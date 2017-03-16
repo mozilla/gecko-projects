@@ -108,7 +108,7 @@ TextPropertyEditor.prototype = {
     this.element._textPropertyEditor = this;
 
     this.container = createChild(this.element, "div", {
-      class: "ruleview-propertycontainer"
+      class: "ruleview-propertycontainer inline-tooltip-container"
     });
 
     // The enable checkbox will disable or enable the rule.
@@ -280,7 +280,8 @@ TextPropertyEditor.prototype = {
         if (target.nodeName === "a") {
           event.stopPropagation();
           event.preventDefault();
-          this.browserWindow.openUILinkIn(target.href, "tab");
+          let browserWin = this.ruleView.inspector.target.tab.ownerDocument.defaultView;
+          browserWin.openUILinkIn(target.href, "tab");
         }
       });
 

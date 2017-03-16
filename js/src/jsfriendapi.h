@@ -136,6 +136,8 @@ enum {
     JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_ADDONS,
     JS_TELEMETRY_ADDON_EXCEPTIONS,
     JS_TELEMETRY_AOT_USAGE,
+    JS_TELEMETRY_PRIVILEGED_PARSER_COMPILE_LAZY_AFTER_MS,
+    JS_TELEMETRY_WEB_PARSER_COMPILE_LAZY_AFTER_MS,
     JS_TELEMETRY_END
 };
 
@@ -491,6 +493,16 @@ IterateGrayObjects(JS::Zone* zone, GCThingCallback cellCallback, void* data);
  */
 extern JS_FRIEND_API(void)
 IterateGrayObjectsUnderCC(JS::Zone* zone, GCThingCallback cellCallback, void* data);
+
+#ifdef DEBUG
+// Trace the heap and check there are no black to gray edges. These are
+// not allowed since the cycle collector could throw away the gray thing and
+// leave a dangling pointer.
+//
+// This doesn't trace weak maps as these are handled separately.
+extern JS_FRIEND_API(bool)
+CheckGrayMarkingState(JSContext* cx);
+#endif
 
 #ifdef JS_HAS_CTYPES
 extern JS_FRIEND_API(size_t)
@@ -1323,7 +1335,7 @@ GetErrorMessage(void* userRef, const unsigned errorNumber);
  * JSString methods and often the code can be rewritten so that only indexes
  * instead of char pointers are used in parts of the code that can GC.
  */
-class MOZ_STACK_CLASS AutoStableStringChars
+class MOZ_STACK_CLASS JS_FRIEND_API(AutoStableStringChars)
 {
     /*
      * When copying string char, use this many bytes of inline storage.  This is
@@ -2978,7 +2990,7 @@ class GCHeapProfiler
 class MemProfiler
 {
     static mozilla::Atomic<uint32_t, mozilla::Relaxed> sActiveProfilerCount;
-    static NativeProfiler* sNativeProfiler;
+    static JS_FRIEND_DATA(NativeProfiler*) sNativeProfiler;
 
     static GCHeapProfiler* GetGCHeapProfiler(void* addr);
     static GCHeapProfiler* GetGCHeapProfiler(JSRuntime* runtime);
@@ -2993,8 +3005,8 @@ class MemProfiler
   public:
     explicit MemProfiler(JSRuntime* aRuntime) : mGCHeapProfiler(nullptr), mRuntime(aRuntime) {}
 
-    void start(GCHeapProfiler* aGCHeapProfiler);
-    void stop();
+    JS_FRIEND_API(void) start(GCHeapProfiler* aGCHeapProfiler);
+    JS_FRIEND_API(void) stop();
 
     GCHeapProfiler* getGCHeapProfiler() const {
         return mGCHeapProfiler;
@@ -3004,7 +3016,7 @@ class MemProfiler
         return sActiveProfilerCount > 0;
     }
 
-    static MemProfiler* GetMemProfiler(JSContext* context);
+    static JS_FRIEND_API(MemProfiler*) GetMemProfiler(JSContext* context);
 
     static void SetNativeProfiler(NativeProfiler* aProfiler) {
         sNativeProfiler = aProfiler;

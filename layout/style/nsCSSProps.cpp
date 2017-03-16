@@ -2435,6 +2435,12 @@ const KTableEntry nsCSSProps::kColumnFillKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
+const KTableEntry nsCSSProps::kColumnSpanKTable[] = {
+  { eCSSKeyword_all, NS_STYLE_COLUMN_SPAN_ALL },
+  { eCSSKeyword_none, NS_STYLE_COLUMN_SPAN_NONE },
+  { eCSSKeyword_UNKNOWN, -1 }
+};
+
 static inline bool
 IsKeyValSentinel(const KTableEntry& aTableEntry)
 {
@@ -2812,7 +2818,6 @@ static const nsCSSPropertyID gFontSubpropTable[] = {
   eCSSProperty_font_feature_settings,
   eCSSProperty_font_language_override,
   eCSSProperty_font_kerning,
-  eCSSProperty_font_synthesis,
   eCSSProperty_font_variant_alternates,
   eCSSProperty_font_variant_caps,
   eCSSProperty_font_variant_east_asian,

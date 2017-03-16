@@ -169,9 +169,6 @@ pref("dom.enable_performance", true);
 // Whether resource timing will be gathered and returned by performance.GetEntries*
 pref("dom.enable_resource_timing", true);
 
-// Enable high-resolution timing markers for users
-pref("dom.enable_user_timing", true);
-
 // Enable printing performance marks/measures to log
 pref("dom.performance.enable_user_timing_logging", false);
 
@@ -212,12 +209,6 @@ pref("dom.keyboardevent.code.enabled", true);
 // even during composition (keypress events are never fired during composition
 // even if this is true).
 pref("dom.keyboardevent.dispatch_during_composition", false);
-
-// Whether URL,Location,Link::GetHash should be percent encoded
-// in setter and percent decoded in getter (old behaviour = true)
-pref("dom.url.encode_decode_hash", true);
-// Whether ::GetHash should do percent decoding (old behaviour = true)
-pref("dom.url.getters_decode_hash", false);
 
 // Whether to run add-on code in different compartments from browser code. This
 // causes a separate compartment for each (addon, global) combination, which may
@@ -622,6 +613,9 @@ pref("layers.geometry.opengl.enabled", true);
 
 // Whether to enable arbitrary layer geometry for Basic compositor
 pref("layers.geometry.basic.enabled", true);
+
+// Whether to enable arbitrary layer geometry for DirectX compositor
+pref("layers.geometry.d3d11.enabled", true);
 
 // APZ preferences. For documentation/details on what these prefs do, check
 // gfx/layers/apz/src/AsyncPanZoomController.cpp.
@@ -1471,6 +1465,10 @@ pref("network.http.max-connections", 900);
 // a new connection will only be attempted if the number of active persistent
 // connections to the server is less then max-persistent-connections-per-server.
 pref("network.http.max-persistent-connections-per-server", 6);
+
+// Number of connections that we can open beyond the standard parallelism limit defined
+// by max-persistent-connections-per-server/-proxy to handle urgent-start marked requests
+pref("network.http.max-urgent-start-excessive-connections-per-host", 10);
 
 // If connecting via a proxy, then a
 // new connection will only be attempted if the number of active persistent
@@ -2556,7 +2554,7 @@ pref("layout.css.convertFromNode.enabled", true);
 pref("layout.css.text-align-unsafe-value.enabled", false);
 
 // Is support for CSS text-justify property enabled?
-pref("layout.css.text-justify.enabled", false);
+pref("layout.css.text-justify.enabled", true);
 
 // Is support for CSS "float: inline-{start,end}" and
 // "clear: inline-{start,end}" enabled?
@@ -2681,6 +2679,12 @@ pref("layout.css.control-characters.visible", false);
 #else
 pref("layout.css.control-characters.visible", true);
 #endif
+
+// Is support for column-span enabled?
+pref("layout.css.column-span.enabled", false);
+
+// Is effect of xml:base disabled for style attribute?
+pref("layout.css.style-attr-with-xml-base.disabled", false);
 
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
@@ -2930,6 +2934,13 @@ pref("browser.tabs.remote.separateFileUriProcess", true);
 pref("browser.tabs.remote.separateFileUriProcess", false);
 #endif
 
+// Pref that enables top level web content pages that are opened from file://
+// URI pages to run in the file content process.
+// This has been added in case breaking any window references between these
+// sorts of pages, which we have to do when we run them in the normal web
+// content process, causes compatibility issues.
+pref("browser.tabs.remote.allowLinkedWebInFileUriProcess", false);
+
 // Enable caching of Moz2D Path objects for SVG geometry elements
 pref("svg.path-caching.enabled", true);
 
@@ -2947,11 +2958,7 @@ pref("svg.marker-improvements.enabled", true);
 // See https://svgwg.org/svg2-draft/single-page.html#types-SVGBoundingBoxOptions
 pref("svg.new-getBBox.enabled", false);
 
-#ifdef RELEASE_OR_BETA
-pref("svg.transform-box.enabled", false);
-#else
 pref("svg.transform-box.enabled", true);
-#endif // RELEASE_OR_BETA
 
 // Default font types and sizes by locale
 pref("font.default.ar", "sans-serif");
@@ -4537,6 +4544,7 @@ pref("webgl.msaa-force", false);
 pref("webgl.prefer-16bpp", false);
 pref("webgl.default-no-alpha", false);
 pref("webgl.force-layers-readback", false);
+pref("webgl.force-index-validation", false);
 pref("webgl.lose-context-on-memory-pressure", false);
 pref("webgl.can-lose-context-in-foreground", true);
 pref("webgl.restore-context-when-visible", true);
@@ -4606,6 +4614,7 @@ pref("layers.bench.enabled", false);
 
 #if defined(XP_WIN)
 pref("layers.gpu-process.enabled", true);
+pref("layers.gpu-process.max_restarts", 3);
 pref("media.gpu-process-decoder", true);
 #endif
 
@@ -4772,6 +4781,7 @@ pref("extensions.webextensions.keepUuidOnUninstall", false);
 pref("extensions.webextensions.identity.redirectDomain", "extensions.allizom.org");
 // Whether or not webextension themes are supported.
 pref("extensions.webextensions.themes.enabled", false);
+pref("extensions.webextensions.themes.icons.enabled", false);
 pref("extensions.webextensions.remote", false);
 
 // Report Site Issue button
@@ -5029,6 +5039,11 @@ pref("dom.vr.openvr.enabled", false);
 // Oculus Rift on SDK 0.8 or greater.  It is disabled by default for now due to
 // frame uniformity issues with e10s.
 pref("dom.vr.poseprediction.enabled", false);
+// Starting VR presentation is only allowed within a user gesture or event such
+// as VRDisplayActivate triggered by the system.  dom.vr.require-gesture allows
+// this requirement to be disabled for special cases such as during automated
+// tests or in a headless kiosk system.
+pref("dom.vr.require-gesture", true);
 // path to openvr DLL
 pref("gfx.vr.openvr-runtime", "");
 // path to OSVR DLLs
@@ -5146,7 +5161,7 @@ pref("urlclassifier.downloadAllowTable", "goog-downloadwhite-digest256");
 pref("urlclassifier.downloadAllowTable", "");
 #endif // XP_WIN
 
-pref("urlclassifier.disallow_completions", "test-malware-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,test-block-simple,test-flashallow-simple,testexcept-flashallow-simple,test-flash-simple,testexcept-flash-simple,test-flashsubdoc-simple,testexcept-flashsubdoc-simple,goog-downloadwhite-digest256,base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256");
+pref("urlclassifier.disallow_completions", "test-malware-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,test-block-simple,test-flashallow-simple,testexcept-flashallow-simple,test-flash-simple,testexcept-flash-simple,test-flashsubdoc-simple,testexcept-flashsubdoc-simple,goog-downloadwhite-digest256,base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256");
 
 // The table and update/gethash URLs for Safebrowsing phishing and malware
 // checks.
@@ -5212,7 +5227,7 @@ pref("urlclassifier.blockedTable", "test-block-simple,mozplugin-block-digest256"
 
 // The protocol version we communicate with mozilla server.
 pref("browser.safebrowsing.provider.mozilla.pver", "2.2");
-pref("browser.safebrowsing.provider.mozilla.lists", "base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256");
+pref("browser.safebrowsing.provider.mozilla.lists", "base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256");
 pref("browser.safebrowsing.provider.mozilla.updateURL", "https://shavar.services.mozilla.com/downloads?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2");
 pref("browser.safebrowsing.provider.mozilla.gethashURL", "https://shavar.services.mozilla.com/gethash?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2");
 // Set to a date in the past to force immediate download in new profiles.
@@ -5224,12 +5239,12 @@ pref("browser.safebrowsing.provider.mozilla.lists.base.description", "mozstdDesc
 pref("browser.safebrowsing.provider.mozilla.lists.content.name", "mozfullName");
 pref("browser.safebrowsing.provider.mozilla.lists.content.description", "mozfullDesc");
 
-pref("urlclassifier.flashAllowTable", "test-flashallow-simple");
-pref("urlclassifier.flashAllowExceptTable", "testexcept-flashallow-simple");
-pref("urlclassifier.flashTable", "test-flash-simple");
-pref("urlclassifier.flashExceptTable", "testexcept-flash-simple");
-pref("urlclassifier.flashSubDocTable", "test-flashsubdoc-simple");
-pref("urlclassifier.flashSubDocExceptTable", "testexcept-flashsubdoc-simple");
+pref("urlclassifier.flashAllowTable", "test-flashallow-simple,allow-flashallow-digest256");
+pref("urlclassifier.flashAllowExceptTable", "testexcept-flashallow-simple,except-flashallow-digest256");
+pref("urlclassifier.flashTable", "test-flash-simple,block-flash-digest256");
+pref("urlclassifier.flashExceptTable", "testexcept-flash-simple,except-flash-digest256");
+pref("urlclassifier.flashSubDocTable", "test-flashsubdoc-simple,block-flashsubdoc-digest256");
+pref("urlclassifier.flashSubDocExceptTable", "testexcept-flashsubdoc-simple,except-flashsubdoc-digest256");
 
 pref("plugins.flashBlock.enabled", false);
 
@@ -5601,7 +5616,7 @@ pref ("security.mixed_content.hsts_priming_request_timeout", 3000);
 pref ("security.data_uri.inherit_security_context", true);
 
 // Disable Storage api in release builds.
-#ifdef NIGHTLY_BUILD
+#if defined(NIGHTLY_BUILD) && !defined(MOZ_WIDGET_ANDROID)
 pref("dom.storageManager.enabled", true);
 #else
 pref("dom.storageManager.enabled", false);

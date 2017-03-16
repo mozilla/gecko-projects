@@ -12,7 +12,7 @@ use error_reporting::ParseErrorReporter;
 use gecko_bindings::sugar::refptr::{GeckoArcPrincipal, GeckoArcURI};
 use servo_url::ServoUrl;
 use style_traits::OneOrMoreCommaSeparated;
-use stylesheets::{MemoryHoleReporter, Origin};
+use stylesheets::Origin;
 
 /// Extra data that the style backend may need to parse stylesheets.
 #[cfg(not(feature = "gecko"))]
@@ -43,6 +43,22 @@ impl Default for ParserContextExtraData {
     }
 }
 
+#[cfg(feature = "gecko")]
+impl ParserContextExtraData {
+    /// Construct from a GeckoParserExtraData
+    ///
+    /// GeckoParserExtraData must live longer than this call
+    pub unsafe fn new(data: *const ::gecko_bindings::structs::GeckoParserExtraData) -> Self {
+        // the to_safe calls are safe since we trust that we have references to
+        // real Gecko refptrs. The dereferencing of data is safe because this function
+        // is expected to be called with a `data` living longer than this function.
+        unsafe { ParserContextExtraData {
+            base: Some((*data).mBaseURI.to_safe()),
+            referrer: Some((*data).mReferrer.to_safe()),
+            principal: Some((*data).mPrincipal.to_safe()),
+        }}
+    }
+}
 /// The data that the parser needs from outside in order to parse a stylesheet.
 pub struct ParserContext<'a> {
     /// The `Origin` of the stylesheet, whether it's a user, author or
@@ -51,7 +67,7 @@ pub struct ParserContext<'a> {
     /// The base url we're parsing this stylesheet as.
     pub base_url: &'a ServoUrl,
     /// An error reporter to report syntax errors.
-    pub error_reporter: Box<ParseErrorReporter + Send>,
+    pub error_reporter: &'a ParseErrorReporter,
     /// Implementation-dependent extra data.
     pub extra_data: ParserContextExtraData,
 }
@@ -60,7 +76,7 @@ impl<'a> ParserContext<'a> {
     /// Create a `ParserContext` with extra data.
     pub fn new_with_extra_data(stylesheet_origin: Origin,
                                base_url: &'a ServoUrl,
-                               error_reporter: Box<ParseErrorReporter + Send>,
+                               error_reporter: &'a ParseErrorReporter,
                                extra_data: ParserContextExtraData)
                                -> ParserContext<'a> {
         ParserContext {
@@ -74,23 +90,29 @@ impl<'a> ParserContext<'a> {
     /// Create a parser context with the default extra data.
     pub fn new(stylesheet_origin: Origin,
                base_url: &'a ServoUrl,
-               error_reporter: Box<ParseErrorReporter + Send>)
+               error_reporter: &'a ParseErrorReporter)
                -> ParserContext<'a> {
         let extra_data = ParserContextExtraData::default();
         Self::new_with_extra_data(stylesheet_origin, base_url, error_reporter, extra_data)
     }
 
     /// Create a parser context for on-the-fly parsing in CSSOM
-    pub fn new_for_cssom(base_url: &'a ServoUrl) -> ParserContext<'a> {
-        Self::new(Origin::User, base_url, Box::new(MemoryHoleReporter))
+    pub fn new_for_cssom(base_url: &'a ServoUrl,
+                         error_reporter: &'a ParseErrorReporter)
+                         -> ParserContext<'a> {
+        Self::new(Origin::User, base_url, error_reporter)
     }
 }
 
 /// Defaults to a no-op.
 /// Set a `RUST_LOG=style::errors` environment variable
 /// to log CSS parse errors to stderr.
-pub fn log_css_error(input: &mut Parser, position: SourcePosition, message: &str, parsercontext: &ParserContext) {
-    parsercontext.error_reporter.report_error(input, position, message);
+pub fn log_css_error(input: &mut Parser,
+                     position: SourcePosition,
+                     message: &str,
+                     parsercontext: &ParserContext) {
+    let servo_url = parsercontext.base_url;
+    parsercontext.error_reporter.report_error(input, position, message, servo_url);
 }
 
 // XXXManishearth Replace all specified value parse impls with impls of this

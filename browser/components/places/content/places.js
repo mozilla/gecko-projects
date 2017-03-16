@@ -313,7 +313,7 @@ var PlacesOrganizer = {
         // The command execution function will take care of seeing if the
         // selection is a folder or a different container type, and will
         // load its contents in tabs.
-        PlacesUIUtils.openContainerNodeInTabs(selectedNode, aEvent, this._places);
+        PlacesUIUtils.openContainerNodeInTabs(node, aEvent, this._places);
       }
     }
   },
@@ -419,7 +419,7 @@ var PlacesOrganizer = {
 
     // Remove existing menu items.  Last item is the restoreFromFile item.
     while (restorePopup.childNodes.length > 1)
-      restorePopup.removeChild(restorePopup.firstChild);
+      restorePopup.firstChild.remove();
 
     Task.spawn(function* () {
       let backupFiles = yield PlacesBackups.getBackupFiles();
@@ -1007,7 +1007,7 @@ var ViewMenu = {
       return endElement;
     }
     while (popup.hasChildNodes()) {
-      popup.removeChild(popup.firstChild);
+      popup.firstChild.remove();
     }
     return null;
   },

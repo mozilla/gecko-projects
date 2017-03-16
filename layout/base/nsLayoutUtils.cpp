@@ -68,6 +68,7 @@
 #include "gfxPlatform.h"
 #include <algorithm>
 #include <limits>
+#include "mozilla/dom/AnonymousContent.h"
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/DOMRect.h"
@@ -186,6 +187,7 @@ typedef nsStyleTransformMatrix::TransformReferenceBox TransformReferenceBox;
 #ifdef MOZ_STYLO
 /* static */ bool nsLayoutUtils::sStyloEnabled;
 #endif
+/* static */ bool nsLayoutUtils::sStyleAttrWithXMLBaseDisabled;
 /* static */ uint32_t nsLayoutUtils::sIdlePeriodDeadlineLimit;
 /* static */ uint32_t nsLayoutUtils::sQuiescentFramesBeforeIdlePeriod;
 
@@ -598,10 +600,10 @@ GetMinAndMaxScaleForAnimationProperty(const nsIFrame* aFrame,
       for (const AnimationPropertySegment& segment : prop.mSegments) {
         // In case of add or accumulate composite, StyleAnimationValue does
         // not have a valid value.
-        if (segment.mFromComposite == dom::CompositeOperation::Replace) {
+        if (segment.HasReplacableFromValue()) {
           UpdateMinMaxScale(aFrame, segment.mFromValue, aMinScale, aMaxScale);
         }
-        if (segment.mToComposite == dom::CompositeOperation::Replace) {
+        if (segment.HasReplacableToValue()) {
           UpdateMinMaxScale(aFrame, segment.mToValue, aMinScale, aMaxScale);
         }
       }
@@ -1156,25 +1158,107 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
 }
 
 static bool
-ShouldDisableApzForElement(nsIContent* aContent)
+HasVisibleAnonymousContents(nsIDocument* aDoc)
 {
-  if (gfxPrefs::APZDisableForScrollLinkedEffects() && aContent) {
-    nsIDocument* doc = aContent->GetComposedDoc();
-    return (doc && doc->HasScrollLinkedEffect());
+  for (RefPtr<AnonymousContent>& ac : aDoc->GetAnonymousContents()) {
+    Element* elem = ac->GetContentNode();
+    // We check to see if the anonymous content node has a frame. If it doesn't,
+    // that means that's not visible to the user because e.g. it's display:none.
+    // For now we assume that if it has a frame, it is visible. We might be able
+    // to refine this further by adding complexity if it turns out this condition
+    // results in a lot of false positives.
+    if (elem && elem->GetPrimaryFrame()) {
+      return true;
+    }
   }
   return false;
 }
 
-static bool
-GetDisplayPortImpl(nsIContent* aContent, nsRect *aResult, float aMultiplier)
+bool
+nsLayoutUtils::ShouldDisableApzForElement(nsIContent* aContent)
 {
-  DisplayPortPropertyData* rectData =
+  if (!aContent) {
+    return false;
+  }
+
+  nsIDocument* doc = aContent->GetComposedDoc();
+  nsIPresShell* rootShell = APZCCallbackHelper::GetRootContentDocumentPresShellForContent(aContent);
+  if (rootShell) {
+    if (nsIDocument* rootDoc = rootShell->GetDocument()) {
+      nsIContent* rootContent = rootShell->GetRootScrollFrame()
+          ? rootShell->GetRootScrollFrame()->GetContent()
+          : rootDoc->GetDocumentElement();
+      // For the AccessibleCaret: disable APZ on any scrollable subframes that
+      // are not the root scrollframe of a document, if the document has any
+      // visible anonymous contents.
+      // If we find this is triggering in too many scenarios then we might
+      // want to tighten this check further. The main use cases for which we want
+      // to disable APZ as of this writing are listed in bug 1316318.
+      if (aContent != rootContent && HasVisibleAnonymousContents(rootDoc)) {
+        return true;
+      }
+    }
+  }
+
+  if (!doc) {
+    return false;
+  }
+  return gfxPrefs::APZDisableForScrollLinkedEffects() &&
+         doc->HasScrollLinkedEffect();
+}
+
+static bool
+GetDisplayPortData(nsIContent* aContent,
+                   DisplayPortPropertyData** aOutRectData,
+                   DisplayPortMarginsPropertyData** aOutMarginsData)
+{
+  MOZ_ASSERT(aOutRectData && aOutMarginsData);
+
+  *aOutRectData =
     static_cast<DisplayPortPropertyData*>(aContent->GetProperty(nsGkAtoms::DisplayPort));
-  DisplayPortMarginsPropertyData* marginsData =
+  *aOutMarginsData =
     static_cast<DisplayPortMarginsPropertyData*>(aContent->GetProperty(nsGkAtoms::DisplayPortMargins));
 
-  if (!rectData && !marginsData) {
+  if (!*aOutRectData && !*aOutMarginsData) {
     // This content element has no displayport data at all
+    return false;
+  }
+
+  if (*aOutRectData && *aOutMarginsData) {
+    // choose margins if equal priority
+    if ((*aOutRectData)->mPriority > (*aOutMarginsData)->mPriority) {
+      *aOutMarginsData = nullptr;
+    } else {
+      *aOutRectData = nullptr;
+    }
+  }
+
+  NS_ASSERTION((*aOutRectData == nullptr) != (*aOutMarginsData == nullptr),
+               "Only one of aOutRectData or aOutMarginsData should be set!");
+
+  return true;
+}
+
+bool
+nsLayoutUtils::IsMissingDisplayPortBaseRect(nsIContent* aContent)
+{
+  DisplayPortPropertyData* rectData = nullptr;
+  DisplayPortMarginsPropertyData* marginsData = nullptr;
+
+  if (GetDisplayPortData(aContent, &rectData, &marginsData) && marginsData) {
+    return !aContent->GetProperty(nsGkAtoms::DisplayPortBase);
+  }
+
+  return false;
+}
+
+static bool
+GetDisplayPortImpl(nsIContent* aContent, nsRect* aResult, float aMultiplier)
+{
+  DisplayPortPropertyData* rectData = nullptr;
+  DisplayPortMarginsPropertyData* marginsData = nullptr;
+
+  if (!GetDisplayPortData(aContent, &rectData, &marginsData)) {
     return false;
   }
 
@@ -1184,22 +1268,11 @@ GetDisplayPortImpl(nsIContent* aContent, nsRect *aResult, float aMultiplier)
     return true;
   }
 
-  if (rectData && marginsData) {
-    // choose margins if equal priority
-    if (rectData->mPriority > marginsData->mPriority) {
-      marginsData = nullptr;
-    } else {
-      rectData = nullptr;
-    }
-  }
-
-  NS_ASSERTION((rectData == nullptr) != (marginsData == nullptr),
-               "Only one of rectData or marginsData should be set!");
-
   nsRect result;
   if (rectData) {
     result = GetDisplayPortFromRectData(aContent, rectData, aMultiplier);
-  } else if (APZCCallbackHelper::IsDisplayportSuppressed() || ShouldDisableApzForElement(aContent)) {
+  } else if (APZCCallbackHelper::IsDisplayportSuppressed() ||
+      nsLayoutUtils::ShouldDisableApzForElement(aContent)) {
     DisplayPortMarginsPropertyData noMargins(ScreenMargin(), 1);
     result = GetDisplayPortFromMarginsData(aContent, &noMargins, aMultiplier);
   } else {
@@ -3987,16 +4060,13 @@ struct MOZ_RAII BoxToRectAndText : public BoxToRect {
     if (aFrame->GetType() == nsGkAtoms::textFrame) {
       nsTextFrame* textFrame = static_cast<nsTextFrame*>(aFrame);
 
-      nsIContent* content = textFrame->GetContent();
-      nsAutoString textContent;
-      mozilla::ErrorResult err; // ignored
-      content->GetTextContent(textContent, err);
+      nsIFrame::RenderedText renderedText = textFrame->GetRenderedText(
+        textFrame->GetContentOffset(),
+        textFrame->GetContentOffset() + textFrame->GetContentLength(),
+        nsIFrame::TextOffsetType::OFFSETS_IN_CONTENT_TEXT,
+        nsIFrame::TrailingWhitespace::DONT_TRIM_TRAILING_WHITESPACE);
 
-      const nsAString& textSubstring =
-        Substring(textContent,
-                  textFrame->GetContentOffset(),
-                  textFrame->GetContentLength());
-      aResult.Append(textSubstring);
+      aResult.Append(renderedText.mString);
     }
 
     for (nsIFrame* child = aFrame->PrincipalChildList().FirstChild();
@@ -6502,7 +6572,7 @@ DrawImageInternal(gfxContext&            aContext,
                   const nsRect&          aFill,
                   const nsPoint&         aAnchor,
                   const nsRect&          aDirty,
-                  const Maybe<const SVGImageContext>& aSVGContext,
+                  const Maybe<SVGImageContext>& aSVGContext,
                   uint32_t               aImageFlags,
                   ExtendMode             aExtendMode = ExtendMode::CLAMP,
                   float                  aOpacity = 1.0)
@@ -6538,10 +6608,10 @@ DrawImageInternal(gfxContext&            aContext,
 
     destCtx->SetMatrix(params.imageSpaceToDeviceSpace);
 
-    Maybe<const SVGImageContext> fallbackContext;
+    Maybe<SVGImageContext> fallbackContext;
     if (!aSVGContext) {
       // Use the default viewport.
-      fallbackContext.emplace(params.svgViewportSize);
+      fallbackContext.emplace(Some(params.svgViewportSize));
     }
 
     result = aImage->Draw(destCtx, params.size, params.region,
@@ -6599,7 +6669,7 @@ nsLayoutUtils::DrawSingleImage(gfxContext&            aContext,
                                const SamplingFilter   aSamplingFilter,
                                const nsRect&          aDest,
                                const nsRect&          aDirty,
-                               const Maybe<const SVGImageContext>& aSVGContext,
+                               const Maybe<SVGImageContext>& aSVGContext,
                                uint32_t               aImageFlags,
                                const nsPoint*         aAnchorPoint,
                                const nsRect*          aSourceArea)
@@ -6726,7 +6796,7 @@ nsLayoutUtils::DrawBackgroundImage(gfxContext&         aContext,
   PROFILER_LABEL("layout", "nsLayoutUtils::DrawBackgroundImage",
                  js::ProfileEntry::Category::GRAPHICS);
 
-  const Maybe<const SVGImageContext> svgContext(Some(SVGImageContext(aImageSize)));
+  const Maybe<SVGImageContext> svgContext(Some(SVGImageContext(Some(aImageSize))));
 
   /* Fast path when there is no need for image spacing */
   if (aRepeatSize.width == aDest.width && aRepeatSize.height == aDest.height) {
@@ -7336,13 +7406,8 @@ nsLayoutUtils::SurfaceFromElement(HTMLVideoElement* aElement,
   if (!principal)
     return result;
 
-  ImageContainer* container = aElement->GetImageContainer();
-  if (!container)
-    return result;
+  result.mLayersImage = aElement->GetCurrentImage();
 
-  AutoLockImage lockImage(container);
-
-  result.mLayersImage = lockImage.GetImage();
   if (!result.mLayersImage)
     return result;
 
@@ -7667,6 +7732,8 @@ nsLayoutUtils::Initialize()
   Preferences::AddBoolVarCache(&sStyloEnabled,
                                "layout.css.servo.enabled");
 #endif
+  Preferences::AddBoolVarCache(&sStyleAttrWithXMLBaseDisabled,
+                               "layout.css.style-attr-with-xml-base.disabled");
   Preferences::AddUintVarCache(&sIdlePeriodDeadlineLimit,
                                "layout.idle_period.time_limit",
                                DEFAULT_IDLE_PERIOD_TIME_LIMIT);
@@ -9379,17 +9446,9 @@ nsLayoutUtils::ComputeGeometryBox(nsIFrame* aFrame,
   // We use ComputeSVGReferenceRect for all SVG elements, except <svg>
   // element, which does have an associated CSS layout box. In this case we
   // should still use ComputeHTMLReferenceRect for region computing.
-  nsRect r = HasCSSBoxLayout(aFrame)
-             ? ComputeHTMLReferenceRect(aFrame, aGeometryBox)
-             : ComputeSVGReferenceRect(aFrame, aGeometryBox);
+  nsRect r = (aFrame->GetStateBits() & NS_FRAME_SVG_LAYOUT)
+             ? ComputeSVGReferenceRect(aFrame, aGeometryBox)
+             : ComputeHTMLReferenceRect(aFrame, aGeometryBox);
 
   return r;
-}
-
-/* static */ bool
-nsLayoutUtils::HasCSSBoxLayout(nsIFrame* aFrame)
-{
-  // Except SVG outer element, all SVG element does not have CSS box layout.
-  return !aFrame->IsFrameOfType(nsIFrame::eSVG) ||
-          aFrame->GetType() == nsGkAtoms::svgOuterSVGFrame;
 }

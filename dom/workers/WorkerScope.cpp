@@ -881,6 +881,7 @@ WorkerDebuggerGlobalScope::GetGlobal(JSContext* aCx,
   WorkerGlobalScope* scope = mWorkerPrivate->GetOrCreateGlobalScope(aCx);
   if (!scope) {
     aRv.Throw(NS_ERROR_FAILURE);
+    return;
   }
 
   aGlobal.set(scope->GetWrapper());
@@ -1061,13 +1062,6 @@ IsDebuggerSandbox(JSObject* object)
 {
   return SimpleGlobalObject::SimpleGlobalType(object) ==
     SimpleGlobalObject::GlobalType::WorkerDebuggerSandbox;
-}
-
-bool
-GetterOnlyJSNative(JSContext* aCx, unsigned aArgc, JS::Value* aVp)
-{
-  JS_ReportErrorNumberASCII(aCx, js::GetErrorMessage, nullptr, JSMSG_GETTER_ONLY);
-  return false;
 }
 
 END_WORKERS_NAMESPACE

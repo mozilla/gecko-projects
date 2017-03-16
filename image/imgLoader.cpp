@@ -772,12 +772,11 @@ NewImageChannel(nsIChannel** aResult,
       // If this is a favicon loading, we will use the originAttributes from the
       // loadingPrincipal as the channel's originAttributes. This allows the favicon
       // loading from XUL will use the correct originAttributes.
-      OriginAttributes attrs;
-      attrs.Inherit(aLoadingPrincipal->OriginAttributesRef());
 
       nsCOMPtr<nsILoadInfo> loadInfo = (*aResult)->GetLoadInfo();
       if (loadInfo) {
-        rv = loadInfo->SetOriginAttributes(attrs);
+        rv =
+          loadInfo->SetOriginAttributes(aLoadingPrincipal->OriginAttributesRef());
       }
     }
   } else {
@@ -805,7 +804,7 @@ NewImageChannel(nsIChannel** aResult,
     // has asked us to perform.
     OriginAttributes attrs;
     if (aLoadingPrincipal) {
-      attrs.Inherit(aLoadingPrincipal->OriginAttributesRef());
+      attrs = aLoadingPrincipal->OriginAttributesRef();
     }
     attrs.mPrivateBrowsingId = aRespectPrivacy ? 1 : 0;
 
@@ -831,15 +830,18 @@ NewImageChannel(nsIChannel** aResult,
   // Initialize HTTP-specific attributes
   newHttpChannel = do_QueryInterface(*aResult);
   if (newHttpChannel) {
-    newHttpChannel->SetRequestHeader(NS_LITERAL_CSTRING("Accept"),
-                                     aAcceptHeader,
-                                     false);
+    rv = newHttpChannel->SetRequestHeader(NS_LITERAL_CSTRING("Accept"),
+                                          aAcceptHeader,
+                                          false);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
 
     nsCOMPtr<nsIHttpChannelInternal> httpChannelInternal =
       do_QueryInterface(newHttpChannel);
     NS_ENSURE_TRUE(httpChannelInternal, NS_ERROR_UNEXPECTED);
-    httpChannelInternal->SetDocumentURI(aInitialDocumentURI);
-    newHttpChannel->SetReferrerWithPolicy(aReferringURI, aReferrerPolicy);
+    rv = httpChannelInternal->SetDocumentURI(aInitialDocumentURI);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    rv = newHttpChannel->SetReferrerWithPolicy(aReferringURI, aReferrerPolicy);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
   }
 
   // Image channels are loaded by default with reduced priority.
@@ -2346,7 +2348,7 @@ imgLoader::LoadImageWithChannel(nsIChannel* channel,
 
   OriginAttributes attrs;
   if (loadInfo) {
-    attrs.Inherit(loadInfo->GetOriginAttributes());
+    attrs = loadInfo->GetOriginAttributes();
   }
 
   nsresult rv;

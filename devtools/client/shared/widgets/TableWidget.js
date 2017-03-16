@@ -143,6 +143,17 @@ TableWidget.prototype = {
     }
   },
 
+/**
+ * Is a row currently selected?
+ *
+ * @return {Boolean}
+ *         true or false.
+ */
+  get hasSelectedRow() {
+    return this.columns.get(this.uniqueId) &&
+           this.columns.get(this.uniqueId).selectedRow;
+  },
+
   /**
    * Returns the json object corresponding to the selected row.
    */
@@ -1554,7 +1565,7 @@ Cell.prototype = {
       this.label.removeAttribute("value");
 
       while (this.label.firstChild) {
-        this.label.removeChild(this.label.firstChild);
+        this.label.firstChild.remove();
       }
 
       this.label.appendChild(value);

@@ -18,11 +18,9 @@ use style_traits::ToCss;
 pub struct CSSErrorReporterTest;
 
 impl ParseErrorReporter for CSSErrorReporterTest {
-     fn report_error(&self, _input: &mut Parser, _position: SourcePosition, _message: &str) {
-     }
-     fn clone(&self) -> Box<ParseErrorReporter + Send + Sync> {
-        Box::new(CSSErrorReporterTest)
-     }
+    fn report_error(&self, _input: &mut Parser, _position: SourcePosition, _message: &str,
+        _url: &ServoUrl) {
+    }
 }
 
 fn test_media_rule<F>(css: &str, callback: F)
@@ -32,7 +30,7 @@ fn test_media_rule<F>(css: &str, callback: F)
     let css_str = css.to_owned();
     let stylesheet = Stylesheet::from_str(
         css, url, Origin::Author, Default::default(),
-        None, Box::new(CSSErrorReporterTest),
+        None, &CSSErrorReporterTest,
         ParserContextExtraData::default());
     let mut rule_count = 0;
     media_queries(&stylesheet.rules.read().0, &mut |mq| {
@@ -59,7 +57,7 @@ fn media_query_test(device: &Device, css: &str, expected_rule_count: usize) {
     let url = ServoUrl::parse("http://localhost").unwrap();
     let ss = Stylesheet::from_str(
         css, url, Origin::Author, Default::default(),
-        None, Box::new(CSSErrorReporterTest),
+        None, &CSSErrorReporterTest,
         ParserContextExtraData::default());
     let mut rule_count = 0;
     ss.effective_style_rules(device, |_| rule_count += 1);
@@ -323,11 +321,12 @@ fn test_mq_multiple_expressions() {
 #[test]
 fn test_mq_malformed_expressions() {
     fn check_malformed_expr(list: &MediaList, css: &str) {
-        assert!(list.media_queries.len() == 1, css.to_owned());
-        let q = &list.media_queries[0];
-        assert!(q.qualifier == Some(Qualifier::Not), css.to_owned());
-        assert!(q.media_type == MediaQueryType::All, css.to_owned());
-        assert!(q.expressions.len() == 0, css.to_owned());
+        assert!(!list.media_queries.is_empty(), css.to_owned());
+        for mq in &list.media_queries {
+            assert!(mq.qualifier == Some(Qualifier::Not), css.to_owned());
+            assert!(mq.media_type == MediaQueryType::All, css.to_owned());
+            assert!(mq.expressions.is_empty(), css.to_owned());
+        }
     }
 
     for rule in &[
@@ -337,8 +336,6 @@ fn test_mq_malformed_expressions() {
         "@media not {}",
         "@media not (min-width: 300px) {}",
         "@media , {}",
-        "@media screen 4px, print {}",
-        "@media screen, {}",
     ] {
         test_media_rule(rule, check_malformed_expr);
     }

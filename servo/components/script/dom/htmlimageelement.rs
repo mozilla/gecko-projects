@@ -15,7 +15,7 @@ use dom::bindings::codegen::Bindings::MouseEventBinding::MouseEventMethods;
 use dom::bindings::codegen::Bindings::WindowBinding::WindowMethods;
 use dom::bindings::error::Fallible;
 use dom::bindings::inheritance::Castable;
-use dom::bindings::js::{LayoutJS, Root};
+use dom::bindings::js::{LayoutJS, MutNullableJS, Root};
 use dom::bindings::refcounted::Trusted;
 use dom::bindings::reflector::DomObject;
 use dom::bindings::str::DOMString;
@@ -26,6 +26,7 @@ use dom::event::Event;
 use dom::eventtarget::EventTarget;
 use dom::htmlareaelement::HTMLAreaElement;
 use dom::htmlelement::HTMLElement;
+use dom::htmlformelement::{FormControl, HTMLFormElement};
 use dom::htmlmapelement::HTMLMapElement;
 use dom::mouseevent::MouseEvent;
 use dom::node::{Node, NodeDamage, document_from_node, window_from_node};
@@ -47,6 +48,8 @@ use network_listener::{NetworkListener, PreInvoke};
 use num_traits::ToPrimitive;
 use script_thread::Runnable;
 use servo_url::ServoUrl;
+use std::cell::Cell;
+use std::default::Default;
 use std::i32;
 use std::sync::{Arc, Mutex};
 use style::attr::{AttrValue, LengthOrPercentageOrAuto};
@@ -76,6 +79,8 @@ pub struct HTMLImageElement {
     htmlelement: HTMLElement,
     current_request: DOMRefCell<ImageRequest>,
     pending_request: DOMRefCell<ImageRequest>,
+    form_owner: MutNullableJS<HTMLFormElement>,
+    generation: Cell<u32>,
 }
 
 impl HTMLImageElement {
@@ -87,14 +92,16 @@ impl HTMLImageElement {
 struct ImageResponseHandlerRunnable {
     element: Trusted<HTMLImageElement>,
     image: ImageResponse,
+    generation: u32,
 }
 
 impl ImageResponseHandlerRunnable {
-    fn new(element: Trusted<HTMLImageElement>, image: ImageResponse)
+    fn new(element: Trusted<HTMLImageElement>, image: ImageResponse, generation: u32)
            -> ImageResponseHandlerRunnable {
         ImageResponseHandlerRunnable {
             element: element,
             image: image,
+            generation: generation,
         }
     }
 }
@@ -104,27 +111,21 @@ impl Runnable for ImageResponseHandlerRunnable {
 
     fn handler(self: Box<Self>) {
         let element = self.element.root();
-        element.process_image_response(self.image);
+        // Ignore any image response for a previous request that has been discarded.
+        if element.generation.get() == self.generation {
+            element.process_image_response(self.image);
+        }
     }
 }
 
 /// The context required for asynchronously loading an external image.
 struct ImageContext {
-    /// The element that initiated the request.
-    elem: Trusted<HTMLImageElement>,
-    /// The initial URL requested.
-    url: ServoUrl,
+    /// A handle with which to communicate with the image cache.
+    image_cache: ImageCacheThread,
     /// Indicates whether the request failed, and why
     status: Result<(), NetworkError>,
     /// The cache ID for this request.
     id: PendingImageId,
-}
-
-impl ImageContext {
-    fn image_cache(&self) -> ImageCacheThread {
-        let elem = self.elem.root();
-        window_from_node(&*elem).image_cache_thread().clone()
-    }
 }
 
 impl FetchResponseListener for ImageContext {
@@ -132,7 +133,7 @@ impl FetchResponseListener for ImageContext {
     fn process_request_eof(&mut self) {}
 
     fn process_response(&mut self, metadata: Result<FetchMetadata, NetworkError>) {
-        self.image_cache().notify_pending_response(
+        self.image_cache.notify_pending_response(
             self.id,
             FetchResponseMsg::ProcessResponse(metadata.clone()));
 
@@ -156,19 +157,16 @@ impl FetchResponseListener for ImageContext {
 
     fn process_response_chunk(&mut self, payload: Vec<u8>) {
         if self.status.is_ok() {
-            self.image_cache().notify_pending_response(
+            self.image_cache.notify_pending_response(
                 self.id,
                 FetchResponseMsg::ProcessResponseChunk(payload));
         }
     }
 
     fn process_response_eof(&mut self, response: Result<(), NetworkError>) {
-        let elem = self.elem.root();
-        let document = document_from_node(&*elem);
-        let image_cache = self.image_cache();
-        image_cache.notify_pending_response(self.id,
-                                            FetchResponseMsg::ProcessResponseEOF(response));
-        document.finish_load(LoadType::Image(self.url.clone()));
+        self.image_cache.notify_pending_response(
+            self.id,
+            FetchResponseMsg::ProcessResponseEOF(response));
     }
 }
 
@@ -197,11 +195,12 @@ impl HTMLImageElement {
             let window = window_from_node(elem);
             let task_source = window.networking_task_source();
             let wrapper = window.get_runnable_wrapper();
+            let generation = elem.generation.get();
             ROUTER.add_route(responder_receiver.to_opaque(), box move |message| {
                 // Return the image via a message to the script thread, which marks the element
                 // as dirty and triggers a reflow.
                 let runnable = ImageResponseHandlerRunnable::new(
-                    trusted_node.clone(), message.to().unwrap());
+                    trusted_node.clone(), message.to().unwrap(), generation);
                 let _ = task_source.queue_with_wrapper(box runnable, &wrapper);
             });
 
@@ -243,8 +242,7 @@ impl HTMLImageElement {
         let window = window_from_node(self);
 
         let context = Arc::new(Mutex::new(ImageContext {
-            elem: Trusted::new(self),
-            url: img_url.clone(),
+            image_cache: window.image_cache_thread().clone(),
             status: Ok(()),
             id: id,
         }));
@@ -267,7 +265,9 @@ impl HTMLImageElement {
             .. RequestInit::default()
         };
 
-        document.fetch_async(LoadType::Image(img_url), request, action_sender);
+        // This is a background load because the load blocker already fulfills the
+        // purpose of delaying the document's load event.
+        document.loader().fetch_async_background(request, action_sender);
     }
 
     fn process_image_response(&self, image: ImageResponse) {
@@ -299,7 +299,9 @@ impl HTMLImageElement {
             self.upcast::<EventTarget>().fire_event(atom!("error"));
         }
 
-        LoadBlocker::terminate(&mut self.current_request.borrow_mut().blocker);
+        if trigger_image_load || trigger_image_error {
+            LoadBlocker::terminate(&mut self.current_request.borrow_mut().blocker);
+        }
 
         // Trigger reflow
         let window = window_from_node(self);
@@ -309,6 +311,9 @@ impl HTMLImageElement {
     /// Makes the local `image` member match the status of the `src` attribute and starts
     /// prefetching the image. This method must be called after `src` is changed.
     fn update_image(&self, value: Option<(DOMString, ServoUrl)>) {
+        // Force any in-progress request to be ignored.
+        self.generation.set(self.generation.get() + 1);
+
         let document = document_from_node(self);
         let window = document.window();
         match value {
@@ -381,6 +386,8 @@ impl HTMLImageElement {
                 metadata: None,
                 blocker: None,
             }),
+            form_owner: Default::default(),
+            generation: Default::default(),
         }
     }
 
@@ -409,24 +416,17 @@ impl HTMLImageElement {
     }
     pub fn areas(&self) -> Option<Vec<Root<HTMLAreaElement>>> {
         let elem = self.upcast::<Element>();
-        let usemap_attr;
-        if elem.has_attribute(&LocalName::from("usemap")) {
-            usemap_attr = elem.get_string_attribute(&local_name!("usemap"));
-        } else {
-            return None;
+        let usemap_attr = match elem.get_attribute(&ns!(), &local_name!("usemap")) {
+            Some(attr) => attr,
+            None => return None,
+        };
+
+        let value = usemap_attr.value();
+        let (first, last) = value.split_at(1);
+
+        if first != "#" || last.len() == 0 {
+            return None
         }
-
-        let (first, last) = usemap_attr.split_at(1);
-
-        match first {
-            "#" => {},
-            _ => return None,
-        };
-
-        match last.len() {
-            0 => return None,
-            _ => {},
-        };
 
         let map = self.upcast::<Node>()
                       .following_siblings()
@@ -622,6 +622,15 @@ impl VirtualMethods for HTMLImageElement {
         Some(self.upcast::<HTMLElement>() as &VirtualMethods)
     }
 
+    fn adopting_steps(&self, old_doc: &Document) {
+        self.super_type().unwrap().adopting_steps(old_doc);
+
+        let elem = self.upcast::<Element>();
+        let document = document_from_node(self);
+        self.update_image(Some((elem.get_string_attribute(&local_name!("src")),
+                                document.base_url())));
+    }
+
     fn attribute_mutated(&self, attr: &Attr, mutation: AttributeMutation) {
         self.super_type().unwrap().attribute_mutated(attr, mutation);
         match attr.local_name() {
@@ -645,7 +654,7 @@ impl VirtualMethods for HTMLImageElement {
     }
 
     fn handle_event(&self, event: &Event) {
-       if (event.type_() == atom!("click")) {
+       if event.type_() == atom!("click") {
            let area_elements = self.areas();
            let elements = if let Some(x) = area_elements {
                x
@@ -660,25 +669,44 @@ impl VirtualMethods for HTMLImageElement {
                return;
            };
 
-           let point = Point2D::new(mouse_event.ClientX().to_f32().unwrap(), mouse_event.ClientY().to_f32().unwrap());
+           let point = Point2D::new(mouse_event.ClientX().to_f32().unwrap(),
+                                    mouse_event.ClientY().to_f32().unwrap());
+
            // Walk HTMLAreaElements
-           let mut index = 0;
-           while index < elements.len() {
-               let shape = elements[index].get_shape_from_coords();
+           for element in elements {
+               let shape = element.get_shape_from_coords();
                let p = Point2D::new(self.upcast::<Element>().GetBoundingClientRect().X() as f32,
-               self.upcast::<Element>().GetBoundingClientRect().Y() as f32);
+                                    self.upcast::<Element>().GetBoundingClientRect().Y() as f32);
+
                let shp = if let Some(x) = shape {
                    x.absolute_coords(p)
                } else {
                    return
                };
                if shp.hit_test(point) {
-                   elements[index].activation_behavior(event, self.upcast());
+                   element.activation_behavior(event, self.upcast());
                    return
                }
-               index += 1;
            }
        }
+    }
+}
+
+impl FormControl for HTMLImageElement {
+    fn form_owner(&self) -> Option<Root<HTMLFormElement>> {
+        self.form_owner.get()
+    }
+
+    fn set_form_owner(&self, form: Option<&HTMLFormElement>) {
+        self.form_owner.set(form);
+    }
+
+    fn to_element<'a>(&'a self) -> &'a Element {
+        self.upcast::<Element>()
+    }
+
+    fn is_listed(&self) -> bool {
+        false
     }
 }
 

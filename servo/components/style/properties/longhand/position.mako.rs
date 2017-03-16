@@ -86,7 +86,7 @@ ${helpers.single_keyword("flex-wrap", "nowrap wrap wrap-reverse",
 
 % if product == "servo":
     // FIXME: Update Servo to support the same Syntax as Gecko.
-    ${helpers.single_keyword("justify-content", "stretch flex-start flex-end center space-between space-around",
+    ${helpers.single_keyword("justify-content", "flex-start stretch flex-end center space-between space-around",
                              extra_prefixes="webkit",
                              spec="https://drafts.csswg.org/css-align/#propdef-justify-content",
                              animatable=False)}
@@ -195,13 +195,16 @@ ${helpers.predefined_type("flex-shrink", "Number",
     }
 </%helpers:longhand>
 
+// FIXME: Gecko doesn't support content value yet.
 // FIXME: This property should be animatable.
 ${helpers.predefined_type("flex-basis",
+                          "LengthOrPercentageOrAuto" if product == "gecko" else
                           "LengthOrPercentageOrAutoOrContent",
+                          "computed::LengthOrPercentageOrAuto::Auto" if product == "gecko" else
                           "computed::LengthOrPercentageOrAutoOrContent::Auto",
                           spec="https://drafts.csswg.org/css-flexbox/#flex-basis-property",
                           extra_prefixes="webkit",
-                          animatable=False)}
+                          animatable=True if product == "gecko" else False)}
 
 % for (size, logical) in ALL_SIZES:
     <%

@@ -36,7 +36,10 @@ public:
   // This should only be used by deserialization, and the factory constructor.
   // Other consumers should use the Create and CreateWithInheritedAttributes
   // methods.
-  nsNullPrincipal() {}
+  nsNullPrincipal()
+    : BasePrincipal(eNullPrincipal)
+  {
+  }
 
   NS_DECL_NSISERIALIZABLE
 
@@ -46,11 +49,16 @@ public:
   NS_IMETHOD GetDomain(nsIURI** aDomain) override;
   NS_IMETHOD SetDomain(nsIURI* aDomain) override;
   NS_IMETHOD GetBaseDomain(nsACString& aBaseDomain) override;
+  NS_IMETHOD GetAddonId(nsAString& aAddonId) override;
   nsresult GetOriginInternal(nsACString& aOrigin) override;
 
   static already_AddRefed<nsNullPrincipal> CreateWithInheritedAttributes(nsIPrincipal* aInheritFrom);
 
-  static already_AddRefed<nsNullPrincipal> CreateWithInheritedAttributes(nsIDocShell* aDocShell);
+  // Create NullPrincipal with origin attributes from docshell.
+  // If aIsFirstParty is true, and the pref 'privacy.firstparty.isolate' is also
+  // enabled, the mFirstPartyDomain value of the origin attributes will be set
+  // to NULL_PRINCIPAL_FIRST_PARTY_DOMAIN.
+  static already_AddRefed<nsNullPrincipal> CreateWithInheritedAttributes(nsIDocShell* aDocShell, bool aIsFirstParty = false);
 
   static already_AddRefed<nsNullPrincipal>
   Create(const mozilla::OriginAttributes& aOriginAttributes = mozilla::OriginAttributes(),
@@ -60,8 +68,6 @@ public:
                 nsIURI* aURI = nullptr);
 
   virtual nsresult GetScriptLocation(nsACString &aStr) override;
-
-  PrincipalKind Kind() override { return eNullPrincipal; }
 
  protected:
   virtual ~nsNullPrincipal() {}

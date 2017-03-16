@@ -11,7 +11,7 @@
 #include "mozilla/dom/ChildIterator.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ElementInlines.h"
-#include "nsAnimationManager.h"
+#include "mozilla/dom/KeyframeEffectReadOnly.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsCSSPseudoElements.h"
 #include "nsHTMLStyleSheet.h"
@@ -26,6 +26,10 @@ using namespace mozilla::dom;
 ServoStyleSet::ServoStyleSet()
   : mPresContext(nullptr)
   , mBatching(0)
+{
+}
+
+ServoStyleSet::~ServoStyleSet()
 {
 }
 
@@ -77,6 +81,9 @@ ServoStyleSet::BeginShutdown()
 void
 ServoStyleSet::Shutdown()
 {
+  // Make sure we drop our cached style contexts before the presshell arena
+  // starts going away.
+  ClearNonInheritingStyleContexts();
   mRawSet = nullptr;
 }
 
@@ -133,8 +140,7 @@ ServoStyleSet::GetContext(nsIContent* aContent,
   ResolveMappedAttrDeclarationBlocks();
   RefPtr<ServoComputedValues> computedValues;
   if (aMayCompute == LazyComputeBehavior::Allow) {
-    computedValues =
-      Servo_ResolveStyleLazily(element, nullptr, mRawSet.get()).Consume();
+    computedValues = ResolveStyleLazily(element, nullptr);
   } else {
     computedValues = ResolveServoStyle(element);
   }
@@ -155,35 +161,11 @@ ServoStyleSet::GetContext(already_AddRefed<ServoComputedValues> aComputedValues,
 
   // XXXbholley: Figure out the correct thing to pass here. Does this fixup
   // duplicate something that servo already does?
+  // See bug 1344914.
   bool skipFixup = false;
 
-  RefPtr<nsStyleContext> result =
-    NS_NewStyleContext(aParentContext, mPresContext, aPseudoTag,
-                       aPseudoType, Move(aComputedValues), skipFixup);
-
-  // Ignore animations for print or print preview, and for elements
-  // that are not attached to the document tree.
-  if (mPresContext->IsDynamic() &&
-      aElementForAnimation &&
-      aElementForAnimation->IsInComposedDoc()) {
-    // Update/build CSS animations in the case where animation properties are
-    // changed.
-    // FIXME: Bug 1341985: This isn't right place to update CSS animations.
-    // We should do it in a SequentialTask and trigger the second traversal for
-    // the animation's restyle after the SequentialTask.
-    const ServoComputedValues* currentStyle =
-      result->StyleSource().AsServoComputedValues();
-    const ServoComputedValues* parentStyle =
-      result->GetParent()
-        ? result->GetParent()->StyleSource().AsServoComputedValues()
-        : nullptr;
-    mPresContext->AnimationManager()->UpdateAnimations(aElementForAnimation,
-                                                       aPseudoTag,
-                                                       currentStyle,
-                                                       parentStyle);
-  }
-
-  return result.forget();
+  return NS_NewStyleContext(aParentContext, mPresContext, aPseudoTag,
+                            aPseudoType, Move(aComputedValues), skipFixup);
 }
 
 void
@@ -192,13 +174,24 @@ ServoStyleSet::ResolveMappedAttrDeclarationBlocks()
   if (nsHTMLStyleSheet* sheet = mPresContext->Document()->GetAttributeStyleSheet()) {
     sheet->CalculateMappedServoDeclarations();
   }
+
+  mPresContext->Document()->ResolveScheduledSVGPresAttrs();
+}
+
+void
+ServoStyleSet::PreTraverse()
+{
+  ResolveMappedAttrDeclarationBlocks();
+
+  // Process animation stuff that we should avoid doing during the parallel
+  // traversal.
+  mPresContext->EffectCompositor()->PreTraverse();
 }
 
 bool
 ServoStyleSet::PrepareAndTraverseSubtree(RawGeckoElementBorrowed aRoot,
-                                         mozilla::TraversalRootBehavior aRootBehavior) {
-  ResolveMappedAttrDeclarationBlocks();
-
+                                         mozilla::TraversalRootBehavior aRootBehavior)
+{
   // Get the Document's root element to ensure that the cache is valid before
   // calling into the (potentially-parallel) Servo traversal, where a cache hit
   // is necessary to avoid a data race when updating the cache.
@@ -208,6 +201,14 @@ ServoStyleSet::PrepareAndTraverseSubtree(RawGeckoElementBorrowed aRoot,
   sInServoTraversal = true;
   bool postTraversalRequired =
     Servo_TraverseSubtree(aRoot, mRawSet.get(), aRootBehavior);
+
+  // If there are still animation restyles needed, trigger a second traversal to
+  // update CSS animations' styles.
+  if (mPresContext->EffectCompositor()->PreTraverse() &&
+      Servo_TraverseSubtree(aRoot, mRawSet.get(), aRootBehavior)) {
+    postTraversalRequired = true;
+  }
+
   sInServoTraversal = false;
   return postTraversalRequired;
 }
@@ -242,25 +243,46 @@ ServoStyleSet::ResolveStyleForText(nsIContent* aTextNode,
     Servo_ComputedValues_Inherit(mRawSet.get(), parentComputedValues).Consume();
 
   return GetContext(computedValues.forget(), aParentContext,
-                    nsCSSAnonBoxes::mozText, CSSPseudoElementType::AnonBox,
+                    nsCSSAnonBoxes::mozText,
+                    CSSPseudoElementType::InheritingAnonBox,
                     nullptr);
 }
 
 already_AddRefed<nsStyleContext>
-ServoStyleSet::ResolveStyleForOtherNonElement(nsStyleContext* aParentContext)
+ServoStyleSet::ResolveStyleForFirstLetterContinuation(nsStyleContext* aParentContext)
 {
-  // The parent context can be null if the non-element share a style context
-  // with the root of an anonymous subtree.
-  const ServoComputedValues* parent =
-    aParentContext ? aParentContext->StyleSource().AsServoComputedValues() : nullptr;
+  const ServoComputedValues* parent = aParentContext->StyleSource().AsServoComputedValues();
   RefPtr<ServoComputedValues> computedValues =
     Servo_ComputedValues_Inherit(mRawSet.get(), parent).Consume();
   MOZ_ASSERT(computedValues);
 
   return GetContext(computedValues.forget(), aParentContext,
-                    nsCSSAnonBoxes::mozOtherNonElement,
-                    CSSPseudoElementType::AnonBox,
+                    nsCSSAnonBoxes::firstLetterContinuation,
+                    CSSPseudoElementType::InheritingAnonBox,
                     nullptr);
+}
+
+already_AddRefed<nsStyleContext>
+ServoStyleSet::ResolveStyleForPlaceholder()
+{
+  RefPtr<nsStyleContext>& cache =
+    mNonInheritingStyleContexts[nsCSSAnonBoxes::NonInheriting::oofPlaceholder];
+  if (cache) {
+    RefPtr<nsStyleContext> retval = cache;
+    return retval.forget();
+  }
+
+  RefPtr<ServoComputedValues> computedValues =
+    Servo_ComputedValues_Inherit(mRawSet.get(), nullptr).Consume();
+  MOZ_ASSERT(computedValues);
+
+  RefPtr<nsStyleContext> retval =
+    GetContext(computedValues.forget(), nullptr,
+               nsCSSAnonBoxes::oofPlaceholder,
+               CSSPseudoElementType::NonInheritingAnonBox,
+               nullptr);
+  cache = retval;
+  return retval.forget();
 }
 
 already_AddRefed<nsStyleContext>
@@ -299,7 +321,7 @@ ServoStyleSet::ResolveTransientStyle(Element* aElement, CSSPseudoElementType aTy
   }
 
   RefPtr<ServoComputedValues> computedValues =
-    Servo_ResolveStyleLazily(aElement, pseudoTag, mRawSet.get()).Consume();
+    ResolveStyleLazily(aElement, pseudoTag);
 
   return GetContext(computedValues.forget(), nullptr, pseudoTag, aType,
                     nullptr);
@@ -307,11 +329,12 @@ ServoStyleSet::ResolveTransientStyle(Element* aElement, CSSPseudoElementType aTy
 
 // aFlags is an nsStyleSet flags bitfield
 already_AddRefed<nsStyleContext>
-ServoStyleSet::ResolveAnonymousBoxStyle(nsIAtom* aPseudoTag,
-                                        nsStyleContext* aParentContext,
-                                        uint32_t aFlags)
+ServoStyleSet::ResolveInheritingAnonymousBoxStyle(nsIAtom* aPseudoTag,
+                                                  nsStyleContext* aParentContext,
+                                                  uint32_t aFlags)
 {
-  MOZ_ASSERT(nsCSSAnonBoxes::IsAnonBox(aPseudoTag));
+  MOZ_ASSERT(nsCSSAnonBoxes::IsAnonBox(aPseudoTag) &&
+             !nsCSSAnonBoxes::IsNonInheritingAnonBox(aPseudoTag));
 
   MOZ_ASSERT(aFlags == 0 ||
              aFlags == nsStyleSet::eSkipParentDisplayBasedStyleFixup);
@@ -321,7 +344,7 @@ ServoStyleSet::ResolveAnonymousBoxStyle(nsIAtom* aPseudoTag,
     aParentContext ? aParentContext->StyleSource().AsServoComputedValues()
                    : nullptr;
   RefPtr<ServoComputedValues> computedValues =
-    Servo_ComputedValues_GetForAnonymousBox(parentStyle, aPseudoTag,
+    Servo_ComputedValues_GetForAnonymousBox(parentStyle, aPseudoTag, skipFixup,
                                             mRawSet.get()).Consume();
 #ifdef DEBUG
   if (!computedValues) {
@@ -333,9 +356,54 @@ ServoStyleSet::ResolveAnonymousBoxStyle(nsIAtom* aPseudoTag,
   }
 #endif
 
+  // FIXME(bz, bug 1344914) We should really GetContext here and make skipFixup
+  // work there.
   return NS_NewStyleContext(aParentContext, mPresContext, aPseudoTag,
-                            CSSPseudoElementType::AnonBox,
+                            CSSPseudoElementType::InheritingAnonBox,
                             computedValues.forget(), skipFixup);
+}
+
+already_AddRefed<nsStyleContext>
+ServoStyleSet::ResolveNonInheritingAnonymousBoxStyle(nsIAtom* aPseudoTag)
+{
+  MOZ_ASSERT(nsCSSAnonBoxes::IsAnonBox(aPseudoTag) &&
+             nsCSSAnonBoxes::IsNonInheritingAnonBox(aPseudoTag));
+  MOZ_ASSERT(aPseudoTag != nsCSSAnonBoxes::pageContent,
+             "If nsCSSAnonBoxes::pageContent ends up non-inheriting, check "
+             "whether we need to do anything to move the "
+             "@page handling from ResolveInheritingAnonymousBoxStyle to "
+             "ResolveNonInheritingAnonymousBoxStyle");
+
+  nsCSSAnonBoxes::NonInheriting type =
+    nsCSSAnonBoxes::NonInheritingTypeForPseudoTag(aPseudoTag);
+  RefPtr<nsStyleContext>& cache = mNonInheritingStyleContexts[type];
+  if (cache) {
+    RefPtr<nsStyleContext> retval = cache;
+    return retval.forget();
+  }
+
+  // We always want to skip parent-based display fixup here.  It never makes
+  // sense for non-inheriting anonymous boxes.
+  MOZ_ASSERT(!nsCSSAnonBoxes::IsNonInheritingAnonBox(nsCSSAnonBoxes::viewport),
+             "viewport needs fixup to handle blockifying it");
+  RefPtr<ServoComputedValues> computedValues =
+    Servo_ComputedValues_GetForAnonymousBox(nullptr, aPseudoTag, true,
+                                            mRawSet.get()).Consume();
+#ifdef DEBUG
+  if (!computedValues) {
+    nsString pseudo;
+    aPseudoTag->ToString(pseudo);
+    NS_ERROR(nsPrintfCString("stylo: could not get anon-box: %s",
+             NS_ConvertUTF16toUTF8(pseudo).get()).get());
+    MOZ_CRASH();
+  }
+#endif
+
+  RefPtr<nsStyleContext> retval =
+    GetContext(computedValues.forget(), nullptr, aPseudoTag,
+               CSSPseudoElementType::NonInheritingAnonBox, nullptr);
+  cache = retval;
+  return retval.forget();
 }
 
 // manage the set of style sheets in the style set
@@ -580,6 +648,8 @@ ServoStyleSet::HasStateDependentStyle(dom::Element* aElement,
 bool
 ServoStyleSet::StyleDocument()
 {
+  PreTraverse();
+
   // Restyle the document from the root element and each of the document level
   // NAC subtree roots.
   bool postTraversalRequired = false;
@@ -596,6 +666,9 @@ void
 ServoStyleSet::StyleNewSubtree(Element* aRoot)
 {
   MOZ_ASSERT(!aRoot->HasServoData());
+
+  PreTraverse();
+
   DebugOnly<bool> postTraversalRequired =
     PrepareAndTraverseSubtree(aRoot, TraversalRootBehavior::Normal);
   MOZ_ASSERT(!postTraversalRequired);
@@ -604,6 +677,8 @@ ServoStyleSet::StyleNewSubtree(Element* aRoot)
 void
 ServoStyleSet::StyleNewChildren(Element* aParent)
 {
+  PreTraverse();
+
   PrepareAndTraverseSubtree(aParent, TraversalRootBehavior::UnstyledChildrenOnly);
   // We can't assert that Servo_TraverseSubtree returns false, since aParent
   // or some of its other children might have pending restyles.
@@ -640,9 +715,28 @@ ServoStyleSet::FillKeyframesForName(const nsString& aName,
                                              &aKeyframes);
 }
 
+nsTArray<ComputedKeyframeValues>
+ServoStyleSet::GetComputedKeyframeValuesFor(const nsTArray<Keyframe>& aKeyframes,
+                                            dom::Element* aElement,
+                                            const ServoComputedStyleValues& aServoValues)
+{
+  nsTArray<ComputedKeyframeValues> result(aKeyframes.Length());
+
+  // Construct each nsTArray<PropertyStyleAnimationValuePair> here.
+  result.AppendElements(aKeyframes.Length());
+
+  Servo_GetComputedKeyframeValues(&aKeyframes,
+                                  aServoValues.mCurrentStyle,
+                                  aServoValues.mParentStyle,
+                                  mRawSet.get(),
+                                  &result);
+  return result;
+}
+
 void
 ServoStyleSet::RebuildData()
 {
+  ClearNonInheritingStyleContexts();
   Servo_StyleSet_RebuildData(mRawSet.get());
 }
 
@@ -650,6 +744,33 @@ already_AddRefed<ServoComputedValues>
 ServoStyleSet::ResolveServoStyle(Element* aElement)
 {
   return Servo_ResolveStyle(aElement, mRawSet.get()).Consume();
+}
+
+void
+ServoStyleSet::ClearNonInheritingStyleContexts()
+{
+  for (RefPtr<nsStyleContext>& ptr : mNonInheritingStyleContexts) {
+    ptr = nullptr;
+  }
+}
+
+already_AddRefed<ServoComputedValues>
+ServoStyleSet::ResolveStyleLazily(Element* aElement, nsIAtom* aPseudoTag)
+{
+  mPresContext->EffectCompositor()->PreTraverse(aElement, aPseudoTag);
+
+  MOZ_ASSERT(!sInServoTraversal);
+  sInServoTraversal = true;
+  RefPtr<ServoComputedValues> computedValues =
+    Servo_ResolveStyleLazily(aElement, aPseudoTag, mRawSet.get()).Consume();
+
+  if (mPresContext->EffectCompositor()->PreTraverse(aElement, aPseudoTag)) {
+    computedValues =
+      Servo_ResolveStyleLazily(aElement, aPseudoTag, mRawSet.get()).Consume();
+  }
+  sInServoTraversal = false;
+
+  return computedValues.forget();
 }
 
 bool ServoStyleSet::sInServoTraversal = false;

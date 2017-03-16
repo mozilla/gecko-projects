@@ -41,7 +41,7 @@ Cu.import("chrome://marionette/content/wait.js");
 this.EXPORTED_SYMBOLS = ["GeckoDriver", "Context"];
 
 var FRAME_SCRIPT = "chrome://marionette/content/listener.js";
-const BROWSER_STARTUP_FINISHED = "browser-delayed-startup-finished";
+
 const CLICK_TO_START_PREF = "marionette.debugging.clicktostart";
 const CONTENT_LISTENER_PREF = "marionette.contentListener";
 
@@ -69,13 +69,6 @@ var systemMessageListenerReady = false;
 Services.obs.addObserver(function() {
   systemMessageListenerReady = true;
 }, "system-message-listener-ready", false);
-
-// This is used on desktop to prevent newSession from returning before a page
-// load initiated by the Firefox command line has completed.
-var delayedBrowserStarted = false;
-Services.obs.addObserver(function () {
-  delayedBrowserStarted = true;
-}, BROWSER_STARTUP_FINISHED, false);
 
 this.Context = {
   CHROME: "chrome",
@@ -622,29 +615,17 @@ GeckoDriver.prototype.newSession = function* (cmd, resp) {
     }
   };
 
-  let runSessionStart = function() {
-    if (!Preferences.get(CONTENT_LISTENER_PREF)) {
-      waitForWindow.call(this);
-    } else if (this.appName != "Firefox" && this.curBrowser === null) {
-      // if there is a content listener, then we just wake it up
-      this.addBrowser(this.getCurrentWindow());
-      this.curBrowser.startSession(this.whenBrowserStarted.bind(this));
-      this.mm.broadcastAsyncMessage("Marionette:restart", {});
-    } else {
-      throw new WebDriverError("Session already running");
-    }
-    this.switchToGlobalMessageManager();
-  };
-
-  if (!delayedBrowserStarted && this.appName != "B2G") {
-    let self = this;
-    Services.obs.addObserver(function onStart() {
-      Services.obs.removeObserver(onStart, BROWSER_STARTUP_FINISHED);
-      runSessionStart.call(self);
-    }, BROWSER_STARTUP_FINISHED, false);
+  if (!Preferences.get(CONTENT_LISTENER_PREF)) {
+    waitForWindow.call(this);
+  } else if (this.appName != "Firefox" && this.curBrowser === null) {
+    // if there is a content listener, then we just wake it up
+    this.addBrowser(this.getCurrentWindow());
+    this.curBrowser.startSession(this.whenBrowserStarted.bind(this));
+    this.mm.broadcastAsyncMessage("Marionette:restart", {});
   } else {
-    runSessionStart.call(this);
+    throw new WebDriverError("Session already running");
   }
+  this.switchToGlobalMessageManager();
 
   yield registerBrowsers;
   yield browserListening;
@@ -953,18 +934,20 @@ GeckoDriver.prototype.get = function*(cmd, resp) {
   let url = cmd.parameters.url;
 
   let get = this.listener.get({url: url, pageTimeout: this.timeouts.pageLoad});
-  // TODO(ato): Bug 1242595
-  let id = this.listener.activeMessageId;
 
   // If a remoteness update interrupts our page load, this will never return
   // We need to re-issue this request to correctly poll for readyState and
   // send errors.
   this.curBrowser.pendingCommands.push(() => {
-    cmd.parameters.command_id = id;
-    cmd.parameters.pageTimeout = this.timeouts.pageLoad;
+    let parameters = {
+      // TODO(ato): Bug 1242595
+      command_id: this.listener.activeMessageId,
+      pageTimeout: this.timeouts.pageLoad,
+      startTime: new Date().getTime(),
+    };
     this.mm.broadcastAsyncMessage(
         "Marionette:pollForReadyState" + this.curBrowser.curFrameId,
-        cmd.parameters);
+        parameters);
   });
 
   yield get;
@@ -1027,18 +1010,86 @@ GeckoDriver.prototype.getPageSource = function* (cmd, resp) {
   }
 };
 
-/** Go back in history. */
-GeckoDriver.prototype.goBack = function*(cmd, resp) {
+/**
+ * Cause the browser to traverse one step backward in the joint history
+ * of the current browsing context.
+ */
+GeckoDriver.prototype.goBack = function* (cmd, resp) {
   assert.content(this.context);
 
-  yield this.listener.goBack();
+  if (!this.curBrowser.tab) {
+    // Navigation does not work for non-browser windows
+    return;
+  }
+
+  let contentBrowser = browser.getBrowserForTab(this.curBrowser.tab)
+  if (!contentBrowser.webNavigation.canGoBack) {
+    return;
+  }
+
+  let currentURL = yield this.listener.getCurrentUrl();
+  let goBack = this.listener.goBack({pageTimeout: this.timeouts.pageLoad});
+
+  // If a remoteness update interrupts our page load, this will never return
+  // We need to re-issue this request to correctly poll for readyState and
+  // send errors.
+  this.curBrowser.pendingCommands.push(() => {
+    let parameters = {
+      // TODO(ato): Bug 1242595
+      command_id: this.listener.activeMessageId,
+      lastSeenURL: currentURL,
+      pageTimeout: this.timeouts.pageLoad,
+      startTime: new Date().getTime(),
+    };
+    this.mm.broadcastAsyncMessage(
+        // TODO: combine with
+        // "Marionette:pollForReadyState" + this.curBrowser.curFrameId,
+        "Marionette:pollForReadyState" + this.curBrowser.curFrameId,
+        parameters);
+  });
+
+  yield goBack;
 };
 
-/** Go forward in history. */
-GeckoDriver.prototype.goForward = function*(cmd, resp) {
+/**
+ * Cause the browser to traverse one step forward in the joint history
+ * of the current browsing context.
+ */
+GeckoDriver.prototype.goForward = function* (cmd, resp) {
   assert.content(this.context);
 
-  yield this.listener.goForward();
+  if (!this.curBrowser.tab) {
+    // Navigation does not work for non-browser windows
+    return;
+  }
+
+  let contentBrowser = browser.getBrowserForTab(this.curBrowser.tab)
+  if (!contentBrowser.webNavigation.canGoForward) {
+    return;
+  }
+
+  let currentURL = yield this.listener.getCurrentUrl();
+  let goForward = this.listener.goForward({pageTimeout: this.timeouts.pageLoad});
+
+  // If a remoteness update interrupts our page load, this will never return
+  // We need to re-issue this request to correctly poll for readyState and
+  // send errors.
+  this.curBrowser.pendingCommands.push(() => {
+    let parameters = {
+      // TODO(ato): Bug 1242595
+      command_id: this.listener.activeMessageId,
+      lastSeenURL: currentURL,
+      pageTimeout: this.timeouts.pageLoad,
+      startTime: new Date().getTime(),
+    };
+    this.mm.broadcastAsyncMessage(
+        // TODO: combine with
+        // "Marionette:pollForReadyState" + this.curBrowser.curFrameId,
+        "Marionette:pollForReadyState" + this.curBrowser.curFrameId,
+        parameters);
+  });
+
+  yield goForward;
 };
 
 /** Refresh the page. */
@@ -1181,8 +1232,8 @@ GeckoDriver.prototype.setWindowPosition = function* (cmd, resp) {
   assert.firefox()
 
   let {x, y} = cmd.parameters;
-  assert.positiveInteger(x);
-  assert.positiveInteger(y);
+  assert.integer(x);
+  assert.integer(y);
 
   let win = this.getCurrentWindow();
   let orig = {screenX: win.screenX, screenY: win.screenY};

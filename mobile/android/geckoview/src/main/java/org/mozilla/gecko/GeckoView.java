@@ -8,12 +8,11 @@ package org.mozilla.gecko;
 
 import java.util.Set;
 
-import org.json.JSONException;
-import org.json.JSONObject;
 import org.mozilla.gecko.annotation.ReflectionTarget;
 import org.mozilla.gecko.annotation.WrapForJNI;
 import org.mozilla.gecko.gfx.LayerView;
 import org.mozilla.gecko.mozglue.JNIObject;
+import org.mozilla.gecko.NativeQueue.StateHolder;
 import org.mozilla.gecko.util.BundleEventListener;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoBundle;
@@ -21,6 +20,7 @@ import org.mozilla.gecko.util.GeckoBundle;
 import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.Handler;
@@ -43,7 +43,40 @@ public class GeckoView extends LayerView
 
     private static final boolean DEBUG = false;
 
-    private final EventDispatcher mEventDispatcher = new EventDispatcher();
+    /* package */ enum State implements NativeQueue.State {
+        @WrapForJNI INITIAL(0),
+        @WrapForJNI READY(1);
+
+        private int rank;
+
+        private State(int rank) {
+            this.rank = rank;
+        }
+
+        @Override
+        public boolean is(final NativeQueue.State other) {
+            return this == other;
+        }
+
+        @Override
+        public boolean isAtLeast(final NativeQueue.State other) {
+            if (other instanceof State) {
+                return this.rank >= ((State) other).rank;
+            }
+            return false;
+        }
+    }
+
+    private final StateHolder mStateHolder =
+        new StateHolder(State.INITIAL, State.READY);
+
+    @WrapForJNI(calledFrom = "gecko")
+    private void setState(final State newState) {
+        mStateHolder.setState(newState);
+    }
+
+    private final EventDispatcher mEventDispatcher =
+        new EventDispatcher(mStateHolder);
 
     private ChromeDelegate mChromeDelegate;
     /* package */ ContentListener mContentListener;
@@ -301,6 +334,7 @@ public class GeckoView extends LayerView
 
     /**
     * Load the given URI.
+    * Note: Only for Fennec support.
     * @param uri The URI of the resource to load.
     * @param flags The load flags (TODO).
     */
@@ -314,6 +348,24 @@ public class GeckoView extends LayerView
         }  else {
             GeckoThread.queueNativeCall(window, "loadUri", String.class, uri, flags);
         }
+    }
+
+    /**
+    * Load the given URI.
+    * @param uri The URI of the resource to load.
+    */
+    public void loadUri(String uri) {
+        final GeckoBundle msg = new GeckoBundle();
+        msg.putString("uri", uri);
+        mEventDispatcher.dispatch("GeckoView:LoadUri", msg);
+    }
+
+    /**
+    * Load the given URI.
+    * @param uri The URI of the resource to load.
+    */
+    public void loadUri(Uri uri) {
+        loadUri(uri.toString());
     }
 
     /**
@@ -413,7 +465,9 @@ public class GeckoView extends LayerView
 
     public void importScript(final String url) {
         if (url.startsWith("resource://android/assets/")) {
-            GeckoAppShell.notifyObservers("GeckoView:ImportScript", url);
+            final GeckoBundle data = new GeckoBundle(1);
+            data.putString("scriptURL", url);
+            getEventDispatcher().dispatch("GeckoView:ImportScript", data);
             return;
         }
 

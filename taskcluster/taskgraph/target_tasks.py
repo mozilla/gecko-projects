@@ -23,6 +23,14 @@ def get_method(method):
     return _target_task_methods[method]
 
 
+def filter_for_project(task, parameters):
+    """Filter tasks by project.  Optionally enable nightlies."""
+    if task.attributes.get('nightly') and not parameters.get('include_nightly'):
+        return False
+    run_on_projects = set(task.attributes.get('run_on_projects', []))
+    return match_run_on_projects(parameters['project'], run_on_projects)
+
+
 @_target_task('try_option_syntax')
 def target_tasks_try_option_syntax(full_task_graph, parameters):
     """Generate a list of target tasks based on try syntax in
@@ -76,10 +84,9 @@ def target_tasks_try_option_syntax(full_task_graph, parameters):
 def target_tasks_default(full_task_graph, parameters):
     """Target the tasks which have indicated they should be run on this project
     via the `run_on_projects` attributes."""
-    def filter(task):
-        run_on_projects = set(task.attributes.get('run_on_projects', []))
-        return match_run_on_projects(parameters['project'], run_on_projects)
-    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+    return [l for l, t in full_task_graph.tasks.iteritems()
+            if filter_for_project(t, parameters)]
 
 
 @_target_task('ash_tasks')
@@ -205,16 +212,26 @@ def target_tasks_mozilla_beta(full_task_graph, parameters):
     """Select the set of tasks required for a promotable beta or release build
     of linux, plus android CI. The candidates build process involves a pipeline
     of builds and signing, but does not include beetmover or balrog jobs."""
+
     def filter(task):
+        if not filter_for_project(task, parameters):
+            return False
         platform = task.attributes.get('build_platform')
-        if platform in ('android-api-15', 'android-x86'):
-            return True
-        if platform in ('linux64-nightly', 'linux-nightly'):
-            if task.kind not in [
-                'balrog', 'beetmover', 'beetmover-checksums', 'beetmover-l10n',
-                'checksums-signing', 'nightly-l10n', 'nightly-l10n-signing'
-            ]:
-                return task.attributes.get('nightly', False)
+        if platform in ('linux64-pgo', 'linux-pgo', 'win32-pgo', 'win64-pgo',
+                        'android-api-15-nightly', 'android-x86-nightly',
+                        'win32', 'win64', 'macosx64'):
+            return False
+        if platform in ('linux64', 'linux'):
+            if task.attributes['build_type'] == 'opt':
+                return False
+        # skip l10n, beetmover, balrog
+        if task.kind in [
+            'balrog', 'beetmover', 'beetmover-checksums', 'beetmover-l10n',
+            'checksums-signing', 'nightly-l10n', 'nightly-l10n-signing',
+        ]:
+            return False
+        return True
+
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 
@@ -263,15 +280,20 @@ def target_tasks_stylo(full_task_graph, parameters):
         return True
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
-# nightly_linux should be refactored to be nightly_all once
-# https://bugzilla.mozilla.org/show_bug.cgi?id=1267425 dependent bugs are implemented
-@_target_task('nightly_macosx')
-def target_tasks_nightly_macosx(full_task_graph, parameters):
-    """Select the set of tasks required for a nightly build of linux. The
-    nightly build process involves a pipeline of builds, signing,
-    and, eventually, uploading the tasks to balrog."""
+
+@_target_task('stylo_talos')
+def target_stylo_talos(full_task_graph, parameters):
+    """Target stylotasks that only run on the m-c branch."""
     def filter(task):
         platform = task.attributes.get('build_platform')
-        if platform in ('macosx64-nightly', ):
-            return task.attributes.get('nightly', False)
+        # only stylo platforms
+        if platform != ('linux64-stylo'):
+            return False
+        # no non-e10s tests
+        if task.attributes.get('unittest_suite'):
+            if not task.attributes.get('e10s'):
+                return False
+            # only run talos
+            if task.attributes.get('unittest_suite') == 'talos':
+                return True
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]

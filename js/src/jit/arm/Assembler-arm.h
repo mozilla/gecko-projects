@@ -1412,7 +1412,6 @@ class Assembler : public AssemblerShared
   public:
     void finish();
     bool asmMergeWith(Assembler& other);
-    void executableCopy(void* buffer);
     void copyJumpRelocationTable(uint8_t* dest);
     void copyDataRelocationTable(uint8_t* dest);
     void copyPreBarrierTable(uint8_t* dest);
@@ -1747,6 +1746,8 @@ class Assembler : public AssemblerShared
         return js::jit::SupportsSimd;
     }
 
+    static bool HasRoundInstruction(RoundingMode mode) { return false; }
+
   protected:
     void addPendingJump(BufferOffset src, ImmPtr target, Relocation::Kind kind) {
         enoughMemory_ &= jumps_.append(RelativePatch(target.value, kind));
@@ -1771,7 +1772,7 @@ class Assembler : public AssemblerShared
 
     // Copy the assembly code to the given buffer, and perform any pending
     // relocations relying on the target address.
-    void executableCopy(uint8_t* buffer);
+    void executableCopy(uint8_t* buffer, bool flushICache = true);
 
     // Actual assembly emitting functions.
 

@@ -51,7 +51,7 @@
     }
     pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
         let first = try!(Side::parse(context, input));
-        let second = Side::parse(context, input).ok();
+        let second = input.try(|input| Side::parse(context, input)).ok();
         Ok(SpecifiedValue {
             first: first,
             second: second,
@@ -101,10 +101,9 @@ ${helpers.single_keyword("unicode-bidi",
                          spec="https://drafts.csswg.org/css-writing-modes/#propdef-unicode-bidi")}
 
 // FIXME: This prop should be animatable.
-<%helpers:longhand name="${'text-decoration' if product == 'servo' else 'text-decoration-line'}"
+<%helpers:longhand name="text-decoration-line"
                    custom_cascade="${product == 'servo'}"
                    animatable="False"
-                   disable_when_testing="True",
                    spec="https://drafts.csswg.org/css-text-decor/#propdef-text-decoration-line">
     use std::fmt;
     use style_traits::ToCss;
@@ -138,6 +137,7 @@ ${helpers.single_keyword("unicode-bidi",
     impl ToCss for SpecifiedValue {
         fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
             let mut has_any = false;
+
             macro_rules! write_value {
                 ($line:ident => $css:expr) => {
                     if self.contains($line) {
@@ -156,6 +156,7 @@ ${helpers.single_keyword("unicode-bidi",
             if !has_any {
                 dest.write_str("none")?;
             }
+
             Ok(())
         }
     }
@@ -209,7 +210,7 @@ ${helpers.single_keyword("unicode-bidi",
                                    _inherited_style: &ComputedValues,
                                    context: &mut computed::Context,
                                    _cacheable: &mut bool,
-                                   _error_reporter: &mut StdBox<ParseErrorReporter + Send>) {
+                                   _error_reporter: &ParseErrorReporter) {
                 longhands::_servo_text_decorations_in_effect::derive_from_text_decoration(context);
         }
     % endif
@@ -223,7 +224,7 @@ ${helpers.single_keyword("text-decoration-style",
 
 ${helpers.predefined_type(
     "text-decoration-color", "CSSColor",
-    "::cssparser::Color::CurrentColor",
+    "computed::CSSColor::CurrentColor",
     initial_specified_value="specified::CSSColor::currentcolor()",
     complex_color=True,
     products="gecko",

@@ -164,7 +164,7 @@ ${helpers.single_keyword("text-transform",
                          animatable=False,
                          spec="https://drafts.csswg.org/css-text/#propdef-text-transform")}
 
-${helpers.single_keyword("hyphens", "none manual auto",
+${helpers.single_keyword("hyphens", "manual none auto",
                          gecko_enum_prefix="StyleHyphens",
                          products="gecko", animatable=False, extra_prefixes="moz",
                          spec="https://drafts.csswg.org/css-text/#propdef-hyphens")}
@@ -192,11 +192,46 @@ ${helpers.single_keyword("word-break",
                          spec="https://drafts.csswg.org/css-text/#propdef-word-break")}
 
 // TODO(pcwalton): Support `text-justify: distribute`.
-${helpers.single_keyword("text-justify",
-                         "auto none inter-word",
-                         products="servo",
-                         animatable=False,
-                         spec="https://drafts.csswg.org/css-text/#propdef-text-justify")}
+<%helpers:single_keyword_computed name="text-justify"
+                                  values="auto none inter-word"
+                                  extra_gecko_values="inter-character"
+                                  extra_specified="${'distribute' if product == 'gecko' else ''}"
+                                  gecko_enum_prefix="StyleTextJustify"
+                                  animatable="False"
+                                  spec="https://drafts.csswg.org/css-text/#propdef-text-justify">
+    use values::HasViewportPercentage;
+    no_viewport_percentage!(SpecifiedValue);
+
+    impl ToComputedValue for SpecifiedValue {
+        type ComputedValue = computed_value::T;
+
+        #[inline]
+        fn to_computed_value(&self, _: &Context) -> computed_value::T {
+            match *self {
+                % for value in "auto none inter_word".split():
+                    SpecifiedValue::${value} => computed_value::T::${value},
+                % endfor
+                % if product == "gecko":
+                    SpecifiedValue::inter_character => computed_value::T::inter_character,
+                    // https://drafts.csswg.org/css-text-3/#valdef-text-justify-distribute
+                    SpecifiedValue::distribute => computed_value::T::inter_character,
+                % endif
+            }
+        }
+
+        #[inline]
+        fn from_computed_value(computed: &computed_value::T) -> SpecifiedValue {
+            match *computed {
+                % for value in "auto none inter_word".split():
+                    computed_value::T::${value} => SpecifiedValue::${value},
+                % endfor
+                % if product == "gecko":
+                    computed_value::T::inter_character => SpecifiedValue::inter_character,
+                % endif
+            }
+        }
+    }
+</%helpers:single_keyword_computed>
 
 ${helpers.single_keyword("text-align-last",
                          "auto start end left right center justify",
@@ -757,7 +792,7 @@ ${helpers.single_keyword("text-align-last",
                     blur_radius: value.blur_radius.to_computed_value(context),
                     color: value.color
                                 .as_ref()
-                                .map(|color| color.parsed)
+                                .map(|color| color.to_computed_value(context))
                                 .unwrap_or(cssparser::Color::CurrentColor),
                 }
             }).collect())
@@ -1098,7 +1133,7 @@ ${helpers.predefined_type(
 
 // CSS Ruby Layout Module Level 1
 // https://drafts.csswg.org/css-ruby/
-${helpers.single_keyword("ruby-align", "start center space-between space-around",
+${helpers.single_keyword("ruby-align", "space-around start center space-between",
                          products="gecko", animatable=False,
                          spec="https://drafts.csswg.org/css-ruby/#ruby-align-property")}
 

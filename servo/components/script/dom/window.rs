@@ -42,7 +42,7 @@ use dom::location::Location;
 use dom::mediaquerylist::{MediaQueryList, WeakMediaQueryListVec};
 use dom::messageevent::MessageEvent;
 use dom::navigator::Navigator;
-use dom::node::{Node, from_untrusted_node_address, window_from_node, NodeDamage};
+use dom::node::{Node, NodeDamage, document_from_node, from_untrusted_node_address, window_from_node};
 use dom::performance::Performance;
 use dom::promise::Promise;
 use dom::screen::Screen;
@@ -331,8 +331,8 @@ impl Window {
          &self.bluetooth_extra_permission_data
     }
 
-    pub fn css_error_reporter(&self) -> Box<ParseErrorReporter + Send> {
-        self.error_reporter.clone()
+    pub fn css_error_reporter(&self) -> &ParseErrorReporter {
+        &self.error_reporter
     }
 
     /// Sets a new list of scroll offsets.
@@ -528,7 +528,24 @@ impl WindowMethods for Window {
 
     // https://html.spec.whatwg.org/multipage/#dom-frameelement
     fn GetFrameElement(&self) -> Option<Root<Element>> {
-        self.browsing_context().frame_element().map(Root::from_ref)
+        // Steps 1-3.
+        let context = match self.browsing_context.get() {
+            None => return None,
+            Some(context) => context,
+        };
+        // Step 4-5.
+        let container = match context.frame_element() {
+            None => return None,
+            Some(container) => container,
+        };
+        // Step 6.
+        let container_doc = document_from_node(container);
+        let current_doc = GlobalScope::current().as_window().Document();
+        if !current_doc.origin().same_origin_domain(container_doc.origin()) {
+            return None;
+        }
+        // Step 7.
+        Some(Root::from_ref(container))
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-navigator
@@ -701,10 +718,7 @@ impl WindowMethods for Window {
         let data = try!(StructuredCloneData::write(cx, message));
 
         // Step 9.
-        let runnable = PostMessageHandler::new(self, origin, data);
-        let msg = CommonScriptMsg::RunnableMsg(ScriptThreadEventCategory::DomEvent, box runnable);
-        // TODO(#12718): Use the "posted message task source".
-        let _ = self.script_chan.send(msg);
+        self.post_message(origin, data);
         Ok(())
     }
 
@@ -1891,5 +1905,14 @@ impl Runnable for PostMessageHandler {
         MessageEvent::dispatch_jsval(window.upcast(),
                                      window.upcast(),
                                      message.handle());
+    }
+}
+
+impl Window {
+    pub fn post_message(&self, origin: Option<ImmutableOrigin>, data: StructuredCloneData) {
+        let runnable = PostMessageHandler::new(self, origin, data);
+        let msg = CommonScriptMsg::RunnableMsg(ScriptThreadEventCategory::DomEvent, box runnable);
+        // TODO(#12718): Use the "posted message task source".
+        let _ = self.script_chan.send(msg);
     }
 }

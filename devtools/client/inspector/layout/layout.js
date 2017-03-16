@@ -36,6 +36,7 @@ LayoutView.prototype = {
       onHideBoxModelHighlighter,
       onShowBoxModelEditor,
       onShowBoxModelHighlighter,
+      onToggleGeometryEditor,
     } = this.inspector.boxmodel.getComponentProps();
 
     let {
@@ -44,6 +45,7 @@ LayoutView.prototype = {
       onSetGridOverlayColor,
       onShowBoxModelHighlighterForNode,
       onShowGridAreaHighlight,
+      onShowGridCellHighlight,
       onToggleGridHighlighter,
       onToggleShowGridLineNumbers,
       onToggleShowInfiniteLines,
@@ -70,6 +72,8 @@ LayoutView.prototype = {
       onShowBoxModelHighlighter,
       onShowBoxModelHighlighterForNode,
       onShowGridAreaHighlight,
+      onShowGridCellHighlight,
+      onToggleGeometryEditor,
       onToggleGridHighlighter,
       onToggleShowGridLineNumbers,
       onToggleShowInfiniteLines,

@@ -1113,6 +1113,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     inline void branchIfTrueBool(Register reg, Label* label);
 
     inline void branchIfRope(Register str, Label* label);
+    inline void branchIfNotRope(Register str, Label* label);
 
     inline void branchLatin1String(Register string, Label* label);
     inline void branchTwoByteString(Register string, Label* label);
@@ -1360,14 +1361,15 @@ class MacroAssembler : public MacroAssemblerSpecific
     // ========================================================================
     // wasm support
 
-    // Emit a bounds check against the (dynamically-patched) wasm bounds check
-    // limit, jumping to 'label' if 'cond' holds.
+    // Emit a bounds check against the wasm heap limit, jumping to 'label' if 'cond' holds.
+    // Required when WASM_HUGE_MEMORY is not defined.
     template <class L>
-    inline void wasmBoundsCheck(Condition cond, Register index, L label) PER_ARCH;
+    inline void wasmBoundsCheck(Condition cond, Register index, Register boundsCheckLimit, L label)
+        DEFINED_ON(arm, arm64, mips32, mips64, x86);
 
-    // Called after compilation completes to patch the given limit into the
-    // given instruction's immediate.
-    static inline void wasmPatchBoundsCheck(uint8_t* patchAt, uint32_t limit) PER_ARCH;
+    template <class L>
+    inline void wasmBoundsCheck(Condition cond, Register index, Address boundsCheckLimit, L label)
+        DEFINED_ON(arm, arm64, mips32, mips64, x86);
 
     // On x86, each instruction adds its own wasm::MemoryAccess's to the
     // wasm::MemoryAccessVector (there can be multiple when i64 is involved).
@@ -1492,7 +1494,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
     void loadStringChars(Register str, Register dest);
-    void loadStringChar(Register str, Register index, Register output);
+    void loadStringChar(Register str, Register index, Register output, Label* fail);
 
     void loadJSContext(Register dest);
     void loadJitActivation(Register dest) {

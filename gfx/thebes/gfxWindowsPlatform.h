@@ -50,7 +50,6 @@ class FeatureState;
 class DeviceManagerDx;
 }
 namespace layers {
-class DeviceManagerD3D9;
 class ReadbackManagerD3D11;
 }
 }
@@ -210,7 +209,6 @@ public:
     bool SupportsApzWheelInput() const override {
       return true;
     }
-    bool SupportsApzTouchInput() const override;
 
     // Recreate devices as needed for a device reset. Returns true if a device
     // reset occurred.

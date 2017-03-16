@@ -1236,7 +1236,7 @@ this.UITour = {
       // Remove all the children of the notice (rating container
       // and the flex).
       while (notice.firstChild) {
-        notice.removeChild(notice.firstChild);
+        notice.firstChild.remove();
       }
 
       // Make sure that we have a valid URL. If we haven't, do not open the engagement page.
@@ -1795,10 +1795,8 @@ this.UITour = {
         // Identifier of the partner repack, as stored in preference "distribution.id"
         // and included in Firefox and other update pings. Note this is not the same as
         // Services.appinfo.distributionID (value of MOZ_DISTRIBUTION_ID is set at build time).
-        let distribution = "default";
-        try {
-          distribution = Services.prefs.getDefaultBranch("distribution.").getCharPref("id");
-        } catch (e) {}
+        let distribution =
+          Services.prefs.getDefaultBranch("distribution.").getCharPref("id", "default");
         appinfo["distribution"] = distribution;
 
         let isDefaultBrowser = null;

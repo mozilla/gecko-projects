@@ -572,7 +572,7 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   transition: none;
 }
 
-#DateTimePickerPanel {
+#DateTimePickerPanel[active="true"] {
   -moz-binding: url("chrome://global/content/bindings/datetimepopup.xml#datetime-popup");
 }
 
@@ -865,10 +865,9 @@ statuspanel {
   pointer-events: none;
 }
 
-statuspanel:-moz-locale-dir(ltr)[mirror],
-statuspanel:-moz-locale-dir(rtl):not([mirror]) {
-  left: auto;
-  right: 0;
+statuspanel[mirror] {
+  offset-inline-start: auto;
+  offset-inline-end: 0;
 }
 
 statuspanel[sizelimit] {
@@ -887,6 +886,9 @@ statuspanel[type=status] {
 
 statuspanel[type=overLink] {
   transition: opacity 120ms ease-out;
+}
+
+statuspanel[type=overLink] > .statuspanel-inner {
   direction: ltr;
 }
 
@@ -1264,3 +1266,5 @@ toolbarpaletteitem[place="palette"][hidden] {
   opacity: 0.65;
   -moz-window-shadow: none;
 }
+
+%include theme-vars.inc.css

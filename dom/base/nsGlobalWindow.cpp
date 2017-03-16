@@ -227,7 +227,9 @@
 #include "mozilla/dom/Fetch.h"
 #include "mozilla/dom/FunctionBinding.h"
 #include "mozilla/dom/HashChangeEvent.h"
+#ifdef ENABLE_INTL_API
 #include "mozilla/dom/IntlUtils.h"
+#endif
 #include "mozilla/dom/MozSelfSupportBinding.h"
 #include "mozilla/dom/PopStateEvent.h"
 #include "mozilla/dom/PopupBlockedEvent.h"
@@ -1566,9 +1568,8 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
   }
 #endif
 
-  if (gDOMLeakPRLog)
-    MOZ_LOG(gDOMLeakPRLog, LogLevel::Debug,
-           ("DOMWINDOW %p created outer=%p", this, aOuterWindow));
+  MOZ_LOG(gDOMLeakPRLog, LogLevel::Debug,
+          ("DOMWINDOW %p created outer=%p", this, aOuterWindow));
 
   NS_ASSERTION(sWindowsById, "Windows hash table must be created!");
   NS_ASSERTION(!sWindowsById->Get(mWindowID),
@@ -1641,9 +1642,7 @@ nsGlobalWindow::~nsGlobalWindow()
   }
 #endif
 
-  if (gDOMLeakPRLog)
-    MOZ_LOG(gDOMLeakPRLog, LogLevel::Debug,
-           ("DOMWINDOW %p destroyed", this));
+  MOZ_LOG(gDOMLeakPRLog, LogLevel::Debug, ("DOMWINDOW %p destroyed", this));
 
   if (IsOuterWindow()) {
     JSObject *proxy = GetWrapperPreserveColor();
@@ -1921,7 +1920,9 @@ nsGlobalWindow::CleanUp()
 
   mServiceWorkerRegistrationTable.Clear();
 
+#ifdef ENABLE_INTL_API
   mIntlUtils = nullptr;
+#endif
 }
 
 void
@@ -2212,7 +2213,9 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindow)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPaintWorklet)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mExternal)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMozSelfSupport)
+#ifdef ENABLE_INTL_API
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mIntlUtils)
+#endif
 
   tmp->TraverseHostObjectURIs(cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -2287,7 +2290,9 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindow)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPaintWorklet)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mExternal)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mMozSelfSupport)
+#ifdef ENABLE_INTL_API
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mIntlUtils)
+#endif
 
   tmp->UnlinkHostObjectURIs();
 
@@ -2408,8 +2413,13 @@ nsGlobalWindow::WouldReuseInnerWindow(nsIDocument* aNewDocument)
     return false;
   }
 
-  NS_ASSERTION(NS_IsAboutBlank(mDoc->GetDocumentURI()),
-               "How'd this happen?");
+#ifdef DEBUG
+{
+  nsCOMPtr<nsIURI> uri;
+  mDoc->GetDocumentURI()->CloneIgnoringRef(getter_AddRefs(uri));
+  NS_ASSERTION(NS_IsAboutBlank(uri), "How'd this happen?");
+}
+#endif
 
   // Great, we're the original document, check for one of the other
   // conditions.
@@ -3175,7 +3185,6 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
                                      newInnerWindow->GetDocGroup()->GetValidAccessPtr());
   }
 
-  nsJSContext::PokeGC(JS::gcreason::SET_NEW_DOCUMENT, GetWrapperPreserveColor());
   kungFuDeathGrip->DidInitializeContext();
 
   // We wait to fire the debugger hook until the window is all set up and hooked
@@ -3263,7 +3272,11 @@ nsGlobalWindow::DispatchDOMWindowCreated()
 
   nsCOMPtr<nsIObserverService> observerService =
     mozilla::services::GetObserverService();
-  if (observerService) {
+
+  // The event dispatching could possibly cause docshell destory, and
+  // consequently cause mDoc to be set to nullptr by DropOuterWindowDocs(),
+  // so check it again here.
+  if (observerService && mDoc) {
     nsAutoString origin;
     nsIPrincipal* principal = mDoc->NodePrincipal();
     nsContentUtils::GetUTFOrigin(principal, origin);
@@ -3288,10 +3301,11 @@ nsGlobalWindow::InnerSetNewDocument(JSContext* aCx, nsIDocument* aDocument)
   NS_PRECONDITION(IsInnerWindow(), "Must only be called on inner windows");
   MOZ_ASSERT(aDocument);
 
-  if (gDOMLeakPRLog && MOZ_LOG_TEST(gDOMLeakPRLog, LogLevel::Debug)) {
+  if (MOZ_LOG_TEST(gDOMLeakPRLog, LogLevel::Debug)) {
     nsIURI *uri = aDocument->GetDocumentURI();
-    PR_LogPrint("DOMWINDOW %p SetNewDocument %s",
-                this, uri ? uri->GetSpecOrDefault().get() : "");
+    MOZ_LOG(gDOMLeakPRLog, LogLevel::Debug,
+            ("DOMWINDOW %p SetNewDocument %s",
+             this, uri ? uri->GetSpecOrDefault().get() : ""));
   }
 
   mDoc = aDocument;
@@ -3449,8 +3463,13 @@ nsGlobalWindow::SetOpenerWindow(nsPIDOMWindowOuter* aOpener,
   mOpener = opener.forget();
   NS_ASSERTION(mOpener || !aOpener, "Opener must support weak references!");
 
-  // Check that the js visible opener matches!
+  // Check that the js visible opener matches! We currently don't depend on this
+  // being true outside of nightly, so we disable the assertion in optimized
+  // release / beta builds.
   nsPIDOMWindowOuter* contentOpener = GetSanitizedOpener(aOpener);
+
+  // contentOpener is not used when the DIAGNOSTIC_ASSERT is compiled out.
+  mozilla::Unused << contentOpener;
   MOZ_DIAGNOSTIC_ASSERT(!contentOpener || !mTabGroup ||
     mTabGroup == Cast(contentOpener)->mTabGroup);
 
@@ -9248,7 +9267,7 @@ nsGlobalWindow::EnterModalState()
   nsCOMPtr<nsIDragService> ds =
     do_GetService("@mozilla.org/widget/dragservice;1");
   if (ds) {
-    ds->EndDragSession(true);
+    ds->EndDragSession(true, 0);
   }
 
   // Clear the capturing content if it is under topDoc.
@@ -9373,6 +9392,9 @@ public:
 
   NS_IMETHOD Run() override
   {
+    PROFILER_LABEL("WindowDestroyedEvent", "Run",
+                   js::ProfileEntry::Category::OTHER);
+
     nsCOMPtr<nsIObserverService> observerService =
       services::GetObserverService();
     if (observerService) {
@@ -10972,9 +10994,8 @@ nsGlobalWindow::GetSessionStorage(ErrorResult& aError)
   }
 
   if (mSessionStorage) {
-    if (MOZ_LOG_TEST(gDOMLeakPRLog, LogLevel::Debug)) {
-      PR_LogPrint("nsGlobalWindow %p has %p sessionStorage", this, mSessionStorage.get());
-    }
+    MOZ_LOG(gDOMLeakPRLog, LogLevel::Debug,
+            ("nsGlobalWindow %p has %p sessionStorage", this, mSessionStorage.get()));
     bool canAccess = mSessionStorage->CanAccess(principal);
     NS_ASSERTION(canAccess,
                  "This window owned sessionStorage "
@@ -11024,9 +11045,8 @@ nsGlobalWindow::GetSessionStorage(ErrorResult& aError)
     mSessionStorage = static_cast<Storage*>(storage.get());
     MOZ_ASSERT(mSessionStorage);
 
-    if (MOZ_LOG_TEST(gDOMLeakPRLog, LogLevel::Debug)) {
-      PR_LogPrint("nsGlobalWindow %p tried to get a new sessionStorage %p", this, mSessionStorage.get());
-    }
+    MOZ_LOG(gDOMLeakPRLog, LogLevel::Debug,
+            ("nsGlobalWindow %p tried to get a new sessionStorage %p", this, mSessionStorage.get()));
 
     if (!mSessionStorage) {
       aError.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
@@ -11034,9 +11054,8 @@ nsGlobalWindow::GetSessionStorage(ErrorResult& aError)
     }
   }
 
-  if (MOZ_LOG_TEST(gDOMLeakPRLog, LogLevel::Debug)) {
-    PR_LogPrint("nsGlobalWindow %p returns %p sessionStorage", this, mSessionStorage.get());
-  }
+  MOZ_LOG(gDOMLeakPRLog, LogLevel::Debug,
+          ("nsGlobalWindow %p returns %p sessionStorage", this, mSessionStorage.get()));
 
   return mSessionStorage;
 }
@@ -11974,10 +11993,9 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
         return NS_OK;
       }
 
-      if (MOZ_LOG_TEST(gDOMLeakPRLog, LogLevel::Debug)) {
-        PR_LogPrint("nsGlobalWindow %p with sessionStorage %p passing event from %p",
-                    this, mSessionStorage.get(), changingStorage.get());
-      }
+      MOZ_LOG(gDOMLeakPRLog, LogLevel::Debug,
+              ("nsGlobalWindow %p with sessionStorage %p passing event from %p",
+               this, mSessionStorage.get(), changingStorage.get()));
 
       fireMozStorageChanged = mSessionStorage == changingStorage;
       if (fireMozStorageChanged) {
@@ -14913,16 +14931,17 @@ nsGlobalWindow::GetPaintWorklet(ErrorResult& aRv)
 }
 
 void
-nsGlobalWindow::GetAppLocales(nsTArray<nsString>& aLocales)
+nsGlobalWindow::GetAppLocalesAsBCP47(nsTArray<nsString>& aLocales)
 {
   nsTArray<nsCString> appLocales;
-  mozilla::intl::LocaleService::GetInstance()->GetAppLocales(appLocales);
+  mozilla::intl::LocaleService::GetInstance()->GetAppLocalesAsBCP47(appLocales);
 
   for (uint32_t i = 0; i < appLocales.Length(); i++) {
     aLocales.AppendElement(NS_ConvertUTF8toUTF16(appLocales[i]));
   }
 }
 
+#ifdef ENABLE_INTL_API
 IntlUtils*
 nsGlobalWindow::GetIntlUtils(ErrorResult& aError)
 {
@@ -14934,7 +14953,7 @@ nsGlobalWindow::GetIntlUtils(ErrorResult& aError)
 
   return mIntlUtils;
 }
-
+#endif
 
 template class nsPIDOMWindow<mozIDOMWindowProxy>;
 template class nsPIDOMWindow<mozIDOMWindow>;

@@ -33,6 +33,7 @@ except ImportError:
 
 from collections import OrderedDict
 
+
 def table_dispatch(kind, table, body):
     """Call body with table[kind] if it exists.  Raise an error otherwise."""
     if kind in table:
@@ -40,8 +41,10 @@ def table_dispatch(kind, table, body):
     else:
         raise BaseException, "don't know how to handle a histogram of kind %s" % kind
 
+
 class DefinitionException(BaseException):
     pass
+
 
 def linear_buckets(dmin, dmax, n_buckets):
     ret_array = [0] * n_buckets
@@ -52,9 +55,10 @@ def linear_buckets(dmin, dmax, n_buckets):
         ret_array[i] = int(linear_range + 0.5)
     return ret_array
 
+
 def exponential_buckets(dmin, dmax, n_buckets):
-    log_max = math.log(dmax);
-    bucket_index = 2;
+    log_max = math.log(dmax)
+    bucket_index = 2
     ret_array = [0] * n_buckets
     current = dmin
     ret_array[1] = current
@@ -74,19 +78,20 @@ always_allowed_keys = ['kind', 'description', 'cpp_guard', 'expires_in_version',
                        'alert_emails', 'keyed', 'releaseChannelCollection',
                        'bug_numbers']
 
-whitelists = None;
+whitelists = None
 try:
     whitelist_path = os.path.join(os.path.abspath(os.path.realpath(os.path.dirname(__file__))), 'histogram-whitelists.json')
     with open(whitelist_path, 'r') as f:
         try:
             whitelists = json.load(f)
             for name, whitelist in whitelists.iteritems():
-              whitelists[name] = set(whitelist)
+                whitelists[name] = set(whitelist)
         except ValueError, e:
             raise BaseException, 'error parsing whitelist (%s)' % whitelist_path
 except IOError:
     whitelists = None
     print 'Unable to parse whitelist (%s). Assuming all histograms are acceptable.' % whitelist_path
+
 
 class Histogram:
     """A class for representing a histogram definition."""
@@ -126,8 +131,8 @@ symbol that should guard C/C++ definitions associated with the histogram."""
         }
         table_dispatch(self.kind(), table,
                        lambda k: self._set_nsITelemetry_kind(k))
-        datasets = { 'opt-in': 'DATASET_RELEASE_CHANNEL_OPTIN',
-                     'opt-out': 'DATASET_RELEASE_CHANNEL_OPTOUT' }
+        datasets = {'opt-in': 'DATASET_RELEASE_CHANNEL_OPTIN',
+                    'opt-out': 'DATASET_RELEASE_CHANNEL_OPTOUT'}
         value = definition.get('releaseChannelCollection', 'opt-in')
         if not value in datasets:
             raise DefinitionException, "unknown release channel collection policy for " + name
@@ -422,6 +427,7 @@ associated with the histogram.  Returns None if no guarding is necessary."""
                 definition['high'],
                 definition['n_buckets'])
 
+
 # We support generating histograms from multiple different input files, not
 # just Histograms.json.  For each file's basename, we have a specific
 # routine to parse that file, and return a dictionary mapping histogram
@@ -434,8 +440,10 @@ def from_Histograms_json(filename):
             raise BaseException, "error parsing histograms in %s: %s" % (filename, e.message)
     return histograms
 
+
 def from_UseCounters_conf(filename):
     return usecounters.generate_histograms(filename)
+
 
 def from_nsDeprecatedOperationList(filename):
     operation_regex = re.compile('^DEPRECATED_OPERATION\\(([^)]+)\\)')
@@ -475,6 +483,7 @@ try:
 except ImportError:
     pass
 
+
 def from_files(filenames):
     """Return an iterator that provides a sequence of Histograms for
 the histograms defined in filenames.
@@ -499,7 +508,7 @@ the histograms defined in filenames.
     # We require that all USE_COUNTER2_* histograms be defined in a contiguous
     # block.
     use_counter_indices = filter(lambda x: x[1].startswith("USE_COUNTER2_"),
-                                 enumerate(all_histograms.iterkeys()));
+                                 enumerate(all_histograms.iterkeys()))
     if use_counter_indices:
         lower_bound = use_counter_indices[0][0]
         upper_bound = use_counter_indices[-1][0]

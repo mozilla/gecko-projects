@@ -400,7 +400,10 @@ VideoSink::RenderVideoFrames(int32_t aMaxFrames,
     VSINK_LOG_V("playing video frame %" PRId64 " (id=%x) (vq-queued=%" PRIuSIZE ")",
                 frame->mTime, frame->mFrameID, VideoQueue().GetSize());
   }
-  mContainer->SetCurrentFrames(frames[0]->As<VideoData>()->mDisplay, images);
+
+  if (images.Length() > 0) {
+    mContainer->SetCurrentFrames(frames[0]->As<VideoData>()->mDisplay, images);
+  }
 }
 
 void
@@ -479,11 +482,12 @@ VideoSink::GetDebugInfo()
 {
   AssertOwnerThread();
   return nsPrintfCString(
-    "IsStarted=%d IsPlaying=%d, VideoQueue: finished=%d size=%" PRIuSIZE ", "
-    "mVideoFrameEndTime=%" PRId64 " mHasVideo=%d mVideoSinkEndRequest.Exists()=%d "
-    "mEndPromiseHolder.IsEmpty()=%d\n",
-    IsStarted(), IsPlaying(), VideoQueue().IsFinished(), VideoQueue().GetSize(),
-    mVideoFrameEndTime, mHasVideo, mVideoSinkEndRequest.Exists(), mEndPromiseHolder.IsEmpty())
+    "VideoSink Status: IsStarted=%d IsPlaying=%d VideoQueue(finished=%d "
+    "size=%" PRIuSIZE ") mVideoFrameEndTime=%" PRId64 " mHasVideo=%d "
+    "mVideoSinkEndRequest.Exists()=%d mEndPromiseHolder.IsEmpty()=%d\n",
+    IsStarted(), IsPlaying(), VideoQueue().IsFinished(),
+    VideoQueue().GetSize(), mVideoFrameEndTime, mHasVideo,
+    mVideoSinkEndRequest.Exists(), mEndPromiseHolder.IsEmpty())
     + mAudioSink->GetDebugInfo();
 }
 

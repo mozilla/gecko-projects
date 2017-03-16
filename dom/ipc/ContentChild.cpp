@@ -49,7 +49,7 @@
 #include "mozilla/ipc/FileDescriptorUtils.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/ipc/ProcessChild.h"
-#include "mozilla/ipc/PSendStreamChild.h"
+#include "mozilla/ipc/PChildToParentStreamChild.h"
 #include "mozilla/ipc/TestShellChild.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/layers/APZChild.h"
@@ -175,7 +175,6 @@
 #endif
 
 #include "mozilla/dom/File.h"
-#include "mozilla/dom/devicestorage/DeviceStorageRequestChild.h"
 #include "mozilla/dom/PPresentationChild.h"
 #include "mozilla/dom/PresentationIPCService.h"
 #include "mozilla/ipc/InputStreamUtils.h"
@@ -188,7 +187,6 @@
 #include "URIUtils.h"
 #include "nsContentUtils.h"
 #include "nsIPrincipal.h"
-#include "nsDeviceStorage.h"
 #include "DomainPolicy.h"
 #include "mozilla/dom/ipc/StructuredCloneData.h"
 #include "mozilla/dom/time/DateCacheCleaner.h"
@@ -211,7 +209,6 @@
 
 using namespace mozilla;
 using namespace mozilla::docshell;
-using namespace mozilla::dom::devicestorage;
 using namespace mozilla::dom::ipc;
 using namespace mozilla::dom::workers;
 using namespace mozilla::media;
@@ -581,6 +578,11 @@ ContentChild::Init(MessageLoop* aIOLoop,
   GetIPCChannel()->SetChannelFlags(MessageChannel::REQUIRE_A11Y_REENTRY);
 #endif
 
+  // This must be sent before any IPDL message, which may hit sentinel
+  // errors due to parent and content processes having different
+  // versions.
+  GetIPCChannel()->SendBuildID();
+
 #ifdef MOZ_X11
   // Send the parent our X socket to act as a proxy reference for our X
   // resources.
@@ -602,10 +604,6 @@ ContentChild::Init(MessageLoop* aIOLoop,
 #endif
 
   SetProcessName(NS_LITERAL_STRING("Web Content"), true);
-
-  nsTArray<mozilla::dom::GfxInfoFeatureStatus> featureStatus;
-  SendGetGfxInfoFeatureStatus(&featureStatus);
-  GfxInfoBase::SetFeatureStatus(featureStatus);
 
   return true;
 }
@@ -1033,6 +1031,10 @@ ContentChild::InitXPCOM(const XPCOMInitData& aXPCOMInit,
 
   // This will register cross-process observer.
   mozilla::dom::time::InitializeDateCacheCleaner();
+
+  GfxInfoBase::SetFeatureStatus(aXPCOMInit.gfxFeatureStatus());
+
+  DataStorage::SetCachedStorageEntries(aXPCOMInit.dataStorage());
 }
 
 mozilla::ipc::IPCResult
@@ -1681,19 +1683,6 @@ ContentChild::RecvPTestShellConstructor(PTestShellChild* actor)
   return IPC_OK();
 }
 
-PDeviceStorageRequestChild*
-ContentChild::AllocPDeviceStorageRequestChild(const DeviceStorageParams& aParams)
-{
-  return new DeviceStorageRequestChild();
-}
-
-bool
-ContentChild::DeallocPDeviceStorageRequestChild(PDeviceStorageRequestChild* aDeviceStorage)
-{
-  delete aDeviceStorage;
-  return true;
-}
-
 PNeckoChild*
 ContentChild::AllocPNeckoChild()
 {
@@ -1724,26 +1713,38 @@ ContentChild::DeallocPPrintingChild(PPrintingChild* printing)
   return true;
 }
 
-PSendStreamChild*
-ContentChild::SendPSendStreamConstructor(PSendStreamChild* aActor)
+PChildToParentStreamChild*
+ContentChild::SendPChildToParentStreamConstructor(PChildToParentStreamChild* aActor)
 {
   if (IsShuttingDown()) {
     return nullptr;
   }
 
-  return PContentChild::SendPSendStreamConstructor(aActor);
+  return PContentChild::SendPChildToParentStreamConstructor(aActor);
 }
 
-PSendStreamChild*
-ContentChild::AllocPSendStreamChild()
+PChildToParentStreamChild*
+ContentChild::AllocPChildToParentStreamChild()
 {
-  return nsIContentChild::AllocPSendStreamChild();
+  return nsIContentChild::AllocPChildToParentStreamChild();
 }
 
 bool
-ContentChild::DeallocPSendStreamChild(PSendStreamChild* aActor)
+ContentChild::DeallocPChildToParentStreamChild(PChildToParentStreamChild* aActor)
 {
-  return nsIContentChild::DeallocPSendStreamChild(aActor);
+  return nsIContentChild::DeallocPChildToParentStreamChild(aActor);
+}
+
+PParentToChildStreamChild*
+ContentChild::AllocPParentToChildStreamChild()
+{
+  return nsIContentChild::AllocPParentToChildStreamChild();
+}
+
+bool
+ContentChild::DeallocPParentToChildStreamChild(PParentToChildStreamChild* aActor)
+{
+  return nsIContentChild::DeallocPParentToChildStreamChild(aActor);
 }
 
 PScreenManagerChild*
@@ -2374,28 +2375,6 @@ ContentChild::RecvLastPrivateDocShellDestroyed()
 }
 
 mozilla::ipc::IPCResult
-ContentChild::RecvFilePathUpdate(const nsString& aStorageType,
-                                 const nsString& aStorageName,
-                                 const nsString& aPath,
-                                 const nsCString& aReason)
-{
-  if (nsDOMDeviceStorage::InstanceCount() == 0) {
-    // No device storage instances in this process. Don't try and
-    // and create a DeviceStorageFile since it will fail.
-
-    return IPC_OK();
-  }
-
-  RefPtr<DeviceStorageFile> dsf = new DeviceStorageFile(aStorageType, aStorageName, aPath);
-
-  nsString reason;
-  CopyASCIItoUTF16(aReason, reason);
-  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-  obs->NotifyObservers(dsf, "file-watcher-update", reason.get());
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
 ContentChild::RecvNotifyProcessPriorityChanged(
   const hal::ProcessPriority& aPriority)
 {
@@ -2953,7 +2932,8 @@ ContentChild::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
 mozilla::ipc::IPCResult
 ContentChild::RecvEndDragSession(const bool& aDoneDrag,
                                  const bool& aUserCancelled,
-                                 const LayoutDeviceIntPoint& aDragEndPoint)
+                                 const LayoutDeviceIntPoint& aDragEndPoint,
+                                 const uint32_t& aKeyModifiers)
 {
   nsCOMPtr<nsIDragService> dragService =
     do_GetService("@mozilla.org/widget/dragservice;1");
@@ -2965,7 +2945,7 @@ ContentChild::RecvEndDragSession(const bool& aDoneDrag,
       }
     }
     static_cast<nsBaseDragService*>(dragService.get())->SetDragEndPoint(aDragEndPoint);
-    dragService->EndDragSession(aDoneDrag);
+    dragService->EndDragSession(aDoneDrag, aKeyModifiers);
   }
   return IPC_OK();
 }

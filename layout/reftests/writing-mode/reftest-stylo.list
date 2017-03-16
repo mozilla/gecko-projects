@@ -62,7 +62,7 @@ fails == ua-style-sheet-margin-13.html ua-style-sheet-margin-13.html
 fails == ua-style-sheet-size-1.html ua-style-sheet-size-1.html
 fails == ua-style-sheet-size-2.html ua-style-sheet-size-2.html
 
-fails == ua-style-sheet-fieldset-1.html ua-style-sheet-fieldset-1.html
+== ua-style-sheet-fieldset-1.html ua-style-sheet-fieldset-1.html
 fails == ua-style-sheet-textarea-1.html ua-style-sheet-textarea-1.html
 fails == ua-style-sheet-textarea-1.html ua-style-sheet-textarea-1.html
 fails == ua-style-sheet-textarea-1.html ua-style-sheet-textarea-1.html
@@ -147,7 +147,7 @@ skip-if(stylo) == 1172774-percent-padding-1.html 1172774-percent-padding-1.html
 skip-if(stylo) == 1172774-percent-padding-2.html 1172774-percent-padding-2.html
 skip-if(stylo) == 1172774-percent-padding-3.html 1172774-percent-padding-3.html
 skip-if(stylo) == 1172774-percent-padding-4.html 1172774-percent-padding-4.html
-fails == 1174450-intrinsic-sizing.html 1174450-intrinsic-sizing.html
+== 1174450-intrinsic-sizing.html 1174450-intrinsic-sizing.html
 fails == 1175789-underline-overline-1.html 1175789-underline-overline-1.html
 == 1188061-1-nsChangeHint_ClearAncestorIntrinsics.html 1188061-1-nsChangeHint_ClearAncestorIntrinsics.html
 == 1188061-2-nsChangeHint_UpdateComputedBSize.html 1188061-2-nsChangeHint_UpdateComputedBSize.html

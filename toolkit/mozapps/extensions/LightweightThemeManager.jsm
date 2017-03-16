@@ -17,7 +17,6 @@ Components.utils.import("resource://gre/modules/Services.jsm");
 const ID_SUFFIX              = "@personas.mozilla.org";
 const PREF_LWTHEME_TO_SELECT = "extensions.lwThemeToSelect";
 const PREF_GENERAL_SKINS_SELECTEDSKIN = "general.skins.selectedSkin";
-const PREF_EM_DSS_ENABLED    = "extensions.dss.enabled";
 const ADDON_TYPE             = "theme";
 const ADDON_TYPE_WEBEXT      = "webextension-theme";
 
@@ -54,11 +53,7 @@ XPCOMUtils.defineLazyGetter(this, "_prefs", () => {
 Object.defineProperty(this, "_maxUsedThemes", {
   get() {
     delete this._maxUsedThemes;
-    try {
-      this._maxUsedThemes = _prefs.getIntPref("maxUsedThemes");
-    } catch (e) {
-      this._maxUsedThemes = DEFAULT_MAX_USED_THEMES_COUNT;
-    }
+    this._maxUsedThemes = _prefs.getIntPref("maxUsedThemes", DEFAULT_MAX_USED_THEMES_COUNT);
     return this._maxUsedThemes;
   },
 
@@ -75,14 +70,15 @@ Object.defineProperty(this, "_maxUsedThemes", {
 var _themeIDBeingEnabled = null;
 var _themeIDBeingDisabled = null;
 
+// Holds optional fallback theme data that will be returned when no data for an
+// active theme can be found. This the case for WebExtension Themes, for example.
+var _fallbackThemeData = null;
+
 // Convert from the old storage format (in which the order of usedThemes
 // was combined with isThemeSelected to determine which theme was selected)
 // to the new one (where a selectedThemeID determines which theme is selected).
 (function() {
-  let wasThemeSelected = false;
-  try {
-    wasThemeSelected = _prefs.getBoolPref("isThemeSelected");
-  } catch (e) { }
+  let wasThemeSelected = _prefs.getBoolPref("isThemeSelected", false);
 
   if (wasThemeSelected) {
     _prefs.clearUserPref("isThemeSelected");
@@ -103,6 +99,19 @@ this.LightweightThemeManager = {
     return "LightweightThemeManager";
   },
 
+  set fallbackThemeData(data) {
+    if (data && Object.getOwnPropertyNames(data).length) {
+      _fallbackThemeData = Object.assign({}, data);
+      if (PERSIST_ENABLED) {
+        LightweightThemeImageOptimizer.purge();
+        _persistImages(_fallbackThemeData, () => {});
+      }
+    } else {
+      _fallbackThemeData = null;
+    }
+    return _fallbackThemeData;
+  },
+
   // Themes that can be added for an application.  They can't be removed, and
   // will always show up at the top of the list.
   _builtInThemes: new Map(),
@@ -119,10 +128,7 @@ this.LightweightThemeManager = {
   },
 
   get currentTheme() {
-    let selectedThemeID = null;
-    try {
-      selectedThemeID = _prefs.getCharPref("selectedThemeID");
-    } catch (e) {}
+    let selectedThemeID = _prefs.getCharPref("selectedThemeID", "");
 
     let data = null;
     if (selectedThemeID) {
@@ -133,6 +139,8 @@ this.LightweightThemeManager = {
 
   get currentThemeForDisplay() {
     var data = this.currentTheme;
+    if (!data && _fallbackThemeData)
+      data = _fallbackThemeData;
 
     if (data && PERSIST_ENABLED) {
       for (let key in PERSIST_FILES) {
@@ -511,15 +519,8 @@ AddonWrapper.prototype = {
   get operationsRequiringRestart() {
     // If a non-default theme is in use then a restart will be required to
     // enable lightweight themes unless dynamic theme switching is enabled
-    if (Services.prefs.prefHasUserValue(PREF_GENERAL_SKINS_SELECTEDSKIN)) {
-      try {
-        if (Services.prefs.getBoolPref(PREF_EM_DSS_ENABLED))
-          return AddonManager.OP_NEEDS_RESTART_NONE;
-      } catch (e) {
-      }
+    if (Services.prefs.prefHasUserValue(PREF_GENERAL_SKINS_SELECTEDSKIN))
       return AddonManager.OP_NEEDS_RESTART_ENABLE;
-    }
-
     return AddonManager.OP_NEEDS_RESTART_NONE;
   },
 
@@ -809,11 +810,8 @@ var _previewTimerCallback = {
 function _prefObserver(aSubject, aTopic, aData) {
   switch (aData) {
     case "maxUsedThemes":
-      try {
-        _maxUsedThemes = _prefs.getIntPref(aData);
-      } catch (e) {
-        _maxUsedThemes = DEFAULT_MAX_USED_THEMES_COUNT;
-      }
+      _maxUsedThemes = _prefs.getIntPref(aData, DEFAULT_MAX_USED_THEMES_COUNT);
+
       // Update the theme list to remove any themes over the number we keep
       _updateUsedThemes(LightweightThemeManager.usedThemes);
       break;

@@ -45,6 +45,9 @@ public:
                           const ContentParentId& aCpID,
                           const bool& aIsForBrowser) override;
 
+  virtual PFileDescriptorSetParent*
+  SendPFileDescriptorSetConstructor(const FileDescriptor&) override;
+
   FORWARD_SHMEM_ALLOCATOR_TO(PContentBridgeParent)
 
   jsipc::CPOWManager* GetCPOWManager() override;
@@ -61,6 +64,25 @@ public:
   {
     // XXX: do we need this for ContentBridgeParent?
     return -1;
+  }
+
+  virtual mozilla::ipc::PParentToChildStreamParent*
+  SendPParentToChildStreamConstructor(mozilla::ipc::PParentToChildStreamParent*) override;
+
+  virtual bool SendActivate(PBrowserParent* aTab) override
+  {
+    return PContentBridgeParent::SendActivate(aTab);
+  }
+
+  virtual bool SendDeactivate(PBrowserParent* aTab) override
+  {
+    return PContentBridgeParent::SendDeactivate(aTab);
+  }
+
+  virtual bool SendParentActivated(PBrowserParent* aTab,
+                                   const bool& aActivated) override
+  {
+    return PContentBridgeParent::SendParentActivated(aTab, aActivated);
   }
 
 protected:
@@ -114,9 +136,16 @@ protected:
 
   virtual bool DeallocPBlobParent(PBlobParent*) override;
 
-  virtual PSendStreamParent* AllocPSendStreamParent() override;
+  virtual PChildToParentStreamParent* AllocPChildToParentStreamParent() override;
 
-  virtual bool DeallocPSendStreamParent(PSendStreamParent* aActor) override;
+  virtual bool
+  DeallocPChildToParentStreamParent(PChildToParentStreamParent* aActor) override;
+
+  virtual mozilla::ipc::PParentToChildStreamParent*
+  AllocPParentToChildStreamParent() override;
+
+  virtual bool
+  DeallocPParentToChildStreamParent(mozilla::ipc::PParentToChildStreamParent* aActor) override;
 
   virtual PFileDescriptorSetParent*
   AllocPFileDescriptorSetParent(const mozilla::ipc::FileDescriptor&) override;

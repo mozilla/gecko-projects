@@ -48,6 +48,7 @@
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Unused.h"
 #include "gfx2DGlue.h"
+#include "mozilla/widget/nsAutoRollup.h"
 
 #ifdef XP_WIN
 #define COMBOBOX_ROLLUP_CONSUME_EVENT 0
@@ -1149,8 +1150,7 @@ nsComboboxControlFrame::HandleEvent(nsPresContext* aPresContext,
 
 #if COMBOBOX_ROLLUP_CONSUME_EVENT == 0
   if (aEvent->mMessage == eMouseDown) {
-    nsIWidget* widget = GetNearestWidget();
-    if (widget && GetContent() == widget->GetLastRollup()) {
+    if (GetContent() == mozilla::widget::nsAutoRollup::GetLastRollup()) {
       // This event did a Rollup on this control - prevent it from opening
       // the dropdown again!
       *aEventStatus = nsEventStatus_eConsumeNoDefault;
@@ -1184,6 +1184,18 @@ nsComboboxControlFrame::SetFormProperty(nsIAtom* aName, const nsAString& aValue)
 nsContainerFrame*
 nsComboboxControlFrame::GetContentInsertionFrame() {
   return mInRedisplayText ? mDisplayFrame : mDropdownFrame->GetContentInsertionFrame();
+}
+
+void
+nsComboboxControlFrame::DoUpdateStyleOfOwnedAnonBoxes(
+  ServoStyleSet& aStyleSet,
+  nsStyleChangeList& aChangeList,
+  nsChangeHint aHintForThisFrame)
+{
+  UpdateStyleOfChildAnonBox(mDropdownFrame, aStyleSet, aChangeList,
+                            aHintForThisFrame);
+  UpdateStyleOfChildAnonBox(mDisplayFrame, aStyleSet, aChangeList,
+                            aHintForThisFrame);
 }
 
 nsresult
@@ -1359,9 +1371,9 @@ nsComboboxControlFrame::CreateFrameForDisplayNode()
   // create the style contexts for the anonymous block frame and text frame
   RefPtr<nsStyleContext> styleContext;
   styleContext = styleSet->
-    ResolveAnonymousBoxStyle(nsCSSAnonBoxes::mozDisplayComboboxControlFrame,
-                             mStyleContext,
-                             nsStyleSet::eSkipParentDisplayBasedStyleFixup);
+    ResolveInheritingAnonymousBoxStyle(nsCSSAnonBoxes::mozDisplayComboboxControlFrame,
+                                       mStyleContext,
+                                       nsStyleSet::eSkipParentDisplayBasedStyleFixup);
 
   RefPtr<nsStyleContext> textStyleContext;
   textStyleContext =

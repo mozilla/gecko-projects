@@ -228,6 +228,37 @@ MainThreadHandoff::Release()
 }
 
 HRESULT
+MainThreadHandoff::FixIServiceProvider(ICallFrame* aFrame)
+{
+  MOZ_ASSERT(aFrame);
+
+  CALLFRAMEPARAMINFO iidOutParamInfo;
+  HRESULT hr = aFrame->GetParamInfo(1, &iidOutParamInfo);
+  if (FAILED(hr)) {
+    return hr;
+  }
+
+  VARIANT varIfaceOut;
+  hr = aFrame->GetParam(2, &varIfaceOut);
+  if (FAILED(hr)) {
+    return hr;
+  }
+
+  MOZ_ASSERT(varIfaceOut.vt == (VT_UNKNOWN | VT_BYREF));
+  if (varIfaceOut.vt != (VT_UNKNOWN | VT_BYREF)) {
+    return DISP_E_BADVARTYPE;
+  }
+
+  IID** iidOutParam = reinterpret_cast<IID**>(
+                        static_cast<BYTE*>(aFrame->GetStackLocation()) +
+                        iidOutParamInfo.stackOffset);
+
+  return OnWalkInterface(**iidOutParam,
+                         reinterpret_cast<void**>(varIfaceOut.ppunkVal), FALSE,
+                         TRUE);
+}
+
+HRESULT
 MainThreadHandoff::OnCall(ICallFrame* aFrame)
 {
   // (1) Get info about the method call
@@ -246,7 +277,7 @@ MainThreadHandoff::OnCall(ICallFrame* aFrame)
     return hr;
   }
 
-  InterceptorTargetPtr targetInterface;
+  InterceptorTargetPtr<IUnknown> targetInterface;
   hr = interceptor->GetTargetForIID(iid, targetInterface);
   if (FAILED(hr)) {
     return hr;
@@ -281,20 +312,31 @@ MainThreadHandoff::OnCall(ICallFrame* aFrame)
     return S_OK;
   }
 
-  // (5) Unfortunately ICallFrame::WalkFrame does not correctly handle array
-  // outparams. Instead, we find out whether anybody has called
-  // mscom::RegisterArrayData to supply array parameter information and use it
-  // if available. This is a terrible hack, but it works for the short term. In
-  // the longer term we want to be able to use COM proxy/stub metadata to
-  // resolve array information for us.
-  const ArrayData* arrayData = FindArrayData(iid, method);
-  if (arrayData) {
+  if (iid == IID_IServiceProvider) {
+    // The only possible method index for IID_IServiceProvider is for
+    // QueryService at index 3; its other methods are inherited from IUnknown
+    // and are not processed here.
+    MOZ_ASSERT(method == 3);
+    // (5) If our interface is IServiceProvider, we need to manually ensure
+    // that the correct IID is provided for the interface outparam in
+    // IServiceProvider::QueryService.
+    hr = FixIServiceProvider(aFrame);
+    if (FAILED(hr)) {
+      return hr;
+    }
+  } else if (const ArrayData* arrayData = FindArrayData(iid, method)) {
+    // (6) Unfortunately ICallFrame::WalkFrame does not correctly handle array
+    // outparams. Instead, we find out whether anybody has called
+    // mscom::RegisterArrayData to supply array parameter information and use it
+    // if available. This is a terrible hack, but it works for the short term. In
+    // the longer term we want to be able to use COM proxy/stub metadata to
+    // resolve array information for us.
     hr = FixArrayElements(aFrame, *arrayData);
     if (FAILED(hr)) {
       return hr;
     }
   } else {
-    // (6) Scan the outputs looking for any outparam interfaces that need wrapping.
+    // (7) Scan the outputs looking for any outparam interfaces that need wrapping.
     // NB: WalkFrame does not correctly handle array outparams. It processes the
     // first element of an array but not the remaining elements (if any).
     hr = aFrame->WalkFrame(CALLFRAME_WALK_OUT, this);
@@ -415,23 +457,25 @@ MainThreadHandoff::GetHandler(CLSID* aHandlerClsid)
 }
 
 HRESULT
-MainThreadHandoff::GetHandlerPayloadSize(REFIID aIid, IUnknown* aTarget,
+MainThreadHandoff::GetHandlerPayloadSize(REFIID aIid,
+                                         InterceptorTargetPtr<IUnknown> aTarget,
                                          DWORD* aOutPayloadSize)
 {
   if (!mHandlerPayload) {
     return E_NOTIMPL;
   }
-  return mHandlerPayload->GetHandlerPayloadSize(aIid, aTarget, aOutPayloadSize);
+  return mHandlerPayload->GetHandlerPayloadSize(aIid, Move(aTarget),
+                                                aOutPayloadSize);
 }
 
 HRESULT
 MainThreadHandoff::WriteHandlerPayload(IStream* aStream, REFIID aIid,
-                                       IUnknown* aTarget)
+                                       InterceptorTargetPtr<IUnknown> aTarget)
 {
   if (!mHandlerPayload) {
     return E_NOTIMPL;
   }
-  return mHandlerPayload->WriteHandlerPayload(aStream, aIid, aTarget);
+  return mHandlerPayload->WriteHandlerPayload(aStream, aIid, Move(aTarget));
 }
 
 REFIID
@@ -482,7 +526,7 @@ MainThreadHandoff::OnWalkInterface(REFIID aIid, PVOID* aInterface,
   // as an interface that we are already managing. We can determine this by
   // querying (NOT casting!) both objects for IUnknown and then comparing the
   // resulting pointers.
-  InterceptorTargetPtr existingTarget;
+  InterceptorTargetPtr<IUnknown> existingTarget;
   hr = interceptor->GetTargetForIID(aIid, existingTarget);
   if (SUCCEEDED(hr)) {
     bool areIUnknownsEqual = false;

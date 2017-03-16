@@ -271,9 +271,11 @@ bool WebrtcVideoConduit::SetLocalSSRCs(const std::vector<unsigned int> & aSSRCs)
     return false;
   }
 
+  MutexAutoLock lock(mCodecMutex);
+  // On the next StartTransmitting() or ConfigureSendMediaCodec, force
+  // building a new SendStream to switch SSRCs.
+  DeleteSendStream();
   if (wasTransmitting) {
-    MutexAutoLock lock(mCodecMutex);
-    DeleteSendStream();
     if (StartTransmitting() != kMediaConduitNoError) {
       return false;
     }
@@ -699,10 +701,11 @@ WebrtcVideoConduit::SetRemoteSSRC(unsigned int ssrc)
   }
   mRecvSSRCSet = true;
 
-  if (current_ssrc == ssrc || !mEngineReceiving) {
+  if (current_ssrc == ssrc) {
     return true;
   }
 
+  bool wasReceiving = mEngineReceiving;
   if (StopReceiving() != kMediaConduitNoError) {
     return false;
   }
@@ -713,7 +716,12 @@ WebrtcVideoConduit::SetRemoteSSRC(unsigned int ssrc)
   // All non-MainThread users must lock before reading/using
   {
     MutexAutoLock lock(mCodecMutex);
+    // On the next StartReceiving() or ConfigureRecvMediaCodec, force
+    // building a new RecvStream to switch SSRCs.
     DeleteRecvStream();
+    if (!wasReceiving) {
+      return true;
+    }
     MediaConduitErrorCode rval = CreateRecvStream();
     if (rval != kMediaConduitNoError) {
       CSFLogError(logTag, "%s Start Receive Error %d ", __FUNCTION__, rval);
@@ -813,22 +821,42 @@ bool WebrtcVideoConduit::GetRTCPReceiverReport(DOMHighResTimeStamp* timestamp,
   {
     CSFLogVerbose(logTag, "%s for VideoConduit:%p", __FUNCTION__, this);
     MutexAutoLock lock(mCodecMutex);
-    if (!mRecvStream) {
+    if (!mSendStream) {
       return false;
     }
-
-    const webrtc::VideoReceiveStream::Stats &stats = mRecvStream->GetStats();
-    *jitterMs = stats.rtcp_stats.jitter;
-    *cumulativeLost = stats.rtcp_stats.cumulative_lost;
-    *bytesReceived = stats.rtp_stats.MediaPayloadBytes();
-    *packetsReceived = stats.rtp_stats.transmitted.packets;
+    const webrtc::VideoSendStream::Stats& sendStats = mSendStream->GetStats();
+    if (sendStats.substreams.size() == 0
+        || mSendStreamConfig.rtp.ssrcs.size() == 0) {
+      return false;
+    }
+    uint32_t ssrc = mSendStreamConfig.rtp.ssrcs.front();
+    auto ind = sendStats.substreams.find(ssrc);
+    if (ind == sendStats.substreams.end()) {
+      CSFLogError(logTag,
+        "%s for VideoConduit:%p ssrc not found in SendStream stats.",
+        __FUNCTION__, this);
+      return false;
+    }
+    *jitterMs = ind->second.rtcp_stats.jitter;
+    *cumulativeLost = ind->second.rtcp_stats.cumulative_lost;
+    *bytesReceived = ind->second.rtp_stats.MediaPayloadBytes();
+    *packetsReceived = ind->second.rtp_stats.transmitted.packets;
+    int64_t rtt = mSendStream->GetRtt(); // TODO: BUG 1241066, mozRtt is 0 or 1
+    if (rtt >= 0) {
+      *rttMs = rtt;
+    } else {
+      *rttMs = 0;
+    }
+#ifdef DEBUG
+    if (rtt > INT32_MAX) {
+      CSFLogError(logTag,
+        "%s for VideoConduit:%p mRecvStream->GetRtt() is larger than the"
+        " maximum size of an RTCP RTT.", __FUNCTION__, this);
+    }
+#endif
     // Note: timestamp is not correct per the spec... should be time the rtcp
     // was received (remote) or sent (local)
     *timestamp = webrtc::Clock::GetRealTimeClock()->TimeInMilliseconds();
-    int64_t rtt = mRecvStream->GetRtt();
-    if (rtt >= 0) {
-      *rttMs = rtt;
-    }
   }
   return true;
 }
@@ -839,22 +867,16 @@ WebrtcVideoConduit::GetRTCPSenderReport(DOMHighResTimeStamp* timestamp,
                                         uint64_t* bytesSent)
 {
   CSFLogVerbose(logTag, "%s for VideoConduit:%p", __FUNCTION__, this);
-  MutexAutoLock lock(mCodecMutex);
-  if (!mSendStream) {
-    return false;
+  webrtc::RTCPSenderInfo senderInfo;
+  {
+    MutexAutoLock lock(mCodecMutex);
+    if (!mRecvStream || !mRecvStream->GetRemoteRTCPSenderInfo(&senderInfo)) {
+      return false;
+    }
   }
-
-  const webrtc::VideoSendStream::Stats& stats = mSendStream->GetStats();
-  *packetsSent = 0;
-  for (auto entry: stats.substreams){
-    *packetsSent += entry.second.rtp_stats.transmitted.packets;
-    // NG -- per https://www.w3.org/TR/webrtc-stats/ this is only payload bytes
-    *bytesSent += entry.second.rtp_stats.MediaPayloadBytes();
-  }
-
-  // Note: timestamp is not correct per the spec... should be time the rtcp
-  // was received (remote) or sent (local)
   *timestamp = webrtc::Clock::GetRealTimeClock()->TimeInMilliseconds();
+  *packetsSent = senderInfo.sendPacketCount;
+  *bytesSent = senderInfo.sendOctetCount;
   return true;
 }
 
@@ -1169,22 +1191,30 @@ WebrtcVideoConduit::ConfigureRecvMediaCodecs(
 
       mRecvStreamConfig.rtp.remote_ssrc = ssrc;
     }
-    // FIXME(jesup) - Bug 1325447 -- SSRCs configured here are a problem.
-    // 0 isn't allowed.  Would be best to ask for a random SSRC from the RTP code.
-    // Would need to call rtp_sender.cc -- GenerateSSRC(), which isn't exposed.  It's called on
-    // collision, or when we decide to send.  it should be called on receiver creation.
-    // Here, we're generating the SSRC value - but this causes ssrc_forced in set in rtp_sender,
-    // which locks us into the SSRC - even a collision won't change it!!!
-    auto ssrc = mRecvStreamConfig.rtp.remote_ssrc;
-    do {
+    // 0 isn't allowed.  Would be best to ask for a random SSRC from the
+    // RTP code.  Would need to call rtp_sender.cc -- GenerateNewSSRC(),
+    // which isn't exposed.  It's called on collision, or when we decide to
+    // send.  it should be called on receiver creation.  Here, we're
+    // generating the SSRC value - but this causes ssrc_forced in set in
+    // rtp_sender, which locks us into the SSRC - even a collision won't
+    // change it!!!
+    MOZ_ASSERT(!mSendStreamConfig.rtp.ssrcs.empty());
+    auto ssrc = mSendStreamConfig.rtp.ssrcs.front();
+    Unused << NS_WARN_IF(ssrc == mRecvStreamConfig.rtp.remote_ssrc);
+
+    while (ssrc == mRecvStreamConfig.rtp.remote_ssrc || ssrc == 0) {
       SECStatus rv = PK11_GenerateRandom(reinterpret_cast<unsigned char*>(&ssrc), sizeof(ssrc));
       if (rv != SECSuccess) {
         return kMediaConduitUnknownError;
       }
-    } while (ssrc == mRecvStreamConfig.rtp.remote_ssrc || ssrc == 0);
+    }
     // webrtc.org code has fits if you select an SSRC of 0
 
     mRecvStreamConfig.rtp.local_ssrc = ssrc;
+    CSFLogDebug(logTag, "%s (%p): Local SSRC 0x%08x (of %u), remote SSRC 0x%08x",
+                __FUNCTION__, (void*) this, ssrc,
+                (uint32_t) mSendStreamConfig.rtp.ssrcs.size(),
+                mRecvStreamConfig.rtp.remote_ssrc);
 
     // XXX Copy over those that are the same and don't rebuild them
     mRecvCodecList.SwapElements(recv_codecs);

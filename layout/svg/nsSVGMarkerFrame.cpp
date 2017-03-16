@@ -15,6 +15,7 @@
 
 using namespace mozilla::dom;
 using namespace mozilla::gfx;
+using namespace mozilla::image;
 
 nsContainerFrame*
 NS_NewSVGMarkerFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
@@ -219,6 +220,16 @@ nsSVGMarkerFrame::SetParentCoordCtxProvider(SVGSVGElement *aContext)
 {
   SVGMarkerElement *marker = static_cast<SVGMarkerElement*>(mContent);
   marker->SetParentCoordCtxProvider(aContext);
+}
+
+void
+nsSVGMarkerFrame::DoUpdateStyleOfOwnedAnonBoxes(
+  mozilla::ServoStyleSet& aStyleSet,
+  nsStyleChangeList& aChangeList,
+  nsChangeHint aHintForThisFrame)
+{
+  UpdateStyleOfChildAnonBox(GetAnonymousChildFrame(this), aStyleSet,
+                            aChangeList, aHintForThisFrame);
 }
 
 //----------------------------------------------------------------------

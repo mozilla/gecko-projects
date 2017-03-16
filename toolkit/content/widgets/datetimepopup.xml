@@ -25,6 +25,8 @@
       <constructor><![CDATA[
         this.mozIntl = Components.classes["@mozilla.org/mozintl;1"]
                                  .getService(Components.interfaces.mozIMozIntl);
+        // Notify DateTimePickerHelper.jsm that binding is ready.
+        this.dispatchEvent(new CustomEvent("DateTimePickerBindingReady"));
       ]]></constructor>
       <method name="loadPicker">
         <parameter name="type"/>
@@ -97,6 +99,7 @@
         <parameter name="detail"/>
         <body><![CDATA[
           const locale = Components.classes["@mozilla.org/chrome/chrome-registry;1"].getService(Ci.nsIXULChromeRegistry).getSelectedLocale("global");
+          const dir = this.mozIntl.getLocaleInfo(locale).direction;
 
           switch (this.type) {
             case "time": {
@@ -158,7 +161,8 @@
                   weekends,
                   monthStrings,
                   weekdayStrings,
-                  locale
+                  locale,
+                  dir,
                 }
               });
               break;

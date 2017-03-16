@@ -17,10 +17,12 @@ use style::values::specified::{BorderStyle, BorderWidth, CSSColor, Length, NoCal
 use style::values::specified::{LengthOrPercentage, LengthOrPercentageOrAuto, LengthOrPercentageOrAutoOrContent};
 use style::values::specified::url::SpecifiedUrl;
 use style_traits::ToCss;
+use stylesheets::block_from;
 
 fn parse_declaration_block(css_properties: &str) -> PropertyDeclarationBlock {
     let url = ServoUrl::parse("http://localhost").unwrap();
-    let context = ParserContext::new(Origin::Author, &url, Box::new(CSSErrorReporterTest));
+    let reporter = CSSErrorReporterTest;
+    let context = ParserContext::new(Origin::Author, &url, &reporter);
     let mut parser = Parser::new(css_properties);
     parse_property_declaration_list(&context, &mut parser)
 }
@@ -56,10 +58,7 @@ fn property_declaration_block_should_serialize_correctly() {
          Importance::Normal),
     ];
 
-    let block = PropertyDeclarationBlock {
-        declarations: declarations,
-        important_count: 0,
-    };
+    let block = block_from(declarations);
 
     let css_string = block.to_css_string();
 
@@ -73,10 +72,7 @@ mod shorthand_serialization {
     pub use super::*;
 
     pub fn shorthand_properties_to_string(properties: Vec<PropertyDeclaration>) -> String {
-        let block = PropertyDeclarationBlock {
-            declarations: properties.into_iter().map(|d| (d, Importance::Normal)).collect(),
-            important_count: 0,
-        };
+        let block = block_from(properties.into_iter().map(|d| (d, Importance::Normal)));
 
         block.to_css_string()
     }
@@ -114,6 +110,47 @@ mod shorthand_serialization {
 
             let serialization = shorthand_properties_to_string(properties);
             assert_eq!(serialization, "overflow-x: scroll; overflow-y: auto;");
+        }
+    }
+
+    mod text {
+        use style::properties::longhands::text_decoration_line as TextDecorationLine;
+        use style::properties::longhands::text_decoration_style::SpecifiedValue as TextDecorationStyle;
+        use super::*;
+
+        #[test]
+        fn text_decoration_should_show_all_properties_when_set() {
+            let mut properties = Vec::new();
+
+            let line = DeclaredValue::Value(TextDecorationLine::OVERLINE);
+            let style = DeclaredValue::Value(TextDecorationStyle::dotted);
+            let color = DeclaredValue::Value(CSSColor {
+                parsed: ComputedColor::RGBA(RGBA::new(128, 0, 128, 255)),
+                authored: None
+            });
+
+            properties.push(PropertyDeclaration::TextDecorationLine(line));
+            properties.push(PropertyDeclaration::TextDecorationStyle(style));
+            properties.push(PropertyDeclaration::TextDecorationColor(color));
+
+            let serialization = shorthand_properties_to_string(properties);
+            assert_eq!(serialization, "text-decoration: overline dotted rgb(128, 0, 128);");
+        }
+
+        #[test]
+        fn text_decoration_should_not_serialize_initial_style_value() {
+            let mut properties = Vec::new();
+
+            let line = DeclaredValue::Value(TextDecorationLine::UNDERLINE);
+            let style = DeclaredValue::Value(TextDecorationStyle::solid);
+            let color = DeclaredValue::Value(CSSColor::currentcolor());
+
+            properties.push(PropertyDeclaration::TextDecorationLine(line));
+            properties.push(PropertyDeclaration::TextDecorationStyle(style));
+            properties.push(PropertyDeclaration::TextDecorationColor(color));
+
+            let serialization = shorthand_properties_to_string(properties);
+            assert_eq!(serialization, "text-decoration: underline;");
         }
     }
 
@@ -882,10 +919,7 @@ mod shorthand_serialization {
                 Importance::Normal)
             ];
 
-            let block = PropertyDeclarationBlock {
-                declarations: declarations,
-                important_count: 0
-            };
+            let block = block_from(declarations);
 
             let mut s = String::new();
 
@@ -905,10 +939,7 @@ mod shorthand_serialization {
                 Importance::Normal)
             ];
 
-            let block = PropertyDeclarationBlock {
-                declarations: declarations,
-                important_count: 0
-            };
+            let block = block_from(declarations);
 
             let mut s = String::new();
 
@@ -933,7 +964,8 @@ mod shorthand_serialization {
 
             let mut s = String::new();
             let url = ::servo_url::ServoUrl::parse("http://localhost").unwrap();
-            let context = ParserContext::new(Origin::Author, &url, Box::new(CSSErrorReporterTest));
+            let reporter = CSSErrorReporterTest;
+            let context = ParserContext::new(Origin::Author, &url, &reporter);
 
             let parsed = transform::parse(&context, &mut Parser::new("none")).unwrap();
             let try_serialize = parsed.to_css(&mut s);
@@ -956,7 +988,8 @@ mod shorthand_serialization {
 
             let mut s = String::new();
             let url = ::servo_url::ServoUrl::parse("http://localhost").unwrap();
-            let context = ParserContext::new(Origin::Author, &url, Box::new(CSSErrorReporterTest));
+            let reporter = CSSErrorReporterTest;
+            let context = ParserContext::new(Origin::Author, &url, &reporter);
 
             let parsed = quotes::parse(&context, &mut Parser::new("none")).unwrap();
             let try_serialize = parsed.to_css(&mut s);
@@ -983,7 +1016,7 @@ mod shorthand_serialization {
 
             let serialization = block.to_css_string();
 
-            assert_eq!(serialization, "animation: 1s ease-in 0s normal forwards infinite paused bounce;")
+            assert_eq!(serialization, "animation: 1s ease-in 0s infinite normal forwards paused bounce;")
         }
 
         #[test]
@@ -1001,8 +1034,8 @@ mod shorthand_serialization {
             let serialization = block.to_css_string();
 
             assert_eq!(serialization,
-                       "animation: 1s ease-in 0s normal forwards infinite paused bounce, \
-                                   0.2s linear 1s reverse backwards 2 running roll;");
+                       "animation: 1s ease-in 0s infinite normal forwards paused bounce, \
+                                   0.2s linear 1s 2 reverse backwards running roll;");
         }
 
         #[test]

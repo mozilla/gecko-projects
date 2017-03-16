@@ -71,6 +71,29 @@ const CLSID CLSID_WebmMfVpxDec =
 
 namespace mozilla {
 
+template<class T>
+class DeleteObjectTask: public Runnable {
+public:
+  explicit DeleteObjectTask(nsAutoPtr<T>& aObject)
+    : Runnable("VideoUtils::DeleteObjectTask")
+    , mObject(aObject)
+  {
+  }
+  NS_IMETHOD Run() override {
+    NS_ASSERTION(NS_IsMainThread(), "Must be on main thread.");
+    mObject = nullptr;
+    return NS_OK;
+  }
+private:
+  nsAutoPtr<T> mObject;
+};
+
+template<class T>
+void DeleteOnMainThread(nsAutoPtr<T>& aObject) {
+  nsCOMPtr<nsIRunnable> r = new DeleteObjectTask<T>(aObject);
+  SystemGroup::Dispatch("VideoUtils::DeleteObjectTask", TaskCategory::Other, r.forget());
+}
+
 LayersBackend
 GetCompositorBackendType(layers::KnowsCompositor* aKnowsCompositor)
 {
@@ -441,8 +464,8 @@ WMFVideoMFTManager::InitializeDXVA(bool aForceD3D9)
     event->Run();
   } else {
     // This logic needs to run on the main thread
-    nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
-    mozilla::SyncRunnable::DispatchToThread(mainThread, event);
+    mozilla::SyncRunnable::DispatchToThread(
+      SystemGroup::EventTargetFor(mozilla::TaskCategory::Other), event);
   }
   mDXVA2Manager = event->mDXVA2Manager;
 
@@ -691,8 +714,8 @@ WMFVideoMFTManager::CanUseDXVA(IMFMediaType* aType)
     event->Run();
   } else {
     // This logic needs to run on the main thread
-    nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
-    mozilla::SyncRunnable::DispatchToThread(mainThread, event);
+    mozilla::SyncRunnable::DispatchToThread(
+      SystemGroup::EventTargetFor(mozilla::TaskCategory::Other), event);
   }
 
   return event->mSupportsConfig;
@@ -877,14 +900,13 @@ WMFVideoMFTManager::CreateBasicVideoFrame(IMFSample* aSample,
                                  false);
 
   RefPtr<VideoData> v =
-    VideoData::CreateFromImage(mVideoInfo,
+    VideoData::CreateFromImage(mVideoInfo.mDisplay,
                                aStreamOffset,
                                pts.ToMicroseconds(),
                                duration.ToMicroseconds(),
                                image.forget(),
                                false,
-                               -1,
-                               pictureRegion);
+                               -1);
 
   v.forget(aOutVideoData);
   return S_OK;
@@ -916,14 +938,13 @@ WMFVideoMFTManager::CreateD3DVideoFrame(IMFSample* aSample,
   NS_ENSURE_TRUE(pts.IsValid(), E_FAIL);
   media::TimeUnit duration = GetSampleDuration(aSample);
   NS_ENSURE_TRUE(duration.IsValid(), E_FAIL);
-  RefPtr<VideoData> v = VideoData::CreateFromImage(mVideoInfo,
+  RefPtr<VideoData> v = VideoData::CreateFromImage(mVideoInfo.mDisplay,
                                                    aStreamOffset,
                                                    pts.ToMicroseconds(),
                                                    duration.ToMicroseconds(),
                                                    image.forget(),
                                                    false,
-                                                   -1,
-                                                   pictureRegion);
+                                                   -1);
 
   NS_ENSURE_TRUE(v, E_FAIL);
   v.forget(aOutVideoData);

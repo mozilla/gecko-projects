@@ -85,7 +85,7 @@ struct MOZ_STACK_CLASS CreateDecoderParams final
   MediaResult* mError = nullptr;
   RefPtr<layers::KnowsCompositor> mKnowsCompositor;
   RefPtr<GMPCrashHelper> mCrashHelper;
-  bool mUseBlankDecoder = false;
+  bool mUseNullDecoder = false;
   TrackInfo::TrackType mType = TrackInfo::kUndefinedTrack;
   MediaEventProducer<TrackInfo::TrackType>* mOnWaitingForKeyEvent = nullptr;
   OptionSet mOptions = OptionSet(Option::Default);
@@ -102,7 +102,7 @@ private:
   }
   void Set(MediaResult* aError) { mError = aError; }
   void Set(GMPCrashHelper* aCrashHelper) { mCrashHelper = aCrashHelper; }
-  void Set(bool aUseBlankDecoder) { mUseBlankDecoder = aUseBlankDecoder; }
+  void Set(bool aUseNullDecoder) { mUseNullDecoder = aUseNullDecoder; }
   void Set(OptionSet aOptions) { mOptions = aOptions; }
   void Set(layers::KnowsCompositor* aKnowsCompositor)
   {
@@ -296,20 +296,6 @@ public:
   // Reuse the decoder if the decoder support recycling.
   // Currently, only Android video decoder will return true.
   virtual bool SupportDecoderRecycling() const { return false; }
-
-  // ConfigurationChanged will be called to inform the video or audio decoder
-  // that the format of the next input sample is about to change.
-  // If video decoder, aConfig will be a VideoInfo object.
-  // If audio decoder, aConfig will be a AudioInfo object.
-  // It is not safe to store a reference to this object and the decoder must
-  // make a copy.
-  // Care should be taken as ConfigurationChanged is called on the reader's
-  // taskqueue.
-  virtual void ConfigurationChanged(const TrackInfo& aConfig)
-  {
-    MOZ_ASSERT(SupportDecoderRecycling(),
-               "Can only work with a decoder supporting recycling.");
-  }
 
   enum class ConversionRequired
   {

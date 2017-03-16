@@ -8,6 +8,7 @@
 #define mozilla_DataStorage_h
 
 #include "mozilla/Atomics.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/StaticPtr.h"
@@ -22,6 +23,7 @@
 namespace mozilla {
 
 namespace dom {
+class DataStorageEntry;
 class DataStorageItem;
 }
 
@@ -101,7 +103,12 @@ public:
 
   // Initializes the DataStorage. Must be called before using.
   // aDataWillPersist returns whether or not data can be persistently saved.
-  nsresult Init(/*out*/bool& aDataWillPersist);
+  // aItems is used in the content process to initialize a cache of the items
+  // received from the parent process over IPC. nullptr must be passed for the
+  // parent process.
+  nsresult Init(/*out*/bool& aDataWillPersist,
+                const InfallibleTArray<mozilla::dom::DataStorageItem>*
+                  aItems = nullptr);
   // Given a key and a type of data, returns a value. Returns an empty string if
   // the key is not present for that type of data. If Get is called before the
   // "data-storage-ready" event is observed, it will block. NB: It is not
@@ -117,8 +124,16 @@ public:
   // Removes all entries of all types of data.
   nsresult Clear();
 
+  // Read all file names that we know about.
+  static void GetAllFileNames(nsTArray<nsString>& aItems);
+
   // Read all of the data items.
   void GetAll(InfallibleTArray<DataStorageItem>* aItems);
+
+  // Set the cached copy of our DataStorage entries in the content process.
+  static void SetCachedStorageEntries(const InfallibleTArray<mozilla::dom::DataStorageEntry>& aEntries);
+
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
 private:
   explicit DataStorage(const nsString& aFilename);

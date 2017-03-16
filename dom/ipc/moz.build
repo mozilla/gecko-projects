@@ -19,6 +19,7 @@ EXPORTS.mozilla.dom.ipc += [
 ]
 
 EXPORTS.mozilla.dom += [
+    'CoalescedWheelData.h',
     'ContentBridgeChild.h',
     'ContentBridgeParent.h',
     'ContentChild.h',
@@ -49,6 +50,7 @@ EXPORTS.mozilla += [
 ]
 
 UNIFIED_SOURCES += [
+    'CoalescedWheelData.cpp',
     'ColorPickerParent.cpp',
     'ContentBridgeChild.cpp',
     'ContentBridgeParent.cpp',
@@ -123,7 +125,6 @@ LOCAL_INCLUDES += [
     '/chrome',
     '/docshell/base',
     '/dom/base',
-    '/dom/devicestorage',
     '/dom/events',
     '/dom/filesystem',
     '/dom/geolocation',

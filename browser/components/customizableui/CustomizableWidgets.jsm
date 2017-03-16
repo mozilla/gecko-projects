@@ -46,10 +46,7 @@ const kWidePanelItemClass = "panel-wide-item";
 XPCOMUtils.defineLazyGetter(this, "log", () => {
   let scope = {};
   Cu.import("resource://gre/modules/Console.jsm", scope);
-  let debug;
-  try {
-    debug = Services.prefs.getBoolPref(kPrefCustomizationDebug);
-  } catch (ex) {}
+  let debug = Services.prefs.getBoolPref(kPrefCustomizationDebug, false);
   let consoleOptions = {
     maxLogLevel: debug ? "all" : "log",
     prefix: "CustomizableWidgets",
@@ -247,12 +244,12 @@ const CustomizableWidgets = [
 
       let recentlyClosedTabs = doc.getElementById("PanelUI-recentlyClosedTabs");
       while (recentlyClosedTabs.firstChild) {
-        recentlyClosedTabs.removeChild(recentlyClosedTabs.firstChild);
+        recentlyClosedTabs.firstChild.remove();
       }
 
       let recentlyClosedWindows = doc.getElementById("PanelUI-recentlyClosedWindows");
       while (recentlyClosedWindows.firstChild) {
-        recentlyClosedWindows.removeChild(recentlyClosedWindows.firstChild);
+        recentlyClosedWindows.firstChild.remove();
       }
 
       let utils = RecentlyClosedTabsAndWindowsMenuUtils;
@@ -729,9 +726,8 @@ const CustomizableWidgets = [
       }
 
       // Register ourselves with the service so we know when the zoom prefs change.
-      Services.obs.addObserver(updateZoomResetButton, "browser-fullZoom:zoomChange", false);
-      Services.obs.addObserver(updateZoomResetButton, "browser-fullZoom:zoomReset", false);
       Services.obs.addObserver(updateZoomResetButton, "browser-fullZoom:location-change", false);
+      window.addEventListener("FullZoomChange", updateZoomResetButton);
 
       if (inPanel) {
         let panel = aDocument.getElementById(kPanelId);
@@ -808,9 +804,8 @@ const CustomizableWidgets = [
             return;
 
           CustomizableUI.removeListener(listener);
-          Services.obs.removeObserver(updateZoomResetButton, "browser-fullZoom:zoomChange");
-          Services.obs.removeObserver(updateZoomResetButton, "browser-fullZoom:zoomReset");
           Services.obs.removeObserver(updateZoomResetButton, "browser-fullZoom:location-change");
+          window.removeEventListener("FullZoomChange", updateZoomResetButton);
           let panel = aDoc.getElementById(kPanelId);
           panel.removeEventListener("popupshowing", updateZoomResetButton);
           let container = aDoc.defaultView.gBrowser.tabContainer;

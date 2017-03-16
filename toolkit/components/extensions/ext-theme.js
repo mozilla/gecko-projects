@@ -4,9 +4,13 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
                                   "resource://gre/modules/Preferences.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
+                                  "resource://gre/modules/LightweightThemeManager.jsm");
 
 // WeakMap[Extension -> Theme]
 let themeMap = new WeakMap();
+
+const ICONS = Preferences.get("extensions.webextensions.themes.icons.buttons", "").split(",");
 
 /** Class representing a theme. */
 class Theme {
@@ -18,7 +22,9 @@ class Theme {
    */
   constructor(baseURI) {
     // A dictionary of light weight theme styles.
-    this.lwtStyles = {};
+    this.lwtStyles = {
+      icons: {},
+    };
     this.baseURI = baseURI;
   }
 
@@ -38,10 +44,15 @@ class Theme {
       this.loadImages(details.images);
     }
 
+    if (details.icons) {
+      this.loadIcons(details.icons);
+    }
+
     // Lightweight themes require all properties to be defined.
     if (this.lwtStyles.headerURL &&
         this.lwtStyles.accentcolor &&
         this.lwtStyles.textcolor) {
+      LightweightThemeManager.fallbackThemeData = this.lwtStyles;
       Services.obs.notifyObservers(null,
         "lightweight-theme-styling-update",
         JSON.stringify(this.lwtStyles));
@@ -103,13 +114,41 @@ class Theme {
     }
   }
 
+  loadIcons(icons) {
+    if (!Preferences.get("extensions.webextensions.themes.icons.enabled")) {
+      // Return early if icons are disabled.
+      return;
+    }
+
+    for (let icon of Object.getOwnPropertyNames(icons)) {
+      let val = icons[icon];
+      if (!val || !ICONS.includes(icon)) {
+        continue;
+      }
+      let variableName = `--${icon}-icon`;
+      let resolvedURL = this.baseURI.resolve(val);
+      this.lwtStyles.icons[variableName] = resolvedURL;
+    }
+  }
+
   /**
    * Unloads the currently applied theme.
    */
   unload() {
+    let lwtStyles = {
+      headerURL: "",
+      accentcolor: "",
+      textcolor: "",
+      icons: {},
+    };
+
+    for (let icon of ICONS) {
+      lwtStyles.icons[`--${icon}--icon`] = "";
+    }
+    LightweightThemeManager.fallbackThemeData = null;
     Services.obs.notifyObservers(null,
       "lightweight-theme-styling-update",
-      null);
+      JSON.stringify(lwtStyles));
   }
 }
 

@@ -46,6 +46,9 @@ web-platform-tests:
 external-media-tests:
     - external-media-tests-base
     - external-media-tests-youtube
+
+external-media-tests-slow:
+    # twitch tests are too slow and stall under debug, give them their own special set
     - external-media-tests-twitch
 
 opt-only-tests:
@@ -62,6 +65,9 @@ talos:
     - talos-svgr
     - talos-tp5o
 
+awsy:
+    - awsy
+
 ##
 # Limited test sets for specific platforms
 
@@ -70,6 +76,7 @@ stylo-tests:
     - crashtest
     - reftest-stylo
     - mochitest-style
+    - mochitest-chrome-style
 
 qr-tests:
     - cppunit
@@ -85,14 +92,26 @@ qr-tests:
     - xpcshell
 
 ccov-code-coverage-tests:
+    - cppunit
     - crashtest
+    - firefox-ui-functional-local
+    - firefox-ui-functional-remote
     - gtest
+    - jittest
     - jsreftest
     - marionette
     - mochitest
+    - mochitest-a11y
     - mochitest-browser-chrome
+    - mochitest-chrome
+    - mochitest-clipboard
     - mochitest-devtools-chrome
+    - mochitest-gpu
+    - mochitest-jetpack
+    - mochitest-media
+    - mochitest-webgl
     - reftest
+    - reftest-no-accel
     - web-platform-tests
     - xpcshell
 

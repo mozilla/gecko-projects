@@ -157,10 +157,7 @@ var gFxAccounts = {
 
   // Note that updateUI() returns a Promise that's only used by tests.
   updateUI() {
-    let profileInfoEnabled = false;
-    try {
-      profileInfoEnabled = Services.prefs.getBoolPref("identity.fxaccounts.profile_image.enabled");
-    } catch (e) { }
+    let profileInfoEnabled = Services.prefs.getBoolPref("identity.fxaccounts.profile_image.enabled", false);
 
     this.panelUIFooter.hidden = false;
 
@@ -326,6 +323,13 @@ var gFxAccounts = {
     this.openAccountsPage("reauth", { entrypoint: entryPoint });
   },
 
+  async openDevicesManagementPage(entryPoint) {
+    let url = await fxAccounts.promiseAccountsManageDevicesURI(entryPoint);
+    switchToTabHavingURI(url, true, {
+      replaceQueryString: true
+    });
+  },
+
   sendTabToDevice(url, clientId, title) {
     Weave.Service.clientsEngine.sendURIToClientForDisplay(url, clientId, title);
   },
@@ -333,7 +337,7 @@ var gFxAccounts = {
   populateSendTabToDevicesMenu(devicesPopup, url, title) {
     // remove existing menu items
     while (devicesPopup.hasChildNodes()) {
-      devicesPopup.removeChild(devicesPopup.firstChild);
+      devicesPopup.firstChild.remove();
     }
 
     const fragment = document.createDocumentFragment();

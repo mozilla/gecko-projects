@@ -9,9 +9,10 @@ use compositor_thread::{InitialCompositorState, Msg, RenderListener};
 use delayed_composition::DelayedCompositionTimerProxy;
 use euclid::Point2D;
 use euclid::point::TypedPoint2D;
+use euclid::rect::TypedRect;
 use euclid::scale_factor::ScaleFactor;
 use euclid::size::TypedSize2D;
-use gfx_traits::{Epoch, FragmentType, ScrollRootId};
+use gfx_traits::{Epoch, ScrollRootId};
 use gleam::gl;
 use gleam::gl::types::{GLint, GLsizei};
 use image::{DynamicImage, ImageFormat, RgbImage};
@@ -82,22 +83,6 @@ impl ConvertScrollRootIdFromWebRender for webrender_traits::ServoScrollRootId {
     }
 }
 
-trait ConvertFragmentTypeFromWebRender {
-    fn from_webrender(&self) -> FragmentType;
-}
-
-impl ConvertFragmentTypeFromWebRender for webrender_traits::FragmentType {
-    fn from_webrender(&self) -> FragmentType {
-        match *self {
-            webrender_traits::FragmentType::FragmentBody => FragmentType::FragmentBody,
-            webrender_traits::FragmentType::BeforePseudoContent => {
-                FragmentType::BeforePseudoContent
-            }
-            webrender_traits::FragmentType::AfterPseudoContent => FragmentType::AfterPseudoContent,
-        }
-    }
-}
-
 /// Holds the state when running reftests that determines when it is
 /// safe to save the output image.
 #[derive(Copy, Clone, PartialEq)]
@@ -140,8 +125,11 @@ pub struct IOCompositor<Window: WindowMethods> {
     /// The scene scale, to allow for zooming and high-resolution painting.
     scale: ScaleFactor<f32, LayerPixel, DevicePixel>,
 
-    /// The application window size.
-    window_size: TypedSize2D<u32, DevicePixel>,
+    /// The size of the rendering area.
+    frame_size: TypedSize2D<u32, DevicePixel>,
+
+    /// The position and size of the window within the rendering area.
+    window_rect: TypedRect<u32, DevicePixel>,
 
     /// The overridden viewport.
     viewport: Option<(TypedPoint2D<u32, DevicePixel>, TypedSize2D<u32, DevicePixel>)>,
@@ -376,7 +364,8 @@ impl webrender_traits::RenderDispatcher for CompositorThreadDispatcher {
 impl<Window: WindowMethods> IOCompositor<Window> {
     fn new(window: Rc<Window>, state: InitialCompositorState)
            -> IOCompositor<Window> {
-        let window_size = window.framebuffer_size();
+        let frame_size = window.framebuffer_size();
+        let window_rect = window.window_rect();
         let scale_factor = window.hidpi_factor();
         let composite_target = match opts::get().output_file {
             Some(_) => CompositeTarget::PngFile,
@@ -388,7 +377,8 @@ impl<Window: WindowMethods> IOCompositor<Window> {
             port: state.receiver,
             root_pipeline: None,
             pipeline_details: HashMap::new(),
-            window_size: window_size,
+            frame_size: frame_size,
+            window_rect: window_rect,
             scale: ScaleFactor::new(1.0),
             viewport: None,
             scale_factor: scale_factor,
@@ -552,6 +542,13 @@ impl<Window: WindowMethods> IOCompositor<Window> {
                 //
                 // TODO(pcwalton): Specify which frame's load completed.
                 self.window.load_end(back, forward, root);
+            }
+
+            (Msg::AllowNavigation(url, response_chan), ShutdownState::NotShuttingDown) => {
+                let allow = self.window.allow_navigation(url);
+                if let Err(e) = response_chan.send(allow) {
+                    warn!("Failed to send allow_navigation result ({}).", e);
+                }
             }
 
             (Msg::DelayedCompositionTimeout(timestamp), ShutdownState::NotShuttingDown) => {
@@ -756,7 +753,18 @@ impl<Window: WindowMethods> IOCompositor<Window> {
 
     fn send_window_size(&self, size_type: WindowSizeType) {
         let dppx = self.page_zoom * self.hidpi_factor();
-        let initial_viewport = self.window_size.to_f32() / dppx;
+
+        let window_rect = {
+            let offset = webrender_traits::DeviceUintPoint::new(self.window_rect.origin.x, self.window_rect.origin.y);
+            let size = webrender_traits::DeviceUintSize::new(self.window_rect.size.width, self.window_rect.size.height);
+            webrender_traits::DeviceUintRect::new(offset, size)
+        };
+
+        let frame_size = webrender_traits::DeviceUintSize::new(self.frame_size.width, self.frame_size.height);
+        self.webrender_api.set_window_parameters(frame_size, window_rect);
+
+        let initial_viewport = self.window_rect.size.to_f32() / dppx;
+
         let msg = ConstellationMsg::WindowSize(WindowSizeData {
             device_pixel_ratio: dppx,
             initial_viewport: initial_viewport,
@@ -892,11 +900,16 @@ impl<Window: WindowMethods> IOCompositor<Window> {
             self.update_zoom_transform();
         }
 
-        if self.window_size == new_size {
+        let new_window_rect = self.window.window_rect();
+        let new_frame_size = self.window.framebuffer_size();
+
+        if self.window_rect == new_window_rect &&
+           self.frame_size == new_frame_size {
             return;
         }
 
-        self.window_size = new_size;
+        self.frame_size = new_size;
+        self.window_rect = new_window_rect;
 
         self.send_window_size(WindowSizeType::Resize);
     }
@@ -1321,7 +1334,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
     }
 
     fn update_page_zoom_for_webrender(&mut self) {
-        let page_zoom = webrender_traits::PageZoomFactor::new(self.page_zoom.get());
+        let page_zoom = webrender_traits::ZoomFactor::new(self.page_zoom.get());
         self.webrender_api.set_page_zoom(page_zoom);
     }
 
@@ -1485,7 +1498,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
                                  target: CompositeTarget)
                                  -> Result<Option<Image>, UnableToComposite> {
         let (width, height) =
-            (self.window_size.width as usize, self.window_size.height as usize);
+            (self.frame_size.width as usize, self.frame_size.height as usize);
         if !self.window.prepare_for_composite(width, height) {
             return Err(UnableToComposite::WindowUnprepared)
         }
@@ -1523,7 +1536,7 @@ impl<Window: WindowMethods> IOCompositor<Window> {
             debug!("compositor: compositing");
 
             // Paint the scene.
-            let size = webrender_traits::DeviceUintSize::from_untyped(&self.window_size.to_untyped());
+            let size = webrender_traits::DeviceUintSize::from_untyped(&self.frame_size.to_untyped());
             self.webrender.render(size);
         });
 

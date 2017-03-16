@@ -196,6 +196,11 @@ public:
    */
   static bool HasDisplayPort(nsIContent* aContent);
 
+  /**
+   * Check if the given element has a margins based displayport but is missing a
+   * displayport base rect that it needs to properly compute a displayport rect.
+   */
+  static bool IsMissingDisplayPortBaseRect(nsIContent* aContent);
 
   /**
    * Go through the IPC Channel and update displayport margins for content
@@ -1888,7 +1893,7 @@ public:
                                     const SamplingFilter aSamplingFilter,
                                     const nsRect&       aDest,
                                     const nsRect&       aDirty,
-                                    const mozilla::Maybe<const SVGImageContext>& aSVGContext,
+                                    const mozilla::Maybe<SVGImageContext>& aSVGContext,
                                     uint32_t            aImageFlags,
                                     const nsPoint*      aAnchorPoint = nullptr,
                                     const nsRect*       aSourceArea = nullptr);
@@ -2447,6 +2452,10 @@ public:
 #endif
   }
 
+  static bool StyleAttrWithXMLBaseDisabled() {
+    return sStyleAttrWithXMLBaseDisabled;
+  }
+
   static uint32_t IdlePeriodDeadlineLimit() {
     return sIdlePeriodDeadlineLimit;
   }
@@ -2676,6 +2685,14 @@ public:
   static float GetCurrentAPZResolutionScale(nsIPresShell* aShell);
 
   /**
+   * Returns true if we need to disable async scrolling for this particular
+   * element. Note that this does a partial disabling - the displayport still
+   * exists but uses a very small margin, and the compositor doesn't apply the
+   * async transform. However, the content may still be layerized.
+   */
+  static bool ShouldDisableApzForElement(nsIContent* aContent);
+
+  /**
    * Log a key/value pair for APZ testing during a paint.
    * @param aManager   The data will be written to the APZTestData associated
    *                   with this layer manager.
@@ -2898,11 +2915,6 @@ public:
   static nsRect ComputeGeometryBox(nsIFrame* aFrame,
                                    StyleGeometryBox aGeometryBox);
 
-  /*
-   * Check whether aFrame is associated with CSS layout box.
-   */
-  static bool HasCSSBoxLayout(nsIFrame* aFrame);
-
 private:
   static uint32_t sFontSizeInflationEmPerLine;
   static uint32_t sFontSizeInflationMinTwips;
@@ -2919,6 +2931,7 @@ private:
 #ifdef MOZ_STYLO
   static bool sStyloEnabled;
 #endif
+  static bool sStyleAttrWithXMLBaseDisabled;
   static uint32_t sIdlePeriodDeadlineLimit;
   static uint32_t sQuiescentFramesBeforeIdlePeriod;
 

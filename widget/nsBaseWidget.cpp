@@ -108,7 +108,6 @@ using namespace mozilla::widget;
 using namespace mozilla;
 using base::Thread;
 
-nsIContent* nsBaseWidget::mLastRollup = nullptr;
 // Global user preference for disabling native theme. Used
 // in NativeWindowTheme.
 bool            gDisableNativeTheme               = false;
@@ -140,21 +139,6 @@ IMENotification::SelectionChangeDataBase::GetWritingMode() const
 
 } // namespace widget
 } // namespace mozilla
-
-nsAutoRollup::nsAutoRollup()
-{
-  // remember if mLastRollup was null, and only clear it upon destruction
-  // if so. This prevents recursive usage of nsAutoRollup from clearing
-  // mLastRollup when it shouldn't.
-  wasClear = !nsBaseWidget::mLastRollup;
-}
-
-nsAutoRollup::~nsAutoRollup()
-{
-  if (nsBaseWidget::mLastRollup && wasClear) {
-    NS_RELEASE(nsBaseWidget::mLastRollup);
-  }
-}
 
 NS_IMPL_ISUPPORTS(nsBaseWidget, nsIWidget, nsISupportsWeakReference)
 
@@ -1811,6 +1795,18 @@ nsBaseWidget::NotifyIME(const IMENotification& aIMENotification)
       return rv2 == NS_ERROR_NOT_IMPLEMENTED ? rv : rv2;
     }
   }
+}
+
+nsIMEUpdatePreference
+nsBaseWidget::GetIMEUpdatePreference()
+{
+  RefPtr<TextEventDispatcherListener> listener =
+    GetNativeTextEventDispatcherListener();
+  if (!listener) {
+    // Default is to not send additional change notifications to NotifyIME.
+    return nsIMEUpdatePreference();
+  }
+  return listener->GetIMEUpdatePreference();
 }
 
 void

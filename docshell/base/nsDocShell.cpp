@@ -14,7 +14,6 @@
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/Casting.h"
 #include "mozilla/dom/ContentChild.h"
-#include "mozilla/dom/ChromeUtils.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/PendingGlobalHistoryEntry.h"
 #include "mozilla/dom/TabChild.h"
@@ -426,7 +425,7 @@ public:
     mLoadGroup = aLoadGroup;
   }
 
-  nsresult StartTimeout();
+  nsresult StartTimeout(Dispatcher* aDispatcher);
 
 private:
   ~nsPingListener();
@@ -446,9 +445,12 @@ nsPingListener::~nsPingListener()
 }
 
 nsresult
-nsPingListener::StartTimeout()
+nsPingListener::StartTimeout(Dispatcher* aDispatcher)
 {
+  NS_ENSURE_ARG(aDispatcher);
+
   nsCOMPtr<nsITimer> timer = do_CreateInstance(NS_TIMER_CONTRACTID);
+  timer->SetTarget(aDispatcher->EventTargetFor(TaskCategory::Network));
 
   if (timer) {
     nsresult rv = timer->InitWithFuncCallback(OnPingTimeout, mLoadGroup,
@@ -542,24 +544,31 @@ SendPing(void* aClosure, nsIContent* aContent, nsIURI* aURI,
 
   // This is needed in order for 3rd-party cookie blocking to work.
   nsCOMPtr<nsIHttpChannelInternal> httpInternal = do_QueryInterface(httpChan);
+  nsresult rv;
   if (httpInternal) {
-    httpInternal->SetDocumentURI(doc->GetDocumentURI());
+    rv = httpInternal->SetDocumentURI(doc->GetDocumentURI());
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
   }
 
-  httpChan->SetRequestMethod(NS_LITERAL_CSTRING("POST"));
+  rv = httpChan->SetRequestMethod(NS_LITERAL_CSTRING("POST"));
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   // Remove extraneous request headers (to reduce request size)
-  httpChan->SetRequestHeader(NS_LITERAL_CSTRING("accept"),
-                             EmptyCString(), false);
-  httpChan->SetRequestHeader(NS_LITERAL_CSTRING("accept-language"),
-                             EmptyCString(), false);
-  httpChan->SetRequestHeader(NS_LITERAL_CSTRING("accept-encoding"),
-                             EmptyCString(), false);
+  rv = httpChan->SetRequestHeader(NS_LITERAL_CSTRING("accept"),
+                                  EmptyCString(), false);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  rv = httpChan->SetRequestHeader(NS_LITERAL_CSTRING("accept-language"),
+                                  EmptyCString(), false);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  rv = httpChan->SetRequestHeader(NS_LITERAL_CSTRING("accept-encoding"),
+                                  EmptyCString(), false);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   // Always send a Ping-To header.
   nsAutoCString pingTo;
   if (NS_SUCCEEDED(info->target->GetSpec(pingTo))) {
-    httpChan->SetRequestHeader(NS_LITERAL_CSTRING("Ping-To"), pingTo, false);
+    rv = httpChan->SetRequestHeader(NS_LITERAL_CSTRING("Ping-To"), pingTo, false);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
   }
 
   nsCOMPtr<nsIScriptSecurityManager> sm =
@@ -568,7 +577,7 @@ SendPing(void* aClosure, nsIContent* aContent, nsIURI* aURI,
   if (sm && info->referrer) {
     bool referrerIsSecure;
     uint32_t flags = nsIProtocolHandler::URI_SAFE_TO_LOAD_IN_SECURE_CONTEXT;
-    nsresult rv = NS_URIChainHasFlags(info->referrer, flags, &referrerIsSecure);
+    rv = NS_URIChainHasFlags(info->referrer, flags, &referrerIsSecure);
 
     // Default to sending less data if NS_URIChainHasFlags() fails.
     referrerIsSecure = NS_FAILED(rv) || referrerIsSecure;
@@ -583,8 +592,9 @@ SendPing(void* aClosure, nsIContent* aContent, nsIURI* aURI,
     if (sameOrigin || !referrerIsSecure) {
       nsAutoCString pingFrom;
       if (NS_SUCCEEDED(info->referrer->GetSpec(pingFrom))) {
-        httpChan->SetRequestHeader(NS_LITERAL_CSTRING("Ping-From"), pingFrom,
-                                   false);
+        rv = httpChan->SetRequestHeader(NS_LITERAL_CSTRING("Ping-From"),
+                                        pingFrom, false);
+        MOZ_ASSERT(NS_SUCCEEDED(rv));
       }
     }
 
@@ -592,7 +602,8 @@ SendPing(void* aClosure, nsIContent* aContent, nsIURI* aURI,
     // over an encrypted connection and its address does not have the same
     // origin as "ping URL", send a referrer.
     if (!sameOrigin && !referrerIsSecure) {
-      httpChan->SetReferrerWithPolicy(info->referrer, info->referrerPolicy);
+      rv = httpChan->SetReferrerWithPolicy(info->referrer, info->referrerPolicy);
+      MOZ_ASSERT(NS_SUCCEEDED(rv));
     }
   }
 
@@ -633,7 +644,7 @@ SendPing(void* aClosure, nsIContent* aContent, nsIURI* aURI,
   info->numPings++;
 
   // Prevent ping requests from stalling and never being garbage collected...
-  if (NS_FAILED(pingListener->StartTimeout())) {
+  if (NS_FAILED(pingListener->StartTimeout(doc->GetDocGroup()))) {
     // If we failed to setup the timer, then we should just cancel the channel
     // because we won't be able to ensure that it goes away in a timely manner.
     chan->Cancel(NS_ERROR_ABORT);
@@ -865,9 +876,7 @@ nsDocShell::~nsDocShell()
     NS_IF_RELEASE(sURIFixup);
   }
 
-  if (gDocShellLeakLog) {
-    MOZ_LOG(gDocShellLeakLog, LogLevel::Debug, ("DOCSHELL %p destroyed\n", this));
-  }
+  MOZ_LOG(gDocShellLeakLog, LogLevel::Debug, ("DOCSHELL %p destroyed\n", this));
 
 #ifdef DEBUG
   // We're counting the number of |nsDocShells| to help find leaks
@@ -1311,15 +1320,9 @@ nsDocShell::LoadURI(nsIURI* aURI,
     aLoadInfo->GetBaseURI(getter_AddRefs(baseURI));
   }
 
-#if defined(DEBUG)
-  if (MOZ_LOG_TEST(gDocShellLog, LogLevel::Debug)) {
-    nsAutoCString uristr;
-    aURI->GetAsciiSpec(uristr);
-    MOZ_LOG(gDocShellLog, LogLevel::Debug,
-           ("nsDocShell[%p]: loading %s with flags 0x%08x",
-            this, uristr.get(), aLoadFlags));
-  }
-#endif
+  MOZ_LOG(gDocShellLeakLog, LogLevel::Debug,
+          ("nsDocShell[%p]: loading %s with flags 0x%08x",
+           this, aURI->GetSpecOrDefault().get(), aLoadFlags));
 
   if (!shEntry &&
       !LOAD_TYPE_HAS_FLAGS(loadType, LOAD_FLAGS_REPLACE_HISTORY)) {
@@ -1509,7 +1512,9 @@ nsDocShell::LoadURI(nsIURI* aURI,
 
   if (aLoadFlags & LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL) {
     inheritPrincipal = false;
-    principalToInherit = nsNullPrincipal::CreateWithInheritedAttributes(this);
+    // If aFirstParty is true and the pref 'privacy.firstparty.isolate' is
+    // enabled, we will set firstPartyDomain on the origin attributes.
+    principalToInherit = nsNullPrincipal::CreateWithInheritedAttributes(this, aFirstParty);
   }
 
   // If the triggeringPrincipal is not passed explicitly, we first try to create
@@ -1737,6 +1742,33 @@ nsDocShell::FirePageHideNotificationInternal(bool aIsUnload,
   }
 }
 
+nsresult
+nsDocShell::DispatchToTabGroup(const char* aName,
+                               TaskCategory aCategory,
+                               already_AddRefed<nsIRunnable>&& aRunnable)
+{
+  // Hold the ref so we won't forget to release it.
+  nsCOMPtr<nsIRunnable> runnable(aRunnable);
+  nsCOMPtr<nsPIDOMWindowOuter> win = GetWindow();
+  if (!win) {
+    // Window should only be unavailable after destroyed.
+    MOZ_ASSERT(mIsBeingDestroyed);
+    return NS_ERROR_FAILURE;
+  }
+
+  RefPtr<mozilla::dom::TabGroup> tabGroup = win->TabGroup();
+  return tabGroup->Dispatch(aName, aCategory, runnable.forget());
+}
+
+NS_IMETHODIMP
+nsDocShell::DispatchLocationChangeEvent()
+{
+  return DispatchToTabGroup("nsDocShell::FireDummyOnLocationChange",
+                            TaskCategory::Other,
+                            NewRunnableMethod(this,
+                              &nsDocShell::FireDummyOnLocationChange));
+}
+
 bool
 nsDocShell::MaybeInitTiming()
 {
@@ -1940,10 +1972,9 @@ bool
 nsDocShell::SetCurrentURI(nsIURI* aURI, nsIRequest* aRequest,
                           bool aFireOnLocationChange, uint32_t aLocationFlags)
 {
-  if (gDocShellLeakLog && MOZ_LOG_TEST(gDocShellLeakLog, LogLevel::Debug)) {
-    PR_LogPrint("DOCSHELL %p SetCurrentURI %s\n",
-                this, aURI ? aURI->GetSpecOrDefault().get() : "");
-  }
+  MOZ_LOG(gDocShellLeakLog, LogLevel::Debug,
+          ("DOCSHELL %p SetCurrentURI %s\n",
+           this, aURI ? aURI->GetSpecOrDefault().get() : ""));
 
   // We don't want to send a location change when we're displaying an error
   // page, and we don't want to change our idea of "current URI" either
@@ -4995,8 +5026,6 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
         // 12.1, HPKP draft spec section 2.6).
         uint32_t flags =
           UsePrivateBrowsing() ? nsISocketProvider::NO_PERMANENT_STORAGE : 0;
-        OriginAttributes originAttributes;
-        originAttributes.Inherit(mOriginAttributes);
         bool isStsHost = false;
         bool isPinnedHost = false;
         if (XRE_IsParentProcess()) {
@@ -5004,10 +5033,10 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
             do_GetService(NS_SSSERVICE_CONTRACTID, &rv);
           NS_ENSURE_SUCCESS(rv, rv);
           rv = sss->IsSecureURI(nsISiteSecurityService::HEADER_HSTS, aURI,
-                                flags, originAttributes, nullptr, &isStsHost);
+                                flags, mOriginAttributes, nullptr, &isStsHost);
           NS_ENSURE_SUCCESS(rv, rv);
           rv = sss->IsSecureURI(nsISiteSecurityService::HEADER_HPKP, aURI,
-                                flags, originAttributes, nullptr,
+                                flags, mOriginAttributes, nullptr,
                                 &isPinnedHost);
           NS_ENSURE_SUCCESS(rv, rv);
         } else {
@@ -5016,9 +5045,9 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
           mozilla::ipc::URIParams uri;
           SerializeURI(aURI, uri);
           cc->SendIsSecureURI(nsISiteSecurityService::HEADER_HSTS, uri, flags,
-                              originAttributes, &isStsHost);
+                              mOriginAttributes, &isStsHost);
           cc->SendIsSecureURI(nsISiteSecurityService::HEADER_HPKP, uri, flags,
-                              originAttributes, &isPinnedHost);
+                              mOriginAttributes, &isPinnedHost);
         }
 
         if (Preferences::GetBool(
@@ -5305,7 +5334,8 @@ nsDocShell::LoadErrorPage(nsIURI* aURI, const char16_t* aURL,
 
     MOZ_LOG(gDocShellLog, LogLevel::Debug,
            ("nsDocShell[%p]::LoadErrorPage(\"%s\", \"%s\", {...}, [%s])\n", this,
-            aURI->GetSpecOrDefault().get(), NS_ConvertUTF16toUTF8(aURL).get(),
+            aURI ? aURI->GetSpecOrDefault().get() : "",
+            NS_ConvertUTF16toUTF8(aURL).get(),
             chanName.get()));
   }
 #endif
@@ -6739,8 +6769,11 @@ nsDocShell::RefreshURI(nsIURI* aURI, int32_t aDelay, bool aRepeat,
     // timer and fire it right away.
     nsCOMPtr<nsITimer> timer = do_CreateInstance("@mozilla.org/timer;1");
     NS_ENSURE_TRUE(timer, NS_ERROR_FAILURE);
+    nsCOMPtr<nsPIDOMWindowOuter> win = GetWindow();
+    NS_ENSURE_TRUE(win, NS_ERROR_FAILURE);
 
     mRefreshURIList->AppendElement(timer, /*weak =*/ false);  // owning timer ref
+    timer->SetTarget(win->TabGroup()->EventTargetFor(TaskCategory::Network));
     timer->InitWithCallback(refreshTimer, aDelay, nsITimer::TYPE_ONE_SHOT);
   }
   return NS_OK;
@@ -7222,12 +7255,14 @@ nsDocShell::RefreshURIFromQueue()
         static_cast<nsRefreshTimer*>(
           static_cast<nsITimerCallback*>(refreshInfo))->GetDelay();
       nsCOMPtr<nsITimer> timer = do_CreateInstance("@mozilla.org/timer;1");
-      if (timer) {
+      nsCOMPtr<nsPIDOMWindowOuter> win = GetWindow();
+      if (timer && win) {
         // Replace the nsRefreshTimer element in the queue with
         // its corresponding timer object, so that in case another
         // load comes through before the timer can go off, the timer will
         // get cancelled in CancelRefreshURITimer()
         mRefreshURIList->ReplaceElementAt(timer, n, /*weak =*/ false);
+        timer->SetTarget(win->TabGroup()->EventTargetFor(TaskCategory::Network));
         timer->InitWithCallback(refreshInfo, delay, nsITimer::TYPE_ONE_SHOT);
       }
     }
@@ -7506,7 +7541,7 @@ nsDocShell::OnRedirectStateChange(nsIChannel* aOldChannel,
     uint32_t responseStatus = 0;
     nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aOldChannel);
     if (httpChannel) {
-      (void)httpChannel->GetResponseStatus(&responseStatus);
+      Unused << httpChannel->GetResponseStatus(&responseStatus);
     }
 
     // Add visit N -1 => N
@@ -8028,9 +8063,7 @@ nsDocShell::CreateAboutBlankContentViewer(nsIPrincipal* aPrincipal,
 
   if (aPrincipal && !nsContentUtils::IsSystemPrincipal(aPrincipal) &&
       mItemType != typeChrome) {
-    MOZ_ASSERT(ChromeUtils::IsOriginAttributesEqualIgnoringAddonId(
-      aPrincipal->OriginAttributesRef(),
-      mOriginAttributes));
+    MOZ_ASSERT(aPrincipal->OriginAttributesRef() == mOriginAttributes);
   }
 
   // Make sure timing is created.  But first record whether we had it
@@ -8510,7 +8543,9 @@ nsDocShell::RestorePresentation(nsISHEntry* aSHEntry, bool* aRestoring)
   mRestorePresentationEvent.Revoke();
 
   RefPtr<RestorePresentationEvent> evt = new RestorePresentationEvent(this);
-  nsresult rv = NS_DispatchToCurrentThread(evt);
+  nsresult rv = DispatchToTabGroup("nsDocShell::RestorePresentationEvent",
+                                   TaskCategory::Other,
+                                   RefPtr<RestorePresentationEvent>(evt).forget());
   if (NS_SUCCEEDED(rv)) {
     mRestorePresentationEvent = evt.get();
     // The rest of the restore processing will happen on our event
@@ -9730,10 +9765,8 @@ nsresult
 nsDocShell::CreatePrincipalFromReferrer(nsIURI* aReferrer,
                                         nsIPrincipal** aResult)
 {
-  OriginAttributes attrs;
-  attrs.Inherit(mOriginAttributes);
   nsCOMPtr<nsIPrincipal> prin =
-    BasePrincipal::CreateCodebasePrincipal(aReferrer, attrs);
+    BasePrincipal::CreateCodebasePrincipal(aReferrer, mOriginAttributes);
   prin.forget(aResult);
 
   return *aResult ? NS_OK : NS_ERROR_FAILURE;
@@ -9768,10 +9801,9 @@ nsDocShell::InternalLoad(nsIURI* aURI,
   nsresult rv = NS_OK;
   mOriginalUriString.Truncate();
 
-  if (gDocShellLeakLog && MOZ_LOG_TEST(gDocShellLeakLog, LogLevel::Debug)) {
-    PR_LogPrint("DOCSHELL %p InternalLoad %s\n",
-                this, aURI ? aURI->GetSpecOrDefault().get() : "");
-  }
+  MOZ_LOG(gDocShellLeakLog, LogLevel::Debug,
+          ("DOCSHELL %p InternalLoad %s\n",
+           this, aURI ? aURI->GetSpecOrDefault().get() : ""));
   // Initialize aDocShell/aRequest
   if (aDocShell) {
     *aDocShell = nullptr;
@@ -10210,7 +10242,8 @@ nsDocShell::InternalLoad(nsIURI* aURI,
                               aFlags, aTypeHint, aPostData, aHeadersData,
                               aLoadType, aSHEntry, aFirstParty, aSrcdoc,
                               aSourceDocShell, aBaseURI, false);
-      return NS_DispatchToCurrentThread(ev);
+      return DispatchToTabGroup("nsDocShell::InternalLoadEvent",
+                                TaskCategory::Other, ev.forget());
     }
 
     // Just ignore this load attempt
@@ -10379,10 +10412,13 @@ nsDocShell::InternalLoad(nsIURI* aURI,
        * call OnNewURI() so that, this traversal will be
        * recorded in session and global history.
        */
-      nsCOMPtr<nsIPrincipal> triggeringPrincipal, principalToInherit;
+      nsCOMPtr<nsIPrincipal> newURITriggeringPrincipal, newURIPrincipalToInherit;
       if (mOSHE) {
-        mOSHE->GetTriggeringPrincipal(getter_AddRefs(triggeringPrincipal));
-        mOSHE->GetPrincipalToInherit(getter_AddRefs(principalToInherit));
+        mOSHE->GetTriggeringPrincipal(getter_AddRefs(newURITriggeringPrincipal));
+        mOSHE->GetPrincipalToInherit(getter_AddRefs(newURIPrincipalToInherit));
+      } else {
+        newURITriggeringPrincipal = aTriggeringPrincipal;
+        newURIPrincipalToInherit = doc->NodePrincipal();
       }
       // Pass true for aCloneSHChildren, since we're not
       // changing documents here, so all of our subframes are
@@ -10392,7 +10428,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       // flag on firing onLocationChange(...).
       // Anyway, aCloneSHChildren param is simply reflecting
       // doShortCircuitedLoad in this scope.
-      OnNewURI(aURI, nullptr, triggeringPrincipal, principalToInherit,
+      OnNewURI(aURI, nullptr, newURITriggeringPrincipal, newURIPrincipalToInherit,
                mLoadType, true, true, true);
 
       nsCOMPtr<nsIInputStream> postData;
@@ -10720,11 +10756,11 @@ nsDocShell::InternalLoad(nsIURI* aURI,
     srcdoc = NullString();
   }
 
-  OriginAttributes attrs;
   bool isTopLevelDoc = mItemType == typeContent &&
                        (isTargetTopLevelDocShell ||
                         GetIsMozBrowser());
-  attrs.Inherit(GetOriginAttributes());
+
+  OriginAttributes attrs = GetOriginAttributes();
   attrs.SetFirstPartyDomain(isTopLevelDoc, aURI);
 
   net::PredictorLearn(aURI, nullptr,
@@ -10977,8 +11013,25 @@ nsDocShell::DoURILoad(nsIURI* aURI,
                         GetIsMozBrowser());
 
   OriginAttributes attrs;
-  attrs.Inherit(GetOriginAttributes());
-  attrs.SetFirstPartyDomain(isTopLevelDoc, aURI);
+
+  // If inherit is true, which means loadInfo will have SEC_FORCE_INHERIT_PRINCIPAL
+  // set, so later when we create principal of the document from
+  // nsScriptSecurityManager::GetChannelResultPrincipal, we will use
+  // principalToInherit of the loadInfo as the document principal.
+  // Therefore we use the origin attributes from aPrincipalToInherit.
+  //
+  // Otherwise we just use the origin attributes from docshell.
+  if (inherit) {
+    MOZ_ASSERT(aPrincipalToInherit, "We should have aPrincipalToInherit here.");
+    attrs = aPrincipalToInherit->OriginAttributesRef();
+    // If firstPartyIsolation is not enabled, then PrincipalToInherit should
+    // have the same origin attributes with docshell.
+    MOZ_ASSERT_IF(!OriginAttributes::IsFirstPartyEnabled(), attrs == GetOriginAttributes());
+  } else {
+    attrs = GetOriginAttributes();
+    attrs.SetFirstPartyDomain(isTopLevelDoc, aURI);
+  }
+
   rv = loadInfo->SetOriginAttributes(attrs);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -11150,16 +11203,20 @@ nsDocShell::DoURILoad(nsIURI* aURI,
     do_QueryInterface(channel));
   if (httpChannelInternal) {
     if (aForceAllowCookies) {
-      httpChannelInternal->SetThirdPartyFlags(
+      rv = httpChannelInternal->SetThirdPartyFlags(
         nsIHttpChannelInternal::THIRD_PARTY_FORCE_ALLOW);
+      MOZ_ASSERT(NS_SUCCEEDED(rv));
     }
     if (aFirstParty) {
-      httpChannelInternal->SetDocumentURI(aURI);
+      rv = httpChannelInternal->SetDocumentURI(aURI);
+      MOZ_ASSERT(NS_SUCCEEDED(rv));
     } else {
-      httpChannelInternal->SetDocumentURI(aReferrerURI);
+      rv = httpChannelInternal->SetDocumentURI(aReferrerURI);
+      MOZ_ASSERT(NS_SUCCEEDED(rv));
     }
-    httpChannelInternal->SetRedirectMode(
+    rv = httpChannelInternal->SetRedirectMode(
       nsIHttpChannelInternal::REDIRECT_MODE_MANUAL);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
   }
 
   nsCOMPtr<nsIWritablePropertyBag2> props(do_QueryInterface(channel));
@@ -11240,7 +11297,8 @@ nsDocShell::DoURILoad(nsIURI* aURI,
     // Set the referrer explicitly
     if (aReferrerURI && aSendReferrer) {
       // Referrer is currenly only set for link clicks here.
-      httpChannel->SetReferrerWithPolicy(aReferrerURI, aReferrerPolicy);
+      rv = httpChannel->SetReferrerWithPolicy(aReferrerURI, aReferrerPolicy);
+      MOZ_ASSERT(NS_SUCCEEDED(rv));
     }
   }
 
@@ -12332,16 +12390,13 @@ nsDocShell::AddToSessionHistory(nsIURI* aURI, nsIChannel* aChannel,
       uint32_t loadFlags;
       aChannel->GetLoadFlags(&loadFlags);
       loadReplace = loadFlags & nsIChannel::LOAD_REPLACE;
-      httpChannel->GetReferrer(getter_AddRefs(referrerURI));
-      httpChannel->GetReferrerPolicy(&referrerPolicy);
+      rv = httpChannel->GetReferrer(getter_AddRefs(referrerURI));
+      MOZ_ASSERT(NS_SUCCEEDED(rv));
+      rv = httpChannel->GetReferrerPolicy(&referrerPolicy);
+      MOZ_ASSERT(NS_SUCCEEDED(rv));
 
       discardLayoutState = ShouldDiscardLayoutState(httpChannel);
     }
-
-    // XXX Bug 1286838: Replace channel owner with loadInfo triggeringPrincipal
-    nsCOMPtr<nsISupports> owner;
-    aChannel->GetOwner(getter_AddRefs(owner));
-    triggeringPrincipal = do_QueryInterface(owner);
 
     nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
     if (loadInfo) {
@@ -12359,7 +12414,6 @@ nsDocShell::AddToSessionHistory(nsIURI* aURI, nsIChannel* aChannel,
             // get the OriginAttributes
             OriginAttributes attrs;
             loadInfo->GetOriginAttributes(&attrs);
-            attrs.StripAttributes(OriginAttributes::STRIP_ADDON_ID);
             principalToInherit = nsNullPrincipal::Create(attrs);
           }
         } else {
@@ -12587,9 +12641,6 @@ nsDocShell::LoadHistoryEntry(nsISHEntry* aEntry, uint32_t aLoadType)
     srcdoc = NullString();
   }
 
-  // If there is no valid triggeringPrincipal, we deny the load
-  MOZ_ASSERT(triggeringPrincipal,
-             "need a valid triggeringPrincipal to load from history");
   if (!triggeringPrincipal) {
     triggeringPrincipal = nsContentUtils::GetSystemPrincipal();
   }
@@ -12976,7 +13027,7 @@ nsDocShell::ShouldDiscardLayoutState(nsIHttpChannel* aChannel)
 
   // figure out if SH should be saving layout state
   bool noStore = false;
-  aChannel->IsNoStoreResponse(&noStore);
+  Unused << aChannel->IsNoStoreResponse(&noStore);
   return noStore;
 }
 
@@ -13048,7 +13099,7 @@ nsDocShell::ChannelIsPost(nsIChannel* aChannel)
   }
 
   nsAutoCString method;
-  httpChannel->GetRequestMethod(method);
+  Unused << httpChannel->GetRequestMethod(method);
   return method.EqualsLiteral("POST");
 }
 
@@ -14004,7 +14055,8 @@ nsDocShell::OnLinkClick(nsIContent* aContent,
     new OnLinkClickEvent(this, aContent, aURI, target.get(), aFileName,
                          aPostDataStream, aHeadersDataStream, noOpenerImplied,
                          aIsTrusted, aTriggeringPrincipal);
-  return NS_DispatchToCurrentThread(ev);
+  return DispatchToTabGroup("nsDocShell::OnLinkClickEvent",
+                            TaskCategory::UI, ev.forget());
 }
 
 NS_IMETHODIMP
@@ -14216,12 +14268,10 @@ nsDocShell::OnOverLink(nsIContent* aContent,
   rv = textToSubURI->UnEscapeURIForUI(charset, spec, uStr);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  OriginAttributes attrs;
-  attrs.Inherit(aContent->NodePrincipal()->OriginAttributesRef());
-
   mozilla::net::PredictorPredict(aURI, mCurrentURI,
                                  nsINetworkPredictor::PREDICT_LINK,
-                                 attrs, nullptr);
+                                 aContent->NodePrincipal()->OriginAttributesRef(),
+                                 nullptr);
 
   if (browserChrome2) {
     nsCOMPtr<nsIDOMElement> element = do_QueryInterface(aContent);
@@ -14733,10 +14783,8 @@ nsDocShell::ShouldPrepareForIntercept(nsIURI* aURI, bool aIsNonSubresourceReques
   }
 
   if (aIsNonSubresourceRequest) {
-    OriginAttributes attrs;
-    attrs.Inherit(mOriginAttributes);
     nsCOMPtr<nsIPrincipal> principal =
-      BasePrincipal::CreateCodebasePrincipal(aURI, attrs);
+      BasePrincipal::CreateCodebasePrincipal(aURI, mOriginAttributes);
     *aShouldIntercept = swm->IsAvailable(principal, aURI);
     return NS_OK;
   }
@@ -14785,12 +14833,9 @@ nsDocShell::ChannelIntercepted(nsIInterceptedChannel* aChannel)
 
   bool isReload = mLoadType & LOAD_CMD_RELOAD;
 
-  OriginAttributes attrs;
-  attrs.Inherit(mOriginAttributes);
-
   ErrorResult error;
-  swm->DispatchFetchEvent(attrs, doc, mInterceptedDocumentId, aChannel,
-                          isReload, isSubresourceLoad, error);
+  swm->DispatchFetchEvent(mOriginAttributes, doc, mInterceptedDocumentId,
+                          aChannel, isReload, isSubresourceLoad, error);
   if (NS_WARN_IF(error.Failed())) {
     return error.StealNSResult();
   }

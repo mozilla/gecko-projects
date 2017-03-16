@@ -652,6 +652,14 @@ bool NS_HasBeenCrossOrigin(nsIChannel* aChannel, bool aReport = false);
 #define NECKO_SAFEBROWSING_FIRST_PARTY_DOMAIN \
   "safebrowsing.86868755-6b82-4842-b301-72671a0db32e.mozilla"
 
+// Unique first-party domain for separating about uri.
+#define ABOUT_URI_FIRST_PARTY_DOMAIN \
+  "about.ef2a7dd5-93bc-417f-a698-142c3116864f.mozilla"
+
+// Unique first-party domain for separating null principal.
+#define NULL_PRINCIPAL_FIRST_PARTY_DOMAIN \
+  "1f1841ad-0395-48ba-aec4-c98ee3f6e614.mozilla"
+
 /**
  * Determines whether appcache should be checked for a given URI.
  */
@@ -942,6 +950,11 @@ nsresult NS_CompareLoadInfoAndLoadContext(nsIChannel *aChannel);
  * pref network.http.referer.userControlPolicy
  */
 uint32_t NS_GetDefaultReferrerPolicy();
+
+/**
+ * Update the window id of the current focused top level content window.
+ */
+nsresult NS_NotifyCurrentTopLevelOuterContentWindowId(uint64_t aWindowId);
 
 namespace mozilla {
 namespace net {

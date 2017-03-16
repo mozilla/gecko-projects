@@ -1369,7 +1369,8 @@ Predictor::Prefetch(nsIURI *uri, nsIURI *referrer,
     return NS_ERROR_UNEXPECTED;
   }
 
-  httpChannel->SetReferrer(referrer);
+  rv = httpChannel->SetReferrer(referrer);
+  NS_ENSURE_SUCCESS(rv, rv);
   // XXX - set a header here to indicate this is a prefetch?
 
   nsCOMPtr<nsIStreamListener> listener = new PrefetchListener(verifier, uri,
@@ -1445,11 +1446,11 @@ Predictor::RunPredictions(nsIURI *referrer,
     uri->GetAsciiHost(hostname);
     PREDICTOR_LOG(("    doing preresolve %s", hostname.get()));
     nsCOMPtr<nsICancelable> tmpCancelable;
-    mDnsService->AsyncResolve(hostname,
-                              (nsIDNSService::RESOLVE_PRIORITY_MEDIUM |
-                               nsIDNSService::RESOLVE_SPECULATE),
-                              mDNSListener, nullptr,
-                              getter_AddRefs(tmpCancelable));
+    mDnsService->AsyncResolveNative(hostname,
+                                    (nsIDNSService::RESOLVE_PRIORITY_MEDIUM |
+                                     nsIDNSService::RESOLVE_SPECULATE),
+                                    mDNSListener, nullptr, originAttributes,
+                                    getter_AddRefs(tmpCancelable));
     predicted = true;
     if (verifier) {
       PREDICTOR_LOG(("    sending preresolve verification"));
@@ -2280,10 +2281,7 @@ PredictorLearn(nsIURI *targetURI, nsIURI *sourceURI,
       loadContext = do_GetInterface(callbacks);
 
       if (loadContext) {
-        OriginAttributes dAttrs;
-        loadContext->GetOriginAttributes(dAttrs);
-
-        originAttributes.Inherit(dAttrs);
+        loadContext->GetOriginAttributes(originAttributes);
       }
     }
   }
@@ -2312,9 +2310,8 @@ PredictorLearn(nsIURI *targetURI, nsIURI *sourceURI,
     nsCOMPtr<nsIPrincipal> docPrincipal = document->NodePrincipal();
 
     if (docPrincipal) {
-      originAttributes.Inherit(docPrincipal->OriginAttributesRef());
+      originAttributes = docPrincipal->OriginAttributesRef();
     }
-
   }
 
   return predictor->LearnNative(targetURI, sourceURI, reason, originAttributes);

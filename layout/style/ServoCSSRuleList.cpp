@@ -10,13 +10,13 @@
 
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoStyleRule.h"
+#include "mozilla/ServoMediaRule.h"
+#include "mozilla/ServoNamespaceRule.h"
 
 namespace mozilla {
 
-ServoCSSRuleList::ServoCSSRuleList(ServoStyleSheet* aStyleSheet,
-                                   already_AddRefed<ServoCssRules> aRawRules)
-  : mStyleSheet(aStyleSheet)
-  , mRawRules(aRawRules)
+ServoCSSRuleList::ServoCSSRuleList(already_AddRefed<ServoCssRules> aRawRules)
+  : mRawRules(aRawRules)
 {
   Servo_CssRules_ListTypes(mRawRules, &mRules);
   // XXX We may want to eagerly create object for import rule, so that
@@ -34,14 +34,7 @@ NS_IMPL_RELEASE_INHERITED(ServoCSSRuleList, dom::CSSRuleList)
 NS_IMPL_CYCLE_COLLECTION_CLASS(ServoCSSRuleList)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(ServoCSSRuleList)
-  for (uintptr_t& rule : tmp->mRules) {
-    if (rule > kMaxRuleType) {
-      CastToPtr(rule)->Release();
-      // Safest to set it to zero, in case someone else pokes at it
-      // during their own unlinking process.
-      rule = 0;
-    }
-  }
+  tmp->DropAllRules();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END_INHERITED(dom::CSSRuleList)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ServoCSSRuleList,
                                                   dom::CSSRuleList)
@@ -53,6 +46,24 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ServoCSSRuleList,
   });
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
+void
+ServoCSSRuleList::SetParentRule(css::GroupRule* aParentRule)
+{
+  mParentRule = aParentRule;
+  EnumerateInstantiatedRules([aParentRule](css::Rule* rule) {
+    rule->SetParentRule(aParentRule);
+  });
+}
+
+void
+ServoCSSRuleList::SetStyleSheet(StyleSheet* aStyleSheet)
+{
+  mStyleSheet = aStyleSheet ? aStyleSheet->AsServo() : nullptr;
+  EnumerateInstantiatedRules([aStyleSheet](css::Rule* rule) {
+    rule->SetStyleSheet(aStyleSheet);
+  });
+}
+
 css::Rule*
 ServoCSSRuleList::GetRule(uint32_t aIndex)
 {
@@ -60,21 +71,25 @@ ServoCSSRuleList::GetRule(uint32_t aIndex)
   if (rule <= kMaxRuleType) {
     RefPtr<css::Rule> ruleObj = nullptr;
     switch (rule) {
-      case nsIDOMCSSRule::STYLE_RULE: {
-        ruleObj = new ServoStyleRule(
-          Servo_CssRules_GetStyleRuleAt(mRawRules, aIndex).Consume());
-        break;
+#define CASE_RULE(const_, name_)                                            \
+      case nsIDOMCSSRule::const_##_RULE: {                                  \
+        ruleObj = new Servo##name_##Rule(                                   \
+          Servo_CssRules_Get##name_##RuleAt(mRawRules, aIndex).Consume());  \
+        break;                                                              \
       }
-      case nsIDOMCSSRule::MEDIA_RULE:
+      CASE_RULE(STYLE, Style)
+      CASE_RULE(MEDIA, Media)
+      CASE_RULE(NAMESPACE, Namespace)
+#undef CASE_RULE
       case nsIDOMCSSRule::FONT_FACE_RULE:
       case nsIDOMCSSRule::KEYFRAMES_RULE:
-      case nsIDOMCSSRule::NAMESPACE_RULE:
         // XXX create corresponding rules
       default:
         NS_WARNING("stylo: not implemented yet");
         return nullptr;
     }
     ruleObj->SetStyleSheet(mStyleSheet);
+    ruleObj->SetParentRule(mParentRule);
     rule = CastToUint(ruleObj.forget().take());
     mRules[aIndex] = rule;
   }
@@ -103,22 +118,36 @@ ServoCSSRuleList::EnumerateInstantiatedRules(Func aCallback)
   }
 }
 
+static void
+DropRule(already_AddRefed<css::Rule> aRule)
+{
+  RefPtr<css::Rule> rule = aRule;
+  rule->SetStyleSheet(nullptr);
+  rule->SetParentRule(nullptr);
+}
+
+void
+ServoCSSRuleList::DropAllRules()
+{
+  EnumerateInstantiatedRules([](css::Rule* rule) {
+    DropRule(already_AddRefed<css::Rule>(rule));
+  });
+  mRules.Clear();
+}
+
 void
 ServoCSSRuleList::DropReference()
 {
   mStyleSheet = nullptr;
-  EnumerateInstantiatedRules([](css::Rule* rule) {
-    rule->SetStyleSheet(nullptr);
-  });
+  mParentRule = nullptr;
+  DropAllRules();
 }
 
 nsresult
 ServoCSSRuleList::InsertRule(const nsAString& aRule, uint32_t aIndex)
 {
   NS_ConvertUTF16toUTF8 rule(aRule);
-  // XXX This needs to actually reflect whether it is nested when we
-  // support using CSSRuleList in CSSGroupingRules.
-  bool nested = false;
+  bool nested = !!mParentRule;
   uint16_t type;
   nsresult rv = Servo_CssRules_InsertRule(mRawRules, mStyleSheet->RawSheet(),
                                           &rule, aIndex, nested, &type);
@@ -135,7 +164,7 @@ ServoCSSRuleList::DeleteRule(uint32_t aIndex)
   if (!NS_FAILED(rv)) {
     uintptr_t rule = mRules[aIndex];
     if (rule > kMaxRuleType) {
-      CastToPtr(rule)->Release();
+      DropRule(already_AddRefed<css::Rule>(CastToPtr(rule)));
     }
     mRules.RemoveElementAt(aIndex);
   }
@@ -144,7 +173,7 @@ ServoCSSRuleList::DeleteRule(uint32_t aIndex)
 
 ServoCSSRuleList::~ServoCSSRuleList()
 {
-  EnumerateInstantiatedRules([](css::Rule* rule) { rule->Release(); });
+  DropAllRules();
 }
 
 } // namespace mozilla

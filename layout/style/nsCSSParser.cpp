@@ -1069,6 +1069,7 @@ protected:
                                                      char aStop,
                                                      bool aIsXPoint);
   bool ParseTransitionStepTimingFunctionValues(nsCSSValue& aValue);
+  bool ParseTransitionFramesTimingFunctionValues(nsCSSValue& aValue);
   enum ParseAnimationOrTransitionShorthandResult {
     eParseAnimationOrTransitionShorthand_Values,
     eParseAnimationOrTransitionShorthand_Inherit,
@@ -6034,7 +6035,8 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
   // anonymous boxes are only allowed if they're the tree boxes or we have
   // enabled agent rules
   bool isAnonBox = isTreePseudo ||
-    (pseudoElementType == CSSPseudoElementType::AnonBox &&
+    ((pseudoElementType == CSSPseudoElementType::InheritingAnonBox ||
+      pseudoElementType == CSSPseudoElementType::NonInheritingAnonBox) &&
      AgentRulesEnabled());
   bool isPseudoClass =
     (pseudoClassType != CSSPseudoClassType::NotPseudo);
@@ -6557,7 +6559,8 @@ CSSParserImpl::ParseSelector(nsCSSSelectorList* aList,
                                           getter_Transfers(pseudoElementArgs),
                                           &pseudoElementType);
       if (pseudoElement &&
-          pseudoElementType != CSSPseudoElementType::AnonBox) {
+          pseudoElementType != CSSPseudoElementType::InheritingAnonBox &&
+          pseudoElementType != CSSPseudoElementType::NonInheritingAnonBox) {
         // Pseudo-elements other than anonymous boxes are represented with
         // a special ':' combinator.
 
@@ -6616,7 +6619,8 @@ CSSParserImpl::ParseSelector(nsCSSSelectorList* aList,
     return false;
   }
 
-  if (pseudoElementType == CSSPseudoElementType::AnonBox) {
+  if (pseudoElementType == CSSPseudoElementType::InheritingAnonBox ||
+      pseudoElementType == CSSPseudoElementType::NonInheritingAnonBox) {
     // We got an anonymous box pseudo-element; it must be the only
     // thing in this selector group.
     if (selector->mNext || !IsUniversalSelector(*selector)) {
@@ -7938,6 +7942,13 @@ CSSParserImpl::ParseVariant(nsCSSValue& aValue,
     }
     if (tk->mIdent.LowerCaseEqualsLiteral("steps")) {
       if (!ParseTransitionStepTimingFunctionValues(aValue)) {
+        SkipUntil(')');
+        return CSSParseResult::Error;
+      }
+      return CSSParseResult::Ok;
+    }
+    if (tk->mIdent.LowerCaseEqualsLiteral("frames")) {
+      if (!ParseTransitionFramesTimingFunctionValues(aValue)) {
         SkipUntil(')');
         return CSSParseResult::Error;
       }
@@ -14039,7 +14050,6 @@ CSSParserImpl::ParseFont()
       AppendValue(eCSSProperty_font_feature_settings, family);
       AppendValue(eCSSProperty_font_language_override, family);
       AppendValue(eCSSProperty_font_kerning, family);
-      AppendValue(eCSSProperty_font_synthesis, family);
       AppendValue(eCSSProperty_font_variant_alternates, family);
       AppendValue(eCSSProperty_font_variant_caps, family);
       AppendValue(eCSSProperty_font_variant_east_asian, family);
@@ -14060,7 +14070,6 @@ CSSParserImpl::ParseFont()
       AppendValue(eCSSProperty_font_feature_settings, systemFont);
       AppendValue(eCSSProperty_font_language_override, systemFont);
       AppendValue(eCSSProperty_font_kerning, systemFont);
-      AppendValue(eCSSProperty_font_synthesis, systemFont);
       AppendValue(eCSSProperty_font_variant_alternates, systemFont);
       AppendValue(eCSSProperty_font_variant_caps, systemFont);
       AppendValue(eCSSProperty_font_variant_east_asian, systemFont);
@@ -14167,9 +14176,6 @@ CSSParserImpl::ParseFont()
       AppendValue(eCSSProperty_font_language_override, nsCSSValue(eCSSUnit_Normal));
       AppendValue(eCSSProperty_font_kerning,
                   nsCSSValue(NS_FONT_KERNING_AUTO, eCSSUnit_Enumerated));
-      AppendValue(eCSSProperty_font_synthesis,
-                  nsCSSValue(NS_FONT_SYNTHESIS_WEIGHT | NS_FONT_SYNTHESIS_STYLE,
-                             eCSSUnit_Enumerated));
       AppendValue(eCSSProperty_font_variant_alternates,
                   nsCSSValue(eCSSUnit_Normal));
       AppendValue(eCSSProperty_font_variant_east_asian,
@@ -16090,14 +16096,13 @@ bool CSSParserImpl::ParseWillChange()
       }
     }
 
-    nsString str;
-    value.GetStringValue(str);
-    if (str.LowerCaseEqualsLiteral("default") ||
-        str.LowerCaseEqualsLiteral("will-change")) {
+    value.AtomizeIdentValue();
+    nsIAtom* atom = value.GetAtomValue();
+    if (atom == nsGkAtoms::_default || atom == nsGkAtoms::willChange) {
       return false;
     }
 
-    currentListValue->mValue = value;
+    currentListValue->mValue = Move(value);
 
     if (!ExpectSymbol(',', true)) {
       break;
@@ -16798,6 +16803,39 @@ CSSParserImpl::ParseTransitionStepTimingFunctionValues(nsCSSValue& aValue)
   }
 
   aValue.SetArrayValue(val, eCSSUnit_Steps);
+  return true;
+}
+
+bool
+CSSParserImpl::ParseTransitionFramesTimingFunctionValues(nsCSSValue& aValue)
+{
+  NS_ASSERTION(!mHavePushBack &&
+               mToken.mType == eCSSToken_Function &&
+               mToken.mIdent.LowerCaseEqualsLiteral("frames"),
+               "unexpected initial state");
+
+  nsCSSKeyword functionName = nsCSSKeywords::LookupKeyword(mToken.mIdent);
+  MOZ_ASSERT(functionName == eCSSKeyword_frames);
+
+  nsCSSValue frameNumber;
+  if (!ParseSingleTokenOneOrLargerVariant(frameNumber, VARIANT_INTEGER,
+                                          nullptr)) {
+    return false;
+  }
+  MOZ_ASSERT(frameNumber.GetIntValue() >= 1,
+             "Parsing function should've enforced OneOrLarger, per its name");
+
+  // The number of frames must be a positive integer greater than one.
+  if (frameNumber.GetIntValue() == 1) {
+    return false;
+  }
+
+  if (!ExpectSymbol(')', true)) {
+    return false;
+  }
+
+  RefPtr<nsCSSValue::Array> val = aValue.InitFunction(functionName, 1);
+  val->Item(1) = frameNumber;
   return true;
 }
 

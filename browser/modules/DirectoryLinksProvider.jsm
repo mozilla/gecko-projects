@@ -188,14 +188,11 @@ var DirectoryLinksProvider = {
    * @return  the selected locale or "en-US" if none is selected
    */
   get locale() {
-    let matchOS;
-    try {
-      matchOS = Services.prefs.getBoolPref(PREF_MATCH_OS_LOCALE);
-    } catch (e) {}
+    let matchOS = Services.prefs.getBoolPref(PREF_MATCH_OS_LOCALE, false);
 
     if (matchOS) {
       return Cc["@mozilla.org/intl/ospreferences;1"].
-             getService(Ci.mozIOSPreferences).getSystemLocale();
+             getService(Ci.mozIOSPreferences).systemLocale;
     }
 
     try {

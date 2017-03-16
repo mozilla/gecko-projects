@@ -168,11 +168,7 @@ var PrefObserver = {
         Services.prefs.removeObserver(PREF_LOGGING_ENABLED, this);
         Services.obs.removeObserver(this, "xpcom-shutdown");
       } else if (aTopic == NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) {
-        let debugLogEnabled = false;
-        try {
-          debugLogEnabled = Services.prefs.getBoolPref(PREF_LOGGING_ENABLED);
-        } catch (e) {
-        }
+        let debugLogEnabled = Services.prefs.getBoolPref(PREF_LOGGING_ENABLED, false);
         if (debugLogEnabled) {
           parentLogger.level = Log.Level.Debug;
         } else {
@@ -332,7 +328,7 @@ function getLocale() {
     if (Services.prefs.getBoolPref(PREF_MATCH_OS_LOCALE)) {
       const osPrefs =
         Cc["@mozilla.org/intl/ospreferences;1"].getService(Ci.mozIOSPreferences);
-      return osPrefs.getSystemLocale();
+      return osPrefs.systemLocale;
     }
   } catch (e) { }
 
@@ -641,8 +637,8 @@ var gCheckUpdateSecurityDefault = true;
 var gCheckUpdateSecurity = gCheckUpdateSecurityDefault;
 var gUpdateEnabled = true;
 var gAutoUpdateDefault = true;
-var gHotfixID = null;
-var gWebExtensionsMinPlatformVersion = null;
+var gHotfixID = "";
+var gWebExtensionsMinPlatformVersion = "";
 var gShutdownBarrier = null;
 var gRepoShutdownState = "";
 var gShutdownInProgress = false;
@@ -821,10 +817,7 @@ var AddonManagerInternal = {
 
       Extension.browserUpdated = appChanged;
 
-      let oldPlatformVersion = null;
-      try {
-        oldPlatformVersion = Services.prefs.getCharPref(PREF_EM_LAST_PLATFORM_VERSION);
-      } catch (e) { }
+      let oldPlatformVersion = Services.prefs.getCharPref(PREF_EM_LAST_PLATFORM_VERSION, "");
 
       if (appChanged !== false) {
         logger.debug("Application has been upgraded");
@@ -842,50 +835,38 @@ var AddonManagerInternal = {
                                       Services.appinfo.version.replace(BRANCH_REGEXP, "$1");
       }
 
-      try {
-        gCheckCompatibility = Services.prefs.getBoolPref(PREF_EM_CHECK_COMPATIBILITY);
-      } catch (e) {}
+      gCheckCompatibility = Services.prefs.getBoolPref(PREF_EM_CHECK_COMPATIBILITY,
+                                                       gCheckCompatibility);
       Services.prefs.addObserver(PREF_EM_CHECK_COMPATIBILITY, this, false);
 
-      try {
-        gStrictCompatibility = Services.prefs.getBoolPref(PREF_EM_STRICT_COMPATIBILITY);
-      } catch (e) {}
+      gStrictCompatibility = Services.prefs.getBoolPref(PREF_EM_STRICT_COMPATIBILITY,
+                                                        gStrictCompatibility);
       Services.prefs.addObserver(PREF_EM_STRICT_COMPATIBILITY, this, false);
 
-      try {
-        let defaultBranch = Services.prefs.getDefaultBranch("");
-        gCheckUpdateSecurityDefault = defaultBranch.getBoolPref(PREF_EM_CHECK_UPDATE_SECURITY);
-      } catch (e) {}
+      let defaultBranch = Services.prefs.getDefaultBranch("");
+      gCheckUpdateSecurityDefault = defaultBranch.getBoolPref(PREF_EM_CHECK_UPDATE_SECURITY,
+                                                              gCheckUpdateSecurityDefault);
 
-      try {
-        gCheckUpdateSecurity = Services.prefs.getBoolPref(PREF_EM_CHECK_UPDATE_SECURITY);
-      } catch (e) {}
+      gCheckUpdateSecurity = Services.prefs.getBoolPref(PREF_EM_CHECK_UPDATE_SECURITY,
+                                                        gCheckUpdateSecurity);
       Services.prefs.addObserver(PREF_EM_CHECK_UPDATE_SECURITY, this, false);
 
-      try {
-        gUpdateEnabled = Services.prefs.getBoolPref(PREF_EM_UPDATE_ENABLED);
-      } catch (e) {}
+      gUpdateEnabled = Services.prefs.getBoolPref(PREF_EM_UPDATE_ENABLED, gUpdateEnabled);
       Services.prefs.addObserver(PREF_EM_UPDATE_ENABLED, this, false);
 
-      try {
-        gAutoUpdateDefault = Services.prefs.getBoolPref(PREF_EM_AUTOUPDATE_DEFAULT);
-      } catch (e) {}
+      gAutoUpdateDefault = Services.prefs.getBoolPref(PREF_EM_AUTOUPDATE_DEFAULT,
+                                                      gAutoUpdateDefault);
       Services.prefs.addObserver(PREF_EM_AUTOUPDATE_DEFAULT, this, false);
 
-      try {
-        gHotfixID = Services.prefs.getCharPref(PREF_EM_HOTFIX_ID);
-      } catch (e) {}
+      gHotfixID = Services.prefs.getCharPref(PREF_EM_HOTFIX_ID, gHotfixID);
       Services.prefs.addObserver(PREF_EM_HOTFIX_ID, this, false);
 
-      try {
-        gWebExtensionsMinPlatformVersion = Services.prefs.getCharPref(PREF_MIN_WEBEXT_PLATFORM_VERSION);
-      } catch (e) {}
+      gWebExtensionsMinPlatformVersion =
+        Services.prefs.getCharPref(PREF_MIN_WEBEXT_PLATFORM_VERSION,
+                                   gWebExtensionsMinPlatformVersion);
       Services.prefs.addObserver(PREF_MIN_WEBEXT_PLATFORM_VERSION, this, false);
 
-      let defaultProvidersEnabled = true;
-      try {
-        defaultProvidersEnabled = Services.prefs.getBoolPref(PREF_DEFAULT_PROVIDERS_ENABLED);
-      } catch (e) {}
+      let defaultProvidersEnabled = Services.prefs.getBoolPref(PREF_DEFAULT_PROVIDERS_ENABLED, true);
       AddonManagerPrivate.recordSimpleMeasure("default_providers", defaultProvidersEnabled);
 
       // Ensure all default providers have had a chance to register themselves
@@ -1226,11 +1207,7 @@ var AddonManagerInternal = {
     switch (aData) {
       case PREF_EM_CHECK_COMPATIBILITY: {
         let oldValue = gCheckCompatibility;
-        try {
-          gCheckCompatibility = Services.prefs.getBoolPref(PREF_EM_CHECK_COMPATIBILITY);
-        } catch (e) {
-          gCheckCompatibility = true;
-        }
+        gCheckCompatibility = Services.prefs.getBoolPref(PREF_EM_CHECK_COMPATIBILITY, true);
 
         this.callManagerListeners("onCompatibilityModeChanged");
 
@@ -1241,11 +1218,7 @@ var AddonManagerInternal = {
       }
       case PREF_EM_STRICT_COMPATIBILITY: {
         let oldValue = gStrictCompatibility;
-        try {
-          gStrictCompatibility = Services.prefs.getBoolPref(PREF_EM_STRICT_COMPATIBILITY);
-        } catch (e) {
-          gStrictCompatibility = true;
-        }
+        gStrictCompatibility = Services.prefs.getBoolPref(PREF_EM_STRICT_COMPATIBILITY, true);
 
         this.callManagerListeners("onCompatibilityModeChanged");
 
@@ -1256,11 +1229,7 @@ var AddonManagerInternal = {
       }
       case PREF_EM_CHECK_UPDATE_SECURITY: {
         let oldValue = gCheckUpdateSecurity;
-        try {
-          gCheckUpdateSecurity = Services.prefs.getBoolPref(PREF_EM_CHECK_UPDATE_SECURITY);
-        } catch (e) {
-          gCheckUpdateSecurity = true;
-        }
+        gCheckUpdateSecurity = Services.prefs.getBoolPref(PREF_EM_CHECK_UPDATE_SECURITY, true);
 
         this.callManagerListeners("onCheckUpdateSecurityChanged");
 
@@ -1270,31 +1239,19 @@ var AddonManagerInternal = {
         break;
       }
       case PREF_EM_UPDATE_ENABLED: {
-        try {
-          gUpdateEnabled = Services.prefs.getBoolPref(PREF_EM_UPDATE_ENABLED);
-        } catch (e) {
-          gUpdateEnabled = true;
-        }
+        gUpdateEnabled = Services.prefs.getBoolPref(PREF_EM_UPDATE_ENABLED, true);
 
         this.callManagerListeners("onUpdateModeChanged");
         break;
       }
       case PREF_EM_AUTOUPDATE_DEFAULT: {
-        try {
-          gAutoUpdateDefault = Services.prefs.getBoolPref(PREF_EM_AUTOUPDATE_DEFAULT);
-        } catch (e) {
-          gAutoUpdateDefault = true;
-        }
+        gAutoUpdateDefault = Services.prefs.getBoolPref(PREF_EM_AUTOUPDATE_DEFAULT, true);
 
         this.callManagerListeners("onUpdateModeChanged");
         break;
       }
       case PREF_EM_HOTFIX_ID: {
-        try {
-          gHotfixID = Services.prefs.getCharPref(PREF_EM_HOTFIX_ID);
-        } catch (e) {
-          gHotfixID = null;
-        }
+        gHotfixID = Services.prefs.getCharPref(PREF_EM_HOTFIX_ID, "");
         break;
       }
       case PREF_MIN_WEBEXT_PLATFORM_VERSION: {
@@ -1474,10 +1431,7 @@ var AddonManagerInternal = {
       }
 
       if (checkHotfix) {
-        var hotfixVersion = "";
-        try {
-          hotfixVersion = Services.prefs.getCharPref(PREF_EM_HOTFIX_LASTVERSION);
-        } catch (e) { }
+        var hotfixVersion = Services.prefs.getCharPref(PREF_EM_HOTFIX_LASTVERSION, "");
 
         let url = null;
         if (Services.prefs.getPrefType(PREF_EM_HOTFIX_URL) == Ci.nsIPrefBranch.PREF_STRING)
@@ -2070,6 +2024,13 @@ var AddonManagerInternal = {
   startInstall(browser, url, install) {
     this.installNotifyObservers("addon-install-started", browser, url, install);
 
+    // Local installs may already be in a failed state in which case
+    // we won't get any further events, detect those cases now.
+    if (install.state == AddonManager.STATE_DOWNLOADED && install.addon.appDisabled) {
+          this.installNotifyObservers("addon-install-failed", browser, url, install);
+          return;
+    }
+
     let self = this;
     let listener = {
       onDownloadCancelled() {
@@ -2191,17 +2152,17 @@ var AddonManagerInternal = {
       // install in that case.
       new BrowserListener(aBrowser, aInstallingPrincipal, aInstall);
 
-      AddonManagerInternal.setupPromptHandler(aBrowser, aInstallingPrincipal.URI, aInstall, true);
+      let startInstall = (source) => {
+        AddonManagerInternal.setupPromptHandler(aBrowser, aInstallingPrincipal.URI, aInstall, true, source);
 
-      let startInstall = () => {
         AddonManagerInternal.startInstall(aBrowser, aInstallingPrincipal.URI, aInstall);
       };
       if (!this.isInstallAllowed(aMimetype, aInstallingPrincipal)) {
         this.installNotifyObservers("addon-install-blocked", topBrowser,
                                     aInstallingPrincipal.URI, aInstall,
-                                    startInstall);
+                                    () => startInstall("other"));
       } else {
-        startInstall();
+        startInstall("AMO");
       }
     } catch (e) {
       // In the event that the weblistener throws during instantiation or when
@@ -2228,7 +2189,7 @@ var AddonManagerInternal = {
       throw Components.Exception("AddonManager is not initialized",
                                  Cr.NS_ERROR_NOT_INITIALIZED);
 
-    AddonManagerInternal.setupPromptHandler(browser, uri, install, true);
+    AddonManagerInternal.setupPromptHandler(browser, uri, install, true, "local");
     AddonManagerInternal.startInstall(browser, uri, install);
   },
 
@@ -2825,7 +2786,7 @@ var AddonManagerInternal = {
     return gHotfixID;
   },
 
-  setupPromptHandler(browser, url, install, requireConfirm) {
+  setupPromptHandler(browser, url, install, requireConfirm, source) {
     install.promptHandler = info => new Promise((resolve, _reject) => {
       let reject = () => {
         this.installNotifyObservers("addon-install-cancelled",
@@ -2852,7 +2813,7 @@ var AddonManagerInternal = {
         let subject = {
           wrappedJSObject: {
             target: browser,
-            info: Object.assign({resolve, reject}, info),
+            info: Object.assign({resolve, reject, source}, info),
           }
         };
         subject.wrappedJSObject.info.permissions = info.addon.userPermissions;
@@ -3041,7 +3002,7 @@ var AddonManagerInternal = {
 
       return AddonManagerInternal.getInstallForURL(options.url, "application/x-xpinstall", options.hash)
                                  .then(install => {
-        AddonManagerInternal.setupPromptHandler(target, null, install, false);
+        AddonManagerInternal.setupPromptHandler(target, null, install, false, "AMO");
 
         let id = this.nextInstall++;
         let {listener, installPromise} = this.makeListener(id, target.messageManager);

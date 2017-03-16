@@ -14,7 +14,7 @@ extern crate parking_lot;
 extern crate rayon;
 extern crate rustc_serialize;
 extern crate selectors;
-extern crate servo_atoms;
+#[macro_use] extern crate servo_atoms;
 extern crate servo_config;
 extern crate servo_url;
 extern crate style;
@@ -23,7 +23,6 @@ extern crate test;
 
 mod animated_properties;
 mod attr;
-mod cache;
 mod keyframes;
 mod logical_geometry;
 mod media_queries;

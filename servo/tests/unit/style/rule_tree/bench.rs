@@ -17,12 +17,9 @@ use test::{self, Bencher};
 
 struct ErrorringErrorReporter;
 impl ParseErrorReporter for ErrorringErrorReporter {
-    fn report_error(&self, _: &mut Parser, position: SourcePosition, message: &str) {
-        panic!("CSS error: {:?} {}", position, message);
-    }
-
-    fn clone(&self) -> Box<ParseErrorReporter + Send + Sync> {
-        Box::new(ErrorringErrorReporter)
+    fn report_error(&self, _input: &mut Parser, position: SourcePosition, message: &str,
+        url: &ServoUrl) {
+        panic!("CSS error: {}\t\n{:?} {}", url.as_str(), position, message);
     }
 }
 
@@ -48,7 +45,7 @@ fn parse_rules(css: &str) -> Vec<(StyleSource, CascadeLevel)> {
                                      media_queries: vec![],
                                  },
                                  None,
-                                 Box::new(ErrorringErrorReporter),
+                                 &ErrorringErrorReporter,
                                  ParserContextExtraData {});
     let rules = s.rules.read();
     rules.0.iter().filter_map(|rule| {
@@ -67,14 +64,11 @@ fn test_insertion(rule_tree: &RuleTree, rules: Vec<(StyleSource, CascadeLevel)>)
 
 fn test_insertion_style_attribute(rule_tree: &RuleTree, rules: &[(StyleSource, CascadeLevel)]) -> StrongRuleNode {
     let mut rules = rules.to_vec();
-    rules.push((StyleSource::Declarations(Arc::new(RwLock::new(PropertyDeclarationBlock {
-        declarations: vec![
-            (PropertyDeclaration::Display(DeclaredValue::Value(
-                longhands::display::SpecifiedValue::block)),
-            Importance::Normal),
-        ],
-        important_count: 0,
-    }))), CascadeLevel::UserNormal));
+    rules.push((StyleSource::Declarations(Arc::new(RwLock::new(PropertyDeclarationBlock::with_one(
+        PropertyDeclaration::Display(DeclaredValue::Value(
+            longhands::display::SpecifiedValue::block)),
+        Importance::Normal
+    )))), CascadeLevel::UserNormal));
     test_insertion(rule_tree, rules)
 }
 

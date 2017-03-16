@@ -32,14 +32,7 @@ function checkDouble(element, maxVal) {
 
 // ---------------------------------------------------
 function isListOfPrinterFeaturesAvailable() {
-  var has_printerfeatures = false;
-
-  try {
-    has_printerfeatures = gPrefs.getBoolPref("print.tmp.printerfeatures." + gPrintSettings.printerName + ".has_special_printerfeatures");
-  } catch (ex) {
-  }
-
-  return has_printerfeatures;
+  return gPrefs.getBoolPref("print.tmp.printerfeatures." + gPrintSettings.printerName + ".has_special_printerfeatures", false);
 }
 
 // ---------------------------------------------------
@@ -88,7 +81,7 @@ paperListElement.prototype =
   {
     clearPaperList() {
           // remove the menupopup node child of the menulist.
-          this.paperListElement.removeChild(this.paperListElement.firstChild);
+          this.paperListElement.firstChild.remove();
         },
 
     appendPaperNames(aDataObject) {

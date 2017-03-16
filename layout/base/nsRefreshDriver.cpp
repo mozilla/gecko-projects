@@ -485,34 +485,6 @@ private:
       MOZ_ASSERT(NS_IsMainThread());
     }
 
-    class ParentProcessVsyncNotifier final: public Runnable,
-                                            public nsIRunnablePriority
-    {
-    public:
-      ParentProcessVsyncNotifier(RefreshDriverVsyncObserver* aObserver,
-                                 TimeStamp aVsyncTimestamp)
-        : mObserver(aObserver), mVsyncTimestamp(aVsyncTimestamp) {}
-
-      NS_DECL_ISUPPORTS_INHERITED
-
-      NS_IMETHOD Run() override
-      {
-        mObserver->TickRefreshDriver(mVsyncTimestamp);
-        return NS_OK;
-      }
-
-      NS_IMETHOD GetPriority(uint32_t* aPriority) override
-      {
-        *aPriority = nsIRunnablePriority::PRIORITY_HIGH;
-        return NS_OK;
-      }
-
-    private:
-      ~ParentProcessVsyncNotifier() {}
-      RefPtr<RefreshDriverVsyncObserver> mObserver;
-      TimeStamp mVsyncTimestamp;
-    };
-
     bool NotifyVsync(TimeStamp aVsyncTimestamp) override
     {
       if (!NS_IsMainThread()) {
@@ -530,7 +502,9 @@ private:
         }
 
         nsCOMPtr<nsIRunnable> vsyncEvent =
-          new ParentProcessVsyncNotifier(this, aVsyncTimestamp);
+             NewRunnableMethod<TimeStamp>(this,
+                                          &RefreshDriverVsyncObserver::TickRefreshDriver,
+                                          aVsyncTimestamp);
         NS_DispatchToMainThread(vsyncEvent);
       } else {
         mRecentVsync = aVsyncTimestamp;
@@ -746,11 +720,6 @@ private:
   RefPtr<VsyncChild> mVsyncChild;
   TimeDuration mVsyncRate;
 }; // VsyncRefreshDriverTimer
-
-NS_IMPL_ISUPPORTS_INHERITED(VsyncRefreshDriverTimer::
-                            RefreshDriverVsyncObserver::
-                            ParentProcessVsyncNotifier,
-                            Runnable, nsIRunnablePriority)
 
 /**
  * Since the content process takes some time to setup
@@ -1327,9 +1296,11 @@ nsRefreshDriver::RemoveImageRequest(imgIRequest* aRequest)
 void
 nsRefreshDriver::EnsureTimerStarted(EnsureTimerStartedFlags aFlags)
 {
-  MOZ_ASSERT(!ServoStyleSet::IsInServoTraversal(),
+  // FIXME: Bug 1346065: We should also assert the case where we have
+  // STYLO_THREADS=1.
+  MOZ_ASSERT(!ServoStyleSet::IsInServoTraversal() || NS_IsMainThread(),
              "EnsureTimerStarted should be called only when we are not "
-             "in servo traversal");
+             "in servo traversal or on the main-thread");
 
   if (mTestControllingRefreshes)
     return;
@@ -2192,6 +2163,19 @@ nsRefreshDriver::RevokeTransactionId(uint64_t aTransactionId)
     FinishedWaitingForTransaction();
   }
   mPendingTransaction--;
+}
+
+void
+nsRefreshDriver::ClearPendingTransactions()
+{
+  mCompletedTransaction = mPendingTransaction;
+  mWaitingForTransaction = false;
+}
+
+void
+nsRefreshDriver::ResetInitialTransactionId(uint64_t aTransactionId)
+{
+  mCompletedTransaction = mPendingTransaction = aTransactionId;
 }
 
 mozilla::TimeStamp

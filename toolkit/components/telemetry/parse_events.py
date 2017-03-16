@@ -7,7 +7,7 @@ import yaml
 import itertools
 import datetime
 import string
-from shared_telemetry_utils import add_expiration_postfix
+import shared_telemetry_utils as utils
 
 MAX_CATEGORY_NAME_LENGTH = 30
 MAX_METHOD_NAME_LENGTH = 20
@@ -18,13 +18,16 @@ MAX_EXTRA_KEY_NAME_LENGTH = 15
 IDENTIFIER_PATTERN = r'^[a-zA-Z][a-zA-Z0-9_.]+[a-zA-Z0-9]$'
 DATE_PATTERN = r'^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
 
+
 def nice_type_name(t):
     if isinstance(t, basestring):
         return "string"
     return t.__name__
 
+
 def convert_to_cpp_identifier(s, sep):
     return string.capwords(s, sep).replace(sep, "")
+
 
 class OneOf:
     """This is a placeholder type for the TypeChecker below.
@@ -32,6 +35,7 @@ class OneOf:
     passed to the TypeChecker constructor.
     """
     pass
+
 
 class TypeChecker:
     """This implements a convenience type TypeChecker to make the validation code more readable."""
@@ -84,7 +88,7 @@ class TypeChecker:
                                       (identifier, key,
                                        nice_type_name(self._args[0]),
                                        nice_type_name(type(x)))
-            for k,v in value.iteritems():
+            for k, v in value.iteritems():
                 if not isinstance(x, self._args[1]):
                     raise ValueError, "%s: failed dict type check for %s - expected value type %s for key %s, got %s" %\
                                       (identifier, key,
@@ -92,12 +96,14 @@ class TypeChecker:
                                        k,
                                        nice_type_name(type(x)))
 
+
 def type_check_event_fields(identifier, name, definition):
     """Perform a type/schema check on the event definition."""
     REQUIRED_FIELDS = {
         'objects': TypeChecker(list, basestring),
         'bug_numbers': TypeChecker(list, int),
         'notification_emails': TypeChecker(list, basestring),
+        'record_in_processes': TypeChecker(list, basestring),
         'description': TypeChecker(basestring),
     }
     OPTIONAL_FIELDS = {
@@ -121,21 +127,23 @@ def type_check_event_fields(identifier, name, definition):
         raise KeyError(identifier + ' - unknown fields: ' + ', '.join(unknown_fields))
 
     # Type-check fields.
-    for k,v in definition.iteritems():
+    for k, v in definition.iteritems():
         ALL_FIELDS[k].check(identifier, k, v)
+
 
 def string_check(identifier, field, value, min_length=1, max_length=None, regex=None):
     # Length check.
     if len(value) < min_length:
-        raise ValueError("%s: value '%s' for field %s is less than minimum length of %d" %\
+        raise ValueError("%s: value '%s' for field %s is less than minimum length of %d" %
                          (identifier, value, field, min_length))
     if max_length and len(value) > max_length:
-        raise ValueError("%s: value '%s' for field %s is greater than maximum length of %d" %\
+        raise ValueError("%s: value '%s' for field %s is greater than maximum length of %d" %
                          (identifier, value, field, max_length))
     # Regex check.
     if regex and not re.match(regex, value):
         raise ValueError, '%s: string value "%s" for %s is not matching pattern "%s"' % \
                           (identifier, value, field, regex)
+
 
 class EventData:
     """A class representing one event."""
@@ -165,6 +173,12 @@ class EventData:
             raise ValueError, "%s: value for %s should be one of: %s" %\
                               (self.identifier, rcc_key, ", ".join(allowed_rcc))
 
+        # Check record_in_processes.
+        record_in_processes = definition.get('record_in_processes')
+        for proc in record_in_processes:
+            if not utils.is_valid_process_name(proc):
+                raise ValueError(self.identifier + ': unknown value in record_in_processes: ' + proc)
+
         # Check extra_keys.
         extra_keys = definition.get('extra_keys', {})
         if len(extra_keys.keys()) > MAX_EXTRA_KEYS_COUNT:
@@ -188,7 +202,7 @@ class EventData:
             definition['expiry_date'] = datetime.datetime.strptime(expiry_date, '%Y-%m-%d')
 
         # Finish setup.
-        definition['expiry_version'] = add_expiration_postfix(definition.get('expiry_version', 'never'))
+        definition['expiry_version'] = utils.add_expiration_postfix(definition.get('expiry_version', 'never'))
 
     @property
     def category(self):
@@ -214,6 +228,15 @@ class EventData:
     @property
     def objects(self):
         return self._definition.get('objects')
+
+    @property
+    def record_in_processes(self):
+        return self._definition.get('record_in_processes')
+
+    @property
+    def record_in_processes_enum(self):
+        """Get the non-empty list of flags representing the processes to record data in"""
+        return [utils.process_name_to_enum(p) for p in self.record_in_processes]
 
     @property
     def expiry_version(self):
@@ -259,6 +282,7 @@ class EventData:
     def extra_keys(self):
         return self._definition.get('extra_keys', {}).keys()
 
+
 def load_events(filename):
     """Parses a YAML file containing the event definitions.
 
@@ -286,7 +310,7 @@ def load_events(filename):
     #       <event definition>
     #      ...
     #   ...
-    for category_name,category in events.iteritems():
+    for category_name, category in events.iteritems():
         string_check("top level structure", field='category', value=category_name,
                      min_length=1, max_length=MAX_CATEGORY_NAME_LENGTH,
                      regex=IDENTIFIER_PATTERN)
@@ -295,7 +319,7 @@ def load_events(filename):
         if not category or len(category) == 0:
             raise ValueError(category_name + ' must contain at least one entry')
 
-        for name,entry in category.iteritems():
+        for name, entry in category.iteritems():
             string_check(category_name, field='event name', value=name,
                          min_length=1, max_length=MAX_METHOD_NAME_LENGTH,
                          regex=IDENTIFIER_PATTERN)

@@ -11,6 +11,7 @@
 #include "base/task.h"                  // for CancelableTask, etc
 #include "base/thread.h"                // for Thread
 #include "mozilla/ipc/Transport.h"      // for Transport
+#include "mozilla/layers/AnimationHelper.h" // for CompositorAnimationStorage
 #include "mozilla/layers/APZCTreeManager.h"  // for APZCTreeManager
 #include "mozilla/layers/APZCTreeManagerParent.h"  // for APZCTreeManagerParent
 #include "mozilla/layers/APZThreadUtils.h"  // for APZCTreeManager
@@ -198,6 +199,7 @@ CrossProcessCompositorBridgeParent::DeallocPAPZParent(PAPZParent* aActor)
 
 PWebRenderBridgeParent*
 CrossProcessCompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipelineId,
+                                                                const LayoutDeviceIntSize& aSize,
                                                                 TextureFactoryIdentifier* aTextureFactoryIdentifier,
                                                                 uint32_t *aIdNamespace)
 {
@@ -221,7 +223,7 @@ CrossProcessCompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::Pipeli
 
   WebRenderBridgeParent* parent = nullptr;
   RefPtr<wr::WebRenderAPI> api = root->GetWebRenderAPI();
-  RefPtr<WebRenderCompositableHolder> holder = root->CompositableHolder();
+  RefPtr<WebRenderCompositableHolder> holder = new WebRenderCompositableHolder();
   parent = new WebRenderBridgeParent(this, aPipelineId, nullptr, root->CompositorScheduler(), Move(api), Move(holder));
 
   parent->AddRef(); // IPDL reference
@@ -405,6 +407,22 @@ CrossProcessCompositorBridgeParent::ApplyAsyncProperties(
 
   MOZ_ASSERT(state->mParent);
   state->mParent->ApplyAsyncProperties(aLayerTree);
+}
+
+CompositorAnimationStorage*
+CrossProcessCompositorBridgeParent::GetAnimationStorage(
+    const uint64_t& aId)
+{
+  MOZ_ASSERT(aId != 0);
+  const CompositorBridgeParent::LayerTreeState* state =
+    CompositorBridgeParent::GetIndirectShadowTree(aId);
+  if (!state) {
+    return nullptr;
+  }
+
+  MOZ_ASSERT(state->mParent);
+  // GetAnimationStorage in CompositorBridgeParent expects id as 0
+  return state->mParent->GetAnimationStorage(0);
 }
 
 void

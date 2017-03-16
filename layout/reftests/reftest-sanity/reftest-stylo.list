@@ -8,7 +8,7 @@ fails == data:text/plain,HELLO data:text/plain,HELLO # Bug 1341637
 == test-async.html test-async.html
 
 # test that zoom works (and really zooms, not just scales)
-fails == test-zoom.html test-zoom.html
+== test-zoom.html test-zoom.html
 
 # make sure we don't fall over if the root is missing
 == no-root.html no-root.html
@@ -37,8 +37,8 @@ HTTP == data:text/html,<div>Text</div> data:text/html,<div>Text</div>
 == blank.html blank.html
 HTTP == blank.html blank.html
 
-fails HTTP(..) == filter-1.xhtml filter-1.xhtml
-fails HTTP(..) == filter-2.xhtml filter-2.xhtml
+HTTP(..) == filter-1.xhtml filter-1.xhtml
+HTTP(..) == filter-2.xhtml filter-2.xhtml
 
 # test that the MozReftestInvalidate event fires
 == invalidation.html invalidation.html

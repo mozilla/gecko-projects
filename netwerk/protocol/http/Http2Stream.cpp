@@ -21,6 +21,7 @@
 #include "Http2Push.h"
 #include "TunnelUtils.h"
 
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/Telemetry.h"
 #include "nsAlgorithm.h"
 #include "nsHttp.h"
@@ -48,8 +49,8 @@ Http2Stream::Http2Stream(nsAHttpTransaction *httpTransaction,
   , mOpenGenerated(0)
   , mAllHeadersReceived(0)
   , mQueued(0)
-  , mTransaction(httpTransaction)
   , mSocketTransport(session->SocketTransport())
+  , mTransaction(httpTransaction)
   , mChunkSize(session->SendingChunkSize())
   , mRequestBlockedOnRead(0)
   , mRecvdFin(0)
@@ -178,7 +179,7 @@ Http2Stream::ReadSegments(nsAHttpSegmentReader *reader,
       LOG3(("Http2Stream %p ReadSegments forcing OnReadSegment call\n", this));
       uint32_t wasted = 0;
       mSegmentReader = reader;
-      OnReadSegment("", 0, &wasted);
+      Unused << OnReadSegment("", 0, &wasted);
       mSegmentReader = nullptr;
     }
 
@@ -346,6 +347,7 @@ Http2Stream::MakeOriginURL(const nsACString &scheme, const nsACString &origin,
 void
 Http2Stream::CreatePushHashKey(const nsCString &scheme,
                                const nsCString &hostHeader,
+                               const mozilla::OriginAttributes &originAttributes,
                                uint64_t serial,
                                const nsCSubstring &pathInfo,
                                nsCString &outOrigin,
@@ -369,6 +371,11 @@ Http2Stream::CreatePushHashKey(const nsCString &scheme,
   }
 
   outKey = outOrigin;
+  outKey.AppendLiteral("/[");
+  nsAutoCString suffix;
+  originAttributes.CreateSuffix(suffix);
+  outKey.Append(suffix);
+  outKey.Append(']');
   outKey.AppendLiteral("/[http2.");
   outKey.AppendInt(serial);
   outKey.Append(']');
@@ -416,12 +423,19 @@ Http2Stream::ParseHttpRequestHeaders(const char *buf,
 
   nsAutoCString authorityHeader;
   nsAutoCString hashkey;
-  head->GetHeader(nsHttp::Host, authorityHeader);
+  nsresult rv = head->GetHeader(nsHttp::Host, authorityHeader);
+  if (NS_FAILED(rv)) {
+    MOZ_ASSERT(false);
+    return rv;
+  }
 
   nsAutoCString requestURI;
   head->RequestURI(requestURI);
+
+  mozilla::OriginAttributes originAttributes;
+  mSocketTransport->GetOriginAttributes(&originAttributes),
   CreatePushHashKey(nsDependentCString(head->IsHTTPS() ? "https" : "http"),
-                    authorityHeader, mSession->Serial(),
+                    authorityHeader, originAttributes, mSession->Serial(),
                     requestURI,
                     mOrigin, hashkey);
 
@@ -516,7 +530,11 @@ Http2Stream::GenerateOpen()
 
   nsCString compressedData;
   nsAutoCString authorityHeader;
-  head->GetHeader(nsHttp::Host, authorityHeader);
+  nsresult rv = head->GetHeader(nsHttp::Host, authorityHeader);
+  if (NS_FAILED(rv)) {
+    MOZ_ASSERT(false);
+    return rv;
+  }
 
   nsDependentCString scheme(head->IsHTTPS() ? "https" : "http");
   if (head->IsConnect()) {
@@ -540,13 +558,14 @@ Http2Stream::GenerateOpen()
   nsAutoCString path;
   head->Method(method);
   head->Path(path);
-  mSession->Compressor()->EncodeHeaderBlock(mFlatHttpRequestHeaders,
-                                            method,
-                                            path,
-                                            authorityHeader,
-                                            scheme,
-                                            head->IsConnect(),
-                                            compressedData);
+  rv = mSession->Compressor()->EncodeHeaderBlock(mFlatHttpRequestHeaders,
+                                                 method,
+                                                 path,
+                                                 authorityHeader,
+                                                 scheme,
+                                                 head->IsConnect(),
+                                                 compressedData);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   int64_t clVal = mSession->Compressor()->GetParsedContentLength();
   if (clVal != -1) {
@@ -1451,7 +1470,12 @@ Http2Stream::ClearTransactionsBlockedOnTunnel()
   if (!mIsTunnel) {
     return;
   }
-  gHttpHandler->ConnMgr()->ProcessPendingQ(mTransaction->ConnectionInfo());
+  nsresult rv = gHttpHandler->ConnMgr()->ProcessPendingQ(mTransaction->ConnectionInfo());
+  if (NS_FAILED(rv)) {
+    LOG3(("Http2Stream::ClearTransactionsBlockedOnTunnel %p\n"
+          "  ProcessPendingQ failed: %08x\n",
+          this, static_cast<uint32_t>(rv)));
+  }
 }
 
 void

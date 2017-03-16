@@ -62,16 +62,6 @@ ServoRestyleManager::PostRestyleEvent(Element* aElement,
     aRestyleHint |= eRestyle_Self | eRestyle_Subtree;
   }
 
-  // XXX For now, convert eRestyle_Subtree into (eRestyle_Self |
-  // eRestyle_SomeDescendants), which Servo will interpret as
-  // RESTYLE_SELF | RESTYLE_DESCENDANTS, since this is a commonly
-  // posted restyle hint that doesn't yet align with RestyleHint's
-  // bits.
-  if (aRestyleHint & eRestyle_Subtree) {
-    aRestyleHint &= ~eRestyle_Subtree;
-    aRestyleHint |= eRestyle_Self | eRestyle_SomeDescendants;
-  }
-
   if (aRestyleHint || aMinChangeHint) {
     Servo_NoteExplicitHints(aElement, aRestyleHint, aMinChangeHint);
   }
@@ -79,13 +69,30 @@ ServoRestyleManager::PostRestyleEvent(Element* aElement,
   PostRestyleEventInternal(false);
 }
 
+/* static */ void
+ServoRestyleManager::PostRestyleEventForAnimations(Element* aElement,
+                                                   nsRestyleHint aRestyleHint)
+{
+  Servo_NoteExplicitHints(aElement, aRestyleHint, nsChangeHint(0));
+}
+
 void
 ServoRestyleManager::RebuildAllStyleData(nsChangeHint aExtraHint,
                                          nsRestyleHint aRestyleHint)
 {
-  // TODO(emilio, bz): We probably need to do some actual restyling here too.
-  NS_WARNING("stylo: ServoRestyleManager::RebuildAllStyleData is incomplete");
   StyleSet()->RebuildData();
+
+  // NOTE(emilio): GeckoRestlyeManager does a sync style flush, which seems
+  // not to be needed in my testing.
+  //
+  // If it is, we can just do a content flush and call ProcessPendingRestyles.
+  if (Element* root = mPresContext->Document()->GetRootElement()) {
+    PostRestyleEvent(root, aRestyleHint, aExtraHint);
+  }
+
+  // TODO(emilio, bz): Extensions can add/remove stylesheets that can affect
+  // non-inheriting anon boxes. It's not clear if we want to support that, but
+  // if we do, we need to re-selector-match them here.
 }
 
 void
@@ -252,6 +259,13 @@ ServoRestyleManager::ProcessPostTraversal(Element* aElement,
         MOZ_ASSERT(pseudoContext, "should have taken the ReconstructFrame path above");
         pseudoFrame->SetStyleContext(pseudoContext);
 
+        if (pseudoFrame->GetStateBits() & NS_FRAME_OWNS_ANON_BOXES) {
+          // XXX It really would be good to pass the actual changehint for our
+          // ::before/::after here, but we never computed it!
+          pseudoFrame->UpdateStyleOfOwnedAnonBoxes(*aStyleSet, aChangeList,
+                                                   nsChangeHint_Hints_NotHandledForDescendants);
+        }
+
         // We only care restyling text nodes, since other type of nodes
         // (images), are still not supported. If that eventually changes, we
         // may have to write more code here... Or not, I don't think too
@@ -383,11 +397,9 @@ ServoRestyleManager::ProcessPendingRestyles()
   // uninstalling XBL bindings) can trigger additional style validations.
   mInStyleRefresh = true;
   while (styleSet->StyleDocument()) {
-    PresContext()->EffectCompositor()->ClearElementsToRestyle();
-
     // Recreate style contexts, and queue up change hints (which also handle
     // lazy frame construction).
-    nsStyleChangeList currentChanges;
+    nsStyleChangeList currentChanges(StyleBackendType::Servo);
     DocumentStyleRootIterator iter(doc);
     while (Element* root = iter.GetNextStyleRoot()) {
       ProcessPostTraversal(root, nullptr, styleSet, currentChanges);

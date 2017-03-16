@@ -40,12 +40,14 @@ import org.mozilla.gecko.updater.UpdateServiceHelper;
 import org.mozilla.gecko.util.ActivityResultHandler;
 import org.mozilla.gecko.util.ActivityUtils;
 import org.mozilla.gecko.util.BundleEventListener;
+import org.mozilla.gecko.util.ColorUtil;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.FileUtils;
 import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.PrefUtils;
 import org.mozilla.gecko.util.ThreadUtils;
+import org.mozilla.gecko.webapps.WebAppActivity;
 
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
@@ -145,6 +147,7 @@ public abstract class GeckoApp
 
     public static final String ACTION_ALERT_CALLBACK       = "org.mozilla.gecko.ALERT_CALLBACK";
     public static final String ACTION_HOMESCREEN_SHORTCUT  = "org.mozilla.gecko.BOOKMARK";
+    public static final String ACTION_WEBAPP               = "org.mozilla.gecko.WEBAPP";
     public static final String ACTION_DEBUG                = "org.mozilla.gecko.DEBUG";
     public static final String ACTION_LAUNCH_SETTINGS      = "org.mozilla.gecko.SETTINGS";
     public static final String ACTION_LOAD                 = "org.mozilla.gecko.LOAD";
@@ -545,7 +548,7 @@ public abstract class GeckoApp
     public boolean onMenuOpened(int featureId, Menu menu) {
         // exit full-screen mode whenever the menu is opened
         if (mLayerView != null && mLayerView.isFullScreen()) {
-            GeckoAppShell.notifyObservers("FullScreen:Exit", null);
+            EventDispatcher.getInstance().dispatch("FullScreen:Exit", null);
         }
 
         if (featureId == Window.FEATURE_OPTIONS_PANEL) {
@@ -572,43 +575,34 @@ public abstract class GeckoApp
             GuestSession.hideNotification(this);
 
             final SharedPreferences prefs = getSharedPreferencesForProfile();
-            final Set<String> clearSet =
-                    PrefUtils.getStringSet(prefs, ClearOnShutdownPref.PREF, new HashSet<String>());
+            final Set<String> clearSet = PrefUtils.getStringSet(
+                    prefs, ClearOnShutdownPref.PREF, new HashSet<String>());
 
-            final JSONObject clearObj = new JSONObject();
-            for (String clear : clearSet) {
-                try {
-                    clearObj.put(clear, true);
-                } catch (JSONException ex) {
-                    Log.e(LOGTAG, "Error adding clear object " + clear, ex);
-                }
+            final GeckoBundle clearObj = new GeckoBundle(clearSet.size());
+            for (final String clear : clearSet) {
+                clearObj.putBoolean(clear, true);
             }
 
-            final JSONObject res = new JSONObject();
-            try {
-                res.put("sanitize", clearObj);
-            } catch (JSONException ex) {
-                Log.e(LOGTAG, "Error adding sanitize object", ex);
+            final GeckoBundle res = new GeckoBundle(2);
+            res.putBundle("sanitize", clearObj);
+
+            // If the user wants to clear open tabs, or else has opted out of session
+            // restore and does want to clear history, we also want to prevent the current
+            // session info from being saved.
+            if (clearObj.containsKey("private.data.openTabs")) {
+                res.putBoolean("dontSaveSession", true);
+            } else if (clearObj.containsKey("private.data.history")) {
+
+                final String sessionRestore =
+                        getSessionRestorePreference(getSharedPreferences());
+                res.putBoolean("dontSaveSession", "quit".equals(sessionRestore));
             }
 
-            // If the user wants to clear open tabs, or else has opted out of session restore and does want to clear history,
-            // we also want to prevent the current session info from being saved.
-            try {
-                if (clearObj.has("private.data.openTabs")) {
-                    res.put("dontSaveSession", true);
-                } else if (clearObj.has("private.data.history")) {
+            EventDispatcher.getInstance().dispatch("Browser:Quit", res);
 
-                    final String sessionRestore = getSessionRestorePreference(getSharedPreferences());
-                    res.put("dontSaveSession", "quit".equals(sessionRestore));
-
-                }
-            } catch (JSONException ex) {
-                Log.e(LOGTAG, "Error adding session restore data", ex);
-            }
-            GeckoAppShell.notifyObservers("Browser:Quit", res.toString());
-            // We don't call doShutdown() here because this creates a race condition which can
-            // cause the clearing of private data to fail. Instead, we shut down the UI only after
-            // we're done sanitizing.
+            // We don't call doShutdown() here because this creates a race condition which
+            // can cause the clearing of private data to fail. Instead, we shut down the
+            // UI only after we're done sanitizing.
             return true;
         }
 
@@ -1347,7 +1341,7 @@ public abstract class GeckoApp
             @Override
             public void run() {
                 // If we are doing a restore, read the session data so we can send it to Gecko later.
-                String restoreMessage = null;
+                GeckoBundle restoreMessage = null;
                 if (!mIsRestoringActivity && mShouldRestore) {
                     final boolean isExternalURL = invokedWithExternalURL(getIntentURI(new SafeIntent(getIntent())));
                     try {
@@ -1406,7 +1400,7 @@ public abstract class GeckoApp
 
                 // If we are doing a restore, send the parsed session data to Gecko.
                 if (!mIsRestoringActivity) {
-                    GeckoAppShell.notifyObservers("Session:Restore", restoreMessage);
+                    EventDispatcher.getInstance().dispatch("Session:Restore", restoreMessage);
                 }
 
                 // Make sure sessionstore.old is either updated or deleted as necessary.
@@ -1791,56 +1785,58 @@ public abstract class GeckoApp
     }
 
     @WorkerThread
-    private String restoreSessionTabs(final boolean isExternalURL, boolean useBackup) throws SessionRestoreException {
-        try {
-            String sessionString = getProfile().readSessionFile(useBackup);
-            if (sessionString == null) {
-                throw new SessionRestoreException("Could not read from session file");
-            }
+    private GeckoBundle restoreSessionTabs(final boolean isExternalURL, boolean useBackup)
+            throws SessionRestoreException {
+        String sessionString = getProfile().readSessionFile(useBackup);
+        if (sessionString == null) {
+            throw new SessionRestoreException("Could not read from session file");
+        }
 
-            // If we are doing an OOM restore, parse the session data and
-            // stub the restored tabs immediately. This allows the UI to be
-            // updated before Gecko has restored.
-            final JSONArray tabs = new JSONArray();
-            final JSONObject windowObject = new JSONObject();
-            final boolean sessionDataValid;
+        // If we are doing an OOM restore, parse the session data and
+        // stub the restored tabs immediately. This allows the UI to be
+        // updated before Gecko has restored.
+        final JSONArray tabs = new JSONArray();
+        final JSONObject windowObject = new JSONObject();
+        final boolean sessionDataValid;
 
-            LastSessionParser parser = new LastSessionParser(tabs, windowObject, isExternalURL);
+        LastSessionParser parser = new LastSessionParser(tabs, windowObject, isExternalURL);
 
-            if (mPrivateBrowsingSession == null) {
-                sessionDataValid = parser.parse(sessionString);
-            } else {
-                sessionDataValid = parser.parse(sessionString, mPrivateBrowsingSession);
-            }
+        if (mPrivateBrowsingSession == null) {
+            sessionDataValid = parser.parse(sessionString);
+        } else {
+            sessionDataValid = parser.parse(sessionString, mPrivateBrowsingSession);
+        }
 
-            if (tabs.length() > 0) {
+        if (tabs.length() > 0) {
+            try {
                 // Update all parent tab IDs ...
                 parser.updateParentId(tabs);
                 windowObject.put("tabs", tabs);
                 // ... and for recently closed tabs as well (if we've got any).
-                JSONArray closedTabs = windowObject.optJSONArray("closedTabs");
+                final JSONArray closedTabs = windowObject.optJSONArray("closedTabs");
                 parser.updateParentId(closedTabs);
                 windowObject.putOpt("closedTabs", closedTabs);
 
-                sessionString = new JSONObject().put("windows", new JSONArray().put(windowObject)).toString();
-            } else {
-                if (parser.allTabsSkipped() || sessionDataValid) {
-                    // If we intentionally skipped all tabs we've read from the session file, we
-                    // set mShouldRestore back to false at this point already, so the calling code
-                    // can infer that the exception wasn't due to a damaged session store file.
-                    // The same applies if the session file was syntactically valid and
-                    // simply didn't contain any tabs.
-                    mShouldRestore = false;
-                }
-                throw new SessionRestoreException("No tabs could be read from session file");
+                sessionString = new JSONObject().put(
+                        "windows", new JSONArray().put(windowObject)).toString();
+            } catch (final JSONException e) {
+                throw new SessionRestoreException(e);
             }
-
-            JSONObject restoreData = new JSONObject();
-            restoreData.put("sessionString", sessionString);
-            return restoreData.toString();
-        } catch (JSONException e) {
-            throw new SessionRestoreException(e);
+        } else {
+            if (parser.allTabsSkipped() || sessionDataValid) {
+                // If we intentionally skipped all tabs we've read from the session file, we
+                // set mShouldRestore back to false at this point already, so the calling code
+                // can infer that the exception wasn't due to a damaged session store file.
+                // The same applies if the session file was syntactically valid and
+                // simply didn't contain any tabs.
+                mShouldRestore = false;
+            }
+            throw new SessionRestoreException("No tabs could be read from session file");
         }
+
+        final GeckoBundle restoreData = new GeckoBundle(1);
+        restoreData.putString("sessionString", sessionString);
+        return restoreData;
     }
 
     @RobocopTarget
@@ -1891,7 +1887,9 @@ public abstract class GeckoApp
         boolean shouldRestore = false;
 
         final int versionCode = getVersionCode();
-        if (mLastSessionCrashed) {
+        if (getSessionRestoreResumeOnce(prefs)) {
+            shouldRestore = true;
+        } else if (mLastSessionCrashed) {
             if (incrementCrashCount(prefs) <= getSessionStoreMaxCrashResumes(prefs) &&
                     getSessionRestoreAfterCrashPreference(prefs)) {
                 shouldRestore = true;
@@ -1912,6 +1910,14 @@ public abstract class GeckoApp
         }
 
         return shouldRestore;
+    }
+
+    private boolean getSessionRestoreResumeOnce(SharedPreferences prefs) {
+        boolean resumeOnce = prefs.getBoolean(GeckoPreferences.PREFS_RESTORE_SESSION_ONCE, false);
+        if (resumeOnce) {
+            prefs.edit().putBoolean(GeckoPreferences.PREFS_RESTORE_SESSION_ONCE, false).apply();
+        }
+        return resumeOnce;
     }
 
     private int incrementCrashCount(SharedPreferences prefs) {
@@ -2019,13 +2025,25 @@ public abstract class GeckoApp
     }
 
     public void createShortcut(final String aTitle, final String aURI, final Bitmap aIcon) {
-        // The intent to be launched by the shortcut.
         Intent shortcutIntent = new Intent();
         shortcutIntent.setAction(GeckoApp.ACTION_HOMESCREEN_SHORTCUT);
         shortcutIntent.setData(Uri.parse(aURI));
         shortcutIntent.setClassName(AppConstants.ANDROID_PACKAGE_NAME,
                 AppConstants.MOZ_ANDROID_BROWSER_INTENT_CLASS);
+        createHomescreenIcon(shortcutIntent, aTitle, aURI, aIcon);
+    }
 
+    public void createAppShortcut(final String aTitle, final String aURI, final String manifestPath, final Bitmap aIcon) {
+        Intent shortcutIntent = new Intent();
+        shortcutIntent.setAction(GeckoApp.ACTION_WEBAPP);
+        shortcutIntent.setData(Uri.parse(aURI));
+        shortcutIntent.putExtra("MANIFEST_PATH", manifestPath);
+        shortcutIntent.setClassName(AppConstants.ANDROID_PACKAGE_NAME, LauncherActivity.class.getName());
+        createHomescreenIcon(shortcutIntent, aTitle, aURI, aIcon);
+    }
+
+    public void createHomescreenIcon(final Intent shortcutIntent, final String aTitle,
+                                     final String aURI, final Bitmap aIcon) {
         Intent intent = new Intent();
         intent.putExtra(Intent.EXTRA_SHORTCUT_INTENT, shortcutIntent);
         intent.putExtra(Intent.EXTRA_SHORTCUT_ICON, getLauncherIcon(aIcon, GeckoAppShell.getPreferredIconSize()));
@@ -2402,8 +2420,10 @@ public abstract class GeckoApp
             "Update:Install",
             null);
 
-        if (mPromptService != null)
+        if (mPromptService != null) {
             mPromptService.destroy();
+            mPromptService = null;
+        }
 
         final HealthRecorder rec = mHealthRecorder;
         mHealthRecorder = null;
@@ -2606,7 +2626,7 @@ public abstract class GeckoApp
         }
 
         if (mLayerView != null && mLayerView.isFullScreen()) {
-            GeckoAppShell.notifyObservers("FullScreen:Exit", null);
+            EventDispatcher.getInstance().dispatch("FullScreen:Exit", null);
             return;
         }
 
@@ -2644,8 +2664,9 @@ public abstract class GeckoApp
                     onDone();
                     Tab nextSelectedTab = Tabs.getInstance().getNextTab(tab);
                     if (nextSelectedTab != null) {
-                        int nextSelectedTabId = nextSelectedTab.getId();
-                        GeckoAppShell.notifyObservers("Tab:KeepZombified", Integer.toString(nextSelectedTabId));
+                        final GeckoBundle data = new GeckoBundle(1);
+                        data.putInt("nextSelectedTabId", nextSelectedTab.getId());
+                        EventDispatcher.getInstance().dispatch("Tab:KeepZombified", data);
                     }
                     tabs.closeTab(tab);
                     return;
@@ -2708,11 +2729,6 @@ public abstract class GeckoApp
             wl.release();
             mWakeLocks.remove(topic);
         }
-    }
-
-    @Override
-    public void notifyCheckUpdateResult(String result) {
-        GeckoAppShell.notifyObservers("Update:CheckResult", result);
     }
 
     private void geckoConnected() {

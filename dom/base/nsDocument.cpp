@@ -1210,42 +1210,31 @@ nsIDocument::SelectorCache::SelectorCache()
 void nsIDocument::SelectorCache::CacheList(const nsAString& aSelector,
                                            nsCSSSelectorList* aSelectorList)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   SelectorCacheKey* key = new SelectorCacheKey(aSelector);
   mTable.Put(key->mKey, aSelectorList);
   AddObject(key);
 }
 
-class nsIDocument::SelectorCacheKeyDeleter final : public Runnable
-{
-public:
-  explicit SelectorCacheKeyDeleter(SelectorCacheKey* aToDelete)
-    : mSelector(aToDelete)
-  {
-  }
-
-protected:
-  ~SelectorCacheKeyDeleter()
-  {
-  }
-
-public:
-  NS_IMETHOD Run() override
-  {
-    return NS_OK;
-  }
-
-private:
-  nsAutoPtr<SelectorCacheKey> mSelector;
-};
-
 void nsIDocument::SelectorCache::NotifyExpired(SelectorCacheKey* aSelector)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aSelector);
+
+  // There is no guarantee that this method won't be re-entered when selector
+  // matching is ongoing because "memory-pressure" could be notified immediately
+  // when OOM happens according to the design of nsExpirationTracker.
+  // The perfect solution is to delete the |aSelector| and its nsCSSSelectorList
+  // in mTable asynchronously.
+  // We remove these objects synchronously for now because NotifiyExpired() will
+  // never be triggered by "memory-pressure" which is not implemented yet in
+  // the stage 2 of mozalloc_handle_oom().
+  // Once these objects are removed asynchronously, we should update the warning
+  // added in mozalloc_handle_oom() as well.
   RemoveObject(aSelector);
   mTable.Remove(aSelector->mKey);
-  nsCOMPtr<nsIRunnable> runnable = new SelectorCacheKeyDeleter(aSelector);
-  NS_DispatchToCurrentThread(runnable);
+  delete aSelector;
 }
-
 
 struct nsIDocument::FrameRequest
 {
@@ -1429,9 +1418,7 @@ nsDocument::nsDocument(const char* aContentType)
 {
   SetContentTypeInternal(nsDependentCString(aContentType));
 
-  if (gDocumentLeakPRLog)
-    MOZ_LOG(gDocumentLeakPRLog, LogLevel::Debug,
-           ("DOCUMENT %p created", this));
+  MOZ_LOG(gDocumentLeakPRLog, LogLevel::Debug, ("DOCUMENT %p created", this));
 
   // Start out mLastStyleSheetSet as null, per spec
   SetDOMStringToNull(mLastStyleSheetSet);
@@ -1488,9 +1475,7 @@ nsDocument::IsAboutPage() const
 
 nsDocument::~nsDocument()
 {
-  if (gDocumentLeakPRLog)
-    MOZ_LOG(gDocumentLeakPRLog, LogLevel::Debug,
-           ("DOCUMENT %p destroyed", this));
+  MOZ_LOG(gDocumentLeakPRLog, LogLevel::Debug, ("DOCUMENT %p destroyed", this));
 
   NS_ASSERTION(!mIsShowing, "Destroying a currently-showing document");
 
@@ -2112,10 +2097,8 @@ nsDocument::ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
 {
   NS_PRECONDITION(aURI, "Null URI passed to ResetToURI");
 
-  if (gDocumentLeakPRLog && MOZ_LOG_TEST(gDocumentLeakPRLog, LogLevel::Debug)) {
-    PR_LogPrint("DOCUMENT %p ResetToURI %s", this,
-                aURI->GetSpecOrDefault().get());
-  }
+  MOZ_LOG(gDocumentLeakPRLog, LogLevel::Debug,
+          ("DOCUMENT %p ResetToURI %s", this, aURI->GetSpecOrDefault().get()));
 
   mSecurityInfo = nullptr;
 
@@ -2435,11 +2418,12 @@ nsDocument::StartDocumentLoad(const char* aCommand, nsIChannel* aChannel,
                               nsIStreamListener **aDocListener,
                               bool aReset, nsIContentSink* aSink)
 {
-  if (gDocumentLeakPRLog && MOZ_LOG_TEST(gDocumentLeakPRLog, LogLevel::Debug)) {
+  if (MOZ_LOG_TEST(gDocumentLeakPRLog, LogLevel::Debug)) {
     nsCOMPtr<nsIURI> uri;
     aChannel->GetURI(getter_AddRefs(uri));
-    PR_LogPrint("DOCUMENT %p StartDocumentLoad %s",
-                this, uri ? uri->GetSpecOrDefault().get() : "");
+    MOZ_LOG(gDocumentLeakPRLog, LogLevel::Debug,
+            ("DOCUMENT %p StartDocumentLoad %s",
+             this, uri ? uri->GetSpecOrDefault().get() : ""));
   }
 
   MOZ_ASSERT(NodePrincipal()->GetAppId() != nsIScriptSecurityManager::UNKNOWN_APP_ID,
@@ -2638,11 +2622,11 @@ nsDocument::InitCSP(nsIChannel* aChannel)
   }
 
   if (httpChannel) {
-    httpChannel->GetResponseHeader(
+    Unused << httpChannel->GetResponseHeader(
         NS_LITERAL_CSTRING("content-security-policy"),
         tCspHeaderValue);
 
-    httpChannel->GetResponseHeader(
+    Unused << httpChannel->GetResponseHeader(
         NS_LITERAL_CSTRING("content-security-policy-report-only"),
         tCspROHeaderValue);
   }
@@ -4796,7 +4780,8 @@ nsDocument::SetScriptGlobalObject(nsIScriptGlobalObject *aScriptGlobalObject)
     do_QueryInterface(GetChannel());
   if (internalChannel) {
     nsCOMArray<nsISecurityConsoleMessage> messages;
-    internalChannel->TakeAllSecurityMessages(messages);
+    DebugOnly<nsresult> rv = internalChannel->TakeAllSecurityMessages(messages);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
     SendToConsole(messages);
   }
 
@@ -6011,6 +5996,28 @@ nsDocument::IsWebComponentsEnabled(nsPIDOMWindowInner* aWindow)
   }
 
   return false;
+}
+
+void
+nsDocument::ScheduleSVGForPresAttrEvaluation(nsSVGElement* aSVG)
+{
+  mLazySVGPresElements.PutEntry(aSVG);
+}
+
+void
+nsDocument::UnscheduleSVGForPresAttrEvaluation(nsSVGElement* aSVG)
+{
+  mLazySVGPresElements.RemoveEntry(aSVG);
+}
+
+void
+nsDocument::ResolveScheduledSVGPresAttrs()
+{
+  for (auto iter = mLazySVGPresElements.Iter(); !iter.Done(); iter.Next()) {
+    nsSVGElement* svg = iter.Get()->GetKey();
+    svg->UpdateContentDeclarationBlock(StyleBackendType::Servo);
+  }
+  mLazySVGPresElements.Clear();
 }
 
 void
@@ -13052,9 +13059,10 @@ ArrayContainsTable(const nsTArray<nsCString>& aTableArray,
  * toolkit/components/url-classifier/flash-block-lists.rst
  */
 FlashClassification
-nsDocument::PrincipalFlashClassification(bool aIsTopLevel)
+nsDocument::PrincipalFlashClassification()
 {
   nsresult rv;
+  bool isThirdPartyDoc = IsThirdParty();
 
   // If flash blocking is disabled, it is equivalent to all sites being
   // whitelisted.
@@ -13087,7 +13095,7 @@ nsDocument::PrincipalFlashClassification(bool aIsTopLevel)
   Preferences::GetCString("urlclassifier.flashExceptTable",
                           &denyExceptionsTables);
   MaybeAddTableToTableList(denyExceptionsTables, tables);
-  if (!aIsTopLevel) {
+  if (isThirdPartyDoc) {
     Preferences::GetCString("urlclassifier.flashSubDocTable",
                             &subDocDenyTables);
     MaybeAddTableToTableList(subDocDenyTables, tables);
@@ -13132,7 +13140,7 @@ nsDocument::PrincipalFlashClassification(bool aIsTopLevel)
     return FlashClassification::Allowed;
   }
 
-  if (!aIsTopLevel && ArrayContainsTable(results, subDocDenyTables) &&
+  if (isThirdPartyDoc && ArrayContainsTable(results, subDocDenyTables) &&
       !ArrayContainsTable(results, subDocDenyExceptionsTables)) {
     return FlashClassification::Denied;
   }
@@ -13155,7 +13163,7 @@ nsDocument::ComputeFlashClassification()
   bool isTopLevel = !parent;
   FlashClassification classification;
   if (isTopLevel) {
-    classification = PrincipalFlashClassification(isTopLevel);
+    classification = PrincipalFlashClassification();
   } else {
     nsCOMPtr<nsIDocument> parentDocument = GetParentDocument();
     if (!parentDocument) {
@@ -13167,7 +13175,7 @@ nsDocument::ComputeFlashClassification()
     if (parentClassification == FlashClassification::Denied) {
       classification = FlashClassification::Denied;
     } else {
-      classification = PrincipalFlashClassification(isTopLevel);
+      classification = PrincipalFlashClassification();
 
       // Allow unknown children to inherit allowed status from parent, but
       // do not allow denied children to do so.
@@ -13200,4 +13208,84 @@ nsDocument::DocumentFlashClassification()
   }
 
   return mFlashClassification;
+}
+
+/**
+ * Initializes |mIsThirdParty| if necessary and returns its value. The value
+ * returned represents whether this document should be considered Third-Party.
+ *
+ * A top-level document cannot be a considered Third-Party; only subdocuments
+ * may. For a subdocument to be considered Third-Party, it must meet ANY ONE
+ * of the following requirements:
+ *  - The document's parent is Third-Party
+ *  - The document has a different scheme (http/https) than its parent document
+ *  - The document's domain and subdomain do not match those of its parent
+ *    document.
+ *
+ * If there is an error in determining whether the document is Third-Party,
+ * it will be assumed to be Third-Party for security reasons.
+ */
+bool
+nsDocument::IsThirdParty()
+{
+  if (mIsThirdParty.isSome()) {
+    return mIsThirdParty.value();
+  }
+
+  nsCOMPtr<nsIDocShellTreeItem> docshell = this->GetDocShell();
+  if (!docshell) {
+    mIsThirdParty.emplace(true);
+    return mIsThirdParty.value();
+  }
+
+  nsCOMPtr<nsIDocShellTreeItem> parent;
+  nsresult rv = docshell->GetSameTypeParent(getter_AddRefs(parent));
+  MOZ_ASSERT(NS_SUCCEEDED(rv),
+             "nsIDocShellTreeItem::GetSameTypeParent should never fail");
+  bool isTopLevel = !parent;
+
+  if (isTopLevel) {
+    mIsThirdParty.emplace(false);
+    return mIsThirdParty.value();
+  }
+
+  nsCOMPtr<nsIDocument> parentDocument = GetParentDocument();
+  if (!parentDocument) {
+    // Failure
+    mIsThirdParty.emplace(true);
+    return mIsThirdParty.value();
+  }
+
+  if (parentDocument->IsThirdParty()) {
+    mIsThirdParty.emplace(true);
+    return mIsThirdParty.value();
+  }
+
+  nsCOMPtr<nsIPrincipal> principal = GetPrincipal();
+  nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(parentDocument,
+                                                             &rv);
+  if (NS_WARN_IF(NS_FAILED(rv) || !sop)) {
+    // Failure
+    mIsThirdParty.emplace(true);
+    return mIsThirdParty.value();
+  }
+  nsCOMPtr<nsIPrincipal> parentPrincipal = sop->GetPrincipal();
+
+  bool principalsMatch = false;
+  rv = principal->Equals(parentPrincipal, &principalsMatch);
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    // Failure
+    mIsThirdParty.emplace(true);
+    return mIsThirdParty.value();
+  }
+
+  if (!principalsMatch) {
+    mIsThirdParty.emplace(true);
+    return mIsThirdParty.value();
+  }
+
+  // Fall-through. Document is not a Third-Party Document.
+  mIsThirdParty.emplace(false);
+  return mIsThirdParty.value();
 }

@@ -34,7 +34,6 @@ class nsIContent;
 class nsIDocument;
 class nsIFrame;
 class nsIPresShell;
-class nsPresContext;
 
 namespace mozilla {
 
@@ -65,6 +64,23 @@ struct AnimationPropertySegment
   Maybe<ComputedTimingFunction> mTimingFunction;
   dom::CompositeOperation mFromComposite = dom::CompositeOperation::Replace;
   dom::CompositeOperation mToComposite = dom::CompositeOperation::Replace;
+
+  bool HasReplacableValues() const
+  {
+    return HasReplacableFromValue() && HasReplacableToValue();
+  }
+
+  bool HasReplacableFromValue() const
+  {
+    return !mFromValue.IsNull() &&
+           mFromComposite == dom::CompositeOperation::Replace;
+  }
+
+  bool HasReplacableToValue() const
+  {
+    return !mToValue.IsNull() &&
+           mToComposite == dom::CompositeOperation::Replace;
+  }
 
   bool operator==(const AnimationPropertySegment& aOther) const
   {
@@ -194,11 +210,9 @@ public:
   {
     mEffectOptions.GetSpacingAsString(aRetVal);
   }
-
   void NotifyAnimationTimingUpdated();
-
+  void RequestRestyle(EffectCompositor::RestyleType aRestyleType);
   void SetAnimation(Animation* aAnimation) override;
-
   void SetKeyframes(JSContext* aContext, JS::Handle<JSObject*> aKeyframes,
                     ErrorResult& aRv);
   void SetKeyframes(nsTArray<Keyframe>&& aKeyframes,
@@ -234,6 +248,12 @@ public:
   void UpdateProperties(nsStyleContext* aStyleContext);
   // Servo version of the above function.
   void UpdateProperties(const ServoComputedStyleValues& aServoValues);
+
+  // Update various bits of state related to running ComposeStyle().
+  // We need to update this outside ComposeStyle() because we should avoid
+  // mutating any state in ComposeStyle() since it might be called during
+  // parallel traversal.
+  void WillComposeStyle();
 
   // Updates |aStyleRule| with the animation values produced by this
   // AnimationEffect for the current time except any properties contained
@@ -274,7 +294,6 @@ public:
   }
 
   nsIDocument* GetRenderedDocument() const;
-  nsPresContext* GetPresContext() const;
   nsIPresShell* GetPresShell() const;
 
   // Associates a warning with the animated property on the specified frame
@@ -355,8 +374,6 @@ protected:
 
   // Remove the current effect target from its EffectSet.
   void UnregisterTarget();
-
-  void RequestRestyle(EffectCompositor::RestyleType aRestyleType);
 
   // Update the associated frame state bits so that, if necessary, a stacking
   // context will be created and the effect sent to the compositor.  We

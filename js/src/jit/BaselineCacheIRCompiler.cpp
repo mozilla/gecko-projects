@@ -767,7 +767,7 @@ BaselineCacheIRCompiler::emitStoreSlotShared(bool isFixed)
         masm.storeValue(val, slot);
     }
 
-    BaselineEmitPostWriteBarrierSlot(masm, obj, val, scratch1, LiveGeneralRegisterSet(), cx_);
+    emitPostBarrierSlot(obj, val, scratch1);
     return true;
 }
 
@@ -879,7 +879,7 @@ BaselineCacheIRCompiler::emitAddAndStoreSlotShared(CacheOp op)
         masm.storeValue(val, slot);
     }
 
-    BaselineEmitPostWriteBarrierSlot(masm, obj, val, scratch1, LiveGeneralRegisterSet(), cx_);
+    emitPostBarrierSlot(obj, val, scratch1);
     return true;
 }
 
@@ -935,7 +935,7 @@ BaselineCacheIRCompiler::emitStoreUnboxedProperty()
                               /* failure = */ nullptr);
 
     if (UnboxedTypeNeedsPostBarrier(fieldType))
-        BaselineEmitPostWriteBarrierSlot(masm, obj, val, scratch, LiveGeneralRegisterSet(), cx_);
+        emitPostBarrierSlot(obj, val, scratch);
     return true;
 }
 
@@ -972,7 +972,7 @@ BaselineCacheIRCompiler::emitStoreTypedObjectReferenceProperty()
     emitStoreTypedObjectReferenceProp(val, type, dest, scratch2);
 
     if (type != ReferenceTypeDescr::TYPE_STRING)
-        BaselineEmitPostWriteBarrierSlot(masm, obj, val, scratch1, LiveGeneralRegisterSet(), cx_);
+        emitPostBarrierSlot(obj, val, scratch1);
     return true;
 }
 
@@ -1075,7 +1075,7 @@ BaselineCacheIRCompiler::emitStoreDenseElement()
     EmitPreBarrier(masm, element, MIRType::Value);
     masm.storeValue(val, element);
 
-    BaselineEmitPostWriteBarrierSlot(masm, obj, val, scratch, LiveGeneralRegisterSet(), cx_);
+    emitPostBarrierElement(obj, val, scratch, index);
     return true;
 }
 
@@ -1116,9 +1116,36 @@ BaselineCacheIRCompiler::emitStoreDenseElementHole()
         // Fail if index > initLength.
         masm.branch32(Assembler::Below, initLength, index, failure->label());
 
-        // Check the capacity.
+        // If index < capacity, we can add a dense element inline. If not we
+        // need to allocate more elements.
+        Label capacityOk;
         Address capacity(scratch, ObjectElements::offsetOfCapacity());
-        masm.branch32(Assembler::BelowOrEqual, capacity, index, failure->label());
+        masm.branch32(Assembler::Above, capacity, index, &capacityOk);
+
+        // Check for non-writable array length. We only have to do this if
+        // index >= capacity.
+        masm.branchTest32(Assembler::NonZero, elementsFlags,
+                          Imm32(ObjectElements::NONWRITABLE_ARRAY_LENGTH),
+                          failure->label());
+
+        LiveRegisterSet save(GeneralRegisterSet::Volatile(), liveVolatileFloatRegs());
+        save.takeUnchecked(scratch);
+        masm.PushRegsInMask(save);
+
+        masm.setupUnalignedABICall(scratch);
+        masm.loadJSContext(scratch);
+        masm.passABIArg(scratch);
+        masm.passABIArg(obj);
+        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, NativeObject::addDenseElementDontReportOOM));
+        masm.mov(ReturnReg, scratch);
+
+        masm.PopRegsInMask(save);
+        masm.branchIfFalseBool(scratch, failure->label());
+
+        // Load the reallocated elements pointer.
+        masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch);
+
+        masm.bind(&capacityOk);
 
         // We increment initLength after the callTypeUpdateIC call, to ensure
         // the type update code doesn't read uninitialized memory.
@@ -1185,7 +1212,7 @@ BaselineCacheIRCompiler::emitStoreDenseElementHole()
     masm.bind(&doStore);
     masm.storeValue(val, element);
 
-    BaselineEmitPostWriteBarrierSlot(masm, obj, val, scratch, LiveGeneralRegisterSet(), cx_);
+    emitPostBarrierElement(obj, val, scratch, index);
     return true;
 }
 
@@ -1283,7 +1310,7 @@ BaselineCacheIRCompiler::emitStoreUnboxedArrayElement()
                               /* failure = */ nullptr);
 
     if (UnboxedTypeNeedsPostBarrier(elementType))
-        BaselineEmitPostWriteBarrierSlot(masm, obj, val, scratch, LiveGeneralRegisterSet(), cx_);
+        emitPostBarrierSlot(obj, val, scratch);
     return true;
 }
 
@@ -1360,7 +1387,7 @@ BaselineCacheIRCompiler::emitStoreUnboxedArrayElementHole()
                               /* failure = */ nullptr);
 
     if (UnboxedTypeNeedsPostBarrier(elementType))
-        BaselineEmitPostWriteBarrierSlot(masm, obj, val, scratch, LiveGeneralRegisterSet(), cx_);
+        emitPostBarrierSlot(obj, val, scratch);
     return true;
 }
 

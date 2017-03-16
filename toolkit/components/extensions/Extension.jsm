@@ -83,6 +83,7 @@ var {
 const {
   EventEmitter,
   LocaleData,
+  StartupCache,
   getUniqueId,
 } = ExtensionUtils;
 
@@ -194,13 +195,14 @@ var UninstallObserver = {
       // Clear any IndexedDB storage created by the extension
       let baseURI = NetUtil.newURI(`moz-extension://${uuid}/`);
       let principal = Services.scriptSecurityManager.createCodebasePrincipal(
-        baseURI, {addonId: addon.id}
-      );
+        baseURI, {});
       Services.qms.clearStoragesForPrincipal(principal);
 
       // Clear localStorage created by the extension
-      let attrs = JSON.stringify({addonId: addon.id});
-      Services.obs.notifyObservers(null, "clear-origin-attributes-data", attrs);
+      let storage = Services.domStorageManager.getStorage(null, principal);
+      if (storage) {
+        storage.clear();
+      }
     }
 
     if (!this.leaveUuid) {
@@ -219,7 +221,7 @@ UninstallObserver.init();
 // useful prior to extension installation or initialization.
 //
 // No functionality of this class is guaranteed to work before
-// |readManifest| has been called, and completed.
+// |loadManifest| has been called, and completed.
 this.ExtensionData = class {
   constructor(rootURI) {
     this.rootURI = rootURI;
@@ -403,9 +405,7 @@ this.ExtensionData = class {
     };
   }
 
-  // Reads the extension's |manifest.json| file, and stores its
-  // parsed contents in |this.manifest|.
-  readManifest() {
+  parseManifest() {
     return Promise.all([
       this.readJSON("manifest.json"),
       Management.lazyInit(),
@@ -437,50 +437,54 @@ this.ExtensionData = class {
       if (normalized.error) {
         this.manifestError(normalized.error);
       } else {
-        this.manifest = normalized.value;
+        return normalized.value;
       }
-
-      try {
-        // Do not override the add-on id that has been already assigned.
-        if (!this.id && this.manifest.applications.gecko.id) {
-          this.id = this.manifest.applications.gecko.id;
-        }
-      } catch (e) {
-        // Errors are handled by the type checks above.
-      }
-
-      let containersEnabled = true;
-      try {
-        containersEnabled = Services.prefs.getBoolPref("privacy.userContext.enabled");
-      } catch (e) {
-        // If we fail here, we are in some xpcshell test.
-      }
-
-      let permissions = this.manifest.permissions || [];
-
-      let whitelist = [];
-      for (let perm of permissions) {
-        if (perm == "contextualIdentities" && !containersEnabled) {
-          continue;
-        }
-
-        this.permissions.add(perm);
-
-        let match = /^(\w+)(?:\.(\w+)(?:\.\w+)*)?$/.exec(perm);
-        if (!match) {
-          whitelist.push(perm);
-        } else if (match[1] == "experiments" && match[2]) {
-          this.apiNames.add(match[2]);
-        }
-      }
-      this.whiteListedHosts = new MatchPattern(whitelist);
-
-      for (let api of this.apiNames) {
-        this.dependencies.add(`${api}@experiments.addons.mozilla.org`);
-      }
-
-      return this.manifest;
     });
+  }
+
+  // Reads the extension's |manifest.json| file, and stores its
+  // parsed contents in |this.manifest|.
+  async loadManifest() {
+    [this.manifest] = await Promise.all([
+      this.parseManifest(),
+      Management.lazyInit(),
+    ]);
+
+    if (!this.manifest) {
+      return;
+    }
+
+    try {
+      // Do not override the add-on id that has been already assigned.
+      if (!this.id && this.manifest.applications.gecko.id) {
+        this.id = this.manifest.applications.gecko.id;
+      }
+    } catch (e) {
+      // Errors are handled by the type checks above.
+    }
+
+    let whitelist = [];
+    for (let perm of this.manifest.permissions) {
+      if (perm == "contextualIdentities" && !Preferences.get("privacy.userContext.enabled")) {
+        continue;
+      }
+
+      this.permissions.add(perm);
+
+      let match = /^(\w+)(?:\.(\w+)(?:\.\w+)*)?$/.exec(perm);
+      if (!match) {
+        whitelist.push(perm);
+      } else if (match[1] == "experiments" && match[2]) {
+        this.apiNames.add(match[2]);
+      }
+    }
+    this.whiteListedHosts = new MatchPattern(whitelist);
+
+    for (let api of this.apiNames) {
+      this.dependencies.add(`${api}@experiments.addons.mozilla.org`);
+    }
+
+    return this.manifest;
   }
 
   localizeMessage(...args) {
@@ -639,6 +643,10 @@ this.Extension = class extends ExtensionData {
     this.addonData = addonData;
     this.startupReason = startupReason;
 
+    if (["ADDON_UPGRADE", "ADDON_DOWNGRADE"].includes(startupReason)) {
+      StartupCache.clearAddonData(addonData.id);
+    }
+
     this.remote = ExtensionManagement.useRemoteWebExtensions;
 
     if (this.remote && processCount !== 1) {
@@ -712,8 +720,7 @@ this.Extension = class extends ExtensionData {
   }
 
   createPrincipal(uri = this.baseURI) {
-    return Services.scriptSecurityManager.createCodebasePrincipal(
-      uri, {addonId: this.id});
+    return Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
   }
 
   // Checks that the given URL is a child of our baseURI.
@@ -724,8 +731,25 @@ this.Extension = class extends ExtensionData {
     return common == this.baseURI.spec;
   }
 
-  readManifest() {
-    return super.readManifest().then(manifest => {
+  readLocaleFile(locale) {
+    return StartupCache.locales.get([this.id, locale],
+                                    () => super.readLocaleFile(locale))
+      .then(result => {
+        this.localeData.messages.set(locale, result);
+      });
+  }
+
+  parseManifest() {
+    return StartupCache.manifests.get([this.id, Locale.getLocale()],
+                                      () => super.parseManifest());
+  }
+
+  loadManifest() {
+    return super.loadManifest().then(manifest => {
+      if (this.errors.length) {
+        return Promise.reject({errors: this.errors});
+      }
+
       if (AppConstants.RELEASE_OR_BETA) {
         return manifest;
       }
@@ -842,29 +866,24 @@ this.Extension = class extends ExtensionData {
   // Reads the locale file for the given Gecko-compatible locale code, or if
   // no locale is given, the available locale closest to the UI locale.
   // Sets the currently selected locale on success.
-  initLocale(locale = undefined) {
-    // Ugh.
-    let super_ = super.initLocale.bind(this);
+  async initLocale(locale = undefined) {
+    if (locale === undefined) {
+      let locales = await this.promiseLocales();
 
-    return Task.spawn(function* () {
-      if (locale === undefined) {
-        let locales = yield this.promiseLocales();
+      let localeList = Array.from(locales.keys(), locale => {
+        return {name: locale, locales: [locale]};
+      });
 
-        let localeList = Array.from(locales.keys(), locale => {
-          return {name: locale, locales: [locale]};
-        });
+      let match = Locale.findClosestLocale(localeList);
+      locale = match ? match.name : this.defaultLocale;
+    }
 
-        let match = Locale.findClosestLocale(localeList);
-        locale = match ? match.name : this.defaultLocale;
-      }
-
-      return super_(locale);
-    }.bind(this));
+    return super.initLocale(locale);
   }
 
   startup() {
     let started = false;
-    return this.readManifest().then(() => {
+    return this.loadManifest().then(() => {
       ExtensionManagement.startupExtension(this.uuid, this.addonData.resourceURI, this);
       started = true;
 
@@ -916,18 +935,23 @@ this.Extension = class extends ExtensionData {
 
     Services.obs.removeObserver(this, "xpcom-shutdown");
 
-    this.broadcast("Extension:FlushJarCache", {path: file.path}).then(() => {
+    return this.broadcast("Extension:FlushJarCache", {path: file.path}).then(() => {
       // We can't delete this file until everyone using it has
       // closed it (because Windows is dumb). So we wait for all the
       // child processes (including the parent) to flush their JAR
       // caches. These caches may keep the file open.
       file.remove(false);
-    });
+    }).catch(Cu.reportError);
   }
 
   shutdown(reason) {
     this.shutdownReason = reason;
     this.hasShutdown = true;
+
+    if (this.cleanupFile ||
+        ["ADDON_INSTALL", "ADDON_UNINSTALL", "ADDON_UPGRADE", "ADDON_DOWNGRADE"].includes(reason)) {
+      StartupCache.clearAddonData(this.id);
+    }
 
     Services.ppmm.removeMessageListener(this.MESSAGE_EMIT_EVENT, this);
 
@@ -958,7 +982,7 @@ this.Extension = class extends ExtensionData {
 
     ExtensionManagement.shutdownExtension(this.uuid);
 
-    this.cleanupGeneratedFile();
+    return this.cleanupGeneratedFile();
   }
 
   observe(subject, topic, data) {

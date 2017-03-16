@@ -266,9 +266,7 @@ ${helpers.predefined_type("clip",
                     try!(dest.write_str(")"));
                 }
                 computed_value::Filter::Url(ref url) => {
-                    dest.write_str("url(")?;
                     url.to_css(dest)?;
-                    dest.write_str(")")?;
                 }
                 % endif
             }
@@ -311,9 +309,7 @@ ${helpers.predefined_type("clip",
                     try!(dest.write_str(")"));
                 }
                 SpecifiedFilter::Url(ref url) => {
-                    dest.write_str("url(")?;
                     url.to_css(dest)?;
-                    dest.write_str(")")?;
                 }
                 % endif
             }
@@ -367,8 +363,8 @@ ${helpers.predefined_type("clip",
     fn parse_factor(input: &mut Parser) -> Result<::values::CSSFloat, ()> {
         use cssparser::Token;
         match input.next() {
-            Ok(Token::Number(value)) => Ok(value.value),
-            Ok(Token::Percentage(value)) => Ok(value.unit_value),
+            Ok(Token::Number(value)) if value.value.is_sign_positive() => Ok(value.value),
+            Ok(Token::Percentage(value)) if value.unit_value.is_sign_positive() => Ok(value.unit_value),
             _ => Err(())
         }
     }

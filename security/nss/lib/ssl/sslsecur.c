@@ -478,7 +478,7 @@ sslBuffer_Append(sslBuffer *b, const void *data, unsigned int len)
 void
 sslBuffer_Clear(sslBuffer *b)
 {
-    if (b->len > 0) {
+    if (b->buf) {
         PORT_Free(b->buf);
         b->buf = NULL;
         b->len = 0;
@@ -991,6 +991,42 @@ int
 ssl_SecureWrite(sslSocket *ss, const unsigned char *buf, int len)
 {
     return ssl_SecureSend(ss, buf, len, 0);
+}
+
+SECStatus
+SSL_AlertReceivedCallback(PRFileDesc *fd, SSLAlertCallback cb, void *arg)
+{
+    sslSocket *ss;
+
+    ss = ssl_FindSocket(fd);
+    if (!ss) {
+        SSL_DBG(("%d: SSL[%d]: unable to find socket in SSL_AlertReceivedCallback",
+                 SSL_GETPID(), fd));
+        return SECFailure;
+    }
+
+    ss->alertReceivedCallback = cb;
+    ss->alertReceivedCallbackArg = arg;
+
+    return SECSuccess;
+}
+
+SECStatus
+SSL_AlertSentCallback(PRFileDesc *fd, SSLAlertCallback cb, void *arg)
+{
+    sslSocket *ss;
+
+    ss = ssl_FindSocket(fd);
+    if (!ss) {
+        SSL_DBG(("%d: SSL[%d]: unable to find socket in SSL_AlertSentCallback",
+                 SSL_GETPID(), fd));
+        return SECFailure;
+    }
+
+    ss->alertSentCallback = cb;
+    ss->alertSentCallbackArg = arg;
+
+    return SECSuccess;
 }
 
 SECStatus

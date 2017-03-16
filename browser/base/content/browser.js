@@ -155,9 +155,13 @@ XPCOMUtils.defineLazyGetter(this, "PopupNotifications", function() {
   try {
     // Hide all notifications while the URL is being edited and the address bar
     // has focus, including the virtual focus in the results popup.
+    // We also have to hide notifications explicitly when the window is
+    // minimized because of the effects of the "noautohide" attribute on Linux.
+    // This can be removed once bug 545265 and bug 1320361 are fixed.
     let shouldSuppress = () => {
-      return gURLBar.getAttribute("pageproxystate") != "valid" &&
-             gURLBar.focused;
+      return window.windowState == window.STATE_MINIMIZED ||
+             (gURLBar.getAttribute("pageproxystate") != "valid" &&
+             gURLBar.focused);
     };
     return new tmp.PopupNotifications(gBrowser,
                                       document.getElementById("notification-popup"),
@@ -829,6 +833,8 @@ function gKeywordURIFixup({ target: browser, data: fixupInfo }) {
     return;
   }
 
+  let contentPrincipal = browser.contentPrincipal;
+
   // At this point we're still only just about to load this URI.
   // When the async DNS lookup comes back, we may be in any of these states:
   // 1) still on the previous URI, waiting for the preferredURI (keyword
@@ -931,7 +937,8 @@ function gKeywordURIFixup({ target: browser, data: fixupInfo }) {
   };
 
   try {
-    gDNSService.asyncResolve(hostName, 0, onLookupComplete, Services.tm.mainThread);
+    gDNSService.asyncResolve(hostName, 0, onLookupComplete, Services.tm.mainThread,
+                             contentPrincipal.originAttributes);
   } catch (ex) {
     // Do nothing if the URL is invalid (we don't want to show a notification in that case).
     if (ex.result != Cr.NS_ERROR_UNKNOWN_HOST) {
@@ -1496,6 +1503,15 @@ var gBrowserInit = {
     gMenuButtonUpdateBadge.init();
 
     gExtensionsNotifications.init();
+
+    let wasMinimized = window.windowState == window.STATE_MINIMIZED;
+    window.addEventListener("sizemodechange", () => {
+      let isMinimized = window.windowState == window.STATE_MINIMIZED;
+      if (wasMinimized != isMinimized) {
+        wasMinimized = isMinimized;
+        UpdatePopupNotificationsVisibility();
+      }
+    });
 
     window.addEventListener("mousemove", MousePosTracker);
     window.addEventListener("dragover", MousePosTracker);
@@ -2413,14 +2429,14 @@ function BrowserViewSourceOfDocument(aArgsOrDocument) {
     if (inTab) {
       let tabBrowser = gBrowser;
       let preferredRemoteType;
-      if (!tabBrowser) {
-        if (!args.browser) {
+      if (args.browser) {
+        preferredRemoteType = args.browser.remoteType;
+      } else {
+        if (!tabBrowser) {
           throw new Error("BrowserViewSourceOfDocument should be passed the " +
                           "subject browser if called from a window without " +
                           "gBrowser defined.");
         }
-        preferredRemoteType = args.browser.remoteType;
-      } else {
         // Some internal URLs (such as specific chrome: and about: URLs that are
         // not yet remote ready) cannot be loaded in a remote browser.  View
         // source in tab expects the new view source browser's remoteness to match
@@ -2790,15 +2806,10 @@ var gMenuButtonUpdateBadge = {
   cancelObserverRegistered: false,
 
   init() {
-    try {
-      this.enabled = Services.prefs.getBoolPref("app.update.badge");
-    } catch (e) {}
+    this.enabled = Services.prefs.getBoolPref("app.update.badge", false);
     if (this.enabled) {
-      try {
-        this.badgeWaitTime = Services.prefs.getIntPref("app.update.badgeWaitTime");
-      } catch (e) {
-        this.badgeWaitTime = 345600; // 4 days
-      }
+      this.badgeWaitTime = Services.prefs.getIntPref("app.update.badgeWaitTime",
+                                                     345600); // 4 days
       Services.obs.addObserver(this, "update-staged", false);
       Services.obs.addObserver(this, "update-downloaded", false);
     }
@@ -6721,6 +6732,12 @@ var gIdentityHandler = {
    */
   _state: 0,
 
+  /**
+   * This flag gets set if the identity popup was opened by a keypress,
+   * to be able to focus it on the popupshown event.
+   */
+  _popupTriggeredByKeyboard: false,
+
   get _isBroken() {
     return this._state & Ci.nsIWebProgressListener.STATE_IS_BROKEN;
   },
@@ -6855,6 +6872,10 @@ var gIdentityHandler = {
     delete this._permissionReloadHint;
     return this._permissionReloadHint = document.getElementById("identity-popup-permission-reload-hint");
   },
+  get _popupExpander() {
+    delete this._popupExpander;
+    return this._popupExpander = document.getElementById("identity-popup-security-expander");
+  },
   get _permissionAnchors() {
     delete this._permissionAnchors;
     let permissionAnchors = {};
@@ -6876,10 +6897,18 @@ var gIdentityHandler = {
 
   toggleSubView(name, anchor) {
     let view = this._identityPopupMultiView;
+    let id = `identity-popup-${name}View`;
+    let subView = document.getElementById(id);
+
+    // Listen for the subview showing or hiding to change
+    // the tooltip on the expander button.
+    subView.addEventListener("ViewShowing", this);
+    subView.addEventListener("ViewHiding", this);
+
     if (view.showingSubView) {
       view.showMainView();
     } else {
-      view.showSubView(`identity-popup-${name}View`, anchor);
+      view.showSubView(id, anchor);
     }
 
     // If an element is focused that's not the anchor, clear the focus.
@@ -7188,6 +7217,9 @@ var gIdentityHandler = {
     this._identityPopupInsecureLoginFormsLearnMore
         .setAttribute("href", baseURL + "insecure-password");
 
+    // The expander switches its tooltip when toggled, change it to the default.
+    this._popupExpander.tooltipText = gNavigatorBundle.getString("identity.showDetails.tooltip");
+
     // Determine connection security information.
     let connection = "not-secure";
     if (this._isSecureInternalUI) {
@@ -7361,6 +7393,8 @@ var gIdentityHandler = {
       return;
     }
 
+    this._popupTriggeredByKeyboard = event.type == "keypress";
+
     // Make sure that the display:none style we set in xul is removed now that
     // the popup is actually needed
     this._identityPopup.hidden = false;
@@ -7380,10 +7414,12 @@ var gIdentityHandler = {
 
   onPopupShown(event) {
     if (event.target == this._identityPopup) {
-      // Move focus to the next available element in the identity popup.
-      // This is required by role=alertdialog and fixes an issue where
-      // an already open panel would steal focus from the identity popup.
-      document.commandDispatcher.advanceFocusIntoSubtree(this._identityPopup);
+      if (this._popupTriggeredByKeyboard) {
+        // Move focus to the next available element in the identity popup.
+        // This is required by role=alertdialog and fixes an issue where
+        // an already open panel would steal focus from the identity popup.
+        document.commandDispatcher.advanceFocusIntoSubtree(this._identityPopup);
+      }
 
       window.addEventListener("focus", this, true);
     }
@@ -7397,6 +7433,16 @@ var gIdentityHandler = {
   },
 
   handleEvent(event) {
+    // If the subview is shown or hidden, change the tooltip on the expander button.
+    if (event.type == "ViewShowing") {
+      this._popupExpander.tooltipText = gNavigatorBundle.getString("identity.hideDetails.tooltip");
+      return;
+    }
+    if (event.type == "ViewHiding") {
+      this._popupExpander.tooltipText = gNavigatorBundle.getString("identity.showDetails.tooltip");
+      return;
+    }
+
     let elem = document.activeElement;
     let position = elem.compareDocumentPosition(this._identityPopup);
 

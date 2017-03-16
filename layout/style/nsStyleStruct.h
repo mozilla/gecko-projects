@@ -24,6 +24,7 @@
 #include "nsCoord.h"
 #include "nsMargin.h"
 #include "nsFont.h"
+#include "nsStyleAutoArray.h"
 #include "nsStyleCoord.h"
 #include "nsStyleConsts.h"
 #include "nsChangeHint.h"
@@ -370,6 +371,8 @@ public:
 
   mozilla::css::ImageValue* GetImageValue() const { return mImageValue; }
 
+  already_AddRefed<nsIURI> GetImageURI() const;
+
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsStyleImageRequest);
 
 private:
@@ -467,6 +470,8 @@ struct nsStyleImage
                  "Only image data can have a crop rect");
     return mCropRect;
   }
+
+  already_AddRefed<nsIURI> GetImageURI() const;
 
   /**
    * Compute the actual crop rect in pixels, using the source image bounds.
@@ -596,72 +601,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleColor
   // Don't add ANY members to this struct!  We can achieve caching in the rule
   // tree (rather than the style tree) by letting color stay by itself! -dwh
   nscolor mColor;                 // [inherited]
-};
-
-/**
- * An array of objects, similar to AutoTArray<T,1> but which is memmovable. It
- * always has length >= 1.
- */
-template<typename T>
-class nsStyleAutoArray
-{
-public:
-  // This constructor places a single element in mFirstElement.
-  enum WithSingleInitialElement { WITH_SINGLE_INITIAL_ELEMENT };
-  explicit nsStyleAutoArray(WithSingleInitialElement) {}
-  nsStyleAutoArray(const nsStyleAutoArray& aOther) { *this = aOther; }
-  nsStyleAutoArray& operator=(const nsStyleAutoArray& aOther) {
-    mFirstElement = aOther.mFirstElement;
-    mOtherElements = aOther.mOtherElements;
-    return *this;
-  }
-
-  bool operator==(const nsStyleAutoArray& aOther) const {
-    return Length() == aOther.Length() &&
-           mFirstElement == aOther.mFirstElement &&
-           mOtherElements == aOther.mOtherElements;
-  }
-  bool operator!=(const nsStyleAutoArray& aOther) const {
-    return !(*this == aOther);
-  }
-
-  nsStyleAutoArray& operator=(nsStyleAutoArray&& aOther) {
-    mFirstElement = aOther.mFirstElement;
-    mOtherElements.SwapElements(aOther.mOtherElements);
-
-    return *this;
-  }
-
-  size_t Length() const {
-    return mOtherElements.Length() + 1;
-  }
-  const T& operator[](size_t aIndex) const {
-    return aIndex == 0 ? mFirstElement : mOtherElements[aIndex - 1];
-  }
-  T& operator[](size_t aIndex) {
-    return aIndex == 0 ? mFirstElement : mOtherElements[aIndex - 1];
-  }
-
-  void EnsureLengthAtLeast(size_t aMinLen) {
-    if (aMinLen > 0) {
-      mOtherElements.EnsureLengthAtLeast(aMinLen - 1);
-    }
-  }
-
-  void SetLengthNonZero(size_t aNewLen) {
-    MOZ_ASSERT(aNewLen > 0);
-    mOtherElements.SetLength(aNewLen - 1);
-  }
-
-  void TruncateLengthNonZero(size_t aNewLen) {
-    MOZ_ASSERT(aNewLen > 0);
-    MOZ_ASSERT(aNewLen <= Length());
-    mOtherElements.TruncateLength(aNewLen - 1);
-  }
-
-private:
-  T mFirstElement;
-  nsTArray<T> mOtherElements;
 };
 
 struct nsStyleImageLayers {
@@ -1595,6 +1534,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleList
     return mListStyleImage ? mListStyleImage->get() : nullptr;
   }
 
+  already_AddRefed<nsIURI> GetListStyleImageURI() const;
+
   void GetListStyleType(nsSubstring& aType) const { mCounterStyle->GetStyleName(aType); }
   mozilla::CounterStyle* GetCounterStyle() const
   {
@@ -2347,13 +2288,16 @@ struct nsTimingFunction
     StepStart,    // step-start and steps(..., start)
     StepEnd,      // step-end, steps(..., end) and steps(...)
     CubicBezier,  // cubic-bezier()
+    Frames,       // frames()
   };
 
   // Whether the timing function type is represented by a spline,
   // and thus will have mFunc filled in.
   static bool IsSplineType(Type aType)
   {
-    return aType != Type::StepStart && aType != Type::StepEnd;
+    return aType != Type::StepStart &&
+           aType != Type::StepEnd &&
+           aType != Type::Frames;
   }
 
   explicit nsTimingFunction(int32_t aTimingFunctionType
@@ -2373,12 +2317,14 @@ struct nsTimingFunction
 
   enum class Keyword { Implicit, Explicit };
 
-  nsTimingFunction(Type aType, uint32_t aSteps)
+  nsTimingFunction(Type aType, uint32_t aStepsOrFrames)
     : mType(aType)
   {
-    MOZ_ASSERT(mType == Type::StepStart || mType == Type::StepEnd,
+    MOZ_ASSERT(mType == Type::StepStart ||
+               mType == Type::StepEnd ||
+               mType == Type::Frames,
                "wrong type");
-    mSteps = aSteps;
+    mStepsOrFrames = aStepsOrFrames;
   }
 
   nsTimingFunction(const nsTimingFunction& aOther)
@@ -2395,7 +2341,7 @@ struct nsTimingFunction
       float mY2;
     } mFunc;
     struct {
-      uint32_t mSteps;
+      uint32_t mStepsOrFrames;
     };
   };
 
@@ -2414,7 +2360,7 @@ struct nsTimingFunction
       mFunc.mX2 = aOther.mFunc.mX2;
       mFunc.mY2 = aOther.mFunc.mY2;
     } else {
-      mSteps = aOther.mSteps;
+      mStepsOrFrames = aOther.mStepsOrFrames;
     }
 
     return *this;
@@ -2429,7 +2375,7 @@ struct nsTimingFunction
       return mFunc.mX1 == aOther.mFunc.mX1 && mFunc.mY1 == aOther.mFunc.mY1 &&
              mFunc.mX2 == aOther.mFunc.mX2 && mFunc.mY2 == aOther.mFunc.mY2;
     }
-    return mSteps == aOther.mSteps;
+    return mStepsOrFrames == aOther.mStepsOrFrames;
   }
 
   bool operator!=(const nsTimingFunction& aOther) const
@@ -2860,7 +2806,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay
                                 // match mWillChange. Also tracks if any of the
                                 // properties in the will-change list require
                                 // a stacking context.
-  nsTArray<nsString> mWillChange;
+  nsCOMArray<nsIAtom> mWillChange;
 
   uint8_t mTouchAction;         // [reset] see nsStyleConsts.h
   uint8_t mScrollBehavior;      // [reset] see nsStyleConsts.h NS_STYLE_SCROLL_BEHAVIOR_*
@@ -3260,6 +3206,7 @@ public:
     MOZ_ASSERT(aType == eStyleContentType_Counter ||
                aType == eStyleContentType_Counters);
     MOZ_ASSERT(aCounters);
+    MOZ_ASSERT(aCounters->Count() == 2 || aCounters->Count() == 3);
     MOZ_ASSERT(mType == eStyleContentType_Uninitialized,
                "should only initialize nsStyleContentData once");
     mType = aType;
@@ -3274,6 +3221,12 @@ public:
     mType = eStyleContentType_Image;
     mContent.mImage = aRequest.take();
     MOZ_ASSERT(mContent.mImage);
+  }
+
+  void Resolve(nsPresContext* aPresContext) {
+    if (mType == eStyleContentType_Image) {
+      mContent.mImage->Resolve(aPresContext);
+    }
   }
 
 private:
@@ -3304,7 +3257,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleContent
   explicit nsStyleContent(const nsPresContext* aContext);
   nsStyleContent(const nsStyleContent& aContent);
   ~nsStyleContent();
-  void FinishStyle(nsPresContext* aPresContext) {}
+  void FinishStyle(nsPresContext* aPresContext);
 
   void* operator new(size_t sz, nsStyleContent* aSelf) { return aSelf; }
   void* operator new(size_t sz, nsPresContext* aContext) {
@@ -3572,6 +3525,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleColumn
   mozilla::StyleComplexColor mColumnRuleColor; // [reset]
   uint8_t      mColumnRuleStyle;  // [reset]
   uint8_t      mColumnFill;  // [reset] see nsStyleConsts.h
+  uint8_t      mColumnSpan;  // [reset] see nsStyleConsts.h
 
   void SetColumnRuleWidth(nscoord aWidth) {
     mColumnRuleWidth = NS_ROUND_BORDER_TO_PIXELS(aWidth, mTwipsPerPixel);

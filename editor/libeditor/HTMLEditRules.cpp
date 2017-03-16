@@ -241,9 +241,16 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLEditRules, TextEditRules,
 NS_IMETHODIMP
 HTMLEditRules::Init(TextEditor* aTextEditor)
 {
+  if (NS_WARN_IF(!aTextEditor)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
   InitFields();
 
-  mHTMLEditor = static_cast<HTMLEditor*>(aTextEditor);
+  mHTMLEditor = aTextEditor->AsHTMLEditor();
+  if (NS_WARN_IF(!mHTMLEditor)) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
   // call through to base class Init
   nsresult rv = TextEditRules::Init(aTextEditor);
@@ -3457,7 +3464,8 @@ HTMLEditRules::WillMakeDefListItem(Selection* aSelection,
 {
   // for now we let WillMakeList handle this
   NS_NAMED_LITERAL_STRING(listType, "dl");
-  return WillMakeList(aSelection, &listType, aEntireList, nullptr, aCancel, aHandled, aItemType);
+  return WillMakeList(aSelection, &listType.AsString(), aEntireList, nullptr,
+                      aCancel, aHandled, aItemType);
 }
 
 nsresult

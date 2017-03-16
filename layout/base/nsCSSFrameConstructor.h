@@ -1313,7 +1313,6 @@ protected:
   static nsIFrame* CreatePlaceholderFrameFor(nsIPresShell*     aPresShell,
                                              nsIContent*       aContent,
                                              nsIFrame*         aFrame,
-                                             nsStyleContext*   aParentStyle,
                                              nsContainerFrame* aParentFrame,
                                              nsIFrame*         aPrevInFlow,
                                              nsFrameState      aTypeBit);
@@ -1372,7 +1371,6 @@ private:
                            nsIContent* aContent);
 
   void AddPageBreakItem(nsIContent* aContent,
-                        nsStyleContext* aMainStyleContext,
                         FrameConstructionItemList& aItems);
 
   // Function to find FrameConstructionData for aElement.  Will return

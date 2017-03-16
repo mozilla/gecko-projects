@@ -28,11 +28,13 @@ GMPCDMProxy::GMPCDMProxy(dom::MediaKeys* aKeys,
                          const nsAString& aKeySystem,
                          GMPCrashHelper* aCrashHelper,
                          bool aDistinctiveIdentifierRequired,
-                         bool aPersistentStateRequired)
+                         bool aPersistentStateRequired,
+                         nsIEventTarget* aMainThread)
   : CDMProxy(aKeys,
              aKeySystem,
              aDistinctiveIdentifierRequired,
-             aPersistentStateRequired)
+             aPersistentStateRequired,
+             aMainThread)
   , mCrashHelper(aCrashHelper)
   , mCDM(nullptr)
   , mShutdownCalled(false)
@@ -124,7 +126,7 @@ GMPCDMProxy::gmp_InitDone(GMPDecryptorProxy* aCDM, UniquePtr<InitData>&& aData)
   }
 
   mCDM = aCDM;
-  mCallback.reset(new GMPCDMCallbackProxy(this));
+  mCallback.reset(new GMPCDMCallbackProxy(this, mMainThread));
   mCDM->Init(mCallback.get(),
              mDistinctiveIdentifierRequired,
              mPersistentStateRequired);
@@ -141,7 +143,7 @@ void GMPCDMProxy::OnSetDecryptorId(uint32_t aId)
     NewRunnableMethod<uint32_t>(this,
                                 &GMPCDMProxy::OnCDMCreated,
                                 mCreatePromiseId));
-  NS_DispatchToMainThread(task);
+  mMainThread->Dispatch(task.forget(), NS_DISPATCH_NORMAL);
 }
 
 class gmp_InitDoneCallback : public GetGMPDecryptorCallback
@@ -518,7 +520,7 @@ GMPCDMProxy::RejectPromise(PromiseId aId, nsresult aCode,
   } else {
     nsCOMPtr<nsIRunnable> task(new RejectPromiseTask(this, aId, aCode,
                                                      aReason));
-    NS_DispatchToMainThread(task);
+    mMainThread->Dispatch(task.forget(), NS_DISPATCH_NORMAL);
   }
 }
 
@@ -536,7 +538,7 @@ GMPCDMProxy::ResolvePromise(PromiseId aId)
     task = NewRunnableMethod<PromiseId>(this,
                                         &GMPCDMProxy::ResolvePromise,
                                         aId);
-    NS_DispatchToMainThread(task);
+    mMainThread->Dispatch(task.forget(), NS_DISPATCH_NORMAL);
   }
 }
 
@@ -609,7 +611,10 @@ GMPCDMProxy::OnExpirationChange(const nsAString& aSessionId,
   }
   RefPtr<dom::MediaKeySession> session(mKeys->GetSession(aSessionId));
   if (session) {
-    session->SetExpiration(static_cast<double>(aExpiryTime));
+    // Expiry of 0 is interpreted as "never expire". See bug 1345341.
+    double t = (aExpiryTime == 0) ? std::numeric_limits<double>::quiet_NaN()
+                                  : static_cast<double>(aExpiryTime);
+    session->SetExpiration(t);
   }
 }
 

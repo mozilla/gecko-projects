@@ -162,12 +162,13 @@ pref("extensions.update.background.url", "https://versioncheck-bg.addons.mozilla
 pref("extensions.update.interval", 86400);  // Check for updates to Extensions and
                                             // Themes every day
 // Non-symmetric (not shared by extensions) extension-specific [update] preferences
-pref("extensions.dss.enabled", false);          // Dynamic Skin Switching
 pref("extensions.dss.switchPending", false);    // Non-dynamic switch pending after next
                                                 // restart.
 
 pref("extensions.{972ce4c6-7e08-4474-a285-3208198ce6fd}.name", "chrome://browser/locale/browser.properties");
 pref("extensions.{972ce4c6-7e08-4474-a285-3208198ce6fd}.description", "chrome://browser/locale/browser.properties");
+
+pref("extensions.webextensions.themes.icons.buttons", "back,forward,reload,stop,bookmark_star,bookmark_menu,downloads,home,app_menu,cut,copy,paste,new_window,new_private_window,save_page,print,history,full_screen,find,options,addons,developer,synced_tabs,open_file,sidebars,share_page,subscribe,text_encoding,email_link,forget,pocket");
 
 pref("lightweightThemes.update.enabled", true);
 pref("lightweightThemes.getMoreURL", "https://addons.mozilla.org/%LOCALE%/firefox/themes");
@@ -531,6 +532,7 @@ pref("privacy.panicButton.enabled",         true);
 
 pref("privacy.firstparty.isolate",                        false);
 pref("privacy.firstparty.isolate.restrict_opener_access", true);
+pref("privacy.resistFingerprinting", false);
 
 // Time until temporary permissions expire, in ms
 pref("privacy.temporary_permission_expire_time_ms",  3600000);
@@ -1201,6 +1203,11 @@ pref("full-screen-api.enabled", true);
 // (this pref has no effect if more than 6 hours have passed since the last crash)
 pref("toolkit.startup.max_resumed_crashes", 3);
 
+// Whether we use pdfium to view content with the pdf mime type.
+// Note: if the pref is set to false while Firefox is open, it won't
+// take effect until there are no open pdfium tabs.
+pref("pdfium.enabled", false);
+
 // Completely disable pdf.js as an option to preview pdfs within firefox.
 // Note: if this is not disabled it does not necessarily mean pdf.js is the pdf
 // handler just that it is an option.
@@ -1247,19 +1254,15 @@ pref("dom.debug.propagate_gesture_events_through_content", false);
 
 // All the Geolocation preferences are here.
 //
-// The request URL of the GeoLocation backend.
-#ifdef RELEASE_OR_BETA
+
+// Geolocation preferences for the RELEASE and "later" Beta channels.
+// Some of these prefs are specified even though they are redundant; they are
+// here for clarity and end-user experiments.
+#ifndef EARLY_BETA_OR_EARLIER
 pref("geo.wifi.uri", "https://www.googleapis.com/geolocation/v1/geolocate?key=%GOOGLE_API_KEY%");
-#else
-pref("geo.wifi.uri", "https://location.services.mozilla.com/v1/geolocate?key=%MOZILLA_API_KEY%");
-#endif
 
 #ifdef XP_MACOSX
-#ifdef RELEASE_OR_BETA
 pref("geo.provider.use_corelocation", false);
-#else
-pref("geo.provider.use_corelocation", true);
-#endif
 #endif
 
 #ifdef XP_WIN
@@ -1267,19 +1270,29 @@ pref("geo.provider.ms-windows-location", false);
 #endif
 
 #ifdef MOZ_WIDGET_GTK
-#ifdef MOZ_GPSD
-#ifdef RELEASE_OR_BETA
 pref("geo.provider.use_gpsd", false);
-#else
-pref("geo.provider.use_gpsd", true);
-#endif
-#endif
 #endif
 
-// We keep allowing non-HTTPS geo requests on all the release
-// channels, for now.
-// TODO: default to false (or remove altogether) for #1072859.
-pref("geo.security.allowinsecure", true);
+#else
+
+// Geolocation preferences for Nightly/Aurora/Beta.
+pref("geo.wifi.uri", "https://location.services.mozilla.com/v1/geolocate?key=%MOZILLA_API_KEY%");
+
+#ifdef XP_MACOSX
+pref("geo.provider.use_corelocation", true);
+#endif
+
+// The native Windows location provider is only enabled in Nightly and likely to
+// be unstable. Set to false if things are really broken.
+#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+pref("geo.provider.ms-windows-location", true);
+#endif
+
+#if defined(MOZ_WIDGET_GTK) && defined(MOZ_GPSD)
+pref("geo.provider.use_gpsd", true);
+#endif
+
+#endif
 
 // Necko IPC security checks only needed for app isolation for cookies/cache/etc:
 // currently irrelevant for desktop e10s

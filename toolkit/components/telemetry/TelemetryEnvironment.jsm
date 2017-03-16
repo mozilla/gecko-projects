@@ -12,7 +12,6 @@ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 const myScope = this;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
-Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/PromiseUtils.jsm");
@@ -88,6 +87,7 @@ this.TelemetryEnvironment = {
   // Policy to use when saving preferences. Exported for using them in tests.
   RECORD_PREF_STATE: 1, // Don't record the preference value
   RECORD_PREF_VALUE: 2, // We only record user-set prefs.
+  RECORD_DEFAULTPREF_VALUE: 3, // We only record default pref if set
 
   // Testing method
   testWatchPreferences(prefMap) {
@@ -118,6 +118,7 @@ this.TelemetryEnvironment = {
 
 const RECORD_PREF_STATE = TelemetryEnvironment.RECORD_PREF_STATE;
 const RECORD_PREF_VALUE = TelemetryEnvironment.RECORD_PREF_VALUE;
+const RECORD_DEFAULTPREF_VALUE = TelemetryEnvironment.RECORD_DEFAULTPREF_VALUE;
 const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["app.feedback.baseURL", {what: RECORD_PREF_VALUE}],
   ["app.support.baseURL", {what: RECORD_PREF_VALUE}],
@@ -225,12 +226,12 @@ function enforceBoolean(aValue) {
 }
 
 /**
- * Get the current browser.
+ * Get the current browser locale.
  * @return a string with the locale or null on failure.
  */
 function getBrowserLocale() {
   try {
-    return Services.locale.getAppLocale();
+    return Services.locale.getAppLocaleAsLangTag();
   } catch (e) {
     return null;
   }
@@ -244,7 +245,7 @@ function getSystemLocale() {
   try {
     return Cc["@mozilla.org/intl/ospreferences;1"].
              getService(Ci.mozIOSPreferences).
-             getSystemLocale();
+             systemLocale;
   } catch (e) {
     return null;
   }
@@ -516,7 +517,7 @@ EnvironmentAddonBuilder.prototype = {
    *   changed - Whether the environment changed.
    *   oldEnvironment - Only set if a change occured, contains the environment data before the change.
    */
-  _updateAddons: Task.async(function* () {
+  async _updateAddons() {
     this._environment._log.trace("_updateAddons");
     let personaId = null;
     if (AppConstants.platform !== "gonk") {
@@ -527,10 +528,10 @@ EnvironmentAddonBuilder.prototype = {
     }
 
     let addons = {
-      activeAddons: yield this._getActiveAddons(),
-      theme: yield this._getActiveTheme(),
+      activeAddons: await this._getActiveAddons(),
+      theme: await this._getActiveTheme(),
       activePlugins: this._getActivePlugins(),
-      activeGMPlugins: yield this._getActiveGMPlugins(),
+      activeGMPlugins: await this._getActiveGMPlugins(),
       activeExperiment: this._getActiveExperiment(),
       persona: personaId,
     };
@@ -547,15 +548,15 @@ EnvironmentAddonBuilder.prototype = {
     }
 
     return result;
-  }),
+  },
 
   /**
    * Get the addon data in object form.
    * @return Promise<object> containing the addon data.
    */
-  _getActiveAddons: Task.async(function* () {
+  async _getActiveAddons() {
     // Request addons, asynchronously.
-    let allAddons = yield AddonManager.getAddonsByTypes(["extension", "service"]);
+    let allAddons = await AddonManager.getAddonsByTypes(["extension", "service"]);
 
     let activeAddons = {};
     for (let addon of allAddons) {
@@ -598,15 +599,15 @@ EnvironmentAddonBuilder.prototype = {
     }
 
     return activeAddons;
-  }),
+  },
 
   /**
    * Get the currently active theme data in object form.
    * @return Promise<object> containing the active theme data.
    */
-  _getActiveTheme: Task.async(function* () {
+  async _getActiveTheme() {
     // Request themes, asynchronously.
-    let themes = yield AddonManager.getAddonsByTypes(["theme"]);
+    let themes = await AddonManager.getAddonsByTypes(["theme"]);
 
     let activeTheme = {};
     // We only store information about the active theme.
@@ -633,7 +634,7 @@ EnvironmentAddonBuilder.prototype = {
     }
 
     return activeTheme;
-  }),
+  },
 
   /**
    * Get the plugins data in object form.
@@ -680,9 +681,9 @@ EnvironmentAddonBuilder.prototype = {
    * This should only be called from _pendingTask; otherwise we risk
    * running this during addon manager shutdown.
    */
-  _getActiveGMPlugins: Task.async(function* () {
+  async _getActiveGMPlugins() {
     // Request plugins, asynchronously.
-    let allPlugins = yield AddonManager.getAddonsByTypes(["plugin"]);
+    let allPlugins = await AddonManager.getAddonsByTypes(["plugin"]);
 
     let activeGMPlugins = {};
     for (let plugin of allPlugins) {
@@ -704,7 +705,7 @@ EnvironmentAddonBuilder.prototype = {
     }
 
     return activeGMPlugins;
-  }),
+  },
 
   /**
    * Get the active experiment data in object form.
@@ -874,8 +875,13 @@ EnvironmentCache.prototype = {
   _getPrefData() {
     let prefData = {};
     for (let [pref, policy] of this._watchedPrefs.entries()) {
-      // Only record preferences if they are non-default
-      if (!Preferences.isSet(pref)) {
+      if (policy.what == TelemetryEnvironment.RECORD_DEFAULTPREF_VALUE) {
+        // For default prefs, make sure they exist
+        if (!Preferences.has(pref)) {
+          continue;
+        }
+      } else if (!Preferences.isSet(pref)) {
+        // For user prefs, make sure they are set
         continue;
       }
 
@@ -1191,12 +1197,12 @@ EnvironmentCache.prototype = {
    * Update the cached profile data.
    * @returns Promise<> resolved when the I/O is complete.
    */
-  _updateProfile: Task.async(function* () {
+  async _updateProfile() {
     const logger = Log.repository.getLoggerWithMessagePrefix(LOGGER_NAME, "ProfileAge - ");
     let profileAccessor = new ProfileAge(null, logger);
 
-    let creationDate = yield profileAccessor.created;
-    let resetDate = yield profileAccessor.reset;
+    let creationDate = await profileAccessor.created;
+    let resetDate = await profileAccessor.reset;
 
     this._currentEnvironment.profile.creationDate =
       Utils.millisecondsToDays(creationDate);
@@ -1204,14 +1210,14 @@ EnvironmentCache.prototype = {
       this._currentEnvironment.profile.resetDate =
         Utils.millisecondsToDays(resetDate);
     }
-  }),
+  },
 
   /**
    * Update the cached attribution data object.
    * @returns Promise<> resolved when the I/O is complete.
    */
-  _updateAttribution: Task.async(function* () {
-    let data = yield AttributionCode.getAttrDataAsync();
+  async _updateAttribution() {
+    let data = await AttributionCode.getAttrDataAsync();
     if (Object.keys(data).length > 0) {
       this._currentEnvironment.settings.attribution = {};
       for (let key in data) {
@@ -1219,7 +1225,7 @@ EnvironmentCache.prototype = {
           limitStringToLength(data[key], MAX_ATTRIBUTION_STRING_LENGTH);
       }
     }
-  }),
+  },
 
   /**
    * Get the partner data in object form.

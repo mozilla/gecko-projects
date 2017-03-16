@@ -15,6 +15,7 @@
 #include "mozilla/SheetType.h"
 #include "mozilla/UniquePtr.h"
 #include "nsCSSPseudoElements.h"
+#include "nsCSSAnonBoxes.h"
 #include "nsChangeHint.h"
 #include "nsIAtom.h"
 #include "nsTArray.h"
@@ -27,6 +28,7 @@ class CSSStyleSheet;
 class ServoRestyleManager;
 class ServoStyleSheet;
 struct Keyframe;
+struct ServoComputedStyleValues;
 } // namespace mozilla
 class nsIDocument;
 class nsStyleContext;
@@ -60,6 +62,7 @@ public:
   }
 
   ServoStyleSet();
+  ~ServoStyleSet();
 
   void Init(nsPresContext* aPresContext);
   void BeginShutdown();
@@ -82,13 +85,46 @@ public:
                   LazyComputeBehavior aMayCompute,
                   TreeMatchContext& aTreeMatchContext);
 
+  // Get a style context for a text node (which no rules will match).
+  //
+  // The returned style context will have nsCSSAnonBoxes::mozText as its pseudo.
+  //
+  // (Perhaps mozText should go away and we shouldn't even create style
+  // contexts for such content nodes, when text-combine-upright is not
+  // present.  However, not doing any rule matching for them is a first step.)
   already_AddRefed<nsStyleContext>
   ResolveStyleForText(nsIContent* aTextNode,
                       nsStyleContext* aParentContext);
 
+  // Get a style context for a first-letter continuation (which no rules will
+  // match).
+  //
+  // The returned style context will have
+  // nsCSSAnonBoxes::firstLetterContinuation as its pseudo.
+  //
+  // (Perhaps nsCSSAnonBoxes::firstLetterContinuation should go away and we
+  // shouldn't even create style contexts for such frames.  However, not doing
+  // any rule matching for them is a first step.  And right now we do use this
+  // style context for some things)
   already_AddRefed<nsStyleContext>
-  ResolveStyleForOtherNonElement(nsStyleContext* aParentContext);
+  ResolveStyleForFirstLetterContinuation(nsStyleContext* aParentContext);
 
+  // Get a style context for a placeholder frame (which no rules will match).
+  //
+  // The returned style context will have nsCSSAnonBoxes::oofPlaceholder as
+  // its pseudo.
+  //
+  // (Perhaps nsCSSAnonBoxes::oofPaceholder should go away and we shouldn't even
+  // create style contexts for placeholders.  However, not doing any rule
+  // matching for them is a first step.)
+  already_AddRefed<nsStyleContext>
+  ResolveStyleForPlaceholder();
+
+  // Get a style context for a pseudo-element.  aParentElement must be
+  // non-null.  aPseudoID is the CSSPseudoElementType for the
+  // pseudo-element.  aPseudoElement must be non-null if the pseudo-element
+  // type is one that allows user action pseudo-classes after it or allows
+  // style attributes; otherwise, it is ignored.
   already_AddRefed<nsStyleContext>
   ResolvePseudoElementStyle(dom::Element* aOriginatingElement,
                             mozilla::CSSPseudoElementType aType,
@@ -102,10 +138,20 @@ public:
   ResolveTransientStyle(dom::Element* aElement,
                         mozilla::CSSPseudoElementType aPseudoType);
 
-  // aFlags is an nsStyleSet flags bitfield
+  // Get a style context for an anonymous box.  aPseudoTag is the pseudo-tag to
+  // use and must be non-null.  It must be an anon box, and must be one that
+  // inherits style from the given aParentContext.  aFlags is an nsStyleSet
+  // flags bitfield.
   already_AddRefed<nsStyleContext>
-  ResolveAnonymousBoxStyle(nsIAtom* aPseudoTag, nsStyleContext* aParentContext,
-                           uint32_t aFlags = 0);
+  ResolveInheritingAnonymousBoxStyle(nsIAtom* aPseudoTag,
+                                     nsStyleContext* aParentContext,
+                                     uint32_t aFlags = 0);
+
+  // Get a style context for an anonymous box that does not inherit style from
+  // anything.  aPseudoTag is the pseudo-tag to use and must be non-null.  It
+  // must be an anon box, and must be a non-inheriting one.
+  already_AddRefed<nsStyleContext>
+  ResolveNonInheritingAnonymousBoxStyle(nsIAtom* aPseudoTag);
 
   // manage the set of style sheets in the style set
   nsresult AppendStyleSheet(SheetType aType, ServoStyleSheet* aSheet);
@@ -196,6 +242,11 @@ public:
                             const ServoComputedValues* aComputedValues,
                             nsTArray<Keyframe>& aKeyframes);
 
+  nsTArray<ComputedKeyframeValues>
+  GetComputedKeyframeValuesFor(const nsTArray<Keyframe>& aKeyframes,
+                               dom::Element* aElement,
+                               const ServoComputedStyleValues& aServoValues);
+
 private:
   already_AddRefed<nsStyleContext> GetContext(already_AddRefed<ServoComputedValues>,
                                               nsStyleContext* aParentContext,
@@ -223,11 +274,32 @@ private:
   bool PrepareAndTraverseSubtree(RawGeckoElementBorrowed aRoot,
                                  mozilla::TraversalRootBehavior aRootBehavior);
 
+  /**
+   * Clear our cached mNonInheritingStyleContexts.  We do this when we want to
+   * make sure those style contexts won't live too long (e.g. when rebuilding
+   * all style data or when shutting down the style set).
+   */
+  void ClearNonInheritingStyleContexts();
+
+  /**
+   * Perform processes that we should do before traversing.
+   */
+  void PreTraverse();
+
+  already_AddRefed<ServoComputedValues> ResolveStyleLazily(dom::Element* aElement,
+                                                           nsIAtom* aPseudoTag);
+
   nsPresContext* mPresContext;
   UniquePtr<RawServoStyleSet> mRawSet;
   EnumeratedArray<SheetType, SheetType::Count,
                   nsTArray<RefPtr<ServoStyleSheet>>> mSheets;
   int32_t mBatching;
+
+  // Stores pointers to our cached style contexts for non-inheriting anonymous
+  // boxes.
+  EnumeratedArray<nsCSSAnonBoxes::NonInheriting,
+                  nsCSSAnonBoxes::NonInheriting::_Count,
+                  RefPtr<nsStyleContext>> mNonInheritingStyleContexts;
 
   static bool sInServoTraversal;
 };

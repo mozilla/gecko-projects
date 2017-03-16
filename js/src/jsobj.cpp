@@ -22,6 +22,7 @@
 #include "jsarray.h"
 #include "jsatom.h"
 #include "jscntxt.h"
+#include "jsexn.h"
 #include "jsfriendapi.h"
 #include "jsfun.h"
 #include "jsgc.h"
@@ -85,6 +86,30 @@ js::ReportNotObject(JSContext* cx, const Value& v)
     if (bytes)
         JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT,
                                    bytes.get());
+}
+
+void
+js::ReportNotObjectArg(JSContext* cx, const char* nth, const char* fun, HandleValue v)
+{
+    MOZ_ASSERT(!v.isObject());
+
+    JSAutoByteString bytes;
+    if (const char* chars = ValueToSourceForError(cx, v, bytes)) {
+        JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT_ARG,
+                                   nth, fun, chars);
+    }
+}
+
+void
+js::ReportNotObjectWithName(JSContext* cx, const char* name, HandleValue v)
+{
+    MOZ_ASSERT(!v.isObject());
+
+    JSAutoByteString bytes;
+    if (const char* chars = ValueToSourceForError(cx, v, bytes)) {
+        JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT_NAME,
+                                   name, chars);
+    }
 }
 
 JS_PUBLIC_API(const char*)
@@ -275,7 +300,7 @@ js::ToPropertyDescriptor(JSContext* cx, HandleValue descval, bool checkAccessors
                          MutableHandle<PropertyDescriptor> desc)
 {
     // step 2
-    RootedObject obj(cx, NonNullObject(cx, descval));
+    RootedObject obj(cx, NonNullObjectWithName(cx, "property descriptor", descval));
     if (!obj)
         return false;
 
@@ -3297,18 +3322,6 @@ GetObjectSlotNameFunctor::operator()(JS::CallbackTracer* trc, char* buf, size_t 
         }
     }
 }
-
-bool
-js::ReportGetterOnlyAssignment(JSContext* cx, bool strict)
-{
-    return JS_ReportErrorFlagsAndNumberASCII(cx,
-                                             strict
-                                             ? JSREPORT_ERROR
-                                             : JSREPORT_WARNING | JSREPORT_STRICT,
-                                             GetErrorMessage, nullptr,
-                                             JSMSG_GETTER_ONLY);
-}
-
 
 /*** Debugging routines **************************************************************************/
 

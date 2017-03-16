@@ -972,9 +972,12 @@ class Watchdog
         {
             AutoLockWatchdog lock(this);
 
+            // Gecko uses thread private for accounting and has to clean up at thread exit.
+            // Therefore, even though we don't have a return value from the watchdog, we need to
+            // join it on shutdown.
             mThread = PR_CreateThread(PR_USER_THREAD, WatchdogMain, this,
                                       PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD,
-                                      PR_UNJOINABLE_THREAD, 0);
+                                      PR_JOINABLE_THREAD, 0);
             if (!mThread)
                 NS_RUNTIMEABORT("PR_CreateThread failed!");
 
@@ -997,9 +1000,12 @@ class Watchdog
 
             // Wake up the watchdog, and wait for it to call us back.
             PR_NotifyCondVar(mWakeup);
-            PR_WaitCondVar(mWakeup, PR_INTERVAL_NO_TIMEOUT);
-            MOZ_ASSERT(!mShuttingDown);
         }
+
+        PR_JoinThread(mThread);
+
+        // The thread sets mShuttingDown to false as it exits.
+        MOZ_ASSERT(!mShuttingDown);
 
         // Destroy state.
         mThread = nullptr;
@@ -1039,7 +1045,6 @@ class Watchdog
     {
         MOZ_ASSERT(!NS_IsMainThread());
         mShuttingDown = false;
-        PR_NotifyCondVar(mWakeup);
     }
 
     int32_t MinScriptRunTimeSeconds()
@@ -1298,6 +1303,9 @@ bool
 XPCJSContext::InterruptCallback(JSContext* cx)
 {
     XPCJSContext* self = XPCJSContext::Get();
+
+    // Now is a good time to turn on profiling if it's pending.
+    profiler_js_interrupt_callback();
 
     // Normally we record mSlowScriptCheckpoint when we start to process an
     // event. However, we can run JS outside of event handlers. This code takes
@@ -1620,8 +1628,7 @@ XPCJSContext::~XPCJSContext()
 
 #ifdef MOZ_GECKO_PROFILER
     // Tell the profiler that the context is gone
-    if (PseudoStack* stack = profiler_get_pseudo_stack())
-        stack->sampleContext(nullptr);
+    profiler_clear_js_context();
 #endif
 
     Preferences::UnregisterCallback(ReloadPrefsCallback, JS_OPTIONS_DOT_STR, this);
@@ -2337,6 +2344,10 @@ ReportCompartmentStats(const JS::CompartmentStats& cStats,
     ZCREPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("non-syntactic-lexical-scopes-table"),
         cStats.nonSyntacticLexicalScopesTable,
         "The non-syntactic lexical scopes table.");
+
+    ZCREPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("template-literal-map"),
+        cStats.templateLiteralMap,
+        "The template literal registry.");
 
     ZCREPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("jit-compartment"),
         cStats.jitCompartment,
@@ -3154,6 +3165,12 @@ AccumulateTelemetryCallback(int id, uint32_t sample, const char* key)
       case JS_TELEMETRY_AOT_USAGE:
         Telemetry::Accumulate(Telemetry::JS_AOT_USAGE, sample);
         break;
+      case JS_TELEMETRY_PRIVILEGED_PARSER_COMPILE_LAZY_AFTER_MS:
+        Telemetry::Accumulate(Telemetry::JS_PRIVILEGED_PARSER_COMPILE_LAZY_AFTER_MS, sample);
+        break;
+      case JS_TELEMETRY_WEB_PARSER_COMPILE_LAZY_AFTER_MS:
+        Telemetry::Accumulate(Telemetry::JS_WEB_PARSER_COMPILE_LAZY_AFTER_MS, sample);
+        break;
       default:
         MOZ_ASSERT_UNREACHABLE("Unexpected JS_TELEMETRY id");
     }
@@ -3485,8 +3502,7 @@ XPCJSContext::Initialize()
     JS_SetWrapObjectCallbacks(cx, &WrapObjectCallbacks);
     js::SetPreserveWrapperCallback(cx, PreserveWrapper);
 #ifdef MOZ_GECKO_PROFILER
-    if (PseudoStack* stack = profiler_get_pseudo_stack())
-        stack->sampleContext(cx);
+    profiler_set_js_context(cx);
 #endif
     JS_SetAccumulateTelemetryCallback(cx, AccumulateTelemetryCallback);
     js::SetActivityCallback(cx, ActivityCallback, this);
@@ -3530,6 +3546,10 @@ XPCJSContext::Initialize()
     // Watch for the JS boolean options.
     ReloadPrefsCallback(nullptr, this);
     Preferences::RegisterCallback(ReloadPrefsCallback, JS_OPTIONS_DOT_STR, this);
+
+#ifdef FUZZING
+    Preferences::RegisterCallback(ReloadPrefsCallback, "fuzzing.enabled", this);
+#endif
 
     return NS_OK;
 }

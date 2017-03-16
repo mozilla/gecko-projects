@@ -4,7 +4,7 @@
 
 import re
 import yaml
-from shared_telemetry_utils import add_expiration_postfix
+import shared_telemetry_utils as utils
 
 # The map of containing the allowed scalar types and their mapping to
 # nsITelemetry::SCALAR_* type constants.
@@ -14,15 +14,6 @@ SCALAR_TYPES_MAP = {
     'boolean': 'nsITelemetry::SCALAR_BOOLEAN'
 }
 
-# This is a list of flags that determine which process the scalar is allowed
-# to record from.
-KNOWN_PROCESS_FLAGS = {
-    'all': 'RecordedProcessType::All',
-    'all_childs': 'RecordedProcessType::AllChilds',
-    'main': 'RecordedProcessType::Main',
-    'content': 'RecordedProcessType::Content',
-    'gpu': 'RecordedProcessType::Gpu',
-}
 
 class ScalarType:
     """A class for representing a scalar definition."""
@@ -40,7 +31,7 @@ class ScalarType:
 
         # Everything is ok, set the rest of the data.
         self._definition = definition
-        definition['expires'] = add_expiration_postfix(definition['expires'])
+        definition['expires'] = utils.add_expiration_postfix(definition['expires'])
 
     def validate_names(self, group_name, probe_name):
         """Validate the group and probe name:
@@ -57,7 +48,7 @@ class ScalarType:
         MAX_NAME_LENGTH = 40
         for n in [group_name, probe_name]:
             if len(n) > MAX_NAME_LENGTH:
-                raise ValueError("Name '{}' exceeds maximum name length of {} characters."\
+                raise ValueError("Name '{}' exceeds maximum name length of {} characters."
                                 .format(n, MAX_NAME_LENGTH))
 
         def check_name(name, error_msg_prefix, allowed_char_regexp):
@@ -69,7 +60,7 @@ class ScalarType:
             # Don't allow leading/trailing digits, '.' or '_'.
             if re.search(r'(^[\d\._])|([\d\._])$', name):
                 raise ValueError(error_msg_prefix +
-                    " name must not have a leading/trailing digit, a dot or underscore. Got: '{}'"\
+                    " name must not have a leading/trailing digit, a dot or underscore. Got: '{}'"
                     .format(name))
 
         check_name(group_name, 'Group', r'\.')
@@ -87,11 +78,11 @@ class ScalarType:
 
         # The required and optional fields in a scalar type definition.
         REQUIRED_FIELDS = {
-            'bug_numbers': list, # This contains ints. See LIST_FIELDS_CONTENT.
+            'bug_numbers': list,  # This contains ints. See LIST_FIELDS_CONTENT.
             'description': basestring,
             'expires': basestring,
             'kind': basestring,
-            'notification_emails': list, # This contains strings. See LIST_FIELDS_CONTENT.
+            'notification_emails': list,  # This contains strings. See LIST_FIELDS_CONTENT.
             'record_in_processes': list,
         }
 
@@ -123,7 +114,7 @@ class ScalarType:
             raise KeyError(self._name + ' - unknown fields: ' + ', '.join(unknown_fields))
 
         # Checks the type for all the fields.
-        wrong_type_names = ['{} must be {}'.format(f, ALL_FIELDS[f].__name__) \
+        wrong_type_names = ['{} must be {}'.format(f, ALL_FIELDS[f].__name__)
             for f in definition.keys() if not isinstance(definition[f], ALL_FIELDS[f])]
         if len(wrong_type_names) > 0:
             raise TypeError(self._name + ' - ' + ', '.join(wrong_type_names))
@@ -168,7 +159,7 @@ class ScalarType:
         # Validate record_in_processes.
         record_in_processes = definition.get('record_in_processes', [])
         for proc in record_in_processes:
-            if proc not in KNOWN_PROCESS_FLAGS.keys():
+            if not utils.is_valid_process_name(proc):
                 raise ValueError(self._name + ' - unknown value in record_in_processes: ' + proc)
 
     @property
@@ -234,7 +225,7 @@ class ScalarType:
     @property
     def record_in_processes_enum(self):
         """Get the non-empty list of flags representing the processes to record data in"""
-        return [KNOWN_PROCESS_FLAGS.get(p) for p in self.record_in_processes]
+        return [utils.process_name_to_enum(p) for p in self.record_in_processes]
 
     @property
     def dataset(self):
@@ -245,13 +236,14 @@ class ScalarType:
         # behaviour for it.
         release_channel_collection = \
             self._definition.get('release_channel_collection', 'opt-in')
-        return 'nsITelemetry::' +  ('DATASET_RELEASE_CHANNEL_OPTOUT' \
+        return 'nsITelemetry::' +  ('DATASET_RELEASE_CHANNEL_OPTOUT'
             if release_channel_collection == 'opt-out' else 'DATASET_RELEASE_CHANNEL_OPTIN')
 
     @property
     def cpp_guard(self):
         """Get the cpp guard for this scalar"""
         return self._definition.get('cpp_guard')
+
 
 def load_scalars(filename):
     """Parses a YAML file containing the scalar definition.

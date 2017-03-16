@@ -45,6 +45,7 @@
 #include "nsINetworkPredictorVerifier.h"
 #include "nsISpeculativeConnect.h"
 #include "nsIThrottlingService.h"
+#include "nsNetUtil.h"
 
 using mozilla::OriginAttributes;
 using mozilla::dom::ChromeUtils;
@@ -635,6 +636,7 @@ NeckoParent::DeallocPUDPSocketParent(PUDPSocketParent* actor)
 
 PDNSRequestParent*
 NeckoParent::AllocPDNSRequestParent(const nsCString& aHost,
+                                    const OriginAttributes& aOriginAttributes,
                                     const uint32_t& aFlags,
                                     const nsCString& aNetworkInterface)
 {
@@ -646,10 +648,13 @@ NeckoParent::AllocPDNSRequestParent(const nsCString& aHost,
 mozilla::ipc::IPCResult
 NeckoParent::RecvPDNSRequestConstructor(PDNSRequestParent* aActor,
                                         const nsCString& aHost,
+                                        const OriginAttributes& aOriginAttributes,
                                         const uint32_t& aFlags,
                                         const nsCString& aNetworkInterface)
 {
-  static_cast<DNSRequestParent*>(aActor)->DoAsyncResolve(aHost, aFlags,
+  static_cast<DNSRequestParent*>(aActor)->DoAsyncResolve(aHost,
+                                                         aOriginAttributes,
+                                                         aFlags,
                                                          aNetworkInterface);
   return IPC_OK();
 }
@@ -683,18 +688,20 @@ NeckoParent::RecvSpeculativeConnect(const URIParams& aURI,
 
 mozilla::ipc::IPCResult
 NeckoParent::RecvHTMLDNSPrefetch(const nsString& hostname,
+                                 const OriginAttributes& aOriginAttributes,
                                  const uint16_t& flags)
 {
-  nsHTMLDNSPrefetch::Prefetch(hostname, flags);
+  nsHTMLDNSPrefetch::Prefetch(hostname, aOriginAttributes, flags);
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
 NeckoParent::RecvCancelHTMLDNSPrefetch(const nsString& hostname,
-                                 const uint16_t& flags,
-                                 const nsresult& reason)
+                                       const OriginAttributes& aOriginAttributes,
+                                       const uint16_t& flags,
+                                       const nsresult& reason)
 {
-  nsHTMLDNSPrefetch::CancelPrefetch(hostname, flags, reason);
+  nsHTMLDNSPrefetch::CancelPrefetch(hostname, aOriginAttributes, flags, reason);
   return IPC_OK();
 }
 
@@ -905,6 +912,16 @@ NeckoParent::RecvDecreaseThrottlePressure()
   // We do this because we don't actually care which throttler gets removed,
   // just that one of them does.
   mThrottlers.RemoveElementAt(0);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+NeckoParent::RecvNotifyCurrentTopLevelOuterContentWindowId(const uint64_t& aWindowId)
+{
+  if (NS_FAILED(NS_NotifyCurrentTopLevelOuterContentWindowId(aWindowId))) {
+    NS_WARNING("NS_NotifyCurrentTopLevelOuterContentWindowId failed!");
+  }
+
   return IPC_OK();
 }
 

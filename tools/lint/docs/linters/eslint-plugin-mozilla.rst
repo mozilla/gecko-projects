@@ -197,6 +197,12 @@ object is assigned to another variable e.g.::
    var b = gBrowser;
    b.content // Would not be detected as a CPOW.
 
+use-default-preference-values
+---------------
+
+Require providing a second parameter to get*Pref methods instead of
+using a try/catch block.
+
 use-ownerGlobal
 ---------------
 
@@ -228,9 +234,6 @@ Example configuration::
 
    "rules": {
      "mozilla/balanced-listeners": 2,
-     "mozilla/components-imports": 1,
-     "mozilla/import-globals-from": 1,
-     "mozilla/import-headjs-globals": 1,
      "mozilla/mark-test-function-used": 1,
      "mozilla/var-only-at-top-level": 1,
      "mozilla/no-cpows-in-tests": 1,

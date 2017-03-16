@@ -302,6 +302,7 @@ StructuredCloneHolder::Read(nsISupports* aParent,
   if (!StructuredCloneHolderBase::Read(aCx, aValue)) {
     JS_ClearPendingException(aCx);
     aRv.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
+    return;
   }
 
   // If we are tranferring something, we cannot call 'Read()' more than once.
@@ -987,13 +988,6 @@ WriteFormData(JSStructuredCloneWriter* aWriter,
 
       if (aValue.IsDirectory()) {
         Directory* directory = aValue.GetAsDirectory();
-
-        if (closure->mHolder->CloneScope() !=
-              StructuredCloneHolder::StructuredCloneScope::SameProcessSameThread &&
-            !directory->ClonableToDifferentThreadOrProcess()) {
-          return false;
-        }
-
         return WriteDirectory(closure->mWriter, directory);
       }
 
@@ -1113,11 +1107,6 @@ StructuredCloneHolder::CustomWriteHandler(JSContext* aCx,
   {
     Directory* directory = nullptr;
     if (NS_SUCCEEDED(UNWRAP_OBJECT(Directory, aObj, directory))) {
-      if (mStructuredCloneScope != StructuredCloneScope::SameProcessSameThread &&
-          !directory->ClonableToDifferentThreadOrProcess()) {
-        return false;
-      }
-
       return WriteDirectory(aWriter, directory);
     }
   }

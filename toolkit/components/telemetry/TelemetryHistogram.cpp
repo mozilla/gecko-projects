@@ -551,7 +551,7 @@ internal_GetHistogramByName(const nsACString &name, Histogram **ret)
 }
 
 
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
 
 /**
  * This clones a histogram |existing| with the id |existingId| to a
@@ -652,7 +652,7 @@ internal_HistogramAdd(Histogram& histogram, int32_t value, uint32_t dataset)
     return NS_OK;
   }
 
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
   if (Histogram* subsession = internal_GetSubsessionHistogram(histogram)) {
     subsession->Add(value);
   }
@@ -697,7 +697,7 @@ internal_HistogramClear(Histogram& aHistogram, bool onlySubsession)
     aHistogram.Clear();
   }
 
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
   if (Histogram* subsession = internal_GetSubsessionHistogram(aHistogram)) {
     subsession->Clear();
   }
@@ -874,7 +874,6 @@ public:
   nsresult GetHistogram(const nsCString& name, Histogram** histogram, bool subsession);
   Histogram* GetHistogram(const nsCString& name, bool subsession);
   uint32_t GetHistogramType() const { return mHistogramType; }
-  nsresult GetDataset(uint32_t* dataset) const;
   nsresult GetJSKeys(JSContext* cx, JS::CallArgs& args);
   nsresult GetJSSnapshot(JSContext* cx, JS::Handle<JSObject*> obj,
                          bool subsession, bool clearSubsession);
@@ -891,7 +890,7 @@ private:
   typedef nsBaseHashtableET<nsCStringHashKey, Histogram*> KeyedHistogramEntry;
   typedef AutoHashtable<KeyedHistogramEntry> KeyedHistogramMapType;
   KeyedHistogramMapType mHistogramMap;
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
   KeyedHistogramMapType mSubsessionMap;
 #endif
 
@@ -915,7 +914,7 @@ KeyedHistogram::KeyedHistogram(const nsACString &name,
                                uint32_t min, uint32_t max,
                                uint32_t bucketCount, uint32_t dataset)
   : mHistogramMap()
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
   , mSubsessionMap()
 #endif
   , mName(name)
@@ -933,7 +932,7 @@ nsresult
 KeyedHistogram::GetHistogram(const nsCString& key, Histogram** histogram,
                              bool subsession)
 {
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
   KeyedHistogramMapType& map = subsession ? mSubsessionMap : mHistogramMap;
 #else
   KeyedHistogramMapType& map = mHistogramMap;
@@ -945,7 +944,7 @@ KeyedHistogram::GetHistogram(const nsCString& key, Histogram** histogram,
   }
 
   nsCString histogramName;
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
   if (subsession) {
     histogramName.AppendLiteral(SUBSESSION_HISTOGRAM_PREFIX);
   }
@@ -985,14 +984,6 @@ KeyedHistogram::GetHistogram(const nsCString& key, bool subsession)
 }
 
 nsresult
-KeyedHistogram::GetDataset(uint32_t* dataset) const
-{
-  MOZ_ASSERT(dataset);
-  *dataset = mDataset;
-  return NS_OK;
-}
-
-nsresult
 KeyedHistogram::Add(const nsCString& key, uint32_t sample)
 {
   bool canRecordDataset = CanRecordDataset(mDataset,
@@ -1007,7 +998,7 @@ KeyedHistogram::Add(const nsCString& key, uint32_t sample)
   if (!histogram) {
     return NS_ERROR_FAILURE;
   }
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
   Histogram* subsession = GetHistogram(key, true);
   MOZ_ASSERT(subsession);
   if (!subsession) {
@@ -1020,7 +1011,7 @@ KeyedHistogram::Add(const nsCString& key, uint32_t sample)
   }
 
   histogram->Add(sample);
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
   subsession->Add(sample);
 #endif
   return NS_OK;
@@ -1033,7 +1024,7 @@ KeyedHistogram::Clear(bool onlySubsession)
   if (!XRE_IsParentProcess()) {
     return;
   }
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
   for (auto iter = mSubsessionMap.Iter(); !iter.Done(); iter.Next()) {
     iter.Get()->mData->Clear();
   }
@@ -1102,7 +1093,7 @@ nsresult
 KeyedHistogram::GetJSSnapshot(JSContext* cx, JS::Handle<JSObject*> obj,
                               bool subsession, bool clearSubsession)
 {
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
   KeyedHistogramMapType& map = subsession ? mSubsessionMap : mHistogramMap;
 #else
   KeyedHistogramMapType& map = mHistogramMap;
@@ -1111,7 +1102,7 @@ KeyedHistogram::GetJSSnapshot(JSContext* cx, JS::Handle<JSObject*> obj,
     return NS_ERROR_FAILURE;
   }
 
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
   if (subsession && clearSubsession) {
     Clear(true);
   }
@@ -1434,7 +1425,6 @@ internal_AccumulateChildKeyed(GeckoProcessType aProcessType, mozilla::Telemetry:
 //   internal_JSHistogram_Add
 //   internal_JSHistogram_Snapshot
 //   internal_JSHistogram_Clear
-//   internal_JSHistogram_Dataset
 //   internal_WrapAndReturnHistogram
 //
 // all run without protection from |gTelemetryHistogramMutex|.  If they
@@ -1554,7 +1544,7 @@ internal_JSHistogram_Clear(JSContext *cx, unsigned argc, JS::Value *vp)
   }
 
   bool onlySubsession = false;
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
 
   if (args.length() >= 1) {
@@ -1576,26 +1566,6 @@ internal_JSHistogram_Clear(JSContext *cx, unsigned argc, JS::Value *vp)
   return true;
 }
 
-bool
-internal_JSHistogram_Dataset(JSContext *cx, unsigned argc, JS::Value *vp)
-{
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JSObject *obj = JS_THIS_OBJECT(cx, vp);
-  if (!obj) {
-    return false;
-  }
-
-  Histogram *h = static_cast<Histogram*>(JS_GetPrivate(obj));
-  mozilla::Telemetry::HistogramID id;
-  nsresult rv = internal_GetHistogramEnumId(h->histogram_name().c_str(), &id);
-  if (NS_SUCCEEDED(rv)) {
-    args.rval().setNumber(gHistograms[id].dataset);
-    return true;
-  }
-
-  return false;
-}
-
 // NOTE: Runs without protection from |gTelemetryHistogramMutex|.
 // See comment at the top of this section.
 nsresult
@@ -1610,14 +1580,12 @@ internal_WrapAndReturnHistogram(Histogram *h, JSContext *cx,
   JS::Rooted<JSObject*> obj(cx, JS_NewObject(cx, &JSHistogram_class));
   if (!obj)
     return NS_ERROR_FAILURE;
-  // The 4 functions that are wrapped up here are eventually called
+  // The 3 functions that are wrapped up here are eventually called
   // by the same thread that runs this function.
   if (!(JS_DefineFunction(cx, obj, "add", internal_JSHistogram_Add, 1, 0)
         && JS_DefineFunction(cx, obj, "snapshot",
                              internal_JSHistogram_Snapshot, 0, 0)
-        && JS_DefineFunction(cx, obj, "clear", internal_JSHistogram_Clear, 0, 0)
-        && JS_DefineFunction(cx, obj, "dataset",
-                             internal_JSHistogram_Dataset, 0, 0))) {
+        && JS_DefineFunction(cx, obj, "clear", internal_JSHistogram_Clear, 0, 0))) {
     return NS_ERROR_FAILURE;
   }
   JS_SetPrivate(obj, h);
@@ -1642,7 +1610,6 @@ internal_WrapAndReturnHistogram(Histogram *h, JSContext *cx,
 //   internal_JSKeyedHistogram_SubsessionSnapshot
 //   internal_JSKeyedHistogram_SnapshotSubsessionAndClear
 //   internal_JSKeyedHistogram_Clear
-//   internal_JSKeyedHistogram_Dataset
 //   internal_WrapAndReturnKeyedHistogram
 //
 // Same comments as above, at the JSHistogram_* section, regarding
@@ -1796,7 +1763,7 @@ internal_JSKeyedHistogram_Snapshot(JSContext *cx, unsigned argc, JS::Value *vp)
   return internal_KeyedHistogram_SnapshotImpl(cx, argc, vp, false, false);
 }
 
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
 bool
 internal_JSKeyedHistogram_SubsessionSnapshot(JSContext *cx,
                                              unsigned argc, JS::Value *vp)
@@ -1805,7 +1772,7 @@ internal_JSKeyedHistogram_SubsessionSnapshot(JSContext *cx,
 }
 #endif
 
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
 bool
 internal_JSKeyedHistogram_SnapshotSubsessionAndClear(JSContext *cx,
                                                      unsigned argc,
@@ -1833,7 +1800,7 @@ internal_JSKeyedHistogram_Clear(JSContext *cx, unsigned argc, JS::Value *vp)
     return false;
   }
 
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
   bool onlySubsession = false;
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
 
@@ -1853,30 +1820,6 @@ internal_JSKeyedHistogram_Clear(JSContext *cx, unsigned argc, JS::Value *vp)
   return true;
 }
 
-bool
-internal_JSKeyedHistogram_Dataset(JSContext *cx, unsigned argc, JS::Value *vp)
-{
-  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-  JSObject *obj = JS_THIS_OBJECT(cx, vp);
-  if (!obj) {
-    return false;
-  }
-
-  KeyedHistogram* keyed = static_cast<KeyedHistogram*>(JS_GetPrivate(obj));
-  if (!keyed) {
-    return false;
-  }
-
-  uint32_t dataset = nsITelemetry::DATASET_RELEASE_CHANNEL_OPTIN;
-  nsresult rv = keyed->GetDataset(&dataset);;
-  if (NS_FAILED(rv)) {
-    return false;
-  }
-
-  args.rval().setNumber(dataset);
-  return true;
-}
-
 // NOTE: Runs without protection from |gTelemetryHistogramMutex|.
 // See comment at the top of this section.
 nsresult
@@ -1891,12 +1834,12 @@ internal_WrapAndReturnKeyedHistogram(KeyedHistogram *h, JSContext *cx,
   JS::Rooted<JSObject*> obj(cx, JS_NewObject(cx, &JSHistogram_class));
   if (!obj)
     return NS_ERROR_FAILURE;
-  // The 7 functions that are wrapped up here are eventually called
+  // The 6 functions that are wrapped up here are eventually called
   // by the same thread that runs this function.
   if (!(JS_DefineFunction(cx, obj, "add", internal_JSKeyedHistogram_Add, 2, 0)
         && JS_DefineFunction(cx, obj, "snapshot",
                              internal_JSKeyedHistogram_Snapshot, 1, 0)
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
         && JS_DefineFunction(cx, obj, "subsessionSnapshot",
                              internal_JSKeyedHistogram_SubsessionSnapshot, 1, 0)
         && JS_DefineFunction(cx, obj, "snapshotSubsessionAndClear",
@@ -1905,9 +1848,7 @@ internal_WrapAndReturnKeyedHistogram(KeyedHistogram *h, JSContext *cx,
         && JS_DefineFunction(cx, obj, "keys",
                              internal_JSKeyedHistogram_Keys, 0, 0)
         && JS_DefineFunction(cx, obj, "clear",
-                             internal_JSKeyedHistogram_Clear, 0, 0)
-        && JS_DefineFunction(cx, obj, "dataset",
-                             internal_JSKeyedHistogram_Dataset, 0, 0))) {
+                             internal_JSKeyedHistogram_Clear, 0, 0))) {
     return NS_ERROR_FAILURE;
   }
 
@@ -2339,7 +2280,7 @@ TelemetryHistogram::CreateHistogramSnapshots(JSContext *cx,
     }
 
     Histogram* original = h;
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
     if (subsession) {
       h = internal_GetSubsessionHistogram(*h);
       if (!h) {
@@ -2367,7 +2308,7 @@ TelemetryHistogram::CreateHistogramSnapshots(JSContext *cx,
       }
     }
 
-#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID)
     if (subsession && clearSubsession) {
       h->Clear();
     }

@@ -14,9 +14,7 @@ using double_conversion::DoubleToStringConverter;
 #ifdef XPCOM_STRING_CONSTRUCTOR_OUT_OF_LINE
 nsTSubstring_CharT::nsTSubstring_CharT(char_type* aData, size_type aLength,
                                        uint32_t aFlags)
-  : mData(aData),
-    mLength(aLength),
-    mFlags(aFlags)
+  : nsTStringRepr_CharT(aData, aLength, aFlags)
 {
   if (aFlags & F_OWNED) {
     STRING_STAT_INCREMENT(Adopt);
@@ -32,21 +30,6 @@ inline const nsTFixedString_CharT*
 AsFixedString(const nsTSubstring_CharT* aStr)
 {
   return static_cast<const nsTFixedString_CharT*>(aStr);
-}
-
-
-nsTSubstring_CharT::char_type
-nsTSubstring_CharT::First() const
-{
-  MOZ_RELEASE_ASSERT(mLength > 0, "|First()| called on an empty string");
-  return mData[0];
-}
-
-nsTSubstring_CharT::char_type
-nsTSubstring_CharT::Last() const
-{
-  MOZ_RELEASE_ASSERT(mLength > 0, "|Last()| called on an empty string");
-  return mData[mLength - 1];
 }
 
 /**
@@ -764,23 +747,53 @@ nsTSubstring_CharT::SetIsVoid(bool aVal)
   }
 }
 
+namespace mozilla {
+namespace detail {
+
+nsTStringRepr_CharT::char_type
+nsTStringRepr_CharT::First() const
+{
+  MOZ_RELEASE_ASSERT(mLength > 0, "|First()| called on an empty string");
+  return mData[0];
+}
+
+nsTStringRepr_CharT::char_type
+nsTStringRepr_CharT::Last() const
+{
+  MOZ_RELEASE_ASSERT(mLength > 0, "|Last()| called on an empty string");
+  return mData[mLength - 1];
+}
+
 bool
-nsTSubstring_CharT::Equals(const self_type& aStr) const
+nsTStringRepr_CharT::Equals(const self_type& aStr) const
 {
   return mLength == aStr.mLength &&
          char_traits::compare(mData, aStr.mData, mLength) == 0;
 }
 
 bool
-nsTSubstring_CharT::Equals(const self_type& aStr,
-                           const comparator_type& aComp) const
+nsTStringRepr_CharT::Equals(const self_type& aStr,
+                            const comparator_type& aComp) const
 {
   return mLength == aStr.mLength &&
          aComp(mData, aStr.mData, mLength, aStr.mLength) == 0;
 }
 
 bool
-nsTSubstring_CharT::Equals(const char_type* aData) const
+nsTStringRepr_CharT::Equals(const substring_tuple_type& aTuple) const
+{
+  return Equals(substring_type(aTuple));
+}
+
+bool
+nsTStringRepr_CharT::Equals(const substring_tuple_type& aTuple,
+                            const comparator_type& aComp) const
+{
+  return Equals(substring_type(aTuple), aComp);
+}
+
+bool
+nsTStringRepr_CharT::Equals(const char_type* aData) const
 {
   // unfortunately, some callers pass null :-(
   if (!aData) {
@@ -795,8 +808,8 @@ nsTSubstring_CharT::Equals(const char_type* aData) const
 }
 
 bool
-nsTSubstring_CharT::Equals(const char_type* aData,
-                           const comparator_type& aComp) const
+nsTStringRepr_CharT::Equals(const char_type* aData,
+                            const comparator_type& aComp) const
 {
   // unfortunately, some callers pass null :-(
   if (!aData) {
@@ -810,36 +823,36 @@ nsTSubstring_CharT::Equals(const char_type* aData,
 }
 
 bool
-nsTSubstring_CharT::EqualsASCII(const char* aData, size_type aLen) const
+nsTStringRepr_CharT::EqualsASCII(const char* aData, size_type aLen) const
 {
   return mLength == aLen &&
          char_traits::compareASCII(mData, aData, aLen) == 0;
 }
 
 bool
-nsTSubstring_CharT::EqualsASCII(const char* aData) const
+nsTStringRepr_CharT::EqualsASCII(const char* aData) const
 {
   return char_traits::compareASCIINullTerminated(mData, mLength, aData) == 0;
 }
 
 bool
-nsTSubstring_CharT::LowerCaseEqualsASCII(const char* aData,
-                                         size_type aLen) const
+nsTStringRepr_CharT::LowerCaseEqualsASCII(const char* aData,
+                                          size_type aLen) const
 {
   return mLength == aLen &&
          char_traits::compareLowerCaseToASCII(mData, aData, aLen) == 0;
 }
 
 bool
-nsTSubstring_CharT::LowerCaseEqualsASCII(const char* aData) const
+nsTStringRepr_CharT::LowerCaseEqualsASCII(const char* aData) const
 {
   return char_traits::compareLowerCaseToASCIINullTerminated(mData,
                                                             mLength,
                                                             aData) == 0;
 }
 
-nsTSubstring_CharT::size_type
-nsTSubstring_CharT::CountChar(char_type aChar) const
+nsTStringRepr_CharT::size_type
+nsTStringRepr_CharT::CountChar(char_type aChar) const
 {
   const char_type* start = mData;
   const char_type* end   = mData + mLength;
@@ -848,7 +861,7 @@ nsTSubstring_CharT::CountChar(char_type aChar) const
 }
 
 int32_t
-nsTSubstring_CharT::FindChar(char_type aChar, index_type aOffset) const
+nsTStringRepr_CharT::FindChar(char_type aChar, index_type aOffset) const
 {
   if (aOffset < mLength) {
     const char_type* result = char_traits::find(mData + aOffset,
@@ -859,6 +872,9 @@ nsTSubstring_CharT::FindChar(char_type aChar, index_type aOffset) const
   }
   return -1;
 }
+
+} // namespace detail
+} // namespace mozilla
 
 void
 nsTSubstring_CharT::StripChar(char_type aChar, int32_t aOffset)
@@ -1106,12 +1122,47 @@ nsTSubstring_CharT::SizeOfIncludingThisEvenIfShared(
   return aMallocSizeOf(this) + SizeOfExcludingThisEvenIfShared(aMallocSizeOf);
 }
 
-nsTSubstringSplitter_CharT nsTSubstring_CharT::Split(const nsTSubstring_CharT::char_type aChar)
+inline
+nsTSubstringSplitter_CharT::nsTSubstringSplitter_CharT(
+    const nsTSubstring_CharT* aStr, char_type aDelim)
+  : mStr(aStr)
+  , mArray(nullptr)
+  , mDelim(aDelim)
+{
+  if (mStr->IsEmpty()) {
+    mArraySize = 0;
+    return;
+  }
+
+  size_type delimCount = mStr->CountChar(aDelim);
+  mArraySize = delimCount + 1;
+  mArray.reset(new nsTDependentSubstring_CharT[mArraySize]);
+
+  size_t seenParts = 0;
+  size_type start = 0;
+  do {
+    MOZ_ASSERT(seenParts < mArraySize);
+    int32_t offset = mStr->FindChar(aDelim, start);
+    if (offset != -1) {
+      size_type length = static_cast<size_type>(offset) - start;
+      mArray[seenParts++].Rebind(mStr->Data() + start, length);
+      start = static_cast<size_type>(offset) + 1;
+    } else {
+      // Get the remainder
+      mArray[seenParts++].Rebind(mStr->Data() + start, mStr->Length() - start);
+      break;
+    }
+  } while (start < mStr->Length());
+}
+
+nsTSubstringSplitter_CharT
+nsTSubstring_CharT::Split(const char_type aChar) const
 {
   return nsTSubstringSplitter_CharT(this, aChar);
 }
 
-const nsTSubstring_CharT& nsTSubstringSplitter_CharT::nsTSubstringSplit_Iter::operator* () const
+const nsTDependentSubstring_CharT&
+nsTSubstringSplitter_CharT::nsTSubstringSplit_Iter::operator* () const
 {
    return mObj.Get(mPos);
 }

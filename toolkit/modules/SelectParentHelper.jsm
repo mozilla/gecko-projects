@@ -24,6 +24,7 @@ var currentZoom = 1;
 var closedWithEnter = false;
 var selectRect;
 var customStylingEnabled = Services.prefs.getBoolPref("dom.forms.select.customstyling");
+var usedSelectBackgroundColor;
 
 this.SelectParentHelper = {
   populate(menulist, items, selectedIndex, zoom, uaBackgroundColor, uaColor,
@@ -54,7 +55,16 @@ this.SelectParentHelper = {
         selectBackgroundColor != uaSelectBackgroundColor &&
         selectBackgroundColor != "rgba(0, 0, 0, 0)" &&
         selectBackgroundColor != selectColor) {
-      ruleBody = `background-color: ${selectBackgroundColor};`;
+      let rgba = selectBackgroundColor.match(/rgba\((\d+), (\d+), (\d+),/);
+      if (rgba) {
+        let [, r, g, b] = rgba;
+        ruleBody = `background-color: rgb(${r}, ${g}, ${b});`;
+      } else {
+        ruleBody = `background-color: ${selectBackgroundColor};`;
+      }
+      usedSelectBackgroundColor = selectBackgroundColor;
+    } else {
+      usedSelectBackgroundColor = uaSelectBackgroundColor;
     }
 
     if (customStylingEnabled &&
@@ -254,7 +264,7 @@ function populateChildren(menulist, options, selectedIndex, zoom,
     if (customStylingEnabled &&
         option.backgroundColor &&
         option.backgroundColor != "rgba(0, 0, 0, 0)" &&
-        option.backgroundColor != uaBackgroundColor) {
+        option.backgroundColor != usedSelectBackgroundColor) {
       ruleBody = `background-color: ${option.backgroundColor};`;
     }
 
@@ -265,10 +275,9 @@ function populateChildren(menulist, options, selectedIndex, zoom,
     }
 
     if (ruleBody) {
-      sheet.insertRule(`${item.localName}:nth-child(${nthChildIndex}):not([_moz-menuactive="true"]) {
+      sheet.insertRule(`menupopup > :nth-child(${nthChildIndex}):not([_moz-menuactive="true"]) {
         ${ruleBody}
       }`, 0);
-
       item.setAttribute("customoptionstyling", "true");
     } else {
       item.removeAttribute("customoptionstyling");
@@ -287,7 +296,7 @@ function populateChildren(menulist, options, selectedIndex, zoom,
       nthChildIndex =
         populateChildren(menulist, option.children, selectedIndex, zoom,
                          uaBackgroundColor, uaColor, sheet,
-                         item, isDisabled, adjustedTextSize, false);
+                         item, isDisabled, adjustedTextSize, false, nthChildIndex);
     } else {
       if (option.index == selectedIndex) {
         // We expect the parent element of the popup to be a <xul:menulist> that

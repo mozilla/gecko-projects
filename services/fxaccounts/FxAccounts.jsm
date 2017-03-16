@@ -7,6 +7,8 @@ this.EXPORTED_SYMBOLS = ["fxAccounts", "FxAccounts"];
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
+Cu.importGlobalProperties(["URL"]);
+
 Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://services-common/utils.js");
@@ -44,6 +46,7 @@ var publicProperties = [
   "getAccountsClient",
   "getAssertion",
   "getDeviceId",
+  "getDeviceList",
   "getKeys",
   "getOAuthToken",
   "getProfileCache",
@@ -58,6 +61,7 @@ var publicProperties = [
   "promiseAccountsChangeProfileURI",
   "promiseAccountsForceSigninURI",
   "promiseAccountsManageURI",
+  "promiseAccountsManageDevicesURI",
   "promiseAccountsSignUpURI",
   "promiseAccountsSignInURI",
   "removeCachedOAuthToken",
@@ -674,6 +678,11 @@ FxAccountsInternal.prototype = {
       });
   },
 
+  async getDeviceList() {
+    let accountData = await this._getVerifiedAccountOrReject();
+    return this.fxAccountsClient.getDeviceList(accountData.sessionToken);
+  },
+
   /**
    * Resend the verification email fot the currently signed-in user.
    *
@@ -1010,12 +1019,7 @@ FxAccountsInternal.prototype = {
     // The purpose of this pref is to expedite any auth errors as the result of a
     // expired or revoked FxA session token, e.g., from resetting or changing the FxA
     // password.
-    let ignoreCachedAuthCredentials = false;
-    try {
-      ignoreCachedAuthCredentials = Services.prefs.getBoolPref("services.sync.debug.ignoreCachedAuthCredentials");
-    } catch (e) {
-      // Pref doesn't exist
-    }
+    let ignoreCachedAuthCredentials = Services.prefs.getBoolPref("services.sync.debug.ignoreCachedAuthCredentials", false);
     let mustBeValidUntil = this.now() + ASSERTION_USE_PERIOD;
     let accountData = yield currentState.getUserAccountData(["cert", "keyPair", "sessionToken"]);
 
@@ -1250,12 +1254,7 @@ FxAccountsInternal.prototype = {
   },
 
   requiresHttps() {
-    let allowHttp = false;
-    try {
-      allowHttp = Services.prefs.getBoolPref("identity.fxaccounts.allowHttp");
-    } catch (e) {
-      // Pref doesn't exist
-    }
+    let allowHttp = Services.prefs.getBoolPref("identity.fxaccounts.allowHttp", false);
     return allowHttp !== true;
   },
 
@@ -1267,80 +1266,66 @@ FxAccountsInternal.prototype = {
     return FxAccountsConfig.promiseAccountsSignInURI();
   },
 
-  // Returns a promise that resolves with the URL to use to force a re-signin
-  // of the current account.
-  promiseAccountsForceSigninURI: Task.async(function *() {
-    yield FxAccountsConfig.ensureConfigured();
-    let url = Services.urlFormatter.formatURLPref("identity.fxaccounts.remote.force_auth.uri");
-    if (this.requiresHttps() && !/^https:/.test(url)) { // Comment to un-break emacs js-mode highlighting
+  /**
+   * Pull an URL defined in the user preferences, add the current UID and email
+   * to the query string, add entrypoint and extra params to the query string if
+   * requested.
+   * @param {string} prefName The preference name from where to pull the URL to format.
+   * @param {string} [entrypoint] "entrypoint" searchParam value.
+   * @param {Object.<string, string>} [extraParams] Additionnal searchParam key and values.
+   * @returns {Promise.<string>} A promise that resolves to the formatted URL
+   */
+  async _formatPrefURL(prefName, entrypoint, extraParams) {
+    let url = new URL(Services.urlFormatter.formatURLPref(prefName));
+    if (this.requiresHttps() && url.protocol != "https:") {
       throw new Error("Firefox Accounts server must use HTTPS");
     }
-    let currentState = this.currentAccountState;
-    // but we need to append the email address onto a query string.
-    return this.getSignedInUser().then(accountData => {
-      if (!accountData) {
-        return null;
+    let accountData = await this.getSignedInUser();
+    if (!accountData) {
+      return Promise.resolve(null);
+    }
+    url.searchParams.append("uid", accountData.uid);
+    url.searchParams.append("email", accountData.email);
+    if (entrypoint) {
+      url.searchParams.append("entrypoint", entrypoint);
+    }
+    if (extraParams) {
+      for (let [k, v] of Object.entries(extraParams)) {
+        url.searchParams.append(k, v);
       }
-      let newQueryPortion = url.indexOf("?") == -1 ? "?" : "&";
-      newQueryPortion += "email=" + encodeURIComponent(accountData.email);
-      return url + newQueryPortion;
-    }).then(result => currentState.resolve(result));
-  }),
+    }
+    return this.currentAccountState.resolve(url.href);
+  },
+
+  // Returns a promise that resolves with the URL to use to force a re-signin
+  // of the current account.
+  async promiseAccountsForceSigninURI() {
+    await FxAccountsConfig.ensureConfigured();
+    return this._formatPrefURL("identity.fxaccounts.remote.force_auth.uri");
+  },
 
   // Returns a promise that resolves with the URL to use to change
   // the current account's profile image.
   // if settingToEdit is set, the profile page should hightlight that setting
   // for the user to edit.
-  promiseAccountsChangeProfileURI(entrypoint, settingToEdit = null) {
-    let url = Services.urlFormatter.formatURLPref("identity.fxaccounts.settings.uri");
-
+  async promiseAccountsChangeProfileURI(entrypoint, settingToEdit = null) {
+    let extraParams;
     if (settingToEdit) {
-      url += (url.indexOf("?") == -1 ? "?" : "&") +
-             "setting=" + encodeURIComponent(settingToEdit);
+      extraParams = { setting: settingToEdit };
     }
-
-    if (this.requiresHttps() && !/^https:/.test(url)) { // Comment to un-break emacs js-mode highlighting
-      throw new Error("Firefox Accounts server must use HTTPS");
-    }
-    let currentState = this.currentAccountState;
-    // but we need to append the email address onto a query string.
-    return this.getSignedInUser().then(accountData => {
-      if (!accountData) {
-        return null;
-      }
-      let newQueryPortion = url.indexOf("?") == -1 ? "?" : "&";
-      newQueryPortion += "email=" + encodeURIComponent(accountData.email);
-      newQueryPortion += "&uid=" + encodeURIComponent(accountData.uid);
-      if (entrypoint) {
-        newQueryPortion += "&entrypoint=" + encodeURIComponent(entrypoint);
-      }
-      return url + newQueryPortion;
-    }).then(result => currentState.resolve(result));
+    return this._formatPrefURL("identity.fxaccounts.settings.uri", entrypoint, extraParams);
   },
 
   // Returns a promise that resolves with the URL to use to manage the current
   // user's FxA acct.
-  promiseAccountsManageURI(entrypoint) {
-    let url = Services.urlFormatter.formatURLPref("identity.fxaccounts.settings.uri");
-    if (this.requiresHttps() && !/^https:/.test(url)) { // Comment to un-break emacs js-mode highlighting
-      throw new Error("Firefox Accounts server must use HTTPS");
-    }
-    let currentState = this.currentAccountState;
-    // but we need to append the uid and email address onto a query string
-    // (if the server has no matching uid it will offer to sign in with the
-    // email address)
-    return this.getSignedInUser().then(accountData => {
-      if (!accountData) {
-        return null;
-      }
-      let newQueryPortion = url.indexOf("?") == -1 ? "?" : "&";
-      newQueryPortion += "uid=" + encodeURIComponent(accountData.uid) +
-                         "&email=" + encodeURIComponent(accountData.email);
-      if (entrypoint) {
-        newQueryPortion += "&entrypoint=" + encodeURIComponent(entrypoint);
-      }
-      return url + newQueryPortion;
-    }).then(result => currentState.resolve(result));
+  async promiseAccountsManageURI(entrypoint) {
+    return this._formatPrefURL("identity.fxaccounts.settings.uri", entrypoint);
+  },
+
+  // Returns a promise that resolves with the URL to use to manage the devices in
+  // the current user's FxA acct.
+  async promiseAccountsManageDevicesURI(entrypoint) {
+    return this._formatPrefURL("identity.fxaccounts.settings.devices.uri", entrypoint);
   },
 
   /**
@@ -1453,8 +1438,8 @@ FxAccountsInternal.prototype = {
     }
    }),
 
-  _getVerifiedAccountOrReject: Task.async(function* () {
-    let data = yield this.currentAccountState.getUserAccountData();
+  async _getVerifiedAccountOrReject() {
+    let data = await this.currentAccountState.getUserAccountData();
     if (!data) {
       // No signed-in user
       throw this._error(ERROR_NO_ACCOUNT);
@@ -1463,7 +1448,8 @@ FxAccountsInternal.prototype = {
       // Signed-in user has not verified email
       throw this._error(ERROR_UNVERIFIED_ACCOUNT);
     }
-  }),
+    return data;
+  },
 
   /*
    * Coerce an error into one of the general error cases:

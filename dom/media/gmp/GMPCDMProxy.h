@@ -26,7 +26,8 @@ public:
               const nsAString& aKeySystem,
               GMPCrashHelper* aCrashHelper,
               bool aDistinctiveIdentifierRequired,
-              bool aPersistentStateRequired);
+              bool aPersistentStateRequired,
+              nsIEventTarget* aMainThread);
 
   void Init(PromiseId aPromiseId,
             const nsAString& aOrigin,

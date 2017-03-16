@@ -49,12 +49,12 @@ class ISurfaceAllocator;
 class TextureHostOGL;
 class TextureReadLock;
 class TextureSourceOGL;
-class TextureSourceD3D9;
 class TextureSourceD3D11;
 class TextureSourceBasic;
 class DataTextureSource;
 class PTextureParent;
 class TextureParent;
+class WebRenderTextureHost;
 class WrappingTextureSourceYCbCrBasic;
 
 /**
@@ -120,7 +120,6 @@ public:
     gfxCriticalNote << "Failed to cast " << Name() << " into a TextureSourceOGL";
     return nullptr;
   }
-  virtual TextureSourceD3D9* AsSourceD3D9() { return nullptr; }
   virtual TextureSourceD3D11* AsSourceD3D11() { return nullptr; }
   virtual TextureSourceBasic* AsSourceBasic() { return nullptr; }
   /**
@@ -586,6 +585,8 @@ public:
 
   virtual BufferTextureHost* AsBufferTextureHost() { return nullptr; }
 
+  virtual WebRenderTextureHost* AsWebRenderTextureHost() { return nullptr; }
+
 protected:
   void ReadUnlock();
 
@@ -882,6 +883,7 @@ private:
 already_AddRefed<TextureHost>
 CreateBackendIndependentTextureHost(const SurfaceDescriptor& aDesc,
                                     ISurfaceAllocator* aDeallocator,
+                                    LayersBackend aBackend,
                                     TextureFlags aFlags);
 
 } // namespace layers

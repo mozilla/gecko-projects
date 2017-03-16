@@ -17,6 +17,7 @@
 #include "nsIScriptContext.h"
 #include "nsIScriptError.h"
 #include "nsIScriptSecurityManager.h"
+#include "nsIStreamTransportService.h"
 #include "nsISupportsPriority.h"
 #include "nsITimer.h"
 #include "nsIURI.h"
@@ -26,6 +27,7 @@
 #include "BackgroundChild.h"
 #include "GeckoProfiler.h"
 #include "jsfriendapi.h"
+#include "mozilla/AbstractThread.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/Atomics.h"
@@ -144,6 +146,8 @@ static_assert(MAX_WORKERS_PER_DOMAIN >= 1,
 #define PREF_WORKERS_OPTIONS_PREFIX PREF_WORKERS_PREFIX "options."
 #define PREF_MEM_OPTIONS_PREFIX "mem."
 #define PREF_GCZEAL "gcZeal"
+
+static NS_DEFINE_CID(kStreamTransportServiceCID, NS_STREAMTRANSPORTSERVICE_CID);
 
 namespace {
 
@@ -579,7 +583,7 @@ InterruptCallback(JSContext* aCx)
   MOZ_ASSERT(worker);
 
   // Now is a good time to turn on profiling if it's pending.
-  profiler_js_operation_callback();
+  profiler_js_interrupt_callback();
 
   return worker->InterruptCallback(aCx);
 }
@@ -697,7 +701,6 @@ AsmJSCacheOpenEntryForRead(JS::Handle<JSObject*> aGlobal,
 
 static JS::AsmJSCacheResult
 AsmJSCacheOpenEntryForWrite(JS::Handle<JSObject*> aGlobal,
-                            bool aInstalled,
                             const char16_t* aBegin,
                             const char16_t* aEnd,
                             size_t aSize,
@@ -709,8 +712,8 @@ AsmJSCacheOpenEntryForWrite(JS::Handle<JSObject*> aGlobal,
     return JS::AsmJSCache_InternalError;
   }
 
-  return asmjscache::OpenEntryForWrite(principal, aInstalled, aBegin, aEnd,
-                                       aSize, aMemory, aHandle);
+  return asmjscache::OpenEntryForWrite(principal, aBegin, aEnd, aSize, aMemory,
+                                       aHandle);
 }
 
 class AsyncTaskWorkerHolder final : public WorkerHolder
@@ -1989,14 +1992,20 @@ RuntimeService::Init()
                            WORKER_DEFAULT_ALLOCATION_THRESHOLD);
   }
 
+  // nsIStreamTransportService is thread-safe but it must be initialized on the
+  // main-thread. FileReader needs it, so, let's initialize it now.
+  nsresult rv;
+  nsCOMPtr<nsIStreamTransportService> sts =
+    do_GetService(kStreamTransportServiceCID, &rv);
+  NS_ENSURE_TRUE(sts, NS_ERROR_FAILURE);
+
   mIdleThreadTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
   NS_ENSURE_STATE(mIdleThreadTimer);
 
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
   NS_ENSURE_TRUE(obs, NS_ERROR_FAILURE);
 
-  nsresult rv =
-    obs->AddObserver(this, NS_XPCOM_SHUTDOWN_THREADS_OBSERVER_ID, false);
+  rv = obs->AddObserver(this, NS_XPCOM_SHUTDOWN_THREADS_OBSERVER_ID, false);
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = obs->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
@@ -2817,10 +2826,12 @@ WorkerThreadPrimaryRunnable::Run()
   {
     // Raw pointer: this class is on the stack.
     WorkerPrivate* mWorkerPrivate;
+    RefPtr<AbstractThread> mAbstractThread;
 
   public:
     SetThreadHelper(WorkerPrivate* aWorkerPrivate, WorkerThread* aThread)
       : mWorkerPrivate(aWorkerPrivate)
+      , mAbstractThread(AbstractThread::CreateXPCOMThreadWrapper(NS_GetCurrentThread(), false))
     {
       MOZ_ASSERT(aWorkerPrivate);
       MOZ_ASSERT(aThread);
@@ -2866,10 +2877,7 @@ WorkerThreadPrimaryRunnable::Run()
 
     {
 #ifdef MOZ_GECKO_PROFILER
-      PseudoStack* stack = profiler_get_pseudo_stack();
-      if (stack) {
-        stack->sampleContext(cx);
-      }
+      profiler_set_js_context(cx);
 #endif
 
       {
@@ -2885,9 +2893,7 @@ WorkerThreadPrimaryRunnable::Run()
       BackgroundChild::CloseForCurrentThread();
 
 #ifdef MOZ_GECKO_PROFILER
-      if (stack) {
-        stack->sampleContext(nullptr);
-      }
+      profiler_clear_js_context();
 #endif
     }
 

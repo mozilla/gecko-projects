@@ -28,7 +28,6 @@
 #include "nsTArray.h"
 #include "nsNetCID.h"
 #include "nsThreadUtils.h"
-#include "nsXPCOMStrings.h"
 #include "nsProxyRelease.h"
 #include "nsString.h"
 #include "mozilla/Atomics.h"
@@ -134,6 +133,9 @@ class nsUrlClassifierDBServiceWorker;
 static nsUrlClassifierDBService* sUrlClassifierDBService;
 
 nsIThread* nsUrlClassifierDBService::gDbBackgroundThread = nullptr;
+
+// For update only.
+static nsIThread* gDbUpdateThread = nullptr;
 
 // Once we've committed to shutting down, don't do work in the background
 // thread.
@@ -612,14 +614,72 @@ nsUrlClassifierDBServiceWorker::FinishUpdate()
     return NS_ERROR_NOT_INITIALIZED;
   }
 
+  MOZ_ASSERT(!mProtocolParser, "Should have been nulled out in FinishStream() "
+                               "or never created.");
+
   NS_ENSURE_STATE(mUpdateObserver);
 
-  if (NS_SUCCEEDED(mUpdateStatus)) {
-    mUpdateStatus = ApplyUpdate();
-  } else {
+  if (NS_FAILED(mUpdateStatus)) {
     LOG(("nsUrlClassifierDBServiceWorker::FinishUpdate() Not running "
          "ApplyUpdate() since the update has already failed."));
+    return NotifyUpdateObserver(mUpdateStatus);
   }
+
+  if (mTableUpdates.IsEmpty()) {
+    LOG(("Nothing to update. Just notify update observer."));
+    return NotifyUpdateObserver(NS_OK);
+  }
+
+  RefPtr<nsUrlClassifierDBServiceWorker> self = this;
+
+  // TODO: Asynchronously dispatch |ApplyUpdatesBackground| to update thread.
+  //       See Bug 1339050. For now we *synchronously* run
+  //       ApplyUpdatesForeground() after ApplyUpdatesBackground().
+  nsresult backgroundRv;
+  nsCString failedTableName;
+  nsCOMPtr<nsIRunnable> r =
+    NS_NewRunnableFunction([self, &backgroundRv, &failedTableName] () -> void {
+      backgroundRv = self->ApplyUpdatesBackground(failedTableName);
+    });
+
+  LOG(("Bulding new tables..."));
+  mozilla::SyncRunnable::DispatchToThread(gDbUpdateThread, r);
+  LOG(("Done bulding new tables. Try to commit them."));
+
+  return ApplyUpdatesForeground(backgroundRv, failedTableName);
+}
+
+nsresult
+nsUrlClassifierDBServiceWorker::ApplyUpdatesForeground(nsresult aBackgroundRv,
+                                                      const nsACString& aFailedTableName)
+{
+  if (gShuttingDownThread) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
+  MOZ_ASSERT(NS_GetCurrentThread() == nsUrlClassifierDBService::BackgroundThread(),
+             "nsUrlClassifierDBServiceWorker::ApplyUpdatesForeground MUST "
+             "run on worker thread!!");
+
+  nsresult rv =
+    mClassifier->ApplyUpdatesForeground(aBackgroundRv, aFailedTableName);
+
+  return NotifyUpdateObserver(rv);
+}
+
+nsresult
+nsUrlClassifierDBServiceWorker::NotifyUpdateObserver(nsresult aUpdateStatus)
+{
+  // We've either
+  //  1) failed starting a download stream
+  //  2) succeeded in starting a download stream but failed to obtain
+  //     table updates
+  //  3) succeeded in obtaining table updates but failed to build new
+  //     tables.
+  //  4) succeeded in building new tables but failed to take them.
+  //  5) succeeded in taking new tables.
+
+  mUpdateStatus = aUpdateStatus;
 
   nsCOMPtr<nsIUrlClassifierUtils> urlUtil =
     do_GetService(NS_URLCLASSIFIERUTILS_CONTRACTID);
@@ -671,10 +731,24 @@ nsUrlClassifierDBServiceWorker::FinishUpdate()
 }
 
 nsresult
-nsUrlClassifierDBServiceWorker::ApplyUpdate()
+nsUrlClassifierDBServiceWorker::ApplyUpdatesBackground(nsACString& aFailedTableName)
 {
-  LOG(("nsUrlClassifierDBServiceWorker::ApplyUpdate()"));
-  nsresult rv = mClassifier->ApplyUpdates(&mTableUpdates);
+  // ********* Please be very careful while adding tasks. *********
+  // This function will run on the update thread (whereas most of the other
+  // functions will run on the worker thread) so any task that might mutate
+  // the in-use data is forbidden.
+
+  if (gShuttingDownThread) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
+  MOZ_ASSERT(NS_GetCurrentThread() == gDbUpdateThread,
+             "nsUrlClassifierDBServiceWorker::BuildNewTables MUST "
+             "run on update thread!!");
+
+  LOG(("nsUrlClassifierDBServiceWorker::BuildNewTables()"));
+  nsresult rv = mClassifier->ApplyUpdatesBackground(&mTableUpdates,
+                                                    aFailedTableName);
 
 #ifdef MOZ_SAFEBROWSING_DUMP_FAILED_UPDATES
   if (NS_FAILED(rv) && NS_ERROR_OUT_OF_MEMORY != rv) {
@@ -1514,6 +1588,13 @@ nsUrlClassifierDBService::Init()
   if (NS_FAILED(rv))
     return rv;
 
+  // Start the update thread.
+  rv = NS_NewNamedThread(NS_LITERAL_CSTRING("SafeBrowsing DB Update"),
+                         &gDbUpdateThread);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
   mWorker = new nsUrlClassifierDBServiceWorker();
   if (!mWorker)
     return NS_ERROR_OUT_OF_MEMORY;
@@ -1606,6 +1687,7 @@ nsUrlClassifierDBService::BuildTables(bool aTrackingProtectionEnabled,
 // nsChannelClassifier is the only consumer of this interface.
 NS_IMETHODIMP
 nsUrlClassifierDBService::Classify(nsIPrincipal* aPrincipal,
+                                   nsIEventTarget* aEventTarget,
                                    bool aTrackingProtectionEnabled,
                                    nsIURIClassifierCallback* c,
                                    bool* result)
@@ -1614,14 +1696,33 @@ nsUrlClassifierDBService::Classify(nsIPrincipal* aPrincipal,
 
   if (XRE_IsContentProcess()) {
     using namespace mozilla::dom;
+
+    ContentChild* content = ContentChild::GetSingleton();
+    MOZ_ASSERT(content);
+
     auto actor = static_cast<URLClassifierChild*>
-      (ContentChild::GetSingleton()->
-         SendPURLClassifierConstructor(IPC::Principal(aPrincipal),
-                                       aTrackingProtectionEnabled,
-                                       result));
-    if (actor) {
-      actor->SetCallback(c);
+      (content->AllocPURLClassifierChild(IPC::Principal(aPrincipal),
+                                         aTrackingProtectionEnabled,
+                                         result));
+    MOZ_ASSERT(actor);
+
+    if (aEventTarget) {
+      content->SetEventTargetForActor(actor, aEventTarget);
+    } else {
+      // In the case null event target we should use systemgroup event target
+      NS_WARNING(("Null event target, we should use SystemGroup to do labelling"));
+      nsCOMPtr<nsIEventTarget> systemGroupEventTarget
+        = mozilla::SystemGroup::EventTargetFor(mozilla::TaskCategory::Other);
+      content->SetEventTargetForActor(actor, systemGroupEventTarget);
     }
+    if (!content->SendPURLClassifierConstructor(actor, IPC::Principal(aPrincipal),
+                  aTrackingProtectionEnabled,
+                  result)) {
+      *result = false;
+      return NS_ERROR_FAILURE;
+    }
+
+    actor->SetCallback(c);
     return NS_OK;
   }
 
@@ -2093,14 +2194,23 @@ nsUrlClassifierDBService::Observe(nsISupports *aSubject, const char *aTopic,
     LOG(("joining background thread"));
     mWorkerProxy = nullptr;
 
-    if (!gDbBackgroundThread) {
-      return NS_OK;
+    if (gDbBackgroundThread) {
+      nsIThread *backgroundThread = gDbBackgroundThread;
+      // Nulling out gDbBackgroundThread MUST be done before Shutdown()
+      // since Shutdown() will lead to processing pending events.
+      gDbBackgroundThread = nullptr;
+      backgroundThread->Shutdown();
+      NS_RELEASE(backgroundThread);
     }
 
-    nsIThread *backgroundThread = gDbBackgroundThread;
-    gDbBackgroundThread = nullptr;
-    backgroundThread->Shutdown();
-    NS_RELEASE(backgroundThread);
+    if (gDbUpdateThread) {
+      nsIThread *updateThread = gDbUpdateThread;
+      gDbUpdateThread = nullptr;
+      updateThread->Shutdown();
+      NS_RELEASE(updateThread);
+    }
+
+    return NS_OK;
   } else {
     return NS_ERROR_UNEXPECTED;
   }
@@ -2115,8 +2225,9 @@ nsUrlClassifierDBService::Shutdown()
   LOG(("shutting down db service\n"));
   MOZ_ASSERT(XRE_IsParentProcess());
 
-  if (!gDbBackgroundThread || gShuttingDownThread)
+  if ((!gDbBackgroundThread && !gDbUpdateThread) || gShuttingDownThread) {
     return NS_OK;
+  }
 
   gShuttingDownThread = true;
 

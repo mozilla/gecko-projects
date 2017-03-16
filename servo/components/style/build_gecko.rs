@@ -268,6 +268,7 @@ mod bindings {
             .include(add_include("mozilla/ServoElementSnapshot.h"))
             .include(add_include("mozilla/dom/Element.h"))
             .include(add_include("mozilla/dom/NameSpaceConstants.h"))
+            .include(add_include("mozilla/LookAndFeel.h"))
             .include(add_include("mozilla/ServoBindings.h"))
             .include(add_include("nsMediaFeatures.h"))
             .include(add_include("nsMediaList.h"))
@@ -304,6 +305,7 @@ mod bindings {
             "mozilla::TraversalRootBehavior",
             "mozilla::StyleShapeRadius",
             "mozilla::StyleGrid.*",
+            "mozilla::LookAndFeel",
             ".*ThreadSafe.*Holder",
             "AnonymousContent",
             "AudioContext",
@@ -317,6 +319,7 @@ mod bindings {
             "FontFamilyType",
             "FragmentOrURL",
             "FrameRequestCallback",
+            "GeckoParserExtraData",
             "gfxAlternateValue",
             "gfxFontFeature",
             "gfxFontVariation",
@@ -428,10 +431,6 @@ mod bindings {
             "mozilla::dom::Sequence",
             "mozilla::dom::Optional",
             "mozilla::dom::Nullable",
-            "nsAString_internal_char_traits",
-            "nsAString_internal_incompatible_char_type",
-            "nsACString_internal_char_traits",
-            "nsACString_internal_incompatible_char_type",
             "RefPtr_Proxy",
             "RefPtr_Proxy_member_function",
             "nsAutoPtr_Proxy",
@@ -459,6 +458,10 @@ mod bindings {
             "mozilla::ErrorResult",  // Causes JSWhyMagic to be included & handled incorrectly.
             "mozilla::StyleAnimationValue",
             "StyleAnimationValue", // pulls in a whole bunch of stuff we don't need in the bindings
+        ];
+        let blacklist = [
+            ".*_char_traits",
+            ".*_incompatible_char_type",
         ];
 
         struct MappedGenericType {
@@ -497,6 +500,9 @@ mod bindings {
         }
         for &ty in opaque_types.iter() {
             builder = builder.opaque_type(ty);
+        }
+        for &ty in blacklist.iter() {
+            builder = builder.hide_type(ty);
         }
         for ty in servo_mapped_generic_types.iter() {
             let gecko_name = ty.gecko.rsplit("::").next().unwrap();
@@ -538,6 +544,8 @@ mod bindings {
             "RawServoDeclarationBlock",
             "RawGeckoPresContext",
             "RawGeckoPresContextOwned",
+            "RawGeckoStyleAnimationList",
+            "GeckoParserExtraData",
             "RefPtr",
             "ThreadSafeURIHolder",
             "ThreadSafePrincipalHolder",
@@ -568,6 +576,8 @@ mod bindings {
             "nsStyleColor",
             "nsStyleColumn",
             "nsStyleContent",
+            "nsStyleContentData",
+            "nsStyleContentType",
             "nsStyleContext",
             "nsStyleCoord",
             "nsStyleCoord_Calc",
@@ -634,6 +644,7 @@ mod bindings {
             "RawGeckoDocument",
             "RawServoDeclarationBlockStrong",
             "RawGeckoPresContext",
+            "RawGeckoStyleAnimationList",
         ];
         let servo_borrow_types = [
             "nsCSSValue",
@@ -718,6 +729,7 @@ pub fn generate() {
     use self::common::*;
     use std::fs;
     use std::thread;
+    println!("cargo:rerun-if-changed=build_gecko.rs");
     fs::create_dir_all(&*OUTDIR_PATH).unwrap();
     let threads = vec![
         thread::spawn(|| bindings::generate_structs(BuildType::Debug)),

@@ -1062,15 +1062,15 @@ private:
         return NS_ERROR_NOT_AVAILABLE;
       }
 
-      httpChannel->GetResponseHeader(
+      Unused << httpChannel->GetResponseHeader(
         NS_LITERAL_CSTRING("content-security-policy"),
         tCspHeaderValue);
 
-      httpChannel->GetResponseHeader(
+      Unused << httpChannel->GetResponseHeader(
         NS_LITERAL_CSTRING("content-security-policy-report-only"),
         tCspROHeaderValue);
 
-      httpChannel->GetResponseHeader(
+      Unused << httpChannel->GetResponseHeader(
         NS_LITERAL_CSTRING("referrer-policy"),
         tRPHeaderCValue);
     }
@@ -2028,10 +2028,10 @@ ScriptExecutorRunnable::ShutdownScriptLoader(JSContext* aCx,
     if (mScriptLoader.mRv.Failed()) {
       if (aMutedError && mScriptLoader.mRv.IsJSException()) {
         LogExceptionToConsole(aCx, aWorkerPrivate);
-        mScriptLoader.mRv.Throw(NS_ERROR_DOM_NETWORK_ERR);
+        mScriptLoader.mRv.ThrowWithCustomCleanup(NS_ERROR_DOM_NETWORK_ERR);
       }
     } else {
-      mScriptLoader.mRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+      mScriptLoader.mRv.ThrowWithCustomCleanup(NS_ERROR_DOM_INVALID_STATE_ERR);
     }
   }
 

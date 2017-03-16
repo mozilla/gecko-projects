@@ -76,8 +76,6 @@ SERVO_BINDING_FUNC(Servo_StyleSet_FillKeyframesForName, bool,
 SERVO_BINDING_FUNC(Servo_CssRules_ListTypes, void,
                    ServoCssRulesBorrowed rules,
                    nsTArrayBorrowed_uintptr_t result)
-SERVO_BINDING_FUNC(Servo_CssRules_GetStyleRuleAt, RawServoStyleRuleStrong,
-                   ServoCssRulesBorrowed rules, uint32_t index)
 SERVO_BINDING_FUNC(Servo_CssRules_InsertRule, nsresult,
                    ServoCssRulesBorrowed rules,
                    RawServoStyleSheetBorrowed sheet, const nsACString* rule,
@@ -86,30 +84,45 @@ SERVO_BINDING_FUNC(Servo_CssRules_DeleteRule, nsresult,
                    ServoCssRulesBorrowed rules, uint32_t index)
 
 // CSS Rules
-SERVO_BINDING_FUNC(Servo_StyleRule_Debug, void,
-                   RawServoStyleRuleBorrowed rule, nsACString* result)
+#define BASIC_RULE_FUNCS(type_) \
+  SERVO_BINDING_FUNC(Servo_CssRules_Get##type_##RuleAt, \
+                     RawServo##type_##RuleStrong, \
+                     ServoCssRulesBorrowed rules, uint32_t index) \
+  SERVO_BINDING_FUNC(Servo_##type_##Rule_Debug, void, \
+                     RawServo##type_##RuleBorrowed rule, nsACString* result) \
+  SERVO_BINDING_FUNC(Servo_##type_##Rule_GetCssText, void, \
+                     RawServo##type_##RuleBorrowed rule, nsAString* result)
+BASIC_RULE_FUNCS(Style)
+BASIC_RULE_FUNCS(Media)
+BASIC_RULE_FUNCS(Namespace)
+#undef BASIC_RULE_FUNCS
 SERVO_BINDING_FUNC(Servo_StyleRule_GetStyle, RawServoDeclarationBlockStrong,
                    RawServoStyleRuleBorrowed rule)
 SERVO_BINDING_FUNC(Servo_StyleRule_SetStyle, void,
                    RawServoStyleRuleBorrowed rule,
                    RawServoDeclarationBlockBorrowed declarations)
-SERVO_BINDING_FUNC(Servo_StyleRule_GetCssText, void,
-                   RawServoStyleRuleBorrowed rule, nsAString* result)
 SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorText, void,
                    RawServoStyleRuleBorrowed rule, nsAString* result)
+SERVO_BINDING_FUNC(Servo_MediaRule_GetMedia, RawServoMediaListStrong,
+                   RawServoMediaRuleBorrowed rule)
+SERVO_BINDING_FUNC(Servo_MediaRule_GetRules, ServoCssRulesStrong,
+                   RawServoMediaRuleBorrowed rule)
+SERVO_BINDING_FUNC(Servo_NamespaceRule_GetPrefix, nsIAtom*,
+                   RawServoNamespaceRuleBorrowed rule)
+SERVO_BINDING_FUNC(Servo_NamespaceRule_GetURI, nsIAtom*,
+                   RawServoNamespaceRuleBorrowed rule)
 
 // Animations API
 SERVO_BINDING_FUNC(Servo_ParseProperty,
                    RawServoDeclarationBlockStrong,
                    const nsACString* property, const nsACString* value,
-                   const nsACString* base_url, ThreadSafeURIHolder* base,
-                   ThreadSafeURIHolder* referrer,
-                   ThreadSafePrincipalHolder* principal)
+                   const nsACString* base,
+                   const GeckoParserExtraData* data)
 SERVO_BINDING_FUNC(Servo_GetComputedKeyframeValues, void,
                    RawGeckoKeyframeListBorrowed keyframes,
                    ServoComputedValuesBorrowed style,
                    ServoComputedValuesBorrowedOrNull parent_style,
-                   RawGeckoPresContextBorrowed pres_context,
+                   RawServoStyleSetBorrowed set,
                    RawGeckoComputedKeyframeValuesListBorrowedMut result)
 
 // AnimationValues handling
@@ -136,7 +149,9 @@ SERVO_BINDING_FUNC(Servo_AnimationValue_DeepEqual, bool,
 
 // Style attribute
 SERVO_BINDING_FUNC(Servo_ParseStyleAttribute, RawServoDeclarationBlockStrong,
-                   const nsACString* data)
+                   const nsACString* data,
+                   const nsACString* base,
+                   const GeckoParserExtraData* extraData)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_CreateEmpty,
                    RawServoDeclarationBlockStrong)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_Clone, RawServoDeclarationBlockStrong,
@@ -167,11 +182,15 @@ SERVO_BINDING_FUNC(Servo_DeclarationBlock_GetPropertyIsImportant, bool,
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_SetProperty, bool,
                    RawServoDeclarationBlockBorrowed declarations,
                    const nsACString* property,
-                   nsACString* value, bool is_important)
+                   const nsACString* value, bool is_important,
+                   const nsACString* base,
+                   const GeckoParserExtraData* data)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_SetPropertyById, bool,
                    RawServoDeclarationBlockBorrowed declarations,
                    nsCSSPropertyID property,
-                   nsACString* value, bool is_important)
+                   const nsACString* value, bool is_important,
+                   const nsACString* base,
+                   const GeckoParserExtraData* data)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_RemoveProperty, void,
                    RawServoDeclarationBlockBorrowed declarations,
                    const nsACString* property)
@@ -219,6 +238,21 @@ SERVO_BINDING_FUNC(Servo_DeclarationBlock_SetFontFamily, void,
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_SetTextDecorationColorOverride, void,
                    RawServoDeclarationBlockBorrowed declarations)
 
+// MediaList
+SERVO_BINDING_FUNC(Servo_MediaList_GetText, void,
+                   RawServoMediaListBorrowed list, nsAString* result)
+SERVO_BINDING_FUNC(Servo_MediaList_SetText, void,
+                   RawServoMediaListBorrowed list, const nsACString* text)
+SERVO_BINDING_FUNC(Servo_MediaList_GetLength, uint32_t,
+                   RawServoMediaListBorrowed list)
+SERVO_BINDING_FUNC(Servo_MediaList_GetMediumAt, bool,
+                   RawServoMediaListBorrowed list, uint32_t index,
+                   nsAString* result)
+SERVO_BINDING_FUNC(Servo_MediaList_AppendMedium, void,
+                   RawServoMediaListBorrowed list, const nsACString* new_medium)
+SERVO_BINDING_FUNC(Servo_MediaList_DeleteMedium, bool,
+                   RawServoMediaListBorrowed list, const nsACString* old_medium)
+
 // CSS supports()
 SERVO_BINDING_FUNC(Servo_CSSSupports2, bool,
                    const nsACString* name, const nsACString* value)
@@ -229,7 +263,8 @@ SERVO_BINDING_FUNC(Servo_CSSSupports, bool,
 SERVO_BINDING_FUNC(Servo_ComputedValues_GetForAnonymousBox,
                    ServoComputedValuesStrong,
                    ServoComputedValuesBorrowedOrNull parent_style_or_null,
-                   nsIAtom* pseudoTag, RawServoStyleSetBorrowed set)
+                   nsIAtom* pseudoTag, bool skip_display_fixup,
+                   RawServoStyleSetBorrowed set)
 SERVO_BINDING_FUNC(Servo_ComputedValues_Inherit, ServoComputedValuesStrong,
                    RawServoStyleSetBorrowed set,
                    ServoComputedValuesBorrowedOrNull parent_style)

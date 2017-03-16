@@ -6,12 +6,6 @@
 
 XPCSHELL_TESTS_MANIFESTS += ['tests/unit/xpcshell.ini']
 
-if CONFIG['ENABLE_INTL_API']:
-    SOURCES += ['OSPreferences.cpp']
-    EXPORTS.mozilla.intl += [
-        'OSPreferences.h',
-    ]
-
 toolkit = CONFIG['MOZ_WIDGET_TOOLKIT']
 
 if toolkit == 'windows':
@@ -22,6 +16,8 @@ else:
     DIRS += ['unix']
     if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
         DIRS += ['gtk']
+    elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
+        DIRS += ['android']
 
 XPIDL_SOURCES += [
     'mozILocaleService.idl',
@@ -47,10 +43,10 @@ EXPORTS += [
 
 EXPORTS.mozilla.intl += [
     'LocaleService.h',
+    'OSPreferences.h',
 ]
 
 UNIFIED_SOURCES += [
-    'DateTimeFormat.cpp',
     'LocaleService.cpp',
     'nsCollation.cpp',
     'nsLanguageAtomService.cpp',
@@ -58,7 +54,17 @@ UNIFIED_SOURCES += [
     'nsLocaleService.cpp',
     'nsScriptableDateFormat.cpp',
     'nsUConvPropertySearch.cpp',
+    'OSPreferences.cpp',
 ]
+
+if CONFIG['ENABLE_INTL_API']:
+    UNIFIED_SOURCES += [
+        'DateTimeFormat.cpp',
+    ]
+else:
+    UNIFIED_SOURCES += [
+        'DateTimeFormatAndroid.cpp',
+    ]
 
 EXTRA_JS_MODULES += [
     'PluralForm.jsm',

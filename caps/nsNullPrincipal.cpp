@@ -46,10 +46,10 @@ nsNullPrincipal::CreateWithInheritedAttributes(nsIPrincipal* aInheritFrom)
 }
 
 /* static */ already_AddRefed<nsNullPrincipal>
-nsNullPrincipal::CreateWithInheritedAttributes(nsIDocShell* aDocShell)
+nsNullPrincipal::CreateWithInheritedAttributes(nsIDocShell* aDocShell, bool aIsFirstParty)
 {
-  OriginAttributes attrs;
-  attrs.Inherit(nsDocShell::Cast(aDocShell)->GetOriginAttributes());
+  OriginAttributes attrs = nsDocShell::Cast(aDocShell)->GetOriginAttributes();
+  attrs.SetFirstPartyDomain(aIsFirstParty, NS_LITERAL_CSTRING(NULL_PRINCIPAL_FIRST_PARTY_DOMAIN));
 
   RefPtr<nsNullPrincipal> nullPrin = new nsNullPrincipal();
   nsresult rv = nullPrin->Init(attrs);
@@ -85,6 +85,8 @@ nsNullPrincipal::Init(const OriginAttributes& aOriginAttributes, nsIURI* aURI)
     mURI = nsNullPrincipalURI::Create();
     NS_ENSURE_TRUE(mURI, NS_ERROR_NOT_AVAILABLE);
   }
+
+  FinishInit();
 
   return NS_OK;
 }
@@ -155,6 +157,13 @@ nsNullPrincipal::GetBaseDomain(nsACString& aBaseDomain)
   // For a null principal, we use our unique uuid as the base domain.
   return mURI->GetPath(aBaseDomain);
 }
+
+NS_IMETHODIMP
+nsNullPrincipal::GetAddonId(nsAString& aAddonId)
+{
+  aAddonId.Truncate();
+  return NS_OK;
+};
 
 /**
  * nsISerializable implementation

@@ -18,6 +18,7 @@ Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/DownloadUtils.jsm");
 Cu.import("resource://gre/modules/AddonManager.jsm");
+Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/addons/AddonRepository.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "E10SUtils", "resource:///modules/E10SUtils.jsm");
@@ -89,6 +90,14 @@ XPCOMUtils.defineLazyGetter(gStrings, "brandShortName", function() {
 });
 XPCOMUtils.defineLazyGetter(gStrings, "appVersion", function() {
   return Services.appinfo.version;
+});
+
+XPCOMUtils.defineLazyGetter(this, "gInlineOptionsStylesheets", () => {
+  let stylesheets = ["chrome://browser/content/extension.css"];
+  if (AppConstants.platform === "macosx") {
+    stylesheets.push("chrome://browser/content/extension-mac.css");
+  }
+  return stylesheets;
 });
 
 document.addEventListener("load", initialize, true);
@@ -1887,6 +1896,7 @@ var gCategories = {
 
     AddonManager.addTypeListener(this);
 
+    // eslint-disable-next-line mozilla/use-default-preference-values
     try {
       this.node.value = Services.prefs.getCharPref(PREF_UI_LASTCATEGORY);
     } catch (e) { }
@@ -1977,12 +1987,7 @@ var gCategories = {
     var startHidden = false;
     if (aType.flags & AddonManager.TYPE_UI_HIDE_EMPTY) {
       var prefName = PREF_UI_TYPE_HIDDEN.replace("%TYPE%", aType.id);
-      try {
-        startHidden = Services.prefs.getBoolPref(prefName);
-      } catch (e) {
-        // Default to hidden
-        startHidden = true;
-      }
+      startHidden = Services.prefs.getBoolPref(prefName, true);
 
       gPendingInitializations++;
       getAddonsAndInstalls(aType.id, (aAddonsList, aInstallsList) => {
@@ -2509,7 +2514,7 @@ var gSearchView = {
       AddonRepository.cancelSearch();
 
     while (this._listBox.firstChild.localName == "richlistitem")
-      this._listBox.removeChild(this._listBox.firstChild);
+      this._listBox.firstChild.remove();
 
     gCachedAddons = {};
     this._pendingSearches = 2;
@@ -2563,10 +2568,7 @@ var gSearchView = {
       finishSearch();
     });
 
-    var maxRemoteResults = 0;
-    try {
-      maxRemoteResults = Services.prefs.getIntPref(PREF_MAXRESULTS);
-    } catch (e) {}
+    var maxRemoteResults = Services.prefs.getIntPref(PREF_MAXRESULTS, 0);
 
     if (maxRemoteResults <= 0) {
       finishSearch(0);
@@ -3656,7 +3658,17 @@ var gDetailView = {
                          false);
       mm.addMessageListener("Extension:BrowserContentLoaded", messageListener);
       mm.addMessageListener("Extension:BrowserResized", messageListener);
-      mm.sendAsyncMessage("Extension:InitBrowser", {fixedWidth: true});
+
+      let browserOptions = {
+        fixedWidth: true,
+        isInline: true,
+      };
+
+      if (this._addon.optionsBrowserStyle) {
+        browserOptions.stylesheets = gInlineOptionsStylesheets;
+      }
+
+      mm.sendAsyncMessage("Extension:InitBrowser", browserOptions);
 
       browser.loadURI(optionsURL);
     });
@@ -3827,7 +3839,7 @@ var gUpdatesView = {
         this._updateSelected.hidden = true;
 
         while (this._listBox.childNodes.length > 0)
-          this._listBox.removeChild(this._listBox.firstChild);
+          this._listBox.firstChild.remove();
       }
 
       var elements = [];

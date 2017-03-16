@@ -2060,8 +2060,7 @@
         "characterSet", "fullZoom", "textZoom", "webProgress",
         "addProgressListener", "removeProgressListener", "audioPlaybackStarted",
         "audioPlaybackStopped", "adjustPriority", "pauseMedia", "stopMedia",
-        "blockMedia", "resumeMedia", "audioMuted", "mute", "unmute",
-        "blockedPopups", "mIconURL", "lastURI", "userTypedValue",
+        "blockMedia", "resumeMedia", "mute", "unmute", "blockedPopups", "lastURI",
         "purgeSessionHistory", "stopScroll", "startScroll"
       ]</field>
 
@@ -2562,9 +2561,6 @@
               var skipPermitUnload = aParams.skipPermitUnload;
             }
 
-            // Ensure aTab's browser is inserted into the document.
-            this._insertBrowser(aTab);
-
             window.maybeRecordAbandonmentTelemetry(aTab, "tabClosed");
 
             // Handle requests for synchronously removing an already
@@ -2639,7 +2635,8 @@
               // processes the event queue and may lead to another removeTab()
               // call before permitUnload() returns.
               aTab._pendingPermitUnload = true;
-              let {permitUnload, timedOut} = browser.permitUnload();
+              let {permitUnload, timedOut} = aTab.linkedPanel ?
+                  browser.permitUnload() : {permitUnload: true, timedOut: false};
               delete aTab._pendingPermitUnload;
               // If we were closed during onbeforeunload, we return false now
               // so we don't (try to) close the same tab again. Of course, we
@@ -2700,21 +2697,23 @@
             var evt = new CustomEvent("TabClose", { bubbles: true, detail: { adoptedBy: aAdoptedByTab } });
             aTab.dispatchEvent(evt);
 
-            if (!aAdoptedByTab && !gMultiProcessBrowser) {
-              // Prevent this tab from showing further dialogs, since we're closing it
-              var windowUtils = browser.contentWindow.QueryInterface(Ci.nsIInterfaceRequestor).
-                                getInterface(Ci.nsIDOMWindowUtils);
-              windowUtils.disableDialogs();
+            if (aTab.linkedPanel) {
+              if (!aAdoptedByTab && !gMultiProcessBrowser) {
+                // Prevent this tab from showing further dialogs, since we're closing it
+                var windowUtils = browser.contentWindow.QueryInterface(Ci.nsIInterfaceRequestor).
+                                  getInterface(Ci.nsIDOMWindowUtils);
+                windowUtils.disableDialogs();
+              }
+
+              // Remove the tab's filter and progress listener.
+              const filter = this._tabFilters.get(aTab);
+
+              browser.webProgress.removeProgressListener(filter);
+
+              const listener = this._tabListeners.get(aTab);
+              filter.removeProgressListener(listener);
+              listener.destroy();
             }
-
-            // Remove the tab's filter and progress listener.
-            const filter = this._tabFilters.get(aTab);
-
-            browser.webProgress.removeProgressListener(filter);
-
-            const listener = this._tabListeners.get(aTab);
-            filter.removeProgressListener(listener);
-            listener.destroy();
 
             if (browser.registeredOpenURI && !aAdoptedByTab) {
               this._unifiedComplete.unregisterOpenPage(browser.registeredOpenURI,
@@ -2779,17 +2778,20 @@
             this._tabListeners.delete(aTab);
 
             var browser = this.getBrowserForTab(aTab);
-            this._outerWindowIDBrowserMap.delete(browser.outerWindowID);
 
-            // Because of the way XBL works (fields just set JS
-            // properties on the element) and the code we have in place
-            // to preserve the JS objects for any elements that have
-            // JS properties set on them, the browser element won't be
-            // destroyed until the document goes away.  So we force a
-            // cleanup ourselves.
-            // This has to happen before we remove the child so that the
-            // XBL implementation of nsIObserver still works.
-            browser.destroy();
+            if (aTab.linkedPanel) {
+              this._outerWindowIDBrowserMap.delete(browser.outerWindowID);
+
+              // Because of the way XBL works (fields just set JS
+              // properties on the element) and the code we have in place
+              // to preserve the JS objects for any elements that have
+              // JS properties set on them, the browser element won't be
+              // destroyed until the document goes away.  So we force a
+              // cleanup ourselves.
+              // This has to happen before we remove the child so that the
+              // XBL implementation of nsIObserver still works.
+              browser.destroy();
+            }
 
             var wasPinned = aTab.pinned;
 
@@ -2843,12 +2845,7 @@
             this._tabForBrowser.delete(aTab.linkedBrowser);
             aTab.linkedBrowser = null;
 
-            // As the browser is removed, the removal of a dependent document can
-            // cause the whole window to close. So at this point, it's possible
-            // that the binding is destructed.
-            if (this.mTabBox) {
-              this.mPanelContainer.removeChild(panel);
-            }
+            panel.remove();
 
             if (aCloseWindow)
               this._windowIsClosing = closeWindow(true, window.warnAboutClosingWindow);
@@ -3702,6 +3699,7 @@
             // time elapses, we're free to put up the spinner and start
             // trying to load a different tab.
             TAB_SWITCH_TIMEOUT: 400 /* ms */,
+            NEWNESS_THRESHOLD: 1000 /* ms */,
 
             // When the user hasn't switched tabs for this long, we unload
             // layers for all tabs that aren't in use.
@@ -3723,6 +3721,7 @@
 
             visibleTab: this.selectedTab,   // Tab that's on screen.
             spinnerTab: null,               // Tab showing a spinner.
+            blankTab: null,                 // Tab showing blank.
             originalTab: this.selectedTab,  // Tab that we started on.
 
             tabbrowser: this,  // Reference to gBrowser.
@@ -3731,6 +3730,12 @@
 
             // Map from tabs to STATE_* (below).
             tabState: new Map(),
+
+            // Holds a collection of <xul:browser>'s for this tabbrowser
+            // that we cannot force paint since their TabChild's haven't
+            // been constructed yet. Instead, we show blank tabs for them
+            // when attempting to switch to them.
+            pendingTabChild: new WeakSet(),
 
             // True if we're in the midst of switching tabs.
             switchInProgress: false,
@@ -3827,6 +3832,7 @@
               window.addEventListener("sizemodechange", this);
               window.addEventListener("SwapDocShells", this, true);
               window.addEventListener("EndSwapDocShells", this, true);
+              window.addEventListener("MozTabChildNotReady", this, true);
               if (!this.minimized) {
                 this.setTabState(this.requestedTab, this.STATE_LOADED);
               }
@@ -3849,6 +3855,7 @@
               window.removeEventListener("sizemodechange", this);
               window.removeEventListener("SwapDocShells", this, true);
               window.removeEventListener("EndSwapDocShells", this, true);
+              window.removeEventListener("MozTabChildNotReady", this, true);
 
               this.tabbrowser._switcher = null;
 
@@ -3864,6 +3871,7 @@
               this.assert(this.tabbrowser._switcher);
               this.assert(this.tabbrowser._switcher === this);
               this.assert(!this.spinnerTab);
+              this.assert(!this.blankTab);
               this.assert(!this.loadTimer);
               this.assert(!this.loadingTab);
               this.assert(this.lastVisibleTab === this.requestedTab);
@@ -3894,20 +3902,45 @@
             // This function is called after all the main state changes to
             // make sure we display the right tab.
             updateDisplay() {
+              let requestedTabState = this.getTabState(this.requestedTab);
+
+              let shouldBeBlank =
+                this.pendingTabChild.has(this.requestedTab.linkedBrowser) &&
+                requestedTabState == this.STATE_LOADING;
+
               // Figure out which tab we actually want visible right now.
               let showTab = null;
-              if (this.getTabState(this.requestedTab) != this.STATE_LOADED &&
-                  this.lastVisibleTab && this.loadTimer) {
+              if (requestedTabState != this.STATE_LOADED &&
+                  this.lastVisibleTab && this.loadTimer && !shouldBeBlank) {
                 // If we can't show the requestedTab, and lastVisibleTab is
                 // available, show it.
                 showTab = this.lastVisibleTab;
               } else {
-                // Show the requested tab. If it's not available, we'll show the spinner.
+                // Show the requested tab. If it's not available, we'll show the spinner or a blank tab.
                 showTab = this.requestedTab;
               }
 
+              // First, let's deal with blank tabs, which we show instead
+              // of the spinner when the tab is not currently set up
+              // properly in the content process.
+              if (!shouldBeBlank && this.blankTab) {
+                this.tabbrowser.removeAttribute("pendingtabchild");
+                this.blankTab.linkedBrowser.removeAttribute("pendingtabchild");
+                this.blankTab = null;
+              } else if (shouldBeBlank && this.blankTab !== showTab) {
+                if (this.blankTab) {
+                  this.blankTab.linkedBrowser.removeAttribute("pendingtabchild");
+                }
+                this.blankTab = showTab;
+                this.tabbrowser.setAttribute("pendingtabchild", "true");
+                this.blankTab.linkedBrowser.setAttribute("pendingtabchild", "true");
+              }
+
               // Show or hide the spinner as needed.
-              let needSpinner = this.getTabState(showTab) != this.STATE_LOADED && !this.minimized;
+              let needSpinner = this.getTabState(showTab) != this.STATE_LOADED &&
+                                !this.minimized &&
+                                !shouldBeBlank;
+
               if (!needSpinner && this.spinnerTab) {
                 this.spinnerHidden();
                 this.tabbrowser.removeAttribute("pendingpaint");
@@ -3991,6 +4024,9 @@
 
               if (this.lastVisibleTab && !this.lastVisibleTab.linkedBrowser) {
                 this.lastVisibleTab = null;
+              }
+              if (this.blankTab && !this.blankTab.linkedBrowser) {
+                this.blankTab = null;
               }
               if (this.spinnerTab && !this.spinnerTab.linkedBrowser) {
                 this.spinnerHidden();
@@ -4104,8 +4140,9 @@
 
             // Fires when the layers become available for a tab.
             onLayersReady(browser) {
+              this.pendingTabChild.delete(browser);
               let tab = this.tabbrowser.getTabForBrowser(browser);
-              this.logState(`onLayersReady(${tab._tPos})`);
+              this.logState(`onLayersReady(${tab._tPos}, ${browser.isRemoteBrowser})`);
 
               this.assert(this.getTabState(tab) == this.STATE_LOADING ||
                           this.getTabState(tab) == this.STATE_LOADED);
@@ -4130,6 +4167,7 @@
 
             // Called when we're done clearing the layers for a tab.
             onLayersCleared(browser) {
+              this.pendingTabChild.delete(browser);
               let tab = this.tabbrowser.getTabForBrowser(browser);
               if (tab) {
                 this.logState(`onLayersCleared(${tab._tPos})`);
@@ -4150,6 +4188,15 @@
                 } else if (this.getTabState(tab) == this.STATE_UNLOADING) {
                   this.onLayersCleared(tab.linkedBrowser);
                 }
+              } else if (this.getTabState(tab) == this.STATE_LOADED) {
+                // A tab just changed from non-remote to remote, which means
+                // that it's gone back into the STATE_LOADING state until
+                // it sends up a layer tree. We also add the browser to
+                // the pendingTabChild set since this browser is unlikely
+                // to have its TabChild set up right away, and we want to
+                // make it appear "blank" instead of showing a spinner for it.
+                this.pendingTabChild.add(tab.linkedBrowser);
+                this.setTabState(tab, this.STATE_LOADING);
               }
             },
 
@@ -4196,9 +4243,18 @@
 
               let otherTabbrowser = otherBrowser.ownerGlobal.gBrowser;
               let otherState;
+              let pendingTabChild = false;
               if (otherTabbrowser && otherTabbrowser._switcher) {
                 let otherTab = otherTabbrowser.getTabForBrowser(otherBrowser);
-                otherState = otherTabbrowser._switcher.getTabState(otherTab);
+                let otherSwitcher = otherTabbrowser._switcher;
+                otherState = otherSwitcher.getTabState(otherTab);
+                pendingTabChild = otherSwitcher.pendingTabChild.has(otherBrowser);
+
+                if (pendingTabChild) {
+                  this.assert(otherState == this.STATE_LOADING);
+                }
+
+                otherSwitcher.pendingTabChild.delete(otherBrowser);
               } else {
                 otherState = (otherBrowser.docShellIsActive
                               ? this.STATE_LOADED
@@ -4208,7 +4264,10 @@
               if (!this.swapMap) {
                 this.swapMap = new WeakMap();
               }
-              this.swapMap.set(otherBrowser, otherState);
+              this.swapMap.set(otherBrowser, {
+                state: otherState,
+                pendingTabChild,
+              });
             },
 
             onEndSwapDocShells(ourBrowser, otherBrowser) {
@@ -4227,12 +4286,17 @@
               }
               this.loadingTab = null;
 
-              let otherState = this.swapMap.get(otherBrowser);
+              let { state: otherState, pendingTabChild } =
+                this.swapMap.get(otherBrowser);
+
               this.swapMap.delete(otherBrowser);
 
               let ourTab = this.tabbrowser.getTabForBrowser(ourBrowser);
               if (ourTab) {
                 this.setTabStateNoAction(ourTab, otherState);
+                if (pendingTabChild) {
+                  this.pendingTabChild.add(ourTab.linkedBrowser);
+                }
               }
             },
 
@@ -4245,6 +4309,28 @@
             activateBrowserForPrintPreview(browser) {
               let tab = this.tabbrowser.getTabForBrowser(browser);
               this.setTabState(tab, this.STATE_LOADING);
+            },
+
+            // The tab for this browser isn't currently set
+            // up in the content process, so we have no chance
+            // of painting it right away. We'll paint a blank
+            // tab instead.
+            onTabChildNotReady(browser) {
+              this.assert(browser.isRemoteBrowser);
+
+              let tab = this.tabbrowser.getTabForBrowser(browser);
+
+              this.assert(this.getTabState(tab) == this.STATE_LOADING);
+
+              this.logState(`onTabChildNotReady(${tab._tPos})`);
+              this.pendingTabChild.add(browser);
+              this.maybeFinishTabSwitch();
+
+              if (this.loadingTab === tab) {
+                this.clearTimer(this.loadTimer);
+                this.loadTimer = null;
+                this.loadingTab = null;
+              }
             },
 
             // Called when the user asks to switch to a given tab.
@@ -4302,6 +4388,8 @@
                 this.onSwapDocShells(event.originalTarget, event.detail);
               } else if (event.type == "EndSwapDocShells") {
                 this.onEndSwapDocShells(event.originalTarget, event.detail);
+              } else if (event.type == "MozTabChildNotReady") {
+                this.onTabChildNotReady(event.originalTarget);
               }
 
               this.postActions();
@@ -4328,7 +4416,8 @@
              */
             maybeFinishTabSwitch() {
               if (this.switchInProgress && this.requestedTab &&
-                  this.getTabState(this.requestedTab) == this.STATE_LOADED) {
+                  (this.getTabState(this.requestedTab) == this.STATE_LOADED ||
+                   this.requestedTab === this.blankTab)) {
                 // After this point the tab has switched from the content thread's point of view.
                 // The changes will be visible after the next refresh driver tick + composite.
                 let time = TelemetryStopwatch.timeElapsed("FX_TAB_SWITCH_TOTAL_E10S_MS", window);
@@ -4343,11 +4432,33 @@
 
             spinnerDisplayed() {
               this.assert(!this.spinnerTab);
+              let browser = this.requestedTab.linkedBrowser;
+              this.assert(browser.isRemoteBrowser);
               TelemetryStopwatch.start("FX_TAB_SWITCH_SPINNER_VISIBLE_MS", window);
               // We have a second, similar probe for capturing recordings of
               // when the spinner is displayed for very long periods.
               TelemetryStopwatch.start("FX_TAB_SWITCH_SPINNER_VISIBLE_LONG_MS", window);
               this.addMarker("AsyncTabSwitch:SpinnerShown");
+
+              // What kind of tab is about to display this spinner? We have three basic
+              // kinds:
+              //
+              // 1) A tab that we've presented before
+              // 2) A tab that we've never presented before, and it's quite new
+              // 3) A tab that we've never presented before, but it's not so new
+              //
+              // Being "new" in this sense means being a tab that was created less than
+              // NEWNESS_THRESHOLD ms ago.
+
+              let histogram = Services.telemetry.getHistogramById("FX_TAB_SWITCH_SPINNER_TYPE");
+              if (browser.frameLoader.tabParent.hasPresented) {
+                // We've presented this tab before.
+                histogram.add("seen");
+              } else if (Date.now() - this.requestedTab.creationTime < this.NEWNESS_THRESHOLD) {
+                histogram.add("unseenNew");
+              } else {
+                histogram.add("unseenOld");
+              }
             },
 
             spinnerHidden() {
@@ -4379,11 +4490,7 @@
                 return true;
               if (this._logInit)
                 return this._shouldLog;
-              let result = false;
-              try {
-                result = Services.prefs.getBoolPref("browser.tabs.remote.logSwitchTiming");
-              } catch (ex) {
-              }
+              let result = Services.prefs.getBoolPref("browser.tabs.remote.logSwitchTiming", false);
               this._shouldLog = result;
               this._logInit = true;
               return this._shouldLog;
@@ -4419,6 +4526,7 @@
                 if (tab === this.lastVisibleTab) accum += "V";
                 if (tab === this.loadingTab) accum += "L";
                 if (tab === this.requestedTab) accum += "R";
+                if (tab === this.blankTab) accum += "B";
                 if (state == this.STATE_LOADED) accum += "(+)";
                 if (state == this.STATE_LOADING) accum += "(+?)";
                 if (state == this.STATE_UNLOADED) accum += "(-)";
@@ -5555,11 +5663,7 @@
           window.addEventListener("resize", this);
           window.addEventListener("load", this);
 
-          try {
-            this._tabAnimationLoggingEnabled = Services.prefs.getBoolPref("browser.tabs.animationLogging.enabled");
-          } catch (ex) {
-            this._tabAnimationLoggingEnabled = false;
-          }
+          this._tabAnimationLoggingEnabled = Services.prefs.getBoolPref("browser.tabs.animationLogging.enabled", false);
           this._browserNewtabpageEnabled = Services.prefs.getBoolPref("browser.newtabpage.enabled");
           Services.prefs.addObserver("privacy.userContext", this, false);
           this.observe(null, "nsPref:changed", "privacy.userContext.enabled");
@@ -6561,6 +6665,10 @@
         // Set the cursor to an arrow during tab drags.
         dt.mozCursor = "default";
 
+        // Set the tab as the source of the drag, which ensures we have a stable
+        // node to deliver the `dragend` event.  See bug 1345473.
+        dt.addElement(tab);
+
         // Create a canvas to which we capture the current tab.
         // Until canvas is HiDPI-aware (bug 780362), we need to scale the desired
         // canvas size (in CSS pixels) to the window's backing resolution in order
@@ -6986,6 +7094,10 @@
         if (!("_lastAccessed" in this)) {
           this.updateLastAccessed();
         }
+
+        if (!("_creationTime" in this)) {
+          this._creationTime = Date.now();
+        }
       ]]></constructor>
 
       <property name="_visuallySelected">
@@ -7091,6 +7203,12 @@
       </method>
 
       <field name="cachePosition">Infinity</field>
+
+      <property name="creationTime">
+        <getter>
+          return this._creationTime;
+        </getter>
+      </property>
 
       <field name="mOverCloseButton">false</field>
       <property name="_overPlayingIcon" readonly="true">

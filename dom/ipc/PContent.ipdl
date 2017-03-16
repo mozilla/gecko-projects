@@ -14,7 +14,6 @@ include protocol PCycleCollectWithLogs;
 include protocol PPSMContentDownloader;
 include protocol PExternalHelperApp;
 include protocol PHandlerService;
-include protocol PDeviceStorageRequest;
 include protocol PFileDescriptorSet;
 include protocol PHal;
 include protocol PHeapSnapshotTempFileHelper;
@@ -27,7 +26,8 @@ include protocol PGMPService;
 include protocol PPluginModule;
 include protocol PGMP;
 include protocol PPrinting;
-include protocol PSendStream;
+include protocol PChildToParentStream;
+include protocol PParentToChildStream;
 include protocol POfflineCacheUpdate;
 include protocol PRenderFrame;
 include protocol PScreenManager;
@@ -45,7 +45,7 @@ include protocol PVideoDecoderManager;
 include protocol PFlyWebPublishedServer;
 include DOMTypes;
 include JavaScriptTypes;
-include InputStreamParams;
+include IPCStream;
 include PTabContext;
 include URIParams;
 include PluginTypes;
@@ -90,6 +90,7 @@ using mozilla::Telemetry::Accumulation from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::KeyedAccumulation from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::ScalarAction from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::KeyedScalarAction from "mozilla/TelemetryComms.h";
+using mozilla::Telemetry::ChildEventData from "mozilla/TelemetryComms.h";
 
 union ChromeRegistryItem
 {
@@ -123,120 +124,6 @@ struct FontFamilyListEntry {
     uint8_t  entryType;
 };
 
-struct DeviceStorageFreeSpaceParams
-{
-  nsString type;
-  nsString storageName;
-};
-
-struct DeviceStorageUsedSpaceParams
-{
-  nsString type;
-  nsString storageName;
-};
-
-struct DeviceStorageAvailableParams
-{
-  nsString type;
-  nsString storageName;
-};
-
-struct DeviceStorageStatusParams
-{
-  nsString type;
-  nsString storageName;
-};
-
-struct DeviceStorageFormatParams
-{
-  nsString type;
-  nsString storageName;
-};
-
-struct DeviceStorageMountParams
-{
-  nsString type;
-  nsString storageName;
-};
-
-struct DeviceStorageUnmountParams
-{
-  nsString type;
-  nsString storageName;
-};
-
-struct DeviceStorageAddParams
-{
-  nsString type;
-  nsString storageName;
-  nsString relpath;
-  PBlob blob;
-};
-
-struct DeviceStorageAppendParams
-{
-  nsString type;
-  nsString storageName;
-  nsString relpath;
-  PBlob blob;
-};
-
-struct DeviceStorageCreateFdParams
-{
-  nsString type;
-  nsString storageName;
-  nsString relpath;
-};
-
-struct DeviceStorageGetParams
-{
-  nsString type;
-  nsString storageName;
-  nsString rootDir;
-  nsString relpath;
-};
-
-struct DeviceStorageDeleteParams
-{
-  nsString type;
-  nsString storageName;
-  nsString relpath;
-};
-
-struct DeviceStorageEnumerationParams
-{
-  nsString type;
-  nsString storageName;
-  nsString rootdir;
-  uint64_t since;
-};
-
-union DeviceStorageParams
-{
-  DeviceStorageAddParams;
-  DeviceStorageAppendParams;
-  DeviceStorageCreateFdParams;
-  DeviceStorageGetParams;
-  DeviceStorageDeleteParams;
-  DeviceStorageEnumerationParams;
-  DeviceStorageFreeSpaceParams;
-  DeviceStorageUsedSpaceParams;
-  DeviceStorageAvailableParams;
-  DeviceStorageStatusParams;
-  DeviceStorageFormatParams;
-  DeviceStorageMountParams;
-  DeviceStorageUnmountParams;
-};
-
-struct DeviceStorageLocationInfo {
-  nsString music;
-  nsString pictures;
-  nsString videos;
-  nsString sdcard;
-  nsString apps;
-  nsString crashes;
-};
-
 union PrefValue {
   nsCString;
   int32_t;
@@ -258,6 +145,11 @@ struct DataStorageItem {
   nsCString key;
   nsCString value;
   DataStorageType type;
+};
+
+struct DataStorageEntry {
+  DataStorageItem[] items;
+  nsString filename;
 };
 
 struct ClipboardCapabilities {
@@ -349,6 +241,13 @@ struct GMPCapabilityData
     GMPAPITags[] capabilities;
 };
 
+struct GfxInfoFeatureStatus
+{
+    int32_t feature;
+    int32_t status;
+    nsCString failureId;
+};
+
 struct XPCOMInitData
 {
     bool isOffline;
@@ -363,13 +262,8 @@ struct XPCOMInitData
     FontFamilyListEntry[] fontFamilies;
     OptionalURIParams userContentSheetURL;
     PrefSetting[] prefs;
-};
-
-struct GfxInfoFeatureStatus
-{
-    int32_t feature;
-    int32_t status;
-    nsCString failureId;
+    GfxInfoFeatureStatus[] gfxFeatureStatus;
+    DataStorageEntry[] dataStorage;
 };
 
 /**
@@ -383,7 +277,6 @@ nested(upto inside_cpow) sync protocol PContent
     manages PBrowser;
     manages PContentPermissionRequest;
     manages PCycleCollectWithLogs;
-    manages PDeviceStorageRequest;
     manages PPSMContentDownloader;
     manages PExternalHelperApp;
     manages PFileDescriptorSet;
@@ -394,7 +287,8 @@ nested(upto inside_cpow) sync protocol PContent
     manages PNecko;
     manages POfflineCacheUpdate;
     manages PPrinting;
-    manages PSendStream;
+    manages PChildToParentStream;
+    manages PParentToChildStream;
     manages PScreenManager;
     manages PSpeechSynthesis;
     manages PStorage;
@@ -562,9 +456,6 @@ child:
     // Notify child that last-pb-context-exited notification was observed
     async LastPrivateDocShellDestroyed();
 
-    async FilePathUpdate(nsString storageType, nsString storageName, nsString filepath,
-                         nsCString reasons);
-
     async NotifyProcessPriorityChanged(ProcessPriority priority);
     async MinimizeMemoryUsage();
 
@@ -604,7 +495,8 @@ child:
     async InvokeDragSession(IPCDataTransfer[] transfers, uint32_t action);
 
     async EndDragSession(bool aDoneDrag, bool aUserCancelled,
-                         LayoutDeviceIntPoint aDragEndPoint);
+                         LayoutDeviceIntPoint aDragEndPoint,
+                         uint32_t aKeyModifiers);
 
     async DomainSetChanged(uint32_t aSetType, uint32_t aChangeType, OptionalURIParams aDomain);
 
@@ -697,6 +589,8 @@ child:
 
     async ParentActivated(PBrowser aTab, bool aActivated);
 
+    async PParentToChildStream();
+
 parent:
     async InitBackground(Endpoint<PBackgroundParent> aEndpoint);
 
@@ -748,7 +642,6 @@ parent:
     async PJavaScript();
 
     async PRemoteSpellcheckEngine();
-    async PDeviceStorageRequest(DeviceStorageParams params);
 
     async InitCrashReporter(Shmem shmem, NativeThreadId tid);
 
@@ -765,9 +658,10 @@ parent:
      * Return whether the provided KeyHandle belongs to this Token
      *
      * |keyHandle| Key Handle to evaluate.
+     * |application| The FIDO Application data that is associated with this key.
      * Returns |True| if the Key Handle is ours.
      */
-    sync NSSU2FTokenIsRegistered(uint8_t[] keyHandle)
+    sync NSSU2FTokenIsRegistered(uint8_t[] keyHandle, uint8_t[] application)
         returns (bool isValidKeyHandle);
 
     /**
@@ -811,7 +705,7 @@ parent:
 
     async PPrinting();
 
-    async PSendStream();
+    async PChildToParentStream();
 
     nested(inside_sync) sync PScreenManager()
         returns (uint32_t numberOfScreens,
@@ -848,9 +742,6 @@ parent:
     sync GetGfxVars() returns (GfxVarUpdate[] vars);
 
     sync ReadFontList() returns (FontListEntry[] retValue);
-
-    sync ReadDataStorageArray(nsString aFilename)
-      returns (DataStorageItem[] retValue);
 
     sync SyncMessage(nsString aMessage, ClonedMessageData aData,
                      CpowEntry[] aCpows, Principal aPrincipal)
@@ -934,13 +825,8 @@ parent:
 
     async AudioChannelChangeDefVolChannel(int32_t aChannel, bool aHidden);
 
-    async FilePathUpdateNotify(nsString aType,
-                               nsString aStorageName,
-                               nsString aFilepath,
-                               nsCString aReason);
-
     sync KeywordToURI(nsCString keyword)
-        returns (nsString providerName, OptionalInputStreamParams postData, OptionalURIParams uri);
+        returns (nsString providerName, OptionalIPCStream postData, OptionalURIParams uri);
 
     sync NotifyKeywordSearchLoading(nsString providerName, nsString keyword);
 
@@ -962,8 +848,6 @@ parent:
                                 nsString pageURL,
                                 bool isAudio,
                                 bool isVideo);
-
-    sync GetGfxInfoFeatureStatus() returns (GfxInfoFeatureStatus[] features);
 
     // Graphics errors
     async GraphicsError(nsCString aError);
@@ -1022,6 +906,9 @@ parent:
      */
     async NotifyTabDestroying(TabId tabId,
                               ContentParentId cpId);
+
+    async TabChildNotReady(TabId tabId);
+
     /**
      * Starts an offline application cache update.
      * @param manifestURI
@@ -1122,12 +1009,6 @@ parent:
       OriginAttributes aOpenerOriginAttributes,
       float aFullZoom);
 
-    sync GetDeviceStorageLocation(nsString type)
-        returns (nsString path);
-
-    sync GetDeviceStorageLocations()
-	returns (DeviceStorageLocationInfo info);
-
     sync GetAndroidSystemInfo()
         returns (AndroidSystemInfo info);
 
@@ -1199,6 +1080,7 @@ parent:
     async AccumulateChildKeyedHistograms(KeyedAccumulation[] accumulations);
     async UpdateChildScalars(ScalarAction[] updates);
     async UpdateChildKeyedScalars(KeyedScalarAction[] updates);
+    async RecordChildEvents(ChildEventData[] events);
 
     sync GetA11yContentId() returns (uint32_t aContentId);
 

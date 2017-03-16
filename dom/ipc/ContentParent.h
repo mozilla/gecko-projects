@@ -159,7 +159,7 @@ public:
    * Returns null if non available.
    */
   static already_AddRefed<ContentParent>
-  RandomSelect(const nsTArray<ContentParent*>& aContentParents,
+  MinTabSelect(const nsTArray<ContentParent*>& aContentParents,
                ContentParent* aOpener,
                int32_t maxContentParents);
 
@@ -425,8 +425,19 @@ public:
   already_AddRefed<embedding::PrintingParent> GetPrintingParent();
 #endif
 
-  virtual PSendStreamParent* AllocPSendStreamParent() override;
-  virtual bool DeallocPSendStreamParent(PSendStreamParent* aActor) override;
+  virtual PChildToParentStreamParent* AllocPChildToParentStreamParent() override;
+  virtual bool
+  DeallocPChildToParentStreamParent(PChildToParentStreamParent* aActor) override;
+
+  virtual PParentToChildStreamParent*
+  SendPParentToChildStreamConstructor(PParentToChildStreamParent*) override;
+
+  virtual PFileDescriptorSetParent*
+  SendPFileDescriptorSetConstructor(const FileDescriptor&) override;
+
+  virtual PParentToChildStreamParent* AllocPParentToChildStreamParent() override;
+  virtual bool
+  DeallocPParentToChildStreamParent(PParentToChildStreamParent* aActor) override;
 
   virtual PScreenManagerParent*
   AllocPScreenManagerParent(uint32_t* aNumberOfScreens,
@@ -469,8 +480,6 @@ public:
                                                             const bool& aIsAudio,
                                                             const bool& aIsVideo) override;
 
-  virtual mozilla::ipc::IPCResult RecvGetGfxInfoFeatureStatus(nsTArray<mozilla::dom::GfxInfoFeatureStatus>* aFS) override;
-
   bool CycleCollectWithLogs(bool aDumpAllTraces,
                             nsICycleCollectorLogSink* aSink,
                             nsIDumpGCAndCCLogsCallback* aCallback);
@@ -490,6 +499,8 @@ public:
 
   virtual mozilla::ipc::IPCResult RecvNotifyTabDestroying(const TabId& aTabId,
                                                           const ContentParentId& aCpId) override;
+
+  virtual mozilla::ipc::IPCResult RecvTabChildNotReady(const TabId& aTabId) override;
 
   nsTArray<TabContext> GetManagedTabContext();
 
@@ -600,6 +611,23 @@ public:
                                 const Principal& aPrincipal,
                                 const bool& aUseTrackingProtection,
                                 bool* aSuccess) override;
+
+  virtual bool SendActivate(PBrowserParent* aTab) override
+  {
+    return PContentParent::SendActivate(aTab);
+  }
+
+  virtual bool SendDeactivate(PBrowserParent* aTab) override
+  {
+    return PContentParent::SendDeactivate(aTab);
+  }
+
+  virtual bool SendParentActivated(PBrowserParent* aTab,
+                                   const bool& aActivated) override
+  {
+    return PContentParent::SendParentActivated(aTab, aActivated);
+  }
+
   virtual bool
   DeallocPURLClassifierParent(PURLClassifierParent* aActor) override;
 
@@ -782,12 +810,6 @@ private:
 
   virtual bool DeallocPBrowserParent(PBrowserParent* frame) override;
 
-  virtual PDeviceStorageRequestParent*
-  AllocPDeviceStorageRequestParent(const DeviceStorageParams&) override;
-
-  virtual bool
-  DeallocPDeviceStorageRequestParent(PDeviceStorageRequestParent*) override;
-
   virtual PBlobParent*
   AllocPBlobParent(const BlobConstructorParams& aParams) override;
 
@@ -801,6 +823,7 @@ private:
                                                                      bool* aIsCompatible) override;
 
   virtual mozilla::ipc::IPCResult RecvNSSU2FTokenIsRegistered(nsTArray<uint8_t>&& aKeyHandle,
+                                                              nsTArray<uint8_t>&& aApplication,
                                                               bool* aIsValidKeyHandle) override;
 
   virtual mozilla::ipc::IPCResult RecvNSSU2FTokenRegister(nsTArray<uint8_t>&& aApplication,
@@ -903,9 +926,6 @@ private:
 
   virtual mozilla::ipc::IPCResult RecvReadFontList(InfallibleTArray<FontListEntry>* retValue) override;
 
-  virtual mozilla::ipc::IPCResult RecvReadDataStorageArray(const nsString& aFilename,
-                                                           InfallibleTArray<DataStorageItem>* aValues) override;
-
   virtual mozilla::ipc::IPCResult RecvReadPermissions(InfallibleTArray<IPC::Permission>* aPermissions) override;
 
   virtual mozilla::ipc::IPCResult RecvSetClipboard(const IPCDataTransfer& aDataTransfer,
@@ -973,11 +993,6 @@ private:
                                                    const IPC::Principal& aPrincipal,
                                                    const ClonedMessageData& aData) override;
 
-  virtual mozilla::ipc::IPCResult RecvFilePathUpdateNotify(const nsString& aType,
-                                                           const nsString& aStorageName,
-                                                           const nsString& aFilePath,
-                                                           const nsCString& aReason) override;
-
   virtual mozilla::ipc::IPCResult RecvAddGeolocationListener(const IPC::Principal& aPrincipal,
                                                              const bool& aHighAccuracy) override;
   virtual mozilla::ipc::IPCResult RecvRemoveGeolocationListener() override;
@@ -1007,7 +1022,7 @@ private:
 
   virtual mozilla::ipc::IPCResult RecvKeywordToURI(const nsCString& aKeyword,
                                                    nsString* aProviderName,
-                                                   OptionalInputStreamParams* aPostData,
+                                                   OptionalIPCStream* aPostData,
                                                    OptionalURIParams* aURI) override;
 
   virtual mozilla::ipc::IPCResult RecvNotifyKeywordSearchLoading(const nsString &aProvider,
@@ -1074,11 +1089,6 @@ private:
 
   void StartProfiler(nsIProfilerStartParams* aParams);
 
-  virtual mozilla::ipc::IPCResult RecvGetDeviceStorageLocation(const nsString& aType,
-                                                               nsString* aPath) override;
-
-  virtual mozilla::ipc::IPCResult RecvGetDeviceStorageLocations(DeviceStorageLocationInfo* info) override;
-
   virtual mozilla::ipc::IPCResult RecvGetAndroidSystemInfo(AndroidSystemInfo* aInfo) override;
 
   virtual mozilla::ipc::IPCResult RecvNotifyBenchmarkResult(const nsString& aCodecName,
@@ -1123,6 +1133,8 @@ private:
     InfallibleTArray<ScalarAction>&& aScalarActions) override;
   virtual mozilla::ipc::IPCResult RecvUpdateChildKeyedScalars(
     InfallibleTArray<KeyedScalarAction>&& aScalarActions) override;
+  virtual mozilla::ipc::IPCResult RecvRecordChildEvents(
+    nsTArray<ChildEventData>&& events) override;
 public:
   void SendGetFilesResponseAndForget(const nsID& aID,
                                      const GetFilesResponseResult& aResult);

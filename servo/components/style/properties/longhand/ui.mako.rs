@@ -11,13 +11,13 @@
 
 // TODO spec says that UAs should not support this
 // we should probably remove from gecko (https://bugzilla.mozilla.org/show_bug.cgi?id=1328331)
-${helpers.single_keyword("ime-mode", "normal auto active disabled inactive",
+${helpers.single_keyword("ime-mode", "auto normal active disabled inactive",
                          products="gecko", gecko_ffi_name="mIMEMode",
                          animatable=False,
                          spec="https://drafts.csswg.org/css-ui/#input-method-editor")}
 
 ${helpers.single_keyword("-moz-user-select", "auto text none all element elements" +
-                            " toggle tri_state -moz-all -moz-none -moz-text",
+                            " toggle tri-state -moz-all -moz-none -moz-text",
                          products="gecko",
                          alias="-webkit-user-select",
                          gecko_ffi_name="mUserSelect",
@@ -30,3 +30,10 @@ ${helpers.single_keyword("-moz-window-dragging", "default drag no-drag", product
                          gecko_enum_prefix="StyleWindowDragging",
                          animatable=False,
                          spec="None (Nonstandard Firefox-only property)")}
+
+${helpers.predefined_type("caret-color",
+                          "ColorOrAuto",
+                          "Either::Second(Auto)",
+                          spec="https://drafts.csswg.org/css-ui/#caret-color",
+                          animatable="True",
+                          products="none")}

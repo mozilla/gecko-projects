@@ -325,6 +325,7 @@ private:
   DECL_GFX_PREF(Once, "dom.vr.openvr.enabled",                 VROpenVREnabled, bool, false);
   DECL_GFX_PREF(Once, "dom.vr.osvr.enabled",                   VROSVREnabled, bool, false);
   DECL_GFX_PREF(Live, "dom.vr.poseprediction.enabled",         VRPosePredictionEnabled, bool, false);
+  DECL_GFX_PREF(Once, "dom.vr.require-gesture",                VRRequireGesture, bool, true);
   DECL_GFX_PREF(Live, "dom.vr.puppet.enabled",                 VRPuppetEnabled, bool, false);
   DECL_GFX_PREF(Live, "dom.w3c_pointer_events.enabled",        PointerEventsEnabled, bool, false);
   DECL_GFX_PREF(Live, "dom.w3c_touch_events.enabled",          TouchEventsEnabled, int32_t, 0);
@@ -459,13 +460,15 @@ private:
   DECL_GFX_PREF(Live, "layers.acceleration.draw-fps.write-to-file", WriteFPSToFile, bool, false);
   DECL_GFX_PREF(Once, "layers.acceleration.force-enabled",     LayersAccelerationForceEnabledDoNotUseDirectly, bool, false);
   DECL_GFX_PREF(Live, "layers.advanced.border-layers",         LayersAllowBorderLayers, bool, false);
-  DECL_GFX_PREF(Live, "layers.advanced.text-layers",           LayersAllowTextLayers, bool, false);
-  DECL_GFX_PREF(Live, "layers.advanced.bullet-layers",         LayersAllowBulletLayers, bool, false);
-  DECL_GFX_PREF(Live, "layers.advanced.caret-layers",          LayersAllowCaretLayers, bool, false);
-  DECL_GFX_PREF(Live, "layers.advanced.boxshadow-outer-layers", LayersAllowOuterBoxShadow, bool, false);
   DECL_GFX_PREF(Live, "layers.advanced.boxshadow-inset-layers", LayersAllowInsetBoxShadow, bool, false);
+  DECL_GFX_PREF(Live, "layers.advanced.boxshadow-outer-layers", LayersAllowOuterBoxShadow, bool, false);
+  DECL_GFX_PREF(Live, "layers.advanced.bullet-layers",         LayersAllowBulletLayers, bool, false);
+  DECL_GFX_PREF(Live, "layers.advanced.button-foreground-layers", LayersAllowButtonForegroundLayers, bool, false);
+  DECL_GFX_PREF(Live, "layers.advanced.caret-layers",          LayersAllowCaretLayers, bool, false);
+  DECL_GFX_PREF(Live, "layers.advanced.displaybuttonborder-layers", LayersAllowDisplayButtonBorder, bool, false);
+  DECL_GFX_PREF(Live, "layers.advanced.image-layers",          LayersAllowImageLayers, bool, false);
   DECL_GFX_PREF(Live, "layers.advanced.outline-layers",        LayersAllowOutlineLayers, bool, false);
-  DECL_GFX_PREF(Skip, "layers.allow-d3d9-fallback",            LayersAllowD3D9Fallback, bool, false);
+  DECL_GFX_PREF(Live, "layers.advanced.text-layers",           LayersAllowTextLayers, bool, false);
   DECL_GFX_PREF(Once, "layers.amd-switchable-gfx.enabled",     LayersAMDSwitchableGfxEnabled, bool, false);
   DECL_GFX_PREF(Once, "layers.async-pan-zoom.enabled",         AsyncPanZoomEnabledDoNotUseDirectly, bool, true);
   DECL_GFX_PREF(Once, "layers.async-pan-zoom.separate-event-thread", AsyncPanZoomSeparateEventThread, bool, false);
@@ -516,7 +519,6 @@ private:
   DECL_GFX_PREF(Once, "layers.offmainthreadcomposition.force-disabled", LayersOffMainThreadCompositionForceDisabled, bool, false);
   DECL_GFX_PREF(Live, "layers.offmainthreadcomposition.frame-rate", LayersCompositionFrameRate, int32_t,-1);
   DECL_GFX_PREF(Live, "layers.orientation.sync.timeout",       OrientationSyncMillis, uint32_t, (uint32_t)0);
-  DECL_GFX_PREF(Skip, "layers.prefer-d3d9",                    LayersPreferD3D9, bool, false);
   DECL_GFX_PREF(Once, "layers.prefer-opengl",                  LayersPreferOpenGL, bool, false);
   DECL_GFX_PREF(Live, "layers.progressive-paint",              ProgressivePaint, bool, false);
   DECL_GFX_PREF(Live, "layers.shared-buffer-provider.enabled", PersistentBufferProviderSharedEnabled, bool, false);
@@ -540,8 +542,10 @@ private:
   DECL_GFX_PREF(Once, "layers.uniformity-info",                UniformityInfo, bool, false);
   DECL_GFX_PREF(Once, "layers.use-image-offscreen-surfaces",   UseImageOffscreenSurfaces, bool, true);
   DECL_GFX_PREF(Live, "layers.draw-mask-debug",                DrawMaskLayer, bool, false);
+
   DECL_GFX_PREF(Live, "layers.geometry.opengl.enabled",        OGLLayerGeometry, bool, false);
   DECL_GFX_PREF(Live, "layers.geometry.basic.enabled",         BasicLayerGeometry, bool, false);
+  DECL_GFX_PREF(Live, "layers.geometry.d3d11.enabled",         D3D11LayerGeometry, bool, false);
 
   DECL_GFX_PREF(Live, "layout.animation.prerender.partial", PartiallyPrerenderAnimatedContent, bool, false);
   DECL_GFX_PREF(Live, "layout.animation.prerender.viewport-ratio-limit-x", AnimationPrerenderViewportRatioLimitX, float, 1.125f);
@@ -574,6 +578,8 @@ private:
 #ifdef XP_WIN
   DECL_GFX_PREF(Live, "media.windows-media-foundation.allow-d3d11-dxva", PDMWMFAllowD3D11, bool, true);
   DECL_GFX_PREF(Live, "media.windows-media-foundation.max-dxva-videos", PDMWMFMaxDXVAVideos, uint32_t, 8);
+  DECL_GFX_PREF(Live, "media.windows-media-foundation.use-nv12-format", PDMWMFUseNV12Format, bool, true);
+  DECL_GFX_PREF(Once, "media.windows-media-foundation.use-sync-texture", PDMWMFUseSyncTexture, bool, true);
   DECL_GFX_PREF(Live, "media.wmf.low-latency.enabled", PDMWMFLowLatencyEnabled, bool, false);
   DECL_GFX_PREF(Live, "media.wmf.skip-blacklist", PDMWMFSkipBlacklist, bool, false);
 #endif
@@ -625,6 +631,7 @@ private:
   DECL_GFX_PREF(Live, "webgl.enable-webgl2",                   WebGL2Enabled, bool, true);
   DECL_GFX_PREF(Live, "webgl.force-enabled",                   WebGLForceEnabled, bool, false);
   DECL_GFX_PREF(Once, "webgl.force-layers-readback",           WebGLForceLayersReadback, bool, false);
+  DECL_GFX_PREF(Live, "webgl.force-index-validation",          WebGLForceIndexValidation, bool, false);
   DECL_GFX_PREF(Live, "webgl.lose-context-on-memory-pressure", WebGLLoseContextOnMemoryPressure, bool, false);
   DECL_GFX_PREF(Live, "webgl.max-warnings-per-context",        WebGLMaxWarningsPerContext, uint32_t, 32);
   DECL_GFX_PREF(Live, "webgl.min_capability_mode",             WebGLMinCapabilityMode, bool, false);

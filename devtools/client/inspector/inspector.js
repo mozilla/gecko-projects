@@ -86,6 +86,8 @@ const PORTRAIT_MODE_WIDTH = 700;
  *      to source-mapped files)
  */
 function Inspector(toolbox) {
+  EventEmitter.decorate(this);
+
   this._toolbox = toolbox;
   this._target = toolbox.target;
   this.panelDoc = window.document;
@@ -114,8 +116,6 @@ function Inspector(toolbox) {
 
   this._target.on("will-navigate", this._onBeforeNavigate);
   this._detectingActorFeatures = this._detectActorFeatures();
-
-  EventEmitter.decorate(this);
 }
 
 Inspector.prototype = {
@@ -956,6 +956,9 @@ Inspector.prototype = {
 
     let markupDestroyer = this._destroyMarkup();
 
+    this.highlighters.destroy();
+    this.search.destroy();
+
     this._toolbox = null;
     this.breadcrumbs = null;
     this.panelDoc = null;
@@ -964,11 +967,7 @@ Inspector.prototype = {
     this.sidebar = null;
     this.store = null;
     this.target = null;
-
-    this.highlighters.destroy();
     this.highlighters = null;
-
-    this.search.destroy();
     this.search = null;
     this.searchBox = null;
 

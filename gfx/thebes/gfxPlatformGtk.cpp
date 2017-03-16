@@ -747,7 +747,6 @@ public:
         mGLContext = gl::GLContextGLX::CreateGLContext(
             gl::CreateContextFlags::NONE,
             gl::SurfaceCaps::Any(),
-            nullptr,
             false,
             mXDisplay,
             root,
@@ -763,7 +762,7 @@ public:
 
         // Test that SGI_video_sync lets us get the counter.
         unsigned int syncCounter = 0;
-        if (gl::sGLXLibrary.xGetVideoSync(&syncCounter) != 0) {
+        if (gl::sGLXLibrary.fGetVideoSync(&syncCounter) != 0) {
           mGLContext = nullptr;
         }
 
@@ -827,7 +826,7 @@ public:
       mGLContext->MakeCurrent();
 
       unsigned int syncCounter = 0;
-      gl::sGLXLibrary.xGetVideoSync(&syncCounter);
+      gl::sGLXLibrary.fGetVideoSync(&syncCounter);
       for (;;) {
         {
           MonitorAutoLock lock(mVsyncEnabledLock);
@@ -844,7 +843,7 @@ public:
         // until the parity of the counter value changes.
         unsigned int nextSync = syncCounter + 1;
         int status;
-        if ((status = gl::sGLXLibrary.xWaitVideoSync(2, nextSync % 2, &syncCounter)) != 0) {
+        if ((status = gl::sGLXLibrary.fWaitVideoSync(2, nextSync % 2, &syncCounter)) != 0) {
           gfxWarningOnce() << "glXWaitVideoSync returned " << status;
           useSoftware = true;
         }
@@ -907,13 +906,6 @@ gfxPlatformGtk::CreateHardwareVsyncSource()
     NS_WARNING("SGI_video_sync unsupported. Falling back to software vsync.");
   }
   return gfxPlatform::CreateHardwareVsyncSource();
-}
-
-bool
-gfxPlatformGtk::SupportsApzTouchInput() const
-{
-  int value = gfxPrefs::TouchEventsEnabled();
-  return value == 1 || value == 2;
 }
 
 #endif

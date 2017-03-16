@@ -9,6 +9,7 @@ use compositing::compositor_thread::{self, CompositorProxy, CompositorReceiver};
 use compositing::windowing::{MouseWindowEvent, WindowNavigateMsg};
 use compositing::windowing::{WindowEvent, WindowMethods};
 use euclid::{Point2D, Size2D, TypedPoint2D};
+use euclid::rect::TypedRect;
 use euclid::scale_factor::ScaleFactor;
 use euclid::size::TypedSize2D;
 #[cfg(target_os = "windows")]
@@ -797,6 +798,12 @@ impl WindowMethods for Window {
         }
     }
 
+    fn window_rect(&self) -> TypedRect<u32, DevicePixel> {
+        let size = self.framebuffer_size();
+        let origin = TypedPoint2D::zero();
+        TypedRect::new(origin, size)
+    }
+
     fn size(&self) -> TypedSize2D<f32, DeviceIndependentPixel> {
         match self.kind {
             WindowKind::Window(ref window) => {
@@ -1098,6 +1105,10 @@ impl WindowMethods for Window {
                 self.platform_handle_key(key, mods);
             }
         }
+    }
+
+    fn allow_navigation(&self, _: ServoUrl) -> bool {
+        true
     }
 
     fn supports_clipboard(&self) -> bool {

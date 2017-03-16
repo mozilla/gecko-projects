@@ -52,7 +52,6 @@ pub enum Origin {
 
 /// A set of namespaces applying to a given stylesheet.
 #[derive(Default, Debug)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
 pub struct Namespaces {
     pub default: Option<Namespace>,
@@ -252,11 +251,9 @@ impl ParseErrorReporter for MemoryHoleReporter {
     fn report_error(&self,
             _: &mut Parser,
             _: SourcePosition,
-            _: &str) {
+            _: &str,
+            _: &ServoUrl) {
         // do nothing
-    }
-    fn clone(&self) -> Box<ParseErrorReporter + Send + Sync> {
-        Box::new(MemoryHoleReporter)
     }
 }
 
@@ -341,11 +338,11 @@ impl CssRule {
                  extra_data: ParserContextExtraData,
                  state: Option<State>)
                  -> Result<(Self, State), SingleRuleParseError> {
-        let error_reporter = Box::new(MemoryHoleReporter);
+        let error_reporter = MemoryHoleReporter;
         let mut namespaces = parent_stylesheet.namespaces.write();
         let context = ParserContext::new_with_extra_data(parent_stylesheet.origin,
                                                          &parent_stylesheet.base_url,
-                                                         error_reporter.clone(),
+                                                         &error_reporter,
                                                          extra_data);
         let mut input = Parser::new(css);
 
@@ -388,7 +385,6 @@ impl ToCss for CssRule {
 }
 
 #[derive(Debug, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
 pub struct NamespaceRule {
     /// `None` for the default Namespace
@@ -535,7 +531,7 @@ impl ToCss for StyleRule {
         let declaration_block = self.block.read();
         try!(declaration_block.to_css(dest));
         // Step 4
-        if declaration_block.declarations.len() > 0 {
+        if declaration_block.declarations().len() > 0 {
             try!(write!(dest, " "));
         }
         // Step 5
@@ -584,7 +580,7 @@ impl Stylesheet {
                       origin: Origin,
                       media: MediaList,
                       stylesheet_loader: Option<&StylesheetLoader>,
-                      error_reporter: Box<ParseErrorReporter + Send>,
+                      error_reporter: &ParseErrorReporter,
                       extra_data: ParserContextExtraData)
                       -> Stylesheet {
         let (string, _) = decode_stylesheet_bytes(
@@ -605,7 +601,7 @@ impl Stylesheet {
                              protocol_encoding_label: Option<&str>,
                              environment_encoding: Option<EncodingRef>,
                              stylesheet_loader: Option<&StylesheetLoader>,
-                             error_reporter: Box<ParseErrorReporter + Send>,
+                             error_reporter: &ParseErrorReporter,
                              extra_data: ParserContextExtraData) {
         let (string, _) = decode_stylesheet_bytes(
             bytes, protocol_encoding_label, environment_encoding);
@@ -620,7 +616,7 @@ impl Stylesheet {
     pub fn update_from_str(existing: &Stylesheet,
                            css: &str,
                            stylesheet_loader: Option<&StylesheetLoader>,
-                           error_reporter: Box<ParseErrorReporter + Send>,
+                           error_reporter: &ParseErrorReporter,
                            extra_data: ParserContextExtraData) {
         let mut rules = existing.rules.write();
         let mut namespaces = existing.namespaces.write();
@@ -669,7 +665,7 @@ impl Stylesheet {
                     origin: Origin,
                     media: MediaList,
                     stylesheet_loader: Option<&StylesheetLoader>,
-                    error_reporter: Box<ParseErrorReporter + Send>,
+                    error_reporter: &ParseErrorReporter,
                     extra_data: ParserContextExtraData) -> Stylesheet {
         let s = Stylesheet {
             origin: origin,
@@ -953,7 +949,7 @@ impl<'a> QualifiedRuleParser for TopLevelRuleParser<'a> {
     }
 }
 
-#[derive(Clone)]  // shallow, relatively cheap clone
+#[derive(Clone)]  // shallow, relatively cheap .clone
 struct NestedRuleParser<'a, 'b: 'a> {
     stylesheet_origin: Origin,
     context: &'a ParserContext<'b>,

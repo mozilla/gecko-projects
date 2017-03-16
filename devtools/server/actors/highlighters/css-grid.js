@@ -16,7 +16,8 @@ const {
 const {
   getCurrentZoom,
   setIgnoreLayoutChanges,
-  getWindowDimensions
+  getWindowDimensions,
+  getMaxSurfaceSize,
 } = require("devtools/shared/layout/utils");
 const { stringifyGridFragments } = require("devtools/server/actors/utils/css-grid-utils");
 
@@ -51,11 +52,20 @@ const GRID_GAP_ALPHA = 0.5;
 /**
  * Cached used by `CssGridHighlighter.getGridGapPattern`.
  */
-const gCachedGridPattern = new WeakMap();
-// WeakMap key for the Row grid pattern.
-const ROW_KEY = {};
-// WeakMap key for the Column grid pattern.
-const COLUMN_KEY = {};
+const gCachedGridPattern = new Map();
+
+// That's the maximum size we can allocate for the canvas, in bytes. See:
+// http://searchfox.org/mozilla-central/source/gfx/thebes/gfxPrefs.h#401
+// It might become accessible as user preference, but at the moment we have to hard code
+// it (see: https://bugzilla.mozilla.org/show_bug.cgi?id=1282656).
+const MAX_ALLOC_SIZE = 500000000;
+// One pixel on canvas is using 4 bytes (R, G, B and Alpha); we use this to calculate the
+// proper memory allocation below
+const BYTES_PER_PIXEL = 4;
+// The maximum allocable pixels the canvas can have
+const MAX_ALLOC_PIXELS = MAX_ALLOC_SIZE / BYTES_PER_PIXEL;
+// The maximum allocable pixels per side in a square canvas
+const MAX_ALLOC_PIXELS_PER_SIDE = Math.sqrt(MAX_ALLOC_PIXELS)|0;
 
 /**
  * The CssGridHighlighter is the class that overlays a visual grid on top of
@@ -119,11 +129,22 @@ const COLUMN_KEY = {};
 function CssGridHighlighter(highlighterEnv) {
   AutoRefreshHighlighter.call(this, highlighterEnv);
 
+  this.maxCanvasSizePerSide = getMaxSurfaceSize(this.highlighterEnv.window);
+
+  // We cache the previous content's size so we're able to understand when it will
+  // change. The `width` and `height` are expressed in physical pixels in order to react
+  // also at any variation of zoom / pixel ratio.
+  // We initialize with `0` so it will check also at the first `_update()` iteration.
+  this._contentSize = {
+    width: 0,
+    height: 0
+  };
+
   this.markup = new CanvasFrameAnonymousContentHelper(this.highlighterEnv,
     this._buildMarkup.bind(this));
 
   this.onNavigate = this.onNavigate.bind(this);
-  this.onPageHide = this.hide.bind(this);
+  this.onPageHide = this.onPageHide.bind(this);
   this.onWillNavigate = this.onWillNavigate.bind(this);
 
   this.highlighterEnv.on("navigate", this.onNavigate);
@@ -311,7 +332,9 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     highlighterEnv.off("will-navigate", this.onWillNavigate);
 
     let { pageListenerTarget } = highlighterEnv;
-    pageListenerTarget.removeEventListener("pagehide", this.onPageHide);
+    if (pageListenerTarget) {
+      pageListenerTarget.removeEventListener("pagehide", this.onPageHide);
+    }
 
     this.markup.destroy();
 
@@ -337,22 +360,33 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
   },
 
   /**
-   * Gets the grid gap pattern used to render the gap regions.
+   * Gets the grid gap pattern used to render the gap regions based on the device
+   * pixel ratio given.
    *
+   * @param {Number} devicePixelRatio
+   *         The device pixel ratio we want the pattern for.
    * @param  {Object} dimension
-   *         Refers to the WeakMap key for the grid dimension type which is either the
-   *         constant COLUMN or ROW.
+   *         Refers to the Map key for the grid dimension type which is either the
+   *         constant COLUMNS or ROWS.
    * @return {CanvasPattern} grid gap pattern.
    */
-  getGridGapPattern(dimension) {
-    if (gCachedGridPattern.has(dimension)) {
-      return gCachedGridPattern.get(dimension);
+  getGridGapPattern(devicePixelRatio, dimension) {
+    let gridPatternMap = null;
+
+    if (gCachedGridPattern.has(devicePixelRatio)) {
+      gridPatternMap = gCachedGridPattern.get(devicePixelRatio);
+    } else {
+      gridPatternMap = new Map();
+    }
+
+    if (gridPatternMap.has(dimension)) {
+      return gridPatternMap.get(dimension);
     }
 
     // Create the diagonal lines pattern for the rendering the grid gaps.
     let canvas = createNode(this.win, { nodeType: "canvas" });
-    canvas.width = GRID_GAP_PATTERN_WIDTH;
-    canvas.height = GRID_GAP_PATTERN_HEIGHT;
+    let width = canvas.width = GRID_GAP_PATTERN_WIDTH * devicePixelRatio;
+    let height = canvas.height = GRID_GAP_PATTERN_HEIGHT * devicePixelRatio;
 
     let ctx = canvas.getContext("2d");
     ctx.save();
@@ -360,12 +394,12 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     ctx.beginPath();
     ctx.translate(.5, .5);
 
-    if (dimension === COLUMN_KEY) {
+    if (dimension === COLUMNS) {
       ctx.moveTo(0, 0);
-      ctx.lineTo(GRID_GAP_PATTERN_WIDTH, GRID_GAP_PATTERN_HEIGHT);
+      ctx.lineTo(width, height);
     } else {
-      ctx.moveTo(GRID_GAP_PATTERN_WIDTH, 0);
-      ctx.lineTo(0, GRID_GAP_PATTERN_HEIGHT);
+      ctx.moveTo(width, 0);
+      ctx.lineTo(0, height);
     }
 
     ctx.strokeStyle = this.color;
@@ -374,7 +408,10 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     ctx.restore();
 
     let pattern = ctx.createPattern(canvas, "repeat");
-    gCachedGridPattern.set(dimension, pattern);
+
+    gridPatternMap.set(dimension, pattern);
+    gCachedGridPattern.set(devicePixelRatio, gridPatternMap);
+
     return pattern;
   },
 
@@ -384,6 +421,14 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
    */
   onNavigate() {
     this._clearCache();
+  },
+
+  onPageHide: function ({ target }) {
+    // If a page hide event is triggered for current window's highlighter, hide the
+    // highlighter.
+    if (target.defaultView === this.win) {
+      this.hide();
+    }
   },
 
   onWillNavigate({ isTopLevel }) {
@@ -408,8 +453,7 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
   },
 
   _clearCache() {
-    gCachedGridPattern.delete(ROW_KEY);
-    gCachedGridPattern.delete(COLUMN_KEY);
+    gCachedGridPattern.clear();
   },
 
   /**
@@ -503,6 +547,7 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     // Clear the canvas the grid area highlights.
     this.clearCanvas(width, height);
     this.clearGridAreas();
+    this.clearGridCell();
 
     // Start drawing the grid fragments.
     for (let i = 0; i < this.gridData.length; i++) {
@@ -529,7 +574,7 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     root.setAttribute("style",
       `position:absolute; width:${width}px;height:${height}px; overflow:hidden`);
 
-    setIgnoreLayoutChanges(false, this.highlighterEnv.window.document.documentElement);
+    setIgnoreLayoutChanges(false, this.highlighterEnv.document.documentElement);
     return true;
   },
 
@@ -606,11 +651,69 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
   clearCanvas(width, height) {
     let ratio = parseFloat((this.win.devicePixelRatio || 1).toFixed(2));
 
+    height *= ratio;
+    width *= ratio;
+
+    let hasResolutionChanged = false;
+    if (height !== this._contentSize.height || width !== this._contentSize.width) {
+      hasResolutionChanged = true;
+      this._contentSize.width = width;
+      this._contentSize.height = height;
+    }
+
+    let isCanvasClipped = false;
+
+    if (height > this.maxCanvasSizePerSide) {
+      height = this.maxCanvasSizePerSide;
+      isCanvasClipped = true;
+    }
+
+    if (width > this.maxCanvasSizePerSide) {
+      width = this.maxCanvasSizePerSide;
+      isCanvasClipped = true;
+    }
+
+    // `maxCanvasSizePerSide` has the maximum size per side, but we have to consider
+    // also the memory allocation limit.
+    // For example, a 16384x16384 canvas will exceeds the current MAX_ALLOC_PIXELS
+    if (width * height > MAX_ALLOC_PIXELS) {
+      isCanvasClipped = true;
+      // We want to keep more or less the same ratio of the document's size.
+      // Therefore we don't only check if `height` is greater than `width`, but also
+      // that `width` is not greater than MAX_ALLOC_PIXELS_PER_SIDE (otherwise we'll end
+      // up to reduce `height` in favor of `width`, for example).
+      if (height > width && width < MAX_ALLOC_PIXELS_PER_SIDE) {
+        height = (MAX_ALLOC_PIXELS / width) |0;
+      } else if (width > height && height < MAX_ALLOC_PIXELS_PER_SIDE) {
+        width = (MAX_ALLOC_PIXELS / height) |0;
+      } else {
+        // fallback to a square canvas with the maximum pixels per side Available
+        height = width = MAX_ALLOC_PIXELS_PER_SIDE;
+      }
+    }
+
+    // We warn the user that we had to clip the canvas, but only if resolution has
+    // changed since the last time.
+    // This is only a temporary workaround, and the warning message is supposed to be
+    // non-localized.
+    // Bug 1345434 will get rid of this.
+    if (hasResolutionChanged && isCanvasClipped) {
+      // We display the warning in the web console, so the user will be able to see it.
+      // Unfortunately that would also display the source, where if clicked , will ends
+      // in a non-existing document.
+      // It's not ideal, but from an highlighter there is no an easy way to show such
+      // notification elsewhere.
+      this.win.console.warn("The CSS Grid Highlighter could have been clipped, due " +
+                            "the size of the document inspected\n" +
+                            "See https://bugzilla.mozilla.org/show_bug.cgi?id=1343217 " +
+                            "for further information.");
+    }
+
     // Resize the canvas taking the dpr into account so as to have crisp lines.
-    this.canvas.setAttribute("width", width * ratio);
-    this.canvas.setAttribute("height", height * ratio);
-    this.canvas.setAttribute("style", `width:${width}px;height:${height}px;`);
-    this.ctx.scale(ratio, ratio);
+    this.canvas.setAttribute("width", width);
+    this.canvas.setAttribute("height", height);
+    this.canvas.setAttribute("style",
+      `width:${width / ratio}px;height:${height / ratio}px;`);
 
     this.ctx.clearRect(0, 0, width, height);
   },
@@ -736,6 +839,12 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
    *         The grid line type - "edge", "explicit", or "implicit".
    */
   renderLine(linePos, startPos, endPos, dimensionType, lineType) {
+    let ratio = this.win.devicePixelRatio;
+
+    linePos = Math.round(linePos * ratio);
+    startPos = Math.round(startPos * ratio);
+    endPos = Math.round(endPos * ratio);
+
     this.ctx.save();
     this.ctx.setLineDash(GRID_LINES_PROPERTIES[lineType].lineDash);
     this.ctx.beginPath();
@@ -770,6 +879,11 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
    *         The grid dimension type which is either the constant COLUMNS or ROWS.
    */
   renderGridLineNumber(lineNumber, linePos, startPos, dimensionType) {
+    let ratio = this.win.devicePixelRatio;
+
+    linePos = Math.round(linePos * ratio);
+    startPos = Math.round(startPos * ratio);
+
     this.ctx.save();
 
     let textWidth = this.ctx.measureText(lineNumber).width;
@@ -803,16 +917,21 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
    *         The grid dimension type which is either the constant COLUMNS or ROWS.
    */
   renderGridGap(linePos, startPos, endPos, breadth, dimensionType) {
+    let ratio = this.win.devicePixelRatio;
+
+    linePos = Math.round(linePos * ratio);
+    startPos = Math.round(startPos * ratio);
+    endPos = Math.round(endPos * ratio);
+    breadth = Math.round(breadth * ratio);
+
     this.ctx.save();
+    this.ctx.fillStyle = this.getGridGapPattern(ratio, dimensionType);
 
     if (dimensionType === COLUMNS) {
-      this.ctx.fillStyle = this.getGridGapPattern(COLUMN_KEY);
       this.ctx.fillRect(linePos, startPos, breadth, endPos - startPos);
     } else {
-      this.ctx.fillStyle = this.getGridGapPattern(ROW_KEY);
       this.ctx.fillRect(startPos, linePos, endPos - startPos, breadth);
     }
-
     this.ctx.restore();
   },
 
@@ -879,6 +998,7 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
    */
   renderGridCell(gridFragmentIndex, rowNumber, columnNumber) {
     let fragment = this.gridData[gridFragmentIndex];
+
     if (!fragment) {
       return;
     }
@@ -918,7 +1038,7 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     this._hideGridElements();
     this._hideGridAreaInfoBar();
     this._hideGridCellInfoBar();
-    setIgnoreLayoutChanges(false, this.highlighterEnv.window.document.documentElement);
+    setIgnoreLayoutChanges(false, this.highlighterEnv.document.documentElement);
   },
 
   _hideGrid() {

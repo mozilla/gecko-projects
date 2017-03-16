@@ -71,11 +71,8 @@ function MarkupView(inspector, frame, controllerWindow) {
   this.doc = this._frame.contentDocument;
   this._elt = this.doc.querySelector("#root");
 
-  try {
-    this.maxChildren = Services.prefs.getIntPref("devtools.markup.pagesize");
-  } catch (ex) {
-    this.maxChildren = DEFAULT_MAX_CHILDREN;
-  }
+  this.maxChildren = Services.prefs.getIntPref("devtools.markup.pagesize",
+                                               DEFAULT_MAX_CHILDREN);
 
   this.collapseAttributes =
     Services.prefs.getBoolPref(ATTR_COLLAPSE_ENABLED_PREF);
@@ -1607,7 +1604,7 @@ MarkupView.prototype = {
       // this container will do double duty as the container for the single
       // text child.
       while (container.children.firstChild) {
-        container.children.removeChild(container.children.firstChild);
+        container.children.firstChild.remove();
       }
 
       container.setInlineTextChild(container.node.inlineTextChild);
@@ -1619,7 +1616,7 @@ MarkupView.prototype = {
 
     if (!container.hasChildren) {
       while (container.children.firstChild) {
-        container.children.removeChild(container.children.firstChild);
+        container.children.firstChild.remove();
       }
       container.childrenDirty = false;
       container.setExpanded(false);
@@ -1662,7 +1659,7 @@ MarkupView.prototype = {
         }
 
         while (container.children.firstChild) {
-          container.children.removeChild(container.children.firstChild);
+          container.children.firstChild.remove();
         }
 
         if (!(children.hasFirst && children.hasLast)) {

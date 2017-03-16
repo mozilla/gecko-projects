@@ -1219,6 +1219,15 @@ nsComputedDOMStyle::DoGetColumnFill()
 }
 
 already_AddRefed<CSSValue>
+nsComputedDOMStyle::DoGetColumnSpan()
+{
+  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+  val->SetIdent(nsCSSProps::ValueToKeywordEnum(StyleColumn()->mColumnSpan,
+                                               nsCSSProps::kColumnSpanKTable));
+  return val.forget();
+}
+
+already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetColumnRuleWidth()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
@@ -2254,17 +2263,11 @@ nsComputedDOMStyle::SetValueToStyleImage(const nsStyleImage& aStyleImage,
   switch (aStyleImage.GetType()) {
     case eStyleImageType_Image:
     {
-      imgIRequest* req = aStyleImage.GetImageData();
-      if (!req) {
-        // XXXheycam If we had some problem resolving the imgRequestProxy,
-        // maybe we should just use the URL stored in the nsStyleImage's
-        // mImageValue?  (Similarly in DoGetListStyleImage.)
+      nsCOMPtr<nsIURI> uri = aStyleImage.GetImageURI();
+      if (!uri) {
         aValue->SetIdent(eCSSKeyword_none);
         break;
       }
-
-      nsCOMPtr<nsIURI> uri;
-      req->GetURI(getter_AddRefs(uri));
 
       const UniquePtr<nsStyleSides>& cropRect = aStyleImage.GetCropRect();
       if (cropRect) {
@@ -3683,18 +3686,10 @@ nsComputedDOMStyle::DoGetListStyleImage()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
 
-  const nsStyleList* list = StyleList();
-
-  // XXXheycam As in SetValueToStyleImage, we might want to use the
-  // URL stored in the nsStyleImageRequest's mImageValue if we
-  // failed to resolve the imgRequestProxy.
-
-  imgRequestProxy* image = list->GetListStyleImage();
-  if (!image) {
+  nsCOMPtr<nsIURI> uri = StyleList()->GetListStyleImageURI();
+  if (!uri) {
     val->SetIdent(eCSSKeyword_none);
   } else {
-    nsCOMPtr<nsIURI> uri;
-    image->GetURI(getter_AddRefs(uri));
     val->SetURI(uri);
   }
 
@@ -4826,7 +4821,7 @@ nsComputedDOMStyle::DoGetClip()
 already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetWillChange()
 {
-  const nsTArray<nsString>& willChange = StyleDisplay()->mWillChange;
+  const nsCOMArray<nsIAtom>& willChange = StyleDisplay()->mWillChange;
 
   if (willChange.IsEmpty()) {
     RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
@@ -4835,10 +4830,9 @@ nsComputedDOMStyle::DoGetWillChange()
   }
 
   RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(true);
-  for (size_t i = 0; i < willChange.Length(); i++) {
-    const nsString& willChangeIdentifier = willChange[i];
+  for (const nsIAtom* ident : willChange) {
     RefPtr<nsROCSSPrimitiveValue> property = new nsROCSSPrimitiveValue;
-    property->SetString(willChangeIdentifier);
+    property->SetString(nsDependentAtomString(ident));
     valueList->AppendCSSValue(property.forget());
   }
 
@@ -6559,8 +6553,12 @@ nsComputedDOMStyle::AppendTimingFunction(nsDOMCSSValueList *aValueList,
     case nsTimingFunction::Type::StepStart:
     case nsTimingFunction::Type::StepEnd:
       nsStyleUtil::AppendStepsTimingFunction(aTimingFunction.mType,
-                                             aTimingFunction.mSteps,
+                                             aTimingFunction.mStepsOrFrames,
                                              tmp);
+      break;
+    case nsTimingFunction::Type::Frames:
+      nsStyleUtil::AppendFramesTimingFunction(aTimingFunction.mStepsOrFrames,
+                                              tmp);
       break;
     default:
       nsStyleUtil::AppendCubicBezierKeywordTimingFunction(aTimingFunction.mType,

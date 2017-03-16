@@ -135,6 +135,7 @@
 #include "mozilla/WindowsVersion.h"
 #include "mozilla/TextEvents.h" // For WidgetKeyboardEvent
 #include "mozilla/TextEventDispatcherListener.h"
+#include "mozilla/widget/nsAutoRollup.h"
 #include "mozilla/widget/WinNativeEventData.h"
 #include "mozilla/widget/PlatformWidgetTypes.h"
 #include "nsThemeConstants.h"
@@ -4325,6 +4326,20 @@ nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
 
   ModifierKeyState modifierKeyState;
   modifierKeyState.InitInputEvent(event);
+
+  // eContextMenu with Shift state is special.  It won't fire "contextmenu"
+  // event in the web content for blocking web content to prevent its default.
+  // However, Shift+F10 is a standard shortcut key on Windows.  Therefore,
+  // this should not block web page to prevent its default.  I.e., it should
+  // behave same as ContextMenu key without Shift key.
+  // XXX Should we allow to block web page to prevent its default with
+  //     Ctrl+Shift+F10 or Alt+Shift+F10 instead?
+  if (aEventMessage == eContextMenu && aIsContextMenuKey && event.IsShift() &&
+      NativeKey::LastKeyMSG().message == WM_SYSKEYDOWN &&
+      NativeKey::LastKeyMSG().wParam == VK_F10) {
+    event.mModifiers &= ~MODIFIER_SHIFT;
+  }
+
   event.button    = aButton;
   event.inputSource = aInputSource;
   if (aPointerInfo) {
@@ -5043,16 +5058,16 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
         // Windows won't let us do that. Bug 212316.
         nsCOMPtr<nsIObserverService> obsServ =
           mozilla::services::GetObserverService();
-        NS_NAMED_LITERAL_STRING(context, "shutdown-persist");
-        NS_NAMED_LITERAL_STRING(syncShutdown, "syncShutdown");
-        obsServ->NotifyObservers(nullptr, "quit-application-granted", syncShutdown.get());
+        const char16_t* context = u"shutdown-persist";
+        const char16_t* syncShutdown = u"syncShutdown";
+        obsServ->NotifyObservers(nullptr, "quit-application-granted", syncShutdown);
         obsServ->NotifyObservers(nullptr, "quit-application-forced", nullptr);
         obsServ->NotifyObservers(nullptr, "quit-application", nullptr);
-        obsServ->NotifyObservers(nullptr, "profile-change-net-teardown", context.get());
-        obsServ->NotifyObservers(nullptr, "profile-change-teardown", context.get());
-        obsServ->NotifyObservers(nullptr, "profile-before-change", context.get());
-        obsServ->NotifyObservers(nullptr, "profile-before-change-qm", context.get());
-        obsServ->NotifyObservers(nullptr, "profile-before-change-telemetry", context.get());
+        obsServ->NotifyObservers(nullptr, "profile-change-net-teardown", context);
+        obsServ->NotifyObservers(nullptr, "profile-change-teardown", context);
+        obsServ->NotifyObservers(nullptr, "profile-before-change", context);
+        obsServ->NotifyObservers(nullptr, "profile-before-change-qm", context);
+        obsServ->NotifyObservers(nullptr, "profile-before-change-telemetry", context);
         // Then a controlled but very quick exit.
         _exit(0);
       }
@@ -7225,12 +7240,6 @@ nsWindow::GetInputContext()
   return mInputContext;
 }
 
-nsIMEUpdatePreference
-nsWindow::GetIMEUpdatePreference()
-{
-  return IMEHandler::GetUpdatePreference();
-}
-
 TextEventDispatcherListener*
 nsWindow::GetNativeTextEventDispatcherListener()
 {
@@ -7908,7 +7917,7 @@ nsWindow::DealWithPopups(HWND aWnd, UINT aMessage,
   }
 
   // Only need to deal with the last rollup for left mouse down events.
-  NS_ASSERTION(!mLastRollup, "mLastRollup is null");
+  NS_ASSERTION(!nsAutoRollup::GetLastRollup(), "last rollup is null");
 
   if (nativeMessage == WM_TOUCH || nativeMessage == WM_LBUTTONDOWN || nativeMessage == WM_POINTERDOWN) {
     nsIntPoint pos;
@@ -7924,9 +7933,10 @@ nsWindow::DealWithPopups(HWND aWnd, UINT aMessage,
       pos = nsIntPoint(pt.x, pt.y);
     }
 
+    nsIContent* lastRollup;
     consumeRollupEvent =
-      rollupListener->Rollup(popupsToRollup, true, &pos, &mLastRollup);
-    NS_IF_ADDREF(mLastRollup);
+      rollupListener->Rollup(popupsToRollup, true, &pos, &lastRollup);
+    nsAutoRollup::SetLastRollup(lastRollup);
   } else {
     consumeRollupEvent =
       rollupListener->Rollup(popupsToRollup, true, nullptr, nullptr);

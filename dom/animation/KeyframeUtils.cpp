@@ -473,8 +473,8 @@ KeyframeUtils::GetKeyframesFromObject(JSContext* aCx,
   if ((!AnimationUtils::IsCoreAPIEnabled() ||
        aDocument->IsStyledByServo()) &&
       RequiresAdditiveAnimation(keyframes, aDocument)) {
-    aRv.Throw(NS_ERROR_DOM_ANIM_MISSING_PROPS_ERR);
     keyframes.Clear();
+    aRv.Throw(NS_ERROR_DOM_ANIM_MISSING_PROPS_ERR);
   }
 
   return keyframes;
@@ -598,22 +598,13 @@ KeyframeUtils::GetComputedKeyframeValues(
   const ServoComputedStyleValues& aServoValues)
 {
   MOZ_ASSERT(aElement);
-  MOZ_ASSERT(aElement->OwnerDoc()->IsStyledByServo());
+  MOZ_ASSERT(aElement->IsStyledByServo());
 
   nsPresContext* presContext = nsContentUtils::GetContextForContent(aElement);
   MOZ_ASSERT(presContext);
 
-  nsTArray<ComputedKeyframeValues> result(aKeyframes.Length());
-
-  // Construct each nsTArray<PropertyStyleAnimationValuePair> here.
-  result.AppendElements(aKeyframes.Length());
-
-  Servo_GetComputedKeyframeValues(&aKeyframes,
-                                  aServoValues.mCurrentStyle,
-                                  aServoValues.mParentStyle,
-                                  presContext,
-                                  &result);
-  return result;
+  return presContext->StyleSet()->AsServo()
+    ->GetComputedKeyframeValuesFor(aKeyframes, aElement, aServoValues);
 }
 
 /* static */ nsTArray<ComputedKeyframeValues>
@@ -654,6 +645,12 @@ KeyframeUtils::GetComputedKeyframeValues(const nsTArray<Keyframe>& aKeyframes,
             IsComputeValuesFailureKey(pair)) {
           continue;
         }
+      } else if (pair.mValue.GetUnit() == eCSSUnit_Null) {
+        // An uninitialized nsCSSValue represents the underlying value which
+        // we represent as an uninitialized AnimationValue so we just leave
+        // neutralPair->mValue as-is.
+        PropertyStyleAnimationValuePair* neutralPair = values.AppendElement();
+        neutralPair->mProperty = pair.mProperty;
       } else {
         if (!StyleAnimationValue::ComputeValues(pair.mProperty,
               CSSEnabledState::eForAllContent, aElement, aStyleContext,
@@ -764,8 +761,8 @@ GetKeyframeListFromKeyframeSequence(JSContext* aCx,
   // Convert the object in aIterator to a sequence of keyframes producing
   // an array of Keyframe objects.
   if (!ConvertKeyframeSequence(aCx, aDocument, aIterator, aResult)) {
-    aRv.Throw(NS_ERROR_FAILURE);
     aResult.Clear();
+    aRv.Throw(NS_ERROR_FAILURE);
     return;
   }
 
@@ -1022,19 +1019,16 @@ MakePropertyValuePair(nsCSSPropertyID aProperty, const nsAString& aStringValue,
     nsCString name = nsCSSProps::GetStringValue(aProperty);
 
     NS_ConvertUTF16toUTF8 value(aStringValue);
-    RefPtr<ThreadSafeURIHolder> base =
-      new ThreadSafeURIHolder(aDocument->GetDocumentURI());
-    RefPtr<ThreadSafeURIHolder> referrer =
-      new ThreadSafeURIHolder(aDocument->GetDocumentURI());
-    RefPtr<ThreadSafePrincipalHolder> principal =
-      new ThreadSafePrincipalHolder(aDocument->NodePrincipal());
 
     nsCString baseString;
+    // FIXME this is using the wrong base uri (bug 1343919)
+    GeckoParserExtraData data(aDocument->GetDocumentURI(),
+                              aDocument->GetDocumentURI(),
+                              aDocument->NodePrincipal());
     aDocument->GetDocumentURI()->GetSpec(baseString);
 
     RefPtr<RawServoDeclarationBlock> servoDeclarationBlock =
-      Servo_ParseProperty(&name, &value, &baseString,
-                          base, referrer, principal).Consume();
+      Servo_ParseProperty(&name, &value, &baseString, &data).Consume();
 
     if (servoDeclarationBlock) {
       result.mServoDeclarationBlock = servoDeclarationBlock.forget();
@@ -1163,7 +1157,6 @@ AppendInitialSegment(AnimationProperty* aAnimationProperty,
   AnimationPropertySegment* segment =
     aAnimationProperty->mSegments.AppendElement();
   segment->mFromKey        = 0.0f;
-  segment->mFromComposite  = dom::CompositeOperation::Add;
   segment->mToKey          = aFirstEntry.mOffset;
   segment->mToValue        = aFirstEntry.mValue;
   segment->mToComposite    = aFirstEntry.mComposite;
@@ -1179,7 +1172,6 @@ AppendFinalSegment(AnimationProperty* aAnimationProperty,
   segment->mFromValue      = aLastEntry.mValue;
   segment->mFromComposite  = aLastEntry.mComposite;
   segment->mToKey          = 1.0f;
-  segment->mToComposite    = dom::CompositeOperation::Add;
   segment->mTimingFunction = aLastEntry.mTimingFunction;
 }
 

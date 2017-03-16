@@ -196,7 +196,7 @@ class Assembler : public vixl::Assembler
     // Emit the jump table, returning the BufferOffset to the first entry in the table.
     BufferOffset emitExtendedJumpTable();
     BufferOffset ExtendedJumpTable_;
-    void executableCopy(uint8_t* buffer);
+    void executableCopy(uint8_t* buffer, bool flushICache = true);
 
     BufferOffset immPool(ARMRegister dest, uint8_t* value, vixl::LoadLiteralOp op,
                          ARMBuffer::PoolEntry* pe = nullptr);
@@ -296,6 +296,8 @@ class Assembler : public vixl::Assembler
     static bool SupportsFloatingPoint() { return true; }
     static bool SupportsUnalignedAccesses() { return true; }
     static bool SupportsSimd() { return js::jit::SupportsSimd; }
+
+    static bool HasRoundInstruction(RoundingMode mode) { return false; }
 
     // Tracks a jump that is patchable after finalization.
     void addJumpRelocation(BufferOffset src, Relocation::Kind reloc);

@@ -81,11 +81,13 @@ public:
   CDMProxy(dom::MediaKeys* aKeys,
            const nsAString& aKeySystem,
            bool aDistinctiveIdentifierRequired,
-           bool aPersistentStateRequired)
+           bool aPersistentStateRequired,
+           nsIEventTarget* aMainThread)
     : mKeys(aKeys)
     , mKeySystem(aKeySystem)
     , mDistinctiveIdentifierRequired(aDistinctiveIdentifierRequired)
     , mPersistentStateRequired(aPersistentStateRequired)
+    , mMainThread(aMainThread)
   {}
 
   // Main thread only.
@@ -269,6 +271,9 @@ protected:
 
   const bool mDistinctiveIdentifierRequired;
   const bool mPersistentStateRequired;
+
+  // The main thread associated with the root document.
+  const nsCOMPtr<nsIEventTarget> mMainThread;
 };
 
 

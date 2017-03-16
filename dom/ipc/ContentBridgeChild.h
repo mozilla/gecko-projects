@@ -48,8 +48,15 @@ public:
   virtual mozilla::ipc::PFileDescriptorSetChild*
   SendPFileDescriptorSetConstructor(const mozilla::ipc::FileDescriptor&) override;
 
-  virtual mozilla::ipc::PSendStreamChild*
-  SendPSendStreamConstructor(mozilla::ipc::PSendStreamChild*) override;
+  virtual mozilla::ipc::PChildToParentStreamChild*
+  SendPChildToParentStreamConstructor(mozilla::ipc::PChildToParentStreamChild*) override;
+
+  virtual mozilla::ipc::IPCResult RecvActivate(PBrowserChild* aTab) override;
+
+  virtual mozilla::ipc::IPCResult RecvDeactivate(PBrowserChild* aTab) override;
+
+  virtual mozilla::ipc::IPCResult RecvParentActivated(PBrowserChild* aTab,
+                                                      const bool& aActivated) override;
 
   FORWARD_SHMEM_ALLOCATOR_TO(PContentBridgeChild)
 
@@ -75,10 +82,16 @@ protected:
   virtual PBlobChild* AllocPBlobChild(const BlobConstructorParams& aParams) override;
   virtual bool DeallocPBlobChild(PBlobChild*) override;
 
-  virtual mozilla::ipc::PSendStreamChild* AllocPSendStreamChild() override;
+  virtual mozilla::ipc::PChildToParentStreamChild*
+  AllocPChildToParentStreamChild() override;
 
   virtual bool
-  DeallocPSendStreamChild(mozilla::ipc::PSendStreamChild* aActor) override;
+  DeallocPChildToParentStreamChild(mozilla::ipc::PChildToParentStreamChild* aActor) override;
+
+  virtual PParentToChildStreamChild* AllocPParentToChildStreamChild() override;
+
+  virtual bool
+  DeallocPParentToChildStreamChild(PParentToChildStreamChild* aActor) override;
 
   virtual PFileDescriptorSetChild*
   AllocPFileDescriptorSetChild(const mozilla::ipc::FileDescriptor& aFD) override;

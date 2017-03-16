@@ -45,6 +45,7 @@ public:
 
     // parameter names
     enum nsParamName {
+        MAX_URGENT_START_Q,
         MAX_CONNECTIONS,
         MAX_PERSISTENT_CONNECTIONS_PER_HOST,
         MAX_PERSISTENT_CONNECTIONS_PER_PROXY,
@@ -57,11 +58,12 @@ public:
 
     nsHttpConnectionMgr();
 
-    nsresult Init(uint16_t maxConnections,
-                  uint16_t maxPersistentConnectionsPerHost,
-                  uint16_t maxPersistentConnectionsPerProxy,
-                  uint16_t maxRequestDelay);
-    nsresult Shutdown();
+    MOZ_MUST_USE nsresult Init(uint16_t maxUrgentStartQ,
+                               uint16_t maxConnections,
+                               uint16_t maxPersistentConnectionsPerHost,
+                               uint16_t maxPersistentConnectionsPerProxy,
+                               uint16_t maxRequestDelay);
+    MOZ_MUST_USE nsresult Shutdown();
 
     //-------------------------------------------------------------------------
     // NOTE: functions below may be called on any thread.
@@ -80,36 +82,39 @@ public:
     void ConditionallyStopTimeoutTick();
 
     // adds a transaction to the list of managed transactions.
-    nsresult AddTransaction(nsHttpTransaction *, int32_t priority);
+    MOZ_MUST_USE nsresult AddTransaction(nsHttpTransaction *, int32_t priority);
 
     // called to reschedule the given transaction.  it must already have been
     // added to the connection manager via AddTransaction.
-    nsresult RescheduleTransaction(nsHttpTransaction *, int32_t priority);
+    MOZ_MUST_USE nsresult RescheduleTransaction(nsHttpTransaction *,
+                                                int32_t priority);
 
     // cancels a transaction w/ the given reason.
-    nsresult CancelTransaction(nsHttpTransaction *, nsresult reason);
-    nsresult CancelTransactions(nsHttpConnectionInfo *, nsresult reason);
+    MOZ_MUST_USE nsresult CancelTransaction(nsHttpTransaction *,
+                                            nsresult reason);
+    MOZ_MUST_USE nsresult CancelTransactions(nsHttpConnectionInfo *,
+                                             nsresult reason);
 
     // called to force the connection manager to prune its list of idle
     // connections.
-    nsresult PruneDeadConnections();
+    MOZ_MUST_USE nsresult PruneDeadConnections();
 
     // called to close active connections with no registered "traffic"
-    nsresult PruneNoTraffic();
+    MOZ_MUST_USE nsresult PruneNoTraffic();
 
     // "VerifyTraffic" means marking connections now, and then check again in
     // N seconds to see if there's been any traffic and if not, kill
     // that connection.
-    nsresult VerifyTraffic();
+    MOZ_MUST_USE nsresult VerifyTraffic();
 
     // Close all idle persistent connections and prevent any active connections
     // from being reused. Optional connection info resets CI specific
     // information such as Happy Eyeballs history.
-    nsresult DoShiftReloadConnectionCleanup(nsHttpConnectionInfo *);
+    MOZ_MUST_USE nsresult DoShiftReloadConnectionCleanup(nsHttpConnectionInfo *);
 
     // called to get a reference to the socket transport service.  the socket
     // transport service is not available when the connection manager is down.
-    nsresult GetSocketThreadTarget(nsIEventTarget **);
+    MOZ_MUST_USE nsresult GetSocketThreadTarget(nsIEventTarget **);
 
     // called to indicate a transaction for the connectionInfo is likely coming
     // soon. The connection manager may use this information to start a TCP
@@ -117,33 +122,34 @@ public:
     // ready when the transaction is submitted. No obligation is taken on by the
     // connection manager, nor is the submitter obligated to actually submit a
     // real transaction for this connectionInfo.
-    nsresult SpeculativeConnect(nsHttpConnectionInfo *,
-                                nsIInterfaceRequestor *,
-                                uint32_t caps = 0,
-                                NullHttpTransaction * = nullptr);
+    MOZ_MUST_USE nsresult SpeculativeConnect(nsHttpConnectionInfo *,
+                                             nsIInterfaceRequestor *,
+                                             uint32_t caps = 0,
+                                             NullHttpTransaction * = nullptr);
 
     // called when a connection is done processing a transaction.  if the
     // connection can be reused then it will be added to the idle list, else
     // it will be closed.
-    nsresult ReclaimConnection(nsHttpConnection *conn);
+    MOZ_MUST_USE nsresult ReclaimConnection(nsHttpConnection *conn);
 
     // called by the main thread to execute the taketransport() logic on the
     // socket thread after a 101 response has been received and the socket
     // needs to be transferred to an expectant upgrade listener such as
     // websockets.
-    nsresult CompleteUpgrade(nsAHttpConnection *aConn,
-                             nsIHttpUpgradeListener *aUpgradeListener);
+    MOZ_MUST_USE nsresult
+    CompleteUpgrade(nsAHttpConnection *aConn,
+                    nsIHttpUpgradeListener *aUpgradeListener);
 
     // called to update a parameter after the connection manager has already
     // been initialized.
-    nsresult UpdateParam(nsParamName name, uint16_t value);
+    MOZ_MUST_USE nsresult UpdateParam(nsParamName name, uint16_t value);
 
     // called from main thread to post a new request token bucket
     // to the socket thread
-    nsresult UpdateRequestTokenBucket(EventTokenBucket *aBucket);
+    MOZ_MUST_USE nsresult UpdateRequestTokenBucket(EventTokenBucket *aBucket);
 
     // clears the connection history mCT
-    nsresult ClearConnectionHistory();
+    MOZ_MUST_USE nsresult ClearConnectionHistory();
 
     void ReportFailedToProcess(nsIURI *uri);
 
@@ -163,16 +169,16 @@ public:
 
     // called to force the transaction queue to be processed once more, giving
     // preference to the specified connection.
-    nsresult ProcessPendingQ(nsHttpConnectionInfo *);
-    bool     ProcessPendingQForEntry(nsHttpConnectionInfo *);
+    MOZ_MUST_USE nsresult ProcessPendingQ(nsHttpConnectionInfo *);
+    MOZ_MUST_USE bool     ProcessPendingQForEntry(nsHttpConnectionInfo *);
 
     // Try and process all pending transactions
-    nsresult ProcessPendingQ();
+    MOZ_MUST_USE nsresult ProcessPendingQ();
 
     // This is used to force an idle connection to be closed and removed from
     // the idle connection list. It is called when the idle connection detects
     // that the network peer has closed the transport.
-    nsresult CloseIdleConnection(nsHttpConnection *);
+    MOZ_MUST_USE nsresult CloseIdleConnection(nsHttpConnection *);
 
     // The connection manager needs to know when a normal HTTP connection has been
     // upgraded to SPDY because the dispatch and idle semantics are a little
@@ -187,6 +193,8 @@ public:
 
     // public, so that the SPDY/http2 seesions can activate
     void ActivateTimeoutTick();
+
+    nsresult UpdateCurrentTopLevelOuterContentWindowId(uint64_t aWindowId);
 
 private:
     virtual ~nsHttpConnectionMgr();
@@ -206,6 +214,7 @@ private:
         ~nsConnectionEntry();
 
         RefPtr<nsHttpConnectionInfo> mConnInfo;
+        nsTArray<RefPtr<nsHttpTransaction> > mUrgentStartQ;// the urgent start transaction queue
         nsTArray<RefPtr<nsHttpTransaction> > mPendingQ;    // pending transaction queue
         nsTArray<RefPtr<nsHttpConnection> >  mActiveConns; // active connections
         nsTArray<RefPtr<nsHttpConnection> >  mIdleConns;   // idle persistent connections
@@ -282,12 +291,12 @@ private:
                          nsAHttpTransaction *trans,
                          uint32_t caps);
 
-        nsresult SetupStreams(nsISocketTransport **,
-                              nsIAsyncInputStream **,
-                              nsIAsyncOutputStream **,
-                              bool isBackup);
-        nsresult SetupPrimaryStreams();
-        nsresult SetupBackupStreams();
+        MOZ_MUST_USE nsresult SetupStreams(nsISocketTransport **,
+                                           nsIAsyncInputStream **,
+                                           nsIAsyncOutputStream **,
+                                           bool isBackup);
+        MOZ_MUST_USE nsresult SetupPrimaryStreams();
+        MOZ_MUST_USE nsresult SetupBackupStreams();
         void     SetupBackupTimer();
         void     CancelBackupTimer();
         void     Abandon();
@@ -360,6 +369,7 @@ private:
     nsCOMPtr<nsIEventTarget>     mSocketThreadTarget;
 
     // connection limits
+    uint16_t mMaxUrgentStartQ;
     uint16_t mMaxConns;
     uint16_t mMaxPersistConnsPerHost;
     uint16_t mMaxPersistConnsPerProxy;
@@ -370,26 +380,32 @@ private:
     // NOTE: these members are only accessed on the socket transport thread
     //-------------------------------------------------------------------------
 
-    bool     ProcessPendingQForEntry(nsConnectionEntry *, bool considerAll);
+    MOZ_MUST_USE bool ProcessPendingQForEntry(nsConnectionEntry *,
+                                              bool considerAll);
+    void DispatchPendingQ(nsTArray<RefPtr<nsHttpTransaction>> &pendingQ,
+                                   nsConnectionEntry *ent,
+                                   bool &dispatchedSuccessfully,
+                                   bool considerAll);
     bool     AtActiveConnectionLimit(nsConnectionEntry *, uint32_t caps);
-    nsresult TryDispatchTransaction(nsConnectionEntry *ent,
-                                    bool onlyReusedConnection,
-                                    nsHttpTransaction *trans);
-    nsresult DispatchTransaction(nsConnectionEntry *,
-                                 nsHttpTransaction *,
-                                 nsHttpConnection *);
-    nsresult DispatchAbstractTransaction(nsConnectionEntry *,
-                                         nsAHttpTransaction *,
-                                         uint32_t,
-                                         nsHttpConnection *,
-                                         int32_t);
+    MOZ_MUST_USE nsresult TryDispatchTransaction(nsConnectionEntry *ent,
+                                                 bool onlyReusedConnection,
+                                                 nsHttpTransaction *trans);
+    MOZ_MUST_USE nsresult DispatchTransaction(nsConnectionEntry *,
+                                              nsHttpTransaction *,
+                                              nsHttpConnection *);
+    MOZ_MUST_USE nsresult DispatchAbstractTransaction(nsConnectionEntry *,
+                                                      nsAHttpTransaction *,
+                                                      uint32_t,
+                                                      nsHttpConnection *,
+                                                      int32_t);
     bool     RestrictConnections(nsConnectionEntry *);
-    nsresult ProcessNewTransaction(nsHttpTransaction *);
-    nsresult EnsureSocketThreadTarget();
+    MOZ_MUST_USE nsresult ProcessNewTransaction(nsHttpTransaction *);
+    MOZ_MUST_USE nsresult EnsureSocketThreadTarget();
     void     ClosePersistentConnections(nsConnectionEntry *ent);
     void     ReportProxyTelemetry(nsConnectionEntry *ent);
-    nsresult CreateTransport(nsConnectionEntry *, nsAHttpTransaction *,
-                             uint32_t, bool, bool, bool);
+    MOZ_MUST_USE nsresult CreateTransport(nsConnectionEntry *,
+                                          nsAHttpTransaction *, uint32_t, bool,
+                                          bool, bool);
     void     AddActiveConn(nsHttpConnection *, nsConnectionEntry *);
     void     DecrementActiveConnCount(nsHttpConnection *);
     void     StartedConnect();
@@ -398,8 +414,8 @@ private:
     nsConnectionEntry *GetOrCreateConnectionEntry(nsHttpConnectionInfo *,
                                                   bool allowWildCard);
 
-    nsresult MakeNewConnection(nsConnectionEntry *ent,
-                               nsHttpTransaction *trans);
+    MOZ_MUST_USE nsresult MakeNewConnection(nsConnectionEntry *ent,
+                                            nsHttpTransaction *trans);
 
     // Manage the preferred spdy connection entry for this address
     nsConnectionEntry *GetSpdyPreferredEnt(nsConnectionEntry *aOriginalEntry);
@@ -413,11 +429,13 @@ private:
                                              nsHttpTransaction *trans);
 
     void               ProcessSpdyPendingQ(nsConnectionEntry *ent);
-
+    void               DispatchSpdyPendingQ(nsTArray<RefPtr<nsHttpTransaction>> &pendingQ,
+                                            nsConnectionEntry *ent,
+                                            nsHttpConnection *conn);
     // used to marshall events to the socket transport thread.
-    nsresult PostEvent(nsConnEventHandler  handler,
-                       int32_t             iparam = 0,
-                       ARefBase            *vparam = nullptr);
+    MOZ_MUST_USE nsresult PostEvent(nsConnEventHandler  handler,
+                                    int32_t             iparam = 0,
+                                    ARefBase            *vparam = nullptr);
 
     // message handlers
     void OnMsgShutdown             (int32_t, ARefBase *);
@@ -438,6 +456,7 @@ private:
     void OnMsgUpdateRequestTokenBucket (int32_t, ARefBase *);
     void OnMsgVerifyTraffic (int32_t, ARefBase *);
     void OnMsgPruneNoTraffic (int32_t, ARefBase *);
+    void OnMsgUpdateCurrentTopLevelOuterContentWindowId (int32_t, ARefBase *);
 
     // Total number of active connections in all of the ConnectionEntry objects
     // that are accessed from mCT connection table.
@@ -482,6 +501,7 @@ private:
     void OnMsgPrintDiagnostics(int32_t, ARefBase *);
 
     nsCString mLogData;
+    uint64_t mCurrentTopLevelOuterContentWindowId;
 };
 
 } // namespace net

@@ -1217,10 +1217,26 @@ GetPropIRGenerator::tryAttachStringChar(ValOperandId valId, ValOperandId indexId
     if (!val_.isString())
         return false;
 
-    JSString* str = val_.toString();
     int32_t index = idVal_.toInt32();
-    if (size_t(index) >= str->length() ||
-        !str->isLinear() ||
+    if (index < 0)
+        return false;
+
+    JSString* str = val_.toString();
+    if (size_t(index) >= str->length())
+        return false;
+
+    // This follows JSString::getChar, otherwise we fail to attach getChar in a lot of cases.
+    if (str->isRope()) {
+        JSRope* rope = &str->asRope();
+
+        // Make sure the left side contains the index.
+        if (size_t(index) >= rope->leftChild()->length())
+            return false;
+
+        str = rope->leftChild();
+    }
+
+    if (!str->isLinear() ||
         str->asLinear().latin1OrTwoByteChar(index) >= StaticStrings::UNIT_STATIC_LIMIT)
     {
         return false;
@@ -2469,10 +2485,12 @@ SetPropIRGenerator::tryAttachSetDenseElementHole(HandleObject obj, ObjOperandId 
         return false;
 
     NativeObject* nobj = &obj->as<NativeObject>();
-    if (nobj->getElementsHeader()->isFrozen())
+    if (!nobj->nonProxyIsExtensible())
         return false;
 
-    uint32_t capacity = nobj->getDenseCapacity();
+    MOZ_ASSERT(!nobj->getElementsHeader()->isFrozen(),
+               "Extensible objects should not have frozen elements");
+
     uint32_t initLength = nobj->getDenseInitializedLength();
 
     // Optimize if we're adding an element at initLength or writing to a hole.
@@ -2483,12 +2501,13 @@ SetPropIRGenerator::tryAttachSetDenseElementHole(HandleObject obj, ObjOperandId 
     if (!isAdd && !isHoleInBounds)
         return false;
 
-    // Checking the capacity also checks for arrays with non-writable length,
-    // as the capacity is always less than or equal to the length in this case.
-    if (index >= capacity)
+    // Can't add new elements to arrays with non-writable length.
+    if (isAdd && nobj->is<ArrayObject>() && !nobj->as<ArrayObject>().lengthIsWritable())
         return false;
 
-    MOZ_ASSERT(!nobj->is<TypedArrayObject>());
+    // Typed arrays don't have dense elements.
+    if (nobj->is<TypedArrayObject>())
+        return false;
 
     // Check for other indexed properties or class hooks.
     if (!CanAttachAddElement(nobj, IsPropertyInitOp(op)))

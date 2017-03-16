@@ -515,24 +515,39 @@ private:
   EventStates StyleStateFromLocks() const;
 
 protected:
-  // Methods for the ESM to manage state bits.  These will handle
-  // setting up script blockers when they notify, so no need to do it
-  // in the callers unless desired.
+  // Methods for the ESM, nsGlobalWindow and focus manager to manage state bits.
+  // These will handle setting up script blockers when they notify, so no need
+  // to do it in the callers unless desired.  States passed here must only be
+  // those in EXTERNALLY_MANAGED_STATES.
   virtual void AddStates(EventStates aStates)
   {
     NS_PRECONDITION(!aStates.HasAtLeastOneOfStates(INTRINSIC_STATES),
-                    "Should only be adding ESM-managed states here");
+                    "Should only be adding externally-managed states here");
     AddStatesSilently(aStates);
     NotifyStateChange(aStates);
   }
   virtual void RemoveStates(EventStates aStates)
   {
     NS_PRECONDITION(!aStates.HasAtLeastOneOfStates(INTRINSIC_STATES),
-                    "Should only be removing ESM-managed states here");
+                    "Should only be removing externally-managed states here");
     RemoveStatesSilently(aStates);
     NotifyStateChange(aStates);
   }
 public:
+  // Public methods to manage state bits in MANUALLY_MANAGED_STATES.
+  void AddManuallyManagedStates(EventStates aStates)
+  {
+    MOZ_ASSERT(MANUALLY_MANAGED_STATES.HasAllStates(aStates),
+               "Should only be adding manually-managed states here");
+    AddStates(aStates);
+  }
+  void RemoveManuallyManagedStates(EventStates aStates)
+  {
+    MOZ_ASSERT(MANUALLY_MANAGED_STATES.HasAllStates(aStates),
+               "Should only be removing manually-managed states here");
+    RemoveStates(aStates);
+  }
+
   virtual void UpdateEditableState(bool aNotify) override;
 
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
@@ -1111,7 +1126,13 @@ public:
    */
   virtual BorrowedAttrInfo GetAttrInfo(int32_t aNamespaceID, nsIAtom* aName) const;
 
-  virtual void NodeInfoChanged()
+  /**
+   * Called when we have been adopted, and the information of the
+   * node has been changed.
+   *
+   * The new document can be reached via OwnerDoc().
+   */
+  virtual void NodeInfoChanged(nsIDocument* aOldDoc)
   {
   }
 

@@ -55,7 +55,6 @@ const LAST_SQLITE_DB_SCHEMA           = 14;
 const PREF_DB_SCHEMA                  = "extensions.databaseSchema";
 const PREF_PENDING_OPERATIONS         = "extensions.pendingOperations";
 const PREF_EM_ENABLED_ADDONS          = "extensions.enabledAddons";
-const PREF_EM_DSS_ENABLED             = "extensions.dss.enabled";
 const PREF_EM_AUTO_DISABLED_SCOPES    = "extensions.autoDisableScopes";
 const PREF_E10S_BLOCKED_BY_ADDONS     = "extensions.e10sBlockedByAddons";
 const PREF_E10S_HAS_NONEXEMPT_ADDON   = "extensions.e10s.rollout.hasAddon";
@@ -81,7 +80,7 @@ const DB_BOOL_METADATA   = ["visible", "active", "userDisabled", "appDisabled",
 // Properties to save in JSON file
 const PROP_JSON_FIELDS = ["id", "syncGUID", "location", "version", "type",
                           "internalName", "updateURL", "updateKey", "optionsURL",
-                          "optionsType", "aboutURL", "icons", "iconURL", "icon64URL",
+                          "optionsType", "optionsBrowserStyle", "aboutURL",
                           "defaultLocale", "visible", "active", "userDisabled",
                           "appDisabled", "pendingUninstall", "descriptor", "installDate",
                           "updateDate", "applyBackgroundUpdates", "bootstrap",
@@ -90,7 +89,7 @@ const PROP_JSON_FIELDS = ["id", "syncGUID", "location", "version", "type",
                           "strictCompatibility", "locales", "targetApplications",
                           "targetPlatforms", "multiprocessCompatible", "signedState",
                           "seen", "dependencies", "hasEmbeddedWebExtension", "mpcOptedOut",
-                          "userPermissions"];
+                          "userPermissions", "icons", "iconURL", "icon64URL"];
 
 // Properties that should be migrated where possible from an old database. These
 // shouldn't include properties that can be read directly from install.rdf files
@@ -1429,33 +1428,17 @@ this.XPIDatabase = {
     // when a lightweight theme is applied for example)
     text += "\r\n[ThemeDirs]\r\n";
 
-    let dssEnabled = false;
-    try {
-      dssEnabled = Services.prefs.getBoolPref(PREF_EM_DSS_ENABLED);
-    } catch (e) {}
-
-    let themes = [];
-    if (dssEnabled) {
-      themes = _filterDB(this.addonDB, aAddon => aAddon.type == "theme");
-    } else {
-      let activeTheme = _findAddon(
-        this.addonDB,
-        aAddon => (aAddon.type == "theme") &&
-                  (aAddon.internalName == XPIProvider.selectedSkin));
-      if (activeTheme) {
-        themes.push(activeTheme);
-      }
+    let activeTheme = _findAddon(
+      this.addonDB,
+      aAddon => (aAddon.type == "theme") &&
+                (aAddon.internalName == XPIProvider.selectedSkin));
+    count = 0;
+    if (activeTheme) {
+      text += "Extension" + (count++) + "=" + activeTheme.descriptor + "\r\n";
+      enabledAddons.push(encodeURIComponent(activeTheme.id) + ":" +
+                         encodeURIComponent(activeTheme.version));
     }
-
-    if (themes.length > 0) {
-      count = 0;
-      for (let row of themes) {
-        text += "Extension" + (count++) + "=" + row.descriptor + "\r\n";
-        enabledAddons.push(encodeURIComponent(row.id) + ":" +
-                           encodeURIComponent(row.version));
-      }
-      fullCount += count;
-    }
+    fullCount += count;
 
     text += "\r\n[MultiprocessIncompatibleExtensions]\r\n";
 

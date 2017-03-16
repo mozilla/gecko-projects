@@ -1298,23 +1298,24 @@ nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest)
   nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(channel));
   if (httpChannel) {
     // HTTP content negotation has little value in this context.
-    httpChannel->SetRequestHeader(NS_LITERAL_CSTRING("Accept"),
-                                  NS_LITERAL_CSTRING("*/*"),
-                                  false);
-    httpChannel->SetReferrerWithPolicy(mDocument->GetDocumentURI(),
-                                       aRequest->mReferrerPolicy);
+    rv = httpChannel->SetRequestHeader(NS_LITERAL_CSTRING("Accept"),
+                                       NS_LITERAL_CSTRING("*/*"),
+                                       false);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    rv = httpChannel->SetReferrerWithPolicy(mDocument->GetDocumentURI(),
+                                            aRequest->mReferrerPolicy);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
 
     nsCOMPtr<nsIHttpChannelInternal> internalChannel(do_QueryInterface(httpChannel));
     if (internalChannel) {
-      internalChannel->SetIntegrityMetadata(aRequest->mIntegrity.GetIntegrityString());
+      rv = internalChannel->SetIntegrityMetadata(aRequest->mIntegrity.GetIntegrityString());
+      MOZ_ASSERT(NS_SUCCEEDED(rv));
     }
   }
 
-  OriginAttributes attrs;
-  attrs.Inherit(mDocument->NodePrincipal()->OriginAttributesRef());
-
   mozilla::net::PredictorLearn(aRequest->mURI, mDocument->GetDocumentURI(),
-      nsINetworkPredictor::LEARN_LOAD_SUBRESOURCE, attrs);
+                               nsINetworkPredictor::LEARN_LOAD_SUBRESOURCE,
+                               mDocument->NodePrincipal()->OriginAttributesRef());
 
   // Set the initiator type
   nsCOMPtr<nsITimedChannel> timedChannel(do_QueryInterface(httpChannel));
@@ -1574,6 +1575,24 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
 
       rv = StartLoad(request);
       if (NS_FAILED(rv)) {
+        const char* message = "ScriptSourceLoadFailed";
+
+        if (rv == NS_ERROR_MALFORMED_URI) {
+            message = "ScriptSourceMalformed";
+        }
+        else if (rv == NS_ERROR_DOM_BAD_URI) {
+            message = "ScriptSourceNotAllowed";
+        }
+
+        NS_ConvertUTF8toUTF16 url(scriptURI->GetSpecOrDefault());
+        const char16_t* params[] = { url.get() };
+
+        nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
+            NS_LITERAL_CSTRING("Script Loader"), mDocument,
+            nsContentUtils::eDOM_PROPERTIES, message,
+            params, ArrayLength(params), nullptr,
+            EmptyString(), aElement->GetScriptLineNumber());
+
         // Asynchronously report the load failure
         NS_DispatchToCurrentThread(
           NewRunnableMethod(aElement,
@@ -2456,7 +2475,8 @@ nsScriptLoader::ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
     // fallback in the old code was ISO-8859-1, which behaved like
     // windows-1252. Saying windows-1252 for clarity and for compliance
     // with the Encoding Standard.
-    unicodeDecoder = EncodingUtils::DecoderForEncoding("windows-1252");
+    charset = "windows-1252";
+    unicodeDecoder = EncodingUtils::DecoderForEncoding(charset);
   }
 
   int32_t unicodeLength = 0;
@@ -2483,6 +2503,11 @@ nsScriptLoader::ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
     aBufOut = nullptr;
     aLengthOut = 0;
   }
+  if (charset.Length() == 0) {
+    charset = "?";
+  }
+  mozilla::Telemetry::Accumulate(mozilla::Telemetry::DOM_SCRIPT_SRC_ENCODING,
+    charset);
   return rv;
 }
 
@@ -2541,11 +2566,31 @@ nsScriptLoader::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
     }
   }
 
-  if (NS_SUCCEEDED(rv)) {
+  bool sriOk = NS_SUCCEEDED(rv);
+
+  if (sriOk) {
     rv = PrepareLoadedRequest(aRequest, aLoader, aChannelStatus);
   }
 
   if (NS_FAILED(rv)) {
+    if (sriOk && aRequest->mElement) {
+      
+      uint32_t lineNo = aRequest->mElement->GetScriptLineNumber();
+
+      nsAutoString url;
+      if (aRequest->mURI) {
+        AppendUTF8toUTF16(aRequest->mURI->GetSpecOrDefault(), url);
+      }
+
+      const char16_t* params[] = { url.get() };
+
+      nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
+        NS_LITERAL_CSTRING("Script Loader"), mDocument,
+        nsContentUtils::eDOM_PROPERTIES, "ScriptSourceLoadFailed",
+        params, ArrayLength(params), nullptr,
+        EmptyString(), lineNo);
+    }
+
     /*
      * Handle script not loading error because source was a tracking URL.
      * We make a note of this script node by including it in a dedicated
@@ -2974,11 +3019,28 @@ nsScriptLoadHandler::EnsureDecoder(nsIIncrementalStreamLoader *aLoader,
   }
 
   nsAutoCString charset;
+  if (!EnsureDecoder(aLoader, aData, aDataLength, aEndOfStream, charset)) {
+    return false;
+  }
+  if (charset.Length() == 0) {
+    charset = "?";
+  }
+  mozilla::Telemetry::Accumulate(mozilla::Telemetry::DOM_SCRIPT_SRC_ENCODING,
+    charset);
+  return true;
+}
 
+bool
+nsScriptLoadHandler::EnsureDecoder(nsIIncrementalStreamLoader *aLoader,
+                                   const uint8_t* aData,
+                                   uint32_t aDataLength,
+                                   bool aEndOfStream,
+                                   nsCString& oCharset)
+{
   // JavaScript modules are always UTF-8.
   if (mRequest->IsModuleRequest()) {
-    charset = "UTF-8";
-    mDecoder = EncodingUtils::DecoderForEncoding(charset);
+    oCharset = "UTF-8";
+    mDecoder = EncodingUtils::DecoderForEncoding(oCharset);
     return true;
   }
 
@@ -2990,8 +3052,8 @@ nsScriptLoadHandler::EnsureDecoder(nsIIncrementalStreamLoader *aLoader,
   }
 
   // Do BOM detection.
-  if (nsContentUtils::CheckForBOM(aData, aDataLength, charset)) {
-    mDecoder = EncodingUtils::DecoderForEncoding(charset);
+  if (nsContentUtils::CheckForBOM(aData, aDataLength, oCharset)) {
+    mDecoder = EncodingUtils::DecoderForEncoding(oCharset);
     return true;
   }
 
@@ -3004,9 +3066,9 @@ nsScriptLoadHandler::EnsureDecoder(nsIIncrementalStreamLoader *aLoader,
   nsCOMPtr<nsIChannel> channel = do_QueryInterface(req);
 
   if (channel &&
-      NS_SUCCEEDED(channel->GetContentCharset(charset)) &&
-      EncodingUtils::FindEncodingForLabel(charset, charset)) {
-    mDecoder = EncodingUtils::DecoderForEncoding(charset);
+      NS_SUCCEEDED(channel->GetContentCharset(oCharset)) &&
+      EncodingUtils::FindEncodingForLabel(oCharset, oCharset)) {
+    mDecoder = EncodingUtils::DecoderForEncoding(oCharset);
     return true;
   }
 
@@ -3025,15 +3087,15 @@ nsScriptLoadHandler::EnsureDecoder(nsIIncrementalStreamLoader *aLoader,
     hintCharset = mScriptLoader->mPreloads[i].mCharset;
   }
 
-  if (EncodingUtils::FindEncodingForLabel(hintCharset, charset)) {
-    mDecoder = EncodingUtils::DecoderForEncoding(charset);
+  if (EncodingUtils::FindEncodingForLabel(hintCharset, oCharset)) {
+    mDecoder = EncodingUtils::DecoderForEncoding(oCharset);
     return true;
   }
 
   // Get the charset from the charset of the document.
   if (mScriptLoader->mDocument) {
-    charset = mScriptLoader->mDocument->GetDocumentCharacterSet();
-    mDecoder = EncodingUtils::DecoderForEncoding(charset);
+    oCharset = mScriptLoader->mDocument->GetDocumentCharacterSet();
+    mDecoder = EncodingUtils::DecoderForEncoding(oCharset);
     return true;
   }
 
@@ -3041,8 +3103,9 @@ nsScriptLoadHandler::EnsureDecoder(nsIIncrementalStreamLoader *aLoader,
   // fallback in the old code was ISO-8859-1, which behaved like
   // windows-1252. Saying windows-1252 for clarity and for compliance
   // with the Encoding Standard.
-  charset = "windows-1252";
-  mDecoder = EncodingUtils::DecoderForEncoding(charset);
+  oCharset = "windows-1252";
+  mDecoder = EncodingUtils::DecoderForEncoding(oCharset);
+
   return true;
 }
 

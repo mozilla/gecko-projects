@@ -11,6 +11,7 @@ const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 Cu.import("resource://gre/modules/ctypes.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://ppapi.js/opengles2-utils.jsm");
+Cu.importGlobalProperties(['URL']);
 
 const PP_OK = 0;
 const PP_OK_COMPLETIONPENDING = -1;
@@ -894,6 +895,9 @@ class Graphics extends PP_Resource {
     super.destroy();
   }
   changeSize(width, height) {
+    let devicePixelRatio = this.instance.window.devicePixelRatio;
+    this.canvas.style.width = (width / devicePixelRatio) + "px";
+    this.canvas.style.height = (height / devicePixelRatio) + "px";
     this.canvas.width = width;
     this.canvas.height = height;
   }
@@ -1538,12 +1542,36 @@ class PPAPIInstance {
     this.viewport = new PPAPIViewport(this);
     this.selectedText = "";
 
+    this.notifyHashChange(info.url);
+
     this.mm.addMessageListener("ppapi.js:fullscreenchange", (evt) => {
       this.viewport.notify({
         type: "fullscreenChange",
         fullscreen: evt.data.fullscreen
       });
     });
+
+    this.mm.addMessageListener("ppapipdf.js:hashchange", (evt) => {
+      this.notifyHashChange(evt.data.url);
+    });
+
+    this.mm.addMessageListener("ppapipdf.js:oncommand", (evt) => {
+      this.viewport.notify({
+        type: "command",
+        name: evt.data.name
+      });
+    });
+  }
+
+  notifyHashChange(url) {
+    let location = new URL(url);
+    if (location.hash) {
+      this.viewport.notify({
+        type: "hashChange",
+        // substring(1) for getting rid of the first '#' character
+        hash: location.hash.substring(1)
+      });
+    }
   }
 
   bindGraphics(graphicsDevice) {
@@ -1672,6 +1700,9 @@ class PPAPIInstance {
         break;
       case 'save':
         this.mm.sendAsyncMessage("ppapipdf.js:save");
+        break;
+      case 'setHash':
+        this.mm.sendAsyncMessage("ppapipdf.js:setHash", message.hash);
         break;
       case 'viewport':
       case 'rotateClockwise':
@@ -3051,6 +3082,59 @@ dump(`callFromJSON: < ${JSON.stringify(call)}\n`);
       //return [new PP_Var(), { exception: PP_Var.fromJSValue(e) }];
     },
 
+    /**
+    * PP_Resource Create([in] PP_Instance instance,
+    *                    [in] PP_InputEvent_Type type,
+    *                    [in] PP_TimeTicks time_stamp,
+    *                    [in] uint32_t modifiers,
+    *                    [in] uint32_t key_code,
+    *                    [in] PP_Var character_text,
+    *                    [in] PP_Var code);
+    */
+    PPB_KeyboardInputEvent_Create: function(json) {
+      let instance = this.instances[json.instance];
+      let charCode = 0;
+      if (PP_VarType[json.character_text.type] ==
+          PP_VarType.PP_VARTYPE_STRING) {
+        charCode = String_PP_Var.getAsJSValue(json.character_text).charCodeAt(0);
+      }
+      let location = instance.window.KeyboardEvent.DOM_KEY_LOCATION_STANDARD;
+      if (PP_InputEvent_Modifier.PP_INPUTEVENT_MODIFIER_ISLEFT &
+          json.modifiers) {
+        location = instance.window.KeyboardEvent.DOM_KEY_LOCATION_LEFT;
+      } else if (PP_InputEvent_Modifier.PP_INPUTEVENT_MODIFIER_ISRIGHT &
+                 json.modifiers) {
+        location = instance.window.KeyboardEvent.DOM_KEY_LOCATION_RIGHT;
+      } else if(PP_InputEvent_Modifier.PP_INPUTEVENT_MODIFIER_ISKEYPAD &
+                json.modifiers) {
+        location = instance.window.KeyboardEvent.DOM_KEY_LOCATION_NUMPAD;
+      }
+
+      // FIXME I skipped to put |PP_Var code| into keyboardEventInit here
+      // because I neither find any useful |code| value passing into here
+      // nor have any PPB APIs which gets access to |code| now.
+      let keyboardEventInit = {
+        altKey: PP_InputEvent_Modifier.PP_INPUTEVENT_MODIFIER_ALTKEY &
+          json.modifiers,
+        charCode: charCode,
+        ctrlKey: PP_InputEvent_Modifier.PP_INPUTEVENT_MODIFIER_CONTROLKEY &
+          json.modifiers,
+        keyCode: json.key_code,
+        location: location,
+        metaKey: PP_InputEvent_Modifier.PP_INPUTEVENT_MODIFIER_METAKEY &
+          json.modifiers,
+        repeat: PP_InputEvent_Modifier.PP_INPUTEVENT_MODIFIER_ISAUTOREPEAT &
+          json.modifiers,
+        shiftKey: PP_InputEvent_Modifier.PP_INPUTEVENT_MODIFIER_SHIFTKEY &
+          json.modifiers,
+      };
+      let eventName = EventByTypes.get(PP_InputEvent_Type[json.type]);
+      let event = new instance.window.KeyboardEvent(eventName,
+                                                    keyboardEventInit);
+      let resource = new KeyboardInputEvent(instance, event);
+      resource.timeStamp = json.time_stamp;
+      return resource;
+    },
 
     /**
      * PP_Bool IsKeyboardInputEvent([in] PP_Resource resource);
@@ -5249,20 +5333,16 @@ dump(`callFromJSON: < ${JSON.stringify(call)}\n`);
      * float_t GetDeviceScale([in] PP_Resource resource);
      */
     PPB_View_GetDeviceScale: function(json) {
-      // FIXME Need to figure out how to get the ratio between device pixels
-      //       and DIPs.
       let view = PP_Resource.lookup(json.resource);
-      return 1; //view.instance.window.devicePixelRatio;
+      return view.instance.window.devicePixelRatio;
     },
 
     /**
      * float_t GetCSSScale([in] PP_Resource resource);
      */
     PPB_View_GetCSSScale: function(json) {
-      // FIXME Need to figure out how to get the ratio between CSS pixels
-      //       and DIPs.
       let view = PP_Resource.lookup(json.resource);
-      return view.instance.window.devicePixelRatio;
+      return 1;
     },
 
     /**

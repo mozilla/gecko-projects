@@ -1702,7 +1702,7 @@ nsAttrValue::ParseStyleAttribute(const nsAString& aString,
 {
   nsIDocument* ownerDoc = aElement->OwnerDoc();
   nsHTMLCSSStyleSheet* sheet = ownerDoc->GetInlineStyleSheet();
-  nsCOMPtr<nsIURI> baseURI = aElement->GetBaseURI();
+  nsCOMPtr<nsIURI> baseURI = aElement->GetBaseURIForStyleAttr();
   nsIURI* docURI = ownerDoc->GetDocumentURI();
 
   NS_ASSERTION(aElement->NodePrincipal() == ownerDoc->NodePrincipal(),
@@ -1725,7 +1725,8 @@ nsAttrValue::ParseStyleAttribute(const nsAString& aString,
 
   RefPtr<DeclarationBlock> decl;
   if (ownerDoc->GetStyleBackendType() == StyleBackendType::Servo) {
-    decl = ServoDeclarationBlock::FromCssText(aString);
+    GeckoParserExtraData data(baseURI, docURI, aElement->NodePrincipal());
+    decl = ServoDeclarationBlock::FromCssText(aString, data);
   } else {
     css::Loader* cssLoader = ownerDoc->CSSLoader();
     nsCSSParser cssParser(cssLoader);

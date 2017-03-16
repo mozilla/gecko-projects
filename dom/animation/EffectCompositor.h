@@ -19,6 +19,7 @@
 #include "nsTArray.h"
 
 class nsCSSPropertyIDSet;
+class nsIAtom;
 class nsIFrame;
 class nsIStyleRule;
 class nsPresContext;
@@ -158,14 +159,6 @@ public:
                                             CSSPseudoElementType aPseudoType,
                                             CascadeLevel aCascadeLevel);
 
-  // Clear mElementsToRestyle hashtable. Unlike GetAnimationRule,
-  // in GetServoAnimationRule, we don't remove the entry of the composed
-  // animation, so we can prevent the thread-safe issues of dom::Element.
-  // Therefore, we need to call Clear mElementsToRestyle until we go back to
-  // Gecko side.
-  // FIXME: we shouldn't clear the animations on the compositor.
-  void ClearElementsToRestyle();
-
   bool HasPendingStyleUpdates() const;
   bool HasThrottledStyleUpdates() const;
 
@@ -203,6 +196,14 @@ public:
                             CSSPseudoElementType aPseudoType,
                             nsStyleContext* aStyleContext);
 
+  // Variant of MaybeUpdateCascadeResults for the Servo backend.
+  // The Servo backend doesn't use an nsStyleContext to get the rule node
+  // to traverse the style tree to find !important rules and instead
+  // gets the rule node from |aElement|.
+  static void
+  MaybeUpdateCascadeResults(dom::Element* aElement,
+                            CSSPseudoElementType aPseudoType);
+
   // Update the mPropertiesWithImportantRules and
   // mPropertiesForAnimationsLevel members of the corresponding EffectSet.
   //
@@ -232,6 +233,15 @@ public:
     const nsIFrame* aFrame,
     nsCSSPropertyID aProperty,
     const AnimationPerformanceWarning& aWarning);
+
+  // Do a bunch of stuff that we should avoid doing during the parallel
+  // traversal (e.g. changing member variables) for all elements that we expect
+  // to restyle on the next traversal.
+  // Returns true if there are elements needing a restyle for animation.
+  bool PreTraverse();
+
+  // Similar to the above but only for the (pseudo-)element.
+  bool PreTraverse(dom::Element* aElement, nsIAtom* aPseudoTagOrNull);
 
 private:
   ~EffectCompositor() = default;

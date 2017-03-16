@@ -2652,6 +2652,28 @@ nsDOMWindowUtils::ZoomToFocusedInput()
     return NS_OK;
   }
 
+  nsIFrame* currentFrame = content->GetPrimaryFrame();
+  nsIFrame* rootFrame = shell->GetRootFrame();
+  nsIFrame* scrolledFrame = rootScrollFrame->GetScrolledFrame();
+  bool isFixedPos = true;
+
+  while (currentFrame) {
+    if (currentFrame == rootFrame) {
+      break;
+    } else if (currentFrame == scrolledFrame) {
+      // we are in the rootScrollFrame so this element is not fixed
+      isFixedPos = false;
+      break;
+    }
+    currentFrame = nsLayoutUtils::GetCrossDocParentFrame(currentFrame);
+  }
+
+  if (isFixedPos) {
+    // We didn't find the scrolledFrame in our parent frames so this content must be fixed position.
+    // Zooming into fixed position content doesn't make sense so just return with out panning and zooming.
+    return NS_OK;
+  }
+
   nsIDocument* document = shell->GetDocument();
   if (!document) {
     return NS_OK;
@@ -3059,8 +3081,7 @@ nsDOMWindowUtils::GetFileReferences(const nsAString& aDatabaseName, int64_t aId,
 
   nsCString origin;
   nsresult rv =
-    quota::QuotaManager::GetInfoFromWindow(window, nullptr, nullptr, &origin,
-                                           nullptr);
+    quota::QuotaManager::GetInfoFromWindow(window, nullptr, nullptr, &origin);
   NS_ENSURE_SUCCESS(rv, rv);
 
   IDBOpenDBOptions options;
@@ -3641,9 +3662,10 @@ nsDOMWindowUtils::GetOMTAStyle(nsIDOMElement* aElement,
         if (forwarder && forwarder->HasShadowManager()) {
           float value;
           bool hadAnimatedOpacity;
-          forwarder->GetShadowManager()->SendGetAnimationOpacity(
-            layer->AsShadowableLayer()->GetShadow(),
-            &value, &hadAnimatedOpacity);
+          forwarder->GetShadowManager()->
+            SendGetAnimationOpacity(layer->GetCompositorAnimationsId(),
+                                    &value,
+                                    &hadAnimatedOpacity);
 
           if (hadAnimatedOpacity) {
             cssValue = new nsROCSSPrimitiveValue;
@@ -3659,8 +3681,8 @@ nsDOMWindowUtils::GetOMTAStyle(nsIDOMElement* aElement,
         ShadowLayerForwarder* forwarder = layer->Manager()->AsShadowForwarder();
         if (forwarder && forwarder->HasShadowManager()) {
           MaybeTransform transform;
-          forwarder->GetShadowManager()->SendGetAnimationTransform(
-            layer->AsShadowableLayer()->GetShadow(), &transform);
+          forwarder->GetShadowManager()->
+            SendGetAnimationTransform(layer->GetCompositorAnimationsId(), &transform);
           if (transform.type() == MaybeTransform::TMatrix4x4) {
             Matrix4x4 matrix = transform.get_Matrix4x4();
             cssValue = nsComputedDOMStyle::MatrixToCSSValue(matrix);
@@ -4092,6 +4114,70 @@ nsDOMWindowUtils::IsTimeoutTracking(uint32_t aTimeoutId, bool* aResult)
   NS_ENSURE_STATE(innerWindow);
 
   *aResult = innerWindow->TimeoutManager().IsTimeoutTracking(aTimeoutId);
+  return NS_OK;
+}
+
+struct StateTableEntry
+{
+  const char* mStateString;
+  EventStates mState;
+};
+
+static constexpr StateTableEntry kManuallyManagedStates[] = {
+  // none yet; but for example: { "highlight", NS_EVENT_STATE_HIGHLIGHT },
+  { nullptr, EventStates() },
+};
+
+static_assert(!kManuallyManagedStates[ArrayLength(kManuallyManagedStates) - 1]
+               .mStateString,
+              "last kManuallyManagedStates entry must be a sentinel with "
+              "mStateString == nullptr");
+
+static EventStates
+GetEventStateForString(const nsAString& aStateString)
+{
+  for (const StateTableEntry* entry = kManuallyManagedStates;
+       entry->mStateString; ++entry) {
+    if (aStateString.EqualsASCII(entry->mStateString)) {
+      return entry->mState;
+    }
+  }
+  return EventStates();
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::AddManuallyManagedState(nsIDOMElement* aElement,
+                                          const nsAString& aStateString)
+{
+  nsCOMPtr<Element> element = do_QueryInterface(aElement);
+  if (!element) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  EventStates state = GetEventStateForString(aStateString);
+  if (state.IsEmpty()) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  element->AddManuallyManagedStates(state);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::RemoveManuallyManagedState(nsIDOMElement* aElement,
+                                             const nsAString& aStateString)
+{
+  nsCOMPtr<Element> element = do_QueryInterface(aElement);
+  if (!element) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  EventStates state = GetEventStateForString(aStateString);
+  if (state.IsEmpty()) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  element->RemoveManuallyManagedStates(state);
   return NS_OK;
 }
 

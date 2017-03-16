@@ -1,3 +1,4 @@
+
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -240,7 +241,7 @@ var ctrlTab = {
     aPreview._tab = aTab;
 
     if (aPreview.firstChild)
-      aPreview.removeChild(aPreview.firstChild);
+      aPreview.firstChild.remove();
     if (aTab) {
       let canvasWidth = this.canvasWidth;
       let canvasHeight = this.canvasHeight;
@@ -473,11 +474,15 @@ var ctrlTab = {
         this._initRecentlyUsedTabs();
         break;
       case "TabAttrModified":
-        // tab attribute modified (e.g. label, busy, image, selected)
-        for (let i = this.previews.length - 1; i >= 0; i--) {
-          if (this.previews[i]._tab && this.previews[i]._tab == event.target) {
-            this.updatePreview(this.previews[i], event.target);
-            break;
+        // tab attribute modified (i.e. label, busy, image)
+        // update preview only if tab attribute modified in the list
+        if (event.detail.changed.some(
+          (elem, ind, arr) => ["label", "busy", "image"].includes(elem))) {
+          for (let i = this.previews.length - 1; i >= 0; i--) {
+            if (this.previews[i]._tab && this.previews[i]._tab == event.target) {
+              this.updatePreview(this.previews[i], event.target);
+              break;
+            }
           }
         }
         break;

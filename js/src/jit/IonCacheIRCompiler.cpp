@@ -133,6 +133,10 @@ class MOZ_RAII IonCacheIRCompiler : public CacheIRCompiler
 
     MOZ_MUST_USE bool emitAddAndStoreSlotShared(CacheOp op);
 
+    bool needsPostBarrier() const {
+        return ic_->asSetPropertyIC()->needsPostBarrier();
+    }
+
     void pushStubCodePointer() {
         stubJitCodeOffset_.emplace(masm.PushWithPatch(ImmPtr((void*)-1)));
     }
@@ -1024,6 +1028,10 @@ IonCacheIRCompiler::emitStoreFixedSlot()
     int32_t offset = int32StubField(reader.stubOffset());
     ConstantOrRegister val = allocator.useConstantOrRegister(masm, reader.valOperandId());
 
+    Maybe<AutoScratchRegister> scratch;
+    if (needsPostBarrier())
+        scratch.emplace(allocator, masm);
+
     if (typeCheckInfo_->isSet()) {
         FailurePath* failure;
         if (!addFailurePath(&failure))
@@ -1035,6 +1043,8 @@ IonCacheIRCompiler::emitStoreFixedSlot()
     Address slot(obj, offset);
     EmitPreBarrier(masm, slot, MIRType::Value);
     masm.storeConstantOrRegister(val, slot);
+    if (needsPostBarrier())
+        emitPostBarrierSlot(obj, val, scratch.ref());
     return true;
 }
 
@@ -1058,6 +1068,8 @@ IonCacheIRCompiler::emitStoreDynamicSlot()
     Address slot(scratch, offset);
     EmitPreBarrier(masm, slot, MIRType::Value);
     masm.storeConstantOrRegister(val, slot);
+    if (needsPostBarrier())
+        emitPostBarrierSlot(obj, val, scratch);
     return true;
 }
 
@@ -1146,6 +1158,9 @@ IonCacheIRCompiler::emitAddAndStoreSlotShared(CacheOp op)
         masm.storeConstantOrRegister(val, slot);
     }
 
+    if (needsPostBarrier())
+        emitPostBarrierSlot(obj, val, scratch1);
+
     return true;
 }
 
@@ -1175,6 +1190,10 @@ IonCacheIRCompiler::emitStoreUnboxedProperty()
     int32_t offset = int32StubField(reader.stubOffset());
     ConstantOrRegister val = allocator.useConstantOrRegister(masm, reader.valOperandId());
 
+    Maybe<AutoScratchRegister> scratch;
+    if (needsPostBarrier() && UnboxedTypeNeedsPostBarrier(fieldType))
+        scratch.emplace(allocator, masm);
+
     if (fieldType == JSVAL_TYPE_OBJECT && typeCheckInfo_->isSet()) {
         FailurePath* failure;
         if (!addFailurePath(&failure))
@@ -1187,6 +1206,8 @@ IonCacheIRCompiler::emitStoreUnboxedProperty()
     Address fieldAddr(obj, offset);
     EmitICUnboxedPreBarrier(masm, fieldAddr, fieldType);
     masm.storeUnboxedProperty(fieldAddr, fieldType, val, /* failure = */ nullptr);
+    if (needsPostBarrier() && UnboxedTypeNeedsPostBarrier(fieldType))
+        emitPostBarrierSlot(obj, val, scratch.ref());
     return true;
 }
 
@@ -1218,6 +1239,9 @@ IonCacheIRCompiler::emitStoreTypedObjectReferenceProperty()
     Address dest(scratch1, offset);
 
     emitStoreTypedObjectReferenceProp(val, type, dest, scratch2);
+
+    if (needsPostBarrier() && type != ReferenceTypeDescr::TYPE_STRING)
+        emitPostBarrierSlot(obj, val, scratch1);
     return true;
 }
 
@@ -1272,6 +1296,8 @@ IonCacheIRCompiler::emitStoreDenseElement()
 
     EmitPreBarrier(masm, element, MIRType::Value);
     EmitIonStoreDenseElement(masm, val, scratch, element);
+    if (needsPostBarrier())
+        emitPostBarrierElement(obj, val, scratch, index);
     return true;
 }
 
@@ -1305,9 +1331,37 @@ IonCacheIRCompiler::emitStoreDenseElementHole()
     masm.branch32(Assembler::Above, initLength, index, &inBounds);
     masm.branch32(Assembler::NotEqual, initLength, index, failure->label());
 
-    // Check the capacity.
+    // If index < capacity, we can add a dense element inline. If not we
+    // need to allocate more elements.
+    Label capacityOk;
     Address capacity(scratch, ObjectElements::offsetOfCapacity());
-    masm.branch32(Assembler::BelowOrEqual, capacity, index, failure->label());
+    masm.branch32(Assembler::Above, capacity, index, &capacityOk);
+
+    // Check for non-writable array length. We only have to do this if
+    // index >= capacity.
+    Address elementsFlags(scratch, ObjectElements::offsetOfFlags());
+    masm.branchTest32(Assembler::NonZero, elementsFlags,
+                      Imm32(ObjectElements::NONWRITABLE_ARRAY_LENGTH),
+                      failure->label());
+
+    LiveRegisterSet save(GeneralRegisterSet::Volatile(), liveVolatileFloatRegs());
+    save.takeUnchecked(scratch);
+    masm.PushRegsInMask(save);
+
+    masm.setupUnalignedABICall(scratch);
+    masm.loadJSContext(scratch);
+    masm.passABIArg(scratch);
+    masm.passABIArg(obj);
+    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, NativeObject::addDenseElementDontReportOOM));
+    masm.mov(ReturnReg, scratch);
+
+    masm.PopRegsInMask(save);
+    masm.branchIfFalseBool(scratch, failure->label());
+
+    // Load the reallocated elements pointer.
+    masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch);
+
+    masm.bind(&capacityOk);
 
     // Increment initLength.
     masm.add32(Imm32(1), initLength);
@@ -1328,6 +1382,8 @@ IonCacheIRCompiler::emitStoreDenseElementHole()
 
     masm.bind(&doStore);
     EmitIonStoreDenseElement(masm, val, scratch, element);
+    if (needsPostBarrier())
+        emitPostBarrierElement(obj, val, scratch, index);
     return true;
 }
 

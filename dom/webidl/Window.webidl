@@ -532,12 +532,14 @@ partial interface Window {
    * Example: ["en-US", "de", "pl", "sr-Cyrl", "zh-Hans-HK"]
    */
   [Func="IsChromeOrXBL"]
-  sequence<DOMString> getAppLocales();
+  sequence<DOMString> getAppLocalesAsBCP47();
 
+#ifdef ENABLE_INTL_API
   /**
    * Getter funcion for IntlUtils, which provides helper functions for
    * localization.
    */
   [Throws, Func="IsChromeOrXBL"]
   readonly attribute IntlUtils intlUtils;
+#endif
 };

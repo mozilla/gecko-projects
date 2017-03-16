@@ -25,7 +25,6 @@
 
 #include "mozilla/a11y/PDocAccessible.h"
 #include "AudioChannelService.h"
-#include "DeviceStorageStatics.h"
 #include "GMPServiceParent.h"
 #include "HandlerServiceParent.h"
 #include "IHistory.h"
@@ -53,7 +52,6 @@
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/dom/Storage.h"
 #include "mozilla/dom/StorageIPC.h"
-#include "mozilla/dom/devicestorage/DeviceStorageRequestParent.h"
 #include "mozilla/dom/power/PowerManagerService.h"
 #include "mozilla/dom/Permissions.h"
 #include "mozilla/dom/PresentationParent.h"
@@ -71,9 +69,9 @@
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/ipc/FileDescriptorUtils.h"
-#include "mozilla/ipc/PSendStreamParent.h"
+#include "mozilla/ipc/PChildToParentStreamParent.h"
 #include "mozilla/ipc/TestShellParent.h"
-#include "mozilla/ipc/InputStreamUtils.h"
+#include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/layers/PAPZParent.h"
 #include "mozilla/layers/CompositorThread.h"
@@ -270,7 +268,6 @@ using base::KillProcess;
 #ifdef MOZ_CRASHREPORTER
 using namespace CrashReporter;
 #endif
-using namespace mozilla::dom::devicestorage;
 using namespace mozilla::dom::power;
 using namespace mozilla::media;
 using namespace mozilla::embedding;
@@ -502,6 +499,19 @@ ScriptableCPInfo::GetOpener(nsIContentProcessInfo** aInfo)
     nsCOMPtr<nsIContentProcessInfo> info = opener->ScriptableHelper();
     info.forget(aInfo);
   }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+ScriptableCPInfo::GetTabCount(int32_t* aTabCount)
+{
+  if (!mContentParent) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
+  ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
+  *aTabCount = cpm->GetTabParentCountByProcessId(mContentParent->ChildID());
+
   return NS_OK;
 }
 
@@ -757,23 +767,28 @@ ContentParent::ReleaseCachedProcesses()
 }
 
 /*static*/ already_AddRefed<ContentParent>
-ContentParent::RandomSelect(const nsTArray<ContentParent*>& aContentParents,
+ContentParent::MinTabSelect(const nsTArray<ContentParent*>& aContentParents,
                             ContentParent* aOpener, int32_t aMaxContentParents)
 {
   uint32_t maxSelectable = std::min(static_cast<uint32_t>(aContentParents.Length()),
                                     static_cast<uint32_t>(aMaxContentParents));
-  uint32_t startIdx = rand() % maxSelectable;
-  uint32_t currIdx = startIdx;
-  do {
-    RefPtr<ContentParent> p = aContentParents[currIdx];
+  uint32_t min = INT_MAX;
+  RefPtr<ContentParent> candidate;
+  ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
+
+  for (uint32_t i = 0; i < maxSelectable; i++) {
+    ContentParent* p = aContentParents[i];
     NS_ASSERTION(p->IsAlive(), "Non-alive contentparent in sBrowserContentParents?");
     if (p->mOpener == aOpener) {
-      return p.forget();
+      uint32_t tabCount = cpm->GetTabParentCountByProcessId(p->ChildID());
+      if (tabCount < min) {
+        candidate = p;
+        min = tabCount;
+      }
     }
-    currIdx = (currIdx + 1) % maxSelectable;
-  } while (currIdx != startIdx);
+  }
 
-  return nullptr;
+  return candidate.forget();
 }
 
 /*static*/ already_AddRefed<ContentParent>
@@ -816,7 +831,7 @@ ContentParent::GetNewOrUsedBrowserProcess(const nsAString& aRemoteType,
       NS_WARNING("nsIContentProcessProvider failed to return a process");
       RefPtr<ContentParent> random;
       if (contentParents.Length() >= maxContentParents &&
-          (random = RandomSelect(contentParents, aOpener, maxContentParents))) {
+          (random = MinTabSelect(contentParents, aOpener, maxContentParents))) {
         return random.forget();
       }
     }
@@ -1951,9 +1966,12 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
   extraArgs.push_back(idStr);
   extraArgs.push_back(IsForBrowser() ? "-isForBrowser" : "-notForBrowser");
 
-  std::stringstream boolPrefs;
-  std::stringstream intPrefs;
-  std::stringstream stringPrefs;
+  char boolBuf[1024];
+  char intBuf[1024];
+  char strBuf[1024];
+  nsFixedCString boolPrefs(boolBuf, 1024, 0);
+  nsFixedCString intPrefs(intBuf, 1024, 0);
+  nsFixedCString stringPrefs(strBuf, 1024, 0);
 
   size_t prefsLen;
   ContentPrefs::GetContentPrefs(&prefsLen);
@@ -1962,14 +1980,15 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
     MOZ_ASSERT(i == 0 || strcmp(ContentPrefs::GetContentPref(i), ContentPrefs::GetContentPref(i - 1)) > 0);
     switch (Preferences::GetType(ContentPrefs::GetContentPref(i))) {
     case nsIPrefBranch::PREF_INT:
-      intPrefs << i << ':' << Preferences::GetInt(ContentPrefs::GetContentPref(i)) << '|';
+      intPrefs.Append(nsPrintfCString("%u:%d|", i, Preferences::GetInt(ContentPrefs::GetContentPref(i))));
       break;
     case nsIPrefBranch::PREF_BOOL:
-      boolPrefs << i << ':' << Preferences::GetBool(ContentPrefs::GetContentPref(i)) << '|';
+      boolPrefs.Append(nsPrintfCString("%u:%d|", i, Preferences::GetBool(ContentPrefs::GetContentPref(i))));
       break;
     case nsIPrefBranch::PREF_STRING: {
-      std::string value(Preferences::GetCString(ContentPrefs::GetContentPref(i)).get());
-      stringPrefs << i << ':' << value.length() << ':' << value << '|';
+      nsAdoptingCString value(Preferences::GetCString(ContentPrefs::GetContentPref(i)));
+      stringPrefs.Append(nsPrintfCString("%u:%d;%s|", i, value.Length(), value.get()));
+
     }
       break;
     case nsIPrefBranch::PREF_INVALID:
@@ -1981,11 +2000,11 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
   }
 
   extraArgs.push_back("-intPrefs");
-  extraArgs.push_back(intPrefs.str());
+  extraArgs.push_back(intPrefs.get());
   extraArgs.push_back("-boolPrefs");
-  extraArgs.push_back(boolPrefs.str());
+  extraArgs.push_back(boolPrefs.get());
   extraArgs.push_back("-stringPrefs");
-  extraArgs.push_back(stringPrefs.str());
+  extraArgs.push_back(stringPrefs.get());
 
   if (gSafeMode) {
     extraArgs.push_back("-safeMode");
@@ -2172,6 +2191,33 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
     SerializeURI(ucs->GetSheetURI(), xpcomInit.userContentSheetURL());
   } else {
     SerializeURI(nullptr, xpcomInit.userContentSheetURL());
+  }
+
+  nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
+  if (gfxInfo) {
+    for (int32_t i = 1; i <= nsIGfxInfo::FEATURE_MAX_VALUE; ++i) {
+      int32_t status = 0;
+      nsAutoCString failureId;
+      gfxInfo->GetFeatureStatus(i, failureId, &status);
+      dom::GfxInfoFeatureStatus gfxFeatureStatus;
+      gfxFeatureStatus.feature() = i;
+      gfxFeatureStatus.status() = status;
+      gfxFeatureStatus.failureId() = failureId;
+      xpcomInit.gfxFeatureStatus().AppendElement(gfxFeatureStatus);
+    }
+  }
+
+  // Ensure the SSS is initialized before we try to use its storage.
+  nsCOMPtr<nsISiteSecurityService> sss = do_GetService("@mozilla.org/ssservice;1");
+
+  nsTArray<nsString> storageFiles;
+  DataStorage::GetAllFileNames(storageFiles);
+  for (auto& file : storageFiles) {
+    dom::DataStorageEntry entry;
+    entry.filename() = file;
+    RefPtr<DataStorage> storage = DataStorage::Get(file);
+    storage->GetAll(&entry.items());
+    xpcomInit.dataStorage().AppendElement(Move(entry));
   }
 
   Unused << SendSetXPCOMProcessAttributes(xpcomInit, initialData, lnfCache);
@@ -2408,24 +2454,6 @@ ContentParent::RecvReadFontList(InfallibleTArray<FontListEntry>* retValue)
 #ifdef ANDROID
   gfxAndroidPlatform::GetPlatform()->GetSystemFontList(retValue);
 #endif
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-ContentParent::RecvReadDataStorageArray(const nsString& aFilename,
-                                        InfallibleTArray<DataStorageItem>* aValues)
-{
-  // If we're shutting down, the DataStorage object may have been cleared
-  // already, and setting it up is pointless anyways since we're about to die.
-  if (mShutdownPending) {
-    return IPC_OK();
-  }
-
-  // Ensure the SSS is initialized before we try to use its storage.
-  nsCOMPtr<nsISiteSecurityService> sss = do_GetService("@mozilla.org/ssservice;1");
-
-  RefPtr<DataStorage> storage = DataStorage::Get(aFilename);
-  storage->GetAll(aValues);
   return IPC_OK();
 }
 
@@ -2768,12 +2796,6 @@ ContentParent::Observe(nsISupports* aSubject,
   else if (!strcmp(aTopic, "last-pb-context-exited")) {
     Unused << SendLastPrivateDocShellDestroyed();
   }
-  else if (!strcmp(aTopic, "file-watcher-update")) {
-    nsCString creason;
-    CopyUTF16toUTF8(aData, creason);
-    DeviceStorageFile* file = static_cast<DeviceStorageFile*>(aSubject);
-    Unused << SendFilePathUpdate(file->mStorageType, file->mStorageName, file->mPath, creason);
-  }
 #ifdef ACCESSIBILITY
   else if (aData && !strcmp(aTopic, "a11y-init-or-shutdown")) {
     if (*aData == '1') {
@@ -2855,22 +2877,6 @@ bool
 ContentParent::DeallocPBrowserParent(PBrowserParent* frame)
 {
   return nsIContentParent::DeallocPBrowserParent(frame);
-}
-
-PDeviceStorageRequestParent*
-ContentParent::AllocPDeviceStorageRequestParent(const DeviceStorageParams& aParams)
-{
-  RefPtr<DeviceStorageRequestParent> result = new DeviceStorageRequestParent(aParams);
-  result->Dispatch();
-  return result.forget().take();
-}
-
-bool
-ContentParent::DeallocPDeviceStorageRequestParent(PDeviceStorageRequestParent* doomed)
-{
-  DeviceStorageRequestParent *parent = static_cast<DeviceStorageRequestParent*>(doomed);
-  NS_RELEASE(parent);
-  return true;
 }
 
 PBlobParent*
@@ -3174,16 +3180,34 @@ ContentParent::GetPrintingParent()
 }
 #endif
 
-PSendStreamParent*
-ContentParent::AllocPSendStreamParent()
+PChildToParentStreamParent*
+ContentParent::AllocPChildToParentStreamParent()
 {
-  return nsIContentParent::AllocPSendStreamParent();
+  return nsIContentParent::AllocPChildToParentStreamParent();
 }
 
 bool
-ContentParent::DeallocPSendStreamParent(PSendStreamParent* aActor)
+ContentParent::DeallocPChildToParentStreamParent(PChildToParentStreamParent* aActor)
 {
-  return nsIContentParent::DeallocPSendStreamParent(aActor);
+  return nsIContentParent::DeallocPChildToParentStreamParent(aActor);
+}
+
+PParentToChildStreamParent*
+ContentParent::SendPParentToChildStreamConstructor(PParentToChildStreamParent* aActor)
+{
+  return PContentParent::SendPParentToChildStreamConstructor(aActor);
+}
+
+PParentToChildStreamParent*
+ContentParent::AllocPParentToChildStreamParent()
+{
+  return nsIContentParent::AllocPParentToChildStreamParent();
+}
+
+bool
+ContentParent::DeallocPParentToChildStreamParent(PParentToChildStreamParent* aActor)
+{
+  return nsIContentParent::DeallocPParentToChildStreamParent(aActor);
 }
 
 PScreenManagerParent*
@@ -3435,6 +3459,7 @@ ContentParent::RecvNSSU2FTokenIsCompatibleVersion(const nsString& aVersion,
 
 mozilla::ipc::IPCResult
 ContentParent::RecvNSSU2FTokenIsRegistered(nsTArray<uint8_t>&& aKeyHandle,
+                                           nsTArray<uint8_t>&& aApplication,
                                            bool* aIsValidKeyHandle)
 {
   MOZ_ASSERT(aIsValidKeyHandle);
@@ -3445,6 +3470,7 @@ ContentParent::RecvNSSU2FTokenIsRegistered(nsTArray<uint8_t>&& aKeyHandle,
   }
 
   nsresult rv = nssToken->IsRegistered(aKeyHandle.Elements(), aKeyHandle.Length(),
+                                       aApplication.Elements(), aApplication.Length(),
                                        aIsValidKeyHandle);
   if (NS_FAILED(rv)) {
     return IPC_FAIL_NO_REASON(this);
@@ -3687,25 +3713,6 @@ ContentParent::RecvAsyncMessage(const nsString& aMsg,
                                             aData);
 }
 
-mozilla::ipc::IPCResult
-ContentParent::RecvFilePathUpdateNotify(const nsString& aType,
-                                        const nsString& aStorageName,
-                                        const nsString& aFilePath,
-                                        const nsCString& aReason)
-{
-  RefPtr<DeviceStorageFile> dsf = new DeviceStorageFile(aType,
-                                                        aStorageName,
-                                                        aFilePath);
-
-  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-  if (!obs) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-  obs->NotifyObservers(dsf, "file-watcher-update",
-                       NS_ConvertASCIItoUTF16(aReason).get());
-  return IPC_OK();
-}
-
 static int32_t
 AddGeolocationListener(nsIDOMGeoPositionCallback* watcher,
                        nsIDOMGeoPositionErrorCallback* errorCallBack,
@@ -3915,7 +3922,7 @@ ContentParent::SendPBrowserConstructor(PBrowserParent* aActor,
 mozilla::ipc::IPCResult
 ContentParent::RecvKeywordToURI(const nsCString& aKeyword,
                                 nsString* aProviderName,
-                                OptionalInputStreamParams* aPostData,
+                                OptionalIPCStream* aPostData,
                                 OptionalURIParams* aURI)
 {
   *aPostData = void_t();
@@ -3935,9 +3942,12 @@ ContentParent::RecvKeywordToURI(const nsCString& aKeyword,
   }
   info->GetKeywordProviderName(*aProviderName);
 
-  nsTArray<mozilla::ipc::FileDescriptor> fds;
-  SerializeInputStream(postData, *aPostData, fds);
-  MOZ_ASSERT(fds.IsEmpty());
+  AutoIPCStream autoStream;
+  if (NS_WARN_IF(!autoStream.Serialize(postData, this))) {
+    NS_ENSURE_SUCCESS(NS_ERROR_FAILURE, IPC_FAIL_NO_REASON(this));
+  }
+
+  *aPostData = autoStream.TakeOptionalValue();
 
   nsCOMPtr<nsIURI> uri;
   info->GetPreferredURI(getter_AddRefs(uri));
@@ -4014,25 +4024,6 @@ ContentParent::RecvRecordingDeviceEvents(const nsString& aRecordingStatus,
   } else {
     NS_WARNING("Could not get the Observer service for ContentParent::RecvRecordingDeviceEvents.");
   }
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-ContentParent::RecvGetGfxInfoFeatureStatus(nsTArray<mozilla::dom::GfxInfoFeatureStatus>* aFS)
-{
-  nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
-  if (!gfxInfo) {
-    return IPC_OK();
-  }
-
-  for (int32_t i = 1; i <= nsIGfxInfo::FEATURE_MAX_VALUE; ++i) {
-    int32_t status = 0;
-    nsAutoCString failureId;
-    gfxInfo->GetFeatureStatus(i, failureId, &status);
-    mozilla::dom::GfxInfoFeatureStatus fs(i, status, failureId);
-    aFS->AppendElement(Move(fs));
-  }
-
   return IPC_OK();
 }
 
@@ -4145,6 +4136,12 @@ ContentParent::RecvKeygenProvideContent(nsString* aAttribute,
 }
 
 PFileDescriptorSetParent*
+ContentParent::SendPFileDescriptorSetConstructor(const FileDescriptor& aFD)
+{
+  return PContentParent::SendPFileDescriptorSetConstructor(aFD);
+}
+
+PFileDescriptorSetParent*
 ContentParent::AllocPFileDescriptorSetParent(const FileDescriptor& aFD)
 {
   return nsIContentParent::AllocPFileDescriptorSetParent(aFD);
@@ -4247,6 +4244,23 @@ ContentParent::RecvNotifyTabDestroying(const TabId& aTabId,
                                        const ContentParentId& aCpId)
 {
   NotifyTabDestroying(aTabId, aCpId);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentParent::RecvTabChildNotReady(const TabId& aTabId)
+{
+  ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
+  RefPtr<TabParent> tp =
+    cpm->GetTopLevelTabParentByProcessAndTabId(this->ChildID(), aTabId);
+
+  if (!tp) {
+    NS_WARNING("Couldn't find TabParent for TabChildNotReady message.");
+    return IPC_OK();
+  }
+
+  tp->DispatchTabChildNotReadyEvent();
+
   return IPC_OK();
 }
 
@@ -4741,25 +4755,6 @@ ContentParent::RecvEndDriverCrashGuard(const uint32_t& aGuardType)
 }
 
 mozilla::ipc::IPCResult
-ContentParent::RecvGetDeviceStorageLocation(const nsString& aType,
-                                            nsString* aPath)
-{
-#ifdef MOZ_WIDGET_ANDROID
-  mozilla::AndroidBridge::GetExternalPublicDirectory(aType, *aPath);
-  return IPC_OK();
-#else
-  return IPC_FAIL_NO_REASON(this);
-#endif
-}
-
-mozilla::ipc::IPCResult
-ContentParent::RecvGetDeviceStorageLocations(DeviceStorageLocationInfo* info)
-{
-    DeviceStorageStatics::GetDeviceStorageLocationsForIPC(info);
-    return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
 ContentParent::RecvGetAndroidSystemInfo(AndroidSystemInfo* aInfo)
 {
 #ifdef MOZ_WIDGET_ANDROID
@@ -5078,6 +5073,13 @@ ContentParent::RecvUpdateChildKeyedScalars(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult
+ContentParent::RecvRecordChildEvents(nsTArray<mozilla::Telemetry::ChildEventData>&& aEvents)
+{
+  TelemetryIPC::RecordChildEvents(GeckoProcessType_Content, aEvents);
+  return IPC_OK();
+}
+
 PURLClassifierParent*
 ContentParent::AllocPURLClassifierParent(const Principal& aPrincipal,
                                          const bool& aUseTrackingProtection,
@@ -5166,6 +5168,10 @@ ContentParent::RecvFileCreationRequest(const nsID& aID,
   MOZ_ASSERT(blobImpl);
 
   BlobParent* blobParent = BlobParent::GetOrCreate(this, blobImpl);
+  if (NS_WARN_IF(!blobParent)) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+
   if (!SendFileCreationResponse(aID,
                                 FileCreationSuccessResult(blobParent, nullptr))) {
     return IPC_FAIL_NO_REASON(this);

@@ -177,12 +177,6 @@ public:
 
   virtual bool DeallocPBrowserChild(PBrowserChild*) override;
 
-  virtual PDeviceStorageRequestChild*
-  AllocPDeviceStorageRequestChild(const DeviceStorageParams&) override;
-
-  virtual bool
-  DeallocPDeviceStorageRequestChild(PDeviceStorageRequestChild*) override;
-
   virtual PBlobChild*
   AllocPBlobChild(const BlobConstructorParams& aParams) override;
 
@@ -239,11 +233,14 @@ public:
 
   virtual bool DeallocPPrintingChild(PPrintingChild*) override;
 
-  virtual PSendStreamChild*
-  SendPSendStreamConstructor(PSendStreamChild*) override;
+  virtual PChildToParentStreamChild*
+  SendPChildToParentStreamConstructor(PChildToParentStreamChild*) override;
 
-  virtual PSendStreamChild* AllocPSendStreamChild() override;
-  virtual bool DeallocPSendStreamChild(PSendStreamChild*) override;
+  virtual PChildToParentStreamChild* AllocPChildToParentStreamChild() override;
+  virtual bool DeallocPChildToParentStreamChild(PChildToParentStreamChild*) override;
+
+  virtual PParentToChildStreamChild* AllocPParentToChildStreamChild() override;
+  virtual bool DeallocPParentToChildStreamChild(PParentToChildStreamChild*) override;
 
   virtual PScreenManagerChild*
   AllocPScreenManagerChild(uint32_t* aNumberOfScreens,
@@ -401,11 +398,6 @@ public:
 
   virtual mozilla::ipc::IPCResult RecvLastPrivateDocShellDestroyed() override;
 
-  virtual mozilla::ipc::IPCResult RecvFilePathUpdate(const nsString& aStorageType,
-                                                     const nsString& aStorageName,
-                                                     const nsString& aPath,
-                                                     const nsCString& aReason) override;
-
   virtual mozilla::ipc::IPCResult
   RecvNotifyProcessPriorityChanged(const hal::ProcessPriority& aPriority) override;
 
@@ -453,7 +445,8 @@ public:
 
   virtual mozilla::ipc::IPCResult RecvEndDragSession(const bool& aDoneDrag,
                                                      const bool& aUserCancelled,
-                                                     const mozilla::LayoutDeviceIntPoint& aEndDragPoint) override;
+                                                     const mozilla::LayoutDeviceIntPoint& aEndDragPoint,
+                                                     const uint32_t& aKeyModifiers) override;
 
   virtual mozilla::ipc::IPCResult
   RecvPush(const nsCString& aScope,

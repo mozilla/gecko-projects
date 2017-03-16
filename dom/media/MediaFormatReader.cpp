@@ -565,10 +565,6 @@ public:
   {
     return mDecoder->SupportDecoderRecycling();
   }
-  void ConfigurationChanged(const TrackInfo& aConfig) override
-  {
-    mDecoder->ConfigurationChanged(aConfig);
-  }
   RefPtr<ShutdownPromise> Shutdown() override
   {
     RefPtr<MediaDataDecoder> decoder = mDecoder.forget();
@@ -665,7 +661,7 @@ MediaFormatReader::DecoderFactory::DoCreateDecoder(Data& aData)
         : *ownerData.mOriginalInfo->GetAsAudioInfo(),
         ownerData.mTaskQueue,
         mOwner->mCrashHelper,
-        ownerData.mIsBlankDecode,
+        ownerData.mIsNullDecode,
         &result,
         TrackInfo::kAudioTrack,
         &mOwner->OnTrackWaitingForKeyProducer()
@@ -684,7 +680,7 @@ MediaFormatReader::DecoderFactory::DoCreateDecoder(Data& aData)
         mOwner->mKnowsCompositor,
         mOwner->GetImageContainer(),
         mOwner->mCrashHelper,
-        ownerData.mIsBlankDecode,
+        ownerData.mIsNullDecode,
         &result,
         TrackType::kVideoTrack,
         &mOwner->OnTrackWaitingForKeyProducer()
@@ -1082,6 +1078,7 @@ MediaFormatReader::MediaFormatReader(AbstractMediaDecoder* aDecoder,
            Preferences::GetUint("media.video-max-decode-error", 2))
   , mDemuxer(new DemuxerProxy(aDemuxer))
   , mDemuxerInitDone(false)
+  , mPendingNotifyDataArrived(false)
   , mLastReportedNumDecodedFrames(0)
   , mPreviousDecodedKeyframeTime_us(sNoPreviousDecodedKeyframe)
   , mInitDone(false)
@@ -1964,8 +1961,11 @@ MediaFormatReader::HandleDemuxedSamples(
     RefPtr<TrackInfoSharedPtr> info = sample->mTrackInfo;
 
     if (info && decoder.mLastStreamSourceID != info->GetID()) {
-      if (decoder.mNextStreamSourceID.isNothing()
-          || decoder.mNextStreamSourceID.ref() != info->GetID()) {
+      bool recyclable = MediaPrefs::MediaDecoderCheckRecycling()
+                        && decoder.mDecoder->SupportDecoderRecycling();
+      if (!recyclable
+          && (decoder.mNextStreamSourceID.isNothing()
+              || decoder.mNextStreamSourceID.ref() != info->GetID())) {
         LOG("%s stream id has changed from:%d to:%d, draining decoder.",
           TrackTypeToStr(aTrack), decoder.mLastStreamSourceID,
           info->GetID());
@@ -1981,8 +1981,7 @@ MediaFormatReader::HandleDemuxedSamples(
       decoder.mLastStreamSourceID = info->GetID();
       decoder.mNextStreamSourceID.reset();
 
-      if (!MediaPrefs::MediaDecoderCheckRecycling()
-          || !decoder.mDecoder->SupportDecoderRecycling()) {
+      if (!recyclable) {
         LOG("Decoder does not support recycling, recreate decoder.");
         // If flushing is required, it will clear our array of queued samples.
         // So make a copy now.
@@ -1991,9 +1990,6 @@ MediaFormatReader::HandleDemuxedSamples(
         if (sample->mKeyframe) {
           decoder.mQueuedSamples.AppendElements(Move(samples));
         }
-      } else if (decoder.mInfo && *decoder.mInfo != *info) {
-        const TrackInfo* trackInfo = *info;
-        decoder.mDecoder->ConfigurationChanged(*trackInfo);
       }
 
       decoder.mInfo = info;
@@ -2144,6 +2140,16 @@ MediaFormatReader::Update(TrackType aTrack)
     return;
   }
 
+  if (decoder.HasWaitingPromise() && decoder.HasCompletedDrain()) {
+    // This situation will occur when a change of stream ID occurred during
+    // internal seeking following a gap encountered in the data, a drain was
+    // requested and has now completed. We need to complete the draining process
+    // so that the new data can be processed.
+    // We can complete the draining operation now as we have no pending
+    // operation when a waiting promise is pending.
+    decoder.mDrainState = DrainState::None;
+  }
+
   if (UpdateReceivedNewData(aTrack)) {
     LOGV("Nothing more to do");
     return;
@@ -2230,8 +2236,7 @@ MediaFormatReader::Update(TrackType aTrack)
       LOG("Rejecting %s promise: DECODE_ERROR", TrackTypeToStr(aTrack));
       decoder.RejectPromise(decoder.mError.ref(), __func__);
       return;
-    } else if (decoder.mDrainState == DrainState::DrainCompleted
-               || decoder.mDrainState == DrainState::DrainAborted) {
+    } else if (decoder.HasCompletedDrain()) {
       if (decoder.mDemuxEOS) {
         LOG("Rejecting %s promise: EOS", TrackTypeToStr(aTrack));
         decoder.RejectPromise(NS_ERROR_DOM_MEDIA_END_OF_STREAM, __func__);
@@ -2884,10 +2889,8 @@ MediaFormatReader::NotifyDataArrived()
   }
 
   if (mNotifyDataArrivedPromise.Exists()) {
-    // Already one in progress. Reschedule for later.
-    RefPtr<nsIRunnable> task(
-        NewRunnableMethod(this, &MediaFormatReader::NotifyDataArrived));
-    OwnerThread()->Dispatch(task.forget());
+    // Already one in progress. Set the dirty flag so we can process it later.
+    mPendingNotifyDataArrived = true;
     return;
   }
 
@@ -2898,6 +2901,10 @@ MediaFormatReader::NotifyDataArrived()
              self->mNotifyDataArrivedPromise.Complete();
              self->UpdateBuffered();
              self->NotifyTrackDemuxers();
+             if (self->mPendingNotifyDataArrived) {
+               self->mPendingNotifyDataArrived = false;
+               self->NotifyDataArrived();
+             }
            },
            [self]() { self->mNotifyDataArrivedPromise.Complete(); })
     ->Track(mNotifyDataArrivedPromise);
@@ -2988,14 +2995,14 @@ MediaFormatReader::GetMozDebugReaderData(nsACString& aString)
     videoName = mVideo.mDescription;
   }
 
-  result += nsPrintfCString("audio decoder: %s\n", audioName);
-  result += nsPrintfCString("audio frames decoded: %" PRIu64 "\n",
+  result += nsPrintfCString("Audio Decoder: %s\n", audioName);
+  result += nsPrintfCString("Audio Frames Decoded: %" PRIu64 "\n",
                             mAudio.mNumSamplesOutputTotal);
   if (HasAudio()) {
     result += nsPrintfCString(
-      "audio state: ni=%d no=%d wp:%d demuxr:%d demuxq:%u decoder:%d tt:%.1f "
-      "tths:%d in:%" PRIu64 " out:%" PRIu64
-      " qs=%u pending:%u wfd:%d wfk:%d sid:%u\n",
+      "Audio State: ni=%d no=%d wp=%d demuxr=%d demuxq=%u decoder=%d tt=%.1f "
+      "tths=%d in=%" PRIu64 " out=%" PRIu64
+      " qs=%u pending=%u wfd=%d wfk=%d sid=%u\n",
       NeedInput(mAudio),
       mAudio.HasPromise(),
       !mAudio.mWaitingPromise.IsEmpty(),
@@ -3013,19 +3020,19 @@ MediaFormatReader::GetMozDebugReaderData(nsACString& aString)
       mAudio.mWaitingForKey,
       mAudio.mLastStreamSourceID);
   }
-  result += nsPrintfCString("video decoder: %s\n", videoName);
+  result += nsPrintfCString("Video Decoder: %s\n", videoName);
   result +=
-    nsPrintfCString("hardware video decoding: %s\n",
+    nsPrintfCString("Hardware Video Decoding: %s\n",
                     VideoIsHardwareAccelerated() ? "enabled" : "disabled");
   result +=
-    nsPrintfCString("video frames decoded: %" PRIu64 " (skipped:%" PRIu64 ")\n",
+    nsPrintfCString("Video Frames Decoded: %" PRIu64 " (skipped=%" PRIu64 ")\n",
                     mVideo.mNumSamplesOutputTotal,
                     mVideo.mNumSamplesSkippedTotal);
   if (HasVideo()) {
     result += nsPrintfCString(
-      "video state: ni=%d no=%d wp:%d demuxr:%d demuxq:%u decoder:%d tt:%.1f "
-      "tths:%d in:%" PRIu64 " out:%" PRIu64
-      " qs=%u pending:%u wfd:%d wfk:%d sid:%u\n",
+      "Video State: ni=%d no=%d wp=%d demuxr=%d demuxq=%u decoder=%d tt=%.1f "
+      "tths=%d in=%" PRIu64 " out=%" PRIu64
+      " qs=%u pending:%u wfd=%d wfk=%d sid=%u\n",
       NeedInput(mVideo),
       mVideo.HasPromise(),
       !mVideo.mWaitingPromise.IsEmpty(),
@@ -3047,26 +3054,26 @@ MediaFormatReader::GetMozDebugReaderData(nsACString& aString)
 }
 
 void
-MediaFormatReader::SetVideoBlankDecode(bool aIsBlankDecode)
+MediaFormatReader::SetVideoNullDecode(bool aIsNullDecode)
 {
   MOZ_ASSERT(OnTaskQueue());
-  return SetBlankDecode(TrackType::kVideoTrack, aIsBlankDecode);
+  return SetNullDecode(TrackType::kVideoTrack, aIsNullDecode);
 }
 
 void
-MediaFormatReader::SetBlankDecode(TrackType aTrack, bool aIsBlankDecode)
+MediaFormatReader::SetNullDecode(TrackType aTrack, bool aIsNullDecode)
 {
   MOZ_ASSERT(OnTaskQueue());
 
   auto& decoder = GetDecoderData(aTrack);
-  if (decoder.mIsBlankDecode == aIsBlankDecode) {
+  if (decoder.mIsNullDecode == aIsNullDecode) {
     return;
   }
 
-  LOG("%s, decoder.mIsBlankDecode = %d => aIsBlankDecode = %d",
-      TrackTypeToStr(aTrack), decoder.mIsBlankDecode, aIsBlankDecode);
+  LOG("%s, decoder.mIsNullDecode = %d => aIsNullDecode = %d",
+      TrackTypeToStr(aTrack), decoder.mIsNullDecode, aIsNullDecode);
 
-  decoder.mIsBlankDecode = aIsBlankDecode;
+  decoder.mIsNullDecode = aIsNullDecode;
   ShutdownDecoder(aTrack);
 }
 

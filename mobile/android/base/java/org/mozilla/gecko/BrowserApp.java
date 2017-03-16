@@ -16,7 +16,6 @@ import android.support.annotation.UiThread;
 
 import android.graphics.Rect;
 
-import org.json.JSONArray;
 import org.mozilla.gecko.activitystream.ActivityStream;
 import org.mozilla.gecko.adjust.AdjustBrowserAppDelegate;
 import org.mozilla.gecko.annotation.RobocopTarget;
@@ -168,8 +167,6 @@ import org.mozilla.gecko.switchboard.AsyncConfigLoader;
 import org.mozilla.gecko.switchboard.SwitchBoard;
 import android.animation.Animator;
 import android.animation.ObjectAnimator;
-import org.json.JSONException;
-import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -647,6 +644,7 @@ public class BrowserApp extends GeckoApp
         });
 
         mProgressView = (ToolbarProgressView) findViewById(R.id.progress);
+        mProgressView.setDynamicToolbar(mDynamicToolbar);
         mBrowserToolbar.setProgressBar(mProgressView);
 
         // Initialize Tab History Controller.
@@ -1380,13 +1378,9 @@ public class BrowserApp extends GeckoApp
             // This can be selected from either the browser menu or the contextmenu, depending on the size and version (v11+) of the phone.
             Tab tab = Tabs.getInstance().getSelectedTab();
             if (tab != null && tab.hasFeeds()) {
-                JSONObject args = new JSONObject();
-                try {
-                    args.put("tabId", tab.getId());
-                } catch (JSONException e) {
-                    Log.e(LOGTAG, "error building json arguments", e);
-                }
-                GeckoAppShell.notifyObservers("Feeds:Subscribe", args.toString());
+                final GeckoBundle args = new GeckoBundle(1);
+                args.putInt("tabId", tab.getId());
+                EventDispatcher.getInstance().dispatch("Feeds:Subscribe", args);
             }
             return true;
         }
@@ -1452,6 +1446,10 @@ public class BrowserApp extends GeckoApp
         if (mIsAbortingAppLaunch) {
             super.onDestroy();
             return;
+        }
+
+        if (mProgressView != null) {
+            mProgressView.setDynamicToolbar(null);
         }
 
         mDynamicToolbar.destroy();
@@ -1541,8 +1539,10 @@ public class BrowserApp extends GeckoApp
 
         deleteTempFiles(getApplicationContext());
 
-        if (mDoorHangerPopup != null)
+        if (mDoorHangerPopup != null) {
             mDoorHangerPopup.destroy();
+            mDoorHangerPopup = null;
+        }
         if (mFormAssistPopup != null)
             mFormAssistPopup.destroy();
         if (mTextSelection != null)
@@ -1912,7 +1912,9 @@ public class BrowserApp extends GeckoApp
                         new AlertDialog.OnClickListener() {
                             @Override
                             public void onClick(final DialogInterface dialog, final int which) {
-                                GeckoAppShell.notifyObservers("CharEncoding:Set", codeArray[which]);
+                                final GeckoBundle data = new GeckoBundle(1);
+                                data.putString("encoding", codeArray[which]);
+                                EventDispatcher.getInstance().dispatch("CharEncoding:Set", data);
                                 dialog.dismiss();
                             }
                         });
@@ -1936,8 +1938,7 @@ public class BrowserApp extends GeckoApp
 
             case "Experiments:GetActive":
                 final List<String> experiments = SwitchBoard.getActiveExperiments(this);
-                final JSONArray json = new JSONArray(experiments);
-                callback.sendSuccess(json.toString());
+                callback.sendSuccess(experiments.toArray(new String[experiments.size()]));
                 break;
 
             case "Experiments:SetOverride":
@@ -2036,10 +2037,11 @@ public class BrowserApp extends GeckoApp
             case "Website:AppInstalled":
                 final String name = message.getString("name");
                 final String startUrl = message.getString("start_url");
+                final String manifestPath = message.getString("manifest_path");
                 final Bitmap icon = FaviconDecoder
                     .decodeDataURI(getContext(), message.getString("icon"))
                     .getBestBitmap(GeckoAppShell.getPreferredIconSize());
-                createShortcut(name, startUrl, icon);
+                createAppShortcut(name, startUrl, manifestPath, icon);
                 break;
 
             case "Updater:Launch":
@@ -2220,6 +2222,9 @@ public class BrowserApp extends GeckoApp
             if (mDoorHangerPopup != null) {
                 mDoorHangerPopup.disable();
             }
+            if (mTabStrip != null) {
+                mTabStrip.tabStripIsCovered(true);
+            }
             mTabsPanel.show(panel);
 
             // Hide potentially visible "find in page" bar (Bug 1177338)
@@ -2234,6 +2239,9 @@ public class BrowserApp extends GeckoApp
     @Override
     public void hideTabs() {
         mTabsPanel.hide();
+        if (mTabStrip != null) {
+            mTabStrip.tabStripIsCovered(false);
+        }
         if (mDoorHangerPopup != null) {
             mDoorHangerPopup.enable();
         }
@@ -3157,7 +3165,9 @@ public class BrowserApp extends GeckoApp
         item.setOnMenuItemClickListener(new MenuItem.OnMenuItemClickListener() {
             @Override
             public boolean onMenuItemClick(MenuItem item) {
-                GeckoAppShell.notifyObservers("Menu:Clicked", Integer.toString(info.id - ADDON_MENU_OFFSET));
+                final GeckoBundle data = new GeckoBundle(1);
+                data.putInt("item", info.id - ADDON_MENU_OFFSET);
+                EventDispatcher.getInstance().dispatch("Menu:Clicked", data);
                 return true;
             }
         });
@@ -3669,7 +3679,7 @@ public class BrowserApp extends GeckoApp
 
         if (itemId == R.id.save_as_pdf) {
             Telemetry.sendUIEvent(TelemetryContract.Event.SAVE, TelemetryContract.Method.MENU, "pdf");
-            GeckoAppShell.notifyObservers("SaveAs:PDF", null);
+            EventDispatcher.getInstance().dispatch("SaveAs:PDF", null);
             return true;
         }
 
@@ -3714,7 +3724,7 @@ public class BrowserApp extends GeckoApp
         }
 
         if (itemId == R.id.char_encoding) {
-            GeckoAppShell.notifyObservers("CharEncoding:Get", null);
+            EventDispatcher.getInstance().dispatch("CharEncoding:Get", null);
             return true;
         }
 
@@ -3727,14 +3737,10 @@ public class BrowserApp extends GeckoApp
             Tab selectedTab = Tabs.getInstance().getSelectedTab();
             if (selectedTab == null)
                 return true;
-            JSONObject args = new JSONObject();
-            try {
-                args.put("desktopMode", !item.isChecked());
-                args.put("tabId", selectedTab.getId());
-            } catch (JSONException e) {
-                Log.e(LOGTAG, "error building json arguments", e);
-            }
-            GeckoAppShell.notifyObservers("DesktopMode:Change", args.toString());
+            final GeckoBundle args = new GeckoBundle(2);
+            args.putBoolean("desktopMode", !item.isChecked());
+            args.putInt("tabId", selectedTab.getId());
+            EventDispatcher.getInstance().dispatch("DesktopMode:Change", args);
             return true;
         }
 
@@ -3947,7 +3953,7 @@ public class BrowserApp extends GeckoApp
 
                 // If we've reached our magic number, show the feedback page.
                 if (launchCount == FEEDBACK_LAUNCH_COUNT) {
-                    GeckoAppShell.notifyObservers("Feedback:Show", null);
+                    EventDispatcher.getInstance().dispatch("Feedback:Show", null);
                 }
             }
         } finally {
@@ -3956,19 +3962,9 @@ public class BrowserApp extends GeckoApp
     }
 
     public void openUrls(List<String> urls) {
-        try {
-            JSONArray array = new JSONArray();
-            for (String url : urls) {
-                array.put(url);
-            }
-
-            JSONObject object = new JSONObject();
-            object.put("urls", array);
-
-            GeckoAppShell.notifyObservers("Tabs:OpenMultiple", object.toString());
-        } catch (JSONException e) {
-            Log.e(LOGTAG, "Unable to create JSON for opening multiple URLs");
-        }
+        final GeckoBundle data = new GeckoBundle(1);
+        data.putStringArray("urls", urls.toArray(new String[urls.size()]));
+        EventDispatcher.getInstance().dispatch("Tabs:OpenMultiple", data);
     }
 
     private void showTabQueuePromptIfApplicable(final SafeIntent intent) {
@@ -4145,6 +4141,10 @@ public class BrowserApp extends GeckoApp
 
     public static interface TabStripInterface {
         public void refresh();
+        /** Called to let the tab strip know it is now, or is now no longer, being hidden by
+         *  something being drawn over it.
+         */
+        void tabStripIsCovered(boolean covered);
         void setOnTabChangedListener(OnTabAddedOrRemovedListener listener);
         interface OnTabAddedOrRemovedListener {
             void onTabChanged();

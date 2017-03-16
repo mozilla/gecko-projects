@@ -734,8 +734,9 @@ refill_callback_duplex(cubeb_stream * stm)
     return true;
   }
 
-  LOGV("Duplex callback: input frames: %Iu, output frames: %Iu",
-       stm->linear_input_buffer.length(), output_frames);
+
+  ALOGV("Duplex callback: input frames: %Iu, output frames: %Iu",
+        stm->linear_input_buffer.length(), output_frames);
 
   refill(stm,
          stm->linear_input_buffer.data(),
@@ -770,7 +771,7 @@ refill_callback_input(cubeb_stream * stm)
     return true;
   }
 
-  LOGV("Input callback: input frames: %Iu", stm->linear_input_buffer.length());
+  ALOGV("Input callback: input frames: %Iu", stm->linear_input_buffer.length());
 
   long read = refill(stm,
                      stm->linear_input_buffer.data(),
@@ -811,8 +812,8 @@ refill_callback_output(cubeb_stream * stm)
                     output_buffer,
                     output_frames);
 
-  LOGV("Output callback: output frames requested: %Iu, got %ld",
-       output_frames, got);
+  ALOGV("Output callback: output frames requested: %Iu, got %ld",
+        output_frames, got);
 
   XASSERT(got >= 0);
   XASSERT((unsigned long) got == output_frames || stm->draining);
@@ -869,6 +870,13 @@ wasapi_stream_render_loop(LPVOID stream)
   unsigned timeout_count = 0;
   const unsigned timeout_limit = 5;
   while (is_playing) {
+    // We want to check the emergency bailout variable before a
+    // and after the WaitForMultipleObject, because the handles WaitForMultipleObjects
+    // is going to wait on might have been closed already.
+    if (*emergency_bailout) {
+      delete emergency_bailout;
+      return 0;
+    }
     DWORD waitResult = WaitForMultipleObjects(ARRAY_LENGTH(wait_array),
                                               wait_array,
                                               FALSE,
@@ -1157,6 +1165,12 @@ bool stop_and_join_render_thread(cubeb_stream * stm)
   if (!stm->thread) {
     LOG("No thread present.");
     return true;
+  }
+
+  // If we've already leaked the thread, just return,
+  // there is not much we can do.
+  if (!stm->emergency_bailout.load()) {
+    return false;
   }
 
   BOOL ok = SetEvent(stm->shutdown_event);
@@ -1479,6 +1493,7 @@ int setup_wasapi_stream_one_side(cubeb_stream * stm,
       if (devid && hr == AUDCLNT_E_DEVICE_INVALIDATED) {
         LOG("Trying again with the default %s audio device.", DIRECTION_NAME);
         devid = nullptr;
+        device = nullptr;
         try_again = true;
       } else {
         return CUBEB_ERROR;
@@ -1609,7 +1624,7 @@ int setup_wasapi_stream(cubeb_stream * stm)
     // is available when calling into the resampler to call the callback: the input
     // refill event will be set shortly after to compensate for this lack of data.
     // In debug, four buffers are used, to avoid tripping up assertions down the line.
-#if !defined(NDEBUG)
+#if !defined(DEBUG)
     const int silent_buffer_count = 2;
 #else
     const int silent_buffer_count = 4;

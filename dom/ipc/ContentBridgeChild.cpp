@@ -90,10 +90,10 @@ ContentBridgeChild::SendPFileDescriptorSetConstructor(const FileDescriptor& aFD)
   return PContentBridgeChild::SendPFileDescriptorSetConstructor(aFD);
 }
 
-PSendStreamChild*
-ContentBridgeChild::SendPSendStreamConstructor(PSendStreamChild* aActor)
+PChildToParentStreamChild*
+ContentBridgeChild::SendPChildToParentStreamConstructor(PChildToParentStreamChild* aActor)
 {
-  return PContentBridgeChild::SendPSendStreamConstructor(aActor);
+  return PContentBridgeChild::SendPChildToParentStreamConstructor(aActor);
 }
 
 // This implementation is identical to ContentChild::GetCPOWManager but we can't
@@ -168,16 +168,28 @@ ContentBridgeChild::DeallocPBlobChild(PBlobChild* aActor)
   return nsIContentChild::DeallocPBlobChild(aActor);
 }
 
-PSendStreamChild*
-ContentBridgeChild::AllocPSendStreamChild()
+PChildToParentStreamChild*
+ContentBridgeChild::AllocPChildToParentStreamChild()
 {
-  return nsIContentChild::AllocPSendStreamChild();
+  return nsIContentChild::AllocPChildToParentStreamChild();
 }
 
 bool
-ContentBridgeChild::DeallocPSendStreamChild(PSendStreamChild* aActor)
+ContentBridgeChild::DeallocPChildToParentStreamChild(PChildToParentStreamChild* aActor)
 {
-  return nsIContentChild::DeallocPSendStreamChild(aActor);
+  return nsIContentChild::DeallocPChildToParentStreamChild(aActor);
+}
+
+PParentToChildStreamChild*
+ContentBridgeChild::AllocPParentToChildStreamChild()
+{
+  return nsIContentChild::AllocPParentToChildStreamChild();
+}
+
+bool
+ContentBridgeChild::DeallocPParentToChildStreamChild(PParentToChildStreamChild* aActor)
+{
+  return nsIContentChild::DeallocPParentToChildStreamChild(aActor);
 }
 
 PFileDescriptorSetChild*
@@ -190,6 +202,27 @@ bool
 ContentBridgeChild::DeallocPFileDescriptorSetChild(PFileDescriptorSetChild* aActor)
 {
   return nsIContentChild::DeallocPFileDescriptorSetChild(aActor);
+}
+
+mozilla::ipc::IPCResult
+ContentBridgeChild::RecvActivate(PBrowserChild* aTab)
+{
+  TabChild* tab = static_cast<TabChild*>(aTab);
+  return tab->RecvActivate();
+}
+
+mozilla::ipc::IPCResult
+ContentBridgeChild::RecvDeactivate(PBrowserChild* aTab)
+{
+  TabChild* tab = static_cast<TabChild*>(aTab);
+  return tab->RecvDeactivate();
+}
+
+mozilla::ipc::IPCResult
+ContentBridgeChild::RecvParentActivated(PBrowserChild* aTab, const bool& aActivated)
+{
+  TabChild* tab = static_cast<TabChild*>(aTab);
+  return tab->RecvParentActivated(aActivated);
 }
 
 } // namespace dom

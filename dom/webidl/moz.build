@@ -484,8 +484,6 @@ WEBIDL_FILES = [
     'DelayNode.webidl',
     'DesktopNotification.webidl',
     'DeviceMotionEvent.webidl',
-    'DeviceStorage.webidl',
-    'DeviceStorageAreaListener.webidl',
     'Directory.webidl',
     'Document.webidl',
     'DocumentFragment.webidl',
@@ -651,7 +649,6 @@ WEBIDL_FILES = [
     'InputEvent.webidl',
     'InspectorUtils.webidl',
     'IntersectionObserver.webidl',
-    'IntlUtils.webidl',
     'IterableIterator.webidl',
     'KeyAlgorithm.webidl',
     'KeyboardEvent.webidl',
@@ -1022,7 +1019,6 @@ WEBIDL_FILES += [
     'CloseEvent.webidl',
     'CustomEvent.webidl',
     'DeviceOrientationEvent.webidl',
-    'DeviceStorageChangeEvent.webidl',
     'HashChangeEvent.webidl',
     'PageTransitionEvent.webidl',
     'PopStateEvent.webidl',
@@ -1068,8 +1064,6 @@ GENERATED_EVENTS_WEBIDL_FILES = [
     'DeviceLightEvent.webidl',
     'DeviceOrientationEvent.webidl',
     'DeviceProximityEvent.webidl',
-    'DeviceStorageAreaChangedEvent.webidl',
-    'DeviceStorageChangeEvent.webidl',
     'ErrorEvent.webidl',
     'FontFaceSetLoadEvent.webidl',
     'GamepadAxisMoveEvent.webidl',
@@ -1092,7 +1086,6 @@ GENERATED_EVENTS_WEBIDL_FILES = [
     'ProgressEvent.webidl',
     'RecordErrorEvent.webidl',
     'ScrollViewChangeEvent.webidl',
-    'ServiceWorkerMessageEvent.webidl',
     'StyleRuleChangeEvent.webidl',
     'StyleSheetApplicableStateChangeEvent.webidl',
     'StyleSheetChangeEvent.webidl',
@@ -1141,4 +1134,9 @@ if CONFIG['MOZ_B2G']:
 if CONFIG['ACCESSIBILITY']:
     WEBIDL_FILES += [
         'AccessibleNode.webidl',
+    ]
+
+if CONFIG['ENABLE_INTL_API']:
+    WEBIDL_FILES += [
+        'IntlUtils.webidl',
     ]

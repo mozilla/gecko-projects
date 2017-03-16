@@ -6,12 +6,14 @@
 
 #include "mozilla/TaskQueue.h"
 
+#include "DecoderDoctorDiagnostics.h"
 #include "H264Converter.h"
 #include "ImageContainer.h"
 #include "MediaInfo.h"
 #include "MediaPrefs.h"
 #include "mp4_demuxer/AnnexB.h"
 #include "mp4_demuxer/H264.h"
+#include "PDMFactory.h"
 
 namespace mozilla
 {
@@ -270,6 +272,14 @@ H264Converter::OnDecoderInitFailed(const MediaResult& aError)
     __func__);
 }
 
+bool
+H264Converter::CanRecycleDecoder() const
+{
+  MOZ_ASSERT(mDecoder);
+  return MediaPrefs::MediaDecoderCheckRecycling()
+         && mDecoder->SupportDecoderRecycling();
+}
+
 void
 H264Converter::DecodeFirstSample(MediaRawData* aSample)
 {
@@ -277,7 +287,6 @@ H264Converter::DecodeFirstSample(MediaRawData* aSample)
     mDecodePromise.Resolve(DecodedData(), __func__);
     return;
   }
-  mNeedKeyframe = false;
 
   mNeedAVCC =
     Some(mDecoder->NeedsConversion() == ConversionRequired::kNeedAVCC);
@@ -290,9 +299,9 @@ H264Converter::DecodeFirstSample(MediaRawData* aSample)
       __func__);
     return;
   }
-  if (CanRecycleDecoder()) {
-    mDecoder->ConfigurationChanged(mCurrentConfig);
-  }
+
+  mNeedKeyframe = false;
+
   RefPtr<H264Converter> self = this;
   mDecoder->Decode(aSample)
     ->Then(AbstractThread::GetCurrent()->AsTaskQueue(), __func__,
@@ -318,35 +327,16 @@ H264Converter::CheckForSPSChange(MediaRawData* aSample)
         return NS_OK;
       }
 
-  mPendingSample = aSample;
+  RefPtr<MediaRawData> sample = aSample;
 
   if (CanRecycleDecoder()) {
     // Do not recreate the decoder, reuse it.
     UpdateConfigFromExtraData(extra_data);
-    // Ideally we would want to drain the decoder instead of flushing it.
-    // However the draining operation requires calling Drain and looping several
-    // times which isn't possible from within the H264Converter. So instead we
-    // flush the decoder. In practice, this is a no-op as SPS change will only
-    // be used with MSE. And with MSE, the MediaFormatReader would have drained
-    // the decoder already.
-    RefPtr<H264Converter> self = this;
-    mDecoder->Flush()
-      ->Then(AbstractThread::GetCurrent()->AsTaskQueue(),
-             __func__,
-             [self, this]() {
-               mFlushRequest.Complete();
-               DecodeFirstSample(mPendingSample);
-               mPendingSample = nullptr;
-             },
-             [self, this](const MediaResult& aError) {
-               mFlushRequest.Complete();
-               mDecodePromise.Reject(aError, __func__);
-             })
-      ->Track(mFlushRequest);
+    if (!sample->mTrackInfo) {
+      sample->mTrackInfo = new TrackInfoSharedPtr(mCurrentConfig, 0);
+    }
     mNeedKeyframe = true;
-    // This is not really initializing the decoder, but it will do as it
-    // indicates an operation is pending.
-    return NS_ERROR_DOM_MEDIA_INITIALIZING_DECODER;
+    return NS_OK;
   }
 
   // The SPS has changed, signal to flush the current decoder and create a
@@ -355,17 +345,16 @@ H264Converter::CheckForSPSChange(MediaRawData* aSample)
   mDecoder->Flush()
     ->Then(AbstractThread::GetCurrent()->AsTaskQueue(),
            __func__,
-           [self, this]() {
+           [self, sample, this]() {
              mFlushRequest.Complete();
              mShutdownPromise = Shutdown();
              mShutdownPromise
                ->Then(AbstractThread::GetCurrent()->AsTaskQueue(),
                       __func__,
-                      [self, this]() {
+                      [self, sample, this]() {
                         mShutdownRequest.Complete();
                         mShutdownPromise = nullptr;
                         mNeedAVCC.reset();
-                        RefPtr<MediaRawData> sample = mPendingSample.forget();
                         nsresult rv = CreateDecoderAndInit(sample);
                         if (rv == NS_ERROR_DOM_MEDIA_INITIALIZING_DECODER) {
                           // All good so far, will continue later.

@@ -122,7 +122,9 @@ enum class ImageBitmapFormat : uint8_t;
 class IdleRequest;
 class IdleRequestCallback;
 class IncrementalRunnable;
+#ifdef ENABLE_INTL_API
 class IntlUtils;
+#endif
 class Location;
 class MediaQueryList;
 class MozSelfSupport;
@@ -949,10 +951,12 @@ public:
   GetPaintWorklet(mozilla::ErrorResult& aRv);
 
   void
-  GetAppLocales(nsTArray<nsString>& aLocales);
+  GetAppLocalesAsBCP47(nsTArray<nsString>& aLocales);
 
+#ifdef ENABLE_INTL_API
   mozilla::dom::IntlUtils*
   GetIntlUtils(mozilla::ErrorResult& aRv);
+#endif
 
 protected:
   bool AlertOrConfirm(bool aAlert, const nsAString& aMessage,
@@ -2036,7 +2040,9 @@ protected:
 
   RefPtr<mozilla::dom::VREventObserver> mVREventObserver;
 
+#ifdef ENABLE_INTL_API
   RefPtr<mozilla::dom::IntlUtils> mIntlUtils;
+#endif
 
   friend class nsDOMScriptableHelper;
   friend class nsDOMWindowUtils;

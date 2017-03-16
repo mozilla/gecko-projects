@@ -6,14 +6,15 @@
 
 EXPORTS += [
     'agnostic/AgnosticDecoderModule.h',
+    'agnostic/DummyMediaDataDecoder.h',
     'agnostic/OpusDecoder.h',
     'agnostic/TheoraDecoder.h',
     'agnostic/VorbisDecoder.h',
     'agnostic/VPXDecoder.h',
-    'DurationMap.h',
     'MediaTelemetryConstants.h',
     'PDMFactory.h',
     'PlatformDecoderModule.h',
+    'SimpleMap.h',
     'wrappers/H264Converter.h',
     'wrappers/MediaDataDecoderProxy.h'
 
@@ -22,6 +23,8 @@ EXPORTS += [
 UNIFIED_SOURCES += [
     'agnostic/AgnosticDecoderModule.cpp',
     'agnostic/BlankDecoderModule.cpp',
+    'agnostic/DummyMediaDataDecoder.cpp',
+    'agnostic/NullDecoderModule.cpp',
     'agnostic/OpusDecoder.cpp',
     'agnostic/TheoraDecoder.cpp',
     'agnostic/VorbisDecoder.cpp',

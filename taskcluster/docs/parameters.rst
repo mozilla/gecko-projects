@@ -44,6 +44,9 @@ Push Information
    the symbolic ref containing ``head_rev`` that should be pulled from
    ``head_repository``.
 
+``include_nightly``
+   Include nightly builds and tests in the graph.
+
 ``owner``
    Email address indicating the person who made the push.  Note that this
    value may be forged and *must not* be relied on for authentication.
@@ -100,3 +103,6 @@ syntax or reading a project-specific configuration file).
 
 ``optimize_target_tasks``
    If true, then target tasks are eligible for optimization.
+
+``include_nightly``
+   If true, then nightly tasks are eligible for optimization.

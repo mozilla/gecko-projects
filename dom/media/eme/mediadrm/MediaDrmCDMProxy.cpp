@@ -25,11 +25,13 @@ ToMediaDrmSessionType(dom::MediaKeySessionType aSessionType)
 MediaDrmCDMProxy::MediaDrmCDMProxy(dom::MediaKeys* aKeys,
                                    const nsAString& aKeySystem,
                                    bool aDistinctiveIdentifierRequired,
-                                   bool aPersistentStateRequired)
+                                   bool aPersistentStateRequired,
+                                   nsIEventTarget* aMainThread)
   : CDMProxy(aKeys,
              aKeySystem,
              aDistinctiveIdentifierRequired,
-             aPersistentStateRequired)
+             aPersistentStateRequired,
+             aMainThread)
   , mCDM(nullptr)
   , mShutdownCalled(false)
 {
@@ -308,7 +310,7 @@ MediaDrmCDMProxy::RejectPromise(PromiseId aId, nsresult aCode,
   } else {
     nsCOMPtr<nsIRunnable> task(new RejectPromiseTask(this, aId, aCode,
                                                      aReason));
-    NS_DispatchToMainThread(task);
+    mMainThread->Dispatch(task.forget(), NS_DISPATCH_NORMAL);
   }
 }
 
@@ -326,7 +328,7 @@ MediaDrmCDMProxy::ResolvePromise(PromiseId aId)
     task = NewRunnableMethod<PromiseId>(this,
                                         &MediaDrmCDMProxy::ResolvePromise,
                                         aId);
-    NS_DispatchToMainThread(task);
+    mMainThread->Dispatch(task.forget(), NS_DISPATCH_NORMAL);
   }
 }
 
@@ -408,7 +410,7 @@ MediaDrmCDMProxy::md_Init(uint32_t aPromiseId)
     NewRunnableMethod<uint32_t>(this,
                                 &MediaDrmCDMProxy::OnCDMCreated,
                                 aPromiseId));
-  NS_DispatchToMainThread(task);
+  mMainThread->Dispatch(task.forget(), NS_DISPATCH_NORMAL);
 }
 
 void

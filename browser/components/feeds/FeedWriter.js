@@ -19,11 +19,7 @@ function LOG(str) {
   let prefB = Cc["@mozilla.org/preferences-service;1"].
               getService(Ci.nsIPrefBranch);
 
-  let shouldLog = false;
-  try {
-    shouldLog = prefB.getBoolPref("feeds.log");
-  } catch (ex) {
-  }
+  let shouldLog = prefB.getBoolPref("feeds.log", false);
 
   if (shouldLog)
     dump("*** Feeds: " + str + "\n");
@@ -177,7 +173,7 @@ FeedWriter.prototype = {
     let element = this._document.getElementById(id);
     let textNode = text.createDocumentFragment(element);
     while (element.hasChildNodes())
-      element.removeChild(element.firstChild);
+      element.firstChild.remove();
     element.appendChild(textNode);
     if (text.base) {
       element.setAttributeNS(XML_NS, "base", text.base.spec);
@@ -697,10 +693,7 @@ FeedWriter.prototype = {
 
   _setSelectedHandler(feedType) {
     let prefs = Services.prefs;
-    let handler = "bookmarks";
-    try {
-      handler = prefs.getCharPref(getPrefReaderForType(feedType));
-    } catch (ex) { }
+    let handler = prefs.getCharPref(getPrefReaderForType(feedType), "bookmarks");
 
     switch (handler) {
       case "web": {
@@ -835,10 +828,7 @@ FeedWriter.prototype = {
         .addEventListener("click", this);
 
     // first-run ui
-    let showFirstRunUI = true;
-    try {
-      showFirstRunUI = Services.prefs.getBoolPref(PREF_SHOW_FIRST_RUN_UI);
-    } catch (ex) { }
+    let showFirstRunUI = Services.prefs.getBoolPref(PREF_SHOW_FIRST_RUN_UI, true);
     if (showFirstRunUI) {
       let textfeedinfo1, textfeedinfo2;
       switch (feedType) {

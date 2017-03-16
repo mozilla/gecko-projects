@@ -192,6 +192,9 @@ test_description_schema = Schema({
                 'test-platform',
                 [basestring]),
 
+            # mochitest flavor for mochitest runs
+            Optional('mochitest-flavor'): basestring,
+
             # any additional actions to pass to the mozharness command
             Optional('actions'): [basestring],
 
@@ -407,7 +410,9 @@ def set_tier(config, tests):
         if 'tier' not in test or test['tier'] == 'default':
             if test['test-platform'] in ['linux32/opt',
                                          'linux32/debug',
+                                         'linux32-nightly/opt',
                                          'linux64/opt',
+                                         'linux64-nightly/opt',
                                          'linux64/debug',
                                          'linux64-pgo/opt',
                                          'linux64-asan/opt',
@@ -587,10 +592,18 @@ def remove_linux_pgo_try_talos(config, tests):
     def predicate(test):
         return not(
             test['test-platform'] == 'linux64-pgo/opt'
-            and test['suite'] == 'talos'
+            and (test['suite'] == 'talos' or test['suite'] == 'awsy')
             and config.params['project'] == 'try'
         )
     for test in filter(predicate, tests):
+        yield test
+
+
+@transforms.add
+def set_mochitest_test_type(config, tests):
+    for test in tests:
+        if 'mochitest' in test['suite']:
+            test.setdefault('tags', {})['test-type'] = 'mochitest'
         yield test
 
 
@@ -646,6 +659,7 @@ def make_job_description(config, tests):
         jobdesc['run-on-projects'] = test.get('run-on-projects', ['all'])
         jobdesc['scopes'] = []
         jobdesc['tags'] = test.get('tags', {})
+        jobdesc['optimizations'] = [['seta']]  # always run SETA for tests
         jobdesc['extra'] = {
             'chunks': {
                 'current': test['this-chunk'],

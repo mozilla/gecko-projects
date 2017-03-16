@@ -14,7 +14,7 @@ use error_reporting::ParseErrorReporter;
 use euclid::Size2D;
 use matching::StyleSharingCandidateCache;
 use parking_lot::RwLock;
-use properties::ComputedValues;
+use selector_parser::PseudoElement;
 use selectors::matching::ElementSelectorFlags;
 use servo_config::opts;
 use std::collections::HashMap;
@@ -27,6 +27,7 @@ use stylist::Stylist;
 use thread_state;
 use time;
 use timer::Timer;
+use traversal::DomTraversal;
 
 /// This structure is used to create a local style context from a shared one.
 pub struct ThreadLocalStyleContextCreationInfo {
@@ -61,9 +62,6 @@ pub enum QuirksMode {
 /// There's exactly one of these during a given restyle traversal, and it's
 /// shared among the worker threads.
 pub struct SharedStyleContext {
-    /// The current viewport size.
-    pub viewport_size: Size2D<Au>,
-
     /// The CSS selector stylist.
     pub stylist: Arc<Stylist>,
 
@@ -74,7 +72,7 @@ pub struct SharedStyleContext {
     pub expired_animations: Arc<RwLock<HashMap<OpaqueNode, Vec<Animation>>>>,
 
     ///The CSS error reporter for all CSS loaded in this layout thread
-    pub error_reporter: Box<ParseErrorReporter + Sync>,
+    pub error_reporter: Box<ParseErrorReporter>,
 
     /// Data needed to create the thread-local style context from the shared one.
     pub local_context_creation_data: Mutex<ThreadLocalStyleContextCreationInfo>,
@@ -85,10 +83,13 @@ pub struct SharedStyleContext {
 
     /// The QuirksMode state which the document needs to be rendered with
     pub quirks_mode: QuirksMode,
+}
 
-    /// The default computed values to use for elements with no rules
-    /// applying to them.
-    pub default_computed_values: Arc<ComputedValues>,
+impl SharedStyleContext {
+    /// Return a suitable viewport size in order to be used for viewport units.
+    pub fn viewport_size(&self) -> Size2D<Au> {
+        self.stylist.device.au_viewport_size()
+    }
 }
 
 /// Information about the current element being processed. We group this together
@@ -117,6 +118,8 @@ pub struct TraversalStatistics {
     pub styles_shared: u32,
     /// Time spent in the traversal, in milliseconds.
     pub traversal_time_ms: f64,
+    /// Whether this was a parallel traversal.
+    pub is_parallel: Option<bool>,
 }
 
 /// Implementation of Add to aggregate statistics across different threads.
@@ -131,6 +134,7 @@ impl<'a> Add for &'a TraversalStatistics {
             elements_matched: self.elements_matched + other.elements_matched,
             styles_shared: self.styles_shared + other.styles_shared,
             traversal_time_ms: 0.0,
+            is_parallel: None,
         }
     }
 }
@@ -141,6 +145,11 @@ impl fmt::Display for TraversalStatistics {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         debug_assert!(self.traversal_time_ms != 0.0, "should have set traversal time");
         try!(writeln!(f, "[PERF] perf block start"));
+        try!(writeln!(f, "[PERF],traversal,{}", if self.is_parallel.unwrap() {
+            "parallel"
+        } else {
+            "sequential"
+        }));
         try!(writeln!(f, "[PERF],elements_traversed,{}", self.elements_traversed));
         try!(writeln!(f, "[PERF],elements_styled,{}", self.elements_styled));
         try!(writeln!(f, "[PERF],elements_matched,{}", self.elements_matched));
@@ -169,7 +178,11 @@ impl TraversalStatistics {
     }
 
     /// Computes the traversal time given the start time in seconds.
-    pub fn compute_traversal_time(&mut self, start: f64) {
+    pub fn finish<E, D>(&mut self, traversal: &D, start: f64)
+        where E: TElement,
+              D: DomTraversal<E>,
+    {
+        self.is_parallel = Some(traversal.is_parallel());
         self.traversal_time_ms = (time::precise_time_s() - start) * 1000.0;
     }
 }
@@ -181,6 +194,10 @@ pub enum SequentialTask<E: TElement> {
     /// Sets selector flags. This is used when we need to set flags on an
     /// element that we don't have exclusive access to (i.e. the parent).
     SetSelectorFlags(SendElement<E>, ElementSelectorFlags),
+
+    /// Marks that we need to create/remove/update CSS animations after the
+    /// first traversal.
+    UpdateAnimations(SendElement<E>, Option<PseudoElement>),
 }
 
 impl<E: TElement> SequentialTask<E> {
@@ -192,6 +209,9 @@ impl<E: TElement> SequentialTask<E> {
             SetSelectorFlags(el, flags) => {
                 unsafe { el.set_selector_flags(flags) };
             }
+            UpdateAnimations(el, pseudo) => {
+                unsafe { el.update_animations(pseudo.as_ref()) };
+            }
         }
     }
 
@@ -199,6 +219,12 @@ impl<E: TElement> SequentialTask<E> {
     pub fn set_selector_flags(el: E, flags: ElementSelectorFlags) -> Self {
         use self::SequentialTask::*;
         SetSelectorFlags(unsafe { SendElement::new(el) }, flags)
+    }
+
+    /// Creates a task to update CSS Animations on a given (pseudo-)element.
+    pub fn update_animations(el: E, pseudo: Option<PseudoElement>) -> Self {
+        use self::SequentialTask::*;
+        UpdateAnimations(unsafe { SendElement::new(el) }, pseudo)
     }
 }
 

@@ -716,6 +716,17 @@ nsStyleList::CalcDifference(const nsStyleList& aNewData) const
   return NS_STYLE_HINT_REFLOW;
 }
 
+already_AddRefed<nsIURI>
+nsStyleList::GetListStyleImageURI() const
+{
+  if (!mListStyleImage) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIURI> uri = mListStyleImage->GetImageURI();
+  return uri.forget();
+}
+
 StaticRefPtr<nsStyleQuoteValues>
 nsStyleList::sInitialQuotes;
 
@@ -785,6 +796,7 @@ nsStyleColumn::nsStyleColumn(const nsPresContext* aContext)
   , mColumnRuleColor(StyleComplexColor::CurrentColor())
   , mColumnRuleStyle(NS_STYLE_BORDER_STYLE_NONE)
   , mColumnFill(NS_STYLE_COLUMN_FILL_BALANCE)
+  , mColumnSpan(NS_STYLE_COLUMN_SPAN_NONE)
   , mColumnRuleWidth((StaticPresData::Get()
                         ->GetBorderWidthTable())[NS_STYLE_BORDER_WIDTH_MEDIUM])
   , mTwipsPerPixel(aContext->AppUnitsPerDevPixel())
@@ -804,6 +816,7 @@ nsStyleColumn::nsStyleColumn(const nsStyleColumn& aSource)
   , mColumnRuleColor(aSource.mColumnRuleColor)
   , mColumnRuleStyle(aSource.mColumnRuleStyle)
   , mColumnFill(aSource.mColumnFill)
+  , mColumnSpan(aSource.mColumnSpan)
   , mColumnRuleWidth(aSource.mColumnRuleWidth)
   , mTwipsPerPixel(aSource.mTwipsPerPixel)
 {
@@ -815,7 +828,8 @@ nsStyleColumn::CalcDifference(const nsStyleColumn& aNewData) const
 {
   if ((mColumnWidth.GetUnit() == eStyleUnit_Auto)
       != (aNewData.mColumnWidth.GetUnit() == eStyleUnit_Auto) ||
-      mColumnCount != aNewData.mColumnCount) {
+      mColumnCount != aNewData.mColumnCount ||
+      mColumnSpan != aNewData.mColumnSpan) {
     // We force column count changes to do a reframe, because it's tricky to handle
     // some edge cases where the column count gets smaller and content overflows.
     // XXX not ideal
@@ -2242,6 +2256,28 @@ ConvertToPixelCoord(const nsStyleCoord& aCoord, int32_t aPercentScale)
   return NS_lround(pixelValue);
 }
 
+already_AddRefed<nsIURI>
+nsStyleImageRequest::GetImageURI() const
+{
+  nsCOMPtr<nsIURI> uri;
+
+  if (mRequestProxy) {
+    mRequestProxy->GetURI(getter_AddRefs(uri));
+    if (uri) {
+      return uri.forget();
+    }
+  }
+
+  // If we had some problem resolving the mRequestProxy, use the URL stored
+  // in the mImageValue.
+  if (!mImageValue) {
+    return nullptr;
+  }
+
+  uri = mImageValue->GetURI();
+  return uri.forget();
+}
+
 bool
 nsStyleImage::ComputeActualCropRect(nsIntRect& aActualCropRect,
                                     bool* aIsEntireImage) const
@@ -2438,6 +2474,17 @@ nsStyleImage::PurgeCacheForViewportChange(
     mCachedBIData->PurgeCachedImages();
     mCachedBIData->SetCachedSVGViewportSize(aSVGViewportSize);
   }
+}
+
+already_AddRefed<nsIURI>
+nsStyleImage::GetImageURI() const
+{
+  if (mType != eStyleImageType_Image) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIURI> uri = mImage->GetImageURI();
+  return uri.forget();
 }
 
 // --------------------
@@ -2932,21 +2979,11 @@ nsStyleImageLayers::Layer::CalcDifference(const nsStyleImageLayers::Layer& aNewL
     // not, it "must" not link to a SVG mask.
     bool maybeSVGMask = false;
     if (mSourceURI) {
-      if (mSourceURI->IsLocalRef()) {
-        maybeSVGMask = true;
-      } else if (mSourceURI->GetURI()) {
-        mSourceURI->GetURI()->GetHasRef(&maybeSVGMask);
-      }
+      maybeSVGMask = mSourceURI->HasRef();
     }
 
-    if (!maybeSVGMask) {
-      if (aNewLayer.mSourceURI) {
-        if (aNewLayer.mSourceURI->IsLocalRef()) {
-          maybeSVGMask = true;
-        } else if (aNewLayer.mSourceURI->GetURI()) {
-          aNewLayer.mSourceURI->GetURI()->GetHasRef(&maybeSVGMask);
-        }
-      }
+    if (!maybeSVGMask && aNewLayer.mSourceURI) {
+      maybeSVGMask = aNewLayer.mSourceURI->HasRef();
     }
 
     // Return nsChangeHint_UpdateOverflow if either URI might link to an SVG
@@ -3079,13 +3116,13 @@ nsTimingFunction::AssignFromKeyword(int32_t aTimingFunctionType)
   switch (aTimingFunctionType) {
     case NS_STYLE_TRANSITION_TIMING_FUNCTION_STEP_START:
       mType = Type::StepStart;
-      mSteps = 1;
+      mStepsOrFrames = 1;
       return;
     default:
       MOZ_FALLTHROUGH_ASSERT("aTimingFunctionType must be a keyword value");
     case NS_STYLE_TRANSITION_TIMING_FUNCTION_STEP_END:
       mType = Type::StepEnd;
-      mSteps = 1;
+      mStepsOrFrames = 1;
       return;
     case NS_STYLE_TRANSITION_TIMING_FUNCTION_EASE:
     case NS_STYLE_TRANSITION_TIMING_FUNCTION_LINEAR:
@@ -3645,11 +3682,10 @@ nsStyleContentData::~nsStyleContentData()
   MOZ_COUNT_DTOR(nsStyleContentData);
 
   if (mType == eStyleContentType_Image) {
-    MOZ_ASSERT(NS_IsMainThread());
-    mContent.mImage->Release();
+    NS_ReleaseOnMainThread(dont_AddRef(mContent.mImage));
+    mContent.mImage = nullptr;
   } else if (mType == eStyleContentType_Counter ||
              mType == eStyleContentType_Counters) {
-    MOZ_ASSERT(NS_IsMainThread());
     mContent.mCounters->Release();
   } else if (mContent.mString) {
     free(mContent.mString);
@@ -3722,6 +3758,14 @@ nsStyleContent::Destroy(nsPresContext* aContext)
 {
   this->~nsStyleContent();
   aContext->PresShell()->FreeByObjectID(eArenaObjectID_nsStyleContent, this);
+}
+
+void
+nsStyleContent::FinishStyle(nsPresContext* aPresContext)
+{
+  for (nsStyleContentData& data : mContents) {
+    data.Resolve(aPresContext);
+  }
 }
 
 nsStyleContent::nsStyleContent(const nsStyleContent& aSource)
