@@ -11,11 +11,8 @@ import copy
 from . import filter_tasks
 from .graph import Graph
 from .taskgraph import TaskGraph
-from .task import Task
 from .optimize import optimize_task_graph
-from .morph import morph
 from .util.python_path import find_object
-from .transforms.base import TransformSequence, TransformConfig
 from .util.verify import (
     verify_docs,
     verify_task_graph_symbol,
@@ -32,15 +29,16 @@ class Kind(object):
         self.path = path
         self.config = config
 
-    def _get_loader(self):
+    def _get_impl_class(self):
+        # load the class defined by implementation
         try:
-            loader = self.config['loader']
+            impl = self.config['implementation']
         except KeyError:
-            raise KeyError("{!r} does not define `loader`".format(self.path))
-        return find_object(loader)
+            raise KeyError("{!r} does not define implementation".format(self.path))
+        return find_object(impl)
 
     def load_tasks(self, parameters, loaded_tasks):
-        loader = self._get_loader()
+        impl_class = self._get_impl_class()
         config = copy.deepcopy(self.config)
 
         if 'parse-commit' in self.config:
@@ -49,23 +47,8 @@ class Kind(object):
         else:
             config['args'] = None
 
-        inputs = loader(self.name, self.path, config, parameters, loaded_tasks)
-
-        transforms = TransformSequence()
-        for xform_path in config['transforms']:
-            transform = find_object(xform_path)
-            transforms.add(transform)
-
-        # perform the transformations on the loaded inputs
-        trans_config = TransformConfig(self.name, self.path, config, parameters)
-        tasks = [Task(self.name,
-                      label=task_dict['label'],
-                      attributes=task_dict['attributes'],
-                      task=task_dict['task'],
-                      optimizations=task_dict.get('optimizations'),
-                      dependencies=task_dict.get('dependencies'))
-                 for task_dict in transforms(trans_config, inputs)]
-        return tasks
+        return impl_class.load_tasks(self.name, self.path, config,
+                                     parameters, loaded_tasks)
 
 
 class TaskGraphGenerator(object):
@@ -168,17 +151,6 @@ class TaskGraphGenerator(object):
         """
         return self._run_until('label_to_taskid')
 
-    @property
-    def morphed_task_graph(self):
-        """
-        The optimized task graph, with any subsequent morphs applied. This graph
-        will have the same meaning as the optimized task graph, but be in a form
-        more palatable to TaskCluster.
-
-        @type: TaskGraph
-        """
-        return self._run_until('morphed_task_graph')
-
     def _load_kinds(self):
         for path in os.listdir(self.root_dir):
             path = os.path.join(self.root_dir, path)
@@ -228,7 +200,7 @@ class TaskGraphGenerator(object):
         logger.info("Generating full task graph")
         edges = set()
         for t in full_task_set:
-            for depname, dep in t.dependencies.iteritems():
+            for dep, depname in t.get_dependencies(full_task_set):
                 edges.add((t.label, dep, depname))
 
         full_task_graph = TaskGraph(all_tasks,
@@ -256,10 +228,7 @@ class TaskGraphGenerator(object):
         yield 'target_task_set', target_task_set
 
         logger.info("Generating target task graph")
-        # include all docker-image build tasks here, in case they are needed for a graph morph
-        docker_image_tasks = set(t.label for t in full_task_graph.tasks.itervalues()
-                                 if t.attributes['kind'] == 'docker-image')
-        target_graph = full_task_graph.graph.transitive_closure(target_tasks | docker_image_tasks)
+        target_graph = full_task_graph.graph.transitive_closure(target_tasks)
         target_task_graph = TaskGraph(
             {l: all_tasks[l] for l in target_graph.nodes},
             target_graph)
@@ -267,18 +236,14 @@ class TaskGraphGenerator(object):
 
         logger.info("Generating optimized task graph")
         do_not_optimize = set()
+
         if not self.parameters.get('optimize_target_tasks', True):
             do_not_optimize = target_task_set.graph.nodes
         optimized_task_graph, label_to_taskid = optimize_task_graph(target_task_graph,
                                                                     self.parameters,
                                                                     do_not_optimize)
-
-        yield 'optimized_task_graph', optimized_task_graph
-
-        morphed_task_graph, label_to_taskid = morph(optimized_task_graph, label_to_taskid)
-
         yield 'label_to_taskid', label_to_taskid
-        yield 'morphed_task_graph', morphed_task_graph
+        yield 'optimized_task_graph', optimized_task_graph
 
     def _run_until(self, name):
         while name not in self._run_results:

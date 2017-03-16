@@ -6,11 +6,11 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 import unittest
 
-from ..optimize import optimize_task_graph, resolve_task_references, optimization
+from ..optimize import optimize_task_graph, resolve_task_references
 from ..optimize import annotate_task_graph, get_subgraph
 from ..taskgraph import TaskGraph
 from .. import graph
-from ..task import Task
+from .util import TestTask
 
 
 class TestResolveTaskReferences(unittest.TestCase):
@@ -53,32 +53,26 @@ class TestResolveTaskReferences(unittest.TestCase):
         )
 
 
+class OptimizingTask(TestTask):
+    # the `optimize` method on this class is overridden direclty in the tests
+    # below.
+    pass
+
+
 class TestOptimize(unittest.TestCase):
 
     kind = None
 
-    @classmethod
-    def setUpClass(cls):
-        # set up some simple optimization functions
-        optimization('no-optimize')(lambda self, params: (False, None))
-        optimization('optimize-away')(lambda self, params: (True, None))
-        optimization('optimize-to-task')(lambda self, params, task: (True, task))
-        optimization('false-with-taskid')(lambda self, params: (False, 'some-taskid'))
-
-    def make_task(self, label, optimization=None, task_def=None, optimized=None, task_id=None):
+    def make_task(self, label, task_def=None, optimized=None, task_id=None):
         task_def = task_def or {'sample': 'task-def'}
-        task = Task(kind='test', label=label, attributes={}, task=task_def)
+        task = OptimizingTask(label=label, task=task_def)
         task.optimized = optimized
-        if optimization:
-            task.optimizations = [optimization]
-        else:
-            task.optimizations = []
         task.task_id = task_id
         return task
 
     def make_graph(self, *tasks_and_edges):
-        tasks = {t.label: t for t in tasks_and_edges if isinstance(t, Task)}
-        edges = {e for e in tasks_and_edges if not isinstance(e, Task)}
+        tasks = {t.label: t for t in tasks_and_edges if isinstance(t, OptimizingTask)}
+        edges = {e for e in tasks_and_edges if not isinstance(e, OptimizingTask)}
         return TaskGraph(tasks, graph.Graph(set(tasks), edges))
 
     def assert_annotations(self, graph, **annotations):
@@ -91,10 +85,11 @@ class TestOptimize(unittest.TestCase):
 
     def test_annotate_task_graph_no_optimize(self):
         "annotating marks everything as un-optimized if the kind returns that"
+        OptimizingTask.optimize = lambda self, params: (False, None)
         graph = self.make_graph(
-            self.make_task('task1', ['no-optimize']),
-            self.make_task('task2', ['no-optimize']),
-            self.make_task('task3', ['no-optimize']),
+            self.make_task('task1'),
+            self.make_task('task2'),
+            self.make_task('task3'),
             ('task2', 'task1', 'build'),
             ('task2', 'task3', 'image'),
         )
@@ -108,7 +103,8 @@ class TestOptimize(unittest.TestCase):
 
     def test_annotate_task_graph_taskid_without_optimize(self):
         "raises exception if kind returns a taskid without optimizing"
-        graph = self.make_graph(self.make_task('task1', ['false-with-taskid']))
+        OptimizingTask.optimize = lambda self, params: (False, 'some-taskid')
+        graph = self.make_graph(self.make_task('task1'))
         self.assertRaises(
             Exception,
             lambda: annotate_task_graph(graph, {}, set(), graph.graph.named_links_dict(), {}, None)
@@ -116,9 +112,11 @@ class TestOptimize(unittest.TestCase):
 
     def test_annotate_task_graph_optimize_away_dependency(self):
         "raises exception if kind optimizes away a task on which another depends"
+        OptimizingTask.optimize = \
+            lambda self, params: (True, None) if self.label == 'task1' else (False, None)
         graph = self.make_graph(
-            self.make_task('task1', ['optimize-away']),
-            self.make_task('task2', ['no-optimize']),
+            self.make_task('task1'),
+            self.make_task('task2'),
             ('task2', 'task1', 'build'),
         )
         self.assertRaises(
@@ -128,9 +126,10 @@ class TestOptimize(unittest.TestCase):
 
     def test_annotate_task_graph_do_not_optimize(self):
         "annotating marks everything as un-optimized if in do_not_optimize"
+        OptimizingTask.optimize = lambda self, params: (True, 'taskid')
         graph = self.make_graph(
-            self.make_task('task1', ['optimize-away']),
-            self.make_task('task2', ['optimize-away']),
+            self.make_task('task1'),
+            self.make_task('task2'),
             ('task2', 'task1', 'build'),
         )
         label_to_taskid = {}
@@ -145,10 +144,12 @@ class TestOptimize(unittest.TestCase):
 
     def test_annotate_task_graph_nos_do_not_propagate(self):
         "a task with a non-optimized dependency can be optimized"
+        OptimizingTask.optimize = \
+            lambda self, params: (False, None) if self.label == 'task1' else (True, 'taskid')
         graph = self.make_graph(
-            self.make_task('task1', ['no-optimize']),
-            self.make_task('task2', ['optimize-to-task', 'taskid']),
-            self.make_task('task3', ['optimize-to-task', 'taskid']),
+            self.make_task('task1'),
+            self.make_task('task2'),
+            self.make_task('task3'),
             ('task2', 'task1', 'build'),
             ('task2', 'task3', 'image'),
         )
@@ -240,10 +241,12 @@ class TestOptimize(unittest.TestCase):
 
     def test_optimize(self):
         "optimize_task_graph annotates and extracts the subgraph from a simple graph"
+        OptimizingTask.optimize = \
+            lambda self, params: (True, 'dep1') if self.label == 'task1' else (False, None)
         input = self.make_graph(
-            self.make_task('task1', ['optimize-to-task', 'dep1']),
-            self.make_task('task2', ['no-optimize']),
-            self.make_task('task3', ['no-optimize']),
+            self.make_task('task1'),
+            self.make_task('task2'),
+            self.make_task('task3'),
             ('task2', 'task1', 'build'),
             ('task2', 'task3', 'image'),
         )
