@@ -11,15 +11,9 @@ import re
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import validate_schema
-from taskgraph.transforms.task import task_description_schema
 from voluptuous import Schema, Required
 
 REQUIRED_ARCHITECTURES = ('android-x86', 'android-api-15')
-
-UPSTREAM_ARTIFACT_SIGNED_PATHS = {
-    'signing-android-x86-nightly/opt': ['public/build/target.apk'],
-    'signing-android-api-15-nightly/opt': ['public/build/target.apk'],
-}
 
 PLATFORM_REGEX = re.compile(r'signing-android-(\S+)-nightly')
 
@@ -40,10 +34,6 @@ CHANNEL_PER_PROJECT = {
     'date': 'aurora',
     'jamun': 'beta',
 }
-
-# Voluptuous uses marker objects as dictionary *keys*, but they are not
-# comparable, so we cast all of the keys back to regular strings
-task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
 
 transforms = TransformSequence()
 
@@ -124,6 +114,10 @@ def make_task_description(config, job):
     task = {
         'label': job['label'],
         'description': 'PushApk',
+        'attributes': {
+            'build_platform': 'android-nightly',
+            'nightly': True,
+        },
         'worker-type': 'scriptworker-prov-v1/pushapk-v1-dev',
         'worker': {
             'implementation': 'push-apk',
@@ -134,7 +128,12 @@ def make_task_description(config, job):
         },
         'scopes': generate_scopes(project),
         'dependencies': dependencies,
-        'treeherder': generate_treeherder_parameters(),
+        'treeherder': {
+            'symbol': 'pub(gp)',
+            'platform': 'Android/opt',
+            'tier': 2,
+            'kind': 'other',
+        },
         # Force this job to only run in a release-like context
         'run-on-projects': ['release', 'date', 'jamun'],
     }
@@ -152,15 +151,11 @@ def generate_dependencies(dependent_tasks):
 
 
 def generate_upstream_artifacts(dependencies):
-    upstream_artifacts = [{
-        'taskId': {'task-reference': '<{}>'.format(dependency_label)},
+    return [{
+        'taskId': {'task-reference': '<{}>'.format(task_kind)},
         'taskType': 'build-signing',
-        'paths': [
-            path for path in UPSTREAM_ARTIFACT_SIGNED_PATHS[dependency_label]
-        ],
-    } for dependency_label in dependencies.values()]
-
-    return upstream_artifacts
+        'paths': ['public/build/target.apk'],
+    } for task_kind in dependencies.keys()]
 
 
 def generate_google_play_track(project):
@@ -177,12 +172,3 @@ def _lookup_project_in_dict(project, dictionary):
         return dictionary[project]
     except KeyError:
         raise Exception('Project "{}" not supported by PushApk'.format(project))
-
-
-def generate_treeherder_parameters():
-    treeherder = {}
-    treeherder.setdefault('symbol', 'pub(gp)')
-    treeherder.setdefault('platform', 'Android/opt')
-    treeherder.setdefault('tier', 2)
-    treeherder.setdefault('kind', 'other')
-    return treeherder
