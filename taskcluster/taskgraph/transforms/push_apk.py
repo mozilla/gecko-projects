@@ -74,7 +74,7 @@ def filter_out_non_android_jobs(_, jobs):
 def concatenate_dependent_jobs(_, jobs):
     return {
         'dependent_tasks': [job.get('dependent-task') for job in jobs],
-        'label': 'push-apk',
+        'label': 'push-apk/opt',
     }
 
 
@@ -153,7 +153,7 @@ def generate_dependencies(dependent_tasks):
 def generate_upstream_artifacts(dependencies):
     return [{
         'taskId': {'task-reference': '<{}>'.format(task_kind)},
-        'taskType': 'build-signing',
+        'taskType': 'signing',
         'paths': ['public/build/target.apk'],
     } for task_kind in dependencies.keys()]
 
