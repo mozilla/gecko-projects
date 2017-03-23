@@ -630,8 +630,7 @@ def build_push_apk_payload(config, task, task_def):
 
 @payload_builder('push-apk-decision')
 def build_push_apk_payload(config, task, task_def):
-    # Nothing to do
-    pass
+    task_def['payload'] = {}
 
 
 @payload_builder('native-engine')
