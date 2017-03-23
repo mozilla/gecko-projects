@@ -171,4 +171,4 @@ def _lookup_project_in_dict(project, dictionary):
     try:
         return dictionary[project]
     except KeyError:
-        raise Exception('Project "{}" not supported by PushApk'.format(project))
+        return 'WRONG_PROJECT'

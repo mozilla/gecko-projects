@@ -359,7 +359,7 @@ task_description_schema = Schema({
             Required('paths'): [basestring],
         }],
 
-        Required('google-play-track'): Any('production', 'beta', 'alpha'),
+        Required('google-play-track'): Any('production', 'beta', 'alpha', 'WRONG_PROJECT'),
         Optional('dry-run', default=True): bool,
     }),
 })
