@@ -344,23 +344,6 @@ task_description_schema = Schema({
             # Paths to the artifacts to sign
             Required('paths'): [basestring],
         }],
-    }, {
-        Required('implementation'): 'push-apk',
-
-        # list of artifact URLs for the artifacts that should be beetmoved
-        Required('upstream-artifacts'): [{
-            # taskId of the task with the artifact
-            Required('taskId'): taskref_or_string,
-
-            # type of signing task (for CoT)
-            Required('taskType'): basestring,
-
-            # Paths to the artifacts to sign
-            Required('paths'): [basestring],
-        }],
-
-        Required('google-play-track'): Any('production', 'beta', 'alpha', 'WRONG_PROJECT'),
-        Optional('dry-run', default=True): bool,
     }),
 })
 
@@ -398,7 +381,6 @@ GROUP_NAMES = {
     'TW32': 'Toolchain builds for Windows 32-bits',
     'TW64': 'Toolchain builds for Windows 64-bits',
     'SM-tc': 'Spidermonkey builds',
-    'pub': 'APK publishing',
 }
 UNKNOWN_GROUP_NAME = "Treeherder group {} has no name; add it to " + __file__
 
@@ -612,17 +594,6 @@ def build_balrog_payload(config, task, task_def):
 
     task_def['payload'] = {
         'upstreamArtifacts':  worker['upstream-artifacts']
-    }
-
-
-@payload_builder('push-apk')
-def build_push_apk_payload(config, task, task_def):
-    worker = task['worker']
-
-    task_def['payload'] = {
-        'dry_run': worker['dry-run'],
-        'upstreamArtifacts':  worker['upstream-artifacts'],
-        'google_play_track': worker['google-play-track'],
     }
 
 
