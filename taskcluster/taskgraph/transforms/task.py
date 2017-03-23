@@ -345,6 +345,8 @@ task_description_schema = Schema({
             Required('paths'): [basestring],
         }],
     }, {
+        Required('implementation'): 'push-apk-decision',
+    }, {
         Required('implementation'): 'push-apk',
 
         # list of artifact URLs for the artifacts that should be beetmoved
@@ -624,6 +626,12 @@ def build_push_apk_payload(config, task, task_def):
         'upstreamArtifacts':  worker['upstream-artifacts'],
         'google_play_track': worker['google-play-track'],
     }
+
+
+@payload_builder('push-apk-decision')
+def build_push_apk_payload(config, task, task_def):
+    # Nothing to do
+    pass
 
 
 @payload_builder('native-engine')

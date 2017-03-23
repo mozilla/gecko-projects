@@ -111,7 +111,33 @@ def make_task_description(config, job):
 
     project = config.params['project']
 
-    task = {
+    decision_task = {
+        'label': 'push-apk-decision/opt',
+        'description': 'PushApk Human decision',
+        'attributes': {
+            'build_platform': 'android-nightly',
+            'nightly': True,
+        },
+        'worker-type': 'null-provisioner/human-decision',
+        'worker': {
+            'implementation': 'push-apk-decision',
+        },
+        'dependencies': dependencies,
+        'treeherder': {
+            'symbol': 'pub(D)',
+            'platform': 'Android/opt',
+            'tier': 2,
+            'kind': 'other',
+        },
+        # Force this job to only run in a release-like context
+        'run-on-projects': ['release', 'date', 'jamun'],
+    }
+
+    yield decision_task
+
+    dependencies['decision'] = 'push-apk-decision/opt'
+
+    real_task = {
         'label': job['label'],
         'description': 'PushApk',
         'attributes': {
@@ -138,7 +164,7 @@ def make_task_description(config, job):
         'run-on-projects': ['release', 'date', 'jamun'],
     }
 
-    yield task
+    yield real_task
 
 
 def generate_dependencies(dependent_tasks):
