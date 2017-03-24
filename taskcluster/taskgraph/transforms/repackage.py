@@ -141,7 +141,8 @@ def make_task_description(config, jobs):
             'scopes':
             ['docker-worker:relengapi-proxy:tooltool.download.internal',
              'secrets:get:project/taskcluster/gecko/hgfingerprint',
-             'docker-worker:relengapi-proxy:tooltool.download.public'],
+             'docker-worker:relengapi-proxy:tooltool.download.public',
+             'project:releng:signing:format:dmg'],
             'worker': {'implementation': 'docker-worker',
                        'docker-image' : {"in-tree": "desktop-build"},
                        'caches': [{
