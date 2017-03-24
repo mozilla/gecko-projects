@@ -29,6 +29,17 @@ def make_signing_description(config, jobs):
                     'format': 'jar',
                 },
             ]
+        elif 'macosx' in dep_platform:
+            job_specs = [
+                 {
+                    'artifacts': ['public/build/{locale}/target.dmg',
+                                  'public/build/{locale}/target.checksums'],
+                    'format': 'dmg',
+                 }, {
+                    'artifacts': ['public/build/{locale}/target.complete.mar'],
+                    'format': 'mar',
+                 }
+            ]
         else:
             job_specs = [
                 {

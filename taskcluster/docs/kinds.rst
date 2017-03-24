@@ -1,4 +1,4 @@
-Task Kinds
+iask Kinds
 ==========
 
 This section lists and documents the available task kinds.
@@ -201,3 +201,7 @@ push-apk
 PushApk publishes Android packages onto Google Play Store. Jobs of this kind take
 all the signed multi-locales (aka "multi") APKs for a given release and upload them
 all at once.
+
+repackage
+---------
+
