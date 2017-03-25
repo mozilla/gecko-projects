@@ -157,7 +157,7 @@ def make_task_description(config, jobs):
                        'artifacts': [{
                                        'type': 'file',
                                        'path': '/home/worker/workspace/build/upload/target.dmg',
-                                       'name': 'public/build',
+                                       'name': 'public/build/target.dmg',
                                      }],
                        'env': {
                                'SIGNED_INPUT': signed_input,
