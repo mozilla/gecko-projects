@@ -2,6 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import buildconfig
 import errno
 import mozfile
 import os
@@ -11,7 +12,6 @@ import subprocess
 import mozpack.path as mozpath
 
 is_linux = platform.system() == 'Linux'
-cross_tools = {}
 
 
 def mkdir(dir):
@@ -44,7 +44,7 @@ def set_folder_icon(dir, tmpdir):
     else:
         hfs = os.path.join(tmpdir, 'staged.hfs')
         subprocess.check_call([
-            cross_tools['HFS_TOOL'],  hfs, 'attr', '/', 'C'])
+            buildconfig.substs['HFS_TOOL'],  hfs, 'attr', '/', 'C'])
 
 
 def generate_hfs_file(stagedir, tmpdir, volume_name):
@@ -62,7 +62,7 @@ def generate_hfs_file(stagedir, tmpdir, volume_name):
         subprocess.check_call(['dd', 'if=/dev/zero', 'of={}'.format(hfs),
                                'bs=1M', 'count={}'.format(size)])
         subprocess.check_call([
-            cross_tools['MKFSHFS'], '-v', volume_name,
+            buildconfig.substs['MKFSHFS'], '-v', volume_name,
             hfs])
 
 
@@ -75,7 +75,7 @@ def create_app_symlink(stagedir, tmpdir):
     if is_linux:
         hfs = os.path.join(tmpdir, 'staged.hfs')
         subprocess.check_call([
-            cross_tools['HFS_TOOL'], hfs, 'symlink',
+            buildconfig.substs['HFS_TOOL'], hfs, 'symlink',
             '/ ', '/Applications'])
     else:
         os.symlink('/Applications', os.path.join(stagedir, ' '))
@@ -97,9 +97,9 @@ def create_dmg_from_staged(stagedir, output_dmg, tmpdir, volume_name):
     else:
         hfs = os.path.join(tmpdir, 'staged.hfs')
         subprocess.check_call([
-            cross_tools['HFS_TOOL'], hfs, 'addall', stagedir])
+            buildconfig.substs['HFS_TOOL'], hfs, 'addall', stagedir])
         subprocess.check_call([
-            cross_tools['DMG_TOOL'],
+            buildconfig.substs['DMG_TOOL'],
             'build',
             hfs,
             output_dmg
@@ -113,21 +113,13 @@ def check_tools(*tools):
     Check that each tool named in tools exists in SUBSTS and is executable.
     '''
     for tool in tools:
-        # Try to pull tools from the environment first, and only grab them from
-        # buildconfig if necessary. This lets us package dmgs without configure
-        # as a prerequisite.
-        path = os.environ.get(tool)
-        if not path:
-            import buildconfig
-            path = buildconfig.substs[tool]
-
+        path = buildconfig.substs[tool]
         if not path:
             raise Exception('Required tool "%s" not found' % tool)
         if not os.path.isfile(path):
             raise Exception('Required tool "%s" not found at path "%s"' % (tool, path))
         if not os.access(path, os.X_OK):
             raise Exception('Required tool "%s" at path "%s" is not executable' % (tool, path))
-        cross_tools[tool] = path
 
 
 def repackage_dmg(source_directory, output_dmg):
