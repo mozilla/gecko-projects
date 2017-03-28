@@ -1,7 +1,6 @@
 import os
 
 config = {
-    "signed_input": os.environ['SIGNED_INPUT'],  # Required Env Var
     "input_filename": "target.tar.gz",
     "output_filename": "target.dmg",
     "input_home": "/home/worker/workspace/inputs",

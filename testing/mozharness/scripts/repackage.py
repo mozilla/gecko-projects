@@ -14,6 +14,7 @@ class Repackage(BaseScript):
         {"action": "store",
          "dest": "signed_input",
          "type": "string",
+         "default": os.environ.get('SIGNED_INPUT'),
          "help": "Specify the signed input (url)"}
     ], [
         ['--output-file', ],
@@ -37,6 +38,10 @@ class Repackage(BaseScript):
             require_config_file=require_config_file,
             **script_kwargs
         )
+
+        # Assert we have it either passed in or in environment
+        assert self.config.get('signed_input'), \
+            "Must pass --signed-input or be set in the environment as SIGNED_INPUT"
 
     def download_input(self):
         config = self.config
