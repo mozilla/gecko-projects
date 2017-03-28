@@ -122,15 +122,13 @@ class Repackage(BaseScript):
         # first determine the mozconfig path
         if c.get('src_mozconfig'):
             self.info('Using in-tree mozconfig')
-            abs_mozconfig_path = os.path.join(dirs['abs_mozilla_dir'], c.get('src_mozconfig'))
+            abs_mozconfig_path = os.path.join(dirs['abs_mozilla_dir'], c['src_mozconfig'])
         else:
             self.fatal("'src_mozconfig' must be in the config "
                        "in order to determine the mozconfig.")
 
         # print its contents
-        content = self.read_from_file(abs_mozconfig_path, error_level=FATAL)
-        self.info("mozconfig content:")
-        self.info(content)
+        self.read_from_file(abs_mozconfig_path, error_level=FATAL)
 
         # finally, copy the mozconfig to a path that 'mach build' expects it to be
         self.copyfile(abs_mozconfig_path, os.path.join(dirs['abs_mozilla_dir'], '.mozconfig'))
