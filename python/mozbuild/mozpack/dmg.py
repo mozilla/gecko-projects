@@ -135,11 +135,7 @@ def repackage_dmg(source_directory, output_dmg):
 
     # Remove the /Applications symlink. If we don't, an rsync command in
     # create_dmg() will break, and create_dmg() re-creates the symlink anyway.
-    try:
-        os.remove(mozpath.join(source_directory, ' '))
-    except OSError, e:
-        if e.errno != errno.ENOENT:
-            raise
+    os.remove(mozpath.join(source_directory, ' '))
 
     # Grab the volume name
     volume_name = None
