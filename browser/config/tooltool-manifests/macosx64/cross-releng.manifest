@@ -33,10 +33,10 @@
     "size": 1020700
   },
   {
-    "version": "https://github.com/andreas56/libdmg-hfsplus rev 81dd75fd1549b24bf8af9736ac25518b367e6b63",
-    "size": 62032,
+    "version": "https://github.com/andreas56/libdmg-hfsplus rev 1d72dd62a13632134667a378f926e8904f70bf25 plus 2 patches",
+    "size": 57296,
     "visibility": "public",
-    "digest": "9073c41034784eb8823ec817aed42bbc65c8da63ad3fac572726fa48b36320ee302ca8f51b23576e7fdbeec6ab300610d0c58bbd9c52024577dfdb13d95aa2ec",
+    "digest": "45d9c9fcd823fb1e28a49a37a5114dd8372212051ca5ec7be82a17a7076d2d4a10cd670bac53f967df6d0e67aac0c12df541712fe8d7f509f5595f2dd1c1567d",
     "algorithm": "sha512",
     "unpack": true,
     "filename": "dmg.tar.xz"
