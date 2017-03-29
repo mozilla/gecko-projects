@@ -8,10 +8,10 @@ Transform the repackage task into an actual task description.
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
-from taskgraph.util.schema import validate_schema
+from taskgraph.util.schema import validate_schema, Schema
 # from taskgraph.util.scriptworker import get_signing_cert_scope
 from taskgraph.transforms.task import task_description_schema
-from voluptuous import Schema, Any, Required, Optional
+from voluptuous import Any, Required, Optional
 from taskgraph.util.docker import (
     docker_image,
 )

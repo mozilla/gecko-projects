@@ -10,8 +10,8 @@ from __future__ import absolute_import, print_function, unicode_literals
 import re
 
 from taskgraph.transforms.base import TransformSequence
-from taskgraph.util.schema import validate_schema
-from voluptuous import Schema, Required
+from taskgraph.util.schema import validate_schema, Schema
+from voluptuous import Required
 
 REQUIRED_ARCHITECTURES = ('android-x86', 'android-api-15')
 
