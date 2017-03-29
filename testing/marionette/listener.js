@@ -643,7 +643,7 @@ function singleTap(id, corx, cory) {
   // after this block, the element will be scrolled into view
   let visible = element.isVisible(el, corx, cory);
   if (!visible) {
-    throw new ElementNotVisibleError("Element is not currently visible and may not be manipulated");
+    throw new ElementNotInteractableError("Element is not currently visible and may not be manipulated");
   }
 
   let a11y = accessibility.get(capabilities.get("moz:accessibilityChecks"));
@@ -1462,8 +1462,7 @@ function isElementSelected(id) {
 function* sendKeysToElement(id, val) {
   let el = seenEls.get(id, curContainer);
   if (el.type == "file") {
-    let path = val.join("");
-    yield interaction.uploadFile(el, path);
+    yield interaction.uploadFile(el, val);
   } else {
     yield interaction.sendKeysToElement(
         el, val, false, capabilities.get("moz:accessibilityChecks"));

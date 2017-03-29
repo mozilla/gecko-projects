@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// Undefine windows version of LoadImage because our code uses that name.
+#undef LoadImage
+
 #include "ImageLogging.h"
 #include "imgLoader.h"
 
@@ -12,6 +15,7 @@
 #include "mozilla/Move.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ChaosMode.h"
+#include "mozilla/Telemetry.h"
 
 #include "nsImageModule.h"
 #include "imgRequestProxy.h"
@@ -127,7 +131,7 @@ public:
         }
 
         RefPtr<imgRequest> req = entry->GetRequest();
-        RefPtr<Image> image = req->GetImage();
+        RefPtr<image::Image> image = req->GetImage();
         if (!image) {
           continue;
         }
@@ -400,7 +404,7 @@ private:
                                       nsTArray<ImageMemoryCounter>* aArray,
                                       bool aIsUsed)
   {
-    RefPtr<Image> image = aRequest->GetImage();
+    RefPtr<image::Image> image = aRequest->GetImage();
     if (!image) {
       return;
     }
@@ -2063,6 +2067,12 @@ imgLoader::LoadImage(nsIURI* aURI,
                      const nsAString& initiatorType,
                      imgRequestProxy** _retval)
 {
+  // Note: We round the time to the nearest milliseconds.  Due to this rounding,
+  // the actual minimum value is 500 microseconds.
+  static const uint32_t kMinTelemetryLatencyMs = 1;
+
+  mozilla::TimeStamp start = TimeStamp::Now();
+
   VerifyCacheSizes();
 
   NS_ASSERTION(aURI, "imgLoader::LoadImage -- NULL URI pointer");
@@ -2298,8 +2308,11 @@ imgLoader::LoadImage(nsIURI* aURI,
     if (!newChannel) {
       proxy->NotifyListener();
     }
+  }
 
-    return rv;
+  uint32_t latencyMs = round((TimeStamp::Now() - start).ToMilliseconds());
+  if (XRE_IsContentProcess() && latencyMs >= kMinTelemetryLatencyMs) {
+    Telemetry::Accumulate(Telemetry::IMAGE_LOAD_TRIGGER_LATENCY_MS, latencyMs);
   }
 
   NS_ASSERTION(*_retval, "imgLoader::LoadImage -- no return value");

@@ -240,6 +240,18 @@ var gMenuBuilder = {
         info.modifiers.push("MacCtrl");
       }
 
+      // Allow context menu's to open various actions supported in webext prior
+      // to notifying onclicked.
+      let actionFor = {
+        _execute_page_action: pageActionFor,
+        _execute_browser_action: browserActionFor,
+        _execute_sidebar_action: sidebarActionFor,
+      }[item.command];
+      if (actionFor) {
+        let win = event.target.ownerGlobal;
+        actionFor(item.extension).triggerAction(win);
+      }
+
       item.extension.emit("webext-contextmenu-menuitem-click", info, tab);
     });
 
@@ -517,7 +529,7 @@ MenuItem.prototype = {
     }
 
     let docPattern = this.documentUrlMatchPattern;
-    let pageURI = Services.io.newURI(contextData.pageUrl);
+    let pageURI = Services.io.newURI(contextData[contextData.inFrame ? "frameUrl" : "pageUrl"]);
     if (docPattern && !docPattern.matches(pageURI)) {
       return false;
     }

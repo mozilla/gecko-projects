@@ -2,21 +2,22 @@ use std::ffi::CString;
 use std::{mem, slice};
 use std::path::PathBuf;
 use std::os::raw::{c_void, c_char};
+use std::sync::Arc;
+use std::collections::HashMap;
 use gleam::gl;
 
-use webrender_traits::{BorderSide, BorderStyle, BorderRadius};
-use webrender_traits::{BorderWidths, BorderDetails, NormalBorder};
-use webrender_traits::{RepeatMode, ImageBorder, NinePatchDescriptor};
-use webrender_traits::{PipelineId, ComplexClipRegion, ClipRegion, PropertyBinding};
-use webrender_traits::{Epoch, ExtendMode, ColorF, GlyphInstance, GradientStop, ImageDescriptor};
-use webrender_traits::{ImageData, ImageFormat, ImageKey, ImageMask, ImageRendering};
-use webrender_traits::{FilterOp, MixBlendMode};
-use webrender_traits::{ExternalImageId, RenderApi, FontKey};
-use webrender_traits::{DeviceUintSize, DeviceUintRect, DeviceUintPoint, ExternalEvent};
-use webrender_traits::{LayoutPoint, LayoutRect, LayoutSize, LayoutTransform};
-use webrender_traits::{BoxShadowClipMode, LayerPixel, ServoScrollRootId, IdNamespace};
-use webrender_traits::{BuiltDisplayListDescriptor, AuxiliaryListsDescriptor};
-use webrender_traits::{BuiltDisplayList, AuxiliaryLists, ItemRange};
+use webrender_traits::{AuxiliaryLists, AuxiliaryListsDescriptor, BorderDetails, BorderRadius};
+use webrender_traits::{BorderSide, BorderStyle, BorderWidths, BoxShadowClipMode, BuiltDisplayList};
+use webrender_traits::{BuiltDisplayListDescriptor, ClipRegion, ColorF, ComplexClipRegion};
+use webrender_traits::{DeviceUintPoint, DeviceUintRect, DeviceUintSize, Epoch, ExtendMode};
+use webrender_traits::{ExternalEvent, ExternalImageId, FilterOp, FontKey, GlyphInstance};
+use webrender_traits::{GradientStop, IdNamespace, ImageBorder, ImageData, ImageDescriptor};
+use webrender_traits::{ImageFormat, ImageKey, ImageMask, ImageRendering, ItemRange, LayerPixel};
+use webrender_traits::{LayoutPoint, LayoutRect, LayoutSize, LayoutTransform, MixBlendMode};
+use webrender_traits::{BlobImageData, BlobImageRenderer, BlobImageResult, BlobImageError};
+use webrender_traits::{BlobImageDescriptor, RasterizedBlobImage};
+use webrender_traits::{NinePatchDescriptor, NormalBorder, PipelineId, PropertyBinding, RenderApi};
+use webrender_traits::RepeatMode;
 use webrender::renderer::{Renderer, RendererOptions};
 use webrender::renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource};
 use webrender::{ApiRecordingReceiver, BinaryRecorder};
@@ -57,6 +58,53 @@ check_ffi_type!(_image_rendering_repr enum ImageRendering as u32);
 check_ffi_type!(_mix_blend_mode_repr enum MixBlendMode as u32);
 check_ffi_type!(_box_shadow_clip_mode_repr enum BoxShadowClipMode as u32);
 check_ffi_type!(_namespace_id_repr struct IdNamespace as (u32));
+
+const GL_FORMAT_BGRA_GL: gl::GLuint = gl::BGRA;
+const GL_FORMAT_BGRA_GLES: gl::GLuint = gl::BGRA_EXT;
+
+fn get_gl_format_bgra(gl: &gl::Gl) -> gl::GLuint {
+    match gl.get_type() {
+        gl::GlType::Gl => {
+            GL_FORMAT_BGRA_GL
+        }
+        gl::GlType::Gles => {
+            GL_FORMAT_BGRA_GLES
+        }
+    }
+}
+
+#[repr(C)]
+pub struct ByteSlice {
+    buffer: *const u8,
+    len: usize,
+}
+
+impl ByteSlice {
+    pub fn new(slice: &[u8]) -> ByteSlice {
+        ByteSlice { buffer: &slice[0], len: slice.len() }
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        unsafe { slice::from_raw_parts(self.buffer, self.len) }
+    }
+}
+
+#[repr(C)]
+pub struct MutByteSlice {
+    buffer: *mut u8,
+    len: usize,
+}
+
+impl MutByteSlice {
+    pub fn new(slice: &mut [u8]) -> MutByteSlice {
+        let len = slice.len();
+        MutByteSlice { buffer: &mut slice[0], len: len }
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe { slice::from_raw_parts_mut(self.buffer, self.len) }
+    }
+}
 
 #[repr(C)]
 pub enum WrGradientExtendMode {
@@ -543,6 +591,8 @@ extern "C" {
     fn is_in_compositor_thread() -> bool;
     fn is_in_render_thread() -> bool;
     fn is_in_main_thread() -> bool;
+    fn is_glcontext_egl(glcontext_ptr: *mut c_void) -> bool;
+    fn gfx_critical_note(msg: *const c_char);
 }
 
 struct CppNotifier {
@@ -605,22 +655,23 @@ pub extern "C" fn wr_renderer_render(renderer: &mut Renderer, width: u32, height
 
 // Call wr_renderer_render() before calling this function.
 #[no_mangle]
-pub unsafe extern "C" fn wr_renderer_readback(width: u32,
+pub unsafe extern "C" fn wr_renderer_readback(renderer: &mut Renderer,
+                                              width: u32,
                                               height: u32,
                                               dst_buffer: *mut u8,
                                               buffer_size: usize) {
     assert!(is_in_render_thread());
 
-    gl::flush();
+    renderer.gl().flush();
 
     let mut slice = slice::from_raw_parts_mut(dst_buffer, buffer_size);
-    gl::read_pixels_into_buffer(0,
-                                0,
-                                width as gl::GLsizei,
-                                height as gl::GLsizei,
-                                gl::BGRA,
-                                gl::UNSIGNED_BYTE,
-                                slice);
+    renderer.gl().read_pixels_into_buffer(0,
+                                          0,
+                                          width as gl::GLsizei,
+                                          height as gl::GLsizei,
+                                          get_gl_format_bgra(renderer.gl()),
+                                          gl::UNSIGNED_BYTE,
+                                          slice);
 }
 
 #[no_mangle]
@@ -690,10 +741,15 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         None
     };
 
-    gl::load_with(|symbol| get_proc_address(gl_context, symbol));
-    gl::clear_color(0.3, 0.0, 0.0, 1.0);
+    let gl;
+    if unsafe { is_glcontext_egl(gl_context) } {
+      gl = unsafe { gl::GlesFns::load_with(|symbol| get_proc_address(gl_context, symbol)) };
+    } else {
+      gl = unsafe { gl::GlFns::load_with(|symbol| get_proc_address(gl_context, symbol)) };
+    }
+    gl.clear_color(0.3, 0.0, 0.0, 1.0);
 
-    let version = gl::get_string(gl::VERSION);
+    let version = gl.get_string(gl::VERSION);
 
     println!("WebRender - OpenGL version new {}", version);
 
@@ -702,14 +758,17 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         enable_subpixel_aa: true,
         enable_profiler: enable_profiler,
         recorder: recorder,
+        blob_image_renderer: Some(Box::new(Moz2dImageRenderer::new())),
         ..Default::default()
     };
 
     let window_size = DeviceUintSize::new(window_width, window_height);
-    let (renderer, sender) = match Renderer::new(opts, window_size) {
+    let (renderer, sender) = match Renderer::new(gl, opts, window_size) {
         Ok((renderer, sender)) => (renderer, sender),
         Err(e) => {
             println!(" Failed to create a Renderer: {:?}", e);
+            let msg = CString::new(format!("wr_window_new: {:?}", e)).unwrap();
+            unsafe { gfx_critical_note(msg.as_ptr()); }
             return false;
         }
     };
@@ -732,13 +791,25 @@ pub unsafe extern "C" fn wr_api_delete(api: *mut RenderApi) {
 pub extern "C" fn wr_api_add_image(api: &mut RenderApi,
                                    image_key: ImageKey,
                                    descriptor: &WrImageDescriptor,
-                                   bytes: *const u8,
-                                   size: usize) {
+                                   bytes: ByteSlice) {
     assert!(unsafe { is_in_compositor_thread() });
-    let bytes = unsafe { slice::from_raw_parts(bytes, size).to_owned() };
+    let copied_bytes = bytes.as_slice().to_owned();
     api.add_image(image_key,
                   descriptor.to_descriptor(),
-                  ImageData::new(bytes),
+                  ImageData::new(copied_bytes),
+                  None);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_api_add_blob_image(api: &mut RenderApi,
+                                        image_key: ImageKey,
+                                        descriptor: &WrImageDescriptor,
+                                        bytes: ByteSlice) {
+    assert!(unsafe { is_in_compositor_thread() });
+    let copied_bytes = bytes.as_slice().to_owned();
+    api.add_image(image_key,
+                  descriptor.to_descriptor(),
+                  ImageData::new_blob_image(copied_bytes),
                   None);
 }
 
@@ -779,12 +850,11 @@ pub extern "C" fn wr_api_add_external_image_buffer(api: &mut RenderApi,
 pub extern "C" fn wr_api_update_image(api: &mut RenderApi,
                                       key: ImageKey,
                                       descriptor: &WrImageDescriptor,
-                                      bytes: *const u8,
-                                      size: usize) {
+                                      bytes: ByteSlice) {
     assert!(unsafe { is_in_compositor_thread() });
-    let bytes = unsafe { slice::from_raw_parts(bytes, size).to_owned() };
+    let copied_bytes = bytes.as_slice().to_owned();
 
-    api.update_image(key, descriptor.to_descriptor(), bytes);
+    api.update_image(key, descriptor.to_descriptor(), copied_bytes);
 }
 
 #[no_mangle]
@@ -864,7 +934,7 @@ pub extern "C" fn wr_api_generate_frame(api: &mut RenderApi) {
 
 #[no_mangle]
 pub extern "C" fn wr_api_send_external_event(api: &mut RenderApi, evt: usize) {
-    assert!(unsafe { is_in_compositor_thread() });
+    assert!(unsafe { !is_in_render_thread() });
 
     api.send_external_event(ExternalEvent::from_raw(evt));
 }
@@ -1036,9 +1106,7 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
                                None,
                                mix_blend_mode,
                                filters);
-    state.frame_builder.dl_builder.push_scroll_layer(clip_region,
-                                                     bounds.size,
-                                                     Some(ServoScrollRootId(1)));
+    state.frame_builder.dl_builder.push_scroll_layer(clip_region, bounds.size, None);
 }
 
 #[no_mangle]
@@ -1064,9 +1132,7 @@ pub extern "C" fn wr_dp_push_scroll_layer(state: &mut WrState,
         }
     });
     let clip_region = state.frame_builder.dl_builder.new_clip_region(&overflow, vec![], mask);
-    state.frame_builder.dl_builder.push_scroll_layer(clip_region,
-                                                     bounds.size,
-                                                     Some(ServoScrollRootId(1)));
+    state.frame_builder.dl_builder.push_scroll_layer(clip_region, bounds.size, None);
 }
 
 #[no_mangle]
@@ -1295,4 +1361,64 @@ pub unsafe extern "C" fn wr_dp_push_built_display_list(state: &mut WrState,
     let aux = AuxiliaryLists::from_data(aux_vec, aux_descriptor);
 
     state.frame_builder.dl_builder.push_built_display_list(dl, aux);
+}
+
+struct Moz2dImageRenderer {
+    images: HashMap<ImageKey, BlobImageResult>
+}
+
+impl BlobImageRenderer for Moz2dImageRenderer {
+    fn request_blob_image(&mut self,
+                          key: ImageKey,
+                          data: Arc<BlobImageData>,
+                          descriptor: &BlobImageDescriptor) {
+        let result = self.render_blob_image(data, descriptor);
+        self.images.insert(key, result);
+    }
+
+    fn resolve_blob_image(&mut self, key: ImageKey) -> BlobImageResult {
+        return match self.images.remove(&key) {
+            Some(result) => result,
+            None => Err(BlobImageError::InvalidKey),
+        }
+    }
+}
+
+impl Moz2dImageRenderer {
+    fn new() -> Self {
+        Moz2dImageRenderer {
+            images: HashMap::new(),
+        }
+    }
+
+    fn render_blob_image(&mut self, data: Arc<BlobImageData>, descriptor: &BlobImageDescriptor) -> BlobImageResult {
+        let mut output = Vec::with_capacity(
+            (descriptor.width * descriptor.height * descriptor.format.bytes_per_pixel().unwrap()) as usize
+        );
+
+        unsafe {
+            if wr_moz2d_render_cb(ByteSlice::new(&data[..]),
+                                  descriptor.width,
+                                  descriptor.height,
+                                  descriptor.format,
+                                  MutByteSlice::new(output.as_mut_slice())) {
+                return Ok(RasterizedBlobImage {
+                    width: descriptor.width,
+                    height: descriptor.height,
+                    data: output,
+                });
+            }
+        }
+
+        Err(BlobImageError::Other("unimplemented!".to_string()))
+    }
+}
+
+extern "C" {
+    // TODO: figure out the API for tiled blob images.
+    fn wr_moz2d_render_cb(blob: ByteSlice,
+                          width: u32,
+                          height: u32,
+                          format: ImageFormat,
+                          output: MutByteSlice) -> bool;
 }

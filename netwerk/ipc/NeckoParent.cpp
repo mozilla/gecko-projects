@@ -25,6 +25,9 @@
 #include "mozilla/net/DNSRequestParent.h"
 #include "mozilla/net/ChannelDiverterParent.h"
 #include "mozilla/net/IPCTransportProvider.h"
+#ifdef MOZ_WEBRTC
+#include "mozilla/net/StunAddrsRequestParent.h"
+#endif
 #include "mozilla/dom/ChromeUtils.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/TabContext.h"
@@ -40,7 +43,7 @@
 #include "SerializedLoadContext.h"
 #include "nsAuthInformationHolder.h"
 #include "nsIAuthPromptCallback.h"
-#include "nsPrincipal.h"
+#include "ContentPrincipal.h"
 #include "nsINetworkPredictor.h"
 #include "nsINetworkPredictorVerifier.h"
 #include "nsISpeculativeConnect.h"
@@ -324,6 +327,28 @@ NeckoParent::RecvPHttpChannelConstructor(
     return IPC_FAIL_NO_REASON(this);
   }
   return IPC_OK();
+}
+
+PStunAddrsRequestParent*
+NeckoParent::AllocPStunAddrsRequestParent()
+{
+#ifdef MOZ_WEBRTC
+  StunAddrsRequestParent* p = new StunAddrsRequestParent();
+  p->AddRef();
+  return p;
+#else
+  return nullptr;
+#endif
+}
+
+bool
+NeckoParent::DeallocPStunAddrsRequestParent(PStunAddrsRequestParent* aActor)
+{
+#ifdef MOZ_WEBRTC
+  StunAddrsRequestParent* p = static_cast<StunAddrsRequestParent*>(aActor);
+  p->Release();
+#endif
+  return true;
 }
 
 PAltDataOutputStreamParent*

@@ -235,7 +235,6 @@ gvjar = add_java_jar('gecko-view')
 
 gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
                   for x in [
-    'AlarmReceiver.java',
     'AndroidGamepadManager.java',
     'BaseGeckoInterface.java',
     'Clipboard.java',
@@ -355,6 +354,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'cleanup/FileCleanupController.java',
     'cleanup/FileCleanupService.java',
     'CustomEditText.java',
+    'customtabs/ActionBarPresenter.java',
     'customtabs/CustomTabsActivity.java',
     'customtabs/GeckoCustomTabsService.java',
     'customtabs/IntentUtil.java',
@@ -453,6 +453,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'GeckoActivityStatus.java',
     'GeckoApp.java',
     'GeckoApplication.java',
+    'GeckoFontScaleListener.java',
     'GeckoJavaSampler.java',
     'GeckoMessageReceiver.java',
     'GeckoProfilesProvider.java',
@@ -652,7 +653,6 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'preferences/CustomListCategory.java',
     'preferences/CustomListPreference.java',
     'preferences/DistroSharedPrefsImport.java',
-    'preferences/FontSizePreference.java',
     'preferences/GeckoPreferenceFragment.java',
     'preferences/GeckoPreferences.java',
     'preferences/LinkPreference.java',
@@ -770,6 +770,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'toolbar/NavButton.java',
     'toolbar/PageActionLayout.java',
     'toolbar/PhoneTabsButton.java',
+    'toolbar/SecurityModeUtil.java',
     'toolbar/ShapedButton.java',
     'toolbar/ShapedButtonFrameLayout.java',
     'toolbar/SiteIdentityPopup.java',
@@ -996,6 +997,8 @@ gbjar.javac_flags += ['-Xlint:all,-deprecation,-fallthrough', '-J-Xmx512m', '-J-
 # gecko-thirdparty is a good place to put small independent libraries
 gtjar = add_java_jar('gecko-thirdparty')
 gtjar.sources += [ thirdparty_source_dir + f for f in [
+    'com/booking/rtlviewpager/PagerAdapterWrapper.java',
+    'com/booking/rtlviewpager/RtlViewPager.java',
     'com/jakewharton/disklrucache/DiskLruCache.java',
     'com/jakewharton/disklrucache/StrictLineReader.java',
     'com/jakewharton/disklrucache/Util.java',

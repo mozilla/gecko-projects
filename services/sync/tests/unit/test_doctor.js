@@ -2,6 +2,7 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 const { Doctor, REPAIR_ADVANCE_PERIOD } = Cu.import("resource://services-sync/doctor.js", {});
+Cu.import("resource://gre/modules/Services.jsm");
 
 initTestLogging("Trace");
 
@@ -9,6 +10,52 @@ function mockDoctor(mocks) {
   // Clone the object and put mocks in that.
   return Object.assign({}, Doctor, mocks);
 }
+
+add_task(async function test_validation_interval() {
+  let now = 1000;
+  let doctor = mockDoctor({
+    _now() {
+      // note that the function being mocked actually returns seconds.
+      return now;
+    },
+  });
+
+  let engine = {
+    name: "test-engine",
+    getValidator() {
+      return {
+        validate(e) {
+          return {};
+        }
+      }
+    },
+  }
+
+  // setup prefs which enable test-engine validation.
+  Services.prefs.setBoolPref("services.sync.engine.test-engine.validation.enabled", true);
+  Services.prefs.setIntPref("services.sync.engine.test-engine.validation.percentageChance", 100);
+  Services.prefs.setIntPref("services.sync.engine.test-engine.validation.maxRecords", 1);
+  // And say we should validate every 10 seconds.
+  Services.prefs.setIntPref("services.sync.engine.test-engine.validation.interval", 10);
+
+  deepEqual(doctor._getEnginesToValidate([engine]), {
+    "test-engine": {
+      engine,
+      maxRecords: 1,
+    }
+  });
+  // We haven't advanced the timestamp, so we should not validate again.
+  deepEqual(doctor._getEnginesToValidate([engine]), {});
+  // Advance our clock by 11 seconds.
+  now += 11;
+  // We should validate again.
+  deepEqual(doctor._getEnginesToValidate([engine]), {
+    "test-engine": {
+      engine,
+      maxRecords: 1,
+    }
+  });
+});
 
 add_task(async function test_repairs_start() {
   let repairStarted = false;
@@ -18,6 +65,9 @@ add_task(async function test_repairs_start() {
   let validator = {
     validate(engine) {
       return problems;
+    },
+    canValidate() {
+      return Promise.resolve(true);
     }
   }
   let engine = {
@@ -32,6 +82,9 @@ add_task(async function test_repairs_start() {
       equal(validationInfo, problems);
       repairStarted = true;
       return true;
+    },
+    tryServerOnlyRepairs() {
+      return false;
     }
   }
   let doctor = mockDoctor({
@@ -60,6 +113,9 @@ add_task(async function test_repairs_advanced_daily() {
   let requestor = {
     continueRepairs() {
       repairCalls++;
+    },
+    tryServerOnlyRepairs() {
+      return false;
     }
   }
   // start now at just after REPAIR_ADVANCE_PERIOD so we do a a first one.
@@ -91,4 +147,42 @@ add_task(async function test_repairs_advanced_daily() {
   await doctor.consult();
   // should have done another repair
   equal(repairCalls, 2);
+});
+
+add_task(async function test_repairs_skip_if_cant_vaidate() {
+  let validator = {
+    canValidate() {
+      return Promise.resolve(false);
+    },
+    validate() {
+      ok(false, "Shouldn't validate");
+    }
+  }
+  let engine = {
+    name: "test-engine",
+    getValidator() {
+      return validator;
+    }
+  }
+  let requestor = {
+    startRepairs(validationInfo, flowID) {
+      assert.ok(false, "Never should start repairs");
+    },
+    tryServerOnlyRepairs() {
+      return false;
+    }
+  }
+  let doctor = mockDoctor({
+    _getEnginesToValidate(recentlySyncedEngines) {
+      deepEqual(recentlySyncedEngines, [engine]);
+      return {
+        "test-engine": { engine, maxRecords: -1 }
+      };
+    },
+    _getRepairRequestor(engineName) {
+      equal(engineName, engine.name);
+      return requestor;
+    },
+  });
+  await doctor.consult([engine]);
 });

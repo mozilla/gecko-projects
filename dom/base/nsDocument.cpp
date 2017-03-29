@@ -75,6 +75,8 @@
 #include "nsIDOMComment.h"
 #include "mozilla/dom/DocumentType.h"
 #include "mozilla/dom/NodeIterator.h"
+#include "mozilla/dom/Promise.h"
+#include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/TreeWalker.h"
 
 #include "nsIServiceManager.h"
@@ -104,7 +106,7 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsIPermissionManager.h"
 #include "nsIPrincipal.h"
-#include "nsNullPrincipal.h"
+#include "NullPrincipal.h"
 
 #include "nsIDOMWindow.h"
 #include "nsPIDOMWindow.h"
@@ -186,7 +188,6 @@
 #include "mozilla/dom/nsCSPUtils.h"
 #include "nsHTMLStyleSheet.h"
 #include "nsHTMLCSSStyleSheet.h"
-#include "SVGAttrAnimationRuleProcessor.h"
 #include "mozilla/dom/DOMImplementation.h"
 #include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/Comment.h"
@@ -1326,7 +1327,9 @@ nsIDocument::nsIDocument()
     mFontFaceSetDirty(true),
     mGetUserFontSetCalled(false),
     mPostedFlushUserFontSet(false),
-    mEverInForeground(false),
+    mDidFireDOMContentLoaded(true),
+    mHasScrollLinkedEffect(false),
+    mFrameRequestCallbacksScheduled(false),
     mCompatMode(eCompatibility_FullStandards),
     mReadyState(ReadyState::READYSTATE_UNINITIALIZED),
     mStyleBackendType(StyleBackendType::None),
@@ -1355,8 +1358,6 @@ nsIDocument::nsIDocument()
     mBFCacheEntry(nullptr),
     mInSyncOperationCount(0),
     mBlockDOMContentLoaded(0),
-    mDidFireDOMContentLoaded(true),
-    mHasScrollLinkedEffect(false),
     mUseCounters(0),
     mChildDocumentUseCounters(0),
     mNotifiedPageForUseCounter(0),
@@ -1425,8 +1426,6 @@ nsDocument::nsDocument(const char* aContentType)
 
   // void state used to differentiate an empty source from an unselected source
   mPreloadPictureFoundSource.SetIsVoid(true);
-
-  mEverInForeground = false;
 }
 
 void
@@ -1924,6 +1923,9 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
   tmp->mSubDocuments = nullptr;
 
   tmp->mFrameRequestCallbacks.Clear();
+  MOZ_RELEASE_ASSERT(!tmp->mFrameRequestCallbacksScheduled,
+                     "How did we get here without our presshell going away "
+                     "first?");
 
   tmp->mRadioGroups.Clear();
 
@@ -2297,11 +2299,6 @@ nsDocument::ResetStylesheetsToURI(nsIURI* aURI)
 
   if (!mStyleAttrStyleSheet) {
     mStyleAttrStyleSheet = new nsHTMLCSSStyleSheet();
-  }
-
-  if (!mSVGAttrAnimationRuleProcessor) {
-    mSVGAttrAnimationRuleProcessor =
-      new mozilla::SVGAttrAnimationRuleProcessor();
   }
 
   // Now set up our style sets
@@ -2721,7 +2718,7 @@ nsDocument::InitCSP(nsIChannel* aChannel)
   if (cspSandboxFlags & SANDBOXED_ORIGIN) {
     // If the new CSP sandbox flags do not have the allow-same-origin flag
     // reset the document principal to a null principal
-    principal = nsNullPrincipal::Create();
+    principal = NullPrincipal::Create();
     SetPrincipal(principal);
   }
 
@@ -2742,6 +2739,13 @@ nsDocument::InitCSP(nsIChannel* aChannel)
   }
   ApplySettingsFromCSP(false);
   return NS_OK;
+}
+
+already_AddRefed<nsIParser>
+nsDocument::CreatorParserOrNull()
+{
+  nsCOMPtr<nsIParser> parser = mParser;
+  return parser.forget();
 }
 
 void
@@ -3797,7 +3801,7 @@ nsDocument::CreateShell(nsPresContext* aContext, nsViewManager* aViewManager,
 
   mExternalResourceMap.ShowViewers();
 
-  MaybeRescheduleAnimationFrameNotifications();
+  UpdateFrameRequestCallbackSchedulingState();
 
   // Now that we have a shell, we might have @font-face rules.
   RebuildUserFontSet();
@@ -3806,17 +3810,29 @@ nsDocument::CreateShell(nsPresContext* aContext, nsViewManager* aViewManager,
 }
 
 void
-nsDocument::MaybeRescheduleAnimationFrameNotifications()
+nsIDocument::UpdateFrameRequestCallbackSchedulingState(nsIPresShell* aOldShell)
 {
-  if (!mPresShell || !IsEventHandlingEnabled()) {
-    // bail out for now, until one of those conditions changes
+  // If the condition for shouldBeScheduled changes to depend on some other
+  // variable, add UpdateFrameRequestCallbackSchedulingState() calls to the
+  // places where that variable can change.
+  bool shouldBeScheduled =
+    mPresShell && IsEventHandlingEnabled() && !mFrameRequestCallbacks.IsEmpty();
+  if (shouldBeScheduled == mFrameRequestCallbacksScheduled) {
+    // nothing to do
     return;
   }
 
-  nsRefreshDriver* rd = mPresShell->GetPresContext()->RefreshDriver();
-  if (!mFrameRequestCallbacks.IsEmpty()) {
+  nsIPresShell* presShell = aOldShell ? aOldShell : mPresShell;
+  MOZ_RELEASE_ASSERT(presShell);
+
+  nsRefreshDriver* rd = presShell->GetPresContext()->RefreshDriver();
+  if (shouldBeScheduled) {
     rd->ScheduleFrameRequestCallbacks(this);
+  } else {
+    rd->RevokeFrameRequestCallbacks(this);
   }
+
+  mFrameRequestCallbacksScheduled = shouldBeScheduled;
 }
 
 void
@@ -3824,6 +3840,9 @@ nsIDocument::TakeFrameRequestCallbacks(FrameRequestCallbackList& aCallbacks)
 {
   aCallbacks.AppendElements(mFrameRequestCallbacks);
   mFrameRequestCallbacks.Clear();
+  // No need to manually remove ourselves from the refresh driver; it will
+  // handle that part.  But we do have to update our state.
+  mFrameRequestCallbacksScheduled = false;
 }
 
 bool
@@ -3871,9 +3890,6 @@ void
 nsDocument::DeleteShell()
 {
   mExternalResourceMap.HideViewers();
-  if (IsEventHandlingEnabled()) {
-    RevokeAnimationFrameNotifications();
-  }
   if (nsPresContext* presContext = mPresShell->GetPresContext()) {
     presContext->RefreshDriver()->CancelPendingEvents(this);
   }
@@ -3887,17 +3903,10 @@ nsDocument::DeleteShell()
   // objects for @font-face rules that came from the style set.
   RebuildUserFontSet();
 
+  nsIPresShell* oldShell = mPresShell;
   mPresShell = nullptr;
+  UpdateFrameRequestCallbackSchedulingState(oldShell);
   mStyleSetFilled = false;
-}
-
-void
-nsDocument::RevokeAnimationFrameNotifications()
-{
-  if (!mFrameRequestCallbacks.IsEmpty()) {
-    mPresShell->GetPresContext()->RefreshDriver()->
-      RevokeFrameRequestCallbacks(this);
-  }
 }
 
 static void
@@ -4397,7 +4406,8 @@ nsDocument::LoadAdditionalStyleSheet(additionalSheetType aType,
     return NS_ERROR_INVALID_ARG;
 
   // Loading the sheet sync.
-  RefPtr<css::Loader> loader = new css::Loader(GetStyleBackendType());
+  RefPtr<css::Loader> loader =
+    new css::Loader(GetStyleBackendType(), GetDocGroup());
 
   css::SheetParsingMode parsingMode;
   switch (aType) {
@@ -4653,10 +4663,6 @@ nsDocument::SetScriptGlobalObject(nsIScriptGlobalObject *aScriptGlobalObject)
     // our layout history state now.
     mLayoutHistoryState = GetLayoutHistoryState();
 
-    if (mPresShell && !EventHandlingSuppressed()) {
-      RevokeAnimationFrameNotifications();
-    }
-
     // Also make sure to remove our onload blocker now if we haven't done it yet
     if (mOnloadBlockCount != 0) {
       nsCOMPtr<nsILoadGroup> loadGroup = GetDocumentLoadGroup();
@@ -4718,6 +4724,8 @@ nsDocument::SetScriptGlobalObject(nsIScriptGlobalObject *aScriptGlobalObject)
     EnsureOnloadBlocker();
   }
 
+  UpdateFrameRequestCallbackSchedulingState();
+
   if (aScriptGlobalObject) {
     // Go back to using the docshell for the layout history state
     mLayoutHistoryState = nullptr;
@@ -4750,8 +4758,6 @@ nsDocument::SetScriptGlobalObject(nsIScriptGlobalObject *aScriptGlobalObject)
         mAllowDNSPrefetch = allowDNSPrefetch;
       }
     }
-
-    MaybeRescheduleAnimationFrameNotifications();
 
     // If we are set in a window that is already focused we should remember this
     // as the time the document gained focus.
@@ -5619,6 +5625,20 @@ nsDocument::GetCustomElementRegistry()
   return registry.forget();
 }
 
+// We only support pseudo-elements with two colons in this function.
+static CSSPseudoElementType
+GetPseudoElementType(const nsString& aString, ErrorResult& aRv)
+{
+  MOZ_ASSERT(!aString.IsEmpty(), "GetPseudoElementType aString should be non-null");
+  if (aString.Length() <= 2 || aString[0] != ':' || aString[1] != ':') {
+    aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
+    return CSSPseudoElementType::NotPseudo;
+  }
+  nsCOMPtr<nsIAtom> pseudo = NS_Atomize(Substring(aString, 1));
+  return nsCSSPseudoElements::GetPseudoType(pseudo,
+      nsCSSProps::EnabledState::eInUASheets);
+}
+
 already_AddRefed<Element>
 nsDocument::CreateElement(const nsAString& aTagName,
                           const ElementCreationOptionsOrString& aOptions,
@@ -5636,17 +5656,37 @@ nsDocument::CreateElement(const nsAString& aTagName,
   }
 
   const nsString* is = nullptr;
+  CSSPseudoElementType pseudoType = CSSPseudoElementType::NotPseudo;
   if (aOptions.IsElementCreationOptions()) {
+    const ElementCreationOptions& options =
+      aOptions.GetAsElementCreationOptions();
     // Throw NotFoundError if 'is' is not-null and definition is null
-    is = CheckCustomElementName(aOptions.GetAsElementCreationOptions(),
-      needsLowercase ? lcTagName : aTagName, mDefaultElementType, rv);
+    is = CheckCustomElementName(options,
+                                needsLowercase ? lcTagName : aTagName,
+                                mDefaultElementType, rv);
     if (rv.Failed()) {
       return nullptr;
+    }
+
+    // Check 'pseudo' and throw an exception if it's not one allowed
+    // with CSS_PSEUDO_ELEMENT_IS_JS_CREATED_NAC.
+    if (options.mPseudo.WasPassed()) {
+      pseudoType = GetPseudoElementType(options.mPseudo.Value(), rv);
+      if (rv.Failed() ||
+          pseudoType == CSSPseudoElementType::NotPseudo ||
+          !nsCSSPseudoElements::PseudoElementIsJSCreatedNAC(pseudoType)) {
+        rv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+        return nullptr;
+      }
     }
   }
 
   RefPtr<Element> elem = CreateElem(
     needsLowercase ? lcTagName : aTagName, nullptr, mDefaultElementType, is);
+
+  if (pseudoType != CSSPseudoElementType::NotPseudo) {
+    elem->SetPseudoElementType(pseudoType);
+  }
 
   return elem.forget();
 }
@@ -7888,12 +7928,9 @@ nsDocument::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 
   // Load events must not propagate to |window| object, see bug 335251.
   if (aVisitor.mEvent->mMessage != eLoad) {
-    nsPIDOMWindowInner* innerWindow = GetInnerWindow();
-    if (innerWindow && innerWindow->IsCurrentInnerWindow()) {
-      nsGlobalWindow* window = nsGlobalWindow::Cast(GetWindow());
-      aVisitor.mParentTarget =
-        window ? window->GetTargetForEventTargetChain() : nullptr;
-    }
+    nsGlobalWindow* window = nsGlobalWindow::Cast(GetWindow());
+    aVisitor.mParentTarget =
+      window ? window->GetTargetForEventTargetChain() : nullptr;
   }
   return NS_OK;
 }
@@ -9364,12 +9401,8 @@ SuppressEventHandlingInDocument(nsIDocument* aDocument, void* aData)
 void
 nsDocument::SuppressEventHandling(uint32_t aIncrease)
 {
-  if (mEventsSuppressed == 0 && aIncrease != 0 && mPresShell &&
-      mScriptGlobalObject) {
-    RevokeAnimationFrameNotifications();
-  }
-
   mEventsSuppressed += aIncrease;
+  UpdateFrameRequestCallbackSchedulingState();
   for (uint32_t i = 0; i < aIncrease; ++i) {
     ScriptLoader()->AddExecuteBlocker();
   }
@@ -9590,8 +9623,8 @@ nsDocument::ForgetImagePreload(nsIURI* aURI)
   }
 }
 
-EventStates
-nsDocument::GetDocumentState()
+void
+nsDocument::UpdatePossiblyStaleDocumentState()
 {
   if (!mGotDocumentState.HasState(NS_DOCUMENT_STATE_RTL_LOCALE)) {
     if (IsDocumentRightToLeft()) {
@@ -9607,7 +9640,19 @@ nsDocument::GetDocumentState()
     }
     mGotDocumentState |= NS_DOCUMENT_STATE_WINDOW_INACTIVE;
   }
+}
+
+EventStates
+nsDocument::ThreadSafeGetDocumentState() const
+{
   return mDocumentState;
+}
+
+EventStates
+nsDocument::GetDocumentState()
+{
+  UpdatePossiblyStaleDocumentState();
+  return ThreadSafeGetDocumentState();
 }
 
 namespace {
@@ -10025,14 +10070,10 @@ nsIDocument::ScheduleFrameRequestCallback(FrameRequestCallback& aCallback,
   }
   int32_t newHandle = ++mFrameRequestCallbackCounter;
 
-  bool alreadyRegistered = !mFrameRequestCallbacks.IsEmpty();
   DebugOnly<FrameRequest*> request =
     mFrameRequestCallbacks.AppendElement(FrameRequest(aCallback, newHandle));
   NS_ASSERTION(request, "This is supposed to be infallible!");
-  if (!alreadyRegistered && mPresShell && IsEventHandlingEnabled()) {
-    mPresShell->GetPresContext()->RefreshDriver()->
-      ScheduleFrameRequestCallbacks(this);
-  }
+  UpdateFrameRequestCallbackSchedulingState();
 
   *aHandle = newHandle;
   return NS_OK;
@@ -10042,11 +10083,8 @@ void
 nsIDocument::CancelFrameRequestCallback(int32_t aHandle)
 {
   // mFrameRequestCallbacks is stored sorted by handle
-  if (mFrameRequestCallbacks.RemoveElementSorted(aHandle) &&
-      mFrameRequestCallbacks.IsEmpty() &&
-      mPresShell && IsEventHandlingEnabled()) {
-    mPresShell->GetPresContext()->RefreshDriver()->
-      RevokeFrameRequestCallbacks(this);
+  if (mFrameRequestCallbacks.RemoveElementSorted(aHandle)) {
+    UpdateFrameRequestCallbackSchedulingState();
   }
 }
 
@@ -10282,22 +10320,6 @@ nsDocument::RemoveResponsiveContent(nsIContent* aContent)
 }
 
 void
-nsDocument::AddMediaContent(nsIContent* aContent)
-{
-  MOZ_ASSERT(aContent);
-  MOZ_ASSERT(aContent->IsHTMLElement(nsGkAtoms::video) ||
-             aContent->IsHTMLElement(nsGkAtoms::audio));
-  mMediaContent.PutEntry(aContent);
-}
-
-void
-nsDocument::RemoveMediaContent(nsIContent* aContent)
-{
-  MOZ_ASSERT(aContent);
-  mMediaContent.RemoveEntry(aContent);
-}
-
-void
 nsDocument::NotifyMediaFeatureValuesChanged()
 {
   for (auto iter = mResponsiveContent.ConstIter(); !iter.Done();
@@ -10512,6 +10534,81 @@ nsIDocument::ObsoleteSheet(const nsAString& aSheetURI, ErrorResult& rv)
   if (NS_FAILED(res)) {
     rv.Throw(res);
   }
+}
+
+class UnblockParsingPromiseHandler final : public PromiseNativeHandler
+{
+public:
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_CLASS(UnblockParsingPromiseHandler)
+
+  explicit UnblockParsingPromiseHandler(nsIDocument* aDocument, Promise* aPromise)
+    : mPromise(aPromise)
+  {
+    nsCOMPtr<nsIParser> parser = aDocument->CreatorParserOrNull();
+    if (parser) {
+      parser->BlockParser();
+      mParser = do_GetWeakReference(parser);
+    }
+  }
+
+  void
+  ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override
+  {
+    MaybeUnblockParser();
+
+    mPromise->MaybeResolve(aCx, aValue);
+  }
+
+  void
+  RejectedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override
+  {
+    MaybeUnblockParser();
+
+    mPromise->MaybeReject(aCx, aValue);
+  }
+
+protected:
+  virtual ~UnblockParsingPromiseHandler()
+  {
+    MaybeUnblockParser();
+  }
+
+private:
+  void MaybeUnblockParser() {
+    nsCOMPtr<nsIParser> parser = do_QueryReferent(mParser);
+    if (parser) {
+      parser->UnblockParser();
+      parser->ContinueInterruptedParsingAsync();
+      mParser = nullptr;
+    }
+  }
+
+  nsWeakPtr mParser;
+  RefPtr<Promise> mPromise;
+};
+
+NS_IMPL_CYCLE_COLLECTION(UnblockParsingPromiseHandler, mPromise)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(UnblockParsingPromiseHandler)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(UnblockParsingPromiseHandler)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(UnblockParsingPromiseHandler)
+
+already_AddRefed<Promise>
+nsIDocument::BlockParsing(Promise& aPromise, ErrorResult& aRv)
+{
+  RefPtr<Promise> resultPromise = Promise::Create(aPromise.GetParentObject(), aRv);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
+  RefPtr<PromiseNativeHandler> promiseHandler = new UnblockParsingPromiseHandler(this, resultPromise);
+  aPromise.AppendNativeHandler(promiseHandler);
+
+  return resultPromise.forget();
 }
 
 already_AddRefed<nsIURI>
@@ -12090,19 +12187,10 @@ nsDocument::PostVisibilityUpdateEvent()
 void
 nsDocument::MaybeActiveMediaComponents()
 {
-  if (mEverInForeground) {
-    return;
-  }
-
   if (!mWindow) {
     return;
   }
 
-  if (mMediaContent.IsEmpty()) {
-    return;
-  }
-
-  mEverInForeground = true;
   GetWindow()->MaybeActiveMediaComponents();
 }
 
@@ -12246,12 +12334,6 @@ nsDocument::DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
   aWindowSizes->mDOMOtherSize +=
     mAttrStyleSheet ?
     mAttrStyleSheet->DOMSizeOfIncludingThis(aWindowSizes->mMallocSizeOf) :
-    0;
-
-  aWindowSizes->mDOMOtherSize +=
-    mSVGAttrAnimationRuleProcessor ?
-    mSVGAttrAnimationRuleProcessor->DOMSizeOfIncludingThis(
-                                      aWindowSizes->mMallocSizeOf) :
     0;
 
   aWindowSizes->mDOMOtherSize +=

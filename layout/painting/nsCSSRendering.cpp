@@ -822,11 +822,11 @@ nsCSSRendering::PaintBorderWithStyleBorder(nsPresContext* aPresContext,
   // renderer draw the border.  DO not get the data from aForFrame, since the passed in style context
   // may be different!  Always use |aStyleContext|!
   const nsStyleDisplay* displayData = aStyleContext->StyleDisplay();
-  if (displayData->mAppearance) {
+  if (displayData->UsedAppearance()) {
     nsITheme *theme = aPresContext->GetTheme();
     if (theme &&
         theme->ThemeSupportsWidget(aPresContext, aForFrame,
-                                   displayData->mAppearance)) {
+                                   displayData->UsedAppearance())) {
       return DrawResult::SUCCESS; // Let the theme handle it.
     }
   }
@@ -906,11 +906,11 @@ nsCSSRendering::CreateBorderRendererWithStyleBorder(nsPresContext* aPresContext,
                                                     Sides aSkipSides)
 {
   const nsStyleDisplay* displayData = aStyleContext->StyleDisplay();
-  if (displayData->mAppearance) {
+  if (displayData->UsedAppearance()) {
     nsITheme *theme = aPresContext->GetTheme();
     if (theme &&
         theme->ThemeSupportsWidget(aPresContext, aForFrame,
-                                   displayData->mAppearance)) {
+                                   displayData->UsedAppearance())) {
       return Nothing();
     }
   }
@@ -965,13 +965,8 @@ nsCSSRendering::CreateBorderRendererForOutline(nsPresContext* aPresContext,
 
   // Get our style context's color struct.
   const nsStyleOutline* ourOutline = aStyleContext->StyleOutline();
-  MOZ_ASSERT(ourOutline != NS_STYLE_BORDER_STYLE_NONE,
-             "shouldn't have created nsDisplayOutline item");
 
-  uint8_t outlineStyle = ourOutline->mOutlineStyle;
-  nscoord width = ourOutline->GetOutlineWidth();
-
-  if (width == 0 && outlineStyle != NS_STYLE_BORDER_STYLE_AUTO) {
+  if (!ourOutline->ShouldPaintOutline()) {
     // Empty outline
     return Nothing();
   }
@@ -1004,6 +999,8 @@ nsCSSRendering::CreateBorderRendererForOutline(nsPresContext* aPresContext,
   if (innerRect.Contains(aDirtyRect))
     return Nothing();
 
+  nscoord width = ourOutline->GetOutlineWidth();
+
   nsRect outerRect = innerRect;
   outerRect.Inflate(width, width);
 
@@ -1022,6 +1019,7 @@ nsCSSRendering::CreateBorderRendererForOutline(nsPresContext* aPresContext,
   RectCornerRadii outlineRadii;
   ComputePixelRadii(twipsRadii, twipsPerPixel, &outlineRadii);
 
+  uint8_t outlineStyle = ourOutline->mOutlineStyle;
   if (outlineStyle == NS_STYLE_BORDER_STYLE_AUTO) {
     if (nsLayoutUtils::IsOutlineStyleAutoEnabled()) {
       nsITheme* theme = aPresContext->GetTheme();
@@ -1592,7 +1590,7 @@ nsCSSRendering::PaintBoxShadowOuter(nsPresContext* aPresContext,
       nativeRect.IntersectRect(frameRect, nativeRect);
       nsRenderingContext wrapperCtx(shadowContext);
       aPresContext->GetTheme()->DrawWidgetBackground(&wrapperCtx, aForFrame,
-          styleDisplay->mAppearance, aFrameArea, nativeRect);
+          styleDisplay->UsedAppearance(), aFrameArea, nativeRect);
 
       blurringArea.DoPaint();
       renderContext->Restore();
@@ -1698,7 +1696,7 @@ nsCSSRendering::GetBoxShadowInnerPaddingRect(nsIFrame* aFrame,
 }
 
 bool
-nsCSSRendering::CanPaintBoxShadowInner(nsIFrame* aFrame)
+nsCSSRendering::ShouldPaintBoxShadowInner(nsIFrame* aFrame)
 {
   nsCSSShadowArray* shadows = aFrame->StyleEffects()->mBoxShadow;
   if (!shadows)
@@ -1757,7 +1755,7 @@ nsCSSRendering::PaintBoxShadowInner(nsPresContext* aPresContext,
                                     nsIFrame* aForFrame,
                                     const nsRect& aFrameArea)
 {
-  if (!CanPaintBoxShadowInner(aForFrame)) {
+  if (!ShouldPaintBoxShadowInner(aForFrame)) {
     return;
   }
 
@@ -1937,7 +1935,7 @@ nsCSSRendering::PaintStyleImageLayer(const PaintBGParams& aParams)
     // a root, otherwise keep going in order to let the theme stuff
     // draw the background. The canvas really should be drawing the
     // bg, but there's no way to hook that up via css.
-    if (!aParams.frame->StyleDisplay()->mAppearance) {
+    if (!aParams.frame->StyleDisplay()->UsedAppearance()) {
       return DrawResult::SUCCESS;
     }
 
@@ -2018,17 +2016,18 @@ SetupDirtyRects(const nsRect& aBGClipArea, const nsRect& aCallerDirtyRect,
 static bool
 IsSVGStyleGeometryBox(StyleGeometryBox aBox)
 {
-  return (aBox == StyleGeometryBox::Fill || aBox == StyleGeometryBox::Stroke ||
-          aBox == StyleGeometryBox::View);
+  return (aBox == StyleGeometryBox::FillBox ||
+          aBox == StyleGeometryBox::StrokeBox ||
+          aBox == StyleGeometryBox::ViewBox);
 }
 
 static bool
 IsHTMLStyleGeometryBox(StyleGeometryBox aBox)
 {
-  return (aBox == StyleGeometryBox::Content ||
-          aBox == StyleGeometryBox::Padding ||
-          aBox == StyleGeometryBox::Border ||
-          aBox == StyleGeometryBox::Margin);
+  return (aBox == StyleGeometryBox::ContentBox ||
+          aBox == StyleGeometryBox::PaddingBox ||
+          aBox == StyleGeometryBox::BorderBox ||
+          aBox == StyleGeometryBox::MarginBox);
 }
 
 static StyleGeometryBox
@@ -2038,13 +2037,13 @@ ComputeBoxValue(nsIFrame* aForFrame, StyleGeometryBox aBox)
     // For elements with associated CSS layout box, the values fill-box,
     // stroke-box and view-box compute to the initial value of mask-clip.
     if (IsSVGStyleGeometryBox(aBox)) {
-      return StyleGeometryBox::Border;
+      return StyleGeometryBox::BorderBox;
     }
   } else {
     // For SVG elements without associated CSS layout box, the values
     // content-box, padding-box, border-box and margin-box compute to fill-box.
     if (IsHTMLStyleGeometryBox(aBox)) {
-      return StyleGeometryBox::Fill;
+      return StyleGeometryBox::FillBox;
     }
   }
 
@@ -2088,9 +2087,9 @@ nsCSSRendering::GetImageLayerClip(const nsStyleImageLayers::Layer& aLayer,
     nsRect clipArea =
       nsLayoutUtils::ComputeGeometryBox(aForFrame, layerClip);
 
-    nsRect strokeBox = (layerClip == StyleGeometryBox::Stroke)
+    nsRect strokeBox = (layerClip == StyleGeometryBox::StrokeBox)
       ? clipArea
-      : nsLayoutUtils::ComputeGeometryBox(aForFrame, StyleGeometryBox::Stroke);
+      : nsLayoutUtils::ComputeGeometryBox(aForFrame, StyleGeometryBox::StrokeBox);
     nsRect clipAreaRelativeToStrokeBox = clipArea - strokeBox.TopLeft();
 
     // aBorderArea is the stroke-box area in a coordinate space defined by
@@ -2135,13 +2134,13 @@ nsCSSRendering::GetImageLayerClip(const nsStyleImageLayers::Layer& aLayer,
 
   bool isSolidBorder =
       aWillPaintBorder && IsOpaqueBorder(aBorder);
-  if (isSolidBorder && layerClip == StyleGeometryBox::Border) {
+  if (isSolidBorder && layerClip == StyleGeometryBox::BorderBox) {
     // If we have rounded corners, we need to inflate the background
     // drawing area a bit to avoid seams between the border and
     // background.
     layerClip = haveRoundedCorners
                      ? StyleGeometryBox::MozAlmostPadding
-                     : StyleGeometryBox::Padding;
+                     : StyleGeometryBox::PaddingBox;
   }
 
   aClipState->mBGClipArea = clipBorderArea;
@@ -2155,7 +2154,7 @@ nsCSSRendering::GetImageLayerClip(const nsStyleImageLayers::Layer& aLayer,
     // but the background is also clipped at a non-scrolling 'padding-box'
     // like the content. (See below.)
     // Therefore, only 'content-box' makes a difference here.
-    if (layerClip == StyleGeometryBox::Content) {
+    if (layerClip == StyleGeometryBox::ContentBox) {
       nsIScrollableFrame* scrollableFrame = do_QueryFrame(aForFrame);
       // Clip at a rectangle attached to the scrolled content.
       aClipState->mHasAdditionalBGClipArea = true;
@@ -2175,7 +2174,7 @@ nsCSSRendering::GetImageLayerClip(const nsStyleImageLayers::Layer& aLayer,
 
     // Also clip at a non-scrolling, rounded-corner 'padding-box',
     // same as the scrolled content because of the 'overflow' property.
-    layerClip = StyleGeometryBox::Padding;
+    layerClip = StyleGeometryBox::PaddingBox;
   }
 
   // See the comment of StyleGeometryBox::Margin.
@@ -2183,10 +2182,10 @@ nsCSSRendering::GetImageLayerClip(const nsStyleImageLayers::Layer& aLayer,
   // positioned mask from CSS parser and style system. In this case, you
   // should *inflate* mBGClipArea by the margin returning from
   // aForFrame->GetUsedMargin() in the code chunk bellow.
-  MOZ_ASSERT(layerClip != StyleGeometryBox::Margin,
-             "StyleGeometryBox::Margin rendering is not supported yet.\n");
+  MOZ_ASSERT(layerClip != StyleGeometryBox::MarginBox,
+             "StyleGeometryBox::MarginBox rendering is not supported yet.\n");
 
-  if (layerClip != StyleGeometryBox::Border &&
+  if (layerClip != StyleGeometryBox::BorderBox &&
       layerClip != StyleGeometryBox::Text) {
     nsMargin border = aForFrame->GetUsedBorder();
     if (layerClip == StyleGeometryBox::MozAlmostPadding) {
@@ -2197,8 +2196,8 @@ nsCSSRendering::GetImageLayerClip(const nsStyleImageLayers::Layer& aLayer,
       border.right = std::max(0, border.right - aAppUnitsPerPixel);
       border.bottom = std::max(0, border.bottom - aAppUnitsPerPixel);
       border.left = std::max(0, border.left - aAppUnitsPerPixel);
-    } else if (layerClip != StyleGeometryBox::Padding) {
-      NS_ASSERTION(layerClip == StyleGeometryBox::Content,
+    } else if (layerClip != StyleGeometryBox::PaddingBox) {
+      NS_ASSERTION(layerClip == StyleGeometryBox::ContentBox,
                    "unexpected background-clip");
       border += aForFrame->GetUsedPadding();
     }
@@ -2902,7 +2901,7 @@ ClampColorStops(nsTArray<ColorStop>& aStops)
 
 void
 nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
-                              nsRenderingContext& aRenderingContext,
+                              gfxContext& aContext,
                               nsStyleGradient* aGradient,
                               const nsRect& aDirtyRect,
                               const nsRect& aDest,
@@ -2920,7 +2919,6 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
     return;
   }
 
-  gfxContext *ctx = aRenderingContext.ThebesContext();
   nscoord appUnitsPerDevPixel = aPresContext->AppUnitsPerDevPixel();
   gfxSize srcSize = gfxSize(gfxFloat(aIntrinsicSize.width)/appUnitsPerDevPixel,
                             gfxFloat(aIntrinsicSize.height)/appUnitsPerDevPixel);
@@ -3224,9 +3222,6 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
                gfxFloat(aPresContext->CSSPixelsToAppUnits(aSrc.height))/aDest.height);
   gradientPattern->SetMatrix(matrix);
 
-  if (gradientPattern->CairoStatus())
-    return;
-
   if (stopDelta == 0.0) {
     // Non-repeating gradient with all stops in same place -> just add
     // first stop and last stop, both at position 0.
@@ -3263,7 +3258,7 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
     rawStops[i].offset = stopScale * (stops[i].mPosition - stopOrigin);
   }
   RefPtr<mozilla::gfx::GradientStops> gs =
-    gfxGradientCache::GetOrCreateGradientStops(ctx->GetDrawTarget(),
+    gfxGradientCache::GetOrCreateGradientStops(aContext.GetDrawTarget(),
                                                rawStops,
                                                isRepeat ? gfx::ExtendMode::REPEAT : gfx::ExtendMode::CLAMP);
   gradientPattern->SetColorStops(gs);
@@ -3281,7 +3276,7 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
   gfxRect dirtyAreaToFill = nsLayoutUtils::RectToGfxRect(dirty, appUnitsPerDevPixel);
   dirtyAreaToFill.RoundOut();
 
-  gfxMatrix ctm = ctx->CurrentMatrix();
+  gfxMatrix ctm = aContext.CurrentMatrix();
   bool isCTMPreservingAxisAlignedRectangles = ctm.PreservesAxisAlignedRectangles();
 
   // xStart/yStart are the top-left corner of the top-left tile.
@@ -3309,9 +3304,9 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
       // Snap three points instead of just two to ensure we choose the
       // correct orientation if there's a reflection.
       if (isCTMPreservingAxisAlignedRectangles &&
-          ctx->UserToDevicePixelSnapped(snappedFillRectTopLeft, true) &&
-          ctx->UserToDevicePixelSnapped(snappedFillRectBottomRight, true) &&
-          ctx->UserToDevicePixelSnapped(snappedFillRectTopRight, true)) {
+          aContext.UserToDevicePixelSnapped(snappedFillRectTopLeft, true) &&
+          aContext.UserToDevicePixelSnapped(snappedFillRectBottomRight, true) &&
+          aContext.UserToDevicePixelSnapped(snappedFillRectTopRight, true)) {
         if (snappedFillRectTopLeft.x == snappedFillRectBottomRight.x ||
             snappedFillRectTopLeft.y == snappedFillRectBottomRight.y) {
           // Nothing to draw; avoid scaling by zero and other weirdness that
@@ -3324,10 +3319,10 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
         gfxMatrix transform = gfxUtils::TransformRectToRect(fillRect,
             snappedFillRectTopLeft, snappedFillRectTopRight,
             snappedFillRectBottomRight);
-        ctx->SetMatrix(transform);
+        aContext.SetMatrix(transform);
       }
-      ctx->NewPath();
-      ctx->Rectangle(fillRect);
+      aContext.NewPath();
+      aContext.Rectangle(fillRect);
 
       gfxRect dirtyFillRect = fillRect.Intersect(dirtyAreaToFill);
       gfxRect fillRectRelativeToTile = dirtyFillRect - tileRect.TopLeft();
@@ -3336,14 +3331,14 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
           RectIsBeyondLinearGradientEdge(fillRectRelativeToTile, matrix, stops,
                                          gradientStart, gradientEnd, &edgeColor)) {
         edgeColor.a *= aOpacity;
-        ctx->SetColor(edgeColor);
+        aContext.SetColor(edgeColor);
       } else {
-        ctx->SetMatrix(
-          ctx->CurrentMatrix().Copy().Translate(tileRect.TopLeft()));
-        ctx->SetPattern(gradientPattern);
+        aContext.SetMatrix(
+          aContext.CurrentMatrix().Copy().Translate(tileRect.TopLeft()));
+        aContext.SetPattern(gradientPattern);
       }
-      ctx->Fill();
-      ctx->SetMatrix(ctm);
+      aContext.Fill();
+      aContext.SetMatrix(ctm);
     }
   }
 }
@@ -3389,18 +3384,18 @@ nsCSSRendering::PaintStyleImageLayerWithSC(const PaintBGParams& aParams,
   // renderer draw the background and bail out.
   // XXXzw this ignores aParams.bgClipRect.
   const nsStyleDisplay* displayData = aParams.frame->StyleDisplay();
-  if (displayData->mAppearance) {
+  if (displayData->UsedAppearance()) {
     nsITheme *theme = aParams.presCtx.GetTheme();
     if (theme && theme->ThemeSupportsWidget(&aParams.presCtx,
                                             aParams.frame,
-                                            displayData->mAppearance)) {
+                                            displayData->UsedAppearance())) {
       nsRect drawing(aParams.borderArea);
       theme->GetWidgetOverflow(aParams.presCtx.DeviceContext(),
-                               aParams.frame, displayData->mAppearance,
+                               aParams.frame, displayData->UsedAppearance(),
                                &drawing);
       drawing.IntersectRect(drawing, aParams.dirtyRect);
       theme->DrawWidgetBackground(&aParams.renderingCtx, aParams.frame,
-                                  displayData->mAppearance, aParams.borderArea,
+                                  displayData->UsedAppearance(), aParams.borderArea,
                                   drawing);
       return DrawResult::SUCCESS;
     }
@@ -3528,7 +3523,7 @@ nsCSSRendering::PaintStyleImageLayerWithSC(const PaintBGParams& aParams,
                                  skipSides, &aBorder);
 
   DrawResult result = DrawResult::SUCCESS;
-  StyleGeometryBox currentBackgroundClip = StyleGeometryBox::Border;
+  StyleGeometryBox currentBackgroundClip = StyleGeometryBox::BorderBox;
   uint32_t count = drawAllLayers
     ? layers.mImageCount                  // iterate all image layers.
     : layers.mImageCount - aParams.layer; // iterate from the bottom layer to
@@ -3630,10 +3625,10 @@ nsCSSRendering::ComputeImageLayerPositioningArea(nsPresContext* aPresContext,
       nsLayoutUtils::ComputeGeometryBox(aForFrame, layerOrigin);
 
     nsPoint toStrokeBoxOffset = nsPoint(0, 0);
-    if (layerOrigin != StyleGeometryBox::Stroke) {
+    if (layerOrigin != StyleGeometryBox::StrokeBox) {
       nsRect strokeBox =
         nsLayoutUtils::ComputeGeometryBox(aForFrame,
-                                          StyleGeometryBox::Stroke);
+                                          StyleGeometryBox::StrokeBox);
       toStrokeBoxOffset = positionArea.TopLeft() - strokeBox.TopLeft();
     }
 
@@ -3657,16 +3652,16 @@ nsCSSRendering::ComputeImageLayerPositioningArea(nsPresContext* aPresContext,
     // The ScrolledRect’s size does not include the borders or scrollbars,
     // reverse the handling of background-origin
     // compared to the common case below.
-    if (layerOrigin == StyleGeometryBox::Border) {
+    if (layerOrigin == StyleGeometryBox::BorderBox) {
       nsMargin border = geometryFrame->GetUsedBorder();
       border.ApplySkipSides(geometryFrame->GetSkipSides());
       positionArea.Inflate(border);
       positionArea.Inflate(scrollableFrame->GetActualScrollbarSizes());
-    } else if (layerOrigin != StyleGeometryBox::Padding) {
+    } else if (layerOrigin != StyleGeometryBox::PaddingBox) {
       nsMargin padding = geometryFrame->GetUsedPadding();
       padding.ApplySkipSides(geometryFrame->GetSkipSides());
       positionArea.Deflate(padding);
-      NS_ASSERTION(layerOrigin == StyleGeometryBox::Content,
+      NS_ASSERTION(layerOrigin == StyleGeometryBox::ContentBox,
                    "unknown background-origin value");
     }
     *aAttachedToFrame = aForFrame;
@@ -3686,22 +3681,22 @@ nsCSSRendering::ComputeImageLayerPositioningArea(nsPresContext* aPresContext,
     positionArea = nsRect(nsPoint(0,0), aBorderArea.Size());
   }
 
-  // See the comment of StyleGeometryBox::Margin.
+  // See the comment of StyleGeometryBox::MarginBox.
   // Hitting this assertion means we decide to turn on margin-box support for
   // positioned mask from CSS parser and style system. In this case, you
   // should *inflate* positionArea by the margin returning from
   // geometryFrame->GetUsedMargin() in the code chunk bellow.
-  MOZ_ASSERT(aLayer.mOrigin != StyleGeometryBox::Margin,
-             "StyleGeometryBox::Margin rendering is not supported yet.\n");
+  MOZ_ASSERT(aLayer.mOrigin != StyleGeometryBox::MarginBox,
+             "StyleGeometryBox::MarginBox rendering is not supported yet.\n");
 
   // {background|mask} images are tiled over the '{background|mask}-clip' area
   // but the origin of the tiling is based on the '{background|mask}-origin'
   // area.
-  if (layerOrigin != StyleGeometryBox::Border && geometryFrame) {
+  if (layerOrigin != StyleGeometryBox::BorderBox && geometryFrame) {
     nsMargin border = geometryFrame->GetUsedBorder();
-    if (layerOrigin != StyleGeometryBox::Padding) {
+    if (layerOrigin != StyleGeometryBox::PaddingBox) {
       border += geometryFrame->GetUsedPadding();
-      NS_ASSERTION(layerOrigin == StyleGeometryBox::Content,
+      NS_ASSERTION(layerOrigin == StyleGeometryBox::ContentBox,
                    "unknown background-origin value");
     }
     positionArea.Deflate(border);

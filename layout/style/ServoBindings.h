@@ -38,6 +38,7 @@ namespace mozilla {
   namespace css {
     struct URLValue;
   };
+  enum class UpdateAnimationsTasks : uint8_t;
 }
 using mozilla::FontFamilyList;
 using mozilla::FontFamilyType;
@@ -115,6 +116,9 @@ uint32_t Gecko_ChildrenCount(RawGeckoNodeBorrowed node);
 bool Gecko_NodeIsElement(RawGeckoNodeBorrowed node);
 bool Gecko_IsInDocument(RawGeckoNodeBorrowed node);
 bool Gecko_FlattenedTreeParentIsParent(RawGeckoNodeBorrowed node);
+bool Gecko_IsSignificantChild(RawGeckoNodeBorrowed node,
+                              bool text_is_significant,
+                              bool whitespace_is_significant);
 RawGeckoNodeBorrowedOrNull Gecko_GetParentNode(RawGeckoNodeBorrowed node);
 RawGeckoNodeBorrowedOrNull Gecko_GetFirstChild(RawGeckoNodeBorrowed node);
 RawGeckoNodeBorrowedOrNull Gecko_GetLastChild(RawGeckoNodeBorrowed node);
@@ -128,6 +132,7 @@ RawGeckoElementBorrowedOrNull Gecko_GetDocumentElement(RawGeckoDocumentBorrowed 
 void Gecko_LoadStyleSheet(mozilla::css::Loader* loader,
                           mozilla::ServoStyleSheet* parent,
                           RawServoImportRuleBorrowed import_rule,
+                          nsIURI* base_uri,
                           const uint8_t* url_bytes,
                           uint32_t url_length,
                           const uint8_t* media_bytes,
@@ -144,7 +149,7 @@ void Gecko_DropStyleChildrenIterator(StyleChildrenIteratorOwned it);
 RawGeckoNodeBorrowedOrNull Gecko_GetNextStyleChild(StyleChildrenIteratorBorrowedMut it);
 
 // Selector Matching.
-uint16_t Gecko_ElementState(RawGeckoElementBorrowed element);
+uint64_t Gecko_ElementState(RawGeckoElementBorrowed element);
 bool Gecko_IsLink(RawGeckoElementBorrowed element);
 bool Gecko_IsTextNode(RawGeckoNodeBorrowed node);
 bool Gecko_IsVisitedLink(RawGeckoElementBorrowed element);
@@ -187,16 +192,20 @@ RawServoDeclarationBlockStrongBorrowedOrNull
 Gecko_GetHTMLPresentationAttrDeclarationBlock(RawGeckoElementBorrowed element);
 
 // Animations
-RawServoDeclarationBlockStrong
+bool
 Gecko_GetAnimationRule(RawGeckoElementBorrowed aElement,
                        nsIAtom* aPseudoTag,
-                       mozilla::EffectCompositor::CascadeLevel aCascadeLevel);
+                       mozilla::EffectCompositor::CascadeLevel aCascadeLevel,
+                       RawServoAnimationValueMapBorrowed aAnimationValues);
 bool Gecko_StyleAnimationsEquals(RawGeckoStyleAnimationListBorrowed,
                                  RawGeckoStyleAnimationListBorrowed);
 void Gecko_UpdateAnimations(RawGeckoElementBorrowed aElement,
                             nsIAtom* aPseudoTagOrNull,
                             ServoComputedValuesBorrowedOrNull aComputedValues,
-                            ServoComputedValuesBorrowedOrNull aParentComputedValues);
+                            ServoComputedValuesBorrowedOrNull aParentComputedValues,
+                            mozilla::UpdateAnimationsTasks aTaskBits);
+bool Gecko_ElementHasAnimations(RawGeckoElementBorrowed aElement,
+                                nsIAtom* aPseudoTagOrNull);
 bool Gecko_ElementHasCSSAnimations(RawGeckoElementBorrowed aElement,
                                    nsIAtom* aPseudoTagOrNull);
 
@@ -225,6 +234,7 @@ void Gecko_SetGradientImageValue(nsStyleImage* image, nsStyleGradient* gradient)
 void Gecko_SetUrlImageValue(nsStyleImage* image,
                             ServoBundledURI uri);
 void Gecko_CopyImageValueFrom(nsStyleImage* image, const nsStyleImage* other);
+void Gecko_InitializeImageCropRect(nsStyleImage* image);
 
 nsStyleGradient* Gecko_CreateGradient(uint8_t shape,
                                       uint8_t size,
@@ -295,6 +305,10 @@ void Gecko_EnsureImageLayersLength(nsStyleImageLayers* layers, size_t len,
 
 void Gecko_EnsureStyleAnimationArrayLength(void* array, size_t len);
 void Gecko_EnsureStyleTransitionArrayLength(void* array, size_t len);
+
+void Gecko_ClearWillChange(nsStyleDisplay* display, size_t length);
+void Gecko_AppendWillChange(nsStyleDisplay* display, nsIAtom* atom);
+void Gecko_CopyWillChangeFrom(nsStyleDisplay* dest, nsStyleDisplay* src);
 
 mozilla::Keyframe* Gecko_AnimationAppendKeyframe(RawGeckoKeyframeListBorrowedMut keyframes,
                                                  float offset,
@@ -368,6 +382,7 @@ bool Gecko_PropertyId_IsPrefEnabled(nsCSSPropertyID id);
 
 void Gecko_nsStyleFont_SetLang(nsStyleFont* font, nsIAtom* atom);
 void Gecko_nsStyleFont_CopyLangFrom(nsStyleFont* aFont, const nsStyleFont* aSource);
+nscoord Gecko_nsStyleFont_GetBaseSize(const nsStyleFont* font, RawGeckoPresContextBorrowed pres_context);
 
 const nsMediaFeature* Gecko_GetMediaFeatures();
 
@@ -375,6 +390,11 @@ const nsMediaFeature* Gecko_GetMediaFeatures();
 // because forward-declaring a nested enum/struct is impossible
 nscolor Gecko_GetLookAndFeelSystemColor(int32_t color_id,
                                         RawGeckoPresContextBorrowed pres_context);
+
+bool Gecko_MatchStringArgPseudo(RawGeckoElementBorrowed element,
+                                mozilla::CSSPseudoClassType type,
+                                const char16_t* ident,
+                                bool* set_slow_selector);
 
 // Style-struct management.
 #define STYLE_STRUCT(name, checkdata_cb)                                       \

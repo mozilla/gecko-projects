@@ -232,17 +232,16 @@ class BaseContext {
     if (error instanceof this.cloneScope.Error) {
       return error;
     }
-    let message;
-    if (instanceOf(error, "Object") || error instanceof ExtensionError) {
+    let message, fileName;
+    if (instanceOf(error, "Object") || error instanceof ExtensionError ||
+        (typeof error == "object" && this.principal.subsumes(Cu.getObjectPrincipal(error)))) {
       message = error.message;
-    } else if (typeof error == "object" &&
-        this.principal.subsumes(Cu.getObjectPrincipal(error))) {
-      message = error.message;
+      fileName = error.fileName;
     } else {
       Cu.reportError(error);
     }
     message = message || "An unexpected error occurred";
-    return new this.cloneScope.Error(message);
+    return new this.cloneScope.Error(message, fileName);
   }
 
   /**
@@ -690,8 +689,11 @@ class SchemaAPIManager extends EventEmitter {
       }
     }
 
+    function hasPermission(perm) {
+      return context.extension.hasPermission(perm, true);
+    }
     for (let api of apis) {
-      if (Schemas.checkPermissions(api.namespace, context.extension)) {
+      if (Schemas.checkPermissions(api.namespace, {hasPermission})) {
         api = api.getAPI(context);
         copy(obj, api);
       }

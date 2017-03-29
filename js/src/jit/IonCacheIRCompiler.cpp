@@ -543,7 +543,7 @@ bool
 IonCacheIRCompiler::emitGuardCompartment()
 {
     Register obj = allocator.useRegister(masm, reader.objOperandId());
-    objectStubField(reader.stubOffset()); // Read global.
+    objectStubField(reader.stubOffset()); // Read global wrapper.
     JSCompartment* compartment = compartmentStubField(reader.stubOffset());
 
     AutoScratchRegister scratch(allocator, masm);
@@ -651,6 +651,130 @@ IonCacheIRCompiler::emitLoadDynamicSlotResult()
     AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
     masm.loadPtr(Address(obj, NativeObject::offsetOfSlots()), scratch);
     masm.loadTypedOrValue(Address(scratch, offset), output);
+    return true;
+}
+
+bool
+IonCacheIRCompiler::emitMegamorphicLoadSlotResult()
+{
+    AutoOutputRegister output(*this);
+
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    PropertyName* name = stringStubField(reader.stubOffset())->asAtom().asPropertyName();
+    bool handleMissing = reader.readBool();
+
+    AutoScratchRegisterMaybeOutput scratch1(allocator, masm, output);
+    AutoScratchRegister scratch2(allocator, masm);
+    AutoScratchRegister scratch3(allocator, masm);
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+
+    masm.Push(UndefinedValue());
+    masm.moveStackPtrTo(scratch3.get());
+
+    LiveRegisterSet volatileRegs(GeneralRegisterSet::Volatile(), liveVolatileFloatRegs());
+    volatileRegs.takeUnchecked(scratch1);
+    volatileRegs.takeUnchecked(scratch2);
+    volatileRegs.takeUnchecked(scratch3);
+    masm.PushRegsInMask(volatileRegs);
+
+    masm.setupUnalignedABICall(scratch1);
+    masm.loadJSContext(scratch1);
+    masm.passABIArg(scratch1);
+    masm.passABIArg(obj);
+    masm.movePtr(ImmGCPtr(name), scratch2);
+    masm.passABIArg(scratch2);
+    masm.passABIArg(scratch3);
+    if (handleMissing)
+        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, (GetNativeDataProperty<true>)));
+    else
+        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, (GetNativeDataProperty<false>)));
+    masm.mov(ReturnReg, scratch2);
+    masm.PopRegsInMask(volatileRegs);
+
+    masm.loadTypedOrValue(Address(masm.getStackPointer(), 0), output);
+    masm.adjustStack(sizeof(Value));
+
+    masm.branchIfFalseBool(scratch2, failure->label());
+    return true;
+}
+
+bool
+IonCacheIRCompiler::emitMegamorphicStoreSlot()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    PropertyName* name = stringStubField(reader.stubOffset())->asAtom().asPropertyName();
+    ValueOperand val = allocator.useValueRegister(masm, reader.valOperandId());
+    bool needsTypeBarrier = reader.readBool();
+
+    AutoScratchRegister scratch1(allocator, masm);
+    AutoScratchRegister scratch2(allocator, masm);
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+
+    masm.Push(val);
+    masm.moveStackPtrTo(val.scratchReg());
+
+    LiveRegisterSet volatileRegs(GeneralRegisterSet::Volatile(), liveVolatileFloatRegs());
+    volatileRegs.takeUnchecked(scratch1);
+    volatileRegs.takeUnchecked(scratch2);
+    volatileRegs.takeUnchecked(val);
+    masm.PushRegsInMask(volatileRegs);
+
+    masm.setupUnalignedABICall(scratch1);
+    masm.loadJSContext(scratch1);
+    masm.passABIArg(scratch1);
+    masm.passABIArg(obj);
+    masm.movePtr(ImmGCPtr(name), scratch2);
+    masm.passABIArg(scratch2);
+    masm.passABIArg(val.scratchReg());
+    if (needsTypeBarrier)
+        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, (SetNativeDataProperty<true>)));
+    else
+        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, (SetNativeDataProperty<false>)));
+    masm.mov(ReturnReg, scratch1);
+    masm.PopRegsInMask(volatileRegs);
+
+    masm.loadValue(Address(masm.getStackPointer(), 0), val);
+    masm.adjustStack(sizeof(Value));
+
+    masm.branchIfFalseBool(scratch1, failure->label());
+    return true;
+}
+
+bool
+IonCacheIRCompiler::emitGuardHasGetterSetter()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    Shape* shape = shapeStubField(reader.stubOffset());
+
+    AutoScratchRegister scratch1(allocator, masm);
+    AutoScratchRegister scratch2(allocator, masm);
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+
+    LiveRegisterSet volatileRegs(GeneralRegisterSet::Volatile(), liveVolatileFloatRegs());
+    volatileRegs.takeUnchecked(scratch1);
+    volatileRegs.takeUnchecked(scratch2);
+    masm.PushRegsInMask(volatileRegs);
+
+    masm.setupUnalignedABICall(scratch1);
+    masm.loadJSContext(scratch1);
+    masm.passABIArg(scratch1);
+    masm.passABIArg(obj);
+    masm.movePtr(ImmGCPtr(shape), scratch2);
+    masm.passABIArg(scratch2);
+    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, ObjectHasGetterSetter));
+    masm.mov(ReturnReg, scratch1);
+    masm.PopRegsInMask(volatileRegs);
+
+    masm.branchIfFalseBool(scratch1, failure->label());
     return true;
 }
 
@@ -1766,13 +1890,16 @@ IonCacheIRCompiler::emitLoadDOMExpandoValueGuardGeneration()
     return true;
 }
 
-bool
+void
 IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer, CacheKind kind,
-                         IonScript* ionScript, const PropertyTypeCheckInfo* typeCheckInfo)
+                         IonScript* ionScript, bool* attached,
+                         const PropertyTypeCheckInfo* typeCheckInfo)
 {
     // We shouldn't GC or report OOM (or any other exception) here.
     AutoAssertNoPendingException aanpe(cx);
     JS::AutoCheckCannotGC nogc;
+
+    MOZ_ASSERT(!*attached);
 
     // SetProp/SetElem stubs must have non-null typeCheckInfo.
     MOZ_ASSERT(!!typeCheckInfo == (kind == CacheKind::SetProp || kind == CacheKind::SetElem));
@@ -1780,7 +1907,7 @@ IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer, CacheKind k
     // Do nothing if the IR generator failed or triggered a GC that invalidated
     // the script.
     if (writer.failed() || ionScript->invalidated())
-        return false;
+        return;
 
     JitZone* jitZone = cx->zone()->jitZone();
     uint32_t stubDataOffset = sizeof(IonICStub);
@@ -1800,11 +1927,11 @@ IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer, CacheKind k
         stubInfo = CacheIRStubInfo::New(kind, ICStubEngine::IonIC, makesGCCalls,
                                         stubDataOffset, writer);
         if (!stubInfo)
-            return false;
+            return;
 
         CacheIRStubKey key(stubInfo);
         if (!jitZone->putIonCacheIRStubInfo(lookup, key))
-            return false;
+            return;
     }
 
     MOZ_ASSERT(stubInfo);
@@ -1815,9 +1942,16 @@ IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer, CacheKind k
     for (IonICStub* stub = firstStub_; stub; stub = stub->next()) {
         if (stub->stubInfo() != stubInfo)
             continue;
-        if (!writer.stubDataEqualsMaybeUpdate(stub->stubDataStart()))
+        bool updated = false;
+        if (!writer.stubDataEqualsMaybeUpdate(stub->stubDataStart(), &updated))
             continue;
-        return true;
+        if (updated || (typeCheckInfo && typeCheckInfo->needsTypeBarrier())) {
+            // We updated a stub or have a stub that requires property type
+            // checks. In this case the stub will likely handle more cases in
+            // the future and we shouldn't deoptimize.
+            *attached = true;
+        }
+        return;
     }
 
     size_t bytesNeeded = stubInfo->stubDataOffset() + stubInfo->stubDataSize();
@@ -1830,7 +1964,7 @@ IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer, CacheKind k
     ICStubSpace* stubSpace = cx->zone()->jitZone()->optimizedStubSpace();
     void* newStubMem = stubSpace->alloc(bytesNeeded);
     if (!newStubMem)
-        return false;
+        return;
 
     IonICStub* newStub = new(newStubMem) IonICStub(fallbackLabel_.raw(), stubInfo);
     writer.copyStubData(newStub->stubDataStart());
@@ -1838,12 +1972,12 @@ IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer, CacheKind k
     JitContext jctx(cx, nullptr);
     IonCacheIRCompiler compiler(cx, writer, this, ionScript, newStub, typeCheckInfo);
     if (!compiler.init())
-        return false;
+        return;
 
     JitCode* code = compiler.compile();
     if (!code)
-        return false;
+        return;
 
     attachStub(newStub, code);
-    return true;
+    *attached = true;
 }

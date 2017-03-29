@@ -21,7 +21,6 @@
   skin/classic/global/progressmeter.css                    (../../windows/global/progressmeter.css)
   skin/classic/global/resizer.css                          (../../windows/global/resizer.css)
   skin/classic/global/richlistbox.css                      (../../windows/global/richlistbox.css)
-  skin/classic/global/scale.css                            (../../windows/global/scale.css)
 #ifndef MOZ_THEME_FASTSTRIPE
   skin/classic/global/scrollbars.css                       (../../windows/global/xulscrollbars.css)
 #endif
@@ -51,8 +50,6 @@
   skin/classic/global/arrow/panelarrow-horizontal-themed.svg (../../windows/global/arrow/panelarrow-horizontal-themed.svg)
   skin/classic/global/arrow/panelarrow-vertical-themed.svg   (../../windows/global/arrow/panelarrow-vertical-themed.svg)
 
-  skin/classic/global/checkbox/cbox-check.gif              (../../windows/global/checkbox/cbox-check.gif)
-  skin/classic/global/checkbox/cbox-check-dis.gif          (../../windows/global/checkbox/cbox-check-dis.gif)
 * skin/classic/global/dirListing/dirListing.css            (../../windows/global/dirListing/dirListing.css)
   skin/classic/global/dirListing/folder.png                (../../windows/global/dirListing/folder.png)
   skin/classic/global/dirListing/local.png                 (../../windows/global/dirListing/local.png)
@@ -68,9 +65,6 @@
   skin/classic/global/icons/error-64.png                   (../../windows/global/icons/error-64.png)
   skin/classic/global/icons/expand.png                     (../../windows/global/icons/expand.png)
   skin/classic/global/icons/folder-item.png                (../../windows/global/icons/folder-item.png)
-  skin/classic/global/icons/information-16.png             (../../windows/global/icons/information-16.png)
-  skin/classic/global/icons/information-24.png             (../../windows/global/icons/information-24.png)
-  skin/classic/global/icons/information-32.png             (../../windows/global/icons/information-32.png)
   skin/classic/global/icons/Minimize.gif                   (../../windows/global/icons/Minimize.gif)
   skin/classic/global/icons/Print-preview.png              (../../windows/global/icons/Print-preview.png)
   skin/classic/global/icons/Portrait.png                   (../../windows/global/icons/Portrait.png)
@@ -90,8 +84,6 @@
   skin/classic/global/icons/windowControls.png             (../../windows/global/icons/windowControls.png)
   skin/classic/global/radio/radio-check.gif                (../../windows/global/radio/radio-check.gif)
   skin/classic/global/radio/radio-check-dis.gif            (../../windows/global/radio/radio-check-dis.gif)
-  skin/classic/global/scale/scale-tray-horiz.gif           (../../windows/global/scale/scale-tray-horiz.gif)
-  skin/classic/global/scale/scale-tray-vert.gif            (../../windows/global/scale/scale-tray-vert.gif)
   skin/classic/global/scrollbar/slider.gif                 (../../windows/global/scrollbar/slider.gif)
   skin/classic/global/splitter/grip-bottom.gif             (../../windows/global/splitter/grip-bottom.gif)
   skin/classic/global/splitter/grip-top.gif                (../../windows/global/splitter/grip-top.gif)

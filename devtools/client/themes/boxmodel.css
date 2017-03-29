@@ -52,7 +52,7 @@
 
 /* Regions are 3 nested elements with wide borders and outlines */
 
-.boxmodel-content {
+.boxmodel-contents {
   height: 18px;
 }
 
@@ -84,7 +84,7 @@
   border-color: #6a5acd;
 }
 
-.boxmodel-content {
+.boxmodel-contents {
   background-color: #87ceeb;
 }
 
@@ -104,7 +104,8 @@
 
 /* Editable region sizes are contained in absolutely positioned <p> */
 
-.boxmodel-main > p {
+.boxmodel-main > p,
+.boxmodel-size {
   position: absolute;
   pointer-events: none;
   margin: 0;
@@ -112,7 +113,8 @@
 }
 
 .boxmodel-main > p > span,
-.boxmodel-main > p > input {
+.boxmodel-main > p > input,
+.boxmodel-content {
   vertical-align: middle;
   pointer-events: auto;
 }
@@ -172,8 +174,8 @@
 .boxmodel-position.boxmodel-right,
 .boxmodel-margin.boxmodel-right,
 .boxmodel-margin.boxmodel-left,
-.boxmodel-border.boxmodel-left,
 .boxmodel-border.boxmodel-right,
+.boxmodel-border.boxmodel-left,
 .boxmodel-padding.boxmodel-right,
 .boxmodel-padding.boxmodel-left {
   width: 21px;
@@ -218,6 +220,12 @@
   height: 30px;
 }
 
+.boxmodel-size > p {
+  display: inline-block;
+  margin: auto;
+  line-height: 0;
+}
+
 .boxmodel-rotate.boxmodel-right.boxmodel-position:not(.boxmodel-editing) {
   border-top: none;
   border-left: 1px solid var(--theme-highlight-purple);
@@ -234,7 +242,7 @@
 .boxmodel-position.boxmodel-top,
 .boxmodel-position.boxmodel-bottom {
   border-left: 1px solid var(--theme-highlight-purple);
-  left: 49.5%;
+  left: calc(50% - 1px);
   padding-left: 1px;
 }
 
@@ -242,7 +250,7 @@
 .boxmodel-position.boxmodel-left {
   border-top: 1px solid var(--theme-highlight-purple);
   line-height: 15px;
-  top: 49.5%;
+  top: calc(50% - 1px);
   width: 30px;
 }
 
@@ -290,8 +298,6 @@
   border-bottom-color: hsl(0, 0%, 50%);
 }
 
-/* Make sure the content size doesn't appear as editable like the other sizes */
-
 .boxmodel-size > span {
   cursor: default;
 }
@@ -316,4 +322,13 @@
 
 .boxmodel-properties-wrapper {
   padding: 0 9px;
+}
+
+/* Box Model Main - Offset Parent */
+
+.boxmodel-offset-parent {
+  position: absolute;
+  top: -20px;
+  right: -10px;
+  color: var(--theme-highlight-purple);
 }

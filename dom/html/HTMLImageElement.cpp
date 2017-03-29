@@ -368,7 +368,7 @@ HTMLImageElement::GetAttributeMappingFunction() const
 
 nsresult
 HTMLImageElement::BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                                nsAttrValueOrString* aValue,
+                                const nsAttrValueOrString* aValue,
                                 bool aNotify)
 {
 
@@ -712,6 +712,7 @@ HTMLImageElement::IntrinsicState() const
 void
 HTMLImageElement::NodeInfoChanged(nsIDocument* aOldDoc)
 {
+  nsGenericHTMLElement::NodeInfoChanged(aOldDoc);
   // Resetting the last selected source if adoption steps are run.
   mLastSelectedSource = nullptr;
 }

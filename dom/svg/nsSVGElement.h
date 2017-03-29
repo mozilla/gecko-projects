@@ -118,7 +118,7 @@ public:
    * We override the default to unschedule computation of Servo declaration blocks
    * when adopted across documents.
    */
-  virtual void NodeInfoChanged(nsIDocument* aOldDoc) override;
+  virtual void NodeInfoChanged(nsIDocument* aOldDoc) final;
 
   NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker) override;
   void WalkAnimatedContentStyleRules(nsRuleWalker* aRuleWalker);
@@ -343,7 +343,7 @@ protected:
   // BeforeSetAttr since it would involve allocating extra SVG value types.
   // See the comment in nsSVGElement::WillChangeValue.
   virtual nsresult BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                                 nsAttrValueOrString* aValue,
+                                 const nsAttrValueOrString* aValue,
                                  bool aNotify) override final
   {
     return nsSVGElementBase::BeforeSetAttr(aNamespaceID, aName, aValue, aNotify);
@@ -356,9 +356,6 @@ protected:
   static nsresult ReportAttributeParseFailure(nsIDocument* aDocument,
                                               nsIAtom* aAttribute,
                                               const nsAString& aValue);
-
-  void UpdateAnimatedContentDeclarationBlock();
-  mozilla::DeclarationBlock* GetAnimatedContentDeclarationBlock();
 
   nsAttrValue WillChangeValue(nsIAtom* aName);
   // aNewValue is set to the old value. This value may be invalid if

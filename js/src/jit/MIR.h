@@ -4081,14 +4081,18 @@ class MCall
     uint32_t numActualArgs_;
 
     // True if the call is for JSOP_NEW.
-    bool construct_;
+    bool construct_:1;
 
-    bool needsArgCheck_;
+    // True if the caller does not use the return value.
+    bool ignoresReturnValue_:1;
 
-    MCall(WrappedFunction* target, uint32_t numActualArgs, bool construct)
+    bool needsArgCheck_:1;
+
+    MCall(WrappedFunction* target, uint32_t numActualArgs, bool construct, bool ignoresReturnValue)
       : target_(target),
         numActualArgs_(numActualArgs),
         construct_(construct),
+        ignoresReturnValue_(ignoresReturnValue),
         needsArgCheck_(true)
     {
         setResultType(MIRType::Value);
@@ -4097,7 +4101,7 @@ class MCall
   public:
     INSTRUCTION_HEADER(Call)
     static MCall* New(TempAllocator& alloc, JSFunction* target, size_t maxArgc, size_t numActualArgs,
-                      bool construct, bool isDOMCall);
+                      bool construct, bool ignoresReturnValue, bool isDOMCall);
 
     void initFunction(MDefinition* func) {
         initOperand(FunctionOperandIndex, func);
@@ -4140,6 +4144,10 @@ class MCall
 
     bool isConstructing() const {
         return construct_;
+    }
+
+    bool ignoresReturnValue() const {
+        return ignoresReturnValue_;
     }
 
     // The number of stack arguments is the max between the number of formal
@@ -4185,7 +4193,7 @@ class MCallDOMNative : public MCall
     // virtual things from MCall.
   protected:
     MCallDOMNative(WrappedFunction* target, uint32_t numActualArgs)
-        : MCall(target, numActualArgs, false)
+        : MCall(target, numActualArgs, false, false)
     {
         MOZ_ASSERT(getJitInfo()->type() != JSJitInfo::InlinableNative);
 
@@ -4200,7 +4208,8 @@ class MCallDOMNative : public MCall
     }
 
     friend MCall* MCall::New(TempAllocator& alloc, JSFunction* target, size_t maxArgc,
-                             size_t numActualArgs, bool construct, bool isDOMCall);
+                             size_t numActualArgs, bool construct, bool ignoresReturnValue,
+                             bool isDOMCall);
 
     const JSJitInfo* getJitInfo() const;
   public:
@@ -4213,27 +4222,6 @@ class MCallDOMNative : public MCall
     }
 
     virtual void computeMovable() override;
-};
-
-// arr.splice(start, deleteCount) with unused return value.
-class MArraySplice
-  : public MTernaryInstruction,
-    public Mix3Policy<ObjectPolicy<0>, IntPolicy<1>, IntPolicy<2> >::Data
-{
-  private:
-
-    MArraySplice(MDefinition* object, MDefinition* start, MDefinition* deleteCount)
-      : MTernaryInstruction(object, start, deleteCount)
-    { }
-
-  public:
-    INSTRUCTION_HEADER(ArraySplice)
-    TRIVIAL_NEW_WRAPPERS
-    NAMED_OPERANDS((0, object), (1, start), (2, deleteCount))
-
-    bool possiblyCalls() const override {
-        return true;
-    }
 };
 
 // fun.apply(self, arguments)
@@ -7013,7 +7001,7 @@ class MDiv : public MBinaryArithInstruction
     bool canBeNegativeOverflow_;
     bool canBeDivideByZero_;
     bool canBeNegativeDividend_;
-    bool unsigned_;
+    bool unsigned_;             // If false, signedness will be derived from operands
     bool trapOnError_;
     wasm::TrapOffset trapOffset_;
 
@@ -7151,7 +7139,7 @@ class MDiv : public MBinaryArithInstruction
 
 class MMod : public MBinaryArithInstruction
 {
-    bool unsigned_;
+    bool unsigned_;             // If false, signedness will be derived from operands
     bool canBeNegativeDividend_;
     bool canBePowerOfTwoDivisor_;
     bool canBeDivideByZero_;
@@ -11952,26 +11940,19 @@ class MCallSetElement
 };
 
 class MCallInitElementArray
-  : public MAryInstruction<2>,
-    public MixPolicy<ObjectPolicy<0>, BoxPolicy<1> >::Data
+  : public MTernaryInstruction,
+    public Mix3Policy<ObjectPolicy<0>, IntPolicy<1>, BoxPolicy<2> >::Data
 {
-    uint32_t index_;
-
-    MCallInitElementArray(MDefinition* obj, uint32_t index, MDefinition* val)
-      : index_(index)
+    MCallInitElementArray(MDefinition* obj, MDefinition* index, MDefinition* val)
+      : MTernaryInstruction(obj, index, val)
     {
-        initOperand(0, obj);
-        initOperand(1, val);
+        MOZ_ASSERT(index->type() == MIRType::Int32);
     }
 
   public:
     INSTRUCTION_HEADER(CallInitElementArray)
     TRIVIAL_NEW_WRAPPERS
-    NAMED_OPERANDS((0, object), (1, value))
-
-    uint32_t index() const {
-        return index_;
-    }
+    NAMED_OPERANDS((0, object), (1, index), (2, value))
 
     bool possiblyCalls() const override {
         return true;
@@ -13730,15 +13711,14 @@ class MWasmBoundsCheck
   : public MBinaryInstruction,
     public NoTypePolicy::Data
 {
-    bool redundant_;
     wasm::TrapOffset trapOffset_;
 
     explicit MWasmBoundsCheck(MDefinition* index, MDefinition* boundsCheckLimit, wasm::TrapOffset trapOffset)
       : MBinaryInstruction(index, boundsCheckLimit),
-        redundant_(false),
         trapOffset_(trapOffset)
     {
-        setGuard(); // Effectful: throws for OOB.
+        // Bounds check is effectful: it throws for OOB.
+        setGuard();
     }
 
   public:
@@ -13751,11 +13731,11 @@ class MWasmBoundsCheck
     }
 
     bool isRedundant() const {
-        return redundant_;
+        return !isGuard();
     }
 
-    void setRedundant(bool val) {
-        redundant_ = val;
+    void setRedundant() {
+        setNotGuard();
     }
 
     wasm::TrapOffset trapOffset() const {
@@ -14259,12 +14239,11 @@ class MWasmParameter : public MNullaryInstruction
 };
 
 class MWasmReturn
-  : public MAryControlInstruction<2, 0>,
+  : public MAryControlInstruction<1, 0>,
     public NoTypePolicy::Data
 {
-    explicit MWasmReturn(MDefinition* ins, MDefinition* tlsPtr) {
+    explicit MWasmReturn(MDefinition* ins) {
         initOperand(0, ins);
-        initOperand(1, tlsPtr);
     }
 
   public:
@@ -14273,13 +14252,9 @@ class MWasmReturn
 };
 
 class MWasmReturnVoid
-  : public MAryControlInstruction<1, 0>,
+  : public MAryControlInstruction<0, 0>,
     public NoTypePolicy::Data
 {
-    explicit MWasmReturnVoid(MDefinition* tlsPtr) {
-        initOperand(0, tlsPtr);
-    }
-
   public:
     INSTRUCTION_HEADER(WasmReturnVoid)
     TRIVIAL_NEW_WRAPPERS
@@ -14317,15 +14292,12 @@ class MWasmCall final
     wasm::CalleeDesc callee_;
     FixedList<AnyRegister> argRegs_;
     uint32_t spIncrement_;
-    uint32_t tlsStackOffset_;
     ABIArg instanceArg_;
 
-    MWasmCall(const wasm::CallSiteDesc& desc, const wasm::CalleeDesc& callee, uint32_t spIncrement,
-              uint32_t tlsStackOffset)
+    MWasmCall(const wasm::CallSiteDesc& desc, const wasm::CalleeDesc& callee, uint32_t spIncrement)
       : desc_(desc),
         callee_(callee),
-        spIncrement_(spIncrement),
-        tlsStackOffset_(tlsStackOffset)
+        spIncrement_(spIncrement)
     { }
 
   public:
@@ -14338,15 +14310,12 @@ class MWasmCall final
     };
     typedef Vector<Arg, 8, SystemAllocPolicy> Args;
 
-    static const uint32_t DontSaveTls = UINT32_MAX;
-
     static MWasmCall* New(TempAllocator& alloc,
                           const wasm::CallSiteDesc& desc,
                           const wasm::CalleeDesc& callee,
                           const Args& args,
                           MIRType resultType,
                           uint32_t spIncrement,
-                          uint32_t tlsStackOffset,
                           MDefinition* tableIndex = nullptr);
 
     static MWasmCall* NewBuiltinInstanceMethodCall(TempAllocator& alloc,
@@ -14355,8 +14324,7 @@ class MWasmCall final
                                                    const ABIArg& instanceArg,
                                                    const Args& args,
                                                    MIRType resultType,
-                                                   uint32_t spIncrement,
-                                                   uint32_t tlsStackOffset);
+                                                   uint32_t spIncrement);
 
     size_t numArgs() const {
         return argRegs_.length();
@@ -14373,13 +14341,6 @@ class MWasmCall final
     }
     uint32_t spIncrement() const {
         return spIncrement_;
-    }
-    bool saveTls() const {
-        return tlsStackOffset_ != DontSaveTls;
-    }
-    uint32_t tlsStackOffset() const {
-        MOZ_ASSERT(saveTls());
-        return tlsStackOffset_;
     }
 
     bool possiblyCalls() const override {

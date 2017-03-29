@@ -12,15 +12,15 @@ Cu.import("resource://gre/modules/UpdateUtils.jsm");
 
  // The amount of people to be part of e10s
 const TEST_THRESHOLD = {
-  "beta"    : 0.5,  // 50%
-  "release" : 1.0,  // 100%
-  "esr"     : 1.0,  // 100%
+  "beta": 0.5,  // 50%
+  "release": 1.0,  // 100%
+  "esr": 1.0,  // 100%
 };
 
 const ADDON_ROLLOUT_POLICY = {
-  "beta"    : "51alladdons", // Any WebExtension or addon except with mpc = false
-  "release" : "51set1",
-  "esr"     : "esrA", // WebExtensions and Addons with mpc=true
+  "beta": "51alladdons", // Any WebExtension or addon except with mpc = false
+  "release": "50allmpc",
+  "esr": "esrA", // WebExtensions and Addons with mpc=true
 };
 
 const PREF_COHORT_SAMPLE       = "e10s.rollout.cohortSample";
@@ -73,7 +73,10 @@ function defineCohort() {
 
     Preferences.set(PREF_E10S_ADDON_BLOCKLIST,
                     // bug 1185672 - Tab Mix Plus
-                    "{dc572301-7619-498c-a57d-39143191b318};");
+                    "{dc572301-7619-498c-a57d-39143191b318};"
+                    // bug 1344345 - Mega
+                    + "firefox@mega.co.nz"
+                    );
   } else {
     Preferences.reset(PREF_E10S_ADDON_POLICY);
   }

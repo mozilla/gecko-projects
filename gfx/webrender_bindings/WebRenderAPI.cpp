@@ -46,6 +46,7 @@ public:
 
     RefPtr<gl::GLContext> gl = gl::GLContextProvider::CreateForCompositorWidget(mCompositorWidget, true);
     if (!gl || !gl->MakeCurrent()) {
+      gfxCriticalNote << "Failed GL context creation for WebRender: " << hexa(gl.get());
       return;
     }
 
@@ -55,6 +56,7 @@ public:
     WrRenderer* wrRenderer = nullptr;
     if (!wr_window_new(aWindowId, mSize.width, mSize.height, gl.get(),
                        this->mEnableProfiler, mWrApi, &wrRenderer)) {
+      // wr_window_new puts a message into gfxCriticalNote if it returns false
       return;
     }
     MOZ_ASSERT(wrRenderer);
@@ -228,7 +230,8 @@ WebRenderAPI::Readback(gfx::IntSize size,
             virtual void Run(RenderThread& aRenderThread, WindowId aWindowId) override
             {
                 aRenderThread.UpdateAndRender(aWindowId);
-                wr_renderer_readback(mSize.width, mSize.height, mBuffer, mBufferSize);
+                wr_renderer_readback(aRenderThread.GetRenderer(aWindowId)->GetWrRenderer(),
+                                     mSize.width, mSize.height, mBuffer, mBufferSize);
                 layers::AutoCompleteTask complete(mTask);
             }
 
@@ -298,7 +301,17 @@ WebRenderAPI::AddImage(ImageKey key, const ImageDescriptor& aDescriptor,
   wr_api_add_image(mWrApi,
                    key,
                    &aDescriptor,
-                   &aBytes[0], aBytes.length());
+                   RangeToByteSlice(aBytes));
+}
+
+void
+WebRenderAPI::AddBlobImage(ImageKey key, const ImageDescriptor& aDescriptor,
+                           Range<uint8_t> aBytes)
+{
+  wr_api_add_blob_image(mWrApi,
+                        key,
+                        &aDescriptor,
+                        RangeToByteSlice(aBytes));
 }
 
 void
@@ -333,7 +346,7 @@ WebRenderAPI::UpdateImageBuffer(ImageKey aKey,
   wr_api_update_image(mWrApi,
                       aKey,
                       &aDescriptor,
-                      &aBytes[0], aBytes.length());
+                      RangeToByteSlice(aBytes));
 }
 
 void

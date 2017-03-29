@@ -1382,16 +1382,16 @@ JS_RemoveFinalizeCallback(JSContext* cx, JSFinalizeCallback cb)
 }
 
 JS_PUBLIC_API(bool)
-JS_AddWeakPointerZoneGroupCallback(JSContext* cx, JSWeakPointerZoneGroupCallback cb, void* data)
+JS_AddWeakPointerZonesCallback(JSContext* cx, JSWeakPointerZonesCallback cb, void* data)
 {
     AssertHeapIsIdle();
-    return cx->runtime()->gc.addWeakPointerZoneGroupCallback(cb, data);
+    return cx->runtime()->gc.addWeakPointerZonesCallback(cb, data);
 }
 
 JS_PUBLIC_API(void)
-JS_RemoveWeakPointerZoneGroupCallback(JSContext* cx, JSWeakPointerZoneGroupCallback cb)
+JS_RemoveWeakPointerZonesCallback(JSContext* cx, JSWeakPointerZonesCallback cb)
 {
-    cx->runtime()->gc.removeWeakPointerZoneGroupCallback(cb);
+    cx->runtime()->gc.removeWeakPointerZonesCallback(cb);
 }
 
 JS_PUBLIC_API(bool)
@@ -6098,10 +6098,10 @@ JS_GetRegExpFlags(JSContext* cx, HandleObject obj)
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
-    RegExpGuard shared(cx);
+    RootedRegExpShared shared(cx);
     if (!RegExpToShared(cx, obj, &shared))
         return false;
-    return shared.re()->getFlags();
+    return shared->getFlags();
 }
 
 JS_PUBLIC_API(JSString*)
@@ -6110,10 +6110,10 @@ JS_GetRegExpSource(JSContext* cx, HandleObject obj)
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
-    RegExpGuard shared(cx);
+    RootedRegExpShared shared(cx);
     if (!RegExpToShared(cx, obj, &shared))
         return nullptr;
-    return shared.re()->getSource();
+    return shared->getSource();
 }
 
 /************************************************************************/
@@ -6341,8 +6341,10 @@ CreateErrorNoteVA(JSContext* cx,
                   ErrorArgumentsType argumentsType, va_list ap)
 {
     auto note = MakeUnique<JSErrorNotes::Note>();
-    if (!note)
+    if (!note) {
+        ReportOutOfMemory(cx);
         return nullptr;
+    }
 
     note->errorNumber = errorNumber;
     note->filename = filename;
@@ -6424,8 +6426,10 @@ UniquePtr<JSErrorNotes>
 JSErrorNotes::copy(JSContext* cx)
 {
     auto copiedNotes = MakeUnique<JSErrorNotes>();
-    if (!copiedNotes)
+    if (!copiedNotes) {
+        ReportOutOfMemory(cx);
         return nullptr;
+    }
 
     for (auto&& note : *this) {
         js::UniquePtr<JSErrorNotes::Note> copied(CopyErrorNote(cx, note.get()));

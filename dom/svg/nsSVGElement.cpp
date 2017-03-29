@@ -47,7 +47,6 @@
 #include "nsIFrame.h"
 #include "nsQueryObject.h"
 #include <stdarg.h>
-#include "nsSMILMappedAttribute.h"
 #include "SVGMotionSMILAttr.h"
 #include "nsAttrValueOrString.h"
 #include "nsSMILAnimationController.h"
@@ -910,6 +909,7 @@ nsSVGElement::IsNodeOfType(uint32_t aFlags) const
 void
 nsSVGElement::NodeInfoChanged(nsIDocument* aOldDoc)
 {
+  nsSVGElementBase::NodeInfoChanged(aOldDoc);
   aOldDoc->UnscheduleSVGForPresAttrEvaluation(this);
   mContentDeclarationBlock = nullptr;
   OwnerDoc()->ScheduleSVGForPresAttrEvaluation(this);
@@ -932,34 +932,6 @@ nsSVGElement::WalkContentStyleRules(nsRuleWalker* aRuleWalker)
   }
 
   return NS_OK;
-}
-
-void
-nsSVGElement::WalkAnimatedContentStyleRules(nsRuleWalker* aRuleWalker)
-{
-  // Update & walk the animated content style rule, to include style from
-  // animated mapped attributes.  But first, get nsPresContext to check
-  // whether this is a "no-animation restyle". (This should match the check
-  // in nsHTMLCSSStyleSheet::RulesMatching(), where we determine whether to
-  // apply the SMILOverrideStyle.)
-  RestyleManager* restyleManager =
-    aRuleWalker->PresContext()->RestyleManager();
-  MOZ_ASSERT(restyleManager->IsGecko(),
-             "stylo: Servo-backed style system should not be calling "
-             "WalkAnimatedContentStyleRules");
-  if (!restyleManager->AsGecko()->SkipAnimationRules()) {
-    // update/walk the animated content style rule.
-    DeclarationBlock* animContentDeclBlock = GetAnimatedContentDeclarationBlock();
-    if (!animContentDeclBlock) {
-      UpdateAnimatedContentDeclarationBlock();
-      animContentDeclBlock = GetAnimatedContentDeclarationBlock();
-    }
-    if (animContentDeclBlock) {
-      css::Declaration* declaration = animContentDeclBlock->AsGecko();
-      declaration->SetImmutable();
-      aRuleWalker->Forward(declaration);
-    }
-  }
 }
 
 NS_IMETHODIMP_(bool)
@@ -1381,85 +1353,6 @@ nsSVGElement::GetContentDeclarationBlock() const
   return mContentDeclarationBlock;
 }
 
-static void
-ParseMappedAttrAnimValueCallback(void*    aObject,
-                                 nsIAtom* aPropertyName,
-                                 void*    aPropertyValue,
-                                 void*    aData)
-{
-  MOZ_ASSERT(aPropertyName != SMIL_MAPPED_ATTR_STYLEDECL_ATOM,
-             "animated content style rule should have been removed "
-             "from properties table already (we're rebuilding it now)");
-
-  MappedAttrParser* mappedAttrParser = static_cast<MappedAttrParser*>(aData);
-  MOZ_ASSERT(mappedAttrParser, "parser should be non-null");
-
-  nsStringBuffer* animValBuf = static_cast<nsStringBuffer*>(aPropertyValue);
-  MOZ_ASSERT(animValBuf, "animated value should be non-null");
-
-  nsString animValStr;
-  nsContentUtils::PopulateStringFromStringBuffer(animValBuf, animValStr);
-
-  mappedAttrParser->ParseMappedAttrValue(aPropertyName, animValStr);
-}
-
-// Callback for freeing animated content decl block, in property table.
-static void
-ReleaseDeclBlock(void*    aObject,       /* unused */
-                 nsIAtom* aPropertyName,
-                 void*    aPropertyValue,
-                 void*    aData          /* unused */)
-{
-  MOZ_ASSERT(aPropertyName == SMIL_MAPPED_ATTR_STYLEDECL_ATOM,
-             "unexpected property name, for animated content style rule");
-  auto decl = static_cast<DeclarationBlock*>(aPropertyValue);
-  MOZ_ASSERT(decl, "unexpected null decl");
-  decl->Release();
-}
-
-void
-nsSVGElement::UpdateAnimatedContentDeclarationBlock()
-{
-  MOZ_ASSERT(!GetAnimatedContentDeclarationBlock(),
-             "Animated content declaration block already set");
-
-  nsIDocument* doc = OwnerDoc();
-  if (!doc) {
-    NS_ERROR("SVG element without owner document");
-    return;
-  }
-
-  // FIXME (bug 1342557): Support SMIL in Servo
-  MappedAttrParser mappedAttrParser(doc->CSSLoader(), doc->GetDocumentURI(),
-                                    GetBaseURI(), this, StyleBackendType::Gecko);
-  doc->PropertyTable(SMIL_MAPPED_ATTR_ANIMVAL)->
-    Enumerate(this, ParseMappedAttrAnimValueCallback, &mappedAttrParser);
- 
-  RefPtr<DeclarationBlock> animContentDeclBlock =
-    mappedAttrParser.GetDeclarationBlock();
-
-  if (animContentDeclBlock) {
-#ifdef DEBUG
-    nsresult rv =
-#endif
-      SetProperty(SMIL_MAPPED_ATTR_ANIMVAL,
-                  SMIL_MAPPED_ATTR_STYLEDECL_ATOM,
-                  animContentDeclBlock.forget().take(),
-                  ReleaseDeclBlock);
-    MOZ_ASSERT(rv == NS_OK,
-               "SetProperty failed (or overwrote something)");
-  }
-}
-
-DeclarationBlock*
-nsSVGElement::GetAnimatedContentDeclarationBlock()
-{
-  return
-    static_cast<DeclarationBlock*>(GetProperty(SMIL_MAPPED_ATTR_ANIMVAL,
-                                               SMIL_MAPPED_ATTR_STYLEDECL_ATOM,
-                                               nullptr));
-}
-
 /**
  * Helper methods for the type-specific WillChangeXXX methods.
  *
@@ -1509,26 +1402,15 @@ nsSVGElement::WillChangeValue(nsIAtom* aName)
   // We need an empty attr value:
   //   a) to pass to BeforeSetAttr when GetParsedAttr returns nullptr
   //   b) to store the old value in the case we have mutation listeners
-  // We can use the same value for both purposes since (a) happens before (b).
+  //
+  // We can use the same value for both purposes, because if GetParsedAttr
+  // returns non-null its return value is what will get passed to BeforeSetAttr,
+  // not matter what our mutation listener situation is.
+  //
   // Also, we should be careful to always return this value to benefit from
   // return value optimization.
   nsAttrValue emptyOrOldAttrValue;
   const nsAttrValue* attrValue = GetParsedAttr(aName);
-
-  // This is not strictly correct--the attribute value parameter for
-  // BeforeSetAttr should reflect the value that *will* be set but that implies
-  // allocating, e.g. an extra nsSVGLength2, and isn't necessary at the moment
-  // since no SVG elements overload BeforeSetAttr. For now we just pass the
-  // current value.
-  nsAttrValueOrString attrStringOrValue(attrValue ? *attrValue
-                                                  : emptyOrOldAttrValue);
-  DebugOnly<nsresult> rv =
-    BeforeSetAttr(kNameSpaceID_None, aName, &attrStringOrValue,
-                  kNotifyDocumentObservers);
-  // SVG elements aren't expected to overload BeforeSetAttr in such a way that
-  // it may fail. So long as this is the case we don't need to check and pass on
-  // the return value which simplifies the calling code significantly.
-  MOZ_ASSERT(NS_SUCCEEDED(rv), "Unexpected failure from BeforeSetAttr");
 
   // We only need to set the old value if we have listeners since otherwise it
   // isn't used.
@@ -1544,6 +1426,21 @@ nsSVGElement::WillChangeValue(nsIAtom* aName)
                   : static_cast<uint8_t>(nsIDOMMutationEvent::ADDITION);
   nsNodeUtils::AttributeWillChange(this, kNameSpaceID_None, aName, modType,
                                    nullptr);
+
+  // This is not strictly correct--the attribute value parameter for
+  // BeforeSetAttr should reflect the value that *will* be set but that implies
+  // allocating, e.g. an extra nsSVGLength2, and isn't necessary at the moment
+  // since no SVG elements overload BeforeSetAttr. For now we just pass the
+  // current value.
+  nsAttrValueOrString attrStringOrValue(attrValue ? *attrValue
+                                                  : emptyOrOldAttrValue);
+  DebugOnly<nsresult> rv =
+    BeforeSetAttr(kNameSpaceID_None, aName, &attrStringOrValue,
+                  kNotifyDocumentObservers);
+  // SVG elements aren't expected to overload BeforeSetAttr in such a way that
+  // it may fail. So long as this is the case we don't need to check and pass on
+  // the return value which simplifies the calling code significantly.
+  MOZ_ASSERT(NS_SUCCEEDED(rv), "Unexpected failure from BeforeSetAttr");
 
   return emptyOrOldAttrValue;
 }
@@ -2619,24 +2516,6 @@ nsISMILAttr*
 nsSVGElement::GetAnimatedAttr(int32_t aNamespaceID, nsIAtom* aName)
 {
   if (aNamespaceID == kNameSpaceID_None) {
-    // We check mapped-into-style attributes first so that animations
-    // targeting width/height on outer-<svg> don't appear to be ignored
-    // because we returned a nsISMILAttr for the corresponding
-    // SVGAnimatedLength.
-
-    // Mapped attributes:
-    if (IsAttributeMapped(aName)) {
-      nsCSSPropertyID prop =
-        nsCSSProps::LookupProperty(nsDependentAtomString(aName),
-                                   CSSEnabledState::eForAllContent);
-      // Check IsPropertyAnimatable to avoid attributes that...
-      //  - map to explicitly unanimatable properties (e.g. 'direction')
-      //  - map to unsupported attributes (e.g. 'glyph-orientation-horizontal')
-      if (nsSMILCSSProperty::IsPropertyAnimatable(prop)) {
-        return new nsSMILMappedAttribute(prop, this);
-      }
-    }
-
     // Transforms:
     if (GetTransformListAttrName() == aName) {
       // The transform attribute is being animated, so we must ensure that the

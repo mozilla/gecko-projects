@@ -567,7 +567,8 @@ impl<'a> CanvasPaintThread<'a> {
                                                 offset: 0,
                                                 is_opaque: false,
                                             },
-                                            element.into());
+                                            element.into(),
+                                            None);
 
             let data = CanvasImageData {
                 image_key: self.webrender_image_key,
@@ -746,7 +747,7 @@ fn crop_image(image_data: Vec<u8>,
     // (consecutive elements in a pixel row of the image are contiguous in memory)
     let stride = image_size.width * 4;
     let image_bytes_length = image_size.height * image_size.width * 4;
-    let crop_area_bytes_length = crop_rect.size.height * crop_rect.size.height * 4;
+    let crop_area_bytes_length = crop_rect.size.height * crop_rect.size.width * 4;
     // If the image size is less or equal than the crop area we do nothing
     if image_bytes_length <= crop_area_bytes_length {
         return image_data;

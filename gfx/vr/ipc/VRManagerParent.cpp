@@ -242,14 +242,6 @@ VRManagerParent::RecvRefreshDisplays()
 }
 
 mozilla::ipc::IPCResult
-VRManagerParent::RecvGetDisplays(nsTArray<VRDisplayInfo> *aDisplays)
-{
-  VRManager* vm = VRManager::Get();
-  vm->GetVRDisplayInfo(*aDisplays);
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
 VRManagerParent::RecvResetSensor(const uint32_t& aDisplayID)
 {
   VRManager* vm = VRManager::Get();
@@ -391,8 +383,9 @@ VRManagerParent::RecvSetDisplayInfoToMockDisplay(const uint32_t& aDeviceID,
                                                  const VRDisplayInfo& aDisplayInfo)
 {
   RefPtr<impl::VRDisplayPuppet> displayPuppet;
-  MOZ_ASSERT(mVRDisplayTests.Get(mDisplayTestID,
-                                 getter_AddRefs(displayPuppet)));
+  mVRDisplayTests.Get(mDisplayTestID,
+                      getter_AddRefs(displayPuppet));
+  MOZ_ASSERT(displayPuppet);
   displayPuppet->SetDisplayInfo(aDisplayInfo);
   return IPC_OK();
 }
@@ -402,8 +395,9 @@ VRManagerParent::RecvSetSensorStateToMockDisplay(const uint32_t& aDeviceID,
                                                  const VRHMDSensorState& aSensorState)
 {
   RefPtr<impl::VRDisplayPuppet> displayPuppet;
-  MOZ_ASSERT(mVRDisplayTests.Get(mControllerTestID,
-                                 getter_AddRefs(displayPuppet)));
+  mVRDisplayTests.Get(mDisplayTestID,
+                      getter_AddRefs(displayPuppet));
+  MOZ_ASSERT(displayPuppet);
   displayPuppet->SetSensorState(aSensorState);
   return IPC_OK();
 }
@@ -413,8 +407,9 @@ VRManagerParent::RecvNewButtonEventToMockController(const uint32_t& aDeviceID, c
                                                     const bool& aPressed)
 {
   RefPtr<impl::VRControllerPuppet> controllerPuppet;
-  MOZ_ASSERT(mVRControllerTests.Get(mControllerTestID,
-                                    getter_AddRefs(controllerPuppet)));
+  mVRControllerTests.Get(mControllerTestID,
+                         getter_AddRefs(controllerPuppet));
+  MOZ_ASSERT(controllerPuppet);
   controllerPuppet->SetButtonPressState(aButton, aPressed);
   return IPC_OK();
 }
@@ -424,8 +419,9 @@ VRManagerParent::RecvNewAxisMoveEventToMockController(const uint32_t& aDeviceID,
                                                       const double& aValue)
 {
   RefPtr<impl::VRControllerPuppet> controllerPuppet;
-  MOZ_ASSERT(mVRControllerTests.Get(mControllerTestID,
-                                    getter_AddRefs(controllerPuppet)));
+  mVRControllerTests.Get(mControllerTestID,
+                         getter_AddRefs(controllerPuppet));
+  MOZ_ASSERT(controllerPuppet);
   controllerPuppet->SetAxisMoveState(aAxis, aValue);
   return IPC_OK();
 }
@@ -435,9 +431,31 @@ VRManagerParent::RecvNewPoseMoveToMockController(const uint32_t& aDeviceID,
                                                  const GamepadPoseState& pose)
 {
   RefPtr<impl::VRControllerPuppet> controllerPuppet;
-  MOZ_ASSERT(mVRControllerTests.Get(mControllerTestID,
-                                    getter_AddRefs(controllerPuppet)));
+  mVRControllerTests.Get(mControllerTestID,
+                         getter_AddRefs(controllerPuppet));
+  MOZ_ASSERT(controllerPuppet);
   controllerPuppet->SetPoseMoveState(pose);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+VRManagerParent::RecvVibrateHaptic(const uint32_t& aControllerIdx,
+                                   const uint32_t& aHapticIndex,
+                                   const double& aIntensity,
+                                   const double& aDuration,
+                                   const uint32_t& aPromiseID)
+{
+  VRManager* vm = VRManager::Get();
+  vm->VibrateHaptic(aControllerIdx, aHapticIndex, aIntensity,
+                    aDuration, aPromiseID);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+VRManagerParent::RecvStopVibrateHaptic(const uint32_t& aControllerIdx)
+{
+  VRManager* vm = VRManager::Get();
+  vm->StopVibrateHaptic(aControllerIdx);
   return IPC_OK();
 }
 
@@ -446,8 +464,22 @@ VRManagerParent::SendGamepadUpdate(const GamepadChangeEvent& aGamepadEvent)
 {
   // GamepadManager only exists at the content process
   // or the same process in non-e10s mode.
-  if (mIsContentChild || IsSameProcess()) {
+  if (mHaveControllerListener &&
+      (mIsContentChild || IsSameProcess())) {
     return PVRManagerParent::SendGamepadUpdate(aGamepadEvent);
+  } else {
+    return true;
+  }
+}
+
+bool
+VRManagerParent::SendReplyGamepadVibrateHaptic(const uint32_t& aPromiseID)
+{
+  // GamepadManager only exists at the content process
+  // or the same process in non-e10s mode.
+  if (mHaveControllerListener &&
+      (mIsContentChild || IsSameProcess())) {
+    return PVRManagerParent::SendReplyGamepadVibrateHaptic(aPromiseID);
   } else {
     return true;
   }

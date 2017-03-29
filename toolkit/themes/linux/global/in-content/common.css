@@ -52,7 +52,7 @@ xul|menulist:not([editable="true"]) > xul|*.menulist-dropmarker {
 }
 
 xul|*.checkbox-check {
-  background-image: none !important;
+  background-image: none;
 }
 
 xul|*.checkbox-check[checked] {
@@ -88,10 +88,6 @@ xul|checkbox:not([disabled="true"]):hover {
 xul|*.numberbox-input-box {
   -moz-appearance: none;
   border-width: 0;
-}
-
-xul|*.text-link:-moz-focusring {
-  border: 1px dotted -moz-DialogText;
 }
 
 xul|menulist:-moz-focusring > xul|*.menulist-label-box,

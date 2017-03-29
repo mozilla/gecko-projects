@@ -15,7 +15,7 @@ Cu.import("resource://gre/modules/NotificationDB.jsm");
 
 // lazy module getters
 
-/* global AboutHome:false, AddonWatcher:false, AppConstants: false,
+/* global AboutHome:false, AddonWatcher:false,
           BrowserUITelemetry:false, BrowserUsageTelemetry:false, BrowserUtils:false,
           CastingApps:false, CharsetMenu:false, Color:false, ContentSearch:false,
           Deprecated:false, E10SUtils:false, FormValidationHandler:false,
@@ -28,7 +28,7 @@ Cu.import("resource://gre/modules/NotificationDB.jsm");
           Social:false, TabCrashHandler:false, Task:false, TelemetryStopwatch:false,
           Translation:false, UITour:false, UpdateUtils:false, Weave:false,
           fxAccounts:false, gDevTools:false, gDevToolsBrowser:false, webrtcUI:false,
-          URLBarZoom:false
+          FullZoomUI:false
  */
 
 /**
@@ -38,7 +38,6 @@ Cu.import("resource://gre/modules/NotificationDB.jsm");
 [
   ["AboutHome", "resource:///modules/AboutHome.jsm"],
   ["AddonWatcher", "resource://gre/modules/AddonWatcher.jsm"],
-  ["AppConstants", "resource://gre/modules/AppConstants.jsm"],
   ["BrowserUITelemetry", "resource:///modules/BrowserUITelemetry.jsm"],
   ["BrowserUsageTelemetry", "resource:///modules/BrowserUsageTelemetry.jsm"],
   ["BrowserUtils", "resource://gre/modules/BrowserUtils.jsm"],
@@ -50,6 +49,7 @@ Cu.import("resource://gre/modules/NotificationDB.jsm");
   ["E10SUtils", "resource:///modules/E10SUtils.jsm"],
   ["ExtensionsUI", "resource:///modules/ExtensionsUI.jsm"],
   ["FormValidationHandler", "resource:///modules/FormValidationHandler.jsm"],
+  ["FullZoomUI", "resource:///modules/FullZoomUI.jsm"],
   ["GMPInstallManager", "resource://gre/modules/GMPInstallManager.jsm"],
   ["LightweightThemeManager", "resource://gre/modules/LightweightThemeManager.jsm"],
   ["Log", "resource://gre/modules/Log.jsm"],
@@ -75,7 +75,6 @@ Cu.import("resource://gre/modules/NotificationDB.jsm");
   ["Translation", "resource:///modules/translation/Translation.jsm"],
   ["UITour", "resource:///modules/UITour.jsm"],
   ["UpdateUtils", "resource://gre/modules/UpdateUtils.jsm"],
-  ["URLBarZoom", "resource:///modules/URLBarZoom.jsm"],
   ["Weave", "resource://services-sync/main.js"],
   ["fxAccounts", "resource://gre/modules/FxAccounts.jsm"],
   ["gDevTools", "resource://devtools/client/framework/gDevTools.jsm"],
@@ -574,7 +573,7 @@ var gPopupBlockerObserver = {
       this._reportButton = document.getElementById("page-report-button");
 
     if (!gBrowser.selectedBrowser.blockedPopups ||
-        gBrowser.selectedBrowser.blockedPopups.count == 0) {
+        !gBrowser.selectedBrowser.blockedPopups.length) {
       // Hide the icon in the location bar (if the location bar exists)
       this._reportButton.hidden = true;
 
@@ -799,13 +798,13 @@ var gPopupBlockerObserver = {
     } catch (e) { }
 
     var bundlePreferences = document.getElementById("bundle_preferences");
-    var params = { blockVisible   : false,
-                   sessionVisible : false,
-                   allowVisible   : true,
-                   prefilledHost  : prefillValue,
-                   permissionType : "popup",
-                   windowTitle    : bundlePreferences.getString("popuppermissionstitle"),
-                   introText      : bundlePreferences.getString("popuppermissionstext") };
+    var params = { blockVisible: false,
+                   sessionVisible: false,
+                   allowVisible: true,
+                   prefilledHost: prefillValue,
+                   permissionType: "popup",
+                   windowTitle: bundlePreferences.getString("popuppermissionstitle"),
+                   introText: bundlePreferences.getString("popuppermissionstext") };
     var existingWindow = Services.wm.getMostRecentWindow("Browser:Permissions");
     if (existingWindow) {
       existingWindow.initWithParams(params);
@@ -1141,7 +1140,7 @@ var gBrowserInit = {
     TrackingProtection.init();
     RefreshBlocker.init();
     CaptivePortalWatcher.init();
-    URLBarZoom.init(window);
+    FullZoomUI.init(window);
 
     let mm = window.getGroupMessageManager("browsers");
     mm.loadFrameScript("chrome://browser/content/tab-content.js", true);
@@ -2572,8 +2571,13 @@ function URLBarSetURI(aURI) {
     valid = !isBlankPageURL(uri.spec);
   }
 
+  let isDifferentValidValue = valid && value != gURLBar.value;
   gURLBar.value = value;
   gURLBar.valueIsTyped = !valid;
+  if (isDifferentValidValue) {
+    gURLBar.selectionStart = gURLBar.selectionEnd = 0;
+  }
+
   SetPageProxyState(valid ? "valid" : "invalid");
 }
 
@@ -3052,7 +3056,7 @@ var BrowserOnClick = {
         securityInfo = getSecurityInfo(securityInfoAsString);
         let sslStatus = securityInfo.QueryInterface(Ci.nsISSLStatusProvider)
                                     .SSLStatus;
-        let params = { exceptionAdded : false,
+        let params = { exceptionAdded: false,
                        sslStatus };
 
         try {
@@ -3607,15 +3611,11 @@ function openHomeDialog(aURL) {
 
   var pressedVal  = Services.prompt.confirmEx(window, promptTitle, promptMsg,
                           Services.prompt.STD_YES_NO_BUTTONS,
-                          null, null, null, null, {value:0});
+                          null, null, null, null, {value: 0});
 
   if (pressedVal == 0) {
     try {
-      var homepageStr = Components.classes["@mozilla.org/supports-string;1"]
-                        .createInstance(Components.interfaces.nsISupportsString);
-      homepageStr.data = aURL;
-      gPrefService.setComplexValue("browser.startup.homepage",
-                                   Components.interfaces.nsISupportsString, homepageStr);
+      gPrefService.setStringPref("browser.startup.homepage", aURL);
     } catch (ex) {
       dump("Failed to set the home page.\n" + ex + "\n");
     }
@@ -4478,7 +4478,7 @@ var XULBrowserWindow = {
   },
 
   // Check whether this URI should load in the current process
-  shouldLoadURI(aDocShell, aURI, aReferrer, aTriggeringPrincipal) {
+  shouldLoadURI(aDocShell, aURI, aReferrer, aHasPostData, aTriggeringPrincipal) {
     if (!gMultiProcessBrowser)
       return true;
 
@@ -4491,7 +4491,10 @@ var XULBrowserWindow = {
     if (browser.localName != "browser" || !browser.getTabBrowser || browser.getTabBrowser() != gBrowser)
       return true;
 
-    if (!E10SUtils.shouldLoadURI(aDocShell, aURI, aReferrer)) {
+    if (!E10SUtils.shouldLoadURI(aDocShell, aURI, aReferrer, aHasPostData)) {
+      // XXX: Do we want to complain if we have post data but are still
+      // redirecting the load? Perhaps a telemetry probe? Theoretically we
+      // shouldn't do this, as it throws out data. See bug 1348018.
       E10SUtils.redirectLoad(aDocShell, aURI, aReferrer, aTriggeringPrincipal, false);
       return false;
     }
@@ -5471,19 +5474,29 @@ var gHomeButton = {
 
 const nodeToTooltipMap = {
   "bookmarks-menu-button": "bookmarksMenuButton.tooltip",
+  "context-reload": "reloadButton.tooltip",
+  "context-stop": "stopButton.tooltip",
+  "downloads-button": "downloads.tooltip",
+  "fullscreen-button": "fullscreenButton.tooltip",
   "new-window-button": "newWindowButton.tooltip",
   "new-tab-button": "newTabButton.tooltip",
   "tabs-newtab-button": "newTabButton.tooltip",
-  "fullscreen-button": "fullscreenButton.tooltip",
-  "downloads-button": "downloads.tooltip",
+  "urlbar-reload-button": "reloadButton.tooltip",
+  "urlbar-stop-button": "stopButton.tooltip",
+  "urlbar-zoom-button": "urlbar-zoom-button.tooltip",
 };
 const nodeToShortcutMap = {
   "bookmarks-menu-button": "manBookmarkKb",
+  "context-reload": "key_reload",
+  "context-stop": "key_stop",
+  "downloads-button": "key_openDownloads",
+  "fullscreen-button": "key_fullScreen",
   "new-window-button": "key_newNavigator",
   "new-tab-button": "key_newNavigatorTab",
   "tabs-newtab-button": "key_newNavigatorTab",
-  "fullscreen-button": "key_fullScreen",
-  "downloads-button": "key_openDownloads"
+  "urlbar-reload-button": "key_reload",
+  "urlbar-stop-button": "key_stop",
+  "urlbar-zoom-button": "key_fullZoomReset",
 };
 
 if (AppConstants.platform == "macosx") {
@@ -6229,7 +6242,7 @@ var OfflineApps = {
       let options = {
         persistent: true,
         hideClose: true,
-        controlledItems : [[Cu.getWeakReference(browser), docId, uri]]
+        controlledItems: [[Cu.getWeakReference(browser), docId, uri]]
       };
       notification = PopupNotifications.show(browser, notificationID, message,
                                              anchorID, mainAction,
@@ -6657,7 +6670,7 @@ function checkEmptyPageOrigin(browser = gBrowser.selectedBrowser,
   let contentPrincipal = browser.contentPrincipal;
   // Not all principals have URIs...
   if (contentPrincipal.URI) {
-    // There are two specialcases involving about:blank. One is where
+    // There are two special-cases involving about:blank. One is where
     // the user has manually loaded it and it got created with a null
     // principal. The other involves the case where we load
     // some other empty page in a browser and the current page is the
@@ -6665,7 +6678,13 @@ function checkEmptyPageOrigin(browser = gBrowser.selectedBrowser,
     // just URI in which case it could be web-based). Especially in
     // e10s, we need to tackle that case specifically to avoid race
     // conditions when updating the URL bar.
-    if ((uri.spec == "about:blank" && contentPrincipal.isNullPrincipal) ||
+    //
+    // Note that we check the documentURI here, since the currentURI on
+    // the browser might have been set by SessionStore in order to
+    // support switch-to-tab without having actually loaded the content
+    // yet.
+    let uriToCheck = browser.documentURI || uri;
+    if ((uriToCheck.spec == "about:blank" && contentPrincipal.isNullPrincipal) ||
         contentPrincipal.URI.spec == "about:blank") {
       return true;
     }
@@ -6679,6 +6698,35 @@ function checkEmptyPageOrigin(browser = gBrowser.selectedBrowser,
 
 function BrowserOpenSyncTabs() {
   gSyncUI.openSyncedTabsPanel();
+}
+
+function ReportFalseDeceptiveSite() {
+  let docURI = gBrowser.selectedBrowser.documentURI;
+  let isPhishingPage =
+    docURI && docURI.spec.startsWith("about:blocked?e=deceptiveBlocked");
+
+  if (isPhishingPage) {
+    let mm = gBrowser.selectedBrowser.messageManager;
+    let onMessage = (message) => {
+      mm.removeMessageListener("DeceptiveBlockedDetails:Result", onMessage);
+      let reportUrl = gSafeBrowsing.getReportURL("PhishMistake", message.data.blockedInfo);
+      if (reportUrl) {
+        openUILinkIn(reportUrl, "tab");
+      } else {
+        let promptService = Cc["@mozilla.org/embedcomp/prompt-service;1"].
+                            getService(Ci.nsIPromptService);
+        let bundle =
+          Services.strings.createBundle("chrome://browser/locale/safebrowsing/safebrowsing.properties");
+        promptService.alert(window,
+                            bundle.GetStringFromName("errorReportFalseDeceptiveTitle"),
+                            bundle.formatStringFromName("errorReportFalseDeceptiveMessage",
+                                                        [message.data.blockedInfo.provider], 1));
+        }
+    }
+    mm.addMessageListener("DeceptiveBlockedDetails:Result", onMessage);
+
+    mm.sendAsyncMessage("DeceptiveBlockedDetails");
+  }
 }
 
 /**

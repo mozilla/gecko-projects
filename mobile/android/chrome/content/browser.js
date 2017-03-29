@@ -118,6 +118,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "RuntimePermissions", "resource://gre/mo
 
 XPCOMUtils.defineLazyModuleGetter(this, "WebsiteMetadata", "resource://gre/modules/WebsiteMetadata.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch", "resource://gre/modules/TelemetryStopwatch.jsm");
+
 XPCOMUtils.defineLazyServiceGetter(this, "FontEnumerator",
   "@mozilla.org/gfx/fontenumerator;1",
   "nsIFontEnumerator");
@@ -1508,6 +1510,9 @@ var BrowserApp = {
   sanitize: function (aItems, callback, aShutdown) {
     let success = true;
     var promises = [];
+    let refObj = {};
+
+    TelemetryStopwatch.start("FX_SANITIZE_TOTAL", refObj);
 
     for (let key in aItems) {
       if (!aItems[key])
@@ -1532,6 +1537,7 @@ var BrowserApp = {
     }
 
     Promise.all(promises).then(function() {
+      TelemetryStopwatch.finish("FX_SANITIZE_TOTAL", refObj);
       GlobalEventDispatcher.sendRequest({
         type: "Sanitize:Finished",
         success: true,
@@ -1542,6 +1548,7 @@ var BrowserApp = {
         callback();
       }
     }).catch(function(err) {
+      TelemetryStopwatch.finish("FX_SANITIZE_TOTAL", refObj);
       GlobalEventDispatcher.sendRequest({
         type: "Sanitize:Finished",
         error: err,
@@ -1863,7 +1870,7 @@ var BrowserApp = {
           pinned: (data.pinned === true),
           delayLoad: (delayLoad === true),
           desktopMode: (data.desktopMode === true),
-          customTab: ("customTab" in data) ? data.customTab : false
+          tabType: ("tabType" in data) ? data.tabType : "BROWSING"
         };
 
         params.userRequested = url;
@@ -3386,8 +3393,8 @@ nsBrowserAccess.prototype = {
 
     if (aOpener != null) {
       let parent = BrowserApp.getTabForWindow(aOpener.top);
-      if ((parent != null) && ("isCustomTab" in parent)) {
-        newTab = newTab && !parent.isCustomTab;
+      if (parent != null) {
+        newTab = newTab && parent.tabType != "CUSTOMTAB";
       }
     }
 
@@ -3556,6 +3563,9 @@ Tab.prototype = {
     // Java and new tabs from Gecko.
     let stub = false;
 
+    // The authoritative list of possible tab types is the TabType enum in Tab.java.
+    this.type = "tabType" in aParams ? aParams.tabType : "BROWSING";
+
     if (!aParams.zombifying) {
       if ("tabID" in aParams) {
         this.id = aParams.tabID;
@@ -3578,6 +3588,7 @@ Tab.prototype = {
       let message = {
         type: "Tab:Added",
         tabID: this.id,
+        tabType: this.type,
         uri: truncate(uri, MAX_URI_LENGTH),
         parentId: this.parentId,
         tabIndex: ("tabIndex" in aParams) ? aParams.tabIndex : -1,
@@ -3618,7 +3629,7 @@ Tab.prototype = {
     this.browser.addEventListener("pageshow", this, true);
     this.browser.addEventListener("MozApplicationManifest", this, true);
     this.browser.addEventListener("TabPreZombify", this, true);
-    this.browser.addEventListener("DOMServiceWorkerFocusClient", this, true);
+    this.browser.addEventListener("DOMWindowFocus", this, true);
 
     // Note that the XBL binding is untrusted
     this.browser.addEventListener("PluginBindingAttached", this, true, true);
@@ -3657,7 +3668,6 @@ Tab.prototype = {
       // The search term the user entered to load the current URL
       this.userRequested = "userRequested" in aParams ? aParams.userRequested : "";
       this.isSearch = "isSearch" in aParams ? aParams.isSearch : false;
-      this.isCustomTab = "customTab" in aParams ? aParams.customTab : false;
 
       try {
         this.browser.loadURIWithFlags(aURL, flags, referrerURI, charset, postData);
@@ -3735,7 +3745,7 @@ Tab.prototype = {
     this.browser.removeEventListener("pageshow", this, true);
     this.browser.removeEventListener("MozApplicationManifest", this, true);
     this.browser.removeEventListener("TabPreZombify", this, true);
-    this.browser.removeEventListener("DOMServiceWorkerFocusClient", this, true);
+    this.browser.removeEventListener("DOMWindowFocus", this, true);
 
     this.browser.removeEventListener("PluginBindingAttached", this, true, true);
     this.browser.removeEventListener("VideoBindingAttached", this, true, true);
@@ -4070,10 +4080,8 @@ Tab.prototype = {
           this.browser.addEventListener("pagehide", listener, true);
         }
 
-        if (AppConstants.NIGHTLY_BUILD || AppConstants.MOZ_ANDROID_ACTIVITY_STREAM) {
-          if (!docURI.startsWith("about:")) {
-            WebsiteMetadata.parseAsynchronously(this.browser.contentDocument);
-          }
+        if (!docURI.startsWith("about:")) {
+          WebsiteMetadata.parseAsynchronously(this.browser.contentDocument);
         }
 
         break;
@@ -4258,7 +4266,7 @@ Tab.prototype = {
         break;
       }
 
-      case "DOMServiceWorkerFocusClient": {
+      case "DOMWindowFocus": {
         GlobalEventDispatcher.sendRequest({
           type: "Tab:Select",
           tabID: this.id,
@@ -4427,21 +4435,13 @@ Tab.prototype = {
     this.shouldShowPluginDoorhanger = true;
     this.clickToPlayPluginsActivated = false;
 
-    let documentURI = contentWin.document.documentURIObject.spec;
-
-    // If reader mode, get the base domain for the original url.
-    let strippedURI = this._stripAboutReaderURL(documentURI);
-
-    // Borrowed from desktop Firefox: https://hg.mozilla.org/mozilla-central/annotate/72835344333f/browser/base/content/urlbarBindings.xml#l236
-    let matchedURL = strippedURI.match(/^((?:[a-z]+:\/\/)?(?:[^\/]+@)?)(.+?)(?::\d+)?(?:\/|$)/);
     let baseDomain = "";
-    if (matchedURL) {
-      var domain = "";
-      [, , domain] = matchedURL;
-
+    // For recognized scheme, get base domain from host.
+    let principalURI = contentWin.document.nodePrincipal.URI;
+    if (principalURI && ["http", "https", "ftp"].includes(principalURI.scheme) && principalURI.host) {
       try {
-        baseDomain = Services.eTLD.getBaseDomainFromHost(domain);
-        if (!domain.endsWith(baseDomain)) {
+        baseDomain = Services.eTLD.getBaseDomainFromHost(principalURI.host);
+        if (!principalURI.host.endsWith(baseDomain)) {
           // getBaseDomainFromHost converts its resultant to ACE.
           let IDNService = Cc["@mozilla.org/network/idn-service;1"].getService(Ci.nsIIDNService);
           baseDomain = IDNService.convertACEtoUTF8(baseDomain);
@@ -6798,9 +6798,8 @@ var Distribution = {
     defaults.setCharPref("distribution.version", global["version"]);
 
     let locale = BrowserApp.getUALocalePref();
-    let aboutString = Cc["@mozilla.org/supports-string;1"].createInstance(Ci.nsISupportsString);
-    aboutString.data = global["about." + locale] || global["about"];
-    defaults.setComplexValue("distribution.about", Ci.nsISupportsString, aboutString);
+    defaults.setStringPref("distribution.about",
+                           global["about." + locale] || global["about"]);
 
     let prefs = aData["Preferences"];
     for (let key in prefs) {

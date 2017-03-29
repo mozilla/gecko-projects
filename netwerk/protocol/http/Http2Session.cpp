@@ -958,6 +958,9 @@ Http2Session::SendHello()
     MOZ_ASSERT(mNextStreamID == kFollowerGroupID);
     CreatePriorityNode(kFollowerGroupID, kLeaderGroupID, 0, "follower");
     mNextStreamID += 2;
+    // Hey, you! YES YOU! If you add/remove any groups here, you almost
+    // certainly need to change the lookup of the stream/ID hash in
+    // Http2Session::OnTransportStatus. Yeah, that's right. YOU!
   }
 
   FlushOutputQueue();
@@ -2307,7 +2310,7 @@ Http2Session::OnTransportStatus(nsITransport* aTransport,
   case NS_NET_STATUS_CONNECTING_TO:
   case NS_NET_STATUS_CONNECTED_TO:
   {
-    Http2Stream *target = mStreamIDHash.Get(1);
+    Http2Stream *target = mStreamIDHash.Get(mUseH2Deps ? 0xD : 0x3);
     nsAHttpTransaction *transaction = target ? target->Transaction() : nullptr;
     if (transaction)
       transaction->OnTransportStatus(aTransport, aStatus, aProgress);
@@ -2771,7 +2774,11 @@ Http2Session::WriteSegmentsAgain(nsAHttpSegmentWriter *writer,
     LOG3(("Http2Session::WriteSegments %p stream 0x%X mPaddingLength=%d", this,
           mInputFrameID, mPaddingLength));
 
-    if (1U + mPaddingLength == mInputFrameDataSize) {
+    if (1U + mPaddingLength > mInputFrameDataSize) {
+      LOG3(("Http2Session::WriteSegments %p stream 0x%X padding too large for "
+            "frame", this, mInputFrameID));
+      RETURN_SESSION_ERROR(this, PROTOCOL_ERROR);
+    } else if (1U + mPaddingLength == mInputFrameDataSize) {
       // This frame consists entirely of padding, we can just discard it
       LOG3(("Http2Session::WriteSegments %p stream 0x%X frame with only padding",
             this, mInputFrameID));
@@ -2992,15 +2999,9 @@ Http2Session::Finish0RTT(bool aRestart, bool aAlpnChanged)
         aRestart, aAlpnChanged));
 
   for (size_t i = 0; i < m0RTTStreams.Length(); ++i) {
-    // Instead of passing (aRestart, aAlpnChanged) here, we use aAlpnChanged for
-    // both arguments because as long as the alpn token stayed the same, we can
-    // just reuse what we have in our buffer to send instead of having to have
-    // the transaction rewind and read it all over again. We only need to rewind
-    // the transaction if we're switching to a new protocol, because our buffer
-    // won't get used in that case.
     Http2Stream *stream = mStreamIDHash.Get(m0RTTStreams[i]);
     if (stream) {
-      stream->Finish0RTT(aAlpnChanged, aAlpnChanged);
+      stream->Finish0RTT(aRestart, aAlpnChanged);
     }
   }
 

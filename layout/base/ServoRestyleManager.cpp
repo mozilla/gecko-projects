@@ -55,13 +55,6 @@ ServoRestyleManager::PostRestyleEvent(Element* aElement,
     return;
   }
 
-  // XXX This is a temporary hack to make style attribute change works.
-  //     In the future, we should be able to use this hint directly.
-  if (aRestyleHint & eRestyle_StyleAttribute) {
-    aRestyleHint &= ~eRestyle_StyleAttribute;
-    aRestyleHint |= eRestyle_Self | eRestyle_Subtree;
-  }
-
   if (aRestyleHint || aMinChangeHint) {
     Servo_NoteExplicitHints(aElement, aRestyleHint, aMinChangeHint);
   }
@@ -118,10 +111,8 @@ ServoRestyleManager::ClearServoDataFromSubtree(Element* aElement)
 }
 
 
-// Clears HasDirtyDescendants and RestyleData from all elements in the
-// subtree rooted at aElement.
-static void
-ClearRestyleStateFromSubtree(Element* aElement)
+/* static */ void
+ServoRestyleManager::ClearRestyleStateFromSubtree(Element* aElement)
 {
   if (aElement->HasDirtyDescendantsForServo()) {
     StyleChildrenIterator it(aElement);
@@ -220,7 +211,7 @@ ServoRestyleManager::ProcessPostTraversal(Element* aElement,
       aStyleSet->GetContext(computedValues.forget(), aParentContext, nullptr,
                             CSSPseudoElementType::NotPseudo, aElement);
 
-    newContext->EnsureStructsForServo(oldStyleContext);
+    newContext->EnsureSameStructsCached(oldStyleContext);
 
     // XXX This could not always work as expected: there are kinds of content
     // with the first split and the last sharing style, but others not. We
@@ -469,12 +460,12 @@ ServoRestyleManager::ContentRemoved(nsINode* aContainer,
   NS_WARNING("stylo: ServoRestyleManager::ContentRemoved not implemented");
 }
 
-nsresult
+void
 ServoRestyleManager::ContentStateChanged(nsIContent* aContent,
                                          EventStates aChangedBits)
 {
   if (!aContent->IsElement()) {
-    return NS_OK;
+    return;
   }
 
   Element* aElement = aContent->AsElement();
@@ -509,8 +500,6 @@ ServoRestyleManager::ContentStateChanged(nsIContent* aContent,
     snapshot->AddState(previousState);
     PostRestyleEvent(aElement, restyleHint, changeHint);
   }
-
-  return NS_OK;
 }
 
 void

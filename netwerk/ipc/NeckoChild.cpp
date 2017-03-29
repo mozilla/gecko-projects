@@ -23,6 +23,9 @@
 #include "mozilla/dom/network/TCPServerSocketChild.h"
 #include "mozilla/dom/network/UDPSocketChild.h"
 #include "mozilla/net/AltDataOutputStreamChild.h"
+#ifdef MOZ_WEBRTC
+#include "mozilla/net/StunAddrsRequestChild.h"
+#endif
 
 #ifdef NECKO_PROTOCOL_rtsp
 #include "mozilla/net/RtspControllerChild.h"
@@ -86,6 +89,25 @@ NeckoChild::DeallocPHttpChannelChild(PHttpChannelChild* channel)
 
   HttpChannelChild* child = static_cast<HttpChannelChild*>(channel);
   child->ReleaseIPDLReference();
+  return true;
+}
+
+PStunAddrsRequestChild*
+NeckoChild::AllocPStunAddrsRequestChild()
+{
+  // We don't allocate here: instead we always use IPDL constructor that takes
+  // an existing object
+  NS_NOTREACHED("AllocPStunAddrsRequestChild should not be called on child");
+  return nullptr;
+}
+
+bool
+NeckoChild::DeallocPStunAddrsRequestChild(PStunAddrsRequestChild* aActor)
+{
+#ifdef MOZ_WEBRTC
+  StunAddrsRequestChild* p = static_cast<StunAddrsRequestChild*>(aActor);
+  p->ReleaseIPDLReference();
+#endif
   return true;
 }
 

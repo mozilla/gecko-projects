@@ -161,6 +161,7 @@ public abstract class GeckoApp
     public static final String LAST_SELECTED_TAB           = "lastSelectedTab";
 
     public static final String PREFS_ALLOW_STATE_BUNDLE    = "allowStateBundle";
+    public static final String PREFS_FLASH_USAGE = "playFlashCount";
     public static final String PREFS_VERSION_CODE          = "versionCode";
     public static final String PREFS_WAS_STOPPED           = "wasStopped";
     public static final String PREFS_CRASHED_COUNT         = "crashedCount";
@@ -824,6 +825,11 @@ public abstract class GeckoApp
 
         } else if ("Update:Install".equals(event)) {
             UpdateServiceHelper.applyUpdate(this);
+
+        } else if ("PluginHelper:playFlash".equals(event)) {
+            final SharedPreferences prefs = getSharedPreferences();
+            int count = prefs.getInt(PREFS_FLASH_USAGE, 0);
+            prefs.edit().putInt(PREFS_FLASH_USAGE, ++count).apply();
         }
     }
 
@@ -1151,7 +1157,11 @@ public abstract class GeckoApp
             enableStrictMode();
         }
 
-        if (!HardwareUtils.isSupportedSystem()) {
+        // Mozglue should already be loaded by BrowserApp.onCreate() in Fennec, but in
+        // custom tabs it may not be.
+        GeckoLoader.loadMozGlue(getApplicationContext());
+
+        if (!HardwareUtils.isSupportedSystem() || !GeckoLoader.neonCompatible()) {
             // This build does not support the Android version of the device: Show an error and finish the app.
             mIsAbortingAppLaunch = true;
             super.onCreate(savedInstanceState);
@@ -1245,10 +1255,14 @@ public abstract class GeckoApp
             "Accessibility:Ready",
             "Gecko:Exited",
             "Gecko:Ready",
+            "PluginHelper:playFlash",
             null);
 
         EventDispatcher.getInstance().registerUiThreadListener(this,
             "Sanitize:Finished",
+            "Update:Check",
+            "Update:Download",
+            "Update:Install",
             null);
 
         GeckoThread.launch();
@@ -1304,9 +1318,6 @@ public abstract class GeckoApp
             "ToggleChrome:Focus",
             "ToggleChrome:Hide",
             "ToggleChrome:Show",
-            "Update:Check",
-            "Update:Download",
-            "Update:Install",
             null);
 
         Tabs.getInstance().attachToContext(this, mLayerView);
@@ -2386,10 +2397,14 @@ public abstract class GeckoApp
             "Accessibility:Ready",
             "Gecko:Exited",
             "Gecko:Ready",
+            "PluginHelper:playFlash",
             null);
 
         EventDispatcher.getInstance().unregisterUiThreadListener(this,
             "Sanitize:Finished",
+            "Update:Check",
+            "Update:Download",
+            "Update:Install",
             null);
 
         getAppEventDispatcher().unregisterGeckoThreadListener(this,
@@ -2415,9 +2430,6 @@ public abstract class GeckoApp
             "ToggleChrome:Focus",
             "ToggleChrome:Hide",
             "ToggleChrome:Show",
-            "Update:Check",
-            "Update:Download",
-            "Update:Install",
             null);
 
         if (mPromptService != null) {

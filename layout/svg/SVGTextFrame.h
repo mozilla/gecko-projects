@@ -252,14 +252,14 @@ public:
 
 
 
-  // nsISVGChildFrame interface:
+  // nsSVGDisplayableFrame interface:
   virtual void NotifySVGChanged(uint32_t aFlags) override;
   virtual DrawResult PaintSVG(gfxContext& aContext,
                               const gfxMatrix& aTransform,
-                              const nsIntRect* aDirtyRect = nullptr) override;
+                              const nsIntRect* aDirtyRect = nullptr,
+                              uint32_t aFlags = 0) override;
   virtual nsIFrame* GetFrameForPoint(const gfxPoint& aPoint) override;
   virtual void ReflowSVG() override;
-  virtual nsRect GetCoveredRegion() override;
   virtual SVGBBox GetBBoxContribution(const Matrix& aToBBoxUserspace,
                                       uint32_t aFlags) override;
 

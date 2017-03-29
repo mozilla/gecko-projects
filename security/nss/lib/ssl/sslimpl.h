@@ -504,6 +504,9 @@ struct ssl3CipherSpecStr {
     SECItem msItem;
     DTLSEpoch epoch;
     DTLSRecvdRecords recvdRecords;
+    /* The number of 0-RTT bytes that can be sent or received in TLS 1.3. This
+     * will be zero for everything but 0-RTT. */
+    PRUint32 earlyDataRemaining;
 
     PRUint8 refCt;
     const char *phase;
@@ -1013,6 +1016,7 @@ typedef struct SessionTicketStr {
     PRUint32 flags;
     SECItem srvName; /* negotiated server name */
     SECItem alpnSelection;
+    PRUint32 maxEarlyData;
 } SessionTicket;
 
 /*
@@ -1231,6 +1235,7 @@ extern FILE *ssl_trace_iob;
 extern FILE *ssl_keylog_iob;
 extern PRUint32 ssl3_sid_timeout;
 extern PRUint32 ssl_ticket_lifetime;
+extern PRUint32 ssl_max_early_data_size;
 
 extern const char *const ssl3_cipherName[];
 
@@ -1350,8 +1355,8 @@ extern SECStatus ssl_CipherPrefSetDefault(PRInt32 which, PRBool enabled);
 
 extern SECStatus ssl3_ConstrainRangeByPolicy(void);
 
-extern SECStatus ssl3_InitState(sslSocket *ss);
-extern SECStatus ssl3_RestartHandshakeHashes(sslSocket *ss);
+extern void ssl3_InitState(sslSocket *ss);
+extern void ssl3_RestartHandshakeHashes(sslSocket *ss);
 extern SECStatus ssl3_UpdateHandshakeHashes(sslSocket *ss,
                                             const unsigned char *b,
                                             unsigned int l);
@@ -1639,7 +1644,6 @@ extern SECStatus ssl3_SendECDHServerKeyExchange(sslSocket *ss);
 extern SECStatus ssl_ImportECDHKeyShare(
     sslSocket *ss, SECKEYPublicKey *peerKey,
     SSL3Opaque *b, PRUint32 length, const sslNamedGroupDef *curve);
-unsigned int tls13_SizeOfECDHEKeyShareKEX(const SECKEYPublicKey *pubKey);
 SECStatus tls13_EncodeECDHEKeyShareKEX(const sslSocket *ss,
                                        const SECKEYPublicKey *pubKey);
 
@@ -1855,6 +1859,8 @@ ssl3_TLSPRFWithMasterSecret(sslSocket *ss, ssl3CipherSpec *spec,
                             const char *label, unsigned int labelLen,
                             const unsigned char *val, unsigned int valLen,
                             unsigned char *out, unsigned int outLen);
+
+PRBool ssl_AlpnTagAllowed(const sslSocket *ss, const SECItem *tag);
 
 #ifdef TRACE
 #define SSL_TRACE(msg) ssl_Trace msg

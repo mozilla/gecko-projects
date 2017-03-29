@@ -725,7 +725,7 @@ function attachUpdateHandler(install) {
     let difference = Extension.comparePermissions(oldPerms, newPerms);
 
     // If there are no new permissions, just proceed
-    if (difference.hosts.length == 0 && difference.permissions.length == 0) {
+    if (difference.origins.length == 0 && difference.permissions.length == 0) {
       return Promise.resolve();
     }
 
@@ -1291,7 +1291,7 @@ var gViewController = {
       doCommand(aAddon) {
         if (aAddon.isWebExtension && !aAddon.seen && WEBEXT_PERMISSION_PROMPTS) {
           let perms = aAddon.userPermissions;
-          if (perms.hosts.length > 0 || perms.permissions.length > 0) {
+          if (perms.origins.length > 0 || perms.permissions.length > 0) {
             let subject = {
               wrappedJSObject: {
                 target: getBrowserElement(),
@@ -1431,7 +1431,7 @@ var gViewController = {
           while (files.hasMoreElements()) {
             let file = files.getNext();
             AddonManager.getInstallForFile(file, install => {
-              AddonManager.installAddonFromAOM(browser, document.documentURI, install);
+              AddonManager.installAddonFromAOM(browser, document.documentURIObject, install);
             });
           }
         });
@@ -1626,11 +1626,8 @@ function openOptionsInTab(optionsURL) {
 }
 
 function formatDate(aDate) {
-  const locale = Cc["@mozilla.org/chrome/chrome-registry;1"]
-                 .getService(Ci.nsIXULChromeRegistry)
-                 .getSelectedLocale("global", true);
   const dtOptions = { year: "numeric", month: "long", day: "numeric" };
-  return aDate.toLocaleDateString(locale, dtOptions);
+  return aDate.toLocaleDateString(undefined, dtOptions);
 }
 
 
@@ -3997,7 +3994,7 @@ var gDragDrop = {
 
       if (url) {
         AddonManager.getInstallForURL(url, install => {
-          AddonManager.installAddonFromAOM(browser, document.documentURI, install);
+          AddonManager.installAddonFromAOM(browser, document.documentURIObject, install);
         }, "application/x-xpinstall");
       }
     }

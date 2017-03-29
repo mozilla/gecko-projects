@@ -447,6 +447,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     void Push(const ImmPtr imm) PER_SHARED_ARCH;
     void Push(const ImmGCPtr ptr) PER_SHARED_ARCH;
     void Push(FloatRegister reg) PER_SHARED_ARCH;
+    void PushFlags() DEFINED_ON(x86_shared);
     void Push(jsid id, Register scratchReg);
     void Push(TypedOrValueRegister v);
     void Push(const ConstantOrRegister& v);
@@ -462,6 +463,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     void Pop(Register reg) PER_SHARED_ARCH;
     void Pop(FloatRegister t) PER_SHARED_ARCH;
     void Pop(const ValueOperand& val) PER_SHARED_ARCH;
+    void PopFlags() DEFINED_ON(x86_shared);
     void popRooted(VMFunction::RootType rootType, Register cellReg, const ValueOperand& valueReg);
 
     // Move the stack pointer based on the requested amount.
@@ -1113,6 +1115,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     inline void branchIfTrueBool(Register reg, Label* label);
 
     inline void branchIfRope(Register str, Label* label);
+    inline void branchIfRopeOrExternal(Register str, Register temp, Label* label);
+
     inline void branchIfNotRope(Register str, Label* label);
 
     inline void branchLatin1String(Register string, Label* label);
@@ -1385,36 +1389,52 @@ class MacroAssembler : public MacroAssemblerSpecific
     // listed below (where it is only mentioned as `ptr`).
 
     // `ptr` will be updated if access.offset() != 0 or access.type() == Scalar::Int64.
-    void wasmLoad(const wasm::MemoryAccessDesc& access, Register ptr, Register ptrScratch, AnyRegister output) DEFINED_ON(arm);
-    void wasmLoadI64(const wasm::MemoryAccessDesc& access, Register ptr, Register ptrScratch, Register64 output) DEFINED_ON(arm);
-    void wasmStore(const wasm::MemoryAccessDesc& access, AnyRegister value, Register ptr, Register ptrScratch) DEFINED_ON(arm);
-    void wasmStoreI64(const wasm::MemoryAccessDesc& access, Register64 value, Register ptr, Register ptrScratch) DEFINED_ON(arm);
+    void wasmLoad(const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,
+                  Register ptrScratch, AnyRegister output)
+        DEFINED_ON(arm);
+    void wasmLoadI64(const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,
+                     Register ptrScratch, Register64 output)
+        DEFINED_ON(arm);
+    void wasmStore(const wasm::MemoryAccessDesc& access, AnyRegister value, Register memoryBase,
+                   Register ptr, Register ptrScratch)
+        DEFINED_ON(arm);
+    void wasmStoreI64(const wasm::MemoryAccessDesc& access, Register64 value, Register memoryBase,
+                      Register ptr, Register ptrScratch)
+        DEFINED_ON(arm);
 
     // `ptr` will always be updated.
-    void wasmUnalignedLoad(const wasm::MemoryAccessDesc& access, Register ptr, Register ptrScratch,
-                           Register output, Register tmp) DEFINED_ON(arm);
+    void wasmUnalignedLoad(const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,
+                           Register ptrScratch, Register output, Register tmp)
+        DEFINED_ON(arm);
 
     // `ptr` will always be updated and `tmp1` is always needed.  `tmp2` is
     // needed for Float32; `tmp2` and `tmp3` are needed for Float64.  Temps must
     // be Invalid when they are not needed.
-    void wasmUnalignedLoadFP(const wasm::MemoryAccessDesc& access, Register ptr, Register ptrScratch,
-                             FloatRegister output, Register tmp1, Register tmp2, Register tmp3) DEFINED_ON(arm);
-
-    // `ptr` will always be updated.
-    void wasmUnalignedLoadI64(const wasm::MemoryAccessDesc& access, Register ptr, Register ptrScratch,
-                              Register64 output, Register tmp) DEFINED_ON(arm);
-
-    // `ptr` and `value` will always be updated.
-    void wasmUnalignedStore(const wasm::MemoryAccessDesc& access, Register value, Register ptr, Register ptrScratch)
+    void wasmUnalignedLoadFP(const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,
+                             Register ptrScratch, FloatRegister output, Register tmp1, Register tmp2,
+                             Register tmp3)
         DEFINED_ON(arm);
 
     // `ptr` will always be updated.
-    void wasmUnalignedStoreFP(const wasm::MemoryAccessDesc& access, FloatRegister floatValue, Register ptr,
-                              Register ptrScratch, Register tmp) DEFINED_ON(arm);
+    void wasmUnalignedLoadI64(const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,
+                              Register ptrScratch, Register64 output, Register tmp)
+        DEFINED_ON(arm);
+
+    // `ptr` and `value` will always be updated.
+    void wasmUnalignedStore(const wasm::MemoryAccessDesc& access, Register value, Register memoryBase,
+                            Register ptr, Register ptrScratch)
+        DEFINED_ON(arm);
 
     // `ptr` will always be updated.
-    void wasmUnalignedStoreI64(const wasm::MemoryAccessDesc& access, Register64 value, Register ptr, Register ptrScratch,
-                               Register tmp) DEFINED_ON(arm);
+    void wasmUnalignedStoreFP(const wasm::MemoryAccessDesc& access, FloatRegister floatValue,
+                              Register memoryBase, Register ptr, Register ptrScratch, Register tmp)
+        DEFINED_ON(arm);
+
+    // `ptr` will always be updated.
+    void wasmUnalignedStoreI64(const wasm::MemoryAccessDesc& access, Register64 value,
+                               Register memoryBase, Register ptr, Register ptrScratch,
+                               Register tmp)
+        DEFINED_ON(arm);
 
     // wasm specific methods, used in both the wasm baseline compiler and ion.
     void wasmTruncateDoubleToUInt32(FloatRegister input, Register output, Label* oolEntry) DEFINED_ON(x86, x64, arm);
@@ -1445,6 +1465,9 @@ class MacroAssembler : public MacroAssemblerSpecific
     // bound. This should be called once per function after all other codegen,
     // including "normal" OutOfLineCode.
     void wasmEmitTrapOutOfLineCode();
+
+    // Assert invariants that should be true within any non-exit-stub wasm code.
+    void wasmAssertNonExitInvariants(Register activation);
 
   public:
     // ========================================================================
@@ -1501,15 +1524,9 @@ class MacroAssembler : public MacroAssemblerSpecific
         loadJSContext(dest);
         loadPtr(Address(dest, offsetof(JSContext, activation_)), dest);
     }
-    void loadWasmActivationFromTls(Register dest) {
-        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, cx)), dest);
-        loadPtr(Address(dest, JSContext::offsetOfWasmActivation()), dest);
-    }
-    void loadWasmActivationFromSymbolicAddress(Register dest) {
-        movePtr(wasm::SymbolicAddress::ContextPtr, dest);
-        loadPtr(Address(dest, 0), dest);
-        loadPtr(Address(dest, JSContext::offsetOfWasmActivation()), dest);
-    }
+
+    void loadWasmActivationFromTls(Register dest);
+    void loadWasmTlsRegFromFrame(Register dest = WasmTlsReg);
 
     template<typename T>
     void loadTypedOrValue(const T& src, TypedOrValueRegister dest) {

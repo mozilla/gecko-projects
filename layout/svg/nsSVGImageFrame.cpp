@@ -65,10 +65,11 @@ protected:
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
-  // nsISVGChildFrame interface:
+  // nsSVGDisplayableFrame interface:
   virtual DrawResult PaintSVG(gfxContext& aContext,
                               const gfxMatrix& aTransform,
-                              const nsIntRect* aDirtyRect = nullptr) override;
+                              const nsIntRect* aDirtyRect = nullptr,
+                              uint32_t aFlags = 0) override;
   virtual nsIFrame* GetFrameForPoint(const gfxPoint& aPoint) override;
   virtual void ReflowSVG() override;
 
@@ -159,6 +160,12 @@ nsSVGImageFrame::Init(nsIContent*       aContent,
   if (GetStateBits() & NS_FRAME_IS_NONDISPLAY) {
     // Non-display frames are likely to be patterns, masks or the like.
     // Treat them as always visible.
+    // This call must happen before the FrameCreated. This is because the
+    // primary frame pointer on our content node isn't set until after this
+    // function ends, so there is no way for the resulting OnVisibilityChange
+    // notification to get a frame. FrameCreated has a workaround for this in
+    // that it passes our frame around so it can be accessed. OnVisibilityChange
+    // doesn't have that workaround.
     IncApproximateVisibleCount();
   }
 
@@ -323,11 +330,12 @@ nsSVGImageFrame::TransformContextForPainting(gfxContext* aGfxContext,
 }
 
 //----------------------------------------------------------------------
-// nsISVGChildFrame methods:
+// nsSVGDisplayableFrame methods:
 DrawResult
 nsSVGImageFrame::PaintSVG(gfxContext& aContext,
                           const gfxMatrix& aTransform,
-                          const nsIntRect *aDirtyRect)
+                          const nsIntRect *aDirtyRect,
+                          uint32_t aFlags)
 {
   if (!StyleVisibility()->IsVisible())
     return DrawResult::SUCCESS;
@@ -389,8 +397,6 @@ nsSVGImageFrame::PaintSVG(gfxContext& aContext,
       dirtyRect.MoveBy(-rootRect.TopLeft());
     }
 
-    uint32_t drawFlags = imgIContainer::FLAG_SYNC_DECODE_IF_FAST;
-
     if (mImageContainer->GetType() == imgIContainer::TYPE_VECTOR) {
       // Package up the attributes of this image element which can override the
       // attributes of mImageContainer's internal SVG document.  The 'width' &
@@ -421,7 +427,7 @@ nsSVGImageFrame::PaintSVG(gfxContext& aContext,
         destRect,
         aDirtyRect ? dirtyRect : destRect,
         context,
-        drawFlags);
+        aFlags);
     } else { // mImageContainer->GetType() == TYPE_RASTER
       result = nsLayoutUtils::DrawSingleUnscaledImage(
         aContext,
@@ -430,7 +436,7 @@ nsSVGImageFrame::PaintSVG(gfxContext& aContext,
         nsLayoutUtils::GetSamplingFilterForFrame(this),
         nsPoint(0, 0),
         aDirtyRect ? &dirtyRect : nullptr,
-        drawFlags);
+        aFlags);
     }
 
     if (opacity != 1.0f || StyleEffects()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {

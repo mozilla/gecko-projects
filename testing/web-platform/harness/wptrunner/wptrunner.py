@@ -15,6 +15,7 @@ import wptcommandline
 import wptlogging
 import wpttest
 from testrunner import ManagerGroup
+from browsers.base import NullBrowser
 
 here = os.path.split(__file__)[0]
 
@@ -115,7 +116,7 @@ def run_tests(config, test_paths, product, **kwargs):
         env.do_delayed_imports(logger, test_paths)
 
         (check_args,
-         browser_cls, get_browser_kwargs,
+         target_browser_cls, get_browser_kwargs,
          executor_classes, get_executor_kwargs,
          env_options, run_info_extras) = products.load_product(config, product)
 
@@ -159,8 +160,6 @@ def run_tests(config, test_paths, product, **kwargs):
                 logger.critical("Error starting test environment: %s" % e.message)
                 raise
 
-            browser_kwargs = get_browser_kwargs(ssl_env=ssl_env, **kwargs)
-
             repeat = kwargs["repeat"]
             repeat_count = 0
             repeat_until_unexpected = kwargs["repeat_until_unexpected"]
@@ -177,9 +176,21 @@ def run_tests(config, test_paths, product, **kwargs):
                 for test_type in kwargs["test_types"]:
                     logger.info("Running %s tests" % test_type)
 
-                    for test in test_loader.disabled_tests[test_type]:
-                        logger.test_start(test.id)
-                        logger.test_end(test.id, status="SKIP")
+                    # WebDriver tests may create and destroy multiple browser
+                    # processes as part of their expected behavior. These
+                    # processes are managed by a WebDriver server binary. This
+                    # obviates the need for wptrunner to provide a browser, so
+                    # the NullBrowser is used in place of the "target" browser
+                    if test_type == "wdspec":
+                        browser_cls = NullBrowser
+                    else:
+                        browser_cls = target_browser_cls
+
+                    browser_kwargs = get_browser_kwargs(test_type,
+                                                        run_info,
+                                                        ssl_env=ssl_env,
+                                                        **kwargs)
+
 
                     executor_cls = executor_classes.get(test_type)
                     executor_kwargs = get_executor_kwargs(test_type,
@@ -193,6 +204,9 @@ def run_tests(config, test_paths, product, **kwargs):
                                      (test_type, product))
                         continue
 
+                    for test in test_loader.disabled_tests[test_type]:
+                        logger.test_start(test.id)
+                        logger.test_end(test.id, status="SKIP")
 
                     with ManagerGroup("web-platform-tests",
                                       kwargs["processes"],

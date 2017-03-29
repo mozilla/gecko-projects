@@ -415,7 +415,7 @@ Simulator::disassemble(SimInstruction* instr, size_t n)
     while (n-- > 0) {
         dasm.InstructionDecode(buffer,
                                reinterpret_cast<uint8_t*>(instr));
-        printf("  0x%08x  %s\n", uint32_t(instr), buffer.start());
+        fprintf(stderr, "  0x%08x  %s\n", uint32_t(instr), buffer.start());
         instr = reinterpret_cast<SimInstruction*>(reinterpret_cast<uint8_t*>(instr) + 4);
     }
 }
@@ -1561,7 +1561,8 @@ Simulator::handleWasmFault(int32_t addr, unsigned numBytes)
         return false;
 
     void* pc = reinterpret_cast<void*>(get_pc());
-    wasm::Instance* instance = act->compartment()->wasm.lookupInstanceDeprecated(pc);
+    void* fp = reinterpret_cast<void*>(get_register(r11));
+    wasm::Instance* instance = wasm::LookupFaultingInstance(act, pc, fp);
     if (!instance || !instance->memoryAccessInGuardRegion((uint8_t*)addr, numBytes))
         return false;
 

@@ -120,7 +120,7 @@
 #include "nsITimer.h"
 #include "nsISHistoryInternal.h"
 #include "nsIPrincipal.h"
-#include "nsNullPrincipal.h"
+#include "NullPrincipal.h"
 #include "nsISHEntry.h"
 #include "nsIWindowWatcher.h"
 #include "nsIPromptFactory.h"
@@ -1501,7 +1501,7 @@ nsDocShell::LoadURI(nsIURI* aURI,
       //
       // We didn't inherit OriginAttributes here as ExpandedPrincipal doesn't
       // have origin attributes.
-      principalToInherit = nsNullPrincipal::CreateWithInheritedAttributes(this);
+      principalToInherit = NullPrincipal::CreateWithInheritedAttributes(this);
       inheritPrincipal = false;
     }
   }
@@ -1514,7 +1514,7 @@ nsDocShell::LoadURI(nsIURI* aURI,
     inheritPrincipal = false;
     // If aFirstParty is true and the pref 'privacy.firstparty.isolate' is
     // enabled, we will set firstPartyDomain on the origin attributes.
-    principalToInherit = nsNullPrincipal::CreateWithInheritedAttributes(this, aFirstParty);
+    principalToInherit = NullPrincipal::CreateWithInheritedAttributes(this, aFirstParty);
   }
 
   // If the triggeringPrincipal is not passed explicitly, we first try to create
@@ -8127,9 +8127,9 @@ nsDocShell::CreateAboutBlankContentViewer(nsIPrincipal* aPrincipal,
     nsCOMPtr<nsIPrincipal> principal;
     if (mSandboxFlags & SANDBOXED_ORIGIN) {
       if (aPrincipal) {
-        principal = nsNullPrincipal::CreateWithInheritedAttributes(aPrincipal);
+        principal = NullPrincipal::CreateWithInheritedAttributes(aPrincipal);
       } else {
-        principal = nsNullPrincipal::CreateWithInheritedAttributes(this);
+        principal = NullPrincipal::CreateWithInheritedAttributes(this);
       }
     } else {
       principal = aPrincipal;
@@ -10199,6 +10199,19 @@ nsDocShell::InternalLoad(nsIURI* aURI,
         //      window will need to be made visible...  For now,
         //      do nothing.
       }
+
+      // Switch to target tab if we're currently focused window.
+      // Take loadDivertedInBackground into account so the behavior would be
+      // the same as how the tab first opened.
+      bool isTargetActive = false;
+      targetDocShell->GetIsActive(&isTargetActive);
+      if (mIsActive && !isTargetActive &&
+          !Preferences::GetBool("browser.tabs.loadDivertedInBackground", false)) {
+        if (NS_FAILED(nsContentUtils::DispatchFocusChromeEvent(
+            targetDocShell->GetWindow()))) {
+          return NS_ERROR_FAILURE;
+        }
+      }
     }
 
     // Else we ran out of memory, or were a popup and got blocked,
@@ -10611,7 +10624,8 @@ nsDocShell::InternalLoad(nsIURI* aURI,
   nsCOMPtr<nsIWebBrowserChrome3> browserChrome3 = do_GetInterface(mTreeOwner);
   if (browserChrome3) {
     bool shouldLoad;
-    rv = browserChrome3->ShouldLoadURI(this, aURI, aReferrer, aTriggeringPrincipal, &shouldLoad);
+    rv = browserChrome3->ShouldLoadURI(this, aURI, aReferrer, !!aPostData,
+                                       aTriggeringPrincipal, &shouldLoad);
     if (NS_SUCCEEDED(rv) && !shouldLoad) {
       return NS_OK;
     }
@@ -11833,6 +11847,21 @@ nsDocShell::OnNewURI(nsIURI* aURI, nsIChannel* aChannel,
                                 aPrincipalToInherit, aCloneSHChildren,
                                 getter_AddRefs(mLSHE));
     }
+  } else if (mSessionHistory && mLSHE && mURIResultedInDocument) {
+    // Even if we don't add anything to SHistory, ensure the current index
+    // points to the same SHEntry as our mLSHE.
+    int32_t index = 0;
+    mSessionHistory->GetRequestedIndex(&index);
+    if (index == -1) {
+      mSessionHistory->GetIndex(&index);
+    }
+    nsCOMPtr<nsISHEntry> currentSH;
+    mSessionHistory->GetEntryAtIndex(index, false, getter_AddRefs(currentSH));
+    if (currentSH != mLSHE) {
+      nsCOMPtr<nsISHistoryInternal> shPrivate =
+        do_QueryInterface(mSessionHistory);
+      shPrivate->ReplaceEntry(index, mLSHE);
+    }
   }
 
   // If this is a POST request, we do not want to include this in global
@@ -12408,13 +12437,13 @@ nsDocShell::AddToSessionHistory(nsIURI* aURI, nsIChannel* aChannel,
       if (!principalToInherit) {
         if (loadInfo->GetLoadingSandboxed()) {
           if (loadInfo->LoadingPrincipal()) {
-            principalToInherit = nsNullPrincipal::CreateWithInheritedAttributes(
+            principalToInherit = NullPrincipal::CreateWithInheritedAttributes(
             loadInfo->LoadingPrincipal());
           } else {
             // get the OriginAttributes
             OriginAttributes attrs;
             loadInfo->GetOriginAttributes(&attrs);
-            principalToInherit = nsNullPrincipal::Create(attrs);
+            principalToInherit = NullPrincipal::Create(attrs);
           }
         } else {
           principalToInherit = loadInfo->PrincipalToInherit();
@@ -12605,7 +12634,7 @@ nsDocShell::LoadHistoryEntry(nsISHEntry* aEntry, uint32_t aLoadType)
       // Ensure that we have a triggeringPrincipal.  Otherwise javascript:
       // URIs will pick it up from the about:blank page we just loaded,
       // and we don't really want even that in this case.
-      triggeringPrincipal = nsNullPrincipal::CreateWithInheritedAttributes(this);
+      triggeringPrincipal = NullPrincipal::CreateWithInheritedAttributes(this);
     }
   }
 
@@ -14377,7 +14406,7 @@ nsDocShell::GetPrintPreview(nsIWebBrowserPrint** aPrintPreview)
     // we QI the mContentViewer if the current URI is either about:blank
     // or about:printpreview.
     Stop(nsIWebNavigation::STOP_ALL);
-    nsCOMPtr<nsIPrincipal> principal = nsNullPrincipal::CreateWithInheritedAttributes(this);
+    nsCOMPtr<nsIPrincipal> principal = NullPrincipal::CreateWithInheritedAttributes(this);
     nsCOMPtr<nsIURI> uri;
     NS_NewURI(getter_AddRefs(uri), NS_LITERAL_CSTRING("about:printpreview"));
     nsresult rv = CreateAboutBlankContentViewer(principal, uri);

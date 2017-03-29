@@ -186,11 +186,7 @@ pref("dom.enable_performance_observer", false);
 #endif
 
 // Enable requestIdleCallback API
-#ifdef NIGHTLY_BUILD
 pref("dom.requestIdleCallback.enabled", true);
-#else
-pref("dom.requestIdleCallback.enabled", false);
-#endif
 
 // Whether the Gamepad API is enabled
 pref("dom.gamepad.enabled", true);
@@ -370,6 +366,8 @@ pref("media.ogg.enabled", true);
 pref("media.opus.enabled", true);
 pref("media.wave.enabled", true);
 pref("media.webm.enabled", true);
+
+pref("media.eme.chromium-api.enabled", false);
 
 #ifdef MOZ_APPLEMEDIA
 #ifdef MOZ_WIDGET_UIKIT
@@ -822,7 +820,11 @@ pref("gfx.logging.peak-texture-usage.enabled", false);
 
 pref("gfx.ycbcr.accurate-conversion", false);
 
+#ifdef MOZ_ENABLE_WEBRENDER
 pref("gfx.webrender.enabled", true);
+#else
+pref("gfx.webrender.enabled", false);
+#endif
 
 pref("accessibility.browsewithcaret", false);
 pref("accessibility.warn_on_browsewithcaret", true);
@@ -858,12 +860,8 @@ pref("canvas.filters.enabled", true);
 pref("canvas.path.enabled", true);
 pref("canvas.capturestream.enabled", true);
 
-// Disable the ImageBitmap-extensions in the release build.
-#ifdef RELEASE_OR_BETA
+// Disable the ImageBitmap-extensions for now.
 pref("canvas.imagebitmap_extensions.enabled", false);
-#else
-pref("canvas.imagebitmap_extensions.enabled", true);
-#endif
 
 // We want the ability to forcibly disable platform a11y, because
 // some non-a11y-related components attempt to bring it up.  See bug
@@ -1172,7 +1170,7 @@ pref("dom.require_user_interaction_for_beforeunload", true);
 
 pref("dom.disable_open_during_load",                false);
 pref("dom.popup_maximum",                           20);
-pref("dom.popup_allowed_events", "change click dblclick mouseup notificationclick reset submit touchend");
+pref("dom.popup_allowed_events", "change click dblclick mouseup pointerup notificationclick reset submit touchend");
 pref("dom.disable_open_click_delay", 1000);
 
 pref("dom.storage.enabled", true);
@@ -1196,9 +1194,12 @@ pref("dom.forms.number", true);
 // platforms which don't have a color picker implemented yet.
 pref("dom.forms.color", true);
 
-// Support for input type=date, time, month, week and datetime-local. By
-// default, disabled.
+// Support for input type=date and type=time. By default, disabled.
 pref("dom.forms.datetime", false);
+
+// Support for input type=month, type=week and type=datetime-local. By default,
+// disabled.
+pref("dom.forms.datetime.others", false);
 
 // Enable time picker UI. By default, disabled.
 pref("dom.forms.datetime.timepicker", false);
@@ -1591,6 +1592,9 @@ pref("network.http.spdy.default-hpack-buffer", 65536); // 64k
 pref("network.http.altsvc.enabled", true);
 pref("network.http.altsvc.oe", true);
 
+// Turn on 0RTT data for TLS 1.3
+pref("security.tls.enable_0rtt_data", true);
+
 pref("network.http.diagnostics", false);
 
 pref("network.http.pacing.requests.enabled", true);
@@ -1619,6 +1623,10 @@ pref("network.http.keep_empty_response_headers_as_empty_string", true);
 
 // Max size, in bytes, for received HTTP response header.
 pref("network.http.max_response_header_size", 393216);
+
+// The ratio of the transaction count for the focused window and the count of
+// all available active connections.
+pref("network.http.focused_window_transaction_ratio", "0.9");
 
 // default values for FTP
 // in a DSCP environment this should be 40 (0x28, or AF11), per RFC-4594,
@@ -2636,6 +2644,10 @@ pref("layout.css.contain.enabled", false);
 // Is support for CSS display:flow-root enabled?
 pref("layout.css.display-flow-root.enabled", true);
 
+// Is support for CSS [-moz-]appearance enabled for web content?
+pref("layout.css.appearance.enabled", true);
+pref("layout.css.moz-appearance.enabled", true);
+
 // Is support for CSS box-decoration-break enabled?
 pref("layout.css.box-decoration-break.enabled", true);
 
@@ -2684,7 +2696,11 @@ pref("layout.css.control-characters.visible", true);
 pref("layout.css.column-span.enabled", false);
 
 // Is effect of xml:base disabled for style attribute?
+#ifdef RELEASE_OR_BETA
 pref("layout.css.style-attr-with-xml-base.disabled", false);
+#else
+pref("layout.css.style-attr-with-xml-base.disabled", true);
+#endif
 
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
@@ -2909,7 +2925,7 @@ pref("dom.ipc.plugins.forcedirect.enabled", true);
 #endif
 
 #ifdef NIGHTLY_BUILD
-pref("dom.ipc.processCount", 2);
+pref("dom.ipc.processCount", 4);
 #else
 pref("dom.ipc.processCount", 1);
 #endif
@@ -2959,6 +2975,14 @@ pref("svg.marker-improvements.enabled", true);
 pref("svg.new-getBBox.enabled", false);
 
 pref("svg.transform-box.enabled", true);
+
+# This pref controls whether the 'context-fill' and 'context-stroke' keywords
+# can be used in SVG-as-an-image in the content processes to use the fill/
+# stroke specified on the element that embeds the image.  (These keywords are
+# always enabled in the chrome process, regardless of this pref.)
+# Also, these keywords are currently not part of any spec, which is partly why
+# we disable them for web content.
+pref("svg.context-properties.content.enabled", false);
 
 // Default font types and sizes by locale
 pref("font.default.ar", "sans-serif");
@@ -3208,6 +3232,17 @@ pref("font.size.inflation.mappingIntercept", 1);
  * i/s.
  */
 pref("font.size.inflation.maxRatio", 0);
+
+/**
+ * This setting corresponds to a global text zoom setting affecting
+ * all content that is not already subject to font size inflation.
+ * It is interpreted as a percentage value that is applied on top
+ * of the document's current text zoom setting.
+ *
+ * The resulting total zoom factor (text zoom * system font scale)
+ * will be limited by zoom.minPercent and maxPercent.
+ */
+pref("font.size.systemFontScale", 100);
 
 /*
  * When enabled, the touch.radius and mouse.radius prefs allow events to be dispatched
@@ -4206,13 +4241,7 @@ pref("intl.ime.use_simple_context_on_password_field", true);
 pref("intl.ime.use_simple_context_on_password_field", false);
 #endif
 
-# enable new platform fontlist for linux on GTK platforms
-# temporary pref to allow flipping back to the existing
-# gfxPangoFontGroup/gfxFontconfigUtils code for handling system fonts
-
 #ifdef MOZ_WIDGET_GTK
-pref("gfx.font_rendering.fontconfig.fontlist.enabled", true);
-
 // maximum number of fonts to substitute for a generic
 pref("gfx.font_rendering.fontconfig.max_generic_substitutions", 3);
 #endif
@@ -5213,8 +5242,11 @@ pref("browser.safebrowsing.provider.google.reportMalwareMistakeURL", "https://%L
 pref("browser.safebrowsing.provider.google4.pver", "4");
 pref("browser.safebrowsing.provider.google4.lists", "goog-badbinurl-proto,goog-downloadwhite-proto,goog-phish-proto,googpub-phish-proto,goog-malware-proto,goog-unwanted-proto");
 pref("browser.safebrowsing.provider.google4.updateURL", "https://safebrowsing.googleapis.com/v4/threatListUpdates:fetch?$ct=application/x-protobuf&key=%GOOGLE_API_KEY%");
-// Leave it empty until we roll out v4 hash completion feature. See Bug 1323856.
+#ifdef NIGHTLY_BUILD
+pref("browser.safebrowsing.provider.google4.gethashURL", "https://safebrowsing.googleapis.com/v4/fullHashes:find?$ct=application/x-protobuf&key=%GOOGLE_API_KEY%");
+#else
 pref("browser.safebrowsing.provider.google4.gethashURL", "");
+#endif // NIGHTLY_BUILD
 pref("browser.safebrowsing.provider.google4.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
 pref("browser.safebrowsing.provider.google4.reportPhishMistakeURL", "https://%LOCALE%.phish-error.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.provider.google4.reportMalwareMistakeURL", "https://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%&url=");
@@ -5286,10 +5318,6 @@ pref("layout.accessiblecaret.bar.enabled", false);
 
 // Show the caret when long tapping on an empty content.
 pref("layout.accessiblecaret.caret_shown_when_long_tapping_on_empty_content", false);
-
-// Timeout in milliseconds to hide the accessiblecaret under cursor mode while
-// no one touches it. Set the value to 0 to disable this feature.
-pref("layout.accessiblecaret.timeout_ms", 0);
 
 // Simulate long tap to select words on the platforms where APZ is not enabled
 // or long tap events does not fired by APZ.
@@ -5646,10 +5674,15 @@ pref("dom.timeout.max_consecutive_callbacks", 5);
 pref("fuzzing.enabled", false);
 #endif
 
-// Set advanced layers preferences here.
-pref("layers.advanced.border-layers", false);
-#ifdef MOZ_ENABLE_WEBRENDER
-pref("layers.advanced.caret-layers", true);
-#else
-pref("layers.advanced.caret-layers", false);
-#endif
+// Set advanced layers preferences here to have them show up in about:config or
+// to be overridable in reftest.list files. They should pretty much all be set
+// to a value of 2, and the conditional-pref code in gfxPrefs.h will convert
+// it to a boolean as appropriate. In particular, do NOT add ifdefs here to
+// turn these on and off, instead use the conditional-pref code in gfxPrefs.h
+// to do that.
+pref("layers.advanced.border-layers", 2);
+pref("layers.advanced.boxshadow-inset-layers", 2);
+pref("layers.advanced.boxshadow-outer-layers", 2);
+pref("layers.advanced.caret-layers", 2);
+pref("layers.advanced.displaybuttonborder-layers", 2);
+pref("layers.advanced.outline-layers", 2);

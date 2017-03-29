@@ -172,6 +172,10 @@ nsCSSValue::nsCSSValue(const nsCSSValue& aCopy)
     mValue.mArray = aCopy.mValue.mArray;
     mValue.mArray->AddRef();
   }
+  else if (UnitHasThreadSafeArrayValue()) {
+    mValue.mThreadSafeArray = aCopy.mValue.mThreadSafeArray;
+    mValue.mThreadSafeArray->AddRef();
+  }
   else if (eCSSUnit_URL == mUnit) {
     mValue.mURL = aCopy.mValue.mURL;
     mValue.mURL->AddRef();
@@ -287,6 +291,9 @@ bool nsCSSValue::operator==(const nsCSSValue& aOther) const
     }
     else if (UnitHasArrayValue()) {
       return *mValue.mArray == *aOther.mValue.mArray;
+    }
+    else if (UnitHasThreadSafeArrayValue()) {
+      return *mValue.mThreadSafeArray == *aOther.mValue.mThreadSafeArray;
     }
     else if (eCSSUnit_URL == mUnit) {
       return mValue.mURL->Equals(*aOther.mValue.mURL);
@@ -420,10 +427,10 @@ nscoord nsCSSValue::GetPixelLength() const
 // traversal, since the refcounts aren't thread-safe.
 // Note that the caller might be an OMTA thread, which is allowed to operate off
 // main thread because it owns all of the corresponding nsCSSValues and any that
-// they might be sharing members with. So pass false for aAssertServoOrMainThread.
-#define DO_RELEASE(member) {                                                  \
-  MOZ_ASSERT(!ServoStyleSet::IsInServoTraversal(false));                      \
-  mValue.member->Release();                                                   \
+// they might be sharing members with.
+#define DO_RELEASE(member) {                                                     \
+  MOZ_ASSERT(NS_IsInCompositorThread() || !ServoStyleSet::IsInServoTraversal()); \
+  mValue.member->Release();                                                      \
 }
 
 void nsCSSValue::DoReset()
@@ -436,6 +443,9 @@ void nsCSSValue::DoReset()
     DO_RELEASE(mComplexColor);
   } else if (UnitHasArrayValue()) {
     DO_RELEASE(mArray);
+  } else if (UnitHasThreadSafeArrayValue()) {
+    // ThreadSafe arrays are ok to release on any thread.
+    mValue.mThreadSafeArray->Release();
   } else if (eCSSUnit_URL == mUnit) {
     DO_RELEASE(mURL);
   } else if (eCSSUnit_Image == mUnit) {
@@ -569,6 +579,15 @@ void nsCSSValue::SetArrayValue(nsCSSValue::Array* aValue, nsCSSUnit aUnit)
   MOZ_ASSERT(UnitHasArrayValue(), "bad unit");
   mValue.mArray = aValue;
   mValue.mArray->AddRef();
+}
+
+void nsCSSValue::SetThreadSafeArrayValue(nsCSSValue::ThreadSafeArray* aValue, nsCSSUnit aUnit)
+{
+  Reset();
+  mUnit = aUnit;
+  MOZ_ASSERT(UnitHasThreadSafeArrayValue(), "bad unit");
+  mValue.mThreadSafeArray = aValue;
+  mValue.mThreadSafeArray->AddRef();
 }
 
 void nsCSSValue::SetURLValue(mozilla::css::URLValue* aValue)
@@ -1339,10 +1358,29 @@ nsCSSValue::AppendToString(nsCSSPropertyID aProperty, nsAString& aResult,
       nsStyleUtil::AppendEscapedCSSIdent(buffer, aResult);
     }
   }
-  else if (eCSSUnit_Array <= unit && unit <= eCSSUnit_Symbols) {
+  else if (eCSSUnit_Counter <= unit && unit <= eCSSUnit_Counters) {
     switch (unit) {
       case eCSSUnit_Counter:  aResult.AppendLiteral("counter(");  break;
       case eCSSUnit_Counters: aResult.AppendLiteral("counters("); break;
+      default: MOZ_ASSERT_UNREACHABLE("bad enum");
+    }
+
+    nsCSSValue::ThreadSafeArray *array = GetThreadSafeArrayValue();
+    bool mark = false;
+    for (size_t i = 0, i_end = array->Count(); i < i_end; ++i) {
+      if (mark && array->Item(i).GetUnit() != eCSSUnit_Null) {
+        aResult.AppendLiteral(", ");
+      }
+      nsCSSPropertyID prop = (i == array->Count() - 1)
+        ? eCSSProperty_list_style_type : aProperty;
+      if (array->Item(i).GetUnit() != eCSSUnit_Null) {
+        array->Item(i).AppendToString(prop, aResult, aSerialization);
+        mark = true;
+      }
+    }
+  }
+  else if (eCSSUnit_Array <= unit && unit <= eCSSUnit_Symbols) {
+    switch (unit) {
       case eCSSUnit_Cubic_Bezier: aResult.AppendLiteral("cubic-bezier("); break;
       case eCSSUnit_Steps: aResult.AppendLiteral("steps("); break;
       case eCSSUnit_Symbols: aResult.AppendLiteral("symbols("); break;
@@ -1386,10 +1424,7 @@ nsCSSValue::AppendToString(nsCSSPropertyID aProperty, nsAString& aResult,
         }
         continue;
       }
-      nsCSSPropertyID prop =
-        ((eCSSUnit_Counter <= unit && unit <= eCSSUnit_Counters) &&
-         i == array->Count() - 1)
-        ? eCSSProperty_list_style_type : aProperty;
+      nsCSSPropertyID prop = aProperty;
       if (array->Item(i).GetUnit() != eCSSUnit_Null) {
         array->Item(i).AppendToString(prop, aResult, aSerialization);
         mark = true;
@@ -1680,13 +1715,17 @@ nsCSSValue::AppendToString(nsCSSPropertyID aProperty, nsAString& aResult,
         unit == eCSSUnit_RGBAColor) {
       nscolor color = GetColorValue();
       // For brevity, we omit the alpha component if it's equal to 255 (full
-      // opaque). Also, we try to preserve the author-specified function name,
-      // unless it's rgba() and we're omitting the alpha component - then we
-      // use rgb().
+      // opaque). Also, we use "rgba" rather than "rgb" when the color includes
+      // the non-opaque alpha value, for backwards-compat (even though they're
+      // aliases as of css-color-4).
+      // e.g.:
+      //   rgba(1, 2, 3, 1.0) => rgb(1, 2, 3)
+      //   rgba(1, 2, 3, 0.5) => rgba(1, 2, 3, 0.5)
+
       uint8_t a = NS_GET_A(color);
       bool showAlpha = (a != 255);
 
-      if (unit == eCSSUnit_RGBAColor && showAlpha) {
+      if (showAlpha) {
         aResult.AppendLiteral("rgba(");
       } else {
         aResult.AppendLiteral("rgb(");
@@ -2771,16 +2810,6 @@ nsCSSValuePairList_heap::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf
   return n;
 }
 
-size_t
-nsCSSValue::Array::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
-{
-  size_t n = aMallocSizeOf(this);
-  for (size_t i = 0; i < mCount; i++) {
-    n += mArray[i].SizeOfExcludingThis(aMallocSizeOf);
-  }
-  return n;
-}
-
 css::URLValueData::URLValueData(already_AddRefed<PtrHolder<nsIURI>> aURI,
                                 nsStringBuffer* aString,
                                 already_AddRefed<PtrHolder<nsIURI>> aBaseURI,
@@ -3057,7 +3086,9 @@ css::ImageValue::Initialize(nsIDocument* aDocument)
 
 css::ImageValue::~ImageValue()
 {
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(NS_IsMainThread() || mRequests.Count() == 0,
+             "Destructor should run on main thread, or on non-main thread "
+             "when mRequest is empty!");
 
   for (auto iter = mRequests.Iter(); !iter.Done(); iter.Next()) {
     nsIDocument* doc = iter.Key();

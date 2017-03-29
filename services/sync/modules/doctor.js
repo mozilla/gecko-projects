@@ -106,7 +106,7 @@ this.Doctor = {
       // Update the time now, even if we decline to actually perform a
       // validation. We don't want to check the rest of these more frequently
       // than once a day.
-      Svc.Prefs.set("validation.lastTime", Math.floor(nowSeconds));
+      Svc.Prefs.set(prefPrefix + "validation.lastTime", Math.floor(nowSeconds));
 
       // Validation only occurs a certain percentage of the time.
       let validationProbability = Svc.Prefs.get(prefPrefix + "validation.percentageChance", 0) / 100.0;
@@ -158,6 +158,11 @@ this.Doctor = {
         continue;
       }
 
+      if (!await validator.canValidate()) {
+        log.debug(`Skipping validation for ${engineName} because validator.canValidate() is false`);
+        continue;
+      }
+
       // Let's do it!
       Services.console.logStringMessage(
         `Sync is about to run a consistency check of ${engine.name}. This may be slow, and ` +
@@ -196,6 +201,10 @@ this.Doctor = {
     let requestor = this._getRepairRequestor(engine.name);
     let didStart = false;
     if (requestor) {
+      if (requestor.tryServerOnlyRepairs(validationResults)) {
+        return; // TODO: It would be nice if we could request a validation to be
+                // done on next sync.
+      }
       didStart = requestor.startRepairs(validationResults, flowID);
     }
     log.info(`${didStart ? "did" : "didn't"} start a repair of ${engine.name} with flowID ${flowID}`);

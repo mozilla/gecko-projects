@@ -65,10 +65,24 @@ function closeGlobalTab() {
   gTab = null;
 }
 
+var gTabsProgressListener = {
+  onLocationChange(aBrowser, aWebProgress, aRequest, aLocation, aFlags) {
+    if (!gTab || gTab.linkedBrowser != aBrowser) {
+      return;
+    }
+
+    unregisterGlobalTab();
+  },
+}
+
 function unregisterGlobalTab() {
   gTab.removeEventListener("TabClose", unregisterGlobalTab);
-  gTab.ownerGlobal.removeEventListener("unload", unregisterGlobalTab);
+  let win = gTab.ownerGlobal;
+  win.removeEventListener("unload", unregisterGlobalTab);
+  win.gBrowser.removeTabsProgressListener(gTabsProgressListener);
+
   gTab.removeAttribute("customizemode");
+
   gTab = null;
 }
 
@@ -177,6 +191,9 @@ CustomizeMode.prototype = {
                          "chrome://browser/skin/customizableui/customizeFavicon.ico");
 
     gTab.addEventListener("TabClose", unregisterGlobalTab);
+
+    win.gBrowser.addTabsProgressListener(gTabsProgressListener);
+
     win.addEventListener("unload", unregisterGlobalTab);
 
     if (gTab.selected) {
@@ -1368,8 +1385,7 @@ CustomizeMode.prototype = {
       }
 
       let lwthemePrefs = Services.prefs.getBranch("lightweightThemes.");
-      let recommendedThemes = lwthemePrefs.getComplexValue("recommendedThemes",
-                                                           Ci.nsISupportsString).data;
+      let recommendedThemes = lwthemePrefs.getStringPref("recommendedThemes");
       recommendedThemes = JSON.parse(recommendedThemes);
       let sb = Services.strings.createBundle("chrome://browser/locale/lightweightThemes.properties");
       for (let theme of recommendedThemes) {
@@ -1379,11 +1395,8 @@ CustomizeMode.prototype = {
         button.addEventListener("command", () => {
           LightweightThemeManager.setLocalTheme(button.theme);
           recommendedThemes = recommendedThemes.filter((aTheme) => { return aTheme.id != button.theme.id; });
-          let string = Cc["@mozilla.org/supports-string;1"]
-                         .createInstance(Ci.nsISupportsString);
-          string.data = JSON.stringify(recommendedThemes);
-          lwthemePrefs.setComplexValue("recommendedThemes",
-                                       Ci.nsISupportsString, string);
+          lwthemePrefs.setStringPref("recommendedThemes",
+                                     JSON.stringify(recommendedThemes));
           onThemeSelected(panel);
         });
         panel.insertBefore(button, footer);

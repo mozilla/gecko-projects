@@ -282,25 +282,6 @@ if (opener) {
   }
 }
 
-/**
- * Return a new MutationObserver which started observing |target| element
- * with { animations: true, subtree: |subtree| } option.
- * NOTE: This observer should be used only with takeRecords(). If any of
- * MutationRecords are observed in the callback of the MutationObserver,
- * it will raise an assertion.
- */
-function setupSynchronousObserver(t, target, subtree) {
-   var observer = new MutationObserver(records => {
-     assert_unreached("Any MutationRecords should not be observed in this " +
-                      "callback");
-   });
-  t.add_cleanup(() => {
-    observer.disconnect();
-  });
-  observer.observe(target, { animations: true, subtree: subtree });
-  return observer;
-}
-
 /*
  * Returns a promise that is resolved when the document has finished loading.
  */
@@ -331,4 +312,26 @@ function isOMTAEnabled() {
   const OMTAPrefKey = 'layers.offmainthreadcomposition.async-animations';
   return SpecialPowers.DOMWindowUtils.layerManagerRemote &&
          SpecialPowers.getBoolPref(OMTAPrefKey);
+}
+
+/**
+ * Append an SVG element to the target element.
+ *
+ * @param target The element which want to append.
+ * @param attrs  A array object with attribute name and values to set on
+ *               the SVG element.
+ * @return An SVG outer element.
+ */
+function addSVGElement(target, tag, attrs) {
+  if (!target) {
+    return null;
+  }
+  var element = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  if (attrs) {
+    for (var attrName in attrs) {
+      element.setAttributeNS(null, attrName, attrs[attrName]);
+    }
+  }
+  target.appendChild(element);
+  return element;
 }

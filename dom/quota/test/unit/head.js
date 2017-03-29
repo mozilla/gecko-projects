@@ -6,6 +6,7 @@
 const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 const NS_OK = Cr.NS_OK;
+const NS_ERROR_FAILURE = Cr.NS_ERROR_FAILURE;
 const NS_ERROR_UNEXPECTED = Cr.NS_ERROR_UNEXPECTED;
 
 function is(a, b, msg)
@@ -146,6 +147,20 @@ function reset(callback)
   return request;
 }
 
+function persist(principal, callback) {
+  let request = SpecialPowers._getQuotaManager().persist(principal);
+  request.callback = callback;
+
+  return request;
+}
+
+function persisted(principal, callback) {
+  let request = SpecialPowers._getQuotaManager().persisted(principal);
+  request.callback = callback;
+
+  return request;
+}
+
 function installPackage(packageName)
 {
   let directoryService = Cc["@mozilla.org/file/directory_service;1"]
@@ -237,12 +252,33 @@ function compareBuffers(buffer1, buffer2)
   return true;
 }
 
-function grabUsageAndContinueHandler(request)
+function getPersistedFromMetadata(readBuffer)
 {
-  testGenerator.next(request.usage);
+  const persistedPosition = 8; // Persisted state is stored in the 9th byte
+  let view =
+    readBuffer instanceof Uint8Array ? readBuffer : new Uint8Array(readBuffer);
+
+  return !!view[persistedPosition];
 }
 
-function getUsage(usageHandler)
+function grabResultAndContinueHandler(request)
+{
+  testGenerator.next(request.result);
+}
+
+function grabUsageAndContinueHandler(request)
+{
+  testGenerator.next(request.result.usage);
+}
+
+function getUsage(usageHandler, getAll)
+{
+  let request = SpecialPowers._getQuotaManager().getUsage(usageHandler, getAll);
+
+  return request;
+}
+
+function getCurrentUsage(usageHandler)
 {
   let principal = Cc["@mozilla.org/systemprincipal;1"]
                     .createInstance(Ci.nsIPrincipal);

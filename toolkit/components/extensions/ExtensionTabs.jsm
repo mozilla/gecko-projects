@@ -25,6 +25,7 @@ const {
   DefaultWeakMap,
   EventEmitter,
   ExtensionError,
+  getWinUtils,
 } = ExtensionUtils;
 
 /**
@@ -562,6 +563,8 @@ class TabBase {
     } else {
       options.css_origin = "author";
     }
+
+    options.wantReturnValue = true;
 
     return this.sendMessage(context, "Extension:Execute", {options});
   }
@@ -1145,7 +1148,7 @@ class WindowTrackerBase extends EventEmitter {
     this._windowIds = new DefaultWeakMap(window => {
       window.QueryInterface(Ci.nsIInterfaceRequestor);
 
-      return window.getInterface(Ci.nsIDOMWindowUtils).outerWindowID;
+      return getWinUtils(window).outerWindowID;
     });
   }
 

@@ -50,6 +50,7 @@ class VideoFrameContainer;
 class MediaDecoderStateMachine;
 
 enum class MediaEventType : int8_t;
+enum class Visibility : uint8_t;
 
 // GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
 // GetTickCount() and conflicts with MediaDecoder::GetCurrentTime implementation.
@@ -190,7 +191,7 @@ public:
 
   // Notify activity of the decoder owner is changed.
   virtual void NotifyOwnerActivityChanged(bool aIsDocumentVisible,
-                                          bool aIsElementVisible,
+                                          Visibility aElementVisibility,
                                           bool aIsElementInTree);
 
   // Pause video playback.
@@ -374,7 +375,7 @@ private:
 
   // Called from HTMLMediaElement when owner document activity changes
   virtual void SetElementVisibility(bool aIsDocumentVisible,
-                                    bool aIsElementVisible,
+                                    Visibility aElementVisibility,
                                     bool aIsElementInTree);
 
   // Force override the visible state to hidden.
@@ -399,14 +400,16 @@ private:
   // change. Call on the main thread only.
   virtual void ChangeState(PlayState aState);
 
-  // Called from MetadataLoaded(). Creates audio tracks and adds them to its
-  // owner's audio track list, and implies to video tracks respectively.
+  // Called from MetadataLoaded(). Ask its owner to create audio/video tracks
+  // and adds them to its owner's audio/video track list.
   // Call on the main thread only.
   void ConstructMediaTracks();
 
-  // Removes all audio tracks and video tracks that are previously added into
-  // the track list. Call on the main thread only.
+  // Ask its owner to remove all audio tracks and video tracks that are
+  // previously added into the track list.
+  // Call on the main thread only.
   void RemoveMediaTracks();
+
 
   // Called when the video has completed playing.
   // Call on the main thread only.
@@ -703,7 +706,8 @@ protected:
   bool mMinimizePreroll;
 
   // True if audio tracks and video tracks are constructed and added into the
-  // track list, false if all tracks are removed from the track list.
+  // owenr's track list, false if all tracks are removed from the owner's track
+  // list.
   bool mMediaTracksConstructed;
 
   // True if we've already fired metadataloaded.
@@ -724,7 +728,7 @@ protected:
   bool mIsDocumentVisible;
 
   // Tracks the visibility status of owner element.
-  bool mIsElementVisible;
+  Visibility mElementVisibility;
 
   // Tracks the owner is in-tree or not.
   bool mIsElementInTree;

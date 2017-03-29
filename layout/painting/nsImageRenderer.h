@@ -230,6 +230,7 @@ public:
   /// Retrieves the image associated with this nsImageRenderer, if there is one.
   already_AddRefed<imgIContainer> GetImage();
 
+  bool IsImageContainerAvailable(layers::LayerManager* aManager, uint32_t aFlags);
   bool IsReady() const { return mPrepareResult == DrawResult::SUCCESS; }
   DrawResult PrepareResult() const { return mPrepareResult; }
   void SetExtendMode(mozilla::gfx::ExtendMode aMode) { mExtendMode = aMode; }
@@ -262,7 +263,7 @@ private:
    * Returns null if we cannot create the drawable.
    */
   already_AddRefed<gfxDrawable> DrawableForElement(const nsRect& aImageRect,
-                                                   nsRenderingContext&  aRenderingContext);
+                                                   gfxContext&  aContext);
 
   nsIFrame*                 mForFrame;
   const nsStyleImage*       mImage;

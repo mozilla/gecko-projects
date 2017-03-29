@@ -330,6 +330,10 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
 #endif
 
   private:
+#ifdef DEBUG
+    js::WriteOnceData<bool> initialized_;
+#endif
+
     // The context for the thread which currently has exclusive access to most
     // contents of the runtime. When execution on the runtime is cooperatively
     // scheduled, this is the thread which is currently running.
@@ -561,7 +565,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     }
 
   private:
-    // List of non-ephemeron weak containers to sweep during beginSweepingZoneGroup.
+    // List of non-ephemeron weak containers to sweep during beginSweepingSweepGroup.
     js::ActiveThreadData<mozilla::LinkedList<JS::WeakCache<void*>>> weakCaches_;
   public:
     mozilla::LinkedList<JS::WeakCache<void*>>& weakCaches() { return weakCaches_.ref(); }
@@ -901,6 +905,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     }
 
     explicit JSRuntime(JSRuntime* parentRuntime);
+    ~JSRuntime();
 
     // destroyRuntime is used instead of a destructor, to ensure the downcast
     // to JSContext remains valid. The final GC triggered here depends on this.

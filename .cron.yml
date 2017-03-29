@@ -16,9 +16,9 @@ jobs:
       when:
           by-project:
             # Match buildbot starts for now
-            date: [{hour: 16, minute: 0}]
-            mozilla-central: [{hour: 11, minute: 0}]
-            mozilla-aurora: [{hour: 8, minute: 45}]  # Buildbot uses minute 40
+            date: [{hour: 15, minute: 0}]
+            mozilla-central: [{hour: 10, minute: 0}]
+            mozilla-aurora: [{hour: 7, minute: 45}]  # Buildbot uses minute 40
             # No default
 
     - name: nightly-desktop-osx
@@ -44,9 +44,9 @@ jobs:
       when:
         by-project:
             # Match buildbot starts for now
-            date: [{hour: 16, minute: 0}]
-            mozilla-central: [{hour: 11, minute: 0}]
-            mozilla-aurora: [{hour: 8, minute: 45}]  # Buildbot uses minute 40
+            date: [{hour: 15, minute: 0}]
+            mozilla-central: [{hour: 10, minute: 0}]
+            mozilla-aurora: [{hour: 7, minute: 45}]  # Buildbot uses minute 40
             # No default
 
     - name: nightly-mochitest-valgrind
@@ -69,14 +69,3 @@ jobs:
           - mozilla-central
       when:
           - {hour: 18, minute: 0}
-
-    - name: nightly-stylo-talos
-      job:
-          type: decision-task
-          treeherder-symbol: T 
-          target-tasks-method: stylo_talos
-      run-on-projects:
-          - mozilla-central
-      when:
-          - {hour: 4, minute: 0}
-

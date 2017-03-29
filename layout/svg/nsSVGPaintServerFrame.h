@@ -26,10 +26,37 @@ class nsStyleContext;
 
 struct gfxRect;
 
+/**
+ * RAII class used to temporarily set and remove the
+ * NS_FRAME_DRAWING_AS_PAINTSERVER frame state bit while a frame is being
+ * drawn as a paint server.
+ */
+class MOZ_RAII AutoSetRestorePaintServerState
+{
+public:
+  explicit AutoSetRestorePaintServerState(
+             nsIFrame* aFrame
+             MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
+    mFrame(aFrame)
+  {
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    mFrame->AddStateBits(NS_FRAME_DRAWING_AS_PAINTSERVER);
+  }
+  ~AutoSetRestorePaintServerState()
+  {
+    mFrame->RemoveStateBits(NS_FRAME_DRAWING_AS_PAINTSERVER);
+  }
+
+private:
+  nsIFrame* mFrame;
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
 class nsSVGPaintServerFrame : public nsSVGContainerFrame
 {
 protected:
   typedef mozilla::gfx::DrawTarget DrawTarget;
+  typedef mozilla::image::DrawResult DrawResult;
 
   explicit nsSVGPaintServerFrame(nsStyleContext* aContext)
     : nsSVGContainerFrame(aContext)
@@ -48,13 +75,14 @@ public:
    *   that surfaces of the correct size can be created. (SVG gradients are
    *   vector based, so it's not used there.)
    */
-  virtual already_AddRefed<gfxPattern>
+  virtual mozilla::Pair<DrawResult, RefPtr<gfxPattern>>
     GetPaintServerPattern(nsIFrame *aSource,
                           const DrawTarget* aDrawTarget,
                           const gfxMatrix& aContextMatrix,
                           nsStyleSVGPaint nsStyleSVG::*aFillOrStroke,
                           float aOpacity,
-                          const gfxRect *aOverrideBounds = nullptr) = 0;
+                          const gfxRect *aOverrideBounds = nullptr,
+                          uint32_t aFlags = 0) = 0;
 
   // nsIFrame methods:
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,

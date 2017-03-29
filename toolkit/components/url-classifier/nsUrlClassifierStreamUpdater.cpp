@@ -99,7 +99,6 @@ nsUrlClassifierStreamUpdater::DownloadDone()
   mSuccessCallback = nullptr;
   mUpdateErrorCallback = nullptr;
   mDownloadErrorCallback = nullptr;
-  mTelemetryProvider.Truncate();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -375,7 +374,8 @@ nsUrlClassifierStreamUpdater::FetchNextRequest()
     return NS_OK;
   }
 
-  PendingRequest &request = mPendingRequests[0];
+  PendingRequest request = mPendingRequests[0];
+  mPendingRequests.RemoveElementAt(0);
   LOG(("Stream updater: fetching next request: %s, %s",
        request.mTables.get(), request.mUrl.get()));
   bool dummy;
@@ -388,11 +388,6 @@ nsUrlClassifierStreamUpdater::FetchNextRequest()
     request.mUpdateErrorCallback,
     request.mDownloadErrorCallback,
     &dummy);
-  request.mSuccessCallback = nullptr;
-  request.mUpdateErrorCallback = nullptr;
-  request.mDownloadErrorCallback = nullptr;
-  mPendingRequests.RemoveElementAt(0);
-
   return NS_OK;
 }
 
@@ -785,6 +780,7 @@ nsUrlClassifierStreamUpdater::OnStopRequest(nsIRequest *request, nsISupports* co
     rv = mDBService->FinishUpdate();
   }
 
+  mTelemetryProvider.Truncate();
   mChannel = nullptr;
 
   // If the fetch failed, return the network status rather than NS_OK, the

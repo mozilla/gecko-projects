@@ -29,6 +29,7 @@
 
 #include "nsAlgorithm.h" // for clamped()
 #include "nscore.h"
+#include "nsCRT.h" // for IsAscii()
 #include "nsIWidget.h"
 #include "nsIPresShell.h"
 #include "nsFontMetrics.h"
@@ -1456,6 +1457,7 @@ struct SetEnumValueHelper
   DEFINE_ENUM_CLASS_SETTER(StyleUserModify, ReadOnly, WriteOnly)
   DEFINE_ENUM_CLASS_SETTER(StyleWindowDragging, Default, NoDrag)
   DEFINE_ENUM_CLASS_SETTER(StyleOrient, Inline, Vertical)
+  DEFINE_ENUM_CLASS_SETTER(StyleGeometryBox, BorderBox, ViewBox)
 #ifdef MOZ_XUL
   DEFINE_ENUM_CLASS_SETTER(StyleDisplay, None, MozPopup)
 #else
@@ -4034,11 +4036,13 @@ nsRuleNode::SetFont(nsPresContext* aPresContext, nsStyleContext* aContext,
     aFont->mFont.languageOverride = aParentFont->mFont.languageOverride;
   } else if (eCSSUnit_Normal == languageOverrideValue->GetUnit() ||
              eCSSUnit_Initial == languageOverrideValue->GetUnit()) {
-    aFont->mFont.languageOverride.Truncate();
+    aFont->mFont.languageOverride = NO_FONT_LANGUAGE_OVERRIDE;
   } else if (eCSSUnit_System_Font == languageOverrideValue->GetUnit()) {
     aFont->mFont.languageOverride = systemFont.languageOverride;
   } else if (eCSSUnit_String == languageOverrideValue->GetUnit()) {
-    languageOverrideValue->GetStringValue(aFont->mFont.languageOverride);
+    nsAutoString lang;
+    languageOverrideValue->GetStringValue(lang);
+    aFont->mFont.languageOverride = ParseFontLanguageOverride(lang);
   }
 
   // -moz-min-font-size-ratio: percent, inherit
@@ -4405,6 +4409,26 @@ nsRuleNode::ComputeFontData(void* aStartStruct,
   }
 
   COMPUTE_END_INHERITED(Font, font)
+}
+
+/*static*/ uint32_t
+nsRuleNode::ParseFontLanguageOverride(const nsAString& aLangTag)
+{
+  if (!aLangTag.Length() || aLangTag.Length() > 4) {
+    return NO_FONT_LANGUAGE_OVERRIDE;
+  }
+  uint32_t index, result = 0;
+  for (index = 0; index < aLangTag.Length(); ++index) {
+    char16_t ch = aLangTag[index];
+    if (!nsCRT::IsAscii(ch)) { // valid tags are pure ASCII
+      return NO_FONT_LANGUAGE_OVERRIDE;
+    }
+    result = (result << 8) + ch;
+  }
+  while (index++ < 4) {
+    result = (result << 8) + 0x20;
+  }
+  return result;
 }
 
 template <typename T>
@@ -6147,33 +6171,35 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
   // See ReflowInput::CalculateHypotheticalBox
   display->mOriginalDisplay = display->mDisplay;
 
-  // appearance: enum, inherit, initial
+  // -moz-appearance: enum, inherit, initial
+  SetValue(*aRuleData->ValueForMozAppearance(),
+           display->mMozAppearance, conditions,
+           SETVAL_ENUMERATED | SETVAL_UNSET_INITIAL,
+           parentDisplay->mMozAppearance,
+           NS_THEME_NONE);
+
+  // appearance: auto | none
   SetValue(*aRuleData->ValueForAppearance(),
            display->mAppearance, conditions,
            SETVAL_ENUMERATED | SETVAL_UNSET_INITIAL,
            parentDisplay->mAppearance,
-           NS_THEME_NONE);
+           NS_THEME_AUTO);
 
   // binding: url, none, inherit
   const nsCSSValue* bindingValue = aRuleData->ValueForBinding();
   if (eCSSUnit_URL == bindingValue->GetUnit()) {
     mozilla::css::URLValue* url = bindingValue->GetURLStructValue();
     NS_ASSERTION(url, "What's going on here?");
-
-    if (MOZ_LIKELY(url->GetURI())) {
-      display->mBinding = url;
-    } else {
-      display->mBinding = nullptr;
-    }
+    display->mBinding.Set(url);
   }
   else if (eCSSUnit_None == bindingValue->GetUnit() ||
            eCSSUnit_Initial == bindingValue->GetUnit() ||
            eCSSUnit_Unset == bindingValue->GetUnit()) {
-    display->mBinding = nullptr;
+    display->mBinding.Set(nullptr);
   }
   else if (eCSSUnit_Inherit == bindingValue->GetUnit()) {
     conditions.SetUncacheable();
-    display->mBinding = parentDisplay->mBinding;
+    display->mBinding.Set(parentDisplay->mBinding);
   }
 
   // position: enum, inherit, initial
@@ -6614,7 +6640,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
            display->mTransformBox, conditions,
            SETVAL_ENUMERATED | SETVAL_UNSET_INITIAL,
            parentDisplay->mTransformBox,
-           NS_STYLE_TRANSFORM_BOX_BORDER_BOX);
+           StyleGeometryBox::BorderBox);
 
   // orient: enum, inherit, initial
   SetValue(*aRuleData->ValueForOrient(),
@@ -7462,7 +7488,7 @@ nsRuleNode::ComputeBackgroundData(void* aStartStruct,
                     bg->mImage.mLayers,
                     parentBG->mImage.mLayers,
                     &nsStyleImageLayers::Layer::mClip,
-                    StyleGeometryBox::Border,
+                    StyleGeometryBox::BorderBox,
                     parentBG->mImage.mClipCount,
                     bg->mImage.mClipCount, maxItemCount, rebuild, conditions);
 
@@ -7481,7 +7507,7 @@ nsRuleNode::ComputeBackgroundData(void* aStartStruct,
                     bg->mImage.mLayers,
                     parentBG->mImage.mLayers,
                     &nsStyleImageLayers::Layer::mOrigin,
-                    StyleGeometryBox::Padding,
+                    StyleGeometryBox::PaddingBox,
                     parentBG->mImage.mOriginCount,
                     bg->mImage.mOriginCount, maxItemCount, rebuild,
                     conditions);
@@ -8650,7 +8676,7 @@ nsRuleNode::ComputePositionData(void* aStartStruct,
   if (MOZ_UNLIKELY(justifyItemsValue.GetUnit() == eCSSUnit_Inherit)) {
     if (MOZ_LIKELY(parentContext)) {
       pos->mJustifyItems =
-        parentPos->ComputedJustifyItems(parentContext->GetParent());
+        parentPos->ComputedJustifyItems(parentContext->GetParentAllowServo());
     } else {
       pos->mJustifyItems = NS_STYLE_JUSTIFY_NORMAL;
     }
@@ -9008,7 +9034,7 @@ nsRuleNode::ComputeContentData(void* aStartStruct,
           nsStyleContentType type =
             unit == eCSSUnit_Counter ? eStyleContentType_Counter
                                      : eStyleContentType_Counters;
-          data.SetCounters(type, value.GetArrayValue());
+          data.SetCounters(type, value.GetThreadSafeArrayValue());
           break;
         }
         case eCSSUnit_Enumerated:
@@ -10102,7 +10128,7 @@ nsRuleNode::ComputeSVGResetData(void* aStartStruct,
                     svgReset->mMask.mLayers,
                     parentSVGReset->mMask.mLayers,
                     &nsStyleImageLayers::Layer::mClip,
-                    StyleGeometryBox::Border,
+                    StyleGeometryBox::BorderBox,
                     parentSVGReset->mMask.mClipCount,
                     svgReset->mMask.mClipCount, maxItemCount, rebuild,
                     conditions);
@@ -10112,7 +10138,7 @@ nsRuleNode::ComputeSVGResetData(void* aStartStruct,
                     svgReset->mMask.mLayers,
                     parentSVGReset->mMask.mLayers,
                     &nsStyleImageLayers::Layer::mOrigin,
-                    StyleGeometryBox::Border,
+                    StyleGeometryBox::BorderBox,
                     parentSVGReset->mMask.mOriginCount,
                     svgReset->mMask.mOriginCount, maxItemCount, rebuild,
                     conditions);

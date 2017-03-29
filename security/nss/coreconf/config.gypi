@@ -108,6 +108,7 @@
     'ct_verif%': 0,
     'nss_public_dist_dir%': '<(nss_dist_dir)/public',
     'nss_private_dist_dir%': '<(nss_dist_dir)/private',
+    'only_dev_random%': 1,
   },
   'target_defaults': {
     # Settings specific to targets should go here.
@@ -218,12 +219,6 @@
               '-Wl,--gc-sections',
             ],
             'conditions': [
-              ['OS=="dragonfly" or OS=="freebsd" or OS=="netbsd" or OS=="openbsd"', {
-                # Bug 1321317 - unix_rand.c:880: undefined reference to `environ'
-                'ldflags': [
-                  '-Wl,--warn-unresolved-symbols',
-                ],
-              }],
               ['no_zdefs==0', {
                 'ldflags': [
                   '-Wl,-z,defs',
@@ -360,10 +355,12 @@
           [ 'fuzz_tls==1', {
             'cflags': [
               '-Wno-unused-function',
+              '-Wno-unused-variable',
             ],
             'xcode_settings': {
               'OTHER_CFLAGS': [
                 '-Wno-unused-function',
+                '-Wno-unused-variable',
               ],
             },
           }],

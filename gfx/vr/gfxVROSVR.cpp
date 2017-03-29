@@ -526,27 +526,33 @@ VRSystemManagerOSVR::GetHMDs(nsTArray<RefPtr<VRDisplayHost>>& aHMDResult)
   }
 }
 
+bool
+VRSystemManagerOSVR::GetIsPresenting()
+{
+  if (mHMDInfo) {
+    VRDisplayInfo displayInfo(mHMDInfo->GetDisplayInfo());
+    return displayInfo.GetIsPresenting();
+  }
+
+  return false;
+}
+
 void
 VRSystemManagerOSVR::HandleInput()
 {
 }
 
 void
-VRSystemManagerOSVR::HandleButtonPress(uint32_t aControllerIdx,
-                                       uint64_t aButtonPressed)
+VRSystemManagerOSVR::VibrateHaptic(uint32_t aControllerIdx,
+                                   uint32_t aHapticIndex,
+                                   double aIntensity,
+                                   double aDuration,
+                                   uint32_t aPromiseID)
 {
 }
 
 void
-VRSystemManagerOSVR::HandleAxisMove(uint32_t aControllerIdx, uint32_t aAxis,
-                                    float aValue)
-{
-}
-
-void
-VRSystemManagerOSVR::HandlePoseTracking(uint32_t aControllerIdx,
-                                        const GamepadPoseState& aPose,
-                                        VRControllerHost* aController)
+VRSystemManagerOSVR::StopVibrateHaptic(uint32_t aControllerIdx)
 {
 }
 

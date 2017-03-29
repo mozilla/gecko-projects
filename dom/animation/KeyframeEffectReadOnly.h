@@ -65,18 +65,18 @@ struct AnimationPropertySegment
   dom::CompositeOperation mFromComposite = dom::CompositeOperation::Replace;
   dom::CompositeOperation mToComposite = dom::CompositeOperation::Replace;
 
-  bool HasReplacableValues() const
+  bool HasReplaceableValues() const
   {
-    return HasReplacableFromValue() && HasReplacableToValue();
+    return HasReplaceableFromValue() && HasReplaceableToValue();
   }
 
-  bool HasReplacableFromValue() const
+  bool HasReplaceableFromValue() const
   {
     return !mFromValue.IsNull() &&
            mFromComposite == dom::CompositeOperation::Replace;
   }
 
-  bool HasReplacableToValue() const
+  bool HasReplaceableToValue() const
   {
     return !mToValue.IsNull() &&
            mToComposite == dom::CompositeOperation::Replace;
@@ -146,7 +146,7 @@ struct AnimationProperty
   }
 };
 
-struct ServoComputedStyleValues
+struct ServoComputedValuesWithParent
 {
   const ServoComputedValues* mCurrentStyle;
   const ServoComputedValues* mParentStyle;
@@ -218,7 +218,7 @@ public:
   void SetKeyframes(nsTArray<Keyframe>&& aKeyframes,
                     nsStyleContext* aStyleContext);
   void SetKeyframes(nsTArray<Keyframe>&& aKeyframes,
-                    const ServoComputedStyleValues& aServoValues);
+                    const ServoComputedValuesWithParent& aServoValues);
 
   // Returns true if the effect includes |aProperty| regardless of whether the
   // property is overridden by !important rule.
@@ -247,7 +247,7 @@ public:
   // |aStyleContext| to resolve specified values.
   void UpdateProperties(nsStyleContext* aStyleContext);
   // Servo version of the above function.
-  void UpdateProperties(const ServoComputedStyleValues& aServoValues);
+  void UpdateProperties(const ServoComputedValuesWithParent& aServoValues);
 
   // Update various bits of state related to running ComposeStyle().
   // We need to update this outside ComposeStyle() because we should avoid
@@ -255,10 +255,11 @@ public:
   // parallel traversal.
   void WillComposeStyle();
 
-  // Updates |aStyleRule| with the animation values produced by this
+  // Updates |aComposeResult| with the animation values produced by this
   // AnimationEffect for the current time except any properties contained
   // in |aPropertiesToSkip|.
-  void ComposeStyle(AnimationRule& aStyleRule,
+  template<typename ComposeAnimationResult>
+  void ComposeStyle(ComposeAnimationResult&& aRestultContainer,
                     const nsCSSPropertyIDSet& aPropertiesToSkip);
 
   // Composite |aValueToComposite| on |aUnderlyingValue| with
@@ -308,7 +309,7 @@ public:
   // This is used for deciding the animation is paint-only.
   void CalculateCumulativeChangeHint(nsStyleContext* aStyleContext);
   void CalculateCumulativeChangeHint(
-    const ServoComputedStyleValues& aServoValues)
+    const ServoComputedValuesWithParent& aServoValues)
   {
   }
 
@@ -410,15 +411,20 @@ protected:
   // Ensure the base styles is available for any properties in |aProperties|.
   void EnsureBaseStyles(nsStyleContext* aStyleContext,
                         const nsTArray<AnimationProperty>& aProperties);
-  void EnsureBaseStyles(const ServoComputedStyleValues& aServoValues,
+  void EnsureBaseStyles(const ServoComputedValuesWithParent& aServoValues,
                         const nsTArray<AnimationProperty>& aProperties)
   {
     // FIXME: Bug 1311257: Support missing keyframes.
   }
 
-  // Returns the base style resolved by |aStyleContext| for |aProperty|.
-  StyleAnimationValue ResolveBaseStyle(nsCSSPropertyID aProperty,
-                                       nsStyleContext* aStyleContext);
+  // If no base style is already stored for |aProperty|, resolves the base style
+  // for |aProperty| using |aStyleContext| and stores it in mBaseStyleValues.
+  // If |aCachedBaseStyleContext| is non-null, it will be used, otherwise the
+  // base style context will be resolved and stored in
+  // |aCachedBaseStyleContext|.
+  void EnsureBaseStyle(nsCSSPropertyID aProperty,
+                       nsStyleContext* aStyleContext,
+                       RefPtr<nsStyleContext>& aCachedBaseStyleContext);
 
   Maybe<OwningAnimationTarget> mTarget;
 
@@ -457,6 +463,16 @@ private:
 
   template<typename StyleType>
   void DoUpdateProperties(StyleType&& aStyle);
+
+  void ComposeStyleRule(RefPtr<AnimValuesStyleRule>& aStyleRule,
+                        const AnimationProperty& aProperty,
+                        const AnimationPropertySegment& aSegment,
+                        const ComputedTiming& aComputedTiming);
+
+  void ComposeStyleRule(const RawServoAnimationValueMap& aAnimationValues,
+                        const AnimationProperty& aProperty,
+                        const AnimationPropertySegment& aSegment,
+                        const ComputedTiming& aComputedTiming);
 
   nsIFrame* GetAnimationFrame() const;
 

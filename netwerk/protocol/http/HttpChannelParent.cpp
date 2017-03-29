@@ -42,6 +42,7 @@
 #include "nsStringStream.h"
 #include "nsQueryObject.h"
 #include "nsIURIClassifier.h"
+#include "mozilla/dom/ContentParent.h"
 
 using mozilla::BasePrincipal;
 using namespace mozilla::dom;
@@ -837,7 +838,7 @@ HttpChannelParent::RecvMarkOfflineCacheEntryAsForeign()
   return IPC_OK();
 }
 
-class DivertDataAvailableEvent : public ChannelEvent
+class DivertDataAvailableEvent : public MainThreadChannelEvent
 {
 public:
   DivertDataAvailableEvent(HttpChannelParent* aParent,
@@ -932,7 +933,7 @@ HttpChannelParent::DivertOnDataAvailable(const nsCString& data,
   }
 }
 
-class DivertStopRequestEvent : public ChannelEvent
+class DivertStopRequestEvent : public MainThreadChannelEvent
 {
 public:
   DivertStopRequestEvent(HttpChannelParent* aParent,
@@ -993,7 +994,7 @@ HttpChannelParent::DivertOnStopRequest(const nsresult& statusCode)
   mParentListener->OnStopRequest(mChannel, nullptr, status);
 }
 
-class DivertCompleteEvent : public ChannelEvent
+class DivertCompleteEvent : public MainThreadChannelEvent
 {
 public:
   explicit DivertCompleteEvent(HttpChannelParent* aParent)
@@ -1125,6 +1126,16 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
 
   MOZ_ASSERT(mChannel == chan,
              "HttpChannelParent getting OnStartRequest from a different nsHttpChannel instance");
+
+  // Send down any permissions which are relevant to this URL if we are
+  // performing a document load. We can't do that is mIPCClosed is set.
+  if (!mIPCClosed) {
+    PContentParent* pcp = Manager()->Manager();
+    MOZ_ASSERT(pcp, "We should have a manager if our IPC isn't closed");
+    DebugOnly<nsresult> rv =
+      static_cast<ContentParent*>(pcp)->TransmitPermissionsFor(chan);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+  }
 
   nsHttpResponseHead *responseHead = chan->GetResponseHead();
   nsHttpRequestHead  *requestHead = chan->GetRequestHead();

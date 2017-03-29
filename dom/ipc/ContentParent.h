@@ -30,6 +30,7 @@
 #include "nsIDOMGeoPositionErrorCallback.h"
 #include "nsRefPtrHashtable.h"
 #include "PermissionMessageUtils.h"
+#include "ProfilerControllingProcess.h"
 #include "DriverCrashGuard.h"
 
 #define CHILD_PROCESS_SHUTDOWN_MESSAGE NS_LITERAL_STRING("child-process-shutdown")
@@ -55,6 +56,9 @@ class nsIWidget;
 
 namespace mozilla {
 class PRemoteSpellcheckEngineParent;
+#ifdef MOZ_GECKO_PROFILER
+class CrossProcessProfilerController;
+#endif
 
 #if defined(XP_LINUX) && defined(MOZ_CONTENT_SANDBOX)
 class SandboxBroker;
@@ -108,6 +112,7 @@ class ContentParent final : public PContentParent
                           , public mozilla::LinkedListElement<ContentParent>
                           , public gfx::GPUProcessListener
                           , public mozilla::MemoryReportingProcess
+                          , public mozilla::ProfilerControllingProcess
 {
   typedef mozilla::ipc::GeckoChildProcessHost GeckoChildProcessHost;
   typedef mozilla::ipc::OptionalURIParams OptionalURIParams;
@@ -303,6 +308,11 @@ public:
                                                        const nsCString& aPermissionType,
                                                        nsresult* aRv) override;
 
+  void SendStartProfiler(const ProfilerInitParams& aParams) override;
+  void SendStopProfiler() override;
+  void SendPauseProfiler(const bool& aPause) override;
+  void SendGatherProfile() override;
+
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(ContentParent, nsIObserver)
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -377,10 +387,7 @@ public:
     return mScriptableHelper;
   }
 
-  bool NeedsPermissionsUpdate() const
-  {
-    return mSendPermissionUpdates;
-  }
+  bool NeedsPermissionsUpdate(const nsACString& aPermissionKey) const;
 
   /**
    * Kill our subprocess and make sure it dies.  Should only be used
@@ -438,14 +445,6 @@ public:
   virtual PParentToChildStreamParent* AllocPParentToChildStreamParent() override;
   virtual bool
   DeallocPParentToChildStreamParent(PParentToChildStreamParent* aActor) override;
-
-  virtual PScreenManagerParent*
-  AllocPScreenManagerParent(uint32_t* aNumberOfScreens,
-                            float* aSystemDefaultScale,
-                            bool* aSuccess) override;
-
-  virtual bool
-  DeallocPScreenManagerParent(PScreenManagerParent* aActor) override;
 
   virtual PHalParent* AllocPHalParent() override;
 
@@ -640,6 +639,10 @@ public:
   // Use the PHangMonitor channel to ask the child to repaint a tab.
   void ForceTabPaint(TabParent* aTabParent, uint64_t aLayerObserverEpoch);
 
+  nsresult TransmitPermissionsFor(nsIChannel* aChannel);
+
+  nsresult TransmitPermissionsForPrincipal(nsIPrincipal* aPrincipal);
+
 protected:
   void OnChannelConnected(int32_t pid) override;
 
@@ -779,6 +782,13 @@ private:
 
   // Start the force-kill timer on shutdown.
   void StartForceKillTimer();
+
+  // Ensure that the permissions for the giben Permission key are set in the
+  // content process.
+  //
+  // See nsIPermissionManager::GetPermissionsForKey for more information on
+  // these keys.
+  void EnsurePermissionsByKey(const nsCString& aKey);
 
   static void ForceKillTimerCallback(nsITimer* aTimer, void* aClosure);
 
@@ -926,8 +936,6 @@ private:
 
   virtual mozilla::ipc::IPCResult RecvReadFontList(InfallibleTArray<FontListEntry>* retValue) override;
 
-  virtual mozilla::ipc::IPCResult RecvReadPermissions(InfallibleTArray<IPC::Permission>* aPermissions) override;
-
   virtual mozilla::ipc::IPCResult RecvSetClipboard(const IPCDataTransfer& aDataTransfer,
                                                    const bool& aIsPrivateData,
                                                    const IPC::Principal& aRequestingPrincipal,
@@ -1059,7 +1067,7 @@ private:
   RecvBackUpXResources(const FileDescriptor& aXSocketFd) override;
 
   virtual mozilla::ipc::IPCResult
-  RecvOpenAnonymousTemporaryFile(FileDescOrError* aFD) override;
+  RecvRequestAnonymousTemporaryFile(const uint64_t& aID) override;
 
   virtual mozilla::ipc::IPCResult
   RecvKeygenProcessValue(const nsString& oldValue, const nsString& challenge,
@@ -1086,8 +1094,6 @@ private:
   virtual mozilla::ipc::IPCResult RecvProfile(const nsCString& aProfile) override;
 
   virtual mozilla::ipc::IPCResult RecvGetGraphicsDeviceInitData(ContentDeviceData* aOut) override;
-
-  void StartProfiler(nsIProfilerStartParams* aParams);
 
   virtual mozilla::ipc::IPCResult RecvGetAndroidSystemInfo(AndroidSystemInfo* aInfo) override;
 
@@ -1178,7 +1184,6 @@ private:
   // still pass through.
   bool mIsAlive;
 
-  bool mSendPermissionUpdates;
   bool mIsForBrowser;
 
   // These variables track whether we've called Close() and KillHard() on our
@@ -1204,9 +1209,8 @@ private:
   PProcessHangMonitorParent* mHangMonitorActor;
 
 #ifdef MOZ_GECKO_PROFILER
-  bool mIsProfilerActive;
+  UniquePtr<mozilla::CrossProcessProfilerController> mProfilerController;
 #endif
-  nsCString mProfile;
 
   UniquePtr<gfx::DriverCrashGuard> mDriverCrashGuard;
   UniquePtr<MemoryReportRequestHost> mMemoryReportRequest;
@@ -1224,6 +1228,8 @@ private:
   // This hashtable is used to run GetFilesHelper objects in the parent process.
   // GetFilesHelper can be aborted by receiving RecvDeleteGetFilesRequest.
   nsRefPtrHashtable<nsIDHashKey, GetFilesHelper> mGetFilesPendingRequests;
+
+  nsTHashtable<nsCStringHashKey> mActivePermissionKeys;
 
   nsTArray<nsCString> mBlobURLs;
 #ifdef MOZ_CRASHREPORTER

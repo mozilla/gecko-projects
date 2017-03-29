@@ -1769,29 +1769,6 @@ ssl3_InitCompressionContext(ssl3CipherSpec *pwSpec)
     return SECSuccess;
 }
 
-/* This function should probably be moved to pk11wrap and be named
- * PK11_ParamFromIVAndEffectiveKeyBits
- */
-static SECItem *
-ssl3_ParamFromIV(CK_MECHANISM_TYPE mtype, SECItem *iv, CK_ULONG ulEffectiveBits)
-{
-    SECItem *param = PK11_ParamFromIV(mtype, iv);
-    if (param && param->data && param->len >= sizeof(CK_RC2_PARAMS)) {
-        switch (mtype) {
-            case CKM_RC2_KEY_GEN:
-            case CKM_RC2_ECB:
-            case CKM_RC2_CBC:
-            case CKM_RC2_MAC:
-            case CKM_RC2_MAC_GENERAL:
-            case CKM_RC2_CBC_PAD:
-                *(CK_RC2_PARAMS *)param->data = ulEffectiveBits;
-            default:
-                break;
-        }
-    }
-    return param;
-}
-
 /* ssl3_BuildRecordPseudoHeader writes the SSL/TLS pseudo-header (the data
  * which is included in the MAC or AEAD additional data) to |out| and returns
  * its length. See https://tools.ietf.org/html/rfc5246#section-6.2.3.3 for the
@@ -1973,7 +1950,6 @@ ssl3_InitPendingContexts(sslSocket *ss)
     CK_MECHANISM_TYPE mechanism;
     CK_MECHANISM_TYPE mac_mech;
     CK_ULONG macLength;
-    CK_ULONG effKeyBits;
     SECItem iv;
     SECItem mac_param;
     SSLCipherAlgorithm calg;
@@ -2043,14 +2019,13 @@ ssl3_InitPendingContexts(sslSocket *ss)
         return SECSuccess;
     }
     mechanism = ssl3_Alg2Mech(calg);
-    effKeyBits = cipher_def->key_size * BPB;
 
     /*
      * build the server context
      */
     iv.data = pwSpec->server.write_iv;
     iv.len = cipher_def->iv_size;
-    param = ssl3_ParamFromIV(mechanism, &iv, effKeyBits);
+    param = PK11_ParamFromIV(mechanism, &iv);
     if (param == NULL) {
         ssl_MapLowLevelError(SSL_ERROR_IV_PARAM_FAILURE);
         goto fail;
@@ -2074,7 +2049,7 @@ ssl3_InitPendingContexts(sslSocket *ss)
     iv.data = pwSpec->client.write_iv;
     iv.len = cipher_def->iv_size;
 
-    param = ssl3_ParamFromIV(mechanism, &iv, effKeyBits);
+    param = PK11_ParamFromIV(mechanism, &iv);
     if (param == NULL) {
         ssl_MapLowLevelError(SSL_ERROR_IV_PARAM_FAILURE);
         goto fail;
@@ -2726,10 +2701,7 @@ ssl3_SendRecord(sslSocket *ss,
         ** trying to send an alert.
         */
         PR_ASSERT(type == content_alert);
-        rv = ssl3_InitState(ss);
-        if (rv != SECSuccess) {
-            return SECFailure; /* ssl3_InitState has set the error code. */
-        }
+        ssl3_InitState(ss);
     }
 
     /* check for Token Presence */
@@ -2935,6 +2907,7 @@ ssl3_SendApplicationData(sslSocket *ss, const unsigned char *in,
             ssl_GetXmitBufLock(ss);
         }
         toSend = PR_MIN(len - totalSent, MAX_FRAGMENT_LENGTH);
+
         /*
          * Note that the 0 epoch is OK because flags will never require
          * its use, as guaranteed by the PORT_Assert above.
@@ -4101,11 +4074,9 @@ ssl3_InitHandshakeHashes(sslSocket *ss)
     return SECSuccess;
 }
 
-SECStatus
+void
 ssl3_RestartHandshakeHashes(sslSocket *ss)
 {
-    SECStatus rv = SECSuccess;
-
     SSL_TRC(30, ("%d: SSL3[%d]: reset handshake hashes",
                  SSL_GETPID(), ss->fd));
     ss->ssl3.hs.hashType = handshake_hash_unknown;
@@ -4118,7 +4089,6 @@ ssl3_RestartHandshakeHashes(sslSocket *ss)
         PK11_DestroyContext(ss->ssl3.hs.sha, PR_TRUE);
         ss->ssl3.hs.sha = NULL;
     }
-    return rv;
 }
 
 /*
@@ -5024,15 +4994,8 @@ ssl3_SendClientHello(sslSocket *ss, sslClientHelloType type)
     if (ss->ssl3.hs.helloRetry) {
         PORT_Assert(type == client_hello_retry);
     } else {
-        rv = ssl3_InitState(ss);
-        if (rv != SECSuccess) {
-            return rv; /* ssl3_InitState has set the error code. */
-        }
-
-        rv = ssl3_RestartHandshakeHashes(ss);
-        if (rv != SECSuccess) {
-            return rv;
-        }
+        ssl3_InitState(ss);
+        ssl3_RestartHandshakeHashes(ss);
     }
 
     /* These must be reset every handshake. */
@@ -9164,16 +9127,8 @@ ssl3_HandleV2ClientHello(sslSocket *ss, unsigned char *buffer, int length,
         goto loser;
     }
 
-    rv = ssl3_InitState(ss);
-    if (rv != SECSuccess) {
-        ssl_ReleaseSSL3HandshakeLock(ss);
-        return rv; /* ssl3_InitState has set the error code. */
-    }
-    rv = ssl3_RestartHandshakeHashes(ss);
-    if (rv != SECSuccess) {
-        ssl_ReleaseSSL3HandshakeLock(ss);
-        return rv;
-    }
+    ssl3_InitState(ss);
+    ssl3_RestartHandshakeHashes(ss);
 
     if (ss->ssl3.hs.ws != wait_client_hello) {
         desc = unexpected_message;
@@ -11795,10 +11750,7 @@ ssl3_HandleHandshakeMessage(sslSocket *ss, SSL3Opaque *b, PRUint32 length,
     /* Start new handshake hashes when we start a new handshake.  Unless this is
      * TLS 1.3 and we sent a HelloRetryRequest. */
     if (ss->ssl3.hs.msg_type == client_hello && !ss->ssl3.hs.helloRetry) {
-        rv = ssl3_RestartHandshakeHashes(ss);
-        if (rv != SECSuccess) {
-            return rv;
-        }
+        ssl3_RestartHandshakeHashes(ss);
     }
     /* We should not include hello_request and hello_verify_request messages
      * in the handshake hashes */
@@ -12590,11 +12542,8 @@ ssl3_HandleRecord(sslSocket *ss, SSL3Ciphertext *cText, sslBuffer *databuf)
 
     if (!ss->ssl3.initialized) {
         ssl_GetSSL3HandshakeLock(ss);
-        rv = ssl3_InitState(ss);
+        ssl3_InitState(ss);
         ssl_ReleaseSSL3HandshakeLock(ss);
-        if (rv != SECSuccess) {
-            return rv; /* ssl3_InitState has set the error code. */
-        }
     }
 
     /* check for Token Presence */
@@ -12913,16 +12862,14 @@ ssl3_InitCipherSpec(ssl3CipherSpec *spec)
 **      ssl3_HandleRecord()
 **
 ** This function should perhaps acquire and release the SpecWriteLock.
-**
-**
 */
-SECStatus
+void
 ssl3_InitState(sslSocket *ss)
 {
     PORT_Assert(ss->opt.noLocks || ssl_HaveSSL3HandshakeLock(ss));
 
     if (ss->ssl3.initialized)
-        return SECSuccess; /* Function should be idempotent */
+        return; /* Function should be idempotent */
 
     ss->ssl3.policy = SSL_ALLOWED;
 
@@ -12977,7 +12924,6 @@ ssl3_InitState(sslSocket *ss)
     ssl_FilterSupportedGroups(ss);
 
     ss->ssl3.initialized = PR_TRUE;
-    return SECSuccess;
 }
 
 /* record the export policy for this cipher suite */

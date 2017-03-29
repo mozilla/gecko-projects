@@ -39,6 +39,8 @@ static const uint32_t kPuppetAxes[] = {
 static const uint32_t kNumPuppetAxis = sizeof(kPuppetAxes) /
                                        sizeof(uint32_t);
 
+static const uint32_t kNumPuppetHaptcs = 1;
+
 VRDisplayPuppet::VRDisplayPuppet()
  : VRDisplayHost(VRDeviceType::Puppet)
  , mIsPresenting(false)
@@ -89,7 +91,6 @@ VRDisplayPuppet::VRDisplayPuppet()
   mDisplayInfo.mSittingToStandingTransform._43 = 0.0f;
 
   mSensorState.Clear();
-  mSensorState.timestamp = PR_Now();
 
   gfx::Quaternion rot;
 
@@ -119,7 +120,12 @@ VRDisplayPuppet::~VRDisplayPuppet()
 void
 VRDisplayPuppet::SetDisplayInfo(const VRDisplayInfo& aDisplayInfo)
 {
-  mDisplayInfo = aDisplayInfo;
+  // We are only interested in the eye info of the display info.
+  mDisplayInfo.mEyeResolution = aDisplayInfo.mEyeResolution;
+  memcpy(&mDisplayInfo.mEyeFOV, &aDisplayInfo.mEyeFOV,
+         sizeof(mDisplayInfo.mEyeFOV[0]) * VRDisplayInfo::NumEyes);
+  memcpy(&mDisplayInfo.mEyeTranslation, &aDisplayInfo.mEyeTranslation,
+         sizeof(mDisplayInfo.mEyeTranslation[0]) * VRDisplayInfo::NumEyes);
 }
 
 void
@@ -148,7 +154,7 @@ VRDisplayPuppet::GetSensorState(double timeOffset)
 void
 VRDisplayPuppet::SetSensorState(const VRHMDSensorState& aSensorState)
 {
-  mSensorState = aSensorState;
+  memcpy(&mSensorState, &aSensorState, sizeof(mSensorState));
 }
 
 void
@@ -232,6 +238,7 @@ VRControllerPuppet::VRControllerPuppet(dom::GamepadHand aHand)
   mControllerInfo.mHand = aHand;
   mControllerInfo.mNumButtons = kNumPuppetButtonMask;
   mControllerInfo.mNumAxes = kNumPuppetAxis;
+  mControllerInfo.mNumHaptics = kNumPuppetHaptcs;
 }
 
 VRControllerPuppet::~VRControllerPuppet()
@@ -337,13 +344,27 @@ VRSystemManagerPuppet::GetHMDs(nsTArray<RefPtr<VRDisplayHost>>& aHMDResult)
   aHMDResult.AppendElement(mPuppetHMD);
 }
 
+bool
+VRSystemManagerPuppet::GetIsPresenting()
+{
+  if (mPuppetHMD) {
+    VRDisplayInfo displayInfo(mPuppetHMD->GetDisplayInfo());
+    return displayInfo.GetIsPresenting();
+  }
+
+  return false;
+}
+
 void
 VRSystemManagerPuppet::HandleInput()
 {
   RefPtr<impl::VRControllerPuppet> controller;
   for (uint32_t i = 0; i < mPuppetController.Length(); ++i) {
     controller = mPuppetController[i];
-    HandleButtonPress(i, controller->GetButtonPressState());
+    for (uint32_t j = 0; j < kNumPuppetButtonMask; ++j) {
+      HandleButtonPress(i, j, kPuppetButtonMask[i], controller->GetButtonPressState());
+    }
+    controller->SetButtonPressed(controller->GetButtonPressState());
 
     for (uint32_t j = 0; j < kNumPuppetAxis; ++j) {
       HandleAxisMove(i, j, controller->GetAxisMoveState(j));
@@ -354,29 +375,25 @@ VRSystemManagerPuppet::HandleInput()
 
 void
 VRSystemManagerPuppet::HandleButtonPress(uint32_t aControllerIdx,
+                                         uint32_t aButton,
+                                         uint64_t aButtonMask,
                                          uint64_t aButtonPressed)
 {
-  uint64_t buttonMask = 0;
   RefPtr<impl::VRControllerPuppet> controller(mPuppetController[aControllerIdx]);
   MOZ_ASSERT(controller);
-  uint64_t diff = (controller->GetButtonPressed() ^ aButtonPressed);
+  const uint64_t diff = (controller->GetButtonPressed() ^ aButtonPressed);
 
   if (!diff) {
     return;
   }
 
-  for (uint32_t i = 0; i < kNumPuppetButtonMask; ++i) {
-    buttonMask = kPuppetButtonMask[i];
-
-    if (diff & buttonMask) {
-      // diff & aButtonPressed would be true while a new button press
-      // event, otherwise it is an old press event and needs to notify
-      // the button has been released.
-      NewButtonEvent(aControllerIdx, i, diff & aButtonPressed);
-    }
+  if (diff & aButtonMask) {
+    // diff & aButtonPressed would be true while a new button press
+    // event, otherwise it is an old press event and needs to notify
+    // the button has been released.
+    NewButtonEvent(aControllerIdx, aButton, aButtonMask & aButtonPressed,
+                   (aButtonMask & aButtonPressed) ? 1.0L : 0.0L);
   }
-
-  controller->SetButtonPressed(aButtonPressed);
 }
 
 void
@@ -402,6 +419,20 @@ VRSystemManagerPuppet::HandlePoseTracking(uint32_t aControllerIdx,
     aController->SetPose(aPose);
     NewPoseState(aControllerIdx, aPose);
   }
+}
+
+void
+VRSystemManagerPuppet::VibrateHaptic(uint32_t aControllerIdx,
+                                     uint32_t aHapticIndex,
+                                     double aIntensity,
+                                     double aDuration,
+                                     uint32_t aPromiseID)
+{
+}
+
+void
+VRSystemManagerPuppet::StopVibrateHaptic(uint32_t aControllerIdx)
+{
 }
 
 void
@@ -433,7 +464,6 @@ VRSystemManagerPuppet::ScanForControllers()
       dom::GamepadHand hand = (i % 2) ? dom::GamepadHand::Right :
                                         dom::GamepadHand::Left;
       RefPtr<VRControllerPuppet> puppetController = new VRControllerPuppet(hand);
-      puppetController->SetIndex(mControllerCount);
       mPuppetController.AppendElement(puppetController);
 
       // Not already present, add it.

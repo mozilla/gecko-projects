@@ -19,8 +19,10 @@
         #[inline] pub fn get_initial_specified_value() -> SpecifiedValue { ${initial_specified_value} }
         % endif
         #[allow(unused_variables)]
-        #[inline] pub fn parse(context: &ParserContext, input: &mut Parser)
-                               -> Result<SpecifiedValue, ()> {
+        #[inline]
+        pub fn parse(context: &ParserContext,
+                     input: &mut Parser)
+                     -> Result<SpecifiedValue, ()> {
             % if needs_context:
             specified::${type}::${parse_method}(context, input)
             % else:
@@ -70,7 +72,7 @@
             pub mod single_value {
                 use cssparser::Parser;
                 use parser::{Parse, ParserContext, ParserContextExtraData};
-                use properties::{DeclaredValue, ShorthandId};
+                use properties::ShorthandId;
                 use values::computed::{Context, ToComputedValue};
                 use values::{computed, specified};
                 use values::{Auto, Either, None_, Normal};
@@ -210,17 +212,15 @@
         % if not property.derived_from:
             use cssparser::Parser;
             use parser::{Parse, ParserContext, ParserContextExtraData};
-            use properties::{DeclaredValue, UnparsedValue, ShorthandId};
+            use properties::{UnparsedValue, ShorthandId};
         % endif
         use values::{Auto, Either, None_, Normal};
         use cascade_info::CascadeInfo;
         use error_reporting::ParseErrorReporter;
         use properties::longhands;
-        use properties::LonghandIdSet;
+        use properties::{DeclaredValue, LonghandId, LonghandIdSet};
         use properties::{CSSWideKeyword, ComputedValues, PropertyDeclaration};
         use properties::style_structs;
-        use std::boxed::Box as StdBox;
-        use std::collections::HashMap;
         use std::sync::Arc;
         use values::computed::{Context, ToComputedValue};
         use values::{computed, specified};
@@ -235,9 +235,17 @@
                                 cascade_info: &mut Option<<&mut CascadeInfo>,
                                 error_reporter: &ParseErrorReporter) {
             let declared_value = match *declaration {
-                PropertyDeclaration::${property.camel_case}(ref declared_value) => {
-                    declared_value
-                }
+                PropertyDeclaration::${property.camel_case}(ref value) => {
+                    DeclaredValue::Value(value)
+                },
+                PropertyDeclaration::CSSWideKeyword(id, value) => {
+                    debug_assert!(id == LonghandId::${property.camel_case});
+                    DeclaredValue::CSSWideKeyword(value)
+                },
+                PropertyDeclaration::WithVariables(id, ref value) => {
+                    debug_assert!(id == LonghandId::${property.camel_case});
+                    DeclaredValue::WithVariables(value)
+                },
                 _ => panic!("entered the wrong cascade_property() implementation"),
             };
 
@@ -245,7 +253,7 @@
                 {
                     let custom_props = context.style().custom_properties();
                     ::properties::substitute_variables_${property.ident}(
-                        declared_value, &custom_props,
+                        &declared_value, &custom_props,
                     |value| {
                         if let Some(ref mut cascade_info) = *cascade_info {
                             cascade_info.on_cascade_property(&declaration,
@@ -258,6 +266,13 @@
                         match *value {
                             DeclaredValue::Value(ref specified_value) => {
                                 let computed = specified_value.to_computed_value(context);
+                                % if property.ident == "font_size":
+                                    if let longhands::font_size::SpecifiedValue::Keyword(kw) = **specified_value {
+                                        context.mutate_style().font_size_keyword = Some(kw);
+                                    } else {
+                                        context.mutate_style().font_size_keyword = None;
+                                    }
+                                % endif
                                 % if property.has_uncacheable_values:
                                 context.mutate_style().mutate_${data.current_style_struct.name_lower}()
                                                       .set_${property.ident}(computed, cacheable ${maybe_wm});
@@ -272,12 +287,22 @@
                                 CSSWideKeyword::Unset |
                                 % endif
                                 CSSWideKeyword::Initial => {
-                                    // We assume that it's faster to use copy_*_from rather than
-                                    // set_*(get_initial_value());
-                                    let initial_struct = default_style
-                                                        .get_${data.current_style_struct.name_lower}();
-                                    context.mutate_style().mutate_${data.current_style_struct.name_lower}()
-                                                        .copy_${property.ident}_from(initial_struct ${maybe_wm});
+                                    % if property.ident == "font_size":
+                                        // font-size's default ("medium") does not always
+                                        // compute to the same value and depends on the font
+                                        let computed = longhands::font_size::get_initial_specified_value()
+                                                            .to_computed_value(context);
+                                        context.mutate_style().mutate_${data.current_style_struct.name_lower}()
+                                               .set_font_size(computed);
+                                        context.mutate_style().font_size_keyword = Some(Default::default());
+                                    % else:
+                                        // We assume that it's faster to use copy_*_from rather than
+                                        // set_*(get_initial_value());
+                                        let initial_struct = default_style
+                                                            .get_${data.current_style_struct.name_lower}();
+                                        context.mutate_style().mutate_${data.current_style_struct.name_lower}()
+                                                            .copy_${property.ident}_from(initial_struct ${maybe_wm});
+                                    % endif
                                 },
                                 % if data.current_style_struct.inherited:
                                 CSSWideKeyword::Unset |
@@ -292,6 +317,10 @@
                                         inherited_style.get_${data.current_style_struct.name_lower}();
                                     context.mutate_style().mutate_${data.current_style_struct.name_lower}()
                                         .copy_${property.ident}_from(inherited_struct ${maybe_wm});
+                                    % if property.ident == "font_size":
+                                        context.mutate_style().font_size_keyword =
+                                            context.inherited_style.font_size_keyword;
+                                    % endif
                                 }
                             }
                         }
@@ -312,21 +341,17 @@
         % if not property.derived_from:
             pub fn parse_specified(context: &ParserContext, input: &mut Parser)
                 % if property.boxed:
-                                   -> Result<DeclaredValue<Box<SpecifiedValue>>, ()> {
-                    parse(context, input).map(|result| DeclaredValue::Value(Box::new(result)))
+                                   -> Result<Box<SpecifiedValue>, ()> {
+                    parse(context, input).map(|result| Box::new(result))
                 % else:
-                                   -> Result<DeclaredValue<SpecifiedValue>, ()> {
-                    parse(context, input).map(DeclaredValue::Value)
+                                   -> Result<SpecifiedValue, ()> {
+                    parse(context, input)
                 % endif
             }
             pub fn parse_declared(context: &ParserContext, input: &mut Parser)
-                               % if property.boxed:
-                                   -> Result<DeclaredValue<Box<SpecifiedValue>>, ()> {
-                               % else:
-                                   -> Result<DeclaredValue<SpecifiedValue>, ()> {
-                               % endif
+                                  -> Result<PropertyDeclaration, ()> {
                 match input.try(|i| CSSWideKeyword::parse(context, i)) {
-                    Ok(keyword) => Ok(DeclaredValue::CSSWideKeyword(keyword)),
+                    Ok(keyword) => Ok(PropertyDeclaration::CSSWideKeyword(LonghandId::${property.camel_case}, keyword)),
                     Err(()) => {
                         input.look_for_var_functions();
                         let start = input.position();
@@ -339,14 +364,15 @@
                             input.reset(start);
                             let (first_token_type, css) = try!(
                                 ::custom_properties::parse_non_custom_with_var(input));
-                            return Ok(DeclaredValue::WithVariables(Arc::new(UnparsedValue {
+                            return Ok(PropertyDeclaration::WithVariables(LonghandId::${property.camel_case},
+                                                                         Arc::new(UnparsedValue {
                                 css: css.into_owned(),
                                 first_token_type: first_token_type,
                                 base_url: context.base_url.clone(),
                                 from_shorthand: None,
                             })))
                         }
-                        specified
+                        specified.map(|s| PropertyDeclaration::${property.camel_case}(s))
                     }
                 }
             }
@@ -483,7 +509,7 @@
         #[allow(unused_imports)]
         use cssparser::Parser;
         use parser::ParserContext;
-        use properties::{DeclaredValue, PropertyDeclaration, ParsedDeclaration};
+        use properties::{PropertyDeclaration, ParsedDeclaration};
         use properties::{ShorthandId, UnparsedValue, longhands};
         use std::fmt;
         use std::sync::Arc;
@@ -519,7 +545,7 @@
                 for longhand in iter {
                     match *longhand {
                         % for sub_property in shorthand.sub_properties:
-                            PropertyDeclaration::${sub_property.camel_case}(DeclaredValue::Value(ref value)) => {
+                            PropertyDeclaration::${sub_property.camel_case}(ref value) => {
                                 ${sub_property.ident} = Some(value)
                             },
                         % endfor

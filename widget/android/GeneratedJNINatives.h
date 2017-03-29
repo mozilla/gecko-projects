@@ -14,21 +14,6 @@ namespace mozilla {
 namespace java {
 
 template<class Impl>
-class AlarmReceiver::Natives : public mozilla::jni::NativeImpl<AlarmReceiver, Impl>
-{
-public:
-    static const JNINativeMethod methods[1];
-};
-
-template<class Impl>
-const JNINativeMethod AlarmReceiver::Natives<Impl>::methods[] = {
-
-    mozilla::jni::MakeNativeMethod<AlarmReceiver::NotifyAlarmFired_t>(
-            mozilla::jni::NativeStub<AlarmReceiver::NotifyAlarmFired_t, Impl>
-            ::template Wrap<&Impl::NotifyAlarmFired>)
-};
-
-template<class Impl>
 class AndroidGamepadManager::Natives : public mozilla::jni::NativeImpl<AndroidGamepadManager, Impl>
 {
 public:
@@ -101,7 +86,7 @@ template<class Impl>
 class GeckoAppShell::Natives : public mozilla::jni::NativeImpl<GeckoAppShell, Impl>
 {
 public:
-    static const JNINativeMethod methods[8];
+    static const JNINativeMethod methods[7];
 };
 
 template<class Impl>
@@ -133,11 +118,7 @@ const JNINativeMethod GeckoAppShell::Natives<Impl>::methods[] = {
 
     mozilla::jni::MakeNativeMethod<GeckoAppShell::ReportJavaCrash_t>(
             mozilla::jni::NativeStub<GeckoAppShell::ReportJavaCrash_t, Impl>
-            ::template Wrap<&Impl::ReportJavaCrash>),
-
-    mozilla::jni::MakeNativeMethod<GeckoAppShell::SyncNotifyObservers_t>(
-            mozilla::jni::NativeStub<GeckoAppShell::SyncNotifyObservers_t, Impl>
-            ::template Wrap<&Impl::SyncNotifyObservers>)
+            ::template Wrap<&Impl::ReportJavaCrash>)
 };
 
 template<class Impl>

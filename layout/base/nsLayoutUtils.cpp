@@ -179,6 +179,9 @@ typedef nsStyleTransformMatrix::TransformReferenceBox TransformReferenceBox;
 /* static */ uint32_t nsLayoutUtils::sFontSizeInflationMaxRatio;
 /* static */ bool nsLayoutUtils::sFontSizeInflationForceEnabled;
 /* static */ bool nsLayoutUtils::sFontSizeInflationDisabledInMasterProcess;
+/* static */ uint32_t nsLayoutUtils::sSystemFontScale;
+/* static */ uint32_t nsLayoutUtils::sZoomMaxPercent;
+/* static */ uint32_t nsLayoutUtils::sZoomMinPercent;
 /* static */ bool nsLayoutUtils::sInvalidationDebuggingIsEnabled;
 /* static */ bool nsLayoutUtils::sCSSVariablesEnabled;
 /* static */ bool nsLayoutUtils::sInterruptibleReflowEnabled;
@@ -600,10 +603,10 @@ GetMinAndMaxScaleForAnimationProperty(const nsIFrame* aFrame,
       for (const AnimationPropertySegment& segment : prop.mSegments) {
         // In case of add or accumulate composite, StyleAnimationValue does
         // not have a valid value.
-        if (segment.HasReplacableFromValue()) {
+        if (segment.HasReplaceableFromValue()) {
           UpdateMinMaxScale(aFrame, segment.mFromValue, aMinScale, aMaxScale);
         }
-        if (segment.HasReplacableToValue()) {
+        if (segment.HasReplaceableToValue()) {
           UpdateMinMaxScale(aFrame, segment.mToValue, aMinScale, aMaxScale);
         }
       }
@@ -2415,7 +2418,7 @@ nsLayoutUtils::GetEventCoordinatesRelativeTo(nsIWidget* aWidget,
   /* If we encountered a transform, we can't do simple arithmetic to figure
    * out how to convert back to aFrame's coordinates and must use the CTM.
    */
-  if (transformFound || aFrame->IsSVGText()) {
+  if (transformFound || nsSVGUtils::IsInSVGTextSubtree(aFrame)) {
     return TransformRootPointToFrame(aFrame, widgetToView);
   }
 
@@ -3054,7 +3057,7 @@ TransformGfxRectToAncestor(nsIFrame *aFrame,
 static SVGTextFrame*
 GetContainingSVGTextFrame(nsIFrame* aFrame)
 {
-  if (!aFrame->IsSVGText()) {
+  if (!nsSVGUtils::IsInSVGTextSubtree(aFrame)) {
     return nullptr;
   }
 
@@ -3722,7 +3725,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       if (profilerNeedsDisplayList && !consoleNeedsDisplayList) {
         profiler_log(ss->str().c_str());
       } else {
-        // Send to the console which will send to the profiler if required.
         fprint_stderr(gfxUtils::sDumpPaintFile, *ss);
       }
       ss = MakeUnique<std::stringstream>();
@@ -3796,7 +3798,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     if (profilerNeedsDisplayList && !consoleNeedsDisplayList) {
       profiler_log(ss->str().c_str());
     } else {
-      // Send to the console which will send to the profiler if required.
       fprint_stderr(gfxUtils::sDumpPaintFile, *ss);
     }
 
@@ -5037,7 +5038,7 @@ AddIntrinsicSizeOffset(nsRenderingContext* aRenderingContext,
     LayoutDeviceIntSize devSize;
     bool canOverride = true;
     nsPresContext* pc = aFrame->PresContext();
-    pc->GetTheme()->GetMinimumWidgetSize(pc, aFrame, disp->mAppearance,
+    pc->GetTheme()->GetMinimumWidgetSize(pc, aFrame, disp->UsedAppearance(),
                                          &devSize, &canOverride);
     nscoord themeSize =
       pc->DevPixelsToAppUnits(aAxis == eAxisVertical ? devSize.height
@@ -6947,10 +6948,10 @@ nsLayoutUtils::GetFrameTransparency(nsIFrame* aBackgroundFrame,
   if (HasNonZeroCorner(aCSSRootFrame->StyleBorder()->mBorderRadius))
     return eTransparencyTransparent;
 
-  if (aCSSRootFrame->StyleDisplay()->mAppearance == NS_THEME_WIN_GLASS)
+  if (aCSSRootFrame->StyleDisplay()->UsedAppearance() == NS_THEME_WIN_GLASS)
     return eTransparencyGlass;
 
-  if (aCSSRootFrame->StyleDisplay()->mAppearance == NS_THEME_WIN_BORDERLESS_GLASS)
+  if (aCSSRootFrame->StyleDisplay()->UsedAppearance() == NS_THEME_WIN_BORDERLESS_GLASS)
     return eTransparencyBorderlessGlass;
 
   nsITheme::Transparency transparency;
@@ -6974,7 +6975,7 @@ nsLayoutUtils::GetFrameTransparency(nsIFrame* aBackgroundFrame,
   const nsStyleBackground* bg = bgSC->StyleBackground();
   if (NS_GET_A(bg->BackgroundColor(bgSC)) < 255 ||
       // bottom layer's clip is used for the color
-      bg->BottomLayer().mClip != StyleGeometryBox::Border)
+      bg->BottomLayer().mClip != StyleGeometryBox::BorderBox)
     return eTransparencyTransparent;
   return eTransparencyOpaque;
 }
@@ -7718,6 +7719,12 @@ nsLayoutUtils::Initialize()
                                "font.size.inflation.forceEnabled");
   Preferences::AddBoolVarCache(&sFontSizeInflationDisabledInMasterProcess,
                                "font.size.inflation.disabledInMasterProcess");
+  Preferences::AddUintVarCache(&sSystemFontScale,
+                               "font.size.systemFontScale", 100);
+  Preferences::AddUintVarCache(&sZoomMaxPercent,
+                               "zoom.maxPercent", 300);
+  Preferences::AddUintVarCache(&sZoomMinPercent,
+                               "zoom.minPercent", 30);
   Preferences::AddBoolVarCache(&sInvalidationDebuggingIsEnabled,
                                "nglayout.debug.invalidation");
   Preferences::AddBoolVarCache(&sCSSVariablesEnabled,
@@ -8107,7 +8114,7 @@ nsLayoutUtils::InflationMinFontSizeFor(const nsIFrame *aFrame)
 float
 nsLayoutUtils::FontSizeInflationFor(const nsIFrame *aFrame)
 {
-  if (aFrame->IsSVGText()) {
+  if (nsSVGUtils::IsInSVGTextSubtree(aFrame)) {
     const nsIFrame* container = aFrame;
     while (container->GetType() != nsGkAtoms::svgTextFrame) {
       container = container->GetParent();
@@ -9340,7 +9347,7 @@ ComputeSVGReferenceRect(nsIFrame* aFrame,
   // For SVG elements without associated CSS layout box, the used value for
   // content-box, padding-box, border-box and margin-box is fill-box.
   switch (aGeometryBox) {
-    case StyleGeometryBox::Stroke: {
+    case StyleGeometryBox::StrokeBox: {
       // XXX Bug 1299876
       // The size of srtoke-box is not correct if this graphic element has
       // specific stroke-linejoin or stroke-linecap.
@@ -9350,7 +9357,7 @@ ComputeSVGReferenceRect(nsIFrame* aFrame,
                                          nsPresContext::AppUnitsPerCSSPixel());
       break;
     }
-    case StyleGeometryBox::View: {
+    case StyleGeometryBox::ViewBox: {
       nsIContent* content = aFrame->GetContent();
       nsSVGElement* element = static_cast<nsSVGElement*>(content);
       SVGSVGElement* svgElement = element->GetCtx();
@@ -9381,11 +9388,11 @@ ComputeSVGReferenceRect(nsIFrame* aFrame,
       break;
     }
     case StyleGeometryBox::NoBox:
-    case StyleGeometryBox::Border:
-    case StyleGeometryBox::Content:
-    case StyleGeometryBox::Padding:
-    case StyleGeometryBox::Margin:
-    case StyleGeometryBox::Fill: {
+    case StyleGeometryBox::BorderBox:
+    case StyleGeometryBox::ContentBox:
+    case StyleGeometryBox::PaddingBox:
+    case StyleGeometryBox::MarginBox:
+    case StyleGeometryBox::FillBox: {
       gfxRect bbox = nsSVGUtils::GetBBox(aFrame,
                                          nsSVGUtils::eBBoxIncludeFill);
       r = nsLayoutUtils::RoundGfxRectToAppRect(bbox,
@@ -9414,20 +9421,20 @@ ComputeHTMLReferenceRect(nsIFrame* aFrame,
   // For elements with associated CSS layout box, the used value for fill-box,
   // stroke-box and view-box is border-box.
   switch (aGeometryBox) {
-    case StyleGeometryBox::Content:
+    case StyleGeometryBox::ContentBox:
       r = aFrame->GetContentRectRelativeToSelf();
       break;
-    case StyleGeometryBox::Padding:
+    case StyleGeometryBox::PaddingBox:
       r = aFrame->GetPaddingRectRelativeToSelf();
       break;
-    case StyleGeometryBox::Margin:
+    case StyleGeometryBox::MarginBox:
       r = aFrame->GetMarginRectRelativeToSelf();
       break;
     case StyleGeometryBox::NoBox:
-    case StyleGeometryBox::Border:
-    case StyleGeometryBox::Fill:
-    case StyleGeometryBox::Stroke:
-    case StyleGeometryBox::View:
+    case StyleGeometryBox::BorderBox:
+    case StyleGeometryBox::FillBox:
+    case StyleGeometryBox::StrokeBox:
+    case StyleGeometryBox::ViewBox:
       r = aFrame->GetRectRelativeToSelf();
       break;
     default:

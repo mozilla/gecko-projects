@@ -595,15 +595,19 @@ class AutoDetectInvalidation
         disabled_ = true;
     }
 
+    bool shouldSetReturnOverride() const {
+        return !disabled_ && ionScript_->invalidated();
+    }
+
     ~AutoDetectInvalidation() {
-        if (!disabled_ && ionScript_->invalidated())
+        if (MOZ_UNLIKELY(shouldSetReturnOverride()))
             setReturnOverride();
     }
 };
 
 MOZ_MUST_USE bool
-InvokeFunction(JSContext* cx, HandleObject obj0, bool constructing, uint32_t argc, Value* argv,
-               MutableHandleValue rval);
+InvokeFunction(JSContext* cx, HandleObject obj0, bool constructing, bool ignoresReturnValue,
+               uint32_t argc, Value* argv, MutableHandleValue rval);
 MOZ_MUST_USE bool
 InvokeFunctionShuffleNewTarget(JSContext* cx, HandleObject obj, uint32_t numActualArgs,
                                uint32_t numFormalArgs, Value* argv, MutableHandleValue rval);
@@ -768,9 +772,6 @@ JSObject* CreateDerivedTypedObj(JSContext* cx, HandleObject descr,
                                 HandleObject owner, int32_t offset);
 
 MOZ_MUST_USE bool
-ArraySpliceDense(JSContext* cx, HandleObject obj, uint32_t start, uint32_t deleteCount);
-
-MOZ_MUST_USE bool
 Recompile(JSContext* cx);
 MOZ_MUST_USE bool
 ForcedRecompile(JSContext* cx);
@@ -845,6 +846,21 @@ EqualStringsHelper(JSString* str1, JSString* str2);
 
 MOZ_MUST_USE bool
 CheckIsCallable(JSContext* cx, HandleValue v, CheckIsCallableKind kind);
+
+template <bool HandleMissing>
+bool
+GetNativeDataProperty(JSContext* cx, JSObject* obj, PropertyName* name, Value* vp);
+
+template <bool HandleMissing>
+bool
+GetNativeDataPropertyByValue(JSContext* cx, JSObject* obj, Value* vp);
+
+template <bool NeedsTypeBarrier>
+bool
+SetNativeDataProperty(JSContext* cx, JSObject* obj, PropertyName* name, Value* val);
+
+bool
+ObjectHasGetterSetter(JSContext* cx, JSObject* obj, Shape* propShape);
 
 } // namespace jit
 } // namespace js

@@ -27,7 +27,12 @@ struct InitOriginParams
   PersistenceType persistenceType;
 };
 
-struct UsageParams
+struct AllUsageParams
+{
+  bool getAll;
+};
+
+struct OriginUsageParams
 {
   PrincipalInfo principalInfo;
   bool getGroupUsage;
@@ -35,7 +40,8 @@ struct UsageParams
 
 union UsageRequestParams
 {
-  UsageParams;
+  AllUsageParams;
+  OriginUsageParams;
 };
 
 struct ClearOriginParams
@@ -59,6 +65,16 @@ struct ResetAllParams
 {
 };
 
+struct PersistedParams
+{
+  PrincipalInfo principalInfo;
+};
+
+struct PersistParams
+{
+  PrincipalInfo principalInfo;
+};
+
 union RequestParams
 {
   InitParams;
@@ -67,6 +83,8 @@ union RequestParams
   ClearDataParams;
   ClearAllParams;
   ResetAllParams;
+  PersistedParams;
+  PersistParams;
 };
 
 protocol PQuota

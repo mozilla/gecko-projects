@@ -54,16 +54,17 @@ protected:
                                      int32_t aStartOffset,
                                      int32_t aEndOffset);
 
-  nsresult CreateTxnsToDeleteNodesBetween();
+  nsresult CreateTxnsToDeleteNodesBetween(nsRange* aRangeToDelete);
 
   nsresult CreateTxnsToDeleteContent(nsINode* aParent,
                                      int32_t aOffset,
                                      nsIEditor::EDirection aAction);
 
   // The editor for this transaction.
-  EditorBase& mEditorBase;
+  RefPtr<EditorBase> mEditorBase;
 
-  // P1 in the range.
+  // P1 in the range.  This is only non-null until DoTransaction is called and
+  // we convert it into child transactions.
   RefPtr<nsRange> mRangeToDelete;
 
   // Range updater object.

@@ -341,7 +341,22 @@ APZCCallbackHelper::InitializeRootDisplayport(nsIPresShell* aPresShell)
   uint32_t presShellId;
   FrameMetrics::ViewID viewId;
   if (APZCCallbackHelper::GetOrCreateScrollIdentifiers(content, &presShellId, &viewId)) {
-    // Note that the base rect that goes with these margins is set in
+    nsPresContext* pc = aPresShell->GetPresContext();
+    // This code is only correct for root content or toplevel documents.
+    MOZ_ASSERT(!pc || pc->IsRootContentDocument() || !pc->GetParentPresContext());
+    nsIFrame* frame = aPresShell->GetRootScrollFrame();
+    if (!frame) {
+      frame = aPresShell->GetRootFrame();
+    }
+    nsRect baseRect;
+    if (frame) {
+      baseRect =
+        nsRect(nsPoint(0, 0), nsLayoutUtils::CalculateCompositionSizeForFrame(frame));
+    } else if (pc) {
+      baseRect = nsRect(nsPoint(0, 0), pc->GetVisibleArea().Size());
+    }
+    nsLayoutUtils::SetDisplayPortBaseIfNotSet(content, baseRect);
+    // Note that we also set the base rect that goes with these margins in
     // nsRootBoxFrame::BuildDisplayList.
     nsLayoutUtils::SetDisplayPortMargins(content, aPresShell, ScreenMargin(), 0,
         nsLayoutUtils::RepaintMode::DoNotRepaint);
@@ -613,8 +628,15 @@ PrepareForSetTargetAPZCNotification(nsIWidget* aWidget,
   ScrollableLayerGuid guid(aGuid.mLayersId, 0, FrameMetrics::NULL_SCROLL_ID);
   nsPoint point =
     nsLayoutUtils::GetEventCoordinatesRelativeTo(aWidget, aRefPoint, aRootFrame);
+  uint32_t flags = 0;
+#ifdef MOZ_WIDGET_ANDROID
+  // On Android, we need IGNORE_ROOT_SCROLL_FRAME for correct hit testing
+  // when zoomed out. On desktop, don't use it because it interferes with
+  // hit testing for some purposes such as scrollbar dragging.
+  flags = nsLayoutUtils::IGNORE_ROOT_SCROLL_FRAME;
+#endif
   nsIFrame* target =
-    nsLayoutUtils::GetFrameForPoint(aRootFrame, point, nsLayoutUtils::IGNORE_ROOT_SCROLL_FRAME);
+    nsLayoutUtils::GetFrameForPoint(aRootFrame, point, flags);
   nsIScrollableFrame* scrollAncestor = target
     ? nsLayoutUtils::GetAsyncScrollableAncestorFrame(target)
     : aRootFrame->PresContext()->PresShell()->GetRootScrollFrameAsScrollable();

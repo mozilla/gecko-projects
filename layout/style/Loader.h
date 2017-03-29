@@ -36,6 +36,7 @@ class nsIStyleSheetLinkingElement;
 
 namespace mozilla {
 namespace dom {
+class DocGroup;
 class Element;
 } // namespace dom
 } // namespace mozilla
@@ -191,7 +192,11 @@ class Loader final {
   typedef mozilla::net::ReferrerPolicy ReferrerPolicy;
 
 public:
-  explicit Loader(StyleBackendType aType);
+  // aDocGroup is used for dispatching SheetLoadData in PostLoadEvent(). It
+  // can be null if you want to use this constructor, and there's no
+  // document when the Loader is constructed.
+  Loader(StyleBackendType aType, mozilla::dom::DocGroup* aDocGroup);
+
   explicit Loader(nsIDocument*);
 
  private:
@@ -334,6 +339,32 @@ public:
   nsresult LoadSheetSync(nsIURI* aURL, RefPtr<StyleSheet>* aSheet) {
     return LoadSheetSync(aURL, eAuthorSheetFeatures, false, aSheet);
   }
+
+  /**
+   * Asynchronously load the stylesheet at aURL.  If a successful result is
+   * returned, aObserver is guaranteed to be notified asynchronously once the
+   * sheet is loaded and marked complete.  This method can be used to load
+   * sheets not associated with a document.
+   *
+   * @param aURL the URL of the sheet to load
+   * @param aParsingMode the mode in which to parse the sheet
+   *        (see comments at enum SheetParsingMode, above).
+   * @param aUseSystemPrincipal if true, give the resulting sheet the system
+   * principal no matter where it's being loaded from.
+   * @param aObserver the observer to notify when the load completes.
+   *                  Must not be null.
+   * @param [out] aSheet the sheet to load. Note that the sheet may well
+   *              not be loaded by the time this method returns.
+   *
+   * NOTE: At the moment, this method assumes the sheet will be UTF-8, but
+   * ideally it would allow arbitrary encodings.  Callers should NOT depend on
+   * non-UTF8 sheets being treated as UTF-8 by this method.
+   */
+  nsresult LoadSheet(nsIURI* aURL,
+                     SheetParsingMode aParsingMode,
+                     bool aUseSystemPrincipal,
+                     nsICSSLoaderObserver* aObserver,
+                     RefPtr<StyleSheet>* aSheet);
 
   /**
    * Asynchronously load the stylesheet at aURL.  If a successful result is
@@ -574,6 +605,8 @@ private:
   // DropDocumentReference().
   nsIDocument* MOZ_NON_OWNING_REF mDocument;  // the document we live for
 
+  // For dispatching events via DocGroup::Dispatch() when mDocument is nullptr.
+  RefPtr<mozilla::dom::DocGroup> mDocGroup;
 
   // Number of datas still waiting to be notified on if we're notifying on a
   // whole bunch at once (e.g. in one of the stop methods).  This is used to

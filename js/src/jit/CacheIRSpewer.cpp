@@ -21,8 +21,11 @@
 #include <stdarg.h>
 
 #include "jsfun.h"
+#include "jsobj.h"
 #include "jsscript.h"
+
 #include "jscompartmentinlines.h"
+#include "jsobjinlines.h"
 
 using namespace js;
 using namespace js::jit;
@@ -86,6 +89,7 @@ CacheIRSpewer::beginCache(LockGuard<Mutex>&, const IRGenerator& gen)
     j.beginObject();
     j.stringProperty("name", "%s", CacheKindNames[uint8_t(gen.cacheKind_)]);
     j.stringProperty("file", "%s", gen.script_->filename());
+    j.integerProperty("mode", int(gen.mode_));
     if (jsbytecode* pc = gen.pc_) {
         unsigned column;
         j.integerProperty("line", PCToLineNumber(gen.script_, pc, &column));
@@ -148,6 +152,9 @@ CacheIRSpewer::valueProperty(LockGuard<Mutex>&, const char* name, HandleValue v)
             QuoteString(output, &str->asLinear());
             j.endStringProperty();
         }
+    } else if (v.isObject()) {
+        j.stringProperty("value", "%p (shape: %p)", &v.toObject(),
+                         v.toObject().maybeShape());
     }
 
     j.endObject();

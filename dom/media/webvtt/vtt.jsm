@@ -317,6 +317,10 @@ Cu.import('resource://gre/modules/Services.jsm');
       }
 
       var m = input.match(/^([^<]*)(<[^>]+>?)?/);
+      // The input doesn't contain a complete tag.
+      if (!m[0]) {
+        return null;
+      }
       // If there is some text before the next tag, return it, otherwise return
       // the tag.
       return consume(m[1] ? m[1] : m[2]);
@@ -400,7 +404,7 @@ Cu.import('resource://gre/modules/Services.jsm');
           // Otherwise just ignore the end tag.
           continue;
         }
-        var ts = collectTimeStamp(t.substr(1, t.length - 2));
+        var ts = collectTimeStamp(t.substr(1, t.length - 1));
         var node;
         if (ts) {
           // Timestamps are lead nodes as well.

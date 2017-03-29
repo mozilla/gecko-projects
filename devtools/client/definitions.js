@@ -26,6 +26,7 @@ loader.lazyGetter(this, "DomPanel", () => require("devtools/client/dom/dom-panel
 
 // Other dependencies
 loader.lazyRequireGetter(this, "CommandUtils", "devtools/client/shared/developer-toolbar", true);
+loader.lazyRequireGetter(this, "CommandState", "devtools/shared/gcli/command-state", true);
 loader.lazyImporter(this, "ResponsiveUIManager", "resource://devtools/client/responsivedesign/responsivedesign.jsm");
 loader.lazyImporter(this, "ScratchpadManager", "resource://devtools/client/scratchpad/scratchpad-manager.jsm");
 
@@ -497,7 +498,15 @@ exports.ToolboxButtons = [
     onClick(event, toolbox) {
       CommandUtils.executeOnTarget(toolbox.target, "paintflashing toggle");
     },
-    autoToggle: true
+    isChecked(toolbox) {
+      return CommandState.isEnabledForTarget(toolbox.target, "paintflashing");
+    },
+    setup(toolbox, onChange) {
+      CommandState.on("changed", onChange);
+    },
+    teardown(toolbox, onChange) {
+      CommandState.off("changed", onChange);
+    }
   },
   { id: "command-button-scratchpad",
     description: l10n("toolbox.buttons.scratchpad"),
@@ -511,11 +520,10 @@ exports.ToolboxButtons = [
                       osString == "Darwin" ? "Cmd+Opt+M" : "Ctrl+Shift+M"),
     isTargetSupported: target => target.isLocalTab,
     onClick(event, toolbox) {
-      let browserWindow = toolbox.win.top;
-      ResponsiveUIManager.handleGcliCommand(browserWindow,
-        browserWindow.gBrowser.selectedTab,
-        "resize toggle",
-        null);
+      let tab = toolbox.target.tab;
+      let browserWindow = tab.ownerDocument.defaultView;
+      ResponsiveUIManager.handleGcliCommand(browserWindow, tab,
+        "resize toggle", null);
     },
     isChecked(toolbox) {
       if (!toolbox.target.tab) {
@@ -552,7 +560,15 @@ exports.ToolboxButtons = [
     onClick(event, toolbox) {
       CommandUtils.executeOnTarget(toolbox.target, "rulers");
     },
-    autoToggle: true
+    isChecked(toolbox) {
+      return CommandState.isEnabledForTarget(toolbox.target, "rulers");
+    },
+    setup(toolbox, onChange) {
+      CommandState.on("changed", onChange);
+    },
+    teardown(toolbox, onChange) {
+      CommandState.off("changed", onChange);
+    }
   },
   { id: "command-button-measure",
     description: l10n("toolbox.buttons.measure"),
@@ -560,7 +576,15 @@ exports.ToolboxButtons = [
     onClick(event, toolbox) {
       CommandUtils.executeOnTarget(toolbox.target, "measure");
     },
-    autoToggle: true
+    isChecked(toolbox) {
+      return CommandState.isEnabledForTarget(toolbox.target, "measure");
+    },
+    setup(toolbox, onChange) {
+      CommandState.on("changed", onChange);
+    },
+    teardown(toolbox, onChange) {
+      CommandState.off("changed", onChange);
+    }
   },
 ];
 

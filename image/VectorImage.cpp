@@ -521,6 +521,13 @@ VectorImage::GetWidth(int32_t* aWidth)
 }
 
 //******************************************************************************
+nsresult
+VectorImage::GetNativeSizes(nsTArray<IntSize>& aNativeSizes) const
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+//******************************************************************************
 NS_IMETHODIMP_(void)
 VectorImage::RequestRefresh(const TimeStamp& aTime)
 {
@@ -1123,7 +1130,7 @@ VectorImage::RequestDiscard()
 }
 
 void
-VectorImage::OnSurfaceDiscarded()
+VectorImage::OnSurfaceDiscarded(const SurfaceKey& aSurfaceKey)
 {
   MOZ_ASSERT(mProgressTracker);
 

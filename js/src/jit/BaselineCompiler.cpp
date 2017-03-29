@@ -2982,6 +2982,12 @@ BaselineCompiler::emit_JSOP_INITELEM_INC()
 
     // Increment index
     Address indexAddr = frame.addressOfStackValue(frame.peek(-1));
+#ifdef DEBUG
+    Label isInt32;
+    masm.branchTestInt32(Assembler::Equal, indexAddr, &isInt32);
+    masm.assumeUnreachable("INITELEM_INC index must be Int32");
+    masm.bind(&isInt32);
+#endif
     masm.incrementInt32Value(indexAddr);
     return true;
 }
@@ -3295,6 +3301,12 @@ BaselineCompiler::emitSpreadCall()
 
 bool
 BaselineCompiler::emit_JSOP_CALL()
+{
+    return emitCall();
+}
+
+bool
+BaselineCompiler::emit_JSOP_CALL_IGNORES_RV()
 {
     return emitCall();
 }

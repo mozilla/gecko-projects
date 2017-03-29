@@ -42,15 +42,12 @@ function GridInspector(inspector, window) {
   this.walker = this.inspector.walker;
 
   this.getSwatchColorPickerTooltip = this.getSwatchColorPickerTooltip.bind(this);
-  this.setSelectedNode = this.setSelectedNode.bind(this);
   this.updateGridPanel = this.updateGridPanel.bind(this);
 
   this.onGridLayoutChange = this.onGridLayoutChange.bind(this);
   this.onHighlighterChange = this.onHighlighterChange.bind(this);
   this.onMarkupMutation = this.onMarkupMutation.bind(this);
   this.onSetGridOverlayColor = this.onSetGridOverlayColor.bind(this);
-  this.onShowBoxModelHighlighterForNode =
-    this.onShowBoxModelHighlighterForNode.bind(this);
   this.onShowGridAreaHighlight = this.onShowGridAreaHighlight.bind(this);
   this.onShowGridCellHighlight = this.onShowGridCellHighlight.bind(this);
   this.onSidebarSelect = this.onSidebarSelect.bind(this);
@@ -118,9 +115,7 @@ GridInspector.prototype = {
   getComponentProps() {
     return {
       getSwatchColorPickerTooltip: this.getSwatchColorPickerTooltip,
-      setSelectedNode: this.setSelectedNode,
       onSetGridOverlayColor: this.onSetGridOverlayColor,
-      onShowBoxModelHighlighterForNode: this.onShowBoxModelHighlighterForNode,
       onShowGridAreaHighlight: this.onShowGridAreaHighlight,
       onShowGridCellHighlight: this.onShowGridCellHighlight,
       onToggleGridHighlighter: this.onToggleGridHighlighter,
@@ -220,16 +215,6 @@ GridInspector.prototype = {
 
     dispatch(updateShowGridLineNumbers(showGridLineNumbers));
     dispatch(updateShowInfiniteLines(showInfinteLines));
-  },
-
-  /**
-   * Set the inspector selection.
-   *
-   * @param {NodeFront} nodeFront
-   *        The NodeFront corresponding to the new selection.
-   */
-  setSelectedNode(nodeFront) {
-    this.inspector.selection.setNodeFront(nodeFront, "layout-panel");
   },
 
   /**
@@ -333,20 +318,6 @@ GridInspector.prototype = {
   },
 
   /**
-   * Shows the box-model highlighter on the element corresponding to the provided
-   * NodeFront.
-   *
-   * @param  {NodeFront} nodeFront
-   *         The node to highlight.
-   * @param  {Object} options
-   *         Options passed to the highlighter actor.
-   */
-  onShowBoxModelHighlighterForNode(nodeFront, options) {
-    let toolbox = this.inspector.toolbox;
-    toolbox.highlighterUtils.highlightNodeFront(nodeFront, options);
-  },
-
-  /**
    * Highlights the grid area in the CSS Grid Highlighter for the given grid.
    *
    * @param  {NodeFront} node
@@ -374,6 +345,9 @@ GridInspector.prototype = {
    * @param  {NodeFront} node
    *         The NodeFront of the grid container element for which the grid
    *         highlighter is highlighted for.
+   * @param  {String} color
+   *         The color of the grid cell for which the grid highlighter
+   *         is highlighted for.
    * @param  {Number|null} gridFragmentIndex
    *         The index of the grid fragment for which the grid highlighter
    *         is highlighted for.
@@ -384,9 +358,11 @@ GridInspector.prototype = {
    *         The column number of the grid cell for which the grid highlighter
    *         is highlighted for.
    */
-  onShowGridCellHighlight(node, gridFragmentIndex, rowNumber, columnNumber) {
+  onShowGridCellHighlight(node, color, gridFragmentIndex, rowNumber, columnNumber) {
     let { highlighterSettings } = this.store.getState();
+
     highlighterSettings.showGridCell = { gridFragmentIndex, rowNumber, columnNumber };
+    highlighterSettings.color = color;
 
     this.highlighters.showGridHighlighter(node, highlighterSettings);
   },

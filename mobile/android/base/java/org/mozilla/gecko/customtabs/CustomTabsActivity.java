@@ -12,12 +12,15 @@ import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
+import android.support.annotation.ColorInt;
 import android.support.annotation.NonNull;
 import android.support.annotation.StyleRes;
 import android.support.annotation.VisibleForTesting;
+import android.support.design.widget.Snackbar;
+import android.support.v4.graphics.drawable.DrawableCompat;
 import android.support.v4.util.SparseArrayCompat;
 import android.support.v4.view.MenuItemCompat;
 import android.support.v7.app.ActionBar;
@@ -29,22 +32,22 @@ import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup.LayoutParams;
-import android.view.Window;
-import android.view.WindowManager;
 import android.widget.ImageButton;
-import android.widget.TextView;
+import android.widget.ProgressBar;
 
-import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.GeckoApp;
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.SnackbarBuilder;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
+import org.mozilla.gecko.Telemetry;
+import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuInflater;
+import org.mozilla.gecko.util.Clipboard;
 import org.mozilla.gecko.util.ColorUtil;
 import org.mozilla.gecko.widget.GeckoPopupMenu;
 
-import java.lang.reflect.Field;
 import java.util.List;
 
 import static android.support.customtabs.CustomTabsIntent.EXTRA_TOOLBAR_COLOR;
@@ -52,73 +55,56 @@ import static android.support.customtabs.CustomTabsIntent.EXTRA_TOOLBAR_COLOR;
 public class CustomTabsActivity extends GeckoApp implements Tabs.OnTabsChangedListener {
     private static final String LOGTAG = "CustomTabsActivity";
     private static final String SAVED_TOOLBAR_COLOR = "SavedToolbarColor";
-    private static final String SAVED_TOOLBAR_TITLE = "SavedToolbarTitle";
-    private static final int NO_COLOR = -1;
+
+    @ColorInt
+    private static final int DEFAULT_ACTION_BAR_COLOR = 0xFF363b40; // default color to match design
+
     private final SparseArrayCompat<PendingIntent> menuItemsIntent = new SparseArrayCompat<>();
-    private ActionBar actionBar;
     private GeckoPopupMenu popupMenu;
-    private int tabId = -1;
-    private boolean useDomainTitle = true;
-    private int toolbarColor;
-    private String toolbarTitle;
+    private ActionBarPresenter actionBarPresenter;
+    private ProgressBar mProgressView;
     // A state to indicate whether this activity is finishing with customize animation
     private boolean usingCustomAnimation = false;
+
+    @ColorInt
+    private int toolbarColor = DEFAULT_ACTION_BAR_COLOR;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         if (savedInstanceState != null) {
-            toolbarColor = savedInstanceState.getInt(SAVED_TOOLBAR_COLOR, NO_COLOR);
-            toolbarTitle = savedInstanceState.getString(SAVED_TOOLBAR_TITLE, AppConstants.MOZ_APP_BASENAME);
+            toolbarColor = savedInstanceState.getInt(SAVED_TOOLBAR_COLOR, DEFAULT_ACTION_BAR_COLOR);
         } else {
-            toolbarColor = getIntent().getIntExtra(EXTRA_TOOLBAR_COLOR, NO_COLOR);
-            toolbarTitle = AppConstants.MOZ_APP_BASENAME;
+            Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL, TelemetryContract.Method.INTENT, "customtab");
+            toolbarColor = getIntent().getIntExtra(EXTRA_TOOLBAR_COLOR, DEFAULT_ACTION_BAR_COLOR);
         }
+
+        // Translucent color does not make sense for toolbar color. Ensure it is 0xFF.
+        toolbarColor = 0xFF000000 | toolbarColor;
 
         setThemeFromToolbarColor();
 
-        Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
-        updateActionBarWithToolbar(toolbar);
-        try {
-            // Since we don't create the Toolbar's TextView ourselves, this seems
-            // to be the only way of changing the ellipsize setting.
-            Field f = toolbar.getClass().getDeclaredField("mTitleTextView");
-            f.setAccessible(true);
-            TextView textView = (TextView) f.get(toolbar);
-            textView.setEllipsize(TextUtils.TruncateAt.START);
-        } catch (Exception e) {
-            // If we can't ellipsize at the start of the title, we shouldn't display the host
-            // so as to avoid displaying a misleadingly truncated host.
-            Log.w(LOGTAG, "Failed to get Toolbar TextView, using default title.");
-            useDomainTitle = false;
-        }
-        actionBar = getSupportActionBar();
-        actionBar.setTitle(toolbarTitle);
-        updateToolbarColor(toolbar);
+        mProgressView = (ProgressBar) findViewById(R.id.page_progress);
+        final Toolbar toolbar = (Toolbar) findViewById(R.id.actionbar);
+        setSupportActionBar(toolbar);
+        final ActionBar actionBar = getSupportActionBar();
+        bindNavigationCallback(toolbar);
 
-        toolbar.setNavigationOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                final Tabs tabs = Tabs.getInstance();
-                final Tab tab = tabs.getSelectedTab();
-                tabs.closeTab(tab);
-                finish();
-            }
-        });
+        actionBarPresenter = new ActionBarPresenter(actionBar);
+        actionBarPresenter.displayUrlOnly(getIntent().getDataString());
+        actionBarPresenter.setBackgroundColor(toolbarColor, getWindow());
+        actionBarPresenter.setTextLongClickListener(new UrlCopyListener());
+        actionBar.setDisplayHomeAsUpEnabled(true);
 
         Tabs.registerOnTabsChangedListener(this);
     }
 
     private void setThemeFromToolbarColor() {
-        // default theme, regardless AndroidManifest.
-        @StyleRes int styleRes = R.style.GeckoCustomTabs;
-
-        if (toolbarColor != NO_COLOR) {
-            styleRes = (ColorUtil.getReadableTextColor(toolbarColor) == Color.BLACK)
-                    ? R.style.GeckoCustomTabs_Light
-                    : R.style.GeckoCustomTabs;
-        }
+        @StyleRes
+        int styleRes = (ColorUtil.getReadableTextColor(toolbarColor) == Color.BLACK)
+                ? R.style.GeckoCustomTabs_Light
+                : R.style.GeckoCustomTabs;
 
         setTheme(styleRes);
     }
@@ -172,27 +158,25 @@ public class CustomTabsActivity extends GeckoApp implements Tabs.OnTabsChangedLi
 
     @Override
     public void onTabChanged(Tab tab, Tabs.TabEvents msg, String data) {
-        if (tab == null) {
+        if (!Tabs.getInstance().isSelectedTab(tab)) {
             return;
         }
 
-        if (tabId >= 0 && tab.getId() != tabId) {
-            return;
+        if (msg == Tabs.TabEvents.START
+                || msg == Tabs.TabEvents.STOP
+                || msg == Tabs.TabEvents.ADDED
+                || msg == Tabs.TabEvents.LOAD_ERROR
+                || msg == Tabs.TabEvents.LOADED
+                || msg == Tabs.TabEvents.LOCATION_CHANGE) {
+
+            updateProgress((tab.getState() == Tab.STATE_LOADING),
+                    tab.getLoadProgress());
         }
 
-        if (msg == Tabs.TabEvents.LOCATION_CHANGE) {
-            tabId = tab.getId();
-            final Uri uri = Uri.parse(tab.getURL());
-            String title = null;
-            if (uri != null) {
-                title = uri.getHost();
-            }
-            if (!useDomainTitle || title == null || title.isEmpty()) {
-                toolbarTitle = AppConstants.MOZ_APP_BASENAME;
-            } else {
-                toolbarTitle = title;
-            }
-            actionBar.setTitle(toolbarTitle);
+        if (msg == Tabs.TabEvents.LOCATION_CHANGE
+                || msg == Tabs.TabEvents.SECURITY_CHANGE
+                || msg == Tabs.TabEvents.TITLE) {
+            actionBarPresenter.update(tab);
         }
 
         updateMenuItemForward();
@@ -203,7 +187,6 @@ public class CustomTabsActivity extends GeckoApp implements Tabs.OnTabsChangedLi
         super.onSaveInstanceState(outState);
 
         outState.putInt(SAVED_TOOLBAR_COLOR, toolbarColor);
-        outState.putString(SAVED_TOOLBAR_TITLE, toolbarTitle);
     }
 
     @Override
@@ -224,7 +207,7 @@ public class CustomTabsActivity extends GeckoApp implements Tabs.OnTabsChangedLi
     // CustomTabsActivity only use standard menu in ActionBar, so initialize menu here.
     @Override
     public boolean onCreatePanelMenu(final int id, final Menu menu) {
-        insertActionButton(menu, getIntent());
+        insertActionButton(menu, getIntent(), actionBarPresenter.getTextPrimaryColor());
 
         popupMenu = createCustomPopupMenu();
 
@@ -286,46 +269,42 @@ public class CustomTabsActivity extends GeckoApp implements Tabs.OnTabsChangedLi
      *
      * @param menu   The options menu in which to place items.
      * @param intent which to launch this activity
+     * @param tintColor color to tint action-button
      * @return the MenuItem which be created and inserted into menu. Otherwise, null.
      */
     @VisibleForTesting
-    MenuItem insertActionButton(Menu menu, Intent intent) {
+    MenuItem insertActionButton(final Menu menu,
+                                final Intent intent,
+                                @ColorInt final int tintColor) {
         if (!IntentUtil.hasActionButton(intent)) {
             return null;
         }
 
-        // TODO: Bug 1336373 - Action button icon should support tint
         MenuItem item = menu.add(Menu.NONE,
                 R.id.action_button,
                 Menu.NONE,
                 IntentUtil.getActionButtonDescription(intent));
         Bitmap bitmap = IntentUtil.getActionButtonIcon(intent);
-        item.setIcon(new BitmapDrawable(getResources(), bitmap));
+        final Drawable icon = new BitmapDrawable(getResources(), bitmap);
+        if (IntentUtil.isActionButtonTinted(intent)) {
+            DrawableCompat.setTint(icon, tintColor);
+        }
+        item.setIcon(icon);
         MenuItemCompat.setShowAsAction(item, MenuItemCompat.SHOW_AS_ACTION_ALWAYS);
 
         return item;
     }
 
-    private void updateActionBarWithToolbar(final Toolbar toolbar) {
-        setSupportActionBar(toolbar);
-        final ActionBar ab = getSupportActionBar();
-        if (ab != null) {
-            ab.setDisplayHomeAsUpEnabled(true);
-        }
-    }
-
-    private void updateToolbarColor(final Toolbar toolbar) {
-        if (toolbarColor == NO_COLOR) {
-            return;
-        }
-
-        toolbar.setBackgroundColor(toolbarColor);
-
-        final Window window = getWindow();
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            window.setStatusBarColor(ColorUtil.darken(toolbarColor, 0.25));
-        }
+    private void bindNavigationCallback(@NonNull final Toolbar toolbar) {
+        toolbar.setNavigationOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                final Tabs tabs = Tabs.getInstance();
+                final Tab tab = tabs.getSelectedTab();
+                tabs.closeTab(tab);
+                finish();
+            }
+        });
     }
 
     private void performPendingIntent(@NonNull PendingIntent pendingIntent) {
@@ -413,6 +392,21 @@ public class CustomTabsActivity extends GeckoApp implements Tabs.OnTabsChangedLi
         forwardMenuItem.setEnabled(enabled);
     }
 
+    /**
+     * Update loading progress of current page
+     *
+     * @param isLoading to indicate whether ProgressBar should be visible or not
+     * @param progress  value of loading progress in percent, should be 0 - 100.
+     */
+    private void updateProgress(final boolean isLoading, final int progress) {
+        if (isLoading) {
+            mProgressView.setVisibility(View.VISIBLE);
+            mProgressView.setProgress(progress);
+        } else {
+            mProgressView.setVisibility(View.GONE);
+        }
+    }
+
     private void onReloadClicked() {
         final Tab tab = Tabs.getInstance().getSelectedTab();
         if (tab != null) {
@@ -460,6 +454,24 @@ public class CustomTabsActivity extends GeckoApp implements Tabs.OnTabsChangedLi
             Intent chooserIntent = Intent.createChooser(shareIntent, getString(R.string.share_title));
             chooserIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(chooserIntent);
+        }
+    }
+
+    /**
+     * Listener when user long-click ActionBar to copy URL.
+     */
+    private class UrlCopyListener implements View.OnLongClickListener {
+        @Override
+        public boolean onLongClick(View v) {
+            final String url = Tabs.getInstance().getSelectedTab().getURL();
+            if (!TextUtils.isEmpty(url)) {
+                Clipboard.setText(url);
+                SnackbarBuilder.builder(CustomTabsActivity.this)
+                        .message(R.string.custom_tabs_hint_url_copy)
+                        .duration(Snackbar.LENGTH_SHORT)
+                        .buildAndShow();
+            }
+            return true;
         }
     }
 }

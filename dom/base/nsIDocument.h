@@ -15,6 +15,7 @@
 #include "nsIDocumentObserver.h"         // for typedef (nsUpdateType)
 #include "nsILoadGroup.h"                // for member (in nsCOMPtr)
 #include "nsINode.h"                     // for base class
+#include "nsIParser.h"
 #include "nsIScriptGlobalObject.h"       // for member (in nsCOMPtr)
 #include "nsIServiceManager.h"
 #include "nsIUUIDGenerator.h"
@@ -108,7 +109,6 @@ class ErrorResult;
 class EventStates;
 class PendingAnimationTracker;
 class StyleSetHandle;
-class SVGAttrAnimationRuleProcessor;
 template<typename> class OwningNonNull;
 
 namespace css {
@@ -358,6 +358,8 @@ public:
    * Set referrer policy and upgrade-insecure-requests flags
    */
   virtual void ApplySettingsFromCSP(bool aSpeculative) = 0;
+
+  virtual already_AddRefed<nsIParser> CreatorParserOrNull() = 0;
 
   /**
    * Return the referrer policy of the document. Return "default" if there's no
@@ -1279,16 +1281,6 @@ public:
     return mStyleAttrStyleSheet;
   }
 
-  /**
-   * Get this document's SVG Animation rule processor.  May return null
-   * if there isn't one.
-   */
-  mozilla::SVGAttrAnimationRuleProcessor*
-  GetSVGAttrAnimationRuleProcessor() const
-  {
-    return mSVGAttrAnimationRuleProcessor;
-  }
-
   virtual void SetScriptGlobalObject(nsIScriptGlobalObject* aGlobalObject) = 0;
 
   /**
@@ -1977,7 +1969,7 @@ public:
     return mMayStartLayout;
   }
 
-  void SetMayStartLayout(bool aMayStartLayout)
+  virtual void SetMayStartLayout(bool aMayStartLayout)
   {
     mMayStartLayout = aMayStartLayout;
   }
@@ -2378,6 +2370,7 @@ public:
    * nsIDocument.h.
    */
   virtual mozilla::EventStates GetDocumentState() = 0;
+  virtual mozilla::EventStates ThreadSafeGetDocumentState() const = 0;
 
   virtual nsISupports* GetCurrentContentSink() = 0;
 
@@ -2447,9 +2440,6 @@ public:
   virtual nsresult AddResponsiveContent(nsIContent* aContent) = 0;
   virtual void RemoveResponsiveContent(nsIContent* aContent) = 0;
   virtual void NotifyMediaFeatureValuesChanged() = 0;
-
-  virtual void AddMediaContent(nsIContent* aContent) = 0;
-  virtual void RemoveMediaContent(nsIContent* aContent) = 0;
 
   virtual nsresult GetStateObject(nsIVariant** aResult) = 0;
 
@@ -2784,6 +2774,9 @@ public:
 
   void ObsoleteSheet(const nsAString& aSheetURI, mozilla::ErrorResult& rv);
 
+  already_AddRefed<mozilla::dom::Promise> BlockParsing(mozilla::dom::Promise& aPromise,
+                                                       mozilla::ErrorResult& aRv);
+
   already_AddRefed<nsIURI> GetMozDocumentURIIfNotForErrorPages();
 
   // ParentNode
@@ -2974,6 +2967,13 @@ protected:
     return mId;
   }
 
+  // Update our frame request callback scheduling state, if needed.  This will
+  // schedule or unschedule them, if necessary, and update
+  // mFrameRequestCallbacksScheduled.  aOldShell should only be passed when
+  // mPresShell is becoming null; in that case it will be used to get hold of
+  // the relevant refresh driver.
+  void UpdateFrameRequestCallbackSchedulingState(nsIPresShell* aOldShell = nullptr);
+
   nsCString mReferrer;
   nsString mLastModified;
 
@@ -3016,7 +3016,6 @@ protected:
   RefPtr<mozilla::css::ImageLoader> mStyleImageLoader;
   RefPtr<nsHTMLStyleSheet> mAttrStyleSheet;
   RefPtr<nsHTMLCSSStyleSheet> mStyleAttrStyleSheet;
-  RefPtr<mozilla::SVGAttrAnimationRuleProcessor> mSVGAttrAnimationRuleProcessor;
 
   // Tracking for images in the document.
   RefPtr<mozilla::dom::ImageTracker> mImageTracker;
@@ -3191,8 +3190,17 @@ protected:
   // Do we currently have an event posted to call FlushUserFontSet?
   bool mPostedFlushUserFontSet : 1;
 
-  // True is document has ever been in a foreground window.
-  bool mEverInForeground : 1;
+  // True if we have fired the DOMContentLoaded event, or don't plan to fire one
+  // (e.g. we're not being parsed at all).
+  bool mDidFireDOMContentLoaded : 1;
+
+  // True if ReportHasScrollLinkedEffect() has been called.
+  bool mHasScrollLinkedEffect : 1;
+
+  // True if we have frame request callbacks scheduled with the refresh driver.
+  // This should generally be updated only via
+  // UpdateFrameRequestCallbackSchedulingState.
+  bool mFrameRequestCallbacksScheduled : 1;
 
   // Compatibility mode
   nsCompatibility mCompatMode;
@@ -3344,9 +3352,6 @@ protected:
   nsTArray<RefPtr<mozilla::dom::AnonymousContent>> mAnonymousContents;
 
   uint32_t mBlockDOMContentLoaded;
-  bool mDidFireDOMContentLoaded:1;
-
-  bool mHasScrollLinkedEffect:1;
 
   // Our live MediaQueryLists
   PRCList mDOMMediaQueryLists;

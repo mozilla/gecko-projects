@@ -52,7 +52,7 @@ pref(layout.css.mix-blend-mode.enabled,true) == blend-normal.svg blend-normal-re
 #skip-if(Android)  pref(layout.css.mix-blend-mode.enabled,true) == blend-saturation.svg blend-saturation-ref.svg
 #skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-screen.svg blend-screen-ref.svg
 #skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-soft-light.svg blend-soft-light-ref.svg
-skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) fails-if(webrender) == blend-difference-stacking.html blend-difference-stacking-ref.html
+skip-if(Android) pref(layout.css.mix-blend-mode.enabled,true) == blend-difference-stacking.html blend-difference-stacking-ref.html
 
 == border-radius-01.html pass.svg
 
@@ -214,7 +214,7 @@ fuzzy-if(skiaContent,1,800000) == filters-and-group-opacity-01.svg filters-and-g
 == foreignObject-ancestor-style-change-01.svg foreignObject-ancestor-style-change-01-ref.svg
 == foreignObject-change-transform-01.svg pass.svg
 == foreignObject-display-01.svg pass.svg
-== foreignObject-form-theme.svg foreignObject-form-theme-ref.html
+pref(layout.css.moz-appearance.enabled,true) == foreignObject-form-theme.svg foreignObject-form-theme-ref.html
 == foreignObject-img-form-theme.html foreignObject-img-form-theme-ref.html
 == foreignObject-move-repaint-01.svg pass.svg
 == foreignObject-overflow-01.svg pass.svg
@@ -278,6 +278,7 @@ fuzzy-if(skiaContent,1,10000) == mask-basic-02.svg mask-basic-02-ref.svg
 == mask-on-outflowElement-01a.html clipPath-on-outflowElement-01-ref.html
 == mask-on-outflowElement-01b.html clipPath-on-outflowElement-01-ref.html
 fuzzy(1,5000) == mask-opacity-01.svg mask-opacity-01-ref.svg
+!= mask-root-svg.svg about:blank
 == mask-transformed-01.svg mask-transformed-01-ref.svg
 == mask-transformed-02.svg pass.svg
 == mask-transformed-child-01.svg mask-transformed-child-01-ref.svg
@@ -345,6 +346,7 @@ fuzzy-if(skiaContent,1,400) == path-06.svg path-06-ref.svg
 == pathLength-02.svg pass.svg
 
 == pattern-basic-01.svg pass.svg
+fuzzy(1,5) skip-if(Android) == pattern-big-image.html pattern-big-image-ref.html
 == pattern-invalid-01.svg pattern-invalid-01-ref.svg
 fuzzy-if(skiaContent,1,5) == pattern-live-01a.svg pattern-live-01-ref.svg
 fuzzy-if(skiaContent,1,5) == pattern-live-01b.svg pattern-live-01-ref.svg

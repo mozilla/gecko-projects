@@ -88,10 +88,6 @@
 #include "GLContextProvider.h"
 #include "mozilla/gfx/Logging.h"
 
-#if defined(MOZ_WIDGET_GTK)
-#include "gfxPlatformGtk.h" // xxx - for UseFcFontList
-#endif
-
 #ifdef MOZ_WIDGET_ANDROID
 #include "TexturePoolOGL.h"
 #include "mozilla/layers/UiCompositorControllerChild.h"
@@ -688,6 +684,9 @@ gfxPlatform::Init()
     #error "No gfxPlatform implementation available"
 #endif
     gPlatform->InitAcceleration();
+    if (XRE_IsParentProcess()) {
+      gPlatform->InitWebRenderConfig();
+    }
 
     if (gfxConfig::IsEnabled(Feature::GPU_PROCESS)) {
       GPUProcessManager* gpu = GPUProcessManager::Get();
@@ -711,17 +710,9 @@ gfxPlatform::Init()
     gPlatform->ComputeTileSize();
 
     nsresult rv;
-
-    bool usePlatformFontList = true;
-#if defined(MOZ_WIDGET_GTK)
-    usePlatformFontList = gfxPlatformGtk::UseFcFontList();
-#endif
-
-    if (usePlatformFontList) {
-        rv = gfxPlatformFontList::Init();
-        if (NS_FAILED(rv)) {
-            MOZ_CRASH("Could not initialize gfxPlatformFontList");
-        }
+    rv = gfxPlatformFontList::Init();
+    if (NS_FAILED(rv)) {
+        MOZ_CRASH("Could not initialize gfxPlatformFontList");
     }
 
     gPlatform->mScreenReferenceSurface =
@@ -762,7 +753,7 @@ gfxPlatform::Init()
     TexturePoolOGL::Init();
 #endif
 
-    Preferences::RegisterCallbackAndCall(RecordingPrefChanged, "gfx.2d.recording", nullptr);
+    Preferences::RegisterCallbackAndCall(RecordingPrefChanged, "gfx.2d.recording");
 
     CreateCMSOutputProfile();
 
@@ -1703,6 +1694,7 @@ gfxPlatform::InitBackendPrefs(uint32_t aCanvasBitmask, BackendType aCanvasDefaul
 
     if (XRE_IsParentProcess()) {
         gfxVars::SetContentBackend(mContentBackend);
+        gfxVars::SetSoftwareBackend(mSoftwareBackend);
     }
 }
 
@@ -2207,11 +2199,8 @@ gfxPlatform::InitAcceleration()
 
   if (XRE_IsParentProcess()) {
     Preferences::RegisterCallbackAndCall(VideoDecodingFailedChangedCallback,
-                                         "media.hardware-video-decoding.failed",
-                                         nullptr,
-                                         Preferences::ExactMatch);
+                                         "media.hardware-video-decoding.failed");
     InitGPUProcessPrefs();
-    InitWebRenderConfig();
   }
 }
 
@@ -2303,13 +2292,17 @@ gfxPlatform::InitWebRenderConfig()
 {
   FeatureState& featureWebRender = gfxConfig::GetFeature(Feature::WEBRENDER);
 
-  featureWebRender.EnableByDefault();
+  featureWebRender.DisableByDefault(
+      FeatureStatus::OptIn,
+      "WebRender is an opt-in feature",
+      NS_LITERAL_CSTRING("FEATURE_FAILURE_DEFAULT_OFF"));
 
-  if (!Preferences::GetBool("gfx.webrender.enabled", false)) {
-    featureWebRender.UserDisable(
-      "User disabled WebRender",
-      NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBRENDER_DISABLED"));
+  bool prefEnabled = Preferences::GetBool("gfx.webrender.enabled", false);
+  if (prefEnabled) {
+    featureWebRender.UserEnable("Enabled by pref");
   }
+
+  ScopedGfxFeatureReporter reporter("WR", prefEnabled);
 
   // WebRender relies on the GPU process when on Windows
 #ifdef XP_WIN
@@ -2328,7 +2321,7 @@ gfxPlatform::InitWebRenderConfig()
       NS_LITERAL_CSTRING("FEATURE_FAILURE_SAFE_MODE"));
   }
 
-#ifndef MOZ_ENABLE_WEBRENDER
+#ifndef MOZ_BUILD_WEBRENDER
   featureWebRender.ForceDisable(
     FeatureStatus::Unavailable,
     "Build doesn't include WebRender",
@@ -2336,7 +2329,10 @@ gfxPlatform::InitWebRenderConfig()
 #endif
 
   // gfxFeature is not usable in the GPU process, so we use gfxVars to transmit this feature
-  gfxVars::SetUseWebRender(gfxConfig::IsEnabled(Feature::WEBRENDER));
+  if (gfxConfig::IsEnabled(Feature::WEBRENDER)) {
+    gfxVars::SetUseWebRender(true);
+    reporter.SetSuccessful();
+  }
 }
 
 bool

@@ -1401,7 +1401,7 @@ static inline bool FrameHasBorderOrBackground(nsTableFrame* tableFrame, nsIFrame
     return true;
   }
   if (!f->StyleBackground()->IsTransparent(f) ||
-      f->StyleDisplay()->mAppearance) {
+      f->StyleDisplay()->UsedAppearance()) {
 
     nsTableCellFrame *cellFrame = do_QueryFrame(f);
     // We could also return false here if the current frame is the root
@@ -7705,9 +7705,6 @@ nsTableFrame::DoUpdateStyleOfOwnedAnonBoxes(ServoStyleSet& aStyleSet,
   uint32_t equalStructs, samePointerStructs; // Not used, actually.
   nsChangeHint wrapperHint = wrapper->StyleContext()->CalcStyleDifference(
     newContext,
-    // The wrapper is not our descendant, so just be pessimistic about which
-    // things it needs to care about.
-    nsChangeHint_Hints_NotHandledForDescendants,
     &equalStructs,
     &samePointerStructs);
   if (wrapperHint) {

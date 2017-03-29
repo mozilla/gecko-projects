@@ -30,6 +30,7 @@
 #include "nsIContentSecurityPolicy.h"
 #include "nsIDocShell.h"
 #include "nsIDocument.h"
+#include "nsILoadContext.h"
 #include "nsINetworkPredictor.h"
 #include "nsIPresShell.h"
 #include "nsIPrincipal.h"
@@ -104,6 +105,8 @@ FontFaceSet::FontFaceSet(nsPIDOMWindowInner* aWindow, nsIDocument* aDocument)
   , mHasLoadingFontFacesIsDirty(false)
   , mDelayedLoadCheck(false)
 {
+  MOZ_ASSERT(mDocument, "We should get a valid document from the caller!");
+
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aWindow);
 
   // If the pref is not set, don't create the Promise (which the page wouldn't
@@ -1040,7 +1043,7 @@ FontFaceSet::FindOrCreateUserFontEntryFromFontFace(const nsAString& aFamilyName,
   } else if (unit == eCSSUnit_String) {
     nsString stringValue;
     val.GetStringValue(stringValue);
-    languageOverride = gfxFontStyle::ParseFontLanguageOverride(stringValue);
+    languageOverride = nsRuleNode::ParseFontLanguageOverride(stringValue);
   } else {
     NS_ASSERTION(unit == eCSSUnit_Null,
                  "@font-face font-language-override has unexpected unit");
@@ -1473,9 +1476,9 @@ FontFaceSet::OnFontFaceStatusChanged(FontFace* aFontFace)
     if (!mDelayedLoadCheck) {
       mDelayedLoadCheck = true;
       nsCOMPtr<nsIRunnable> checkTask =
-        NewRunnableMethod("FontFaceSet::CheckLoadingFinishedAfterDelay",
-                          this, &FontFaceSet::CheckLoadingFinishedAfterDelay);
-      NS_DispatchToMainThread(checkTask);
+        NewRunnableMethod(this, &FontFaceSet::CheckLoadingFinishedAfterDelay);
+      mDocument->Dispatch("FontFaceSet::CheckLoadingFinishedAfterDelay",
+                          TaskCategory::Other, checkTask.forget());
     }
   }
 }

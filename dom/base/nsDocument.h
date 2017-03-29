@@ -537,6 +537,8 @@ public:
 
   virtual void ApplySettingsFromCSP(bool aSpeculative) override;
 
+  virtual already_AddRefed<nsIParser> CreatorParserOrNull() override;
+
   /**
    * Set the principal responsible for this document.
    */
@@ -918,7 +920,7 @@ public:
   void DecreaseEventSuppression() {
     MOZ_ASSERT(mEventsSuppressed);
     --mEventsSuppressed;
-    MaybeRescheduleAnimationFrameNotifications();
+    UpdateFrameRequestCallbackSchedulingState();
   }
 
   virtual nsIDocument* GetTemplateContentsOwner() override;
@@ -978,7 +980,12 @@ public:
 
   virtual nsISupports* GetCurrentContentSink() override;
 
-  virtual mozilla::EventStates GetDocumentState() override;
+  virtual mozilla::EventStates GetDocumentState() final;
+  // GetDocumentState() mutates the state due to lazy resolution;
+  // and can't be used during parallel traversal. Use this instead,
+  // and ensure GetDocumentState() has been called first.
+  // This will assert if the state is stale.
+  virtual mozilla::EventStates ThreadSafeGetDocumentState() const final;
 
   // Only BlockOnload should call this!
   void AsyncBlockOnload();
@@ -1014,13 +1021,6 @@ public:
   // Notifies any responsive content added by AddResponsiveContent upon media
   // features values changing.
   virtual void NotifyMediaFeatureValuesChanged() override;
-
-  // Adds an element to mMediaContent when the element is added to the tree.
-  virtual void AddMediaContent(nsIContent* aContent) override;
-
-  // Removes an element from mMediaContent when the element is removed from
-  // the tree.
-  virtual void RemoveMediaContent(nsIContent* aContent) override;
 
   virtual nsresult GetStateObject(nsIVariant** aResult) override;
 
@@ -1389,6 +1389,7 @@ protected:
   // caches its result here.
   mozilla::Maybe<bool> mIsThirdParty;
 private:
+  void UpdatePossiblyStaleDocumentState();
   static bool CustomElementConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp);
 
   /**
@@ -1534,12 +1535,6 @@ private:
   void EnableStyleSheetsForSetInternal(const nsAString& aSheetSet,
                                        bool aUpdateCSSLoader);
 
-  // Revoke any pending notifications due to requestAnimationFrame calls
-  void RevokeAnimationFrameNotifications();
-  // Reschedule any notifications we need to handle
-  // requestAnimationFrame, if it's OK to do so.
-  void MaybeRescheduleAnimationFrameNotifications();
-
   void ClearAllBoxObjects();
 
   // Returns true if the scheme for the url for this document is "about"
@@ -1572,9 +1567,6 @@ private:
 
   // A set of responsive images keyed by address pointer.
   nsTHashtable< nsPtrHashKey<nsIContent> > mResponsiveContent;
-
-  // A set of media elements keyed by address pointer.
-  nsTHashtable<nsPtrHashKey<nsIContent>> mMediaContent;
 
   // Member to store out last-selected stylesheet set.
   nsString mLastStyleSheetSet;

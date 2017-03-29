@@ -1796,7 +1796,7 @@ nsTreeBodyFrame::MarkDirtyIfSelect()
 nsresult
 nsTreeBodyFrame::CreateTimer(const LookAndFeel::IntID aID,
                              nsTimerCallbackFunc aFunc, int32_t aType,
-                             nsITimer** aTimer)
+                             nsITimer** aTimer, const char* aName)
 {
   // Get the delay from the look and feel service.
   int32_t delay = LookAndFeel::GetInt(aID, 0);
@@ -1807,8 +1807,11 @@ nsTreeBodyFrame::CreateTimer(const LookAndFeel::IntID aID,
   // Zero value means that this feature is completely disabled.
   if (delay > 0) {
     timer = do_CreateInstance("@mozilla.org/timer;1");
-    if (timer)
-      timer->InitWithFuncCallback(aFunc, this, delay, aType);
+    if (timer) {
+      timer->SetTarget(
+          mContent->OwnerDoc()->EventTargetFor(TaskCategory::Other));
+      timer->InitWithNamedFuncCallback(aFunc, this, delay, aType, aName);
+    }
   }
 
   NS_IF_ADDREF(*aTimer = timer);
@@ -2075,16 +2078,16 @@ nsTreeBodyFrame::GetTwistyRect(int32_t aRowIndex,
   bool useTheme = false;
   nsITheme *theme = nullptr;
   const nsStyleDisplay* twistyDisplayData = aTwistyContext->StyleDisplay();
-  if (twistyDisplayData->mAppearance) {
+  if (twistyDisplayData->UsedAppearance()) {
     theme = aPresContext->GetTheme();
-    if (theme && theme->ThemeSupportsWidget(aPresContext, nullptr, twistyDisplayData->mAppearance))
+    if (theme && theme->ThemeSupportsWidget(aPresContext, nullptr, twistyDisplayData->UsedAppearance()))
       useTheme = true;
   }
 
   if (useTheme) {
     LayoutDeviceIntSize minTwistySizePx;
     bool canOverride = true;
-    theme->GetMinimumWidgetSize(aPresContext, this, twistyDisplayData->mAppearance,
+    theme->GetMinimumWidgetSize(aPresContext, this, twistyDisplayData->UsedAppearance(),
                                 &minTwistySizePx, &canOverride);
 
     // GMWS() returns size in pixels, we need to convert it back to app units
@@ -2642,7 +2645,8 @@ nsTreeBodyFrame::HandleEvent(nsPresContext* aPresContext,
         // Set a timer to trigger the tree scrolling.
         CreateTimer(LookAndFeel::eIntID_TreeLazyScrollDelay,
                     LazyScrollCallback, nsITimer::TYPE_ONE_SHOT,
-                    getter_AddRefs(mSlots->mTimer));
+                    getter_AddRefs(mSlots->mTimer),
+                    "nsTreeBodyFrame::LazyScrollCallback");
        }
 #endif
       // Bail out to prevent spring loaded timer and feedback line settings.
@@ -2680,7 +2684,8 @@ nsTreeBodyFrame::HandleEvent(nsPresContext* aPresContext,
               // This node isn't expanded, set a timer to expand it.
               CreateTimer(LookAndFeel::eIntID_TreeOpenDelay,
                           OpenCallback, nsITimer::TYPE_ONE_SHOT,
-                          getter_AddRefs(mSlots->mTimer));
+                          getter_AddRefs(mSlots->mTimer),
+                          "nsTreeBodyFrame::OpenCallback");
             }
           }
         }
@@ -2754,7 +2759,8 @@ nsTreeBodyFrame::HandleEvent(nsPresContext* aPresContext,
       // Close all spring loaded folders except the drop folder.
       CreateTimer(LookAndFeel::eIntID_TreeCloseDelay,
                   CloseCallback, nsITimer::TYPE_ONE_SHOT,
-                  getter_AddRefs(mSlots->mTimer));
+                  getter_AddRefs(mSlots->mTimer),
+                  "nsTreeBodyFrame::CloseCallback");
     }
   }
 
@@ -2851,7 +2857,7 @@ nsTreeBodyFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // geometrics for the row. In order to make the vibrancy effect to work
   // properly, we also need the tree to be themed as a source list.
   if (selection && treeFrame && theme &&
-      treeFrame->StyleDisplay()->mAppearance == NS_THEME_MAC_SOURCE_LIST) {
+      treeFrame->StyleDisplay()->UsedAppearance() == NS_THEME_MAC_SOURCE_LIST) {
     // Loop through our onscreen rows. If the row is selected and a
     // -moz-appearance is provided, RegisterThemeGeometry might be necessary.
     const auto end = std::min(mRowCount, LastVisibleRow() + 1);
@@ -2865,7 +2871,7 @@ nsTreeBodyFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
         nsTreeUtils::TokenizeProperties(properties, mScratchArray);
         nsStyleContext* rowContext =
           GetPseudoStyleContext(nsCSSAnonBoxes::moztreerow);
-        auto appearance = rowContext->StyleDisplay()->mAppearance;
+        auto appearance = rowContext->StyleDisplay()->UsedAppearance();
         if (appearance) {
           if (theme->ThemeSupportsWidget(PresContext(), this, appearance)) {
             nsITheme::ThemeGeometryType type =
@@ -3045,7 +3051,7 @@ nsTreeBodyFrame::PaintRow(int32_t              aRowIndex,
 
   // Paint our borders and background for our row rect.
   nsITheme* theme = nullptr;
-  auto appearance = rowContext->StyleDisplay()->mAppearance;
+  auto appearance = rowContext->StyleDisplay()->UsedAppearance();
   if (appearance) {
     theme = aPresContext->GetTheme();
   }
@@ -3186,9 +3192,9 @@ nsTreeBodyFrame::PaintSeparator(int32_t              aRowIndex,
   bool useTheme = false;
   nsITheme *theme = nullptr;
   const nsStyleDisplay* displayData = separatorContext->StyleDisplay();
-  if ( displayData->mAppearance ) {
+  if ( displayData->UsedAppearance() ) {
     theme = aPresContext->GetTheme();
-    if (theme && theme->ThemeSupportsWidget(aPresContext, nullptr, displayData->mAppearance))
+    if (theme && theme->ThemeSupportsWidget(aPresContext, nullptr, displayData->UsedAppearance()))
       useTheme = true;
   }
 
@@ -3199,7 +3205,7 @@ nsTreeBodyFrame::PaintSeparator(int32_t              aRowIndex,
     nsRect dirty;
     dirty.IntersectRect(aSeparatorRect, aDirtyRect);
     theme->DrawWidgetBackground(&aRenderingContext, this,
-                                displayData->mAppearance, aSeparatorRect, dirty); 
+                                displayData->UsedAppearance(), aSeparatorRect, dirty); 
   }
   else {
     const nsStylePosition* stylePosition = separatorContext->StylePosition();
@@ -3503,7 +3509,7 @@ nsTreeBodyFrame::PaintTwisty(int32_t              aRowIndex,
       nsRect dirty;
       dirty.IntersectRect(twistyRect, aDirtyRect);
       theme->DrawWidgetBackground(&aRenderingContext, this, 
-                                  twistyContext->StyleDisplay()->mAppearance, twistyRect, dirty);
+                                  twistyContext->StyleDisplay()->UsedAppearance(), twistyRect, dirty);
     }
     else {
       // Time to paint the twisty.
@@ -4691,7 +4697,8 @@ nsTreeBodyFrame::LazyScrollCallback(nsITimer *aTimer, void *aClosure)
       // Set a new timer to scroll the tree repeatedly.
       self->CreateTimer(LookAndFeel::eIntID_TreeScrollDelay,
                         ScrollCallback, nsITimer::TYPE_REPEATING_SLACK,
-                        getter_AddRefs(self->mSlots->mTimer));
+                        getter_AddRefs(self->mSlots->mTimer),
+                        "nsTreeBodyFrame::ScrollCallback");
       self->ScrollByLines(self->mSlots->mScrollLines);
       // ScrollByLines may have deleted |self|.
     }
@@ -4740,11 +4747,14 @@ nsTreeBodyFrame::PostScrollEvent()
   if (mScrollEvent.IsPending())
     return;
 
-  RefPtr<ScrollEvent> ev = new ScrollEvent(this);
-  if (NS_FAILED(NS_DispatchToCurrentThread(ev))) {
+  RefPtr<ScrollEvent> event = new ScrollEvent(this);
+  nsresult rv = mContent->OwnerDoc()->Dispatch("ScrollEvent",
+                                               TaskCategory::Other,
+                                               do_AddRef(event));
+  if (NS_FAILED(rv)) {
     NS_WARNING("failed to dispatch ScrollEvent");
   } else {
-    mScrollEvent = ev;
+    mScrollEvent = event;
   }
 }
 
@@ -4931,7 +4941,9 @@ nsTreeBodyFrame::FullScrollbarsUpdate(bool aNeedsFullInvalidation)
   if (!mCheckingOverflow) {
     nsContentUtils::AddScriptRunner(checker);
   } else {
-    NS_DispatchToCurrentThread(checker);
+    mContent->OwnerDoc()->Dispatch("nsOverflowChecker",
+                                   TaskCategory::Other,
+                                   checker.forget());
   }
   return weakFrame.IsAlive();
 }

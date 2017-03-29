@@ -8,6 +8,7 @@
 
 #include "mozilla/DocumentStyleRootIterator.h"
 #include "mozilla/ServoRestyleManager.h"
+#include "mozilla/dom/AnonymousContent.h"
 #include "mozilla/dom/ChildIterator.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ElementInlines.h"
@@ -60,6 +61,8 @@ ServoStyleSet::Init(nsPresContext* aPresContext)
 void
 ServoStyleSet::BeginShutdown()
 {
+  nsIDocument* doc = mPresContext->Document();
+
   // It's important to do this before mRawSet is released, since that will cause
   // a RuleTree GC, which needs to happen after we have dropped all of the
   // document's strong references to RuleNodes.  We also need to do it here,
@@ -72,9 +75,17 @@ ServoStyleSet::BeginShutdown()
   // Note that this is pretty bad for performance; we should find a way to
   // get by with the ServoNodeDatas being dropped as part of the document
   // going away.
-  DocumentStyleRootIterator iter(mPresContext->Document());
+  DocumentStyleRootIterator iter(doc);
   while (Element* root = iter.GetNextStyleRoot()) {
     ServoRestyleManager::ClearServoDataFromSubtree(root);
+  }
+
+  // We can also have some cloned canvas custom content stored in the document
+  // (as done in nsCanvasFrame::DestroyFrom), due to bug 1348480, when we create
+  // the clone (wastefully) during PresShell destruction.  Clear data from that
+  // clone.
+  for (RefPtr<AnonymousContent>& ac : doc->GetAnonymousContents()) {
+    ServoRestyleManager::ClearServoDataFromSubtree(ac->GetContentNode());
   }
 }
 
@@ -137,7 +148,7 @@ ServoStyleSet::GetContext(nsIContent* aContent,
   Element* element = aContent->AsElement();
 
 
-  ResolveMappedAttrDeclarationBlocks();
+  PreTraverseSync();
   RefPtr<ServoComputedValues> computedValues;
   if (aMayCompute == LazyComputeBehavior::Allow) {
     computedValues = ResolveStyleLazily(element, nullptr);
@@ -179,9 +190,19 @@ ServoStyleSet::ResolveMappedAttrDeclarationBlocks()
 }
 
 void
-ServoStyleSet::PreTraverse()
+ServoStyleSet::PreTraverseSync()
 {
   ResolveMappedAttrDeclarationBlocks();
+
+  // This is lazily computed and pseudo matching needs to access
+  // it so force computation early.
+  mPresContext->Document()->GetDocumentState();
+}
+
+void
+ServoStyleSet::PreTraverse()
+{
+  PreTraverseSync();
 
   // Process animation stuff that we should avoid doing during the parallel
   // traversal.
@@ -199,14 +220,32 @@ ServoStyleSet::PrepareAndTraverseSubtree(RawGeckoElementBorrowed aRoot,
 
   MOZ_ASSERT(!sInServoTraversal);
   sInServoTraversal = true;
+
+  bool isInitial = !aRoot->HasServoData();
   bool postTraversalRequired =
     Servo_TraverseSubtree(aRoot, mRawSet.get(), aRootBehavior);
+  MOZ_ASSERT_IF(isInitial, !postTraversalRequired);
 
   // If there are still animation restyles needed, trigger a second traversal to
   // update CSS animations' styles.
-  if (mPresContext->EffectCompositor()->PreTraverse() &&
-      Servo_TraverseSubtree(aRoot, mRawSet.get(), aRootBehavior)) {
-    postTraversalRequired = true;
+  if (mPresContext->EffectCompositor()->PreTraverse()) {
+    if (Servo_TraverseSubtree(aRoot, mRawSet.get(), aRootBehavior)) {
+      if (isInitial) {
+        // We're doing initial styling, and the additional animation
+        // traversal changed the styles that were set by the first traversal.
+        // This would normally require a post-traversal to update the style
+        // contexts, and the DOM now has dirty descendant bits and RestyleData
+        // in expectation of that post-traversal. But since this is actually
+        // the initial styling, there are no style contexts to update and no
+        // frames to apply the change hints to, so we don't need to do that
+        // post-traversal. Instead, just drop this state and tell the caller
+        // that no post-traversal is required.
+        MOZ_ASSERT(!postTraversalRequired);
+        ServoRestyleManager::ClearRestyleStateFromSubtree(const_cast<Element*>(aRoot));
+      } else {
+        postTraversalRequired = true;
+      }
+    }
   }
 
   sInServoTraversal = false;
@@ -716,9 +755,10 @@ ServoStyleSet::FillKeyframesForName(const nsString& aName,
 }
 
 nsTArray<ComputedKeyframeValues>
-ServoStyleSet::GetComputedKeyframeValuesFor(const nsTArray<Keyframe>& aKeyframes,
-                                            dom::Element* aElement,
-                                            const ServoComputedStyleValues& aServoValues)
+ServoStyleSet::GetComputedKeyframeValuesFor(
+  const nsTArray<Keyframe>& aKeyframes,
+  dom::Element* aElement,
+  const ServoComputedValuesWithParent& aServoValues)
 {
   nsTArray<ComputedKeyframeValues> result(aKeyframes.Length());
 

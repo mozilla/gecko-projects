@@ -255,6 +255,19 @@ function openLinkIn(url, where, params) {
     aRelatedToCurrent = false;
   }
 
+  // Teach the principal about the right OA to use, e.g. in case when
+  // opening a link in a new private window, or in a new container tab.
+  // Please note we do not have to do that for SystemPrincipals and we
+  // can not do it for NullPrincipals since NullPrincipals are only
+  // identical if they actually are the same object (See Bug: 1346759)
+  if (aPrincipal && aPrincipal.isCodebasePrincipal) {
+    let attrs = {
+      userContextId: aUserContextId,
+      privateBrowsingId: aIsPrivate || (w && PrivateBrowsingUtils.isWindowPrivate(w)),
+    };
+    aPrincipal = Services.scriptSecurityManager.createCodebasePrincipal(aPrincipal.URI, attrs);
+  }
+
   if (!w || where == "window") {
     // This propagates to window.arguments.
     var sa = Cc["@mozilla.org/array;1"].
@@ -657,33 +670,13 @@ function isBidiEnabled() {
   if (getBoolPref("bidi.browser.ui", false))
     return true;
 
-  // then check intl.uidirection.<locale>
-  var chromeReg = Components.classes["@mozilla.org/chrome/chrome-registry;1"].
-                  getService(Components.interfaces.nsIXULChromeRegistry);
-  if (chromeReg.isLocaleRTL("global"))
-    return true;
+  // now see if the app locale is an RTL one.
+  const isRTL = Services.locale.isAppLocaleRTL;
 
-  // now see if the system locale is an RTL one.
-  var rv = false;
-
-  try {
-    var localeService = Components.classes["@mozilla.org/intl/nslocaleservice;1"]
-                                  .getService(Components.interfaces.nsILocaleService);
-    var systemLocale = localeService.getSystemLocale().getCategory("NSILOCALE_CTYPE").substr(0, 3);
-
-    switch (systemLocale) {
-      case "ar-":
-      case "he-":
-      case "fa-":
-      case "ug-":
-      case "ur-":
-      case "syr":
-        rv = true;
-        Services.prefs.setBoolPref("bidi.browser.ui", true);
-    }
-  } catch (e) {}
-
-  return rv;
+  if (isRTL) {
+    Services.prefs.setBoolPref("bidi.browser.ui", true);
+  }
+  return isRTL;
 }
 
 function openAboutDialog() {
@@ -777,7 +770,7 @@ function openPreferences(paneID, extraArgs) {
 }
 
 function openAdvancedPreferences(tabID) {
-  openPreferences("paneAdvanced", { "advancedTab" : tabID });
+  openPreferences("paneAdvanced", { "advancedTab": tabID });
 }
 
 /**

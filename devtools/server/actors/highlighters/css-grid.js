@@ -15,6 +15,7 @@ const {
 } = require("./utils/markup");
 const {
   getCurrentZoom,
+  getDisplayPixelRatio,
   setIgnoreLayoutChanges,
   getWindowDimensions,
   getMaxSurfaceSize,
@@ -27,6 +28,9 @@ const DEFAULT_GRID_COLOR = "#4B0082";
 
 const COLUMNS = "cols";
 const ROWS = "rows";
+
+const GRID_FONT_SIZE = 10;
+const GRID_FONT_FAMILY = "sans-serif";
 
 const GRID_LINES_PROPERTIES = {
   "edge": {
@@ -43,10 +47,9 @@ const GRID_LINES_PROPERTIES = {
   }
 };
 
-// px
-const GRID_GAP_PATTERN_WIDTH = 14;
-const GRID_GAP_PATTERN_HEIGHT = 14;
-const GRID_GAP_PATTERN_LINE_DASH = [5, 3];
+const GRID_GAP_PATTERN_WIDTH = 14; // px
+const GRID_GAP_PATTERN_HEIGHT = 14; // px
+const GRID_GAP_PATTERN_LINE_DASH = [5, 3]; // px
 const GRID_GAP_ALPHA = 0.5;
 
 /**
@@ -839,16 +842,19 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
    *         The grid line type - "edge", "explicit", or "implicit".
    */
   renderLine(linePos, startPos, endPos, dimensionType, lineType) {
-    let ratio = this.win.devicePixelRatio;
+    let { devicePixelRatio } = this.win;
+    let lineWidth = getDisplayPixelRatio(this.win);
+    let offset = (lineWidth / 2) % 1;
 
-    linePos = Math.round(linePos * ratio);
-    startPos = Math.round(startPos * ratio);
-    endPos = Math.round(endPos * ratio);
+    linePos = Math.round(linePos * devicePixelRatio);
+    startPos = Math.round(startPos * devicePixelRatio);
+    endPos = Math.round(endPos * devicePixelRatio);
 
     this.ctx.save();
     this.ctx.setLineDash(GRID_LINES_PROPERTIES[lineType].lineDash);
     this.ctx.beginPath();
-    this.ctx.translate(.5, .5);
+    this.ctx.translate(offset, offset);
+    this.ctx.lineWidth = lineWidth;
 
     if (dimensionType === COLUMNS) {
       this.ctx.moveTo(linePos, startPos);
@@ -879,19 +885,21 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
    *         The grid dimension type which is either the constant COLUMNS or ROWS.
    */
   renderGridLineNumber(lineNumber, linePos, startPos, dimensionType) {
-    let ratio = this.win.devicePixelRatio;
+    let { devicePixelRatio } = this.win;
+    let displayPixelRatio = getDisplayPixelRatio(this.win);
 
-    linePos = Math.round(linePos * ratio);
-    startPos = Math.round(startPos * ratio);
+    linePos = Math.round(linePos * devicePixelRatio);
+    startPos = Math.round(startPos * devicePixelRatio);
 
     this.ctx.save();
 
+    let fontSize = (GRID_FONT_SIZE * displayPixelRatio);
+    this.ctx.font = fontSize + "px " + GRID_FONT_FAMILY;
+
     let textWidth = this.ctx.measureText(lineNumber).width;
-    // Guess the font height based on the measured width
-    let textHeight = textWidth * 2;
 
     if (dimensionType === COLUMNS) {
-      let yPos = Math.max(startPos, textHeight);
+      let yPos = Math.max(startPos, fontSize);
       this.ctx.fillText(lineNumber, linePos, yPos);
     } else {
       let xPos = Math.max(startPos, textWidth);
@@ -917,15 +925,15 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
    *         The grid dimension type which is either the constant COLUMNS or ROWS.
    */
   renderGridGap(linePos, startPos, endPos, breadth, dimensionType) {
-    let ratio = this.win.devicePixelRatio;
+    let { devicePixelRatio } = this.win;
 
-    linePos = Math.round(linePos * ratio);
-    startPos = Math.round(startPos * ratio);
-    endPos = Math.round(endPos * ratio);
-    breadth = Math.round(breadth * ratio);
+    linePos = Math.round(linePos * devicePixelRatio);
+    startPos = Math.round(startPos * devicePixelRatio);
+    endPos = Math.round(endPos * devicePixelRatio);
+    breadth = Math.round(breadth * devicePixelRatio);
 
     this.ctx.save();
-    this.ctx.fillStyle = this.getGridGapPattern(ratio, dimensionType);
+    this.ctx.fillStyle = this.getGridGapPattern(devicePixelRatio, dimensionType);
 
     if (dimensionType === COLUMNS) {
       this.ctx.fillRect(linePos, startPos, breadth, endPos - startPos);

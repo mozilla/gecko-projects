@@ -94,9 +94,11 @@ this.SelectContentHelper.prototype = {
   showDropDown() {
     this.element.openInParentProcess = true;
     let rect = this._getBoundingContentRect();
+    DOMUtils.addPseudoClassLock(this.element, ":focus");
     let computedStyles = getComputedStyles(this.element);
     this._selectBackgroundColor = computedStyles.backgroundColor;
     this._selectColor = computedStyles.color;
+    DOMUtils.clearPseudoClassLocks(this.element);
     this.global.sendAsyncMessage("Forms:ShowDropDown", {
       direction: computedStyles.direction,
       isOpenedViaTouch: this.isOpenedViaTouch,
@@ -124,6 +126,14 @@ this.SelectContentHelper.prototype = {
   _update() {
     // The <select> was updated while the dropdown was open.
     // Let's send up a new list of options.
+    // Technically we might not need to set this pseudo-class
+    // during _update() since the element should organically
+    // have :focus, though it is here for belt-and-suspenders.
+    DOMUtils.addPseudoClassLock(this.element, ":focus");
+    let computedStyles = getComputedStyles(this.element);
+    this._selectBackgroundColor = computedStyles.backgroundColor;
+    this._selectColor = computedStyles.color;
+    DOMUtils.clearPseudoClassLocks(this.element);
     this.global.sendAsyncMessage("Forms:UpdateDropDown", {
       options: this._buildOptionList(),
       selectedIndex: this.element.selectedIndex,
@@ -142,13 +152,13 @@ this.SelectContentHelper.prototype = {
   _calculateUAColors() {
     let dummyOption = this.element.ownerDocument.createElement("option");
     dummyOption.style.setProperty("color", "-moz-comboboxtext", "important");
-    dummyOption.style.setProperty("backgroundColor", "-moz-combobox", "important");
+    dummyOption.style.setProperty("background-color", "-moz-combobox", "important");
     let optionCS = this.element.ownerGlobal.getComputedStyle(dummyOption);
     this._uaBackgroundColor = optionCS.backgroundColor;
     this._uaColor = optionCS.color;
     let dummySelect = this.element.ownerDocument.createElement("select");
     dummySelect.style.setProperty("color", "-moz-fieldtext", "important");
-    dummySelect.style.setProperty("backgroundColor", "-moz-field", "important");
+    dummySelect.style.setProperty("background-color", "-moz-field", "important");
     let selectCS = this.element.ownerGlobal.getComputedStyle(dummySelect);
     this._uaSelectBackgroundColor = selectCS.backgroundColor;
     this._uaSelectColor = selectCS.color;

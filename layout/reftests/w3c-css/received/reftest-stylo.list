@@ -236,7 +236,7 @@ fails == css-values-3/ch-unit-001.html css-values-3/ch-unit-001.html
 fails == css-values-3/vh-support-atviewport.html css-values-3/vh-support-atviewport.html
 == css-values-3/vh-support-margin.html css-values-3/vh-support-margin.html
 == css-values-3/vh-support-transform-origin.html css-values-3/vh-support-transform-origin.html
-== css-values-3/vh-support-transform-translate.html css-values-3/vh-support-transform-translate.html
+fuzzy-if(stylo,160000,251) == css-values-3/vh-support-transform-translate.html css-values-3/vh-support-transform-translate.html
 == css-values-3/vh-support.html css-values-3/vh-support.html
 == css-values-3/vh-zero-support.html css-values-3/vh-zero-support.html
 skip-if(stylo) == css-values-3/vh_not_refreshing_on_chrome.html css-values-3/vh_not_refreshing_on_chrome.html # bug 1346829
@@ -254,5 +254,5 @@ skip-if(stylo) pref(dom.webcomponents.enabled,true) needs-focus == selectors-4/f
 skip-if(stylo) pref(dom.webcomponents.enabled,true) needs-focus == selectors-4/focus-within-shadow-005.html selectors-4/focus-within-shadow-005.html # Bug 1292285
 == selectors-4/of-type-selectors.xhtml selectors-4/of-type-selectors.xhtml
 fails == selectors-4/selector-required.html selectors-4/selector-required.html
-fails == selectors-4/selectors-dir-selector-ltr-001.html selectors-4/selectors-dir-selector-ltr-001.html
-fails == selectors-4/selectors-dir-selector-rtl-001.html selectors-4/selectors-dir-selector-rtl-001.html
+== selectors-4/selectors-dir-selector-ltr-001.html selectors-4/selectors-dir-selector-ltr-001.html
+== selectors-4/selectors-dir-selector-rtl-001.html selectors-4/selectors-dir-selector-rtl-001.html

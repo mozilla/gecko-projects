@@ -118,6 +118,25 @@ assert.mobile = function (msg = "") {
 };
 
 /**
+ * Asserts that |win| is open.
+ *
+ * @param {ChromeWindow} win
+ *     Chrome window to test.
+ * @param {string=} msg
+ *     Custom error message.
+ *
+ * @return {ChromeWindow}
+ *     |win| is returned unaltered.
+ *
+ * @throws {NoSuchWindowError}
+ *     If |win| has been closed.
+ */
+assert.window = function (win, msg = "") {
+  msg = msg || "Unable to locate window";
+  return assert.that(w => w && w.document.defaultView, msg, NoSuchWindowError)(win);
+}
+
+/**
  * Asserts that |obj| is defined.
  *
  * @param {?} obj
@@ -153,6 +172,25 @@ assert.defined = function (obj, msg = "") {
 assert.number = function (obj, msg = "") {
   msg = msg || error.pprint`Expected ${obj} to be finite number`;
   return assert.that(Number.isFinite, msg)(obj);
+};
+
+/**
+ * Asserts that |obj| is callable.
+ *
+ * @param {?} obj
+ *     Value to test.
+ * @param {string=} msg
+ *     Custom error message.
+ *
+ * @return {Function}
+ *     |obj| is returned unaltered.
+ *
+ * @throws {InvalidArgumentError}
+ *     If |obj| is not callable.
+ */
+assert.callable = function (obj, msg = "") {
+  msg = msg || error.pprint`${obj} is not callable`;
+  return assert.that(o => typeof o == "function", msg)(obj);
 };
 
 /**
@@ -248,8 +286,12 @@ assert.string = function (obj, msg = "") {
  */
 assert.object = function (obj, msg = "") {
   msg = msg || error.pprint`Expected ${obj} to be an object`;
-  return assert.that(o =>
-      Object.prototype.toString.call(o) == "[object Object]", msg)(obj);
+  return assert.that(o => {
+    // unable to use instanceof because LHS and RHS may come from
+    // different globals
+    let s = Object.prototype.toString.call(o);
+    return s == "[object Object]" || s == "[object nsJSIID]";
+  })(obj);
 };
 
 /**

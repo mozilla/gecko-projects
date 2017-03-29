@@ -301,7 +301,8 @@ this.PermissionPromptPrototype = {
           if (this.permissionKey) {
 
             // Permanently store permission.
-            if (state && state.checkboxChecked) {
+            if ((state && state.checkboxChecked) ||
+                promptAction.scope == SitePermissions.SCOPE_PERSISTENT) {
               let scope = SitePermissions.SCOPE_PERSISTENT;
               // Only remember permission for session if in PB mode.
               if (PrivateBrowsingUtils.isBrowserPrivate(this.browser)) {
@@ -350,6 +351,10 @@ this.PermissionPromptPrototype = {
     // Permission prompts are always persistent; the close button is controlled by a pref.
     options.persistent = true;
     options.hideClose = !Services.prefs.getBoolPref("privacy.permissionPrompts.showCloseButton");
+    // When the docshell of the browser is aboout to be swapped to another one,
+    // the "swapping" event is called. Returning true causes the notification
+    // to be moved to the new browser.
+    options.eventCallback = topic => topic == "swapping";
 
     this.onBeforeShow();
     chromeWin.PopupNotifications.show(this.browser,
@@ -539,22 +544,8 @@ DesktopNotificationPermissionPrompt.prototype = {
     let learnMoreURL =
       Services.urlFormatter.formatURLPref("app.support.baseURL") + "push";
 
-    let checkbox = {
-      show: true,
-      checked: true,
-      label: gBrowserBundle.GetStringFromName("webNotifications.remember")
-    };
-
-    // In PB mode, the "always remember" checkbox should only remember for the
-    // session.
-    if (PrivateBrowsingUtils.isWindowPrivate(this.browser.ownerGlobal)) {
-      checkbox.label =
-        gBrowserBundle.GetStringFromName("webNotifications.rememberForSession");
-    }
-
     return {
       learnMoreURL,
-      checkbox,
       displayURI: false
     };
   },
@@ -577,20 +568,31 @@ DesktopNotificationPermissionPrompt.prototype = {
   },
 
   get promptActions() {
-    return [
+    let actions = [
       {
         label: gBrowserBundle.GetStringFromName("webNotifications.allow"),
         accessKey:
           gBrowserBundle.GetStringFromName("webNotifications.allow.accesskey"),
         action: SitePermissions.ALLOW,
+        scope: SitePermissions.SCOPE_PERSISTENT,
       },
       {
-        label: gBrowserBundle.GetStringFromName("webNotifications.dontAllow"),
+        label: gBrowserBundle.GetStringFromName("webNotifications.notNow"),
         accessKey:
-          gBrowserBundle.GetStringFromName("webNotifications.dontAllow.accesskey"),
+          gBrowserBundle.GetStringFromName("webNotifications.notNow.accesskey"),
         action: SitePermissions.BLOCK,
       },
     ];
+    if (!PrivateBrowsingUtils.isBrowserPrivate(this.browser)) {
+      actions.push({
+        label: gBrowserBundle.GetStringFromName("webNotifications.never"),
+        accessKey:
+          gBrowserBundle.GetStringFromName("webNotifications.never.accesskey"),
+        action: SitePermissions.BLOCK,
+        scope: SitePermissions.SCOPE_PERSISTENT,
+      });
+    }
+    return actions;
   },
 };
 

@@ -653,6 +653,9 @@ GetPrototypeNoProxy(JSObject* obj);
 JS_FRIEND_API(void)
 AssertSameCompartment(JSContext* cx, JSObject* obj);
 
+JS_FRIEND_API(void)
+AssertSameCompartment(JSContext* cx, JS::HandleValue v);
+
 #ifdef JS_DEBUG
 JS_FRIEND_API(void)
 AssertSameCompartment(JSObject* objA, JSObject* objB);
@@ -1160,9 +1163,9 @@ extern JS_FRIEND_API(unsigned)
 GetEnterCompartmentDepth(JSContext* cx);
 #endif
 
-class RegExpGuard;
 extern JS_FRIEND_API(bool)
-RegExpToSharedNonInline(JSContext* cx, JS::HandleObject regexp, RegExpGuard* shared);
+RegExpToSharedNonInline(JSContext* cx, JS::HandleObject regexp,
+                        JS::MutableHandle<RegExpShared*> shared);
 
 /* Implemented in CrossCompartmentWrapper.cpp. */
 typedef enum NukeReferencesToWindow {
@@ -2312,6 +2315,7 @@ struct JSJitInfo {
         Method,
         StaticMethod,
         InlinableNative,
+        IgnoresReturnValueNative,
         // Must be last
         OpTypeCount
     };
@@ -2403,7 +2407,12 @@ struct JSJitInfo {
         JSJitMethodOp method;
         /** A DOM static method, used for Promise wrappers */
         JSNative staticMethod;
+        JSNative ignoresReturnValueMethod;
     };
+
+    static unsigned offsetOfIgnoresReturnValueNative() {
+        return offsetof(JSJitInfo, ignoresReturnValueMethod);
+    }
 
     union {
         uint16_t protoID;

@@ -18,6 +18,7 @@
 #include "pk11pub.h"
 
 #include "nsNetCID.h"
+#include "nsILoadContext.h"
 #include "nsIProperty.h"
 #include "nsIPropertyBag2.h"
 #include "nsIServiceManager.h"
@@ -74,7 +75,7 @@
 #include "nsIURLParser.h"
 #include "nsIDOMDataChannel.h"
 #include "nsIDOMLocation.h"
-#include "nsNullPrincipal.h"
+#include "NullPrincipal.h"
 #include "mozilla/PeerIdentity.h"
 #include "mozilla/dom/RTCCertificate.h"
 #include "mozilla/dom/RTCConfigurationBinding.h"
@@ -1877,7 +1878,7 @@ PeerConnectionImpl::CreateNewRemoteTracks(RefPtr<PeerConnectionObserver>& aPco)
     } else {
       // we're either certain that we need isolation for the streams, OR
       // we're not sure and we can fix the stream in SetDtlsConnected
-      principal =  nsNullPrincipal::CreateWithInheritedAttributes(doc->NodePrincipal());
+      principal =  NullPrincipal::CreateWithInheritedAttributes(doc->NodePrincipal());
     }
 
     // We need to select unique ids, just use max + 1

@@ -72,6 +72,7 @@ class nsIImageLoadingContent;
 class nsIInterfaceRequestor;
 class nsIIOService;
 class nsILineBreaker;
+class nsILoadInfo;
 class nsILoadGroup;
 class nsIMessageBroadcaster;
 class nsNameSpaceManager;
@@ -115,6 +116,7 @@ template<class K, class V> class nsRefPtrHashtable;
 template<class T> class nsReadingIterator;
 
 namespace mozilla {
+class Dispatcher;
 class ErrorResult;
 class EventListenerManager;
 
@@ -1256,7 +1258,7 @@ public:
                                       bool *aDefaultAction = nullptr);
 
   /**
-   * Helper function for dispatching a "DOMServiceWorkerFocusClient" event to
+   * Helper function for dispatching a "DOMWindowFocus" event to
    * the chrome event handler of the given DOM Window. This has the effect
    * of focusing the corresponding tab and bringing the browser window
    * to the foreground.
@@ -1578,12 +1580,12 @@ public:
   static bool IsSystemPrincipal(nsIPrincipal* aPrincipal);
 
   /**
-   * Returns true if aPrincipal is an nsExpandedPrincipal.
+   * Returns true if aPrincipal is an ExpandedPrincipal.
    */
   static bool IsExpandedPrincipal(nsIPrincipal* aPrincipal);
 
   /**
-   * Returns true if aPrincipal is the system or an nsExpandedPrincipal.
+   * Returns true if aPrincipal is the system or an ExpandedPrincipal.
    */
   static bool IsSystemOrExpandedPrincipal(nsIPrincipal* aPrincipal)
   {
@@ -2791,6 +2793,32 @@ public:
 
   static bool
   IsWebComponentsEnabled() { return sIsWebComponentsEnabled; }
+
+  /**
+   * Walks up the tree from aElement until it finds an element that is
+   * not native anonymous content.  aElement must be NAC itself.
+   */
+  static Element* GetClosestNonNativeAnonymousAncestor(Element* aElement);
+
+  /**
+   * Returns one of the nsIObjectLoadingContent::TYPE_ values describing the
+   * content type which will be used for the given MIME type when loaded within
+   * an nsObjectLoadingContent.
+   *
+   * NOTE: This method doesn't take capabilities into account. The caller must
+   * take that into account.
+   *
+   * @param aMIMEType  The MIME type of the document being loaded.
+   * @param aContent The nsIContent object which is performing the load. May be
+   *                 nullptr in which case the docshell's plugin permissions
+   *                 will not be checked.
+   */
+  static uint32_t
+  HtmlObjectContentTypeForMIMEType(const nsCString& aMIMEType,
+                                   nsIContent* aContent);
+
+  static already_AddRefed<mozilla::Dispatcher>
+  GetDispatcherByLoadInfo(nsILoadInfo* aLoadInfo);
 
 private:
   static bool InitializeEventTable();

@@ -109,8 +109,8 @@ WMFVideoMFTManager::WMFVideoMFTManager(
                             layers::ImageContainer* aImageContainer,
                             bool aDXVAEnabled)
   : mVideoInfo(aConfig)
-  , mVideoStride(0)
   , mImageSize(aConfig.mImage)
+  , mVideoStride(0)
   , mImageContainer(aImageContainer)
   , mDXVAEnabled(aDXVAEnabled)
   , mKnowsCompositor(aKnowsCompositor)
@@ -384,10 +384,9 @@ FindD3D9BlacklistedDLL()
 class CreateDXVAManagerEvent : public Runnable
 {
 public:
-  CreateDXVAManagerEvent(LayersBackend aBackend,
-                         layers::KnowsCompositor* aKnowsCompositor,
+  CreateDXVAManagerEvent(layers::KnowsCompositor* aKnowsCompositor,
                          nsCString& aFailureReason)
-    : mBackend(aBackend)
+    : mBackend(LayersBackend::LAYERS_D3D11)
     , mKnowsCompositor(aKnowsCompositor)
     , mFailureReason(aFailureReason)
   {
@@ -435,7 +434,7 @@ public:
 };
 
 bool
-WMFVideoMFTManager::InitializeDXVA(bool aForceD3D9)
+WMFVideoMFTManager::InitializeDXVA()
 {
   // If we use DXVA but aren't running with a D3D layer manager then the
   // readback of decoded video frames from GPU to CPU memory grinds painting
@@ -447,17 +446,14 @@ WMFVideoMFTManager::InitializeDXVA(bool aForceD3D9)
   }
   MOZ_ASSERT(!mDXVA2Manager);
   LayersBackend backend = GetCompositorBackendType(mKnowsCompositor);
-  if (backend != LayersBackend::LAYERS_D3D9
-      && backend != LayersBackend::LAYERS_D3D11) {
+  if (backend != LayersBackend::LAYERS_D3D11) {
     mDXVAFailureReason.AssignLiteral("Unsupported layers backend");
     return false;
   }
 
   // The DXVA manager must be created on the main thread.
   RefPtr<CreateDXVAManagerEvent> event =
-    new CreateDXVAManagerEvent(aForceD3D9 ? LayersBackend::LAYERS_D3D9
-                                          : backend,
-                               mKnowsCompositor,
+    new CreateDXVAManagerEvent(mKnowsCompositor,
                                mDXVAFailureReason);
 
   if (NS_IsMainThread()) {
@@ -499,7 +495,7 @@ WMFVideoMFTManager::Init()
     return false;
   }
 
-  bool success = InitInternal(/* aForceD3D9 = */ false);
+  bool success = InitInternal();
 
   if (success && mDXVA2Manager) {
     // If we had some failures but eventually made it work,
@@ -515,10 +511,10 @@ WMFVideoMFTManager::Init()
 }
 
 bool
-WMFVideoMFTManager::InitInternal(bool aForceD3D9)
+WMFVideoMFTManager::InitInternal()
 {
   mUseHwAccel = false; // default value; changed if D3D setup succeeds.
-  bool useDxva = InitializeDXVA(aForceD3D9);
+  bool useDxva = InitializeDXVA();
 
   RefPtr<MFTDecoder> decoder(new MFTDecoder());
 
@@ -576,8 +572,35 @@ WMFVideoMFTManager::InitInternal(bool aForceD3D9)
   hr = SetDecoderMediaTypes();
   NS_ENSURE_TRUE(SUCCEEDED(hr), false);
 
+  RefPtr<IMFMediaType> outputType;
+  hr = mDecoder->GetOutputMediaType(outputType);
+  NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
+
+  if (mUseHwAccel && !CanUseDXVA(outputType)) {
+    mDXVAEnabled = false;
+    // DXVA initialization actually failed, re-do initialisation.
+    return InitInternal();
+  }
+
   LOG("Video Decoder initialized, Using DXVA: %s",
       (mUseHwAccel ? "Yes" : "No"));
+
+  if (mDXVA2Manager) {
+    hr = mDXVA2Manager->ConfigureForSize(mVideoInfo.ImageRect().width,
+                                         mVideoInfo.ImageRect().height);
+    NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
+  } else {
+    GetDefaultStride(outputType, mVideoInfo.ImageRect().width, &mVideoStride);
+  }
+  LOG("WMFVideoMFTManager frame geometry stride=%u picture=(%d, %d, %d, %d) "
+      "display=(%d,%d)",
+      mVideoStride,
+      mVideoInfo.ImageRect().x,
+      mVideoInfo.ImageRect().y,
+      mVideoInfo.ImageRect().width,
+      mVideoInfo.ImageRect().height,
+      mVideoInfo.mDisplay.width,
+      mVideoInfo.mDisplay.height);
 
   return true;
 }
@@ -600,24 +623,26 @@ WMFVideoMFTManager::SetDecoderMediaTypes()
                             MFVideoInterlace_MixedInterlaceOrProgressive);
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
-  // MSFT MFT needs this frame size set for VP9?
-  if (mStreamType == VP9 || mStreamType == VP8) {
-    hr =
-      inputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-    NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
+  hr = inputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+  NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
-    hr = MFSetAttributeSize(inputType,
-                            MF_MT_FRAME_SIZE,
-                            mVideoInfo.ImageRect().width,
-                            mVideoInfo.ImageRect().height);
-    NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
-  }
+  hr = MFSetAttributeSize(inputType,
+                          MF_MT_FRAME_SIZE,
+                          mVideoInfo.ImageRect().width,
+                          mVideoInfo.ImageRect().height);
+  NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
   RefPtr<IMFMediaType> outputType;
   hr = wmf::MFCreateMediaType(getter_AddRefs(outputType));
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
   hr = outputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+  NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
+
+  hr = MFSetAttributeSize(outputType,
+                          MF_MT_FRAME_SIZE,
+                          mVideoInfo.ImageRect().width,
+                          mVideoInfo.ImageRect().height);
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
   GUID outputSubType = mUseHwAccel ? MFVideoFormat_NV12 : MFVideoFormat_YV12;
@@ -639,18 +664,19 @@ WMFVideoMFTManager::Input(MediaRawData* aSample)
     return E_FAIL;
   }
 
+  RefPtr<IMFSample> inputSample;
   HRESULT hr = mDecoder->CreateInputSample(aSample->Data(),
                                            uint32_t(aSample->Size()),
                                            aSample->mTime,
-                                           &mLastInput);
-  NS_ENSURE_TRUE(SUCCEEDED(hr) && mLastInput != nullptr, hr);
+                                           &inputSample);
+  NS_ENSURE_TRUE(SUCCEEDED(hr) && inputSample != nullptr, hr);
 
   mLastDuration = aSample->mDuration;
   mLastTime = aSample->mTime;
   mSamplesCount++;
 
   // Forward sample data to the decoder.
-  return mDecoder->Input(mLastInput);
+  return mDecoder->Input(inputSample);
 }
 
 class SupportsConfigEvent : public Runnable {
@@ -721,69 +747,6 @@ WMFVideoMFTManager::CanUseDXVA(IMFMediaType* aType)
   return event->mSupportsConfig;
 }
 
-HRESULT
-WMFVideoMFTManager::ConfigureVideoFrameGeometry()
-{
-  RefPtr<IMFMediaType> mediaType;
-  HRESULT hr = mDecoder->GetOutputMediaType(mediaType);
-  NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
-
-  // If we enabled/disabled DXVA in response to a resolution
-  // change then we need to renegotiate our media types,
-  // and resubmit our previous frame (since the MFT appears
-  // to lose it otherwise).
-  if (mUseHwAccel && !CanUseDXVA(mediaType)) {
-    mDXVAEnabled = false;
-    if (!Init()) {
-      return E_FAIL;
-    }
-
-    mDecoder->Input(mLastInput);
-    return S_OK;
-  }
-
-  // Verify that the video subtype is what we expect it to be.
-  // When using hardware acceleration/DXVA2 the video format should
-  // be NV12, which is DXVA2's preferred format. For software decoding
-  // we use YV12, as that's easier for us to stick into our rendering
-  // pipeline than NV12. NV12 has interleaved UV samples, whereas YV12
-  // is a planar format.
-  GUID videoFormat;
-  hr = mediaType->GetGUID(MF_MT_SUBTYPE, &videoFormat);
-  NS_ENSURE_TRUE(videoFormat == MFVideoFormat_NV12 || !mUseHwAccel, E_FAIL);
-  NS_ENSURE_TRUE(videoFormat == MFVideoFormat_YV12 || mUseHwAccel, E_FAIL);
-
-  nsIntRect pictureRegion;
-  hr = GetPictureRegion(mediaType, pictureRegion);
-  NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
-
-  UINT32 width = pictureRegion.width;
-  UINT32 height = pictureRegion.height;
-  mImageSize = nsIntSize(width, height);
-  // Calculate and validate the picture region and frame dimensions after
-  // scaling by the pixel aspect ratio.
-  pictureRegion = mVideoInfo.ScaledImageRect(width, height);
-  if (!IsValidVideoRegion(mImageSize, pictureRegion, mVideoInfo.mDisplay)) {
-    // Video track's frame sizes will overflow. Ignore the video track.
-    return E_FAIL;
-  }
-
-  if (mDXVA2Manager) {
-    hr = mDXVA2Manager->ConfigureForSize(width, height);
-    NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
-  }
-
-  // Success! Save state.
-  GetDefaultStride(mediaType, width, &mVideoStride);
-
-  LOG("WMFVideoMFTManager frame geometry frame=(%u,%u) stride=%u picture=(%d, %d, %d, %d) display=(%d,%d)",
-      width, height,
-      mVideoStride,
-      pictureRegion.x, pictureRegion.y, pictureRegion.width, pictureRegion.height,
-      mVideoInfo.mDisplay.width, mVideoInfo.mDisplay.height);
-
-  return S_OK;
-}
 
 HRESULT
 WMFVideoMFTManager::CreateBasicVideoFrame(IMFSample* aSample,
@@ -869,8 +832,7 @@ WMFVideoMFTManager::CreateBasicVideoFrame(IMFSample* aSample,
   nsIntRect pictureRegion = mVideoInfo.ScaledImageRect(videoWidth, videoHeight);
 
   LayersBackend backend = GetCompositorBackendType(mKnowsCompositor);
-  if (backend != LayersBackend::LAYERS_D3D9 &&
-      backend != LayersBackend::LAYERS_D3D11) {
+  if (backend != LayersBackend::LAYERS_D3D11) {
     RefPtr<VideoData> v =
       VideoData::CreateAndCopyData(mVideoInfo,
                                    mImageContainer,
@@ -978,13 +940,25 @@ WMFVideoMFTManager::Output(int64_t aStreamOffset,
     if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
       return MF_E_TRANSFORM_NEED_MORE_INPUT;
     }
+
     if (hr == MF_E_TRANSFORM_STREAM_CHANGE) {
-      // Video stream output type change. Probably a geometric apperature
-      // change. Reconfigure the video geometry, so that we output the
-      // correct size frames.
       MOZ_ASSERT(!sample);
-      hr = ConfigureVideoFrameGeometry();
+      // Video stream output type change, probably geometric aperture change.
+      // We must reconfigure the decoder output type.
+      hr = mDecoder->SetDecoderOutputType(false /* check all attribute */,
+                                          nullptr,
+                                          nullptr);
       NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
+
+      if (!mUseHwAccel) {
+        // The stride may have changed, recheck for it.
+        RefPtr<IMFMediaType> outputType;
+        hr = mDecoder->GetOutputMediaType(outputType);
+        NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
+        hr = GetDefaultStride(outputType, mVideoInfo.ImageRect().width,
+                              &mVideoStride);
+        NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
+      }
       // Catch infinite loops, but some decoders perform at least 2 stream
       // changes on consecutive calls, so be permissive.
       // 100 is arbitrarily > 2.
@@ -993,6 +967,7 @@ WMFVideoMFTManager::Output(int64_t aStreamOffset,
       ++typeChangeCount;
       continue;
     }
+
     if (SUCCEEDED(hr)) {
       if (!sample) {
         LOG("Video MFTDecoder returned success but no output!");

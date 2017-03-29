@@ -690,12 +690,8 @@ nsFrame::DestroyFrom(nsIFrame* aDestructRoot)
     }
   }
 
-  // Get the view pointer now before the frame properties disappear
-  // when we call NotifyDestroyingFrame()
-  nsView* view = GetView();
   nsPresContext* presContext = PresContext();
-
-  nsIPresShell *shell = presContext->GetPresShell();
+  nsIPresShell* shell = presContext->GetPresShell();
   if (mState & NS_FRAME_OUT_OF_FLOW) {
     nsPlaceholderFrame* placeholder =
       shell->FrameManager()->GetPlaceholderFrameFor(this);
@@ -785,11 +781,9 @@ nsFrame::DestroyFrom(nsIFrame* aDestructRoot)
     shell->ClearFrameRefs(this);
   }
 
+  nsView* view = GetView();
   if (view) {
-    // Break association between view and frame
     view->SetFrame(nullptr);
-
-    // Destroy the view
     view->Destroy();
   }
 
@@ -879,7 +873,7 @@ AddAndRemoveImageAssociations(nsFrame* aFrame,
 /* virtual */ void
 nsFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 {
-  if (IsSVGText()) {
+  if (nsSVGUtils::IsInSVGTextSubtree(this)) {
     SVGTextFrame* svgTextFrame = static_cast<SVGTextFrame*>(
         nsLayoutUtils::GetClosestFrameOfType(this, nsGkAtoms::svgTextFrame));
     nsIFrame* anonBlock = svgTextFrame->PrincipalChildList().FirstChild();
@@ -986,6 +980,120 @@ nsFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
   RemoveStateBits(NS_FRAME_SIMPLE_EVENT_REGIONS);
 }
 
+void
+nsIFrame::ReparentFrameViewTo(nsViewManager* aViewManager,
+                              nsView*        aNewParentView,
+                              nsView*        aOldParentView)
+{
+  if (HasView()) {
+#ifdef MOZ_XUL
+    if (GetType() == nsGkAtoms::menuPopupFrame) {
+      // This view must be parented by the root view, don't reparent it.
+      return;
+    }
+#endif
+    nsView* view = GetView();
+    // Verify that the current parent view is what we think it is
+    //nsView*  parentView;
+    //NS_ASSERTION(parentView == aOldParentView, "unexpected parent view");
+
+    aViewManager->RemoveChild(view);
+    
+    // The view will remember the Z-order and other attributes that have been set on it.
+    nsView* insertBefore = nsLayoutUtils::FindSiblingViewFor(aNewParentView, this);
+    aViewManager->InsertChild(aNewParentView, view, insertBefore, insertBefore != nullptr);
+  } else if (GetStateBits() & NS_FRAME_HAS_CHILD_WITH_VIEW) {
+    nsIFrame::ChildListIterator lists(this);
+    for (; !lists.IsDone(); lists.Next()) {
+      // Iterate the child frames, and check each child frame to see if it has
+      // a view
+      nsFrameList::Enumerator childFrames(lists.CurrentList());
+      for (; !childFrames.AtEnd(); childFrames.Next()) {
+        childFrames.get()->ReparentFrameViewTo(aViewManager, aNewParentView,
+                                               aOldParentView);
+      }
+    }
+  }
+}
+
+void
+nsIFrame::SyncFrameViewProperties(nsView* aView)
+{
+  if (!aView) {
+    aView = GetView();
+    if (!aView) {
+      return;
+    }
+  }
+
+  nsViewManager* vm = aView->GetViewManager();
+
+  // Make sure visibility is correct. This only affects nsSubDocumentFrame.
+  if (!SupportsVisibilityHidden()) {
+    // See if the view should be hidden or visible
+    nsStyleContext* sc = StyleContext();
+    vm->SetViewVisibility(aView,
+        sc->StyleVisibility()->IsVisible()
+            ? nsViewVisibility_kShow : nsViewVisibility_kHide);
+  }
+
+  int32_t zIndex = 0;
+  bool    autoZIndex = false;
+
+  if (IsAbsPosContainingBlock()) {
+    // Make sure z-index is correct
+    nsStyleContext* sc = StyleContext();
+    const nsStylePosition* position = sc->StylePosition();
+    if (position->mZIndex.GetUnit() == eStyleUnit_Integer) {
+      zIndex = position->mZIndex.GetIntValue();
+    } else if (position->mZIndex.GetUnit() == eStyleUnit_Auto) {
+      autoZIndex = true;
+    }
+  } else {
+    autoZIndex = true;
+  }
+
+  vm->SetViewZIndex(aView, autoZIndex, zIndex);
+}
+
+void
+nsFrame::CreateView()
+{
+  MOZ_ASSERT(!HasView());
+
+  nsView* parentView = GetParent()->GetClosestView();
+  MOZ_ASSERT(parentView, "no parent with view");
+
+  nsViewManager* viewManager = parentView->GetViewManager();
+  MOZ_ASSERT(viewManager, "null view manager");
+
+  nsView* view = viewManager->CreateView(GetRect(), parentView);
+  SyncFrameViewProperties(view);
+
+  nsView* insertBefore = nsLayoutUtils::FindSiblingViewFor(parentView, this);
+  // we insert this view 'above' the insertBefore view, unless insertBefore is null,
+  // in which case we want to call with aAbove == false to insert at the beginning
+  // in document order
+  viewManager->InsertChild(parentView, view, insertBefore, insertBefore != nullptr);
+
+  // REVIEW: Don't create a widget for fixed-pos elements anymore.
+  // ComputeRepaintRegionForCopy will calculate the right area to repaint
+  // when we scroll.
+  // Reparent views on any child frames (or their descendants) to this
+  // view. We can just call ReparentFrameViewTo on this frame because
+  // we know this frame has no view, so it will crawl the children. Also,
+  // we know that any descendants with views must have 'parentView' as their
+  // parent view.
+  ReparentFrameViewTo(viewManager, view, parentView);
+
+  // Remember our view
+  SetView(view);
+
+  NS_FRAME_LOG(NS_FRAME_TRACE_CALLS,
+               ("nsFrame::CreateView: frame=%p view=%p",
+                this, view));
+}
+
 // MSVC fails with link error "one or more multiply defined symbols found",
 // gcc fails with "hidden symbol `nsIFrame::kPrincipalList' isn't defined"
 // etc if they are not defined.
@@ -1014,7 +1122,7 @@ nsIFrame::GetUsedMargin() const
   nsMargin margin(0, 0, 0, 0);
   if (((mState & NS_FRAME_FIRST_REFLOW) &&
        !(mState & NS_FRAME_IN_REFLOW)) ||
-      IsSVGText())
+      nsSVGUtils::IsInSVGTextSubtree(this))
     return margin;
 
   nsMargin *m = Properties().Get(UsedMarginProperty());
@@ -1036,7 +1144,7 @@ nsIFrame::GetUsedBorder() const
   nsMargin border(0, 0, 0, 0);
   if (((mState & NS_FRAME_FIRST_REFLOW) &&
        !(mState & NS_FRAME_IN_REFLOW)) ||
-      IsSVGText())
+      nsSVGUtils::IsInSVGTextSubtree(this))
     return border;
 
   // Theme methods don't use const-ness.
@@ -1047,7 +1155,7 @@ nsIFrame::GetUsedBorder() const
     nsIntMargin result;
     nsPresContext *presContext = PresContext();
     presContext->GetTheme()->GetWidgetBorder(presContext->DeviceContext(),
-                                             mutable_this, disp->mAppearance,
+                                             mutable_this, disp->UsedAppearance(),
                                              &result);
     border.left = presContext->DevPixelsToAppUnits(result.left);
     border.top = presContext->DevPixelsToAppUnits(result.top);
@@ -1071,7 +1179,7 @@ nsIFrame::GetUsedPadding() const
   nsMargin padding(0, 0, 0, 0);
   if (((mState & NS_FRAME_FIRST_REFLOW) &&
        !(mState & NS_FRAME_IN_REFLOW)) ||
-      IsSVGText())
+      nsSVGUtils::IsInSVGTextSubtree(this))
     return padding;
 
   // Theme methods don't use const-ness.
@@ -1083,7 +1191,7 @@ nsIFrame::GetUsedPadding() const
     nsIntMargin widget;
     if (presContext->GetTheme()->GetWidgetPadding(presContext->DeviceContext(),
                                                   mutable_this,
-                                                  disp->mAppearance,
+                                                  disp->UsedAppearance(),
                                                   &widget)) {
       padding.top = presContext->DevPixelsToAppUnits(widget.top);
       padding.right = presContext->DevPixelsToAppUnits(widget.right);
@@ -1499,13 +1607,13 @@ nsIFrame::GetShapeBoxBorderRadii(nscoord aRadii[8]) const
   switch (StyleDisplay()->mShapeOutside.GetReferenceBox()) {
     case StyleGeometryBox::NoBox:
       return false;
-    case StyleGeometryBox::Content:
+    case StyleGeometryBox::ContentBox:
       return GetContentBoxBorderRadii(aRadii);
-    case StyleGeometryBox::Padding:
+    case StyleGeometryBox::PaddingBox:
       return GetPaddingBoxBorderRadii(aRadii);
-    case StyleGeometryBox::Border:
+    case StyleGeometryBox::BorderBox:
       return GetBorderRadii(aRadii);
-    case StyleGeometryBox::Margin:
+    case StyleGeometryBox::MarginBox:
       return GetMarginBoxBorderRadii(aRadii);
     default:
       MOZ_ASSERT_UNREACHABLE("Unexpected box value");
@@ -1909,7 +2017,7 @@ void
 nsFrame::DisplayOutlineUnconditional(nsDisplayListBuilder*   aBuilder,
                                      const nsDisplayListSet& aLists)
 {
-  if (StyleOutline()->mOutlineStyle == NS_STYLE_BORDER_STYLE_NONE) {
+  if (!StyleOutline()->ShouldPaintOutline()) {
     return;
   }
 
@@ -1952,7 +2060,7 @@ nsFrame::DisplayBackgroundUnconditional(nsDisplayListBuilder* aBuilder,
   // receive a propagated background should just set aForceBackground to
   // true.
   if (aBuilder->IsForEventDelivery() || aForceBackground ||
-      !StyleBackground()->IsTransparent(this) || StyleDisplay()->mAppearance) {
+      !StyleBackground()->IsTransparent(this) || StyleDisplay()->UsedAppearance()) {
     return nsDisplayBackgroundImage::AppendBackgroundItemsToTop(
         aBuilder, this, GetRectRelativeToSelf(), aLists.BorderBackground());
   }
@@ -2876,7 +2984,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
   // REVIEW: Taken from nsBoxFrame::Paint
   // Don't paint our children if the theme object is a leaf.
   if (IsThemed(ourDisp) &&
-      !PresContext()->GetTheme()->WidgetIsContainer(ourDisp->mAppearance))
+      !PresContext()->GetTheme()->WidgetIsContainer(ourDisp->UsedAppearance()))
     return;
 
   // Since we're now sure that we're adding this frame to the display list
@@ -4279,7 +4387,7 @@ static FrameTarget GetSelectionClosestFrame(nsIFrame* aFrame, nsPoint aPoint,
       kid->FindCloserFrameForSelection(aPoint, &closest);
     }
     if (closest.mFrame) {
-      if (closest.mFrame->IsSVGText())
+      if (nsSVGUtils::IsInSVGTextSubtree(closest.mFrame))
         return FrameTarget(closest.mFrame, false, false);
       return GetSelectionClosestFrameForChild(closest.mFrame, aPoint, aFlags);
     }
@@ -4410,7 +4518,7 @@ nsIFrame::ContentOffsets nsIFrame::GetContentOffsetsFromPoint(nsPoint aPoint,
 
   nsPoint pt;
   if (closest.frame != this) {
-    if (closest.frame->IsSVGText()) {
+    if (nsSVGUtils::IsInSVGTextSubtree(closest.frame)) {
       pt = nsLayoutUtils::TransformAncestorPointToFrame(closest.frame,
                                                         aPoint, this);
     } else {
@@ -4776,7 +4884,7 @@ IntrinsicSizeOffsets(nsIFrame* aFrame, bool aForISize)
 
     nsIntMargin border;
     presContext->GetTheme()->GetWidgetBorder(presContext->DeviceContext(),
-                                             aFrame, disp->mAppearance,
+                                             aFrame, disp->UsedAppearance(),
                                              &border);
     result.hBorder =
       presContext->DevPixelsToAppUnits(verticalAxis ? border.TopBottom()
@@ -4784,7 +4892,7 @@ IntrinsicSizeOffsets(nsIFrame* aFrame, bool aForISize)
 
     nsIntMargin padding;
     if (presContext->GetTheme()->GetWidgetPadding(presContext->DeviceContext(),
-                                                  aFrame, disp->mAppearance,
+                                                  aFrame, disp->UsedAppearance(),
                                                   &padding)) {
       result.hPadding =
         presContext->DevPixelsToAppUnits(verticalAxis ? padding.TopBottom()
@@ -5056,7 +5164,7 @@ nsFrame::ComputeSize(nsRenderingContext* aRenderingContext,
     bool canOverride = true;
     nsPresContext *presContext = PresContext();
     presContext->GetTheme()->
-      GetMinimumWidgetSize(presContext, this, disp->mAppearance,
+      GetMinimumWidgetSize(presContext, this, disp->UsedAppearance(),
                            &widget, &canOverride);
 
     // Convert themed widget's physical dimensions to logical coords
@@ -5183,7 +5291,7 @@ nsFrame::ComputeSizeWithIntrinsicDimensions(nsRenderingContext*  aRenderingConte
   nscoord iSize, minISize, maxISize, bSize, minBSize, maxBSize;
   enum class Stretch {
     // stretch to fill the CB (preserving intrinsic ratio) in the relevant axis
-    eStretchPreservingRatio,
+    eStretchPreservingRatio, // XXX not used yet
     // stretch to fill the CB in the relevant axis
     eStretch,
     // no stretching in the relevant axis
@@ -5196,6 +5304,35 @@ nsFrame::ComputeSizeWithIntrinsicDimensions(nsRenderingContext*  aRenderingConte
 
   Stretch stretchI = eNoStretch; // stretch behavior in the inline axis
   Stretch stretchB = eNoStretch; // stretch behavior in the block axis
+
+  const bool isVertical = aWM.IsVertical();
+  const nsStyleCoord& isizeCoord =
+    isVertical ? aIntrinsicSize.height : aIntrinsicSize.width;
+  const bool hasIntrinsicISize = isizeCoord.GetUnit() == eStyleUnit_Coord;
+  nscoord intrinsicISize;
+  if (hasIntrinsicISize) {
+    intrinsicISize = std::max(nscoord(0), isizeCoord.GetCoordValue());
+  } else {
+    NS_ASSERTION(isizeCoord.GetUnit() == eStyleUnit_None,
+                 "unexpected unit");
+    intrinsicISize = 0;
+  }
+
+  const nsStyleCoord& bsizeCoord =
+    isVertical ? aIntrinsicSize.width : aIntrinsicSize.height;
+  const bool hasIntrinsicBSize = bsizeCoord.GetUnit() == eStyleUnit_Coord;
+  nscoord intrinsicBSize;
+  if (hasIntrinsicBSize) {
+    intrinsicBSize = std::max(nscoord(0), bsizeCoord.GetCoordValue());
+  } else {
+    NS_ASSERTION(bsizeCoord.GetUnit() == eStyleUnit_None,
+                 "unexpected unit");
+    intrinsicBSize = 0;
+  }
+
+  NS_ASSERTION(aIntrinsicRatio.width >= 0 && aIntrinsicRatio.height >= 0,
+               "Intrinsic ratio has a negative component!");
+  LogicalSize logicalRatio(aWM, aIntrinsicRatio);
 
   if (!isAutoISize) {
     iSize = ComputeISizeValue(aRenderingContext,
@@ -5211,9 +5348,13 @@ nsFrame::ComputeSizeWithIntrinsicDimensions(nsRenderingContext*  aRenderingConte
           aWM.IsOrthogonalTo(GetParent()->GetWritingMode()) ?
             stylePos->UsedAlignSelf(GetParent()->StyleContext()) :
             stylePos->UsedJustifySelf(GetParent()->StyleContext());
-        if (inlineAxisAlignment == NS_STYLE_ALIGN_NORMAL) {
-          stretchI = eStretchPreservingRatio;
-        } else if (inlineAxisAlignment == NS_STYLE_ALIGN_STRETCH) {
+        // Note: 'normal' means 'start' for elements with an intrinsic size
+        // or ratio in the relevant dimension, otherwise 'stretch'.
+        // https://drafts.csswg.org/css-grid/#grid-item-sizing
+        if ((inlineAxisAlignment == NS_STYLE_ALIGN_NORMAL &&
+             !hasIntrinsicISize &&
+             !(logicalRatio.ISize(aWM) > 0)) ||
+            inlineAxisAlignment == NS_STYLE_ALIGN_STRETCH) {
           stretchI = eStretch;
         }
       }
@@ -5276,9 +5417,13 @@ nsFrame::ComputeSizeWithIntrinsicDimensions(nsRenderingContext*  aRenderingConte
           !aWM.IsOrthogonalTo(GetParent()->GetWritingMode()) ?
             stylePos->UsedAlignSelf(GetParent()->StyleContext()) :
             stylePos->UsedJustifySelf(GetParent()->StyleContext());
-        if (blockAxisAlignment == NS_STYLE_ALIGN_NORMAL) {
-          stretchB = eStretchPreservingRatio;
-        } else if (blockAxisAlignment == NS_STYLE_ALIGN_STRETCH) {
+        // Note: 'normal' means 'start' for elements with an intrinsic size
+        // or ratio in the relevant dimension, otherwise 'stretch'.
+        // https://drafts.csswg.org/css-grid/#grid-item-sizing
+        if ((blockAxisAlignment == NS_STYLE_ALIGN_NORMAL &&
+             !hasIntrinsicBSize &&
+             !(logicalRatio.BSize(aWM) > 0)) ||
+            blockAxisAlignment == NS_STYLE_ALIGN_STRETCH) {
           stretchB = eStretch;
         }
       }
@@ -5316,47 +5461,8 @@ nsFrame::ComputeSizeWithIntrinsicDimensions(nsRenderingContext*  aRenderingConte
     minBSize = 0;
   }
 
-  // Resolve percentage intrinsic iSize/bSize as necessary:
-
   NS_ASSERTION(aCBSize.ISize(aWM) != NS_UNCONSTRAINEDSIZE,
                "Our containing block must not have unconstrained inline-size!");
-
-  const bool isVertical = aWM.IsVertical();
-  const nsStyleCoord& isizeCoord =
-    isVertical ? aIntrinsicSize.height : aIntrinsicSize.width;
-  const nsStyleCoord& bsizeCoord =
-    isVertical ? aIntrinsicSize.width : aIntrinsicSize.height;
-
-  bool hasIntrinsicISize, hasIntrinsicBSize;
-  nscoord intrinsicISize, intrinsicBSize;
-
-  if (isizeCoord.GetUnit() == eStyleUnit_Coord) {
-    hasIntrinsicISize = true;
-    intrinsicISize = isizeCoord.GetCoordValue();
-    if (intrinsicISize < 0)
-      intrinsicISize = 0;
-  } else {
-    NS_ASSERTION(isizeCoord.GetUnit() == eStyleUnit_None,
-                 "unexpected unit");
-    hasIntrinsicISize = false;
-    intrinsicISize = 0;
-  }
-
-  if (bsizeCoord.GetUnit() == eStyleUnit_Coord) {
-    hasIntrinsicBSize = true;
-    intrinsicBSize = bsizeCoord.GetCoordValue();
-    if (intrinsicBSize < 0)
-      intrinsicBSize = 0;
-  } else {
-    NS_ASSERTION(bsizeCoord.GetUnit() == eStyleUnit_None,
-                 "unexpected unit");
-    hasIntrinsicBSize = false;
-    intrinsicBSize = 0;
-  }
-
-  NS_ASSERTION(aIntrinsicRatio.width >= 0 && aIntrinsicRatio.height >= 0,
-               "Intrinsic ratio has a negative component!");
-  LogicalSize logicalRatio(aWM, aIntrinsicRatio);
 
   // Now calculate the used values for iSize and bSize:
 
@@ -5516,9 +5622,9 @@ nsIFrame::ComputeTightBounds(DrawTarget* aDrawTarget) const
 nsRect
 nsFrame::ComputeSimpleTightBounds(DrawTarget* aDrawTarget) const
 {
-  if (StyleOutline()->mOutlineStyle != NS_STYLE_BORDER_STYLE_NONE ||
-      StyleBorder()->HasBorder() || !StyleBackground()->IsTransparent(this) ||
-      StyleDisplay()->mAppearance) {
+  if (StyleOutline()->ShouldPaintOutline() || StyleBorder()->HasBorder() ||
+      !StyleBackground()->IsTransparent(this) ||
+      StyleDisplay()->UsedAppearance()) {
     // Not necessarily tight, due to clipping, negative
     // outline-offset, and lots of other issues, but that's OK
     return GetVisualOverflowRect();
@@ -5852,23 +5958,8 @@ nsIFrame* nsIFrame::GetTailContinuation()
   return frame;
 }
 
-NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(ViewProperty, nsView)
-
 // Associated view object
-nsView*
-nsIFrame::GetView() const
-{
-  // Check the frame state bit and see if the frame has a view
-  if (!(GetStateBits() & NS_FRAME_HAS_VIEW))
-    return nullptr;
-
-  // Check for a property on the frame
-  nsView* value = Properties().Get(ViewProperty());
-  NS_ASSERTION(value, "frame state bit was set but frame has no view");
-  return value;
-}
-
-nsresult
+void
 nsIFrame::SetView(nsView* aView)
 {
   if (aView) {
@@ -5876,8 +5967,7 @@ nsIFrame::SetView(nsView* aView)
 
 #ifdef DEBUG
     nsIAtom* frameType = GetType();
-    NS_ASSERTION(frameType == nsGkAtoms::scrollFrame ||
-                 frameType == nsGkAtoms::subDocumentFrame ||
+    NS_ASSERTION(frameType == nsGkAtoms::subDocumentFrame ||
                  frameType == nsGkAtoms::listControlFrame ||
                  frameType == nsGkAtoms::objectFrame ||
                  frameType == nsGkAtoms::viewportFrame ||
@@ -5885,8 +5975,8 @@ nsIFrame::SetView(nsView* aView)
                  "Only specific frame types can have an nsView");
 #endif
 
-    // Set a property on the frame
-    Properties().Set(ViewProperty(), aView);
+    // Store the view on the frame.
+    SetViewInternal(aView);
 
     // Set the frame state bit that says the frame has a view
     AddStateBits(NS_FRAME_HAS_VIEW);
@@ -5896,9 +5986,11 @@ nsIFrame::SetView(nsView* aView)
          f && !(f->GetStateBits() & NS_FRAME_HAS_CHILD_WITH_VIEW);
          f = f->GetParent())
       f->AddStateBits(NS_FRAME_HAS_CHILD_WITH_VIEW);
+  } else {
+    MOZ_ASSERT_UNREACHABLE("Destroying a view while the frame is alive?");
+    RemoveStateBits(NS_FRAME_HAS_VIEW);
+    SetViewInternal(nullptr);
   }
-
-  return NS_OK;
 }
 
 // Find the first geometric parent that has a view
@@ -6997,13 +7089,15 @@ nsIFrame::ListGeneric(nsACString& aTo, const char* aPrefix, uint32_t aFlags) con
       pseudoTag->ToString(atomString);
       aTo += nsPrintfCString("%s", NS_LossyConvertUTF16toASCII(atomString).get());
     }
-    if (!mStyleContext->GetParent() ||
-        (GetParent() && GetParent()->StyleContext() != mStyleContext->GetParent())) {
-      aTo += nsPrintfCString("^%p", mStyleContext->GetParent());
-      if (mStyleContext->GetParent()) {
-        aTo += nsPrintfCString("^%p", mStyleContext->GetParent()->GetParent());
-        if (mStyleContext->GetParent()->GetParent()) {
-          aTo += nsPrintfCString("^%p", mStyleContext->GetParent()->GetParent()->GetParent());
+    if (mStyleContext->StyleSource().IsGeckoRuleNodeOrNull()) {
+      if (!mStyleContext->GetParent() ||
+          (GetParent() && GetParent()->StyleContext() != mStyleContext->GetParent())) {
+        aTo += nsPrintfCString("^%p", mStyleContext->GetParent());
+        if (mStyleContext->GetParent()) {
+          aTo += nsPrintfCString("^%p", mStyleContext->GetParent()->GetParent());
+          if (mStyleContext->GetParent()->GetParent()) {
+            aTo += nsPrintfCString("^%p", mStyleContext->GetParent()->GetParent()->GetParent());
+          }
         }
       }
     }
@@ -8608,12 +8702,18 @@ UnionBorderBoxes(nsIFrame* aFrame, bool aApplyTransform,
   // we expect, we need to make them narrow to their children's outline.
   // aOutValid is set to false if the returned nsRect is not valid
   // and should not be included in the outline rectangle.
-  aOutValid = !aFrame->IsFrameOfType(nsIFrame::eSVGContainer)
+  aOutValid = !(aFrame->GetStateBits() & NS_FRAME_SVG_LAYOUT)
+              || !aFrame->IsFrameOfType(nsIFrame::eSVGContainer)
               || aFrame->GetType() == nsGkAtoms::svgTextFrame;
+
+  nsRect u;
+
+  if (!aFrame->FrameMaintainsOverflow()) {
+    return u;
+  }
 
   // Start from our border-box, transformed.  See comment below about
   // transform of children.
-  nsRect u;
   bool doTransform = aApplyTransform && aFrame->IsTransformed();
   if (doTransform) {
     u = nsDisplayTransform::TransformRect(bounds, aFrame, &bounds);
@@ -8713,13 +8813,7 @@ ComputeAndIncludeOutlineArea(nsIFrame* aFrame, nsOverflowAreas& aOverflowAreas,
                              const nsSize& aNewSize)
 {
   const nsStyleOutline* outline = aFrame->StyleOutline();
-  const uint8_t outlineStyle = outline->mOutlineStyle;
-  if (outlineStyle == NS_STYLE_BORDER_STYLE_NONE) {
-    return;
-  }
-
-  nscoord width = outline->GetOutlineWidth();
-  if (width <= 0 && outlineStyle != NS_STYLE_BORDER_STYLE_AUTO) {
+  if (!outline->ShouldPaintOutline()) {
     return;
   }
 
@@ -8781,7 +8875,7 @@ ComputeAndIncludeOutlineArea(nsIFrame* aFrame, nsOverflowAreas& aOverflowAreas,
   nsRect outerRect(innerRect);
   bool useOutlineAuto = false;
   if (nsLayoutUtils::IsOutlineStyleAutoEnabled()) {
-    useOutlineAuto = outlineStyle == NS_STYLE_BORDER_STYLE_AUTO;
+    useOutlineAuto = outline->mOutlineStyle == NS_STYLE_BORDER_STYLE_AUTO;
     if (MOZ_UNLIKELY(useOutlineAuto)) {
       nsPresContext* presContext = aFrame->PresContext();
       nsITheme* theme = presContext->GetTheme();
@@ -8796,6 +8890,7 @@ ComputeAndIncludeOutlineArea(nsIFrame* aFrame, nsOverflowAreas& aOverflowAreas,
     }
   }
   if (MOZ_LIKELY(!useOutlineAuto)) {
+    nscoord width = outline->GetOutlineWidth();
     outerRect.Inflate(width + offset);
   }
 
@@ -8807,8 +8902,8 @@ bool
 nsIFrame::FinishAndStoreOverflow(nsOverflowAreas& aOverflowAreas,
                                  nsSize aNewSize, nsSize* aOldSize)
 {
-  NS_ASSERTION(FrameMaintainsOverflow(),
-               "Don't call - overflow rects not maintained on these SVG frames");
+  MOZ_ASSERT(FrameMaintainsOverflow(),
+             "Don't call - overflow rects not maintained on these SVG frames");
 
   nsRect bounds(nsPoint(0, 0), aNewSize);
   // Store the passed in overflow area if we are a preserve-3d frame or we have
@@ -8887,7 +8982,7 @@ nsIFrame::FinishAndStoreOverflow(nsOverflowAreas& aOverflowAreas,
     nsPresContext *presContext = PresContext();
     if (presContext->GetTheme()->
           GetWidgetOverflow(presContext->DeviceContext(), this,
-                            disp->mAppearance, &r)) {
+                            disp->UsedAppearance(), &r)) {
       nsRect& vo = aOverflowAreas.VisualOverflow();
       vo.UnionRectEdges(vo, r);
     }
@@ -9440,7 +9535,7 @@ ConvertSVGDominantBaselineToVerticalAlign(uint8_t aDominantBaseline)
 uint8_t
 nsIFrame::VerticalAlignEnum() const
 {
-  if (IsSVGText()) {
+  if (nsSVGUtils::IsInSVGTextSubtree(this)) {
     uint8_t dominantBaseline;
     for (const nsIFrame* frame = this; frame; frame = frame->GetParent()) {
       dominantBaseline = frame->StyleSVGReset()->mDominantBaseline;
@@ -10094,7 +10189,6 @@ nsFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
   uint32_t equalStructs, samePointerStructs; // Not used, actually.
   nsChangeHint childHint = aChildFrame->StyleContext()->CalcStyleDifference(
     newContext,
-    NS_HintsNotHandledForDescendantsIn(aHintForThisFrame),
     &equalStructs,
     &samePointerStructs);
   if (childHint) {
@@ -10303,7 +10397,7 @@ IsFrameScrolledOutOfView(nsIFrame *aFrame)
   }
 
   nsIFrame *scrollableParent = do_QueryFrame(scrollableFrame);
-  nsRect rect = aFrame->GetVisualOverflowRect();
+  nsRect rect = aFrame->GetVisualOverflowRectRelativeToSelf();
 
   nsRect transformedRect =
     nsLayoutUtils::TransformFrameRectToAncestor(aFrame,
@@ -11345,7 +11439,7 @@ void nsFrame::DisplayReflowExit(nsPresContext* aPresContext,
     DR_state->PrettyUC(aMetrics.Height(), height, 16);
     printf("Reflow d=%s,%s", width, height);
 
-    if (!aStatus.IsFullyComplete()) {
+    if (!aStatus.IsEmpty()) {
       printf(" status=%s", ToString(aStatus).c_str());
     }
     if (aFrame->HasOverflowAreas()) {

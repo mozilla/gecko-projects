@@ -68,9 +68,6 @@
          Components.classes["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
                    .getService(Components.interfaces.mozIPlacesAutoComplete);
       </field>
-      <field name="AppConstants" readonly="true">
-        (Components.utils.import("resource://gre/modules/AppConstants.jsm", {})).AppConstants;
-      </field>
       <field name="mTabBox" readonly="true">
         document.getAnonymousElementByAttribute(this, "anonid", "tabbox");
       </field>
@@ -108,7 +105,7 @@
         new Map();
       </field>
       <field name="arrowKeysShouldWrap" readonly="true">
-        this.AppConstants.platform == "macosx";
+        AppConstants == "macosx";
       </field>
 
       <field name="_autoScrollPopup">
@@ -802,10 +799,14 @@
                   }
                 }
 
-                // Don't clear the favicon if this onLocationChange was
-                // triggered by a pushState or a replaceState (bug 550565) or
-                // a hash change (bug 408415).
-                if (aWebProgress.isLoadingDocument && !isSameDocument) {
+                // Don't clear the favicon if this tab is in the pending
+                // state, as SessionStore will have set the icon for us even
+                // though we're pointed at an about:blank. Also don't clear it
+                // if onLocationChange was triggered by a pushState or a
+                // replaceState (bug 550565) or a hash change (bug 408415).
+                if (!this.mTab.hasAttribute("pending") &&
+                    aWebProgress.isLoadingDocument &&
+                    !isSameDocument) {
                   this.mBrowser.mIconURL = null;
                 }
 
@@ -2197,6 +2198,7 @@
             var aDisallowInheritPrincipal;
             var aOpener;
             var aCreateLazyBrowser;
+            var aSkipBackgroundNotify;
             if (arguments.length == 2 &&
                 typeof arguments[1] == "object" &&
                 !(arguments[1] instanceof Ci.nsIURI)) {
@@ -2223,6 +2225,7 @@
               aOpener                   = params.opener;
               aIsPrerendered            = params.isPrerendered;
               aCreateLazyBrowser        = params.createLazyBrowser;
+              aSkipBackgroundNotify     = params.skipBackgroundNotify;
             }
 
             // if we're adding tabs, we're past interrupt mode, ditch the owner
@@ -2257,6 +2260,11 @@
             }
 
             t.setAttribute("onerror", "this.removeAttribute('image');");
+
+            if (aSkipBackgroundNotify) {
+              t.setAttribute("skipbackgroundnotify", true);
+            }
+
             t.className = "tabbrowser-tab";
 
             this.tabContainer._unlockTabSizing();
@@ -2555,6 +2563,23 @@
         <parameter name="aParams"/>
         <body>
           <![CDATA[
+            // We collect Telemetry on how long it takes to close a tab.
+            // Sometimes, tabs animate closed, and sometimes they don't, and
+            // it doesn't really make sense to put timings for both cases in the
+            // same bucket.
+            //
+            // We decide later on whether or not we're actually going to animate
+            // the tab closed. In order to capture as much of the time we care
+            // about with these stopwatches, but also in order to avoid any
+            // unnecessary work (since calculating whether or not we're going
+            // to do the animation might involved a style flush), we start
+            // stopwatches for both the animating and non-animating case. When
+            // we decide that we're animating, we cancel the non-animating case,
+            // and vice-versa. Then, in _endRemoveTab, we "finish" both
+            // stopwatches, which is a no-op for cancelled stopwatches.
+            TelemetryStopwatch.start("FX_TAB_CLOSE_TIME_ANIM_MS", aTab);
+            TelemetryStopwatch.start("FX_TAB_CLOSE_TIME_NO_ANIM_MS", aTab);
+
             if (aParams) {
               var animate = aParams.animate;
               var byMouse = aParams.byMouse;
@@ -2573,8 +2598,11 @@
 
             var isLastTab = (this.tabs.length - this._removingTabs.length == 1);
 
-            if (!this._beginRemoveTab(aTab, null, null, true, skipPermitUnload))
+            if (!this._beginRemoveTab(aTab, null, null, true, skipPermitUnload)) {
+              TelemetryStopwatch.cancel("FX_TAB_CLOSE_TIME_ANIM_MS", aTab);
+              TelemetryStopwatch.cancel("FX_TAB_CLOSE_TIME_NO_ANIM_MS", aTab);
               return;
+            }
 
             if (!aTab.pinned && !aTab.hidden && aTab._fullyOpen && byMouse)
               this.tabContainer._lockTabSizing(aTab);
@@ -2589,9 +2617,14 @@
                 aTab.getAttribute("fadein") != "true" /* fade-in transition hasn't been triggered yet */ ||
                 window.getComputedStyle(aTab).maxWidth == "0.1px" /* fade-in transition hasn't moved yet */ ||
                 !Services.prefs.getBoolPref("browser.tabs.animate")) {
+              // We're not animating, so we can cancel the animation stopwatch.
+              TelemetryStopwatch.cancel("FX_TAB_CLOSE_TIME_ANIM_MS", aTab);
               this._endRemoveTab(aTab);
               return;
             }
+
+            // We're animating, so we can cancel the non-animation stopwatch.
+            TelemetryStopwatch.cancel("FX_TAB_CLOSE_TIME_NO_ANIM_MS", aTab);
 
             this.tabContainer._handleTabTelemetryStart(aTab);
 
@@ -2630,20 +2663,25 @@
 
             var browser = this.getBrowserForTab(aTab);
 
-            if (!aTab._pendingPermitUnload && !aAdoptedByTab && !aSkipPermitUnload) {
+            if (!aTab._pendingPermitUnload &&
+                !aSkipPermitUnload &&
+                aTab.linkedPanel &&
+                !aAdoptedByTab) {
+              TelemetryStopwatch.start("FX_TAB_CLOSE_PERMIT_UNLOAD_TIME_MS", aTab);
+
               // We need to block while calling permitUnload() because it
               // processes the event queue and may lead to another removeTab()
               // call before permitUnload() returns.
               aTab._pendingPermitUnload = true;
-              let {permitUnload, timedOut} = aTab.linkedPanel ?
-                  browser.permitUnload() : {permitUnload: true, timedOut: false};
+              let {permitUnload, timedOut} = browser.permitUnload();
               delete aTab._pendingPermitUnload;
+
+              TelemetryStopwatch.finish("FX_TAB_CLOSE_PERMIT_UNLOAD_TIME_MS", aTab);
+
               // If we were closed during onbeforeunload, we return false now
               // so we don't (try to) close the same tab again. Of course, we
               // also stop if the unload was cancelled by the user:
               if (aTab.closing || (!timedOut && !permitUnload)) {
-                // NB: deliberately keep the _closedDuringPermitUnload set to
-                // true so we keep exiting early in case of multiple calls.
                 return false;
               }
             }
@@ -2671,7 +2709,7 @@
                 // This call actually closes the window, unless the user
                 // cancels the operation.  We are finished here in both cases.
                 this._windowIsClosing = window.closeWindow(true, window.warnAboutClosingWindow);
-                return null;
+                return false;
               }
 
               newTab = true;
@@ -2846,6 +2884,14 @@
             aTab.linkedBrowser = null;
 
             panel.remove();
+
+            // closeWindow might wait an arbitrary length of time if we're supposed
+            // to warn about closing the window, so we'll just stop the tab close
+            // stopwatches here instead.
+            TelemetryStopwatch.finish("FX_TAB_CLOSE_TIME_ANIM_MS", aTab,
+                                      true /* aCanceledOkay */);
+            TelemetryStopwatch.finish("FX_TAB_CLOSE_TIME_NO_ANIM_MS", aTab,
+                                      true /* aCanceledOkay */);
 
             if (aCloseWindow)
               this._windowIsClosing = closeWindow(true, window.warnAboutClosingWindow);
@@ -3386,7 +3432,7 @@
         <parameter name="aTab"/>
         <body>
           <![CDATA[
-            if (!this.AppConstants.E10S_TESTING_ONLY) {
+            if (!AppConstants.E10S_TESTING_ONLY) {
               throw "This method is intended only for e10s testing!";
             }
             let url = aTab.linkedBrowser.currentURI.spec;
@@ -3833,8 +3879,16 @@
               window.addEventListener("SwapDocShells", this, true);
               window.addEventListener("EndSwapDocShells", this, true);
               window.addEventListener("MozTabChildNotReady", this, true);
+
+              let tab = this.requestedTab;
+              let browser = tab.linkedBrowser;
+              let tabIsLoaded = !browser.isRemoteBrowser ||
+                                browser.frameLoader.tabParent.hasPresented;
+
               if (!this.minimized) {
-                this.setTabState(this.requestedTab, this.STATE_LOADED);
+                this.log("Initial tab is loaded?: " + tabIsLoaded);
+                this.setTabState(tab, tabIsLoaded ? this.STATE_LOADED
+                                                  : this.STATE_LOADING);
               }
             },
 
@@ -3990,7 +4044,7 @@
                 dump("Assertion failure\n" + Error().stack);
 
                 // Don't break a user's browser if an assertion fails.
-                if (this.tabbrowser.AppConstants.DEBUG) {
+                if (AppConstants.DEBUG) {
                   throw new Error("Assertion failure");
                 }
               }
@@ -4766,7 +4820,7 @@
             }
           }
 
-          if (this.AppConstants.platform != "macosx") {
+          if (AppConstants.platform != "macosx") {
             if (aEvent.ctrlKey && !aEvent.shiftKey && !aEvent.metaKey &&
                 aEvent.keyCode == KeyEvent.DOM_VK_F4 &&
                 !this.mCurrentTab.pinned) {
@@ -4788,7 +4842,7 @@
           if (aEvent.altKey)
             return;
 
-          if (this.AppConstants.platform == "macosx") {
+          if (AppConstants.platform == "macosx") {
             if (!aEvent.metaKey)
               return;
 
@@ -4851,7 +4905,7 @@
             }
           } else {
             label = tab.getAttribute("label");
-            if (this.AppConstants.E10S_TESTING_ONLY &&
+            if (AppConstants.E10S_TESTING_ONLY &&
                 tab.linkedBrowser &&
                 tab.linkedBrowser.isRemoteBrowser) {
               label += " - e10s";
@@ -4957,8 +5011,7 @@
               popup.openPopupAtScreen(event.screenX, event.screenY, true);
               break;
             }
-            case "DOMServiceWorkerFocusClient":
-            case "DOMWebNotificationClicked": {
+            case "DOMWindowFocus": {
               let tab = this.getTabForBrowser(browser);
               if (!tab)
                 return undefined;
@@ -5134,7 +5187,7 @@
           let els = Components.classes["@mozilla.org/eventlistenerservice;1"]
                               .getService(nsIEventListenerService);
           els.addSystemEventListener(document, "keydown", this, false);
-          if (this.AppConstants.platform == "macosx") {
+          if (AppConstants.platform == "macosx") {
             els.addSystemEventListener(document, "keypress", this, false);
           }
           window.addEventListener("sizemodechange", this);
@@ -5190,8 +5243,7 @@
             this._outerWindowIDBrowserMap.set(this.mCurrentBrowser.outerWindowID,
                                               this.mCurrentBrowser);
           }
-          messageManager.addMessageListener("DOMWebNotificationClicked", this);
-          messageManager.addMessageListener("DOMServiceWorkerFocusClient", this);
+          messageManager.addMessageListener("DOMWindowFocus", this);
           messageManager.addMessageListener("RefreshBlocker:Blocked", this);
           messageManager.addMessageListener("Browser:WindowCreated", this);
 
@@ -5251,7 +5303,7 @@
           let els = Components.classes["@mozilla.org/eventlistenerservice;1"]
                               .getService(nsIEventListenerService);
           els.removeSystemEventListener(document, "keydown", this, false);
-          if (this.AppConstants.platform == "macosx") {
+          if (AppConstants.platform == "macosx") {
             els.removeSystemEventListener(document, "keypress", this, false);
           }
           window.removeEventListener("sizemodechange", this);
@@ -6267,10 +6319,10 @@
                                                  selected.left - scrollRect.left);
           }
 
-          if (!this._animateElement.hasAttribute("notifybgtab")) {
-            this._animateElement.setAttribute("notifybgtab", "true");
+          if (!this._animateElement.hasAttribute("highlight")) {
+            this._animateElement.setAttribute("highlight", "true");
             setTimeout(function(ele) {
-              ele.removeAttribute("notifybgtab");
+              ele.removeAttribute("highlight");
             }, 150, this._animateElement);
           }
         ]]></body>
@@ -6358,7 +6410,7 @@
           if (tab.getAttribute("selected") == "true") {
             this._fillTrailingGap();
             this._handleTabSelect();
-          } else {
+          } else if (!tab.hasAttribute("skipbackgroundnotify")) {
             this._notifyBackgroundTab(tab);
           }
 
@@ -6611,7 +6663,7 @@
           return;
 
         let wrongModifiers;
-        if (this.tabbrowser.AppConstants.platform == "macosx") {
+        if (AppConstants.platform == "macosx") {
           wrongModifiers = !event.metaKey;
         } else {
           wrongModifiers = !event.ctrlKey || event.metaKey;
@@ -6694,7 +6746,7 @@
           context.fillRect(0, 0, canvas.width, canvas.height);
 
           let captureListener;
-          let platform = this.tabbrowser.AppConstants.platform;
+          let platform = AppConstants.platform;
           // On Windows and Mac we can update the drag image during a drag
           // using updateDragImage. On Linux, we can use a panel.
           if (platform == "win" || platform == "macosx") {
@@ -6979,7 +7031,7 @@
           window.focus();
         } else {
           let props = { screenX: left, screenY: top };
-          if (this.tabbrowser.AppConstants.platform != "win") {
+          if (AppConstants.platform != "win") {
             props.outerWidth = winWidth;
             props.outerHeight = winHeight;
           }
@@ -7054,8 +7106,7 @@
                   class="tab-content" align="center">
           <xul:image xbl:inherits="fadein,pinned,busy,progress,selected=visuallyselected"
                      class="tab-throbber"
-                     role="presentation"
-                     layer="true" />
+                     role="presentation"/>
           <xul:image xbl:inherits="src=image,loadingprincipal=iconLoadingPrincipal,fadein,pinned,selected=visuallyselected,busy,crashed,sharing"
                      anonid="tab-icon-image"
                      class="tab-icon-image"

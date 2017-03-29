@@ -458,19 +458,20 @@ CrossCompartmentWrapper::fun_toString(JSContext* cx, HandleObject wrapper, unsig
 }
 
 bool
-CrossCompartmentWrapper::regexp_toShared(JSContext* cx, HandleObject wrapper, RegExpGuard* g) const
+CrossCompartmentWrapper::regexp_toShared(JSContext* cx, HandleObject wrapper,
+                                         MutableHandleRegExpShared shared) const
 {
-    RegExpGuard wrapperGuard(cx);
+    RootedRegExpShared re(cx);
     {
         AutoCompartment call(cx, wrappedObject(wrapper));
-        if (!Wrapper::regexp_toShared(cx, wrapper, &wrapperGuard))
+        if (!Wrapper::regexp_toShared(cx, wrapper, &re))
             return false;
     }
 
     // Get an equivalent RegExpShared associated with the current compartment.
-    RegExpShared* re = wrapperGuard.re();
-    cx->markAtom(re->getSource());
-    return cx->compartment()->regExps.get(cx, re->getSource(), re->getFlags(), g);
+    RootedAtom source(cx, re->getSource());
+    cx->markAtom(source);
+    return cx->compartment()->regExps.get(cx, source, re->getFlags(), shared);
 }
 
 bool
@@ -542,6 +543,12 @@ js::NukeCrossCompartmentWrappers(JSContext* cx,
 
             AutoWrapperRooter wobj(cx, WrapperValue(e));
             JSObject* wrapped = UncheckedUnwrap(wobj);
+
+            // We never nuke script source objects, since only ever used internally by the JS
+            // engine, and are expected to remain valid throughout a scripts lifetime.
+            if (MOZ_UNLIKELY(wrapped->is<ScriptSourceObject>())) {
+                continue;
+            }
 
             // We only skip nuking window references that point to a target
             // compartment, not the ones that belong to it.

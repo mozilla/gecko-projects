@@ -214,6 +214,11 @@ enum {
   // Whether this node has dirty descendants for Servo's style system.
   NODE_HAS_DIRTY_DESCENDANTS_FOR_SERVO =  NODE_SHARED_RESTYLE_BIT_1,
 
+  // Whether this node has dirty descendants for animation-only restyle for
+  // Servo's style system.
+  NODE_HAS_ANIMATION_ONLY_DIRTY_DESCENDANTS_FOR_SERVO =
+    NODE_SHARED_RESTYLE_BIT_2,
+
   // Remaining bits are node type specific.
   NODE_TYPE_SPECIFIC_BITS_OFFSET =        23
 };
@@ -282,7 +287,6 @@ private:
 // Categories of node properties
 // 0 is global.
 #define DOM_USER_DATA         1
-#define SMIL_MAPPED_ATTR_ANIMVAL 2
 
 // IID for the nsINode interface
 #define NS_INODE_IID \

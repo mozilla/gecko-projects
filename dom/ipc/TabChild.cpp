@@ -104,7 +104,6 @@
 #include "LayersLogging.h"
 #include "nsDOMClassInfoID.h"
 #include "nsColorPickerProxy.h"
-#include "nsDatePickerProxy.h"
 #include "nsContentPermissionHelper.h"
 #include "nsNetUtil.h"
 #include "nsIPermissionManager.h"
@@ -2136,21 +2135,6 @@ TabChild::DeallocPColorPickerChild(PColorPickerChild* aColorPicker)
   return true;
 }
 
-PDatePickerChild*
-TabChild::AllocPDatePickerChild(const nsString&, const nsString&)
-{
-  MOZ_CRASH("unused");
-  return nullptr;
-}
-
-bool
-TabChild::DeallocPDatePickerChild(PDatePickerChild* aDatePicker)
-{
-  nsDatePickerProxy* picker = static_cast<nsDatePickerProxy*>(aDatePicker);
-  NS_RELEASE(picker);
-  return true;
-}
-
 PFilePickerChild*
 TabChild::AllocPFilePickerChild(const nsString&, const int16_t&)
 {
@@ -2750,7 +2734,11 @@ TabChild::InitAPZState()
   // The ContentProcessController will hold a reference to the tab, and will be destroyed by the compositor or ipdl
   // during destruction.
   RefPtr<GeckoContentController> contentController = new ContentProcessController(this);
-  cbc->SendPAPZConstructor(new APZChild(contentController), mLayersId);
+  APZChild* apzChild = new APZChild(contentController);
+  cbc->SetEventTargetForActor(
+    apzChild, TabGroup()->EventTargetFor(TaskCategory::Other));
+  MOZ_ASSERT(apzChild->GetActorEventTarget());
+  cbc->SendPAPZConstructor(apzChild, mLayersId);
 }
 
 void

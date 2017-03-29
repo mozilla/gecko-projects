@@ -1283,13 +1283,13 @@ function focusElement(element) {
 }
 
 /**
- * @param {Array.<string>} keySequence
+ * @param {string} keyString
  * @param {Element} element
  * @param {Object.<string, boolean>=} opts
  * @param {Window=} window
  */
 event.sendKeysToElement = function (
-    keySequence, el, opts = {}, window = undefined) {
+    keyString, el, opts = {}, window = undefined) {
 
   if (opts.ignoreVisibility || element.isVisible(el)) {
     focusElement(el);
@@ -1300,14 +1300,13 @@ event.sendKeysToElement = function (
       modifiers[modifier] = false;
     }
 
-    let value = keySequence.join("");
-    for (let i = 0; i < value.length; i++) {
-      let c = value.charAt(i);
+    for (let i = 0; i < keyString.length; i++) {
+      let c = keyString.charAt(i);
       event.sendSingleKey(c, modifiers, window);
     }
 
   } else {
-    throw new ElementNotVisibleError("Element is not visible");
+    throw new ElementNotInteractableError("Element is not visible");
   }
 };
 

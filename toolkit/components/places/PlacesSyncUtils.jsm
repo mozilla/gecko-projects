@@ -67,7 +67,7 @@ const HistorySyncUtils = PlacesSyncUtils.history = Object.freeze({
       FROM moz_places
       WHERE url_hash = hash(:url) AND url = :url
       LIMIT 1`,
-      { url:canonicalURL.href }
+      { url: canonicalURL.href }
     );
     return rows.length ? rows[0].getResultByName("frecency") : -1;
   }),
@@ -296,6 +296,33 @@ const BookmarkSyncUtils = PlacesSyncUtils.bookmarks = Object.freeze({
     let orderedChildrenGuids = childSyncIds.map(BookmarkSyncUtils.syncIdToGuid);
     return PlacesUtils.bookmarks.reorder(parentGuid, orderedChildrenGuids,
                                          { source: SOURCE_SYNC });
+  }),
+
+  /**
+   * Resolves to true if there are known sync changes.
+   */
+  havePendingChanges: Task.async(function* () {
+    let db = yield PlacesUtils.promiseDBConnection();
+    let rows = yield db.executeCached(`
+      WITH RECURSIVE
+      syncedItems(id, guid, syncChangeCounter) AS (
+        SELECT b.id, b.guid, b.syncChangeCounter
+         FROM moz_bookmarks b
+         WHERE b.guid IN ('menu________', 'toolbar_____', 'unfiled_____',
+                          'mobile______')
+        UNION ALL
+        SELECT b.id, b.guid, b.syncChangeCounter
+        FROM moz_bookmarks b
+        JOIN syncedItems s ON b.parent = s.id
+      ),
+      changedItems(guid) AS (
+        SELECT guid FROM syncedItems
+        WHERE syncChangeCounter >= 1
+        UNION ALL
+        SELECT guid FROM moz_bookmarks_deleted
+      )
+      SELECT EXISTS(SELECT guid FROM changedItems) AS haveChanges`);
+    return !!rows[0].getResultByName("haveChanges");
   }),
 
   /**
@@ -1391,7 +1418,7 @@ var tagItem = Task.async(function(item, tags) {
   }
 
   // Remove leading and trailing whitespace, then filter out empty tags.
-  let newTags = tags.map(tag => tag.trim()).filter(Boolean);
+  let newTags = tags ? tags.map(tag => tag.trim()).filter(Boolean) : [];
 
   // Removing the last tagged item will also remove the tag. To preserve
   // tag IDs, we temporarily tag a dummy URI, ensuring the tags exist.

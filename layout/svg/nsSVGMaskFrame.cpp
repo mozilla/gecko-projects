@@ -7,6 +7,7 @@
 #include "nsSVGMaskFrame.h"
 
 // Keep others in (case-insensitive) order:
+#include "AutoReferenceChainGuard.h"
 #include "gfx2DGlue.h"
 #include "gfxContext.h"
 #include "mozilla/gfx/2D.h"
@@ -204,14 +205,14 @@ NS_IMPL_FRAMEARENA_HELPERS(nsSVGMaskFrame)
 mozilla::Pair<DrawResult, RefPtr<SourceSurface>>
 nsSVGMaskFrame::GetMaskForMaskedFrame(MaskParams& aParams)
 {
-  // If the flag is set when we get here, it means this mask frame
-  // has already been used painting the current mask, and the document
-  // has a mask reference loop.
-  if (mInUse) {
-    NS_WARNING("Mask loop detected!");
+  // Make sure we break reference loops and over long reference chains:
+  static int16_t sRefChainLengthCounter = AutoReferenceChainGuard::noChain;
+  AutoReferenceChainGuard refChainGuard(this, &mInUse,
+                                        &sRefChainLengthCounter);
+  if (MOZ_UNLIKELY(!refChainGuard.Reference())) {
+    // Break reference chain
     return MakePair(DrawResult::SUCCESS, RefPtr<SourceSurface>());
   }
-  AutoMaskReferencer maskRef(this);
 
   gfxRect maskArea = GetMaskArea(aParams.maskedFrame);
   gfxContext* context = aParams.ctx;
@@ -252,24 +253,22 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(MaskParams& aParams)
 
   mMatrixForChildren = GetMaskTransform(aParams.maskedFrame) *
                        aParams.toUserSpace;
-  DrawResult result;
+  DrawResult result = DrawResult::SUCCESS;
 
   for (nsIFrame* kid = mFrames.FirstChild(); kid;
        kid = kid->GetNextSibling()) {
     // The CTM of each frame referencing us can be different
-    nsISVGChildFrame* SVGFrame = do_QueryFrame(kid);
+    nsSVGDisplayableFrame* SVGFrame = do_QueryFrame(kid);
     if (SVGFrame) {
-      SVGFrame->NotifySVGChanged(nsISVGChildFrame::TRANSFORM_CHANGED);
+      SVGFrame->NotifySVGChanged(nsSVGDisplayableFrame::TRANSFORM_CHANGED);
     }
     gfxMatrix m = mMatrixForChildren;
     if (kid->GetContent()->IsSVGElement()) {
       m = static_cast<nsSVGElement*>(kid->GetContent())->
             PrependLocalTransformsTo(m, eUserSpaceToParent);
     }
-    result = nsSVGUtils::PaintFrameWithEffects(kid, *tmpCtx, m);
-    if (result != DrawResult::SUCCESS) {
-      return MakePair(result, RefPtr<SourceSurface>());
-    }
+    result &= nsSVGUtils::PaintFrameWithEffects(kid, *tmpCtx, m, nullptr,
+                                                aParams.flags);
   }
 
   RefPtr<SourceSurface> maskSnapshot = maskDT->Snapshot();
@@ -323,12 +322,12 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(MaskParams& aParams)
 
   // Moz2D transforms in the opposite direction to Thebes
   if (!maskSurfaceMatrix.Invert()) {
-    return MakePair(DrawResult::TEMPORARY_ERROR, RefPtr<SourceSurface>());
+    return MakePair(DrawResult::SUCCESS, RefPtr<SourceSurface>());
   }
 
   *aParams.maskTransform = ToMatrix(maskSurfaceMatrix);
   RefPtr<SourceSurface> surface = destMaskSurface.forget();
-  return MakePair(DrawResult::SUCCESS, Move(surface));
+  return MakePair(result, Move(surface));
 }
 
 gfxRect
@@ -340,7 +339,10 @@ nsSVGMaskFrame::GetMaskArea(nsIFrame* aMaskedFrame)
     maskElem->mEnumAttributes[SVGMaskElement::MASKUNITS].GetAnimValue();
   gfxRect bbox;
   if (units == SVG_UNIT_TYPE_OBJECTBOUNDINGBOX) {
-    bbox = nsSVGUtils::GetBBox(aMaskedFrame);
+    bbox =
+      nsSVGUtils::GetBBox(aMaskedFrame,
+                          nsSVGUtils::eUseFrameBoundsForOuterSVG |
+                          nsSVGUtils::eBBoxIncludeFillGeometry);
   }
 
   // Bounds in the user space of aMaskedFrame

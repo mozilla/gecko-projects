@@ -382,6 +382,8 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "GamepadEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "GamepadHapticActuator", release: false},
+// IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "GamepadPose", release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "HashChangeEvent",
@@ -546,7 +548,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "HTMLVideoElement",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "IdleDeadline", nightly: true},
+    {name: "IdleDeadline"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "IDBCursor",
 // IMPORTANT: Do not change this list without review from a DOM peer!

@@ -453,7 +453,7 @@ public:
   inline bool DirtyDescendantsBitIsPropagatedForServo();
 #endif
 
-  bool HasServoData() {
+  bool HasServoData() const {
 #ifdef MOZ_STYLO
     return !!mServoData.Get();
 #else
@@ -462,6 +462,29 @@ public:
   }
 
   void ClearServoData();
+
+  /**
+   * Gets the custom element data used by web components custom element.
+   * Custom element data is created at the first attempt to enqueue a callback.
+   *
+   * @return The custom element data or null if none.
+   */
+  inline CustomElementData* GetCustomElementData() const
+  {
+    nsDOMSlots *slots = GetExistingDOMSlots();
+    if (slots) {
+      return slots->mCustomElementData;
+    }
+    return nullptr;
+  }
+
+  /**
+   * Sets the custom element data, ownership of the
+   * callback data is taken by this element.
+   *
+   * @param aData The custom element data.
+   */
+  void SetCustomElementData(CustomElementData* aData);
 
 protected:
   /**
@@ -1131,10 +1154,11 @@ public:
    * node has been changed.
    *
    * The new document can be reached via OwnerDoc().
+   *
+   * If you override this method,
+   * please call up to the parent NodeInfoChanged.
    */
-  virtual void NodeInfoChanged(nsIDocument* aOldDoc)
-  {
-  }
+  virtual void NodeInfoChanged(nsIDocument* aOldDoc) {}
 
   /**
    * Parse a string into an nsAttrValue for a CORS attribute.  This
@@ -1380,16 +1404,17 @@ protected:
    * @param aName the localname of the attribute being set
    * @param aValue the value it's being set to represented as either a string or
    *        a parsed nsAttrValue. Alternatively, if the attr is being removed it
-   *        will be null. BeforeSetAttr is allowed to modify aValue by parsing
-   *        the string to an nsAttrValue (to avoid having to reparse it in
-   *        ParseAttribute).
+   *        will be null.
    * @param aNotify Whether we plan to notify document observers.
    */
   // Note that this is inlined so that when subclasses call it it gets
   // inlined.  Those calls don't go through a vtable.
   virtual nsresult BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                                 nsAttrValueOrString* aValue,
-                                 bool aNotify);
+                                 const nsAttrValueOrString* aValue,
+                                 bool aNotify)
+  {
+    return NS_OK;
+  }
 
   /**
    * Hook that is called by Element::SetAttr to allow subclasses to

@@ -61,6 +61,39 @@ function getUniqueId() {
   return `${nextId++}-${uniqueProcessID}`;
 }
 
+// The list of properties that themes are allowed to contain.
+XPCOMUtils.defineLazyGetter(this, "gAllowedThemeProperties", () => {
+  Cu.import("resource://gre/modules/ExtensionParent.jsm");
+  let propertiesInBaseManifest = ExtensionParent.baseManifestProperties;
+
+  // The properties found in the base manifest contain all of the properties that
+  // themes are allowed to have. However, the list also contains several properties
+  // that aren't allowed, so we need to filter them out first before the list can
+  // be used to validate themes.
+  return propertiesInBaseManifest.filter(prop => {
+    const propertiesToRemove = ["background", "content_scripts", "permissions"];
+    return !propertiesToRemove.includes(prop);
+  });
+});
+
+/**
+ * Validates a theme to ensure it only contains static resources.
+ *
+ * @param {Array<string>} manifestProperties The list of top-level keys found in the
+ *    the extension's manifest.
+ * @returns {Array<string>} A list of invalid properties or an empty list
+ *    if none are found.
+ */
+function validateThemeManifest(manifestProperties) {
+  let invalidProps = [];
+  for (let propName of manifestProperties) {
+    if (propName != "theme" && !gAllowedThemeProperties.includes(propName)) {
+      invalidProps.push(propName);
+    }
+  }
+  return invalidProps;
+}
+
 let StartupCache = {
   DB_NAME: "ExtensionStartupCache",
 
@@ -238,12 +271,6 @@ function runSafe(context, f, ...args) {
   return runSafeWithoutClone(f, ...args);
 }
 
-function getInnerWindowID(window) {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-    .getInterface(Ci.nsIDOMWindowUtils)
-    .currentInnerWindowID;
-}
-
 // Return true if the given value is an instance of the given
 // native type.
 function instanceOf(value, type) {
@@ -295,6 +322,16 @@ class DefaultMap extends Map {
     }
     return super.get(key);
   }
+}
+
+const _winUtils = new DefaultWeakMap(win => {
+  return win.QueryInterface(Ci.nsIInterfaceRequestor)
+            .getInterface(Ci.nsIDOMWindowUtils);
+});
+const getWinUtils = win => _winUtils.get(win);
+
+function getInnerWindowID(window) {
+  return getWinUtils(window).currentInnerWindowID;
 }
 
 class SpreadArgs extends Array {
@@ -593,8 +630,7 @@ LocaleData.prototype = {
     if (message == "@@ui_locale") {
       return this.uiLocale;
     } else if (message.startsWith("@@bidi_")) {
-      let registry = Cc["@mozilla.org/chrome/chrome-registry;1"].getService(Ci.nsIXULChromeRegistry);
-      let rtl = registry.isLocaleRTL("global");
+      let rtl = Services.locale.isAppLocaleRTL;
 
       if (message == "@@bidi_dir") {
         return rtl ? "rtl" : "ltr";
@@ -1291,7 +1327,31 @@ class MessageManagerProxy {
   }
 }
 
+/**
+ * Classify an individual permission from a webextension manifest
+ * as a host/origin permission, an api permission, or a regular permission.
+ *
+ * @param {string} perm  The permission string to classify
+ *
+ * @returns {object}
+ *          An object with exactly one of the following properties:
+ *          "origin" to indicate this is a host/origin permission.
+ *          "api" to indicate this is an api permission
+ *                (as used for webextensions experiments).
+ *          "permission" to indicate this is a regular permission.
+ */
+function classifyPermission(perm) {
+  let match = /^(\w+)(?:\.(\w+)(?:\.\w+)*)?$/.exec(perm);
+  if (!match) {
+    return {origin: perm};
+  } else if (match[1] == "experiments" && match[2]) {
+    return {api: match[2]};
+  }
+  return {permission: perm};
+}
+
 this.ExtensionUtils = {
+  classifyPermission,
   defineLazyGetter,
   detectLanguage,
   extend,
@@ -1301,6 +1361,8 @@ this.ExtensionUtils = {
   getInnerWindowID,
   getMessageManager,
   getUniqueId,
+  filterStack,
+  getWinUtils,
   ignoreEvent,
   injectAPI,
   instanceOf,
@@ -1314,6 +1376,7 @@ this.ExtensionUtils = {
   runSafeSyncWithoutClone,
   runSafeWithoutClone,
   stylesheetMap,
+  validateThemeManifest,
   DefaultMap,
   DefaultWeakMap,
   EventEmitter,

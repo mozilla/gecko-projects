@@ -37,6 +37,22 @@ bool is_in_render_thread()
   return mozilla::wr::RenderThread::IsInRenderThread();
 }
 
+bool is_glcontext_egl(void* glcontext_ptr)
+{
+  MOZ_ASSERT(glcontext_ptr);
+
+  mozilla::gl::GLContext* glcontext = reinterpret_cast<mozilla::gl::GLContext*>(glcontext_ptr);
+  if (!glcontext) {
+    return false;
+  }
+  return glcontext->GetContextType() == mozilla::gl::GLContextType::EGL;
+}
+
+void gfx_critical_note(const char* msg)
+{
+  gfxCriticalNote << msg;
+}
+
 void* get_proc_address_from_glcontext(void* glcontext_ptr, const char* procname)
 {
   MOZ_ASSERT(glcontext_ptr);
@@ -102,6 +118,7 @@ WebRenderBridgeParent::WebRenderBridgeParent(CompositorBridgeParentBase* aCompos
   , mDestroyed(false)
 {
   MOZ_ASSERT(mCompositableHolder);
+  mCompositableHolder->AddPipeline(mPipelineId);
   if (mWidget) {
     MOZ_ASSERT(!mCompositorScheduler);
     mCompositorScheduler = new CompositorVsyncScheduler(this, mWidget);
@@ -146,7 +163,7 @@ WebRenderBridgeParent::Destroy()
 
 mozilla::ipc::IPCResult
 WebRenderBridgeParent::RecvAddImage(const wr::ImageKey& aImageKey,
-				    const gfx::IntSize& aSize,
+                                    const gfx::IntSize& aSize,
                                     const uint32_t& aStride,
                                     const gfx::SurfaceFormat& aFormat,
                                     const ByteBuffer& aBuffer)
@@ -158,6 +175,24 @@ WebRenderBridgeParent::RecvAddImage(const wr::ImageKey& aImageKey,
   wr::ImageDescriptor descriptor(aSize, aStride, aFormat);
   mApi->AddImage(aImageKey, descriptor,
                  aBuffer.AsSlice());
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+WebRenderBridgeParent::RecvAddBlobImage(const wr::ImageKey& aImageKey,
+                        				        const gfx::IntSize& aSize,
+                                        const uint32_t& aStride,
+                                        const gfx::SurfaceFormat& aFormat,
+                                        const ByteBuffer& aBuffer)
+{
+  if (mDestroyed) {
+    return IPC_OK();
+  }
+  MOZ_ASSERT(mApi);
+  wr::ImageDescriptor descriptor(aSize, aStride, aFormat);
+  mApi->AddBlobImage(aImageKey, descriptor,
+                     aBuffer.AsSlice());
 
   return IPC_OK();
 }
@@ -316,7 +351,7 @@ WebRenderBridgeParent::ProcessWebRenderCommands(const gfx::IntSize &aSize,
           mApi->AddExternalImageBuffer(key,
                                        descriptor,
                                        wrTexture->GetExternalImageKey());
-          mCompositableHolder->HoldExternalImage(aEpoch, texture->AsWebRenderTextureHost());
+          mCompositableHolder->HoldExternalImage(mPipelineId, aEpoch, texture->AsWebRenderTextureHost());
           keysToDelete.push_back(key);
           break;
         }
@@ -337,10 +372,6 @@ WebRenderBridgeParent::ProcessWebRenderCommands(const gfx::IntSize &aSize,
 
         keysToDelete.push_back(key);
         dSurf->Unmap();
-        // XXX workaround for releasing Readlock. See Bug 1339625
-        if(host->GetType() == CompositableType::CONTENT_SINGLE) {
-          host->CleanupResources();
-        }
         break;
       }
       case WebRenderParentCommand::TCompositableOperation: {
@@ -563,9 +594,6 @@ WebRenderBridgeParent::FlushTransactionIdsForEpoch(const wr::Epoch& aEpoch)
     }
     mPendingTransactionIds.pop();
   }
-
-  mCompositableHolder->Update(aEpoch);
-
   return id;
 }
 
@@ -602,9 +630,7 @@ WebRenderBridgeParent::ClearResources()
       DeleteOldImages();
     }
   }
-  if (mCompositableHolder) {
-    mCompositableHolder->Destroy();
-  }
+  mCompositableHolder->RemovePipeline(mPipelineId);
   mExternalImageIds.Clear();
 
   if (mWidget && mCompositorScheduler) {

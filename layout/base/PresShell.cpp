@@ -807,8 +807,8 @@ nsIPresShell::nsIPresShell()
     , mFontSizeInflationForceEnabled(false)
     , mFontSizeInflationDisabledInMasterProcess(false)
     , mFontSizeInflationEnabled(false)
-    , mPaintingIsFrozen(false)
     , mFontSizeInflationEnabledIsDirty(false)
+    , mPaintingIsFrozen(false)
     , mIsNeverPainting(false)
     , mInFlush(false)
   {}
@@ -1859,6 +1859,8 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
         Preferences::GetInt("nglayout.initialpaint.delay",
                             PAINTLOCK_EVENT_DELAY);
 
+      mPaintSuppressionTimer->SetTarget(
+          mDocument->EventTargetFor(TaskCategory::Other));
       mPaintSuppressionTimer->InitWithNamedFuncCallback(
         sPaintSuppressionCallback, this, delay, nsITimer::TYPE_ONE_SHOT,
         "PresShell::sPaintSuppressionCallback");
@@ -2005,16 +2007,21 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight, nscoord a
       }
       if (mAsyncResizeEventTimer) {
         mAsyncResizeTimerIsActive = true;
-        mAsyncResizeEventTimer->InitWithFuncCallback(AsyncResizeEventCallback,
-                                                     this, 15,
-                                                     nsITimer::TYPE_ONE_SHOT);
+        mAsyncResizeEventTimer->SetTarget(
+            mDocument->EventTargetFor(TaskCategory::Other));
+        mAsyncResizeEventTimer->InitWithNamedFuncCallback(AsyncResizeEventCallback,
+                                                          this, 15,
+                                                          nsITimer::TYPE_ONE_SHOT,
+                                                          "AsyncResizeEventCallback");
       }
     } else {
-      RefPtr<nsRunnableMethod<PresShell> > resizeEvent =
-        NewRunnableMethod("PresShell::FireResizeEvent",
-                          this, &PresShell::FireResizeEvent);
-      if (NS_SUCCEEDED(NS_DispatchToCurrentThread(resizeEvent))) {
-        mResizeEvent = resizeEvent;
+      RefPtr<nsRunnableMethod<PresShell>> event =
+        NewRunnableMethod(this, &PresShell::FireResizeEvent);
+      nsresult rv = mDocument->Dispatch("PresShell::FireResizeEvent",
+                                        TaskCategory::Other,
+                                        do_AddRef(event));
+      if (NS_SUCCEEDED(rv)) {
+        mResizeEvent = event;
         SetNeedStyleFlush();
       }
     }
@@ -3687,28 +3694,6 @@ PresShell::GetRectVisibility(nsIFrame* aFrame,
   return nsRectVisibility_kVisible;
 }
 
-class PaintTimerCallBack final : public nsITimerCallback
-{
-public:
-  explicit PaintTimerCallBack(PresShell* aShell) : mShell(aShell) {}
-
-  NS_DECL_ISUPPORTS
-
-  NS_IMETHOD Notify(nsITimer* aTimer) final
-  {
-    mShell->SetNextPaintCompressed();
-    mShell->ScheduleViewManagerFlush();
-    return NS_OK;
-  }
-
-private:
-  ~PaintTimerCallBack() {}
-
-  PresShell* mShell;
-};
-
-NS_IMPL_ISUPPORTS(PaintTimerCallBack, nsITimerCallback)
-
 void
 PresShell::ScheduleViewManagerFlush(PaintType aType)
 {
@@ -3716,9 +3701,24 @@ PresShell::ScheduleViewManagerFlush(PaintType aType)
     // Delay paint for 1 second.
     static const uint32_t kPaintDelayPeriod = 1000;
     if (!mDelayedPaintTimer) {
+      nsTimerCallbackFunc
+        PaintTimerCallBack = [](nsITimer* aTimer, void* aClosure) {
+          // The passed-in PresShell is always alive here. Because if PresShell
+          // died, mDelayedPaintTimer->Cancel() would be called during the
+          // destruction and this callback would never be invoked.
+          auto self = static_cast<PresShell*>(aClosure);
+          self->SetNextPaintCompressed();
+          self->ScheduleViewManagerFlush();
+      };
+
       mDelayedPaintTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
-      RefPtr<PaintTimerCallBack> cb = new PaintTimerCallBack(this);
-      mDelayedPaintTimer->InitWithCallback(cb, kPaintDelayPeriod, nsITimer::TYPE_ONE_SHOT);
+      mDelayedPaintTimer->SetTarget(
+          mDocument->EventTargetFor(TaskCategory::Other));
+      mDelayedPaintTimer->InitWithNamedFuncCallback(PaintTimerCallBack,
+                                                    this,
+                                                    kPaintDelayPeriod,
+                                                    nsITimer::TYPE_ONE_SHOT,
+                                                    "PaintTimerCallBack");
     }
     return;
   }
@@ -4088,8 +4088,8 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     "Display"
   };
 
-  PROFILER_LABEL_PRINTF("PresShell", "Flush",
-    js::ProfileEntry::Category::GRAPHICS, "(FlushType::%s)",
+  PROFILER_LABEL_DYNAMIC("PresShell", "Flush",
+    js::ProfileEntry::Category::GRAPHICS,
     flushTypeNames[flushType]);
 #endif
 
@@ -4526,14 +4526,14 @@ PresShell::NotifyCounterStylesAreDirty()
   mFrameConstructor->EndUpdate();
 }
 
-nsresult
-PresShell::ReconstructFrames(void)
+void
+PresShell::ReconstructFrames()
 {
   NS_PRECONDITION(!mFrameConstructor->GetRootFrame() || mDidInitialize,
                   "Must not have root frame before initial reflow");
   if (!mDidInitialize || mIsDestroying) {
     // Nothing to do here
-    return NS_OK;
+    return;
   }
 
   nsCOMPtr<nsIPresShell> kungFuDeathGrip(this);
@@ -4543,16 +4543,14 @@ PresShell::ReconstructFrames(void)
   mDocument->FlushPendingNotifications(FlushType::ContentAndNotify);
 
   if (mIsDestroying) {
-    return NS_OK;
+    return;
   }
 
   nsAutoCauseReflowNotifier crNotifier(this);
   mFrameConstructor->BeginUpdate();
-  nsresult rv = mFrameConstructor->ReconstructDocElementHierarchy();
+  mFrameConstructor->ReconstructDocElementHierarchy();
   VERIFY_STYLE_TREE;
   mFrameConstructor->EndUpdate();
-
-  return rv;
 }
 
 void
@@ -4580,6 +4578,17 @@ nsIPresShell::RestyleForCSSRuleChanges()
     mPresContext->RebuildCounterStyles();
   }
 
+  // Tell Servo that the contents of style sheets have changed.
+  //
+  // NB: It's important to do so before bailing out.
+  //
+  // Even if we have no frames, we can end up styling those when creating
+  // them, and it's important for Servo to know that it needs to use the
+  // correct styles.
+  if (mStyleSet->IsServo()) {
+    mStyleSet->AsServo()->NoteStyleSheetsChanged();
+  }
+
   Element* root = mDocument->GetRootElement();
   if (!mDidInitialize) {
     // Nothing to do here, since we have no frames yet
@@ -4592,11 +4601,6 @@ nsIPresShell::RestyleForCSSRuleChanges()
   }
 
   RestyleManager* restyleManager = mPresContext->RestyleManager();
-
-  if (mStyleSet->IsServo()) {
-    // Tell Servo that the contents of style sheets have changed.
-    mStyleSet->AsServo()->NoteStyleSheetsChanged();
-  }
 
   if (scopeRoots.IsEmpty()) {
     // If scopeRoots is empty, we know that mStylesHaveChanged was true at
@@ -6252,11 +6256,15 @@ PresShell::ScheduleApproximateFrameVisibilityUpdateNow()
     return;
   }
 
-  RefPtr<nsRunnableMethod<PresShell> > ev =
-    NewRunnableMethod("PresShell::UpdateApproximateFrameVisibility",
-                      this, &PresShell::UpdateApproximateFrameVisibility);
-  if (NS_SUCCEEDED(NS_DispatchToCurrentThread(ev))) {
-    mUpdateApproximateFrameVisibilityEvent = ev;
+  RefPtr<nsRunnableMethod<PresShell>> event =
+    NewRunnableMethod(this, &PresShell::UpdateApproximateFrameVisibility);
+  nsresult rv =
+    mDocument->Dispatch("PresShell::UpdateApproximateFrameVisibility",
+                        TaskCategory::Other,
+                        do_AddRef(event));
+
+  if (NS_SUCCEEDED(rv)) {
+    mUpdateApproximateFrameVisibilityEvent = event;
   }
 }
 
@@ -6353,9 +6361,9 @@ PresShell::Paint(nsView*        aViewToPaint,
   if (contentRoot) {
     uri = contentRoot->GetDocumentURI();
   }
-  PROFILER_LABEL_PRINTF("PresShell", "Paint",
-    js::ProfileEntry::Category::GRAPHICS, "(%s)",
-    uri ? uri->GetSpecOrDefault().get() : "N/A");
+  nsCString uriString = uri ? uri->GetSpecOrDefault() : NS_LITERAL_CSTRING("N/A");
+  PROFILER_LABEL_DYNAMIC("PresShell", "Paint",
+    js::ProfileEntry::Category::GRAPHICS, Move(uriString));
 #endif
 
   Maybe<js::AutoAssertNoContentJS> nojs;
@@ -7177,17 +7185,21 @@ PresShell::HandleEvent(nsIFrame* aFrame,
                        nsIContent** aTargetContent)
 {
 #ifdef MOZ_TASK_TRACER
-  // Make touch events, mouse events and hardware key events to be the source
-  // events of TaskTracer, and originate the rest correlation tasks from here.
-  SourceEventType type = SourceEventType::Unknown;
-  if (aEvent->AsTouchEvent()) {
-    type = SourceEventType::Touch;
-  } else if (aEvent->AsMouseEvent()) {
-    type = SourceEventType::Mouse;
-  } else if (aEvent->AsKeyboardEvent()) {
-    type = SourceEventType::Key;
+  Maybe<AutoSourceEvent> taskTracerEvent;
+  if (MOZ_UNLIKELY(IsStartLogging())) {
+    // Make touch events, mouse events and hardware key events to be
+    // the source events of TaskTracer, and originate the rest
+    // correlation tasks from here.
+    SourceEventType type = SourceEventType::Unknown;
+    if (aEvent->AsTouchEvent()) {
+      type = SourceEventType::Touch;
+    } else if (aEvent->AsMouseEvent()) {
+      type = SourceEventType::Mouse;
+    } else if (aEvent->AsKeyboardEvent()) {
+      type = SourceEventType::Key;
+    }
+    taskTracerEvent.emplace(type);
   }
-  AutoSourceEvent taskTracerEvent(type);
 #endif
 
   NS_ASSERTION(aFrame, "aFrame should be not null");
@@ -8055,16 +8067,28 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent,
             nsPresContext::InteractionType::eKeyInteraction,
             aEvent->mTimeStamp);
         }
+
+        Telemetry::AccumulateTimeDelta(Telemetry::KEYBOARD_EVENT_RECEIVED_MS, aEvent->mTimeStamp);
         break;
       }
       case eMouseDown:
       case eMouseUp:
+        Telemetry::AccumulateTimeDelta(Telemetry::MOUSE_CLICK_EVENT_RECEIVED_MS, aEvent->mTimeStamp);
+        MOZ_FALLTHROUGH;
       case ePointerDown:
       case ePointerUp:
         isHandlingUserInput = true;
         mPresContext->RecordInteractionTime(
           nsPresContext::InteractionType::eClickInteraction,
           aEvent->mTimeStamp);
+        break;
+
+      case eMouseMove:
+        if (aEvent->mFlags.mHandledByAPZ) {
+          Telemetry::AccumulateTimeDelta(Telemetry::APZ_HANDLED_MOUSE_MOVE_EVENT_RECEIVED_MS, aEvent->mTimeStamp);
+        } else {
+          Telemetry::AccumulateTimeDelta(Telemetry::MOUSE_MOVE_EVENT_RECEIVED_MS, aEvent->mTimeStamp);
+        }
         break;
 
       case eDrop: {
@@ -8078,6 +8102,18 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent,
         }
         break;
       }
+
+      case eWheel:
+        if (aEvent->mFlags.mHandledByAPZ) {
+          Telemetry::AccumulateTimeDelta(Telemetry::APZ_HANDLED_WHEEL_EVENT_RECEIVED_MS, aEvent->mTimeStamp);
+        }
+        break;
+
+      case eTouchMove:
+        if (aEvent->mFlags.mHandledByAPZ) {
+          Telemetry::AccumulateTimeDelta(Telemetry::APZ_HANDLED_TOUCH_MOVE_EVENT_RECEIVED_MS, aEvent->mTimeStamp);
+        }
+        break;
 
       default:
         break;
@@ -9142,10 +9178,13 @@ PresShell::ScheduleReflowOffTimer()
 
   if (!mReflowContinueTimer) {
     mReflowContinueTimer = do_CreateInstance("@mozilla.org/timer;1");
+    mReflowContinueTimer->SetTarget(
+        mDocument->EventTargetFor(TaskCategory::Other));
     if (!mReflowContinueTimer ||
         NS_FAILED(mReflowContinueTimer->
-                    InitWithFuncCallback(sReflowContinueCallback, this, 30,
-                                         nsITimer::TYPE_ONE_SHOT))) {
+                    InitWithNamedFuncCallback(sReflowContinueCallback, this, 30,
+                                              nsITimer::TYPE_ONE_SHOT,
+                                              "sReflowContinueCallback"))) {
       return false;
     }
   }
@@ -9172,9 +9211,9 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
 
 #ifdef MOZ_GECKO_PROFILER
   nsIURI* uri = mDocument->GetDocumentURI();
-  PROFILER_LABEL_PRINTF("PresShell", "DoReflow",
-    js::ProfileEntry::Category::GRAPHICS, "(%s)",
-    uri ? uri->GetSpecOrDefault().get() : "N/A");
+  nsCString uriString = uri ? uri->GetSpecOrDefault() : NS_LITERAL_CSTRING("N/A");
+  PROFILER_LABEL_DYNAMIC("PresShell", "DoReflow",
+    js::ProfileEntry::Category::GRAPHICS, Move(uriString));
 #endif
 
   nsDocShell* docShell = static_cast<nsDocShell*>(GetPresContext()->GetDocShell());
@@ -10993,12 +11032,18 @@ void
 nsIPresShell::RecomputeFontSizeInflationEnabled()
 {
   mFontSizeInflationEnabledIsDirty = false;
+  mFontSizeInflationEnabled = DetermineFontSizeInflationState();
 
+  HandleSystemFontScale();
+}
+
+bool
+nsIPresShell::DetermineFontSizeInflationState()
+{
   MOZ_ASSERT(mPresContext, "our pres context should not be null");
   if ((FontSizeInflationEmPerLine() == 0 &&
       FontSizeInflationMinTwips() == 0) || mPresContext->IsChrome()) {
-    mFontSizeInflationEnabled = false;
-    return;
+    return false;
   }
 
   // Force-enabling font inflation always trumps the heuristics here.
@@ -11007,15 +11052,13 @@ nsIPresShell::RecomputeFontSizeInflationEnabled()
       // We're in a child process.  Cancel inflation if we're not
       // async-pan zoomed.
       if (!tab->AsyncPanZoomEnabled()) {
-        mFontSizeInflationEnabled = false;
-        return;
+        return false;
       }
     } else if (XRE_IsParentProcess()) {
       // We're in the master process.  Cancel inflation if it's been
       // explicitly disabled.
       if (FontSizeInflationDisabledInMasterProcess()) {
-        mFontSizeInflationEnabled = false;
-        return;
+        return false;
       }
     }
   }
@@ -11040,8 +11083,7 @@ nsIPresShell::RecomputeFontSizeInflationEnabled()
   nsCOMPtr<nsIScreenManager> screenMgr =
     do_GetService("@mozilla.org/gfx/screenmanager;1", &rv);
   if (!NS_SUCCEEDED(rv)) {
-    mFontSizeInflationEnabled = false;
-    return;
+    return false;
   }
 
   nsCOMPtr<nsIScreen> screen;
@@ -11054,12 +11096,11 @@ nsIPresShell::RecomputeFontSizeInflationEnabled()
       GetDocument()->GetViewportInfo(ScreenIntSize(screenWidth, screenHeight));
 
     if (vInf.GetDefaultZoom() >= CSSToScreenScale(1.0f) || vInf.IsAutoSizeEnabled()) {
-      mFontSizeInflationEnabled = false;
-      return;
+      return false;
     }
   }
 
-  mFontSizeInflationEnabled = true;
+  return true;
 }
 
 bool
@@ -11070,6 +11111,23 @@ nsIPresShell::FontSizeInflationEnabled()
   }
 
   return mFontSizeInflationEnabled;
+}
+
+void
+nsIPresShell::HandleSystemFontScale()
+{
+  float fontScale = nsLayoutUtils::SystemFontScale();
+  if (fontScale == 0.0f) {
+    return;
+  }
+
+  MOZ_ASSERT(mDocument && mPresContext, "our document and pres context should not be null");
+
+  if (!mFontSizeInflationEnabled && !mDocument->IsSyntheticDocument()) {
+    mPresContext->SetSystemFontScale(fontScale);
+  } else {
+    mPresContext->SetSystemFontScale(1.0f);
+  }
 }
 
 void

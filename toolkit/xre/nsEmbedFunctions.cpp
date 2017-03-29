@@ -25,6 +25,7 @@
 #ifdef XP_WIN
 #include <process.h>
 #include "mozilla/ipc/WindowsMessageLoop.h"
+#include "mozilla/TlsAllocationTracker.h"
 #endif
 
 #include "nsAppDirectoryServiceDefs.h"
@@ -337,6 +338,30 @@ AddContentSandboxLevelAnnotation()
 #endif /* MOZ_CONTENT_SANDBOX && !MOZ_WIDGET_GONK */
 #endif /* MOZ_CRASHREPORTER */
 
+namespace {
+
+int GetDebugChildPauseTime() {
+  auto pauseStr = PR_GetEnv("MOZ_DEBUG_CHILD_PAUSE");
+  if (pauseStr && *pauseStr) {
+    int pause = atoi(pauseStr);
+    if (pause != 1) { // must be !=1 since =1 enables the default pause time
+#if defined(OS_WIN)
+      pause *= 1000; // convert to ms
+#endif
+      return pause;
+    }
+  }
+#ifdef OS_POSIX
+  return 30; // seconds
+#elif defined(OS_WIN)
+  return 10000; // milliseconds
+#else
+  return 0;
+#endif
+}
+
+} // namespace
+
 nsresult
 XRE_InitChildProcess(int aArgc,
                      char* aArgv[],
@@ -358,6 +383,14 @@ XRE_InitChildProcess(int aArgc,
 #endif
 
 #if defined(XP_WIN)
+#ifndef DEBUG
+  // XXX Bug 1320134: added for diagnosing the crashes because we're running out
+  // of TLS indices on Windows. Remove after the root cause is found.
+  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+    mozilla::InitTlsAllocationTracker();
+  }
+#endif
+
   // From the --attach-console support in nsNativeAppSupportWin.cpp, but
   // here we are a content child process, so we always attempt to attach
   // to the parent's (ie, the browser's) console.
@@ -534,7 +567,7 @@ XRE_InitChildProcess(int aArgc,
 #endif
     printf_stderr("\n\nCHILDCHILDCHILDCHILD\n  debug me @ %d\n\n",
                   base::GetCurrentProcId());
-    sleep(30);
+    sleep(GetDebugChildPauseTime());
   }
 #elif defined(OS_WIN)
   if (PR_GetEnv("MOZ_DEBUG_CHILD_PROCESS")) {
@@ -544,7 +577,7 @@ XRE_InitChildProcess(int aArgc,
   } else if (PR_GetEnv("MOZ_DEBUG_CHILD_PAUSE")) {
     printf_stderr("\n\nCHILDCHILDCHILDCHILD\n  debug me @ %d\n\n",
                   base::GetCurrentProcId());
-    ::Sleep(10000);
+    ::Sleep(GetDebugChildPauseTime());
   }
 #endif
 
@@ -696,6 +729,14 @@ XRE_InitChildProcess(int aArgc,
 #endif
     }
   }
+
+#if defined(XP_WIN) && !defined(DEBUG)
+  // XXX Bug 1320134: added for diagnosing the crashes because we're running out
+  // of TLS indices on Windows. Remove after the root cause is found.
+  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+    mozilla::ShutdownTlsAllocationTracker();
+  }
+#endif
 
   Telemetry::DestroyStatisticsRecorder();
   return XRE_DeinitCommandLine();

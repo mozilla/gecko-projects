@@ -18,8 +18,10 @@
 #include "nsMenuBarFrame.h"
 #include "nsPopupSetFrame.h"
 #include "nsPIDOMWindow.h"
+#include "nsIDOMEvent.h"
 #include "nsIDOMKeyEvent.h"
 #include "nsIDOMScreen.h"
+#include "nsIDOMXULMenuListElement.h"
 #include "nsIPresShell.h"
 #include "nsFrameManager.h"
 #include "nsIDocument.h"
@@ -53,6 +55,7 @@
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/dom/PopupBoxObject.h"
 #include <algorithm>
 
@@ -94,6 +97,7 @@ NS_QUERYFRAME_TAIL_INHERITING(nsBoxFrame)
 nsMenuPopupFrame::nsMenuPopupFrame(nsStyleContext* aContext)
   :nsBoxFrame(aContext),
   mCurrentMenu(nullptr),
+  mView(nullptr),
   mPrefSize(-1, -1),
   mLastClientOffset(0, 0),
   mPopupType(ePopupTypePanel),
@@ -337,7 +341,7 @@ nsMenuPopupFrame::GetShadowStyle()
   if (shadow != NS_STYLE_WINDOW_SHADOW_DEFAULT)
     return shadow;
 
-  switch (StyleDisplay()->mAppearance) {
+  switch (StyleDisplay()->UsedAppearance()) {
     case NS_THEME_TOOLTIP:
       return NS_STYLE_WINDOW_SHADOW_TOOLTIP;
     case NS_THEME_MENUPOPUP:
@@ -529,7 +533,7 @@ nsMenuPopupFrame::LayoutPopup(nsBoxLayoutState& aState, nsIFrame* aParentMenu,
     }
 
     viewManager->SetViewVisibility(view, nsViewVisibility_kShow);
-    nsContainerFrame::SyncFrameViewProperties(pc, this, nullptr, view, 0);
+    SyncFrameViewProperties(view);
   }
 
   // finally, if the popup just opened, send a popupshown event
@@ -556,7 +560,9 @@ nsMenuPopupFrame::LayoutPopup(nsBoxLayoutState& aState, nsIFrame* aParentMenu,
 
     // If there are no transitions, fire the popupshown event right away.
     nsCOMPtr<nsIRunnable> event = new nsXULPopupShownEvent(GetContent(), pc);
-    NS_DispatchToCurrentThread(event);
+    mContent->OwnerDoc()->Dispatch("nsXULPopupShownEvent",
+                                   TaskCategory::Other,
+                                   event.forget());
   }
 
   if (needCallback && !mReflowCallbackData.mPosted) {
@@ -2436,7 +2442,7 @@ nsMenuPopupFrame::GetAlignmentPosition() const
 }
 
 /**
- * KEEP THIS IN SYNC WITH nsContainerFrame::CreateViewForFrame
+ * KEEP THIS IN SYNC WITH nsFrame::CreateView
  * as much as possible. Until we get rid of views finally...
  */
 void

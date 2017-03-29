@@ -12,10 +12,8 @@ const Cu = Components.utils;
 const myScope = this;
 
 Cu.import("resource://gre/modules/Log.jsm");
-Cu.import("resource://gre/modules/debug.js", this);
 Cu.import("resource://gre/modules/Services.jsm", this);
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
-Cu.import("resource://gre/modules/osfile.jsm", this);
 Cu.import("resource://gre/modules/Promise.jsm", this);
 Cu.import("resource://gre/modules/PromiseUtils.jsm", this);
 Cu.import("resource://gre/modules/Task.jsm", this);
@@ -719,6 +717,9 @@ var Impl = {
     // a few observers and initializing the session.
     TelemetrySession.earlyInit(this._testMode);
 
+    // Annotate crash reports so that we get pings for startup crashes
+    TelemetrySend.earlyInit();
+
     // For very short session durations, we may never load the client
     // id from disk.
     // We try to cache it in prefs to avoid this, even though this may
@@ -735,10 +736,10 @@ var Impl = {
         this._initialized = true;
         TelemetryEnvironment.delayedInit();
 
-        yield TelemetrySend.setup(this._testMode);
-
         // Load the ClientID.
         this._clientID = yield ClientID.getClientID();
+
+        yield TelemetrySend.setup(this._testMode);
 
         // Perform TelemetrySession delayed init.
         yield TelemetrySession.delayedInit();

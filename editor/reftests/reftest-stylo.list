@@ -1,4 +1,3 @@
-# DO NOT EDIT! This is a auto-generated temporary list for Stylo testing
 # include the XUL reftests
 include xul/reftest-stylo.list
 
@@ -83,7 +82,7 @@ fails needs-focus == spellcheck-non-latin-japanese.html spellcheck-non-latin-jap
 fails needs-focus == spellcheck-non-latin-korean.html spellcheck-non-latin-korean.html
 fails == unneeded_scroll.html unneeded_scroll.html
 == caret_on_presshell_reinit.html caret_on_presshell_reinit.html
-== caret_on_presshell_reinit-2.html caret_on_presshell_reinit-2.html
+asserts-if(stylo&&isDebugBuild,0-2) fuzzy-if(stylo,255,3) == caret_on_presshell_reinit-2.html caret_on_presshell_reinit-2.html
 fails == 642800.html 642800.html
 fails == selection_visibility_after_reframe.html selection_visibility_after_reframe.html
 fails == selection_visibility_after_reframe-2.html selection_visibility_after_reframe-2.html
@@ -102,7 +101,7 @@ fails == dynamic-overflow-change.html dynamic-overflow-change.html
 fails == 694880-1.html 694880-1.html
 fails == 694880-2.html 694880-2.html
 fails == 694880-3.html 694880-3.html
-fails == 388980-1.html 388980-1.html
+== 388980-1.html 388980-1.html
 fails needs-focus == spellcheck-superscript-1.html spellcheck-superscript-1.html
 fails == spellcheck-superscript-2.html spellcheck-superscript-2.html
 == 824080-1.html 824080-1.html

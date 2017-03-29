@@ -26,7 +26,7 @@ NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 NS_QUERYFRAME_HEAD(nsSVGDisplayContainerFrame)
   NS_QUERYFRAME_ENTRY(nsSVGDisplayContainerFrame)
-  NS_QUERYFRAME_ENTRY(nsISVGChildFrame)
+  NS_QUERYFRAME_ENTRY(nsSVGDisplayableFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsSVGContainerFrame)
 
 nsIFrame*
@@ -176,7 +176,7 @@ nsSVGDisplayContainerFrame::InsertFrames(ChildListID aListID,
          NS_FRAME_IS_NONDISPLAY))) {
     for (nsIFrame* kid = firstNewFrame; kid != nextFrame;
          kid = kid->GetNextSibling()) {
-      nsISVGChildFrame* SVGFrame = do_QueryFrame(kid);
+      nsSVGDisplayableFrame* SVGFrame = do_QueryFrame(kid);
       if (SVGFrame) {
         MOZ_ASSERT(!(kid->GetStateBits() & NS_FRAME_IS_NONDISPLAY),
                    "Check for this explicitly in the |if|, then");
@@ -249,12 +249,13 @@ nsSVGDisplayContainerFrame::IsSVGTransformed(gfx::Matrix *aOwnTransform,
 }
 
 //----------------------------------------------------------------------
-// nsISVGChildFrame methods
+// nsSVGDisplayableFrame methods
 
 DrawResult
 nsSVGDisplayContainerFrame::PaintSVG(gfxContext& aContext,
                                      const gfxMatrix& aTransform,
-                                     const nsIntRect *aDirtyRect)
+                                     const nsIntRect *aDirtyRect,
+                                     uint32_t aFlags)
 {
   NS_ASSERTION(!NS_SVGDisplayListPaintingEnabled() ||
                (mState & NS_FRAME_IS_NONDISPLAY) ||
@@ -292,7 +293,8 @@ nsSVGDisplayContainerFrame::PaintSVG(gfxContext& aContext,
         continue;
       }
     }
-    result = nsSVGUtils::PaintFrameWithEffects(kid, aContext, m, aDirtyRect);
+    result = nsSVGUtils::PaintFrameWithEffects(kid, aContext, m, aDirtyRect,
+                                               aFlags);
     if (result != DrawResult::SUCCESS) {
       return result;
     }
@@ -309,12 +311,6 @@ nsSVGDisplayContainerFrame::GetFrameForPoint(const gfxPoint& aPoint)
                "If display lists are enabled, only hit-testing of a "
                "clipPath's contents should take this code path");
   return nsSVGUtils::HitTestChildren(this, aPoint);
-}
-
-nsRect
-nsSVGDisplayContainerFrame::GetCoveredRegion()
-{
-  return nsSVGUtils::GetCoveredRegion(mFrames);
 }
 
 void
@@ -353,7 +349,7 @@ nsSVGDisplayContainerFrame::ReflowSVG()
 
   for (nsIFrame* kid = mFrames.FirstChild(); kid;
        kid = kid->GetNextSibling()) {
-    nsISVGChildFrame* SVGFrame = do_QueryFrame(kid);
+    nsSVGDisplayableFrame* SVGFrame = do_QueryFrame(kid);
     if (SVGFrame) {
       MOZ_ASSERT(!(kid->GetStateBits() & NS_FRAME_IS_NONDISPLAY),
                  "Check for this explicitly in the |if|, then");
@@ -426,7 +422,7 @@ nsSVGDisplayContainerFrame::GetBBoxContribution(
   nsIFrame* kid = mFrames.FirstChild();
   while (kid) {
     nsIContent *content = kid->GetContent();
-    nsISVGChildFrame* svgKid = do_QueryFrame(kid);
+    nsSVGDisplayableFrame* svgKid = do_QueryFrame(kid);
     // content could be a XUL element so check for an SVG element before casting
     if (svgKid && (!content->IsSVGElement() ||
                    static_cast<const nsSVGElement*>(content)->HasValidDimensions())) {

@@ -465,6 +465,13 @@ EditorBase::PreDestroy(bool aDestroyingFrames)
   mSpellcheckCheckboxState = eTriUnset;
   mRootElement = nullptr;
 
+  // Transaction may grab this instance.  Therefore, they should be released
+  // here for stopping the circular reference with this instance.
+  if (mTxnMgr) {
+    mTxnMgr->Clear();
+    mTxnMgr = nullptr;
+  }
+
   mDidPreDestroy = true;
   return NS_OK;
 }
@@ -784,16 +791,6 @@ EditorBase::GetTransactionManager(nsITransactionManager** aTxnManager)
   NS_ENSURE_TRUE(mTxnMgr, NS_ERROR_FAILURE);
 
   NS_ADDREF(*aTxnManager = mTxnMgr);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-EditorBase::SetTransactionManager(nsITransactionManager* aTxnManager)
-{
-  NS_ENSURE_TRUE(aTxnManager, NS_ERROR_FAILURE);
-
-  // nsITransactionManager is builtinclass, so this is safe
-  mTxnMgr = static_cast<nsTransactionManager*>(aTxnManager);
   return NS_OK;
 }
 

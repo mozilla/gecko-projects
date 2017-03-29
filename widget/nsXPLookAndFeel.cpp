@@ -13,6 +13,7 @@
 #include "nsFont.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/ServoStyleSet.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/widget/WidgetMessageUtils.h"
 
@@ -437,6 +438,8 @@ nsXPLookAndFeel::OnPrefChanged(const char* aPref, void* aClosure)
 void
 nsXPLookAndFeel::Init()
 {
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
+
   // Say we're already initialized, and take the chance that it might fail;
   // protects against some other process writing to our static variables.
   sInitialized = true;
@@ -444,7 +447,9 @@ nsXPLookAndFeel::Init()
   // XXX If we could reorganize the pref names, we should separate the branch
   //     for each types.  Then, we could reduce the unnecessary loop from
   //     nsXPLookAndFeel::OnPrefChanged().
-  Preferences::RegisterCallback(OnPrefChanged, "ui.");
+  Preferences::RegisterPrefixCallback(OnPrefChanged, "ui.");
+  // We really do just want the accessibility.tabfocus pref, not other prefs
+  // that start with that string.
   Preferences::RegisterCallback(OnPrefChanged, "accessibility.tabfocus");
 
   unsigned int i;
@@ -823,7 +828,10 @@ nsXPLookAndFeel::GetColorImpl(ColorID aID, bool aUseStandinsForNativeColors,
       }
     }
 
-    CACHE_COLOR(aID, aResult);
+    if (!mozilla::ServoStyleSet::IsInServoTraversal()) {
+      MOZ_ASSERT(NS_IsMainThread());
+      CACHE_COLOR(aID, aResult);
+    }
     return NS_OK;
   }
 

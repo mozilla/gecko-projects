@@ -19,6 +19,8 @@
 #include "jit/JitFrames.h"
 #include "vm/StringBuffer.h"
 
+#include "jsgcinlines.h"
+
 using namespace js;
 
 using mozilla::DebugOnly;
@@ -140,6 +142,12 @@ GeckoProfiler::enable(bool enabled)
             }
         }
     }
+
+    // WebAssembly code does not need to be released, but profiling string
+    // labels have to be generated so that they are available during async
+    // profiling stack iteration.
+    for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next())
+        c->wasm.ensureProfilingLabels(enabled);
 
     return true;
 }
@@ -289,6 +297,7 @@ GeckoProfiler::push(const char* string, void* sp, JSScript* script, jsbytecode* 
         }
 
         entry.setLabel(string);
+        entry.setDynamicString(nullptr);
         entry.setCategory(category);
 
         // Track if mLabel needs a copy.

@@ -238,10 +238,14 @@ MP4AudioInfo::Update(const mp4parse_track_info* track,
     mProfile = audio->profile;
   }
 
-  const uint8_t* cdata = audio->codec_specific_config.data;
-  size_t size = audio->codec_specific_config.length;
-  if (size > 0) {
-    mCodecSpecificConfig->AppendElements(cdata, size);
+  if (audio->codec_specific_config.length > 0) {
+    mExtraData->AppendElements(audio->codec_specific_config.data,
+                               audio->codec_specific_config.length);
+  }
+
+  if (audio->codec_specific_data.length > 0) {
+    mCodecSpecificConfig->AppendElements(audio->codec_specific_data.data,
+                                         audio->codec_specific_data.length);
   }
 }
 
@@ -262,6 +266,7 @@ MP4VideoInfo::Update(const mp4parse_track_info* track,
   mDisplay.height = video->display_height;
   mImage.width = video->image_width;
   mImage.height = video->image_height;
+  mRotation = ToSupportedRotation(video->rotation);
   if (video->extra_data.data) {
     mExtraData->AppendElements(video->extra_data.data, video->extra_data.length);
   }

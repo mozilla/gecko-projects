@@ -17,7 +17,7 @@
 #include "gfxUtils.h"
 #include "mozilla/gfx/Helpers.h"
 #include "mozilla/gfx/PatternHelpers.h"
-#include "nsISVGChildFrame.h"
+#include "nsSVGDisplayableFrame.h"
 #include "nsCSSFilterInstance.h"
 #include "nsSVGFilterInstance.h"
 #include "nsSVGFilterPaintCallback.h"
@@ -236,31 +236,9 @@ nsFilterInstance::ComputeTargetBBoxInFilterSpace()
 {
   gfxRect targetBBoxInFilterSpace = UserSpaceToFilterSpace(mTargetBBox);
   targetBBoxInFilterSpace.RoundOut();
-  if (!gfxUtils::GfxRectToIntRect(targetBBoxInFilterSpace,
-                                  &mTargetBBoxInFilterSpace)) {
-    // The target's bbox is way too big if there is float->int overflow.
-    return false;
-  }
 
-  if (!mTargetFrame || !mTargetFrame->IsFrameOfType(nsIFrame::eSVG)) {
-    return true;
-  }
-
-  // SVG graphic elements will always be clipped by svg::svg element, so we
-  // should clip mTargetBBoxInFilterSpace by the bounded parent SVG frame
-  // anyway to shrink the size of surface that we are going to create later in
-  // BuildSourcePaint and BuildSourceImage.
-  MOZ_ASSERT(mTargetFrame->IsFrameOfType(nsIFrame::eSVG));
-  nsIFrame* svgFrame = nsSVGUtils::GetNearestSVGViewport(mTargetFrame);
-  if (svgFrame) {
-    nscoord A2D = svgFrame->PresContext()->AppUnitsPerCSSPixel();
-    nsIntRect bounds =
-      svgFrame->GetVisualOverflowRect().ToOutsidePixels(A2D);
-
-    mTargetBBoxInFilterSpace = mTargetBBoxInFilterSpace.Intersect(bounds);
-  }
-
-  return true;
+  return gfxUtils::GfxRectToIntRect(targetBBoxInFilterSpace,
+                                    &mTargetBBoxInFilterSpace);
 }
 
 bool
@@ -418,10 +396,11 @@ nsFilterInstance::BuildSourcePaint(SourceInfo *aSource)
   ctx->SetMatrix(mPaintTransform *
                  gfxMatrix::Translation(-neededRect.TopLeft()));
   GeneralPattern pattern;
+  DrawResult result = DrawResult::SUCCESS;
   if (aSource == &mFillPaint) {
-    nsSVGUtils::MakeFillPatternFor(mTargetFrame, ctx, &pattern);
+    result = nsSVGUtils::MakeFillPatternFor(mTargetFrame, ctx, &pattern);
   } else if (aSource == &mStrokePaint) {
-    nsSVGUtils::MakeStrokePatternFor(mTargetFrame, ctx, &pattern);
+    result = nsSVGUtils::MakeStrokePatternFor(mTargetFrame, ctx, &pattern);
   }
 
   if (pattern.GetPattern()) {
@@ -432,7 +411,7 @@ nsFilterInstance::BuildSourcePaint(SourceInfo *aSource)
   aSource->mSourceSurface = offscreenDT->Snapshot();
   aSource->mSurfaceRect = neededRect;
 
-  return DrawResult::SUCCESS;
+  return result;
 }
 
 DrawResult
@@ -529,9 +508,10 @@ nsFilterInstance::Render(DrawTarget* aDrawTarget)
   MOZ_ASSERT(invertible);
   filterSpaceToUserSpace *= nsSVGUtils::GetCSSPxToDevPxMatrix(mTargetFrame);
 
-  aDrawTarget->SetTransform(ToMatrix(filterSpaceToUserSpace) *
-                            aDrawTarget->GetTransform() *
-                            Matrix::Translation(filterRect.TopLeft()));
+  Matrix newTM =
+    ToMatrix(filterSpaceToUserSpace).PreTranslate(filterRect.x, filterRect.y) *
+    aDrawTarget->GetTransform();
+  aDrawTarget->SetTransform(newTM);
 
   ComputeNeededBoxes();
 

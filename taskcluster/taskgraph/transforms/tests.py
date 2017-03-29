@@ -25,12 +25,12 @@ from taskgraph.util.treeherder import split_symbol, join_symbol
 from taskgraph.util.schema import (
     validate_schema,
     optionally_keyed_by,
+    Schema,
 )
 from voluptuous import (
     Any,
     Optional,
     Required,
-    Schema,
 )
 
 import copy
@@ -486,6 +486,8 @@ def enable_code_coverage(config, tests):
     for test in tests:
         if test['build-platform'] == 'linux64-ccov/opt':
             test['mozharness'].setdefault('extra-options', []).append('--code-coverage')
+            test['instance-size'] = 'xlarge'
+            test['e10s'] = False
             test['run-on-projects'] = []
         elif test['build-platform'] == 'linux64-jsdcov/opt':
             test['run-on-projects'] = []
@@ -600,10 +602,11 @@ def remove_linux_pgo_try_talos(config, tests):
 
 
 @transforms.add
-def set_mochitest_test_type(config, tests):
+def set_test_type(config, tests):
     for test in tests:
-        if 'mochitest' in test['suite']:
-            test.setdefault('tags', {})['test-type'] = 'mochitest'
+        for test_type in ['mochitest', 'reftest']:
+            if test_type in test['suite'] and 'web-platform' not in test['suite']:
+                test.setdefault('tags', {})['test-type'] = test_type
         yield test
 
 

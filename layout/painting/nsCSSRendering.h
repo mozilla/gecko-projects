@@ -116,7 +116,7 @@ struct nsCSSRendering {
                                   RectCornerRadii& aOutInnerRadii);
   static nsRect GetBoxShadowInnerPaddingRect(nsIFrame* aFrame,
                                              const nsRect& aFrameArea);
-  static bool CanPaintBoxShadowInner(nsIFrame* aFrame);
+  static bool ShouldPaintBoxShadowInner(nsIFrame* aFrame);
   static void PaintBoxShadowInner(nsPresContext* aPresContext,
                                   nsRenderingContext& aRenderingContext,
                                   nsIFrame* aForFrame,
@@ -237,7 +237,7 @@ struct nsCSSRendering {
    * aIntrinsicSize is the size of the source gradient.
    */
   static void PaintGradient(nsPresContext* aPresContext,
-                            nsRenderingContext& aRenderingContext,
+                            gfxContext& aContext,
                             nsStyleGradient* aGradient,
                             const nsRect& aDirtyRect,
                             const nsRect& aDest,

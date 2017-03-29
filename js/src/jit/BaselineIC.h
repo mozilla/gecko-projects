@@ -371,20 +371,10 @@ class ICGetElem_Fallback : public ICMonitoredFallbackStub
       : ICMonitoredFallbackStub(ICStub::GetElem_Fallback, stubCode)
     { }
 
-    static const uint16_t EXTRA_NON_NATIVE = 0x1;
-    static const uint16_t EXTRA_NEGATIVE_INDEX = 0x2;
-    static const uint16_t EXTRA_UNOPTIMIZABLE_ACCESS = 0x4;
+    static const uint16_t EXTRA_NEGATIVE_INDEX = 0x1;
+    static const uint16_t EXTRA_UNOPTIMIZABLE_ACCESS = 0x2;
 
   public:
-    static const uint32_t MAX_OPTIMIZED_STUBS = 16;
-
-    void noteNonNativeAccess() {
-        extra_ |= EXTRA_NON_NATIVE;
-    }
-    bool hasNonNativeAccess() const {
-        return extra_ & EXTRA_NON_NATIVE;
-    }
-
     void noteNegativeIndex() {
         extra_ |= EXTRA_NEGATIVE_INDEX;
     }
@@ -435,8 +425,6 @@ class ICSetElem_Fallback : public ICFallbackStub
     static const size_t HasTypedArrayOOBFlag = 0x2;
 
   public:
-    static const uint32_t MAX_OPTIMIZED_STUBS = 8;
-
     void noteHasDenseAdd() { extra_ |= HasDenseAddFlag; }
     bool hasDenseAdd() const { return extra_ & HasDenseAddFlag; }
 
@@ -470,8 +458,6 @@ class ICIn_Fallback : public ICFallbackStub
     { }
 
   public:
-    static const uint32_t MAX_OPTIMIZED_STUBS = 8;
-
     class Compiler : public ICStubCompiler {
       protected:
         MOZ_MUST_USE bool generateStubCode(MacroAssembler& masm);
@@ -500,7 +486,6 @@ class ICGetName_Fallback : public ICMonitoredFallbackStub
     { }
 
   public:
-    static const uint32_t MAX_OPTIMIZED_STUBS = 8;
     static const size_t UNOPTIMIZABLE_ACCESS_BIT = 0;
 
     void noteUnoptimizableAccess() {
@@ -634,8 +619,6 @@ class ICSetProp_Fallback : public ICFallbackStub
     { }
 
   public:
-    static const uint32_t MAX_OPTIMIZED_STUBS = 8;
-
     static const size_t UNOPTIMIZABLE_ACCESS_BIT = 0;
     void noteUnoptimizableAccess() {
         extra_ |= (1u << UNOPTIMIZABLE_ACCESS_BIT);
@@ -668,6 +651,7 @@ class ICSetProp_Fallback : public ICFallbackStub
 
 // Call
 //      JSOP_CALL
+//      JSOP_CALL_IGNORES_RV
 //      JSOP_FUNAPPLY
 //      JSOP_FUNCALL
 //      JSOP_NEW
@@ -938,6 +922,7 @@ class ICCall_Native : public ICMonitoredStub
       protected:
         ICStub* firstMonitorStub_;
         bool isConstructing_;
+        bool ignoresReturnValue_;
         bool isSpread_;
         RootedFunction callee_;
         RootedObject templateObject_;
@@ -947,17 +932,19 @@ class ICCall_Native : public ICMonitoredStub
         virtual int32_t getKey() const {
             return static_cast<int32_t>(engine_) |
                   (static_cast<int32_t>(kind) << 1) |
-                  (static_cast<int32_t>(isConstructing_) << 17) |
-                  (static_cast<int32_t>(isSpread_) << 18);
+                  (static_cast<int32_t>(isSpread_) << 17) |
+                  (static_cast<int32_t>(isConstructing_) << 18) |
+                  (static_cast<int32_t>(ignoresReturnValue_) << 19);
         }
 
       public:
         Compiler(JSContext* cx, ICStub* firstMonitorStub,
                  HandleFunction callee, HandleObject templateObject,
-                 bool isConstructing, bool isSpread, uint32_t pcOffset)
+                 bool isConstructing, bool ignoresReturnValue, bool isSpread, uint32_t pcOffset)
           : ICCallStubCompiler(cx, ICStub::Call_Native),
             firstMonitorStub_(firstMonitorStub),
             isConstructing_(isConstructing),
+            ignoresReturnValue_(ignoresReturnValue),
             isSpread_(isSpread),
             callee_(cx, callee),
             templateObject_(cx, templateObject),
@@ -1539,6 +1526,8 @@ class ICTypeOf_Fallback : public ICFallbackStub
     { }
 
   public:
+    static const uint32_t MAX_OPTIMIZED_STUBS = 6;
+
     class Compiler : public ICStubCompiler {
       protected:
         MOZ_MUST_USE bool generateStubCode(MacroAssembler& masm);

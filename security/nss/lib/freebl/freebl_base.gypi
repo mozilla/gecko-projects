@@ -21,7 +21,6 @@
     'ecdecode.c',
     'ecl/ec_naf.c',
     'ecl/ecl.c',
-    'ecl/ecl_curve.c',
     'ecl/ecl_gf.c',
     'ecl/ecl_mult.c',
     'ecl/ecp_25519.c',
@@ -159,15 +158,11 @@
         }],
       ],
     }],
-    [ 'fuzz_oss==1', {
-      'defines': [
-        'UNSAFE_RNG_NO_URANDOM_SEED',
-      ],
+    [ 'fuzz==1', {
+      'sources!': [ 'drbg.c' ],
+      'sources': [ 'det_rng.c' ],
     }],
     [ 'fuzz_tls==1', {
-      'sources': [
-        'det_rng.c',
-      ],
       'defines': [
         'UNSAFE_FUZZER_MODE',
       ],
@@ -176,6 +171,11 @@
       'defines': [
         'CT_VERIF',
       ],
+    }],
+    [ 'only_dev_random==1', {
+      'defines': [
+        'SEED_ONLY_DEV_URANDOM',
+      ]
     }],
     [ 'OS=="mac"', {
       'conditions': [

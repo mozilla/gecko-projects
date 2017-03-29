@@ -58,7 +58,6 @@
 #include "nsIDOMWindowUtils.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsILoadInfo.h"
-#include "nsPrincipal.h"
 #include "nsIPromptFactory.h"
 #include "nsIURI.h"
 #include "nsIWindowWatcher.h"
@@ -69,6 +68,7 @@
 #include "nsViewManager.h"
 #include "nsVariant.h"
 #include "nsIWidget.h"
+#include "nsNetUtil.h"
 #ifndef XP_WIN
 #include "nsJARProtocolHandler.h"
 #endif
@@ -79,7 +79,6 @@
 #include "PermissionMessageUtils.h"
 #include "StructuredCloneData.h"
 #include "ColorPickerParent.h"
-#include "DatePickerParent.h"
 #include "FilePickerParent.h"
 #include "TabChild.h"
 #include "LoadContext.h"
@@ -2470,20 +2469,6 @@ TabParent::DeallocPColorPickerParent(PColorPickerParent* actor)
   return true;
 }
 
-PDatePickerParent*
-TabParent::AllocPDatePickerParent(const nsString& aTitle,
-                                  const nsString& aInitialDate)
-{
-  return new DatePickerParent(aTitle, aInitialDate);
-}
-
-bool
-TabParent::DeallocPDatePickerParent(PDatePickerParent* actor)
-{
-  delete actor;
-  return true;
-}
-
 PRenderFrameParent*
 TabParent::AllocPRenderFrameParent()
 {
@@ -2819,6 +2804,18 @@ TabParent::NavigateByKey(bool aForward, bool aForDocumentNavigation)
 {
   Unused << SendNavigateByKey(aForward, aForDocumentNavigation);
   return NS_OK;
+}
+
+NS_IMETHODIMP
+TabParent::TransmitPermissionsForPrincipal(nsIPrincipal* aPrincipal)
+{
+  nsCOMPtr<nsIContentParent> manager = Manager();
+  if (!manager->IsContentParent()) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  return manager->AsContentParent()
+    ->TransmitPermissionsForPrincipal(aPrincipal);
 }
 
 class LayerTreeUpdateRunnable final

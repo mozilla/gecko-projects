@@ -230,7 +230,7 @@ IndiceWrapperRust::GetIndice(size_t aIndex, Index::Indice& aIndice) const
 MP4Metadata::MP4Metadata(Stream* aSource)
  : mStagefright(MakeUnique<MP4MetadataStagefright>(aSource))
  , mRust(MakeUnique<MP4MetadataRust>(aSource))
- , mPreferRust(false)
+ , mPreferRust(MediaPrefs::EnableRustMP4Parser())
  , mReportedAudioTrackTelemetry(false)
  , mReportedVideoTrackTelemetry(false)
 #ifndef RELEASE_OR_BETA
@@ -373,6 +373,7 @@ MP4Metadata::GetTrackInfo(mozilla::TrackInfo::TrackType aType,
       VideoInfo *videoRust = infoRust->GetAsVideoInfo(), *video = info->GetAsVideoInfo();
       MOZ_DIAGNOSTIC_ASSERT(videoRust->mDisplay == video->mDisplay);
       MOZ_DIAGNOSTIC_ASSERT(videoRust->mImage == video->mImage);
+      MOZ_DIAGNOSTIC_ASSERT(videoRust->mRotation == video->mRotation);
       MOZ_DIAGNOSTIC_ASSERT(*videoRust->mExtraData == *video->mExtraData);
       // mCodecSpecificConfig is for video/mp4-es, not video/avc. Since video/mp4-es
       // is supported on b2g only, it could be removed from TrackInfo.
@@ -421,7 +422,8 @@ mozilla::UniquePtr<IndiceWrapper>
 MP4Metadata::GetTrackIndice(mozilla::TrackID aTrackID)
 {
   FallibleTArray<Index::Indice> indiceSF;
-  if(!mStagefright->ReadTrackIndex(indiceSF, aTrackID)) {
+  if ((!mPreferRust || mRustTestMode) &&
+       !mStagefright->ReadTrackIndex(indiceSF, aTrackID)) {
     return nullptr;
   }
 

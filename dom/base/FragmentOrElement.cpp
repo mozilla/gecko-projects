@@ -390,9 +390,6 @@ nsIContent::GetBaseURI(bool aTryUseXHRDocBaseURI) const
 
   if (!baseAttrs.IsEmpty()) {
     doc->WarnOnceAbout(nsIDocument::eXMLBaseAttribute);
-    if (IsHTMLElement() || IsSVGElement() || IsXULElement()) {
-      doc->WarnOnceAbout(nsIDocument::eXMLBaseAttributeWithStyledElement);
-    }
     // Now resolve against all xml:base attrs
     for (uint32_t i = baseAttrs.Length() - 1; i != uint32_t(-1); --i) {
       nsCOMPtr<nsIURI> newBase;
@@ -414,21 +411,38 @@ nsIContent::GetBaseURI(bool aTryUseXHRDocBaseURI) const
   return base.forget();
 }
 
-already_AddRefed<nsIURI>
-nsIContent::GetBaseURIForStyleAttr() const
+nsIURI*
+nsIContent::GetBaseURIWithoutXMLBase() const
 {
-  if (!nsLayoutUtils::StyleAttrWithXMLBaseDisabled()) {
-    return GetBaseURI();
-  }
   if (IsInAnonymousSubtree() && IsAnonymousContentInSVGUseSubtree()) {
     nsIContent* bindingParent = GetBindingParent();
     MOZ_ASSERT(bindingParent);
     SVGUseElement* useElement = static_cast<SVGUseElement*>(bindingParent);
-    return do_AddRef(useElement->GetContentBaseURI());
+    return useElement->GetContentBaseURI();
   }
   // This also ignores the case that SVG inside XBL binding.
   // But it is probably fine.
-  return do_AddRef(OwnerDoc()->GetDocBaseURI());
+  return OwnerDoc()->GetDocBaseURI();
+}
+
+already_AddRefed<nsIURI>
+nsIContent::GetBaseURIForStyleAttr() const
+{
+  nsIDocument* doc = OwnerDoc();
+  nsIURI* baseWithoutXMLBase = GetBaseURIWithoutXMLBase();
+  nsCOMPtr<nsIURI> base = GetBaseURI();
+  // If eXMLBaseAttribute is not triggered in GetBaseURI() call above,
+  // we don't need to count eXMLBaseAttributeForStyleAttr either.
+  if (doc->HasWarnedAbout(nsIDocument::eXMLBaseAttribute) &&
+      !doc->HasWarnedAbout(nsIDocument::eXMLBaseAttributeForStyleAttr)) {
+    bool isEqual = false;
+    base->Equals(baseWithoutXMLBase, &isEqual);
+    if (!isEqual) {
+      doc->WarnOnceAbout(nsIDocument::eXMLBaseAttributeForStyleAttr);
+    }
+  }
+  return nsLayoutUtils::StyleAttrWithXMLBaseDisabled()
+    ? do_AddRef(baseWithoutXMLBase) : base.forget();
 }
 
 //----------------------------------------------------------------------
@@ -1150,24 +1164,6 @@ FragmentOrElement::SetXBLInsertionParent(nsIContent* aContent)
   if (IsStyledByServo() && IsElement() && AsElement()->HasServoData()) {
     ServoRestyleManager::ClearServoDataFromSubtree(AsElement());
   }
-}
-
-CustomElementData*
-FragmentOrElement::GetCustomElementData() const
-{
-  nsDOMSlots *slots = GetExistingDOMSlots();
-  if (slots) {
-    return slots->mCustomElementData;
-  }
-  return nullptr;
-}
-
-void
-FragmentOrElement::SetCustomElementData(CustomElementData* aData)
-{
-  nsDOMSlots *slots = DOMSlots();
-  MOZ_ASSERT(!slots->mCustomElementData, "Custom element data may not be changed once set.");
-  slots->mCustomElementData = aData;
 }
 
 nsresult
@@ -2085,6 +2081,12 @@ FragmentOrElement::AppendText(const char16_t* aBuffer, uint32_t aLength,
 
 bool
 FragmentOrElement::TextIsOnlyWhitespace()
+{
+  return false;
+}
+
+bool
+FragmentOrElement::ThreadSafeTextIsOnlyWhitespace() const
 {
   return false;
 }

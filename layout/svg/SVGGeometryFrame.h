@@ -10,7 +10,7 @@
 #include "gfxMatrix.h"
 #include "gfxRect.h"
 #include "nsFrame.h"
-#include "nsISVGChildFrame.h"
+#include "nsSVGDisplayableFrame.h"
 #include "nsLiteralString.h"
 #include "nsQueryFrame.h"
 #include "nsSVGUtils.h"
@@ -39,7 +39,7 @@ NS_NewSVGGeometryFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 namespace mozilla {
 
 class SVGGeometryFrame : public nsFrame
-                       , public nsISVGChildFrame
+                       , public nsSVGDisplayableFrame
 {
   typedef mozilla::gfx::DrawTarget DrawTarget;
 
@@ -100,12 +100,12 @@ public:
   // SVGGeometryFrame methods
   gfxMatrix GetCanvasTM();
 protected:
-  // nsISVGChildFrame interface:
+  // nsSVGDisplayableFrame interface:
   virtual DrawResult PaintSVG(gfxContext& aContext,
                               const gfxMatrix& aTransform,
-                              const nsIntRect* aDirtyRect = nullptr) override;
+                              const nsIntRect* aDirtyRect = nullptr,
+                              uint32_t aFlags = 0) override;
   virtual nsIFrame* GetFrameForPoint(const gfxPoint& aPoint) override;
-  virtual nsRect GetCoveredRegion() override;
   virtual void ReflowSVG() override;
   virtual void NotifySVGChanged(uint32_t aFlags) override;
   virtual SVGBBox GetBBoxContribution(const Matrix &aToBBoxUserspace,
@@ -121,8 +121,8 @@ protected:
   virtual uint16_t GetHitTestFlags();
 private:
   enum { eRenderFill = 1, eRenderStroke = 2 };
-  void Render(gfxContext* aContext, uint32_t aRenderComponents,
-              const gfxMatrix& aTransform);
+  DrawResult Render(gfxContext* aContext, uint32_t aRenderComponents,
+                    const gfxMatrix& aTransform, uint32_t aFlags);
 
   /**
    * @param aMatrix The transform that must be multiplied onto aContext to

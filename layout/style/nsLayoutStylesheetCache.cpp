@@ -147,6 +147,11 @@ nsLayoutStylesheetCache::MinimalXULSheet()
 StyleSheet*
 nsLayoutStylesheetCache::XULSheet()
 {
+  if (!mXULSheet) {
+    LoadSheetURL("chrome://global/content/xul.css",
+                 &mXULSheet, eAgentSheetFeatures, eCrash);
+  }
+
   return mXULSheet;
 }
 
@@ -338,8 +343,10 @@ nsLayoutStylesheetCache::nsLayoutStylesheetCache(StyleBackendType aType)
                &mQuirkSheet, eAgentSheetFeatures, eCrash);
   LoadSheetURL("resource://gre/res/svg.css",
                &mSVGSheet, eAgentSheetFeatures, eCrash);
-  LoadSheetURL("chrome://global/content/xul.css",
-               &mXULSheet, eAgentSheetFeatures, eCrash);
+  if (XRE_IsParentProcess()) {
+    // We know we need xul.css for the UI, so load that now too:
+    XULSheet();
+  }
 
   if (gUserContentSheetURL) {
     MOZ_ASSERT(XRE_IsContentProcess(), "Only used in content processes.");
@@ -773,7 +780,7 @@ nsLayoutStylesheetCache::LoadSheet(nsIURI* aURI,
     gCSSLoader_Servo;
 
   if (!loader) {
-    loader = new mozilla::css::Loader(mBackendType);
+    loader = new Loader(mBackendType, nullptr);
     if (!loader) {
       ErrorLoadingSheet(aURI, "no Loader", eCrash);
       return;

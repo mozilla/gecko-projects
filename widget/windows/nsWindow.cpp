@@ -143,6 +143,7 @@
 #include "nsThemeConstants.h"
 #include "gfxConfig.h"
 #include "InProcessWinCompositorWidget.h"
+#include "ScreenHelperWin.h"
 
 #include "nsIGfxInfo.h"
 #include "nsUXThemeConstants.h"
@@ -936,6 +937,14 @@ nsWindow::Create(nsIWidget* aParent,
     nsUXThemeData::UpdateTitlebarInfo(mWnd);
   }
 
+  static bool a11yPrimed = false;
+  if (!a11yPrimed &&
+      mWindowType == eWindowType_toplevel) {
+    a11yPrimed = true;
+    if (Preferences::GetInt("accessibility.force_disabled", 0) == -1) {
+      ::PostMessage(mWnd, MOZ_WM_STARTA11Y, 0, 0);
+    }
+  }
   return NS_OK;
 }
 
@@ -1833,7 +1842,7 @@ nsWindow::Move(double aX, double aY)
     // region, some drivers or OSes may incorrectly copy into the clipped-out
     // area.
     if (IsPlugin() &&
-        (!mLayerManager || mLayerManager->GetBackendType() == LayersBackend::LAYERS_D3D9) &&
+        !mLayerManager &&
         mClipRects &&
         (mClipRectCount != 1 || !mClipRects[0].IsEqualInterior(LayoutDeviceIntRect(0, 0, mBounds.width, mBounds.height)))) {
       flags |= SWP_NOCOPYBITS;
@@ -3022,8 +3031,9 @@ nsWindow::SetCursor(imgIContainer* aCursor,
  *
  * SECTION: nsIWidget::Get/SetTransparencyMode
  *
- * Manage the transparency mode of the top-level window
- * containing this widget.
+ * Manage the transparency mode of the window containing this
+ * widget. Only works for popup and dialog windows, and not
+ * top-level windows.
  *
  **************************************************************/
 
@@ -3035,7 +3045,19 @@ nsTransparencyMode nsWindow::GetTransparencyMode()
 
 void nsWindow::SetTransparencyMode(nsTransparencyMode aMode)
 {
-  GetTopLevelWindow(true)->SetWindowTranslucencyInner(aMode);
+  nsWindow* window = GetTopLevelWindow(true);
+  MOZ_ASSERT(window);
+
+  if (!window || window->DestroyCalled()) {
+      return;
+  }
+
+  if (nsWindowType::eWindowType_toplevel == window->mWindowType) {
+      NS_WARNING("Cannot set transparency mode on top-level windows.");
+      return;
+  }
+
+  window->SetWindowTranslucencyInner(aMode);
 }
 
 void nsWindow::UpdateOpaqueRegion(const LayoutDeviceIntRegion& aOpaqueRegion)
@@ -5048,6 +5070,11 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       result = true;
       break;
 
+    case MOZ_WM_STARTA11Y:
+      (void*)GetAccessible();
+      result = true;
+      break;
+
     case WM_ENDSESSION:
     case MOZ_WM_APP_QUIT:
       if (msg == MOZ_WM_APP_QUIT || (wParam == TRUE && sCanQuit == TRI_TRUE))
@@ -5711,6 +5738,12 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
         NotifySizeMoveDone();
       }
 
+      break;
+    }
+
+    case WM_DISPLAYCHANGE:
+    {
+      ScreenHelperWin::RefreshScreens();
       break;
     }
 

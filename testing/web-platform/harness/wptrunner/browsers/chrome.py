@@ -23,7 +23,7 @@ def check_args(**kwargs):
     require_arg(kwargs, "webdriver_binary")
 
 
-def browser_kwargs(**kwargs):
+def browser_kwargs(test_type, run_info_data, **kwargs):
     return {"binary": kwargs["binary"],
             "webdriver_binary": kwargs["webdriver_binary"]}
 
@@ -35,10 +35,18 @@ def executor_kwargs(test_type, server_config, cache_manager, run_info_data,
     executor_kwargs = base_executor_kwargs(test_type, server_config,
                                            cache_manager, **kwargs)
     executor_kwargs["close_after_done"] = True
-    executor_kwargs["capabilities"] = dict(DesiredCapabilities.CHROME.items())
-    if kwargs["binary"] is not None:
-        executor_kwargs["capabilities"]["chromeOptions"] = {"binary": kwargs["binary"]}
-
+    capabilities = dict(DesiredCapabilities.CHROME.items())
+    capabilities.setdefault("chromeOptions", {})["prefs"] = {
+        "profile": {
+            "default_content_setting_values": {
+                "popups": 1
+            }
+        }
+    }
+    for (kwarg, capability) in [("binary", "binary"), ("binary_args", "args")]:
+        if kwargs[kwarg] is not None:
+            capabilities["chromeOptions"][capability] = kwargs[kwarg]
+    executor_kwargs["capabilities"] = capabilities
     return executor_kwargs
 
 
@@ -62,8 +70,8 @@ class ChromeBrowser(Browser):
     def start(self):
         self.server.start(block=False)
 
-    def stop(self):
-        self.server.stop()
+    def stop(self, force=False):
+        self.server.stop(force=Force)
 
     def pid(self):
         return self.server.pid

@@ -137,16 +137,14 @@ nsSVGIntegrationUtils::UsingEffectsForFrame(const nsIFrame* aFrame)
   // painting or hit-testing anyway.
   const nsStyleSVGReset *style = aFrame->StyleSVGReset();
   return aFrame->StyleEffects()->HasFilters() ||
-         style->HasClipPath() ||
-         style->mMask.HasLayerWithImage();
+         style->HasClipPath() || style->HasMask();
 }
 
 bool
 nsSVGIntegrationUtils::UsingMaskOrClipPathForFrame(const nsIFrame* aFrame)
 {
   const nsStyleSVGReset *style = aFrame->StyleSVGReset();
-  return style->HasClipPath() ||
-         style->mMask.HasLayerWithImage();
+  return style->HasClipPath() || style->HasMask();
 }
 
 nsPoint
@@ -192,8 +190,14 @@ nsSVGIntegrationUtils::GetSVGCoordContextForNonSVGFrame(nsIFrame* aNonSVGFrame)
 gfxRect
 nsSVGIntegrationUtils::GetSVGBBoxForNonSVGFrame(nsIFrame* aNonSVGFrame)
 {
+  // Except for nsSVGOuterSVGFrame, we shouldn't be getting here with SVG
+  // frames at all. This function is for elements that are laid out using the
+  // CSS box model rules.
   NS_ASSERTION(!(aNonSVGFrame->GetStateBits() & NS_FRAME_SVG_LAYOUT),
                "Frames with SVG layout should not get here");
+  MOZ_ASSERT_IF(aNonSVGFrame->IsFrameOfType(nsIFrame::eSVG),
+                aNonSVGFrame->GetType() == nsGkAtoms::svgOuterSVGFrame);
+
   nsIFrame* firstFrame =
     nsLayoutUtils::FirstContinuationOrIBSplitSibling(aNonSVGFrame);
   // 'r' is in "user space":
@@ -433,9 +437,10 @@ PaintMaskSurface(const PaintFramesParams& aParams,
     if (maskFrame) {
       Matrix svgMaskMatrix;
       nsSVGMaskFrame::MaskParams params(maskContext, aParams.frame,
-                                                  cssPxToDevPxMatrix,
-                                                  aOpacity, &svgMaskMatrix,
-                                                  svgReset->mMask.mLayers[i].mMaskMode);
+                                        cssPxToDevPxMatrix,
+                                        aOpacity, &svgMaskMatrix,
+                                        svgReset->mMask.mLayers[i].mMaskMode,
+                                        aParams.flags);
       RefPtr<SourceSurface> svgMask;
       Tie(result, svgMask) = maskFrame->GetMaskForMaskedFrame(params);
 
@@ -511,7 +516,8 @@ CreateAndPaintMaskSurface(const PaintFramesParams& aParams,
     paintResult.opacityApplied = true;
     nsSVGMaskFrame::MaskParams params(&ctx, aParams.frame, cssPxToDevPxMatrix,
                                       aOpacity, &paintResult.maskTransform,
-                                      svgReset->mMask.mLayers[0].mMaskMode);
+                                      svgReset->mMask.mLayers[0].mMaskMode,
+                                      aParams.flags);
     Tie(paintResult.result, paintResult.maskSurface) =
       aMaskFrames[0]->GetMaskForMaskedFrame(params);
 
@@ -597,8 +603,8 @@ ValidateSVGFrame(nsIFrame* aFrame)
   bool hasSVGLayout = (aFrame->GetStateBits() & NS_FRAME_SVG_LAYOUT);
   if (hasSVGLayout) {
 #ifdef DEBUG
-    nsISVGChildFrame *svgChildFrame = do_QueryFrame(aFrame);
-    MOZ_ASSERT(svgChildFrame && aFrame->GetContent()->IsSVGElement(),
+    nsSVGDisplayableFrame* svgFrame = do_QueryFrame(aFrame);
+    MOZ_ASSERT(svgFrame && aFrame->GetContent()->IsSVGElement(),
                "A non-SVG frame carries NS_FRAME_SVG_LAYOUT flag?");
 #endif
 
@@ -921,7 +927,6 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
       result &= paintResult.result;
       maskSurface = paintResult.maskSurface;
       if (maskSurface) {
-        MOZ_ASSERT(paintResult.result == DrawResult::SUCCESS);
         shouldPushMask = true;
         maskTransform = paintResult.maskTransform;
         opacityApplied = paintResult.opacityApplied;
@@ -1132,7 +1137,7 @@ PaintFrameCallback::operator()(gfxContext* aContext,
   if (mFrame->GetStateBits() & NS_FRAME_DRAWING_AS_PAINTSERVER)
     return false;
 
-  mFrame->AddStateBits(NS_FRAME_DRAWING_AS_PAINTSERVER);
+  AutoSetRestorePaintServerState paintServer(mFrame);
 
   aContext->Save();
 
@@ -1200,8 +1205,6 @@ PaintFrameCallback::operator()(gfxContext* aContext,
 
   aContext->Restore();
 
-  mFrame->RemoveStateBits(NS_FRAME_DRAWING_AS_PAINTSERVER);
-
   return true;
 }
 
@@ -1230,10 +1233,12 @@ nsSVGIntegrationUtils::DrawableFromPaintServer(nsIFrame*         aFrame,
     gfxRect overrideBounds(0, 0,
                            aPaintServerSize.width, aPaintServerSize.height);
     overrideBounds.ScaleInverse(aFrame->PresContext()->AppUnitsPerDevPixel());
-    RefPtr<gfxPattern> pattern =
-    server->GetPaintServerPattern(aTarget, aDrawTarget,
-                                  aContextMatrix, &nsStyleSVG::mFill, 1.0,
-                                  &overrideBounds);
+    DrawResult result = DrawResult::SUCCESS;
+    RefPtr<gfxPattern> pattern;
+    Tie(result, pattern) =
+      server->GetPaintServerPattern(aTarget, aDrawTarget,
+                                    aContextMatrix, &nsStyleSVG::mFill, 1.0,
+                                    &overrideBounds);
 
     if (!pattern)
       return nullptr;

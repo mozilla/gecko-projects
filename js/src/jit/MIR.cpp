@@ -1976,7 +1976,7 @@ WrappedFunction::WrappedFunction(JSFunction* fun)
 
 MCall*
 MCall::New(TempAllocator& alloc, JSFunction* target, size_t maxArgc, size_t numActualArgs,
-           bool construct, bool isDOMCall)
+           bool construct, bool ignoresReturnValue, bool isDOMCall)
 {
     WrappedFunction* wrappedTarget = target ? new(alloc) WrappedFunction(target) : nullptr;
     MOZ_ASSERT(maxArgc >= numActualArgs);
@@ -1985,7 +1985,7 @@ MCall::New(TempAllocator& alloc, JSFunction* target, size_t maxArgc, size_t numA
         MOZ_ASSERT(!construct);
         ins = new(alloc) MCallDOMNative(wrappedTarget, numActualArgs);
     } else {
-        ins = new(alloc) MCall(wrappedTarget, numActualArgs, construct);
+        ins = new(alloc) MCall(wrappedTarget, numActualArgs, construct, ignoresReturnValue);
     }
     if (!ins->init(alloc, maxArgc + NumNonArgumentOperands))
         return nullptr;
@@ -3171,7 +3171,8 @@ MBinaryArithInstruction::foldsTo(TempAllocator& alloc)
         if (isTruncated()) {
             if (!folded->block())
                 block()->insertBefore(this, folded);
-            return MTruncateToInt32::New(alloc, folded);
+            if (folded->type() != MIRType::Int32)
+                return MTruncateToInt32::New(alloc, folded);
         }
         return folded;
     }
@@ -5700,10 +5701,9 @@ MWasmUnsignedToFloat32::foldsTo(TempAllocator& alloc)
 
 MWasmCall*
 MWasmCall::New(TempAllocator& alloc, const wasm::CallSiteDesc& desc, const wasm::CalleeDesc& callee,
-               const Args& args, MIRType resultType, uint32_t spIncrement, uint32_t tlsStackOffset,
-               MDefinition* tableIndex)
+               const Args& args, MIRType resultType, uint32_t spIncrement, MDefinition* tableIndex)
 {
-    MWasmCall* call = new(alloc) MWasmCall(desc, callee, spIncrement, tlsStackOffset);
+    MWasmCall* call = new(alloc) MWasmCall(desc, callee, spIncrement);
     call->setResultType(resultType);
 
     if (!call->argRegs_.init(alloc, args.length()))
@@ -5729,12 +5729,10 @@ MWasmCall::NewBuiltinInstanceMethodCall(TempAllocator& alloc,
                                         const ABIArg& instanceArg,
                                         const Args& args,
                                         MIRType resultType,
-                                        uint32_t spIncrement,
-                                        uint32_t tlsStackOffset)
+                                        uint32_t spIncrement)
 {
     auto callee = wasm::CalleeDesc::builtinInstanceMethod(builtin);
-    MWasmCall* call = MWasmCall::New(alloc, desc, callee, args, resultType, spIncrement,
-                                     tlsStackOffset, nullptr);
+    MWasmCall* call = MWasmCall::New(alloc, desc, callee, args, resultType, spIncrement, nullptr);
     if (!call)
         return nullptr;
 

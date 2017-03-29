@@ -146,6 +146,7 @@ VRDisplayHost::CheckClearDisplayInfoDirty()
 }
 
 VRControllerHost::VRControllerHost(VRDeviceType aType)
+ : mVibrateIndex(0)
 {
   MOZ_COUNT_CTOR(VRControllerHost);
   mControllerInfo.mType = aType;
@@ -161,18 +162,6 @@ const VRControllerInfo&
 VRControllerHost::GetControllerInfo() const
 {
   return mControllerInfo;
-}
-
-void
-VRControllerHost::SetIndex(uint32_t aIndex)
-{
-  mIndex = aIndex;
-}
-
-uint32_t
-VRControllerHost::GetIndex()
-{
-  return mIndex;
 }
 
 void
@@ -205,3 +194,14 @@ VRControllerHost::GetHand()
   return mControllerInfo.mHand;
 }
 
+void
+VRControllerHost::SetVibrateIndex(uint64_t aIndex)
+{
+  mVibrateIndex = aIndex;
+}
+
+uint64_t
+VRControllerHost::GetVibrateIndex()
+{
+  return mVibrateIndex;
+}

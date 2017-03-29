@@ -2135,7 +2135,11 @@ nsDocumentViewer::Show(void)
 
   // Notify observers that a new page has been shown. This will get run
   // from the event loop after we actually draw the page.
-  NS_DispatchToMainThread(new nsDocumentShownDispatcher(mDocument));
+  RefPtr<nsDocumentShownDispatcher> event =
+    new nsDocumentShownDispatcher(mDocument);
+  mDocument->Dispatch("nsDocumentShownDispatcher",
+                      TaskCategory::Other,
+                      event.forget());
 
   return NS_OK;
 }
@@ -2294,8 +2298,8 @@ nsDocumentViewer::CreateStyleSet(nsIDocument* aDocument)
       nsAutoString sheets;
       elt->GetAttribute(NS_LITERAL_STRING("usechromesheets"), sheets);
       if (!sheets.IsEmpty() && baseURI) {
-        RefPtr<mozilla::css::Loader> cssLoader =
-          new mozilla::css::Loader(backendType);
+        RefPtr<css::Loader> cssLoader =
+          new css::Loader(backendType, aDocument->GetDocGroup());
 
         char *str = ToNewCString(sheets);
         char *newStr = str;
@@ -3009,6 +3013,15 @@ nsDocumentViewer::GetTextZoom(float* aTextZoom)
   NS_ENSURE_ARG_POINTER(aTextZoom);
   nsPresContext* pc = GetPresContext();
   *aTextZoom = pc ? pc->TextZoom() : 1.0f;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocumentViewer::GetEffectiveTextZoom(float* aEffectiveTextZoom)
+{
+  NS_ENSURE_ARG_POINTER(aEffectiveTextZoom);
+  nsPresContext* pc = GetPresContext();
+  *aEffectiveTextZoom = pc ? pc->EffectiveTextZoom() : 1.0f;
   return NS_OK;
 }
 
@@ -4627,4 +4640,3 @@ nsDocumentShownDispatcher::Run()
   }
   return NS_OK;
 }
-

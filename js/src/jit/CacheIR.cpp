@@ -31,19 +31,21 @@ const char* js::jit::CacheKindNames[] = {
 };
 
 
-IRGenerator::IRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc, CacheKind cacheKind)
+IRGenerator::IRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc, CacheKind cacheKind,
+                         ICState::Mode mode)
   : writer(cx),
     cx_(cx),
     script_(script),
     pc_(pc),
-    cacheKind_(cacheKind)
+    cacheKind_(cacheKind),
+    mode_(mode)
 {}
 
 GetPropIRGenerator::GetPropIRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc,
-                                       CacheKind cacheKind, bool* isTemporarilyUnoptimizable,
-                                       HandleValue val, HandleValue idVal,
-                                       CanAttachGetter canAttachGetter)
-  : IRGenerator(cx, script, pc, cacheKind),
+                                       CacheKind cacheKind, ICState::Mode mode,
+                                       bool* isTemporarilyUnoptimizable, HandleValue val,
+                                       HandleValue idVal, CanAttachGetter canAttachGetter)
+  : IRGenerator(cx, script, pc, cacheKind, mode),
     val_(val),
     idVal_(idVal),
     isTemporarilyUnoptimizable_(isTemporarilyUnoptimizable),
@@ -505,20 +507,47 @@ EmitCallGetterResultNoGuards(CacheIRWriter& writer, JSObject* obj, JSObject* hol
 
 static void
 EmitCallGetterResult(CacheIRWriter& writer, JSObject* obj, JSObject* holder,
-                     Shape* shape, ObjOperandId objId)
+                     Shape* shape, ObjOperandId objId, ICState::Mode mode)
 {
-    Maybe<ObjOperandId> expandoId;
-    TestMatchingReceiver(writer, obj, shape, objId, &expandoId);
+    // Use the megamorphic guard if we're in megamorphic mode, except if |obj|
+    // is a Window as GuardHasGetterSetter doesn't support this yet (Window may
+    // require outerizing).
+    if (mode == ICState::Mode::Specialized || IsWindow(obj)) {
+        Maybe<ObjOperandId> expandoId;
+        TestMatchingReceiver(writer, obj, shape, objId, &expandoId);
 
-    if (obj != holder) {
-        GeneratePrototypeGuards(writer, obj, holder, objId);
+        if (obj != holder) {
+            GeneratePrototypeGuards(writer, obj, holder, objId);
 
-        // Guard on the holder's shape.
-        ObjOperandId holderId = writer.loadObject(holder);
-        writer.guardShape(holderId, holder->as<NativeObject>().lastProperty());
+            // Guard on the holder's shape.
+            ObjOperandId holderId = writer.loadObject(holder);
+            writer.guardShape(holderId, holder->as<NativeObject>().lastProperty());
+        }
+    } else {
+        writer.guardHasGetterSetter(objId, shape);
     }
 
     EmitCallGetterResultNoGuards(writer, obj, holder, shape, objId);
+}
+
+void
+GetPropIRGenerator::attachMegamorphicNativeSlot(ObjOperandId objId, jsid id, bool handleMissing)
+{
+    MOZ_ASSERT(mode_ == ICState::Mode::Megamorphic);
+
+    // The stub handles the missing-properties case only if we're seeing one
+    // now, to make sure Ion ICs correctly monitor the undefined type.
+
+    if (cacheKind_ == CacheKind::GetProp) {
+        writer.megamorphicLoadSlotResult(objId, JSID_TO_ATOM(id)->asPropertyName(),
+                                         handleMissing);
+    } else {
+        MOZ_ASSERT(cacheKind_ == CacheKind::GetElem);
+        writer.megamorphicLoadSlotByValueResult(objId, getElemKeyValueId(), handleMissing);
+    }
+    writer.typeMonitorResult();
+
+    trackAttached(handleMissing ? "MegamorphicMissingNativeSlot" : "MegamorphicNativeSlot");
 }
 
 bool
@@ -536,6 +565,11 @@ GetPropIRGenerator::tryAttachNative(HandleObject obj, ObjOperandId objId, Handle
       case CanAttachNone:
         return false;
       case CanAttachReadSlot:
+        if (mode_ == ICState::Mode::Megamorphic) {
+            attachMegamorphicNativeSlot(objId, id, holder == nullptr);
+            return true;
+        }
+
         maybeEmitIdGuard(id);
         if (holder) {
             EnsureTrackPropertyTypes(cx_, holder, id);
@@ -554,7 +588,7 @@ GetPropIRGenerator::tryAttachNative(HandleObject obj, ObjOperandId objId, Handle
         return true;
       case CanAttachCallGetter:
         maybeEmitIdGuard(id);
-        EmitCallGetterResult(writer, obj, holder, shape, objId);
+        EmitCallGetterResult(writer, obj, holder, shape, objId, mode_);
 
         trackAttached("NativeGetter");
         return true;
@@ -570,6 +604,11 @@ GetPropIRGenerator::tryAttachWindowProxy(HandleObject obj, ObjOperandId objId, H
     // on the Window (the global object).
 
     if (!IsWindowProxy(obj))
+        return false;
+
+    // If we're megamorphic prefer a generic proxy stub that handles a lot more
+    // cases.
+    if (mode_ == ICState::Mode::Megamorphic)
         return false;
 
     // This must be a WindowProxy for the current Window/global. Else it would
@@ -617,7 +656,7 @@ GetPropIRGenerator::tryAttachWindowProxy(HandleObject obj, ObjOperandId objId, H
         maybeEmitIdGuard(id);
         writer.guardClass(objId, GuardClassKind::WindowProxy);
         ObjOperandId windowObjId = writer.loadObject(windowObj);
-        EmitCallGetterResult(writer, windowObj, holder, shape, windowObjId);
+        EmitCallGetterResult(writer, windowObj, holder, shape, windowObjId, mode_);
 
         trackAttached("WindowProxyGetter");
         return true;
@@ -636,11 +675,20 @@ GetPropIRGenerator::tryAttachCrossCompartmentWrapper(HandleObject obj, ObjOperan
     if (!IsWrapper(obj) || Wrapper::wrapperHandler(obj) != &CrossCompartmentWrapper::singleton)
         return false;
 
+    // If we're megamorphic prefer a generic proxy stub that handles a lot more
+    // cases.
+    if (mode_ == ICState::Mode::Megamorphic)
+        return false;
+
     RootedObject unwrapped(cx_, Wrapper::wrappedObject(obj));
     MOZ_ASSERT(unwrapped == UnwrapOneChecked(obj));
 
     // If we allowed different zones we would have to wrap strings.
     if (unwrapped->compartment()->zone() != cx_->compartment()->zone())
+        return false;
+
+    RootedObject wrappedGlobal(cx_, &obj->global());
+    if (!cx_->compartment()->wrap(cx_, &wrappedGlobal))
         return false;
 
     AutoCompartment ac(cx_, unwrapped);
@@ -681,7 +729,7 @@ GetPropIRGenerator::tryAttachCrossCompartmentWrapper(HandleObject obj, ObjOperan
     ObjOperandId wrapperTargetId = writer.loadWrapperTarget(objId);
 
     // If the compartment of the wrapped object is different we should fail.
-    writer.guardCompartment(wrapperTargetId, unwrapped->compartment());
+    writer.guardCompartment(wrapperTargetId, wrappedGlobal, unwrapped->compartment());
 
     ObjOperandId unwrappedId = wrapperTargetId;
     if (isWindowProxy) {
@@ -700,23 +748,26 @@ GetPropIRGenerator::tryAttachCrossCompartmentWrapper(HandleObject obj, ObjOperan
 }
 
 bool
-GetPropIRGenerator::tryAttachGenericProxy(HandleObject obj, ObjOperandId objId, HandleId id)
+GetPropIRGenerator::tryAttachGenericProxy(HandleObject obj, ObjOperandId objId, HandleId id,
+                                          bool handleDOMProxies)
 {
     MOZ_ASSERT(obj->is<ProxyObject>());
 
     writer.guardIsProxy(objId);
 
-    // Ensure that the incoming object is not a DOM proxy, so that we can get to
-    // the specialized stubs
-    writer.guardNotDOMProxy(objId);
+    if (!handleDOMProxies) {
+        // Ensure that the incoming object is not a DOM proxy, so that we can get to
+        // the specialized stubs
+        writer.guardNotDOMProxy(objId);
+    }
 
-    if (cacheKind_ == CacheKind::GetProp) {
+    if (cacheKind_ == CacheKind::GetProp || mode_ == ICState::Mode::Specialized) {
+        maybeEmitIdGuard(id);
         writer.callProxyGetResult(objId, id);
     } else {
-        // We could call maybeEmitIdGuard here and then emit CallProxyGetResult,
-        // but for GetElem we prefer to attach a stub that can handle any Value
-        // so we don't attach a new stub for every id.
+        // Attach a stub that handles every id.
         MOZ_ASSERT(cacheKind_ == CacheKind::GetElem);
+        MOZ_ASSERT(mode_ == ICState::Mode::Megamorphic);
         writer.callProxyGetByValueResult(objId, getElemKeyValueId());
     }
 
@@ -726,6 +777,27 @@ GetPropIRGenerator::tryAttachGenericProxy(HandleObject obj, ObjOperandId objId, 
     return true;
 }
 
+ObjOperandId
+IRGenerator::guardDOMProxyExpandoObjectAndShape(JSObject* obj, ObjOperandId objId,
+                                                const Value& expandoVal, JSObject* expandoObj)
+{
+    MOZ_ASSERT(IsCacheableDOMProxy(obj));
+
+    writer.guardShape(objId, obj->maybeShape());
+
+    // Shape determines Class, so now it must be a DOM proxy.
+    ValOperandId expandoValId;
+    if (expandoVal.isObject())
+        expandoValId = writer.loadDOMExpandoValue(objId);
+    else
+        expandoValId = writer.loadDOMExpandoValueIgnoreGeneration(objId);
+
+    // Guard the expando is an object and shape guard.
+    ObjOperandId expandoObjId = writer.guardIsObject(expandoValId);
+    writer.guardShape(expandoObjId, expandoObj->as<NativeObject>().shape());
+    return expandoObjId;
+}
+
 bool
 GetPropIRGenerator::tryAttachDOMProxyExpando(HandleObject obj, ObjOperandId objId, HandleId id)
 {
@@ -733,13 +805,12 @@ GetPropIRGenerator::tryAttachDOMProxyExpando(HandleObject obj, ObjOperandId objI
 
     RootedValue expandoVal(cx_, GetProxyExtra(obj, GetDOMProxyExpandoSlot()));
     RootedObject expandoObj(cx_);
-    ExpandoAndGeneration* expandoAndGeneration = nullptr;
     if (expandoVal.isObject()) {
         expandoObj = &expandoVal.toObject();
     } else {
         MOZ_ASSERT(!expandoVal.isUndefined(),
                    "How did a missing expando manage to shadow things?");
-        expandoAndGeneration = static_cast<ExpandoAndGeneration*>(expandoVal.toPrivate());
+        auto expandoAndGeneration = static_cast<ExpandoAndGeneration*>(expandoVal.toPrivate());
         MOZ_ASSERT(expandoAndGeneration);
         expandoObj = &expandoAndGeneration->expando.toObject();
     }
@@ -758,20 +829,8 @@ GetPropIRGenerator::tryAttachDOMProxyExpando(HandleObject obj, ObjOperandId objI
     MOZ_ASSERT(holder == expandoObj);
 
     maybeEmitIdGuard(id);
-    writer.guardShape(objId, obj->maybeShape());
-
-    // Shape determines Class, so now it must be a DOM proxy.
-    ValOperandId expandoValId;
-    if (expandoVal.isObject()) {
-        expandoValId = writer.loadDOMExpandoValue(objId);
-    } else {
-        MOZ_ASSERT(expandoAndGeneration);
-        expandoValId = writer.loadDOMExpandoValueIgnoreGeneration(objId);
-    }
-
-    // Guard the expando is an object and shape guard.
-    ObjOperandId expandoObjId = writer.guardIsObject(expandoValId);
-    writer.guardShape(expandoObjId, expandoObj->as<NativeObject>().shape());
+    ObjOperandId expandoObjId =
+        guardDOMProxyExpandoObjectAndShape(obj, objId, expandoVal, expandoObj);
 
     if (canCache == CanAttachReadSlot) {
         // Load from the expando's slots.
@@ -898,9 +957,16 @@ GetPropIRGenerator::tryAttachDOMProxyUnshadowed(HandleObject obj, ObjOperandId o
 bool
 GetPropIRGenerator::tryAttachProxy(HandleObject obj, ObjOperandId objId, HandleId id)
 {
-    switch (GetProxyStubType(cx_, obj, id)) {
-      case ProxyStubType::None:
+    ProxyStubType type = GetProxyStubType(cx_, obj, id);
+    if (type == ProxyStubType::None)
         return false;
+
+    if (mode_ == ICState::Mode::Megamorphic)
+        return tryAttachGenericProxy(obj, objId, id, /* handleDOMProxies = */ true);
+
+    switch (type) {
+      case ProxyStubType::None:
+        break;
       case ProxyStubType::DOMExpando:
         if (tryAttachDOMProxyExpando(obj, objId, id))
             return true;
@@ -912,9 +978,15 @@ GetPropIRGenerator::tryAttachProxy(HandleObject obj, ObjOperandId objId, HandleI
       case ProxyStubType::DOMShadowed:
         return tryAttachDOMProxyShadowed(obj, objId, id);
       case ProxyStubType::DOMUnshadowed:
-        return tryAttachDOMProxyUnshadowed(obj, objId, id);
+        if (tryAttachDOMProxyUnshadowed(obj, objId, id))
+            return true;
+        if (*isTemporarilyUnoptimizable_) {
+            // Scripted getter without JIT code. Just wait.
+            return false;
+        }
+        return tryAttachGenericProxy(obj, objId, id, /* handleDOMProxies = */ true);
       case ProxyStubType::Generic:
-        return tryAttachGenericProxy(obj, objId, id);
+        return tryAttachGenericProxy(obj, objId, id, /* handleDOMProxies = */ false);
     }
 
     MOZ_CRASH("Unexpected ProxyStubType");
@@ -1546,8 +1618,9 @@ SetPropIRGenerator::maybeEmitIdGuard(jsid id)
 }
 
 GetNameIRGenerator::GetNameIRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc,
-                                       HandleObject env, HandlePropertyName name)
-  : IRGenerator(cx, script, pc, CacheKind::GetName),
+                                       ICState::Mode mode, HandleObject env,
+                                       HandlePropertyName name)
+  : IRGenerator(cx, script, pc, CacheKind::GetName, mode),
     env_(env),
     name_(name)
 {}
@@ -1767,8 +1840,8 @@ GetNameIRGenerator::tryAttachEnvironmentName(ObjOperandId objId, HandleId id)
 }
 
 InIRGenerator::InIRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc,
-                             HandleValue key, HandleObject obj)
-  : IRGenerator(cx, script, pc, CacheKind::In),
+                             ICState::Mode mode, HandleValue key, HandleObject obj)
+  : IRGenerator(cx, script, pc, CacheKind::In, mode),
     key_(key), obj_(obj)
 { }
 
@@ -1971,10 +2044,11 @@ IRGenerator::maybeGuardInt32Index(const Value& index, ValOperandId indexId,
 }
 
 SetPropIRGenerator::SetPropIRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc,
-                                       CacheKind cacheKind, bool* isTemporarilyUnoptimizable,
+                                       CacheKind cacheKind, ICState::Mode mode,
+                                       bool* isTemporarilyUnoptimizable,
                                        HandleValue lhsVal, HandleValue idVal, HandleValue rhsVal,
                                        bool needsTypeBarrier, bool maybeHasExtraIndexedProps)
-  : IRGenerator(cx, script, pc, cacheKind),
+  : IRGenerator(cx, script, pc, cacheKind, mode),
     lhsVal_(lhsVal),
     idVal_(idVal),
     rhsVal_(rhsVal),
@@ -2027,6 +2101,8 @@ SetPropIRGenerator::tryAttachStub()
                 return true;
             if (IsPropertySetOp(JSOp(*pc_))) {
                 if (tryAttachSetter(obj, objId, id, rhsValId))
+                    return true;
+                if (tryAttachWindowProxy(obj, objId, id, rhsValId))
                     return true;
                 if (tryAttachProxy(obj, objId, id, rhsValId))
                     return true;
@@ -2082,20 +2158,20 @@ LookupShapeForSetSlot(NativeObject* obj, jsid id)
     return nullptr;
 }
 
-bool
-SetPropIRGenerator::tryAttachNativeSetSlot(HandleObject obj, ObjOperandId objId, HandleId id,
-                                           ValOperandId rhsId)
+static bool
+CanAttachNativeSetSlot(JSContext* cx, HandleObject obj, HandleId id,
+                       bool* isTemporarilyUnoptimizable, MutableHandleShape propShape)
 {
     if (!obj->isNative())
         return false;
 
-    RootedShape propShape(cx_, LookupShapeForSetSlot(&obj->as<NativeObject>(), id));
+    propShape.set(LookupShapeForSetSlot(&obj->as<NativeObject>(), id));
     if (!propShape)
         return false;
 
-    RootedObjectGroup group(cx_, JSObject::getGroup(cx_, obj));
+    ObjectGroup* group = JSObject::getGroup(cx, obj);
     if (!group) {
-        cx_->recoverFromOutOfMemory();
+        cx->recoverFromOutOfMemory();
         return false;
     }
 
@@ -2103,10 +2179,29 @@ SetPropIRGenerator::tryAttachNativeSetSlot(HandleObject obj, ObjOperandId objId,
     // properties, TI will not mark the property as having been
     // overwritten. Don't attach a stub in this case, so that we don't
     // execute another write to the property without TI seeing that write.
-    EnsureTrackPropertyTypes(cx_, obj, id);
+    EnsureTrackPropertyTypes(cx, obj, id);
     if (!PropertyHasBeenMarkedNonConstant(obj, id)) {
-        *isTemporarilyUnoptimizable_ = true;
+        *isTemporarilyUnoptimizable = true;
         return false;
+    }
+
+    return true;
+}
+
+bool
+SetPropIRGenerator::tryAttachNativeSetSlot(HandleObject obj, ObjOperandId objId, HandleId id,
+                                           ValOperandId rhsId)
+{
+    RootedShape propShape(cx_);
+    if (!CanAttachNativeSetSlot(cx_, obj, id, isTemporarilyUnoptimizable_, &propShape))
+        return false;
+
+    if (mode_ == ICState::Mode::Megamorphic && cacheKind_ == CacheKind::SetProp) {
+        writer.megamorphicStoreSlot(objId, JSID_TO_ATOM(id)->asPropertyName(), rhsId,
+                                    typeCheckInfo_.needsTypeBarrier());
+        writer.returnFromIC();
+        trackAttached("MegamorphicNativeSlot");
+        return true;
     }
 
     maybeEmitIdGuard(id);
@@ -2349,15 +2444,22 @@ SetPropIRGenerator::tryAttachSetter(HandleObject obj, ObjOperandId objId, Handle
 
     maybeEmitIdGuard(id);
 
-    Maybe<ObjOperandId> expandoId;
-    TestMatchingReceiver(writer, obj, propShape, objId, &expandoId);
+    // Use the megamorphic guard if we're in megamorphic mode, except if |obj|
+    // is a Window as GuardHasGetterSetter doesn't support this yet (Window may
+    // require outerizing).
+    if (mode_ == ICState::Mode::Specialized || IsWindow(obj)) {
+        Maybe<ObjOperandId> expandoId;
+        TestMatchingReceiver(writer, obj, propShape, objId, &expandoId);
 
-    if (obj != holder) {
-        GeneratePrototypeGuards(writer, obj, holder, objId);
+        if (obj != holder) {
+            GeneratePrototypeGuards(writer, obj, holder, objId);
 
-        // Guard on the holder's shape.
-        ObjOperandId holderId = writer.loadObject(holder);
-        writer.guardShape(holderId, holder->as<NativeObject>().lastProperty());
+            // Guard on the holder's shape.
+            ObjOperandId holderId = writer.loadObject(holder);
+            writer.guardShape(holderId, holder->as<NativeObject>().lastProperty());
+        }
+    } else {
+        writer.guardHasGetterSetter(objId, propShape);
     }
 
     EmitCallSetterNoGuards(writer, obj, holder, propShape, objId, rhsId);
@@ -2670,13 +2772,13 @@ SetPropIRGenerator::tryAttachGenericProxy(HandleObject obj, ObjOperandId objId, 
         writer.guardNotDOMProxy(objId);
     }
 
-    if (cacheKind_ == CacheKind::SetProp) {
+    if (cacheKind_ == CacheKind::SetProp || mode_ == ICState::Mode::Specialized) {
+        maybeEmitIdGuard(id);
         writer.callProxySet(objId, id, rhsId, IsStrictSetPC(pc_));
     } else {
-        // We could call maybeEmitIdGuard here and then emit CallProxySet, but
-        // for SetElem we prefer to attach a stub that can handle any Value
-        // so we don't attach a new stub for every id.
+        // Attach a stub that handles every id.
         MOZ_ASSERT(cacheKind_ == CacheKind::SetElem);
+        MOZ_ASSERT(mode_ == ICState::Mode::Megamorphic);
         writer.callProxySetByValue(objId, setElemKeyValueId(), rhsId, IsStrictSetPC(pc_));
     }
 
@@ -2742,21 +2844,91 @@ SetPropIRGenerator::tryAttachDOMProxyUnshadowed(HandleObject obj, ObjOperandId o
 }
 
 bool
+SetPropIRGenerator::tryAttachDOMProxyExpando(HandleObject obj, ObjOperandId objId, HandleId id,
+                                             ValOperandId rhsId)
+{
+    MOZ_ASSERT(IsCacheableDOMProxy(obj));
+
+    RootedValue expandoVal(cx_, GetProxyExtra(obj, GetDOMProxyExpandoSlot()));
+    RootedObject expandoObj(cx_);
+    if (expandoVal.isObject()) {
+        expandoObj = &expandoVal.toObject();
+    } else {
+        MOZ_ASSERT(!expandoVal.isUndefined(),
+                   "How did a missing expando manage to shadow things?");
+        auto expandoAndGeneration = static_cast<ExpandoAndGeneration*>(expandoVal.toPrivate());
+        MOZ_ASSERT(expandoAndGeneration);
+        expandoObj = &expandoAndGeneration->expando.toObject();
+    }
+
+    RootedShape propShape(cx_);
+    if (CanAttachNativeSetSlot(cx_, expandoObj, id, isTemporarilyUnoptimizable_, &propShape)) {
+        maybeEmitIdGuard(id);
+        ObjOperandId expandoObjId =
+            guardDOMProxyExpandoObjectAndShape(obj, objId, expandoVal, expandoObj);
+
+        NativeObject* nativeExpandoObj = &expandoObj->as<NativeObject>();
+        writer.guardGroup(expandoObjId, nativeExpandoObj->group());
+        typeCheckInfo_.set(nativeExpandoObj->group(), id);
+
+        EmitStoreSlotAndReturn(writer, expandoObjId, nativeExpandoObj, propShape, rhsId);
+        trackAttached("DOMProxyExpandoSlot");
+        return true;
+    }
+
+    RootedObject holder(cx_);
+    if (CanAttachSetter(cx_, pc_, expandoObj, id, &holder, &propShape,
+                        isTemporarilyUnoptimizable_))
+    {
+        // Note that we don't actually use the expandoObjId here after the
+        // shape guard. The DOM proxy (objId) is passed to the setter as
+        // |this|.
+        maybeEmitIdGuard(id);
+        guardDOMProxyExpandoObjectAndShape(obj, objId, expandoVal, expandoObj);
+
+        MOZ_ASSERT(holder == expandoObj);
+        EmitCallSetterNoGuards(writer, expandoObj, expandoObj, propShape, objId, rhsId);
+        trackAttached("DOMProxyExpandoSetter");
+        return true;
+    }
+
+    return false;
+}
+
+bool
 SetPropIRGenerator::tryAttachProxy(HandleObject obj, ObjOperandId objId, HandleId id,
                                    ValOperandId rhsId)
 {
     // Don't attach a proxy stub for ops like JSOP_INITELEM.
     MOZ_ASSERT(IsPropertySetOp(JSOp(*pc_)));
 
-    switch (GetProxyStubType(cx_, obj, id)) {
-      case ProxyStubType::None:
+    ProxyStubType type = GetProxyStubType(cx_, obj, id);
+    if (type == ProxyStubType::None)
         return false;
+
+    if (mode_ == ICState::Mode::Megamorphic)
+        return tryAttachGenericProxy(obj, objId, id, rhsId, /* handleDOMProxies = */ true);
+
+    switch (type) {
+      case ProxyStubType::None:
+        break;
       case ProxyStubType::DOMExpando:
+        if (tryAttachDOMProxyExpando(obj, objId, id, rhsId))
+            return true;
+        if (*isTemporarilyUnoptimizable_) {
+            // Scripted setter without JIT code. Just wait.
+            return false;
+        }
+        MOZ_FALLTHROUGH; // Fall through to the generic shadowed case.
       case ProxyStubType::DOMShadowed:
         return tryAttachDOMProxyShadowed(obj, objId, id, rhsId);
       case ProxyStubType::DOMUnshadowed:
         if (tryAttachDOMProxyUnshadowed(obj, objId, id, rhsId))
             return true;
+        if (*isTemporarilyUnoptimizable_) {
+            // Scripted setter without JIT code. Just wait.
+            return false;
+        }
         return tryAttachGenericProxy(obj, objId, id, rhsId, /* handleDOMProxies = */ true);
       case ProxyStubType::Generic:
         return tryAttachGenericProxy(obj, objId, id, rhsId, /* handleDOMProxies = */ false);
@@ -2783,6 +2955,49 @@ SetPropIRGenerator::tryAttachProxyElement(HandleObject obj, ObjOperandId objId, 
     writer.returnFromIC();
 
     trackAttached("ProxyElement");
+    return true;
+}
+
+bool
+SetPropIRGenerator::tryAttachWindowProxy(HandleObject obj, ObjOperandId objId, HandleId id,
+                                         ValOperandId rhsId)
+{
+    // Attach a stub when the receiver is a WindowProxy and we can do the set
+    // on the Window (the global object).
+
+    if (!IsWindowProxy(obj))
+        return false;
+
+    // If we're megamorphic prefer a generic proxy stub that handles a lot more
+    // cases.
+    if (mode_ == ICState::Mode::Megamorphic)
+        return false;
+
+    // This must be a WindowProxy for the current Window/global. Else it would
+    // be a cross-compartment wrapper and IsWindowProxy returns false for
+    // those.
+    MOZ_ASSERT(obj->getClass() == cx_->runtime()->maybeWindowProxyClass());
+    MOZ_ASSERT(ToWindowIfWindowProxy(obj) == cx_->global());
+
+    // Now try to do the set on the Window (the current global).
+    Handle<GlobalObject*> windowObj = cx_->global();
+
+    RootedShape propShape(cx_);
+    if (!CanAttachNativeSetSlot(cx_, windowObj, id, isTemporarilyUnoptimizable_, &propShape))
+        return false;
+
+    maybeEmitIdGuard(id);
+
+    writer.guardClass(objId, GuardClassKind::WindowProxy);
+    ObjOperandId windowObjId = writer.loadObject(windowObj);
+
+    writer.guardShape(windowObjId, windowObj->lastProperty());
+    writer.guardGroup(windowObjId, windowObj->group());
+    typeCheckInfo_.set(windowObj->group(), id);
+
+    EmitStoreSlotAndReturn(writer, windowObjId, windowObj, propShape, rhsId);
+
+    trackAttached("WindowProxySlot");
     return true;
 }
 

@@ -658,7 +658,7 @@ RespondWithHandler::ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValu
 
     nsCOMPtr<nsIOutputStream> responseBody;
     rv = mInterceptedChannel->GetResponseBody(getter_AddRefs(responseBody));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
+    if (NS_WARN_IF(NS_FAILED(rv)) || !responseBody) {
       return;
     }
 
@@ -833,7 +833,7 @@ public:
 
   WaitUntilHandler(WorkerPrivate* aWorkerPrivate, JSContext* aCx)
     : mWorkerPrivate(aWorkerPrivate)
-    , mScope(mWorkerPrivate->WorkerName())
+    , mScope(mWorkerPrivate->ServiceWorkerScope())
     , mLine(0)
     , mColumn(0)
   {
@@ -1191,7 +1191,8 @@ ExtendableMessageEvent::GetSource(Nullable<OwningClientOrServiceWorkerOrMessageP
   } else if (mMessagePort) {
     aValue.SetValue().SetAsMessagePort() = mMessagePort;
   } else {
-    MOZ_CRASH("Unexpected source value");
+    // nullptr source is possible for manually constructed event
+    aValue.SetNull();
   }
 }
 

@@ -121,6 +121,8 @@ static mozilla::LazyLogModule gMediaElementEventsLog("nsMediaElementEvents");
 #include "mozilla/dom/VideoPlaybackQuality.h"
 #include "HTMLMediaElement.h"
 
+#include "GMPCrashHelper.h"
+
 using namespace mozilla::layers;
 using mozilla::net::nsMediaFragmentURIParser;
 
@@ -690,7 +692,8 @@ public:
 
     MOZ_LOG(AudioChannelService::GetAudioChannelLog(), LogLevel::Debug,
            ("HTMLMediaElement::AudioChannelAgentCallback, WindowVolumeChanged, "
-            "this = %p, aVolume = %f, aMuted = %d\n", this, aVolume, aMuted));
+            "this = %p, aVolume = %f, aMuted = %s\n",
+            this, aVolume, aMuted ? "true" : "false"));
 
     if (mAudioChannelVolume != aVolume) {
       mAudioChannelVolume = aVolume;
@@ -714,7 +717,7 @@ public:
 
     MOZ_LOG(AudioChannelService::GetAudioChannelLog(), LogLevel::Debug,
            ("HTMLMediaElement::AudioChannelAgentCallback, WindowSuspendChanged, "
-            "this = %p, aSuspend = %d\n", this, aSuspend));
+            "this = %p, aSuspend = %s\n", this, SuspendTypeToStr(aSuspend)));
 
     switch (aSuspend) {
       case nsISuspendedTypes::NONE_SUSPENDED:
@@ -881,10 +884,7 @@ private:
     mSuspended = aSuspend;
     MOZ_LOG(AudioChannelService::GetAudioChannelLog(), LogLevel::Debug,
            ("HTMLMediaElement::AudioChannelAgentCallback, SetAudioChannelSuspended, "
-            "this = %p, aSuspend = %d\n", this, aSuspend));
-
-    NotifyAudioPlaybackChanged(
-      AudioChannelService::AudibleChangedReasons::ePauseStateChanged);
+            "this = %p, aSuspend = %s\n", this, SuspendTypeToStr(aSuspend)));
   }
 
   void
@@ -905,6 +905,9 @@ private:
     if (rv.Failed()) {
       NS_WARNING("Not able to resume from AudioChannel.");
     }
+
+    NotifyAudioPlaybackChanged(
+      AudioChannelService::AudibleChangedReasons::ePauseStateChanged);
   }
 
   void
@@ -922,6 +925,8 @@ private:
           return;
         }
     }
+    NotifyAudioPlaybackChanged(
+      AudioChannelService::AudibleChangedReasons::ePauseStateChanged);
   }
 
   void
@@ -1012,8 +1017,9 @@ private:
       return AudioChannelService::AudibleState::eMaybeAudible;
     }
 
-    // Media is suspended.
-    if (mSuspended != nsISuspendedTypes::NONE_SUSPENDED) {
+    // Suspended or paused media doesn't produce any sound.
+    if (mSuspended != nsISuspendedTypes::NONE_SUSPENDED ||
+        mOwner->mPaused) {
       return AudioChannelService::AudibleState::eNotAudible;
     }
 
@@ -1028,6 +1034,11 @@ private:
       return false;
     }
 
+    // We should consider any bfcached page or inactive document as non-playing.
+    if (!mOwner->IsActive()) {
+      return false;
+    }
+
     // It might be resumed from remote, we should keep the audio channel agent.
     if (IsSuspended()) {
       return true;
@@ -1035,11 +1046,6 @@ private:
 
     // Are we paused
     if (mOwner->mPaused) {
-      return false;
-    }
-
-    // We should consider any bfcached page or inactive document as non-playing.
-    if (!mOwner->IsActive()) {
       return false;
     }
 
@@ -1527,15 +1533,10 @@ HTMLMediaElement::SetVisible(bool aVisible)
   mDecoder->SetForcedHidden(!aVisible);
 }
 
-layers::Image*
+already_AddRefed<layers::Image>
 HTMLMediaElement::GetCurrentImage()
 {
-  // Mark the decoder owned by the element as tainted so that the
-  // suspend-vide-decoder is suspended.
-  mHasSuspendTaint = true;
-  if (mDecoder) {
-    mDecoder->SetSuspendTaint(true);
-  }
+  MarkAsTainted();
 
   // TODO: In bug 1345404, handle case when video decoder is already suspended.
   ImageContainer* container = GetImageContainer();
@@ -1544,7 +1545,8 @@ HTMLMediaElement::GetCurrentImage()
   }
 
   AutoLockImage lockImage(container);
-  return lockImage.GetImage();
+  RefPtr<layers::Image> image = lockImage.GetImage();
+  return image.forget();
 }
 
 bool
@@ -3331,7 +3333,8 @@ HTMLMediaElement::CaptureStreamInternal(bool aFinishWhenEnded,
 {
   MOZ_RELEASE_ASSERT(aGraph);
 
-    MarkAsContentSource(CallerAPI::CAPTURE_STREAM);
+  MarkAsContentSource(CallerAPI::CAPTURE_STREAM);
+  MarkAsTainted();
 
   nsPIDOMWindowInner* window = OwnerDoc()->GetInnerWindow();
   if (!window) {
@@ -3720,7 +3723,7 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
     mDefaultPlaybackStartPosition(0.0),
     mIsAudioTrackAudible(false),
     mHasSuspendTaint(false),
-    mVisibilityState(Visibility::APPROXIMATELY_NONVISIBLE),
+    mVisibilityState(Visibility::UNTRACKED),
     mErrorSink(new ErrorSink(this)),
     mAudioChannelWrapper(new AudioChannelAgentCallback(this, mAudioChannel))
 {
@@ -4310,7 +4313,6 @@ nsresult HTMLMediaElement::BindToTree(nsIDocument* aDocument, nsIContent* aParen
     // The preload action depends on the value of the autoplay attribute.
     // It's value may have changed, so update it.
     UpdatePreloadAction();
-    aDocument->AddMediaContent(this);
   }
 
   NotifyDecoderActivityChanges();
@@ -4542,9 +4544,7 @@ void HTMLMediaElement::UnbindFromTree(bool aDeep,
                                       bool aNullParent)
 {
   mUnboundFromTree = true;
-  if (OwnerDoc()) {
-    OwnerDoc()->RemoveMediaContent(this);
-  }
+  mVisibilityState = Visibility::UNTRACKED;
 
   nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
 
@@ -7199,7 +7199,7 @@ HTMLMediaElement::NotifyCueDisplayStatesChanged()
 void
 HTMLMediaElement::MarkAsContentSource(CallerAPI aAPI)
 {
-  const bool isVisible = mVisibilityState != Visibility::APPROXIMATELY_NONVISIBLE;
+  const bool isVisible = mVisibilityState == Visibility::APPROXIMATELY_VISIBLE;
 
   if (isVisible) {
     // 0 = ALL_VISIBLE
@@ -7404,8 +7404,89 @@ HTMLMediaElement::NotifyDecoderActivityChanges() const
 {
   if (mDecoder) {
     mDecoder->NotifyOwnerActivityChanged(!IsHidden(),
-                                         mVisibilityState == Visibility::APPROXIMATELY_VISIBLE,
+                                         mVisibilityState,
                                          IsInUncomposedDoc());
+  }
+}
+
+nsIDocument*
+HTMLMediaElement::GetDocument() const
+{
+  return OwnerDoc();
+}
+
+void
+HTMLMediaElement::ConstructMediaTracks(const MediaInfo* aInfo)
+{
+  MOZ_ASSERT(aInfo);
+
+  AudioTrackList* audioList = AudioTracks();
+  if (audioList && aInfo->HasAudio()) {
+    const TrackInfo& info = aInfo->mAudio;
+    RefPtr<AudioTrack> track = MediaTrackList::CreateAudioTrack(
+    info.mId, info.mKind, info.mLabel, info.mLanguage, info.mEnabled);
+
+    audioList->AddTrack(track);
+  }
+
+  VideoTrackList* videoList = VideoTracks();
+  if (videoList && aInfo->HasVideo()) {
+    const TrackInfo& info = aInfo->mVideo;
+    RefPtr<VideoTrack> track = MediaTrackList::CreateVideoTrack(
+    info.mId, info.mKind, info.mLabel, info.mLanguage);
+
+    videoList->AddTrack(track);
+    track->SetEnabledInternal(info.mEnabled, MediaTrack::FIRE_NO_EVENTS);
+  }
+}
+
+void
+HTMLMediaElement::RemoveMediaTracks()
+{
+  AudioTrackList* audioList = AudioTracks();
+  if (audioList) {
+    audioList->RemoveTracks();
+  }
+
+  VideoTrackList* videoList = VideoTracks();
+  if (videoList) {
+    videoList->RemoveTracks();
+  }
+}
+
+class MediaElementGMPCrashHelper : public GMPCrashHelper
+{
+public:
+  explicit MediaElementGMPCrashHelper(HTMLMediaElement* aElement)
+    : mElement(aElement)
+  {
+    MOZ_ASSERT(NS_IsMainThread()); // WeakPtr isn't thread safe.
+  }
+  already_AddRefed<nsPIDOMWindowInner> GetPluginCrashedEventTarget() override
+  {
+    MOZ_ASSERT(NS_IsMainThread()); // WeakPtr isn't thread safe.
+    if (!mElement) {
+      return nullptr;
+    }
+    return do_AddRef(mElement->OwnerDoc()->GetInnerWindow());
+  }
+private:
+  WeakPtr<HTMLMediaElement> mElement;
+};
+
+already_AddRefed<GMPCrashHelper>
+HTMLMediaElement::CreateGMPCrashHelper()
+{
+  return MakeAndAddRef<MediaElementGMPCrashHelper>(this);
+}
+
+void
+HTMLMediaElement::MarkAsTainted()
+{
+  mHasSuspendTaint = true;
+
+  if (mDecoder) {
+    mDecoder->SetSuspendTaint(true);
   }
 }
 

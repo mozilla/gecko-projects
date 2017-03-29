@@ -121,8 +121,10 @@ public:
   size_t GetStackCount() const;
   size_t SizeOfExcludingThis() const;
 
+#if defined(ENABLE_STACK_CAPTURE)
   /** Clears the contents of vectors and resets the index. */
   void Clear();
+#endif
 private:
   std::vector<Telemetry::ProcessedStack::Module> mModules;
   // A circular buffer to hold the stacks.
@@ -229,12 +231,14 @@ ComputeAnnotationsKey(const HangAnnotationsPtr& aAnnotations, nsAString& aKeyOut
   return NS_OK;
 }
 
+#if defined(ENABLE_STACK_CAPTURE)
 void
 CombinedStacks::Clear() {
   mNextIndex = 0;
   mStacks.clear();
   mModules.clear();
 }
+#endif
 
 class HangReports {
 public:
@@ -271,10 +275,12 @@ public:
     void operator=(const AnnotationInfo& aOther) = delete;
   };
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+#if defined(MOZ_GECKO_PROFILER)
   void AddHang(const Telemetry::ProcessedStack& aStack, uint32_t aDuration,
                int32_t aSystemUptime, int32_t aFirefoxUptime,
                HangAnnotationsPtr aAnnotations);
   void PruneStackReferences(const size_t aRemovedStackIndex);
+#endif
   uint32_t GetDuration(unsigned aIndex) const;
   int32_t GetSystemUptime(unsigned aIndex) const;
   int32_t GetFirefoxUptime(unsigned aIndex) const;
@@ -298,6 +304,7 @@ private:
   CombinedStacks mStacks;
 };
 
+#if defined(MOZ_GECKO_PROFILER)
 void
 HangReports::AddHang(const Telemetry::ProcessedStack& aStack,
                      uint32_t aDuration,
@@ -371,6 +378,7 @@ HangReports::PruneStackReferences(const size_t aRemovedStackIndex) {
     }
   }
 }
+#endif
 
 size_t
 HangReports::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
@@ -1694,22 +1702,6 @@ public:
     for (unsigned int i = 0, n = mRawModules.GetSize(); i != n; i++) {
       const SharedLibrary &info = mRawModules.GetEntry(i);
 
-      nsString basename = info.GetName();
-#if defined(XP_MACOSX) || defined(XP_LINUX)
-      int32_t pos = basename.RFindChar('/');
-      if (pos != kNotFound) {
-        basename.Cut(0, pos + 1);
-      }
-#endif
-
-      nsString debug_basename = info.GetDebugName();
-#if defined(XP_MACOSX) || defined(XP_LINUX)
-      pos = debug_basename.RFindChar('/');
-      if (pos != kNotFound) {
-        debug_basename.Cut(0, pos + 1);
-      }
-#endif
-
       JS::RootedObject moduleObj(cx, JS_NewPlainObject(cx));
       if (!moduleObj) {
         mPromise->MaybeReject(NS_ERROR_FAILURE);
@@ -1717,7 +1709,7 @@ public:
       }
 
       // Module name.
-      JS::RootedString moduleName(cx, JS_NewUCStringCopyZ(cx, basename.get()));
+      JS::RootedString moduleName(cx, JS_NewUCStringCopyZ(cx, info.GetModuleName().get()));
       if (!moduleName || !JS_DefineProperty(cx, moduleObj, "name", moduleName, JSPROP_ENUMERATE)) {
         mPromise->MaybeReject(NS_ERROR_FAILURE);
         return NS_OK;
@@ -1726,8 +1718,8 @@ public:
       // Module debug name.
       JS::RootedValue moduleDebugName(cx);
 
-      if (!debug_basename.IsEmpty()) {
-        JS::RootedString str_moduleDebugName(cx, JS_NewUCStringCopyZ(cx, debug_basename.get()));
+      if (!info.GetDebugName().IsEmpty()) {
+        JS::RootedString str_moduleDebugName(cx, JS_NewUCStringCopyZ(cx, info.GetDebugName().get()));
         if (!str_moduleDebugName) {
           mPromise->MaybeReject(NS_ERROR_FAILURE);
           return NS_OK;
@@ -3228,18 +3220,8 @@ GetStackAndModules(const std::vector<uintptr_t>& aPCs)
 #ifdef MOZ_GECKO_PROFILER
   for (unsigned i = 0, n = rawModules.GetSize(); i != n; ++i) {
     const SharedLibrary &info = rawModules.GetEntry(i);
-    nsString basename = info.GetDebugName();
-#if defined(XP_MACOSX) || defined(XP_LINUX)
-    // We want to use just the basename as the libname, but the
-    // current profiler addon needs the full path name, so we compute the
-    // basename in here.
-    int32_t pos = basename.RFindChar('/');
-    if (pos != kNotFound) {
-      basename.Cut(0, pos + 1);
-    }
-#endif
     mozilla::Telemetry::ProcessedStack::Module module = {
-      basename,
+      info.GetDebugName(),
       info.GetBreakpadId()
     };
     Ret.AddModule(module);

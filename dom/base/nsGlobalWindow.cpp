@@ -528,6 +528,36 @@ DialogValueHolder::Get(JSContext* aCx, JS::Handle<JSObject*> aScope,
   }
 }
 
+class IdleRequestExecutor;
+
+class IdleRequestExecutorTimeoutHandler final : public TimeoutHandler
+{
+public:
+  explicit IdleRequestExecutorTimeoutHandler(IdleRequestExecutor* aExecutor)
+    : mExecutor(aExecutor)
+  {
+  }
+
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IdleRequestExecutorTimeoutHandler,
+                                           TimeoutHandler)
+
+  nsresult Call() override;
+
+private:
+  ~IdleRequestExecutorTimeoutHandler() {}
+  RefPtr<IdleRequestExecutor> mExecutor;
+};
+
+NS_IMPL_CYCLE_COLLECTION_INHERITED(IdleRequestExecutorTimeoutHandler, TimeoutHandler, mExecutor)
+
+NS_IMPL_ADDREF_INHERITED(IdleRequestExecutorTimeoutHandler, TimeoutHandler)
+NS_IMPL_RELEASE_INHERITED(IdleRequestExecutorTimeoutHandler, TimeoutHandler)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(IdleRequestExecutorTimeoutHandler)
+NS_INTERFACE_MAP_END_INHERITING(TimeoutHandler)
+
+
 class IdleRequestExecutor final : public nsIRunnable
                                 , public nsICancelableRunnable
                                 , public nsIIncrementalRunnable
@@ -540,6 +570,9 @@ public:
   {
     MOZ_DIAGNOSTIC_ASSERT(mWindow);
     MOZ_DIAGNOSTIC_ASSERT(mWindow->IsInnerWindow());
+
+    mIdlePeriodLimit = { mDeadline, mWindow->LastIdleRequestHandle() };
+    mDelayedExecutorDispatcher = new IdleRequestExecutorTimeoutHandler(this);
   }
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -549,13 +582,49 @@ public:
   nsresult Cancel() override;
   void SetDeadline(TimeStamp aDeadline) override;
 
-  void MaybeDispatch();
+  bool IsCancelled() const { return !mWindow || mWindow->AsInner()->InnerObjectsFreed(); }
+  // Checks if aRequest shouldn't execute in the current idle period
+  // since it has been queued from a chained call to
+  // requestIdleCallback from within a running idle callback.
+  bool IneligibleForCurrentIdlePeriod(IdleRequest* aRequest) const
+  {
+    return aRequest->Handle() >= mIdlePeriodLimit.mLastRequestIdInIdlePeriod &&
+           TimeStamp::Now() <= mIdlePeriodLimit.mEndOfIdlePeriod;
+  }
+
+  void MaybeUpdateIdlePeriodLimit();
+
+  // Maybe dispatch the IdleRequestExecutor. MabyeDispatch will
+  // schedule a delayed dispatch if the associated window is in the
+  // background or if given a time to wait until dispatching.
+  void MaybeDispatch(TimeStamp aDelayUntil = TimeStamp());
+  void ScheduleDispatch();
 private:
+  struct IdlePeriodLimit
+  {
+    TimeStamp mEndOfIdlePeriod;
+    uint32_t mLastRequestIdInIdlePeriod;
+  };
+
+  void DelayedDispatch(uint32_t aDelay);
+
   ~IdleRequestExecutor() {}
 
   bool mDispatched;
   TimeStamp mDeadline;
+  IdlePeriodLimit mIdlePeriodLimit;
   RefPtr<nsGlobalWindow> mWindow;
+  // The timeout handler responsible for dispatching this executor in
+  // the case of immediate dispatch to the idle queue isn't
+  // desirable. This is used if we've dispatched all idle callbacks
+  // that are allowed to run in the current idle period, or if the
+  // associated window is currently in the background.
+  nsCOMPtr<nsITimeoutHandler> mDelayedExecutorDispatcher;
+  // If not Nothing() then this value is the handle to the currently
+  // scheduled delayed executor dispatcher. This is needed to be able
+  // to cancel the timeout handler in case of the executor being
+  // cancelled.
+  Maybe<int32_t> mDelayedExecutorHandle;
 };
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(IdleRequestExecutor)
@@ -565,10 +634,12 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(IdleRequestExecutor)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(IdleRequestExecutor)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWindow)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDelayedExecutorDispatcher)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(IdleRequestExecutor)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWindow)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDelayedExecutorDispatcher)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(IdleRequestExecutor)
@@ -596,6 +667,12 @@ IdleRequestExecutor::Cancel()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  if (mDelayedExecutorHandle && mWindow) {
+    mWindow->AsInner()->TimeoutManager().ClearTimeout(
+      mDelayedExecutorHandle.value(),
+      Timeout::Reason::eIdleCallbackTimeout);
+  }
+
   mWindow = nullptr;
   return NS_OK;
 }
@@ -613,80 +690,81 @@ IdleRequestExecutor::SetDeadline(TimeStamp aDeadline)
 }
 
 void
-IdleRequestExecutor::MaybeDispatch()
+IdleRequestExecutor::MaybeUpdateIdlePeriodLimit()
+{
+  if (TimeStamp::Now() > mIdlePeriodLimit.mEndOfIdlePeriod) {
+    mIdlePeriodLimit = { mDeadline, mWindow->LastIdleRequestHandle() };
+  }
+}
+
+void
+IdleRequestExecutor::MaybeDispatch(TimeStamp aDelayUntil)
 {
   // If we've already dispatched the executor we don't want to do it
   // again. Also, if we've called IdleRequestExecutor::Cancel mWindow
   // will be null, which indicates that we shouldn't dispatch this
   // executor either.
-  if (mDispatched || !mWindow) {
+  if (mDispatched || IsCancelled()) {
     return;
   }
 
   mDispatched = true;
+
+  nsPIDOMWindowOuter* outer = mWindow->GetOuterWindow();
+  if (outer && outer->AsOuter()->IsBackground()) {
+    // Set a timeout handler with a timeout of 0 ms to throttle idle
+    // callback requests coming from a backround window using
+    // background timeout throttling.
+    DelayedDispatch(0);
+    return;
+  }
+
+  TimeStamp now = TimeStamp::Now();
+  if (!aDelayUntil || aDelayUntil < now) {
+    ScheduleDispatch();
+    return;
+  }
+
+  TimeDuration delay = aDelayUntil - now;
+  DelayedDispatch(static_cast<uint32_t>(delay.ToMilliseconds()));
+}
+
+void
+IdleRequestExecutor::ScheduleDispatch()
+{
+  MOZ_ASSERT(mWindow);
+  mDelayedExecutorHandle = Nothing();
   RefPtr<IdleRequestExecutor> request = this;
   NS_IdleDispatchToCurrentThread(request.forget());
 }
 
-class IdleRequestExecutorTimeoutHandler final : public TimeoutHandler
+void
+IdleRequestExecutor::DelayedDispatch(uint32_t aDelay)
 {
-public:
-  explicit IdleRequestExecutorTimeoutHandler(IdleRequestExecutor* aExecutor)
-    : mExecutor(aExecutor)
-  {
+  MOZ_ASSERT(mWindow);
+  MOZ_ASSERT(mDelayedExecutorHandle.isNothing());
+  int32_t handle;
+  mWindow->AsInner()->TimeoutManager().SetTimeout(
+    mDelayedExecutorDispatcher, aDelay, false, Timeout::Reason::eIdleCallbackTimeout, &handle);
+  mDelayedExecutorHandle = Some(handle);
+}
+
+nsresult
+IdleRequestExecutorTimeoutHandler::Call()
+{
+  if (!mExecutor->IsCancelled()) {
+    mExecutor->ScheduleDispatch();
   }
-
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IdleRequestExecutorTimeoutHandler,
-                                           TimeoutHandler)
-
-  nsresult Call() override
-  {
-    mExecutor->MaybeDispatch();
-    return NS_OK;
-  }
-private:
-  ~IdleRequestExecutorTimeoutHandler() {}
-  RefPtr<IdleRequestExecutor> mExecutor;
-};
-
-NS_IMPL_CYCLE_COLLECTION_INHERITED(IdleRequestExecutorTimeoutHandler, TimeoutHandler, mExecutor)
-
-NS_IMPL_ADDREF_INHERITED(IdleRequestExecutorTimeoutHandler, TimeoutHandler)
-NS_IMPL_RELEASE_INHERITED(IdleRequestExecutorTimeoutHandler, TimeoutHandler)
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(IdleRequestExecutorTimeoutHandler)
-  NS_INTERFACE_MAP_ENTRY(nsITimeoutHandler)
-NS_INTERFACE_MAP_END_INHERITING(TimeoutHandler)
+  return NS_OK;
+}
 
 void
 nsGlobalWindow::ScheduleIdleRequestDispatch()
 {
   AssertIsOnMainThread();
 
-  if (mIdleRequestCallbacks.isEmpty()) {
-    if (mIdleRequestExecutor) {
-      mIdleRequestExecutor->Cancel();
-      mIdleRequestExecutor = nullptr;
-    }
-
-    return;
-  }
-
   if (!mIdleRequestExecutor) {
     mIdleRequestExecutor = new IdleRequestExecutor(this);
-  }
-
-  nsPIDOMWindowOuter* outer = GetOuterWindow();
-  if (outer && outer->AsOuter()->IsBackground()) {
-    nsCOMPtr<nsITimeoutHandler> handler = new IdleRequestExecutorTimeoutHandler(mIdleRequestExecutor);
-    int32_t dummy;
-    // Set a timeout handler with a timeout of 0 ms to throttle idle
-    // callback requests coming from a backround window using
-    // background timeout throttling.
-    mTimeoutManager->SetTimeout(handler, 0, false,
-                                Timeout::Reason::eIdleCallbackTimeout, &dummy);
-    return;
   }
 
   mIdleRequestExecutor->MaybeDispatch();
@@ -754,15 +832,24 @@ nsGlobalWindow::ExecuteIdleRequest(TimeStamp aDeadline)
     return NS_OK;
   }
 
+  // If the request that we're trying to execute has been queued
+  // during the current idle period, then dispatch it again at the end
+  // of the idle period.
+  if (mIdleRequestExecutor->IneligibleForCurrentIdlePeriod(request)) {
+    mIdleRequestExecutor->MaybeDispatch(aDeadline);
+    return NS_OK;
+  }
+
   DOMHighResTimeStamp deadline = 0.0;
 
   if (Performance* perf = GetPerformance()) {
     deadline = perf->GetDOMTiming()->TimeStampToDOMHighRes(aDeadline);
   }
 
+  mIdleRequestExecutor->MaybeUpdateIdlePeriodLimit();
   nsresult result = RunIdleRequest(request, deadline, false);
 
-  ScheduleIdleRequestDispatch();
+  mIdleRequestExecutor->MaybeDispatch();
   return result;
 }
 
@@ -803,7 +890,6 @@ NS_IMPL_ADDREF_INHERITED(IdleRequestTimeoutHandler, TimeoutHandler)
 NS_IMPL_RELEASE_INHERITED(IdleRequestTimeoutHandler, TimeoutHandler)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(IdleRequestTimeoutHandler)
-  NS_INTERFACE_MAP_ENTRY(nsITimeoutHandler)
 NS_INTERFACE_MAP_END_INHERITING(TimeoutHandler)
 
 uint32_t
@@ -835,15 +921,10 @@ nsGlobalWindow::RequestIdleCallback(JSContext* aCx,
     request->SetTimeoutHandle(timeoutHandle);
   }
 
-  // If the list of idle callback requests is not empty it means that
-  // we've already dispatched the first idle request. If we're
-  // suspended we should only queue the idle callback and not schedule
-  // it to run, that will be done in ResumeIdleRequest.
-  bool needsScheduling = !IsSuspended() && mIdleRequestCallbacks.isEmpty();
   // mIdleRequestCallbacks now owns request
   InsertIdleCallback(request);
 
-  if (needsScheduling) {
+  if (!IsSuspended()) {
     ScheduleIdleRequestDispatch();
   }
 
@@ -908,7 +989,8 @@ nsPIDOMWindow<T>::nsPIDOMWindow(nsPIDOMWindowOuter *aOuterWindow)
   // Make sure no actual window ends up with mWindowID == 0
   mWindowID(NextWindowID()), mHasNotifiedGlobalCreated(false),
   mMarkedCCGeneration(0), mServiceWorkersTestingEnabled(false),
-  mLargeAllocStatus(LargeAllocStatus::NONE)
+  mLargeAllocStatus(LargeAllocStatus::NONE),
+  mShouldResumeOnFirstActiveMediaComponent(false)
 {
   if (aOuterWindow) {
     mTimeoutManager =
@@ -1487,7 +1569,8 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
 #ifdef DEBUG
     mIsValidatingTabGroup(false),
 #endif
-    mCanSkipCCGeneration(0)
+    mCanSkipCCGeneration(0),
+    mAutoActivateVRDisplayID(0)
 {
   AssertIsOnMainThread();
 
@@ -3781,6 +3864,27 @@ nsGlobalWindow::PostHandleEvent(EventChainPostVisitor& aVisitor)
     mIsHandlingResizeEvent = false;
   } else if (aVisitor.mEvent->mMessage == eUnload &&
              aVisitor.mEvent->IsTrusted()) {
+
+    // If any VR display presentation is active at unload, the next page
+    // will receive a vrdisplayactive event to indicate that it should
+    // immediately begin vr presentation. This should occur when navigating
+    // forwards, navigating backwards, and on page reload.
+    for (auto display : mVRDisplays) {
+      if (display->IsPresenting()) {
+        // Save this VR display ID to trigger vrdisplayactivate event
+        // after the next load event.
+        nsGlobalWindow* outer = GetOuterWindowInternal();
+        if (outer) {
+          outer->SetAutoActivateVRDisplayID(display->DisplayId());
+        }
+
+        // XXX The WebVR 1.1 spec does not define which of multiple VR
+        // presenting VR displays will be chosen during navigation.
+        // As the underlying platform VR API's currently only allow a single
+        // VR display, it is safe to choose the first VR display for now.
+        break;
+      }
+    }
     // Execute bindingdetached handlers before we tear ourselves
     // down.
     if (mDoc) {
@@ -3813,6 +3917,16 @@ nsGlobalWindow::PostHandleEvent(EventChainPostVisitor& aVisitor)
       // event we don't need a pres context anyway so we just pass
       // null as the pres context all the time here.
       EventDispatcher::Dispatch(element, nullptr, &event, nullptr, &status);
+    }
+
+    uint32_t autoActivateVRDisplayID = 0;
+    nsGlobalWindow* outer = GetOuterWindowInternal();
+    if (outer) {
+      autoActivateVRDisplayID = outer->GetAutoActivateVRDisplayID();
+    }
+    if (autoActivateVRDisplayID) {
+      DispatchVRDisplayActivate(autoActivateVRDisplayID,
+                                VRDisplayEventReason::Navigation);
     }
   }
 
@@ -4235,9 +4349,8 @@ nsPIDOMWindowInner::IsRunningTimeout()
 void
 nsPIDOMWindowOuter::NotifyCreatedNewMediaComponent()
 {
-  if (mMediaSuspend != nsISuspendedTypes::SUSPENDED_BLOCK) {
-    return;
-  }
+  // We would only active media component when there is any alive one.
+  mShouldResumeOnFirstActiveMediaComponent = true;
 
   // If the document is already on the foreground but the suspend state is still
   // suspend-block, that means the media component was created after calling
@@ -4254,20 +4367,29 @@ nsPIDOMWindowOuter::MaybeActiveMediaComponents()
     return mOuterWindow->MaybeActiveMediaComponents();
   }
 
+  // Resume the media when the tab was blocked and the tab already has
+  // alive media components.
+  if (!mShouldResumeOnFirstActiveMediaComponent ||
+      mMediaSuspend != nsISuspendedTypes::SUSPENDED_BLOCK) {
+    return;
+  }
+
   nsCOMPtr<nsPIDOMWindowInner> inner = GetCurrentInnerWindow();
   if (!inner) {
     return;
   }
 
+  // If the document is not visible, don't need to resume it.
   nsCOMPtr<nsIDocument> doc = inner->GetExtantDoc();
-  if (!doc) {
+  if (!doc || doc->Hidden()) {
     return;
   }
 
-  if (!doc->Hidden() &&
-      mMediaSuspend == nsISuspendedTypes::SUSPENDED_BLOCK) {
-    SetMediaSuspend(nsISuspendedTypes::NONE_SUSPENDED);
-  }
+  MOZ_LOG(AudioChannelService::GetAudioChannelLog(), LogLevel::Debug,
+         ("nsPIDOMWindowOuter, MaybeActiveMediaComponents, "
+          "resume the window from blocked, this = %p\n", this));
+
+  SetMediaSuspend(nsISuspendedTypes::NONE_SUSPENDED);
 }
 
 SuspendTypes
@@ -6337,7 +6459,7 @@ nsGlobalWindow::GetScrollMaxY(ErrorResult& aError)
   FORWARD_TO_OUTER_OR_THROW(GetScrollBoundaryOuter, (eSideBottom), aError, 0);
 }
 
-CSSIntPoint
+CSSPoint
 nsGlobalWindow::GetScrollXY(bool aDoFlush)
 {
   MOZ_ASSERT(IsOuterWindow());
@@ -6361,30 +6483,30 @@ nsGlobalWindow::GetScrollXY(bool aDoFlush)
     return GetScrollXY(true);
   }
 
-  return sf->GetScrollPositionCSSPixels();
+  return CSSPoint::FromAppUnits(scrollPos);
 }
 
-int32_t
+double
 nsGlobalWindow::GetScrollXOuter()
 {
   MOZ_RELEASE_ASSERT(IsOuterWindow());
   return GetScrollXY(false).x;
 }
 
-int32_t
+double
 nsGlobalWindow::GetScrollX(ErrorResult& aError)
 {
   FORWARD_TO_OUTER_OR_THROW(GetScrollXOuter, (), aError, 0);
 }
 
-int32_t
+double
 nsGlobalWindow::GetScrollYOuter()
 {
   MOZ_RELEASE_ASSERT(IsOuterWindow());
   return GetScrollXY(false).y;
 }
 
-int32_t
+double
 nsGlobalWindow::GetScrollY(ErrorResult& aError)
 {
   FORWARD_TO_OUTER_OR_THROW(GetScrollYOuter, (), aError, 0);
@@ -10390,21 +10512,22 @@ void nsGlobalWindow::SetIsBackground(bool aIsBackground)
   bool resetTimers = (!aIsBackground && AsOuter()->IsBackground());
   nsPIDOMWindow::SetIsBackground(aIsBackground);
 
+  nsGlobalWindow* inner = GetCurrentInnerWindowInternal();
+
   if (aIsBackground) {
     MOZ_ASSERT(!resetTimers);
+    // Notify gamepadManager we are at the background window,
+    // we need to stop vibrate.
+    if (inner) {
+      inner->StopGamepadHaptics();
+    }
     return;
+  } else if (inner) {
+    if (resetTimers) {
+      inner->mTimeoutManager->ResetTimersForThrottleReduction();
+    }
+    inner->SyncGamepadState();
   }
-
-  nsGlobalWindow* inner = GetCurrentInnerWindowInternal();
-  if (!inner) {
-    return;
-  }
-
-  if (resetTimers) {
-    inner->mTimeoutManager->ResetTimersForThrottleReduction();
-  }
-
-  inner->SyncGamepadState();
 }
 
 void nsGlobalWindow::MaybeUpdateTouchState()
@@ -12964,9 +13087,14 @@ nsGlobalWindow::RunTimeoutHandler(Timeout* aTimeout,
       AutoEntryScript aes(this, reason, true);
       JS::CompileOptions options(aes.cx());
       options.setFileAndLine(filename, lineNo).setVersion(JSVERSION_DEFAULT);
+      options.setNoScriptRval(true);
       JS::Rooted<JSObject*> global(aes.cx(), FastGetGlobalJSObject());
-      nsresult rv =
-        nsJSUtils::EvaluateString(aes.cx(), script, global, options);
+      nsresult rv = NS_OK;
+      {
+        nsJSUtils::ExecutionContext exec(aes.cx(), global);
+        rv = exec.CompileAndExec(options, script);
+      }
+
       if (rv == NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW_UNCATCHABLE) {
         abortIntervalHandler = true;
       }
@@ -13483,6 +13611,16 @@ nsGlobalWindow::SyncGamepadState()
   }
 }
 
+void
+nsGlobalWindow::StopGamepadHaptics()
+{
+  MOZ_ASSERT(IsInnerWindow());
+  if (mHasSeenGamepadInput) {
+    RefPtr<GamepadManager> gamepadManager(GamepadManager::GetService());
+    gamepadManager->StopHaptics();
+  }
+}
+
 bool
 nsGlobalWindow::UpdateVRDisplays(nsTArray<RefPtr<mozilla::dom::VRDisplay>>& aDevices)
 {
@@ -13503,6 +13641,22 @@ nsGlobalWindow::NotifyActiveVRDisplaysChanged()
   }
 }
 
+uint32_t
+nsGlobalWindow::GetAutoActivateVRDisplayID()
+{
+  MOZ_ASSERT(IsOuterWindow());
+  uint32_t retVal = mAutoActivateVRDisplayID;
+  mAutoActivateVRDisplayID = 0;
+  return retVal;
+}
+
+void
+nsGlobalWindow::SetAutoActivateVRDisplayID(uint32_t aAutoActivateVRDisplayID)
+{
+  MOZ_ASSERT(IsOuterWindow());
+  mAutoActivateVRDisplayID = aAutoActivateVRDisplayID;
+}
+
 void
 nsGlobalWindow::DispatchVRDisplayActivate(uint32_t aDisplayID,
                                           mozilla::dom::VRDisplayEventReason aReason)
@@ -13510,10 +13664,14 @@ nsGlobalWindow::DispatchVRDisplayActivate(uint32_t aDisplayID,
   // Search for the display identified with aDisplayID and fire the
   // event if found.
   for (auto display : mVRDisplays) {
-    if (display->DisplayId() == aDisplayID
-        && !display->IsAnyPresenting()) {
-      // We only want to trigger this event if nobody is presenting to the
-      // display already.
+    if (display->DisplayId() == aDisplayID) {
+      if (aReason != VRDisplayEventReason::Navigation &&
+          display->IsAnyPresenting()) {
+        // We only want to trigger this event if nobody is presenting to the
+        // display already or when a page is loaded by navigating away
+        // from a page with an active VR Presentation.
+        continue;
+      }
 
       VRDisplayEventInit init;
       init.mBubbles = false;
@@ -14660,7 +14818,8 @@ nsGlobalWindow::FireOnNewGlobalObject()
 #endif
 
 already_AddRefed<Promise>
-nsGlobalWindow::CreateImageBitmap(const ImageBitmapSource& aImage,
+nsGlobalWindow::CreateImageBitmap(JSContext* aCx,
+                                  const ImageBitmapSource& aImage,
                                   ErrorResult& aRv)
 {
   if (aImage.IsArrayBuffer() || aImage.IsArrayBufferView()) {
@@ -14672,7 +14831,8 @@ nsGlobalWindow::CreateImageBitmap(const ImageBitmapSource& aImage,
 }
 
 already_AddRefed<Promise>
-nsGlobalWindow::CreateImageBitmap(const ImageBitmapSource& aImage,
+nsGlobalWindow::CreateImageBitmap(JSContext* aCx,
+                                  const ImageBitmapSource& aImage,
                                   int32_t aSx, int32_t aSy, int32_t aSw, int32_t aSh,
                                   ErrorResult& aRv)
 {
@@ -14685,12 +14845,17 @@ nsGlobalWindow::CreateImageBitmap(const ImageBitmapSource& aImage,
 }
 
 already_AddRefed<mozilla::dom::Promise>
-nsGlobalWindow::CreateImageBitmap(const ImageBitmapSource& aImage,
+nsGlobalWindow::CreateImageBitmap(JSContext* aCx,
+                                  const ImageBitmapSource& aImage,
                                   int32_t aOffset, int32_t aLength,
                                   ImageBitmapFormat aFormat,
                                   const Sequence<ChannelPixelLayout>& aLayout,
                                   ErrorResult& aRv)
 {
+  if (!ImageBitmap::ExtensionsEnabled(aCx)) {
+    aRv.Throw(NS_ERROR_TYPE_ERR);
+    return nullptr;
+  }
   if (aImage.IsArrayBuffer() || aImage.IsArrayBufferView()) {
     return ImageBitmap::Create(this, aImage, aOffset, aLength, aFormat, aLayout,
                                aRv);

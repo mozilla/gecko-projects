@@ -34,7 +34,7 @@
 
 #include "nsGtkKeyUtils.h"
 #include "nsGtkCursors.h"
-#include "nsScreenGtk.h"
+#include "ScreenHelperGTK.h"
 
 #include <gtk/gtk.h>
 #if (MOZ_WIDGET_GTK == 3)
@@ -4303,6 +4303,12 @@ nsWindow::SetTransparencyMode(nsTransparencyMode aMode)
         topWindow->SetTransparencyMode(aMode);
         return;
     }
+
+    if (mWindowType != eWindowType_popup) {
+        NS_WARNING("Cannot set transparency mode on non-popup windows.");
+        return;
+    }
+
     bool isTransparent = aMode == eTransparencyTransparent;
 
     if (mIsTransparent == isTransparent)
@@ -6439,7 +6445,7 @@ nsWindow::GdkScaleFactor()
     if (sGdkWindowGetScaleFactorPtr && mGdkWindow)
         return (*sGdkWindowGetScaleFactorPtr)(mGdkWindow);
 #endif
-    return nsScreenGtk::GetGtkMonitorScaleFactor();
+    return ScreenHelperGTK::GetGTKMonitorScaleFactor();
 }
 
 

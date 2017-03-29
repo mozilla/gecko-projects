@@ -61,7 +61,6 @@ ContentClient::CreateContentClient(CompositableForwarder* aForwarder)
 {
   LayersBackend backend = aForwarder->GetCompositorBackendType();
   if (backend != LayersBackend::LAYERS_OPENGL &&
-      backend != LayersBackend::LAYERS_D3D9 &&
       backend != LayersBackend::LAYERS_D3D11 &&
       backend != LayersBackend::LAYERS_WR &&
       backend != LayersBackend::LAYERS_BASIC) {
@@ -256,7 +255,7 @@ ContentClientRemoteBuffer::EndPaint(nsTArray<ReadbackProcessor::Update>* aReadba
   mOldTextures.Clear();
 
   if (mTextureClient && mTextureClient->IsLocked()) {
-    if (aReadbackUpdates->Length() > 0) {
+    if (aReadbackUpdates && aReadbackUpdates->Length() > 0) {
       RefPtr<TextureReadbackSink> readbackSink = new RemoteBufferReadbackProcessor(aReadbackUpdates, mBufferRect, mBufferRotation);
 
       mTextureClient->SetReadbackSink(readbackSink);

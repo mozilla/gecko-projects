@@ -61,6 +61,7 @@
 #include "mozilla/net/CaptivePortalService.h"
 #include "mozilla/plugins/PluginInstanceParent.h"
 #include "mozilla/plugins/PluginModuleParent.h"
+#include "mozilla/widget/ScreenManager.h"
 #include "mozilla/widget/WidgetMessageUtils.h"
 #include "nsBaseDragService.h"
 #include "mozilla/media/MediaChild.h"
@@ -99,7 +100,6 @@
 #include "nsIMutable.h"
 #include "nsIObserverService.h"
 #include "nsIScriptSecurityManager.h"
-#include "nsScreenManagerProxy.h"
 #include "nsMemoryInfoDumper.h"
 #include "nsServiceManagerUtils.h"
 #include "nsStyleSheetService.h"
@@ -198,6 +198,7 @@
 #include "gfxPlatform.h"
 #include "nscore.h" // for NS_FREE_PERMANENT_DATA
 #include "VRManagerChild.h"
+#include "private/pprio.h"
 
 #ifdef MOZ_WIDGET_GTK
 #include "nsAppRunner.h"
@@ -1747,28 +1748,6 @@ ContentChild::DeallocPParentToChildStreamChild(PParentToChildStreamChild* aActor
   return nsIContentChild::DeallocPParentToChildStreamChild(aActor);
 }
 
-PScreenManagerChild*
-ContentChild::AllocPScreenManagerChild(uint32_t* aNumberOfScreens,
-                                       float* aSystemDefaultScale,
-                                       bool* aSuccess)
-{
-  // The ContentParent should never attempt to allocate the
-  // nsScreenManagerProxy. Instead, the nsScreenManagerProxy
-  // service is requested and instantiated via XPCOM, and the
-  // constructor of nsScreenManagerProxy sets up the IPC connection.
-  MOZ_CRASH("Should never get here!");
-  return nullptr;
-}
-
-bool
-ContentChild::DeallocPScreenManagerChild(PScreenManagerChild* aService)
-{
-  // nsScreenManagerProxy is AddRef'd in its constructor.
-  nsScreenManagerProxy *child = static_cast<nsScreenManagerProxy*>(aService);
-  child->Release();
-  return true;
-}
-
 PPSMContentDownloaderChild*
 ContentChild::AllocPPSMContentDownloaderChild(const uint32_t& aCertType)
 {
@@ -3012,7 +2991,8 @@ ContentChild::RecvBlobURLRegistration(const nsCString& aURI, PBlobChild* aBlobCh
 mozilla::ipc::IPCResult
 ContentChild::RecvBlobURLUnregistration(const nsCString& aURI)
 {
-  nsHostObjectProtocolHandler::RemoveDataEntry(aURI);
+  nsHostObjectProtocolHandler::RemoveDataEntry(aURI,
+                                               /* aBroadcastToOtherProcesses = */ false);
   return IPC_OK();
 }
 
@@ -3220,6 +3200,61 @@ ContentChild::RecvParentActivated(PBrowserChild* aTab, const bool& aActivated)
 {
   TabChild* tab = static_cast<TabChild*>(aTab);
   return tab->RecvParentActivated(aActivated);
+}
+
+mozilla::ipc::IPCResult
+ContentChild::RecvProvideAnonymousTemporaryFile(const uint64_t& aID,
+                                                const FileDescOrError& aFDOrError)
+{
+  nsAutoPtr<AnonymousTemporaryFileCallback> callback;
+  mPendingAnonymousTemporaryFiles.RemoveAndForget(aID, callback);
+  MOZ_ASSERT(callback);
+
+  PRFileDesc* prfile = nullptr;
+  if (aFDOrError.type() == FileDescOrError::Tnsresult) {
+    DebugOnly<nsresult> rv = aFDOrError.get_nsresult();
+    MOZ_ASSERT(NS_FAILED(rv));
+  } else {
+    auto rawFD = aFDOrError.get_FileDescriptor().ClonePlatformHandle();
+    prfile = PR_ImportFile(PROsfd(rawFD.release()));
+  }
+  (*callback)(prfile);
+  return IPC_OK();
+}
+
+nsresult
+ContentChild::AsyncOpenAnonymousTemporaryFile(AnonymousTemporaryFileCallback aCallback)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  static uint64_t id = 0;
+  auto newID = id++;
+  if (!SendRequestAnonymousTemporaryFile(newID)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // Remember the association with the callback.
+  MOZ_ASSERT(!mPendingAnonymousTemporaryFiles.Get(newID));
+  mPendingAnonymousTemporaryFiles.LookupOrAdd(newID, aCallback);
+  return NS_OK;
+}
+
+mozilla::ipc::IPCResult
+ContentChild::RecvSetPermissionsWithKey(const nsCString& aPermissionKey,
+                                        nsTArray<IPC::Permission>&& aPerms)
+{
+  nsCOMPtr<nsIPermissionManager> permissionManager =
+    services::GetPermissionManager();
+  permissionManager->SetPermissionsWithKey(aPermissionKey, aPerms);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentChild::RecvRefreshScreens(nsTArray<ScreenDetails>&& aScreens)
+{
+  ScreenManager& screenManager = ScreenManager::GetSingleton();
+  screenManager.Refresh(Move(aScreens));
+  return IPC_OK();
 }
 
 } // namespace dom

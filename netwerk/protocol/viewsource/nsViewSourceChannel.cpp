@@ -11,7 +11,7 @@
 #include "nsContentUtils.h"
 #include "nsIHttpHeaderVisitor.h"
 #include "nsContentSecurityManager.h"
-#include "nsNullPrincipal.h"
+#include "NullPrincipal.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIInputStreamChannel.h"
 #include "mozilla/DebugOnly.h"
@@ -67,7 +67,7 @@ nsViewSourceChannel::Init(nsIURI* uri)
     // Until then we follow the principal of least privilege and use
     // nullPrincipal as the loadingPrincipal and the least permissive
     // securityflag.
-    nsCOMPtr<nsIPrincipal> nullPrincipal = nsNullPrincipal::Create();
+    nsCOMPtr<nsIPrincipal> nullPrincipal = NullPrincipal::Create();
 
     rv = pService->NewChannel2(path,
                                nullptr, // aOriginCharset
@@ -737,6 +737,20 @@ nsViewSourceChannel::SetTopLevelContentWindowId(uint64_t aWindowId)
 {
   return !mHttpChannel ? NS_ERROR_NULL_POINTER :
       mHttpChannel->SetTopLevelContentWindowId(aWindowId);
+}
+
+NS_IMETHODIMP
+nsViewSourceChannel::GetTopLevelOuterContentWindowId(uint64_t *aWindowId)
+{
+  return !mHttpChannel ? NS_ERROR_NULL_POINTER :
+      mHttpChannel->GetTopLevelOuterContentWindowId(aWindowId);
+}
+
+NS_IMETHODIMP
+nsViewSourceChannel::SetTopLevelOuterContentWindowId(uint64_t aWindowId)
+{
+  return !mHttpChannel ? NS_ERROR_NULL_POINTER :
+      mHttpChannel->SetTopLevelOuterContentWindowId(aWindowId);
 }
 
 NS_IMETHODIMP

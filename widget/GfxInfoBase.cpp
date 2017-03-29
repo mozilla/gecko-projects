@@ -32,6 +32,7 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/gfx/Logging.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "MediaPrefs.h"
 #include "gfxPrefs.h"
 #include "gfxPlatform.h"
@@ -1194,8 +1195,6 @@ GetLayersBackendName(layers::LayersBackend aBackend)
       return "none";
     case layers::LayersBackend::LAYERS_OPENGL:
       return "opengl";
-    case layers::LayersBackend::LAYERS_D3D9:
-      return "d3d9";
     case layers::LayersBackend::LAYERS_D3D11:
       return "d3d11";
     case layers::LayersBackend::LAYERS_CLIENT:
@@ -1438,6 +1437,13 @@ GfxInfoBase::GetActiveCrashGuards(JSContext* aCx, JS::MutableHandle<JS::Value> a
     }
   });
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+GfxInfoBase::GetWebRenderEnabled(bool* aWebRenderEnabled)
+{
+  *aWebRenderEnabled = gfxVars::UseWebRender();
   return NS_OK;
 }
 

@@ -8,9 +8,10 @@ use cssparser::{Parser, ToCss};
 use element_state::ElementState;
 use gecko_bindings::structs::CSSPseudoClassType;
 use gecko_bindings::structs::nsIAtom;
+use restyle_hints::complex_selector_to_state;
 use selector_parser::{SelectorParser, PseudoElementCascadeType};
 use selector_parser::{attr_equals_selector_is_shareable, attr_exists_selector_is_shareable};
-use selectors::parser::AttrSelector;
+use selectors::parser::{AttrSelector, ComplexSelector, SelectorMethods};
 use std::borrow::Cow;
 use std::fmt;
 use std::ptr;
@@ -150,8 +151,13 @@ macro_rules! pseudo_class_name {
             )*
             $(
                 #[doc = $s_css]
-                $s_name(Box<str>),
+                $s_name(Box<[u16]>),
             )*
+            /// The non-standard `:-moz-any` pseudo-class.
+            ///
+            /// TODO(emilio): We disallow combinators and pseudos here, so we
+            /// should use SimpleSelector instead
+            MozAny(Vec<ComplexSelector<SelectorImpl>>),
         }
     }
 }
@@ -159,14 +165,32 @@ apply_non_ts_list!(pseudo_class_name);
 
 impl ToCss for NonTSPseudoClass {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+        use cssparser::CssStringWriter;
+        use fmt::Write;
         macro_rules! pseudo_class_serialize {
             (bare: [$(($css:expr, $name:ident, $gecko_type:tt, $state:tt, $flags:tt),)*],
              string: [$(($s_css:expr, $s_name:ident, $s_gecko_type:tt, $s_state:tt, $s_flags:tt),)*]) => {
                 match *self {
                     $(NonTSPseudoClass::$name => concat!(":", $css),)*
                     $(NonTSPseudoClass::$s_name(ref s) => {
-                        return dest.write_str(&format!(":{}({})", $s_css, s))
+                        write!(dest, ":{}(", $s_css)?;
+                        {
+                            let mut css = CssStringWriter::new(dest);
+                            css.write_str(&String::from_utf16(&s).unwrap())?;
+                        }
+                        return dest.write_str(")")
                     }, )*
+                    NonTSPseudoClass::MozAny(ref selectors) => {
+                        dest.write_str(":-moz-any(")?;
+                        let mut iter = selectors.iter();
+                        let first = iter.next().expect(":-moz-any must have at least 1 selector");
+                        first.to_css(dest)?;
+                        for selector in iter {
+                            dest.write_str(", ")?;
+                            selector.to_css(dest)?;
+                        }
+                        return dest.write_str(")")
+                    }
                 }
             }
         }
@@ -174,6 +198,29 @@ impl ToCss for NonTSPseudoClass {
         dest.write_str(ser)
     }
 }
+
+impl SelectorMethods for NonTSPseudoClass {
+    #[inline]
+    fn affects_siblings(&self) -> bool {
+        match *self {
+            NonTSPseudoClass::MozAny(ref selectors) => {
+                selectors.iter().any(|s| s.affects_siblings())
+            }
+            _ => false
+        }
+    }
+
+    #[inline]
+    fn matches_non_common_style_affecting_attribute(&self) -> bool {
+        match *self {
+            NonTSPseudoClass::MozAny(ref selectors) => {
+                selectors.iter().any(|s| s.matches_non_common_style_affecting_attribute())
+            }
+            _ => false
+        }
+    }
+}
+
 
 impl NonTSPseudoClass {
     /// A pseudo-class is internal if it can only be used inside
@@ -189,6 +236,7 @@ impl NonTSPseudoClass {
                 match *self {
                     $(NonTSPseudoClass::$name => check_flag!($flags),)*
                     $(NonTSPseudoClass::$s_name(..) => check_flag!($s_flags),)*
+                    NonTSPseudoClass::MozAny(_) => false,
                 }
             }
         }
@@ -207,6 +255,11 @@ impl NonTSPseudoClass {
                 match *self {
                     $(NonTSPseudoClass::$name => flag!($state),)*
                     $(NonTSPseudoClass::$s_name(..) => flag!($s_state),)*
+                    NonTSPseudoClass::MozAny(ref selectors) => {
+                        selectors.iter().fold(ElementState::empty(), |state, s| {
+                            state | complex_selector_to_state(s)
+                        })
+                    }
                 }
             }
         }
@@ -226,6 +279,7 @@ impl NonTSPseudoClass {
                 match *self {
                     $(NonTSPseudoClass::$name => gecko_type!($gecko_type),)*
                     $(NonTSPseudoClass::$s_name(..) => gecko_type!($s_gecko_type),)*
+                    NonTSPseudoClass::MozAny(_) => gecko_type!(any),
                 }
             }
         }
@@ -234,7 +288,7 @@ impl NonTSPseudoClass {
 }
 
 /// The dummy struct we use to implement our selector parsing.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SelectorImpl;
 
 impl ::selectors::SelectorImpl for SelectorImpl {
@@ -290,9 +344,22 @@ impl<'a> ::selectors::Parser for SelectorParser<'a> {
              string: [$(($s_css:expr, $s_name:ident, $s_gecko_type:tt, $s_state:tt, $s_flags:tt),)*]) => {
                 match_ignore_ascii_case! { &name,
                     $($s_css => {
-                        let name = String::from(parser.expect_ident_or_string()?).into_boxed_str();
-                        NonTSPseudoClass::$s_name(name)
+                        let name = parser.expect_ident_or_string()?;
+                        // convert to null terminated utf16 string
+                        // since that's what Gecko deals with
+                        let utf16: Vec<u16> = name.encode_utf16().chain(Some(0u16)).collect();
+                        NonTSPseudoClass::$s_name(utf16.into_boxed_slice())
                     }, )*
+                    "-moz-any" => {
+                        let selectors = parser.parse_comma_separated(|input| {
+                            ComplexSelector::parse(self, input)
+                        })?;
+                        // Selectors inside `:-moz-any` may not include combinators.
+                        if selectors.iter().any(|s| s.next.is_some()) {
+                            return Err(())
+                        }
+                        NonTSPseudoClass::MozAny(selectors)
+                    }
                     _ => return Err(())
                 }
             }

@@ -965,7 +965,7 @@ protected:
    * Called when an attribute is about to be changed
    */
   virtual nsresult BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                                 nsAttrValueOrString* aValue,
+                                 const nsAttrValueOrString* aValue,
                                  bool aNotify) override;
   /**
    * Called when an attribute has just been changed
@@ -1107,7 +1107,7 @@ protected:
   /**
    * Manages the internal data storage across type changes.
    */
-  void HandleTypeChange(uint8_t aNewType);
+  void HandleTypeChange(uint8_t aNewType, bool aNotify);
 
   /**
    * Sanitize the value of the element depending of its current type.
@@ -1460,7 +1460,6 @@ protected:
   };
   nsresult InitFilePicker(FilePickerType aType);
   nsresult InitColorPicker();
-  nsresult InitDatePicker();
 
   /**
    * Use this function before trying to open a picker.
@@ -1494,6 +1493,11 @@ protected:
   void GetSelectionRange(uint32_t* aSelectionStart,
                          uint32_t* aSelectionEnd,
                          ErrorResult& aRv);
+
+  /**
+   * Override for nsImageLoadingContent.
+   */
+  nsIContent* AsContent() override { return this; }
 
   nsCOMPtr<nsIControllers> mControllers;
 
@@ -1663,7 +1667,7 @@ private:
 
   /**
    * Checks if aDateTimeInputType should be supported based on "dom.forms.datetime",
-   * "dom.forms.datepicker" and "dom.experimental_forms".
+   * and "dom.experimental_forms".
    */
   static bool
   IsDateTimeTypeSupported(uint8_t aDateTimeInputType);
@@ -1690,13 +1694,6 @@ private:
   IsDirPickerEnabled();
 
   /**
-   * Checks preference "dom.forms.datepicker" to determine if date picker should
-   * be supported.
-   */
-  static bool
-  IsDatePickerEnabled();
-
-  /**
    * Checks preference "dom.experimental_forms" to determine if experimental
    * implementation of input element should be enabled.
    */
@@ -1704,11 +1701,18 @@ private:
   IsExperimentalFormsEnabled();
 
   /**
-   * Checks preference "dom.forms.datetime" to determine if input date/time
-   * related types should be supported.
+   * Checks preference "dom.forms.datetime" to determine if input date and time
+   * should be supported.
    */
   static bool
   IsInputDateTimeEnabled();
+
+  /**
+   * Checks preference "dom.forms.datetime.others" to determine if input week,
+   * month and datetime-local should be supported.
+   */
+  static bool
+  IsInputDateTimeOthersEnabled();
 
   /**
    * Checks preference "dom.forms.number" to determine if input type=number

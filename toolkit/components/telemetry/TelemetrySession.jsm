@@ -17,12 +17,10 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
 Cu.import("resource://gre/modules/Promise.jsm", this);
 Cu.import("resource://gre/modules/DeferredTask.jsm", this);
 Cu.import("resource://gre/modules/Preferences.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
 Cu.import("resource://gre/modules/TelemetrySend.jsm", this);
 Cu.import("resource://gre/modules/TelemetryUtils.jsm", this);
 Cu.import("resource://gre/modules/AppConstants.jsm");
-Cu.import("resource://gre/modules/ClientID.jsm");
 
 const Utils = TelemetryUtils;
 
@@ -57,7 +55,7 @@ const INTERNAL_PROCESSES_NAMES = {
 const ENVIRONMENT_CHANGE_LISTENER = "TelemetrySession::onEnvironmentChange";
 
 const MS_IN_ONE_HOUR  = 60 * 60 * 1000;
-const MIN_SUBSESSION_LENGTH_MS = Preferences.get("toolkit.telemetry.minSubsessionLength", 10 * 60) * 1000;
+const MIN_SUBSESSION_LENGTH_MS = Preferences.get("toolkit.telemetry.minSubsessionLength", 5 * 60) * 1000;
 
 const LOGGER_NAME = "Toolkit.Telemetry";
 const LOGGER_PREFIX = "TelemetrySession" + (Utils.isContentProcess ? "#content::" : "::");
@@ -67,7 +65,6 @@ const PREF_PREVIOUS_BUILDID = PREF_BRANCH + "previousBuildID";
 const PREF_FHR_UPLOAD_ENABLED = "datareporting.healthreport.uploadEnabled";
 const PREF_ASYNC_PLUGIN_INIT = "dom.ipc.plugins.asyncInit.enabled";
 const PREF_UNIFIED = PREF_BRANCH + "unified";
-const PREF_SERVER = PREF_BRANCH + "server";
 
 const MESSAGE_TELEMETRY_PAYLOAD = "Telemetry:Payload";
 const MESSAGE_TELEMETRY_THREAD_HANGS = "Telemetry:ChildThreadHangs";
@@ -103,10 +100,6 @@ const SCHEDULER_MIDNIGHT_TOLERANCE_MS = 15 * 60 * 1000;
 // On idle-daily a gather-telemetry notification is fired, during it probes can
 // start asynchronous tasks to gather data.
 const IDLE_TIMEOUT_SECONDS = Preferences.get("toolkit.telemetry.idleTimeout", 5 * 60);
-
-// To avoid generating too many main pings, we ignore environment changes that
-// happen within this interval since the last main ping.
-const CHANGE_THROTTLE_INTERVAL_MS = 5 * 60 * 1000;
 
 // The frequency at which we persist session data to the disk to prevent data loss
 // in case of aborted sessions (currently 5 minutes).
@@ -204,25 +197,12 @@ function getPingType(aPayload) {
 /**
  * Annotate the current session ID with the crash reporter to map potential
  * crash pings with the related main ping.
- *
- * @param sessionId {String} The telemetry session ID
- * @param clientId {String} The telemetry client ID
- * @param telemetryServer {String} The URL of the telemetry server
  */
-function annotateCrashReport(sessionId, clientId, telemetryServer) {
+function annotateCrashReport(sessionId) {
   try {
     const cr = Cc["@mozilla.org/toolkit/crash-reporter;1"];
     if (cr) {
-      const crs = cr.getService(Ci.nsICrashReporter);
-
-      crs.setTelemetrySessionId(sessionId);
-
-      // We do not annotate the crash if telemetry is disabled to prevent the
-      // crashreporter client from sending the crash ping.
-      if (Utils.isTelemetryEnabled) {
-        crs.annotateCrashReport("TelemetryClientId", clientId);
-        crs.annotateCrashReport("TelemetryServerURL", telemetryServer);
-      }
+      cr.getService(Ci.nsICrashReporter).setTelemetrySessionId(sessionId);
     }
   } catch (e) {
     // Ignore errors when crash reporting is disabled
@@ -677,7 +657,7 @@ var Impl = {
   _slowSQLStartup: {},
   _hasWindowRestoredObserver: false,
   _hasXulWindowVisibleObserver: false,
-  _startupIO : {},
+  _startupIO: {},
   // The previous build ID, if this is the first run with a new build.
   // Null if this is the first run, or the previous build ID is unknown.
   _previousBuildId: null,
@@ -1493,10 +1473,7 @@ var Impl = {
     // the very same value for |_sessionStartDate|.
     this._sessionStartDate = this._subsessionStartDate;
 
-    // Annotate crash reports using the cached client ID which can be accessed
-    // synchronously. If it is not available yet, we'll update it later.
-    annotateCrashReport(this._sessionId, ClientID.getCachedClientID(),
-                        Preferences.get(PREF_SERVER, undefined));
+    annotateCrashReport(this._sessionId);
 
     // Initialize some probes that are kept in their own modules
     this._thirdPartyCookies = new ThirdPartyCookieProbe();
@@ -1533,14 +1510,14 @@ var Impl = {
   delayedInit() {
     this._log.trace("delayedInit");
 
-    this._delayedInitTask = Task.spawn(function* () {
+    this._delayedInitTask = (async function() {
       try {
         this._initialized = true;
 
-        yield this._loadSessionData();
+        await this._loadSessionData();
         // Update the session data to keep track of new subsessions created before
         // the initialization.
-        yield TelemetryStorage.saveSessionData(this._getSessionDataObject());
+        await TelemetryStorage.saveSessionData(this._getSessionDataObject());
 
         this.attachObservers();
         this.gatherMemory();
@@ -1551,19 +1528,15 @@ var Impl = {
 
         Telemetry.asyncFetchTelemetryData(function() {});
 
-        // Update the crash annotation with the proper client ID.
-        annotateCrashReport(this._sessionId, yield ClientID.getClientID(),
-                            Preferences.get(PREF_SERVER, undefined));
-
         if (IS_UNIFIED_TELEMETRY) {
           // Check for a previously written aborted session ping.
-          yield TelemetryController.checkAbortedSessionPing();
+          await TelemetryController.checkAbortedSessionPing();
 
           // Write the first aborted-session ping as early as possible. Just do that
           // if we are not testing, since calling Telemetry.reset() will make a previous
           // aborted ping a pending ping.
           if (!this._testing) {
-            yield this._saveAbortedSessionPing();
+            await this._saveAbortedSessionPing();
           }
 
           // The last change date for the environment, used to throttle environment changes.
@@ -1582,7 +1555,7 @@ var Impl = {
         this._delayedInitTask = null;
         throw e;
       }
-    }.bind(this));
+    }.bind(this))();
 
     return this._delayedInitTask;
   },
@@ -1992,15 +1965,15 @@ var Impl = {
         this._initialized = false;
       };
 
-      return Task.spawn(function*() {
-        yield this.saveShutdownPings();
+      return (async function() {
+        await this.saveShutdownPings();
 
         if (IS_UNIFIED_TELEMETRY) {
-          yield TelemetryController.removeAbortedSessionPing();
+          await TelemetryController.removeAbortedSessionPing();
         }
 
         reset();
-      }.bind(this));
+      }.bind(this))();
     };
 
     // We can be in one the following states here:
@@ -2053,8 +2026,8 @@ var Impl = {
    * @return {Promise<object>} A promise which is resolved with an object when
    *                            loading has completed, with null otherwise.
    */
-  _loadSessionData: Task.async(function* () {
-    let data = yield TelemetryStorage.loadSessionData();
+  async _loadSessionData() {
+    let data = await TelemetryStorage.loadSessionData();
 
     if (!data) {
       return null;
@@ -2076,7 +2049,7 @@ var Impl = {
     this._profileSubsessionCounter = data.profileSubsessionCounter +
                                      this._subsessionCounter;
     return data;
-  }),
+  },
 
   /**
    * Get the session data object to serialise to disk.
@@ -2094,7 +2067,7 @@ var Impl = {
 
     let now = Policy.monotonicNow();
     let timeDelta = now - this._lastEnvironmentChangeDate;
-    if (timeDelta <= CHANGE_THROTTLE_INTERVAL_MS) {
+    if (timeDelta <= MIN_SUBSESSION_LENGTH_MS) {
       this._log.trace(`_onEnvironmentChange - throttling; last change was ${Math.round(timeDelta / 1000)}s ago.`);
       return;
     }

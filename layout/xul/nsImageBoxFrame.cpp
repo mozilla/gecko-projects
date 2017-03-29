@@ -97,10 +97,10 @@ nsImageBoxFrameEvent::Run()
 
 // Fire off an event that'll asynchronously call the image elements
 // onload handler once handled. This is needed since the image library
-// can't decide if it wants to call it's observer methods
+// can't decide if it wants to call its observer methods
 // synchronously or asynchronously. If an image is loaded from the
 // cache the notifications come back synchronously, but if the image
-// is loaded from the netswork the notifications come back
+// is loaded from the network the notifications come back
 // asynchronously.
 
 void
@@ -110,8 +110,12 @@ FireImageDOMEvent(nsIContent* aContent, EventMessage aMessage)
                "invalid message");
 
   nsCOMPtr<nsIRunnable> event = new nsImageBoxFrameEvent(aContent, aMessage);
-  if (NS_FAILED(NS_DispatchToCurrentThread(event)))
+  nsresult rv = aContent->OwnerDoc()->Dispatch("nsImageBoxFrameEvent",
+                                               TaskCategory::Other,
+                                               event.forget());
+  if (NS_FAILED(rv)) {
     NS_WARNING("failed to dispatch image event");
+  }
 }
 
 //
@@ -256,7 +260,7 @@ nsImageBoxFrame::UpdateImage()
   } else {
     // Only get the list-style-image if we aren't being drawn
     // by a native theme.
-    uint8_t appearance = StyleDisplay()->mAppearance;
+    uint8_t appearance = StyleDisplay()->UsedAppearance();
     if (!(appearance && nsBox::gTheme &&
           nsBox::gTheme->ThemeSupportsWidget(nullptr, this, appearance))) {
       // get the list-style-image
@@ -406,11 +410,7 @@ nsImageBoxFrame::PaintImage(nsRenderingContext& aRenderingContext,
   }
 
   Maybe<SVGImageContext> svgContext;
-  if (imgCon->GetType() == imgIContainer::TYPE_VECTOR) {
-    // We avoid this overhead for raster images.
-    svgContext.emplace();
-    svgContext->MaybeStoreContextPaint(this);
-  }
+  SVGImageContext::MaybeInitAndStoreContextPaint(svgContext, this, imgCon);
 
   return nsLayoutUtils::DrawSingleImage(
            *aRenderingContext.ThebesContext(),
@@ -532,8 +532,8 @@ nsImageBoxFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 
   // If we're using a native theme implementation, we shouldn't draw anything.
   const nsStyleDisplay* disp = StyleDisplay();
-  if (disp->mAppearance && nsBox::gTheme &&
-      nsBox::gTheme->ThemeSupportsWidget(nullptr, this, disp->mAppearance))
+  if (disp->UsedAppearance() && nsBox::gTheme &&
+      nsBox::gTheme->ThemeSupportsWidget(nullptr, this, disp->UsedAppearance()))
     return;
 
   // If list-style-image changes, we have a new image.

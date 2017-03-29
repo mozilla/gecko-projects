@@ -46,9 +46,9 @@ _SUBDIR_CONFIG_ARGS="$ac_configure_args"
 dnl Set the version number of the libs included with mozilla
 dnl ========================================================
 MOZJPEG=62
-MOZPNG=10628
+MOZPNG=10629
 NSPR_VERSION=4
-NSPR_MINVER=4.13.1
+NSPR_MINVER=4.14
 NSS_VERSION=3
 
 dnl Set the minimum version of toolkit libs used by mozilla
@@ -4884,7 +4884,6 @@ if test "$MOZ_TREE_CAIRO"; then
         WIN32_FONT_FEATURE="#define CAIRO_HAS_WIN32_FONT 1"
         WIN32_SURFACE_FEATURE="#define CAIRO_HAS_WIN32_SURFACE 1"
         MOZ_ENABLE_D2D_SURFACE=1
-        MOZ_ENABLE_DWRITE_FONT=1
 
         if test "$COMPILE_ENVIRONMENT"; then
 
@@ -4899,7 +4898,6 @@ if test "$MOZ_TREE_CAIRO"; then
         FC_FONT_FEATURE="#define CAIRO_HAS_FC_FONT 1"
     fi
     AC_SUBST(MOZ_ENABLE_CAIRO_FT)
-    AC_SUBST(MOZ_ENABLE_DWRITE_FONT)
     AC_SUBST(MOZ_ENABLE_D2D_SURFACE)
     AC_SUBST(MOZ_ENABLE_D3D10_LAYER)
 
@@ -5308,7 +5306,12 @@ dnl ICU Support
 dnl ========================================================
 
 if test "$MOZ_WIDGET_TOOLKIT" != "android" -o -z "$RELEASE_OR_BETA"; then
-    _INTL_API=yes
+    dnl Disable ICU on android/x86 for testing on tier-1 platform
+    if test "$MOZ_WIDGET_TOOLKIT" = "android" -a "$CPU_ARCH" = "x86"; then
+        _INTL_API=no
+    else
+        _INTL_API=yes
+    fi
 else
     _INTL_API=no
 fi

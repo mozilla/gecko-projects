@@ -4,9 +4,10 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-from voluptuous import Schema, Required
+from voluptuous import Required
 from taskgraph.util.taskcluster import get_artifact_url
 from taskgraph.transforms.job import run_job_using
+from taskgraph.util.schema import Schema
 from taskgraph.transforms.tests import (
     test_description_schema,
     get_firefox_version,
@@ -393,12 +394,21 @@ def mozharness_test_buildbot_bridge(config, job, taskdesc):
         variant = ''
         if m and m.group(1):
             variant = m.group(1) + ' '
-        buildername = '{} {} {}talos {}'.format(
-            BUILDER_NAME_PREFIX[platform],
-            branch,
-            variant,
-            test_name
-        )
+        # this variant name has branch after the variant type in BBB bug 1338871
+        if variant == 'stylo ':
+            buildername = '{} {}{} talos {}'.format(
+                BUILDER_NAME_PREFIX[platform],
+                variant,
+                branch,
+                test_name
+            )
+        else:
+            buildername = '{} {} {}talos {}'.format(
+                BUILDER_NAME_PREFIX[platform],
+                branch,
+                variant,
+                test_name
+            )
         if buildername.startswith('Ubuntu'):
             buildername = buildername.replace('VM', 'HW')
     else:

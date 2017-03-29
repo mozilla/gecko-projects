@@ -44,16 +44,25 @@ XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
 XPCOMUtils.defineLazyModuleGetter(this, "WebNavigationFrames",
                                   "resource://gre/modules/WebNavigationFrames.jsm");
 
+XPCOMUtils.defineLazyServiceGetter(this, "styleSheetService",
+                                   "@mozilla.org/content/style-sheet-service;1",
+                                   "nsIStyleSheetService");
+
+const Timer = Components.Constructor("@mozilla.org/timer;1", "nsITimer", "initWithCallback");
+
 Cu.import("resource://gre/modules/ExtensionChild.jsm");
 Cu.import("resource://gre/modules/ExtensionCommon.jsm");
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 
 const {
+  DefaultMap,
+  DefaultWeakMap,
   EventEmitter,
   LocaleData,
   defineLazyGetter,
   flushJarCache,
   getInnerWindowID,
+  getWinUtils,
   promiseDocumentReady,
   runSafeSyncWithoutClone,
 } = ExtensionUtils;
@@ -102,45 +111,174 @@ var apiManager = new class extends SchemaAPIManager {
   }
 }();
 
-// Represents a content script.
-function Script(extension, options, deferred = PromiseUtils.defer()) {
-  this.extension = extension;
-  this.options = options;
-  this.run_at = this.options.run_at;
-  this.js = this.options.js || [];
-  this.css = this.options.css || [];
-  this.remove_css = this.options.remove_css;
-  this.match_about_blank = this.options.match_about_blank;
-  this.css_origin = this.options.css_origin;
+const SCRIPT_EXPIRY_TIMEOUT_MS = 5 * 60 * 1000;
+const SCRIPT_CLEAR_TIMEOUT_MS = 5 * 1000;
 
-  this.deferred = deferred;
+const CSS_EXPIRY_TIMEOUT_MS = 30 * 60 * 1000;
 
-  this.matches_ = new MatchPattern(this.options.matches);
-  this.exclude_matches_ = new MatchPattern(this.options.exclude_matches || null);
-  // TODO: MatchPattern should pre-mangle host-only patterns so that we
-  // don't need to call a separate match function.
-  this.matches_host_ = new MatchPattern(this.options.matchesHost || null);
-  this.include_globs_ = new MatchGlobs(this.options.include_globs);
-  this.exclude_globs_ = new MatchGlobs(this.options.exclude_globs);
+const scriptCaches = new WeakSet();
+const sheetCacheDocuments = new DefaultWeakMap(() => new WeakSet());
 
-  this.requiresCleanup = !this.remove_css && (this.css.length > 0 || options.cssCode);
+class CacheMap extends DefaultMap {
+  constructor(timeout, getter) {
+    super(getter);
+
+    this.expiryTimeout = timeout;
+
+    scriptCaches.add(this);
+  }
+
+  get(url) {
+    let promise = super.get(url);
+
+    promise.lastUsed = Date.now();
+    if (promise.timer) {
+      promise.timer.cancel();
+    }
+    promise.timer = Timer(this.delete.bind(this, url),
+                          this.expiryTimeout,
+                          Ci.nsITimer.TYPE_ONE_SHOT);
+
+    return promise;
+  }
+
+  delete(url) {
+    if (this.has(url)) {
+      super.get(url).timer.cancel();
+    }
+
+    super.delete(url);
+  }
+
+  clear(timeout = SCRIPT_CLEAR_TIMEOUT_MS) {
+    let now = Date.now();
+    for (let [url, promise] of this.entries()) {
+      if (now - promise.lastUsed >= timeout) {
+        this.delete(url);
+      }
+    }
+  }
 }
 
-Script.prototype = {
-  get cssURLs() {
-    // We can handle CSS urls (css) and CSS code (cssCode).
-    let urls = [];
-    for (let url of this.css) {
-      urls.push(this.extension.baseURI.resolve(url));
+class ScriptCache extends CacheMap {
+  constructor(options) {
+    super(SCRIPT_EXPIRY_TIMEOUT_MS,
+          url => ChromeUtils.compileScript(url, options));
+  }
+}
+
+class CSSCache extends CacheMap {
+  constructor(sheetType) {
+    super(CSS_EXPIRY_TIMEOUT_MS, url => {
+      let uri = Services.io.newURI(url);
+      return styleSheetService.preloadSheetAsync(uri, sheetType).then(sheet => {
+        return {url, sheet};
+      });
+    });
+  }
+
+  addDocument(url, document) {
+    sheetCacheDocuments.get(this.get(url)).add(document);
+  }
+
+  deleteDocument(url, document) {
+    sheetCacheDocuments.get(this.get(url)).delete(document);
+  }
+
+  delete(url) {
+    if (this.has(url)) {
+      let promise = this.get(url);
+
+      // Never remove a sheet from the cache if it's still being used by a
+      // document. Rule processors can be shared between documents with the
+      // same preloaded sheet, so we only lose by removing them while they're
+      // still in use.
+      let docs = ChromeUtils.nondeterministicGetWeakSetKeys(sheetCacheDocuments.get(promise));
+      if (docs.length) {
+        return;
+      }
     }
 
-    if (this.options.cssCode) {
-      let url = "data:text/css;charset=utf-8," + encodeURIComponent(this.options.cssCode);
-      urls.push(url);
+    super.delete(url);
+  }
+}
+
+// Represents a content script.
+class Script {
+  constructor(extension, options, deferred = PromiseUtils.defer()) {
+    this.extension = extension;
+    this.options = options;
+    this.run_at = this.options.run_at;
+    this.js = this.options.js || [];
+    this.css = this.options.css || [];
+    this.remove_css = this.options.remove_css;
+    this.match_about_blank = this.options.match_about_blank;
+    this.css_origin = this.options.css_origin;
+
+    this.deferred = deferred;
+
+    this.cssCache = extension[this.css_origin === "user" ? "userCSS"
+                                                         : "authorCSS"];
+    this.scriptCache = extension[options.wantReturnValue ? "dynamicScripts"
+                                                         : "staticScripts"];
+
+    if (options.wantReturnValue) {
+      this.compileScripts();
+      this.loadCSS();
     }
 
-    return urls;
-  },
+    this.matches_ = new MatchPattern(this.options.matches);
+    this.exclude_matches_ = new MatchPattern(this.options.exclude_matches || null);
+    // TODO: MatchPattern should pre-mangle host-only patterns so that we
+    // don't need to call a separate match function.
+    this.matches_host_ = new MatchPattern(this.options.matchesHost || null);
+    this.include_globs_ = new MatchGlobs(this.options.include_globs);
+    this.exclude_globs_ = new MatchGlobs(this.options.exclude_globs);
+
+    this.requiresCleanup = !this.remove_css && (this.css.length > 0 || options.cssCode);
+  }
+
+  compileScripts() {
+    return this.js.map(url => this.scriptCache.get(url));
+  }
+
+  loadCSS() {
+    return this.cssURLs.map(url => this.cssCache.get(url));
+  }
+
+  matchesLoadInfo(uri, loadInfo) {
+    if (!this.matchesURI(uri)) {
+      return false;
+    }
+
+    if (!this.options.all_frames && !loadInfo.isTopLevelLoad) {
+      return false;
+    }
+
+    return true;
+  }
+
+  matchesURI(uri) {
+    if (!(this.matches_.matches(uri) || this.matches_host_.matchesIgnoringPath(uri))) {
+      return false;
+    }
+
+    if (this.exclude_matches_.matches(uri)) {
+      return false;
+    }
+
+    if (this.options.include_globs != null) {
+      if (!this.include_globs_.matches(uri.spec)) {
+        return false;
+      }
+    }
+
+    if (this.exclude_globs_.matches(uri.spec)) {
+      return false;
+    }
+
+    return true;
+  }
 
   matches(window) {
     let uri = window.document.documentURIObject;
@@ -174,21 +312,7 @@ Script.prototype = {
       uri = principal.URI;
     }
 
-    if (!(this.matches_.matches(uri) || this.matches_host_.matchesIgnoringPath(uri))) {
-      return false;
-    }
-
-    if (this.exclude_matches_.matches(uri)) {
-      return false;
-    }
-
-    if (this.options.include_globs != null) {
-      if (!this.include_globs_.matches(uri.spec)) {
-        return false;
-      }
-    }
-
-    if (this.exclude_globs_.matches(uri.spec)) {
+    if (!this.matchesURI(uri)) {
       return false;
     }
 
@@ -201,19 +325,23 @@ Script.prototype = {
     }
 
     return true;
-  },
+  }
 
   cleanup(window) {
-    if (!this.remove_css) {
-      let winUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                           .getInterface(Ci.nsIDOMWindowUtils);
+    if (!this.remove_css && this.cssURLs.length) {
+      let winUtils = getWinUtils(window);
 
       let type = this.css_origin === "user" ? winUtils.USER_SHEET : winUtils.AUTHOR_SHEET;
       for (let url of this.cssURLs) {
+        this.cssCache.deleteDocument(url, window.document);
         runSafeSyncWithoutClone(winUtils.removeSheetUsingURIString, url, type);
       }
+
+      // Clear any sheets that were kept alive past their timeout as
+      // a result of living in this document.
+      this.cssCache.clear(CSS_EXPIRY_TIMEOUT_MS);
     }
-  },
+  }
 
   /**
    * Tries to inject this script into the given window and sandbox, if
@@ -241,56 +369,78 @@ Script.prototype = {
    *        the injection.
    */
   tryInject(window, sandbox, shouldRun, when) {
-    if (shouldRun("document_start")) {
-      let {cssURLs} = this;
-      if (cssURLs.length > 0) {
-        let winUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                             .getInterface(Ci.nsIDOMWindowUtils);
+    if (this.cssURLs.length && shouldRun("document_start")) {
+      let winUtils = getWinUtils(window);
 
-        let method = this.remove_css ? winUtils.removeSheetUsingURIString : winUtils.loadSheetUsingURIString;
-        let type = this.css_origin === "user" ? winUtils.USER_SHEET : winUtils.AUTHOR_SHEET;
-        for (let url of cssURLs) {
-          runSafeSyncWithoutClone(method, url, type);
+      let innerWindowID = winUtils.currentInnerWindowID;
+
+      let type = this.css_origin === "user" ? winUtils.USER_SHEET : winUtils.AUTHOR_SHEET;
+
+      if (this.remove_css) {
+        for (let url of this.cssURLs) {
+          this.cssCache.deleteDocument(url, window.document);
+
+          runSafeSyncWithoutClone(winUtils.removeSheetUsingURIString, url, type);
         }
 
         this.deferred.resolve();
+      } else {
+        this.deferred.resolve(
+          Promise.all(this.loadCSS()).then(sheets => {
+            if (winUtils.currentInnerWindowID !== innerWindowID) {
+              return;
+            }
+
+            for (let {url, sheet} of sheets) {
+              this.cssCache.addDocument(url, window.document);
+
+              runSafeSyncWithoutClone(winUtils.addSheet, sheet, type);
+            }
+          }));
       }
     }
 
-    let result;
     let scheduled = this.run_at || "document_idle";
     if (shouldRun(scheduled)) {
-      for (let url of this.js) {
-        url = this.extension.baseURI.resolve(url);
+      let scriptsPromise = Promise.all(this.compileScripts());
 
-        let options = {
-          target: sandbox,
-          charset: "UTF-8",
-          // Inject asynchronously unless we're expected to inject before any
-          // page scripts have run, and we haven't already missed that boat.
-          async: this.run_at !== "document_start" || when !== "document_start",
-        };
-        try {
-          result = Services.scriptloader.loadSubScriptWithOptions(url, options);
-        } catch (e) {
-          Cu.reportError(e);
-          this.deferred.reject(e);
-        }
+      // If we're supposed to inject at the start of the document load,
+      // and we haven't already missed that point, block further parsing
+      // until the scripts have been loaded.
+      if (this.run_at === "document_start" && when === "document_start") {
+        window.document.blockParsing(scriptsPromise);
       }
 
-      if (this.options.jsCode) {
-        try {
+      this.deferred.resolve(scriptsPromise.then(scripts => {
+        let result;
+
+        // The evaluations below may throw, in which case the promise will be
+        // automatically rejected.
+        for (let script of scripts) {
+          result = script.executeInGlobal(sandbox);
+        }
+
+        if (this.options.jsCode) {
           result = Cu.evalInSandbox(this.options.jsCode, sandbox, "latest");
-        } catch (e) {
-          Cu.reportError(e);
-          this.deferred.reject(e);
         }
-      }
 
-      this.deferred.resolve(result);
+        return result;
+      }));
     }
-  },
-};
+  }
+}
+
+defineLazyGetter(Script.prototype, "cssURLs", function() {
+  // We can handle CSS urls (css) and CSS code (cssCode).
+  let urls = this.css.slice();
+
+  if (this.options.cssCode) {
+    urls.push("data:text/css;charset=utf-8," + encodeURIComponent(this.options.cssCode));
+  }
+
+  return urls;
+});
+
 
 function getWindowMessageManager(contentWindow) {
   let ir = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -499,15 +649,23 @@ DocumentManager = {
   extensionPageWindows: new Map(),
 
   init() {
+    if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
+      Services.obs.addObserver(this, "http-on-opening-request", false);
+    }
     Services.obs.addObserver(this, "content-document-global-created", false);
     Services.obs.addObserver(this, "document-element-inserted", false);
     Services.obs.addObserver(this, "inner-window-destroyed", false);
+    Services.obs.addObserver(this, "memory-pressure", false);
   },
 
   uninit() {
+    if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
+      Services.obs.removeObserver(this, "http-on-opening-request");
+    }
     Services.obs.removeObserver(this, "content-document-global-created");
     Services.obs.removeObserver(this, "document-element-inserted");
     Services.obs.removeObserver(this, "inner-window-destroyed");
+    Services.obs.removeObserver(this, "memory-pressure");
   },
 
   getWindowState(contentWindow) {
@@ -544,17 +702,15 @@ DocumentManager = {
     }
   },
 
-  observe: function(subject, topic, data) {
+  observers: {
     // For some types of documents (about:blank), we only see the first
     // notification, for others (data: URIs) we only observe the second.
-    if (topic == "content-document-global-created" || topic == "document-element-inserted") {
+    "content-document-global-created"(subject, topic, data) {
+      this.observers["document-element-inserted"].call(this, subject.document, topic, data);
+    },
+    "document-element-inserted"(subject, topic, data) {
       let document = subject;
       let window = document && document.defaultView;
-
-      if (topic == "content-document-global-created") {
-        window = subject;
-        document = window && window.document;
-      }
 
       if (!document || !document.location || !window) {
         return;
@@ -578,7 +734,8 @@ DocumentManager = {
       window.addEventListener("DOMContentLoaded", this, true);
       window.addEventListener("load", this, true);
       /* eslint-enable mozilla/balanced-listeners */
-    } else if (topic == "inner-window-destroyed") {
+    },
+    "inner-window-destroyed"(subject, topic, data) {
       let windowId = subject.QueryInterface(Ci.nsISupportsPRUint64).data;
 
       MessageChannel.abortResponses({innerWindowID: windowId});
@@ -601,10 +758,31 @@ DocumentManager = {
       }
 
       ExtensionChild.destroyExtensionContext(windowId);
-    }
+    },
+    "http-on-opening-request"(subject, topic, data) {
+      let {loadInfo} = subject.QueryInterface(Ci.nsIChannel);
+      if (loadInfo) {
+        let {externalContentPolicyType: type} = loadInfo;
+        if (type === Ci.nsIContentPolicy.TYPE_DOCUMENT ||
+            type === Ci.nsIContentPolicy.TYPE_SUBDOCUMENT) {
+          this.preloadScripts(subject.URI, loadInfo);
+        }
+      }
+    },
+    "memory-pressure"(subject, topic, data) {
+      let timeout = data === "heap-minimize" ? 0 : undefined;
+
+      for (let cache of ChromeUtils.nondeterministicGetWeakSetKeys(scriptCaches)) {
+        cache.clear(timeout);
+      }
+    },
   },
 
-  handleEvent: function(event) {
+  observe(subject, topic, data) {
+    this.observers[topic].call(this, subject, topic, data);
+  },
+
+  handleEvent(event) {
     let window = event.currentTarget;
     if (event.target != window.document) {
       // We use capturing listeners so we have precedence over content script
@@ -763,6 +941,17 @@ DocumentManager = {
     }
   },
 
+  preloadScripts(uri, loadInfo) {
+    for (let extension of ExtensionManager.extensions.values()) {
+      for (let script of extension.scripts) {
+        if (script.matchesLoadInfo(uri, loadInfo)) {
+          script.loadCSS();
+          script.compileScripts();
+        }
+      }
+    }
+  },
+
   trigger(when, window) {
     if (when === "document_start") {
       for (let extension of ExtensionManager.extensions.values()) {
@@ -795,10 +984,14 @@ class BrowserExtensionContent extends EventEmitter {
     this.MESSAGE_EMIT_EVENT = `Extension:EmitEvent:${this.instanceId}`;
     Services.cpmm.addMessageListener(this.MESSAGE_EMIT_EVENT, this);
 
-    this.scripts = data.content_scripts.map(scriptData => new Script(this, scriptData));
+    defineLazyGetter(this, "scripts", () => {
+      return data.content_scripts.map(scriptData => new Script(this, scriptData));
+    });
+
     this.webAccessibleResources = new MatchGlobs(data.webAccessibleResources);
     this.whiteListedHosts = new MatchPattern(data.whiteListedHosts);
     this.permissions = data.permissions;
+    this.optionalPermissions = data.optionalPermissions;
     this.principal = data.principal;
 
     this.localeData = new LocaleData(data.localeData);
@@ -818,6 +1011,34 @@ class BrowserExtensionContent extends EventEmitter {
       // Extension.jsm takes care of this in the parent.
       ExtensionManagement.startupExtension(this.uuid, uri, this);
     }
+
+    /* eslint-disable mozilla/balanced-listeners */
+    this.on("add-permissions", (ignoreEvent, permissions) => {
+      if (permissions.permissions.length > 0) {
+        for (let perm of permissions.permissions) {
+          this.permissions.add(perm);
+        }
+      }
+
+      if (permissions.origins.length > 0) {
+        this.whiteListedHosts = new MatchPattern(this.whiteListedHosts.pat.concat(...permissions.origins));
+      }
+    });
+
+    this.on("remove-permissions", (ignoreEvent, permissions) => {
+      if (permissions.permissions.length > 0) {
+        for (let perm of permissions.permissions) {
+          this.permissions.delete(perm);
+        }
+      }
+
+      if (permissions.origins.length > 0) {
+        for (let origin of permissions.origins) {
+          this.whiteListedHosts.removeOne(origin);
+        }
+      }
+    });
+    /* eslint-enable mozilla/balanced-listeners */
   }
 
   shutdown() {
@@ -856,6 +1077,22 @@ class BrowserExtensionContent extends EventEmitter {
     return this.permissions.has(perm);
   }
 }
+
+defineLazyGetter(BrowserExtensionContent.prototype, "staticScripts", () => {
+  return new ScriptCache({hasReturnValue: false});
+});
+
+defineLazyGetter(BrowserExtensionContent.prototype, "dynamicScripts", () => {
+  return new ScriptCache({hasReturnValue: true});
+});
+
+defineLazyGetter(BrowserExtensionContent.prototype, "userCSS", () => {
+  return new CSSCache(Ci.nsIStyleSheetService.USER_SHEET);
+});
+
+defineLazyGetter(BrowserExtensionContent.prototype, "authorCSS", () => {
+  return new CSSCache(Ci.nsIStyleSheetService.AUTHOR_SHEET);
+});
 
 ExtensionManager = {
   // Map[extensionId, BrowserExtensionContent]
@@ -925,10 +1162,7 @@ class ExtensionGlobal {
     MessageChannel.addListener(global, "WebNavigation:GetFrame", this);
     MessageChannel.addListener(global, "WebNavigation:GetAllFrames", this);
 
-    this.windowId = global.content
-                          .QueryInterface(Ci.nsIInterfaceRequestor)
-                          .getInterface(Ci.nsIDOMWindowUtils)
-                          .outerWindowID;
+    this.windowId = getWinUtils(global.content).outerWindowID;
 
     global.sendAsyncMessage("Extension:TopWindowID", {windowId: this.windowId});
   }
@@ -1017,7 +1251,10 @@ class ExtensionGlobal {
         // we try to send it back over the message manager.
         Cu.cloneInto(result, target);
       } catch (e) {
-        return Promise.reject({message: "Script returned non-structured-clonable data"});
+        const {js} = options;
+        const fileName = js.length ? js[js.length - 1] : "<anonymous code>";
+        const message = `Script '${fileName}' result is non-structured-clonable data`;
+        return Promise.reject({message, fileName});
       }
       return result;
     });

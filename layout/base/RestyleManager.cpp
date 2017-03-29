@@ -355,7 +355,7 @@ RestyleManager::ContentStateChangedInternal(Element* aElement,
                                          NS_EVENT_STATE_LOADING)) {
       *aOutChangeHint = nsChangeHint_ReconstructFrame;
     } else {
-      uint8_t app = primaryFrame->StyleDisplay()->mAppearance;
+      uint8_t app = primaryFrame->StyleDisplay()->UsedAppearance();
       if (app) {
         nsITheme* theme = PresContext()->GetTheme();
         if (theme &&
@@ -408,8 +408,8 @@ RestyleManager::RestyleHintToString(nsRestyleHint aHint)
   bool any = false;
   const char* names[] = {
     "Self", "SomeDescendants", "Subtree", "LaterSiblings", "CSSTransitions",
-    "CSSAnimations", "SVGAttrAnimations", "StyleAttribute",
-    "StyleAttribute_Animations", "Force", "ForceDescendants"
+    "CSSAnimations", "StyleAttribute", "StyleAttribute_Animations",
+    "Force", "ForceDescendants"
   };
   uint32_t hint = aHint & ((1 << ArrayLength(names)) - 1);
   uint32_t rest = aHint & ~((1 << ArrayLength(names)) - 1);
@@ -459,24 +459,18 @@ RestyleManager::ChangeHintToString(nsChangeHint aHint)
                 "Name list doesn't match change hints.");
   uint32_t hint = aHint & ((1 << ArrayLength(names)) - 1);
   uint32_t rest = aHint & ~((1 << ArrayLength(names)) - 1);
-  if (hint == nsChangeHint_Hints_NotHandledForDescendants) {
-    result.AppendLiteral("nsChangeHint_Hints_NotHandledForDescendants");
-    hint = 0;
+  if ((hint & NS_STYLE_HINT_REFLOW) == NS_STYLE_HINT_REFLOW) {
+    result.AppendLiteral("NS_STYLE_HINT_REFLOW");
+    hint = hint & ~NS_STYLE_HINT_REFLOW;
     any = true;
-  } else {
-    if ((hint & NS_STYLE_HINT_REFLOW) == NS_STYLE_HINT_REFLOW) {
-      result.AppendLiteral("NS_STYLE_HINT_REFLOW");
-      hint = hint & ~NS_STYLE_HINT_REFLOW;
-      any = true;
-    } else if ((hint & nsChangeHint_AllReflowHints) == nsChangeHint_AllReflowHints) {
-      result.AppendLiteral("nsChangeHint_AllReflowHints");
-      hint = hint & ~nsChangeHint_AllReflowHints;
-      any = true;
-    } else if ((hint & NS_STYLE_HINT_VISUAL) == NS_STYLE_HINT_VISUAL) {
-      result.AppendLiteral("NS_STYLE_HINT_VISUAL");
-      hint = hint & ~NS_STYLE_HINT_VISUAL;
-      any = true;
-    }
+  } else if ((hint & nsChangeHint_AllReflowHints) == nsChangeHint_AllReflowHints) {
+    result.AppendLiteral("nsChangeHint_AllReflowHints");
+    hint = hint & ~nsChangeHint_AllReflowHints;
+    any = true;
+  } else if ((hint & NS_STYLE_HINT_VISUAL) == NS_STYLE_HINT_VISUAL) {
+    result.AppendLiteral("NS_STYLE_HINT_VISUAL");
+    hint = hint & ~NS_STYLE_HINT_VISUAL;
+    any = true;
   }
   for (uint32_t i = 0; i < ArrayLength(names); i++) {
     if (hint & (1 << i)) {
@@ -976,7 +970,7 @@ FrameHasPositionedPlaceholderDescendants(nsIFrame* aFrame,
           nsPlaceholderFrame::GetRealFrameForPlaceholder(f);
         // If SVG text frames could appear here, they could confuse us since
         // they ignore their position style ... but they can't.
-        NS_ASSERTION(!outOfFlow->IsSVGText(),
+        NS_ASSERTION(!nsSVGUtils::IsInSVGTextSubtree(outOfFlow),
                      "SVG text frames can't be out of flow");
         if (aPositionMask & (1 << outOfFlow->StyleDisplay()->mPosition)) {
           return true;
@@ -1099,7 +1093,7 @@ DoApplyRenderingChangeToTree(nsIFrame* aFrame,
       }
     }
     if (aChange & nsChangeHint_UpdateTextPath) {
-      if (aFrame->IsSVGText()) {
+      if (nsSVGUtils::IsInSVGTextSubtree(aFrame)) {
         // Invalidate and reflow the entire SVGTextFrame:
         NS_ASSERTION(aFrame->GetContent()->IsSVGElement(nsGkAtoms::textPath),
                      "expected frame for a <textPath> element");
@@ -1172,12 +1166,8 @@ SyncViewsAndInvalidateDescendants(nsIFrame* aFrame, nsChangeHint aChange)
                                       nsChangeHint_SchedulePaint)),
                "Invalid change flag");
 
-  nsView* view = aFrame->GetView();
-  if (view) {
-    if (aChange & nsChangeHint_SyncFrameView) {
-      nsContainerFrame::SyncFrameViewProperties(aFrame->PresContext(), aFrame,
-                                                nullptr, view);
-    }
+  if (aChange & nsChangeHint_SyncFrameView) {
+    aFrame->SyncFrameViewProperties();
   }
 
   nsIFrame::ChildListIterator lists(aFrame);
@@ -1350,7 +1340,8 @@ RestyleManager::GetNextContinuationWithSameStyle(
   nsStyleContext* nextStyle = nextContinuation->StyleContext();
   if (nextStyle != aOldStyleContext) {
     NS_ASSERTION(aOldStyleContext->GetPseudo() != nextStyle->GetPseudo() ||
-                 aOldStyleContext->GetParent() != nextStyle->GetParent(),
+                 aOldStyleContext->GetParentAllowServo() !=
+                   nextStyle->GetParentAllowServo(),
                  "continuations should have the same style context");
     nextContinuation = nullptr;
     if (aHaveMoreContinuations) {

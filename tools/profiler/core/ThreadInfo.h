@@ -34,9 +34,9 @@ public:
   virtual void SetPendingDelete();
   bool IsPendingDelete() const { return mPendingDelete; }
 
-  bool CanInvokeJS() const;
-
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+
+  ProfileBuffer::LastSample& LastSample() { return mLastSample; }
 
  private:
   mozilla::UniqueFreePtr<char> mName;
@@ -104,6 +104,12 @@ private:
   mozilla::Maybe<UniqueStacks> mUniqueStacks;
 
   ThreadResponsiveness mRespInfo;
+
+  // When sampling, this holds the generation number and offset in the
+  // ProfileBuffer of the most recent sample for this thread.
+  // mLastSample.mThreadId duplicates mThreadId in this structure, which
+  // simplifies some uses of mLastSample.
+  ProfileBuffer::LastSample mLastSample;
 };
 
 #endif

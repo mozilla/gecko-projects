@@ -60,6 +60,20 @@ SurfaceFormatToWrImageFormat(gfx::SurfaceFormat aFormat) {
   }
 }
 
+inline gfx::SurfaceFormat
+WrImageFormatToSurfaceFormat(ImageFormat aFormat) {
+  switch (aFormat) {
+    case ImageFormat::RGBA8:
+      return gfx::SurfaceFormat::B8G8R8A8;
+    case ImageFormat::A8:
+      return gfx::SurfaceFormat::A8;
+    case ImageFormat::RGB8:
+      return gfx::SurfaceFormat::B8G8R8;
+    default:
+      return gfx::SurfaceFormat::UNKNOWN;
+  }
+}
+
 struct ImageDescriptor: public WrImageDescriptor {
   ImageDescriptor(const gfx::IntSize& aSize, gfx::SurfaceFormat aFormat)
   {
@@ -201,6 +215,16 @@ static inline WrSize ToWrSize(const LayerSize size)
   return ls;
 }
 
+static inline WrBorderRadius ToWrUniformBorderRadius(const LayerSize& aSize)
+{
+  WrBorderRadius br;
+  br.top_left = ToWrSize(aSize);
+  br.top_right = ToWrSize(aSize);
+  br.bottom_left = ToWrSize(aSize);
+  br.bottom_right = ToWrSize(aSize);
+  return br;
+}
+
 static inline WrBorderRadius ToWrBorderRadius(const LayerSize& topLeft, const LayerSize& topRight,
                                               const LayerSize& bottomLeft, const LayerSize& bottomRight)
 {
@@ -285,6 +309,16 @@ template<class T>
 static inline WrRect ToWrRect(const gfx::IntRectTyped<T>& rect)
 {
   return ToWrRect(IntRectToRect(rect));
+}
+
+template<class T>
+static inline WrComplexClipRegion ToWrComplexClipRegion(const gfx::RectTyped<T>& rect,
+                                                        const LayerSize& size)
+{
+  WrComplexClipRegion complex_clip;
+  complex_clip.rect = wr::ToWrRect(rect);
+  complex_clip.radii = wr::ToWrUniformBorderRadius(size);
+  return complex_clip;
 }
 
 static inline WrPoint ToWrPoint(const gfx::Point& point)
@@ -402,6 +436,14 @@ struct ByteBuffer
   uint8_t* mData;
   bool mOwned;
 };
+
+inline WrByteSlice RangeToByteSlice(mozilla::Range<uint8_t> aRange) {
+  return WrByteSlice { aRange.begin().get(), aRange.length() };
+}
+
+inline mozilla::Range<uint8_t> ByteSliceToRange(WrByteSlice aWrSlice) {
+  return mozilla::Range<uint8_t>(aWrSlice.mBuffer, aWrSlice.mLength);
+}
 
 struct BuiltDisplayList {
   VecU8 dl;

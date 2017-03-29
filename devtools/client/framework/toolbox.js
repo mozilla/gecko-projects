@@ -93,8 +93,13 @@ function Toolbox(target, selectedTool, hostType, contentWindow, frameId) {
 
   this._toolPanels = new Map();
   this._telemetry = new Telemetry();
+
+  // TODO: This approach to source maps uses server-side source maps, which we are
+  // replacing with client-side source maps.  Do not use this in new code paths.
+  // To be removed in bug 1349354.  Read more about ongoing work with source maps:
+  // https://docs.google.com/document/d/19TKnMJD3CMBzwByNE4aBBVWnl-AEan8Sf4hxi6J-eps/edit
   if (Services.prefs.getBoolPref("devtools.source-map.locations.enabled")) {
-    this._sourceMapService = new SourceMapService(this._target);
+    this._deprecatedServerSourceMapService = new SourceMapService(this._target);
   }
 
   this._initInspector = null;
@@ -520,6 +525,23 @@ Toolbox.prototype = {
     return this.browserRequire("devtools/client/framework/components/toolbox-controller");
   },
 
+  /**
+   * A common access point for the client-side mapping service for source maps that
+   * any panel can use.
+   */
+  get sourceMapService() {
+    if (!Services.prefs.getBoolPref("devtools.source-map.client-service.enabled")) {
+      return null;
+    }
+    if (this._sourceMapService) {
+      return this._sourceMapService;
+    }
+    // Uses browser loader to access the `Worker` global.
+    this._sourceMapService =
+      this.browserRequire("devtools/client/shared/source-map/index");
+    return this._sourceMapService;
+  },
+
   // Return HostType id for telemetry
   _getTelemetryHostId: function () {
     switch (this.hostType) {
@@ -574,13 +596,11 @@ Toolbox.prototype = {
    * @property {Function} isChecked - Optional function called to known if the button
    *                      is toggled or not. The function should return true when
    *                      the button should be displayed as toggled on.
-   * @property {Boolean}  autoToggle - If true, the checked state is going to be
-   *                      automatically toggled on click.
    */
   _createButtonState: function (options) {
     let isCheckedValue = false;
     const { id, className, description, onClick, isInStartContainer, setup, teardown,
-            isTargetSupported, isChecked, autoToggle } = options;
+            isTargetSupported, isChecked } = options;
     const toolbox = this;
     const button = {
       id,
@@ -589,9 +609,6 @@ Toolbox.prototype = {
       onClick(event) {
         if (typeof onClick == "function") {
           onClick(event, toolbox);
-        }
-        if (autoToggle) {
-          button.isChecked = !button.isChecked;
         }
       },
       isTargetSupported,
@@ -2265,8 +2282,14 @@ Toolbox.prototype = {
                                   this._applyServiceWorkersTestingSettings);
 
     this._lastFocusedElement = null;
+
+    if (this._deprecatedServerSourceMapService) {
+      this._deprecatedServerSourceMapService.destroy();
+      this._deprecatedServerSourceMapService = null;
+    }
+
     if (this._sourceMapService) {
-      this._sourceMapService.destroy();
+      this._sourceMapService.destroyWorker();
       this._sourceMapService = null;
     }
 

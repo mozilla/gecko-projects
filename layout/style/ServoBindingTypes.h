@@ -13,7 +13,6 @@
 #include "nsStyleAutoArray.h"
 #include "nsTArray.h"
 
-struct RawServoAnimationValue;
 struct RawServoStyleSet;
 
 #define SERVO_ARC_TYPE(name_, type_) struct type_;
@@ -36,6 +35,7 @@ class nsCSSValue;
 class nsIDocument;
 class nsINode;
 class nsPresContext;
+struct nsTimingFunction;
 
 using mozilla::dom::StyleChildrenIterator;
 using mozilla::ServoElementSnapshot;
@@ -47,7 +47,6 @@ typedef nsPresContext RawGeckoPresContext;
 typedef nsTArray<mozilla::Keyframe> RawGeckoKeyframeList;
 typedef nsTArray<mozilla::ComputedKeyframeValues> RawGeckoComputedKeyframeValuesList;
 typedef nsTArray<mozilla::PropertyStyleAnimationValuePair> RawGeckoAnimationValueList;
-typedef nsTArray<const RawServoAnimationValue*> RawServoAnimationValueBorrowedList;
 typedef nsStyleAutoArray<mozilla::StyleAnimation> RawGeckoStyleAnimationList;
 
 // We have these helper types so that we can directly generate
@@ -119,11 +118,12 @@ DECL_BORROWED_MUT_REF_TYPE_FOR(nsCSSValue)
 DECL_OWNED_REF_TYPE_FOR(RawGeckoPresContext)
 DECL_BORROWED_REF_TYPE_FOR(RawGeckoPresContext)
 DECL_BORROWED_MUT_REF_TYPE_FOR(RawGeckoAnimationValueList)
-DECL_BORROWED_REF_TYPE_FOR(RawServoAnimationValueBorrowedList)
 DECL_BORROWED_MUT_REF_TYPE_FOR(RawGeckoKeyframeList)
 DECL_BORROWED_REF_TYPE_FOR(RawGeckoKeyframeList)
 DECL_BORROWED_MUT_REF_TYPE_FOR(RawGeckoComputedKeyframeValuesList)
 DECL_BORROWED_REF_TYPE_FOR(RawGeckoStyleAnimationList)
+DECL_BORROWED_MUT_REF_TYPE_FOR(nsTimingFunction)
+DECL_BORROWED_REF_TYPE_FOR(nsTimingFunction)
 
 #undef DECL_ARC_REF_TYPE_FOR
 #undef DECL_OWNED_REF_TYPE_FOR

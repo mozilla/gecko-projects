@@ -164,7 +164,7 @@ ScriptSettingsStackEntry::~ScriptSettingsStackEntry()
 // If the entry or incumbent global ends up being something that the subject
 // principal doesn't subsume, we don't want to use it. This never happens on
 // the web, but can happen with asymmetric privilege relationships (i.e.
-// nsExpandedPrincipal and System Principal).
+// ExpandedPrincipal and System Principal).
 //
 // The most correct thing to use instead would be the topmost global on the
 // callstack whose principal is subsumed by the subject principal. But that's
@@ -375,6 +375,13 @@ AutoJSAPI::InitInternal(nsIGlobalObject* aGlobalObject, JSObject* aGlobal,
     JS_ClearPendingException(aCx);
     if (exn.isObject()) {
       JS::Rooted<JSObject*> exnObj(aCx, &exn.toObject());
+
+      // Make sure we can actually read things from it.  This UncheckedUwrap is
+      // safe because we're only getting data for a debug printf.  In
+      // particular, we do not expose this data to anyone, which is very
+      // important; otherwise it could be a cross-origin information leak.
+      exnObj = js::UncheckedUnwrap(exnObj);
+      JSAutoCompartment ac(aCx, exnObj);
 
       nsAutoJSString stack, filename, name, message;
       int32_t line;

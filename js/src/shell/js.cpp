@@ -2689,6 +2689,8 @@ TryNoteName(JSTryNoteKind kind)
         return "for-of";
       case JSTRY_LOOP:
         return "loop";
+      case JSTRY_FOR_OF_ITERCLOSE:
+        return "for-of-iterclose";
       case JSTRY_DESTRUCTURING_ITERCLOSE:
         return "dstr-iterclose";
     }
@@ -2702,14 +2704,14 @@ TryNotes(JSContext* cx, HandleScript script, Sprinter* sp)
     if (!script->hasTrynotes())
         return true;
 
-    if (!sp->put("\nException table:\nkind             stack    start      end\n"))
+    if (!sp->put("\nException table:\nkind               stack    start      end\n"))
         return false;
 
     JSTryNote* tn = script->trynotes()->vector;
     JSTryNote* tnlimit = tn + script->trynotes()->length;
     do {
         uint32_t startOff = script->pcToOffset(script->main()) + tn->start;
-        if (!sp->jsprintf(" %-14s %6u %8u %8u\n",
+        if (!sp->jsprintf(" %-16s %6u %8u %8u\n",
                           TryNoteName(static_cast<JSTryNoteKind>(tn->kind)),
                           tn->stackDepth, startOff, startOff + tn->length))
         {
@@ -5272,9 +5274,11 @@ SingleStepCallback(void* arg, jit::Simulator* sim, void* pc)
 #if defined(JS_SIMULATOR_ARM)
     state.sp = (void*)sim->get_register(jit::Simulator::sp);
     state.lr = (void*)sim->get_register(jit::Simulator::lr);
+    state.fp = (void*)sim->get_register(jit::Simulator::fp);
 #elif defined(JS_SIMULATOR_MIPS64)
     state.sp = (void*)sim->getRegister(jit::Simulator::sp);
     state.lr = (void*)sim->getRegister(jit::Simulator::ra);
+    state.fp = (void*)sim->getRegister(jit::Simulator::fp);
 #else
 #  error "NYI: Single-step profiling support"
 #endif
@@ -7726,6 +7730,9 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
     if (op.getBoolOption("wasm-check-bce"))
         jit::JitOptions.wasmAlwaysCheckBounds = true;
 
+    if (op.getBoolOption("wasm-test-mode"))
+        jit::JitOptions.wasmTestMode = true;
+
     if (op.getBoolOption("no-unboxed-objects"))
         jit::JitOptions.disableUnboxedObjects = true;
 
@@ -8199,6 +8206,8 @@ main(int argc, char** argv, char** envp)
         || !op.addBoolOption('\0', "unboxed-arrays", "Allow creating unboxed arrays")
         || !op.addBoolOption('\0', "wasm-always-baseline", "Enable wasm baseline compiler when possible")
         || !op.addBoolOption('\0', "wasm-check-bce", "Always generate wasm bounds check, even redundant ones.")
+        || !op.addBoolOption('\0', "wasm-test-mode", "Enable wasm testing mode, creating synthetic "
+                                   "objects for non-canonical NaNs and i64 returned from wasm.")
 #ifdef ENABLE_SHARED_ARRAY_BUFFER
         || !op.addStringOption('\0', "shared-memory", "on/off",
                                "SharedArrayBuffer and Atomics "
@@ -8308,7 +8317,7 @@ main(int argc, char** argv, char** envp)
         || !op.addIntOption('\0', "arm-sim-stop-at", "NUMBER", "Stop the ARM simulator after the given "
                             "NUMBER of instructions.", -1)
 #elif defined(JS_SIMULATOR_MIPS32) || defined(JS_SIMULATOR_MIPS64)
-	|| !op.addBoolOption('\0', "mips-sim-icache-checks", "Enable icache flush checks in the MIPS "
+        || !op.addBoolOption('\0', "mips-sim-icache-checks", "Enable icache flush checks in the MIPS "
                              "simulator.")
         || !op.addIntOption('\0', "mips-sim-stop-at", "NUMBER", "Stop the MIPS simulator after the given "
                             "NUMBER of instructions.", -1)

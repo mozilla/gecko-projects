@@ -2063,7 +2063,11 @@ class ForOfLoopControl : public LoopControl
 
     bool emitIteratorClose(BytecodeEmitter* bce,
                            CompletionKind completionKind = CompletionKind::Normal) {
-        return bce->emitIteratorClose(completionKind, allowSelfHosted_);
+        ptrdiff_t start = bce->offset();
+        if (!bce->emitIteratorClose(completionKind, allowSelfHosted_))
+            return false;
+        ptrdiff_t end = bce->offset();
+        return bce->tryNoteList.append(JSTRY_FOR_OF_ITERCLOSE, 0, start, end);
     }
 
     bool emitPrepareForNonLocalJump(BytecodeEmitter* bce, bool isTarget) {
@@ -2625,16 +2629,6 @@ BytecodeEmitter::emitUint32Operand(JSOp op, uint32_t operand)
     return true;
 }
 
-bool
-BytecodeEmitter::flushPops(int* npops)
-{
-    if (!emitPopN(*npops))
-        return false;
-
-    *npops = 0;
-    return true;
-}
-
 namespace {
 
 class NonLocalExitControl
@@ -2728,8 +2722,9 @@ NonLocalExitControl::prepareForNonLocalJump(BytecodeEmitter::NestableControl* ta
     bool emitIteratorCloseAtTarget = emitIteratorClose && kind_ != Continue;
 
     auto flushPops = [&npops](BytecodeEmitter* bce) {
-        if (npops && !bce->flushPops(&npops))
+        if (npops && !bce->emitPopN(npops))
             return false;
+        npops = 0;
         return true;
     };
 
@@ -4590,7 +4585,7 @@ BytecodeEmitter::emitSwitch(ParseNode* pn)
             // If the expression is a literal, suppress line number emission so
             // that debugging works more naturally.
             if (caseValue) {
-                if (!emitTree(caseValue,
+                if (!emitTree(caseValue, ValueUsage::WantValue,
                               caseValue->isLiteral() ? SUPPRESS_LINENOTE : EMIT_LINENOTE))
                 {
                     return false;
@@ -6618,7 +6613,7 @@ BytecodeEmitter::emitLexicalScopeBody(ParseNode* body, EmitLineNumberNote emitLi
     }
 
     // Line notes were updated by emitLexicalScope.
-    return emitTree(body, emitLineNote);
+    return emitTree(body, ValueUsage::WantValue, emitLineNote);
 }
 
 // Using MOZ_NEVER_INLINE in here is a workaround for llvm.org/pr14047. See
@@ -6720,9 +6715,9 @@ BytecodeEmitter::emitRequireObjectCoercible()
         return false;
     if (!emit2(JSOP_PICK, 2))              // VAL REQUIREOBJECTCOERCIBLE UNDEFINED VAL
         return false;
-    if (!emitCall(JSOP_CALL, 1))           // VAL IGNORED
+    if (!emitCall(JSOP_CALL_IGNORES_RV, 1))// VAL IGNORED
         return false;
-    checkTypeSet(JSOP_CALL);
+    checkTypeSet(JSOP_CALL_IGNORES_RV);
 
     if (!emit1(JSOP_POP))                  // VAL
         return false;
@@ -7242,12 +7237,14 @@ BytecodeEmitter::emitCStyleFor(ParseNode* pn, EmitterScope* headLexicalEmitterSc
         // scope, but we still need to emit code for the initializers.)
         if (!updateSourceCoordNotes(init->pn_pos.begin))
             return false;
-        if (!emitTree(init))
-            return false;
-
-        if (!init->isForLoopDeclaration()) {
+        if (init->isForLoopDeclaration()) {
+            if (!emitTree(init))
+                return false;
+        } else {
             // 'init' is an expression, not a declaration. emitTree left its
             // value on the stack.
+            if (!emitTree(init, ValueUsage::IgnoreValue))
+                return false;
             if (!emit1(JSOP_POP))
                 return false;
         }
@@ -7329,7 +7326,7 @@ BytecodeEmitter::emitCStyleFor(ParseNode* pn, EmitterScope* headLexicalEmitterSc
 
         if (!updateSourceCoordNotes(update->pn_pos.begin))
             return false;
-        if (!emitTree(update))
+        if (!emitTree(update, ValueUsage::IgnoreValue))
             return false;
         if (!emit1(JSOP_POP))
             return false;
@@ -8686,8 +8683,9 @@ BytecodeEmitter::emitStatement(ParseNode* pn)
 
     if (useful) {
         JSOp op = wantval ? JSOP_SETRVAL : JSOP_POP;
+        ValueUsage valueUsage = wantval ? ValueUsage::WantValue : ValueUsage::IgnoreValue;
         MOZ_ASSERT_IF(pn2->isKind(PNK_ASSIGN), pn2->isOp(JSOP_NOP));
-        if (!emitTree(pn2))
+        if (!emitTree(pn2, valueUsage))
             return false;
         if (!emit1(op))
             return false;
@@ -9065,7 +9063,7 @@ BytecodeEmitter::emitOptimizeSpread(ParseNode* arg0, JumpList* jmp, bool* emitte
 }
 
 bool
-BytecodeEmitter::emitCallOrNew(ParseNode* pn)
+BytecodeEmitter::emitCallOrNew(ParseNode* pn, ValueUsage valueUsage /* = ValueUsage::WantValue */)
 {
     bool callop = pn->isKind(PNK_CALL) || pn->isKind(PNK_TAGGED_TEMPLATE);
     /*
@@ -9246,13 +9244,20 @@ BytecodeEmitter::emitCallOrNew(ParseNode* pn)
     }
 
     if (!spread) {
-        if (!emitCall(pn->getOp(), argc, pn))
-            return false;
+        if (pn->getOp() == JSOP_CALL && valueUsage == ValueUsage::IgnoreValue) {
+            if (!emitCall(JSOP_CALL_IGNORES_RV, argc, pn))
+                return false;
+            checkTypeSet(JSOP_CALL_IGNORES_RV);
+        } else {
+            if (!emitCall(pn->getOp(), argc, pn))
+                return false;
+            checkTypeSet(pn->getOp());
+        }
     } else {
         if (!emit1(pn->getOp()))
             return false;
+        checkTypeSet(pn->getOp());
     }
-    checkTypeSet(pn->getOp());
     if (pn->isOp(JSOP_EVAL) ||
         pn->isOp(JSOP_STRICTEVAL) ||
         pn->isOp(JSOP_SPREADEVAL) ||
@@ -9350,12 +9355,13 @@ BytecodeEmitter::emitLogical(ParseNode* pn)
 }
 
 bool
-BytecodeEmitter::emitSequenceExpr(ParseNode* pn)
+BytecodeEmitter::emitSequenceExpr(ParseNode* pn,
+                                  ValueUsage valueUsage /* = ValueUsage::WantValue */)
 {
     for (ParseNode* child = pn->pn_head; ; child = child->pn_next) {
         if (!updateSourceCoordNotes(child->pn_pos.begin))
             return false;
-        if (!emitTree(child))
+        if (!emitTree(child, child->pn_next ? ValueUsage::IgnoreValue : valueUsage))
             return false;
         if (!child->pn_next)
             break;
@@ -9418,7 +9424,8 @@ BytecodeEmitter::emitLabeledStatement(const LabeledStatement* pn)
 }
 
 bool
-BytecodeEmitter::emitConditionalExpression(ConditionalExpression& conditional)
+BytecodeEmitter::emitConditionalExpression(ConditionalExpression& conditional,
+                                           ValueUsage valueUsage /* = ValueUsage::WantValue */)
 {
     /* Emit the condition, then branch if false to the else part. */
     if (!emitTree(&conditional.condition()))
@@ -9428,13 +9435,13 @@ BytecodeEmitter::emitConditionalExpression(ConditionalExpression& conditional)
     if (!ifThenElse.emitCond())
         return false;
 
-    if (!emitTreeInBranch(&conditional.thenExpression()))
+    if (!emitTreeInBranch(&conditional.thenExpression(), valueUsage))
         return false;
 
     if (!ifThenElse.emitElse())
         return false;
 
-    if (!emitTreeInBranch(&conditional.elseExpression()))
+    if (!emitTreeInBranch(&conditional.elseExpression(), valueUsage))
         return false;
 
     if (!ifThenElse.emitEnd())
@@ -10312,7 +10319,8 @@ BytecodeEmitter::emitClass(ParseNode* pn)
 }
 
 bool
-BytecodeEmitter::emitTree(ParseNode* pn, EmitLineNumberNote emitLineNote)
+BytecodeEmitter::emitTree(ParseNode* pn, ValueUsage valueUsage /* = ValueUsage::WantValue */,
+                          EmitLineNumberNote emitLineNote /* = EMIT_LINENOTE */)
 {
     if (!CheckRecursionLimit(cx))
         return false;
@@ -10444,7 +10452,7 @@ BytecodeEmitter::emitTree(ParseNode* pn, EmitLineNumberNote emitLineNote)
         break;
 
       case PNK_COMMA:
-        if (!emitSequenceExpr(pn))
+        if (!emitSequenceExpr(pn, valueUsage))
             return false;
         break;
 
@@ -10466,7 +10474,7 @@ BytecodeEmitter::emitTree(ParseNode* pn, EmitLineNumberNote emitLineNote)
         break;
 
       case PNK_CONDITIONAL:
-        if (!emitConditionalExpression(pn->as<ConditionalExpression>()))
+        if (!emitConditionalExpression(pn->as<ConditionalExpression>(), valueUsage))
             return false;
         break;
 
@@ -10579,7 +10587,7 @@ BytecodeEmitter::emitTree(ParseNode* pn, EmitLineNumberNote emitLineNote)
       case PNK_CALL:
       case PNK_GENEXP:
       case PNK_SUPERCALL:
-        if (!emitCallOrNew(pn))
+        if (!emitCallOrNew(pn, valueUsage))
             return false;
         break;
 
@@ -10737,12 +10745,13 @@ BytecodeEmitter::emitTree(ParseNode* pn, EmitLineNumberNote emitLineNote)
 }
 
 bool
-BytecodeEmitter::emitTreeInBranch(ParseNode* pn)
+BytecodeEmitter::emitTreeInBranch(ParseNode* pn,
+                                  ValueUsage valueUsage /* = ValueUsage::WantValue */)
 {
     // Code that may be conditionally executed always need their own TDZ
     // cache.
     TDZCheckCache tdzCache(this);
-    return emitTree(pn);
+    return emitTree(pn, valueUsage);
 }
 
 static bool

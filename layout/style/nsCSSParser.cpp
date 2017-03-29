@@ -8026,8 +8026,8 @@ CSSParserImpl::ParseCounter(nsCSSValue& aValue)
       break;
     }
 
-    RefPtr<nsCSSValue::Array> val =
-      nsCSSValue::Array::Create(unit == eCSSUnit_Counter ? 2 : 3);
+    RefPtr<nsCSSValue::ThreadSafeArray> val =
+      nsCSSValue::ThreadSafeArray::Create(unit == eCSSUnit_Counter ? 2 : 3);
 
     val->Item(0).SetStringValue(mToken.mIdent, eCSSUnit_Ident);
 
@@ -8058,7 +8058,7 @@ CSSParserImpl::ParseCounter(nsCSSValue& aValue)
       break;
     }
 
-    aValue.SetArrayValue(val, unit);
+    aValue.SetThreadSafeArrayValue(val, unit);
     return true;
   }
 
@@ -12220,7 +12220,7 @@ CSSParserImpl::ParseImageLayersItem(
   aState.mImage->mValue.SetNoneValue();
   aState.mAttachment->mValue.SetIntValue(NS_STYLE_IMAGELAYER_ATTACHMENT_SCROLL,
                                          eCSSUnit_Enumerated);
-  aState.mClip->mValue.SetEnumValue(StyleGeometryBox::Border);
+  aState.mClip->mValue.SetEnumValue(StyleGeometryBox::BorderBox);
 
   aState.mRepeat->mXValue.SetIntValue(NS_STYLE_IMAGELAYER_REPEAT_REPEAT,
                                       eCSSUnit_Enumerated);
@@ -12232,9 +12232,9 @@ CSSParserImpl::ParseImageLayersItem(
   aState.mPositionY->mValue.SetArrayValue(positionYArr, eCSSUnit_Array);
 
   if (eCSSProperty_mask == aTable[nsStyleImageLayers::shorthand]) {
-    aState.mOrigin->mValue.SetEnumValue(StyleGeometryBox::Border);
+    aState.mOrigin->mValue.SetEnumValue(StyleGeometryBox::BorderBox);
   } else {
-    aState.mOrigin->mValue.SetEnumValue(StyleGeometryBox::Padding);
+    aState.mOrigin->mValue.SetEnumValue(StyleGeometryBox::PaddingBox);
   }
   positionXArr->Item(1).SetPercentValue(0.0f);
   positionYArr->Item(1).SetPercentValue(0.0f);

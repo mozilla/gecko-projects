@@ -214,14 +214,14 @@ const STATIC_BLOCKLIST_PATTERNS = [
 
 
 const BOOTSTRAP_REASONS = {
-  APP_STARTUP     : 1,
-  APP_SHUTDOWN    : 2,
-  ADDON_ENABLE    : 3,
-  ADDON_DISABLE   : 4,
-  ADDON_INSTALL   : 5,
-  ADDON_UNINSTALL : 6,
-  ADDON_UPGRADE   : 7,
-  ADDON_DOWNGRADE : 8
+  APP_STARTUP: 1,
+  APP_SHUTDOWN: 2,
+  ADDON_ENABLE: 3,
+  ADDON_DISABLE: 4,
+  ADDON_INSTALL: 5,
+  ADDON_UNINSTALL: 6,
+  ADDON_UPGRADE: 7,
+  ADDON_DOWNGRADE: 8
 };
 
 // Map new string type identifiers to old style nsIUpdateItem types
@@ -1022,7 +1022,7 @@ var loadManifestFromWebManifest = Task.async(function*(aUri) {
   addon.iconURL = null;
   addon.icon64URL = null;
   addon.icons = manifest.icons || {};
-  addon.userPermissions = extension.userPermissions();
+  addon.userPermissions = extension.userPermissions;
 
   addon.applyBackgroundUpdates = AddonManager.AUTOUPDATE_DEFAULT;
 
@@ -4072,6 +4072,8 @@ this.XPIProvider = {
     let installReason = BOOTSTRAP_REASONS.ADDON_INSTALL;
     let oldAddon = yield new Promise(
                    resolve => XPIDatabase.getVisibleAddonForID(addon.id, resolve));
+
+    let extraParams = {};
     if (oldAddon) {
       if (!oldAddon.bootstrap) {
         logger.warn("Non-restartless Add-on is already installed", addon.id);
@@ -4088,6 +4090,7 @@ this.XPIProvider = {
         // call its uninstall method
         let newVersion = addon.version;
         let oldVersion = oldAddon.version;
+
         if (Services.vc.compare(newVersion, oldVersion) >= 0) {
           installReason = BOOTSTRAP_REASONS.ADDON_UPGRADE;
         } else {
@@ -4095,13 +4098,16 @@ this.XPIProvider = {
         }
         let uninstallReason = installReason;
 
+        extraParams.newVersion = newVersion;
+        extraParams.oldVersion = oldVersion;
+
         if (oldAddon.active) {
           XPIProvider.callBootstrapMethod(oldAddon, existingAddon,
                                           "shutdown", uninstallReason,
-                                          { newVersion });
+                                          extraParams);
         }
         this.callBootstrapMethod(oldAddon, existingAddon,
-                                 "uninstall", uninstallReason, { newVersion });
+                                 "uninstall", uninstallReason, extraParams);
         this.unloadBootstrapScope(existingAddonID);
         flushChromeCaches();
       }
@@ -4112,7 +4118,7 @@ this.XPIProvider = {
     let file = addon._sourceBundle;
 
     XPIProvider._addURIMapping(addon.id, file);
-    XPIProvider.callBootstrapMethod(addon, file, "install", installReason);
+    XPIProvider.callBootstrapMethod(addon, file, "install", installReason, extraParams);
     addon.state = AddonManager.STATE_INSTALLED;
     logger.debug("Install of temporary addon in " + aFile.path + " completed.");
     addon.visible = true;
@@ -4127,7 +4133,7 @@ this.XPIProvider = {
 
     AddonManagerPrivate.callAddonListeners("onInstalling", addon.wrapper,
                                            false);
-    XPIProvider.callBootstrapMethod(addon, file, "startup", installReason);
+    XPIProvider.callBootstrapMethod(addon, file, "startup", installReason, extraParams);
     AddonManagerPrivate.callInstallListeners("onExternalInstall",
                                              null, addon.wrapper,
                                              oldAddon ? oldAddon.wrapper : null,
@@ -7967,9 +7973,9 @@ function DirectoryInstallLocation(aName, aDirectory, aScope) {
 }
 
 DirectoryInstallLocation.prototype = {
-  _name       : "",
-  _directory   : null,
-  _IDToFileMap : null,  // mapping from add-on ID to nsIFile
+  _name: "",
+  _directory: null,
+  _IDToFileMap: null,  // mapping from add-on ID to nsIFile
 
   /**
    * Reads a directory linked to in a file.
@@ -8654,15 +8660,21 @@ Object.assign(SystemAddonInstallLocation.prototype, {
    * Resets the add-on set so on the next startup the default set will be used.
    */
   resetAddonSet() {
+    logger.info("Removing all system add-on upgrades.");
 
+    // remove everything from the pref first, if uninstall
+    // fails then at least they will not be re-activated on
+    // next restart.
+    this._saveAddonSet({ schema: 1, addons: {} });
+
+    // If this is running at app startup, the pref being cleared
+    // will cause later stages of startup to notice that the
+    // old updates are now gone.
+    //
+    // Updates will only be explicitly uninstalled if they are
+    // removed restartlessly, for instance if they are no longer
+    // part of the latest update set.
     if (this._addonSet) {
-      logger.info("Removing all system add-on upgrades.");
-
-      // remove everything from the pref first, if uninstall
-      // fails then at least they will not be re-activated on
-      // next restart.
-      this._saveAddonSet({ schema: 1, addons: {} });
-
       for (let id of Object.keys(this._addonSet.addons)) {
         AddonManager.getAddonByID(id, addon => {
           if (addon) {
@@ -8980,10 +8992,10 @@ function WinRegInstallLocation(aName, aRootKey, aScope) {
 }
 
 WinRegInstallLocation.prototype = {
-  _name       : "",
-  _rootKey    : null,
-  _scope      : null,
-  _IDToFileMap : null,  // mapping from ID to nsIFile
+  _name: "",
+  _rootKey: null,
+  _scope: null,
+  _IDToFileMap: null,  // mapping from ID to nsIFile
 
   /**
    * Retrieves the path of this Application's data key in the registry.

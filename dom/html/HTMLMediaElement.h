@@ -629,7 +629,7 @@ public:
   // This function is synchronous for cases where decoding has been suspended
   // and JS needs a frame to use in, eg., nsLayoutUtils::SurfaceFromElement()
   // via drawImage().
-  layers::Image* GetCurrentImage();
+  already_AddRefed<layers::Image> GetCurrentImage();
 
   already_AddRefed<DOMMediaStream> GetSrcObject() const;
   void SetSrcObject(DOMMediaStream& aValue);
@@ -773,6 +773,14 @@ public:
     CAPTURE_STREAM,
   };
   void MarkAsContentSource(CallerAPI aAPI);
+
+  nsIDocument* GetDocument() const override;
+
+  void ConstructMediaTracks(const MediaInfo* aInfo) override;
+
+  void RemoveMediaTracks() override;
+
+  already_AddRefed<GMPCrashHelper> CreateGMPCrashHelper() override;
 
 protected:
   virtual ~HTMLMediaElement();
@@ -1301,6 +1309,10 @@ protected:
 
   // Pass information for deciding the video decode mode to decoder.
   void NotifyDecoderActivityChanges() const;
+
+  // Mark the decoder owned by the element as tainted so that the
+  // suspend-video-decoder is disabled.
+  void MarkAsTainted();
 
   // The current decoder. Load() has been called on this decoder.
   // At most one of mDecoder and mSrcStream can be non-null.

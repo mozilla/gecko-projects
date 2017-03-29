@@ -613,8 +613,8 @@ public:
    * If the frame is a continuing frame, then aPrevInFlow indicates the previous
    * frame (the frame that was split).
    *
-   * If you want a view associated with your frame, you should create the view
-   * after Init() has returned.
+   * Each subclass that need a view should override this method and call
+   * CreateView() after calling its base class Init().
    *
    * @param   aContent the content object associated with the frame
    * @param   aParent the parent frame
@@ -838,9 +838,30 @@ public:
                                           nsIFrame* aSubFrame) const;
 
   /**
-   * Bounding rect of the frame. The values are in app units, and the origin is
-   * relative to the upper-left of the geometric parent. The size includes the
-   * content area, borders, and padding.
+   * Bounding rect of the frame.
+   *
+   * For frames that are laid out according to CSS box model rules the values
+   * are in app units, and the origin is relative to the upper-left of the
+   * geometric parent.  The size includes the content area, borders, and
+   * padding.
+   *
+   * Frames that are laid out according to SVG's coordinate space based rules
+   * (frames with the NS_FRAME_SVG_LAYOUT bit set, which *excludes*
+   * nsSVGOuterSVGFrame) are different.  Many frames of this type do not set or
+   * use mRect, in which case the frame rect is undefined.  The exceptions are:
+   *
+   *   - nsSVGInnerSVGFrame
+   *   - SVGGeometryFrame (used for <path>, <circle>, etc.)
+   *   - nsSVGImageFrame
+   *   - nsSVGForeignObjectFrame
+   *
+   * For these frames the frame rect contains the frame's element's userspace
+   * bounds including fill, stroke and markers, but converted to app units
+   * rather than being in user units (CSS px).  In the SVG code "userspace" is
+   * defined to be the coordinate system for the attributes that define an
+   * element's geometry (such as the 'cx' attribute for <circle>).  For more
+   * precise details see these frames' implementations of the ReflowSVG method
+   * where mRect is set.
    *
    * Note: moving or sizing the frame does not affect the view's size or
    * position.
@@ -1563,16 +1584,16 @@ public:
   bool IsThemed(const nsStyleDisplay* aDisp,
                   nsITheme::Transparency* aTransparencyState = nullptr) const {
     nsIFrame* mutable_this = const_cast<nsIFrame*>(this);
-    if (!aDisp->mAppearance)
+    if (!aDisp->UsedAppearance())
       return false;
     nsPresContext* pc = PresContext();
     nsITheme *theme = pc->GetTheme();
     if(!theme ||
-       !theme->ThemeSupportsWidget(pc, mutable_this, aDisp->mAppearance))
+       !theme->ThemeSupportsWidget(pc, mutable_this, aDisp->UsedAppearance()))
       return false;
     if (aTransparencyState) {
       *aTransparencyState =
-        theme->GetWidgetTransparency(mutable_this, aDisp->mAppearance);
+        theme->GetWidgetTransparency(mutable_this, aDisp->UsedAppearance());
     }
     return true;
   }
@@ -1606,11 +1627,6 @@ public:
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists,
                                 uint32_t                aFlags = 0);
-
-  /**
-   * Does this frame need a view?
-   */
-  virtual bool NeedsView() { return false; }
 
   bool RefusedAsyncAnimation() const
   {
@@ -2445,14 +2461,31 @@ public:
   virtual bool HasAnyNoncollapsedCharacters()
   { return false; }
 
-  /**
-   * Accessor functions to get/set the associated view object
-   *
-   * GetView returns non-null if and only if |HasView| returns true.
-   */
+  //
+  // Accessor functions to an associated view object:
+  //
   bool HasView() const { return !!(mState & NS_FRAME_HAS_VIEW); }
-  nsView* GetView() const;
-  nsresult SetView(nsView* aView);
+protected:
+  virtual nsView* GetViewInternal() const
+  {
+    MOZ_ASSERT_UNREACHABLE("method should have been overridden by subclass");
+    return nullptr;
+  }
+  virtual void SetViewInternal(nsView* aView)
+  {
+    MOZ_ASSERT_UNREACHABLE("method should have been overridden by subclass");
+  }
+public:
+  nsView* GetView() const
+  {
+    if (MOZ_LIKELY(!HasView())) {
+      return nullptr;
+    }
+    nsView* view = GetViewInternal();
+    MOZ_ASSERT(view, "GetViewInternal() should agree with HasView()");
+    return view;
+  }
+  void SetView(nsView* aView);
 
   /**
    * Find the closest view (on |this| or an ancestor).
@@ -2465,6 +2498,14 @@ public:
    * Find the closest ancestor (excluding |this| !) that has a view
    */
   nsIFrame* GetAncestorWithView() const;
+
+  /**
+   * Sets the view's attributes from the frame style.
+   * Call this for nsChangeHint_SyncFrameView style changes or when the view
+   * has just been created.
+   * @param aView the frame's view or use GetView() if nullptr is given
+   */
+  void SyncFrameViewProperties(nsView* aView = nullptr);
 
   /**
    * Get the offset between the coordinate systems of |this| and aOther.
@@ -3510,8 +3551,6 @@ public:
   uint8_t VerticalAlignEnum() const;
   enum { eInvalidVerticalAlign = 0xFF };
 
-  bool IsSVGText() const { return mState & NS_FRAME_IS_SVG_TEXT; }
-
   void CreateOwnLayerIfNeeded(nsDisplayListBuilder* aBuilder, nsDisplayList* aList);
 
   /**
@@ -3616,6 +3655,13 @@ public:
                             const nsStyleCoord& aCoord,
                             ComputeSizeFlags    aFlags = eDefault);
 protected:
+  /**
+   * Reparent this frame's view if it has one.
+   */
+  void ReparentFrameViewTo(nsViewManager* aViewManager,
+                           nsView*        aNewParentView,
+                           nsView*        aOldParentView);
+
   // Members
   nsRect           mRect;
   nsIContent*      mContent;

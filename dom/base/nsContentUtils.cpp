@@ -42,6 +42,7 @@
 #include "mozilla/dom/DocumentFragment.h"
 #include "mozilla/dom/DOMTypes.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/FileSystemSecurity.h"
 #include "mozilla/dom/FileBlobImpl.h"
 #include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/HTMLTemplateElement.h"
@@ -181,7 +182,7 @@
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsNodeInfoManager.h"
-#include "nsNullPrincipal.h"
+#include "NullPrincipal.h"
 #include "nsParserCIID.h"
 #include "nsParserConstants.h"
 #include "nsPIDOMWindow.h"
@@ -215,6 +216,8 @@
 #include "TabChild.h"
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/TabGroup.h"
+#include "nsIWebNavigationInfo.h"
+#include "nsPluginHost.h"
 
 #include "nsIBidiKeyboard.h"
 
@@ -511,7 +514,7 @@ nsContentUtils::Init()
   sSecurityManager->GetSystemPrincipal(&sSystemPrincipal);
   MOZ_ASSERT(sSystemPrincipal);
 
-  RefPtr<nsNullPrincipal> nullPrincipal = nsNullPrincipal::Create();
+  RefPtr<NullPrincipal> nullPrincipal = NullPrincipal::Create();
   if (!nullPrincipal) {
     return NS_ERROR_FAILURE;
   }
@@ -4124,7 +4127,7 @@ nsContentUtils::DispatchFocusChromeEvent(nsPIDOMWindowOuter* aWindow)
   }
 
   return DispatchChromeEvent(doc, aWindow,
-                             NS_LITERAL_STRING("DOMServiceWorkerFocusClient"),
+                             NS_LITERAL_STRING("DOMWindowFocus"),
                              true, true);
 }
 
@@ -4787,7 +4790,7 @@ nsContentUtils::ConvertToPlainText(const nsAString& aSourceBuffer,
 {
   nsCOMPtr<nsIURI> uri;
   NS_NewURI(getter_AddRefs(uri), "about:blank");
-  nsCOMPtr<nsIPrincipal> principal = nsNullPrincipal::Create();
+  nsCOMPtr<nsIPrincipal> principal = NullPrincipal::Create();
   nsCOMPtr<nsIDOMDocument> domDocument;
   nsresult rv = NS_NewDOMDocument(getter_AddRefs(domDocument),
                                   EmptyString(),
@@ -7885,6 +7888,19 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
               continue;
             }
 
+            if (aParent) {
+              bool isDir = false;
+              if (NS_SUCCEEDED(file->IsDirectory(&isDir)) && isDir) {
+                nsAutoString path;
+                if (NS_WARN_IF(NS_FAILED(file->GetPath(path)))) {
+                  continue;
+                }
+
+                RefPtr<FileSystemSecurity> fss = FileSystemSecurity::GetOrCreate();
+                fss->GrantAccessToContentProcess(aParent->ChildID(), path);
+              }
+            }
+
             blobImpl = new FileBlobImpl(file);
 
             IgnoredErrorResult rv;
@@ -8036,7 +8052,11 @@ GetSurfaceDataImpl(mozilla::gfx::DataSourceSurface* aSurface,
   mozilla::gfx::IntSize size = aSurface->GetSize();
   mozilla::CheckedInt32 requiredBytes =
     mozilla::CheckedInt32(map.mStride) * mozilla::CheckedInt32(size.height);
-  size_t maxBufLen = requiredBytes.isValid() ? requiredBytes.value() : 0;
+  if (!requiredBytes.isValid()) {
+    return GetSurfaceDataContext::NullValue();
+  }
+
+  size_t maxBufLen = requiredBytes.value();
   mozilla::gfx::SurfaceFormat format = aSurface->GetFormat();
 
   // Surface data handling is totally nuts. This is the magic one needs to
@@ -9960,4 +9980,140 @@ nsContentUtils::CreateJSValueFromSequenceOfObject(JSContext* aCx,
 
   aValue.setObject(*array);
   return NS_OK;
+}
+
+/* static */ Element*
+nsContentUtils::GetClosestNonNativeAnonymousAncestor(Element* aElement)
+{
+  MOZ_ASSERT(aElement);
+  MOZ_ASSERT(aElement->IsNativeAnonymous());
+
+  Element* e = aElement;
+  while (e && e->IsNativeAnonymous()) {
+    e = e->GetParentElement();
+  }
+  return e;
+}
+
+/**
+ * Checks whether the given type is a supported document type for
+ * loading within the nsObjectLoadingContent specified by aContent.
+ *
+ * NOTE Helper method for nsContentUtils::HtmlObjectContentTypeForMIMEType.
+ * NOTE Does not take content policy or capabilities into account
+ */
+static bool
+HtmlObjectContentSupportsDocument(const nsCString& aMimeType,
+                                  nsIContent* aContent)
+{
+  nsCOMPtr<nsIWebNavigationInfo> info(
+    do_GetService(NS_WEBNAVIGATION_INFO_CONTRACTID));
+  if (!info) {
+    return false;
+  }
+
+  nsCOMPtr<nsIWebNavigation> webNav;
+  if (aContent) {
+    nsIDocument* currentDoc = aContent->GetComposedDoc();
+    if (currentDoc) {
+      webNav = do_GetInterface(currentDoc->GetWindow());
+    }
+  }
+
+  uint32_t supported;
+  nsresult rv = info->IsTypeSupported(aMimeType, webNav, &supported);
+
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+
+  if (supported != nsIWebNavigationInfo::UNSUPPORTED) {
+    // Don't want to support plugins as documents
+    return supported != nsIWebNavigationInfo::PLUGIN;
+  }
+
+  // Try a stream converter
+  // NOTE: We treat any type we can convert from as a supported type. If a
+  // type is not actually supported, the URI loader will detect that and
+  // return an error, and we'll fallback.
+  nsCOMPtr<nsIStreamConverterService> convServ =
+    do_GetService("@mozilla.org/streamConverters;1");
+  bool canConvert = false;
+  if (convServ) {
+    rv = convServ->CanConvert(aMimeType.get(), "*/*", &canConvert);
+  }
+  return NS_SUCCEEDED(rv) && canConvert;
+}
+
+/* static */ uint32_t
+nsContentUtils::HtmlObjectContentTypeForMIMEType(const nsCString& aMIMEType,
+                                                 nsIContent* aContent)
+{
+  if (aMIMEType.IsEmpty()) {
+    return nsIObjectLoadingContent::TYPE_NULL;
+  }
+
+  if (imgLoader::SupportImageWithMimeType(aMIMEType.get())) {
+    return nsIObjectLoadingContent::TYPE_IMAGE;
+  }
+
+  // Faking support of the PDF content as a document for EMBED tags
+  // when internal PDF viewer is enabled.
+  if (aMIMEType.LowerCaseEqualsLiteral("application/pdf") &&
+      IsPDFJSEnabled()) {
+    return nsIObjectLoadingContent::TYPE_DOCUMENT;
+  }
+
+  // Faking support of the SWF content as a document for EMBED tags
+  // when internal SWF player is enabled.
+  if (aMIMEType.LowerCaseEqualsLiteral("application/x-shockwave-flash") &&
+      IsSWFPlayerEnabled()) {
+    return nsIObjectLoadingContent::TYPE_DOCUMENT;
+  }
+
+  if (HtmlObjectContentSupportsDocument(aMIMEType, aContent)) {
+    return nsIObjectLoadingContent::TYPE_DOCUMENT;
+  }
+
+  RefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
+  if (pluginHost &&
+      pluginHost->HavePluginForType(aMIMEType, nsPluginHost::eExcludeNone)) {
+    // ShouldPlay will handle checking for disabled plugins
+    return nsIObjectLoadingContent::TYPE_PLUGIN;
+  }
+
+  return nsIObjectLoadingContent::TYPE_NULL;
+}
+
+/* static */ already_AddRefed<Dispatcher>
+nsContentUtils::GetDispatcherByLoadInfo(nsILoadInfo* aLoadInfo)
+{
+  if (NS_WARN_IF(!aLoadInfo)) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIDOMDocument> domDoc;
+  aLoadInfo->GetLoadingDocument(getter_AddRefs(domDoc));
+  nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
+  RefPtr<Dispatcher> dispatcher;
+  if (doc) {
+    dispatcher = doc->GetDocGroup();
+  } else {
+    // There's no document yet, but this might be a top-level load where we can
+    // find a TabGroup.
+    uint64_t outerWindowId;
+    if (NS_FAILED(aLoadInfo->GetOuterWindowID(&outerWindowId))) {
+      // No window. This might be an add-on XHR, a service worker request, or
+      // something else.
+      return nullptr;
+    }
+    RefPtr<nsGlobalWindow> window = nsGlobalWindow::GetOuterWindowWithId(outerWindowId);
+    if (!window) {
+      return nullptr;
+    }
+
+    dispatcher = window->TabGroup();
+  }
+
+  return dispatcher.forget();
 }

@@ -15,8 +15,8 @@
 
 #include "gfx2DGlue.h"
 
+#include "mediasink/AudioSink.h"
 #include "mediasink/AudioSinkWrapper.h"
-#include "mediasink/DecodedAudioDataSink.h"
 #include "mediasink/DecodedStream.h"
 #include "mediasink/OutputStreamManager.h"
 #include "mediasink/VideoSink.h"
@@ -66,24 +66,22 @@ using namespace mozilla::media;
 
 // avoid redefined macro in unified build
 #undef FMT
-#undef DECODER_LOG
-#undef VERBOSE_LOG
-#undef SAMPLE_LOG
-#undef DECODER_WARN
+#undef LOG
+#undef LOGV
+#undef LOGW
 #undef SFMT
 #undef SLOG
-#undef SWARN
+#undef SLOGW
 
 #define FMT(x, ...) "Decoder=%p " x, mDecoderID, ##__VA_ARGS__
-#define DECODER_LOG(x, ...) MOZ_LOG(gMediaDecoderLog, LogLevel::Debug,   (FMT(x, ##__VA_ARGS__)))
-#define VERBOSE_LOG(x, ...) MOZ_LOG(gMediaDecoderLog, LogLevel::Verbose, (FMT(x, ##__VA_ARGS__)))
-#define SAMPLE_LOG(x, ...)  MOZ_LOG(gMediaSampleLog,  LogLevel::Debug,   (FMT(x, ##__VA_ARGS__)))
-#define DECODER_WARN(x, ...) NS_WARNING(nsPrintfCString(FMT(x, ##__VA_ARGS__)).get())
+#define LOG(x, ...) MOZ_LOG(gMediaDecoderLog, LogLevel::Debug,   (FMT(x, ##__VA_ARGS__)))
+#define LOGV(x, ...) MOZ_LOG(gMediaDecoderLog, LogLevel::Verbose, (FMT(x, ##__VA_ARGS__)))
+#define LOGW(x, ...) NS_WARNING(nsPrintfCString(FMT(x, ##__VA_ARGS__)).get())
 
 // Used by StateObject and its sub-classes
 #define SFMT(x, ...) "Decoder=%p state=%s " x, mMaster->mDecoderID, ToStateStr(GetState()), ##__VA_ARGS__
 #define SLOG(x, ...) MOZ_LOG(gMediaDecoderLog, LogLevel::Debug, (SFMT(x, ##__VA_ARGS__)))
-#define SWARN(x, ...) NS_WARNING(nsPrintfCString(SFMT(x, ##__VA_ARGS__)).get())
+#define SLOGW(x, ...) NS_WARNING(nsPrintfCString(SFMT(x, ##__VA_ARGS__)).get())
 
 // Certain constants get stored as member variables and then adjusted by various
 // scale factors on a per-decoder basis. We want to make sure to avoid using these
@@ -196,11 +194,11 @@ public:
   // Event handlers for various events.
   virtual void HandleCDMProxyReady() { }
   virtual void HandleAudioCaptured() { }
-  virtual void HandleAudioDecoded(MediaData* aAudio)
+  virtual void HandleAudioDecoded(AudioData* aAudio)
   {
     Crash("Unexpected event!", __func__);
   }
-  virtual void HandleVideoDecoded(MediaData* aVideo, TimeStamp aDecodeStart)
+  virtual void HandleVideoDecoded(VideoData* aVideo, TimeStamp aDecodeStart)
   {
     Crash("Unexpected event!", __func__);
   }
@@ -283,8 +281,8 @@ protected:
            || mMaster->IsWaitingAudioData()
            || mMaster->IsWaitingVideoData();
   }
-  MediaQueue<MediaData>& AudioQueue() const { return mMaster->mAudioQueue; }
-  MediaQueue<MediaData>& VideoQueue() const { return mMaster->mVideoQueue; }
+  MediaQueue<AudioData>& AudioQueue() const { return mMaster->mAudioQueue; }
+  MediaQueue<VideoData>& VideoQueue() const { return mMaster->mVideoQueue; }
 
   template <class S, typename... Args, size_t... Indexes>
   auto
@@ -405,7 +403,7 @@ private:
   void OnMetadataNotRead(const MediaResult& aError)
   {
     mMetadataRequest.Complete();
-    SWARN("Decode metadata failed, shutting down decoder");
+    SLOGW("Decode metadata failed, shutting down decoder");
     mMaster->DecodeError(aError);
   }
 
@@ -555,13 +553,13 @@ public:
     return DECODER_STATE_DECODING_FIRSTFRAME;
   }
 
-  void HandleAudioDecoded(MediaData* aAudio) override
+  void HandleAudioDecoded(AudioData* aAudio) override
   {
     mMaster->PushAudio(aAudio);
     MaybeFinishDecodeFirstFrame();
   }
 
-  void HandleVideoDecoded(MediaData* aVideo, TimeStamp aDecodeStart) override
+  void HandleVideoDecoded(VideoData* aVideo, TimeStamp aDecodeStart) override
   {
     mMaster->PushVideo(aVideo);
     MaybeFinishDecodeFirstFrame();
@@ -702,14 +700,14 @@ public:
     return DECODER_STATE_DECODING;
   }
 
-  void HandleAudioDecoded(MediaData* aAudio) override
+  void HandleAudioDecoded(AudioData* aAudio) override
   {
     mMaster->PushAudio(aAudio);
     DispatchDecodeTasksIfNeeded();
     MaybeStopPrerolling();
   }
 
-  void HandleVideoDecoded(MediaData* aVideo, TimeStamp aDecodeStart) override
+  void HandleVideoDecoded(VideoData* aVideo, TimeStamp aDecodeStart) override
   {
     mMaster->PushVideo(aVideo);
     DispatchDecodeTasksIfNeeded();
@@ -970,8 +968,8 @@ public:
     return DECODER_STATE_SEEKING;
   }
 
-  void HandleAudioDecoded(MediaData* aAudio) override = 0;
-  void HandleVideoDecoded(MediaData* aVideo,
+  void HandleAudioDecoded(AudioData* aAudio) override = 0;
+  void HandleVideoDecoded(VideoData* aVideo,
                           TimeStamp aDecodeStart) override = 0;
   void HandleAudioWaited(MediaData::Type aType) override = 0;
   void HandleVideoWaited(MediaData::Type aType) override = 0;
@@ -1026,7 +1024,7 @@ public:
     mWaitRequest.DisconnectIfExists();
   }
 
-  void HandleAudioDecoded(MediaData* aAudio) override
+  void HandleAudioDecoded(AudioData* aAudio) override
   {
     MOZ_ASSERT(!mDoneAudioSeeking || !mDoneVideoSeeking,
                "Seek shouldn't be finished");
@@ -1048,7 +1046,7 @@ public:
       mMaster->PushAudio(aAudio);
       mDoneAudioSeeking = true;
     } else {
-      nsresult rv = DropAudioUpToSeekTarget(aAudio->As<AudioData>());
+      nsresult rv = DropAudioUpToSeekTarget(aAudio);
       if (NS_FAILED(rv)) {
         mMaster->DecodeError(rv);
         return;
@@ -1062,7 +1060,7 @@ public:
     MaybeFinishSeek();
   }
 
-  void HandleVideoDecoded(MediaData* aVideo, TimeStamp aDecodeStart) override
+  void HandleVideoDecoded(VideoData* aVideo, TimeStamp aDecodeStart) override
   {
     MOZ_ASSERT(!mDoneAudioSeeking || !mDoneVideoSeeking,
                "Seek shouldn't be finished");
@@ -1205,8 +1203,8 @@ private:
     // For the fast seek, we update the newCurrentTime with the decoded audio
     // and video samples, set it to be the one which is closet to the seekTime.
     if (mSeekJob.mTarget->IsFast()) {
-      RefPtr<MediaData> audio = AudioQueue().PeekFront();
-      RefPtr<MediaData> video = VideoQueue().PeekFront();
+      RefPtr<AudioData> audio = AudioQueue().PeekFront();
+      RefPtr<VideoData> video = VideoQueue().PeekFront();
 
       // A situation that both audio and video approaches the end.
       if (!audio && !video) {
@@ -1325,7 +1323,7 @@ private:
       // abort the audio decode-to-target, the state machine will play
       // silence to cover the gap. Typically this happens in poorly muxed
       // files.
-      SWARN("Audio not synced after seek, maybe a poorly muxed file?");
+      SLOGW("Audio not synced after seek, maybe a poorly muxed file?");
       mMaster->PushAudio(aAudio);
       mDoneAudioSeeking = true;
       return NS_OK;
@@ -1349,7 +1347,7 @@ private:
     if (framesToPrune.value() > aAudio->mFrames) {
       // We've messed up somehow. Don't try to trim frames, the |frames|
       // variable below will overflow.
-      SWARN("Can't prune more frames that we have!");
+      SLOGW("Can't prune more frames that we have!");
       return NS_ERROR_FAILURE;
     }
     uint32_t frames =
@@ -1378,35 +1376,34 @@ private:
     return NS_OK;
   }
 
-  nsresult DropVideoUpToSeekTarget(MediaData* aSample)
+  nsresult DropVideoUpToSeekTarget(VideoData* aVideo)
   {
-    RefPtr<VideoData> video(aSample->As<VideoData>());
-    MOZ_ASSERT(video);
+    MOZ_ASSERT(aVideo);
     SLOG("DropVideoUpToSeekTarget() frame [%" PRId64 ", %" PRId64 "]",
-         video->mTime, video->GetEndTime());
+         aVideo->mTime, aVideo->GetEndTime());
     const int64_t target = mSeekJob.mTarget->GetTime().ToMicroseconds();
 
     // If the frame end time is less than the seek target, we won't want
     // to display this frame after the seek, so discard it.
-    if (target >= video->GetEndTime()) {
+    if (target >= aVideo->GetEndTime()) {
       SLOG("DropVideoUpToSeekTarget() pop video frame [%" PRId64 ", %" PRId64 "] target=%" PRId64,
-           video->mTime, video->GetEndTime(), target);
-      mFirstVideoFrameAfterSeek = video;
+           aVideo->mTime, aVideo->GetEndTime(), target);
+      mFirstVideoFrameAfterSeek = aVideo;
     } else {
-      if (target >= video->mTime && video->GetEndTime() >= target) {
+      if (target >= aVideo->mTime && aVideo->GetEndTime() >= target) {
         // The seek target lies inside this frame's time slice. Adjust the
         // frame's start time to match the seek target.
-        video->UpdateTimestamp(target);
+        aVideo->UpdateTimestamp(target);
       }
       mFirstVideoFrameAfterSeek = nullptr;
 
       SLOG("DropVideoUpToSeekTarget() found video frame [%" PRId64 ", %" PRId64 "] "
            "containing target=%" PRId64,
-           video->mTime, video->GetEndTime(), target);
+           aVideo->mTime, aVideo->GetEndTime(), target);
 
       MOZ_ASSERT(VideoQueue().GetSize() == 0,
                  "Should be the 1st sample after seeking");
-      mMaster->PushVideo(video);
+      mMaster->PushVideo(aVideo);
       mDoneVideoSeeking = true;
     }
 
@@ -1437,7 +1434,7 @@ private:
   // This is so that if we hit end of stream while we're decoding to reach
   // the seek target, we will still have a frame that we can display as the
   // last frame in the media.
-  RefPtr<MediaData> mFirstVideoFrameAfterSeek;
+  RefPtr<VideoData> mFirstVideoFrameAfterSeek;
 };
 
 /*
@@ -1445,12 +1442,13 @@ private:
  * aCompare A function object with the signature bool(int64_t) which returns
  *          true for samples that should be removed.
  */
-template <typename Function> static void
-DiscardFrames(MediaQueue<MediaData>& aQueue, const Function& aCompare)
+template <typename Type, typename Function>
+static void
+DiscardFrames(MediaQueue<Type>& aQueue, const Function& aCompare)
 {
   while(aQueue.GetSize() > 0) {
     if (aCompare(aQueue.PeekFront()->mTime)) {
-      RefPtr<MediaData> releaseMe = aQueue.PopFront();
+      RefPtr<Type> releaseMe = aQueue.PopFront();
       continue;
     }
     break;
@@ -1538,12 +1536,12 @@ private:
     OwnerThread()->Dispatch(r.forget());
   }
 
-  void HandleAudioDecoded(MediaData* aAudio) override
+  void HandleAudioDecoded(AudioData* aAudio) override
   {
     mMaster->PushAudio(aAudio);
   }
 
-  void HandleVideoDecoded(MediaData* aVideo, TimeStamp aDecodeStart) override
+  void HandleVideoDecoded(VideoData* aVideo, TimeStamp aDecodeStart) override
   {
     MOZ_ASSERT(aVideo);
     MOZ_ASSERT(!mSeekJob.mPromise.IsEmpty(), "Seek shouldn't be finished");
@@ -1639,7 +1637,7 @@ private:
   // position.
   void UpdateSeekTargetTime()
   {
-    RefPtr<MediaData> data = VideoQueue().PeekFront();
+    RefPtr<VideoData> data = VideoQueue().PeekFront();
     if (data) {
       mSeekJob.mTarget->SetTime(TimeUnit::FromMicroseconds(data->mTime));
     } else {
@@ -1710,7 +1708,7 @@ public:
     return DECODER_STATE_BUFFERING;
   }
 
-  void HandleAudioDecoded(MediaData* aAudio) override
+  void HandleAudioDecoded(AudioData* aAudio) override
   {
     // This might be the sample we need to exit buffering.
     // Schedule Step() to check it.
@@ -1718,7 +1716,7 @@ public:
     mMaster->ScheduleStateMachine();
   }
 
-  void HandleVideoDecoded(MediaData* aVideo, TimeStamp aDecodeStart) override
+  void HandleVideoDecoded(VideoData* aVideo, TimeStamp aDecodeStart) override
   {
     // This might be the sample we need to exit buffering.
     // Schedule Step() to check it.
@@ -2701,8 +2699,9 @@ MediaDecoderStateMachine::CreateAudioSink()
   RefPtr<MediaDecoderStateMachine> self = this;
   auto audioSinkCreator = [self] () {
     MOZ_ASSERT(self->OnTaskQueue());
-    DecodedAudioDataSink* audioSink = new DecodedAudioDataSink(
-      self->mTaskQueue, self->mAudioQueue, self->GetMediaTime(),
+    AudioSink* audioSink = new AudioSink(
+      self->mTaskQueue, self->mAudioQueue,
+      TimeUnit::FromMicroseconds(self->GetMediaTime()),
       self->Info().mAudio, self->mAudioChannel);
 
     self->mAudibleListener = audioSink->AudibleEvent().Connect(
@@ -2760,7 +2759,7 @@ bool MediaDecoderStateMachine::HaveEnoughDecodedVideo()
 }
 
 void
-MediaDecoderStateMachine::PushAudio(MediaData* aSample)
+MediaDecoderStateMachine::PushAudio(AudioData* aSample)
 {
   MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(aSample);
@@ -2768,23 +2767,23 @@ MediaDecoderStateMachine::PushAudio(MediaData* aSample)
 }
 
 void
-MediaDecoderStateMachine::PushVideo(MediaData* aSample)
+MediaDecoderStateMachine::PushVideo(VideoData* aSample)
 {
   MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(aSample);
-  aSample->As<VideoData>()->mFrameID = ++mCurrentFrameID;
+  aSample->mFrameID = ++mCurrentFrameID;
   VideoQueue().Push(aSample);
 }
 
 void
-MediaDecoderStateMachine::OnAudioPopped(const RefPtr<MediaData>& aSample)
+MediaDecoderStateMachine::OnAudioPopped(const RefPtr<AudioData>& aSample)
 {
   MOZ_ASSERT(OnTaskQueue());
   mPlaybackOffset = std::max(mPlaybackOffset.Ref(), aSample->mOffset);
 }
 
 void
-MediaDecoderStateMachine::OnVideoPopped(const RefPtr<MediaData>& aSample)
+MediaDecoderStateMachine::OnVideoPopped(const RefPtr<VideoData>& aSample)
 {
   MOZ_ASSERT(OnTaskQueue());
   mPlaybackOffset = std::max(mPlaybackOffset.Ref(), aSample->mOffset);
@@ -2852,7 +2851,7 @@ void
 MediaDecoderStateMachine::StopPlayback()
 {
   MOZ_ASSERT(OnTaskQueue());
-  DECODER_LOG("StopPlayback()");
+  LOG("StopPlayback()");
 
   mOnPlaybackEvent.Notify(MediaEventType::PlaybackStopped);
 
@@ -2874,11 +2873,11 @@ void MediaDecoderStateMachine::MaybeStartPlayback()
   }
 
   if (mPlayState != MediaDecoder::PLAY_STATE_PLAYING) {
-    DECODER_LOG("Not starting playback [mPlayState=%d]", mPlayState.Ref());
+    LOG("Not starting playback [mPlayState=%d]", mPlayState.Ref());
     return;
   }
 
-  DECODER_LOG("MaybeStartPlayback() starting playback");
+  LOG("MaybeStartPlayback() starting playback");
   mOnPlaybackEvent.Notify(MediaEventType::PlaybackStarted);
   StartMediaSink();
 
@@ -2891,7 +2890,7 @@ void MediaDecoderStateMachine::MaybeStartPlayback()
 void MediaDecoderStateMachine::UpdatePlaybackPositionInternal(int64_t aTime)
 {
   MOZ_ASSERT(OnTaskQueue());
-  SAMPLE_LOG("UpdatePlaybackPositionInternal(%" PRId64 ")", aTime);
+  LOGV("UpdatePlaybackPositionInternal(%" PRId64 ")", aTime);
 
   mCurrentPosition = aTime;
   NS_ASSERTION(mCurrentPosition >= 0, "CurrentTime should be positive!");
@@ -3018,10 +3017,10 @@ void MediaDecoderStateMachine::SetVideoDecodeMode(VideoDecodeMode aMode)
 void MediaDecoderStateMachine::SetVideoDecodeModeInternal(VideoDecodeMode aMode)
 {
   MOZ_ASSERT(OnTaskQueue());
-  DECODER_LOG("VideoDecodeModeChanged: VideoDecodeMode=(%s->%s), mVideoDecodeSuspended=%c",
-              mVideoDecodeMode == VideoDecodeMode::Normal ? "Normal" : "Suspend",
-              aMode == VideoDecodeMode::Normal ? "Normal" : "Suspend",
-              mVideoDecodeSuspended ? 'T' : 'F');
+  LOG("VideoDecodeModeChanged: VideoDecodeMode=(%s->%s), mVideoDecodeSuspended=%c",
+      mVideoDecodeMode == VideoDecodeMode::Normal ? "Normal" : "Suspend",
+      aMode == VideoDecodeMode::Normal ? "Normal" : "Suspend",
+      mVideoDecodeSuspended ? 'T' : 'F');
 
   if (!MediaPrefs::MDSMSuspendBackgroundVideoEnabled()) {
     return;
@@ -3086,15 +3085,13 @@ MediaDecoderStateMachine::Seek(const SeekTarget& aTarget)
 
   // We need to be able to seek in some way
   if (!mMediaSeekable && !mMediaSeekableOnlyInBufferedRanges) {
-    DECODER_WARN(
-      "Seek() function should not be called on a non-seekable state machine");
+    LOGW("Seek() should not be called on a non-seekable media");
     return MediaDecoder::SeekPromise::CreateAndReject(/* aIgnored = */ true,
                                                       __func__);
   }
 
   if (aTarget.IsNextFrame() && !HasVideo()) {
-    DECODER_WARN(
-      "Ignore a NextFrameSeekTask on a media file without video track.");
+    LOGW("Ignore a NextFrameSeekTask on a media file without video track.");
     return MediaDecoder::SeekPromise::CreateAndReject(/* aIgnored = */ true,
                                                       __func__);
   }
@@ -3116,7 +3113,7 @@ void MediaDecoderStateMachine::StopMediaSink()
 {
   MOZ_ASSERT(OnTaskQueue());
   if (mMediaSink->IsStarted()) {
-    DECODER_LOG("Stop MediaSink");
+    LOG("Stop MediaSink");
     mAudibleListener.DisconnectIfExists();
 
     mMediaSink->Stop();
@@ -3132,24 +3129,24 @@ MediaDecoderStateMachine::RequestAudioData()
   MOZ_ASSERT(IsAudioDecoding());
   MOZ_ASSERT(!IsRequestingAudioData());
   MOZ_ASSERT(!IsWaitingAudioData());
-  SAMPLE_LOG("Queueing audio task - queued=%" PRIuSIZE ", decoder-queued=%" PRIuSIZE,
-             AudioQueue().GetSize(), mReader->SizeOfAudioQueueInFrames());
+  LOGV("Queueing audio task - queued=%" PRIuSIZE ", decoder-queued=%" PRIuSIZE,
+       AudioQueue().GetSize(), mReader->SizeOfAudioQueueInFrames());
 
   RefPtr<MediaDecoderStateMachine> self = this;
   mReader->RequestAudioData()->Then(
     OwnerThread(), __func__,
-    [this, self] (MediaData* aAudio) {
+    [this, self] (AudioData* aAudio) {
       MOZ_ASSERT(aAudio);
       mAudioDataRequest.Complete();
       // audio->GetEndTime() is not always mono-increasing in chained ogg.
       mDecodedAudioEndTime =
         std::max(aAudio->GetEndTime(), mDecodedAudioEndTime);
-      SAMPLE_LOG("OnAudioDecoded [%" PRId64 ",%" PRId64 "]", aAudio->mTime,
-                 aAudio->GetEndTime());
+      LOGV("OnAudioDecoded [%" PRId64 ",%" PRId64 "]", aAudio->mTime,
+           aAudio->GetEndTime());
       mStateObj->HandleAudioDecoded(aAudio);
     },
     [this, self] (const MediaResult& aError) {
-      SAMPLE_LOG("OnAudioNotDecoded aError=%" PRIu32, static_cast<uint32_t>(aError.Code()));
+      LOGV("OnAudioNotDecoded aError=%" PRIu32, static_cast<uint32_t>(aError.Code()));
       mAudioDataRequest.Complete();
       switch (aError.Code()) {
         case NS_ERROR_DOM_MEDIA_WAITING_FOR_DATA:
@@ -3175,28 +3172,27 @@ MediaDecoderStateMachine::RequestVideoData(bool aSkipToNextKeyframe,
   MOZ_ASSERT(IsVideoDecoding());
   MOZ_ASSERT(!IsRequestingVideoData());
   MOZ_ASSERT(!IsWaitingVideoData());
-  SAMPLE_LOG(
-    "Queueing video task - queued=%" PRIuSIZE ", decoder-queued=%" PRIoSIZE
-    ", skip=%i, time=%" PRId64,
-    VideoQueue().GetSize(), mReader->SizeOfVideoQueueInFrames(),
-    aSkipToNextKeyframe, aCurrentTime.ToMicroseconds());
+  LOGV("Queueing video task - queued=%" PRIuSIZE ", decoder-queued=%" PRIoSIZE
+       ", skip=%i, time=%" PRId64,
+       VideoQueue().GetSize(), mReader->SizeOfVideoQueueInFrames(),
+       aSkipToNextKeyframe, aCurrentTime.ToMicroseconds());
 
   TimeStamp videoDecodeStartTime = TimeStamp::Now();
   RefPtr<MediaDecoderStateMachine> self = this;
   mReader->RequestVideoData(aSkipToNextKeyframe, aCurrentTime)->Then(
     OwnerThread(), __func__,
-    [this, self, videoDecodeStartTime] (MediaData* aVideo) {
+    [this, self, videoDecodeStartTime] (VideoData* aVideo) {
       MOZ_ASSERT(aVideo);
       mVideoDataRequest.Complete();
       // Handle abnormal or negative timestamps.
       mDecodedVideoEndTime =
         std::max(mDecodedVideoEndTime, aVideo->GetEndTime());
-      SAMPLE_LOG("OnVideoDecoded [%" PRId64 ",%" PRId64 "]", aVideo->mTime,
-                 aVideo->GetEndTime());
+      LOGV("OnVideoDecoded [%" PRId64 ",%" PRId64 "]", aVideo->mTime,
+           aVideo->GetEndTime());
       mStateObj->HandleVideoDecoded(aVideo, videoDecodeStartTime);
     },
     [this, self] (const MediaResult& aError) {
-      SAMPLE_LOG("OnVideoNotDecoded aError=%" PRIu32 , static_cast<uint32_t>(aError.Code()));
+      LOGV("OnVideoNotDecoded aError=%" PRIu32 , static_cast<uint32_t>(aError.Code()));
       mVideoDataRequest.Complete();
       switch (aError.Code()) {
         case NS_ERROR_DOM_MEDIA_WAITING_FOR_DATA:
@@ -3368,7 +3364,7 @@ MediaDecoderStateMachine::DecodeError(const MediaResult& aError)
 {
   MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(!IsShutdown());
-  DECODER_WARN("Decode error");
+  LOGW("Decode error");
   // Notify the decode error and MediaDecoder will shut down MDSM.
   mOnPlaybackErrorEvent.Notify(aError);
 }
@@ -3405,14 +3401,14 @@ MediaDecoderStateMachine::FinishDecodeFirstFrame()
 {
   MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(!mSentFirstFrameLoadedEvent);
-  DECODER_LOG("FinishDecodeFirstFrame");
+  LOG("FinishDecodeFirstFrame");
 
   mMediaSink->Redraw(Info().mVideo);
 
-  DECODER_LOG("Media duration %" PRId64 ", "
-              "transportSeekable=%d, mediaSeekable=%d",
-              Duration().ToMicroseconds(), mResource->IsTransportSeekable(),
-              mMediaSeekable);
+  LOG("Media duration %" PRId64 ", "
+      "transportSeekable=%d, mediaSeekable=%d",
+      Duration().ToMicroseconds(), mResource->IsTransportSeekable(),
+      mMediaSeekable);
 
   // Get potentially updated metadata
   mReader->ReadUpdatedMetadata(mInfo.ptr());
@@ -3431,7 +3427,7 @@ RefPtr<ShutdownPromise>
 MediaDecoderStateMachine::FinishShutdown()
 {
   MOZ_ASSERT(OnTaskQueue());
-  DECODER_LOG("Shutting down state machine task queue");
+  LOG("Shutting down state machine task queue");
   return OwnerThread()->BeginShutdown();
 }
 
@@ -3449,7 +3445,7 @@ void
 MediaDecoderStateMachine::ResetDecode(TrackSet aTracks)
 {
   MOZ_ASSERT(OnTaskQueue());
-  DECODER_LOG("MediaDecoderStateMachine::Reset");
+  LOG("MediaDecoderStateMachine::Reset");
 
   // Assert that aTracks specifies to reset the video track because we
   // don't currently support resetting just the audio track.
@@ -3497,7 +3493,7 @@ MediaDecoderStateMachine::UpdatePlaybackPositionPeriodically()
   // Cap the current time to the larger of the audio and video end time.
   // This ensures that if we're running off the system clock, we don't
   // advance the clock to after the media end time.
-  if (VideoEndTime() != -1 || AudioEndTime() != -1) {
+  if (VideoEndTime() > 0 || AudioEndTime() > 0) {
 
     const int64_t clockTime = GetClock();
     // Skip frames up to the frame at the playback position, and figure out
@@ -3546,7 +3542,7 @@ MediaDecoderStateMachine::UpdateNextFrameStatus(NextFrameStatus aStatus)
 {
   MOZ_ASSERT(OnTaskQueue());
   if (aStatus != mNextFrameStatus) {
-    DECODER_LOG("Changed mNextFrameStatus to %s", ToStr(aStatus));
+    LOG("Changed mNextFrameStatus to %s", ToStr(aStatus));
     mNextFrameStatus = aStatus;
   }
 }
@@ -3656,7 +3652,7 @@ MediaDecoderStateMachine::AudioEndTime() const
   if (mMediaSink->IsStarted()) {
     return mMediaSink->GetEndTime(TrackInfo::kAudioTrack);
   }
-  return -1;
+  return 0;
 }
 
 int64_t
@@ -3666,7 +3662,7 @@ MediaDecoderStateMachine::VideoEndTime() const
   if (mMediaSink->IsStarted()) {
     return mMediaSink->GetEndTime(TrackInfo::kVideoTrack);
   }
-  return -1;
+  return 0;
 }
 
 void
@@ -3674,7 +3670,7 @@ MediaDecoderStateMachine::OnMediaSinkVideoComplete()
 {
   MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(HasVideo());
-  VERBOSE_LOG("[%s]", __func__);
+  LOG("[%s]", __func__);
 
   mMediaSinkVideoPromise.Complete();
   mVideoCompleted = true;
@@ -3686,7 +3682,7 @@ MediaDecoderStateMachine::OnMediaSinkVideoError()
 {
   MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(HasVideo());
-  VERBOSE_LOG("[%s]", __func__);
+  LOGW("[%s]", __func__);
 
   mMediaSinkVideoPromise.Complete();
   mVideoCompleted = true;
@@ -3700,7 +3696,7 @@ void MediaDecoderStateMachine::OnMediaSinkAudioComplete()
 {
   MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(HasAudio());
-  VERBOSE_LOG("[%s]", __func__);
+  LOG("[%s]", __func__);
 
   mMediaSinkAudioPromise.Complete();
   mAudioCompleted = true;
@@ -3716,7 +3712,7 @@ void MediaDecoderStateMachine::OnMediaSinkAudioError(nsresult aResult)
 {
   MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(HasAudio());
-  VERBOSE_LOG("[%s]", __func__);
+  LOGW("[%s]", __func__);
 
   mMediaSinkAudioPromise.Complete();
   mAudioCompleted = true;
@@ -3835,7 +3831,7 @@ void MediaDecoderStateMachine::AddOutputStream(ProcessedMediaStream* aStream,
                                                bool aFinishWhenEnded)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  DECODER_LOG("AddOutputStream aStream=%p!", aStream);
+  LOG("AddOutputStream aStream=%p!", aStream);
   mOutputStreamManager->Add(aStream, aFinishWhenEnded);
   nsCOMPtr<nsIRunnable> r = NewRunnableMethod<bool>(
     this, &MediaDecoderStateMachine::SetAudioCaptured, true);
@@ -3845,7 +3841,7 @@ void MediaDecoderStateMachine::AddOutputStream(ProcessedMediaStream* aStream,
 void MediaDecoderStateMachine::RemoveOutputStream(MediaStream* aStream)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  DECODER_LOG("RemoveOutputStream=%p!", aStream);
+  LOG("RemoveOutputStream=%p!", aStream);
   mOutputStreamManager->Remove(aStream);
   if (mOutputStreamManager->IsEmpty()) {
     nsCOMPtr<nsIRunnable> r = NewRunnableMethod<bool>(
@@ -3907,7 +3903,7 @@ MediaDecoderStateMachine::VideoRequestStatus() const
 void
 MediaDecoderStateMachine::OnSuspendTimerResolved()
 {
-  DECODER_LOG("OnSuspendTimerResolved");
+  LOG("OnSuspendTimerResolved");
   mVideoDecodeSuspendTimer.CompleteRequest();
   mStateObj->HandleVideoSuspendTimeout();
 }
@@ -3915,9 +3911,9 @@ MediaDecoderStateMachine::OnSuspendTimerResolved()
 void
 MediaDecoderStateMachine::CancelSuspendTimer()
 {
-  DECODER_LOG("CancelSuspendTimer: State: %s, Timer.IsScheduled: %c",
-              ToStateStr(mStateObj->GetState()),
-              mVideoDecodeSuspendTimer.IsScheduled() ? 'T' : 'F');
+  LOG("CancelSuspendTimer: State: %s, Timer.IsScheduled: %c",
+      ToStateStr(mStateObj->GetState()),
+      mVideoDecodeSuspendTimer.IsScheduled() ? 'T' : 'F');
   MOZ_ASSERT(OnTaskQueue());
   if (mVideoDecodeSuspendTimer.IsScheduled()) {
     mOnPlaybackEvent.Notify(MediaEventType::CancelVideoSuspendTimer);
@@ -3927,4 +3923,9 @@ MediaDecoderStateMachine::CancelSuspendTimer()
 
 } // namespace mozilla
 
+// avoid redefined macro in unified build
+#undef LOG
+#undef LOGV
+#undef LOGW
+#undef SLOGW
 #undef NS_DispatchToMainThread

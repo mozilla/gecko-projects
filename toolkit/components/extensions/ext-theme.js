@@ -7,6 +7,10 @@ XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
 XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
                                   "resource://gre/modules/LightweightThemeManager.jsm");
 
+XPCOMUtils.defineLazyGetter(this, "gThemesEnabled", () => {
+  return Preferences.get("extensions.webextensions.themes.enabled");
+});
+
 // WeakMap[Extension -> Theme]
 let themeMap = new WeakMap();
 
@@ -114,6 +118,11 @@ class Theme {
     }
   }
 
+  /**
+   * Helper method for loading icons found in the extension's manifest.
+   *
+   * @param {Object} icons Dictionary mapping icon properties to extension URLs.
+   */
   loadIcons(icons) {
     if (!Preferences.get("extensions.webextensions.themes.icons.enabled")) {
       // Return early if icons are disabled.
@@ -154,7 +163,7 @@ class Theme {
 
 /* eslint-disable mozilla/balanced-listeners */
 extensions.on("manifest_theme", (type, directive, extension, manifest) => {
-  if (!Preferences.get("extensions.webextensions.themes.enabled")) {
+  if (!gThemesEnabled) {
     // Return early if themes are disabled.
     return;
   }
@@ -167,8 +176,8 @@ extensions.on("manifest_theme", (type, directive, extension, manifest) => {
 extensions.on("shutdown", (type, extension) => {
   let theme = themeMap.get(extension);
 
-  // We won't have a theme if theme's aren't enabled.
   if (!theme) {
+    // We won't have a theme if themes are disabled.
     return;
   }
 
@@ -181,11 +190,19 @@ extensions.registerSchemaAPI("theme", "addon_parent", context => {
   return {
     theme: {
       update(details) {
+        if (!gThemesEnabled) {
+          // Return early if themes are disabled.
+          return;
+        }
+
         let theme = themeMap.get(extension);
 
-        // We won't have a theme if theme's aren't enabled.
         if (!theme) {
-          return;
+          // WebExtensions using the Theme API will not have a theme defined
+          // in the manifest. Therefore, we need to initialize the theme the
+          // first time browser.theme.update is called.
+          theme = new Theme(extension.baseURI);
+          themeMap.set(extension, theme);
         }
 
         theme.load(details);

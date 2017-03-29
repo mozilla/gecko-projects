@@ -55,7 +55,6 @@ b2g/locales/en-US/b2g-l10n.js
 # browser/ exclusions
 browser/app/**
 browser/branding/**/firefox-branding.js
-browser/base/content/nsContextMenu.js
 browser/base/content/sanitizeDialog.js
 browser/base/content/test/general/file_csp_block_all_mixedcontent.html
 browser/base/content/test/urlbar/file_blank_but_not_blank.html
@@ -91,6 +90,7 @@ devtools/client/performance/components/test/test_jit_optimizations_01.html
 devtools/client/projecteditor/**
 devtools/client/responsive.html/test/browser/touch.html
 devtools/client/responsivedesign/**
+!devtools/client/responsivedesign/responsivedesign.jsm
 devtools/client/scratchpad/**
 devtools/client/shadereditor/**
 devtools/client/shared/*.jsm
@@ -130,8 +130,7 @@ devtools/server/actors/stylesheets.js
 devtools/server/tests/browser/storage-*.html
 !devtools/server/tests/browser/storage-unsecured-iframe.html
 devtools/server/tests/browser/stylesheets-nested-iframes.html
-devtools/server/tests/mochitest/**
-devtools/server/tests/unit/**
+devtools/server/tests/unit/xpcshell_debugging_script.js
 devtools/shared/platform/content/test/test_clipboard.html
 devtools/shared/qrcode/tests/mochitest/test_decode.html
 devtools/shared/tests/mochitest/*.html
@@ -154,6 +153,7 @@ devtools/shared/sprintfjs/*
 devtools/shared/qrcode/decoder/*
 devtools/shared/qrcode/encoder/*
 devtools/client/shared/demangle.js
+devtools/client/shared/source-map/*
 devtools/client/shared/vendor/*
 devtools/client/sourceeditor/codemirror/*.js
 devtools/client/sourceeditor/codemirror/**/*.js
@@ -173,6 +173,7 @@ devtools/client/debugger/test/mochitest/code_worker-source-map.js
 devtools/client/framework/test/code_ugly*
 devtools/server/tests/unit/babel_and_browserify_script_with_source_map.js
 devtools/server/tests/unit/setBreakpoint*
+devtools/server/tests/unit/sourcemapped.js
 
 # dom/ exclusions
 dom/animation/**

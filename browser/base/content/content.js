@@ -262,6 +262,35 @@ function getSerializedSecurityInfo(docShell) {
   return serhelper.serializeToString(securityInfo);
 }
 
+function getSiteBlockedErrorDetails(docShell) {
+  let blockedInfo = {};
+  if (docShell.failedChannel) {
+    let classifiedChannel = docShell.failedChannel.
+                            QueryInterface(Ci.nsIClassifiedChannel);
+    if (classifiedChannel) {
+      let httpChannel = docShell.failedChannel.QueryInterface(Ci.nsIHttpChannel);
+
+      let reportUri = httpChannel.URI.clone();
+
+      // Remove the query to avoid leaking sensitive data
+      if (reportUri instanceof Ci.nsIURL) {
+        reportUri.query = "";
+      }
+
+      blockedInfo = { list: classifiedChannel.matchedList,
+                      provider: classifiedChannel.matchedProvider,
+                      uri: reportUri.asciiSpec };
+    }
+  }
+  return blockedInfo;
+}
+
+addMessageListener("DeceptiveBlockedDetails", (message) => {
+  sendAsyncMessage("DeceptiveBlockedDetails:Result", {
+    blockedInfo: getSiteBlockedErrorDetails(docShell),
+  });
+});
+
 var AboutNetAndCertErrorListener = {
   init(chromeGlobal) {
     addMessageListener("CertErrorDetails", this);
@@ -583,32 +612,13 @@ var ClickEventHandler = {
     let docShell = ownerDoc.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
                                        .getInterface(Ci.nsIWebNavigation)
                                       .QueryInterface(Ci.nsIDocShell);
-    let blockedInfo = {};
-    if (docShell.failedChannel) {
-      let classifiedChannel = docShell.failedChannel.
-                              QueryInterface(Ci.nsIClassifiedChannel);
-      if (classifiedChannel) {
-        let httpChannel = docShell.failedChannel.QueryInterface(Ci.nsIHttpChannel);
-
-        let reportUri = httpChannel.URI.clone();
-
-        // Remove the query to avoid leaking sensitive data
-        if (reportUri instanceof Ci.nsIURL) {
-          reportUri.query = "";
-        }
-
-        blockedInfo = { list: classifiedChannel.matchedList,
-                        provider: classifiedChannel.matchedProvider,
-                        uri: reportUri.asciiSpec };
-      }
-    }
 
     sendAsyncMessage("Browser:SiteBlockedError", {
       location: ownerDoc.location.href,
       reason,
       elementId: targetElement.getAttribute("id"),
       isTopFrame: (ownerDoc.defaultView.parent === ownerDoc.defaultView),
-      blockedInfo
+      blockedInfo: getSiteBlockedErrorDetails(docShell),
     });
   },
 
@@ -688,12 +698,8 @@ ContentLinkHandler.init(this);
 // TODO: Load this lazily so the JSM is run only if a relevant event/message fires.
 var pluginContent = new PluginContent(global);
 
-addEventListener("DOMWebNotificationClicked", function(event) {
-  sendAsyncMessage("DOMWebNotificationClicked", {});
-}, false);
-
-addEventListener("DOMServiceWorkerFocusClient", function(event) {
-  sendAsyncMessage("DOMServiceWorkerFocusClient", {});
+addEventListener("DOMWindowFocus", function(event) {
+  sendAsyncMessage("DOMWindowFocus", {});
 }, false);
 
 ContentWebRTC.init();
@@ -794,38 +800,41 @@ addMessageListener("ContextMenu:SaveVideoFrameAsImage", (message) => {
 });
 
 addMessageListener("ContextMenu:MediaCommand", (message) => {
-  let media = message.objects.element;
-
-  switch (message.data.command) {
-    case "play":
-      media.play();
-      break;
-    case "pause":
-      media.pause();
-      break;
-    case "loop":
-      media.loop = !media.loop;
-      break;
-    case "mute":
-      media.muted = true;
-      break;
-    case "unmute":
-      media.muted = false;
-      break;
-    case "playbackRate":
-      media.playbackRate = message.data.data;
-      break;
-    case "hidecontrols":
-      media.removeAttribute("controls");
-      break;
-    case "showcontrols":
-      media.setAttribute("controls", "true");
-      break;
-    case "fullscreen":
-      if (content.document.fullscreenEnabled)
-        media.requestFullscreen();
-      break;
-  }
+  E10SUtils.wrapHandlingUserInput(
+    content, message.data.handlingUserInput,
+    () => {
+      let media = message.objects.element;
+      switch (message.data.command) {
+        case "play":
+          media.play();
+          break;
+        case "pause":
+          media.pause();
+          break;
+        case "loop":
+          media.loop = !media.loop;
+          break;
+        case "mute":
+          media.muted = true;
+          break;
+        case "unmute":
+          media.muted = false;
+          break;
+        case "playbackRate":
+          media.playbackRate = message.data.data;
+          break;
+        case "hidecontrols":
+          media.removeAttribute("controls");
+          break;
+        case "showcontrols":
+          media.setAttribute("controls", "true");
+          break;
+        case "fullscreen":
+          if (content.document.fullscreenEnabled)
+            media.requestFullscreen();
+          break;
+      }
+    });
 });
 
 addMessageListener("ContextMenu:Canvas:ToBlobURL", (message) => {
@@ -1245,8 +1254,10 @@ var PageInfoListener = {
       try {
         // Note: makeURLAbsolute will throw if either the baseURI is not a valid URI
         //       or the URI formed from the baseURI and the URL is not a valid URI.
-        let href = makeURLAbsolute(elem.baseURI, elem.href.baseVal);
-        addImage(href, strings.mediaImg, "", elem, false);
+        if (elem.href.baseVal) {
+          let href = Services.io.newURI(elem.href.baseVal, null, Services.io.newURI(elem.baseURI)).spec;
+          addImage(href, strings.mediaImg, "", elem, false);
+        }
       } catch (e) { }
     } else if (elem instanceof content.HTMLVideoElement) {
       addImage(elem.currentSrc, strings.mediaVideo, "", elem, false);

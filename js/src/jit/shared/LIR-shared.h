@@ -1910,6 +1910,9 @@ class LJSCallInstructionHelper : public LCallInstructionHelper<Defs, Operands, T
     bool isConstructing() const {
         return mir()->isConstructing();
     }
+    bool ignoresReturnValue() const {
+        return mir()->ignoresReturnValue();
+    }
 };
 
 // Generates a polymorphic callsite, wherein the function being called is
@@ -2227,34 +2230,6 @@ class LApplyArrayGeneric : public LCallInstructionHelper<BOX_PIECES, BOX_PIECES 
     }
     const LDefinition* getTempStackCounter() {
         return getTemp(1);
-    }
-};
-
-class LArraySplice : public LCallInstructionHelper<0, 3, 0>
-{
-  public:
-    LIR_HEADER(ArraySplice)
-
-    LArraySplice(const LAllocation& object, const LAllocation& start,
-                 const LAllocation& deleteCount)
-    {
-        setOperand(0, object);
-        setOperand(1, start);
-        setOperand(2, deleteCount);
-    }
-
-    MArraySplice* mir() const {
-        return mir_->toArraySplice();
-    }
-
-    const LAllocation* getObject() {
-        return getOperand(0);
-    }
-    const LAllocation* getStart() {
-        return getOperand(1);
-    }
-    const LAllocation* getDeleteCount() {
-        return getOperand(2);
     }
 };
 
@@ -7179,18 +7154,25 @@ class LCallSetElement : public LCallInstructionHelper<0, 1 + 2 * BOX_PIECES, 0>
 };
 
 // Call js::InitElementArray.
-class LCallInitElementArray : public LCallInstructionHelper<0, 1 + BOX_PIECES, 0>
+class LCallInitElementArray : public LCallInstructionHelper<0, 2 + BOX_PIECES, 0>
 {
 public:
     LIR_HEADER(CallInitElementArray)
 
-    static const size_t Value = 1;
+    static const size_t Value = 2;
 
-    LCallInitElementArray(const LAllocation& obj, const LBoxAllocation& value) {
+    LCallInitElementArray(const LAllocation& obj, const LAllocation& index,
+                          const LBoxAllocation& value) {
         setOperand(0, obj);
+        setOperand(1, index);
         setBoxOperand(Value, value);
     }
-
+    const LAllocation* object() {
+        return getOperand(0);
+    }
+    const LAllocation* index() {
+        return getOperand(1);
+    }
     const MCallInitElementArray* mir() const {
         return mir_->toCallInitElementArray();
     }
@@ -8630,13 +8612,13 @@ class LWasmParameterI64 : public LInstructionHelper<INT64_PIECES, 0, 0>
     LIR_HEADER(WasmParameterI64);
 };
 
-class LWasmReturn : public LInstructionHelper<0, 2, 0>
+class LWasmReturn : public LInstructionHelper<0, 1, 0>
 {
   public:
     LIR_HEADER(WasmReturn);
 };
 
-class LWasmReturnI64 : public LInstructionHelper<0, INT64_PIECES + 1, 0>
+class LWasmReturnI64 : public LInstructionHelper<0, INT64_PIECES, 0>
 {
   public:
     LIR_HEADER(WasmReturnI64)
@@ -8646,7 +8628,7 @@ class LWasmReturnI64 : public LInstructionHelper<0, INT64_PIECES + 1, 0>
     }
 };
 
-class LWasmReturnVoid : public LInstructionHelper<0, 1, 0>
+class LWasmReturnVoid : public LInstructionHelper<0, 0, 0>
 {
   public:
     LIR_HEADER(WasmReturnVoid);
@@ -8708,6 +8690,7 @@ class LWasmCallBase : public LInstruction
         //  - internal/indirect calls do by the internal wasm ABI
         //  - import calls do by explicitly saving/restoring at the callsite
         //  - builtin calls do because the TLS reg is non-volatile
+        // See also CodeGeneratorShared::emitWasmCallBase.
         return !reg.isFloat() && reg.gpr() == WasmTlsReg;
     }
 

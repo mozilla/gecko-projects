@@ -342,7 +342,7 @@ PrincipalImmuneToScriptPolicy(nsIPrincipal* aPrincipal)
     if (nsXPConnect::SecurityManager()->IsSystemPrincipal(aPrincipal))
         return true;
 
-    // nsExpandedPrincipal gets a free pass.
+    // ExpandedPrincipal gets a free pass.
     nsCOMPtr<nsIExpandedPrincipal> ep = do_QueryInterface(aPrincipal);
     if (ep)
         return true;
@@ -888,7 +888,7 @@ XPCJSContext::FinalizeCallback(JSFreeOp* fop,
 }
 
 /* static */ void
-XPCJSContext::WeakPointerZoneGroupCallback(JSContext* cx, void* data)
+XPCJSContext::WeakPointerZonesCallback(JSContext* cx, void* data)
 {
     // Called before each sweeping slice -- after processing any final marking
     // triggered by barriers -- to clear out any references to things that are
@@ -1582,7 +1582,7 @@ XPCJSContext::~XPCJSContext()
     // callbacks if we aren't careful. Null out the relevant callbacks.
     js::SetActivityCallback(Context(), nullptr, nullptr);
     JS_RemoveFinalizeCallback(Context(), FinalizeCallback);
-    JS_RemoveWeakPointerZoneGroupCallback(Context(), WeakPointerZoneGroupCallback);
+    JS_RemoveWeakPointerZonesCallback(Context(), WeakPointerZonesCallback);
     JS_RemoveWeakPointerCompartmentCallback(Context(), WeakPointerCompartmentCallback);
 
     // Clear any pending exception.  It might be an XPCWrappedJS, and if we try
@@ -1631,7 +1631,12 @@ XPCJSContext::~XPCJSContext()
     profiler_clear_js_context();
 #endif
 
-    Preferences::UnregisterCallback(ReloadPrefsCallback, JS_OPTIONS_DOT_STR, this);
+    Preferences::UnregisterPrefixCallback(ReloadPrefsCallback,
+                                          JS_OPTIONS_DOT_STR, this);
+
+#ifdef FUZZING
+    Preferences::UnRegisterCallback(ReloadPrefsCallback, "fuzzing.enabled", this);
+#endif
 }
 
 // If |*anonymizeID| is non-zero and this is a user compartment, the name will
@@ -1938,6 +1943,14 @@ ReportZoneStats(const JS::ZoneStats& zStats,
     ZCREPORT_BYTES(pathPrefix + NS_LITERAL_CSTRING("scopes/malloc-heap"),
         zStats.scopesMallocHeap,
         "Arrays of binding names and other binding-related data.");
+
+    ZCREPORT_GC_BYTES(pathPrefix + NS_LITERAL_CSTRING("regexp-shareds/gc-heap"),
+        zStats.regExpSharedsGCHeap,
+        "Shared compiled regexp data.");
+
+    ZCREPORT_BYTES(pathPrefix + NS_LITERAL_CSTRING("regexp-shareds/malloc-heap"),
+        zStats.regExpSharedsMallocHeap,
+        "Shared compiled regexp data.");
 
     ZCREPORT_BYTES(pathPrefix + NS_LITERAL_CSTRING("type-pool"),
         zStats.typePool,
@@ -2973,6 +2986,10 @@ JSReporter::CollectReports(WindowPaths* windowPaths,
         KIND_OTHER, rtStats.zTotals.unusedGCThings.jitcode,
         "Unused jitcode cells within non-empty arenas.");
 
+    REPORT_BYTES(NS_LITERAL_CSTRING("js-main-runtime-gc-heap-committed/unused/gc-things/regexp-shareds"),
+        KIND_OTHER, rtStats.zTotals.unusedGCThings.regExpShared,
+        "Unused regexpshared cells within non-empty arenas.");
+
     REPORT_BYTES(NS_LITERAL_CSTRING("js-main-runtime-gc-heap-committed/used/chunk-admin"),
         KIND_OTHER, rtStats.gcHeapChunkAdmin,
         "The same as 'explicit/js-non-window/gc-heap/chunk-admin'.");
@@ -3023,6 +3040,10 @@ JSReporter::CollectReports(WindowPaths* windowPaths,
     MREPORT_BYTES(NS_LITERAL_CSTRING("js-main-runtime-gc-heap-committed/used/gc-things/jitcode"),
         KIND_OTHER, rtStats.zTotals.jitCodesGCHeap,
         "Used jitcode cells.");
+
+    MREPORT_BYTES(NS_LITERAL_CSTRING("js-main-runtime-gc-heap-committed/used/gc-things/regexp-shareds"),
+        KIND_OTHER, rtStats.zTotals.regExpSharedsGCHeap,
+        "Used regexpshared cells.");
 
     MOZ_ASSERT(gcThingTotal == rtStats.gcHeapGCThings);
 
@@ -3497,7 +3518,7 @@ XPCJSContext::Initialize()
     mPrevDoCycleCollectionCallback = JS::SetDoCycleCollectionCallback(cx,
             DoCycleCollectionCallback);
     JS_AddFinalizeCallback(cx, FinalizeCallback, nullptr);
-    JS_AddWeakPointerZoneGroupCallback(cx, WeakPointerZoneGroupCallback, this);
+    JS_AddWeakPointerZonesCallback(cx, WeakPointerZonesCallback, this);
     JS_AddWeakPointerCompartmentCallback(cx, WeakPointerCompartmentCallback, this);
     JS_SetWrapObjectCallbacks(cx, &WrapObjectCallbacks);
     js::SetPreserveWrapperCallback(cx, PreserveWrapper);
@@ -3545,7 +3566,8 @@ XPCJSContext::Initialize()
 
     // Watch for the JS boolean options.
     ReloadPrefsCallback(nullptr, this);
-    Preferences::RegisterCallback(ReloadPrefsCallback, JS_OPTIONS_DOT_STR, this);
+    Preferences::RegisterPrefixCallback(ReloadPrefsCallback,
+                                        JS_OPTIONS_DOT_STR, this);
 
 #ifdef FUZZING
     Preferences::RegisterCallback(ReloadPrefsCallback, "fuzzing.enabled", this);

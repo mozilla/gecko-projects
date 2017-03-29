@@ -52,6 +52,15 @@ interface mozILocaleService : nsISupports
   const long langNegStrategyLookup    = 2;
 
   /**
+   * Default locale of the browser. The locale we are guaranteed to have
+   * resources for that should be used as a last resort fallack in cases
+   * where requested locales do not match available locales.
+   *
+   * At the moment it returns `en-US`.
+   */
+  readonly attribute ACString defaultLocale;
+
+  /**
    * Returns a list of locales that the application should be localized to.
    *
    * The result is a ordered list of valid locale IDs and it should be
@@ -152,4 +161,20 @@ interface mozILocaleService : nsISupports
    */
   void setRequestedLocales([array, size_is(aRequestedCount)] in string aRequested,
                            [optional] in unsigned long aRequestedCount);
+
+  /**
+   * Returns a list of locales that the app can be localized to.
+   *
+   * The result is an unordered list of locale IDs which should be
+   * used as a availableLocales input list for language negotiation.
+   *
+   * Example: ["en-US", "de", "pl", "sr-Cyrl", "zh-Hans-HK"]
+   */
+  void getAvailableLocales([optional] out unsigned long aCount,
+                           [retval, array, size_is(aCount)] out string aLocales);
+
+  /**
+   * Returns whether the current app locale is RTL.
+   */
+  readonly attribute boolean isAppLocaleRTL;
 };

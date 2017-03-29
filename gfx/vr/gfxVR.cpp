@@ -67,7 +67,8 @@ VRSystemManager::AddGamepad(const VRControllerInfo& controllerInfo)
                       controllerInfo.GetHand(),
                       dom::GamepadServiceType::VR,
                       controllerInfo.GetNumButtons(),
-                      controllerInfo.GetNumAxes());
+                      controllerInfo.GetNumAxes(),
+                      controllerInfo.GetNumHaptics());
 
   VRManager* vm = VRManager::Get();
   MOZ_ASSERT(vm);
@@ -86,10 +87,10 @@ VRSystemManager::RemoveGamepad(uint32_t aIndex)
 
 void
 VRSystemManager::NewButtonEvent(uint32_t aIndex, uint32_t aButton,
-                                bool aPressed)
+                                bool aPressed, double aValue)
 {
   dom::GamepadButtonInformation a(aIndex, dom::GamepadServiceType::VR,
-                                  aButton, aPressed, aPressed ? 1.0L : 0.0L);
+                                  aButton, aPressed, aValue);
 
   VRManager* vm = VRManager::Get();
   MOZ_ASSERT(vm);

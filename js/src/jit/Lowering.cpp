@@ -656,16 +656,6 @@ LIRGenerator::visitAssertRecoveredOnBailout(MAssertRecoveredOnBailout* assertion
 }
 
 void
-LIRGenerator::visitArraySplice(MArraySplice* ins)
-{
-    LArraySplice* lir = new(alloc()) LArraySplice(useRegisterAtStart(ins->object()),
-                                                  useRegisterAtStart(ins->start()),
-                                                  useRegisterAtStart(ins->deleteCount()));
-    add(lir, ins);
-    assignSafepoint(lir, ins);
-}
-
-void
 LIRGenerator::visitGetDynamicName(MGetDynamicName* ins)
 {
     MDefinition* envChain = ins->getEnvironmentChain();
@@ -3992,10 +3982,10 @@ LIRGenerator::visitSetPropertyCache(MSetPropertyCache* ins)
     gen->setPerformsCall();
 
     // We need a double/float32 temp register for typed array stubs if this is
-    // a SETELEM.
+    // a SETELEM or INITELEM op.
     LDefinition tempD = LDefinition::BogusTemp();
     LDefinition tempF32 = LDefinition::BogusTemp();
-    if (IsSetElemPC(ins->resumePoint()->pc())) {
+    if (IsElemPC(ins->resumePoint()->pc())) {
         tempD = tempDouble();
         tempF32 = hasUnaliasedDouble() ? tempFloat32() : LDefinition::BogusTemp();
     }
@@ -4026,8 +4016,10 @@ LIRGenerator::visitCallSetElement(MCallSetElement* ins)
 void
 LIRGenerator::visitCallInitElementArray(MCallInitElementArray* ins)
 {
-    LCallInitElementArray* lir = new(alloc()) LCallInitElementArray(useRegisterAtStart(ins->object()),
-                                                                    useBoxAtStart(ins->value()));
+    LCallInitElementArray* lir =
+        new(alloc()) LCallInitElementArray(useRegisterAtStart(ins->object()),
+                                           useRegisterOrConstantAtStart(ins->index()),
+                                           useBoxAtStart(ins->value()));
     add(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -4288,10 +4280,7 @@ LIRGenerator::visitWasmBoundsCheck(MWasmBoundsCheck* ins)
 #ifdef WASM_HUGE_MEMORY
     MOZ_CRASH("No bounds checking on huge memory");
 #else
-    if (ins->isRedundant()) {
-        if (MOZ_LIKELY(!JitOptions.wasmAlwaysCheckBounds))
-            return;
-    }
+    MOZ_ASSERT(!ins->isRedundant());
 
     MDefinition* index = ins->index();
     MOZ_ASSERT(index->type() == MIRType::Int32);
@@ -4379,13 +4368,7 @@ LIRGenerator::visitWasmReturn(MWasmReturn* ins)
     MDefinition* rval = ins->getOperand(0);
 
     if (rval->type() == MIRType::Int64) {
-        LWasmReturnI64* lir = new(alloc()) LWasmReturnI64(useInt64Fixed(rval, ReturnReg64));
-
-        // Preserve the TLS pointer we were passed in `WasmTlsReg`.
-        MDefinition* tlsPtr = ins->getOperand(1);
-        lir->setOperand(INT64_PIECES, useFixed(tlsPtr, WasmTlsReg));
-
-        add(lir);
+        add(new(alloc()) LWasmReturnI64(useInt64Fixed(rval, ReturnReg64)));
         return;
     }
 
@@ -4401,23 +4384,13 @@ LIRGenerator::visitWasmReturn(MWasmReturn* ins)
     else
         MOZ_CRASH("Unexpected wasm return type");
 
-    // Preserve the TLS pointer we were passed in `WasmTlsReg`.
-    MDefinition* tlsPtr = ins->getOperand(1);
-    lir->setOperand(1, useFixed(tlsPtr, WasmTlsReg));
-
     add(lir);
 }
 
 void
 LIRGenerator::visitWasmReturnVoid(MWasmReturnVoid* ins)
 {
-    auto* lir = new(alloc()) LWasmReturnVoid;
-
-    // Preserve the TLS pointer we were passed in `WasmTlsReg`.
-    MDefinition* tlsPtr = ins->getOperand(0);
-    lir->setOperand(0, useFixed(tlsPtr, WasmTlsReg));
-
-    add(lir);
+    add(new(alloc()) LWasmReturnVoid);
 }
 
 void

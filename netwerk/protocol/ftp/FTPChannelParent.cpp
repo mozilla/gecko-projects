@@ -26,6 +26,7 @@
 #include "nsIContentPolicy.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/LoadInfo.h"
+#include "mozilla/dom/ContentParent.h"
 
 using namespace mozilla::dom;
 using namespace mozilla::ipc;
@@ -239,7 +240,7 @@ FTPChannelParent::RecvResume()
   return IPC_OK();
 }
 
-class FTPDivertDataAvailableEvent : public ChannelEvent
+class FTPDivertDataAvailableEvent : public MainThreadChannelEvent
 {
 public:
   FTPDivertDataAvailableEvent(FTPChannelParent* aParent,
@@ -330,7 +331,7 @@ FTPChannelParent::DivertOnDataAvailable(const nsCString& data,
   }
 }
 
-class FTPDivertStopRequestEvent : public ChannelEvent
+class FTPDivertStopRequestEvent : public MainThreadChannelEvent
 {
 public:
   FTPDivertStopRequestEvent(FTPChannelParent* aParent,
@@ -390,7 +391,7 @@ FTPChannelParent::DivertOnStopRequest(const nsresult& statusCode)
   OnStopRequest(mChannel, nullptr, status);
 }
 
-class FTPDivertCompleteEvent : public ChannelEvent
+class FTPDivertCompleteEvent : public MainThreadChannelEvent
 {
 public:
   explicit FTPDivertCompleteEvent(FTPChannelParent* aParent)
@@ -456,6 +457,13 @@ FTPChannelParent::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
   nsCOMPtr<nsIChannel> chan = do_QueryInterface(aRequest);
   MOZ_ASSERT(chan);
   NS_ENSURE_TRUE(chan, NS_ERROR_UNEXPECTED);
+
+  // Send down any permissions which are relevant to this URL if we are
+  // performing a document load.
+  PContentParent* pcp = Manager()->Manager();
+  DebugOnly<nsresult> rv =
+    static_cast<ContentParent*>(pcp)->TransmitPermissionsFor(chan);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   int64_t contentLength;
   chan->GetContentLength(&contentLength);

@@ -19,6 +19,7 @@
 #include "mozilla/RestyleManagerInlines.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/StyleAnimationValue.h"
+#include "mozilla/TypeTraits.h" // For Forward<>
 #include "nsComputedDOMStyle.h" // nsComputedDOMStyle::GetPresShellForContent
 #include "nsContentUtils.h"
 #include "nsCSSPseudoElements.h"
@@ -332,12 +333,8 @@ EffectCompositor::PostRestyleForAnimation(dom::Element* aElement,
       // second traversal so we don't need to post any restyle requests to the
       // PresShell.
       return;
-    } else if (!mPresContext->RestyleManager()->IsInStyleRefresh()) {
-      // FIXME: stylo only supports Self and Subtree hints now, so we override
-      // it for stylo if we are not in process of restyling.
-      hint = eRestyle_Self | eRestyle_Subtree;
     } else {
-      MOZ_ASSERT_UNREACHABLE("Should not request restyle");
+      MOZ_ASSERT(!mPresContext->RestyleManager()->IsInStyleRefresh());
     }
   }
   mPresContext->PresShell()->RestyleForAnimation(element, hint);
@@ -364,9 +361,10 @@ EffectCompositor::PostRestyleForThrottledAnimations()
   }
 }
 
+template<typename StyleType>
 void
-EffectCompositor::UpdateEffectProperties(nsStyleContext* aStyleContext,
-                                         dom::Element* aElement,
+EffectCompositor::UpdateEffectProperties(StyleType&& aStyleType,
+                                         Element* aElement,
                                          CSSPseudoElementType aPseudoType)
 {
   EffectSet* effectSet = EffectSet::GetEffectSet(aElement, aPseudoType);
@@ -374,12 +372,13 @@ EffectCompositor::UpdateEffectProperties(nsStyleContext* aStyleContext,
     return;
   }
 
-  // Style context change might cause CSS cascade level,
-  // e.g removing !important, so we should update the cascading result.
+  // Style context (Gecko) or computed values (Stylo) change might cause CSS
+  // cascade level, e.g removing !important, so we should update the cascading
+  // result.
   effectSet->MarkCascadeNeedsUpdate();
 
   for (KeyframeEffectReadOnly* effect : *effectSet) {
-    effect->UpdateProperties(aStyleContext);
+    effect->UpdateProperties(Forward<StyleType>(aStyleType));
   }
 }
 
@@ -452,7 +451,7 @@ EffectCompositor::GetAnimationRule(dom::Element* aElement,
     return nullptr;
   }
 
-  return effectSet->AnimationRule(aCascadeLevel).mGecko;
+  return effectSet->AnimationRule(aCascadeLevel);
 }
 
 namespace {
@@ -477,19 +476,20 @@ namespace {
   };
 }
 
-ServoAnimationRule*
-EffectCompositor::GetServoAnimationRule(const dom::Element* aElement,
-                                        CSSPseudoElementType aPseudoType,
-                                        CascadeLevel aCascadeLevel)
+bool
+EffectCompositor::GetServoAnimationRule(
+  const dom::Element* aElement,
+  CSSPseudoElementType aPseudoType,
+  CascadeLevel aCascadeLevel,
+  RawServoAnimationValueMapBorrowed aAnimationValues)
 {
-  if (!mPresContext || !mPresContext->IsDynamic()) {
-    // For print or print preview, ignore animations.
-    return nullptr;
-  }
+  MOZ_ASSERT(aAnimationValues);
+  MOZ_ASSERT(mPresContext && mPresContext->IsDynamic(),
+             "Should not be in print preview");
 
   EffectSet* effectSet = EffectSet::GetEffectSet(aElement, aPseudoType);
   if (!effectSet) {
-    return nullptr;
+    return false;
   }
 
   // Get a list of effects sorted by composite order.
@@ -499,9 +499,6 @@ EffectCompositor::GetServoAnimationRule(const dom::Element* aElement,
   }
   sortedEffectList.Sort(EffectCompositeOrderComparator());
 
-  AnimationRule& animRule = effectSet->AnimationRule(aCascadeLevel);
-  animRule.mServo = nullptr;
-
   // If multiple animations affect the same property, animations with higher
   // composite order (priority) override or add or animations with lower
   // priority.
@@ -510,13 +507,13 @@ EffectCompositor::GetServoAnimationRule(const dom::Element* aElement,
       ? effectSet->PropertiesForAnimationsLevel().Inverse()
       : effectSet->PropertiesForAnimationsLevel();
   for (KeyframeEffectReadOnly* effect : sortedEffectList) {
-    effect->GetAnimation()->ComposeStyle(animRule, propertiesToSkip);
+    effect->GetAnimation()->ComposeStyle(*aAnimationValues, propertiesToSkip);
   }
 
   MOZ_ASSERT(effectSet == EffectSet::GetEffectSet(aElement, aPseudoType),
              "EffectSet should not change while composing style");
 
-  return animRule.mServo;
+  return true;
 }
 
 /* static */ dom::Element*
@@ -773,8 +770,8 @@ EffectCompositor::ComposeAnimationRule(dom::Element* aElement,
   }
   sortedEffectList.Sort(EffectCompositeOrderComparator());
 
-  AnimationRule& animRule = effects->AnimationRule(aCascadeLevel);
-  animRule.mGecko = nullptr;
+  RefPtr<AnimValuesStyleRule>& animRule = effects->AnimationRule(aCascadeLevel);
+  animRule = nullptr;
 
   // If multiple animations affect the same property, animations with higher
   // composite order (priority) override or add or animations with lower
@@ -985,8 +982,8 @@ EffectCompositor::PreTraverse()
       // We can't call PostRestyleEvent directly here since we are still in the
       // middle of the servo traversal.
       mPresContext->RestyleManager()->AsServo()->
-        PostRestyleEventForAnimations(target.mElement,
-                                      eRestyle_Self | eRestyle_Subtree);
+        PostRestyleEventForAnimations(target.mElement, eRestyle_CSSAnimations);
+
       foundElementsNeedingRestyle = true;
 
       EffectSet* effects =
@@ -1037,7 +1034,7 @@ EffectCompositor::PreTraverse(dom::Element* aElement, nsIAtom* aPseudoTagOrNull)
     }
 
     mPresContext->RestyleManager()->AsServo()->
-      PostRestyleEventForAnimations(aElement, eRestyle_Self);
+      PostRestyleEventForAnimations(aElement, eRestyle_CSSAnimations);
 
     EffectSet* effects = EffectSet::GetEffectSet(aElement, pseudoType);
     if (effects) {
@@ -1161,5 +1158,19 @@ EffectCompositor::AnimationStyleRuleProcessor::SizeOfIncludingThis(
 {
   return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
+
+template
+void
+EffectCompositor::UpdateEffectProperties<RefPtr<nsStyleContext>&>(
+  RefPtr<nsStyleContext>& aStyleContext,
+  Element* aElement,
+  CSSPseudoElementType aPseudoType);
+
+template
+void
+EffectCompositor::UpdateEffectProperties<const ServoComputedValuesWithParent&>(
+  const ServoComputedValuesWithParent& aServoValues,
+  Element* aElement,
+  CSSPseudoElementType aPseudoType);
 
 } // namespace mozilla

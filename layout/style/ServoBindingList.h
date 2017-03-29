@@ -68,7 +68,7 @@ SERVO_BINDING_FUNC(Servo_StyleSet_NoteStyleSheetsChanged, void,
 SERVO_BINDING_FUNC(Servo_StyleSet_FillKeyframesForName, bool,
                    RawServoStyleSetBorrowed set,
                    const nsACString* property,
-                   const nsTimingFunction* timing_function,
+                   nsTimingFunctionBorrowed timing_function,
                    ServoComputedValuesBorrowed computed_values,
                    RawGeckoKeyframeListBorrowedMut keyframe_list)
 
@@ -118,12 +118,21 @@ SERVO_BINDING_FUNC(Servo_ParseProperty,
                    const nsACString* property, const nsACString* value,
                    const nsACString* base,
                    const GeckoParserExtraData* data)
+SERVO_BINDING_FUNC(Servo_ParseEasing, bool,
+                   const nsAString* easing,
+                   const nsACString* base,
+                   const GeckoParserExtraData* data,
+                   nsTimingFunctionBorrowedMut output)
 SERVO_BINDING_FUNC(Servo_GetComputedKeyframeValues, void,
                    RawGeckoKeyframeListBorrowed keyframes,
                    ServoComputedValuesBorrowed style,
                    ServoComputedValuesBorrowedOrNull parent_style,
                    RawServoStyleSetBorrowed set,
                    RawGeckoComputedKeyframeValuesListBorrowedMut result)
+SERVO_BINDING_FUNC(Servo_AnimationValueMap_Push, void,
+                   RawServoAnimationValueMapBorrowed,
+                   nsCSSPropertyID property,
+                   RawServoAnimationValueBorrowed value)
 
 // AnimationValues handling
 SERVO_BINDING_FUNC(Servo_AnimationValues_Interpolate,
@@ -131,9 +140,6 @@ SERVO_BINDING_FUNC(Servo_AnimationValues_Interpolate,
                    RawServoAnimationValueBorrowed from,
                    RawServoAnimationValueBorrowed to,
                    double progress)
-SERVO_BINDING_FUNC(Servo_AnimationValues_Uncompute,
-                   RawServoDeclarationBlockStrong,
-                   RawServoAnimationValueBorrowedListBorrowed value)
 SERVO_BINDING_FUNC(Servo_AnimationValue_Serialize, void,
                    RawServoAnimationValueBorrowed value,
                    nsCSSPropertyID property,

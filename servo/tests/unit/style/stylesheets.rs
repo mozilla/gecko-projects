@@ -17,9 +17,10 @@ use style::error_reporting::ParseErrorReporter;
 use style::keyframes::{Keyframe, KeyframeSelector, KeyframePercentage};
 use style::parser::ParserContextExtraData;
 use style::properties::Importance;
-use style::properties::{CSSWideKeyword, PropertyDeclaration, PropertyDeclarationBlock};
-use style::properties::{DeclaredValue, longhands};
+use style::properties::{CSSWideKeyword, DeclaredValueOwned, PropertyDeclaration, PropertyDeclarationBlock};
+use style::properties::longhands;
 use style::properties::longhands::animation_play_state;
+use style::shared_lock::SharedRwLock;
 use style::stylesheets::{Origin, Namespaces};
 use style::stylesheets::{Stylesheet, NamespaceRule, CssRule, CssRules, StyleRule, KeyframesRule};
 use style::values::specified::{LengthOrPercentageOrAuto, Percentage};
@@ -62,24 +63,25 @@ fn test_parse_stylesheet() {
         }";
     let url = ServoUrl::parse("about::test").unwrap();
     let stylesheet = Stylesheet::from_str(css, url.clone(), Origin::UserAgent, Default::default(),
-                                          None,
+                                          SharedRwLock::new(), None,
                                           &CSSErrorReporterTest,
                                           ParserContextExtraData::default());
     let mut namespaces = Namespaces::default();
     namespaces.default = Some(ns!(html));
     let expected = Stylesheet {
         origin: Origin::UserAgent,
-        media: Default::default(),
+        media: Arc::new(stylesheet.shared_lock.wrap(Default::default())),
+        shared_lock: stylesheet.shared_lock.clone(),
         namespaces: RwLock::new(namespaces),
         base_url: url,
         dirty_on_viewport_size_change: AtomicBool::new(false),
         disabled: AtomicBool::new(false),
         rules: CssRules::new(vec![
-            CssRule::Namespace(Arc::new(RwLock::new(NamespaceRule {
+            CssRule::Namespace(Arc::new(stylesheet.shared_lock.wrap(NamespaceRule {
                 prefix: None,
                 url: NsAtom::from("http://www.w3.org/1999/xhtml")
             }))),
-            CssRule::Style(Arc::new(RwLock::new(StyleRule {
+            CssRule::Style(Arc::new(stylesheet.shared_lock.wrap(StyleRule {
                 selectors: SelectorList(vec![
                     Selector {
                         complex_selector: Arc::new(ComplexSelector {
@@ -107,16 +109,15 @@ fn test_parse_stylesheet() {
                         specificity: (0 << 20) + (1 << 10) + (1 << 0),
                     },
                 ]),
-                block: Arc::new(RwLock::new(block_from(vec![
-                    (PropertyDeclaration::Display(DeclaredValue::Value(
-                        longhands::display::SpecifiedValue::none)),
+                block: Arc::new(stylesheet.shared_lock.wrap(block_from(vec![
+                    (PropertyDeclaration::Display(longhands::display::SpecifiedValue::none),
                      Importance::Important),
                     (PropertyDeclaration::Custom(Atom::from("a"),
-                     DeclaredValue::CSSWideKeyword(CSSWideKeyword::Inherit)),
+                     DeclaredValueOwned::CSSWideKeyword(CSSWideKeyword::Inherit)),
                      Importance::Important),
                 ]))),
             }))),
-            CssRule::Style(Arc::new(RwLock::new(StyleRule {
+            CssRule::Style(Arc::new(stylesheet.shared_lock.wrap(StyleRule {
                 selectors: SelectorList(vec![
                     Selector {
                         complex_selector: Arc::new(ComplexSelector {
@@ -153,13 +154,12 @@ fn test_parse_stylesheet() {
                         specificity: (0 << 20) + (0 << 10) + (1 << 0),
                     },
                 ]),
-                block: Arc::new(RwLock::new(block_from(vec![
-                    (PropertyDeclaration::Display(DeclaredValue::Value(
-                        longhands::display::SpecifiedValue::block)),
+                block: Arc::new(stylesheet.shared_lock.wrap(block_from(vec![
+                    (PropertyDeclaration::Display(longhands::display::SpecifiedValue::block),
                      Importance::Normal),
                 ]))),
             }))),
-            CssRule::Style(Arc::new(RwLock::new(StyleRule {
+            CssRule::Style(Arc::new(stylesheet.shared_lock.wrap(StyleRule {
                 selectors: SelectorList(vec![
                     Selector {
                         complex_selector: Arc::new(ComplexSelector {
@@ -185,85 +185,85 @@ fn test_parse_stylesheet() {
                         specificity: (1 << 20) + (1 << 10) + (0 << 0),
                     },
                 ]),
-                block: Arc::new(RwLock::new(block_from(vec![
-                    (PropertyDeclaration::BackgroundColor(DeclaredValue::Value(
+                block: Arc::new(stylesheet.shared_lock.wrap(block_from(vec![
+                    (PropertyDeclaration::BackgroundColor(
                         longhands::background_color::SpecifiedValue {
                             authored: Some("blue".to_owned().into_boxed_str()),
                             parsed: cssparser::Color::RGBA(cssparser::RGBA::new(0, 0, 255, 255)),
                         }
-                     )),
+                     ),
                      Importance::Normal),
-                    (PropertyDeclaration::BackgroundPositionX(DeclaredValue::Value(
+                    (PropertyDeclaration::BackgroundPositionX(
                         longhands::background_position_x::SpecifiedValue(
                         vec![longhands::background_position_x::single_value
-                                                   ::get_initial_position_value()]))),
+                                                   ::get_initial_position_value()])),
                     Importance::Normal),
-                    (PropertyDeclaration::BackgroundPositionY(DeclaredValue::Value(
+                    (PropertyDeclaration::BackgroundPositionY(
                         longhands::background_position_y::SpecifiedValue(
                         vec![longhands::background_position_y::single_value
-                                                   ::get_initial_position_value()]))),
+                                                   ::get_initial_position_value()])),
                      Importance::Normal),
-                    (PropertyDeclaration::BackgroundRepeat(DeclaredValue::Value(
+                    (PropertyDeclaration::BackgroundRepeat(
                         longhands::background_repeat::SpecifiedValue(
                         vec![longhands::background_repeat::single_value
-                                                   ::get_initial_specified_value()]))),
+                                                   ::get_initial_specified_value()])),
                      Importance::Normal),
-                    (PropertyDeclaration::BackgroundAttachment(DeclaredValue::Value(
+                    (PropertyDeclaration::BackgroundAttachment(
                         longhands::background_attachment::SpecifiedValue(
                         vec![longhands::background_attachment::single_value
-                                                   ::get_initial_specified_value()]))),
+                                                   ::get_initial_specified_value()])),
                      Importance::Normal),
-                    (PropertyDeclaration::BackgroundImage(DeclaredValue::Value(
+                    (PropertyDeclaration::BackgroundImage(
                         longhands::background_image::SpecifiedValue(
                         vec![longhands::background_image::single_value
-                                                   ::get_initial_specified_value()]))),
+                                                   ::get_initial_specified_value()])),
                      Importance::Normal),
-                    (PropertyDeclaration::BackgroundSize(DeclaredValue::Value(
+                    (PropertyDeclaration::BackgroundSize(
                         longhands::background_size::SpecifiedValue(
                         vec![longhands::background_size::single_value
-                                                   ::get_initial_specified_value()]))),
+                                                   ::get_initial_specified_value()])),
                      Importance::Normal),
-                    (PropertyDeclaration::BackgroundOrigin(DeclaredValue::Value(
+                    (PropertyDeclaration::BackgroundOrigin(
                         longhands::background_origin::SpecifiedValue(
                         vec![longhands::background_origin::single_value
-                                                   ::get_initial_specified_value()]))),
+                                                   ::get_initial_specified_value()])),
                      Importance::Normal),
-                    (PropertyDeclaration::BackgroundClip(DeclaredValue::Value(
+                    (PropertyDeclaration::BackgroundClip(
                         longhands::background_clip::SpecifiedValue(
                         vec![longhands::background_clip::single_value
-                                                   ::get_initial_specified_value()]))),
+                                                   ::get_initial_specified_value()])),
                      Importance::Normal),
                 ]))),
             }))),
-            CssRule::Keyframes(Arc::new(RwLock::new(KeyframesRule {
+            CssRule::Keyframes(Arc::new(stylesheet.shared_lock.wrap(KeyframesRule {
                 name: "foo".into(),
                 keyframes: vec![
-                    Arc::new(RwLock::new(Keyframe {
+                    Arc::new(stylesheet.shared_lock.wrap(Keyframe {
                         selector: KeyframeSelector::new_for_unit_testing(
                                       vec![KeyframePercentage::new(0.)]),
-                        block: Arc::new(RwLock::new(block_from(vec![
-                            (PropertyDeclaration::Width(DeclaredValue::Value(
-                                LengthOrPercentageOrAuto::Percentage(Percentage(0.)))),
+                        block: Arc::new(stylesheet.shared_lock.wrap(block_from(vec![
+                            (PropertyDeclaration::Width(
+                                LengthOrPercentageOrAuto::Percentage(Percentage(0.))),
                              Importance::Normal),
                         ])))
                     })),
-                    Arc::new(RwLock::new(Keyframe {
+                    Arc::new(stylesheet.shared_lock.wrap(Keyframe {
                         selector: KeyframeSelector::new_for_unit_testing(
                                       vec![KeyframePercentage::new(1.)]),
-                        block: Arc::new(RwLock::new(block_from(vec![
-                            (PropertyDeclaration::Width(DeclaredValue::Value(
-                                LengthOrPercentageOrAuto::Percentage(Percentage(1.)))),
+                        block: Arc::new(stylesheet.shared_lock.wrap(block_from(vec![
+                            (PropertyDeclaration::Width(
+                                LengthOrPercentageOrAuto::Percentage(Percentage(1.))),
                              Importance::Normal),
-                            (PropertyDeclaration::AnimationPlayState(DeclaredValue::Value(
+                            (PropertyDeclaration::AnimationPlayState(
                                 animation_play_state::SpecifiedValue(
-                                    vec![animation_play_state::SingleSpecifiedValue::running]))),
+                                    vec![animation_play_state::SingleSpecifiedValue::running])),
                              Importance::Normal),
                         ]))),
                     })),
                 ]
             })))
 
-        ]),
+        ], &stylesheet.shared_lock),
     };
 
     assert_eq!(format!("{:#?}", stylesheet), format!("{:#?}", expected));
@@ -326,7 +326,7 @@ fn test_report_error_stylesheet() {
     let errors = error_reporter.errors.clone();
 
     Stylesheet::from_str(css, url.clone(), Origin::UserAgent, Default::default(),
-                         None,
+                         SharedRwLock::new(), None,
                          &error_reporter,
                          ParserContextExtraData::default());
 

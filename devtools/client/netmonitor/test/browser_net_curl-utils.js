@@ -7,15 +7,16 @@
  * Tests Curl Utils functionality.
  */
 
-const { CurlUtils } = require("devtools/client/shared/curl");
+const { Curl, CurlUtils } = require("devtools/client/shared/curl");
 
 add_task(function* () {
   let { tab, monitor } = yield initNetMonitor(CURL_UTILS_URL);
   info("Starting test... ");
 
-  let { gStore, windowRequire, gNetwork } = monitor.panelWin;
+  let { gStore, windowRequire } = monitor.panelWin;
   let Actions = windowRequire("devtools/client/netmonitor/actions/index");
   let { getSortedRequests } = windowRequire("devtools/client/netmonitor/selectors/index");
+  let { getLongString } = windowRequire("devtools/client/netmonitor/utils/client");
 
   gStore.dispatch(Actions.batchEnable(false));
 
@@ -32,20 +33,21 @@ add_task(function* () {
     multipartForm: getSortedRequests(gStore.getState()).get(3),
   };
 
-  let data = yield createCurlData(requests.get, gNetwork);
+  let data = yield createCurlData(requests.get, getLongString);
   testFindHeader(data);
 
-  data = yield createCurlData(requests.post, gNetwork);
+  data = yield createCurlData(requests.post, getLongString);
   testIsUrlEncodedRequest(data);
   testWritePostDataTextParams(data);
+  testDataArgumentOnGeneratedCommand(data);
 
-  data = yield createCurlData(requests.multipart, gNetwork);
+  data = yield createCurlData(requests.multipart, getLongString);
   testIsMultipartRequest(data);
   testGetMultipartBoundary(data);
   testMultiPartHeaders(data);
   testRemoveBinaryDataFromMultipartText(data);
 
-  data = yield createCurlData(requests.multipartForm, gNetwork);
+  data = yield createCurlData(requests.multipartForm, getLongString);
   testMultiPartHeaders(data);
 
   testGetHeadersFromMultipartText({
@@ -97,6 +99,12 @@ function testWritePostDataTextParams(data) {
   let params = CurlUtils.writePostDataTextParams(data.postDataText);
   is(params, "param1=value1&param2=value2&param3=value3",
     "Should return a serialized representation of the request parameters");
+}
+
+function testDataArgumentOnGeneratedCommand(data) {
+  let curlCommand = Curl.generateCommand(data);
+  ok(curlCommand.includes("--data"),
+    "Should return a curl command with --data");
 }
 
 function testGetMultipartBoundary(data) {
@@ -214,7 +222,7 @@ function testEscapeStringWin() {
     "Newlines should be escaped.");
 }
 
-function* createCurlData(selected, network, controller) {
+function* createCurlData(selected, getLongString) {
   let { url, method, httpVersion } = selected;
 
   // Create a sanitized object for the Curl command generator.
@@ -228,14 +236,14 @@ function* createCurlData(selected, network, controller) {
 
   // Fetch header values.
   for (let { name, value } of selected.requestHeaders.headers) {
-    let text = yield network.getString(value);
+    let text = yield getLongString(value);
     data.headers.push({ name: name, value: text });
   }
 
   // Fetch the request payload.
   if (selected.requestPostData) {
     let postData = selected.requestPostData.postData.text;
-    data.postDataText = yield network.getString(postData);
+    data.postDataText = yield getLongString(postData);
   }
 
   return data;

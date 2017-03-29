@@ -32,8 +32,8 @@
 #include <stdint.h>
 #include <math.h>
 #include "MainThreadUtils.h"
-#include "mozilla/StaticMutex.h"
 #include "ThreadResponsiveness.h"
+#include "mozilla/Logging.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/TimeStamp.h"
@@ -59,40 +59,37 @@ static inline pid_t gettid()
 {
   return (pid_t) syscall(SYS_thread_selfid);
 }
-#endif
-
-#if defined(GP_OS_windows)
+#elif defined(GP_OS_android)
+#include <unistd.h>
+#elif defined(GP_OS_windows)
 #include <windows.h>
+#include <process.h>
+#ifndef getpid
+#define getpid _getpid
 #endif
-
-bool profiler_verbose();
-
-#if defined(GP_OS_android)
-# include <android/log.h>
-# define LOG(text) \
-    do { if (profiler_verbose()) \
-           __android_log_write(ANDROID_LOG_ERROR, "Profiler", text); \
-    } while (0)
-# define LOGF(format, ...) \
-    do { if (profiler_verbose()) \
-           __android_log_print(ANDROID_LOG_ERROR, "Profiler", format, \
-                               __VA_ARGS__); \
-    } while (0)
-
-#else
-# define LOG(text) \
-    do { if (profiler_verbose()) fprintf(stderr, "Profiler: %s\n", text); \
-    } while (0)
-# define LOGF(format, ...) \
-    do { if (profiler_verbose()) fprintf(stderr, "Profiler: " format "\n", \
-                                         __VA_ARGS__); \
-    } while (0)
-
 #endif
 
 #if defined(GP_OS_android) && !defined(MOZ_WIDGET_GONK)
 #define PROFILE_JAVA
 #endif
+
+extern mozilla::LazyLogModule gProfilerLog;
+
+// These are for MOZ_LOG="prof:3" or higher. It's the default logging level for
+// the profiler, and should be used sparingly.
+#define LOG_TEST \
+  MOZ_LOG_TEST(gProfilerLog, mozilla::LogLevel::Info)
+#define LOG(arg, ...) \
+  MOZ_LOG(gProfilerLog, mozilla::LogLevel::Info, \
+          ("[%d] " arg, getpid(), ##__VA_ARGS__))
+
+// These are for MOZ_LOG="prof:4" or higher. It should be used for logging that
+// is somewhat more verbose than LOG.
+#define DEBUG_LOG_TEST \
+  MOZ_LOG_TEST(gProfilerLog, mozilla::LogLevel::Debug)
+#define DEBUG_LOG(arg, ...) \
+  MOZ_LOG(gProfilerLog, mozilla::LogLevel::Debug, \
+          ("[%d] " arg, getpid(), ##__VA_ARGS__))
 
 typedef uint8_t* Address;
 
@@ -113,24 +110,6 @@ public:
 
   static tid_t GetCurrentId();
 };
-
-// ----------------------------------------------------------------------------
-// HAVE_NATIVE_UNWIND
-//
-// Pseudo backtraces are available on all platforms.  Native
-// backtraces are available only on selected platforms.  Breakpad is
-// the only supported native unwinder.  HAVE_NATIVE_UNWIND is set at
-// build time to indicate whether native unwinding is possible on this
-// platform.
-
-#undef HAVE_NATIVE_UNWIND
-#if defined(MOZ_PROFILING) && \
-    (defined(GP_OS_windows) || \
-     defined(GP_OS_darwin) || \
-     defined(GP_OS_linux) || \
-     defined(GP_PLAT_arm_android))
-# define HAVE_NATIVE_UNWIND
-#endif
 
 // ----------------------------------------------------------------------------
 // ProfilerState auxiliaries
@@ -166,5 +145,10 @@ UniquePlatformData AllocPlatformData(int aThreadId);
 
 mozilla::UniquePtr<char[]>
 ToJSON(PSLockRef aLock, double aSinceTime);
+
+namespace mozilla {
+class JSONWriter;
+}
+void AppendSharedLibraries(mozilla::JSONWriter& aWriter);
 
 #endif /* ndef TOOLS_PLATFORM_H_ */

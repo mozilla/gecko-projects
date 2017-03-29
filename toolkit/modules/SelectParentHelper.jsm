@@ -55,13 +55,7 @@ this.SelectParentHelper = {
         selectBackgroundColor != uaSelectBackgroundColor &&
         selectBackgroundColor != "rgba(0, 0, 0, 0)" &&
         selectBackgroundColor != selectColor) {
-      let rgba = selectBackgroundColor.match(/rgba\((\d+), (\d+), (\d+),/);
-      if (rgba) {
-        let [, r, g, b] = rgba;
-        ruleBody = `background-color: rgb(${r}, ${g}, ${b});`;
-      } else {
-        ruleBody = `background-color: ${selectBackgroundColor};`;
-      }
+      ruleBody = `background-image: linear-gradient(${selectBackgroundColor}, ${selectBackgroundColor});`;
       usedSelectBackgroundColor = selectBackgroundColor;
     } else {
       usedSelectBackgroundColor = uaSelectBackgroundColor;
@@ -198,10 +192,13 @@ this.SelectParentHelper = {
       let selectedIndex = msg.data.selectedIndex;
       let uaBackgroundColor = msg.data.uaBackgroundColor;
       let uaColor = msg.data.uaColor;
+      let uaSelectBackgroundColor = msg.data.uaSelectBackgroundColor;
+      let uaSelectColor = msg.data.uaSelectColor;
       let selectBackgroundColor = msg.data.selectBackgroundColor;
       let selectColor = msg.data.selectColor;
       this.populate(currentMenulist, options, selectedIndex,
                     currentZoom, uaBackgroundColor, uaColor,
+                    uaSelectBackgroundColor, uaSelectColor,
                     selectBackgroundColor, selectColor);
     }
   },
@@ -333,6 +330,7 @@ function populateChildren(menulist, options, selectedIndex, zoom,
     searchbox.addEventListener("input", onSearchInput);
     searchbox.addEventListener("focus", onSearchFocus);
     searchbox.addEventListener("blur", onSearchBlur);
+    searchbox.addEventListener("command", onSearchInput);
 
     // Handle special keys for exiting search
     searchbox.addEventListener("keydown", function(event) {
