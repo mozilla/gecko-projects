@@ -36,6 +36,7 @@ job-template:
       by-build-platform:
          default: public
          android-api-15-l10n: internal
+         macosx64-nightly: internal
    index:
       type: l10n
       product:
