@@ -295,4 +295,3 @@ def target_tasks_nightly_macosx(full_task_graph, parameters):
         if platform in ('macosx64-nightly', ):
             return task.attributes.get('nightly', False)
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
-

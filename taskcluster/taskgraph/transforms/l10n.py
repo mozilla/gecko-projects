@@ -147,12 +147,6 @@ def _parse_locales_file(locales_file, platform=None):
             locales = {locale: 'default' for locale in all_locales}
     return locales
 
-def _remove_ja_jp_mac_locale(locales):
-    # ja-JP-mac is a mac-only locale, but there are no mac builds being repacked, so just omit it unconditionally
-    return {
-        locale: revision for locale, revision in locales.items() if locale != 'ja-JP-mac'
-    }
-
 
 def _remove_ja_jp_mac_locale(locales):
     # ja-JP-mac is a mac-only locale, but there are no mac builds being repacked,

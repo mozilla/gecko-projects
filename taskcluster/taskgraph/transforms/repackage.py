@@ -12,15 +12,8 @@ from taskgraph.util.schema import validate_schema, Schema
 # from taskgraph.util.scriptworker import get_signing_cert_scope
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
-from taskgraph.util.docker import (
-    docker_image,
-)
 
 transforms = TransformSequence()
-
-
-import logging
-logger = logging.getLogger(__name__)
 
 
 # Voluptuous uses marker objects as dictionary *keys*, but they are not
@@ -53,8 +46,8 @@ packaging_description_schema = Schema({
 
 
 # comment out adding routes until talking to mshal
-#@transforms.add
-#def add_repackage_routes(config, jobs):
+# @transforms.add
+# def add_repackage_routes(config, jobs):
 #    """Add routes corresponding to the routes of the build task
 #       this corresponds to, with .repackage inserted, for all gecko.v2 routes"""
 #
@@ -124,7 +117,7 @@ def make_task_description(config, jobs):
 
         dependencies = {dep_job.attributes.get('kind'): dep_job.label}
         input_string = 'https://queue.taskcluster.net/v1/task/<build-signing>/artifacts/' + \
-        'public/build/target.tar.gz'
+            'public/build/target.tar.gz'
         signed_input = {'task-reference': input_string}
         level = config.params['level']
 
@@ -144,7 +137,7 @@ def make_task_description(config, jobs):
              'docker-worker:relengapi-proxy:tooltool.download.public',
              'project:releng:signing:format:dmg'],
             'worker': {'implementation': 'docker-worker',
-                       'docker-image' : {"in-tree": "desktop-build"},
+                       'docker-image': {"in-tree": "desktop-build"},
                        'caches': [{
                                    'type': 'persistent',
                                    'name': 'tooltool-cache',
@@ -176,12 +169,10 @@ def make_task_description(config, jobs):
                                'USE_SCCACHE': '1',
                                'MOZHARNESS_SCRIPT': 'mozharness/scripts/repackage.py'
                                },
-                        'command': command,
-                        'chain-of-trust': True,
-                        'relengapi-proxy': True,
-                        'max-run-time': 3600
-            }
+                       'command': command,
+                       'chain-of-trust': True,
+                       'relengapi-proxy': True,
+                       'max-run-time': 3600
+               }
         }
-        # logging.info("task")
-        # logging.info(task)
         yield task
