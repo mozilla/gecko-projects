@@ -10,10 +10,11 @@ from __future__ import absolute_import, print_function, unicode_literals
 import functools
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.schema import Schema
 from taskgraph.util.scriptworker import get_push_apk_breakpoint_worker_type
 from taskgraph.util.push_apk import fill_labels_tranform, validate_jobs_schema_transform_partial, \
     validate_dependent_tasks_transform, delete_non_required_fields_transform, generate_dependencies
-from voluptuous import Schema, Required
+from voluptuous import Required
 
 
 transforms = TransformSequence()
@@ -24,14 +25,12 @@ push_apk_breakpoint_description_schema = Schema({
     Required('name'): basestring,
     Required('label'): basestring,
     Required('description'): basestring,
-    Required('attributes'): {
-        Required('build_platform'): basestring,
-        Required('nightly'): bool,
-    },
+    Required('attributes'): object,
     Required('worker-type'): None,
     Required('worker'): object,
     Required('treeherder'): object,
     Required('run-on-projects'): list,
+    Required('deadline-after'): basestring,
 })
 
 validate_jobs_schema_transform = functools.partial(
@@ -53,11 +52,7 @@ def make_task_description(config, jobs):
         worker_type = get_push_apk_breakpoint_worker_type(config)
         job['worker-type'] = worker_type
 
-        if 'human' in worker_type:
-            job['deadline-after'] = '4 days 23 hours 59 minutes'
-            job['worker']['payload'] = {}
-        else:
-            job['worker']['payload'] = {
+        job['worker']['payload'] = {} if 'human' in worker_type else {
                 'image': 'ubuntu:16.10',
                 'command': [
                     '/bin/bash',

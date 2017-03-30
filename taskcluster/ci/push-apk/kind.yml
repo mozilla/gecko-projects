@@ -36,3 +36,4 @@ jobs:
             - mozilla-beta
             - mozilla-release
             - date
+        deadline-after: 4 days 23 hours 59 minutes

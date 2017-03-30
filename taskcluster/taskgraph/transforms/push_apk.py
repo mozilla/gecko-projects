@@ -10,10 +10,11 @@ from __future__ import absolute_import, print_function, unicode_literals
 import functools
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.schema import Schema
 from taskgraph.util.scriptworker import get_push_apk_scope, get_push_apk_track
 from taskgraph.util.push_apk import fill_labels_tranform, validate_jobs_schema_transform_partial, \
     validate_dependent_tasks_transform, delete_non_required_fields_transform, generate_dependencies
-from voluptuous import Schema, Required
+from voluptuous import Required
 
 
 transforms = TransformSequence()
@@ -24,15 +25,13 @@ push_apk_description_schema = Schema({
     Required('name'): basestring,
     Required('label'): basestring,
     Required('description'): basestring,
-    Required('attributes'): {
-        Required('build_platform'): basestring,
-        Required('nightly'): bool,
-    },
+    Required('attributes'): object,
     Required('treeherder'): object,
     Required('run-on-projects'): list,
     Required('worker-type'): basestring,
     Required('worker'): object,
     Required('scopes'): None,
+    Required('deadline-after'): basestring,
 })
 
 validate_jobs_schema_transform = functools.partial(
