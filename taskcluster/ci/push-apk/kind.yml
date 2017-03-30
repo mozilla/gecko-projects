@@ -35,3 +35,4 @@ jobs:
             - mozilla-aurora
             - mozilla-beta
             - mozilla-release
+            - date

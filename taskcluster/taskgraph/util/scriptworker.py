@@ -151,6 +151,7 @@ BALROG_SERVER_SCOPES = {
 PUSH_APK_SCOPE_ALIAS_TO_PROJECT = [[
     'aurora', set([
         'mozilla-aurora',
+        'date',
     ])
 ], [
     'beta', set([
