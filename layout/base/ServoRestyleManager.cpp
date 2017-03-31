@@ -98,7 +98,10 @@ ServoRestyleManager::PostRebuildAllStyleDataEvent(nsChangeHint aExtraHint,
 /* static */ void
 ServoRestyleManager::ClearServoDataFromSubtree(Element* aElement)
 {
-  aElement->ClearServoData();
+  if (!aElement->HasServoData()) {
+    MOZ_ASSERT(!aElement->HasDirtyDescendantsForServo());
+    return;
+  }
 
   StyleChildrenIterator it(aElement);
   for (nsIContent* n = it.GetNextChild(); n; n = it.GetNextChild()) {
@@ -107,6 +110,7 @@ ServoRestyleManager::ClearServoDataFromSubtree(Element* aElement)
     }
   }
 
+  aElement->ClearServoData();
   aElement->UnsetHasDirtyDescendantsForServo();
 }
 
@@ -417,6 +421,8 @@ ServoRestyleManager::ProcessPendingRestyles()
     IncrementRestyleGeneration();
   }
 
+  FlushOverflowChangedTracker();
+
   mInStyleRefresh = false;
   styleSet->AssertTreeIsClean();
 
@@ -525,6 +531,11 @@ ServoRestyleManager::AttributeChanged(Element* aElement, int32_t aNameSpaceID,
 #endif
   if (aAttribute == nsGkAtoms::style) {
     PostRestyleEvent(aElement, eRestyle_StyleAttribute, nsChangeHint(0));
+  }
+  // <td> is affected by the cellpadding on its ancestor table,
+  // so we should restyle the whole subtree
+  if (aAttribute == nsGkAtoms::cellpadding && aElement->IsHTMLElement(nsGkAtoms::table)) {
+    PostRestyleEvent(aElement, eRestyle_Subtree, nsChangeHint(0));
   }
 }
 

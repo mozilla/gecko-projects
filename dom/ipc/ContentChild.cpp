@@ -199,6 +199,7 @@
 #include "nscore.h" // for NS_FREE_PERMANENT_DATA
 #include "VRManagerChild.h"
 #include "private/pprio.h"
+#include "nsString.h"
 
 #ifdef MOZ_WIDGET_GTK
 #include "nsAppRunner.h"
@@ -1524,6 +1525,18 @@ ContentChild::DeallocPBrowserChild(PBrowserChild* aIframe)
   return nsIContentChild::DeallocPBrowserChild(aIframe);
 }
 
+PMemoryStreamChild*
+ContentChild::AllocPMemoryStreamChild(const uint64_t& aSize)
+{
+  return nsIContentChild::AllocPMemoryStreamChild(aSize);
+}
+
+bool
+ContentChild::DeallocPMemoryStreamChild(PMemoryStreamChild* aActor)
+{
+  return nsIContentChild::DeallocPMemoryStreamChild(aActor);
+}
+
 PBlobChild*
 ContentChild::AllocPBlobChild(const BlobConstructorParams& aParams)
 {
@@ -1559,6 +1572,16 @@ ContentChild::SendPBlobConstructor(PBlobChild* aActor,
   }
 
   return PContentChild::SendPBlobConstructor(aActor, aParams);
+}
+
+PMemoryStreamChild*
+ContentChild::SendPMemoryStreamConstructor(const uint64_t& aSize)
+{
+  if (IsShuttingDown()) {
+    return nullptr;
+  }
+
+  return PContentChild::SendPMemoryStreamConstructor(aSize);
 }
 
 PPresentationChild*
@@ -2137,6 +2160,11 @@ ContentChild::RecvAsyncMessage(const nsString& aMsg,
                                const IPC::Principal& aPrincipal,
                                const ClonedMessageData& aData)
 {
+  NS_LossyConvertUTF16toASCII messageNameCStr(aMsg);
+  PROFILER_LABEL_DYNAMIC("ContentChild", "RecvAsyncMessage",
+                        js::ProfileEntry::Category::EVENTS,
+                        messageNameCStr.get());
+
   CrossProcessCpowHolder cpows(this, aCpows);
   RefPtr<nsFrameMessageManager> cpm =
     nsFrameMessageManager::GetChildProcessManager();

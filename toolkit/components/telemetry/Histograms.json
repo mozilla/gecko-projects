@@ -1483,6 +1483,7 @@
     "description": "Did the browser start after a successful shutdown"
   },
   "IMAGE_DECODE_LATENCY_US": {
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "low": 50,
@@ -1491,6 +1492,7 @@
     "description": "Time spent decoding an image chunk (us)"
   },
   "IMAGE_DECODE_TIME": {
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "low": 50,
@@ -1509,6 +1511,7 @@
     "description": "Time spent decoding an animated image (us)"
   },
   "IMAGE_DECODE_ON_DRAW_LATENCY": {
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "low": 50,
@@ -1527,6 +1530,7 @@
     "description": "Time from starting a decode of an animated image to it showing up on the screen (us)"
   },
   "IMAGE_DECODE_CHUNKS": {
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 500,
@@ -1534,6 +1538,7 @@
     "description": "Number of chunks per decode attempt"
   },
   "IMAGE_DECODE_COUNT": {
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 500,
@@ -1550,6 +1555,7 @@
     "description": "Decode count of animated images"
   },
   "IMAGE_DECODE_SPEED_JPEG": {
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "low": 500,
@@ -1558,6 +1564,7 @@
     "description": "JPEG image decode speed (Kbytes/sec)"
   },
   "IMAGE_DECODE_SPEED_GIF": {
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "low": 500,
@@ -1566,7 +1573,7 @@
     "description": "GIF image decode speed (Kbytes/sec)"
   },
   "IMAGE_LOAD_TRIGGER_LATENCY_MS": {
-    "alert_emails": ["ehsan@mozilla.com"],
+    "alert_emails": ["ehsan@mozilla.com", "gfx-telemetry-alerts@mozilla.com"],
     "expires_in_version": "60",
     "bug_numbers": [1347376],
     "kind": "exponential",
@@ -1576,6 +1583,7 @@
     "description": "Measures the number of milliseconds we spend inside imgLoader::LoadImage(). Note: only calls that take more than 500 microseconds and happen in the content process are included in this probe."
   },
   "IMAGE_DECODE_SPEED_PNG": {
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "low": 500,
@@ -2103,6 +2111,15 @@
       "kind": "enumerated",
       "n_values": 80,
       "description": "Network vs cache time load (OnStopRequest) difference (ms) not revalidated cache entries. Cache wins: 41-50 for 1-100ms, 51-59 for 101-1000ms, 60-68 for 1-10s, 69-73 for 11-60s and 74 for > 1m. Network wins: 39-30 for 1-100ms, 29-21 for 101-1000ms, 20-12 for 1-10s, 11-7 for 11-60s and 6 for > 1m."
+  },
+  "HTTP_ONSTART_SUSPEND_TOTAL_TIME": {
+    "expires_in_version": "58",
+      "alert_emails": ["necko@mozilla.com"],
+      "bug_numbers": [1347948],
+      "kind": "exponential",
+      "high": 60000,
+      "n_buckets": 100,
+      "description": "Time in milliseconds that http channel spent suspended between AsyncOpen and OnStartRequest."
   },
   "HTTP_AUTH_DIALOG_STATS": {
     "expires_in_version": "never",
@@ -4307,6 +4324,16 @@
     "bug_numbers": [1311910],
     "description": "Server HTTP status code from SafeBrowsing database updates. (0=1xx, 1=200, 2=2xx, 3=204, 4=3xx, 5=400, 6=4xx, 7=403, 8=404, 9=408, 10=413, 11=5xx, 12=502|504|511, 13=503, 14=505, 15=Other). Keyed by provider"
   },
+  "URLCLASSIFIER_UPDATE_SERVER_RESPONSE_TIME": {
+    "alert_emails": ["safebrowsing-telemetry@mozilla.org"],
+    "expires_in_version": "61",
+    "kind": "exponential",
+    "keyed": true,
+    "high": 100000,
+    "n_buckets": 30,
+    "bug_numbers": [1336903],
+    "description": "Server response time to update request (ms). Keyed by provider"
+  },
   "URLCLASSIFIER_COMPLETE_REMOTE_STATUS2": {
     "alert_emails": ["safebrowsing-telemetry@mozilla.org"],
     "expires_in_version": "never",
@@ -4332,6 +4359,17 @@
     "bug_numbers": [1172688, 1311926],
     "description": "This metric is recorded every time a gethash lookup is performed, `true` is recorded if the lookup times out. Keyed by provider"
   },
+  "URLCLASSIFIER_COMPLETE_SERVER_RESPONSE_TIME": {
+    "alert_emails": ["safebrowsing-telemetry@mozilla.org"],
+    "expires_in_version": "61",
+    "kind": "exponential",
+    "keyed": true,
+    "high": 5000,
+    "n_buckets": 15,
+    "bug_numbers": [1336903],
+    "description": "Server response time to getHash request (ms). Keyed by provider"
+  },
+
   "URLCLASSIFIER_UPDATE_ERROR": {
     "alert_emails": ["safebrowsing-telemetry@mozilla.org"],
     "expires_in_version": "59",
@@ -5611,9 +5649,18 @@
   "FX_PREFERENCES_CATEGORY_OPENED": {
     "bug_numbers": [1324167],
     "alert_emails": ["jaws@mozilla.com"],
-    "expires_in_version": "56",
+    "expires_in_version": "59",
     "kind": "categorical",
     "labels": ["unknown", "general", "search", "content", "applications", "privacy", "security", "sync", "advancedGeneral", "advancedDataChoices", "advancedNetwork", "advancedUpdates", "advancedCerts"],
+    "releaseChannelCollection": "opt-out",
+    "description": "Count how often each preference category is opened."
+  },
+  "FX_PREFERENCES_CATEGORY_OPENED_V2": {
+    "bug_numbers": [1335907],
+    "alert_emails": ["jaws@mozilla.com"],
+    "expires_in_version": "59",
+    "kind": "categorical",
+    "labels": ["unknown", "searchresults", "general", "applications", "privacy", "sync", "advanced"],
     "releaseChannelCollection": "opt-out",
     "description": "Count how often each preference category is opened."
   },
@@ -11266,5 +11313,16 @@
     "n_buckets": 100,
     "bug_numbers": [1341531],
     "description": "Time (ms) for the APZ handled wheel event to dispatch, but before handlers executing."
+  },
+  "IPC_SYNC_MESSAGE_MANAGER_LATENCY_MS": {
+    "alert_emails": ["michael@thelayzells.com"],
+    "bug_numbers": [1348113],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "low": 32,
+    "high": 750,
+    "n_buckets": 40,
+    "keyed": true,
+    "description": "Measures the number of milliseconds we spend waiting for sync message manager IPC messages to finish sending, keyed by message name. Note: only messages that wait for more than 500 microseconds are included in this probe."
   }
 }

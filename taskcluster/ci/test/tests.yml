@@ -1051,6 +1051,7 @@ reftest-stylo:
     description: "Reftest run for Stylo"
     suite: reftest/reftest-stylo
     treeherder-symbol: tc-R(Rs)
+    docker-image: {"in-tree": "desktop1604-test"}
     chunks: 16
     run-on-projects:
         by-test-platform:
@@ -1306,6 +1307,8 @@ awsy:
         script: awsy_script.py
         config:
             by-test-platform:
+                windows.*/opt:
+                    - awsy/taskcluster_windows_config.py
                 default:
                     - awsy/linux_config.py
 

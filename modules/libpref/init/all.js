@@ -825,6 +825,9 @@ pref("gfx.webrender.enabled", true);
 #else
 pref("gfx.webrender.enabled", false);
 #endif
+#ifdef XP_WIN
+pref("gfx.webrender.force-angle", true);
+#endif
 
 pref("accessibility.browsewithcaret", false);
 pref("accessibility.warn_on_browsewithcaret", true);
@@ -1469,7 +1472,7 @@ pref("network.http.max-persistent-connections-per-server", 6);
 
 // Number of connections that we can open beyond the standard parallelism limit defined
 // by max-persistent-connections-per-server/-proxy to handle urgent-start marked requests
-pref("network.http.max-urgent-start-excessive-connections-per-host", 10);
+pref("network.http.max-urgent-start-excessive-connections-per-host", 3);
 
 // If connecting via a proxy, then a
 // new connection will only be attempted if the number of active persistent
@@ -2832,6 +2835,8 @@ pref("plugins.click_to_play", false);
 #ifdef NIGHTLY_BUILD
 // This only supports one hidden ctp plugin, edit nsPluginArray.cpp if adding a second
 pref("plugins.navigator.hidden_ctp_plugin", "Shockwave Flash");
+#else
+pref("plugins.navigator.hidden_ctp_plugin", "");
 #endif
 // The default value for nsIPluginTag.enabledState (STATE_ENABLED = 2)
 pref("plugin.default.state", 2);
@@ -5065,9 +5070,8 @@ pref("dom.vr.osvr.enabled", false);
 pref("dom.vr.openvr.enabled", false);
 // Pose prediction reduces latency effects by returning future predicted HMD
 // poses to callers of the WebVR API.  This currently only has an effect for
-// Oculus Rift on SDK 0.8 or greater.  It is disabled by default for now due to
-// frame uniformity issues with e10s.
-pref("dom.vr.poseprediction.enabled", false);
+// Oculus Rift on SDK 0.8 or greater.
+pref("dom.vr.poseprediction.enabled", true);
 // Starting VR presentation is only allowed within a user gesture or event such
 // as VRDisplayActivate triggered by the system.  dom.vr.require-gesture allows
 // this requirement to be disabled for special cases such as during automated
@@ -5612,7 +5616,11 @@ pref("dom.webkitBlink.dirPicker.enabled", true);
 pref("dom.webkitBlink.filesystem.enabled", true);
 #endif
 
+#ifdef RELEASE_OR_BETA
+pref("media.block-autoplay-until-in-foreground", false);
+#else
 pref("media.block-autoplay-until-in-foreground", true);
+#endif
 
 #ifdef MOZ_STYLO
 // Is the Servo-backed style system enabled?

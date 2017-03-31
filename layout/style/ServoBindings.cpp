@@ -46,6 +46,7 @@
 #include "mozilla/DeclarationBlockInlines.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ElementInlines.h"
+#include "mozilla/dom/HTMLTableCellElement.h"
 #include "mozilla/LookAndFeel.h"
 
 using namespace mozilla;
@@ -205,27 +206,9 @@ Gecko_ElementState(RawGeckoElementBorrowed aElement)
 }
 
 bool
-Gecko_IsLink(RawGeckoElementBorrowed aElement)
-{
-  return nsCSSRuleProcessor::IsLink(aElement);
-}
-
-bool
 Gecko_IsTextNode(RawGeckoNodeBorrowed aNode)
 {
   return aNode->NodeInfo()->NodeType() == nsIDOMNode::TEXT_NODE;
-}
-
-bool
-Gecko_IsVisitedLink(RawGeckoElementBorrowed aElement)
-{
-  return aElement->StyleState().HasState(NS_EVENT_STATE_VISITED);
-}
-
-bool
-Gecko_IsUnvisitedLink(RawGeckoElementBorrowed aElement)
-{
-  return aElement->StyleState().HasState(NS_EVENT_STATE_UNVISITED);
 }
 
 bool
@@ -287,6 +270,7 @@ Gecko_SetOwnerDocumentNeedsStyleFlush(RawGeckoElementBorrowed aElement)
 
   if (nsIPresShell* shell = aElement->OwnerDoc()->GetShell()) {
     shell->SetNeedStyleFlush();
+    shell->ObserveStyleFlushes();
   }
 }
 
@@ -397,6 +381,23 @@ Gecko_GetHTMLPresentationAttrDeclarationBlock(RawGeckoElementBorrowed aElement)
 
   const RefPtr<RawServoDeclarationBlock>& servo = attrs->GetServoStyle();
   return reinterpret_cast<const RawServoDeclarationBlockStrong*>(&servo);
+}
+
+RawServoDeclarationBlockStrongBorrowedOrNull
+Gecko_GetExtraContentStyleDeclarations(RawGeckoElementBorrowed aElement)
+{
+  static_assert(sizeof(RefPtr<RawServoDeclarationBlock>) ==
+                sizeof(RawServoDeclarationBlockStrong),
+                "RefPtr should just be a pointer");
+  if (!aElement->IsAnyOfHTMLElements(nsGkAtoms::td, nsGkAtoms::th)) {
+    return nullptr;
+  }
+  const HTMLTableCellElement* cell = static_cast<const HTMLTableCellElement*>(aElement);
+  if (nsMappedAttributes* attrs = cell->GetMappedAttributesInheritedFromTable()) {
+    const RefPtr<RawServoDeclarationBlock>& servo = attrs->GetServoStyle();
+    return reinterpret_cast<const RawServoDeclarationBlockStrong*>(&servo);
+  }
+  return nullptr;
 }
 
 bool
@@ -834,12 +835,14 @@ Gecko_FontFamilyList_Clear(FontFamilyList* aList) {
 }
 
 void
-Gecko_FontFamilyList_AppendNamed(FontFamilyList* aList, nsIAtom* aName)
+Gecko_FontFamilyList_AppendNamed(FontFamilyList* aList, nsIAtom* aName, bool aQuoted)
 {
-  // Servo doesn't record whether the name was quoted or unquoted, so just
-  // assume unquoted for now.
   FontFamilyName family;
   aName->ToString(family.mName);
+  if (aQuoted) {
+    family.mType = eFamily_named_quoted;
+  }
+
   aList->Append(family);
 }
 
@@ -961,8 +964,7 @@ void
 Gecko_InitializeImageCropRect(nsStyleImage* aImage)
 {
   MOZ_ASSERT(aImage);
-  nsStyleSides cropRect;
-  aImage->SetCropRect(MakeUnique<nsStyleSides>(cropRect));
+  aImage->SetCropRect(MakeUnique<nsStyleSides>());
 }
 
 void
@@ -997,7 +999,7 @@ void
 Gecko_SetContentDataArray(nsStyleContentData* aContent,
                           nsStyleContentType aType, uint32_t aLen)
 {
-  nsCSSValue::ThreadSafeArray* arr = nsCSSValue::ThreadSafeArray::Create(aLen);
+  nsCSSValue::Array* arr = nsCSSValue::Array::Create(aLen);
   aContent->SetCounters(aType, arr);
 }
 
@@ -1380,6 +1382,12 @@ Gecko_CSSValue_GetAbsoluteLength(nsCSSValueBorrowed aCSSValue)
 }
 
 void
+Gecko_CSSValue_SetNormal(nsCSSValueBorrowedMut aCSSValue)
+{
+  aCSSValue->SetNormalValue();
+}
+
+void
 Gecko_CSSValue_SetNumber(nsCSSValueBorrowedMut aCSSValue, float aNumber)
 {
   aCSSValue->SetFloatValue(aNumber, eCSSUnit_Number);
@@ -1451,25 +1459,23 @@ Gecko_CSSValue_SetFunction(nsCSSValueBorrowedMut aCSSValue, int32_t aLen)
 }
 
 void
-Gecko_CSSValue_SetString(nsCSSValueBorrowedMut aCSSValue, const uint8_t* aString, uint32_t aLength)
+Gecko_CSSValue_SetString(nsCSSValueBorrowedMut aCSSValue,
+                         const uint8_t* aString, uint32_t aLength,
+                         nsCSSUnit aUnit)
 {
   MOZ_ASSERT(aCSSValue->GetUnit() == eCSSUnit_Null);
   nsString string;
   nsDependentCSubstring slice(reinterpret_cast<const char*>(aString),
                                   aLength);
   AppendUTF8toUTF16(slice, string);
-  aCSSValue->SetStringValue(string, eCSSUnit_String);
+  aCSSValue->SetStringValue(string, aUnit);
 }
 
 void
-Gecko_CSSValue_SetIdent(nsCSSValueBorrowedMut aCSSValue, const uint8_t* aString, uint32_t aLength)
+Gecko_CSSValue_SetStringFromAtom(nsCSSValueBorrowedMut aCSSValue,
+                                 nsIAtom* aAtom, nsCSSUnit aUnit)
 {
-  MOZ_ASSERT(aCSSValue->GetUnit() == eCSSUnit_Null);
-  nsString string;
-  nsDependentCSubstring slice(reinterpret_cast<const char*>(aString),
-                                  aLength);
-  AppendUTF8toUTF16(slice, string);
-  aCSSValue->SetStringValue(string, eCSSUnit_Ident);
+  aCSSValue->SetStringValue(nsDependentAtomString(aAtom), aUnit);
 }
 
 void
@@ -1491,18 +1497,10 @@ Gecko_CSSValue_SetURL(nsCSSValueBorrowedMut aCSSValue,
 }
 
 void
-Gecko_CSSValue_SetLocal(nsCSSValueBorrowedMut aCSSValue, const nsString aFamily)
+Gecko_CSSValue_SetInt(nsCSSValueBorrowedMut aCSSValue,
+                      int32_t aInteger, nsCSSUnit aUnit)
 {
-  MOZ_ASSERT(aCSSValue->GetUnit() == eCSSUnit_Null);
-  aCSSValue->SetStringValue(aFamily, eCSSUnit_Local_Font);
-}
-
-void
-Gecko_CSSValue_SetInteger(nsCSSValueBorrowedMut aCSSValue, int32_t aInteger)
-{
-  MOZ_ASSERT(aCSSValue->GetUnit() == eCSSUnit_Null ||
-    aCSSValue->GetUnit() == eCSSUnit_Integer);
-  aCSSValue->SetIntValue(aInteger, eCSSUnit_Integer);
+  aCSSValue->SetIntValue(aInteger, aUnit);
 }
 
 nsCSSValueBorrowedMut
@@ -1598,6 +1596,22 @@ Gecko_GetMediaFeatures()
 {
   return nsMediaFeatures::features;
 }
+
+nsCSSFontFaceRule*
+Gecko_CSSFontFaceRule_Create()
+{
+  RefPtr<nsCSSFontFaceRule> rule = new nsCSSFontFaceRule(0, 0);
+  return rule.forget().take();
+}
+
+void
+Gecko_CSSFontFaceRule_GetCssText(const nsCSSFontFaceRule* aRule,
+                                 nsAString* aResult)
+{
+  aRule->GetCssText(*aResult);
+}
+
+NS_IMPL_FFI_REFCOUNTING(nsCSSFontFaceRule, CSSFontFaceRule);
 
 NS_IMPL_THREADSAFE_FFI_REFCOUNTING(nsCSSValueSharedList, CSSValueSharedList);
 

@@ -734,7 +734,8 @@ EditorBase::DoTransaction(nsITransaction* aTxn)
 
     nsresult rv;
     if (mTxnMgr) {
-      rv = mTxnMgr->DoTransaction(aTxn);
+      RefPtr<nsTransactionManager> txnMgr = mTxnMgr;
+      rv = txnMgr->DoTransaction(aTxn);
     } else {
       rv = aTxn->DoTransaction();
     }
@@ -809,8 +810,9 @@ EditorBase::Undo(uint32_t aCount)
     return NS_OK;
   }
 
+  RefPtr<nsTransactionManager> txnMgr = mTxnMgr;
   for (uint32_t i = 0; i < aCount; ++i) {
-    nsresult rv = mTxnMgr->UndoTransaction();
+    nsresult rv = txnMgr->UndoTransaction();
     NS_ENSURE_SUCCESS(rv, rv);
 
     DoAfterUndoTransaction();
@@ -848,8 +850,9 @@ EditorBase::Redo(uint32_t aCount)
     return NS_OK;
   }
 
+  RefPtr<nsTransactionManager> txnMgr = mTxnMgr;
   for (uint32_t i = 0; i < aCount; ++i) {
-    nsresult rv = mTxnMgr->RedoTransaction();
+    nsresult rv = txnMgr->RedoTransaction();
     NS_ENSURE_SUCCESS(rv, rv);
 
     DoAfterRedoTransaction();
@@ -880,7 +883,8 @@ EditorBase::BeginTransaction()
   BeginUpdateViewBatch();
 
   if (mTxnMgr) {
-    mTxnMgr->BeginBatch(nullptr);
+    RefPtr<nsTransactionManager> txnMgr = mTxnMgr;
+    txnMgr->BeginBatch(nullptr);
   }
 
   return NS_OK;
@@ -890,7 +894,8 @@ NS_IMETHODIMP
 EditorBase::EndTransaction()
 {
   if (mTxnMgr) {
-    mTxnMgr->EndBatch(false);
+    RefPtr<nsTransactionManager> txnMgr = mTxnMgr;
+    txnMgr->EndBatch(false);
   }
 
   EndUpdateViewBatch();
@@ -2436,6 +2441,18 @@ EditorBase::InsertTextImpl(const nsAString& aStringToInsert,
   // element.  Let's try to look for better insertion point in the nearest
   // text node if there is.
   FindBetterInsertionPoint(node, offset);
+
+  // If a neighboring text node already exists, use that
+  if (!node->IsNodeOfType(nsINode::eTEXT)) {
+    if (offset && node->GetChildAt(offset - 1)->IsNodeOfType(nsINode::eTEXT)) {
+      node = node->GetChildAt(offset - 1);
+      offset = node->Length();
+    } else if (offset < static_cast<int32_t>(node->Length()) &&
+               node->GetChildAt(offset)->IsNodeOfType(nsINode::eTEXT)) {
+      node = node->GetChildAt(offset);
+      offset = 0;
+    }
+  }
 
   if (ShouldHandleIMEComposition()) {
     CheckedInt<int32_t> newOffset;

@@ -620,6 +620,11 @@ nsFrameMessageManager::SendMessage(const nsAString& aMessageName,
                                    JS::MutableHandle<JS::Value> aRetval,
                                    bool aIsSync)
 {
+  NS_LossyConvertUTF16toASCII messageNameCStr(aMessageName);
+  PROFILER_LABEL_DYNAMIC("nsFrameMessageManager", "SendMessage",
+                          js::ProfileEntry::Category::EVENTS,
+                          messageNameCStr.get());
+
   NS_ASSERTION(!IsGlobal(), "Should not call SendSyncMessage in chrome");
   NS_ASSERTION(!IsBroadcaster(), "Should not call SendSyncMessage in chrome");
   NS_ASSERTION(!mParentManager, "Should not have parent manager in content!");
@@ -658,11 +663,23 @@ nsFrameMessageManager::SendMessage(const nsAString& aMessageName,
 
   nsTArray<StructuredCloneData> retval;
 
+  TimeStamp start = TimeStamp::Now();
   sSendingSyncMessage |= aIsSync;
   bool ok = mCallback->DoSendBlockingMessage(aCx, aMessageName, data, objects,
                                              aPrincipal, &retval, aIsSync);
   if (aIsSync) {
     sSendingSyncMessage = false;
+  }
+
+  uint32_t latencyMs = round((TimeStamp::Now() - start).ToMilliseconds());
+  if (latencyMs >= kMinTelemetrySyncMessageManagerLatencyMs) {
+    NS_ConvertUTF16toUTF8 messageName(aMessageName);
+    // NOTE: We need to strip digit characters from the message name in order to
+    // avoid a large number of buckets due to generated names from addons (such
+    // as "ublock:sb:{N}"). See bug 1348113 comment 10.
+    messageName.StripChars("0123456789");
+    Telemetry::Accumulate(Telemetry::IPC_SYNC_MESSAGE_MANAGER_LATENCY_MS,
+                          messageName, latencyMs);
   }
 
   if (!ok) {

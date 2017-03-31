@@ -255,6 +255,7 @@ nsHttpChannel::nsHttpChannel()
     , mPostID(0)
     , mRequestTime(0)
     , mOfflineCacheLastModifiedTime(0)
+    , mSuspendTotalTime(0)
     , mInterceptCache(DO_NOT_INTERCEPT)
     , mInterceptionID(gNumIntercepted++)
     , mCacheOpenWithPriority(false)
@@ -6660,6 +6661,9 @@ nsHttpChannel::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
     mAfterOnStartRequestBegun = true;
     mOnStartRequestTimestamp = TimeStamp::Now();
 
+    Telemetry::Accumulate(Telemetry::HTTP_ONSTART_SUSPEND_TOTAL_TIME,
+                          mSuspendTotalTime);
+
     if (!mSecurityInfo && !mCachePump && mTransaction) {
         // grab the security info from the connection object; the transaction
         // is guaranteed to own a reference to the connection.
@@ -6911,13 +6915,9 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
         if (request == mTransactionPump && mCacheEntry && !mDidReval &&
             !mCustomConditionalRequest &&
             !mAsyncOpenTime.IsNull() && !mOnStartRequestTimestamp.IsNull()) {
-            nsAutoCString onStartTime;
-            onStartTime.AppendInt( (uint64_t) (mOnStartRequestTimestamp - mAsyncOpenTime).ToMilliseconds());
-            mCacheEntry->SetMetaDataElement("net-response-time-onstart", onStartTime.get());
-
-            nsAutoCString responseTime;
-            responseTime.AppendInt( (uint64_t) (TimeStamp::Now() - mAsyncOpenTime).ToMilliseconds());
-            mCacheEntry->SetMetaDataElement("net-response-time-onstop", responseTime.get());
+            uint64_t onStartTime = (mOnStartRequestTimestamp - mAsyncOpenTime).ToMilliseconds();
+            uint64_t onStopTime = (TimeStamp::Now() - mAsyncOpenTime).ToMilliseconds();
+            Unused << mCacheEntry->SetNetworkTimes(onStartTime, onStopTime);
         }
 
         // at this point, we're done with the transaction
@@ -8424,6 +8424,10 @@ nsHttpChannel::SuspendInternal()
 
     ++mSuspendCount;
 
+    if (mSuspendCount == 1) {
+        mSuspendTimestamp = TimeStamp::NowLoRes();
+    }
+
     nsresult rvTransaction = NS_OK;
     if (mTransactionPump) {
         rvTransaction = mTransactionPump->Suspend();
@@ -8443,10 +8447,15 @@ nsHttpChannel::ResumeInternal()
 
     LOG(("nsHttpChannel::ResumeInternal [this=%p]\n", this));
 
-    if (--mSuspendCount == 0 && mCallOnResume) {
-        nsresult rv = AsyncCall(mCallOnResume);
-        mCallOnResume = nullptr;
-        NS_ENSURE_SUCCESS(rv, rv);
+    if (--mSuspendCount == 0) {
+        mSuspendTotalTime += (TimeStamp::NowLoRes() - mSuspendTimestamp).
+                               ToMilliseconds();
+
+        if (mCallOnResume) {
+            nsresult rv = AsyncCall(mCallOnResume);
+            mCallOnResume = nullptr;
+            NS_ENSURE_SUCCESS(rv, rv);
+        }
     }
 
     nsresult rvTransaction = NS_OK;
@@ -8596,25 +8605,13 @@ nsHttpChannel::ReportNetVSCacheTelemetry()
         return;
     }
 
-    nsXPIDLCString tmpStr;
-    rv = mCacheEntry->GetMetaDataElement("net-response-time-onstart",
-                                         getter_Copies(tmpStr));
-    if (NS_FAILED(rv)) {
-        return;
-    }
-    uint64_t onStartNetTime = tmpStr.ToInteger64(&rv);
-    if (NS_FAILED(rv)) {
+    uint64_t onStartNetTime = 0;
+    if (NS_FAILED(mCacheEntry->GetOnStartTime(&onStartNetTime))) {
         return;
     }
 
-    tmpStr.Truncate();
-    rv = mCacheEntry->GetMetaDataElement("net-response-time-onstop",
-                                         getter_Copies(tmpStr));
-    if (NS_FAILED(rv)) {
-        return;
-    }
-    uint64_t onStopNetTime = tmpStr.ToInteger64(&rv);
-    if (NS_FAILED(rv)) {
+    uint64_t onStopNetTime = 0;
+    if (NS_FAILED(mCacheEntry->GetOnStopTime(&onStopNetTime))) {
         return;
     }
 

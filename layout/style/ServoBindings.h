@@ -43,6 +43,7 @@ namespace mozilla {
 using mozilla::FontFamilyList;
 using mozilla::FontFamilyType;
 using mozilla::ServoElementSnapshot;
+class nsCSSFontFaceRule;
 struct nsMediaFeature;
 struct nsStyleList;
 struct nsStyleImage;
@@ -72,6 +73,13 @@ struct nsStyleDisplay;
   { NS_ADDREF(aPtr); }                                                        \
   void Gecko_Release##name_##ArbitraryThread(ThreadSafe##name_##Holder* aPtr) \
   { NS_RELEASE(aPtr); }                                                       \
+
+#define NS_DECL_FFI_REFCOUNTING(class_, name_)  \
+  void Gecko_##name_##_AddRef(class_* aPtr);    \
+  void Gecko_##name_##_Release(class_* aPtr);
+#define NS_IMPL_FFI_REFCOUNTING(class_, name_)                    \
+  void Gecko_##name_##_AddRef(class_* aPtr) { NS_ADDREF(aPtr); }  \
+  void Gecko_##name_##_Release(class_* aPtr) { NS_RELEASE(aPtr); }
 
 
 #define DEFINE_ARRAY_TYPE_FOR(type_)                                \
@@ -150,10 +158,7 @@ RawGeckoNodeBorrowedOrNull Gecko_GetNextStyleChild(StyleChildrenIteratorBorrowed
 
 // Selector Matching.
 uint64_t Gecko_ElementState(RawGeckoElementBorrowed element);
-bool Gecko_IsLink(RawGeckoElementBorrowed element);
 bool Gecko_IsTextNode(RawGeckoNodeBorrowed node);
-bool Gecko_IsVisitedLink(RawGeckoElementBorrowed element);
-bool Gecko_IsUnvisitedLink(RawGeckoElementBorrowed element);
 bool Gecko_IsRootElement(RawGeckoElementBorrowed element);
 bool Gecko_MatchesElement(mozilla::CSSPseudoClassType type, RawGeckoElementBorrowed element);
 nsIAtom* Gecko_LocalName(RawGeckoElementBorrowed element);
@@ -190,6 +195,8 @@ RawServoDeclarationBlockStrongBorrowedOrNull
 Gecko_GetStyleAttrDeclarationBlock(RawGeckoElementBorrowed element);
 RawServoDeclarationBlockStrongBorrowedOrNull
 Gecko_GetHTMLPresentationAttrDeclarationBlock(RawGeckoElementBorrowed element);
+RawServoDeclarationBlockStrongBorrowedOrNull
+Gecko_GetExtraContentStyleDeclarations(RawGeckoElementBorrowed element);
 
 // Animations
 bool
@@ -219,7 +226,7 @@ bool Gecko_AtomEqualsUTF8IgnoreCase(nsIAtom* aAtom, const char* aString, uint32_
 
 // Font style
 void Gecko_FontFamilyList_Clear(FontFamilyList* aList);
-void Gecko_FontFamilyList_AppendNamed(FontFamilyList* aList, nsIAtom* aName);
+void Gecko_FontFamilyList_AppendNamed(FontFamilyList* aList, nsIAtom* aName, bool aQuoted);
 void Gecko_FontFamilyList_AppendGeneric(FontFamilyList* list, FontFamilyType familyType);
 void Gecko_CopyFontFamilyFrom(nsFont* dst, const nsFont* src);
 
@@ -364,18 +371,20 @@ float Gecko_CSSValue_GetPercentage(nsCSSValueBorrowed css_value);
 nsStyleCoord::CalcValue Gecko_CSSValue_GetCalc(nsCSSValueBorrowed aCSSValue);
 
 void Gecko_CSSValue_SetAbsoluteLength(nsCSSValueBorrowedMut css_value, nscoord len);
+void Gecko_CSSValue_SetNormal(nsCSSValueBorrowedMut css_value);
 void Gecko_CSSValue_SetNumber(nsCSSValueBorrowedMut css_value, float number);
 void Gecko_CSSValue_SetKeyword(nsCSSValueBorrowedMut css_value, nsCSSKeyword keyword);
 void Gecko_CSSValue_SetPercentage(nsCSSValueBorrowedMut css_value, float percent);
 void Gecko_CSSValue_SetAngle(nsCSSValueBorrowedMut css_value, float radians);
 void Gecko_CSSValue_SetCalc(nsCSSValueBorrowedMut css_value, nsStyleCoord::CalcValue calc);
 void Gecko_CSSValue_SetFunction(nsCSSValueBorrowedMut css_value, int32_t len);
-void Gecko_CSSValue_SetString(nsCSSValueBorrowedMut css_value, const uint8_t* string, uint32_t len);
-void Gecko_CSSValue_SetIdent(nsCSSValueBorrowedMut css_value, const uint8_t* string, uint32_t len);
+void Gecko_CSSValue_SetString(nsCSSValueBorrowedMut css_value,
+                              const uint8_t* string, uint32_t len, nsCSSUnit unit);
+void Gecko_CSSValue_SetStringFromAtom(nsCSSValueBorrowedMut css_value,
+                                      nsIAtom* atom, nsCSSUnit unit);
 void Gecko_CSSValue_SetArray(nsCSSValueBorrowedMut css_value, int32_t len);
 void Gecko_CSSValue_SetURL(nsCSSValueBorrowedMut css_value, ServoBundledURI uri);
-void Gecko_CSSValue_SetLocal(nsCSSValueBorrowedMut css_value, const nsString family);
-void Gecko_CSSValue_SetInteger(nsCSSValueBorrowedMut css_value, int32_t integer);
+void Gecko_CSSValue_SetInt(nsCSSValueBorrowedMut css_value, int32_t integer, nsCSSUnit unit);
 void Gecko_CSSValue_Drop(nsCSSValueBorrowedMut css_value);
 NS_DECL_THREADSAFE_FFI_REFCOUNTING(nsCSSValueSharedList, CSSValueSharedList);
 bool Gecko_PropertyId_IsPrefEnabled(nsCSSPropertyID id);
@@ -385,6 +394,12 @@ void Gecko_nsStyleFont_CopyLangFrom(nsStyleFont* aFont, const nsStyleFont* aSour
 nscoord Gecko_nsStyleFont_GetBaseSize(const nsStyleFont* font, RawGeckoPresContextBorrowed pres_context);
 
 const nsMediaFeature* Gecko_GetMediaFeatures();
+
+// Font face rule
+// Creates and returns a new (already-addrefed) nsCSSFontFaceRule object.
+nsCSSFontFaceRule* Gecko_CSSFontFaceRule_Create();
+void Gecko_CSSFontFaceRule_GetCssText(const nsCSSFontFaceRule* rule, nsAString* result);
+NS_DECL_FFI_REFCOUNTING(nsCSSFontFaceRule, CSSFontFaceRule);
 
 // We use an int32_t here instead of a LookAndFeel::ColorID
 // because forward-declaring a nested enum/struct is impossible

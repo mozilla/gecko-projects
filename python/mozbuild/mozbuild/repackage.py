@@ -8,24 +8,23 @@ import tarfile
 import shutil
 import ConfigParser
 import mozpack.path as mozpath
+from mozpack.dmg import create_dmg
 
-def repackage_dmg(input, output):
-    from mozpack.dmg import create_dmg
+def repackage_dmg(infile, output):
 
-    if not tarfile.is_tarfile(input):
-        raise Exception("Input file %s is not a valid tarfile." % input)
+    if not tarfile.is_tarfile(infile):
+        raise Exception("Input file %s is not a valid tarfile." % infile)
 
     tmpdir = tempfile.mkdtemp()
     try:
-        with tarfile.open(input) as tar:
+        with tarfile.open(infile) as tar:
             tar.extractall(path=tmpdir)
-            tar.close()
 
         # Remove the /Applications symlink. If we don't, an rsync command in
         # create_dmg() will break, and create_dmg() re-creates the symlink anyway.
         try:
             os.remove(mozpath.join(tmpdir, ' '))
-        except OSError, e:
+        except OSError as e:
             if e.errno != errno.ENOENT:
                 raise
 

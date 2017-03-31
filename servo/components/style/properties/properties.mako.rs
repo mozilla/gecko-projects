@@ -561,8 +561,8 @@ impl ShorthandId {
     ///
     /// Returns the optional appendable value.
     pub fn get_shorthand_appendable_value<'a, I>(self,
-                                             declarations: I)
-                                             -> Option<AppendableValue<'a, I::IntoIter>>
+                                                 declarations: I)
+                                                 -> Option<AppendableValue<'a, I::IntoIter>>
         where I: IntoIterator<Item=&'a PropertyDeclaration>,
               I::IntoIter: Clone,
     {
@@ -580,15 +580,21 @@ impl ShorthandId {
         // https://drafts.csswg.org/css-variables/#variables-in-shorthands
         if let Some(css) = first_declaration.with_variables_from_shorthand(self) {
             if declarations2.all(|d| d.with_variables_from_shorthand(self) == Some(css)) {
-               return Some(AppendableValue::Css(css));
-           }
-           return None;
+               return Some(AppendableValue::Css {
+                   css: css,
+                   with_variables: true,
+               });
+            }
+            return None;
         }
 
         // Check whether they are all the same CSS-wide keyword.
         if let Some(keyword) = first_declaration.get_css_wide_keyword() {
             if declarations2.all(|d| d.get_css_wide_keyword() == Some(keyword)) {
-                return Some(AppendableValue::Css(keyword.to_str()));
+                return Some(AppendableValue::Css {
+                    css: keyword.to_str(),
+                    with_variables: false,
+                });
             }
             return None;
         }
@@ -882,7 +888,29 @@ pub enum ParsedDeclaration {
 impl ParsedDeclaration {
     /// Transform this ParsedDeclaration into a sequence of PropertyDeclaration
     /// by expanding shorthand declarations into their corresponding longhands
-    pub fn expand<F>(self, mut push: F) where F: FnMut(PropertyDeclaration) {
+    ///
+    /// Adds or overrides exsting declarations in the given block,
+    /// except if existing declarations are more important.
+    #[inline]
+    pub fn expand_push_into(self, block: &mut PropertyDeclarationBlock,
+                            importance: Importance) {
+        self.expand_into(block, importance, false);
+    }
+
+    /// Transform this ParsedDeclaration into a sequence of PropertyDeclaration
+    /// by expanding shorthand declarations into their corresponding longhands
+    ///
+    /// Add or override existing declarations in the given block.
+    /// Return whether anything changed.
+    #[inline]
+    pub fn expand_set_into(self, block: &mut PropertyDeclarationBlock,
+                           importance: Importance) -> bool {
+        self.expand_into(block, importance, true)
+    }
+
+    fn expand_into(self, block: &mut PropertyDeclarationBlock,
+                   importance: Importance,
+                   overwrite_more_important: bool) -> bool {
         match self {
             % for shorthand in data.shorthands:
                 ParsedDeclaration::${shorthand.camel_case}(
@@ -892,32 +920,58 @@ impl ParsedDeclaration {
                         % endfor
                     }
                 ) => {
+                    let mut changed = false;
                     % for sub_property in shorthand.sub_properties:
-                        push(PropertyDeclaration::${sub_property.camel_case}(
-                            % if sub_property.boxed:
-                                Box::new(${sub_property.ident})
-                            % else:
-                                ${sub_property.ident}
-                            % endif
-                        ));
+                        changed |= block.push_common(
+                            PropertyDeclaration::${sub_property.camel_case}(
+                                % if sub_property.boxed:
+                                    Box::new(${sub_property.ident})
+                                % else:
+                                    ${sub_property.ident}
+                                % endif
+                            ),
+                            importance,
+                            overwrite_more_important,
+                        );
                     % endfor
+                    changed
                 },
                 ParsedDeclaration::${shorthand.camel_case}CSSWideKeyword(keyword) => {
+                    let mut changed = false;
                     % for sub_property in shorthand.sub_properties:
-                        push(PropertyDeclaration::CSSWideKeyword(LonghandId::${sub_property.camel_case}, keyword));
+                        changed |= block.push_common(
+                            PropertyDeclaration::CSSWideKeyword(
+                                LonghandId::${sub_property.camel_case},
+                                keyword,
+                            ),
+                            importance,
+                            overwrite_more_important,
+                        );
                     % endfor
+                    changed
                 },
                 ParsedDeclaration::${shorthand.camel_case}WithVariables(value) => {
                     debug_assert_eq!(
                         value.from_shorthand,
                         Some(ShorthandId::${shorthand.camel_case})
                     );
+                    let mut changed = false;
                     % for sub_property in shorthand.sub_properties:
-                        push(PropertyDeclaration::WithVariables(LonghandId::${sub_property.camel_case}, value.clone()));
+                        changed |= block.push_common(
+                            PropertyDeclaration::WithVariables(
+                                LonghandId::${sub_property.camel_case},
+                                value.clone()
+                            ),
+                            importance,
+                            overwrite_more_important,
+                        );
                     % endfor
+                    changed
                 }
             % endfor
-            ParsedDeclaration::LonghandOrCustom(declaration) => push(declaration),
+            ParsedDeclaration::LonghandOrCustom(declaration) => {
+                block.push_common(declaration, importance, overwrite_more_important)
+            }
         }
     }
 
@@ -1191,10 +1245,10 @@ impl PropertyDeclaration {
     /// the longhand declarations.
     pub fn may_serialize_as_part_of_shorthand(&self) -> bool {
         match *self {
-            PropertyDeclaration::CSSWideKeyword(..) => false,
+            PropertyDeclaration::CSSWideKeyword(..) |
             PropertyDeclaration::WithVariables(..) => false,
             PropertyDeclaration::Custom(..) =>
-                unreachable!("Serialize a custom property as part of shorthand?"),
+                unreachable!("Serializing a custom property as part of shorthand?"),
             _ => true,
         }
     }

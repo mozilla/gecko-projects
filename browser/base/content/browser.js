@@ -13,6 +13,9 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/ContextualIdentityService.jsm");
 Cu.import("resource://gre/modules/NotificationDB.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
+                                  "resource://gre/modules/Preferences.jsm");
+
 // lazy module getters
 
 /* global AboutHome:false, AddonWatcher:false,
@@ -502,7 +505,14 @@ const gStoragePressureObserver = {
         label: prefStrBundle.getString(prefButtonLabelStringID),
         accessKey: prefStrBundle.getString(prefButtonAccesskeyStringID),
         callback(notificationBar, button) {
-          gBrowser.ownerGlobal.openPreferences("advanced", { advancedTab: "networkTab" });
+          // The advanced subpanes are only supported in the old organization, which will
+          // be removed by bug 1349689.
+          let win = gBrowser.ownerGlobal;
+          if (Preferences.get("browser.preferences.useOldOrganization", false)) {
+            win.openAdvancedPreferences("networkTab");
+          } else {
+            win.openPreferences("panePrivacy");
+          }
         }
       });
     }
@@ -1179,8 +1189,14 @@ var gBrowserInit = {
     // have been initialized.
     Services.obs.notifyObservers(window, "browser-window-before-show", "");
 
+    let isResistFingerprintingEnabled = gPrefService.getBoolPref("privacy.resistFingerprinting");
+
     // Set a sane starting width/height for all resolutions on new profiles.
-    if (!document.documentElement.hasAttribute("width")) {
+    if (isResistFingerprintingEnabled) {
+      // When the fingerprinting resistance is enabled, making sure that we don't
+      // have a maximum window to interfere with generating rounded window dimensions.
+      document.documentElement.setAttribute("sizemode", "normal");
+    } else if (!document.documentElement.hasAttribute("width")) {
       const TARGET_WIDTH = 1280;
       const TARGET_HEIGHT = 1040;
       let width = Math.min(screen.availWidth * .9, TARGET_WIDTH);
@@ -3182,7 +3198,7 @@ var BrowserOnClick = {
     let title;
     if (reason === "malware") {
       let reportUrl = gSafeBrowsing.getReportURL("MalwareMistake", blockedInfo);
-
+      title = gNavigatorBundle.getString("safebrowsing.reportedAttackSite");
       // There's no button if we can not get report url, for example if the provider
       // of blockedInfo is not Google
       if (reportUrl) {
@@ -3196,7 +3212,7 @@ var BrowserOnClick = {
       }
     } else if (reason === "phishing") {
       let reportUrl = gSafeBrowsing.getReportURL("PhishMistake", blockedInfo);
-
+      title = gNavigatorBundle.getString("safebrowsing.deceptiveSite");
       // There's no button if we can not get report url, for example if the provider
       // of blockedInfo is not Google
       if (reportUrl) {
@@ -6269,7 +6285,13 @@ var OfflineApps = {
   },
 
   manage() {
-    openAdvancedPreferences("networkTab");
+    // The advanced subpanes are only supported in the old organization, which will
+    // be removed by bug 1349689.
+    if (Preferences.get("browser.preferences.useOldOrganization", false)) {
+      openAdvancedPreferences("networkTab");
+    } else {
+      openPreferences("panePrivacy");
+    }
   },
 
   receiveMessage(msg) {
@@ -7436,8 +7458,14 @@ var gIdentityHandler = {
       return; // Left click, space or enter only
     }
 
-    // Don't allow left click, space or enter if the location has been modified.
-    if (gURLBar.getAttribute("pageproxystate") != "valid") {
+    // Don't allow left click, space or enter if the location has been modified,
+    // so long as we're not sharing any devices.
+    // If we are sharing a device, the identity block is prevented by CSS from
+    // being focused (and therefore, interacted with) by the user. However, we
+    // want to allow opening the identity popup from the device control menu,
+    // which calls click() on the identity button, so we don't return early.
+    if (!this._sharingState &&
+        gURLBar.getAttribute("pageproxystate") != "valid") {
       return;
     }
 

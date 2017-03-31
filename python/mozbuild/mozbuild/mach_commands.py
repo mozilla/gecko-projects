@@ -41,9 +41,6 @@ from mozbuild.backend import (
     get_backend_class,
 )
 from mozbuild.shellutil import quote as shell_quote
-from mozbuild.repackage import (
-    repackage_dmg,
-)
 
 
 BUILD_WHAT_HELP = '''
@@ -1627,7 +1624,6 @@ class WebRTCGTestCommands(GTestCommands):
                                 ensure_exit_code=False,
                                 pass_thru=True)
 
-
 @CommandProvider
 class Repackage(MachCommandBase):
     '''Repackages artifacts into different formats.
@@ -1653,6 +1649,7 @@ class Repackage(MachCommandBase):
             return 1
 
         if output.endswith('.dmg'):
+            from mozbuild.repackage import repackage_dmg
             repackage_dmg(input, output)
         else:
             print("Repackaging into output '%s' is not yet supported." % output)

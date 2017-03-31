@@ -61,7 +61,7 @@ to mochitest command.
     * test_value_storage.html `frames` [30]
   * Property parsing and computation:
     * test_property_syntax_errors.html `animation` [404]
-    * test_value_storage.html `animation` [280]
+    * test_value_storage.html `animation` [91]
 * test_any_dynamic.html: slow selector handling [3]
 * test_bug635286.html: :-moz-any pseudo-class bugs [3]
 * CSSOM support:
@@ -76,7 +76,6 @@ to mochitest command.
 * test_box_size_keywords.html: moz-prefixed intrinsic size keyword value [64]
 * test_bug357614.html: case-insensitivity for old attrs in attr selector servo/servo#15006 [2]
 * mapped attribute not supported
-  * test_bug363146.html [2]
   * test_html_attribute_computed_values.html: also list-style-type [8]
 * test_bug387615.html: servo/servo#15006 [1]
 * test_bug397427.html: @import issue bug 1331291 and CSSOM support of @import [1]
@@ -93,7 +92,7 @@ to mochitest command.
   * test_transitions_computed_value_combinations.html [145]
   * test_transitions_dynamic_changes.html [10]
   * test_transitions_step_functions.html [24]
-  * test_value_storage.html `transition` [776]
+  * test_value_storage.html `transition` [596]
   * Events:
     * test_animations_event_handler_attribute.html [10]
     * test_animations_event_order.html [11]
@@ -123,7 +122,6 @@ to mochitest command.
   * test_descriptor_storage.html [1]
   * test_descriptor_syntax_errors.html [1]
   * test_font_face_parser.html `@font-face` [447]
-  * test_redundant_font_download.html [3]
 * @namespace support:
   * test_namespace_rule.html [17]
 * test_dont_use_document_colors.html: support of disabling document color [21]
@@ -339,8 +337,8 @@ to mochitest command.
 * Incorrect serialization
   * border-radius and -moz-outline-radius shorthand servo/servo#15169
     * test_priority_preservation.html `border-radius` [4]
-    * test_value_storage.html `border-radius:` [156]
-    * ... `-moz-outline-radius:` [76]
+    * test_value_storage.html `border-radius:` [92]
+    * ... `-moz-outline-radius:` [45]
     * test_shorthand_property_getters.html `should condense to shortest possible` [6]
   * transform property servo/servo#15194
     * test_value_storage.html `'transform` [104]
@@ -349,15 +347,12 @@ to mochitest command.
     * test_specified_value_serialization.html `bug-721136` [27]
     * test_units_angle.html [3]
   * {background,mask}-position lacks comma for serialization servo/servo#15200
-    * test_value_storage.html `background-position` [63]
     * test_shorthand_property_getters.html `background-position` [1]
   * color value not canonicalized servo/servo#15397
     * test_shorthand_property_getters.html `should condense to canonical case` [2]
   * background-position invalid 3-value form **issue to be filed**
     * test_shorthand_property_getters.html `should serialize to 4-value` [2]
   * test_variables.html `--weird`: name of custom property is not escaped properly servo/servo#15399 [1]
-  * image-layer values should omit some of its parts when they are initial servo/servo#15951
-    * test_shorthand_property_getters.html `background` [2]
   * :not(*) doesn't serialize properly servo/servo#16017
     * test_selectors.html `:not()` [8]
     * ... `:not(html|)` [1]
@@ -371,8 +366,6 @@ to mochitest command.
   * ::-moz-color-swatch bug 1348492
     * test_selectors.html `::-moz-color-swatch` [1]
 * Unsupported pseudo-classes
-  * :default ##easy##
-    * test_bug302186.html [24]
   * :-moz-locale-dir
     * test_selectors.html `:-moz-locale-dir` [15]
   * :-moz-lwtheme-*
@@ -392,12 +385,8 @@ to mochitest command.
   * ... `0.766667px` [2]
   * ... `105.333px` [2]
 * test_value_storage.html `: var(--a)`: extra whitespace is added for shorthand with variables servo/servo#15295 [*]
-* border-width computed wrong bug 1335990
-  * test_parse_rule.html `border-style` [4]
-  * test_initial_computation.html `0px", expected "3px` [48]
 * Negative value should be rejected
   * test_property_syntax_errors.html `transition-duration`: servo/servo#15343 [20]
-  * ... `perspective'`: servo/servo#15449 [20]
   * ... `'text-shadow'`: third length of text-shadow servo/servo#15999 [2]
   * ... `flex-basis`: servo/servo#15902 [6]
 * Quirks mode support
@@ -425,7 +414,7 @@ to mochitest command.
   * test_variable_serialization_computed.html [35]
   * test_variables.html `custom property name` [2]
 * test_css_supports.html: issues around @supports syntax servo/servo#15482 [8]
-* test_author_specified_style.html: support serializing color as author specified bug 1348165 [33]
+* test_author_specified_style.html: support serializing color as author specified bug 1348165 [27]
 * browser_newtab_share_rule_processors.js: agent style sheet sharing [1]
 * test_selectors.html `this_better_be_unvisited`: visited handling [2]
 

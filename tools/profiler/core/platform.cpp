@@ -138,9 +138,7 @@ public:
   typedef std::vector<ThreadInfo*> ThreadVector;
 
   ProfilerState()
-    : mEnvVarEntries(0)
-    , mEntries(0)
-    , mEnvVarInterval(0)
+    : mEntries(0)
     , mInterval(0)
     , mFeatureDisplayListDump(false)
     , mFeatureGPU(false)
@@ -175,10 +173,8 @@ public:
 
   GET_AND_SET(TimeStamp, StartTime)
 
-  GET_AND_SET(int, EnvVarEntries)
   GET_AND_SET(int, Entries)
 
-  GET_AND_SET(int, EnvVarInterval)
   GET_AND_SET(double, Interval)
 
   Vector<std::string>& Features(LockRef) { return mFeatures; }
@@ -239,16 +235,11 @@ private:
   // When profiler_init() or profiler_start() was most recently called.
   mozilla::TimeStamp mStartTime;
 
-  // The number of entries in mBuffer. mEnvVarEntries comes from an environment
-  // variable and can override the value passed in to profiler_start(). Zeroed
-  // when the profiler is inactive.
-  int mEnvVarEntries;
+  // The number of entries in mBuffer. Zeroed when the profiler is inactive.
   int mEntries;
 
-  // The interval between samples, measured in milliseconds. mEnvVarInterval
-  // comes from an environment variable and can override the value passed in to
-  // profiler_start(). Zeroed when the profiler is inactive.
-  int mEnvVarInterval;
+  // The interval between samples, measured in milliseconds. Zeroed when the
+  // profiler is inactive.
   double mInterval;
 
   // The profile features that are enabled. Cleared when the profiler is
@@ -1430,40 +1421,8 @@ void ProfilerMarker::StreamJSON(SpliceableJSONWriter& aWriter,
   aWriter.EndArray();
 }
 
-static bool
-set_profiler_interval(PS::LockRef aLock, const char* aInterval)
-{
-  if (aInterval) {
-    errno = 0;
-    long int n = strtol(aInterval, nullptr, 10);
-    if (errno == 0 && 1 <= n && n <= 1000) {
-      gPS->SetEnvVarInterval(aLock, n);
-      return true;
-    }
-    return false;
-  }
-
-  return true;
-}
-
-static bool
-set_profiler_entries(PS::LockRef aLock, const char* aEntries)
-{
-  if (aEntries) {
-    errno = 0;
-    long int n = strtol(aEntries, nullptr, 10);
-    if (errno == 0 && n > 0) {
-      gPS->SetEnvVarEntries(aLock, n);
-      return true;
-    }
-    return false;
-  }
-
-  return true;
-}
-
 static void
-profiler_usage(int aExitCode)
+PrintUsageThenExit(int aExitCode)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   MOZ_RELEASE_ASSERT(gPS);
@@ -1475,14 +1434,6 @@ profiler_usage(int aExitCode)
     "  MOZ_PROFILER_HELP\n"
     "  If set to any value, prints this message.\n"
     "\n"
-    "  MOZ_PROFILER_ENTRIES=<1..>\n"
-    "  The number of entries in the profiler's circular buffer.\n"
-    "  If unset, the platform default is used.\n"
-    "\n"
-    "  MOZ_PROFILER_INTERVAL=<1..1000>\n"
-    "  The interval between samples, measured in milliseconds.\n"
-    "  If unset, platform default is used.\n"
-    "\n"
     "  MOZ_LOG\n"
     "  Enables logging. The levels of logging available are\n"
     "  'prof:3' (least verbose), 'prof:4', 'prof:5' (most verbose).\n"
@@ -1490,6 +1441,16 @@ profiler_usage(int aExitCode)
     "  MOZ_PROFILER_STARTUP\n"
     "  If set to any value, starts the profiler immediately on start-up.\n"
     "  Useful if you want profile code that runs very early.\n"
+    "\n"
+    "  MOZ_PROFILER_STARTUP_ENTRIES=<1..>\n"
+    "  If MOZ_PROFILER_STARTUP is set, specifies the number of entries in\n"
+    "  the profiler's circular buffer when the profiler is first started.\n"
+    "  If unset, the platform default is used.\n"
+    "\n"
+    "  MOZ_PROFILER_STARTUP_INTERVAL=<1..1000>\n"
+    "  If MOZ_PROFILER_STARTUP is set, specifies the sample interval,\n"
+    "  measured in milliseconds, when the profiler is first started.\n"
+    "  If unset, the platform default is used.\n"
     "\n"
     "  MOZ_PROFILER_SHUTDOWN\n"
     "  If set, the profiler saves a profile to the named file on shutdown.\n"
@@ -1507,30 +1468,6 @@ profiler_usage(int aExitCode)
   );
 
   exit(aExitCode);
-}
-
-// Read env vars at startup, so as to set:
-//   gPS->mEnvVarEntries, gPS->mEnvVarInterval
-static void
-ReadProfilerEnvVars(PS::LockRef aLock)
-{
-  const char* help     = getenv("MOZ_PROFILER_HELP");
-  const char* entries  = getenv("MOZ_PROFILER_ENTRIES");
-  const char* interval = getenv("MOZ_PROFILER_INTERVAL");
-
-  if (help) {
-    profiler_usage(0); // terminates execution
-  }
-
-  if (!set_profiler_entries(aLock, entries) ||
-      !set_profiler_interval(aLock, interval)) {
-    profiler_usage(1); // terminates execution
-  }
-
-  LOG("entries  = %d (zero means \"platform default\")",
-      gPS->EnvVarEntries(aLock));
-  LOG("interval = %d ms (zero means \"platform default\")",
-      gPS->EnvVarInterval(aLock));
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -1947,6 +1884,10 @@ profiler_init(void* aStackTop)
 
   const char* threadFilters[] = { "GeckoMain", "Compositor" };
 
+  if (getenv("MOZ_PROFILER_HELP")) {
+    PrintUsageThenExit(0); // terminates execution
+  }
+
   {
     PS::AutoLock lock(gPSMutex);
 
@@ -1956,9 +1897,6 @@ profiler_init(void* aStackTop)
 
     bool ignore;
     gPS->SetStartTime(lock, mozilla::TimeStamp::ProcessCreation(ignore));
-
-    // Read settings from environment variables.
-    ReadProfilerEnvVars(lock);
 
     locked_register_thread(lock, kMainThreadName, aStackTop);
 
@@ -1981,18 +1919,37 @@ profiler_init(void* aStackTop)
     // startup, even if no profiling is actually to be done. So, instead, it is
     // created on demand at the first call to PlatformStart().
 
-    // We can't open pref so we use an environment variable to know if we
-    // should trigger the profiler on startup.
-    // NOTE: Default
-    const char *val = getenv("MOZ_PROFILER_STARTUP");
-    if (!val || !*val) {
+    if (!getenv("MOZ_PROFILER_STARTUP")) {
       return;
     }
 
-    LOG("MOZ_PROFILER_STARTUP is set");
+    LOG("- MOZ_PROFILER_STARTUP is set");
 
-    locked_profiler_start(lock, PROFILE_DEFAULT_ENTRIES,
-                          PROFILE_DEFAULT_INTERVAL,
+    int entries = PROFILE_DEFAULT_ENTRIES;
+    const char* startupEntries = getenv("MOZ_PROFILER_STARTUP_ENTRIES");
+    if (startupEntries) {
+      errno = 0;
+      entries = strtol(startupEntries, nullptr, 10);
+      if (errno == 0 && entries > 0) {
+        LOG("- MOZ_PROFILER_STARTUP_ENTRIES = %d", entries);
+      } else {
+        PrintUsageThenExit(1);
+      }
+    }
+
+    int interval = PROFILE_DEFAULT_INTERVAL;
+    const char* startupInterval = getenv("MOZ_PROFILER_STARTUP_INTERVAL");
+    if (startupInterval) {
+      errno = 0;
+      interval = strtol(startupInterval, nullptr, 10);
+      if (errno == 0 && 1 <= interval && interval <= 1000) {
+        LOG("- MOZ_PROFILER_STARTUP_INTERVAL = %d", interval);
+      } else {
+        PrintUsageThenExit(1);
+      }
+    }
+
+    locked_profiler_start(lock, entries, interval,
                           features, MOZ_ARRAY_LENGTH(features),
                           threadFilters, MOZ_ARRAY_LENGTH(threadFilters));
   }
@@ -2165,14 +2122,14 @@ profiler_save_profile_to_file_async(double aSinceTime, const char* aFileName)
 
 void
 profiler_get_start_params(int* aEntries, double* aInterval,
-                          mozilla::Vector<const char*>* aFilters,
-                          mozilla::Vector<const char*>* aFeatures)
+                          mozilla::Vector<const char*>* aFeatures,
+                          mozilla::Vector<const char*>* aFilters)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   MOZ_RELEASE_ASSERT(gPS);
 
   if (NS_WARN_IF(!aEntries) || NS_WARN_IF(!aInterval) ||
-      NS_WARN_IF(!aFilters) || NS_WARN_IF(!aFeatures)) {
+      NS_WARN_IF(!aFeatures) || NS_WARN_IF(!aFilters)) {
     return;
   }
 
@@ -2181,16 +2138,16 @@ profiler_get_start_params(int* aEntries, double* aInterval,
   *aEntries = gPS->Entries(lock);
   *aInterval = gPS->Interval(lock);
 
-  const Vector<std::string>& threadNameFilters = gPS->ThreadNameFilters(lock);
-  MOZ_ALWAYS_TRUE(aFilters->resize(threadNameFilters.length()));
-  for (uint32_t i = 0; i < threadNameFilters.length(); ++i) {
-    (*aFilters)[i] = threadNameFilters[i].c_str();
-  }
-
   const Vector<std::string>& features = gPS->Features(lock);
   MOZ_ALWAYS_TRUE(aFeatures->resize(features.length()));
   for (size_t i = 0; i < features.length(); ++i) {
     (*aFeatures)[i] = features[i].c_str();
+  }
+
+  const Vector<std::string>& threadNameFilters = gPS->ThreadNameFilters(lock);
+  MOZ_ALWAYS_TRUE(aFilters->resize(threadNameFilters.length()));
+  for (uint32_t i = 0; i < threadNameFilters.length(); ++i) {
+    (*aFilters)[i] = threadNameFilters[i].c_str();
   }
 }
 
@@ -2383,25 +2340,12 @@ locked_profiler_start(PS::LockRef aLock, int aEntries, double aInterval,
   bool ignore;
   gPS->SetStartTime(aLock, mozilla::TimeStamp::ProcessCreation(ignore));
 
-  // Start with the default value. Then override with the passed-in value, if
-  // reasonable. Then override with the env var value, if reasonable.
-  int entries = PROFILE_DEFAULT_ENTRIES;
-  if (aEntries > 0) {
-    entries = aEntries;
-  }
-  if (gPS->EnvVarEntries(aLock) > 0) {
-    entries = gPS->EnvVarEntries(aLock);
-  }
+  // Fall back to the default value if the passed-in value is unreasonable.
+  int entries = aEntries > 0 ? aEntries : PROFILE_DEFAULT_ENTRIES;
   gPS->SetEntries(aLock, entries);
 
   // Ditto.
-  double interval = PROFILE_DEFAULT_INTERVAL;
-  if (aInterval > 0) {
-    interval = aInterval;
-  }
-  if (gPS->EnvVarInterval(aLock) > 0) {
-    interval = gPS->EnvVarInterval(aLock);
-  }
+  double interval = aInterval > 0 ? aInterval : PROFILE_DEFAULT_INTERVAL;
   gPS->SetInterval(aLock, interval);
 
   // Deep copy aFeatures. Must precede the MaybeSetProfile() call below.
@@ -3064,7 +3008,7 @@ profiler_add_marker(const char* aMarker, ProfilerMarkerPayload* aPayload)
 
 void
 profiler_tracing(const char* aCategory, const char* aInfo,
-                 TracingMetadata aMetaData)
+                 TracingKind aKind)
 {
   // This function runs both on and off the main thread.
 
@@ -3076,13 +3020,13 @@ profiler_tracing(const char* aCategory, const char* aInfo,
     return;
   }
 
-  auto marker = new ProfilerMarkerTracing(aCategory, aMetaData);
+  auto marker = new ProfilerMarkerTracing(aCategory, aKind);
   locked_profiler_add_marker(lock, aInfo, marker);
 }
 
 void
 profiler_tracing(const char* aCategory, const char* aInfo,
-                 UniqueProfilerBacktrace aCause, TracingMetadata aMetaData)
+                 UniqueProfilerBacktrace aCause, TracingKind aKind)
 {
   // This function runs both on and off the main thread.
 
@@ -3095,7 +3039,7 @@ profiler_tracing(const char* aCategory, const char* aInfo,
   }
 
   auto marker =
-    new ProfilerMarkerTracing(aCategory, aMetaData, mozilla::Move(aCause));
+    new ProfilerMarkerTracing(aCategory, aKind, mozilla::Move(aCause));
   locked_profiler_add_marker(lock, aInfo, marker);
 }
 
@@ -3104,7 +3048,7 @@ profiler_log(const char* aStr)
 {
   // This function runs both on and off the main thread.
 
-  profiler_tracing("log", aStr, TRACING_EVENT);
+  profiler_tracing("log", aStr);
 }
 
 void
