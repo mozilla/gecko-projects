@@ -2483,7 +2483,7 @@ public:
 private:
   // This class is only used on stack, so we don't have to worry about leaking
   // it.  Don't let us be heap-allocated!
-  void* operator new(size_t sz) CPP_THROW_NEW;
+  //void* operator new(size_t sz) CPP_THROW_NEW;
 
   nsDisplayItemLink  mSentinel;
   nsDisplayItemLink* mTop;

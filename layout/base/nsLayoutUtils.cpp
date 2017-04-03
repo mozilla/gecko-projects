@@ -3489,6 +3489,41 @@ nsLayoutUtils::ExpireDisplayPortOnAsyncScrollableAncestor(nsIFrame* aFrame)
   }
 }
 
+bool IsSameItem(nsDisplayItem* aFirst, nsDisplayItem* aSecond)
+{
+  return aFirst->Frame() == aSecond->Frame() &&
+         aFirst->GetPerFrameKey() == aSecond->GetPerFrameKey();
+}
+
+void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
+                       nsDisplayList* aNewList,
+                       nsDisplayList* aOldList)
+{
+  nsDisplayList merged;
+
+  while (nsDisplayItem* i = aNewList->RemoveBottom()) {
+    // If the new item has a matching counterpart in the old list, copy all items
+    // up to that one into the merged list, but discard the repeat.
+    // TODO: We need to detect invalidated items in the old list (belonging to deleted
+    // frames, or just items that aren't needed any more) and skip over them.
+    if (FrameLayerBuilder::HasRetainedDataFor(i->Frame(), i->GetPerFrameKey())) {
+      nsDisplayItem* old;
+      while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
+        merged.AppendToTop(old);
+      }
+    }
+
+    merged.AppendToTop(i);
+  }
+  
+  merged.AppendToTop(aOldList);
+  
+  //printf_stderr("Painting --- Merged list:\n");
+  //nsFrame::PrintDisplayList(aBuilder, merged);
+
+  aOldList->AppendToTop(&merged);
+}
+
 nsresult
 nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFrame,
                           const nsRegion& aDirtyRegion, nscolor aBackstop,
@@ -3525,8 +3560,20 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   }
 
   TimeStamp startBuildDisplayList = TimeStamp::Now();
-  nsDisplayListBuilder builder(aFrame, aBuilderMode,
-                               !(aFlags & PaintFrameFlags::PAINT_HIDE_CARET));
+
+  nsDisplayListBuilder* builderPtr = nullptr;
+  if (aBuilderMode == nsDisplayListBuilderMode::PAINTING) {
+    builderPtr = aFrame->Properties().Get(nsIFrame::CachedDisplayListBuilder());
+    if (!builderPtr) {
+      builderPtr = new nsDisplayListBuilder(aFrame, aBuilderMode,
+          !(aFlags & PaintFrameFlags::PAINT_HIDE_CARET));
+      aFrame->Properties().Set(nsIFrame::CachedDisplayListBuilder(), builderPtr);
+    }
+  } else {
+    builderPtr = new nsDisplayListBuilder(aFrame, aBuilderMode,
+        !(aFlags & PaintFrameFlags::PAINT_HIDE_CARET));
+  }
+  nsDisplayListBuilder& builder = *builderPtr;
   if (aFlags & PaintFrameFlags::PAINT_IN_TRANSFORM) {
     builder.SetInTransform(true);
   }
@@ -3563,7 +3610,17 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     visibleRegion = aDirtyRegion;
   }
 
-  nsDisplayList list;
+  nsDisplayList* listPtr = nullptr;
+  if (aBuilderMode == nsDisplayListBuilderMode::PAINTING) {
+    listPtr = aFrame->Properties().Get(nsIFrame::CachedDisplayList());
+    if (!listPtr) {
+      listPtr = new nsDisplayList;
+      aFrame->Properties().Set(nsIFrame::CachedDisplayList(), listPtr);
+    }
+  } else {
+    listPtr = new nsDisplayList;
+  }
+  nsDisplayList& list = *listPtr;
 
   // If the root has embedded plugins, flag the builder so we know we'll need
   // to update plugin geometry after painting.
@@ -3641,7 +3698,32 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
       nsDisplayListBuilder::AutoCurrentScrollParentIdSetter idSetter(&builder, id);
 
-      aFrame->BuildDisplayListForStackingContext(&builder, dirtyRect, &list);
+      if ((aFlags & PaintFrameFlags::PAINT_WIDGET_LAYERS) &&
+          aFrame->Properties().Get(nsIFrame::ModifiedFrameList())) {
+        nsTArray<nsIFrame*>* modifiedFrames = aFrame->Properties().Get(nsIFrame::ModifiedFrameList());
+
+        nsRect modifiedDirty;
+        for (nsIFrame* f : *modifiedFrames) {
+          modifiedDirty.UnionRect(modifiedDirty, TransformFrameRectToAncestor(f,
+                                                                              f->GetVisualOverflowRectRelativeToSelf(),
+                                                                              aFrame));
+        }
+        modifiedFrames->Clear();
+
+        nsDisplayList modifiedDL;
+        aFrame->BuildDisplayListForStackingContext(&builder, modifiedDirty, &modifiedDL);
+        //printf_stderr("Painting --- Modified list (dirty %d,%d,%d,%d):\n",
+        //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
+        //nsFrame::PrintDisplayList(&builder, modifiedDL);
+
+        builder.LeavePresShell(aFrame, &modifiedDL);
+        builder.EnterPresShell(aFrame);
+
+        MergeDisplayLists(&builder, &modifiedDL, &list);
+      } else {
+        list.DeleteAll();
+        aFrame->BuildDisplayListForStackingContext(&builder, dirtyRect, &list);
+      }
     }
 
     nsIAtom* frameType = aFrame->GetType();
@@ -3868,7 +3950,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
 
   // Flush the list so we don't trigger the IsEmpty-on-destruction assertion
-  list.DeleteAll();
+  //list.DeleteAll();
   return NS_OK;
 }
 

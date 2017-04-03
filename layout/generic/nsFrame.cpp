@@ -6336,6 +6336,21 @@ static void InvalidateFrameInternal(nsIFrame *aFrame, bool aHasDisplayItem = tru
   if (aHasDisplayItem) {
     aFrame->AddStateBits(NS_FRAME_NEEDS_PAINT);
   }
+
+  // TODO: We really should be storing this on the current stacking context, not the display
+  // root (which is the root stacking context, but not necessarily the one for the current frame)
+  // We should avoid adding duplicates here.
+  if (XRE_IsContentProcess()) {
+    nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
+    nsTArray<nsIFrame*>* modifiedFrames = displayRoot->Properties().Get(nsIFrame::ModifiedFrameList());
+    if (!modifiedFrames) {
+      modifiedFrames = new nsTArray<nsIFrame*>;
+      displayRoot->Properties().Set(nsIFrame::ModifiedFrameList(), modifiedFrames);
+    }
+    modifiedFrames->AppendElement(aFrame);
+  }
+
+
   nsSVGEffects::InvalidateDirectRenderingObservers(aFrame);
   bool needsSchedulePaint = false;
   if (nsLayoutUtils::IsPopup(aFrame)) {
