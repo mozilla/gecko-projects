@@ -32,6 +32,7 @@
 #include "D3D11ShareHandleImage.h"
 
 #include <VersionHelpers.h> // For IsWindows8OrGreater
+#include <winsdkver.h>
 
 namespace mozilla {
 
@@ -491,11 +492,14 @@ CompositorD3D11::Initialize(nsCString* const out_failureReason)
     RefPtr<IDXGIFactory2> dxgiFactory2;
     hr = dxgiFactory->QueryInterface((IDXGIFactory2**)getter_AddRefs(dxgiFactory2));
 
+#if (_WIN32_WINDOWS_MAXVER >= 0x0A00)
     if (gfxPrefs::Direct3D11UseDoubleBuffering() && SUCCEEDED(hr) && dxgiFactory2 && IsWindows10OrGreater()) {
       // DXGI_SCALING_NONE is not available on Windows 7 with Platform Update.
       // This looks awful for things like the awesome bar and browser window resizing
       // so we don't use a flip buffer chain here. When using EFFECT_SEQUENTIAL
       // it looks like windows doesn't stretch the surface when resizing.
+      // We chose not to run this before Windows 10 because it appears sometimes this breaks
+      // our ability to test ASAP compositing.
       RefPtr<IDXGISwapChain1> swapChain;
 
       DXGI_SWAP_CHAIN_DESC1 swapDesc;
@@ -527,7 +531,9 @@ CompositorD3D11::Initialize(nsCString* const out_failureReason)
       swapChain->SetBackgroundColor(&color);
 
       mSwapChain = swapChain;
-    } else {
+    } else
+#endif
+    {
       DXGI_SWAP_CHAIN_DESC swapDesc;
       ::ZeroMemory(&swapDesc, sizeof(swapDesc));
       swapDesc.BufferDesc.Width = 0;
@@ -823,6 +829,10 @@ CompositorD3D11::GetPSForEffect(Effect* aEffect,
 void
 CompositorD3D11::ClearRect(const gfx::Rect& aRect)
 {
+  if (aRect.IsEmpty()) {
+    return;
+  }
+
   mContext->OMSetBlendState(mAttachments->mDisabledBlendState, sBlendFactor, 0xFFFFFFFF);
 
   Matrix4x4 identity;
@@ -854,8 +864,6 @@ CompositorD3D11::ClearRect(const gfx::Rect& aRect)
   }
 
   mContext->Draw(4, 0);
-
-  mContext->OMSetBlendState(mAttachments->mPremulBlendState, sBlendFactor, 0xFFFFFFFF);
 }
 
 static inline bool
@@ -1358,8 +1366,12 @@ CompositorD3D11::BeginFrame(const nsIntRegion& aInvalidRegion,
 
   SetRenderTarget(mDefaultRT);
 
-  // ClearRect will set the correct blend state for us.
-  ClearRect(Rect(mCurrentClip.x, mCurrentClip.y, mCurrentClip.width, mCurrentClip.height));
+  IntRegion regionToClear(mCurrentClip);
+  regionToClear.Sub(regionToClear, aOpaqueRegion);
+
+  ClearRect(Rect(regionToClear.GetBounds()));
+
+  mContext->OMSetBlendState(mAttachments->mPremulBlendState, sBlendFactor, 0xFFFFFFFF);
 
   if (mAttachments->mSyncTexture) {
     RefPtr<IDXGIKeyedMutex> mutex;

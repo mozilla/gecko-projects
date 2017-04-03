@@ -54,16 +54,15 @@ use style::gecko_bindings::bindings::nsTimingFunctionBorrowed;
 use style::gecko_bindings::bindings::nsTimingFunctionBorrowedMut;
 use style::gecko_bindings::structs;
 use style::gecko_bindings::structs::{SheetParsingMode, nsIAtom, nsCSSPropertyID};
-use style::gecko_bindings::structs::{ThreadSafePrincipalHolder, ThreadSafeURIHolder};
 use style::gecko_bindings::structs::{nsRestyleHint, nsChangeHint, nsCSSFontFaceRule};
 use style::gecko_bindings::structs::Loader;
 use style::gecko_bindings::structs::RawGeckoPresContextOwned;
 use style::gecko_bindings::structs::ServoStyleSheet;
+use style::gecko_bindings::structs::URLExtraData;
 use style::gecko_bindings::structs::nsCSSValueSharedList;
 use style::gecko_bindings::structs::nsresult;
 use style::gecko_bindings::sugar::ownership::{FFIArcHelpers, HasFFI, HasArcFFI, HasBoxFFI};
 use style::gecko_bindings::sugar::ownership::{HasSimpleFFI, Strong};
-use style::gecko_bindings::sugar::refptr::{GeckoArcPrincipal, GeckoArcURI};
 use style::gecko_properties::{self, style_structs};
 use style::keyframes::KeyframesStepValue;
 use style::media_queries::{MediaList, parse_media_query_list};
@@ -331,9 +330,7 @@ pub extern "C" fn Servo_StyleSheet_FromUTF8Bytes(loader: *mut Loader,
                                                  data: *const nsACString,
                                                  mode: SheetParsingMode,
                                                  base_url: *const nsACString,
-                                                 base: *mut ThreadSafeURIHolder,
-                                                 referrer: *mut ThreadSafeURIHolder,
-                                                 principal: *mut ThreadSafePrincipalHolder)
+                                                 extra_data: *mut URLExtraData)
                                                  -> RawServoStyleSheetStrong {
     let global_style_data = &*GLOBAL_STYLE_DATA;
     let input = unsafe { data.as_ref().unwrap().as_str_unchecked() };
@@ -346,11 +343,7 @@ pub extern "C" fn Servo_StyleSheet_FromUTF8Bytes(loader: *mut Loader,
 
     let base_str = unsafe { base_url.as_ref().unwrap().as_str_unchecked() };
     let url = ServoUrl::parse(base_str).unwrap();
-    let extra_data = unsafe { ParserContextExtraData {
-        base: Some(GeckoArcURI::new(base)),
-        referrer: Some(GeckoArcURI::new(referrer)),
-        principal: Some(GeckoArcPrincipal::new(principal)),
-    }};
+    let extra_data = unsafe { ParserContextExtraData::new(extra_data) };
     let loader = if loader.is_null() {
         None
     } else {
@@ -375,16 +368,10 @@ pub extern "C" fn Servo_StyleSheet_ClearAndUpdate(stylesheet: RawServoStyleSheet
                                                   loader: *mut Loader,
                                                   gecko_stylesheet: *mut ServoStyleSheet,
                                                   data: *const nsACString,
-                                                  base: *mut ThreadSafeURIHolder,
-                                                  referrer: *mut ThreadSafeURIHolder,
-                                                  principal: *mut ThreadSafePrincipalHolder)
+                                                  extra_data: *mut URLExtraData)
 {
     let input = unsafe { data.as_ref().unwrap().as_str_unchecked() };
-    let extra_data = unsafe { ParserContextExtraData {
-        base: Some(GeckoArcURI::new(base)),
-        referrer: Some(GeckoArcURI::new(referrer)),
-        principal: Some(GeckoArcPrincipal::new(principal)),
-    }};
+    let extra_data = unsafe { ParserContextExtraData::new(extra_data) };
 
     let loader = if loader.is_null() {
         None
@@ -792,7 +779,7 @@ macro_rules! make_context {
 #[no_mangle]
 pub extern "C" fn Servo_ParseProperty(property: *const nsACString, value: *const nsACString,
                                       base: *const nsACString,
-                                      data: *const structs::GeckoParserExtraData)
+                                      data: *mut URLExtraData)
                                       -> RawServoDeclarationBlockStrong {
     let name = unsafe { property.as_ref().unwrap().as_str_unchecked() };
     let id = if let Ok(id) = PropertyId::parse(name.into()) {
@@ -824,7 +811,7 @@ pub extern "C" fn Servo_ParseProperty(property: *const nsACString, value: *const
 #[no_mangle]
 pub extern "C" fn Servo_ParseEasing(easing: *const nsAString,
                                     base: *const nsACString,
-                                    data: *const structs::GeckoParserExtraData,
+                                    data: *mut URLExtraData,
                                     output: nsTimingFunctionBorrowedMut)
                                     -> bool {
     use style::properties::longhands::transition_timing_function;
@@ -845,7 +832,7 @@ pub extern "C" fn Servo_ParseEasing(easing: *const nsAString,
 #[no_mangle]
 pub extern "C" fn Servo_ParseStyleAttribute(data: *const nsACString,
                                             base: *const nsACString,
-                                            raw_extra_data: *const structs::GeckoParserExtraData)
+                                            raw_extra_data: *mut URLExtraData)
                                             -> RawServoDeclarationBlockStrong {
     let global_style_data = &*GLOBAL_STYLE_DATA;
     let value = unsafe { data.as_ref().unwrap().as_str_unchecked() };
@@ -965,7 +952,7 @@ pub extern "C" fn Servo_DeclarationBlock_GetPropertyIsImportant(declarations: Ra
 
 fn set_property(declarations: RawServoDeclarationBlockBorrowed, property_id: PropertyId,
                 value: *const nsACString, is_important: bool,
-                base: *const nsACString, data: *const structs::GeckoParserExtraData) -> bool {
+                base: *const nsACString, data: *mut URLExtraData) -> bool {
     let value = unsafe { value.as_ref().unwrap().as_str_unchecked() };
 
     make_context!((base, data) => (base_url, extra_data));
@@ -985,7 +972,7 @@ pub extern "C" fn Servo_DeclarationBlock_SetProperty(declarations: RawServoDecla
                                                      property: *const nsACString, value: *const nsACString,
                                                      is_important: bool,
                                                      base: *const nsACString,
-                                                     data: *const structs::GeckoParserExtraData) -> bool {
+                                                     data: *mut URLExtraData) -> bool {
     set_property(declarations, get_property_id_from_property!(property, false),
                  value, is_important, base, data)
 }
@@ -995,7 +982,7 @@ pub extern "C" fn Servo_DeclarationBlock_SetPropertyById(declarations: RawServoD
                                                          property: nsCSSPropertyID, value: *const nsACString,
                                                          is_important: bool,
                                                          base: *const nsACString,
-                                                         data: *const structs::GeckoParserExtraData) -> bool {
+                                                         data: *mut URLExtraData) -> bool {
     set_property(declarations, get_property_id_from_nscsspropertyid!(property, false),
                  value, is_important, base, data)
 }
@@ -1148,6 +1135,7 @@ pub extern "C" fn Servo_DeclarationBlock_SetKeywordValue(declarations:
         Float => longhands::float::SpecifiedValue::from_gecko_keyword(value),
         VerticalAlign => longhands::vertical_align::SpecifiedValue::from_gecko_keyword(value),
         TextAlign => longhands::text_align::SpecifiedValue::from_gecko_keyword(value),
+        TextEmphasisPosition => longhands::text_emphasis_position::SpecifiedValue::from_gecko_keyword(value),
         Clear => longhands::clear::SpecifiedValue::from_gecko_keyword(value),
         FontSize => {
             // We rely on Gecko passing in font-size values (0...7) here.
@@ -1551,6 +1539,7 @@ pub extern "C" fn Servo_GetComputedKeyframeValues(keyframes: RawGeckoKeyframeLis
                                                   raw_data: RawServoStyleSetBorrowed,
                                                   computed_keyframes: RawGeckoComputedKeyframeValuesListBorrowedMut)
 {
+    use std::mem;
     use style::properties::LonghandIdSet;
     use style::properties::declaration_block::Importance;
     use style::values::computed::Context;
@@ -1614,6 +1603,10 @@ pub extern "C" fn Servo_GetComputedKeyframeValues(keyframes: RawGeckoKeyframeLis
                     unsafe { animation_values.set_len((i + 1) as u32) };
                     seen.set_transition_property_bit(&anim.0);
                     animation_values[i].mProperty = anim.0.into();
+                    // We only make sure we have enough space for this variable,
+                    // but didn't construct a default value for StyleAnimationValue,
+                    // so we should zero it to avoid getting undefined behaviors.
+                    animation_values[i].mValue.mGecko = unsafe { mem::zeroed() };
                     animation_values[i].mValue.mServo.set_arc_leaky(Arc::new(anim.1));
                 }
             }

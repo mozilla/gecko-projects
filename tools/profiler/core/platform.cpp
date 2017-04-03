@@ -414,8 +414,9 @@ AddDynamicCodeLocationTag(ProfileBuffer* aBuffer, const char* aStr)
 static const int SAMPLER_MAX_STRING_LENGTH = 128;
 
 static void
-AddPseudoEntry(ProfileBuffer* aBuffer, volatile js::ProfileEntry& entry,
-               PseudoStack* stack, void* lastpc)
+AddPseudoEntry(PS::LockRef aLock, ProfileBuffer* aBuffer,
+               volatile js::ProfileEntry& entry, PseudoStack* stack,
+               void* lastpc)
 {
   // Pseudo-frames with the BEGIN_PSEUDO_JS flag are just annotations and
   // should not be recorded in the profile.
@@ -428,7 +429,9 @@ AddPseudoEntry(ProfileBuffer* aBuffer, volatile js::ProfileEntry& entry,
   // First entry has kind CodeLocation. Check for magic pointer bit 1 to
   // indicate copy.
   const char* sampleLabel = entry.label();
-  const char* dynamicString = entry.getDynamicString();
+  bool includeDynamicString = !gPS->FeaturePrivacy(aLock);
+  const char* dynamicString =
+    includeDynamicString ? entry.getDynamicString() : nullptr;
   char combinedStringBuffer[SAMPLER_MAX_STRING_LENGTH];
 
   if (entry.isCopyLabel() || dynamicString) {
@@ -513,8 +516,8 @@ struct AutoWalkJSStack
 };
 
 static void
-MergeStacksIntoProfile(ProfileBuffer* aBuffer, TickSample* aSample,
-                       NativeStack& aNativeStack)
+MergeStacksIntoProfile(PS::LockRef aLock, ProfileBuffer* aBuffer,
+                       TickSample* aSample, NativeStack& aNativeStack)
 {
   NotNull<PseudoStack*> pseudoStack = aSample->mThreadInfo->Stack();
   volatile js::ProfileEntry* pseudoFrames = pseudoStack->mStack;
@@ -645,7 +648,7 @@ MergeStacksIntoProfile(ProfileBuffer* aBuffer, TickSample* aSample,
     if (pseudoStackAddr > jsStackAddr && pseudoStackAddr > nativeStackAddr) {
       MOZ_ASSERT(pseudoIndex < pseudoCount);
       volatile js::ProfileEntry& pseudoFrame = pseudoFrames[pseudoIndex];
-      AddPseudoEntry(aBuffer, pseudoFrame, pseudoStack, nullptr);
+      AddPseudoEntry(aLock, aBuffer, pseudoFrame, pseudoStack, nullptr);
       pseudoIndex++;
       continue;
     }
@@ -759,7 +762,7 @@ DoNativeBacktrace(PS::LockRef aLock, ProfileBuffer* aBuffer,
                thread, /* platformData */ nullptr);
 #endif
 
-  MergeStacksIntoProfile(aBuffer, aSample, nativeStack);
+  MergeStacksIntoProfile(aLock, aBuffer, aSample, nativeStack);
 }
 #endif
 
@@ -829,11 +832,30 @@ DoNativeBacktrace(PS::LockRef aLock, ProfileBuffer* aBuffer,
                                       pc_array + nativeStack.count,
                                       nativeStack.size - nativeStack.count);
 
-  MergeStacksIntoProfile(aBuffer, aSample, nativeStack);
+  MergeStacksIntoProfile(aLock, aBuffer, aSample, nativeStack);
 }
 #endif
 
 #ifdef USE_LUL_STACKWALK
+
+// See the comment at the callsite for why this function is necessary.
+#if defined(MOZ_HAVE_ASAN_BLACKLIST)
+MOZ_ASAN_BLACKLIST static void
+ASAN_memcpy(void* aDst, const void* aSrc, size_t aLen)
+{
+  // The obvious thing to do here is call memcpy(). However, although
+  // ASAN_memcpy() is not instrumented by ASAN, memcpy() still is, and the
+  // false positive still manifests! So we must implement memcpy() ourselves
+  // within this function.
+  char* dst = static_cast<char*>(aDst);
+  const char* src = static_cast<const char*>(aSrc);
+
+  for (size_t i = 0; i < aLen; i++) {
+    dst[i] = src[i];
+  }
+}
+#endif
+
 static void
 DoNativeBacktrace(PS::LockRef aLock, ProfileBuffer* aBuffer,
                   TickSample* aSample)
@@ -897,7 +919,20 @@ DoNativeBacktrace(PS::LockRef aLock, ProfileBuffer* aBuffer,
     stackImg.mLen       = nToCopy;
     stackImg.mStartAvma = start;
     if (nToCopy > 0) {
+      // If this is a vanilla memcpy(), ASAN makes the following complaint:
+      //
+      //   ERROR: AddressSanitizer: stack-buffer-underflow ...
+      //   ...
+      //   HINT: this may be a false positive if your program uses some custom
+      //   stack unwind mechanism or swapcontext
+      //
+      // This code is very much a custom stack unwind mechanism! So we use an
+      // alternative memcpy() implementation that is ignored by ASAN.
+#if defined(MOZ_HAVE_ASAN_BLACKLIST)
+      ASAN_memcpy(&stackImg.mContents[0], (void*)start, nToCopy);
+#else
       memcpy(&stackImg.mContents[0], (void*)start, nToCopy);
+#endif
       (void)VALGRIND_MAKE_MEM_DEFINED(&stackImg.mContents[0], nToCopy);
     }
   }
@@ -929,7 +964,7 @@ DoNativeBacktrace(PS::LockRef aLock, ProfileBuffer* aBuffer,
 
   nativeStack.count = framesUsed;
 
-  MergeStacksIntoProfile(aBuffer, aSample, nativeStack);
+  MergeStacksIntoProfile(aLock, aBuffer, aSample, nativeStack);
 
   // Update stats in the LUL stats object.  Unfortunately this requires
   // three global memory operations.
@@ -937,6 +972,7 @@ DoNativeBacktrace(PS::LockRef aLock, ProfileBuffer* aBuffer,
   lul->mStats.mCFI     += framesUsed - 1 - scannedFramesAcquired;
   lul->mStats.mScanned += scannedFramesAcquired;
 }
+
 #endif
 
 static void
@@ -944,7 +980,7 @@ DoSampleStackTrace(PS::LockRef aLock, ProfileBuffer* aBuffer,
                    TickSample* aSample)
 {
   NativeStack nativeStack = { nullptr, nullptr, 0, 0 };
-  MergeStacksIntoProfile(aBuffer, aSample, nativeStack);
+  MergeStacksIntoProfile(aLock, aBuffer, aSample, nativeStack);
 
   if (gPS->FeatureLeaf(aLock)) {
     aBuffer->addTag(ProfileBufferEntry::NativeLeafAddr((void*)aSample->mPC));
@@ -2853,18 +2889,6 @@ profiler_time()
   return delta.ToMilliseconds();
 }
 
-bool
-profiler_is_active_and_not_in_privacy_mode()
-{
-  // This function runs both on and off the main thread.
-
-  MOZ_RELEASE_ASSERT(gPS);
-
-  PS::AutoLock lock(gPSMutex);
-
-  return gPS->IsActive(lock) && !gPS->FeaturePrivacy(lock);
-}
-
 UniqueProfilerBacktrace
 profiler_get_backtrace()
 {
@@ -2927,9 +2951,16 @@ profiler_get_backtrace_noalloc(char *output, size_t outputSize)
   MOZ_ASSERT(outputSize >= 2);
   char *bound = output + outputSize - 2;
   output[0] = output[1] = '\0';
+
   PseudoStack *pseudoStack = tlsPseudoStack.get();
   if (!pseudoStack) {
     return;
+  }
+
+  bool includeDynamicString = true;
+  {
+    PS::AutoLock lock(gPSMutex);
+    includeDynamicString = !gPS->FeaturePrivacy(lock);
   }
 
   volatile js::ProfileEntry *pseudoFrames = pseudoStack->mStack;
@@ -2937,7 +2968,8 @@ profiler_get_backtrace_noalloc(char *output, size_t outputSize)
 
   for (uint32_t i = 0; i < pseudoCount; i++) {
     const char* label = pseudoFrames[i].label();
-    const char* dynamicString = pseudoFrames[i].getDynamicString();
+    const char* dynamicString =
+      includeDynamicString ? pseudoFrames[i].getDynamicString() : nullptr;
     size_t labelLength = strlen(label);
     if (dynamicString) {
       // Put the label, a space, and the dynamic string into output.

@@ -5127,7 +5127,7 @@ PresShell::PaintRangePaintInfo(const nsTArray<UniquePtr<RangePaintInfo>>& aItems
 
   if (aRegion) {
     RefPtr<PathBuilder> builder = dt->CreatePathBuilder(FillRule::FILL_WINDING);
-    
+
     // Convert aRegion from CSS pixels to dev pixels
     nsIntRegion region =
       aRegion->ToAppUnits(nsPresContext::AppUnitsPerCSSPixel())
@@ -6366,7 +6366,7 @@ PresShell::Paint(nsView*        aViewToPaint,
   }
   nsCString uriString = uri ? uri->GetSpecOrDefault() : NS_LITERAL_CSTRING("N/A");
   PROFILER_LABEL_DYNAMIC("PresShell", "Paint",
-    js::ProfileEntry::Category::GRAPHICS, Move(uriString));
+    js::ProfileEntry::Category::GRAPHICS, uriString.get());
 #endif
 
   Maybe<js::AutoAssertNoContentJS> nojs;
@@ -8071,12 +8071,12 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent,
             aEvent->mTimeStamp);
         }
 
-        Telemetry::AccumulateTimeDelta(Telemetry::KEYBOARD_EVENT_RECEIVED_MS, aEvent->mTimeStamp);
+        Telemetry::AccumulateTimeDelta(Telemetry::INPUT_EVENT_QUEUED_KEYBOARD_MS, aEvent->mTimeStamp);
         break;
       }
       case eMouseDown:
       case eMouseUp:
-        Telemetry::AccumulateTimeDelta(Telemetry::MOUSE_CLICK_EVENT_RECEIVED_MS, aEvent->mTimeStamp);
+        Telemetry::AccumulateTimeDelta(Telemetry::INPUT_EVENT_QUEUED_CLICK_MS, aEvent->mTimeStamp);
         MOZ_FALLTHROUGH;
       case ePointerDown:
       case ePointerUp:
@@ -8088,9 +8088,7 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent,
 
       case eMouseMove:
         if (aEvent->mFlags.mHandledByAPZ) {
-          Telemetry::AccumulateTimeDelta(Telemetry::APZ_HANDLED_MOUSE_MOVE_EVENT_RECEIVED_MS, aEvent->mTimeStamp);
-        } else {
-          Telemetry::AccumulateTimeDelta(Telemetry::MOUSE_MOVE_EVENT_RECEIVED_MS, aEvent->mTimeStamp);
+          Telemetry::AccumulateTimeDelta(Telemetry::INPUT_EVENT_QUEUED_APZ_MOUSE_MOVE_MS, aEvent->mTimeStamp);
         }
         break;
 
@@ -8108,13 +8106,13 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent,
 
       case eWheel:
         if (aEvent->mFlags.mHandledByAPZ) {
-          Telemetry::AccumulateTimeDelta(Telemetry::APZ_HANDLED_WHEEL_EVENT_RECEIVED_MS, aEvent->mTimeStamp);
+          Telemetry::AccumulateTimeDelta(Telemetry::INPUT_EVENT_QUEUED_APZ_WHEEL_MS, aEvent->mTimeStamp);
         }
         break;
 
       case eTouchMove:
         if (aEvent->mFlags.mHandledByAPZ) {
-          Telemetry::AccumulateTimeDelta(Telemetry::APZ_HANDLED_TOUCH_MOVE_EVENT_RECEIVED_MS, aEvent->mTimeStamp);
+          Telemetry::AccumulateTimeDelta(Telemetry::INPUT_EVENT_QUEUED_APZ_TOUCH_MOVE_MS, aEvent->mTimeStamp);
         }
         break;
 
@@ -9211,7 +9209,7 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
   nsIURI* uri = mDocument->GetDocumentURI();
   nsCString uriString = uri ? uri->GetSpecOrDefault() : NS_LITERAL_CSTRING("N/A");
   PROFILER_LABEL_DYNAMIC("PresShell", "DoReflow",
-    js::ProfileEntry::Category::GRAPHICS, Move(uriString));
+    js::ProfileEntry::Category::GRAPHICS, uriString.get());
 #endif
 
   nsDocShell* docShell = static_cast<nsDocShell*>(GetPresContext()->GetDocShell());
