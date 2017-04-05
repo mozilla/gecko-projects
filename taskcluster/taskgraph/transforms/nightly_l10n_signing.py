@@ -32,8 +32,7 @@ def make_signing_description(config, jobs):
         elif 'macosx' in dep_platform:
             job_specs = [
                  {
-                    'artifacts': ['public/build/{locale}/target.dmg',
-                                  'public/build/{locale}/target.checksums'],
+                    'artifacts': ['public/build/{locale}/target.dmg'],
                     'format': 'dmg',
                  }, {
                     'artifacts': ['public/build/{locale}/target.complete.mar'],
@@ -43,8 +42,7 @@ def make_signing_description(config, jobs):
         else:
             job_specs = [
                 {
-                    'artifacts': ['public/build/{locale}/target.tar.bz2',
-                                  'public/build/{locale}/target.checksums'],
+                    'artifacts': ['public/build/{locale}/target.tar.bz2'],
                     'format': 'gpg',
                 }, {
                     'artifacts': ['public/build/{locale}/target.complete.mar'],
