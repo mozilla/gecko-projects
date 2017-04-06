@@ -190,7 +190,6 @@ void
 FrameLayerBuilder::DisplayItemData::EndUpdate()
 {
   MOZ_RELEASE_ASSERT(mLayer);
-  MOZ_ASSERT(!mItem);
   mIsInvalid = false;
   mUsed = false;
 }
@@ -208,7 +207,6 @@ FrameLayerBuilder::DisplayItemData::EndUpdate(nsAutoPtr<nsDisplayItemGeometry> a
   mClip = mItem->GetClip();
   mFrameListChanges.Clear();
 
-  mItem = nullptr;
   EndUpdate();
 }
 
@@ -225,10 +223,7 @@ FrameLayerBuilder::DisplayItemData::BeginUpdate(Layer* aLayer, LayerState aState
   mLayerState = aState;
   mContainerLayerGeneration = aContainerLayerGeneration;
   mUsed = true;
-
-  if (aLayer->AsPaintedLayer()) {
-    mItem = aItem;
-  }
+  mItem = aItem;
 
   if (!aItem) {
     return;
@@ -1961,6 +1956,18 @@ FrameLayerBuilder::RemoveFrameFromLayerManager(const nsIFrame* aFrame,
     }
 
     data->mParent->mDisplayItems.RemoveEntry(data);
+
+    // TODO: It would be nice to remove this item from the underlying list, but that turns out to be really hard.
+    // It's a singly linked list, so we need the pointer to the list, and the pointer to the previous item (if one
+    // exists). We also need to ensure nothing else deletes our item before we get to here, which can happen if the
+    // display list itself (owned by an outer item) gets destroyed. We need to guarantee the right order of iterating
+    // these items for a given frame (since the outer and inner item can belong to the same fame), as well as the ordering
+    // of frame deleted callbacks. Alternatively we could have circular references and have the display item dtors clear
+    // this data out.
+    // Another option is to change how we manage display items entirely, and make them refcounted.
+    if (data->mItem) {
+      data->mItem->MarkFrameDeleted();
+    }
   }
 
   arrayCopy.Clear();

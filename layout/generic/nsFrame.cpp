@@ -978,6 +978,9 @@ nsFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
   }
 
   RemoveStateBits(NS_FRAME_SIMPLE_EVENT_REGIONS);
+  if (mParent) {
+    SchedulePaint();
+  }
 }
 
 void
@@ -6290,7 +6293,7 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
                                 0.0f);
 }
 
-static void InvalidateRenderingObservers(nsIFrame* aFrame)
+static void InvalidateRenderingObservers(nsIFrame* aFrame, bool aFrameChanged = true)
 {
   nsSVGEffects::InvalidateDirectRenderingObservers(aFrame);
   nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
@@ -6299,6 +6302,23 @@ static void InvalidateRenderingObservers(nsIFrame* aFrame)
          (parent = nsLayoutUtils::GetCrossDocParentFrame(parent)) &&
          !parent->HasAnyStateBits(NS_FRAME_DESCENDANT_NEEDS_PAINT)) {
     nsSVGEffects::InvalidateDirectRenderingObservers(parent);
+  }
+
+  if (!aFrameChanged) {
+    return;
+  }
+
+  // TODO: We really should be storing this on the current stacking context, not the display
+  // root (which is the root stacking context, but not necessarily the one for the current frame)
+  // We should avoid adding duplicates here.
+  if (XRE_IsContentProcess()) {
+    nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
+    nsTArray<nsIFrame*>* modifiedFrames = displayRoot->Properties().Get(nsIFrame::ModifiedFrameList());
+    if (!modifiedFrames) {
+      modifiedFrames = new nsTArray<nsIFrame*>;
+      displayRoot->Properties().Set(nsIFrame::ModifiedFrameList(), modifiedFrames);
+    }
+    modifiedFrames->AppendElement(aFrame);
   }
 }
 
@@ -6335,19 +6355,6 @@ static void InvalidateFrameInternal(nsIFrame *aFrame, bool aHasDisplayItem = tru
 {
   if (aHasDisplayItem) {
     aFrame->AddStateBits(NS_FRAME_NEEDS_PAINT);
-  }
-
-  // TODO: We really should be storing this on the current stacking context, not the display
-  // root (which is the root stacking context, but not necessarily the one for the current frame)
-  // We should avoid adding duplicates here.
-  if (XRE_IsContentProcess()) {
-    nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
-    nsTArray<nsIFrame*>* modifiedFrames = displayRoot->Properties().Get(nsIFrame::ModifiedFrameList());
-    if (!modifiedFrames) {
-      modifiedFrames = new nsTArray<nsIFrame*>;
-      displayRoot->Properties().Set(nsIFrame::ModifiedFrameList(), modifiedFrames);
-    }
-    modifiedFrames->AppendElement(aFrame);
   }
 
 
@@ -6575,9 +6582,9 @@ nsIFrame::IsInvalid(nsRect& aRect)
 }
 
 void
-nsIFrame::SchedulePaint(PaintType aType)
+nsIFrame::SchedulePaint(PaintType aType, bool aFrameChanged)
 {
-  InvalidateRenderingObservers(this);
+  InvalidateRenderingObservers(this, aFrameChanged);
   SchedulePaintInternal(this, aType);
 }
 
@@ -10335,6 +10342,8 @@ nsIFrame::SetParent(nsContainerFrame* aParent)
   // the way up the frame tree.
   if (aParent->HasAnyStateBits(NS_FRAME_ALL_DESCENDANTS_NEED_PAINT)) {
     InvalidateFrame();
+  } else {
+    SchedulePaint();
   }
 }
 

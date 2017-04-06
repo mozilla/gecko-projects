@@ -2551,6 +2551,7 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
   , mActiveScrolledRoot(aActiveScrolledRoot)
   , mAnimatedGeometryRoot(nullptr)
   , mForceNotVisible(aBuilder->IsBuildingInvisibleItems())
+  , mFrameDeleted(false)
 #ifdef MOZ_DUMP_PAINTING
   , mPainted(false)
 #endif

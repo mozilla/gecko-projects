@@ -2149,6 +2149,14 @@ public:
     return mFrame->BackfaceIsHidden();
   }
 
+  void MarkFrameDeleted() {
+    mFrameDeleted = true;
+  }
+
+  bool CanBeRecycled() {
+    return !mFrameDeleted;
+  }
+
 protected:
   friend class nsDisplayList;
 
@@ -2171,6 +2179,7 @@ protected:
   // Guaranteed to be contained in GetBounds().
   nsRect    mVisibleRect;
   bool      mForceNotVisible;
+  bool      mFrameDeleted;
 #ifdef MOZ_DUMP_PAINTING
   // True if this frame has been painted.
   bool      mPainted;

@@ -3500,6 +3500,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
                        nsDisplayList* aOldList)
 {
   nsDisplayList merged;
+  nsDisplayItem* old;
 
   while (nsDisplayItem* i = aNewList->RemoveBottom()) {
     // If the new item has a matching counterpart in the old list, copy all items
@@ -3507,16 +3508,28 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
     // TODO: We need to detect invalidated items in the old list (belonging to deleted
     // frames, or just items that aren't needed any more) and skip over them.
     if (FrameLayerBuilder::HasRetainedDataFor(i->Frame(), i->GetPerFrameKey())) {
-      nsDisplayItem* old;
       while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
-        merged.AppendToTop(old);
+        if (old->CanBeRecycled()) {
+          merged.AppendToTop(old);
+        } else {
+          // TODO: Is it going to be safe to call the dtor on a display item that belongs
+          // to a deleted frame? Can we ensure that it is? Or do we need to make sure we
+          // destroy display items during frame deletion.
+          old->~nsDisplayItem();
+        }
       }
     }
 
     merged.AppendToTop(i);
   }
   
-  merged.AppendToTop(aOldList);
+  while ((old = aOldList->RemoveBottom())) {
+    if (old->CanBeRecycled()) {
+      merged.AppendToTop(old);
+    } else {
+      old->~nsDisplayItem();
+    }
+  }
   
   //printf_stderr("Painting --- Merged list:\n");
   //nsFrame::PrintDisplayList(aBuilder, merged);
