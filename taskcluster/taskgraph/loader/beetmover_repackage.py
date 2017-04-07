@@ -11,9 +11,8 @@ def loader(kind, path, config, params, loaded_tasks):
     and signing jobs and transfer the artifacts to S3 after build and signing
     are completed.
     """
-    if config.get('kind-dependencies', []) != ["build-signing"] and \
-       config.get('kind-dependencies', []) != ["nightly-l10n-signing"]:
-        raise Exception("Beetmover kinds must depend on builds or signing builds")
+    if config.get('kind-dependencies', []) != ["repackage"]:
+        raise Exception("Beetmover_repackage kinds must depend on repackage builds")
     for task in loaded_tasks:
         if not task.attributes.get('nightly'):
             continue
@@ -24,10 +23,10 @@ def loader(kind, path, config, params, loaded_tasks):
         if not build_platform or not build_type:
             continue
         platform = "{}/{}".format(build_platform, build_type)
-        not_platforms = config.get('not-for-build-platforms')
-        if not_platforms and platform in not_platforms:
+        only_platforms = config.get('only-for-build-platforms')
+        if only_platforms and platform not in only_platforms:
             continue
 
-        beetmover_task = {'dependent-task': task}
+        beetmover_repackage_task = {'dependent-task': task}
 
-        yield beetmover_task
+        yield beetmover_repackage_task

@@ -2,14 +2,14 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-loader: taskgraph.loader.beetmover:loader
+loader: taskgraph.loader.beetmover_repackage:loader
 
 transforms:
-   - taskgraph.transforms.beetmover:transforms
+   - taskgraph.transforms.beetmover_repackage:transforms
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
-  - build-signing
+  - repackage 
 
-not-for-build-platforms:
-   - macosx64-nightly/opt
+only-for-build-platforms:
+  - macosx64-nightly/opt
