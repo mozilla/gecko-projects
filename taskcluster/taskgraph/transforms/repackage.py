@@ -125,7 +125,7 @@ def make_task_description(config, jobs):
             'label': label,
             'description': "{} Repackage".format(
                 dep_job.task["metadata"]["description"]),
-            'worker-type': "aws-provisioner-v1/gecko-1-b-macosx64",
+            'worker-type': 'aws-provisioner-v1/gecko-%s-b-macosx64' % level,
             'dependencies': dependencies,
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
