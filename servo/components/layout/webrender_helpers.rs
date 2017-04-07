@@ -370,12 +370,11 @@ impl WebRenderDisplayItemConverter for DisplayItem {
                 let start_point = item.gradient.start_point.to_pointf();
                 let end_point = item.gradient.end_point.to_pointf();
                 let clip = item.base.clip.to_clip_region(builder);
-                builder.push_gradient(rect,
-                                      clip,
-                                      start_point,
-                                      end_point,
-                                      item.gradient.stops.clone(),
-                                      ExtendMode::Clamp);
+                let gradient = builder.create_gradient(start_point,
+                                                       end_point,
+                                                       item.gradient.stops.clone(),
+                                                       ExtendMode::Clamp);
+                builder.push_gradient(rect, clip, gradient);
             }
             DisplayItem::Line(..) => {
                 println!("TODO DisplayItem::Line");
@@ -415,21 +414,18 @@ impl WebRenderDisplayItemConverter for DisplayItem {
                                               stacking_context.bounds.to_rectf(),
                                               stacking_context.z_index,
                                               transform,
+                                              webrender_traits::TransformStyle::Flat,
                                               perspective,
                                               stacking_context.blend_mode.to_blend_mode(),
                                               stacking_context.filters.to_filter_ops());
             }
             DisplayItem::PopStackingContext(_) => builder.pop_stacking_context(),
             DisplayItem::PushScrollRoot(ref item) => {
-                let clip = builder.new_clip_region(&item.scroll_root.clip.to_rectf(),
-                                                   vec![],
-                                                   None);
-
-                let provided_id = ScrollLayerId::new(item.scroll_root.id.0 as u64, builder.pipeline_id);
-                let id = builder.define_clip(clip,
-                                             item.scroll_root.size.to_sizef(),
-                                             Some(provided_id));
-                debug_assert!(provided_id == id);
+                let our_id = ScrollLayerId::new(item.scroll_root.id.0 as u64, builder.pipeline_id);
+                let clip = item.scroll_root.clip.to_clip_region(builder);
+                let content_rect = item.scroll_root.content_rect.to_rectf();
+                let webrender_id = builder.define_clip(content_rect, clip, Some(our_id));
+                debug_assert!(our_id == webrender_id);
             }
             DisplayItem::PopScrollRoot(_) => {} //builder.pop_scroll_layer(),
         }

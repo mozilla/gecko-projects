@@ -653,6 +653,10 @@
 ; gre location for now.
 @RESPATH@/defaults/pref/channel-prefs.js
 
+; Remote control protocol prefs
+; defined in ../../testing/marionette/prefs/marionette.js
+@RESPATH@/defaults/pref/marionette.js
+
 ; Services (gre) prefs
 @RESPATH@/defaults/pref/services-sync.js
 
@@ -796,14 +800,12 @@ bin/libfreebl_32int64_3.so
 @RESPATH@/components/nsTerminatorTelemetry.js
 @RESPATH@/components/terminator.manifest
 
-#if defined(CLANG_CXX)
-#if defined(MOZ_ASAN) || defined(MOZ_TSAN)
-@BINPATH@/llvm-symbolizer
-#endif
+#ifdef LLVM_SYMBOLIZER
+@BINPATH@/@LLVM_SYMBOLIZER@
 #endif
 
-#if defined(MOZ_ASAN) && defined(CLANG_CL)
-@BINPATH@/clang_rt.asan_dynamic-*.dll
+#ifdef MOZ_CLANG_RT_ASAN_LIB
+@BINPATH@/@MOZ_CLANG_RT_ASAN_LIB@
 #endif
 
 

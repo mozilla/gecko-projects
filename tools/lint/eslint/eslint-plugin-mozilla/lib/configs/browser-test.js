@@ -3,6 +3,7 @@
 
 module.exports = {
   "rules": {
+    "mozilla/import-content-task-globals": "error",
     "mozilla/import-headjs-globals": "warn",
     "mozilla/mark-test-function-used": "warn"
   },
@@ -35,7 +36,9 @@ module.exports = {
     "export_assertions": false,
     "extractJarToTmp": false,
     "finish": false,
+    "getChromeDir": false,
     "getJar": false,
+    "getResolvedURI": false,
     "getRootDirectory": false,
     "getTestFilePath": false,
     "gTestPath": false,
@@ -56,6 +59,8 @@ module.exports = {
     "todo_isnot": false,
     "waitForClipboard": false,
     "waitForExplicitFinish": false,
-    "waitForFocus": false
+    "waitForFocus": false,
+    "XPCNativeWrapper": false,
+    "XULDocument": false
   }
 };

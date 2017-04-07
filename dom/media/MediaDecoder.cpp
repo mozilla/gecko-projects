@@ -128,9 +128,7 @@ public:
 
 StaticRefPtr<MediaMemoryTracker> MediaMemoryTracker::sUniqueInstance;
 
-#if defined(PR_LOGGING)
 LazyLogModule gMediaTimerLog("MediaTimer");
-#endif
 
 void
 MediaDecoder::InitStatics()
@@ -994,7 +992,8 @@ MediaDecoder::PlaybackEnded()
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
 
-  if (mLogicallySeeking || mPlayState == PLAY_STATE_LOADING) {
+  if (mLogicallySeeking || mPlayState == PLAY_STATE_LOADING ||
+      mPlayState == PLAY_STATE_ENDED) {
     LOG("MediaDecoder::PlaybackEnded bailed out, "
         "mLogicallySeeking=%d mPlayState=%s",
         mLogicallySeeking.Ref(), ToPlayStateStr(mPlayState));

@@ -1041,8 +1041,8 @@ var Impl = {
    * @return The metadata as a JS object
    */
   getMetadata: function getMetadata(reason) {
-    const sessionStartDate = Utils.toLocalTimeISOString(Utils.truncateToDays(this._sessionStartDate));
-    const subsessionStartDate = Utils.toLocalTimeISOString(Utils.truncateToDays(this._subsessionStartDate));
+    const sessionStartDate = Utils.toLocalTimeISOString(Utils.truncateToHours(this._sessionStartDate));
+    const subsessionStartDate = Utils.toLocalTimeISOString(Utils.truncateToHours(this._subsessionStartDate));
     const monotonicNow = Policy.monotonicNow();
 
     let ret = {
@@ -1378,7 +1378,7 @@ var Impl = {
 
     let payload;
     try {
-      const isMobile = ["gonk", "android"].includes(AppConstants.platform);
+      const isMobile = (AppConstants.platform == "android");
       const isSubsession = isMobile ? false : !this._isClassicReason(reason);
 
       if (isMobile) {

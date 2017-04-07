@@ -14,6 +14,7 @@
 #include "mozilla/ServoElementSnapshot.h"
 #include "mozilla/css/SheetParsingMode.h"
 #include "mozilla/EffectCompositor.h"
+#include "mozilla/ComputedTimingFunction.h"
 #include "nsChangeHint.h"
 #include "nsCSSPseudoClasses.h"
 #include "nsStyleStruct.h"
@@ -68,8 +69,10 @@ struct nsStyleDisplay;
   void Gecko_##name_##_AddRef(class_* aPtr);    \
   void Gecko_##name_##_Release(class_* aPtr);
 #define NS_IMPL_FFI_REFCOUNTING(class_, name_)                    \
-  void Gecko_##name_##_AddRef(class_* aPtr) { NS_ADDREF(aPtr); }  \
-  void Gecko_##name_##_Release(class_* aPtr) { NS_RELEASE(aPtr); }
+  void Gecko_##name_##_AddRef(class_* aPtr)                       \
+    { MOZ_ASSERT(NS_IsMainThread()); NS_ADDREF(aPtr); }           \
+  void Gecko_##name_##_Release(class_* aPtr)                      \
+    { MOZ_ASSERT(NS_IsMainThread()); NS_RELEASE(aPtr); }
 
 #define DEFINE_ARRAY_TYPE_FOR(type_)                                \
   struct nsTArrayBorrowed_##type_ {                                 \
@@ -88,7 +91,7 @@ public:
   already_AddRefed<mozilla::css::URLValue> IntoCssUrl();
   const uint8_t* mURLString;
   uint32_t mURLStringLength;
-  mozilla::css::URLExtraData* mExtraData;
+  mozilla::URLExtraData* mExtraData;
 };
 
 // DOM Traversal.
@@ -118,10 +121,6 @@ void Gecko_LoadStyleSheet(mozilla::css::Loader* loader,
                           const uint8_t* media_bytes,
                           uint32_t media_length);
 
-// URLExtraData
-// Create a new addrefed URLExtraData.
-RawGeckoURLExtraData* Gecko_URLExtraData_CreateDummy();
-
 // By default, Servo walks the DOM by traversing the siblings of the DOM-view
 // first child. This generally works, but misses anonymous children, which we
 // want to traverse during styling. To support these cases, we create an
@@ -140,6 +139,8 @@ bool Gecko_MatchesElement(mozilla::CSSPseudoClassType type, RawGeckoElementBorro
 nsIAtom* Gecko_LocalName(RawGeckoElementBorrowed element);
 nsIAtom* Gecko_Namespace(RawGeckoElementBorrowed element);
 nsIAtom* Gecko_GetElementId(RawGeckoElementBorrowed element);
+
+nsIAtom* Gecko_GetXMLLangValue(RawGeckoElementBorrowed element);
 
 // Attributes.
 #define SERVO_DECLARE_ELEMENT_ATTR_MATCHING_FUNCTIONS(prefix_, implementor_)  \
@@ -191,6 +192,18 @@ bool Gecko_ElementHasAnimations(RawGeckoElementBorrowed aElement,
                                 nsIAtom* aPseudoTagOrNull);
 bool Gecko_ElementHasCSSAnimations(RawGeckoElementBorrowed aElement,
                                    nsIAtom* aPseudoTagOrNull);
+double Gecko_GetProgressFromComputedTiming(RawGeckoComputedTimingBorrowed aComputedTiming);
+double Gecko_GetPositionInSegment(
+  RawGeckoAnimationPropertySegmentBorrowed aSegment,
+  double aProgress,
+  mozilla::ComputedTimingFunction::BeforeFlag aBeforeFlag);
+// Get servo's AnimationValue for |aProperty| from the cached base style
+// |aBaseStyles|.
+// |aBaseStyles| is nsRefPtrHashtable<nsUint32HashKey, RawServoAnimationValue>.
+// We use void* to avoid exposing nsRefPtrHashtable in FFI.
+RawServoAnimationValueBorrowedOrNull Gecko_AnimationGetBaseStyle(
+  void* aBaseStyles,
+  nsCSSPropertyID aProperty);
 
 // Atoms.
 nsIAtom* Gecko_Atomize(const char* aString, uint32_t aLength);
@@ -377,6 +390,8 @@ const nsMediaFeature* Gecko_GetMediaFeatures();
 nsCSSFontFaceRule* Gecko_CSSFontFaceRule_Create();
 void Gecko_CSSFontFaceRule_GetCssText(const nsCSSFontFaceRule* rule, nsAString* result);
 NS_DECL_FFI_REFCOUNTING(nsCSSFontFaceRule, CSSFontFaceRule);
+
+RawGeckoElementBorrowedOrNull Gecko_GetBody(RawGeckoPresContextBorrowed pres_context);
 
 // We use an int32_t here instead of a LookAndFeel::ColorID
 // because forward-declaring a nested enum/struct is impossible

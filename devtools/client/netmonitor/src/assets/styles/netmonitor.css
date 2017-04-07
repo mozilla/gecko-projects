@@ -101,6 +101,9 @@ body,
   display: inline-flex;
   align-content: stretch;
   margin-inline-end: 10px;
+
+  /* Status bar has just one line so, don't wrap labels */
+  white-space: nowrap;
 }
 
 .status-bar-label::before {
@@ -151,7 +154,7 @@ body,
 }
 
 .requests-list-perf-notice-button::before {
-  background-image: url(images/profiler-stopwatch.svg);
+  background-image: url(chrome://devtools/skin/images/profiler-stopwatch.svg);
 }
 
 .requests-list-reload-notice-button {
@@ -702,7 +705,8 @@ body,
 .properties-view {
   display: flex;
   flex-direction: column;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .properties-view {
@@ -853,6 +857,18 @@ body,
   color: var(--theme-selection-color);
 }
 
+.learn-more-link {
+  color: var(--theme-highlight-blue);
+  cursor: pointer;
+  margin: 0 5px;
+  white-space: nowrap;
+  flex-grow: 1;
+}
+
+.learn-more-link:hover {
+  text-decoration: underline;
+}
+
 /* Headers tabpanel */
 
 .headers-overview {
@@ -901,18 +917,6 @@ body,
 
 .headers-summary .status-text {
     width: auto!important;
-}
-
-.headers-summary .learn-more-link {
-  color: var(--theme-highlight-blue);
-  cursor: pointer;
-  margin: 0 5px;
-  white-space: nowrap;
-  flex-grow: 1;
-}
-
-.headers-summary .learn-more-link:hover {
-  text-decoration: underline;
 }
 
 /* Response tabpanel */
@@ -1018,7 +1022,7 @@ body,
 }
 
 .security-warning-icon {
-  background-image: url(images/alerticon-warning.png);
+  background-image: url(chrome://devtools/skin/images/alerticon-warning.png);
   background-size: 13px 12px;
   margin-inline-start: 5px;
   vertical-align: top;
@@ -1028,7 +1032,7 @@ body,
 
 @media (min-resolution: 1.1dppx) {
   .security-warning-icon {
-    background-image: url(images/alerticon-warning@2x.png);
+    background-image: url(chrome://devtools/skin/images/alerticon-warning@2x.png);
   }
 }
 
@@ -1093,11 +1097,10 @@ body,
   padding-inline-end: 0;
   cursor: pointer;
   margin-inline-end: 1em;
-  min-width: 0;
 }
 
 .requests-list-network-summary-button > .summary-info-icon {
-  background-image: url(images/profiler-stopwatch.svg);
+  background-image: url(chrome://devtools/skin/images/profiler-stopwatch.svg);
   filter: var(--icon-filter);
   width: 16px;
   height: 16px;
@@ -1286,12 +1289,6 @@ body,
 
 /* Responsive sidebar */
 @media (max-width: 700px) {
-  #toolbar-spacer,
-  .network-details-panel-toggle,
-  .requests-list-network-summary-button > .summary-info-text {
-    display: none;
-  }
-
   .requests-list-toolbar {
     height: 22px;
   }

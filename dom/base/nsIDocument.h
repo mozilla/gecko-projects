@@ -110,6 +110,7 @@ class EventStates;
 class PendingAnimationTracker;
 class StyleSetHandle;
 template<typename> class OwningNonNull;
+struct URLExtraData;
 
 namespace css {
 class Loader;
@@ -483,6 +484,15 @@ public:
   virtual already_AddRefed<nsIURI> GetBaseURI(bool aTryUseXHRDocBaseURI = false) const override;
 
   virtual void SetBaseURI(nsIURI* aURI) = 0;
+
+  /**
+   * Return the URL data which style system needs for resolving url value.
+   * This method attempts to use the cached object in mCachedURLData, but
+   * if the base URI, document URI, or principal has changed since last
+   * call to this function, or the function is called the first time for
+   * the document, a new one is created.
+   */
+  mozilla::URLExtraData* DefaultStyleAttrURLData();
 
   /**
    * Get/Set the base target of a link in a document.
@@ -1068,7 +1078,7 @@ public:
     : public nsExpirationTracker<SelectorCacheKey, 4>
   {
     public:
-      SelectorCache();
+      explicit SelectorCache(nsIEventTarget* aEventTarget);
 
       // CacheList takes ownership of aSelectorList.
       void CacheList(const nsAString& aSelector, nsCSSSelectorList* aSelectorList);
@@ -1091,9 +1101,12 @@ public:
       nsClassHashtable<nsStringHashKey, nsCSSSelectorList> mTable;
   };
 
-  SelectorCache& GetSelectorCache()
-  {
-    return mSelectorCache;
+  SelectorCache& GetSelectorCache() {
+    if (!mSelectorCache) {
+      mSelectorCache =
+        new SelectorCache(EventTargetFor(mozilla::TaskCategory::Other));
+    }
+    return *mSelectorCache;
   }
   // Get the root <html> element, or return null if there isn't one (e.g.
   // if the root isn't <html>)
@@ -2916,7 +2929,8 @@ protected:
 private:
   mutable std::bitset<eDeprecatedOperationCount> mDeprecationWarnedAbout;
   mutable std::bitset<eDocumentWarningCount> mDocWarningWarnedAbout;
-  SelectorCache mSelectorCache;
+  // Lazy-initialization to have mDocGroup initialized in prior to mSelectorCache.
+  nsAutoPtr<SelectorCache> mSelectorCache;
 
 protected:
   ~nsIDocument();
@@ -2979,6 +2993,11 @@ protected:
   nsCOMPtr<nsIURI> mChromeXHRDocURI;
   nsCOMPtr<nsIURI> mDocumentBaseURI;
   nsCOMPtr<nsIURI> mChromeXHRDocBaseURI;
+
+#ifdef MOZ_STYLO
+  // A lazily-constructed URL data for style system to resolve URL value.
+  RefPtr<mozilla::URLExtraData> mCachedURLData;
+#endif
 
   nsWeakPtr mDocumentLoadGroup;
 

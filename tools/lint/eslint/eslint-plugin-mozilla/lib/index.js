@@ -34,6 +34,10 @@ module.exports = {
     "avoid-nsISupportsString-preferences":
       require("../lib/rules/avoid-nsISupportsString-preferences"),
     "balanced-listeners": require("../lib/rules/balanced-listeners"),
+    "import-browser-window-globals":
+      require("../lib/rules/import-browser-window-globals"),
+    "import-content-task-globals":
+      require("../lib/rules/import-content-task-globals"),
     "import-globals": require("../lib/rules/import-globals"),
     "import-headjs-globals": require("../lib/rules/import-headjs-globals"),
     "mark-test-function-used": require("../lib/rules/mark-test-function-used"),
@@ -57,6 +61,8 @@ module.exports = {
     "avoid-removeChild": "off",
     "avoid-nsISupportsString-preferences": "off",
     "balanced-listeners": "off",
+    "import-browser-window-globals": "off",
+    "import-content-task-globals": "off",
     "import-globals": "off",
     "import-headjs-globals": "off",
     "mark-test-function-used": "off",

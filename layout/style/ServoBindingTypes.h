@@ -20,15 +20,15 @@ struct RawServoStyleSet;
 #undef SERVO_ARC_TYPE
 
 namespace mozilla {
-  class ServoElementSnapshot;
-  struct StyleAnimation;
-namespace css {
+class ServoElementSnapshot;
+struct StyleAnimation;
 struct URLExtraData;
-} // namespace css
 namespace dom {
 class Element;
 class StyleChildrenIterator;
 } // namespace dom
+struct AnimationPropertySegment;
+struct ComputedTiming;
 struct Keyframe;
 struct PropertyStyleAnimationValuePair;
 using ComputedKeyframeValues = nsTArray<PropertyStyleAnimationValuePair>;
@@ -48,12 +48,14 @@ typedef nsINode RawGeckoNode;
 typedef mozilla::dom::Element RawGeckoElement;
 typedef nsIDocument RawGeckoDocument;
 typedef nsPresContext RawGeckoPresContext;
-typedef mozilla::css::URLExtraData RawGeckoURLExtraData;
+typedef mozilla::URLExtraData RawGeckoURLExtraData;
 typedef nsTArray<mozilla::Keyframe> RawGeckoKeyframeList;
 typedef nsTArray<mozilla::ComputedKeyframeValues> RawGeckoComputedKeyframeValuesList;
 typedef nsTArray<mozilla::PropertyStyleAnimationValuePair> RawGeckoAnimationValueList;
 typedef nsStyleAutoArray<mozilla::StyleAnimation> RawGeckoStyleAnimationList;
 typedef nsTArray<nsFontFaceRuleContainer> RawGeckoFontFaceRuleList;
+typedef mozilla::AnimationPropertySegment RawGeckoAnimationPropertySegment;
+typedef mozilla::ComputedTiming RawGeckoComputedTiming;
 
 // We have these helper types so that we can directly generate
 // things like &T or Borrowed<T> on the Rust side in the function, providing
@@ -131,6 +133,8 @@ DECL_BORROWED_REF_TYPE_FOR(RawGeckoStyleAnimationList)
 DECL_BORROWED_MUT_REF_TYPE_FOR(nsTimingFunction)
 DECL_BORROWED_REF_TYPE_FOR(nsTimingFunction)
 DECL_BORROWED_MUT_REF_TYPE_FOR(RawGeckoFontFaceRuleList)
+DECL_BORROWED_REF_TYPE_FOR(RawGeckoAnimationPropertySegment)
+DECL_BORROWED_REF_TYPE_FOR(RawGeckoComputedTiming)
 
 #undef DECL_ARC_REF_TYPE_FOR
 #undef DECL_OWNED_REF_TYPE_FOR

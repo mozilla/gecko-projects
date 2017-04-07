@@ -508,10 +508,10 @@ pub struct ScrollRoot {
     pub parent_id: ScrollRootId,
 
     /// The position of this scroll root's frame in the parent stacking context.
-    pub clip: Rect<Au>,
+    pub clip: ClippingRegion,
 
-    /// The size of the contents that can be scrolled inside of the scroll root.
-    pub size: Size2D<Au>,
+    /// The rect of the contents that can be scrolled inside of the scroll root.
+    pub content_rect: Rect<Au>,
 }
 
 impl ScrollRoot {

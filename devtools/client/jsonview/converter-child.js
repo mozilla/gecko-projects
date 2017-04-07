@@ -12,10 +12,6 @@ const Services = require("Services");
 
 loader.lazyRequireGetter(this, "NetworkHelper",
                                "devtools/shared/webconsole/network-helper");
-loader.lazyRequireGetter(this, "Events",
-                               "sdk/dom/events");
-loader.lazyRequireGetter(this, "Clipboard",
-                               "sdk/clipboard");
 loader.lazyRequireGetter(this, "JsonViewUtils",
                                "devtools/client/jsonview/utils");
 
@@ -106,7 +102,7 @@ Converter.prototype = {
     // Because content might still have a reference to this window,
     // force setting it to a null principal to avoid it being same-
     // origin with (other) content.
-    this.channel.loadInfo.resetPrincipalsToNullPrincipal();
+    this.channel.loadInfo.resetPrincipalToInheritToNullPrincipal();
 
     this.listener.onStartRequest(this.channel, context);
   },
@@ -140,10 +136,10 @@ Converter.prototype = {
 
     JsonViewUtils.exportIntoContentScope(win, Locale, "Locale");
 
-    Events.once(win, "DOMContentLoaded", event => {
+    win.addEventListener("DOMContentLoaded", event => {
       win.addEventListener("contentMessage",
         this.onContentMessage.bind(this), false, true);
-    });
+    }, {once: true});
 
     // The request doesn't have to be always nsIHttpChannel
     // (e.g. in case of data: URLs)
@@ -281,11 +277,11 @@ Converter.prototype = {
     let value = e.detail.value;
     switch (e.detail.type) {
       case "copy":
-        Clipboard.set(value, "text");
+        copyString(win, value);
         break;
 
       case "copy-headers":
-        this.copyHeaders(value);
+        this.copyHeaders(win, value);
         break;
 
       case "save":
@@ -294,7 +290,7 @@ Converter.prototype = {
     }
   },
 
-  copyHeaders: function (headers) {
+  copyHeaders: function (win, headers) {
     let value = "";
     let eol = (Services.appinfo.OS !== "WINNT") ? "\n" : "\r\n";
 
@@ -312,9 +308,18 @@ Converter.prototype = {
       value += header.name + ": " + header.value + eol;
     }
 
-    Clipboard.set(value, "text");
+    copyString(win, value);
   }
 };
+
+function copyString(win, string) {
+  win.document.addEventListener("copy", event => {
+    event.clipboardData.setData("text/plain", string);
+    event.preventDefault();
+  }, {once: true});
+
+  win.document.execCommand("copy", false, null);
+}
 
 function createInstance() {
   return new Converter();

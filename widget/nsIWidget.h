@@ -572,6 +572,12 @@ class nsIWidget : public nsISupports
     mozilla::CSSToLayoutDeviceScale GetDefaultScale();
 
     /**
+     * Cache the scale override value. Call whenever the scale override
+     * value is changed.
+     */
+    static void ScaleOverrideChanged();
+
+    /**
      * Return the Gecko override of the system default scale, if any;
      * returns <= 0.0 if the system scale should be used as-is.
      * nsIWidget::GetDefaultScale() [above] takes this into account.
@@ -1852,6 +1858,9 @@ public:
      */
     static already_AddRefed<nsIWidget>
     CreatePuppetWidget(TabChild* aTabChild);
+
+    static already_AddRefed<nsIWidget>
+    CreateHeadlessWidget();
 
     /**
      * Allocate and return a "plugin proxy widget", a subclass of PuppetWidget

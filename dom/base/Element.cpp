@@ -458,7 +458,7 @@ Element::GetBindingURL(nsIDocument *aDocument, css::URLValue **aResult)
 
   // Get the computed -moz-binding directly from the style context
   RefPtr<nsStyleContext> sc =
-    nsComputedDOMStyle::GetStyleContextForElementNoFlush(this, nullptr, shell);
+    nsComputedDOMStyle::GetStyleContextNoFlush(this, nullptr, shell);
   NS_ENSURE_TRUE(sc, false);
 
   NS_IF_ADDREF(*aResult = sc->StyleDisplay()->mBinding);
@@ -1697,6 +1697,28 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                              shadowRoot->GetBindingParent(),
                              aCompileEventHandlers);
       NS_ENSURE_SUCCESS(rv, rv);
+    }
+  }
+
+  // Pseudo-elements implemented by JS must have the NODE_IS_NATIVE_ANONYMOUS
+  // flag set on them. For C++-created pseudo-elements, this is done in
+  // nsCSSFrameConstructor::GetAnonymousContent, but any JS that creates
+  // pseudo-elements would run after that. So we set that flag here,
+  // when the element implementing the pseudo is inserted into the document.
+  // We maintain the invariant that any NAC-implemented pseudo-element's
+  // anonymous ancestors are also flagged as NAC, which the style system relies on.
+  if (aDocument) {
+    CSSPseudoElementType pseudoType = GetPseudoElementType();
+    if (pseudoType != CSSPseudoElementType::NotPseudo &&
+        nsCSSPseudoElements::PseudoElementIsJSCreatedNAC(pseudoType)) {
+      SetFlags(NODE_IS_NATIVE_ANONYMOUS);
+      nsIContent* parent = aParent;
+      while (parent && !parent->IsRootOfNativeAnonymousSubtree()) {
+        MOZ_ASSERT(parent->IsInNativeAnonymousSubtree());
+        parent->SetFlags(NODE_IS_NATIVE_ANONYMOUS);
+        parent = parent->GetParent();
+      }
+      MOZ_ASSERT(parent);
     }
   }
 

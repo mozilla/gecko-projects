@@ -10,6 +10,7 @@
 /* import-globals-from privacy.js */
 /* import-globals-from applications.js */
 /* import-globals-from sync.js */
+/* import-globals-from findInPage.js */
 /* import-globals-from ../../../base/content/utilityOverlay.js */
 
 "use strict";
@@ -59,6 +60,8 @@ function init_all() {
   register_module("paneAdvanced", gAdvancedPane);
   register_module("paneApplications", gApplicationsPane);
   register_module("paneSync", gSyncPane);
+  register_module("paneSearchResults", gSearchResultsPane);
+  gSearchResultsPane.init();
 
   let categories = document.getElementById("categories");
   categories.addEventListener("select", event => gotoPref(event.target.value));
@@ -116,6 +119,7 @@ function init_dynamic_padding() {
 }
 
 function telemetryBucketForCategory(category) {
+  category = category.toLowerCase();
   switch (category) {
     case "applications":
     case "advanced":
@@ -123,6 +127,7 @@ function telemetryBucketForCategory(category) {
     case "general":
     case "privacy":
     case "sync":
+    case "searchresults":
       return category;
     default:
       return "unknown";
@@ -135,7 +140,7 @@ function onHashChange() {
 
 function gotoPref(aCategory) {
   let categories = document.getElementById("categories");
-  const kDefaultCategoryInternalName = categories.firstElementChild.value;
+  const kDefaultCategoryInternalName = "paneGeneral";
   let hash = document.location.hash;
   let category = aCategory || hash.substr(1) || kDefaultCategoryInternalName;
   category = friendlyPrefCategoryNameToInternalName(category);
@@ -179,8 +184,14 @@ function search(aQuery, aAttribute) {
   let mainPrefPane = document.getElementById("mainPrefPane");
   let elements = mainPrefPane.children;
   for (let element of elements) {
-    let attributeValue = element.getAttribute(aAttribute);
-    element.hidden = (attributeValue != aQuery);
+    // If the "data-hidden-from-search" is "true", the
+    // element will not get considered during search. This
+    // should only be used when an element is still under
+    // development and should not be shown for any reason.
+    if (element.getAttribute("data-hidden-from-search") != "true") {
+      let attributeValue = element.getAttribute(aAttribute);
+      element.hidden = (attributeValue != aQuery);
+    }
   }
 
   let keysets = mainPrefPane.getElementsByTagName("keyset");

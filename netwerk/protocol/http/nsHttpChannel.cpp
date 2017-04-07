@@ -335,7 +335,7 @@ nsHttpChannel::Init(nsIURI *uri,
                     nsProxyInfo *proxyInfo,
                     uint32_t proxyResolveFlags,
                     nsIURI *proxyURI,
-                    const nsID& channelId)
+                    uint64_t channelId)
 {
     nsresult rv = HttpBaseChannel::Init(uri, caps, proxyInfo,
                                         proxyResolveFlags, proxyURI, channelId);
@@ -2387,7 +2387,7 @@ nsHttpChannel::ContinueProcessResponse3(nsresult rv)
 
     LOG(("ContinueProcessResponse3 got failure result [rv=%" PRIx32 "]\n",
          static_cast<uint32_t>(rv)));
-    if (mTransaction->ProxyConnectFailed()) {
+    if (mTransaction && mTransaction->ProxyConnectFailed()) {
         return ProcessFailedProxyConnect(mRedirectType);
     }
     return ProcessNormal();

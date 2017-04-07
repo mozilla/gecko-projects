@@ -44,7 +44,7 @@ var ecmaGlobals =
     "Int32Array",
     "Int8Array",
     "InternalError",
-    "Intl",
+    {name: "Intl", nonReleaseAndroid: true, android: false},
     "Iterator",
     "JSON",
     "Map",
@@ -596,9 +596,9 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "InstallTrigger",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "IntersectionObserver", disabled: true},
+    "IntersectionObserver",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "IntersectionObserverEntry", disabled: true},
+    "IntersectionObserverEntry",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "KeyEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1119,8 +1119,6 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "SVGZoomAndPan",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGZoomEvent",
-// IMPORTANT: Do not change this list without review from a DOM peer!
     "Text",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "TextDecoder",
@@ -1318,12 +1316,13 @@ function createInterfaceMap(isXBLScope) {
         ok(!("pref" in entry), "Bogus pref annotation for " + entry.name);
         if ((entry.nightly === !isNightly) ||
             (entry.nightlyAndroid === !(isAndroid && isNightly) && isAndroid) ||
+            (entry.nonReleaseAndroid === !(isAndroid && !isRelease) && isAndroid) ||
             (entry.xbl === !isXBLScope) ||
             (entry.desktop === !isDesktop) ||
             (entry.windows === !isWindows) ||
             (entry.mac === !isMac) ||
             (entry.linux === !isLinux) ||
-            (entry.android === !isAndroid && !entry.nightlyAndroid) ||
+            (entry.android === !isAndroid && !entry.nonReleaseAndroid && !entry.nightlyAndroid) ||
             (entry.release === !isRelease) ||
             (entry.isSecureContext === !isSecureContext) ||
             entry.disabled) {

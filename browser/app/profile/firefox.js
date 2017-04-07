@@ -670,6 +670,10 @@ pref("browser.preferences.instantApply", false);
 #else
 pref("browser.preferences.instantApply", true);
 #endif
+
+// Toggling Search bar on and off in about:preferences
+pref("browser.preferences.search", false);
+
 // Once the Storage Management is completed.
 // (The Storage Management-related prefs are browser.storageManager.* )
 // The Offline(Appcache) Group section in about:preferences will be hidden.
@@ -789,8 +793,16 @@ pref("browser.selfsupport.url", "https://self-repair.mozilla.org/%LOCALE%/repair
 pref("browser.sessionstore.resume_from_crash", true);
 pref("browser.sessionstore.resume_session_once", false);
 
-// minimal interval between two save operations in milliseconds
-pref("browser.sessionstore.interval", 15000);
+// Minimal interval between two save operations in milliseconds (while the user is active).
+pref("browser.sessionstore.interval", 15000); // 15 seconds
+
+// Minimal interval between two save operations in milliseconds (while the user is idle).
+pref("browser.sessionstore.interval.idle", 3600000); // 1h
+
+// Time (ms) before we assume that the user is idle and that we don't need to
+// collect/save the session quite as often.
+pref("browser.sessionstore.idleDelay", 180000); // 3 minutes
+
 // on which sites to save text data, POSTDATA and cookies
 // 0 = everywhere, 1 = unencrypted sites, 2 = nowhere
 pref("browser.sessionstore.privacy_level", 0);

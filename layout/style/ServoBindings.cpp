@@ -7,7 +7,6 @@
 #include "mozilla/ServoBindings.h"
 
 #include "ChildIterator.h"
-#include "NullPrincipalURI.h"
 #include "gfxFontFamilyList.h"
 #include "nsAnimationManager.h"
 #include "nsAttrValueInlines.h"
@@ -21,6 +20,7 @@
 #include "nsIContentInlines.h"
 #include "nsIDOMNode.h"
 #include "nsIDocument.h"
+#include "nsIDocumentInlines.h"
 #include "nsIFrame.h"
 #include "nsINode.h"
 #include "nsIPresShell.h"
@@ -48,6 +48,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ElementInlines.h"
 #include "mozilla/dom/HTMLTableCellElement.h"
+#include "mozilla/dom/HTMLBodyElement.h"
 #include "mozilla/LookAndFeel.h"
 
 using namespace mozilla;
@@ -511,6 +512,37 @@ Gecko_ElementHasCSSAnimations(RawGeckoElementBorrowed aElement,
   return collection && !collection->mAnimations.IsEmpty();
 }
 
+double
+Gecko_GetProgressFromComputedTiming(RawGeckoComputedTimingBorrowed aComputedTiming)
+{
+  return aComputedTiming->mProgress.Value();
+}
+
+double
+Gecko_GetPositionInSegment(RawGeckoAnimationPropertySegmentBorrowed aSegment,
+                          double aProgress,
+                          ComputedTimingFunction::BeforeFlag aBeforeFlag)
+{
+  MOZ_ASSERT(aSegment->mFromKey < aSegment->mToKey,
+             "The segment from key should be less than to key");
+
+  double positionInSegment =
+    (aProgress - aSegment->mFromKey) / (aSegment->mToKey - aSegment->mFromKey);
+
+  return ComputedTimingFunction::GetPortion(aSegment->mTimingFunction,
+                                            positionInSegment,
+                                            aBeforeFlag);
+}
+
+RawServoAnimationValueBorrowedOrNull
+Gecko_AnimationGetBaseStyle(void* aBaseStyles, nsCSSPropertyID aProperty)
+{
+  auto base =
+    static_cast<nsRefPtrHashtable<nsUint32HashKey, RawServoAnimationValue>*>
+      (aBaseStyles);
+  return base->GetWeak(aProperty);
+}
+
 void
 Gecko_FillAllBackgroundLists(nsStyleImageLayers* aLayers, uint32_t aMaxLen)
 {
@@ -521,6 +553,12 @@ void
 Gecko_FillAllMaskLists(nsStyleImageLayers* aLayers, uint32_t aMaxLen)
 {
   nsRuleNode::FillAllMaskLists(*aLayers, aMaxLen);
+}
+
+RawGeckoElementBorrowedOrNull
+Gecko_GetBody(RawGeckoPresContextBorrowed aPresContext)
+{
+  return aPresContext->Document()->GetBodyElement();
 }
 
 nscolor Gecko_GetLookAndFeelSystemColor(int32_t aId,
@@ -543,6 +581,16 @@ Gecko_MatchStringArgPseudo(RawGeckoElementBorrowed aElement,
   return nsCSSRuleProcessor::StringPseudoMatches(aElement, aType, aIdent,
                                                  aElement->OwnerDoc(), true,
                                                  dummyMask, false, aSetSlowSelectorFlag, nullptr);
+}
+
+nsIAtom*
+Gecko_GetXMLLangValue(RawGeckoElementBorrowed aElement)
+{
+  nsString string;
+  if (aElement->GetAttr(kNameSpaceID_XML, nsGkAtoms::lang, string)) {
+    return NS_Atomize(string).take();
+  }
+  return nullptr;
 }
 
 template <typename Implementor>
@@ -1133,7 +1181,7 @@ void
 Gecko_EnsureStyleAnimationArrayLength(void* aArray, size_t aLen)
 {
   auto base =
-    reinterpret_cast<nsStyleAutoArray<StyleAnimation>*>(aArray);
+    static_cast<nsStyleAutoArray<StyleAnimation>*>(aArray);
 
   size_t oldLength = base->Length();
 
@@ -1304,7 +1352,7 @@ Gecko_NewURLValue(ServoBundledURI aURI)
 
 NS_IMPL_THREADSAFE_FFI_REFCOUNTING(css::URLValue, CSSURLValue);
 
-NS_IMPL_THREADSAFE_FFI_REFCOUNTING(css::URLExtraData, URLExtraData);
+NS_IMPL_THREADSAFE_FFI_REFCOUNTING(URLExtraData, URLExtraData);
 
 NS_IMPL_THREADSAFE_FFI_REFCOUNTING(nsStyleCoord::Calc, Calc);
 
@@ -1576,15 +1624,6 @@ Gecko_LoadStyleSheet(css::Loader* aLoader,
   }
 
   aLoader->LoadChildSheet(aParent, uri, media, nullptr, aChildSheet, nullptr);
-}
-
-RawGeckoURLExtraData*
-Gecko_URLExtraData_CreateDummy()
-{
-  RefPtr<css::URLExtraData> data =
-    new css::URLExtraData(NullPrincipalURI::Create(), nullptr,
-                          NullPrincipal::Create());
-  return data.forget().take();
 }
 
 const nsMediaFeature*

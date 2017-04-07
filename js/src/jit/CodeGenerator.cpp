@@ -231,6 +231,11 @@ typedef bool (*IonSetPropertyICFn)(JSContext*, HandleScript, IonSetPropertyIC*, 
 static const VMFunction IonSetPropertyICInfo =
     FunctionInfo<IonSetPropertyICFn>(IonSetPropertyIC::update, "IonSetPropertyIC::update");
 
+typedef bool (*IonGetNameICFn)(JSContext*, HandleScript, IonGetNameIC*, HandleObject,
+                               MutableHandleValue);
+static const VMFunction IonGetNameICInfo =
+    FunctionInfo<IonGetNameICFn>(IonGetNameIC::update, "IonGetNameIC::update");
+
 void
 CodeGenerator::visitOutOfLineICFallback(OutOfLineICFallback* ool)
 {
@@ -282,7 +287,23 @@ CodeGenerator::visitOutOfLineICFallback(OutOfLineICFallback* ool)
         masm.jump(ool->rejoin());
         return;
       }
-      case CacheKind::GetName:
+      case CacheKind::GetName: {
+        IonGetNameIC* getNameIC = ic->asGetNameIC();
+
+        saveLive(lir);
+
+        pushArg(getNameIC->environment());
+        icInfo_[cacheInfoIndex].icOffsetForPush = pushArgWithPatch(ImmWord(-1));
+        pushArg(ImmGCPtr(gen->info().script()));
+
+        callVM(IonGetNameICInfo, lir);
+
+        StoreValueTo(getNameIC->output()).generate(this);
+        restoreLiveIgnore(lir, StoreValueTo(getNameIC->output()).clobbered());
+
+        masm.jump(ool->rejoin());
+        return;
+      }
       case CacheKind::In:
         MOZ_CRASH("Baseline-specific for now");
     }
@@ -7955,13 +7976,13 @@ JitRuntime::generateTLEventVM(JSContext* cx, MacroAssembler& masm, const VMFunct
         }
         if (vmSpecificEventEnabled) {
             TraceLoggerEvent event(f.name());
-            if (!event.hasPayload())
+            if (!event.hasTextId())
                 return false;
 
             if (enter)
-                masm.tracelogStartId(loggerReg, event.payload()->textId(), /* force = */ true);
+                masm.tracelogStartId(loggerReg, event.textId(), /* force = */ true);
             else
-                masm.tracelogStopId(loggerReg, event.payload()->textId(), /* force = */ true);
+                masm.tracelogStopId(loggerReg, event.textId(), /* force = */ true);
         }
 
         masm.Pop(loggerReg);
@@ -9921,22 +9942,22 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
 
     for (uint32_t i = 0; i < patchableTLEvents_.length(); i++) {
         TraceLoggerEvent event(patchableTLEvents_[i].event);
-        if (!event.hasPayload() || !ionScript->addTraceLoggerEvent(event)) {
+        if (!event.hasTextId() || !ionScript->addTraceLoggerEvent(event)) {
             TLFailed = true;
             break;
         }
         Assembler::PatchDataWithValueCheck(CodeLocationLabel(code, patchableTLEvents_[i].offset),
-                ImmPtr((void*) uintptr_t(event.payload()->textId())),
+                ImmPtr((void*) uintptr_t(event.textId())),
                 ImmPtr((void*)0));
     }
 
     if (!TLFailed && patchableTLScripts_.length() > 0) {
         MOZ_ASSERT(TraceLogTextIdEnabled(TraceLogger_Scripts));
         TraceLoggerEvent event(TraceLogger_Scripts, script);
-        if (!event.hasPayload() || !ionScript->addTraceLoggerEvent(event))
+        if (!event.hasTextId() || !ionScript->addTraceLoggerEvent(event))
             TLFailed = true;
         if (!TLFailed) {
-            uint32_t textId = event.payload()->textId();
+            uint32_t textId = event.textId();
             for (uint32_t i = 0; i < patchableTLScripts_.length(); i++) {
                 Assembler::PatchDataWithValueCheck(CodeLocationLabel(code, patchableTLScripts_[i]),
                                                    ImmPtr((void*) uintptr_t(textId)),
@@ -10272,31 +10293,11 @@ CodeGenerator::visitGetNameCache(LGetNameCache* ins)
 {
     LiveRegisterSet liveRegs = ins->safepoint()->liveRegs();
     Register envChain = ToRegister(ins->envObj());
-    TypedOrValueRegister output(GetValueOutput(ins));
-    bool isTypeOf = ins->mir()->accessKind() != MGetNameCache::NAME;
+    ValueOperand output(GetValueOutput(ins));
+    Register temp = ToRegister(ins->temp());
 
-    NameIC cache(liveRegs, isTypeOf, envChain, ins->mir()->name(), output);
-    cache.setProfilerLeavePC(ins->mir()->profilerLeavePc());
-    addCache(ins, allocateCache(cache));
-}
-
-typedef bool (*NameICFn)(JSContext*, HandleScript, size_t, HandleObject, MutableHandleValue);
-const VMFunction NameIC::UpdateInfo = FunctionInfo<NameICFn>(NameIC::update, "NameIC::update");
-
-void
-CodeGenerator::visitNameIC(OutOfLineUpdateCache* ool, DataPtr<NameIC>& ic)
-{
-    LInstruction* lir = ool->lir();
-    saveLive(lir);
-
-    pushArg(ic->environmentChainReg());
-    pushArg(Imm32(ool->getCacheIndex()));
-    pushArg(ImmGCPtr(gen->info().script()));
-    callVM(NameIC::UpdateInfo, lir);
-    StoreValueTo(ic->outputReg()).generate(this);
-    restoreLiveIgnore(lir, StoreValueTo(ic->outputReg()).clobbered());
-
-    masm.jump(ool->rejoin());
+    IonGetNameIC ic(liveRegs, envChain, output, temp);
+    addIC(ins, allocateIC(ic));
 }
 
 void

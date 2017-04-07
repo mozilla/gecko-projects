@@ -4,6 +4,8 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
+<!-- eslint-env mozilla/browser-window -->
+
 <bindings id="tabBrowserBindings"
           xmlns="http://www.mozilla.org/xbl"
           xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
@@ -1943,7 +1945,7 @@
 
             if (aParams.opener) {
               if (aParams.remoteType) {
-                throw new Exception("Cannot set opener window on a remote browser!");
+                throw new Error("Cannot set opener window on a remote browser!");
               }
               b.QueryInterface(Ci.nsIFrameLoaderOwner).presetOpenerWindow(aParams.opener);
             }
@@ -2037,6 +2039,13 @@
               let getter;
               let setter;
               switch (name) {
+                case "permitUnload":
+                  getter = () => {
+                    return function() {
+                      return { permitUnload: true, timedOut: false };
+                    };
+                  };
+                  break;
                 default:
                   getter = () => {
                     this._insertBrowser(aTab);
@@ -5246,15 +5255,20 @@
                                                        browser.getAttribute("usercontextid") || 0);
               delete browser.registeredOpenURI;
             }
+
             let filter = this._tabFilters.get(tab);
-            let listener = this._tabListeners.get(tab);
+            if (filter) {
+              browser.webProgress.removeProgressListener(filter);
 
-            browser.webProgress.removeProgressListener(filter);
-            filter.removeProgressListener(listener);
-            listener.destroy();
+              let listener = this._tabListeners.get(tab);
+              if (listener) {
+                filter.removeProgressListener(listener);
+                listener.destroy();
+              }
 
-            this._tabFilters.delete(tab);
-            this._tabListeners.delete(tab);
+              this._tabFilters.delete(tab);
+              this._tabListeners.delete(tab);
+            }
           }
           const nsIEventListenerService =
             Components.interfaces.nsIEventListenerService;
@@ -5461,7 +5475,7 @@
       </handler>
       <handler event="DOMAudioPlaybackStarted">
         <![CDATA[
-          var tab = getTabFromAudioEvent(event)
+          var tab = this.getTabFromAudioEvent(event)
           if (!tab) {
             return;
           }
@@ -5477,10 +5491,13 @@
 
           if (!tab.hasAttribute("soundplaying")) {
             tab.setAttribute("soundplaying", true);
+            modifiedAttrs.push("soundplaying");
+          }
+
+          if (modifiedAttrs.length) {
             // Flush style so that the opacity takes effect immediately, in
             // case the media is stopped before the style flushes naturally.
             getComputedStyle(tab).opacity;
-            modifiedAttrs.push("soundplaying");
           }
 
           this._tabAttrModified(tab, modifiedAttrs);
@@ -5488,7 +5505,7 @@
       </handler>
       <handler event="DOMAudioPlaybackStopped">
         <![CDATA[
-          var tab = getTabFromAudioEvent(event)
+          var tab = this.getTabFromAudioEvent(event)
           if (!tab) {
             return;
           }
@@ -5510,7 +5527,7 @@
       </handler>
       <handler event="DOMAudioPlaybackBlockStarted">
         <![CDATA[
-          var tab = getTabFromAudioEvent(event)
+          var tab = this.getTabFromAudioEvent(event)
           if (!tab) {
             return;
           }
@@ -5524,7 +5541,7 @@
       </handler>
       <handler event="DOMAudioPlaybackBlockStopped">
         <![CDATA[
-          var tab = getTabFromAudioEvent(event)
+          var tab = this.getTabFromAudioEvent(event)
           if (!tab) {
             return;
           }
