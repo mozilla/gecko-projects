@@ -213,3 +213,11 @@ all at once. They also depend on the breakpoint.
 
 repackage
 ---------
+Repackage tasks take a signed output and package them up into something suiteable
+for shipping to our users. For example, on OSX we return a tarball as the signed output
+and this task would package that up as an Apple Disk Image (.dmg)
+
+
+repackage-l10n
+--------------
+Repackage-L10n is a ```Repackage``` task split up to be suitable for use after l10n repacks.

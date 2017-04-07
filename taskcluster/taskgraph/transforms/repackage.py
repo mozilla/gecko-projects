@@ -40,6 +40,9 @@ packaging_description_schema = Schema({
     # below transforms for defaults of various values.
     Optional('treeherder'): task_description_schema['treeherder'],
 
+    # If a l10n task, the corresponding locale
+    Optional('locale'): basestring,
+
     # Routes specific to this task, if defined
     Optional('routes'): [basestring],
 })
@@ -65,23 +68,24 @@ packaging_description_schema = Schema({
 #        yield job
 
 @transforms.add
-def make_repackage_description(config, jobs):
-    for job in jobs:
-        dep_job = job['dependent-task']
-
-        label = dep_job.label.replace("signing-", "repackage-")
-        job['label'] = label
-
-        yield job
-
-
-@transforms.add
 def validate(config, jobs):
     for job in jobs:
         label = job.get('dependent-task', object).__dict__.get('label', '?no-label?')
         yield validate_schema(
             packaging_description_schema, job,
             "In packaging ({!r} kind) task for {!r}:".format(config.kind, label))
+
+
+@transforms.add
+def make_repackage_description(config, jobs):
+    for job in jobs:
+        dep_job = job['dependent-task']
+
+        label = job.get('label',
+                        dep_job.label.replace("signing-", "repackage-"))
+        job['label'] = label
+
+        yield job
 
 
 @transforms.add
@@ -96,8 +100,6 @@ def make_task_description(config, jobs):
         treeherder.setdefault('platform', "{}/opt".format(dep_th_platform))
         treeherder.setdefault('tier', 1)
         treeherder.setdefault('kind', 'build')
-
-        label = job.get('label', "{}-repackage".format(dep_job.label))
 
         attributes = {
             'nightly': dep_job.attributes.get('nightly', False),
@@ -116,13 +118,18 @@ def make_task_description(config, jobs):
                    ]
 
         dependencies = {dep_job.attributes.get('kind'): dep_job.label}
-        input_string = 'https://queue.taskcluster.net/v1/task/<build-signing>/artifacts/' + \
-            'public/build/target.tar.gz'
+        if job.get('locale'):
+            input_string = 'https://queue.taskcluster.net/v1/task/<nightly-l10n-signing>/' + \
+                'artifacts/public/build/{}/target.tar.gz'
+            input_string = input_string.format(job['locale'])
+        else:
+            input_string = 'https://queue.taskcluster.net/v1/task/<build-signing>/artifacts/' + \
+                'public/build/target.tar.gz'
         signed_input = {'task-reference': input_string}
         level = config.params['level']
 
         task = {
-            'label': label,
+            'label': job['label'],
             'description': "{} Repackage".format(
                 dep_job.task["metadata"]["description"]),
             'worker-type': 'aws-provisioner-v1/gecko-%s-b-macosx64' % level,
@@ -173,6 +180,6 @@ def make_task_description(config, jobs):
                        'chain-of-trust': True,
                        'relengapi-proxy': True,
                        'max-run-time': 3600
-               }
+                       }
         }
         yield task

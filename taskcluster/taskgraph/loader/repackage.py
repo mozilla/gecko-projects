@@ -16,7 +16,8 @@ def loader(kind, path, config, params, loaded_tasks):
     build job
     """
 
-    if (config.get('kind-dependencies', []) != ['build-signing']):
+    if (config.get('kind-dependencies', []) != ['build-signing']) and \
+       (config.get('kind-dependencies', []) != ['nightly-l10n-signing']):
         raise Exception("Repackage signing tasks must depend on build-signing tasks")
     for task in loaded_tasks:
         if not task.attributes.get('nightly'):
