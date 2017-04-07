@@ -128,6 +128,10 @@ def make_task_description(config, jobs):
         # macosx nightly builds depend on repackage which use in tree docker
         # images and thus have two dependencies
         # change the signing_dependencies to be use the ones in
+        docker_dependencies = {"docker-image":
+                                dep_job.dependencies["docker-image"]
+                               }
+        dependencies.update(docker_dependencies)
         signing_dependencies = {"build-signing":
                                 dep_job.dependencies["build-signing"]
                                }
@@ -206,10 +210,10 @@ def generate_upstream_artifacts(signing_task_ref, build_task_ref,
 @transforms.add
 def make_task_worker(config, jobs):
     for job in jobs:
-        valid_beetmover_job = (len(job["dependencies"]) == 3 and
+        valid_beetmover_job = (len(job["dependencies"]) == 4 and
                                any(['repackage' in j for j in job['dependencies']]))
         if not valid_beetmover_job:
-            raise NotImplementedError("Beetmover_repackage must have three dependencies.")
+            raise NotImplementedError("Beetmover_repackage must have four dependencies.")
 
         locale = job["attributes"].get("locale")
         platform = job["attributes"]["build_platform"]
@@ -236,5 +240,11 @@ def make_task_worker(config, jobs):
         if locale:
             worker["locale"] = locale
         job["worker"] = worker
+        job.setdefault('extra', {})
+        job['extra'].setdefault('chainOfTrust', {})
+        job['extra']['chainOfTrust'].setdefault('inputs', {})
+        job['extra']['chainOfTrust']['inputs']['docker-image'] = {
+                      "task-reference": "<docker-image>"
+        }
 
         yield job
