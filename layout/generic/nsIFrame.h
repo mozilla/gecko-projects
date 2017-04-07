@@ -3504,6 +3504,10 @@ public:
   // Checks if we (or any of our descendents) have NS_FRAME_PAINTED_THEBES set, and
   // clears this bit if so.
   bool CheckAndClearPaintedState();
+  
+  // Checks if we (or any of our descendents) have NS_FRAME_BUILT_DISPLAY_LIST set, and
+  // clears this bit if so.
+  bool CheckAndClearDisplayListState();
 
   // CSS visibility just doesn't cut it because it doesn't inherit through
   // documents. Also if this frame is in a hidden card of a deck then it isn't

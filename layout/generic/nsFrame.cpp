@@ -350,6 +350,25 @@ nsIFrame::CheckAndClearPaintedState()
 }
 
 bool
+nsIFrame::CheckAndClearDisplayListState()
+{
+  bool result = (GetStateBits() & NS_FRAME_BUILT_DISPLAY_LIST);
+  RemoveStateBits(NS_FRAME_BUILT_DISPLAY_LIST);
+  
+  nsIFrame::ChildListIterator lists(this);
+  for (; !lists.IsDone(); lists.Next()) {
+    nsFrameList::Enumerator childFrames(lists.CurrentList());
+    for (; !childFrames.AtEnd(); childFrames.Next()) {
+      nsIFrame* child = childFrames.get();
+      if (child->CheckAndClearDisplayListState()) {
+        result = true;
+      }
+    }
+  }
+  return result;
+}
+
+bool
 nsIFrame::IsVisibleConsideringAncestors(uint32_t aFlags) const
 {
   if (!StyleVisibility()->IsVisible()) {
@@ -3001,6 +3020,8 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
   if (aBuilder->IsPaintingToWindow() && child->TrackingVisibility()) {
     child->PresContext()->PresShell()->EnsureFrameInApproximatelyVisibleList(child);
   }
+  
+  child->AddStateBits(NS_FRAME_BUILT_DISPLAY_LIST);
 
   // Child is composited if it's transformed, partially transparent, or has
   // SVG effects or a blend mode..

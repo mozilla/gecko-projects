@@ -3716,12 +3716,15 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         nsTArray<nsIFrame*>* modifiedFrames = aFrame->Properties().Get(nsIFrame::ModifiedFrameList());
 
         nsRect modifiedDirty;
+        //printf_stderr("Dirty frames: ");
         for (nsIFrame* f : *modifiedFrames) {
+          //printf_stderr("%p,", f);
           modifiedDirty.UnionRect(modifiedDirty, TransformFrameRectToAncestor(f,
                                                                               f->GetVisualOverflowRectRelativeToSelf(),
                                                                               aFrame));
         }
         modifiedFrames->Clear();
+        //printf_stderr("\n");
 
         nsDisplayList modifiedDL;
         aFrame->BuildDisplayListForStackingContext(&builder, modifiedDirty, &modifiedDL);
