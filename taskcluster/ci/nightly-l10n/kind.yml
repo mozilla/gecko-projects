@@ -32,6 +32,7 @@ job-template:
      - mozilla-central
      - mozilla-aurora
      - mozilla-beta
+     - date
    run-time:
       by-build-platform:
          default: 36000
