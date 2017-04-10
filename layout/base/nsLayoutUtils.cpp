@@ -3497,7 +3497,8 @@ bool IsSameItem(nsDisplayItem* aFirst, nsDisplayItem* aSecond)
 
 void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
                        nsDisplayList* aNewList,
-                       nsDisplayList* aOldList)
+                       nsDisplayList* aOldList,
+                       nsDisplayList* aOutList)
 {
   nsDisplayList merged;
   nsDisplayItem* old;
@@ -3518,6 +3519,21 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
           old->~nsDisplayItem();
         }
       }
+
+      // Recursively merge any child lists.
+      // TODO: We may need to call UpdateBounds on any non-flattenable nsDisplayWrapLists
+      // here.
+      // TODO: When an invalidation happens we only need to build items for the overflow area
+      // up to the nearest stacking context, and then use MarkFramesForDisplay to make sure
+      // we build the stacking context itself. This is similar to what we want to do for
+      // displayports.
+      MOZ_ASSERT(old && IsSameItem(i, old));
+      if (old->GetChildren()) {
+        MOZ_ASSERT(i->GetChildren());
+        MergeDisplayLists(aBuilder, i->GetChildren(), old->GetChildren(), i->GetChildren());
+      }
+
+      old->~nsDisplayItem();
     }
 
     merged.AppendToTop(i);
@@ -3534,7 +3550,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   //printf_stderr("Painting --- Merged list:\n");
   //nsFrame::PrintDisplayList(aBuilder, merged);
 
-  aOldList->AppendToTop(&merged);
+  aOutList->AppendToTop(&merged);
 }
 
 nsresult
@@ -3735,7 +3751,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         builder.LeavePresShell(aFrame, &modifiedDL);
         builder.EnterPresShell(aFrame);
 
-        MergeDisplayLists(&builder, &modifiedDL, &list);
+        MergeDisplayLists(&builder, &modifiedDL, &list, &list);
       } else {
         list.DeleteAll();
         aFrame->BuildDisplayListForStackingContext(&builder, dirtyRect, &list);
