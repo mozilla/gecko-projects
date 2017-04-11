@@ -240,11 +240,5 @@ def make_task_worker(config, jobs):
         if locale:
             worker["locale"] = locale
         job["worker"] = worker
-        job.setdefault('extra', {})
-        job['extra'].setdefault('chainOfTrust', {})
-        job['extra']['chainOfTrust'].setdefault('inputs', {})
-        job['extra']['chainOfTrust']['inputs']['docker-image'] = {
-                      "task-reference": "<docker-image>"
-        }
 
         yield job

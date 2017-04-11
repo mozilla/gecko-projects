@@ -15,7 +15,6 @@ from voluptuous import Any, Required, Optional
 
 transforms = TransformSequence()
 
-
 # Voluptuous uses marker objects as dictionary *keys*, but they are not
 # comparable, so we cast all of the keys back to regular strings
 task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
@@ -45,6 +44,10 @@ packaging_description_schema = Schema({
 
     # Routes specific to this task, if defined
     Optional('routes'): [basestring],
+
+    # passed through directly to the job description
+    Optional('extra'): task_description_schema['extra'],
+
 })
 
 
@@ -84,6 +87,8 @@ def make_repackage_description(config, jobs):
         label = job.get('label',
                         dep_job.label.replace("signing-", "repackage-"))
         job['label'] = label
+        cot = job.setdefault('extra', {}).setdefault('chainOfTrust', {})
+        cot.setdefault('inputs', {})['docker-image'] = {"task-reference": "<docker-image>"}
 
         yield job
 
@@ -138,6 +143,7 @@ def make_task_description(config, jobs):
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
             'treeherder': treeherder,
             'routes': job.get('routes', []),
+            'extra': job.get('extra', {}),
             'scopes':
             ['docker-worker:relengapi-proxy:tooltool.download.internal',
              'secrets:get:project/taskcluster/gecko/hgfingerprint',
