@@ -8,17 +8,18 @@
 
 #![allow(non_snake_case, missing_docs)]
 
-use gecko_bindings::bindings::{RawServoMediaList, RawServoMediaRule, RawServoNamespaceRule};
-use gecko_bindings::bindings::{RawServoStyleSheet, RawServoStyleRule, RawServoImportRule};
+use gecko_bindings::bindings::{RawServoMediaList, RawServoMediaRule, RawServoNamespaceRule, RawServoPageRule};
+use gecko_bindings::bindings::{RawServoStyleSheet, RawServoImportRule};
 use gecko_bindings::bindings::{ServoComputedValues, ServoCssRules};
-use gecko_bindings::structs::{RawServoAnimationValue, RawServoAnimationValueMap, RawServoDeclarationBlock};
+use gecko_bindings::structs::{RawServoAnimationValue, RawServoAnimationValueMap};
+use gecko_bindings::structs::{RawServoDeclarationBlock, RawServoStyleRule};
 use gecko_bindings::sugar::ownership::{HasArcFFI, HasFFI};
 use media_queries::MediaList;
 use parking_lot::RwLock;
 use properties::{ComputedValues, PropertyDeclarationBlock};
 use properties::animated_properties::{AnimationValue, AnimationValueMap};
 use shared_lock::Locked;
-use stylesheets::{CssRules, Stylesheet, StyleRule, ImportRule, MediaRule, NamespaceRule};
+use stylesheets::{CssRules, Stylesheet, StyleRule, ImportRule, MediaRule, NamespaceRule, PageRule};
 
 macro_rules! impl_arc_ffi {
     ($servo_type:ty => $gecko_type:ty [$addref:ident, $release:ident]) => {
@@ -71,3 +72,6 @@ impl_arc_ffi!(Locked<MediaRule> => RawServoMediaRule
 
 impl_arc_ffi!(Locked<NamespaceRule> => RawServoNamespaceRule
               [Servo_NamespaceRule_AddRef, Servo_NamespaceRule_Release]);
+
+impl_arc_ffi!(Locked<PageRule> => RawServoPageRule
+              [Servo_PageRule_AddRef, Servo_PageRule_Release]);

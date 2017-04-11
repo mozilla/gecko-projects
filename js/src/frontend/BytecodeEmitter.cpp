@@ -357,7 +357,8 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
         if (bi.nextFrameSlot() >= LOCALNO_LIMIT ||
             bi.nextEnvironmentSlot() >= ENVCOORD_SLOT_LIMIT)
         {
-            return bce->reportError(nullptr, JSMSG_TOO_MANY_LOCALS);
+            bce->reportError(nullptr, JSMSG_TOO_MANY_LOCALS);
+            return false;
         }
         return true;
     }
@@ -368,8 +369,12 @@ class BytecodeEmitter::EmitterScope : public Nestable<BytecodeEmitter::EmitterSc
             hops = emitterScope->environmentChainLength_;
         else
             hops = bce->sc->compilationEnclosingScope()->environmentChainLength();
-        if (hops >= ENVCOORD_HOPS_LIMIT - 1)
-            return bce->reportError(nullptr, JSMSG_TOO_DEEP, js_function_str);
+
+        if (hops >= ENVCOORD_HOPS_LIMIT - 1) {
+            bce->reportError(nullptr, JSMSG_TOO_DEEP, js_function_str);
+            return false;
+        }
+
         environmentChainLength_ = mozilla::AssertedCast<uint8_t>(hops + 1);
         return true;
     }
@@ -2500,8 +2505,11 @@ BytecodeEmitter::updateLineNumberNotes(uint32_t offset)
 {
     TokenStream* ts = &parser->tokenStream;
     bool onThisLine;
-    if (!ts->srcCoords.isOnThisLine(offset, currentLine(), &onThisLine))
-        return ts->reportError(JSMSG_OUT_OF_MEMORY);
+    if (!ts->srcCoords.isOnThisLine(offset, currentLine(), &onThisLine)) {
+        ts->reportError(JSMSG_OUT_OF_MEMORY);
+        return false;
+    }
+
     if (!onThisLine) {
         unsigned line = ts->srcCoords.lineNum(offset);
         unsigned delta = line - currentLine();
@@ -3562,17 +3570,20 @@ BytecodeEmitter::tokenStream()
     return parser->tokenStream;
 }
 
-bool
+void
 BytecodeEmitter::reportError(ParseNode* pn, unsigned errorNumber, ...)
 {
     TokenPos pos = pn ? pn->pn_pos : tokenStream().currentToken().pos;
 
     va_list args;
     va_start(args, errorNumber);
-    bool result = tokenStream().reportCompileErrorNumberVA(nullptr, pos.begin, JSREPORT_ERROR,
-                                                           errorNumber, args);
+
+    TokenStream& ts = tokenStream();
+    ErrorMetadata metadata;
+    if (ts.computeErrorMetadata(&metadata, pos.begin))
+        ts.compileError(Move(metadata), nullptr, JSREPORT_ERROR, errorNumber, args);
+
     va_end(args);
-    return result;
 }
 
 bool
@@ -5429,24 +5440,22 @@ BytecodeEmitter::setOrEmitSetFunName(ParseNode* maybeFun, HandleAtom name,
     if (maybeFun->isKind(PNK_FUNCTION)) {
         // Function doesn't have 'name' property at this point.
         // Set function's name at compile time.
-        RootedFunction fun(cx, maybeFun->pn_funbox->function());
+        JSFunction* fun = maybeFun->pn_funbox->function();
 
         // Single node can be emitted multiple times if it appears in
         // array destructuring default.  If function already has a name,
         // just return.
         if (fun->hasCompileTimeName()) {
 #ifdef DEBUG
-            RootedAtom funName(cx, NameToFunctionName(cx, name, prefixKind));
+            RootedFunction rootedFun(cx, fun);
+            JSAtom* funName = NameToFunctionName(cx, name, prefixKind);
             if (!funName)
                 return false;
-            MOZ_ASSERT(funName == maybeFun->pn_funbox->function()->compileTimeName());
+            MOZ_ASSERT(funName == rootedFun->compileTimeName());
 #endif
             return true;
         }
 
-        RootedAtom funName(cx, NameToFunctionName(cx, name, prefixKind));
-        if (!funName)
-            return false;
         fun->setCompileTimeName(name);
         return true;
     }
@@ -9135,28 +9144,23 @@ BytecodeEmitter::emitSelfHostedDefineDataProperty(ParseNode* pn)
 }
 
 bool
-BytecodeEmitter::isRestParameter(ParseNode* pn, bool* result)
+BytecodeEmitter::isRestParameter(ParseNode* pn)
 {
-    if (!sc->isFunctionBox()) {
-        *result = false;
-        return true;
-    }
+    if (!sc->isFunctionBox())
+        return false;
 
     FunctionBox* funbox = sc->asFunctionBox();
     RootedFunction fun(cx, funbox->function());
-    if (!funbox->hasRest()) {
-        *result = false;
-        return true;
-    }
+    if (!funbox->hasRest())
+        return false;
 
     if (!pn->isKind(PNK_NAME)) {
         if (emitterMode == BytecodeEmitter::SelfHosting && pn->isKind(PNK_CALL)) {
             ParseNode* pn2 = pn->pn_head;
             if (pn2->getKind() == PNK_NAME && pn2->name() == cx->names().allowContentIter)
-                return isRestParameter(pn2->pn_next, result);
+                return isRestParameter(pn2->pn_next);
         }
-        *result = false;
-        return true;
+        return false;
     }
 
     JSAtom* name = pn->name();
@@ -9167,12 +9171,11 @@ BytecodeEmitter::isRestParameter(ParseNode* pn, bool* result)
             // |paramName| can be nullptr when the rest destructuring syntax is
             // used: `function f(...[]) {}`.
             JSAtom* paramName = bindings->names[bindings->nonPositionalFormalStart - 1].name();
-            *result = paramName && name == paramName;
-            return true;
+            return paramName && name == paramName;
         }
     }
 
-    return true;
+    return false;
 }
 
 bool
@@ -9189,11 +9192,7 @@ BytecodeEmitter::emitOptimizeSpread(ParseNode* arg0, JumpList* jmp, bool* emitte
     // skip spread operation and pass it directly to spread call operation.
     // See the comment in OptimizeSpreadCall in Interpreter.cpp for the
     // optimizable conditons.
-    bool result = false;
-    if (!isRestParameter(arg0, &result))
-        return false;
-
-    if (!result) {
+    if (!isRestParameter(arg0)) {
         *emitted = false;
         return true;
     }

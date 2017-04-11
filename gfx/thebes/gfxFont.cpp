@@ -94,6 +94,13 @@ MOZ_DEFINE_MALLOC_SIZE_OF(FontCacheMallocSizeOf)
 
 NS_IMPL_ISUPPORTS(gfxFontCache::MemoryReporter, nsIMemoryReporter)
 
+/*virtual*/
+gfxTextRunFactory::~gfxTextRunFactory()
+{
+    // Should not be dropped by stylo
+    MOZ_ASSERT(NS_IsMainThread());
+}
+
 NS_IMETHODIMP
 gfxFontCache::MemoryReporter::CollectReports(
     nsIHandleReportCallback* aHandleReport, nsISupports* aData, bool aAnonymize)
@@ -835,7 +842,8 @@ gfxFont::RunMetrics::CombineWith(const RunMetrics& aOther, bool aOtherIsOnLeft)
     mAdvanceWidth += aOther.mAdvanceWidth;
 }
 
-gfxFont::gfxFont(gfxFontEntry *aFontEntry, const gfxFontStyle *aFontStyle,
+gfxFont::gfxFont(const RefPtr<UnscaledFont>& aUnscaledFont,
+                 gfxFontEntry *aFontEntry, const gfxFontStyle *aFontStyle,
                  AntialiasOption anAAOption, cairo_scaled_font_t *aScaledFont) :
     mScaledFont(aScaledFont),
     mFontEntry(aFontEntry), mIsValid(true),
@@ -844,7 +852,8 @@ gfxFont::gfxFont(gfxFontEntry *aFontEntry, const gfxFontStyle *aFontStyle,
     mStyle(*aFontStyle),
     mAdjustedSize(0.0),
     mFUnitsConvFactor(-1.0f), // negative to indicate "not yet initialized"
-    mAntialiasOption(anAAOption)
+    mAntialiasOption(anAAOption),
+    mUnscaledFont(aUnscaledFont)
 {
 #ifdef DEBUG_TEXT_RUN_STORAGE_METRICS
     ++gFontCount;

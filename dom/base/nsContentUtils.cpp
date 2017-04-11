@@ -180,6 +180,7 @@
 #include "nsIXPConnect.h"
 #include "nsJSUtils.h"
 #include "nsLWBrkCIID.h"
+#include "nsMappedAttributes.h"
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsNodeInfoManager.h"
@@ -293,6 +294,9 @@ bool nsContentUtils::sIsWebComponentsEnabled = false;
 bool nsContentUtils::sPrivacyResistFingerprinting = false;
 bool nsContentUtils::sSendPerformanceTimingNotifications = false;
 bool nsContentUtils::sUseActivityCursor = false;
+bool nsContentUtils::sAnimationsAPICoreEnabled = false;
+bool nsContentUtils::sAnimationsAPIElementAnimateEnabled = false;
+bool nsContentUtils::sGetBoxQuadsEnabled = false;
 
 int32_t nsContentUtils::sPrivacyMaxInnerWidth = 1000;
 int32_t nsContentUtils::sPrivacyMaxInnerHeight = 1000;
@@ -628,6 +632,15 @@ nsContentUtils::Init()
 
   Preferences::AddBoolVarCache(&sUseActivityCursor,
                                "ui.use_activity_cursor", false);
+
+  Preferences::AddBoolVarCache(&sAnimationsAPICoreEnabled,
+                               "dom.animations-api.core.enabled", false);
+
+  Preferences::AddBoolVarCache(&sAnimationsAPIElementAnimateEnabled,
+                               "dom.animations-api.element-animate.enabled", false);
+
+  Preferences::AddBoolVarCache(&sGetBoxQuadsEnabled,
+                               "layout.css.getBoxQuads.enabled", false);
 
   Element::InitCCCallbacks();
 
@@ -1993,6 +2006,7 @@ nsContentUtils::Shutdown()
   NS_IF_RELEASE(sSameOriginChecker);
 
   HTMLInputElement::Shutdown();
+  nsMappedAttributes::Shutdown();
 }
 
 /**
@@ -10158,8 +10172,8 @@ nsContentUtils::HtmlObjectContentTypeForMIMEType(const nsCString& aMIMEType,
   return nsIObjectLoadingContent::TYPE_NULL;
 }
 
-/* static */ already_AddRefed<Dispatcher>
-nsContentUtils::GetDispatcherByLoadInfo(nsILoadInfo* aLoadInfo)
+/* static */ already_AddRefed<nsIEventTarget>
+  nsContentUtils::GetEventTargetByLoadInfo(nsILoadInfo* aLoadInfo, TaskCategory aCategory)
 {
   if (NS_WARN_IF(!aLoadInfo)) {
     return nullptr;
@@ -10168,9 +10182,11 @@ nsContentUtils::GetDispatcherByLoadInfo(nsILoadInfo* aLoadInfo)
   nsCOMPtr<nsIDOMDocument> domDoc;
   aLoadInfo->GetLoadingDocument(getter_AddRefs(domDoc));
   nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
-  RefPtr<Dispatcher> dispatcher;
+  nsCOMPtr<nsIEventTarget> target;
   if (doc) {
-    dispatcher = doc->GetDocGroup();
+    if (DocGroup* group = doc->GetDocGroup()) {
+      target = group->EventTargetFor(aCategory);
+    }
   } else {
     // There's no document yet, but this might be a top-level load where we can
     // find a TabGroup.
@@ -10185,8 +10201,8 @@ nsContentUtils::GetDispatcherByLoadInfo(nsILoadInfo* aLoadInfo)
       return nullptr;
     }
 
-    dispatcher = window->TabGroup();
+    target = window->TabGroup()->EventTargetFor(aCategory);
   }
 
-  return dispatcher.forget();
+  return target.forget();
 }

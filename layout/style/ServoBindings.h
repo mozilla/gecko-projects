@@ -40,6 +40,7 @@ namespace mozilla {
     struct URLValue;
   };
   enum class UpdateAnimationsTasks : uint8_t;
+  struct LangGroupFontPrefs;
 }
 using mozilla::FontFamilyList;
 using mozilla::FontFamilyType;
@@ -92,6 +93,18 @@ public:
   const uint8_t* mURLString;
   uint32_t mURLStringLength;
   mozilla::URLExtraData* mExtraData;
+};
+
+struct FontSizePrefs
+{
+  void CopyFrom(const mozilla::LangGroupFontPrefs&);
+  nscoord mDefaultVariableSize;
+  nscoord mDefaultFixedSize;
+  nscoord mDefaultSerifSize;
+  nscoord mDefaultSansSerifSize;
+  nscoord mDefaultMonospaceSize;
+  nscoord mDefaultCursiveSize;
+  nscoord mDefaultFantasySize;
 };
 
 // DOM Traversal.
@@ -224,11 +237,11 @@ void Gecko_SetListStyleType(nsStyleList* style_struct, uint32_t type);
 void Gecko_CopyListStyleTypeFrom(nsStyleList* dst, const nsStyleList* src);
 
 // background-image style.
-// TODO: support element() and -moz-image()
 void Gecko_SetNullImageValue(nsStyleImage* image);
 void Gecko_SetGradientImageValue(nsStyleImage* image, nsStyleGradient* gradient);
 void Gecko_SetUrlImageValue(nsStyleImage* image,
                             ServoBundledURI uri);
+void Gecko_SetImageElement(nsStyleImage* image, nsIAtom* atom);
 void Gecko_CopyImageValueFrom(nsStyleImage* image, const nsStyleImage* other);
 void Gecko_InitializeImageCropRect(nsStyleImage* image);
 
@@ -283,6 +296,9 @@ void Gecko_EnsureTArrayCapacity(void* array, size_t capacity, size_t elem_size);
 // Important note: Only valid for POD types, since destructors won't be run
 // otherwise. This is ensured with rust traits for the relevant structs.
 void Gecko_ClearPODTArray(void* array, size_t elem_size, size_t elem_align);
+
+void Gecko_CopyStyleGridTemplateValues(nsStyleGridTemplate* grid_template,
+                                       const nsStyleGridTemplate* other);
 
 // Clear the mContents, mCounterIncrements, or mCounterResets field in nsStyleContent. This is
 // needed to run the destructors, otherwise we'd leak the images, strings, and whatnot.
@@ -381,7 +397,21 @@ bool Gecko_PropertyId_IsPrefEnabled(nsCSSPropertyID id);
 
 void Gecko_nsStyleFont_SetLang(nsStyleFont* font, nsIAtom* atom);
 void Gecko_nsStyleFont_CopyLangFrom(nsStyleFont* aFont, const nsStyleFont* aSource);
-nscoord Gecko_nsStyleFont_GetBaseSize(const nsStyleFont* font, RawGeckoPresContextBorrowed pres_context);
+FontSizePrefs Gecko_GetBaseSize(nsIAtom* lang);
+
+struct GeckoFontMetrics
+{
+  nscoord mChSize;
+  nscoord mXSize;
+};
+
+GeckoFontMetrics Gecko_GetFontMetrics(RawGeckoPresContextBorrowed pres_context,
+                                      bool is_vertical,
+                                      const nsStyleFont* font,
+                                      nscoord font_size,
+                                      bool use_user_font_set);
+void InitializeServo();
+void ShutdownServo();
 
 const nsMediaFeature* Gecko_GetMediaFeatures();
 
@@ -415,6 +445,9 @@ bool Gecko_MatchStringArgPseudo(RawGeckoElementBorrowed element,
 #undef STYLE_STRUCT
 
 void Gecko_Construct_nsStyleVariables(nsStyleVariables* ptr);
+
+void Gecko_RegisterProfilerThread(const char* name);
+void Gecko_UnregisterProfilerThread();
 
 #define SERVO_BINDING_FUNC(name_, return_, ...) return_ name_(__VA_ARGS__);
 #include "mozilla/ServoBindingList.h"

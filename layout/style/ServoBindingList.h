@@ -95,6 +95,7 @@ SERVO_BINDING_FUNC(Servo_CssRules_DeleteRule, nsresult,
 BASIC_RULE_FUNCS(Style)
 BASIC_RULE_FUNCS(Media)
 BASIC_RULE_FUNCS(Namespace)
+BASIC_RULE_FUNCS(Page)
 #undef BASIC_RULE_FUNCS
 SERVO_BINDING_FUNC(Servo_CssRules_GetFontFaceRuleAt, nsCSSFontFaceRule*,
                    ServoCssRulesBorrowed rules, uint32_t index)
@@ -113,6 +114,11 @@ SERVO_BINDING_FUNC(Servo_NamespaceRule_GetPrefix, nsIAtom*,
                    RawServoNamespaceRuleBorrowed rule)
 SERVO_BINDING_FUNC(Servo_NamespaceRule_GetURI, nsIAtom*,
                    RawServoNamespaceRuleBorrowed rule)
+SERVO_BINDING_FUNC(Servo_PageRule_GetStyle, RawServoDeclarationBlockStrong,
+                   RawServoPageRuleBorrowed rule)
+SERVO_BINDING_FUNC(Servo_PageRule_SetStyle, void,
+                   RawServoPageRuleBorrowed rule,
+                   RawServoDeclarationBlockBorrowed declarations)
 
 // Animations API
 SERVO_BINDING_FUNC(Servo_ParseProperty,
@@ -296,6 +302,12 @@ SERVO_BINDING_FUNC(Servo_Shutdown, void)
 SERVO_BINDING_FUNC(Servo_Element_GetSnapshot, ServoElementSnapshot*,
                    RawGeckoElementBorrowed element)
 
+// Gets the source style rules for the element. This returns the result via
+// rules, which would include a list of unowned pointers to RawServoStyleRule.
+SERVO_BINDING_FUNC(Servo_Element_GetStyleRuleList, void,
+                   RawGeckoElementBorrowed element,
+                   RawGeckoServoStyleRuleListBorrowedMut rules)
+
 // Restyle and change hints.
 SERVO_BINDING_FUNC(Servo_NoteExplicitHints, void, RawGeckoElementBorrowed element,
                    nsRestyleHint restyle_hint, nsChangeHint change_hint)
@@ -324,7 +336,8 @@ SERVO_BINDING_FUNC(Servo_ResolveStyleLazily, ServoComputedValuesStrong,
 // directly
 SERVO_BINDING_FUNC(Servo_TraverseSubtree, bool,
                    RawGeckoElementBorrowed root, RawServoStyleSetBorrowed set,
-                   mozilla::TraversalRootBehavior root_behavior)
+                   mozilla::TraversalRootBehavior root_behavior,
+                   mozilla::TraversalRestyleBehavior restyle_behavior)
 
 // Assert that the tree has no pending or unconsumed restyles.
 SERVO_BINDING_FUNC(Servo_AssertTreeIsClean, void, RawGeckoElementBorrowed root)

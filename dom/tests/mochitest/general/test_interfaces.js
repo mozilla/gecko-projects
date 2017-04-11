@@ -596,9 +596,9 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "InstallTrigger",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IntersectionObserver",
+    {name: "IntersectionObserver", disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IntersectionObserverEntry",
+    {name: "IntersectionObserverEntry", disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "KeyEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -637,6 +637,8 @@ var interfaceNamesInGlobalScope =
     "MediaList",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "MediaQueryList",
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    "MediaQueryListEvent",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "MediaRecorder",
 // IMPORTANT: Do not change this list without review from a DOM peer!

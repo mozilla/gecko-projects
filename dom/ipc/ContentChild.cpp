@@ -813,6 +813,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
   PRenderFrameChild* renderFrame = newChild->SendPRenderFrameConstructor();
   TextureFactoryIdentifier textureFactoryIdentifier;
   uint64_t layersId = 0;
+  CompositorOptions compositorOptions;
 
   if (aIframeMoz) {
     MOZ_ASSERT(aTabOpener);
@@ -829,7 +830,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
     newChild->SendBrowserFrameOpenWindow(aTabOpener, renderFrame, NS_ConvertUTF8toUTF16(url),
                                          name, NS_ConvertUTF8toUTF16(features),
                                          aWindowIsNew, &textureFactoryIdentifier,
-                                         &layersId);
+                                         &layersId, &compositorOptions);
   } else {
     nsAutoCString baseURIString;
     float fullZoom;
@@ -852,7 +853,8 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
                           &frameScripts,
                           &urlToLoad,
                           &textureFactoryIdentifier,
-                          &layersId)) {
+                          &layersId,
+                          &compositorOptions)) {
       PRenderFrameChild::Send__delete__(renderFrame);
       return NS_ERROR_NOT_AVAILABLE;
     }
@@ -896,8 +898,8 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
 
   // Unfortunately we don't get a window unless we've shown the frame.  That's
   // pretty bogus; see bug 763602.
-  newChild->DoFakeShow(textureFactoryIdentifier, layersId, renderFrame,
-                       showInfo);
+  newChild->DoFakeShow(textureFactoryIdentifier, layersId, compositorOptions,
+                       renderFrame, showInfo);
 
   for (size_t i = 0; i < frameScripts.Length(); i++) {
     FrameScriptInfo& info = frameScripts[i];
@@ -2087,7 +2089,7 @@ mozilla::ipc::IPCResult
 ContentChild::RecvDataStoragePut(const nsString& aFilename,
                                  const DataStorageItem& aItem)
 {
-  RefPtr<DataStorage> storage = DataStorage::GetIfExists(aFilename);
+  RefPtr<DataStorage> storage = DataStorage::GetFromRawFileName(aFilename);
   if (storage) {
     storage->Put(aItem.key(), aItem.value(), aItem.type());
   }
@@ -2099,7 +2101,7 @@ ContentChild::RecvDataStorageRemove(const nsString& aFilename,
                                     const nsCString& aKey,
                                     const DataStorageType& aType)
 {
-  RefPtr<DataStorage> storage = DataStorage::GetIfExists(aFilename);
+  RefPtr<DataStorage> storage = DataStorage::GetFromRawFileName(aFilename);
   if (storage) {
     storage->Remove(aKey, aType);
   }
@@ -2109,7 +2111,7 @@ ContentChild::RecvDataStorageRemove(const nsString& aFilename,
 mozilla::ipc::IPCResult
 ContentChild::RecvDataStorageClear(const nsString& aFilename)
 {
-  RefPtr<DataStorage> storage = DataStorage::GetIfExists(aFilename);
+  RefPtr<DataStorage> storage = DataStorage::GetFromRawFileName(aFilename);
   if (storage) {
     storage->Clear();
   }
@@ -3137,6 +3139,21 @@ ContentChild::AllocPURLClassifierChild(const Principal& aPrincipal,
 
 bool
 ContentChild::DeallocPURLClassifierChild(PURLClassifierChild* aActor)
+{
+  MOZ_ASSERT(aActor);
+  delete aActor;
+  return true;
+}
+
+PURLClassifierLocalChild*
+ContentChild::AllocPURLClassifierLocalChild(const URIParams& aUri,
+                                            const nsCString& aTables)
+{
+  return new URLClassifierLocalChild();
+}
+
+bool
+ContentChild::DeallocPURLClassifierLocalChild(PURLClassifierLocalChild* aActor)
 {
   MOZ_ASSERT(aActor);
   delete aActor;

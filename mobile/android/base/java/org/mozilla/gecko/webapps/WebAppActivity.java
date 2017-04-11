@@ -31,6 +31,8 @@ import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoApp;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoProfile;
+import org.mozilla.gecko.Telemetry;
+import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.icons.decoders.FaviconDecoder;
 import org.mozilla.gecko.mozglue.SafeIntent;
 import org.mozilla.gecko.R;
@@ -54,6 +56,8 @@ public class WebAppActivity extends GeckoApp {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL, TelemetryContract.Method.INTENT, "webapp");
 
         if (savedInstanceState != null) {
             mManifestPath = savedInstanceState.getString(WebAppActivity.MANIFEST_PATH, null);
@@ -154,6 +158,7 @@ public class WebAppActivity extends GeckoApp {
             .equals(Uri.parse(launchUrl).getHost());
 
         if (!isSameDomain) {
+            Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL, TelemetryContract.Method.INTENT, "webapp");
             mManifestPath = externalIntent.getStringExtra(WebAppActivity.MANIFEST_PATH);
             loadManifest(mManifestPath);
             Tabs.getInstance().loadUrl(launchUrl);
@@ -163,6 +168,10 @@ public class WebAppActivity extends GeckoApp {
     private void loadManifest(String manifestPath) {
         if (manifestPath == null) {
             Log.e(LOGTAG, "Missing manifest");
+            return;
+        }
+        // The customisations defined in the manifest only work on Android API 21+
+        if (AppConstants.Versions.preLollipop) {
             return;
         }
 
@@ -186,7 +195,7 @@ public class WebAppActivity extends GeckoApp {
     }
 
     private void updateStatusBarColor(final Integer themeColor) {
-        if (themeColor != null && !AppConstants.Versions.preLollipop) {
+        if (themeColor != null) {
             final Window window = getWindow();
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
             window.setStatusBarColor(ColorUtil.darken(themeColor, 0.25));

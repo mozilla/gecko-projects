@@ -1,1058 +1,1050 @@
-// IWYU pragma: private, include "nsError.h"
-/* Helper file for nsError.h, via preprocessor magic */
-  /* Standard "it worked" return value */
-  ERROR(NS_OK,  0),
 
-  /* ======================================================================= */
-  /* Core errors, not part of any modules */
-  /* ======================================================================= */
-  ERROR(NS_ERROR_BASE,                          0xC1F30000),
-  /* Returned when an instance is not initialized */
-  ERROR(NS_ERROR_NOT_INITIALIZED,               NS_ERROR_BASE + 1),
-  /* Returned when an instance is already initialized */
-  ERROR(NS_ERROR_ALREADY_INITIALIZED,           NS_ERROR_BASE + 2),
-  /* Returned by a not implemented function */
-  ERROR(NS_ERROR_NOT_IMPLEMENTED,               0x80004001),
-  /* Returned when a given interface is not supported. */
-  ERROR(NS_NOINTERFACE,                         0x80004002),
-  ERROR(NS_ERROR_NO_INTERFACE,                  NS_NOINTERFACE),
-  /* Returned when a function aborts */
-  ERROR(NS_ERROR_ABORT,                         0x80004004),
-  /* Returned when a function fails */
-  ERROR(NS_ERROR_FAILURE,                       0x80004005),
-  /* Returned when an unexpected error occurs */
-  ERROR(NS_ERROR_UNEXPECTED,                    0x8000ffff),
-  /* Returned when a memory allocation fails */
-  ERROR(NS_ERROR_OUT_OF_MEMORY,                 0x8007000e),
-  /* Returned when an illegal value is passed */
-  ERROR(NS_ERROR_ILLEGAL_VALUE,                 0x80070057),
-  ERROR(NS_ERROR_INVALID_ARG,                   NS_ERROR_ILLEGAL_VALUE),
-  ERROR(NS_ERROR_INVALID_POINTER,               NS_ERROR_INVALID_ARG),
-  ERROR(NS_ERROR_NULL_POINTER,                  NS_ERROR_INVALID_ARG),
-  /* Returned when a class doesn't allow aggregation */
-  ERROR(NS_ERROR_NO_AGGREGATION,                0x80040110),
-  /* Returned when an operation can't complete due to an unavailable resource */
-  ERROR(NS_ERROR_NOT_AVAILABLE,                 0x80040111),
-  /* Returned when a class is not registered */
-  ERROR(NS_ERROR_FACTORY_NOT_REGISTERED,        0x80040154),
-  /* Returned when a class cannot be registered, but may be tried again later */
-  ERROR(NS_ERROR_FACTORY_REGISTER_AGAIN,        0x80040155),
-  /* Returned when a dynamically loaded factory couldn't be found */
-  ERROR(NS_ERROR_FACTORY_NOT_LOADED,            0x800401f8),
-  /* Returned when a factory doesn't support signatures */
-  ERROR(NS_ERROR_FACTORY_NO_SIGNATURE_SUPPORT,  NS_ERROR_BASE + 0x101),
-  /* Returned when a factory already is registered */
-  ERROR(NS_ERROR_FACTORY_EXISTS,                NS_ERROR_BASE + 0x100),
-
-
-  /* ======================================================================= */
-  /* 1: NS_ERROR_MODULE_XPCOM */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_XPCOM
-  /* Result codes used by nsIVariant */
-  ERROR(NS_ERROR_CANNOT_CONVERT_DATA,       FAILURE(1)),
-  ERROR(NS_ERROR_OBJECT_IS_IMMUTABLE,       FAILURE(2)),
-  ERROR(NS_ERROR_LOSS_OF_SIGNIFICANT_DATA,  FAILURE(3)),
-  /* Result code used by nsIThreadManager */
-  ERROR(NS_ERROR_NOT_SAME_THREAD,           FAILURE(4)),
-  /* Various operations are not permitted during XPCOM shutdown and will fail
-   * with this exception. */
-  ERROR(NS_ERROR_ILLEGAL_DURING_SHUTDOWN,   FAILURE(30)),
-  ERROR(NS_ERROR_SERVICE_NOT_AVAILABLE,     FAILURE(22)),
-
-  ERROR(NS_SUCCESS_LOSS_OF_INSIGNIFICANT_DATA,  SUCCESS(1)),
-  /* Used by nsCycleCollectionParticipant */
-  ERROR(NS_SUCCESS_INTERRUPTED_TRAVERSE,        SUCCESS(2)),
-  /* DEPRECATED */
-  ERROR(NS_ERROR_SERVICE_NOT_FOUND,             SUCCESS(22)),
-  /* DEPRECATED */
-  ERROR(NS_ERROR_SERVICE_IN_USE,                SUCCESS(23)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 2: NS_ERROR_MODULE_BASE */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_BASE
-  /* I/O Errors */
-
-  /*  Stream closed */
-  ERROR(NS_BASE_STREAM_CLOSED,          FAILURE(2)),
-  /*  Error from the operating system */
-  ERROR(NS_BASE_STREAM_OSERROR,         FAILURE(3)),
-  /*  Illegal arguments */
-  ERROR(NS_BASE_STREAM_ILLEGAL_ARGS,    FAILURE(4)),
-  /*  For unichar streams */
-  ERROR(NS_BASE_STREAM_NO_CONVERTER,    FAILURE(5)),
-  /*  For unichar streams */
-  ERROR(NS_BASE_STREAM_BAD_CONVERSION,  FAILURE(6)),
-  ERROR(NS_BASE_STREAM_WOULD_BLOCK,     FAILURE(7)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 3: NS_ERROR_MODULE_GFX */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_GFX
-  /* no printer available (e.g. cannot find _any_ printer) */
-  ERROR(NS_ERROR_GFX_PRINTER_NO_PRINTER_AVAILABLE,        FAILURE(1)),
-  /* _specified_ (by name) printer not found */
-  ERROR(NS_ERROR_GFX_PRINTER_NAME_NOT_FOUND,              FAILURE(2)),
-  /* print-to-file: could not open output file */
-  ERROR(NS_ERROR_GFX_PRINTER_COULD_NOT_OPEN_FILE,         FAILURE(3)),
-  /* print: starting document */
-  ERROR(NS_ERROR_GFX_PRINTER_STARTDOC,                    FAILURE(4)),
-  /* print: ending document */
-  ERROR(NS_ERROR_GFX_PRINTER_ENDDOC,                      FAILURE(5)),
-  /* print: starting page */
-  ERROR(NS_ERROR_GFX_PRINTER_STARTPAGE,                   FAILURE(6)),
-  /* The document is still being loaded */
-  ERROR(NS_ERROR_GFX_PRINTER_DOC_IS_BUSY,                 FAILURE(7)),
-
-  /* Font cmap is strangely structured - avoid this font! */
-  ERROR(NS_ERROR_GFX_CMAP_MALFORMED,                      FAILURE(51)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 4:  NS_ERROR_MODULE_WIDGET */
-  /* ======================================================================= */
-#define MODULE  NS_ERROR_MODULE_WIDGET
-  /* Used by:
-   *   - nsIWidget::NotifyIME()
-   *   - nsIWidget::OnWindowedPluginKeyEvent()
-   * Returned when the notification or the event is handled and it's consumed
-   * by somebody. */
-  ERROR(NS_SUCCESS_EVENT_CONSUMED,                        SUCCESS(1)),
-  /* Used by:
-   *   - nsIWidget::OnWindowedPluginKeyEvent()
-   * Returned when the event is handled correctly but the result will be
-   * notified asynchronously. */
-  ERROR(NS_SUCCESS_EVENT_HANDLED_ASYNCHRONOUSLY,          SUCCESS(2)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 6: NS_ERROR_MODULE_NETWORK */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_NETWORK
-  /* General async request error codes:
-   *
-   * These error codes are commonly passed through callback methods to indicate
-   * the status of some requested async request.
-   *
-   * For example, see nsIRequestObserver::onStopRequest.
-   */
-
-  /* The async request completed successfully. */
-  ERROR(NS_BINDING_SUCCEEDED,  NS_OK),
-
-  /* The async request failed for some unknown reason.  */
-  ERROR(NS_BINDING_FAILED,      FAILURE(1)),
-  /* The async request failed because it was aborted by some user action. */
-  ERROR(NS_BINDING_ABORTED,     FAILURE(2)),
-  /* The async request has been "redirected" to a different async request.
-   * (e.g., an HTTP redirect occurred).
-   *
-   * This error code is used with load groups to notify the load group observer
-   * when a request in the load group is redirected to another request. */
-  ERROR(NS_BINDING_REDIRECTED,  FAILURE(3)),
-  /* The async request has been "retargeted" to a different "handler."
-   *
-   * This error code is used with load groups to notify the load group observer
-   * when a request in the load group is removed from the load group and added
-   * to a different load group. */
-  ERROR(NS_BINDING_RETARGETED,  FAILURE(4)),
-
-  /* Miscellaneous error codes: These errors are not typically passed via
-   * onStopRequest. */
-
-  /* The URI is malformed. */
-  ERROR(NS_ERROR_MALFORMED_URI,                       FAILURE(10)),
-  /* The requested action could not be completed while the object is busy.
-   * Implementations of nsIChannel::asyncOpen will commonly return this error
-   * if the channel has already been opened (and has not yet been closed). */
-  ERROR(NS_ERROR_IN_PROGRESS,                         FAILURE(15)),
-  /* Returned from nsIChannel::asyncOpen to indicate that OnDataAvailable will
-   * not be called because there is no content available.  This is used by
-   * helper app style protocols (e.g., mailto).  XXX perhaps this should be a
-   * success code. */
-  ERROR(NS_ERROR_NO_CONTENT,                          FAILURE(17)),
-  /* The URI scheme corresponds to an unknown protocol handler. */
-  ERROR(NS_ERROR_UNKNOWN_PROTOCOL,                    FAILURE(18)),
-  /* The content encoding of the source document was incorrect, for example
-   * returning a plain HTML document advertised as Content-Encoding: gzip */
-  ERROR(NS_ERROR_INVALID_CONTENT_ENCODING,            FAILURE(27)),
-  /* A transport level corruption was found in the source document. for example
-   * a document with a calculated checksum that does not match the Content-MD5
-   * http header. */
-  ERROR(NS_ERROR_CORRUPTED_CONTENT,                   FAILURE(29)),
-  /* A content signature verification failed for some reason. This can be either
-   * an actual verification error, or any other error that led to the fact that
-   * a content signature that was expected couldn't be verified. */
-  ERROR(NS_ERROR_INVALID_SIGNATURE,                   FAILURE(58)),
-  /* While parsing for the first component of a header field using syntax as in
-   * Content-Disposition or Content-Type, the first component was found to be
-   * empty, such as in: Content-Disposition: ; filename=foo */
-  ERROR(NS_ERROR_FIRST_HEADER_FIELD_COMPONENT_EMPTY,  FAILURE(34)),
-  /* Returned from nsIChannel::asyncOpen when trying to open the channel again
-   * (reopening is not supported). */
-  ERROR(NS_ERROR_ALREADY_OPENED,                      FAILURE(73)),
-
-  /* Connectivity error codes: */
-
-  /* The connection is already established.  XXX unused - consider removing. */
-  ERROR(NS_ERROR_ALREADY_CONNECTED,         FAILURE(11)),
-  /* The connection does not exist.  XXX unused - consider removing. */
-  ERROR(NS_ERROR_NOT_CONNECTED,             FAILURE(12)),
-  /* The connection attempt failed, for example, because no server was
-   * listening at specified host:port. */
-  ERROR(NS_ERROR_CONNECTION_REFUSED,        FAILURE(13)),
-  /* The connection was lost due to a timeout error.  */
-  ERROR(NS_ERROR_NET_TIMEOUT,               FAILURE(14)),
-  /* The requested action could not be completed while the networking library
-   * is in the offline state. */
-  ERROR(NS_ERROR_OFFLINE,                   FAILURE(16)),
-  /* The requested action was prohibited because it would have caused the
-   * networking library to establish a connection to an unsafe or otherwise
-   * banned port. */
-  ERROR(NS_ERROR_PORT_ACCESS_NOT_ALLOWED,   FAILURE(19)),
-  /* The connection was established, but no data was ever received. */
-  ERROR(NS_ERROR_NET_RESET,                 FAILURE(20)),
-  /* The connection was established, but the data transfer was interrupted. */
-  ERROR(NS_ERROR_NET_INTERRUPT,             FAILURE(71)),
-  /* The connection attempt to a proxy failed. */
-  ERROR(NS_ERROR_PROXY_CONNECTION_REFUSED,  FAILURE(72)),
-  /* A transfer was only partially done when it completed. */
-  ERROR(NS_ERROR_NET_PARTIAL_TRANSFER,      FAILURE(76)),
-  /* HTTP/2 detected invalid TLS configuration */
-  ERROR(NS_ERROR_NET_INADEQUATE_SECURITY,   FAILURE(82)),
-
-  /* XXX really need to better rationalize these error codes.  are consumers of
-   * necko really expected to know how to discern the meaning of these?? */
-  /* This request is not resumable, but it was tried to resume it, or to
-   * request resume-specific data. */
-  ERROR(NS_ERROR_NOT_RESUMABLE,        FAILURE(25)),
-  /* The request failed as a result of a detected redirection loop.  */
-  ERROR(NS_ERROR_REDIRECT_LOOP,        FAILURE(31)),
-  /* It was attempted to resume the request, but the entity has changed in the
-   * meantime. */
-  ERROR(NS_ERROR_ENTITY_CHANGED,       FAILURE(32)),
-  /* The request failed because the content type returned by the server was not
-   * a type expected by the channel (for nested channels such as the JAR
-   * channel). */
-  ERROR(NS_ERROR_UNSAFE_CONTENT_TYPE,  FAILURE(74)),
-  /* The request failed because the user tried to access to a remote XUL
-   * document from a website that is not in its white-list. */
-  ERROR(NS_ERROR_REMOTE_XUL,           FAILURE(75)),
-  /* The request resulted in an error page being displayed. */
-  ERROR(NS_ERROR_LOAD_SHOWED_ERRORPAGE, FAILURE(77)),
-  /* The request occurred in docshell that lacks a treeowner, so it is
-   * probably in the process of being torn down. */
-  ERROR(NS_ERROR_DOCSHELL_DYING,       FAILURE(78)),
-
-
-  /* FTP specific error codes: */
-
-  ERROR(NS_ERROR_FTP_LOGIN,  FAILURE(21)),
-  ERROR(NS_ERROR_FTP_CWD,    FAILURE(22)),
-  ERROR(NS_ERROR_FTP_PASV,   FAILURE(23)),
-  ERROR(NS_ERROR_FTP_PWD,    FAILURE(24)),
-  ERROR(NS_ERROR_FTP_LIST,   FAILURE(28)),
-
-  /* DNS specific error codes: */
-
-  /* The lookup of a hostname failed.  This generally refers to the hostname
-   * from the URL being loaded. */
-  ERROR(NS_ERROR_UNKNOWN_HOST,           FAILURE(30)),
-  /* A low or medium priority DNS lookup failed because the pending queue was
-   * already full. High priorty (the default) always makes room */
-  ERROR(NS_ERROR_DNS_LOOKUP_QUEUE_FULL,  FAILURE(33)),
-  /* The lookup of a proxy hostname failed.  If a channel is configured to
-   * speak to a proxy server, then it will generate this error if the proxy
-   * hostname cannot be resolved. */
-  ERROR(NS_ERROR_UNKNOWN_PROXY_HOST,     FAILURE(42)),
-
-
-  /* Socket specific error codes: */
-
-  /* The specified socket type does not exist. */
-  ERROR(NS_ERROR_UNKNOWN_SOCKET_TYPE,   FAILURE(51)),
-  /* The specified socket type could not be created. */
-  ERROR(NS_ERROR_SOCKET_CREATE_FAILED,  FAILURE(52)),
-  /* The operating system doesn't support the given type of address. */
-  ERROR(NS_ERROR_SOCKET_ADDRESS_NOT_SUPPORTED, FAILURE(53)),
-  /* The address to which we tried to bind the socket was busy. */
-  ERROR(NS_ERROR_SOCKET_ADDRESS_IN_USE, FAILURE(54)),
-
-  /* Cache specific error codes: */
-  ERROR(NS_ERROR_CACHE_KEY_NOT_FOUND,        FAILURE(61)),
-  ERROR(NS_ERROR_CACHE_DATA_IS_STREAM,       FAILURE(62)),
-  ERROR(NS_ERROR_CACHE_DATA_IS_NOT_STREAM,   FAILURE(63)),
-  ERROR(NS_ERROR_CACHE_WAIT_FOR_VALIDATION,  FAILURE(64)),
-  ERROR(NS_ERROR_CACHE_ENTRY_DOOMED,         FAILURE(65)),
-  ERROR(NS_ERROR_CACHE_READ_ACCESS_DENIED,   FAILURE(66)),
-  ERROR(NS_ERROR_CACHE_WRITE_ACCESS_DENIED,  FAILURE(67)),
-  ERROR(NS_ERROR_CACHE_IN_USE,               FAILURE(68)),
-  /* Error passed through onStopRequest if the document could not be fetched
-   * from the cache. */
-  ERROR(NS_ERROR_DOCUMENT_NOT_CACHED,        FAILURE(70)),
-
-  /* Effective TLD Service specific error codes: */
-
-  /* The requested number of domain levels exceeds those present in the host
-   * string. */
-  ERROR(NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS,  FAILURE(80)),
-  /* The host string is an IP address. */
-  ERROR(NS_ERROR_HOST_IS_IP_ADDRESS,          FAILURE(81)),
-
-
-  /* StreamLoader specific result codes: */
-
-  /* Result code returned by nsIStreamLoaderObserver to indicate that the
-   * observer is taking over responsibility for the data buffer, and the loader
-   * should NOT free it. */
-  ERROR(NS_SUCCESS_ADOPTED_DATA,  SUCCESS(90)),
-
-  /* FTP */
-  ERROR(NS_NET_STATUS_BEGIN_FTP_TRANSACTION,  SUCCESS(27)),
-  ERROR(NS_NET_STATUS_END_FTP_TRANSACTION,    SUCCESS(28)),
-
-  /* This success code may be returned by nsIAuthModule::getNextToken to
-   * indicate that the authentication is finished and thus there's no need
-   * to call getNextToken again. */
-  ERROR(NS_SUCCESS_AUTH_FINISHED,  SUCCESS(40)),
-
-  /* These are really not "results", they're statuses, used by nsITransport and
-   * friends.  This is abuse of nsresult, but we'll put up with it for now. */
-  /* nsITransport */
-  ERROR(NS_NET_STATUS_READING,  FAILURE(8)),
-  ERROR(NS_NET_STATUS_WRITING,  FAILURE(9)),
-
-  /* nsISocketTransport */
-  ERROR(NS_NET_STATUS_RESOLVING_HOST,         FAILURE(3)),
-  ERROR(NS_NET_STATUS_RESOLVED_HOST,          FAILURE(11)),
-  ERROR(NS_NET_STATUS_CONNECTING_TO,          FAILURE(7)),
-  ERROR(NS_NET_STATUS_CONNECTED_TO,           FAILURE(4)),
-  ERROR(NS_NET_STATUS_TLS_HANDSHAKE_STARTING, FAILURE(12)),
-  ERROR(NS_NET_STATUS_TLS_HANDSHAKE_ENDED,    FAILURE(13)),
-  ERROR(NS_NET_STATUS_SENDING_TO,             FAILURE(5)),
-  ERROR(NS_NET_STATUS_WAITING_FOR,            FAILURE(10)),
-  ERROR(NS_NET_STATUS_RECEIVING_FROM,         FAILURE(6)),
-
-  /* nsIInterceptedChannel */
-  /* Generic error for non-specific failures during service worker interception */
-  ERROR(NS_ERROR_INTERCEPTION_FAILED,                  FAILURE(100)),
-
-  /* nsIHstsPrimingListener */
-  /* Error code for HSTS priming timeout to distinguish from blocking */
-  ERROR(NS_ERROR_HSTS_PRIMING_TIMEOUT, FAILURE(110)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 7: NS_ERROR_MODULE_PLUGINS */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_PLUGINS
-  ERROR(NS_ERROR_PLUGINS_PLUGINSNOTCHANGED,        FAILURE(1000)),
-  ERROR(NS_ERROR_PLUGIN_DISABLED,                  FAILURE(1001)),
-  ERROR(NS_ERROR_PLUGIN_BLOCKLISTED,               FAILURE(1002)),
-  ERROR(NS_ERROR_PLUGIN_TIME_RANGE_NOT_SUPPORTED,  FAILURE(1003)),
-  ERROR(NS_ERROR_PLUGIN_CLICKTOPLAY,               FAILURE(1004)),
-  ERROR(NS_PLUGIN_INIT_PENDING,                    SUCCESS(1005)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 8: NS_ERROR_MODULE_LAYOUT */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_LAYOUT
-  /* Return code for nsITableLayout */
-  ERROR(NS_TABLELAYOUT_CELL_NOT_FOUND,  SUCCESS(0)),
-  /* Return code for nsFrame::GetNextPrevLineFromeBlockFrame */
-  ERROR(NS_POSITION_BEFORE_TABLE,       SUCCESS(3)),
-  /** Return codes for nsPresState::GetProperty() */
-  /* Returned if the property exists */
-  ERROR(NS_STATE_PROPERTY_EXISTS,       NS_OK),
-  /* Returned if the property does not exist */
-  ERROR(NS_STATE_PROPERTY_NOT_THERE,    SUCCESS(5)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 9: NS_ERROR_MODULE_HTMLPARSER */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_HTMLPARSER
-  ERROR(NS_ERROR_HTMLPARSER_CONTINUE,  NS_OK),
-
-  ERROR(NS_ERROR_HTMLPARSER_EOF,                        FAILURE(1000)),
-  ERROR(NS_ERROR_HTMLPARSER_UNKNOWN,                    FAILURE(1001)),
-  ERROR(NS_ERROR_HTMLPARSER_CANTPROPAGATE,              FAILURE(1002)),
-  ERROR(NS_ERROR_HTMLPARSER_CONTEXTMISMATCH,            FAILURE(1003)),
-  ERROR(NS_ERROR_HTMLPARSER_BADFILENAME,                FAILURE(1004)),
-  ERROR(NS_ERROR_HTMLPARSER_BADURL,                     FAILURE(1005)),
-  ERROR(NS_ERROR_HTMLPARSER_INVALIDPARSERCONTEXT,       FAILURE(1006)),
-  ERROR(NS_ERROR_HTMLPARSER_INTERRUPTED,                FAILURE(1007)),
-  ERROR(NS_ERROR_HTMLPARSER_BLOCK,                      FAILURE(1008)),
-  ERROR(NS_ERROR_HTMLPARSER_BADTOKENIZER,               FAILURE(1009)),
-  ERROR(NS_ERROR_HTMLPARSER_BADATTRIBUTE,               FAILURE(1010)),
-  ERROR(NS_ERROR_HTMLPARSER_UNRESOLVEDDTD,              FAILURE(1011)),
-  ERROR(NS_ERROR_HTMLPARSER_MISPLACEDTABLECONTENT,      FAILURE(1012)),
-  ERROR(NS_ERROR_HTMLPARSER_BADDTD,                     FAILURE(1013)),
-  ERROR(NS_ERROR_HTMLPARSER_BADCONTEXT,                 FAILURE(1014)),
-  ERROR(NS_ERROR_HTMLPARSER_STOPPARSING,                FAILURE(1015)),
-  ERROR(NS_ERROR_HTMLPARSER_UNTERMINATEDSTRINGLITERAL,  FAILURE(1016)),
-  ERROR(NS_ERROR_HTMLPARSER_HIERARCHYTOODEEP,           FAILURE(1017)),
-  ERROR(NS_ERROR_HTMLPARSER_FAKE_ENDTAG,                FAILURE(1018)),
-  ERROR(NS_ERROR_HTMLPARSER_INVALID_COMMENT,            FAILURE(1019)),
-
-  ERROR(NS_HTMLTOKENS_NOT_AN_ENTITY,       SUCCESS(2000)),
-  ERROR(NS_HTMLPARSER_VALID_META_CHARSET,  SUCCESS(3000)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 10: NS_ERROR_MODULE_RDF */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_RDF
-  /* Returned from nsIRDFDataSource::Assert() and Unassert() if the assertion
-   * (or unassertion was accepted by the datasource */
-  ERROR(NS_RDF_ASSERTION_ACCEPTED,  NS_OK),
-  /* Returned from nsIRDFCursor::Advance() if the cursor has no more
-   * elements to enumerate */
-  ERROR(NS_RDF_CURSOR_EMPTY,        SUCCESS(1)),
-  /* Returned from nsIRDFDataSource::GetSource() and GetTarget() if the
-   * source/target has no value */
-  ERROR(NS_RDF_NO_VALUE,            SUCCESS(2)),
-  /* Returned from nsIRDFDataSource::Assert() and Unassert() if the assertion
-   * (or unassertion) was rejected by the datasource; i.e., the datasource was
-   * not willing to record the statement. */
-  ERROR(NS_RDF_ASSERTION_REJECTED,  SUCCESS(3)),
-  /* Return this from rdfITripleVisitor to stop cycling */
-  ERROR(NS_RDF_STOP_VISIT,          SUCCESS(4)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 11: NS_ERROR_MODULE_UCONV */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_UCONV
-  ERROR(NS_ERROR_UCONV_NOCONV,       FAILURE(1)),
-  ERROR(NS_ERROR_UDEC_ILLEGALINPUT,  FAILURE(14)),
-
-  ERROR(NS_SUCCESS_USING_FALLBACK_LOCALE,  SUCCESS(2)),
-  ERROR(NS_OK_UDEC_EXACTLENGTH,            SUCCESS(11)),
-  ERROR(NS_OK_UDEC_MOREINPUT,              SUCCESS(12)),
-  ERROR(NS_OK_UDEC_MOREOUTPUT,             SUCCESS(13)),
-  ERROR(NS_OK_UDEC_NOBOMFOUND,             SUCCESS(14)),
-  ERROR(NS_OK_UENC_EXACTLENGTH,            SUCCESS(33)),
-  ERROR(NS_OK_UENC_MOREOUTPUT,             SUCCESS(34)),
-  ERROR(NS_ERROR_UENC_NOMAPPING,           SUCCESS(35)),
-  ERROR(NS_OK_UENC_MOREINPUT,              SUCCESS(36)),
-
-  /* BEGIN DEPRECATED */
-  ERROR(NS_EXACT_LENGTH,         NS_OK_UDEC_EXACTLENGTH),
-  ERROR(NS_PARTIAL_MORE_INPUT,   NS_OK_UDEC_MOREINPUT),
-  ERROR(NS_PARTIAL_MORE_OUTPUT,  NS_OK_UDEC_MOREOUTPUT),
-  ERROR(NS_ERROR_ILLEGAL_INPUT,  NS_ERROR_UDEC_ILLEGALINPUT),
-  /* END DEPRECATED */
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 13: NS_ERROR_MODULE_FILES */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_FILES
-  ERROR(NS_ERROR_FILE_UNRECOGNIZED_PATH,      FAILURE(1)),
-  ERROR(NS_ERROR_FILE_UNRESOLVABLE_SYMLINK,   FAILURE(2)),
-  ERROR(NS_ERROR_FILE_EXECUTION_FAILED,       FAILURE(3)),
-  ERROR(NS_ERROR_FILE_UNKNOWN_TYPE,           FAILURE(4)),
-  ERROR(NS_ERROR_FILE_DESTINATION_NOT_DIR,    FAILURE(5)),
-  ERROR(NS_ERROR_FILE_TARGET_DOES_NOT_EXIST,  FAILURE(6)),
-  ERROR(NS_ERROR_FILE_COPY_OR_MOVE_FAILED,    FAILURE(7)),
-  ERROR(NS_ERROR_FILE_ALREADY_EXISTS,         FAILURE(8)),
-  ERROR(NS_ERROR_FILE_INVALID_PATH,           FAILURE(9)),
-  ERROR(NS_ERROR_FILE_DISK_FULL,              FAILURE(10)),
-  ERROR(NS_ERROR_FILE_CORRUPTED,              FAILURE(11)),
-  ERROR(NS_ERROR_FILE_NOT_DIRECTORY,          FAILURE(12)),
-  ERROR(NS_ERROR_FILE_IS_DIRECTORY,           FAILURE(13)),
-  ERROR(NS_ERROR_FILE_IS_LOCKED,              FAILURE(14)),
-  ERROR(NS_ERROR_FILE_TOO_BIG,                FAILURE(15)),
-  ERROR(NS_ERROR_FILE_NO_DEVICE_SPACE,        FAILURE(16)),
-  ERROR(NS_ERROR_FILE_NAME_TOO_LONG,          FAILURE(17)),
-  ERROR(NS_ERROR_FILE_NOT_FOUND,              FAILURE(18)),
-  ERROR(NS_ERROR_FILE_READ_ONLY,              FAILURE(19)),
-  ERROR(NS_ERROR_FILE_DIR_NOT_EMPTY,          FAILURE(20)),
-  ERROR(NS_ERROR_FILE_ACCESS_DENIED,          FAILURE(21)),
-
-  ERROR(NS_SUCCESS_FILE_DIRECTORY_EMPTY,  SUCCESS(1)),
-  /* Result codes used by nsIDirectoryServiceProvider2 */
-  ERROR(NS_SUCCESS_AGGREGATE_RESULT,      SUCCESS(2)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 14: NS_ERROR_MODULE_DOM */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_DOM
-  /* XXX If you add a new DOM error code, also add an error string to
-   * dom/base/domerr.msg */
-
-  /* Standard DOM error codes: http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html */
-  ERROR(NS_ERROR_DOM_INDEX_SIZE_ERR,               FAILURE(1)),
-  ERROR(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR,        FAILURE(3)),
-  ERROR(NS_ERROR_DOM_WRONG_DOCUMENT_ERR,           FAILURE(4)),
-  ERROR(NS_ERROR_DOM_INVALID_CHARACTER_ERR,        FAILURE(5)),
-  ERROR(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR,  FAILURE(7)),
-  ERROR(NS_ERROR_DOM_NOT_FOUND_ERR,                FAILURE(8)),
-  ERROR(NS_ERROR_DOM_NOT_SUPPORTED_ERR,            FAILURE(9)),
-  ERROR(NS_ERROR_DOM_INUSE_ATTRIBUTE_ERR,          FAILURE(10)),
-  ERROR(NS_ERROR_DOM_INVALID_STATE_ERR,            FAILURE(11)),
-  ERROR(NS_ERROR_DOM_SYNTAX_ERR,                   FAILURE(12)),
-  ERROR(NS_ERROR_DOM_INVALID_MODIFICATION_ERR,     FAILURE(13)),
-  ERROR(NS_ERROR_DOM_NAMESPACE_ERR,                FAILURE(14)),
-  ERROR(NS_ERROR_DOM_INVALID_ACCESS_ERR,           FAILURE(15)),
-  ERROR(NS_ERROR_DOM_TYPE_MISMATCH_ERR,            FAILURE(17)),
-  ERROR(NS_ERROR_DOM_SECURITY_ERR,                 FAILURE(18)),
-  ERROR(NS_ERROR_DOM_NETWORK_ERR,                  FAILURE(19)),
-  ERROR(NS_ERROR_DOM_ABORT_ERR,                    FAILURE(20)),
-  ERROR(NS_ERROR_DOM_URL_MISMATCH_ERR,             FAILURE(21)),
-  ERROR(NS_ERROR_DOM_QUOTA_EXCEEDED_ERR,           FAILURE(22)),
-  ERROR(NS_ERROR_DOM_TIMEOUT_ERR,                  FAILURE(23)),
-  ERROR(NS_ERROR_DOM_INVALID_NODE_TYPE_ERR,        FAILURE(24)),
-  ERROR(NS_ERROR_DOM_DATA_CLONE_ERR,               FAILURE(25)),
-  /* XXX Should be JavaScript native errors */
-  ERROR(NS_ERROR_TYPE_ERR,                         FAILURE(26)),
-  ERROR(NS_ERROR_RANGE_ERR,                        FAILURE(27)),
-  /* StringEncoding API errors from http://wiki.whatwg.org/wiki/StringEncoding */
-  ERROR(NS_ERROR_DOM_ENCODING_NOT_SUPPORTED_ERR,   FAILURE(28)),
-  ERROR(NS_ERROR_DOM_INVALID_POINTER_ERR,          FAILURE(29)),
-  /* WebCrypto API errors from http://www.w3.org/TR/WebCryptoAPI/ */
-  ERROR(NS_ERROR_DOM_UNKNOWN_ERR,                  FAILURE(30)),
-  ERROR(NS_ERROR_DOM_DATA_ERR,                     FAILURE(31)),
-  ERROR(NS_ERROR_DOM_OPERATION_ERR,                FAILURE(32)),
-  /* https://heycam.github.io/webidl/#notallowederror */
-  ERROR(NS_ERROR_DOM_NOT_ALLOWED_ERR,              FAILURE(33)),
-  /* DOM error codes defined by us */
-  ERROR(NS_ERROR_DOM_SECMAN_ERR,                   FAILURE(1001)),
-  ERROR(NS_ERROR_DOM_WRONG_TYPE_ERR,               FAILURE(1002)),
-  ERROR(NS_ERROR_DOM_NOT_OBJECT_ERR,               FAILURE(1003)),
-  ERROR(NS_ERROR_DOM_NOT_XPC_OBJECT_ERR,           FAILURE(1004)),
-  ERROR(NS_ERROR_DOM_NOT_NUMBER_ERR,               FAILURE(1005)),
-  ERROR(NS_ERROR_DOM_NOT_BOOLEAN_ERR,              FAILURE(1006)),
-  ERROR(NS_ERROR_DOM_NOT_FUNCTION_ERR,             FAILURE(1007)),
-  ERROR(NS_ERROR_DOM_TOO_FEW_PARAMETERS_ERR,       FAILURE(1008)),
-  ERROR(NS_ERROR_DOM_BAD_DOCUMENT_DOMAIN,          FAILURE(1009)),
-  ERROR(NS_ERROR_DOM_PROP_ACCESS_DENIED,           FAILURE(1010)),
-  ERROR(NS_ERROR_DOM_XPCONNECT_ACCESS_DENIED,      FAILURE(1011)),
-  ERROR(NS_ERROR_DOM_BAD_URI,                      FAILURE(1012)),
-  ERROR(NS_ERROR_DOM_RETVAL_UNDEFINED,             FAILURE(1013)),
-  ERROR(NS_ERROR_DOM_QUOTA_REACHED,                FAILURE(1014)),
-
-  /* A way to represent uncatchable exceptions */
-  ERROR(NS_ERROR_UNCATCHABLE_EXCEPTION,            FAILURE(1015)),
-
-  ERROR(NS_ERROR_DOM_MALFORMED_URI,                FAILURE(1016)),
-  ERROR(NS_ERROR_DOM_INVALID_HEADER_NAME,          FAILURE(1017)),
-
-  ERROR(NS_ERROR_DOM_INVALID_STATE_XHR_HAS_INVALID_CONTEXT,                            FAILURE(1018)),
-  ERROR(NS_ERROR_DOM_INVALID_STATE_XHR_MUST_BE_OPENED,                                 FAILURE(1019)),
-  ERROR(NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_SENDING,                            FAILURE(1020)),
-  ERROR(NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_LOADING_OR_DONE,                    FAILURE(1021)),
-  ERROR(NS_ERROR_DOM_INVALID_STATE_XHR_HAS_WRONG_RESPONSETYPE_FOR_RESPONSEXML,         FAILURE(1022)),
-  ERROR(NS_ERROR_DOM_INVALID_STATE_XHR_HAS_WRONG_RESPONSETYPE_FOR_RESPONSETEXT,        FAILURE(1023)),
-  ERROR(NS_ERROR_DOM_INVALID_STATE_XHR_CHUNKED_RESPONSETYPES_UNSUPPORTED_FOR_SYNC,     FAILURE(1024)),
-  ERROR(NS_ERROR_DOM_INVALID_ACCESS_XHR_TIMEOUT_AND_RESPONSETYPE_UNSUPPORTED_FOR_SYNC, FAILURE(1025)),
-
-  /* May be used to indicate when e.g. setting a property value didn't
-   * actually change the value, like for obj.foo = "bar"; obj.foo = "bar";
-   * the second assignment throws NS_SUCCESS_DOM_NO_OPERATION.
-   */
-  ERROR(NS_SUCCESS_DOM_NO_OPERATION,               SUCCESS(1)),
-
-  /*
-   * A success code that indicates that evaluating a string of JS went
-   * just fine except it threw an exception. Only for legacy use by
-   * nsJSUtils.
-   */
-  ERROR(NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW,    SUCCESS(2)),
-
-  /*
-   * A success code that indicates that evaluating a string of JS went
-   * just fine except it was killed by an uncatchable exception.
-   * Only for legacy use by nsJSUtils.
-   */
-  ERROR(NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW_UNCATCHABLE, SUCCESS(3)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 15: NS_ERROR_MODULE_IMGLIB */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_IMGLIB
-  ERROR(NS_IMAGELIB_SUCCESS_LOAD_FINISHED,  SUCCESS(0)),
-  ERROR(NS_IMAGELIB_CHANGING_OWNER,         SUCCESS(1)),
-
-  ERROR(NS_IMAGELIB_ERROR_FAILURE,       FAILURE(5)),
-  ERROR(NS_IMAGELIB_ERROR_NO_DECODER,    FAILURE(6)),
-  ERROR(NS_IMAGELIB_ERROR_NOT_FINISHED,  FAILURE(7)),
-  ERROR(NS_IMAGELIB_ERROR_NO_ENCODER,    FAILURE(9)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 17: NS_ERROR_MODULE_EDITOR */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_EDITOR
-  ERROR(NS_SUCCESS_EDITOR_ELEMENT_NOT_FOUND,   SUCCESS(1)),
-  ERROR(NS_SUCCESS_EDITOR_FOUND_TARGET,        SUCCESS(2)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 18: NS_ERROR_MODULE_XPCONNECT */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_XPCONNECT
-  ERROR(NS_ERROR_XPC_NOT_ENOUGH_ARGS,                  FAILURE(1)),
-  ERROR(NS_ERROR_XPC_NEED_OUT_OBJECT,                  FAILURE(2)),
-  ERROR(NS_ERROR_XPC_CANT_SET_OUT_VAL,                 FAILURE(3)),
-  ERROR(NS_ERROR_XPC_NATIVE_RETURNED_FAILURE,          FAILURE(4)),
-  ERROR(NS_ERROR_XPC_CANT_GET_INTERFACE_INFO,          FAILURE(5)),
-  ERROR(NS_ERROR_XPC_CANT_GET_PARAM_IFACE_INFO,        FAILURE(6)),
-  ERROR(NS_ERROR_XPC_CANT_GET_METHOD_INFO,             FAILURE(7)),
-  ERROR(NS_ERROR_XPC_UNEXPECTED,                       FAILURE(8)),
-  ERROR(NS_ERROR_XPC_BAD_CONVERT_JS,                   FAILURE(9)),
-  ERROR(NS_ERROR_XPC_BAD_CONVERT_NATIVE,               FAILURE(10)),
-  ERROR(NS_ERROR_XPC_BAD_CONVERT_JS_NULL_REF,          FAILURE(11)),
-  ERROR(NS_ERROR_XPC_BAD_OP_ON_WN_PROTO,               FAILURE(12)),
-  ERROR(NS_ERROR_XPC_CANT_CONVERT_WN_TO_FUN,           FAILURE(13)),
-  ERROR(NS_ERROR_XPC_CANT_DEFINE_PROP_ON_WN,           FAILURE(14)),
-  ERROR(NS_ERROR_XPC_CANT_WATCH_WN_STATIC,             FAILURE(15)),
-  ERROR(NS_ERROR_XPC_CANT_EXPORT_WN_STATIC,            FAILURE(16)),
-  ERROR(NS_ERROR_XPC_SCRIPTABLE_CALL_FAILED,           FAILURE(17)),
-  ERROR(NS_ERROR_XPC_SCRIPTABLE_CTOR_FAILED,           FAILURE(18)),
-  ERROR(NS_ERROR_XPC_CANT_CALL_WO_SCRIPTABLE,          FAILURE(19)),
-  ERROR(NS_ERROR_XPC_CANT_CTOR_WO_SCRIPTABLE,          FAILURE(20)),
-  ERROR(NS_ERROR_XPC_CI_RETURNED_FAILURE,              FAILURE(21)),
-  ERROR(NS_ERROR_XPC_GS_RETURNED_FAILURE,              FAILURE(22)),
-  ERROR(NS_ERROR_XPC_BAD_CID,                          FAILURE(23)),
-  ERROR(NS_ERROR_XPC_BAD_IID,                          FAILURE(24)),
-  ERROR(NS_ERROR_XPC_CANT_CREATE_WN,                   FAILURE(25)),
-  ERROR(NS_ERROR_XPC_JS_THREW_EXCEPTION,               FAILURE(26)),
-  ERROR(NS_ERROR_XPC_JS_THREW_NATIVE_OBJECT,           FAILURE(27)),
-  ERROR(NS_ERROR_XPC_JS_THREW_JS_OBJECT,               FAILURE(28)),
-  ERROR(NS_ERROR_XPC_JS_THREW_NULL,                    FAILURE(29)),
-  ERROR(NS_ERROR_XPC_JS_THREW_STRING,                  FAILURE(30)),
-  ERROR(NS_ERROR_XPC_JS_THREW_NUMBER,                  FAILURE(31)),
-  ERROR(NS_ERROR_XPC_JAVASCRIPT_ERROR,                 FAILURE(32)),
-  ERROR(NS_ERROR_XPC_JAVASCRIPT_ERROR_WITH_DETAILS,    FAILURE(33)),
-  ERROR(NS_ERROR_XPC_CANT_CONVERT_PRIMITIVE_TO_ARRAY,  FAILURE(34)),
-  ERROR(NS_ERROR_XPC_CANT_CONVERT_OBJECT_TO_ARRAY,     FAILURE(35)),
-  ERROR(NS_ERROR_XPC_NOT_ENOUGH_ELEMENTS_IN_ARRAY,     FAILURE(36)),
-  ERROR(NS_ERROR_XPC_CANT_GET_ARRAY_INFO,              FAILURE(37)),
-  ERROR(NS_ERROR_XPC_NOT_ENOUGH_CHARS_IN_STRING,       FAILURE(38)),
-  ERROR(NS_ERROR_XPC_SECURITY_MANAGER_VETO,            FAILURE(39)),
-  ERROR(NS_ERROR_XPC_INTERFACE_NOT_SCRIPTABLE,         FAILURE(40)),
-  ERROR(NS_ERROR_XPC_INTERFACE_NOT_FROM_NSISUPPORTS,   FAILURE(41)),
-  ERROR(NS_ERROR_XPC_CANT_GET_JSOBJECT_OF_DOM_OBJECT,  FAILURE(42)),
-  ERROR(NS_ERROR_XPC_CANT_SET_READ_ONLY_CONSTANT,      FAILURE(43)),
-  ERROR(NS_ERROR_XPC_CANT_SET_READ_ONLY_ATTRIBUTE,     FAILURE(44)),
-  ERROR(NS_ERROR_XPC_CANT_SET_READ_ONLY_METHOD,        FAILURE(45)),
-  ERROR(NS_ERROR_XPC_CANT_ADD_PROP_TO_WRAPPED_NATIVE,  FAILURE(46)),
-  ERROR(NS_ERROR_XPC_CALL_TO_SCRIPTABLE_FAILED,        FAILURE(47)),
-  ERROR(NS_ERROR_XPC_JSOBJECT_HAS_NO_FUNCTION_NAMED,   FAILURE(48)),
-  ERROR(NS_ERROR_XPC_BAD_ID_STRING,                    FAILURE(49)),
-  ERROR(NS_ERROR_XPC_BAD_INITIALIZER_NAME,             FAILURE(50)),
-  ERROR(NS_ERROR_XPC_HAS_BEEN_SHUTDOWN,                FAILURE(51)),
-  ERROR(NS_ERROR_XPC_CANT_MODIFY_PROP_ON_WN,           FAILURE(52)),
-  ERROR(NS_ERROR_XPC_BAD_CONVERT_JS_ZERO_ISNOT_NULL,   FAILURE(53)),
-  ERROR(NS_ERROR_XPC_CANT_PASS_CPOW_TO_NATIVE,         FAILURE(54)),
-  /* any new errors here should have an associated entry added in xpc.msg */
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 19: NS_ERROR_MODULE_PROFILE */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_PROFILE
-  ERROR(NS_ERROR_LAUNCHED_CHILD_PROCESS,  FAILURE(200)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 21: NS_ERROR_MODULE_SECURITY */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_SECURITY
-  /* Error code for CSP */
-  ERROR(NS_ERROR_CSP_FORM_ACTION_VIOLATION,        FAILURE(98)),
-  ERROR(NS_ERROR_CSP_FRAME_ANCESTOR_VIOLATION,     FAILURE(99)),
-
-  /* Error code for Sub-Resource Integrity */
-  ERROR(NS_ERROR_SRI_CORRUPT,                      FAILURE(200)),
-  ERROR(NS_ERROR_SRI_DISABLED,                     FAILURE(201)),
-  ERROR(NS_ERROR_SRI_NOT_ELIGIBLE,                 FAILURE(202)),
-  ERROR(NS_ERROR_SRI_UNEXPECTED_HASH_TYPE,         FAILURE(203)),
-  ERROR(NS_ERROR_SRI_IMPORT,                       FAILURE(204)),
-
-  /* CMS specific nsresult error codes.  Note: the numbers used here correspond
-   * to the values in nsICMSMessageErrors.idl. */
-  ERROR(NS_ERROR_CMS_VERIFY_NOT_SIGNED,            FAILURE(1024)),
-  ERROR(NS_ERROR_CMS_VERIFY_NO_CONTENT_INFO,       FAILURE(1025)),
-  ERROR(NS_ERROR_CMS_VERIFY_BAD_DIGEST,            FAILURE(1026)),
-  ERROR(NS_ERROR_CMS_VERIFY_NOCERT,                FAILURE(1028)),
-  ERROR(NS_ERROR_CMS_VERIFY_UNTRUSTED,             FAILURE(1029)),
-  ERROR(NS_ERROR_CMS_VERIFY_ERROR_UNVERIFIED,      FAILURE(1031)),
-  ERROR(NS_ERROR_CMS_VERIFY_ERROR_PROCESSING,      FAILURE(1032)),
-  ERROR(NS_ERROR_CMS_VERIFY_BAD_SIGNATURE,         FAILURE(1033)),
-  ERROR(NS_ERROR_CMS_VERIFY_DIGEST_MISMATCH,       FAILURE(1034)),
-  ERROR(NS_ERROR_CMS_VERIFY_UNKNOWN_ALGO,          FAILURE(1035)),
-  ERROR(NS_ERROR_CMS_VERIFY_UNSUPPORTED_ALGO,      FAILURE(1036)),
-  ERROR(NS_ERROR_CMS_VERIFY_MALFORMED_SIGNATURE,   FAILURE(1037)),
-  ERROR(NS_ERROR_CMS_VERIFY_HEADER_MISMATCH,       FAILURE(1038)),
-  ERROR(NS_ERROR_CMS_VERIFY_NOT_YET_ATTEMPTED,     FAILURE(1039)),
-  ERROR(NS_ERROR_CMS_VERIFY_CERT_WITHOUT_ADDRESS,  FAILURE(1040)),
-  ERROR(NS_ERROR_CMS_ENCRYPT_NO_BULK_ALG,          FAILURE(1056)),
-  ERROR(NS_ERROR_CMS_ENCRYPT_INCOMPLETE,           FAILURE(1057)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 22: NS_ERROR_MODULE_DOM_XPATH */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_DOM_XPATH
-  /* DOM error codes from http://www.w3.org/TR/DOM-Level-3-XPath/ */
-  ERROR(NS_ERROR_DOM_INVALID_EXPRESSION_ERR,  FAILURE(51)),
-  ERROR(NS_ERROR_DOM_TYPE_ERR,                FAILURE(52)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 24: NS_ERROR_MODULE_URILOADER */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_URILOADER
-  ERROR(NS_ERROR_WONT_HANDLE_CONTENT,   FAILURE(1)),
-  /* The load has been cancelled because it was found on a malware or phishing
-   * blacklist. */
-  ERROR(NS_ERROR_MALWARE_URI,           FAILURE(30)),
-  ERROR(NS_ERROR_PHISHING_URI,          FAILURE(31)),
-  ERROR(NS_ERROR_TRACKING_URI,          FAILURE(34)),
-  ERROR(NS_ERROR_UNWANTED_URI,          FAILURE(35)),
-  ERROR(NS_ERROR_BLOCKED_URI,           FAILURE(37)),
-  /* Used when "Save Link As..." doesn't see the headers quickly enough to
-   * choose a filename.  See nsContextMenu.js. */
-  ERROR(NS_ERROR_SAVE_LINK_AS_TIMEOUT,  FAILURE(32)),
-  /* Used when the data from a channel has already been parsed and cached so it
-   * doesn't need to be reparsed from the original source. */
-  ERROR(NS_ERROR_PARSED_DATA_CACHED,    FAILURE(33)),
-
-  /* This success code indicates that a refresh header was found and
-   * successfully setup.  */
-  ERROR(NS_REFRESHURI_HEADER_FOUND,  SUCCESS(2)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 25: NS_ERROR_MODULE_CONTENT */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_CONTENT
-  /* Error codes for image loading */
-  ERROR(NS_ERROR_IMAGE_SRC_CHANGED,             FAILURE(4)),
-  ERROR(NS_ERROR_IMAGE_BLOCKED,                 FAILURE(5)),
-  /* Error codes for content policy blocking */
-  ERROR(NS_ERROR_CONTENT_BLOCKED,               FAILURE(6)),
-  ERROR(NS_ERROR_CONTENT_BLOCKED_SHOW_ALT,      FAILURE(7)),
-  /* Success variations of content policy blocking */
-  ERROR(NS_PROPTABLE_PROP_NOT_THERE,            FAILURE(10)),
-  /* Error code for XBL */
-  ERROR(NS_ERROR_XBL_BLOCKED,                   FAILURE(15)),
-  /* Error code for when the content process crashed */
-  ERROR(NS_ERROR_CONTENT_CRASHED,               FAILURE(16)),
-
-  /* XXX this is not really used */
-  ERROR(NS_HTML_STYLE_PROPERTY_NOT_THERE,   SUCCESS(2)),
-  ERROR(NS_CONTENT_BLOCKED,                 SUCCESS(8)),
-  ERROR(NS_CONTENT_BLOCKED_SHOW_ALT,        SUCCESS(9)),
-  ERROR(NS_PROPTABLE_PROP_OVERWRITTEN,      SUCCESS(11)),
-  /* Error codes for FindBroadcaster in XULDocument.cpp */
-  ERROR(NS_FINDBROADCASTER_NOT_FOUND,       SUCCESS(12)),
-  ERROR(NS_FINDBROADCASTER_FOUND,           SUCCESS(13)),
-  ERROR(NS_FINDBROADCASTER_AWAIT_OVERLAYS,  SUCCESS(14)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 27: NS_ERROR_MODULE_XSLT */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_XSLT
-  ERROR(NS_ERROR_XPATH_INVALID_ARG,  NS_ERROR_INVALID_ARG),
-
-  ERROR(NS_ERROR_XSLT_PARSE_FAILURE,                  FAILURE(1)),
-  ERROR(NS_ERROR_XPATH_PARSE_FAILURE,                 FAILURE(2)),
-  ERROR(NS_ERROR_XSLT_ALREADY_SET,                    FAILURE(3)),
-  ERROR(NS_ERROR_XSLT_EXECUTION_FAILURE,              FAILURE(4)),
-  ERROR(NS_ERROR_XPATH_UNKNOWN_FUNCTION,              FAILURE(5)),
-  ERROR(NS_ERROR_XSLT_BAD_RECURSION,                  FAILURE(6)),
-  ERROR(NS_ERROR_XSLT_BAD_VALUE,                      FAILURE(7)),
-  ERROR(NS_ERROR_XSLT_NODESET_EXPECTED,               FAILURE(8)),
-  ERROR(NS_ERROR_XSLT_ABORTED,                        FAILURE(9)),
-  ERROR(NS_ERROR_XSLT_NETWORK_ERROR,                  FAILURE(10)),
-  ERROR(NS_ERROR_XSLT_WRONG_MIME_TYPE,                FAILURE(11)),
-  ERROR(NS_ERROR_XSLT_LOAD_RECURSION,                 FAILURE(12)),
-  ERROR(NS_ERROR_XPATH_BAD_ARGUMENT_COUNT,            FAILURE(13)),
-  ERROR(NS_ERROR_XPATH_BAD_EXTENSION_FUNCTION,        FAILURE(14)),
-  ERROR(NS_ERROR_XPATH_PAREN_EXPECTED,                FAILURE(15)),
-  ERROR(NS_ERROR_XPATH_INVALID_AXIS,                  FAILURE(16)),
-  ERROR(NS_ERROR_XPATH_NO_NODE_TYPE_TEST,             FAILURE(17)),
-  ERROR(NS_ERROR_XPATH_BRACKET_EXPECTED,              FAILURE(18)),
-  ERROR(NS_ERROR_XPATH_INVALID_VAR_NAME,              FAILURE(19)),
-  ERROR(NS_ERROR_XPATH_UNEXPECTED_END,                FAILURE(20)),
-  ERROR(NS_ERROR_XPATH_OPERATOR_EXPECTED,             FAILURE(21)),
-  ERROR(NS_ERROR_XPATH_UNCLOSED_LITERAL,              FAILURE(22)),
-  ERROR(NS_ERROR_XPATH_BAD_COLON,                     FAILURE(23)),
-  ERROR(NS_ERROR_XPATH_BAD_BANG,                      FAILURE(24)),
-  ERROR(NS_ERROR_XPATH_ILLEGAL_CHAR,                  FAILURE(25)),
-  ERROR(NS_ERROR_XPATH_BINARY_EXPECTED,               FAILURE(26)),
-  ERROR(NS_ERROR_XSLT_LOAD_BLOCKED_ERROR,             FAILURE(27)),
-  ERROR(NS_ERROR_XPATH_INVALID_EXPRESSION_EVALUATED,  FAILURE(28)),
-  ERROR(NS_ERROR_XPATH_UNBALANCED_CURLY_BRACE,        FAILURE(29)),
-  ERROR(NS_ERROR_XSLT_BAD_NODE_NAME,                  FAILURE(30)),
-  ERROR(NS_ERROR_XSLT_VAR_ALREADY_SET,                FAILURE(31)),
-  ERROR(NS_ERROR_XSLT_CALL_TO_KEY_NOT_ALLOWED,        FAILURE(32)),
-
-  ERROR(NS_XSLT_GET_NEW_HANDLER,  SUCCESS(1)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 28: NS_ERROR_MODULE_IPC */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_IPC
-  // Initial creation of a Transport object failed internally for unknown reasons.
-  ERROR(NS_ERROR_TRANSPORT_INIT,          FAILURE(1)),
-  // Generic error related to duplicating handle failures.
-  ERROR(NS_ERROR_DUPLICATE_HANDLE,        FAILURE(2)),
-  // Bridging: failure trying to open the connection to the parent
-  ERROR(NS_ERROR_BRIDGE_OPEN_PARENT,      FAILURE(3)),
-  // Bridging: failure trying to open the connection to the child
-  ERROR(NS_ERROR_BRIDGE_OPEN_CHILD,       FAILURE(4)),
-#undef MODULE
-
-  /* ======================================================================= */
-  /* 29: NS_ERROR_MODULE_SVG */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_SVG
-  /* SVG DOM error codes from http://www.w3.org/TR/SVG11/svgdom.html */
-  ERROR(NS_ERROR_DOM_SVG_WRONG_TYPE_ERR,         FAILURE(0)),
-  /* Yes, the spec says "INVERTABLE", not "INVERTIBLE" */
-  ERROR(NS_ERROR_DOM_SVG_MATRIX_NOT_INVERTABLE,  FAILURE(2)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 30: NS_ERROR_MODULE_STORAGE */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_STORAGE
-  /* To add additional errors to Storage, please append entries to the bottom
-   * of the list in the following format:
-   *   NS_ERROR_STORAGE_YOUR_ERR,  FAILURE(n)
-   * where n is the next unique positive integer.  You must also add an entry
-   * to js/xpconnect/src/xpc.msg under the code block beginning with the
-   * comment 'storage related codes (from mozStorage.h)', in the following
-   * format: 'XPC_MSG_DEF(NS_ERROR_STORAGE_YOUR_ERR, "brief description of your
-   * error")' */
-  ERROR(NS_ERROR_STORAGE_BUSY,        FAILURE(1)),
-  ERROR(NS_ERROR_STORAGE_IOERR,       FAILURE(2)),
-  ERROR(NS_ERROR_STORAGE_CONSTRAINT,  FAILURE(3)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 32: NS_ERROR_MODULE_DOM_FILE */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_DOM_FILE
-  ERROR(NS_ERROR_DOM_FILE_NOT_FOUND_ERR,     FAILURE(0)),
-  ERROR(NS_ERROR_DOM_FILE_NOT_READABLE_ERR,  FAILURE(1)),
-  ERROR(NS_ERROR_DOM_FILE_ABORT_ERR,         FAILURE(2)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 33: NS_ERROR_MODULE_DOM_INDEXEDDB */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_DOM_INDEXEDDB
-  /* IndexedDB error codes http://dvcs.w3.org/hg/IndexedDB/raw-file/tip/Overview.html */
-  ERROR(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR,               FAILURE(1)),
-  ERROR(NS_ERROR_DOM_INDEXEDDB_NOT_FOUND_ERR,             FAILURE(3)),
-  ERROR(NS_ERROR_DOM_INDEXEDDB_CONSTRAINT_ERR,            FAILURE(4)),
-  ERROR(NS_ERROR_DOM_INDEXEDDB_DATA_ERR,                  FAILURE(5)),
-  ERROR(NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR,           FAILURE(6)),
-  ERROR(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR,  FAILURE(7)),
-  ERROR(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR,                 FAILURE(8)),
-  ERROR(NS_ERROR_DOM_INDEXEDDB_READ_ONLY_ERR,             FAILURE(9)),
-  ERROR(NS_ERROR_DOM_INDEXEDDB_TIMEOUT_ERR,               FAILURE(10)),
-  ERROR(NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR,                 FAILURE(11)),
-  ERROR(NS_ERROR_DOM_INDEXEDDB_VERSION_ERR,               FAILURE(12)),
-  ERROR(NS_ERROR_DOM_INDEXEDDB_RECOVERABLE_ERR,           FAILURE(1001)),
-#undef MODULE
-
-
-  /* ======================================================================= */
-  /* 34: NS_ERROR_MODULE_DOM_FILEHANDLE */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_DOM_FILEHANDLE
-  ERROR(NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR,              FAILURE(1)),
-  ERROR(NS_ERROR_DOM_FILEHANDLE_NOT_ALLOWED_ERR,          FAILURE(2)),
-  ERROR(NS_ERROR_DOM_FILEHANDLE_INACTIVE_ERR,             FAILURE(3)),
-  ERROR(NS_ERROR_DOM_FILEHANDLE_ABORT_ERR,                FAILURE(4)),
-  ERROR(NS_ERROR_DOM_FILEHANDLE_READ_ONLY_ERR,            FAILURE(5)),
-  ERROR(NS_ERROR_DOM_FILEHANDLE_QUOTA_ERR,                FAILURE(6)),
-#undef MODULE
-
-  /* ======================================================================= */
-  /* 35: NS_ERROR_MODULE_SIGNED_JAR */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_SIGNED_JAR
-  ERROR(NS_ERROR_SIGNED_JAR_NOT_SIGNED,                   FAILURE(1)),
-  ERROR(NS_ERROR_SIGNED_JAR_MODIFIED_ENTRY,               FAILURE(2)),
-  ERROR(NS_ERROR_SIGNED_JAR_UNSIGNED_ENTRY,               FAILURE(3)),
-  ERROR(NS_ERROR_SIGNED_JAR_ENTRY_MISSING,                FAILURE(4)),
-  ERROR(NS_ERROR_SIGNED_JAR_WRONG_SIGNATURE,              FAILURE(5)),
-  ERROR(NS_ERROR_SIGNED_JAR_ENTRY_TOO_LARGE,              FAILURE(6)),
-  ERROR(NS_ERROR_SIGNED_JAR_ENTRY_INVALID,                FAILURE(7)),
-  ERROR(NS_ERROR_SIGNED_JAR_MANIFEST_INVALID,             FAILURE(8)),
-#undef MODULE
-
-  /* ======================================================================= */
-  /* 36: NS_ERROR_MODULE_DOM_FILESYSTEM */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_DOM_FILESYSTEM
-  ERROR(NS_ERROR_DOM_FILESYSTEM_INVALID_PATH_ERR,          FAILURE(1)),
-  ERROR(NS_ERROR_DOM_FILESYSTEM_INVALID_MODIFICATION_ERR,  FAILURE(2)),
-  ERROR(NS_ERROR_DOM_FILESYSTEM_NO_MODIFICATION_ALLOWED_ERR, FAILURE(3)),
-  ERROR(NS_ERROR_DOM_FILESYSTEM_PATH_EXISTS_ERR,           FAILURE(4)),
-  ERROR(NS_ERROR_DOM_FILESYSTEM_TYPE_MISMATCH_ERR,         FAILURE(5)),
-  ERROR(NS_ERROR_DOM_FILESYSTEM_UNKNOWN_ERR,               FAILURE(6)),
-#undef MODULE
-
-  /* ======================================================================= */
-  /* 38: NS_ERROR_MODULE_SIGNED_APP */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_SIGNED_APP
-  ERROR(NS_ERROR_SIGNED_APP_MANIFEST_INVALID,   FAILURE(1)),
-#undef MODULE
-
-  /* ======================================================================= */
-  /* 39: NS_ERROR_MODULE_DOM_ANIM */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_DOM_ANIM
-  ERROR(NS_ERROR_DOM_ANIM_MISSING_PROPS_ERR,              FAILURE(1)),
-#undef MODULE
-
-  /* ======================================================================= */
-  /* 40: NS_ERROR_MODULE_DOM_PUSH */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_DOM_PUSH
-  ERROR(NS_ERROR_DOM_PUSH_INVALID_REGISTRATION_ERR, FAILURE(1)),
-  ERROR(NS_ERROR_DOM_PUSH_DENIED_ERR,               FAILURE(2)),
-  ERROR(NS_ERROR_DOM_PUSH_ABORT_ERR,                FAILURE(3)),
-  ERROR(NS_ERROR_DOM_PUSH_SERVICE_UNREACHABLE,      FAILURE(4)),
-  ERROR(NS_ERROR_DOM_PUSH_INVALID_KEY_ERR,          FAILURE(5)),
-  ERROR(NS_ERROR_DOM_PUSH_MISMATCHED_KEY_ERR,       FAILURE(6)),
-#undef MODULE
-
-  /* ======================================================================= */
-  /* 41: NS_ERROR_MODULE_DOM_MEDIA */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_DOM_MEDIA
-  /* HTMLMediaElement API errors from https://html.spec.whatwg.org/multipage/embedded-content.html#media-elements */
-  ERROR(NS_ERROR_DOM_MEDIA_ABORT_ERR,           FAILURE(1)),
-  ERROR(NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR,     FAILURE(2)),
-  ERROR(NS_ERROR_DOM_MEDIA_NOT_SUPPORTED_ERR,   FAILURE(3)),
-
-  /* HTMLMediaElement internal decoding error */
-  ERROR(NS_ERROR_DOM_MEDIA_DECODE_ERR,          FAILURE(4)),
-  ERROR(NS_ERROR_DOM_MEDIA_FATAL_ERR,           FAILURE(5)),
-  ERROR(NS_ERROR_DOM_MEDIA_METADATA_ERR,        FAILURE(6)),
-  ERROR(NS_ERROR_DOM_MEDIA_OVERFLOW_ERR,        FAILURE(7)),
-  ERROR(NS_ERROR_DOM_MEDIA_END_OF_STREAM,       FAILURE(8)),
-  ERROR(NS_ERROR_DOM_MEDIA_WAITING_FOR_DATA,    FAILURE(9)),
-  ERROR(NS_ERROR_DOM_MEDIA_CANCELED,            FAILURE(10)),
-  ERROR(NS_ERROR_DOM_MEDIA_MEDIASINK_ERR,       FAILURE(11)),
-  ERROR(NS_ERROR_DOM_MEDIA_DEMUXER_ERR,         FAILURE(12)),
-  ERROR(NS_ERROR_DOM_MEDIA_CDM_ERR,             FAILURE(13)),
-  ERROR(NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER,    FAILURE(14)),
-  ERROR(NS_ERROR_DOM_MEDIA_INITIALIZING_DECODER, FAILURE(15)),
-
-  /* Internal platform-related errors */
-  ERROR(NS_ERROR_DOM_MEDIA_CUBEB_INITIALIZATION_ERR,  FAILURE(101)),
-#undef MODULE
-
-  /* ======================================================================= */
-  /* 42: NS_ERROR_MODULE_URL_CLASSIFIER */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_URL_CLASSIFIER
-  ERROR(NS_ERROR_UC_UPDATE_UNKNOWN,                    FAILURE(1)),
-  ERROR(NS_ERROR_UC_UPDATE_DUPLICATE_PREFIX,           FAILURE(2)),
-  ERROR(NS_ERROR_UC_UPDATE_INFINITE_LOOP,              FAILURE(3)),
-  ERROR(NS_ERROR_UC_UPDATE_WRONG_REMOVAL_INDICES,      FAILURE(4)),
-  ERROR(NS_ERROR_UC_UPDATE_CHECKSUM_MISMATCH,          FAILURE(5)),
-  ERROR(NS_ERROR_UC_UPDATE_MISSING_CHECKSUM,           FAILURE(6)),
-  ERROR(NS_ERROR_UC_UPDATE_SHUTDOWNING,                FAILURE(7)),
-  ERROR(NS_ERROR_UC_UPDATE_TABLE_NOT_FOUND,            FAILURE(8)),
-  ERROR(NS_ERROR_UC_UPDATE_BUILD_PREFIX_FAILURE,       FAILURE(9)),
-  ERROR(NS_ERROR_UC_UPDATE_FAIL_TO_WRITE_DISK,         FAILURE(10)),
-  ERROR(NS_ERROR_UC_UPDATE_PROTOCOL_PARSER_ERROR,      FAILURE(11)),
-#undef MODULE
-
-  /* ======================================================================= */
-  /* 43: NS_ERROR_MODULE_ERRORRESULT */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_ERRORRESULT
-  /* Represents a JS Value being thrown as an exception. */
-  ERROR(NS_ERROR_INTERNAL_ERRORRESULT_JS_EXCEPTION,           FAILURE(1)),
-  /* Used to indicate that we want to throw a DOMException. */
-  ERROR(NS_ERROR_INTERNAL_ERRORRESULT_DOMEXCEPTION,           FAILURE(2)),
-  /* Used to indicate that an exception is already pending on the JSContext. */
-  ERROR(NS_ERROR_INTERNAL_ERRORRESULT_EXCEPTION_ON_JSCONTEXT, FAILURE(3)),
-  /* Used to indicate that we want to throw a TypeError. */
-  ERROR(NS_ERROR_INTERNAL_ERRORRESULT_TYPEERROR,              FAILURE(4)),
-  /* Used to indicate that we want to throw a RangeError. */
-  ERROR(NS_ERROR_INTERNAL_ERRORRESULT_RANGEERROR,             FAILURE(5)),
-#undef MODULE
-
-  /* ======================================================================= */
-  /* 51: NS_ERROR_MODULE_GENERAL */
-  /* ======================================================================= */
-#define MODULE NS_ERROR_MODULE_GENERAL
-  /* Error code used internally by the incremental downloader to cancel the
-   * network channel when the download is already complete. */
-  ERROR(NS_ERROR_DOWNLOAD_COMPLETE,      FAILURE(1)),
-  /* Error code used internally by the incremental downloader to cancel the
-   * network channel when the response to a range request is 200 instead of
-   * 206. */
-  ERROR(NS_ERROR_DOWNLOAD_NOT_PARTIAL,   FAILURE(2)),
-  ERROR(NS_ERROR_UNORM_MOREOUTPUT,       FAILURE(33)),
-
-  ERROR(NS_ERROR_DOCSHELL_REQUEST_REJECTED,  FAILURE(1001)),
-  /* This is needed for displaying an error message when navigation is
-   * attempted on a document when printing The value arbitrary as long as it
-   * doesn't conflict with any of the other values in the errors in
-   * DisplayLoadError */
-  ERROR(NS_ERROR_DOCUMENT_IS_PRINTMODE,  FAILURE(2001)),
-
-  ERROR(NS_SUCCESS_DONT_FIXUP,           SUCCESS(1)),
-  /* This success code may be returned by nsIAppStartup::Run to indicate that
-   * the application should be restarted.  This condition corresponds to the
-   * case in which nsIAppStartup::Quit was called with the eRestart flag. */
-  ERROR(NS_SUCCESS_RESTART_APP,          SUCCESS(1)),
-  ERROR(NS_SUCCESS_RESTART_APP_NOT_SAME_PROFILE,    SUCCESS(3)),
-  ERROR(NS_SUCCESS_UNORM_NOTFOUND,  SUCCESS(17)),
-
-
-  /* a11y */
-  /* raised when current pivot's position is needed but it's not in the tree */
-  ERROR(NS_ERROR_NOT_IN_TREE,  FAILURE(38)),
-
-  /* see nsTextEquivUtils */
-  ERROR(NS_OK_NO_NAME_CLAUSE_HANDLED,  SUCCESS(34))
-#undef MODULE
+/* THIS FILE IS GENERATED BY ErrorList.py - DO NOT EDIT */
+
+#ifndef ErrorList_h__
+#define ErrorList_h__
+
+#define NS_ERROR_MODULE_BASE_OFFSET 69
+#define NS_ERROR_MODULE_XPCOM 1
+#define NS_ERROR_MODULE_BASE 2
+#define NS_ERROR_MODULE_GFX 3
+#define NS_ERROR_MODULE_WIDGET 4
+#define NS_ERROR_MODULE_CALENDAR 5
+#define NS_ERROR_MODULE_NETWORK 6
+#define NS_ERROR_MODULE_PLUGINS 7
+#define NS_ERROR_MODULE_LAYOUT 8
+#define NS_ERROR_MODULE_HTMLPARSER 9
+#define NS_ERROR_MODULE_RDF 10
+#define NS_ERROR_MODULE_UCONV 11
+#define NS_ERROR_MODULE_REG 12
+#define NS_ERROR_MODULE_FILES 13
+#define NS_ERROR_MODULE_DOM 14
+#define NS_ERROR_MODULE_IMGLIB 15
+#define NS_ERROR_MODULE_MAILNEWS 16
+#define NS_ERROR_MODULE_EDITOR 17
+#define NS_ERROR_MODULE_XPCONNECT 18
+#define NS_ERROR_MODULE_PROFILE 19
+#define NS_ERROR_MODULE_LDAP 20
+#define NS_ERROR_MODULE_SECURITY 21
+#define NS_ERROR_MODULE_DOM_XPATH 22
+#define NS_ERROR_MODULE_URILOADER 24
+#define NS_ERROR_MODULE_CONTENT 25
+#define NS_ERROR_MODULE_PYXPCOM 26
+#define NS_ERROR_MODULE_XSLT 27
+#define NS_ERROR_MODULE_IPC 28
+#define NS_ERROR_MODULE_SVG 29
+#define NS_ERROR_MODULE_STORAGE 30
+#define NS_ERROR_MODULE_SCHEMA 31
+#define NS_ERROR_MODULE_DOM_FILE 32
+#define NS_ERROR_MODULE_DOM_INDEXEDDB 33
+#define NS_ERROR_MODULE_DOM_FILEHANDLE 34
+#define NS_ERROR_MODULE_SIGNED_JAR 35
+#define NS_ERROR_MODULE_DOM_FILESYSTEM 36
+#define NS_ERROR_MODULE_DOM_BLUETOOTH 37
+#define NS_ERROR_MODULE_SIGNED_APP 38
+#define NS_ERROR_MODULE_DOM_ANIM 39
+#define NS_ERROR_MODULE_DOM_PUSH 40
+#define NS_ERROR_MODULE_DOM_MEDIA 41
+#define NS_ERROR_MODULE_URL_CLASSIFIER 42
+#define NS_ERROR_MODULE_ERRORRESULT 43
+#define NS_ERROR_MODULE_GENERAL 51
+
+enum class nsresult : uint32_t
+{
+  NS_OK = 0x0,
+  NS_ERROR_BASE = 0xC1F30000,
+  NS_ERROR_NOT_INITIALIZED = 0xC1F30001,
+  NS_ERROR_ALREADY_INITIALIZED = 0xC1F30002,
+  NS_ERROR_NOT_IMPLEMENTED = 0x80004001,
+  NS_NOINTERFACE = 0x80004002,
+  NS_ERROR_NO_INTERFACE = 0x80004002,
+  NS_ERROR_ABORT = 0x80004004,
+  NS_ERROR_FAILURE = 0x80004005,
+  NS_ERROR_UNEXPECTED = 0x8000FFFF,
+  NS_ERROR_OUT_OF_MEMORY = 0x8007000E,
+  NS_ERROR_ILLEGAL_VALUE = 0x80070057,
+  NS_ERROR_INVALID_ARG = 0x80070057,
+  NS_ERROR_INVALID_POINTER = 0x80070057,
+  NS_ERROR_NULL_POINTER = 0x80070057,
+  NS_ERROR_NO_AGGREGATION = 0x80040110,
+  NS_ERROR_NOT_AVAILABLE = 0x80040111,
+  NS_ERROR_FACTORY_NOT_REGISTERED = 0x80040154,
+  NS_ERROR_FACTORY_REGISTER_AGAIN = 0x80040155,
+  NS_ERROR_FACTORY_NOT_LOADED = 0x800401F8,
+  NS_ERROR_FACTORY_NO_SIGNATURE_SUPPORT = 0xC1F30101,
+  NS_ERROR_FACTORY_EXISTS = 0xC1F30100,
+  NS_ERROR_CANNOT_CONVERT_DATA = 0x80460001,
+  NS_ERROR_OBJECT_IS_IMMUTABLE = 0x80460002,
+  NS_ERROR_LOSS_OF_SIGNIFICANT_DATA = 0x80460003,
+  NS_ERROR_NOT_SAME_THREAD = 0x80460004,
+  NS_ERROR_ILLEGAL_DURING_SHUTDOWN = 0x8046001E,
+  NS_ERROR_SERVICE_NOT_AVAILABLE = 0x80460016,
+  NS_SUCCESS_LOSS_OF_INSIGNIFICANT_DATA = 0x460001,
+  NS_SUCCESS_INTERRUPTED_TRAVERSE = 0x460002,
+  NS_ERROR_SERVICE_NOT_FOUND = 0x460016,
+  NS_ERROR_SERVICE_IN_USE = 0x460017,
+  NS_BASE_STREAM_CLOSED = 0x80470002,
+  NS_BASE_STREAM_OSERROR = 0x80470003,
+  NS_BASE_STREAM_ILLEGAL_ARGS = 0x80470004,
+  NS_BASE_STREAM_NO_CONVERTER = 0x80470005,
+  NS_BASE_STREAM_BAD_CONVERSION = 0x80470006,
+  NS_BASE_STREAM_WOULD_BLOCK = 0x80470007,
+  NS_ERROR_GFX_PRINTER_NO_PRINTER_AVAILABLE = 0x80480001,
+  NS_ERROR_GFX_PRINTER_NAME_NOT_FOUND = 0x80480002,
+  NS_ERROR_GFX_PRINTER_COULD_NOT_OPEN_FILE = 0x80480003,
+  NS_ERROR_GFX_PRINTER_STARTDOC = 0x80480004,
+  NS_ERROR_GFX_PRINTER_ENDDOC = 0x80480005,
+  NS_ERROR_GFX_PRINTER_STARTPAGE = 0x80480006,
+  NS_ERROR_GFX_PRINTER_DOC_IS_BUSY = 0x80480007,
+  NS_ERROR_GFX_CMAP_MALFORMED = 0x80480033,
+  NS_SUCCESS_EVENT_CONSUMED = 0x490001,
+  NS_SUCCESS_EVENT_HANDLED_ASYNCHRONOUSLY = 0x490002,
+  NS_BINDING_SUCCEEDED = 0x0,
+  NS_BINDING_FAILED = 0x804B0001,
+  NS_BINDING_ABORTED = 0x804B0002,
+  NS_BINDING_REDIRECTED = 0x804B0003,
+  NS_BINDING_RETARGETED = 0x804B0004,
+  NS_ERROR_MALFORMED_URI = 0x804B000A,
+  NS_ERROR_IN_PROGRESS = 0x804B000F,
+  NS_ERROR_NO_CONTENT = 0x804B0011,
+  NS_ERROR_UNKNOWN_PROTOCOL = 0x804B0012,
+  NS_ERROR_INVALID_CONTENT_ENCODING = 0x804B001B,
+  NS_ERROR_CORRUPTED_CONTENT = 0x804B001D,
+  NS_ERROR_INVALID_SIGNATURE = 0x804B003A,
+  NS_ERROR_FIRST_HEADER_FIELD_COMPONENT_EMPTY = 0x804B0022,
+  NS_ERROR_ALREADY_OPENED = 0x804B0049,
+  NS_ERROR_ALREADY_CONNECTED = 0x804B000B,
+  NS_ERROR_NOT_CONNECTED = 0x804B000C,
+  NS_ERROR_CONNECTION_REFUSED = 0x804B000D,
+  NS_ERROR_NET_TIMEOUT = 0x804B000E,
+  NS_ERROR_OFFLINE = 0x804B0010,
+  NS_ERROR_PORT_ACCESS_NOT_ALLOWED = 0x804B0013,
+  NS_ERROR_NET_RESET = 0x804B0014,
+  NS_ERROR_NET_INTERRUPT = 0x804B0047,
+  NS_ERROR_PROXY_CONNECTION_REFUSED = 0x804B0048,
+  NS_ERROR_NET_PARTIAL_TRANSFER = 0x804B004C,
+  NS_ERROR_NET_INADEQUATE_SECURITY = 0x804B0052,
+  NS_ERROR_NOT_RESUMABLE = 0x804B0019,
+  NS_ERROR_REDIRECT_LOOP = 0x804B001F,
+  NS_ERROR_ENTITY_CHANGED = 0x804B0020,
+  NS_ERROR_UNSAFE_CONTENT_TYPE = 0x804B004A,
+  NS_ERROR_REMOTE_XUL = 0x804B004B,
+  NS_ERROR_LOAD_SHOWED_ERRORPAGE = 0x804B004D,
+  NS_ERROR_DOCSHELL_DYING = 0x804B004E,
+  NS_ERROR_FTP_LOGIN = 0x804B0015,
+  NS_ERROR_FTP_CWD = 0x804B0016,
+  NS_ERROR_FTP_PASV = 0x804B0017,
+  NS_ERROR_FTP_PWD = 0x804B0018,
+  NS_ERROR_FTP_LIST = 0x804B001C,
+  NS_ERROR_UNKNOWN_HOST = 0x804B001E,
+  NS_ERROR_DNS_LOOKUP_QUEUE_FULL = 0x804B0021,
+  NS_ERROR_UNKNOWN_PROXY_HOST = 0x804B002A,
+  NS_ERROR_UNKNOWN_SOCKET_TYPE = 0x804B0033,
+  NS_ERROR_SOCKET_CREATE_FAILED = 0x804B0034,
+  NS_ERROR_SOCKET_ADDRESS_NOT_SUPPORTED = 0x804B0035,
+  NS_ERROR_SOCKET_ADDRESS_IN_USE = 0x804B0036,
+  NS_ERROR_CACHE_KEY_NOT_FOUND = 0x804B003D,
+  NS_ERROR_CACHE_DATA_IS_STREAM = 0x804B003E,
+  NS_ERROR_CACHE_DATA_IS_NOT_STREAM = 0x804B003F,
+  NS_ERROR_CACHE_WAIT_FOR_VALIDATION = 0x804B0040,
+  NS_ERROR_CACHE_ENTRY_DOOMED = 0x804B0041,
+  NS_ERROR_CACHE_READ_ACCESS_DENIED = 0x804B0042,
+  NS_ERROR_CACHE_WRITE_ACCESS_DENIED = 0x804B0043,
+  NS_ERROR_CACHE_IN_USE = 0x804B0044,
+  NS_ERROR_DOCUMENT_NOT_CACHED = 0x804B0046,
+  NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS = 0x804B0050,
+  NS_ERROR_HOST_IS_IP_ADDRESS = 0x804B0051,
+  NS_SUCCESS_ADOPTED_DATA = 0x4B005A,
+  NS_NET_STATUS_BEGIN_FTP_TRANSACTION = 0x4B001B,
+  NS_NET_STATUS_END_FTP_TRANSACTION = 0x4B001C,
+  NS_SUCCESS_AUTH_FINISHED = 0x4B0028,
+  NS_NET_STATUS_READING = 0x804B0008,
+  NS_NET_STATUS_WRITING = 0x804B0009,
+  NS_NET_STATUS_RESOLVING_HOST = 0x804B0003,
+  NS_NET_STATUS_RESOLVED_HOST = 0x804B000B,
+  NS_NET_STATUS_CONNECTING_TO = 0x804B0007,
+  NS_NET_STATUS_CONNECTED_TO = 0x804B0004,
+  NS_NET_STATUS_TLS_HANDSHAKE_STARTING = 0x804B000C,
+  NS_NET_STATUS_TLS_HANDSHAKE_ENDED = 0x804B000D,
+  NS_NET_STATUS_SENDING_TO = 0x804B0005,
+  NS_NET_STATUS_WAITING_FOR = 0x804B000A,
+  NS_NET_STATUS_RECEIVING_FROM = 0x804B0006,
+  NS_ERROR_INTERCEPTION_FAILED = 0x804B0064,
+  NS_ERROR_HSTS_PRIMING_TIMEOUT = 0x804B006E,
+  NS_ERROR_PLUGINS_PLUGINSNOTCHANGED = 0x804C03E8,
+  NS_ERROR_PLUGIN_DISABLED = 0x804C03E9,
+  NS_ERROR_PLUGIN_BLOCKLISTED = 0x804C03EA,
+  NS_ERROR_PLUGIN_TIME_RANGE_NOT_SUPPORTED = 0x804C03EB,
+  NS_ERROR_PLUGIN_CLICKTOPLAY = 0x804C03EC,
+  NS_PLUGIN_INIT_PENDING = 0x4C03ED,
+  NS_TABLELAYOUT_CELL_NOT_FOUND = 0x4D0000,
+  NS_POSITION_BEFORE_TABLE = 0x4D0003,
+  NS_STATE_PROPERTY_EXISTS = 0x0,
+  NS_STATE_PROPERTY_NOT_THERE = 0x4D0005,
+  NS_ERROR_HTMLPARSER_CONTINUE = 0x0,
+  NS_ERROR_HTMLPARSER_EOF = 0x804E03E8,
+  NS_ERROR_HTMLPARSER_UNKNOWN = 0x804E03E9,
+  NS_ERROR_HTMLPARSER_CANTPROPAGATE = 0x804E03EA,
+  NS_ERROR_HTMLPARSER_CONTEXTMISMATCH = 0x804E03EB,
+  NS_ERROR_HTMLPARSER_BADFILENAME = 0x804E03EC,
+  NS_ERROR_HTMLPARSER_BADURL = 0x804E03ED,
+  NS_ERROR_HTMLPARSER_INVALIDPARSERCONTEXT = 0x804E03EE,
+  NS_ERROR_HTMLPARSER_INTERRUPTED = 0x804E03EF,
+  NS_ERROR_HTMLPARSER_BLOCK = 0x804E03F0,
+  NS_ERROR_HTMLPARSER_BADTOKENIZER = 0x804E03F1,
+  NS_ERROR_HTMLPARSER_BADATTRIBUTE = 0x804E03F2,
+  NS_ERROR_HTMLPARSER_UNRESOLVEDDTD = 0x804E03F3,
+  NS_ERROR_HTMLPARSER_MISPLACEDTABLECONTENT = 0x804E03F4,
+  NS_ERROR_HTMLPARSER_BADDTD = 0x804E03F5,
+  NS_ERROR_HTMLPARSER_BADCONTEXT = 0x804E03F6,
+  NS_ERROR_HTMLPARSER_STOPPARSING = 0x804E03F7,
+  NS_ERROR_HTMLPARSER_UNTERMINATEDSTRINGLITERAL = 0x804E03F8,
+  NS_ERROR_HTMLPARSER_HIERARCHYTOODEEP = 0x804E03F9,
+  NS_ERROR_HTMLPARSER_FAKE_ENDTAG = 0x804E03FA,
+  NS_ERROR_HTMLPARSER_INVALID_COMMENT = 0x804E03FB,
+  NS_HTMLTOKENS_NOT_AN_ENTITY = 0x4E07D0,
+  NS_HTMLPARSER_VALID_META_CHARSET = 0x4E0BB8,
+  NS_RDF_ASSERTION_ACCEPTED = 0x0,
+  NS_RDF_CURSOR_EMPTY = 0x4F0001,
+  NS_RDF_NO_VALUE = 0x4F0002,
+  NS_RDF_ASSERTION_REJECTED = 0x4F0003,
+  NS_RDF_STOP_VISIT = 0x4F0004,
+  NS_ERROR_UCONV_NOCONV = 0x80500001,
+  NS_ERROR_UDEC_ILLEGALINPUT = 0x8050000E,
+  NS_SUCCESS_USING_FALLBACK_LOCALE = 0x500002,
+  NS_OK_UDEC_EXACTLENGTH = 0x50000B,
+  NS_OK_UDEC_MOREINPUT = 0x50000C,
+  NS_OK_UDEC_MOREOUTPUT = 0x50000D,
+  NS_OK_UDEC_NOBOMFOUND = 0x50000E,
+  NS_OK_UENC_EXACTLENGTH = 0x500021,
+  NS_OK_UENC_MOREOUTPUT = 0x500022,
+  NS_ERROR_UENC_NOMAPPING = 0x500023,
+  NS_OK_UENC_MOREINPUT = 0x500024,
+  NS_EXACT_LENGTH = 0x50000B,
+  NS_PARTIAL_MORE_INPUT = 0x50000C,
+  NS_PARTIAL_MORE_OUTPUT = 0x50000D,
+  NS_ERROR_ILLEGAL_INPUT = 0x8050000E,
+  NS_ERROR_FILE_UNRECOGNIZED_PATH = 0x80520001,
+  NS_ERROR_FILE_UNRESOLVABLE_SYMLINK = 0x80520002,
+  NS_ERROR_FILE_EXECUTION_FAILED = 0x80520003,
+  NS_ERROR_FILE_UNKNOWN_TYPE = 0x80520004,
+  NS_ERROR_FILE_DESTINATION_NOT_DIR = 0x80520005,
+  NS_ERROR_FILE_TARGET_DOES_NOT_EXIST = 0x80520006,
+  NS_ERROR_FILE_COPY_OR_MOVE_FAILED = 0x80520007,
+  NS_ERROR_FILE_ALREADY_EXISTS = 0x80520008,
+  NS_ERROR_FILE_INVALID_PATH = 0x80520009,
+  NS_ERROR_FILE_DISK_FULL = 0x8052000A,
+  NS_ERROR_FILE_CORRUPTED = 0x8052000B,
+  NS_ERROR_FILE_NOT_DIRECTORY = 0x8052000C,
+  NS_ERROR_FILE_IS_DIRECTORY = 0x8052000D,
+  NS_ERROR_FILE_IS_LOCKED = 0x8052000E,
+  NS_ERROR_FILE_TOO_BIG = 0x8052000F,
+  NS_ERROR_FILE_NO_DEVICE_SPACE = 0x80520010,
+  NS_ERROR_FILE_NAME_TOO_LONG = 0x80520011,
+  NS_ERROR_FILE_NOT_FOUND = 0x80520012,
+  NS_ERROR_FILE_READ_ONLY = 0x80520013,
+  NS_ERROR_FILE_DIR_NOT_EMPTY = 0x80520014,
+  NS_ERROR_FILE_ACCESS_DENIED = 0x80520015,
+  NS_SUCCESS_FILE_DIRECTORY_EMPTY = 0x520001,
+  NS_SUCCESS_AGGREGATE_RESULT = 0x520002,
+  NS_ERROR_DOM_INDEX_SIZE_ERR = 0x80530001,
+  NS_ERROR_DOM_HIERARCHY_REQUEST_ERR = 0x80530003,
+  NS_ERROR_DOM_WRONG_DOCUMENT_ERR = 0x80530004,
+  NS_ERROR_DOM_INVALID_CHARACTER_ERR = 0x80530005,
+  NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR = 0x80530007,
+  NS_ERROR_DOM_NOT_FOUND_ERR = 0x80530008,
+  NS_ERROR_DOM_NOT_SUPPORTED_ERR = 0x80530009,
+  NS_ERROR_DOM_INUSE_ATTRIBUTE_ERR = 0x8053000A,
+  NS_ERROR_DOM_INVALID_STATE_ERR = 0x8053000B,
+  NS_ERROR_DOM_SYNTAX_ERR = 0x8053000C,
+  NS_ERROR_DOM_INVALID_MODIFICATION_ERR = 0x8053000D,
+  NS_ERROR_DOM_NAMESPACE_ERR = 0x8053000E,
+  NS_ERROR_DOM_INVALID_ACCESS_ERR = 0x8053000F,
+  NS_ERROR_DOM_TYPE_MISMATCH_ERR = 0x80530011,
+  NS_ERROR_DOM_SECURITY_ERR = 0x80530012,
+  NS_ERROR_DOM_NETWORK_ERR = 0x80530013,
+  NS_ERROR_DOM_ABORT_ERR = 0x80530014,
+  NS_ERROR_DOM_URL_MISMATCH_ERR = 0x80530015,
+  NS_ERROR_DOM_QUOTA_EXCEEDED_ERR = 0x80530016,
+  NS_ERROR_DOM_TIMEOUT_ERR = 0x80530017,
+  NS_ERROR_DOM_INVALID_NODE_TYPE_ERR = 0x80530018,
+  NS_ERROR_DOM_DATA_CLONE_ERR = 0x80530019,
+  NS_ERROR_TYPE_ERR = 0x8053001A,
+  NS_ERROR_RANGE_ERR = 0x8053001B,
+  NS_ERROR_DOM_ENCODING_NOT_SUPPORTED_ERR = 0x8053001C,
+  NS_ERROR_DOM_INVALID_POINTER_ERR = 0x8053001D,
+  NS_ERROR_DOM_UNKNOWN_ERR = 0x8053001E,
+  NS_ERROR_DOM_DATA_ERR = 0x8053001F,
+  NS_ERROR_DOM_OPERATION_ERR = 0x80530020,
+  NS_ERROR_DOM_NOT_ALLOWED_ERR = 0x80530021,
+  NS_ERROR_DOM_SECMAN_ERR = 0x805303E9,
+  NS_ERROR_DOM_WRONG_TYPE_ERR = 0x805303EA,
+  NS_ERROR_DOM_NOT_OBJECT_ERR = 0x805303EB,
+  NS_ERROR_DOM_NOT_XPC_OBJECT_ERR = 0x805303EC,
+  NS_ERROR_DOM_NOT_NUMBER_ERR = 0x805303ED,
+  NS_ERROR_DOM_NOT_BOOLEAN_ERR = 0x805303EE,
+  NS_ERROR_DOM_NOT_FUNCTION_ERR = 0x805303EF,
+  NS_ERROR_DOM_TOO_FEW_PARAMETERS_ERR = 0x805303F0,
+  NS_ERROR_DOM_BAD_DOCUMENT_DOMAIN = 0x805303F1,
+  NS_ERROR_DOM_PROP_ACCESS_DENIED = 0x805303F2,
+  NS_ERROR_DOM_XPCONNECT_ACCESS_DENIED = 0x805303F3,
+  NS_ERROR_DOM_BAD_URI = 0x805303F4,
+  NS_ERROR_DOM_RETVAL_UNDEFINED = 0x805303F5,
+  NS_ERROR_DOM_QUOTA_REACHED = 0x805303F6,
+  NS_ERROR_UNCATCHABLE_EXCEPTION = 0x805303F7,
+  NS_ERROR_DOM_MALFORMED_URI = 0x805303F8,
+  NS_ERROR_DOM_INVALID_HEADER_NAME = 0x805303F9,
+  NS_ERROR_DOM_INVALID_STATE_XHR_HAS_INVALID_CONTEXT = 0x805303FA,
+  NS_ERROR_DOM_INVALID_STATE_XHR_MUST_BE_OPENED = 0x805303FB,
+  NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_SENDING = 0x805303FC,
+  NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_LOADING_OR_DONE = 0x805303FD,
+  NS_ERROR_DOM_INVALID_STATE_XHR_HAS_WRONG_RESPONSETYPE_FOR_RESPONSEXML = 0x805303FE,
+  NS_ERROR_DOM_INVALID_STATE_XHR_HAS_WRONG_RESPONSETYPE_FOR_RESPONSETEXT = 0x805303FF,
+  NS_ERROR_DOM_INVALID_STATE_XHR_CHUNKED_RESPONSETYPES_UNSUPPORTED_FOR_SYNC = 0x80530400,
+  NS_ERROR_DOM_INVALID_ACCESS_XHR_TIMEOUT_AND_RESPONSETYPE_UNSUPPORTED_FOR_SYNC = 0x80530401,
+  NS_SUCCESS_DOM_NO_OPERATION = 0x530001,
+  NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW = 0x530002,
+  NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW_UNCATCHABLE = 0x530003,
+  NS_IMAGELIB_SUCCESS_LOAD_FINISHED = 0x540000,
+  NS_IMAGELIB_CHANGING_OWNER = 0x540001,
+  NS_IMAGELIB_ERROR_FAILURE = 0x80540005,
+  NS_IMAGELIB_ERROR_NO_DECODER = 0x80540006,
+  NS_IMAGELIB_ERROR_NOT_FINISHED = 0x80540007,
+  NS_IMAGELIB_ERROR_NO_ENCODER = 0x80540009,
+  NS_SUCCESS_EDITOR_ELEMENT_NOT_FOUND = 0x560001,
+  NS_SUCCESS_EDITOR_FOUND_TARGET = 0x560002,
+  NS_ERROR_XPC_NOT_ENOUGH_ARGS = 0x80570001,
+  NS_ERROR_XPC_NEED_OUT_OBJECT = 0x80570002,
+  NS_ERROR_XPC_CANT_SET_OUT_VAL = 0x80570003,
+  NS_ERROR_XPC_NATIVE_RETURNED_FAILURE = 0x80570004,
+  NS_ERROR_XPC_CANT_GET_INTERFACE_INFO = 0x80570005,
+  NS_ERROR_XPC_CANT_GET_PARAM_IFACE_INFO = 0x80570006,
+  NS_ERROR_XPC_CANT_GET_METHOD_INFO = 0x80570007,
+  NS_ERROR_XPC_UNEXPECTED = 0x80570008,
+  NS_ERROR_XPC_BAD_CONVERT_JS = 0x80570009,
+  NS_ERROR_XPC_BAD_CONVERT_NATIVE = 0x8057000A,
+  NS_ERROR_XPC_BAD_CONVERT_JS_NULL_REF = 0x8057000B,
+  NS_ERROR_XPC_BAD_OP_ON_WN_PROTO = 0x8057000C,
+  NS_ERROR_XPC_CANT_CONVERT_WN_TO_FUN = 0x8057000D,
+  NS_ERROR_XPC_CANT_DEFINE_PROP_ON_WN = 0x8057000E,
+  NS_ERROR_XPC_CANT_WATCH_WN_STATIC = 0x8057000F,
+  NS_ERROR_XPC_CANT_EXPORT_WN_STATIC = 0x80570010,
+  NS_ERROR_XPC_SCRIPTABLE_CALL_FAILED = 0x80570011,
+  NS_ERROR_XPC_SCRIPTABLE_CTOR_FAILED = 0x80570012,
+  NS_ERROR_XPC_CANT_CALL_WO_SCRIPTABLE = 0x80570013,
+  NS_ERROR_XPC_CANT_CTOR_WO_SCRIPTABLE = 0x80570014,
+  NS_ERROR_XPC_CI_RETURNED_FAILURE = 0x80570015,
+  NS_ERROR_XPC_GS_RETURNED_FAILURE = 0x80570016,
+  NS_ERROR_XPC_BAD_CID = 0x80570017,
+  NS_ERROR_XPC_BAD_IID = 0x80570018,
+  NS_ERROR_XPC_CANT_CREATE_WN = 0x80570019,
+  NS_ERROR_XPC_JS_THREW_EXCEPTION = 0x8057001A,
+  NS_ERROR_XPC_JS_THREW_NATIVE_OBJECT = 0x8057001B,
+  NS_ERROR_XPC_JS_THREW_JS_OBJECT = 0x8057001C,
+  NS_ERROR_XPC_JS_THREW_NULL = 0x8057001D,
+  NS_ERROR_XPC_JS_THREW_STRING = 0x8057001E,
+  NS_ERROR_XPC_JS_THREW_NUMBER = 0x8057001F,
+  NS_ERROR_XPC_JAVASCRIPT_ERROR = 0x80570020,
+  NS_ERROR_XPC_JAVASCRIPT_ERROR_WITH_DETAILS = 0x80570021,
+  NS_ERROR_XPC_CANT_CONVERT_PRIMITIVE_TO_ARRAY = 0x80570022,
+  NS_ERROR_XPC_CANT_CONVERT_OBJECT_TO_ARRAY = 0x80570023,
+  NS_ERROR_XPC_NOT_ENOUGH_ELEMENTS_IN_ARRAY = 0x80570024,
+  NS_ERROR_XPC_CANT_GET_ARRAY_INFO = 0x80570025,
+  NS_ERROR_XPC_NOT_ENOUGH_CHARS_IN_STRING = 0x80570026,
+  NS_ERROR_XPC_SECURITY_MANAGER_VETO = 0x80570027,
+  NS_ERROR_XPC_INTERFACE_NOT_SCRIPTABLE = 0x80570028,
+  NS_ERROR_XPC_INTERFACE_NOT_FROM_NSISUPPORTS = 0x80570029,
+  NS_ERROR_XPC_CANT_GET_JSOBJECT_OF_DOM_OBJECT = 0x8057002A,
+  NS_ERROR_XPC_CANT_SET_READ_ONLY_CONSTANT = 0x8057002B,
+  NS_ERROR_XPC_CANT_SET_READ_ONLY_ATTRIBUTE = 0x8057002C,
+  NS_ERROR_XPC_CANT_SET_READ_ONLY_METHOD = 0x8057002D,
+  NS_ERROR_XPC_CANT_ADD_PROP_TO_WRAPPED_NATIVE = 0x8057002E,
+  NS_ERROR_XPC_CALL_TO_SCRIPTABLE_FAILED = 0x8057002F,
+  NS_ERROR_XPC_JSOBJECT_HAS_NO_FUNCTION_NAMED = 0x80570030,
+  NS_ERROR_XPC_BAD_ID_STRING = 0x80570031,
+  NS_ERROR_XPC_BAD_INITIALIZER_NAME = 0x80570032,
+  NS_ERROR_XPC_HAS_BEEN_SHUTDOWN = 0x80570033,
+  NS_ERROR_XPC_CANT_MODIFY_PROP_ON_WN = 0x80570034,
+  NS_ERROR_XPC_BAD_CONVERT_JS_ZERO_ISNOT_NULL = 0x80570035,
+  NS_ERROR_XPC_CANT_PASS_CPOW_TO_NATIVE = 0x80570036,
+  NS_ERROR_LAUNCHED_CHILD_PROCESS = 0x805800C8,
+  NS_ERROR_CSP_FORM_ACTION_VIOLATION = 0x805A0062,
+  NS_ERROR_CSP_FRAME_ANCESTOR_VIOLATION = 0x805A0063,
+  NS_ERROR_SRI_CORRUPT = 0x805A00C8,
+  NS_ERROR_SRI_DISABLED = 0x805A00C9,
+  NS_ERROR_SRI_NOT_ELIGIBLE = 0x805A00CA,
+  NS_ERROR_SRI_UNEXPECTED_HASH_TYPE = 0x805A00CB,
+  NS_ERROR_SRI_IMPORT = 0x805A00CC,
+  NS_ERROR_CMS_VERIFY_NOT_SIGNED = 0x805A0400,
+  NS_ERROR_CMS_VERIFY_NO_CONTENT_INFO = 0x805A0401,
+  NS_ERROR_CMS_VERIFY_BAD_DIGEST = 0x805A0402,
+  NS_ERROR_CMS_VERIFY_NOCERT = 0x805A0404,
+  NS_ERROR_CMS_VERIFY_UNTRUSTED = 0x805A0405,
+  NS_ERROR_CMS_VERIFY_ERROR_UNVERIFIED = 0x805A0407,
+  NS_ERROR_CMS_VERIFY_ERROR_PROCESSING = 0x805A0408,
+  NS_ERROR_CMS_VERIFY_BAD_SIGNATURE = 0x805A0409,
+  NS_ERROR_CMS_VERIFY_DIGEST_MISMATCH = 0x805A040A,
+  NS_ERROR_CMS_VERIFY_UNKNOWN_ALGO = 0x805A040B,
+  NS_ERROR_CMS_VERIFY_UNSUPPORTED_ALGO = 0x805A040C,
+  NS_ERROR_CMS_VERIFY_MALFORMED_SIGNATURE = 0x805A040D,
+  NS_ERROR_CMS_VERIFY_HEADER_MISMATCH = 0x805A040E,
+  NS_ERROR_CMS_VERIFY_NOT_YET_ATTEMPTED = 0x805A040F,
+  NS_ERROR_CMS_VERIFY_CERT_WITHOUT_ADDRESS = 0x805A0410,
+  NS_ERROR_CMS_ENCRYPT_NO_BULK_ALG = 0x805A0420,
+  NS_ERROR_CMS_ENCRYPT_INCOMPLETE = 0x805A0421,
+  NS_ERROR_DOM_INVALID_EXPRESSION_ERR = 0x805B0033,
+  NS_ERROR_DOM_TYPE_ERR = 0x805B0034,
+  NS_ERROR_WONT_HANDLE_CONTENT = 0x805D0001,
+  NS_ERROR_MALWARE_URI = 0x805D001E,
+  NS_ERROR_PHISHING_URI = 0x805D001F,
+  NS_ERROR_TRACKING_URI = 0x805D0022,
+  NS_ERROR_UNWANTED_URI = 0x805D0023,
+  NS_ERROR_BLOCKED_URI = 0x805D0025,
+  NS_ERROR_SAVE_LINK_AS_TIMEOUT = 0x805D0020,
+  NS_ERROR_PARSED_DATA_CACHED = 0x805D0021,
+  NS_REFRESHURI_HEADER_FOUND = 0x5D0002,
+  NS_ERROR_IMAGE_SRC_CHANGED = 0x805E0004,
+  NS_ERROR_IMAGE_BLOCKED = 0x805E0005,
+  NS_ERROR_CONTENT_BLOCKED = 0x805E0006,
+  NS_ERROR_CONTENT_BLOCKED_SHOW_ALT = 0x805E0007,
+  NS_PROPTABLE_PROP_NOT_THERE = 0x805E000A,
+  NS_ERROR_XBL_BLOCKED = 0x805E000F,
+  NS_ERROR_CONTENT_CRASHED = 0x805E0010,
+  NS_HTML_STYLE_PROPERTY_NOT_THERE = 0x5E0002,
+  NS_CONTENT_BLOCKED = 0x5E0008,
+  NS_CONTENT_BLOCKED_SHOW_ALT = 0x5E0009,
+  NS_PROPTABLE_PROP_OVERWRITTEN = 0x5E000B,
+  NS_FINDBROADCASTER_NOT_FOUND = 0x5E000C,
+  NS_FINDBROADCASTER_FOUND = 0x5E000D,
+  NS_FINDBROADCASTER_AWAIT_OVERLAYS = 0x5E000E,
+  NS_ERROR_XPATH_INVALID_ARG = 0x80070057,
+  NS_ERROR_XSLT_PARSE_FAILURE = 0x80600001,
+  NS_ERROR_XPATH_PARSE_FAILURE = 0x80600002,
+  NS_ERROR_XSLT_ALREADY_SET = 0x80600003,
+  NS_ERROR_XSLT_EXECUTION_FAILURE = 0x80600004,
+  NS_ERROR_XPATH_UNKNOWN_FUNCTION = 0x80600005,
+  NS_ERROR_XSLT_BAD_RECURSION = 0x80600006,
+  NS_ERROR_XSLT_BAD_VALUE = 0x80600007,
+  NS_ERROR_XSLT_NODESET_EXPECTED = 0x80600008,
+  NS_ERROR_XSLT_ABORTED = 0x80600009,
+  NS_ERROR_XSLT_NETWORK_ERROR = 0x8060000A,
+  NS_ERROR_XSLT_WRONG_MIME_TYPE = 0x8060000B,
+  NS_ERROR_XSLT_LOAD_RECURSION = 0x8060000C,
+  NS_ERROR_XPATH_BAD_ARGUMENT_COUNT = 0x8060000D,
+  NS_ERROR_XPATH_BAD_EXTENSION_FUNCTION = 0x8060000E,
+  NS_ERROR_XPATH_PAREN_EXPECTED = 0x8060000F,
+  NS_ERROR_XPATH_INVALID_AXIS = 0x80600010,
+  NS_ERROR_XPATH_NO_NODE_TYPE_TEST = 0x80600011,
+  NS_ERROR_XPATH_BRACKET_EXPECTED = 0x80600012,
+  NS_ERROR_XPATH_INVALID_VAR_NAME = 0x80600013,
+  NS_ERROR_XPATH_UNEXPECTED_END = 0x80600014,
+  NS_ERROR_XPATH_OPERATOR_EXPECTED = 0x80600015,
+  NS_ERROR_XPATH_UNCLOSED_LITERAL = 0x80600016,
+  NS_ERROR_XPATH_BAD_COLON = 0x80600017,
+  NS_ERROR_XPATH_BAD_BANG = 0x80600018,
+  NS_ERROR_XPATH_ILLEGAL_CHAR = 0x80600019,
+  NS_ERROR_XPATH_BINARY_EXPECTED = 0x8060001A,
+  NS_ERROR_XSLT_LOAD_BLOCKED_ERROR = 0x8060001B,
+  NS_ERROR_XPATH_INVALID_EXPRESSION_EVALUATED = 0x8060001C,
+  NS_ERROR_XPATH_UNBALANCED_CURLY_BRACE = 0x8060001D,
+  NS_ERROR_XSLT_BAD_NODE_NAME = 0x8060001E,
+  NS_ERROR_XSLT_VAR_ALREADY_SET = 0x8060001F,
+  NS_ERROR_XSLT_CALL_TO_KEY_NOT_ALLOWED = 0x80600020,
+  NS_XSLT_GET_NEW_HANDLER = 0x600001,
+  NS_ERROR_TRANSPORT_INIT = 0x80610001,
+  NS_ERROR_DUPLICATE_HANDLE = 0x80610002,
+  NS_ERROR_BRIDGE_OPEN_PARENT = 0x80610003,
+  NS_ERROR_BRIDGE_OPEN_CHILD = 0x80610004,
+  NS_ERROR_DOM_SVG_WRONG_TYPE_ERR = 0x80620000,
+  NS_ERROR_DOM_SVG_MATRIX_NOT_INVERTABLE = 0x80620002,
+  NS_ERROR_STORAGE_BUSY = 0x80630001,
+  NS_ERROR_STORAGE_IOERR = 0x80630002,
+  NS_ERROR_STORAGE_CONSTRAINT = 0x80630003,
+  NS_ERROR_DOM_FILE_NOT_FOUND_ERR = 0x80650000,
+  NS_ERROR_DOM_FILE_NOT_READABLE_ERR = 0x80650001,
+  NS_ERROR_DOM_FILE_ABORT_ERR = 0x80650002,
+  NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR = 0x80660001,
+  NS_ERROR_DOM_INDEXEDDB_NOT_FOUND_ERR = 0x80660003,
+  NS_ERROR_DOM_INDEXEDDB_CONSTRAINT_ERR = 0x80660004,
+  NS_ERROR_DOM_INDEXEDDB_DATA_ERR = 0x80660005,
+  NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR = 0x80660006,
+  NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR = 0x80660007,
+  NS_ERROR_DOM_INDEXEDDB_ABORT_ERR = 0x80660008,
+  NS_ERROR_DOM_INDEXEDDB_READ_ONLY_ERR = 0x80660009,
+  NS_ERROR_DOM_INDEXEDDB_TIMEOUT_ERR = 0x8066000A,
+  NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR = 0x8066000B,
+  NS_ERROR_DOM_INDEXEDDB_VERSION_ERR = 0x8066000C,
+  NS_ERROR_DOM_INDEXEDDB_RECOVERABLE_ERR = 0x806603E9,
+  NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR = 0x80670001,
+  NS_ERROR_DOM_FILEHANDLE_NOT_ALLOWED_ERR = 0x80670002,
+  NS_ERROR_DOM_FILEHANDLE_INACTIVE_ERR = 0x80670003,
+  NS_ERROR_DOM_FILEHANDLE_ABORT_ERR = 0x80670004,
+  NS_ERROR_DOM_FILEHANDLE_READ_ONLY_ERR = 0x80670005,
+  NS_ERROR_DOM_FILEHANDLE_QUOTA_ERR = 0x80670006,
+  NS_ERROR_SIGNED_JAR_NOT_SIGNED = 0x80680001,
+  NS_ERROR_SIGNED_JAR_MODIFIED_ENTRY = 0x80680002,
+  NS_ERROR_SIGNED_JAR_UNSIGNED_ENTRY = 0x80680003,
+  NS_ERROR_SIGNED_JAR_ENTRY_MISSING = 0x80680004,
+  NS_ERROR_SIGNED_JAR_WRONG_SIGNATURE = 0x80680005,
+  NS_ERROR_SIGNED_JAR_ENTRY_TOO_LARGE = 0x80680006,
+  NS_ERROR_SIGNED_JAR_ENTRY_INVALID = 0x80680007,
+  NS_ERROR_SIGNED_JAR_MANIFEST_INVALID = 0x80680008,
+  NS_ERROR_DOM_FILESYSTEM_INVALID_PATH_ERR = 0x80690001,
+  NS_ERROR_DOM_FILESYSTEM_INVALID_MODIFICATION_ERR = 0x80690002,
+  NS_ERROR_DOM_FILESYSTEM_NO_MODIFICATION_ALLOWED_ERR = 0x80690003,
+  NS_ERROR_DOM_FILESYSTEM_PATH_EXISTS_ERR = 0x80690004,
+  NS_ERROR_DOM_FILESYSTEM_TYPE_MISMATCH_ERR = 0x80690005,
+  NS_ERROR_DOM_FILESYSTEM_UNKNOWN_ERR = 0x80690006,
+  NS_ERROR_SIGNED_APP_MANIFEST_INVALID = 0x806B0001,
+  NS_ERROR_DOM_ANIM_MISSING_PROPS_ERR = 0x806C0001,
+  NS_ERROR_DOM_PUSH_INVALID_REGISTRATION_ERR = 0x806D0001,
+  NS_ERROR_DOM_PUSH_DENIED_ERR = 0x806D0002,
+  NS_ERROR_DOM_PUSH_ABORT_ERR = 0x806D0003,
+  NS_ERROR_DOM_PUSH_SERVICE_UNREACHABLE = 0x806D0004,
+  NS_ERROR_DOM_PUSH_INVALID_KEY_ERR = 0x806D0005,
+  NS_ERROR_DOM_PUSH_MISMATCHED_KEY_ERR = 0x806D0006,
+  NS_ERROR_DOM_MEDIA_ABORT_ERR = 0x806E0001,
+  NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR = 0x806E0002,
+  NS_ERROR_DOM_MEDIA_NOT_SUPPORTED_ERR = 0x806E0003,
+  NS_ERROR_DOM_MEDIA_DECODE_ERR = 0x806E0004,
+  NS_ERROR_DOM_MEDIA_FATAL_ERR = 0x806E0005,
+  NS_ERROR_DOM_MEDIA_METADATA_ERR = 0x806E0006,
+  NS_ERROR_DOM_MEDIA_OVERFLOW_ERR = 0x806E0007,
+  NS_ERROR_DOM_MEDIA_END_OF_STREAM = 0x806E0008,
+  NS_ERROR_DOM_MEDIA_WAITING_FOR_DATA = 0x806E0009,
+  NS_ERROR_DOM_MEDIA_CANCELED = 0x806E000A,
+  NS_ERROR_DOM_MEDIA_MEDIASINK_ERR = 0x806E000B,
+  NS_ERROR_DOM_MEDIA_DEMUXER_ERR = 0x806E000C,
+  NS_ERROR_DOM_MEDIA_CDM_ERR = 0x806E000D,
+  NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER = 0x806E000E,
+  NS_ERROR_DOM_MEDIA_INITIALIZING_DECODER = 0x806E000F,
+  NS_ERROR_DOM_MEDIA_CUBEB_INITIALIZATION_ERR = 0x806E0065,
+  NS_ERROR_UC_UPDATE_UNKNOWN = 0x806F0001,
+  NS_ERROR_UC_UPDATE_DUPLICATE_PREFIX = 0x806F0002,
+  NS_ERROR_UC_UPDATE_INFINITE_LOOP = 0x806F0003,
+  NS_ERROR_UC_UPDATE_WRONG_REMOVAL_INDICES = 0x806F0004,
+  NS_ERROR_UC_UPDATE_CHECKSUM_MISMATCH = 0x806F0005,
+  NS_ERROR_UC_UPDATE_MISSING_CHECKSUM = 0x806F0006,
+  NS_ERROR_UC_UPDATE_SHUTDOWNING = 0x806F0007,
+  NS_ERROR_UC_UPDATE_TABLE_NOT_FOUND = 0x806F0008,
+  NS_ERROR_UC_UPDATE_BUILD_PREFIX_FAILURE = 0x806F0009,
+  NS_ERROR_UC_UPDATE_FAIL_TO_WRITE_DISK = 0x806F000A,
+  NS_ERROR_UC_UPDATE_PROTOCOL_PARSER_ERROR = 0x806F000B,
+  NS_ERROR_INTERNAL_ERRORRESULT_JS_EXCEPTION = 0x80700001,
+  NS_ERROR_INTERNAL_ERRORRESULT_DOMEXCEPTION = 0x80700002,
+  NS_ERROR_INTERNAL_ERRORRESULT_EXCEPTION_ON_JSCONTEXT = 0x80700003,
+  NS_ERROR_INTERNAL_ERRORRESULT_TYPEERROR = 0x80700004,
+  NS_ERROR_INTERNAL_ERRORRESULT_RANGEERROR = 0x80700005,
+  NS_ERROR_DOWNLOAD_COMPLETE = 0x80780001,
+  NS_ERROR_DOWNLOAD_NOT_PARTIAL = 0x80780002,
+  NS_ERROR_UNORM_MOREOUTPUT = 0x80780021,
+  NS_ERROR_DOCSHELL_REQUEST_REJECTED = 0x807803E9,
+  NS_ERROR_DOCUMENT_IS_PRINTMODE = 0x807807D1,
+  NS_SUCCESS_DONT_FIXUP = 0x780001,
+  NS_SUCCESS_RESTART_APP = 0x780001,
+  NS_SUCCESS_RESTART_APP_NOT_SAME_PROFILE = 0x780003,
+  NS_SUCCESS_UNORM_NOTFOUND = 0x780011,
+  NS_ERROR_NOT_IN_TREE = 0x80780026,
+  NS_OK_NO_NAME_CLAUSE_HANDLED = 0x780022
+};
+
+
+const nsresult
+  NS_OK = nsresult::NS_OK,
+  NS_ERROR_BASE = nsresult::NS_ERROR_BASE,
+  NS_ERROR_NOT_INITIALIZED = nsresult::NS_ERROR_NOT_INITIALIZED,
+  NS_ERROR_ALREADY_INITIALIZED = nsresult::NS_ERROR_ALREADY_INITIALIZED,
+  NS_ERROR_NOT_IMPLEMENTED = nsresult::NS_ERROR_NOT_IMPLEMENTED,
+  NS_NOINTERFACE = nsresult::NS_NOINTERFACE,
+  NS_ERROR_NO_INTERFACE = nsresult::NS_ERROR_NO_INTERFACE,
+  NS_ERROR_ABORT = nsresult::NS_ERROR_ABORT,
+  NS_ERROR_FAILURE = nsresult::NS_ERROR_FAILURE,
+  NS_ERROR_UNEXPECTED = nsresult::NS_ERROR_UNEXPECTED,
+  NS_ERROR_OUT_OF_MEMORY = nsresult::NS_ERROR_OUT_OF_MEMORY,
+  NS_ERROR_ILLEGAL_VALUE = nsresult::NS_ERROR_ILLEGAL_VALUE,
+  NS_ERROR_INVALID_ARG = nsresult::NS_ERROR_INVALID_ARG,
+  NS_ERROR_INVALID_POINTER = nsresult::NS_ERROR_INVALID_POINTER,
+  NS_ERROR_NULL_POINTER = nsresult::NS_ERROR_NULL_POINTER,
+  NS_ERROR_NO_AGGREGATION = nsresult::NS_ERROR_NO_AGGREGATION,
+  NS_ERROR_NOT_AVAILABLE = nsresult::NS_ERROR_NOT_AVAILABLE,
+  NS_ERROR_FACTORY_NOT_REGISTERED = nsresult::NS_ERROR_FACTORY_NOT_REGISTERED,
+  NS_ERROR_FACTORY_REGISTER_AGAIN = nsresult::NS_ERROR_FACTORY_REGISTER_AGAIN,
+  NS_ERROR_FACTORY_NOT_LOADED = nsresult::NS_ERROR_FACTORY_NOT_LOADED,
+  NS_ERROR_FACTORY_NO_SIGNATURE_SUPPORT = nsresult::NS_ERROR_FACTORY_NO_SIGNATURE_SUPPORT,
+  NS_ERROR_FACTORY_EXISTS = nsresult::NS_ERROR_FACTORY_EXISTS,
+  NS_ERROR_CANNOT_CONVERT_DATA = nsresult::NS_ERROR_CANNOT_CONVERT_DATA,
+  NS_ERROR_OBJECT_IS_IMMUTABLE = nsresult::NS_ERROR_OBJECT_IS_IMMUTABLE,
+  NS_ERROR_LOSS_OF_SIGNIFICANT_DATA = nsresult::NS_ERROR_LOSS_OF_SIGNIFICANT_DATA,
+  NS_ERROR_NOT_SAME_THREAD = nsresult::NS_ERROR_NOT_SAME_THREAD,
+  NS_ERROR_ILLEGAL_DURING_SHUTDOWN = nsresult::NS_ERROR_ILLEGAL_DURING_SHUTDOWN,
+  NS_ERROR_SERVICE_NOT_AVAILABLE = nsresult::NS_ERROR_SERVICE_NOT_AVAILABLE,
+  NS_SUCCESS_LOSS_OF_INSIGNIFICANT_DATA = nsresult::NS_SUCCESS_LOSS_OF_INSIGNIFICANT_DATA,
+  NS_SUCCESS_INTERRUPTED_TRAVERSE = nsresult::NS_SUCCESS_INTERRUPTED_TRAVERSE,
+  NS_ERROR_SERVICE_NOT_FOUND = nsresult::NS_ERROR_SERVICE_NOT_FOUND,
+  NS_ERROR_SERVICE_IN_USE = nsresult::NS_ERROR_SERVICE_IN_USE,
+  NS_BASE_STREAM_CLOSED = nsresult::NS_BASE_STREAM_CLOSED,
+  NS_BASE_STREAM_OSERROR = nsresult::NS_BASE_STREAM_OSERROR,
+  NS_BASE_STREAM_ILLEGAL_ARGS = nsresult::NS_BASE_STREAM_ILLEGAL_ARGS,
+  NS_BASE_STREAM_NO_CONVERTER = nsresult::NS_BASE_STREAM_NO_CONVERTER,
+  NS_BASE_STREAM_BAD_CONVERSION = nsresult::NS_BASE_STREAM_BAD_CONVERSION,
+  NS_BASE_STREAM_WOULD_BLOCK = nsresult::NS_BASE_STREAM_WOULD_BLOCK,
+  NS_ERROR_GFX_PRINTER_NO_PRINTER_AVAILABLE = nsresult::NS_ERROR_GFX_PRINTER_NO_PRINTER_AVAILABLE,
+  NS_ERROR_GFX_PRINTER_NAME_NOT_FOUND = nsresult::NS_ERROR_GFX_PRINTER_NAME_NOT_FOUND,
+  NS_ERROR_GFX_PRINTER_COULD_NOT_OPEN_FILE = nsresult::NS_ERROR_GFX_PRINTER_COULD_NOT_OPEN_FILE,
+  NS_ERROR_GFX_PRINTER_STARTDOC = nsresult::NS_ERROR_GFX_PRINTER_STARTDOC,
+  NS_ERROR_GFX_PRINTER_ENDDOC = nsresult::NS_ERROR_GFX_PRINTER_ENDDOC,
+  NS_ERROR_GFX_PRINTER_STARTPAGE = nsresult::NS_ERROR_GFX_PRINTER_STARTPAGE,
+  NS_ERROR_GFX_PRINTER_DOC_IS_BUSY = nsresult::NS_ERROR_GFX_PRINTER_DOC_IS_BUSY,
+  NS_ERROR_GFX_CMAP_MALFORMED = nsresult::NS_ERROR_GFX_CMAP_MALFORMED,
+  NS_SUCCESS_EVENT_CONSUMED = nsresult::NS_SUCCESS_EVENT_CONSUMED,
+  NS_SUCCESS_EVENT_HANDLED_ASYNCHRONOUSLY = nsresult::NS_SUCCESS_EVENT_HANDLED_ASYNCHRONOUSLY,
+  NS_BINDING_SUCCEEDED = nsresult::NS_BINDING_SUCCEEDED,
+  NS_BINDING_FAILED = nsresult::NS_BINDING_FAILED,
+  NS_BINDING_ABORTED = nsresult::NS_BINDING_ABORTED,
+  NS_BINDING_REDIRECTED = nsresult::NS_BINDING_REDIRECTED,
+  NS_BINDING_RETARGETED = nsresult::NS_BINDING_RETARGETED,
+  NS_ERROR_MALFORMED_URI = nsresult::NS_ERROR_MALFORMED_URI,
+  NS_ERROR_IN_PROGRESS = nsresult::NS_ERROR_IN_PROGRESS,
+  NS_ERROR_NO_CONTENT = nsresult::NS_ERROR_NO_CONTENT,
+  NS_ERROR_UNKNOWN_PROTOCOL = nsresult::NS_ERROR_UNKNOWN_PROTOCOL,
+  NS_ERROR_INVALID_CONTENT_ENCODING = nsresult::NS_ERROR_INVALID_CONTENT_ENCODING,
+  NS_ERROR_CORRUPTED_CONTENT = nsresult::NS_ERROR_CORRUPTED_CONTENT,
+  NS_ERROR_INVALID_SIGNATURE = nsresult::NS_ERROR_INVALID_SIGNATURE,
+  NS_ERROR_FIRST_HEADER_FIELD_COMPONENT_EMPTY = nsresult::NS_ERROR_FIRST_HEADER_FIELD_COMPONENT_EMPTY,
+  NS_ERROR_ALREADY_OPENED = nsresult::NS_ERROR_ALREADY_OPENED,
+  NS_ERROR_ALREADY_CONNECTED = nsresult::NS_ERROR_ALREADY_CONNECTED,
+  NS_ERROR_NOT_CONNECTED = nsresult::NS_ERROR_NOT_CONNECTED,
+  NS_ERROR_CONNECTION_REFUSED = nsresult::NS_ERROR_CONNECTION_REFUSED,
+  NS_ERROR_NET_TIMEOUT = nsresult::NS_ERROR_NET_TIMEOUT,
+  NS_ERROR_OFFLINE = nsresult::NS_ERROR_OFFLINE,
+  NS_ERROR_PORT_ACCESS_NOT_ALLOWED = nsresult::NS_ERROR_PORT_ACCESS_NOT_ALLOWED,
+  NS_ERROR_NET_RESET = nsresult::NS_ERROR_NET_RESET,
+  NS_ERROR_NET_INTERRUPT = nsresult::NS_ERROR_NET_INTERRUPT,
+  NS_ERROR_PROXY_CONNECTION_REFUSED = nsresult::NS_ERROR_PROXY_CONNECTION_REFUSED,
+  NS_ERROR_NET_PARTIAL_TRANSFER = nsresult::NS_ERROR_NET_PARTIAL_TRANSFER,
+  NS_ERROR_NET_INADEQUATE_SECURITY = nsresult::NS_ERROR_NET_INADEQUATE_SECURITY,
+  NS_ERROR_NOT_RESUMABLE = nsresult::NS_ERROR_NOT_RESUMABLE,
+  NS_ERROR_REDIRECT_LOOP = nsresult::NS_ERROR_REDIRECT_LOOP,
+  NS_ERROR_ENTITY_CHANGED = nsresult::NS_ERROR_ENTITY_CHANGED,
+  NS_ERROR_UNSAFE_CONTENT_TYPE = nsresult::NS_ERROR_UNSAFE_CONTENT_TYPE,
+  NS_ERROR_REMOTE_XUL = nsresult::NS_ERROR_REMOTE_XUL,
+  NS_ERROR_LOAD_SHOWED_ERRORPAGE = nsresult::NS_ERROR_LOAD_SHOWED_ERRORPAGE,
+  NS_ERROR_DOCSHELL_DYING = nsresult::NS_ERROR_DOCSHELL_DYING,
+  NS_ERROR_FTP_LOGIN = nsresult::NS_ERROR_FTP_LOGIN,
+  NS_ERROR_FTP_CWD = nsresult::NS_ERROR_FTP_CWD,
+  NS_ERROR_FTP_PASV = nsresult::NS_ERROR_FTP_PASV,
+  NS_ERROR_FTP_PWD = nsresult::NS_ERROR_FTP_PWD,
+  NS_ERROR_FTP_LIST = nsresult::NS_ERROR_FTP_LIST,
+  NS_ERROR_UNKNOWN_HOST = nsresult::NS_ERROR_UNKNOWN_HOST,
+  NS_ERROR_DNS_LOOKUP_QUEUE_FULL = nsresult::NS_ERROR_DNS_LOOKUP_QUEUE_FULL,
+  NS_ERROR_UNKNOWN_PROXY_HOST = nsresult::NS_ERROR_UNKNOWN_PROXY_HOST,
+  NS_ERROR_UNKNOWN_SOCKET_TYPE = nsresult::NS_ERROR_UNKNOWN_SOCKET_TYPE,
+  NS_ERROR_SOCKET_CREATE_FAILED = nsresult::NS_ERROR_SOCKET_CREATE_FAILED,
+  NS_ERROR_SOCKET_ADDRESS_NOT_SUPPORTED = nsresult::NS_ERROR_SOCKET_ADDRESS_NOT_SUPPORTED,
+  NS_ERROR_SOCKET_ADDRESS_IN_USE = nsresult::NS_ERROR_SOCKET_ADDRESS_IN_USE,
+  NS_ERROR_CACHE_KEY_NOT_FOUND = nsresult::NS_ERROR_CACHE_KEY_NOT_FOUND,
+  NS_ERROR_CACHE_DATA_IS_STREAM = nsresult::NS_ERROR_CACHE_DATA_IS_STREAM,
+  NS_ERROR_CACHE_DATA_IS_NOT_STREAM = nsresult::NS_ERROR_CACHE_DATA_IS_NOT_STREAM,
+  NS_ERROR_CACHE_WAIT_FOR_VALIDATION = nsresult::NS_ERROR_CACHE_WAIT_FOR_VALIDATION,
+  NS_ERROR_CACHE_ENTRY_DOOMED = nsresult::NS_ERROR_CACHE_ENTRY_DOOMED,
+  NS_ERROR_CACHE_READ_ACCESS_DENIED = nsresult::NS_ERROR_CACHE_READ_ACCESS_DENIED,
+  NS_ERROR_CACHE_WRITE_ACCESS_DENIED = nsresult::NS_ERROR_CACHE_WRITE_ACCESS_DENIED,
+  NS_ERROR_CACHE_IN_USE = nsresult::NS_ERROR_CACHE_IN_USE,
+  NS_ERROR_DOCUMENT_NOT_CACHED = nsresult::NS_ERROR_DOCUMENT_NOT_CACHED,
+  NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS = nsresult::NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS,
+  NS_ERROR_HOST_IS_IP_ADDRESS = nsresult::NS_ERROR_HOST_IS_IP_ADDRESS,
+  NS_SUCCESS_ADOPTED_DATA = nsresult::NS_SUCCESS_ADOPTED_DATA,
+  NS_NET_STATUS_BEGIN_FTP_TRANSACTION = nsresult::NS_NET_STATUS_BEGIN_FTP_TRANSACTION,
+  NS_NET_STATUS_END_FTP_TRANSACTION = nsresult::NS_NET_STATUS_END_FTP_TRANSACTION,
+  NS_SUCCESS_AUTH_FINISHED = nsresult::NS_SUCCESS_AUTH_FINISHED,
+  NS_NET_STATUS_READING = nsresult::NS_NET_STATUS_READING,
+  NS_NET_STATUS_WRITING = nsresult::NS_NET_STATUS_WRITING,
+  NS_NET_STATUS_RESOLVING_HOST = nsresult::NS_NET_STATUS_RESOLVING_HOST,
+  NS_NET_STATUS_RESOLVED_HOST = nsresult::NS_NET_STATUS_RESOLVED_HOST,
+  NS_NET_STATUS_CONNECTING_TO = nsresult::NS_NET_STATUS_CONNECTING_TO,
+  NS_NET_STATUS_CONNECTED_TO = nsresult::NS_NET_STATUS_CONNECTED_TO,
+  NS_NET_STATUS_TLS_HANDSHAKE_STARTING = nsresult::NS_NET_STATUS_TLS_HANDSHAKE_STARTING,
+  NS_NET_STATUS_TLS_HANDSHAKE_ENDED = nsresult::NS_NET_STATUS_TLS_HANDSHAKE_ENDED,
+  NS_NET_STATUS_SENDING_TO = nsresult::NS_NET_STATUS_SENDING_TO,
+  NS_NET_STATUS_WAITING_FOR = nsresult::NS_NET_STATUS_WAITING_FOR,
+  NS_NET_STATUS_RECEIVING_FROM = nsresult::NS_NET_STATUS_RECEIVING_FROM,
+  NS_ERROR_INTERCEPTION_FAILED = nsresult::NS_ERROR_INTERCEPTION_FAILED,
+  NS_ERROR_HSTS_PRIMING_TIMEOUT = nsresult::NS_ERROR_HSTS_PRIMING_TIMEOUT,
+  NS_ERROR_PLUGINS_PLUGINSNOTCHANGED = nsresult::NS_ERROR_PLUGINS_PLUGINSNOTCHANGED,
+  NS_ERROR_PLUGIN_DISABLED = nsresult::NS_ERROR_PLUGIN_DISABLED,
+  NS_ERROR_PLUGIN_BLOCKLISTED = nsresult::NS_ERROR_PLUGIN_BLOCKLISTED,
+  NS_ERROR_PLUGIN_TIME_RANGE_NOT_SUPPORTED = nsresult::NS_ERROR_PLUGIN_TIME_RANGE_NOT_SUPPORTED,
+  NS_ERROR_PLUGIN_CLICKTOPLAY = nsresult::NS_ERROR_PLUGIN_CLICKTOPLAY,
+  NS_PLUGIN_INIT_PENDING = nsresult::NS_PLUGIN_INIT_PENDING,
+  NS_TABLELAYOUT_CELL_NOT_FOUND = nsresult::NS_TABLELAYOUT_CELL_NOT_FOUND,
+  NS_POSITION_BEFORE_TABLE = nsresult::NS_POSITION_BEFORE_TABLE,
+  NS_STATE_PROPERTY_EXISTS = nsresult::NS_STATE_PROPERTY_EXISTS,
+  NS_STATE_PROPERTY_NOT_THERE = nsresult::NS_STATE_PROPERTY_NOT_THERE,
+  NS_ERROR_HTMLPARSER_CONTINUE = nsresult::NS_ERROR_HTMLPARSER_CONTINUE,
+  NS_ERROR_HTMLPARSER_EOF = nsresult::NS_ERROR_HTMLPARSER_EOF,
+  NS_ERROR_HTMLPARSER_UNKNOWN = nsresult::NS_ERROR_HTMLPARSER_UNKNOWN,
+  NS_ERROR_HTMLPARSER_CANTPROPAGATE = nsresult::NS_ERROR_HTMLPARSER_CANTPROPAGATE,
+  NS_ERROR_HTMLPARSER_CONTEXTMISMATCH = nsresult::NS_ERROR_HTMLPARSER_CONTEXTMISMATCH,
+  NS_ERROR_HTMLPARSER_BADFILENAME = nsresult::NS_ERROR_HTMLPARSER_BADFILENAME,
+  NS_ERROR_HTMLPARSER_BADURL = nsresult::NS_ERROR_HTMLPARSER_BADURL,
+  NS_ERROR_HTMLPARSER_INVALIDPARSERCONTEXT = nsresult::NS_ERROR_HTMLPARSER_INVALIDPARSERCONTEXT,
+  NS_ERROR_HTMLPARSER_INTERRUPTED = nsresult::NS_ERROR_HTMLPARSER_INTERRUPTED,
+  NS_ERROR_HTMLPARSER_BLOCK = nsresult::NS_ERROR_HTMLPARSER_BLOCK,
+  NS_ERROR_HTMLPARSER_BADTOKENIZER = nsresult::NS_ERROR_HTMLPARSER_BADTOKENIZER,
+  NS_ERROR_HTMLPARSER_BADATTRIBUTE = nsresult::NS_ERROR_HTMLPARSER_BADATTRIBUTE,
+  NS_ERROR_HTMLPARSER_UNRESOLVEDDTD = nsresult::NS_ERROR_HTMLPARSER_UNRESOLVEDDTD,
+  NS_ERROR_HTMLPARSER_MISPLACEDTABLECONTENT = nsresult::NS_ERROR_HTMLPARSER_MISPLACEDTABLECONTENT,
+  NS_ERROR_HTMLPARSER_BADDTD = nsresult::NS_ERROR_HTMLPARSER_BADDTD,
+  NS_ERROR_HTMLPARSER_BADCONTEXT = nsresult::NS_ERROR_HTMLPARSER_BADCONTEXT,
+  NS_ERROR_HTMLPARSER_STOPPARSING = nsresult::NS_ERROR_HTMLPARSER_STOPPARSING,
+  NS_ERROR_HTMLPARSER_UNTERMINATEDSTRINGLITERAL = nsresult::NS_ERROR_HTMLPARSER_UNTERMINATEDSTRINGLITERAL,
+  NS_ERROR_HTMLPARSER_HIERARCHYTOODEEP = nsresult::NS_ERROR_HTMLPARSER_HIERARCHYTOODEEP,
+  NS_ERROR_HTMLPARSER_FAKE_ENDTAG = nsresult::NS_ERROR_HTMLPARSER_FAKE_ENDTAG,
+  NS_ERROR_HTMLPARSER_INVALID_COMMENT = nsresult::NS_ERROR_HTMLPARSER_INVALID_COMMENT,
+  NS_HTMLTOKENS_NOT_AN_ENTITY = nsresult::NS_HTMLTOKENS_NOT_AN_ENTITY,
+  NS_HTMLPARSER_VALID_META_CHARSET = nsresult::NS_HTMLPARSER_VALID_META_CHARSET,
+  NS_RDF_ASSERTION_ACCEPTED = nsresult::NS_RDF_ASSERTION_ACCEPTED,
+  NS_RDF_CURSOR_EMPTY = nsresult::NS_RDF_CURSOR_EMPTY,
+  NS_RDF_NO_VALUE = nsresult::NS_RDF_NO_VALUE,
+  NS_RDF_ASSERTION_REJECTED = nsresult::NS_RDF_ASSERTION_REJECTED,
+  NS_RDF_STOP_VISIT = nsresult::NS_RDF_STOP_VISIT,
+  NS_ERROR_UCONV_NOCONV = nsresult::NS_ERROR_UCONV_NOCONV,
+  NS_ERROR_UDEC_ILLEGALINPUT = nsresult::NS_ERROR_UDEC_ILLEGALINPUT,
+  NS_SUCCESS_USING_FALLBACK_LOCALE = nsresult::NS_SUCCESS_USING_FALLBACK_LOCALE,
+  NS_OK_UDEC_EXACTLENGTH = nsresult::NS_OK_UDEC_EXACTLENGTH,
+  NS_OK_UDEC_MOREINPUT = nsresult::NS_OK_UDEC_MOREINPUT,
+  NS_OK_UDEC_MOREOUTPUT = nsresult::NS_OK_UDEC_MOREOUTPUT,
+  NS_OK_UDEC_NOBOMFOUND = nsresult::NS_OK_UDEC_NOBOMFOUND,
+  NS_OK_UENC_EXACTLENGTH = nsresult::NS_OK_UENC_EXACTLENGTH,
+  NS_OK_UENC_MOREOUTPUT = nsresult::NS_OK_UENC_MOREOUTPUT,
+  NS_ERROR_UENC_NOMAPPING = nsresult::NS_ERROR_UENC_NOMAPPING,
+  NS_OK_UENC_MOREINPUT = nsresult::NS_OK_UENC_MOREINPUT,
+  NS_EXACT_LENGTH = nsresult::NS_EXACT_LENGTH,
+  NS_PARTIAL_MORE_INPUT = nsresult::NS_PARTIAL_MORE_INPUT,
+  NS_PARTIAL_MORE_OUTPUT = nsresult::NS_PARTIAL_MORE_OUTPUT,
+  NS_ERROR_ILLEGAL_INPUT = nsresult::NS_ERROR_ILLEGAL_INPUT,
+  NS_ERROR_FILE_UNRECOGNIZED_PATH = nsresult::NS_ERROR_FILE_UNRECOGNIZED_PATH,
+  NS_ERROR_FILE_UNRESOLVABLE_SYMLINK = nsresult::NS_ERROR_FILE_UNRESOLVABLE_SYMLINK,
+  NS_ERROR_FILE_EXECUTION_FAILED = nsresult::NS_ERROR_FILE_EXECUTION_FAILED,
+  NS_ERROR_FILE_UNKNOWN_TYPE = nsresult::NS_ERROR_FILE_UNKNOWN_TYPE,
+  NS_ERROR_FILE_DESTINATION_NOT_DIR = nsresult::NS_ERROR_FILE_DESTINATION_NOT_DIR,
+  NS_ERROR_FILE_TARGET_DOES_NOT_EXIST = nsresult::NS_ERROR_FILE_TARGET_DOES_NOT_EXIST,
+  NS_ERROR_FILE_COPY_OR_MOVE_FAILED = nsresult::NS_ERROR_FILE_COPY_OR_MOVE_FAILED,
+  NS_ERROR_FILE_ALREADY_EXISTS = nsresult::NS_ERROR_FILE_ALREADY_EXISTS,
+  NS_ERROR_FILE_INVALID_PATH = nsresult::NS_ERROR_FILE_INVALID_PATH,
+  NS_ERROR_FILE_DISK_FULL = nsresult::NS_ERROR_FILE_DISK_FULL,
+  NS_ERROR_FILE_CORRUPTED = nsresult::NS_ERROR_FILE_CORRUPTED,
+  NS_ERROR_FILE_NOT_DIRECTORY = nsresult::NS_ERROR_FILE_NOT_DIRECTORY,
+  NS_ERROR_FILE_IS_DIRECTORY = nsresult::NS_ERROR_FILE_IS_DIRECTORY,
+  NS_ERROR_FILE_IS_LOCKED = nsresult::NS_ERROR_FILE_IS_LOCKED,
+  NS_ERROR_FILE_TOO_BIG = nsresult::NS_ERROR_FILE_TOO_BIG,
+  NS_ERROR_FILE_NO_DEVICE_SPACE = nsresult::NS_ERROR_FILE_NO_DEVICE_SPACE,
+  NS_ERROR_FILE_NAME_TOO_LONG = nsresult::NS_ERROR_FILE_NAME_TOO_LONG,
+  NS_ERROR_FILE_NOT_FOUND = nsresult::NS_ERROR_FILE_NOT_FOUND,
+  NS_ERROR_FILE_READ_ONLY = nsresult::NS_ERROR_FILE_READ_ONLY,
+  NS_ERROR_FILE_DIR_NOT_EMPTY = nsresult::NS_ERROR_FILE_DIR_NOT_EMPTY,
+  NS_ERROR_FILE_ACCESS_DENIED = nsresult::NS_ERROR_FILE_ACCESS_DENIED,
+  NS_SUCCESS_FILE_DIRECTORY_EMPTY = nsresult::NS_SUCCESS_FILE_DIRECTORY_EMPTY,
+  NS_SUCCESS_AGGREGATE_RESULT = nsresult::NS_SUCCESS_AGGREGATE_RESULT,
+  NS_ERROR_DOM_INDEX_SIZE_ERR = nsresult::NS_ERROR_DOM_INDEX_SIZE_ERR,
+  NS_ERROR_DOM_HIERARCHY_REQUEST_ERR = nsresult::NS_ERROR_DOM_HIERARCHY_REQUEST_ERR,
+  NS_ERROR_DOM_WRONG_DOCUMENT_ERR = nsresult::NS_ERROR_DOM_WRONG_DOCUMENT_ERR,
+  NS_ERROR_DOM_INVALID_CHARACTER_ERR = nsresult::NS_ERROR_DOM_INVALID_CHARACTER_ERR,
+  NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR = nsresult::NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR,
+  NS_ERROR_DOM_NOT_FOUND_ERR = nsresult::NS_ERROR_DOM_NOT_FOUND_ERR,
+  NS_ERROR_DOM_NOT_SUPPORTED_ERR = nsresult::NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+  NS_ERROR_DOM_INUSE_ATTRIBUTE_ERR = nsresult::NS_ERROR_DOM_INUSE_ATTRIBUTE_ERR,
+  NS_ERROR_DOM_INVALID_STATE_ERR = nsresult::NS_ERROR_DOM_INVALID_STATE_ERR,
+  NS_ERROR_DOM_SYNTAX_ERR = nsresult::NS_ERROR_DOM_SYNTAX_ERR,
+  NS_ERROR_DOM_INVALID_MODIFICATION_ERR = nsresult::NS_ERROR_DOM_INVALID_MODIFICATION_ERR,
+  NS_ERROR_DOM_NAMESPACE_ERR = nsresult::NS_ERROR_DOM_NAMESPACE_ERR,
+  NS_ERROR_DOM_INVALID_ACCESS_ERR = nsresult::NS_ERROR_DOM_INVALID_ACCESS_ERR,
+  NS_ERROR_DOM_TYPE_MISMATCH_ERR = nsresult::NS_ERROR_DOM_TYPE_MISMATCH_ERR,
+  NS_ERROR_DOM_SECURITY_ERR = nsresult::NS_ERROR_DOM_SECURITY_ERR,
+  NS_ERROR_DOM_NETWORK_ERR = nsresult::NS_ERROR_DOM_NETWORK_ERR,
+  NS_ERROR_DOM_ABORT_ERR = nsresult::NS_ERROR_DOM_ABORT_ERR,
+  NS_ERROR_DOM_URL_MISMATCH_ERR = nsresult::NS_ERROR_DOM_URL_MISMATCH_ERR,
+  NS_ERROR_DOM_QUOTA_EXCEEDED_ERR = nsresult::NS_ERROR_DOM_QUOTA_EXCEEDED_ERR,
+  NS_ERROR_DOM_TIMEOUT_ERR = nsresult::NS_ERROR_DOM_TIMEOUT_ERR,
+  NS_ERROR_DOM_INVALID_NODE_TYPE_ERR = nsresult::NS_ERROR_DOM_INVALID_NODE_TYPE_ERR,
+  NS_ERROR_DOM_DATA_CLONE_ERR = nsresult::NS_ERROR_DOM_DATA_CLONE_ERR,
+  NS_ERROR_TYPE_ERR = nsresult::NS_ERROR_TYPE_ERR,
+  NS_ERROR_RANGE_ERR = nsresult::NS_ERROR_RANGE_ERR,
+  NS_ERROR_DOM_ENCODING_NOT_SUPPORTED_ERR = nsresult::NS_ERROR_DOM_ENCODING_NOT_SUPPORTED_ERR,
+  NS_ERROR_DOM_INVALID_POINTER_ERR = nsresult::NS_ERROR_DOM_INVALID_POINTER_ERR,
+  NS_ERROR_DOM_UNKNOWN_ERR = nsresult::NS_ERROR_DOM_UNKNOWN_ERR,
+  NS_ERROR_DOM_DATA_ERR = nsresult::NS_ERROR_DOM_DATA_ERR,
+  NS_ERROR_DOM_OPERATION_ERR = nsresult::NS_ERROR_DOM_OPERATION_ERR,
+  NS_ERROR_DOM_NOT_ALLOWED_ERR = nsresult::NS_ERROR_DOM_NOT_ALLOWED_ERR,
+  NS_ERROR_DOM_SECMAN_ERR = nsresult::NS_ERROR_DOM_SECMAN_ERR,
+  NS_ERROR_DOM_WRONG_TYPE_ERR = nsresult::NS_ERROR_DOM_WRONG_TYPE_ERR,
+  NS_ERROR_DOM_NOT_OBJECT_ERR = nsresult::NS_ERROR_DOM_NOT_OBJECT_ERR,
+  NS_ERROR_DOM_NOT_XPC_OBJECT_ERR = nsresult::NS_ERROR_DOM_NOT_XPC_OBJECT_ERR,
+  NS_ERROR_DOM_NOT_NUMBER_ERR = nsresult::NS_ERROR_DOM_NOT_NUMBER_ERR,
+  NS_ERROR_DOM_NOT_BOOLEAN_ERR = nsresult::NS_ERROR_DOM_NOT_BOOLEAN_ERR,
+  NS_ERROR_DOM_NOT_FUNCTION_ERR = nsresult::NS_ERROR_DOM_NOT_FUNCTION_ERR,
+  NS_ERROR_DOM_TOO_FEW_PARAMETERS_ERR = nsresult::NS_ERROR_DOM_TOO_FEW_PARAMETERS_ERR,
+  NS_ERROR_DOM_BAD_DOCUMENT_DOMAIN = nsresult::NS_ERROR_DOM_BAD_DOCUMENT_DOMAIN,
+  NS_ERROR_DOM_PROP_ACCESS_DENIED = nsresult::NS_ERROR_DOM_PROP_ACCESS_DENIED,
+  NS_ERROR_DOM_XPCONNECT_ACCESS_DENIED = nsresult::NS_ERROR_DOM_XPCONNECT_ACCESS_DENIED,
+  NS_ERROR_DOM_BAD_URI = nsresult::NS_ERROR_DOM_BAD_URI,
+  NS_ERROR_DOM_RETVAL_UNDEFINED = nsresult::NS_ERROR_DOM_RETVAL_UNDEFINED,
+  NS_ERROR_DOM_QUOTA_REACHED = nsresult::NS_ERROR_DOM_QUOTA_REACHED,
+  NS_ERROR_UNCATCHABLE_EXCEPTION = nsresult::NS_ERROR_UNCATCHABLE_EXCEPTION,
+  NS_ERROR_DOM_MALFORMED_URI = nsresult::NS_ERROR_DOM_MALFORMED_URI,
+  NS_ERROR_DOM_INVALID_HEADER_NAME = nsresult::NS_ERROR_DOM_INVALID_HEADER_NAME,
+  NS_ERROR_DOM_INVALID_STATE_XHR_HAS_INVALID_CONTEXT = nsresult::NS_ERROR_DOM_INVALID_STATE_XHR_HAS_INVALID_CONTEXT,
+  NS_ERROR_DOM_INVALID_STATE_XHR_MUST_BE_OPENED = nsresult::NS_ERROR_DOM_INVALID_STATE_XHR_MUST_BE_OPENED,
+  NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_SENDING = nsresult::NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_SENDING,
+  NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_LOADING_OR_DONE = nsresult::NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_LOADING_OR_DONE,
+  NS_ERROR_DOM_INVALID_STATE_XHR_HAS_WRONG_RESPONSETYPE_FOR_RESPONSEXML = nsresult::NS_ERROR_DOM_INVALID_STATE_XHR_HAS_WRONG_RESPONSETYPE_FOR_RESPONSEXML,
+  NS_ERROR_DOM_INVALID_STATE_XHR_HAS_WRONG_RESPONSETYPE_FOR_RESPONSETEXT = nsresult::NS_ERROR_DOM_INVALID_STATE_XHR_HAS_WRONG_RESPONSETYPE_FOR_RESPONSETEXT,
+  NS_ERROR_DOM_INVALID_STATE_XHR_CHUNKED_RESPONSETYPES_UNSUPPORTED_FOR_SYNC = nsresult::NS_ERROR_DOM_INVALID_STATE_XHR_CHUNKED_RESPONSETYPES_UNSUPPORTED_FOR_SYNC,
+  NS_ERROR_DOM_INVALID_ACCESS_XHR_TIMEOUT_AND_RESPONSETYPE_UNSUPPORTED_FOR_SYNC = nsresult::NS_ERROR_DOM_INVALID_ACCESS_XHR_TIMEOUT_AND_RESPONSETYPE_UNSUPPORTED_FOR_SYNC,
+  NS_SUCCESS_DOM_NO_OPERATION = nsresult::NS_SUCCESS_DOM_NO_OPERATION,
+  NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW = nsresult::NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW,
+  NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW_UNCATCHABLE = nsresult::NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW_UNCATCHABLE,
+  NS_IMAGELIB_SUCCESS_LOAD_FINISHED = nsresult::NS_IMAGELIB_SUCCESS_LOAD_FINISHED,
+  NS_IMAGELIB_CHANGING_OWNER = nsresult::NS_IMAGELIB_CHANGING_OWNER,
+  NS_IMAGELIB_ERROR_FAILURE = nsresult::NS_IMAGELIB_ERROR_FAILURE,
+  NS_IMAGELIB_ERROR_NO_DECODER = nsresult::NS_IMAGELIB_ERROR_NO_DECODER,
+  NS_IMAGELIB_ERROR_NOT_FINISHED = nsresult::NS_IMAGELIB_ERROR_NOT_FINISHED,
+  NS_IMAGELIB_ERROR_NO_ENCODER = nsresult::NS_IMAGELIB_ERROR_NO_ENCODER,
+  NS_SUCCESS_EDITOR_ELEMENT_NOT_FOUND = nsresult::NS_SUCCESS_EDITOR_ELEMENT_NOT_FOUND,
+  NS_SUCCESS_EDITOR_FOUND_TARGET = nsresult::NS_SUCCESS_EDITOR_FOUND_TARGET,
+  NS_ERROR_XPC_NOT_ENOUGH_ARGS = nsresult::NS_ERROR_XPC_NOT_ENOUGH_ARGS,
+  NS_ERROR_XPC_NEED_OUT_OBJECT = nsresult::NS_ERROR_XPC_NEED_OUT_OBJECT,
+  NS_ERROR_XPC_CANT_SET_OUT_VAL = nsresult::NS_ERROR_XPC_CANT_SET_OUT_VAL,
+  NS_ERROR_XPC_NATIVE_RETURNED_FAILURE = nsresult::NS_ERROR_XPC_NATIVE_RETURNED_FAILURE,
+  NS_ERROR_XPC_CANT_GET_INTERFACE_INFO = nsresult::NS_ERROR_XPC_CANT_GET_INTERFACE_INFO,
+  NS_ERROR_XPC_CANT_GET_PARAM_IFACE_INFO = nsresult::NS_ERROR_XPC_CANT_GET_PARAM_IFACE_INFO,
+  NS_ERROR_XPC_CANT_GET_METHOD_INFO = nsresult::NS_ERROR_XPC_CANT_GET_METHOD_INFO,
+  NS_ERROR_XPC_UNEXPECTED = nsresult::NS_ERROR_XPC_UNEXPECTED,
+  NS_ERROR_XPC_BAD_CONVERT_JS = nsresult::NS_ERROR_XPC_BAD_CONVERT_JS,
+  NS_ERROR_XPC_BAD_CONVERT_NATIVE = nsresult::NS_ERROR_XPC_BAD_CONVERT_NATIVE,
+  NS_ERROR_XPC_BAD_CONVERT_JS_NULL_REF = nsresult::NS_ERROR_XPC_BAD_CONVERT_JS_NULL_REF,
+  NS_ERROR_XPC_BAD_OP_ON_WN_PROTO = nsresult::NS_ERROR_XPC_BAD_OP_ON_WN_PROTO,
+  NS_ERROR_XPC_CANT_CONVERT_WN_TO_FUN = nsresult::NS_ERROR_XPC_CANT_CONVERT_WN_TO_FUN,
+  NS_ERROR_XPC_CANT_DEFINE_PROP_ON_WN = nsresult::NS_ERROR_XPC_CANT_DEFINE_PROP_ON_WN,
+  NS_ERROR_XPC_CANT_WATCH_WN_STATIC = nsresult::NS_ERROR_XPC_CANT_WATCH_WN_STATIC,
+  NS_ERROR_XPC_CANT_EXPORT_WN_STATIC = nsresult::NS_ERROR_XPC_CANT_EXPORT_WN_STATIC,
+  NS_ERROR_XPC_SCRIPTABLE_CALL_FAILED = nsresult::NS_ERROR_XPC_SCRIPTABLE_CALL_FAILED,
+  NS_ERROR_XPC_SCRIPTABLE_CTOR_FAILED = nsresult::NS_ERROR_XPC_SCRIPTABLE_CTOR_FAILED,
+  NS_ERROR_XPC_CANT_CALL_WO_SCRIPTABLE = nsresult::NS_ERROR_XPC_CANT_CALL_WO_SCRIPTABLE,
+  NS_ERROR_XPC_CANT_CTOR_WO_SCRIPTABLE = nsresult::NS_ERROR_XPC_CANT_CTOR_WO_SCRIPTABLE,
+  NS_ERROR_XPC_CI_RETURNED_FAILURE = nsresult::NS_ERROR_XPC_CI_RETURNED_FAILURE,
+  NS_ERROR_XPC_GS_RETURNED_FAILURE = nsresult::NS_ERROR_XPC_GS_RETURNED_FAILURE,
+  NS_ERROR_XPC_BAD_CID = nsresult::NS_ERROR_XPC_BAD_CID,
+  NS_ERROR_XPC_BAD_IID = nsresult::NS_ERROR_XPC_BAD_IID,
+  NS_ERROR_XPC_CANT_CREATE_WN = nsresult::NS_ERROR_XPC_CANT_CREATE_WN,
+  NS_ERROR_XPC_JS_THREW_EXCEPTION = nsresult::NS_ERROR_XPC_JS_THREW_EXCEPTION,
+  NS_ERROR_XPC_JS_THREW_NATIVE_OBJECT = nsresult::NS_ERROR_XPC_JS_THREW_NATIVE_OBJECT,
+  NS_ERROR_XPC_JS_THREW_JS_OBJECT = nsresult::NS_ERROR_XPC_JS_THREW_JS_OBJECT,
+  NS_ERROR_XPC_JS_THREW_NULL = nsresult::NS_ERROR_XPC_JS_THREW_NULL,
+  NS_ERROR_XPC_JS_THREW_STRING = nsresult::NS_ERROR_XPC_JS_THREW_STRING,
+  NS_ERROR_XPC_JS_THREW_NUMBER = nsresult::NS_ERROR_XPC_JS_THREW_NUMBER,
+  NS_ERROR_XPC_JAVASCRIPT_ERROR = nsresult::NS_ERROR_XPC_JAVASCRIPT_ERROR,
+  NS_ERROR_XPC_JAVASCRIPT_ERROR_WITH_DETAILS = nsresult::NS_ERROR_XPC_JAVASCRIPT_ERROR_WITH_DETAILS,
+  NS_ERROR_XPC_CANT_CONVERT_PRIMITIVE_TO_ARRAY = nsresult::NS_ERROR_XPC_CANT_CONVERT_PRIMITIVE_TO_ARRAY,
+  NS_ERROR_XPC_CANT_CONVERT_OBJECT_TO_ARRAY = nsresult::NS_ERROR_XPC_CANT_CONVERT_OBJECT_TO_ARRAY,
+  NS_ERROR_XPC_NOT_ENOUGH_ELEMENTS_IN_ARRAY = nsresult::NS_ERROR_XPC_NOT_ENOUGH_ELEMENTS_IN_ARRAY,
+  NS_ERROR_XPC_CANT_GET_ARRAY_INFO = nsresult::NS_ERROR_XPC_CANT_GET_ARRAY_INFO,
+  NS_ERROR_XPC_NOT_ENOUGH_CHARS_IN_STRING = nsresult::NS_ERROR_XPC_NOT_ENOUGH_CHARS_IN_STRING,
+  NS_ERROR_XPC_SECURITY_MANAGER_VETO = nsresult::NS_ERROR_XPC_SECURITY_MANAGER_VETO,
+  NS_ERROR_XPC_INTERFACE_NOT_SCRIPTABLE = nsresult::NS_ERROR_XPC_INTERFACE_NOT_SCRIPTABLE,
+  NS_ERROR_XPC_INTERFACE_NOT_FROM_NSISUPPORTS = nsresult::NS_ERROR_XPC_INTERFACE_NOT_FROM_NSISUPPORTS,
+  NS_ERROR_XPC_CANT_GET_JSOBJECT_OF_DOM_OBJECT = nsresult::NS_ERROR_XPC_CANT_GET_JSOBJECT_OF_DOM_OBJECT,
+  NS_ERROR_XPC_CANT_SET_READ_ONLY_CONSTANT = nsresult::NS_ERROR_XPC_CANT_SET_READ_ONLY_CONSTANT,
+  NS_ERROR_XPC_CANT_SET_READ_ONLY_ATTRIBUTE = nsresult::NS_ERROR_XPC_CANT_SET_READ_ONLY_ATTRIBUTE,
+  NS_ERROR_XPC_CANT_SET_READ_ONLY_METHOD = nsresult::NS_ERROR_XPC_CANT_SET_READ_ONLY_METHOD,
+  NS_ERROR_XPC_CANT_ADD_PROP_TO_WRAPPED_NATIVE = nsresult::NS_ERROR_XPC_CANT_ADD_PROP_TO_WRAPPED_NATIVE,
+  NS_ERROR_XPC_CALL_TO_SCRIPTABLE_FAILED = nsresult::NS_ERROR_XPC_CALL_TO_SCRIPTABLE_FAILED,
+  NS_ERROR_XPC_JSOBJECT_HAS_NO_FUNCTION_NAMED = nsresult::NS_ERROR_XPC_JSOBJECT_HAS_NO_FUNCTION_NAMED,
+  NS_ERROR_XPC_BAD_ID_STRING = nsresult::NS_ERROR_XPC_BAD_ID_STRING,
+  NS_ERROR_XPC_BAD_INITIALIZER_NAME = nsresult::NS_ERROR_XPC_BAD_INITIALIZER_NAME,
+  NS_ERROR_XPC_HAS_BEEN_SHUTDOWN = nsresult::NS_ERROR_XPC_HAS_BEEN_SHUTDOWN,
+  NS_ERROR_XPC_CANT_MODIFY_PROP_ON_WN = nsresult::NS_ERROR_XPC_CANT_MODIFY_PROP_ON_WN,
+  NS_ERROR_XPC_BAD_CONVERT_JS_ZERO_ISNOT_NULL = nsresult::NS_ERROR_XPC_BAD_CONVERT_JS_ZERO_ISNOT_NULL,
+  NS_ERROR_XPC_CANT_PASS_CPOW_TO_NATIVE = nsresult::NS_ERROR_XPC_CANT_PASS_CPOW_TO_NATIVE,
+  NS_ERROR_LAUNCHED_CHILD_PROCESS = nsresult::NS_ERROR_LAUNCHED_CHILD_PROCESS,
+  NS_ERROR_CSP_FORM_ACTION_VIOLATION = nsresult::NS_ERROR_CSP_FORM_ACTION_VIOLATION,
+  NS_ERROR_CSP_FRAME_ANCESTOR_VIOLATION = nsresult::NS_ERROR_CSP_FRAME_ANCESTOR_VIOLATION,
+  NS_ERROR_SRI_CORRUPT = nsresult::NS_ERROR_SRI_CORRUPT,
+  NS_ERROR_SRI_DISABLED = nsresult::NS_ERROR_SRI_DISABLED,
+  NS_ERROR_SRI_NOT_ELIGIBLE = nsresult::NS_ERROR_SRI_NOT_ELIGIBLE,
+  NS_ERROR_SRI_UNEXPECTED_HASH_TYPE = nsresult::NS_ERROR_SRI_UNEXPECTED_HASH_TYPE,
+  NS_ERROR_SRI_IMPORT = nsresult::NS_ERROR_SRI_IMPORT,
+  NS_ERROR_CMS_VERIFY_NOT_SIGNED = nsresult::NS_ERROR_CMS_VERIFY_NOT_SIGNED,
+  NS_ERROR_CMS_VERIFY_NO_CONTENT_INFO = nsresult::NS_ERROR_CMS_VERIFY_NO_CONTENT_INFO,
+  NS_ERROR_CMS_VERIFY_BAD_DIGEST = nsresult::NS_ERROR_CMS_VERIFY_BAD_DIGEST,
+  NS_ERROR_CMS_VERIFY_NOCERT = nsresult::NS_ERROR_CMS_VERIFY_NOCERT,
+  NS_ERROR_CMS_VERIFY_UNTRUSTED = nsresult::NS_ERROR_CMS_VERIFY_UNTRUSTED,
+  NS_ERROR_CMS_VERIFY_ERROR_UNVERIFIED = nsresult::NS_ERROR_CMS_VERIFY_ERROR_UNVERIFIED,
+  NS_ERROR_CMS_VERIFY_ERROR_PROCESSING = nsresult::NS_ERROR_CMS_VERIFY_ERROR_PROCESSING,
+  NS_ERROR_CMS_VERIFY_BAD_SIGNATURE = nsresult::NS_ERROR_CMS_VERIFY_BAD_SIGNATURE,
+  NS_ERROR_CMS_VERIFY_DIGEST_MISMATCH = nsresult::NS_ERROR_CMS_VERIFY_DIGEST_MISMATCH,
+  NS_ERROR_CMS_VERIFY_UNKNOWN_ALGO = nsresult::NS_ERROR_CMS_VERIFY_UNKNOWN_ALGO,
+  NS_ERROR_CMS_VERIFY_UNSUPPORTED_ALGO = nsresult::NS_ERROR_CMS_VERIFY_UNSUPPORTED_ALGO,
+  NS_ERROR_CMS_VERIFY_MALFORMED_SIGNATURE = nsresult::NS_ERROR_CMS_VERIFY_MALFORMED_SIGNATURE,
+  NS_ERROR_CMS_VERIFY_HEADER_MISMATCH = nsresult::NS_ERROR_CMS_VERIFY_HEADER_MISMATCH,
+  NS_ERROR_CMS_VERIFY_NOT_YET_ATTEMPTED = nsresult::NS_ERROR_CMS_VERIFY_NOT_YET_ATTEMPTED,
+  NS_ERROR_CMS_VERIFY_CERT_WITHOUT_ADDRESS = nsresult::NS_ERROR_CMS_VERIFY_CERT_WITHOUT_ADDRESS,
+  NS_ERROR_CMS_ENCRYPT_NO_BULK_ALG = nsresult::NS_ERROR_CMS_ENCRYPT_NO_BULK_ALG,
+  NS_ERROR_CMS_ENCRYPT_INCOMPLETE = nsresult::NS_ERROR_CMS_ENCRYPT_INCOMPLETE,
+  NS_ERROR_DOM_INVALID_EXPRESSION_ERR = nsresult::NS_ERROR_DOM_INVALID_EXPRESSION_ERR,
+  NS_ERROR_DOM_TYPE_ERR = nsresult::NS_ERROR_DOM_TYPE_ERR,
+  NS_ERROR_WONT_HANDLE_CONTENT = nsresult::NS_ERROR_WONT_HANDLE_CONTENT,
+  NS_ERROR_MALWARE_URI = nsresult::NS_ERROR_MALWARE_URI,
+  NS_ERROR_PHISHING_URI = nsresult::NS_ERROR_PHISHING_URI,
+  NS_ERROR_TRACKING_URI = nsresult::NS_ERROR_TRACKING_URI,
+  NS_ERROR_UNWANTED_URI = nsresult::NS_ERROR_UNWANTED_URI,
+  NS_ERROR_BLOCKED_URI = nsresult::NS_ERROR_BLOCKED_URI,
+  NS_ERROR_SAVE_LINK_AS_TIMEOUT = nsresult::NS_ERROR_SAVE_LINK_AS_TIMEOUT,
+  NS_ERROR_PARSED_DATA_CACHED = nsresult::NS_ERROR_PARSED_DATA_CACHED,
+  NS_REFRESHURI_HEADER_FOUND = nsresult::NS_REFRESHURI_HEADER_FOUND,
+  NS_ERROR_IMAGE_SRC_CHANGED = nsresult::NS_ERROR_IMAGE_SRC_CHANGED,
+  NS_ERROR_IMAGE_BLOCKED = nsresult::NS_ERROR_IMAGE_BLOCKED,
+  NS_ERROR_CONTENT_BLOCKED = nsresult::NS_ERROR_CONTENT_BLOCKED,
+  NS_ERROR_CONTENT_BLOCKED_SHOW_ALT = nsresult::NS_ERROR_CONTENT_BLOCKED_SHOW_ALT,
+  NS_PROPTABLE_PROP_NOT_THERE = nsresult::NS_PROPTABLE_PROP_NOT_THERE,
+  NS_ERROR_XBL_BLOCKED = nsresult::NS_ERROR_XBL_BLOCKED,
+  NS_ERROR_CONTENT_CRASHED = nsresult::NS_ERROR_CONTENT_CRASHED,
+  NS_HTML_STYLE_PROPERTY_NOT_THERE = nsresult::NS_HTML_STYLE_PROPERTY_NOT_THERE,
+  NS_CONTENT_BLOCKED = nsresult::NS_CONTENT_BLOCKED,
+  NS_CONTENT_BLOCKED_SHOW_ALT = nsresult::NS_CONTENT_BLOCKED_SHOW_ALT,
+  NS_PROPTABLE_PROP_OVERWRITTEN = nsresult::NS_PROPTABLE_PROP_OVERWRITTEN,
+  NS_FINDBROADCASTER_NOT_FOUND = nsresult::NS_FINDBROADCASTER_NOT_FOUND,
+  NS_FINDBROADCASTER_FOUND = nsresult::NS_FINDBROADCASTER_FOUND,
+  NS_FINDBROADCASTER_AWAIT_OVERLAYS = nsresult::NS_FINDBROADCASTER_AWAIT_OVERLAYS,
+  NS_ERROR_XPATH_INVALID_ARG = nsresult::NS_ERROR_XPATH_INVALID_ARG,
+  NS_ERROR_XSLT_PARSE_FAILURE = nsresult::NS_ERROR_XSLT_PARSE_FAILURE,
+  NS_ERROR_XPATH_PARSE_FAILURE = nsresult::NS_ERROR_XPATH_PARSE_FAILURE,
+  NS_ERROR_XSLT_ALREADY_SET = nsresult::NS_ERROR_XSLT_ALREADY_SET,
+  NS_ERROR_XSLT_EXECUTION_FAILURE = nsresult::NS_ERROR_XSLT_EXECUTION_FAILURE,
+  NS_ERROR_XPATH_UNKNOWN_FUNCTION = nsresult::NS_ERROR_XPATH_UNKNOWN_FUNCTION,
+  NS_ERROR_XSLT_BAD_RECURSION = nsresult::NS_ERROR_XSLT_BAD_RECURSION,
+  NS_ERROR_XSLT_BAD_VALUE = nsresult::NS_ERROR_XSLT_BAD_VALUE,
+  NS_ERROR_XSLT_NODESET_EXPECTED = nsresult::NS_ERROR_XSLT_NODESET_EXPECTED,
+  NS_ERROR_XSLT_ABORTED = nsresult::NS_ERROR_XSLT_ABORTED,
+  NS_ERROR_XSLT_NETWORK_ERROR = nsresult::NS_ERROR_XSLT_NETWORK_ERROR,
+  NS_ERROR_XSLT_WRONG_MIME_TYPE = nsresult::NS_ERROR_XSLT_WRONG_MIME_TYPE,
+  NS_ERROR_XSLT_LOAD_RECURSION = nsresult::NS_ERROR_XSLT_LOAD_RECURSION,
+  NS_ERROR_XPATH_BAD_ARGUMENT_COUNT = nsresult::NS_ERROR_XPATH_BAD_ARGUMENT_COUNT,
+  NS_ERROR_XPATH_BAD_EXTENSION_FUNCTION = nsresult::NS_ERROR_XPATH_BAD_EXTENSION_FUNCTION,
+  NS_ERROR_XPATH_PAREN_EXPECTED = nsresult::NS_ERROR_XPATH_PAREN_EXPECTED,
+  NS_ERROR_XPATH_INVALID_AXIS = nsresult::NS_ERROR_XPATH_INVALID_AXIS,
+  NS_ERROR_XPATH_NO_NODE_TYPE_TEST = nsresult::NS_ERROR_XPATH_NO_NODE_TYPE_TEST,
+  NS_ERROR_XPATH_BRACKET_EXPECTED = nsresult::NS_ERROR_XPATH_BRACKET_EXPECTED,
+  NS_ERROR_XPATH_INVALID_VAR_NAME = nsresult::NS_ERROR_XPATH_INVALID_VAR_NAME,
+  NS_ERROR_XPATH_UNEXPECTED_END = nsresult::NS_ERROR_XPATH_UNEXPECTED_END,
+  NS_ERROR_XPATH_OPERATOR_EXPECTED = nsresult::NS_ERROR_XPATH_OPERATOR_EXPECTED,
+  NS_ERROR_XPATH_UNCLOSED_LITERAL = nsresult::NS_ERROR_XPATH_UNCLOSED_LITERAL,
+  NS_ERROR_XPATH_BAD_COLON = nsresult::NS_ERROR_XPATH_BAD_COLON,
+  NS_ERROR_XPATH_BAD_BANG = nsresult::NS_ERROR_XPATH_BAD_BANG,
+  NS_ERROR_XPATH_ILLEGAL_CHAR = nsresult::NS_ERROR_XPATH_ILLEGAL_CHAR,
+  NS_ERROR_XPATH_BINARY_EXPECTED = nsresult::NS_ERROR_XPATH_BINARY_EXPECTED,
+  NS_ERROR_XSLT_LOAD_BLOCKED_ERROR = nsresult::NS_ERROR_XSLT_LOAD_BLOCKED_ERROR,
+  NS_ERROR_XPATH_INVALID_EXPRESSION_EVALUATED = nsresult::NS_ERROR_XPATH_INVALID_EXPRESSION_EVALUATED,
+  NS_ERROR_XPATH_UNBALANCED_CURLY_BRACE = nsresult::NS_ERROR_XPATH_UNBALANCED_CURLY_BRACE,
+  NS_ERROR_XSLT_BAD_NODE_NAME = nsresult::NS_ERROR_XSLT_BAD_NODE_NAME,
+  NS_ERROR_XSLT_VAR_ALREADY_SET = nsresult::NS_ERROR_XSLT_VAR_ALREADY_SET,
+  NS_ERROR_XSLT_CALL_TO_KEY_NOT_ALLOWED = nsresult::NS_ERROR_XSLT_CALL_TO_KEY_NOT_ALLOWED,
+  NS_XSLT_GET_NEW_HANDLER = nsresult::NS_XSLT_GET_NEW_HANDLER,
+  NS_ERROR_TRANSPORT_INIT = nsresult::NS_ERROR_TRANSPORT_INIT,
+  NS_ERROR_DUPLICATE_HANDLE = nsresult::NS_ERROR_DUPLICATE_HANDLE,
+  NS_ERROR_BRIDGE_OPEN_PARENT = nsresult::NS_ERROR_BRIDGE_OPEN_PARENT,
+  NS_ERROR_BRIDGE_OPEN_CHILD = nsresult::NS_ERROR_BRIDGE_OPEN_CHILD,
+  NS_ERROR_DOM_SVG_WRONG_TYPE_ERR = nsresult::NS_ERROR_DOM_SVG_WRONG_TYPE_ERR,
+  NS_ERROR_DOM_SVG_MATRIX_NOT_INVERTABLE = nsresult::NS_ERROR_DOM_SVG_MATRIX_NOT_INVERTABLE,
+  NS_ERROR_STORAGE_BUSY = nsresult::NS_ERROR_STORAGE_BUSY,
+  NS_ERROR_STORAGE_IOERR = nsresult::NS_ERROR_STORAGE_IOERR,
+  NS_ERROR_STORAGE_CONSTRAINT = nsresult::NS_ERROR_STORAGE_CONSTRAINT,
+  NS_ERROR_DOM_FILE_NOT_FOUND_ERR = nsresult::NS_ERROR_DOM_FILE_NOT_FOUND_ERR,
+  NS_ERROR_DOM_FILE_NOT_READABLE_ERR = nsresult::NS_ERROR_DOM_FILE_NOT_READABLE_ERR,
+  NS_ERROR_DOM_FILE_ABORT_ERR = nsresult::NS_ERROR_DOM_FILE_ABORT_ERR,
+  NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR = nsresult::NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR,
+  NS_ERROR_DOM_INDEXEDDB_NOT_FOUND_ERR = nsresult::NS_ERROR_DOM_INDEXEDDB_NOT_FOUND_ERR,
+  NS_ERROR_DOM_INDEXEDDB_CONSTRAINT_ERR = nsresult::NS_ERROR_DOM_INDEXEDDB_CONSTRAINT_ERR,
+  NS_ERROR_DOM_INDEXEDDB_DATA_ERR = nsresult::NS_ERROR_DOM_INDEXEDDB_DATA_ERR,
+  NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR = nsresult::NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR,
+  NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR = nsresult::NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR,
+  NS_ERROR_DOM_INDEXEDDB_ABORT_ERR = nsresult::NS_ERROR_DOM_INDEXEDDB_ABORT_ERR,
+  NS_ERROR_DOM_INDEXEDDB_READ_ONLY_ERR = nsresult::NS_ERROR_DOM_INDEXEDDB_READ_ONLY_ERR,
+  NS_ERROR_DOM_INDEXEDDB_TIMEOUT_ERR = nsresult::NS_ERROR_DOM_INDEXEDDB_TIMEOUT_ERR,
+  NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR = nsresult::NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR,
+  NS_ERROR_DOM_INDEXEDDB_VERSION_ERR = nsresult::NS_ERROR_DOM_INDEXEDDB_VERSION_ERR,
+  NS_ERROR_DOM_INDEXEDDB_RECOVERABLE_ERR = nsresult::NS_ERROR_DOM_INDEXEDDB_RECOVERABLE_ERR,
+  NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR = nsresult::NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR,
+  NS_ERROR_DOM_FILEHANDLE_NOT_ALLOWED_ERR = nsresult::NS_ERROR_DOM_FILEHANDLE_NOT_ALLOWED_ERR,
+  NS_ERROR_DOM_FILEHANDLE_INACTIVE_ERR = nsresult::NS_ERROR_DOM_FILEHANDLE_INACTIVE_ERR,
+  NS_ERROR_DOM_FILEHANDLE_ABORT_ERR = nsresult::NS_ERROR_DOM_FILEHANDLE_ABORT_ERR,
+  NS_ERROR_DOM_FILEHANDLE_READ_ONLY_ERR = nsresult::NS_ERROR_DOM_FILEHANDLE_READ_ONLY_ERR,
+  NS_ERROR_DOM_FILEHANDLE_QUOTA_ERR = nsresult::NS_ERROR_DOM_FILEHANDLE_QUOTA_ERR,
+  NS_ERROR_SIGNED_JAR_NOT_SIGNED = nsresult::NS_ERROR_SIGNED_JAR_NOT_SIGNED,
+  NS_ERROR_SIGNED_JAR_MODIFIED_ENTRY = nsresult::NS_ERROR_SIGNED_JAR_MODIFIED_ENTRY,
+  NS_ERROR_SIGNED_JAR_UNSIGNED_ENTRY = nsresult::NS_ERROR_SIGNED_JAR_UNSIGNED_ENTRY,
+  NS_ERROR_SIGNED_JAR_ENTRY_MISSING = nsresult::NS_ERROR_SIGNED_JAR_ENTRY_MISSING,
+  NS_ERROR_SIGNED_JAR_WRONG_SIGNATURE = nsresult::NS_ERROR_SIGNED_JAR_WRONG_SIGNATURE,
+  NS_ERROR_SIGNED_JAR_ENTRY_TOO_LARGE = nsresult::NS_ERROR_SIGNED_JAR_ENTRY_TOO_LARGE,
+  NS_ERROR_SIGNED_JAR_ENTRY_INVALID = nsresult::NS_ERROR_SIGNED_JAR_ENTRY_INVALID,
+  NS_ERROR_SIGNED_JAR_MANIFEST_INVALID = nsresult::NS_ERROR_SIGNED_JAR_MANIFEST_INVALID,
+  NS_ERROR_DOM_FILESYSTEM_INVALID_PATH_ERR = nsresult::NS_ERROR_DOM_FILESYSTEM_INVALID_PATH_ERR,
+  NS_ERROR_DOM_FILESYSTEM_INVALID_MODIFICATION_ERR = nsresult::NS_ERROR_DOM_FILESYSTEM_INVALID_MODIFICATION_ERR,
+  NS_ERROR_DOM_FILESYSTEM_NO_MODIFICATION_ALLOWED_ERR = nsresult::NS_ERROR_DOM_FILESYSTEM_NO_MODIFICATION_ALLOWED_ERR,
+  NS_ERROR_DOM_FILESYSTEM_PATH_EXISTS_ERR = nsresult::NS_ERROR_DOM_FILESYSTEM_PATH_EXISTS_ERR,
+  NS_ERROR_DOM_FILESYSTEM_TYPE_MISMATCH_ERR = nsresult::NS_ERROR_DOM_FILESYSTEM_TYPE_MISMATCH_ERR,
+  NS_ERROR_DOM_FILESYSTEM_UNKNOWN_ERR = nsresult::NS_ERROR_DOM_FILESYSTEM_UNKNOWN_ERR,
+  NS_ERROR_SIGNED_APP_MANIFEST_INVALID = nsresult::NS_ERROR_SIGNED_APP_MANIFEST_INVALID,
+  NS_ERROR_DOM_ANIM_MISSING_PROPS_ERR = nsresult::NS_ERROR_DOM_ANIM_MISSING_PROPS_ERR,
+  NS_ERROR_DOM_PUSH_INVALID_REGISTRATION_ERR = nsresult::NS_ERROR_DOM_PUSH_INVALID_REGISTRATION_ERR,
+  NS_ERROR_DOM_PUSH_DENIED_ERR = nsresult::NS_ERROR_DOM_PUSH_DENIED_ERR,
+  NS_ERROR_DOM_PUSH_ABORT_ERR = nsresult::NS_ERROR_DOM_PUSH_ABORT_ERR,
+  NS_ERROR_DOM_PUSH_SERVICE_UNREACHABLE = nsresult::NS_ERROR_DOM_PUSH_SERVICE_UNREACHABLE,
+  NS_ERROR_DOM_PUSH_INVALID_KEY_ERR = nsresult::NS_ERROR_DOM_PUSH_INVALID_KEY_ERR,
+  NS_ERROR_DOM_PUSH_MISMATCHED_KEY_ERR = nsresult::NS_ERROR_DOM_PUSH_MISMATCHED_KEY_ERR,
+  NS_ERROR_DOM_MEDIA_ABORT_ERR = nsresult::NS_ERROR_DOM_MEDIA_ABORT_ERR,
+  NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR = nsresult::NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR,
+  NS_ERROR_DOM_MEDIA_NOT_SUPPORTED_ERR = nsresult::NS_ERROR_DOM_MEDIA_NOT_SUPPORTED_ERR,
+  NS_ERROR_DOM_MEDIA_DECODE_ERR = nsresult::NS_ERROR_DOM_MEDIA_DECODE_ERR,
+  NS_ERROR_DOM_MEDIA_FATAL_ERR = nsresult::NS_ERROR_DOM_MEDIA_FATAL_ERR,
+  NS_ERROR_DOM_MEDIA_METADATA_ERR = nsresult::NS_ERROR_DOM_MEDIA_METADATA_ERR,
+  NS_ERROR_DOM_MEDIA_OVERFLOW_ERR = nsresult::NS_ERROR_DOM_MEDIA_OVERFLOW_ERR,
+  NS_ERROR_DOM_MEDIA_END_OF_STREAM = nsresult::NS_ERROR_DOM_MEDIA_END_OF_STREAM,
+  NS_ERROR_DOM_MEDIA_WAITING_FOR_DATA = nsresult::NS_ERROR_DOM_MEDIA_WAITING_FOR_DATA,
+  NS_ERROR_DOM_MEDIA_CANCELED = nsresult::NS_ERROR_DOM_MEDIA_CANCELED,
+  NS_ERROR_DOM_MEDIA_MEDIASINK_ERR = nsresult::NS_ERROR_DOM_MEDIA_MEDIASINK_ERR,
+  NS_ERROR_DOM_MEDIA_DEMUXER_ERR = nsresult::NS_ERROR_DOM_MEDIA_DEMUXER_ERR,
+  NS_ERROR_DOM_MEDIA_CDM_ERR = nsresult::NS_ERROR_DOM_MEDIA_CDM_ERR,
+  NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER = nsresult::NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER,
+  NS_ERROR_DOM_MEDIA_INITIALIZING_DECODER = nsresult::NS_ERROR_DOM_MEDIA_INITIALIZING_DECODER,
+  NS_ERROR_DOM_MEDIA_CUBEB_INITIALIZATION_ERR = nsresult::NS_ERROR_DOM_MEDIA_CUBEB_INITIALIZATION_ERR,
+  NS_ERROR_UC_UPDATE_UNKNOWN = nsresult::NS_ERROR_UC_UPDATE_UNKNOWN,
+  NS_ERROR_UC_UPDATE_DUPLICATE_PREFIX = nsresult::NS_ERROR_UC_UPDATE_DUPLICATE_PREFIX,
+  NS_ERROR_UC_UPDATE_INFINITE_LOOP = nsresult::NS_ERROR_UC_UPDATE_INFINITE_LOOP,
+  NS_ERROR_UC_UPDATE_WRONG_REMOVAL_INDICES = nsresult::NS_ERROR_UC_UPDATE_WRONG_REMOVAL_INDICES,
+  NS_ERROR_UC_UPDATE_CHECKSUM_MISMATCH = nsresult::NS_ERROR_UC_UPDATE_CHECKSUM_MISMATCH,
+  NS_ERROR_UC_UPDATE_MISSING_CHECKSUM = nsresult::NS_ERROR_UC_UPDATE_MISSING_CHECKSUM,
+  NS_ERROR_UC_UPDATE_SHUTDOWNING = nsresult::NS_ERROR_UC_UPDATE_SHUTDOWNING,
+  NS_ERROR_UC_UPDATE_TABLE_NOT_FOUND = nsresult::NS_ERROR_UC_UPDATE_TABLE_NOT_FOUND,
+  NS_ERROR_UC_UPDATE_BUILD_PREFIX_FAILURE = nsresult::NS_ERROR_UC_UPDATE_BUILD_PREFIX_FAILURE,
+  NS_ERROR_UC_UPDATE_FAIL_TO_WRITE_DISK = nsresult::NS_ERROR_UC_UPDATE_FAIL_TO_WRITE_DISK,
+  NS_ERROR_UC_UPDATE_PROTOCOL_PARSER_ERROR = nsresult::NS_ERROR_UC_UPDATE_PROTOCOL_PARSER_ERROR,
+  NS_ERROR_INTERNAL_ERRORRESULT_JS_EXCEPTION = nsresult::NS_ERROR_INTERNAL_ERRORRESULT_JS_EXCEPTION,
+  NS_ERROR_INTERNAL_ERRORRESULT_DOMEXCEPTION = nsresult::NS_ERROR_INTERNAL_ERRORRESULT_DOMEXCEPTION,
+  NS_ERROR_INTERNAL_ERRORRESULT_EXCEPTION_ON_JSCONTEXT = nsresult::NS_ERROR_INTERNAL_ERRORRESULT_EXCEPTION_ON_JSCONTEXT,
+  NS_ERROR_INTERNAL_ERRORRESULT_TYPEERROR = nsresult::NS_ERROR_INTERNAL_ERRORRESULT_TYPEERROR,
+  NS_ERROR_INTERNAL_ERRORRESULT_RANGEERROR = nsresult::NS_ERROR_INTERNAL_ERRORRESULT_RANGEERROR,
+  NS_ERROR_DOWNLOAD_COMPLETE = nsresult::NS_ERROR_DOWNLOAD_COMPLETE,
+  NS_ERROR_DOWNLOAD_NOT_PARTIAL = nsresult::NS_ERROR_DOWNLOAD_NOT_PARTIAL,
+  NS_ERROR_UNORM_MOREOUTPUT = nsresult::NS_ERROR_UNORM_MOREOUTPUT,
+  NS_ERROR_DOCSHELL_REQUEST_REJECTED = nsresult::NS_ERROR_DOCSHELL_REQUEST_REJECTED,
+  NS_ERROR_DOCUMENT_IS_PRINTMODE = nsresult::NS_ERROR_DOCUMENT_IS_PRINTMODE,
+  NS_SUCCESS_DONT_FIXUP = nsresult::NS_SUCCESS_DONT_FIXUP,
+  NS_SUCCESS_RESTART_APP = nsresult::NS_SUCCESS_RESTART_APP,
+  NS_SUCCESS_RESTART_APP_NOT_SAME_PROFILE = nsresult::NS_SUCCESS_RESTART_APP_NOT_SAME_PROFILE,
+  NS_SUCCESS_UNORM_NOTFOUND = nsresult::NS_SUCCESS_UNORM_NOTFOUND,
+  NS_ERROR_NOT_IN_TREE = nsresult::NS_ERROR_NOT_IN_TREE,
+  NS_OK_NO_NAME_CLAUSE_HANDLED = nsresult::NS_OK_NO_NAME_CLAUSE_HANDLED
+;
+
+#endif // ErrorList_h__

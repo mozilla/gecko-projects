@@ -1035,9 +1035,8 @@ HttpChannelChild::OnStopRequest(const nsresult& channelStatus,
     AutoEventEnqueuer ensureSerialDispatch(mEventQ);
 
     DoOnStopRequest(this, channelStatus, mListenerContext);
+    // DoOnStopRequest() calls ReleaseListeners()
   }
-
-  ReleaseListeners();
 
   // DocumentChannelCleanup actually nulls out mCacheEntry in the parent, which
   // we might need later to open the Alt-Data output stream, so just return here
@@ -1108,8 +1107,7 @@ HttpChannelChild::DoOnStopRequest(nsIRequest* aRequest, nsresult aChannelStatus,
   }
   mOnStopRequestCalled = true;
 
-  mListener = nullptr;
-  mListenerContext = nullptr;
+  ReleaseListeners();
   mCacheEntryAvailable = false;
   if (mLoadGroup)
     mLoadGroup->RemoveRequest(this, nullptr, mStatus);
@@ -1779,6 +1777,7 @@ HttpChannelChild::CleanupRedirectingChannel(nsresult rv)
     mInterceptListener->Cleanup();
     mInterceptListener = nullptr;
   }
+  ReleaseListeners();
 }
 
 //-----------------------------------------------------------------------------
@@ -2217,7 +2216,10 @@ HttpChannelChild::AsyncOpen2(nsIStreamListener *aListener)
 {
   nsCOMPtr<nsIStreamListener> listener = aListener;
   nsresult rv = nsContentSecurityManager::doContentSecurityCheck(this, listener);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    ReleaseListeners();
+    return rv;
+  }
   return AsyncOpen(listener, nullptr);
 }
 
@@ -2229,24 +2231,13 @@ HttpChannelChild::SetEventTarget()
   nsCOMPtr<nsILoadInfo> loadInfo;
   GetLoadInfo(getter_AddRefs(loadInfo));
 
-  RefPtr<Dispatcher> dispatcher =
-    nsContentUtils::GetDispatcherByLoadInfo(loadInfo);
+  nsCOMPtr<nsIEventTarget> target =
+    nsContentUtils::GetEventTargetByLoadInfo(loadInfo, TaskCategory::Network);
 
-  if (!dispatcher) {
+  if (!target) {
     return;
   }
 
-#ifdef DEBUG
-  if (dispatcher->AsTabGroup()) {
-    // We have a TabGroup. This must be a top-level load.
-    bool isMainDocumentChannel;
-    GetIsMainDocumentChannel(&isMainDocumentChannel);
-    MOZ_ASSERT(isMainDocumentChannel);
-  }
-#endif
-
-  nsCOMPtr<nsIEventTarget> target =
-    dispatcher->EventTargetFor(TaskCategory::Network);
   gNeckoChild->SetEventTargetForActor(this, target);
 
   {

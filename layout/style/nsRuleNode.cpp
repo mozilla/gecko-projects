@@ -369,22 +369,18 @@ static inline nscoord ScaleViewportCoordTrunc(const nsCSSValue& aValue,
                                aViewportSize / 100.0f);
 }
 
+/* static */
 already_AddRefed<nsFontMetrics>
-GetMetricsFor(nsPresContext* aPresContext,
-              nsStyleContext* aStyleContext,
-              const nsStyleFont* aStyleFont,
-              nscoord aFontSize, // overrides value from aStyleFont
-              bool aUseUserFontSet)
+nsRuleNode::GetMetricsFor(nsPresContext* aPresContext,
+                          bool aIsVertical,
+                          const nsStyleFont* aStyleFont,
+                          nscoord aFontSize,
+                          bool aUseUserFontSet)
 {
   nsFont font = aStyleFont->mFont;
   font.size = aFontSize;
-  gfxFont::Orientation orientation = gfxFont::eHorizontal;
-  if (aStyleContext) {
-    WritingMode wm(aStyleContext);
-    if (wm.IsVertical() && !wm.IsSideways()) {
-      orientation = gfxFont::eVertical;
-    }
-  }
+  gfxFont::Orientation orientation
+    = aIsVertical ? gfxFont::eVertical : gfxFont::eHorizontal;
   nsFontMetrics::Params params;
   params.language = aStyleFont->mLanguage;
   params.explicitLanguage = aStyleFont->mExplicitLanguage;
@@ -393,6 +389,25 @@ GetMetricsFor(nsPresContext* aPresContext,
     aUseUserFontSet ? aPresContext->GetUserFontSet() : nullptr;
   params.textPerf = aPresContext->GetTextPerfMetrics();
   return aPresContext->DeviceContext()->GetMetricsFor(font, params);
+}
+
+/* static */
+already_AddRefed<nsFontMetrics>
+nsRuleNode::GetMetricsFor(nsPresContext* aPresContext,
+                          nsStyleContext* aStyleContext,
+                          const nsStyleFont* aStyleFont,
+                          nscoord aFontSize, // overrides value from aStyleFont
+                          bool aUseUserFontSet)
+{
+  bool isVertical = false;
+  if (aStyleContext) {
+    WritingMode wm(aStyleContext);
+    if (wm.IsVertical() && !wm.IsSideways()) {
+      isVertical = true;
+    }
+  }
+  return nsRuleNode::GetMetricsFor(aPresContext, isVertical, aStyleFont,
+                                   aFontSize, aUseUserFontSet);
 }
 
 
@@ -599,16 +614,16 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
     case eCSSUnit_XHeight: {
       aPresContext->SetUsesExChUnits(true);
       RefPtr<nsFontMetrics> fm =
-        GetMetricsFor(aPresContext, aStyleContext, styleFont,
-                      aFontSize, aUseUserFontSet);
+        nsRuleNode::GetMetricsFor(aPresContext, aStyleContext, styleFont,
+                                  aFontSize, aUseUserFontSet);
       aConditions.SetUncacheable();
       return ScaleCoordRound(aValue, float(fm->XHeight()));
     }
     case eCSSUnit_Char: {
       aPresContext->SetUsesExChUnits(true);
       RefPtr<nsFontMetrics> fm =
-        GetMetricsFor(aPresContext, aStyleContext, styleFont,
-                      aFontSize, aUseUserFontSet);
+        nsRuleNode::GetMetricsFor(aPresContext, aStyleContext, styleFont,
+                                  aFontSize, aUseUserFontSet);
       gfxFloat zeroWidth =
         fm->GetThebesFontGroup()->GetFirstValidFont()->
           GetMetrics(fm->Orientation()).zeroOrAveCharWidth;
@@ -1374,8 +1389,11 @@ static void SetStyleImage(nsStyleContext* aStyleContext,
       break;
     }
     case eCSSUnit_Element:
-      aResult.SetElementId(aValue.GetStringBufferValue());
+    {
+      nsCOMPtr<nsIAtom> atom = NS_Atomize(aValue.GetStringBufferValue());
+      aResult.SetElementId(atom.forget());
       break;
+    }
     case eCSSUnit_Initial:
     case eCSSUnit_Unset:
     case eCSSUnit_None:
@@ -1411,7 +1429,7 @@ static void SetStyleImage(nsStyleContext* aStyleContext,
                  isLocalRef,
                  "unexpected unit; maybe nsCSSValue::Image::Image() failed?");
 #endif
-
+      aResult.SetURLValue(do_AddRef(aValue.GetURLStructValue()));
       break;
     }
     default:
@@ -6900,30 +6918,6 @@ struct BackgroundItemComputer<nsCSSValueList, nsStyleImage>
   }
 };
 
-template <>
-struct BackgroundItemComputer<nsCSSValueList, RefPtr<css::URLValueData>>
-{
-  static void ComputeValue(nsStyleContext* aStyleContext,
-                           const nsCSSValueList* aSpecifiedValue,
-                           RefPtr<css::URLValueData>& aComputedValue,
-                           RuleNodeCacheConditions& aConditions)
-  {
-    switch (aSpecifiedValue->mValue.GetUnit()) {
-      case eCSSUnit_Null:
-        break;
-      case eCSSUnit_URL:
-        aComputedValue = aSpecifiedValue->mValue.GetURLStructValue();
-        break;
-      case eCSSUnit_Image:
-        aComputedValue = aSpecifiedValue->mValue.GetImageStructValue();
-        break;
-      default:
-        aComputedValue = nullptr;
-        break;
-    }
-  }
-};
-
 template <typename T>
 struct BackgroundItemComputer<nsCSSValueList, T>
 {
@@ -8345,14 +8339,7 @@ SetGridTrackList(const nsCSSValue& aValue,
 
   case eCSSUnit_Inherit:
     aConditions.SetUncacheable();
-    aResult.mIsSubgrid = aParentValue.mIsSubgrid;
-    aResult.mLineNameLists = aParentValue.mLineNameLists;
-    aResult.mMinTrackSizingFunctions = aParentValue.mMinTrackSizingFunctions;
-    aResult.mMaxTrackSizingFunctions = aParentValue.mMaxTrackSizingFunctions;
-    aResult.mRepeatAutoLineNameListBefore = aParentValue.mRepeatAutoLineNameListBefore;
-    aResult.mRepeatAutoLineNameListAfter = aParentValue.mRepeatAutoLineNameListAfter;
-    aResult.mRepeatAutoIndex = aParentValue.mRepeatAutoIndex;
-    aResult.mIsAutoFill = aParentValue.mIsAutoFill;
+    aResult = aParentValue;
     break;
 
   case eCSSUnit_Initial:
@@ -9446,9 +9433,6 @@ nsRuleNode::FillAllMaskLists(nsStyleImageLayers& aMask,
                      &nsStyleImageLayers::Layer::mImage,
                      aMask.mImageCount, fillCount);
   FillImageLayerList(aMask.mLayers,
-                     &nsStyleImageLayers::Layer::mSourceURI,
-                     aMask.mImageCount, fillCount);
-  FillImageLayerList(aMask.mLayers,
                      &nsStyleImageLayers::Layer::mRepeat,
                      aMask.mRepeatCount, fillCount);
   FillImageLayerList(aMask.mLayers,
@@ -10101,14 +10085,6 @@ nsRuleNode::ComputeSVGResetData(void* aStartStruct,
                     parentSVGReset->mMask.mLayers,
                     &nsStyleImageLayers::Layer::mImage,
                     initialImage, parentSVGReset->mMask.mImageCount,
-                    svgReset->mMask.mImageCount,
-                    maxItemCount, rebuild, conditions);
-  SetImageLayerList(aContext, *aRuleData->ValueForMaskImage(),
-                    svgReset->mMask.mLayers,
-                    parentSVGReset->mMask.mLayers,
-                    &nsStyleImageLayers::Layer::mSourceURI,
-                    RefPtr<css::URLValueData>(),
-                    parentSVGReset->mMask.mImageCount,
                     svgReset->mMask.mImageCount,
                     maxItemCount, rebuild, conditions);
 

@@ -6,6 +6,7 @@
 
 #include "mozilla/ServoStyleSet.h"
 
+#include "gfxPlatformFontList.h"
 #include "mozilla/DocumentStyleRootIterator.h"
 #include "mozilla/ServoRestyleManager.h"
 #include "mozilla/dom/AnonymousContent.h"
@@ -15,6 +16,7 @@
 #include "mozilla/dom/KeyframeEffectReadOnly.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsCSSPseudoElements.h"
+#include "nsDeviceContext.h"
 #include "nsHTMLStyleSheet.h"
 #include "nsIDocumentInlines.h"
 #include "nsPrintfCString.h"
@@ -40,6 +42,9 @@ ServoStyleSet::Init(nsPresContext* aPresContext)
 {
   mPresContext = aPresContext;
   mRawSet.reset(Servo_StyleSet_Init(aPresContext));
+
+  mPresContext->DeviceContext()->InitFontCache();
+  gfxPlatformFontList::PlatformFontList()->InitLangService();
 
   // Now that we have an mRawSet, go ahead and notify about whatever stylesheets
   // we have so far.
@@ -97,6 +102,23 @@ ServoStyleSet::Shutdown()
   // starts going away.
   ClearNonInheritingStyleContexts();
   mRawSet = nullptr;
+}
+
+size_t
+ServoStyleSet::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+{
+  size_t n = aMallocSizeOf(this);
+
+  // Measurement of the following members may be added later if DMD finds it is
+  // worthwhile:
+  // - mRawSet
+  // - mSheets
+  // - mNonInheritingStyleContexts
+  //
+  // The following members are not measured:
+  // - mPresContext, because it a non-owning pointer
+
+  return n;
 }
 
 bool
@@ -197,7 +219,7 @@ void
 ServoStyleSet::ResolveMappedAttrDeclarationBlocks()
 {
   if (nsHTMLStyleSheet* sheet = mPresContext->Document()->GetAttributeStyleSheet()) {
-    sheet->CalculateMappedServoDeclarations();
+    sheet->CalculateMappedServoDeclarations(mPresContext);
   }
 
   mPresContext->Document()->ResolveScheduledSVGPresAttrs();
@@ -211,21 +233,30 @@ ServoStyleSet::PreTraverseSync()
   // This is lazily computed and pseudo matching needs to access
   // it so force computation early.
   mPresContext->Document()->GetDocumentState();
+
+  // Ensure that the @font-face data is not stale
+  mPresContext->Document()->GetUserFontSet();
 }
 
 void
-ServoStyleSet::PreTraverse()
+ServoStyleSet::PreTraverse(Element* aRoot)
 {
   PreTraverseSync();
 
   // Process animation stuff that we should avoid doing during the parallel
   // traversal.
-  mPresContext->EffectCompositor()->PreTraverse();
+  if (aRoot) {
+    mPresContext->EffectCompositor()->PreTraverseInSubtree(aRoot);
+  } else {
+    mPresContext->EffectCompositor()->PreTraverse();
+  }
 }
 
 bool
 ServoStyleSet::PrepareAndTraverseSubtree(RawGeckoElementBorrowed aRoot,
-                                         mozilla::TraversalRootBehavior aRootBehavior)
+                                         TraversalRootBehavior aRootBehavior,
+                                         TraversalRestyleBehavior
+                                           aRestyleBehavior)
 {
   // Get the Document's root element to ensure that the cache is valid before
   // calling into the (potentially-parallel) Servo traversal, where a cache hit
@@ -236,14 +267,22 @@ ServoStyleSet::PrepareAndTraverseSubtree(RawGeckoElementBorrowed aRoot,
   sInServoTraversal = true;
 
   bool isInitial = !aRoot->HasServoData();
+  bool forReconstruct =
+    aRestyleBehavior == TraversalRestyleBehavior::ForReconstruct;
   bool postTraversalRequired =
-    Servo_TraverseSubtree(aRoot, mRawSet.get(), aRootBehavior);
-  MOZ_ASSERT_IF(isInitial, !postTraversalRequired);
+    Servo_TraverseSubtree(aRoot, mRawSet.get(), aRootBehavior, aRestyleBehavior);
+  MOZ_ASSERT_IF(isInitial || forReconstruct, !postTraversalRequired);
+
+  auto root = const_cast<Element*>(aRoot);
 
   // If there are still animation restyles needed, trigger a second traversal to
   // update CSS animations' styles.
-  if (mPresContext->EffectCompositor()->PreTraverse()) {
-    if (Servo_TraverseSubtree(aRoot, mRawSet.get(), aRootBehavior)) {
+  EffectCompositor* compositor = mPresContext->EffectCompositor();
+  if (forReconstruct ? compositor->PreTraverseInSubtree(root)
+                     : compositor->PreTraverse()) {
+    if (Servo_TraverseSubtree(aRoot, mRawSet.get(),
+                              aRootBehavior, aRestyleBehavior)) {
+      MOZ_ASSERT(!forReconstruct);
       if (isInitial) {
         // We're doing initial styling, and the additional animation
         // traversal changed the styles that were set by the first traversal.
@@ -255,7 +294,7 @@ ServoStyleSet::PrepareAndTraverseSubtree(RawGeckoElementBorrowed aRoot,
         // post-traversal. Instead, just drop this state and tell the caller
         // that no post-traversal is required.
         MOZ_ASSERT(!postTraversalRequired);
-        ServoRestyleManager::ClearRestyleStateFromSubtree(const_cast<Element*>(aRoot));
+        ServoRestyleManager::ClearRestyleStateFromSubtree(root);
       } else {
         postTraversalRequired = true;
       }
@@ -708,7 +747,9 @@ ServoStyleSet::StyleDocument()
   bool postTraversalRequired = false;
   DocumentStyleRootIterator iter(mPresContext->Document());
   while (Element* root = iter.GetNextStyleRoot()) {
-    if (PrepareAndTraverseSubtree(root, TraversalRootBehavior::Normal)) {
+    if (PrepareAndTraverseSubtree(root,
+                                  TraversalRootBehavior::Normal,
+                                  TraversalRestyleBehavior::Normal)) {
       postTraversalRequired = true;
     }
   }
@@ -723,7 +764,9 @@ ServoStyleSet::StyleNewSubtree(Element* aRoot)
   PreTraverse();
 
   DebugOnly<bool> postTraversalRequired =
-    PrepareAndTraverseSubtree(aRoot, TraversalRootBehavior::Normal);
+    PrepareAndTraverseSubtree(aRoot,
+                              TraversalRootBehavior::Normal,
+                              TraversalRestyleBehavior::Normal);
   MOZ_ASSERT(!postTraversalRequired);
 }
 
@@ -732,9 +775,23 @@ ServoStyleSet::StyleNewChildren(Element* aParent)
 {
   PreTraverse();
 
-  PrepareAndTraverseSubtree(aParent, TraversalRootBehavior::UnstyledChildrenOnly);
+  PrepareAndTraverseSubtree(aParent,
+                            TraversalRootBehavior::UnstyledChildrenOnly,
+                            TraversalRestyleBehavior::Normal);
   // We can't assert that Servo_TraverseSubtree returns false, since aParent
   // or some of its other children might have pending restyles.
+}
+
+void
+ServoStyleSet::StyleSubtreeForReconstruct(Element* aRoot)
+{
+  PreTraverse(aRoot);
+
+  DebugOnly<bool> postTraversalRequired =
+    PrepareAndTraverseSubtree(aRoot,
+                              TraversalRootBehavior::Normal,
+                              TraversalRestyleBehavior::ForReconstruct);
+  MOZ_ASSERT(!postTraversalRequired);
 }
 
 void
