@@ -11,7 +11,8 @@ def loader(kind, path, config, params, loaded_tasks):
     jobs and submit the update to balrog as available after the files are moved
     into place
     """
-    if config.get('kind-dependencies', []) != ["beetmover", "beetmover-l10n"]:
+    if config.get('kind-dependencies', []) != ["beetmover", "beetmover-l10n",
+                                               "beetmover-repackage"]:
         raise Exception("Balrog kinds must depend on beetmover kinds")
     for task in loaded_tasks:
         if not task.attributes.get('nightly'):
