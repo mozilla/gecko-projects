@@ -53,6 +53,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <list>
 
 using namespace mozilla::layers;
 using namespace mozilla::gfx;
@@ -4009,9 +4010,24 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
   int32_t maxLayers = gfxPrefs::MaxActiveLayers();
   int layerCount = 0;
 
-  nsDisplayList savedItems;
+  std::list<nsDisplayItem*> itemQueue;
+  nsDisplayList listCopy;
   nsDisplayItem* item;
-  while ((item = aList->RemoveBottom()) != nullptr) {
+
+  while (!itemQueue.empty() || !aList->IsEmpty()) {
+    // Try to remove the last element from the item queue
+    if (!itemQueue.empty()) {
+      item = itemQueue.front();
+      itemQueue.pop_front();
+    }
+    // Process the next item from the display list.
+    else if (!aList->IsEmpty()) {
+      // This is ugly but required, since we are processing items that might
+      // belong to separate display lists.
+      item = aList->RemoveBottom();
+      listCopy.AppendToTop(item);
+    }
+
     nsDisplayItem::Type itemType = item->GetType();
 
     // If the item is a event regions item, but is empty (has no regions in it)
@@ -4019,12 +4035,13 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
     if (itemType == nsDisplayItem::TYPE_LAYER_EVENT_REGIONS) {
       nsDisplayLayerEventRegions* eventRegions =
         static_cast<nsDisplayLayerEventRegions*>(item);
+
       if (eventRegions->IsEmpty()) {
-        item->~nsDisplayItem();
         continue;
       }
     }
 
+    // TODO: Fix merging
     // Peek ahead to the next item and try merging with it or swapping with it
     // if necessary.
     nsDisplayItem* aboveItem;
@@ -4039,15 +4056,17 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
       }
     }
 
-    nsDisplayList* itemSameCoordinateSystemChildren
-      = item->GetSameCoordinateSystemChildren();
+    nsDisplayList* childItems = item->GetSameCoordinateSystemChildren();
+
     if (item->ShouldFlattenAway(mBuilder)) {
-      aList->AppendToBottom(itemSameCoordinateSystemChildren);
-      item->~nsDisplayItem();
+      MOZ_ASSERT(childItems);
+
+      for (nsDisplayItem* i = childItems->GetBottom(); i; i = i->GetAbove()) {
+        itemQueue.push_back(i);
+      }
+
       continue;
     }
-
-    savedItems.AppendToTop(item);
 
     NS_ASSERTION(mAppUnitsPerDevPixel == AppUnitsPerDevPixel(item),
       "items in a container layer should all have the same app units per dev pixel");
@@ -4508,13 +4527,12 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
       }
     }
 
-    if (itemSameCoordinateSystemChildren &&
-        itemSameCoordinateSystemChildren->NeedsTransparentSurface()) {
+    if (childItems && childItems->NeedsTransparentSurface()) {
       aList->SetNeedsTransparentSurface();
     }
   }
 
-  aList->AppendToTop(&savedItems);
+  aList->AppendToTop(&listCopy);
 }
 
 void
@@ -6213,7 +6231,8 @@ FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
     // items too, so there's no need to do this for the items in inactive
     // PaintedLayers. If aDirtyRegion has not changed since the previous call
     // then we can skip this.
-    int32_t appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
+
+    //int32_t appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
     //RecomputeVisibilityForItems(entry->mItems, builder, aDirtyRegion,
     //                            offset, appUnitsPerDevPixel,
     //                            userData->mXScale, userData->mYScale);
