@@ -70,11 +70,9 @@ public:
   void Destroy();
 
   void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                        const nsRect&           aDirtyRect,
                         const nsDisplayListSet& aLists);
 
   void AppendScrollPartsTo(nsDisplayListBuilder*   aBuilder,
-                           const nsRect&           aDirtyRect,
                            const nsDisplayListSet& aLists,
                            bool                    aCreateLayer,
                            bool                    aPositioned);
@@ -678,10 +676,9 @@ public:
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
-  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
+  virtual void BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                 const nsDisplayListSet& aLists) override {
-    mHelper.BuildDisplayList(aBuilder, aDirtyRect, aLists);
+    mHelper.BuildDisplayList(aBuilder, aLists);
   }
 
   bool TryLayout(ScrollReflowInput* aState,
@@ -1114,9 +1111,8 @@ public:
                                                 bool aClipAllDescendants);
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override {
-    mHelper.BuildDisplayList(aBuilder, aDirtyRect, aLists);
+    mHelper.BuildDisplayList(aBuilder, aLists);
   }
 
   // XXXldb Is this actually used?

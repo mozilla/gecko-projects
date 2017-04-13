@@ -242,7 +242,7 @@ nsDisplayTableRowGroupBackground::Paint(nsDisplayListBuilder* aBuilder,
 // Handle the child-traversal part of DisplayGenericTablePart
 static void
 DisplayRows(nsDisplayListBuilder* aBuilder, nsFrame* aFrame,
-            const nsRect& aDirtyRect, const nsDisplayListSet& aLists)
+            const nsDisplayListSet& aLists)
 {
   nscoord overflowAbove;
   nsTableRowGroupFrame* f = static_cast<nsTableRowGroupFrame*>(aFrame);
@@ -255,15 +255,15 @@ DisplayRows(nsDisplayListBuilder* aBuilder, nsFrame* aFrame,
   // approximate it by checking it for |f|: if it's true for any row
   // in |f| then it's true for |f| itself.
   nsIFrame* kid = aBuilder->ShouldDescendIntoFrame(f) ?
-    nullptr : f->GetFirstRowContaining(aDirtyRect.y, &overflowAbove);
+    nullptr : f->GetFirstRowContaining(aBuilder->GetVisibleRect().y, &overflowAbove);
 
   if (kid) {
     // have a cursor, use it
     while (kid) {
-      if (kid->GetRect().y - overflowAbove >= aDirtyRect.YMost() &&
-          kid->GetNormalRect().y - overflowAbove >= aDirtyRect.YMost())
+      if (kid->GetRect().y - overflowAbove >= aBuilder->GetVisibleRect().YMost() &&
+          kid->GetNormalRect().y - overflowAbove >= aBuilder->GetVisibleRect().YMost())
         break;
-      f->BuildDisplayListForChild(aBuilder, kid, aDirtyRect, aLists);
+      f->BuildDisplayListForChild(aBuilder, kid, aLists);
       kid = kid->GetNextSibling();
     }
     return;
@@ -273,7 +273,7 @@ DisplayRows(nsDisplayListBuilder* aBuilder, nsFrame* aFrame,
   nsTableRowGroupFrame::FrameCursorData* cursor = f->SetupRowCursor();
   kid = f->PrincipalChildList().FirstChild();
   while (kid) {
-    f->BuildDisplayListForChild(aBuilder, kid, aDirtyRect, aLists);
+    f->BuildDisplayListForChild(aBuilder, kid, aLists);
 
     if (cursor) {
       if (!cursor->AppendFrame(kid)) {
@@ -291,7 +291,6 @@ DisplayRows(nsDisplayListBuilder* aBuilder, nsFrame* aFrame,
 
 void
 nsTableRowGroupFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                       const nsRect&           aDirtyRect,
                                        const nsDisplayListSet& aLists)
 {
   nsDisplayTableItem* item = nullptr;
@@ -305,8 +304,7 @@ nsTableRowGroupFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       aLists.BorderBackground()->AppendNewToTop(item);
     }
   }
-  nsTableFrame::DisplayGenericTablePart(aBuilder, this, aDirtyRect,
-                                        aLists, item, DisplayRows);
+  nsTableFrame::DisplayGenericTablePart(aBuilder, this, aLists, item, DisplayRows);
 }
 
 nsIFrame::LogicalSides

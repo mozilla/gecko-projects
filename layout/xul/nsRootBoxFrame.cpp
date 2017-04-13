@@ -75,7 +75,6 @@ public:
                                nsEventStatus* aEventStatus) override;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
 
   /**
@@ -176,14 +175,13 @@ nsRootBoxFrame::Reflow(nsPresContext*           aPresContext,
 
 void
 nsRootBoxFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                 const nsRect&           aDirtyRect,
                                  const nsDisplayListSet& aLists)
 {
   if (mContent && mContent->GetProperty(nsGkAtoms::DisplayPortMargins)) {
     // The XUL document's root element may have displayport margins set in
     // ChromeProcessController::InitializeRoot, and we should to supply the
     // base rect.
-    nsRect displayPortBase = aDirtyRect.Intersect(nsRect(nsPoint(0, 0), GetSize()));
+    nsRect displayPortBase = aBuilder->GetVisibleRect().Intersect(nsRect(nsPoint(0, 0), GetSize()));
     nsLayoutUtils::SetDisplayPortBase(mContent, displayPortBase);
   }
 
@@ -192,7 +190,7 @@ nsRootBoxFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // of a background display list element.
   DisplayBorderBackgroundOutline(aBuilder, aLists, true);
 
-  BuildDisplayListForChildren(aBuilder, aDirtyRect, aLists);
+  BuildDisplayListForChildren(aBuilder, aLists);
 }
 
 nsresult

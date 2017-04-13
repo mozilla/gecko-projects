@@ -617,7 +617,6 @@ nsDisplayTableRowBackground::Paint(nsDisplayListBuilder* aBuilder,
 
 void
 nsTableRowFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                  const nsRect&           aDirtyRect,
                                   const nsDisplayListSet& aLists)
 {
   nsDisplayTableItem* item = nullptr;
@@ -634,7 +633,7 @@ nsTableRowFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       aLists.BorderBackground()->AppendNewToTop(item);
     }
   }
-  nsTableFrame::DisplayGenericTablePart(aBuilder, this, aDirtyRect, aLists, item);
+  nsTableFrame::DisplayGenericTablePart(aBuilder, this, aLists, item);
 }
 
 nsIFrame::LogicalSides

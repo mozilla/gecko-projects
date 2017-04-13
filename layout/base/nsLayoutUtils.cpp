@@ -3285,7 +3285,11 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
   }
 
   builder.EnterPresShell(aFrame);
-  aFrame->BuildDisplayListForStackingContext(&builder, aRect, &list);
+
+  builder.SetVisibleRect(aRect);
+  builder.SetDirtyRect(aRect);
+
+  aFrame->BuildDisplayListForStackingContext(&builder, &list);
   builder.LeavePresShell(aFrame, nullptr);
 
 #ifdef MOZ_DUMP_PAINTING
@@ -3727,6 +3731,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
       nsDisplayListBuilder::AutoCurrentScrollParentIdSetter idSetter(&builder, id);
 
+      builder.SetVisibleRect(dirtyRect);
+
       if ((aFlags & PaintFrameFlags::PAINT_WIDGET_LAYERS) &&
           aFrame->Properties().Get(nsIFrame::ModifiedFrameList())) {
         nsTArray<nsIFrame*>* modifiedFrames = aFrame->Properties().Get(nsIFrame::ModifiedFrameList());
@@ -3741,9 +3747,11 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         }
         modifiedFrames->Clear();
         //printf_stderr("\n");
+        
+        builder.SetDirtyRect(modifiedDirty);
 
         nsDisplayList modifiedDL;
-        aFrame->BuildDisplayListForStackingContext(&builder, modifiedDirty, &modifiedDL);
+        aFrame->BuildDisplayListForStackingContext(&builder, &modifiedDL);
         //printf_stderr("Painting --- Modified list (dirty %d,%d,%d,%d):\n",
         //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
         //nsFrame::PrintDisplayList(&builder, modifiedDL);
@@ -3754,7 +3762,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         MergeDisplayLists(&builder, &modifiedDL, &list, &list);
       } else {
         list.DeleteAll();
-        aFrame->BuildDisplayListForStackingContext(&builder, dirtyRect, &list);
+        builder.SetDirtyRect(dirtyRect);
+        aFrame->BuildDisplayListForStackingContext(&builder, &list);
       }
     }
 
@@ -3767,7 +3776,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       nsRect bounds = nsRect(builder.ToReferenceFrame(aFrame),
                              aFrame->GetSize());
       nsDisplayListBuilder::AutoBuildingDisplayList
-        buildingDisplayList(&builder, aFrame, bounds, false);
+        buildingDisplayList(&builder, aFrame, bounds, bounds, false);
       presShell->AddPrintPreviewBackgroundItem(builder, list, aFrame, bounds);
     } else if (frameType != nsGkAtoms::pageFrame) {
       // For printing, this function is first called on an nsPageFrame, which
@@ -3781,7 +3790,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       // can monkey with the contents if necessary.
       canvasArea.IntersectRect(canvasArea, visibleRegion.GetBounds());
       nsDisplayListBuilder::AutoBuildingDisplayList
-        buildingDisplayList(&builder, aFrame, canvasArea, false);
+        buildingDisplayList(&builder, aFrame, canvasArea, canvasArea, false);
       presShell->AddCanvasBackgroundColorItem(
              builder, list, aFrame, canvasArea, aBackstop);
     }

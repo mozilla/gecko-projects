@@ -104,7 +104,6 @@ public:
   virtual bool NeedsToObserve(const ReflowInput& aReflowInput) override;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
 
   DrawResult PaintCellBackground(nsRenderingContext& aRenderingContext,

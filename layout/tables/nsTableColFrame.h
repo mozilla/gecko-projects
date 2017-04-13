@@ -56,7 +56,6 @@ public:
    * Table columns never paint anything, nor receive events.
    */
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override {}
 
   /**

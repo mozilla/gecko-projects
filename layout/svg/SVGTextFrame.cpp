@@ -3163,7 +3163,6 @@ SVGTextFrame::Init(nsIContent*       aContent,
 
 void
 SVGTextFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
-                               const nsRect& aDirtyRect,
                                const nsDisplayListSet& aLists)
 {
   if (NS_SUBTREE_DIRTY(this)) {

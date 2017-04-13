@@ -1032,10 +1032,10 @@ nsDisplayListBuilder::FindAnimatedGeometryRootFor(nsDisplayItem* aItem)
 
 
 void nsDisplayListBuilder::MarkOutOfFlowFrameForDisplay(nsIFrame* aDirtyFrame,
-                                                        nsIFrame* aFrame,
-                                                        const nsRect& aDirtyRect)
+                                                        nsIFrame* aFrame)
 {
-  nsRect dirtyRectRelativeToDirtyFrame = aDirtyRect;
+  nsRect visible = GetVisibleRect();
+  nsRect dirtyRectRelativeToDirtyFrame = GetDirtyRect();
   if (nsLayoutUtils::IsFixedPosFrameInDisplayPort(aFrame) &&
       IsPaintingToWindow()) {
     NS_ASSERTION(aDirtyFrame == aFrame->GetParent(), "Dirty frame should be viewport frame");
@@ -1049,8 +1049,13 @@ void nsDisplayListBuilder::MarkOutOfFlowFrameForDisplay(nsIFrame* aDirtyFrame,
     } else {
       dirtyRectRelativeToDirtyFrame.SizeTo(aDirtyFrame->GetSize());
     }
+    // TODO: We probably don't want visible and dirty to be the same here, figure
+    // out what to do.
+    visible = dirtyRectRelativeToDirtyFrame;
   }
-  nsRect dirty = dirtyRectRelativeToDirtyFrame - aFrame->GetOffsetTo(aDirtyFrame);
+  nsPoint offset = aFrame->GetOffsetTo(aDirtyFrame);
+  visible -= offset;
+  nsRect dirty = dirtyRectRelativeToDirtyFrame - offset;
   nsRect overflowRect = aFrame->GetVisualOverflowRect();
 
   if (aFrame->IsTransformed() &&
@@ -1075,7 +1080,7 @@ void nsDisplayListBuilder::MarkOutOfFlowFrameForDisplay(nsIFrame* aDirtyFrame,
     CopyWholeChain(mClipState.GetClipChainForContainingBlockDescendants());
   const DisplayItemClipChain* combinedClipChain = mClipState.GetCurrentCombinedClipChain(this);
   const ActiveScrolledRoot* asr = mCurrentActiveScrolledRoot;
-  OutOfFlowDisplayData* data = new OutOfFlowDisplayData(clipChain, combinedClipChain, asr, dirty);
+  OutOfFlowDisplayData* data = new OutOfFlowDisplayData(clipChain, combinedClipChain, asr, visible, dirty);
   aFrame->Properties().Set(nsDisplayListBuilder::OutOfFlowDisplayDataProperty(), data);
 
   MarkFrameForDisplay(aFrame, aDirtyFrame);
@@ -1267,8 +1272,7 @@ nsDisplayListBuilder::ResetMarkedFramesForDisplayList()
 
 void
 nsDisplayListBuilder::MarkFramesForDisplayList(nsIFrame* aDirtyFrame,
-                                               const nsFrameList& aFrames,
-                                               const nsRect& aDirtyRect) {
+                                               const nsFrameList& aFrames) {
   mFramesMarkedForDisplay.SetCapacity(mFramesMarkedForDisplay.Length() + aFrames.GetLength());
   for (nsIFrame* e : aFrames) {
     // Skip the AccessibleCaret frame when building no caret.
@@ -1282,7 +1286,7 @@ nsDisplayListBuilder::MarkFramesForDisplayList(nsIFrame* aDirtyFrame,
       }
     }
     mFramesMarkedForDisplay.AppendElement(e);
-    MarkOutOfFlowFrameForDisplay(aDirtyFrame, e, aDirtyRect);
+    MarkOutOfFlowFrameForDisplay(aDirtyFrame, e);
   }
 
   if (!aDirtyFrame->GetParent()) {
@@ -1300,7 +1304,7 @@ nsDisplayListBuilder::MarkFramesForDisplayList(nsIFrame* aDirtyFrame,
     const DisplayItemClipChain* combinedClipChain = mClipState.GetCurrentCombinedClipChain(this);
     const ActiveScrolledRoot* asr = mCurrentActiveScrolledRoot;
     CurrentPresShellState()->mFixedBackgroundDisplayData.emplace(
-      clipChain, combinedClipChain, asr, aDirtyRect);
+      clipChain, combinedClipChain, asr, GetVisibleRect(), GetDirtyRect());
   }
 }
 
@@ -2562,11 +2566,11 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
   mAnimatedGeometryRoot = aBuilder->FindAnimatedGeometryRootFor(aFrame);
   MOZ_ASSERT(nsLayoutUtils::IsAncestorFrameCrossDoc(aBuilder->RootReferenceFrame(),
                                                     *mAnimatedGeometryRoot), "Bad");
-  NS_ASSERTION(aBuilder->GetDirtyRect().width >= 0 ||
-               !aBuilder->IsForPainting(), "dirty rect not set");
+  NS_ASSERTION(aBuilder->GetVisibleRect().width >= 0 ||
+               !aBuilder->IsForPainting(), "visible rect not set");
   // The dirty rect is for mCurrentFrame, so we have to use
   // mCurrentOffsetToReferenceFrame
-  mVisibleRect = aBuilder->GetDirtyRect() +
+  mVisibleRect = aBuilder->GetVisibleRect() +
       aBuilder->GetCurrentFrameOffsetToReferenceFrame();
 }
 
@@ -3115,7 +3119,7 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
 
       auto* displayData = aBuilder->GetCurrentFixedBackgroundDisplayData();
       nsDisplayListBuilder::AutoBuildingDisplayList
-        buildingDisplayList(aBuilder, aFrame, aBuilder->GetDirtyRect(), false);
+        buildingDisplayList(aBuilder, aFrame, aBuilder->GetVisibleRect(), aBuilder->GetDirtyRect(), false);
 
       nsDisplayListBuilder::AutoCurrentActiveScrolledRootSetter asrSetter(aBuilder);
       if (displayData) {
@@ -3129,8 +3133,10 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
           nsIFrame* rootFrame = aBuilder->CurrentPresShellState()->mPresShell->GetRootFrame();
           // There cannot be any transforms between aFrame and rootFrame
           // because then bgData.shouldFixToViewport would have been false.
+          nsRect visibleRect = displayData->mVisibleRect + aFrame->GetOffsetTo(rootFrame);
+          aBuilder->SetVisibleRect(visibleRect);
           nsRect dirtyRect = displayData->mDirtyRect + aFrame->GetOffsetTo(rootFrame);
-          buildingDisplayList.SetDirtyRect(dirtyRect);
+          aBuilder->SetDirtyRect(dirtyRect);
         }
       }
       nsDisplayBackgroundImage* bgItem = nullptr;
@@ -5324,7 +5330,7 @@ nsDisplayWrapList::nsDisplayWrapList(nsDisplayListBuilder* aBuilder,
     mReferenceFrame = i->ReferenceFrame();
     mToReferenceFrame = i->ToReferenceFrame();
   }
-  mVisibleRect = aBuilder->GetDirtyRect() +
+  mVisibleRect = aBuilder->GetVisibleRect() +
       aBuilder->GetCurrentFrameOffsetToReferenceFrame();
 }
 
@@ -5350,7 +5356,7 @@ nsDisplayWrapList::nsDisplayWrapList(nsDisplayListBuilder* aBuilder,
     mReferenceFrame = aItem->ReferenceFrame();
     mToReferenceFrame = aItem->ToReferenceFrame();
   }
-  mVisibleRect = aBuilder->GetDirtyRect() +
+  mVisibleRect = aBuilder->GetVisibleRect() +
       aBuilder->GetCurrentFrameOffsetToReferenceFrame();
 }
 
@@ -6615,7 +6621,7 @@ nsDisplayTransform::SetReferenceFrameToAncestor(nsDisplayListBuilder* aBuilder)
       mAnimatedGeometryRoot = mAnimatedGeometryRoot->mParentAGR;
     }
   }
-  mVisibleRect = aBuilder->GetDirtyRect() + mToReferenceFrame;
+  mVisibleRect = aBuilder->GetVisibleRect() + mToReferenceFrame;
 }
 
 void

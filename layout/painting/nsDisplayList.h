@@ -272,6 +272,7 @@ class nsDisplayListBuilder {
       : mAccumulatedTransform()
       , mAccumulatedRect()
       , mAccumulatedRectLevels(0)
+      , mVisibleRect(aOther.mVisibleRect)
       , mDirtyRect(aOther.mDirtyRect) {}
 
     // Accmulate transforms of ancestors on the preserves-3d chain.
@@ -280,6 +281,7 @@ class nsDisplayListBuilder {
     nsRect mAccumulatedRect;
     // How far this frame is from the root of the current 3d context.
     int mAccumulatedRectLevels;
+    nsRect mVisibleRect;
     nsRect mDirtyRect;
   };
 
@@ -511,7 +513,14 @@ public:
    * Get dirty rect relative to current frame (the frame that we're calling
    * BuildDisplayList on right now).
    */
+  const nsRect& GetVisibleRect() { return mVisibleRect; }
   const nsRect& GetDirtyRect() { return mDirtyRect; }
+  
+  void SetVisibleRect(const nsRect& aVisibleRect) { mVisibleRect = aVisibleRect; }
+  void IntersectVisibleRect(const nsRect& aVisibleRect) { mVisibleRect.IntersectRect(mVisibleRect, aVisibleRect); }
+  void SetDirtyRect(const nsRect& aDirtyRect) { mDirtyRect = aDirtyRect; }
+  void IntersectDirtyRect(const nsRect& aDirtyRect) { mDirtyRect.IntersectRect(mDirtyRect, aDirtyRect); }
+
   const nsIFrame* GetCurrentFrame() { return mCurrentFrame; }
   const nsIFrame* GetCurrentReferenceFrame() { return mCurrentReferenceFrame; }
   const nsPoint& GetCurrentFrameOffsetToReferenceFrame() { return mCurrentOffsetToReferenceFrame; }
@@ -561,11 +570,10 @@ public:
   /**
    * Display the caret if needed.
    */
-  void DisplayCaret(nsIFrame* aFrame, const nsRect& aDirtyRect,
-                    nsDisplayList* aList) {
+  void DisplayCaret(nsIFrame* aFrame, nsDisplayList* aList) {
     nsIFrame* frame = GetCaretFrame();
     if (aFrame == frame) {
-      frame->DisplayCaret(this, aDirtyRect, aList);
+      frame->DisplayCaret(this, aList);
     }
   }
   /**
@@ -670,8 +678,7 @@ public:
    * destroyed.
    */
   void MarkFramesForDisplayList(nsIFrame* aDirtyFrame,
-                                const nsFrameList& aFrames,
-                                const nsRect& aDirtyRect);
+                                const nsFrameList& aFrames);
   /**
    * Mark all child frames that Preserve3D() as needing display.
    * Because these frames include transforms set on their parent, dirty rects
@@ -796,12 +803,15 @@ public:
   public:
     AutoBuildingDisplayList(nsDisplayListBuilder* aBuilder,
                             nsIFrame* aForChild,
-                            const nsRect& aDirtyRect, bool aIsRoot)
+                            const nsRect& aVisibleRect,
+                            const nsRect& aDirtyRect,
+                            bool aIsRoot)
       : mBuilder(aBuilder),
         mPrevFrame(aBuilder->mCurrentFrame),
         mPrevReferenceFrame(aBuilder->mCurrentReferenceFrame),
         mPrevLayerEventRegions(aBuilder->mLayerEventRegions),
         mPrevOffset(aBuilder->mCurrentOffsetToReferenceFrame),
+        mPrevVisibleRect(aBuilder->mVisibleRect),
         mPrevDirtyRect(aBuilder->mDirtyRect),
         mPrevAGR(aBuilder->mCurrentAGR),
         mPrevIsAtRootOfPseudoStackingContext(aBuilder->mIsAtRootOfPseudoStackingContext),
@@ -830,9 +840,6 @@ public:
       aBuilder->mDirtyRect = aDirtyRect;
       aBuilder->mIsAtRootOfPseudoStackingContext = aIsRoot;
     }
-    void SetDirtyRect(const nsRect& aRect) {
-      mBuilder->mDirtyRect = aRect;
-    }
     void SetReferenceFrameAndCurrentOffset(const nsIFrame* aFrame, const nsPoint& aOffset) {
       mBuilder->mCurrentReferenceFrame = aFrame;
       mBuilder->mCurrentOffsetToReferenceFrame = aOffset;
@@ -854,6 +861,7 @@ public:
       mBuilder->mCurrentReferenceFrame = mPrevReferenceFrame;
       mBuilder->mLayerEventRegions = mPrevLayerEventRegions;
       mBuilder->mCurrentOffsetToReferenceFrame = mPrevOffset;
+      mBuilder->mVisibleRect = mPrevVisibleRect;
       mBuilder->mDirtyRect = mPrevDirtyRect;
       mBuilder->mCurrentAGR = mPrevAGR;
       mBuilder->mIsAtRootOfPseudoStackingContext = mPrevIsAtRootOfPseudoStackingContext;
@@ -867,6 +875,7 @@ public:
     nsIFrame*             mPrevAnimatedGeometryRoot;
     nsDisplayLayerEventRegions* mPrevLayerEventRegions;
     nsPoint               mPrevOffset;
+    nsRect                mPrevVisibleRect;
     nsRect                mPrevDirtyRect;
     AnimatedGeometryRoot* mPrevAGR;
     bool                  mPrevIsAtRootOfPseudoStackingContext;
@@ -1218,15 +1227,18 @@ public:
     OutOfFlowDisplayData(const DisplayItemClipChain* aContainingBlockClipChain,
                          const DisplayItemClipChain* aCombinedClipChain,
                          const ActiveScrolledRoot* aContainingBlockActiveScrolledRoot,
+                         const nsRect &aVisibleRect,
                          const nsRect &aDirtyRect)
       : mContainingBlockClipChain(aContainingBlockClipChain)
       , mCombinedClipChain(aCombinedClipChain)
       , mContainingBlockActiveScrolledRoot(aContainingBlockActiveScrolledRoot)
+      , mVisibleRect(aVisibleRect)
       , mDirtyRect(aDirtyRect)
     {}
     const DisplayItemClipChain* mContainingBlockClipChain;
     const DisplayItemClipChain* mCombinedClipChain; // only necessary for the special case of top layer
     const ActiveScrolledRoot* mContainingBlockActiveScrolledRoot;
+    nsRect mVisibleRect;
     nsRect mDirtyRect;
   };
 
@@ -1365,11 +1377,13 @@ public:
     Preserves3DContext mSavedCtx;
   };
 
-  const nsRect GetPreserves3DDirtyRect(const nsIFrame *aFrame) const {
+  const nsRect GetPreserves3DRects(nsRect* aOutVisibleRect) const {
+    *aOutVisibleRect = mPreserves3DCtx.mVisibleRect;
     return mPreserves3DCtx.mDirtyRect;
   }
-  void SetPreserves3DDirtyRect(const nsRect &aDirtyRect) {
-    mPreserves3DCtx.mDirtyRect = aDirtyRect;
+  void SavePreserves3DRects() {
+    mPreserves3DCtx.mVisibleRect = mVisibleRect;
+    mPreserves3DCtx.mDirtyRect = mDirtyRect;
   }
 
   bool IsBuildingInvisibleItems() const { return mBuildingInvisibleItems; }
@@ -1391,8 +1405,7 @@ public:
   }
 
 private:
-  void MarkOutOfFlowFrameForDisplay(nsIFrame* aDirtyFrame, nsIFrame* aFrame,
-                                    const nsRect& aDirtyRect);
+  void MarkOutOfFlowFrameForDisplay(nsIFrame* aDirtyFrame, nsIFrame* aFrame);
 
   /**
    * Returns whether a frame acts as an animated geometry root, optionally
@@ -1494,6 +1507,7 @@ private:
   nsTHashtable<nsPtrHashKey<nsIFrame> > mAGRBudgetSet;
 
   // Relative to mCurrentFrame.
+  nsRect                         mVisibleRect;
   nsRect                         mDirtyRect;
   nsRegion                       mWindowExcludeGlassRegion;
   nsRegion                       mWindowOpaqueRegion;
