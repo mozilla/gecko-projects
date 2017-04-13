@@ -341,7 +341,10 @@ def set_target(config, tests):
         if build_platform.startswith('macosx'):
             target = 'target.dmg'
         elif build_platform.startswith('android'):
-            target = 'target.apk'
+            if 'geckoview' in test['test-name']:
+                target = 'geckoview_example.apk'
+            else:
+                target = 'target.apk'
         elif build_platform.startswith('win'):
             target = 'firefox-{}.en-US.{}.zip'.format(
                 get_firefox_version(),
@@ -587,7 +590,7 @@ def set_profile(config, tests):
     """Set profiling mode for tests."""
     for test in tests:
         if config.config['args'].profile and test['suite'] == 'talos':
-            test['mozharness']['extra-options'].append('--spsProfile')
+            test['mozharness']['extra-options'].append('--geckoProfile')
         yield test
 
 

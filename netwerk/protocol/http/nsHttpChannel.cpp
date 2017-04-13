@@ -5367,6 +5367,18 @@ nsHttpChannel::SetupReplacementChannel(nsIURI       *newURI,
         }
     }
 
+    if (redirectFlags & nsIChannelEventSink::REDIRECT_INTERNAL) {
+      nsCOMPtr<nsITimedChannel> timedChannel = do_QueryInterface(newChannel);
+      if (timedChannel) {
+        timedChannel->SetLaunchServiceWorkerStart(mLaunchServiceWorkerStart);
+        timedChannel->SetLaunchServiceWorkerEnd(mLaunchServiceWorkerEnd);
+        timedChannel->SetDispatchFetchEventStart(mDispatchFetchEventStart);
+        timedChannel->SetDispatchFetchEventEnd(mDispatchFetchEventEnd);
+        timedChannel->SetHandleFetchEventStart(mHandleFetchEventStart);
+        timedChannel->SetHandleFetchEventEnd(mHandleFetchEventEnd);
+      }
+    }
+
     return NS_OK;
 }
 
@@ -5639,6 +5651,25 @@ NS_IMETHODIMP nsHttpChannel::CloseStickyConnection()
     // This turns the IsPersistent() indicator on the connection to false,
     // and makes us throw it away in OnStopRequest.
     conn->DontReuse();
+    return NS_OK;
+}
+
+NS_IMETHODIMP nsHttpChannel::ForceNoSpdy()
+{
+    LOG(("nsHttpChannel::ForceNoSpdy this=%p", this));
+
+    MOZ_ASSERT(mTransaction);
+    if (!mTransaction) {
+        return NS_ERROR_UNEXPECTED;
+    }
+
+    mAllowSpdy = 0;
+    mCaps |= NS_HTTP_DISALLOW_SPDY;
+
+    if (!(mTransaction->Caps() & NS_HTTP_DISALLOW_SPDY)) {
+        mTransaction->DisableSpdy();
+    }
+
     return NS_OK;
 }
 

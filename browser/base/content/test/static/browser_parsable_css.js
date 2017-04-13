@@ -53,6 +53,10 @@ let whitelist = [
    intermittent: true,
    errorMessage: /Property contained reference to invalid variable.*color/i,
    isFromDevTools: true},
+  {sourceName: /webide\/skin\/logs\.css$/i,
+   intermittent: true,
+   errorMessage: /Property contained reference to invalid variable.*background/i,
+   isFromDevTools: true},
   {sourceName: /devtools\/skin\/animationinspector\.css$/i,
    intermittent: true,
    errorMessage: /Property contained reference to invalid variable.*color/i,
@@ -240,6 +244,10 @@ function chromeFileExists(aURI) {
 }
 
 add_task(function* checkAllTheCSS() {
+  // Since we later in this test use Services.console.getMessageArray(),
+  // better to not have some messages from previous tests in the array.
+  Services.console.reset();
+
   let appDir = Services.dirsvc.get("GreD", Ci.nsIFile);
   // This asynchronously produces a list of URLs (sadly, mostly sync on our
   // test infrastructure because it runs against jarfiles there, and

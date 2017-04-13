@@ -1698,9 +1698,19 @@ toolbar .toolbarbutton-1 > .toolbarbutton-menubutton-button {
   border: 1px solid transparent;
 }
 
+.autocomplete-richlistitem:hover,
+treechildren.searchbar-treebody::-moz-tree-row(hover) {
+  background-color: hsla(0, 0%, 0%, 0.06);
+  border-color: hsla(0, 0%, 0%, 0.1);
+}
+
 .autocomplete-richlistitem[selected] {
   background-color: hsl(210, 80%, 52%);
   color: hsl(0, 0%, 100%);
+}
+
+treechildren.searchbar-treebody::-moz-tree-row(selected) {
+  background-color: Highlight;
 }
 
 .ac-title {
@@ -3031,8 +3041,18 @@ menulist.translate-infobar-element > .menulist-dropmarker {
   font-weight: bold;
 }
 
-.addon-webext-perm-header {
-  font-size: 1.3em;
+html|*.addon-webext-perm-list {
+  margin-block-end: 0;
+  padding-inline-start: 10px;
+}
+
+.addon-webext-perm-text {
+  margin-inline-start: 0;
+}
+
+.popup-notification-description[popupid="addon-webext-permissions"] {
+  margin: 0;
+  padding: 0;
 }
 
 .addon-webext-name {

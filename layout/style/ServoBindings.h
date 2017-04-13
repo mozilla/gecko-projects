@@ -131,8 +131,7 @@ void Gecko_LoadStyleSheet(mozilla::css::Loader* loader,
                           RawGeckoURLExtraData* base_url_data,
                           const uint8_t* url_bytes,
                           uint32_t url_length,
-                          const uint8_t* media_bytes,
-                          uint32_t media_length);
+                          RawServoMediaListStrong media_list);
 
 // By default, Servo walks the DOM by traversing the siblings of the DOM-view
 // first child. This generally works, but misses anonymous children, which we
@@ -198,6 +197,7 @@ bool Gecko_StyleAnimationsEquals(RawGeckoStyleAnimationListBorrowed,
                                  RawGeckoStyleAnimationListBorrowed);
 void Gecko_UpdateAnimations(RawGeckoElementBorrowed aElement,
                             nsIAtom* aPseudoTagOrNull,
+                            ServoComputedValuesBorrowedOrNull aOldComputedValues,
                             ServoComputedValuesBorrowedOrNull aComputedValues,
                             ServoComputedValuesBorrowedOrNull aParentComputedValues,
                             mozilla::UpdateAnimationsTasks aTaskBits);
@@ -231,6 +231,14 @@ void Gecko_FontFamilyList_Clear(FontFamilyList* aList);
 void Gecko_FontFamilyList_AppendNamed(FontFamilyList* aList, nsIAtom* aName, bool aQuoted);
 void Gecko_FontFamilyList_AppendGeneric(FontFamilyList* list, FontFamilyType familyType);
 void Gecko_CopyFontFamilyFrom(nsFont* dst, const nsFont* src);
+
+// Visibility style
+void Gecko_SetImageOrientation(nsStyleVisibility* aVisibility,
+                               double aRadians,
+                               bool aFlip);
+void Gecko_SetImageOrientationAsFromImage(nsStyleVisibility* aVisibility);
+void Gecko_CopyImageOrientationFrom(nsStyleVisibility* aDst,
+                                    const nsStyleVisibility* aSrc);
 
 // Counter style.
 void Gecko_SetListStyleType(nsStyleList* style_struct, uint32_t type);

@@ -1016,10 +1016,8 @@ DoNativeBacktrace(PS::LockRef aLock, ProfileBuffer* aBuffer,
     reinterpret_cast<void**>(framePCs),
     reinterpret_cast<void**>(frameSPs),
     mozilla::ArrayLength(framePCs),
-    0
+    framesUsed
   };
-
-  nativeStack.count = framesUsed;
 
   MergeStacksIntoProfile(aLock, aBuffer, aSample, nativeStack);
 
@@ -1981,7 +1979,6 @@ profiler_init(void* aStackTop)
 {
   LOG("profiler_init");
 
-  MOZ_RELEASE_ASSERT(NS_IsMainThread());
   MOZ_RELEASE_ASSERT(!gPS);
 
   const char* features[] = { "js"

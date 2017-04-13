@@ -24,7 +24,8 @@ ${helpers.single_keyword("writing-mode",
                          spec="https://drafts.csswg.org/css-writing-modes/#propdef-writing-mode")}
 
 ${helpers.single_keyword("direction", "ltr rtl", need_clone=True, animation_type="none",
-                         spec="https://drafts.csswg.org/css-writing-modes/#propdef-direction")}
+                         spec="https://drafts.csswg.org/css-writing-modes/#propdef-direction",
+                         needs_conversion=True)}
 
 <%helpers:single_keyword_computed
     name="text-orientation"
@@ -70,20 +71,21 @@ ${helpers.single_keyword("color-adjust",
                          animation_type="none",
                          spec="https://drafts.csswg.org/css-color/#propdef-color-adjust")}
 
-<% image_rendering_custom_consts = { "crisp-edges": "CRISPEDGES" } %>
+<% image_rendering_custom_consts = { "crisp-edges": "CRISPEDGES",
+                                     "-moz-crisp-edges": "CRISPEDGES" } %>
 // According to to CSS-IMAGES-3, `optimizespeed` and `optimizequality` are synonyms for `auto`
 // And, firefox doesn't support `pixelated` yet (https://bugzilla.mozilla.org/show_bug.cgi?id=856337)
 ${helpers.single_keyword("image-rendering",
-                         "auto crisp-edges",
-                         extra_gecko_values="optimizespeed optimizequality",
-                         extra_servo_values="pixelated",
+                         "auto",
+                         extra_gecko_values="optimizespeed optimizequality -moz-crisp-edges",
+                         extra_servo_values="pixelated crisp-edges",
                          custom_consts=image_rendering_custom_consts,
                          animation_type="none",
                          spec="https://drafts.csswg.org/css-images/#propdef-image-rendering")}
 
 // Image Orientation
 <%helpers:longhand name="image-orientation"
-                   products="None"
+                   products="gecko"
                    animation_type="none"
     spec="https://drafts.csswg.org/css-images/#propdef-image-orientation, \
       /// additional values in https://developer.mozilla.org/en-US/docs/Web/CSS/image-orientation">
@@ -199,21 +201,23 @@ ${helpers.single_keyword("image-rendering",
         }
     }
 
+    // from-image | <angle> | [<angle>? flip]
     pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
         if input.try(|input| input.expect_ident_matching("from-image")).is_ok() {
             // Handle from-image
             Ok(SpecifiedValue { angle: None, flipped: false })
+        } else if input.try(|input| input.expect_ident_matching("flip")).is_ok() {
+            // Handle flip
+            Ok(SpecifiedValue { angle: Some(Angle::zero()), flipped: true })
         } else {
-            // Handle <angle> | <angle>? flip
+            // Handle <angle> | <angle> flip
             let angle = input.try(|input| Angle::parse(context, input)).ok();
-            let flipped = input.try(|input| input.expect_ident_matching("flip")).is_ok();
-            let explicit_angle = if angle.is_none() && !flipped {
-                Some(Angle::zero())
-            } else {
-                angle
-            };
+            if angle.is_none() {
+                return Err(());
+            }
 
-            Ok(SpecifiedValue { angle: explicit_angle, flipped: flipped })
+            let flipped = input.try(|input| input.expect_ident_matching("flip")).is_ok();
+            Ok(SpecifiedValue { angle: angle, flipped: flipped })
         }
     }
 </%helpers:longhand>

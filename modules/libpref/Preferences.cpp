@@ -10,6 +10,7 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/HashFunctions.h"
+#include "mozilla/ServoStyleSet.h"
 #include "mozilla/UniquePtrExtensions.h"
 
 #include "nsXULAppAPI.h"
@@ -352,7 +353,7 @@ PreferenceServiceReporter::CollectReports(
   for (auto iter = rootBranch->mObservers.Iter(); !iter.Done(); iter.Next()) {
     nsAutoPtr<PrefCallback>& callback = iter.Data();
     nsPrefBranch* prefBranch = callback->GetPrefBranch();
-    const char* pref = prefBranch->getPrefName(callback->GetDomain().get());
+    const auto& pref = prefBranch->getPrefName(callback->GetDomain().get());
 
     if (callback->IsWeak()) {
       nsCOMPtr<nsIObserver> callbackRef = do_QueryReferent(callback->mWeakRef);
@@ -365,7 +366,7 @@ PreferenceServiceReporter::CollectReports(
       numStrong++;
     }
 
-    nsDependentCString prefString(pref);
+    nsDependentCString prefString(pref.get());
     uint32_t oldCount = 0;
     prefCounter.Get(prefString, &oldCount);
     uint32_t currentCount = oldCount + 1;
@@ -478,10 +479,11 @@ bool
 Preferences::InitStaticMembers()
 {
 #ifndef MOZ_B2G
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(NS_IsMainThread() || mozilla::ServoStyleSet::IsInServoTraversal());
 #endif
 
   if (!sShutdown && !sPreferences) {
+    MOZ_ASSERT(NS_IsMainThread());
     nsCOMPtr<nsIPrefService> prefService =
       do_GetService(NS_PREFSERVICE_CONTRACTID);
   }

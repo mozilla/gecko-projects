@@ -540,6 +540,35 @@ pub mod root {
     pub const NS_STYLE_GRID_TEMPLATE_SUBGRID: ::std::os::raw::c_uint = 0;
     pub const NS_STYLE_GRID_REPEAT_AUTO_FILL: ::std::os::raw::c_uint = 0;
     pub const NS_STYLE_GRID_REPEAT_AUTO_FIT: ::std::os::raw::c_uint = 1;
+    pub const NS_MATHML_DEFAULT_SCRIPT_SIZE_MULTIPLIER: f32 = 0.71;
+    pub const NS_MATHML_DEFAULT_SCRIPT_MIN_SIZE_PT: ::std::os::raw::c_uint =
+        8;
+    pub const NS_MATHML_MATHVARIANT_NONE: ::std::os::raw::c_uint = 0;
+    pub const NS_MATHML_MATHVARIANT_NORMAL: ::std::os::raw::c_uint = 1;
+    pub const NS_MATHML_MATHVARIANT_BOLD: ::std::os::raw::c_uint = 2;
+    pub const NS_MATHML_MATHVARIANT_ITALIC: ::std::os::raw::c_uint = 3;
+    pub const NS_MATHML_MATHVARIANT_BOLD_ITALIC: ::std::os::raw::c_uint = 4;
+    pub const NS_MATHML_MATHVARIANT_SCRIPT: ::std::os::raw::c_uint = 5;
+    pub const NS_MATHML_MATHVARIANT_BOLD_SCRIPT: ::std::os::raw::c_uint = 6;
+    pub const NS_MATHML_MATHVARIANT_FRAKTUR: ::std::os::raw::c_uint = 7;
+    pub const NS_MATHML_MATHVARIANT_DOUBLE_STRUCK: ::std::os::raw::c_uint = 8;
+    pub const NS_MATHML_MATHVARIANT_BOLD_FRAKTUR: ::std::os::raw::c_uint = 9;
+    pub const NS_MATHML_MATHVARIANT_SANS_SERIF: ::std::os::raw::c_uint = 10;
+    pub const NS_MATHML_MATHVARIANT_BOLD_SANS_SERIF: ::std::os::raw::c_uint =
+        11;
+    pub const NS_MATHML_MATHVARIANT_SANS_SERIF_ITALIC: ::std::os::raw::c_uint
+              =
+        12;
+    pub const NS_MATHML_MATHVARIANT_SANS_SERIF_BOLD_ITALIC:
+              ::std::os::raw::c_uint =
+        13;
+    pub const NS_MATHML_MATHVARIANT_MONOSPACE: ::std::os::raw::c_uint = 14;
+    pub const NS_MATHML_MATHVARIANT_INITIAL: ::std::os::raw::c_uint = 15;
+    pub const NS_MATHML_MATHVARIANT_TAILED: ::std::os::raw::c_uint = 16;
+    pub const NS_MATHML_MATHVARIANT_LOOPED: ::std::os::raw::c_uint = 17;
+    pub const NS_MATHML_MATHVARIANT_STRETCHED: ::std::os::raw::c_uint = 18;
+    pub const NS_MATHML_DISPLAYSTYLE_INLINE: ::std::os::raw::c_uint = 0;
+    pub const NS_MATHML_DISPLAYSTYLE_BLOCK: ::std::os::raw::c_uint = 1;
     pub const NS_STYLE_WIDTH_MAX_CONTENT: ::std::os::raw::c_uint = 0;
     pub const NS_STYLE_WIDTH_MIN_CONTENT: ::std::os::raw::c_uint = 1;
     pub const NS_STYLE_WIDTH_FIT_CONTENT: ::std::os::raw::c_uint = 2;
@@ -23700,6 +23729,8 @@ pub mod root {
         pub mModeFlags: root::nsStyleImageRequest_Mode,
         pub mResolved: bool,
     }
+    pub type nsStyleImageRequest_URLValueData =
+        root::mozilla::css::URLValueData;
     #[repr(u8)]
     #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
     pub enum nsStyleImageRequest_Mode { Track = 1, Discard = 2, }
@@ -23758,6 +23789,7 @@ pub mod root {
         eStyleImageType_Image = 1,
         eStyleImageType_Gradient = 2,
         eStyleImageType_Element = 3,
+        eStyleImageType_URL = 4,
     }
     #[repr(C)]
     #[derive(Debug)]
@@ -23808,11 +23840,14 @@ pub mod root {
         pub mCropRect: root::mozilla::UniquePtr<root::nsStyleSides,
                                                 root::mozilla::DefaultDelete<root::nsStyleSides>>,
     }
+    pub type nsStyleImage_URLValue = root::mozilla::css::URLValue;
+    pub type nsStyleImage_URLValueData = root::mozilla::css::URLValueData;
     #[repr(C)]
     #[derive(Debug, Copy)]
     pub struct nsStyleImage__bindgen_ty_1 {
         pub mImage: root::__BindgenUnionField<*mut root::nsStyleImageRequest>,
         pub mGradient: root::__BindgenUnionField<*mut root::nsStyleGradient>,
+        pub mURLValue: root::__BindgenUnionField<*mut root::nsStyleImage_URLValue>,
         pub mElementId: root::__BindgenUnionField<*mut u16>,
         pub bindgen_union_field: u64,
     }
@@ -23838,6 +23873,12 @@ pub mod root {
                     "Alignment of field: " , stringify ! (
                     nsStyleImage__bindgen_ty_1 ) , "::" , stringify ! (
                     mGradient ) ));
+        assert_eq! (unsafe {
+                    & ( * ( 0 as * const nsStyleImage__bindgen_ty_1 ) ) .
+                    mURLValue as * const _ as usize } , 0usize , concat ! (
+                    "Alignment of field: " , stringify ! (
+                    nsStyleImage__bindgen_ty_1 ) , "::" , stringify ! (
+                    mURLValue ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleImage__bindgen_ty_1 ) ) .
                     mElementId as * const _ as usize } , 0usize , concat ! (
@@ -24066,7 +24107,6 @@ pub mod root {
     #[derive(Debug)]
     pub struct nsStyleImageLayers_Layer {
         pub mImage: root::nsStyleImage,
-        pub mSourceURI: root::RefPtr<root::mozilla::css::URLValueData>,
         pub mPosition: root::mozilla::Position,
         pub mSize: root::nsStyleImageLayers_Size,
         pub mClip: root::nsStyleImageLayers_Layer_StyleGeometryBox,
@@ -24081,8 +24121,8 @@ pub mod root {
             nsStyleImageLayers_Layer_StyleGeometryBox;
     #[test]
     fn bindgen_test_layout_nsStyleImageLayers_Layer() {
-        assert_eq!(::std::mem::size_of::<nsStyleImageLayers_Layer>() ,
-                   104usize , concat ! (
+        assert_eq!(::std::mem::size_of::<nsStyleImageLayers_Layer>() , 96usize
+                   , concat ! (
                    "Size of: " , stringify ! ( nsStyleImageLayers_Layer ) ));
         assert_eq! (::std::mem::align_of::<nsStyleImageLayers_Layer>() ,
                     8usize , concat ! (
@@ -24096,61 +24136,55 @@ pub mod root {
                     ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleImageLayers_Layer ) ) .
-                    mSourceURI as * const _ as usize } , 32usize , concat ! (
-                    "Alignment of field: " , stringify ! (
-                    nsStyleImageLayers_Layer ) , "::" , stringify ! (
-                    mSourceURI ) ));
-        assert_eq! (unsafe {
-                    & ( * ( 0 as * const nsStyleImageLayers_Layer ) ) .
-                    mPosition as * const _ as usize } , 40usize , concat ! (
+                    mPosition as * const _ as usize } , 32usize , concat ! (
                     "Alignment of field: " , stringify ! (
                     nsStyleImageLayers_Layer ) , "::" , stringify ! (
                     mPosition ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleImageLayers_Layer ) ) . mSize
-                    as * const _ as usize } , 64usize , concat ! (
+                    as * const _ as usize } , 56usize , concat ! (
                     "Alignment of field: " , stringify ! (
                     nsStyleImageLayers_Layer ) , "::" , stringify ! ( mSize )
                     ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleImageLayers_Layer ) ) . mClip
-                    as * const _ as usize } , 92usize , concat ! (
+                    as * const _ as usize } , 84usize , concat ! (
                     "Alignment of field: " , stringify ! (
                     nsStyleImageLayers_Layer ) , "::" , stringify ! ( mClip )
                     ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleImageLayers_Layer ) ) .
-                    mOrigin as * const _ as usize } , 93usize , concat ! (
+                    mOrigin as * const _ as usize } , 85usize , concat ! (
                     "Alignment of field: " , stringify ! (
                     nsStyleImageLayers_Layer ) , "::" , stringify ! ( mOrigin
                     ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleImageLayers_Layer ) ) .
-                    mAttachment as * const _ as usize } , 94usize , concat ! (
+                    mAttachment as * const _ as usize } , 86usize , concat ! (
                     "Alignment of field: " , stringify ! (
                     nsStyleImageLayers_Layer ) , "::" , stringify ! (
                     mAttachment ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleImageLayers_Layer ) ) .
-                    mBlendMode as * const _ as usize } , 95usize , concat ! (
+                    mBlendMode as * const _ as usize } , 87usize , concat ! (
                     "Alignment of field: " , stringify ! (
                     nsStyleImageLayers_Layer ) , "::" , stringify ! (
                     mBlendMode ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleImageLayers_Layer ) ) .
-                    mComposite as * const _ as usize } , 96usize , concat ! (
+                    mComposite as * const _ as usize } , 88usize , concat ! (
                     "Alignment of field: " , stringify ! (
                     nsStyleImageLayers_Layer ) , "::" , stringify ! (
                     mComposite ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleImageLayers_Layer ) ) .
-                    mMaskMode as * const _ as usize } , 97usize , concat ! (
+                    mMaskMode as * const _ as usize } , 89usize , concat ! (
                     "Alignment of field: " , stringify ! (
                     nsStyleImageLayers_Layer ) , "::" , stringify ! (
                     mMaskMode ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleImageLayers_Layer ) ) .
-                    mRepeat as * const _ as usize } , 98usize , concat ! (
+                    mRepeat as * const _ as usize } , 90usize , concat ! (
                     "Alignment of field: " , stringify ! (
                     nsStyleImageLayers_Layer ) , "::" , stringify ! ( mRepeat
                     ) ));
@@ -24167,7 +24201,7 @@ pub mod root {
     }
     #[test]
     fn bindgen_test_layout_nsStyleImageLayers() {
-        assert_eq!(::std::mem::size_of::<nsStyleImageLayers>() , 160usize ,
+        assert_eq!(::std::mem::size_of::<nsStyleImageLayers>() , 152usize ,
                    concat ! ( "Size of: " , stringify ! ( nsStyleImageLayers )
                    ));
         assert_eq! (::std::mem::align_of::<nsStyleImageLayers>() , 8usize ,
@@ -24248,7 +24282,7 @@ pub mod root {
     }
     #[test]
     fn bindgen_test_layout_nsStyleBackground() {
-        assert_eq!(::std::mem::size_of::<nsStyleBackground>() , 168usize ,
+        assert_eq!(::std::mem::size_of::<nsStyleBackground>() , 160usize ,
                    concat ! ( "Size of: " , stringify ! ( nsStyleBackground )
                    ));
         assert_eq! (::std::mem::align_of::<nsStyleBackground>() , 8usize ,
@@ -24261,7 +24295,7 @@ pub mod root {
                     , "::" , stringify ! ( mImage ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleBackground ) ) .
-                    mBackgroundColor as * const _ as usize } , 160usize ,
+                    mBackgroundColor as * const _ as usize } , 152usize ,
                     concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleBackground )
                     , "::" , stringify ! ( mBackgroundColor ) ));
@@ -26362,7 +26396,7 @@ pub mod root {
     }
     #[test]
     fn bindgen_test_layout_nsStyleSVGReset() {
-        assert_eq!(::std::mem::size_of::<nsStyleSVGReset>() , 200usize ,
+        assert_eq!(::std::mem::size_of::<nsStyleSVGReset>() , 192usize ,
                    concat ! ( "Size of: " , stringify ! ( nsStyleSVGReset )
                    ));
         assert_eq! (::std::mem::align_of::<nsStyleSVGReset>() , 8usize ,
@@ -26375,48 +26409,48 @@ pub mod root {
                     "::" , stringify ! ( mMask ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleSVGReset ) ) . mClipPath as *
-                    const _ as usize } , 160usize , concat ! (
+                    const _ as usize } , 152usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleSVGReset ) ,
                     "::" , stringify ! ( mClipPath ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleSVGReset ) ) . mStopColor as *
-                    const _ as usize } , 176usize , concat ! (
+                    const _ as usize } , 168usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleSVGReset ) ,
                     "::" , stringify ! ( mStopColor ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleSVGReset ) ) . mFloodColor as
-                    * const _ as usize } , 180usize , concat ! (
+                    * const _ as usize } , 172usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleSVGReset ) ,
                     "::" , stringify ! ( mFloodColor ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleSVGReset ) ) . mLightingColor
-                    as * const _ as usize } , 184usize , concat ! (
+                    as * const _ as usize } , 176usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleSVGReset ) ,
                     "::" , stringify ! ( mLightingColor ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleSVGReset ) ) . mStopOpacity as
-                    * const _ as usize } , 188usize , concat ! (
+                    * const _ as usize } , 180usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleSVGReset ) ,
                     "::" , stringify ! ( mStopOpacity ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleSVGReset ) ) . mFloodOpacity
-                    as * const _ as usize } , 192usize , concat ! (
+                    as * const _ as usize } , 184usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleSVGReset ) ,
                     "::" , stringify ! ( mFloodOpacity ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleSVGReset ) ) .
-                    mDominantBaseline as * const _ as usize } , 196usize ,
+                    mDominantBaseline as * const _ as usize } , 188usize ,
                     concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleSVGReset ) ,
                     "::" , stringify ! ( mDominantBaseline ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleSVGReset ) ) . mVectorEffect
-                    as * const _ as usize } , 197usize , concat ! (
+                    as * const _ as usize } , 189usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleSVGReset ) ,
                     "::" , stringify ! ( mVectorEffect ) ));
         assert_eq! (unsafe {
                     & ( * ( 0 as * const nsStyleSVGReset ) ) . mMaskType as *
-                    const _ as usize } , 198usize , concat ! (
+                    const _ as usize } , 190usize , concat ! (
                     "Alignment of field: " , stringify ! ( nsStyleSVGReset ) ,
                     "::" , stringify ! ( mMaskType ) ));
     }
