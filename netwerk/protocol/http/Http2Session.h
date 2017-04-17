@@ -43,7 +43,7 @@ public:
   NS_DECL_NSAHTTPSEGMENTREADER
   NS_DECL_NSAHTTPSEGMENTWRITER
 
- Http2Session(nsISocketTransport *, uint32_t version, bool attemptingEarlyData);
+  Http2Session(nsISocketTransport *, uint32_t version, bool attemptingEarlyData);
 
   MOZ_MUST_USE bool AddStream(nsAHttpTransaction *, int32_t,
                               bool, nsIInterfaceRequestor *) override;
@@ -52,6 +52,7 @@ public:
   uint32_t SpdyVersion() override;
   bool TestJoinConnection(const nsACString &hostname, int32_t port) override;
   bool JoinConnection(const nsACString &hostname, int32_t port) override;
+  void ThrottleResponse(bool aThrottle) override;
 
   // When the connection is active this is called up to once every 1 second
   // return the interval (in seconds) that the connection next wants to
@@ -426,6 +427,9 @@ private:
   // the session received a GoAway frame with a valid GoAwayID
   bool                 mCleanShutdown;
 
+  // the session received the opening SETTINGS frame from the server
+  bool                 mReceivedSettings;
+
   // The TLS comlpiance checks are not done in the ctor beacuse of bad
   // exception handling - so we do them at IO time and cache the result
   bool                 mTLSProfileConfirmed;
@@ -517,9 +521,12 @@ private:
   // The ID(s) of the stream(s) that we are getting 0RTT data from.
   nsTArray<uint32_t> m0RTTStreams;
 
+  bool RealJoinConnection(const nsACString &hostname, int32_t port, bool jk);
   bool TestOriginFrame(const nsACString &name, int32_t port);
   bool mOriginFrameActivated;
   nsDataHashtable<nsCStringHashKey, bool> mOriginFrame;
+
+  nsDataHashtable<nsCStringHashKey, bool> mJoinConnectionCache;
 
 private:
 /// connect tunnels

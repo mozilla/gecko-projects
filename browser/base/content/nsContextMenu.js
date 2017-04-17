@@ -15,8 +15,48 @@ Components.utils.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "LoginHelper",
   "resource://gre/modules/LoginHelper.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "WebNavigationFrames",
+  "resource://gre/modules/WebNavigationFrames.jsm");
 
 var gContextMenuContentData = null;
+
+function openContextMenu(aMessage) {
+  let data = aMessage.data;
+  let browser = aMessage.target;
+
+  let spellInfo = data.spellInfo;
+  if (spellInfo)
+    spellInfo.target = aMessage.target.messageManager;
+  let documentURIObject = makeURI(data.docLocation,
+                                  data.charSet,
+                                  makeURI(data.baseURI));
+  gContextMenuContentData = { isRemote: true,
+                              event: aMessage.objects.event,
+                              popupNode: aMessage.objects.popupNode,
+                              browser,
+                              editFlags: data.editFlags,
+                              spellInfo,
+                              principal: data.principal,
+                              customMenuItems: data.customMenuItems,
+                              addonInfo: data.addonInfo,
+                              documentURIObject,
+                              docLocation: data.docLocation,
+                              charSet: data.charSet,
+                              referrer: data.referrer,
+                              referrerPolicy: data.referrerPolicy,
+                              contentType: data.contentType,
+                              contentDisposition: data.contentDisposition,
+                              frameOuterWindowID: data.frameOuterWindowID,
+                              selectionInfo: data.selectionInfo,
+                              disableSetDesktopBackground: data.disableSetDesktopBg,
+                              loginFillInfo: data.loginFillInfo,
+                              parentAllowsMixedContent: data.parentAllowsMixedContent,
+                              userContextId: data.userContextId,
+                            };
+  let popup = browser.ownerDocument.getElementById("contentAreaContextMenu");
+  let event = gContextMenuContentData.event;
+  popup.openPopupAtScreen(event.screenX, event.screenY, true);
+}
 
 function nsContextMenu(aXulMenu, aIsShift) {
   this.shouldDisplay = true;
@@ -62,10 +102,10 @@ nsContextMenu.prototype = {
         pageUrl: this.browser ? this.browser.currentURI.spec : undefined,
         linkUrl: this.linkURL,
         selectionText: this.isTextSelected ? this.selectionInfo.text : undefined,
-        windowId: this.frameOuterWindowID,
+        frameId: this.frameOuterWindowID,
       };
       subject.wrappedJSObject = subject;
-      Services.obs.notifyObservers(subject, "on-build-contextmenu", null);
+      Services.obs.notifyObservers(subject, "on-build-contextmenu");
     }
 
     this.isFrameImage = document.getElementById("isFrameImage");
@@ -670,10 +710,7 @@ nsContextMenu.prototype = {
                              .QueryInterface(Ci.nsIDocShell)
                              .chromeEventHandler;
       this.principal = ownerDoc.nodePrincipal;
-      this.frameOuterWindowID = ownerDoc.defaultView
-                                        .QueryInterface(Ci.nsIInterfaceRequestor)
-                                        .getInterface(Ci.nsIDOMWindowUtils)
-                                        .outerWindowID;
+      this.frameOuterWindowID = WebNavigationFrames.getFrameId(ownerDoc.defaultView);
     }
     this.onSocial = !!this.browser.getAttribute("origin");
 
@@ -996,9 +1033,7 @@ nsContextMenu.prototype = {
     }
 
     if (!this.isRemote) {
-      params.frameOuterWindowID = this.target.ownerGlobal
-                                      .QueryInterface(Ci.nsIInterfaceRequestor)
-                                      .getInterface(Ci.nsIDOMWindowUtils).outerWindowID;
+      params.frameOuterWindowID = WebNavigationFrames.getFrameId(this.target.ownerGlobal);
     }
     // If we want to change userContextId, we must be sure that we don't
     // propagate the referrer.

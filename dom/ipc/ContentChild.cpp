@@ -521,6 +521,14 @@ ContentChild::RecvSetXPCOMProcessAttributes(const XPCOMInitData& aXPCOMInit,
   mLookAndFeelCache = aLookAndFeelIntCache;
   InitXPCOM(aXPCOMInit, aInitialData);
   InitGraphicsDeviceData(aXPCOMInit.contentDeviceData());
+
+#ifdef NS_PRINTING
+  // Force the creation of the nsPrintingProxy so that it's IPC counterpart,
+  // PrintingParent, is always available for printing initiated from the parent.
+  // Create nsPrintingProxy instance later than the SystemGroup initialization.
+  RefPtr<nsPrintingProxy> printingProxy = nsPrintingProxy::GetInstance();
+#endif
+
   return IPC_OK();
 }
 
@@ -601,12 +609,6 @@ ContentChild::Init(MessageLoop* aIOLoop,
 
   mID = aChildID;
   mIsForBrowser = aIsForBrowser;
-
-#ifdef NS_PRINTING
-  // Force the creation of the nsPrintingProxy so that it's IPC counterpart,
-  // PrintingParent, is always available for printing initiated from the parent.
-  RefPtr<nsPrintingProxy> printingProxy = nsPrintingProxy::GetInstance();
-#endif
 
   SetProcessName(NS_LITERAL_STRING("Web Content"), true);
 
@@ -775,18 +777,6 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
                     GetID(),
                     &tabId);
 
-  TabContext newTabContext = aTabOpener ? *aTabOpener : TabContext();
-  RefPtr<TabChild> newChild = new TabChild(this, tabId,
-                                           newTabContext, aChromeFlags);
-  if (NS_FAILED(newChild->Init())) {
-    return NS_ERROR_ABORT;
-  }
-
-  if (aTabOpener) {
-    MOZ_ASSERT(ipcContext->type() == IPCTabContext::TPopupIPCTabContext);
-    ipcContext->get_PopupIPCTabContext().opener() = aTabOpener;
-  }
-
   // We need to assign a TabGroup to the PBrowser actor before we send it to the
   // parent. Otherwise, the parent could send messages to us before we have a
   // proper TabGroup for that actor.
@@ -797,13 +787,26 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
   } else {
     tabGroup = new TabGroup();
   }
+
+  TabContext newTabContext = aTabOpener ? *aTabOpener : TabContext();
+  RefPtr<TabChild> newChild = new TabChild(this, tabId, tabGroup,
+                                           newTabContext, aChromeFlags);
+  if (NS_FAILED(newChild->Init())) {
+    return NS_ERROR_ABORT;
+  }
+
+  if (aTabOpener) {
+    MOZ_ASSERT(ipcContext->type() == IPCTabContext::TPopupIPCTabContext);
+    ipcContext->get_PopupIPCTabContext().opener() = aTabOpener;
+  }
+
   nsCOMPtr<nsIEventTarget> target = tabGroup->EventTargetFor(TaskCategory::Other);
   SetEventTargetForActor(newChild, target);
 
   Unused << SendPBrowserConstructor(
     // We release this ref in DeallocPBrowserChild
     RefPtr<TabChild>(newChild).forget().take(),
-    tabId, *ipcContext, aChromeFlags,
+    tabId, TabId(0), *ipcContext, aChromeFlags,
     GetID(), IsForBrowser());
 
   nsString name(aName);
@@ -1441,12 +1444,14 @@ ContentChild::DeallocPJavaScriptChild(PJavaScriptChild *aChild)
 
 PBrowserChild*
 ContentChild::AllocPBrowserChild(const TabId& aTabId,
+                                 const TabId& aSameTabGroupAs,
                                  const IPCTabContext& aContext,
                                  const uint32_t& aChromeFlags,
                                  const ContentParentId& aCpID,
                                  const bool& aIsForBrowser)
 {
   return nsIContentChild::AllocPBrowserChild(aTabId,
+                                             aSameTabGroupAs,
                                              aContext,
                                              aChromeFlags,
                                              aCpID,
@@ -1456,6 +1461,7 @@ ContentChild::AllocPBrowserChild(const TabId& aTabId,
 bool
 ContentChild::SendPBrowserConstructor(PBrowserChild* aActor,
                                       const TabId& aTabId,
+                                      const TabId& aSameTabGroupAs,
                                       const IPCTabContext& aContext,
                                       const uint32_t& aChromeFlags,
                                       const ContentParentId& aCpID,
@@ -1467,6 +1473,7 @@ ContentChild::SendPBrowserConstructor(PBrowserChild* aActor,
 
   return PContentChild::SendPBrowserConstructor(aActor,
                                                 aTabId,
+                                                aSameTabGroupAs,
                                                 aContext,
                                                 aChromeFlags,
                                                 aCpID,
@@ -1476,6 +1483,7 @@ ContentChild::SendPBrowserConstructor(PBrowserChild* aActor,
 mozilla::ipc::IPCResult
 ContentChild::RecvPBrowserConstructor(PBrowserChild* aActor,
                                       const TabId& aTabId,
+                                      const TabId& aSameTabGroupAs,
                                       const IPCTabContext& aContext,
                                       const uint32_t& aChromeFlags,
                                       const ContentParentId& aCpID,
@@ -1492,8 +1500,13 @@ ContentChild::RecvPBrowserConstructor(PBrowserChild* aActor,
     NS_IdleDispatchToCurrentThread(firstIdleTask.forget());
   }
 
-  return nsIContentChild::RecvPBrowserConstructor(aActor, aTabId, aContext,
-                                                  aChromeFlags, aCpID, aIsForBrowser);
+  return nsIContentChild::RecvPBrowserConstructor(aActor,
+                                                  aTabId,
+                                                  aSameTabGroupAs,
+                                                  aContext,
+                                                  aChromeFlags,
+                                                  aCpID,
+                                                  aIsForBrowser);
 }
 
 void
@@ -2537,8 +2550,8 @@ ContentChild::RecvPauseProfiler(const bool& aPause)
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult
-ContentChild::RecvGatherProfile()
+void
+ContentChild::GatherProfile(bool aIsExitProfile)
 {
   nsCString profileCString;
   UniquePtr<char[]> profile = profiler_get_profile();
@@ -2548,7 +2561,13 @@ ContentChild::RecvGatherProfile()
     profileCString = EmptyCString();
   }
 
-  Unused << SendProfile(profileCString);
+  Unused << SendProfile(profileCString, aIsExitProfile);
+}
+
+mozilla::ipc::IPCResult
+ContentChild::RecvGatherProfile()
+{
+  GatherProfile(false);
   return IPC_OK();
 }
 
@@ -2722,7 +2741,7 @@ ContentChild::RecvShutdown()
     // We're shutting down while we were profiling. Send the
     // profile up to the parent so that we don't lose this
     // information.
-    Unused << RecvGatherProfile();
+    GatherProfile(true);
   }
 #endif
 
@@ -3167,6 +3186,32 @@ ContentChild::GetConstructedEventTarget(const Message& aMsg)
 {
   // Currently we only set targets for PBrowser.
   if (aMsg.type() != PContent::Msg_PBrowserConstructor__ID) {
+    return nullptr;
+  }
+
+  ActorHandle handle;
+  TabId tabId, sameTabGroupAs;
+  PickleIterator iter(aMsg);
+  if (!IPC::ReadParam(&aMsg, &iter, &handle)) {
+    return nullptr;
+  }
+  aMsg.IgnoreSentinel(&iter);
+  if (!IPC::ReadParam(&aMsg, &iter, &tabId)) {
+    return nullptr;
+  }
+  aMsg.IgnoreSentinel(&iter);
+  if (!IPC::ReadParam(&aMsg, &iter, &sameTabGroupAs)) {
+    return nullptr;
+  }
+
+  // If sameTabGroupAs is non-zero, then the new tab will be in the same
+  // TabGroup as a previously created tab. Rather than try to find the
+  // previously created tab (whose constructor message may not even have been
+  // processed yet, in theory) and look up its event target, we just use the
+  // default event target. This means that runnables for this tab will not be
+  // labeled. However, this path is only taken for print preview and view
+  // source, which are not performance-sensitive.
+  if (sameTabGroupAs) {
     return nullptr;
   }
 

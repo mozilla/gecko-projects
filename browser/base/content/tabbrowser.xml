@@ -4955,38 +4955,7 @@
               break;
             }
             case "contextmenu": {
-              let spellInfo = data.spellInfo;
-              if (spellInfo)
-                spellInfo.target = aMessage.target.messageManager;
-              let documentURIObject = makeURI(data.docLocation,
-                                              data.charSet,
-                                              makeURI(data.baseURI));
-              gContextMenuContentData = { isRemote: true,
-                                          event: aMessage.objects.event,
-                                          popupNode: aMessage.objects.popupNode,
-                                          browser,
-                                          editFlags: data.editFlags,
-                                          spellInfo,
-                                          principal: data.principal,
-                                          customMenuItems: data.customMenuItems,
-                                          addonInfo: data.addonInfo,
-                                          documentURIObject,
-                                          docLocation: data.docLocation,
-                                          charSet: data.charSet,
-                                          referrer: data.referrer,
-                                          referrerPolicy: data.referrerPolicy,
-                                          contentType: data.contentType,
-                                          contentDisposition: data.contentDisposition,
-                                          frameOuterWindowID: data.frameOuterWindowID,
-                                          selectionInfo: data.selectionInfo,
-                                          disableSetDesktopBackground: data.disableSetDesktopBg,
-                                          loginFillInfo: data.loginFillInfo,
-                                          parentAllowsMixedContent: data.parentAllowsMixedContent,
-                                          userContextId: data.userContextId,
-                                        };
-              let popup = browser.ownerDocument.getElementById("contentAreaContextMenu");
-              let event = gContextMenuContentData.event;
-              popup.openPopupAtScreen(event.screenX, event.screenY, true);
+              openContextMenu(aMessage);
               break;
             }
             case "DOMWindowFocus": {
@@ -5157,7 +5126,7 @@
           this.mCurrentBrowser = document.getAnonymousElementByAttribute(this, "anonid", "initialBrowser");
           this.mCurrentBrowser.permanentKey = {};
 
-          Services.obs.addObserver(this, "contextual-identity-updated", false);
+          Services.obs.addObserver(this, "contextual-identity-updated");
 
           this.mCurrentTab = this.tabContainer.firstChild;
           const nsIEventListenerService =
@@ -5227,7 +5196,7 @@
           // To correctly handle keypresses for potential FindAsYouType, while
           // the tab's find bar is not yet initialized.
           this._findAsYouType = Services.prefs.getBoolPref("accessibility.typeaheadfind");
-          Services.prefs.addObserver("accessibility.typeaheadfind", this, false);
+          Services.prefs.addObserver("accessibility.typeaheadfind", this);
           messageManager.addMessageListener("Findbar:Keypress", this);
 
           // Add listeners for prerender messages
@@ -5707,7 +5676,7 @@
 
           this._tabAnimationLoggingEnabled = Services.prefs.getBoolPref("browser.tabs.animationLogging.enabled", false);
           this._browserNewtabpageEnabled = Services.prefs.getBoolPref("browser.newtabpage.enabled");
-          Services.prefs.addObserver("privacy.userContext", this, false);
+          Services.prefs.addObserver("privacy.userContext", this);
           this.observe(null, "nsPref:changed", "privacy.userContext.enabled");
         ]]>
       </constructor>
