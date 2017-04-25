@@ -3005,8 +3005,13 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
         (shell->IgnoringViewportScrolling() && child == shell->GetRootScrollFrame());
     if (!keepDescending) {
       nsRect childDirty;
-      if (!childDirty.IntersectRect(dirty, child->GetVisualOverflowRect()))
+      if (!childDirty.IntersectRect(dirty, child->GetVisualOverflowRect()) &&
+          (!(child->GetStateBits() & NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO_IF_VISIBLE))) {
         return;
+      }
+      if (!childDirty.IntersectRect(visible, child->GetVisualOverflowRect())) {
+        return;
+      }
       // Usually we could set dirty to childDirty now but there's no
       // benefit, and it can be confusing. It can especially confuse
       // situations where we're going to ignore a scrollframe's clipping;

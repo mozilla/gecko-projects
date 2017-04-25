@@ -3492,6 +3492,28 @@ nsLayoutUtils::ExpireDisplayPortOnAsyncScrollableAncestor(nsIFrame* aFrame)
     }
   }
 }
+        
+void MarkFramesForDifferentAGR(nsDisplayListBuilder* aBuilder,
+                                nsDisplayList* aList,
+                                AnimatedGeometryRoot* aAGR)
+{
+  for (nsDisplayItem* i = aList->GetBottom(); i; i = i->GetAbove()) {
+    if (!i->CanBeRecycled()) {
+      continue;
+    }
+
+    if (i->GetChildren()) {
+      MarkFramesForDifferentAGR(aBuilder, i->GetChildren(), aAGR);
+    }
+
+    // TODO: We should be able to check the clipped bounds relative
+    // to the common AGR (of both the existing item and the invalidated
+    // frame) and determine if they can ever intersect.
+    if (i->GetAnimatedGeometryRoot() != aAGR) {
+      aBuilder->MarkFrameForDisplayIfVisible(i->Frame());
+    }
+  }
+}
 
 bool IsSameItem(nsDisplayItem* aFirst, nsDisplayItem* aSecond)
 {
@@ -3526,7 +3548,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
 
       // Recursively merge any child lists.
       // TODO: We may need to call UpdateBounds on any non-flattenable nsDisplayWrapLists
-      // here.
+      // here. Is there any other cached state that we need to update?
       // TODO: When an invalidation happens we only need to build items for the overflow area
       // up to the nearest stacking context, and then use MarkFramesForDisplay to make sure
       // we build the stacking context itself. This is similar to what we want to do for
@@ -3733,34 +3755,59 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
       builder.SetVisibleRect(dirtyRect);
 
+      bool merged = false;
       if ((aFlags & PaintFrameFlags::PAINT_WIDGET_LAYERS) &&
           aFrame->Properties().Get(nsIFrame::ModifiedFrameList())) {
         nsTArray<nsIFrame*>* modifiedFrames = aFrame->Properties().Get(nsIFrame::ModifiedFrameList());
 
+
+        AnimatedGeometryRoot* modifiedAGR = nullptr;
         nsRect modifiedDirty;
+        bool success = true;
         //printf_stderr("Dirty frames: ");
         for (nsIFrame* f : *modifiedFrames) {
           //printf_stderr("%p,", f);
           modifiedDirty.UnionRect(modifiedDirty, TransformFrameRectToAncestor(f,
                                                                               f->GetVisualOverflowRectRelativeToSelf(),
                                                                               aFrame));
+          // TODO: We really only want to know about AGRS that can be modified by the compositor (async scrolling
+          // and animated transforms) not all AGRS.
+          // There is almost certainly a faster way of doing this, probably can be combined with the ancestor
+          // walk for TransformFrameRectToAncestor.
+          AnimatedGeometryRoot* agr = builder.FindAnimatedGeometryRootFor(f);
+
+          // If we get changed frames from multiple AGRS, then just give up as it gets really complex to
+          // track which items would need to be marked in MarkFramesForDifferentAGR.
+          if (!modifiedAGR) {
+            modifiedAGR = agr;
+          } else if (modifiedAGR != agr) {
+            success = false;
+            break;
+          }
         }
-        modifiedFrames->Clear();
         //printf_stderr("\n");
+        modifiedFrames->Clear();
+
+        if (success) {
+          MarkFramesForDifferentAGR(&builder, &list, modifiedAGR);
         
-        builder.SetDirtyRect(modifiedDirty);
+          builder.SetDirtyRect(modifiedDirty);
 
-        nsDisplayList modifiedDL;
-        aFrame->BuildDisplayListForStackingContext(&builder, &modifiedDL);
-        //printf_stderr("Painting --- Modified list (dirty %d,%d,%d,%d):\n",
-        //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
-        //nsFrame::PrintDisplayList(&builder, modifiedDL);
+          nsDisplayList modifiedDL;
+          aFrame->BuildDisplayListForStackingContext(&builder, &modifiedDL);
+          //printf_stderr("Painting --- Modified list (dirty %d,%d,%d,%d):\n",
+          //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
+          //nsFrame::PrintDisplayList(&builder, modifiedDL);
 
-        builder.LeavePresShell(aFrame, &modifiedDL);
-        builder.EnterPresShell(aFrame);
+          builder.LeavePresShell(aFrame, &modifiedDL);
+          builder.EnterPresShell(aFrame);
 
-        MergeDisplayLists(&builder, &modifiedDL, &list, &list);
-      } else {
+          MergeDisplayLists(&builder, &modifiedDL, &list, &list);
+          merged = true;
+        }
+      }
+
+      if (!merged) {
         list.DeleteAll();
         builder.SetDirtyRect(dirtyRect);
         aFrame->BuildDisplayListForStackingContext(&builder, &list);

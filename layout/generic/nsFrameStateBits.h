@@ -272,6 +272,9 @@ FRAME_STATE_BIT(Generic, 55, NS_FRAME_OWNS_ANON_BOXES)
 
 FRAME_STATE_BIT(Generic, 56, NS_FRAME_BUILT_DISPLAY_LIST)
 
+// This is only set during painting
+FRAME_STATE_BIT(Generic, 57, NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO_IF_VISIBLE)
+
 // Set for all descendants of MathML sub/supscript elements (other than the
 // base frame) to indicate that the SSTY font feature should be used.
 FRAME_STATE_BIT(Generic, 58, NS_FRAME_MATHML_SCRIPT_DESCENDANT)

@@ -254,7 +254,7 @@ DisplayRows(nsDisplayListBuilder* aBuilder, nsFrame* aFrame,
   // the rows in |f|, but that's exactly what we're trying to avoid, so we
   // approximate it by checking it for |f|: if it's true for any row
   // in |f| then it's true for |f| itself.
-  nsIFrame* kid = aBuilder->ShouldDescendIntoFrame(f) ?
+  nsIFrame* kid = aBuilder->ShouldDescendIntoFrame(f, true) ?
     nullptr : f->GetFirstRowContaining(aBuilder->GetVisibleRect().y, &overflowAbove);
 
   if (kid) {

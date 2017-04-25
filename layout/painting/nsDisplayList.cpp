@@ -941,12 +941,29 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
                 "Check nsDisplayItem::TYPE_MAX should not overflow");
 }
 
-static void MarkFrameForDisplay(nsIFrame* aFrame, nsIFrame* aStopAtFrame) {
+void
+nsDisplayListBuilder::MarkFrameForDisplay(nsIFrame* aFrame, nsIFrame* aStopAtFrame) {
+  mFramesMarkedForDisplay.AppendElement(aFrame);
   for (nsIFrame* f = aFrame; f;
        f = nsLayoutUtils::GetParentOrPlaceholderFor(f)) {
     if (f->GetStateBits() & NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO)
       return;
     f->AddStateBits(NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO);
+    if (f == aStopAtFrame) {
+      // we've reached a frame that we know will be painted, so we can stop.
+      break;
+    }
+  }
+}
+
+void
+nsDisplayListBuilder::MarkFrameForDisplayIfVisible(nsIFrame* aFrame, nsIFrame* aStopAtFrame) {
+  mFramesMarkedForDisplay.AppendElement(aFrame);
+  for (nsIFrame* f = aFrame; f;
+       f = nsLayoutUtils::GetParentOrPlaceholderFor(f)) {
+    if (f->GetStateBits() & NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO_IF_VISIBLE)
+      return;
+    f->AddStateBits(NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO_IF_VISIBLE);
     if (f == aStopAtFrame) {
       // we've reached a frame that we know will be painted, so we can stop.
       break;
@@ -1093,10 +1110,12 @@ static void UnmarkFrameForDisplay(nsIFrame* aFrame) {
 
   for (nsIFrame* f = aFrame; f;
        f = nsLayoutUtils::GetParentOrPlaceholderFor(f)) {
-    if (!(f->GetStateBits() & NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO))
+    if (!(f->GetStateBits() & (NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO | NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO_IF_VISIBLE)))
       return;
-    f->RemoveStateBits(NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO);
+    f->RemoveStateBits(NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO |
+                       NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO_IF_VISIBLE);
   }
+  
 }
 
 nsDisplayListBuilder::~nsDisplayListBuilder() {
@@ -1192,7 +1211,6 @@ nsDisplayListBuilder::EnterPresShell(nsIFrame* aReferenceFrame,
   RefPtr<nsCaret> caret = state->mPresShell->GetCaret();
   state->mCaretFrame = caret->GetPaintGeometry(&state->mCaretRect);
   if (state->mCaretFrame) {
-    mFramesMarkedForDisplay.AppendElement(state->mCaretFrame);
     MarkFrameForDisplay(state->mCaretFrame, nullptr);
   }
 
@@ -1285,7 +1303,6 @@ nsDisplayListBuilder::MarkFramesForDisplayList(nsIFrame* aDirtyFrame,
         }
       }
     }
-    mFramesMarkedForDisplay.AppendElement(e);
     MarkOutOfFlowFrameForDisplay(aDirtyFrame, e);
   }
 
@@ -1327,7 +1344,6 @@ nsDisplayListBuilder::MarkPreserve3DFramesForDisplayList(nsIFrame* aDirtyFrame)
     for (; !childFrames.AtEnd(); childFrames.Next()) {
       nsIFrame *child = childFrames.get();
       if (child->Combines3DTransformWithAncestors()) {
-        mFramesMarkedForDisplay.AppendElement(child);
         MarkFrameForDisplay(child, aDirtyFrame);
       }
     }

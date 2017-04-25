@@ -679,6 +679,8 @@ public:
    */
   void MarkFramesForDisplayList(nsIFrame* aDirtyFrame,
                                 const nsFrameList& aFrames);
+  void MarkFrameForDisplay(nsIFrame* aFrame, nsIFrame* aStopAtFrame = nullptr);
+  void MarkFrameForDisplayIfVisible(nsIFrame* aFrame, nsIFrame* aStopAtFrame = nullptr);
   /**
    * Mark all child frames that Preserve3D() as needing display.
    * Because these frames include transforms set on their parent, dirty rects
@@ -693,9 +695,10 @@ public:
    * the display list, even though it doesn't intersect the dirty
    * rect, because it may have out-of-flows that do so.
    */
-  bool ShouldDescendIntoFrame(nsIFrame* aFrame) const {
+  bool ShouldDescendIntoFrame(nsIFrame* aFrame, bool aVisible) const {
     return
       (aFrame->GetStateBits() & NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO) ||
+      (aVisible && (aFrame->GetStateBits() & NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO_IF_VISIBLE)) ||
       GetIncludeAllOutOfFlows();
   }
 
@@ -1404,7 +1407,6 @@ public:
     mHitTestShouldStopAtFirstOpaque = aHitTestShouldStopAtFirstOpaque;
   }
 
-private:
   void MarkOutOfFlowFrameForDisplay(nsIFrame* aDirtyFrame, nsIFrame* aFrame);
 
   /**
@@ -1431,6 +1433,7 @@ private:
                                         AnimatedGeometryRoot* aParent = nullptr);
 
   nsDataHashtable<nsPtrHashKey<nsIFrame>, AnimatedGeometryRoot*> mFrameToAnimatedGeometryRootMap;
+private:
 
   /**
    * Add the current frame to the AGR budget if possible and remember
