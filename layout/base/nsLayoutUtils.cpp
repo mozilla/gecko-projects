@@ -3529,15 +3529,38 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   nsDisplayList merged;
   nsDisplayItem* old;
 
+  std::map<std::pair<nsIFrame*, uint32_t>, nsDisplayItem*> newListLookup;
+  std::map<std::pair<nsIFrame*, uint32_t>, nsDisplayItem*> oldListLookup;
+
+  for (nsDisplayItem* i = aNewList->GetBottom(); i != nullptr; i = i->GetAbove()) {
+    newListLookup[std::make_pair(i->Frame(), i->GetPerFrameKey())] = i;
+  }
+  
+  for (nsDisplayItem* i = aOldList->GetBottom(); i != nullptr; i = i->GetAbove()) {
+    oldListLookup[std::make_pair(i->Frame(), i->GetPerFrameKey())] = i;
+  }
+
   while (nsDisplayItem* i = aNewList->RemoveBottom()) {
     // If the new item has a matching counterpart in the old list, copy all items
     // up to that one into the merged list, but discard the repeat.
     // TODO: We need to detect invalidated items in the old list (belonging to deleted
     // frames, or just items that aren't needed any more) and skip over them.
-    if (FrameLayerBuilder::HasRetainedDataFor(i->Frame(), i->GetPerFrameKey())) {
+    if (oldListLookup[std::make_pair(i->Frame(), i->GetPerFrameKey())]) {
       while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
         if (old->CanBeRecycled()) {
-          merged.AppendToTop(old);
+
+          // If the old item is in the new list (but further forward), then do the sub-list merging
+          // now and delete us, and we'll add the new item when we get to it.
+          if (nsDisplayItem* newItem = newListLookup[std::make_pair(old->Frame(), old->GetPerFrameKey())]) {
+            if (old->GetChildren()) {
+              MOZ_ASSERT(newItem->GetChildren());
+              MergeDisplayLists(aBuilder, newItem->GetChildren(), old->GetChildren(), newItem->GetChildren());
+            }
+            oldListLookup.erase(std::make_pair(old->Frame(), old->GetPerFrameKey()));
+            old->~nsDisplayItem();
+          } else {
+            merged.AppendToTop(old);
+          }
         } else {
           // TODO: Is it going to be safe to call the dtor on a display item that belongs
           // to a deleted frame? Can we ensure that it is? Or do we need to make sure we
@@ -3789,7 +3812,9 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         modifiedFrames->Clear();
 
         if (success) {
-          MarkFramesForDifferentAGR(&builder, &list, modifiedAGR);
+          if (modifiedAGR) {
+            MarkFramesForDifferentAGR(&builder, &list, modifiedAGR);
+          }
         
           builder.SetDirtyRect(modifiedDirty);
 
@@ -3798,7 +3823,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           //printf_stderr("Painting --- Modified list (dirty %d,%d,%d,%d):\n",
           //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
           //nsFrame::PrintDisplayList(&builder, modifiedDL);
-
+          
           builder.LeavePresShell(aFrame, &modifiedDL);
           builder.EnterPresShell(aFrame);
 
