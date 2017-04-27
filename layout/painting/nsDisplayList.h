@@ -144,10 +144,13 @@ typedef mozilla::EnumSet<mozilla::gfx::CompositionOp> BlendModeSet;
  */
 struct AnimatedGeometryRoot
 {
-  AnimatedGeometryRoot(nsIFrame* aFrame, AnimatedGeometryRoot* aParent)
+  AnimatedGeometryRoot(nsIFrame* aFrame, AnimatedGeometryRoot* aParent, bool aIsAsync)
     : mFrame(aFrame)
     , mParentAGR(aParent)
-  {}
+    , mIsAsync(aIsAsync)
+  {
+    MOZ_ASSERT(mParentAGR || mIsAsync);
+  }
 
   operator nsIFrame*() { return mFrame; }
 
@@ -156,8 +159,17 @@ struct AnimatedGeometryRoot
   void* operator new(size_t aSize,
                      nsDisplayListBuilder* aBuilder);
 
+  AnimatedGeometryRoot* GetAsyncAGR() {
+    AnimatedGeometryRoot* agr = this;
+    while (!agr->mIsAsync) {
+      agr = agr->mParentAGR;
+    }
+    return agr;
+  }
+
   nsIFrame* mFrame;
   AnimatedGeometryRoot* mParentAGR;
+  bool mIsAsync;
 };
 
 namespace mozilla {
@@ -832,8 +844,9 @@ public:
               &aBuilder->mCurrentOffsetToReferenceFrame);
       }
       if (aBuilder->mCurrentFrame == aForChild->GetParent()) {
-        if (aBuilder->IsAnimatedGeometryRoot(aForChild)) {
-          aBuilder->mCurrentAGR = aBuilder->WrapAGRForFrame(aForChild, aBuilder->mCurrentAGR);
+        bool isAsync;
+        if (aBuilder->IsAnimatedGeometryRoot(aForChild, isAsync)) {
+          aBuilder->mCurrentAGR = aBuilder->WrapAGRForFrame(aForChild, isAsync, aBuilder->mCurrentAGR);
         }
       } else if (aForChild != aBuilder->mCurrentFrame) {
         aBuilder->mCurrentAGR = aBuilder->FindAnimatedGeometryRootFor(aForChild);
@@ -1413,13 +1426,13 @@ public:
    * Returns whether a frame acts as an animated geometry root, optionally
    * returning the next ancestor to check.
    */
-  bool IsAnimatedGeometryRoot(nsIFrame* aFrame, nsIFrame** aParent = nullptr);
+  bool IsAnimatedGeometryRoot(nsIFrame* aFrame, bool& aIsAsync, nsIFrame** aParent = nullptr);
 
   /**
    * Returns the nearest ancestor frame to aFrame that is considered to have
    * (or will have) animated geometry. This can return aFrame.
    */
-  nsIFrame* FindAnimatedGeometryRootFrameFor(nsIFrame* aFrame);
+  nsIFrame* FindAnimatedGeometryRootFrameFor(nsIFrame* aFrame, bool& aIsAsync);
 
   friend class nsDisplayCanvasBackgroundImage;
   friend class nsDisplayBackgroundImage;
@@ -1430,6 +1443,7 @@ public:
   AnimatedGeometryRoot* FindAnimatedGeometryRootFor(nsIFrame* aFrame);
 
   AnimatedGeometryRoot* WrapAGRForFrame(nsIFrame* aAnimatedGeometryRoot,
+                                        bool aIsAsync,
                                         AnimatedGeometryRoot* aParent = nullptr);
 
   nsDataHashtable<nsPtrHashKey<nsIFrame>, AnimatedGeometryRoot*> mFrameToAnimatedGeometryRootMap;

@@ -315,6 +315,8 @@ public:
    * expectation that scrolling is going to happen.
    */
   virtual bool IsScrollingActive(nsDisplayListBuilder* aBuilder) = 0;
+
+  virtual bool MayBeAsynchronouslyScrolled() = 0;
   /**
    * Returns true if the scrollframe is currently processing an async
    * or smooth scroll.

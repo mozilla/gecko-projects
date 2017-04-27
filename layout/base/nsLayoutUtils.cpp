@@ -3509,7 +3509,7 @@ void MarkFramesForDifferentAGR(nsDisplayListBuilder* aBuilder,
     // TODO: We should be able to check the clipped bounds relative
     // to the common AGR (of both the existing item and the invalidated
     // frame) and determine if they can ever intersect.
-    if (i->GetAnimatedGeometryRoot() != aAGR) {
+    if (i->GetAnimatedGeometryRoot()->GetAsyncAGR() != aAGR) {
       aBuilder->MarkFrameForDisplayIfVisible(i->Frame());
     }
   }
@@ -3793,11 +3793,9 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           modifiedDirty.UnionRect(modifiedDirty, TransformFrameRectToAncestor(f,
                                                                               f->GetVisualOverflowRectRelativeToSelf(),
                                                                               aFrame));
-          // TODO: We really only want to know about AGRS that can be modified by the compositor (async scrolling
-          // and animated transforms) not all AGRS.
-          // There is almost certainly a faster way of doing this, probably can be combined with the ancestor
+          // TODO: There is almost certainly a faster way of doing this, probably can be combined with the ancestor
           // walk for TransformFrameRectToAncestor.
-          AnimatedGeometryRoot* agr = builder.FindAnimatedGeometryRootFor(f);
+          AnimatedGeometryRoot* agr = builder.FindAnimatedGeometryRootFor(f)->GetAsyncAGR();
 
           // If we get changed frames from multiple AGRS, then just give up as it gets really complex to
           // track which items would need to be marked in MarkFramesForDifferentAGR.
