@@ -2,3 +2,4 @@
 == retained-dl-frame-deleted-1.html retained-dl-style-change-1-ref.html
 == retained-dl-frame-created-1.html retained-dl-style-change-1-ref.html
 == retained-dl-style-change-stacking-context-1.html retained-dl-style-change-stacking-context-1-ref.html
+skip-if(!asyncPan) == retained-dl-async-scrolled-1.html retained-dl-async-scrolled-1-ref.html
