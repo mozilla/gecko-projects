@@ -6355,6 +6355,7 @@ static void InvalidateRenderingObservers(nsIFrame* aFrame, bool aFrameChanged = 
       displayRoot->Properties().Set(nsIFrame::ModifiedFrameList(), modifiedFrames);
     }
     modifiedFrames->AppendElement(aFrame);
+    aFrame->SetFrameIsModified(true);
   }
 }
 

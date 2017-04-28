@@ -598,9 +598,13 @@ public:
     , mParent(nullptr)
     , mNextSibling(nullptr)
     , mPrevSibling(nullptr)
+    , mFrameIsModified(false)
   {
     mozilla::PodZero(&mOverflow);
   }
+
+  bool IsFrameModified() { return mFrameIsModified; }
+  void SetFrameIsModified(bool aFrameIsModified) { mFrameIsModified = aFrameIsModified; }
 
   nsPresContext* PresContext() const {
     return StyleContext()->PresContext();
@@ -3740,6 +3744,9 @@ protected:
   }
 
   nsFrameState     mState;
+
+  // TODO: Make this a frame state bit.
+  bool mFrameIsModified : 1;
 
   // When there is an overflow area only slightly larger than mRect,
   // we store a set of four 1-byte deltas from the edges of mRect

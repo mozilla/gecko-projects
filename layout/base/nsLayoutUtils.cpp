@@ -3515,6 +3515,18 @@ void MarkFramesForDifferentAGR(nsDisplayListBuilder* aBuilder,
   }
 }
 
+bool IsAnyAncestorModified(nsIFrame* aFrame)
+{
+  nsIFrame* f = aFrame;
+  while (f) {
+    if (f->IsFrameModified()) {
+      return true;
+    }
+    f = nsLayoutUtils::GetCrossDocParentFrame(f);
+  }
+  return false;
+}
+
 bool IsSameItem(nsDisplayItem* aFirst, nsDisplayItem* aSecond)
 {
   return aFirst->Frame() == aSecond->Frame() &&
@@ -3547,7 +3559,8 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
     // frames, or just items that aren't needed any more) and skip over them.
     if (oldListLookup[std::make_pair(i->Frame(), i->GetPerFrameKey())]) {
       while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
-        if (old->CanBeRecycled()) {
+        if (old->CanBeRecycled() &&
+            !IsAnyAncestorModified(old->Frame())) {
 
           // If the old item is in the new list (but further forward), then do the sub-list merging
           // now and delete us, and we'll add the new item when we get to it.
@@ -3589,7 +3602,8 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   }
   
   while ((old = aOldList->RemoveBottom())) {
-    if (old->CanBeRecycled()) {
+    if (old->CanBeRecycled() &&
+        !IsAnyAncestorModified(old->Frame())) {
       merged.AppendToTop(old);
     } else {
       old->~nsDisplayItem();
@@ -3807,7 +3821,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           }
         }
         //printf_stderr("\n");
-        modifiedFrames->Clear();
 
         if (success) {
           if (modifiedAGR) {
@@ -3828,6 +3841,13 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           MergeDisplayLists(&builder, &modifiedDL, &list, &list);
           merged = true;
         }
+
+        // TODO: Do we mark frames as modified during displaylist building? If
+        // we do this isn't gonna work.
+        for (nsIFrame* f : *modifiedFrames) {
+          f->SetFrameIsModified(false);
+        }
+        modifiedFrames->Clear();
       }
 
       if (!merged) {
