@@ -912,23 +912,6 @@ var Impl = {
     return ret;
   },
 
-  getAddonHistograms: function getAddonHistograms() {
-    let ahs = Telemetry.addonHistogramSnapshots;
-    let ret = {};
-
-    for (let addonName in ahs) {
-      let addonHistograms = ahs[addonName];
-      let packedHistograms = {};
-      for (let name in addonHistograms) {
-        packedHistograms[name] = this.packHistogram(addonHistograms[name]);
-      }
-      if (Object.keys(packedHistograms).length != 0)
-        ret[addonName] = packedHistograms;
-    }
-
-    return ret;
-  },
-
   getKeyedHistograms(subsession, clearSubsession) {
     let registered =
       Telemetry.registeredKeyedHistograms(this.getDatasetType(), []);
@@ -1335,12 +1318,6 @@ var Impl = {
       payloadObj.fileIOReports = protect(() => Telemetry.fileIOReports);
       payloadObj.lateWrites = protect(() => Telemetry.lateWrites);
 
-      // Add the addon histograms if they are present
-      let addonHistograms = protect(() => this.getAddonHistograms());
-      if (addonHistograms && Object.keys(addonHistograms).length > 0) {
-        payloadObj.addonHistograms = addonHistograms;
-      }
-
       payloadObj.addonDetails = protect(() => AddonManagerPrivate.getTelemetryDetails());
 
       let clearUIsession = !(reason == REASON_GATHER_PAYLOAD || reason == REASON_GATHER_SUBSESSION_PAYLOAD);
@@ -1526,7 +1503,7 @@ var Impl = {
   delayedInit() {
     this._log.trace("delayedInit");
 
-    this._delayedInitTask = (async function() {
+    this._delayedInitTask = (async () => {
       try {
         this._initialized = true;
 
@@ -1571,7 +1548,7 @@ var Impl = {
         this._delayedInitTask = null;
         throw e;
       }
-    }.bind(this))();
+    })();
 
     return this._delayedInitTask;
   },
@@ -1796,7 +1773,9 @@ var Impl = {
 
       // Only send the shutdown ping using the pingsender from the second
       // browsing session on, to mitigate issues with "bot" profiles (see bug 1354482).
-      let sendWithPingsender = Preferences.get(PREF_SHUTDOWN_PINGSENDER, true) &&
+      // Note: sending the "shutdown" ping using the pingsender is currently disabled
+      // due to a crash happening on OSX platforms. See bug 1357745 for context.
+      let sendWithPingsender = Preferences.get(PREF_SHUTDOWN_PINGSENDER, false) &&
                                !TelemetryReportingPolicy.isFirstRun();
 
       let options = {
@@ -2031,7 +2010,7 @@ var Impl = {
         this._initialized = false;
       };
 
-      return (async function() {
+      return (async () => {
         await this.saveShutdownPings();
 
         if (IS_UNIFIED_TELEMETRY) {
@@ -2039,7 +2018,7 @@ var Impl = {
         }
 
         reset();
-      }.bind(this))();
+      })();
     };
 
     // We can be in one the following states here:

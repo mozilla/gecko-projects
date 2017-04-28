@@ -138,9 +138,11 @@ public:
           gl::OriginPos::BottomLeft);
 
         RefPtr<VideoData> v = VideoData::CreateFromImage(
-          inputInfo.mDisplaySize, offset, presentationTimeUs, inputInfo.mDurationUs,
+          inputInfo.mDisplaySize, offset,
+          TimeUnit::FromMicroseconds(presentationTimeUs),
+          TimeUnit::FromMicroseconds(inputInfo.mDurationUs),
           img, !!(flags & MediaCodec::BUFFER_FLAG_SYNC_FRAME),
-          presentationTimeUs);
+          TimeUnit::FromMicroseconds(presentationTimeUs));
 
         v->SetListener(Move(releaseSample));
         mDecoder->UpdateOutputStatus(v);
@@ -223,8 +225,9 @@ public:
                               : &mConfig;
     MOZ_ASSERT(config);
 
-    InputInfo info(aSample->mDuration, config->mImage, config->mDisplay);
-    mInputInfos.Insert(aSample->mTime, info);
+    InputInfo info(
+      aSample->mDuration.ToMicroseconds(), config->mImage, config->mDisplay);
+    mInputInfos.Insert(aSample->mTime.ToMicroseconds(), info);
     return RemoteDataDecoder::Decode(aSample);
   }
 
@@ -342,8 +345,8 @@ private:
         aSample->WriteToByteBuffer(dest);
 
         RefPtr<AudioData> data = new AudioData(
-          0, presentationTimeUs,
-          FramesToUsecs(numFrames, mOutputSampleRate).value(), numFrames,
+          0, TimeUnit::FromMicroseconds(presentationTimeUs),
+          FramesToTimeUnit(numFrames, mOutputSampleRate), numFrames,
           Move(audio), mOutputChannels, mOutputSampleRate);
 
         mDecoder->UpdateOutputStatus(data);
@@ -535,7 +538,7 @@ RemoteDataDecoder::Decode(MediaRawData* aSample)
       return DecodePromise::CreateAndReject(
         MediaResult(NS_ERROR_OUT_OF_MEMORY, __func__), __func__);
     }
-    bufferInfo->Set(0, sample->Size(), sample->mTime, 0);
+    bufferInfo->Set(0, sample->Size(), sample->mTime.ToMicroseconds(), 0);
 
     mDrainStatus = DrainStatus::DRAINABLE;
     return mJavaDecoder->Input(bytes, bufferInfo, GetCryptoInfoFromSample(sample))

@@ -190,6 +190,8 @@ NS_NewChannel(nsIChannel           **outChannel,
               nsLoadFlags            aLoadFlags = nsIRequest::LOAD_NORMAL,
               nsIIOService          *aIoService = nullptr);
 
+nsresult NS_GetIsDocumentChannel(nsIChannel * aChannel, bool *aIsDocument);
+
 nsresult NS_MakeAbsoluteURI(nsACString       &result,
                             const nsACString &spec,
                             nsIURI           *baseURI);
@@ -922,6 +924,11 @@ bool NS_IsReasonableHTTPHeaderValue(const nsACString &aValue);
  * 2.2.
  */
 bool NS_IsValidHTTPToken(const nsACString &aToken);
+
+/**
+ * Strip the leading or trailing HTTP whitespace per fetch spec section 2.2.
+ */
+void NS_TrimHTTPWhitespace(const nsACString& aSource, nsACString& aDest);
 
 /**
  * Return true if the given request must be upgraded to HTTPS.

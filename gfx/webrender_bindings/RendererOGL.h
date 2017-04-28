@@ -42,7 +42,6 @@ class RendererOGL
 {
   friend WrExternalImage LockExternalImage(void* aObj, WrExternalImageId aId);
   friend void UnlockExternalImage(void* aObj, WrExternalImageId aId);
-  friend void ReleaseExternalImage(void* aObj, WrExternalImageId aId);
 
 public:
   WrExternalImageHandler GetExternalImageHandler();
@@ -80,7 +79,7 @@ public:
 
   WrRenderedEpochs* FlushRenderedEpochs();
 
-  RenderTextureHost* GetRenderTexture(uint64_t aExternalImageId);
+  RenderTextureHost* GetRenderTexture(WrExternalImageId aExternalImageId);
 
   WrRenderer* GetWrRenderer() { return mWrRenderer; }
 

@@ -13,6 +13,7 @@ use std::borrow::ToOwned;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
+use style::context::QuirksMode;
 use style::error_reporting::ParseErrorReporter;
 use style::keyframes::{Keyframe, KeyframeSelector, KeyframePercentage};
 use style::media_queries::MediaList;
@@ -23,6 +24,7 @@ use style::properties::longhands::animation_play_state;
 use style::shared_lock::SharedRwLock;
 use style::stylesheets::{Origin, Namespaces};
 use style::stylesheets::{Stylesheet, NamespaceRule, CssRule, CssRules, StyleRule, KeyframesRule};
+use style::values::{KeyframesName, CustomIdent};
 use style::values::specified::{LengthOrPercentageOrAuto, Percentage};
 
 pub fn block_from<I>(iterable: I) -> PropertyDeclarationBlock
@@ -65,7 +67,7 @@ fn test_parse_stylesheet() {
     let lock = SharedRwLock::new();
     let media = Arc::new(lock.wrap(MediaList::empty()));
     let stylesheet = Stylesheet::from_str(css, url.clone(), Origin::UserAgent, media, lock,
-                                          None, &CSSErrorReporterTest, 0u64);
+                                          None, &CSSErrorReporterTest, QuirksMode::NoQuirks, 0u64);
     let mut namespaces = Namespaces::default();
     namespaces.default = Some(ns!(html));
     let expected = Stylesheet {
@@ -76,6 +78,7 @@ fn test_parse_stylesheet() {
         url_data: url,
         dirty_on_viewport_size_change: AtomicBool::new(false),
         disabled: AtomicBool::new(false),
+        quirks_mode: QuirksMode::NoQuirks,
         rules: CssRules::new(vec![
             CssRule::Namespace(Arc::new(stylesheet.shared_lock.wrap(NamespaceRule {
                 prefix: None,
@@ -84,27 +87,24 @@ fn test_parse_stylesheet() {
             CssRule::Style(Arc::new(stylesheet.shared_lock.wrap(StyleRule {
                 selectors: SelectorList(vec![
                     Selector {
-                        complex_selector: Arc::new(ComplexSelector {
-                            compound_selector: vec![
-                                SimpleSelector::Namespace(Namespace {
+                        inner: SelectorInner::from_vec(vec![
+                            Component::Namespace(Namespace {
+                                prefix: None,
+                                url: NsAtom::from("http://www.w3.org/1999/xhtml")
+                            }),
+                            Component::LocalName(LocalName {
+                                name: local_name!("input"),
+                                lower_name: local_name!("input"),
+                            }),
+                            Component::AttrEqual(AttrSelector {
+                                name: local_name!("type"),
+                                lower_name: local_name!("type"),
+                                namespace: NamespaceConstraint::Specific(Namespace {
                                     prefix: None,
-                                    url: NsAtom::from("http://www.w3.org/1999/xhtml")
+                                    url: ns!()
                                 }),
-                                SimpleSelector::LocalName(LocalName {
-                                    name: local_name!("input"),
-                                    lower_name: local_name!("input"),
-                                }),
-                                SimpleSelector::AttrEqual(AttrSelector {
-                                    name: local_name!("type"),
-                                    lower_name: local_name!("type"),
-                                    namespace: NamespaceConstraint::Specific(Namespace {
-                                        prefix: None,
-                                        url: ns!()
-                                    }),
-                                }, "hidden".to_owned(), CaseSensitivity::CaseInsensitive)
-                            ],
-                            next: None,
-                        }),
+                            }, "hidden".to_owned(), CaseSensitivity::CaseInsensitive)
+                        ]),
                         pseudo_element: None,
                         specificity: (0 << 20) + (1 << 10) + (1 << 0),
                     },
@@ -120,36 +120,30 @@ fn test_parse_stylesheet() {
             CssRule::Style(Arc::new(stylesheet.shared_lock.wrap(StyleRule {
                 selectors: SelectorList(vec![
                     Selector {
-                        complex_selector: Arc::new(ComplexSelector {
-                            compound_selector: vec![
-                                SimpleSelector::Namespace(Namespace {
-                                    prefix: None,
-                                    url: NsAtom::from("http://www.w3.org/1999/xhtml")
-                                }),
-                                SimpleSelector::LocalName(LocalName {
-                                    name: local_name!("html"),
-                                    lower_name: local_name!("html"),
-                                }),
-                            ],
-                            next: None,
-                        }),
+                        inner: SelectorInner::from_vec(vec![
+                            Component::Namespace(Namespace {
+                                prefix: None,
+                                url: NsAtom::from("http://www.w3.org/1999/xhtml")
+                            }),
+                            Component::LocalName(LocalName {
+                                name: local_name!("html"),
+                                lower_name: local_name!("html"),
+                            }),
+                        ]),
                         pseudo_element: None,
                         specificity: (0 << 20) + (0 << 10) + (1 << 0),
                     },
                     Selector {
-                        complex_selector: Arc::new(ComplexSelector {
-                            compound_selector: vec![
-                                SimpleSelector::Namespace(Namespace {
-                                    prefix: None,
-                                    url: NsAtom::from("http://www.w3.org/1999/xhtml")
-                                }),
-                                SimpleSelector::LocalName(LocalName {
-                                    name: local_name!("body"),
-                                    lower_name: local_name!("body"),
-                                }),
-                            ],
-                            next: None,
-                        }),
+                        inner: SelectorInner::from_vec(vec![
+                            Component::Namespace(Namespace {
+                                prefix: None,
+                                url: NsAtom::from("http://www.w3.org/1999/xhtml")
+                            }),
+                            Component::LocalName(LocalName {
+                                name: local_name!("body"),
+                                lower_name: local_name!("body"),
+                            }),
+                        ]),
                         pseudo_element: None,
                         specificity: (0 << 20) + (0 << 10) + (1 << 0),
                     },
@@ -162,25 +156,19 @@ fn test_parse_stylesheet() {
             CssRule::Style(Arc::new(stylesheet.shared_lock.wrap(StyleRule {
                 selectors: SelectorList(vec![
                     Selector {
-                        complex_selector: Arc::new(ComplexSelector {
-                            compound_selector: vec![
-                                SimpleSelector::Namespace(Namespace {
-                                    prefix: None,
-                                    url: NsAtom::from("http://www.w3.org/1999/xhtml")
-                                }),
-                                SimpleSelector::Class(Atom::from("ok")),
-                            ],
-                            next: Some((Arc::new(ComplexSelector {
-                                compound_selector: vec![
-                                    SimpleSelector::Namespace(Namespace {
-                                        prefix: None,
-                                        url: NsAtom::from("http://www.w3.org/1999/xhtml")
-                                    }),
-                                    SimpleSelector::ID(Atom::from("d1")),
-                                ],
-                                next: None,
-                            }), Combinator::Child)),
-                        }),
+                        inner: SelectorInner::from_vec(vec![
+                            Component::Namespace(Namespace {
+                                prefix: None,
+                                url: NsAtom::from("http://www.w3.org/1999/xhtml")
+                            }),
+                            Component::ID(Atom::from("d1")),
+                            Component::Combinator(Combinator::Child),
+                            Component::Namespace(Namespace {
+                                prefix: None,
+                                url: NsAtom::from("http://www.w3.org/1999/xhtml")
+                            }),
+                            Component::Class(Atom::from("ok")),
+                        ]),
                         pseudo_element: None,
                         specificity: (1 << 20) + (1 << 10) + (0 << 0),
                     },
@@ -236,7 +224,7 @@ fn test_parse_stylesheet() {
                 ]))),
             }))),
             CssRule::Keyframes(Arc::new(stylesheet.shared_lock.wrap(KeyframesRule {
-                name: "foo".into(),
+                name: KeyframesName::Ident(CustomIdent("foo".into())),
                 keyframes: vec![
                     Arc::new(stylesheet.shared_lock.wrap(Keyframe {
                         selector: KeyframeSelector::new_for_unit_testing(
@@ -260,7 +248,8 @@ fn test_parse_stylesheet() {
                              Importance::Normal),
                         ]))),
                     })),
-                ]
+                ],
+                vendor_prefix: None,
             })))
 
         ], &stylesheet.shared_lock),
@@ -329,7 +318,7 @@ fn test_report_error_stylesheet() {
     let lock = SharedRwLock::new();
     let media = Arc::new(lock.wrap(MediaList::empty()));
     Stylesheet::from_str(css, url.clone(), Origin::UserAgent, media, lock,
-                         None, &error_reporter, 5u64);
+                         None, &error_reporter, QuirksMode::NoQuirks, 5u64);
 
     let mut errors = errors.lock().unwrap();
 

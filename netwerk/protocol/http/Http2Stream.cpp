@@ -75,7 +75,7 @@ Http2Stream::Http2Stream(nsAHttpTransaction *httpTransaction,
   , mIsTunnel(false)
   , mPlainTextTunnel(false)
 {
-  MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+  MOZ_ASSERT(OnSocketThread(), "not on socket thread");
 
   LOG3(("Http2Stream::Http2Stream %p", this));
 
@@ -121,7 +121,7 @@ Http2Stream::ReadSegments(nsAHttpSegmentReader *reader,
   LOG3(("Http2Stream %p ReadSegments reader=%p count=%d state=%x",
         this, reader, count, mUpstreamState));
 
-  MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+  MOZ_ASSERT(OnSocketThread(), "not on socket thread");
 
   nsresult rv = NS_ERROR_UNEXPECTED;
   mRequestBlockedOnRead = 0;
@@ -288,7 +288,7 @@ Http2Stream::WriteSegments(nsAHttpSegmentWriter *writer,
                            uint32_t count,
                            uint32_t *countWritten)
 {
-  MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+  MOZ_ASSERT(OnSocketThread(), "not on socket thread");
   MOZ_ASSERT(!mSegmentWriter, "segment writer in progress");
 
   LOG3(("Http2Stream::WriteSegments %p count=%d state=%x",
@@ -390,7 +390,7 @@ Http2Stream::ParseHttpRequestHeaders(const char *buf,
   // Returns NS_OK even if the headers are incomplete
   // set mRequestHeadersDone flag if they are complete
 
-  MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+  MOZ_ASSERT(OnSocketThread(), "not on socket thread");
   MOZ_ASSERT(mUpstreamState == GENERATING_HEADERS);
   MOZ_ASSERT(!mRequestHeadersDone);
 
@@ -433,7 +433,8 @@ Http2Stream::ParseHttpRequestHeaders(const char *buf,
   head->RequestURI(requestURI);
 
   mozilla::OriginAttributes originAttributes;
-  mSocketTransport->GetOriginAttributes(&originAttributes),
+  mSocketTransport->GetOriginAttributes(&originAttributes);
+
   CreatePushHashKey(nsDependentCString(head->IsHTTPS() ? "https" : "http"),
                     authorityHeader, originAttributes, mSession->Serial(),
                     requestURI,
@@ -973,7 +974,7 @@ Http2Stream::GenerateDataFrameHeader(uint32_t dataLength, bool lastFrame)
   LOG3(("Http2Stream::GenerateDataFrameHeader %p len=%d last=%d",
         this, dataLength, lastFrame));
 
-  MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+  MOZ_ASSERT(OnSocketThread(), "not on socket thread");
   MOZ_ASSERT(!mTxInlineFrameUsed, "inline frame not empty");
   MOZ_ASSERT(!mTxStreamFrameSize, "stream frame not empty");
 
@@ -1305,7 +1306,7 @@ Http2Stream::OnReadSegment(const char *buf,
   LOG3(("Http2Stream::OnReadSegment %p count=%d state=%x",
         this, count, mUpstreamState));
 
-  MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+  MOZ_ASSERT(OnSocketThread(), "not on socket thread");
   MOZ_ASSERT(mSegmentReader, "OnReadSegment with null mSegmentReader");
 
   nsresult rv = NS_ERROR_UNEXPECTED;
@@ -1450,7 +1451,7 @@ Http2Stream::OnWriteSegment(char *buf,
   LOG3(("Http2Stream::OnWriteSegment %p count=%d state=%x 0x%X\n",
         this, count, mUpstreamState, mStreamID));
 
-  MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+  MOZ_ASSERT(OnSocketThread(), "not on socket thread");
   MOZ_ASSERT(mSegmentWriter);
 
   if (mPushSource) {
@@ -1484,7 +1485,7 @@ Http2Stream::OnWriteSegment(char *buf,
 void
 Http2Stream::ClearTransactionsBlockedOnTunnel()
 {
-  MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+  MOZ_ASSERT(OnSocketThread(), "not on socket thread");
 
   if (!mIsTunnel) {
     return;
@@ -1550,7 +1551,6 @@ Http2Stream::Finish0RTT(bool aRestart, bool aAlpnChanged)
   }
   return rv;
 }
-
 
 } // namespace net
 } // namespace mozilla

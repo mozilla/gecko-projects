@@ -670,6 +670,11 @@ with modules["DOM"]:
     errors["NS_ERROR_DOM_INVALID_STATE_XHR_CHUNKED_RESPONSETYPES_UNSUPPORTED_FOR_SYNC"] = FAILURE(1024)
     errors["NS_ERROR_DOM_INVALID_ACCESS_XHR_TIMEOUT_AND_RESPONSETYPE_UNSUPPORTED_FOR_SYNC"] = FAILURE(1025)
 
+    # When manipulating the bytecode cache with the JS API, some transcoding
+    # errors, such as a different bytecode format can cause failures of the
+    # decoding process.
+    errors["NS_ERROR_DOM_JS_DECODING_ERROR"] = FAILURE(1026)
+
     # May be used to indicate when e.g. setting a property value didn't
     # actually change the value, like for obj.foo = "bar"; obj.foo = "bar";
     # the second assignment throws NS_SUCCESS_DOM_NO_OPERATION.
@@ -1059,6 +1064,7 @@ with modules["DOM_PUSH"]:
     errors["NS_ERROR_DOM_PUSH_SERVICE_UNREACHABLE"] = FAILURE(4)
     errors["NS_ERROR_DOM_PUSH_INVALID_KEY_ERR"] = FAILURE(5)
     errors["NS_ERROR_DOM_PUSH_MISMATCHED_KEY_ERR"] = FAILURE(6)
+    errors["NS_ERROR_DOM_PUSH_GCM_DISABLED"] = FAILURE(7)
 
 
 # =======================================================================

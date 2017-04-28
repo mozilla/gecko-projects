@@ -51,10 +51,6 @@
 #include "nsFrameState.h"
 #include "Units.h"
 
-#ifdef MOZ_B2G
-#include "nsIHardwareKeyHandler.h"
-#endif
-
 class nsDocShell;
 class nsIDocument;
 class nsIFrame;
@@ -552,11 +548,6 @@ public:
    * in the new frame tree.
    */
   virtual void CreateFramesFor(nsIContent* aContent) = 0;
-
-  /**
-   * Recreates the frames for a node
-   */
-  virtual nsresult RecreateFramesFor(nsIContent* aContent) = 0;
 
   void PostRecreateFramesFor(mozilla::dom::Element* aElement);
   void RestyleForAnimation(mozilla::dom::Element* aElement,

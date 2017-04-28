@@ -696,6 +696,17 @@ Layer::GetLocalTransformTyped()
 }
 
 bool
+Layer::HasOpacityAnimation() const
+{
+  for (uint32_t i = 0; i < mAnimations.Length(); i++) {
+    if (mAnimations[i].property() == eCSSProperty_opacity) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool
 Layer::HasTransformAnimation() const
 {
   for (uint32_t i = 0; i < mAnimations.Length(); i++) {
@@ -1925,19 +1936,19 @@ DumpTransform(layerscope::LayersPacket::Layer::Matrix* aLayerMatrix, const Matri
     Matrix m = aMatrix.As2D();
     aLayerMatrix->set_isid(m.IsIdentity());
     if (!m.IsIdentity()) {
-      aLayerMatrix->add_m(m._11), aLayerMatrix->add_m(m._12);
-      aLayerMatrix->add_m(m._21), aLayerMatrix->add_m(m._22);
-      aLayerMatrix->add_m(m._31), aLayerMatrix->add_m(m._32);
+      aLayerMatrix->add_m(m._11); aLayerMatrix->add_m(m._12);
+      aLayerMatrix->add_m(m._21); aLayerMatrix->add_m(m._22);
+      aLayerMatrix->add_m(m._31); aLayerMatrix->add_m(m._32);
     }
   } else {
-    aLayerMatrix->add_m(aMatrix._11), aLayerMatrix->add_m(aMatrix._12);
-    aLayerMatrix->add_m(aMatrix._13), aLayerMatrix->add_m(aMatrix._14);
-    aLayerMatrix->add_m(aMatrix._21), aLayerMatrix->add_m(aMatrix._22);
-    aLayerMatrix->add_m(aMatrix._23), aLayerMatrix->add_m(aMatrix._24);
-    aLayerMatrix->add_m(aMatrix._31), aLayerMatrix->add_m(aMatrix._32);
-    aLayerMatrix->add_m(aMatrix._33), aLayerMatrix->add_m(aMatrix._34);
-    aLayerMatrix->add_m(aMatrix._41), aLayerMatrix->add_m(aMatrix._42);
-    aLayerMatrix->add_m(aMatrix._43), aLayerMatrix->add_m(aMatrix._44);
+    aLayerMatrix->add_m(aMatrix._11); aLayerMatrix->add_m(aMatrix._12);
+    aLayerMatrix->add_m(aMatrix._13); aLayerMatrix->add_m(aMatrix._14);
+    aLayerMatrix->add_m(aMatrix._21); aLayerMatrix->add_m(aMatrix._22);
+    aLayerMatrix->add_m(aMatrix._23); aLayerMatrix->add_m(aMatrix._24);
+    aLayerMatrix->add_m(aMatrix._31); aLayerMatrix->add_m(aMatrix._32);
+    aLayerMatrix->add_m(aMatrix._33); aLayerMatrix->add_m(aMatrix._34);
+    aLayerMatrix->add_m(aMatrix._41); aLayerMatrix->add_m(aMatrix._42);
+    aLayerMatrix->add_m(aMatrix._43); aLayerMatrix->add_m(aMatrix._44);
   }
 }
 

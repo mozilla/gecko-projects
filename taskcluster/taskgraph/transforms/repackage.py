@@ -9,7 +9,6 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import validate_schema, Schema
-# from taskgraph.util.scriptworker import get_signing_cert_scope
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
@@ -25,16 +24,16 @@ taskref_or_string = Any(
     {Required('task-reference'): basestring})
 
 packaging_description_schema = Schema({
-    # the dependant task (object) for this  job, used to inform signing.
+    # the dependant task (object) for this  job, used to inform repackaging.
     Required('dependent-task'): object,
 
-    # depname is used in taskref's to identify the taskID of the unsigned things
+    # depname is used in taskref's to identify the taskID of the signed things
     Required('depname', default='build'): basestring,
 
-    # unique label to describe this signing task, defaults to {dep.label}-signing
+    # unique label to describe this repackaging task
     Optional('label'): basestring,
 
-    # treeherder is allowed here to override any defaults we use for signing.  See
+    # treeherder is allowed here to override any defaults we use for repackaging.  See
     # taskcluster/taskgraph/transforms/task.py for the schema details, and the
     # below transforms for defaults of various values.
     Optional('treeherder'): task_description_schema['treeherder'],
@@ -50,25 +49,6 @@ packaging_description_schema = Schema({
 
 })
 
-
-# comment out adding routes until talking to mshal
-# @transforms.add
-# def add_repackage_routes(config, jobs):
-#    """Add routes corresponding to the routes of the build task
-#       this corresponds to, with .repackage inserted, for all gecko.v2 routes"""
-#
-#    for job in jobs:
-#        dep_job = job['dependent-task']
-#
-#        job['routes'] = []
-#        for dep_route in dep_job.task.get('routes', []):
-#            if not dep_route.startswith('index.gecko.v2'):
-#                continue
-#            branch = dep_route.split(".")[3]
-#            rest = ".".join(dep_route.split(".")[5:])
-#            job['routes'].append(
-#                'index.gecko.v2.{}.repackage-nightly.{}'.format(branch, rest))
-#        yield job
 
 @transforms.add
 def validate(config, jobs):

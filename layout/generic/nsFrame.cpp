@@ -5071,7 +5071,7 @@ nsFrame::ComputeSize(nsRenderingContext* aRenderingContext,
       ComputeISizeValue(aRenderingContext, aCBSize.ISize(aWM),
                         boxSizingAdjust.ISize(aWM), boxSizingToMarginEdgeISize,
                         minISizeCoord, aFlags);
-  } else if (MOZ_UNLIKELY(isGridItem)) {
+  } else if (MOZ_UNLIKELY(aFlags & eIApplyAutoMinSize)) {
     // This implements "Implied Minimum Size of Grid Items".
     // https://drafts.csswg.org/css-grid/#min-size-auto
     minISize = std::min(maxISize, GetMinISize(aRenderingContext));
@@ -6098,9 +6098,9 @@ nsIFrame::GetOffsetToCrossDoc(const nsIFrame* aOther, const int32_t aAPD) const
   return offset;
 }
 
-nsIntRect nsIFrame::GetScreenRect() const
+CSSIntRect nsIFrame::GetScreenRect() const
 {
-  return GetScreenRectInAppUnits().ToNearestPixels(PresContext()->AppUnitsPerCSSPixel());
+  return CSSIntRect::FromAppUnitsToNearest(GetScreenRectInAppUnits());
 }
 
 nsRect nsIFrame::GetScreenRectInAppUnits() const
@@ -7069,6 +7069,11 @@ nsIFrame::ListGeneric(nsACString& aTo, const char* aPrefix, uint32_t aFlags) con
   }
   if (0 != mState) {
     aTo += nsPrintfCString(" [state=%016llx]", (unsigned long long)mState);
+  }
+  if (Properties().Has(BidiDataProperty())) {
+    FrameBidiData bidi = GetBidiData();
+    aTo += nsPrintfCString(" bidi(%d,%d,%d)", bidi.baseLevel,
+                           bidi.embeddingLevel, bidi.precedingControl);
   }
   if (IsTransformed()) {
     aTo += nsPrintfCString(" transformed");
@@ -10365,19 +10370,16 @@ nsIFrame::IsPseudoStackingContextFromStyle() {
 Element*
 nsIFrame::GetPseudoElement(CSSPseudoElementType aType)
 {
-  nsIFrame* frame = nullptr;
-
-  if (aType == CSSPseudoElementType::before) {
-    frame = nsLayoutUtils::GetBeforeFrame(this);
-  } else if (aType == CSSPseudoElementType::after) {
-    frame = nsLayoutUtils::GetAfterFrame(this);
+  if (!mContent) {
+    return nullptr;
   }
 
-  if (frame) {
-    nsIContent* content = frame->GetContent();
-    if (content->IsElement()) {
-      return content->AsElement();
-    }
+  if (aType == CSSPseudoElementType::before) {
+    return nsLayoutUtils::GetBeforePseudo(mContent);
+  }
+
+  if (aType == CSSPseudoElementType::after) {
+    return nsLayoutUtils::GetAfterPseudo(mContent);
   }
 
   return nullptr;

@@ -795,19 +795,24 @@ or run without that action (ie: --no-{action})"
 
         buildid = None
         if c.get("is_automation"):
-            if self.buildbot_config['properties'].get('buildid'):
-                self.info("Determining buildid from buildbot properties")
-                buildid = self.buildbot_config['properties']['buildid'].encode(
-                    'ascii', 'replace'
-                )
+            if self.buildbot_config.get('properties'):
+                # We're on buildbot
+                if self.buildbot_config.get('properties').get('buildid'):
+                    # Try may not provide a buildid. This means, it's gonna be generated
+                    # below.
+                    self.info("Determining buildid from buildbot properties")
+                    buildid = self.buildbot_config['properties']['buildid'].encode(
+                        'ascii', 'replace'
+                    )
             else:
-                # for taskcluster, there are no buildbot properties, and we must pass
+                # We're on taskcluster.
+                # In this case, there are no buildbot properties, and we must pass
                 # MOZ_BUILD_DATE into mozharness as an environment variable, only
                 # to have it pass the same value out with the same name.
                 try:
                     buildid = os.environ['MOZ_BUILD_DATE']
                 except KeyError:
-                    return self.fatal(
+                    self.fatal(
                         "MOZ_BUILD_DATE must be provided as an environment var on Taskcluster"
                     )
 
@@ -1890,6 +1895,46 @@ or run without that action (ie: --no-{action})"
 
         return data
 
+
+    def _load_sccache_stats(self):
+        stats_file = os.path.join(
+            self.query_abs_dirs()['abs_obj_dir'], 'sccache-stats.json'
+        )
+        if not os.path.exists(stats_file):
+            self.info('%s does not exist; not loading sccache stats' % stats_file)
+            return
+
+        with open(stats_file, 'rb') as fh:
+            stats = json.load(fh)
+
+        total = stats['stats']['requests_executed']
+        hits = stats['stats']['cache_hits']
+        if total > 0:
+            hits /= float(total)
+
+        yield {
+            'name': 'sccache hit rate',
+            'value': hits,
+            'extraOptions': self.perfherder_resource_options(),
+            'subtests': [],
+        }
+
+        yield {
+            'name': 'sccache cache_write_errors',
+            'value': stats['stats']['cache_write_errors'],
+            'extraOptions': self.perfherder_resource_options(),
+            'alertThreshold': 50.0,
+            'subtests': [],
+        }
+
+        yield {
+            'name': 'sccache requests_not_cacheable',
+            'value': stats['stats']['requests_not_cacheable'],
+            'extraOptions': self.perfherder_resource_options(),
+            'alertThreshold': 50.0,
+            'subtests': [],
+        }
+
     def get_firefox_version(self):
         versionFilePath = os.path.join(
             self.query_abs_dirs()['abs_src_dir'], 'browser/config/version.txt')
@@ -1993,17 +2038,27 @@ or run without that action (ie: --no-{action})"
             },
             "suites": [],
         }
-        if installer_size or size_measurements:
-            perfherder_data["suites"].append({
-                "name": "installer size",
-                "value": installer_size,
-                "alertThreshold": 0.25,
-                "subtests": size_measurements
-            })
+        if (installer_size or size_measurements) and not c.get('debug_build'):
+            if installer.endswith('.apk'): # Android
+                perfherder_data["suites"].append({
+                    "name": "installer size",
+                    "value": installer_size,
+                    "alertChangeType": "absolute",
+                    "alertThreshold": (200 * 1024),
+                    "subtests": size_measurements
+                })
+            else:
+                perfherder_data["suites"].append({
+                    "name": "installer size",
+                    "value": installer_size,
+                    "alertThreshold": 1.0,
+                    "subtests": size_measurements
+                })
 
         build_metrics = self._load_build_resources()
         if build_metrics:
             perfherder_data['suites'].append(build_metrics)
+        perfherder_data['suites'].extend(self._load_sccache_stats())
 
         if self.query_is_nightly():
             for suite in perfherder_data['suites']:

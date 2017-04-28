@@ -122,7 +122,7 @@
 #include "nsFontMetrics.h"
 #include "Units.h"
 #include "CanvasUtils.h"
-#include "mozilla/CycleCollectedJSContext.h"
+#include "mozilla/CycleCollectedJSRuntime.h"
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
 #include "mozilla/layers/CanvasClient.h"
@@ -1799,7 +1799,7 @@ CanvasRenderingContext2D::RegisterAllocation()
 
   JSObject* wrapper = GetWrapperPreserveColor();
   if (wrapper) {
-    CycleCollectedJSContext::Get()->
+    CycleCollectedJSRuntime::Get()->
       AddZoneWaitingForGC(JS::GetObjectZone(wrapper));
   }
 }
@@ -3801,9 +3801,8 @@ void
 CanvasRenderingContext2D::EnsureWritablePath()
 {
   EnsureTarget();
-  if (!IsTargetValid()) {
-    return;
-  }
+  // NOTE: IsTargetValid() may be false here (mTarget == sErrorTarget) but we
+  // go ahead and create a path anyway since callers depend on that.
 
   if (mDSPathBuilder) {
     return;
@@ -5463,12 +5462,12 @@ CanvasRenderingContext2D::DrawDirectlyToCanvas(
   uint32_t modifiedFlags = aImage.mDrawingFlags | imgIContainer::FLAG_CLAMP;
 
   CSSIntSize sz(scaledImageSize.width, scaledImageSize.height); // XXX hmm is scaledImageSize really in CSS pixels?
-  SVGImageContext svgContext(Some(sz), Nothing(), CurrentState().globalAlpha);
+  SVGImageContext svgContext(Some(sz));
 
   auto result = aImage.mImgContainer->
     Draw(context, scaledImageSize,
          ImageRegion::Create(gfxRect(aSrc.x, aSrc.y, aSrc.width, aSrc.height)),
-         aImage.mWhichFrame, SamplingFilter::GOOD, Some(svgContext), modifiedFlags, 1.0);
+         aImage.mWhichFrame, SamplingFilter::GOOD, Some(svgContext), modifiedFlags, CurrentState().globalAlpha);
 
   if (result != DrawResult::SUCCESS) {
     NS_WARNING("imgIContainer::Draw failed");
@@ -5580,15 +5579,18 @@ CanvasRenderingContext2D::DrawWindow(nsGlobalWindow& aWindow, double aX,
     return;
   }
 
+  // Flush layout updates
+  if (!(aFlags & nsIDOMCanvasRenderingContext2D::DRAWWINDOW_DO_NOT_FLUSH)) {
+    nsContentUtils::FlushLayoutForTree(aWindow.AsInner()->GetOuterWindow());
+  }
+
   CompositionOp op = UsedOperation();
   bool discardContent = GlobalAlpha() == 1.0f
     && (op == CompositionOp::OP_OVER || op == CompositionOp::OP_SOURCE);
   const gfx::Rect drawRect(aX, aY, aW, aH);
   EnsureTarget(discardContent ? &drawRect : nullptr);
-
-  // Flush layout updates
-  if (!(aFlags & nsIDOMCanvasRenderingContext2D::DRAWWINDOW_DO_NOT_FLUSH)) {
-    nsContentUtils::FlushLayoutForTree(aWindow.AsInner()->GetOuterWindow());
+  if (!IsTargetValid()) {
+    return;
   }
 
   RefPtr<nsPresContext> presContext;

@@ -91,8 +91,14 @@ function test() {
       );
     });
 
-    monitor.panelWin.once(EVENTS.RECEIVED_REQUEST_HEADERS, () => {
+    monitor.panelWin.once(EVENTS.RECEIVED_REQUEST_HEADERS, async () => {
+      await waitUntil(() => {
+        let requestItem = getSortedRequests(gStore.getState()).get(0);
+        return requestItem.requestHeaders;
+      });
+
       let requestItem = getSortedRequests(gStore.getState()).get(0);
+
       ok(requestItem.requestHeaders,
         "There should be a requestHeaders data available.");
       is(requestItem.requestHeaders.headers.length, 10,
@@ -111,7 +117,12 @@ function test() {
       );
     });
 
-    monitor.panelWin.once(EVENTS.RECEIVED_REQUEST_COOKIES, () => {
+    monitor.panelWin.once(EVENTS.RECEIVED_REQUEST_COOKIES, async () => {
+      await waitUntil(() => {
+        let requestItem = getSortedRequests(gStore.getState()).get(0);
+        return requestItem.requestCookies;
+      });
+
       let requestItem = getSortedRequests(gStore.getState()).get(0);
 
       ok(requestItem.requestCookies,
@@ -132,7 +143,12 @@ function test() {
       ok(false, "Trap listener: this request doesn't have any post data.");
     });
 
-    monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_HEADERS, () => {
+    monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_HEADERS, async () => {
+      await waitUntil(() => {
+        let requestItem = getSortedRequests(gStore.getState()).get(0);
+        return requestItem.responseHeaders;
+      });
+
       let requestItem = getSortedRequests(gStore.getState()).get(0);
 
       ok(requestItem.responseHeaders,
@@ -151,7 +167,12 @@ function test() {
       );
     });
 
-    monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_COOKIES, () => {
+    monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_COOKIES, async () => {
+      await waitUntil(() => {
+        let requestItem = getSortedRequests(gStore.getState()).get(0);
+        return requestItem.responseCookies;
+      });
+
       let requestItem = getSortedRequests(gStore.getState()).get(0);
 
       ok(requestItem.responseCookies,
@@ -168,7 +189,15 @@ function test() {
       );
     });
 
-    monitor.panelWin.once(EVENTS.STARTED_RECEIVING_RESPONSE, () => {
+    monitor.panelWin.once(EVENTS.STARTED_RECEIVING_RESPONSE, async () => {
+      await waitUntil(() => {
+        let requestItem = getSortedRequests(gStore.getState()).get(0);
+        return requestItem.httpVersion &&
+               requestItem.status &&
+               requestItem.statusText &&
+               requestItem.headersSize;
+      });
+
       let requestItem = getSortedRequests(gStore.getState()).get(0);
 
       is(requestItem.httpVersion, "HTTP/1.1",
@@ -193,7 +222,15 @@ function test() {
       );
     });
 
-    monitor.panelWin.once(EVENTS.UPDATING_RESPONSE_CONTENT, () => {
+    monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_CONTENT, async () => {
+      await waitUntil(() => {
+        let requestItem = getSortedRequests(gStore.getState()).get(0);
+        return requestItem.transferredSize &&
+               requestItem.contentSize &&
+               requestItem.mimeType &&
+               requestItem.responseContent;
+      });
+
       let requestItem = getSortedRequests(gStore.getState()).get(0);
 
       is(requestItem.transferredSize, "12",
@@ -202,24 +239,6 @@ function test() {
         "The contentSize data has an incorrect value.");
       is(requestItem.mimeType, "text/plain; charset=utf-8",
         "The mimeType data has an incorrect value.");
-
-      verifyRequestItemTarget(
-        document,
-        getDisplayedRequests(gStore.getState()),
-        requestItem,
-        "GET",
-        SIMPLE_SJS,
-        {
-          type: "plain",
-          fullMimeType: "text/plain; charset=utf-8",
-          transferred: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 12),
-          size: L10N.getFormatStrWithNumbers("networkMenu.sizeB", 12),
-        }
-      );
-    });
-
-    monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_CONTENT, () => {
-      let requestItem = getSortedRequests(gStore.getState()).get(0);
 
       ok(requestItem.responseContent,
         "There should be a responseContent data available.");
@@ -251,7 +270,12 @@ function test() {
       );
     });
 
-    monitor.panelWin.once(EVENTS.UPDATING_EVENT_TIMINGS, () => {
+    monitor.panelWin.once(EVENTS.UPDATING_EVENT_TIMINGS, async () => {
+      await waitUntil(() => {
+        let requestItem = getSortedRequests(gStore.getState()).get(0);
+        return requestItem.eventTimings;
+      });
+
       let requestItem = getSortedRequests(gStore.getState()).get(0);
 
       is(typeof requestItem.totalTime, "number",

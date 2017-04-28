@@ -24,7 +24,8 @@ function checkExternalFunction(entry)
         "fmod",
         "floor",
         "ceil",
-
+        /memchr/,
+        "strlen",
         // Assume that atomic accesses are threadsafe.
         /^__atomic_fetch_/,
         /^__atomic_load_/,
@@ -37,7 +38,6 @@ function checkExternalFunction(entry)
         "memcpy",
         "memset",
         "memmove",
-        "strlen",
     ];
 
     if (entry.isSafeArgument(1) && simpleWrites.includes(entry.name))
@@ -207,6 +207,12 @@ function treatAsSafeArgument(entry, varName, csuName)
         ["Gecko_ClearWillChange", "aDisplay", null],
         ["Gecko_AppendWillChange", "aDisplay", null],
         ["Gecko_CopyWillChangeFrom", "aDest", null],
+        ["Gecko_InitializeImageCropRect", "aImage", null],
+        ["Gecko_CopyShapeSourceFrom", "aDst", null],
+        ["Gecko_DestroyShapeSource", "aShape", null],
+        ["Gecko_StyleShapeSource_SetURLValue", "aShape", null],
+        ["Gecko_nsFont_InitSystem", "aDest", null],
+        ["Gecko_StyleTransition_SetUnsupportedProperty", "aTransition", null],
     ];
     for (var [entryMatch, varMatch, csuMatch] of whitelist) {
         assert(entryMatch || varMatch || csuMatch);
@@ -318,6 +324,12 @@ function ignoreCallEdge(entry, callee)
         return true;
     }
 
+    // We manually lock here
+    if ("Gecko_nsFont_InitSystem" == name)
+    {
+        return true;
+    }
+
     return false;
 }
 
@@ -367,6 +379,10 @@ function ignoreContents(entry)
         /CSSValueSerializeCalcOps::Append/,
         "Gecko_CSSValue_SetFunction",
         "Gecko_CSSValue_SetArray",
+        "Gecko_EnsureMozBorderColors",
+        "Gecko_ClearMozBorderColors",
+        "Gecko_AppendMozBorderColors",
+        "Gecko_CopyMozBorderColors",
 
         // Needs main thread assertions or other fixes.
         /UndisplayedMap::GetEntryFor/,
@@ -396,6 +412,7 @@ function ignoreContents(entry)
             /nsAC?String::Assign/,
             /nsAC?String::Append/,
             /nsAC?String::Replace/,
+            /nsAC?String::Trim/,
             /nsAC?String::Truncate/,
             /nsString::StripChars/,
             /nsAC?String::operator=/,
@@ -1062,31 +1079,44 @@ function isSafeVariable(entry, variable)
             return true;
         }
 
-        // References to the contents of an array are threadsafe if the array
-        // itself is threadsafe.
-        if ((isDirectCall(edge, /operator\[\]/) ||
-             isDirectCall(edge, /nsStyleContent::ContentAt/)) &&
-            isEdgeSafeArgument(entry, edge.PEdgeCallInstance.Exp))
-        {
-            return true;
-        }
-
-        // Watch for the coerced result of a getter_AddRefs call.
-        if (isDirectCall(edge, /operator /)) {
-            var otherEdge = expressionValueEdge(edge.PEdgeCallInstance.Exp);
-            if (otherEdge &&
-                isDirectCall(otherEdge, /getter_AddRefs/) &&
-                isEdgeSafeArgument(entry, otherEdge.PEdgeCallArguments.Exp[0]))
+        if ("PEdgeCallInstance" in edge) {
+            // References to the contents of an array are threadsafe if the array
+            // itself is threadsafe.
+            if ((isDirectCall(edge, /operator\[\]/) ||
+                 isDirectCall(edge, /nsStyleContent::ContentAt/)) &&
+                isEdgeSafeArgument(entry, edge.PEdgeCallInstance.Exp))
             {
                 return true;
             }
-        }
 
-        // Coercion via AsAString preserves safety.
-        if (isDirectCall(edge, /AsAString/) &&
-            isEdgeSafeArgument(entry, edge.PEdgeCallInstance.Exp))
-        {
-            return true;
+            // Watch for the coerced result of a getter_AddRefs call.
+            if (isDirectCall(edge, /operator /)) {
+                var otherEdge = expressionValueEdge(edge.PEdgeCallInstance.Exp);
+                if (otherEdge &&
+                    isDirectCall(otherEdge, /getter_AddRefs/) &&
+                    isEdgeSafeArgument(entry, otherEdge.PEdgeCallArguments.Exp[0]))
+                {
+                    return true;
+                }
+            }
+
+            // Placement-new returns a pointer that is as safe as the pointer
+            // passed to it. Exp[0] is the size, Exp[1] is the pointer/address.
+            // Note that the invocation of the constructor is a separate call,
+            // and so need not be considered here.
+            if (isDirectCall(edge, /operator new/) &&
+                edge.PEdgeCallInstance.Exp.length == 2 &&
+                isEdgeSafeArgument(entry, edge.PEdgeCallInstance.Exp[1]))
+            {
+                return true;
+            }
+
+            // Coercion via AsAString preserves safety.
+            if (isDirectCall(edge, /AsAString/) &&
+                isEdgeSafeArgument(entry, edge.PEdgeCallInstance.Exp))
+            {
+                return true;
+            }
         }
 
         // Watch out for variables which were assigned arguments.

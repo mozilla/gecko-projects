@@ -8,26 +8,26 @@
     "unpack": true
   },
   {
-    "version": "rustc 1.16.0 (30cf806ef 2017-03-10) repack",
-    "size": 124444249,
-    "digest": "11239565e6dde851a5229a0380da129b129c560c3fa765eb4998549e688385be314523074456afec9ebe4ddb6af71e44c64d7c669e7e904ed253f6e7b0f6317b",
+    "version": "rustc 1.16.0 (30cf806ef 2017-03-10) repack with cargo 0.19.0-nightly (8326a3683 2017-04-19)",
+    "size": 80381089,
+    "digest": "01bc5c4d25ffd16f51643d36449ca469eccc362b8315945edd9b7e174462659a3d5d4bd5d2738f449557254ba930ca0d70d22f8717b51ba36af68193bd3c39f7",
     "algorithm": "sha512",
     "filename": "rustc.tar.bz2",
     "unpack": true
   },
   {
-    "version": "sccache rev b21198a7183a2fe226ff49348b1c0b51bae9f4f8",
+    "version": "sccache rev 7a3847276d05deb564cb84a16b8c551b690aaa3e",
     "algorithm": "sha512",
     "visibility": "public",
     "filename": "sccache2.tar.bz2",
     "unpack": true,
-    "digest": "a285c7c6468ad7438262dfec90f65981e84abf2adbb1aa075c0ec1759b4f98ce5d5f14a3d555274f970704210a00738ba7d95db2fc320f7780e6b99bcb0ffb6c",
-    "size": 1143715
+    "digest": "6c93ee3ef4bcc129ade3e58629ba4be224a1dec5e1d864ba4017d1bc2a17febb0ca32e4e6d2575c8cc6e0a8235ca07be485b8c6c1cf1a0c0e91e3c23caa515b8",
+    "size": 1603430
   },
   {
-    "version": "cctools port from commit hash 84ce22dbb22a26ce7f392e9de0ee39c2efe6fd68",
-    "size": 2174783,
-    "digest": "8678348faff8f344b377075007975ae77a55a2a73488e36950a43c8ec27a79970cd8e34003e33e756a57d9cbf5c3e2e4461184102c6c03f793377a4d250a7f24",
+    "version": "cctools port from commit hash 8e9c3f2506b51",
+    "size": 2233376,
+    "digest": "d632ef587f0253f016aa5323999a3d9576284c04e66b5243a5780af9a55f474ac91ad8dee5bd86a6ee4e2593e2b345e2fd0aa4e8838b3686f84c5c5ac5c9c418",
     "algorithm": "sha512",
     "filename": "cctools.tar.bz2",
     "unpack": true

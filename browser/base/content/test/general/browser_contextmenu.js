@@ -59,6 +59,7 @@ add_task(function* test_setup_html() {
     let videoIframe = doc.querySelector("#test-video-in-iframe");
     let video = videoIframe.contentDocument.querySelector("video");
     let awaitPause = ContentTaskUtils.waitForEvent(video, "pause");
+    yield ContentTaskUtils.waitForCondition(() => !video.paused, "Making sure video is playing before calling pause");
     video.pause();
     yield awaitPause;
 
@@ -66,6 +67,7 @@ add_task(function* test_setup_html() {
     // media documents always use a <video> tag.
     let audio = audioIframe.contentDocument.querySelector("video");
     awaitPause = ContentTaskUtils.waitForEvent(audio, "pause");
+    yield ContentTaskUtils.waitForCondition(() => !audio.paused, "Making sure audio is playing before calling pause");
     audio.pause();
     yield awaitPause;
   });
@@ -894,6 +896,7 @@ add_task(function* test_plaintext_sendpagetodevice() {
   if (!gFxAccounts.sendTabToDeviceEnabled) {
     return;
   }
+  yield ensureSyncReady();
   const oldGetter = setupRemoteClientsFixture(remoteClientsFixture);
 
   let plainTextItemsWithSendPage =
@@ -931,6 +934,7 @@ add_task(function* test_link_sendlinktodevice() {
   if (!gFxAccounts.sendTabToDeviceEnabled) {
     return;
   }
+  yield ensureSyncReady();
   const oldGetter = setupRemoteClientsFixture(remoteClientsFixture);
 
   yield test_contextmenu("#test-link",
@@ -987,4 +991,11 @@ function* selectText(selector) {
     div.setEndAfter(element);
     win.getSelection().addRange(div);
   });
+}
+
+function ensureSyncReady() {
+  let service = Cc["@mozilla.org/weave/service;1"]
+                  .getService(Components.interfaces.nsISupports)
+                  .wrappedJSObject;
+  return service.whenLoaded();
 }

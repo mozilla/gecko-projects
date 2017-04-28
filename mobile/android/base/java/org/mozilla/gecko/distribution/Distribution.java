@@ -649,7 +649,16 @@ public class Distribution {
             return null;
         }
 
-        return new JarInputStream(new BufferedInputStream(connection.getInputStream()), true);
+        final BufferedInputStream bufferedInputStream = new BufferedInputStream(connection.getInputStream());
+        try {
+            return new JarInputStream(bufferedInputStream, true);
+        } catch (IOException e) {
+            // Thrown e.g. if JarInputStream can't parse the input as a valid Zip.
+            // In that case we need to ensure the bufferedInputStream gets closed since it won't
+            // be used anywhere (while still passing the Exception up the stack).
+            bufferedInputStream.close();
+            throw e;
+        }
     }
 
     private static void recordFetchTelemetry(final Exception exception) {
@@ -878,7 +887,7 @@ public class Distribution {
 
         // We restrict here to avoid injection attacks. After all,
         // we're downloading a distribution payload based on intent input.
-        if (!content.matches("^[a-zA-Z0-9]+$")) {
+        if (!content.matches("^[a-zA-Z0-9_-]+$")) {
             Log.e(LOGTAG, "Invalid referrer content: " + content);
             Telemetry.addToHistogram(HISTOGRAM_REFERRER_INVALID, 1);
             return null;

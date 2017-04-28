@@ -49,7 +49,6 @@ DIRS += [
 if CONFIG['MOZ_PERMISSIONS']:
     DIRS += [
         '/extensions/cookie',
-        '/extensions/permissions',
     ]
 
 DIRS += [
@@ -187,7 +186,6 @@ if CONFIG['ENABLE_TESTS']:
 
     if CONFIG['MOZ_WEBRTC'] and not CONFIG['MOZ_TASK_TRACER']:
         DIRS += [
-            '/media/webrtc/signaling/test',
             '/media/mtransport/test',
         ]
 

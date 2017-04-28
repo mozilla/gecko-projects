@@ -55,7 +55,6 @@ JS::Zone::Zone(JSRuntime* rt, ZoneGroup* group)
     gcLastSweepGroupIndex(group, 0),
 #endif
     jitZone_(group, nullptr),
-    gcState_(NoGC),
     gcScheduled_(false),
     gcPreserveCode_(group, false),
     jitUsingBarriers_(group, false),
@@ -280,7 +279,11 @@ Zone::createJitZone(JSContext* cx)
     if (!cx->runtime()->getJitRuntime(cx))
         return nullptr;
 
-    jitZone_ = cx->new_<js::jit::JitZone>();
+    UniquePtr<jit::JitZone> jitZone(cx->new_<js::jit::JitZone>());
+    if (!jitZone || !jitZone->init(cx))
+        return nullptr;
+
+    jitZone_ = jitZone.release();
     return jitZone_;
 }
 

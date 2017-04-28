@@ -284,7 +284,22 @@ Proxy::hasOwn(JSContext* cx, HandleObject proxy, HandleId id, bool* bp)
     return handler->hasOwn(cx, proxy, id, bp);
 }
 
-static Value
+bool
+js::ProxyHasOwn(JSContext* cx, HandleObject proxy, HandleValue idVal, MutableHandleValue result)
+{
+    RootedId id(cx);
+    if (!ValueToId<CanGC>(cx, idVal, &id))
+        return false;
+
+    bool hasOwn;
+    if (!Proxy::hasOwn(cx, proxy, id, &hasOwn))
+        return false;
+
+    result.setBoolean(hasOwn);
+    return true;
+}
+
+static MOZ_ALWAYS_INLINE Value
 ValueToWindowProxyIfWindow(const Value& v)
 {
     if (v.isObject())
@@ -697,7 +712,9 @@ proxy_Finalize(FreeOp* fop, JSObject* obj)
 
     MOZ_ASSERT(obj->is<ProxyObject>());
     obj->as<ProxyObject>().handler()->finalize(fop, obj);
-    js_free(js::detail::GetProxyDataLayout(obj)->values);
+
+    if (!obj->as<ProxyObject>().usingInlineValueArray())
+        js_free(js::detail::GetProxyDataLayout(obj)->values);
 }
 
 static void

@@ -36,6 +36,8 @@ namespace mozilla {
   class FontFamilyList;
   enum FontFamilyType : uint32_t;
   struct Keyframe;
+  enum Side;
+  struct StyleTransition;
   namespace css {
     struct URLValue;
   };
@@ -189,22 +191,28 @@ Gecko_GetExtraContentStyleDeclarations(RawGeckoElementBorrowed element);
 
 // Animations
 bool
-Gecko_GetAnimationRule(RawGeckoElementBorrowed aElement,
-                       nsIAtom* aPseudoTag,
+Gecko_GetAnimationRule(RawGeckoElementBorrowed aElementOrPseudo,
                        mozilla::EffectCompositor::CascadeLevel aCascadeLevel,
                        RawServoAnimationValueMapBorrowed aAnimationValues);
+RawServoDeclarationBlockStrongBorrowedOrNull
+Gecko_GetSMILOverrideDeclarationBlock(RawGeckoElementBorrowed element);
 bool Gecko_StyleAnimationsEquals(RawGeckoStyleAnimationListBorrowed,
                                  RawGeckoStyleAnimationListBorrowed);
-void Gecko_UpdateAnimations(RawGeckoElementBorrowed aElement,
-                            nsIAtom* aPseudoTagOrNull,
+void Gecko_UpdateAnimations(RawGeckoElementBorrowed aElementOrPseudo,
                             ServoComputedValuesBorrowedOrNull aOldComputedValues,
                             ServoComputedValuesBorrowedOrNull aComputedValues,
                             ServoComputedValuesBorrowedOrNull aParentComputedValues,
-                            mozilla::UpdateAnimationsTasks aTaskBits);
-bool Gecko_ElementHasAnimations(RawGeckoElementBorrowed aElement,
-                                nsIAtom* aPseudoTagOrNull);
-bool Gecko_ElementHasCSSAnimations(RawGeckoElementBorrowed aElement,
-                                   nsIAtom* aPseudoTagOrNull);
+                            mozilla::UpdateAnimationsTasks aTasks);
+bool Gecko_ElementHasAnimations(RawGeckoElementBorrowed aElementOrPseudo);
+bool Gecko_ElementHasCSSAnimations(RawGeckoElementBorrowed aElementOrPseudo);
+bool Gecko_ElementHasCSSTransitions(RawGeckoElementBorrowed aElementOrPseudo);
+size_t Gecko_ElementTransitions_Length(RawGeckoElementBorrowed aElementOrPseudo);
+nsCSSPropertyID Gecko_ElementTransitions_PropertyAt(
+  RawGeckoElementBorrowed aElementOrPseudo,
+  size_t aIndex);
+RawServoAnimationValueBorrowedOrNull Gecko_ElementTransitions_EndValueAt(
+  RawGeckoElementBorrowed aElementOrPseudo,
+  size_t aIndex);
 double Gecko_GetProgressFromComputedTiming(RawGeckoComputedTimingBorrowed aComputedTiming);
 double Gecko_GetPositionInSegment(
   RawGeckoAnimationPropertySegmentBorrowed aSegment,
@@ -217,20 +225,37 @@ double Gecko_GetPositionInSegment(
 RawServoAnimationValueBorrowedOrNull Gecko_AnimationGetBaseStyle(
   void* aBaseStyles,
   nsCSSPropertyID aProperty);
+void Gecko_StyleTransition_SetUnsupportedProperty(
+  mozilla::StyleTransition* aTransition,
+  nsIAtom* aAtom);
 
 // Atoms.
 nsIAtom* Gecko_Atomize(const char* aString, uint32_t aLength);
+nsIAtom* Gecko_Atomize16(const nsAString* aString);
 void Gecko_AddRefAtom(nsIAtom* aAtom);
 void Gecko_ReleaseAtom(nsIAtom* aAtom);
 const uint16_t* Gecko_GetAtomAsUTF16(nsIAtom* aAtom, uint32_t* aLength);
 bool Gecko_AtomEqualsUTF8(nsIAtom* aAtom, const char* aString, uint32_t aLength);
 bool Gecko_AtomEqualsUTF8IgnoreCase(nsIAtom* aAtom, const char* aString, uint32_t aLength);
 
+// Border style
+void Gecko_EnsureMozBorderColors(nsStyleBorder* aBorder);
+void Gecko_ClearMozBorderColors(nsStyleBorder* aBorder, mozilla::Side aSide);
+void Gecko_AppendMozBorderColors(nsStyleBorder* aBorder, mozilla::Side aSide,
+                                 nscolor aColor);
+void Gecko_CopyMozBorderColors(nsStyleBorder* aDest, const nsStyleBorder* aSrc,
+                               mozilla::Side aSide);
+
 // Font style
 void Gecko_FontFamilyList_Clear(FontFamilyList* aList);
 void Gecko_FontFamilyList_AppendNamed(FontFamilyList* aList, nsIAtom* aName, bool aQuoted);
 void Gecko_FontFamilyList_AppendGeneric(FontFamilyList* list, FontFamilyType familyType);
 void Gecko_CopyFontFamilyFrom(nsFont* dst, const nsFont* src);
+// will not run destructors on dst, give it uninitialized memory
+// font_id is LookAndFeel::FontID
+void Gecko_nsFont_InitSystem(nsFont* dst, int32_t font_id,
+                             const nsStyleFont* font, RawGeckoPresContextBorrowed pres_context);
+void Gecko_nsFont_Destroy(nsFont* dst);
 
 // Visibility style
 void Gecko_SetImageOrientation(nsStyleVisibility* aVisibility,
@@ -284,8 +309,9 @@ void Gecko_SetOwnerDocumentNeedsStyleFlush(RawGeckoElementBorrowed element);
 // Incremental restyle.
 // Also, we might want a ComputedValues to ComputedValues API for animations?
 // Not if we do them in Gecko...
-nsStyleContext* Gecko_GetStyleContext(RawGeckoNodeBorrowed node,
+nsStyleContext* Gecko_GetStyleContext(RawGeckoElementBorrowed element,
                                       nsIAtom* aPseudoTagOrNull);
+nsIAtom* Gecko_GetImplementedPseudo(RawGeckoElementBorrowed element);
 nsChangeHint Gecko_CalcStyleDifference(nsStyleContext* oldstyle,
                                        ServoComputedValuesBorrowed newstyle);
 nsChangeHint Gecko_HintsHandledForDescendants(nsChangeHint aHint);

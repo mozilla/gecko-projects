@@ -33,7 +33,7 @@ class nsIThrottlingService;
 namespace mozilla {
 namespace net {
 
-extern Atomic<PRThread*, Relaxed> gSocketThread;
+bool OnSocketThread();
 
 class ATokenBucketEvent;
 class EventTokenBucket;
@@ -380,7 +380,7 @@ private:
     void     PrefsChanged(nsIPrefBranch *prefs, const char *pref);
 
     MOZ_MUST_USE nsresult SetAccept(const char *);
-    MOZ_MUST_USE nsresult SetAcceptLanguages(const char *);
+    MOZ_MUST_USE nsresult SetAcceptLanguages();
     MOZ_MUST_USE nsresult SetAcceptEncodings(const char *, bool mIsSecure);
 
     MOZ_MUST_USE nsresult InitConnectionMgr();
@@ -474,6 +474,7 @@ private:
     nsCString      mUserAgent;
     nsXPIDLCString mUserAgentOverride;
     bool           mUserAgentIsDirty; // true if mUserAgent should be rebuilt
+    bool           mAcceptLanguagesIsDirty;
 
 
     bool           mPromptTempRedirect;
@@ -592,7 +593,7 @@ public:
     MOZ_MUST_USE nsresult SubmitPacedRequest(ATokenBucketEvent *event,
                                              nsICancelable **cancel)
     {
-        MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+        MOZ_ASSERT(OnSocketThread(), "not on socket thread");
         if (!mRequestTokenBucket) {
             return NS_ERROR_NOT_AVAILABLE;
         }
@@ -602,13 +603,13 @@ public:
     // Socket thread only
     void SetRequestTokenBucket(EventTokenBucket *aTokenBucket)
     {
-        MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+        MOZ_ASSERT(OnSocketThread(), "not on socket thread");
         mRequestTokenBucket = aTokenBucket;
     }
 
     void StopRequestTokenBucket()
     {
-        MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+        MOZ_ASSERT(OnSocketThread(), "not on socket thread");
         if (mRequestTokenBucket) {
             mRequestTokenBucket->Stop();
             mRequestTokenBucket = nullptr;

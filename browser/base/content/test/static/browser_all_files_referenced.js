@@ -10,6 +10,7 @@ var gExceptionPaths = [
   "chrome://browser/content/defaultthemes/",
   "chrome://browser/locale/searchplugins/",
   "resource://app/defaults/blocklists/",
+  "resource://app/defaults/pinning/",
   "resource://app/defaults/preferences/",
   "resource://gre/modules/commonjs/",
   "resource://gre/defaults/pref/",
@@ -34,10 +35,6 @@ var whitelist = new Set([
 
   // security/manager/pki/resources/content/device_manager.js
   {file: "chrome://pippki/content/load_device.xul"},
-
-  // browser/modules/ReaderParent.jsm
-  {file: "chrome://browser/skin/reader-tour.png"},
-  {file: "chrome://browser/skin/reader-tour@2x.png"},
 
   // Used by setting this url as a pref in about:config
   {file: "chrome://browser/content/newtab/alternativeDefaultSites.json"},
@@ -158,11 +155,6 @@ var whitelist = new Set([
    platforms: ["linux"]},
   {file: "chrome://global/skin/arrow/panelarrow-vertical.svg",
    platforms: ["linux"]},
-  // Bug 1348359
-  {file: "chrome://global/skin/dirListing/folder.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/dirListing/local.png", platforms: ["linux", "win"]},
-  {file: "chrome://global/skin/dirListing/remote.png"},
-  {file: "chrome://global/skin/dirListing/up.png", platforms: ["linux"]},
   // Bug 1348362
   {file: "chrome://global/skin/icons/Close.gif", platforms: ["win"]},
   {file: "chrome://global/skin/icons/Error.png", platforms: ["linux", "macosx"]},
@@ -226,11 +218,6 @@ var whitelist = new Set([
    platforms: ["linux"]},
   // Bug 1348559
   {file: "chrome://pippki/content/resetpassword.xul"},
-
-  // Bug 1344257
-  {file: "resource://gre-resources/checkmark.svg"},
-  {file: "resource://gre-resources/indeterminate-checkmark.svg"},
-  {file: "resource://gre-resources/radio.svg"},
   // Bug 1351078
   {file: "resource://gre/modules/Battery.jsm"},
   // Bug 1351070
@@ -249,12 +236,8 @@ var whitelist = new Set([
   {file: "resource://gre/modules/Sntp.jsm"},
   // Bug 1351097
   {file: "resource://gre/modules/accessibility/AccessFu.jsm"},
-  // Bug 1351099
-  {file: "resource://gre/modules/addons/AddonLogging.jsm"},
   // Bug 1351637
   {file: "resource://gre/modules/sdk/bootstrap.js"},
-  // Bug 1351657
-  {file: "resource://gre/res/langGroups.properties", platforms: ["macosx"]},
 
 ].filter(item =>
   ("isFromDevTools" in item) == isDevtools &&
@@ -284,12 +267,6 @@ const ignorableWhitelist = new Set([
 
   // dom/media/gmp/GMPParent.cpp
   "resource://gre/gmp-clearkey/0.1/manifest.json",
-
-  // Bug 1351675 - should this file be packaged?
-  "resource://app/defaults/pinning/pins.json",
-
-  // Bug 1351682 - should be removed?
-  "resource://app/defaults/profile/prefs.js",
 
   // Bug 1351669 - obsolete test file
   "resource://gre/res/test.properties",

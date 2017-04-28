@@ -334,6 +334,10 @@ this.SessionStore = {
     SessionStoreInternal.deleteTabValue(aTab, aKey);
   },
 
+  getLazyTabValue(aTab, aKey) {
+    return SessionStoreInternal.getLazyTabValue(aTab, aKey);
+  },
+
   getGlobalValue: function ss_getGlobalValue(aKey) {
     return SessionStoreInternal.getGlobalValue(aKey);
   },
@@ -1871,6 +1875,15 @@ var SessionStoreInternal = {
     if (browser.frameLoader) {
       this._lastKnownFrameLoader.set(browser.permanentKey, browser.frameLoader);
     }
+
+    // Only restore if browser has been lazy.
+    if (aTab.__SS_lazyData && !browser.__SS_restoreState && TabStateCache.get(browser)) {
+      let tabState = TabState.clone(aTab);
+      this.restoreTab(aTab, tabState);
+    }
+
+    // The browser has been inserted now, so lazy data is no longer relevant.
+    delete aTab.__SS_lazyData;
   },
 
   /**
@@ -2545,6 +2558,19 @@ var SessionStoreInternal = {
     }
   },
 
+  /**
+   * Retrieves data specific to lazy-browser tabs.  If tab is not lazy,
+   * will return undefined.
+   *
+   * @param aTab (xul:tab)
+   *        The tabbrowser-tab the data is for.
+   * @param aKey (string)
+   *        The key which maps to the desired data.
+   */
+  getLazyTabValue(aTab, aKey) {
+    return (aTab.__SS_lazyData || {})[aKey];
+  },
+
   getGlobalValue: function ssi_getGlobalValue(aKey) {
     return this._globalState.get(aKey);
   },
@@ -3112,9 +3138,7 @@ var SessionStoreInternal = {
     };
 
     // Collect and store session cookies.
-    TelemetryStopwatch.start("FX_SESSION_RESTORE_COLLECT_COOKIES_MS");
     state.cookies = SessionCookies.collect();
-    TelemetryStopwatch.finish("FX_SESSION_RESTORE_COLLECT_COOKIES_MS");
 
     if (Cu.isModuleLoaded("resource://devtools/client/scratchpad/scratchpad-manager.jsm")) {
       // get open Scratchpad window states too
@@ -3272,6 +3296,9 @@ var SessionStoreInternal = {
 
     let numVisibleTabs = 0;
 
+    let createLazyBrowser = this._prefBranch.getBoolPref("sessionstore.restore_tabs_lazily") &&
+      this._prefBranch.getBoolPref("sessionstore.restore_on_demand");
+
     for (var t = 0; t < newTabCount; t++) {
       // When trying to restore into existing tab, we also take the userContextId
       // into account if present.
@@ -3280,7 +3307,8 @@ var SessionStoreInternal = {
                           (tabbrowser.tabs[t].getAttribute("usercontextid") == (userContextId || ""));
       let tab = reuseExisting ? this._maybeUpdateBrowserRemoteness(tabbrowser.tabs[t])
                               : tabbrowser.addTab("about:blank",
-                                                  { skipAnimation: true,
+                                                  { createLazyBrowser,
+                                                    skipAnimation: true,
                                                     userContextId,
                                                     skipBackgroundNotify: true });
 
@@ -3306,7 +3334,7 @@ var SessionStoreInternal = {
       }
     }
 
-    if (selectTab > 0) {
+    if (selectTab > 0 && selectTab <= tabs.length) {
       // The state we're restoring wants to select a particular tab. This
       // implies that we're overwriting tabs.
       let currentIndex = tabbrowser.tabContainer.selectedIndex;
@@ -3595,9 +3623,7 @@ var SessionStoreInternal = {
                                  tabbrowser.selectedBrowser == browser ||
                                  loadArguments;
 
-    if (!willRestoreImmediately && !forceOnDemand) {
-      TabRestoreQueue.add(tab);
-    }
+    let isBrowserInserted = browser.isConnected;
 
     // Increase the busy state counter before modifying the tab.
     this._setWindowStateBusy(window);
@@ -3665,14 +3691,6 @@ var SessionStoreInternal = {
     // Save the index in case we updated it above.
     tabData.index = activeIndex + 1;
 
-    // Start a new epoch to discard all frame script messages relating to a
-    // previous epoch. All async messages that are still on their way to chrome
-    // will be ignored and don't override any tab data set when restoring.
-    let epoch = this.startNextEpoch(browser);
-
-    // keep the data around to prevent dataloss in case
-    // a tab gets closed before it's been properly restored
-    browser.__SS_restoreState = TAB_STATE_NEEDS_RESTORE;
     browser.setAttribute("pending", "true");
     tab.setAttribute("pending", "true");
 
@@ -3690,6 +3708,7 @@ var SessionStoreInternal = {
       formdata: tabData.formdata || null,
       disallow: tabData.disallow || null,
       pageStyle: tabData.pageStyle || null,
+      userContextId: tabData.userContextId || 0,
 
       // This information is only needed until the tab has finished restoring.
       // When that's done it will be removed from the cache and we always
@@ -3700,25 +3719,56 @@ var SessionStoreInternal = {
       userTypedClear: tabData.userTypedClear || 0
     });
 
-    this._sendRestoreHistory(browser, {tabData, epoch, loadArguments});
-
-    // Update tab label and icon to show something
-    // while we wait for the messages to be processed.
-    this.updateTabLabelAndIcon(tab, tabData);
-
     // Restore tab attributes.
     if ("attributes" in tabData) {
       TabAttributes.set(tab, tabData.attributes);
     }
 
-    // This could cause us to ignore MAX_CONCURRENT_TAB_RESTORES a bit, but
-    // it ensures each window will have its selected tab loaded.
-    if (willRestoreImmediately) {
-      this.restoreTabContent(tab, loadArguments, reloadInFreshProcess,
-                             restoreContentReason);
-    } else if (!forceOnDemand) {
-      this.restoreNextTab();
+    if (isBrowserInserted) {
+      // Start a new epoch to discard all frame script messages relating to a
+      // previous epoch. All async messages that are still on their way to chrome
+      // will be ignored and don't override any tab data set when restoring.
+      let epoch = this.startNextEpoch(browser);
+
+      // Ensure that the tab will get properly restored in the event the tab
+      // crashes while restoring.  But don't set this on lazy browsers as
+      // restoreTab will get called again when the browser is instantiated.
+      browser.__SS_restoreState = TAB_STATE_NEEDS_RESTORE;
+
+      this._sendRestoreHistory(browser, {tabData, epoch, loadArguments});
+
+      // This could cause us to ignore MAX_CONCURRENT_TAB_RESTORES a bit, but
+      // it ensures each window will have its selected tab loaded.
+      if (willRestoreImmediately) {
+        this.restoreTabContent(tab, loadArguments, reloadInFreshProcess,
+                               restoreContentReason);
+      } else if (!forceOnDemand) {
+        TabRestoreQueue.add(tab);
+        this.restoreNextTab();
+      }
+    } else {
+      // __SS_lazyData holds data for lazy-browser tabs to proxy for
+      // data unobtainable from the unbound browser.  This only applies to lazy
+      // browsers and will be removed once the browser is inserted in the document.
+      // This must preceed `updateTabLabelAndIcon` call for required data to be present.
+      let url = "about:blank";
+      let title = "";
+
+      if (activeIndex in tabData.entries) {
+        url = tabData.entries[activeIndex].url;
+        title = tabData.entries[activeIndex].title || url;
+      }
+      tab.__SS_lazyData = {
+        url,
+        title,
+        userTypedValue: tabData.userTypedValue || "",
+        userTypedClear: tabData.userTypedClear || 0
+      };
     }
+
+    // Update tab label and icon to show something
+    // while we wait for the messages to be processed.
+    this.updateTabLabelAndIcon(tab, tabData);
 
     // Decrease the busy state counter after we're done.
     this._setWindowStateReady(window);
@@ -3800,7 +3850,7 @@ var SessionStoreInternal = {
 
     browser.messageManager.sendAsyncMessage("SessionStore:restoreTabContent",
       {loadArguments: aLoadArguments, isRemotenessUpdate,
-       reason: aReason});
+       reason: aReason, requestTime: Services.telemetry.msSystemNow()});
   },
 
   /**
@@ -4355,8 +4405,8 @@ var SessionStoreInternal = {
           if (tIndex + 1 < window.selected)
             window.selected -= 1;
           else if (tIndex + 1 == window.selected)
-            pinnedWindowState.selected = pinnedWindowState.tabs.length + 2;
-            // + 2 because the tab isn't actually in the array yet
+            pinnedWindowState.selected = pinnedWindowState.tabs.length + 1;
+            // + 1 because the tab isn't actually in the array yet
 
           // Now add the pinned tab to our window
           pinnedWindowState.tabs =

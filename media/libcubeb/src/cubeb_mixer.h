@@ -27,7 +27,8 @@ typedef enum {
   CHANNEL_RCENTER,
   CHANNEL_RRS,
   CHANNEL_LFE,
-  CHANNEL_MAX // Max number of supported channels.
+  CHANNEL_UNMAPPED,
+  CHANNEL_MAX = 256 // Max number of supported channels.
 } cubeb_channel;
 
 static cubeb_channel const CHANNEL_INDEX_TO_ORDER[CUBEB_LAYOUT_MAX][CHANNEL_MAX] = {
@@ -50,6 +51,8 @@ static cubeb_channel const CHANNEL_INDEX_TO_ORDER[CUBEB_LAYOUT_MAX][CHANNEL_MAX]
   { CHANNEL_LEFT, CHANNEL_RIGHT, CHANNEL_CENTER, CHANNEL_LFE, CHANNEL_LS, CHANNEL_RS },                           // 3F2_LFE
   { CHANNEL_LEFT, CHANNEL_RIGHT, CHANNEL_CENTER, CHANNEL_LFE, CHANNEL_RCENTER, CHANNEL_LS, CHANNEL_RS },          // 3F3R_LFE
   { CHANNEL_LEFT, CHANNEL_RIGHT, CHANNEL_CENTER, CHANNEL_LFE, CHANNEL_RLS, CHANNEL_RRS, CHANNEL_LS, CHANNEL_RS }  // 3F4_LFE
+  // When more channels are present, the stream is considered unmapped to a
+  // particular speaker set.
 };
 
 typedef struct {
@@ -63,6 +66,8 @@ bool cubeb_should_upmix(cubeb_stream_params const * stream, cubeb_stream_params 
 
 bool cubeb_should_downmix(cubeb_stream_params const * stream, cubeb_stream_params const * mixer);
 
+bool cubeb_should_mix(cubeb_stream_params const * stream, cubeb_stream_params const * mixer);
+
 void cubeb_downmix_float(float * const in, long inframes, float * out,
                          unsigned int in_channels, unsigned int out_channels,
                          cubeb_channel_layout in_layout, cubeb_channel_layout out_layout);
@@ -73,6 +78,11 @@ void cubeb_downmix_short(short * const in, long inframes, short * out,
 
 void cubeb_upmix_float(float * const in, long inframes, float * out,
                        unsigned int in_channels, unsigned int out_channels);
+
+void cubeb_upmix_short(short * const in, long inframes, short * out,
+                       unsigned int in_channels, unsigned int out_channels);
+
+
 
 #if defined(__cplusplus)
 }

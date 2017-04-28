@@ -350,6 +350,12 @@
    ]
   },
   "testharness": {
+   "dom/classList.html": [
+    [
+     "/_mozilla/dom/classList.html",
+     {}
+    ]
+   ],
    "fetch/api/redirect/redirect-referrer.https.html": [
     [
      "/_mozilla/fetch/api/redirect/redirect-referrer.https.html",
@@ -830,6 +836,10 @@
   "./placeholder": [
    "74e16eb87ecdfeb2dfc28f36e0c73a584abdf9c2",
    "support"
+  ],
+  "dom/classList.html": [
+   "6d9b7f24be9c7e2ccf504c8fe05e93bbc01fd7c6",
+   "testharness"
   ],
   "fetch/api/redirect/redirect-referrer-mixed-content.js": [
    "f9d7ec9cf9fa8c847e45664b05482e3f8c191385",

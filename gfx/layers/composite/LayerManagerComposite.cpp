@@ -13,7 +13,7 @@
 #include "Diagnostics.h"
 #include "FPSCounter.h"                 // for FPSState, FPSCounter
 #include "FrameMetrics.h"               // for FrameMetrics
-#include "GeckoProfiler.h"              // for profiler_set_frame_number, etc
+#include "GeckoProfiler.h"              // for profiler_*
 #include "ImageLayerComposite.h"        // for ImageLayerComposite
 #include "Layers.h"                     // for Layer, ContainerLayer, etc
 #include "LayerScope.h"                 // for LayerScope Tool
@@ -53,14 +53,15 @@
 #include "nsPoint.h"                    // for nsIntPoint
 #include "nsRect.h"                     // for mozilla::gfx::IntRect
 #include "nsRegion.h"                   // for nsIntRegion, etc
-#ifdef MOZ_WIDGET_ANDROID
+#if defined(MOZ_WIDGET_ANDROID)
 #include <android/log.h>
 #include <android/native_window.h>
-#endif
-#if defined(MOZ_WIDGET_ANDROID)
+#include "mozilla/widget/AndroidCompositorWidget.h"
 #include "opengl/CompositorOGL.h"
+#include "GLConsts.h"
 #include "GLContextEGL.h"
 #include "GLContextProvider.h"
+#include "mozilla/Unused.h"
 #include "mozilla/widget/AndroidCompositorWidget.h"
 #include "ScopedGLHelpers.h"
 #endif
@@ -147,6 +148,9 @@ LayerManagerComposite::LayerManagerComposite(Compositor* aCompositor)
 , mInTransaction(false)
 , mIsCompositorReady(false)
 , mGeometryChanged(true)
+#if defined(MOZ_WIDGET_ANDROID)
+, mScreenPixelsTarget(nullptr)
+#endif // defined(MOZ_WIDGET_ANDROID)
 {
   mTextRenderer = new TextRenderer();
   mDiagnostics = MakeUnique<Diagnostics>();
@@ -537,22 +541,13 @@ LayerManagerComposite::RootLayer() const
   return ToLayerComposite(mRoot);
 }
 
-#ifdef MOZ_PROFILING
-// Only build the QR feature when profiling to avoid bloating
-// our data section.
-// This table was generated using qrencode and is a binary
-// encoding of the qrcodes 0-255.
-#include "qrcode_table.h"
-#endif
-
 void
 LayerManagerComposite::InvalidateDebugOverlay(nsIntRegion& aInvalidRegion, const IntRect& aBounds)
 {
   bool drawFps = gfxPrefs::LayersDrawFPS();
-  bool drawFrameCounter = gfxPrefs::DrawFrameCounter();
   bool drawFrameColorBars = gfxPrefs::CompositorDrawColorBars();
 
-  if (drawFps || drawFrameCounter) {
+  if (drawFps) {
     aInvalidRegion.Or(aInvalidRegion, nsIntRect(0, 0, 650, 400));
   }
   if (drawFrameColorBars) {
@@ -585,7 +580,6 @@ void
 LayerManagerComposite::RenderDebugOverlay(const IntRect& aBounds)
 {
   bool drawFps = gfxPrefs::LayersDrawFPS();
-  bool drawFrameCounter = gfxPrefs::DrawFrameCounter();
   bool drawFrameColorBars = gfxPrefs::CompositorDrawColorBars();
 
   if (drawFps) {
@@ -680,51 +674,7 @@ LayerManagerComposite::RenderDebugOverlay(const IntRect& aBounds)
 
   }
 
-#ifdef MOZ_PROFILING
-  if (drawFrameCounter) {
-    profiler_set_frame_number(sFrameCount);
-    const char* qr = sQRCodeTable[sFrameCount%256];
-
-    int size = 21;
-    int padding = 2;
-    float opacity = 1.0;
-    const uint16_t bitWidth = 5;
-    gfx::IntRect clip(0,0, bitWidth*640, bitWidth*640);
-
-    // Draw the white squares at once
-    gfx::Color bitColor(1.0, 1.0, 1.0, 1.0);
-    EffectChain effects;
-    effects.mPrimaryEffect = new EffectSolidColor(bitColor);
-    int totalSize = (size + padding * 2) * bitWidth;
-    mCompositor->DrawQuad(gfx::Rect(0, 0, totalSize, totalSize),
-                          clip,
-                          effects,
-                          opacity,
-                          gfx::Matrix4x4());
-
-    // Draw a black square for every bit set in qr[index]
-    effects.mPrimaryEffect = new EffectSolidColor(gfx::Color(0, 0, 0, 1.0));
-    for (int y = 0; y < size; y++) {
-      for (int x = 0; x < size; x++) {
-        // Select the right bit from the binary encoding
-        int currBit = 128 >> ((x + y * 21) % 8);
-        int i = (x + y * 21) / 8;
-        if (qr[i] & currBit) {
-          mCompositor->DrawQuad(gfx::Rect(bitWidth * (x + padding),
-                                          bitWidth * (y + padding),
-                                          bitWidth, bitWidth),
-                                clip,
-                                effects,
-                                opacity,
-                                gfx::Matrix4x4());
-        }
-      }
-    }
-
-  }
-#endif
-
-  if (drawFrameColorBars || drawFrameCounter) {
+  if (drawFrameColorBars) {
     // We intentionally overflow at 2^16.
     sFrameCount++;
   }
@@ -838,6 +788,25 @@ ClearLayerFlags(Layer* aLayer) {
       });
 }
 
+#if defined(MOZ_WIDGET_ANDROID)
+class ScopedCompositorRenderOffset {
+public:
+  ScopedCompositorRenderOffset(CompositorOGL* aCompositor, const ScreenPoint& aOffset) :
+    mCompositor(aCompositor),
+    mOriginalOffset(mCompositor->GetScreenRenderOffset())
+  {
+    mCompositor->SetScreenRenderOffset(aOffset);
+  }
+  ~ScopedCompositorRenderOffset()
+  {
+    mCompositor->SetScreenRenderOffset(mOriginalOffset);
+  }
+private:
+  CompositorOGL* const mCompositor;
+  const ScreenPoint mOriginalOffset;
+};
+#endif // defined(MOZ_WIDGET_ANDROID)
+
 void
 LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion, const nsIntRegion& aOpaqueRegion)
 {
@@ -923,6 +892,11 @@ LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion, const nsIntRegi
     mCompositor->BeginFrame(aInvalidRegion, nullptr, bounds, aOpaqueRegion, &rect, &actualBounds);
     clipRect = ParentLayerIntRect(rect.x, rect.y, rect.width, rect.height);
   }
+#if defined(MOZ_WIDGET_ANDROID)
+  int32_t toolbarHeight = RenderToolbar();
+  // This doesn't affect the projection matrix after BeginFrame has been called.
+  ScopedCompositorRenderOffset scopedOffset(mCompositor->AsCompositorOGL(), ScreenPoint(0, toolbarHeight));
+#endif
 
   if (actualBounds.IsEmpty()) {
     mCompositor->GetWidget()->PostRender(&widgetContext);
@@ -977,6 +951,10 @@ LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion, const nsIntRegi
 
   mCompositor->NormalDrawingDone();
 
+#if defined(MOZ_WIDGET_ANDROID)
+  HandlePixelsTarget();
+#endif // defined(MOZ_WIDGET_ANDROID)
+
   // Debugging
   RenderDebugOverlay(actualBounds);
 
@@ -1029,23 +1007,6 @@ public:
 private:
   CompositorOGL* const mCompositor;
   const gfx::IntSize mOriginalSize;
-};
-
-class ScopedCompositorRenderOffset {
-public:
-  ScopedCompositorRenderOffset(CompositorOGL* aCompositor, const ScreenPoint& aOffset) :
-    mCompositor(aCompositor),
-    mOriginalOffset(mCompositor->GetScreenRenderOffset())
-  {
-    mCompositor->SetScreenRenderOffset(aOffset);
-  }
-  ~ScopedCompositorRenderOffset()
-  {
-    mCompositor->SetScreenRenderOffset(mOriginalOffset);
-  }
-private:
-  CompositorOGL* const mCompositor;
-  const ScreenPoint mOriginalOffset;
 };
 
 class ScopedContextSurfaceOverride {
@@ -1164,6 +1125,65 @@ LayerManagerComposite::RenderToPresentationSurface()
   RootLayer()->RenderLayer(clipRect, Nothing());
 
   mCompositor->EndFrame();
+}
+
+int32_t
+LayerManagerComposite::RenderToolbar()
+{
+  int32_t toolbarHeight = 0;
+
+  // If GetTargetContext returns null we are drawing to the screen so draw the toolbar offset if present.
+  if (mCompositor->GetTargetContext() != nullptr) {
+    return toolbarHeight;
+  }
+
+  if (CompositorBridgeParent* bridge = mCompositor->GetCompositorBridgeParent()) {
+    AndroidDynamicToolbarAnimator* animator = bridge->GetAPZCTreeManager()->GetAndroidDynamicToolbarAnimator();
+    MOZ_ASSERT(animator);
+    toolbarHeight = animator->GetCurrentToolbarHeight();
+    if (toolbarHeight == 0) {
+      return toolbarHeight;
+    }
+
+    EffectChain effects;
+    effects.mPrimaryEffect = animator->GetToolbarEffect(mCompositor->AsCompositorOGL());
+    if (!effects.mPrimaryEffect) {
+      // No toolbar texture so just draw a red square
+      effects.mPrimaryEffect = new EffectSolidColor(gfx::Color(1, 0, 0));
+    }
+    mCompositor->DrawQuad(gfx::Rect(0, 0, mRenderBounds.width, toolbarHeight),
+                          IntRect(0, 0, mRenderBounds.width, toolbarHeight), effects, 1.0, gfx::Matrix4x4());
+
+    // Move the content down the surface by the toolbar's height so they don't overlap
+    gfx::Matrix4x4 mat = mCompositor->AsCompositorOGL()->GetProjMatrix();
+    mat.PreTranslate(0.0f, float(toolbarHeight), 0.0f);
+    mCompositor->AsCompositorOGL()->SetProjMatrix(mat);
+  }
+
+  return toolbarHeight;
+}
+
+// Used by robocop tests to get a snapshot of the frame buffer.
+void
+LayerManagerComposite::HandlePixelsTarget()
+{
+  if (!mScreenPixelsTarget) {
+    return;
+  }
+
+  int32_t bufferWidth = mRenderBounds.width;
+  int32_t bufferHeight = mRenderBounds.height;
+  ipc::Shmem mem;
+  if (!mScreenPixelsTarget->AllocPixelBuffer(bufferWidth * bufferHeight * sizeof(uint32_t), &mem)) {
+    // Failed to alloc shmem, Just bail out.
+    return;
+  }
+  CompositorOGL* compositor = mCompositor->AsCompositorOGL();
+  GLContext* gl = compositor->gl();
+  MOZ_ASSERT(gl);
+  gl->fReadPixels(0, 0, bufferWidth, bufferHeight, LOCAL_GL_RGBA, LOCAL_GL_UNSIGNED_BYTE, mem.get<uint8_t>());
+  Unused << mScreenPixelsTarget->SendScreenPixels(mem, ScreenIntSize(bufferWidth, bufferHeight));
+  mScreenPixelsTarget = nullptr;
 }
 #endif
 

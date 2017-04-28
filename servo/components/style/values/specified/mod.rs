@@ -7,6 +7,7 @@
 //! TODO(emilio): Enhance docs.
 
 use app_units::Au;
+use context::QuirksMode;
 use cssparser::{self, Parser, Token};
 use euclid::size::Size2D;
 use parser::{ParserContext, Parse};
@@ -22,14 +23,15 @@ use style_traits::values::specified::AllowedNumericType;
 use super::{Auto, CSSFloat, CSSInteger, HasViewportPercentage, Either, None_};
 use super::computed::{self, Context};
 use super::computed::{Shadow as ComputedShadow, ToComputedValue};
+use super::generics::BorderRadiusSize as GenericBorderRadiusSize;
 
 #[cfg(feature = "gecko")]
 pub use self::align::{AlignItems, AlignJustifyContent, AlignJustifySelf, JustifyItems};
 pub use self::color::Color;
 pub use self::grid::{GridLine, TrackKeyword};
 pub use self::image::{AngleOrCorner, ColorStop, EndingShape as GradientEndingShape, Gradient};
-pub use self::image::{GradientKind, HorizontalDirection, Image, ImageRect, LengthOrKeyword};
-pub use self::image::{LengthOrPercentageOrKeyword, SizeKeyword, VerticalDirection};
+pub use self::image::{GradientItem, GradientKind, HorizontalDirection, Image, ImageRect};
+pub use self::image::{LengthOrKeyword, LengthOrPercentageOrKeyword, SizeKeyword, VerticalDirection};
 pub use self::length::AbsoluteLength;
 pub use self::length::{FontRelativeLength, ViewportPercentageLength, CharacterWidth, Length, CalcLengthOrPercentage};
 pub use self::length::{Percentage, LengthOrNone, LengthOrNumber, LengthOrPercentage, LengthOrPercentageOrAuto};
@@ -282,30 +284,8 @@ pub fn parse_number_with_clamping_mode(context: &ParserContext,
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[allow(missing_docs)]
-pub struct BorderRadiusSize(pub Size2D<LengthOrPercentage>);
-
-no_viewport_percentage!(BorderRadiusSize);
-
-impl BorderRadiusSize {
-    #[allow(missing_docs)]
-    pub fn zero() -> BorderRadiusSize {
-        let zero = LengthOrPercentage::Length(NoCalcLength::zero());
-        BorderRadiusSize(Size2D::new(zero.clone(), zero))
-    }
-
-    #[allow(missing_docs)]
-    pub fn new(width: LengthOrPercentage, height: LengthOrPercentage) -> BorderRadiusSize {
-        BorderRadiusSize(Size2D::new(width, height))
-    }
-
-    #[allow(missing_docs)]
-    pub fn circle(radius: LengthOrPercentage) -> BorderRadiusSize {
-        BorderRadiusSize(Size2D::new(radius.clone(), radius))
-    }
-}
+/// The specified value of `BorderRadiusSize`
+pub type BorderRadiusSize = GenericBorderRadiusSize<LengthOrPercentage>;
 
 impl Parse for BorderRadiusSize {
     #[inline]
@@ -313,15 +293,7 @@ impl Parse for BorderRadiusSize {
         let first = try!(LengthOrPercentage::parse_non_negative(context, input));
         let second = input.try(|i| LengthOrPercentage::parse_non_negative(context, i))
             .unwrap_or_else(|()| first.clone());
-        Ok(BorderRadiusSize(Size2D::new(first, second)))
-    }
-}
-
-impl ToCss for BorderRadiusSize {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        try!(self.0.width.to_css(dest));
-        try!(dest.write_str(" "));
-        self.0.height.to_css(dest)
+        Ok(GenericBorderRadiusSize(Size2D::new(first, second)))
     }
 }
 
@@ -519,7 +491,17 @@ pub enum BorderWidth {
 
 impl Parse for BorderWidth {
     fn parse(context: &ParserContext, input: &mut Parser) -> Result<BorderWidth, ()> {
-        match input.try(|i| Length::parse_non_negative(context, i)) {
+        Self::parse_quirky(context, input, AllowQuirks::No)
+    }
+}
+
+impl BorderWidth {
+    /// Parses a border width, allowing quirks.
+    pub fn parse_quirky(context: &ParserContext,
+                        input: &mut Parser,
+                        allow_quirks: AllowQuirks)
+                        -> Result<BorderWidth, ()> {
+        match input.try(|i| Length::parse_non_negative_quirky(context, i, allow_quirks)) {
             Ok(length) => Ok(BorderWidth::Width(length)),
             Err(_) => match_ignore_ascii_case! { &try!(input.expect_ident()),
                "thin" => Ok(BorderWidth::Thin),
@@ -554,7 +536,7 @@ impl HasViewportPercentage for BorderWidth {
         match *self {
             BorderWidth::Thin | BorderWidth::Medium | BorderWidth::Thick => false,
             BorderWidth::Width(ref length) => length.has_viewport_percentage()
-         }
+        }
     }
 }
 
@@ -874,7 +856,8 @@ impl Parse for Integer {
 }
 
 impl Integer {
-    fn parse_with_minimum(context: &ParserContext, input: &mut Parser, min: i32) -> Result<Integer, ()> {
+    #[allow(missing_docs)]
+    pub fn parse_with_minimum(context: &ParserContext, input: &mut Parser, min: i32) -> Result<Integer, ()> {
         match parse_integer(context, input) {
             Ok(value) if value.value() >= min => Ok(value),
             _ => Err(()),
@@ -1309,13 +1292,13 @@ impl ToComputedValue for ClipRect {
 
 impl Parse for ClipRect {
     fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
-        use values::specified::Length;
+        use values::specified::{AllowQuirks, Length};
 
         fn parse_argument(context: &ParserContext, input: &mut Parser) -> Result<Option<Length>, ()> {
             if input.try(|input| input.expect_ident_matching("auto")).is_ok() {
                 Ok(None)
             } else {
-                Length::parse(context, input).map(Some)
+                Length::parse_quirky(context, input, AllowQuirks::Yes).map(Some)
             }
         }
 
@@ -1355,3 +1338,19 @@ pub type ClipRectOrAuto = Either<ClipRect, Auto>;
 
 /// <color> | auto
 pub type ColorOrAuto = Either<CSSColor, Auto>;
+
+/// Whether quirks are allowed in this context.
+#[derive(Clone, Copy, PartialEq)]
+pub enum AllowQuirks {
+    /// Quirks are allowed.
+    Yes,
+    /// Quirks are not allowed.
+    No,
+}
+
+impl AllowQuirks {
+    /// Returns `true` if quirks are allowed in this context.
+    pub fn allowed(self, quirks_mode: QuirksMode) -> bool {
+        self == AllowQuirks::Yes && quirks_mode == QuirksMode::Quirks
+    }
+}

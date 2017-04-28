@@ -465,15 +465,19 @@ CacheRegisterAllocator::fixupAliasedInputs(MacroAssembler& masm)
             if (!loc1.aliasesReg(loc2))
                 continue;
 
+            // loc1 and loc2 alias so we spill one of them. If one is a
+            // ValueReg and the other is a PayloadReg, we have to spill the
+            // PayloadReg: spilling the ValueReg instead would leave its type
+            // register unallocated on 32-bit platforms.
             if (loc1.kind() == OperandLocation::ValueReg) {
                 MOZ_ASSERT_IF(loc2.kind() == OperandLocation::ValueReg,
                               loc1 == loc2);
+                spillOperandToStack(masm, &loc2);
+            } else {
+                MOZ_ASSERT(loc1.kind() == OperandLocation::PayloadReg);
                 spillOperandToStack(masm, &loc1);
-                break;
+                break; // Spilled loc1, so nothing else will alias it.
             }
-
-            MOZ_ASSERT(loc1.kind() == OperandLocation::PayloadReg);
-            spillOperandToStack(masm, &loc2);
         }
     }
 }
@@ -1522,20 +1526,29 @@ CacheIRCompiler::emitGuardAndGetIndexFromString()
     if (!addFailurePath(&failure))
         return false;
 
-    LiveRegisterSet save(GeneralRegisterSet::Volatile(), liveVolatileFloatRegs());
-    masm.PushRegsInMask(save);
+    Label vmCall, done;
+    masm.loadStringIndexValue(str, output, &vmCall);
+    masm.jump(&done);
 
-    masm.setupUnalignedABICall(output);
-    masm.passABIArg(str);
-    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, GetIndexFromString));
-    masm.mov(ReturnReg, output);
+    {
+        masm.bind(&vmCall);
+        LiveRegisterSet save(GeneralRegisterSet::Volatile(), liveVolatileFloatRegs());
+        masm.PushRegsInMask(save);
 
-    LiveRegisterSet ignore;
-    ignore.add(output);
-    masm.PopRegsInMaskIgnore(save, ignore);
+        masm.setupUnalignedABICall(output);
+        masm.passABIArg(str);
+        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, GetIndexFromString));
+        masm.mov(ReturnReg, output);
 
-    // GetIndexFromString returns a negative value on failure.
-    masm.branchTest32(Assembler::Signed, output, output, failure->label());
+        LiveRegisterSet ignore;
+        ignore.add(output);
+        masm.PopRegsInMaskIgnore(save, ignore);
+
+        // GetIndexFromString returns a negative value on failure.
+        masm.branchTest32(Assembler::Signed, output, output, failure->label());
+    }
+
+    masm.bind(&done);
     return true;
 }
 
@@ -1933,7 +1946,13 @@ CacheIRCompiler::emitLoadDenseElementExistsResult()
     // Hole check.
     BaseObjectElementIndex element(scratch, index);
     masm.branchTestMagic(Assembler::Equal, element, failure->label());
-    masm.moveValue(BooleanValue(true), output.valueReg());
+
+    if (output.hasValue()) {
+        masm.moveValue(BooleanValue(true), output.valueReg());
+    } else {
+        MOZ_ASSERT(output.type() == JSVAL_TYPE_BOOLEAN);
+        masm.movePtr(ImmWord(true), output.typedReg().gpr());
+    }
     return true;
 }
 

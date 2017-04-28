@@ -112,10 +112,10 @@ GamepadManager::StopMonitoring()
   mChannelChildren.Clear();
   mGamepads.Clear();
 
-#if defined(XP_WIN) || defined(XP_MACOSX) || defined(XP_LINUX)
-  gfx::VRManagerChild* vm = gfx::VRManagerChild::Get();
-  vm->SendControllerListenerRemoved();
-#endif
+  if (gfx::VRManagerChild::IsCreated()) {
+    gfx::VRManagerChild* vm = gfx::VRManagerChild::Get();
+    vm->SendControllerListenerRemoved();
+  }
 }
 
 void
@@ -452,6 +452,49 @@ GamepadManager::NewPoseEvent(uint32_t aIndex, GamepadServiceType aServiceType,
 }
 
 void
+GamepadManager::NewHandChangeEvent(uint32_t aIndex, GamepadServiceType aServiceType,
+                                   GamepadHand aHand)
+{
+  if (mShuttingDown) {
+    return;
+  }
+
+  uint32_t newIndex = GetGamepadIndexWithServiceType(aIndex, aServiceType);
+
+  RefPtr<Gamepad> gamepad = GetGamepad(newIndex);
+  if (!gamepad) {
+    return;
+  }
+  gamepad->SetHand(aHand);
+
+  // Hold on to listeners in a separate array because firing events
+  // can mutate the mListeners array.
+  nsTArray<RefPtr<nsGlobalWindow>> listeners(mListeners);
+  MOZ_ASSERT(!listeners.IsEmpty());
+
+  for (uint32_t i = 0; i < listeners.Length(); i++) {
+
+    MOZ_ASSERT(listeners[i]->IsInnerWindow());
+
+    // Only send events to non-background windows
+    if (!listeners[i]->AsInner()->IsCurrentInnerWindow() ||
+        listeners[i]->GetOuterWindow()->IsBackground()) {
+      continue;
+    }
+
+    bool firstTime = MaybeWindowHasSeenGamepad(listeners[i], newIndex);
+
+    RefPtr<Gamepad> listenerGamepad = listeners[i]->GetGamepad(newIndex);
+    if (listenerGamepad) {
+      listenerGamepad->SetHand(aHand);
+      if (firstTime) {
+        FireConnectionEvent(listeners[i], listenerGamepad, true);
+      }
+    }
+  }
+}
+
+void
 GamepadManager::NewConnectionEvent(uint32_t aIndex, bool aConnected)
 {
   if (mShuttingDown) {
@@ -664,6 +707,11 @@ GamepadManager::Update(const GamepadChangeEvent& aEvent)
     NewPoseEvent(a.index(), a.service_type(), a.pose_state());
     return;
   }
+   if (aEvent.type() == GamepadChangeEvent::TGamepadHandInformation) {
+    const GamepadHandInformation& a = aEvent.get_GamepadHandInformation();
+    NewHandChangeEvent(a.index(), a.service_type(), a.hand());
+    return;
+  }
 
   MOZ_CRASH("We shouldn't be here!");
 
@@ -681,12 +729,14 @@ GamepadManager::VibrateHaptic(uint32_t aControllerIdx, uint32_t aHapticIndex,
   }
 
   if (aControllerIdx >= VR_GAMEPAD_IDX_OFFSET) {
-    uint32_t index = aControllerIdx - VR_GAMEPAD_IDX_OFFSET;
-    gfx::VRManagerChild* vm = gfx::VRManagerChild::Get();
-    vm->AddPromise(mPromiseID, promise);
-    vm->SendVibrateHaptic(index, aHapticIndex,
-                          aIntensity, aDuration,
-                          mPromiseID);
+    if (gfx::VRManagerChild::IsCreated()) {
+      const uint32_t index = aControllerIdx - VR_GAMEPAD_IDX_OFFSET;
+      gfx::VRManagerChild* vm = gfx::VRManagerChild::Get();
+      vm->AddPromise(mPromiseID, promise);
+      vm->SendVibrateHaptic(index, aHapticIndex,
+                            aIntensity, aDuration,
+                            mPromiseID);
+    }
   } else {
     for (const auto& channelChild: mChannelChildren) {
       channelChild->AddPromise(mPromiseID, promise);
@@ -706,9 +756,11 @@ GamepadManager::StopHaptics()
   for (auto iter = mGamepads.Iter(); !iter.Done(); iter.Next()) {
     const uint32_t gamepadIndex = iter.UserData()->HashKey();
     if (gamepadIndex >= VR_GAMEPAD_IDX_OFFSET) {
-      const uint32_t index = gamepadIndex - VR_GAMEPAD_IDX_OFFSET;
-      gfx::VRManagerChild* vm = gfx::VRManagerChild::Get();
-      vm->SendStopVibrateHaptic(index);
+      if (gfx::VRManagerChild::IsCreated()) {
+        const uint32_t index = gamepadIndex - VR_GAMEPAD_IDX_OFFSET;
+        gfx::VRManagerChild* vm = gfx::VRManagerChild::Get();
+        vm->SendStopVibrateHaptic(index);
+      }
     } else {
       for (auto& channelChild : mChannelChildren) {
         channelChild->SendStopVibrateHaptic(gamepadIndex);
@@ -733,12 +785,12 @@ GamepadManager::ActorCreated(PBackgroundChild *aActor)
   child->SendGamepadListenerAdded();
   mChannelChildren.AppendElement(child);
 
-#if defined(XP_WIN) || defined(XP_MACOSX) || defined(XP_LINUX)
-  // Construct VRManagerChannel and ask adding the connected
-  // VR controllers to GamepadManager
-  gfx::VRManagerChild* vm = gfx::VRManagerChild::Get();
-  vm->SendControllerListenerAdded();
-#endif
+  if (gfx::VRManagerChild::IsCreated()) {
+    // Construct VRManagerChannel and ask adding the connected
+    // VR controllers to GamepadManager
+    gfx::VRManagerChild* vm = gfx::VRManagerChild::Get();
+    vm->SendControllerListenerAdded();
+  }
 }
 
 //Override nsIIPCBackgroundChildCreateCallback

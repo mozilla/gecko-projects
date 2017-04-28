@@ -27,6 +27,8 @@ const Columns = I.Record({
   remoteip: false,
   cause: true,
   type: true,
+  cookies: false,
+  setCookies: false,
   transferred: true,
   contentSize: true,
   waterfall: true,
@@ -40,15 +42,12 @@ const UI = I.Record({
   waterfallWidth: null,
 });
 
-// Safe bounds for waterfall width (px)
-const REQUESTS_WATERFALL_SAFE_BOUNDS = 90;
-
 function resetColumns(state) {
   return state.set("columns", new Columns());
 }
 
 function resizeWaterfall(state, action) {
-  return state.set("waterfallWidth", action.width - REQUESTS_WATERFALL_SAFE_BOUNDS);
+  return state.set("waterfallWidth", action.width);
 }
 
 function openNetworkDetails(state, action) {

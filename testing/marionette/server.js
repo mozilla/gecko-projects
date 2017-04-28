@@ -19,10 +19,11 @@ Cu.import("chrome://marionette/content/driver.js");
 Cu.import("chrome://marionette/content/error.js");
 Cu.import("chrome://marionette/content/message.js");
 
-// Bug 1083711: Load transport.js as an SDK module instead of subscript
-loader.loadSubScript("resource://devtools/shared/transport/transport.js");
+Cu.import("chrome://marionette/content/transport.js");
 
 const logger = Log.repository.getLogger("Marionette");
+
+const {KeepWhenOffline, LoopbackOnly} = Ci.nsIServerSocket;
 
 this.EXPORTED_SYMBOLS = ["server"];
 this.server = {};
@@ -30,6 +31,7 @@ this.server = {};
 const PROTOCOL_VERSION = 3;
 
 const PREF_CONTENT_LISTENER = "marionette.contentListener";
+const PREF_PORT = "marionette.port";
 const PREF_RECOMMENDED = "marionette.prefs.recommended";
 
 // Marionette sets preferences recommended for automation when it starts,
@@ -92,9 +94,6 @@ const RECOMMENDED_PREFS = new Map([
   // thumbnails in general cannot hurt
   ["browser.pagethumbnails.capturing_disabled", true],
 
-  // Avoid performing Reader Mode intros during tests
-  ["browser.reader.detectedFirstArticle", true],
-
   // Disable safebrowsing components.
   //
   // These should also be set in the profile prior to starting Firefox,
@@ -126,8 +125,8 @@ const RECOMMENDED_PREFS = new Map([
   // Do not redirect user when a milstone upgrade of Firefox is detected
   ["browser.startup.homepage_override.mstone", "ignore"],
 
-  // Disable tab animation
-  ["browser.tabs.animate", false],
+  // Disable browser animations
+  ["toolkit.cosmeticAnimations.enabled", false],
 
   // Do not allow background tabs to be zombified, otherwise for tests
   // that open additional tabs, the test harness tab itself might get
@@ -268,13 +267,10 @@ server.TCPListener = class {
   /**
    * @param {number} port
    *     Port for server to listen to.
-   * @param {boolean=} forceLocal
-   *     Listen only to connections from loopback if true (default).
-   *     When false, accept all connections.
    */
-  constructor (port, forceLocal = true) {
+  constructor (port) {
     this.port = port;
-    this.forceLocal = forceLocal;
+    this.socket = null;
     this.conns = new Set();
     this.nextConnID = 0;
     this.alive = false;
@@ -285,7 +281,7 @@ server.TCPListener = class {
   /**
    * Function produces a GeckoDriver.
    *
-   * Determines application nameto initialise the driver with.
+   * Determines application name to initialise the driver with.
    *
    * @return {GeckoDriver}
    *     A driver instance.
@@ -305,6 +301,13 @@ server.TCPListener = class {
     this._acceptConnections = value;
   }
 
+  /**
+   * Bind this listener to |port| and start accepting incoming socket
+   * connections on |onSocketAccepted|.
+   *
+   * The marionette.port preference will be populated with the value
+   * of |this.port|.
+   */
   start () {
     if (this.alive) {
       return;
@@ -321,14 +324,12 @@ server.TCPListener = class {
       }
     }
 
-    let flags = Ci.nsIServerSocket.KeepWhenOffline;
-    if (this.forceLocal) {
-      flags |= Ci.nsIServerSocket.LoopbackOnly;
-    } else {
-      logger.warn("Server socket is not limited to loopback connections");
-    }
-    this.listener = new ServerSocket(this.port, flags, 1);
-    this.listener.asyncListen(this);
+    const flags = KeepWhenOffline | LoopbackOnly;
+    const backlog = 1;
+    this.socket = new ServerSocket(this.port, flags, backlog);
+    this.socket.asyncListen(this);
+    this.port = this.socket.port;
+    Preferences.set(PREF_PORT, this.port);
 
     this.alive = true;
     this._acceptConnections = true;
@@ -339,20 +340,18 @@ server.TCPListener = class {
       return;
     }
 
+    this._acceptConnections = false;
+
+    this.socket.close();
+    this.socket = null;
+
     for (let k of this.alteredPrefs) {
       logger.debug(`Resetting recommended pref ${k}`);
       Preferences.reset(k);
     }
-    this.closeListener();
 
     this.alteredPrefs.clear();
     this.alive = false;
-    this._acceptConnections = false;
-  }
-
-  closeListener () {
-    this.listener.close();
-    this.listener = null;
   }
 
   onSocketAccepted (serverSocket, clientSocket) {

@@ -8,7 +8,7 @@ const {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
 this.EXPORTED_SYMBOLS = ["ExtensionsUI"];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://devtools/shared/event-emitter.js");
+Cu.import("resource://gre/modules/EventEmitter.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
                                   "resource://gre/modules/AddonManager.jsm");
@@ -247,7 +247,8 @@ this.ExtensionsUI = {
       }
       let match = /^[htps*]+:\/\/([^/]+)\//.exec(permission);
       if (!match) {
-        throw new Error("Unparseable host permission");
+        Cu.reportError(`Unparseable host permission ${permission}`);
+        continue;
       }
       if (match[1] == "*") {
         allUrls = true;
@@ -397,7 +398,9 @@ this.ExtensionsUI = {
         label: strings.acceptText,
         accessKey: strings.acceptKey,
         callback: () => {
-          this.histogram.add(histkey + "Accepted");
+          if (histkey) {
+            this.histogram.add(histkey + "Accepted");
+          }
           resolve(true);
         },
       };
@@ -406,7 +409,9 @@ this.ExtensionsUI = {
           label: strings.cancelText,
           accessKey: strings.cancelKey,
           callback: () => {
-            this.histogram.add(histkey + "Rejected");
+            if (histkey) {
+              this.histogram.add(histkey + "Rejected");
+            }
             resolve(false);
           },
         },

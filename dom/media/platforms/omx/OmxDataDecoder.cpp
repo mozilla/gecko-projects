@@ -99,7 +99,7 @@ protected:
 
 OmxDataDecoder::OmxDataDecoder(const TrackInfo& aTrackInfo,
                                layers::ImageContainer* aImageContainer)
-  : mOmxTaskQueue(CreateMediaDecodeTaskQueue())
+  : mOmxTaskQueue(CreateMediaDecodeTaskQueue("OmxDataDecoder::mOmxTaskQueue"))
   , mImageContainer(aImageContainer)
   , mWatchManager(this, mOmxTaskQueue)
   , mOmxState(OMX_STATETYPE::OMX_StateInvalid, "OmxDataDecoder::mOmxState")
@@ -445,7 +445,7 @@ OmxDataDecoder::FillAndEmptyBuffers()
     inbuf->mBuffer->nOffset = 0;
     inbuf->mBuffer->nFlags = inbuf->mBuffer->nAllocLen > data->Size() ?
                              OMX_BUFFERFLAG_ENDOFFRAME : 0;
-    inbuf->mBuffer->nTimeStamp = data->mTime;
+    inbuf->mBuffer->nTimeStamp = data->mTime.ToMicroseconds();
     if (data->Size()) {
       inbuf->mRawData = mMediaRawDatas[0];
     } else {
@@ -994,11 +994,11 @@ MediaDataHelper::CreateYUV420VideoData(BufferData* aBufferData)
     VideoData::CreateAndCopyData(info,
                                  mImageContainer,
                                  0, // Filled later by caller.
-                                 0, // Filled later by caller.
-                                 1, // We don't know the duration.
+                                 media::TimeUnit::Zero(), // Filled later by caller.
+                                 media::TimeUnit::FromMicroseconds(1), // We don't know the duration.
                                  b,
                                  0, // Filled later by caller.
-                                 -1,
+                                 media::TimeUnit::FromMicroseconds(-1),
                                  info.ImageRect());
 
   LOG("YUV420 VideoData: disp width %d, height %d, pic width %d, height %d, time %lld",

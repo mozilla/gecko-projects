@@ -30,11 +30,11 @@ const PanelUI = {
   get kElements() {
     return {
       contents: "PanelUI-contents",
-      mainView: "PanelUI-mainView",
-      multiView: "PanelUI-multiView",
+      mainView: gPhotonStructure ? "appMenu-mainView" : "PanelUI-mainView",
+      multiView: gPhotonStructure ? "appMenu-multiView" : "PanelUI-multiView",
       helpView: "PanelUI-helpView",
       menuButton: "PanelUI-menu-button",
-      panel: gPhotonStructure ? "PanelUI-photon-popup" : "PanelUI-popup",
+      panel: gPhotonStructure ? "appMenu-popup" : "PanelUI-popup",
       notificationPanel: "PanelUI-notification-popup",
       scroller: "PanelUI-contents-scroller",
       footer: "PanelUI-footer"
@@ -149,6 +149,9 @@ const PanelUI = {
    * @param aEvent the event (if any) that triggers showing the menu.
    */
   show(aEvent) {
+    if (gPhotonStructure) {
+      this._ensureShortcutsShown();
+    }
     return new Promise(resolve => {
       this.ensureReady().then(() => {
         if (this.panel.state == "open" ||
@@ -223,6 +226,13 @@ const PanelUI = {
     } else {
       // If it's not a string, assume RegExp
       notifications = this.notifications.filter(n => id.test(n.id));
+    }
+    // _updateNotifications can be expensive if it forces attachment of XBL
+    // bindings that haven't been used yet, so return early if we haven't found
+    // any notification to remove, as callers may expect this removeNotification
+    // method to be a no-op for non-existent notifications.
+    if (!notifications.length) {
+      return;
     }
 
     notifications.forEach(n => {
@@ -431,8 +441,9 @@ const PanelUI = {
       return;
     }
 
-    if (aPlacementArea == CustomizableUI.AREA_PANEL) {
-      this.multiView.showSubView(aViewId, aAnchor);
+    let container = aAnchor.closest("panelmultiview");
+    if (container) {
+      container.showSubView(aViewId, aAnchor);
     } else if (!aAnchor.open) {
       aAnchor.open = true;
 
@@ -685,8 +696,14 @@ const PanelUI = {
         this._showMenuItem(this.notifications[0]);
       }
     } else if (doorhangers.length > 0) {
-      this._clearBadge();
-      this._showNotificationPanel(doorhangers[0]);
+      if (window.fullScreen) {
+        this._hidePopup();
+        this._showBadge(doorhangers[0]);
+        this._showMenuItem(doorhangers[0]);
+      } else {
+        this._clearBadge();
+        this._showNotificationPanel(doorhangers[0]);
+      }
     } else {
       this._hidePopup();
       this._showBadge(this.notifications[0]);
@@ -854,6 +871,22 @@ const PanelUI = {
       document.getAnonymousElementByAttribute(candidate, "class",
                                               "toolbarbutton-icon");
     return iconAnchor || candidate;
+  },
+
+  _addedShortcuts: false,
+  _ensureShortcutsShown() {
+    if (this._addedShortcuts) {
+      return;
+    }
+    this._addedShortcuts = true;
+    for (let button of this.mainView.querySelectorAll("toolbarbutton[key]")) {
+      let keyId = button.getAttribute("key");
+      let key = document.getElementById(keyId);
+      if (!key) {
+        continue;
+      }
+      button.setAttribute("shortcut", ShortcutUtils.prettifyShortcut(key));
+    }
   },
 
   _notify(status, topic) {

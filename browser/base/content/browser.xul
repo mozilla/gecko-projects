@@ -165,6 +165,7 @@
            hidden="true"
            orient="vertical"
            noautofocus="true"
+           noautohide="true"
            consumeoutsideclicks="false"
            level="parent"
            tabspecific="true">
@@ -402,6 +403,16 @@
       <hbox pack="center">
         <button id="ctrlTab-showAll" class="ctrlTab-preview" noicon="true"/>
       </hbox>
+    </panel>
+
+    <panel id="page-action-panel"
+           role="group"
+           type="arrow"
+           hidden="true"
+           flip="slide"
+           position="bottomcenter topright"
+           noautofocus="true">
+      This space intentionally left blank.
     </panel>
 
     <!-- Bookmarks and history tooltip -->
@@ -801,6 +812,11 @@
                              class="chromeclass-toolbar-additional"
                              command="Browser:Stop"
                              tooltip="dynamic-shortcut-tooltip"/>
+              <toolbarbutton id="urlbar-page-action-button"
+                             hidden="true"
+                             class="chromeclass-toolbar-additional"
+                             tooltiptext="&pageActionButton.tooltip;"
+                             onclick="gPageActionButton.onEvent(event);"/>
             </textbox>
           </hbox>
         </toolbaritem>
@@ -1051,7 +1067,7 @@
 
       <toolbarbutton id="new-window-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
                      label="&newNavigatorCmd.label;"
-                     command="key_newNavigator"
+                     command="cmd_newNavigator"
                      tooltip="dynamic-shortcut-tooltip"
                      ondrop="newWindowButtonObserver.onDrop(event)"
                      ondragover="newWindowButtonObserver.onDragOver(event)"

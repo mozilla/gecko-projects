@@ -89,30 +89,26 @@ class ActionSequence(object):
             .key_up("a") \
             .perform()
     """
-    def __init__(self, session, action_type, input_id, pointer_params=None):
+    def __init__(self, session, action_type, input_id):
         """Represents a sequence of actions of one type for one input source.
 
         :param session: WebDriver session.
         :param action_type: Action type; may be "none", "key", or "pointer".
         :param input_id: ID of input source.
-        :param pointer_params: Optional dictionary of pointer parameters.
         """
         self.session = session
+        # TODO take advantage of remote end generating uuid
         self._id = input_id
         self._type = action_type
         self._actions = []
-        self._pointer_params = pointer_params
 
     @property
     def dict(self):
-        d = {
-            "type": self._type,
-            "id": self._id,
-            "actions": self._actions,
+        return {
+          "type": self._type,
+          "id": self._id,
+          "actions": self._actions,
         }
-        if self._pointer_params is not None:
-            d["parameters"] = self._pointer_params
-        return d
 
     @command
     def perform(self):
@@ -151,18 +147,20 @@ class ActionSequence(object):
         self._actions.append(action)
         return self
 
-    def pointer_up(self, button):
+    def pointer_up(self, button=0):
         """Queue a pointerUp action for `button`.
 
         :param button: Pointer button to perform action with.
+                       Default: 0, which represents main device button.
         """
         self._pointer_action("pointerUp", button)
         return self
 
-    def pointer_down(self, button):
+    def pointer_down(self, button=0):
         """Queue a pointerDown action for `button`.
 
         :param button: Pointer button to perform action with.
+                       Default: 0, which represents main device button.
         """
         self._pointer_action("pointerDown", button)
         return self

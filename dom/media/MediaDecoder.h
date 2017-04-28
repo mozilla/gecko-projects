@@ -41,7 +41,6 @@ class nsIPrincipal;
 namespace mozilla {
 
 namespace dom {
-class Promise;
 class HTMLMediaElement;
 }
 
@@ -179,8 +178,7 @@ public:
   // Seek to the time position in (seconds) from the start of the video.
   // If aDoFastSeek is true, we'll seek to the sync point/keyframe preceeding
   // the seek target.
-  virtual nsresult Seek(double aTime, SeekTarget::Type aSeekType,
-                        dom::Promise* aPromise = nullptr);
+  virtual nsresult Seek(double aTime, SeekTarget::Type aSeekType);
 
   // Initialize state machine and schedule it.
   nsresult InitializeStateMachine();
@@ -253,17 +251,6 @@ public:
   bool OwnerHasError() const;
 
   already_AddRefed<GMPCrashHelper> GetCrashHelper() override;
-
-protected:
-  // Updates the media duration. This is called while the media is being
-  // played, calls before the media has reached loaded metadata are ignored.
-  // The duration is assumed to be an estimate, and so a degree of
-  // instability is expected; if the incoming duration is not significantly
-  // different from the existing duration, the change request is ignored.
-  // If the incoming duration is significantly different, the duration is
-  // changed, this causes a durationchanged event to fire to the media
-  // element.
-  void UpdateEstimatedMediaDuration(int64_t aDuration) override;
 
 public:
   // Returns true if this media supports random seeking. False for example with
@@ -570,9 +557,9 @@ protected:
   // This corresponds to the "current position" in HTML5.
   // We allow omx subclasses to substitute an alternative current position for
   // usage with the audio offload player.
-  virtual int64_t CurrentPosition()
+  virtual media::TimeUnit CurrentPosition()
   {
-    return mCurrentPosition.Ref().ToMicroseconds();
+    return mCurrentPosition.Ref();
   }
 
   // Official duration of the media resource as observed by script.
@@ -588,7 +575,8 @@ protected:
   // Amount of buffered data ahead of current time required to consider that
   // the next frame is available.
   // An arbitrary value of 250ms is used.
-  static const int DEFAULT_NEXT_FRAME_AVAILABLE_BUFFERED = 250000;
+  static constexpr auto DEFAULT_NEXT_FRAME_AVAILABLE_BUFFERED =
+    media::TimeUnit::FromMicroseconds(250000);
 
 private:
   nsCString GetDebugInfo();
@@ -641,21 +629,10 @@ private:
   RefPtr<CDMProxyPromise> mCDMProxyPromise;
 
 protected:
-  // The promise resolving/rejection is queued as a "micro-task" which will be
-  // handled immediately after the current JS task and before any pending JS
-  // tasks.
-  // At the time we are going to resolve/reject a promise, the "seeking" event
-  // task should already be queued but might yet be processed, so we queue one
-  // more task to file the promise resolving/rejection micro-tasks
-  // asynchronously to make sure that the micro-tasks are processed after the
-  // "seeking" event task.
-  void AsyncResolveSeekDOMPromiseIfExists();
-  void AsyncRejectSeekDOMPromiseIfExists();
   void DiscardOngoingSeekIfExists();
-  virtual void CallSeek(const SeekTarget& aTarget, dom::Promise* aPromise);
+  virtual void CallSeek(const SeekTarget& aTarget);
 
   MozPromiseRequestHolder<SeekPromise> mSeekRequest;
-  RefPtr<dom::Promise> mSeekDOMPromise;
 
   // True when seeking or otherwise moving the play position around in
   // such a manner that progress event data is inaccurate. This is set
@@ -787,13 +764,6 @@ protected:
 
   Canonical<bool> mPreservesPitch;
 
-  // Media duration according to the demuxer's current estimate.
-  // Note that it's quite bizarre for this to live on the main thread - it would
-  // make much more sense for this to be owned by the demuxer's task queue. But
-  // currently this is only every changed in NotifyDataArrived, which runs on
-  // the main thread. That will need to be cleaned up at some point.
-  Canonical<media::NullableTimeUnit> mEstimatedDuration;
-
   // Media duration set explicitly by JS. At present, this is only ever present
   // for MSE.
   Canonical<Maybe<double>> mExplicitDuration;
@@ -838,10 +808,6 @@ public:
   AbstractCanonical<bool>* CanonicalPreservesPitch()
   {
     return &mPreservesPitch;
-  }
-  AbstractCanonical<media::NullableTimeUnit>* CanonicalEstimatedDuration()
-  {
-    return &mEstimatedDuration;
   }
   AbstractCanonical<Maybe<double>>* CanonicalExplicitDuration()
   {

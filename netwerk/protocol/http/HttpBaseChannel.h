@@ -135,6 +135,7 @@ public:
   NS_IMETHOD SetOwner(nsISupports *aOwner) override;
   NS_IMETHOD GetLoadInfo(nsILoadInfo **aLoadInfo) override;
   NS_IMETHOD SetLoadInfo(nsILoadInfo *aLoadInfo) override;
+  NS_IMETHOD GetIsDocument(bool *aIsDocument) override;
   NS_IMETHOD GetNotificationCallbacks(nsIInterfaceRequestor **aCallbacks) override;
   NS_IMETHOD SetNotificationCallbacks(nsIInterfaceRequestor *aCallbacks) override;
   NS_IMETHOD GetContentType(nsACString& aContentType) override;
@@ -353,9 +354,10 @@ public: /* Necko internal use only... */
     DoApplyContentConversions(nsIStreamListener *aNextListener,
                               nsIStreamListener **aNewNextListener);
 
-    // Callback on main thread when NS_AsyncCopy() is finished populating
-    // the new mUploadStream.
-    void EnsureUploadStreamIsCloneableComplete(nsresult aStatus);
+    // Callback on STS thread called by CopyComplete when NS_AsyncCopy()
+    // is finished. This function works as a proxy function to dispatch
+    // |EnsureUploadStreamIsCloneableComplete| to main thread.
+    virtual void OnCopyComplete(nsresult aStatus);
 
     void SetIsTrackingResource()
     {
@@ -412,6 +414,10 @@ protected:
   // Returns true if this channel should intercept the network request and prepare
   // for a possible synthesized response instead.
   bool ShouldIntercept(nsIURI* aURI = nullptr);
+
+  // Callback on main thread when NS_AsyncCopy() is finished populating
+  // the new mUploadStream.
+  void EnsureUploadStreamIsCloneableComplete(nsresult aStatus);
 
 #ifdef DEBUG
   // Check if mPrivateBrowsingId matches between LoadInfo and LoadContext.
@@ -652,8 +658,8 @@ public:
   // AsyncCall calls a member function asynchronously (via an event).
   // retval isn't refcounted and is set only when event was successfully
   // posted, the event is returned for the purpose of cancelling when needed
-  MOZ_MUST_USE nsresult AsyncCall(void (T::*funcPtr)(),
-                                  nsRunnableMethod<T> **retval = nullptr);
+  MOZ_MUST_USE virtual nsresult AsyncCall(void (T::*funcPtr)(),
+                                          nsRunnableMethod<T> **retval = nullptr);
 private:
   T *mThis;
 

@@ -125,6 +125,8 @@ var gFailedOpaqueLayerMessages = [];
 var gFailedAssignedLayer = false;
 var gFailedAssignedLayerMessages = [];
 
+var gStartAfter = undefined;
+
 // The enabled-state of the test-plugins, stored so they can be reset later
 var gTestPluginEnabledStates = null;
 
@@ -389,6 +391,12 @@ function InitAndStartRefTests()
         gFocusFilterMode = prefs.getCharPref("reftest.focusFilterMode");
     } catch(e) {}
 
+    try {
+        gStartAfter = prefs.getCharPref("reftest.startAfter");
+    } catch(e) {
+        gStartAfter = undefined;
+    }
+
 #ifdef MOZ_STYLO
     try {
         gCompareStyloToGecko = prefs.getBoolPref("reftest.compareStyloToGecko");
@@ -544,7 +552,24 @@ function StartTests()
         }
 
         if (gShuffle) {
+            if (gStartAfter !== undefined) {
+                logger.error("Can't resume from a crashed test when " +
+                             "--shuffle is enabled, continue by shuffling " +
+                             "all the tests");
+                DoneTests();
+                return;
+            }
             Shuffle(gURLs);
+        } else if (gStartAfter !== undefined) {
+            // Skip through previously crashed test
+            // We have to do this after chunking so we don't break the numbers
+            var crash_idx = gURLs.map(function(url) {
+                return url['url1']['spec'];
+            }).indexOf(gStartAfter);
+            if (crash_idx == -1) {
+                throw "Can't find the previously crashed test";
+            }
+            gURLs = gURLs.slice(crash_idx + 1);
         }
 
         gTotalTests = gURLs.length;
@@ -775,11 +800,20 @@ function AddPrefSettings(aWhere, aPrefName, aPrefValExpression, aSandbox, aTestP
     var setting = { name: aPrefName,
                     type: prefType,
                     value: prefVal };
-    if (aWhere != "ref-") {
-        aTestPrefSettings.push(setting);
-    }
-    if (aWhere != "test-") {
-        aRefPrefSettings.push(setting);
+
+    if (gCompareStyloToGecko && aPrefName != "layout.css.servo.enabled") {
+        // ref-pref() is ignored, test-pref() and pref() are added to both
+        if (aWhere != "ref-") {
+            aTestPrefSettings.push(setting);
+            aRefPrefSettings.push(setting);
+        }
+    } else {
+        if (aWhere != "ref-") {
+            aTestPrefSettings.push(setting);
+        }
+        if (aWhere != "test-") {
+            aRefPrefSettings.push(setting);
+        }
     }
     return true;
 }
@@ -1132,8 +1166,12 @@ function ReadManifest(aURL, inherited_status, aFilter)
                                              CI.nsIScriptSecurityManager.DISALLOW_SCRIPT);
             secMan.checkLoadURIWithPrincipal(principal, refURI,
                                              CI.nsIScriptSecurityManager.DISALLOW_SCRIPT);
-
-            AddTestItem({ type: items[0],
+            var type = items[0];
+            if (gCompareStyloToGecko) {
+                type = TYPE_REFTEST_EQUAL;
+                refURI = testURI;
+            }
+            AddTestItem({ type: type,
                           expected: expected_status,
                           allowSilentFail: allow_silent_fail,
                           prettyPath: prettyPath,

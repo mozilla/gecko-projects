@@ -8,6 +8,13 @@
  */
 
 add_task(function* () {
+  // Hide file, protocol, remoteip columns to make sure timing division
+  // can render properly
+  Services.prefs.setCharPref(
+    "devtools.netmonitor.hiddenColumns",
+    "[\"file\",\"protocol\",\"remoteip\"]"
+  );
+
   let { tab, monitor } = yield initNetMonitor(CUSTOM_GET_URL);
   info("Starting test... ");
 
@@ -48,9 +55,9 @@ add_task(function* () {
   let lastRequest = getSortedRequests(gStore.getState()).get(1);
 
   info("First request happened at: " +
-       firstRequest.responseHeaders.headers.find(e => e.name == "Date").value);
+       firstRequest.responseHeaders.headers.find(e => e.name == "date").value);
   info("Last request happened at: " +
-       lastRequest.responseHeaders.headers.find(e => e.name == "Date").value);
+       lastRequest.responseHeaders.headers.find(e => e.name == "date").value);
 
   ok(secDivs.length,
      "There should be at least one division on the seconds time scale.");

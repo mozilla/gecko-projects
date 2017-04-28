@@ -310,6 +310,11 @@ user_pref("extensions.shield-recipe-client.api_url", "https://example.com/selfsu
 
 user_pref("media.eme.enabled", true);
 
+// Set the number of shmems the PChromiumCDM protocol pre-allocates to 0,
+// so that we test the case where we under-estimate how many shmems we need
+// to send decoded video frames from the CDM to Gecko.
+user_pref("media.eme.chromium-api.video-shmems", 0);
+
 user_pref("media.autoplay.enabled", true);
 
 // Don't use auto-enabled e10s
@@ -322,9 +327,6 @@ user_pref("dom.ipc.tabs.shutdownTimeoutSecs", 0);
 
 // Don't block add-ons for e10s
 user_pref("extensions.e10sBlocksEnabling", false);
-
-// Avoid performing Reader Mode intros during tests.
-user_pref("browser.reader.detectedFirstArticle", true);
 
 // Make tests run consistently on DevEdition (which has a lightweight theme
 // selected by default).

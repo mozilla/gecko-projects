@@ -9,7 +9,7 @@
 #include <map>
 #include <stdint.h>                     // for uint32_t, uint64_t, uint8_t
 #include <stdio.h>                      // for FILE
-#include <sys/types.h>                  // for int32_t, int64_t
+#include <sys/types.h>                  // for int32_t
 #include "FrameMetrics.h"               // for FrameMetrics
 #include "Units.h"                      // for LayerMargin, LayerPoint, ParentLayerIntRect
 #include "gfxContext.h"
@@ -116,7 +116,8 @@ class LayersPacket;
 
 #define MOZ_LAYER_DECL_NAME(n, e)                              \
   virtual const char* Name() const override { return n; }  \
-  virtual LayerType GetType() const override { return e; }
+  virtual LayerType GetType() const override { return e; } \
+  static LayerType Type() { return e; }
 
 // Defined in LayerUserData.h; please include that file instead.
 class LayerUserData;
@@ -1440,6 +1441,7 @@ public:
   void SetAnimationGeneration(uint64_t aCount) { mAnimationGeneration = aCount; }
 
   bool HasTransformAnimation() const;
+  bool HasOpacityAnimation() const;
 
   StyleAnimationValue GetBaseAnimationStyle() const
   {
@@ -2865,7 +2867,7 @@ public:
   // These getters can be used anytime.
   virtual RefLayer* AsRefLayer() override { return this; }
 
-  virtual int64_t GetReferentId() { return mId; }
+  virtual uint64_t GetReferentId() { return mId; }
 
   /**
    * DRAWING PHASE ONLY

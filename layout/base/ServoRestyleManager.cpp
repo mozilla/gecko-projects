@@ -55,6 +55,10 @@ ServoRestyleManager::PostRestyleEvent(Element* aElement,
     return;
   }
 
+  if (aRestyleHint & ~eRestyle_AllHintsWithAnimations) {
+    mHaveNonAnimationRestyles = true;
+  }
+
   Servo_NoteExplicitHints(aElement, aRestyleHint, aMinChangeHint);
 }
 
@@ -70,6 +74,8 @@ ServoRestyleManager::RebuildAllStyleData(nsChangeHint aExtraHint,
                                          nsRestyleHint aRestyleHint)
 {
   StyleSet()->RebuildData();
+
+  mHaveNonAnimationRestyles = true;
 
   // NOTE(emilio): GeckoRestlyeManager does a sync style flush, which seems
   // not to be needed in my testing.
@@ -207,9 +213,17 @@ ServoRestyleManager::ProcessPostTraversal(Element* aElement,
   RefPtr<nsStyleContext> newContext = nullptr;
   if (recreateContext) {
     MOZ_ASSERT(styleFrame || displayContentsNode);
+
+    auto pseudo = aElement->GetPseudoElementType();
+    nsIAtom* pseudoTag = pseudo == CSSPseudoElementType::NotPseudo
+      ? nullptr : nsCSSPseudoElements::GetPseudoAtom(pseudo);
+
     newContext =
-      aStyleSet->GetContext(computedValues.forget(), aParentContext, nullptr,
-                            CSSPseudoElementType::NotPseudo, aElement);
+      aStyleSet->GetContext(computedValues.forget(),
+                            aParentContext,
+                            pseudoTag,
+                            pseudo,
+                            aElement);
 
     newContext->EnsureSameStructsCached(oldStyleContext);
 
@@ -231,47 +245,6 @@ ServoRestyleManager::ProcessPostTraversal(Element* aElement,
 
     if (styleFrame) {
       styleFrame->UpdateStyleOfOwnedAnonBoxes(*aStyleSet, aChangeList, changeHint);
-    }
-
-    // Update pseudo-elements state if appropriate.
-    const static CSSPseudoElementType pseudosToRestyle[] = {
-      CSSPseudoElementType::before,
-      CSSPseudoElementType::after,
-    };
-
-    for (CSSPseudoElementType pseudoType : pseudosToRestyle) {
-      nsIAtom* pseudoTag = nsCSSPseudoElements::GetPseudoAtom(pseudoType);
-
-      if (nsIFrame* pseudoFrame = FrameForPseudoElement(aElement, pseudoTag)) {
-        // TODO: we could maybe make this more performant via calling into
-        // Servo just once to know which pseudo-elements we've got to restyle?
-        RefPtr<nsStyleContext> pseudoContext =
-          aStyleSet->ProbePseudoElementStyle(aElement, pseudoType, newContext);
-        MOZ_ASSERT(pseudoContext, "should have taken the ReconstructFrame path above");
-        pseudoFrame->SetStyleContext(pseudoContext);
-
-        if (pseudoFrame->GetStateBits() & NS_FRAME_OWNS_ANON_BOXES) {
-          // XXX It really would be good to pass the actual changehint for our
-          // ::before/::after here, but we never computed it!
-          pseudoFrame->UpdateStyleOfOwnedAnonBoxes(*aStyleSet, aChangeList,
-                                                   nsChangeHint_Hints_NotHandledForDescendants);
-        }
-
-        // We only care restyling text nodes, since other type of nodes
-        // (images), are still not supported. If that eventually changes, we
-        // may have to write more code here... Or not, I don't think too
-        // many inherited properties can affect those other frames.
-        StyleChildrenIterator it(pseudoFrame->GetContent());
-        for (nsIContent* n = it.GetNextChild(); n; n = it.GetNextChild()) {
-          if (n->IsNodeOfType(nsINode::eTEXT)) {
-            RefPtr<nsStyleContext> childContext =
-              aStyleSet->ResolveStyleForText(n, pseudoContext);
-            MOZ_ASSERT(n->GetPrimaryFrame(),
-                       "How? This node is created at FC time!");
-            n->GetPrimaryFrame()->SetStyleContext(childContext);
-          }
-        }
-      }
     }
   }
 
@@ -329,25 +302,16 @@ ServoRestyleManager::FrameForPseudoElement(const nsIContent* aContent,
                                            nsIAtom* aPseudoTagOrNull)
 {
   MOZ_ASSERT_IF(aPseudoTagOrNull, aContent->IsElement());
-  nsIFrame* primaryFrame = aContent->GetPrimaryFrame();
-
   if (!aPseudoTagOrNull) {
-    return primaryFrame;
+    return aContent->GetPrimaryFrame();
   }
 
-  // FIXME(emilio): Need to take into account display: contents pseudos!
-  if (!primaryFrame) {
-    return nullptr;
-  }
-
-  // NOTE: we probably need to special-case display: contents here. Gecko's
-  // RestyleManager passes the primary frame of the parent instead.
   if (aPseudoTagOrNull == nsCSSPseudoElements::before) {
-    return nsLayoutUtils::GetBeforeFrameForContent(primaryFrame, aContent);
+    return nsLayoutUtils::GetBeforeFrame(aContent);
   }
 
   if (aPseudoTagOrNull == nsCSSPseudoElements::after) {
-    return nsLayoutUtils::GetAfterFrameForContent(primaryFrame, aContent);
+    return nsLayoutUtils::GetAfterFrame(aContent);
   }
 
   MOZ_CRASH("Unkown pseudo-element given to "
@@ -387,6 +351,9 @@ ServoRestyleManager::ProcessPendingRestyles()
   // in a loop because certain rare paths in the frame constructor (like
   // uninstalling XBL bindings) can trigger additional style validations.
   mInStyleRefresh = true;
+  if (mHaveNonAnimationRestyles) {
+    ++mAnimationGeneration;
+  }
   while (styleSet->StyleDocument()) {
     // Recreate style contexts, and queue up change hints (which also handle
     // lazy frame construction).
@@ -419,6 +386,7 @@ ServoRestyleManager::ProcessPendingRestyles()
 
   FlushOverflowChangedTracker();
 
+  mHaveNonAnimationRestyles = false;
   mInStyleRefresh = false;
   styleSet->AssertTreeIsClean();
 

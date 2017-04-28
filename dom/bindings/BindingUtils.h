@@ -49,6 +49,7 @@ namespace mozilla {
 enum UseCounter : int16_t;
 
 namespace dom {
+class CustomElementReactionsStack;
 template<typename KeyType, typename ValueType> class Record;
 
 nsresult
@@ -1317,25 +1318,27 @@ GetUseXBLScope(const ParentObject& aParentObject)
 
 template<class T>
 inline void
-ClearWrapper(T* p, nsWrapperCache* cache)
+ClearWrapper(T* p, nsWrapperCache* cache, JSObject* obj)
 {
-  cache->ClearWrapper();
+  JS::AutoAssertGCCallback inCallback;
+  cache->ClearWrapper(obj);
 }
 
 template<class T>
 inline void
-ClearWrapper(T* p, void*)
+ClearWrapper(T* p, void*, JSObject* obj)
 {
+  JS::AutoAssertGCCallback inCallback;
   nsWrapperCache* cache;
   CallQueryInterface(p, &cache);
-  ClearWrapper(p, cache);
+  ClearWrapper(p, cache, obj);
 }
 
 template<class T>
 inline void
 UpdateWrapper(T* p, nsWrapperCache* cache, JSObject* obj, const JSObject* old)
 {
-  JS::AutoAssertGCCallback inCallback(obj);
+  JS::AutoAssertGCCallback inCallback;
   cache->UpdateWrapper(obj, old);
 }
 
@@ -1343,7 +1346,7 @@ template<class T>
 inline void
 UpdateWrapper(T* p, void*, JSObject* obj, const JSObject* old)
 {
-  JS::AutoAssertGCCallback inCallback(obj);
+  JS::AutoAssertGCCallback inCallback;
   nsWrapperCache* cache;
   CallQueryInterface(p, &cache);
   UpdateWrapper(p, cache, obj, old);
@@ -3196,6 +3199,12 @@ bool
 GetDesiredProto(JSContext* aCx, const JS::CallArgs& aCallArgs,
                 JS::MutableHandle<JSObject*> aDesiredProto);
 
+// Get the CustomElementReactionsStack for the docgroup of the global
+// of the underlying object of aObj.  This can be null if aObj can't
+// be CheckUnwrapped, or if the global of the result has no docgroup
+// (e.g. because it's not a Window global).
+CustomElementReactionsStack*
+GetCustomElementReactionsStack(JS::Handle<JSObject*> aObj);
 // This function is expected to be called from the constructor function for an
 // HTML element interface; the global/callargs need to be whatever was passed to
 // that constructor function.

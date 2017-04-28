@@ -22,6 +22,7 @@
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/EffectSet.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/ServoComputedValuesWithParent.h"
 #include "mozilla/StyleAnimationValue.h"
 #include "mozilla/dom/DocumentTimeline.h"
 #include "mozilla/dom/Element.h"
@@ -1109,6 +1110,9 @@ nsTransitionManager::PruneCompletedTransitions(mozilla::dom::Element* aElement,
                                                CSSPseudoElementType aPseudoType,
                                                nsStyleContext* aNewStyleContext)
 {
+  MOZ_ASSERT(!aElement->IsGeneratedContentContainerForBefore() &&
+             !aElement->IsGeneratedContentContainerForAfter());
+
   CSSTransitionCollection* collection =
     CSSTransitionCollection::GetAnimationCollection(aElement, aPseudoType);
   if (!collection) {

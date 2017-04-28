@@ -208,10 +208,6 @@ PROFILER_FUNC(bool profiler_is_active(), false)
 // Supported features: "displaylistdump", "gpu", "layersdump", "restyle".
 PROFILER_FUNC(bool profiler_feature_active(const char*), false)
 
-// Set the current frame number. Operates the same whether the profiler is
-// active or not.
-PROFILER_FUNC_VOID(profiler_set_frame_number(int frameNumber))
-
 // Get the profile encoded as a JSON string. A no-op (returning nullptr) if the
 // profiler is inactive.
 PROFILER_FUNC(mozilla::UniquePtr<char[]> profiler_get_profile(double aSinceTime = 0),
@@ -289,8 +285,8 @@ PROFILER_FUNC(bool profiler_thread_is_sleeping(), false)
 // not.
 PROFILER_FUNC_VOID(profiler_js_interrupt_callback())
 
-// Gets the time since the last profiler_init() or profiler_start() call.
-// Operates the same whether the profiler is active or inactive.
+// The number of milliseconds since the process started. Operates the same
+// whether the profiler is active or inactive.
 PROFILER_FUNC(double profiler_time(), 0)
 
 PROFILER_FUNC_VOID(profiler_log(const char *str))
@@ -329,14 +325,6 @@ class ProfilerMarkerPayload;
 //
 extern MOZ_THREAD_LOCAL(PseudoStack*) tlsPseudoStack;
 
-class ProfilerState;
-
-// The core profiler state. Null at process startup, it is set to a non-null
-// value in profiler_init() and stays that way until profiler_shutdown() is
-// called. Therefore it can be checked to determine if the profiler has been
-// initialized but not yet shut down.
-extern ProfilerState* gPS;
-
 #ifndef SAMPLE_FUNCTION_NAME
 # if defined(__GNUC__) || defined(_MSC_VER)
 #  define SAMPLE_FUNCTION_NAME __FUNCTION__
@@ -355,8 +343,6 @@ profiler_call_enter(const char* aInfo,
 {
   // This function runs both on and off the main thread.
 
-  MOZ_RELEASE_ASSERT(gPS);
-
   PseudoStack* stack = tlsPseudoStack.get();
   if (!stack) {
     return stack;
@@ -372,8 +358,6 @@ static inline void
 profiler_call_exit(void* aHandle)
 {
   // This function runs both on and off the main thread.
-
-  MOZ_RELEASE_ASSERT(gPS);
 
   if (!aHandle) {
     return;
@@ -497,8 +481,6 @@ inline PseudoStack*
 profiler_get_pseudo_stack(void)
 {
   // This function runs both on and off the main thread.
-
-  MOZ_RELEASE_ASSERT(gPS);
 
   return tlsPseudoStack.get();
 }

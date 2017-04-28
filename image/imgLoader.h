@@ -48,8 +48,7 @@ public:
   nsrefcnt AddRef()
   {
     NS_PRECONDITION(int32_t(mRefCnt) >= 0, "illegal refcnt");
-    MOZ_ASSERT(_mOwningThread.GetThread() == PR_GetCurrentThread(),
-      "imgCacheEntry addref isn't thread-safe!");
+    NS_ASSERT_OWNINGTHREAD(imgCacheEntry);
     ++mRefCnt;
     NS_LOG_ADDREF(this, mRefCnt, "imgCacheEntry", sizeof(*this));
     return mRefCnt;
@@ -58,8 +57,7 @@ public:
   nsrefcnt Release()
   {
     NS_PRECONDITION(0 != mRefCnt, "dup release");
-    MOZ_ASSERT(_mOwningThread.GetThread() == PR_GetCurrentThread(),
-      "imgCacheEntry release isn't thread-safe!");
+    NS_ASSERT_OWNINGTHREAD(imgCacheEntry);
     --mRefCnt;
     NS_LOG_RELEASE(this, mRefCnt, "imgCacheEntry");
     if (mRefCnt == 0) {
@@ -144,6 +142,14 @@ public:
     return mForcePrincipalCheck;
   }
 
+  bool GetInUse() const {
+    return mInUse;
+  }
+
+  void SetInUse(bool aInUse) {
+    mInUse = aInUse;
+  }
+
   imgLoader* Loader() const
   {
     return mLoader;
@@ -178,6 +184,7 @@ private: // data
   bool mEvicted : 1;
   bool mHasNoProxies : 1;
   bool mForcePrincipalCheck : 1;
+  bool mInUse : 1;
 };
 
 #include <vector>

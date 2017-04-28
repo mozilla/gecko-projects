@@ -11,17 +11,18 @@ const {
   PropTypes,
 } = require("devtools/client/shared/vendor/react");
 const I = require("devtools/client/shared/vendor/immutable");
-
 const { propertiesEqual } = require("../utils/request-utils");
 
 // Components
 const RequestListColumnCause = createFactory(require("./request-list-column-cause"));
 const RequestListColumnContentSize = createFactory(require("./request-list-column-content-size"));
+const RequestListColumnCookies = createFactory(require("./request-list-column-cookies"));
 const RequestListColumnDomain = createFactory(require("./request-list-column-domain"));
 const RequestListColumnFile = createFactory(require("./request-list-column-file"));
 const RequestListColumnMethod = createFactory(require("./request-list-column-method"));
 const RequestListColumnProtocol = createFactory(require("./request-list-column-protocol"));
 const RequestListColumnRemoteIP = createFactory(require("./request-list-column-remote-ip"));
+const RequestListColumnSetCookies = createFactory(require("./request-list-column-set-cookies"));
 const RequestListColumnStatus = createFactory(require("./request-list-column-status"));
 const RequestListColumnTransferredSize = createFactory(require("./request-list-column-transferred-size"));
 const RequestListColumnType = createFactory(require("./request-list-column-type"));
@@ -55,9 +56,10 @@ const UPDATED_REQ_ITEM_PROPS = [
 ];
 
 const UPDATED_REQ_PROPS = [
+  "firstRequestStartedMillis",
   "index",
   "isSelected",
-  "firstRequestStartedMillis",
+  "waterfallWidth",
 ];
 
 /**
@@ -78,11 +80,12 @@ const RequestListItem = createClass({
     onFocusedNodeChange: PropTypes.func,
     onMouseDown: PropTypes.func.isRequired,
     onSecurityIconClick: PropTypes.func.isRequired,
+    waterfallWidth: PropTypes.number,
   },
 
   componentDidMount() {
     if (this.props.isSelected) {
-      this.refs.el.focus();
+      this.refs.listItem.focus();
     }
   },
 
@@ -94,7 +97,7 @@ const RequestListItem = createClass({
 
   componentDidUpdate(prevProps) {
     if (!prevProps.isSelected && this.props.isSelected) {
-      this.refs.el.focus();
+      this.refs.listItem.focus();
       if (this.props.onFocusedNodeChange) {
         this.props.onFocusedNodeChange();
       }
@@ -102,7 +105,7 @@ const RequestListItem = createClass({
   },
 
   render() {
-    const {
+    let {
       columns,
       item,
       index,
@@ -112,23 +115,16 @@ const RequestListItem = createClass({
       onContextMenu,
       onMouseDown,
       onCauseBadgeClick,
-      onSecurityIconClick
+      onSecurityIconClick,
     } = this.props;
 
-    let classList = ["request-list-item"];
-    if (isSelected) {
-      classList.push("selected");
-    }
-
-    if (fromCache) {
-      classList.push("fromCache");
-    }
-
-    classList.push(index % 2 ? "odd" : "even");
+    let classList = ["request-list-item", index % 2 ? "odd" : "even"];
+    isSelected && classList.push("selected");
+    fromCache && classList.push("fromCache");
 
     return (
       div({
-        ref: "el",
+        ref: "listItem",
         className: classList.join(" "),
         "data-id": item.id,
         tabIndex: 0,
@@ -143,6 +139,8 @@ const RequestListItem = createClass({
         columns.get("remoteip") && RequestListColumnRemoteIP({ item }),
         columns.get("cause") && RequestListColumnCause({ item, onCauseBadgeClick }),
         columns.get("type") && RequestListColumnType({ item }),
+        columns.get("cookies") && RequestListColumnCookies({ item }),
+        columns.get("setCookies") && RequestListColumnSetCookies({ item }),
         columns.get("transferred") && RequestListColumnTransferredSize({ item }),
         columns.get("contentSize") && RequestListColumnContentSize({ item }),
         columns.get("waterfall") &&

@@ -312,7 +312,7 @@ public class MediaControlService extends Service implements Tabs.OnTabsChangedLi
                 Log.d(LOGTAG, "Controller, onPlay");
                 super.onPlay();
                 setState(State.PLAYING);
-                notifyObservers("MediaControl", "resumeMedia");
+                notifyObservers("mediaControl", "resumeMedia");
             }
 
             @Override
@@ -320,7 +320,7 @@ public class MediaControlService extends Service implements Tabs.OnTabsChangedLi
                 Log.d(LOGTAG, "Controller, onPause");
                 super.onPause();
                 setState(State.PAUSED);
-                notifyObservers("MediaControl", "mediaControlPaused");
+                notifyObservers("mediaControl", "mediaControlPaused");
             }
 
             @Override
@@ -328,7 +328,7 @@ public class MediaControlService extends Service implements Tabs.OnTabsChangedLi
                 Log.d(LOGTAG, "Controller, onStop");
                 super.onStop();
                 setState(State.STOPPED);
-                notifyObservers("MediaControl", "mediaControlStopped");
+                notifyObservers("mediaControl", "mediaControlStopped");
                 mTabReference = new WeakReference<>(null);
             }
         });
@@ -442,7 +442,7 @@ public class MediaControlService extends Service implements Tabs.OnTabsChangedLi
     private PendingIntent createContentIntent(int tabId) {
         Intent intent = new Intent(getApplicationContext(), BrowserApp.class);
         intent.setAction(GeckoApp.ACTION_SWITCH_TAB);
-        intent.putExtra("TabId", tabId);
+        intent.putExtra(Tabs.INTENT_EXTRA_TAB_ID, tabId);
         return PendingIntent.getActivity(getApplicationContext(), 0, intent, PendingIntent.FLAG_UPDATE_CURRENT);
     }
 

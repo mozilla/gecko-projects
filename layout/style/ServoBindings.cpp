@@ -36,6 +36,7 @@
 #include "nsString.h"
 #include "nsStyleStruct.h"
 #include "nsStyleUtil.h"
+#include "nsSVGElement.h"
 #include "nsTArray.h"
 #include "nsTransitionManager.h"
 
@@ -50,6 +51,7 @@
 #include "mozilla/StyleAnimationValue.h"
 #include "mozilla/SystemGroup.h"
 #include "mozilla/ServoMediaList.h"
+#include "mozilla/ServoComputedValuesWithParent.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ElementInlines.h"
 #include "mozilla/dom/HTMLTableCellElement.h"
@@ -69,6 +71,9 @@ using namespace mozilla::dom;
   }
 #include "mozilla/ServoArcTypeList.h"
 #undef SERVO_ARC_TYPE
+
+
+static Mutex* sServoFontMetricsLock = nullptr;
 
 uint32_t
 Gecko_ChildrenCount(RawGeckoNodeBorrowed aNode)
@@ -283,12 +288,11 @@ Gecko_SetOwnerDocumentNeedsStyleFlush(RawGeckoElementBorrowed aElement)
 }
 
 nsStyleContext*
-Gecko_GetStyleContext(RawGeckoNodeBorrowed aNode, nsIAtom* aPseudoTagOrNull)
+Gecko_GetStyleContext(RawGeckoElementBorrowed aElement,
+                      nsIAtom* aPseudoTagOrNull)
 {
-  MOZ_ASSERT(aNode->IsContent());
   nsIFrame* relevantFrame =
-    ServoRestyleManager::FrameForPseudoElement(aNode->AsContent(),
-                                               aPseudoTagOrNull);
+    ServoRestyleManager::FrameForPseudoElement(aElement, aPseudoTagOrNull);
   if (relevantFrame) {
     return relevantFrame->StyleContext();
   }
@@ -299,11 +303,20 @@ Gecko_GetStyleContext(RawGeckoNodeBorrowed aNode, nsIAtom* aPseudoTagOrNull)
 
   // FIXME(emilio): Is there a shorter path?
   nsCSSFrameConstructor* fc =
-    aNode->OwnerDoc()->GetShell()->GetPresContext()->FrameConstructor();
+    aElement->OwnerDoc()->GetShell()->GetPresContext()->FrameConstructor();
 
   // NB: This is only called for CalcStyleDifference, and we handle correctly
   // the display: none case since Servo still has the older style.
-  return fc->GetDisplayContentsStyleFor(aNode->AsContent());
+  return fc->GetDisplayContentsStyleFor(aElement);
+}
+
+nsIAtom*
+Gecko_GetImplementedPseudo(RawGeckoElementBorrowed aElement)
+{
+  CSSPseudoElementType pseudo = aElement->GetPseudoElementType();
+  if (pseudo == CSSPseudoElementType::NotPseudo)
+    return nullptr;
+  return nsCSSPseudoElements::GetPseudoAtom(pseudo);
 }
 
 nsChangeHint
@@ -371,6 +384,28 @@ Gecko_GetStyleAttrDeclarationBlock(RawGeckoElementBorrowed aElement)
 }
 
 RawServoDeclarationBlockStrongBorrowedOrNull
+Gecko_GetSMILOverrideDeclarationBlock(RawGeckoElementBorrowed aElement)
+{
+  // This function duplicates a lot of the code in
+  // Gecko_GetStyleAttrDeclarationBlock above because I haven't worked out a way
+  // to persuade hazard analysis that a pointer-to-lambda is ok yet.
+  MOZ_ASSERT(aElement, "Invalid GeckoElement");
+
+  DeclarationBlock* decl =
+    const_cast<dom::Element*>(aElement)->GetSMILOverrideStyleDeclaration();
+  if (!decl) {
+    return nullptr;
+  }
+  if (decl->IsGecko()) {
+    // XXX This can happen when nodes are adopted from a Gecko-style-backend
+    //     document into a Servo-style-backend document.  See bug 1330051.
+    NS_WARNING("stylo: requesting a Gecko declaration block?");
+    return nullptr;
+  }
+  return decl->AsServo()->RefRawStrong();
+}
+
+RawServoDeclarationBlockStrongBorrowedOrNull
 Gecko_GetHTMLPresentationAttrDeclarationBlock(RawGeckoElementBorrowed aElement)
 {
   static_assert(sizeof(RefPtr<RawServoDeclarationBlock>) ==
@@ -408,16 +443,27 @@ Gecko_GetExtraContentStyleDeclarations(RawGeckoElementBorrowed aElement)
   return nullptr;
 }
 
+static nsIAtom*
+PseudoTagAndCorrectElementForAnimation(const Element*& aElementOrPseudo) {
+  if (aElementOrPseudo->IsGeneratedContentContainerForBefore()) {
+    aElementOrPseudo = aElementOrPseudo->GetParent()->AsElement();
+    return nsCSSPseudoElements::before;
+  }
+
+  if (aElementOrPseudo->IsGeneratedContentContainerForAfter()) {
+    aElementOrPseudo = aElementOrPseudo->GetParent()->AsElement();
+    return nsCSSPseudoElements::after;
+  }
+
+  return nullptr;
+}
+
 bool
 Gecko_GetAnimationRule(RawGeckoElementBorrowed aElement,
-                       nsIAtom* aPseudoTag,
                        EffectCompositor::CascadeLevel aCascadeLevel,
                        RawServoAnimationValueMapBorrowed aAnimationValues)
 {
-  MOZ_ASSERT(aElement, "Invalid GeckoElement");
-  MOZ_ASSERT(!aPseudoTag ||
-             aPseudoTag == nsCSSPseudoElements::before ||
-             aPseudoTag == nsCSSPseudoElements::after);
+  MOZ_ASSERT(aElement);
 
   nsIDocument* doc = aElement->GetComposedDoc();
   if (!doc || !doc->GetShell()) {
@@ -429,13 +475,16 @@ Gecko_GetAnimationRule(RawGeckoElementBorrowed aElement,
     return false;
   }
 
+  nsIAtom* pseudoTag = PseudoTagAndCorrectElementForAnimation(aElement);
+
   CSSPseudoElementType pseudoType =
     nsCSSPseudoElements::GetPseudoType(
-      aPseudoTag,
+      pseudoTag,
       nsCSSProps::EnabledState::eIgnoreEnabledState);
 
   return presContext->EffectCompositor()
-    ->GetServoAnimationRule(aElement, pseudoType,
+    ->GetServoAnimationRule(aElement,
+                            pseudoType,
                             aCascadeLevel,
                             aAnimationValues);
 }
@@ -449,37 +498,44 @@ Gecko_StyleAnimationsEquals(RawGeckoStyleAnimationListBorrowed aA,
 
 void
 Gecko_UpdateAnimations(RawGeckoElementBorrowed aElement,
-                       nsIAtom* aPseudoTagOrNull,
                        ServoComputedValuesBorrowedOrNull aOldComputedValues,
                        ServoComputedValuesBorrowedOrNull aComputedValues,
                        ServoComputedValuesBorrowedOrNull aParentComputedValues,
-                       UpdateAnimationsTasks aTaskBits)
+                       UpdateAnimationsTasks aTasks)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aElement);
-  MOZ_ASSERT(!aPseudoTagOrNull ||
-             aPseudoTagOrNull == nsCSSPseudoElements::before ||
-             aPseudoTagOrNull == nsCSSPseudoElements::after);
 
   nsPresContext* presContext = nsContentUtils::GetContextForContent(aElement);
   if (!presContext) {
     return;
   }
 
-  UpdateAnimationsTasks tasks = static_cast<UpdateAnimationsTasks>(aTaskBits);
+  nsIAtom* pseudoTag = PseudoTagAndCorrectElementForAnimation(aElement);
   if (presContext->IsDynamic() && aElement->IsInComposedDoc()) {
     const ServoComputedValuesWithParent servoValues =
       { aComputedValues, aParentComputedValues };
     CSSPseudoElementType pseudoType =
-      nsCSSPseudoElements::GetPseudoType(aPseudoTagOrNull,
+      nsCSSPseudoElements::GetPseudoType(pseudoTag,
                                          CSSEnabledState::eForAllContent);
 
-    if (tasks & UpdateAnimationsTasks::CSSAnimations) {
+    if (aTasks & UpdateAnimationsTasks::CSSAnimations) {
       presContext->AnimationManager()->
         UpdateAnimations(const_cast<dom::Element*>(aElement), pseudoType,
                          servoValues);
     }
-    if (tasks & UpdateAnimationsTasks::CSSTransitions) {
+
+    // aComputedValues might be nullptr if the target element is now in a
+    // display:none subtree. We still call Gecko_UpdateAnimations in this case
+    // because we need to stop CSS animations in the display:none subtree.
+    // However, we don't need to update transitions since they are stopped by
+    // RestyleManager::AnimationsWithDestroyedFrame so we just return early
+    // here.
+    if (!aComputedValues) {
+      return;
+    }
+
+    if (aTasks & UpdateAnimationsTasks::CSSTransitions) {
       MOZ_ASSERT(aOldComputedValues);
       const ServoComputedValuesWithParent oldServoValues =
         { aOldComputedValues, nullptr };
@@ -487,7 +543,7 @@ Gecko_UpdateAnimations(RawGeckoElementBorrowed aElement,
         UpdateTransitions(const_cast<dom::Element*>(aElement), pseudoType,
                           oldServoValues, servoValues);
     }
-    if (tasks & UpdateAnimationsTasks::EffectProperties) {
+    if (aTasks & UpdateAnimationsTasks::EffectProperties) {
       presContext->EffectCompositor()->UpdateEffectProperties(
         servoValues, const_cast<dom::Element*>(aElement), pseudoType);
     }
@@ -495,36 +551,81 @@ Gecko_UpdateAnimations(RawGeckoElementBorrowed aElement,
 }
 
 bool
-Gecko_ElementHasAnimations(RawGeckoElementBorrowed aElement,
-                           nsIAtom* aPseudoTagOrNull)
+Gecko_ElementHasAnimations(RawGeckoElementBorrowed aElement)
 {
-  MOZ_ASSERT(!aPseudoTagOrNull ||
-             aPseudoTagOrNull == nsCSSPseudoElements::before ||
-             aPseudoTagOrNull == nsCSSPseudoElements::after);
-
+  nsIAtom* pseudoTag = PseudoTagAndCorrectElementForAnimation(aElement);
   CSSPseudoElementType pseudoType =
-    nsCSSPseudoElements::GetPseudoType(aPseudoTagOrNull,
+    nsCSSPseudoElements::GetPseudoType(pseudoTag,
                                        CSSEnabledState::eForAllContent);
 
   return !!EffectSet::GetEffectSet(aElement, pseudoType);
 }
 
 bool
-Gecko_ElementHasCSSAnimations(RawGeckoElementBorrowed aElement,
-                              nsIAtom* aPseudoTagOrNull)
+Gecko_ElementHasCSSAnimations(RawGeckoElementBorrowed aElement)
 {
-  MOZ_ASSERT(!aPseudoTagOrNull ||
-             aPseudoTagOrNull == nsCSSPseudoElements::before ||
-             aPseudoTagOrNull == nsCSSPseudoElements::after);
-
-  CSSPseudoElementType pseudoType =
-    nsCSSPseudoElements::GetPseudoType(aPseudoTagOrNull,
-                                       CSSEnabledState::eForAllContent);
+  nsIAtom* pseudoTag = PseudoTagAndCorrectElementForAnimation(aElement);
   nsAnimationManager::CSSAnimationCollection* collection =
     nsAnimationManager::CSSAnimationCollection
-                      ::GetAnimationCollection(aElement, pseudoType);
+                      ::GetAnimationCollection(aElement, pseudoTag);
 
   return collection && !collection->mAnimations.IsEmpty();
+}
+
+bool
+Gecko_ElementHasCSSTransitions(RawGeckoElementBorrowed aElement)
+{
+  nsIAtom* pseudoTag = PseudoTagAndCorrectElementForAnimation(aElement);
+  nsTransitionManager::CSSTransitionCollection* collection =
+    nsTransitionManager::CSSTransitionCollection
+                       ::GetAnimationCollection(aElement, pseudoTag);
+
+  return collection && !collection->mAnimations.IsEmpty();
+}
+
+size_t
+Gecko_ElementTransitions_Length(RawGeckoElementBorrowed aElement)
+{
+  nsIAtom* pseudoTag = PseudoTagAndCorrectElementForAnimation(aElement);
+  nsTransitionManager::CSSTransitionCollection* collection =
+    nsTransitionManager::CSSTransitionCollection
+                       ::GetAnimationCollection(aElement, pseudoTag);
+
+  return collection ? collection->mAnimations.Length() : 0;
+}
+
+static CSSTransition*
+GetCurrentTransitionAt(RawGeckoElementBorrowed aElement, size_t aIndex)
+{
+  nsIAtom* pseudoTag = PseudoTagAndCorrectElementForAnimation(aElement);
+  nsTransitionManager::CSSTransitionCollection* collection =
+    nsTransitionManager::CSSTransitionCollection
+                       ::GetAnimationCollection(aElement, pseudoTag);
+  if (!collection) {
+    return nullptr;
+  }
+  nsTArray<RefPtr<CSSTransition>>& transitions = collection->mAnimations;
+  return aIndex < transitions.Length()
+         ? transitions[aIndex].get()
+         : nullptr;
+}
+
+nsCSSPropertyID
+Gecko_ElementTransitions_PropertyAt(RawGeckoElementBorrowed aElement,
+                                    size_t aIndex)
+{
+  CSSTransition* transition = GetCurrentTransitionAt(aElement, aIndex);
+  return transition ? transition->TransitionProperty()
+                    : nsCSSPropertyID::eCSSProperty_UNKNOWN;
+}
+
+RawServoAnimationValueBorrowedOrNull
+Gecko_ElementTransitions_EndValueAt(RawGeckoElementBorrowed aElement,
+                                    size_t aIndex)
+{
+  CSSTransition* transition = GetCurrentTransitionAt(aElement,
+                                                     aIndex);
+  return transition ? transition->ToValue().mServo.get() : nullptr;
 }
 
 double
@@ -556,6 +657,20 @@ Gecko_AnimationGetBaseStyle(void* aBaseStyles, nsCSSPropertyID aProperty)
     static_cast<nsRefPtrHashtable<nsUint32HashKey, RawServoAnimationValue>*>
       (aBaseStyles);
   return base->GetWeak(aProperty);
+}
+
+void
+Gecko_StyleTransition_SetUnsupportedProperty(StyleTransition* aTransition,
+                                             nsIAtom* aAtom)
+{
+  nsCSSPropertyID id =
+    nsCSSProps::LookupProperty(nsDependentAtomString(aAtom),
+                               CSSEnabledState::eForAllContent);
+  if (id == eCSSProperty_UNKNOWN || id == eCSSPropertyExtra_variable) {
+    aTransition->SetUnknownProperty(id, aAtom);
+  } else {
+    aTransition->SetProperty(id);
+  }
 }
 
 void
@@ -595,7 +710,7 @@ Gecko_MatchStringArgPseudo(RawGeckoElementBorrowed aElement,
   EventStates dummyMask; // mask is never read because we pass aDependence=nullptr
   return nsCSSRuleProcessor::StringPseudoMatches(aElement, aType, aIdent,
                                                  aElement->OwnerDoc(), true,
-                                                 dummyMask, false, aSetSlowSelectorFlag, nullptr);
+                                                 dummyMask, aSetSlowSelectorFlag, nullptr);
 }
 
 nsIAtom*
@@ -849,6 +964,12 @@ Gecko_Atomize(const char* aString, uint32_t aLength)
   return NS_Atomize(nsDependentCSubstring(aString, aLength)).take();
 }
 
+nsIAtom*
+Gecko_Atomize16(const nsAString* aString)
+{
+  return NS_Atomize(*aString).take();
+}
+
 void
 Gecko_AddRefAtom(nsIAtom* aAtom)
 {
@@ -894,6 +1015,33 @@ Gecko_AtomEqualsUTF8IgnoreCase(nsIAtom* aAtom, const char* aString, uint32_t aLe
 }
 
 void
+Gecko_EnsureMozBorderColors(nsStyleBorder* aBorder)
+{
+  aBorder->EnsureBorderColors();
+}
+
+void Gecko_ClearMozBorderColors(nsStyleBorder* aBorder, mozilla::Side aSide)
+{
+  aBorder->ClearBorderColors(aSide);
+}
+
+void
+Gecko_AppendMozBorderColors(nsStyleBorder* aBorder, mozilla::Side aSide,
+                            nscolor aColor)
+{
+  aBorder->AppendBorderColor(aSide, aColor);
+}
+
+void
+Gecko_CopyMozBorderColors(nsStyleBorder* aDest, const nsStyleBorder* aSrc,
+                          mozilla::Side aSide)
+{
+  if (aSrc->mBorderColors) {
+    aDest->CopyBorderColorsFrom(aSrc->mBorderColors[aSide], aSide);
+  }
+}
+
+void
 Gecko_FontFamilyList_Clear(FontFamilyList* aList) {
   aList->Clear();
 }
@@ -921,6 +1069,35 @@ Gecko_CopyFontFamilyFrom(nsFont* dst, const nsFont* src)
 {
   dst->fontlist = src->fontlist;
 }
+
+void
+Gecko_nsFont_InitSystem(nsFont* aDest, int32_t aFontId,
+                        const nsStyleFont* aFont, RawGeckoPresContextBorrowed aPresContext)
+{
+  MutexAutoLock lock(*sServoFontMetricsLock);
+  const nsFont* defaultVariableFont =
+    aPresContext->GetDefaultFont(kPresContext_DefaultVariableFont_ID,
+                                 aFont->mLanguage);
+
+  // We have passed uninitialized memory to this function,
+  // initialize it. We can't simply return an nsFont because then
+  // we need to know its size beforehand. Servo cannot initialize nsFont
+  // itself, so this will do.
+  nsFont* system = new (aDest) nsFont(*defaultVariableFont);
+
+  MOZ_RELEASE_ASSERT(system);
+
+  *aDest = *defaultVariableFont;
+  LookAndFeel::FontID fontID = static_cast<LookAndFeel::FontID>(aFontId);
+  nsRuleNode::ComputeSystemFont(aDest, fontID, aPresContext, defaultVariableFont);
+}
+
+void
+Gecko_nsFont_Destroy(nsFont* aDest)
+{
+  aDest->~nsFont();
+}
+
 
 void
 Gecko_SetImageOrientation(nsStyleVisibility* aVisibility,
@@ -1644,8 +1821,6 @@ Gecko_GetBaseSize(nsIAtom* aLanguage)
   return sizes;
 }
 
-static Mutex* sServoFontMetricsLock = nullptr;
-
 void
 InitializeServo()
 {
@@ -1669,6 +1844,9 @@ Gecko_GetFontMetrics(RawGeckoPresContextBorrowed aPresContext,
                      nscoord aFontSize,
                      bool aUseUserFontSet)
 {
+  // This function is still unsafe due to frobbing DOM and network
+  // off main thread. We currently disable it in Servo, see bug 1356105
+  MOZ_ASSERT(NS_IsMainThread());
   MutexAutoLock lock(*sServoFontMetricsLock);
   GeckoFontMetrics ret;
   // Safe because we are locked, and this function is only
@@ -1754,6 +1932,12 @@ void
 Gecko_CSSFontFaceRule_GetCssText(const nsCSSFontFaceRule* aRule,
                                  nsAString* aResult)
 {
+  // GetCSSText serializes nsCSSValues, which have a heap write
+  // hazard when dealing with color values (nsCSSKeywords::AddRefTable)
+  // We only serialize on the main thread; assert to convince the analysis
+  // and prevent accidentally calling this elsewhere
+  MOZ_ASSERT(NS_IsMainThread());
+
   aRule->GetCssText(*aResult);
 }
 

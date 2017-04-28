@@ -70,6 +70,17 @@ pref("extensions.screenshots.system-disabled", true);
 // See the SCOPE constants in AddonManager.jsm for values to use here.
 pref("extensions.autoDisableScopes", 15);
 
+// This is where the profiler WebExtension API will look for breakpad symbols.
+// NOTE: deliberately http right now since https://symbols.mozilla.org is not supported.
+pref("extensions.geckoProfiler.symbols.url", "http://symbols.mozilla.org/");
+pref("extensions.geckoProfiler.acceptedExtensionIds", "geckoprofiler@mozilla.com");
+#if defined(XP_LINUX) || defined (XP_MACOSX)
+pref("extensions.geckoProfiler.getSymbolRules", "localBreakpad,remoteBreakpad,nm");
+#else // defined(XP_WIN)
+pref("extensions.geckoProfiler.getSymbolRules", "localBreakpad,remoteBreakpad");
+#endif
+
+
 // Add-on content security policies.
 pref("extensions.webextensions.base-content-security-policy", "script-src 'self' https://* moz-extension: blob: filesystem: 'unsafe-eval' 'unsafe-inline'; object-src 'self' https://* moz-extension: blob: filesystem:;");
 pref("extensions.webextensions.default-content-security-policy", "script-src 'self'; object-src 'self';");
@@ -254,7 +265,6 @@ pref("browser.warnOnQuit", true);
 // might still show the window closing dialog with showQuitWarning == false.
 pref("browser.showQuitWarning", false);
 pref("browser.fullscreen.autohide", true);
-pref("browser.fullscreen.animate", true);
 pref("browser.overlink-delay", 80);
 
 #ifdef UNIX_BUT_NOT_MAC
@@ -444,7 +454,6 @@ pref("browser.tabs.opentabfor.middleclick", true);
 pref("browser.tabs.loadDivertedInBackground", false);
 pref("browser.tabs.loadBookmarksInBackground", false);
 pref("browser.tabs.tabClipWidth", 140);
-pref("browser.tabs.animate", true);
 #ifdef UNIX_BUT_NOT_MAC
 pref("browser.tabs.drawInTitlebar", false);
 #else
@@ -654,11 +663,6 @@ pref("accessibility.typeaheadfind", false);
 pref("accessibility.typeaheadfind.timeout", 5000);
 pref("accessibility.typeaheadfind.linksonly", false);
 pref("accessibility.typeaheadfind.flashBar", 1);
-
-#ifdef NIGHTLY_BUILD
-pref("findbar.highlightAll", true);
-pref("findbar.modalHighlight", true);
-#endif
 
 // Tracks when accessibility is loaded into the previous session.
 pref("accessibility.loadedInLastSession", false);
@@ -1006,6 +1010,13 @@ pref("security.sandbox.content.level", 1);
 // allow stack tracing.  This does not require a restart to take effect.
 pref("security.sandbox.windows.log.stackTraceDepth", 0);
 #endif
+
+// This controls the strength of the Windows GPU process sandbox.  Changes
+// will require restart.
+// For information on what the level number means, see
+// SetSecurityLevelForGPUProcess() in
+// security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp
+pref("security.sandbox.gpu.level", 1);
 #endif
 
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
@@ -1530,7 +1541,6 @@ pref("dom.ipc.reportProcessHangs", false);
 pref("dom.ipc.reportProcessHangs", true);
 #endif
 
-pref("browser.reader.detectedFirstArticle", false);
 // Don't limit how many nodes we care about on desktop:
 pref("reader.parse-node-limit", 0);
 
@@ -1619,6 +1629,9 @@ pref("browser.crashReports.unsubmittedCheck.autoSubmit", false);
 pref("browser.formautofill.experimental", false);
 pref("browser.formautofill.enabled", false);
 pref("browser.formautofill.loglevel", "Warn");
+
+// Whether or not to restore a session with lazy-browser tabs.
+pref("browser.sessionstore.restore_tabs_lazily", true);
 
 // Enable safebrowsing v4 tables (suffixed by "-proto") update.
 #ifdef NIGHTLY_BUILD

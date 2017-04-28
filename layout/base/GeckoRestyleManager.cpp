@@ -1174,9 +1174,16 @@ ElementRestyler::ElementRestyler(ParentContextFromChildFrame,
 #endif
 {
   MOZ_ASSERT_IF(mContent, !mContent->IsStyledByServo());
-  MOZ_ASSERT(!(mHintsHandledByAncestors & nsChangeHint_ReconstructFrame),
-             "why restyle descendants if we are reconstructing the frame for "
-             "an ancestor?");
+
+  // We would assert here that we're not restyling a child provider frame if
+  // mHintsHandledByAncestors includes nsChangeHint_ReconstructFrame, but
+  // we do actually do this if the ReconstructFrame hint came from the
+  // RestyleTracker, rather than generated from CalcDifference.  (We could
+  // even try to avoid restyling the child provider frame, by returning
+  // early in ElementRestyler::Restyle if we grab out a ReconstructFrame
+  // hint from the RestyleTracker, but it's trickier to verify its correctness
+  // with all of the tree patching that happens currently, so for now we just
+  // skip the assertion.)
 }
 
 ElementRestyler::ElementRestyler(nsPresContext* aPresContext,
@@ -3322,14 +3329,14 @@ ElementRestyler::MustReframeForPseudo(CSSPseudoElementType aPseudoType,
     // Check for a ::before pseudo style and the absence of a ::before content,
     // but only if aFrame is null or is the first continuation/ib-split.
     if ((aFrame && !nsLayoutUtils::IsFirstContinuationOrIBSplitSibling(aFrame)) ||
-        nsLayoutUtils::GetBeforeFrameForContent(aGenConParentFrame, aContent)) {
+        nsLayoutUtils::GetBeforeFrame(aContent)) {
       return false;
     }
   } else {
     // Similarly for ::after, but check for being the last continuation/
     // ib-split.
     if ((aFrame && nsLayoutUtils::GetNextContinuationOrIBSplitSibling(aFrame)) ||
-        nsLayoutUtils::GetAfterFrameForContent(aGenConParentFrame, aContent)) {
+        nsLayoutUtils::GetAfterFrame(aContent)) {
       return false;
     }
   }

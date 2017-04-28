@@ -148,7 +148,6 @@ nsImageRenderer::PrepareImage()
         bool isEntireImage;
         bool success =
           mImage->ComputeActualCropRect(actualCropRect, &isEntireImage);
-        NS_ASSERTION(success, "ComputeActualCropRect() should not fail here");
         if (!success || actualCropRect.IsEmpty()) {
           // The cropped image has zero size
           mPrepareResult = DrawResult::BAD_IMAGE;
@@ -513,7 +512,7 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
       CSSIntSize imageSize(nsPresContext::AppUnitsToIntCSSPixels(mSize.width),
                            nsPresContext::AppUnitsToIntCSSPixels(mSize.height));
       result =
-        nsLayoutUtils::DrawBackgroundImage(*ctx,
+        nsLayoutUtils::DrawBackgroundImage(*ctx, mForFrame,
                                            aPresContext,
                                            mImageContainer, imageSize,
                                            samplingFilter,
@@ -577,7 +576,7 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
   return result;
 }
 
-void
+DrawResult
 nsImageRenderer::BuildWebRenderDisplayItems(nsPresContext*       aPresContext,
                                             mozilla::wr::DisplayListBuilder&            aBuilder,
                                             nsTArray<WebRenderParentCommand>&           aParentCommands,
@@ -592,11 +591,11 @@ nsImageRenderer::BuildWebRenderDisplayItems(nsPresContext*       aPresContext,
 {
   if (!IsReady()) {
     NS_NOTREACHED("Ensure PrepareImage() has returned true before calling me");
-    return;
+    return DrawResult::NOT_READY;
   }
   if (aDest.IsEmpty() || aFill.IsEmpty() ||
       mSize.width <= 0 || mSize.height <= 0) {
-    return;
+    return DrawResult::SUCCESS;
   }
 
   switch (mType) {
@@ -614,36 +613,35 @@ nsImageRenderer::BuildWebRenderDisplayItems(nsPresContext*       aPresContext,
                                                                                     ConvertImageRendererToDrawFlags(mFlags));
       if (!container) {
         NS_WARNING("Failed to get image container");
-        return;
+        return DrawResult::BAD_IMAGE;
       }
-      uint64_t externalImageId = aLayer->SendImageContainer(container);
-      if (!externalImageId) {
-        return;
+      Maybe<wr::ImageKey> key = aLayer->SendImageContainer(container, aParentCommands);
+      if (key.isNothing()) {
+        return DrawResult::BAD_IMAGE;
       }
 
       const int32_t appUnitsPerDevPixel = mForFrame->PresContext()->AppUnitsPerDevPixel();
-      Rect destRect = NSRectToRect(aDest, appUnitsPerDevPixel);
-      Rect dest = aLayer->RelativeToParent(destRect);
+      LayoutDeviceRect destRect = LayoutDeviceRect::FromAppUnits(
+          aDest, appUnitsPerDevPixel);
+      LayerRect dest = aLayer->RelativeToParent(destRect);
 
-      Rect fillRect = NSRectToRect(aFill, appUnitsPerDevPixel);
-      Rect fill = aLayer->RelativeToParent(fillRect);
+      LayoutDeviceRect fillRect = LayoutDeviceRect::FromAppUnits(
+          aFill, appUnitsPerDevPixel);
+      LayerRect fill = aLayer->RelativeToParent(fillRect);
 
-      Rect clip = fill;
+      LayerRect clip = fill;
       Size gapSize((aRepeatSize.width - aDest.width) / appUnitsPerDevPixel,
                    (aRepeatSize.height - aDest.height) / appUnitsPerDevPixel);
-      WrImageKey key;
-      key.mNamespace = aLayer->WrBridge()->GetNamespace();
-      key.mHandle = aLayer->WrBridge()->GetNextResourceId();
-      aParentCommands.AppendElement(OpAddExternalImage(externalImageId, key));
-      aLayer->WrManager()->AddImageKeyForDiscard(key);
       aBuilder.PushImage(wr::ToWrRect(fill), aBuilder.BuildClipRegion(wr::ToWrRect(clip)),
                          wr::ToWrSize(dest.Size()), wr::ToWrSize(gapSize),
-                         wr::ImageRendering::Auto, key);
+                         wr::ImageRendering::Auto, key.value());
       break;
     }
     default:
       break;
   }
+
+  return DrawResult::SUCCESS;
 }
 
 already_AddRefed<gfxDrawable>
@@ -706,7 +704,7 @@ nsImageRenderer::DrawLayer(nsPresContext*       aPresContext,
               aOpacity);
 }
 
-void
+DrawResult
 nsImageRenderer::BuildWebRenderDisplayItemsForLayer(nsPresContext*       aPresContext,
                                                     mozilla::wr::DisplayListBuilder& aBuilder,
                                                     nsTArray<WebRenderParentCommand>& aParentCommands,
@@ -720,19 +718,19 @@ nsImageRenderer::BuildWebRenderDisplayItemsForLayer(nsPresContext*       aPresCo
 {
   if (!IsReady()) {
     NS_NOTREACHED("Ensure PrepareImage() has returned true before calling me");
-    return;
+    return mPrepareResult;
   }
   if (aDest.IsEmpty() || aFill.IsEmpty() ||
       mSize.width <= 0 || mSize.height <= 0) {
-    return;
+    return DrawResult::SUCCESS;
   }
 
-  BuildWebRenderDisplayItems(aPresContext, aBuilder, aParentCommands, aLayer,
-                             aDirty, aDest, aFill, aAnchor, aRepeatSize,
-                             CSSIntRect(0, 0,
-                                        nsPresContext::AppUnitsToIntCSSPixels(mSize.width),
-                                        nsPresContext::AppUnitsToIntCSSPixels(mSize.height)),
-                             aOpacity);
+  return BuildWebRenderDisplayItems(aPresContext, aBuilder, aParentCommands, aLayer,
+                                    aDirty, aDest, aFill, aAnchor, aRepeatSize,
+                                    CSSIntRect(0, 0,
+                                               nsPresContext::AppUnitsToIntCSSPixels(mSize.width),
+                                               nsPresContext::AppUnitsToIntCSSPixels(mSize.height)),
+                                    aOpacity);
 }
 
 /**
@@ -925,7 +923,7 @@ nsImageRenderer::DrawBorderImageComponent(nsPresContext*       aPresContext,
     nsRect tile = ComputeTile(fillRect, aHFill, aVFill, aUnitSize, repeatSize);
     CSSIntSize imageSize(srcRect.width, srcRect.height);
     return nsLayoutUtils::DrawBackgroundImage(*aRenderingContext.ThebesContext(),
-                                              aPresContext,
+                                              mForFrame, aPresContext,
                                               subImage, imageSize, samplingFilter,
                                               tile, fillRect, repeatSize,
                                               tile.TopLeft(), aDirtyRect,

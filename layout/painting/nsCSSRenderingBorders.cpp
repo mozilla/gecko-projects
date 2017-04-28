@@ -3333,8 +3333,8 @@ nsCSSBorderRenderer::DrawBorders()
   if (allBordersSame && mCompositeColors[0] != nullptr && !mNoBorderRadius)
     forceSeparateCorners = true;
 
-  PrintAsString(" mOuterRect: "), PrintAsString(mOuterRect), PrintAsStringNewline();
-  PrintAsString(" mInnerRect: "), PrintAsString(mInnerRect), PrintAsStringNewline();
+  PrintAsString(" mOuterRect: "); PrintAsString(mOuterRect); PrintAsStringNewline();
+  PrintAsString(" mInnerRect: "); PrintAsString(mInnerRect); PrintAsStringNewline();
   PrintAsFormatString(" mBorderColors: 0x%08x 0x%08x 0x%08x 0x%08x\n", mBorderColors[0], mBorderColors[1], mBorderColors[2], mBorderColors[3]);
 
   // if conditioning the outside rect failed, then bail -- the outside
@@ -3554,7 +3554,8 @@ nsCSSBorderRenderer::CreateWebRenderCommands(wr::DisplayListBuilder& aBuilder,
                                              layers::WebRenderDisplayItemLayer* aLayer,
                                              gfx::Rect aClipRect)
 {
-  Rect transformedRect = aLayer->RelativeToParent(mOuterRect);
+  LayoutDeviceRect outerRect = LayoutDeviceRect::FromUnknownRect(mOuterRect);
+  LayerRect transformedRect = aLayer->RelativeToParent(outerRect);
   WrBorderSide side[4];
   NS_FOR_CSS_SIDES(i) {
     side[i] = wr::ToWrBorderSide(ToDeviceColor(mBorderColors[i]), mBorderStyles[i]);
@@ -3585,8 +3586,6 @@ nsCSSBorderImageRenderer::CreateBorderImageRenderer(nsPresContext* aPresContext,
                                                     uint32_t aFlags,
                                                     DrawResult* aDrawResult)
 {
-  NS_PRECONDITION(aStyleBorder.IsBorderImageLoaded(),
-                  "drawing border image that isn't successfully loaded");
   MOZ_ASSERT(aDrawResult);
 
   if (aDirtyRect.IsEmpty()) {

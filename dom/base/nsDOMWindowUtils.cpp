@@ -2728,6 +2728,126 @@ nsDOMWindowUtils::ComputeAnimationDistance(nsIDOMElement* aElement,
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsDOMWindowUtils::GetAnimationTypeForLonghand(const nsAString& aProperty,
+                                              nsAString& aResult)
+{
+  nsCSSPropertyID propertyID =
+    nsCSSProps::LookupProperty(aProperty, CSSEnabledState::eForAllContent);
+  if (propertyID == eCSSProperty_UNKNOWN) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  if (nsCSSProps::IsShorthand(propertyID)) {
+    // The given property should be a longhand.
+    return NS_ERROR_INVALID_ARG;
+  }
+  switch (nsCSSProps::kAnimTypeTable[propertyID]) {
+    case eStyleAnimType_Custom:
+      aResult.AssignLiteral("custom");
+      break;
+    case eStyleAnimType_Coord:
+    case eStyleAnimType_Sides_Top:
+    case eStyleAnimType_Sides_Right:
+    case eStyleAnimType_Sides_Bottom:
+    case eStyleAnimType_Sides_Left:
+    case eStyleAnimType_Corner_TopLeft:
+    case eStyleAnimType_Corner_TopRight:
+    case eStyleAnimType_Corner_BottomRight:
+    case eStyleAnimType_Corner_BottomLeft:
+      aResult.AssignLiteral("coord");
+      break;
+    case eStyleAnimType_nscoord:
+      aResult.AssignLiteral("length");
+      break;
+    case eStyleAnimType_float:
+      aResult.AssignLiteral("float");
+      break;
+    case eStyleAnimType_Color:
+    case eStyleAnimType_ComplexColor:
+      aResult.AssignLiteral("color");
+      break;
+    case eStyleAnimType_PaintServer:
+      aResult.AssignLiteral("paintServer");
+      break;
+    case eStyleAnimType_Shadow:
+      aResult.AssignLiteral("shadow");
+      break;
+    case eStyleAnimType_Discrete:
+      aResult.AssignLiteral("discrete");
+      break;
+    case eStyleAnimType_None:
+      aResult.AssignLiteral("none");
+      break;
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetUnanimatedComputedStyle(nsIDOMElement* aElement,
+                                             const nsAString& aPseudoElement,
+                                             const nsAString& aProperty,
+                                             nsAString& aResult)
+{
+  nsCOMPtr<Element> element = do_QueryInterface(aElement);
+  if (!element) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  nsCSSPropertyID propertyID =
+    nsCSSProps::LookupProperty(aProperty, CSSEnabledState::eForAllContent);
+  if (propertyID == eCSSProperty_UNKNOWN ||
+      nsCSSProps::IsShorthand(propertyID)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  nsIPresShell* shell = GetPresShell();
+  if (!shell) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsIAtom* pseudo = nsCSSPseudoElements::GetPseudoAtom(aPseudoElement);
+  RefPtr<nsStyleContext> styleContext =
+    nsComputedDOMStyle::GetUnanimatedStyleContextNoFlush(element,
+                                                         pseudo, shell);
+
+  // We will support Servo in bug 1311257.
+  if (shell->StyleSet()->IsServo()) {
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
+
+  StyleAnimationValue computedValue;
+  if (!StyleAnimationValue::ExtractComputedValue(propertyID,
+                                                 styleContext, computedValue)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // Note: ExtractComputedValue can return 'unset', 'initial', or 'inherit' in
+  // its "computedValue" outparam, even though these technically aren't valid
+  // computed values. (It has this behavior for discretely-animatable
+  // properties, e.g. 'align-content', when these keywords are explicitly
+  // specified or when there is no specified value.)  But we need to return a
+  // valid computed value -- these keywords won't do.  So we fall back to
+  // nsComputedDOMStyle in this case.
+  if (computedValue.GetUnit() == StyleAnimationValue::eUnit_DiscreteCSSValue &&
+      (computedValue.GetCSSValueValue()->GetUnit() == eCSSUnit_Unset ||
+       computedValue.GetCSSValueValue()->GetUnit() == eCSSUnit_Initial ||
+       computedValue.GetCSSValueValue()->GetUnit() == eCSSUnit_Inherit)) {
+    RefPtr<nsComputedDOMStyle> computedStyle =
+      NS_NewComputedDOMStyle(
+       element, aPseudoElement, shell,
+       nsComputedDOMStyle::AnimationFlag::eWithoutAnimation);
+    computedStyle->GetPropertyValue(propertyID, aResult);
+    return NS_OK;
+  }
+
+  DebugOnly<bool> uncomputeResult =
+    StyleAnimationValue::UncomputeValue(propertyID,
+                                        Move(computedValue), aResult);
+  MOZ_ASSERT(uncomputeResult,
+             "Unable to get specified value from computed value");
+  return NS_OK;
+}
+
 nsresult
 nsDOMWindowUtils::RenderDocument(const nsRect& aRect,
                                  uint32_t aFlags,
@@ -2929,13 +3049,20 @@ nsDOMWindowUtils::IsPartOfOpaqueLayer(nsIDOMElement* aElement, bool* aResult)
     return NS_ERROR_FAILURE;
   }
 
-  PaintedLayer* layer = FrameLayerBuilder::GetDebugSingleOldPaintedLayerForFrame(frame);
-  if (!layer) {
-    return NS_ERROR_FAILURE;
+  ColorLayer* colorLayer = FrameLayerBuilder::GetDebugSingleOldLayerForFrame<ColorLayer>(frame);
+  if (colorLayer) {
+    auto color = colorLayer->GetColor();
+    *aResult = color.a == 1.0f;
+    return NS_OK;
   }
 
-  *aResult = (layer->GetContentFlags() & Layer::CONTENT_OPAQUE);
-  return NS_OK;
+  PaintedLayer* paintedLayer = FrameLayerBuilder::GetDebugSingleOldLayerForFrame<PaintedLayer>(frame);
+  if (paintedLayer) {
+    *aResult = paintedLayer->IsOpaque();
+    return NS_OK;
+  }
+
+  return NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -2958,7 +3085,7 @@ nsDOMWindowUtils::NumberOfAssignedPaintedLayers(nsIDOMElement** aElements,
       return NS_ERROR_FAILURE;
     }
 
-    PaintedLayer* layer = FrameLayerBuilder::GetDebugSingleOldPaintedLayerForFrame(frame);
+    PaintedLayer* layer = FrameLayerBuilder::GetDebugSingleOldLayerForFrame<PaintedLayer>(frame);
     if (!layer) {
       return NS_ERROR_FAILURE;
     }
@@ -3629,11 +3756,11 @@ nsDOMWindowUtils::GetOMTAStyle(nsIDOMElement* aElement,
 
   RefPtr<nsROCSSPrimitiveValue> cssValue = nullptr;
   nsIFrame* frame = element->GetPrimaryFrame();
-  if (frame && !aPseudoElement.IsEmpty()) {
+  if (!aPseudoElement.IsEmpty()) {
     if (aPseudoElement.EqualsLiteral("::before")) {
-      frame = nsLayoutUtils::GetBeforeFrame(frame);
+      frame = nsLayoutUtils::GetBeforeFrame(element);
     } else if (aPseudoElement.EqualsLiteral("::after")) {
-      frame = nsLayoutUtils::GetAfterFrame(frame);
+      frame = nsLayoutUtils::GetAfterFrame(element);
     } else {
       return NS_ERROR_INVALID_ARG;
     }
@@ -4032,21 +4159,6 @@ nsDOMWindowUtils::HasRuleProcessorUsedByMultipleStyleSets(uint32_t aSheetType,
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::SetNextPaintSyncId(int32_t aSyncId)
-{
-  if (nsIWidget* widget = GetWidget()) {
-    RefPtr<LayerManager> lm = widget->GetLayerManager();
-    if (lm && lm->AsClientLayerManager()) {
-      lm->AsClientLayerManager()->SetNextPaintSyncId(aSyncId);
-      return NS_OK;
-    }
-  }
-
-  NS_WARNING("Paint sync id could not be set on the ClientLayerManager");
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsDOMWindowUtils::RespectDisplayPortSuppression(bool aEnabled)
 {
   nsCOMPtr<nsIPresShell> shell(GetPresShell());
@@ -4110,7 +4222,7 @@ struct StateTableEntry
 };
 
 static constexpr StateTableEntry kManuallyManagedStates[] = {
-  // none yet; but for example: { "highlight", NS_EVENT_STATE_HIGHLIGHT },
+  { "-moz-autofill", NS_EVENT_STATE_AUTOFILL },
   { nullptr, EventStates() },
 };
 

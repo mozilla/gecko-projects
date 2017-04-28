@@ -259,8 +259,7 @@ var gCSSProperties = {
   },
   'border-spacing': {
     // https://drafts.csswg.org/css-tables/#propdef-border-spacing
-    types: [
-    ]
+    types: [ 'lengthPair' ]
   },
   'border-top-color': {
     // https://drafts.csswg.org/css-backgrounds-3/#border-top-color
@@ -318,6 +317,10 @@ var gCSSProperties = {
       { type: 'discrete', options: [ [ 'top', 'bottom' ] ] }
     ]
   },
+  'caret-color': {
+    // https://drafts.csswg.org/css-ui/#propdef-caret-color
+    types: [ 'color' ]
+  },
   'clear': {
     // https://drafts.csswg.org/css-page-floats/#propdef-clear
     types: [
@@ -327,6 +330,11 @@ var gCSSProperties = {
   'clip': {
     // https://drafts.fxtf.org/css-masking-1/#propdef-clip
     types: [
+      'rect',
+      { type: 'discrete', options: [ [ 'rect(10px, 10px, 10px, 10px)',
+                                       'auto' ],
+                                     [ 'rect(10px, 10px, 10px, 10px)',
+                                       'rect(10px, 10px, 10px, auto)'] ] }
     ]
   },
   'clip-path': {
@@ -1130,8 +1138,7 @@ var gCSSProperties = {
   },
   'perspective-origin': {
     // https://drafts.csswg.org/css-transforms-1/#propdef-perspective-origin
-    types: [
-    ]
+    types: [ 'position' ]
   },
   'pointer-events': {
     // https://svgwg.org/svg2-draft/interact.html#PointerEventsProperty
@@ -1520,3 +1527,13 @@ function propertyToIDL(property) {
                             return str.substr(1).toUpperCase(); });
 }
 
+function calcFromPercentage(idlName, percentageValue) {
+  var examElem = document.createElement('div');
+  document.body.appendChild(examElem);
+  examElem.style[idlName] = percentageValue;
+
+  var calcValue = getComputedStyle(examElem)[idlName];
+  document.body.removeChild(examElem);
+
+  return calcValue;
+}

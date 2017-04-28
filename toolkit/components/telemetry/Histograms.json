@@ -225,6 +225,14 @@
     "kind": "boolean",
     "description": "blocklist.xml has been loaded synchronously *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
   },
+  "BOX_ALIGN_PROPS_IN_BLOCKS_FLAG": {
+    "alert_emails": ["bwerth@mozilla.com"],
+    "bug_numbers": [1351383],
+    "releaseChannelCollection": "opt-out",
+    "expires_in_version": "57",
+    "kind": "boolean",
+    "description": "Whether we have layed out any display:block containers with not-yet-supported properties from CSS Box Align."
+  },
   "CHECKERBOARD_DURATION": {
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1238040],
@@ -373,20 +381,6 @@
     "kind": "count",
     "bug_numbers": [1295588, 1251198]
   },
-  "CREATE_EVENT_COMMANDEVENT" : {
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"commandevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_COMMANDEVENTS" : {
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"commandevents\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
   "CREATE_EVENT_COMPOSITIONEVENT" : {
     "alert_emails": ["ayg@aryeh.name"],
     "description": "Was document.createEvent(\"compositionevent\") ever called",
@@ -397,20 +391,6 @@
   "CREATE_EVENT_CUSTOMEVENT" : {
     "alert_emails": ["ayg@aryeh.name"],
     "description": "Was document.createEvent(\"customevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_DATACONTAINEREVENT" : {
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"datacontainerevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_DATACONTAINEREVENTS" : {
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"datacontainerevents\") ever called",
     "expires_in_version": "56",
     "kind": "count",
     "bug_numbers": [1295588, 1251198]
@@ -432,13 +412,6 @@
   "CREATE_EVENT_DRAGEVENT" : {
     "alert_emails": ["ayg@aryeh.name"],
     "description": "Was document.createEvent(\"dragevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_DRAGEVENTS" : {
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"dragevents\") ever called",
     "expires_in_version": "56",
     "kind": "count",
     "bug_numbers": [1295588, 1251198]
@@ -534,30 +507,9 @@
     "kind": "count",
     "bug_numbers": [1295588, 1251198]
   },
-  "CREATE_EVENT_NOTIFYPAINTEVENT" : {
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"notifypaintevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_PAGETRANSITION" : {
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"pagetransition\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
   "CREATE_EVENT_POPSTATEEVENT" : {
     "alert_emails": ["ayg@aryeh.name"],
     "description": "Was document.createEvent(\"popstateevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_POPUPEVENTS" : {
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"popupevents\") ever called",
     "expires_in_version": "56",
     "kind": "count",
     "bug_numbers": [1295588, 1251198]
@@ -569,23 +521,9 @@
     "kind": "count",
     "bug_numbers": [1295588, 1251198]
   },
-  "CREATE_EVENT_SIMPLEGESTUREEVENT" : {
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"simplegestureevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
   "CREATE_EVENT_STORAGEEVENT" : {
     "alert_emails": ["ayg@aryeh.name"],
     "description": "Was document.createEvent(\"storageevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_SVGEVENT" : {
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"svgevent\") ever called",
     "expires_in_version": "56",
     "kind": "count",
     "bug_numbers": [1295588, 1251198]
@@ -597,20 +535,6 @@
     "kind": "count",
     "bug_numbers": [1295588, 1251198]
   },
-  "CREATE_EVENT_SVGZOOMEVENT" : {
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"svgzoomevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_SVGZOOMEVENTS" : {
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"svgzoomevents\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
   "CREATE_EVENT_TEXTEVENT" : {
     "alert_emails": ["ayg@aryeh.name"],
     "description": "Was document.createEvent(\"textevent\") ever called",
@@ -618,23 +542,9 @@
     "kind": "count",
     "bug_numbers": [1295588, 1251198]
   },
-  "CREATE_EVENT_TEXTEVENTS" : {
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"textevents\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
   "CREATE_EVENT_TIMEEVENT" : {
     "alert_emails": ["ayg@aryeh.name"],
     "description": "Was document.createEvent(\"timeevent\") ever called",
-    "expires_in_version": "56",
-    "kind": "count",
-    "bug_numbers": [1295588, 1251198]
-  },
-  "CREATE_EVENT_TIMEEVENTS" : {
-    "alert_emails": ["ayg@aryeh.name"],
-    "description": "Was document.createEvent(\"timeevents\") ever called",
     "expires_in_version": "56",
     "kind": "count",
     "bug_numbers": [1295588, 1251198]
@@ -5207,30 +5117,6 @@
     "n_buckets": 50,
     "description": "Firefox: Time taken to run permitUnload on a browser during tab close to see whether or not we're allowed to close the tab (ms)."
   },
-  "FX_TAB_ANIM_OPEN_PREVIEW_FRAME_INTERVAL_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "low": 7,
-    "high": 500,
-    "n_buckets": 50,
-    "description": "Average frame interval during tab open animation of about:newtab (preview=on), when other tabs are unaffected"
-  },
-  "FX_TAB_ANIM_OPEN_FRAME_INTERVAL_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "low": 7,
-    "high": 500,
-    "n_buckets": 50,
-    "description": "Average frame interval during tab open animation of about:newtab (preview=off), when other tabs are unaffected"
-  },
-  "FX_TAB_ANIM_ANY_FRAME_INTERVAL_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "low": 7,
-    "high": 500,
-    "n_buckets": 50,
-    "description": "Average frame interval during any tab open/close animation (excluding tabstrip scroll)"
-  },
   "FX_REFRESH_DRIVER_CHROME_FRAME_DELAY_MS": {
     "alert_emails": ["perf-telemetry-alerts@mozilla.com"],
     "expires_in_version": "never",
@@ -5316,6 +5202,16 @@
     "high": 1000,
     "n_buckets": 20,
     "description": "Firefox: Time in ms spent on switching tabs in response to a tab click"
+  },
+  "FX_TAB_REMOTE_NAVIGATION_DELAY_MS": {
+    "alert_emails": ["gkrizsanits@mozilla.com", "mconley@mozilla.com"],
+    "bug_numbers": [1352961],
+    "expires_in_version": "61",
+    "kind": "exponential",
+    "high": 4000,
+    "n_buckets": 100,
+    "keyed": true,
+    "description": "Time taken (in ms) from the point of the parent sending the naviagion triggering message to the content and the content receiving it. This message can be either SessionStore:restoreTabContent or WebNavigation:LoadURI and these names are used as keys for this histogram. This is e10s only and recorded in the content process."
   },
   "FX_BOOKMARKS_TOOLBAR_INIT_MS": {
     "expires_in_version": "never",
@@ -5693,6 +5589,15 @@
     "n_buckets": 50,
     "description": "Time (ms) from the Input event being created to the end of it being handled"
   },
+  "INPUT_EVENT_RESPONSE_COALESCED_MS": {
+    "alert_emails": ["perf-telemetry-alerts@mozilla.com"],
+    "bug_numbers": [1357457],
+    "expires_in_version": "61",
+    "kind": "exponential",
+    "high": 10000,
+    "n_buckets": 50,
+    "description": "Time (ms) from the Input event being created to the end of it being handled, but with overlapping events coalesced."
+  },
   "LOAD_INPUT_EVENT_RESPONSE_MS": {
     "alert_emails": ["perf-telemetry-alerts@mozilla.com"],
     "bug_numbers": [1298101],
@@ -5735,14 +5640,6 @@
     "n_buckets": 10,
     "description": "Session restore: Time to collect all window data (ms)"
   },
-  "FX_SESSION_RESTORE_COLLECT_COOKIES_MS": {
-    "alert_emails": ["session-restore-telemetry-alerts@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 30000,
-    "n_buckets": 10,
-    "description": "Session restore: Time to collect cookies (ms)"
-  },
   "FX_SESSION_RESTORE_COLLECT_DATA_MS": {
     "alert_emails": ["session-restore-telemetry-alerts@mozilla.com"],
     "expires_in_version": "default",
@@ -5750,14 +5647,6 @@
     "high": 30000,
     "n_buckets": 10,
     "description": "Session restore: Time to collect all window and tab data (ms)"
-  },
-  "FX_SESSION_RESTORE_COLLECT_DATA_LONGEST_OP_MS": {
-    "alert_emails": ["session-restore-telemetry-alerts@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 30000,
-    "n_buckets": 10,
-    "description": "Session restore: Duration of the longest uninterruptible operation while collecting all window and tab data (ms)"
   },
   "FX_SESSION_RESTORE_CONTENT_COLLECT_DATA_LONGEST_OP_MS": {
     "alert_emails": ["session-restore-telemetry-alerts@mozilla.com"],
@@ -5940,6 +5829,13 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "Deleted or to-be-reused innerwindow which has had mutation event listeners."
+  },
+  "FORM_ISINDEX_USED": {
+    "alert_emails": ["hsivonen@mozilla.com"],
+    "expires_in_version": "56",
+    "kind": "flag",
+    "bug_numbers": [1356181],
+    "description": "Whether there has been an isindex form submission in this session."
   },
   "CHARSET_OVERRIDE_SITUATION": {
     "expires_in_version": "never",
@@ -9461,29 +9357,14 @@
     "kind": "flag",
     "description": "If a master-password is enabled for this profile"
   },
-  "DISPLAY_SCALING_OSX" : {
+  "DISPLAY_SCALING" : {
     "expires_in_version": "never",
     "kind": "linear",
     "high": 500,
     "n_buckets": 100,
-    "description": "Scaling percentage for the display where the first window is opened (OS X only)",
-    "cpp_guard": "XP_MACOSX"
-  },
-  "DISPLAY_SCALING_MSWIN" : {
-    "expires_in_version": "never",
-    "kind": "linear",
-    "high": 500,
-    "n_buckets": 100,
-    "description": "Scaling percentage for the display where the first window is opened (MS Windows only)",
-    "cpp_guard": "XP_WIN"
-  },
-  "DISPLAY_SCALING_LINUX" : {
-    "expires_in_version": "never",
-    "kind": "linear",
-    "high": 500,
-    "n_buckets": 100,
-    "description": "Scaling percentage for the display where the first window is opened (Linux only)",
-    "cpp_guard": "XP_LINUX"
+    "bug_numbers": [1121966],
+    "alert_emails": ["dolske@mozilla.com"],
+    "description": "Scaling percentage for the display where the first window is opened"
   },
   "SOCIAL_SIDEBAR_STATE": {
     "expires_in_version": "never",
@@ -10746,13 +10627,6 @@
     "bug_numbers": [1238433],
     "description": "Percentage of frames decoded frames dropped in an HTMLVideoElement"
   },
-  "REMOTE_JAR_PROTOCOL_USED": {
-    "alert_emails": ["dev-platform@lists.mozilla.org"],
-    "expires_in_version": "55",
-    "bug_numbers": [1255934],
-    "kind": "count",
-    "description": "Remote JAR protocol usage"
-  },
   "MEDIA_DECODER_BACKEND_USED": {
     "alert_emails": ["danderson@mozilla.com"],
     "bug_numbers": [1259695],
@@ -11342,11 +11216,83 @@
     "description": "Measures the number of milliseconds we spend waiting for sync message manager IPC messages to finish sending, keyed by message name. Note: only messages that wait for more than 500 microseconds are included in this probe."
   },
   "DISPLAY_ITEM_USAGE_COUNT": {
-    "alert_emails": ["mchang@mozilla.com"],
+    "alert_emails": ["mchang@mozilla.com", "gfx-telemetry@mozilla.com"],
     "bug_numbers": [1353521],
-    "expires_in_version": "70",
+    "expires_in_version": "56",
     "kind": "enumerated",
     "n_values": 99,
-    "description": "Count of which display items are being used by type id"
+    "description": "Count of which layout display items are being created. Display items are created by layout to determine what content to render. A full description is above the class definition for nsDisplayItem. The list of types is kept in nsDisplayItemTypes.h."
+  },
+  "TIME_TO_DOM_LOADING_MS": {
+    "alert_emails": ["wpan@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 50000,
+    "n_buckets": 100,
+    "bug_numbers": [1344893],
+    "description": "Time in milliseconds from navigationStart to domLoading."
+  },
+  "TIME_TO_DOM_INTERACTIVE_MS": {
+    "alert_emails": ["wpan@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 50000,
+    "n_buckets": 100,
+    "bug_numbers": [1344893],
+    "description": "Time in milliseconds from navigationStart to domInteractive."
+  },
+  "TIME_TO_DOM_CONTENT_LOADED_START_MS": {
+    "alert_emails": ["wpan@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 50000,
+    "n_buckets": 100,
+    "bug_numbers": [1344893],
+    "description": "Time in milliseconds from navigationStart to domContentLoadedEventStart."
+  },
+  "TIME_TO_DOM_CONTENT_LOADED_END_MS": {
+    "alert_emails": ["wpan@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 50000,
+    "n_buckets": 100,
+    "bug_numbers": [1344893],
+    "description": "Time in milliseconds from navigationStart to domContentLoadedEventEnd."
+  },
+  "TIME_TO_DOM_COMPLETE_MS": {
+    "alert_emails": ["wpan@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 50000,
+    "n_buckets": 100,
+    "bug_numbers": [1344893],
+    "description": "Time in milliseconds from navigationStart to domComplete."
+  },
+  "TIME_TO_LOAD_EVENT_START_MS": {
+    "alert_emails": ["wpan@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 50000,
+    "n_buckets": 100,
+    "bug_numbers": [1344893],
+    "description": "Time in milliseconds from navigationStart to loadEventStart."
+  },
+  "TIME_TO_LOAD_EVENT_END_MS": {
+    "alert_emails": ["wpan@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 50000,
+    "n_buckets": 100,
+    "bug_numbers": [1344893],
+    "description": "Time in milliseconds from navigationStart to loadEventEnd."
+  },
+  "TIME_TO_RESPONSE_START_MS": {
+    "alert_emails": ["wpan@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 50000,
+    "n_buckets": 100,
+    "bug_numbers": [1344893],
+    "description": "Time in milliseconds from navigationStart to responseStart."
   }
 }

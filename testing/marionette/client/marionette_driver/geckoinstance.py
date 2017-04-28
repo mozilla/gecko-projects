@@ -74,6 +74,8 @@ class GeckoInstance(object):
 
         # Enable Marionette component
         "marionette.enabled": True,
+        # Deprecated, and can be removed in Firefox 60.0
+        "marionette.defaultPrefs.enabled": True,
         # Disable recommended automation prefs in CI
         "marionette.prefs.recommended": False,
 
@@ -429,9 +431,6 @@ class DesktopInstance(GeckoInstance):
         # in general can"t hurt - we re-enable them when tests need them
         "browser.pagethumbnails.capturing_disabled": True,
 
-        # Avoid performing Reader Mode intros during tests
-        "browser.reader.detectedFirstArticle": True,
-
         # Disable safebrowsing components
         "browser.safebrowsing.blockedURIs.enabled": False,
         "browser.safebrowsing.downloads.enabled": False,
@@ -458,8 +457,8 @@ class DesktopInstance(GeckoInstance):
         # Start with a blank page by default
         "browser.startup.page": 0,
 
-        # Disable tab animation
-        "browser.tabs.animate": False,
+        # Disable browser animations
+        "toolkit.cosmeticAnimations.enabled": False,
 
         # Do not warn on exit when multiple tabs are open
         "browser.tabs.warnOnClose": False,

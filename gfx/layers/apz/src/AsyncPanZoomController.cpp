@@ -77,6 +77,7 @@
 #include "WheelScrollAnimation.h"
 #if defined(MOZ_WIDGET_ANDROID)
 #include "AndroidAPZ.h"
+#include "mozilla/layers/AndroidDynamicToolbarAnimator.h"
 #endif // defined(MOZ_WIDGET_ANDROID)
 
 #define ENABLE_APZC_LOGGING 0
@@ -926,9 +927,7 @@ nsEventStatus AsyncPanZoomController::HandleDragEvent(const MouseInput& aEvent,
                         GetAxisStart(aDragMetrics.mDirection, aDragMetrics.mScrollTrack);
 
   CSSCoord scrollMax = GetAxisLength(aDragMetrics.mDirection, aDragMetrics.mScrollTrack);
-  scrollMax -= node->GetScrollThumbLength() /
-               GetAxisScale(aDragMetrics.mDirection, mFrameMetrics.GetZoom()) *
-               mFrameMetrics.GetPresShellResolution();
+  scrollMax -= aDragMetrics.mScrollThumbLength;
 
   float scrollPercent = mousePosition / scrollMax;
 
@@ -1150,17 +1149,19 @@ nsEventStatus AsyncPanZoomController::OnTouchMove(const MultiTouchInput& aEvent)
         return nsEventStatus_eIgnore;
       }
 
+      ParentLayerPoint touchPoint = GetFirstTouchPoint(aEvent);
+
       MOZ_ASSERT(GetCurrentTouchBlock());
       if (gfxPrefs::TouchActionEnabled() && GetCurrentTouchBlock()->TouchActionAllowsPanningXY()) {
         // User tries to trigger a touch behavior. If allowed touch behavior is vertical pan
         // + horizontal pan (touch-action value is equal to AUTO) we can return ConsumeNoDefault
         // status immediately to trigger cancel event further. It should happen independent of
         // the parent type (whether it is scrolling or not).
-        StartPanning(aEvent);
+        StartPanning(touchPoint);
         return nsEventStatus_eConsumeNoDefault;
       }
 
-      return StartPanning(aEvent);
+      return StartPanning(touchPoint);
     }
 
     case PANNING:
@@ -1189,12 +1190,6 @@ nsEventStatus AsyncPanZoomController::OnTouchMove(const MultiTouchInput& aEvent)
 
 nsEventStatus AsyncPanZoomController::OnTouchEnd(const MultiTouchInput& aEvent) {
   APZC_LOG("%p got a touch-end in state %d\n", this, mState);
-
-  RefPtr<GeckoContentController> controller = GetGeckoContentController();
-  if (controller) {
-    controller->SetScrollingRootContent(false);
-  }
-
   OnTouchEndOrCancel();
 
   // In case no touch behavior triggered previously we can avoid sending
@@ -1251,43 +1246,9 @@ nsEventStatus AsyncPanZoomController::OnTouchEnd(const MultiTouchInput& aEvent) 
   case PAN_MOMENTUM:
   {
     MOZ_ASSERT(GetCurrentTouchBlock());
-    GetCurrentTouchBlock()->GetOverscrollHandoffChain()->FlushRepaints();
     mX.EndTouch(aEvent.mTime);
     mY.EndTouch(aEvent.mTime);
-    ParentLayerPoint flingVelocity = GetVelocityVector();
-    // Clear our velocities; if DispatchFling() gives the fling to us,
-    // the fling velocity gets *added* to our existing velocity in
-    // AcceptFling().
-    mX.SetVelocity(0);
-    mY.SetVelocity(0);
-    // Clear our state so that we don't stay in the PANNING state
-    // if DispatchFling() gives the fling to somone else. However,
-    // don't send the state change notification until we've determined
-    // what our final state is to avoid notification churn.
-    StateChangeNotificationBlocker blocker(this);
-    SetState(NOTHING);
-
-    APZC_LOG("%p starting a fling animation if %f >= %f\n", this,
-        flingVelocity.Length().value, gfxPrefs::APZFlingMinVelocityThreshold());
-
-    if (flingVelocity.Length() < gfxPrefs::APZFlingMinVelocityThreshold()) {
-      // Relieve overscroll now if needed, since we will not transition to a fling
-      // animation and then an overscroll animation, and relieve it then.
-      GetCurrentTouchBlock()->GetOverscrollHandoffChain()->SnapBackOverscrolledApzc(this);
-      return nsEventStatus_eConsumeNoDefault;
-    }
-
-    // Make a local copy of the tree manager pointer and check that it's not
-    // null before calling DispatchFling(). This is necessary because Destroy(),
-    // which nulls out mTreeManager, could be called concurrently.
-    if (APZCTreeManager* treeManagerLocal = GetApzcTreeManager()) {
-      FlingHandoffState handoffState{flingVelocity,
-                                     GetCurrentTouchBlock()->GetOverscrollHandoffChain(),
-                                     false /* not handoff */,
-                                     GetCurrentTouchBlock()->GetScrolledApzc()};
-      treeManagerLocal->DispatchFling(this, handoffState);
-    }
-    return nsEventStatus_eConsumeNoDefault;
+    return HandleEndOfPan();
   }
   case PINCHING:
     SetState(NOTHING);
@@ -1324,6 +1285,13 @@ nsEventStatus AsyncPanZoomController::OnScaleBegin(const PinchGestureInput& aEve
     return nsEventStatus_eIgnore;
   }
 
+  // If zooming is not allowed, this is a two-finger pan.
+  // Start tracking panning distance and velocity.
+  if (!mZoomConstraints.mAllowZoom) {
+    mX.StartTouch(aEvent.mLocalFocusPoint.x, aEvent.mTime);
+    mY.StartTouch(aEvent.mLocalFocusPoint.y, aEvent.mTime);
+  }
+
   // For platforms that don't support APZ zooming, dispatch a message to the
   // content controller, it may want to do something else with this gesture.
   if (!gfxPrefs::APZAllowZooming()) {
@@ -1349,6 +1317,13 @@ nsEventStatus AsyncPanZoomController::OnScale(const PinchGestureInput& aEvent) {
 
   if (mState != PINCHING) {
     return nsEventStatus_eConsumeNoDefault;
+  }
+
+  // If zooming is not allowed, this is a two-finger pan.
+  // Tracking panning distance and velocity.
+  if (!mZoomConstraints.mAllowZoom) {
+    mX.UpdateWithTouchAtDevicePoint(aEvent.mLocalFocusPoint.x, 0, aEvent.mTime);
+    mY.UpdateWithTouchAtDevicePoint(aEvent.mLocalFocusPoint.y, 0, aEvent.mTime);
   }
 
   if (!gfxPrefs::APZAllowZooming()) {
@@ -1477,8 +1452,6 @@ nsEventStatus AsyncPanZoomController::OnScaleEnd(const PinchGestureInput& aEvent
     }
   }
 
-  SetState(NOTHING);
-
   {
     ReentrantMonitorAutoEnter lock(mMonitor);
     ScheduleComposite();
@@ -1488,32 +1461,90 @@ nsEventStatus AsyncPanZoomController::OnScaleEnd(const PinchGestureInput& aEvent
 
   // Non-negative focus point would indicate that one finger is still down
   if (aEvent.mLocalFocusPoint.x != -1 && aEvent.mLocalFocusPoint.y != -1) {
-    mPanDirRestricted = false;
-    mX.StartTouch(aEvent.mLocalFocusPoint.x, aEvent.mTime);
-    mY.StartTouch(aEvent.mLocalFocusPoint.y, aEvent.mTime);
-    SetState(TOUCHING);
+    if (mZoomConstraints.mAllowZoom) {
+      mPanDirRestricted = false;
+      mX.StartTouch(aEvent.mLocalFocusPoint.x, aEvent.mTime);
+      mY.StartTouch(aEvent.mLocalFocusPoint.y, aEvent.mTime);
+      SetState(TOUCHING);
+    } else {
+      // If zooming isn't allowed, StartTouch() was already called
+      // in OnScaleBegin().
+      StartPanning(aEvent.mLocalFocusPoint);
+    }
   } else {
     // Otherwise, handle the fingers being lifted.
-    ReentrantMonitorAutoEnter lock(mMonitor);
+    if (mZoomConstraints.mAllowZoom) {
+      ReentrantMonitorAutoEnter lock(mMonitor);
 
-    // We can get into a situation where we are overscrolled at the end of a
-    // pinch if we go into overscroll with a two-finger pan, and then turn
-    // that into a pinch by increasing the span sufficiently. In such a case,
-    // there is no snap-back animation to get us out of overscroll, so we need
-    // to get out of it somehow.
-    // Moreover, in cases of scroll handoff, the overscroll can be on an APZC
-    // further up in the handoff chain rather than on the current APZC, so
-    // we need to clear overscroll along the entire handoff chain.
-    if (HasReadyTouchBlock()) {
-      GetCurrentTouchBlock()->GetOverscrollHandoffChain()->ClearOverscroll();
+      // We can get into a situation where we are overscrolled at the end of a
+      // pinch if we go into overscroll with a two-finger pan, and then turn
+      // that into a pinch by increasing the span sufficiently. In such a case,
+      // there is no snap-back animation to get us out of overscroll, so we need
+      // to get out of it somehow.
+      // Moreover, in cases of scroll handoff, the overscroll can be on an APZC
+      // further up in the handoff chain rather than on the current APZC, so
+      // we need to clear overscroll along the entire handoff chain.
+      if (HasReadyTouchBlock()) {
+        GetCurrentTouchBlock()->GetOverscrollHandoffChain()->ClearOverscroll();
+      } else {
+        ClearOverscroll();
+      }
+      // Along with clearing the overscroll, we also want to snap to the nearest
+      // snap point as appropriate.
+      ScrollSnap();
     } else {
-      ClearOverscroll();
+      // when zoom is not allowed
+      mX.EndTouch(aEvent.mTime);
+      mY.EndTouch(aEvent.mTime);
+      if (mState == PINCHING) {
+        // still pinching
+        if (HasReadyTouchBlock()) {
+          return HandleEndOfPan();
+        }
+      }
     }
-    // Along with clearing the overscroll, we also want to snap to the nearest
-    // snap point as appropriate.
-    ScrollSnap();
+  }
+  return nsEventStatus_eConsumeNoDefault;
+}
+
+nsEventStatus AsyncPanZoomController::HandleEndOfPan()
+{
+  MOZ_ASSERT(GetCurrentTouchBlock());
+  GetCurrentTouchBlock()->GetOverscrollHandoffChain()->FlushRepaints();
+  ParentLayerPoint flingVelocity = GetVelocityVector();
+
+  // Clear our velocities; if DispatchFling() gives the fling to us,
+  // the fling velocity gets *added* to our existing velocity in
+  // AcceptFling().
+  mX.SetVelocity(0);
+  mY.SetVelocity(0);
+  // Clear our state so that we don't stay in the PANNING state
+  // if DispatchFling() gives the fling to somone else. However,
+  // don't send the state change notification until we've determined
+  // what our final state is to avoid notification churn.
+  StateChangeNotificationBlocker blocker(this);
+  SetState(NOTHING);
+
+  APZC_LOG("%p starting a fling animation if %f >= %f\n", this,
+      flingVelocity.Length().value, gfxPrefs::APZFlingMinVelocityThreshold());
+
+  if (flingVelocity.Length() < gfxPrefs::APZFlingMinVelocityThreshold()) {
+    // Relieve overscroll now if needed, since we will not transition to a fling
+    // animation and then an overscroll animation, and relieve it then.
+    GetCurrentTouchBlock()->GetOverscrollHandoffChain()->SnapBackOverscrolledApzc(this);
+    return nsEventStatus_eConsumeNoDefault;
   }
 
+  // Make a local copy of the tree manager pointer and check that it's not
+  // null before calling DispatchFling(). This is necessary because Destroy(),
+  // which nulls out mTreeManager, could be called concurrently.
+  if (APZCTreeManager* treeManagerLocal = GetApzcTreeManager()) {
+    FlingHandoffState handoffState{flingVelocity,
+                                  GetCurrentTouchBlock()->GetOverscrollHandoffChain(),
+                                  false /* not handoff */,
+                                  GetCurrentTouchBlock()->GetScrolledApzc()};
+    treeManagerLocal->DispatchFling(this, handoffState);
+  }
   return nsEventStatus_eConsumeNoDefault;
 }
 
@@ -2324,12 +2355,12 @@ void AsyncPanZoomController::HandlePanningUpdate(const ScreenPoint& aPanDistance
   }
 }
 
-nsEventStatus AsyncPanZoomController::StartPanning(const MultiTouchInput& aEvent) {
+nsEventStatus
+AsyncPanZoomController::StartPanning(const ParentLayerPoint& aStartPoint) {
   ReentrantMonitorAutoEnter lock(mMonitor);
 
-  ParentLayerPoint point = GetFirstTouchPoint(aEvent);
-  float dx = mX.PanDistance(point.x);
-  float dy = mY.PanDistance(point.y);
+  float dx = mX.PanDistance(aStartPoint.x);
+  float dy = mY.PanDistance(aStartPoint.y);
 
   double angle = atan2(dy, dx); // range [-pi, pi]
   angle = fabs(angle); // range [0, pi]
@@ -2399,12 +2430,15 @@ bool AsyncPanZoomController::AttemptScroll(ParentLayerPoint& aStartPoint,
     if (!IsZero(adjustedDisplacement)) {
       ScrollBy(adjustedDisplacement / mFrameMetrics.GetZoom());
       if (CancelableBlockState* block = GetCurrentInputBlock()) {
-        if (block->AsTouchBlock() && (block->GetScrolledApzc() != this)) {
-          RefPtr<GeckoContentController> controller = GetGeckoContentController();
-          if (controller) {
-            controller->SetScrollingRootContent(IsRootContent());
+#if defined(MOZ_WIDGET_ANDROID)
+        if (block->AsTouchBlock() && (block->GetScrolledApzc() != this) && IsRootContent()) {
+          if (APZCTreeManager* manager = GetApzcTreeManager()) {
+            AndroidDynamicToolbarAnimator* animator = manager->GetAndroidDynamicToolbarAnimator();
+            MOZ_ASSERT(animator);
+            animator->SetScrollingRootContent();
           }
         }
+#endif
         block->SetScrolledApzc(this);
       }
       ScheduleCompositeAndMaybeRepaint();
@@ -3416,6 +3450,21 @@ void AsyncPanZoomController::NotifyLayersUpdated(const ScrollMetadata& aScrollMe
   // TODO if we're in a drag and scrollOffsetUpdated is set then we want to
   // ignore it
 
+#if defined(MOZ_WIDGET_ANDROID)
+  if (aLayerMetrics.IsRootContent()) {
+    if (APZCTreeManager* manager = GetApzcTreeManager()) {
+      AndroidDynamicToolbarAnimator* animator = manager->GetAndroidDynamicToolbarAnimator();
+      MOZ_ASSERT(animator);
+      CSSToScreenScale scale = ViewTargetAs<ScreenPixel>(aLayerMetrics.GetZoom().ToScaleFactor(),
+                                                         PixelCastJustification::ScreenIsParentLayerForRoot);
+      ScreenIntSize size = ScreenIntSize::Round(aLayerMetrics.GetRootCompositionSize() * scale);
+      if (animator->SetCompositionSize(size)) {
+        animator->UpdateRootFrameMetrics(aLayerMetrics);
+      }
+    }
+  }
+#endif
+
   if ((aIsFirstPaint && aThisLayerTreeUpdated) || isDefault) {
     // Initialize our internal state to something sane when the content
     // that was just painted is something we knew nothing about previously
@@ -3788,6 +3837,17 @@ void AsyncPanZoomController::DispatchStateChangeNotification(PanZoomState aOldSt
       }
 #endif
     } else if (IsTransformingState(aOldState) && !IsTransformingState(aNewState)) {
+#if defined(MOZ_WIDGET_ANDROID)
+      // The Android UI thread only shows overlay UI elements when the content is not being
+      // panned or zoomed and it is in a steady state. So the FrameMetrics only need to be
+      // updated when the transform ends.
+      if (APZCTreeManager* manager = GetApzcTreeManager()) {
+        AndroidDynamicToolbarAnimator* animator = manager->GetAndroidDynamicToolbarAnimator();
+        MOZ_ASSERT(animator);
+        animator->UpdateRootFrameMetrics(mFrameMetrics);
+      }
+#endif
+
       controller->NotifyAPZStateChange(
           GetGuid(), APZStateChange::eTransformEnd);
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)

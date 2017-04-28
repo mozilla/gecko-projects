@@ -6,7 +6,6 @@ this.EXPORTED_SYMBOLS = ["XPCOMUtils", "Services", "Utils", "Async", "Svc", "Str
 
 var {classes: Cc, interfaces: Ci, results: Cr, utils: Cu} = Components;
 
-Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://services-common/observers.js");
 Cu.import("resource://services-common/utils.js");
 Cu.import("resource://services-common/async.js", this);
@@ -303,7 +302,7 @@ this.Utils = {
    * N.B., salt should be base64 encoded, even though we have to decode
    * it later!
    */
-  derivePresentableKeyFromPassphrase : function derivePresentableKeyFromPassphrase(passphrase, salt, keyLength, forceJS) {
+  derivePresentableKeyFromPassphrase: function derivePresentableKeyFromPassphrase(passphrase, salt, keyLength, forceJS) {
     let k = CryptoUtils.deriveKeyFromPassphrase(passphrase, salt, keyLength,
                                                 forceJS);
     return Utils.encodeKeyBase32(k);
@@ -313,7 +312,7 @@ this.Utils = {
    * N.B., salt should be base64 encoded, even though we have to decode
    * it later!
    */
-  deriveEncodedKeyFromPassphrase : function deriveEncodedKeyFromPassphrase(passphrase, salt, keyLength, forceJS) {
+  deriveEncodedKeyFromPassphrase: function deriveEncodedKeyFromPassphrase(passphrase, salt, keyLength, forceJS) {
     let k = CryptoUtils.deriveKeyFromPassphrase(passphrase, salt, keyLength,
                                                 forceJS);
     return Utils.base64Key(k);
@@ -324,7 +323,7 @@ this.Utils = {
    * uppercase alphanumeric characters, separated by hyphens.
    * A.K.A. base64-to-base32 encoding.
    */
-  presentEncodedKeyAsSyncKey : function presentEncodedKeyAsSyncKey(encodedKey) {
+  presentEncodedKeyAsSyncKey: function presentEncodedKeyAsSyncKey(encodedKey) {
     return Utils.encodeKeyBase32(atob(encodedKey));
   },
 
@@ -462,13 +461,13 @@ this.Utils = {
     try {
       if (args) {
         return Str.errors.formatStringFromName(error, args, args.length);
-      } else {
-        return Str.errors.GetStringFromName(error);
       }
+      return Str.errors.GetStringFromName(error);
+
     } catch (e) {}
 
     // basically returns "Unknown Error"
-    return Str.errors.GetStringFromName('error.reason.unknown');
+    return Str.errors.GetStringFromName("error.reason.unknown");
   },
 
   /**

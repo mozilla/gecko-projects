@@ -124,6 +124,49 @@ const lengthType = {
 
 };
 
+const lengthPairType = {
+  testInterpolation: function(property, setup) {
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation = target.animate({ [idlName]: ['10px 10px', '50px 50px'] },
+                                     { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+                           [{ time: 500,  expected: '30px 30px' }]);
+    }, property + ' supports animating as a length pair');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation = target.animate({ [idlName]: ['1rem 1rem', '5rem 5rem'] },
+                                     { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+                           [{ time: 500,  expected: '30px 30px' }]);
+    }, property + ' supports animating as a length pair of rem');
+  },
+
+  testAddition: function(property, setup) {
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      target.style[idlName] = '10px 10px';
+      var animation = target.animate({ [idlName]: ['10px 10px', '50px 50px'] },
+                                     { duration: 1000, composite: 'add' });
+      testAnimationSamples(animation, idlName, [{ time: 0, expected: '20px 20px' }]);
+    }, property + ': length pair');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      target.style[idlName] = '1rem 1rem';
+      var animation = target.animate({ [idlName]: ['1rem 1rem', '5rem 5rem'] },
+                                     { duration: 1000, composite: 'add' });
+      testAnimationSamples(animation, idlName, [{ time: 0, expected: '20px 20px' }]);
+    }, property + ': length pair of rem');
+  },
+
+};
+
 const percentageType = {
   testInterpolation: function(property, setup) {
     test(function(t) {
@@ -921,6 +964,83 @@ const filterListType = {
 };
 
 const textShadowListType = {
+  testInterpolation: function(property, setup) {
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation =
+        target.animate({ [idlName]: [ 'none',
+                                      'rgb(100, 100, 100) 10px 10px 10px'] },
+                       { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+                                  // Premultiplied
+        [{ time: 500,  expected: 'rgba(100, 100, 100, 0.5) 5px 5px 5px' }]);
+    }, property + ': from none to other');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation =
+        target.animate({ [idlName]: [ 'rgb(100, 100, 100) 10px 10px 10px',
+                                      'none' ] },
+                       { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+                                  // Premultiplied
+        [{ time: 500,  expected: 'rgba(100, 100, 100, 0.5) 5px 5px 5px' }]);
+    }, property + ': from other to none');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation =
+        target.animate({ [idlName]: [ 'rgb(0, 0, 0) 0px 0px 0px',
+                                      'rgb(100, 100, 100) 10px 10px 10px'] },
+                       { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+        [{ time: 500,  expected: 'rgb(50, 50, 50) 5px 5px 5px' }]);
+    }, property + ': single shadow');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation =
+        target.animate({ [idlName]: [ 'rgb(0, 0, 0) 0px 0px 0px, '
+                                    + 'rgb(200, 200, 200) 20px 20px 20px',
+                                      'rgb(100, 100, 100) 10px 10px 10px, '
+                                    + 'rgb(100, 100, 100) 10px 10px 10px'] },
+                       { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+        [{ time: 500,  expected: 'rgb(50, 50, 50) 5px 5px 5px, '
+                               + 'rgb(150, 150, 150) 15px 15px 15px' }]);
+    }, property + ': shadow list');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation =
+        target.animate({ [idlName]: [ 'rgb(200, 200, 200) 20px 20px 20px',
+                                      'rgb(100, 100, 100) 10px 10px 10px, '
+                                    + 'rgb(100, 100, 100) 10px 10px 10px'] },
+                       { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+        [{ time: 500,  expected: 'rgb(150, 150, 150) 15px 15px 15px, '
+                               + 'rgba(100, 100, 100, 0.5) 5px 5px 5px' }]);
+    }, property + ': mismatched list length (from longer to shorter)');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation =
+        target.animate({ [idlName]: [ 'rgb(100, 100, 100) 10px 10px 10px, '
+                                    + 'rgb(100, 100, 100) 10px 10px 10px',
+                                      'rgb(200, 200, 200) 20px 20px 20px'] },
+                       { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+        [{ time: 500,  expected: 'rgb(150, 150, 150) 15px 15px 15px, '
+                               + 'rgba(100, 100, 100, 0.5) 5px 5px 5px' }]);
+    }, property + ': mismatched list length (from shorter to longer)');
+  },
+
   testAddition: function(property, setup) {
     test(function(t) {
       var idlName = propertyToIDL(property);
@@ -939,6 +1059,83 @@ const textShadowListType = {
 
 
 const boxShadowListType = {
+  testInterpolation: function(property, setup) {
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation =
+        target.animate({ [idlName]: [ 'none',
+                                      'rgb(100, 100, 100) 10px 10px 10px 0px'] },
+                       { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+                                  // Premultiplied
+        [{ time: 500,  expected: 'rgba(100, 100, 100, 0.5) 5px 5px 5px 0px' }]);
+    }, property + ': from none to other');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation =
+        target.animate({ [idlName]: [ 'rgb(100, 100, 100) 10px 10px 10px 0px',
+                                      'none' ] },
+                       { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+                                  // Premultiplied
+        [{ time: 500,  expected: 'rgba(100, 100, 100, 0.5) 5px 5px 5px 0px' }]);
+    }, property + ': from other to none');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation =
+        target.animate({ [idlName]: [ 'rgb(0, 0, 0) 0px 0px 0px 0px',
+                                      'rgb(100, 100, 100) 10px 10px 10px 0px'] },
+                       { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+        [{ time: 500,  expected: 'rgb(50, 50, 50) 5px 5px 5px 0px' }]);
+    }, property + ': single shadow');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation =
+        target.animate({ [idlName]: [ 'rgb(0, 0, 0) 0px 0px 0px 0px, '
+                                    + 'rgb(200, 200, 200) 20px 20px 20px 20px',
+                                      'rgb(100, 100, 100) 10px 10px 10px 0px, '
+                                    + 'rgb(100, 100, 100) 10px 10px 10px 0px'] },
+                       { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+        [{ time: 500,  expected: 'rgb(50, 50, 50) 5px 5px 5px 0px, '
+                               + 'rgb(150, 150, 150) 15px 15px 15px 10px' }]);
+    }, property + ': shadow list');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation =
+        target.animate({ [idlName]: [ 'rgb(200, 200, 200) 20px 20px 20px 20px',
+                                      'rgb(100, 100, 100) 10px 10px 10px 0px, '
+                                    + 'rgb(100, 100, 100) 10px 10px 10px 0px'] },
+                       { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+        [{ time: 500,  expected: 'rgb(150, 150, 150) 15px 15px 15px 10px, '
+                               + 'rgba(100, 100, 100, 0.5) 5px 5px 5px 0px' }]);
+    }, property + ': mismatched list length (from shorter to longer)');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation =
+        target.animate({ [idlName]: [ 'rgb(100, 100, 100) 10px 10px 10px 0px, '
+                                    + 'rgb(100, 100, 100) 10px 10px 10px 0px',
+                                      'rgb(200, 200, 200) 20px 20px 20px 20px']},
+                       { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+        [{ time: 500,  expected: 'rgb(150, 150, 150) 15px 15px 15px 10px, '
+                               + 'rgba(100, 100, 100, 0.5) 5px 5px 5px 0px' }]);
+    }, property + ': mismatched list length (from longer to shorter)');
+  },
+
   testAddition: function(property, setup) {
     test(function(t) {
       var idlName = propertyToIDL(property);
@@ -955,6 +1152,106 @@ const boxShadowListType = {
   },
 };
 
+const positionType = {
+  testInterpolation: function(property, setup) {
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation = target.animate({ [idlName]: ['10px 10px', '50px 50px'] },
+                                     { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+                           [{ time: 0,    expected: '10px 10px' },
+                            { time: 500,  expected: '30px 30px' },
+                            { time: 1000, expected: '50px 50px' }]);
+    }, property + ' supports animating as a position');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation = target.animate({ [idlName]: ['1rem 1rem', '5rem 5rem'] },
+                                     { duration: 1000, fill: 'both' });
+      testAnimationSamples(animation, idlName,
+                           [{ time: 0,    expected: '10px 10px' },
+                            { time: 500,  expected: '30px 30px' },
+                            { time: 1000, expected: '50px 50px' }]);
+    }, property + ' supports animating as a position of rem');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation = target.animate({ [idlName]: ['10% 10%', '50% 50%'] },
+                                     { duration: 1000, fill: 'both' });
+      testAnimationSamples(
+        animation, idlName,
+        [{ time: 0,    expected: calcFromPercentage(idlName, '10% 10%') },
+         { time: 500,  expected: calcFromPercentage(idlName, '30% 30%') },
+         { time: 1000, expected: calcFromPercentage(idlName, '50% 50%') }]);
+    }, property + ' supports animating as a position of percent');
+  },
+
+  testAddition: function(property, setup) {
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      target.style[idlName] = '10px 10px';
+      var animation = target.animate({ [idlName]: ['10px 10px', '50px 50px'] },
+                                     { duration: 1000, composite: 'add' });
+      testAnimationSamples(animation, idlName, [{ time: 0, expected: '20px 20px' }]);
+    }, property + ': position');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      target.style[idlName] = '1rem 1rem';
+      var animation = target.animate({ [idlName]: ['1rem 1rem', '5rem 5rem'] },
+                                     { duration: 1000, composite: 'add' });
+      testAnimationSamples(animation, idlName, [{ time: 0, expected: '20px 20px' }]);
+    }, property + ': position of rem');
+
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      target.style[idlName] = '60% 60%';
+      var animation = target.animate({ [idlName]: ['70% 70%', '100% 100%'] },
+                                     { duration: 1000, composite: 'add' });
+      testAnimationSamples(
+        animation, idlName,
+        [{ time: 0, expected: calcFromPercentage(idlName, '130% 130%') }]);
+    }, property + ': position of percentage');
+  },
+};
+
+const rectType = {
+  testInterpolation: function(property, setup) {
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      var animation = target.animate({ [idlName]:
+                                         ['rect(10px, 10px, 10px, 10px)',
+					  'rect(50px, 50px, 50px, 50px)'] },
+                                     { duration: 1000, fill: 'both' });
+	testAnimationSamples(
+          animation, idlName,
+          [{ time: 500,  expected: 'rect(30px, 30px, 30px, 30px)' }]);
+    }, property + ' supports animating as a rect');
+  },
+
+  testAddition: function(property, setup) {
+    test(function(t) {
+      var idlName = propertyToIDL(property);
+      var target = createTestElement(t, setup);
+      target.style[idlName] = 'rect(100px, 100px, 100px, 100px)';
+      var animation = target.animate({ [idlName]:
+                                         ['rect(10px, 10px, 10px, 10px)',
+					  'rect(10px, 10px, 10px, 10px)'] },
+                                     { duration: 1000, composite: 'add' });
+      testAnimationSamples(
+        animation, idlName,
+        [{ time: 0, expected: 'rect(110px, 110px, 110px, 110px)' }]);
+    }, property + ': rect');
+  },
+}
+
 const types = {
   color: colorType,
   discrete: discreteType,
@@ -963,10 +1260,13 @@ const types = {
   length: lengthType,
   percentage: percentageType,
   lengthPercentageOrCalc: lengthPercentageOrCalcType,
+  lengthPair: lengthPairType,
   positiveNumber: positiveNumberType,
   transformList: transformListType,
   visibility: visibilityType,
   boxShadowList: boxShadowListType,
   textShadowList: textShadowListType,
+  rect: rectType,
+  position: positionType,
 };
 

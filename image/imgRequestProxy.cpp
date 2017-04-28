@@ -617,7 +617,7 @@ imgRequestProxy* NewStaticProxy(imgRequestProxy* aThis)
 {
   nsCOMPtr<nsIPrincipal> currentPrincipal;
   aThis->GetImagePrincipal(getter_AddRefs(currentPrincipal));
-  RefPtr<image::Image> image = aThis->GetImage();
+  RefPtr<Image> image = aThis->GetImage();
   return new imgRequestProxyStatic(image, currentPrincipal);
 }
 
@@ -643,6 +643,8 @@ imgRequestProxy::PerformClone(imgINotificationObserver* aObserver,
                               imgRequestProxy* (aAllocFn)(imgRequestProxy*),
                               imgRequestProxy** aClone)
 {
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
+
   NS_PRECONDITION(aClone, "Null out param");
 
   LOG_SCOPE(gImgLog, "imgRequestProxy::Clone");
@@ -713,6 +715,14 @@ imgRequestProxy::GetCORSMode(int32_t* aCorsMode)
 
   *aCorsMode = GetOwner()->GetCORSMode();
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+imgRequestProxy::BoostPriority(uint32_t aCategory)
+{
+  NS_ENSURE_STATE(GetOwner() && !mCanceled);
+  GetOwner()->BoostPriority(aCategory);
   return NS_OK;
 }
 

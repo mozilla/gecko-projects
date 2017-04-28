@@ -121,6 +121,7 @@ UNITTEST_ALIASES = {
 # [test_platforms]} translations, This includes only the most commonly-used
 # substrings.  This is intended only for backward-compatibility.  New test
 # platforms should have their `test_platform` spelled out fully in try syntax.
+# Note that the test platforms here are only the prefix up to the `/`.
 UNITTEST_PLATFORM_PRETTY_NAMES = {
     'Ubuntu': ['linux32', 'linux64', 'linux64-asan'],
     'x64': ['linux64', 'linux64-asan'],
@@ -249,7 +250,7 @@ def parse_message(message):
     # In order to run test jobs multiple times
     parser.add_argument('--rebuild', dest='trigger_tests', type=int, default=1)
     parts = parts[try_idx:] if try_idx is not None else []
-    args, _ = parser.parse_known_args(parts[try_idx:])
+    args, _ = parser.parse_known_args(parts)
     return args
 
 
@@ -306,8 +307,8 @@ class TryOptionSyntax(object):
         assert args is not None
 
         self.jobs = self.parse_jobs(args.jobs)
-        self.build_types = self.parse_build_types(args.build_types)
-        self.platforms = self.parse_platforms(args.platforms)
+        self.build_types = self.parse_build_types(args.build_types, full_task_graph)
+        self.platforms = self.parse_platforms(args.platforms, full_task_graph)
         self.unittests = self.parse_test_option(
             "unittest_try_name", args.unittests, full_task_graph)
         self.talos = self.parse_test_option("talos_try_name", args.talos, full_task_graph)
@@ -329,14 +330,23 @@ class TryOptionSyntax(object):
             expanded.extend(j.strip() for j in job.split(','))
         return expanded
 
-    def parse_build_types(self, build_types_arg):
+    def parse_build_types(self, build_types_arg, full_task_graph):
         if build_types_arg is None:
             build_types_arg = []
+
         build_types = filter(None, [BUILD_TYPE_ALIASES.get(build_type) for
                              build_type in build_types_arg])
+
+        all_types = set(t.attributes['build_type']
+                        for t in full_task_graph.tasks.itervalues()
+                        if 'build_type' in t.attributes)
+        bad_types = set(build_types) - all_types
+        if bad_types:
+            raise Exception("Unknown build type(s) [%s] specified for try" % ','.join(bad_types))
+
         return build_types
 
-    def parse_platforms(self, platform_arg):
+    def parse_platforms(self, platform_arg, full_task_graph):
         if platform_arg == 'all':
             return None
 
@@ -347,6 +357,17 @@ class TryOptionSyntax(object):
                 results.extend(RIDEALONG_BUILDS[build])
                 logger.info("platform %s triggers ridealong builds %s" %
                             (build, ', '.join(RIDEALONG_BUILDS[build])))
+
+        test_platforms = set(t.attributes['test_platform']
+                             for t in full_task_graph.tasks.itervalues()
+                             if 'test_platform' in t.attributes)
+        build_platforms = set(t.attributes['build_platform']
+                              for t in full_task_graph.tasks.itervalues()
+                              if 'build_platform' in t.attributes)
+        all_platforms = test_platforms | build_platforms
+        bad_platforms = set(results) - all_platforms
+        if bad_platforms:
+            raise Exception("Unknown platform(s) [%s] specified for try" % ','.join(bad_platforms))
 
         return results
 
@@ -366,7 +387,7 @@ class TryOptionSyntax(object):
         if test_arg is None or test_arg == 'none':
             return []
 
-        all_platforms = set(t.attributes['test_platform']
+        all_platforms = set(t.attributes['test_platform'].split('/')[0]
                             for t in full_task_graph.tasks.itervalues()
                             if 'test_platform' in t.attributes)
 
@@ -564,8 +585,10 @@ class TryOptionSyntax(object):
                     break
             else:
                 return False
-            if 'platforms' in test and attr('test_platform') not in test['platforms']:
-                return False
+            if 'platforms' in test:
+                platform = attributes.get('test_platform', '').split('/')[0]
+                if platform not in test['platforms']:
+                    return False
             if 'only_chunks' in test and attr('test_chunk') not in test['only_chunks']:
                 return False
             return True

@@ -18,7 +18,7 @@ add_task(function* test_actionContextMenus() {
     await browser.contextMenus.create({parentId, title: "click B"});
 
     for (let i = 1; i < 9; i++) {
-      await browser.contextMenus.create({contexts, title: `click ${i}`});
+      await browser.contextMenus.create({contexts, id: `${i}`, title: `click ${i}`});
     }
 
     browser.contextMenus.onClicked.addListener((info, tab) => {
@@ -47,10 +47,14 @@ add_task(function* test_actionContextMenus() {
     is(popup, submenu.firstChild, "Correct submenu opened");
     is(popup.children.length, 2, "Correct number of submenu items");
 
+    let idPrefix = `${makeWidgetId(extension.id)}_`;
+
     is(second.tagName, "menuitem", "Second menu item type is correct");
     is(second.label, "click 1", "Second menu item title is correct");
+    is(second.id, `${idPrefix}1`, "Second menu item id is correct");
 
     is(last.label, "click 5", "Last menu item title is correct");
+    is(last.id, `${idPrefix}5`, "Last menu item id is correct");
     is(separator.tagName, "menuseparator", "Separator after last menu item");
 
     yield closeActionContextMenu(popup.firstChild);
@@ -72,8 +76,11 @@ add_task(function* test_tabContextMenu() {
       await browser.contextMenus.create({
         id: "alpha-beta-parent", title: "alpha-beta parent", contexts: ["tab"],
       });
+
       await browser.contextMenus.create({parentId: "alpha-beta-parent", title: "alpha"});
       await browser.contextMenus.create({parentId: "alpha-beta-parent", title: "beta"});
+
+      await browser.contextMenus.create({title: "dummy", contexts: ["page"]});
 
       browser.contextMenus.onClicked.addListener((info, tab) => {
         browser.test.sendMessage("click", {info, tab});
@@ -107,6 +114,8 @@ add_task(function* test_tabContextMenu() {
 
   is(submenu.tagName, "menu", "Correct submenu type");
   is(submenu.label, "alpha-beta parent", "Correct submenu title");
+
+  isnot(gamma.label, "dummy", "`page` context menu item should not appear here");
 
   is(gamma.tagName, "menuitem", "Third menu item type is correct");
   is(gamma.label, "gamma", "Third menu item label is correct");

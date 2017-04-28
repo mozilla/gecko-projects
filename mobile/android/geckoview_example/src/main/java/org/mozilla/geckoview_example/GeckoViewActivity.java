@@ -6,102 +6,65 @@
 package org.mozilla.geckoview_example;
 
 import android.app.Activity;
-import android.app.AlertDialog;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.util.Log;
-import android.widget.Toast;
 
-import org.mozilla.gecko.BaseGeckoInterface;
-import org.mozilla.gecko.GeckoProfile;
-import org.mozilla.gecko.GeckoThread;
 import org.mozilla.gecko.GeckoView;
-
-import static org.mozilla.gecko.GeckoView.setGeckoInterface;
 
 public class GeckoViewActivity extends Activity {
     private static final String LOGTAG = "GeckoViewActivity";
     private static final String DEFAULT_URL = "https://mozilla.org";
 
-    GeckoView mGeckoView;
+    /* package */ static final int REQUEST_FILE_PICKER = 1;
+
+    private GeckoView mGeckoView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        setGeckoInterface(new BaseGeckoInterface(this));
+        Log.i(LOGTAG, "zerdatime " + SystemClock.elapsedRealtime() +
+              " - application start");
 
         setContentView(R.layout.geckoview_activity);
 
         mGeckoView = (GeckoView) findViewById(R.id.gecko_view);
-        mGeckoView.setChromeDelegate(new MyGeckoViewChrome());
         mGeckoView.setContentListener(new MyGeckoViewContent());
         mGeckoView.setProgressListener(new MyGeckoViewProgress());
 
-        final GeckoProfile profile = GeckoProfile.get(this);
-
-        GeckoThread.initMainProcess(profile, /* args */ null, /* debugging */ false);
-        GeckoThread.launch();
+        final BasicGeckoViewPrompt prompt = new BasicGeckoViewPrompt();
+        prompt.filePickerRequestCode = REQUEST_FILE_PICKER;
+        mGeckoView.setPromptDelegate(prompt);
 
         loadFromIntent(getIntent());
     }
 
     @Override
-    protected void onNewIntent(Intent externalIntent) {
-        Log.d(LOGTAG, "SNORP: onNewIntent: " + externalIntent.getData().toString());
-        loadFromIntent(externalIntent);
+    protected void onNewIntent(final Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+
+        if (intent.getData() != null) {
+            loadFromIntent(intent);
+        }
     }
 
-    private void loadFromIntent(Intent intent) {
-        Uri u = intent.getData();
-        if (u != null) {
-            mGeckoView.loadUri(u.toString());
+    private void loadFromIntent(final Intent intent) {
+        final Uri uri = intent.getData();
+        mGeckoView.loadUri(uri != null ? uri.toString() : DEFAULT_URL);
+    }
+
+    @Override
+    protected void onActivityResult(final int requestCode, final int resultCode,
+                                    final Intent data) {
+        if (requestCode == REQUEST_FILE_PICKER) {
+            final BasicGeckoViewPrompt prompt = (BasicGeckoViewPrompt)
+                    mGeckoView.getPromptDelegate();
+            prompt.onFileCallbackResult(resultCode, data);
         } else {
-            mGeckoView.loadUri(DEFAULT_URL);
-        }
-    }
-
-    private class MyGeckoViewChrome implements GeckoView.ChromeDelegate {
-        @Override
-        public void onAlert(GeckoView view, String message, GeckoView.PromptResult result) {
-            Log.i(LOGTAG, "Alert!");
-            result.confirm();
-            Toast.makeText(getApplicationContext(), message, Toast.LENGTH_LONG).show();
-        }
-
-        @Override
-        public void onConfirm(GeckoView view, String message, final GeckoView.PromptResult result) {
-            Log.i(LOGTAG, "Confirm!");
-            new AlertDialog.Builder(GeckoViewActivity.this)
-                .setTitle("javaScript dialog")
-                .setMessage(message)
-                .setPositiveButton(android.R.string.ok,
-                                   new DialogInterface.OnClickListener() {
-                                       public void onClick(DialogInterface dialog, int which) {
-                                           result.confirm();
-                                       }
-                                   })
-                .setNegativeButton(android.R.string.cancel,
-                                   new DialogInterface.OnClickListener() {
-                                       public void onClick(DialogInterface dialog, int which) {
-                                           result.cancel();
-                                       }
-                                   })
-                .create()
-                .show();
-        }
-
-        @Override
-        public void onPrompt(GeckoView view, String message, String defaultValue, GeckoView.PromptResult result) {
-            result.cancel();
-        }
-
-        @Override
-        public void onDebugRequest(GeckoView view, GeckoView.PromptResult result) {
-            Log.i(LOGTAG, "Remote Debug!");
-            result.confirm();
+            super.onActivityResult(requestCode, resultCode, data);
         }
     }
 
@@ -116,11 +79,15 @@ public class GeckoViewActivity extends Activity {
         @Override
         public void onPageStart(GeckoView view, String url) {
             Log.i(LOGTAG, "Starting to load page at " + url);
+            Log.i(LOGTAG, "zerdatime " + SystemClock.elapsedRealtime() +
+                  " - page load start");
         }
 
         @Override
         public void onPageStop(GeckoView view, boolean success) {
             Log.i(LOGTAG, "Stopping page load " + (success ? "successfully" : "unsuccessfully"));
+            Log.i(LOGTAG, "zerdatime " + SystemClock.elapsedRealtime() +
+                  " - page load stop");
         }
 
         @Override

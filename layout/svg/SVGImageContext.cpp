@@ -10,20 +10,19 @@
 // Keep others in (case-insensitive) order:
 #include "gfxUtils.h"
 #include "mozilla/Preferences.h"
+#include "nsContentUtils.h"
 #include "nsIFrame.h"
 #include "nsPresContext.h"
 
 namespace mozilla {
 
 /* static */ void
-SVGImageContext::MaybeInitAndStoreContextPaint(Maybe<SVGImageContext>& aContext,
-                                               nsIFrame* aFromFrame,
-                                               imgIContainer* aImgContainer)
+SVGImageContext::MaybeStoreContextPaint(Maybe<SVGImageContext>& aContext,
+                                        nsIFrame* aFromFrame,
+                                        imgIContainer* aImgContainer)
 {
   static bool sEnabledForContent = false;
   static bool sEnabledForContentCached = false;
-
-  MOZ_ASSERT(!aContext, "The emplace() call below with overwrite this object");
 
   if (!sEnabledForContentCached) {
     Preferences::AddBoolVarCache(&sEnabledForContent,
@@ -32,7 +31,7 @@ SVGImageContext::MaybeInitAndStoreContextPaint(Maybe<SVGImageContext>& aContext,
   }
 
   if (!sEnabledForContent &&
-      !aFromFrame->PresContext()->IsChrome()) {
+      !nsContentUtils::IsChromeDoc(aFromFrame->PresContext()->Document())) {
     // Context paint is pref'ed off for content and this is a content doc.
     return;
   }
@@ -62,7 +61,9 @@ SVGImageContext::MaybeInitAndStoreContextPaint(Maybe<SVGImageContext>& aContext,
   }
 
   if (haveContextPaint) {
-    aContext.emplace();
+    if (!aContext) {
+      aContext.emplace();
+    }
     aContext->mContextPaint = contextPaint.forget();
   }
 }

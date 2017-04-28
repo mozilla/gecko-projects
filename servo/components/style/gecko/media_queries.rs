@@ -5,6 +5,7 @@
 //! Gecko's media-query device and expression representation.
 
 use app_units::Au;
+use context::QuirksMode;
 use cssparser::{CssStringWriter, Parser, Token};
 use euclid::Size2D;
 use font_metrics::get_metrics_provider_for_product;
@@ -16,9 +17,9 @@ use gecko_bindings::structs::RawGeckoPresContextOwned;
 use media_queries::MediaType;
 use parser::ParserContext;
 use properties::ComputedValues;
-use std::ascii::AsciiExt;
 use std::fmt::{self, Write};
 use std::sync::Arc;
+use str::starts_with_ignore_ascii_case;
 use string_cache::Atom;
 use style_traits::ToCss;
 use style_traits::viewport::ViewportConstraints;
@@ -340,11 +341,6 @@ impl MediaExpressionValue {
     }
 }
 
-fn starts_with_ignore_ascii_case(string: &str, prefix: &str) -> bool {
-    string.len() > prefix.len() &&
-      string[0..prefix.len()].eq_ignore_ascii_case(prefix)
-}
-
 fn find_feature<F>(mut f: F) -> Option<&'static nsMediaFeature>
     where F: FnMut(&'static nsMediaFeature) -> bool,
 {
@@ -526,7 +522,7 @@ impl Expression {
     }
 
     /// Returns whether this media query evaluates to true for the given device.
-    pub fn matches(&self, device: &Device) -> bool {
+    pub fn matches(&self, device: &Device, quirks_mode: QuirksMode) -> bool {
         let mut css_value = nsCSSValue::null();
         unsafe {
             (self.feature.mGetter.unwrap())(device.pres_context,
@@ -539,12 +535,13 @@ impl Expression {
             None => return false,
         };
 
-        self.evaluate_against(device, &value)
+        self.evaluate_against(device, &value, quirks_mode)
     }
 
     fn evaluate_against(&self,
                         device: &Device,
-                        actual_value: &MediaExpressionValue)
+                        actual_value: &MediaExpressionValue,
+                        quirks_mode: QuirksMode)
                         -> bool {
         use self::MediaExpressionValue::*;
         use std::cmp::Ordering;
@@ -569,6 +566,8 @@ impl Expression {
             style: default_values.clone(),
             font_metrics_provider: &provider,
             in_media_query: true,
+            // TODO: pass the correct value here.
+            quirks_mode: quirks_mode,
         };
 
         let required_value = match self.value {

@@ -54,7 +54,6 @@
 #include "vm/Stack.h"
 #include "vm/Stopwatch.h"
 #include "vm/Symbol.h"
-#include "wasm/WasmRuntime.h"
 
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -466,13 +465,6 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     void setTelemetryCallback(JSRuntime* rt, JSAccumulateTelemetryDataCallback callback);
 
   public:
-    js::ActiveThreadData<JSGetIncumbentGlobalCallback> getIncumbentGlobalCallback;
-    js::ActiveThreadData<JSEnqueuePromiseJobCallback> enqueuePromiseJobCallback;
-    js::ActiveThreadData<void*> enqueuePromiseJobCallbackData;
-
-    js::ActiveThreadData<JSPromiseRejectionTrackerCallback> promiseRejectionTrackerCallback;
-    js::ActiveThreadData<void*> promiseRejectionTrackerCallbackData;
-
     js::ActiveThreadData<JS::StartAsyncTaskCallback> startAsyncTaskCallback;
     js::UnprotectedData<JS::FinishAsyncTaskCallback> finishAsyncTaskCallback;
     js::ExclusiveData<js::PromiseTaskPtrVector> promiseTasksToDestroy;
@@ -534,13 +526,6 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
 
     /* AsmJSCache callbacks are runtime-wide. */
     js::UnprotectedData<JS::AsmJSCacheOps> asmJSCacheOps;
-
-  private:
-    // All runtime data needed for wasm and defined in wasm/WasmRuntime.h.
-    js::ActiveThreadData<js::wasm::Runtime> wasmRuntime_;
-
-  public:
-    js::wasm::Runtime& wasm() { return wasmRuntime_.ref(); }
 
   private:
     js::UnprotectedData<const JSPrincipals*> trustedPrincipals_;
@@ -941,7 +926,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     JS_FRIEND_API(void*) onOutOfMemory(js::AllocFunction allocator, size_t nbytes,
                                        void* reallocPtr = nullptr, JSContext* maybecx = nullptr);
 
-    /*  onOutOfMemory but can call the largeAllocationFailureCallback. */
+    /*  onOutOfMemory but can call OnLargeAllocationFailure. */
     JS_FRIEND_API(void*) onOutOfMemoryCanGC(js::AllocFunction allocator, size_t nbytes,
                                             void* reallocPtr = nullptr);
 
@@ -975,10 +960,6 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
         MOZ_ASSERT(autoWritableJitCodeActive_ != b, "AutoWritableJitCode should not be nested.");
         autoWritableJitCodeActive_ = b;
     }
-
-    /* See comment for JS::SetLargeAllocationFailureCallback in jsapi.h. */
-    js::ActiveThreadData<JS::LargeAllocationFailureCallback> largeAllocationFailureCallback;
-    js::ActiveThreadData<void*> largeAllocationFailureCallbackData;
 
     /* See comment for JS::SetOutOfMemoryCallback in jsapi.h. */
     js::ActiveThreadData<JS::OutOfMemoryCallback> oomCallback;
@@ -1340,6 +1321,10 @@ ZoneGroup::callAfterMinorGC(void (*thunk)(void* data), void* data)
 {
     nursery().queueSweepAction(thunk, data);
 }
+
+// This callback is set by JS::SetProcessLargeAllocationFailureCallback
+// and may be null. See comment in jsapi.h.
+extern mozilla::Atomic<JS::LargeAllocationFailureCallback> OnLargeAllocationFailure;
 
 } /* namespace js */
 

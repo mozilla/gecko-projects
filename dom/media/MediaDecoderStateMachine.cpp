@@ -1237,8 +1237,8 @@ private:
         return seekTime;
       }
 
-      const int64_t audioStart = audio ? audio->mTime : INT64_MAX;
-      const int64_t videoStart = video ? video->mTime : INT64_MAX;
+      const int64_t audioStart = audio ? audio->mTime.ToMicroseconds() : INT64_MAX;
+      const int64_t videoStart = video ? video->mTime.ToMicroseconds() : INT64_MAX;
       const int64_t audioGap = std::abs(audioStart - seekTime.ToMicroseconds());
       const int64_t videoGap = std::abs(videoStart - seekTime.ToMicroseconds());
       return TimeUnit::FromMicroseconds(
@@ -1314,7 +1314,7 @@ private:
   {
     if (mSeekJob.mTarget->IsFast()
         && mSeekJob.mTarget->GetTime() > mCurrentTimeBeforeSeek
-        && aSample->mTime < mCurrentTimeBeforeSeek.ToMicroseconds()) {
+        && aSample->mTime < mCurrentTimeBeforeSeek) {
       // We are doing a fastSeek, but we ended up *before* the previous
       // playback position. This is surprising UX, so switch to an accurate
       // seek and decode to the seek target. This is not conformant to the
@@ -1335,7 +1335,7 @@ private:
       return NS_ERROR_DOM_MEDIA_OVERFLOW_ERR;
     }
 
-    auto audioTime = TimeUnit::FromMicroseconds(aAudio->mTime);
+    auto audioTime = aAudio->mTime;
     if (audioTime + sampleDuration <= mSeekJob.mTarget->GetTime()) {
       // Our seek target lies after the frames in this AudioData. Don't
       // push it onto the audio queue, and keep decoding forwards.
@@ -1390,8 +1390,8 @@ private:
       return NS_ERROR_DOM_MEDIA_OVERFLOW_ERR;
     }
     RefPtr<AudioData> data(new AudioData(
-      aAudio->mOffset, mSeekJob.mTarget->GetTime().ToMicroseconds(),
-      duration.ToMicroseconds(), frames, Move(audioData), channels,
+      aAudio->mOffset, mSeekJob.mTarget->GetTime(),
+      duration, frames, Move(audioData), channels,
       aAudio->mRate));
     MOZ_ASSERT(AudioQueue().GetSize() == 0,
                "Should be the 1st sample after seeking");
@@ -1405,17 +1405,19 @@ private:
   {
     MOZ_ASSERT(aVideo);
     SLOG("DropVideoUpToSeekTarget() frame [%" PRId64 ", %" PRId64 "]",
-         aVideo->mTime, aVideo->GetEndTime());
-    const int64_t target = mSeekJob.mTarget->GetTime().ToMicroseconds();
+         aVideo->mTime.ToMicroseconds(), aVideo->GetEndTime().ToMicroseconds());
+    const auto target = mSeekJob.mTarget->GetTime();
 
     // If the frame end time is less than the seek target, we won't want
     // to display this frame after the seek, so discard it.
     if (target >= aVideo->GetEndTime()) {
       SLOG("DropVideoUpToSeekTarget() pop video frame [%" PRId64 ", %" PRId64 "] target=%" PRId64,
-           aVideo->mTime, aVideo->GetEndTime(), target);
+           aVideo->mTime.ToMicroseconds(), aVideo->GetEndTime().ToMicroseconds(),
+           target.ToMicroseconds());
       mFirstVideoFrameAfterSeek = aVideo;
     } else {
-      if (target >= aVideo->mTime && aVideo->GetEndTime() >= target) {
+      if (target >= aVideo->mTime &&
+          aVideo->GetEndTime() >= target) {
         // The seek target lies inside this frame's time slice. Adjust the
         // frame's start time to match the seek target.
         aVideo->UpdateTimestamp(target);
@@ -1424,7 +1426,8 @@ private:
 
       SLOG("DropVideoUpToSeekTarget() found video frame [%" PRId64 ", %" PRId64 "] "
            "containing target=%" PRId64,
-           aVideo->mTime, aVideo->GetEndTime(), target);
+           aVideo->mTime.ToMicroseconds(), aVideo->GetEndTime().ToMicroseconds(),
+           target.ToMicroseconds());
 
       MOZ_ASSERT(VideoQueue().GetSize() == 0,
                  "Should be the 1st sample after seeking");
@@ -1472,7 +1475,7 @@ static void
 DiscardFrames(MediaQueue<Type>& aQueue, const Function& aCompare)
 {
   while(aQueue.GetSize() > 0) {
-    if (aCompare(aQueue.PeekFront()->mTime)) {
+    if (aCompare(aQueue.PeekFront()->mTime.ToMicroseconds())) {
       RefPtr<Type> releaseMe = aQueue.PopFront();
       continue;
     }
@@ -1572,7 +1575,7 @@ private:
     MOZ_ASSERT(!mSeekJob.mPromise.IsEmpty(), "Seek shouldn't be finished");
     MOZ_ASSERT(NeedMoreVideo());
 
-    if (aVideo->mTime > mCurrentTime.ToMicroseconds()) {
+    if (aVideo->mTime > mCurrentTime) {
       mMaster->PushVideo(aVideo);
       FinishSeek();
     } else {
@@ -1664,7 +1667,7 @@ private:
   {
     RefPtr<VideoData> data = VideoQueue().PeekFront();
     if (data) {
-      mSeekJob.mTarget->SetTime(TimeUnit::FromMicroseconds(data->mTime));
+      mSeekJob.mTarget->SetTime(data->mTime);
     } else {
       MOZ_ASSERT(VideoQueue().AtEndOfStream());
       mSeekJob.mTarget->SetTime(mDuration);
@@ -2038,9 +2041,16 @@ StateObject::HandleResumeVideoDecoding(const TimeUnit& aTarget)
   // Start video-only seek to the current time.
   SeekJob seekJob;
 
-  const SeekTarget::Type type = mMaster->HasAudio()
-                                ? SeekTarget::Type::Accurate
-                                : SeekTarget::Type::PrevSyncPoint;
+  // We use fastseek to optimize the resuming time.
+  // FastSeek is only used for video-only media since we don't need to worry
+  // about A/V sync.
+  // Don't use fastSeek if we want to seek to the end because it might seek to a
+  // keyframe before the last frame (if the last frame itself is not a keyframe)
+  // and we always want to present the final frame to the user when seeking to
+  // the end.
+  const auto type = mMaster->HasAudio() || aTarget == mMaster->Duration()
+                    ? SeekTarget::Type::Accurate
+                    : SeekTarget::Type::PrevSyncPoint;
 
   seekJob.mTarget.emplace(aTarget, type, true /* aVideoOnly */);
 
@@ -2568,7 +2578,6 @@ ShutdownState::Enter()
 
   // Disconnect canonicals and mirrors before shutting down our task queue.
   master->mBuffered.DisconnectIfConnected();
-  master->mEstimatedDuration.DisconnectIfConnected();
   master->mExplicitDuration.DisconnectIfConnected();
   master->mPlayState.DisconnectIfConnected();
   master->mNextPlayState.DisconnectIfConnected();
@@ -2610,8 +2619,9 @@ MediaDecoderStateMachine::MediaDecoderStateMachine(MediaDecoder* aDecoder,
   mFrameStats(&aDecoder->GetFrameStatistics()),
   mVideoFrameContainer(aDecoder->GetVideoFrameContainer()),
   mAudioChannel(aDecoder->GetAudioChannel()),
-  mTaskQueue(new TaskQueue(GetMediaThreadPool(MediaThreadType::PLAYBACK),
-                           /* aSupportsTailDispatch = */ true)),
+  mTaskQueue(new TaskQueue(
+    GetMediaThreadPool(MediaThreadType::PLAYBACK),
+    "MDSM::mTaskQueue", /* aSupportsTailDispatch = */ true)),
   mWatchManager(this, mTaskQueue),
   mDispatchedStateMachine(false),
   mDelayedScheduler(mTaskQueue),
@@ -2632,7 +2642,6 @@ MediaDecoderStateMachine::MediaDecoderStateMachine(MediaDecoder* aDecoder,
   mVideoDecodeMode(VideoDecodeMode::Normal),
   mIsMSE(aDecoder->IsMSE()),
   INIT_MIRROR(mBuffered, TimeIntervals()),
-  INIT_MIRROR(mEstimatedDuration, NullableTimeUnit()),
   INIT_MIRROR(mExplicitDuration, Maybe<double>()),
   INIT_MIRROR(mPlayState, MediaDecoder::PLAY_STATE_LOADING),
   INIT_MIRROR(mNextPlayState, MediaDecoder::PLAY_STATE_PAUSED),
@@ -2686,7 +2695,6 @@ MediaDecoderStateMachine::InitializationTask(MediaDecoder* aDecoder)
 
   // Connect mirrors.
   mBuffered.Connect(mReader->CanonicalBuffered());
-  mEstimatedDuration.Connect(aDecoder->CanonicalEstimatedDuration());
   mExplicitDuration.Connect(aDecoder->CanonicalExplicitDuration());
   mPlayState.Connect(aDecoder->CanonicalPlayState());
   mNextPlayState.Connect(aDecoder->CanonicalNextPlayState());
@@ -2704,8 +2712,6 @@ MediaDecoderStateMachine::InitializationTask(MediaDecoder* aDecoder)
   mWatchManager.Watch(mVolume, &MediaDecoderStateMachine::VolumeChanged);
   mWatchManager.Watch(mPreservesPitch,
                       &MediaDecoderStateMachine::PreservesPitchChanged);
-  mWatchManager.Watch(mEstimatedDuration,
-                      &MediaDecoderStateMachine::RecomputeDuration);
   mWatchManager.Watch(mExplicitDuration,
                       &MediaDecoderStateMachine::RecomputeDuration);
   mWatchManager.Watch(mObservedDuration,
@@ -2991,8 +2997,6 @@ void MediaDecoderStateMachine::RecomputeDuration()
     // We don't fire duration changed for this case because it should have
     // already been fired on the main thread when the explicit duration was set.
     duration = TimeUnit::FromSeconds(d);
-  } else if (mEstimatedDuration.Ref().isSome()) {
-    duration = mEstimatedDuration.Ref().ref();
   } else if (mInfo.isSome() && Info().mMetadataDuration.isSome()) {
     // We need to check mInfo.isSome() because that this method might be invoked
     // while mObservedDuration is changed which might before the metadata been
@@ -3173,9 +3177,10 @@ MediaDecoderStateMachine::RequestAudioData()
       mAudioDataRequest.Complete();
       // audio->GetEndTime() is not always mono-increasing in chained ogg.
       mDecodedAudioEndTime = std::max(
-        TimeUnit::FromMicroseconds(aAudio->GetEndTime()), mDecodedAudioEndTime);
-      LOGV("OnAudioDecoded [%" PRId64 ",%" PRId64 "]", aAudio->mTime,
-           aAudio->GetEndTime());
+        aAudio->GetEndTime(), mDecodedAudioEndTime);
+      LOGV("OnAudioDecoded [%" PRId64 ",%" PRId64 "]",
+           aAudio->mTime.ToMicroseconds(),
+           aAudio->GetEndTime().ToMicroseconds());
       mStateObj->HandleAudioDecoded(aAudio);
     },
     [this, self] (const MediaResult& aError) {
@@ -3219,9 +3224,10 @@ MediaDecoderStateMachine::RequestVideoData(bool aSkipToNextKeyframe,
       mVideoDataRequest.Complete();
       // Handle abnormal or negative timestamps.
       mDecodedVideoEndTime = std::max(
-        mDecodedVideoEndTime, TimeUnit::FromMicroseconds(aVideo->GetEndTime()));
-      LOGV("OnVideoDecoded [%" PRId64 ",%" PRId64 "]", aVideo->mTime,
-           aVideo->GetEndTime());
+        mDecodedVideoEndTime, aVideo->GetEndTime());
+      LOGV("OnVideoDecoded [%" PRId64 ",%" PRId64 "]",
+           aVideo->mTime.ToMicroseconds(),
+           aVideo->GetEndTime().ToMicroseconds());
       mStateObj->HandleVideoDecoded(aVideo, videoDecodeStartTime);
     },
     [this, self] (const MediaResult& aError) {

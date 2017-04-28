@@ -80,7 +80,7 @@
   ; Adds a pinned Task Bar shortcut (see MigrateTaskBarShortcut for details).
   ${MigrateTaskBarShortcut}
 
-  ${UpdateShortcutNames}
+  ${UpdateShortcutBranding}
 
   ${RemoveDeprecatedKeys}
 
@@ -106,6 +106,11 @@
 
   ; Register AccessibleHandler.dll with COM (this writes to HKLM)
   ${RegisterAccessibleHandler}
+
+!ifndef HAVE_64BIT_BUILD
+  ; Clean up any IAccessible registry corruption
+  ${FixCorruptOleAccRegistration}
+!endif
 
 !ifdef MOZ_MAINTENANCE_SERVICE
   Call IsUserAdmin
@@ -315,7 +320,7 @@
 ; in case the branding has changed between updates.
 ; This should only be called sometime after both MigrateStartMenuShortcut
 ; and MigrateTaskBarShurtcut
-!macro UpdateShortcutNames
+!macro UpdateShortcutBranding
   ${GetLongPath} "$INSTDIR\uninstall\${SHORTCUTS_LOG}" $R9
   ${If} ${FileExists} "$R9"
     ClearErrors
@@ -324,13 +329,35 @@
     ReadINIStr $R8 "$R9" "STARTMENU" "Shortcut0"
     ${IfNot} ${Errors}
       ${If} ${FileExists} "$SMPROGRAMS\$R8"
-      ${AndIf} $R8 != "${BrandFullName}.lnk"
         ShellLink::GetShortCutTarget "$SMPROGRAMS\$R8"
         Pop $R7
         ${GetLongPath} "$R7" $R7
-        ${If} "$INSTDIR\${FileMainEXE}" == "$R7"
-          Rename "$SMPROGRAMS\$R8" "$SMPROGRAMS\${BrandFullName}.lnk"
-          WriteINIStr "$R9" "STARTMENU" "Shortcut0" "${BrandFullName}.lnk"
+        ${If} $R7 == "$INSTDIR\${FileMainEXE}"
+          ShellLink::GetShortCutIconLocation "$SMPROGRAMS\$R8"
+          Pop $R6
+          ${GetLongPath} "$R6" $R6
+          ${If} $R6 != "$INSTDIR\firefox.ico"
+          ${AndIf} ${FileExists} "$INSTDIR\firefox.ico"
+            StrCpy $R5 "1"
+          ${ElseIf} $R6 == "$INSTDIR\firefox.ico"
+          ${AndIfNot} ${FileExists} "$INSTDIR\firefox.ico"
+            StrCpy $R5 "1"
+          ${Else}
+            StrCpy $R5 "0"
+          ${EndIf}
+
+          ${If} $R5 == "1"
+          ${OrIf} $R8 != "${BrandFullName}.lnk"
+            Delete "$SMPROGRAMS\$R8"
+            ${If} ${FileExists} "$INSTDIR\firefox.ico"
+              CreateShortcut "$SMPROGRAMS\${BrandFullName}.lnk" \
+                             "$INSTDIR\${FileMainEXE}" "" "$INSTDIR\firefox.ico"
+            ${Else}
+              CreateShortcut "$SMPROGRAMS\${BrandFullName}.lnk" \
+                             "$INSTDIR\${FileMainEXE}"
+            ${EndIf}
+            WriteINIStr "$R9" "STARTMENU" "Shortcut0" "${BrandFullName}.lnk"
+          ${EndIf}
         ${EndIf}
       ${EndIf}
     ${EndIf}
@@ -339,13 +366,35 @@
     ReadINIStr $R8 "$R9" "DESKTOP" "Shortcut0"
     ${IfNot} ${Errors}
       ${If} ${FileExists} "$DESKTOP\$R8"
-      ${AndIf} $R8 != "${BrandFullName}.lnk"
         ShellLink::GetShortCutTarget "$DESKTOP\$R8"
         Pop $R7
         ${GetLongPath} "$R7" $R7
-        ${If} "$INSTDIR\${FileMainEXE}" == "$R7"
-          Rename "$DESKTOP\$R8" "$DESKTOP\${BrandFullName}.lnk"
-          WriteINIStr "$R9" "DESKTOP" "Shortcut0" "${BrandFullName}.lnk"
+        ${If} $R7 == "$INSTDIR\${FileMainEXE}"
+          ShellLink::GetShortCutIconLocation "$DESKTOP\$R8"
+          Pop $R6
+          ${GetLongPath} "$R6" $R6
+          ${If} $R6 != "$INSTDIR\firefox.ico"
+          ${AndIf} ${FileExists} "$INSTDIR\firefox.ico"
+            StrCpy $R5 "1"
+          ${ElseIf} $R6 == "$INSTDIR\firefox.ico"
+          ${AndIfNot} ${FileExists} "$INSTDIR\firefox.ico"
+            StrCpy $R5 "1"
+          ${Else}
+            StrCpy $R5 "0"
+          ${EndIf}
+
+          ${If} $R5 == "1"
+          ${OrIf} $R8 != "${BrandFullName}.lnk"
+            Delete "$DESKTOP\$R8"
+            ${If} ${FileExists} "$INSTDIR\firefox.ico"
+              CreateShortcut "$DESKTOP\${BrandFullName}.lnk" \
+                             "$INSTDIR\${FileMainEXE}" "" "$INSTDIR\firefox.ico"
+            ${Else}
+              CreateShortcut "$DESKTOP\${BrandFullName}.lnk" \
+                             "$INSTDIR\${FileMainEXE}"
+            ${EndIf}
+            WriteINIStr "$R9" "DESKTOP" "Shortcut0" "${BrandFullName}.lnk"
+          ${EndIf}
         ${EndIf}
       ${EndIf}
     ${EndIf}
@@ -354,21 +403,41 @@
     ReadINIStr $R8 "$R9" "QUICKLAUNCH" "Shortcut0"
     ${IfNot} ${Errors}
       ; "QUICKLAUNCH" actually means a taskbar pin.
+      ; We can't simultaneously rename and change the icon for a taskbar pin
+      ; without the icon breaking, and the icon is more important than the name,
+      ; so we'll forget about changing the name and just overwrite the icon.
       ${If} ${FileExists} "$QUICKLAUNCH\User Pinned\TaskBar\$R8"
-      ${AndIf} $R8 != "${BrandFullName}.lnk"
         ShellLink::GetShortCutTarget "$QUICKLAUNCH\User Pinned\TaskBar\$R8"
         Pop $R7
         ${GetLongPath} "$R7" $R7
         ${If} "$INSTDIR\${FileMainEXE}" == "$R7"
-          Rename "$QUICKLAUNCH\User Pinned\TaskBar\$R8" \
-                 "$QUICKLAUNCH\User Pinned\TaskBar\${BrandFullName}.lnk"
-          WriteINIStr "$R9" "QUICKLAUNCH" "Shortcut0" "${BrandFullName}.lnk"
+          ShellLink::GetShortCutIconLocation "$QUICKLAUNCH\User Pinned\TaskBar\$R8"
+          Pop $R6
+          ${GetLongPath} "$R6" $R6
+          ${If} $R6 != "$INSTDIR\firefox.ico"
+          ${AndIf} ${FileExists} "$INSTDIR\firefox.ico"
+            StrCpy $R5 "1"
+          ${ElseIf} $R6 == "$INSTDIR\firefox.ico"
+          ${AndIfNot} ${FileExists} "$INSTDIR\firefox.ico"
+            StrCpy $R5 "1"
+          ${Else}
+            StrCpy $R5 "0"
+          ${EndIf}
+
+          ${If} $R5 == "1"
+            ${If} ${FileExists} "$INSTDIR\firefox.ico"
+              CreateShortcut "$QUICKLAUNCH\User Pinned\TaskBar\$R8" "$R7" "" \
+                             "$INSTDIR\firefox.ico"
+            ${Else}
+              CreateShortcut "$QUICKLAUNCH\User Pinned\TaskBar\$R8" "$R7"
+            ${EndIf}
+          ${EndIf}
         ${EndIf}
       ${EndIf}
     ${EndIf}
   ${EndIf}
 !macroend
-!define UpdateShortcutNames "!insertmacro UpdateShortcutNames"
+!define UpdateShortcutBranding "!insertmacro UpdateShortcutBranding"
 
 !macro AddAssociationIfNoneExist FILE_TYPE KEY
   ClearErrors
@@ -857,6 +926,49 @@
   ${RegisterDLL} "$INSTDIR\AccessibleHandler.dll"
 !macroend
 !define RegisterAccessibleHandler "!insertmacro RegisterAccessibleHandler"
+
+!ifndef HAVE_64BIT_BUILD
+!define IID_IAccessible "{618736E0-3C3D-11CF-810C-00AA00389B71}"
+!define CLSID_UniversalMarshaler "{00020404-0000-0000-C000-000000000046}"
+!define OleAccTypeLib "{1EA4DBF0-3C3B-11CF-810C-00AA00389B71}"
+!define OleAccTypeLibVersion "1.1"
+Function FixCorruptOleAccRegistration
+  Push $0
+
+  ; Read IAccessible's ProxyStubClsid32. If it is not CLSID_UniversalMarshaler
+  ; then we must be running Windows 10 Creators Update which does not use a
+  ; type library.
+  ReadRegStr $0 HKCR "Interface\${IID_IAccessible}\ProxyStubClsid32" ""
+  ${Unless} "$0" == "${CLSID_UniversalMarshaler}"
+    Pop $0
+    Return
+  ${EndIf}
+
+  Push $1
+
+  ; IAccessible is using the universal marshler, therefore we expect a valid
+  ; TypeLib key to exist
+  ClearErrors
+  ReadRegStr $0 HKCR "Interface\${IID_IAccessible}\TypeLib" ""
+  ReadRegStr $1 HKCR "Interface\${IID_IAccessible}\TypeLib" "Version"
+  ReadRegStr $0 HKCR "TypeLib\$0\$1\0\win32" ""
+  Pop $1
+  ${IfNot} ${Errors}
+  ${AndIf} ${FileExists} "$0"
+    Pop $0
+    Return
+  ${EndIf}
+
+  Pop $0
+
+  ; Some third-party code has previously overridden system typelibs
+  ; with their own but did not clean itself up during uninstall.
+  ; Revert to the system typelib.
+  WriteRegStr HKCR "Interface\${IID_IAccessible}\TypeLib" "" "${OleAccTypeLib}"
+  WriteRegStr HKCR "Interface\${IID_IAccessible}\TypeLib" "Version" "${OleAccTypeLibVersion}"
+FunctionEnd
+!define FixCorruptOleAccRegistration "Call FixCorruptOleAccRegistration"
+!endif
 
 ; Removes various registry entries for reasons noted below (does not use SHCTX).
 !macro RemoveDeprecatedKeys

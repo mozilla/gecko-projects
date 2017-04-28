@@ -47,7 +47,6 @@
       hidden="true"
       data-category="paneAdvanced">
   <label class="header-name" flex="1">&paneUpdates.title;</label>
-  <html:a class="help-button" target="_blank" aria-label="&helpButton.label;"></html:a>
 </hbox>
 
 <!-- Update -->
@@ -85,6 +84,7 @@
     <spacer flex="1"/>
     <vbox>
       <button id="showUpdateHistory"
+              class="accessory-button"
               label="&updateHistory2.label;"
               accesskey="&updateHistory2.accesskey;"
               preference="app.update.disable_button.showUpdateHistory"/>

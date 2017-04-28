@@ -11,8 +11,6 @@ this.EXPORTED_SYMBOLS = ["BookmarkRepairRequestor", "BookmarkRepairResponder"];
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Log.jsm");
-Cu.import("resource://gre/modules/PlacesUtils.jsm");
-Cu.import("resource://gre/modules/PlacesSyncUtils.jsm");
 Cu.import("resource://services-sync/util.js");
 Cu.import("resource://services-sync/collection_repair.js");
 Cu.import("resource://services-sync/constants.js");
@@ -20,6 +18,9 @@ Cu.import("resource://services-sync/resource.js");
 Cu.import("resource://services-sync/doctor.js");
 Cu.import("resource://services-sync/telemetry.js");
 Cu.import("resource://services-common/utils.js");
+
+XPCOMUtils.defineLazyModuleGetter(this, "PlacesSyncUtils",
+                                  "resource://gre/modules/PlacesSyncUtils.jsm");
 
 const log = Log.repository.getLogger("Sync.Engine.Bookmarks.Repair");
 
@@ -638,7 +639,7 @@ class BookmarkRepairResponder extends CollectionRepairResponder {
     let itemSource = engine.itemSource();
     itemSource.ids = repairable.map(item => item.syncId);
     log.trace(`checking the server for items`, itemSource.ids);
-    let itemsResponse = itemSource.get();
+    let itemsResponse = await itemSource.get();
     // If the response failed, don't bother trying to parse the output.
     // Throwing here means we abort the repair, which isn't ideal for transient
     // errors (eg, no network, 500 service outage etc), but we don't currently

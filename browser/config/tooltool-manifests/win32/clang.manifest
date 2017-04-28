@@ -6,21 +6,21 @@
     "filename": "mozmake.exe"
   },
   {
-    "version": "rustc 1.16.0 (30cf806ef 2017-03-10) repack",
-    "size": 68287611,
-    "digest": "702b162f53970de096d1c7777f37eddd22251a910d523df4edcbead399d40bfb85b059b5745ec8d6e835149a8c7e7888aed36f7ca77ddfd57466a72505c2e86f",
+    "version": "rustc 1.16.0 (30cf806ef 2017-03-10) repack with cargo 0.19.0-nightly (8326a3683 2017-04-19)",
+    "size": 68401632,
+    "digest": "d55a50d61f3dbd34e68daf985c95773f6f66fa9b88364eefde03d2b009f2f4e9df7e7e72006347bb4ba0f65ff5190b4b6367fde01e79827e10534cd03fe720df",
     "algorithm": "sha512",
     "filename": "rustc.tar.bz2",
     "unpack": true
   },
   {
-    "version": "sccache rev b21198a7183a2fe226ff49348b1c0b51bae9f4f8",
+    "version": "sccache rev 7a3847276d05deb564cb84a16b8c551b690aaa3e",
     "algorithm": "sha512",
     "visibility": "public",
     "filename": "sccache2.tar.bz2",
     "unpack": true,
-    "digest": "7dee5c5602b3830cb8ac45ebaa8542714bbac0e50eabbff58a06972a02ceeab75ed7c56ff22a23f760b8317ae8e9a01cdecfaf75a7acbd2a4cdd817967170d2e",
-    "size": 1179901
+    "digest": "09c6b9407978a4ffa0638b412cde9517ebbdb9c8e8449f4dc6745f4da5c8025e29b4c99dfa1ddb84623d0dde8a3aac513f73e92fdb3a148e4c9a4e7931907964",
+    "size": 1628305
   },
   {
     "version": "Visual Studio 2015 Update 3 14.0.25425.01 / SDK 10.0.14393.0",

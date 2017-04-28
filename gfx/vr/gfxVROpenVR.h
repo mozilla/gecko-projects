@@ -66,12 +66,15 @@ class VRControllerOpenVR : public VRControllerHost
 {
 public:
   explicit VRControllerOpenVR(dom::GamepadHand aHand, uint32_t aNumButtons,
-                              uint32_t aNumAxes, vr::ETrackedDeviceClass aDeviceType);
+                              uint32_t aNumAxes, ::vr::ETrackedDeviceClass aDeviceType);
   void SetTrackedIndex(uint32_t aTrackedIndex);
   uint32_t GetTrackedIndex();
+  float GetAxisMove(uint32_t aAxis);
+  void SetAxisMove(uint32_t aAxis, float aValue);
   void SetTrigger(float aValue);
   float GetTrigger();
-  void VibrateHaptic(vr::IVRSystem* aVRSystem,
+  void SetHand(dom::GamepadHand aHand);
+  void VibrateHaptic(::vr::IVRSystem* aVRSystem,
                      uint32_t aHapticIndex,
                      double aIntensity,
                      double aDuration,
@@ -82,7 +85,7 @@ protected:
   virtual ~VRControllerOpenVR();
 
 private:
-  void UpdateVibrateHaptic(vr::IVRSystem* aVRSystem,
+  void UpdateVibrateHaptic(::vr::IVRSystem* aVRSystem,
                            uint32_t aHapticIndex,
                            double aIntensity,
                            double aDuration,
@@ -90,9 +93,10 @@ private:
                            uint32_t aPromiseID);
   void VibrateHapticComplete(uint32_t aPromiseID);
 
-  // The index of tracked devices from vr::IVRSystem.
+  // The index of tracked devices from ::vr::IVRSystem.
   uint32_t mTrackedIndex;
   float mTrigger;
+  nsTArray<float> mAxisMove;
   nsCOMPtr<nsIThread> mVibrateThread;
   Atomic<bool> mIsVibrateStopped;
 };
@@ -131,20 +135,19 @@ private:
                          uint64_t aButtonTouched);
   void HandleTriggerPress(uint32_t aControllerIdx,
                           uint32_t aButton,
-                          uint64_t aButtonMask,
-                          float aValue,
-                          uint64_t aButtonPressed,
-                          uint64_t aButtonTouched);
+                          float aValue);
   void HandleAxisMove(uint32_t aControllerIdx, uint32_t aAxis,
                       float aValue);
   void HandlePoseTracking(uint32_t aControllerIdx,
                           const dom::GamepadPoseState& aPose,
                           VRControllerHost* aController);
+  dom::GamepadHand GetGamepadHandFromControllerRole(
+                          ::vr::ETrackedControllerRole aRole);
 
   // there can only be one
   RefPtr<impl::VRDisplayOpenVR> mOpenVRHMD;
   nsTArray<RefPtr<impl::VRControllerOpenVR>> mOpenVRController;
-  vr::IVRSystem *mVRSystem;
+  ::vr::IVRSystem *mVRSystem;
 };
 
 } // namespace gfx

@@ -41,9 +41,21 @@ function EvaluationResult(props) {
 
   let messageBody;
   if (message.messageText) {
-    messageBody = message.messageText;
+    if (typeof message.messageText === "string") {
+      messageBody = message.messageText;
+    } else if (
+      typeof message.messageText === "object"
+      && message.messageText.type === "longString"
+    ) {
+      messageBody = `${message.messageText.initial}…`;
+    }
   } else {
-    messageBody = GripMessageBody({grip: parameters, serviceContainer, useQuotes: true});
+    messageBody = GripMessageBody({
+      grip: parameters,
+      serviceContainer,
+      useQuotes: true,
+      escapeWhitespace: false,
+    });
   }
 
   const topLevelClasses = ["cm-s-mozilla"];

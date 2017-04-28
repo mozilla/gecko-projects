@@ -172,12 +172,8 @@ pub struct mp4parse_track_audio_info {
     pub bit_depth: u16,
     pub sample_rate: u32,
     pub profile: u16,
-    // TODO:
-    //  codec_specific_data is AudioInfo.mCodecSpecificConfig,
-    //  codec_specific_config is AudioInfo.mExtraData.
-    //  It'd be better to change name same as AudioInfo.
-    pub codec_specific_data: mp4parse_byte_data,
     pub codec_specific_config: mp4parse_byte_data,
+    pub extra_data: mp4parse_byte_data,
     pub protected_data: mp4parse_sinf_info,
 }
 
@@ -523,10 +519,10 @@ pub unsafe extern fn mp4parse_get_track_audio_info(parser: *mut mp4parse_parser,
             if v.codec_esds.len() > std::u32::MAX as usize {
                 return mp4parse_status::INVALID;
             }
-            (*info).codec_specific_config.length = v.codec_esds.len() as u32;
-            (*info).codec_specific_config.data = v.codec_esds.as_ptr();
-            (*info).codec_specific_data.length = v.decoder_specific_data.len() as u32;
-            (*info).codec_specific_data.data = v.decoder_specific_data.as_ptr();
+            (*info).extra_data.length = v.codec_esds.len() as u32;
+            (*info).extra_data.data = v.codec_esds.as_ptr();
+            (*info).codec_specific_config.length = v.decoder_specific_data.len() as u32;
+            (*info).codec_specific_config.data = v.decoder_specific_data.as_ptr();
             if let Some(rate) = v.audio_sample_rate {
                 (*info).sample_rate = rate;
             }
@@ -543,8 +539,8 @@ pub unsafe extern fn mp4parse_get_track_audio_info(parser: *mut mp4parse_parser,
             if streaminfo.block_type != 0 || streaminfo.data.len() != 34 {
                 return mp4parse_status::INVALID;
             }
-            (*info).codec_specific_config.length = streaminfo.data.len() as u32;
-            (*info).codec_specific_config.data = streaminfo.data.as_ptr();
+            (*info).extra_data.length = streaminfo.data.len() as u32;
+            (*info).extra_data.data = streaminfo.data.as_ptr();
         }
         AudioCodecSpecific::OpusSpecificBox(ref opus) => {
             let mut v = Vec::new();
@@ -559,8 +555,8 @@ pub unsafe extern fn mp4parse_get_track_audio_info(parser: *mut mp4parse_parser,
                         if v.len() > std::u32::MAX as usize {
                             return mp4parse_status::INVALID;
                         }
-                        (*info).codec_specific_config.length = v.len() as u32;
-                        (*info).codec_specific_config.data = v.as_ptr();
+                        (*info).extra_data.length = v.len() as u32;
+                        (*info).extra_data.data = v.as_ptr();
                     }
                 }
             }
@@ -991,8 +987,8 @@ fn create_sample_table(track: &Track, track_offset_time: i64) -> Option<Vec<mp4p
 
         let iter = sort_table.iter();
         for i in 0 .. (iter.len() - 1) {
-            let current_index = sort_table[i] as usize;
-            let peek_index = sort_table[i + 1] as usize;
+            let current_index = sort_table[i];
+            let peek_index = sort_table[i + 1];
             let next_start_composition_time = sample_table[peek_index].start_composition;
             let sample = &mut sample_table[current_index];
             sample.end_composition = next_start_composition_time;
@@ -1049,13 +1045,14 @@ pub unsafe extern fn mp4parse_is_fragmented(parser: *mut mp4parse_parser, track_
 
     // check sample tables.
     let mut iter = tracks.iter();
-    match iter.find(|track| track.track_id == Some(track_id)) {
-        Some(track) if track.empty_sample_boxes.all_empty() => (*fragmented) = true as u8,
-        Some(_) => {},
-        None => return mp4parse_status::BAD_ARG,
-    }
-
-    mp4parse_status::OK
+    iter.find(|track| track.track_id == Some(track_id)).map_or(mp4parse_status::BAD_ARG, |track| {
+        match (&track.stsc, &track.stco, &track.stts) {
+            (&Some(ref stsc), &Some(ref stco), &Some(ref stts))
+                if stsc.samples.is_empty() && stco.offsets.is_empty() && stts.samples.is_empty() => (*fragmented) = true as u8,
+            _ => {},
+        };
+        mp4parse_status::OK
+    })
 }
 
 /// Get 'pssh' system id and 'pssh' box content for eme playback.

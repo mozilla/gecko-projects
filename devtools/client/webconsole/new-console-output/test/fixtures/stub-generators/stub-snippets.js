@@ -59,14 +59,14 @@ consoleApi.set("console.group('bar')", {
   keys: ["console.group('bar')", "console.groupEnd('bar')"],
   code: `
 console.group("bar");
-console.groupEnd("bar");
+console.groupEnd();
 `});
 
 consoleApi.set("console.groupCollapsed('foo')", {
   keys: ["console.groupCollapsed('foo')", "console.groupEnd('foo')"],
   code: `
 console.groupCollapsed("foo");
-console.groupEnd("foo");
+console.groupEnd();
 `});
 
 consoleApi.set("console.group()", {
@@ -128,6 +128,8 @@ const evaluationResultCommands = [
 ];
 
 let evaluationResult = new Map(evaluationResultCommands.map(cmd => [cmd, cmd]));
+evaluationResult.set("longString message Error",
+  `throw new Error("Long error ".repeat(10000))`);
 
 // Network Event
 
@@ -160,7 +162,7 @@ xhr.send();
 
 let pageError = new Map();
 
-pageError.set("Reference Error", `
+pageError.set("ReferenceError: asdf is not defined", `
   function bar() {
     asdf()
   }
@@ -171,9 +173,12 @@ pageError.set("Reference Error", `
   foo()
 `);
 
-pageError.set("Redeclaration Error", `
+pageError.set("SyntaxError: redeclaration of let a", `
   let a, a;
 `);
+
+pageError.set("TypeError longString message",
+  `throw new Error("Long error ".repeat(10000))`);
 
 module.exports = {
   consoleApi,

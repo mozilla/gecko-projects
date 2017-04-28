@@ -354,16 +354,16 @@ public:
     return nullptr;
   }
 
-  LayerIntRegion GetVisibleRegion() const
+  Maybe<uint64_t> GetReferentId() const
   {
     MOZ_ASSERT(IsValid());
 
     if (AtBottomLayer()) {
-      return mLayer->GetVisibleRegion();
+      return mLayer->AsRefLayer()
+           ? Some(mLayer->AsRefLayer()->GetReferentId())
+           : Nothing();
     }
-    LayerIntRegion region = mLayer->GetVisibleRegion();
-    region.Transform(mLayer->GetTransform());
-    return region;
+    return Nothing();
   }
 
   Maybe<ParentLayerIntRect> GetClipRect() const
@@ -423,15 +423,6 @@ public:
     return mLayer->GetScrollbarTargetContainerId();
   }
 
-  int32_t GetScrollThumbLength() const
-  {
-    if (GetScrollbarDirection() == ScrollDirection::VERTICAL) {
-      return mLayer->GetVisibleRegion().GetBounds().height;
-    } else {
-      return mLayer->GetVisibleRegion().GetBounds().width;
-    }
-  }
-
   bool IsScrollbarContainer() const
   {
     MOZ_ASSERT(IsValid());
@@ -464,34 +455,6 @@ public:
   bool operator!=(const LayerMetricsWrapper& aOther) const
   {
     return !(*this == aOther);
-  }
-
-  static const FrameMetrics& TopmostScrollableMetrics(Layer* aLayer)
-  {
-    for (uint32_t i = aLayer->GetScrollMetadataCount(); i > 0; i--) {
-      if (aLayer->GetFrameMetrics(i - 1).IsScrollable()) {
-        return aLayer->GetFrameMetrics(i - 1);
-      }
-    }
-    return ScrollMetadata::sNullMetadata->GetMetrics();
-  }
-
-  static const FrameMetrics& BottommostScrollableMetrics(Layer* aLayer)
-  {
-    for (uint32_t i = 0; i < aLayer->GetScrollMetadataCount(); i++) {
-      if (aLayer->GetFrameMetrics(i).IsScrollable()) {
-        return aLayer->GetFrameMetrics(i);
-      }
-    }
-    return ScrollMetadata::sNullMetadata->GetMetrics();
-  }
-
-  static const FrameMetrics& BottommostMetrics(Layer* aLayer)
-  {
-    if (aLayer->GetScrollMetadataCount() > 0) {
-      return aLayer->GetFrameMetrics(0);
-    }
-    return ScrollMetadata::sNullMetadata->GetMetrics();
   }
 
 private:

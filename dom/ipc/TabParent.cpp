@@ -19,7 +19,7 @@
 #include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/indexedDB/ActorsParent.h"
-#include "mozilla/dom/ipc/BlobParent.h"
+#include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
@@ -329,18 +329,6 @@ TabParent::RemoveWindowListeners()
   }
 }
 
-void
-TabParent::GetAppType(nsAString& aOut)
-{
-  aOut.Truncate();
-  nsCOMPtr<Element> elem = do_QueryInterface(mFrameElement);
-  if (!elem) {
-    return;
-  }
-
-  elem->GetAttr(kNameSpaceID_None, nsGkAtoms::mozapptype, aOut);
-}
-
 bool
 TabParent::IsVisible() const
 {
@@ -425,15 +413,15 @@ mozilla::ipc::IPCResult
 TabParent::Recv__delete__()
 {
   if (XRE_IsParentProcess()) {
-    ContentParent::DeallocateTabId(mTabId,
-                                   Manager()->AsContentParent()->ChildID(),
-                                   mMarkedDestroying);
+    ContentParent::UnregisterRemoteFrame(mTabId,
+                                         Manager()->AsContentParent()->ChildID(),
+                                         mMarkedDestroying);
   }
   else {
     Manager()->AsContentBridgeParent()->NotifyTabDestroyed();
-    ContentParent::DeallocateTabId(mTabId,
-                                   Manager()->ChildID(),
-                                   mMarkedDestroying);
+    ContentParent::UnregisterRemoteFrame(mTabId,
+                                         Manager()->ChildID(),
+                                         mMarkedDestroying);
   }
 
   return IPC_OK();
@@ -575,16 +563,6 @@ TabParent::RecvEvent(const RemoteDOMEvent& aEvent)
   bool dummy;
   target->DispatchEvent(event, &dummy);
   return IPC_OK();
-}
-
-TabParent* TabParent::sNextTabParent;
-
-/* static */ TabParent*
-TabParent::GetNextTabParent()
-{
-  TabParent* result = sNextTabParent;
-  sNextTabParent = nullptr;
-  return result;
 }
 
 bool
@@ -1754,7 +1732,7 @@ TabParent::RecvNotifyIMEFocus(const ContentCache& aContentCache,
   IMEStateManager::NotifyIME(aIMENotification, widget, true);
 
   if (aIMENotification.mMessage == NOTIFY_IME_OF_FOCUS) {
-    *aRequests = widget->GetIMENotificationRequests();
+    *aRequests = widget->IMENotificationRequestsRef();
   }
   return IPC_OK();
 }
@@ -1769,7 +1747,8 @@ TabParent::RecvNotifyIMETextChange(const ContentCache& aContentCache,
   }
 
 #ifdef DEBUG
-  IMENotificationRequests requests = widget->GetIMENotificationRequests();
+  const IMENotificationRequests& requests =
+    widget->IMENotificationRequestsRef();
   NS_ASSERTION(requests.WantTextChange(),
     "Don't call Send/RecvNotifyIMETextChange without NOTIFY_TEXT_CHANGE");
 #endif
@@ -2956,6 +2935,7 @@ public:
   NS_IMETHOD SetLoadGroup(nsILoadGroup*) NO_IMPL
   NS_IMETHOD SetLoadFlags(nsLoadFlags) NO_IMPL
   NS_IMETHOD GetLoadFlags(nsLoadFlags*) NO_IMPL
+  NS_IMETHOD GetIsDocument(bool *) NO_IMPL
   NS_IMETHOD GetOriginalURI(nsIURI**) NO_IMPL
   NS_IMETHOD SetOriginalURI(nsIURI*) NO_IMPL
   NS_IMETHOD GetURI(nsIURI** aUri) override
@@ -3136,9 +3116,9 @@ TabParent::AddInitialDnDDataTo(DataTransfer* aDataTransfer)
         variant->SetAsISupports(flavorDataProvider);
       } else if (item.data().type() == IPCDataTransferData::TnsString) {
         variant->SetAsAString(item.data().get_nsString());
-      } else if (item.data().type() == IPCDataTransferData::TPBlobParent) {
-        auto* parent = static_cast<BlobParent*>(item.data().get_PBlobParent());
-        RefPtr<BlobImpl> impl = parent->GetBlobImpl();
+      } else if (item.data().type() == IPCDataTransferData::TIPCBlob) {
+        RefPtr<BlobImpl> impl =
+          IPCBlobUtils::Deserialize(item.data().get_IPCBlob());
         variant->SetAsISupports(impl);
       } else if (item.data().type() == IPCDataTransferData::TShmem) {
         if (nsContentUtils::IsFlavorImage(item.flavor())) {

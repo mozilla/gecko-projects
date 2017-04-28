@@ -80,11 +80,12 @@ module.exports = {
    * @return {String}
    *         The JS source for the node.
    */
-  getASTSource(node) {
+  getASTSource(node, context) {
     switch (node.type) {
       case "MemberExpression":
         if (node.computed) {
-          throw new Error("getASTSource unsupported computed MemberExpression");
+          let filename = context && context.getFilename();
+          throw new Error(`getASTSource unsupported computed MemberExpression in ${filename}`);
         }
         return this.getASTSource(node.object) + "." +
           this.getASTSource(node.property);
@@ -202,7 +203,7 @@ module.exports = {
         expr.callee.type === "Identifier" &&
         expr.callee.name === "importScripts") {
       for (var arg of expr.arguments) {
-        var match = arg.value.match(workerImportFilenameMatch);
+        var match = arg.value && arg.value.match(workerImportFilenameMatch);
         if (match) {
           if (!match[1]) {
             let filePath = path.resolve(dirname, match[2]);
@@ -525,12 +526,16 @@ module.exports = {
     if (!gRootDir) {
       let dirName = path.dirname(module.filename);
 
-      while (dirName && !fs.existsSync(path.join(dirName, ".eslintignore"))) {
-        dirName = path.dirname(dirName);
-      }
-
-      if (!dirName) {
-        throw new Error("Unable to find root of repository");
+      while (true) {
+        const parsed = path.parse(dirName);
+        if (parsed.root === dirName) {
+          // We've reached the top of the filesystem
+          throw new Error("Unable to find root of repository");
+        }
+        dirName = parsed.dir;
+        if (fs.existsSync(path.join(dirName, ".eslintignore"))) {
+          break;
+        }
       }
 
       gRootDir = dirName;

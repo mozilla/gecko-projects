@@ -105,7 +105,6 @@ GK_ATOM(any, "any")
 GK_ATOM(applet, "applet")
 GK_ATOM(applyImports, "apply-imports")
 GK_ATOM(applyTemplates, "apply-templates")
-GK_ATOM(mozapptype, "mozapptype")
 GK_ATOM(archive, "archive")
 GK_ATOM(area, "area")
 GK_ATOM(arrow, "arrow")
@@ -628,7 +627,6 @@ GK_ATOM(mouseout, "mouseout")
 GK_ATOM(mouseover, "mouseover")
 GK_ATOM(mousethrough, "mousethrough")
 GK_ATOM(mouseup, "mouseup")
-GK_ATOM(mozaudiochannel, "mozaudiochannel")
 GK_ATOM(mozfullscreenchange, "mozfullscreenchange")
 GK_ATOM(mozfullscreenerror, "mozfullscreenerror")
 GK_ATOM(mozpointerlockchange, "mozpointerlockchange")
@@ -653,6 +651,7 @@ GK_ATOM(never, "never")
 GK_ATOM(_new, "new")
 GK_ATOM(newline, "newline")
 GK_ATOM(nextBidi, "NextBidi")
+GK_ATOM(nextTabParentId, "nextTabParentId")
 GK_ATOM(no, "no")
 GK_ATOM(noautofocus, "noautofocus")
 GK_ATOM(noautohide, "noautohide")
@@ -1959,10 +1958,6 @@ GK_ATOM(onuserproximity, "onuserproximity")
 // light sensor support
 GK_ATOM(ondevicelight, "ondevicelight")
 
-// Audio channel events
-GK_ATOM(onmozinterruptbegin, "onmozinterruptbegin")
-GK_ATOM(onmozinterruptend, "onmozinterruptend")
-
 // MediaDevices device change event
 GK_ATOM(ondevicechange, "ondevicechange")
 
@@ -2142,12 +2137,14 @@ GK_ATOM(ongamepadconnected, "ongamepadconnected")
 GK_ATOM(ongamepaddisconnected, "ongamepaddisconnected")
 
 // Content property names
+GK_ATOM(afterPseudoProperty, "afterPseudoProperty")  // nsXMLElement*
 GK_ATOM(animationsProperty, "AnimationsProperty")        // FrameAnimations*
 GK_ATOM(animationsOfBeforeProperty, "AnimationsOfBeforeProperty") // FrameAnimations*
 GK_ATOM(animationsOfAfterProperty, "AnimationsOfAfterProperty") // FrameAnimations*
 GK_ATOM(animationEffectsProperty, "AnimationEffectsProperty") // EffectSet*
 GK_ATOM(animationEffectsForBeforeProperty, "AnimationsEffectsForBeforeProperty") // EffectSet*
 GK_ATOM(animationEffectsForAfterProperty, "AnimationsEffectsForAfterProperty") // EffectSet*
+GK_ATOM(beforePseudoProperty, "beforePseudoProperty")  // nsXMLElement*
 GK_ATOM(cssPseudoElementBeforeProperty, "CSSPseudoElementBeforeProperty") // CSSPseudoElement*
 GK_ATOM(cssPseudoElementAfterProperty, "CSSPseudoElementAfterProperty") // CSSPseudoElement*
 GK_ATOM(transitionsProperty, "TransitionsProperty")        // FrameTransitions*

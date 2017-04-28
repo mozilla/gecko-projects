@@ -30,7 +30,6 @@ VRMockDisplay::VRMockDisplay(const nsCString& aID, uint32_t aDeviceID)
  : mDeviceID(aDeviceID)
  , mTimestamp(TimeStamp::Now())
 {
-  mSensorState.Clear();
   mDisplayInfo.mDisplayName = aID;
   mDisplayInfo.mType = VRDeviceType::Puppet;
   mDisplayInfo.mIsConnected = true;
@@ -213,6 +212,7 @@ VRMockController::NewPoseMove(const Nullable<Float32Array>& aPosition,
     poseState.orientation[1] = value.Data()[1];
     poseState.orientation[2] = value.Data()[2];
     poseState.orientation[3] = value.Data()[3];
+    poseState.isOrientationValid = true;
   }
   if (!aPosition.IsNull()) {
     const Float32Array& value = aPosition.Value();
@@ -221,6 +221,7 @@ VRMockController::NewPoseMove(const Nullable<Float32Array>& aPosition,
     poseState.position[0] = value.Data()[0];
     poseState.position[1] = value.Data()[1];
     poseState.position[2] = value.Data()[2];
+    poseState.isPositionValid = true;
   }
   if (!aAngularVelocity.IsNull()) {
     const Float32Array& value = aAngularVelocity.Value();

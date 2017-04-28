@@ -455,7 +455,6 @@ VRHMDSensorState
 VRDisplayOculus::GetSensorState(double timeOffset)
 {
   VRHMDSensorState result;
-  result.Clear();
 
   ovrTrackingState state = ovr_GetTrackingState(mSession, timeOffset, true);
   ovrPoseStatef& pose(state.HeadPose);
@@ -1200,8 +1199,7 @@ VRSystemManagerOculus::HandleInput()
         HandleButtonPress(i, buttonIdx, ovrButton_LThumb, inputState.Buttons,
                           inputState.Touches);
         ++buttonIdx;
-        HandleIndexTriggerPress(i, buttonIdx, ovrTouch_LIndexTrigger,
-                                inputState.IndexTrigger[handIdx], inputState.Touches);
+        HandleIndexTriggerPress(i, buttonIdx, inputState.IndexTrigger[handIdx]);
         ++buttonIdx;
         HandleHandTriggerPress(i, buttonIdx, inputState.HandTrigger[handIdx]);
         ++buttonIdx;
@@ -1218,8 +1216,7 @@ VRSystemManagerOculus::HandleInput()
         HandleButtonPress(i, buttonIdx, ovrButton_RThumb, inputState.Buttons,
                           inputState.Touches);
         ++buttonIdx;
-        HandleIndexTriggerPress(i, buttonIdx, ovrTouch_RIndexTrigger,
-                                inputState.IndexTrigger[handIdx], inputState.Touches);
+        HandleIndexTriggerPress(i, buttonIdx, inputState.IndexTrigger[handIdx]);
         ++buttonIdx;
         HandleHandTriggerPress(i, buttonIdx, inputState.HandTrigger[handIdx]);
         ++buttonIdx;
@@ -1267,6 +1264,7 @@ VRSystemManagerOculus::HandleInput()
       poseState.angularAcceleration[0] = pose.AngularAcceleration.x;
       poseState.angularAcceleration[1] = pose.AngularAcceleration.y;
       poseState.angularAcceleration[2] = pose.AngularAcceleration.z;
+      poseState.isOrientationValid = true;
     }
     if (state.HandStatusFlags[handIdx] & ovrStatus_PositionTracked) {
       poseState.flags |= GamepadCapabilityFlags::Cap_Position;
@@ -1284,6 +1282,7 @@ VRSystemManagerOculus::HandleInput()
 
       float eyeHeight = ovr_GetFloat(mSession, OVR_KEY_EYE_HEIGHT, OVR_DEFAULT_EYE_HEIGHT);
       poseState.position[1] -= eyeHeight;
+      poseState.isPositionValid = true;
     }
     HandlePoseTracking(i, poseState, controller);
   }
@@ -1319,19 +1318,20 @@ VRSystemManagerOculus::HandleButtonPress(uint32_t aControllerIdx,
 void
 VRSystemManagerOculus::HandleIndexTriggerPress(uint32_t aControllerIdx,
                                                uint32_t aButton,
-                                               uint64_t aTouchMask,
-                                               float aValue,
-                                               uint64_t aButtonTouched)
+                                               float aValue)
 {
   RefPtr<impl::VRControllerOculus> controller(mOculusController[aControllerIdx]);
   MOZ_ASSERT(controller);
-  const uint64_t touchedDiff = (controller->GetButtonTouched() ^ aButtonTouched);
   const float oldValue = controller->GetIndexTrigger();
+  // We prefer to let developers to set their own threshold for the adjustment.
+  // Therefore, we don't check ButtonPressed and ButtonTouched with TouchMask here.
+  // we just check the button value is larger than the threshold value or not.
+  const float threshold = gfxPrefs::VRControllerTriggerThreshold();
 
   // Avoid sending duplicated events in IPC channels.
-  if ((oldValue != aValue) ||
-      (touchedDiff & aTouchMask)) {
-    NewButtonEvent(aControllerIdx, aButton, aValue > 0.1f, aTouchMask & aButtonTouched, aValue);
+  if (oldValue != aValue) {
+    NewButtonEvent(aControllerIdx, aButton, aValue > threshold,
+                   aValue > threshold, aValue);
     controller->SetIndexTrigger(aValue);
   }
 }
@@ -1344,10 +1344,15 @@ VRSystemManagerOculus::HandleHandTriggerPress(uint32_t aControllerIdx,
   RefPtr<impl::VRControllerOculus> controller(mOculusController[aControllerIdx]);
   MOZ_ASSERT(controller);
   const float oldValue = controller->GetHandTrigger();
+  // We prefer to let developers to set their own threshold for the adjustment.
+  // Therefore, we don't check ButtonPressed and ButtonTouched with TouchMask here.
+  // we just check the button value is larger than the threshold value or not.
+  const float threshold = gfxPrefs::VRControllerTriggerThreshold();
 
   // Avoid sending duplicated events in IPC channels.
   if (oldValue != aValue) {
-    NewButtonEvent(aControllerIdx, aButton, aValue > 0.1f, aValue > 0.1f, aValue);
+    NewButtonEvent(aControllerIdx, aButton, aValue > threshold,
+                   aValue > threshold, aValue);
     controller->SetHandTrigger(aValue);
   }
 }
@@ -1465,13 +1470,7 @@ VRSystemManagerOculus::ScanForControllers()
   }
 
   if (newControllerCount != mControllerCount) {
-    // controller count is changed, removing the existing gamepads first.
-    for (uint32_t i = 0; i < mOculusController.Length(); ++i) {
-      RemoveGamepad(i);
-    }
-
-    mControllerCount = 0;
-    mOculusController.Clear();
+    RemoveControllers();
 
     // Re-adding controllers to VRControllerManager.
     for (uint32_t i = 0; i < newControllerCount; ++i) {
@@ -1498,6 +1497,11 @@ VRSystemManagerOculus::ScanForControllers()
 void
 VRSystemManagerOculus::RemoveControllers()
 {
+  // controller count is changed, removing the existing gamepads first.
+  for (uint32_t i = 0; i < mOculusController.Length(); ++i) {
+    RemoveGamepad(i);
+  }
+
   mOculusController.Clear();
   mControllerCount = 0;
 }

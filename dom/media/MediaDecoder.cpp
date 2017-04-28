@@ -27,7 +27,6 @@
 #include "mozilla/dom/AudioTrack.h"
 #include "mozilla/dom/AudioTrackList.h"
 #include "mozilla/dom/HTMLMediaElement.h"
-#include "mozilla/dom/Promise.h"
 #include "mozilla/dom/VideoTrack.h"
 #include "mozilla/dom/VideoTrackList.h"
 #include "nsPrintfCString.h"
@@ -44,12 +43,6 @@ using namespace mozilla::layers;
 using namespace mozilla::media;
 
 namespace mozilla {
-
-// The amount of instability we tollerate in calls to
-// MediaDecoder::UpdateEstimatedMediaDuration(); changes of duration
-// less than this are ignored, as they're assumed to be the result of
-// instability in the duration estimation.
-static const uint64_t ESTIMATED_DURATION_FUZZ_FACTOR_USECS = USECS_PER_S / 2;
 
 // avoid redefined macro in unified build
 #undef LOG
@@ -129,6 +122,8 @@ public:
 StaticRefPtr<MediaMemoryTracker> MediaMemoryTracker::sUniqueInstance;
 
 LazyLogModule gMediaTimerLog("MediaTimer");
+
+constexpr TimeUnit MediaDecoder::DEFAULT_NEXT_FRAME_AVAILABLE_BUFFERED;
 
 void
 MediaDecoder::InitStatics()
@@ -406,7 +401,6 @@ MediaDecoder::MediaDecoder(MediaDecoderOwner* aOwner)
   , INIT_MIRROR(mIsAudioDataAudible, false)
   , INIT_CANONICAL(mVolume, 0.0)
   , INIT_CANONICAL(mPreservesPitch, true)
-  , INIT_CANONICAL(mEstimatedDuration, NullableTimeUnit())
   , INIT_CANONICAL(mExplicitDuration, Maybe<double>())
   , INIT_CANONICAL(mPlayState, PLAY_STATE_LOADING)
   , INIT_CANONICAL(mNextState, PLAY_STATE_PAUSED)
@@ -720,8 +714,7 @@ MediaDecoder::Play()
 }
 
 nsresult
-MediaDecoder::Seek(double aTime, SeekTarget::Type aSeekType,
-                   dom::Promise* aPromise /*=nullptr*/)
+MediaDecoder::Seek(double aTime, SeekTarget::Type aSeekType)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
@@ -734,7 +727,7 @@ MediaDecoder::Seek(double aTime, SeekTarget::Type aSeekType,
 
   mLogicallySeeking = true;
   SeekTarget target = SeekTarget(timeUsecs, aSeekType);
-  CallSeek(target, aPromise);
+  CallSeek(target);
 
   if (mPlayState == PLAY_STATE_ENDED) {
     PinForSeek();
@@ -744,48 +737,19 @@ MediaDecoder::Seek(double aTime, SeekTarget::Type aSeekType,
 }
 
 void
-MediaDecoder::AsyncResolveSeekDOMPromiseIfExists()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (mSeekDOMPromise) {
-    RefPtr<dom::Promise> promise = mSeekDOMPromise;
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([=] () {
-      promise->MaybeResolveWithUndefined();
-    });
-    mAbstractMainThread->Dispatch(r.forget());
-    mSeekDOMPromise = nullptr;
-  }
-}
-
-void
-MediaDecoder::AsyncRejectSeekDOMPromiseIfExists()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (mSeekDOMPromise) {
-    RefPtr<dom::Promise> promise = mSeekDOMPromise;
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([=] () {
-      promise->MaybeReject(NS_ERROR_DOM_ABORT_ERR);
-    });
-    mAbstractMainThread->Dispatch(r.forget());
-    mSeekDOMPromise = nullptr;
-  }
-}
-
-void
 MediaDecoder::DiscardOngoingSeekIfExists()
 {
   MOZ_ASSERT(NS_IsMainThread());
   mSeekRequest.DisconnectIfExists();
-  AsyncRejectSeekDOMPromiseIfExists();
+  GetOwner()->AsyncRejectSeekDOMPromiseIfExists();
 }
 
 void
-MediaDecoder::CallSeek(const SeekTarget& aTarget, dom::Promise* aPromise)
+MediaDecoder::CallSeek(const SeekTarget& aTarget)
 {
   MOZ_ASSERT(NS_IsMainThread());
   DiscardOngoingSeekIfExists();
 
-  mSeekDOMPromise = aPromise;
   mDecoderStateMachine->InvokeSeek(aTarget)
   ->Then(mAbstractMainThread, __func__, this,
          &MediaDecoder::OnSeekResolved, &MediaDecoder::OnSeekRejected)
@@ -1166,7 +1130,7 @@ MediaDecoder::OnSeekResolved()
   UpdateLogicalPositionInternal();
 
   GetOwner()->SeekCompleted();
-  AsyncResolveSeekDOMPromiseIfExists();
+  GetOwner()->AsyncResolveSeekDOMPromiseIfExists();
 }
 
 void
@@ -1175,7 +1139,7 @@ MediaDecoder::OnSeekRejected()
   MOZ_ASSERT(NS_IsMainThread());
   mSeekRequest.Complete();
   mLogicallySeeking = false;
-  AsyncRejectSeekDOMPromiseIfExists();
+  GetOwner()->AsyncRejectSeekDOMPromiseIfExists();
 }
 
 void
@@ -1212,8 +1176,7 @@ MediaDecoder::UpdateLogicalPositionInternal()
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
 
-  double currentPosition =
-    static_cast<double>(CurrentPosition()) / static_cast<double>(USECS_PER_S);
+  double currentPosition = CurrentPosition().ToSeconds();
   if (mPlayState == PLAY_STATE_ENDED) {
     currentPosition = std::max(currentPosition, mDuration);
   }
@@ -1263,7 +1226,7 @@ MediaDecoder::DurationChanged()
     GetOwner()->DispatchAsyncEvent(NS_LITERAL_STRING("durationchange"));
   }
 
-  if (CurrentPosition() > TimeUnit::FromSeconds(mDuration).ToMicroseconds()) {
+  if (CurrentPosition() > TimeUnit::FromSeconds(mDuration)) {
     Seek(mDuration, SeekTarget::Accurate);
   }
 }
@@ -1363,29 +1326,6 @@ MediaDecoder::HasSuspendTaint() const
   return mHasSuspendTaint;
 }
 
-void
-MediaDecoder::UpdateEstimatedMediaDuration(int64_t aDuration)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (mPlayState <= PLAY_STATE_LOADING) {
-    return;
-  }
-
-  // The duration is only changed if its significantly different than the
-  // the current estimate, as the incoming duration is an estimate and so
-  // often is unstable as more data is read and the estimate is updated.
-  // Can result in a durationchangeevent. aDuration is in microseconds.
-  if (mEstimatedDuration.Ref().isSome()
-      && mozilla::Abs(mEstimatedDuration.Ref().ref().ToMicroseconds()
-                      - aDuration)
-         < ESTIMATED_DURATION_FUZZ_FACTOR_USECS) {
-    return;
-  }
-
-  mEstimatedDuration = Some(TimeUnit::FromMicroseconds(aDuration));
-}
-
 bool
 MediaDecoder::IsTransportSeekable()
 {
@@ -1422,10 +1362,10 @@ MediaDecoder::GetSeekable()
     return GetBuffered();
   } else {
     return media::TimeIntervals(
-      media::TimeInterval(media::TimeUnit::FromMicroseconds(0),
+      media::TimeInterval(TimeUnit::Zero(),
                           IsInfinite()
-                          ? media::TimeUnit::FromInfinity()
-                          : media::TimeUnit::FromSeconds(GetDuration())));
+                          ? TimeUnit::FromInfinity()
+                          : TimeUnit::FromSeconds(GetDuration())));
   }
 }
 
@@ -1435,7 +1375,7 @@ MediaDecoder::SetFragmentEndTime(double aTime)
   MOZ_ASSERT(NS_IsMainThread());
   if (mDecoderStateMachine) {
     mDecoderStateMachine->DispatchSetFragmentEndTime(
-      media::TimeUnit::FromSeconds(aTime));
+      TimeUnit::FromSeconds(aTime));
   }
 }
 
@@ -1801,12 +1741,10 @@ MediaDecoder::NextFrameBufferedStatus()
   MOZ_ASSERT(NS_IsMainThread());
   // Next frame hasn't been decoded yet.
   // Use the buffered range to consider if we have the next frame available.
-  media::TimeUnit currentPosition =
-    media::TimeUnit::FromMicroseconds(CurrentPosition());
+  auto currentPosition = CurrentPosition();
   media::TimeInterval interval(
     currentPosition,
-    currentPosition
-    + media::TimeUnit::FromMicroseconds(DEFAULT_NEXT_FRAME_AVAILABLE_BUFFERED));
+    currentPosition + DEFAULT_NEXT_FRAME_AVAILABLE_BUFFERED);
   return GetBuffered().Contains(interval)
          ? MediaDecoderOwner::NEXT_FRAME_AVAILABLE
          : MediaDecoderOwner::NEXT_FRAME_UNAVAILABLE;

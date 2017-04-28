@@ -11,13 +11,7 @@ const {
 } = require("devtools/client/shared/vendor/react");
 const { getAbbreviatedMimeType } = require("../utils/request-utils");
 
-const { div, span } = DOM;
-
-const CONTENT_MIME_TYPE_ABBREVIATIONS = {
-  "ecmascript": "js",
-  "javascript": "js",
-  "x-javascript": "js"
-};
+const { div } = DOM;
 
 const RequestListColumnType = createClass({
   displayName: "RequestListColumnType",
@@ -31,19 +25,19 @@ const RequestListColumnType = createClass({
   },
 
   render() {
-    const { mimeType } = this.props.item;
+    let { mimeType } = this.props.item;
     let abbrevType;
+
     if (mimeType) {
       abbrevType = getAbbreviatedMimeType(mimeType);
-      abbrevType = CONTENT_MIME_TYPE_ABBREVIATIONS[abbrevType] || abbrevType;
     }
 
     return (
       div({
-        className: "requests-list-subitem requests-list-type",
+        className: "requests-list-column requests-list-type",
         title: mimeType,
       },
-        span({ className: "subitem-label" }, abbrevType),
+        abbrevType
       )
     );
   }

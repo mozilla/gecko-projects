@@ -2164,7 +2164,7 @@ ContentEventHandler::OnQueryTextRect(WidgetQueryContentEvent* aEvent)
     }
 
     // Look for the last frame which should be included text rects.
-    ErrorResult erv;
+    IgnoredErrorResult erv;
     range->SelectNodeContents(*mRootContent, erv);
     if (NS_WARN_IF(erv.Failed())) {
       return NS_ERROR_UNEXPECTED;
@@ -2654,7 +2654,7 @@ ContentEventHandler::OnQueryDOMWidgetHittest(WidgetQueryContentEvent* aEvent)
 
   LayoutDeviceIntPoint eventLoc =
     aEvent->mRefPoint + aEvent->mWidget->WidgetToScreenOffset();
-  nsIntRect docFrameRect = docFrame->GetScreenRect(); // Returns CSS pixels
+  CSSIntRect docFrameRect = docFrame->GetScreenRect();
   CSSIntPoint eventLocCSS(
     mPresContext->DevPixelsToIntCSSPixels(eventLoc.x) - docFrameRect.x,
     mPresContext->DevPixelsToIntCSSPixels(eventLoc.y) - docFrameRect.y);

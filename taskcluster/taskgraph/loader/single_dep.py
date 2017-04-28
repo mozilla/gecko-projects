@@ -12,7 +12,10 @@ def loader(kind, path, config, params, loaded_tasks):
     Load tasks based on the jobs dependant kinds.
 
     The `only-for-build-platforms` kind configuration, if specified, will limit
-    the build platforms for which a job will be created.
+    the build platforms for which a job will be created. Alternatively there is
+    'not-for-build-platforms' kind configuration which will be consulted only after
+    'only-for-build-platforms' is checked (if present), and omit any jobs where the
+    build platform matches.
 
     Optional `only-for-attributes` kind configuration, if specified, will limit
     the jobs chosen to ones which have the specified attribute, with the specified

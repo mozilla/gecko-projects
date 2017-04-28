@@ -90,8 +90,6 @@ VRDisplayPuppet::VRDisplayPuppet()
   mDisplayInfo.mSittingToStandingTransform._42 = 0.75f;
   mDisplayInfo.mSittingToStandingTransform._43 = 0.0f;
 
-  mSensorState.Clear();
-
   gfx::Quaternion rot;
 
   mSensorState.flags |= VRDisplayCapabilityFlags::Cap_Orientation;
@@ -480,13 +478,7 @@ VRSystemManagerPuppet::ScanForControllers()
   const uint32_t newControllerCount = 2;
 
   if (newControllerCount != mControllerCount) {
-    // controller count is changed, removing the existing gamepads first.
-    for (uint32_t i = 0; i < mPuppetController.Length(); ++i) {
-      RemoveGamepad(i);
-    }
-
-    mControllerCount = 0;
-    mPuppetController.Clear();
+    RemoveControllers();
 
     // Re-adding controllers to VRControllerManager.
     for (uint32_t i = 0; i < newControllerCount; ++i) {
@@ -505,6 +497,10 @@ VRSystemManagerPuppet::ScanForControllers()
 void
 VRSystemManagerPuppet::RemoveControllers()
 {
+  // controller count is changed, removing the existing gamepads first.
+  for (uint32_t i = 0; i < mPuppetController.Length(); ++i) {
+    RemoveGamepad(i);
+  }
   mPuppetController.Clear();
   mControllerCount = 0;
 }
