@@ -175,9 +175,14 @@ NS_INTERFACE_MAP_BEGIN(nsGenericHTMLElement)
 NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElementBase)
 
 nsresult
-nsGenericHTMLElement::CopyInnerTo(Element* aDst)
+nsGenericHTMLElement::CopyInnerTo(Element* aDst, bool aPreallocateChildren)
 {
   nsresult rv;
+
+  rv = static_cast<nsGenericHTMLElement*>(aDst)->mAttrsAndChildren.
+       EnsureCapacityToClone(mAttrsAndChildren, aPreallocateChildren);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   int32_t i, count = GetAttrCount();
   for (i = 0; i < count; ++i) {
     const nsAttrName *name = mAttrsAndChildren.AttrNameAt(i);
@@ -233,17 +238,19 @@ nsGenericHTMLElement::GetAccessKeyLabel(nsString& aLabel)
   }
 }
 
-static bool IS_TABLE_CELL(nsIAtom* frameType) {
-  return nsGkAtoms::tableCellFrame == frameType ||
-    nsGkAtoms::bcTableCellFrame == frameType;
+static bool
+IS_TABLE_CELL(FrameType frameType)
+{
+  return FrameType::TableCell == frameType ||
+         FrameType::BCTableCell == frameType;
 }
 
 static bool
 IsOffsetParent(nsIFrame* aFrame)
 {
-  nsIAtom* frameType = aFrame->GetType();
-  
-  if (IS_TABLE_CELL(frameType) || frameType == nsGkAtoms::tableFrame) {
+  FrameType frameType = aFrame->Type();
+
+  if (IS_TABLE_CELL(frameType) || frameType == FrameType::Table) {
     // Per the IDL for Element, only td, th, and table are acceptable offsetParents
     // apart from body or positioned elements; we need to check the content type as
     // well as the frame type so we ignore anonymous tables created by an element
@@ -270,8 +277,7 @@ nsGenericHTMLElement::GetOffsetRect(CSSIntRect& aRect)
   nsIFrame* parent = frame->GetParent();
   nsPoint origin(0, 0);
 
-  if (parent && parent->GetType() == nsGkAtoms::tableWrapperFrame &&
-      frame->GetType() == nsGkAtoms::tableFrame) {
+  if (parent && parent->IsTableWrapperFrame() && frame->IsTableFrame()) {
     origin = parent->GetPositionIgnoringScrolling();
     parent = parent->GetParent();
   }

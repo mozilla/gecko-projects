@@ -12,7 +12,7 @@
 #include "gtest/gtest.h"
 
 #include "GeckoProfiler.h"
-#include "ProfilerMarkers.h"
+#include "ProfilerMarkerPayload.h"
 #include "jsapi.h"
 #include "js/Initialization.h"
 #include "mozilla/UniquePtrExtensions.h"
@@ -429,7 +429,7 @@ TEST(GeckoProfiler, Bug1355807)
                  features, MOZ_ARRAY_LENGTH(features),
                  fewThreadsFilter, MOZ_ARRAY_LENGTH(fewThreadsFilter));
 
-  // In bug 1355807 this caused an assertion failure in stopJSSampling().
+  // In bug 1355807 this caused an assertion failure in StopJSSampling().
   profiler_start(PROFILE_DEFAULT_ENTRIES, PROFILE_DEFAULT_INTERVAL,
                  features, MOZ_ARRAY_LENGTH(features),
                  fewThreadsFilter, MOZ_ARRAY_LENGTH(fewThreadsFilter));

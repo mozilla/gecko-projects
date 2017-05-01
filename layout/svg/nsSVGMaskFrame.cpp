@@ -277,7 +277,8 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(MaskParams& aParams)
   }
   RefPtr<DataSourceSurface> maskSurface = maskSnapshot->GetDataSurface();
   DataSourceSurface::MappedSurface map;
-  if (!maskSurface->Map(DataSourceSurface::MapType::READ, &map)) {
+  if (!maskSurface ||
+      !maskSurface->Map(DataSourceSurface::MapType::READ, &map)) {
     return MakePair(DrawResult::TEMPORARY_ERROR, RefPtr<SourceSurface>());
   }
 
@@ -384,12 +385,6 @@ nsSVGMaskFrame::Init(nsIContent*       aContent,
   nsSVGContainerFrame::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
-
-nsIAtom *
-nsSVGMaskFrame::GetType() const
-{
-  return nsGkAtoms::svgMaskFrame;
-}
 
 gfxMatrix
 nsSVGMaskFrame::GetCanvasTM()

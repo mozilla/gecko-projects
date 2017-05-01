@@ -912,7 +912,8 @@ EventStateManager::HandleQueryContentEvent(WidgetQueryContentEvent* aEvent)
   // If there is an IMEContentObserver, we need to handle QueryContentEvent
   // with it.
   if (mIMEContentObserver) {
-    mIMEContentObserver->HandleQueryContentEvent(aEvent);
+    RefPtr<IMEContentObserver> contentObserver = mIMEContentObserver;
+    contentObserver->HandleQueryContentEvent(aEvent);
     return;
   }
 
@@ -2738,10 +2739,10 @@ EventStateManager::DecideGestureEvent(WidgetGestureNotifyEvent* aEvent,
       break;
     }
 
-    nsIAtom* currentFrameType = current->GetType();
+    FrameType currentFrameType = current->Type();
 
     // Scrollbars should always be draggable
-    if (currentFrameType == nsGkAtoms::scrollbarFrame) {
+    if (currentFrameType == FrameType::Scrollbar) {
       panDirection = WidgetGestureNotifyEvent::ePanNone;
       break;
     }
@@ -2768,7 +2769,7 @@ EventStateManager::DecideGestureEvent(WidgetGestureNotifyEvent* aEvent,
         nsRect scrollRange = scrollableFrame->GetScrollRange();
         bool canScrollHorizontally = scrollRange.width > 0;
 
-        if (targetFrame->GetType() == nsGkAtoms::menuFrame) {
+        if (targetFrame->IsMenuFrame()) {
           // menu frames report horizontal scroll when they have submenus
           // and we don't want that
           canScrollHorizontally = false;

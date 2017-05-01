@@ -25,6 +25,8 @@
 #include "mozilla/HashFunctions.h"
 #include "mozilla/UniquePtr.h"
 
+class ProfilerMarker;
+
 #define PROFILE_BUFFER_ENTRY_KIND_LIST(_) \
     _(Category,        int)               \
     _(CodeLocation,    const char *)      \

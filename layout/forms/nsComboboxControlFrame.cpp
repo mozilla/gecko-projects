@@ -223,7 +223,7 @@ static int32_t gReflowInx = -1;
 //------------------------------------------------------
 
 nsComboboxControlFrame::nsComboboxControlFrame(nsStyleContext* aContext)
-  : nsBlockFrame(aContext)
+  : nsBlockFrame(aContext, FrameType::ComboboxControl)
   , mDisplayFrame(nullptr)
   , mButtonFrame(nullptr)
   , mDropdownFrame(nullptr)
@@ -908,12 +908,6 @@ nsComboboxControlFrame::Reflow(nsPresContext*          aPresContext,
 
 //--------------------------------------------------------------
 
-nsIAtom*
-nsComboboxControlFrame::GetType() const
-{
-  return nsGkAtoms::comboboxControlFrame;
-}
-
 #ifdef DEBUG_FRAME_DUMP
 nsresult
 nsComboboxControlFrame::GetFrameName(nsAString& aResult) const
@@ -1282,15 +1276,18 @@ class nsComboboxDisplayFrame : public nsBlockFrame {
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
-  nsComboboxDisplayFrame (nsStyleContext* aContext,
-                          nsComboboxControlFrame* aComboBox)
-    : nsBlockFrame(aContext),
-      mComboBox(aComboBox)
+  nsComboboxDisplayFrame(nsStyleContext* aContext,
+                         nsComboboxControlFrame* aComboBox)
+    : nsBlockFrame(aContext, FrameType::ComboboxDisplay)
+    , mComboBox(aComboBox)
   {}
 
-  // Need this so that line layout knows that this block's inline size
-  // depends on the available inline size.
-  virtual nsIAtom* GetType() const override;
+#ifdef DEBUG_FRAME_DUMP
+  nsresult GetFrameName(nsAString& aResult) const override
+  {
+    return MakeFrameName(NS_LITERAL_STRING("ComboboxDisplay"), aResult);
+  }
+#endif
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
@@ -1312,12 +1309,6 @@ protected:
 };
 
 NS_IMPL_FRAMEARENA_HELPERS(nsComboboxDisplayFrame)
-
-nsIAtom*
-nsComboboxDisplayFrame::GetType() const
-{
-  return nsGkAtoms::comboboxDisplayFrame;
-}
 
 void
 nsComboboxDisplayFrame::Reflow(nsPresContext*           aPresContext,
@@ -1372,8 +1363,7 @@ nsComboboxControlFrame::CreateFrameForDisplayNode()
   RefPtr<nsStyleContext> styleContext;
   styleContext = styleSet->
     ResolveInheritingAnonymousBoxStyle(nsCSSAnonBoxes::mozDisplayComboboxControlFrame,
-                                       mStyleContext,
-                                       nsStyleSet::eSkipParentDisplayBasedStyleFixup);
+                                       mStyleContext);
 
   RefPtr<nsStyleContext> textStyleContext;
   textStyleContext =
