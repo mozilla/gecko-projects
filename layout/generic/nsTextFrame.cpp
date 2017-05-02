@@ -4901,7 +4901,11 @@ public:
     aFrames->AppendElements(mMergedFrames);
   }
 
-  bool TryMerge(nsDisplayItem* aItem) override {
+  bool TryMerge(nsDisplayItem* aItem, bool aMerge) override {
+    // TODO: The current item merging behavior is not compatible with text merging.
+    return false;
+
+#if 0
     if (aItem->GetType() != TYPE_TEXT)
       return false;
     if (aItem->GetClipChain() != GetClipChain())
@@ -4926,6 +4930,7 @@ public:
       append->glyphs().SwapElements(g.glyphs());
     }
     return true;
+#endif
 }
 
   RefPtr<ScaledFont> mFont;

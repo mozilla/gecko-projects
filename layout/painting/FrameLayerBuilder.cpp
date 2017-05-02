@@ -3977,6 +3977,35 @@ ContainerState::SetupMaskLayerForCSSMask(Layer* aLayer,
   aLayer->SetMaskLayer(maskLayer);
 }
 
+static nsDisplayItem*
+MergeItems(nsDisplayListBuilder* aBuilder,
+           std::list<nsDisplayItem*>& aMergedItems)
+{
+  nsDisplayItem* merged = nullptr;
+
+  // Clone the last item in the aMergedItems list and merge the items into it.
+  // We also build a display list that contains nsDisplayWrapLists for every
+  // merged item. These nsDisplayWrapLists hold pointers to the display lists
+  // owned by the merged items.
+  for (auto i = aMergedItems.rbegin(); i != aMergedItems.rend(); ++i) {
+    nsDisplayItem* item = *i;
+    MOZ_ASSERT(item);
+
+    if (!merged) {
+      merged = item->Clone(aBuilder);
+      MOZ_ASSERT(merged);
+
+      aBuilder->AddTemporaryItem(merged);
+    } else {
+      merged->TryMerge(item, true);
+    }
+
+    merged->MergeDisplayListFromItem(aBuilder, item);
+  }
+
+  return merged;
+}
+
 /*
  * Iterate through the non-clip items in aList and its descendants.
  * For each item we compute the effective clip rect. Each item is assigned
@@ -4014,23 +4043,22 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
   int32_t maxLayers = gfxPrefs::MaxActiveLayers();
   int layerCount = 0;
 
-  std::list<nsDisplayItem*> itemQueue;
-  nsDisplayList listCopy;
-  nsDisplayItem* item;
+  // In order to simplify flattening and merging, we create a local mutable copy
+  // of the display list. Since we keep track of the current iterator and append
+  // items only to that position, the modifications to the local list list take
+  // constant time.
+  std::list<nsDisplayItem*> list;
+  auto CopyList = [&](nsDisplayList* aOtherList,
+                      std::list<nsDisplayItem*>::iterator aIterator) {
+    for (nsDisplayItem* i = aOtherList->GetBottom(); i; i = i->GetAbove()) {
+      aIterator = list.insert(++aIterator, i);
+    }
+  };
 
-  while (!itemQueue.empty() || !aList->IsEmpty()) {
-    // Try to remove the last element from the item queue
-    if (!itemQueue.empty()) {
-      item = itemQueue.front();
-      itemQueue.pop_front();
-    }
-    // Process the next item from the display list.
-    else if (!aList->IsEmpty()) {
-      // This is ugly but required, since we are processing items that might
-      // belong to separate display lists.
-      item = aList->RemoveBottom();
-      listCopy.AppendToTop(item);
-    }
+  CopyList(aList, list.begin());
+  for (auto it = list.begin(); it != list.end(); ++it) {
+    nsDisplayItem* item = *it;
+    MOZ_ASSERT(item);
 
     nsDisplayItem::Type itemType = item->GetType();
 
@@ -4045,19 +4073,25 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
       }
     }
 
-    // TODO: Fix merging
-    // Peek ahead to the next item and try merging with it or swapping with it
-    // if necessary.
-    nsDisplayItem* aboveItem;
-    while ((aboveItem = aList->GetBottom()) != nullptr) {
-      if (aboveItem->TryMerge(item)) {
-        aList->RemoveBottom();
-        item->~nsDisplayItem();
-        item = aboveItem;
-        itemType = item->GetType();
-      } else {
+    // Peek ahead to the next item and try merging the current item with it.
+    // This will create a list of consecutive items that can be merged together.
+    std::list<nsDisplayItem*> mergedItems { item };
+    for (auto i = std::next(it); i != list.end(); ++i) {
+      nsDisplayItem* nextItem = *i;
+
+      if (!item->TryMerge(nextItem, false)) {
         break;
       }
+
+      mergedItems.push_back(nextItem);
+
+      // Move the iterator forward since we will merge this item.
+      it = i;
+    }
+
+    if (mergedItems.size() > 1) {
+      item = MergeItems(mBuilder, mergedItems);
+      MOZ_ASSERT(item && itemType == item->GetType());
     }
 
     nsDisplayList* childItems = item->GetSameCoordinateSystemChildren();
@@ -4065,12 +4099,12 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
     if (item->ShouldFlattenAway(mBuilder)) {
       MOZ_ASSERT(childItems);
 
-      for (nsDisplayItem* i = childItems->GetBottom(); i; i = i->GetAbove()) {
-        itemQueue.push_back(i);
-      }
-
+      // Copy the items from the child display list after the current item.
+      CopyList(childItems, it);
       continue;
     }
+
+    MOZ_ASSERT(item->GetType() != nsDisplayItem::TYPE_WRAP_LIST);
 
     NS_ASSERTION(mAppUnitsPerDevPixel == AppUnitsPerDevPixel(item),
       "items in a container layer should all have the same app units per dev pixel");
@@ -4387,12 +4421,12 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
         nsDisplayMask* maskItem = static_cast<nsDisplayMask*>(item);
         SetupMaskLayerForCSSMask(ownLayer, maskItem);
 
-        nsDisplayItem* next = aList->GetBottom();
-        if (next && next->GetType() == nsDisplayItem::TYPE_SCROLL_INFO_LAYER) {
+        auto next = std::next(it);
+        if (next != list.end() &&
+            (*next)->GetType() == nsDisplayItem::TYPE_SCROLL_INFO_LAYER) {
           // Since we do build a layer for mask, there is no need for this
           // scroll info layer anymore.
-          aList->RemoveBottom();
-          next->~nsDisplayItem();
+          it = next;
         }
       }
 
@@ -4535,8 +4569,6 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
       aList->SetNeedsTransparentSurface();
     }
   }
-
-  aList->AppendToTop(&listCopy);
 }
 
 void
