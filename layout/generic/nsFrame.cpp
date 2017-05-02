@@ -6346,8 +6346,7 @@ static void InvalidateRenderingObservers(nsIFrame* aFrame, bool aFrameChanged = 
 
   // TODO: We really should be storing this on the current stacking context, not the display
   // root (which is the root stacking context, but not necessarily the one for the current frame)
-  // We should avoid adding duplicates here.
-  if (XRE_IsContentProcess()) {
+  if (XRE_IsContentProcess() && !aFrame->IsFrameModified()) {
     nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
     nsTArray<nsIFrame*>* modifiedFrames = displayRoot->Properties().Get(nsIFrame::ModifiedFrameList());
     if (!modifiedFrames) {
