@@ -385,6 +385,7 @@ public:
    * paint. Returns false otherwise.
    */
   static bool HasRetainedDataFor(nsIFrame* aFrame, uint32_t aDisplayItemKey);
+  static bool HasRetainedDataFor(nsIFrame* aFrame);
 
   class DisplayItemData;
   typedef void (*DisplayItemDataCallback)(nsIFrame *aFrame, DisplayItemData* aItem);

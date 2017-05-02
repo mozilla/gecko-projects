@@ -2081,6 +2081,17 @@ FrameLayerBuilder::HasRetainedDataFor(nsIFrame* aFrame, uint32_t aDisplayItemKey
   return false;
 }
 
+bool
+FrameLayerBuilder::HasRetainedDataFor(nsIFrame* aFrame)
+{
+  const nsTArray<DisplayItemData*>* array =
+    aFrame->Properties().Get(LayerManagerDataProperty());
+  if (array && array->Length() > 0) {
+    return true;
+  }
+  return false;
+}
+
 void
 FrameLayerBuilder::IterateRetainedDataFor(nsIFrame* aFrame, DisplayItemDataCallback aCallback)
 {

@@ -2712,19 +2712,25 @@ nsLayoutUtils::PostTranslate(Matrix4x4& aTransform, const nsPoint& aOrigin, floa
 }
 
 Matrix4x4
-nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame, const nsIFrame *aAncestor)
+nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame,
+                                      const nsIFrame *aAncestor,
+                                      bool aStopAtStackingContext,
+                                      nsIFrame** aOutAncestor)
 {
   nsIFrame* parent;
   Matrix4x4 ctm;
   if (aFrame == aAncestor) {
     return ctm;
   }
-  ctm = aFrame->GetTransformMatrix(aAncestor, &parent);
-  while (parent && parent != aAncestor) {
+  ctm = aFrame->GetTransformMatrix(aAncestor, &parent, aStopAtStackingContext);
+  while (parent && parent != aAncestor && (!aStopAtStackingContext || !parent->IsStackingContext())) {
     if (!parent->Extend3DContext()) {
       ctm.ProjectTo2D();
     }
-    ctm = ctm * parent->GetTransformMatrix(aAncestor, &parent);
+    ctm = ctm * parent->GetTransformMatrix(aAncestor, &parent, aStopAtStackingContext);
+  }
+  if (aOutAncestor) {
+    *aOutAncestor = parent;
   }
   return ctm;
 }
@@ -3027,7 +3033,9 @@ TransformGfxRectToAncestor(nsIFrame *aFrame,
                            const Rect &aRect,
                            const nsIFrame *aAncestor,
                            bool* aPreservesAxisAlignedRectangles = nullptr,
-                           Maybe<Matrix4x4>* aMatrixCache = nullptr)
+                           Maybe<Matrix4x4>* aMatrixCache = nullptr,
+                           bool aStopAtStackingContext = false,
+                           nsIFrame** aOutAncestor = nullptr)
 {
   Matrix4x4 ctm;
   if (aMatrixCache && *aMatrixCache) {
@@ -3035,7 +3043,7 @@ TransformGfxRectToAncestor(nsIFrame *aFrame,
     ctm = aMatrixCache->value();
   } else {
     // Else, compute it
-    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor);
+    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor, aStopAtStackingContext, aOutAncestor);
     if (aMatrixCache) {
       // and put it in the cache, if provided
       *aMatrixCache = Some(ctm);
@@ -3097,7 +3105,9 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
                                             const nsRect& aRect,
                                             const nsIFrame* aAncestor,
                                             bool* aPreservesAxisAlignedRectangles /* = nullptr */,
-                                            Maybe<Matrix4x4>* aMatrixCache /* = nullptr */)
+                                            Maybe<Matrix4x4>* aMatrixCache /* = nullptr */,
+                                            bool aStopAtStackingContext /* = false */,
+                                            nsIFrame** aOutAncestor /* = nullptr */)
 {
   SVGTextFrame* text = GetContainingSVGTextFrame(aFrame);
 
@@ -3105,8 +3115,13 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
   Rect result;
 
   if (text) {
+    // TODO: Is it possible that there is a stacking context between aFrame
+    // and 'text'? I don't think it matters, the stacking context thing is
+    // just for retained-dl optimizations, not a requirement.
     result = ToRect(text->TransformFrameRectFromTextChild(aRect, aFrame));
-    result = TransformGfxRectToAncestor(text, result, aAncestor, nullptr, aMatrixCache);
+    result = TransformGfxRectToAncestor(text, result, aAncestor,
+                                        nullptr, aMatrixCache,
+                                        aStopAtStackingContext, aOutAncestor);
     // TransformFrameRectFromTextChild could involve any kind of transform, we
     // could drill down into it to get an answer out of it but we don't yet.
     if (aPreservesAxisAlignedRectangles)
@@ -3116,7 +3131,9 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
                   NSAppUnitsToFloatPixels(aRect.y, srcAppUnitsPerDevPixel),
                   NSAppUnitsToFloatPixels(aRect.width, srcAppUnitsPerDevPixel),
                   NSAppUnitsToFloatPixels(aRect.height, srcAppUnitsPerDevPixel));
-    result = TransformGfxRectToAncestor(aFrame, result, aAncestor, aPreservesAxisAlignedRectangles, aMatrixCache);
+    result = TransformGfxRectToAncestor(aFrame, result, aAncestor,
+                                        aPreservesAxisAlignedRectangles, aMatrixCache,
+                                        aStopAtStackingContext, aOutAncestor);
   }
 
   float destAppUnitsPerDevPixel = aAncestor->PresContext()->AppUnitsPerDevPixel();
@@ -3555,8 +3572,6 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   while (nsDisplayItem* i = aNewList->RemoveBottom()) {
     // If the new item has a matching counterpart in the old list, copy all items
     // up to that one into the merged list, but discard the repeat.
-    // TODO: We need to detect invalidated items in the old list (belonging to deleted
-    // frames, or just items that aren't needed any more) and skip over them.
     if (oldListLookup[std::make_pair(i->Frame(), i->GetPerFrameKey())]) {
       while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
         if (old->CanBeRecycled() &&
@@ -3585,10 +3600,6 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
       // Recursively merge any child lists.
       // TODO: We may need to call UpdateBounds on any non-flattenable nsDisplayWrapLists
       // here. Is there any other cached state that we need to update?
-      // TODO: When an invalidation happens we only need to build items for the overflow area
-      // up to the nearest stacking context, and then use MarkFramesForDisplay to make sure
-      // we build the stacking context itself. This is similar to what we want to do for
-      // displayports.
       MOZ_ASSERT(old && IsSameItem(i, old));
       if (old->GetChildren()) {
         MOZ_ASSERT(i->GetChildren());
@@ -3797,22 +3808,74 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           aFrame->Properties().Get(nsIFrame::ModifiedFrameList())) {
         nsTArray<nsIFrame*>* modifiedFrames = aFrame->Properties().Get(nsIFrame::ModifiedFrameList());
 
+        nsTArray<nsIFrame*> stackingContexts;
 
         AnimatedGeometryRoot* modifiedAGR = nullptr;
         nsRect modifiedDirty;
         bool success = true;
         //printf_stderr("Dirty frames: ");
         for (nsIFrame* f : *modifiedFrames) {
-          //printf_stderr("%p,", f);
-          modifiedDirty.UnionRect(modifiedDirty, TransformFrameRectToAncestor(f,
-                                                                              f->GetVisualOverflowRectRelativeToSelf(),
-                                                                              aFrame));
+
+          // Convert the frame's overflow rect into the coordinate space
+          // of the nearest stacking context that has an existing display item.
+          // We store the overflow rect on that stacking context so that we build
+          // all items that intersect that changed frame within the stacking context,
+          // and then we use MarkFrameForDisplayIfVisible to make sure the stacking
+          // context itself gets built. We don't need to build items that intersect outside
+          // of the stacking context, since we know the stacking context item exists in
+          // the old list, so we can trivially merge without needing other items.
+          nsRect overflow = f->GetVisualOverflowRectRelativeToSelf();
+          nsIFrame* currentFrame = f;
+
+          while (currentFrame != aFrame) {
+            overflow = TransformFrameRectToAncestor(currentFrame, overflow, aFrame,
+                                                    nullptr, nullptr,
+                                                    /* aStopAtStackingContext = */ true, &currentFrame);
+
+            // If we found an intermediate stacking context with an existing display item
+            // then we can store the dirty rect there and stop.
+            if (currentFrame != aFrame &&
+                FrameLayerBuilder::HasRetainedDataFor(currentFrame)) {
+
+              // Convert directly into aFrames coordinate space.
+              nsRect rootOverflow = TransformFrameRectToAncestor(currentFrame, overflow, aFrame);
+              rootOverflow.IntersectRect(rootOverflow, dirtyRect);
+
+              // If the stacking context intersected the visible region then make
+              // sure we build display items for it.
+              // TODO: Isn't this always true, unless we've invalidated the stacking context itself (
+              // or an ancestor of it), in which case we'll be rebuilding all the things anyway?
+              if (!rootOverflow.IsEmpty()) {
+                builder.MarkFrameForDisplayIfVisible(currentFrame);
+
+                // Store the stacking context relative dirty area such
+                // that display list building will pick it up when it
+                // gets to it.
+                nsRect* rect = currentFrame->Properties().Get(nsIFrame::DisplayListBuildingRect());
+                if (!rect) {
+                  rect = new nsRect();
+                  currentFrame->Properties().Set(nsIFrame::DisplayListBuildingRect(), rect);
+                  stackingContexts.AppendElement(currentFrame);
+                }
+                rect->UnionRect(*rect, overflow);
+                currentFrame->SetHasOverrideDirtyRegion();
+              }
+
+              // Don't contribute to the root dirty area at all.
+              overflow.SetEmpty();
+              break;
+            }
+          }
+          modifiedDirty.UnionRect(modifiedDirty, overflow);
+
           // TODO: There is almost certainly a faster way of doing this, probably can be combined with the ancestor
           // walk for TransformFrameRectToAncestor.
           AnimatedGeometryRoot* agr = builder.FindAnimatedGeometryRootFor(f)->GetAsyncAGR();
 
           // If we get changed frames from multiple AGRS, then just give up as it gets really complex to
           // track which items would need to be marked in MarkFramesForDifferentAGR.
+          // TODO: We should store the modifiedAGR on the per-stacking context data and only do the
+          // marking within the scope of the current stacking context.
           if (!modifiedAGR) {
             modifiedAGR = agr;
           } else if (modifiedAGR != agr) {
@@ -3822,11 +3885,16 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         }
         //printf_stderr("\n");
 
+        modifiedDirty.IntersectRect(modifiedDirty, dirtyRect);
+
+        // TODO: Early return if modified Dirty is empty, and we didn't mark any sub-stacking
+        // contexts as needing-paint-if-visible.
+
         if (success) {
           if (modifiedAGR) {
             MarkFramesForDifferentAGR(&builder, &list, modifiedAGR);
           }
-        
+
           builder.SetDirtyRect(modifiedDirty);
 
           nsDisplayList modifiedDL;
@@ -3848,6 +3916,11 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           f->SetFrameIsModified(false);
         }
         modifiedFrames->Clear();
+
+        for (nsIFrame* f: stackingContexts) {
+          f->SetHasOverrideDirtyRegion(false);
+          f->Properties().Delete(nsIFrame::DisplayListBuildingRect());
+        }
       }
 
       if (!merged) {

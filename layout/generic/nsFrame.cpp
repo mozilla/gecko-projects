@@ -2976,6 +2976,10 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     pseudoStackingContext = true;
   }
 
+  if (child->HasOverrideDirtyRegion()) {
+    dirty = *child->Properties().Get(DisplayListBuildingRect());
+  }
+
   NS_ASSERTION(childType != nsGkAtoms::placeholderFrame,
                "Should have dealt with placeholders already");
   if (aBuilder->GetSelectedFramesOnly() &&
@@ -3043,6 +3047,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
   const nsStyleDisplay* disp = child->StyleDisplay();
   const nsStyleEffects* effects = child->StyleEffects();
   const nsStylePosition* pos = child->StylePosition();
+  // If you change this, also change IsVisuallyAtomic()
   bool isVisuallyAtomic = child->HasOpacity()
     || child->IsTransformed(disp)
     // strictly speaking, 'perspective' doesn't require visual atomicity,
@@ -3052,6 +3057,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     || nsSVGIntegrationUtils::UsingEffectsForFrame(child);
 
   bool isPositioned = disp->IsAbsPosContainingBlock(child);
+  // If you change this, also change IsStackingContext()
   bool isStackingContext =
     (isPositioned && (disp->IsPositionForcingStackingContext() ||
                       pos->mZIndex.GetUnit() == eStyleUnit_Integer)) ||
@@ -6223,7 +6229,8 @@ nsIFrame::IsLeaf() const
 
 Matrix4x4
 nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
-                             nsIFrame** aOutAncestor)
+                             nsIFrame** aOutAncestor,
+                             bool aStopAtStackingContext)
 {
   NS_PRECONDITION(aOutAncestor, "Need a place to put the ancestor!");
 
@@ -6308,7 +6315,8 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
   /* Keep iterating while the frame can't possibly be transformed. */
   while (!(*aOutAncestor)->IsTransformed() &&
          !nsLayoutUtils::IsPopup(*aOutAncestor) &&
-         *aOutAncestor != aStopAtAncestor) {
+         *aOutAncestor != aStopAtAncestor &&
+         (!aStopAtStackingContext || !(*aOutAncestor)->IsStackingContext())) {
     /* If no parent, stop iterating.  Otherwise, update the ancestor. */
     nsIFrame* parent = nsLayoutUtils::GetCrossDocParentFrame(*aOutAncestor);
     if (!parent)
@@ -10423,6 +10431,27 @@ nsIFrame::IsPseudoStackingContextFromStyle() {
   return disp->IsAbsPosContainingBlock(this) ||
          disp->IsFloating(this) ||
          (disp->mWillChangeBitField & NS_STYLE_WILL_CHANGE_STACKING_CONTEXT);
+}
+
+// If you change any of these, also change the computation in BuildDisplayListForChild
+bool
+nsIFrame::IsVisuallyAtomic() {
+  return HasOpacity() ||
+         IsTransformed(StyleDisplay()) ||
+         StyleDisplay()->mChildPerspective.GetUnit() == eStyleUnit_Coord ||
+         StyleEffects()->mMixBlendMode != NS_STYLE_BLEND_NORMAL ||
+         nsSVGIntegrationUtils::UsingEffectsForFrame(this);
+}
+
+// If you change any of these, also change the computation in BuildDisplayListForChild
+bool
+nsIFrame::IsStackingContext() {
+  bool isPositioned = StyleDisplay()->IsAbsPosContainingBlock(this);
+  return (isPositioned && (StyleDisplay()->IsPositionForcingStackingContext() ||
+                           StylePosition()->mZIndex.GetUnit() == eStyleUnit_Integer)) ||
+         (StyleDisplay()->mWillChangeBitField & NS_STYLE_WILL_CHANGE_STACKING_CONTEXT) ||
+         StyleDisplay()->mIsolation != NS_STYLE_ISOLATION_AUTO ||
+         IsVisuallyAtomic();
 }
 
 Element*

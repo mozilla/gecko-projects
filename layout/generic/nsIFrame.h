@@ -599,12 +599,16 @@ public:
     , mNextSibling(nullptr)
     , mPrevSibling(nullptr)
     , mFrameIsModified(false)
+    , mHasOverrideDirtyRegion(false)
   {
     mozilla::PodZero(&mOverflow);
   }
 
   bool IsFrameModified() { return mFrameIsModified; }
   void SetFrameIsModified(bool aFrameIsModified) { mFrameIsModified = aFrameIsModified; }
+
+  bool HasOverrideDirtyRegion() { return mHasOverrideDirtyRegion; }
+  void SetHasOverrideDirtyRegion(bool aHasDirtyRegion) { mHasOverrideDirtyRegion = aHasDirtyRegion; }
 
   nsPresContext* PresContext() const {
     return StyleContext()->PresContext();
@@ -1176,6 +1180,8 @@ public:
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(CachedDisplayList, nsDisplayList)
 
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(BidiDataProperty, mozilla::FrameBidiData)
+
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(DisplayListBuildingRect, nsRect)
 
   mozilla::FrameBidiData GetBidiData()
   {
@@ -2636,7 +2642,8 @@ public:
    *   into points in aOutAncestor's coordinate space.
    */
   Matrix4x4 GetTransformMatrix(const nsIFrame* aStopAtAncestor,
-                               nsIFrame **aOutAncestor);
+                               nsIFrame **aOutAncestor,
+                               bool aStopAtStackingContext = false);
 
   /**
    * Bit-flags to pass to IsFrameOfType()
@@ -3208,6 +3215,9 @@ public:
    */
   bool IsPseudoStackingContextFromStyle();
 
+  bool IsVisuallyAtomic();
+  bool IsStackingContext();
+
   virtual bool HonorPrintBackgroundSettings() { return true; }
 
   /**
@@ -3747,6 +3757,7 @@ protected:
 
   // TODO: Make this a frame state bit.
   bool mFrameIsModified : 1;
+  bool mHasOverrideDirtyRegion : 1;
 
   // When there is an overflow area only slightly larger than mRect,
   // we store a set of four 1-byte deltas from the edges of mRect
