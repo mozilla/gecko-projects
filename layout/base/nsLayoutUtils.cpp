@@ -3858,7 +3858,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
                   stackingContexts.AppendElement(currentFrame);
                 }
                 rect->UnionRect(*rect, overflow);
-                currentFrame->SetHasOverrideDirtyRegion();
+                currentFrame->SetHasOverrideDirtyRegion(true);
               }
 
               // Don't contribute to the root dirty area at all.
