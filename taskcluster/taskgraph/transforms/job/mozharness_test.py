@@ -10,7 +10,6 @@ from taskgraph.transforms.job import run_job_using
 from taskgraph.util.schema import Schema
 from taskgraph.transforms.tests import (
     test_description_schema,
-    get_firefox_version,
     normpath
 )
 from taskgraph.transforms.job.common import (
@@ -219,8 +218,7 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
 
     build_platform = taskdesc['attributes']['build_platform']
 
-    target = 'firefox-{}.en-US.{}'.format(get_firefox_version(), build_platform) \
-        if build_platform.startswith('win') else 'target'
+    target = 'target'
 
     installer_url = get_artifact_url('<build>', mozharness['build-artifact-name'])
 
