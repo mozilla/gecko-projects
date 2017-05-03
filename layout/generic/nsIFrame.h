@@ -1181,8 +1181,6 @@ public:
 
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(BidiDataProperty, mozilla::FrameBidiData)
 
-  NS_DECLARE_FRAME_PROPERTY_DELETABLE(DisplayListBuildingRect, nsRect)
-
   mozilla::FrameBidiData GetBidiData()
   {
     return Properties().Get(BidiDataProperty());

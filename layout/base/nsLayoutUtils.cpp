@@ -3510,7 +3510,10 @@ nsLayoutUtils::ExpireDisplayPortOnAsyncScrollableAncestor(nsIFrame* aFrame)
     }
   }
 }
-        
+
+// TODO: We currently descend into all children even if we don't have an AGR
+// to mark, as child stacking contexts might. It would be nice if we could
+// jump into those immediately rather than walking the entire thing.
 void MarkFramesForDifferentAGR(nsDisplayListBuilder* aBuilder,
                                 nsDisplayList* aList,
                                 AnimatedGeometryRoot* aAGR)
@@ -3521,13 +3524,21 @@ void MarkFramesForDifferentAGR(nsDisplayListBuilder* aBuilder,
     }
 
     if (i->GetChildren()) {
-      MarkFramesForDifferentAGR(aBuilder, i->GetChildren(), aAGR);
+      AnimatedGeometryRoot *childAGR = aAGR;
+      if (i->Frame()->IsStackingContext()) {
+        if (i->Frame()->HasOverrideDirtyRegion()) {
+          childAGR = i->Frame()->Properties().Get(nsDisplayListBuilder::DisplayListBuildingRect())->mModifiedAGR;
+        } else {
+          childAGR = nullptr;
+        }
+      }
+      MarkFramesForDifferentAGR(aBuilder, i->GetChildren(), childAGR);
     }
 
     // TODO: We should be able to check the clipped bounds relative
     // to the common AGR (of both the existing item and the invalidated
     // frame) and determine if they can ever intersect.
-    if (i->GetAnimatedGeometryRoot()->GetAsyncAGR() != aAGR) {
+    if (aAGR && i->GetAnimatedGeometryRoot()->GetAsyncAGR() != aAGR) {
       aBuilder->MarkFrameForDisplayIfVisible(i->Frame());
     }
   }
@@ -3816,6 +3827,10 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         bool success = true;
         //printf_stderr("Dirty frames: ");
         for (nsIFrame* f : *modifiedFrames) {
+          // TODO: There is almost certainly a faster way of doing this, probably can be combined with the ancestor
+          // walk for TransformFrameRectToAncestor.
+          AnimatedGeometryRoot* agr = builder.FindAnimatedGeometryRootFor(f)->GetAsyncAGR();
+
 
           // Convert the frame's overflow rect into the coordinate space
           // of the nearest stacking context that has an existing display item.
@@ -3852,14 +3867,20 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
                 // Store the stacking context relative dirty area such
                 // that display list building will pick it up when it
                 // gets to it.
-                nsRect* rect = currentFrame->Properties().Get(nsIFrame::DisplayListBuildingRect());
-                if (!rect) {
-                  rect = new nsRect();
-                  currentFrame->Properties().Set(nsIFrame::DisplayListBuildingRect(), rect);
+                nsDisplayListBuilder::DisplayListBuildingData* data=
+                  currentFrame->Properties().Get(nsDisplayListBuilder::DisplayListBuildingRect());
+                if (!data) {
+                  data = new nsDisplayListBuilder::DisplayListBuildingData;
+                  currentFrame->Properties().Set(nsDisplayListBuilder::DisplayListBuildingRect(), data);
+                  currentFrame->SetHasOverrideDirtyRegion(true);
                   stackingContexts.AppendElement(currentFrame);
                 }
-                rect->UnionRect(*rect, overflow);
-                currentFrame->SetHasOverrideDirtyRegion(true);
+                data->mDirtyRect.UnionRect(data->mDirtyRect, overflow);
+                if (!data->mModifiedAGR) {
+                  data->mModifiedAGR = agr;
+                } else if (data->mModifiedAGR != agr) {
+                  data->mDirtyRect = currentFrame->GetVisualOverflowRectRelativeToSelf();
+                }
               }
 
               // Don't contribute to the root dirty area at all.
@@ -3868,10 +3889,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
             }
           }
           modifiedDirty.UnionRect(modifiedDirty, overflow);
-
-          // TODO: There is almost certainly a faster way of doing this, probably can be combined with the ancestor
-          // walk for TransformFrameRectToAncestor.
-          AnimatedGeometryRoot* agr = builder.FindAnimatedGeometryRootFor(f)->GetAsyncAGR();
 
           // If we get changed frames from multiple AGRS, then just give up as it gets really complex to
           // track which items would need to be marked in MarkFramesForDifferentAGR.
@@ -3892,9 +3909,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         // contexts as needing-paint-if-visible.
 
         if (success) {
-          if (modifiedAGR) {
-            MarkFramesForDifferentAGR(&builder, &list, modifiedAGR);
-          }
+          MarkFramesForDifferentAGR(&builder, &list, modifiedAGR);
 
           builder.SetDirtyRect(modifiedDirty);
 
@@ -3920,7 +3935,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
         for (nsIFrame* f: stackingContexts) {
           f->SetHasOverrideDirtyRegion(false);
-          f->Properties().Delete(nsIFrame::DisplayListBuildingRect());
+          f->Properties().Delete(nsDisplayListBuilder::DisplayListBuildingRect());
         }
       }
 

@@ -1262,6 +1262,13 @@ public:
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(OutOfFlowDisplayDataProperty,
                                       OutOfFlowDisplayData)
 
+  struct DisplayListBuildingData {
+    AnimatedGeometryRoot* mModifiedAGR = nullptr;
+    nsRect mDirtyRect;
+  };
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(DisplayListBuildingRect, DisplayListBuildingData)
+
+
   static OutOfFlowDisplayData* GetOutOfFlowData(nsIFrame* aFrame)
   {
     return aFrame->Properties().Get(OutOfFlowDisplayDataProperty());

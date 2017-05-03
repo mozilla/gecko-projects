@@ -2977,7 +2977,8 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
   }
 
   if (child->HasOverrideDirtyRegion()) {
-    dirty = *child->Properties().Get(DisplayListBuildingRect());
+    dirty = child->Properties().Get(nsDisplayListBuilder::DisplayListBuildingRect())->mDirtyRect;
+    dirty.IntersectRect(dirty, visible);
   }
 
   NS_ASSERTION(childType != nsGkAtoms::placeholderFrame,
