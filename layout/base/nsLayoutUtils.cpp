@@ -122,6 +122,7 @@
 #include "mozilla/StyleSetHandleInlines.h"
 #include "RegionBuilder.h"
 #include "SVGSVGElement.h"
+#include "nsAutoLayoutPhase.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"

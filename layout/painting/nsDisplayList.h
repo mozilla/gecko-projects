@@ -36,6 +36,7 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/gfx/UserData.h"
 #include "nsCSSRenderingBorders.h"
+#include "nsAutoLayoutPhase.h"
 
 #include <stdint.h>
 #include "nsTHashtable.h"
@@ -1458,6 +1459,8 @@ private:
 
   struct PresShellState {
     nsIPresShell* mPresShell;
+    // TODO: Using a Maybe for this is silly, we always want to instantiate it.
+    mozilla::Maybe<nsAutoLayoutPhase> mAutoLayoutPhase;
     nsIFrame*     mCaretFrame;
     nsRect        mCaretRect;
     mozilla::Maybe<OutOfFlowDisplayData> mFixedBackgroundDisplayData;

@@ -1189,6 +1189,7 @@ nsDisplayListBuilder::EnterPresShell(nsIFrame* aReferenceFrame,
 {
   PresShellState* state = mPresShellStates.AppendElement();
   state->mPresShell = aReferenceFrame->PresContext()->PresShell();
+  state->mAutoLayoutPhase.emplace(aReferenceFrame->PresContext(), eLayoutPhase_DisplayListBuilding);
   state->mCaretFrame = nullptr;
   state->mFirstFrameMarkedForDisplay = mFramesMarkedForDisplay.Length();
 

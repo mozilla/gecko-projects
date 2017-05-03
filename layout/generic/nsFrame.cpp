@@ -6361,6 +6361,7 @@ static void InvalidateRenderingObservers(nsIFrame* aFrame, bool aFrameChanged = 
       modifiedFrames = new nsTArray<nsIFrame*>;
       displayRoot->Properties().Set(nsIFrame::ModifiedFrameList(), modifiedFrames);
     }
+    MOZ_ASSERT(aFrame->PresContext()->LayoutPhaseCount(eLayoutPhase_DisplayListBuilding) == 0);
     modifiedFrames->AppendElement(aFrame);
     aFrame->SetFrameIsModified(true);
   }
