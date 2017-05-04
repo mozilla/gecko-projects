@@ -1937,6 +1937,6 @@ class Repackage(MachCommandBase):
         help='Mar binary path')
     @CommandArgument('--output', '-o', type=str, required=True,
         help='Output filename')
-    def repackage_installer(self, input, mar, output):
+    def repackage_mar(self, input, mar, output):
         from mozbuild.repackaging.mar import repackage_mar
         repackage_mar(self.topsrcdir, input, mar, output)
