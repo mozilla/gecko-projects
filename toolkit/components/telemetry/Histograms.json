@@ -377,9 +377,9 @@
   "CREATE_EVENT_BEFOREUNLOADEVENT" : {
     "alert_emails": ["ayg@aryeh.name"],
     "description": "Was document.createEvent(\"beforeunloadevent\") ever called",
-    "expires_in_version": "56",
+    "expires_in_version": "60",
     "kind": "count",
-    "bug_numbers": [1295588, 1251198]
+    "bug_numbers": [1295588, 1251198, 1358893]
   },
   "CREATE_EVENT_COMPOSITIONEVENT" : {
     "alert_emails": ["ayg@aryeh.name"],
@@ -2056,6 +2056,14 @@
       "high": 60000,
       "n_buckets": 100,
       "description": "Time in milliseconds that http channel spent suspended between AsyncOpen and OnStartRequest."
+  },
+  "NETWORK_RACE_CACHE_WITH_NETWORK_USAGE": {
+    "expires_in_version": "58",
+    "alert_emails": ["necko@mozilla.com"],
+    "bug_numbers": [1354409],
+    "kind": "enumerated",
+    "n_values": 4,
+    "description": "Whether we raced network with the cache. (0=network & no racing, 1=cache & no racing, 2=network & raced, 3=cache & raced)"
   },
   "HTTP_AUTH_DIALOG_STATS": {
     "expires_in_version": "never",
@@ -4219,6 +4227,15 @@
     "bug_numbers": [1336903],
     "description": "Server response time to update request (ms). Keyed by provider"
   },
+  "URLCLASSIFIER_UPDATE_TIMEOUT": {
+    "alert_emails": ["safebrowsing-telemetry@mozilla.org"],
+    "expires_in_version": "61",
+    "kind": "enumerated",
+    "keyed": true,
+    "n_values": 4,
+    "bug_numbers": [1336904],
+    "description": " Whether or not an update timed out (0 = no timeout, 1 = server respond timeout, 2 = overall timeout). Keyed by provider"
+  },
   "URLCLASSIFIER_COMPLETE_REMOTE_STATUS2": {
     "alert_emails": ["safebrowsing-telemetry@mozilla.org"],
     "expires_in_version": "never",
@@ -4254,7 +4271,6 @@
     "bug_numbers": [1336903],
     "description": "Server response time to getHash request (ms). Keyed by provider"
   },
-
   "URLCLASSIFIER_UPDATE_ERROR": {
     "alert_emails": ["safebrowsing-telemetry@mozilla.org"],
     "expires_in_version": "59",
@@ -5648,13 +5664,23 @@
     "n_buckets": 10,
     "description": "Session restore: Time to collect all window and tab data (ms)"
   },
-  "FX_SESSION_RESTORE_CONTENT_COLLECT_DATA_LONGEST_OP_MS": {
-    "alert_emails": ["session-restore-telemetry-alerts@mozilla.com"],
-    "expires_in_version": "default",
+  "FX_SESSION_RESTORE_CONTENT_COLLECT_DATA_MS": {
+    "alert_emails": ["session-restore-telemetry-alerts@mozilla.com", "mdeboer@mozilla.com"],
+    "expires_in_version": "60",
     "kind": "exponential",
+    "keyed": true,
     "high": 30000,
-    "n_buckets": 10,
-    "description": "Session restore: Duration of the longest uninterruptible operation while collecting data in the content process (ms)"
+    "n_buckets": 20,
+    "bug_numbers": [1360916],
+    "description": "Session restore: Duration of data collection in the content process (ms). Possible keys currently are: historychange, scroll, formdata, pageStyle, disallow, storage, storagechange."
+  },
+  "FX_SESSION_RESTORE_PRIVACY_LEVEL": {
+    "alert_emails": ["session-restore-telemetry-alerts@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "enumerated",
+    "n_values": 3,
+    "bug_numbers": [1360810],
+    "description": "Session restore: The privacy level chosen by the user (0: Collect data from all sites, 1: Collect data only from non-HTTPS sites, 2: Collect no data)"
   },
   "FX_SESSION_RESTORE_SERIALIZE_DATA_MS": {
     "alert_emails": ["session-restore-telemetry-alerts@mozilla.com"],
@@ -10435,6 +10461,20 @@
     "releaseChannelCollection": "opt-out",
     "description": "Graphics Crash Reason (...)"
   },
+  "APZ_AWARE_KEY_LISTENERS": {
+    "alert_emails": ["rhunt@mozilla.com"],
+    "bug_numbers": [1352654],
+    "expires_in_version": "58",
+    "kind": "boolean",
+    "description": "The percentage of pages with a non-passive key event on the path to the root scrolling element that would disable APZ key scrolling. This is tracked for non system principal windows, so it applies to toplevel windows and subframes/iframes, but not chrome windows. "
+  },
+  "APZ_AWARE_MOUSEMOVE_LISTENERS": {
+    "alert_emails": ["rhunt@mozilla.com"],
+    "bug_numbers": [1352654],
+    "expires_in_version": "58",
+    "kind": "boolean",
+    "description": "The percentage of pages with a mousemove listener anywhere in the document that would disable APZ key scrolling. This is tracked for non system principal windows, so it applies to toplevel windows and subframes/iframes, but not chrome windows."
+  },
   "SCROLL_INPUT_METHODS": {
     "alert_emails": ["botond@mozilla.com"],
     "bug_numbers": [1238137],
@@ -11230,6 +11270,47 @@
     "n_values": 99,
     "description": "Count of which layout display items are being created. Display items are created by layout to determine what content to render. A full description is above the class definition for nsDisplayItem. The list of types is kept in nsDisplayItemTypes.h."
   },
+  "TIMEOUT_EXECUTION_FG_MS":
+  {
+    "alert_emails": ["farre@mozilla.com"],
+    "bug_numbers": [1355480],
+    "expires_in_version": "61",
+    "kind": "exponential",
+    "high": 1000,
+    "n_buckets": 20,
+    "description": "Time in ms used to execute callbacks from setTimeout/setInterval, when the script belongs to a tab in the foreground and the script is not on the tracking list. Multiple events are aggregated over a 1s interval."
+  },
+  "TIMEOUT_EXECUTION_FG_TRACKING_MS":
+  {
+    "alert_emails": ["farre@mozilla.com"],
+    "bug_numbers": [1355480],
+    "expires_in_version": "61",
+    "kind": "exponential",
+    "high": 1000,
+    "n_buckets": 20,
+    "description": "Time in ms used to execute callbacks from setTimeout/setInterval, when the script belongs to a tab in the foreground and the script is on the tracking list. Multiple events are aggregated over a 1s interval."
+  },
+  "TIMEOUT_EXECUTION_BG_MS":
+  {
+    "alert_emails": ["farre@mozilla.com"],
+    "bug_numbers": [1355480],
+    "expires_in_version": "61",
+    "kind": "exponential",
+    "high": 1000,
+    "n_buckets": 20,
+    "description": "Time in ms used to execute callbacks from setTimeout/setInterval, when the script belongs to a tab in the background and the script is not on the tracking list. Multiple events are aggregated over a 1s interval."
+  },
+  "TIMEOUT_EXECUTION_BG_TRACKING_MS":
+  {
+    "alert_emails": ["farre@mozilla.com"],
+    "bug_numbers": [1355480],
+    "expires_in_version": "61",
+    "kind": "exponential",
+    "low": 1,
+    "high": 1000,
+    "n_buckets": 10,
+    "description": "Time in ms used to execute callbacks from setTimeout/setInterval, when the script belongs to a tab in the background and the script is on the tracking list. Multiple events are aggregated over a 1s interval."
+  },
   "TIME_TO_DOM_LOADING_MS": {
     "alert_emails": ["wpan@mozilla.com"],
     "expires_in_version": "60",
@@ -11301,5 +11382,59 @@
     "n_buckets": 100,
     "bug_numbers": [1344893],
     "description": "Time in milliseconds from navigationStart to responseStart."
+  },
+  "INPUT_EVENT_HANDLED_MOUSE_UP_MS": {
+    "alert_emails": ["wpan@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 5000,
+    "n_buckets": 100,
+    "bug_numbers": [1345540],
+    "description": "Time (ms) for the mouse up event spent in handlers."
+  },
+  "INPUT_EVENT_HANDLED_MOUSE_DOWN_MS": {
+    "alert_emails": ["wpan@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 5000,
+    "n_buckets": 100,
+    "bug_numbers": [1345540],
+    "description": "Time (ms) for the mouse down event spent in handlers."
+  },
+  "INPUT_EVENT_HANDLED_KEYBOARD_MS": {
+    "alert_emails": ["wpan@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 5000,
+    "n_buckets": 100,
+    "bug_numbers": [1345540],
+    "description": "Time (ms) for the keyboard event spent in handlers."
+  },
+  "INPUT_EVENT_HANDLED_APZ_TOUCH_MOVE_MS": {
+    "alert_emails": ["wpan@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 5000,
+    "n_buckets": 100,
+    "bug_numbers": [1345540],
+    "description": "Time (ms) for the APZ handled touch move event spent in handlers."
+  },
+  "INPUT_EVENT_HANDLED_APZ_MOUSE_MOVE_MS": {
+    "alert_emails": ["wpan@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 5000,
+    "n_buckets": 100,
+    "bug_numbers": [1345540],
+    "description": "Time (ms) for the APZ handled mouse move event spent in handlers."
+  },
+  "INPUT_EVENT_HANDLED_APZ_WHEEL_MS": {
+    "alert_emails": ["wpan@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 5000,
+    "n_buckets": 100,
+    "bug_numbers": [1345540],
+    "description": "Time (ms) for the APZ handled wheel event spent in handlers."
   }
 }

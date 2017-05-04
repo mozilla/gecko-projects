@@ -15,7 +15,7 @@
 #error "This file should not be included"
 #endif
 
-class nsXULLabelFrame : public nsBlockFrame
+class nsXULLabelFrame final : public nsBlockFrame
 {
 public:
   NS_DECL_FRAMEARENA_HELPERS
@@ -40,7 +40,7 @@ public:
 
 protected:
   explicit nsXULLabelFrame(nsStyleContext* aContext)
-    : nsBlockFrame(aContext, mozilla::FrameType::XULLabel)
+    : nsBlockFrame(aContext, mozilla::LayoutFrameType::XULLabel)
   {}
 
   nsresult RegUnregAccessKey(bool aDoReg);

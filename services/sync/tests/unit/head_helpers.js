@@ -3,9 +3,8 @@
 
 /* import-globals-from head_appinfo.js */
 /* import-globals-from ../../../common/tests/unit/head_helpers.js */
-
-// From head_http_server.js (which also imports this file).
-/* global new_timestamp */
+/* import-globals-from head_errorhandler_common.js */
+/* import-globals-from head_http_server.js */
 
 // This file expects Service to be defined in the global scope when EHTestsCommon
 // is used (from service.js).
@@ -485,6 +484,8 @@ Utils.getDefaultDeviceName = function() {
 };
 
 function registerRotaryEngine() {
+  let {RotaryEngine} =
+    Cu.import("resource://testing-common/services/sync/rotaryengine.js", {});
   Service.engineManager.clear();
 
   Service.engineManager.register(RotaryEngine);
@@ -500,4 +501,47 @@ function enableValidationPrefs() {
   Svc.Prefs.set("engine.bookmarks.validation.percentageChance", 100);
   Svc.Prefs.set("engine.bookmarks.validation.maxRecords", -1);
   Svc.Prefs.set("engine.bookmarks.validation.enabled", true);
+}
+
+function serverForEnginesWithKeys(users, engines, callback) {
+  // Generate and store a fake default key bundle to avoid resetting the client
+  // before the first sync.
+  let wbo = Service.collectionKeys.generateNewKeysWBO();
+  let modified = new_timestamp();
+  Service.collectionKeys.setContents(wbo.cleartext, modified);
+
+  let allEngines = [Service.clientsEngine].concat(engines);
+
+  let globalEngines = allEngines.reduce((entries, engine) => {
+    let { name, version, syncID } = engine;
+    entries[name] = { version, syncID };
+    return entries;
+  }, {});
+
+  let contents = allEngines.reduce((collections, engine) => {
+    collections[engine.name] = {};
+    return collections;
+  }, {
+    meta: {
+      global: {
+        syncID: Service.syncID,
+        storageVersion: STORAGE_VERSION,
+        engines: globalEngines,
+      },
+    },
+    crypto: {
+      keys: encryptPayload(wbo.cleartext),
+    },
+  });
+
+  return serverForUsers(users, contents, callback);
+}
+
+function serverForFoo(engine, callback) {
+  // The bookmarks engine *always* tracks changes, meaning we might try
+  // and sync due to the bookmarks we ourselves create! Worse, because we
+  // do an engine sync only, there's no locking - so we end up with multiple
+  // syncs running. Neuter that by making the threshold very large.
+  Service.scheduler.syncThreshold = 10000000;
+  return serverForEnginesWithKeys({"foo": "password"}, engine, callback);
 }

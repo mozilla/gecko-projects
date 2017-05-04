@@ -68,7 +68,7 @@ public:
                                           nsStyleContext* aContext,
                                           nsFrameState aTypeBit);
   nsPlaceholderFrame(nsStyleContext* aContext, nsFrameState aTypeBit)
-    : nsFrame(aContext, mozilla::FrameType::Placeholder)
+    : nsFrame(aContext, mozilla::LayoutFrameType::Placeholder)
   {
     NS_PRECONDITION(aTypeBit == PLACEHOLDER_FOR_FLOAT ||
                     aTypeBit == PLACEHOLDER_FOR_ABSPOS ||
@@ -166,7 +166,7 @@ public:
   }
 
 protected:
-  nsIFrame* mOutOfFlowFrame;
+  nsIFrame* mOutOfFlowFrame { nullptr };
 };
 
 #endif /* nsPlaceholderFrame_h___ */

@@ -758,8 +758,6 @@ nsComputedDOMStyle::UpdateCurrentStyleSources(bool aNeedsLayoutFlush)
     return;
   }
 
-  document->FlushPendingLinkUpdates();
-
   // Flush _before_ getting the presshell, since that could create a new
   // presshell.  Also note that we want to flush the style on the document
   // we're computing style in, not on the document mContent is in -- the two
@@ -809,8 +807,8 @@ nsComputedDOMStyle::UpdateCurrentStyleSources(bool aNeedsLayoutFlush)
 
     mInnerFrame = mOuterFrame;
     if (mOuterFrame) {
-      FrameType type = mOuterFrame->Type();
-      if (type == FrameType::TableWrapper) {
+      LayoutFrameType type = mOuterFrame->Type();
+      if (type == LayoutFrameType::TableWrapper) {
         // If the frame is a table wrapper frame then we should get the style
         // from the inner table frame.
         mInnerFrame = mOuterFrame->PrincipalChildList().FirstChild();
@@ -5769,17 +5767,24 @@ nsComputedDOMStyle::GetFrameBoundsHeightForTransform(nscoord& aHeight)
 }
 
 already_AddRefed<CSSValue>
+nsComputedDOMStyle::GetFallbackValue(const nsStyleSVGPaint* aPaint)
+{
+  RefPtr<nsROCSSPrimitiveValue> fallback = new nsROCSSPrimitiveValue;
+  if (aPaint->GetFallbackType() == eStyleSVGFallbackType_Color) {
+    SetToRGBAColor(fallback, aPaint->GetFallbackColor());
+  } else {
+    fallback->SetIdent(eCSSKeyword_none);
+  }
+  return fallback.forget();
+}
+
+already_AddRefed<CSSValue>
 nsComputedDOMStyle::GetSVGPaintFor(bool aFill)
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
 
   const nsStyleSVG* svg = StyleSVG();
-  const nsStyleSVGPaint* paint = nullptr;
-
-  if (aFill)
-    paint = &svg->mFill;
-  else
-    paint = &svg->mStroke;
+  const nsStyleSVGPaint* paint = aFill ? &svg->mFill : &svg->mStroke;
 
   nsAutoString paintString;
 
@@ -5791,23 +5796,29 @@ nsComputedDOMStyle::GetSVGPaintFor(bool aFill)
       SetToRGBAColor(val, paint->GetColor());
       break;
     case eStyleSVGPaintType_Server: {
-      RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
-      RefPtr<nsROCSSPrimitiveValue> fallback = new nsROCSSPrimitiveValue;
       SetValueToURLValue(paint->GetPaintServer(), val);
-      SetToRGBAColor(fallback, paint->GetFallbackColor());
-
-      valueList->AppendCSSValue(val.forget());
-      valueList->AppendCSSValue(fallback.forget());
-      return valueList.forget();
+      if (paint->GetFallbackType() != eStyleSVGFallbackType_NotSet) {
+        RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
+        RefPtr<CSSValue> fallback = GetFallbackValue(paint);
+        valueList->AppendCSSValue(val.forget());
+        valueList->AppendCSSValue(fallback.forget());
+        return valueList.forget();
+      }
+      break;
     }
     case eStyleSVGPaintType_ContextFill:
-      val->SetIdent(eCSSKeyword_context_fill);
-      // XXXheycam context-fill and context-stroke can have fallback colors,
-      // so they should be serialized here too
+    case eStyleSVGPaintType_ContextStroke: {
+      val->SetIdent(paint->Type() == eStyleSVGPaintType_ContextFill ?
+                    eCSSKeyword_context_fill : eCSSKeyword_context_stroke);
+      if (paint->GetFallbackType() != eStyleSVGFallbackType_NotSet) {
+        RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
+        RefPtr<CSSValue> fallback = GetFallbackValue(paint);
+        valueList->AppendCSSValue(val.forget());
+        valueList->AppendCSSValue(fallback.forget());
+        return valueList.forget();
+      }
       break;
-    case eStyleSVGPaintType_ContextStroke:
-      val->SetIdent(eCSSKeyword_context_stroke);
-      break;
+    }
   }
 
   return val.forget();

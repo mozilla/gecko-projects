@@ -141,12 +141,13 @@ protected:
     }
   };
 
-  nsInlineFrame(nsStyleContext* aContext, mozilla::FrameType aType)
+  nsInlineFrame(nsStyleContext* aContext, mozilla::LayoutFrameType aType)
     : nsContainerFrame(aContext, aType)
+    , mBaseline(NS_INTRINSIC_WIDTH_UNKNOWN)
   {}
 
   explicit nsInlineFrame(nsStyleContext* aContext)
-    : nsInlineFrame(aContext, mozilla::FrameType::Inline)
+    : nsInlineFrame(aContext, mozilla::LayoutFrameType::Inline)
   {}
 
   virtual LogicalSides GetLogicalSkipSides(const ReflowInput* aReflowInput = nullptr) const override;
@@ -232,7 +233,7 @@ public:
 
 protected:
   explicit nsFirstLineFrame(nsStyleContext* aContext)
-    : nsInlineFrame(aContext, mozilla::FrameType::Line)
+    : nsInlineFrame(aContext, mozilla::LayoutFrameType::Line)
   {}
 
   virtual nsIFrame* PullOneFrame(nsPresContext* aPresContext,

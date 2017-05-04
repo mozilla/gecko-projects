@@ -292,8 +292,16 @@ Layer::StartPendingAnimations(const TimeStamp& aReadyTime)
           Animation& anim = layer->mAnimations[animIdx];
 
           // If the animation is play-pending, resolve the start time.
-          if (anim.startTime().IsNull() && !anim.isNotPlaying()) {
-            anim.startTime() = aReadyTime - anim.holdTime() + anim.delay();
+          // This mirrors the calculation in Animation::StartTimeFromReadyTime.
+          if (anim.startTime().type() == MaybeTimeDuration::Tnull_t &&
+              !anim.originTime().IsNull() &&
+              !anim.isNotPlaying()) {
+            TimeDuration readyTime = aReadyTime - anim.originTime();
+            anim.startTime() =
+              anim.playbackRate() == 0
+              ? readyTime
+              : readyTime - anim.holdTime().MultDouble(1.0 /
+                                                       anim.playbackRate());
             updated = true;
           }
         }
@@ -576,8 +584,7 @@ Layer::CalculateScissorRect(const RenderTargetIntRect& aCurrentScissorRect)
     return currentClip;
   }
 
-  if (GetLocalVisibleRegion().IsEmpty() &&
-      !(AsHostLayer() && AsHostLayer()->NeedToDrawCheckerboarding())) {
+  if (GetLocalVisibleRegion().IsEmpty()) {
     // When our visible region is empty, our parent may not have created the
     // intermediate surface that we would require for correct clipping; however,
     // this does not matter since we are invisible.
@@ -1849,9 +1856,6 @@ Layer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
   }
   if (GetTransformIsPerspective()) {
     aStream << " [perspective]";
-  }
-  if (!GetLayerBounds().IsEmpty()) {
-    AppendToString(aStream, GetLayerBounds(), " [bounds=", "]");
   }
   if (!mVisibleRegion.IsEmpty()) {
     AppendToString(aStream, mVisibleRegion.ToUnknownRegion(), " [visible=", "]");

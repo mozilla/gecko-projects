@@ -441,7 +441,7 @@ struct HTMLInputElement::FileData
 
   void ClearGetFilesHelpers()
   {
-    if (mGetFilesNonRecursiveHelper) {
+    if (mGetFilesRecursiveHelper) {
       mGetFilesRecursiveHelper->Unlink();
       mGetFilesRecursiveHelper = nullptr;
     }
@@ -1550,6 +1550,27 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                                                          aValue, aNotify);
 }
 
+void
+HTMLInputElement::BeforeSetForm(bool aBindToTree)
+{
+  // No need to remove from radio group if we are just binding to tree.
+  if (mType == NS_FORM_INPUT_RADIO && !aBindToTree) {
+    WillRemoveFromRadioGroup();
+  }
+}
+
+void
+HTMLInputElement::AfterClearForm(bool aUnbindOrDelete)
+{
+  MOZ_ASSERT(!mForm);
+
+  // Do not add back to radio group if we are releasing or unbinding from tree.
+  if (mType == NS_FORM_INPUT_RADIO && !aUnbindOrDelete) {
+    AddedToRadioGroup();
+    UpdateValueMissingValidityStateForRadio(false);
+  }
+}
+
 // nsIDOMHTMLInputElement
 
 NS_IMETHODIMP
@@ -1974,9 +1995,10 @@ HTMLInputElement::SetValue(const nsAString& aValue, CallerType aCallerType,
       GetValue(currentValue, aCallerType);
 
       nsresult rv =
-        SetValueInternal(aValue, nsTextEditorState::eSetValue_ByContent |
-                                 nsTextEditorState::eSetValue_Notify |
-                                 nsTextEditorState::eSetValue_MoveCursorToEnd);
+        SetValueInternal(aValue,
+          nsTextEditorState::eSetValue_ByContent |
+          nsTextEditorState::eSetValue_Notify |
+          nsTextEditorState::eSetValue_MoveCursorToEndIfValueChanged);
       if (NS_FAILED(rv)) {
         aRv.Throw(rv);
         return;
@@ -1987,9 +2009,10 @@ HTMLInputElement::SetValue(const nsAString& aValue, CallerType aCallerType,
       }
     } else {
       nsresult rv =
-        SetValueInternal(aValue, nsTextEditorState::eSetValue_ByContent |
-                                 nsTextEditorState::eSetValue_Notify |
-                                 nsTextEditorState::eSetValue_MoveCursorToEnd);
+        SetValueInternal(aValue,
+          nsTextEditorState::eSetValue_ByContent |
+          nsTextEditorState::eSetValue_Notify |
+          nsTextEditorState::eSetValue_MoveCursorToEndIfValueChanged);
       if (NS_FAILED(rv)) {
         aRv.Throw(rv);
         return;
@@ -2843,9 +2866,9 @@ HTMLInputElement::SetUserInput(const nsAString& aValue)
   } else {
     nsresult rv =
       SetValueInternal(aValue,
-                       nsTextEditorState::eSetValue_BySetUserInput |
-                       nsTextEditorState::eSetValue_Notify|
-                       nsTextEditorState::eSetValue_MoveCursorToEnd);
+        nsTextEditorState::eSetValue_BySetUserInput |
+        nsTextEditorState::eSetValue_Notify|
+        nsTextEditorState::eSetValue_MoveCursorToEndIfValueChanged);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 

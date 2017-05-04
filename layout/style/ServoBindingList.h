@@ -50,14 +50,25 @@ SERVO_BINDING_FUNC(Servo_StyleSet_RebuildData, void,
                    RawServoStyleSetBorrowed set)
 SERVO_BINDING_FUNC(Servo_StyleSet_Drop, void, RawServoStyleSetOwned set)
 SERVO_BINDING_FUNC(Servo_StyleSet_AppendStyleSheet, void,
-                   RawServoStyleSetBorrowed set, RawServoStyleSheetBorrowed sheet, bool flush)
+                   RawServoStyleSetBorrowed set,
+                   RawServoStyleSheetBorrowed sheet,
+                   uint32_t unique_id,
+                   bool flush)
 SERVO_BINDING_FUNC(Servo_StyleSet_PrependStyleSheet, void,
-                   RawServoStyleSetBorrowed set, RawServoStyleSheetBorrowed sheet, bool flush)
+                   RawServoStyleSetBorrowed set,
+                   RawServoStyleSheetBorrowed sheet,
+                   uint32_t unique_id,
+                   bool flush)
 SERVO_BINDING_FUNC(Servo_StyleSet_RemoveStyleSheet, void,
-                   RawServoStyleSetBorrowed set, RawServoStyleSheetBorrowed sheet, bool flush)
+                   RawServoStyleSetBorrowed set,
+                   uint32_t unique_id,
+                   bool flush)
 SERVO_BINDING_FUNC(Servo_StyleSet_InsertStyleSheetBefore, void,
-                   RawServoStyleSetBorrowed set, RawServoStyleSheetBorrowed sheet,
-                   RawServoStyleSheetBorrowed reference, bool flush)
+                   RawServoStyleSetBorrowed set,
+                   RawServoStyleSheetBorrowed sheet,
+                   uint32_t unique_id,
+                   uint32_t before_unique_id,
+                   bool flush)
 SERVO_BINDING_FUNC(Servo_StyleSet_FlushStyleSheets, void, RawServoStyleSetBorrowed set)
 SERVO_BINDING_FUNC(Servo_StyleSet_NoteStyleSheetsChanged, void,
                    RawServoStyleSetBorrowed set, bool author_style_disabled)
@@ -148,7 +159,7 @@ SERVO_BINDING_FUNC(Servo_GetComputedKeyframeValues, void,
                    RawServoStyleSetBorrowed set,
                    RawGeckoComputedKeyframeValuesListBorrowedMut result)
 SERVO_BINDING_FUNC(Servo_AnimationValueMap_Push, void,
-                   RawServoAnimationValueMapBorrowed,
+                   RawServoAnimationValueMapBorrowedMut,
                    nsCSSPropertyID property,
                    RawServoAnimationValueBorrowed value)
 SERVO_BINDING_FUNC(Servo_ComputedValues_ExtractAnimationValue,
@@ -187,6 +198,12 @@ SERVO_BINDING_FUNC(Servo_AnimationValue_DeepEqual, bool,
 SERVO_BINDING_FUNC(Servo_AnimationValue_Uncompute,
                    RawServoDeclarationBlockStrong,
                    RawServoAnimationValueBorrowed value)
+SERVO_BINDING_FUNC(Servo_AnimationValue_Compute,
+                   RawServoAnimationValueStrong,
+                   RawServoDeclarationBlockBorrowed declarations,
+                   ServoComputedValuesBorrowed style,
+                   ServoComputedValuesBorrowedOrNull parent_style,
+                   RawServoStyleSetBorrowed raw_data)
 
 // Style attribute
 SERVO_BINDING_FUNC(Servo_ParseStyleAttribute, RawServoDeclarationBlockStrong,
@@ -244,7 +261,7 @@ SERVO_BINDING_FUNC(Servo_DeclarationBlock_HasCSSWideKeyword, bool,
 // |base_values| is nsRefPtrHashtable<nsUint32HashKey, RawServoAnimationValue>.
 // We use void* to avoid exposing nsRefPtrHashtable in FFI.
 SERVO_BINDING_FUNC(Servo_AnimationCompose, void,
-                   RawServoAnimationValueMapBorrowed animation_values,
+                   RawServoAnimationValueMapBorrowedMut animation_values,
                    void* base_values,
                    nsCSSPropertyID property,
                    RawGeckoAnimationPropertySegmentBorrowed animation_segment,

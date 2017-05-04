@@ -18,7 +18,6 @@ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/FxAccounts.jsm");
-Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/FxAccountsCommon.js");
 
 XPCOMUtils.defineLazyServiceGetter(this, "permissionManager",
@@ -465,7 +464,7 @@ this.FxAccountsManager = {
     let client = this._getFxAccountsClient();
     return client.accountExists(aEmail).then(
       result => {
-        log.debug("Account " + result ? "" : "does not" + " exists");
+        log.debug("Account " + (result ? "" : "does not ") + "exists");
         let error = this._getError(result);
         if (error) {
           return this._error(error, result);

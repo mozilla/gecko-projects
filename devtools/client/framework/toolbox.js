@@ -4,6 +4,8 @@
 
 "use strict";
 
+const SOURCE_MAP_WORKER = "resource://devtools/client/shared/source-map/worker.js";
+
 const MAX_ORDINAL = 99;
 const SPLITCONSOLE_ENABLED_PREF = "devtools.toolbox.splitconsoleEnabled";
 const SPLITCONSOLE_HEIGHT_PREF = "devtools.toolbox.splitconsoleHeight";
@@ -60,6 +62,8 @@ loader.lazyRequireGetter(this, "ToolboxButtons",
   "devtools/client/definitions", true);
 loader.lazyRequireGetter(this, "SourceMapService",
   "devtools/client/framework/source-map-service", true);
+loader.lazyRequireGetter(this, "SourceMapURLService",
+  "devtools/client/framework/source-map-url-service", true);
 loader.lazyRequireGetter(this, "HUDService",
   "devtools/client/webconsole/hudservice");
 loader.lazyRequireGetter(this, "viewSource",
@@ -534,7 +538,8 @@ Toolbox.prototype = {
 
   /**
    * A common access point for the client-side mapping service for source maps that
-   * any panel can use.
+   * any panel can use.  This is a "low-level" API that connects to
+   * the source map worker.
    */
   get sourceMapService() {
     if (!Services.prefs.getBoolPref("devtools.source-map.client-service.enabled")) {
@@ -546,7 +551,27 @@ Toolbox.prototype = {
     // Uses browser loader to access the `Worker` global.
     this._sourceMapService =
       this.browserRequire("devtools/client/shared/source-map/index");
+    this._sourceMapService.startSourceMapWorker(SOURCE_MAP_WORKER);
     return this._sourceMapService;
+  },
+
+  /**
+   * Clients wishing to use source maps but that want the toolbox to
+   * track the source actor mapping can use this source map service.
+   * This is a higher-level service than the one returned by
+   * |sourceMapService|, in that it automatically tracks source actor
+   * IDs.
+   */
+  get sourceMapURLService() {
+    if (this._sourceMapURLService) {
+      return this._sourceMapURLService;
+    }
+    let sourceMaps = this.sourceMapService;
+    if (!sourceMaps) {
+      return null;
+    }
+    this._sourceMapURLService = new SourceMapURLService(this._target, sourceMaps);
+    return this._sourceMapURLService;
   },
 
   // Return HostType id for telemetry
@@ -2296,8 +2321,13 @@ Toolbox.prototype = {
       this._deprecatedServerSourceMapService = null;
     }
 
+    if (this._sourceMapURLService) {
+      this._sourceMapURLService.destroy();
+      this._sourceMapURLService = null;
+    }
+
     if (this._sourceMapService) {
-      this._sourceMapService.destroyWorker();
+      this._sourceMapService.stopSourceMapWorker();
       this._sourceMapService = null;
     }
 

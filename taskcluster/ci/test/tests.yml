@@ -3,7 +3,26 @@
 # bunch of tasks.  See the schema in `taskcluster/taskgraph/transforms/tests.py`
 # for a description of the fields used here.
 
-# Note that these are in lexical order
+# Note that these are in lexical order, as enforced by the task loader.
+
+awsy:
+    description: "Are we slim yet"
+    suite: awsy
+    treeherder-symbol: tc-SY(sy)
+    run-on-projects: ['mozilla-beta', 'mozilla-aurora', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+    docker-image: {"in-tree": "desktop1604-test"}
+    max-run-time: 7200
+    e10s: true
+    instance-size: xlarge
+    allow-software-gl-layers: false
+    mozharness:
+        script: awsy_script.py
+        config:
+            by-test-platform:
+                windows.*/opt:
+                    - awsy/taskcluster_windows_config.py
+                default:
+                    - awsy/linux_config.py
 
 cppunit:
     description: "CPP Unit Tests"
@@ -62,7 +81,6 @@ crashtest:
             default: 1
     e10s:
         by-test-platform:
-            windows.*: false # Bug 1304435
             macosx64/debug: true
             default: both
     mozharness:
@@ -199,6 +217,21 @@ firefox-ui-functional-remote:
             - "--tag"
             - "remote"
 
+geckoview:
+    description: "Geckoview run"
+    suite: geckoview
+    treeherder-symbol: tc(gv)
+    instance-size: xlarge
+    loopback-video: true
+    e10s: false
+    mozharness:
+        script: android_emulator_unittest.py
+        no-read-buildbot-config: true
+        config:
+            - android/androidarm_4_3.py
+        extra-options:
+            - --test-suite=geckoview
+
 gtest:
     description: "GTests run"
     suite: gtest
@@ -208,7 +241,7 @@ gtest:
     docker-image: {"in-tree": "desktop1604-test"}
     run-on-projects:
         by-test-platform:
-            windows10.*: []
+            windows.*: ['mozilla-central', 'try']
             linux64-qr/.*: ['graphics']
             default: built-projects
     mozharness:
@@ -286,8 +319,6 @@ jsreftest:
             default: 3
     e10s:
         by-test-platform:
-            # Bug 1321782
-            windows.*: false
             android.*: false
             macosx.*: true
             default: both
@@ -620,6 +651,25 @@ mochitest-chrome:
                 extra-options:
                     - --mochitest-suite=chrome
 
+mochitest-chrome-style:
+    description: "Mochitest chrome run for style system"
+    suite: mochitest/chrome-style
+    treeherder-symbol: tc-M(cs)
+    loopback-video: true
+    docker-image: {"in-tree": "desktop1604-test"}
+    e10s: false
+    mozharness:
+        mochitest-flavor: chrome
+        script: desktop_unittest.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                default:
+                    - unittests/linux_unittest.py
+                    - remove_executables.py
+        extra-options:
+            - --mochitest-suite=chrome-style
+
 mochitest-clipboard:
     description: "Mochitest clipboard run"
     suite: mochitest/clipboard
@@ -686,8 +736,6 @@ mochitest-devtools-chrome:
     e10s:
         by-test-platform:
             linux64-jsdcov/opt: false
-            # Bug 1304433: mochitest-devtools-chrome (e10s) not greened on windows
-            windows.*: false
             macosx64/debug: true
             default: both
     mozharness:
@@ -854,6 +902,25 @@ mochitest-media:
                 extra-options:
                     - --mochitest-suite=mochitest-media
 
+mochitest-style:
+    description: "Mochitest plain run for style system"
+    suite: mochitest/plain-style
+    treeherder-symbol: tc-M(s)
+    loopback-video: true
+    docker-image: {"in-tree": "desktop1604-test"}
+    e10s: both
+    mozharness:
+        mochitest-flavor: plain
+        script: desktop_unittest.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                default:
+                    - unittests/linux_unittest.py
+                    - remove_executables.py
+        extra-options:
+            - --mochitest-suite=plain-style
+
 mochitest-valgrind:
     description: "Mochitest plain Valgrind run"
     suite: mochitest/valgrind-plain
@@ -938,44 +1005,6 @@ mochitest-webgl:
                             - remove_executables.py
                 extra-options:
                     - --mochitest-suite=mochitest-gl
-
-mochitest-style:
-    description: "Mochitest plain run for style system"
-    suite: mochitest/plain-style
-    treeherder-symbol: tc-M(s)
-    loopback-video: true
-    docker-image: {"in-tree": "desktop1604-test"}
-    e10s: both
-    mozharness:
-        mochitest-flavor: plain
-        script: desktop_unittest.py
-        no-read-buildbot-config: true
-        config:
-            by-test-platform:
-                default:
-                    - unittests/linux_unittest.py
-                    - remove_executables.py
-        extra-options:
-            - --mochitest-suite=plain-style
-
-mochitest-chrome-style:
-    description: "Mochitest chrome run for style system"
-    suite: mochitest/chrome-style
-    treeherder-symbol: tc-M(cs)
-    loopback-video: true
-    docker-image: {"in-tree": "desktop1604-test"}
-    e10s: false
-    mozharness:
-        mochitest-flavor: chrome
-        script: desktop_unittest.py
-        no-read-buildbot-config: true
-        config:
-            by-test-platform:
-                default:
-                    - unittests/linux_unittest.py
-                    - remove_executables.py
-        extra-options:
-            - --mochitest-suite=chrome-style
 
 reftest:
     description: "Reftest run"
@@ -1121,21 +1150,6 @@ robocop:
         extra-options:
             - --test-suite=robocop
 
-geckoview:
-    description: "Geckoview run"
-    suite: geckoview
-    treeherder-symbol: tc(gv)
-    instance-size: xlarge
-    loopback-video: true
-    e10s: false
-    mozharness:
-        script: android_emulator_unittest.py
-        no-read-buildbot-config: true
-        config:
-            - android/androidarm_4_3.py
-        extra-options:
-            - --test-suite=geckoview
-
 talos-chrome:
     description: "Talos chrome"
     suite: talos
@@ -1151,11 +1165,16 @@ talos-chrome:
         no-read-buildbot-config: true
         config:
             by-test-platform:
+                macosx.*:
+                    - remove_executables.py
+                    - talos/mac_config.py
                 default:
                     - talos/linux_config.py
                     - remove_executables.py
         extra-options:
             - --suite=chromez
+            - --add-option
+            - --webServer,localhost
 
 talos-dromaeojs:
     description: "Talos dromaeojs"
@@ -1172,11 +1191,16 @@ talos-dromaeojs:
         no-read-buildbot-config: true
         config:
             by-test-platform:
+                macosx.*:
+                    - remove_executables.py
+                    - talos/mac_config.py
                 default:
                     - talos/linux_config.py
                     - remove_executables.py
         extra-options:
             - --suite=dromaeojs
+            - --add-option
+            - --webServer,localhost
 
 talos-g1:
     description: "Talos g1"
@@ -1193,11 +1217,16 @@ talos-g1:
         no-read-buildbot-config: true
         config:
             by-test-platform:
+                macosx.*:
+                    - remove_executables.py
+                    - talos/mac_config.py
                 default:
                     - talos/linux_config.py
                     - remove_executables.py
         extra-options:
             - --suite=g1
+            - --add-option
+            - --webServer,localhost
 
 talos-g2:
     description: "Talos g2"
@@ -1214,11 +1243,16 @@ talos-g2:
         no-read-buildbot-config: true
         config:
             by-test-platform:
+                macosx.*:
+                    - remove_executables.py
+                    - talos/mac_config.py
                 default:
                     - talos/linux_config.py
                     - remove_executables.py
         extra-options:
             - --suite=g2
+            - --add-option
+            - --webServer,localhost
 
 talos-g3:
     description: "Talos g3"
@@ -1235,11 +1269,16 @@ talos-g3:
         no-read-buildbot-config: true
         config:
             by-test-platform:
+                macosx.*:
+                    - remove_executables.py
+                    - talos/mac_config.py
                 default:
                     - talos/linux_config.py
                     - remove_executables.py
         extra-options:
             - --suite=g3
+            - --add-option
+            - --webServer,localhost
 
 talos-g4:
     description: "Talos g4"
@@ -1256,11 +1295,16 @@ talos-g4:
         no-read-buildbot-config: true
         config:
             by-test-platform:
+                macosx.*:
+                    - remove_executables.py
+                    - talos/mac_config.py
                 default:
                     - talos/linux_config.py
                     - remove_executables.py
         extra-options:
             - --suite=g4
+            - --add-option
+            - --webServer,localhost
 
 talos-other:
     description: "Talos other"
@@ -1277,53 +1321,16 @@ talos-other:
         no-read-buildbot-config: true
         config:
             by-test-platform:
+                macosx.*:
+                    - remove_executables.py
+                    - talos/mac_config.py
                 default:
                     - talos/linux_config.py
                     - remove_executables.py
         extra-options:
             - --suite=other
-
-talos-svgr:
-    description: "Talos svgr"
-    suite: talos
-    talos-try-name: svgr
-    treeherder-symbol: tc-T(s)
-    run-on-projects:
-        by-test-platform:
-            linux64-stylo/.*: ['mozilla-central', 'try']
-            default: ['mozilla-beta', 'mozilla-aurora', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
-    max-run-time: 3600
-    mozharness:
-        script: talos_script.py
-        no-read-buildbot-config: true
-        config:
-            by-test-platform:
-                default:
-                    - talos/linux_config.py
-                    - remove_executables.py
-        extra-options:
-            - --suite=svgr
-
-talos-tp5o:
-    description: "Talos tp5o"
-    suite: talos
-    talos-try-name: tp5o
-    treeherder-symbol: tc-T(tp)
-    run-on-projects:
-        by-test-platform:
-            linux64-stylo/.*: ['mozilla-central', 'try']
-            default: ['mozilla-beta', 'mozilla-aurora', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
-    max-run-time: 3600
-    mozharness:
-        script: talos_script.py
-        no-read-buildbot-config: true
-        config:
-            by-test-platform:
-                default:
-                    - talos/linux_config.py
-                    - remove_executables.py
-        extra-options:
-            - --suite=tp5o
+            - --add-option
+            - --webServer,localhost
 
 talos-perf-reftest:
     description: "Talos perf-reftest"
@@ -1346,24 +1353,57 @@ talos-perf-reftest:
         extra-options:
             - --suite=perf-reftest
 
-awsy:
-    description: "Are we slim yet"
-    suite: awsy
-    treeherder-symbol: tc-SY(sy)
-    run-on-projects: ['mozilla-beta', 'mozilla-aurora', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
-    docker-image: {"in-tree": "desktop1604-test"}
-    max-run-time: 7200
-    e10s: true
-    instance-size: xlarge
-    allow-software-gl-layers: false
+talos-svgr:
+    description: "Talos svgr"
+    suite: talos
+    talos-try-name: svgr
+    treeherder-symbol: tc-T(s)
+    run-on-projects:
+        by-test-platform:
+            linux64-stylo/.*: ['mozilla-central', 'try']
+            default: ['mozilla-beta', 'mozilla-aurora', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+    max-run-time: 3600
     mozharness:
-        script: awsy_script.py
+        script: talos_script.py
+        no-read-buildbot-config: true
         config:
             by-test-platform:
-                windows.*/opt:
-                    - awsy/taskcluster_windows_config.py
+                macosx.*:
+                    - remove_executables.py
+                    - talos/mac_config.py
                 default:
-                    - awsy/linux_config.py
+                    - talos/linux_config.py
+                    - remove_executables.py
+        extra-options:
+            - --suite=svgr
+            - --add-option
+            - --webServer,localhost
+
+talos-tp5o:
+    description: "Talos tp5o"
+    suite: talos
+    talos-try-name: tp5o
+    treeherder-symbol: tc-T(tp)
+    run-on-projects:
+        by-test-platform:
+            linux64-stylo/.*: ['mozilla-central', 'try']
+            default: ['mozilla-beta', 'mozilla-aurora', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+    max-run-time: 3600
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                macosx.*:
+                    - remove_executables.py
+                    - talos/mac_config.py
+                default:
+                    - talos/linux_config.py
+                    - remove_executables.py
+        extra-options:
+            - --suite=tp5o
+            - --add-option
+            - --webServer,localhost
 
 web-platform-tests:
     description: "Web platform test run"
@@ -1409,8 +1449,6 @@ web-platform-tests-reftests:
     instance-size: xlarge
     e10s:
         by-test-platform:
-            # Bug 1304438
-            windows.*: false
             macosx.*: true
             default: both
     docker-image: {"in-tree": "desktop1604-test"}

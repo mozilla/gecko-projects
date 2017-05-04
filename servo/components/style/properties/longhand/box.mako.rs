@@ -2404,20 +2404,24 @@ ${helpers.single_keyword("appearance",
 ${helpers.single_keyword("-moz-appearance",
                          """none button button-arrow-down button-arrow-next button-arrow-previous button-arrow-up
                             button-bevel button-focus caret checkbox checkbox-container checkbox-label checkmenuitem
-                            dualbutton groupbox listbox listitem menuarrow menubar menucheckbox menuimage menuitem
-                            menuitemtext menulist menulist-button menulist-text menulist-textfield menupopup menuradio
-                            menuseparator meterbar meterchunk number-input progressbar progressbar-vertical
-                            progresschunk
-                            progresschunk-vertical radio radio-container radio-label radiomenuitem range range-thumb
-                            resizer resizerpanel scale-horizontal scalethumbend scalethumb-horizontal scalethumbstart
-                            scalethumbtick scalethumb-vertical scale-vertical scrollbarbutton-down scrollbarbutton-left
-                            scrollbarbutton-right scrollbarbutton-up scrollbarthumb-horizontal scrollbarthumb-vertical
-                            scrollbartrack-horizontal scrollbartrack-vertical searchfield separator spinner
-                            spinner-downbutton spinner-textfield spinner-upbutton splitter statusbar statusbarpanel tab
-                            tabpanel tabpanels tab-scroll-arrow-back tab-scroll-arrow-forward textfield
-                            textfield-multiline toolbar toolbarbutton toolbarbutton-dropdown toolbargripper toolbox
-                            tooltip treeheader treeheadercell treeheadersortarrow treeitem treeline treetwisty
-                            treetwistyopen treeview -moz-win-borderless-glass -moz-win-browsertabbar-toolbox
+                            dialog dualbutton groupbox listbox listitem menuarrow menubar menucheckbox menuimage
+                            menuitem menuitemtext menulist menulist-button menulist-text menulist-textfield menupopup
+                            menuradio menuseparator meterbar meterchunk number-input progressbar progressbar-vertical
+                            progresschunk progresschunk-vertical radio radio-container radio-label radiomenuitem range
+                            range-thumb resizer resizerpanel scale-horizontal scalethumbend scalethumb-horizontal
+                            scalethumbstart scalethumbtick scalethumb-vertical scale-vertical scrollbar
+                            scrollbar-horizontal scrollbar-small scrollbar-vertical scrollbarbutton-down
+                            scrollbarbutton-left scrollbarbutton-right scrollbarbutton-up scrollbarthumb-horizontal
+                            scrollbarthumb-vertical scrollbartrack-horizontal scrollbartrack-vertical searchfield
+                            separator spinner spinner-downbutton spinner-textfield spinner-upbutton splitter statusbar
+                            statusbarpanel tab tabpanel tabpanels tab-scroll-arrow-back tab-scroll-arrow-forward
+                            textfield textfield-multiline toolbar toolbarbutton toolbarbutton-dropdown toolbargripper
+                            toolbox tooltip treeheader treeheadercell treeheadersortarrow treeitem treeline treetwisty
+                            treetwistyopen treeview window
+                            -moz-gtk-info-bar -moz-mac-active-source-list-selection -moz-mac-disclosure-button-closed
+                            -moz-mac-disclosure-button-open -moz-mac-fullscreen-button -moz-mac-help-button
+                            -moz-mac-source-list -moz-mac-source-list-selection -moz-mac-vibrancy-dark
+                            -moz-mac-vibrancy-light -moz-win-borderless-glass -moz-win-browsertabbar-toolbox
                             -moz-win-communications-toolbox -moz-win-exclude-glass -moz-win-glass -moz-win-media-toolbox
                             -moz-window-button-box -moz-window-button-box-maximized -moz-window-button-close
                             -moz-window-button-maximize -moz-window-button-minimize -moz-window-button-restore
@@ -2514,3 +2518,82 @@ ${helpers.predefined_type("shape-outside", "basic_shape::ShapeWithShapeBox",
                           products="gecko", boxed="True",
                           animation_value_type="none",
                           spec="https://drafts.csswg.org/css-shapes/#shape-outside-property")}
+
+<%helpers:longhand name="touch-action"
+                   products="gecko"
+                   animation_value_type="none"
+                   disable_when_testing="True"
+                   spec="https://compat.spec.whatwg.org/#touch-action">
+    use gecko_bindings::structs;
+    use std::fmt;
+    use style_traits::ToCss;
+    use values::HasViewportPercentage;
+    use values::computed::ComputedValueAsSpecified;
+
+    impl ComputedValueAsSpecified for SpecifiedValue {}
+    no_viewport_percentage!(SpecifiedValue);
+
+    pub mod computed_value {
+        pub use super::SpecifiedValue as T;
+    }
+
+    bitflags! {
+        /// These constants match Gecko's `NS_STYLE_TOUCH_ACTION_*` constants.
+        pub flags SpecifiedValue: u8 {
+            const TOUCH_ACTION_NONE = structs::NS_STYLE_TOUCH_ACTION_NONE as u8,
+            const TOUCH_ACTION_AUTO = structs::NS_STYLE_TOUCH_ACTION_AUTO as u8,
+            const TOUCH_ACTION_PAN_X = structs::NS_STYLE_TOUCH_ACTION_PAN_X as u8,
+            const TOUCH_ACTION_PAN_Y = structs::NS_STYLE_TOUCH_ACTION_PAN_Y as u8,
+            const TOUCH_ACTION_MANIPULATION = structs::NS_STYLE_TOUCH_ACTION_MANIPULATION as u8,
+        }
+    }
+
+    impl ToCss for SpecifiedValue {
+        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+            match *self {
+                TOUCH_ACTION_NONE => dest.write_str("none"),
+                TOUCH_ACTION_AUTO => dest.write_str("auto"),
+                TOUCH_ACTION_MANIPULATION => dest.write_str("manipulation"),
+                _ if self.contains(TOUCH_ACTION_PAN_X | TOUCH_ACTION_PAN_Y) => {
+                    dest.write_str("pan-x pan-y")
+                },
+                _ if self.contains(TOUCH_ACTION_PAN_X) => {
+                    dest.write_str("pan-x")
+                },
+                _ if self.contains(TOUCH_ACTION_PAN_Y) => {
+                    dest.write_str("pan-y")
+                },
+                _ => panic!("invalid touch-action value"),
+            }
+        }
+    }
+
+    #[inline]
+    pub fn get_initial_value() -> computed_value::T {
+        TOUCH_ACTION_AUTO
+    }
+
+    pub fn parse(_context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+        let ident = input.expect_ident()?;
+        match_ignore_ascii_case! { &ident,
+            "auto" => Ok(TOUCH_ACTION_AUTO),
+            "none" => Ok(TOUCH_ACTION_NONE),
+            "manipulation" => Ok(TOUCH_ACTION_MANIPULATION),
+            "pan-x" => {
+                if input.try(|i| i.expect_ident_matching("pan-y")).is_ok() {
+                    Ok(TOUCH_ACTION_PAN_X | TOUCH_ACTION_PAN_Y)
+                } else {
+                    Ok(TOUCH_ACTION_PAN_X)
+                }
+            },
+            "pan-y" => {
+                if input.try(|i| i.expect_ident_matching("pan-x")).is_ok() {
+                    Ok(TOUCH_ACTION_PAN_X | TOUCH_ACTION_PAN_Y)
+                } else {
+                    Ok(TOUCH_ACTION_PAN_Y)
+                }
+            },
+            _ => Err(()),
+        }
+    }
+</%helpers:longhand>

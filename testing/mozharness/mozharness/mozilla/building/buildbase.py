@@ -1419,6 +1419,7 @@ or run without that action (ie: --no-{action})"
             routes.append(template.format(**fmt))
         self.info("Using routes: %s" % routes)
 
+        taskid = self.buildbot_config['properties'].get('upload_to_task_id')
         tc = Taskcluster(
             branch=self.branch,
             rank=pushinfo.pushdate, # Use pushdate as the rank
@@ -1427,10 +1428,13 @@ or run without that action (ie: --no-{action})"
             log_obj=self.log_obj,
             # `upload_to_task_id` is used by mozci to have access to where the artifacts
             # will be uploaded
-            task_id=self.buildbot_config['properties'].get('upload_to_task_id'),
+            task_id=taskid,
         )
 
-        task = tc.create_task(routes)
+        if taskid:
+            task = tc.get_task(taskid)
+        else:
+            task = tc.create_task(routes)
         tc.claim_task(task)
 
         # Only those files uploaded with valid extensions are processed.
@@ -1841,18 +1845,20 @@ or run without that action (ie: --no-{action})"
         env = self.query_build_env()
         env.update(self.query_check_test_env())
 
-        if c.get('enable_pymake'):  # e.g. windows
-            pymake_path = os.path.join(dirs['abs_src_dir'], 'build',
-                                       'pymake', 'make.py')
-            cmd = ['python', pymake_path]
-        else:
-            cmd = ['make']
-        cmd.extend(['-k', 'check'])
+        python = self.query_exe('python2.7')
+        cmd = [
+            python, 'mach',
+            '--log-no-times',
+            'build',
+            '-v',
+            '--keep-going',
+            'check',
+        ]
 
         parser = CheckTestCompleteParser(config=c,
                                          log_obj=self.log_obj)
         return_code = self.run_command_m(command=cmd,
-                                         cwd=dirs['abs_obj_dir'],
+                                         cwd=dirs['abs_src_dir'],
                                          env=env,
                                          output_parser=parser)
         tbpl_status = parser.evaluate_parser(return_code)
@@ -1863,8 +1869,8 @@ or run without that action (ie: --no-{action})"
                 return_code,  self.return_code,
                 AUTOMATION_EXIT_CODES[::-1]
             )
-            self.error("'make -k check' did not run successfully. Please check "
-                       "log for errors.")
+            self.error("'mach build check' did not run successfully. Please "
+                       "check log for errors.")
 
     def _load_build_resources(self):
         p = self.config.get('build_resources_path') % self.query_abs_dirs()

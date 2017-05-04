@@ -79,7 +79,7 @@ nsLayoutStylesheetCache::ScrollbarsSheet()
   if (!mScrollbarsSheet) {
     // Scrollbars don't need access to unsafe rules
     LoadSheetURL("chrome://global/skin/scrollbars.css",
-                 &mScrollbarsSheet, eAuthorSheetFeatures, eCrash);
+                 &mScrollbarsSheet, eSafeAgentSheetFeatures, eCrash);
   }
 
   return mScrollbarsSheet;
@@ -258,7 +258,7 @@ nsLayoutStylesheetCache::Shutdown()
   gCSSLoader_Servo = nullptr;
   gStyleCache_Gecko = nullptr;
   gStyleCache_Servo = nullptr;
-  MOZ_ASSERT(!gUserContentSheetURL, "Got the URL but never used?");
+  gUserContentSheetURL = nullptr;
 }
 
 void

@@ -40,7 +40,6 @@
 #include <sys/resource.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
-#include <sys/prctl.h> // set name
 #include <stdlib.h>
 #include <sched.h>
 #include <ucontext.h>
@@ -96,6 +95,11 @@ FillInSample(TickSample& aSample, ucontext_t* aContext)
   aSample.mSP = reinterpret_cast<Address>(mcontext.arm_sp);
   aSample.mFP = reinterpret_cast<Address>(mcontext.arm_fp);
   aSample.mLR = reinterpret_cast<Address>(mcontext.arm_lr);
+#elif defined(GP_ARCH_aarch64)
+  aSample.mPC = reinterpret_cast<Address>(mcontext.pc);
+  aSample.mSP = reinterpret_cast<Address>(mcontext.sp);
+  aSample.mFP = reinterpret_cast<Address>(mcontext.regs[29]);
+  aSample.mLR = reinterpret_cast<Address>(mcontext.regs[30]);
 #else
 # error "bad platform"
 #endif
@@ -273,7 +277,6 @@ static void*
 ThreadEntry(void* aArg)
 {
   auto thread = static_cast<SamplerThread*>(aArg);
-  prctl(PR_SET_NAME, "SamplerThread", 0, 0, 0);
   thread->mSamplerTid = gettid();
   thread->Run();
   return nullptr;

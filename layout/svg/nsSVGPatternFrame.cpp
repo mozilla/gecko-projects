@@ -34,7 +34,8 @@ using namespace mozilla::image;
 // Implementation
 
 nsSVGPatternFrame::nsSVGPatternFrame(nsStyleContext* aContext)
-  : nsSVGPaintServerFrame(aContext, FrameType::SVGPattern)
+  : nsSVGPaintServerFrame(aContext, LayoutFrameType::SVGPattern)
+  , mSource(nullptr)
   , mLoopFlag(false)
   , mNoHRefURI(false)
 {
@@ -615,8 +616,8 @@ nsSVGPatternFrame::GetReferencedPattern()
   if (!result)
     return nullptr;
 
-  FrameType frameType = result->Type();
-  if (frameType != FrameType::SVGPattern)
+  LayoutFrameType frameType = result->Type();
+  if (frameType != LayoutFrameType::SVGPattern)
     return nullptr;
 
   return static_cast<nsSVGPatternFrame*>(result);

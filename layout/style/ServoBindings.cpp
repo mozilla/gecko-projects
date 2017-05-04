@@ -461,7 +461,7 @@ PseudoTagAndCorrectElementForAnimation(const Element*& aElementOrPseudo) {
 bool
 Gecko_GetAnimationRule(RawGeckoElementBorrowed aElement,
                        EffectCompositor::CascadeLevel aCascadeLevel,
-                       RawServoAnimationValueMapBorrowed aAnimationValues)
+                       RawServoAnimationValueMapBorrowedMut aAnimationValues)
 {
   MOZ_ASSERT(aElement);
 
@@ -1542,7 +1542,7 @@ void
 Gecko_nsStyleSVGPaint_SetURLValue(nsStyleSVGPaint* aPaint, ServoBundledURI aURI)
 {
   RefPtr<css::URLValue> url = aURI.IntoCssUrl();
-  aPaint->SetPaintServer(url.get(), NS_RGB(0, 0, 0));
+  aPaint->SetPaintServer(url.get());
 }
 
 void Gecko_nsStyleSVGPaint_Reset(nsStyleSVGPaint* aPaint)
@@ -1675,22 +1675,6 @@ float
 Gecko_CSSValue_GetPercentage(nsCSSValueBorrowed aCSSValue)
 {
   return aCSSValue->GetPercentValue();
-}
-
-void
-Gecko_CSSValue_SetAngle(nsCSSValueBorrowedMut aCSSValue, float aRadians)
-{
-  aCSSValue->SetFloatValue(aRadians, eCSSUnit_Radian);
-}
-
-float
-Gecko_CSSValue_GetAngle(nsCSSValueBorrowed aCSSValue)
-{
-  // Unfortunately nsCSSValue.GetAngleValueInRadians() returns double,
-  // so we use GetAngleValue() instead.
-  MOZ_ASSERT(aCSSValue->GetUnit() == eCSSUnit_Radian,
-             "The unit should be eCSSUnit_Radian");
-  return aCSSValue->GetAngleValue();
 }
 
 void
@@ -1861,6 +1845,13 @@ Gecko_GetFontMetrics(RawGeckoPresContextBorrowed aPresContext,
                            GetMetrics(fm->Orientation()).zeroOrAveCharWidth;
   ret.mChSize = ceil(aPresContext->AppUnitsPerDevPixel() * zeroWidth);
   return ret;
+}
+
+int32_t
+Gecko_GetAppUnitsPerPhysicalInch(RawGeckoPresContextBorrowed aPresContext)
+{
+  nsPresContext* presContext = const_cast<nsPresContext*>(aPresContext);
+  return presContext->DeviceContext()->AppUnitsPerPhysicalInch();
 }
 
 void

@@ -103,6 +103,7 @@
 #include "nsIDocShell.h"
 #include "nsIDocCharset.h"
 #include "nsIDocument.h"
+#include "nsIDocumentInlines.h"
 #include "Crypto.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMElement.h"
@@ -977,6 +978,7 @@ nsPIDOMWindow<T>::nsPIDOMWindow(nsPIDOMWindowOuter *aOuterWindow)
   mIsHandlingResizeEvent(false), mIsInnerWindow(aOuterWindow != nullptr),
   mMayHavePaintEventListener(false), mMayHaveTouchEventListener(false),
   mMayHaveMouseEnterLeaveEventListener(false),
+  mMayHaveMouseMoveEventListener(false),
   mMayHavePointerEnterLeaveEventListener(false),
   mInnerObjectsFreed(false),
   mIsModalContentWindow(false),
@@ -2043,6 +2045,23 @@ void
 nsGlobalWindow::FreeInnerObjects()
 {
   NS_ASSERTION(IsInnerWindow(), "Don't free inner objects on an outer window");
+
+  if (mDoc && !nsContentUtils::IsSystemPrincipal(mDoc->NodePrincipal())) {
+    EventTarget* win = this;
+    EventTarget* html = mDoc->GetHtmlElement();
+    EventTarget* body = mDoc->GetBodyElement();
+
+    bool mouseAware = AsInner()->HasMouseMoveEventListeners();
+    bool keyboardAware = win->MayHaveAPZAwareKeyEventListener() ||
+                         mDoc->MayHaveAPZAwareKeyEventListener() ||
+                         (html && html->MayHaveAPZAwareKeyEventListener()) ||
+                         (body && body->MayHaveAPZAwareKeyEventListener());
+
+    Telemetry::Accumulate(Telemetry::APZ_AWARE_MOUSEMOVE_LISTENERS,
+                          mouseAware ? 1 : 0);
+    Telemetry::Accumulate(Telemetry::APZ_AWARE_KEY_LISTENERS,
+                          keyboardAware ? 1 : 0);
+  }
 
   // Make sure that this is called before we null out the document and
   // other members that the window destroyed observers could
@@ -3128,15 +3147,6 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
 
     if (currentInner && currentInner->GetWrapperPreserveColor()) {
       if (oldDoc == aDocument) {
-        // Move the navigator from the old inner window to the new one since
-        // this is a document.write. This is safe from a same-origin point of
-        // view because document.write can only be used by the same origin.
-        newInnerWindow->mNavigator = currentInner->mNavigator;
-        currentInner->mNavigator = nullptr;
-        if (newInnerWindow->mNavigator) {
-          newInnerWindow->mNavigator->SetWindow(newInnerWindow->AsInner());
-        }
-
         // Make a copy of the old window's performance object on document.open.
         // Note that we have to force eager creation of it here, because we need
         // to grab the current document channel and whatnot before that changes.
@@ -5148,6 +5158,14 @@ nsGlobalWindow::IsShowModalDialogEnabled(JSContext*, JSObject*)
   }
 
   return !sIsDisabled && !XRE_IsContentProcess();
+}
+
+/* static */ bool
+nsGlobalWindow::IsRequestIdleCallbackEnabled(JSContext* aCx, JSObject* aObj)
+{
+  // The requestIdleCallback should always be enabled for system code.
+  return nsContentUtils::RequestIdleCallbackEnabled() ||
+         nsContentUtils::IsSystemCaller(aCx);
 }
 
 nsIDOMOfflineResourceList*

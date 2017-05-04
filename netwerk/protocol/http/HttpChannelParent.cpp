@@ -590,7 +590,7 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
       bool chooseAppCache = false;
       // This works because we've already called SetNotificationCallbacks and
       // done mPBOverride logic by this point.
-      chooseAppCache = NS_ShouldCheckAppCache(principal, NS_UsePrivateBrowsing(mChannel));
+      chooseAppCache = NS_ShouldCheckAppCache(principal);
 
       appCacheChan->SetChooseApplicationCache(chooseAppCache);
     }
@@ -1148,7 +1148,7 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
     PContentParent* pcp = Manager()->Manager();
     MOZ_ASSERT(pcp, "We should have a manager if our IPC isn't closed");
     DebugOnly<nsresult> rv =
-      static_cast<ContentParent*>(pcp)->AboutToLoadDocumentForChild(chan);
+      static_cast<ContentParent*>(pcp)->AboutToLoadHttpFtpWyciwygDocumentForChild(chan);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
   }
 

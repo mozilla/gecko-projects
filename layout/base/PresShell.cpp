@@ -2954,6 +2954,12 @@ PresShell::CreateFramesFor(nsIContent* aContent)
 void
 nsIPresShell::PostRecreateFramesFor(Element* aElement)
 {
+  if (MOZ_UNLIKELY(!mDidInitialize)) {
+    // Nothing to do here. In fact, if we proceed and aElement is the root, we
+    // will crash.
+    return;
+  }
+
   mPresContext->RestyleManager()->PostRestyleEvent(aElement, nsRestyleHint(0),
                                                    nsChangeHint_ReconstructFrame);
 }
@@ -3532,8 +3538,8 @@ PresShell::DoScrollContentIntoView()
 
   // Make sure we skip 'frame' ... if it's scrollable, we should use its
   // scrollable ancestor as the container.
-  nsIFrame* container =
-    nsLayoutUtils::GetClosestFrameOfType(frame->GetParent(), FrameType::Scroll);
+  nsIFrame* container = nsLayoutUtils::GetClosestFrameOfType(
+    frame->GetParent(), LayoutFrameType::Scroll);
   if (!container) {
     // nothing can be scrolled
     return;
@@ -5307,20 +5313,39 @@ PresShell::AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
   // color background behind a scrolled transparent background. Instead,
   // we'll try to move the color background into the scrolled content
   // by making nsDisplayCanvasBackground paint it.
-  if (!aFrame->GetParent()) {
+  // If we're only adding an unscrolled item, then pretend that we've
+  // already done it.
+  bool addedScrollingBackgroundColor = (aFlags & APPEND_UNSCROLLED_ONLY);
+  if (!aFrame->GetParent() && !addedScrollingBackgroundColor) {
     nsIScrollableFrame* sf =
       aFrame->PresContext()->PresShell()->GetRootScrollFrameAsScrollable();
     if (sf) {
       nsCanvasFrame* canvasFrame = do_QueryFrame(sf->GetScrolledFrame());
       if (canvasFrame && canvasFrame->IsVisibleForPainting(&aBuilder)) {
-        if (AddCanvasBackgroundColor(aList, canvasFrame, bgcolor, mHasCSSBackgroundColor))
-          return;
+        addedScrollingBackgroundColor =
+          AddCanvasBackgroundColor(aList, canvasFrame, bgcolor, mHasCSSBackgroundColor);
       }
     }
   }
 
-  aList.AppendNewToBottom(
-    new (&aBuilder) nsDisplaySolidColor(&aBuilder, aFrame, aBounds, bgcolor));
+  // With async scrolling, we'd like to have two instances of the background
+  // color: one that scrolls with the content (for the reasons stated above),
+  // and one underneath which does not scroll with the content, but which can
+  // be shown during checkerboarding and overscroll.
+  // We can only do that if the color is opaque.
+  bool forceUnscrolledItem = nsLayoutUtils::UsesAsyncScrolling(aFrame) &&
+                             NS_GET_A(bgcolor) == 255;
+  if ((aFlags & ADD_FOR_SUBDOC) && gfxPrefs::LayoutUseContainersForRootFrames()) {
+    // If we're using ContainerLayers for a subdoc, then any items we add here will
+    // still be scrolled (since we're inside the container at this point), so don't
+    // bother and we will do it manually later.
+    forceUnscrolledItem = false;
+  }
+
+  if (!addedScrollingBackgroundColor || forceUnscrolledItem) {
+    aList.AppendNewToBottom(
+      new (&aBuilder) nsDisplaySolidColor(&aBuilder, aFrame, aBounds, bgcolor));
+  }
 }
 
 static bool IsTransparentContainerElement(nsPresContext* aPresContext)
@@ -8132,6 +8157,8 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent,
     // bug 329430
     aEvent->mTarget = nullptr;
 
+    TimeStamp handlerStartTime = TimeStamp::Now();
+
     // 1. Give event to event manager for pre event state changes and
     //    generation of synthetic events.
     rv = manager->PreHandleEvent(mPresContext, aEvent, mCurrentEventFrame,
@@ -8202,6 +8229,39 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent,
       break;
     default:
       break;
+    }
+
+    if (aEvent->IsTrusted() && aEvent->mTimeStamp > mLastOSWake) {
+      switch (aEvent->mMessage) {
+        case eKeyPress:
+        case eKeyDown:
+        case eKeyUp:
+          Telemetry::AccumulateTimeDelta(Telemetry::INPUT_EVENT_HANDLED_KEYBOARD_MS, handlerStartTime);
+          break;
+        case eMouseDown:
+          Telemetry::AccumulateTimeDelta(Telemetry::INPUT_EVENT_HANDLED_MOUSE_DOWN_MS, handlerStartTime);
+          break;
+        case eMouseUp:
+          Telemetry::AccumulateTimeDelta(Telemetry::INPUT_EVENT_HANDLED_MOUSE_UP_MS, handlerStartTime);
+          break;
+        case eMouseMove:
+          if (aEvent->mFlags.mHandledByAPZ) {
+            Telemetry::AccumulateTimeDelta(Telemetry::INPUT_EVENT_HANDLED_APZ_MOUSE_MOVE_MS, handlerStartTime);
+          }
+          break;
+        case eWheel:
+          if (aEvent->mFlags.mHandledByAPZ) {
+            Telemetry::AccumulateTimeDelta(Telemetry::INPUT_EVENT_HANDLED_APZ_WHEEL_MS, handlerStartTime);
+          }
+          break;
+        case eTouchMove:
+          if (aEvent->mFlags.mHandledByAPZ) {
+            Telemetry::AccumulateTimeDelta(Telemetry::INPUT_EVENT_HANDLED_APZ_TOUCH_MOVE_MS, handlerStartTime);
+          }
+          break;
+        default:
+          break;
+      }
     }
   }
 

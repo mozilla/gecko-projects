@@ -41,7 +41,8 @@ nsIRootBox::GetRootBox(nsIPresShell* aShell)
   return rootBox;
 }
 
-class nsRootBoxFrame : public nsBoxFrame, public nsIRootBox {
+class nsRootBoxFrame final : public nsBoxFrame, public nsIRootBox
+{
 public:
 
   friend nsIFrame* NS_NewBoxFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
@@ -107,7 +108,7 @@ NS_NewRootBoxFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 NS_IMPL_FRAMEARENA_HELPERS(nsRootBoxFrame)
 
 nsRootBoxFrame::nsRootBoxFrame(nsStyleContext* aContext)
-  : nsBoxFrame(aContext, FrameType::Root, true)
+  : nsBoxFrame(aContext, LayoutFrameType::Root, true)
   , mPopupSetFrame(nullptr)
   , mDefaultTooltip(nullptr)
 {
