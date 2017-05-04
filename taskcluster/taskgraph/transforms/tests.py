@@ -755,3 +755,7 @@ def make_job_description(config, tests):
 
 def normpath(path):
     return path.replace('/', '\\')
+
+def get_firefox_version():
+    with open('browser/config/version.txt', 'r') as f:
+        return f.readline().strip()
