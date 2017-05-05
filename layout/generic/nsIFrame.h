@@ -1175,6 +1175,7 @@ public:
                                       DestroyContentArray)
 
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(ModifiedFrameList, nsTArray<nsIFrame*>)
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(DeletedFrameList, nsTArray<nsIFrame*>)
 
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(CachedDisplayListBuilder, nsDisplayListBuilder)
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(CachedDisplayList, nsDisplayList)

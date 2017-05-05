@@ -2069,6 +2069,16 @@ PresShell::SetIgnoreFrameDestruction(bool aIgnore)
 void
 PresShell::NotifyDestroyingFrame(nsIFrame* aFrame)
 {
+  nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
+  if (displayRoot != aFrame) {
+    nsTArray<nsIFrame*>* deletedFrames = displayRoot->Properties().Get(nsIFrame::DeletedFrameList());
+    if (!deletedFrames) {
+      deletedFrames = new nsTArray<nsIFrame*>;
+      displayRoot->Properties().Set(nsIFrame::DeletedFrameList(), deletedFrames);
+    }
+    deletedFrames->AppendElement(aFrame);
+  }
+
   if (!mIgnoreFrameDestruction) {
     mDocument->StyleImageLoader()->DropRequestsForFrame(aFrame);
 
@@ -2113,6 +2123,8 @@ PresShell::NotifyDestroyingFrame(nsIFrame* aFrame)
     // tries to remove it from the (array) value of this property.
     mPresContext->PropertyTable()->
       Delete(aFrame, FrameLayerBuilder::LayerManagerDataProperty());
+    mPresContext->PropertyTable()->
+      Delete(aFrame, nsIFrame::CachedDisplayList());
   }
 }
 

@@ -3515,11 +3515,12 @@ nsLayoutUtils::ExpireDisplayPortOnAsyncScrollableAncestor(nsIFrame* aFrame)
 // to mark, as child stacking contexts might. It would be nice if we could
 // jump into those immediately rather than walking the entire thing.
 void MarkFramesForDifferentAGR(nsDisplayListBuilder* aBuilder,
-                                nsDisplayList* aList,
-                                AnimatedGeometryRoot* aAGR)
+                               nsTHashtable<nsPtrHashKey<nsIFrame>>& aDeletedFrames,
+                               nsDisplayList* aList,
+                               AnimatedGeometryRoot* aAGR)
 {
   for (nsDisplayItem* i = aList->GetBottom(); i; i = i->GetAbove()) {
-    if (!i->CanBeRecycled()) {
+    if (aDeletedFrames.Contains(i->Frame())) {
       continue;
     }
 
@@ -3532,7 +3533,7 @@ void MarkFramesForDifferentAGR(nsDisplayListBuilder* aBuilder,
           childAGR = nullptr;
         }
       }
-      MarkFramesForDifferentAGR(aBuilder, i->GetChildren(), childAGR);
+      MarkFramesForDifferentAGR(aBuilder, aDeletedFrames, i->GetChildren(), childAGR);
     }
 
     // TODO: We should be able to check the clipped bounds relative
@@ -3563,6 +3564,7 @@ bool IsSameItem(nsDisplayItem* aFirst, nsDisplayItem* aSecond)
 }
 
 void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
+                       nsTHashtable<nsPtrHashKey<nsIFrame>>& aDeletedFrames,
                        nsDisplayList* aNewList,
                        nsDisplayList* aOldList,
                        nsDisplayList* aOutList)
@@ -3586,7 +3588,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
     // up to that one into the merged list, but discard the repeat.
     if (oldListLookup[std::make_pair(i->Frame(), i->GetPerFrameKey())]) {
       while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
-        if (old->CanBeRecycled() &&
+        if (!aDeletedFrames.Contains(old->Frame()) &&
             !IsAnyAncestorModified(old->Frame())) {
 
           // If the old item is in the new list (but further forward), then do the sub-list merging
@@ -3594,7 +3596,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
           if (nsDisplayItem* newItem = newListLookup[std::make_pair(old->Frame(), old->GetPerFrameKey())]) {
             if (old->GetChildren()) {
               MOZ_ASSERT(newItem->GetChildren());
-              MergeDisplayLists(aBuilder, newItem->GetChildren(), old->GetChildren(), newItem->GetChildren());
+              MergeDisplayLists(aBuilder, aDeletedFrames, newItem->GetChildren(), old->GetChildren(), newItem->GetChildren());
             }
             oldListLookup.erase(std::make_pair(old->Frame(), old->GetPerFrameKey()));
             old->~nsDisplayItem();
@@ -3615,7 +3617,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
       MOZ_ASSERT(old && IsSameItem(i, old));
       if (old->GetChildren()) {
         MOZ_ASSERT(i->GetChildren());
-        MergeDisplayLists(aBuilder, i->GetChildren(), old->GetChildren(), i->GetChildren());
+        MergeDisplayLists(aBuilder, aDeletedFrames, i->GetChildren(), old->GetChildren(), i->GetChildren());
       }
 
       old->~nsDisplayItem();
@@ -3625,7 +3627,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   }
   
   while ((old = aOldList->RemoveBottom())) {
-    if (old->CanBeRecycled() &&
+    if (!aDeletedFrames.Contains(old->Frame()) &&
         !IsAnyAncestorModified(old->Frame())) {
       merged.AppendToTop(old);
     } else {
@@ -3819,6 +3821,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       if ((aFlags & PaintFrameFlags::PAINT_WIDGET_LAYERS) &&
           aFrame->Properties().Get(nsIFrame::ModifiedFrameList())) {
         nsTArray<nsIFrame*>* modifiedFrames = aFrame->Properties().Get(nsIFrame::ModifiedFrameList());
+        nsTArray<nsIFrame*>* deletedFrames = aFrame->Properties().Get(nsIFrame::DeletedFrameList());
 
         nsTArray<nsIFrame*> stackingContexts;
 
@@ -3909,7 +3912,14 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         // contexts as needing-paint-if-visible.
 
         if (success) {
-          MarkFramesForDifferentAGR(&builder, &list, modifiedAGR);
+          nsTHashtable<nsPtrHashKey<nsIFrame>> deletions;
+          if (deletedFrames) {
+            for (nsIFrame* f : *deletedFrames) {
+              deletions.PutEntry(f);
+            }
+          }
+
+          MarkFramesForDifferentAGR(&builder, deletions, &list, modifiedAGR);
 
           builder.SetDirtyRect(modifiedDirty);
 
@@ -3922,7 +3932,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           builder.LeavePresShell(aFrame, &modifiedDL);
           builder.EnterPresShell(aFrame);
 
-          MergeDisplayLists(&builder, &modifiedDL, &list, &list);
+
+          MergeDisplayLists(&builder, deletions, &modifiedDL, &list, &list);
           merged = true;
         }
 
@@ -3932,6 +3943,9 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           f->SetFrameIsModified(false);
         }
         modifiedFrames->Clear();
+        if (deletedFrames) {
+          deletedFrames->Clear();
+        }
 
         for (nsIFrame* f: stackingContexts) {
           f->SetHasOverrideDirtyRegion(false);
