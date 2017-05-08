@@ -3984,9 +3984,6 @@ MergeItems(nsDisplayListBuilder* aBuilder,
   nsDisplayItem* merged = nullptr;
 
   // Clone the last item in the aMergedItems list and merge the items into it.
-  // We also build a display list that contains nsDisplayWrapLists for every
-  // merged item. These nsDisplayWrapLists hold pointers to the display lists
-  // owned by the merged items.
   for (auto i = aMergedItems.rbegin(); i != aMergedItems.rend(); ++i) {
     nsDisplayItem* item = *i;
     MOZ_ASSERT(item);
