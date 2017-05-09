@@ -150,7 +150,7 @@ public:
   template<typename T>
   using PropertyType = typename detail::FramePropertyTypeHelper<T>::Type;
 
-  FramePropertyTable() : mLastFrame(nullptr), mLastEntry(nullptr)
+  FramePropertyTable() : mLastFrame(nullptr), mLastEntry(nullptr), mInDeleteAll(false)
   {
   }
   ~FramePropertyTable()
@@ -389,6 +389,7 @@ protected:
   nsTHashtable<Entry> mEntries;
   const nsIFrame* mLastFrame;
   Entry* mLastEntry;
+  bool mInDeleteAll;
 };
 
 /**

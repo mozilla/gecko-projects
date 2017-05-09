@@ -120,12 +120,6 @@ SpammyLayoutWarningsEnabled()
 }
 #endif
 
-void*
-AnimatedGeometryRoot::operator new(size_t aSize, nsDisplayListBuilder* aBuilder)
-{
-  return aBuilder->Allocate(aSize);
-}
-
 /* static */ bool
 ActiveScrolledRoot::IsAncestor(const ActiveScrolledRoot* aAncestor,
                                const ActiveScrolledRoot* aDescendant)
@@ -988,6 +982,7 @@ nsDisplayListBuilder::WrapAGRForFrame(nsIFrame* aAnimatedGeometryRoot,
   if (!mFrameToAnimatedGeometryRootMap.Get(aAnimatedGeometryRoot, &result)) {
     MOZ_ASSERT(nsLayoutUtils::IsAncestorFrameCrossDoc(RootReferenceFrame(), aAnimatedGeometryRoot));
     AnimatedGeometryRoot* parent = aParent;
+    MOZ_ASSERT(!parent || parent->mValidated);
     if (!parent) {
       nsIFrame* parentFrame = nsLayoutUtils::GetCrossDocParentFrame(aAnimatedGeometryRoot);
       if (parentFrame) {
@@ -996,7 +991,16 @@ nsDisplayListBuilder::WrapAGRForFrame(nsIFrame* aAnimatedGeometryRoot,
         parent = WrapAGRForFrame(parentAGRFrame, isAsync);
       }
     }
-    result = new (this) AnimatedGeometryRoot(aAnimatedGeometryRoot, parent, aIsAsync);
+    if (aAnimatedGeometryRoot->HasAnimatedGeometryRoot()) {
+      result = aAnimatedGeometryRoot->Properties().Get(AnimatedGeometryRootCache());
+      result->mValidated = true;
+      result->mParentAGR = parent;
+    } else {
+      result = new AnimatedGeometryRoot(aAnimatedGeometryRoot, parent, aIsAsync);
+      mAnimatedGeometryRoots.AppendElement(result);
+      aAnimatedGeometryRoot->SetHasAnimatedGeometryRoot(true);
+      aAnimatedGeometryRoot->Properties().Set(AnimatedGeometryRootCache(), result);
+    }
     mFrameToAnimatedGeometryRootMap.Put(aAnimatedGeometryRoot, result);
   }
   MOZ_ASSERT(!aParent || result->mParentAGR == aParent);
@@ -1145,6 +1149,13 @@ nsDisplayListBuilder::~nsDisplayListBuilder() {
   for (nsDisplayItem* i : mTemporaryItems) {
     i->~nsDisplayItem();
   }
+  for (AnimatedGeometryRoot* agr : mAnimatedGeometryRoots) {
+    if (agr->mFrame) {
+      agr->mFrame->SetHasAnimatedGeometryRoot(false);
+      agr->mFrame->Properties().Delete(AnimatedGeometryRootCache());
+    }
+    delete agr;
+  }
 
   MOZ_COUNT_DTOR(nsDisplayListBuilder);
 }
@@ -1202,6 +1213,11 @@ nsDisplayListBuilder::EnterPresShell(nsIFrame* aReferenceFrame,
     mReferenceFrame->AddPaintedPresShell(state->mPresShell);
 
     state->mPresShell->IncrementPaintCount();
+  }
+
+  if (mPresShellStates.Length() == 1) {
+    mFrameToAnimatedGeometryRootMap.Clear();
+    mFrameToAnimatedGeometryRootMap.Put(aReferenceFrame, &mRootAGR);
   }
 
   bool buildCaret = mBuildCaret;
@@ -1286,6 +1302,16 @@ nsDisplayListBuilder::LeavePresShell(nsIFrame* aReferenceFrame, nsDisplayList* a
       docShell->GetWindowDraggingAllowed(&mWindowDraggingAllowed);
     }
     mIsInChromePresContext = pc->IsChrome();
+  } else {
+    for (AnimatedGeometryRoot* agr : mAnimatedGeometryRoots) {
+      if (!agr->mValidated) {
+        if (agr->mFrame) {
+          agr->mFrame->SetHasAnimatedGeometryRoot(false);
+          agr->mFrame->Properties().Delete(AnimatedGeometryRootCache());
+        }
+        delete agr;
+      }
+    }
   }
 }
 

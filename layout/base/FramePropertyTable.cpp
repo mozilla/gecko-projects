@@ -182,6 +182,10 @@ FramePropertyTable::DeleteInternal(
   NS_ASSERTION(aFrame, "Null frame?");
   NS_ASSERTION(aProperty, "Null property?");
 
+  if (mInDeleteAll) {
+    return;
+  }
+
   bool found;
   void* v = RemoveInternal(aFrame, aProperty, &found);
   if (found) {
@@ -234,9 +238,11 @@ FramePropertyTable::DeleteAll()
   mLastFrame = nullptr;
   mLastEntry = nullptr;
 
+  mInDeleteAll = true;
   for (auto iter = mEntries.Iter(); !iter.Done(); iter.Next()) {
     DeleteAllForEntry(iter.Get());
   }
+  mInDeleteAll = false;
   mEntries.Clear();
 }
 

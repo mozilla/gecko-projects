@@ -149,6 +149,7 @@ struct AnimatedGeometryRoot
     : mFrame(aFrame)
     , mParentAGR(aParent)
     , mIsAsync(aIsAsync)
+    , mValidated(true)
   {
     MOZ_ASSERT(mParentAGR || mIsAsync);
   }
@@ -156,9 +157,6 @@ struct AnimatedGeometryRoot
   operator nsIFrame*() { return mFrame; }
 
   nsIFrame* operator ->() const { return mFrame; }
-
-  void* operator new(size_t aSize,
-                     nsDisplayListBuilder* aBuilder);
 
   AnimatedGeometryRoot* GetAsyncAGR() {
     AnimatedGeometryRoot* agr = this;
@@ -171,6 +169,7 @@ struct AnimatedGeometryRoot
   nsIFrame* mFrame;
   AnimatedGeometryRoot* mParentAGR;
   bool mIsAsync;
+  bool mValidated;
 };
 
 namespace mozilla {
@@ -1274,6 +1273,13 @@ public:
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(DisplayListBuildingRect, DisplayListBuildingData)
 
 
+  static void DetachAGR(AnimatedGeometryRoot* aAGR) {
+    aAGR->mFrame = nullptr;
+    aAGR->mParentAGR = nullptr;
+  }
+  NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(AnimatedGeometryRootCache, AnimatedGeometryRoot, DetachAGR)
+
+
   static OutOfFlowDisplayData* GetOutOfFlowData(nsIFrame* aFrame)
   {
     return aFrame->Properties().Get(OutOfFlowDisplayDataProperty());
@@ -1556,6 +1562,7 @@ private:
   nsTArray<ActiveScrolledRoot*>  mActiveScrolledRoots;
   nsTArray<DisplayItemClipChain*> mClipChainsToDestroy;
   nsTArray<nsDisplayItem*> mTemporaryItems;
+  nsTArray<AnimatedGeometryRoot*> mAnimatedGeometryRoots;
   const ActiveScrolledRoot*      mActiveScrolledRootForRootScrollframe;
   nsDisplayListBuilderMode       mMode;
   ViewID                         mCurrentScrollParentId;

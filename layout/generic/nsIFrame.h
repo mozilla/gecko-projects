@@ -600,6 +600,7 @@ public:
     , mPrevSibling(nullptr)
     , mFrameIsModified(false)
     , mHasOverrideDirtyRegion(false)
+    , mHasAnimatedGeometryRoot(false)
   {
     mozilla::PodZero(&mOverflow);
   }
@@ -609,6 +610,10 @@ public:
 
   bool HasOverrideDirtyRegion() { return mHasOverrideDirtyRegion; }
   void SetHasOverrideDirtyRegion(bool aHasDirtyRegion) { mHasOverrideDirtyRegion = aHasDirtyRegion; }
+
+
+  bool HasAnimatedGeometryRoot() { return mHasAnimatedGeometryRoot; }
+  void SetHasAnimatedGeometryRoot(bool aHasAGR) { mHasAnimatedGeometryRoot = aHasAGR; }
 
   nsPresContext* PresContext() const {
     return StyleContext()->PresContext();
@@ -3757,6 +3762,7 @@ protected:
   // TODO: Make this a frame state bit.
   bool mFrameIsModified : 1;
   bool mHasOverrideDirtyRegion : 1;
+  bool mHasAnimatedGeometryRoot : 1;
 
   // When there is an overflow area only slightly larger than mRect,
   // we store a set of four 1-byte deltas from the edges of mRect
