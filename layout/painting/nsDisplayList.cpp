@@ -876,8 +876,8 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
       mCurrentContainerASR(nullptr),
       mCurrentFrame(aReferenceFrame),
       mCurrentReferenceFrame(aReferenceFrame),
-      mCurrentAGR(&mRootAGR),
-      mRootAGR(aReferenceFrame, nullptr, true),
+      mRootAGR(AnimatedGeometryRoot::CreateAGRForFrame(aReferenceFrame, nullptr, true)),
+      mCurrentAGR(mRootAGR),
       mUsedAGRBudget(0),
       mDirtyRect(-1,-1,-1,-1),
       mGlassDisplayItem(nullptr),
@@ -928,8 +928,6 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
     }
   }
 
-  mFrameToAnimatedGeometryRootMap.Put(aReferenceFrame, &mRootAGR);
-
   nsCSSRendering::BeginFrameTreesLocked();
   static_assert(nsDisplayItem::TYPE_MAX < (1 << nsDisplayItem::TYPE_BITS),
                 "Check nsDisplayItem::TYPE_MAX should not overflow");
@@ -978,11 +976,10 @@ nsDisplayListBuilder::WrapAGRForFrame(nsIFrame* aAnimatedGeometryRoot,
   DebugOnly<bool> dummy;
   MOZ_ASSERT(IsAnimatedGeometryRoot(aAnimatedGeometryRoot, dummy));
 
-  AnimatedGeometryRoot* result = nullptr;
+  RefPtr<AnimatedGeometryRoot> result;
   if (!mFrameToAnimatedGeometryRootMap.Get(aAnimatedGeometryRoot, &result)) {
     MOZ_ASSERT(nsLayoutUtils::IsAncestorFrameCrossDoc(RootReferenceFrame(), aAnimatedGeometryRoot));
-    AnimatedGeometryRoot* parent = aParent;
-    MOZ_ASSERT(!parent || parent->mValidated);
+    RefPtr<AnimatedGeometryRoot> parent = aParent;
     if (!parent) {
       nsIFrame* parentFrame = nsLayoutUtils::GetCrossDocParentFrame(aAnimatedGeometryRoot);
       if (parentFrame) {
@@ -991,16 +988,7 @@ nsDisplayListBuilder::WrapAGRForFrame(nsIFrame* aAnimatedGeometryRoot,
         parent = WrapAGRForFrame(parentAGRFrame, isAsync);
       }
     }
-    if (aAnimatedGeometryRoot->HasAnimatedGeometryRoot()) {
-      result = aAnimatedGeometryRoot->Properties().Get(AnimatedGeometryRootCache());
-      result->mValidated = true;
-      result->mParentAGR = parent;
-    } else {
-      result = new AnimatedGeometryRoot(aAnimatedGeometryRoot, parent, aIsAsync);
-      mAnimatedGeometryRoots.AppendElement(result);
-      aAnimatedGeometryRoot->SetHasAnimatedGeometryRoot(true);
-      aAnimatedGeometryRoot->Properties().Set(AnimatedGeometryRootCache(), result);
-    }
+    result = AnimatedGeometryRoot::CreateAGRForFrame(aAnimatedGeometryRoot, parent, aIsAsync);
     mFrameToAnimatedGeometryRootMap.Put(aAnimatedGeometryRoot, result);
   }
   MOZ_ASSERT(!aParent || result->mParentAGR == aParent);
@@ -1021,12 +1009,12 @@ AnimatedGeometryRoot*
 nsDisplayListBuilder::FindAnimatedGeometryRootFor(nsIFrame* aFrame)
 {
   if (!IsPaintingToWindow()) {
-    return &mRootAGR;
+    return mRootAGR;
   }
   if (aFrame == mCurrentFrame) {
     return mCurrentAGR;
   }
-  AnimatedGeometryRoot* result = nullptr;
+  RefPtr<AnimatedGeometryRoot> result;
   if (mFrameToAnimatedGeometryRootMap.Get(aFrame, &result)) {
     return result;
   }
@@ -1149,13 +1137,6 @@ nsDisplayListBuilder::~nsDisplayListBuilder() {
   for (nsDisplayItem* i : mTemporaryItems) {
     i->~nsDisplayItem();
   }
-  for (AnimatedGeometryRoot* agr : mAnimatedGeometryRoots) {
-    if (agr->mFrame) {
-      agr->mFrame->SetHasAnimatedGeometryRoot(false);
-      agr->mFrame->Properties().Delete(AnimatedGeometryRootCache());
-    }
-    delete agr;
-  }
 
   MOZ_COUNT_DTOR(nsDisplayListBuilder);
 }
@@ -1209,15 +1190,15 @@ nsDisplayListBuilder::EnterPresShell(nsIFrame* aReferenceFrame,
 
   state->mPresShell->UpdateCanvasBackground();
 
+  if (mPresShellStates.Length() == 1) {
+    mFrameToAnimatedGeometryRootMap.Put(aReferenceFrame, mRootAGR);
+    mCurrentAGR = mRootAGR;
+  }
+
   if (mIsPaintingToWindow) {
     mReferenceFrame->AddPaintedPresShell(state->mPresShell);
 
     state->mPresShell->IncrementPaintCount();
-  }
-
-  if (mPresShellStates.Length() == 1) {
-    mFrameToAnimatedGeometryRootMap.Clear();
-    mFrameToAnimatedGeometryRootMap.Put(aReferenceFrame, &mRootAGR);
   }
 
   bool buildCaret = mBuildCaret;
@@ -1303,16 +1284,10 @@ nsDisplayListBuilder::LeavePresShell(nsIFrame* aReferenceFrame, nsDisplayList* a
     }
     mIsInChromePresContext = pc->IsChrome();
   } else {
-    for (AnimatedGeometryRoot* agr : mAnimatedGeometryRoots) {
-      if (!agr->mValidated) {
-        if (agr->mFrame) {
-          agr->mFrame->SetHasAnimatedGeometryRoot(false);
-          agr->mFrame->Properties().Delete(AnimatedGeometryRootCache());
-        }
-        delete agr;
-      }
-    }
+    mFrameToAnimatedGeometryRootMap.Clear();
+    mCurrentAGR = nullptr;
   }
+
 }
 
 void
@@ -1638,7 +1613,7 @@ nsDisplayListBuilder::RecomputeCurrentAnimatedGeometryRoot()
     // to see if they need to be updated. AGRs can be in the cache multiple times, so we may
     // end up doing the work multiple times for AGRs that don't change.
     for (auto iter = mFrameToAnimatedGeometryRootMap.Iter(); !iter.Done(); iter.Next()) {
-      AnimatedGeometryRoot* cached = iter.UserData();
+      RefPtr<AnimatedGeometryRoot> cached = iter.UserData();
       if (cached->mParentAGR == oldAGR && cached != mCurrentAGR) {
         // It's possible that this cached AGR struct that has the old AGR as a parent
         // should instead have mCurrentFrame has a parent.

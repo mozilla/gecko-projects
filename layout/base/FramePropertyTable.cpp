@@ -135,8 +135,14 @@ FramePropertyTable::RemoveInternal(
 
     // Here it's ok to use RemoveEntry() -- which may resize mEntries --
     // because we null mLastEntry at the same time.
-    mEntries.RemoveEntry(entry);
-    mLastEntry = nullptr;
+    if (!mInDeleteAll) {
+      mEntries.RemoveEntry(entry);
+      mLastEntry = nullptr;
+    } else {
+      entry->mProp.mProperty = nullptr;
+      entry->mProp.mValue = nullptr;
+    }
+
     if (aFoundResult) {
       *aFoundResult = true;
     }
@@ -181,10 +187,6 @@ FramePropertyTable::DeleteInternal(
   MOZ_ASSERT(NS_IsMainThread());
   NS_ASSERTION(aFrame, "Null frame?");
   NS_ASSERTION(aProperty, "Null property?");
-
-  if (mInDeleteAll) {
-    return;
-  }
 
   bool found;
   void* v = RemoveInternal(aFrame, aProperty, &found);

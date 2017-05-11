@@ -145,13 +145,18 @@ typedef mozilla::EnumSet<mozilla::gfx::CompositionOp> BlendModeSet;
  */
 struct AnimatedGeometryRoot
 {
-  AnimatedGeometryRoot(nsIFrame* aFrame, AnimatedGeometryRoot* aParent, bool aIsAsync)
-    : mFrame(aFrame)
-    , mParentAGR(aParent)
-    , mIsAsync(aIsAsync)
-    , mValidated(true)
+  static already_AddRefed<AnimatedGeometryRoot>
+  CreateAGRForFrame(nsIFrame* aFrame, AnimatedGeometryRoot* aParent, bool aIsAsync)
   {
-    MOZ_ASSERT(mParentAGR || mIsAsync);
+    RefPtr<AnimatedGeometryRoot> result;
+    if (aFrame->HasAnimatedGeometryRoot()) {
+      result = aFrame->Properties().Get(AnimatedGeometryRootCache());
+      result->mParentAGR = aParent;
+      result->mIsAsync = aIsAsync;
+    } else {
+      result = new AnimatedGeometryRoot(aFrame, aParent, aIsAsync);
+    }
+    return result.forget();
   }
 
   operator nsIFrame*() { return mFrame; }
@@ -166,10 +171,36 @@ struct AnimatedGeometryRoot
     return agr;
   }
 
+  NS_INLINE_DECL_REFCOUNTING(AnimatedGeometryRoot)
+
   nsIFrame* mFrame;
-  AnimatedGeometryRoot* mParentAGR;
+  RefPtr<AnimatedGeometryRoot> mParentAGR;
   bool mIsAsync;
-  bool mValidated;
+
+protected:
+  static void DetachAGR(AnimatedGeometryRoot* aAGR) {
+    aAGR->mFrame = nullptr;
+    aAGR->mParentAGR = nullptr;
+  }
+  NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(AnimatedGeometryRootCache, AnimatedGeometryRoot, DetachAGR)
+
+  AnimatedGeometryRoot(nsIFrame* aFrame, AnimatedGeometryRoot* aParent, bool aIsAsync)
+    : mFrame(aFrame)
+    , mParentAGR(aParent)
+    , mIsAsync(aIsAsync)
+  {
+    MOZ_ASSERT(mParentAGR || mIsAsync);
+    aFrame->SetHasAnimatedGeometryRoot(true);
+    aFrame->Properties().Set(AnimatedGeometryRootCache(), this);
+  }
+
+  ~AnimatedGeometryRoot()
+  {
+    if (mFrame) {
+      mFrame->SetHasAnimatedGeometryRoot(false);
+      mFrame->Properties().Delete(AnimatedGeometryRootCache());
+    }
+  }
 };
 
 namespace mozilla {
@@ -545,7 +576,7 @@ public:
     return mCurrentAGR;
   }
   AnimatedGeometryRoot* GetRootAnimatedGeometryRoot() {
-    return &mRootAGR;
+    return mRootAGR;
   }
 
   void RecomputeCurrentAnimatedGeometryRoot();
@@ -898,7 +929,7 @@ public:
     nsPoint               mPrevOffset;
     nsRect                mPrevVisibleRect;
     nsRect                mPrevDirtyRect;
-    AnimatedGeometryRoot* mPrevAGR;
+    RefPtr<AnimatedGeometryRoot> mPrevAGR;
     bool                  mPrevIsAtRootOfPseudoStackingContext;
     bool                  mPrevAncestorHasApzAwareEventHandler;
     bool                  mPrevBuildingInvisibleItems;
@@ -1267,17 +1298,10 @@ public:
                                       OutOfFlowDisplayData)
 
   struct DisplayListBuildingData {
-    AnimatedGeometryRoot* mModifiedAGR = nullptr;
+    RefPtr<AnimatedGeometryRoot> mModifiedAGR = nullptr;
     nsRect mDirtyRect;
   };
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(DisplayListBuildingRect, DisplayListBuildingData)
-
-
-  static void DetachAGR(AnimatedGeometryRoot* aAGR) {
-    aAGR->mFrame = nullptr;
-    aAGR->mParentAGR = nullptr;
-  }
-  NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(AnimatedGeometryRootCache, AnimatedGeometryRoot, DetachAGR)
 
 
   static OutOfFlowDisplayData* GetOutOfFlowData(nsIFrame* aFrame)
@@ -1465,7 +1489,7 @@ public:
                                         bool aIsAsync,
                                         AnimatedGeometryRoot* aParent = nullptr);
 
-  nsDataHashtable<nsPtrHashKey<nsIFrame>, AnimatedGeometryRoot*> mFrameToAnimatedGeometryRootMap;
+  nsDataHashtable<nsPtrHashKey<nsIFrame>, RefPtr<AnimatedGeometryRoot>> mFrameToAnimatedGeometryRootMap;
 private:
 
   /**
@@ -1528,8 +1552,8 @@ private:
   // The offset from mCurrentFrame to mCurrentReferenceFrame.
   nsPoint                        mCurrentOffsetToReferenceFrame;
 
-  AnimatedGeometryRoot*          mCurrentAGR;
-  AnimatedGeometryRoot           mRootAGR;
+  RefPtr<AnimatedGeometryRoot>   mRootAGR;
+  RefPtr<AnimatedGeometryRoot>   mCurrentAGR;
 
   // will-change budget tracker
   nsDataHashtable<nsPtrHashKey<nsPresContext>, DocumentWillChangeBudget>
@@ -1562,7 +1586,6 @@ private:
   nsTArray<ActiveScrolledRoot*>  mActiveScrolledRoots;
   nsTArray<DisplayItemClipChain*> mClipChainsToDestroy;
   nsTArray<nsDisplayItem*> mTemporaryItems;
-  nsTArray<AnimatedGeometryRoot*> mAnimatedGeometryRoots;
   const ActiveScrolledRoot*      mActiveScrolledRootForRootScrollframe;
   nsDisplayListBuilderMode       mMode;
   ViewID                         mCurrentScrollParentId;
@@ -1671,7 +1694,6 @@ public:
     , mClip(nullptr)
     , mActiveScrolledRoot(nullptr)
     , mReferenceFrame(nullptr)
-    , mAnimatedGeometryRoot(nullptr)
     , mForceNotVisible(false)
 #ifdef MOZ_DUMP_PAINTING
     , mPainted(false)
@@ -2238,7 +2260,7 @@ protected:
   const ActiveScrolledRoot* mActiveScrolledRoot;
   // Result of FindReferenceFrameFor(mFrame), if mFrame is non-null
   const nsIFrame* mReferenceFrame;
-  struct AnimatedGeometryRoot* mAnimatedGeometryRoot;
+  RefPtr<struct AnimatedGeometryRoot> mAnimatedGeometryRoot;
   // Result of ToReferenceFrame(mFrame), if mFrame is non-null
   nsPoint   mToReferenceFrame;
   // This is the rectangle that needs to be painted.
@@ -4303,7 +4325,7 @@ private:
                          nsDisplayList* aList, uint32_t aIndex);
   void Init(nsDisplayListBuilder* aBuilder);
 
-  AnimatedGeometryRoot* mAnimatedGeometryRootForScrollMetadata;
+  RefPtr<AnimatedGeometryRoot> mAnimatedGeometryRootForScrollMetadata;
   uint32_t mIndex;
   bool mIsFixedBackground;
 };
@@ -4916,8 +4938,8 @@ private:
   // Accumulated transform of ancestors on the preserves-3d chain.
   Matrix4x4 mTransformPreserves3D;
   ComputeTransformFunction mTransformGetter;
-  AnimatedGeometryRoot* mAnimatedGeometryRootForChildren;
-  AnimatedGeometryRoot* mAnimatedGeometryRootForScrollMetadata;
+  RefPtr<AnimatedGeometryRoot> mAnimatedGeometryRootForChildren;
+  RefPtr<AnimatedGeometryRoot> mAnimatedGeometryRootForScrollMetadata;
   nsRect mChildrenVisibleRect;
   uint32_t mIndex;
   nsRect mBounds;

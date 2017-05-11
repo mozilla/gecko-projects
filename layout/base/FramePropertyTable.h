@@ -321,6 +321,9 @@ protected:
     }
 
     void DestroyValueFor(const nsIFrame* aFrame) {
+      if (!mProperty) {
+        return;
+      }
       if (mProperty->mDestructor) {
         mProperty->mDestructor(mValue);
       } else if (mProperty->mDestructorWithFrame) {
