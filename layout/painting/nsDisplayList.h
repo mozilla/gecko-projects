@@ -222,12 +222,24 @@ namespace mozilla {
  *    is on the stack.
  */
 struct ActiveScrolledRoot {
-  ActiveScrolledRoot(const ActiveScrolledRoot* aParent,
-                     nsIScrollableFrame* aScrollableFrame)
-    : mParent(aParent)
-    , mScrollableFrame(aScrollableFrame)
-    , mDepth(mParent ? mParent->mDepth + 1 : 1)
+  static already_AddRefed<ActiveScrolledRoot>
+  CreateASRForFrame(const ActiveScrolledRoot* aParent,
+                    nsIScrollableFrame* aScrollableFrame)
   {
+    nsIFrame* f = do_QueryFrame(aScrollableFrame);
+
+    RefPtr<ActiveScrolledRoot> asr;
+    if (f->HasActiveScrolledRoot()) {
+      asr = f->Properties().Get(ActiveScrolledRootCache());
+      asr->ActiveScrolledRoot::~ActiveScrolledRoot();
+      asr = new (KnownNotNull, asr) ActiveScrolledRoot(aParent, aScrollableFrame);
+    } else {
+      asr = new ActiveScrolledRoot(aParent, aScrollableFrame);
+
+      f->SetHasActiveScrolledRoot(true);
+      f->Properties().Set(ActiveScrolledRootCache(), asr);
+    }
+    return asr.forget();
   }
 
   static const ActiveScrolledRoot* PickAncestor(const ActiveScrolledRoot* aOne,
@@ -255,7 +267,32 @@ struct ActiveScrolledRoot {
   const ActiveScrolledRoot* mParent;
   nsIScrollableFrame* mScrollableFrame;
 
+  NS_INLINE_DECL_REFCOUNTING(ActiveScrolledRoot)
+
 private:
+  ActiveScrolledRoot(const ActiveScrolledRoot* aParent,
+                     nsIScrollableFrame* aScrollableFrame)
+    : mParent(aParent)
+    , mScrollableFrame(aScrollableFrame)
+    , mDepth(mParent ? mParent->mDepth + 1 : 1)
+  {
+  }
+
+  ~ActiveScrolledRoot()
+  {
+    if (mScrollableFrame) {
+      nsIFrame* f = do_QueryFrame(mScrollableFrame);
+      f->SetHasActiveScrolledRoot(false);
+      f->Properties().Delete(ActiveScrolledRootCache());
+    }
+  }
+
+  static void DetachASR(ActiveScrolledRoot* aASR) {
+    aASR->mParent = nullptr;
+    aASR->mScrollableFrame = nullptr;
+  }
+  NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(ActiveScrolledRootCache, ActiveScrolledRoot, DetachASR)
+
   static uint32_t Depth(const ActiveScrolledRoot* aActiveScrolledRoot) {
     return aActiveScrolledRoot ? aActiveScrolledRoot->mDepth : 0;
   }
@@ -1583,7 +1620,7 @@ private:
   // This is a pointer and not a real nsDisplayList value because the
   // nsDisplayList class is defined below this class, so we can't use it here.
   nsDisplayList*                 mScrollInfoItemsForHoisting;
-  nsTArray<ActiveScrolledRoot*>  mActiveScrolledRoots;
+  nsTArray<RefPtr<ActiveScrolledRoot>>  mActiveScrolledRoots;
   nsTArray<DisplayItemClipChain*> mClipChainsToDestroy;
   nsTArray<nsDisplayItem*> mTemporaryItems;
   const ActiveScrolledRoot*      mActiveScrolledRootForRootScrollframe;
@@ -2257,7 +2294,7 @@ protected:
   nsIFrame* mFrame;
   RefPtr<const DisplayItemClipChain> mClipChain;
   const DisplayItemClip* mClip;
-  const ActiveScrolledRoot* mActiveScrolledRoot;
+  RefPtr<const ActiveScrolledRoot> mActiveScrolledRoot;
   // Result of FindReferenceFrameFor(mFrame), if mFrame is non-null
   const nsIFrame* mReferenceFrame;
   RefPtr<struct AnimatedGeometryRoot> mAnimatedGeometryRoot;

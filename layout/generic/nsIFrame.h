@@ -601,6 +601,7 @@ public:
     , mFrameIsModified(false)
     , mHasOverrideDirtyRegion(false)
     , mHasAnimatedGeometryRoot(false)
+    , mHasActiveScrolledRoot(false)
   {
     mozilla::PodZero(&mOverflow);
   }
@@ -614,6 +615,9 @@ public:
 
   bool HasAnimatedGeometryRoot() { return mHasAnimatedGeometryRoot; }
   void SetHasAnimatedGeometryRoot(bool aHasAGR) { mHasAnimatedGeometryRoot = aHasAGR; }
+
+  bool HasActiveScrolledRoot() { return mHasActiveScrolledRoot; }
+  void SetHasActiveScrolledRoot(bool aHasASR) { mHasActiveScrolledRoot = aHasASR; }
 
   nsPresContext* PresContext() const {
     return StyleContext()->PresContext();
@@ -3763,6 +3767,7 @@ protected:
   bool mFrameIsModified : 1;
   bool mHasOverrideDirtyRegion : 1;
   bool mHasAnimatedGeometryRoot : 1;
+  bool mHasActiveScrolledRoot : 1;
 
   // When there is an overflow area only slightly larger than mRect,
   // we store a set of four 1-byte deltas from the edges of mRect

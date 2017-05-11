@@ -1128,9 +1128,6 @@ nsDisplayListBuilder::~nsDisplayListBuilder() {
 
   nsCSSRendering::EndFrameTreesLocked();
 
-  for (ActiveScrolledRoot* asr : mActiveScrolledRoots) {
-    asr->ActiveScrolledRoot::~ActiveScrolledRoot();
-  }
   for (DisplayItemClipChain* c : mClipChainsToDestroy) {
     delete c;
   }
@@ -1287,6 +1284,8 @@ nsDisplayListBuilder::LeavePresShell(nsIFrame* aReferenceFrame, nsDisplayList* a
     mFrameToAnimatedGeometryRootMap.Clear();
     mCurrentAGR = nullptr;
 
+    mActiveScrolledRoots.Clear();
+
     // Reverse iterate the clip chains, so that we destroy descendants
     // first which will drop the ref count on their ancestors.
     for (int32_t i = mClipChainsToDestroy.Length() - 1; i >= 0; i--) {
@@ -1383,9 +1382,7 @@ ActiveScrolledRoot*
 nsDisplayListBuilder::AllocateActiveScrolledRoot(const ActiveScrolledRoot* aParent,
                                                  nsIScrollableFrame* aScrollableFrame)
 {
-  void* p = Allocate(sizeof(ActiveScrolledRoot));
-  ActiveScrolledRoot* asr =
-    new (KnownNotNull, p) ActiveScrolledRoot(aParent, aScrollableFrame);
+  RefPtr<ActiveScrolledRoot> asr = ActiveScrolledRoot::CreateASRForFrame(aParent, aScrollableFrame);
   mActiveScrolledRoots.AppendElement(asr);
   return asr;
 }
