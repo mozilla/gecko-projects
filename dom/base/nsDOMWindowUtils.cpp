@@ -3690,7 +3690,7 @@ nsDOMWindowUtils::GetOMTAStyle(nsIDOMElement* aElement,
     if (aProperty.EqualsLiteral("opacity")) {
       Layer* layer =
         FrameLayerBuilder::GetDedicatedLayer(frame,
-                                             nsDisplayItem::TYPE_OPACITY);
+                                             TYPE_OPACITY);
       if (layer) {
         ShadowLayerForwarder* forwarder = layer->Manager()->AsShadowForwarder();
         if (forwarder && forwarder->HasShadowManager()) {
@@ -3710,7 +3710,7 @@ nsDOMWindowUtils::GetOMTAStyle(nsIDOMElement* aElement,
     } else if (aProperty.EqualsLiteral("transform")) {
       Layer* layer =
         FrameLayerBuilder::GetDedicatedLayer(frame,
-                                             nsDisplayItem::TYPE_TRANSFORM);
+                                             TYPE_TRANSFORM);
       if (layer) {
         ShadowLayerForwarder* forwarder = layer->Manager()->AsShadowForwarder();
         if (forwarder && forwarder->HasShadowManager()) {

@@ -1897,7 +1897,7 @@ public:
   }
   
   virtual uint32_t GetPerFrameKey() override {
-    return (mIndex << nsDisplayItem::TYPE_BITS)
+    return (mIndex << TYPE_BITS)
       | nsDisplayItem::GetPerFrameKey();
   }
 

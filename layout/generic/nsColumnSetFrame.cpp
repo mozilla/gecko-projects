@@ -1129,7 +1129,7 @@ nsColumnSetFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   if (IsVisibleForPainting(aBuilder)) {
     aLists.BorderBackground()->AppendNewToTop(new (aBuilder)
       nsDisplayGenericOverflow(aBuilder, this, ::PaintColumnRule, "ColumnRule",
-                               nsDisplayItem::TYPE_COLUMN_RULE));
+                               TYPE_COLUMN_RULE));
   }
 
   // Our children won't have backgrounds so it doesn't matter where we put them.

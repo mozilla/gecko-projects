@@ -1244,7 +1244,7 @@ ElementRestyler::AddLayerChangesForAnimation()
       // so we can skip adding any change hint here. (If we *were* to add
       // nsChangeHint_UpdateTransformLayer, ApplyRenderingChangeToTree would
       // complain that we're updating a transform layer without a transform).
-      if (layerInfo.mLayerType == nsDisplayItem::TYPE_TRANSFORM &&
+      if (layerInfo.mLayerType == TYPE_TRANSFORM &&
           !mFrame->StyleDisplay()->HasTransformStyle()) {
         continue;
       }

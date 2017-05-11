@@ -2238,14 +2238,14 @@ DisplayDebugBorders(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
   if (nsFrame::GetShowFrameBorders() && !aFrame->GetRect().IsEmpty()) {
     aLists.Outlines()->AppendNewToTop(new (aBuilder)
         nsDisplayGeneric(aBuilder, aFrame, PaintDebugBorder, "DebugBorder",
-                         nsDisplayItem::TYPE_DEBUG_BORDER));
+                         TYPE_DEBUG_BORDER));
   }
   // Draw a border around the current event target
   if (nsFrame::GetShowEventTargetFrameBorder() &&
       aFrame->PresContext()->PresShell()->GetDrawEventTargetFrame() == aFrame) {
     aLists.Outlines()->AppendNewToTop(new (aBuilder)
         nsDisplayGeneric(aBuilder, aFrame, PaintEventTargetBorder, "EventTargetBorder",
-                         nsDisplayItem::TYPE_EVENT_TARGET_BORDER));
+                         TYPE_EVENT_TARGET_BORDER));
   }
 }
 #endif
@@ -2326,9 +2326,9 @@ static bool
 ItemParticipatesIn3DContext(nsIFrame* aAncestor, nsDisplayItem* aItem)
 {
   nsIFrame* transformFrame;
-  if (aItem->GetType() == nsDisplayItem::TYPE_TRANSFORM) {
+  if (aItem->GetType() == TYPE_TRANSFORM) {
     transformFrame = aItem->Frame();
-  } else if (aItem->GetType() == nsDisplayItem::TYPE_PERSPECTIVE) {
+  } else if (aItem->GetType() == TYPE_PERSPECTIVE) {
     transformFrame = static_cast<nsDisplayPerspective*>(aItem)->TransformFrame();
   } else {
     return false;
@@ -2881,7 +2881,7 @@ WrapInWrapList(nsDisplayListBuilder* aBuilder,
   // makes the perspective frame create one (so we have an atomic entry for z-index
   // sorting).
   nsIFrame *itemFrame = item->Frame();
-  if (item->GetType() == nsDisplayItem::TYPE_PERSPECTIVE) {
+  if (item->GetType() == TYPE_PERSPECTIVE) {
     itemFrame = static_cast<nsDisplayPerspective*>(item)->TransformFrame();
   }
 
@@ -6564,7 +6564,7 @@ bool
 nsIFrame::TryUpdateTransformOnly(Layer** aLayerResult)
 {
   Layer* layer = FrameLayerBuilder::GetDedicatedLayer(
-    this, nsDisplayItem::TYPE_TRANSFORM);
+    this, TYPE_TRANSFORM);
   if (!layer || !layer->HasUserData(LayerIsPrerenderedDataKey())) {
     // If this layer isn't prerendered or we clip composites to our OS
     // window, then we can't correctly optimize to an empty
@@ -6667,8 +6667,8 @@ nsIFrame::InvalidateLayer(uint32_t aDisplayItemKey,
     // for remote type displayitem and thus Repaint event is not
     // triggered. So, always invalidate here as well.
     uint32_t displayItemKey = aDisplayItemKey;
-    if (aDisplayItemKey == nsDisplayItem::TYPE_PLUGIN ||
-        aDisplayItemKey == nsDisplayItem::TYPE_REMOTE) {
+    if (aDisplayItemKey == TYPE_PLUGIN ||
+        aDisplayItemKey == TYPE_REMOTE) {
       displayItemKey = 0;
     }
 
