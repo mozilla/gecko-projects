@@ -3409,7 +3409,7 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       // We prepare an extra DisplayItemClipChain here that will be intersected
       // with those items after they've been created.
       const ActiveScrolledRoot* asr = aBuilder->CurrentActiveScrolledRoot();
-      extraContentBoxClipForNonCaretContent = Some(DisplayItemClipChain{ DisplayItemClip(), asr, nullptr });
+      extraContentBoxClipForNonCaretContent = Some(DisplayItemClipChain(DisplayItemClip(), asr, nullptr));
       extraContentBoxClipForNonCaretContent->mClip.SetTo(clipRect);
 
       nsIFrame* caretFrame = aBuilder->GetCaretFrame();

@@ -2255,7 +2255,7 @@ protected:
   nsDisplayItem() { mAbove = nullptr; }
 
   nsIFrame* mFrame;
-  const DisplayItemClipChain* mClipChain;
+  RefPtr<const DisplayItemClipChain> mClipChain;
   const DisplayItemClip* mClip;
   const ActiveScrolledRoot* mActiveScrolledRoot;
   // Result of FindReferenceFrameFor(mFrame), if mFrame is non-null

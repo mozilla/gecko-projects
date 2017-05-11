@@ -1132,7 +1132,7 @@ nsDisplayListBuilder::~nsDisplayListBuilder() {
     asr->ActiveScrolledRoot::~ActiveScrolledRoot();
   }
   for (DisplayItemClipChain* c : mClipChainsToDestroy) {
-    c->DisplayItemClipChain::~DisplayItemClipChain();
+    delete c;
   }
   for (nsDisplayItem* i : mTemporaryItems) {
     i->~nsDisplayItem();
@@ -1286,8 +1286,17 @@ nsDisplayListBuilder::LeavePresShell(nsIFrame* aReferenceFrame, nsDisplayList* a
   } else {
     mFrameToAnimatedGeometryRootMap.Clear();
     mCurrentAGR = nullptr;
-  }
 
+    // Reverse iterate the clip chains, so that we destroy descendants
+    // first which will drop the ref count on their ancestors.
+    for (int32_t i = mClipChainsToDestroy.Length() - 1; i >= 0; i--) {
+      DisplayItemClipChain* clip = mClipChainsToDestroy[i];
+      if (!clip->mRefCount) {
+        mClipChainsToDestroy.RemoveElementAt(i);
+        delete clip;
+      }
+    }
+  }
 }
 
 void
@@ -1386,8 +1395,7 @@ nsDisplayListBuilder::AllocateDisplayItemClipChain(const DisplayItemClip& aClip,
                                                    const ActiveScrolledRoot* aASR,
                                                    const DisplayItemClipChain* aParent)
 {
-  void* p = Allocate(sizeof(DisplayItemClipChain));
-  DisplayItemClipChain* c = new (KnownNotNull, p) DisplayItemClipChain{ aClip, aASR, aParent };
+  DisplayItemClipChain* c = new DisplayItemClipChain(aClip, aASR, aParent);
   mClipChainsToDestroy.AppendElement(c);
   return c;
 }
