@@ -1375,12 +1375,13 @@ nsDisplayListBuilder::MarkPreserve3DFramesForDisplayList(nsIFrame* aDirtyFrame)
 void*
 nsDisplayListBuilder::Allocate(size_t aSize, DisplayItemType aType)
 {
-  return mPool.Allocate(aSize);
+  return mPool.AllocateByObjectID((mozilla::ArenaObjectID)aType, aSize);
 }
 
 void
 nsDisplayListBuilder::Destroy(DisplayItemType aType, void* aPtr)
 {
+  mPool.FreeByObjectID((mozilla::ArenaObjectID)aType, aPtr);
 }
 
 ActiveScrolledRoot*
