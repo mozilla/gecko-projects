@@ -555,7 +555,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   if (aBuilder->IsForFrameVisibility()) {
     // We don't add the childItems to the return list as we're dealing with them here.
     presShell->RebuildApproximateFrameVisibilityDisplayList(childItems);
-    childItems.DeleteAll();
+    childItems.DeleteAll(aBuilder);
   } else {
     aLists.Content()->AppendToTop(&childItems);
   }

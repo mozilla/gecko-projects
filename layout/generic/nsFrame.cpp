@@ -2600,11 +2600,11 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
   }
 
   if (aBuilder->IsBackgroundOnly()) {
-    set.BlockBorderBackgrounds()->DeleteAll();
-    set.Floats()->DeleteAll();
-    set.Content()->DeleteAll();
-    set.PositionedDescendants()->DeleteAll();
-    set.Outlines()->DeleteAll();
+    set.BlockBorderBackgrounds()->DeleteAll(aBuilder);
+    set.Floats()->DeleteAll(aBuilder);
+    set.Content()->DeleteAll(aBuilder);
+    set.PositionedDescendants()->DeleteAll(aBuilder);
+    set.Outlines()->DeleteAll(aBuilder);
   }
 
   // Sort PositionedDescendants() in CSS 'z-order' order.  The list is already

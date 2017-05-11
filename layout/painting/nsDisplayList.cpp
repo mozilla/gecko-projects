@@ -1132,7 +1132,7 @@ nsDisplayListBuilder::~nsDisplayListBuilder() {
     delete c;
   }
   for (nsDisplayItem* i : mTemporaryItems) {
-    i->~nsDisplayItem();
+    i->Destroy(this);
   }
 
   MOZ_COUNT_DTOR(nsDisplayListBuilder);
@@ -1376,6 +1376,11 @@ void*
 nsDisplayListBuilder::Allocate(size_t aSize, DisplayItemType aType)
 {
   return mPool.Allocate(aSize);
+}
+
+void
+nsDisplayListBuilder::Destroy(DisplayItemType aType, void* aPtr)
+{
 }
 
 ActiveScrolledRoot*
@@ -2010,15 +2015,15 @@ nsDisplayList::ComputeVisibilityForSublist(nsDisplayListBuilder* aBuilder,
   for (int32_t i = elements.Length() - 1; i >= 0; --i) {
     nsDisplayItem* item = elements[i];
 
-    if (item->mForceNotVisible && !item->GetSameCoordinateSystemChildren()) {
-      NS_ASSERTION(item->mVisibleRect.IsEmpty(),
+    if (item->ForceNotVisible() && !item->GetSameCoordinateSystemChildren()) {
+      NS_ASSERTION(item->GetVisibleRect().IsEmpty(),
         "invisible items should have empty vis rect");
     } else {
       nsRect bounds = item->GetClippedBounds(aBuilder);
 
       nsRegion itemVisible;
       itemVisible.And(*aVisibleRegion, bounds);
-      item->mVisibleRect = itemVisible.GetBounds();
+      item->SetVisibleRect(itemVisible.GetBounds());
     }
 
     if (item->ComputeVisibility(aBuilder, aVisibleRegion)) {
@@ -2362,10 +2367,10 @@ nsDisplayItem* nsDisplayList::RemoveBottom() {
   return item;
 }
 
-void nsDisplayList::DeleteAll() {
+void nsDisplayList::DeleteAll(nsDisplayListBuilder* aBuilder) {
   nsDisplayItem* item;
   while ((item = RemoveBottom()) != nullptr) {
-    item->~nsDisplayItem();
+    item->Destroy(aBuilder);
   }
 }
 
@@ -5417,8 +5422,6 @@ nsDisplayWrapList::nsDisplayWrapList(nsDisplayListBuilder* aBuilder,
 }
 
 nsDisplayWrapList::~nsDisplayWrapList() {
-  mList.DeleteAll();
-
   MOZ_COUNT_DTOR(nsDisplayWrapList);
 }
 

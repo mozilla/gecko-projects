@@ -832,6 +832,8 @@ public:
    */
   void* Allocate(size_t aSize, DisplayItemType aType);
 
+  void Destroy(DisplayItemType aType, void* aPtr);
+
   /**
    * Allocate a new ActiveScrolledRoot in the arena. Will be cleaned up
    * automatically when the arena goes away.
@@ -1744,7 +1746,16 @@ public:
 #endif
   {
   }
+protected:
   virtual ~nsDisplayItem() {}
+public:
+
+  virtual void Destroy(nsDisplayListBuilder* aBuilder)
+  {
+    DisplayItemType type = GetType();
+    this->nsDisplayItem::~nsDisplayItem();
+    aBuilder->Destroy(type, this);
+  }
 
   /**
    * Downcasts this item to nsDisplayWrapList, if possible.
@@ -2169,6 +2180,8 @@ public:
    */
   const nsRect& GetVisibleRect() const { return mVisibleRect; }
 
+  void SetVisibleRect(const nsRect& aVisibleRect) { mVisibleRect = aVisibleRect; }
+
   /**
    * Returns the visible rect for the children, relative to their
    * reference frame. Can be different from mVisibleRect for nsDisplayTransform,
@@ -2193,6 +2206,8 @@ public:
   virtual bool CanApplyOpacity() const {
     return false;
   }
+
+  bool ForceNotVisible() const { return mForceNotVisible; }
 
   /**
    * For debugging and stuff
@@ -2286,8 +2301,6 @@ public:
   }
 
 protected:
-  friend class nsDisplayList;
-
   nsDisplayItem() { mAbove = nullptr; }
 
   nsIFrame* mFrame;
@@ -2349,7 +2362,6 @@ public:
     if (mSentinel.mAbove) {
       NS_WARNING("Nonempty list left over?");
     }
-    DeleteAll();
   }
 
   /**
@@ -2433,7 +2445,7 @@ public:
   /**
    * Remove all items from the list and call their destructors.
    */
-  void DeleteAll();
+  void DeleteAll(nsDisplayListBuilder* aBuilder);
 
   /**
    * @return the item at the top of the list, or null if the list is empty
@@ -3844,6 +3856,11 @@ public:
   virtual ~nsDisplayWrapList();
 
   virtual nsDisplayWrapList* AsDisplayWrapList() override { return this; }
+
+  virtual void Destroy(nsDisplayListBuilder* aBuilder) override {
+    mList.DeleteAll(aBuilder);
+    nsDisplayItem::Destroy(aBuilder);
+  }
 
   /**
    * Creates a new nsDisplayWrapList that holds a pointer to the display list

@@ -3323,7 +3323,7 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
   nsDisplayItem::HitTestState hitTestState;
   builder.SetHitTestShouldStopAtFirstOpaque(aFlags & ONLY_VISIBLE);
   list.HitTest(&builder, aRect, &hitTestState, &aOutFrames);
-  list.DeleteAll();
+  list.DeleteAll(&builder);
   return NS_OK;
 }
 
@@ -3599,7 +3599,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
               MergeDisplayLists(aBuilder, aDeletedFrames, newItem->GetChildren(), old->GetChildren(), newItem->GetChildren());
             }
             oldListLookup.erase(std::make_pair(old->Frame(), old->GetPerFrameKey()));
-            old->~nsDisplayItem();
+            old->Destroy(aBuilder);
           } else {
             merged.AppendToTop(old);
           }
@@ -3607,7 +3607,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
           // TODO: Is it going to be safe to call the dtor on a display item that belongs
           // to a deleted frame? Can we ensure that it is? Or do we need to make sure we
           // destroy display items during frame deletion.
-          old->~nsDisplayItem();
+          old->Destroy(aBuilder);
         }
       }
 
@@ -3620,7 +3620,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
         MergeDisplayLists(aBuilder, aDeletedFrames, i->GetChildren(), old->GetChildren(), i->GetChildren());
       }
 
-      old->~nsDisplayItem();
+      old->Destroy(aBuilder);
     }
 
     merged.AppendToTop(i);
@@ -3631,7 +3631,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
         !IsAnyAncestorModified(old->Frame())) {
       merged.AppendToTop(old);
     } else {
-      old->~nsDisplayItem();
+      old->Destroy(aBuilder);
     }
   }
   
@@ -3954,7 +3954,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       }
 
       if (!merged) {
-        list.DeleteAll();
+        list.DeleteAll(&builder);
         builder.SetDirtyRect(dirtyRect);
         aFrame->BuildDisplayListForStackingContext(&builder, &list);
       }
@@ -4184,7 +4184,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
 
   // Flush the list so we don't trigger the IsEmpty-on-destruction assertion
-  //list.DeleteAll();
+  //list.DeleteAll(&builder);
   return NS_OK;
 }
 

@@ -1351,7 +1351,7 @@ nsComboboxDisplayFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
   // remove background items if parent frame is themed
   if (mComboBox->IsThemed()) {
-    set.BorderBackground()->DeleteAll();
+    set.BorderBackground()->DeleteAll(aBuilder);
   }
 
   set.MoveTo(aLists);

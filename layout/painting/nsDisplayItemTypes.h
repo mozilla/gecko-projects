@@ -36,7 +36,7 @@ enum DisplayItemFlags {
   TYPE_RENDERS_NO_IMAGES = 1 << 0
 };
 
-static const char* DisplayItemTypeName(DisplayItemType aType)
+inline const char* DisplayItemTypeName(DisplayItemType aType)
 {
   switch (aType) {
 #define DECLARE_DISPLAY_ITEM_TYPE(name) case DisplayItemType::TYPE_##name: return #name;
@@ -49,7 +49,7 @@ static const char* DisplayItemTypeName(DisplayItemType aType)
   }
 }
 
-static uint8_t GetDisplayItemFlagsForType(DisplayItemType aType)
+inline uint8_t GetDisplayItemFlagsForType(DisplayItemType aType)
 {
   static const uint8_t flags[DisplayItemType::TYPE_MAX] = {
     0
@@ -63,7 +63,7 @@ static uint8_t GetDisplayItemFlagsForType(DisplayItemType aType)
   return flags[aType];
 }
 
-static DisplayItemType GetDisplayItemTypeFromKey(uint32_t aDisplayItemKey)
+inline DisplayItemType GetDisplayItemTypeFromKey(uint32_t aDisplayItemKey)
 {
   static const uint32_t typeMask = (1 << TYPE_BITS) - 1;
   DisplayItemType type = static_cast<DisplayItemType>(aDisplayItemKey & typeMask);
