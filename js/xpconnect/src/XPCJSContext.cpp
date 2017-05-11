@@ -37,13 +37,13 @@
 #include "nsCCUncollectableMarker.h"
 #include "nsCycleCollectionNoteRootCallback.h"
 #include "nsCycleCollector.h"
-#include "nsScriptLoader.h"
 #include "jsapi.h"
 #include "jsprf.h"
 #include "js/MemoryMetrics.h"
 #include "mozilla/dom/GeneratedAtomList.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/Atomics.h"
@@ -581,6 +581,7 @@ XPCJSContext::InterruptCallback(JSContext* cx)
 
 XPCJSContext::~XPCJSContext()
 {
+    MOZ_COUNT_DTOR_INHERITED(XPCJSContext, CycleCollectedJSContext);
     // Elsewhere we abort immediately if XPCJSContext initialization fails.
     // Therefore the context must be non-null.
     MOZ_ASSERT(MaybeContext());
@@ -620,6 +621,7 @@ XPCJSContext::XPCJSContext()
    mTimeoutAccumulated(false),
    mPendingResult(NS_OK)
 {
+    MOZ_COUNT_CTOR_INHERITED(XPCJSContext, CycleCollectedJSContext);
     MOZ_RELEASE_ASSERT(!gTlsContext.get());
     gTlsContext.set(this);
 }

@@ -17,6 +17,7 @@
 #include "mozilla/Move.h"
 #include "mozilla/SheetType.h"
 #include "mozilla/css/GroupRule.h"
+#include "mozilla/css/URLMatchingFunction.h"
 #include "mozilla/dom/CSSMediaRule.h"
 #include "mozilla/dom/CSSPageRule.h"
 #include "mozilla/dom/CSSSupportsRule.h"
@@ -124,19 +125,18 @@ public:
 
   // rest of GroupRule
   virtual bool UseForPresentation(nsPresContext* aPresContext,
-                                    nsMediaQueryResultCacheKey& aKey) override;
+                                  nsMediaQueryResultCacheKey& aKey) override;
 
   bool UseForPresentation(nsPresContext* aPresContext);
 
-  enum Function {
-    eURL,
-    eURLPrefix,
-    eDomain,
-    eRegExp
-  };
+  static bool UseForPresentation(nsIDocument* aDoc,
+                                 nsIURI* aDocURI,
+                                 const nsACString& aDocURISpec,
+                                 const nsACString& aPattern,
+                                 URLMatchingFunction aUrlMatchingFunction);
 
   struct URL {
-    Function func;
+    URLMatchingFunction func;
     nsCString url;
     URL *next;
 
@@ -486,12 +486,13 @@ class nsCSSCounterStyleRule final : public mozilla::css::Rule,
                                     public nsIDOMCSSCounterStyleRule
 {
 public:
-  explicit nsCSSCounterStyleRule(const nsAString& aName,
+  explicit nsCSSCounterStyleRule(nsIAtom* aName,
                                  uint32_t aLineNumber, uint32_t aColumnNumber)
     : mozilla::css::Rule(aLineNumber, aColumnNumber)
     , mName(aName)
     , mGeneration(0)
   {
+    MOZ_ASSERT(aName, "Must have non-null name");
   }
 
 private:
@@ -544,7 +545,7 @@ public:
                              nsCSSCounterDesc aDescID,
                              const nsCSSValue& aValue);
 
-  const nsString& GetName() const { return mName; }
+  nsIAtom* Name() const { return mName; }
 
   uint32_t GetGeneration() const { return mGeneration; }
 
@@ -566,14 +567,13 @@ public:
                                JS::Handle<JSObject*> aGivenProto) override;
 
 private:
-  typedef NS_STDCALL_FUNCPROTO(nsresult, Getter, nsCSSCounterStyleRule,
-                               GetSymbols, (nsAString&));
+  typedef decltype(&nsCSSCounterStyleRule::GetSymbols) Getter;
   static const Getter kGetters[];
 
   nsresult GetDescriptor(nsCSSCounterDesc aDescID, nsAString& aValue);
   nsresult SetDescriptor(nsCSSCounterDesc aDescID, const nsAString& aValue);
 
-  nsString   mName;
+  nsCOMPtr<nsIAtom> mName;
   nsCSSValue mValues[eCSSCounterDesc_COUNT];
   uint32_t   mGeneration;
 };

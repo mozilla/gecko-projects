@@ -15,6 +15,7 @@
 #include "mozilla/Monitor.h"
 #include "mozilla/Tuple.h"
 #include "mozilla/TypeTraits.h"
+#include "mozilla/Variant.h"
 
 #include "nsTArray.h"
 #include "nsThreadUtils.h"
@@ -137,19 +138,32 @@ public:
   typedef RejectValueT RejectValueType;
   class ResolveOrRejectValue
   {
+    template <int, typename T>
+    struct Holder
+    {
+      template <typename... Args>
+      explicit Holder(Args&&... aArgs) : mData(Forward<Args>(aArgs)...) { }
+      T mData;
+    };
+
+    // Ensure Holder<0, T1> and Holder<1, T2> are different types
+    // which is required by Variant.
+    using ResolveValueHolder = Holder<0, ResolveValueType>;
+    using RejectValueHolder = Holder<1, RejectValueType>;
+
   public:
     template<typename ResolveValueType_>
     void SetResolve(ResolveValueType_&& aResolveValue)
     {
       MOZ_ASSERT(IsNothing());
-      mResolveValue.emplace(Forward<ResolveValueType_>(aResolveValue));
+      mValue = AsVariant(ResolveValueHolder(Forward<ResolveValueType_>(aResolveValue)));
     }
 
     template<typename RejectValueType_>
     void SetReject(RejectValueType_&& aRejectValue)
     {
       MOZ_ASSERT(IsNothing());
-      mRejectValue.emplace(Forward<RejectValueType_>(aRejectValue));
+      mValue = AsVariant(RejectValueHolder(Forward<RejectValueType_>(aRejectValue)));
     }
 
     template<typename ResolveValueType_>
@@ -168,16 +182,29 @@ public:
       return val;
     }
 
-    bool IsResolve() const { return mResolveValue.isSome(); }
-    bool IsReject() const { return mRejectValue.isSome(); }
-    bool IsNothing() const { return mResolveValue.isNothing() && mRejectValue.isNothing(); }
+    bool IsResolve() const { return mValue.template is<ResolveValueHolder>(); }
+    bool IsReject() const { return mValue.template is<RejectValueHolder>(); }
+    bool IsNothing() const { return mValue.template is<Nothing>(); }
 
-    const ResolveValueType& ResolveValue() const { return mResolveValue.ref(); }
-    const RejectValueType& RejectValue() const { return mRejectValue.ref(); }
+    const ResolveValueType& ResolveValue() const
+    {
+      return mValue.template as<ResolveValueHolder>().mData;
+    }
+    ResolveValueType& ResolveValue()
+    {
+      return mValue.template as<ResolveValueHolder>().mData;
+    }
+    const RejectValueType& RejectValue() const
+    {
+      return mValue.template as<RejectValueHolder>().mData;
+    }
+    RejectValueType& RejectValue()
+    {
+      return mValue.template as<RejectValueHolder>().mData;
+    }
 
   private:
-    Maybe<ResolveValueType> mResolveValue;
-    Maybe<RejectValueType> mRejectValue;
+    Variant<Nothing, ResolveValueHolder, RejectValueHolder> mValue = AsVariant(Nothing{});
   };
 
 protected:
@@ -437,14 +464,11 @@ protected:
       // Invoke the resolve or reject method.
       RefPtr<MozPromise> result = DoResolveOrRejectInternal(aValue);
 
-      // If there's a completion promise, resolve it appropriately with the
-      // result of the method.
-      if (RefPtr<Private> p = mCompletionPromise.forget()) {
-        if (result) {
-          result->ChainTo(p.forget(), "<chained completion promise>");
-        } else {
-          p->ResolveOrReject(aValue, "<completion of non-promise-returning method>");
-        }
+      MOZ_DIAGNOSTIC_ASSERT(!mCompletionPromise || result,
+        "Can't do promise chaining for a non-promise-returning method.");
+
+      if (mCompletionPromise && result) {
+        result->ChainTo(mCompletionPromise.forget(), "<chained completion promise>");
       }
     }
 
@@ -729,6 +753,7 @@ private:
    * This allows a unified syntax for promise chaining and disconnection
    * and feels more like its JS counterpart.
    */
+  template <bool SupportChaining>
   class ThenCommand
   {
     friend class MozPromise;
@@ -759,8 +784,13 @@ private:
     // Allow RefPtr<MozPromise> p = somePromise->Then();
     //       p->Then(thread1, ...);
     //       p->Then(thread2, ...);
+    template <typename...>
     operator RefPtr<MozPromise>()
     {
+      static_assert(SupportChaining,
+        "The resolve/reject callback needs to return a RefPtr<MozPromise> "
+        "in order to do promise chaining.");
+
       RefPtr<ThenValueBase> thenValue = mThenValue.forget();
       // mCompletionPromise must be created before ThenInternal() to avoid race.
       RefPtr<MozPromise::Private> p = new MozPromise::Private(
@@ -800,45 +830,91 @@ private:
     MozPromise* mReceiver;
   };
 
+  template<typename Method>
+  using MethodReturnPromise =
+    ReturnTypeIs<Method, RefPtr<MozPromise>>;
+
+  template<typename Function>
+  using FunctionReturnPromise =
+    MethodReturnPromise<decltype(&Function::operator())>;
+
+  template <typename M1, typename... Ms>
+  struct MethodThenCommand
+  {
+    static const bool value =
+      MethodThenCommand<M1>::value && MethodThenCommand<Ms...>::value;
+    using type = ThenCommand<value>;
+  };
+
+  template <typename M1>
+  struct MethodThenCommand<M1>
+  {
+    static const bool value = MethodReturnPromise<M1>::value;
+    using type = ThenCommand<value>;
+  };
+
+  template <typename F1, typename... Fs>
+  struct FunctionThenCommand
+  {
+    static const bool value =
+      FunctionThenCommand<F1>::value && FunctionThenCommand<Fs...>::value;
+    using type = ThenCommand<value>;
+  };
+
+  template <typename F1>
+  struct FunctionThenCommand<F1>
+  {
+    static const bool value = FunctionReturnPromise<F1>::value;
+    using type = ThenCommand<value>;
+  };
+
 public:
   template<typename ThisType, typename ResolveMethodType, typename RejectMethodType>
-  ThenCommand Then(AbstractThread* aResponseThread, const char* aCallSite,
+  typename MethodThenCommand<ResolveMethodType, RejectMethodType>::type
+  Then(AbstractThread* aResponseThread, const char* aCallSite,
     ThisType* aThisVal, ResolveMethodType aResolveMethod, RejectMethodType aRejectMethod)
   {
     using ThenType = MethodThenValue<ThisType, ResolveMethodType, RejectMethodType>;
     RefPtr<ThenValueBase> thenValue = new ThenType(aResponseThread,
        aThisVal, aResolveMethod, aRejectMethod, aCallSite);
-    return ThenCommand(aResponseThread, aCallSite, thenValue.forget(), this);
+    return typename MethodThenCommand<ResolveMethodType, RejectMethodType>::type(
+      aResponseThread, aCallSite, thenValue.forget(), this);
   }
 
   template<typename ThisType, typename ResolveRejectMethodType>
-  ThenCommand Then(AbstractThread* aResponseThread, const char* aCallSite,
+  typename MethodThenCommand<ResolveRejectMethodType>::type
+  Then(AbstractThread* aResponseThread, const char* aCallSite,
     ThisType* aThisVal, ResolveRejectMethodType aResolveRejectMethod)
   {
     using ThenType = MethodThenValue<ThisType, ResolveRejectMethodType, void>;
     RefPtr<ThenValueBase> thenValue = new ThenType(aResponseThread,
        aThisVal, aResolveRejectMethod, aCallSite);
-    return ThenCommand(aResponseThread, aCallSite, thenValue.forget(), this);
+    return typename MethodThenCommand<ResolveRejectMethodType>::type(
+      aResponseThread, aCallSite, thenValue.forget(), this);
   }
 
   template<typename ResolveFunction, typename RejectFunction>
-  ThenCommand Then(AbstractThread* aResponseThread, const char* aCallSite,
+  typename FunctionThenCommand<ResolveFunction, RejectFunction>::type
+  Then(AbstractThread* aResponseThread, const char* aCallSite,
     ResolveFunction&& aResolveFunction, RejectFunction&& aRejectFunction)
   {
     using ThenType = FunctionThenValue<ResolveFunction, RejectFunction>;
     RefPtr<ThenValueBase> thenValue = new ThenType(aResponseThread,
       Move(aResolveFunction), Move(aRejectFunction), aCallSite);
-    return ThenCommand(aResponseThread, aCallSite, thenValue.forget(), this);
+    return typename FunctionThenCommand<ResolveFunction, RejectFunction>::type(
+      aResponseThread, aCallSite, thenValue.forget(), this);
   }
 
   template<typename ResolveRejectFunction>
-  ThenCommand Then(AbstractThread* aResponseThread, const char* aCallSite,
+  typename FunctionThenCommand<ResolveRejectFunction>::type
+  Then(AbstractThread* aResponseThread, const char* aCallSite,
                    ResolveRejectFunction&& aResolveRejectFunction)
   {
     using ThenType = FunctionThenValue<ResolveRejectFunction, void>;
     RefPtr<ThenValueBase> thenValue = new ThenType(aResponseThread,
       Move(aResolveRejectFunction), aCallSite);
-    return ThenCommand(aResponseThread, aCallSite, thenValue.forget(), this);
+    return typename FunctionThenCommand<ResolveRejectFunction>::type(
+      aResponseThread, aCallSite, thenValue.forget(), this);
   }
 
   void ChainTo(already_AddRefed<Private> aChainedPromise, const char* aCallSite)
@@ -1328,11 +1404,11 @@ InvokeAsync(AbstractThread* aTarget, ThisType* aThisVal, const char* aCallerName
             RefPtr<PromiseType>(ThisType::*aMethod)(ArgTypes...),
             ActualArgTypes&&... aArgs)
 {
-  static_assert(!detail::Any(IsPointer<ArgTypes>::value...),
+  static_assert(!detail::Any(IsPointer<typename RemoveReference<ActualArgTypes>::Type>::value...),
                 "Cannot pass pointer types through InvokeAsync, Storages must be provided");
   static_assert(sizeof...(ArgTypes) == sizeof...(ActualArgTypes),
                 "Method's ArgTypes and ActualArgTypes should have equal sizes");
-  return detail::InvokeAsyncImpl<StoreCopyPassByRRef<typename Decay<ArgTypes>::Type>...>(
+  return detail::InvokeAsyncImpl<StoreCopyPassByRRef<typename Decay<ActualArgTypes>::Type>...>(
            aTarget, aThisVal, aCallerName, aMethod,
            Forward<ActualArgTypes>(aArgs)...);
 }

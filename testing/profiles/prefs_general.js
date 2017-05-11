@@ -198,9 +198,6 @@ user_pref("layout.spammy_warnings.enabled", false);
 user_pref("media.mediasource.mp4.enabled", true);
 user_pref("media.mediasource.webm.enabled", true);
 
-// Make sure the disk cache doesn't get auto disabled
-user_pref("network.http.bypass-cachelock-threshold", 200000);
-
 // Enable Gamepad
 user_pref("dom.gamepad.enabled", true);
 user_pref("dom.gamepad.non_standard_events.enabled", true);
@@ -290,9 +287,8 @@ user_pref("browser.translation.engine", "bing");
 // Make sure we don't try to load snippets from the network.
 user_pref("browser.aboutHomeSnippets.updateUrl", "nonexistent://test");
 
-// Don't fetch or send directory tiles data from real servers
+// Don't fetch directory tiles data from real servers
 user_pref("browser.newtabpage.directory.source", 'data:application/json,{"testing":1}');
-user_pref("browser.newtabpage.directory.ping", "");
 
 // Ensure UITour won't hit the network
 user_pref("browser.uitour.pinnedTabUrl", "http://%(server)s/uitour-dummy/pinnedTab");

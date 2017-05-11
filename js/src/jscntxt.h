@@ -293,9 +293,6 @@ struct JSContext : public JS::RootingContext,
     static size_t offsetOfActivation() {
         return offsetof(JSContext, activation_);
     }
-    static size_t offsetOfWasmActivation() {
-        return offsetof(JSContext, wasmActivationStack_);
-    }
     static size_t offsetOfProfilingActivation() {
         return offsetof(JSContext, profilingActivation_);
      }
@@ -369,16 +366,6 @@ struct JSContext : public JS::RootingContext,
     js::Activation* volatile profilingActivation_;
 
   public:
-    /* See WasmActivation comment. */
-    js::WasmActivation* volatile wasmActivationStack_;
-
-    js::WasmActivation* wasmActivationStack() const {
-        return wasmActivationStack_;
-    }
-    static js::WasmActivation* innermostWasmActivation() {
-        return js::TlsContext.get()->wasmActivationStack_;
-    }
-
     js::Activation* activation() const {
         return activation_;
     }
@@ -1024,7 +1011,7 @@ SelfHostedFunction(JSContext* cx, HandlePropertyName propName);
 #ifdef va_start
 extern bool
 ReportErrorVA(JSContext* cx, unsigned flags, const char* format,
-              ErrorArgumentsType argumentsType, va_list ap);
+              ErrorArgumentsType argumentsType, va_list ap) MOZ_FORMAT_PRINTF(3, 0);
 
 extern bool
 ReportErrorNumberVA(JSContext* cx, unsigned flags, JSErrorCallback callback,

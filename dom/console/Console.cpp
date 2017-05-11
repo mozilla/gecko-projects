@@ -12,6 +12,7 @@
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/FunctionBinding.h"
 #include "mozilla/dom/Performance.h"
+#include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/StructuredCloneHolder.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/dom/WorkletGlobalScope.h"
@@ -22,7 +23,6 @@
 #include "nsGlobalWindow.h"
 #include "nsJSUtils.h"
 #include "nsNetUtil.h"
-#include "ScriptSettings.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
@@ -1118,12 +1118,6 @@ Console::Assert(const GlobalObject& aGlobal, bool aCondition,
 Console::Count(const GlobalObject& aGlobal, const nsAString& aLabel)
 {
   StringMethod(aGlobal, aLabel, MethodCount, NS_LITERAL_STRING("count"));
-}
-
-/* static */ void
-Console::NoopMethod(const GlobalObject& aGlobal)
-{
-  // Nothing to do.
 }
 
 namespace {

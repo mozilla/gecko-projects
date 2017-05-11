@@ -69,9 +69,8 @@ DEFAULT_NO_CONNECTIONS_PREFS = {
     'app.update.enabled' : False,
     'app.update.staging.enabled': False,
 
-    # Disable about:newtab content fetch and ping
+    # Disable about:newtab content fetch
     'browser.newtabpage.directory.source': 'data:application/json,{"jetpack":1}',
-    'browser.newtabpage.directory.ping': '',
 
     # Point update checks to a nonexistent local URL for fast failures.
     'extensions.update.url' : 'http://localhost/extensions-dummy/updateURL',
@@ -216,8 +215,6 @@ DEFAULT_TEST_PREFS = {
     'layout.css.report_errors': True,
     'layout.css.grid.enabled': True,
     'layout.spammy_warnings.enabled': False,
-    # Make sure the disk cache doesn't get auto disabled
-    'network.http.bypass-cachelock-threshold': 200000,
     # Always use network provider for geolocation tests
     # so we bypass the OSX dialog raised by the corelocation provider
     'geo.provider.testing': True,

@@ -202,16 +202,16 @@ var gSearchResultsPane = {
       let resultsFound = false;
 
       // Building the range for highlighted areas
-      let rootPreferences = document.getElementById("mainPrefPane")
-      let rootPreferencesChildren = rootPreferences.children;
+      let rootPreferencesChildren = document
+        .querySelectorAll("#mainPrefPane > *:not([data-hidden-from-search])");
 
       // Showing all the children to bind JS, Access Keys, etc
-      for (let i = 0; i < rootPreferences.childElementCount; i++) {
+      for (let i = 0; i < rootPreferencesChildren.length; i++) {
         rootPreferencesChildren[i].hidden = false;
       }
 
       // Showing or Hiding specific section depending on if words in query are found
-      for (let i = 0; i < rootPreferences.childElementCount; i++) {
+      for (let i = 0; i < rootPreferencesChildren.length; i++) {
         if (rootPreferencesChildren[i].className != "header" &&
             rootPreferencesChildren[i].className != "no-results-message" &&
             this.searchWithinNode(rootPreferencesChildren[i], query)) {
@@ -290,12 +290,16 @@ var gSearchResultsPane = {
         valueResult = this.stringMatchesFilters(nodeObject.getAttribute("value"), searchPhrase);
       }
 
+      if (nodeObject.tagName == "button" && (labelResult || valueResult)) {
+        nodeObject.setAttribute("highlightable", "true");
+      }
+
       matchesFound = matchesFound || complexTextNodesResult || labelResult || valueResult;
     }
 
     for (let i = 0; i < nodeObject.childNodes.length; i++) {
       // Search only if child node is not hidden
-      if (!nodeObject.childNodes[i].hidden) {
+      if (!nodeObject.childNodes[i].hidden && nodeObject.getAttribute("data-hidden-from-search") !== "true") {
         let result = this.searchWithinNode(nodeObject.childNodes[i], searchPhrase);
         matchesFound = matchesFound || result;
       }

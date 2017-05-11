@@ -96,6 +96,29 @@ Converter.prototype = {
     this.charset =
       request.QueryInterface(Ci.nsIChannel).contentCharset || "UTF-8";
 
+    // Let "save as" save the original JSON, not the viewer.
+    // To save with the proper extension we need the original content type,
+    // which has been replaced by application/vnd.mozilla.json.view
+    let originalType;
+    if (request instanceof Ci.nsIHttpChannel) {
+      try {
+        originalType = request.getResponseHeader("Content-Type");
+      } catch (err) {
+        // Handled below
+      }
+    } else {
+      let match = this.uri.match(/^data:(.*?)[,;]/);
+      if (match) {
+        originalType = match[1];
+      }
+    }
+    const JSON_TYPES = ["application/json", "application/manifest+json"];
+    if (!JSON_TYPES.includes(originalType)) {
+      originalType = JSON_TYPES[0];
+    }
+    request.QueryInterface(Ci.nsIWritablePropertyBag);
+    request.setProperty("contentType", originalType);
+
     this.channel = request;
     this.channel.contentType = "text/html";
     this.channel.contentCharset = "UTF-8";
@@ -161,10 +184,10 @@ Converter.prototype = {
 
     try {
       headers = JSON.stringify(headers);
-      outputDoc = this.toHTML(this.data, headers, this.uri);
+      outputDoc = this.toHTML(this.data, headers);
     } catch (e) {
       console.error("JSON Viewer ERROR " + e);
-      outputDoc = this.toErrorPage(e, this.data, this.uri);
+      outputDoc = this.toErrorPage(e, this.data);
     }
 
     let storage = Cc["@mozilla.org/storagestream;1"]
@@ -201,7 +224,7 @@ Converter.prototype = {
       .replace(/>/g, "&gt;") : "";
   },
 
-  toHTML: function (json, headers, title) {
+  toHTML: function (json, headers) {
     let themeClassName = "theme-" + JsonViewUtils.getCurrentTheme();
     let clientBaseUrl = "resource://devtools/client/";
     let baseUrl = clientBaseUrl + "jsonview/";
@@ -224,7 +247,7 @@ Converter.prototype = {
     return "<!DOCTYPE html>\n" +
       "<html platform=\"" + os + "\" class=\"" + themeClassName +
         "\" dir=\"" + dir + "\">" +
-      "<head><title>" + this.htmlEncode(title) + "</title>" +
+      "<head>" +
       "<base href=\"" + this.htmlEncode(baseUrl) + "\">" +
       "<link rel=\"stylesheet\" type=\"text/css\" href=\"" +
         themeVarsUrl + "\">" +
@@ -241,7 +264,7 @@ Converter.prototype = {
       "</body></html>";
   },
 
-  toErrorPage: function (error, data, uri) {
+  toErrorPage: function (error, data) {
     // Escape unicode nulls
     data = data.replace("\u0000", "\uFFFD");
 
@@ -258,7 +281,7 @@ Converter.prototype = {
     let dir = Services.locale.isAppLocaleRTL ? "rtl" : "ltr";
 
     return "<!DOCTYPE html>\n" +
-      "<html><head><title>" + this.htmlEncode(uri + " - Error") + "</title>" +
+      "<html><head>" +
       "<base href=\"" + this.htmlEncode(this.data.url()) + "\">" +
       "</head><body dir=\"" + dir + "\">" +
       output +

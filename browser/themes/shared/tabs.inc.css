@@ -192,13 +192,13 @@
 }
 
 .tab-close-button {
-  margin-inline-start: 2px;
+  margin-inline-start: 1px;
   margin-inline-end: -2px;
   padding: 0;
 }
 
 .tab-icon-sound {
-  margin-inline-start: 4px;
+  margin-inline-start: 1px;
   width: 16px;
   height: 16px;
   padding: 0;
@@ -262,7 +262,7 @@
   background-image: url(chrome://browser/skin/tabbrowser/tab-overflow-indicator.png);
   background-size: 100% 100%;
   width: 14px;
-  margin-bottom: var(--navbar-tab-toolbar-highlight-overlap);
+  margin-bottom: calc(var(--navbar-tab-toolbar-highlight-overlap) + var(--tab-toolbar-navbar-overlap));
   pointer-events: none;
   position: relative;
   z-index: 3; /* the selected tab's z-index + 1 */

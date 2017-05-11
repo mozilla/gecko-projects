@@ -80,12 +80,11 @@ to mochitest command.
 * \@counter-style support bug 1328319
   * test_counter_descriptor_storage.html [1]
   * test_counter_style.html [5]
-  * test_rule_insertion.html `@counter-style` [1]
-  * ... `cjk-decimal` [1]
+  * test_rule_insertion.html `@counter-style` and bug 1361994 (CSSOM support for @-moz-document) [22]
   * test_value_storage.html `symbols(` [30]
   * ... `list-style-type` [60]
   * ... `'list-style'` [30]
-  * ... `'content`: various value as list-style-type in counter functions [12]
+  * ... `'content`: various value as list-style-type in counter functions [2]
   * test_html_attribute_computed_values.html `list-style-type` [8]
 * @page support:
   * test_bug887741_at-rules_in_declaration_lists.html `exception` [1]
@@ -120,8 +119,6 @@ to mochitest command.
 * Some issue with font-feature-settings:
   * test_inherit_computation.html `value for 'font'` [8]
 * Unimplemented prefixed properties:
-  * -moz-transform: need different parsing rules servo/servo#16003
-    * test_value_storage.html `-moz-transform`: need different parsing rules bug 1357906 [70]
   * test_variables.html `var(--var6)`: -x-system-font [1]
 * Unimplemented CSS properties:
   * place-{content,items,self} shorthands servo/servo#16391
@@ -134,9 +131,7 @@ to mochitest command.
   * font-feature-settings property servo/servo#15975
     * test_inherit_storage.html `font-feature-settings` [2]
     * test_initial_storage.html `font-feature-settings` [1]
-    * test_value_storage.html `font-feature-settings` [118]
-  * image-orientation property bug 1341758
-    * test_value_storage.html `image-orientation` [40]
+    * test_value_storage.html `font-feature-settings` [40]
 * Stylesheet cloning is somehow busted bug 1348481
   * test_selectors.html `matched clone` [3]
 * Unsupported prefixed values
@@ -156,13 +151,9 @@ to mochitest command.
     * ... `-moz-min-content` [6]
     * ... `-moz-fit-content` [6]
     * ... `-moz-available` [4]
-  * several prefixed values in cursor property bug 1356072
-    * test_value_storage.html `cursor` [4]
   * -webkit-{flex,inline-flex} for display servo/servo#15400
     * test_webkit_flex_display.html [4]
 * Unsupported values
-  * SVG-only values of pointer-events not recognized
-    * test_value_storage.html `pointer-events` [1]
   * new syntax of rgba?() and hsla?() functions servo/rust-cssparser#113
     * test_computed_style.html `css-color-4` [2]
   * SVG-in-OpenType values not supported servo/servo#15211 bug 1355412
@@ -171,9 +162,6 @@ to mochitest command.
 * Incorrect parsing
   * Incorrect bounds
     * test_bug664955.html `font size is larger than max font size` [2]
-  * calc() doesn't support dividing expression servo/servo#15192
-    * test_value_storage.html `calc(50px/` [7]
-    * ... `calc(2em / ` [9]
   * -moz-alt-content parsing is wrong: servo/servo#15726
     * test_property_syntax_errors.html `-moz-alt-content` [4]
   * mask shorthand servo/servo#15772
@@ -212,7 +200,6 @@ to mochitest command.
   * ... `font-size: var(--a)` [3]
 * Negative value should be rejected
   * test_property_syntax_errors.html `transition-duration`: servo/servo#15343 [20]
-  * ... `'text-shadow'`: third length of text-shadow servo/servo#15999 [2]
 * Quirks mode support
   * hashless color servo/servo#15341
     * test_property_syntax_errors.html `color: 000000` [22]
@@ -229,13 +216,11 @@ to mochitest command.
 * test_pseudoelement_parsing.html: support parsing some pseudo-classes on some pseudo-elements [5]
 * Unit should be preserved after parsing servo/servo#15346
   * test_units_time.html [1]
-* insertRule / deleteRule don't work bug 1336863
-  * test_rule_insertion.html [5]
-* @-moz-document support bug 1355408
-  * test_rule_serialization.html [2]
-  * test_moz_document_rules.html [13]
-  * test_bug511909.html `@-moz-document` [4]
-  * test_condition_text.html: also \@supports [11]
+* insertRule / deleteRule don't work bug 1336863 and bug 1361994 (CSSOM support for @-moz-document)
+  * test_rule_insertion.html [94]
+* CSSOM support for @-moz-document bug 1361994
+  * test_rule_serialization.html [1]
+  * test_condition_text.html: also \@supports [1]
 * getComputedStyle style doesn't contain custom properties bug 1336891
   * test_variable_serialization_computed.html [35]
   * test_variables.html `custom property name` [2]

@@ -900,7 +900,6 @@ endif
 
 $(foreach file,$(DUMP_SYMS_TARGETS),$(eval $(call syms_template,$(file),$(file)_syms.track)))
 
-ifdef MOZ_RUST
 cargo_host_flag := --target=$(RUST_HOST_TARGET)
 cargo_target_flag := --target=$(RUST_TARGET)
 
@@ -993,13 +992,15 @@ cargo_linker_env_var := CARGO_TARGET_$(RUST_TARGET_ENV_NAME)_LINKER
 # have to pass in any special linker options on Windows.
 ifneq (WINNT,$(OS_ARCH))
 
-# Defining all of this for ASan builds results in crashes while running
+# Defining all of this for ASan/TSan builds results in crashes while running
 # some crates's build scripts (!), so disable it for now.
 ifndef MOZ_ASAN
+ifndef MOZ_TSAN
 target_cargo_env_vars := \
 	MOZ_CARGO_WRAP_LDFLAGS="$(LDFLAGS)" \
 	MOZ_CARGO_WRAP_LD="$(CC)" \
 	$(cargo_linker_env_var)=$(topsrcdir)/build/cargo-linker
+endif # MOZ_TSAN
 endif # MOZ_ASAN
 
 endif # ifneq WINNT
@@ -1049,7 +1050,6 @@ force-cargo-host-program-build:
 
 $(HOST_RUST_PROGRAMS): force-cargo-host-program-build
 endif # HOST_RUST_PROGRAMS
-endif # MOZ_RUST
 
 $(SOBJS):
 	$(REPORT_BUILD)

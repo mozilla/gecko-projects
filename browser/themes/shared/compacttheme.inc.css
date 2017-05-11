@@ -178,12 +178,6 @@ toolbar:-moz-lwtheme-darktext {
   text-shadow: var(--toolbarbutton-text-shadow);
 }
 
-/* Using toolbar[brighttext] instead of important to override linux */
-toolbar[brighttext] #downloads-indicator-counter {
-  text-shadow: var(--toolbarbutton-text-shadow);
-  color: var(--chrome-color);
-}
-
 #TabsToolbar {
   text-shadow: none !important;
 }
@@ -211,9 +205,11 @@ toolbar[brighttext] #downloads-indicator-counter {
   box-shadow: none !important;
 }
 
+%ifndef MOZ_PHOTON_THEME
 #forward-button > .toolbarbutton-icon {
   border-inline-start: none !important;
 }
+%endif
 
 /* Override a box shadow for disabled back button */
 #main-window:not([customizing]) #back-button[disabled] > .toolbarbutton-icon {
@@ -265,7 +261,9 @@ toolbar[brighttext] #downloads-indicator-counter {
 %include identity-block/icons.inc.css
 
 #urlbar {
+%ifndef MOZ_PHOTON_THEME
   border-inline-start: none !important;
+%endif
   opacity: 1 !important;
 }
 

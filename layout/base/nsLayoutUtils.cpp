@@ -30,7 +30,6 @@
 #include "nsIDOMHTMLElement.h"
 #include "nsFrameList.h"
 #include "nsGkAtoms.h"
-#include "nsHtml5Atoms.h"
 #include "nsIAtom.h"
 #include "nsCaret.h"
 #include "nsCSSPseudoElements.h"
@@ -122,6 +121,7 @@
 #include "mozilla/StyleSetHandleInlines.h"
 #include "RegionBuilder.h"
 #include "SVGSVGElement.h"
+#include "DisplayItemClip.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
@@ -2060,6 +2060,8 @@ nsLayoutUtils::SetFixedPositionLayerData(Layer* aLayer,
       } else {
         anchor.x = anchorRect.XMost();
       }
+    } else if (position->mOffset.GetLeftUnit() != eStyleUnit_Auto) {
+      sides |= eSideBitsLeft;
     }
     if (position->mOffset.GetBottomUnit() != eStyleUnit_Auto) {
       sides |= eSideBitsBottom;
@@ -2069,6 +2071,8 @@ nsLayoutUtils::SetFixedPositionLayerData(Layer* aLayer,
       } else {
         anchor.y = anchorRect.YMost();
       }
+    } else if (position->mOffset.GetTopUnit() != eStyleUnit_Auto) {
+      sides |= eSideBitsTop;
     }
   }
 
@@ -3636,7 +3640,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   Telemetry::AccumulateTimeDelta(Telemetry::PAINT_BUILD_DISPLAYLIST_TIME,
                                  startBuildDisplayList);
 
-  bool profilerNeedsDisplayList = profiler_feature_active("displaylistdump");
+  bool profilerNeedsDisplayList =
+    profiler_feature_active(ProfilerFeature::DisplayListDump);
   bool consoleNeedsDisplayList = gfxUtils::DumpDisplayList() || gfxEnv::DumpPaint();
 #ifdef MOZ_DUMP_PAINTING
   FILE* savedDumpFile = gfxUtils::sDumpPaintFile;
@@ -4721,6 +4726,63 @@ GetPercentBSize(const nsStyleCoord& aStyle,
   return true;
 }
 
+// Return true if aStyle can be resolved to a definite value and if so
+// return that value in aResult.
+static bool
+GetDefiniteSize(const nsStyleCoord&       aStyle,
+                nsIFrame*                 aFrame,
+                bool                      aIsInlineAxis,
+                const Maybe<LogicalSize>& aPercentageBasis,
+                nscoord*                  aResult)
+{
+  switch (aStyle.GetUnit()) {
+    case eStyleUnit_Coord:
+      *aResult = aStyle.GetCoordValue();
+      return true;
+    case eStyleUnit_Percent: {
+      if (aPercentageBasis.isNothing()) {
+        return false;
+      }
+      auto wm = aFrame->GetWritingMode();
+      nscoord pb = aIsInlineAxis ? aPercentageBasis.value().ISize(wm)
+                                 : aPercentageBasis.value().BSize(wm);
+      if (pb != NS_UNCONSTRAINEDSIZE) {
+        nscoord p = NSToCoordFloorClamped(pb * aStyle.GetPercentValue());
+        *aResult = std::max(nscoord(0), p);
+        return true;
+      }
+      return false;
+    }
+    case eStyleUnit_Calc: {
+      nsStyleCoord::Calc* calc = aStyle.GetCalcValue();
+      if (calc->mPercent != 0.0f) {
+        if (aPercentageBasis.isNothing()) {
+          return false;
+        }
+        auto wm = aFrame->GetWritingMode();
+        nscoord pb = aIsInlineAxis ? aPercentageBasis.value().ISize(wm)
+                                   : aPercentageBasis.value().BSize(wm);
+        if (pb == NS_UNCONSTRAINEDSIZE) {
+          // XXXmats given that we're calculating an intrinsic size here,
+          // maybe we should back-compute the calc-size using AddPercents?
+          return false;
+        }
+        *aResult = std::max(0, calc->mLength +
+                               NSToCoordFloorClamped(pb * calc->mPercent));
+      } else {
+        *aResult = std::max(0, calc->mLength);
+      }
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+//
+// NOTE: this function will be replaced by GetDefiniteSizeTakenByBoxSizing (bug 1363918).
+// Please do not add new uses of this function.
+//
 // Get the amount of vertical space taken out of aFrame's content area due to
 // its borders and paddings given the box-sizing value in aBoxSizing.  We don't
 // get aBoxSizing from the frame because some callers want to compute this for
@@ -4763,6 +4825,54 @@ GetBSizeTakenByBoxSizing(StyleBoxSizing aBoxSizing,
     }
   }
   return bSizeTakenByBoxSizing;
+}
+
+// Get the amount of space taken out of aFrame's content area due to its
+// borders and paddings given the box-sizing value in aBoxSizing.  We don't
+// get aBoxSizing from the frame because some callers want to compute this for
+// specific box-sizing values.
+// aIsInlineAxis is true if we're computing for aFrame's inline axis.
+// aIgnorePadding is true if padding should be ignored.
+static nscoord
+GetDefiniteSizeTakenByBoxSizing(StyleBoxSizing aBoxSizing,
+                                nsIFrame* aFrame,
+                                bool aIsInlineAxis,
+                                bool aIgnorePadding,
+                                const Maybe<LogicalSize>& aPercentageBasis)
+{
+  nscoord sizeTakenByBoxSizing = 0;
+  if (MOZ_UNLIKELY(aBoxSizing == StyleBoxSizing::Border)) {
+    const bool isHorizontalAxis =
+      aIsInlineAxis == !aFrame->GetWritingMode().IsVertical();
+    const nsStyleBorder* styleBorder = aFrame->StyleBorder();
+    sizeTakenByBoxSizing =
+      isHorizontalAxis ? styleBorder->GetComputedBorder().LeftRight()
+                       : styleBorder->GetComputedBorder().TopBottom();
+    if (!aIgnorePadding) {
+      const nsStyleSides& stylePadding = aFrame->StylePadding()->mPadding;
+      const nsStyleCoord& pStart =
+        stylePadding.Get(isHorizontalAxis ? eSideLeft : eSideTop);
+      const nsStyleCoord& pEnd =
+        stylePadding.Get(isHorizontalAxis ? eSideRight : eSideBottom);
+      nscoord pad;
+      // XXXbz Calling GetPercentBSize on padding values looks bogus, since
+      // percent padding is always a percentage of the inline-size of the
+      // containing block.  We should perhaps just treat non-absolute paddings
+      // here as 0 instead, except that in some cases the width may in fact be
+      // known.  See bug 1231059.
+      if (GetDefiniteSize(pStart, aFrame, aIsInlineAxis, aPercentageBasis, &pad) ||
+          (aPercentageBasis.isNothing() &&
+           GetPercentBSize(pStart, aFrame, isHorizontalAxis, pad))) {
+        sizeTakenByBoxSizing += pad;
+      }
+      if (GetDefiniteSize(pEnd, aFrame, aIsInlineAxis, aPercentageBasis, &pad) ||
+          (aPercentageBasis.isNothing() &&
+           GetPercentBSize(pEnd, aFrame, isHorizontalAxis, pad))) {
+        sizeTakenByBoxSizing += pad;
+      }
+    }
+  }
+  return sizeTakenByBoxSizing;
 }
 
 // Handles only -moz-max-content and -moz-min-content, and
@@ -5024,17 +5134,21 @@ AddStateBitToAncestors(nsIFrame* aFrame, nsFrameState aBit)
 }
 
 /* static */ nscoord
-nsLayoutUtils::IntrinsicForAxis(PhysicalAxis        aAxis,
-                                nsRenderingContext* aRenderingContext,
-                                nsIFrame*           aFrame,
-                                IntrinsicISizeType  aType,
-                                uint32_t            aFlags,
-                                nscoord             aMarginBoxMinSizeClamp)
+nsLayoutUtils::IntrinsicForAxis(PhysicalAxis              aAxis,
+                                nsRenderingContext*       aRenderingContext,
+                                nsIFrame*                 aFrame,
+                                IntrinsicISizeType        aType,
+                                const Maybe<LogicalSize>& aPercentageBasis,
+                                uint32_t                  aFlags,
+                                nscoord                   aMarginBoxMinSizeClamp)
 {
   NS_PRECONDITION(aFrame, "null frame");
   NS_PRECONDITION(aFrame->GetParent(),
                   "IntrinsicForAxis called on frame not in tree");
   NS_PRECONDITION(aType == MIN_ISIZE || aType == PREF_ISIZE, "bad type");
+  MOZ_ASSERT(aFrame->GetParent()->Type() != LayoutFrameType::GridContainer ||
+             aPercentageBasis.isSome(),
+             "grid layout should always pass a percentage basis");
 
   const bool horizontalAxis = MOZ_LIKELY(aAxis == eAxisHorizontal);
 #ifdef DEBUG_INTRINSIC_WIDTH
@@ -5098,6 +5212,7 @@ nsLayoutUtils::IntrinsicForAxis(PhysicalAxis        aAxis,
 
   PhysicalAxis ourInlineAxis =
     aFrame->GetWritingMode().PhysicalAxis(eLogicalAxisInline);
+  const bool isInlineAxis = aAxis == ourInlineAxis;
   // If we have a specified width (or a specified 'min-width' greater
   // than the specified 'max-width', which works out to the same thing),
   // don't even bother getting the frame's intrinsic width, because in
@@ -5127,7 +5242,7 @@ nsLayoutUtils::IntrinsicForAxis(PhysicalAxis        aAxis,
       // constraint is the max-content contribution which we shouldn't clamp.
       aMarginBoxMinSizeClamp = NS_MAXSIZE;
     }
-    if (MOZ_UNLIKELY(aAxis != ourInlineAxis)) {
+    if (MOZ_UNLIKELY(!isInlineAxis)) {
       IntrinsicSize intrinsicSize = aFrame->GetIntrinsicSize();
       const nsStyleCoord intrinsicBCoord =
         horizontalAxis ? intrinsicSize.width : intrinsicSize.height;
@@ -5189,21 +5304,23 @@ nsLayoutUtils::IntrinsicForAxis(PhysicalAxis        aAxis,
             NS_FRAME_DESCENDANT_INTRINSIC_ISIZE_DEPENDS_ON_BSIZE);
 
         nscoord bSizeTakenByBoxSizing =
-          GetBSizeTakenByBoxSizing(boxSizing, aFrame, horizontalAxis,
-                                   aFlags & IGNORE_PADDING);
-
+          GetDefiniteSizeTakenByBoxSizing(boxSizing, aFrame, !isInlineAxis,
+                                          aFlags & IGNORE_PADDING,
+                                          aPercentageBasis);
         // NOTE: This is only the minContentSize if we've been passed MIN_INTRINSIC_ISIZE
         // (which is fine, because this should only be used inside a check for that flag).
         nscoord minContentSize = result;
         nscoord h;
-        if (GetAbsoluteCoord(styleBSize, h) ||
-            GetPercentBSize(styleBSize, aFrame, horizontalAxis, h)) {
+        if (GetDefiniteSize(styleBSize, aFrame, !isInlineAxis, aPercentageBasis, &h) ||
+            (aPercentageBasis.isNothing() &&
+             GetPercentBSize(styleBSize, aFrame, horizontalAxis, h))) {
           h = std::max(0, h - bSizeTakenByBoxSizing);
           result = NSCoordMulDiv(h, ratioISize, ratioBSize);
         }
 
-        if (GetAbsoluteCoord(styleMaxBSize, h) ||
-            GetPercentBSize(styleMaxBSize, aFrame, horizontalAxis, h)) {
+        if (GetDefiniteSize(styleMaxBSize, aFrame, !isInlineAxis, aPercentageBasis, &h) ||
+            (aPercentageBasis.isNothing() &&
+             GetPercentBSize(styleMaxBSize, aFrame, horizontalAxis, h))) {
           h = std::max(0, h - bSizeTakenByBoxSizing);
           nscoord maxISize = NSCoordMulDiv(h, ratioISize, ratioBSize);
           if (maxISize < result) {
@@ -5214,8 +5331,9 @@ nsLayoutUtils::IntrinsicForAxis(PhysicalAxis        aAxis,
           }
         }
 
-        if (GetAbsoluteCoord(styleMinBSize, h) ||
-            GetPercentBSize(styleMinBSize, aFrame, horizontalAxis, h)) {
+        if (GetDefiniteSize(styleMinBSize, aFrame, !isInlineAxis, aPercentageBasis, &h) ||
+            (aPercentageBasis.isNothing() &&
+             GetPercentBSize(styleMinBSize, aFrame, horizontalAxis, h))) {
           h = std::max(0, h - bSizeTakenByBoxSizing);
           nscoord minISize = NSCoordMulDiv(h, ratioISize, ratioBSize);
           if (minISize > result) {
@@ -5242,8 +5360,8 @@ nsLayoutUtils::IntrinsicForAxis(PhysicalAxis        aAxis,
   }
 
   nsIFrame::IntrinsicISizeOffsetData offsets =
-    MOZ_LIKELY(aAxis == ourInlineAxis) ? aFrame->IntrinsicISizeOffsets()
-                                       : aFrame->IntrinsicBSizeOffsets();
+    MOZ_LIKELY(isInlineAxis) ? aFrame->IntrinsicISizeOffsets()
+                             : aFrame->IntrinsicBSizeOffsets();
   nscoord contentBoxSize = result;
   result = AddIntrinsicSizeOffset(aRenderingContext, aFrame, offsets, aType,
                                   boxSizing, result, min, styleISize,
@@ -5280,7 +5398,7 @@ nsLayoutUtils::IntrinsicForContainer(nsRenderingContext* aRenderingContext,
   // We want the size aFrame will contribute to its parent's inline-size.
   PhysicalAxis axis =
     aFrame->GetParent()->GetWritingMode().PhysicalAxis(eLogicalAxisInline);
-  return IntrinsicForAxis(axis, aRenderingContext, aFrame, aType, aFlags);
+  return IntrinsicForAxis(axis, aRenderingContext, aFrame, aType, Nothing(), aFlags);
 }
 
 /* static */ nscoord
@@ -6735,6 +6853,16 @@ nsLayoutUtils::ComputeSizeForDrawingWithFallback(imgIContainer* aImage,
   return imageSize;
 }
 
+/* static */ nsPoint
+nsLayoutUtils::GetBackgroundFirstTilePos(const nsPoint& aDest,
+                                         const nsPoint& aFill,
+                                         const nsSize& aRepeatSize)
+{
+  return nsPoint(NSToIntFloor(float(aFill.x - aDest.x) / aRepeatSize.width) * aRepeatSize.width,
+                 NSToIntFloor(float(aFill.y - aDest.y) / aRepeatSize.height) * aRepeatSize.height) +
+         aDest;
+}
+
 /* static */ DrawResult
 nsLayoutUtils::DrawBackgroundImage(gfxContext&         aContext,
                                    nsIFrame*           aForFrame,
@@ -6765,9 +6893,7 @@ nsLayoutUtils::DrawBackgroundImage(gfxContext&         aContext,
                              aOpacity);
   }
 
-  nsPoint firstTilePos = aDest.TopLeft() +
-                         nsPoint(NSToIntFloor(float(aFill.x - aDest.x) / aRepeatSize.width) * aRepeatSize.width,
-                                 NSToIntFloor(float(aFill.y - aDest.y) / aRepeatSize.height) * aRepeatSize.height);
+  nsPoint firstTilePos = GetBackgroundFirstTilePos(aDest.TopLeft(), aFill.TopLeft(), aRepeatSize);
   for (int32_t i = firstTilePos.x; i < aFill.XMost(); i += aRepeatSize.width) {
     for (int32_t j = firstTilePos.y; j < aFill.YMost(); j += aRepeatSize.height) {
       nsRect dest(i, j, aDest.width, aDest.height);
@@ -6997,28 +7123,28 @@ nsLayoutUtils::GetReferenceFrame(nsIFrame* aFrame)
   }
 }
 
-/* static */ uint32_t
+/* static */ gfx::ShapedTextFlags
 nsLayoutUtils::GetTextRunFlagsForStyle(nsStyleContext* aStyleContext,
                                        const nsStyleFont* aStyleFont,
                                        const nsStyleText* aStyleText,
                                        nscoord aLetterSpacing)
 {
-  uint32_t result = 0;
+  gfx::ShapedTextFlags result = gfx::ShapedTextFlags();
   if (aLetterSpacing != 0 ||
       aStyleText->mTextJustify == StyleTextJustify::InterCharacter) {
-    result |= gfxTextRunFactory::TEXT_DISABLE_OPTIONAL_LIGATURES;
+    result |= gfx::ShapedTextFlags::TEXT_DISABLE_OPTIONAL_LIGATURES;
   }
   if (aStyleText->mControlCharacterVisibility == NS_STYLE_CONTROL_CHARACTER_VISIBILITY_HIDDEN) {
-    result |= gfxTextRunFactory::TEXT_HIDE_CONTROL_CHARACTERS;
+    result |= gfx::ShapedTextFlags::TEXT_HIDE_CONTROL_CHARACTERS;
   }
   switch (aStyleContext->StyleText()->mTextRendering) {
   case NS_STYLE_TEXT_RENDERING_OPTIMIZESPEED:
-    result |= gfxTextRunFactory::TEXT_OPTIMIZE_SPEED;
+    result |= gfx::ShapedTextFlags::TEXT_OPTIMIZE_SPEED;
     break;
   case NS_STYLE_TEXT_RENDERING_AUTO:
     if (aStyleFont->mFont.size <
         aStyleContext->PresContext()->GetAutoQualityMinFontSize()) {
-      result |= gfxTextRunFactory::TEXT_OPTIMIZE_SPEED;
+      result |= gfx::ShapedTextFlags::TEXT_OPTIMIZE_SPEED;
     }
     break;
   default:
@@ -7027,37 +7153,37 @@ nsLayoutUtils::GetTextRunFlagsForStyle(nsStyleContext* aStyleContext,
   return result | GetTextRunOrientFlagsForStyle(aStyleContext);
 }
 
-/* static */ uint32_t
+/* static */ gfx::ShapedTextFlags
 nsLayoutUtils::GetTextRunOrientFlagsForStyle(nsStyleContext* aStyleContext)
 {
   uint8_t writingMode = aStyleContext->StyleVisibility()->mWritingMode;
   switch (writingMode) {
   case NS_STYLE_WRITING_MODE_HORIZONTAL_TB:
-    return gfxTextRunFactory::TEXT_ORIENT_HORIZONTAL;
+    return gfx::ShapedTextFlags::TEXT_ORIENT_HORIZONTAL;
 
   case NS_STYLE_WRITING_MODE_VERTICAL_LR:
   case NS_STYLE_WRITING_MODE_VERTICAL_RL:
     switch (aStyleContext->StyleVisibility()->mTextOrientation) {
     case NS_STYLE_TEXT_ORIENTATION_MIXED:
-      return gfxTextRunFactory::TEXT_ORIENT_VERTICAL_MIXED;
+      return gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_MIXED;
     case NS_STYLE_TEXT_ORIENTATION_UPRIGHT:
-      return gfxTextRunFactory::TEXT_ORIENT_VERTICAL_UPRIGHT;
+      return gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_UPRIGHT;
     case NS_STYLE_TEXT_ORIENTATION_SIDEWAYS:
-      return gfxTextRunFactory::TEXT_ORIENT_VERTICAL_SIDEWAYS_RIGHT;
+      return gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_SIDEWAYS_RIGHT;
     default:
       NS_NOTREACHED("unknown text-orientation");
-      return 0;
+      return gfx::ShapedTextFlags();
     }
 
   case NS_STYLE_WRITING_MODE_SIDEWAYS_LR:
-    return gfxTextRunFactory::TEXT_ORIENT_VERTICAL_SIDEWAYS_LEFT;
+    return gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_SIDEWAYS_LEFT;
 
   case NS_STYLE_WRITING_MODE_SIDEWAYS_RL:
-    return gfxTextRunFactory::TEXT_ORIENT_VERTICAL_SIDEWAYS_RIGHT;
+    return gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_SIDEWAYS_RIGHT;
 
   default:
     NS_NOTREACHED("unknown writing-mode");
-    return 0;
+    return gfx::ShapedTextFlags();
   }
 }
 
@@ -8937,7 +9063,8 @@ nsLayoutUtils::TransformToAncestorAndCombineRegions(
   const nsIFrame* aAncestorFrame,
   nsRegion* aPreciseTargetDest,
   nsRegion* aImpreciseTargetDest,
-  Maybe<Matrix4x4>* aMatrixCache)
+  Maybe<Matrix4x4>* aMatrixCache,
+  const DisplayItemClip* aClip)
 {
   if (aRegion.IsEmpty()) {
     return;
@@ -8947,6 +9074,12 @@ nsLayoutUtils::TransformToAncestorAndCombineRegions(
   for (nsRegion::RectIterator it = aRegion.RectIter(); !it.Done(); it.Next()) {
     nsRect transformed = TransformFrameRectToAncestor(
       aFrame, it.Get(), aAncestorFrame, &isPrecise, aMatrixCache);
+    if (aClip) {
+      transformed = aClip->ApplyNonRoundedIntersection(transformed);
+      if (aClip->GetRoundedRectCount() > 0) {
+        isPrecise = false;
+      }
+    }
     transformedRegion.OrWith(transformed);
   }
   nsRegion* dest = isPrecise ? aPreciseTargetDest : aImpreciseTargetDest;
@@ -9190,27 +9323,11 @@ nsLayoutUtils::GetCumulativeApzCallbackTransform(nsIFrame* aFrame)
   return delta;
 }
 
-/* static */ nsRect
-nsLayoutUtils::ComputePartialPrerenderArea(const nsRect& aDirtyRect,
-                                           const nsRect& aOverflow,
-                                           const nsSize& aPrerenderSize)
-{
-  // Simple calculation for now: center the pre-render area on the dirty rect,
-  // and clamp to the overflow area. Later we can do more advanced things like
-  // redistributing from one axis to another, or from one side to another.
-  nscoord xExcess = aPrerenderSize.width - aDirtyRect.width;
-  nscoord yExcess = aPrerenderSize.height - aDirtyRect.height;
-  nsRect result = aDirtyRect;
-  result.Inflate(xExcess / 2, yExcess / 2);
-  return result.MoveInsideAndClamp(aOverflow);
-}
-
-
 /* static */ bool
 nsLayoutUtils::SupportsServoStyleBackend(nsIDocument* aDocument)
 {
   return StyloEnabled() &&
-         aDocument->IsHTMLOrXHTML() &&
+         (aDocument->IsHTMLOrXHTML() || aDocument->IsSVGDocument()) &&
          static_cast<nsDocument*>(aDocument)->IsContentDocument();
 }
 

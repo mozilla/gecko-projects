@@ -224,6 +224,12 @@
 extern uint32_t gRestartMode;
 extern void InstallSignalHandlers(const char *ProgramName);
 
+// This workaround is fixed in Rust 1.19. For details, see bug 1358151.
+// Implementation in toolkit/library/rust/shared/lib.rs
+extern "C" {
+  void rust_init_please_remove_this_after_updating_rust_1_19();
+}
+
 #define FILE_COMPATIBILITY_INFO NS_LITERAL_CSTRING("compatibility.ini")
 #define FILE_INVALIDATE_CACHES NS_LITERAL_CSTRING(".purgecaches")
 
@@ -3114,6 +3120,9 @@ XREMain::XRE_mainInit(bool* aExitFlag)
     return 1;
   *aExitFlag = false;
 
+  // This workaround is fixed in Rust 1.19. For details, see bug 1358151.
+  rust_init_please_remove_this_after_updating_rust_1_19();
+
   atexit(UnexpectedExit);
   auto expectedShutdown = mozilla::MakeScopeExit([&] {
     MozExpectedExit();
@@ -4918,10 +4927,20 @@ XRE_IsGPUProcess()
   return XRE_GetProcessType() == GeckoProcessType_GPU;
 }
 
+/**
+ * Returns true in the e10s parent process and in the main process when e10s
+ * is disabled.
+ */
 bool
 XRE_IsParentProcess()
 {
   return XRE_GetProcessType() == GeckoProcessType_Default;
+}
+
+bool
+XRE_IsE10sParentProcess()
+{
+  return XRE_IsParentProcess() && BrowserTabsRemoteAutostart();
 }
 
 bool
@@ -5109,13 +5128,6 @@ GetMaxWebProcessCount()
   // cohort.
   if (Preferences::HasUserValue(optInPref)) {
     return std::max(1u, optInPrefValue);
-  }
-
-  // If there are add-ons that would make the user's experience poor, don't
-  // use more than one web content process.
-  if (Preferences::GetBool("extensions.e10sMultiBlocksEnabling", false) &&
-      Preferences::GetBool("extensions.e10sMultiBlockedByAddons", false)) {
-    return 1;
   }
 
   if (Preferences::HasUserValue("dom.ipc.processCount.web")) {

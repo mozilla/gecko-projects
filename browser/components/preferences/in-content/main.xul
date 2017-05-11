@@ -380,7 +380,7 @@
   <separator class="thin"/>
 
   <hbox id="addEnginesBox" pack="start">
-    <label id="addEngines" class="text-link" value="&addMoreSearchEngines2.label;"/>
+    <label id="addEngines" class="text-link">&addMoreSearchEngines2.label;</label>
   </hbox>
 </groupbox>
 
@@ -565,10 +565,13 @@
 <groupbox id="performanceGroup" data-category="paneGeneral" hidden="true">
   <caption><label>&performance.label;</label></caption>
 
-  <checkbox id="useRecommendedPerformanceSettings"
-            label="&useRecommendedPerformanceSettings.label;"
-            accesskey="&useRecommendedPerformanceSettings.accesskey;"
-            preference="browser.preferences.defaultPerformanceSettings.enabled"/>
+  <hbox align="center">
+    <checkbox id="useRecommendedPerformanceSettings"
+              label="&useRecommendedPerformanceSettings.label;"
+              accesskey="&useRecommendedPerformanceSettings.accesskey;"
+              preference="browser.preferences.defaultPerformanceSettings.enabled"/>
+    <label id="performanceSettingsLearnMore" class="learnMore text-link">&performanceSettingsLearnMore.label;</label>
+  </hbox>
   <description class="indent">&useRecommendedPerformanceSettings.description;</description>
 
   <vbox id="performanceSettings" class="indent" hidden="true">

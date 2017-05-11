@@ -9,8 +9,10 @@
 
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/EventStates.h"
+#include "mozilla/PostTraversalTask.h"
 #include "mozilla/ServoBindingTypes.h"
 #include "mozilla/ServoElementSnapshot.h"
+#include "mozilla/ServoUtils.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/SheetType.h"
 #include "mozilla/UniquePtr.h"
@@ -30,12 +32,14 @@ class ServoRestyleManager;
 class ServoStyleSheet;
 struct Keyframe;
 struct ServoComputedValuesWithParent;
+class ServoElementSnapshotTable;
 } // namespace mozilla
 class nsIContent;
 class nsIDocument;
 class nsStyleContext;
 class nsPresContext;
 struct nsTimingFunction;
+struct RawServoRuleNode;
 struct TreeMatchContext;
 
 namespace mozilla {
@@ -47,6 +51,8 @@ namespace mozilla {
 class ServoStyleSet
 {
   friend class ServoRestyleManager;
+  typedef ServoElementSnapshotTable SnapshotTable;
+
 public:
   class AutoAllowStaleStyles
   {
@@ -82,6 +88,11 @@ public:
     // callers, and are likely to take the main-thread codepath if this function
     // returns false. So we assert against other non-main-thread callers here.
     MOZ_ASSERT(sInServoTraversal || NS_IsMainThread());
+    return sInServoTraversal;
+  }
+
+  static ServoStyleSet* Current()
+  {
     return sInServoTraversal;
   }
 
@@ -185,6 +196,10 @@ public:
   already_AddRefed<nsStyleContext>
   ResolveNonInheritingAnonymousBoxStyle(nsIAtom* aPseudoTag);
 
+  // Get the rule node for a (pseudo-)element, resolving it lazily if needed.
+  already_AddRefed<RawServoRuleNode>
+  ResolveRuleNode(dom::Element *aElement, nsIAtom *aPseudoTag);
+
   // manage the set of style sheets in the style set
   nsresult AppendStyleSheet(SheetType aType, ServoStyleSheet* aSheet);
   nsresult PrependStyleSheet(SheetType aType, ServoStyleSheet* aSheet);
@@ -223,9 +238,12 @@ public:
 
   /**
    * Performs a Servo traversal to compute style for all dirty nodes in the
-   * document.  This will traverse all of the document's style roots (that
-   * is, its document element, and the roots of the document-level native
-   * anonymous content).  Returns true if a post-traversal is required.
+   * document.
+   *
+   * This will traverse all of the document's style roots (that is, its document
+   * element, and the roots of the document-level native anonymous content).
+   *
+   * Returns true if a post-traversal is required.
    */
   bool StyleDocument();
 
@@ -308,7 +326,44 @@ public:
   ComputeAnimationValue(RawServoDeclarationBlock* aDeclaration,
                         const ServoComputedValuesWithParent& aComputedValues);
 
+  void AppendTask(PostTraversalTask aTask)
+  {
+    MOZ_ASSERT(IsInServoTraversal());
+
+    // We currently only use PostTraversalTasks while the Servo font metrics
+    // mutex is locked.  If we need to use them in other situations during
+    // a traversal, we should assert that we've taken appropriate
+    // synchronization measures.
+    AssertIsMainThreadOrServoFontMetricsLocked();
+
+    mPostTraversalTasks.AppendElement(aTask);
+  }
+
 private:
+  // On construction, sets sInServoTraversal to the given ServoStyleSet.
+  // On destruction, clears sInServoTraversal and calls RunPostTraversalTasks.
+  class MOZ_STACK_CLASS AutoSetInServoTraversal
+  {
+  public:
+    explicit AutoSetInServoTraversal(ServoStyleSet* aSet)
+      : mSet(aSet)
+    {
+      MOZ_ASSERT(!sInServoTraversal);
+      MOZ_ASSERT(aSet);
+      sInServoTraversal = aSet;
+    }
+
+    ~AutoSetInServoTraversal()
+    {
+      MOZ_ASSERT(sInServoTraversal);
+      sInServoTraversal = nullptr;
+      mSet->RunPostTraversalTasks();
+    }
+
+  private:
+    ServoStyleSet* mSet;
+  };
+
   already_AddRefed<nsStyleContext> GetContext(already_AddRefed<ServoComputedValues>,
                                               nsStyleContext* aParentContext,
                                               nsIAtom* aPseudoTag,
@@ -322,24 +377,34 @@ private:
                                               LazyComputeBehavior aMayCompute);
 
   /**
+   * Gets the pending snapshots to handle from the restyle manager.
+   */
+  const SnapshotTable& Snapshots();
+
+  /**
    * Resolve all ServoDeclarationBlocks attached to mapped
    * presentation attributes cached on the document.
+   *
    * Call this before jumping into Servo's style system.
    */
   void ResolveMappedAttrDeclarationBlocks();
 
   /**
    * Perform all lazy operations required before traversing
-   * a subtree.  Returns whether a post-traversal is required.
+   * a subtree.
+   *
+   * Returns whether a post-traversal is required.
    */
   bool PrepareAndTraverseSubtree(RawGeckoElementBorrowed aRoot,
                                  TraversalRootBehavior aRootBehavior,
                                  TraversalRestyleBehavior aRestyleBehavior);
 
   /**
-   * Clear our cached mNonInheritingStyleContexts.  We do this when we want to
-   * make sure those style contexts won't live too long (e.g. when rebuilding
-   * all style data or when shutting down the style set).
+   * Clear our cached mNonInheritingStyleContexts.
+   *
+   * We do this when we want to make sure those style contexts won't live too
+   * long (e.g. when rebuilding all style data or when shutting down the style
+   * set).
    */
   void ClearNonInheritingStyleContexts();
 
@@ -353,8 +418,27 @@ private:
   // Subset of the pre-traverse steps that involve syncing up data
   void PreTraverseSync();
 
+  /**
+   * Rebuild the stylist.  This should only be called if mStylistMayNeedRebuild
+   * is true.
+   */
+  void RebuildStylist();
+
+  /**
+   * Helper for correctly calling RebuildStylist without paying the cost of an
+   * extra function call in the common no-rebuild-needed case.
+   */
+  void MaybeRebuildStylist()
+  {
+    if (mStylistMayNeedRebuild) {
+      RebuildStylist();
+    }
+  }
+
   already_AddRefed<ServoComputedValues> ResolveStyleLazily(dom::Element* aElement,
                                                            nsIAtom* aPseudoTag);
+
+  void RunPostTraversalTasks();
 
   uint32_t FindSheetOfType(SheetType aType,
                            ServoStyleSheet* aSheet);
@@ -388,10 +472,10 @@ private:
   UniquePtr<RawServoStyleSet> mRawSet;
   EnumeratedArray<SheetType, SheetType::Count,
                   nsTArray<Entry>> mEntries;
-  int32_t mBatching;
   uint32_t mUniqueIDCounter;
   bool mAllowResolveStaleStyles;
   bool mAuthorStyleDisabled;
+  bool mStylistMayNeedRebuild;
 
   // Stores pointers to our cached style contexts for non-inheriting anonymous
   // boxes.
@@ -399,7 +483,13 @@ private:
                   nsCSSAnonBoxes::NonInheriting::_Count,
                   RefPtr<nsStyleContext>> mNonInheritingStyleContexts;
 
-  static bool sInServoTraversal;
+  // Tasks to perform after a traversal, back on the main thread.
+  //
+  // These are similar to Servo's SequentialTasks, except that they are
+  // posted by C++ code running on style worker threads.
+  nsTArray<PostTraversalTask> mPostTraversalTasks;
+
+  static ServoStyleSet* sInServoTraversal;
 };
 
 } // namespace mozilla

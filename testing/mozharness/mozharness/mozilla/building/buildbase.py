@@ -796,27 +796,16 @@ or run without that action (ie: --no-{action})"
 
         buildid = None
         if c.get("is_automation"):
-            if self.buildbot_config.get('properties'):
-                # We're on buildbot
-                if self.buildbot_config.get('properties').get('buildid'):
-                    # Try may not provide a buildid. This means, it's gonna be generated
-                    # below.
-                    self.info("Determining buildid from buildbot properties")
-                    buildid = self.buildbot_config['properties']['buildid'].encode(
-                        'ascii', 'replace'
-                    )
+            if self.buildbot_config['properties'].get('buildid'):
+                self.info("Determining buildid from buildbot properties")
+                buildid = self.buildbot_config['properties']['buildid'].encode(
+                    'ascii', 'replace'
+                )
             else:
-                # We're on taskcluster.
-                # In this case, there are no buildbot properties, and we must pass
+                # for taskcluster, there are no buildbot properties, and we pass
                 # MOZ_BUILD_DATE into mozharness as an environment variable, only
                 # to have it pass the same value out with the same name.
-                try:
-                    buildid = os.environ['MOZ_BUILD_DATE']
-                except KeyError:
-                    self.fatal(
-                        "MOZ_BUILD_DATE must be provided as an environment var on Taskcluster"
-                    )
-
+                buildid = os.environ.get('MOZ_BUILD_DATE')
 
         if not buildid:
             self.info("Creating buildid through current time")
@@ -1133,36 +1122,41 @@ or run without that action (ie: --no-{action})"
             return fn
 
     def _run_tooltool(self):
+        env = self.query_build_env()
+        env.update(self.query_mach_build_env())
+
         self._assert_cfg_valid_for_action(
-            ['tooltool_script', 'tooltool_bootstrap', 'tooltool_url'],
+            ['tooltool_script', 'tooltool_url'],
             'build'
         )
         c = self.config
         dirs = self.query_abs_dirs()
         if not c.get('tooltool_manifest_src'):
             return self.warning(ERROR_MSGS['tooltool_manifest_undetermined'])
-        fetch_script_path = os.path.join(dirs['abs_tools_dir'],
-                                         'scripts',
-                                         'tooltool',
-                                         'tooltool_wrapper.sh')
         tooltool_manifest_path = os.path.join(dirs['abs_src_dir'],
                                               c['tooltool_manifest_src'])
+        python = self.query_exe('python2.7')
         cmd = [
-            'sh',
-            fetch_script_path,
+            python, '-u',
+            os.path.join(dirs['abs_src_dir'], 'mach'),
+            'artifact',
+            'toolchain',
+            '-v',
+            '--retry', '4',
+            '--tooltool-manifest',
             tooltool_manifest_path,
+            '--tooltool-url',
             c['tooltool_url'],
-            c['tooltool_bootstrap'],
         ]
-        cmd.extend(c['tooltool_script'])
         auth_file = self._get_tooltool_auth_file()
         if auth_file:
             cmd.extend(['--authentication-file', auth_file])
         cache = c['env'].get('TOOLTOOL_CACHE')
         if cache:
-            cmd.extend(['-c', cache])
+            cmd.extend(['--cache-dir', cache])
         self.info(str(cmd))
-        self.run_command_m(cmd, cwd=dirs['abs_src_dir'], halt_on_failure=True)
+        self.run_command_m(cmd, cwd=dirs['abs_src_dir'], halt_on_failure=True,
+                           env=env)
 
     def query_revision(self, source_path=None):
         """ returns the revision of the build

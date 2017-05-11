@@ -17,13 +17,7 @@
 :root {
   --space-above-tabbar: 15px;
 
-  --backbutton-urlbar-overlap: 6px;
-
-  /* icon width + border + horizontal padding (without the overlap from backbutton-urlbar-overlap) */
-  --forwardbutton-width: 25px;
-
-  --toolbarbutton-vertical-inner-padding: 2px;
-  --toolbarbutton-vertical-text-padding: var(--toolbarbutton-vertical-inner-padding);
+  --toolbarbutton-vertical-text-padding: calc(var(--toolbarbutton-vertical-inner-padding) - 1px);
 
   --toolbarbutton-border-radius: 1px;
 
@@ -37,7 +31,6 @@
 
   --toolbarbutton-checkedhover-backgroundcolor: rgba(0,0,0,.1);
 
-  --toolbarbutton-disabled-opacity: 0.4;
   --backbutton-border-color: var(--urlbar-border-color-hover);
 
   --backbutton-background: rgba(255,255,255,.15);
@@ -774,7 +767,7 @@ toolbar[brighttext] #close-button {
 
   :root {
     /* let toolbar buttons match the location and search bar's minimum height */
-    --toolbarbutton-vertical-inner-padding: 4px;
+    --toolbarbutton-vertical-inner-padding: 5px;
   }
 }
 
@@ -794,6 +787,7 @@ toolbar[brighttext] #close-button {
   background-color: white;
 }
 
+%ifndef MOZ_PHOTON_THEME
 @conditionalForwardWithUrlbar@ > #urlbar {
   border-inline-start: none;
   padding-inline-start: 0;
@@ -834,6 +828,7 @@ toolbar[brighttext] #close-button {
 @conditionalForwardWithUrlbar@:-moz-locale-dir(rtl) {
   -moz-box-direction: reverse;
 }
+%endif
 
 html|*.urlbar-input:-moz-lwtheme::placeholder,
 .searchbar-textbox:-moz-lwtheme > .autocomplete-textbox-container > .textbox-input-box > html|*.textbox-input::placeholder {
@@ -850,7 +845,7 @@ html|*.urlbar-input:-moz-lwtheme::placeholder,
 }
 
 .urlbar-input-box {
-  margin-inline-start: 0;
+  margin: 0;
 }
 
 .urlbar-input-box,
@@ -1519,7 +1514,6 @@ html|span.ac-emphasize-text-url {
 .tabbrowser-arrowscrollbox > .scrollbutton-up,
 .tabbrowser-arrowscrollbox > .scrollbutton-down {
   list-style-image: url("chrome://browser/skin/tabbrowser/tab-arrow-left.svg");
-  margin: 0 0 var(--tab-toolbar-navbar-overlap);
 }
 
 #TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-arrowscrollbox > .scrollbutton-up,
@@ -1527,23 +1521,9 @@ html|span.ac-emphasize-text-url {
   list-style-image: url(chrome://browser/skin/tabbrowser/tab-arrow-left-inverted.svg);
 }
 
-.tabbrowser-arrowscrollbox > .scrollbutton-up[disabled],
-.tabbrowser-arrowscrollbox > .scrollbutton-down[disabled] {
-  opacity: .4;
-}
-
 .tabbrowser-arrowscrollbox > .scrollbutton-up:-moz-locale-dir(rtl),
 .tabbrowser-arrowscrollbox > .scrollbutton-down:-moz-locale-dir(ltr) {
   transform: scaleX(-1);
-}
-
-.tabbrowser-arrowscrollbox > .scrollbutton-down {
-  transition: 1s background-color ease-out;
-}
-
-.tabbrowser-arrowscrollbox > .scrollbutton-down[highlight] {
-  background-color: Highlight;
-  transition: none;
 }
 
 .tabs-newtab-button > .toolbarbutton-icon {
@@ -1581,10 +1561,6 @@ html|span.ac-emphasize-text-url {
 #TabsToolbar[brighttext] > #alltabs-button,
 #TabsToolbar[brighttext] > toolbarpaletteitem > #alltabs-button {
   list-style-image: url("chrome://browser/skin/toolbarbutton-dropdown-arrow-inverted.png");
-}
-
-#alltabs-button > .toolbarbutton-icon {
-  margin: 0 2px;
 }
 
 #alltabs-button > .toolbarbutton-menu-dropmarker {
@@ -2033,6 +2009,18 @@ notification.pluginVulnerable > .notification-inner > .messageCloseButton {
 }
 
 %include ../shared/contextmenu.inc.css
+
+/* Make context menu items larger when opened through touch. */
+#contentAreaContextMenu[touchmode] menu,
+#contentAreaContextMenu[touchmode] menuitem {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+#contentAreaContextMenu[touchmode] > #context-navigation > menuitem {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
 
 #context-navigation {
   background-color: menu;

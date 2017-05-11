@@ -130,7 +130,7 @@ static MessageChannel* gParentProcessBlocker;
 namespace mozilla {
 namespace ipc {
 
-static const uint32_t kMinTelemetryMessageSize = 8192;
+static const uint32_t kMinTelemetryMessageSize = 4096;
 
 // Note: we round the time we spend to the nearest millisecond. So a min value
 // of 1 ms actually captures from 500us and above.
@@ -746,6 +746,23 @@ MessageChannel::Clear()
     }
 }
 
+class AbstractThreadWrapperCleanup : public MessageLoop::DestructionObserver
+{
+public:
+    explicit AbstractThreadWrapperCleanup(already_AddRefed<AbstractThread> aWrapper)
+        : mWrapper(aWrapper)
+    {}
+    virtual ~AbstractThreadWrapperCleanup() override {}
+    virtual void WillDestroyCurrentMessageLoop() override
+    {
+        mWrapper = nullptr;
+        MessageLoop::current()->RemoveDestructionObserver(this);
+        delete this;
+    }
+private:
+    RefPtr<AbstractThread> mWrapper;
+};
+
 bool
 MessageChannel::Open(Transport* aTransport, MessageLoop* aIOLoop, Side aSide)
 {
@@ -757,7 +774,9 @@ MessageChannel::Open(Transport* aTransport, MessageLoop* aIOLoop, Side aSide)
     mWorkerLoop->AddDestructionObserver(this);
 
     if (!AbstractThread::GetCurrent()) {
-        mAbstractThread = MessageLoopAbstractThreadWrapper::Create(mWorkerLoop);
+        mWorkerLoop->AddDestructionObserver(
+            new AbstractThreadWrapperCleanup(
+                MessageLoopAbstractThreadWrapper::Create(mWorkerLoop)));
     }
 
 
@@ -840,7 +859,9 @@ MessageChannel::CommonThreadOpenInit(MessageChannel *aTargetChan, Side aSide)
     mWorkerLoop->AddDestructionObserver(this);
 
     if (!AbstractThread::GetCurrent()) {
-        mAbstractThread = MessageLoopAbstractThreadWrapper::Create(mWorkerLoop);
+        mWorkerLoop->AddDestructionObserver(
+            new AbstractThreadWrapperCleanup(
+                MessageLoopAbstractThreadWrapper::Create(mWorkerLoop)));
     }
 
     mLink = new ThreadLink(this, aTargetChan);
@@ -873,8 +894,7 @@ bool
 MessageChannel::Send(Message* aMsg)
 {
     if (aMsg->size() >= kMinTelemetryMessageSize) {
-        Telemetry::Accumulate(Telemetry::IPC_MESSAGE_SIZE,
-                              nsDependentCString(aMsg->name()), aMsg->size());
+        Telemetry::Accumulate(Telemetry::IPC_MESSAGE_SIZE2, aMsg->size());
     }
 
     // If the message was created by the IPC bindings, the create time will be
@@ -1088,6 +1108,8 @@ MessageChannel::OnMessageReceivedFromLink(Message&& aMsg)
     if (MaybeInterceptSpecialIOMessage(aMsg))
         return;
 
+    mListener->OnChannelReceivedMessage(aMsg);
+
     // Regardless of the Interrupt stack, if we're awaiting a sync reply,
     // we know that it needs to be immediately handled to unblock us.
     if (aMsg.is_sync() && aMsg.is_reply()) {
@@ -1292,8 +1314,7 @@ MessageChannel::Send(Message* aMsg, Message* aReply)
 {
     mozilla::TimeStamp start = TimeStamp::Now();
     if (aMsg->size() >= kMinTelemetryMessageSize) {
-        Telemetry::Accumulate(Telemetry::IPC_MESSAGE_SIZE,
-                              nsDependentCString(aMsg->name()), aMsg->size());
+        Telemetry::Accumulate(Telemetry::IPC_MESSAGE_SIZE2, aMsg->size());
     }
 
     nsAutoPtr<Message> msg(aMsg);

@@ -26,6 +26,7 @@
 #include "jsprf.h"
 #include "js/Debug.h"
 #include "js/GCAPI.h"
+#include "js/Utility.h"
 #include "nsContentUtils.h"
 #include "nsCycleCollectionNoteRootCallback.h"
 #include "nsCycleCollectionParticipant.h"
@@ -45,6 +46,10 @@
 #include "nsThreadUtils.h"
 #include "xpcpublic.h"
 
+#ifdef MOZ_GECKO_PROFILER
+#include "ProfilerMarkerPayload.h"
+#endif
+
 using namespace mozilla;
 using namespace mozilla::dom;
 
@@ -57,6 +62,7 @@ CycleCollectedJSContext::CycleCollectedJSContext()
   , mDoingStableStates(false)
   , mDisableMicroTaskCheckpoint(false)
 {
+  MOZ_COUNT_CTOR(CycleCollectedJSContext);
   nsCOMPtr<nsIThread> thread = do_GetCurrentThread();
   mOwningThread = thread.forget().downcast<nsThread>().take();
   MOZ_RELEASE_ASSERT(mOwningThread);
@@ -64,6 +70,7 @@ CycleCollectedJSContext::CycleCollectedJSContext()
 
 CycleCollectedJSContext::~CycleCollectedJSContext()
 {
+  MOZ_COUNT_DTOR(CycleCollectedJSContext);
   // If the allocation failed, here we are.
   if (!mJSContext) {
     return;

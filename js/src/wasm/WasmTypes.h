@@ -89,6 +89,7 @@ using mozilla::Unused;
 typedef Vector<uint32_t, 0, SystemAllocPolicy> Uint32Vector;
 typedef Vector<uint8_t, 0, SystemAllocPolicy> Bytes;
 typedef UniquePtr<Bytes> UniqueBytes;
+typedef UniquePtr<const Bytes> UniqueConstBytes;
 typedef Vector<char, 0, SystemAllocPolicy> UTF8Bytes;
 
 typedef int8_t I8x16[16];
@@ -1582,7 +1583,7 @@ struct Frame
 {
     // The caller's Frame*. See GenerateCallableEpilogue for why this must be
     // the first field of wasm::Frame (in a downward-growing stack).
-    uint8_t* callerFP;
+    Frame* callerFP;
 
     // The saved value of WasmTlsReg on entry to the function. This is
     // effectively the callee's instance.

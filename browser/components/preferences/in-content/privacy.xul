@@ -306,35 +306,23 @@
 <groupbox id="passwordsGroup" orient="vertical" data-category="panePrivacy" hidden="true">
   <caption><label>&formsAndPasswords.label;</label></caption>
 
-  <hbox id="savePasswordsBox">
-    <checkbox id="savePasswords"
-              label="&rememberLogins1.label;" accesskey="&rememberLogins1.accesskey;"
-              preference="signon.rememberSignons"
-              onsyncfrompreference="return gPrivacyPane.readSavePasswords();"
-              flex="1" />
-    <button id="passwordExceptions"
-            class="accessory-button"
-            label="&passwordExceptions.label;"
-            accesskey="&passwordExceptions.accesskey;"
-            preference="pref.privacy.disable_button.view_passwords_exceptions"/>
-  </hbox>
   <grid id="passwordGrid">
     <columns>
       <column flex="1"/>
       <column/>
     </columns>
     <rows id="passwordRows">
-      <row id="masterPasswordRow">
-        <hbox id="masterPasswordBox">
-          <checkbox id="useMasterPassword"
-                    label="&useMasterPassword.label;"
-                    accesskey="&useMasterPassword.accesskey;"
-                    flex="1" />
-        </hbox>
-        <button id="changeMasterPassword"
+      <row id="savePasswordsBox">
+        <checkbox id="savePasswords"
+                  label="&rememberLogins1.label;" accesskey="&rememberLogins1.accesskey;"
+                  preference="signon.rememberSignons"
+                  onsyncfrompreference="return gPrivacyPane.readSavePasswords();"
+                  flex="1" />
+        <button id="passwordExceptions"
                 class="accessory-button"
-                label="&changeMasterPassword.label;"
-                accesskey="&changeMasterPassword.accesskey;"/>
+                label="&passwordExceptions.label;"
+                accesskey="&passwordExceptions.accesskey;"
+                preference="pref.privacy.disable_button.view_passwords_exceptions"/>
       </row>
       <row id="showPasswordRow">
         <hbox id="showPasswordsBox"/>
@@ -345,6 +333,16 @@
       </row>
     </rows>
   </grid>
+  <hbox id="masterPasswordRow">
+    <checkbox id="useMasterPassword"
+              label="&useMasterPassword.label;"
+              accesskey="&useMasterPassword.accesskey;"
+              flex="1" />
+    <button id="changeMasterPassword"
+            class="accessory-button"
+            label="&changeMasterPassword.label;"
+            accesskey="&changeMasterPassword.accesskey;"/>
+  </hbox>
 </groupbox>
 
 <!-- Tracking -->
@@ -355,8 +353,7 @@
       <vbox flex="1">
         <description>
           &trackingProtection.description;
-          <label id="trackingProtectionLearnMore" class="learnMore text-link"
-                 value="&trackingProtectionLearnMore.label;"/>
+          <label id="trackingProtectionLearnMore" class="learnMore text-link">&trackingProtectionLearnMore.label;</label>
         </description>
         <description id="trackingProtectionDesc"
                      control="trackingProtectionRadioGroup">
@@ -397,8 +394,7 @@
                 accesskey="&trackingProtectionPBM5.accesskey;"
                 label="&trackingProtectionPBM5.label;" />
       <label id="trackingProtectionPBMLearnMore"
-             class="learnMore text-link"
-             value="&trackingProtectionPBMLearnMore.label;"/>
+             class="learnMore text-link">&trackingProtectionPBMLearnMore.label;</label>
       <spacer flex="1" />
       <button id="changeBlockListPBM"
               label="&changeBlockList.label;" accesskey="&changeBlockList.accesskey;"
@@ -441,8 +437,7 @@
         <hbox flex="1">
           <label id="notificationsPolicy">&notificationsPolicyDesc3.label;</label>
           <label id="notificationsPolicyLearnMore"
-                 class="learnMore text-link"
-                 value="&notificationsPolicyLearnMore.label;"/>
+                 class="learnMore text-link">&notificationsPolicyLearnMore.label;</label>
         </hbox>
         <hbox pack="end">
           <button id="notificationsPolicyButton"
@@ -457,8 +452,7 @@
     <checkbox id="notificationsDoNotDisturb" label="&notificationsDoNotDisturb.label;"
               accesskey="&notificationsDoNotDisturb.accesskey;"/>
     <label id="notificationsDoNotDisturbDetails"
-           class="indent"
-           value="&notificationsDoNotDisturbDetails.value;"/>
+           class="indent">&notificationsDoNotDisturbDetails.value;</label>
   </vbox>
 </groupbox>
 
@@ -570,7 +564,9 @@
         <hbox align="center">
           <checkbox id="playDRMContent" preference="media.eme.enabled"
                     label="&playDRMContent.label;" accesskey="&playDRMContent.accesskey;"/>
-          <label id="playDRMContentLink" class="learnMore text-link" value="&playDRMContent.learnMore.label;"/>
+          <label id="playDRMContentLink" class="learnMore text-link">
+            &playDRMContent.learnMore.label;
+          </label>
         </hbox>
       </row>
     </rows>
@@ -587,8 +583,9 @@
                 accesskey="&browserContainersEnabled.accesskey;"
                 preference="privacy.userContext.enabled"
                 onsyncfrompreference="return gPrivacyPane.readBrowserContainersCheckbox();"/>
-      <label id="browserContainersLearnMore" class="learnMore text-link"
-             value="&browserContainersLearnMore.label;"/>
+      <label id="browserContainersLearnMore" class="learnMore text-link">
+        &browserContainersLearnMore.label;
+      </label>
       <spacer flex="1"/>
       <button id="browserContainersSettings"
               class="accessory-button"

@@ -51,7 +51,6 @@
 #include "nsCSSRuleProcessor.h"
 #include "nsCORSListenerProxy.h"
 #include "nsHTMLDNSPrefetch.h"
-#include "nsHtml5Atoms.h"
 #include "nsHtml5Module.h"
 #include "nsHTMLTags.h"
 #include "nsIRDFContentSink.h"	// for RDF atom initialization
@@ -128,6 +127,7 @@
 #include "mozilla/StaticPresData.h"
 #include "mozilla/dom/WebIDLGlobalNameHash.h"
 #include "mozilla/dom/ipc/IPCBlobInputStreamStorage.h"
+#include "mozilla/dom/U2FTokenManager.h"
 
 using namespace mozilla;
 using namespace mozilla::net;
@@ -158,7 +158,6 @@ nsLayoutStatics::Initialize()
   nsCSSProps::AddRefTable();
   nsColorNames::AddRefTable();
   nsGkAtoms::AddRefAtoms();
-  nsHtml5Atoms::AddRefAtoms();
   nsTextServicesDocument::RegisterAtoms();
   nsHTMLTags::RegisterAtoms();
   nsRDFAtoms::RegisterAtoms();
@@ -319,6 +318,7 @@ nsLayoutStatics::Initialize()
   // This must be initialized on the main-thread.
   mozilla::dom::IPCBlobInputStreamStorage::Initialize();
 
+  mozilla::dom::U2FTokenManager::Initialize();
   return NS_OK;
 }
 

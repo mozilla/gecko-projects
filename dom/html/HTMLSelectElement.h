@@ -443,6 +443,9 @@ public:
   bool OpenInParentProcess();
   void SetOpenInParentProcess(bool aVal);
 
+  void GetPreviewValue(nsAString& aValue);
+  void SetPreviewValue(const nsAString& aValue);
+
 protected:
   virtual ~HTMLSelectElement();
 
@@ -607,6 +610,7 @@ protected:
   /** The options[] array */
   RefPtr<HTMLOptionsCollection> mOptions;
   nsContentUtils::AutocompleteAttrState mAutocompleteAttrState;
+  nsContentUtils::AutocompleteAttrState mAutocompleteInfoState;
   /** false if the parser is in the middle of adding children. */
   bool            mIsDoneAddingChildren;
   /** true if our disabled state has changed from the default **/

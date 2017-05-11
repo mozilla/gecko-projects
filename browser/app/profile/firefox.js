@@ -238,7 +238,7 @@ pref("browser.shell.skipDefaultBrowserCheckOnFirstRun", false);
 #else
 pref("browser.shell.skipDefaultBrowserCheckOnFirstRun", true);
 #endif
-pref("browser.shell.skipDefaultBrowserCheck", true);
+pref("browser.shell.didSkipDefaultBrowserCheckOnFirstRun", false);
 pref("browser.shell.defaultBrowserCheckCount", 0);
 pref("browser.defaultbrowser.notificationbar", false);
 
@@ -359,12 +359,6 @@ pref("browser.download.useDownloadDir", true);
 pref("browser.download.folderList", 1);
 pref("browser.download.manager.addToRecentDocs", true);
 pref("browser.download.manager.resumeOnWakeDelay", 10000);
-
-#ifdef RELEASE_OR_BETA
-pref("browser.download.showPanelDropmarker", false);
-#else
-pref("browser.download.showPanelDropmarker", true);
-#endif
 
 // This allows disabling the animated notifications shown by
 // the Downloads Indicator when a download starts or completes.
@@ -870,6 +864,8 @@ pref("browser.sessionstore.debug", false);
 pref("browser.sessionstore.debug.no_auto_updates", false);
 // Forget closed windows/tabs after two weeks
 pref("browser.sessionstore.cleanup.forget_closed_after", 1209600000);
+// Maximum number of bytes of DOMSessionStorage data we collect per origin.
+pref("browser.sessionstore.dom_storage_limit", 2048);
 
 // allow META refresh by default
 pref("accessibility.blockautorefresh", false);
@@ -1025,7 +1021,7 @@ pref("security.sandbox.windows.log.stackTraceDepth", 0);
 // For information on what the level number means, see
 // SetSecurityLevelForGPUProcess() in
 // security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp
-pref("security.sandbox.gpu.level", 1);
+pref("security.sandbox.gpu.level", 0);
 #endif
 
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
@@ -1156,7 +1152,6 @@ pref("services.sync.prefs.sync.dom.event.contextmenu.enabled", true);
 pref("services.sync.prefs.sync.extensions.personas.current", true);
 pref("services.sync.prefs.sync.extensions.update.enabled", true);
 pref("services.sync.prefs.sync.intl.accept_languages", true);
-pref("services.sync.prefs.sync.javascript.enabled", true);
 pref("services.sync.prefs.sync.layout.spellcheckDefault", true);
 pref("services.sync.prefs.sync.lightweightThemes.selectedThemeID", true);
 pref("services.sync.prefs.sync.lightweightThemes.usedThemes", true);
@@ -1224,7 +1219,7 @@ pref("browser.newtabpage.introShown", false);
 // Toggles the content of 'about:newtab'. Shows the grid when enabled.
 pref("browser.newtabpage.enabled", true);
 
-// Toggles the enhanced content of 'about:newtab'. Shows sponsored tiles.
+// Toggles the directory tiles content of 'about:newtab'.
 sticky_pref("browser.newtabpage.enhanced", true);
 
 // enables Activity Stream inspired layout
@@ -1241,9 +1236,6 @@ pref("browser.newtabpage.columns", 5);
 
 // directory tiles download URL
 pref("browser.newtabpage.directory.source", "https://tiles.services.mozilla.com/v3/links/fetch/%LOCALE%/%CHANNEL%");
-
-// endpoint to send newtab click and view pings
-pref("browser.newtabpage.directory.ping", "https://tiles.services.mozilla.com/v3/links/");
 
 // activates Activity Stream
 pref("browser.newtabpage.activity-stream.enabled", false);
@@ -1641,7 +1633,11 @@ pref("browser.crashReports.unsubmittedCheck.chancesUntilSuppress", 4);
 pref("browser.crashReports.unsubmittedCheck.autoSubmit", false);
 
 // Preferences for the form autofill system extension
+#ifdef NIGHTLY_BUILD
+pref("browser.formautofill.experimental", true);
+#else
 pref("browser.formautofill.experimental", false);
+#endif
 pref("browser.formautofill.enabled", true);
 pref("browser.formautofill.loglevel", "Warn");
 

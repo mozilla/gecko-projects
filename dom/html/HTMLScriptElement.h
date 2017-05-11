@@ -8,16 +8,16 @@
 #define mozilla_dom_HTMLScriptElement_h
 
 #include "nsIDOMHTMLScriptElement.h"
-#include "nsScriptElement.h"
 #include "nsGenericHTMLElement.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/ScriptElement.h"
 
 namespace mozilla {
 namespace dom {
 
 class HTMLScriptElement final : public nsGenericHTMLElement,
                                 public nsIDOMHTMLScriptElement,
-                                public nsScriptElement
+                                public ScriptElement
 {
 public:
   using Element::GetText;
@@ -90,12 +90,15 @@ public:
   }
   bool Async();
   void SetAsync(bool aValue, ErrorResult& rv);
+  bool NoModule();
+  void SetNoModule(bool aValue, ErrorResult& rv);
 
 protected:
   virtual ~HTMLScriptElement();
 
   virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
-  // nsScriptElement
+
+  // ScriptElement
   virtual bool HasScriptContent() override;
 };
 

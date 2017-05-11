@@ -57,7 +57,6 @@ var whitelist = new Set([
   {file: "chrome://global/locale/printjoboptions.dtd",
    platforms: ["macosx", "win"]},
 
-  // services/cloudsync/CloudSyncLocal.jsm
   {file: "chrome://weave/locale/errors.properties"},
 
   // devtools/client/inspector/bin/dev-server.js
@@ -121,10 +120,6 @@ var whitelist = new Set([
   // Bug 1339424 (wontfix?)
   {file: "chrome://browser/locale/taskbar.properties",
    platforms: ["linux", "macosx"]},
-  // Bug 1320156
-  {file: "chrome://browser/skin/Privacy-16.png", platforms: ["linux"]},
-  // Bug 1343584
-  {file: "chrome://browser/skin/click-to-play-warning-stripes.png"},
   // Bug 1343824
   {file: "chrome://browser/skin/customizableui/customize-illustration-rtl@2x.png",
    platforms: ["linux", "win"]},
@@ -190,8 +185,6 @@ var whitelist = new Set([
   {file: "chrome://global/skin/icons/warning-64.png", platforms: ["linux", "win"]},
   {file: "chrome://global/skin/icons/warning-large.png", platforms: ["linux"]},
   {file: "chrome://global/skin/icons/windowControls.png", platforms: ["linux"]},
-  // Bug 1348521
-  {file: "chrome://global/skin/linkTree.css"},
   // Bug 1348522
   {file: "chrome://global/skin/media/clicktoplay-bgtexture.png"},
   {file: "chrome://global/skin/media/videoClickToPlayButton.svg"},
@@ -214,10 +207,6 @@ var whitelist = new Set([
   // Bug 1348533
   {file: "chrome://mozapps/skin/downloads/buttons.png", platforms: ["macosx"]},
   {file: "chrome://mozapps/skin/downloads/downloadButtons.png", platforms: ["linux", "win"]},
-  // Bug 1348555
-  {file: "chrome://mozapps/skin/extensions/dictionaryGeneric-16.png"},
-  {file: "chrome://mozapps/skin/extensions/search.png", platforms: ["macosx"]},
-  {file: "chrome://mozapps/skin/extensions/themeGeneric-16.png"},
   // Bug 1348556
   {file: "chrome://mozapps/skin/plugins/pluginBlocked.png"},
   // Bug 1348558
@@ -235,10 +224,6 @@ var whitelist = new Set([
   {file: "resource://gre/modules/Manifest.jsm"},
   // Bug 1351089
   {file: "resource://gre/modules/PresentationDeviceInfoManager.jsm"},
-  // Bug 1351091
-  {file: "resource://gre/modules/Profiler.jsm"},
-  // Bug 1351658
-  {file: "resource://gre/modules/PropertyListUtils.jsm", platforms: ["linux", "win"]},
   // Bug 1351097
   {file: "resource://gre/modules/accessibility/AccessFu.jsm"},
   // Bug 1351637

@@ -1169,6 +1169,11 @@ _posturlnotify(NPP aNPP,
     if (!aBuffer)
         return NPERR_INVALID_PARAM;
 
+    if (aIsFile) {
+      PLUGIN_LOG_DEBUG(("NPN_PostURLNotify with file=true is no longer supported"));
+      return NPERR_GENERIC_ERROR;
+    }
+
     nsCString url = NullableString(aRelativeURL);
     auto* sn = new StreamNotifyChild(url);
 
@@ -1197,6 +1202,10 @@ _posturl(NPP aNPP,
     PLUGIN_LOG_DEBUG_FUNCTION;
     ENSURE_PLUGIN_THREAD(NPERR_INVALID_PARAM);
 
+    if (aIsFile) {
+      PLUGIN_LOG_DEBUG(("NPN_PostURL with file=true is no longer supported"));
+      return NPERR_GENERIC_ERROR;
+    }
     NPError err;
     // FIXME what should happen when |aBuffer| is null?
     InstCast(aNPP)->CallNPN_PostURL(NullableString(aRelativeURL),
@@ -2659,19 +2668,13 @@ PluginModuleChild::ProcessNativeEvents() {
 mozilla::ipc::IPCResult
 PluginModuleChild::RecvStartProfiler(const ProfilerInitParams& params)
 {
-    nsTArray<const char*> featureArray;
-    for (size_t i = 0; i < params.features().Length(); ++i) {
-        featureArray.AppendElement(params.features()[i].get());
+    nsTArray<const char*> filterArray;
+    for (size_t i = 0; i < params.filters().Length(); ++i) {
+        filterArray.AppendElement(params.filters()[i].get());
     }
 
-    nsTArray<const char*> threadNameFilterArray;
-    for (size_t i = 0; i < params.threadFilters().Length(); ++i) {
-        threadNameFilterArray.AppendElement(params.threadFilters()[i].get());
-    }
-
-    profiler_start(params.entries(), params.interval(),
-                   featureArray.Elements(), featureArray.Length(),
-                   threadNameFilterArray.Elements(), threadNameFilterArray.Length());
+    profiler_start(params.entries(), params.interval(), params.features(),
+                   filterArray.Elements(), filterArray.Length());
 
     return IPC_OK();
 }

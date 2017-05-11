@@ -34,7 +34,6 @@
 #include "nsIPipe.h"
 #include "nsIOutputStream.h"
 #include "nsPrintfCString.h"
-#include "nsScriptLoader.h"
 #include "nsString.h"
 #include "nsStreamUtils.h"
 #include "nsTArray.h"
@@ -58,6 +57,7 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/Response.h"
+#include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/SRILogHelper.h"
 #include "mozilla/UniquePtr.h"
@@ -427,7 +427,7 @@ private:
 NS_IMPL_ISUPPORTS0(CacheCreator)
 
 class CacheScriptLoader final : public PromiseNativeHandler
-                                  , public nsIStreamLoaderObserver
+                              , public nsIStreamLoaderObserver
 {
 public:
   NS_DECL_ISUPPORTS
@@ -556,7 +556,8 @@ NS_IMPL_ISUPPORTS(LoaderListener, nsIStreamLoaderObserver, nsIRequestObserver)
 
 class ScriptLoaderHolder;
 
-class ScriptLoaderRunnable final : public nsIRunnable
+class ScriptLoaderRunnable final : public nsIRunnable,
+                                   public nsINamed
 {
   friend class ScriptExecutorRunnable;
   friend class ScriptLoaderHolder;
@@ -609,6 +610,19 @@ private:
     }
 
     return NS_OK;
+  }
+
+  NS_IMETHOD
+  GetName(nsACString& aName) override
+  {
+    aName.AssignASCII("ScriptLoaderRunnable");
+    return NS_OK;
+  }
+
+  NS_IMETHOD
+  SetName(const char* aName) override
+  {
+    return NS_ERROR_NOT_IMPLEMENTED;
   }
 
   void
@@ -1078,14 +1092,14 @@ private:
     // May be null.
     nsIDocument* parentDoc = mWorkerPrivate->GetDocument();
 
-    // Use the regular nsScriptLoader for this grunt work! Should be just fine
+    // Use the regular ScriptLoader for this grunt work! Should be just fine
     // because we're running on the main thread.
     // Unlike <script> tags, Worker scripts are always decoded as UTF-8,
     // per spec. So we explicitly pass in the charset hint.
-    rv = nsScriptLoader::ConvertToUTF16(aLoadInfo.mChannel, aString, aStringLen,
-                                        NS_LITERAL_STRING("UTF-8"), parentDoc,
-                                        aLoadInfo.mScriptTextBuf,
-                                        aLoadInfo.mScriptTextLength);
+    rv = ScriptLoader::ConvertToUTF16(aLoadInfo.mChannel, aString, aStringLen,
+                                      NS_LITERAL_STRING("UTF-8"), parentDoc,
+                                      aLoadInfo.mScriptTextBuf,
+                                      aLoadInfo.mScriptTextLength);
     if (NS_FAILED(rv)) {
       return rv;
     }
@@ -1212,10 +1226,10 @@ private:
     MOZ_ASSERT(!loadInfo.mScriptTextBuf);
 
     nsresult rv =
-      nsScriptLoader::ConvertToUTF16(nullptr, aString, aStringLen,
-                                     NS_LITERAL_STRING("UTF-8"), parentDoc,
-                                     loadInfo.mScriptTextBuf,
-                                     loadInfo.mScriptTextLength);
+      ScriptLoader::ConvertToUTF16(nullptr, aString, aStringLen,
+                                   NS_LITERAL_STRING("UTF-8"), parentDoc,
+                                   loadInfo.mScriptTextBuf,
+                                   loadInfo.mScriptTextLength);
     if (NS_SUCCEEDED(rv) && IsMainWorkerScript()) {
       nsCOMPtr<nsIURI> finalURI;
       rv = NS_NewURI(getter_AddRefs(finalURI), loadInfo.mFullURL, nullptr, nullptr);
@@ -1334,7 +1348,7 @@ private:
   }
 };
 
-NS_IMPL_ISUPPORTS(ScriptLoaderRunnable, nsIRunnable)
+NS_IMPL_ISUPPORTS(ScriptLoaderRunnable, nsIRunnable, nsINamed)
 
 class MOZ_STACK_CLASS ScriptLoaderHolder final : public WorkerHolder
 {

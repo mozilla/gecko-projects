@@ -9,6 +9,7 @@ import math
 import os
 import re
 import sys
+import shared_telemetry_utils as utils
 
 from shared_telemetry_utils import ParserError
 from collections import OrderedDict
@@ -65,11 +66,12 @@ def exponential_buckets(dmin, dmax, n_buckets):
 
 always_allowed_keys = ['kind', 'description', 'cpp_guard', 'expires_in_version',
                        'alert_emails', 'keyed', 'releaseChannelCollection',
-                       'bug_numbers']
+                       'bug_numbers', 'record_in_processes']
 
 whitelists = None
 try:
-    whitelist_path = os.path.join(os.path.abspath(os.path.realpath(os.path.dirname(__file__))), 'histogram-whitelists.json')
+    whitelist_path = os.path.join(os.path.abspath(os.path.realpath(os.path.dirname(__file__))),
+                                  'histogram-whitelists.json')
     with open(whitelist_path, 'r') as f:
         try:
             whitelists = json.load(f)
@@ -79,7 +81,8 @@ try:
             raise ParserError('Error parsing whitelist: %s' % whitelist_path)
 except IOError:
     whitelists = None
-    print 'Unable to parse whitelist: %s.\nAssuming all histograms are acceptable.' % whitelist_path
+    print('Unable to parse whitelist: %s.\nAssuming all histograms are acceptable.' %
+          whitelist_path)
 
 
 class Histogram:
@@ -100,6 +103,8 @@ The key 'cpp_guard' is optional; if present, it denotes a preprocessor
 symbol that should guard C/C++ definitions associated with the histogram."""
         self._strict_type_checks = strict_type_checks
         self._is_use_counter = name.startswith("USE_COUNTER2_")
+        if self._is_use_counter:
+            definition.setdefault('record_in_processes', ['main', 'content'])
         self.verify_attributes(name, definition)
         self._name = name
         self._description = definition['description']
@@ -164,6 +169,14 @@ associated with the histogram.  Returns None if no guarding is necessary."""
     def labels(self):
         """Returns a list of labels for a categorical histogram, [] for others."""
         return self._labels
+
+    def record_in_processes(self):
+        """Returns a list of processes this histogram is permitted to record in."""
+        return self.definition['record_in_processes']
+
+    def record_in_processes_enum(self):
+        """Get the non-empty list of flags representing the processes to record data in"""
+        return [utils.process_name_to_enum(p) for p in self.record_in_processes]
 
     def ranges(self):
         """Return an array of lower bounds for each bucket in the histogram."""
@@ -230,6 +243,7 @@ associated with the histogram.  Returns None if no guarding is necessary."""
         self.check_whitelistable_fields(name, definition)
         self.check_expiration(name, definition)
         self.check_label_values(name, definition)
+        self.check_record_in_processes(name, definition)
 
     def check_name(self, name):
         if '#' in name:
@@ -237,7 +251,8 @@ associated with the histogram.  Returns None if no guarding is necessary."""
 
         # Avoid C++ identifier conflicts between histogram enums and label enum names.
         if name.startswith("LABELS_"):
-            raise ParserError('Error for histogram name "%s":  can not start with "LABELS_".' % (name))
+            raise ParserError('Error for histogram name "%s":  can not start with "LABELS_".' %
+                              (name))
 
         # To make it easier to generate C++ identifiers from this etc., we restrict
         # the histogram names to a strict pattern.
@@ -245,7 +260,8 @@ associated with the histogram.  Returns None if no guarding is necessary."""
         if self._strict_type_checks:
             pattern = '^[a-z][a-z0-9_]+[a-z0-9]$'
             if not re.match(pattern, name, re.IGNORECASE):
-                raise ParserError('Error for histogram name "%s": name does not conform to "%s"' % (name, pattern))
+                raise ParserError('Error for histogram name "%s": name does not conform to "%s"' %
+                                  (name, pattern))
 
     def check_expiration(self, name, definition):
         field = 'expires_in_version'
@@ -287,6 +303,18 @@ associated with the histogram.  Returns None if no guarding is necessary."""
         if len(invalid) > 0:
             raise ParserError('Label values for %s are not matching pattern "%s": %s' %
                               (name, pattern, ', '.join(invalid)))
+
+    def check_record_in_processes(self, name, definition):
+        field = 'record_in_processes'
+        rip = definition.get(field)
+
+        if not rip:
+            raise ParserError('Histogram "%s" must have a "%s" field.' % (name, field))
+
+        for process in rip:
+            if not utils.is_valid_process_name(process):
+                raise ParserError('Histogram "%s" has unknown process "%s" in %s.' %
+                                  (name, process, field))
 
     def check_whitelisted_kind(self, name, definition):
         # We don't need to run any of these checks on the server.
@@ -330,7 +358,8 @@ associated with the histogram.  Returns None if no guarding is necessary."""
             if field not in definition and name not in whitelists[field]:
                 raise ParserError('New histogram "%s" must have a "%s" field.' % (name, field))
             if field in definition and name in whitelists[field]:
-                msg = 'Histogram "%s" should be removed from the whitelist for "%s" in histogram-whitelists.json.'
+                msg = 'Histogram "%s" should be removed from the whitelist for "%s" in ' \
+                      'histogram-whitelists.json.'
                 raise ParserError(msg % (name, field))
 
     def check_field_types(self, name, definition):
@@ -353,6 +382,7 @@ associated with the histogram.  Returns None if no guarding is necessary."""
             "bug_numbers": int,
             "alert_emails": basestring,
             "labels": basestring,
+            "record_in_processes": basestring,
         }
 
         # For the server-side, where _strict_type_checks==False, we want to
@@ -387,8 +417,8 @@ associated with the histogram.  Returns None if no guarding is necessary."""
             if key not in definition:
                 continue
             if not all(isinstance(x, key_type) for x in definition[key]):
-                raise ParserError('All values for list "{0}" in histogram "{1}" should be of type {2}.'
-                                  .format(key, name, nice_type_name(key_type)))
+                raise ParserError('All values for list "{0}" in histogram "{1}" should be of type'
+                                  ' {2}.'.format(key, name, nice_type_name(key_type)))
 
     def check_keys(self, name, definition, allowed_keys):
         for key in definition.iterkeys():
@@ -401,11 +431,14 @@ associated with the histogram.  Returns None if no guarding is necessary."""
         self._n_buckets = n_buckets
         if whitelists is not None and self._n_buckets > 100 and type(self._n_buckets) is int:
             if self._name not in whitelists['n_buckets']:
-                raise ParserError('New histogram "%s" is not permitted to have more than 100 buckets.\n'
-                                  'Histograms with large numbers of buckets use disproportionately high amounts of resources. '
-                                  'Contact a Telemetry peer (e.g. in #telemetry) if you think an exception ought to be made:\n'
-                                  'https://wiki.mozilla.org/Modules/Toolkit#Telemetry'
-                                  % self._name)
+                raise ParserError(
+                    'New histogram "%s" is not permitted to have more than 100 buckets.\n'
+                    'Histograms with large numbers of buckets use disproportionately high'
+                    ' amounts of resources. Contact a Telemetry peer (e.g. in #telemetry)'
+                    ' if you think an exception ought to be made:\n'
+                    'https://wiki.mozilla.org/Modules/Toolkit#Telemetry'
+                    % self._name
+                    )
 
     @staticmethod
     def boolean_flag_bucket_parameters(definition):
@@ -425,7 +458,8 @@ associated with the histogram.  Returns None if no guarding is necessary."""
     @staticmethod
     def categorical_bucket_parameters(definition):
         # Categorical histograms default to 50 buckets to make working with them easier.
-        # Otherwise when adding labels later we run into problems with the pipeline not supporting bucket changes.
+        # Otherwise when adding labels later we run into problems with the pipeline not
+        # supporting bucket changes.
         # This can be overridden using the n_values field.
         n_values = max(len(definition['labels']),
                        definition.get('n_values', 0),
@@ -463,7 +497,8 @@ associated with the histogram.  Returns None if no guarding is necessary."""
 
         value = definition.get('releaseChannelCollection', 'opt-in')
         if value not in datasets:
-            raise ParserError('Unknown value for releaseChannelCollection policy for histogram "%s".' % self._name)
+            raise ParserError('Unknown value for releaseChannelCollection'
+                              ' policy for histogram "%s".' % self._name)
 
         self._dataset = "nsITelemetry::" + datasets[value]
 
@@ -567,12 +602,14 @@ the histograms defined in filenames.
         if n_counters != len(use_counter_indices):
             raise ParserError("Use counter histograms must be defined in a contiguous block.")
 
-    # Check that histograms that were removed from Histograms.json etc. are also removed from the whitelists.
+    # Check that histograms that were removed from Histograms.json etc.
+    # are also removed from the whitelists.
     if whitelists is not None:
         all_whitelist_entries = itertools.chain.from_iterable(whitelists.itervalues())
         orphaned = set(all_whitelist_entries) - set(all_histograms.keys())
         if len(orphaned) > 0:
-            msg = 'The following entries are orphaned and should be removed from histogram-whitelists.json:\n%s'
+            msg = 'The following entries are orphaned and should be removed from ' \
+                  'histogram-whitelists.json:\n%s'
             raise ParserError(msg % (', '.join(sorted(orphaned))))
 
     for (name, definition) in all_histograms.iteritems():

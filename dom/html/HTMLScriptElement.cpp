@@ -38,7 +38,7 @@ HTMLScriptElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 HTMLScriptElement::HTMLScriptElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo,
                                      FromParser aFromParser)
   : nsGenericHTMLElement(aNodeInfo)
-  , nsScriptElement(aFromParser)
+  , ScriptElement(aFromParser)
 {
   AddMutationObserver(this);
 }
@@ -218,6 +218,18 @@ HTMLScriptElement::SetAsync(bool aValue, ErrorResult& rv)
 {
   mForceAsync = false;
   SetHTMLBoolAttr(nsGkAtoms::async, aValue, rv);
+}
+
+bool
+HTMLScriptElement::NoModule()
+{
+  return GetBoolAttr(nsGkAtoms::nomodule);
+}
+
+void
+HTMLScriptElement::SetNoModule(bool aValue, ErrorResult& aRv)
+{
+  SetHTMLBoolAttr(nsGkAtoms::nomodule, aValue, aRv);
 }
 
 nsresult

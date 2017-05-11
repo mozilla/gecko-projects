@@ -35,6 +35,7 @@
 #include "mozilla/layers/IAPZCTreeManager.h"
 #include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/InputAPZContext.h"
+#include "mozilla/layers/PLayerTransactionChild.h"
 #include "mozilla/layers/ShadowLayers.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/layout/RenderFrameChild.h"
@@ -2713,11 +2714,9 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
     if (lf) {
       nsTArray<LayersBackend> backends;
       backends.AppendElement(mTextureFactoryIdentifier.mParentBackend);
-      bool success;
       PLayerTransactionChild* shadowManager =
-          compositorChild->SendPLayerTransactionConstructor(backends,
-                                                            aLayersId, &mTextureFactoryIdentifier, &success);
-      if (shadowManager && success) {
+          compositorChild->SendPLayerTransactionConstructor(backends, aLayersId);
+      if (shadowManager) {
         lf->SetShadowManager(shadowManager);
         lf->IdentifyTextureHost(mTextureFactoryIdentifier);
         ImageBridgeChild::IdentifyCompositorTextureHost(mTextureFactoryIdentifier);
@@ -3100,17 +3099,17 @@ TabChild::ReinitRendering()
                                               wr::AsPipelineId(mLayersId),
                                               &mTextureFactoryIdentifier);
   } else {
-    bool success;
+    bool success = false;
     nsTArray<LayersBackend> ignored;
-    PLayerTransactionChild* shadowManager =
-      cb->SendPLayerTransactionConstructor(ignored, LayersId(), &mTextureFactoryIdentifier, &success);
+    PLayerTransactionChild* shadowManager = cb->SendPLayerTransactionConstructor(ignored, LayersId());
+    if (shadowManager &&
+        shadowManager->SendGetTextureFactoryIdentifier(&mTextureFactoryIdentifier) &&
+        mTextureFactoryIdentifier.mParentBackend != LayersBackend::LAYERS_NONE)
+    {
+      success = true;
+    }
     if (!success) {
       NS_WARNING("failed to re-allocate layer transaction");
-      return;
-    }
-
-    if (!shadowManager) {
-      NS_WARNING("failed to re-construct LayersChild");
       return;
     }
 
@@ -3322,7 +3321,8 @@ TabChild::ForcePaint(uint64_t aLayerObserverEpoch)
 void
 TabChild::BeforeUnloadAdded()
 {
-  if (mBeforeUnloadListeners == 0) {
+  // Don't bother notifying the parent if we don't have an IPC link open.
+  if (mBeforeUnloadListeners == 0 && IPCOpen()) {
     SendSetHasBeforeUnload(true);
   }
 
@@ -3336,7 +3336,8 @@ TabChild::BeforeUnloadRemoved()
   mBeforeUnloadListeners--;
   MOZ_ASSERT(mBeforeUnloadListeners >= 0);
 
-  if (mBeforeUnloadListeners == 0) {
+  // Don't bother notifying the parent if we don't have an IPC link open.
+  if (mBeforeUnloadListeners == 0 && IPCOpen()) {
     SendSetHasBeforeUnload(false);
   }
 }

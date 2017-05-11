@@ -563,16 +563,16 @@ DocumentRule::List(FILE* out, int32_t aIndent) const
   str.AppendLiteral("@-moz-document ");
   for (URL *url = mURLs; url; url = url->next) {
     switch (url->func) {
-      case eURL:
+      case URLMatchingFunction::eURL:
         str.AppendLiteral("url(\"");
         break;
-      case eURLPrefix:
+      case URLMatchingFunction::eURLPrefix:
         str.AppendLiteral("url-prefix(\"");
         break;
-      case eDomain:
+      case URLMatchingFunction::eDomain:
         str.AppendLiteral("domain(\"");
         break;
-      case eRegExp:
+      case URLMatchingFunction::eRegExp:
         str.AppendLiteral("regexp(\"");
         break;
     }
@@ -680,37 +680,56 @@ DocumentRule::UseForPresentation(nsPresContext* aPresContext)
   }
 
   for (URL *url = mURLs; url; url = url->next) {
-    switch (url->func) {
-      case eURL: {
-        if (docURISpec == url->url)
-          return true;
-      } break;
-      case eURLPrefix: {
-        if (StringBeginsWith(docURISpec, url->url))
-          return true;
-      } break;
-      case eDomain: {
-        nsAutoCString host;
-        if (docURI)
-          docURI->GetHost(host);
-        int32_t lenDiff = host.Length() - url->url.Length();
-        if (lenDiff == 0) {
-          if (host == url->url)
-            return true;
-        } else {
-          if (StringEndsWith(host, url->url) &&
-              host.CharAt(lenDiff - 1) == '.')
-            return true;
-        }
-      } break;
-      case eRegExp: {
-        NS_ConvertUTF8toUTF16 spec(docURISpec);
-        NS_ConvertUTF8toUTF16 regex(url->url);
-        if (nsContentUtils::IsPatternMatching(spec, regex, doc)) {
-          return true;
-        }
-      } break;
+    if (UseForPresentation(doc, docURI, docURISpec, url->url, url->func)) {
+      return true;
     }
+  }
+
+  return false;
+}
+
+bool
+DocumentRule::UseForPresentation(nsIDocument* aDoc,
+                                 nsIURI* aDocURI,
+                                 const nsACString& aDocURISpec,
+                                 const nsACString& aPattern,
+                                 URLMatchingFunction aUrlMatchingFunction)
+{
+  switch (aUrlMatchingFunction) {
+    case URLMatchingFunction::eURL: {
+      if (aDocURISpec == aPattern) {
+        return true;
+      }
+    } break;
+    case URLMatchingFunction::eURLPrefix: {
+      if (StringBeginsWith(aDocURISpec, aPattern)) {
+        return true;
+      }
+    } break;
+    case URLMatchingFunction::eDomain: {
+      nsAutoCString host;
+      if (aDocURI) {
+        aDocURI->GetHost(host);
+      }
+      int32_t lenDiff = host.Length() - aPattern.Length();
+      if (lenDiff == 0) {
+        if (host == aPattern) {
+          return true;
+        }
+      } else {
+        if (StringEndsWith(host, aPattern) &&
+            host.CharAt(lenDiff - 1) == '.') {
+          return true;
+        }
+      }
+    } break;
+    case URLMatchingFunction::eRegExp: {
+      NS_ConvertUTF8toUTF16 spec(aDocURISpec);
+      NS_ConvertUTF8toUTF16 regex(aPattern);
+      if (nsContentUtils::IsPatternMatching(spec, regex, aDoc)) {
+        return true;
+      }
+    } break;
   }
 
   return false;
@@ -746,16 +765,16 @@ DocumentRule::AppendConditionText(nsAString& aCssText) const
 {
   for (URL *url = mURLs; url; url = url->next) {
     switch (url->func) {
-      case eURL:
+      case URLMatchingFunction::eURL:
         aCssText.AppendLiteral("url(");
         break;
-      case eURLPrefix:
+      case URLMatchingFunction::eURLPrefix:
         aCssText.AppendLiteral("url-prefix(");
         break;
-      case eDomain:
+      case URLMatchingFunction::eDomain:
         aCssText.AppendLiteral("domain(");
         break;
-      case eRegExp:
+      case URLMatchingFunction::eRegExp:
         aCssText.AppendLiteral("regexp(");
         break;
     }
@@ -1081,6 +1100,9 @@ nsCSSFontFaceStyleDecl::SetProperty(const nsAString & propertyName,
                                     const nsAString & value,
                                     const nsAString & priority)
 {
+  // FIXME(heycam): If we are changing unicode-range, then a FontFace object
+  // representing this rule must have its mUnicodeRange value invalidated.
+
   return NS_ERROR_NOT_IMPLEMENTED; // bug 443978
 }
 
@@ -1166,7 +1188,7 @@ nsCSSFontFaceStyleDecl::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenPr
 
 // -------------------------------------------
 // nsCSSFontFaceRule
-// 
+//
 
 /* virtual */ already_AddRefed<css::Rule>
 nsCSSFontFaceRule::Clone() const
@@ -1295,6 +1317,9 @@ nsCSSFontFaceRule::SetDesc(nsCSSFontDesc aDescID, nsCSSValue const & aValue)
                   "aDescID out of range in nsCSSFontFaceRule::SetDesc");
 
   // FIXME: handle dynamic changes
+
+  // FIXME(heycam): If we are changing unicode-range, then a FontFace object
+  // representing this rule must have its mUnicodeRange value invalidated.
 
   mDecl.mDescriptors.Get(aDescID) = aValue;
 }
@@ -2419,8 +2444,9 @@ nsCSSCounterStyleRule::List(FILE* out, int32_t aIndent) const
   descInd = baseInd;
   descInd.AppendLiteral("  ");
 
+  nsDependentAtomString name(mName);
   fprintf_stderr(out, "%s@counter-style %s (rev.%u) {\n",
-                 baseInd.get(), NS_ConvertUTF16toUTF8(mName).get(),
+                 baseInd.get(), NS_ConvertUTF16toUTF8(name).get(),
                  mGeneration);
   // TODO
   fprintf_stderr(out, "%s}\n", baseInd.get());
@@ -2443,7 +2469,8 @@ void
 nsCSSCounterStyleRule::GetCssTextImpl(nsAString& aCssText) const
 {
   aCssText.AssignLiteral(u"@counter-style ");
-  nsStyleUtil::AppendEscapedCSSIdent(mName, aCssText);
+  nsDependentAtomString name(mName);
+  nsStyleUtil::AppendEscapedCSSIdent(name, aCssText);
   aCssText.AppendLiteral(u" {\n");
   for (nsCSSCounterDesc id = nsCSSCounterDesc(0);
        id < eCSSCounterDesc_COUNT;
@@ -2469,7 +2496,8 @@ NS_IMETHODIMP
 nsCSSCounterStyleRule::GetName(nsAString& aName)
 {
   aName.Truncate();
-  nsStyleUtil::AppendEscapedCSSIdent(mName, aName);
+  nsDependentAtomString name(mName);
+  nsStyleUtil::AppendEscapedCSSIdent(name, aName);
   return NS_OK;
 }
 
@@ -2477,8 +2505,7 @@ NS_IMETHODIMP
 nsCSSCounterStyleRule::SetName(const nsAString& aName)
 {
   nsCSSParser parser;
-  nsAutoString name;
-  if (parser.ParseCounterStyleName(aName, nullptr, name)) {
+  if (nsCOMPtr<nsIAtom> name = parser.ParseCounterStyleName(aName, nullptr)) {
     nsIDocument* doc = GetDocument();
     MOZ_AUTO_DOC_UPDATE(doc, UPDATE_STYLE, true);
 
@@ -2669,13 +2696,18 @@ nsCSSCounterStyleRule::GetSpeakAs(nsAString& aSpeakAs)
       break;
 
     case eCSSUnit_Auto:
-    case eCSSUnit_Ident:
+    case eCSSUnit_AtomIdent:
       aSpeakAs.Truncate();
       value.AppendToString(eCSSProperty_UNKNOWN,
                            aSpeakAs, nsCSSValue::eNormalized);
       break;
 
+    case eCSSUnit_Null:
+      aSpeakAs.Truncate();
+      break;
+
     default:
+      NS_NOTREACHED("Unknown speech synthesis");
       aSpeakAs.Truncate();
   }
   return NS_OK;

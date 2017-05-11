@@ -130,7 +130,7 @@ load 364427-1.html
 load 365909-1.xhtml
 load 365909-2.xhtml
 skip-if(stylo) load 366128-1.xhtml # bug 1361235
-load 366271-1.html
+skip-if(stylo) load 366271-1.html # bug 1363000
 load 366967-1.html
 load 367015-1.html
 load 367243-1.html
@@ -491,3 +491,4 @@ load 1338772-1.html
 load 1343937.html
 asserts(0-1) load 1343606.html # bug 1343948
 load 1352380.html
+load 1362423-1.html

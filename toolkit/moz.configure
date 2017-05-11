@@ -405,6 +405,20 @@ set_config('MOZ_FFMPEG', ffmpeg)
 set_define('MOZ_FFMPEG', ffmpeg)
 imply_option('--enable-fmp4', ffmpeg, '--enable-ffmpeg')
 
+# Libaom AV1 Video Codec Support
+# ==============================================================
+option('--enable-av1',
+        help='Enable libaom for av1 video support')
+
+@depends('--enable-av1')
+def av1(value):
+    enabled = bool(value)
+    if enabled:
+        return True
+
+set_config('MOZ_AV1', av1)
+set_define('MOZ_AV1', av1)
+
 # Built-in fragmented MP4 support.
 # ==============================================================
 option('--disable-fmp4', env='MOZ_FMP4',
@@ -520,12 +534,33 @@ project_flag('MOZ_SERVICES_HEALTHREPORT',
 project_flag('MOZ_SERVICES_SYNC',
              help='Build Sync Services if required')
 
-project_flag('MOZ_SERVICES_CLOUDSYNC',
-             help='Build Services/CloudSync if required')
-
 project_flag('MOZ_ANDROID_HISTORY',
              help='Enable Android History instead of Places',
              set_as_define=True)
+
+option(env='MOZ_PHOTON_ANIMATIONS',
+       help='Enable Photon UI animations',
+       default=is_nightly)
+
+@depends('MOZ_PHOTON_ANIMATIONS')
+def photon_animations(value):
+    if value:
+        return bool(value)
+
+set_config('MOZ_PHOTON_ANIMATIONS', photon_animations)
+set_define('MOZ_PHOTON_ANIMATIONS', photon_animations)
+
+option(env='MOZ_PHOTON_THEME',
+       help='Enable Photon theme',
+       default=is_nightly)
+
+@depends('MOZ_PHOTON_THEME')
+def photon_theme(value):
+    if value:
+        return bool(value)
+
+set_config('MOZ_PHOTON_THEME', photon_theme)
+set_define('MOZ_PHOTON_THEME', photon_theme)
 
 @depends('MOZ_PLACES', 'MOZ_ANDROID_HISTORY')
 def check_places_and_android_history(places, android_history):
@@ -587,7 +622,11 @@ option('--enable-stylo', env='STYLO_ENABLED', nargs=0,
 # configure options.  The Windows installer of LLVM/Clang doesn't provide
 # llvm-config, so we need both methods to support all of our tier-1
 # platforms.
-llvm_config = check_prog('LLVM_CONFIG', ('llvm-config-3.9', 'llvm-config39', 'llvm-config',),
+llvm_config = check_prog('LLVM_CONFIG', ('llvm-config-4.0',
+                                         'llvm-config40',
+                                         'llvm-config-3.9',
+                                         'llvm-config39',
+                                         'llvm-config',),
                          what='llvm-config', allow_missing=True)
 
 option('--disable-stylo-build-bindgen',
@@ -609,12 +648,11 @@ def check_minimum_llvm_config_version(llvm_config):
     version = Version(invoke_llvm_config(llvm_config, '--version'))
     min_version = Version('3.9.0')
     # For various reasons, bindgen doesn't work with LLVM 4.0.x.
-    if version < min_version or (version >= Version('4.0.0') and
-                                 version < Version('5.0.0')):
+    if version < min_version:
         die(dedent('''\
         llvm installation {} is incompatible with Stylo bindgen.
 
-        To compile Stylo, please install version {} of
+        To compile Stylo, please install version {} or greater of
         Clang + LLVM and ensure that the 'llvm-config' from that
         installation is first on your path.
 

@@ -30,13 +30,13 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Services.h"
+#include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/ScriptSettings.h"
 
 #include "nsContentUtils.h"
 #include "nsCCUncollectableMarker.h"
 #include "nsCycleCollectionNoteRootCallback.h"
 #include "nsCycleCollector.h"
-#include "nsScriptLoader.h"
 #include "jsapi.h"
 #include "jsprf.h"
 #include "js/MemoryMetrics.h"
@@ -1221,6 +1221,7 @@ XPCJSRuntime::Shutdown(JSContext* cx)
 
 XPCJSRuntime::~XPCJSRuntime()
 {
+    MOZ_COUNT_DTOR_INHERITED(XPCJSRuntime, CycleCollectedJSRuntime);
 }
 
 // If |*anonymizeID| is non-zero and this is a user compartment, the name will
@@ -2891,8 +2892,8 @@ ReadSourceFromFilename(JSContext* cx, const char* filename, char16_t** src, size
         ptr += bytesRead;
     }
 
-    rv = nsScriptLoader::ConvertToUTF16(scriptChannel, buf.get(), rawLen, EmptyString(),
-                                        nullptr, *src, *len);
+    rv = ScriptLoader::ConvertToUTF16(scriptChannel, buf.get(), rawLen,
+                                      EmptyString(), nullptr, *src, *len);
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (!*src)
@@ -2952,6 +2953,7 @@ XPCJSRuntime::XPCJSRuntime(JSContext* aCx)
    mObjectHolderRoots(nullptr),
    mAsyncSnowWhiteFreer(new AsyncFreeSnowWhite())
 {
+    MOZ_COUNT_CTOR_INHERITED(XPCJSRuntime, CycleCollectedJSRuntime);
 }
 
 /* static */
