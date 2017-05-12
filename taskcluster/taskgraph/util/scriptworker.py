@@ -105,6 +105,7 @@ BEETMOVER_SCOPE_ALIAS_TO_TARGET_TASK = [[
         'nightly_macosx',
         'mozilla_beta_tasks',
         'mozilla_release_tasks',
+        'date_tasks',
     ])
 ], [
     'all-release-tasks', BEETMOVER_RELEASE_TARGET_TASKS
@@ -209,8 +210,10 @@ BALROG_CHANNEL_SCOPES = {
 
 
 PUSH_APK_SCOPE_ALIAS_TO_PROJECT = [[
+    # TODO: rename?
     'aurora', set([
         'mozilla-aurora',
+        'date'
     ])
 ], [
     'beta', set([
