@@ -89,7 +89,7 @@ PER_PROJECT_PARAMETERS = {
     'default': {
         'target_tasks_method': 'default',
         'optimize_target_tasks': True,
-        'include_nightly': True,
+        'include_nightly': False,
     }
 }
 
