@@ -258,6 +258,14 @@ config = {
     'date': {
         'update_channel': 'nightly-date',
         'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
+        'platform_overrides': {
+            'android-api-15-old-id': {
+                "update_channel": "nightly-old-id",
+            },
+            'android-x86-old-id': {
+                "update_channel": "nightly-old-id",
+            },
+        }
     },
     'cypress': {
         # bug 1164935
