@@ -752,9 +752,8 @@ or run without that action (ie: --no-{action})"
             app_ini_path = dirs['abs_app_ini_path']
         if (os.path.exists(print_conf_setting_path) and
                 os.path.exists(app_ini_path)):
-            python = self.query_exe('python2.7')
             cmd = [
-                python, os.path.join(dirs['abs_src_dir'], 'mach'), 'python',
+                sys.executable, os.path.join(dirs['abs_src_dir'], 'mach'), 'python',
                 print_conf_setting_path, app_ini_path,
                 'App', prop
             ]
@@ -1040,21 +1039,6 @@ or run without that action (ie: --no-{action})"
 
         return post_upload_cmd
 
-    def _ccache_z(self):
-        """clear ccache stats."""
-        dirs = self.query_abs_dirs()
-        env = self.query_build_env()
-        self.run_command(command=['ccache', '-z'],
-                         cwd=dirs['base_work_dir'],
-                         env=env)
-
-    def _ccache_s(self):
-        """print ccache stats. only done for unix like platforms"""
-        dirs = self.query_abs_dirs()
-        env = self.query_build_env()
-        cmd = ['ccache', '-s']
-        self.run_command(cmd, cwd=dirs['abs_src_dir'], env=env)
-
     def _rm_old_package(self):
         """rm the old package."""
         c = self.config
@@ -1137,9 +1121,8 @@ or run without that action (ie: --no-{action})"
             return self.warning(ERROR_MSGS['tooltool_manifest_undetermined'])
         tooltool_manifest_path = os.path.join(dirs['abs_src_dir'],
                                               c['tooltool_manifest_src'])
-        python = self.query_exe('python2.7')
         cmd = [
-            python, '-u',
+            sys.executable, '-u',
             os.path.join(dirs['abs_src_dir'], 'mach'),
             'artifact',
             'toolchain',
@@ -1307,9 +1290,8 @@ or run without that action (ie: --no-{action})"
                                             dirs['abs_app_ini_path']),
                      level=error_level)
         self.info("Setting properties found in: %s" % dirs['abs_app_ini_path'])
-        python = self.query_exe('python2.7')
         base_cmd = [
-            python, os.path.join(dirs['abs_src_dir'], 'mach'), 'python',
+            sys.executable, os.path.join(dirs['abs_src_dir'], 'mach'), 'python',
             print_conf_setting_path, dirs['abs_app_ini_path'], 'App'
         ]
         properties_needed = [
@@ -1605,9 +1587,6 @@ or run without that action (ie: --no-{action})"
 
     def preflight_build(self):
         """set up machine state for a complete build."""
-        c = self.config
-        if c.get('enable_ccache'):
-            self._ccache_z()
         if not self.query_is_nightly():
             # the old package should live in source dir so we don't need to do
             # this for nighties since we clobber the whole work_dir in
@@ -1640,12 +1619,8 @@ or run without that action (ie: --no-{action})"
                 buildprops,
                 os.path.join(dirs['abs_work_dir'], 'buildprops.json'))
 
-        # use mh config override for mach build wrapper, if it exists
-        python = self.query_exe('python2.7')
-        default_mach_build = [python, 'mach', '--log-no-times', 'build', '-v']
-        mach_build = self.query_exe('mach-build', default=default_mach_build)
         return_code = self.run_command_m(
-            command=mach_build,
+            command=[sys.executable, 'mach', '--log-no-times', 'build', '-v'],
             cwd=dirs['abs_src_dir'],
             env=env,
             output_timeout=self.config.get('max_build_output_timeout', 60 * 40)
@@ -1657,6 +1632,9 @@ or run without that action (ie: --no-{action})"
             )
             self.fatal("'mach build' did not run successfully. Please check "
                        "log for errors.")
+
+        self.generate_build_props(console_output=True, halt_on_failure=True)
+        self._generate_build_stats()
 
     def multi_l10n(self):
         if not self.query_is_nightly():
@@ -1751,13 +1729,8 @@ or run without that action (ie: --no-{action})"
         self._taskcluster_upload(abs_files, self.routes_json['l10n'],
                                  locale='multi')
 
-    def postflight_build(self, console_output=True):
+    def postflight_build(self):
         """grabs properties from post build and calls ccache -s"""
-        self.generate_build_props(console_output=console_output,
-                                  halt_on_failure=True)
-        if self.config.get('enable_ccache'):
-            self._ccache_s()
-
         # A list of argument lists.  Better names gratefully accepted!
         mach_commands = self.config.get('postflight_build_mach_commands', [])
         for mach_command in mach_commands:
@@ -1766,9 +1739,8 @@ or run without that action (ie: --no-{action})"
     def _execute_postflight_build_mach_command(self, mach_command_args):
         env = self.query_build_env()
         env.update(self.query_mach_build_env())
-        python = self.query_exe('python2.7')
 
-        command = [python, 'mach', '--log-no-times']
+        command = [sys.executable, 'mach', '--log-no-times']
         command.extend(mach_command_args)
 
         self.run_command_m(
@@ -1785,11 +1757,10 @@ or run without that action (ie: --no-{action})"
         """generates source archives and uploads them"""
         env = self.query_build_env()
         env.update(self.query_mach_build_env())
-        python = self.query_exe('python2.7')
         dirs = self.query_abs_dirs()
 
         self.run_command_m(
-            command=[python, 'mach', '--log-no-times', 'configure'],
+            command=[sys.executable, 'mach', '--log-no-times', 'configure'],
             cwd=dirs['abs_src_dir'],
             env=env, output_timeout=60*3, halt_on_failure=True,
         )
@@ -1841,9 +1812,8 @@ or run without that action (ie: --no-{action})"
         env = self.query_build_env()
         env.update(self.query_check_test_env())
 
-        python = self.query_exe('python2.7')
         cmd = [
-            python, 'mach',
+            sys.executable, 'mach',
             '--log-no-times',
             'build',
             '-v',
@@ -1938,13 +1908,15 @@ or run without that action (ie: --no-{action})"
             'subtests': [],
         }
 
-    def generate_build_stats(self):
+    def _generate_build_stats(self):
         """grab build stats following a compile.
 
         This action handles all statistics from a build: 'count_ctors'
         and then posts to graph server the results.
         We only post to graph server for non nightly build
         """
+        self.info('Collecting build metrics')
+
         if self.config.get('forced_artifact_build'):
             self.info('Skipping due to forced artifact build.')
             return
@@ -2044,17 +2016,38 @@ or run without that action (ie: --no-{action})"
                     "subtests": size_measurements
                 })
 
+        # Extract compiler warnings count.
+        warnings = self.get_output_from_command(
+            command=[sys.executable, 'mach', 'warnings-list'],
+            cwd=self.query_abs_dirs()['abs_src_dir'],
+            env=self.query_build_env(),
+            # No need to pollute the log.
+            silent=True,
+            # Fail fast.
+            halt_on_failure=True)
+
+        if warnings is not None:
+            perfherder_data['suites'].append({
+                'name': 'compiler warnings',
+                'value': len(warnings.strip().splitlines()),
+                'alertThreshold': 1.0,
+                'subtests': [],
+            })
+
         build_metrics = self._load_build_resources()
         if build_metrics:
             perfherder_data['suites'].append(build_metrics)
         perfherder_data['suites'].extend(self._load_sccache_stats())
 
+        # Ensure all extra options for this configuration are present.
+        for opt in self.config.get('perfherder_extra_options', []):
+            for suite in perfherder_data['suites']:
+                if opt not in suite.get('extraOptions', []):
+                    suite.setdefault('extraOptions', []).append(opt)
+
         if self.query_is_nightly():
             for suite in perfherder_data['suites']:
-                if 'extraOptions' in suite:
-                    suite['extraOptions'] = ['nightly'] + suite['extraOptions']
-                else:
-                    suite['extraOptions'] = ['nightly']
+                suite.setdefault('extraOptions', []).insert(0, 'nightly')
 
         if perfherder_data["suites"]:
             self.info('PERFHERDER_DATA: %s' % json.dumps(perfherder_data))
@@ -2196,9 +2189,8 @@ or run without that action (ie: --no-{action})"
         env = self.query_build_env()
         env.update(self.query_mach_build_env())
 
-        python = self.query_exe('python2.7')
         return_code = self.run_command_m(
-            command=[python, 'mach', 'valgrind-test'],
+            command=[sys.executable, 'mach', 'valgrind-test'],
             cwd=self.query_abs_dirs()['abs_src_dir'],
             env=env, output_timeout=self.config.get('max_build_output_timeout', 60 * 40)
         )

@@ -58,6 +58,7 @@ const PanelUI = {
     Services.obs.addObserver(this, "panelUI-notification-dismissed");
 
     window.addEventListener("fullscreen", this);
+    window.addEventListener("activate", this);
     window.matchMedia("(-moz-overlay-scrollbars)").addListener(this._overlayScrollListenerBoundFn);
     CustomizableUI.addListener(this);
 
@@ -143,6 +144,7 @@ const PanelUI = {
     Services.obs.removeObserver(this, "panelUI-notification-dismissed");
 
     window.removeEventListener("fullscreen", this);
+    window.removeEventListener("activate", this);
     this.menuButton.removeEventListener("mousedown", this);
     this.menuButton.removeEventListener("keypress", this);
     window.matchMedia("(-moz-overlay-scrollbars)").removeListener(this._overlayScrollListenerBoundFn);
@@ -356,6 +358,7 @@ const PanelUI = {
         this.toggle(aEvent);
         break;
       case "fullscreen":
+      case "activate":
         this._updateNotifications();
         break;
     }
@@ -404,9 +407,9 @@ const PanelUI = {
       this._isReady = true;
       return this._readyPromise;
     }
-    this._readyPromise = Task.spawn(function*() {
+    this._readyPromise = (async () => {
       if (!this._initialized) {
-        yield new Promise(resolve => {
+        await new Promise(resolve => {
           let delayedStartupObserver = (aSubject, aTopic, aData) => {
             if (aSubject == window) {
               Services.obs.removeObserver(delayedStartupObserver, "browser-delayed-startup-finished");
@@ -425,7 +428,7 @@ const PanelUI = {
         // do a bit of hackery. In particular, we calculate a new width for the
         // scroller, based on the system scrollbar width.
         this._scrollWidth =
-          (yield ScrollbarSampler.getSystemScrollbarWidth()) + "px";
+          (await ScrollbarSampler.getSystemScrollbarWidth()) + "px";
         let cstyle = window.getComputedStyle(this.scroller);
         let widthStr = cstyle.width;
         // Get the calculated padding on the left and right sides of
@@ -452,7 +455,7 @@ const PanelUI = {
       this._updateQuitTooltip();
       this.panel.hidden = false;
       this._isReady = true;
-    }.bind(this)).then(null, Cu.reportError);
+    })().then(null, Cu.reportError);
 
     return this._readyPromise;
   },
@@ -482,7 +485,7 @@ const PanelUI = {
    * @param aAnchor the element that spawned the subview.
    * @param aPlacementArea the CustomizableUI area that aAnchor is in.
    */
-  showSubView: Task.async(function*(aViewId, aAnchor, aPlacementArea) {
+  async showSubView(aViewId, aAnchor, aPlacementArea, aAdopted = false) {
     this._ensureEventListenersAdded();
     let viewNode = document.getElementById(aViewId);
     if (!viewNode) {
@@ -497,7 +500,7 @@ const PanelUI = {
 
     let container = aAnchor.closest("panelmultiview,photonpanelmultiview");
     if (container) {
-      container.showSubView(aViewId, aAnchor);
+      container.showSubView(aViewId, aAnchor, null, aAdopted);
     } else if (!aAnchor.open) {
       aAnchor.open = true;
 
@@ -557,7 +560,7 @@ const PanelUI = {
       let cancel = evt.defaultPrevented;
       if (detail.blockers.size) {
         try {
-          let results = yield Promise.all(detail.blockers);
+          let results = await Promise.all(detail.blockers);
           cancel = cancel || results.some(val => val === false);
         } catch (e) {
           Components.utils.reportError(e);
@@ -582,7 +585,7 @@ const PanelUI = {
 
       tempPanel.openPopup(anchor, "bottomcenter topright");
     }
-  }),
+  },
 
   /**
    * NB: The enable- and disableSingleSubviewPanelAnimations methods only
@@ -767,7 +770,8 @@ const PanelUI = {
         this._showBannerItem(this.notifications[0]);
       }
     } else if (doorhangers.length > 0) {
-      if (window.fullScreen) {
+      // Only show the doorhanger if the window is focused and not fullscreen
+      if (window.fullScreen || Services.focus.activeWindow !== window) {
         this._hidePopup();
         this._showBadge(doorhangers[0]);
         this._showBannerItem(doorhangers[0]);
