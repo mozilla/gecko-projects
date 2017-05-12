@@ -1671,7 +1671,7 @@ or run without that action (ie: --no-{action})"
             multil10n_path = '%s/scripts/scripts/multil10n.py' % base_work_dir,
 
         cmd = [
-            self.query_exe('python'),
+            sys.executable,
             multil10n_path,
             '--config-file',
             'multi_locale/%s_%s.json' % (branch, multi_config_pf),
