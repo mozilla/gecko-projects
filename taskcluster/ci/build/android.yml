@@ -149,6 +149,7 @@ android-x86-old-id/opt:
         secrets: true
         custom-build-variant-cfg: x86-old-id
         tooltool-downloads: internal
+    run-on-projects: [ 'mozilla-central', 'date' ]
 
 android-x86-old-id-nightly/opt:
     description: "Android 4.2 x86 OldId Nightly"
@@ -177,6 +178,7 @@ android-x86-old-id-nightly/opt:
         secrets: true
         custom-build-variant-cfg: x86-old-id
         tooltool-downloads: internal
+    run-on-projects: [ 'mozilla-central', 'date' ]
 
 android-api-15-old-id/opt:
     description: "Android 4.0 API15+ Opt OldId"
@@ -201,6 +203,7 @@ android-api-15-old-id/opt:
         secrets: true
         custom-build-variant-cfg: api-15-old-id
         tooltool-downloads: internal
+    run-on-projects: [ 'mozilla-central', 'date' ]
 
 android-api-15-old-id-nightly/opt:
     description: "Android 4.0 API15+ OldId Nightly"
@@ -229,6 +232,7 @@ android-api-15-old-id-nightly/opt:
         secrets: true
         custom-build-variant-cfg: api-15-old-id
         tooltool-downloads: internal
+    run-on-projects: [ 'mozilla-central', 'date' ]
 
 android-api-15-gradle/opt:
     description: "Android 4.0 API15+ (Gradle) Opt"
