@@ -1282,7 +1282,7 @@ nsDisplayListBuilder::LeavePresShell(nsIFrame* aReferenceFrame, nsDisplayList* a
     mIsInChromePresContext = pc->IsChrome();
   } else {
     mFrameToAnimatedGeometryRootMap.Clear();
-    mCurrentAGR = nullptr;
+    mCurrentAGR = mRootAGR;
 
     mActiveScrolledRoots.Clear();
 

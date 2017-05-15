@@ -238,14 +238,16 @@ struct ActiveScrolledRoot {
     RefPtr<ActiveScrolledRoot> asr;
     if (f->HasActiveScrolledRoot()) {
       asr = f->Properties().Get(ActiveScrolledRootCache());
-      asr->ActiveScrolledRoot::~ActiveScrolledRoot();
-      asr = new (KnownNotNull, asr) ActiveScrolledRoot(aParent, aScrollableFrame);
     } else {
       asr = new ActiveScrolledRoot(aParent, aScrollableFrame);
 
       f->SetHasActiveScrolledRoot(true);
       f->Properties().Set(ActiveScrolledRootCache(), asr);
     }
+    asr->mParent = aParent;
+    asr->mScrollableFrame = aScrollableFrame;
+    asr->mDepth = aParent ? aParent->mDepth + 1 : 1;
+
     return asr.forget();
   }
 
@@ -279,9 +281,6 @@ struct ActiveScrolledRoot {
 private:
   ActiveScrolledRoot(const ActiveScrolledRoot* aParent,
                      nsIScrollableFrame* aScrollableFrame)
-    : mParent(aParent)
-    , mScrollableFrame(aScrollableFrame)
-    , mDepth(mParent ? mParent->mDepth + 1 : 1)
   {
   }
 
