@@ -4218,6 +4218,16 @@ public:
   virtual ~nsDisplayOwnLayer();
 #endif
 
+  nsDisplayOwnLayer(const nsDisplayOwnLayer& aOther)
+    : nsDisplayWrapList(aOther)
+    , mFlags(aOther.mFlags)
+    , mScrollTarget(aOther.mFlags)
+    , mScrollbarThumbRatio(aOther.mScrollbarThumbRatio)
+    , mForceActive(aOther.mForceActive)
+  {
+    MOZ_COUNT_CTOR(nsDisplayOwnLayer);
+  }
+
   virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
                                              LayerManager* aManager,
                                              const ContainerLayerParameters& aContainerParameters) override;
