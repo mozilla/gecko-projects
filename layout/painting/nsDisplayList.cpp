@@ -5833,24 +5833,6 @@ nsDisplayOpacity::ComputeVisibility(nsDisplayListBuilder* aBuilder,
     nsDisplayWrapList::ComputeVisibility(aBuilder, &visibleUnderChildren);
 }
 
-bool nsDisplayOpacity::TryMerge(nsDisplayItem* aItem, bool aMerge) {
-  if (aItem->GetType() != TYPE_OPACITY)
-    return false;
-  // items for the same content element should be merged into a single
-  // compositing group
-  // aItem->GetUnderlyingFrame() returns non-null because it's nsDisplayOpacity
-  if (aItem->Frame()->GetContent() != mFrame->GetContent())
-    return false;
-  if (aItem->GetClipChain() != GetClipChain())
-    return false;
-
-  if (aMerge) {
-    MergeFromTrackingMergedFrames(static_cast<nsDisplayOpacity*>(aItem));
-  }
-
-  return true;
-}
-
 void
 nsDisplayOpacity::WriteDebugInfo(std::stringstream& aStream)
 {
@@ -5910,7 +5892,8 @@ nsDisplayBlendMode::BuildLayer(nsDisplayListBuilder* aBuilder,
   return container.forget();
 }
 
-bool nsDisplayBlendMode::ComputeVisibility(nsDisplayListBuilder* aBuilder,
+bool
+nsDisplayBlendMode::ComputeVisibility(nsDisplayListBuilder* aBuilder,
                                               nsRegion* aVisibleRegion) {
   // Our children are need their backdrop so we should not allow them to subtract
   // area from aVisibleRegion. We do need to find out what is visible under
@@ -5921,26 +5904,6 @@ bool nsDisplayBlendMode::ComputeVisibility(nsDisplayListBuilder* aBuilder,
   nsRegion visibleUnderChildren;
   visibleUnderChildren.And(*aVisibleRegion, bounds);
   return nsDisplayWrapList::ComputeVisibility(aBuilder, &visibleUnderChildren);
-}
-
-bool nsDisplayBlendMode::TryMerge(nsDisplayItem* aItem, bool aMerge) {
-  if (aItem->GetType() != TYPE_BLEND_MODE)
-    return false;
-  nsDisplayBlendMode* item = static_cast<nsDisplayBlendMode*>(aItem);
-  // items for the same content element should be merged into a single
-  // compositing group
-  if (item->Frame()->GetContent() != mFrame->GetContent())
-    return false;
-  if (item->mIndex != 0 || mIndex != 0)
-    return false; // don't merge background-blend-mode items
-  if (item->GetClipChain() != GetClipChain())
-    return false;
-
-  if (aMerge) {
-    MergeFromTrackingMergedFrames(item);
-  }
-
-  return true;
 }
 
 /* static */ nsDisplayBlendContainer*
@@ -6002,24 +5965,6 @@ nsDisplayBlendContainer::GetLayerState(nsDisplayListBuilder* aBuilder,
                                        const ContainerLayerParameters& aParameters)
 {
   return RequiredLayerStateForChildren(aBuilder, aManager, aParameters, mList, GetAnimatedGeometryRoot());
-}
-
-bool nsDisplayBlendContainer::TryMerge(nsDisplayItem* aItem, bool aMerge) {
-  if (aItem->GetType() != TYPE_BLEND_CONTAINER)
-    return false;
-  // items for the same content element should be merged into a single
-  // compositing group
-  // aItem->GetUnderlyingFrame() returns non-null because it's nsDisplayOpacity
-  if (aItem->Frame()->GetContent() != mFrame->GetContent())
-    return false;
-  if (aItem->GetClipChain() != GetClipChain())
-    return false;
-
-  if (aMerge) {
-    MergeFromTrackingMergedFrames(static_cast<nsDisplayBlendContainer*>(aItem));
-  }
-
-  return true;
 }
 
 nsDisplayOwnLayer::nsDisplayOwnLayer(nsDisplayListBuilder* aBuilder,
@@ -6373,23 +6318,6 @@ nsDisplayFixedPosition::BuildLayer(nsDisplayListBuilder* aBuilder,
   return layer.forget();
 }
 
-bool nsDisplayFixedPosition::TryMerge(nsDisplayItem* aItem, bool aMerge) {
-  if (aItem->GetType() != TYPE_FIXED_POSITION)
-    return false;
-  // Items with the same fixed position frame can be merged.
-  nsDisplayFixedPosition* other = static_cast<nsDisplayFixedPosition*>(aItem);
-  if (other->mFrame != mFrame)
-    return false;
-  if (aItem->GetClipChain() != GetClipChain())
-    return false;
-
-  if (aMerge) {
-    MergeFromTrackingMergedFrames(other);
-  }
-
-  return true;
-}
-
 nsDisplayStickyPosition::nsDisplayStickyPosition(nsDisplayListBuilder* aBuilder,
                                                  nsIFrame* aFrame,
                                                  nsDisplayList* aList,
@@ -6468,23 +6396,6 @@ nsDisplayStickyPosition::BuildLayer(nsDisplayListBuilder* aBuilder,
   layer->SetStickyPositionData(scrollId, stickyOuter, stickyInner);
 
   return layer.forget();
-}
-
-bool nsDisplayStickyPosition::TryMerge(nsDisplayItem* aItem, bool aMerge) {
-  if (aItem->GetType() != TYPE_STICKY_POSITION)
-    return false;
-  // Items with the same fixed position frame can be merged.
-  nsDisplayStickyPosition* other = static_cast<nsDisplayStickyPosition*>(aItem);
-  if (other->mFrame != mFrame)
-    return false;
-  if (aItem->GetClipChain() != GetClipChain())
-    return false;
-
-  if (aMerge) {
-    MergeFromTrackingMergedFrames(other);
-  }
-
-  return true;
 }
 
 nsDisplayScrollInfoLayer::nsDisplayScrollInfoLayer(
@@ -7675,45 +7586,6 @@ nsDisplayTransform::IsUniform(nsDisplayListBuilder *aBuilder)
   return Nothing();
 }
 
-/* If UNIFIED_CONTINUATIONS is defined, we can merge two display lists that
- * share the same underlying content.  Otherwise, doing so results in graphical
- * glitches.
- */
-#ifndef UNIFIED_CONTINUATIONS
-
-bool
-nsDisplayTransform::TryMerge(nsDisplayItem *aItem, bool aMerge)
-{
-  return false;
-}
-
-#else
-
-bool
-nsDisplayTransform::TryMerge(nsDisplayItem *aItem)
-{
-  NS_PRECONDITION(aItem, "Why did you try merging with a null item?");
-
-  /* Make sure that we're dealing with two transforms. */
-  if (aItem->GetType() != TYPE_TRANSFORM)
-    return false;
-
-  /* Check to see that both frames are part of the same content. */
-  if (aItem->Frame()->GetContent() != mFrame->GetContent())
-    return false;
-
-  if (aItem->GetClipChain() != GetClipChain())
-    return false;
-
-  /* Now, move everything over to this frame and signal that
-   * we merged things!
-   */
-  mStoredList.MergeFromTrackingMergedFrames(&static_cast<nsDisplayTransform*>(aItem)->mStoredList);
-  return true;
-}
-
-#endif
-
 /* TransformRect takes in as parameters a rectangle (in app space) and returns
  * the smallest rectangle (in app space) containing the transformed image of
  * that rectangle.  That is, it takes the four corners of the rectangle,
@@ -8176,37 +8048,6 @@ nsDisplayMask::~nsDisplayMask()
 }
 #endif
 
-bool nsDisplayMask::TryMerge(nsDisplayItem* aItem, bool aMerge)
-{
-  if (aItem->GetType() != TYPE_MASK)
-    return false;
-
-  // items for the same content element should be merged into a single
-  // compositing group
-  // aItem->GetUnderlyingFrame() returns non-null because it's nsDisplaySVGEffects
-  if (aItem->Frame()->GetContent() != mFrame->GetContent()) {
-    return false;
-  }
-  if (aItem->GetClipChain() != GetClipChain()) {
-    return false;
-  }
-
-  // Do not merge if mFrame has mask. Continuation frames should apply mask
-  // independently(just like nsDisplayBackgroundImage).
-  if (mFrame->StyleSVGReset()->HasMask()) {
-    return false;
-  }
-
-  if (aMerge) {
-    nsDisplayMask* other = static_cast<nsDisplayMask*>(aItem);
-    MergeFromTrackingMergedFrames(other);
-    mEffectsBounds.UnionRect(mEffectsBounds,
-      other->mEffectsBounds + other->mFrame->GetOffsetTo(mFrame));
-  }
-
-  return true;
-}
-
 already_AddRefed<Layer>
 nsDisplayMask::BuildLayer(nsDisplayListBuilder* aBuilder,
                           LayerManager* aManager,
@@ -8471,32 +8312,6 @@ nsDisplayFilter::BuildLayer(nsDisplayListBuilder* aBuilder,
                            newContainerParameters, nullptr);
 
   return container.forget();
-}
-
-bool nsDisplayFilter::TryMerge(nsDisplayItem* aItem, bool aMerge)
-{
-  if (aItem->GetType() != TYPE_FILTER) {
-    return false;
-  }
-
-  // items for the same content element should be merged into a single
-  // compositing group.
-  // aItem->Frame() returns non-null because it's nsDisplayFilter
-  if (aItem->Frame()->GetContent() != mFrame->GetContent()) {
-    return false;
-  }
-  if (aItem->GetClipChain() != GetClipChain()) {
-    return false;
-  }
-
-  if (aMerge) {
-    nsDisplayFilter* other = static_cast<nsDisplayFilter*>(aItem);
-    MergeFromTrackingMergedFrames(other);
-    mEffectsBounds.UnionRect(mEffectsBounds,
-      other->mEffectsBounds + other->mFrame->GetOffsetTo(mFrame));
-  }
-
-  return true;
 }
 
 LayerState

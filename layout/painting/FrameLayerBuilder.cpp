@@ -3994,7 +3994,7 @@ MergeItems(nsDisplayListBuilder* aBuilder,
 
       aBuilder->AddTemporaryItem(merged);
     } else {
-      merged->TryMerge(item, true);
+      merged->Merge(item);
     }
 
     merged->MergeDisplayListFromItem(aBuilder, item);
@@ -4076,7 +4076,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
     for (auto i = std::next(it); i != list.end(); ++i) {
       nsDisplayItem* nextItem = *i;
 
-      if (!item->TryMerge(nextItem, false)) {
+      if (!item->CanMerge(nextItem)) {
         break;
       }
 

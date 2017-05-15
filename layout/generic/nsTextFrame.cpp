@@ -4901,10 +4901,14 @@ public:
     aFrames->AppendElements(mMergedFrames);
   }
 
-  bool TryMerge(nsDisplayItem* aItem, bool aMerge) override {
-    // TODO: The current item merging behavior is not compatible with text merging.
+  bool CanMerge(const nsDisplayItem* aItem) const override
+  {
     return false;
+  }
 
+  void Merge(nsDisplayItem* aItem) override
+  {
+    // TODO: The current item merging behavior is not compatible with text merging.
 #if 0
     if (aItem->GetType() != TYPE_TEXT)
       return false;
@@ -4929,7 +4933,6 @@ public:
       append->color() = g.color();
       append->glyphs().SwapElements(g.glyphs());
     }
-    return true;
 #endif
 }
 
