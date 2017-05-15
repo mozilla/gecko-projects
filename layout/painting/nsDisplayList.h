@@ -1757,12 +1757,12 @@ public:
   /**
    * Downcasts this item to nsDisplayWrapList, if possible.
    */
-  virtual nsDisplayWrapList* AsDisplayWrapList() { return nullptr; }
+  virtual const nsDisplayWrapList* AsDisplayWrapList() const { return nullptr; }
 
   /**
    * Create a clone of this item.
    */
-  virtual nsDisplayItem* Clone(nsDisplayListBuilder* aBuilder)
+  virtual nsDisplayItem* Clone(nsDisplayListBuilder* aBuilder) const
   {
     return nullptr;
   }
@@ -2145,13 +2145,13 @@ public:
    * used by nsDisplayOutline to merge multiple outlines for the same element
    * (also for correctness).
    */
-  virtual void Merge(nsDisplayItem* aItem) {}
+  virtual void Merge(const nsDisplayItem* aItem) {}
 
   /**
    * Merges the given display list to this item.
    */
   virtual void MergeDisplayListFromItem(nsDisplayListBuilder* aBuilder,
-                                        nsDisplayItem* aItem) {}
+                                        const nsDisplayItem* aItem) {}
 
   /**
    * Appends the underlying frames of all display items that have been
@@ -3913,7 +3913,10 @@ public:
 
   virtual ~nsDisplayWrapList();
 
-  virtual nsDisplayWrapList* AsDisplayWrapList() override { return this; }
+  virtual const nsDisplayWrapList* AsDisplayWrapList() const override
+  {
+    return this;
+  }
 
   virtual void Destroy(nsDisplayListBuilder* aBuilder) override {
     mList.DeleteAll(aBuilder);
@@ -3925,9 +3928,9 @@ public:
    * owned by the given nsDisplayItem.
    */
   virtual void MergeDisplayListFromItem(nsDisplayListBuilder* aBuilder,
-                                        nsDisplayItem* aItem) override
+                                        const nsDisplayItem* aItem) override
   {
-    nsDisplayWrapList* wrappedItem = aItem->AsDisplayWrapList();
+    const nsDisplayWrapList* wrappedItem = aItem->AsDisplayWrapList();
     MOZ_ASSERT(wrappedItem);
 
     // Create a new nsDisplayWrapList using a copy-constructor. This is done
@@ -3971,6 +3974,12 @@ public:
   virtual bool CanMerge(const nsDisplayItem* aItem) const override
   {
     return false;
+  }
+
+  virtual void Merge(const nsDisplayItem* aItem) override
+  {
+    MOZ_ASSERT(CanMerge(aItem));
+    MergeFromTrackingMergedFrames(static_cast<const nsDisplayWrapList*>(aItem));
   }
 
   virtual void GetMergedFrames(nsTArray<nsIFrame*>* aFrames) const override
@@ -4044,13 +4053,12 @@ public:
 protected:
   nsDisplayWrapList() {}
 
-  void MergeFromTrackingMergedFrames(nsDisplayWrapList* aOther)
+  void MergeFromTrackingMergedFrames(const nsDisplayWrapList* aOther)
   {
     mBounds.UnionRect(mBounds, aOther->mBounds);
     mVisibleRect.UnionRect(mVisibleRect, aOther->mVisibleRect);
     mMergedFrames.AppendElement(aOther->mFrame);
     mMergedFrames.AppendElements(aOther->mMergedFrames);
-    mMergedItems.AppendElement(aOther);
   }
 
   nsDisplayList mList;
@@ -4058,7 +4066,6 @@ protected:
   // The frames from items that have been merged into this item, excluding
   // this item's own frame.
   nsTArray<nsIFrame*> mMergedFrames;
-  nsTArray<nsDisplayItem*> mMergedItems;
   nsRect mBounds;
   // Visible rect contributed by this display item itself.
   // Our mVisibleRect may include the visible areas of children.
@@ -4107,7 +4114,8 @@ public:
   virtual ~nsDisplayOpacity();
 #endif
 
-  virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) override {
+  virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
+  {
     MOZ_COUNT_CTOR(nsDisplayOpacity);
     return new (aBuilder) nsDisplayOpacity(*this);
   }
@@ -4129,12 +4137,6 @@ public:
     // compositing group
     // aItem->GetUnderlyingFrame() returns non-null because it's nsDisplayOpacity
     return HasSameTypeAndClip(aItem) && HasSameContent(aItem);
-  }
-
-  virtual void Merge(nsDisplayItem* aItem) override
-  {
-    MOZ_ASSERT(CanMerge(aItem));
-    MergeFromTrackingMergedFrames(static_cast<nsDisplayOpacity*>(aItem));
   }
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
@@ -4176,7 +4178,8 @@ public:
   virtual ~nsDisplayBlendMode();
 #endif
 
-  virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) override {
+  virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
+  {
     MOZ_COUNT_CTOR(nsDisplayBlendMode);
     return new (aBuilder) nsDisplayBlendMode(*this);
   }
@@ -4222,12 +4225,6 @@ public:
     return true;
   }
 
-  virtual void Merge(nsDisplayItem* aItem) override
-  {
-    MOZ_ASSERT(CanMerge(aItem));
-    MergeFromTrackingMergedFrames(static_cast<nsDisplayBlendMode*>(aItem));
-  }
-
   virtual bool ShouldFlattenAway(nsDisplayListBuilder* aBuilder) override
   {
     return false;
@@ -4256,7 +4253,8 @@ public:
     virtual ~nsDisplayBlendContainer();
 #endif
 
-    virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) override {
+    virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
+    {
       MOZ_COUNT_CTOR(nsDisplayBlendContainer);
       return new (aBuilder) nsDisplayBlendContainer(*this);
     }
@@ -4273,12 +4271,6 @@ public:
       // Items for the same content element should be merged into a single
       // compositing group.
       return HasSameTypeAndClip(aItem) && HasSameContent(aItem);
-    }
-
-    virtual void Merge(nsDisplayItem* aItem) override
-    {
-      MOZ_ASSERT(CanMerge(aItem));
-      MergeFromTrackingMergedFrames(static_cast<nsDisplayBlendContainer*>(aItem));
     }
 
     virtual bool ShouldFlattenAway(nsDisplayListBuilder* aBuilder) override
@@ -4453,7 +4445,8 @@ public:
   virtual ~nsDisplayStickyPosition();
 #endif
 
-  virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) override {
+  virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
+  {
     MOZ_COUNT_CTOR(nsDisplayStickyPosition);
     return new (aBuilder) nsDisplayStickyPosition(*this);
   }
@@ -4475,12 +4468,6 @@ public:
     // Items with the same fixed position frame can be merged.
     return HasSameTypeAndClip(aItem) && mFrame == aItem->Frame();
   }
-
-  virtual void Merge(nsDisplayItem* aItem) override
-  {
-    MOZ_ASSERT(CanMerge(aItem));
-    MergeFromTrackingMergedFrames(static_cast<nsDisplayStickyPosition*>(aItem));
-  }
 };
 
 class nsDisplayFixedPosition : public nsDisplayOwnLayer {
@@ -4499,7 +4486,8 @@ public:
   virtual ~nsDisplayFixedPosition();
 #endif
 
-  virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) override {
+  virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
+  {
     MOZ_COUNT_CTOR(nsDisplayFixedPosition);
     return new (aBuilder) nsDisplayFixedPosition(*this);
   }
@@ -4519,12 +4507,6 @@ public:
   {
     // Items with the same fixed position frame can be merged.
     return HasSameTypeAndClip(aItem) && mFrame == aItem->Frame();
-  }
-
-  virtual void Merge(nsDisplayItem* aItem) override
-  {
-    MOZ_ASSERT(CanMerge(aItem));
-    MergeFromTrackingMergedFrames(static_cast<nsDisplayFixedPosition*>(aItem));
   }
 
   virtual bool ShouldFixToViewport(nsDisplayListBuilder* aBuilder) const override
@@ -4711,7 +4693,8 @@ public:
   virtual ~nsDisplayMask();
 #endif
 
-  virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) override {
+  virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
+  {
     MOZ_COUNT_CTOR(nsDisplayMask);
     return new (aBuilder) nsDisplayMask(*this);
   }
@@ -4728,11 +4711,11 @@ public:
            !mFrame->StyleSVGReset()->HasMask();
   }
 
-  virtual void Merge(nsDisplayItem* aItem) override
+  virtual void Merge(const nsDisplayItem* aItem) override
   {
-    MOZ_ASSERT(CanMerge(aItem));
-    nsDisplayMask* other = static_cast<nsDisplayMask*>(aItem);
-    MergeFromTrackingMergedFrames(other);
+    nsDisplayWrapList::Merge(aItem);
+
+    const nsDisplayMask* other = static_cast<const nsDisplayMask*>(aItem);
     mEffectsBounds.UnionRect(mEffectsBounds,
       other->mEffectsBounds + other->mFrame->GetOffsetTo(mFrame));
   }
@@ -4791,7 +4774,8 @@ public:
   virtual ~nsDisplayFilter();
 #endif
 
-  virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) override {
+  virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
+  {
     MOZ_COUNT_CTOR(nsDisplayFilter);
     return new (aBuilder) nsDisplayFilter(*this);
   }
@@ -4805,12 +4789,11 @@ public:
     return HasSameTypeAndClip(aItem) && HasSameContent(aItem);
   }
 
-  virtual void Merge(nsDisplayItem* aItem) override
+  virtual void Merge(const nsDisplayItem* aItem) override
   {
-    MOZ_ASSERT(CanMerge(aItem));
+    nsDisplayWrapList::Merge(aItem);
 
-    nsDisplayFilter* other = static_cast<nsDisplayFilter*>(aItem);
-    MergeFromTrackingMergedFrames(other);
+    const nsDisplayFilter* other = static_cast<const nsDisplayFilter*>(aItem);
     mEffectsBounds.UnionRect(mEffectsBounds,
       other->mEffectsBounds + other->mFrame->GetOffsetTo(mFrame));
   }

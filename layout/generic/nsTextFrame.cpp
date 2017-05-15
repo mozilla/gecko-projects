@@ -4906,7 +4906,7 @@ public:
     return false;
   }
 
-  void Merge(nsDisplayItem* aItem) override
+  void Merge(const nsDisplayItem* aItem) override
   {
     // TODO: The current item merging behavior is not compatible with text merging.
 #if 0
