@@ -176,7 +176,7 @@ public:
    * the frame's content-box but may be smaller if the plugin is rendering
    * asynchronously and has a different-sized image temporarily.
    */
-  nsRect GetPaintedRect(nsDisplayPlugin* aItem);
+  nsRect GetPaintedRect(const nsDisplayPlugin* aItem) const;
 
   /**
    * If aSupports has a nsPluginFrame, then prepare it for a DocShell swap.
@@ -350,9 +350,10 @@ public:
   }
 #endif
 
-  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) override;
+  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
+                           bool* aSnap) const override;
   virtual nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
-                                   bool* aSnap) override;
+                                   bool* aSnap) const override;
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      nsRenderingContext* aCtx) override;
   virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,

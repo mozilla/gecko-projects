@@ -4799,7 +4799,7 @@ public:
 #endif
 
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
-                           bool* aSnap) override {
+                           bool* aSnap) const override {
     *aSnap = false;
     return mBounds;
   }
@@ -4821,7 +4821,7 @@ public:
                      nsRenderingContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("Text", TYPE_TEXT)
 
-  virtual nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) override
+  virtual nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) const override
   {
     if (gfxPlatform::GetPlatform()->RespectsFontStyleSmoothing()) {
       // On OS X, web authors can turn off subpixel text rendering using the
@@ -4896,7 +4896,7 @@ public:
 #endif
   }
 
-  void GetMergedFrames(nsTArray<nsIFrame*>* aFrames) override
+  void GetMergedFrames(nsTArray<nsIFrame*>* aFrames) const override
   {
     aFrames->AppendElements(mMergedFrames);
   }

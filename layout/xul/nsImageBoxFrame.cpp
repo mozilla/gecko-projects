@@ -487,12 +487,12 @@ nsDisplayXULImage::GetImage()
 
   nsCOMPtr<imgIContainer> imgCon;
   imageFrame->mImageRequest->GetImage(getter_AddRefs(imgCon));
-  
+
   return imgCon.forget();
 }
 
 nsRect
-nsDisplayXULImage::GetDestRect()
+nsDisplayXULImage::GetDestRect() const
 {
   nsImageBoxFrame* imageFrame = static_cast<nsImageBoxFrame*>(mFrame);
 

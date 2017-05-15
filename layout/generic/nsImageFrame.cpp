@@ -1301,7 +1301,7 @@ public:
   }
 
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
-                           bool* aSnap) override
+                           bool* aSnap) const override
   {
     *aSnap = false;
     return mFrame->GetVisualOverflowRectRelativeToSelf() + ToReferenceFrame();
@@ -1561,7 +1561,7 @@ nsDisplayImage::GetImage()
 }
 
 nsRect
-nsDisplayImage::GetDestRect()
+nsDisplayImage::GetDestRect() const
 {
   bool snap = true;
   const nsRect frameContentBox = GetBounds(&snap);
@@ -1630,7 +1630,7 @@ nsDisplayImage::GetLayerState(nsDisplayListBuilder* aBuilder,
 
 /* virtual */ nsRegion
 nsDisplayImage::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
-                                bool* aSnap)
+                                bool* aSnap) const
 {
   *aSnap = false;
   if (mImage && mImage->WillDrawOpaqueNow()) {

@@ -103,7 +103,8 @@ public:
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
                                          nsRegion *aInvalidRegion) override;
-  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) override;
+  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
+                           bool* aSnap) const override;
   NS_DISPLAY_DECL_NAME("FieldSetBorder", TYPE_FIELDSET_BORDER_BACKGROUND)
 };
 
@@ -142,7 +143,7 @@ nsDisplayFieldSetBorder::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilde
 
 nsRect
 nsDisplayFieldSetBorder::GetBounds(nsDisplayListBuilder* aBuilder,
-                                   bool* aSnap)
+                                   bool* aSnap) const
 {
   // Just go ahead and claim our frame's overflow rect as the bounds, because we
   // may have border-image-outset or other features that cause borders to extend

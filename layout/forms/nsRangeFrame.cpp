@@ -187,7 +187,8 @@ public:
   void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                  const nsDisplayItemGeometry* aGeometry,
                                  nsRegion *aInvalidRegion) override;
-  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) override;
+  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
+                           bool* aSnap) const override;
   virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("RangeFocusRing", TYPE_RANGE_FOCUS_RING)
 };
@@ -217,7 +218,8 @@ nsDisplayRangeFocusRing::ComputeInvalidationRegion(
 }
 
 nsRect
-nsDisplayRangeFocusRing::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap)
+nsDisplayRangeFocusRing::GetBounds(nsDisplayListBuilder* aBuilder,
+                                   bool* aSnap) const
 {
   *aSnap = false;
   nsRect rect(ToReferenceFrame(), Frame()->GetSize());

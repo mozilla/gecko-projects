@@ -138,7 +138,7 @@ nsTextBoxFrame::DestroyFrom(nsIFrame* aDestructRoot)
 bool
 nsTextBoxFrame::AlwaysAppendAccessKey()
 {
-  if (!gAccessKeyPrefInitialized) 
+  if (!gAccessKeyPrefInitialized)
   {
     gAccessKeyPrefInitialized = true;
 
@@ -295,12 +295,13 @@ public:
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      nsRenderingContext* aCtx) override;
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
-                           bool* aSnap) override;
+                           bool* aSnap) const override;
   NS_DISPLAY_DECL_NAME("XULTextBox", TYPE_XUL_TEXT_BOX)
 
-  virtual nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) override;
+  virtual nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) const override;
 
-  virtual void DisableComponentAlpha() override {
+  virtual void DisableComponentAlpha() override
+  {
     mDisableSubpixelAA = true;
   }
 
@@ -350,13 +351,15 @@ nsDisplayXULTextBox::PaintTextToContext(nsRenderingContext* aCtx,
 }
 
 nsRect
-nsDisplayXULTextBox::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) {
+nsDisplayXULTextBox::GetBounds(nsDisplayListBuilder* aBuilder,
+                               bool* aSnap) const
+{
   *aSnap = false;
   return mFrame->GetVisualOverflowRectRelativeToSelf() + ToReferenceFrame();
 }
 
 nsRect
-nsDisplayXULTextBox::GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder)
+nsDisplayXULTextBox::GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) const
 {
   return static_cast<nsTextBoxFrame*>(mFrame)->GetComponentAlphaBounds() +
       ToReferenceFrame();
@@ -1027,7 +1030,7 @@ nsTextBoxFrame::DoXULLayout(nsBoxLayoutState& aBoxLayoutState)
 }
 
 nsRect
-nsTextBoxFrame::GetComponentAlphaBounds()
+nsTextBoxFrame::GetComponentAlphaBounds() const
 {
   if (StyleText()->mTextShadow) {
     return GetVisualOverflowRectRelativeToSelf();

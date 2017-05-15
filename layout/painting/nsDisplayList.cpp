@@ -2776,7 +2776,7 @@ nsDisplayItem::IntersectClip(nsDisplayListBuilder* aBuilder,
 }
 
 nsRect
-nsDisplayItem::GetClippedBounds(nsDisplayListBuilder* aBuilder)
+nsDisplayItem::GetClippedBounds(nsDisplayListBuilder* aBuilder) const
 {
   bool snap;
   nsRect r = GetBounds(aBuilder, &snap);
@@ -2807,7 +2807,8 @@ nsDisplayItem::BuildDisplayItemLayer(nsDisplayListBuilder* aBuilder,
 }
 
 nsRect
-nsDisplaySolidColor::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap)
+nsDisplaySolidColor::GetBounds(nsDisplayListBuilder* aBuilder,
+                               bool* aSnap) const
 {
   *aSnap = true;
   return mBounds;
@@ -2835,7 +2836,8 @@ nsDisplaySolidColor::WriteDebugInfo(std::stringstream& aStream)
 }
 
 nsRect
-nsDisplaySolidColorRegion::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap)
+nsDisplaySolidColorRegion::GetBounds(nsDisplayListBuilder* aBuilder,
+                                     bool* aSnap) const
 {
   *aSnap = true;
   return mRegion.GetBounds();
@@ -3297,7 +3299,7 @@ nsDisplayBackgroundImage::CanOptimizeToImageLayer(LayerManager* aManager,
 }
 
 nsRect
-nsDisplayBackgroundImage::GetDestRect()
+nsDisplayBackgroundImage::GetDestRect() const
 {
   return mDestRect;
 }
@@ -3472,7 +3474,7 @@ nsDisplayBackgroundImage::ComputeVisibility(nsDisplayListBuilder* aBuilder,
 }
 
 /* static */ nsRegion
-nsDisplayBackgroundImage::GetInsideClipRegion(nsDisplayItem* aItem,
+nsDisplayBackgroundImage::GetInsideClipRegion(const nsDisplayItem* aItem,
                                               StyleGeometryBox aClip,
                                               const nsRect& aRect,
                                               const nsRect& aBackgroundRect)
@@ -3502,7 +3504,8 @@ nsDisplayBackgroundImage::GetInsideClipRegion(nsDisplayItem* aItem,
 
 nsRegion
 nsDisplayBackgroundImage::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
-                                          bool* aSnap) {
+                                          bool* aSnap) const
+{
   nsRegion result;
   *aSnap = false;
 
@@ -3532,7 +3535,8 @@ nsDisplayBackgroundImage::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
 }
 
 Maybe<nscolor>
-nsDisplayBackgroundImage::IsUniform(nsDisplayListBuilder* aBuilder) {
+nsDisplayBackgroundImage::IsUniform(nsDisplayListBuilder* aBuilder) const
+{
   if (!mBackgroundStyle) {
     return Some(NS_RGBA(0,0,0,0));
   }
@@ -3677,7 +3681,9 @@ void nsDisplayBackgroundImage::ComputeInvalidationRegion(nsDisplayListBuilder* a
 }
 
 nsRect
-nsDisplayBackgroundImage::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) {
+nsDisplayBackgroundImage::GetBounds(nsDisplayListBuilder* aBuilder,
+                                    bool* aSnap) const
+{
   *aSnap = true;
   return mBounds;
 }
@@ -3699,13 +3705,6 @@ nsDisplayBackgroundImage::GetBoundsInternal(nsDisplayListBuilder* aBuilder) {
   return nsCSSRendering::GetBackgroundLayerRect(presContext, mFrame,
                                                 mBackgroundRect, clipRect, layer,
                                                 aBuilder->GetBackgroundPaintFlags());
-}
-
-uint32_t
-nsDisplayBackgroundImage::GetPerFrameKey()
-{
-  return (mLayer << TYPE_BITS) |
-    nsDisplayItem::GetPerFrameKey();
 }
 
 nsDisplayThemedBackground::nsDisplayThemedBackground(nsDisplayListBuilder* aBuilder,
@@ -3763,7 +3762,8 @@ nsDisplayThemedBackground::HitTest(nsDisplayListBuilder* aBuilder,
 
 nsRegion
 nsDisplayThemedBackground::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
-                                           bool* aSnap) {
+                                           bool* aSnap) const
+{
   nsRegion result;
   *aSnap = false;
 
@@ -3774,7 +3774,8 @@ nsDisplayThemedBackground::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
 }
 
 Maybe<nscolor>
-nsDisplayThemedBackground::IsUniform(nsDisplayListBuilder* aBuilder) {
+nsDisplayThemedBackground::IsUniform(nsDisplayListBuilder* aBuilder) const
+{
   if (mAppearance == NS_THEME_WIN_BORDERLESS_GLASS ||
       mAppearance == NS_THEME_WIN_GLASS) {
     return Some(NS_RGBA(0,0,0,0));
@@ -3783,7 +3784,7 @@ nsDisplayThemedBackground::IsUniform(nsDisplayListBuilder* aBuilder) {
 }
 
 bool
-nsDisplayThemedBackground::ProvidesFontSmoothingBackgroundColor(nscolor* aColor)
+nsDisplayThemedBackground::ProvidesFontSmoothingBackgroundColor(nscolor* aColor) const
 {
   nsITheme* theme = mFrame->PresContext()->GetTheme();
   return theme->WidgetProvidesFontSmoothingBackgroundColor(mFrame, mAppearance, aColor);
@@ -3851,7 +3852,9 @@ void nsDisplayThemedBackground::ComputeInvalidationRegion(nsDisplayListBuilder* 
 }
 
 nsRect
-nsDisplayThemedBackground::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) {
+nsDisplayThemedBackground::GetBounds(nsDisplayListBuilder* aBuilder,
+                                     bool* aSnap) const
+{
   *aSnap = true;
   return mBounds;
 }
@@ -4089,7 +4092,7 @@ nsDisplayBackgroundColor::Paint(nsDisplayListBuilder* aBuilder,
 
 nsRegion
 nsDisplayBackgroundColor::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
-                                          bool* aSnap)
+                                          bool* aSnap) const
 {
   *aSnap = false;
 
@@ -4112,7 +4115,7 @@ nsDisplayBackgroundColor::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
 }
 
 Maybe<nscolor>
-nsDisplayBackgroundColor::IsUniform(nsDisplayListBuilder* aBuilder)
+nsDisplayBackgroundColor::IsUniform(nsDisplayListBuilder* aBuilder) const
 {
   return Some(mColor.ToABGR());
 }
@@ -4162,7 +4165,9 @@ nsDisplayClearBackground::BuildLayer(nsDisplayListBuilder* aBuilder,
 }
 
 nsRect
-nsDisplayOutline::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) {
+nsDisplayOutline::GetBounds(nsDisplayListBuilder* aBuilder,
+                            bool* aSnap) const
+{
   *aSnap = false;
   return mFrame->GetVisualOverflowRectRelativeToSelf() + ToReferenceFrame();
 }
@@ -4240,7 +4245,7 @@ nsDisplayOutline::CreateWebRenderCommands(wr::DisplayListBuilder& aBuilder,
 }
 
 bool
-nsDisplayOutline::IsInvisibleInRect(const nsRect& aRect)
+nsDisplayOutline::IsInvisibleInRect(const nsRect& aRect) const
 {
   const nsStyleOutline* outline = mFrame->StyleOutline();
   nsRect borderBox(ToReferenceFrame(), mFrame->GetSize());
@@ -4480,7 +4485,8 @@ nsDisplayCaret::~nsDisplayCaret()
 #endif
 
 nsRect
-nsDisplayCaret::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap)
+nsDisplayCaret::GetBounds(nsDisplayListBuilder* aBuilder,
+                          bool* aSnap) const
 {
   *aSnap = true;
   // The caret returns a rect in the coordinates of mFrame.
@@ -4566,7 +4572,7 @@ nsDisplayBorder::nsDisplayBorder(nsDisplayListBuilder* aBuilder, nsIFrame* aFram
 }
 
 bool
-nsDisplayBorder::IsInvisibleInRect(const nsRect& aRect)
+nsDisplayBorder::IsInvisibleInRect(const nsRect& aRect) const
 {
   nsRect paddingRect = mFrame->GetPaddingRect() - mFrame->GetPosition() +
     ToReferenceFrame();
@@ -4852,14 +4858,15 @@ nsDisplayBorder::Paint(nsDisplayListBuilder* aBuilder,
 }
 
 nsRect
-nsDisplayBorder::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap)
+nsDisplayBorder::GetBounds(nsDisplayListBuilder* aBuilder,
+                           bool* aSnap) const
 {
   *aSnap = true;
   return mBounds;
 }
 
 nsRegion
-nsDisplayBorder::CalculateBounds(const nsStyleBorder& aStyleBorder)
+nsDisplayBorder::CalculateBounds(const nsStyleBorder& aStyleBorder) const
 {
   nsRect borderBounds(ToReferenceFrame(), mFrame->GetSize());
   if (aStyleBorder.IsBorderImageLoaded()) {
@@ -4956,7 +4963,9 @@ nsDisplayBoxShadowOuter::Paint(nsDisplayListBuilder* aBuilder,
 }
 
 nsRect
-nsDisplayBoxShadowOuter::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) {
+nsDisplayBoxShadowOuter::GetBounds(nsDisplayListBuilder* aBuilder,
+                                   bool* aSnap) const
+{
   *aSnap = false;
   return mBounds;
 }
@@ -4968,7 +4977,7 @@ nsDisplayBoxShadowOuter::GetBoundsInternal() {
 }
 
 bool
-nsDisplayBoxShadowOuter::IsInvisibleInRect(const nsRect& aRect)
+nsDisplayBoxShadowOuter::IsInvisibleInRect(const nsRect& aRect) const
 {
   nsPoint origin = ToReferenceFrame();
   nsRect frameRect(origin, mFrame->GetSize());
@@ -5433,7 +5442,9 @@ nsDisplayWrapList::HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
 }
 
 nsRect
-nsDisplayWrapList::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) {
+nsDisplayWrapList::GetBounds(nsDisplayListBuilder* aBuilder,
+                             bool* aSnap) const
+{
   *aSnap = false;
   return mBounds;
 }
@@ -5463,7 +5474,8 @@ nsDisplayWrapList::ComputeVisibility(nsDisplayListBuilder* aBuilder,
 
 nsRegion
 nsDisplayWrapList::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
-                                   bool* aSnap) {
+                                   bool* aSnap) const
+{
   *aSnap = false;
   nsRegion result;
   if (mListPtr->IsOpaque()) {
@@ -5474,7 +5486,8 @@ nsDisplayWrapList::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
 }
 
 Maybe<nscolor>
-nsDisplayWrapList::IsUniform(nsDisplayListBuilder* aBuilder) {
+nsDisplayWrapList::IsUniform(nsDisplayListBuilder* aBuilder) const
+{
   // We could try to do something but let's conservatively just return Nothing.
   return Nothing();
 }
@@ -5535,7 +5548,7 @@ RequiredLayerStateForChildren(nsDisplayListBuilder* aBuilder,
   return result;
 }
 
-nsRect nsDisplayWrapList::GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder)
+nsRect nsDisplayWrapList::GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) const
 {
   nsRect bounds;
   for (nsDisplayItem* i = mListPtr->GetBottom(); i; i = i->GetAbove()) {
@@ -5646,7 +5659,8 @@ nsDisplayOpacity::~nsDisplayOpacity() {
 #endif
 
 nsRegion nsDisplayOpacity::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
-                                           bool* aSnap) {
+                                           bool* aSnap) const
+{
   *aSnap = false;
   // The only time where mOpacity == 1.0 should be when we have will-change.
   // We could report this as opaque then but when the will-change value starts
@@ -5858,7 +5872,8 @@ nsDisplayBlendMode::~nsDisplayBlendMode() {
 #endif
 
 nsRegion nsDisplayBlendMode::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
-                                                bool* aSnap) {
+                                                bool* aSnap) const
+{
   *aSnap = false;
   // We are never considered opaque
   return nsRegion();
@@ -6105,7 +6120,8 @@ UseDisplayPortForViewport(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
 }
 
 nsRect
-nsDisplaySubDocument::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap)
+nsDisplaySubDocument::GetBounds(nsDisplayListBuilder* aBuilder,
+                                bool* aSnap) const
 {
   bool usingDisplayPort = UseDisplayPortForViewport(aBuilder, mFrame);
 
@@ -6173,7 +6189,8 @@ nsDisplaySubDocument::ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBui
 }
 
 nsRegion
-nsDisplaySubDocument::GetOpaqueRegion(nsDisplayListBuilder* aBuilder, bool* aSnap)
+nsDisplaySubDocument::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
+                                      bool* aSnap) const
 {
   bool usingDisplayPort = UseDisplayPortForViewport(aBuilder, mFrame);
 
@@ -6496,7 +6513,8 @@ nsDisplayZoom::~nsDisplayZoom() {
 }
 #endif
 
-nsRect nsDisplayZoom::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap)
+nsRect nsDisplayZoom::GetBounds(nsDisplayListBuilder* aBuilder,
+                                bool* aSnap) const
 {
   nsRect bounds = nsDisplaySubDocument::GetBounds(aBuilder, aSnap);
   *aSnap = false;
@@ -7155,7 +7173,7 @@ static bool IsFrameVisible(nsIFrame* aFrame, const Matrix4x4& aMatrix)
 }
 
 const Matrix4x4&
-nsDisplayTransform::GetTransform()
+nsDisplayTransform::GetTransform() const
 {
   if (mTransform.IsIdentity()) {
     float scale = mFrame->PresContext()->AppUnitsPerDevPixel();
@@ -7465,7 +7483,8 @@ nsDisplayTransform::GetHitDepthAtPoint(nsDisplayListBuilder* aBuilder, const nsP
  * by the reference point.
  */
 nsRect
-nsDisplayTransform::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap)
+nsDisplayTransform::GetBounds(nsDisplayListBuilder* aBuilder,
+                              bool* aSnap) const
 {
   *aSnap = false;
 
@@ -7541,8 +7560,9 @@ nsDisplayTransform::ComputeBounds(nsDisplayListBuilder* aBuilder)
  * mStoredList.GetVisibleRect().Contains(untransformedVisible), then it
  * certainly contains the actual (non-axis-aligned) untransformed rect.
  */
-nsRegion nsDisplayTransform::GetOpaqueRegion(nsDisplayListBuilder *aBuilder,
-                                             bool* aSnap)
+nsRegion
+nsDisplayTransform::GetOpaqueRegion(nsDisplayListBuilder *aBuilder,
+                                             bool* aSnap) const
 {
   *aSnap = false;
   nsRect untransformedVisible;
@@ -7568,7 +7588,7 @@ nsRegion nsDisplayTransform::GetOpaqueRegion(nsDisplayListBuilder *aBuilder,
  * works.
  */
 Maybe<nscolor>
-nsDisplayTransform::IsUniform(nsDisplayListBuilder *aBuilder)
+nsDisplayTransform::IsUniform(nsDisplayListBuilder *aBuilder) const
 {
   nsRect untransformedVisible;
   if (!UntransformVisibleRect(aBuilder, &untransformedVisible)) {
@@ -7647,7 +7667,7 @@ bool nsDisplayTransform::UntransformRect(const nsRect &aTransformedBounds,
 }
 
 bool nsDisplayTransform::UntransformVisibleRect(nsDisplayListBuilder* aBuilder,
-                                                nsRect *aOutRect)
+                                                nsRect *aOutRect) const
 {
   const Matrix4x4& matrix = GetTransform();
   if (matrix.IsSingular())
@@ -7827,7 +7847,7 @@ nsDisplaySVGEffects::~nsDisplaySVGEffects()
 #endif
 
 nsRegion nsDisplaySVGEffects::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
-                                              bool* aSnap)
+                                              bool* aSnap) const
 {
   *aSnap = false;
   return nsRegion();

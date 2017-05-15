@@ -178,7 +178,8 @@ public:
   }
 #endif
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
-                           bool* aSnap) override {
+                           bool* aSnap) const override
+  {
     *aSnap = false;
     nsRect shadowRect =
       nsLayoutUtils::GetTextShadowRectsUnion(mRect, mFrame);
@@ -187,8 +188,9 @@ public:
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      nsRenderingContext* aCtx) override;
 
-  virtual uint32_t GetPerFrameKey() override { 
-    return (mIndex << TYPE_BITS) | nsDisplayItem::GetPerFrameKey(); 
+  virtual uint32_t GetPerFrameKey() const override
+  {
+    return (mIndex << TYPE_BITS) | nsDisplayItem::GetPerFrameKey();
   }
   void PaintTextToContext(nsRenderingContext* aCtx,
                           nsPoint aOffsetFromRect);
