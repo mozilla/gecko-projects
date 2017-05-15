@@ -172,7 +172,7 @@ struct AnimatedGeometryRoot
 
   AnimatedGeometryRoot* GetAsyncAGR() {
     AnimatedGeometryRoot* agr = this;
-    while (!agr->mIsAsync) {
+    while (!agr->mIsAsync && agr->mParentAGR) {
       agr = agr->mParentAGR;
     }
     return agr;

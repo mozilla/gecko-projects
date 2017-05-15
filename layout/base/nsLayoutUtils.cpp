@@ -3588,6 +3588,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
     // up to that one into the merged list, but discard the repeat.
     if (oldListLookup[std::make_pair(i->Frame(), i->GetPerFrameKey())]) {
       while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
+        oldListLookup.erase(std::make_pair(old->Frame(), old->GetPerFrameKey()));
         if (!aDeletedFrames.Contains(old->Frame()) &&
             !IsAnyAncestorModified(old->Frame())) {
 
@@ -3598,7 +3599,6 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
               MOZ_ASSERT(newItem->GetChildren());
               MergeDisplayLists(aBuilder, aDeletedFrames, newItem->GetChildren(), old->GetChildren(), newItem->GetChildren());
             }
-            oldListLookup.erase(std::make_pair(old->Frame(), old->GetPerFrameKey()));
             old->Destroy(aBuilder);
           } else {
             merged.AppendToTop(old);
