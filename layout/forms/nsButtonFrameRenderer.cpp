@@ -68,7 +68,7 @@ nsButtonFrameRenderer::SetDisabled(bool aDisabled, bool notify)
 }
 
 bool
-nsButtonFrameRenderer::isDisabled() 
+nsButtonFrameRenderer::isDisabled()
 {
   return mFrame->GetContent()->AsElement()->
     State().HasState(NS_EVENT_STATE_DISABLED);
@@ -85,8 +85,8 @@ public:
   virtual ~nsDisplayButtonBoxShadowOuter() {
     MOZ_COUNT_DTOR(nsDisplayButtonBoxShadowOuter);
   }
-#endif  
-  
+#endif
+
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      nsRenderingContext* aCtx) override;
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
@@ -271,7 +271,7 @@ public:
   virtual ~nsDisplayButtonForeground() {
     MOZ_COUNT_DTOR(nsDisplayButtonForeground);
   }
-#endif  
+#endif
 
   nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override;
   void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
@@ -437,7 +437,7 @@ nsButtonFrameRenderer::PaintInnerFocusBorder(
 
   DrawResult result = DrawResult::SUCCESS;
 
-  if (mInnerFocusStyle) { 
+  if (mInnerFocusStyle) {
     GetButtonInnerFocusRect(aRect, rect);
 
     result &=
@@ -538,7 +538,7 @@ nsButtonFrameRenderer::GetStyleContext(int32_t aIndex) const
   }
 }
 
-void 
+void
 nsButtonFrameRenderer::SetStyleContext(int32_t aIndex, nsStyleContext* aStyleContext)
 {
   switch (aIndex) {

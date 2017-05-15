@@ -157,9 +157,9 @@ nsSelectsAreaFrame::BuildDisplayListInternal(nsDisplayListBuilder*   aBuilder,
 }
 
 void
-nsSelectsAreaFrame::Reflow(nsPresContext*           aPresContext, 
+nsSelectsAreaFrame::Reflow(nsPresContext*           aPresContext,
                            ReflowOutput&     aDesiredSize,
-                           const ReflowInput& aReflowInput, 
+                           const ReflowInput& aReflowInput,
                            nsReflowStatus&          aStatus)
 {
   nsListControlFrame* list = GetEnclosingListFrame(this);

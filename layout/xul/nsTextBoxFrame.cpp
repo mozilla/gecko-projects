@@ -370,7 +370,7 @@ nsTextBoxFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
         return;
 
     nsLeafBoxFrame::BuildDisplayList(aBuilder, aLists);
-    
+
     aLists.Content()->AppendNewToTop(new (aBuilder)
         nsDisplayXULTextBox(aBuilder, this));
 }
@@ -904,10 +904,10 @@ nsTextBoxFrame::UpdateAccessIndex()
             }
 
             nsAString::const_iterator start, end;
-                
+
             mCroppedTitle.BeginReading(start);
             mCroppedTitle.EndReading(end);
-            
+
             // remember the beginning of the string
             nsAString::const_iterator originalStart = start;
 
@@ -926,7 +926,7 @@ nsTextBoxFrame::UpdateAccessIndex()
                 found = RFindInReadable(mAccessKey, start, end,
                                         nsCaseInsensitiveStringComparator());
             }
-            
+
             if (found)
                 mAccessKeyInfo->mAccesskeyIndex = Distance(originalStart, start);
             else
@@ -988,13 +988,13 @@ nsTextBoxFrame::DoXULLayout(nsBoxLayoutState& aBoxLayoutState)
     CalcDrawRect(*aBoxLayoutState.GetRenderingContext());
 
     const nsStyleText* textStyle = StyleText();
-    
+
     nsRect scrollBounds(nsPoint(0, 0), GetSize());
     nsRect textRect = mTextDrawRect;
-    
+
     RefPtr<nsFontMetrics> fontMet =
       nsLayoutUtils::GetFontMetricsForFrame(this, 1.0f);
-    nsBoundingMetrics metrics = 
+    nsBoundingMetrics metrics =
       fontMet->GetInkBoundsForVisualOverflow(mCroppedTitle.get(),
                                              mCroppedTitle.Length(),
                                              aBoxLayoutState.GetRenderingContext()->GetDrawTarget());
@@ -1004,7 +1004,7 @@ nsTextBoxFrame::DoXULLayout(nsBoxLayoutState& aBoxLayoutState)
 
     tr.IStart(wm) -= metrics.leftBearing;
     tr.ISize(wm) = metrics.width;
-    // In DrawText() we always draw with the baseline at MaxAscent() (relative to mTextDrawRect), 
+    // In DrawText() we always draw with the baseline at MaxAscent() (relative to mTextDrawRect),
     tr.BStart(wm) += fontMet->MaxAscent() - metrics.ascent;
     tr.BSize(wm) = metrics.ascent + metrics.descent;
 
@@ -1199,7 +1199,7 @@ nsTextBoxFrame::GetFrameName(nsAString& aResult) const
 }
 #endif
 
-// If you make changes to this function, check its counterparts 
+// If you make changes to this function, check its counterparts
 // in nsBoxFrame and nsXULLabelFrame
 nsresult
 nsTextBoxFrame::RegUnregAccessKey(bool aDoReg)
@@ -1226,7 +1226,7 @@ nsTextBoxFrame::RegUnregAccessKey(bool aDoReg)
     if (accessKey.IsEmpty())
         return NS_OK;
 
-    // With a valid PresContext we can get the ESM 
+    // With a valid PresContext we can get the ESM
     // and (un)register the access key
     EventStateManager* esm = PresContext()->EventStateManager();
 

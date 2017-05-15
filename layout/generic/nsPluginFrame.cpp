@@ -234,7 +234,7 @@ nsPluginFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
     nsView* view = GetView();
     nsViewManager* vm = view->GetViewManager();
     if (vm) {
-      nsViewVisibility visibility = 
+      nsViewVisibility visibility =
         IsHidden() ? nsViewVisibility_kHide : nsViewVisibility_kShow;
       vm->SetViewVisibility(view, visibility);
     }
@@ -246,7 +246,7 @@ nsPluginFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 nsIAtom*
 nsPluginFrame::GetType() const
 {
-  return nsGkAtoms::objectFrame; 
+  return nsGkAtoms::objectFrame;
 }
 
 #ifdef DEBUG_FRAME_DUMP
@@ -263,7 +263,7 @@ nsPluginFrame::PrepForDrawing(nsIWidget *aWidget)
   mWidget = aWidget;
 
   nsView* view = GetView();
-  NS_ASSERTION(view, "Object frames must have views");  
+  NS_ASSERTION(view, "Object frames must have views");
   if (!view) {
     return NS_ERROR_FAILURE;
   }
@@ -276,7 +276,7 @@ nsPluginFrame::PrepForDrawing(nsIWidget *aWidget)
   //this is ugly. it was ripped off from didreflow(). MMP
   // Position and size view relative to its parent, not relative to our
   // parent frame (our parent frame may not have a view).
-  
+
   nsView* parentWithView;
   nsPoint origin;
   nsRect r(0, 0, mRect.width, mRect.height);
@@ -336,7 +336,7 @@ nsPluginFrame::PrepForDrawing(nsIWidget *aWidget)
 
     RegisterPluginForGeometryUpdates();
 
-    // Here we set the background color for this widget because some plugins will use 
+    // Here we set the background color for this widget because some plugins will use
     // the child window background color when painting. If it's not set, it may default to gray
     // Sometimes, a frame doesn't have a background color or is transparent. In this
     // case, walk up the frame tree until we do find a frame with a background color
@@ -601,13 +601,13 @@ nsresult
 nsPluginFrame::CallSetWindow(bool aCheckIsHidden)
 {
   NPWindow *win = nullptr;
- 
+
   nsresult rv = NS_ERROR_FAILURE;
   RefPtr<nsNPAPIPluginInstance> pi;
   if (!mInstanceOwner ||
       NS_FAILED(rv = mInstanceOwner->GetInstance(getter_AddRefs(pi))) ||
       !pi ||
-      NS_FAILED(rv = mInstanceOwner->GetWindow(win)) || 
+      NS_FAILED(rv = mInstanceOwner->GetWindow(win)) ||
       !win)
     return rv;
 
@@ -765,7 +765,7 @@ nsPluginFrame::IsHidden(bool aCheckVisibilityStyle) const
 {
   if (aCheckVisibilityStyle) {
     if (!StyleVisibility()->IsVisibleOrCollapsed())
-      return true;    
+      return true;
   }
 
   // only <embed> tags support the HIDDEN attribute

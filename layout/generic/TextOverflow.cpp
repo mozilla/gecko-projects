@@ -517,7 +517,7 @@ TextOverflow::ExamineLineFrames(nsLineBox*      aLine,
     if (guessIEnd) {
       mIEnd.SetupString(mBlock);
     }
-    
+
     // If there is insufficient space for both markers then keep the one on the
     // end side per the block's 'direction'.
     nscoord istartMarkerISize = mIStart.mActive ? mIStart.mISize : 0;
@@ -683,7 +683,7 @@ TextOverflow::PruneDisplayListContents(nsDisplayListBuilder* aBuilder,
       }
     }
 
-    nsCharClipDisplayItem* charClip = itemFrame ? 
+    nsCharClipDisplayItem* charClip = itemFrame ?
       nsCharClipDisplayItem::CheckCast(item) : nullptr;
     if (charClip && GetSelfOrNearestBlock(itemFrame) == mBlock) {
       LogicalRect rect =

@@ -502,7 +502,7 @@ nsTableCellFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
         aLists.BorderBackground()->AppendNewToTop(
           new (aBuilder) nsDisplayBoxShadowOuter(aBuilder, this));
       }
-    
+
       // display background if we need to.
       if (aBuilder->IsForEventDelivery() ||
           !StyleBackground()->IsTransparent(this) ||
@@ -530,16 +530,16 @@ nsTableCellFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
           }
         }
       }
-    
+
       // display inset box-shadows if we need to.
       if (hasBoxShadow) {
         aLists.BorderBackground()->AppendNewToTop(
           new (aBuilder) nsDisplayBoxShadowInner(aBuilder, this));
       }
-    
+
       // display borders if we need to
       ProcessBorders(tableFrame, aBuilder, aLists);
-    
+
       // and display the selection border if we need to
       if (IsSelected()) {
         aLists.BorderBackground()->AppendNewToTop(new (aBuilder)
@@ -548,7 +548,7 @@ nsTableCellFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                            TYPE_TABLE_CELL_SELECTION));
       }
     }
-    
+
     // the 'empty-cells' property has no effect on 'outline'
     DisplayOutline(aBuilder, aLists);
   }

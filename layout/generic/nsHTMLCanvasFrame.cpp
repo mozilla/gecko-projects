@@ -305,7 +305,7 @@ nsHTMLCanvasFrame::Reflow(nsPresContext*           aPresContext,
 // removed.  That needs to be fixed.
 // XXXdholbert As in nsImageFrame, this function's clients should probably
 // just be calling GetContentRectRelativeToSelf().
-nsRect 
+nsRect
 nsHTMLCanvasFrame::GetInnerArea() const
 {
   nsMargin bp = mBorderPadding.GetPhysicalMargin(GetWritingMode());
@@ -396,7 +396,7 @@ nsHTMLCanvasFrame::GetType() const
 
 // get the offset into the content area of the image where aImg starts if it is a continuation.
 // from nsImageFrame
-nscoord 
+nscoord
 nsHTMLCanvasFrame::GetContinuationOffset(nscoord* aWidth) const
 {
   nscoord offset = 0;
