@@ -1116,7 +1116,7 @@ static void UnmarkFrameForDisplay(nsIFrame* aFrame) {
     f->RemoveStateBits(NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO |
                        NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO_IF_VISIBLE);
   }
-  
+
 }
 
 nsDisplayListBuilder::~nsDisplayListBuilder() {
@@ -1375,13 +1375,13 @@ nsDisplayListBuilder::MarkPreserve3DFramesForDisplayList(nsIFrame* aDirtyFrame)
 void*
 nsDisplayListBuilder::Allocate(size_t aSize, DisplayItemType aType)
 {
-  return mPool.AllocateByObjectID((mozilla::ArenaObjectID)aType, aSize);
+  return mPool.AllocateByCustomID(aType, aSize);
 }
 
 void
 nsDisplayListBuilder::Destroy(DisplayItemType aType, void* aPtr)
 {
-  mPool.FreeByObjectID((mozilla::ArenaObjectID)aType, aPtr);
+  mPool.FreeByCustomID(aType, aPtr);
 }
 
 ActiveScrolledRoot*

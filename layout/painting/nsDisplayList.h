@@ -1750,7 +1750,7 @@ public:
   virtual void Destroy(nsDisplayListBuilder* aBuilder)
   {
     DisplayItemType type = GetType();
-    this->nsDisplayItem::~nsDisplayItem();
+    this->~nsDisplayItem();
     aBuilder->Destroy(type, this);
   }
 
@@ -2893,6 +2893,14 @@ public:
   void* operator new(size_t aSize,
                      nsDisplayListBuilder* aBuilder) {
     return aBuilder->Allocate(aSize, DisplayItemType::TYPE_GENERIC);
+  }
+
+  // This override is needed because GetType() for nsDisplayGeneric subclasses
+  // does not match TYPE_GENERIC that was used to allocate the object.
+  virtual void Destroy(nsDisplayListBuilder* aBuilder) override
+  {
+    this->~nsDisplayGeneric();
+    aBuilder->Destroy(TYPE_GENERIC, this);
   }
 
 protected:
@@ -4859,6 +4867,12 @@ class nsDisplayTransform: public nsDisplayItem
       nsDisplayWrapList(aBuilder, aFrame, aItem) {}
     virtual ~StoreList() {}
 
+    // This override is needed since StoreList is only allocated from the stack.
+    virtual void Destroy(nsDisplayListBuilder* aBuilder) override
+    {
+      mList.DeleteAll(aBuilder);
+    }
+
     virtual void UpdateBounds(nsDisplayListBuilder* aBuilder) override {
       // For extending 3d rendering context, the bounds would be
       // updated by DoUpdateBoundsPreserves3D(), not here.
@@ -4912,6 +4926,12 @@ public:
     MOZ_COUNT_DTOR(nsDisplayTransform);
   }
 #endif
+
+  virtual void Destroy(nsDisplayListBuilder* aBuilder) override
+  {
+    mStoredList.Destroy(aBuilder);
+    nsDisplayItem::Destroy(aBuilder);
+  }
 
   NS_DISPLAY_DECL_NAME("nsDisplayTransform", TYPE_TRANSFORM)
 
