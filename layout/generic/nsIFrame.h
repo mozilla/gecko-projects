@@ -1183,7 +1183,7 @@ public:
   NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(GenConProperty, ContentArray,
                                       DestroyContentArray)
 
-  NS_DECLARE_FRAME_PROPERTY_DELETABLE(ModifiedFrameList, nsTArray<nsIFrame*>)
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(ModifiedFrameList, std::vector<WeakFrame>)
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(DeletedFrameList, nsTArray<nsIFrame*>)
 
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(BidiDataProperty, mozilla::FrameBidiData)

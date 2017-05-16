@@ -3816,7 +3816,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       bool merged = false;
       if ((aFlags & PaintFrameFlags::PAINT_WIDGET_LAYERS) &&
           aFrame->Properties().Get(nsIFrame::ModifiedFrameList())) {
-        nsTArray<nsIFrame*>* modifiedFrames = aFrame->Properties().Get(nsIFrame::ModifiedFrameList());
+        std::vector<WeakFrame>* modifiedFrames = aFrame->Properties().Get(nsIFrame::ModifiedFrameList());
         nsTArray<nsIFrame*>* deletedFrames = aFrame->Properties().Get(nsIFrame::DeletedFrameList());
 
         nsTArray<nsIFrame*> stackingContexts;
@@ -3826,6 +3826,9 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         bool success = true;
         //printf_stderr("Dirty frames: ");
         for (nsIFrame* f : *modifiedFrames) {
+          if (!f) {
+            continue;
+          }
           // TODO: There is almost certainly a faster way of doing this, probably can be combined with the ancestor
           // walk for TransformFrameRectToAncestor.
           AnimatedGeometryRoot* agr = builder.FindAnimatedGeometryRootFor(f)->GetAsyncAGR();
@@ -3936,10 +3939,13 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         // TODO: Do we mark frames as modified during displaylist building? If
         // we do this isn't gonna work.
         for (nsIFrame* f : *modifiedFrames) {
-          f->SetFrameIsModified(false);
+          if (f) {
+            f->SetFrameIsModified(false);
+          }
         }
-        modifiedFrames->Clear();
+        modifiedFrames->clear();
         if (deletedFrames) {
+
           deletedFrames->Clear();
         }
 

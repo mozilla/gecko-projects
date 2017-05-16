@@ -6357,13 +6357,13 @@ static void InvalidateRenderingObservers(nsIFrame* aFrame, bool aFrameChanged = 
   // root (which is the root stacking context, but not necessarily the one for the current frame)
   if (XRE_IsContentProcess() && !aFrame->IsFrameModified()) {
     nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
-    nsTArray<nsIFrame*>* modifiedFrames = displayRoot->Properties().Get(nsIFrame::ModifiedFrameList());
+    std::vector<WeakFrame>* modifiedFrames = displayRoot->Properties().Get(nsIFrame::ModifiedFrameList());
     if (!modifiedFrames) {
-      modifiedFrames = new nsTArray<nsIFrame*>;
+      modifiedFrames = new std::vector<WeakFrame>;
       displayRoot->Properties().Set(nsIFrame::ModifiedFrameList(), modifiedFrames);
     }
     MOZ_ASSERT(aFrame->PresContext()->LayoutPhaseCount(eLayoutPhase_DisplayListBuilding) == 0);
-    modifiedFrames->AppendElement(aFrame);
+    modifiedFrames->push_back(aFrame);
     aFrame->SetFrameIsModified(true);
   }
 }
