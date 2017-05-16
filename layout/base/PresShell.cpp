@@ -2123,8 +2123,6 @@ PresShell::NotifyDestroyingFrame(nsIFrame* aFrame)
     // tries to remove it from the (array) value of this property.
     mPresContext->PropertyTable()->
       Delete(aFrame, FrameLayerBuilder::LayerManagerDataProperty());
-    mPresContext->PropertyTable()->
-      Delete(aFrame, nsIFrame::CachedDisplayList());
   }
 }
 

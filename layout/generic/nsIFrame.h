@@ -1186,9 +1186,6 @@ public:
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(ModifiedFrameList, nsTArray<nsIFrame*>)
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(DeletedFrameList, nsTArray<nsIFrame*>)
 
-  NS_DECLARE_FRAME_PROPERTY_DELETABLE(CachedDisplayListBuilder, nsDisplayListBuilder)
-  NS_DECLARE_FRAME_PROPERTY_DELETABLE(CachedDisplayList, nsDisplayList)
-
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(BidiDataProperty, mozilla::FrameBidiData)
 
   mozilla::FrameBidiData GetBidiData()

@@ -3679,18 +3679,26 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   TimeStamp startBuildDisplayList = TimeStamp::Now();
 
   nsDisplayListBuilder* builderPtr = nullptr;
+  nsDisplayList* listPtr = nullptr;
   if (aBuilderMode == nsDisplayListBuilderMode::PAINTING) {
-    builderPtr = aFrame->Properties().Get(nsIFrame::CachedDisplayListBuilder());
-    if (!builderPtr) {
-      builderPtr = new nsDisplayListBuilder(aFrame, aBuilderMode,
-          !(aFlags & PaintFrameFlags::PAINT_HIDE_CARET));
-      aFrame->Properties().Set(nsIFrame::CachedDisplayListBuilder(), builderPtr);
+    RetainedDisplayListBuilder* retainedBuilder =
+      aFrame->Properties().Get(RetainedDisplayListBuilder::Cached());
+    if (!retainedBuilder) {
+      retainedBuilder =
+        new RetainedDisplayListBuilder(aFrame, aBuilderMode,
+                                       !(aFlags & PaintFrameFlags::PAINT_HIDE_CARET));
+      aFrame->Properties().Set(RetainedDisplayListBuilder::Cached(), retainedBuilder);
     }
+    builderPtr = &retainedBuilder->mBuilder;
+    listPtr = &retainedBuilder->mList;
   } else {
     builderPtr = new nsDisplayListBuilder(aFrame, aBuilderMode,
         !(aFlags & PaintFrameFlags::PAINT_HIDE_CARET));
+    listPtr = new nsDisplayList;
   }
   nsDisplayListBuilder& builder = *builderPtr;
+  nsDisplayList& list = *listPtr;
+
   if (aFlags & PaintFrameFlags::PAINT_IN_TRANSFORM) {
     builder.SetInTransform(true);
   }
@@ -3726,18 +3734,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   } else {
     visibleRegion = aDirtyRegion;
   }
-
-  nsDisplayList* listPtr = nullptr;
-  if (aBuilderMode == nsDisplayListBuilderMode::PAINTING) {
-    listPtr = aFrame->Properties().Get(nsIFrame::CachedDisplayList());
-    if (!listPtr) {
-      listPtr = new nsDisplayList;
-      aFrame->Properties().Set(nsIFrame::CachedDisplayList(), listPtr);
-    }
-  } else {
-    listPtr = new nsDisplayList;
-  }
-  nsDisplayList& list = *listPtr;
 
   // If the root has embedded plugins, flag the builder so we know we'll need
   // to update plugin geometry after painting.
