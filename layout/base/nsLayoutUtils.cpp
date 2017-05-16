@@ -4186,7 +4186,11 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
 
   // Flush the list so we don't trigger the IsEmpty-on-destruction assertion
-  //list.DeleteAll(&builder);
+  if (aBuilderMode != nsDisplayListBuilderMode::PAINTING) {
+    list.DeleteAll(&builder);
+    delete listPtr;
+    delete builderPtr;
+  }
   return NS_OK;
 }
 
