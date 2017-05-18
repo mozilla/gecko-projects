@@ -385,7 +385,7 @@ def mozharness_test_buildbot_bridge(config, job, taskdesc):
 
     branch = config.params['project']
     platform, build_type = test['build-platform'].split('/')
-    test_name = test.get('talos-try-name', test['test-name'])
+    test_name = test.get('try-name', test['test-name'])
     mozharness = test['mozharness']
 
     # mochitest e10s follows the pattern mochitest-e10s-<suffix>
@@ -397,13 +397,7 @@ def mozharness_test_buildbot_bridge(config, job, taskdesc):
         'mochitest-gpu',
         'mochitest-e10s',
     ]
-    test_name = test.get(
-                    'talos-try-name',
-                    test.get(
-                        'unittest-try-name',
-                        test['test-name']
-                    )
-                )
+    test_name = test.get('try-name', test['test-name'])
     if test['e10s'] and 'e10s' not in test_name:
         test_name += '-e10s'
 
@@ -438,7 +432,7 @@ def mozharness_test_buildbot_bridge(config, job, taskdesc):
         if variant == 'nightly ':
             variant = ''
         # this variant name has branch after the variant type in BBB bug 1338871
-        if variant == 'stylo ':
+        if variant == 'stylo ' or 'stylo-sequential':
             buildername = '{} {}{} talos {}'.format(
                 BUILDER_NAME_PREFIX[platform],
                 variant,

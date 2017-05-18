@@ -633,7 +633,6 @@ pref("layers.geometry.d3d11.enabled", true);
 // gfx/layers/apz/src/AsyncPanZoomController.cpp.
 pref("apz.allow_checkerboarding", true);
 pref("apz.allow_immediate_handoff", true);
-pref("apz.allow_with_webrender", false);
 pref("apz.allow_zooming", false);
 
 // Whether to lock touch scrolling to one axis at a time
@@ -648,8 +647,10 @@ pref("apz.axis_lock.direct_pan_angle", "1.047197");   // PI / 3 (60 degrees)
 pref("apz.content_response_timeout", 400);
 #ifdef NIGHTLY_BUILD
 pref("apz.drag.enabled", true);
+pref("apz.drag.initial.enabled", true);
 #else
 pref("apz.drag.enabled", false);
+pref("apz.drag.initial.enabled", false);
 #endif
 pref("apz.danger_zone_x", 50);
 pref("apz.danger_zone_y", 100);
@@ -1233,9 +1234,6 @@ pref("dom.forms.datetime.timepicker", false);
 
 // Support for new @autocomplete values
 pref("dom.forms.autocomplete.experimental", false);
-
-// Enables requestAutocomplete DOM API on forms.
-pref("dom.forms.requestAutocomplete", false);
 
 // Enable search in <select> dropdowns (more than 40 options)
 pref("dom.forms.selectSearch", false);
@@ -3009,12 +3007,10 @@ pref("hangmonitor.timeout", 0);
 pref("plugins.load_appdir_plugins", false);
 // If true, plugins will be click to play
 pref("plugins.click_to_play", false);
-#ifdef NIGHTLY_BUILD
+
 // This only supports one hidden ctp plugin, edit nsPluginArray.cpp if adding a second
-pref("plugins.navigator.hidden_ctp_plugin", "Shockwave Flash");
-#else
 pref("plugins.navigator.hidden_ctp_plugin", "");
-#endif
+
 // The default value for nsIPluginTag.enabledState (STATE_ENABLED = 2)
 pref("plugin.default.state", 2);
 
@@ -3097,10 +3093,21 @@ pref("dom.ipc.plugins.unloadTimeoutSecs", 30);
 // Asynchronous plugin initialization is on hold.
 pref("dom.ipc.plugins.asyncInit.enabled", false);
 
-// Use flash async drawing mode
+#ifdef RELEASE_OR_BETA
+#ifdef _AMD64_
+// Allow Flash async drawing mode in 64-bit release builds
 pref("dom.ipc.plugins.asyncdrawing.enabled", true);
-// Force the accelerated path for a subset of Flash wmode values
+// Force the accelerated direct path for a subset of Flash wmode values
 pref("dom.ipc.plugins.forcedirect.enabled", true);
+#else
+// Disable async drawing for 32-bit release builds
+pref("dom.ipc.plugins.asyncdrawing.enabled", false);
+#endif // _AMD64_
+#else
+// Enable in dev channels
+pref("dom.ipc.plugins.asyncdrawing.enabled", true);
+pref("dom.ipc.plugins.forcedirect.enabled", true);
+#endif
 
 #ifdef RELEASE_OR_BETA
 pref("dom.ipc.processCount", 1);
@@ -4638,6 +4645,9 @@ pref("layers.bench.enabled", false);
 pref("layers.gpu-process.enabled", true);
 pref("layers.gpu-process.max_restarts", 3);
 pref("media.gpu-process-decoder", true);
+#ifdef NIGHTLY_BUILD
+pref("layers.gpu-process.allow-software", true);
+#endif
 #endif
 
 // Whether to force acceleration on, ignoring blacklists.
@@ -5221,11 +5231,6 @@ pref("urlclassifier.update.response_timeout_ms", 5000);
 // Download update timeout for Safebrowsing.
 pref("urlclassifier.update.timeout_ms", 60000);
 
-// If an urlclassifier table has not been updated in this number of seconds,
-// a gethash request will be forced to check that the result is still in
-// the database.
-pref("urlclassifier.max-complete-age", 2700);
-
 // Name of the about: page contributed by safebrowsing to handle display of error
 // pages on phishing/malware hits.  (bug 399233)
 pref("urlclassifier.alternate_error_page", "blocked");
@@ -5259,9 +5264,9 @@ pref("browser.safebrowsing.provider.google.reportMalwareMistakeURL", "https://%L
 // Prefs for v4.
 pref("browser.safebrowsing.provider.google4.pver", "4");
 pref("browser.safebrowsing.provider.google4.lists", "goog-badbinurl-proto,goog-downloadwhite-proto,goog-phish-proto,googpub-phish-proto,goog-malware-proto,goog-unwanted-proto");
-pref("browser.safebrowsing.provider.google4.updateURL", "https://safebrowsing.googleapis.com/v4/threatListUpdates:fetch?$ct=application/x-protobuf&key=%GOOGLE_API_KEY%");
+pref("browser.safebrowsing.provider.google4.updateURL", "https://safebrowsing.googleapis.com/v4/threatListUpdates:fetch?$ct=application/x-protobuf&key=%GOOGLE_API_KEY%&$httpMethod=POST");
 #ifdef NIGHTLY_BUILD
-pref("browser.safebrowsing.provider.google4.gethashURL", "https://safebrowsing.googleapis.com/v4/fullHashes:find?$ct=application/x-protobuf&key=%GOOGLE_API_KEY%");
+pref("browser.safebrowsing.provider.google4.gethashURL", "https://safebrowsing.googleapis.com/v4/fullHashes:find?$ct=application/x-protobuf&key=%GOOGLE_API_KEY%&$httpMethod=POST");
 #else
 pref("browser.safebrowsing.provider.google4.gethashURL", "");
 #endif // NIGHTLY_BUILD
@@ -5296,6 +5301,7 @@ pref("urlclassifier.flashExceptTable", "testexcept-flash-simple,except-flash-dig
 pref("urlclassifier.flashSubDocTable", "test-flashsubdoc-simple,block-flashsubdoc-digest256");
 pref("urlclassifier.flashSubDocExceptTable", "testexcept-flashsubdoc-simple,except-flashsubdoc-digest256");
 
+pref("plugins.http_https_only", true);
 pref("plugins.flashBlock.enabled", false);
 
 // Allow users to ignore Safe Browsing warnings.
@@ -5713,3 +5719,6 @@ pref("layers.advanced.caret-layers", 2);
 pref("layers.advanced.displaybuttonborder-layers", 2);
 pref("layers.advanced.outline-layers", 2);
 pref("layers.advanced.solid-color-layers", 2);
+
+// Enable lowercased response header name
+pref("dom.xhr.lowercase_header.enabled", true);

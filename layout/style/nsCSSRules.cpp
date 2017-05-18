@@ -6,6 +6,7 @@
 /* rules in a CSS stylesheet other than style rules (e.g., @import rules) */
 
 #include "nsCSSRules.h"
+#include "nsCSSCounterStyleRule.h"
 #include "nsCSSFontFaceRule.h"
 
 #include "mozilla/Attributes.h"
@@ -1576,11 +1577,10 @@ nsCSSKeyframeStyleDeclaration::GetCSSParsingEnvironment(CSSParsingEnvironment& a
   GetCSSParsingEnvironmentForRule(mRule, aCSSParseEnv);
 }
 
-URLExtraData*
-nsCSSKeyframeStyleDeclaration::GetURLData() const
+nsDOMCSSDeclaration::ServoCSSParsingEnvironment
+nsCSSKeyframeStyleDeclaration::GetServoCSSParsingEnvironment() const
 {
-  MOZ_ASSERT_UNREACHABLE("GetURLData shouldn't be calling on a Gecko rule");
-  return GetURLDataForRule(mRule);
+  MOZ_CRASH("GetURLData shouldn't be calling on a Gecko rule");
 }
 
 NS_IMETHODIMP
@@ -2093,11 +2093,10 @@ nsCSSPageStyleDeclaration::GetCSSParsingEnvironment(CSSParsingEnvironment& aCSSP
   GetCSSParsingEnvironmentForRule(mRule, aCSSParseEnv);
 }
 
-URLExtraData*
-nsCSSPageStyleDeclaration::GetURLData() const
+nsDOMCSSDeclaration::ServoCSSParsingEnvironment
+nsCSSPageStyleDeclaration::GetServoCSSParsingEnvironment() const
 {
-  MOZ_ASSERT_UNREACHABLE("GetURLData shouldn't be calling on a Gecko rule");
-  return GetURLDataForRule(mRule);
+  MOZ_CRASH("GetURLData shouldn't be calling on a Gecko rule");
 }
 
 NS_IMETHODIMP
@@ -2462,7 +2461,11 @@ nsCSSCounterStyleRule::SetName(const nsAString& aName)
     mName = name;
 
     if (StyleSheet* sheet = GetStyleSheet()) {
-      sheet->AsGecko()->SetModifiedByChildRule();
+      if (sheet->IsGecko()) {
+        sheet->AsGecko()->SetModifiedByChildRule();
+      } else {
+        NS_ERROR("stylo: Dynamic change on @counter-style not yet supported");
+      }
       if (doc) {
         doc->StyleRuleChanged(sheet, this);
       }
@@ -2507,7 +2510,11 @@ nsCSSCounterStyleRule::SetDesc(nsCSSCounterDesc aDescID, const nsCSSValue& aValu
   mGeneration++;
 
   if (StyleSheet* sheet = GetStyleSheet()) {
-    sheet->AsGecko()->SetModifiedByChildRule();
+    if (sheet->IsGecko()) {
+      sheet->AsGecko()->SetModifiedByChildRule();
+    } else {
+      NS_ERROR("stylo: Dynamic change on @counter-style not yet supported");
+    }
     if (doc) {
       doc->StyleRuleChanged(sheet, this);
     }

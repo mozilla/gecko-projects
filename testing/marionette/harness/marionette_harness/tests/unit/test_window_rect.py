@@ -121,8 +121,8 @@ class TestSize(MarionetteTestCase):
         # so reset to original size minus 1 pixel width
         start_size = self.marionette.window_size
         if start_size["width"] == self.max["width"] and start_size["height"] == self.max["height"]:
-            self.start_size["width"] -= 1
-            self.start_size["height"] -= 1
+            start_size["width"] -= 1
+            start_size["height"] -= 1
         self.marionette.set_window_size(start_size["width"], start_size["height"])
 
         self.original_size = self.marionette.window_size
@@ -184,3 +184,9 @@ class TestSize(MarionetteTestCase):
         # in X the window size may be greater than the bounds of the screen
         self.assertGreaterEqual(new["width"], self.max["width"])
         self.assertGreaterEqual(new["height"], self.max["height"])
+
+    def test_resize_to_available_screen_size(self):
+        result = self.marionette.set_window_rect(width=self.max['width'],
+                                                 height=self.max["height"])
+        self.assertEqual(result["width"], self.max["width"])
+        self.assertEqual(result["height"], self.max["height"])

@@ -33,18 +33,24 @@ this.runtime = class extends ExtensionAPI {
         }).api(),
 
         onInstalled: new SingletonEventManager(context, "runtime.onInstalled", fire => {
+          let temporary = !!extension.addonData.temporarilyInstalled;
+
           let listener = () => {
             switch (extension.startupReason) {
               case "APP_STARTUP":
                 if (AddonManagerPrivate.browserUpdated) {
-                  fire.sync({reason: "browser_update"});
+                  fire.sync({reason: "browser_update", temporary});
                 }
                 break;
               case "ADDON_INSTALL":
-                fire.sync({reason: "install"});
+                fire.sync({reason: "install", temporary});
                 break;
               case "ADDON_UPGRADE":
-                fire.sync({reason: "update", previousVersion: extension.addonData.oldVersion});
+                fire.sync({
+                  reason: "update",
+                  previousVersion: extension.addonData.oldVersion,
+                  temporary,
+                });
                 break;
             }
           };
@@ -64,7 +70,9 @@ this.runtime = class extends ExtensionAPI {
             fire.sync(details);
           });
           return () => {
-            AddonManager.removeUpgradeListener(instanceID);
+            AddonManager.removeUpgradeListener(instanceID).catch(e => {
+              // This can happen if we try this after shutdown is complete.
+            });
           };
         }).api(),
 

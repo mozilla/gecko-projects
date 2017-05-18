@@ -2618,9 +2618,7 @@ var SessionStoreInternal = {
 
   /**
    * Updates the label and icon for a <xul:tab> using the data from
-   * tabData. If the tab being updated happens to be the
-   * customization mode tab, this function will tell the window's
-   * CustomizeMode instance about it.
+   * tabData.
    *
    * @param tab
    *        The <xul:tab> to update.
@@ -2629,6 +2627,10 @@ var SessionStoreInternal = {
    *        not supplied, the data will be retrieved from the cache.
    */
   updateTabLabelAndIcon(tab, tabData = null) {
+    if (tab.hasAttribute("customizemode")) {
+      return;
+    }
+
     let browser = tab.linkedBrowser;
     let win = browser.ownerGlobal;
 
@@ -2644,12 +2646,10 @@ var SessionStoreInternal = {
     // If the page has a title, set it.
     if (activePageData) {
       if (activePageData.title) {
-        tab.label = activePageData.title;
+        win.gBrowser.setInitialTabTitle(tab, activePageData.title);
       } else if (activePageData.url != "about:blank") {
-        tab.label = activePageData.url;
+        win.gBrowser.setInitialTabTitle(tab, activePageData.url);
       }
-    } else if (tab.hasAttribute("customizemode")) {
-      win.gCustomizeMode.setTab(tab);
     }
 
     // Restore the tab icon.
@@ -3291,9 +3291,13 @@ var SessionStoreInternal = {
         url = tabData.entries[activeIndex].url;
       }
 
+      // Setting noInitialLabel is a perf optimization. Rendering tab labels
+      // would make resizing the tabs more expensive as we're adding them.
+      // Each tab will get its initial label set in restoreTab.
       let tab = tabbrowser.addTab(url,
                                   { createLazyBrowser,
                                     skipAnimation: true,
+                                    noInitialLabel: true,
                                     userContextId,
                                     skipBackgroundNotify: true });
 
@@ -3686,6 +3690,10 @@ var SessionStoreInternal = {
         userTypedValue: tabData.userTypedValue || "",
         userTypedClear: tabData.userTypedClear || 0
       };
+    }
+
+    if (tab.hasAttribute("customizemode")) {
+      window.gCustomizeMode.setTab(tab);
     }
 
     // Update tab label and icon to show something
@@ -4259,9 +4267,12 @@ var SessionStoreInternal = {
    * @returns boolean
    */
   _shouldSaveTab: function ssi_shouldSaveTab(aTabState) {
-    // If the tab has one of the following transient about: history entry,
-    // then we don't actually want to write this tab's data to disk.
+    // If the tab has one of the following transient about: history entry, no
+    // userTypedValue, and no customizemode attribute, then we don't actually
+    // want to write this tab's data to disk.
     return aTabState.userTypedValue ||
+           (aTabState.attributes &&
+            aTabState.attributes.customizemode == "true") ||
            (aTabState.entries.length &&
             !(aTabState.entries[0].url == "about:printpreview" ||
               aTabState.entries[0].url == "about:privatebrowsing"));

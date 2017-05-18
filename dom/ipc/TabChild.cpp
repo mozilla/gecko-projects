@@ -182,14 +182,12 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(TabChildBase)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(TabChildBase)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTabChildGlobal)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mGlobal)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mAnonymousGlobalScopes)
+  tmp->nsMessageManagerScriptExecutor::Unlink();
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebBrowserChrome)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(TabChildBase)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTabChildGlobal)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mGlobal)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebBrowserChrome)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -242,7 +240,7 @@ TabChildBase::DispatchMessageManagerMessage(const nsAString& aMessageName,
         }
     }
 
-    nsCOMPtr<nsIXPConnectJSObjectHolder> kungFuDeathGrip(GetGlobal());
+    JS::Rooted<JSObject*> kungFuDeathGrip(cx, GetGlobal());
     // Let the BrowserElementScrolling helper (if it exists) for this
     // content manipulate the frame state.
     RefPtr<nsFrameMessageManager> mm =
@@ -1686,12 +1684,16 @@ TabChild::MaybeCoalesceWheelEvent(const WidgetWheelEvent& aEvent,
     // 1. It's eWheel (we don't coalesce eOperationStart and eWheelOperationEnd)
     // 2. It's not the first wheel event.
     // 3. It's not the last wheel event.
-    // 4. It's dispatched before the last wheel event was processed.
+    // 4. It's dispatched before the last wheel event was processed +
+    //    the processing time of the last event.
+    //    This way pages spending lots of time in wheel listeners get wheel
+    //    events coalesced more aggressively.
     // 5. It has same attributes as the coalesced wheel event which is not yet
     //    fired.
     if (!mLastWheelProcessedTimeFromParent.IsNull() &&
         *aIsNextWheelEvent &&
-        aEvent.mTimeStamp < mLastWheelProcessedTimeFromParent &&
+        aEvent.mTimeStamp < (mLastWheelProcessedTimeFromParent +
+                             mLastWheelProcessingDuration) &&
         (mCoalescedWheelData.IsEmpty() ||
          mCoalescedWheelData.CanCoalesce(aEvent, aGuid, aInputBlockId))) {
       mCoalescedWheelData.Coalesce(aEvent, aGuid, aInputBlockId);
@@ -1759,8 +1761,8 @@ TabChild::RecvMouseWheelEvent(const WidgetWheelEvent& aEvent,
     mozilla::TimeStamp beforeDispatchingTime = TimeStamp::Now();
     MaybeDispatchCoalescedWheelEvent();
     DispatchWheelEvent(aEvent, aGuid, aInputBlockId);
-    mLastWheelProcessedTimeFromParent +=
-      (TimeStamp::Now() - beforeDispatchingTime);
+    mLastWheelProcessingDuration = (TimeStamp::Now() - beforeDispatchingTime);
+    mLastWheelProcessedTimeFromParent += mLastWheelProcessingDuration;
   } else {
     // This is the last wheel event. Set mLastWheelProcessedTimeFromParent to
     // null moment to avoid coalesce the next incoming wheel event.
@@ -1969,6 +1971,7 @@ TabChild::RecvRealKeyEvent(const WidgetKeyboardEvent& aEvent,
 
   WidgetKeyboardEvent localEvent(aEvent);
   localEvent.mWidget = mPuppetWidget;
+  localEvent.mUniqueId = aEvent.mUniqueId;
   nsEventStatus status = APZCCallbackHelper::DispatchWidgetEvent(localEvent);
 
   // Update the end time of the possible repeated event so that we can skip
@@ -2231,7 +2234,7 @@ TabChild::RecvAsyncMessage(const nsString& aMessage,
     return IPC_OK();
   }
 
-  nsCOMPtr<nsIXPConnectJSObjectHolder> kungFuDeathGrip(GetGlobal());
+  JS::Rooted<JSObject*> kungFuDeathGrip(dom::RootingCx(), GetGlobal());
   StructuredCloneData data;
   UnpackClonedMessageDataForChild(aData, data);
   RefPtr<nsFrameMessageManager> mm =
@@ -3576,7 +3579,5 @@ JSObject*
 TabChildGlobal::GetGlobalJSObject()
 {
   NS_ENSURE_TRUE(mTabChild, nullptr);
-  nsCOMPtr<nsIXPConnectJSObjectHolder> ref = mTabChild->GetGlobal();
-  NS_ENSURE_TRUE(ref, nullptr);
-  return ref->GetJSObject();
+  return mTabChild->GetGlobal();
 }

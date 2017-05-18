@@ -63,6 +63,7 @@ use dom::htmltablerowelement::{HTMLTableRowElement, HTMLTableRowElementLayoutHel
 use dom::htmltablesectionelement::{HTMLTableSectionElement, HTMLTableSectionElementLayoutHelpers};
 use dom::htmltemplateelement::HTMLTemplateElement;
 use dom::htmltextareaelement::{HTMLTextAreaElement, LayoutHTMLTextAreaElementHelpers};
+use dom::mutationobserver::{Mutation, MutationObserver};
 use dom::namednodemap::NamedNodeMap;
 use dom::node::{CLICK_IN_PROGRESS, ChildrenMutation, LayoutNodeHelpers, Node};
 use dom::node::{NodeDamage, SEQUENTIALLY_FOCUSABLE, UnbindContext};
@@ -85,7 +86,7 @@ use net_traits::request::CorsSettings;
 use ref_filter_map::ref_filter_map;
 use script_layout_interface::message::ReflowQueryType;
 use script_thread::Runnable;
-use selectors::matching::{ElementSelectorFlags, StyleRelations, matches_selector_list};
+use selectors::matching::{ElementSelectorFlags, MatchingContext, MatchingMode, matches_selector_list};
 use selectors::matching::{HAS_EDGE_CHILD_SELECTOR, HAS_SLOW_SELECTOR, HAS_SLOW_SELECTOR_LATER_SIBLINGS};
 use selectors::parser::{AttrSelector, NamespaceConstraint};
 use servo_atoms::Atom;
@@ -103,13 +104,13 @@ use style::properties::{Importance, PropertyDeclaration, PropertyDeclarationBloc
 use style::properties::longhands::{self, background_image, border_spacing, font_family, font_size, overflow_x};
 use style::restyle_hints::RESTYLE_SELF;
 use style::rule_tree::CascadeLevel;
-use style::selector_parser::{NonTSPseudoClass, RestyleDamage, SelectorImpl, SelectorParser};
+use style::selector_parser::{NonTSPseudoClass, PseudoElement, RestyleDamage, SelectorImpl, SelectorParser};
 use style::shared_lock::{SharedRwLock, Locked};
 use style::sink::Push;
 use style::stylearc::Arc;
 use style::stylist::ApplicableDeclarationBlock;
 use style::thread_state;
-use style::values::CSSFloat;
+use style::values::{CSSFloat, Either};
 use style::values::specified::{self, CSSColor};
 use stylesheet_loader::StylesheetOwner;
 
@@ -427,9 +428,7 @@ impl LayoutElementHelpers for LayoutJS<Element> {
                 shared_lock,
                 PropertyDeclaration::BackgroundImage(
                     background_image::SpecifiedValue(vec![
-                        background_image::single_value::SpecifiedValue(Some(
-                            specified::Image::for_cascade(url.into())
-                        ))
+                        Either::Second(specified::Image::for_cascade(url.into()))
                     ]))));
         }
 
@@ -1005,6 +1004,12 @@ impl Element {
     }
 
     pub fn push_attribute(&self, attr: &Attr) {
+        let name = attr.local_name().clone();
+        let namespace = attr.namespace().clone();
+        let old_value = DOMString::from(&**attr.value());
+        let mutation = Mutation::Attribute { name, namespace, old_value };
+        MutationObserver::queue_a_mutation_record(&self.node, mutation);
+
         assert!(attr.GetOwnerElement().r() == Some(self));
         self.will_mutate_attr(attr);
         self.attrs.borrow_mut().push(JS::from_ref(attr));
@@ -1127,13 +1132,18 @@ impl Element {
     }
 
     fn remove_first_matching_attribute<F>(&self, find: F) -> Option<Root<Attr>>
-        where F: Fn(&Attr) -> bool
-    {
+        where F: Fn(&Attr) -> bool {
         let idx = self.attrs.borrow().iter().position(|attr| find(&attr));
-
         idx.map(|idx| {
             let attr = Root::from_ref(&*(*self.attrs.borrow())[idx]);
             self.will_mutate_attr(&attr);
+
+            let name = attr.local_name().clone();
+            let namespace = attr.namespace().clone();
+            let old_value = DOMString::from(&**attr.value());
+            let mutation = Mutation::Attribute { name, namespace, old_value, };
+            MutationObserver::queue_a_mutation_record(&self.node, mutation);
+
             self.attrs.borrow_mut().remove(idx);
             attr.set_owner(None);
             if attr.namespace() == &ns!() {
@@ -2048,7 +2058,8 @@ impl ElementMethods for Element {
         match SelectorParser::parse_author_origin_no_namespace(&selectors) {
             Err(()) => Err(Error::Syntax),
             Ok(selectors) => {
-                Ok(matches_selector_list(&selectors.0, &Root::from_ref(self), None))
+                let mut ctx = MatchingContext::new(MatchingMode::Normal, None);
+                Ok(matches_selector_list(&selectors.0, &Root::from_ref(self), &mut ctx))
             }
         }
     }
@@ -2066,8 +2077,8 @@ impl ElementMethods for Element {
                 let root = self.upcast::<Node>();
                 for element in root.inclusive_ancestors() {
                     if let Some(element) = Root::downcast::<Element>(element) {
-                        if matches_selector_list(&selectors.0, &element, None)
-                        {
+                        let mut ctx = MatchingContext::new(MatchingMode::Normal, None);
+                        if matches_selector_list(&selectors.0, &element, &mut ctx) {
                             return Ok(Some(element));
                         }
                     }
@@ -2376,6 +2387,15 @@ impl<'a> ::selectors::Element for Root<Element> {
         self.upcast::<Node>().GetParentElement()
     }
 
+    fn match_pseudo_element(&self,
+                            _pseudo: &PseudoElement,
+                            _context: &mut MatchingContext)
+                            -> bool
+    {
+        false
+    }
+
+
     fn first_child_element(&self) -> Option<Root<Element>> {
         self.node.child_elements().next()
     }
@@ -2416,7 +2436,7 @@ impl<'a> ::selectors::Element for Root<Element> {
 
     fn match_non_ts_pseudo_class<F>(&self,
                                     pseudo_class: &NonTSPseudoClass,
-                                    _: &mut StyleRelations,
+                                    _: &mut MatchingContext,
                                     _: &mut F)
                                     -> bool
         where F: FnMut(&Self, ElementSelectorFlags),

@@ -10,21 +10,29 @@
 %endif
 
 :root {
-  --toolbarbutton-vertical-inner-padding: 3px;
+%ifdef MOZ_PHOTON_THEME
+  --toolbarbutton-hover-background: hsla(240, 5%, 5%, .1);
+  --toolbarbutton-active-background: hsla(240, 5%, 5%, .15);
 
-%ifndef MOZ_PHOTON_THEME
+  --toolbarbutton-inner-padding: 5px;
+%else
   --backbutton-urlbar-overlap: 6px;
 
   /* icon width + border + horizontal padding (without the overlap from backbutton-urlbar-overlap) */
   --forwardbutton-width: 25px;
+
+  --toolbarbutton-inner-padding: 3px;
 %endif
 }
 
 toolbar:-moz-lwtheme {
+%ifndef MOZ_PHOTON_THEME
   --toolbarbutton-hover-background: rgba(255,255,255,.25);
+  --toolbarbutton-active-background: rgba(70%,70%,70%,.25);
+%endif
+
   --toolbarbutton-hover-bordercolor: rgba(0,0,0,.2);
 
-  --toolbarbutton-active-background: rgba(70%,70%,70%,.25);
   --toolbarbutton-active-bordercolor: rgba(0,0,0,.3);
   --toolbarbutton-active-boxshadow: 0 0 2px rgba(0,0,0,.6) inset;
 
@@ -146,12 +154,17 @@ toolbar[brighttext] .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
 @conditionalForwardWithUrlbar@ > .toolbarbutton-1:-moz-any([disabled],:not([open]):not([disabled]):not(:active)) > .toolbarbutton-icon,
 %endif
 .findbar-button > .toolbarbutton-text,
+toolbarbutton.bookmark-item:not(.subviewbutton),
 #nav-bar .toolbarbutton-1 > .toolbarbutton-icon,
 #nav-bar .toolbarbutton-1 > .toolbarbutton-text,
 #nav-bar .toolbarbutton-1 > .toolbarbutton-badge-stack,
 #nav-bar .toolbarbutton-1 > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
 #nav-bar .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon {
-  padding: var(--toolbarbutton-vertical-inner-padding) 7px;
+%ifdef MOZ_PHOTON_THEME
+  padding: var(--toolbarbutton-inner-padding);
+%else
+  padding: var(--toolbarbutton-inner-padding) 7px;
+%endif
   background-origin: padding-box !important;
   background-clip: padding-box !important;
   border: 1px solid transparent;
@@ -207,8 +220,8 @@ toolbar[brighttext] .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
 }
 
 #nav-bar .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon {
-  padding-top: calc(var(--toolbarbutton-vertical-inner-padding) + 6px);
-  padding-bottom: calc(var(--toolbarbutton-vertical-inner-padding) + 6px);
+  padding-top: calc(var(--toolbarbutton-inner-padding) + 6px);
+  padding-bottom: calc(var(--toolbarbutton-inner-padding) + 6px);
 }
 
 #nav-bar .toolbarbutton-1 > .toolbarbutton-text {
@@ -218,7 +231,7 @@ toolbar[brighttext] .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
    * height (16px) + padding (2 * 3px) + border (2 * 1px), but as a minimum
    * because otherwise an increase in text sizes would break things.
    */
-  min-height: calc(18px + 2 * var(--toolbarbutton-vertical-inner-padding));
+  min-height: calc(18px + 2 * var(--toolbarbutton-inner-padding));
 }
 
 #nav-bar .toolbaritem-combined-buttons {
@@ -256,6 +269,7 @@ toolbar[brighttext] .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
 .tabbrowser-arrowscrollbox > .scrollbutton-up:not([disabled=true]):hover,
 .tabbrowser-arrowscrollbox > .scrollbutton-down:not([disabled=true]):hover,
 .findbar-button:not(:-moz-any([checked="true"],[disabled="true"])):hover > .toolbarbutton-text,
+toolbarbutton.bookmark-item:not(.subviewbutton):hover:not([disabled="true"]):not([open]),
 #nav-bar .toolbarbutton-1:not([disabled=true]) > .toolbarbutton-menubutton-button[open] + .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
 #nav-bar .toolbarbutton-1:not([disabled=true]):-moz-any(:hover,[open]) > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
 #nav-bar .toolbarbutton-1:not([disabled=true]):-moz-any(:hover,[open]) > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
@@ -267,19 +281,25 @@ toolbar[brighttext] .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
 %endif
 #nav-bar .toolbarbutton-1:not([buttonover]):not([open]):not(:active):hover > .toolbarbutton-menubutton-dropmarker:not([disabled]) > .dropmarker-icon {
   background: var(--toolbarbutton-hover-background);
+%ifndef MOZ_PHOTON_THEME
   border-color: var(--toolbarbutton-hover-bordercolor);
   box-shadow: var(--toolbarbutton-hover-boxshadow);
+%endif
 }
 
 .findbar-button:not([disabled=true]):-moz-any([checked="true"],:hover:active) > .toolbarbutton-text,
+toolbarbutton.bookmark-item:not(.subviewbutton):hover:active:not([disabled="true"]),
+toolbarbutton.bookmark-item[open="true"],
 #nav-bar .toolbarbutton-1 > .toolbarbutton-menubutton-button:not([disabled=true]):-moz-any(:hover:active, [open]) > .toolbarbutton-icon,
 #nav-bar .toolbarbutton-1[open] > .toolbarbutton-menubutton-dropmarker:not([disabled=true]) > .dropmarker-icon,
 #nav-bar .toolbarbutton-1:not([disabled=true]):-moz-any([open],[checked],:hover:active) > .toolbarbutton-icon,
 #nav-bar .toolbarbutton-1:not([disabled=true]):-moz-any([open],[checked],:hover:active) > .toolbarbutton-text,
 #nav-bar .toolbarbutton-1:not([disabled=true]):-moz-any([open],[checked],:hover:active) > .toolbarbutton-badge-stack {
   background: var(--toolbarbutton-active-background);
+%ifndef MOZ_PHOTON_THEME
   border-color: var(--toolbarbutton-active-bordercolor);
   box-shadow: var(--toolbarbutton-active-boxshadow);
+%endif
   transition-duration: 10ms;
 }
 
@@ -293,11 +313,7 @@ toolbar[brighttext] .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
 
 :-moz-any(#back-button, #forward-button) > .toolbarbutton-icon {
   border-color: var(--backbutton-border-color) !important;
-}
-
-:-moz-any(#back-button, #forward-button):not(:hover):not(:active):not([open=true]) > .toolbarbutton-icon,
-:-moz-any(#back-button, #forward-button)[disabled=true] > .toolbarbutton-icon {
-  background: var(--backbutton-background) !important;
+  background: var(--backbutton-background);
 }
 
 #forward-button {
@@ -356,22 +372,12 @@ toolbar[brighttext] .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
 
 #back-button > .toolbarbutton-icon {
 %ifdef MOZ_PHOTON_THEME
+  background: var(--backbutton-background);
   border-color: var(--backbutton-border-color) !important;
 %endif
   border-radius: 10000px !important;
   padding: 7px !important;
 }
-
-#back-button:-moz-locale-dir(rtl) > .toolbarbutton-icon {
-  transform: scaleX(-1);
-}
-
-%ifdef MOZ_PHOTON_THEME
-#back-button:not(:hover):not(:active):not([open=true]) > .toolbarbutton-icon,
-#back-button[disabled=true] > .toolbarbutton-icon {
-  background: var(--backbutton-background) !important;
-}
-%endif
 
 /* bookmarks menu-button */
 
@@ -380,8 +386,8 @@ toolbar[brighttext] .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
 }
 
 #nav-bar #bookmarks-menu-button[cui-areatype="toolbar"]:not([overflowedItem=true]) > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon {
-  padding-top: var(--toolbarbutton-vertical-inner-padding);
-  padding-bottom: var(--toolbarbutton-vertical-inner-padding);
+  padding-top: var(--toolbarbutton-inner-padding);
+  padding-bottom: var(--toolbarbutton-inner-padding);
 }
 
 #BMB_bookmarksPopup[side="top"],
@@ -396,3 +402,27 @@ toolbar[brighttext] .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
   margin-bottom: -20px;
 }
 
+/* ::::: bookmark buttons ::::: */
+
+toolbarbutton.bookmark-item:not(.subviewbutton) {
+  margin: 0;
+  padding: 2px 3px;
+  -moz-appearance: none;
+}
+
+.bookmark-item > .toolbarbutton-icon,
+#personal-bookmarks[cui-areatype="toolbar"] > #bookmarks-toolbar-placeholder > .toolbarbutton-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Force the display of the label for bookmarks */
+.bookmark-item > .toolbarbutton-text,
+#personal-bookmarks[cui-areatype="toolbar"] > #bookmarks-toolbar-placeholder > .toolbarbutton-text {
+  display: -moz-box !important;
+}
+
+.bookmark-item > .toolbarbutton-icon[label]:not([label=""]),
+.bookmark-item > .toolbarbutton-icon[type="menu"] {
+  margin-inline-end: 5px;
+}

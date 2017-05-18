@@ -2210,34 +2210,23 @@ nsPresContext::UpdateIsChrome()
 }
 
 bool
-nsPresContext::HasAuthorSpecifiedRules(const nsIFrame *aFrame,
-                                       uint32_t ruleTypeMask) const
+nsPresContext::HasAuthorSpecifiedRules(const nsIFrame* aFrame,
+                                       uint32_t aRuleTypeMask) const
 {
   if (mShell->StyleSet()->IsGecko()) {
     return
       nsRuleNode::HasAuthorSpecifiedRules(aFrame->StyleContext(),
-                                          ruleTypeMask,
+                                          aRuleTypeMask,
                                           UseDocumentColors());
-  } else {
-    Element *elem = aFrame->GetContent()->AsElement();
-    if (elem->IsNativeAnonymous()) {
-      elem = nsContentUtils::GetClosestNonNativeAnonymousAncestor(elem);
-    }
-    if (!elem->HasServoData()) {
-      return false;
-    }
-
-    nsIAtom *pseudoTag = aFrame->StyleContext()->GetPseudo();
-    RefPtr<RawServoRuleNode> ruleNode;
-    ruleNode = mShell->StyleSet()->AsServo()->ResolveRuleNode(elem, pseudoTag);
-    if (!ruleNode) {
-      return false;
-    }
-    return Servo_HasAuthorSpecifiedRules(ruleNode,
-                                         elem,
-                                         ruleTypeMask,
-                                         UseDocumentColors());
   }
+  Element* elem = aFrame->GetContent()->AsElement();
+
+  MOZ_ASSERT(elem->GetPseudoElementType() ==
+             aFrame->StyleContext()->GetPseudoType());
+  MOZ_ASSERT(elem->HasServoData());
+  return Servo_HasAuthorSpecifiedRules(elem,
+                                       aRuleTypeMask,
+                                       UseDocumentColors());
 }
 
 gfxUserFontSet*
@@ -2282,6 +2271,29 @@ nsPresContext::UserFontSetUpdated(gfxUserFontEntry* aUpdatedFont)
   }
 }
 
+class CounterStyleCleaner : public nsAPostRefreshObserver
+{
+public:
+  CounterStyleCleaner(nsRefreshDriver* aRefreshDriver,
+                      CounterStyleManager* aCounterStyleManager)
+    : mRefreshDriver(aRefreshDriver)
+    , mCounterStyleManager(aCounterStyleManager)
+  {
+  }
+  virtual ~CounterStyleCleaner() {}
+
+  void DidRefresh() final
+  {
+    mRefreshDriver->RemovePostRefreshObserver(this);
+    mCounterStyleManager->CleanRetiredStyles();
+    delete this;
+  }
+
+private:
+  RefPtr<nsRefreshDriver> mRefreshDriver;
+  RefPtr<CounterStyleManager> mCounterStyleManager;
+};
+
 void
 nsPresContext::FlushCounterStyles()
 {
@@ -2299,6 +2311,14 @@ nsPresContext::FlushCounterStyles()
       PresShell()->NotifyCounterStylesAreDirty();
       PostRebuildAllStyleDataEvent(NS_STYLE_HINT_REFLOW,
                                    eRestyle_ForceDescendants);
+      if (mShell->StyleSet()->IsGecko()) {
+        RefreshDriver()->AddPostRefreshObserver(
+          new CounterStyleCleaner(RefreshDriver(), mCounterStyleManager));
+      } else {
+        NS_WARNING("stylo: Pseudo-element ::-moz-list-{number,bullet} are not "
+                   "restyled properly, so we cannot clean up retired objects. "
+                   "See bug 1364871.");
+      }
     }
     mCounterStylesDirty = false;
   }

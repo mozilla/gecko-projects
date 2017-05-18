@@ -18,6 +18,10 @@ Cu.import("resource://gre/modules/NotificationDB.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
                                   "resource://gre/modules/Preferences.jsm");
 
+XPCOMUtils.defineLazyGetter(this, "extensionNameFromURI", () => {
+  return Cu.import("resource://gre/modules/ExtensionParent.jsm", {}).extensionNameFromURI;
+});
+
 // lazy module getters
 
 /* global AboutHome:false,
@@ -33,7 +37,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
           Social:false, TabCrashHandler:false, Task:false, TelemetryStopwatch:false,
           Translation:false, UITour:false, UpdateUtils:false, Weave:false,
           WebNavigationFrames: false, fxAccounts:false, gDevTools:false,
-          gDevToolsBrowser:false, webrtcUI:false, FullZoomUI:false
+          gDevToolsBrowser:false, webrtcUI:false, FullZoomUI:false,
+          Marionette:false,
  */
 
 /**
@@ -106,9 +111,10 @@ if (AppConstants.MOZ_CRASHREPORTER) {
  */
 [
   ["Favicons", "@mozilla.org/browser/favicon-service;1", "mozIAsyncFavicons"],
-  ["WindowsUIUtils", "@mozilla.org/windows-ui-utils;1", "nsIWindowsUIUtils"],
   ["gAboutNewTabService", "@mozilla.org/browser/aboutnewtab-service;1", "nsIAboutNewTabService"],
   ["gDNSService", "@mozilla.org/network/dns-service;1", "nsIDNSService"],
+  ["Marionette", "@mozilla.org/remote/marionette;1", "nsIMarionette"],
+  ["WindowsUIUtils", "@mozilla.org/windows-ui-utils;1", "nsIWindowsUIUtils"],
 ].forEach(([name, cc, ci]) => XPCOMUtils.defineLazyServiceGetter(this, name, cc, ci));
 
 if (AppConstants.MOZ_CRASHREPORTER) {
@@ -527,9 +533,9 @@ const gStoragePressureObserver = {
           // be removed by bug 1349689.
           let win = gBrowser.ownerGlobal;
           if (Preferences.get("browser.preferences.useOldOrganization", false)) {
-            win.openAdvancedPreferences("networkTab");
+            win.openAdvancedPreferences("networkTab", {origin: "storagePressure"});
           } else {
-            win.openPreferences("panePrivacy");
+            win.openPreferences("panePrivacy", {origin: "storagePressure"});
           }
         }
       });
@@ -1143,6 +1149,11 @@ addEventListener("DOMContentLoaded", function onDCL() {
   gBrowser.updateBrowserRemoteness(initBrowser, gMultiProcessBrowser);
 });
 
+let _resolveDelayedStartup;
+var delayedStartupPromise = new Promise(resolve => {
+  _resolveDelayedStartup = resolve;
+});
+
 var gBrowserInit = {
   delayedStartupFinished: false,
 
@@ -1249,6 +1260,8 @@ var gBrowserInit = {
     }
 
     ToolbarIconColor.init();
+
+    gRemoteControl.updateVisualCue(Marionette.running);
 
     // Wait until chrome is painted before executing code not critical to making the window visible
     this._boundDelayedStartup = this._delayedStartup.bind(this);
@@ -1388,6 +1401,7 @@ var gBrowserInit = {
     setTimeout(function() { SafeBrowsing.init(); }, 2000);
 
     Services.obs.addObserver(gIdentityHandler, "perm-changed");
+    Services.obs.addObserver(gRemoteControl, "remote-active");
     Services.obs.addObserver(gSessionHistoryObserver, "browser:purge-session-history");
     Services.obs.addObserver(gStoragePressureObserver, "QuotaManager::StoragePressure");
     Services.obs.addObserver(gXPInstallObserver, "addon-install-disabled");
@@ -1605,6 +1619,7 @@ var gBrowserInit = {
 
     this.delayedStartupFinished = true;
 
+    _resolveDelayedStartup();
     Services.obs.notifyObservers(window, "browser-delayed-startup-finished");
     TelemetryTimestamps.add("delayedStartupFinished");
   },
@@ -1707,6 +1722,7 @@ var gBrowserInit = {
       FullZoom.destroy();
 
       Services.obs.removeObserver(gIdentityHandler, "perm-changed");
+      Services.obs.removeObserver(gRemoteControl, "remote-active");
       Services.obs.removeObserver(gSessionHistoryObserver, "browser:purge-session-history");
       Services.obs.removeObserver(gStoragePressureObserver, "QuotaManager::StoragePressure");
       Services.obs.removeObserver(gXPInstallObserver, "addon-install-disabled");
@@ -4496,6 +4512,10 @@ var XULBrowserWindow = {
   },
 
   setOverLink(url, anchorElt) {
+    const textToSubURI = Cc["@mozilla.org/intl/texttosuburi;1"].
+                         getService(Ci.nsITextToSubURI);
+    url = textToSubURI.unEscapeURIForUI("UTF-8", url);
+
     // Encode bidirectional formatting characters.
     // (RFC 3987 sections 3.2 and 4.1 paragraph 6)
     url = url.replace(/[\u200e\u200f\u202a\u202b\u202c\u202d\u202e]/g,
@@ -6357,9 +6377,9 @@ var OfflineApps = {
     // The advanced subpanes are only supported in the old organization, which will
     // be removed by bug 1349689.
     if (Preferences.get("browser.preferences.useOldOrganization", false)) {
-      openAdvancedPreferences("networkTab");
+      openAdvancedPreferences("networkTab", {origin: "offlineApps"});
     } else {
-      openPreferences("panePrivacy");
+      openPreferences("panePrivacy", {origin: "offlineApps"});
     }
   },
 
@@ -6868,6 +6888,11 @@ var gIdentityHandler = {
   _uriHasHost: false,
 
   /**
+   * Whether this is a "moz-extension:" page, loaded from a WebExtension.
+   */
+  _isExtensionPage: false,
+
+  /**
    * Whether this._uri refers to an internally implemented browser page.
    *
    * Note that this is set for some "about:" pages, but general "chrome:" URIs
@@ -7000,6 +7025,10 @@ var gIdentityHandler = {
   get _connectionIcon() {
     delete this._connectionIcon;
     return this._connectionIcon = document.getElementById("connection-icon");
+  },
+  get _extensionIcon() {
+    delete this._extensionIcon;
+    return this._extensionIcon = document.getElementById("extension-icon");
   },
   get _overrideService() {
     delete this._overrideService;
@@ -7279,7 +7308,11 @@ var gIdentityHandler = {
         icon_labels_dir = /^[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc]/.test(icon_label) ?
                           "rtl" : "ltr";
       }
-
+    } else if (this._isExtensionPage) {
+      this._identityBox.className = "extensionPage";
+      let extensionName = extensionNameFromURI(this._uri);
+      icon_label = gNavigatorBundle.getFormattedString(
+        "identity.extension.label", [extensionName]);
     } else if (this._uriHasHost && this._isSecure) {
       this._identityBox.className = "verifiedDomain";
       if (this._isMixedActiveContentBlocked) {
@@ -7347,6 +7380,13 @@ var gIdentityHandler = {
 
     // Push the appropriate strings out to the UI
     this._connectionIcon.tooltipText = tooltip;
+
+    if (this._isExtensionPage) {
+      let extensionName = extensionNameFromURI(this._uri);
+      this._extensionIcon.tooltipText = gNavigatorBundle.getFormattedString(
+        "identity.extension.tooltip", [extensionName]);
+    }
+
     this._identityIconLabels.tooltipText = tooltip;
     this._identityIcon.tooltipText = gNavigatorBundle.getString("identity.icon.tooltip");
     this._identityIconLabel.value = icon_label;
@@ -7378,6 +7418,8 @@ var gIdentityHandler = {
     let connection = "not-secure";
     if (this._isSecureInternalUI) {
       connection = "chrome";
+    } else if (this._isExtensionPage) {
+      connection = "extension";
     } else if (this._isURILoadedFromFile) {
       connection = "file";
     } else if (this._isEV) {
@@ -7458,6 +7500,10 @@ var gIdentityHandler = {
       hostless = true;
     }
 
+    if (this._isExtensionPage) {
+      host = extensionNameFromURI(this._uri);
+    }
+
     // Fill in the CA name if we have a valid TLS certificate.
     if (this._isSecure || this._isCertUserOverridden) {
       verifier = this._identityIconLabels.tooltipText;
@@ -7510,6 +7556,8 @@ var gIdentityHandler = {
 
     let whitelist = /^(?:accounts|addons|cache|config|crashes|customizing|downloads|healthreport|home|license|newaddon|permissions|preferences|privatebrowsing|rights|searchreset|sessionrestore|support|welcomeback)(?:[?#]|$)/i;
     this._isSecureInternalUI = uri.schemeIs("about") && whitelist.test(uri.path);
+
+    this._isExtensionPage = uri.schemeIs("moz-extension");
 
     // Create a channel for the sole purpose of getting the resolved URI
     // of the request to determine if it's loaded from the file system.
@@ -7811,7 +7859,6 @@ var gIdentityHandler = {
   }
 };
 
-
 var gPageActionButton = {
   get button() {
     delete this.button;
@@ -7840,6 +7887,37 @@ var gPageActionButton = {
 
     this.panel.hidden = false;
     this.panel.openPopup(this.button, "bottomcenter topright");
+  },
+
+  copyURL() {
+    this.panel.hidePopup();
+    Cc["@mozilla.org/widget/clipboardhelper;1"]
+      .getService(Ci.nsIClipboardHelper)
+      .copyString(gBrowser.selectedBrowser.currentURI.spec);
+  },
+
+  emailLink() {
+    this.panel.hidePopup();
+    MailIntegration.sendLinkForBrowser(gBrowser.selectedBrowser);
+  },
+};
+
+/**
+ * Fired on the "marionette-remote-control" system notification,
+ * indicating if the browser session is under remote control.
+ */
+const gRemoteControl = {
+  observe(subject, topic, data) {
+    gRemoteControl.updateVisualCue(data);
+  },
+
+  updateVisualCue(enabled) {
+    const mainWindow = document.documentElement;
+    if (enabled) {
+      mainWindow.setAttribute("remotecontrol", "true");
+    } else {
+      mainWindow.removeAttribute("remotecontrol");
+    }
   },
 };
 

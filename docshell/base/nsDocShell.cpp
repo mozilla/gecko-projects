@@ -11182,12 +11182,6 @@ nsDocShell::DoURILoad(nsIURI* aURI,
 
   if (aOriginalURI) {
     channel->SetOriginalURI(aOriginalURI);
-    // The LOAD_REPLACE flag and its handling here will be removed as part
-    // of bug 1319110.  For now preserve its restoration here to not break
-    // any code expecting it being set specially on redirected channels.
-    // If the flag has originally been set to change result of
-    // NS_GetFinalChannelURI it won't have any effect and also won't cause
-    // any harm.
     if (aLoadReplace) {
       uint32_t loadFlags;
       channel->GetLoadFlags(&loadFlags);
@@ -14312,24 +14306,11 @@ nsDocShell::OnOverLink(nsIContent* aContent,
     }
   }
 
-  nsCOMPtr<nsITextToSubURI> textToSubURI =
-    do_GetService(NS_ITEXTTOSUBURI_CONTRACTID, &rv);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  // use url origin charset to unescape the URL
-  nsAutoCString charset;
-  rv = aURI->GetOriginCharset(charset);
-  NS_ENSURE_SUCCESS(rv, rv);
-
   nsAutoCString spec;
   rv = aURI->GetSpec(spec);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsAutoString uStr;
-  rv = textToSubURI->UnEscapeURIForUI(charset, spec, uStr);
-  NS_ENSURE_SUCCESS(rv, rv);
+  NS_ConvertUTF8toUTF16 uStr(spec);
 
   mozilla::net::PredictorPredict(aURI, mCurrentURI,
                                  nsINetworkPredictor::PREDICT_LINK,

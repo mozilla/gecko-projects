@@ -45,6 +45,7 @@ class ErrorResult;
 struct AnimationRule;
 struct ServoComputedValuesWithParent;
 struct TimingParams;
+class EffectSet;
 
 namespace dom {
 class ElementOrCSSPseudoElement;
@@ -380,7 +381,7 @@ protected:
   // Stylo version of the above function that also first checks for an additive
   // value in |aProperty|'s list of segments.
   void EnsureBaseStyle(const AnimationProperty& aProperty,
-                       nsIAtom* aPseudoAtom,
+                       CSSPseudoElementType aPseudoType,
                        nsPresContext* aPresContext,
                        RefPtr<ServoComputedValues>& aBaseComputedValues);
 
@@ -461,6 +462,8 @@ private:
   static bool IsGeometricProperty(const nsCSSPropertyID aProperty);
 
   static const TimeDuration OverflowRegionRefreshInterval();
+
+  void UpadateEffectSet(mozilla::EffectSet* aEffectSet = nullptr) const;
 
   // FIXME: This flag will be removed in bug 1324966.
   bool mIsComposingStyle = false;

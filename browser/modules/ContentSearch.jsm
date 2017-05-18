@@ -1,7 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* globals XPCOMUtils, Services, Task, Promise, SearchSuggestionController, FormHistory, PrivateBrowsingUtils */
 "use strict";
 
 this.EXPORTED_SYMBOLS = [
@@ -414,7 +413,7 @@ this.ContentSearch = {
 
   _onMessageManageEngines(msg, data) {
     let browserWin = msg.target.ownerGlobal;
-    browserWin.openPreferences("paneGeneral");
+    browserWin.openPreferences("paneGeneral", {origin: "contentSearch"});
   },
 
   async _onMessageGetSuggestions(msg, data) {

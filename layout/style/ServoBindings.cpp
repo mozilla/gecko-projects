@@ -11,6 +11,7 @@
 #include "gfxFontFamilyList.h"
 #include "nsAnimationManager.h"
 #include "nsAttrValueInlines.h"
+#include "nsCSSCounterStyleRule.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsCSSProps.h"
 #include "nsCSSParser.h"
@@ -259,7 +260,13 @@ nsIAtom*
 Gecko_GetElementId(RawGeckoElementBorrowed aElement)
 {
   const nsAttrValue* attr = aElement->GetParsedAttr(nsGkAtoms::id);
-  return attr ? attr->GetAtomValue() : nullptr;
+  if (attr && attr->Type() == nsAttrValue::eAtom) {
+    return attr->GetAtomValue();
+  }
+  // The only case in which we should have a non-atom value here is if it's the
+  // empty string value.
+  MOZ_ASSERT_IF(attr, attr->IsEmptyString());
+  return nullptr;
 }
 
 // Dirtiness tracking.
@@ -314,13 +321,10 @@ Gecko_GetStyleContext(RawGeckoElementBorrowed aElement,
   return fc->GetDisplayContentsStyleFor(aElement);
 }
 
-nsIAtom*
+CSSPseudoElementType
 Gecko_GetImplementedPseudo(RawGeckoElementBorrowed aElement)
 {
-  CSSPseudoElementType pseudo = aElement->GetPseudoElementType();
-  if (pseudo == CSSPseudoElementType::NotPseudo)
-    return nullptr;
-  return nsCSSPseudoElements::GetPseudoAtom(pseudo);
+  return aElement->GetPseudoElementType();
 }
 
 nsChangeHint
@@ -1112,17 +1116,15 @@ Gecko_CopyImageOrientationFrom(nsStyleVisibility* aDst,
 }
 
 void
-Gecko_SetListStyleType(nsStyleList* style_struct, uint32_t type)
+Gecko_SetListStyleType(nsStyleList* aList, nsIAtom* aName)
 {
-  // Builtin counter styles are static and use no-op refcounting, and thus are
-  // safe to use off-main-thread.
-  style_struct->SetCounterStyle(CounterStyleManager::GetBuiltinStyle(type));
+  aList->SetListStyleType(aName);
 }
 
 void
-Gecko_CopyListStyleTypeFrom(nsStyleList* dst, const nsStyleList* src)
+Gecko_CopyListStyleTypeFrom(nsStyleList* aDst, const nsStyleList* aSrc)
 {
-  dst->SetCounterStyle(src->GetCounterStyle());
+  aDst->CopyListStyleTypeFrom(*aSrc);
 }
 
 already_AddRefed<css::URLValue>
@@ -1157,29 +1159,35 @@ Gecko_SetGradientImageValue(nsStyleImage* aImage, nsStyleGradient* aGradient)
   aImage->SetGradientData(aGradient);
 }
 
+NS_IMPL_THREADSAFE_FFI_REFCOUNTING(mozilla::css::ImageValue, ImageValue);
+
 static already_AddRefed<nsStyleImageRequest>
 CreateStyleImageRequest(nsStyleImageRequest::Mode aModeFlags,
-                        ServoBundledURI aURI)
+                        mozilla::css::ImageValue* aImageValue)
 {
-  MOZ_ASSERT(aURI.mURLString);
-  MOZ_ASSERT(aURI.mExtraData->GetReferrer());
-  MOZ_ASSERT(aURI.mExtraData->GetPrincipal());
-
-  NS_ConvertUTF8toUTF16 url(reinterpret_cast<const char*>(aURI.mURLString),
-                            aURI.mURLStringLength);
-
   RefPtr<nsStyleImageRequest> req =
-    new nsStyleImageRequest(aModeFlags, url, do_AddRef(aURI.mExtraData));
+    new nsStyleImageRequest(aModeFlags, aImageValue);
   return req.forget();
 }
 
-NS_IMPL_THREADSAFE_FFI_REFCOUNTING(mozilla::css::ImageValue, ImageValue);
+mozilla::css::ImageValue*
+Gecko_ImageValue_Create(ServoBundledURI aURI)
+{
+  NS_ConvertUTF8toUTF16 url(reinterpret_cast<const char*>(aURI.mURLString),
+                            aURI.mURLStringLength);
+
+  RefPtr<ImageValue> value(new ImageValue(url, do_AddRef(aURI.mExtraData)));
+  return value.forget().take();
+}
 
 void
-Gecko_SetUrlImageValue(nsStyleImage* aImage, ServoBundledURI aURI)
+Gecko_SetLayerImageImageValue(nsStyleImage* aImage,
+                              mozilla::css::ImageValue* aImageValue)
 {
+  MOZ_ASSERT(aImage && aImageValue);
+
   RefPtr<nsStyleImageRequest> req =
-    CreateStyleImageRequest(nsStyleImageRequest::Mode::Track, aURI);
+    CreateStyleImageRequest(nsStyleImageRequest::Mode::Track, aImageValue);
   aImage->SetImageRequest(req.forget());
 }
 
@@ -1213,10 +1221,13 @@ Gecko_SetCursorArrayLength(nsStyleUserInterface* aStyleUI, size_t aLen)
 }
 
 void
-Gecko_SetCursorImage(nsCursorImage* aCursor, ServoBundledURI aURI)
+Gecko_SetCursorImageValue(nsCursorImage* aCursor,
+                          mozilla::css::ImageValue* aImageValue)
 {
+  MOZ_ASSERT(aCursor && aImageValue);
+
   aCursor->mImage =
-    CreateStyleImageRequest(nsStyleImageRequest::Mode::Discard, aURI);
+    CreateStyleImageRequest(nsStyleImageRequest::Mode::Discard, aImageValue);
 }
 
 void
@@ -1227,9 +1238,13 @@ Gecko_CopyCursorArrayFrom(nsStyleUserInterface* aDest,
 }
 
 void
-Gecko_SetContentDataImage(nsStyleContentData* aContent, ServoBundledURI aURI)
+Gecko_SetContentDataImageValue(nsStyleContentData* aContent,
+                               mozilla::css::ImageValue* aImageValue)
 {
-  RefPtr<nsStyleImageRequest> req = CreateStyleImageRequest(nsStyleImageRequest::Mode::Track, aURI);
+  MOZ_ASSERT(aContent && aImageValue);
+
+  RefPtr<nsStyleImageRequest> req =
+    CreateStyleImageRequest(nsStyleImageRequest::Mode::Track, aImageValue);
   aContent->SetImageRequest(req.forget());
 }
 
@@ -1280,11 +1295,13 @@ Gecko_SetListStyleImageNone(nsStyleList* aList)
 }
 
 void
-Gecko_SetListStyleImage(nsStyleList* aList,
-                        ServoBundledURI aURI)
+Gecko_SetListStyleImageImageValue(nsStyleList* aList,
+                             mozilla::css::ImageValue* aImageValue)
 {
+  MOZ_ASSERT(aList && aImageValue);
+
   aList->mListStyleImage =
-    CreateStyleImageRequest(nsStyleImageRequest::Mode(0), aURI);
+    CreateStyleImageRequest(nsStyleImageRequest::Mode(0), aImageValue);
 }
 
 void
@@ -1452,20 +1469,100 @@ Gecko_CopyWillChangeFrom(nsStyleDisplay* aDest, nsStyleDisplay* aSrc)
   aDest->mWillChange.AppendElements(aSrc->mWillChange);
 }
 
-Keyframe*
-Gecko_AnimationAppendKeyframe(RawGeckoKeyframeListBorrowedMut aKeyframes,
-                              float aOffset,
-                              const nsTimingFunction* aTimingFunction)
+enum class KeyframeSearchDirection {
+  Forwards,
+  Backwards,
+};
+
+enum class KeyframeInsertPosition {
+  Prepend,
+  LastForOffset,
+};
+
+static Keyframe*
+GetOrCreateKeyframe(nsTArray<Keyframe>* aKeyframes,
+                    float aOffset,
+                    const nsTimingFunction* aTimingFunction,
+                    KeyframeSearchDirection aSearchDirection,
+                    KeyframeInsertPosition aInsertPosition)
 {
-  Keyframe* keyframe = aKeyframes->AppendElement();
+  MOZ_ASSERT(aKeyframes, "The keyframe array should be valid");
+  MOZ_ASSERT(aTimingFunction, "The timing function should be valid");
+  MOZ_ASSERT(aOffset >= 0. && aOffset <= 1.,
+             "The offset should be in the range of [0.0, 1.0]");
+
+  size_t keyframeIndex;
+  switch (aSearchDirection) {
+    case KeyframeSearchDirection::Forwards:
+      if (nsAnimationManager::FindMatchingKeyframe(*aKeyframes,
+                                                   aOffset,
+                                                   *aTimingFunction,
+                                                   keyframeIndex)) {
+        return &(*aKeyframes)[keyframeIndex];
+      }
+      break;
+    case KeyframeSearchDirection::Backwards:
+      if (nsAnimationManager::FindMatchingKeyframe(Reversed(*aKeyframes),
+                                                   aOffset,
+                                                   *aTimingFunction,
+                                                   keyframeIndex)) {
+        return &(*aKeyframes)[aKeyframes->Length() - 1 - keyframeIndex];
+      }
+      keyframeIndex = aKeyframes->Length() - 1;
+      break;
+  }
+
+  Keyframe* keyframe =
+    aKeyframes->InsertElementAt(
+      aInsertPosition == KeyframeInsertPosition::Prepend
+                         ? 0
+                         : keyframeIndex);
   keyframe->mOffset.emplace(aOffset);
-  if (aTimingFunction &&
-      aTimingFunction->mType != nsTimingFunction::Type::Linear) {
+  if (aTimingFunction->mType != nsTimingFunction::Type::Linear) {
     keyframe->mTimingFunction.emplace();
     keyframe->mTimingFunction->Init(*aTimingFunction);
   }
 
   return keyframe;
+}
+
+Keyframe*
+Gecko_GetOrCreateKeyframeAtStart(nsTArray<Keyframe>* aKeyframes,
+                                 float aOffset,
+                                 const nsTimingFunction* aTimingFunction)
+{
+  MOZ_ASSERT(aKeyframes->IsEmpty() ||
+             aKeyframes->ElementAt(0).mOffset.value() >= aOffset,
+             "The offset should be less than or equal to the first keyframe's "
+             "offset if there are exisiting keyframes");
+
+  return GetOrCreateKeyframe(aKeyframes,
+                             aOffset,
+                             aTimingFunction,
+                             KeyframeSearchDirection::Forwards,
+                             KeyframeInsertPosition::Prepend);
+}
+
+Keyframe*
+Gecko_GetOrCreateInitialKeyframe(nsTArray<Keyframe>* aKeyframes,
+                                 const nsTimingFunction* aTimingFunction)
+{
+  return GetOrCreateKeyframe(aKeyframes,
+                             0.,
+                             aTimingFunction,
+                             KeyframeSearchDirection::Forwards,
+                             KeyframeInsertPosition::LastForOffset);
+}
+
+Keyframe*
+Gecko_GetOrCreateFinalKeyframe(nsTArray<Keyframe>* aKeyframes,
+                               const nsTimingFunction* aTimingFunction)
+{
+  return GetOrCreateKeyframe(aKeyframes,
+                             1.,
+                             aTimingFunction,
+                             KeyframeSearchDirection::Backwards,
+                             KeyframeInsertPosition::LastForOffset);
 }
 
 void
@@ -1641,12 +1738,6 @@ Gecko_CSSValue_GetAbsoluteLength(nsCSSValueBorrowed aCSSValue)
 }
 
 void
-Gecko_CSSValue_SetNormal(nsCSSValueBorrowedMut aCSSValue)
-{
-  aCSSValue->SetNormalValue();
-}
-
-void
 Gecko_CSSValue_SetNumber(nsCSSValueBorrowedMut aCSSValue, float aNumber)
 {
   aCSSValue->SetFloatValue(aNumber, eCSSUnit_Number);
@@ -1762,6 +1853,36 @@ nsCSSValueBorrowed
 Gecko_CSSValue_GetArrayItemConst(nsCSSValueBorrowed aCSSValue, int32_t aIndex)
 {
   return &aCSSValue->GetArrayValue()->Item(aIndex);
+}
+
+void
+Gecko_CSSValue_SetPair(nsCSSValueBorrowedMut aCSSValue,
+                       nsCSSValueBorrowed aXValue, nsCSSValueBorrowed aYValue)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  aCSSValue->SetPairValue(*aXValue, *aYValue);
+}
+
+void
+Gecko_CSSValue_SetList(nsCSSValueBorrowedMut aCSSValue, uint32_t aLen)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  nsCSSValueList* item = aCSSValue->SetListValue();
+  for (uint32_t i = 1; i < aLen; ++i) {
+    item->mNext = new nsCSSValueList;
+    item = item->mNext;
+  }
+}
+
+void
+Gecko_CSSValue_SetPairList(nsCSSValueBorrowedMut aCSSValue, uint32_t aLen)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  nsCSSValuePairList* item = aCSSValue->SetPairListValue();
+  for (uint32_t i = 1; i < aLen; ++i) {
+    item->mNext = new nsCSSValuePairList;
+    item = item->mNext;
+  }
 }
 
 
@@ -1955,9 +2076,9 @@ Gecko_CSSKeywordString(nsCSSKeyword aKeyword, uint32_t* aLength)
 }
 
 nsCSSFontFaceRule*
-Gecko_CSSFontFaceRule_Create()
+Gecko_CSSFontFaceRule_Create(uint32_t aLine, uint32_t aColumn)
 {
-  RefPtr<nsCSSFontFaceRule> rule = new nsCSSFontFaceRule(0, 0);
+  RefPtr<nsCSSFontFaceRule> rule = new nsCSSFontFaceRule(aLine, aColumn);
   return rule.forget().take();
 }
 
@@ -1975,6 +2096,23 @@ Gecko_CSSFontFaceRule_GetCssText(const nsCSSFontFaceRule* aRule,
 }
 
 NS_IMPL_FFI_REFCOUNTING(nsCSSFontFaceRule, CSSFontFaceRule);
+
+nsCSSCounterStyleRule*
+Gecko_CSSCounterStyle_Create(nsIAtom* aName)
+{
+  RefPtr<nsCSSCounterStyleRule> rule = new nsCSSCounterStyleRule(aName, 0, 0);
+  return rule.forget().take();
+}
+
+void
+Gecko_CSSCounterStyle_GetCssText(const nsCSSCounterStyleRule* aRule,
+                                 nsAString* aResult)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  aRule->GetCssText(*aResult);
+}
+
+NS_IMPL_FFI_REFCOUNTING(nsCSSCounterStyleRule, CSSCounterStyleRule);
 
 NS_IMPL_THREADSAFE_FFI_REFCOUNTING(nsCSSValueSharedList, CSSValueSharedList);
 

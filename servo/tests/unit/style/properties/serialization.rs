@@ -493,6 +493,7 @@ mod shorthand_serialization {
     }
 
     mod list_style {
+        use style::properties::longhands::list_style_image::SpecifiedValue as ListStyleImage;
         use style::properties::longhands::list_style_position::SpecifiedValue as ListStylePosition;
         use style::properties::longhands::list_style_type::SpecifiedValue as ListStyleType;
         use style::values::Either;
@@ -503,12 +504,17 @@ mod shorthand_serialization {
             let mut properties = Vec::new();
 
             let position = ListStylePosition::inside;
-            let image = Either::First(
-                SpecifiedUrl::new_for_testing("http://servo/test.png"));
+            let image =
+                ListStyleImage(Either::First(SpecifiedUrl::new_for_testing("http://servo/test.png")));
             let style_type = ListStyleType::disc;
 
             properties.push(PropertyDeclaration::ListStylePosition(position));
+
+            #[cfg(feature = "gecko")]
+            properties.push(PropertyDeclaration::ListStyleImage(Box::new(image)));
+            #[cfg(not(feature = "gecko"))]
             properties.push(PropertyDeclaration::ListStyleImage(image));
+
             properties.push(PropertyDeclaration::ListStyleType(style_type));
 
             let serialization = shorthand_properties_to_string(properties);
@@ -653,7 +659,8 @@ mod shorthand_serialization {
                               font-kerning: auto; \
                               font-variant-caps: normal; \
                               font-variant-position: normal; \
-                              font-language-override: normal;";
+                              font-language-override: normal; \
+                              font-feature-settings: normal;";
 
             let block = parse(|c, i| Ok(parse_property_declaration_list(c, i)), block_text).unwrap();
 
@@ -798,7 +805,8 @@ mod shorthand_serialization {
         use style::properties::longhands::mask_position_y as position_y;
         use style::properties::longhands::mask_repeat as repeat;
         use style::properties::longhands::mask_size as size;
-        use style::values::specified::Image;
+        use style::values::Either;
+        use style::values::generics::image::Image;
         use super::*;
 
         macro_rules! single_vec_value_typedef {
@@ -827,9 +835,10 @@ mod shorthand_serialization {
         fn mask_should_serialize_all_available_properties_when_specified() {
             let mut properties = Vec::new();
 
-            let image = single_vec_value_typedef!(image,
-                image::single_value::SpecifiedValue(
-                    Some(Image::Url(SpecifiedUrl::new_for_testing("http://servo/test.png")))));
+            let image = single_vec_value_typedef!(
+                image,
+                Either::Second(Image::Url(SpecifiedUrl::new_for_testing("http://servo/test.png")))
+            );
 
             let mode = single_vec_keyword_value!(mode, luminance);
 
@@ -879,9 +888,10 @@ mod shorthand_serialization {
         fn mask_should_combine_origin_and_clip_properties_when_equal() {
             let mut properties = Vec::new();
 
-            let image = single_vec_value_typedef!(image,
-                image::single_value::SpecifiedValue(
-                    Some(Image::Url(SpecifiedUrl::new_for_testing("http://servo/test.png")))));
+            let image = single_vec_value_typedef!(
+                image,
+                Either::Second(Image::Url(SpecifiedUrl::new_for_testing("http://servo/test.png")))
+            );
 
             let mode = single_vec_keyword_value!(mode, luminance);
 

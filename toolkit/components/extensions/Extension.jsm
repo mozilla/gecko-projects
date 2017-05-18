@@ -14,6 +14,20 @@ this.EXPORTED_SYMBOLS = ["Extension", "ExtensionData"];
  * and calls .startup() on it. It calls .shutdown() when the extension
  * unloads. Extension manages any extension-specific state in
  * the chrome process.
+ *
+ * TODO(rpl): we are current restricting the extensions to a single process
+ * (set as the current default value of the "dom.ipc.processCount.extension"
+ * preference), if we switch to use more than one extension process, we have to
+ * be sure that all the browser's frameLoader are associated to the same process,
+ * e.g. by using the `sameProcessAsFrameLoader` property.
+ * (http://searchfox.org/mozilla-central/source/dom/interfaces/base/nsIBrowser.idl)
+ *
+ * At that point we are going to keep track of the existing browsers associated to
+ * a webextension to ensure that they are all running in the same process (and we
+ * are also going to do the same with the browser element provided to the
+ * addon debugging Remote Debugging actor, e.g. because the addon has been
+ * reloaded by the user, we have to  ensure that the new extension pages are going
+ * to run in the same process of the existing addon debugging browser element).
  */
 
 const Ci = Components.interfaces;
@@ -316,69 +330,67 @@ this.ExtensionData = class {
     return `moz-extension://${this.uuid}/${path}`;
   }
 
-  readDirectory(path) {
-    return (async () => {
-      if (this.rootURI instanceof Ci.nsIFileURL) {
-        let uri = NetUtil.newURI(this.rootURI.resolve("./" + path));
-        let fullPath = uri.QueryInterface(Ci.nsIFileURL).file.path;
+  async readDirectory(path) {
+    if (this.rootURI instanceof Ci.nsIFileURL) {
+      let uri = NetUtil.newURI(this.rootURI.resolve("./" + path));
+      let fullPath = uri.QueryInterface(Ci.nsIFileURL).file.path;
 
-        let iter = new OS.File.DirectoryIterator(fullPath);
-        let results = [];
+      let iter = new OS.File.DirectoryIterator(fullPath);
+      let results = [];
 
-        try {
-          await iter.forEach(entry => {
-            results.push(entry);
-          });
-        } catch (e) {
-          // Always return a list, even if the directory does not exist (or is
-          // not a directory) for symmetry with the ZipReader behavior.
-        }
-        iter.close();
-
-        return results;
-      }
-
-      // FIXME: We need a way to do this without main thread IO.
-
-      let uri = this.rootURI.QueryInterface(Ci.nsIJARURI);
-
-      let file = uri.JARFile.QueryInterface(Ci.nsIFileURL).file;
-      let zipReader = Cc["@mozilla.org/libjar/zip-reader;1"].createInstance(Ci.nsIZipReader);
-      zipReader.open(file);
       try {
-        let results = [];
+        await iter.forEach(entry => {
+          results.push(entry);
+        });
+      } catch (e) {
+        // Always return a list, even if the directory does not exist (or is
+        // not a directory) for symmetry with the ZipReader behavior.
+      }
+      iter.close();
 
-        // Normalize the directory path.
-        path = `${uri.JAREntry}/${path}`;
-        path = path.replace(/\/\/+/g, "/").replace(/^\/|\/$/g, "") + "/";
+      return results;
+    }
 
-        // Escape pattern metacharacters.
-        let pattern = path.replace(/[[\]()?*~|$\\]/g, "\\$&");
+    // FIXME: We need a way to do this without main thread IO.
 
-        let enumerator = zipReader.findEntries(pattern + "*");
-        while (enumerator.hasMore()) {
-          let name = enumerator.getNext();
-          if (!name.startsWith(path)) {
-            throw new Error("Unexpected ZipReader entry");
-          }
+    let uri = this.rootURI.QueryInterface(Ci.nsIJARURI);
 
-          // The enumerator returns the full path of all entries.
-          // Trim off the leading path, and filter out entries from
-          // subdirectories.
-          name = name.slice(path.length);
-          if (name && !/\/./.test(name)) {
-            results.push({
-              name: name.replace("/", ""),
-              isDir: name.endsWith("/"),
-            });
-          }
+    let file = uri.JARFile.QueryInterface(Ci.nsIFileURL).file;
+    let zipReader = Cc["@mozilla.org/libjar/zip-reader;1"].createInstance(Ci.nsIZipReader);
+    zipReader.open(file);
+    try {
+      let results = [];
+
+      // Normalize the directory path.
+      path = `${uri.JAREntry}/${path}`;
+      path = path.replace(/\/\/+/g, "/").replace(/^\/|\/$/g, "") + "/";
+
+      // Escape pattern metacharacters.
+      let pattern = path.replace(/[[\]()?*~|$\\]/g, "\\$&");
+
+      let enumerator = zipReader.findEntries(pattern + "*");
+      while (enumerator.hasMore()) {
+        let name = enumerator.getNext();
+        if (!name.startsWith(path)) {
+          throw new Error("Unexpected ZipReader entry");
         }
 
-        return results;
-      } finally {
-        zipReader.close();
+        // The enumerator returns the full path of all entries.
+        // Trim off the leading path, and filter out entries from
+        // subdirectories.
+        name = name.slice(path.length);
+        if (name && !/\/./.test(name)) {
+          results.push({
+            name: name.replace("/", ""),
+            isDir: name.endsWith("/"),
+          });
+        }
       }
-    })();
+
+      return results;
+    } finally {
+      zipReader.close();
+    }
   }
 
   readJSON(path) {
@@ -569,20 +581,18 @@ this.ExtensionData = class {
 
   // Reads the locale file for the given Gecko-compatible locale code, and
   // stores its parsed contents in |this.localeMessages.get(locale)|.
-  readLocaleFile(locale) {
-    return (async () => {
-      let locales = await this.promiseLocales();
-      let dir = locales.get(locale) || locale;
-      let file = `_locales/${dir}/messages.json`;
+  async readLocaleFile(locale) {
+    let locales = await this.promiseLocales();
+    let dir = locales.get(locale) || locale;
+    let file = `_locales/${dir}/messages.json`;
 
-      try {
-        let messages = await this.readJSON(file);
-        return this.localeData.addLocale(locale, messages, this);
-      } catch (e) {
-        this.packagingError(`Loading locale file ${file}: ${e}`);
-        return new Map();
-      }
-    })();
+    try {
+      let messages = await this.readJSON(file);
+      return this.localeData.addLocale(locale, messages, this);
+    } catch (e) {
+      this.packagingError(`Loading locale file ${file}: ${e}`);
+      return new Map();
+    }
   }
 
   // Reads the list of locales available in the extension, and returns a
@@ -621,27 +631,25 @@ this.ExtensionData = class {
   // resolves to a Map of locale messages upon completion. Each key in the map
   // is a Gecko-compatible locale code, and each value is a locale data object
   // as returned by |readLocaleFile|.
-  initAllLocales() {
-    return (async () => {
-      let locales = await this.promiseLocales();
+  async initAllLocales() {
+    let locales = await this.promiseLocales();
 
-      await Promise.all(Array.from(locales.keys(),
-                                   locale => this.readLocaleFile(locale)));
+    await Promise.all(Array.from(locales.keys(),
+                                 locale => this.readLocaleFile(locale)));
 
-      let defaultLocale = this.defaultLocale;
-      if (defaultLocale) {
-        if (!locales.has(defaultLocale)) {
-          this.manifestError('Value for "default_locale" property must correspond to ' +
-                             'a directory in "_locales/". Not found: ' +
-                             JSON.stringify(`_locales/${this.manifest.default_locale}/`));
-        }
-      } else if (locales.size) {
-        this.manifestError('The "default_locale" property is required when a ' +
-                           '"_locales/" directory is present.');
+    let defaultLocale = this.defaultLocale;
+    if (defaultLocale) {
+      if (!locales.has(defaultLocale)) {
+        this.manifestError('Value for "default_locale" property must correspond to ' +
+                           'a directory in "_locales/". Not found: ' +
+                           JSON.stringify(`_locales/${this.manifest.default_locale}/`));
       }
+    } else if (locales.size) {
+      this.manifestError('The "default_locale" property is required when a ' +
+                         '"_locales/" directory is present.');
+    }
 
-      return this.localeData.messages;
-    })();
+    return this.localeData.messages;
   }
 
   // Reads the locale file for the given Gecko-compatible locale code, or the
@@ -652,24 +660,22 @@ this.ExtensionData = class {
   // of the locale specified.
   //
   // If no locales are unavailable, resolves to |null|.
-  initLocale(locale = this.defaultLocale) {
-    return (async () => {
-      if (locale == null) {
-        return null;
-      }
+  async initLocale(locale = this.defaultLocale) {
+    if (locale == null) {
+      return null;
+    }
 
-      let promises = [this.readLocaleFile(locale)];
+    let promises = [this.readLocaleFile(locale)];
 
-      let {defaultLocale} = this;
-      if (locale != defaultLocale && !this.localeData.has(defaultLocale)) {
-        promises.push(this.readLocaleFile(defaultLocale));
-      }
+    let {defaultLocale} = this;
+    if (locale != defaultLocale && !this.localeData.has(defaultLocale)) {
+      promises.push(this.readLocaleFile(defaultLocale));
+    }
 
-      let results = await Promise.all(promises);
+    let results = await Promise.all(promises);
 
-      this.localeData.selectedLocale = locale;
-      return results[0];
-    })();
+    this.localeData.selectedLocale = locale;
+    return results[0];
   }
 };
 
@@ -956,14 +962,19 @@ this.Extension = class extends ExtensionData {
     return super.initLocale(locale);
   }
 
-  async startup() {
-    let started = false;
+  startup() {
+    this.startupPromise = this._startup();
+    return this.startupPromise;
+  }
+
+  async _startup() {
+    this.started = false;
 
     try {
       let [, perms] = await Promise.all([this.loadManifest(), ExtensionPermissions.get(this)]);
 
       ExtensionManagement.startupExtension(this.uuid, this.addonData.resourceURI, this);
-      started = true;
+      this.started = true;
 
       if (!this.hasShutdown) {
         await this.initLocale();
@@ -1002,7 +1013,8 @@ this.Extension = class extends ExtensionData {
       dump(`Extension error: ${e.message} ${e.filename || e.fileName}:${e.lineNumber} :: ${e.stack || new Error().stack}\n`);
       Cu.reportError(e);
 
-      if (started) {
+      if (this.started) {
+        this.started = false;
         ExtensionManagement.shutdownExtension(this.uuid);
       }
 
@@ -1010,6 +1022,8 @@ this.Extension = class extends ExtensionData {
 
       throw e;
     }
+
+    this.startupPromise = null;
   }
 
   cleanupGeneratedFile() {
@@ -1031,9 +1045,21 @@ this.Extension = class extends ExtensionData {
     }).catch(Cu.reportError);
   }
 
-  shutdown(reason) {
+  async shutdown(reason) {
+    try {
+      if (this.startupPromise) {
+        await this.startupPromise;
+      }
+    } catch (e) {
+      Cu.reportError(e);
+    }
+
     this.shutdownReason = reason;
     this.hasShutdown = true;
+
+    if (!this.started) {
+      return;
+    }
 
     if (this.cleanupFile ||
         ["ADDON_INSTALL", "ADDON_UNINSTALL", "ADDON_UPGRADE", "ADDON_DOWNGRADE"].includes(reason)) {

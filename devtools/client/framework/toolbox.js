@@ -60,8 +60,6 @@ loader.lazyRequireGetter(this, "settleAll",
   "devtools/shared/ThreadSafeDevToolsUtils", true);
 loader.lazyRequireGetter(this, "ToolboxButtons",
   "devtools/client/definitions", true);
-loader.lazyRequireGetter(this, "SourceMapService",
-  "devtools/client/framework/source-map-service", true);
 loader.lazyRequireGetter(this, "SourceMapURLService",
   "devtools/client/framework/source-map-url-service", true);
 loader.lazyRequireGetter(this, "HUDService",
@@ -97,14 +95,6 @@ function Toolbox(target, selectedTool, hostType, contentWindow, frameId) {
 
   this._toolPanels = new Map();
   this._telemetry = new Telemetry();
-
-  // TODO: This approach to source maps uses server-side source maps, which we are
-  // replacing with client-side source maps.  Do not use this in new code paths.
-  // To be removed in bug 1349354.  Read more about ongoing work with source maps:
-  // https://docs.google.com/document/d/19TKnMJD3CMBzwByNE4aBBVWnl-AEan8Sf4hxi6J-eps/edit
-  if (Services.prefs.getBoolPref("devtools.source-map.locations.enabled")) {
-    this._deprecatedServerSourceMapService = new SourceMapService(this._target);
-  }
 
   this._initInspector = null;
   this._inspector = null;
@@ -1823,8 +1813,10 @@ Toolbox.prototype = {
   _refreshHostTitle: function () {
     let title;
     if (this.target.name && this.target.name != this.target.url) {
+      const url = this.target.isWebExtension ?
+                  this.target.getExtensionPathName(this.target.url) : this.target.url;
       title = L10N.getFormatStr("toolbox.titleTemplate2", this.target.name,
-                                                          this.target.url);
+                                                          url);
     } else {
       title = L10N.getFormatStr("toolbox.titleTemplate1", this.target.url);
     }
@@ -1895,9 +1887,16 @@ Toolbox.prototype = {
       // A frame is checked if it's the selected one.
       let checked = frame.id == this.selectedFrameId;
 
+      let label = frame.url;
+
+      if (this.target.isWebExtension) {
+        // Show a shorter url for extensions page.
+        label = this.target.getExtensionPathName(frame.url);
+      }
+
       // Create menu item.
       menu.append(new MenuItem({
-        label: frame.url,
+        label,
         type: "radio",
         checked,
         click: () => {
@@ -2315,11 +2314,6 @@ Toolbox.prototype = {
                                   this._applyServiceWorkersTestingSettings);
 
     this._lastFocusedElement = null;
-
-    if (this._deprecatedServerSourceMapService) {
-      this._deprecatedServerSourceMapService.destroy();
-      this._deprecatedServerSourceMapService = null;
-    }
 
     if (this._sourceMapURLService) {
       this._sourceMapURLService.destroy();

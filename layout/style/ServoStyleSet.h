@@ -34,6 +34,7 @@ struct Keyframe;
 struct ServoComputedValuesWithParent;
 class ServoElementSnapshotTable;
 } // namespace mozilla
+class nsCSSCounterStyleRule;
 class nsIContent;
 class nsIDocument;
 class nsStyleContext;
@@ -165,7 +166,7 @@ public:
   // style attributes; otherwise, it is ignored.
   already_AddRefed<nsStyleContext>
   ResolvePseudoElementStyle(dom::Element* aOriginatingElement,
-                            mozilla::CSSPseudoElementType aType,
+                            CSSPseudoElementType aType,
                             nsStyleContext* aParentContext,
                             dom::Element* aPseudoElement);
 
@@ -181,7 +182,8 @@ public:
   // Similar to ResolveTransientStyle() but returns ServoComputedValues.
   // Unlike ResolveServoStyle() this function calls PreTraverseSync().
   already_AddRefed<ServoComputedValues>
-  ResolveTransientServoStyle(dom::Element* aElement, nsIAtom* aPseudoTag);
+  ResolveTransientServoStyle(dom::Element* aElement,
+                             CSSPseudoElementType aPseudoTag);
 
   // Get a style context for an anonymous box.  aPseudoTag is the pseudo-tag to
   // use and must be non-null.  It must be an anon box, and must be one that
@@ -195,10 +197,6 @@ public:
   // must be an anon box, and must be a non-inheriting one.
   already_AddRefed<nsStyleContext>
   ResolveNonInheritingAnonymousBoxStyle(nsIAtom* aPseudoTag);
-
-  // Get the rule node for a (pseudo-)element, resolving it lazily if needed.
-  already_AddRefed<RawServoRuleNode>
-  ResolveRuleNode(dom::Element *aElement, nsIAtom *aPseudoTag);
 
   // manage the set of style sheets in the style set
   nsresult AppendStyleSheet(SheetType aType, ServoStyleSheet* aSheet);
@@ -292,15 +290,22 @@ public:
   void RebuildData();
 
   /**
+   * Clears the style data, both style sheet data and cached non-inheriting
+   * style contexts, and marks the stylist as needing an unconditional full
+   * rebuild, including a device reset.
+   */
+  void ClearDataAndMarkDeviceDirty();
+
+  /**
    * Resolve style for the given element, and return it as a
    * ServoComputedValues, not an nsStyleContext.
    */
   already_AddRefed<ServoComputedValues> ResolveServoStyle(dom::Element* aElement);
 
-  bool FillKeyframesForName(const nsString& aName,
-                            const nsTimingFunction& aTimingFunction,
-                            const ServoComputedValues* aComputedValues,
-                            nsTArray<Keyframe>& aKeyframes);
+  bool GetKeyframesForName(const nsString& aName,
+                           const nsTimingFunction& aTimingFunction,
+                           const ServoComputedValues* aComputedValues,
+                           nsTArray<Keyframe>& aKeyframes);
 
   nsTArray<ComputedKeyframeValues>
   GetComputedKeyframeValuesFor(const nsTArray<Keyframe>& aKeyframes,
@@ -310,8 +315,11 @@ public:
 
   bool AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray);
 
+  nsCSSCounterStyleRule* CounterStyleRuleForName(nsIAtom* aName);
+
   already_AddRefed<ServoComputedValues>
-  GetBaseComputedValuesForElement(dom::Element* aElement, nsIAtom* aPseudoTag);
+  GetBaseComputedValuesForElement(dom::Element* aElement,
+                                  CSSPseudoElementType aPseudoType);
 
   /**
    * Resolve style for a given declaration block with/without the parent style.
@@ -419,63 +427,79 @@ private:
   void PreTraverseSync();
 
   /**
-   * Rebuild the stylist.  This should only be called if mStylistMayNeedRebuild
-   * is true.
+   * A tri-state used to track which kind of stylist state we may need to
+   * update.
    */
-  void RebuildStylist();
+  enum class StylistState : uint8_t {
+    /** The stylist is not dirty, we should do nothing */
+    NotDirty,
+    /** The style sheets have changed, so we need to update the style data. */
+    StyleSheetsDirty,
+    /**
+     * All style data is dirty and both style sheet data and default computed
+     * values need to be recomputed.
+     */
+    FullyDirty,
+  };
+
+  /**
+   * Note that the stylist needs a style flush due to style sheet changes.
+   */
+  void SetStylistStyleSheetsDirty()
+  {
+    if (mStylistState == StylistState::NotDirty) {
+      mStylistState = StylistState::StyleSheetsDirty;
+    }
+  }
+
+  bool StylistNeedsUpdate() const
+  {
+    return mStylistState != StylistState::NotDirty;
+  }
+
+  /**
+   * Update the stylist as needed to ensure style data is up-to-date.
+   *
+   * This should only be called if StylistNeedsUpdate returns true.
+   */
+  void UpdateStylist();
 
   /**
    * Helper for correctly calling RebuildStylist without paying the cost of an
    * extra function call in the common no-rebuild-needed case.
    */
-  void MaybeRebuildStylist()
+  void UpdateStylistIfNeeded()
   {
-    if (mStylistMayNeedRebuild) {
-      RebuildStylist();
+    if (StylistNeedsUpdate()) {
+      UpdateStylist();
     }
   }
 
-  already_AddRefed<ServoComputedValues> ResolveStyleLazily(dom::Element* aElement,
-                                                           nsIAtom* aPseudoTag);
+  already_AddRefed<ServoComputedValues>
+    ResolveStyleLazily(dom::Element* aElement, CSSPseudoElementType aPseudoType);
 
   void RunPostTraversalTasks();
 
-  uint32_t FindSheetOfType(SheetType aType,
-                           ServoStyleSheet* aSheet);
+  void PrependSheetOfType(SheetType aType,
+                          ServoStyleSheet* aSheet);
 
-  uint32_t PrependSheetOfType(SheetType aType,
-                              ServoStyleSheet* aSheet,
-                              uint32_t aReuseUniqueID = 0);
+  void AppendSheetOfType(SheetType aType,
+                         ServoStyleSheet* aSheet);
 
-  uint32_t AppendSheetOfType(SheetType aType,
-                             ServoStyleSheet* aSheet,
-                             uint32_t aReuseUniqueID = 0);
+  void InsertSheetOfType(SheetType aType,
+                         ServoStyleSheet* aSheet,
+                         ServoStyleSheet* aBeforeSheet);
 
-  uint32_t InsertSheetOfType(SheetType aType,
-                             ServoStyleSheet* aSheet,
-                             uint32_t aBeforeUniqueID,
-                             uint32_t aReuseUniqueID = 0);
-
-  uint32_t RemoveSheetOfType(SheetType aType,
-                             ServoStyleSheet* aSheet);
-
-  struct Entry {
-    uint32_t uniqueID;
-    RefPtr<ServoStyleSheet> sheet;
-
-    // Provide a cast operator to simplify calling
-    // nsIDocument::FindDocStyleSheetInsertionPoint.
-    operator ServoStyleSheet*() const { return sheet; }
-  };
+  void RemoveSheetOfType(SheetType aType,
+                         ServoStyleSheet* aSheet);
 
   nsPresContext* mPresContext;
   UniquePtr<RawServoStyleSet> mRawSet;
   EnumeratedArray<SheetType, SheetType::Count,
-                  nsTArray<Entry>> mEntries;
-  uint32_t mUniqueIDCounter;
+                  nsTArray<RefPtr<ServoStyleSheet>>> mSheets;
   bool mAllowResolveStaleStyles;
   bool mAuthorStyleDisabled;
-  bool mStylistMayNeedRebuild;
+  StylistState mStylistState;
 
   // Stores pointers to our cached style contexts for non-inheriting anonymous
   // boxes.

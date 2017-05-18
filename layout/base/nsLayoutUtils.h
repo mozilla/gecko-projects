@@ -71,6 +71,7 @@ struct IntrinsicSize;
 struct ContainerLayerParameters;
 class WritingMode;
 class DisplayItemClip;
+class EffectSet;
 namespace dom {
 class CanvasRenderingContext2D;
 class DOMRectList;
@@ -2256,6 +2257,13 @@ public:
                                      nsCSSPropertyID aProperty);
 
   /**
+   * Returns true if |aEffectSet| has an animation of |aProperty| regardless of
+   * whether the property is overridden by !important rule.
+   */
+  static bool HasAnimationOfProperty(mozilla::EffectSet* aEffectSet,
+                                     nsCSSPropertyID aProperty);
+
+  /**
    * Returns true if |aFrame| has an animation of |aProperty| which is
    * not overridden by !important rules.
    */
@@ -2890,6 +2898,19 @@ public:
    * is probably what we *want* to be computing).
    */
   static CSSPoint GetCumulativeApzCallbackTransform(nsIFrame* aFrame);
+
+  /**
+   * Compute a rect to pre-render in cases where we want to render more of
+   * something than what is visible (usually to support async transformation).
+   * @param aDirtyRect the area that's visible
+   * @param aOverflow the total size of the thing we're rendering
+   * @param aPrerenderSize how large of an area we're willing to render
+   * @return A rectangle that includes |aDirtyRect|, is clamped to |aOverflow|,
+   *         and is no larger than |aPrerenderSize|.
+   */
+  static nsRect ComputePartialPrerenderArea(const nsRect& aDirtyRect,
+                                            const nsRect& aOverflow,
+                                            const nsSize& aPrerenderSize);
 
   /*
    * Returns whether the given document supports being rendered with a

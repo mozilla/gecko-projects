@@ -344,8 +344,7 @@ public:
   // on the main thread before get() can be used.
   nsStyleImageRequest(
       Mode aModeFlags,
-      const nsAString& aURL,
-      already_AddRefed<mozilla::URLExtraData> aExtraData);
+      mozilla::css::ImageValue* aImageValue);
 
   bool Resolve(nsPresContext* aPresContext);
   bool IsResolved() const { return mResolved; }
@@ -1470,21 +1469,17 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleList
 
   already_AddRefed<nsIURI> GetListStyleImageURI() const;
 
-  void GetListStyleType(nsSubstring& aType) const { mCounterStyle->GetStyleName(aType); }
-  mozilla::CounterStyle* GetCounterStyle() const
+  // The following two methods are called from Servo code to maintain
+  // list-style-type off main thread.
+  void SetListStyleType(nsIAtom* aType)
   {
-    return mCounterStyle.get();
+    mListStyleType = aType;
+    mCounterStyle = nullptr;
   }
-  void SetCounterStyle(mozilla::CounterStyle* aStyle)
+  void CopyListStyleTypeFrom(const nsStyleList& aOther)
   {
-    // NB: This function is called off-main-thread during parallel restyle, but
-    // only with builtin styles that use dummy refcounting.
-    MOZ_ASSERT(NS_IsMainThread() || !aStyle->IsDependentStyle());
-    mCounterStyle = aStyle;
-  }
-  void SetListStyleType(nsIAtom* aType, nsPresContext* aPresContext)
-  {
-    SetCounterStyle(aPresContext->CounterStyleManager()->BuildCounterStyle(aType));
+    mListStyleType = aOther.mListStyleType;
+    mCounterStyle = aOther.mCounterStyle;
   }
 
   const nsStyleQuoteValues::QuotePairArray& GetQuotePairs() const;
@@ -1496,8 +1491,16 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleList
 
   uint8_t mListStylePosition;                  // [inherited]
   RefPtr<nsStyleImageRequest> mListStyleImage; // [inherited]
+
+  // mCounterStyle is the actual field for computed list-style-type.
+  // mListStyleType is only used when we are off the main thread, so we
+  // cannot safely construct CounterStyle object. FinishStyle() will
+  // use it to setup mCounterStyle and then clear it. At any time, only
+  // one of the following two fields should be non-null.
+  nsCOMPtr<nsIAtom> mListStyleType;
+  mozilla::CounterStylePtr mCounterStyle;      // [inherited]
+
 private:
-  RefPtr<mozilla::CounterStyle> mCounterStyle; // [inherited]
   RefPtr<nsStyleQuoteValues> mQuotes;   // [inherited]
   nsStyleList& operator=(const nsStyleList& aOther) = delete;
 public:

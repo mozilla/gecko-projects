@@ -15,6 +15,8 @@ const {isWindowIncluded} = require("devtools/shared/layout/utils");
 const specs = require("devtools/shared/specs/storage");
 const { Task } = require("devtools/shared/task");
 
+const DEFAULT_VALUE = "value";
+
 loader.lazyRequireGetter(this, "naturalSortCaseInsensitive",
   "devtools/client/shared/natural-sort", true);
 
@@ -668,6 +670,14 @@ StorageActors.createActor({
     this.editCookie(data);
   }),
 
+  addItem: Task.async(function* (guid) {
+    let doc = this.storageActor.document;
+    let time = new Date().getTime();
+    let expiry = new Date(time + 3600 * 24 * 1000).toGMTString();
+
+    doc.cookie = `${guid}=${DEFAULT_VALUE};expires=${expiry}`;
+  }),
+
   removeItem: Task.async(function* (host, name) {
     let doc = this.storageActor.document;
     this.removeCookie(host, name, doc.nodePrincipal
@@ -995,6 +1005,12 @@ var cookieHelpers = {
         let rowdata = msg.data.args[0];
         return cookieHelpers.editCookie(rowdata);
       }
+      case "createNewCookie": {
+        let host = msg.data.args[0];
+        let guid = msg.data.args[1];
+        let originAttributes = msg.data.args[2];
+        return cookieHelpers.createNewCookie(host, guid, originAttributes);
+      }
       case "removeCookie": {
         let host = msg.data.args[0];
         let name = msg.data.args[1];
@@ -1120,6 +1136,14 @@ function getObjectForLocalOrSessionStorage(type) {
         { name: "name", editable: true },
         { name: "value", editable: true }
       ];
+    }),
+
+    addItem: Task.async(function* (guid, host) {
+      let storage = this.hostVsStores.get(host);
+      if (!storage) {
+        return;
+      }
+      storage.setItem(guid, DEFAULT_VALUE);
     }),
 
     /**

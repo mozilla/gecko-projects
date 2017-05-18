@@ -29,7 +29,7 @@ use font_metrics::FontMetricsProvider;
 #[cfg(feature = "servo")] use logical_geometry::{LogicalMargin, PhysicalSide};
 use logical_geometry::WritingMode;
 use media_queries::Device;
-use parser::{LengthParsingMode, Parse, ParserContext};
+use parser::{PARSING_MODE_DEFAULT, Parse, ParserContext};
 use properties::animated_properties::TransitionProperty;
 #[cfg(feature = "servo")] use servo_config::prefs::PREFS;
 use shared_lock::StylesheetGuards;
@@ -251,6 +251,14 @@ impl LonghandIdSet {
         self.storage[bit / 32] &= !(1 << (bit % 32));
     }
 
+    /// Clear all bits
+    #[inline]
+    pub fn clear(&mut self) {
+        for cell in &mut self.storage {
+            *cell = 0
+        }
+    }
+
     /// Set the corresponding bit of TransitionProperty.
     /// This function will panic if TransitionProperty::All is given.
     pub fn set_transition_property_bit(&mut self, property: &TransitionProperty) {
@@ -379,7 +387,7 @@ impl PropertyDeclarationIdSet {
                                                      url_data,
                                                      error_reporter,
                                                      None,
-                                                     LengthParsingMode::Default,
+                                                     PARSING_MODE_DEFAULT,
                                                      quirks_mode);
                     Parser::new(&css).parse_entirely(|input| {
                         match from_shorthand {
@@ -1946,33 +1954,30 @@ impl ComputedValues {
         ))
     }
 
-    /// https://drafts.csswg.org/css-transforms/#grouping-property-values
-    pub fn get_used_transform_style(&self) -> computed_values::transform_style::T {
+    /// Return true if the effects force the transform style to be Flat
+    pub fn overrides_transform_style(&self) -> bool {
         use computed_values::mix_blend_mode;
-        use computed_values::transform_style;
 
         let effects = self.get_effects();
+        // TODO(gw): Add clip-path, isolation, mask-image, mask-border-source when supported.
+        effects.opacity < 1.0 ||
+           !effects.filter.is_empty() ||
+           !effects.clip.is_auto() ||
+           effects.mix_blend_mode != mix_blend_mode::T::normal
+    }
+
+    /// https://drafts.csswg.org/css-transforms/#grouping-property-values
+    pub fn get_used_transform_style(&self) -> computed_values::transform_style::T {
+        use computed_values::transform_style;
+
         let box_ = self.get_box();
 
-        // TODO(gw): Add clip-path, isolation, mask-image, mask-border-source when supported.
-        if effects.opacity < 1.0 ||
-           !effects.filter.is_empty() ||
-           !effects.clip.is_auto() {
-           effects.mix_blend_mode != mix_blend_mode::T::normal ||
-            return transform_style::T::flat;
+        if self.overrides_transform_style() {
+            transform_style::T::flat
+        } else {
+            // Return the computed value if not overridden by the above exceptions
+            box_.transform_style
         }
-
-        if box_.transform_style == transform_style::T::auto {
-            if box_.transform.0.is_some() {
-                return transform_style::T::flat;
-            }
-            if let Either::First(ref _length) = box_.perspective {
-                return transform_style::T::flat;
-            }
-        }
-
-        // Return the computed value if not overridden by the above exceptions
-        box_.transform_style
     }
 
     /// Whether given this transform value, the compositor would require a
@@ -2604,6 +2609,7 @@ pub fn apply_declarations<'a, F, I>(device: &Device,
         % if category_to_cascade_now == "early":
             let writing_mode = get_writing_mode(context.style.get_inheritedbox());
             context.style.writing_mode = writing_mode;
+
             // It is important that font_size is computed before
             // the late properties (for em units), but after font-family
             // (for the base-font-size dependence for default and keyword font-sizes)
@@ -2657,6 +2663,11 @@ pub fn apply_declarations<'a, F, I>(device: &Device,
                                                  error_reporter);
             % endif
             }
+
+            if is_root_element {
+                let s = context.style.get_font().clone_font_size();
+                context.style.root_font_size = s;
+            }
         % endif
     % endfor
 
@@ -2677,11 +2688,6 @@ pub fn apply_declarations<'a, F, I>(device: &Device,
             svg.fill_arrays();
         }
     % endif
-
-    if is_root_element {
-        let s = style.get_font().clone_font_size();
-        style.root_font_size = s;
-    }
 
     % if product == "servo":
         if seen.contains(LonghandId::FontStyle) ||

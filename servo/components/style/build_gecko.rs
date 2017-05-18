@@ -148,29 +148,46 @@ mod bindings {
             if build_type == BuildType::Debug {
                 builder = builder.clang_arg("-DDEBUG=1").clang_arg("-DJS_DEBUG=1");
             }
-            if cfg!(target_family = "unix") {
+            // cfg!(...) will check the attributes of the Rust target this file
+            // is being compiled for.  We want the attributes of the target that
+            // the clang we're going to invoke is being compiled for, which isn't
+            // necessarily the same thing.  Cargo provides the (yet-to-be-documented)
+            // CARGO_CFG_* environment variables for this purpose.  Those variables
+            // should be used in preference to cfg! checks below.
+            let target_family = env::var("CARGO_CFG_TARGET_FAMILY").unwrap();
+            let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
+            let target_pointer_width = env::var("CARGO_CFG_TARGET_POINTER_WIDTH").unwrap();
+            let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+            let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap();
+
+            if target_family == "unix" {
                 builder = builder.clang_arg("-DOS_POSIX=1");
             }
-            if cfg!(target_os = "linux") {
+            if target_os == "linux" {
                 builder = builder.clang_arg("-DOS_LINUX=1");
-            } else if cfg!(target_os = "solaris") {
+                if target_arch == "x86" {
+                    builder = builder.clang_arg("-m32");
+                } else if target_arch == "x86_64" {
+                    builder = builder.clang_arg("-m64");
+                }
+            } else if target_os == "solaris" {
                 builder = builder.clang_arg("-DOS_SOLARIS=1");
-            } else if cfg!(target_os = "dragonfly") {
+            } else if target_os == "dragonfly" {
                 builder = builder.clang_arg("-DOS_BSD=1").clang_arg("-DOS_DRAGONFLY=1");
-            } else if cfg!(target_os = "freebsd") {
+            } else if target_os == "freebsd" {
                 builder = builder.clang_arg("-DOS_BSD=1").clang_arg("-DOS_FREEBSD=1");
-            } else if cfg!(target_os = "netbsd") {
+            } else if target_os == "netbsd" {
                 builder = builder.clang_arg("-DOS_BSD=1").clang_arg("-DOS_NETBSD=1");
-            } else if cfg!(target_os = "openbsd") {
+            } else if target_os == "openbsd" {
                 builder = builder.clang_arg("-DOS_BSD=1").clang_arg("-DOS_OPENBSD=1");
-            } else if cfg!(target_os = "macos") {
+            } else if target_os == "macos" {
                 builder = builder.clang_arg("-DOS_MACOSX=1")
                     .clang_arg("-stdlib=libc++")
                     // To disable the fixup bindgen applies which adds search
                     // paths from clang command line in order to avoid potential
                     // conflict with -stdlib=libc++.
                     .clang_arg("--target=x86_64-apple-darwin");
-            } else if cfg!(target_env = "msvc") {
+            } else if target_env == "msvc" {
                 builder = builder.clang_arg("-DOS_WIN=1").clang_arg("-DWIN32=1")
                     // For compatibility with MSVC 2015
                     .clang_arg("-fms-compatibility-version=19")
@@ -182,7 +199,7 @@ mod bindings {
                     // thus not enabled by default with a MSVC-compatibile build)
                     // to exclude hidden symbols from the generated file.
                     .clang_arg("-DHAVE_VISIBILITY_HIDDEN_ATTRIBUTE=1");
-                if cfg!(target_pointer_width = "32") {
+                if target_pointer_width == "32" {
                     builder = builder.clang_arg("--target=i686-pc-win32");
                 } else {
                     builder = builder.clang_arg("--target=x86_64-pc-win32");
@@ -241,7 +258,14 @@ mod bindings {
                 return;
             }
         }
-        let mut result = builder.generate().expect("Unable to generate bindings").to_string();
+        let command_line_opts = builder.command_line_flags();
+        let result = builder.generate();
+        let mut result = match result {
+            Ok(bindings) => bindings.to_string(),
+            Err(_) => {
+                panic!("Failed to generate bindings, flags: {:?}", command_line_opts);
+            },
+        };
         for fixup in fixups.iter() {
             result = Regex::new(&format!(r"\b{}\b", fixup.pat)).unwrap().replace_all(&result, fixup.rep.as_str())
                 .into_owned().into();
@@ -310,6 +334,7 @@ mod bindings {
             .include(add_include("mozilla/dom/NameSpaceConstants.h"))
             .include(add_include("mozilla/LookAndFeel.h"))
             .include(add_include("mozilla/ServoBindings.h"))
+            .include(add_include("nsCSSCounterStyleRule.h"))
             .include(add_include("nsCSSFontFaceRule.h"))
             .include(add_include("nsMediaFeatures.h"))
             .include(add_include("nsMediaList.h"))
@@ -325,6 +350,7 @@ mod bindings {
             .bitfield_enum("nsChangeHint")
             .bitfield_enum("nsRestyleHint")
             .constified_enum("UpdateAnimationsTasks")
+            .constified_enum("ParsingMode")
             .parse_callbacks(Box::new(Callbacks));
         let whitelist_vars = [
             "NS_AUTHOR_SPECIFIED_.*",
@@ -338,6 +364,8 @@ mod bindings {
             "BORDER_COLOR_.*",
             "BORDER_STYLE_.*",
             "mozilla::SERVO_PREF_.*",
+            "CSS_PSEUDO_ELEMENT_.*",
+            "SERVO_CSS_PSEUDO_ELEMENT_FLAGS_.*",
             "kNameSpaceID_.*",
             "kGenericFont_.*",
             "kPresContext_.*",
@@ -390,6 +418,7 @@ mod bindings {
             "nsBorderColors",
             "nscolor",
             "nsChangeHint",
+            "nsCSSCounterStyleRule",
             "nsCSSFontFaceRule",
             "nsCSSKeyword",
             "nsCSSPropertyID",
@@ -479,7 +508,7 @@ mod bindings {
             "mozilla::DefaultDelete",
             "mozilla::Side",
             "mozilla::binding_danger::AssertAndSuppressCleanupPolicy",
-            "mozilla::LengthParsingMode",
+            "mozilla::ParsingMode",
             "mozilla::InheritTarget",
         ];
         let opaque_types = [
@@ -662,6 +691,7 @@ mod bindings {
             "RawGeckoURLExtraData",
             "RefPtr",
             "CSSPseudoClassType",
+            "CSSPseudoElementType",
             "TraversalRestyleBehavior",
             "TraversalRootBehavior",
             "ComputedTimingFunction_BeforeFlag",
@@ -678,6 +708,7 @@ mod bindings {
             "StyleBasicShapeType",
             "StyleShapeSource",
             "StyleTransition",
+            "nsCSSCounterStyleRule",
             "nsCSSFontFaceRule",
             "nsCSSKeyword",
             "nsCSSPropertyID",
@@ -689,6 +720,7 @@ mod bindings {
             "nsCursorImage",
             "nsFont",
             "nsIAtom",
+            "nsCompatibility",
             "nsMediaFeature",
             "nsRestyleHint",
             "nsStyleBackground",
@@ -742,7 +774,7 @@ mod bindings {
             "ServoStyleSheet",
             "EffectCompositor_CascadeLevel",
             "UpdateAnimationsTasks",
-            "LengthParsingMode",
+            "ParsingMode",
             "InheritTarget",
             "URLMatchingFunction",
         ];
@@ -831,7 +863,7 @@ mod bindings {
     }
 
     fn generate_atoms() {
-        let script = Path::new(file!()).parent().unwrap().join("binding_tools").join("regen_atoms.py");
+        let script = Path::new(file!()).parent().unwrap().join("gecko").join("regen_atoms.py");
         println!("cargo:rerun-if-changed={}", script.display());
         let status = Command::new(&*PYTHON)
             .arg(&script)

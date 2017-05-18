@@ -12,6 +12,7 @@
 use computed_values::{font_style, font_weight, font_stretch};
 use computed_values::font_family::FamilyName;
 use cssparser::{AtRuleParser, DeclarationListParser, DeclarationParser, Parser};
+use cssparser::SourceLocation;
 #[cfg(feature = "gecko")] use gecko_bindings::structs::CSSFontFaceDescriptors;
 #[cfg(feature = "gecko")] use cssparser::UnicodeRange;
 use parser::{ParserContext, log_css_error, Parse};
@@ -74,8 +75,10 @@ impl ToCss for UrlSource {
 /// Parse the block inside a `@font-face` rule.
 ///
 /// Note that the prelude parsing code lives in the `stylesheets` module.
-pub fn parse_font_face_block(context: &ParserContext, input: &mut Parser) -> FontFaceRuleData {
+pub fn parse_font_face_block(context: &ParserContext, input: &mut Parser, location: SourceLocation)
+    -> FontFaceRuleData {
     let mut rule = FontFaceRuleData::empty();
+    rule.source_location = location;
     {
         let parser = FontFaceRuleParser {
             context: context,
@@ -186,6 +189,8 @@ macro_rules! font_face_descriptors_common {
                 #[$doc]
                 pub $ident: Option<$ty>,
             )*
+            /// Line and column of the @font-face rule source code.
+            pub source_location: SourceLocation,
         }
 
         impl FontFaceRuleData {
@@ -194,14 +199,18 @@ macro_rules! font_face_descriptors_common {
                     $(
                         $ident: None,
                     )*
+                    source_location: SourceLocation {
+                        line: 0,
+                        column: 0,
+                    },
                 }
             }
 
             /// Convert to Gecko types
             #[cfg(feature = "gecko")]
-            pub fn set_descriptors(&self, descriptors: &mut CSSFontFaceDescriptors) {
+            pub fn set_descriptors(self, descriptors: &mut CSSFontFaceDescriptors) {
                 $(
-                    if let Some(ref value) = self.$ident {
+                    if let Some(value) = self.$ident {
                         descriptors.$gecko_ident.set_from(value)
                     }
                 )*

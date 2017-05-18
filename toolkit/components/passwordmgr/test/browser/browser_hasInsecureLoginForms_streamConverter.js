@@ -38,7 +38,6 @@ function registerConverter() {
         loadUsingSystemPrincipal: true,
       });
       channel.originalURI = aRequest.QueryInterface(Ci.nsIChannel).URI;
-      channel.loadInfo.resultPrincipalURI = channel.originalURI;
       channel.loadGroup = aRequest.loadGroup;
       channel.owner = Services.scriptSecurityManager
                               .createCodebasePrincipal(channel.URI, {});
@@ -82,9 +81,9 @@ add_task(async function test_streamConverter() {
 
   await ContentTask.spawn(originalBrowser, null, registerConverter);
 
-  let tab = gBrowser.addTab("http://example.com/browser/toolkit/components/" +
-                            "passwordmgr/test/browser/streamConverter_content.sjs",
-                            { sameProcessAsFrameLoader: originalBrowser.frameLoader });
+  let tab = BrowserTestUtils.addTab(gBrowser, "http://example.com/browser/toolkit/components/" +
+                                   "passwordmgr/test/browser/streamConverter_content.sjs",
+                                   { sameProcessAsFrameLoader: originalBrowser.frameLoader });
   let browser = tab.linkedBrowser;
   await Promise.all([
     BrowserTestUtils.switchTab(gBrowser, tab),

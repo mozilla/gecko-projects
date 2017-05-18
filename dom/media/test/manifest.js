@@ -84,6 +84,7 @@ var gPlayedTests = [
   { name:"seek-short.webm", type:"video/webm", duration:0.23 },
   { name:"gizmo-short.mp4", type:"video/mp4", duration:0.27 },
   { name:"owl-short.mp3", type:"audio/mpeg", duration:0.52 },
+  { name:"very-short.mp3", type:"audio/mpeg", duration:0.07 },
   // Disable vbr.mp3 to see if it reduces the error of AUDCLNT_E_CPUUSAGE_EXCEEDED.
   // See bug 1110922 comment 26.
   //{ name:"vbr.mp3", type:"audio/mpeg", duration:10.0 },
@@ -603,14 +604,6 @@ function getAndroidVersion() {
   return androidVersion;
 }
 
-//Android supports fragmented MP4 playback from 4.3.
-//Fragmented MP4.
-if (getAndroidVersion() >= 18) {
-  gUnseekableTests = gUnseekableTests.concat([
-    { name:"street.mp4", type:"video/mp4" }
-  ]);
-}
-
 // These are files suitable for using with a "new Audio" constructor.
 var gAudioTests = [
   { name:"r11025_s16_c1.wav", type:"audio/x-wav", duration:1.0 },
@@ -775,16 +768,21 @@ var gMetadataTests = [
   },
   { name:"wavedata_u8.wav", tags: { }
   },
-  { name:"flac-s24.flac", tags: {
-      ALBUM:"Seascapes",
-      TITLE:"(La Mer) - II. Jeux de vagues. Allegro",
-      COMPOSER:"Debussy, Claude",
-      TRACKNUMBER:"2/9",
-      DISCNUMBER:"1/1",
-      encoder:"Lavf57.41.100",
-    }
-  },
 ];
+
+// Now Fennec doesn't support flac, so only test it on non-android platforms.
+if (getAndroidVersion() < 0) {
+  gMetadataTests = gMetadataTests.concat([
+    { name:"flac-s24.flac", tags: {
+        ALBUM:"Seascapes",
+        TITLE:"(La Mer) - II. Jeux de vagues. Allegro",
+        COMPOSER:"Debussy, Claude",
+        TRACKNUMBER:"2/9",
+        DISCNUMBER:"1/1",
+        encoder:"Lavf57.41.100",
+      }
+    }]);
+}
 
 // Test files for Encrypted Media Extensions
 var gEMETests = [

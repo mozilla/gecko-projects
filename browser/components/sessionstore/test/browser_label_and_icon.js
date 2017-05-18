@@ -22,7 +22,7 @@ add_task(function setup() {
  */
 add_task(async function test_label_and_icon() {
   // Create a new tab.
-  let tab = gBrowser.addTab("about:robots");
+  let tab = BrowserTestUtils.addTab(gBrowser, "about:robots");
   let browser = tab.linkedBrowser;
   await promiseBrowserLoaded(browser);
 
@@ -33,12 +33,12 @@ add_task(async function test_label_and_icon() {
   browser = null;
 
   // Open a new tab to restore into.
-  tab = gBrowser.addTab("about:blank");
+  tab = BrowserTestUtils.addTab(gBrowser, "about:blank");
   ss.setTabState(tab, state);
   await promiseTabRestoring(tab);
 
   // Check that label and icon are set for the restoring tab.
-  ok(gBrowser.getIcon(tab).startsWith("data:image/png;"), "icon is set");
+  is(gBrowser.getIcon(tab), "chrome://browser/content/robot.ico", "icon is set");
   is(tab.label, "Gort! Klaatu barada nikto!", "label is set");
 
   let serhelper = Cc["@mozilla.org/network/serialization-helper;1"]

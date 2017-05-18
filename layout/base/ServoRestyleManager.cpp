@@ -95,7 +95,11 @@ void
 ServoRestyleManager::PostRebuildAllStyleDataEvent(nsChangeHint aExtraHint,
                                                   nsRestyleHint aRestyleHint)
 {
-  NS_WARNING("stylo: ServoRestyleManager::PostRebuildAllStyleDataEvent not implemented");
+  StyleSet()->ClearDataAndMarkDeviceDirty();
+
+  if (Element* root = mPresContext->Document()->GetRootElement()) {
+    PostRestyleEvent(root, aRestyleHint, aExtraHint);
+  }
 }
 
 /* static */ void

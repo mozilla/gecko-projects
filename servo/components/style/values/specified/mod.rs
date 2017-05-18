@@ -10,12 +10,14 @@ use app_units::Au;
 use context::QuirksMode;
 use cssparser::{self, Parser, Token};
 use euclid::size::Size2D;
+use itoa;
 use parser::{ParserContext, Parse};
 use self::grid::{TrackBreadth as GenericTrackBreadth, TrackSize as GenericTrackSize};
 use self::url::SpecifiedUrl;
 use std::ascii::AsciiExt;
 use std::f32;
 use std::fmt;
+use std::io::Write;
 use style_traits::ToCss;
 use style_traits::values::specified::AllowedNumericType;
 use super::{Auto, CSSFloat, CSSInteger, HasViewportPercentage, Either, None_};
@@ -28,9 +30,8 @@ use values::specified::calc::CalcNode;
 pub use self::align::{AlignItems, AlignJustifyContent, AlignJustifySelf, JustifyItems};
 pub use self::color::Color;
 pub use self::grid::{GridLine, TrackKeyword};
-pub use self::image::{AngleOrCorner, ColorStop, EndingShape as GradientEndingShape, Gradient};
-pub use self::image::{GradientItem, GradientKind, HorizontalDirection, Image, ImageRect, LayerImage};
-pub use self::image::{LengthOrKeyword, LengthOrPercentageOrKeyword, SizeKeyword, VerticalDirection};
+pub use self::image::{ColorStop, EndingShape as GradientEndingShape, Gradient};
+pub use self::image::{GradientItem, GradientKind, Image, ImageRect, ImageLayer};
 pub use self::length::AbsoluteLength;
 pub use self::length::{FontRelativeLength, ViewportPercentageLength, CharacterWidth, Length, CalcLengthOrPercentage};
 pub use self::length::{Percentage, LengthOrNone, LengthOrNumber, LengthOrPercentage, LengthOrPercentageOrAuto};
@@ -86,15 +87,89 @@ pub struct CSSColor {
 
 impl Parse for CSSColor {
     fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
+        Self::parse_quirky(context, input, AllowQuirks::No)
+    }
+}
+
+impl CSSColor {
+    /// Parse a color, with quirks.
+    ///
+    /// https://quirks.spec.whatwg.org/#the-hashless-hex-color-quirk
+    pub fn parse_quirky(context: &ParserContext,
+                        input: &mut Parser,
+                        allow_quirks: AllowQuirks)
+                        -> Result<Self, ()> {
         let start_position = input.position();
         let authored = match input.next() {
             Ok(Token::Ident(s)) => Some(s.into_owned().into_boxed_str()),
             _ => None,
         };
         input.reset(start_position);
+        if let Ok(parsed) = input.try(|i| Parse::parse(context, i)) {
+            return Ok(CSSColor {
+                parsed: parsed,
+                authored: authored,
+            });
+        }
+        if !allow_quirks.allowed(context.quirks_mode) {
+            return Err(());
+        }
+        let (number, dimension) = match input.next()? {
+            Token::Number(number) => {
+                (number, None)
+            },
+            Token::Dimension(number, dimension) => {
+                (number, Some(dimension))
+            },
+            Token::Ident(ident) => {
+                if ident.len() != 3 && ident.len() != 6 {
+                    return Err(());
+                }
+                return cssparser::Color::parse_hash(ident.as_bytes()).map(|color| {
+                    Self {
+                        parsed: color.into(),
+                        authored: None
+                    }
+                });
+            }
+            _ => {
+                return Err(());
+            },
+        };
+        let value = number.int_value.ok_or(())?;
+        if value < 0 {
+            return Err(());
+        }
+        let length = if value <= 9 {
+            1
+        } else if value <= 99 {
+            2
+        } else if value <= 999 {
+            3
+        } else if value <= 9999 {
+            4
+        } else if value <= 99999 {
+            5
+        } else if value <= 999999 {
+            6
+        } else {
+            return Err(())
+        };
+        let total = length + dimension.as_ref().map_or(0, |d| d.len());
+        if total > 6 {
+            return Err(());
+        }
+        let mut serialization = [b'0'; 6];
+        let space_padding = 6 - total;
+        let mut written = space_padding;
+        written += itoa::write(&mut serialization[written..], value).unwrap();
+        if let Some(dimension) = dimension {
+            written += (&mut serialization[written..]).write(dimension.as_bytes()).unwrap();
+        }
+        debug_assert!(written == 6);
         Ok(CSSColor {
-            parsed: try!(Parse::parse(context, input)),
-            authored: authored,
+            parsed: cssparser::Color::parse_hash(&serialization).map(From::from)?,
+            authored: None,
         })
     }
 }
@@ -539,6 +614,28 @@ impl Time {
             was_calc: true,
         }
     }
+
+    fn parse_with_clamping_mode(context: &ParserContext,
+                                input: &mut Parser,
+                                clamping_mode: AllowedNumericType) -> Result<Self, ()> {
+        match input.next() {
+            Ok(Token::Dimension(ref value, ref unit)) if clamping_mode.is_ok(value.value) => {
+                Time::parse_dimension(value.value, &unit, /* from_calc = */ false)
+            }
+            Ok(Token::Function(ref name)) if name.eq_ignore_ascii_case("calc") => {
+                match input.parse_nested_block(|i| CalcNode::parse_time(context, i)) {
+                    Ok(time) if clamping_mode.is_ok(time.seconds) => Ok(time),
+                    _ => Err(()),
+                }
+            }
+            _ => Err(())
+        }
+    }
+
+    /// Parse <time> that values are non-negative.
+    pub fn parse_non_negative(context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
+        Self::parse_with_clamping_mode(context, input, AllowedNumericType::NonNegative)
+    }
 }
 
 impl ToComputedValue for Time {
@@ -558,15 +655,7 @@ impl ToComputedValue for Time {
 
 impl Parse for Time {
     fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
-        match input.next() {
-            Ok(Token::Dimension(ref value, ref unit)) => {
-                Time::parse_dimension(value.value, &unit, /* from_calc = */ false)
-            }
-            Ok(Token::Function(ref name)) if name.eq_ignore_ascii_case("calc") => {
-                input.parse_nested_block(|i| CalcNode::parse_time(context, i))
-            }
-            _ => Err(())
-        }
+        Self::parse_with_clamping_mode(context, input, AllowedNumericType::All)
     }
 }
 
@@ -618,12 +707,20 @@ impl Number {
 
     #[allow(missing_docs)]
     pub fn parse_non_negative(context: &ParserContext, input: &mut Parser) -> Result<Number, ()> {
-        parse_number_with_clamping_mode(context, input, AllowedNumericType::NonNegative)
+        if context.parsing_mode.allows_all_numeric_values() {
+            parse_number(context, input)
+        } else {
+            parse_number_with_clamping_mode(context, input, AllowedNumericType::NonNegative)
+        }
     }
 
     #[allow(missing_docs)]
     pub fn parse_at_least_one(context: &ParserContext, input: &mut Parser) -> Result<Number, ()> {
-        parse_number_with_clamping_mode(context, input, AllowedNumericType::AtLeastOne)
+        if context.parsing_mode.allows_all_numeric_values() {
+            parse_number(context, input)
+        } else {
+            parse_number_with_clamping_mode(context, input, AllowedNumericType::AtLeastOne)
+        }
     }
 }
 
@@ -659,7 +756,7 @@ impl ToCss for Number {
 
 /// <number-percentage>
 /// Accepts only non-negative numbers.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
 pub enum NumberOrPercentage {
@@ -669,13 +766,27 @@ pub enum NumberOrPercentage {
 
 no_viewport_percentage!(NumberOrPercentage);
 
-impl Parse for NumberOrPercentage {
-    fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
-        if let Ok(per) = input.try(Percentage::parse_non_negative) {
+impl NumberOrPercentage {
+    fn parse_with_clamping_mode(context: &ParserContext,
+                                input: &mut Parser,
+                                type_: AllowedNumericType)
+                                -> Result<Self, ()> {
+        if let Ok(per) = input.try(|i| Percentage::parse_with_clamping_mode(i, type_)) {
             return Ok(NumberOrPercentage::Percentage(per));
         }
 
-        Number::parse_non_negative(context, input).map(NumberOrPercentage::Number)
+        parse_number_with_clamping_mode(context, input, type_).map(NumberOrPercentage::Number)
+    }
+
+    /// Parse a non-negative number or percentage.
+    pub fn parse_non_negative(context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
+        Self::parse_with_clamping_mode(context, input, AllowedNumericType::NonNegative)
+    }
+}
+
+impl Parse for NumberOrPercentage {
+    fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
+        Self::parse_with_clamping_mode(context, input, AllowedNumericType::All)
     }
 }
 
@@ -1197,13 +1308,22 @@ impl ToComputedValue for ClipRect {
 
 impl Parse for ClipRect {
     fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
-        use values::specified::{AllowQuirks, Length};
+        Self::parse_quirky(context, input, AllowQuirks::No)
+    }
+}
 
-        fn parse_argument(context: &ParserContext, input: &mut Parser) -> Result<Option<Length>, ()> {
+impl ClipRect {
+    /// Parses a rect(<top>, <left>, <bottom>, <right>), allowing quirks.
+    pub fn parse_quirky(context: &ParserContext, input: &mut Parser,
+                    allow_quirks: AllowQuirks) -> Result<Self, ()> {
+        use values::specified::Length;
+
+        fn parse_argument(context: &ParserContext, input: &mut Parser,
+                          allow_quirks: AllowQuirks) -> Result<Option<Length>, ()> {
             if input.try(|input| input.expect_ident_matching("auto")).is_ok() {
                 Ok(None)
             } else {
-                Length::parse_quirky(context, input, AllowQuirks::Yes).map(Some)
+                Length::parse_quirky(context, input, allow_quirks).map(Some)
             }
         }
 
@@ -1212,21 +1332,21 @@ impl Parse for ClipRect {
         }
 
         input.parse_nested_block(|input| {
-            let top = try!(parse_argument(context, input));
+            let top = try!(parse_argument(context, input, allow_quirks));
             let right;
             let bottom;
             let left;
 
             if input.try(|input| input.expect_comma()).is_ok() {
-                right = try!(parse_argument(context, input));
+                right = try!(parse_argument(context, input, allow_quirks));
                 try!(input.expect_comma());
-                bottom = try!(parse_argument(context, input));
+                bottom = try!(parse_argument(context, input, allow_quirks));
                 try!(input.expect_comma());
-                left = try!(parse_argument(context, input));
+                left = try!(parse_argument(context, input, allow_quirks));
             } else {
-                right = try!(parse_argument(context, input));
-                bottom = try!(parse_argument(context, input));
-                left = try!(parse_argument(context, input));
+                right = try!(parse_argument(context, input, allow_quirks));
+                bottom = try!(parse_argument(context, input, allow_quirks));
+                left = try!(parse_argument(context, input, allow_quirks));
             }
             Ok(ClipRect {
                 top: top,
@@ -1240,6 +1360,18 @@ impl Parse for ClipRect {
 
 /// rect(...) | auto
 pub type ClipRectOrAuto = Either<ClipRect, Auto>;
+
+impl ClipRectOrAuto {
+    /// Parses a ClipRect or Auto, allowing quirks.
+    pub fn parse_quirky(context: &ParserContext, input: &mut Parser,
+                        allow_quirks: AllowQuirks) -> Result<Self, ()> {
+        if let Ok(v) = input.try(|i| ClipRect::parse_quirky(context, i, allow_quirks)) {
+            Ok(Either::First(v))
+        } else {
+            Auto::parse(context, input).map(Either::Second)
+        }
+    }
+}
 
 /// <color> | auto
 pub type ColorOrAuto = Either<CSSColor, Auto>;

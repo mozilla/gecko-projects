@@ -35,7 +35,7 @@
 #include "mozilla/dom/MemoryReportRequest.h"
 #include "mozilla/dom/ProcessGlobal.h"
 #include "mozilla/dom/PushNotifier.h"
-#include "mozilla/dom/Storage.h"
+#include "mozilla/dom/LocalStorage.h"
 #include "mozilla/dom/StorageIPC.h"
 #include "mozilla/dom/TabGroup.h"
 #include "mozilla/dom/workers/ServiceWorkerManager.h"
@@ -59,6 +59,7 @@
 #include "mozilla/layers/ContentProcessController.h"
 #include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layout/RenderFrameChild.h"
+#include "mozilla/loader/ScriptCacheActors.h"
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/net/CaptivePortalService.h"
 #include "mozilla/Omnijar.h"
@@ -235,6 +236,7 @@ using namespace mozilla::widget;
 using namespace mozilla::system;
 #endif
 using namespace mozilla::widget;
+using mozilla::loader::PScriptCacheChild;
 
 namespace mozilla {
 
@@ -1820,6 +1822,31 @@ ContentChild::RecvPTestShellConstructor(PTestShellChild* actor)
   return IPC_OK();
 }
 
+PScriptCacheChild*
+ContentChild::AllocPScriptCacheChild(const FileDescOrError& cacheFile, const bool& wantCacheData)
+{
+  return new loader::ScriptCacheChild();
+}
+
+bool
+ContentChild::DeallocPScriptCacheChild(PScriptCacheChild* cache)
+{
+  delete static_cast<loader::ScriptCacheChild*>(cache);
+  return true;
+}
+
+mozilla::ipc::IPCResult
+ContentChild::RecvPScriptCacheConstructor(PScriptCacheChild* actor, const FileDescOrError& cacheFile, const bool& wantCacheData)
+{
+  Maybe<FileDescriptor> fd;
+  if (cacheFile.type() == cacheFile.TFileDescriptor) {
+    fd.emplace(cacheFile.get_FileDescriptor());
+  }
+
+  static_cast<loader::ScriptCacheChild*>(actor)->Init(fd, wantCacheData);
+  return IPC_OK();
+}
+
 PNeckoChild*
 ContentChild::AllocPNeckoChild()
 {
@@ -3158,9 +3185,8 @@ ContentChild::RecvDispatchLocalStorageChange(const nsString& aDocumentURI,
                                              const IPC::Principal& aPrincipal,
                                              const bool& aIsPrivate)
 {
-  Storage::DispatchStorageEvent(Storage::LocalStorage,
-                                aDocumentURI, aKey, aOldValue, aNewValue,
-                                aPrincipal, aIsPrivate, nullptr, true);
+  LocalStorage::DispatchStorageEvent(aDocumentURI, aKey, aOldValue, aNewValue,
+                                     aPrincipal, aIsPrivate, nullptr, true);
   return IPC_OK();
 }
 

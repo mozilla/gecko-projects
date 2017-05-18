@@ -154,6 +154,11 @@ static uint32_t gNumberOfWidgetsNeedingEventThread = 0;
 
 static bool sIsTabletPointerActivated = false;
 
+static uint32_t sUniqueKeyEventId = 0;
+
+static NSMutableDictionary* sNativeKeyEventsMap =
+  [NSMutableDictionary dictionary];
+
 @interface ChildView(Private)
 
 // sets up our view, attaching it to its owning gecko view
@@ -207,6 +212,8 @@ static bool sIsTabletPointerActivated = false;
 
 - (BOOL)inactiveWindowAcceptsMouseEvent:(NSEvent*)aEvent;
 - (void)updateWindowDraggableState;
+
+- (bool)beginOrEndGestureForEventPhase:(NSEvent*)aEvent;
 
 - (bool)shouldConsiderStartingSwipeFromEvent:(NSEvent*)aEvent;
 
@@ -1245,6 +1252,50 @@ static NSMenuItem* NativeMenuItemWithLocation(NSMenu* menubar, NSString* locatio
   }
 
   return nil;
+}
+
+bool
+nsChildView::SendEventToNativeMenuSystem(NSEvent* aEvent)
+{
+  bool handled = false;
+  nsCocoaWindow* widget = GetXULWindowWidget();
+  if (widget) {
+    nsMenuBarX* mb = widget->GetMenuBar();
+    if (mb) {
+      // Check if main menu wants to handle the event.
+      handled = mb->PerformKeyEquivalent(aEvent);
+    }
+  }
+
+  if (!handled && sApplicationMenu) {
+    // Check if application menu wants to handle the event.
+    handled = [sApplicationMenu performKeyEquivalent:aEvent];
+  }
+
+  return handled;
+}
+
+void
+nsChildView::PostHandleKeyEvent(mozilla::WidgetKeyboardEvent* aEvent)
+{
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  // We always allow keyboard events to propagate to keyDown: but if they are
+  // not handled we give menu items a chance to act. This allows for handling of
+  // custom shortcuts. Note that existing shortcuts cannot be reassigned yet and
+  // will have been handled by keyDown: before we get here.
+  NSEvent* cocoaEvent =
+    [sNativeKeyEventsMap objectForKey:@(aEvent->mUniqueId)];
+  [sNativeKeyEventsMap removeObjectForKey:@(aEvent->mUniqueId)];
+  if (!cocoaEvent) {
+    return;
+  }
+
+  if (SendEventToNativeMenuSystem(cocoaEvent)) {
+    aEvent->PreventDefault();
+  }
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
 // Used for testing native menu system structure and event handling.
@@ -4179,8 +4230,10 @@ NSEvent* gLastDragMouseDownEvent = nil;
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  if (!anEvent || !mGeckoChild)
+  if (!anEvent || !mGeckoChild ||
+      [self beginOrEndGestureForEventPhase:anEvent]) {
     return;
+  }
 
   nsAutoRetainCocoaObject kungFuDeathGrip(self);
 
@@ -4209,22 +4262,14 @@ NSEvent* gLastDragMouseDownEvent = nil;
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
-- (void)beginGestureWithEvent:(NSEvent *)anEvent
-{
-  if (!anEvent)
-    return;
-
-  mGestureState = eGestureState_StartGesture;
-  mCumulativeMagnification = 0;
-  mCumulativeRotation = 0.0;
-}
-
 - (void)magnifyWithEvent:(NSEvent *)anEvent
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  if (!anEvent || !mGeckoChild)
+  if (!anEvent || !mGeckoChild ||
+      [self beginOrEndGestureForEventPhase:anEvent]) {
     return;
+  }
 
   nsAutoRetainCocoaObject kungFuDeathGrip(self);
 
@@ -4247,16 +4292,41 @@ NSEvent* gLastDragMouseDownEvent = nil;
     return;
   }
 
-  // Setup the event.
-  WidgetSimpleGestureEvent geckoEvent(true, msg, mGeckoChild);
-  geckoEvent.mDelta = deltaZ;
-  [self convertCocoaMouseEvent:anEvent toGeckoEvent:&geckoEvent];
+  // This sends the pinch gesture value as a fake wheel event that has the
+  // control key pressed so that pages can implement custom pinch gesture
+  // handling. It may seem strange that this doesn't use a wheel event with
+  // the deltaZ property set, but this matches Chrome's behavior as described
+  // at https://code.google.com/p/chromium/issues/detail?id=289887
+  //
+  // The intent of the formula below is to produce numbers similar to Chrome's
+  // implementation of this feature. Chrome implements deltaY using the formula
+  // "-100 * log(1 + [event magnification])" which is unfortunately incorrect.
+  // All deltas for a single pinch gesture should sum to 0 if the start and end
+  // of a pinch gesture end up in the same place. This doesn't happen in Chrome
+  // because they followed Apple's misleading documentation, which implies that
+  // "1 + [event magnification]" is the scale factor. The scale factor is
+  // instead "pow(ratio, [event magnification])" so "[event magnification]" is
+  // already in log space.
+  //
+  // The multiplication by the backing scale factor below counteracts the
+  // division by the backing scale factor in WheelEvent.
+  WidgetWheelEvent geckoWheelEvent(true, EventMessage::eWheel, mGeckoChild);
+  [self convertCocoaMouseEvent:anEvent toGeckoEvent:&geckoWheelEvent];
+  double backingScale = mGeckoChild->BackingScaleFactor();
+  geckoWheelEvent.mDeltaY = -100.0 * [anEvent magnification] * backingScale;
+  geckoWheelEvent.mModifiers |= MODIFIER_CONTROL;
+  mGeckoChild->DispatchWindowEvent(geckoWheelEvent);
 
-  // Send the event.
-  mGeckoChild->DispatchWindowEvent(geckoEvent);
+  // If the fake wheel event wasn't stopped, then send a normal magnify event.
+  if (!geckoWheelEvent.mFlags.mDefaultPrevented) {
+    WidgetSimpleGestureEvent geckoEvent(true, msg, mGeckoChild);
+    geckoEvent.mDelta = deltaZ;
+    [self convertCocoaMouseEvent:anEvent toGeckoEvent:&geckoEvent];
+    mGeckoChild->DispatchWindowEvent(geckoEvent);
 
-  // Keep track of the cumulative magnification for the final "magnify" event.
-  mCumulativeMagnification += deltaZ;
+    // Keep track of the cumulative magnification for the final "magnify" event.
+    mCumulativeMagnification += deltaZ;
+  }
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
@@ -4265,7 +4335,8 @@ NSEvent* gLastDragMouseDownEvent = nil;
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  if (!anEvent || !mGeckoChild) {
+  if (!anEvent || !mGeckoChild ||
+      [self beginOrEndGestureForEventPhase:anEvent]) {
     return;
   }
 
@@ -4289,8 +4360,10 @@ NSEvent* gLastDragMouseDownEvent = nil;
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  if (!anEvent || !mGeckoChild)
+  if (!anEvent || !mGeckoChild ||
+      [self beginOrEndGestureForEventPhase:anEvent]) {
     return;
+  }
 
   nsAutoRetainCocoaObject kungFuDeathGrip(self);
 
@@ -4330,6 +4403,50 @@ NSEvent* gLastDragMouseDownEvent = nil;
   mCumulativeRotation += rotation;
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
+// `beginGestureWithEvent` and `endGestureWithEvent` are not called for
+// applications that link against the macOS 10.11 or later SDK when we're
+// running on macOS 10.11 or later. For compatibility with all supported macOS
+// versions, we have to call {begin,end}GestureWithEvent ourselves based on
+// the event phase when we're handling gestures.
+- (bool)beginOrEndGestureForEventPhase:(NSEvent*)aEvent
+{
+  if (!aEvent) {
+    return false;
+  }
+
+  bool usingElCapitanOrLaterSDK = true;
+#if !defined(MAC_OS_X_VERSION_10_11) || \
+    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_11
+  usingElCapitanOrLaterSDK = false;
+#endif
+
+  if (nsCocoaFeatures::OnElCapitanOrLater() && usingElCapitanOrLaterSDK) {
+    if (aEvent.phase == NSEventPhaseBegan) {
+      [self beginGestureWithEvent:aEvent];
+      return true;
+    }
+
+    if (aEvent.phase == NSEventPhaseEnded ||
+        aEvent.phase == NSEventPhaseCancelled) {
+      [self endGestureWithEvent:aEvent];
+      return true;
+    }
+  }
+
+  return false;
+}
+
+- (void)beginGestureWithEvent:(NSEvent*)aEvent
+{
+  if (!aEvent) {
+    return;
+  }
+
+  mGestureState = eGestureState_StartGesture;
+  mCumulativeMagnification = 0;
+  mCumulativeRotation = 0.0;
 }
 
 - (void)endGestureWithEvent:(NSEvent *)anEvent
@@ -5481,15 +5598,20 @@ GetIntegerDeltaForEvent(NSEvent* aEvent)
 #endif // #if !defined(RELEASE_OR_BETA) || defined(DEBUG)
 
   nsAutoRetainCocoaObject kungFuDeathGrip(self);
-  bool handled = false;
-  if (mGeckoChild && mTextInputHandler) {
-    handled = mTextInputHandler->HandleKeyDownEvent(theEvent);
-  }
-
-  // We always allow keyboard events to propagate to keyDown: but if they are not
-  // handled we give special Application menu items a chance to act.
-  if (!handled && sApplicationMenu) {
-    [sApplicationMenu performKeyEquivalent:theEvent];
+  if (mGeckoChild) {
+    if (mTextInputHandler) {
+      sUniqueKeyEventId++;
+      [sNativeKeyEventsMap setObject:theEvent forKey:@(sUniqueKeyEventId)];
+      // Purge old native events, in case we're still holding on to them. We
+      // keep at most 10 references to 10 different native events.
+      [sNativeKeyEventsMap removeObjectForKey:@(sUniqueKeyEventId - 10)];
+      mTextInputHandler->HandleKeyDownEvent(theEvent, sUniqueKeyEventId);
+    } else {
+      // There was no text input handler. Offer the event to the native menu
+      // system to check if there are any registered custom shortcuts for this
+      // event.
+      mGeckoChild->SendEventToNativeMenuSystem(theEvent);
+    }
   }
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
@@ -6417,6 +6539,10 @@ nsChildView::GetSelectionAsPlaintext(nsAString& aResult)
 }
 
 #endif /* ACCESSIBILITY */
+
++ (uint32_t)sUniqueKeyEventId { return sUniqueKeyEventId; }
+
++ (NSMutableDictionary*)sNativeKeyEventsMap { return sNativeKeyEventsMap; }
 
 @end
 

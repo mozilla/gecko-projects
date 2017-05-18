@@ -15,7 +15,7 @@ use fnv::FnvHashMap;
 use restyle_hints::ElementSnapshot;
 use selector_parser::{ElementExt, PseudoElementCascadeType, SelectorParser};
 use selectors::{Element, MatchAttrGeneric};
-use selectors::matching::StyleRelations;
+use selectors::matching::{MatchingContext, MatchingMode};
 use selectors::parser::{AttrSelector, SelectorMethods};
 use selectors::visitor::SelectorVisitor;
 use std::borrow::Cow;
@@ -49,6 +49,14 @@ pub enum PseudoElement {
     ServoAnonymousBlock,
     ServoInlineBlockWrapper,
     ServoInlineAbsolute,
+}
+
+impl ::selectors::parser::PseudoElement for PseudoElement {
+    type Impl = SelectorImpl;
+
+    fn supports_pseudo_class(&self, _: &NonTSPseudoClass) -> bool {
+        false
+    }
 }
 
 impl ToCss for PseudoElement {
@@ -311,7 +319,8 @@ impl<'a> ::selectors::Parser for SelectorParser<'a> {
         Ok(pseudo_class)
     }
 
-    fn parse_pseudo_element(&self, name: Cow<str>) -> Result<PseudoElement, ()> {
+    fn parse_pseudo_element(&self, name: Cow<str>)
+                            -> Result<PseudoElement, ()> {
         use self::PseudoElement::*;
         let pseudo_element = match_ignore_ascii_case! { &name,
             "before" => Before,
@@ -564,8 +573,9 @@ impl MatchAttrGeneric for ServoElementSnapshot {
 
 impl<E: Element<Impl=SelectorImpl> + Debug> ElementExt for E {
     fn is_link(&self) -> bool {
+        let mut context = MatchingContext::new(MatchingMode::Normal, None);
         self.match_non_ts_pseudo_class(&NonTSPseudoClass::AnyLink,
-                                       &mut StyleRelations::empty(),
+                                       &mut context,
                                        &mut |_, _| {})
     }
 

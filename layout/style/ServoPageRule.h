@@ -32,7 +32,7 @@ protected:
   nsresult SetCSSDeclaration(DeclarationBlock* aDecl) final;
   nsIDocument* DocToUpdate() final;
   void GetCSSParsingEnvironment(CSSParsingEnvironment& aCSSParseEnv) final;
-  URLExtraData* GetURLData() const final;
+  nsDOMCSSDeclaration::ServoCSSParsingEnvironment GetServoCSSParsingEnvironment() const final;
 
 private:
   // For accessing the constructor.
@@ -51,7 +51,8 @@ private:
 class ServoPageRule final : public dom::CSSPageRule
 {
 public:
-  explicit ServoPageRule(RefPtr<RawServoPageRule> aRawRule);
+  ServoPageRule(RefPtr<RawServoPageRule> aRawRule,
+                uint32_t aLine, uint32_t aColumn);
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(

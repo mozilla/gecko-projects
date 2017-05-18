@@ -22,7 +22,7 @@ use net_traits::image::base::{Image, PixelFormat};
 use profile_traits::time::{self, ProfilerCategory, profile};
 use script_traits::{AnimationState, AnimationTickType, ConstellationControlMsg};
 use script_traits::{ConstellationMsg, DevicePixel, LayoutControlMsg, LoadData, MouseButton};
-use script_traits::{MouseEventType, StackingContextScrollState};
+use script_traits::{MouseEventType, ScrollState};
 use script_traits::{TouchpadPressurePhase, TouchEventType, TouchId, WindowSizeData, WindowSizeType};
 use script_traits::CompositorEvent::{self, MouseMoveEvent, MouseButtonEvent, TouchEvent, TouchpadPressureEvent};
 use servo_config::opts;
@@ -39,7 +39,7 @@ use style_traits::viewport::ViewportConstraints;
 use time::{precise_time_ns, precise_time_s};
 use touch::{TouchHandler, TouchAction};
 use webrender;
-use webrender_traits::{self, ClipId, LayoutPoint, ScrollEventPhase, ScrollLocation};
+use webrender_traits::{self, ClipId, LayoutPoint, ScrollEventPhase, ScrollLocation, ScrollClamping};
 use windowing::{self, MouseWindowEvent, WindowEvent, WindowMethods, WindowNavigateMsg};
 
 #[derive(Debug, PartialEq)]
@@ -777,7 +777,8 @@ impl<Window: WindowMethods> IOCompositor<Window> {
     }
 
     fn scroll_fragment_to_point(&mut self, id: ClipId, point: Point2D<f32>) {
-        self.webrender_api.scroll_node_with_id(LayoutPoint::from_untyped(&point), id);
+        self.webrender_api.scroll_node_with_id(LayoutPoint::from_untyped(&point), id,
+                                               ScrollClamping::ToContentBounds);
     }
 
     fn handle_window_message(&mut self, event: WindowEvent) {
@@ -903,7 +904,8 @@ impl<Window: WindowMethods> IOCompositor<Window> {
         match ServoUrl::parse(&url_string) {
             Ok(url) => {
                 let msg = match self.root_pipeline {
-                    Some(ref pipeline) => ConstellationMsg::LoadUrl(pipeline.id, LoadData::new(url, None, None)),
+                    Some(ref pipeline) =>
+                        ConstellationMsg::LoadUrl(pipeline.id, LoadData::new(url, Some(pipeline.id), None, None)),
                     None => ConstellationMsg::InitLoadUrl(url)
                 };
                 if let Err(e) = self.constellation_chan.send(msg) {
@@ -1366,29 +1368,26 @@ impl<Window: WindowMethods> IOCompositor<Window> {
     }
 
     fn send_viewport_rects(&self) {
-        let mut stacking_context_scroll_states_per_pipeline = HashMap::new();
+        let mut scroll_states_per_pipeline = HashMap::new();
         for scroll_layer_state in self.webrender_api.get_scroll_node_state() {
             if scroll_layer_state.id.external_id().is_none() &&
-               scroll_layer_state.id.is_root_scroll_node() {
+               !scroll_layer_state.id.is_root_scroll_node() {
                 continue;
             }
 
-            let stacking_context_scroll_state = StackingContextScrollState {
+            let scroll_state = ScrollState {
                 scroll_root_id: scroll_layer_state.id,
                 scroll_offset: scroll_layer_state.scroll_offset.to_untyped(),
             };
 
-            stacking_context_scroll_states_per_pipeline
-                .entry(scroll_layer_state.id.pipeline_id())
-                .or_insert(vec![])
-                .push(stacking_context_scroll_state);
+            scroll_states_per_pipeline.entry(scroll_layer_state.id.pipeline_id())
+                                     .or_insert(vec![])
+                                     .push(scroll_state);
         }
 
-        for (pipeline_id, stacking_context_scroll_states) in
-                stacking_context_scroll_states_per_pipeline {
+        for (pipeline_id, scroll_states) in scroll_states_per_pipeline {
             if let Some(pipeline) = self.pipeline(pipeline_id.from_webrender()) {
-                let msg = LayoutControlMsg::SetStackingContextScrollStates(
-                    stacking_context_scroll_states);
+                let msg = LayoutControlMsg::SetScrollStates(scroll_states);
                 let _ = pipeline.layout_chan.send(msg);
             }
         }

@@ -39,6 +39,7 @@
 #include "nsIURI.h"
 #include "nsIDocument.h"
 #include <algorithm>
+#include "ImageLoader.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -572,7 +573,8 @@ nsStyleOutline::CalcDifference(const nsStyleOutline& aNewData) const
       (mActualOutlineWidth > 0 &&
        mOutlineOffset != aNewData.mOutlineOffset)) {
     return nsChangeHint_UpdateOverflow |
-           nsChangeHint_SchedulePaint;
+           nsChangeHint_SchedulePaint |
+           nsChangeHint_RepaintFrame;
   }
 
   if (mOutlineStyle != aNewData.mOutlineStyle ||
@@ -601,9 +603,7 @@ nsStyleList::nsStyleList(const nsPresContext* aContext)
 {
   MOZ_COUNT_CTOR(nsStyleList);
   if (aContext->StyleSet()->IsServo()) {
-    // FIXME: bug 1328319.
-    mCounterStyle =
-      CounterStyleManager::GetBuiltinStyle(NS_STYLE_LIST_STYLE_DISC);
+    mListStyleType = nsGkAtoms::disc;
   } else {
     mCounterStyle = aContext->
       CounterStyleManager()->BuildCounterStyle(nsGkAtoms::disc);
@@ -619,6 +619,7 @@ nsStyleList::~nsStyleList()
 nsStyleList::nsStyleList(const nsStyleList& aSource)
   : mListStylePosition(aSource.mListStylePosition)
   , mListStyleImage(aSource.mListStyleImage)
+  , mListStyleType(aSource.mListStyleType)
   , mCounterStyle(aSource.mCounterStyle)
   , mQuotes(aSource.mQuotes)
   , mImageRegion(aSource.mImageRegion)
@@ -634,6 +635,12 @@ nsStyleList::FinishStyle(nsPresContext* aPresContext)
 
   if (mListStyleImage && !mListStyleImage->IsResolved()) {
     mListStyleImage->Resolve(aPresContext);
+  }
+  if (mListStyleType) {
+    MOZ_ASSERT(!mCounterStyle);
+    mCounterStyle = aPresContext->
+      CounterStyleManager()->BuildCounterStyle(mListStyleType);
+    mListStyleType = nullptr;
   }
 }
 
@@ -702,7 +709,8 @@ nsStyleList::CalcDifference(const nsStyleList& aNewData) const
     return nsChangeHint_ReconstructFrame;
   }
   if (DefinitelyEqualImages(mListStyleImage, aNewData.mListStyleImage) &&
-      mCounterStyle == aNewData.mCounterStyle) {
+      (mCounterStyle == aNewData.mCounterStyle ||
+       mListStyleType != aNewData.mListStyleType)) {
     if (mImageRegion.IsEqualInterior(aNewData.mImageRegion)) {
       return nsChangeHint(0);
     }
@@ -2011,9 +2019,8 @@ nsStyleImageRequest::nsStyleImageRequest(Mode aModeFlags,
 
 nsStyleImageRequest::nsStyleImageRequest(
     Mode aModeFlags,
-    const nsAString& aURL,
-    already_AddRefed<URLExtraData> aExtraData)
-  : mImageValue(new css::ImageValue(aURL, Move(aExtraData)))
+    mozilla::css::ImageValue* aImageValue)
+  : mImageValue(aImageValue)
   , mModeFlags(aModeFlags)
   , mResolved(false)
 {
@@ -2030,13 +2037,16 @@ nsStyleImageRequest::~nsStyleImageRequest()
                                          mRequestProxy.forget(),
                                          mImageValue.forget(),
                                          mImageTracker.forget());
-    if (NS_IsMainThread() || !IsResolved()) {
+    if (NS_IsMainThread()) {
       task->Run();
     } else {
-      MOZ_ASSERT(IsResolved() == bool(mDocGroup),
-                 "We forgot to cache mDocGroup in Resolve()?");
-      mDocGroup->Dispatch("StyleImageRequestCleanupTask",
-                          TaskCategory::Other, task.forget());
+      if (mDocGroup) {
+        mDocGroup->Dispatch("StyleImageRequestCleanupTask",
+                            TaskCategory::Other, task.forget());
+      } else {
+        // if Resolve was not called at some point, mDocGroup is not set.
+        NS_DispatchToMainThread(task.forget());
+      }
     }
   }
 
@@ -2068,10 +2078,6 @@ nsStyleImageRequest::Resolve(nsPresContext* aPresContext)
 
   mDocGroup = doc->GetDocGroup();
 
-  // For now, just have unique nsCSSValue/ImageValue objects.  We should
-  // really store the ImageValue on the Servo specified value, so that we can
-  // share imgRequestProxys that come from the same rule in the same
-  // document.
   mImageValue->Initialize(doc);
 
   nsCSSValue value;

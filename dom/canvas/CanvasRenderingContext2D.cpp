@@ -2811,7 +2811,8 @@ CreateDeclarationForServo(nsCSSPropertyID aProperty,
     Servo_ParseProperty(aProperty,
                         &value,
                         data,
-                        LengthParsingMode::Default).Consume();
+                        ParsingMode::Default,
+                        aDocument->GetCompatibilityMode()).Consume();
 
   if (!servoDeclarations) {
     // We got a syntax error.  The spec says this value must be ignored.
@@ -2827,7 +2828,8 @@ CreateDeclarationForServo(nsCSSPropertyID aProperty,
                                            &normalString,
                                            false,
                                            data,
-                                           LengthParsingMode::Default);
+                                           ParsingMode::Default,
+                                           aDocument->GetCompatibilityMode());
   }
 
   return servoDeclarations.forget();
@@ -2874,7 +2876,9 @@ GetFontStyleForServo(Element* aElement, const nsAString& aFont,
     // We need to use ResolveTransientServoStyle, which involves traversal,
     // instead of ResolveServoStyle() because we need up-to-date style even if
     // the canvas element is display:none.
-    parentStyle = styleSet->ResolveTransientServoStyle(aElement, nullptr);
+    parentStyle =
+      styleSet->ResolveTransientServoStyle(aElement,
+                                           CSSPseudoElementType::NotPseudo);
   } else {
     RefPtr<RawServoDeclarationBlock> declarations =
       CreateFontDeclarationForServo(NS_LITERAL_STRING("10px sans-serif"),

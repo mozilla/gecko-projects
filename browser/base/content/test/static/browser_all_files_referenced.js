@@ -57,11 +57,12 @@ var whitelist = new Set([
   {file: "chrome://global/locale/printjoboptions.dtd",
    platforms: ["macosx", "win"]},
 
-  {file: "chrome://weave/locale/errors.properties"},
-
   // devtools/client/inspector/bin/dev-server.js
   {file: "chrome://devtools/content/inspector/markup/markup.xhtml",
    isFromDevTools: true},
+
+  // Kept for add-on compatibility, should be removed in bug 851471.
+  {file: "chrome://mozapps/skin/downloads/downloadIcon.png"},
 
   // extensions/pref/autoconfig/src/nsReadConfig.cpp
   {file: "resource://gre/defaults/autoconfig/prefcalls.js"},
@@ -97,11 +98,11 @@ var whitelist = new Set([
    platforms: ["linux", "win"]},
   {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/mac/platformKeys.properties",
    platforms: ["linux", "win"]},
-  {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/unix/accessible.properties",
+  {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/gtk/accessible.properties",
    platforms: ["macosx", "win"]},
-  {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/unix/intl.properties",
+  {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/gtk/intl.properties",
    platforms: ["macosx", "win"]},
-  {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/unix/platformKeys.properties",
+  {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/gtk/platformKeys.properties",
    platforms: ["macosx", "win"]},
   {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/win/accessible.properties",
    platforms: ["linux", "macosx"]},
@@ -112,7 +113,6 @@ var whitelist = new Set([
 
   // browser/extensions/pdfjs/content/web/viewer.js#7450
   {file: "resource://pdf.js/web/debugger.js"},
-
 
   // Starting from here, files in the whitelist are bugs that need fixing.
   // Bug 1339420
@@ -158,33 +158,7 @@ var whitelist = new Set([
   {file: "chrome://global/skin/arrow/panelarrow-vertical.svg",
    platforms: ["linux"]},
   // Bug 1348362
-  {file: "chrome://global/skin/icons/Close.gif", platforms: ["win"]},
-  {file: "chrome://global/skin/icons/Error.png", platforms: ["linux", "macosx"]},
-  {file: "chrome://global/skin/icons/Landscape.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/Minimize.gif", platforms: ["win"]},
-  {file: "chrome://global/skin/icons/Portrait.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/Print-preview.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/Question.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/Restore.gif", platforms: ["win"]},
-  {file: "chrome://global/skin/icons/Search-close.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/Search-glass.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/Warning.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/checkbox.png", platforms: ["macosx"]},
-  {file: "chrome://global/skin/icons/checkbox@2x.png", platforms: ["macosx"]},
-  {file: "chrome://global/skin/icons/close-inverted.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/close-inverted@2x.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/close.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/close@2x.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/collapse.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/error-64.png", platforms: ["linux", "win"]},
-  {file: "chrome://global/skin/icons/error-large.png", platforms: ["macosx"]},
-  {file: "chrome://global/skin/icons/expand.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/folder-item.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/question-large.png", platforms: ["macosx"]},
-  {file: "chrome://global/skin/icons/warning-32.png", platforms: ["macosx"]},
   {file: "chrome://global/skin/icons/warning-64.png", platforms: ["linux", "win"]},
-  {file: "chrome://global/skin/icons/warning-large.png", platforms: ["linux"]},
-  {file: "chrome://global/skin/icons/windowControls.png", platforms: ["linux"]},
   // Bug 1348522
   {file: "chrome://global/skin/media/clicktoplay-bgtexture.png"},
   {file: "chrome://global/skin/media/videoClickToPlayButton.svg"},

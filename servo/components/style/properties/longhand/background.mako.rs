@@ -10,11 +10,13 @@ ${helpers.predefined_type("background-color", "CSSColor",
     "::cssparser::Color::RGBA(::cssparser::RGBA::transparent())",
     initial_specified_value="SpecifiedValue::transparent()",
     spec="https://drafts.csswg.org/css-backgrounds/#background-color",
-    animation_value_type="IntermediateColor", complex_color=True)}
+    animation_value_type="IntermediateColor",
+    complex_color=True,
+    allow_quirks=True)}
 
-${helpers.predefined_type("background-image", "LayerImage",
-    initial_value="computed_value::T(None)",
-    initial_specified_value="SpecifiedValue(None)",
+${helpers.predefined_type("background-image", "ImageLayer",
+    initial_value="Either::First(None_)",
+    initial_specified_value="Either::First(None_)",
     spec="https://drafts.csswg.org/css-backgrounds/#the-background-image",
     vector="True",
     animation_value_type="none",
@@ -190,13 +192,16 @@ ${helpers.single_keyword("background-origin",
         impl RepeatableListAnimatable for T {}
 
         impl Animatable for T {
-            fn interpolate(&self, other: &Self, time: f64) -> Result<Self, ()> {
+            fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64)
+                -> Result<Self, ()> {
                 use properties::longhands::background_size::single_value::computed_value::ExplicitSize;
                 match (self, other) {
                     (&T::Explicit(ref me), &T::Explicit(ref other)) => {
                         Ok(T::Explicit(ExplicitSize {
-                            width: try!(me.width.interpolate(&other.width, time)),
-                            height: try!(me.height.interpolate(&other.height, time)),
+                            width: try!(me.width.add_weighted(&other.width,
+                                                              self_portion, other_portion)),
+                            height: try!(me.height.add_weighted(&other.height,
+                                                                self_portion, other_portion)),
                         }))
                     }
                     _ => Err(()),

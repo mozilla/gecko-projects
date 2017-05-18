@@ -35,6 +35,7 @@
 #include "mozilla/net/ReferrerPolicy.h"
 #include "mozilla/Logging.h"
 #include "mozilla/NotNull.h"
+#include "mozilla/Maybe.h"
 #include "nsIContentPolicy.h"
 #include "nsIDocument.h"
 #include "nsPIDOMWindow.h"
@@ -500,7 +501,9 @@ public:
     // Set if one or more error flags were set.
     eParseHTMLInteger_Error                 = 1 << 3,
     eParseHTMLInteger_ErrorNoValue          = 1 << 4,
-    eParseHTMLInteger_ErrorOverflow         = 1 << 5
+    eParseHTMLInteger_ErrorOverflow         = 1 << 5,
+    // Use this flag to detect the difference between overflow and underflow
+    eParseHTMLInteger_Negative              = 1 << 6,
   };
   static int32_t ParseHTMLInteger(const nsAString& aValue,
                                   ParseHTMLIntegerResultFlags *aResult);
@@ -2673,10 +2676,10 @@ public:
    * Get the pixel data from the given source surface and fill it in Shmem.
    * The length and stride will be assigned from the surface.
    */
-  static void GetSurfaceData(mozilla::gfx::DataSourceSurface* aSurface,
-                             size_t* aLength, int32_t* aStride,
-                             mozilla::ipc::IShmemAllocator* aAlloc,
-                             mozilla::ipc::Shmem *aOutShmem);
+  static mozilla::Maybe<mozilla::ipc::Shmem>
+  GetSurfaceData(mozilla::gfx::DataSourceSurface* aSurface,
+                 size_t* aLength, int32_t* aStride,
+                 mozilla::ipc::IShmemAllocator* aAlloc);
 
   // Helpers shared by the implementations of nsContentUtils methods and
   // nsIDOMWindowUtils methods.

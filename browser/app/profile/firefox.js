@@ -69,6 +69,8 @@ pref("extensions.screenshots.system-disabled", true);
 // Disable add-ons that are not installed by the user in all scopes by default.
 // See the SCOPE constants in AddonManager.jsm for values to use here.
 pref("extensions.autoDisableScopes", 15);
+// Scopes to scan for changes at startup.
+pref("extensions.startupScanScopes", 0);
 
 // This is where the profiler WebExtension API will look for breakpad symbols.
 // NOTE: deliberately http right now since https://symbols.mozilla.org is not supported.
@@ -318,10 +320,11 @@ pref("browser.urlbar.suggest.bookmark",             true);
 pref("browser.urlbar.suggest.openpage",             true);
 pref("browser.urlbar.suggest.searches",             false);
 pref("browser.urlbar.userMadeSearchSuggestionsChoice", false);
-// 4 here means the suggestion notification will be automatically
-// hidden the 4th day, so it will actually be shown on 3 different days.
+// The suggestion opt-in notification will be shown on 4 different days.
 pref("browser.urlbar.daysBeforeHidingSuggestionsPrompt", 4);
 pref("browser.urlbar.lastSuggestionsPromptDate", 20160601);
+// The suggestion opt-out hint will be hidden after being shown 4 times.
+pref("browser.urlbar.timesBeforeHidingSuggestionsHint", 4);
 
 // Limit the number of characters sent to the current search engine to fetch
 // suggestions.
@@ -672,13 +675,22 @@ pref("plugin.default.state", 1);
 // Plugins bundled in XPIs are enabled by default.
 pref("plugin.defaultXpi.state", 2);
 
-// Flash is enabled by default, and Java is click-to-activate by default on
-// all channels.
-pref("plugin.state.flash", 2);
+// Java is Click-to-Activate by default on all channels.
 pref("plugin.state.java", 1);
 
+// Flash is Click-to-Activate by default on Nightly,
+// Always-Activate on other channels.
 #ifdef NIGHTLY_BUILD
 pref("plugins.flashBlock.enabled", true);
+pref("plugin.state.flash", 1);
+
+// Prefer HTML5 video over Flash content, and don't
+// load plugin instances with no src declared.
+// These prefs are documented in details on all.js.
+pref("plugins.favorfallback.mode", "follow-ctp");
+pref("plugins.favorfallback.rules", "nosrc,video");
+#else
+pref("plugin.state.flash", 2);
 #endif
 
 #ifdef XP_WIN
@@ -1649,3 +1661,5 @@ pref("browser.sessionstore.restore_tabs_lazily", true);
 pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,goog-malware-proto,goog-unwanted-proto,test-malware-simple,test-unwanted-simple");
 pref("urlclassifier.phishTable", "goog-phish-shavar,goog-phish-proto,test-phish-simple");
 #endif
+
+pref("browser.suppress_first_window_animation", true);

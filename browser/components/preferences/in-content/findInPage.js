@@ -12,6 +12,7 @@ var gSearchResultsPane = {
   init() {
     let controller = this.getSelectionController();
     this.findSelection = controller.getSelection(Ci.nsISelectionController.SELECTION_FIND);
+    this.findSelection.setColors("currentColor", "#ffe900", "currentColor", "#540ead");
     this.searchResultsCategory = document.getElementById("category-search-results");
 
     this.searchInput = document.getElementById("searchInput");
@@ -230,7 +231,7 @@ var gSearchResultsPane = {
 
         let strings = this.strings;
         document.getElementById("sorry-message").textContent =
-          strings.getFormattedString("searchResults.sorryMessage", [query]);
+          strings.getFormattedString("searchResults.sorryMessage2", [query]);
         let brandName = document.getElementById("bundleBrand").getString("brandShortName");
         document.getElementById("need-help").innerHTML =
           strings.getFormattedString("searchResults.needHelp", [brandName]);

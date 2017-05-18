@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use cssparser::{self, Parser as CssParser, SourcePosition};
+use cssparser::{self, Parser as CssParser, SourcePosition, SourceLocation};
 use html5ever::{Namespace as NsAtom};
 use media_queries::CSSErrorReporterTest;
 use parking_lot::RwLock;
@@ -82,16 +82,17 @@ fn test_parse_stylesheet() {
         rules: CssRules::new(vec![
             CssRule::Namespace(Arc::new(stylesheet.shared_lock.wrap(NamespaceRule {
                 prefix: None,
-                url: NsAtom::from("http://www.w3.org/1999/xhtml")
+                url: NsAtom::from("http://www.w3.org/1999/xhtml"),
+                source_location: SourceLocation {
+                    line: 1,
+                    column: 19,
+                },
             }))),
             CssRule::Style(Arc::new(stylesheet.shared_lock.wrap(StyleRule {
                 selectors: SelectorList(vec![
-                    Selector {
-                        inner: SelectorInner::from_vec(vec![
-                            Component::Namespace(Namespace {
-                                prefix: None,
-                                url: NsAtom::from("http://www.w3.org/1999/xhtml")
-                            }),
+                    Selector::new_for_unit_testing(
+                        SelectorInner::from_vec(vec![
+                            Component::DefaultNamespace(NsAtom::from("http://www.w3.org/1999/xhtml")),
                             Component::LocalName(LocalName {
                                 name: local_name!("input"),
                                 lower_name: local_name!("input"),
@@ -105,9 +106,8 @@ fn test_parse_stylesheet() {
                                 }),
                             }, "hidden".to_owned(), CaseSensitivity::CaseInsensitive)
                         ]),
-                        pseudo_element: None,
-                        specificity: (0 << 20) + (1 << 10) + (1 << 0),
-                    },
+                        (0 << 20) + (1 << 10) + (1 << 0)
+                    ),
                 ]),
                 block: Arc::new(stylesheet.shared_lock.wrap(block_from(vec![
                     (PropertyDeclaration::Display(longhands::display::SpecifiedValue::none),
@@ -116,62 +116,55 @@ fn test_parse_stylesheet() {
                      DeclaredValueOwned::CSSWideKeyword(CSSWideKeyword::Inherit)),
                      Importance::Important),
                 ]))),
+                source_location: SourceLocation {
+                    line: 3,
+                    column: 31,
+                },
             }))),
             CssRule::Style(Arc::new(stylesheet.shared_lock.wrap(StyleRule {
                 selectors: SelectorList(vec![
-                    Selector {
-                        inner: SelectorInner::from_vec(vec![
-                            Component::Namespace(Namespace {
-                                prefix: None,
-                                url: NsAtom::from("http://www.w3.org/1999/xhtml")
-                            }),
+                    Selector::new_for_unit_testing(
+                        SelectorInner::from_vec(vec![
+                            Component::DefaultNamespace(NsAtom::from("http://www.w3.org/1999/xhtml")),
                             Component::LocalName(LocalName {
                                 name: local_name!("html"),
                                 lower_name: local_name!("html"),
                             }),
                         ]),
-                        pseudo_element: None,
-                        specificity: (0 << 20) + (0 << 10) + (1 << 0),
-                    },
-                    Selector {
-                        inner: SelectorInner::from_vec(vec![
-                            Component::Namespace(Namespace {
-                                prefix: None,
-                                url: NsAtom::from("http://www.w3.org/1999/xhtml")
-                            }),
+                        (0 << 20) + (0 << 10) + (1 << 0)
+                    ),
+                    Selector::new_for_unit_testing(
+                        SelectorInner::from_vec(vec![
+                            Component::DefaultNamespace(NsAtom::from("http://www.w3.org/1999/xhtml")),
                             Component::LocalName(LocalName {
                                 name: local_name!("body"),
                                 lower_name: local_name!("body"),
                             }),
                         ]),
-                        pseudo_element: None,
-                        specificity: (0 << 20) + (0 << 10) + (1 << 0),
-                    },
+                        (0 << 20) + (0 << 10) + (1 << 0)
+                    ),
                 ]),
                 block: Arc::new(stylesheet.shared_lock.wrap(block_from(vec![
                     (PropertyDeclaration::Display(longhands::display::SpecifiedValue::block),
                      Importance::Normal),
                 ]))),
+                source_location: SourceLocation {
+                    line: 11,
+                    column: 27,
+                },
             }))),
             CssRule::Style(Arc::new(stylesheet.shared_lock.wrap(StyleRule {
                 selectors: SelectorList(vec![
-                    Selector {
-                        inner: SelectorInner::from_vec(vec![
-                            Component::Namespace(Namespace {
-                                prefix: None,
-                                url: NsAtom::from("http://www.w3.org/1999/xhtml")
-                            }),
+                    Selector::new_for_unit_testing(
+                        SelectorInner::from_vec(vec![
+                            Component::DefaultNamespace(NsAtom::from("http://www.w3.org/1999/xhtml")),
                             Component::ID(Atom::from("d1")),
                             Component::Combinator(Combinator::Child),
-                            Component::Namespace(Namespace {
-                                prefix: None,
-                                url: NsAtom::from("http://www.w3.org/1999/xhtml")
-                            }),
+                            Component::DefaultNamespace(NsAtom::from("http://www.w3.org/1999/xhtml")),
                             Component::Class(Atom::from("ok")),
                         ]),
-                        pseudo_element: None,
-                        specificity: (1 << 20) + (1 << 10) + (0 << 0),
-                    },
+                        (1 << 20) + (1 << 10) + (0 << 0)
+                    ),
                 ]),
                 block: Arc::new(stylesheet.shared_lock.wrap(block_from(vec![
                     (PropertyDeclaration::BackgroundColor(
@@ -220,6 +213,10 @@ fn test_parse_stylesheet() {
                                                    ::get_initial_specified_value()])),
                      Importance::Normal),
                 ]))),
+                source_location: SourceLocation {
+                    line: 15,
+                    column: 20,
+                },
             }))),
             CssRule::Keyframes(Arc::new(stylesheet.shared_lock.wrap(KeyframesRule {
                 name: KeyframesName::Ident(CustomIdent("foo".into())),

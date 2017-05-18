@@ -30,7 +30,6 @@ use dom::bindings::structuredclone::StructuredCloneData;
 use dom::bindings::trace::RootedTraceableBox;
 use dom::bindings::utils::{GlobalStaticData, WindowProxyHandler};
 use dom::bluetooth::BluetoothExtraPermissionData;
-use dom::browsingcontext::BrowsingContext;
 use dom::crypto::Crypto;
 use dom::cssstyledeclaration::{CSSModificationAccess, CSSStyleDeclaration, CSSStyleOwner};
 use dom::document::{AnimationFrameCallback, Document};
@@ -49,6 +48,8 @@ use dom::promise::Promise;
 use dom::screen::Screen;
 use dom::storage::Storage;
 use dom::testrunner::TestRunner;
+use dom::windowproxy::WindowProxy;
+use dom::worklet::Worklet;
 use dom_struct::dom_struct;
 use euclid::{Point2D, Rect, Size2D};
 use fetch;
@@ -75,11 +76,11 @@ use script_layout_interface::rpc::{ContentBoxResponse, ContentBoxesResponse, Lay
 use script_layout_interface::rpc::{MarginStyleResponse, NodeScrollRootIdResponse};
 use script_layout_interface::rpc::{ResolvedStyleResponse, TextIndexResponse};
 use script_runtime::{CommonScriptMsg, ScriptChan, ScriptPort, ScriptThreadEventCategory};
-use script_thread::{MainThreadScriptChan, MainThreadScriptMsg, Runnable, RunnableWrapper};
-use script_thread::{SendableMainThreadScriptChan, ImageCacheMsg};
-use script_traits::{ConstellationControlMsg, LoadData, MozBrowserEvent, UntrustedNodeAddress};
-use script_traits::{DocumentState, TimerEvent, TimerEventId};
-use script_traits::{ScriptMsg as ConstellationMsg, TimerSchedulerMsg, WindowSizeData, WindowSizeType};
+use script_thread::{ImageCacheMsg, MainThreadScriptChan, MainThreadScriptMsg, Runnable};
+use script_thread::{RunnableWrapper, ScriptThread, SendableMainThreadScriptChan};
+use script_traits::{ConstellationControlMsg, DocumentState, LoadData, MozBrowserEvent};
+use script_traits::{ScriptMsg as ConstellationMsg, ScrollState, TimerEvent, TimerEventId};
+use script_traits::{TimerSchedulerMsg, UntrustedNodeAddress, WindowSizeData, WindowSizeType};
 use script_traits::webdriver_msg::{WebDriverJSError, WebDriverJSResult};
 use servo_atoms::Atom;
 use servo_config::opts;
@@ -104,7 +105,7 @@ use std::sync::mpsc::TryRecvError::{Disconnected, Empty};
 use style::context::ReflowGoal;
 use style::error_reporting::ParseErrorReporter;
 use style::media_queries;
-use style::parser::{LengthParsingMode, ParserContext as CssParserContext};
+use style::parser::{PARSING_MODE_DEFAULT, ParserContext as CssParserContext};
 use style::properties::PropertyId;
 use style::properties::longhands::overflow_x;
 use style::selector_parser::PseudoElement;
@@ -175,7 +176,7 @@ pub struct Window {
     image_cache: Arc<ImageCache>,
     #[ignore_heap_size_of = "channels are hard"]
     image_cache_chan: Sender<ImageCacheMsg>,
-    browsing_context: MutNullableJS<BrowsingContext>,
+    window_proxy: MutNullableJS<WindowProxy>,
     document: MutNullableJS<Document>,
     history: MutNullableJS<History>,
     performance: MutNullableJS<Performance>,
@@ -273,6 +274,9 @@ pub struct Window {
     /// Directory to store unminified scripts for this window if unminify-js
     /// opt is enabled.
     unminified_js_dir: DOMRefCell<Option<String>>,
+
+    /// Worklets
+    test_worklet: MutNullableJS<Worklet>,
 }
 
 impl Window {
@@ -280,7 +284,7 @@ impl Window {
     pub fn clear_js_runtime_for_script_deallocation(&self) {
         unsafe {
             *self.js_runtime.borrow_for_script_deallocation() = None;
-            self.browsing_context.set(None);
+            self.window_proxy.set(None);
             self.current_state.set(WindowState::Zombie);
             self.ignore_further_async_events.borrow().store(true, Ordering::Relaxed);
         }
@@ -332,12 +336,12 @@ impl Window {
     }
 
     /// This can panic if it is called after the browsing context has been discarded
-    pub fn browsing_context(&self) -> Root<BrowsingContext> {
-        self.browsing_context.get().unwrap()
+    pub fn window_proxy(&self) -> Root<WindowProxy> {
+        self.window_proxy.get().unwrap()
     }
 
-    pub fn maybe_browsing_context(&self) -> Option<Root<BrowsingContext>> {
-        self.browsing_context.get()
+    pub fn maybe_window_proxy(&self) -> Option<Root<WindowProxy>> {
+        self.window_proxy.get()
     }
 
     pub fn bluetooth_thread(&self) -> IpcSender<BluetoothRequest> {
@@ -545,12 +549,12 @@ impl WindowMethods for Window {
     // https://html.spec.whatwg.org/multipage/#dom-frameelement
     fn GetFrameElement(&self) -> Option<Root<Element>> {
         // Steps 1-3.
-        let context = match self.browsing_context.get() {
+        let window_proxy = match self.window_proxy.get() {
             None => return None,
-            Some(context) => context,
+            Some(window_proxy) => window_proxy,
         };
         // Step 4-5.
-        let container = match context.frame_element() {
+        let container = match window_proxy.frame_element() {
             None => return None,
             Some(container) => container,
         };
@@ -624,50 +628,50 @@ impl WindowMethods for Window {
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-window
-    fn Window(&self) -> Root<BrowsingContext> {
-        self.browsing_context()
+    fn Window(&self) -> Root<WindowProxy> {
+        self.window_proxy()
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-self
-    fn Self_(&self) -> Root<BrowsingContext> {
-        self.browsing_context()
+    fn Self_(&self) -> Root<WindowProxy> {
+        self.window_proxy()
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-frames
-    fn Frames(&self) -> Root<BrowsingContext> {
-        self.browsing_context()
+    fn Frames(&self) -> Root<WindowProxy> {
+        self.window_proxy()
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-parent
-    fn GetParent(&self) -> Option<Root<BrowsingContext>> {
+    fn GetParent(&self) -> Option<Root<WindowProxy>> {
         // Steps 1-3.
-        let context = match self.maybe_browsing_context() {
-            Some(context) => context,
+        let window_proxy = match self.maybe_window_proxy() {
+            Some(window_proxy) => window_proxy,
             None => return None,
         };
-        if context.is_discarded() {
+        if window_proxy.is_browsing_context_discarded() {
             return None;
         }
         // Step 4.
-        if let Some(parent) = context.parent() {
+        if let Some(parent) = window_proxy.parent() {
             return Some(Root::from_ref(parent));
         }
         // Step 5.
-        Some(context)
+        Some(window_proxy)
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-top
-    fn GetTop(&self) -> Option<Root<BrowsingContext>> {
+    fn GetTop(&self) -> Option<Root<WindowProxy>> {
         // Steps 1-3.
-        let context = match self.maybe_browsing_context() {
-            Some(context) => context,
+        let window_proxy = match self.maybe_window_proxy() {
+            Some(window_proxy) => window_proxy,
             None => return None,
         };
-        if context.is_discarded() {
+        if window_proxy.is_browsing_context_discarded() {
             return None;
         }
         // Steps 4-5.
-        Some(Root::from_ref(context.top()))
+        Some(Root::from_ref(window_proxy.top()))
     }
 
     // https://dvcs.w3.org/hg/webperf/raw-file/tip/specs/
@@ -978,7 +982,7 @@ impl WindowMethods for Window {
         let url = self.get_url();
         let quirks_mode = self.Document().quirks_mode();
         let context = CssParserContext::new_for_cssom(&url, self.css_error_reporter(), Some(CssRuleType::Media),
-                                                      LengthParsingMode::Default,
+                                                      PARSING_MODE_DEFAULT,
                                                       quirks_mode);
         let media_query_list = media_queries::parse_media_query_list(&context, &mut parser);
         let document = self.Document();
@@ -1036,7 +1040,7 @@ impl Window {
 
         self.current_state.set(WindowState::Zombie);
         *self.js_runtime.borrow_mut() = None;
-        self.browsing_context.set(None);
+        self.window_proxy.set(None);
         self.ignore_further_async_events.borrow().store(true, Ordering::SeqCst);
     }
 
@@ -1111,6 +1115,11 @@ impl Window {
             ScrollBehavior::Smooth => true
         };
 
+        self.layout_chan.send(Msg::UpdateScrollStateFromScript(ScrollState {
+            scroll_root_id: scroll_root_id,
+            scroll_offset: Point2D::new(-x, -y),
+        })).unwrap();
+
         // TODO (farodin91): Raise an event to stop the current_viewport
         self.update_viewport_for_scroll(x, y);
 
@@ -1150,6 +1159,7 @@ impl Window {
     /// off-main-thread layout.
     ///
     /// Returns true if layout actually happened, false otherwise.
+    #[allow(unsafe_code)]
     pub fn force_reflow(&self,
                         goal: ReflowGoal,
                         query_type: ReflowQueryType,
@@ -1213,16 +1223,16 @@ impl Window {
 
         debug!("script: layout forked");
 
-        match join_port.try_recv() {
+        let complete = match join_port.try_recv() {
             Err(Empty) => {
                 info!("script: waiting on layout");
-                join_port.recv().unwrap();
+                join_port.recv().unwrap()
             }
-            Ok(_) => {}
+            Ok(reflow_complete) => reflow_complete,
             Err(Disconnected) => {
                 panic!("Layout thread failed while script was waiting for a result.");
             }
-        }
+        };
 
         debug!("script: layout joined");
 
@@ -1236,12 +1246,11 @@ impl Window {
             self.emit_timeline_marker(marker.end());
         }
 
-        let pending_images = self.layout_rpc.pending_images();
-        for image in pending_images {
+        for image in complete.pending_images {
             let id = image.id;
             let js_runtime = self.js_runtime.borrow();
             let js_runtime = js_runtime.as_ref().unwrap();
-            let node = from_untrusted_node_address(js_runtime.rt(), image.node);
+            let node = unsafe { from_untrusted_node_address(js_runtime.rt(), image.node) };
 
             if let PendingImageState::Unrequested(ref url) = image.state {
                 fetch_image_for_layout(url.clone(), &*node, id, self.image_cache.clone());
@@ -1259,6 +1268,10 @@ impl Window {
                 self.image_cache.add_listener(id, ImageResponder::new(responder, id));
                 nodes.push(JS::from_ref(&*node));
             }
+        }
+
+        unsafe {
+            ScriptThread::note_newly_transitioning_nodes(complete.newly_transitioning_nodes);
         }
 
         true
@@ -1368,14 +1381,8 @@ impl Window {
                           client_point: Point2D<f32>,
                           update_cursor: bool)
                           -> Option<UntrustedNodeAddress> {
-        let translated_point =
-            Point2D::new(client_point.x + self.PageXOffset() as f32,
-                         client_point.y + self.PageYOffset() as f32);
-
         if !self.reflow(ReflowGoal::ForScriptQuery,
-                        ReflowQueryType::HitTestQuery(translated_point,
-                                                      client_point,
-                                                      update_cursor),
+                        ReflowQueryType::HitTestQuery(client_point, update_cursor),
                         ReflowReason::Query) {
             return None
         }
@@ -1455,6 +1462,7 @@ impl Window {
         DOMString::from(resolved)
     }
 
+    #[allow(unsafe_code)]
     pub fn offset_parent_query(&self, node: TrustedNodeAddress) -> (Option<Root<Element>>, Rect<Au>) {
         if !self.reflow(ReflowGoal::ForScriptQuery,
                         ReflowQueryType::OffsetParentQuery(node),
@@ -1466,7 +1474,7 @@ impl Window {
         let js_runtime = self.js_runtime.borrow();
         let js_runtime = js_runtime.as_ref().unwrap();
         let element = response.node_address.and_then(|parent_node_address| {
-            let node = from_untrusted_node_address(js_runtime.rt(), parent_node_address);
+            let node = unsafe { from_untrusted_node_address(js_runtime.rt(), parent_node_address) };
             Root::downcast(node)
         });
         (element, response.rect)
@@ -1491,9 +1499,9 @@ impl Window {
     }
 
     #[allow(unsafe_code)]
-    pub fn init_browsing_context(&self, browsing_context: &BrowsingContext) {
-        assert!(self.browsing_context.get().is_none());
-        self.browsing_context.set(Some(&browsing_context));
+    pub fn init_window_proxy(&self, window_proxy: &WindowProxy) {
+        assert!(self.window_proxy.get().is_none());
+        self.window_proxy.set(Some(&window_proxy));
     }
 
     #[allow(unsafe_code)]
@@ -1537,10 +1545,10 @@ impl Window {
                 }
         }
 
+        let pipeline_id = self.upcast::<GlobalScope>().pipeline_id();
         self.main_thread_script_chan().send(
-            MainThreadScriptMsg::Navigate(self.upcast::<GlobalScope>().pipeline_id(),
-                LoadData::new(url, referrer_policy, Some(doc.url())),
-                replace)).unwrap();
+            MainThreadScriptMsg::Navigate(pipeline_id,
+                LoadData::new(url, Some(pipeline_id), referrer_policy, Some(doc.url())), replace)).unwrap();
     }
 
     pub fn handle_fire_timer(&self, timer_id: TimerEventId) {
@@ -1625,8 +1633,8 @@ impl Window {
         self.upcast::<GlobalScope>().suspend();
 
         // Set the window proxy to be a cross-origin window.
-        if self.browsing_context().currently_active() == Some(self.global().pipeline_id()) {
-            self.browsing_context().unset_currently_active();
+        if self.window_proxy().currently_active() == Some(self.global().pipeline_id()) {
+            self.window_proxy().unset_currently_active();
         }
 
         // A hint to the JS runtime that now would be a good time to
@@ -1641,7 +1649,7 @@ impl Window {
         self.upcast::<GlobalScope>().resume();
 
         // Set the window proxy to be this object.
-        self.browsing_context().set_currently_active(self);
+        self.window_proxy().set_currently_active(self);
 
         // Push the document title to the compositor since we are
         // activating this document due to a navigation.
@@ -1790,7 +1798,7 @@ impl Window {
             image_cache: image_cache.clone(),
             navigator: Default::default(),
             history: Default::default(),
-            browsing_context: Default::default(),
+            window_proxy: Default::default(),
             document: Default::default(),
             performance: Default::default(),
             navigation_start: (current_time.sec * 1000 + current_time.nsec as i64 / 1000000) as u64,
@@ -1826,6 +1834,7 @@ impl Window {
             permission_state_invocation_results: DOMRefCell::new(HashMap::new()),
             pending_layout_images: DOMRefCell::new(HashMap::new()),
             unminified_js_dir: DOMRefCell::new(None),
+            test_worklet: Default::default(),
         };
 
         unsafe {

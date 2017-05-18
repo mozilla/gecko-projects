@@ -76,11 +76,9 @@ test_description_schema = Schema({
         basestring),
 
     # the name by which this test suite is addressed in try syntax; defaults to
-    # the test-name
-    Optional('unittest-try-name'): basestring,
-
-    # the name by which this talos test is addressed in try syntax
-    Optional('talos-try-name'): basestring,
+    # the test-name.  This will translate to the `unittest_try_name` or
+    # `talos_try_name` attribute.
+    Optional('try-name'): basestring,
 
     # additional tags to mark up this type of test
     Optional('tags'): {basestring: object},
@@ -132,6 +130,9 @@ test_description_schema = Schema({
     Required('e10s', default='both'): optionally_keyed_by(
         'test-platform', 'project',
         Any(bool, 'both')),
+
+    # Whether the task should run with WebRender enabled or not.
+    Optional('webrender', default=False): bool,
 
     # The EC2 instance size to run these tests on.
     Required('instance-size', default='default'): optionally_keyed_by(
@@ -333,6 +334,17 @@ def set_defaults(config, tests):
         else:
             test['allow-software-gl-layers'] = False
 
+        # Enable WebRender by default on the QuantumRender test platform, since
+        # the whole point of QuantumRender is to run with WebRender enabled.
+        # If other *-qr test platforms are added they should also be checked for
+        # here; currently linux64-qr is the only one.
+        if test['test-platform'].startswith('linux64-qr'):
+            test['webrender'] = True
+        else:
+            test.setdefault('webrender', False)
+
+        test.setdefault('try-name', test['test-name'])
+
         test.setdefault('os-groups', [])
         test.setdefault('chunks', 1)
         test.setdefault('run-on-projects', 'built-projects')
@@ -531,6 +543,7 @@ def split_e10s(config, tests):
             e10s = True
         if e10s:
             test['test-name'] += '-e10s'
+            test['try-name'] += '-e10s'
             test['e10s'] = True
             test['attributes']['e10s'] = True
             group, symbol = split_symbol(test['treeherder-symbol'])
@@ -584,6 +597,20 @@ def allow_software_gl_layers(config, tests):
             # This should be set always once bug 1296086 is resolved.
             test['mozharness'].setdefault('extra-options', [])\
                               .append("--allow-software-gl-layers")
+
+        yield test
+
+
+@transforms.add
+def enable_webrender(config, tests):
+    """
+    Handle the "webrender" property by passing a flag to mozharness if it is
+    enabled.
+    """
+    for test in tests:
+        if test.get('webrender'):
+            test['mozharness'].setdefault('extra-options', [])\
+                              .append("--enable-webrender")
 
         yield test
 
@@ -706,11 +733,10 @@ def make_job_description(config, tests):
 
         build_label = test['build-label']
 
-        if 'talos-try-name' in test:
-            try_name = test['talos-try-name']
+        try_name = test['try-name']
+        if test['suite'] == 'talos':
             attr_try_name = 'talos_try_name'
         else:
-            try_name = test.get('unittest-try-name', test['test-name'])
             attr_try_name = 'unittest_try_name'
 
         attr_build_platform, attr_build_type = test['build-platform'].split('/', 1)

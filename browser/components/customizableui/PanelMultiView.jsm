@@ -211,8 +211,10 @@ this.PanelMultiView = class {
     return this._panelViews;
   }
   get _dwu() {
-    return this.window.QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIDOMWindowUtils);
+    if (this.__dwu)
+      return this.__dwu;
+    return this.__dwu = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
+                                   .getInterface(Ci.nsIDOMWindowUtils);
   }
   get _currentSubView() {
     return this.panelViews ? this.panelViews.currentView : this.__currentSubView;
@@ -308,7 +310,7 @@ this.PanelMultiView = class {
     this._panel.removeEventListener("popupshown", this);
     this._panel.removeEventListener("popuphidden", this);
     this.node = this._clickCapturer = this._viewContainer = this._mainViewContainer =
-      this._subViews = this._viewStack = null;
+      this._subViews = this._viewStack = this.__dwu = null;
   }
 
   goBack(target) {
@@ -382,10 +384,16 @@ this.PanelMultiView = class {
       let playTransition = (!!previousViewNode && previousViewNode != viewNode);
 
       let dwu, previousRect;
-      if (playTransition) {
+      if (playTransition || this.panelViews) {
         dwu = this._dwu;
         previousRect = previousViewNode.__lastKnownBoundingRect =
           dwu.getBoundsWithoutFlushing(previousViewNode);
+        if (this.panelViews && !this._mainViewWidth) {
+          this._mainViewWidth = previousRect.width;
+          let top = dwu.getBoundsWithoutFlushing(previousViewNode.firstChild).top;
+          let bottom = dwu.getBoundsWithoutFlushing(previousViewNode.lastChild).bottom;
+          this._viewVerticalPadding = previousRect.height - (bottom - top);
+        }
       }
 
       // Emit the ViewShowing event so that the widget definition has a chance
@@ -410,6 +418,8 @@ this.PanelMultiView = class {
         }
       }
       viewNode.setAttribute("current", true);
+      if (playTransition && this.panelViews)
+        viewNode.style.maxWidth = viewNode.style.minWidth = this._mainViewWidth + "px";
 
       let evt = new window.CustomEvent("ViewShowing", { bubbles: true, cancelable: true, detail });
       viewNode.dispatchEvent(evt);
@@ -504,7 +514,7 @@ this.PanelMultiView = class {
               // individual child element of the view.
               viewRect.height = [viewNode.header, ...viewNode.children].reduce((acc, node) => {
                 return acc + dwu.getBoundsWithoutFlushing(node).height;
-              }, 0);
+              }, this._viewVerticalPadding);
             }
           }
 

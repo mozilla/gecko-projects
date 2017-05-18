@@ -249,19 +249,12 @@ WebrtcVideoConduit::~WebrtcVideoConduit()
 }
 
 void
-WebrtcVideoConduit::AddLocalRTPExtensions(bool aIsSend,
+WebrtcVideoConduit::SetLocalRTPExtensions(bool aIsSend,
   const std::vector<webrtc::RtpExtension> & aExtensions)
 {
   auto& extList = aIsSend ? mSendStreamConfig.rtp.extensions :
                   mRecvStreamConfig.rtp.extensions;
-  extList.erase(std::remove_if(extList.begin(),
-                               extList.end(),
-                               [&](const webrtc::RtpExtension & i) {
-                                 return std::find(aExtensions.begin(),
-                                                  aExtensions.end(),
-                                                  i) != aExtensions.end(); }),
-                extList.end());
-  extList.insert(extList.end(), aExtensions.begin(), aExtensions.end());
+  extList = aExtensions;
 }
 
 std::vector<webrtc::RtpExtension>
@@ -508,6 +501,7 @@ WebrtcVideoConduit::ConfigureSendMediaCodec(const VideoCodecConfig* codecConfig)
 
   mSendingFramerate = 0;
   mEncoderConfig.ClearStreams();
+  mSendStreamConfig.rtp.rids.clear();
 
   unsigned short width = 320;
   unsigned short height = 240;
@@ -1218,6 +1212,9 @@ WebrtcVideoConduit::ConfigureRecvMediaCodecs(
       mRecvStreamConfig.rtp.fec.red_rtx_payload_type = -1;
     }
 
+    // SetRemoteSSRC should have populated this already
+    mRecvSSRC = mRecvStreamConfig.rtp.remote_ssrc;
+
     // XXX ugh! same SSRC==0 problem that webrtc.org has
     if (mRecvSSRC == 0) {
       // Handle un-signalled SSRCs by creating a random one and then when it actually gets set,
@@ -1232,9 +1229,8 @@ WebrtcVideoConduit::ConfigureRecvMediaCodecs(
       } while (ssrc == 0); // webrtc.org code has fits if you select an SSRC of 0
 
       mRecvStreamConfig.rtp.remote_ssrc = ssrc;
+      mRecvSSRC = ssrc;
     }
-    // Either set via SetRemoteSSRC, or temp one we created.
-    mRecvSSRC = mRecvStreamConfig.rtp.remote_ssrc;
 
     // 0 isn't allowed.  Would be best to ask for a random SSRC from the
     // RTP code.  Would need to call rtp_sender.cc -- GenerateNewSSRC(),

@@ -22,6 +22,7 @@
 #include "mozilla/Base64.h"
 #include "mozilla/Unused.h"
 #include "mozilla/SizePrintfMacros.h"
+#include "mozilla/UniquePtr.h"
 #include "nsIUrlClassifierUtils.h"
 #include "nsUrlClassifierDBService.h"
 
@@ -62,7 +63,7 @@ public:
 
 private:
   nsTArray<TableUpdate*>* mUpdatesArrayRef;
-  nsTArray<nsAutoPtr<TableUpdate>> mUpdatesPointerHolder;
+  nsTArray<UniquePtr<TableUpdate>> mUpdatesPointerHolder;
 };
 
 } // End of unnamed namespace.
@@ -292,7 +293,6 @@ Classifier::Reset()
 
     CreateStoreDirectory();
 
-    mTableFreshness.Clear();
     RegenActiveTables();
   };
 
@@ -311,8 +311,6 @@ Classifier::ResetTables(ClearType aType, const nsTArray<nsCString>& aTables)
 {
   for (uint32_t i = 0; i < aTables.Length(); i++) {
     LOG(("Resetting table: %s", aTables[i].get()));
-    // Spoil this table by marking it as no known freshness
-    mTableFreshness.Remove(aTables[i]);
     LookupCache *cache = GetLookupCache(aTables[i]);
     if (cache) {
       // Remove any cached Completes for this table if clear type is Clear_Cache
@@ -444,7 +442,6 @@ Classifier::TableRequest(nsACString& aResult)
 nsresult
 Classifier::Check(const nsACString& aSpec,
                   const nsACString& aTables,
-                  uint32_t aFreshnessGuarantee,
                   LookupResultArray& aResults)
 {
   Telemetry::AutoTimer<Telemetry::URLCLASSIFIER_CL_CHECK_TIME> timer;
@@ -496,11 +493,10 @@ Classifier::Check(const nsACString& aSpec,
 
     for (uint32_t i = 0; i < cacheArray.Length(); i++) {
       LookupCache *cache = cacheArray[i];
-      bool has, fromCache, confirmed;
+      bool has, confirmed;
       uint32_t matchLength;
 
-      rv = cache->Has(lookupHash, mTableFreshness, aFreshnessGuarantee,
-                      &has, &matchLength, &confirmed, &fromCache);
+      rv = cache->Has(lookupHash, &has, &matchLength, &confirmed);
       NS_ENSURE_SUCCESS(rv, rv);
 
       if (has) {
@@ -621,8 +617,6 @@ Classifier::RemoveUpdateIntermediaries()
   }
   mNewLookupCaches.Clear();
 
-  mNewTableFreshness.Clear();
-
   // Remove the "old" directory. (despite its looking-new name)
   if (NS_FAILED(mUpdatingDirectory->Remove(true))) {
     // If the directory is locked from removal for some reason,
@@ -687,21 +681,16 @@ Classifier::SwapInNewTablesAndCleanup()
   // up later.
   MergeNewLookupCaches();
 
-  // Step 3. Merge mTableFreshnessForUpdate.
-  for (auto itr = mNewTableFreshness.ConstIter(); !itr.Done(); itr.Next()) {
-    mTableFreshness.Put(itr.Key(), itr.Data());
-  }
-
-  // Step 4. Re-generate active tables based on on-disk tables.
+  // Step 3. Re-generate active tables based on on-disk tables.
   rv = RegenActiveTables();
   if (NS_FAILED(rv)) {
     LOG(("Failed to re-generate active tables!"));
   }
 
-  // Step 5. Clean up intermediaries for update.
+  // Step 4. Clean up intermediaries for update.
   RemoveUpdateIntermediaries();
 
-  // Step 6. Invalidate cached tableRequest request.
+  // Step 5. Invalidate cached tableRequest request.
   mIsTableRequestResultOutdated = true;
 
   LOG(("Done swap in updated tables."));
@@ -895,23 +884,6 @@ Classifier::ApplyFullHashes(nsTArray<TableUpdate*>* aUpdates)
   }
 
   return NS_OK;
-}
-
-int64_t
-Classifier::GetLastUpdateTime(const nsACString& aTableName)
-{
-  int64_t age;
-  bool found = mTableFreshness.Get(aTableName, &age);
-  return found ? (age * PR_MSEC_PER_SEC) : 0;
-}
-
-void
-Classifier::SetLastUpdateTime(const nsACString &aTable,
-                              uint64_t updateTime)
-{
-  LOG(("Marking table %s as last updated on %" PRIu64,
-       PromiseFlatCString(aTable).get(), updateTime));
-  mTableFreshness.Put(aTable, updateTime / PR_MSEC_PER_SEC);
 }
 
 void
@@ -1240,7 +1212,7 @@ Classifier::UpdateHashStore(nsTArray<TableUpdate*>* aUpdates,
   }
 
   // Clear cache when update
-  lookupCache->ClearCache();
+  lookupCache->InvalidateExpiredCacheEntries();
 
   FallibleTArray<uint32_t> AddPrefixHashes;
   rv = lookupCache->GetPrefixes(AddPrefixHashes);
@@ -1304,9 +1276,7 @@ Classifier::UpdateHashStore(nsTArray<TableUpdate*>* aUpdates,
   rv = lookupCache->WriteFile();
   NS_ENSURE_SUCCESS(rv, NS_ERROR_UC_UPDATE_FAIL_TO_WRITE_DISK);
 
-  int64_t now = (PR_Now() / PR_USEC_PER_SEC);
   LOG(("Successfully updated %s", store.TableName().get()));
-  mNewTableFreshness.Put(store.TableName(), now);
 
   return NS_OK;
 }
@@ -1336,7 +1306,7 @@ Classifier::UpdateTableV4(nsTArray<TableUpdate*>* aUpdates,
   // Remove cache entries whose negative cache time is expired when update.
   // We don't check if positive cache time is expired here because we want to
   // keep the eviction rule simple when doing an update.
-  lookupCache->InvalidateExpiredCacheEntry();
+  lookupCache->InvalidateExpiredCacheEntries();
 
   nsresult rv = NS_OK;
 
@@ -1405,10 +1375,7 @@ Classifier::UpdateTableV4(nsTArray<TableUpdate*>* aUpdates,
     NS_ENSURE_SUCCESS(rv, NS_ERROR_UC_UPDATE_FAIL_TO_WRITE_DISK);
   }
 
-
-  int64_t now = (PR_Now() / PR_USEC_PER_SEC);
   LOG(("Successfully updated %s\n", PromiseFlatCString(aTable).get()));
-  mNewTableFreshness.Put(aTable, now);
 
   return NS_OK;
 }
@@ -1431,7 +1398,8 @@ Classifier::UpdateCache(TableUpdate* aUpdate)
   auto lookupV2 = LookupCache::Cast<LookupCacheV2>(lookupCache);
   if (lookupV2) {
     auto updateV2 = TableUpdate::Cast<TableUpdateV2>(aUpdate);
-    lookupV2->AddCompletionsToCache(updateV2->AddCompletes());
+    lookupV2->AddGethashResultToCache(updateV2->AddCompletes(),
+                                      updateV2->MissPrefixes());
   } else {
     auto lookupV4 = LookupCache::Cast<LookupCacheV4>(lookupCache);
     if (!lookupV4) {

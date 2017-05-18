@@ -26,7 +26,7 @@ use ipc_channel::ipc::IpcSender;
 use layout_debug;
 use model::{self, IntrinsicISizes, IntrinsicISizesContribution, MaybeAuto, SizeConstraint};
 use model::{style_length, ToGfxMatrix};
-use msg::constellation_msg::PipelineId;
+use msg::constellation_msg::{BrowsingContextId, PipelineId};
 use net_traits::image::base::{Image, ImageMetadata};
 use net_traits::image_cache::{ImageOrMetadataAvailable, UsePlaceholder};
 use range::*;
@@ -467,19 +467,23 @@ impl ImageFragmentInfo {
     }
 }
 
-/// A fragment that represents an inline frame (iframe). This stores the pipeline ID so that the
+/// A fragment that represents an inline frame (iframe). This stores the frame ID so that the
 /// size of this iframe can be communicated via the constellation to the iframe's own layout thread.
 #[derive(Clone)]
 pub struct IframeFragmentInfo {
-    /// The pipeline ID of this iframe.
+    /// The frame ID of this iframe.
+    pub browsing_context_id: BrowsingContextId,
+    /// The pipelineID of this iframe.
     pub pipeline_id: PipelineId,
 }
 
 impl IframeFragmentInfo {
     /// Creates the information specific to an iframe fragment.
     pub fn new<N: ThreadSafeLayoutNode>(node: &N) -> IframeFragmentInfo {
+        let browsing_context_id = node.iframe_browsing_context_id();
         let pipeline_id = node.iframe_pipeline_id();
         IframeFragmentInfo {
+            browsing_context_id: browsing_context_id,
             pipeline_id: pipeline_id,
         }
     }
@@ -2466,7 +2470,10 @@ impl Fragment {
         if self.style().get_effects().mix_blend_mode != mix_blend_mode::T::normal {
             return true
         }
-        if self.style().get_box().transform.0.is_some() {
+
+        if self.style().get_box().transform.0.is_some() ||
+           self.style().get_box().transform_style == transform_style::T::preserve_3d ||
+           self.style().overrides_transform_style() {
             return true
         }
 
@@ -2479,13 +2486,6 @@ impl Fragment {
         // Fixed position blocks always create stacking contexts.
         if self.style.get_box().position == position::T::fixed {
             return true
-        }
-
-        match self.style().get_used_transform_style() {
-            transform_style::T::flat | transform_style::T::preserve_3d => {
-                return true
-            }
-            transform_style::T::auto => {}
         }
 
         match (self.style().get_box().position,

@@ -36,9 +36,11 @@ to mochitest command.
   * test_webkit_device_pixel_ratio.html: -webkit-device-pixel-ratio [3]
   * browser_bug453896.js [8]
 * Animation support:
-  * test_animations.html [5]
+  * test_animations.html [1]
   * test_animations_dynamic_changes.html [1]
   * test_bug716226.html [1]
+  * inserting keyframes rule doesn't trigger restyle bug 1364799:
+    * test_rule_insertion.html `@keyframes` [36]
   * OMTA
     * test_animations_effect_timing_duration.html [1]
     * test_animations_effect_timing_enddelay.html [1]
@@ -51,8 +53,6 @@ to mochitest command.
     * test_animations_reverse.html [1]
   * SMIL Animation
     * test_restyles_in_smil_animation.html [2]
-  * Property parsing and computation:
-    * test_property_syntax_errors.html `animation` [20]
 * CSSOM support:
   * \@import bug 1352968
     * test_bug221428.html [1]
@@ -70,16 +70,16 @@ to mochitest command.
   * test_transitions.html: pseudo elements [12]
   * Events:
     * test_animations_event_order.html [2]
-* test_computed_style.html `gradient`: -moz- and -webkit-prefixed gradient values [35]
+* test_computed_style.html `gradient`: -webkit-prefixed gradient values [13]
 * test_bug829816.html: counter-{reset,increment} serialization difference bug 1363968 [8]
-* \@counter-style support bug 1328319
-  * test_counter_descriptor_storage.html [1]
-  * test_counter_style.html [5]
+* dynamic change on \@counter-style rule bug 1363590
+  * test_counter_style.html [11]
+  * test_counter_style.html asserts [11]
+  * test_counter_descriptor_storage.html asserts [110]
+* symbols() function and string value on list-style-type bug 1363596
   * test_value_storage.html `symbols(` [30]
-  * ... `list-style-type` [60]
-  * ... `'list-style'` [30]
-  * ... `'content`: various value as list-style-type in counter functions [2]
-  * test_html_attribute_computed_values.html `list-style-type` [8]
+  * ... `list-style-type` [8]
+  * ... `'list-style'` [18]
 * @page support:
   * test_bug887741_at-rules_in_declaration_lists.html `exception` [1]
 * Unimplemented \@font-face descriptors:
@@ -90,46 +90,32 @@ to mochitest command.
   * ... `font-feature-settings`: bug 1355366 [10]
 * test_font_face_parser.html `font-weight`: keyword values should be preserved in \@font-face [4]
 * @namespace support:
-  * test_namespace_rule.html: bug 1355715 [16]
+  * test_namespace_rule.html: bug 1355715 [8]
 * test_dont_use_document_colors.html: support of disabling document color bug 1355716 [21]
-* test_exposed_prop_accessors.html: mainly various unsupported properties [*]
 * test_font_feature_values_parsing.html: \@font-feature-values support bug 1355721 [107]
 * Grid support bug 1341802
   * test_grid_computed_values.html [4]
   * test_grid_container_shorthands.html [65]
   * test_grid_item_shorthands.html [23]
   * test_grid_shorthand_serialization.html [28]
-  * test_compute_data_with_start_struct.html `grid-` [*]
-  * test_inherit_computation.html `grid` [*]
-  * test_inherit_storage.html `'grid` [*]
-  * ... `"grid` [*]
-  * test_initial_computation.html `grid` [*]
-  * test_initial_storage.html `grid` [*]
-  * test_property_syntax_errors.html `grid`: actually there are issues with this [*]
-  * test_value_storage.html `'grid` [*]
+  * test_compute_data_with_start_struct.html `grid-` [4]
+  * test_inherit_computation.html `grid` [8]
+  * test_inherit_storage.html `'grid` [15]
+  * ... `"grid` [4]
+  * test_initial_computation.html `grid` [16]
+  * test_initial_storage.html `grid` [38]
+  * test_property_syntax_errors.html `grid`: actually there are issues with this [548]
+  * test_value_storage.html `'grid` [637]
+  * test_exposed_prop_accessors.html `grid` [4]
 * Unimplemented prefixed properties:
   * test_variables.html `var(--var6)`: -x-system-font [1]
 * Unimplemented CSS properties:
   * font-variant-{alternates,east-asian,ligatures,numeric} properties servo/servo#15957
     * test_property_syntax_errors.html `font-variant-alternates` [2]
-    * test_value_storage.html `font-variant` [176]
+    * test_value_storage.html `font-variant` [167]
     * test_specified_value_serialization.html `bug-721136` [1]
-* font-feature-settings should be a subproperty of font shorthand bug 1363984
-  * test_inherit_storage.html `font-feature-settings` [2]
-  * test_initial_storage.html `font-feature-settings` [1]
-  * test_inherit_computation.html `liga` [8]
-  * test_value_storage.html `font-feature-settings` [40]
-  * test_shorthand_property_getters.html `font shorthand` [1]
 * Unsupported prefixed values
-  * moz-prefixed gradient functions bug 1337655
-    * test_value_storage.html `-moz-linear-gradient` [322]
-    * ... `-moz-radial-gradient` [309]
-    * ... `-moz-repeating-` [298]
-    * test_specified_value_serialization.html `-moz-linear-gradient` [2]
-  * -webkit-gradient() bug 1363986
-    * test_value_storage.html `-webkit-gradient` [225]
   * serialization of prefixed gradient functions bug 1358710
-    * test_specified_value_serialization.html `-webkit-linear-gradient` [1]
     * test_specified_value_serialization.html `-webkit-radial-gradient` [1]
   * moz-prefixed intrinsic width values bug 1355402
     * test_box_size_keywords.html [16]
@@ -157,24 +143,17 @@ to mochitest command.
 * Incorrect serialization
   * color value not canonicalized servo/servo#15397
     * test_shorthand_property_getters.html `should condense to canonical case` [2]
-  * :not(*) doesn't serialize properly servo/servo#16017
-    * test_selectors.html `:not()` [8]
-    * ... `:not(html|)` [1]
-  * "*|a" gets serialized as "a" when it should not servo/servo#16020
-    * test_selectors.html `reserialization of *|a` [6]
   * place-{content,items,self} shorthands bug 1363971
     * test_align_shorthand_serialization.html [6]
   * system font serialization with subprop specified bug 1364286
     * test_system_font_serialization.html [5]
   * serialize subprops to -moz-use-system-font when using system font bug 1364289
-    * test_value_storage.html `'font'` [128]
+    * test_value_storage.html `'font'` [144]
 * Unsupported pseudo-elements or anon boxes
   * :-moz-tree bits bug 1348488
     * test_selectors.html `:-moz-tree` [10]
   * :-moz-placeholder bug 1348490
     * test_selectors.html `:-moz-placeholder` [1]
-  * ::-moz-color-swatch bug 1348492
-    * test_selectors.html `::-moz-color-swatch` [1]
 * Unsupported pseudo-classes
   * :-moz-locale-dir
     * test_selectors.html `:-moz-locale-dir` [15]
@@ -187,22 +166,11 @@ to mochitest command.
 * clamp negative value from calc() servo/servo#15296
   * test_value_storage.html `font-size: calc(` [3]
   * ... `font-size: var(--a)` [3]
-* Negative value should be rejected
-  * test_property_syntax_errors.html `transition-duration`: servo/servo#15343 [20]
 * Quirks mode support
   * hashless color servo/servo#15341
-    * test_property_syntax_errors.html `color: 000000` [22]
-    * ... `color: 96ed2a` [22]
-    * ... `color: fff` [4]
-  * unitless length servo/servo#15342
-    * test_property_syntax_errors.html ` 20 ` [6]
-    * ... `: 10 ` [6]
-    * ... ` 2 ` [26]
-    * ... `: 5 ` [84]
-    * ... `border-spacing: ` [6]
-    * ... `rect(1, ` [2]
+    * test_property_syntax_errors.html `color: 000000` [10]
+    * ... `color: 96ed2a` [10]
   * test_hover_quirk.html: hover quirks bug 1355724 [6]
-* test_pseudoelement_parsing.html: support parsing some pseudo-classes on some pseudo-elements [5]
 * Unit should be preserved after parsing servo/servo#15346
   * test_units_time.html [1]
 * getComputedStyle style doesn't contain custom properties bug 1336891
@@ -211,8 +179,6 @@ to mochitest command.
 * test_css_supports.html: issues around @supports syntax servo/servo#15482 [8]
 * test_author_specified_style.html: support serializing color as author specified bug 1348165 [27]
 * browser_newtab_share_rule_processors.js: agent style sheet sharing [1]
-* test_selectors.html `this_better_be_unvisited`: visited handling [1]
-* test_computed_style.html `mask`: initial value of mask-repeat bug 1364273 [10]
 
 ## Assertions
 
@@ -221,12 +187,8 @@ to mochitest command.
 * Servo is correct but Gecko is wrong
   * flex-basis should be 0px when omitted in flex shorthand bug 1331530
     * test_flexbox_flex_shorthand.html `flex-basis` [10]
-  * should reject whole value bug 1355352
-    * test_descriptor_storage.html `unicode-range` [1]
-    * test_font_face_parser.html `U+A5` [4]
-  * Gecko clamps rather than rejects invalid unicode range bug 1355356
-    * test_font_face_parser.html `U+??????` [2]
-    * ... `12FFFF` [2]
+  * Gecko rejects calc() in -webkit-gradient bug 1363349
+    * test_property_syntax_errors.html `-webkit-gradient` [20]
 * test_property_syntax_errors.html `linear-gradient(0,`: unitless zero as degree [10]
 
 ## Spec Unclear
@@ -238,7 +200,6 @@ to mochitest command.
 * test_selectors_on_anonymous_content.html: xbl and :nth-child [1]
 * test_parse_rule.html `rgb(0, 128, 0)`: color properties not getting computed [5]
 * test_selectors.html `:nth-child`: &lt;an+b&gt; parsing difference bug 1364009 [14]
-* test_rule_insertion.html: bug 1363665 [83]
 
 ## Ignore
 

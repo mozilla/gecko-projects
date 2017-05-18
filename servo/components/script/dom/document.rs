@@ -34,7 +34,6 @@ use dom::bindings::reflector::{DomObject, reflect_dom_object};
 use dom::bindings::str::{DOMString, USVString};
 use dom::bindings::xmlname::{namespace_from_domstring, validate_and_extract, xml_name_type};
 use dom::bindings::xmlname::XMLName::InvalidXMLName;
-use dom::browsingcontext::BrowsingContext;
 use dom::closeevent::CloseEvent;
 use dom::comment::Comment;
 use dom::customevent::CustomEvent;
@@ -89,6 +88,7 @@ use dom::treewalker::TreeWalker;
 use dom::uievent::UIEvent;
 use dom::webglcontextevent::WebGLContextEvent;
 use dom::window::{ReflowReason, Window};
+use dom::windowproxy::WindowProxy;
 use dom_struct::dom_struct;
 use encoding::EncodingRef;
 use encoding::all::UTF_8;
@@ -100,7 +100,7 @@ use ipc_channel::ipc::{self, IpcSender};
 use js::jsapi::{JSContext, JSObject, JSRuntime};
 use js::jsapi::JS_GetRuntime;
 use msg::constellation_msg::{ALT, CONTROL, SHIFT, SUPER};
-use msg::constellation_msg::{FrameId, Key, KeyModifiers, KeyState};
+use msg::constellation_msg::{BrowsingContextId, Key, KeyModifiers, KeyState};
 use net_traits::{FetchResponseMsg, IpcSend, ReferrerPolicy};
 use net_traits::CookieSource::NonHTTP;
 use net_traits::CoreResourceMsg::{GetCookiesForUrl, SetCookiesForUrl};
@@ -401,9 +401,9 @@ impl Document {
 
     /// https://html.spec.whatwg.org/multipage/#concept-document-bc
     #[inline]
-    pub fn browsing_context(&self) -> Option<Root<BrowsingContext>> {
+    pub fn browsing_context(&self) -> Option<Root<WindowProxy>> {
         if self.has_browsing_context {
-            self.window.maybe_browsing_context()
+            self.window.maybe_window_proxy()
         } else {
             None
         }
@@ -826,6 +826,7 @@ impl Document {
         }
     }
 
+    #[allow(unsafe_code)]
     pub fn handle_mouse_event(&self,
                               js_runtime: *mut JSRuntime,
                               button: MouseButton,
@@ -841,7 +842,9 @@ impl Document {
         let node = match self.window.hit_test_query(client_point, false) {
             Some(node_address) => {
                 debug!("node address is {:?}", node_address);
-                node::from_untrusted_node_address(js_runtime, node_address)
+                unsafe {
+                    node::from_untrusted_node_address(js_runtime, node_address)
+                }
             },
             None => return,
         };
@@ -988,13 +991,16 @@ impl Document {
         *self.last_click_info.borrow_mut() = Some((now, click_pos));
     }
 
+    #[allow(unsafe_code)]
     pub fn handle_touchpad_pressure_event(&self,
                                           js_runtime: *mut JSRuntime,
                                           client_point: Point2D<f32>,
                                           pressure: f32,
                                           phase_now: TouchpadPressurePhase) {
         let node = match self.window.hit_test_query(client_point, false) {
-            Some(node_address) => node::from_untrusted_node_address(js_runtime, node_address),
+            Some(node_address) => unsafe {
+                node::from_untrusted_node_address(js_runtime, node_address)
+            },
             None => return
         };
 
@@ -1089,6 +1095,7 @@ impl Document {
         event.fire(target);
     }
 
+    #[allow(unsafe_code)]
     pub fn handle_mouse_move_event(&self,
                                    js_runtime: *mut JSRuntime,
                                    client_point: Option<Point2D<f32>>,
@@ -1104,7 +1111,7 @@ impl Document {
         };
 
         let maybe_new_target = self.window.hit_test_query(client_point, true).and_then(|address| {
-            let node = node::from_untrusted_node_address(js_runtime, address);
+            let node = unsafe { node::from_untrusted_node_address(js_runtime, address) };
             node.inclusive_ancestors()
                 .filter_map(Root::downcast::<Element>)
                 .next()
@@ -1186,6 +1193,7 @@ impl Document {
                            ReflowReason::MouseEvent);
     }
 
+    #[allow(unsafe_code)]
     pub fn handle_touch_event(&self,
                               js_runtime: *mut JSRuntime,
                               event_type: TouchEventType,
@@ -1202,7 +1210,9 @@ impl Document {
         };
 
         let node = match self.window.hit_test_query(point, false) {
-            Some(node_address) => node::from_untrusted_node_address(js_runtime, node_address),
+            Some(node_address) => unsafe {
+                node::from_untrusted_node_address(js_runtime, node_address)
+            },
             None => return TouchEventResult::Processed(false),
         };
         let el = match node.downcast::<Element>() {
@@ -1887,9 +1897,9 @@ impl Document {
     }
 
     /// Find an iframe element in the document.
-    pub fn find_iframe(&self, frame_id: FrameId) -> Option<Root<HTMLIFrameElement>> {
+    pub fn find_iframe(&self, browsing_context_id: BrowsingContextId) -> Option<Root<HTMLIFrameElement>> {
         self.iter_iframes()
-            .find(|node| node.frame_id() == frame_id)
+            .find(|node| node.browsing_context_id() == browsing_context_id)
     }
 
     pub fn get_dom_loading(&self) -> u64 {
@@ -1945,12 +1955,8 @@ impl Document {
     }
 
     pub fn nodes_from_point(&self, client_point: &Point2D<f32>) -> Vec<UntrustedNodeAddress> {
-        let page_point =
-            Point2D::new(client_point.x + self.window.PageXOffset() as f32,
-                         client_point.y + self.window.PageYOffset() as f32);
-
         if !self.window.reflow(ReflowGoal::ForScriptQuery,
-                               ReflowQueryType::NodesFromPoint(page_point, *client_point),
+                               ReflowQueryType::NodesFromPoint(*client_point),
                                ReflowReason::Query) {
             return vec!();
         };
@@ -3480,7 +3486,9 @@ impl DocumentMethods for Document {
             Some(untrusted_node_address) => {
                 let js_runtime = unsafe { JS_GetRuntime(window.get_cx()) };
 
-                let node = node::from_untrusted_node_address(js_runtime, untrusted_node_address);
+                let node = unsafe {
+                    node::from_untrusted_node_address(js_runtime, untrusted_node_address)
+                };
                 let parent_node = node.GetParentNode().unwrap();
                 let element_ref = node.downcast::<Element>().unwrap_or_else(|| {
                     parent_node.downcast::<Element>().unwrap()
@@ -3515,7 +3523,9 @@ impl DocumentMethods for Document {
         // Step 1 and Step 3
         let mut elements: Vec<Root<Element>> = self.nodes_from_point(point).iter()
             .flat_map(|&untrusted_node_address| {
-                let node = node::from_untrusted_node_address(js_runtime, untrusted_node_address);
+                let node = unsafe {
+                    node::from_untrusted_node_address(js_runtime, untrusted_node_address)
+                };
                 Root::downcast::<Element>(node)
         }).collect();
 

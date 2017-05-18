@@ -17,7 +17,7 @@ function test() {
 
   // If a sidebar is already open, close it.
   if (!document.getElementById("sidebar-box").hidden) {
-    info("Unexpected sidebar found - a previous test failed to cleanup correctly");
+    ok(false, "Unexpected sidebar found - a previous test failed to cleanup correctly");
     SidebarUI.hide();
   }
 
@@ -131,7 +131,7 @@ function test() {
       finish();
     } else {
       // Create a new tab and run the test.
-      gBrowser.selectedTab = gBrowser.addTab();
+      gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
       currentTest = tests.shift();
       testPlacesPanel(function() {
                         changeSidebarDirection("ltr");

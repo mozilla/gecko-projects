@@ -362,6 +362,7 @@ KeyframeEffectReadOnly::DoUpdateProperties(StyleType&& aStyle)
   }
 
   mProperties = Move(properties);
+  UpadateEffectSet();
 
   for (AnimationProperty& property : mProperties) {
     property.mIsRunningOnCompositor =
@@ -527,12 +528,9 @@ KeyframeEffectReadOnly::EnsureBaseStyles(
              "a valid nsPresContext");
 
   RefPtr<ServoComputedValues> baseComputedValues;
-  nsIAtom* pseudoAtom = mTarget->mPseudoType < CSSPseudoElementType::Count
-                      ? nsCSSPseudoElements::GetPseudoAtom(mTarget->mPseudoType)
-                      : nullptr;
   for (const AnimationProperty& property : aProperties) {
     EnsureBaseStyle(property,
-                    pseudoAtom,
+                    mTarget->mPseudoType,
                     presContext,
                     baseComputedValues);
   }
@@ -541,7 +539,7 @@ KeyframeEffectReadOnly::EnsureBaseStyles(
 void
 KeyframeEffectReadOnly::EnsureBaseStyle(
   const AnimationProperty& aProperty,
-  nsIAtom* aPseudoAtom,
+  CSSPseudoElementType aPseudoType,
   nsPresContext* aPresContext,
   RefPtr<ServoComputedValues>& aBaseComputedValues)
 {
@@ -561,7 +559,7 @@ KeyframeEffectReadOnly::EnsureBaseStyle(
   if (!aBaseComputedValues) {
     aBaseComputedValues =
       aPresContext->StyleSet()->AsServo()->
-        GetBaseComputedValuesForElement(mTarget->mElement, aPseudoAtom);
+        GetBaseComputedValuesForElement(mTarget->mElement, aPseudoType);
   }
   RefPtr<RawServoAnimationValue> baseValue =
     Servo_ComputedValues_ExtractAnimationValue(aBaseComputedValues,
@@ -1014,6 +1012,7 @@ KeyframeEffectReadOnly::UpdateTargetRegistration()
     EffectSet* effectSet =
       EffectSet::GetOrCreateEffectSet(mTarget->mElement, mTarget->mPseudoType);
     effectSet->AddEffect(*this);
+    UpadateEffectSet(effectSet);
   } else {
     UnregisterTarget();
   }
@@ -1026,6 +1025,7 @@ KeyframeEffectReadOnly::UnregisterTarget()
     EffectSet::GetEffectSet(mTarget->mElement, mTarget->mPseudoType);
   if (effectSet) {
     effectSet->RemoveEffect(*this);
+
     if (effectSet->IsEmpty()) {
       EffectSet::DestroyEffectSet(mTarget->mElement, mTarget->mPseudoType);
     }
@@ -1879,6 +1879,25 @@ KeyframeEffectReadOnly::ContainsAnimatedScale(const nsIFrame* aFrame) const
   }
 
   return false;
+}
+
+void
+KeyframeEffectReadOnly::UpadateEffectSet(EffectSet* aEffectSet) const
+{
+  EffectSet* effectSet =
+    aEffectSet ? aEffectSet
+               : EffectSet::GetEffectSet(mTarget->mElement,
+                                         mTarget->mPseudoType);
+  if (!effectSet) {
+    return;
+  }
+
+  if (HasAnimationOfProperty(eCSSProperty_opacity)) {
+    effectSet->SetMayHaveOpacityAnimation();
+  }
+  if (HasAnimationOfProperty(eCSSProperty_transform)) {
+    effectSet->SetMayHaveTransformAnimation();
+  }
 }
 
 template

@@ -42,6 +42,26 @@ function synthesizeNativeMouseClick(aElement) {
   });
 }
 
+async function endCustomizing(aWindow = window) {
+  if (aWindow.document.documentElement.getAttribute("customizing") != "true") {
+    return true;
+  }
+  await SpecialPowers.pushPrefEnv({set: [["browser.uiCustomization.disableAnimation", true]]});
+  let eventPromise = BrowserTestUtils.waitForEvent(aWindow.gNavToolbox, "aftercustomization");
+  aWindow.gCustomizeMode.exit();
+  return eventPromise;
+}
+
+async function startCustomizing(aWindow = window) {
+  if (aWindow.document.documentElement.getAttribute("customizing") == "true") {
+    return true;
+  }
+  await SpecialPowers.pushPrefEnv({set: [["browser.uiCustomization.disableAnimation", true]]});
+  let eventPromise = BrowserTestUtils.waitForEvent(aWindow.gNavToolbox, "customizationready");
+  aWindow.gCustomizeMode.enter();
+  return eventPromise;
+}
+
 add_task(async function init() {
   await promiseNewEngine("testEngine.xml");
 
@@ -407,7 +427,7 @@ add_task(async function refocus_window_doesnt_open_popup_keyboard() {
 
 // Clicking the search go button shouldn't open the popup
 add_no_popup_task(async function search_go_doesnt_open_popup() {
-  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
 
   gURLBar.focus();
   textbox.value = "foo";
@@ -518,5 +538,33 @@ add_task(async function dont_rollup_oncaretmove() {
   EventUtils.synthesizeKey("VK_ESCAPE", {});
   await promise;
 
+  textbox.value = "";
+});
+
+// Entering customization mode shouldn't open the popup.
+add_task(async function dont_open_in_customization() {
+  gURLBar.focus();
+  textbox.value = "foo";
+
+  let promise = promiseEvent(searchPopup, "popupshown");
+  EventUtils.synthesizeKey("VK_TAB", {});
+  await promise;
+  isnot(searchPopup.getAttribute("showonlysettings"), "true", "Should show the full popup");
+
+  info("Entering customization mode");
+  let sawPopup = false;
+  function listener() {
+    sawPopup = true;
+  }
+  searchPopup.addEventListener("popupshowing", listener);
+  await PanelUI.show();
+  promise =  promiseEvent(searchPopup, "popuphidden");
+  await startCustomizing();
+  await promise;
+
+  searchPopup.removeEventListener("popupshowing", listener);
+  ok(!sawPopup, "Shouldn't have seen the suggestions popup");
+
+  await endCustomizing();
   textbox.value = "";
 });

@@ -65,7 +65,7 @@ set_config('MOZ_DMD', dmd)
 set_define('MOZ_DMD', dmd)
 add_old_configure_assignment('MOZ_DMD', dmd)
 imply_option('--enable-profiling', dmd)
-# --enable-jemalloc is implied below.
+imply_option('--enable-jemalloc', dmd)
 imply_option('--enable-replace-malloc', dmd)
 
 # JACK cubeb backend
@@ -704,9 +704,11 @@ def stylo(stylo_enabled, bindgen_config_paths, bindgen_enabled):
     elif not bindgen_config_paths:
         die(dedent('''\
         Could not find LLVM/Clang installation for compiling stylo build-time
-        bindgen.  Please put 'llvm-config' in your PATH, specify the
-        'LLVM_CONFIG' environment variable, or pass the '--with-libclang-path'
-        and '--with-clang-path' options to configure.'''))
+        bindgen.  Please specify the 'LLVM_CONFIG' environment variable
+        (recommended), pass the '--with-libclang-path' and '--with-clang-path'
+        options to configure, or put 'llvm-config' in your PATH.  Altering your
+        PATH may expose 'clang' as well, potentially altering your compiler,
+        which may not be what you intended.'''))
 
     return namespace(
         enabled=bool(stylo_enabled),
@@ -721,18 +723,6 @@ set_define('MOZ_STYLO', delayed_getattr(stylo, 'enabled'))
 set_config('MOZ_LIBCLANG_PATH', delayed_getattr(stylo, 'libclang_path'))
 set_config('MOZ_CLANG_PATH', delayed_getattr(stylo, 'clang_path'))
 set_config('MOZ_STYLO_BINDGEN', delayed_getattr(stylo, 'bindgen_enabled'))
-
-@depends(stylo, target, dmd)
-def jemalloc(stylo, target, dmd):
-    if stylo and target.kernel in ('Darwin', 'Linux', 'WINNT'):
-        # Avoid a moving performance target if the default allocator
-        # is changed on Tier1 platforms (see bug 1291356).
-        return 'moz'
-    elif dmd:
-        return True
-
-imply_option('--enable-jemalloc', jemalloc,
-             reason='--enable-dmd or --enable-stylo')
 
 option('--with-servo', env='SERVO_TARGET_DIR', nargs=1,
        help='Absolute path of the target directory where libgeckoservo can '

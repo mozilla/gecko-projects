@@ -42,7 +42,7 @@ fuzzy-if(skiaContent,2,5) needs-focus skip-if(stylo) == focus-handling.html focu
 fuzzy-if(skiaContent,1,1) skip-if(stylo) == number-selected.html number-selected-ref.html
 
 # pseudo-elements not usable from content:
-fails-if(stylo) == number-pseudo-elements.html number-pseudo-elements-ref.html
+== number-pseudo-elements.html number-pseudo-elements-ref.html
 
 fails-if(stylo) == number-placeholder.html number-placeholder-ref.html
 
@@ -54,4 +54,4 @@ fuzzy(128,4) == number-reframe-anon-text-field.html number-reframe-anon-text-fie
 == pseudo-classes.html about:blank
 
 # Style inheritance:
-pref(layout.css.moz-appearance.enabled,true) fails-if(stylo) == number-style-inheritance.html number-style-inheritance-ref.html
+pref(layout.css.moz-appearance.enabled,true) == number-style-inheritance.html number-style-inheritance-ref.html

@@ -20,7 +20,9 @@
                               "::cssparser::Color::CurrentColor",
                               alias=maybe_moz_logical_alias(product, side, "-moz-border-%s-color"),
                               spec=maybe_logical_spec(side, "color"),
-                              animation_value_type="IntermediateColor", logical = side[1])}
+                              animation_value_type="IntermediateColor",
+                              logical=side[1],
+                              allow_quirks=not side[1])}
 
     ${helpers.predefined_type("border-%s-style" % side[0], "BorderStyle",
                               "specified::BorderStyle::none",
@@ -190,9 +192,9 @@ ${helpers.single_keyword("-moz-float-edge", "content-box margin-box",
                          spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/-moz-float-edge)",
                          animation_value_type="none")}
 
-${helpers.predefined_type("border-image-source", "LayerImage",
-    initial_value="computed_value::T(None)",
-    initial_specified_value="SpecifiedValue(None)",
+${helpers.predefined_type("border-image-source", "ImageLayer",
+    initial_value="Either::First(None_)",
+    initial_specified_value="Either::First(None_)",
     spec="https://drafts.csswg.org/css-backgrounds/#the-background-image",
     vector=False,
     animation_value_type="none",
@@ -717,7 +719,7 @@ ${helpers.predefined_type("border-image-source", "LayerImage",
 
         let mut values = vec![];
         for _ in 0..4 {
-            let value = input.try(|input| NumberOrPercentage::parse(context, input));
+            let value = input.try(|input| NumberOrPercentage::parse_non_negative(context, input));
             match value {
                 Ok(val) => values.push(val),
                 Err(_) => break,
