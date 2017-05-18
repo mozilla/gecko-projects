@@ -226,15 +226,6 @@ config = {
         'stage_ssh_key': 'trybld_dsa',
         'branch_supports_uploadsymbols': False,
         'use_clobberer': False,
-        "update_channel": "nightly",
-        'platform_overrides': {
-            'android-api-15-old-id': {
-                "update_channel": "nightly-old-id",
-            },
-            'android-x86-old-id': {
-                "update_channel": "nightly-old-id",
-            },
-        }
     },
 
     ### project branches

@@ -66,7 +66,6 @@ def match_run_on_projects(project, run_on_projects):
     """Determine whether the given project is included in the `run-on-projects`
     parameter, applying expansions for things like "integration" mentioned in
     the attribute documentation."""
-    return True
     if 'all' in run_on_projects:
         return True
     if 'integration' in run_on_projects:

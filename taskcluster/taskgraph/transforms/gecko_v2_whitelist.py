@@ -50,8 +50,6 @@ JOB_NAME_WHITELIST = set([
     'macosx64-clang-tidy',
     'macosx64-debug',
     'macosx64-opt',
-    'macosx64-nightly-opt',
-    'macosx64-nightly-l10n-opt',
     'macosx64-qr-debug',
     'macosx64-qr-opt',
     'macosx64-st-an-debug',
