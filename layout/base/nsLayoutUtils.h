@@ -197,6 +197,12 @@ public:
   static bool HasDisplayPort(nsIContent* aContent);
 
   /**
+   * Check whether the given frame has a displayport. It returns false
+   * for scrolled frames and true for the corresponding scroll frame.
+   */
+  static bool FrameHasDisplayPort(nsIFrame* aFrame);
+
+  /**
    * Check if the given element has a margins based displayport but is missing a
    * displayport base rect that it needs to properly compute a displayport rect.
    */
@@ -868,7 +874,7 @@ public:
                                              const nsIFrame* aAncestor,
                                              bool* aPreservesAxisAlignedRectangles = nullptr,
                                              mozilla::Maybe<Matrix4x4>* aMatrixCache = nullptr,
-                                             bool aStopAtStackingContext = false,
+                                             bool aStopAtStackingContextAndDisplayPort = false,
                                              nsIFrame** aOutAncestor = nullptr);
 
 
@@ -878,7 +884,7 @@ public:
    */
   static Matrix4x4 GetTransformToAncestor(nsIFrame *aFrame,
                                           const nsIFrame *aAncestor,
-                                          bool aStopAtStackingContext = false,
+                                          bool aStopAtStackingContextAndDisplayPort = false,
                                           nsIFrame** aOutAncestor = nullptr);
 
   /**

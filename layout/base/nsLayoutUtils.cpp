@@ -2712,10 +2712,25 @@ nsLayoutUtils::PostTranslate(Matrix4x4& aTransform, const nsPoint& aOrigin, floa
   aTransform.PostTranslate(gfxOrigin);
 }
 
+// We want to this return true for the scroll frame, but not the
+// scrolled frame (which has the same content).
+bool
+nsLayoutUtils::FrameHasDisplayPort(nsIFrame* aFrame)
+{
+  if (!aFrame->GetContent() || !HasDisplayPort(aFrame->GetContent())) {
+    return false;
+  }
+  nsIScrollableFrame* sf = do_QueryFrame(aFrame);
+  if (sf) {
+    return true;
+  }
+  return false;
+}
+
 Matrix4x4
 nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame,
                                       const nsIFrame *aAncestor,
-                                      bool aStopAtStackingContext,
+                                      bool aStopAtStackingContextAndDisplayPort,
                                       nsIFrame** aOutAncestor)
 {
   nsIFrame* parent;
@@ -2723,12 +2738,14 @@ nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame,
   if (aFrame == aAncestor) {
     return ctm;
   }
-  ctm = aFrame->GetTransformMatrix(aAncestor, &parent, aStopAtStackingContext);
-  while (parent && parent != aAncestor && (!aStopAtStackingContext || !parent->IsStackingContext())) {
+  ctm = aFrame->GetTransformMatrix(aAncestor, &parent, aStopAtStackingContextAndDisplayPort);
+  while (parent && parent != aAncestor &&
+    (!aStopAtStackingContextAndDisplayPort ||
+      (!parent->IsStackingContext() && !FrameHasDisplayPort(parent)))) {
     if (!parent->Extend3DContext()) {
       ctm.ProjectTo2D();
     }
-    ctm = ctm * parent->GetTransformMatrix(aAncestor, &parent, aStopAtStackingContext);
+    ctm = ctm * parent->GetTransformMatrix(aAncestor, &parent, aStopAtStackingContextAndDisplayPort);
   }
   if (aOutAncestor) {
     *aOutAncestor = parent;
@@ -3035,7 +3052,7 @@ TransformGfxRectToAncestor(nsIFrame *aFrame,
                            const nsIFrame *aAncestor,
                            bool* aPreservesAxisAlignedRectangles = nullptr,
                            Maybe<Matrix4x4>* aMatrixCache = nullptr,
-                           bool aStopAtStackingContext = false,
+                           bool aStopAtStackingContextAndDisplayPort = false,
                            nsIFrame** aOutAncestor = nullptr)
 {
   Matrix4x4 ctm;
@@ -3044,7 +3061,7 @@ TransformGfxRectToAncestor(nsIFrame *aFrame,
     ctm = aMatrixCache->value();
   } else {
     // Else, compute it
-    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor, aStopAtStackingContext, aOutAncestor);
+    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor, aStopAtStackingContextAndDisplayPort, aOutAncestor);
     if (aMatrixCache) {
       // and put it in the cache, if provided
       *aMatrixCache = Some(ctm);
@@ -3107,7 +3124,7 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
                                             const nsIFrame* aAncestor,
                                             bool* aPreservesAxisAlignedRectangles /* = nullptr */,
                                             Maybe<Matrix4x4>* aMatrixCache /* = nullptr */,
-                                            bool aStopAtStackingContext /* = false */,
+                                            bool aStopAtStackingContextAndDisplayPort /* = false */,
                                             nsIFrame** aOutAncestor /* = nullptr */)
 {
   SVGTextFrame* text = GetContainingSVGTextFrame(aFrame);
@@ -3122,7 +3139,7 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
     result = ToRect(text->TransformFrameRectFromTextChild(aRect, aFrame));
     result = TransformGfxRectToAncestor(text, result, aAncestor,
                                         nullptr, aMatrixCache,
-                                        aStopAtStackingContext, aOutAncestor);
+                                        aStopAtStackingContextAndDisplayPort, aOutAncestor);
     // TransformFrameRectFromTextChild could involve any kind of transform, we
     // could drill down into it to get an answer out of it but we don't yet.
     if (aPreservesAxisAlignedRectangles)
@@ -3134,7 +3151,7 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
                   NSAppUnitsToFloatPixels(aRect.height, srcAppUnitsPerDevPixel));
     result = TransformGfxRectToAncestor(aFrame, result, aAncestor,
                                         aPreservesAxisAlignedRectangles, aMatrixCache,
-                                        aStopAtStackingContext, aOutAncestor);
+                                        aStopAtStackingContextAndDisplayPort, aOutAncestor);
   }
 
   float destAppUnitsPerDevPixel = aAncestor->PresContext()->AppUnitsPerDevPixel();
@@ -3718,7 +3735,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     nsIScrollableFrame* rootScrollableFrame = presShell->GetRootScrollFrameAsScrollable();
     MOZ_ASSERT(rootScrollableFrame);
     nsRect displayPortBase = aFrame->GetVisualOverflowRectRelativeToSelf();
-    Unused << rootScrollableFrame->DecideScrollableLayer(&builder, &displayPortBase,
+    nsRect temp = displayPortBase;
+    Unused << rootScrollableFrame->DecideScrollableLayer(&builder, &displayPortBase, &temp,
                 /* aAllowCreateDisplayPort = */ true);
   }
 
@@ -3819,7 +3837,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         std::vector<WeakFrame>* modifiedFrames = aFrame->Properties().Get(nsIFrame::ModifiedFrameList());
         nsTArray<nsIFrame*>* deletedFrames = aFrame->Properties().Get(nsIFrame::DeletedFrameList());
 
-        nsTArray<nsIFrame*> stackingContexts;
+        nsTArray<nsIFrame*> framesWithProps;
 
         AnimatedGeometryRoot* modifiedAGR = nullptr;
         nsRect modifiedDirty;
@@ -3848,46 +3866,77 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           while (currentFrame != aFrame) {
             overflow = TransformFrameRectToAncestor(currentFrame, overflow, aFrame,
                                                     nullptr, nullptr,
-                                                    /* aStopAtStackingContext = */ true, &currentFrame);
+                                                    /* aStopAtStackingContextAndDisplayPort = */ true,
+                                                    &currentFrame);
 
-            // If we found an intermediate stacking context with an existing display item
-            // then we can store the dirty rect there and stop.
-            if (currentFrame != aFrame &&
-                FrameLayerBuilder::HasRetainedDataFor(currentFrame)) {
-
-              // Convert directly into aFrames coordinate space.
-              nsRect rootOverflow = TransformFrameRectToAncestor(currentFrame, overflow, aFrame);
-              rootOverflow.IntersectRect(rootOverflow, dirtyRect);
-
-              // If the stacking context intersected the visible region then make
-              // sure we build display items for it.
-              // TODO: Isn't this always true, unless we've invalidated the stacking context itself (
-              // or an ancestor of it), in which case we'll be rebuilding all the things anyway?
-              if (!rootOverflow.IsEmpty()) {
-                builder.MarkFrameForDisplayIfVisible(currentFrame);
-
-                // Store the stacking context relative dirty area such
-                // that display list building will pick it up when it
-                // gets to it.
-                nsDisplayListBuilder::DisplayListBuildingData* data=
-                  currentFrame->Properties().Get(nsDisplayListBuilder::DisplayListBuildingRect());
-                if (!data) {
-                  data = new nsDisplayListBuilder::DisplayListBuildingData;
-                  currentFrame->Properties().Set(nsDisplayListBuilder::DisplayListBuildingRect(), data);
+            if (FrameHasDisplayPort(currentFrame)) {
+              nsIScrollableFrame* sf = do_QueryFrame(currentFrame);
+              MOZ_ASSERT(sf);
+              nsRect displayPort;
+              bool hasDisplayPort =
+                GetDisplayPort(currentFrame->GetContent(), &displayPort, RelativeTo::ScrollPort);
+              MOZ_ASSERT(hasDisplayPort);
+              // get it relative to the scrollport (from the scrollframe)
+              nsRect r = overflow - sf->GetScrollPortRect().TopLeft();
+              r.IntersectRect(r, displayPort);
+              if (!r.IsEmpty()) {
+                nsRect* rect =
+                  currentFrame->Properties().Get(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect());
+                if (!rect) {
+                  rect = new nsRect();
+                  currentFrame->Properties().Set(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect(), rect);
                   currentFrame->SetHasOverrideDirtyRegion(true);
-                  stackingContexts.AppendElement(currentFrame);
                 }
-                data->mDirtyRect.UnionRect(data->mDirtyRect, overflow);
-                if (!data->mModifiedAGR) {
-                  data->mModifiedAGR = agr;
-                } else if (data->mModifiedAGR != agr) {
-                  data->mDirtyRect = currentFrame->GetVisualOverflowRectRelativeToSelf();
-                }
+                rect->UnionRect(*rect, r);
+                framesWithProps.AppendElement(currentFrame);
+                overflow = sf->GetScrollPortRect();
+              } else {
+                // Don't contribute to the root dirty area at all.
+                overflow.SetEmpty();
+                break;
               }
+            }
 
-              // Don't contribute to the root dirty area at all.
-              overflow.SetEmpty();
-              break;
+            if (currentFrame->IsStackingContext()) {
+              // If we found an intermediate stacking context with an existing display item
+              // then we can store the dirty rect there and stop.
+              if (currentFrame != aFrame &&
+                  FrameLayerBuilder::HasRetainedDataFor(currentFrame)) {
+
+                // Convert directly into aFrames coordinate space.
+                nsRect rootOverflow = TransformFrameRectToAncestor(currentFrame, overflow, aFrame);
+                rootOverflow.IntersectRect(rootOverflow, dirtyRect);
+
+                // If the stacking context intersected the visible region then make
+                // sure we build display items for it.
+                // TODO: Isn't this always true, unless we've invalidated the stacking context itself (
+                // or an ancestor of it), in which case we'll be rebuilding all the things anyway?
+                if (!rootOverflow.IsEmpty()) {
+                  builder.MarkFrameForDisplayIfVisible(currentFrame);
+
+                  // Store the stacking context relative dirty area such
+                  // that display list building will pick it up when it
+                  // gets to it.
+                  nsDisplayListBuilder::DisplayListBuildingData* data=
+                    currentFrame->Properties().Get(nsDisplayListBuilder::DisplayListBuildingRect());
+                  if (!data) {
+                    data = new nsDisplayListBuilder::DisplayListBuildingData;
+                    currentFrame->Properties().Set(nsDisplayListBuilder::DisplayListBuildingRect(), data);
+                    currentFrame->SetHasOverrideDirtyRegion(true);
+                    framesWithProps.AppendElement(currentFrame);
+                  }
+                  data->mDirtyRect.UnionRect(data->mDirtyRect, overflow);
+                  if (!data->mModifiedAGR) {
+                    data->mModifiedAGR = agr;
+                  } else if (data->mModifiedAGR != agr) {
+                    data->mDirtyRect = currentFrame->GetVisualOverflowRectRelativeToSelf();
+                  }
+                }
+
+                // Don't contribute to the root dirty area at all.
+                overflow.SetEmpty();
+                break;
+              }
             }
           }
           modifiedDirty.UnionRect(modifiedDirty, overflow);
@@ -3949,9 +3998,10 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           deletedFrames->Clear();
         }
 
-        for (nsIFrame* f: stackingContexts) {
+        for (nsIFrame* f: framesWithProps) {
           f->SetHasOverrideDirtyRegion(false);
           f->Properties().Delete(nsDisplayListBuilder::DisplayListBuildingRect());
+          f->Properties().Delete(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect());
         }
       }
 

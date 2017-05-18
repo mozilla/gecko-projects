@@ -399,10 +399,12 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     if (nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame()) {
       nsIScrollableFrame* rootScrollableFrame = presShell->GetRootScrollFrameAsScrollable();
       MOZ_ASSERT(rootScrollableFrame);
-      // Use a copy, so the dirty rect doesn't get modified to the display port.
-      nsRect copy = dirty;
+      // Use a copy, so the rects don't get modified.
+      nsRect copyOfDirty = dirty;
+      nsRect copyOfVisible = visible;
       haveDisplayPort = rootScrollableFrame->DecideScrollableLayer(aBuilder,
-                          &copy, /* aAllowCreateDisplayPort = */ true);
+                          &copyOfVisible, &copyOfDirty,
+                          /* aAllowCreateDisplayPort = */ true);
       if (!gfxPrefs::LayoutUseContainersForRootFrames()) {
         haveDisplayPort = false;
       }

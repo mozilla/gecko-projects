@@ -2977,8 +2977,12 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
   }
 
   if (child->HasOverrideDirtyRegion()) {
-    dirty = child->Properties().Get(nsDisplayListBuilder::DisplayListBuildingRect())->mDirtyRect;
-    dirty.IntersectRect(dirty, visible);
+    nsDisplayListBuilder::DisplayListBuildingData* data =
+      child->Properties().Get(nsDisplayListBuilder::DisplayListBuildingRect());
+    if (data) {
+      dirty = data->mDirtyRect;
+      dirty.IntersectRect(dirty, visible);
+    }
   }
 
   NS_ASSERTION(childType != nsGkAtoms::placeholderFrame,
@@ -6231,7 +6235,7 @@ nsIFrame::IsLeaf() const
 Matrix4x4
 nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
                              nsIFrame** aOutAncestor,
-                             bool aStopAtStackingContext)
+                             bool aStopAtStackingContextAndDisplayPort)
 {
   NS_PRECONDITION(aOutAncestor, "Need a place to put the ancestor!");
 
@@ -6317,7 +6321,8 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
   while (!(*aOutAncestor)->IsTransformed() &&
          !nsLayoutUtils::IsPopup(*aOutAncestor) &&
          *aOutAncestor != aStopAtAncestor &&
-         (!aStopAtStackingContext || !(*aOutAncestor)->IsStackingContext())) {
+         (!aStopAtStackingContextAndDisplayPort ||
+          (!(*aOutAncestor)->IsStackingContext() && !nsLayoutUtils::FrameHasDisplayPort(*aOutAncestor)))) {
     /* If no parent, stop iterating.  Otherwise, update the ancestor. */
     nsIFrame* parent = nsLayoutUtils::GetCrossDocParentFrame(*aOutAncestor);
     if (!parent)

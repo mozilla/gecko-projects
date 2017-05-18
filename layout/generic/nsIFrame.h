@@ -2648,7 +2648,7 @@ public:
    */
   Matrix4x4 GetTransformMatrix(const nsIFrame* aStopAtAncestor,
                                nsIFrame **aOutAncestor,
-                               bool aStopAtStackingContext = false);
+                               bool aStopAtStackingContextAndDisplayPort = false);
 
   /**
    * Bit-flags to pass to IsFrameOfType()
