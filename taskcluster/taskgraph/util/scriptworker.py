@@ -215,10 +215,7 @@ BALROG_CHANNEL_SCOPES = {
 PUSH_APK_SCOPE_ALIAS_TO_PROJECT = [[
     'central', set([
         'mozilla-central',
-    ])
-], [
-    'date', set([
-        'mozilla-central',
+        'date',
     ])
 ], [
     'beta', set([
