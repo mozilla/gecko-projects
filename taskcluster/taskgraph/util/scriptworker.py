@@ -248,6 +248,7 @@ PUSH_APK_GOOGLE_PLAY_TRACT = {
 
 PUSH_APK_BREAKPOINT_WORKER_TYPE = {
     'central': 'aws-provisioner-v1/taskcluster-generic',
+    'date': 'aws-provisioner-v1/taskcluster-generic',
     'beta': 'null-provisioner/human-breakpoint',
     'release': 'null-provisioner/human-breakpoint',
     'default': 'invalid/invalid',
