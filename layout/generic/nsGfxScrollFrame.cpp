@@ -5023,9 +5023,11 @@ ScrollFrameHelper::IsMaybeScrollingActive() const
     return true;
   }
 
+  nsIContent* content = mOuter->GetContent();
   return mHasBeenScrolledRecently ||
       IsAlwaysActive() ||
-      mWillBuildScrollableLayer;
+      nsLayoutUtils::HasDisplayPort(content) ||
+      nsContentUtils::HasScrollgrab(content);
 }
 
 bool
@@ -5037,9 +5039,11 @@ ScrollFrameHelper::IsScrollingActive(nsDisplayListBuilder* aBuilder) const
     return true;
   }
 
+  nsIContent* content = mOuter->GetContent();
   return mHasBeenScrolledRecently ||
         IsAlwaysActive() ||
-        mWillBuildScrollableLayer;
+        nsLayoutUtils::HasDisplayPort(content) ||
+        nsContentUtils::HasScrollgrab(content);
 }
 
 /**
