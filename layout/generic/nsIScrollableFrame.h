@@ -316,6 +316,12 @@ public:
    */
   virtual bool IsScrollingActive(nsDisplayListBuilder* aBuilder) = 0;
 
+  /**
+   * Same as the above except doesn't take into account will-change budget,
+   * which means that it can be called during display list building.
+   */
+  virtual bool IsMaybeScrollingActive() const = 0;
+
   virtual bool MayBeAsynchronouslyScrolled() = 0;
   /**
    * Returns true if the scrollframe is currently processing an async

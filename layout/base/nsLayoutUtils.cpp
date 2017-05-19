@@ -2154,20 +2154,6 @@ nsLayoutUtils::IsFixedPosFrameInDisplayPort(const nsIFrame* aFrame)
   return ViewportHasDisplayPort(aFrame->PresContext());
 }
 
-NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(ScrollbarThumbLayerized, bool)
-
-/* static */ void
-nsLayoutUtils::SetScrollbarThumbLayerization(nsIFrame* aThumbFrame, bool aLayerize)
-{
-  aThumbFrame->Properties().Set(ScrollbarThumbLayerized(), aLayerize);
-}
-
-bool
-nsLayoutUtils::IsScrollbarThumbLayerized(nsIFrame* aThumbFrame)
-{
-  return aThumbFrame->Properties().Get(ScrollbarThumbLayerized());
-}
-
 // static
 nsIScrollableFrame*
 nsLayoutUtils::GetNearestScrollableFrameForDirection(nsIFrame* aFrame,

@@ -83,6 +83,7 @@
 #include "nsCSSProps.h"
 #include "nsPluginFrame.h"
 #include "nsSVGMaskFrame.h"
+#include "nsSliderFrame.h"
 #include "mozilla/layers/WebRenderBridgeChild.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/layers/WebRenderDisplayItemLayer.h"
@@ -1576,8 +1577,11 @@ nsDisplayListBuilder::IsAnimatedGeometryRoot(nsIFrame* aFrame, bool& aIsAsync, n
 
   // Treat the slider thumb as being as an active scrolled root when it wants
   // its own layer so that it can move without repainting.
-  if (parentType == nsGkAtoms::sliderFrame && nsLayoutUtils::IsScrollbarThumbLayerized(aFrame)) {
-    return true;
+  if (parentType == nsGkAtoms::sliderFrame) {
+    nsIScrollableFrame* sf = static_cast<nsSliderFrame*>(parent)->GetScrollFrame();
+    if (sf && sf->IsMaybeScrollingActive()) {
+      return true;
+    }
   }
 
   if (aFrame->StyleDisplay()->mPosition == NS_STYLE_POSITION_STICKY &&

@@ -140,6 +140,9 @@ public:
   // fall back to main-thread dragging.
   void AsyncScrollbarDragRejected();
 
+  // Returns the associated scrollframe that contains this slider if any.
+  nsIScrollableFrame* GetScrollFrame();
+
 private:
 
   bool GetScrollToClick();
