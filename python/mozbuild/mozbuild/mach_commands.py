@@ -1905,17 +1905,11 @@ class Repackage(MachCommandBase):
     '''
     @Command('repackage', category='misc',
              description='Repackage artifacts into different formats.')
-    def repackage(self):
-        print("TODO: Usage")
-        # TODO: Print usage.
-
-    @SubCommand('repackage', 'dmg',
-                description='Repackage a tar file into a .dmg for OSX')
     @CommandArgument('--input', '-i', type=str, required=True,
         help='Input filename')
     @CommandArgument('--output', '-o', type=str, required=True,
         help='Output filename')
-    def repackage_dmg(self, input, output):
+    def repackage(self, input, output):
         if not os.path.exists(input):
             print('Input file does not exist: %s' % input)
             return 1
@@ -1925,31 +1919,10 @@ class Repackage(MachCommandBase):
                   'prior to |mach repackage|.')
             return 1
 
-        from mozbuild.repackaging.dmg import repackage_dmg
-        repackage_dmg(input, output)
-
-    @SubCommand('repackage', 'installer',
-                description='Repackage into a Windows installer exe')
-    @CommandArgument('--tag', type=str, required=True,
-        help='The .tag file used to build the installer')
-    @CommandArgument('--setupexe', type=str, required=True,
-        help='setup.exe file inside the installer')
-    @CommandArgument('--package', type=str, required=False,
-        help='Optional package .zip for building a full installer')
-    @CommandArgument('--output', '-o', type=str, required=True,
-        help='Output filename')
-    def repackage_installer(self, tag, setupexe, package, output):
-        from mozbuild.repackaging.installer import repackage_installer
-        repackage_installer(self.topsrcdir, tag, setupexe, package, output)
-
-    @SubCommand('repackage', 'mar',
-                description='Repackage into complete MAR file')
-    @CommandArgument('--input', '-i', type=str, required=True,
-        help='Input filename')
-    @CommandArgument('--mar', type=str, required=True,
-        help='Mar binary path')
-    @CommandArgument('--output', '-o', type=str, required=True,
-        help='Output filename')
-    def repackage_installer(self, input, mar, output):
-        from mozbuild.repackaging.mar import repackage_mar
-        repackage_mar(self.topsrcdir, input, mar, output)
+        if output.endswith('.dmg'):
+            from mozbuild.repackage import repackage_dmg
+            repackage_dmg(input, output)
+        else:
+            print("Repackaging into output '%s' is not yet supported." % output)
+            return 1
+        return 0

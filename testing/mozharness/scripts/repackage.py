@@ -82,7 +82,6 @@ class Repackage(BaseScript):
         infile = os.path.join(config['input_home'], config['input_filename'])
         outfile = os.path.join(dirs['abs_upload_dir'], config['output_filename'])
         command = [python, 'mach', '--log-no-times', 'repackage',
-                   'dmg', # TODO: This should depend on the config, or something
                    '--input', infile,
                    '--output', outfile]
         return self.run_command(
