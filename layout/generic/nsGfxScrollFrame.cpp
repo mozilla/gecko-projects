@@ -3600,7 +3600,8 @@ ScrollFrameHelper::DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
     wasUsingDisplayPort = nsLayoutUtils::HasDisplayPort(content);
 
     if (aAllowCreateDisplayPort) {
-      nsLayoutUtils::MaybeCreateDisplayPort(*aBuilder, mOuter);
+      //nsLayoutUtils::MaybeCreateDisplayPort(*aBuilder, mOuter,
+        //nsLayoutUtils::RepaintMode::DoNotRepaint);
 
       nsRect displayportBase = *aVisibleRect;
       nsPresContext* pc = mOuter->PresContext();
