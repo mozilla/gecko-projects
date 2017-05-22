@@ -1768,9 +1768,7 @@ public:
       return;
     }
 
-    mClipChain = mozilla::Get<0>(*mState);
-    mClip = mozilla::Get<1>(*mState);
-    mDisableSubpixelAA = mozilla::Get<2>(*mState);
+    mozilla::Tie(mClipChain, mClip, mDisableSubpixelAA) = *mState;
 
     VisitChildren([](nsDisplayItem* i) { i->RestoreState(); });
   }
