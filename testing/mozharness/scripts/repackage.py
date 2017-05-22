@@ -10,21 +10,6 @@ from mozharness.mozilla.mock import ERROR_MSGS
 
 class Repackage(BaseScript):
 
-    config_options = [[
-        ['--signed-input', ],
-        {"action": "store",
-         "dest": "signed_input",
-         "type": "string",
-         "default": os.environ.get('SIGNED_INPUT'),
-         "help": "Specify the signed input (url)"}
-    ], [
-        ['--output-file', ],
-        {"action": "store",
-         "dest": "output_file",
-         "type": "string",
-         "help": "Specify the output filename"}
-    ]]
-
     def __init__(self, require_config_file=False):
         script_kwargs = {
             'all_actions': [
@@ -35,24 +20,19 @@ class Repackage(BaseScript):
         }
         BaseScript.__init__(
             self,
-            config_options=self.config_options,
             require_config_file=require_config_file,
             **script_kwargs
         )
 
-        # Assert we have it either passed in or in environment
-        assert self.config.get('signed_input'), \
-            "Must pass --signed-input or be set in the environment as SIGNED_INPUT"
-
     def download_input(self):
         config = self.config
 
-        url = config['signed_input']
-        status = self.download_file(url=url,
-                                    file_name=config['input_filename'],
-                                    parent_dir=config['input_home'])
-        if not status:
-            self.fatal("Unable to fetch signed input from %s" % config['signed_input'])
+        for path, url in config["download_config"]:
+            status = self.download_file(url=url,
+                                        file_name=path,
+                                        parent_dir=config['input_home'])
+            if not status:
+                self.fatal("Unable to fetch signed input from %s" % url)
 
     def setup(self):
         self._run_tooltool()
@@ -78,18 +58,15 @@ class Repackage(BaseScript):
     def repackage(self):
         config = self.config
         dirs = self.query_abs_dirs()
-        python = self.query_exe('python2.7')
-        infile = os.path.join(config['input_home'], config['input_filename'])
-        outfile = os.path.join(dirs['abs_upload_dir'], config['output_filename'])
-        command = [python, 'mach', '--log-no-times', 'repackage',
-                   'dmg', # TODO: This should depend on the config, or something
-                   '--input', infile,
-                   '--output', outfile]
-        return self.run_command(
-            command=command,
-            cwd=dirs['abs_mozilla_dir'],
-            halt_on_failure=True,
-        )
+        for repack_config in config["repackage_config"]:
+            command = [sys.executable, 'mach', '--log-no-times', 'repackage']
+            for arg in repack_config["repackage_args"]:
+                command.append(arg % repack_config)
+            self.run_command(
+                command=command,
+                cwd=dirs['abs_mozilla_dir'],
+                halt_on_failure=True,
+            )
 
     def _run_tooltool(self):
         config = self.config
