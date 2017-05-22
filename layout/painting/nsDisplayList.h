@@ -2297,7 +2297,7 @@ public:
   /**
    * Disable usage of component alpha. Currently only relevant for items that have text.
    */
-  virtual void DisableComponentAlpha() {}
+  void DisableComponentAlpha() { mDisableSubpixelAA = true; }
 
   /**
    * Check if we can add async animations to the layer for this display item.
@@ -2360,6 +2360,7 @@ protected:
   // Guaranteed to be contained in GetBounds().
   nsRect    mVisibleRect;
   bool      mForceNotVisible;
+  bool      mDisableSubpixelAA;
 #ifdef MOZ_DUMP_PAINTING
   // True if this frame has been painted.
   bool      mPainted;

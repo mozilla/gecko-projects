@@ -483,7 +483,6 @@ class nsDisplayHeaderFooter : public nsDisplayItem {
 public:
   nsDisplayHeaderFooter(nsDisplayListBuilder* aBuilder, nsPageFrame *aFrame)
     : nsDisplayItem(aBuilder, aFrame)
-    , mDisableSubpixelAA(false)
   {
     MOZ_COUNT_CTOR(nsDisplayHeaderFooter);
   }
@@ -509,13 +508,6 @@ public:
     bool snap;
     return GetBounds(aBuilder, &snap);
   }
-
-  virtual void DisableComponentAlpha() override
-  {
-    mDisableSubpixelAA = true;
-  }
-protected:
-  bool mDisableSubpixelAA;
 };
 
 //------------------------------------------------------------------------------
@@ -576,7 +568,7 @@ nsPageFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     nsIFrame* page = child;
     while ((page = GetNextPage(page)) != nullptr) {
       nsRect childDirty = dirtyRect + child->GetOffsetTo(page);
-      
+
       nsDisplayListBuilder::AutoBuildingDisplayList
         buildingForChild(aBuilder, page, childDirty, childDirty,
                          aBuilder->IsAtRootOfPseudoStackingContext());

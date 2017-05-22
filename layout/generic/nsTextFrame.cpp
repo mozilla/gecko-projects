@@ -4843,10 +4843,6 @@ public:
                                          const nsDisplayItemGeometry* aGeometry,
                                          nsRegion *aInvalidRegion) const override;
 
-  virtual void DisableComponentAlpha() override {
-    mDisableSubpixelAA = true;
-  }
-
   void RenderToContext(gfxContext* aCtx, nsDisplayListBuilder* aBuilder, bool aIsRecording = false);
 
   bool CanApplyOpacity() const override
@@ -4942,7 +4938,6 @@ public:
   nsRect mBounds;
 
   float mOpacity;
-  bool mDisableSubpixelAA;
 };
 
 class nsDisplayTextGeometry : public nsCharClipGeometry
@@ -5008,7 +5003,6 @@ nsDisplayText::nsDisplayText(nsDisplayListBuilder* aBuilder, nsTextFrame* aFrame
                              const Maybe<bool>& aIsSelected)
   : nsCharClipDisplayItem(aBuilder, aFrame)
   , mOpacity(1.0f)
-  , mDisableSubpixelAA(false)
 {
   MOZ_COUNT_CTOR(nsDisplayText);
   mIsFrameSelected = aIsSelected;

@@ -279,10 +279,8 @@ nsTextBoxFrame::UpdateAttributes(nsIAtom*         aAttribute,
 
 class nsDisplayXULTextBox : public nsDisplayItem {
 public:
-  nsDisplayXULTextBox(nsDisplayListBuilder* aBuilder,
-                      nsTextBoxFrame* aFrame) :
-    nsDisplayItem(aBuilder, aFrame),
-    mDisableSubpixelAA(false)
+  nsDisplayXULTextBox(nsDisplayListBuilder* aBuilder, nsTextBoxFrame* aFrame)
+    : nsDisplayItem(aBuilder, aFrame)
   {
     MOZ_COUNT_CTOR(nsDisplayXULTextBox);
   }
@@ -300,16 +298,9 @@ public:
 
   virtual nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) const override;
 
-  virtual void DisableComponentAlpha() override
-  {
-    mDisableSubpixelAA = true;
-  }
-
   void PaintTextToContext(nsRenderingContext* aCtx,
                           nsPoint aOffset,
                           const nscolor* aColor);
-
-  bool mDisableSubpixelAA;
 };
 
 static void
