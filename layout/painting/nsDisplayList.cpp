@@ -2639,6 +2639,22 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
       aBuilder->GetCurrentFrameOffsetToReferenceFrame();
 }
 
+void
+nsDisplayItem::VisitChildren(void (*aCallBack)(nsDisplayItem*))
+{
+  if (!GetChildren()) {
+    return;
+  }
+
+  for (nsDisplayItem* i = GetChildren()->GetBottom(); i; i = i->GetAbove()) {
+    aCallBack(i);
+
+    if (i->GetChildren()) {
+      i->VisitChildren(aCallBack);
+    }
+  }
+}
+
 /* static */ bool
 nsDisplayItem::ForceActiveLayers()
 {

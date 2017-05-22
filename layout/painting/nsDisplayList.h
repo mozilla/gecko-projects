@@ -19,6 +19,7 @@
 #include "mozilla/EnumSet.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/TemplateLib.h" // mozilla::tl::Max
+#include "Mozilla/Tuple.h"
 #include "nsCOMPtr.h"
 #include "nsContainerFrame.h"
 #include "nsPoint.h"
@@ -1757,6 +1758,47 @@ public:
   }
 
   /**
+   * Restores the previous state for this display item and its children.
+   * Does nothing if there is no state to restore.
+   */
+  virtual void RestoreState()
+  {
+    if (!mState) {
+      // There is no state to restore.
+      return;
+    }
+
+    mClipChain = mozilla::Get<0>(*mState);
+    mClip = mozilla::Get<1>(*mState);
+    mDisableSubpixelAA = mozilla::Get<2>(*mState);
+
+    VisitChildren([](nsDisplayItem* i) { i->RestoreState(); });
+  }
+
+  /**
+   * Saves the current state for the display item and its children.
+   * Does nothing if the state has already been saved.
+   */
+  virtual void SaveState()
+  {
+    if (mState) {
+      // The initial item state is already saved, and since we are assuming that
+      // the item creation is deterministic, there is no need to save it again.
+      return;
+    }
+
+    // State for FuseClipChainUpTo() and DisableComponentAlpha().
+    mState.emplace(mClipChain, mClip, mDisableSubpixelAA);
+
+    VisitChildren([](nsDisplayItem* i) { i->SaveState(); });
+  }
+
+  /**
+   * Visits all child display items and calls the given function on them.
+   */
+  virtual void VisitChildren(void (*aCallBack)(nsDisplayItem*));
+
+  /**
    * Downcasts this item to nsDisplayWrapList, if possible.
    */
   virtual const nsDisplayWrapList* AsDisplayWrapList() const { return nullptr; }
@@ -2365,6 +2407,12 @@ protected:
   // True if this frame has been painted.
   bool      mPainted;
 #endif
+
+private:
+  using State = mozilla::Tuple<RefPtr<const DisplayItemClipChain>,
+                               const DisplayItemClip*,
+                               bool>;
+  mozilla::Maybe<State> mState;
 };
 
 /**

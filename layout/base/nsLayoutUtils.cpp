@@ -3585,7 +3585,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   for (nsDisplayItem* i = aNewList->GetBottom(); i != nullptr; i = i->GetAbove()) {
     newListLookup[std::make_pair(i->Frame(), i->GetPerFrameKey())] = i;
   }
-  
+
   for (nsDisplayItem* i = aOldList->GetBottom(); i != nullptr; i = i->GetAbove()) {
     oldListLookup[std::make_pair(i->Frame(), i->GetPerFrameKey())] = i;
   }
@@ -3632,7 +3632,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
 
     merged.AppendToTop(i);
   }
-  
+
   while ((old = aOldList->RemoveBottom())) {
     if (!aDeletedFrames.Contains(old->Frame()) &&
         !IsAnyAncestorModified(old->Frame())) {
@@ -3641,7 +3641,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
       old->Destroy(aBuilder);
     }
   }
-  
+
   //printf_stderr("Painting --- Merged list:\n");
   //nsFrame::PrintDisplayList(aBuilder, merged);
 
@@ -3874,6 +3874,13 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         AnimatedGeometryRoot* modifiedAGR = nullptr;
         nsRect modifiedDirty;
         bool success = true;
+
+        // Restore the previously saved state of the display items in the old
+        // display list.
+        for (nsDisplayItem* i = list.GetBottom(); i; i = i->GetAbove()) {
+          i->RestoreState();
+        }
+
         //printf_stderr("Dirty frames: ");
         for (nsIFrame* f : *modifiedFrames) {
           if (!f) {
@@ -4008,7 +4015,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           //printf_stderr("Painting --- Modified list (dirty %d,%d,%d,%d):\n",
           //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
           //nsFrame::PrintDisplayList(&builder, modifiedDL);
-          
+
           builder.LeavePresShell(aFrame, &modifiedDL);
           builder.EnterPresShell(aFrame);
 
@@ -4042,6 +4049,12 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         builder.SetDirtyRect(dirtyRect);
         aFrame->BuildDisplayListForStackingContext(&builder, &list);
       }
+    }
+
+    // Save the current state of the display items so that they can be reused
+    // during display list merging.
+    for (nsDisplayItem* i = list.GetBottom(); i; i = i->GetAbove()) {
+      i->SaveState();
     }
 
     nsIAtom* frameType = aFrame->GetType();
