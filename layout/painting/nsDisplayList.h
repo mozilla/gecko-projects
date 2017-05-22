@@ -2341,7 +2341,7 @@ public:
   }
 
 protected:
-  nsDisplayItem() { mAbove = nullptr; }
+  nsDisplayItem() = delete;
 
   nsIFrame* mFrame;
   RefPtr<const DisplayItemClipChain> mClipChain;
@@ -4079,7 +4079,7 @@ public:
   }
 
 protected:
-  nsDisplayWrapList() {}
+  nsDisplayWrapList() = delete;
 
   void MergeFromTrackingMergedFrames(const nsDisplayWrapList* aOther)
   {
@@ -4125,7 +4125,7 @@ public:
   nsresult WrapListsInPlace(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                             const nsDisplayListSet& aLists);
 protected:
-  nsDisplayWrapper() {}
+  nsDisplayWrapper() = default;
 };
 
 /**
