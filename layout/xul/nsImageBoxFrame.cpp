@@ -449,7 +449,7 @@ nsDisplayXULImage::AllocateGeometry(nsDisplayListBuilder* aBuilder)
 void
 nsDisplayXULImage::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                              const nsDisplayItemGeometry* aGeometry,
-                                             nsRegion* aInvalidRegion)
+                                             nsRegion* aInvalidRegion) const
 {
   auto boxFrame = static_cast<nsImageBoxFrame*>(mFrame);
   auto geometry =
@@ -775,7 +775,7 @@ nsImageBoxFrame::OnFrameUpdate(imgIRequest* aRequest)
   if ((0 == mRect.width) || (0 == mRect.height)) {
     return NS_OK;
   }
- 
+
   InvalidateLayer(TYPE_XUL_IMAGE);
 
   return NS_OK;

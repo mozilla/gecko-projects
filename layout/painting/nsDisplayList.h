@@ -1923,7 +1923,7 @@ public:
    */
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion)
+                                         nsRegion* aInvalidRegion) const
   {
     const nsDisplayItemGenericGeometry* geometry = static_cast<const nsDisplayItemGenericGeometry*>(aGeometry);
     bool snap;
@@ -1939,7 +1939,7 @@ public:
    */
   void ComputeInvalidationRegionDifference(nsDisplayListBuilder* aBuilder,
                                            const nsDisplayItemBoundsGeometry* aGeometry,
-                                           nsRegion* aInvalidRegion)
+                                           nsRegion* aInvalidRegion) const
   {
     bool snap;
     nsRect bounds = GetBounds(aBuilder, &snap);
@@ -1963,7 +1963,7 @@ public:
    * longer is, because generally that means there is no display item to
    * call this method on.
    */
-  virtual void NotifyRenderingChanged() {}
+  virtual void NotifyRenderingChanged() const {}
 
   /**
    * @param aSnap set to true if the edges of the rectangles of the opaque
@@ -2049,7 +2049,7 @@ public:
    * Return true to indicate the layer should be constructed even if it's
    * completely invisible.
    */
-  virtual bool ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder)
+  virtual bool ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder) const
   {
     return false;
   }
@@ -3105,7 +3105,7 @@ public:
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override;
+                                         nsRegion* aInvalidRegion) const override;
 
   virtual nsRegion GetTightBounds(nsDisplayListBuilder* aBuilder,
                                   bool* aSnap) const override
@@ -3156,7 +3156,7 @@ public:
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override
+                                         nsRegion* aInvalidRegion) const override
   {
     const nsDisplaySolidColorGeometry* geometry =
       static_cast<const nsDisplaySolidColorGeometry*>(aGeometry);
@@ -3245,7 +3245,7 @@ public:
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override
+                                         nsRegion* aInvalidRegion) const override
   {
     const nsDisplaySolidColorRegionGeometry* geometry =
       static_cast<const nsDisplaySolidColorRegionGeometry*>(aGeometry);
@@ -3360,7 +3360,7 @@ public:
    * (GetBounds() returns the background painting area.)
    * Can be called only when mBackgroundStyle is non-null.
    */
-  nsRect GetPositioningArea();
+  nsRect GetPositioningArea() const;
 
   /**
    * Returns true if existing rendered pixels of this display item may need
@@ -3369,7 +3369,7 @@ public:
    * If false, only the changed painting area needs to be redrawn when the
    * positioning area size changes but its position does not.
    */
-  bool RenderingMightDependOnPositioningAreaSizeChange();
+  bool RenderingMightDependOnPositioningAreaSizeChange() const;
 
   virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override
   {
@@ -3378,7 +3378,7 @@ public:
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override;
+                                         nsRegion* aInvalidRegion) const override;
 
   virtual bool CanOptimizeToImageLayer(LayerManager* aManager,
                                        nsDisplayListBuilder* aBuilder) override;
@@ -3461,13 +3461,13 @@ public:
    * (GetBounds() returns the background painting area.)
    * Can be called only when mBackgroundStyle is non-null.
    */
-  nsRect GetPositioningArea();
+  nsRect GetPositioningArea() const;
 
   /**
    * Return whether our frame's document does not have the state
    * NS_DOCUMENT_STATE_WINDOW_INACTIVE.
    */
-  bool IsWindowActive();
+  bool IsWindowActive() const;
 
   virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override
   {
@@ -3476,7 +3476,7 @@ public:
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override;
+                                         nsRegion* aInvalidRegion) const override;
 
   virtual void WriteDebugInfo(std::stringstream& aStream) override;
 protected:
@@ -3539,7 +3539,7 @@ public:
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override
+                                         nsRegion* aInvalidRegion) const override
   {
     const nsDisplaySolidColorGeometry* geometry = static_cast<const nsDisplaySolidColorGeometry*>(aGeometry);
     if (mColor.ToABGR() != geometry->mColor) {
@@ -3630,7 +3630,7 @@ public:
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override;
+                                         nsRegion* aInvalidRegion) const override;
 
   virtual void ApplyOpacity(nsDisplayListBuilder* aBuilder,
                             float aOpacity,
@@ -3697,7 +3697,7 @@ public:
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override
+                                         nsRegion* aInvalidRegion) const override
   {
     const nsDisplayBoxShadowInnerGeometry* geometry = static_cast<const nsDisplayBoxShadowInnerGeometry*>(aGeometry);
     if (!geometry->mPaddingRect.IsEqualInterior(GetPaddingRect())) {
@@ -4168,7 +4168,7 @@ public:
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override
+                                         nsRegion* aInvalidRegion) const override
   {
     // We don't need to compute an invalidation region since we have LayerTreeInvalidation
   }
@@ -4219,7 +4219,7 @@ public:
                                              const ContainerLayerParameters& aContainerParameters) override;
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override
+                                         nsRegion* aInvalidRegion) const override
   {
     // We don't need to compute an invalidation region since we have LayerTreeInvalidation
   }
@@ -4421,7 +4421,7 @@ public:
   virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
                                  nsRegion* aVisibleRegion) override;
 
-  virtual bool ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder) override;
+  virtual bool ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder) const override;
 
   virtual nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
                                    bool* aSnap) const override;
@@ -4582,7 +4582,7 @@ public:
                                              LayerManager* aManager,
                                              const ContainerLayerParameters& aContainerParameters) override;
 
-  virtual bool ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder) override
+  virtual bool ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder) const override
   {
     return true;
   }
@@ -4695,7 +4695,7 @@ public:
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override;
+                                         nsRegion* aInvalidRegion) const override;
 protected:
   bool ValidateSVGFrame();
 
@@ -4763,7 +4763,7 @@ public:
   }
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override;
+                                         nsRegion* aInvalidRegion) const override;
 #ifdef MOZ_DUMP_PAINTING
   void PrintEffects(nsACString& aTo);
 #endif
@@ -4845,7 +4845,7 @@ public:
   }
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override;
+                                         nsRegion* aInvalidRegion) const override;
 #ifdef MOZ_DUMP_PAINTING
   void PrintEffects(nsACString& aTo);
 #endif
@@ -4980,7 +4980,7 @@ public:
   virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
                                              LayerManager* aManager,
                                              const ContainerLayerParameters& aContainerParameters) override;
-  virtual bool ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder) override;
+  virtual bool ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder) const override;
   virtual bool ComputeVisibility(nsDisplayListBuilder *aBuilder,
                                  nsRegion *aVisibleRegion) override;
 
@@ -4996,7 +4996,7 @@ public:
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override
+                                         nsRegion* aInvalidRegion) const override
   {
     // We don't need to compute an invalidation region since we have LayerTreeInvalidation
   }
@@ -5156,7 +5156,7 @@ public:
                                                              nsRect* aDirtyRect);
   bool CanUseAsyncAnimations(nsDisplayListBuilder* aBuilder) override;
 
-  bool MayBeAnimated(nsDisplayListBuilder* aBuilder);
+  bool MayBeAnimated(nsDisplayListBuilder* aBuilder) const;
 
   virtual void WriteDebugInfo(std::stringstream& aStream) override;
 
@@ -5292,7 +5292,7 @@ public:
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override
+                                         nsRegion* aInvalidRegion) const override
   {}
 
   virtual nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
@@ -5310,7 +5310,7 @@ public:
                                    LayerManager* aManager,
                                    const ContainerLayerParameters& aParameters) override;
 
-  virtual bool ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder) override
+  virtual bool ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder) const override
   {
     if (!mList.GetChildren()->GetTop()) {
       return false;
@@ -5385,7 +5385,7 @@ public:
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override;
+                                         nsRegion* aInvalidRegion) const override;
 
   struct ClipEdges {
     ClipEdges(const nsDisplayItem& aItem,

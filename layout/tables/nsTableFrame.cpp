@@ -1227,7 +1227,7 @@ nsDisplayTableItem::AllocateGeometry(nsDisplayListBuilder* aBuilder)
 void
 nsDisplayTableItem::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                               const nsDisplayItemGeometry* aGeometry,
-                                              nsRegion *aInvalidRegion)
+                                              nsRegion *aInvalidRegion) const
 {
   auto geometry =
     static_cast<const nsDisplayTableItemGeometry*>(aGeometry);

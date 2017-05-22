@@ -201,7 +201,7 @@ public:
 
   virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) override;
 
-  virtual void NotifyRenderingChanged() override
+  virtual void NotifyRenderingChanged() const override
   {
     mFrame->Properties().Delete(nsIFrame::CachedBackgroundImageDT());
   }

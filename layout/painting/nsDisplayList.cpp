@@ -3548,7 +3548,7 @@ nsDisplayBackgroundImage::IsUniform(nsDisplayListBuilder* aBuilder) const
 }
 
 nsRect
-nsDisplayBackgroundImage::GetPositioningArea()
+nsDisplayBackgroundImage::GetPositioningArea() const
 {
   if (!mBackgroundStyle) {
     return nsRect();
@@ -3564,7 +3564,7 @@ nsDisplayBackgroundImage::GetPositioningArea()
 }
 
 bool
-nsDisplayBackgroundImage::RenderingMightDependOnPositioningAreaSizeChange()
+nsDisplayBackgroundImage::RenderingMightDependOnPositioningAreaSizeChange() const
 {
   if (!mBackgroundStyle)
     return false;
@@ -3634,9 +3634,10 @@ nsDisplayBackgroundImage::PaintInternal(nsDisplayListBuilder* aBuilder,
   nsDisplayBackgroundGeometry::UpdateDrawResult(this, result);
 }
 
-void nsDisplayBackgroundImage::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
-                                                         const nsDisplayItemGeometry* aGeometry,
-                                                         nsRegion* aInvalidRegion)
+void
+nsDisplayBackgroundImage::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                                    const nsDisplayItemGeometry* aGeometry,
+                                                    nsRegion* aInvalidRegion) const
 {
   if (!mBackgroundStyle) {
     return;
@@ -3795,7 +3796,7 @@ nsDisplayThemedBackground::ProvidesFontSmoothingBackgroundColor(nscolor* aColor)
 }
 
 nsRect
-nsDisplayThemedBackground::GetPositioningArea()
+nsDisplayThemedBackground::GetPositioningArea() const
 {
   return mBackgroundRect;
 }
@@ -3823,15 +3824,17 @@ nsDisplayThemedBackground::PaintInternal(nsDisplayListBuilder* aBuilder,
   theme->DrawWidgetBackground(aCtx, mFrame, mAppearance, mBackgroundRect, drawing);
 }
 
-bool nsDisplayThemedBackground::IsWindowActive()
+bool
+nsDisplayThemedBackground::IsWindowActive() const
 {
   EventStates docState = mFrame->GetContent()->OwnerDoc()->GetDocumentState();
   return !docState.HasState(NS_DOCUMENT_STATE_WINDOW_INACTIVE);
 }
 
-void nsDisplayThemedBackground::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
-                                                          const nsDisplayItemGeometry* aGeometry,
-                                                          nsRegion* aInvalidRegion)
+void
+nsDisplayThemedBackground::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                                     const nsDisplayItemGeometry* aGeometry,
+                                                     nsRegion* aInvalidRegion) const
 {
   const nsDisplayThemedBackgroundGeometry* geometry = static_cast<const nsDisplayThemedBackgroundGeometry*>(aGeometry);
 
@@ -4605,7 +4608,7 @@ nsDisplayBorder::AllocateGeometry(nsDisplayListBuilder* aBuilder)
 void
 nsDisplayBorder::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                            const nsDisplayItemGeometry* aGeometry,
-                                           nsRegion* aInvalidRegion)
+                                           nsRegion* aInvalidRegion) const
 {
   const nsDisplayBorderGeometry* geometry = static_cast<const nsDisplayBorderGeometry*>(aGeometry);
   bool snap;
@@ -5175,7 +5178,7 @@ nsDisplayBoxShadowOuter::CreateWebRenderCommands(wr::DisplayListBuilder& aBuilde
 void
 nsDisplayBoxShadowOuter::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                                    const nsDisplayItemGeometry* aGeometry,
-                                                   nsRegion* aInvalidRegion)
+                                                   nsRegion* aInvalidRegion) const
 {
   const nsDisplayBoxShadowOuterGeometry* geometry =
     static_cast<const nsDisplayBoxShadowOuterGeometry*>(aGeometry);
@@ -6181,7 +6184,7 @@ nsDisplaySubDocument::ComputeVisibility(nsDisplayListBuilder* aBuilder,
 }
 
 bool
-nsDisplaySubDocument::ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder)
+nsDisplaySubDocument::ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder) const
 {
   bool usingDisplayPort = UseDisplayPortForViewport(aBuilder, mFrame);
 
@@ -7245,7 +7248,7 @@ nsDisplayTransform::GetAccumulatedPreserved3DTransform(nsDisplayListBuilder* aBu
 }
 
 bool
-nsDisplayTransform::ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder)
+nsDisplayTransform::ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder) const
 {
   // The visible rect of a Preserves-3D frame is just an intermediate
   // result.  It should always build a layer to make sure it is
@@ -7298,7 +7301,7 @@ already_AddRefed<Layer> nsDisplayTransform::BuildLayer(nsDisplayListBuilder *aBu
 }
 
 bool
-nsDisplayTransform::MayBeAnimated(nsDisplayListBuilder* aBuilder)
+nsDisplayTransform::MayBeAnimated(nsDisplayListBuilder* aBuilder) const
 {
   // If EffectCompositor::HasAnimationsForCompositor() is true then we can
   // completely bypass the main thread for this animation, so it is always
@@ -7807,7 +7810,7 @@ nsCharClipDisplayItem::AllocateGeometry(nsDisplayListBuilder* aBuilder)
 void
 nsCharClipDisplayItem::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion)
+                                         nsRegion* aInvalidRegion) const
 {
   const nsCharClipGeometry* geometry = static_cast<const nsCharClipGeometry*>(aGeometry);
 
@@ -7883,7 +7886,7 @@ nsDisplaySVGEffects::UserSpaceOffset() const
 void
 nsDisplaySVGEffects::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                                const nsDisplayItemGeometry* aGeometry,
-                                               nsRegion* aInvalidRegion)
+                                               nsRegion* aInvalidRegion) const
 {
   const nsDisplaySVGEffectGeometry* geometry =
     static_cast<const nsDisplaySVGEffectGeometry*>(aGeometry);
@@ -8178,7 +8181,7 @@ bool nsDisplayMask::ComputeVisibility(nsDisplayListBuilder* aBuilder,
 void
 nsDisplayMask::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion)
+                                         nsRegion* aInvalidRegion) const
 {
   nsDisplaySVGEffects::ComputeInvalidationRegion(aBuilder, aGeometry,
                                                  aInvalidRegion);
@@ -8346,8 +8349,9 @@ nsDisplayFilter::GetLayerState(nsDisplayListBuilder* aBuilder,
   return LAYER_SVG_EFFECTS;
 }
 
-bool nsDisplayFilter::ComputeVisibility(nsDisplayListBuilder* aBuilder,
-                                        nsRegion* aVisibleRegion)
+bool
+nsDisplayFilter::ComputeVisibility(nsDisplayListBuilder* aBuilder,
+                                   nsRegion* aVisibleRegion)
 {
   nsPoint offset = ToReferenceFrame();
   nsRect dirtyRect =
@@ -8367,7 +8371,7 @@ bool nsDisplayFilter::ComputeVisibility(nsDisplayListBuilder* aBuilder,
 void
 nsDisplayFilter::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                            const nsDisplayItemGeometry* aGeometry,
-                                           nsRegion* aInvalidRegion)
+                                           nsRegion* aInvalidRegion) const
 {
   nsDisplaySVGEffects::ComputeInvalidationRegion(aBuilder, aGeometry,
                                                  aInvalidRegion);

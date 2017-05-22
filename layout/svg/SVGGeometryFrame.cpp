@@ -86,7 +86,7 @@ public:
 
   void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                  const nsDisplayItemGeometry* aGeometry,
-                                 nsRegion *aInvalidRegion) override;
+                                 nsRegion *aInvalidRegion) const override;
 };
 
 void
@@ -135,10 +135,9 @@ nsDisplaySVGGeometry::Paint(nsDisplayListBuilder* aBuilder,
 }
 
 void
-nsDisplaySVGGeometry::ComputeInvalidationRegion(
-  nsDisplayListBuilder* aBuilder,
-  const nsDisplayItemGeometry* aGeometry,
-  nsRegion* aInvalidRegion)
+nsDisplaySVGGeometry::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                                const nsDisplayItemGeometry* aGeometry,
+                                                nsRegion* aInvalidRegion) const
 {
   auto geometry =
     static_cast<const nsDisplayItemGenericImageGeometry*>(aGeometry);
@@ -419,7 +418,7 @@ SVGGeometryFrame::ReflowSVG()
   if ((hitTestFlags & SVG_HIT_TEST_STROKE)) {
    flags |= nsSVGUtils::eBBoxIncludeStrokeGeometry;
   }
- 
+
   gfxRect extent = GetBBoxContribution(Matrix(), flags).ToThebesRect();
   mRect = nsLayoutUtils::RoundGfxRectToAppRect(extent,
             PresContext()->AppUnitsPerCSSPixel());
@@ -481,7 +480,7 @@ SVGGeometryFrame::NotifySVGChanged(uint32_t aFlags)
     // Stroke currently contributes to our mRect, and our stroke depends on
     // the transform to our outer-<svg> if |vector-effect:non-scaling-stroke|.
     nsSVGUtils::ScheduleReflowSVG(this);
-  } 
+  }
 }
 
 SVGBBox
