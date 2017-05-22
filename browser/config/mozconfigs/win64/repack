@@ -1,0 +1,4 @@
+# This mozconfig is responsible merely for setting up
+# windows signed internals repackaging.
+
+ac_add_options --disable-compile-environment
