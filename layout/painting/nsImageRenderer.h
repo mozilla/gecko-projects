@@ -14,6 +14,8 @@ class gfxDrawable;
 namespace mozilla {
 
 namespace layers {
+class StackingContextHelper;
+class WebRenderParentCommand;
 class WebRenderDisplayItemLayer;
 } // namespace layers
 
@@ -205,15 +207,17 @@ public:
    * {background|mask}-specific arguments.
    * @see nsLayoutUtils::DrawImage() for parameters.
    */
-  void BuildWebRenderDisplayItemsForLayer(nsPresContext*       aPresContext,
-                                          mozilla::wr::DisplayListBuilder& aBuilder,
-                                          mozilla::layers::WebRenderDisplayItemLayer* aLayer,
-                                          const nsRect&        aDest,
-                                          const nsRect&        aFill,
-                                          const nsPoint&       aAnchor,
-                                          const nsRect&        aDirty,
-                                          const nsSize&        aRepeatSize,
-                                          float                aOpacity);
+  DrawResult BuildWebRenderDisplayItemsForLayer(nsPresContext*       aPresContext,
+                                                mozilla::wr::DisplayListBuilder& aBuilder,
+                                                const mozilla::layers::StackingContextHelper& aSc,
+                                                nsTArray<layers::WebRenderParentCommand>& aParentCommands,
+                                                mozilla::layers::WebRenderDisplayItemLayer* aLayer,
+                                                const nsRect&        aDest,
+                                                const nsRect&        aFill,
+                                                const nsPoint&       aAnchor,
+                                                const nsRect&        aDirty,
+                                                const nsSize&        aRepeatSize,
+                                                float                aOpacity);
 
   /**
    * Draw the image to a single component of a border-image style rendering.
@@ -260,6 +264,8 @@ public:
   void SetMaskOp(uint8_t aMaskOp) { mMaskOp = aMaskOp; }
   void PurgeCacheForViewportChange(const mozilla::Maybe<nsSize>& aSVGViewportSize,
                                    const bool aHasRatio);
+  nsStyleImageType GetType() const { return mType; }
+  already_AddRefed<nsStyleGradient> GetGradientData();
 
 private:
   /**
@@ -286,16 +292,18 @@ private:
    *
    * @see nsLayoutUtils::DrawImage() for other parameters.
    */
-  void BuildWebRenderDisplayItems(nsPresContext*       aPresContext,
-                                  mozilla::wr::DisplayListBuilder& aBuilder,
-                                  mozilla::layers::WebRenderDisplayItemLayer* aLayer,
-                                  const nsRect&        aDirtyRect,
-                                  const nsRect&        aDest,
-                                  const nsRect&        aFill,
-                                  const nsPoint&       aAnchor,
-                                  const nsSize&        aRepeatSize,
-                                  const mozilla::CSSIntRect& aSrc,
-                                  float                aOpacity = 1.0);
+  DrawResult BuildWebRenderDisplayItems(nsPresContext*       aPresContext,
+                                        mozilla::wr::DisplayListBuilder& aBuilder,
+                                        const mozilla::layers::StackingContextHelper& aSc,
+                                        nsTArray<layers::WebRenderParentCommand>& aParentCommands,
+                                        mozilla::layers::WebRenderDisplayItemLayer* aLayer,
+                                        const nsRect&        aDirtyRect,
+                                        const nsRect&        aDest,
+                                        const nsRect&        aFill,
+                                        const nsPoint&       aAnchor,
+                                        const nsSize&        aRepeatSize,
+                                        const mozilla::CSSIntRect& aSrc,
+                                        float                aOpacity = 1.0);
 
   /**
    * Helper method for creating a gfxDrawable from mPaintServerFrame or

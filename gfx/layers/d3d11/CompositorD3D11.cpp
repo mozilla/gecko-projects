@@ -6,7 +6,6 @@
 #include "CompositorD3D11.h"
 
 #include "TextureD3D11.h"
-#include "CompositorD3D11Shaders.h"
 
 #include "gfxWindowsPlatform.h"
 #include "nsIWidget.h"
@@ -15,7 +14,10 @@
 #include "mozilla/gfx/GPUParent.h"
 #include "mozilla/layers/ImageHost.h"
 #include "mozilla/layers/ContentHost.h"
+#include "mozilla/layers/Diagnostics.h"
+#include "mozilla/layers/DiagnosticsD3D11.h"
 #include "mozilla/layers/Effects.h"
+#include "mozilla/layers/HelpersD3D11.h"
 #include "nsWindowsHelpers.h"
 #include "gfxPrefs.h"
 #include "gfxConfig.h"
@@ -30,8 +32,13 @@
 #include "BlendShaderConstants.h"
 
 #include "D3D11ShareHandleImage.h"
+#include "DeviceAttachmentsD3D11.h"
 
+#ifdef __MINGW32__
+#include <versionhelpers.h> // For IsWindows8OrGreater
+#else
 #include <VersionHelpers.h> // For IsWindows8OrGreater
+#endif
 #include <winsdkver.h>
 
 namespace mozilla {
@@ -42,27 +49,7 @@ namespace layers {
 
 static bool CanUsePartialPresents(ID3D11Device* aDevice);
 
-struct Vertex
-{
-    float position[2];
-};
-
-struct TexturedVertex
-{
-    float position[2];
-    float texCoords[2];
-};
-
-// {1E4D7BEB-D8EC-4A0B-BF0A-63E6DE129425}
-static const GUID sDeviceAttachmentsD3D11 =
-{ 0x1e4d7beb, 0xd8ec, 0x4a0b, { 0xbf, 0xa, 0x63, 0xe6, 0xde, 0x12, 0x94, 0x25 } };
-// {88041664-C835-4AA8-ACB8-7EC832357ED8}
-static const GUID sLayerManagerCount =
-{ 0x88041664, 0xc835, 0x4aa8, { 0xac, 0xb8, 0x7e, 0xc8, 0x32, 0x35, 0x7e, 0xd8 } };
-
 const FLOAT sBlendFactor[] = { 0, 0, 0, 0 };
-
-static const size_t kInitialMaximumTriangles = 64;
 
 namespace TexSlot {
   static const int RGB = 0;
@@ -74,92 +61,6 @@ namespace TexSlot {
   static const int Backdrop = 6;
 }
 
-struct DeviceAttachmentsD3D11
-{
-  explicit DeviceAttachmentsD3D11(ID3D11Device* device)
-   : mSyncHandle(0),
-     mDevice(device),
-     mInitOkay(true)
-  {}
-
-  bool CreateShaders();
-  bool InitBlendShaders();
-  bool InitSyncObject();
-
-  typedef EnumeratedArray<MaskType, MaskType::NumMaskTypes, RefPtr<ID3D11VertexShader>>
-          VertexShaderArray;
-  typedef EnumeratedArray<MaskType, MaskType::NumMaskTypes, RefPtr<ID3D11PixelShader>>
-          PixelShaderArray;
-
-  RefPtr<ID3D11InputLayout> mInputLayout;
-  RefPtr<ID3D11InputLayout> mDynamicInputLayout;
-
-  RefPtr<ID3D11Buffer> mVertexBuffer;
-  RefPtr<ID3D11Buffer> mDynamicVertexBuffer;
-
-  VertexShaderArray mVSQuadShader;
-  VertexShaderArray mVSQuadBlendShader;
-
-  VertexShaderArray mVSDynamicShader;
-  VertexShaderArray mVSDynamicBlendShader;
-
-  PixelShaderArray mSolidColorShader;
-  PixelShaderArray mRGBAShader;
-  PixelShaderArray mRGBShader;
-  PixelShaderArray mYCbCrShader;
-  PixelShaderArray mNV12Shader;
-  PixelShaderArray mComponentAlphaShader;
-  PixelShaderArray mBlendShader;
-  RefPtr<ID3D11Buffer> mPSConstantBuffer;
-  RefPtr<ID3D11Buffer> mVSConstantBuffer;
-  RefPtr<ID3D11RasterizerState> mRasterizerState;
-  RefPtr<ID3D11SamplerState> mLinearSamplerState;
-  RefPtr<ID3D11SamplerState> mPointSamplerState;
-
-  RefPtr<ID3D11BlendState> mPremulBlendState;
-  RefPtr<ID3D11BlendState> mNonPremulBlendState;
-  RefPtr<ID3D11BlendState> mComponentBlendState;
-  RefPtr<ID3D11BlendState> mDisabledBlendState;
-  RefPtr<IDXGIResource> mSyncTexture;
-  HANDLE mSyncHandle;
-
-private:
-  void InitVertexShader(const ShaderBytes& aShader, VertexShaderArray& aArray, MaskType aMaskType) {
-    InitVertexShader(aShader, getter_AddRefs(aArray[aMaskType]));
-  }
-  void InitPixelShader(const ShaderBytes& aShader, PixelShaderArray& aArray, MaskType aMaskType) {
-    InitPixelShader(aShader, getter_AddRefs(aArray[aMaskType]));
-  }
-  void InitVertexShader(const ShaderBytes& aShader, ID3D11VertexShader** aOut) {
-    if (!mInitOkay) {
-      return;
-    }
-    if (Failed(mDevice->CreateVertexShader(aShader.mData, aShader.mLength, nullptr, aOut), "create vs")) {
-      mInitOkay = false;
-    }
-  }
-  void InitPixelShader(const ShaderBytes& aShader, ID3D11PixelShader** aOut) {
-    if (!mInitOkay) {
-      return;
-    }
-    if (Failed(mDevice->CreatePixelShader(aShader.mData, aShader.mLength, nullptr, aOut), "create ps")) {
-      mInitOkay = false;
-    }
-  }
-
-  bool Failed(HRESULT hr, const char* aContext) {
-    if (SUCCEEDED(hr))
-      return false;
-
-    gfxCriticalNote << "[D3D11] " << aContext << " failed: " << hexa(hr);
-    return true;
-  }
-
-  // Only used during initialization.
-  RefPtr<ID3D11Device> mDevice;
-  bool mInitOkay;
-};
-
 CompositorD3D11::CompositorD3D11(CompositorBridgeParent* aParent, widget::CompositorWidget* aWidget)
   : Compositor(aWidget, aParent)
   , mAttachments(nullptr)
@@ -168,35 +69,12 @@ CompositorD3D11::CompositorD3D11(CompositorBridgeParent* aParent, widget::Compos
   , mAllowPartialPresents(false)
   , mVerifyBuffersFailed(false)
   , mIsDoubleBuffered(false)
-  , mMaximumTriangles(kInitialMaximumTriangles)
 {
 }
 
 CompositorD3D11::~CompositorD3D11()
 {
-  if (mDevice) {
-    int referenceCount = 0;
-    UINT size = sizeof(referenceCount);
-    HRESULT hr = mDevice->GetPrivateData(sLayerManagerCount, &size, &referenceCount);
-    NS_ASSERTION(SUCCEEDED(hr), "Reference count not found on device.");
-    referenceCount--;
-    mDevice->SetPrivateData(sLayerManagerCount,
-                            sizeof(referenceCount),
-                            &referenceCount);
-
-    if (!referenceCount) {
-      DeviceAttachmentsD3D11 *attachments;
-      size = sizeof(attachments);
-      mDevice->GetPrivateData(sDeviceAttachmentsD3D11, &size, &attachments);
-      // No LayerManagers left for this device. Clear out interfaces stored
-      // which hold a reference to the device.
-      mDevice->SetPrivateData(sDeviceAttachmentsD3D11, 0, nullptr);
-
-      delete attachments;
-    }
-  }
 }
-
 
 template<typename VertexType>
 void
@@ -219,23 +97,9 @@ CompositorD3D11::UpdateDynamicVertexBuffer(const nsTArray<gfx::TexturedTriangle>
   HRESULT hr;
 
   // Resize the dynamic vertex buffer if needed.
-  if (aTriangles.Length() > mMaximumTriangles) {
-    CD3D11_BUFFER_DESC bufferDesc(sizeof(TexturedVertex) * aTriangles.Length() * 3,
-                                  D3D11_BIND_VERTEX_BUFFER,
-                                  D3D11_USAGE_DYNAMIC,
-                                  D3D11_CPU_ACCESS_WRITE);
-
-    hr = mDevice->CreateBuffer(&bufferDesc, nullptr,
-                               getter_AddRefs(mAttachments->mDynamicVertexBuffer));
-
-    if (Failed(hr, "resize dynamic vertex buffer")) {
-      return false;
-    }
-
-    mMaximumTriangles = aTriangles.Length();
+  if (!mAttachments->EnsureTriangleBuffer(aTriangles.Length())) {
+    return false;
   }
-
-  MOZ_ASSERT(mMaximumTriangles >= aTriangles.Length());
 
   D3D11_MAPPED_SUBRESOURCE resource {};
   hr = mContext->Map(mAttachments->mDynamicVertexBuffer, 0,
@@ -245,17 +109,8 @@ CompositorD3D11::UpdateDynamicVertexBuffer(const nsTArray<gfx::TexturedTriangle>
     return false;
   }
 
-  const auto vertexFromPoints = [](const gfx::Point& p, const gfx::Point& t) {
-    return TexturedVertex { { p.x, p.y }, { t.x, t.y } };
-  };
-
-  nsTArray<TexturedVertex> vertices;
-
-  for (const gfx::TexturedTriangle& t : aTriangles) {
-    vertices.AppendElement(vertexFromPoints(t.p1, t.textureCoords.p1));
-    vertices.AppendElement(vertexFromPoints(t.p2, t.textureCoords.p2));
-    vertices.AppendElement(vertexFromPoints(t.p3, t.textureCoords.p3));
-  }
+  const nsTArray<TexturedVertex> vertices =
+    TexturedTrianglesToVertexArray(aTriangles);
 
   memcpy(resource.pData, vertices.Elements(),
          vertices.Length() * sizeof(TexturedVertex));
@@ -272,10 +127,17 @@ CompositorD3D11::Initialize(nsCString* const out_failureReason)
 
   HRESULT hr;
 
-  mDevice = DeviceManagerDx::Get()->GetCompositorDevice();
+  DeviceManagerDx::Get()->GetCompositorDevices(&mDevice, &mAttachments);
   if (!mDevice) {
     gfxCriticalNote << "[D3D11] failed to get compositor device.";
     *out_failureReason = "FEATURE_FAILURE_D3D11_NO_DEVICE";
+    return false;
+  }
+  if (!mAttachments || !mAttachments->IsValid()) {
+    gfxCriticalNote << "[D3D11] failed to get compositor device attachments";
+    *out_failureReason = mAttachments
+                         ? mAttachments->GetFailureId()
+                         : NS_LITERAL_CSTRING("FEATURE_FAILURE_NO_ATTACHMENTS");
     return false;
   }
 
@@ -286,198 +148,12 @@ CompositorD3D11::Initialize(nsCString* const out_failureReason)
     return false;
   }
 
+  mDiagnostics = MakeUnique<DiagnosticsD3D11>(mDevice, mContext);
   mFeatureLevel = mDevice->GetFeatureLevel();
 
   mHwnd = mWidget->AsWindows()->GetHwnd();
 
   memset(&mVSConstants, 0, sizeof(VertexShaderConstants));
-
-  int referenceCount = 0;
-  UINT size = sizeof(referenceCount);
-  // If this isn't there yet it'll fail, count will remain 0, which is correct.
-  mDevice->GetPrivateData(sLayerManagerCount, &size, &referenceCount);
-  referenceCount++;
-  mDevice->SetPrivateData(sLayerManagerCount,
-                          sizeof(referenceCount),
-                          &referenceCount);
-
-  size = sizeof(DeviceAttachmentsD3D11*);
-  if (FAILED(mDevice->GetPrivateData(sDeviceAttachmentsD3D11,
-                                     &size,
-                                     &mAttachments))) {
-    mAttachments = new DeviceAttachmentsD3D11(mDevice);
-    mDevice->SetPrivateData(sDeviceAttachmentsD3D11,
-                            sizeof(mAttachments),
-                            &mAttachments);
-
-    D3D11_INPUT_ELEMENT_DESC layout[] =
-    {
-      { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-    };
-
-    hr = mDevice->CreateInputLayout(layout,
-                                    sizeof(layout) / sizeof(D3D11_INPUT_ELEMENT_DESC),
-                                    LayerQuadVS,
-                                    sizeof(LayerQuadVS),
-                                    getter_AddRefs(mAttachments->mInputLayout));
-
-    if (Failed(hr, "CreateInputLayout")) {
-      *out_failureReason = "FEATURE_FAILURE_D3D11_INPUT_LAYOUT";
-      return false;
-    }
-
-    Vertex vertices[] = { {{0.0, 0.0}}, {{1.0, 0.0}}, {{0.0, 1.0}}, {{1.0, 1.0}} };
-    CD3D11_BUFFER_DESC bufferDesc(sizeof(vertices), D3D11_BIND_VERTEX_BUFFER);
-    D3D11_SUBRESOURCE_DATA data;
-    data.pSysMem = (void*)vertices;
-
-    hr = mDevice->CreateBuffer(&bufferDesc, &data, getter_AddRefs(mAttachments->mVertexBuffer));
-    if (Failed(hr, "create vertex buffer")) {
-      *out_failureReason = "FEATURE_FAILURE_D3D11_VERTEX_BUFFER";
-      return false;
-    }
-
-    // Create a second input layout for layers with dynamic geometry.
-    D3D11_INPUT_ELEMENT_DESC dynamicLayout[] =
-    {
-      { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-      { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-    };
-
-    hr = mDevice->CreateInputLayout(dynamicLayout,
-                                    sizeof(dynamicLayout) / sizeof(D3D11_INPUT_ELEMENT_DESC),
-                                    LayerDynamicVS,
-                                    sizeof(LayerDynamicVS),
-                                    getter_AddRefs(mAttachments->mDynamicInputLayout));
-
-    if (Failed(hr, "CreateInputLayout")) {
-      *out_failureReason = "FEATURE_FAILURE_D3D11_INPUT_LAYOUT";
-      return false;
-    }
-
-    // Allocate memory for the dynamic vertex buffer.
-    bufferDesc = CD3D11_BUFFER_DESC(sizeof(TexturedVertex) * mMaximumTriangles * 3,
-                                    D3D11_BIND_VERTEX_BUFFER,
-                                    D3D11_USAGE_DYNAMIC,
-                                    D3D11_CPU_ACCESS_WRITE);
-
-    hr = mDevice->CreateBuffer(&bufferDesc, nullptr, getter_AddRefs(mAttachments->mDynamicVertexBuffer));
-    if (Failed(hr, "create dynamic vertex buffer")) {
-      *out_failureReason = "FEATURE_FAILURE_D3D11_VERTEX_BUFFER";
-      return false;
-    }
-
-    if (!mAttachments->CreateShaders()) {
-      *out_failureReason = "FEATURE_FAILURE_D3D11_CREATE_SHADERS";
-      return false;
-    }
-
-    CD3D11_BUFFER_DESC cBufferDesc(sizeof(VertexShaderConstants),
-                                   D3D11_BIND_CONSTANT_BUFFER,
-                                   D3D11_USAGE_DYNAMIC,
-                                   D3D11_CPU_ACCESS_WRITE);
-
-    hr = mDevice->CreateBuffer(&cBufferDesc, nullptr, getter_AddRefs(mAttachments->mVSConstantBuffer));
-    if (Failed(hr, "create vs buffer")) {
-      *out_failureReason = "FEATURE_FAILURE_D3D11_VS_BUFFER";
-      return false;
-    }
-
-    cBufferDesc.ByteWidth = sizeof(PixelShaderConstants);
-    hr = mDevice->CreateBuffer(&cBufferDesc, nullptr, getter_AddRefs(mAttachments->mPSConstantBuffer));
-    if (Failed(hr, "create ps buffer")) {
-      *out_failureReason = "FEATURE_FAILURE_D3D11_PS_BUFFER";
-      return false;
-    }
-
-    CD3D11_RASTERIZER_DESC rastDesc(D3D11_DEFAULT);
-    rastDesc.CullMode = D3D11_CULL_NONE;
-    rastDesc.ScissorEnable = TRUE;
-
-    hr = mDevice->CreateRasterizerState(&rastDesc, getter_AddRefs(mAttachments->mRasterizerState));
-    if (Failed(hr, "create rasterizer")) {
-      *out_failureReason = "FEATURE_FAILURE_D3D11_RASTERIZER";
-      return false;
-    }
-
-    CD3D11_SAMPLER_DESC samplerDesc(D3D11_DEFAULT);
-    hr = mDevice->CreateSamplerState(&samplerDesc, getter_AddRefs(mAttachments->mLinearSamplerState));
-    if (Failed(hr, "create linear sampler")) {
-      *out_failureReason = "FEATURE_FAILURE_D3D11_LINEAR_SAMPLER";
-      return false;
-    }
-
-    samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-    hr = mDevice->CreateSamplerState(&samplerDesc, getter_AddRefs(mAttachments->mPointSamplerState));
-    if (Failed(hr, "create point sampler")) {
-      *out_failureReason = "FEATURE_FAILURE_D3D11_POINT_SAMPLER";
-      return false;
-    }
-
-    CD3D11_BLEND_DESC blendDesc(D3D11_DEFAULT);
-    D3D11_RENDER_TARGET_BLEND_DESC rtBlendPremul = {
-      TRUE,
-      D3D11_BLEND_ONE, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_OP_ADD,
-      D3D11_BLEND_ONE, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_OP_ADD,
-      D3D11_COLOR_WRITE_ENABLE_ALL
-    };
-    blendDesc.RenderTarget[0] = rtBlendPremul;
-    hr = mDevice->CreateBlendState(&blendDesc, getter_AddRefs(mAttachments->mPremulBlendState));
-    if (Failed(hr, "create pm blender")) {
-      *out_failureReason = "FEATURE_FAILURE_D3D11_PM_BLENDER";
-      return false;
-    }
-
-    D3D11_RENDER_TARGET_BLEND_DESC rtBlendNonPremul = {
-      TRUE,
-      D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_OP_ADD,
-      D3D11_BLEND_ONE, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_OP_ADD,
-      D3D11_COLOR_WRITE_ENABLE_ALL
-    };
-    blendDesc.RenderTarget[0] = rtBlendNonPremul;
-    hr = mDevice->CreateBlendState(&blendDesc, getter_AddRefs(mAttachments->mNonPremulBlendState));
-    if (Failed(hr, "create npm blender")) {
-      *out_failureReason = "FEATURE_FAILURE_D3D11_NPM_BLENDER";
-      return false;
-    }
-
-    if (gfxPrefs::ComponentAlphaEnabled()) {
-      D3D11_RENDER_TARGET_BLEND_DESC rtBlendComponent = {
-        TRUE,
-        D3D11_BLEND_ONE,
-        D3D11_BLEND_INV_SRC1_COLOR,
-        D3D11_BLEND_OP_ADD,
-        D3D11_BLEND_ONE,
-        D3D11_BLEND_INV_SRC_ALPHA,
-        D3D11_BLEND_OP_ADD,
-        D3D11_COLOR_WRITE_ENABLE_ALL
-      };
-      blendDesc.RenderTarget[0] = rtBlendComponent;
-      hr = mDevice->CreateBlendState(&blendDesc, getter_AddRefs(mAttachments->mComponentBlendState));
-      if (Failed(hr, "create component blender")) {
-        *out_failureReason = "FEATURE_FAILURE_D3D11_COMP_BLENDER";
-        return false;
-      }
-    }
-
-    D3D11_RENDER_TARGET_BLEND_DESC rtBlendDisabled = {
-      FALSE,
-      D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_OP_ADD,
-      D3D11_BLEND_ONE, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_OP_ADD,
-      D3D11_COLOR_WRITE_ENABLE_ALL
-    };
-    blendDesc.RenderTarget[0] = rtBlendDisabled;
-    hr = mDevice->CreateBlendState(&blendDesc, getter_AddRefs(mAttachments->mDisabledBlendState));
-    if (Failed(hr, "create null blender")) {
-      *out_failureReason = "FEATURE_FAILURE_D3D11_NULL_BLENDER";
-      return false;
-    }
-
-    if (!mAttachments->InitSyncObject()) {
-      *out_failureReason = "FEATURE_FAILURE_D3D11_OBJ_SYNC";
-      return false;
-    }
-  }
 
   RefPtr<IDXGIDevice> dxgiDevice;
   RefPtr<IDXGIAdapter> dxgiAdapter;
@@ -864,6 +540,9 @@ CompositorD3D11::ClearRect(const gfx::Rect& aRect)
   }
 
   mContext->Draw(4, 0);
+
+  // Restore the default blend state.
+  mContext->OMSetBlendState(mAttachments->mPremulBlendState, sBlendFactor, 0xFFFFFFFF);
 }
 
 static inline bool
@@ -1297,16 +976,19 @@ CompositorD3D11::BeginFrame(const nsIntRegion& aInvalidRegion,
   }
 
   if (mDevice->GetDeviceRemovedReason() != S_OK) {
-    gfxCriticalNote << "GFX: D3D11 skip BeginFrame with device-removed.";
     ReadUnlockTextures();
     *aRenderBoundsOut = IntRect();
 
-    // If we are in the GPU process then the main process doesn't
-    // know that a device reset has happened and needs to be informed
-    if (XRE_IsGPUProcess()) {
-      GPUParent::GetSingleton()->NotifyDeviceReset();
-    }
+    if (!mAttachments->IsDeviceReset()) {
+      gfxCriticalNote << "GFX: D3D11 skip BeginFrame with device-removed.";
 
+      // If we are in the GPU process then the main process doesn't
+      // know that a device reset has happened and needs to be informed
+      if (XRE_IsGPUProcess()) {
+        GPUParent::GetSingleton()->NotifyDeviceReset();
+      }
+      mAttachments->SetDeviceReset();
+    }
     return;
   }
 
@@ -1398,6 +1080,21 @@ CompositorD3D11::BeginFrame(const nsIntRegion& aInvalidRegion,
       }
     }
   }
+
+  if (gfxPrefs::LayersDrawFPS()) {
+    uint32_t pixelsPerFrame = 0;
+    for (auto iter = mBackBufferInvalid.RectIter(); !iter.Done(); iter.Next()) {
+      pixelsPerFrame += iter.Get().width * iter.Get().height;
+    }
+
+    mDiagnostics->Start(pixelsPerFrame);
+  }
+}
+
+void
+CompositorD3D11::NormalDrawingDone()
+{
+  mDiagnostics->End();
 }
 
 void
@@ -1405,13 +1102,6 @@ CompositorD3D11::EndFrame()
 {
   if (!mDefaultRT) {
     Compositor::EndFrame();
-    return;
-  }
-
-  if (mDevice->GetDeviceRemovedReason() != S_OK) {
-    gfxCriticalNote << "GFX: D3D11 skip EndFrame with device-removed.";
-    Compositor::EndFrame();
-    mCurrentRT = nullptr;
     return;
   }
 
@@ -1429,74 +1119,16 @@ CompositorD3D11::EndFrame()
     mContext->End(query);
   }
 
-  UINT presentInterval = 0;
-
-  bool isWARP = DeviceManagerDx::Get()->IsWARP();
-  if (isWARP) {
-    // When we're using WARP we cannot present immediately as it causes us
-    // to tear when rendering. When not using WARP it appears the DWM takes
-    // care of tearing for us.
-    presentInterval = 1;
-  }
-
   if (oldSize == mSize) {
-    // This must be called before present so our back buffer has the validated window content.
-    if (mTarget) {
-      PaintToTarget();
-    }
-
-    RefPtr<IDXGISwapChain1> chain;
-    HRESULT hr = mSwapChain->QueryInterface((IDXGISwapChain1**)getter_AddRefs(chain));
-
-    if (SUCCEEDED(hr) && mAllowPartialPresents) {
-      DXGI_PRESENT_PARAMETERS params;
-      PodZero(&params);
-      params.DirtyRectsCount = mBackBufferInvalid.GetNumRects();
-      StackArray<RECT, 4> rects(params.DirtyRectsCount);
-
-      uint32_t i = 0;
-      for (auto iter = mBackBufferInvalid.RectIter(); !iter.Done(); iter.Next()) {
-        const IntRect& r = iter.Get();
-        rects[i].left = r.x;
-        rects[i].top = r.y;
-        rects[i].bottom = r.YMost();
-        rects[i].right = r.XMost();
-        i++;
-      }
-
-      params.pDirtyRects = params.DirtyRectsCount ? rects.data() : nullptr;
-      chain->Present1(presentInterval, mDisableSequenceForNextFrame ? DXGI_PRESENT_DO_NOT_SEQUENCE : 0, &params);
-    } else {
-      HRESULT hr = mSwapChain->Present(0, mDisableSequenceForNextFrame ? DXGI_PRESENT_DO_NOT_SEQUENCE : 0);
-      if (FAILED(hr)) {
-        gfxCriticalNote << "D3D11 swap chain preset failed " << hexa(hr);
-        HandleError(hr);
-      }
-    }
-
-    if (mIsDoubleBuffered) {
-      mBackBufferInvalid = mFrontBufferInvalid;
-      mFrontBufferInvalid.SetEmpty();
-    } else {
-      mBackBufferInvalid.SetEmpty();
-    }
-
-    mDisableSequenceForNextFrame = false;
+    Present();
+  } else {
+    mDiagnostics->Cancel();
   }
 
   // Block until the previous frame's work has been completed.
   if (mQuery) {
-    TimeStamp start = TimeStamp::Now();
     BOOL result;
-    while (mContext->GetData(mQuery, &result, sizeof(BOOL), 0) != S_OK) {
-      if (mDevice->GetDeviceRemovedReason() != S_OK) {
-        break;
-      }
-      if ((TimeStamp::Now() - start) > TimeDuration::FromSeconds(2)) {
-        break;
-      }
-      Sleep(0);
-    }
+    WaitForGPUQuery(mDevice, mContext, mQuery, &result);
   }
   // Store the query for this frame so we can flush it next time.
   mQuery = query;
@@ -1507,12 +1139,77 @@ CompositorD3D11::EndFrame()
 }
 
 void
-CompositorD3D11::CancelFrame()
+CompositorD3D11::GetFrameStats(GPUStats* aStats)
+{
+  mDiagnostics->Query(aStats);
+}
+
+void
+CompositorD3D11::Present()
+{
+  UINT presentInterval = 0;
+
+  bool isWARP = DeviceManagerDx::Get()->IsWARP();
+  if (isWARP) {
+    // When we're using WARP we cannot present immediately as it causes us
+    // to tear when rendering. When not using WARP it appears the DWM takes
+    // care of tearing for us.
+    presentInterval = 1;
+  }
+
+  // This must be called before present so our back buffer has the validated window content.
+  if (mTarget) {
+    PaintToTarget();
+  }
+
+  RefPtr<IDXGISwapChain1> chain;
+  HRESULT hr = mSwapChain->QueryInterface((IDXGISwapChain1**)getter_AddRefs(chain));
+
+  if (SUCCEEDED(hr) && mAllowPartialPresents) {
+    DXGI_PRESENT_PARAMETERS params;
+    PodZero(&params);
+    params.DirtyRectsCount = mBackBufferInvalid.GetNumRects();
+    StackArray<RECT, 4> rects(params.DirtyRectsCount);
+
+    uint32_t i = 0;
+    for (auto iter = mBackBufferInvalid.RectIter(); !iter.Done(); iter.Next()) {
+      const IntRect& r = iter.Get();
+      rects[i].left = r.x;
+      rects[i].top = r.y;
+      rects[i].bottom = r.YMost();
+      rects[i].right = r.XMost();
+      i++;
+    }
+
+    params.pDirtyRects = params.DirtyRectsCount ? rects.data() : nullptr;
+    chain->Present1(presentInterval, mDisableSequenceForNextFrame ? DXGI_PRESENT_DO_NOT_SEQUENCE : 0, &params);
+  } else {
+    HRESULT hr = mSwapChain->Present(0, mDisableSequenceForNextFrame ? DXGI_PRESENT_DO_NOT_SEQUENCE : 0);
+    if (FAILED(hr)) {
+      gfxCriticalNote << "D3D11 swap chain preset failed " << hexa(hr);
+      HandleError(hr);
+    }
+  }
+
+  if (mIsDoubleBuffered) {
+    mBackBufferInvalid = mFrontBufferInvalid;
+    mFrontBufferInvalid.SetEmpty();
+  } else {
+    mBackBufferInvalid.SetEmpty();
+  }
+
+  mDisableSequenceForNextFrame = false;
+}
+
+void
+CompositorD3D11::CancelFrame(bool aNeedFlush)
 {
   ReadUnlockTextures();
   // Flush the context, otherwise the driver might hold some resources alive
   // until the next flush or present.
-  mContext->Flush();
+  if (aNeedFlush) {
+    mContext->Flush();
+  }
 }
 
 void
@@ -1706,91 +1403,6 @@ CompositorD3D11::UpdateRenderTarget()
   mDefaultRT->SetSize(mSize.ToUnknownSize());
 
   return true;
-}
-
-bool
-DeviceAttachmentsD3D11::InitSyncObject()
-{
-  // Sync object is not supported on WARP.
-  if (DeviceManagerDx::Get()->IsWARP()) {
-    return true;
-  }
-
-  // It's okay to do this on Windows 8. But for now we'll just bail
-  // whenever we're using WARP.
-  CD3D11_TEXTURE2D_DESC desc(DXGI_FORMAT_B8G8R8A8_UNORM, 1, 1, 1, 1,
-                             D3D11_BIND_SHADER_RESOURCE |
-                             D3D11_BIND_RENDER_TARGET);
-  desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
-
-  RefPtr<ID3D11Texture2D> texture;
-  HRESULT hr = mDevice->CreateTexture2D(&desc, nullptr, getter_AddRefs(texture));
-  if (Failed(hr, "create sync texture")) {
-    return false;
-  }
-
-  hr = texture->QueryInterface((IDXGIResource**)getter_AddRefs(mSyncTexture));
-  if (Failed(hr, "QI sync texture")) {
-    return false;
-  }
-
-  hr = mSyncTexture->GetSharedHandle(&mSyncHandle);
-  if (FAILED(hr) || !mSyncHandle) {
-    gfxCriticalError() << "Failed to get SharedHandle for sync texture. Result: "
-                       << hexa(hr);
-    NS_DispatchToMainThread(NS_NewRunnableFunction([] () -> void {
-      Accumulate(Telemetry::D3D11_SYNC_HANDLE_FAILURE, 1);
-    }));
-    return false;
-  }
-
-  return true;
-}
-
-bool
-DeviceAttachmentsD3D11::InitBlendShaders()
-{
-  if (!mVSQuadBlendShader[MaskType::MaskNone]) {
-    InitVertexShader(sLayerQuadBlendVS, mVSQuadBlendShader, MaskType::MaskNone);
-    InitVertexShader(sLayerQuadBlendMaskVS, mVSQuadBlendShader, MaskType::Mask);
-  }
-
-  if (!mVSDynamicBlendShader[MaskType::MaskNone]) {
-    InitVertexShader(sLayerDynamicBlendVS, mVSDynamicBlendShader, MaskType::MaskNone);
-    InitVertexShader(sLayerDynamicBlendMaskVS, mVSDynamicBlendShader, MaskType::Mask);
-  }
-
-  if (!mBlendShader[MaskType::MaskNone]) {
-    InitPixelShader(sBlendShader, mBlendShader, MaskType::MaskNone);
-  }
-  return mInitOkay;
-}
-
-bool
-DeviceAttachmentsD3D11::CreateShaders()
-{
-  InitVertexShader(sLayerQuadVS, mVSQuadShader, MaskType::MaskNone);
-  InitVertexShader(sLayerQuadMaskVS, mVSQuadShader, MaskType::Mask);
-
-  InitVertexShader(sLayerDynamicVS, mVSDynamicShader, MaskType::MaskNone);
-  InitVertexShader(sLayerDynamicMaskVS, mVSDynamicShader, MaskType::Mask);
-
-  InitPixelShader(sSolidColorShader, mSolidColorShader, MaskType::MaskNone);
-  InitPixelShader(sSolidColorShaderMask, mSolidColorShader, MaskType::Mask);
-  InitPixelShader(sRGBShader, mRGBShader, MaskType::MaskNone);
-  InitPixelShader(sRGBShaderMask, mRGBShader, MaskType::Mask);
-  InitPixelShader(sRGBAShader, mRGBAShader, MaskType::MaskNone);
-  InitPixelShader(sRGBAShaderMask, mRGBAShader, MaskType::Mask);
-  InitPixelShader(sYCbCrShader, mYCbCrShader, MaskType::MaskNone);
-  InitPixelShader(sYCbCrShaderMask, mYCbCrShader, MaskType::Mask);
-  InitPixelShader(sNV12Shader, mNV12Shader, MaskType::MaskNone);
-  InitPixelShader(sNV12ShaderMask, mNV12Shader, MaskType::Mask);
-  if (gfxPrefs::ComponentAlphaEnabled()) {
-    InitPixelShader(sComponentAlphaShader, mComponentAlphaShader, MaskType::MaskNone);
-    InitPixelShader(sComponentAlphaShaderMask, mComponentAlphaShader, MaskType::Mask);
-  }
-
-  return mInitOkay;
 }
 
 bool

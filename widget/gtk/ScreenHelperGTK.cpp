@@ -145,17 +145,7 @@ ScreenHelperGTK::GetGTKMonitorScaleFactor()
 static float
 GetDefaultCssScale()
 {
-  double scale = nsIWidget::DefaultScaleOverride();
-  if (scale <= 0.0) {
-    scale = ScreenHelperGTK::GetGTKMonitorScaleFactor() * gfxPlatformGtk::GetDPIScale();
-  }
-  return scale;
-}
-
-float
-ScreenHelperGTK::GetSystemDefaultScale()
-{
-  return GetDefaultCssScale();
+  return ScreenHelperGTK::GetGTKMonitorScaleFactor() * gfxPlatformGtk::GetDPIScale();
 }
 
 static uint32_t

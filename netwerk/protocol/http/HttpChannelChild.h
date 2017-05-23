@@ -115,6 +115,8 @@ public:
   void FlushedForDiversion();
   mozilla::ipc::IPCResult RecvSetClassifierMatchedInfo(const ClassifierInfo& aInfo) override;
 
+  void OnCopyComplete(nsresult aStatus) override;
+
 protected:
   mozilla::ipc::IPCResult RecvOnStartRequest(const nsresult& channelStatus,
                                              const nsHttpResponseHead& responseHead,
@@ -145,7 +147,7 @@ protected:
                                              const uint32_t& redirectFlags,
                                              const nsHttpResponseHead& responseHead,
                                              const nsCString& securityInfoSerialization,
-                                             const nsCString& channelId) override;
+                                             const uint64_t& channelId) override;
   mozilla::ipc::IPCResult RecvRedirect3Complete() override;
   mozilla::ipc::IPCResult RecvAssociateApplicationCache(const nsCString& groupID,
                                                         const nsCString& clientID) override;
@@ -167,6 +169,10 @@ protected:
   virtual void DoNotifyListenerCleanup() override;
 
   NS_IMETHOD GetResponseSynthesized(bool* aSynthesized) override;
+
+  nsresult
+  AsyncCall(void (HttpChannelChild::*funcPtr)(),
+            nsRunnableMethod<HttpChannelChild> **retval = nullptr) override;
 
 private:
   // this section is for main-thread-only object
@@ -361,7 +367,7 @@ private:
                       const uint32_t& redirectFlags,
                       const nsHttpResponseHead& responseHead,
                       const nsACString& securityInfoSerialization,
-                      const nsACString& channelId);
+                      const uint64_t& channelId);
   bool Redirect3Complete(OverrideRunnable* aRunnable);
   void DeleteSelf();
 

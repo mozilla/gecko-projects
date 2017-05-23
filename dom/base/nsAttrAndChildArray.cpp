@@ -389,12 +389,15 @@ nsAttrAndChildArray::AttrAt(uint32_t aPos) const
 }
 
 nsresult
-nsAttrAndChildArray::SetAndSwapAttr(nsIAtom* aLocalName, nsAttrValue& aValue)
+nsAttrAndChildArray::SetAndSwapAttr(nsIAtom* aLocalName, nsAttrValue& aValue,
+                                    bool* aHadValue)
 {
+  *aHadValue = false;
   uint32_t i, slotCount = AttrSlotCount();
   for (i = 0; i < slotCount && AttrSlotIsTaken(i); ++i) {
     if (ATTRS(mImpl)[i].mName.Equals(aLocalName)) {
       ATTRS(mImpl)[i].mValue.SwapValueWith(aValue);
+      *aHadValue = true;
       return NS_OK;
     }
   }
@@ -414,21 +417,22 @@ nsAttrAndChildArray::SetAndSwapAttr(nsIAtom* aLocalName, nsAttrValue& aValue)
 }
 
 nsresult
-nsAttrAndChildArray::SetAndSwapAttr(mozilla::dom::NodeInfo* aName, nsAttrValue& aValue)
+nsAttrAndChildArray::SetAndSwapAttr(mozilla::dom::NodeInfo* aName,
+                                    nsAttrValue& aValue, bool* aHadValue)
 {
   int32_t namespaceID = aName->NamespaceID();
   nsIAtom* localName = aName->NameAtom();
   if (namespaceID == kNameSpaceID_None) {
-    return SetAndSwapAttr(localName, aValue);
+    return SetAndSwapAttr(localName, aValue, aHadValue);
   }
 
+  *aHadValue = false;
   uint32_t i, slotCount = AttrSlotCount();
   for (i = 0; i < slotCount && AttrSlotIsTaken(i); ++i) {
     if (ATTRS(mImpl)[i].mName.Equals(localName, namespaceID)) {
       ATTRS(mImpl)[i].mName.SetTo(aName);
-      ATTRS(mImpl)[i].mValue.Reset();
       ATTRS(mImpl)[i].mValue.SwapValueWith(aValue);
-
+      *aHadValue = true;
       return NS_OK;
     }
   }
@@ -583,10 +587,11 @@ nsAttrAndChildArray::IndexOfAttr(nsIAtom* aLocalName, int32_t aNamespaceID) cons
 }
 
 nsresult
-nsAttrAndChildArray::SetAndTakeMappedAttr(nsIAtom* aLocalName,
+nsAttrAndChildArray::SetAndSwapMappedAttr(nsIAtom* aLocalName,
                                           nsAttrValue& aValue,
                                           nsMappedAttributeElement* aContent,
-                                          nsHTMLStyleSheet* aSheet)
+                                          nsHTMLStyleSheet* aSheet,
+                                          bool* aHadValue)
 {
   bool willAdd = true;
   if (mImpl && mImpl->mMappedAttrs) {
@@ -596,7 +601,7 @@ nsAttrAndChildArray::SetAndTakeMappedAttr(nsIAtom* aLocalName,
   RefPtr<nsMappedAttributes> mapped =
     GetModifiableMapped(aContent, aSheet, willAdd);
 
-  mapped->SetAndTakeAttr(aLocalName, aValue);
+  mapped->SetAndSwapAttr(aLocalName, aValue, aHadValue);
 
   return MakeMappedUnique(mapped);
 }
@@ -794,6 +799,44 @@ nsAttrAndChildArray::GetMapped() const
   return mImpl ? mImpl->mMappedAttrs : nullptr;
 }
 
+nsresult nsAttrAndChildArray::EnsureCapacityToClone(const nsAttrAndChildArray& aOther,
+                                                    bool aAllocateChildren)
+{
+  NS_PRECONDITION(!mImpl, "nsAttrAndChildArray::EnsureCapacityToClone requires the array be empty when called");
+
+  uint32_t attrCount = aOther.NonMappedAttrCount();
+  uint32_t childCount = 0;
+  if (aAllocateChildren) {
+    childCount = aOther.ChildCount();
+  }
+
+  if (attrCount == 0 && childCount == 0) {
+    return NS_OK;
+  }
+
+  // No need to use a CheckedUint32 because we are cloning. We know that we
+  // have already allocated an nsAttrAndChildArray of this size.
+  uint32_t size = attrCount;
+  size *= ATTRSIZE;
+  size += childCount;
+  uint32_t totalSize = size;
+  totalSize += NS_IMPL_EXTRA_SIZE;
+
+  mImpl = static_cast<Impl*>(malloc(totalSize * sizeof(void*)));
+  NS_ENSURE_TRUE(mImpl, NS_ERROR_OUT_OF_MEMORY);
+
+  mImpl->mMappedAttrs = nullptr;
+  mImpl->mBufferSize = size;
+
+  // The array is now the right size, but we should reserve the correct
+  // number of slots for attributes so that children don't get written into
+  // that part of the array (which will then need to be moved later).
+  memset(static_cast<void*>(mImpl->mBuffer), 0, sizeof(InternalAttr) * attrCount);
+  SetAttrSlotAndChildCount(attrCount, 0);
+
+  return NS_OK;
+}
+
 bool
 nsAttrAndChildArray::GrowBy(uint32_t aGrowSize)
 {
@@ -880,8 +923,7 @@ nsAttrAndChildArray::AddAttrSlot()
   }
 
   SetAttrSlotCount(slotCount + 1);
-  offset[0] = nullptr;
-  offset[1] = nullptr;
+  memset(static_cast<void*>(offset), 0, sizeof(InternalAttr));
 
   return true;
 }

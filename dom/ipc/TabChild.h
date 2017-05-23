@@ -278,6 +278,7 @@ public:
    */
   TabChild(nsIContentChild* aManager,
            const TabId& aTabId,
+           TabGroup* aTabGroup,
            const TabContext& aContext,
            uint32_t aChromeFlags);
 
@@ -286,6 +287,7 @@ public:
   /** Return a TabChild with the given attributes. */
   static already_AddRefed<TabChild>
   Create(nsIContentChild* aManager, const TabId& aTabId,
+         const TabId& aSameTabGroupAs,
          const TabContext& aContext, uint32_t aChromeFlags);
 
   // Let managees query if it is safe to send messages.
@@ -343,6 +345,7 @@ public:
   virtual mozilla::ipc::IPCResult
   RecvInitRendering(const TextureFactoryIdentifier& aTextureFactoryIdentifier,
                     const uint64_t& aLayersId,
+                    const mozilla::layers::CompositorOptions& aCompositorOptions,
                     const bool& aLayersConnected,
                     PRenderFrameChild* aRenderFrame) override;
 
@@ -386,8 +389,7 @@ public:
                                                     const uint32_t& aDropEffect) override;
 
   virtual mozilla::ipc::IPCResult
-  RecvRealKeyEvent(const mozilla::WidgetKeyboardEvent& aEvent,
-                   const MaybeNativeKeyBinding& aBindings) override;
+  RecvRealKeyEvent(const mozilla::WidgetKeyboardEvent& aEvent) override;
 
   virtual mozilla::ipc::IPCResult RecvMouseWheelEvent(const mozilla::WidgetWheelEvent& aEvent,
                                                       const ScrollableLayerGuid& aGuid,
@@ -509,8 +511,9 @@ public:
 
   void NotifyPainted();
 
-  void RequestNativeKeyBindings(mozilla::widget::AutoCacheNativeKeyCommands* aAutoCache,
-                                const WidgetKeyboardEvent* aEvent);
+  void RequestEditCommands(nsIWidget::NativeKeyBindingsType aType,
+                           const WidgetKeyboardEvent& aEvent,
+                           nsTArray<CommandInt>& aCommands);
 
   /**
    * Signal to this TabChild that it should be made visible:
@@ -565,6 +568,7 @@ public:
   void ClearCachedResources();
   void InvalidateLayers();
   void ReinitRendering();
+  void ReinitRenderingForDeviceReset();
   void CompositorUpdated(const TextureFactoryIdentifier& aNewIdentifier,
                          uint64_t aDeviceResetSeqNo);
 
@@ -585,10 +589,6 @@ public:
   virtual mozilla::ipc::IPCResult RecvHandleAccessKey(const WidgetKeyboardEvent& aEvent,
                                                       nsTArray<uint32_t>&& aCharCodes,
                                                       const int32_t& aModifierMask) override;
-
-  virtual mozilla::ipc::IPCResult RecvAudioChannelChangeNotification(const uint32_t& aAudioChannel,
-                                                                     const float& aVolume,
-                                                                     const bool& aMuted) override;
 
   virtual mozilla::ipc::IPCResult RecvSetUseGlobalHistory(const bool& aUse) override;
 
@@ -629,6 +629,7 @@ public:
   // Call RecvShow(nsIntSize(0, 0)) and block future calls to RecvShow().
   void DoFakeShow(const TextureFactoryIdentifier& aTextureFactoryIdentifier,
                   const uint64_t& aLayersId,
+                  const mozilla::layers::CompositorOptions& aCompositorOptions,
                   PRenderFrameChild* aRenderFrame,
                   const ShowInfo& aShowInfo);
 
@@ -670,6 +671,18 @@ public:
   already_AddRefed<nsISHistory> GetRelatedSHistory();
 
   mozilla::dom::TabGroup* TabGroup();
+
+#if defined(ACCESSIBILITY)
+  void SetTopLevelDocAccessibleChild(PDocAccessibleChild* aTopLevelChild)
+  {
+    mTopLevelDocAccessibleChild = aTopLevelChild;
+  }
+
+  PDocAccessibleChild* GetTopLevelDocAccessibleChild()
+  {
+    return mTopLevelDocAccessibleChild;
+  }
+#endif
 
 protected:
   virtual ~TabChild();
@@ -729,6 +742,7 @@ private:
 
   void InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIdentifier,
                           const uint64_t& aLayersId,
+                          const mozilla::layers::CompositorOptions& aCompositorOptions,
                           PRenderFrameChild* aRenderFrame);
   void InitAPZState();
 
@@ -766,6 +780,7 @@ private:
 
   TextureFactoryIdentifier mTextureFactoryIdentifier;
   nsCOMPtr<nsIWebNavigation> mWebNav;
+  RefPtr<mozilla::dom::TabGroup> mTabGroup;
   RefPtr<PuppetWidget> mPuppetWidget;
   nsCOMPtr<nsIURI> mLastURI;
   RenderFrameChild* mRemoteFrame;
@@ -774,6 +789,7 @@ private:
   uint32_t mChromeFlags;
   int32_t mActiveSuppressDisplayport;
   uint64_t mLayersId;
+  int64_t mBeforeUnloadListeners;
   CSSRect mUnscaledOuterRect;
   nscolor mLastBackgroundColor;
   bool mLayersConnected;
@@ -822,9 +838,8 @@ private:
   // of handling the last repeated wheel event so that in case event handling
   // takes time, some repeated events can be skipped to not flood child process.
   mozilla::TimeStamp mLastWheelProcessedTimeFromParent;
+  mozilla::TimeDuration mLastWheelProcessingDuration;
   CoalescedWheelData mCoalescedWheelData;
-
-  AutoTArray<bool, NUMBER_OF_AUDIO_CHANNELS> mAudioChannelsActive;
 
   RefPtr<layers::IAPZCTreeManager> mApzcTreeManager;
 
@@ -835,6 +850,10 @@ private:
   // The handle associated with the native window that contains this tab
   uintptr_t mNativeWindowHandle;
 #endif // defined(XP_WIN)
+
+#if defined(ACCESSIBILITY)
+  PDocAccessibleChild* mTopLevelDocAccessibleChild;
+#endif
 
   DISALLOW_EVIL_CONSTRUCTORS(TabChild);
 };

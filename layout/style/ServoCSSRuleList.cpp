@@ -9,9 +9,15 @@
 #include "mozilla/ServoCSSRuleList.h"
 
 #include "mozilla/ServoBindings.h"
-#include "mozilla/ServoStyleRule.h"
+#include "mozilla/ServoDocumentRule.h"
+#include "mozilla/ServoKeyframesRule.h"
 #include "mozilla/ServoMediaRule.h"
 #include "mozilla/ServoNamespaceRule.h"
+#include "mozilla/ServoPageRule.h"
+#include "mozilla/ServoStyleRule.h"
+#include "mozilla/ServoSupportsRule.h"
+#include "nsCSSCounterStyleRule.h"
+#include "nsCSSFontFaceRule.h"
 
 namespace mozilla {
 
@@ -42,10 +48,13 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ServoCSSRuleList,
     if (!aRule->IsCCLeaf()) {
       NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mRules[i]");
       cb.NoteXPCOMChild(aRule);
-      // Note about @font-face rule again, since there is an indirect
-      // owning edge through Servo's struct that FontFaceRule in Servo
-      // owns a Gecko nsCSSFontFaceRule object.
-      if (aRule->Type() == nsIDOMCSSRule::FONT_FACE_RULE) {
+      // Note about @font-face and @counter-style rule again, since
+      // there is an indirect owning edge through Servo's struct that
+      // FontFaceRule / CounterStyleRule in Servo owns a Gecko
+      // nsCSSFontFaceRule / nsCSSCounterStyleRule object.
+      auto type = aRule->Type();
+      if (type == nsIDOMCSSRule::FONT_FACE_RULE ||
+          type == nsIDOMCSSRule::COUNTER_STYLE_RULE) {
         NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mRawRules[i]");
         cb.NoteXPCOMChild(aRule);
       }
@@ -80,23 +89,37 @@ ServoCSSRuleList::GetRule(uint32_t aIndex)
     switch (rule) {
 #define CASE_RULE(const_, name_)                                            \
       case nsIDOMCSSRule::const_##_RULE: {                                  \
-        ruleObj = new Servo##name_##Rule(                                   \
-          Servo_CssRules_Get##name_##RuleAt(mRawRules, aIndex).Consume());  \
+        uint32_t line = 0, column = 0;                                      \
+        RefPtr<RawServo##name_##Rule> rule =                                \
+          Servo_CssRules_Get##name_##RuleAt(                                \
+              mRawRules, aIndex, &line, &column                             \
+          ).Consume();                                                      \
+        ruleObj = new Servo##name_##Rule(rule.forget(), line, column);      \
         break;                                                              \
       }
       CASE_RULE(STYLE, Style)
+      CASE_RULE(KEYFRAMES, Keyframes)
       CASE_RULE(MEDIA, Media)
       CASE_RULE(NAMESPACE, Namespace)
+      CASE_RULE(PAGE, Page)
+      CASE_RULE(SUPPORTS, Supports)
+      CASE_RULE(DOCUMENT, Document)
 #undef CASE_RULE
+      // For @font-face and @counter-style rules, the function returns
+      // a borrowed Gecko rule object directly, so we don't need to
+      // create anything here. But we still need to have the style sheet
+      // and parent rule set properly.
       case nsIDOMCSSRule::FONT_FACE_RULE: {
-        // Returns a borrowed nsCSSFontFaceRule object directly, so we
-        // don't need to create anything here, but we still need to have
-        // the style sheet and parent rule set properly.
         ruleObj = Servo_CssRules_GetFontFaceRuleAt(mRawRules, aIndex);
         break;
       }
-      case nsIDOMCSSRule::KEYFRAMES_RULE:
-        // XXX create corresponding rules
+      case nsIDOMCSSRule::COUNTER_STYLE_RULE: {
+        ruleObj = Servo_CssRules_GetCounterStyleRuleAt(mRawRules, aIndex);
+        break;
+      }
+      case nsIDOMCSSRule::KEYFRAME_RULE:
+        MOZ_ASSERT_UNREACHABLE("keyframe rule cannot be here");
+        return nullptr;
       default:
         NS_WARNING("stylo: not implemented yet");
         return nullptr;
@@ -200,6 +223,28 @@ ServoCSSRuleList::GetRuleType(uint32_t aIndex) const
     return rule;
   }
   return CastToPtr(rule)->Type();
+}
+
+void
+ServoCSSRuleList::FillStyleRuleHashtable(StyleRuleHashtable& aTable)
+{
+  for (uint32_t i = 0; i < mRules.Length(); i++) {
+    uint16_t type = GetRuleType(i);
+    if (type == nsIDOMCSSRule::STYLE_RULE) {
+      ServoStyleRule* castedRule = static_cast<ServoStyleRule*>(GetRule(i));
+      RawServoStyleRule* rawRule = castedRule->Raw();
+      aTable.Put(rawRule, castedRule);
+    } else if (type == nsIDOMCSSRule::MEDIA_RULE ||
+               type == nsIDOMCSSRule::SUPPORTS_RULE ||
+               type == nsIDOMCSSRule::DOCUMENT_RULE) {
+      css::GroupRule* castedRule = static_cast<css::GroupRule*>(GetRule(i));
+
+      // Call this method recursively on the ServoCSSRuleList in the rule.
+      ServoCSSRuleList* castedRuleList = static_cast<ServoCSSRuleList*>(
+        castedRule->CssRules());
+      castedRuleList->FillStyleRuleHashtable(aTable);
+    }
+  }
 }
 
 ServoCSSRuleList::~ServoCSSRuleList()

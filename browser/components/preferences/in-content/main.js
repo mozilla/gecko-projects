@@ -7,7 +7,6 @@
 
 Components.utils.import("resource://gre/modules/Downloads.jsm");
 Components.utils.import("resource://gre/modules/FileUtils.jsm");
-Components.utils.import("resource://gre/modules/Task.jsm");
 Components.utils.import("resource:///modules/ShellService.jsm");
 Components.utils.import("resource:///modules/TransientPrefs.jsm");
 
@@ -65,10 +64,16 @@ var gMainPane = {
     document.getElementById("engineList").view = gEngineView;
     this.buildDefaultEngineDropDown();
 
+    this.buildContentProcessCountMenuList();
+
     let addEnginesLink = document.getElementById("addEngines");
     let searchEnginesURL = Services.wm.getMostRecentWindow("navigator:browser")
                                       .BrowserSearch.searchEnginesURL;
     addEnginesLink.setAttribute("href", searchEnginesURL);
+
+    let performanceSettingsLink = document.getElementById("performanceSettingsLearnMore");
+    let performanceSettingsUrl = Services.urlFormatter.formatURLPref("app.support.baseURL") + "performance";
+    performanceSettingsLink.setAttribute("href", performanceSettingsUrl);
 
     window.addEventListener("click", this);
     window.addEventListener("command", this);
@@ -77,7 +82,7 @@ var gMainPane = {
     window.addEventListener("select", this);
     window.addEventListener("blur", this, true);
 
-    Services.obs.addObserver(this, "browser-search-engine-modified", false);
+    Services.obs.addObserver(this, "browser-search-engine-modified");
     window.addEventListener("unload", () => {
       Services.obs.removeObserver(this, "browser-search-engine-modified");
     });
@@ -90,6 +95,25 @@ var gMainPane = {
       this.updateSuggestsCheckbox();
     });
     this.updateSuggestsCheckbox();
+
+    let processCountPref =
+      document.getElementById("dom.ipc.processCount");
+    processCountPref.addEventListener("change", () => {
+      this.updateDefaultPerformanceSettingsPref();
+    });
+    let accelerationPref =
+      document.getElementById("layers.acceleration.disabled");
+    accelerationPref.addEventListener("change", () => {
+      this.updateDefaultPerformanceSettingsPref();
+    });
+    this.updateDefaultPerformanceSettingsPref();
+
+    let defaultPerformancePref =
+      document.getElementById("browser.preferences.defaultPerformanceSettings.enabled");
+    defaultPerformancePref.addEventListener("change", () => {
+      this.updatePerformanceSettingsBox();
+    });
+    this.updatePerformanceSettingsBox();
 
     // set up the "use current page" label-changing listener
     this._updateUseCurrentButton();
@@ -141,13 +165,13 @@ var gMainPane = {
       gMainPane.configureFonts);
     setEventListener("colors", "command",
       gMainPane.configureColors);
+    setEventListener("layers.acceleration.disabled", "change",
+      gMainPane.updateHardwareAcceleration);
 
     // Initializes the fonts dropdowns displayed in this pane.
     this._rebuildFonts();
-    var menulist = document.getElementById("defaultFont");
-    if (menulist.selectedIndex == -1) {
-      menulist.value = FontBuilder.readFontSelection(menulist);
-    }
+
+    this.updateOnScreenKeyboardVisibility();
 
     // Show translation preferences if we may:
     const prefName = "browser.translation.ui.show";
@@ -201,7 +225,7 @@ var gMainPane = {
     // Notify observers that the UI is now ready
     Components.classes["@mozilla.org/observer-service;1"]
               .getService(Components.interfaces.nsIObserverService)
-              .notifyObservers(window, "main-pane-loaded", null);
+              .notifyObservers(window, "main-pane-loaded");
   },
 
   enableE10SChange() {
@@ -624,6 +648,33 @@ var gMainPane = {
     gSubDialog.open("chrome://browser/content/preferences/colors.xul", "resizable=no");
   },
 
+  /**
+   * ui.osk.enabled
+   * - when set to true, subject to other conditions, we may sometimes invoke
+   *   an on-screen keyboard when a text input is focused.
+   *   (Currently Windows-only, and depending on prefs, may be Windows-8-only)
+   */
+  updateOnScreenKeyboardVisibility() {
+    if (AppConstants.platform == "win") {
+      let minVersion = Services.prefs.getBoolPref("ui.osk.require_win10") ? 10 : 6.2;
+      if (Services.vc.compare(Services.sysinfo.getProperty("version"), minVersion) >= 0) {
+        document.getElementById("useOnScreenKeyboard").hidden = false;
+      }
+    }
+  },
+
+  /**
+   * When the user toggles the layers.acceleration.disabled pref,
+   * sync its new value to the gfx.direct2d.disabled pref too.
+   */
+  updateHardwareAcceleration() {
+    if (AppConstants.platform == "win") {
+      var fromPref = document.getElementById("layers.acceleration.disabled");
+      var toPref = document.getElementById("gfx.direct2d.disabled");
+      toPref.value = fromPref.value;
+    }
+  },
+
   // FONTS
 
   /**
@@ -706,9 +757,21 @@ var gMainPane = {
   },
 
   /**
+   * Stores the original value of the spellchecking preference to enable proper
+   * restoration if unchanged (since we're mapping a tristate onto a checkbox).
+   */
+  _storedSpellCheck: 0,
+
+  /**
    * Returns true if any spellchecking is enabled and false otherwise, caching
    * the current value to enable proper pref restoration if the checkbox is
    * never changed.
+   *
+   * layout.spellcheckDefault
+   * - an integer:
+   *     0  disables spellchecking
+   *     1  enables spellchecking, but only for multiline text fields
+   *     2  enables spellchecking for all text fields
    */
   readCheckSpelling() {
     var pref = document.getElementById("layout.spellcheckDefault");
@@ -751,6 +814,43 @@ var gMainPane = {
     let permanentPBLabel =
       document.getElementById("urlBarSuggestionPermanentPBLabel");
     permanentPBLabel.hidden = urlbarSuggests.hidden || !permanentPB;
+  },
+
+  updateDefaultPerformanceSettingsPref() {
+    let defaultPerformancePref =
+      document.getElementById("browser.preferences.defaultPerformanceSettings.enabled");
+    let processCountPref = document.getElementById("dom.ipc.processCount");
+    let accelerationPref = document.getElementById("layers.acceleration.disabled");
+    if (processCountPref.value != processCountPref.defaultValue ||
+        accelerationPref.value != accelerationPref.defaultValue) {
+      defaultPerformancePref.value = false;
+    }
+  },
+
+  updatePerformanceSettingsBox() {
+    let defaultPerformancePref =
+      document.getElementById("browser.preferences.defaultPerformanceSettings.enabled");
+    let performanceSettings = document.getElementById("performanceSettings");
+    if (defaultPerformancePref.value) {
+      let processCountPref = document.getElementById("dom.ipc.processCount");
+      let accelerationPref = document.getElementById("layers.acceleration.disabled");
+      processCountPref.value = processCountPref.defaultValue;
+      accelerationPref.value = accelerationPref.defaultValue;
+      performanceSettings.hidden = true;
+    } else {
+      performanceSettings.hidden = false;
+    }
+  },
+
+  buildContentProcessCountMenuList() {
+    let processCountPref = document.getElementById("dom.ipc.processCount");
+    let bundlePreferences = document.getElementById("bundlePreferences");
+    let label = bundlePreferences.getFormattedString("defaultContentProcessCount",
+      [processCountPref.defaultValue]);
+    let contentProcessCount =
+      document.querySelector(`#contentProcessCount > menupopup >
+                              menuitem[value="${processCountPref.defaultValue}"]`);
+    contentProcessCount.label = label;
   },
 
   buildDefaultEngineDropDown() {
@@ -934,14 +1034,14 @@ var gMainPane = {
     document.getElementById("engineList").focus();
   },
 
-  editKeyword: Task.async(function* (aEngine, aNewKeyword) {
+  async editKeyword(aEngine, aNewKeyword) {
     let keyword = aNewKeyword.trim();
     if (keyword) {
       let eduplicate = false;
       let dupName = "";
 
       // Check for duplicates in Places keywords.
-      let bduplicate = !!(yield PlacesUtils.keywords.fetch(keyword));
+      let bduplicate = !!(await PlacesUtils.keywords.fetch(keyword));
 
       // Check for duplicates in changes we haven't committed yet
       let engines = gEngineView._engineStore.engines;
@@ -969,7 +1069,7 @@ var gMainPane = {
     gEngineView._engineStore.changeEngine(aEngine, "alias", keyword);
     gEngineView.invalidate();
     return true;
-  }),
+  },
 
   saveOneClickEnginesList() {
     let hiddenList = [];

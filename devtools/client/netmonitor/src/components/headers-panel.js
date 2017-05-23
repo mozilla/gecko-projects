@@ -10,7 +10,10 @@ const {
   DOM,
   PropTypes,
 } = require("devtools/client/shared/vendor/react");
-const { getFormattedSize } = require("../utils/format-utils");
+const {
+  getFormattedIPAndPort,
+  getFormattedSize,
+} = require("../utils/format-utils");
 const { L10N } = require("../utils/l10n");
 const {
   getHeadersURL,
@@ -23,7 +26,7 @@ const { REPS, MODE } = require("devtools/client/shared/components/reps/reps");
 const MDNLink = createFactory(require("./mdn-link"));
 const PropertiesView = createFactory(require("./properties-view"));
 
-const Rep = createFactory(REPS.Rep);
+const { Rep } = REPS;
 const { button, div, input, textarea } = DOM;
 
 const EDIT_AND_RESEND = L10N.getStr("netmonitor.summary.editAndResend");
@@ -161,7 +164,7 @@ const HeadersPanel = createClass({
 
     let summaryAddress = remoteAddress ?
       this.renderSummary(SUMMARY_ADDRESS,
-        remotePort ? `${remoteAddress}:${remotePort}` : remoteAddress) : null;
+        getFormattedIPAndPort(remoteAddress, remotePort)) : null;
 
     let summaryStatus;
 
@@ -197,7 +200,7 @@ const HeadersPanel = createClass({
           statusCodeDocURL ? MDNLink({
             url: statusCodeDocURL,
           }) : null,
-          window.NetMonitorController.supportsCustomRequest && button({
+          button({
             className: "devtools-button",
             onClick: cloneSelectedRequest,
           }, EDIT_AND_RESEND),

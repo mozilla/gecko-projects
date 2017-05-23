@@ -9,9 +9,10 @@
 #![deny(missing_docs)]
 
 #[cfg(feature = "gecko")]
-use computed_values::{font_style, font_weight, font_stretch};
+use computed_values::{font_feature_settings, font_stretch, font_style, font_weight};
 use computed_values::font_family::FamilyName;
 use cssparser::{AtRuleParser, DeclarationListParser, DeclarationParser, Parser};
+use cssparser::SourceLocation;
 #[cfg(feature = "gecko")] use gecko_bindings::structs::CSSFontFaceDescriptors;
 #[cfg(feature = "gecko")] use cssparser::UnicodeRange;
 use parser::{ParserContext, log_css_error, Parse};
@@ -71,11 +72,24 @@ impl ToCss for UrlSource {
     }
 }
 
+/// A font-display value for a @font-face rule.
+/// The font-display descriptor determines how a font face is displayed based
+/// on whether and when it is downloaded and ready to use.
+define_css_keyword_enum!(FontDisplay:
+                         "auto" => Auto,
+                         "block" => Block,
+                         "swap" => Swap,
+                         "fallback" => Fallback,
+                         "optional" => Optional);
+add_impls_for_keyword_enum!(FontDisplay);
+
 /// Parse the block inside a `@font-face` rule.
 ///
 /// Note that the prelude parsing code lives in the `stylesheets` module.
-pub fn parse_font_face_block(context: &ParserContext, input: &mut Parser) -> FontFaceRuleData {
+pub fn parse_font_face_block(context: &ParserContext, input: &mut Parser, location: SourceLocation)
+    -> FontFaceRuleData {
     let mut rule = FontFaceRuleData::empty();
+    rule.source_location = location;
     {
         let parser = FontFaceRuleParser {
             context: context,
@@ -186,6 +200,8 @@ macro_rules! font_face_descriptors_common {
                 #[$doc]
                 pub $ident: Option<$ty>,
             )*
+            /// Line and column of the @font-face rule source code.
+            pub source_location: SourceLocation,
         }
 
         impl FontFaceRuleData {
@@ -194,14 +210,18 @@ macro_rules! font_face_descriptors_common {
                     $(
                         $ident: None,
                     )*
+                    source_location: SourceLocation {
+                        line: 0,
+                        column: 0,
+                    },
                 }
             }
 
             /// Convert to Gecko types
             #[cfg(feature = "gecko")]
-            pub fn set_descriptors(&self, descriptors: &mut CSSFontFaceDescriptors) {
+            pub fn set_descriptors(self, descriptors: &mut CSSFontFaceDescriptors) {
                 $(
-                    if let Some(ref value) = self.$ident {
+                    if let Some(value) = self.$ident {
                         descriptors.$gecko_ident.set_from(value)
                     }
                 )*
@@ -323,12 +343,20 @@ font_face_descriptors! {
         /// The stretch of this font face
         "font-stretch" stretch / mStretch: font_stretch::T = font_stretch::T::normal,
 
+        /// The display of this font face
+        "font-display" display / mDisplay: FontDisplay = FontDisplay::Auto,
+
         /// The ranges of code points outside of which this font face should not be used.
         "unicode-range" unicode_range / mUnicodeRange: Vec<UnicodeRange> = vec![
             UnicodeRange { start: 0, end: 0x10FFFF }
         ],
 
-        // FIXME: add font-feature-settings, font-language-override, and font-display
+        /// The feature settings of this font face.
+        "font-feature-settings" feature_settings / mFontFeatureSettings: font_feature_settings::T = {
+            font_feature_settings::T::Normal
+        },
+
+        // FIXME: add font-language-override.
     ]
 }
 

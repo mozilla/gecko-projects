@@ -21,7 +21,7 @@ const NS_GFXINFO_CONTRACTID = "@mozilla.org/gfx/info;1";
 const BLANK_URL_FOR_CLEARING = "data:text/html;charset=UTF-8,%3C%21%2D%2DCLEAR%2D%2D%3E";
 
 CU.import("resource://gre/modules/Timer.jsm");
-CU.import("resource://gre/modules/AsyncSpellCheckTestHelper.jsm");
+CU.import("chrome://reftest/content/AsyncSpellCheckTestHelper.jsm");
 
 var gBrowserIsRemote;
 var gIsWebRenderEnabled;
@@ -593,7 +593,7 @@ function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
                 state = STATE_WAITING_TO_FINISH;
                 MakeProgress();
             };
-            os.addObserver(flushWaiter, "apz-repaints-flushed", false);
+            os.addObserver(flushWaiter, "apz-repaints-flushed");
 
             var willSnapshot = (gCurrentTestType != TYPE_SCRIPT) &&
                                (gCurrentTestType != TYPE_LOAD);

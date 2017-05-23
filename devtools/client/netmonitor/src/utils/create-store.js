@@ -4,23 +4,42 @@
 
 "use strict";
 
-const { createStore, applyMiddleware } = require("devtools/client/shared/vendor/redux");
-const { thunk } = require("devtools/client/shared/redux/middleware/thunk");
+const Services = require("Services");
+const { applyMiddleware, createStore } = require("devtools/client/shared/vendor/redux");
 const batching = require("../middleware/batching");
 const prefs = require("../middleware/prefs");
-const { Prefs } = require("./prefs");
+const thunk = require("../middleware/thunk");
 const rootReducer = require("../reducers/index");
 const { FilterTypes, Filters } = require("../reducers/filters");
 const { Requests } = require("../reducers/requests");
 const { Sort } = require("../reducers/sort");
 const { TimingMarkers } = require("../reducers/timing-markers");
-const { UI } = require("../reducers/ui");
+const { UI, Columns } = require("../reducers/ui");
 
 function configureStore() {
+  const getPref = (pref) => {
+    try {
+      return JSON.parse(Services.prefs.getCharPref(pref));
+    } catch (_) {
+      return [];
+    }
+  };
+
   let activeFilters = {};
-  Prefs.filters.forEach((filter) => {
+  let filters = getPref("devtools.netmonitor.filters");
+  filters.forEach((filter) => {
     activeFilters[filter] = true;
   });
+
+  let columns = new Columns();
+  let hiddenColumns = getPref("devtools.netmonitor.hiddenColumns");
+
+  for (let [col] of columns) {
+    columns = columns.withMutations((state) => {
+      state.set(col, !hiddenColumns.includes(col));
+    });
+  }
+
   const initialState = {
     filters: new Filters({
       requestFilterTypes: new FilterTypes(activeFilters)
@@ -28,18 +47,12 @@ function configureStore() {
     requests: new Requests(),
     sort: new Sort(),
     timingMarkers: new TimingMarkers(),
-    ui: new UI()
+    ui: new UI({
+      columns,
+    }),
   };
 
-  return createStore(
-    rootReducer,
-    initialState,
-    applyMiddleware(
-      thunk,
-      prefs,
-      batching
-    )
-  );
+  return createStore(rootReducer, initialState, applyMiddleware(thunk, prefs, batching));
 }
 
 exports.configureStore = configureStore;

@@ -237,6 +237,7 @@ class JSFunction : public js::NativeObject
     }
 
     bool isBuiltinFunctionConstructor();
+    bool needsPrototypeProperty();
 
     /* Returns the strictness of this function, which must be interpreted. */
     bool strict() const {
@@ -311,7 +312,8 @@ class JSFunction : public js::NativeObject
     static bool getUnresolvedLength(JSContext* cx, js::HandleFunction fun,
                                     js::MutableHandleValue v);
 
-    JSAtom* getUnresolvedName(JSContext* cx);
+    static bool getUnresolvedName(JSContext* cx, js::HandleFunction fun,
+                                  js::MutableHandleAtom v);
 
     JSAtom* explicitName() const {
         return (hasCompileTimeName() || hasGuessedAtom()) ? nullptr : atom_.get();
@@ -320,9 +322,15 @@ class JSFunction : public js::NativeObject
         return hasGuessedAtom() ? nullptr : atom_.get();
     }
 
-    void initAtom(JSAtom* atom) { atom_.init(atom); }
+    void initAtom(JSAtom* atom) {
+        MOZ_ASSERT_IF(atom, js::AtomIsMarked(zone(), atom));
+        atom_.init(atom);
+    }
 
-    void setAtom(JSAtom* atom) { atom_ = atom; }
+    void setAtom(JSAtom* atom) {
+        MOZ_ASSERT_IF(atom, js::AtomIsMarked(zone(), atom));
+        atom_ = atom;
+    }
 
     JSAtom* displayAtom() const {
         return atom_;

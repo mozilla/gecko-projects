@@ -25,7 +25,7 @@ namespace image {
 // AnimationState implementation.
 ///////////////////////////////////////////////////////////////////////////////
 
-void
+const gfx::IntRect
 AnimationState::UpdateState(bool aAnimationFinished,
                             RasterImage *aImage,
                             const gfx::IntSize& aSize)
@@ -36,12 +36,13 @@ AnimationState::UpdateState(bool aAnimationFinished,
                                           DefaultSurfaceFlags(),
                                           PlaybackType::eAnimated));
 
-  UpdateStateInternal(result, aAnimationFinished);
+  return UpdateStateInternal(result, aAnimationFinished, aSize);
 }
 
-void
+const gfx::IntRect
 AnimationState::UpdateStateInternal(LookupResult& aResult,
-                                    bool aAnimationFinished)
+                                    bool aAnimationFinished,
+                                    const gfx::IntSize& aSize)
 {
   // Update mDiscarded and mIsCurrentlyDecoded.
   if (aResult.Type() == MatchType::NOT_FOUND) {
@@ -73,6 +74,8 @@ AnimationState::UpdateStateInternal(LookupResult& aResult,
     }
   }
 
+  gfx::IntRect ret;
+
   // Update the value of mCompositedFrameInvalid.
   if (mIsCurrentlyDecoded || aAnimationFinished) {
     // Animated images that have finished their animation (ie because it is a
@@ -84,6 +87,10 @@ AnimationState::UpdateStateInternal(LookupResult& aResult,
     // to do for images that aren't finished animating because before we paint
     // the refresh driver will call into us to advance to the correct frame,
     // and that will succeed because we have all the frames.
+    if (mCompositedFrameInvalid) {
+      // Invalidate if we are marking the composited frame valid.
+      ret.SizeTo(aSize);
+    }
     mCompositedFrameInvalid = false;
   } else if (aResult.Type() == MatchType::NOT_FOUND ||
              aResult.Type() == MatchType::PENDING) {
@@ -94,6 +101,8 @@ AnimationState::UpdateStateInternal(LookupResult& aResult,
   }
   // Otherwise don't change the value of mCompositedFrameInvalid, it will be
   // updated by RequestRefresh.
+
+  return ret;
 }
 
 void
@@ -372,8 +381,11 @@ FrameAnimator::RequestRefresh(AnimationState& aState,
                                           DefaultSurfaceFlags(),
                                           PlaybackType::eAnimated));
 
-  aState.UpdateStateInternal(result, aAnimationFinished);
+  ret.mDirtyRect = aState.UpdateStateInternal(result, aAnimationFinished, mSize);
   if (aState.IsDiscarded() || !result) {
+    if (!ret.mDirtyRect.IsEmpty()) {
+      ret.mFrameAdvanced = true;
+    }
     return ret;
   }
 
@@ -413,6 +425,7 @@ FrameAnimator::RequestRefresh(AnimationState& aState,
   // Advanced to the correct frame, the composited frame is now valid to be drawn.
   if (*currentFrameEndTime > aTime) {
     aState.mCompositedFrameInvalid = false;
+    ret.mDirtyRect = IntRect(IntPoint(0,0), mSize);
   }
 
   MOZ_ASSERT(!aState.mIsCurrentlyDecoded || !aState.mCompositedFrameInvalid);
@@ -423,11 +436,20 @@ FrameAnimator::RequestRefresh(AnimationState& aState,
 LookupResult
 FrameAnimator::GetCompositedFrame(AnimationState& aState)
 {
+  LookupResult result =
+    SurfaceCache::Lookup(ImageKey(mImage),
+                         RasterSurfaceKey(mSize,
+                                          DefaultSurfaceFlags(),
+                                          PlaybackType::eAnimated));
+
   if (aState.mCompositedFrameInvalid) {
     MOZ_ASSERT(gfxPrefs::ImageMemAnimatedDiscardable());
     MOZ_ASSERT(aState.GetHasBeenDecoded());
     MOZ_ASSERT(!aState.GetIsCurrentlyDecoded());
-    return LookupResult(MatchType::NOT_FOUND);
+    if (result.Type() == MatchType::NOT_FOUND) {
+      return result;
+    }
+    return LookupResult(MatchType::PENDING);
   }
 
   // If we have a composited version of this frame, return that.
@@ -439,11 +461,6 @@ FrameAnimator::GetCompositedFrame(AnimationState& aState)
 
   // Otherwise return the raw frame. DoBlend is required to ensure that we only
   // hit this case if the frame is not paletted and doesn't require compositing.
-  LookupResult result =
-    SurfaceCache::Lookup(ImageKey(mImage),
-                         RasterSurfaceKey(mSize,
-                                          DefaultSurfaceFlags(),
-                                          PlaybackType::eAnimated));
   if (!result) {
     return result;
   }
@@ -451,7 +468,10 @@ FrameAnimator::GetCompositedFrame(AnimationState& aState)
   // Seek to the appropriate frame. If seeking fails, it means that we couldn't
   // get the frame we're looking for; treat this as if the lookup failed.
   if (NS_FAILED(result.Surface().Seek(aState.mCurrentAnimationFrameIndex))) {
-    return LookupResult(MatchType::NOT_FOUND);
+    if (result.Type() == MatchType::NOT_FOUND) {
+      return result;
+    }
+    return LookupResult(MatchType::PENDING);
   }
 
   MOZ_ASSERT(!result.Surface()->GetIsPaletted(),

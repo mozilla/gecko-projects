@@ -106,7 +106,7 @@ AutofillProfileAutoCompleteSearch.prototype = {
       return;
     }
 
-    this._getProfiles({info, searchString}).then((profiles) => {
+    this._getAddresses({info, searchString}).then((addresses) => {
       if (this.forceStop) {
         return;
       }
@@ -115,7 +115,7 @@ AutofillProfileAutoCompleteSearch.prototype = {
       let result = new ProfileAutoCompleteResult(searchString,
                                                  info.fieldName,
                                                  allFieldNames,
-                                                 profiles,
+                                                 addresses,
                                                  {});
 
       listener.onSearchResult(this, result);
@@ -132,27 +132,27 @@ AutofillProfileAutoCompleteSearch.prototype = {
   },
 
   /**
-   * Get the profile data from parent process for AutoComplete result.
+   * Get the address data from parent process for AutoComplete result.
    *
    * @private
    * @param  {Object} data
    *         Parameters for querying the corresponding result.
    * @param  {string} data.searchString
-   *         The typed string for filtering out the matched profile.
+   *         The typed string for filtering out the matched address.
    * @param  {string} data.info
    *         The input autocomplete property's information.
    * @returns {Promise}
-   *          Promise that resolves when profiles returned from parent process.
+   *          Promise that resolves when addresses returned from parent process.
    */
-  _getProfiles(data) {
-    this.log.debug("_getProfiles with data:", data);
+  _getAddresses(data) {
+    this.log.debug("_getAddresses with data:", data);
     return new Promise((resolve) => {
-      Services.cpmm.addMessageListener("FormAutofill:Profiles", function getResult(result) {
-        Services.cpmm.removeMessageListener("FormAutofill:Profiles", getResult);
+      Services.cpmm.addMessageListener("FormAutofill:Addresses", function getResult(result) {
+        Services.cpmm.removeMessageListener("FormAutofill:Addresses", getResult);
         resolve(result.data);
       });
 
-      Services.cpmm.sendAsyncMessage("FormAutofill:GetProfiles", data);
+      Services.cpmm.sendAsyncMessage("FormAutofill:GetAddresses", data);
     });
   },
 };
@@ -178,7 +178,7 @@ let ProfileAutocomplete = {
     this._factory.register(AutofillProfileAutoCompleteSearch);
     this._registered = true;
 
-    Services.obs.addObserver(this, "autocomplete-will-enter-text", false);
+    Services.obs.addObserver(this, "autocomplete-will-enter-text");
   },
 
   ensureUnregistered() {
@@ -287,6 +287,7 @@ let ProfileAutocomplete = {
  * NOTE: Declares it by "var" to make it accessible in unit tests.
  */
 var FormAutofillContent = {
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIFormSubmitObserver]),
   /**
    * @type {WeakMap} mapping FormLike root HTML elements to FormAutofillHandler objects.
    */
@@ -302,6 +303,7 @@ var FormAutofillContent = {
 
     Services.cpmm.addMessageListener("FormAutofill:enabledStatus", this);
     Services.cpmm.addMessageListener("FormAutofill:savedFieldNames", this);
+    Services.obs.addObserver(this, "earlyformsubmit");
 
     if (Services.cpmm.initialProcessData.autofillEnabled) {
       ProfileAutocomplete.ensureRegistered();
@@ -309,6 +311,23 @@ var FormAutofillContent = {
 
     this.savedFieldNames =
       Services.cpmm.initialProcessData.autofillSavedFieldNames || new Set();
+  },
+
+  _onFormSubmit(handler) {
+    // TODO: Handle form submit event for profile saving(bug 990219) and metrics(bug 1341569).
+  },
+
+  notify(formElement) {
+    this.log.debug("notified for form early submission");
+
+    let handler = this._formsDetails.get(formElement);
+    if (!handler) {
+      this.log.debug("Form element could not map to an existing handler");
+    } else {
+      this._onFormSubmit(handler);
+    }
+
+    return true;
   },
 
   receiveMessage({name, data}) {
@@ -388,6 +407,13 @@ var FormAutofillContent = {
       // We only consider text-like fields for now until we support radio and
       // checkbox buttons in the future.
       if (!field.mozIsTextField(true)) {
+        continue;
+      }
+
+      // For now skip consider fields in forms we've already seen before even
+      // if the specific field wasn't seen before. Ideally whether the field is
+      // already in the handler's form details would be considered.
+      if (this.getFormHandler(field)) {
         continue;
       }
 

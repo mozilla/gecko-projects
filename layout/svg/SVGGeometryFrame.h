@@ -49,11 +49,15 @@ class SVGGeometryFrame : public nsFrame
   friend class ::nsDisplaySVGGeometry;
 
 protected:
-  explicit SVGGeometryFrame(nsStyleContext* aContext)
-    : nsFrame(aContext)
+  SVGGeometryFrame(nsStyleContext* aContext, mozilla::LayoutFrameType aType)
+    : nsFrame(aContext, aType)
   {
      AddStateBits(NS_FRAME_SVG_LAYOUT | NS_FRAME_MAY_BE_TRANSFORMED);
   }
+
+  explicit SVGGeometryFrame(nsStyleContext* aContext)
+    : SVGGeometryFrame(aContext, mozilla::LayoutFrameType::SVGGeometry)
+  {}
 
 public:
   NS_DECL_QUERYFRAME_TARGET(SVGGeometryFrame)
@@ -76,13 +80,6 @@ public:
 
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) override;
 
-  /**
-   * Get the "type" of the frame
-   *
-   * @see nsGkAtoms::svgGeometryFrame
-   */
-  virtual nsIAtom* GetType() const override;
-
   virtual bool IsSVGTransformed(Matrix *aOwnTransforms = nullptr,
                                 Matrix *aFromParentTransforms = nullptr) const override;
 
@@ -100,10 +97,10 @@ public:
   gfxMatrix GetCanvasTM();
 protected:
   // nsSVGDisplayableFrame interface:
-  virtual DrawResult PaintSVG(gfxContext& aContext,
-                              const gfxMatrix& aTransform,
-                              const nsIntRect* aDirtyRect = nullptr,
-                              uint32_t aFlags = 0) override;
+  virtual void PaintSVG(gfxContext& aContext,
+                        const gfxMatrix& aTransform,
+                        imgDrawingParams& aImgParams,
+                        const nsIntRect* aDirtyRect = nullptr) override;
   virtual nsIFrame* GetFrameForPoint(const gfxPoint& aPoint) override;
   virtual void ReflowSVG() override;
   virtual void NotifySVGChanged(uint32_t aFlags) override;
@@ -120,15 +117,15 @@ protected:
   virtual uint16_t GetHitTestFlags();
 private:
   enum { eRenderFill = 1, eRenderStroke = 2 };
-  DrawResult Render(gfxContext* aContext, uint32_t aRenderComponents,
-                    const gfxMatrix& aTransform, uint32_t aFlags);
+  void Render(gfxContext* aContext, uint32_t aRenderComponents,
+              const gfxMatrix& aTransform, imgDrawingParams& aImgParams);
 
   /**
    * @param aMatrix The transform that must be multiplied onto aContext to
    *   establish this frame's SVG user space.
    */
-  DrawResult PaintMarkers(gfxContext& aContext, const gfxMatrix& aMatrix,
-                          uint32_t aFlags);
+  void PaintMarkers(gfxContext& aContext, const gfxMatrix& aMatrix,
+                    imgDrawingParams& aImgParams);
 
   struct MarkerProperties {
     nsSVGMarkerProperty* mMarkerStart;

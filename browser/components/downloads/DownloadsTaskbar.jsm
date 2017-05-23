@@ -89,7 +89,7 @@ this.DownloadsTaskbar = {
         Services.obs.addObserver(() => {
           this._taskbarProgress = null;
           gMacTaskbarProgress = null;
-        }, "quit-application-granted", false);
+        }, "quit-application-granted");
       } else if (gWinTaskbar) {
         // On Windows, the indicator is currently hidden because we have no
         // previous browser window, thus we should attach the indicator now.
@@ -106,9 +106,10 @@ this.DownloadsTaskbar = {
         // In case the method is re-entered, we simply ignore redundant
         // invocations of the callback, instead of keeping separate state.
         if (this._summary) {
-          return;
+          return undefined;
         }
         this._summary = summary;
+        return this._summary.addView(this);
       }).then(null, Cu.reportError);
     }
   },

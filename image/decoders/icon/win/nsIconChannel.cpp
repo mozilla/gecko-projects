@@ -28,6 +28,7 @@
 #include "nsProxyRelease.h"
 #include "nsContentSecurityManager.h"
 #include "nsContentUtils.h"
+#include "nsNetUtil.h"
 
 // we need windows.h to read out registry information...
 #include <windows.h>
@@ -157,6 +158,12 @@ nsIconChannel::SetLoadFlags(uint32_t aLoadAttributes)
   return mPump->SetLoadFlags(aLoadAttributes);
 }
 
+NS_IMETHODIMP
+nsIconChannel::GetIsDocument(bool *aIsDocument)
+{
+  return NS_GetIsDocumentChannel(this, aIsDocument);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // nsIChannel methods:
 
@@ -245,7 +252,10 @@ nsIconChannel::AsyncOpen(nsIStreamListener* aListener,
   }
 
   // Init our streampump
-  rv = mPump->Init(inStream, int64_t(-1), int64_t(-1), 0, 0, false);
+  nsCOMPtr<nsIEventTarget> target =
+    nsContentUtils::GetEventTargetByLoadInfo(mLoadInfo,
+                                             mozilla::TaskCategory::Other);
+  rv = mPump->Init(inStream, int64_t(-1), int64_t(-1), 0, 0, false, target);
   if (NS_FAILED(rv)) {
     mCallbacks = nullptr;
     return rv;

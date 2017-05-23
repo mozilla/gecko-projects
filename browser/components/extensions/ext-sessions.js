@@ -4,7 +4,6 @@
 
 var {
   promiseObserved,
-  SingletonEventManager,
 } = ExtensionUtils;
 
 XPCOMUtils.defineLazyModuleGetter(this, "SessionStore",
@@ -46,11 +45,11 @@ function createSession(restored, extension, sessionId) {
   if (restored instanceof Ci.nsIDOMChromeWindow) {
     return promiseObserved("sessionstore-single-window-restored", subject => subject == restored).then(() => {
       sessionObj.window = extension.windowManager.convert(restored, {populate: true});
-      return Promise.resolve([sessionObj]);
+      return Promise.resolve(sessionObj);
     });
   }
   sessionObj.tab = extension.tabManager.convert(restored);
-  return Promise.resolve([sessionObj]);
+  return Promise.resolve(sessionObj);
 }
 
 this.sessions = class extends ExtensionAPI {
@@ -61,6 +60,37 @@ this.sessions = class extends ExtensionAPI {
         getRecentlyClosed: function(filter) {
           let maxResults = filter.maxResults == undefined ? this.MAX_SESSION_RESULTS : filter.maxResults;
           return Promise.resolve(getRecentlyClosed(maxResults, extension));
+        },
+
+        forgetClosedTab: function(windowId, sessionId) {
+          let window = context.extension.windowManager.get(windowId).window;
+          let closedTabData = SessionStore.getClosedTabData(window, false);
+
+          let closedTabIndex = closedTabData.findIndex((closedTab) => {
+            return closedTab.closedId === parseInt(sessionId, 10);
+          });
+
+          if (closedTabIndex < 0) {
+            return Promise.reject({message: `Could not find closed tab using sessionId ${sessionId}.`});
+          }
+
+          SessionStore.forgetClosedTab(window, closedTabIndex);
+          return Promise.resolve();
+        },
+
+        forgetClosedWindow: function(sessionId) {
+          let closedWindowData = SessionStore.getClosedWindowData(false);
+
+          let closedWindowIndex = closedWindowData.findIndex((closedWindow) => {
+            return closedWindow.closedId === parseInt(sessionId, 10);
+          });
+
+          if (closedWindowIndex < 0) {
+            return Promise.reject({message: `Could not find closed window using sessionId ${sessionId}.`});
+          }
+
+          SessionStore.forgetClosedWindow(closedWindowIndex);
+          return Promise.resolve();
         },
 
         restore: function(sessionId) {
@@ -97,7 +127,7 @@ this.sessions = class extends ExtensionAPI {
             fire.async();
           };
 
-          Services.obs.addObserver(observer, SS_ON_CLOSED_OBJECTS_CHANGED, false);
+          Services.obs.addObserver(observer, SS_ON_CLOSED_OBJECTS_CHANGED);
           return () => {
             Services.obs.removeObserver(observer, SS_ON_CLOSED_OBJECTS_CHANGED);
           };

@@ -6,17 +6,19 @@
 
 /* utility functions for drawing borders and backgrounds */
 
-#include "nsCSSRenderingGradients.h"
+#include "nsImageRenderer.h"
 
 #include "mozilla/webrender/WebRenderAPI.h"
 
 #include "gfxDrawable.h"
 #include "ImageOps.h"
+#include "mozilla/layers/StackingContextHelper.h"
 #include "nsContentUtils.h"
 #include "nsCSSRendering.h"
+#include "nsCSSRenderingGradients.h"
 #include "nsIFrame.h"
-#include "nsImageRenderer.h"
 #include "nsRenderingContext.h"
+#include "nsStyleStructInlines.h"
 #include "nsSVGEffects.h"
 #include "nsSVGIntegrationUtils.h"
 
@@ -147,7 +149,6 @@ nsImageRenderer::PrepareImage()
         bool isEntireImage;
         bool success =
           mImage->ComputeActualCropRect(actualCropRect, &isEntireImage);
-        NS_ASSERTION(success, "ComputeActualCropRect() should not fail here");
         if (!success || actualCropRect.IsEmpty()) {
           // The cropped image has zero size
           mPrepareResult = DrawResult::BAD_IMAGE;
@@ -173,7 +174,7 @@ nsImageRenderer::PrepareImage()
     case eStyleImageType_Element:
     {
       nsAutoString elementId =
-        NS_LITERAL_STRING("#") + nsDependentString(mImage->GetElementId());
+        NS_LITERAL_STRING("#") + nsDependentAtomString(mImage->GetElementId());
       nsCOMPtr<nsIURI> targetURI;
       nsCOMPtr<nsIURI> base = mForFrame->GetContent()->GetBaseURI();
       nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(targetURI), elementId,
@@ -512,7 +513,7 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
       CSSIntSize imageSize(nsPresContext::AppUnitsToIntCSSPixels(mSize.width),
                            nsPresContext::AppUnitsToIntCSSPixels(mSize.height));
       result =
-        nsLayoutUtils::DrawBackgroundImage(*ctx,
+        nsLayoutUtils::DrawBackgroundImage(*ctx, mForFrame,
                                            aPresContext,
                                            mImageContainer, imageSize,
                                            samplingFilter,
@@ -524,13 +525,10 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
     }
     case eStyleImageType_Gradient:
     {
-      Maybe<nsCSSGradientRenderer> renderer =
-        nsCSSGradientRenderer::Create(aPresContext, mGradientData,
-                                      aDest, aFill, aRepeatSize, aSrc, mSize);
+      nsCSSGradientRenderer renderer =
+        nsCSSGradientRenderer::Create(aPresContext, mGradientData, mSize);
 
-      if (renderer) {
-        renderer->Paint(*ctx, aDirtyRect, aOpacity);
-      }
+      renderer.Paint(*ctx, aDest, aFill, aRepeatSize, aSrc, aDirtyRect, aOpacity);
       break;
     }
     case eStyleImageType_Element:
@@ -579,9 +577,11 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
   return result;
 }
 
-void
+DrawResult
 nsImageRenderer::BuildWebRenderDisplayItems(nsPresContext*       aPresContext,
                                             mozilla::wr::DisplayListBuilder&            aBuilder,
+                                            const mozilla::layers::StackingContextHelper& aSc,
+                                            nsTArray<WebRenderParentCommand>&           aParentCommands,
                                             mozilla::layers::WebRenderDisplayItemLayer* aLayer,
                                             const nsRect&        aDirtyRect,
                                             const nsRect&        aDest,
@@ -593,28 +593,62 @@ nsImageRenderer::BuildWebRenderDisplayItems(nsPresContext*       aPresContext,
 {
   if (!IsReady()) {
     NS_NOTREACHED("Ensure PrepareImage() has returned true before calling me");
-    return;
+    return DrawResult::NOT_READY;
   }
   if (aDest.IsEmpty() || aFill.IsEmpty() ||
       mSize.width <= 0 || mSize.height <= 0) {
-    return;
+    return DrawResult::SUCCESS;
   }
 
   switch (mType) {
     case eStyleImageType_Gradient:
     {
-      Maybe<nsCSSGradientRenderer> renderer =
-        nsCSSGradientRenderer::Create(aPresContext, mGradientData,
-                                   aDest, aFill, aRepeatSize, aSrc, mSize);
+      nsCSSGradientRenderer renderer =
+        nsCSSGradientRenderer::Create(aPresContext, mGradientData, mSize);
 
-      if (renderer) {
-        renderer->BuildWebRenderDisplayItems(aBuilder, aLayer, aOpacity);
+      renderer.BuildWebRenderDisplayItems(aBuilder, aSc, aLayer, aDest, aFill, aRepeatSize, aSrc, aOpacity);
+      break;
+    }
+    case eStyleImageType_Image:
+    {
+      RefPtr<layers::ImageContainer> container = mImageContainer->GetImageContainer(aLayer->WrManager(),
+                                                                                    ConvertImageRendererToDrawFlags(mFlags));
+      if (!container) {
+        NS_WARNING("Failed to get image container");
+        return DrawResult::NOT_READY;
       }
+      Maybe<wr::ImageKey> key = aLayer->SendImageContainer(container, aParentCommands);
+      if (key.isNothing()) {
+        return DrawResult::BAD_IMAGE;
+      }
+
+      const int32_t appUnitsPerDevPixel = mForFrame->PresContext()->AppUnitsPerDevPixel();
+      LayoutDeviceRect destRect = LayoutDeviceRect::FromAppUnits(
+          aDest, appUnitsPerDevPixel);
+
+      nsPoint firstTilePos = nsLayoutUtils::GetBackgroundFirstTilePos(aDest.TopLeft(),
+                                                                      aFill.TopLeft(),
+                                                                      aRepeatSize);
+      LayoutDeviceRect fillRect = LayoutDeviceRect::FromAppUnits(
+          nsRect(firstTilePos.x, firstTilePos.y,
+                 aFill.XMost() - firstTilePos.x, aFill.YMost() - firstTilePos.y),
+          appUnitsPerDevPixel);
+      WrRect fill = aSc.ToRelativeWrRect(fillRect);
+      WrRect clip = aSc.ToRelativeWrRect(
+          LayoutDeviceRect::FromAppUnits(aFill, appUnitsPerDevPixel));
+
+      LayoutDeviceSize gapSize = LayoutDeviceSize::FromAppUnits(
+          aRepeatSize - aDest.Size(), appUnitsPerDevPixel);
+      aBuilder.PushImage(fill, aBuilder.PushClipRegion(clip),
+                         wr::ToWrSize(destRect.Size()), wr::ToWrSize(gapSize),
+                         wr::ImageRendering::Auto, key.value());
       break;
     }
     default:
       break;
   }
+
+  return DrawResult::SUCCESS;
 }
 
 already_AddRefed<gfxDrawable>
@@ -677,9 +711,11 @@ nsImageRenderer::DrawLayer(nsPresContext*       aPresContext,
               aOpacity);
 }
 
-void
+DrawResult
 nsImageRenderer::BuildWebRenderDisplayItemsForLayer(nsPresContext*       aPresContext,
                                                     mozilla::wr::DisplayListBuilder& aBuilder,
+                                                    const mozilla::layers::StackingContextHelper& aSc,
+                                                    nsTArray<WebRenderParentCommand>& aParentCommands,
                                                     WebRenderDisplayItemLayer*       aLayer,
                                                     const nsRect&        aDest,
                                                     const nsRect&        aFill,
@@ -690,19 +726,19 @@ nsImageRenderer::BuildWebRenderDisplayItemsForLayer(nsPresContext*       aPresCo
 {
   if (!IsReady()) {
     NS_NOTREACHED("Ensure PrepareImage() has returned true before calling me");
-    return;
+    return mPrepareResult;
   }
   if (aDest.IsEmpty() || aFill.IsEmpty() ||
       mSize.width <= 0 || mSize.height <= 0) {
-    return;
+    return DrawResult::SUCCESS;
   }
 
-  BuildWebRenderDisplayItems(aPresContext, aBuilder, aLayer,
-                             aDirty, aDest, aFill, aAnchor, aRepeatSize,
-                             CSSIntRect(0, 0,
-                                        nsPresContext::AppUnitsToIntCSSPixels(mSize.width),
-                                        nsPresContext::AppUnitsToIntCSSPixels(mSize.height)),
-                             aOpacity);
+  return BuildWebRenderDisplayItems(aPresContext, aBuilder, aSc, aParentCommands, aLayer,
+                                    aDirty, aDest, aFill, aAnchor, aRepeatSize,
+                                    CSSIntRect(0, 0,
+                                               nsPresContext::AppUnitsToIntCSSPixels(mSize.width),
+                                               nsPresContext::AppUnitsToIntCSSPixels(mSize.height)),
+                                    aOpacity);
 }
 
 /**
@@ -895,7 +931,7 @@ nsImageRenderer::DrawBorderImageComponent(nsPresContext*       aPresContext,
     nsRect tile = ComputeTile(fillRect, aHFill, aVFill, aUnitSize, repeatSize);
     CSSIntSize imageSize(srcRect.width, srcRect.height);
     return nsLayoutUtils::DrawBackgroundImage(*aRenderingContext.ThebesContext(),
-                                              aPresContext,
+                                              mForFrame, aPresContext,
                                               subImage, imageSize, samplingFilter,
                                               tile, fillRect, repeatSize,
                                               tile.TopLeft(), aDirtyRect,
@@ -962,5 +998,12 @@ nsImageRenderer::PurgeCacheForViewportChange(
       mImageContainer->GetType() == imgIContainer::TYPE_VECTOR) {
     mImage->PurgeCacheForViewportChange(aSVGViewportSize, aHasIntrinsicRatio);
   }
+}
+
+already_AddRefed<nsStyleGradient>
+nsImageRenderer::GetGradientData()
+{
+  RefPtr<nsStyleGradient> res = mGradientData;
+  return res.forget();
 }
 

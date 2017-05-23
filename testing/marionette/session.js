@@ -53,23 +53,21 @@ session.Timeouts = class {
     let t = new session.Timeouts();
 
     for (let [typ, ms] of Object.entries(json)) {
-      assert.positiveInteger(ms);
-
       switch (typ) {
         case "implicit":
-          t.implicit = ms;
+          t.implicit = assert.positiveInteger(ms);
           break;
 
         case "script":
-          t.script = ms;
+          t.script = assert.positiveInteger(ms);
           break;
 
         case "pageLoad":
-          t.pageLoad = ms;
+          t.pageLoad = assert.positiveInteger(ms);
           break;
 
         default:
-          throw new InvalidArgumentError();
+          throw new InvalidArgumentError("Unrecognised timeout: " + typ);
       }
     }
 
@@ -247,7 +245,7 @@ session.Capabilities = class extends Map {
       throw new TypeError();
     }
 
-    return super.set(key, value);  
+    return super.set(key, value);
   }
 
   toString() { return "[object session.Capabilities]"; }
@@ -359,11 +357,18 @@ session.Capabilities = class extends Map {
           break;
 
         case "pageLoadStrategy":
-          if (Object.values(session.PageLoadStrategy).includes(v)) {
-            matched.set("pageLoadStrategy", v);
+          if (v === null) {
+            matched.set("pageLoadStrategy", session.PageLoadStrategy.Normal);
           } else {
-            throw new TypeError("Unknown page load strategy: " + v);
+            assert.string(v);
+
+            if (Object.values(session.PageLoadStrategy).includes(v)) {
+              matched.set("pageLoadStrategy", v);
+            } else {
+              throw new InvalidArgumentError("Unknown page load strategy: " + v);
+            }
           }
+
           break;
 
         case "proxy":

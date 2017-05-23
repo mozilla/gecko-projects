@@ -37,7 +37,7 @@ protected:
   virtual ~nsSliderMediator() {}
 };
 
-class nsSliderFrame : public nsBoxFrame
+class nsSliderFrame final : public nsBoxFrame
 {
 public:
   NS_DECL_FRAMEARENA_HELPERS
@@ -81,8 +81,6 @@ public:
   virtual nsresult HandleEvent(nsPresContext* aPresContext,
                                mozilla::WidgetGUIEvent* aEvent,
                                nsEventStatus* aEventStatus) override;
-
-  virtual nsIAtom* GetType() const override;
 
   // nsContainerFrame overrides
   virtual void SetInitialChildList(ChildListID     aListID,
@@ -168,7 +166,9 @@ private:
   void UnsuppressDisplayport();
 
   void StartRepeat() {
-    nsRepeatService::GetInstance()->Start(Notify, this);
+    nsRepeatService::GetInstance()->Start(Notify, this,
+                                          mContent->OwnerDoc(),
+                                          NS_LITERAL_CSTRING("nsSliderFrame"));
   }
   void StopRepeat() {
     nsRepeatService::GetInstance()->Stop(Notify, this);

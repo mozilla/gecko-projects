@@ -27,10 +27,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "RecentWindow",
                                   "resource:///modules/RecentWindow.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Task",
-                                  "resource://gre/modules/Task.jsm");
-
-const nsIDM = Ci.nsIDownloadManager;
 
 const DESTINATION_FILE_URI_ANNO  = "downloads/destinationFileURI";
 const DOWNLOAD_META_DATA_ANNO    = "downloads/metaData";
@@ -72,17 +68,17 @@ HistoryDownload.prototype = {
     }
 
     if ("state" in metaData) {
-      this.succeeded = metaData.state == nsIDM.DOWNLOAD_FINISHED;
-      this.canceled = metaData.state == nsIDM.DOWNLOAD_CANCELED ||
-                      metaData.state == nsIDM.DOWNLOAD_PAUSED;
+      this.succeeded = metaData.state == DownloadsCommon.DOWNLOAD_FINISHED;
+      this.canceled = metaData.state == DownloadsCommon.DOWNLOAD_CANCELED ||
+                      metaData.state == DownloadsCommon.DOWNLOAD_PAUSED;
       this.endTime = metaData.endTime;
 
       // Recreate partial error information from the state saved in history.
-      if (metaData.state == nsIDM.DOWNLOAD_FAILED) {
+      if (metaData.state == DownloadsCommon.DOWNLOAD_FAILED) {
         this.error = { message: "History download failed." };
-      } else if (metaData.state == nsIDM.DOWNLOAD_BLOCKED_PARENTAL) {
+      } else if (metaData.state == DownloadsCommon.DOWNLOAD_BLOCKED_PARENTAL) {
         this.error = { becauseBlockedByParentalControls: true };
-      } else if (metaData.state == nsIDM.DOWNLOAD_DIRTY) {
+      } else if (metaData.state == DownloadsCommon.DOWNLOAD_DIRTY) {
         this.error = {
           becauseBlockedByReputationCheck: true,
           reputationCheckVerdict: metaData.reputationCheckVerdict || "",
@@ -160,15 +156,15 @@ HistoryDownload.prototype = {
    * This method mimicks the "refresh" method of session downloads, except that
    * it cannot notify that the data changed to the Downloads View.
    */
-  refresh: Task.async(function* () {
+  async refresh() {
     try {
-      this.target.size = (yield OS.File.stat(this.target.path)).size;
+      this.target.size = (await OS.File.stat(this.target.path)).size;
       this.target.exists = true;
     } catch (ex) {
       // We keep the known file size from the metadata, if any.
       this.target.exists = false;
     }
-  }),
+  },
 };
 
 /**
@@ -422,9 +418,9 @@ HistoryDownloadElementShell.prototype = {
     }
   },
 
-  _checkTargetFileOnSelect: Task.async(function* () {
+  async _checkTargetFileOnSelect() {
     try {
-      yield this.download.refresh();
+      await this.download.refresh();
     } finally {
       // Do not try to check for existence again if this failed once.
       this._targetFileChecked = true;
@@ -438,7 +434,7 @@ HistoryDownloadElementShell.prototype = {
     // Ensure the interface has been updated based on the new values. We need to
     // do this because history downloads can't trigger update notifications.
     this._updateProgress();
-  }),
+  },
 };
 
 /**
@@ -912,7 +908,7 @@ DownloadsPlacesView.prototype = {
 
     let result = history.executeQueries(queries.value, queries.value.length,
                                         options.value);
-    result.addObserver(this, false);
+    result.addObserver(this);
     return val;
   },
 
@@ -1092,11 +1088,11 @@ DownloadsPlacesView.prototype = {
         // first item is activated, and pass the item to the richlistbox
         // setters only at a point we know for sure the binding is attached.
         firstDownloadElement._shell.ensureActive();
-        Services.tm.mainThread.dispatch(() => {
+        Services.tm.dispatchToMainThread(() => {
           this._richlistbox.selectedItem = firstDownloadElement;
           this._richlistbox.currentItem = firstDownloadElement;
           this._initiallySelectedElement = firstDownloadElement;
-        }, Ci.nsIThread.DISPATCH_NORMAL);
+        });
       }
     }
   },

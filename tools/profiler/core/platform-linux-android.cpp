@@ -40,7 +40,6 @@
 #include <sys/resource.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
-#include <sys/prctl.h> // set name
 #include <stdlib.h>
 #include <sched.h>
 #include <ucontext.h>
@@ -77,22 +76,30 @@ Thread::GetCurrentId()
 }
 
 static void
-SetSampleContext(TickSample* sample, mcontext_t& mcontext)
+FillInSample(TickSample& aSample, ucontext_t* aContext)
 {
+  aSample.mContext = aContext;
+  mcontext_t& mcontext = aContext->uc_mcontext;
+
   // Extracting the sample from the context is extremely machine dependent.
 #if defined(GP_ARCH_x86)
-  sample->mPC = reinterpret_cast<Address>(mcontext.gregs[REG_EIP]);
-  sample->mSP = reinterpret_cast<Address>(mcontext.gregs[REG_ESP]);
-  sample->mFP = reinterpret_cast<Address>(mcontext.gregs[REG_EBP]);
+  aSample.mPC = reinterpret_cast<Address>(mcontext.gregs[REG_EIP]);
+  aSample.mSP = reinterpret_cast<Address>(mcontext.gregs[REG_ESP]);
+  aSample.mFP = reinterpret_cast<Address>(mcontext.gregs[REG_EBP]);
 #elif defined(GP_ARCH_amd64)
-  sample->mPC = reinterpret_cast<Address>(mcontext.gregs[REG_RIP]);
-  sample->mSP = reinterpret_cast<Address>(mcontext.gregs[REG_RSP]);
-  sample->mFP = reinterpret_cast<Address>(mcontext.gregs[REG_RBP]);
+  aSample.mPC = reinterpret_cast<Address>(mcontext.gregs[REG_RIP]);
+  aSample.mSP = reinterpret_cast<Address>(mcontext.gregs[REG_RSP]);
+  aSample.mFP = reinterpret_cast<Address>(mcontext.gregs[REG_RBP]);
 #elif defined(GP_ARCH_arm)
-  sample->mPC = reinterpret_cast<Address>(mcontext.arm_pc);
-  sample->mSP = reinterpret_cast<Address>(mcontext.arm_sp);
-  sample->mFP = reinterpret_cast<Address>(mcontext.arm_fp);
-  sample->mLR = reinterpret_cast<Address>(mcontext.arm_lr);
+  aSample.mPC = reinterpret_cast<Address>(mcontext.arm_pc);
+  aSample.mSP = reinterpret_cast<Address>(mcontext.arm_sp);
+  aSample.mFP = reinterpret_cast<Address>(mcontext.arm_fp);
+  aSample.mLR = reinterpret_cast<Address>(mcontext.arm_lr);
+#elif defined(GP_ARCH_aarch64)
+  aSample.mPC = reinterpret_cast<Address>(mcontext.pc);
+  aSample.mSP = reinterpret_cast<Address>(mcontext.sp);
+  aSample.mFP = reinterpret_cast<Address>(mcontext.regs[29]);
+  aSample.mLR = reinterpret_cast<Address>(mcontext.regs[30]);
 #else
 # error "bad platform"
 #endif
@@ -106,33 +113,6 @@ int
 tgkill(pid_t tgid, pid_t tid, int signalno)
 {
   return syscall(SYS_tgkill, tgid, tid, signalno);
-}
-
-static void
-SleepMicro(int aMicroseconds)
-{
-  aMicroseconds = std::max(0, aMicroseconds);
-
-  if (aMicroseconds >= 1000000) {
-    // Use usleep for larger intervals, because the nanosleep
-    // code below only supports intervals < 1 second.
-    MOZ_ALWAYS_TRUE(!::usleep(aMicroseconds));
-    return;
-  }
-
-  struct timespec ts;
-  ts.tv_sec  = 0;
-  ts.tv_nsec = aMicroseconds * 1000UL;
-
-  int rv = ::nanosleep(&ts, &ts);
-
-  while (rv != 0 && errno == EINTR) {
-    // Keep waiting in case of interrupt.
-    // nanosleep puts the remaining time back into ts.
-    rv = ::nanosleep(&ts, &ts);
-  }
-
-  MOZ_ASSERT(!rv, "nanosleep call failed");
 }
 
 class PlatformData
@@ -270,13 +250,12 @@ static void*
 ThreadEntry(void* aArg)
 {
   auto thread = static_cast<SamplerThread*>(aArg);
-  prctl(PR_SET_NAME, "SamplerThread", 0, 0, 0);
   thread->mSamplerTid = gettid();
   thread->Run();
   return nullptr;
 }
 
-SamplerThread::SamplerThread(PS::LockRef aLock, uint32_t aActivityGeneration,
+SamplerThread::SamplerThread(PSLockRef aLock, uint32_t aActivityGeneration,
                              double aIntervalMilliseconds)
   : mActivityGeneration(aActivityGeneration)
   , mIntervalMicroseconds(
@@ -292,10 +271,10 @@ SamplerThread::SamplerThread(PS::LockRef aLock, uint32_t aActivityGeneration,
   mozilla::EHABIStackWalkInit();
 #elif defined(USE_LUL_STACKWALK)
   bool createdLUL = false;
-  lul::LUL* lul = gPS->LUL(aLock);
+  lul::LUL* lul = CorePS::Lul(aLock);
   if (!lul) {
     lul = new lul::LUL(logging_sink_for_LUL);
-    gPS->SetLUL(aLock, lul);
+    CorePS::SetLul(aLock, lul);
     // Read all the unwind info currently available.
     read_procmaps(lul);
     createdLUL = true;
@@ -340,7 +319,7 @@ SamplerThread::~SamplerThread()
 }
 
 void
-SamplerThread::Stop(PS::LockRef aLock)
+SamplerThread::Stop(PSLockRef aLock)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
@@ -353,14 +332,39 @@ SamplerThread::Stop(PS::LockRef aLock)
 }
 
 void
-SamplerThread::SuspendAndSampleAndResumeThread(PS::LockRef aLock,
-                                               TickSample* aSample)
+SamplerThread::SleepMicro(uint32_t aMicroseconds)
+{
+  if (aMicroseconds >= 1000000) {
+    // Use usleep for larger intervals, because the nanosleep
+    // code below only supports intervals < 1 second.
+    MOZ_ALWAYS_TRUE(!::usleep(aMicroseconds));
+    return;
+  }
+
+  struct timespec ts;
+  ts.tv_sec  = 0;
+  ts.tv_nsec = aMicroseconds * 1000UL;
+
+  int rv = ::nanosleep(&ts, &ts);
+
+  while (rv != 0 && errno == EINTR) {
+    // Keep waiting in case of interrupt.
+    // nanosleep puts the remaining time back into ts.
+    rv = ::nanosleep(&ts, &ts);
+  }
+
+  MOZ_ASSERT(!rv, "nanosleep call failed");
+}
+
+void
+SamplerThread::SuspendAndSampleAndResumeThread(PSLockRef aLock,
+                                               TickSample& aSample)
 {
   // Only one sampler thread can be sampling at once.  So we expect to have
   // complete control over |sSigHandlerCoordinator|.
   MOZ_ASSERT(!sSigHandlerCoordinator);
 
-  int sampleeTid = aSample->mThreadInfo->ThreadId();
+  int sampleeTid = aSample.mThreadId;
   MOZ_RELEASE_ASSERT(sampleeTid != mSamplerTid);
 
   //----------------------------------------------------------------//
@@ -403,13 +407,10 @@ SamplerThread::SuspendAndSampleAndResumeThread(PS::LockRef aLock,
   // The samplee thread is now frozen and sSigHandlerCoordinator->mUContext is
   // valid.  We can poke around in it and unwind its stack as we like.
 
-  aSample->mContext = &sSigHandlerCoordinator->mUContext;
+  // Extract the current PC and sp.
+  FillInSample(aSample, &sSigHandlerCoordinator->mUContext);
 
-  // Extract the current pc and sp.
-  SetSampleContext(aSample,
-                   sSigHandlerCoordinator->mUContext.uc_mcontext);
-
-  Tick(aLock, gPS->Buffer(aLock), aSample);
+  Tick(aLock, ActivePS::Buffer(aLock), aSample);
 
   //----------------------------------------------------------------//
   // Resume the target thread.
@@ -464,12 +465,14 @@ paf_prepare()
 {
   // This function can run off the main thread.
 
-  MOZ_RELEASE_ASSERT(gPS);
+  MOZ_RELEASE_ASSERT(CorePS::Exists());
 
-  PS::AutoLock lock(gPSMutex);
+  PSAutoLock lock(gPSMutex);
 
-  gPS->SetWasPaused(lock, gPS->IsPaused(lock));
-  gPS->SetIsPaused(lock, true);
+  if (ActivePS::Exists(lock)) {
+    ActivePS::SetWasPaused(lock, ActivePS::IsPaused(lock));
+    ActivePS::SetIsPaused(lock, true);
+  }
 }
 
 // In the parent, after the fork, return IsPaused to the pre-fork state.
@@ -478,16 +481,18 @@ paf_parent()
 {
   // This function can run off the main thread.
 
-  MOZ_RELEASE_ASSERT(gPS);
+  MOZ_RELEASE_ASSERT(CorePS::Exists());
 
-  PS::AutoLock lock(gPSMutex);
+  PSAutoLock lock(gPSMutex);
 
-  gPS->SetIsPaused(lock, gPS->WasPaused(lock));
-  gPS->SetWasPaused(lock, false);
+  if (ActivePS::Exists(lock)) {
+    ActivePS::SetIsPaused(lock, ActivePS::WasPaused(lock));
+    ActivePS::SetWasPaused(lock, false);
+  }
 }
 
 static void
-PlatformInit(PS::LockRef aLock)
+PlatformInit(PSLockRef aLock)
 {
   // Set up the fork handlers.
   pthread_atfork(paf_prepare, paf_parent, nullptr);
@@ -496,7 +501,7 @@ PlatformInit(PS::LockRef aLock)
 #else
 
 static void
-PlatformInit(PS::LockRef aLock)
+PlatformInit(PSLockRef aLock)
 {
 }
 
@@ -505,10 +510,11 @@ PlatformInit(PS::LockRef aLock)
 void
 TickSample::PopulateContext(ucontext_t* aContext)
 {
+  MOZ_ASSERT(mIsSynchronous);
   MOZ_ASSERT(aContext);
+
   if (!getcontext(aContext)) {
-    mContext = aContext;
-    SetSampleContext(this, aContext->uc_mcontext);
+    FillInSample(*this, aContext);
   }
 }
 

@@ -6,6 +6,10 @@
 
 const {
   getAbbreviatedMimeType,
+  getEndTime,
+  getResponseTime,
+  getStartTime,
+  ipToLong,
 } = require("./request-utils");
 
 /**
@@ -50,6 +54,44 @@ function file(first, second) {
   return result || waterfall(first, second);
 }
 
+function protocol(first, second) {
+  const result = compareValues(first.httpVersion, second.httpVersion);
+  return result || waterfall(first, second);
+}
+
+function scheme(first, second) {
+  const result = compareValues(first.urlDetails.scheme, second.urlDetails.scheme);
+  return result || waterfall(first, second);
+}
+
+function startTime(first, second) {
+  const result = compareValues(getStartTime(first), getStartTime(second));
+  return result || waterfall(first, second);
+}
+
+function endTime(first, second) {
+  const result = compareValues(getEndTime(first), getEndTime(second));
+  return result || waterfall(first, second);
+}
+
+function responseTime(first, second) {
+  const result = compareValues(getResponseTime(first), getResponseTime(second));
+  return result || waterfall(first, second);
+}
+
+function duration(first, second) {
+  const result = compareValues(first.totalTime, second.totalTime);
+  return result || waterfall(first, second);
+}
+
+function latency(first, second) {
+  let { eventTimings: firstEventTimings = { timings: {} } } = first;
+  let { eventTimings: secondEventTimings = { timings: {} } } = second;
+  const result = compareValues(firstEventTimings.timings.wait,
+   secondEventTimings.timings.wait);
+  return result || waterfall(first, second);
+}
+
 function domain(first, second) {
   const firstDomain = first.urlDetails.host.toLowerCase();
   const secondDomain = second.urlDetails.host.toLowerCase();
@@ -57,10 +99,37 @@ function domain(first, second) {
   return result || waterfall(first, second);
 }
 
+function remoteip(first, second) {
+  const firstIP = ipToLong(first.remoteAddress);
+  const secondIP = ipToLong(second.remoteAddress);
+  const result = compareValues(firstIP, secondIP);
+  return result || waterfall(first, second);
+}
+
 function cause(first, second) {
   const firstCause = first.cause.type;
   const secondCause = second.cause.type;
   const result = compareValues(firstCause, secondCause);
+  return result || waterfall(first, second);
+}
+
+function setCookies(first, second) {
+  let { responseCookies: firstResponseCookies = { cookies: [] } } = first;
+  let { responseCookies: secondResponseCookies = { cookies: [] } } = second;
+  firstResponseCookies = firstResponseCookies.cookies || firstResponseCookies;
+  secondResponseCookies = secondResponseCookies.cookies || secondResponseCookies;
+  const result =
+    compareValues(firstResponseCookies.length, secondResponseCookies.length);
+  return result || waterfall(first, second);
+}
+
+function cookies(first, second) {
+  let { requestCookies: firstRequestCookies = { cookies: [] } } = first;
+  let { requestCookies: secondRequestCookies = { cookies: [] } } = second;
+  firstRequestCookies = firstRequestCookies.cookies || firstRequestCookies;
+  secondRequestCookies = secondRequestCookies.cookies || secondRequestCookies;
+  const result =
+    compareValues(firstRequestCookies.length, secondRequestCookies.length);
   return result || waterfall(first, second);
 }
 
@@ -76,7 +145,7 @@ function transferred(first, second) {
   return result || waterfall(first, second);
 }
 
-function size(first, second) {
+function contentSize(first, second) {
   const result = compareValues(first.contentSize, second.contentSize);
   return result || waterfall(first, second);
 }
@@ -85,10 +154,20 @@ exports.Sorters = {
   status,
   method,
   file,
+  protocol,
+  scheme,
+  cookies,
+  setCookies,
   domain,
+  remoteip,
   cause,
   type,
   transferred,
-  size,
+  contentSize,
+  startTime,
+  endTime,
+  responseTime,
+  duration,
+  latency,
   waterfall,
 };

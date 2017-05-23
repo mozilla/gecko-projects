@@ -12,6 +12,8 @@
 
 <stringbundle id="engineManagerBundle" src="chrome://browser/locale/engineManager.properties"/>
 
+<stringbundle id="bundlePreferences" src="chrome://browser/locale/preferences.properties"/>
+
 <preferences id="mainPreferences" hidden="true" data-category="paneGeneral">
 
 #ifdef E10S_TESTING_ONLY
@@ -139,7 +141,14 @@
 
   <!-- General tab -->
 
-  <!-- Accessibility -->
+  <!-- Accessibility
+   * accessibility.browsewithcaret
+     - true enables keyboard navigation and selection within web pages using a
+       visible caret, false uses normal keyboard navigation with no caret
+   * accessibility.typeaheadfind
+     - when set to true, typing outside text areas and input boxes will
+       automatically start searching for what's typed within the current
+       document; when set to false, no search action happens -->
   <preference id="accessibility.browsewithcaret"
               name="accessibility.browsewithcaret"
               type="bool"/>
@@ -154,17 +163,22 @@
               name="ui.osk.enabled"
               type="bool"/>
 #endif
-  <!-- Browsing -->
+  <!-- Browsing
+   * general.autoScroll
+     - when set to true, clicking the scroll wheel on the mouse activates a
+       mouse mode where moving the mouse down scrolls the document downward with
+       speed correlated with the distance of the cursor from the original
+       position at which the click occurred (and likewise with movement upward);
+       if false, this behavior is disabled
+   * general.smoothScroll
+     - set to true to enable finer page scrolling than line-by-line on page-up,
+       page-down, and other such page movements -->
   <preference id="general.autoScroll"
               name="general.autoScroll"
               type="bool"/>
   <preference id="general.smoothScroll"
               name="general.smoothScroll"
               type="bool"/>
-  <preference id="layers.acceleration.disabled"
-              name="layers.acceleration.disabled"
-              type="bool"
-              inverted="true"/>
 #ifdef XP_WIN
   <preference id="gfx.direct2d.disabled"
               name="gfx.direct2d.disabled"
@@ -180,6 +194,19 @@
               name="toolkit.telemetry.enabled"
               type="bool"/>
 #endif
+
+  <preference id="browser.preferences.defaultPerformanceSettings.enabled"
+              name="browser.preferences.defaultPerformanceSettings.enabled"
+              type="bool"/>
+
+  <preference id="dom.ipc.processCount"
+              name="dom.ipc.processCount"
+              type="int"/>
+
+  <preference id="layers.acceleration.disabled"
+              name="layers.acceleration.disabled"
+              type="bool"
+              inverted="true"/>
 </preferences>
 
 <hbox id="header-general"
@@ -187,7 +214,6 @@
       hidden="true"
       data-category="paneGeneral">
   <label class="header-name" flex="1">&paneGeneral.title;</label>
-  <html:a class="help-button" target="_blank" aria-label="&helpButton.label;"></html:a>
 </hbox>
 
 <!-- Startup -->
@@ -217,14 +243,13 @@
 
 #ifdef HAVE_SHELL_SERVICE
   <vbox id="defaultBrowserBox">
-    <hbox align="center">
-      <checkbox id="alwaysCheckDefault" preference="browser.shell.checkDefaultBrowser"
-                label="&alwaysCheckDefault2.label;" accesskey="&alwaysCheckDefault2.accesskey;"/>
-    </hbox>
+    <checkbox id="alwaysCheckDefault" preference="browser.shell.checkDefaultBrowser"
+              label="&alwaysCheckDefault2.label;" accesskey="&alwaysCheckDefault2.accesskey;"/>
     <deck id="setDefaultPane">
       <hbox align="center" class="indent">
         <label id="isNotDefaultLabel" flex="1">&isNotDefault.label;</label>
         <button id="setDefaultButton"
+                class="accessory-button"
                 label="&setAsMyDefaultBrowser2.label;" accesskey="&setAsMyDefaultBrowser2.accesskey;"
                 preference="pref.general.disable_button.default_browser"/>
       </hbox>
@@ -239,8 +264,8 @@
   <html:table id="startupTable">
     <html:tr>
       <html:td class="label-cell">
-        <label accesskey="&startupPage.accesskey;"
-               control="browserStartupPage">&startupPage.label;</label>
+        <label accesskey="&startupPage2.accesskey;"
+               control="browserStartupPage">&startupPage2.label;</label>
       </html:td>
       <html:td class="content-cell">
         <menulist id="browserStartupPage"
@@ -262,8 +287,8 @@
     </html:tr>
     <html:tr>
       <html:td class="label-cell">
-        <label accesskey="&homepage.accesskey;"
-               control="browserHomePage">&homepage.label;</label>
+        <label accesskey="&homepage2.accesskey;"
+               control="browserHomePage">&homepage2.label;</label>
       </html:td>
       <html:td class="content-cell">
         <textbox id="browserHomePage"
@@ -302,12 +327,14 @@
 </groupbox>
 
 <!-- Default Search Engine -->
-<groupbox id="defaultEngineGroup" align="start" data-category="paneGeneral">
+<groupbox id="defaultEngineGroup" data-category="paneGeneral" data-subcategory="search">
   <caption label="&defaultSearchEngine.label;"/>
   <label>&chooseYourDefaultSearchEngine.label;</label>
-  <menulist id="defaultEngine">
-    <menupopup/>
-  </menulist>
+  <box align="start">
+    <menulist id="defaultEngine">
+      <menupopup/>
+    </menulist>
+  </box>
   <checkbox id="suggestionsInSearchFieldsCheckbox"
             label="&provideSearchSuggestions.label;"
             accesskey="&provideSearchSuggestions.accesskey;"
@@ -323,12 +350,12 @@
   </vbox>
 </groupbox>
 
-<groupbox id="oneClickSearchProvidersGroup" data-category="paneGeneral">
+<groupbox id="oneClickSearchProvidersGroup" data-category="paneGeneral" data-subcategory="search">
   <caption label="&oneClickSearchEngines.label;"/>
   <label>&chooseWhichOneToDisplay.label;</label>
 
   <tree id="engineList" flex="1" rows="8" hidecolumnpicker="true" editable="true"
-        seltype="single">
+        seltype="single" allowunderflowscroll="true">
     <treechildren id="engineChildren" flex="1"/>
     <treecols>
       <treecol id="engineShown" type="checkbox" editable="true" sortable="false"/>
@@ -341,27 +368,25 @@
   <hbox>
     <button id="restoreDefaultSearchEngines"
             label="&restoreDefaultSearchEngines.label;"
-            accesskey="&restoreDefaultSearchEngines.accesskey;"
-            />
+            accesskey="&restoreDefaultSearchEngines.accesskey;"/>
     <spacer flex="1"/>
     <button id="removeEngineButton"
-            class="searchEngineAction"
+            class="searchEngineAction accessory-button"
             label="&removeEngine.label;"
             accesskey="&removeEngine.accesskey;"
-            disabled="true"
-            />
+            disabled="true"/>
   </hbox>
 
   <separator class="thin"/>
 
   <hbox id="addEnginesBox" pack="start">
-    <label id="addEngines" class="text-link" value="&addMoreSearchEngines.label;"/>
+    <label id="addEngines" class="text-link">&addMoreSearchEngines2.label;</label>
   </hbox>
 </groupbox>
 
 <!-- Tab preferences -->
 <groupbox data-category="paneGeneral"
-          hidden="true" align="start">
+          hidden="true">
     <caption><label>&tabsGroup.label;</label></caption>
 
     <checkbox id="ctrlTabRecentlyUsedOrder" label="&ctrlTabRecentlyUsedOrder.label;"
@@ -394,7 +419,7 @@
 </groupbox>
 
 <!-- Accessibility -->
-<groupbox data-category="paneGeneral" id="accessibilityGroup" align="start">
+<groupbox data-category="paneGeneral" id="accessibilityGroup">
   <caption><label>&accessibility.label;</label></caption>
 
 #ifdef XP_WIN
@@ -425,6 +450,7 @@
   <hbox id="languagesBox" align="center">
     <description flex="1" control="chooseLanguage">&chooseLanguage.label;</description>
     <button id="chooseLanguage"
+            class="accessory-button"
             label="&chooseButton.label;"
             accesskey="&chooseButton.accesskey;"/>
   </hbox>
@@ -444,17 +470,17 @@
         <label>&translation.options.attribution.afterLogo;</label>
       </hbox>
     </hbox>
-    <button id="translateButton" label="&translateExceptions.label;"
+    <button id="translateButton"
+            class="accessory-button"
+            label="&translateExceptions.label;"
             accesskey="&translateExceptions.accesskey;"/>
   </hbox>
-  <hbox>
-    <checkbox id="checkSpelling"
-            label="&checkUserSpelling.label;"
-            accesskey="&checkUserSpelling.accesskey;"
-            onsyncfrompreference="return gMainPane.readCheckSpelling();"
-            onsynctopreference="return gMainPane.writeCheckSpelling();"
-            preference="layout.spellcheckDefault"/>
-  </hbox>
+  <checkbox id="checkSpelling"
+          label="&checkUserSpelling.label;"
+          accesskey="&checkUserSpelling.accesskey;"
+          onsyncfrompreference="return gMainPane.readCheckSpelling();"
+          onsynctopreference="return gMainPane.writeCheckSpelling();"
+          preference="layout.spellcheckDefault"/>
 </groupbox>
 
 
@@ -462,63 +488,62 @@
 <groupbox id="fontsGroup" data-category="paneGeneral" hidden="true">
   <caption><label>&fontsAndColors.label;</label></caption>
 
-  <grid id="fontsGrid">
-    <columns>
-      <column flex="1"/>
-      <column/>
-    </columns>
-    <rows id="fontsRows">
-      <row id="fontRow">
-        <hbox align="center">
-          <label control="defaultFont" accesskey="&defaultFont.accesskey;">&defaultFont.label;</label>
-          <menulist id="defaultFont" delayprefsave="true"/>
-          <label id="defaultFontSizeLabel" control="defaultFontSize" accesskey="&defaultSize.accesskey;">&defaultSize.label;</label>
-          <menulist id="defaultFontSize" delayprefsave="true">
-            <menupopup>
-              <menuitem value="9" label="9"/>
-              <menuitem value="10" label="10"/>
-              <menuitem value="11" label="11"/>
-              <menuitem value="12" label="12"/>
-              <menuitem value="13" label="13"/>
-              <menuitem value="14" label="14"/>
-              <menuitem value="15" label="15"/>
-              <menuitem value="16" label="16"/>
-              <menuitem value="17" label="17"/>
-              <menuitem value="18" label="18"/>
-              <menuitem value="20" label="20"/>
-              <menuitem value="22" label="22"/>
-              <menuitem value="24" label="24"/>
-              <menuitem value="26" label="26"/>
-              <menuitem value="28" label="28"/>
-              <menuitem value="30" label="30"/>
-              <menuitem value="32" label="32"/>
-              <menuitem value="34" label="34"/>
-              <menuitem value="36" label="36"/>
-              <menuitem value="40" label="40"/>
-              <menuitem value="44" label="44"/>
-              <menuitem value="48" label="48"/>
-              <menuitem value="56" label="56"/>
-              <menuitem value="64" label="64"/>
-              <menuitem value="72" label="72"/>
-            </menupopup>
-          </menulist>
-        </hbox>
-        <button id="advancedFonts" icon="select-font"
-                label="&advancedFonts.label;"
-                accesskey="&advancedFonts.accesskey;"/>
-      </row>
-      <row id="colorsRow">
-        <hbox/>
-        <button id="colors" icon="select-color"
-                label="&colors.label;"
-                accesskey="&colors.accesskey;"/>
-      </row>
-    </rows>
-  </grid>
+  <vbox>
+    <hbox id="fontSettings">
+      <hbox align="center">
+        <label control="defaultFont" accesskey="&defaultFont2.accesskey;">&defaultFont2.label;</label>
+        <menulist id="defaultFont" delayprefsave="true" onsyncfrompreference="return FontBuilder.readFontSelection(this);"/>
+        <label id="defaultFontSizeLabel" control="defaultFontSize" accesskey="&defaultSize2.accesskey;">&defaultSize2.label;</label>
+        <menulist id="defaultFontSize" delayprefsave="true">
+          <menupopup>
+            <menuitem value="9" label="9"/>
+            <menuitem value="10" label="10"/>
+            <menuitem value="11" label="11"/>
+            <menuitem value="12" label="12"/>
+            <menuitem value="13" label="13"/>
+            <menuitem value="14" label="14"/>
+            <menuitem value="15" label="15"/>
+            <menuitem value="16" label="16"/>
+            <menuitem value="17" label="17"/>
+            <menuitem value="18" label="18"/>
+            <menuitem value="20" label="20"/>
+            <menuitem value="22" label="22"/>
+            <menuitem value="24" label="24"/>
+            <menuitem value="26" label="26"/>
+            <menuitem value="28" label="28"/>
+            <menuitem value="30" label="30"/>
+            <menuitem value="32" label="32"/>
+            <menuitem value="34" label="34"/>
+            <menuitem value="36" label="36"/>
+            <menuitem value="40" label="40"/>
+            <menuitem value="44" label="44"/>
+            <menuitem value="48" label="48"/>
+            <menuitem value="56" label="56"/>
+            <menuitem value="64" label="64"/>
+            <menuitem value="72" label="72"/>
+          </menupopup>
+        </menulist>
+      </hbox>
+      <spacer flex="1" />
+      <button id="advancedFonts"
+              class="accessory-button"
+              icon="select-font"
+              label="&advancedFonts.label;"
+              accesskey="&advancedFonts.accesskey;"/>
+    </hbox>
+    <hbox id="colorsSettings">
+      <spacer flex="1" />
+      <button id="colors"
+              class="accessory-button"
+              icon="select-color"
+              label="&colors.label;"
+              accesskey="&colors.accesskey;"/>
+    </hbox>
+  </vbox>
 </groupbox>
 
 <!-- Browsing -->
-<groupbox id="browsingGroup" align="start" data-category="paneGeneral">
+<groupbox id="browsingGroup" data-category="paneGeneral">
   <caption><label>&browsing.label;</label></caption>
 
   <checkbox id="useAutoScroll"
@@ -529,8 +554,40 @@
             label="&useSmoothScrolling.label;"
             accesskey="&useSmoothScrolling.accesskey;"
             preference="general.smoothScroll"/>
-  <checkbox id="allowHWAccel"
-            label="&allowHWAccel.label;"
-            accesskey="&allowHWAccel.accesskey;"
-            preference="layers.acceleration.disabled"/>
+</groupbox>
+
+<!-- Performance -->
+<groupbox id="performanceGroup" data-category="paneGeneral" hidden="true">
+  <caption><label>&performance.label;</label></caption>
+
+  <hbox align="center">
+    <checkbox id="useRecommendedPerformanceSettings"
+              label="&useRecommendedPerformanceSettings.label;"
+              accesskey="&useRecommendedPerformanceSettings.accesskey;"
+              preference="browser.preferences.defaultPerformanceSettings.enabled"/>
+    <label id="performanceSettingsLearnMore" class="learnMore text-link">&performanceSettingsLearnMore.label;</label>
+  </hbox>
+  <description class="indent">&useRecommendedPerformanceSettings.description;</description>
+
+  <vbox id="performanceSettings" class="indent" hidden="true">
+    <checkbox id="allowHWAccel"
+              label="&allowHWAccel.label;"
+              accesskey="&allowHWAccel.accesskey;"
+              preference="layers.acceleration.disabled"/>
+    <hbox align="center">
+      <label id="limitContentProcess" accesskey="&limitContentProcess.accesskey;" control="contentProcessCount">&limitContentProcess.label;</label>
+      <menulist id="contentProcessCount" preference="dom.ipc.processCount">
+        <menupopup>
+          <menuitem label="1" value="1"/>
+          <menuitem label="2" value="2"/>
+          <menuitem label="3" value="3"/>
+          <menuitem label="4" value="4"/>
+          <menuitem label="5" value="5"/>
+          <menuitem label="6" value="6"/>
+          <menuitem label="7" value="7"/>
+        </menupopup>
+      </menulist>
+    </hbox>
+    <description>&limitContentProcess.description;</description>
+  </vbox>
 </groupbox>

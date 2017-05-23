@@ -5,8 +5,6 @@
 
 // Tests for the FxA push service.
 
-Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/FxAccountsCommon.js");
 Cu.import("resource://gre/modules/Log.jsm");
 
@@ -163,7 +161,7 @@ add_test(function observePushTopicDeviceConnected() {
     Services.obs.removeObserver(obs, topic);
     run_next_test();
   };
-  Services.obs.addObserver(obs, ON_DEVICE_CONNECTED_NOTIFICATION, false);
+  Services.obs.addObserver(obs, ON_DEVICE_CONNECTED_NOTIFICATION);
 
   let pushService = new FxAccountsPushService({
     pushService: mockPushService,
@@ -218,7 +216,7 @@ add_test(function observePushTopicProfileUpdated() {
     Services.obs.removeObserver(obs, topic);
     run_next_test();
   };
-  Services.obs.addObserver(obs, ON_PROFILE_CHANGE_NOTIFICATION, false);
+  Services.obs.addObserver(obs, ON_PROFILE_CHANGE_NOTIFICATION);
 
   let pushService = new FxAccountsPushService({
     pushService: mockPushService,

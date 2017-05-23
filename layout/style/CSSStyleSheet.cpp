@@ -192,9 +192,11 @@ CSSStyleSheet::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
     // is worthwhile:
     // - s->mRuleCollection
     // - s->mRuleProcessors
+    // - s->mStyleSets
     //
     // The following members are not measured:
     // - s->mOwnerRule, because it's non-owning
+    // - s->mScopeElement, because it's non-owning
 
     s = s->mNext ? s->mNext->AsGecko() : nullptr;
   }
@@ -511,6 +513,7 @@ CSSStyleSheet::UseForPresentation(nsPresContext* aPresContext,
                                   nsMediaQueryResultCacheKey& aKey) const
 {
   if (mMedia) {
+    MOZ_ASSERT(aPresContext);
     auto media = static_cast<nsMediaList*>(mMedia.get());
     return media->Matches(aPresContext, &aKey);
   }
@@ -1028,7 +1031,7 @@ CSSStyleSheet::ReparseSheet(const nsAString& aInput)
     NS_ASSERTION(child->mParent == this, "Child sheet is not parented to this!");
     StyleSheet* next = child->mNext;
     child->mParent = nullptr;
-    child->mDocument = nullptr;
+    child->SetAssociatedDocument(nullptr, NotOwnedByDocument);
     child->mNext = nullptr;
     child = next;
   }

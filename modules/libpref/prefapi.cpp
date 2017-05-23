@@ -26,6 +26,7 @@
 #include "mozilla/ArenaAllocatorExtensions.h"
 #include "mozilla/Logging.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/ServoStyleSet.h"
 #include "mozilla/dom/PContent.h"
 #include "mozilla/dom/ContentPrefs.h"
 #include "nsQuickSort.h"
@@ -69,7 +70,8 @@ matchPrefEntry(const PLDHashEntryHdr* entry, const void* key)
 PLDHashTable*       gHashTable;
 static ArenaAllocator<8192,4> gPrefNameArena;
 
-static struct CallbackNode* gCallbacks = nullptr;
+static struct CallbackNode* gFirstCallback = nullptr;
+static struct CallbackNode* gLastPriorityNode = nullptr;
 static bool         gIsAnyPrefLocked = false;
 // These are only used during the call to pref_DoCallback
 static bool         gCallbacksInProgress = false;
@@ -156,7 +158,7 @@ void PREF_Cleanup()
 {
     NS_ASSERTION(!gCallbacksInProgress,
         "PREF_Cleanup was called while gCallbacksInProgress is true!");
-    struct CallbackNode* node = gCallbacks;
+    struct CallbackNode* node = gFirstCallback;
     struct CallbackNode* next_node;
 
     while (node)
@@ -166,7 +168,7 @@ void PREF_Cleanup()
         free(node);
         node = next_node;
     }
-    gCallbacks = nullptr;
+    gLastPriorityNode = gFirstCallback = nullptr;
 
     PREF_CleanupPrefs();
 }
@@ -762,7 +764,7 @@ inInitArray(const char* key)
 PrefHashEntry* pref_HashTableLookup(const char *key)
 {
 #ifndef MOZ_B2G
-    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(NS_IsMainThread() || mozilla::ServoStyleSet::IsInServoTraversal());
 #endif
     MOZ_ASSERT((!XRE_IsContentProcess() || gPhase != START),
                "pref access before commandline prefs set");
@@ -860,7 +862,7 @@ size_t
 pref_SizeOfPrivateData(MallocSizeOf aMallocSizeOf)
 {
     size_t n = gPrefNameArena.SizeOfExcludingThis(aMallocSizeOf);
-    for (struct CallbackNode* node = gCallbacks; node; node = node->next) {
+    for (struct CallbackNode* node = gFirstCallback; node; node = node->next) {
         n += aMallocSizeOf(node);
         n += aMallocSizeOf(node->domain);
     }
@@ -897,6 +899,29 @@ PREF_PrefIsLocked(const char *pref_name)
 
 /* Adds a node to the beginning of the callback list. */
 void
+PREF_RegisterPriorityCallback(const char *pref_node,
+                              PrefChangedFunc callback,
+                              void * instance_data)
+{
+    NS_PRECONDITION(pref_node, "pref_node must not be nullptr");
+    NS_PRECONDITION(callback, "callback must not be nullptr");
+
+    struct CallbackNode* node = (struct CallbackNode*) malloc(sizeof(struct CallbackNode));
+    if (node)
+    {
+        node->domain = PL_strdup(pref_node);
+        node->func = callback;
+        node->data = instance_data;
+        node->next = gFirstCallback;
+        gFirstCallback = node;
+        if (!gLastPriorityNode) {
+            gLastPriorityNode = node;
+        }
+    }
+}
+
+/* Adds a node to the end of the callback list. */
+void
 PREF_RegisterCallback(const char *pref_node,
                        PrefChangedFunc callback,
                        void * instance_data)
@@ -910,29 +935,37 @@ PREF_RegisterCallback(const char *pref_node,
         node->domain = PL_strdup(pref_node);
         node->func = callback;
         node->data = instance_data;
-        node->next = gCallbacks;
-        gCallbacks = node;
+        if (gLastPriorityNode) {
+            node->next = gLastPriorityNode->next;
+            gLastPriorityNode->next = node;
+        } else {
+            node->next = gFirstCallback;
+            gFirstCallback = node;
+        }
     }
-    return;
 }
 
-/* Removes |node| from gCallbacks list.
+/* Removes |node| from callback list.
    Returns the node after the deleted one. */
 struct CallbackNode*
 pref_RemoveCallbackNode(struct CallbackNode* node,
                         struct CallbackNode* prev_node)
 {
     NS_PRECONDITION(!prev_node || prev_node->next == node, "invalid params");
-    NS_PRECONDITION(prev_node || gCallbacks == node, "invalid params");
+    NS_PRECONDITION(prev_node || gFirstCallback == node, "invalid params");
 
     NS_ASSERTION(!gCallbacksInProgress,
         "modifying the callback list while gCallbacksInProgress is true");
 
     struct CallbackNode* next_node = node->next;
-    if (prev_node)
+    if (prev_node) {
         prev_node->next = next_node;
-    else
-        gCallbacks = next_node;
+    } else {
+        gFirstCallback = next_node;
+    }
+    if (gLastPriorityNode == node) {
+        gLastPriorityNode = prev_node;
+    }
     PL_strfree(node->domain);
     free(node);
     return next_node;
@@ -945,7 +978,7 @@ PREF_UnregisterCallback(const char *pref_node,
                          void * instance_data)
 {
     nsresult rv = NS_ERROR_FAILURE;
-    struct CallbackNode* node = gCallbacks;
+    struct CallbackNode* node = gFirstCallback;
     struct CallbackNode* prev_node = nullptr;
 
     while (node != nullptr)
@@ -957,7 +990,7 @@ PREF_UnregisterCallback(const char *pref_node,
             if (gCallbacksInProgress)
             {
                 // postpone the node removal until after
-                // gCallbacks enumeration is finished.
+                // callbacks enumeration is finished.
                 node->func = nullptr;
                 gShouldCleanupDeadNodes = true;
                 prev_node = node;
@@ -990,7 +1023,7 @@ static nsresult pref_DoCallback(const char* changed_pref)
     // out the |func| pointer. We release them at the end of this function
     // if we haven't reentered.
 
-    for (node = gCallbacks; node != nullptr; node = node->next)
+    for (node = gFirstCallback; node != nullptr; node = node->next)
     {
         if ( node->func &&
              PL_strncmp(changed_pref,
@@ -1006,7 +1039,7 @@ static nsresult pref_DoCallback(const char* changed_pref)
     if (gShouldCleanupDeadNodes && !gCallbacksInProgress)
     {
         struct CallbackNode* prev_node = nullptr;
-        node = gCallbacks;
+        node = gFirstCallback;
 
         while (node != nullptr)
         {

@@ -17,20 +17,22 @@
 #include "mozilla/Move.h"
 #include "mozilla/SheetType.h"
 #include "mozilla/css/GroupRule.h"
+#include "mozilla/css/URLMatchingFunction.h"
+#include "mozilla/dom/CSSKeyframeRule.h"
+#include "mozilla/dom/CSSKeyframesRule.h"
 #include "mozilla/dom/CSSMediaRule.h"
+#include "mozilla/dom/CSSPageRule.h"
+#include "mozilla/dom/CSSSupportsRule.h"
+#include "mozilla/dom/CSSMozDocumentRule.h"
 #include "nsAutoPtr.h"
 #include "nsCSSPropertyID.h"
 #include "nsCSSValue.h"
 #include "nsDOMCSSDeclaration.h"
 #include "nsIDOMCSSConditionRule.h"
-#include "nsIDOMCSSCounterStyleRule.h"
 #include "nsIDOMCSSFontFeatureValuesRule.h"
 #include "nsIDOMCSSGroupingRule.h"
 #include "nsIDOMCSSMozDocumentRule.h"
-#include "nsIDOMCSSPageRule.h"
 #include "nsIDOMCSSSupportsRule.h"
-#include "nsIDOMCSSKeyframeRule.h"
-#include "nsIDOMCSSKeyframesRule.h"
 #include "nsTArray.h"
 
 class nsMediaList;
@@ -92,8 +94,7 @@ protected:
   RefPtr<nsMediaList> mMedia;
 };
 
-class DocumentRule final : public ConditionRule,
-                           public nsIDOMCSSMozDocumentRule
+class DocumentRule final : public dom::CSSMozDocumentRule
 {
 public:
   DocumentRule(uint32_t aLineNumber, uint32_t aColumnNumber);
@@ -108,34 +109,25 @@ public:
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
-  virtual int32_t GetType() const override;
-  using Rule::GetType;
   virtual already_AddRefed<Rule> Clone() const override;
-
-  // nsIDOMCSSGroupingRule interface
-  NS_DECL_NSIDOMCSSGROUPINGRULE
 
   // nsIDOMCSSConditionRule interface
   NS_DECL_NSIDOMCSSCONDITIONRULE
 
-  // nsIDOMCSSMozDocumentRule interface
-  NS_DECL_NSIDOMCSSMOZDOCUMENTRULE
-
   // rest of GroupRule
   virtual bool UseForPresentation(nsPresContext* aPresContext,
-                                    nsMediaQueryResultCacheKey& aKey) override;
+                                  nsMediaQueryResultCacheKey& aKey) override;
 
   bool UseForPresentation(nsPresContext* aPresContext);
 
-  enum Function {
-    eURL,
-    eURLPrefix,
-    eDomain,
-    eRegExp
-  };
+  static bool UseForPresentation(nsIDocument* aDoc,
+                                 nsIURI* aDocURI,
+                                 const nsACString& aDocURISpec,
+                                 const nsACString& aPattern,
+                                 URLMatchingFunction aUrlMatchingFunction);
 
   struct URL {
-    Function func;
+    URLMatchingFunction func;
     nsCString url;
     URL *next;
 
@@ -152,17 +144,11 @@ public:
   void SetURLs(URL *aURLs) { mURLs = aURLs; }
 
   // WebIDL interface
-  uint16_t Type() const override;
   void GetCssTextImpl(nsAString& aCssText) const override;
-  // Our XPCOM GetConditionText is OK
-  virtual void SetConditionText(const nsAString& aConditionText,
-                                ErrorResult& aRv) override;
+  using dom::CSSMozDocumentRule::SetConditionText;
 
   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
     const override MOZ_MUST_OVERRIDE;
-
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aGivenProto) override;
 
 protected:
   void AppendConditionText(nsAString& aOutput) const;
@@ -247,6 +233,7 @@ public:
   virtual mozilla::DeclarationBlock* GetCSSDeclaration(Operation aOperation) override;
   virtual nsresult SetCSSDeclaration(mozilla::DeclarationBlock* aDecl) override;
   virtual void GetCSSParsingEnvironment(CSSParsingEnvironment& aCSSParseEnv) override;
+  nsDOMCSSDeclaration::ServoCSSParsingEnvironment GetServoCSSParsingEnvironment() const final;
   virtual nsIDocument* DocToUpdate() override;
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -263,15 +250,14 @@ protected:
   nsCSSKeyframeRule* MOZ_NON_OWNING_REF mRule;
 };
 
-class nsCSSKeyframeRule final : public mozilla::css::Rule,
-                                public nsIDOMCSSKeyframeRule
+class nsCSSKeyframeRule final : public mozilla::dom::CSSKeyframeRule
 {
 public:
   // Steals the contents of aKeys, and takes the reference in Declaration
   nsCSSKeyframeRule(InfallibleTArray<float>&& aKeys,
                     already_AddRefed<mozilla::css::Declaration>&& aDeclaration,
                     uint32_t aLineNumber, uint32_t aColumnNumber)
-    : mozilla::css::Rule(aLineNumber, aColumnNumber)
+    : mozilla::dom::CSSKeyframeRule(aLineNumber, aColumnNumber)
     , mKeys(mozilla::Move(aKeys))
     , mDeclaration(mozilla::Move(aDeclaration))
   {
@@ -282,25 +268,22 @@ private:
   ~nsCSSKeyframeRule();
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsCSSKeyframeRule, mozilla::css::Rule)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsCSSKeyframeRule,
+                                           mozilla::dom::CSSKeyframeRule)
   virtual bool IsCCLeaf() const override;
 
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
-  virtual int32_t GetType() const override;
-  using Rule::GetType;
   virtual already_AddRefed<mozilla::css::Rule> Clone() const override;
 
   // nsIDOMCSSKeyframeRule interface
-  NS_DECL_NSIDOMCSSKEYFRAMERULE
+  NS_IMETHOD GetKeyText(nsAString& aKeyText) final;
+  NS_IMETHOD SetKeyText(const nsAString& aKeyText) final;
 
   // WebIDL interface
-  uint16_t Type() const override;
-  void GetCssTextImpl(nsAString& aCssText) const override;
-  // The XPCOM GetKeyText is fine.
-  // The XPCOM SetKeyText is fine.
-  nsICSSDeclaration* Style();
+  void GetCssTextImpl(nsAString& aCssText) const final;
+  nsICSSDeclaration* Style() final;
 
   const nsTArray<float>& GetKeys() const     { return mKeys; }
   mozilla::css::Declaration* Declaration()   { return mDeclaration; }
@@ -308,9 +291,6 @@ public:
   void ChangeDeclaration(mozilla::css::Declaration* aDeclaration);
 
   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
-
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aGivenProto) override;
 
   void DoGetKeyText(nsAString &aKeyText) const;
 
@@ -321,13 +301,12 @@ private:
   RefPtr<nsCSSKeyframeStyleDeclaration>    mDOMDeclaration;
 };
 
-class nsCSSKeyframesRule final : public mozilla::css::GroupRule,
-                                 public nsIDOMCSSKeyframesRule
+class nsCSSKeyframesRule final : public mozilla::dom::CSSKeyframesRule
 {
 public:
   nsCSSKeyframesRule(const nsSubstring& aName,
                      uint32_t aLineNumber, uint32_t aColumnNumber)
-    : mozilla::css::GroupRule(aLineNumber, aColumnNumber)
+    : mozilla::dom::CSSKeyframesRule(aLineNumber, aColumnNumber)
     , mName(aName)
   {
   }
@@ -341,33 +320,23 @@ public:
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
-  virtual int32_t GetType() const override;
-  using Rule::GetType;
   virtual already_AddRefed<mozilla::css::Rule> Clone() const override;
 
   // nsIDOMCSSKeyframesRule interface
-  NS_DECL_NSIDOMCSSKEYFRAMESRULE
+  NS_IMETHOD GetName(nsAString& aName) final;
+  NS_IMETHOD SetName(const nsAString& aName) final;
+  NS_IMETHOD AppendRule(const nsAString& aRule) final;
+  NS_IMETHOD DeleteRule(const nsAString& aKey) final;
+  using nsIDOMCSSKeyframesRule::FindRule;
 
   // WebIDL interface
-  uint16_t Type() const override;
-  void GetCssTextImpl(nsAString& aCssText) const override;
-  // The XPCOM GetName is OK
-  // The XPCOM SetName is OK
-  using mozilla::css::GroupRule::CssRules;
-  // The XPCOM appendRule is OK, since it never throws
-  // The XPCOM deleteRule is OK, since it never throws
-  nsCSSKeyframeRule* FindRule(const nsAString& aKey);
-
-  // rest of GroupRule
-  virtual bool UseForPresentation(nsPresContext* aPresContext,
-                                    nsMediaQueryResultCacheKey& aKey) override;
+  void GetCssTextImpl(nsAString& aCssText) const final;
+  mozilla::dom::CSSRuleList* CssRules() final { return GroupRule::CssRules(); }
+  nsCSSKeyframeRule* FindRule(const nsAString& aKey) final;
 
   const nsString& GetName() { return mName; }
 
   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
-
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aGivenProto) override;
 
 private:
   uint32_t FindRuleIndexForKey(const nsAString& aKey);
@@ -387,6 +356,7 @@ public:
   virtual mozilla::DeclarationBlock* GetCSSDeclaration(Operation aOperation) override;
   virtual nsresult SetCSSDeclaration(mozilla::DeclarationBlock* aDecl) override;
   virtual void GetCSSParsingEnvironment(CSSParsingEnvironment& aCSSParseEnv) override;
+  nsDOMCSSDeclaration::ServoCSSParsingEnvironment GetServoCSSParsingEnvironment() const final;
   virtual nsIDocument* DocToUpdate() override;
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -403,13 +373,12 @@ protected:
   nsCSSPageRule* MOZ_NON_OWNING_REF mRule;
 };
 
-class nsCSSPageRule final : public mozilla::css::Rule,
-                            public nsIDOMCSSPageRule
+class nsCSSPageRule final : public mozilla::dom::CSSPageRule
 {
 public:
   nsCSSPageRule(mozilla::css::Declaration* aDeclaration,
                 uint32_t aLineNumber, uint32_t aColumnNumber)
-    : mozilla::css::Rule(aLineNumber, aColumnNumber)
+    : mozilla::dom::CSSPageRule(aLineNumber, aColumnNumber)
     , mDeclaration(aDeclaration)
   {
     mDeclaration->SetOwningRule(this);
@@ -419,32 +388,23 @@ private:
   ~nsCSSPageRule();
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsCSSPageRule, mozilla::css::Rule)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsCSSPageRule, mozilla::dom::CSSPageRule)
   virtual bool IsCCLeaf() const override;
 
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
-  virtual int32_t GetType() const override;
-  using Rule::GetType;
   virtual already_AddRefed<mozilla::css::Rule> Clone() const override;
 
-  // nsIDOMCSSPageRule interface
-  NS_DECL_NSIDOMCSSPAGERULE
-
-  // WebIDL interface
-  uint16_t Type() const override;
-  void GetCssTextImpl(nsAString& aCssText) const override;
-  nsICSSDeclaration* Style();
+  // WebIDL interfaces
+  virtual void GetCssTextImpl(nsAString& aCssText) const override;
+  virtual nsICSSDeclaration* Style() override;
 
   mozilla::css::Declaration* Declaration()   { return mDeclaration; }
 
   void ChangeDeclaration(mozilla::css::Declaration* aDeclaration);
 
   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
-
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aGivenProto) override;
 
 private:
   RefPtr<mozilla::css::Declaration>     mDeclaration;
@@ -454,8 +414,7 @@ private:
 
 namespace mozilla {
 
-class CSSSupportsRule final : public css::ConditionRule,
-                              public nsIDOMCSSSupportsRule
+class CSSSupportsRule final : public dom::CSSSupportsRule
 {
 public:
   CSSSupportsRule(bool aConditionMet, const nsString& aCondition,
@@ -466,34 +425,20 @@ public:
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
 #endif
-  virtual int32_t GetType() const override;
-  using Rule::GetType;
   virtual already_AddRefed<mozilla::css::Rule> Clone() const override;
   virtual bool UseForPresentation(nsPresContext* aPresContext,
                                   nsMediaQueryResultCacheKey& aKey) override;
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  // nsIDOMCSSGroupingRule interface
-  NS_DECL_NSIDOMCSSGROUPINGRULE
-
   // nsIDOMCSSConditionRule interface
   NS_DECL_NSIDOMCSSCONDITIONRULE
 
-  // nsIDOMCSSSupportsRule interface
-  NS_DECL_NSIDOMCSSSUPPORTSRULE
-
   // WebIDL interface
-  uint16_t Type() const override;
   void GetCssTextImpl(nsAString& aCssText) const override;
-  // Our XPCOM GetConditionText is OK
-  virtual void SetConditionText(const nsAString& aConditionText,
-                                ErrorResult& aRv) override;
+  using dom::CSSSupportsRule::SetConditionText;
 
   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
-
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aGivenProto) override;
 
 protected:
   virtual ~CSSSupportsRule();
@@ -503,101 +448,5 @@ protected:
 };
 
 } // namespace mozilla
-
-class nsCSSCounterStyleRule final : public mozilla::css::Rule,
-                                    public nsIDOMCSSCounterStyleRule
-{
-public:
-  explicit nsCSSCounterStyleRule(const nsAString& aName,
-                                 uint32_t aLineNumber, uint32_t aColumnNumber)
-    : mozilla::css::Rule(aLineNumber, aColumnNumber)
-    , mName(aName)
-    , mGeneration(0)
-  {
-  }
-
-private:
-  nsCSSCounterStyleRule(const nsCSSCounterStyleRule& aCopy);
-  ~nsCSSCounterStyleRule();
-
-public:
-  NS_DECL_ISUPPORTS_INHERITED
-  virtual bool IsCCLeaf() const override;
-
-#ifdef DEBUG
-  virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
-#endif
-  virtual int32_t GetType() const override;
-  using Rule::GetType;
-  virtual already_AddRefed<mozilla::css::Rule> Clone() const override;
-
-  // nsIDOMCSSCounterStyleRule
-  NS_DECL_NSIDOMCSSCOUNTERSTYLERULE
-
-  // WebIDL interface
-  uint16_t Type() const override;
-  void GetCssTextImpl(nsAString& aCssText) const override;
-  // The XPCOM GetName is OK
-  // The XPCOM SetName is OK
-  // The XPCOM GetSystem is OK
-  // The XPCOM SetSystem is OK
-  // The XPCOM GetSymbols is OK
-  // The XPCOM SetSymbols is OK
-  // The XPCOM GetAdditiveSymbols is OK
-  // The XPCOM SetAdditiveSymbols is OK
-  // The XPCOM GetNegative is OK
-  // The XPCOM SetNegative is OK
-  // The XPCOM GetPrefix is OK
-  // The XPCOM SetPrefix is OK
-  // The XPCOM GetSuffix is OK
-  // The XPCOM SetSuffix is OK
-  // The XPCOM GetRange is OK
-  // The XPCOM SetRange is OK
-  // The XPCOM GetPad is OK
-  // The XPCOM SetPad is OK
-  // The XPCOM GetSpeakAs is OK
-  // The XPCOM SetSpeakAs is OK
-  // The XPCOM GetFallback is OK
-  // The XPCOM SetFallback is OK
-
-  // This function is only used to check whether a non-empty value, which has
-  // been accepted by parser, is valid for the given system and descriptor.
-  static bool CheckDescValue(int32_t aSystem,
-                             nsCSSCounterDesc aDescID,
-                             const nsCSSValue& aValue);
-
-  const nsString& GetName() const { return mName; }
-
-  uint32_t GetGeneration() const { return mGeneration; }
-
-  int32_t GetSystem() const;
-  const nsCSSValue& GetSystemArgument() const;
-
-  const nsCSSValue& GetDesc(nsCSSCounterDesc aDescID) const
-  {
-    MOZ_ASSERT(aDescID >= 0 && aDescID < eCSSCounterDesc_COUNT,
-               "descriptor ID out of range");
-    return mValues[aDescID];
-  }
-
-  void SetDesc(nsCSSCounterDesc aDescID, const nsCSSValue& aValue);
-
-  virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
-
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aGivenProto) override;
-
-private:
-  typedef NS_STDCALL_FUNCPROTO(nsresult, Getter, nsCSSCounterStyleRule,
-                               GetSymbols, (nsAString&));
-  static const Getter kGetters[];
-
-  nsresult GetDescriptor(nsCSSCounterDesc aDescID, nsAString& aValue);
-  nsresult SetDescriptor(nsCSSCounterDesc aDescID, const nsAString& aValue);
-
-  nsString   mName;
-  nsCSSValue mValues[eCSSCounterDesc_COUNT];
-  uint32_t   mGeneration;
-};
 
 #endif /* !defined(nsCSSRules_h_) */

@@ -31,8 +31,8 @@ function test()
 function test1()
 {
   // Set database version for domain 1
-  gBrowser.selectedTab = gBrowser.addTab();
-  gBrowser.selectedBrowser.addEventListener("load", function () {
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
+  gBrowser.selectedBrowser.addEventListener("load", function() {
     setFinishedCallback(function(result, exception) {
       ok(result == 11, "Set version on database in " + testPageURL1);
       ok(!exception, "No exception");
@@ -47,8 +47,8 @@ function test1()
 function test2()
 {
   // Set database version for domain 2
-  gBrowser.selectedTab = gBrowser.addTab();
-  gBrowser.selectedBrowser.addEventListener("load", function () {
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
+  gBrowser.selectedBrowser.addEventListener("load", function() {
     setFinishedCallback(function(result, exception) {
       ok(result == 11, "Set version on database in " + testPageURL2);
       ok(!exception, "No exception");
@@ -72,8 +72,8 @@ function test3()
 function test4()
 {
   // Get database version for domain 1
-  gBrowser.selectedTab = gBrowser.addTab();
-  gBrowser.selectedBrowser.addEventListener("load", function () {
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
+  gBrowser.selectedBrowser.addEventListener("load", function() {
     setFinishedCallback(function(result, exception) {
       ok(result == 11, "Got correct version on database in " + testPageURL3);
       ok(!exception, "No exception");
@@ -88,8 +88,8 @@ function test4()
 function test5()
 {
   // Get database version for domain 2
-  gBrowser.selectedTab = gBrowser.addTab();
-  gBrowser.selectedBrowser.addEventListener("load", function () {
+  gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
+  gBrowser.selectedBrowser.addEventListener("load", function() {
     setFinishedCallback(function(result, exception) {
       ok(result == 1, "Got correct version on database in " + testPageURL4);
       ok(!exception, "No exception");

@@ -73,10 +73,10 @@ nsScreenAndroid::GetRect(int32_t *outLeft, int32_t *outTop, int32_t *outWidth, i
     }
 
     java::sdk::Rect::LocalRef rect = java::GeckoAppShell::GetScreenSize();
-    rect->Left(outLeft);
-    rect->Top(outTop);
-    rect->Width(outWidth);
-    rect->Height(outHeight);
+    *outLeft = rect->Left();
+    *outTop = rect->Top();
+    *outWidth = rect->Width();
+    *outHeight = rect->Height();
 
     return NS_OK;
 }
@@ -201,13 +201,6 @@ nsScreenManagerAndroid::ScreenForRect(int32_t inLeft,
 {
     // Not support to query non-primary screen with rect.
     return GetPrimaryScreen(outScreen);
-}
-
-NS_IMETHODIMP
-nsScreenManagerAndroid::GetSystemDefaultScale(float *aDefaultScale)
-{
-    *aDefaultScale = 1.0f;
-    return NS_OK;
 }
 
 already_AddRefed<nsScreenAndroid>

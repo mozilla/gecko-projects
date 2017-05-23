@@ -15,7 +15,6 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AsyncPrefs", "resource://gre/modules/AsyncPrefs.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NarrateControls", "resource://gre/modules/narrate/NarrateControls.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Rect", "resource://gre/modules/Geometry.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Task", "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "UITelemetry", "resource://gre/modules/UITelemetry.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PluralForm", "resource://gre/modules/PluralForm.jsm");
 
@@ -73,7 +72,7 @@ var AboutReader = function(mm, win, articlePromise) {
   win.addEventListener("scroll", this);
   win.addEventListener("resize", this);
 
-  Services.obs.addObserver(this, "inner-window-destroyed", false);
+  Services.obs.addObserver(this, "inner-window-destroyed");
 
   doc.addEventListener("visibilitychange", this);
 
@@ -618,16 +617,16 @@ AboutReader.prototype = {
     this._mm.sendAsyncMessage("Reader:SystemUIVisibility", { visible });
   },
 
-  _loadArticle: Task.async(function* () {
+  async _loadArticle() {
     let url = this._getOriginalUrl();
     this._showProgressDelayed();
 
     let article;
     if (this._articlePromise) {
-      article = yield this._articlePromise;
+      article = await this._articlePromise;
     } else {
       try {
-        article = yield this._getArticle(url);
+        article = await this._getArticle(url);
       } catch (e) {
         if (e && e.newURL) {
           let readerURL = "about:reader?url=" + encodeURIComponent(e.newURL);
@@ -650,7 +649,7 @@ AboutReader.prototype = {
     }
 
     this._showContent(article);
-  }),
+  },
 
   _getArticle(url) {
     return new Promise((resolve, reject) => {
@@ -818,7 +817,7 @@ AboutReader.prototype = {
 
     this._goToReference(articleUri.ref);
 
-    Services.obs.notifyObservers(this._win, "AboutReader:Ready", "");
+    Services.obs.notifyObservers(this._win, "AboutReader:Ready");
 
     this._doc.dispatchEvent(
       new this._win.CustomEvent("AboutReaderContentReady", { bubbles: true, cancelable: false }));
@@ -830,7 +829,7 @@ AboutReader.prototype = {
   },
 
   _showProgressDelayed() {
-    this._win.setTimeout(function() {
+    this._win.setTimeout(() => {
       // No need to show progress if the article has been loaded,
       // if the window has been unloaded, or if there was an error
       // trying to load the article.
@@ -843,7 +842,7 @@ AboutReader.prototype = {
 
       this._messageElement.textContent = gStrings.GetStringFromName("aboutReader.loading2");
       this._messageElement.style.display = "block";
-    }.bind(this), 300);
+    }, 300);
   },
 
   /**

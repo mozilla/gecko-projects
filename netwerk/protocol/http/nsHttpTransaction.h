@@ -86,6 +86,7 @@ public:
                                nsHttpConnectionInfo  *connInfo,
                                nsHttpRequestHead     *reqHeaders,
                                nsIInputStream        *reqBody,
+                               uint64_t               reqContentLength,
                                bool                   reqBodyIncludesHeaders,
                                nsIEventTarget        *consumerTarget,
                                nsIInterfaceRequestor *callbacks,
@@ -175,10 +176,15 @@ public:
     // restart - this indicates that state for dev tools
     void Refused0RTT();
 
+    MOZ_MUST_USE bool CanDo0RTT() override;
+    MOZ_MUST_USE nsresult RestartOnFastOpenError() override;
+
     uint64_t TopLevelOuterContentWindowId() override
     {
         return mTopLevelOuterContentWindowId;
     }
+
+    void SetFastOpenStatus(uint8_t aStatus) override;
 private:
     friend class DeleteHttpTransaction;
     virtual ~nsHttpTransaction();
@@ -306,6 +312,9 @@ private:
     Atomic<uint32_t>                mCapsToClear;
     Atomic<bool, ReleaseAcquire>    mResponseIsComplete;
 
+    // If true, this transaction was asked to stop receiving the response.
+    bool                            mThrottleResponse;
+
     // state flags, all logically boolean, but not packed together into a
     // bitfield so as to avoid bitfield-induced races.  See bug 560579.
     bool                            mClosed;
@@ -368,6 +377,10 @@ public:
     // but later can be dispatched via spdy (not subject to rate pacing).
     void CancelPacing(nsresult reason);
 
+    // Forwards to the connection's ThrottleResponse.  If there is no connection
+    // at the time, we set a flag to do it on connection assignment.
+    void ThrottleResponse(bool aThrottle);
+
 private:
     bool mSubmittedRatePacing;
     bool mPassedRatePacing;
@@ -413,7 +426,7 @@ private:
         EARLY_ACCEPTED
     } mEarlyDataDisposition;
 
-    nsresult                        mTransportStatus;
+    uint8_t mFastOpenStatus;
 };
 
 } // namespace net

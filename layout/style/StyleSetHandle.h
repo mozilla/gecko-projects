@@ -24,6 +24,7 @@ namespace dom {
 class Element;
 } // namespace dom
 } // namespace mozilla
+class nsCSSCounterStyleRule;
 struct nsFontFaceRuleContainer;
 class nsIAtom;
 class nsIContent;
@@ -122,7 +123,7 @@ public:
     ResolveStyleFor(dom::Element* aElement,
                     nsStyleContext* aParentContext,
                     LazyComputeBehavior aMayCompute,
-                    TreeMatchContext& aTreeMatchContext);
+                    TreeMatchContext* aTreeMatchContext);
     inline already_AddRefed<nsStyleContext>
     ResolveStyleForText(nsIContent* aTextNode,
                         nsStyleContext* aParentContext);
@@ -137,8 +138,7 @@ public:
                               dom::Element* aPseudoElement);
     inline already_AddRefed<nsStyleContext>
     ResolveInheritingAnonymousBoxStyle(nsIAtom* aPseudoTag,
-                                       nsStyleContext* aParentContext,
-                                       uint32_t aFlags = 0);
+                                       nsStyleContext* aParentContext);
     inline already_AddRefed<nsStyleContext>
     ResolveNonInheritingAnonymousBoxStyle(nsIAtom* aPseudoTag);
     inline nsresult AppendStyleSheet(SheetType aType, StyleSheet* aSheet);
@@ -161,7 +161,7 @@ public:
     ProbePseudoElementStyle(dom::Element* aParentElement,
                             mozilla::CSSPseudoElementType aType,
                             nsStyleContext* aParentContext,
-                            TreeMatchContext& aTreeMatchContext,
+                            TreeMatchContext* aTreeMatchContext,
                             dom::Element* aPseudoElement = nullptr);
     inline nsRestyleHint HasStateDependentStyle(dom::Element* aElement,
                                                 EventStates aStateMask);
@@ -175,6 +175,7 @@ public:
     inline void RootStyleContextRemoved();
 
     inline bool AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray);
+    inline nsCSSCounterStyleRule* CounterStyleRuleForName(nsIAtom* aName);
 
   private:
     // Stores a pointer to an nsStyleSet or a ServoStyleSet.  The least

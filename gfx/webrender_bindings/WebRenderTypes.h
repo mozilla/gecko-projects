@@ -8,6 +8,7 @@
 
 #include "mozilla/webrender/webrender_ffi.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/gfx/Matrix.h"
 #include "mozilla/gfx/Types.h"
 #include "mozilla/gfx/Tools.h"
 #include "mozilla/Range.h"
@@ -28,6 +29,9 @@ typedef WrPipelineId PipelineId;
 typedef WrImageKey ImageKey;
 typedef WrFontKey FontKey;
 typedef WrEpoch Epoch;
+typedef WrExternalImageId ExternalImageId;
+
+typedef Maybe<ExternalImageId> MaybeExternalImageId;
 
 inline WindowId NewWindowId(uint64_t aId) {
   WindowId id;
@@ -44,6 +48,9 @@ inline Epoch NewEpoch(uint32_t aEpoch) {
 inline Maybe<WrImageFormat>
 SurfaceFormatToWrImageFormat(gfx::SurfaceFormat aFormat) {
   switch (aFormat) {
+    case gfx::SurfaceFormat::R8G8B8X8:
+      // TODO: use RGBA + opaque flag
+      return Some(WrImageFormat::RGBA8);
     case gfx::SurfaceFormat::B8G8R8X8:
       // TODO: WebRender will have a BGRA + opaque flag for this but does not
       // have it yet (cf. issue #732).
@@ -53,6 +60,8 @@ SurfaceFormatToWrImageFormat(gfx::SurfaceFormat aFormat) {
       return Some(WrImageFormat::RGB8);
     case gfx::SurfaceFormat::A8:
       return Some(WrImageFormat::A8);
+    case gfx::SurfaceFormat::R8G8:
+      return Some(WrImageFormat::RG8);
     case gfx::SurfaceFormat::UNKNOWN:
       return Some(WrImageFormat::Invalid);
     default:
@@ -93,6 +102,17 @@ struct ImageDescriptor: public WrImageDescriptor {
     is_opaque = gfx::IsOpaqueFormat(aFormat);
   }
 };
+
+// Whenever possible, use wr::WindowId instead of manipulating uint64_t.
+inline uint64_t AsUint64(const WindowId& aId) {
+  return static_cast<uint64_t>(aId.mHandle);
+}
+
+// Whenever possible, use wr::ImageKey instead of manipulating uint64_t.
+inline uint64_t AsUint64(const ImageKey& aId) {
+  return (static_cast<uint64_t>(aId.mNamespace) << 32)
+        + static_cast<uint64_t>(aId.mHandle);
+}
 
 // Whenever possible, use wr::PipelineId instead of manipulating uint64_t.
 inline uint64_t AsUint64(const PipelineId& aId) {
@@ -217,6 +237,16 @@ static inline WrSize ToWrSize(const gfx::IntSizeTyped<T>& size)
   return ToWrSize(IntSizeToSize(size));
 }
 
+template<class S, class T>
+static inline WrMatrix ToWrMatrix(const gfx::Matrix4x4Typed<S, T>& m)
+{
+  WrMatrix transform;
+  static_assert(sizeof(m.components) == sizeof(transform.values),
+      "Matrix components size mismatch!");
+  memcpy(transform.values, m.components, sizeof(transform.values));
+  return transform;
+}
+
 static inline WrBorderStyle ToWrBorderStyle(const uint8_t& style)
 {
   switch (style) {
@@ -333,50 +363,101 @@ static inline WrRepeatMode ToWrRepeatMode(uint8_t repeatMode)
   return WrRepeatMode::Stretch;
 }
 
-template<class T>
-static inline WrComplexClipRegion ToWrComplexClipRegion(const gfx::RectTyped<T>& rect,
+static inline WrTransformProperty ToWrTransformProperty(uint64_t id, gfx::Matrix4x4& transform)
+{
+  WrTransformProperty prop;
+  prop.id = id;
+  prop.transform = ToWrMatrix(transform);
+  return prop;
+}
+
+static inline WrOpacityProperty ToWrOpacityProperty(uint64_t id, const float opacity)
+{
+  WrOpacityProperty prop;
+  prop.id = id;
+  prop.opacity = opacity;
+  return prop;
+}
+
+static inline WrComplexClipRegion ToWrComplexClipRegion(const WrRect& rect,
                                                         const LayerSize& size)
 {
   WrComplexClipRegion complex_clip;
-  complex_clip.rect = wr::ToWrRect(rect);
+  complex_clip.rect = rect;
   complex_clip.radii = wr::ToWrUniformBorderRadius(size);
   return complex_clip;
 }
 
-static inline WrExternalImageId ToWrExternalImageId(uint64_t aID)
+template<class T>
+static inline WrComplexClipRegion ToWrComplexClipRegion(const gfx::RectTyped<T>& rect,
+                                                        const LayerSize& size)
 {
-  WrExternalImageId id;
-  id.id = aID;
-  return id;
+  return ToWrComplexClipRegion(wr::ToWrRect(rect), size);
+}
+
+// Whenever possible, use wr::ExternalImageId instead of manipulating uint64_t.
+inline uint64_t AsUint64(const ExternalImageId& aId) {
+  return static_cast<uint64_t>(aId.mHandle);
+}
+
+static inline ExternalImageId ToExternalImageId(uint64_t aID)
+{
+  ExternalImageId Id;
+  Id.mHandle = aID;
+  return Id;
+}
+
+static inline WrExternalImage RawDataToWrExternalImage(const uint8_t* aBuff,
+                                                       size_t size)
+{
+  return WrExternalImage {
+    WrExternalImageType::RawData,
+    0, 0.0f, 0.0f, 0.0f, 0.0f,
+    aBuff, size
+  };
+}
+
+static inline WrExternalImage NativeTextureToWrExternalImage(uint8_t aHandle,
+                                                             float u0, float v0,
+                                                             float u1, float v1)
+{
+  return WrExternalImage {
+    WrExternalImageType::NativeTexture,
+    aHandle, u0, v0, u1, v1,
+    nullptr, 0
+  };
 }
 
 struct VecU8 {
   WrVecU8 inner;
   VecU8() {
-    inner.data = nullptr;
-    inner.capacity = 0;
+    SetEmpty();
   }
   VecU8(VecU8&) = delete;
   VecU8(VecU8&& src) {
     inner = src.inner;
-    src.inner.data = nullptr;
-    src.inner.capacity = 0;
+    src.SetEmpty();
   }
 
   VecU8&
   operator=(VecU8&& src) {
     inner = src.inner;
-    src.inner.data = nullptr;
-    src.inner.capacity = 0;
+    src.SetEmpty();
     return *this;
   }
 
   WrVecU8
   Extract() {
     WrVecU8 ret = inner;
-    inner.data = nullptr;
-    inner.capacity = 0;
+    SetEmpty();
     return ret;
+  }
+
+  void
+  SetEmpty() {
+    inner.data = (uint8_t*)1;
+    inner.capacity = 0;
+    inner.length = 0;
   }
 
   ~VecU8() {
@@ -455,15 +536,17 @@ inline WrByteSlice RangeToByteSlice(mozilla::Range<uint8_t> aRange) {
   return WrByteSlice { aRange.begin().get(), aRange.length() };
 }
 
-inline mozilla::Range<uint8_t> ByteSliceToRange(WrByteSlice aWrSlice) {
-  return mozilla::Range<uint8_t>(aWrSlice.mBuffer, aWrSlice.mLength);
+inline mozilla::Range<const uint8_t> ByteSliceToRange(WrByteSlice aWrSlice) {
+  return mozilla::Range<const uint8_t>(aWrSlice.buffer, aWrSlice.len);
+}
+
+inline mozilla::Range<uint8_t> MutByteSliceToRange(MutByteSlice aWrSlice) {
+  return mozilla::Range<uint8_t>(aWrSlice.buffer, aWrSlice.len);
 }
 
 struct BuiltDisplayList {
   VecU8 dl;
   WrBuiltDisplayListDescriptor dl_desc;
-  VecU8 aux;
-  WrAuxiliaryListsDescriptor aux_desc;
 };
 
 } // namespace wr

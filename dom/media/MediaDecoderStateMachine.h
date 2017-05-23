@@ -124,6 +124,7 @@ enum class MediaEventType : int8_t
   ExitVideoSuspend,
   StartVideoSuspendTimer,
   CancelVideoSuspendTimer,
+  VideoOnlySeekBegin,
   VideoOnlySeekCompleted,
 };
 
@@ -189,12 +190,14 @@ public:
 
   RefPtr<ShutdownPromise> BeginShutdown();
 
-  // Set the media fragment end time. aEndTime is in microseconds.
-  void DispatchSetFragmentEndTime(int64_t aEndTime)
+  // Set the media fragment end time.
+  void DispatchSetFragmentEndTime(const media::TimeUnit& aEndTime)
   {
     RefPtr<MediaDecoderStateMachine> self = this;
     nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([self, aEndTime] () {
-      self->mFragmentEndTime = aEndTime;
+      // A negative number means we don't have a fragment end time at all.
+      self->mFragmentEndTime = aEndTime >= media::TimeUnit::Zero()
+        ? aEndTime : media::TimeUnit::Invalid();
     });
     OwnerThread()->Dispatch(r.forget());
   }
@@ -211,8 +214,8 @@ public:
 
   MediaEventSource<void>& OnMediaNotSeekable() const;
 
-  MediaEventSourceExc<nsAutoPtr<MediaInfo>,
-                      nsAutoPtr<MetadataTags>,
+  MediaEventSourceExc<UniquePtr<MediaInfo>,
+                      UniquePtr<MetadataTags>,
                       MediaDecoderEventVisibility>&
   MetadataLoadedEvent() { return mMetadataLoadedEvent; }
 
@@ -293,10 +296,10 @@ private:
   // Schedules the shared state machine thread to run the state machine.
   void ScheduleStateMachine();
 
-  // Invokes ScheduleStateMachine to run in |aMicroseconds| microseconds,
+  // Invokes ScheduleStateMachine to run in |aTime|,
   // unless it's already scheduled to run earlier, in which case the
   // request is discarded.
-  void ScheduleStateMachineIn(int64_t aMicroseconds);
+  void ScheduleStateMachineIn(const media::TimeUnit& aTime);
 
   bool HaveEnoughDecodedAudio();
   bool HaveEnoughDecodedVideo();
@@ -374,8 +377,6 @@ protected:
   // to the returned stream time.
   media::TimeUnit GetClock(TimeStamp* aTimeStamp = nullptr) const;
 
-  void SetStartTime(int64_t aStartTimeUsecs);
-
   // Update only the state machine's current playback position (and duration,
   // if unknown).  Does not update the playback position on the decoder or
   // media element -- use UpdatePlaybackPosition for that.  Called on the state
@@ -422,11 +423,6 @@ protected:
   // decode thread.
   void DecodeError(const MediaResult& aError);
 
-  // Dispatches a LoadedMetadataEvent.
-  // This is threadsafe and can be called on any thread.
-  // The decoder monitor must be held.
-  void EnqueueLoadedMetadataEvent();
-
   void EnqueueFirstFrameLoadedEvent();
 
   // Start a task to decode audio.
@@ -451,7 +447,7 @@ protected:
   media::TimeUnit GetMediaTime() const
   {
     MOZ_ASSERT(OnTaskQueue());
-    return media::TimeUnit::FromMicroseconds(mCurrentPosition.Ref());
+    return mCurrentPosition;
   }
 
   // Returns an upper bound on the number of microseconds of audio that is
@@ -461,7 +457,7 @@ protected:
   // calling this, the audio hardware may play some of the audio pushed to
   // hardware, so this can only be used as a upper bound. The decoder monitor
   // must be held when calling this. Called on the decode thread.
-  int64_t GetDecodedAudioDuration();
+  media::TimeUnit GetDecodedAudioDuration();
 
   void FinishDecodeFirstFrame();
 
@@ -542,8 +538,8 @@ private:
            || mNextPlayState == MediaDecoder::PLAY_STATE_PLAYING;
   }
 
-  // Media Fragment end time in microseconds. Access controlled by decoder monitor.
-  int64_t mFragmentEndTime;
+  // Media Fragment end time.
+  media::TimeUnit mFragmentEndTime = media::TimeUnit::Invalid();
 
   // The media sink resource.  Used on the state machine thread.
   RefPtr<media::MediaSink> mMediaSink;
@@ -561,11 +557,11 @@ private:
 
   // The end time of the last decoded audio frame. This signifies the end of
   // decoded audio data. Used to check if we are low in decoded data.
-  int64_t mDecodedAudioEndTime;
+  media::TimeUnit mDecodedAudioEndTime;
 
   // The end time of the last decoded video frame. Used to check if we are low
   // on decoded video data.
-  int64_t mDecodedVideoEndTime;
+  media::TimeUnit mDecodedVideoEndTime;
 
   // Playback rate. 1.0 : normal speed, 0.5 : two times slower.
   double mPlaybackRate;
@@ -635,13 +631,7 @@ private:
   // Stores presentation info required for playback.
   Maybe<MediaInfo> mInfo;
 
-  nsAutoPtr<MetadataTags> mMetadataTags;
-
   mozilla::MediaMetadataManager mMetadataManager;
-
-  // True if we are back from DECODER_STATE_DORMANT state and
-  // LoadedMetadataEvent was already sent.
-  bool mSentLoadedMetadataEvent;
 
   // True if we've decoded first frames (thus having the start time) and
   // notified the FirstFrameLoaded event. Note we can't initiate seek until the
@@ -679,8 +669,8 @@ private:
   MediaEventListener mAudibleListener;
   MediaEventListener mOnMediaNotSeekable;
 
-  MediaEventProducerExc<nsAutoPtr<MediaInfo>,
-                        nsAutoPtr<MetadataTags>,
+  MediaEventProducerExc<UniquePtr<MediaInfo>,
+                        UniquePtr<MetadataTags>,
                         MediaDecoderEventVisibility> mMetadataLoadedEvent;
   MediaEventProducerExc<nsAutoPtr<MediaInfo>,
                         MediaDecoderEventVisibility> mFirstFrameLoadedEvent;
@@ -700,9 +690,6 @@ private:
 private:
   // The buffered range. Mirrored from the decoder thread.
   Mirror<media::TimeIntervals> mBuffered;
-
-  // The duration according to the demuxer's current estimate, mirrored from the main thread.
-  Mirror<media::NullableTimeUnit> mEstimatedDuration;
 
   // The duration explicitly set by JS, mirrored from the main thread.
   Mirror<Maybe<double>> mExplicitDuration;
@@ -746,10 +733,10 @@ private:
   // compute ready state.
   Canonical<NextFrameStatus> mNextFrameStatus;
 
-  // The time of the current frame in microseconds, corresponding to the "current
+  // The time of the current frame, corresponding to the "current
   // playback position" in HTML5. This is referenced from 0, which is the initial
   // playback position.
-  Canonical<int64_t> mCurrentPosition;
+  Canonical<media::TimeUnit> mCurrentPosition;
 
   // Current playback position in the stream in bytes.
   Canonical<int64_t> mPlaybackOffset;
@@ -769,7 +756,7 @@ public:
   {
     return &mNextFrameStatus;
   }
-  AbstractCanonical<int64_t>* CanonicalCurrentPosition()
+  AbstractCanonical<media::TimeUnit>* CanonicalCurrentPosition()
   {
     return &mCurrentPosition;
   }
@@ -781,6 +768,17 @@ public:
   {
     return &mIsAudioDataAudible;
   }
+
+#ifdef XP_WIN
+  // Whether we've called timeBeginPeriod(1) to request high resolution
+  // timers. We request high resolution timers when playback starts, and
+  // turn them off when playback is paused. Enabling high resolution
+  // timers can cause higher CPU usage and battery drain on Windows 7.
+  bool mHiResTimersRequested = false;
+  // Whether we should enable high resolution timers. This is initialized at
+  // MDSM construction, and mirrors the value of media.hi-res-timers.enabled.
+  const bool mShouldUseHiResTimers;
+#endif
 };
 
 } // namespace mozilla

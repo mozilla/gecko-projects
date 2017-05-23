@@ -71,7 +71,9 @@ public:
 
   NS_DECL_FRAMEARENA_HELPERS
 
-  explicit nsImageFrame(nsStyleContext* aContext);
+  explicit nsImageFrame(nsStyleContext* aContext)
+    : nsImageFrame(aContext, mozilla::LayoutFrameType::Image)
+  {}
 
   NS_DECL_QUERYFRAME_TARGET(nsImageFrame)
   NS_DECL_QUERYFRAME
@@ -110,8 +112,6 @@ public:
 #ifdef ACCESSIBILITY
   virtual mozilla::a11y::AccType AccessibleType() override;
 #endif
-
-  virtual nsIAtom* GetType() const override;
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
@@ -182,6 +182,8 @@ public:
   virtual void ReflowCallbackCanceled() override;
 
 protected:
+  nsImageFrame(nsStyleContext* aContext, mozilla::LayoutFrameType aType);
+
   virtual ~nsImageFrame();
 
   void EnsureIntrinsicSizeAndRatio();

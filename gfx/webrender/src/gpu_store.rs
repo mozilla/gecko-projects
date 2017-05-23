@@ -6,6 +6,7 @@ use device::TextureFilter;
 use std::marker::PhantomData;
 use std::mem;
 use std::ops::Add;
+use util::recycle_vec;
 use webrender_traits::ImageFormat;
 
 #[derive(Debug, Copy, Clone, Eq, Hash, PartialEq)]
@@ -17,6 +18,14 @@ impl Add<i32> for GpuStoreAddress {
 
     fn add(self, other: i32) -> GpuStoreAddress {
         GpuStoreAddress(self.0 + other)
+    }
+}
+
+impl Add<usize> for GpuStoreAddress {
+    type Output = GpuStoreAddress;
+
+    fn add(self, other: usize) -> GpuStoreAddress {
+        GpuStoreAddress(self.0 + other as i32)
     }
 }
 
@@ -66,6 +75,13 @@ impl<T: Clone + Default, L: GpuStoreLayout> GpuStore<T, L> {
             data: Vec::new(),
             layout: PhantomData,
             //free_list: Vec::new(),
+        }
+    }
+
+    pub fn recycle(self) -> Self {
+        GpuStore {
+            data: recycle_vec(self.data),
+            layout: PhantomData,
         }
     }
 
@@ -121,6 +137,10 @@ impl<T: Clone + Default, L: GpuStoreLayout> GpuStore<T, L> {
                          count: usize) -> &mut [T] {
         let offset = address.0 as usize;
         &mut self.data[offset..offset + count]
+    }
+
+    pub fn clear(&mut self) {
+        self.data.clear()
     }
 
     // TODO(gw): Implement incremental updates of

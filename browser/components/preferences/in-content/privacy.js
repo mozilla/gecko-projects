@@ -18,6 +18,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "SiteDataManager",
 
 Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 
+const PREF_UPLOAD_ENABLED = "datareporting.healthreport.uploadEnabled";
+
 XPCOMUtils.defineLazyGetter(this, "AlertsServiceDND", function() {
   try {
     let alertsService = Cc["@mozilla.org/alerts-service;1"]
@@ -86,6 +88,10 @@ var gPrivacyPane = {
    */
   _initBrowserContainers() {
     if (!Services.prefs.getBoolPref("privacy.userContext.ui.enabled")) {
+      // The browserContainersGroup element has its own internal padding that
+      // is visible even if the browserContainersbox is visible, so hide the whole
+      // groupbox if the feature is disabled to prevent a gap in the preferences.
+      document.getElementById("browserContainersGroup").setAttribute("data-hidden-from-search", "true");
       return;
     }
 
@@ -233,9 +239,9 @@ var gPrivacyPane = {
       gPrivacyPane.toggleDoNotDisturbNotifications);
 
     if (AlertsServiceDND) {
-      let notificationsDoNotDisturbRow =
-        document.getElementById("notificationsDoNotDisturbRow");
-      notificationsDoNotDisturbRow.removeAttribute("hidden");
+      let notificationsDoNotDisturbBox =
+        document.getElementById("notificationsDoNotDisturbBox");
+      notificationsDoNotDisturbBox.removeAttribute("hidden");
       if (AlertsServiceDND.manualDoNotDisturb) {
         let notificationsDoNotDisturb =
           document.getElementById("notificationsDoNotDisturb");
@@ -262,13 +268,16 @@ var gPrivacyPane = {
               .style.height = bundlePrefs.getString("offlineAppsList.height");
       let offlineGroup = document.getElementById("offlineGroup");
       offlineGroup.hidden = false;
+      offlineGroup.removeAttribute("data-hidden-from-search");
     }
 
     if (Services.prefs.getBoolPref("browser.storageManager.enabled")) {
-      Services.obs.addObserver(this, "sitedatamanager:sites-updated", false);
+      Services.obs.addObserver(this, "sitedatamanager:sites-updated");
+      Services.obs.addObserver(this, "sitedatamanager:updating-sites");
       let unload = () => {
         window.removeEventListener("unload", unload);
         Services.obs.removeObserver(this, "sitedatamanager:sites-updated");
+        Services.obs.removeObserver(this, "sitedatamanager:updating-sites");
       };
       window.addEventListener("unload", unload);
       SiteDataManager.updateSites();
@@ -276,14 +285,17 @@ var gPrivacyPane = {
                        gPrivacyPane.clearSiteData);
       setEventListener("siteDataSettings", "command",
                        gPrivacyPane.showSiteDataSettings);
+      let url = Services.urlFormatter.formatURLPref("app.support.baseURL") + "storage-permissions";
+      document.getElementById("siteDataLearnMoreLink").setAttribute("href", url);
+      let siteDataGroup = document.getElementById("siteDataGroup");
+      siteDataGroup.hidden = false;
+      siteDataGroup.removeAttribute("data-hidden-from-search");
     }
-
 
     let notificationInfoURL =
       Services.urlFormatter.formatURLPref("app.support.baseURL") + "push";
     document.getElementById("notificationsPolicyLearnMore").setAttribute("href",
                                                                          notificationInfoURL);
-
     let drmInfoURL =
       Services.urlFormatter.formatURLPref("app.support.baseURL") + "drm-content";
     document.getElementById("playDRMContentLink").setAttribute("href", drmInfoURL);
@@ -298,6 +310,15 @@ var gPrivacyPane = {
       document.getElementById("drmGroup").setAttribute("style", "display: none !important");
     }
 
+    if (AppConstants.MOZ_CRASHREPORTER) {
+      this.initSubmitCrashes();
+    }
+    this.initTelemetry();
+    if (AppConstants.MOZ_TELEMETRY_REPORTING) {
+      this.initSubmitHealthReport();
+      setEventListener("submitHealthReportBox", "command",
+                       gPrivacyPane.updateSubmitHealthReport);
+    }
   },
 
   // TRACKING PROTECTION MODE
@@ -777,7 +798,7 @@ var gPrivacyPane = {
         ts.value = timeSpanOrig;
       }
 
-      Services.obs.notifyObservers(null, "clear-private-data", null);
+      Services.obs.notifyObservers(null, "clear-private-data");
     });
   },
 
@@ -938,6 +959,27 @@ var gPrivacyPane = {
     this._initMasterPasswordUI();
   },
 
+  /**
+   * Displays the "remove master password" dialog to allow the user to remove
+   * the current master password.  When the dialog is dismissed, master password
+   * UI is automatically updated.
+   */
+  _removeMasterPassword() {
+    var secmodDB = Cc["@mozilla.org/security/pkcs11moduledb;1"].
+                   getService(Ci.nsIPKCS11ModuleDB);
+    if (secmodDB.isFIPSEnabled) {
+      var promptService = Cc["@mozilla.org/embedcomp/prompt-service;1"].
+                          getService(Ci.nsIPromptService);
+      var bundle = document.getElementById("bundlePreferences");
+      promptService.alert(window,
+                          bundle.getString("pw_change_failed_title"),
+                          bundle.getString("pw_change2empty_in_fips_mode"));
+      this._initMasterPasswordUI();
+    } else {
+      gSubDialog.open("chrome://mozapps/content/preferences/removemp.xul",
+                      null, null, this._initMasterPasswordUI.bind(this));
+    }
+  },
 
   /**
    * Displays a dialog in which the master password may be changed.
@@ -1170,20 +1212,26 @@ var gPrivacyPane = {
     }
   },
 
-    showSiteDataSettings() {
+  showSiteDataSettings() {
     gSubDialog.open("chrome://browser/content/preferences/siteDataSettings.xul");
   },
 
-  updateTotalSiteDataSize() {
-    SiteDataManager.getTotalUsage()
-      .then(usage => {
-        let size = DownloadUtils.convertByteUnits(usage);
-        let prefStrBundle = document.getElementById("bundlePreferences");
-        let totalSiteDataSizeLabel = document.getElementById("totalSiteDataSize");
-        totalSiteDataSizeLabel.textContent = prefStrBundle.getFormattedString("totalSiteDataSize", size);
-        let siteDataGroup = document.getElementById("siteDataGroup");
-        siteDataGroup.hidden = false;
-      });
+  toggleSiteData(shouldShow) {
+    let clearButton = document.getElementById("clearSiteDataButton");
+    let settingsButton = document.getElementById("siteDataSettings");
+    clearButton.disabled = !shouldShow;
+    settingsButton.disabled = !shouldShow;
+  },
+
+  updateTotalDataSizeLabel(usage) {
+    let prefStrBundle = document.getElementById("bundlePreferences");
+    let totalSiteDataSizeLabel = document.getElementById("totalSiteDataSize");
+    if (usage < 0) {
+      totalSiteDataSizeLabel.textContent = prefStrBundle.getString("loadingSiteDataSize");
+    } else {
+      let size = DownloadUtils.convertByteUnits(usage);
+      totalSiteDataSizeLabel.textContent = prefStrBundle.getFormattedString("totalSiteDataSize", size);
+    }
   },
 
   // Retrieves the amount of space currently used by disk cache
@@ -1279,6 +1327,87 @@ var gPrivacyPane = {
     if (result == 0) {
       SiteDataManager.removeAll();
     }
+  },
+
+  initSubmitCrashes() {
+    this._setupLearnMoreLink("toolkit.crashreporter.infoURL",
+                             "crashReporterLearnMore");
+  },
+
+  /**
+   * The preference/checkbox is configured in XUL.
+   *
+   * In all cases, set up the Learn More link sanely.
+   */
+  initTelemetry() {
+    if (AppConstants.MOZ_TELEMETRY_REPORTING) {
+      this._setupLearnMoreLink("toolkit.telemetry.infoURL", "telemetryLearnMore");
+    }
+  },
+
+  /**
+   * Set up or hide the Learn More links for various data collection options
+   */
+  _setupLearnMoreLink(pref, element) {
+    // set up the Learn More link with the correct URL
+    let url = Services.prefs.getCharPref(pref);
+    let el = document.getElementById(element);
+
+    if (url) {
+      el.setAttribute("href", url);
+    } else {
+      el.setAttribute("hidden", "true");
+    }
+  },
+
+  /**
+   * Set the status of the telemetry controls based on the input argument.
+   * @param {Boolean} aEnabled False disables the controls, true enables them.
+   */
+  setTelemetrySectionEnabled(aEnabled) {
+    if (!AppConstants.MOZ_TELEMETRY_REPORTING) {
+      return;
+    }
+    // If FHR is disabled, additional data sharing should be disabled as well.
+    let disabled = !aEnabled;
+    document.getElementById("submitTelemetryBox").disabled = disabled;
+    if (disabled) {
+      // If we disable FHR, untick the telemetry checkbox.
+      Services.prefs.setBoolPref("toolkit.telemetry.enabled", false);
+    }
+    document.getElementById("telemetryDataDesc").disabled = disabled;
+  },
+
+  /**
+   * Initialize the health report service reference and checkbox.
+   */
+  initSubmitHealthReport() {
+    if (!AppConstants.MOZ_TELEMETRY_REPORTING) {
+      return;
+    }
+    this._setupLearnMoreLink("datareporting.healthreport.infoURL", "FHRLearnMore");
+
+    let checkbox = document.getElementById("submitHealthReportBox");
+
+    if (Services.prefs.prefIsLocked(PREF_UPLOAD_ENABLED)) {
+      checkbox.setAttribute("disabled", "true");
+      return;
+    }
+
+    checkbox.checked = Services.prefs.getBoolPref(PREF_UPLOAD_ENABLED);
+    this.setTelemetrySectionEnabled(checkbox.checked);
+  },
+
+  /**
+   * Update the health report preference with state from checkbox.
+   */
+  updateSubmitHealthReport() {
+    if (!AppConstants.MOZ_TELEMETRY_REPORTING) {
+      return;
+    }
+    let checkbox = document.getElementById("submitHealthReportBox");
+    Services.prefs.setBoolPref(PREF_UPLOAD_ENABLED, checkbox.checked);
+    this.setTelemetrySectionEnabled(checkbox.checked);
   },
 
   // Methods for Offline Apps (AppCache)
@@ -1440,4 +1569,20 @@ var gPrivacyPane = {
     this.updateActualAppCacheSize();
   },
   // Methods for Offline Apps (AppCache) end
+
+  observe(aSubject, aTopic, aData) {
+    switch (aTopic) {
+      case "sitedatamanager:updating-sites":
+        // While updating, we want to disable this section and display loading message until updated
+        this.toggleSiteData(false);
+        this.updateTotalDataSizeLabel(-1);
+        break;
+
+      case "sitedatamanager:sites-updated":
+        this.toggleSiteData(true);
+        SiteDataManager.getTotalUsage()
+          .then(this.updateTotalDataSizeLabel.bind(this));
+        break;
+    }
+  },
 };

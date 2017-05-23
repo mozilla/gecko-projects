@@ -102,7 +102,7 @@ ContentClient::PrintInfo(std::stringstream& aStream, const char* aPrefix)
   aStream << aPrefix;
   aStream << nsPrintfCString("ContentClient (0x%p)", this).get();
 
-  if (profiler_feature_active("displaylistdump")) {
+  if (profiler_feature_active(ProfilerFeature::DisplayListDump)) {
     nsAutoCString pfx(aPrefix);
     pfx += "  ";
 
@@ -331,7 +331,9 @@ ContentClientRemoteBuffer::CreateBackBuffer(const IntRect& aBufferRect)
       AbortTextureClientCreation();
       return;
     }
-    mTextureClientOnWhite->EnableBlockingReadLock();
+    // We don't enable the readlock for the white buffer since we always
+    // use them together and waiting on the lock for the black
+    // should be sufficient.
   }
 }
 

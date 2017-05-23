@@ -13,6 +13,7 @@
 
 #![deny(unsafe_code)]
 
+use StyleArc;
 use app_units::Au;
 use block::BlockFlow;
 use context::{LayoutContext, with_thread_local_font_context};
@@ -52,6 +53,7 @@ use style::computed_values::position;
 use style::context::SharedStyleContext;
 use style::logical_geometry::Direction;
 use style::properties::ServoComputedValues;
+use style::properties::longhands::list_style_image;
 use style::selector_parser::{PseudoElement, RestyleDamage};
 use style::servo::restyle_damage::{BUBBLE_ISIZES, RECONSTRUCT_FLOW};
 use style::values::Either;
@@ -107,7 +109,7 @@ pub enum ConstructionItem {
     /// Inline fragments and associated {ib} splits that have not yet found flows.
     InlineFragments(InlineFragmentsConstructionResult),
     /// Potentially ignorable whitespace.
-    Whitespace(OpaqueNode, PseudoElementType<()>, Arc<ServoComputedValues>, RestyleDamage),
+    Whitespace(OpaqueNode, PseudoElementType<()>, StyleArc<ServoComputedValues>, RestyleDamage),
     /// TableColumn Fragment
     TableColumnFragment(Fragment),
 }
@@ -675,7 +677,7 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
     fn create_fragments_for_node_text_content(&self,
                                               fragments: &mut IntermediateInlineFragments,
                                               node: &ConcreteThreadSafeLayoutNode,
-                                              style: &Arc<ServoComputedValues>) {
+                                              style: &StyleArc<ServoComputedValues>) {
         // Fast path: If there is no text content, return immediately.
         let text_content = node.text_content();
         if text_content.is_empty() {
@@ -1205,13 +1207,13 @@ impl<'a, ConcreteThreadSafeLayoutNode: ThreadSafeLayoutNode>
                                 -> ConstructionResult {
         let flotation = FloatKind::from_property(flotation);
         let marker_fragments = match node.style(self.style_context()).get_list().list_style_image {
-            Either::First(ref url_value) => {
+            list_style_image::computed_value::T(Either::First(ref url_value)) => {
                 let image_info = box ImageFragmentInfo::new(url_value.url().map(|u| u.clone()),
                                                             node,
                                                             &self.layout_context);
                 vec![Fragment::new(node, SpecificFragmentInfo::Image(image_info), self.layout_context)]
             }
-            Either::Second(_none) => {
+            list_style_image::computed_value::T(Either::Second(_none)) => {
                 match ListStyleTypeContent::from_list_style_type(node.style(self.style_context())
                                                                      .get_list()
                                                                      .list_style_type) {
@@ -1804,7 +1806,7 @@ pub fn strip_ignorable_whitespace_from_end(this: &mut LinkedList<Fragment>) {
 
 /// If the 'unicode-bidi' property has a value other than 'normal', return the bidi control codes
 /// to inject before and after the text content of the element.
-fn bidi_control_chars(style: &Arc<ServoComputedValues>) -> Option<(&'static str, &'static str)> {
+fn bidi_control_chars(style: &StyleArc<ServoComputedValues>) -> Option<(&'static str, &'static str)> {
     use style::computed_values::direction::T::*;
     use style::computed_values::unicode_bidi::T::*;
 

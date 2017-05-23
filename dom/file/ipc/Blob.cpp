@@ -50,6 +50,7 @@
 #include "nsStringStream.h"
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
+#include "SlicedInputStream.h"
 #include "StreamBlobImpl.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
@@ -627,7 +628,9 @@ SerializeInputStreamInChunks(nsIInputStream* aInputStream, uint64_t aLength,
   MOZ_ASSERT(aInputStream);
 
   PMemoryStreamChild* child = aManager->SendPMemoryStreamConstructor(aLength);
-  MOZ_ASSERT(child);
+  if (NS_WARN_IF(!child)) {
+    return nullptr;
+  }
 
   const uint64_t kMaxChunk = 1024 * 1024;
 
@@ -658,7 +661,9 @@ SerializeInputStreamInChunks(nsIInputStream* aInputStream, uint64_t aLength,
       return nullptr;
     }
 
-    child->SendAddChunk(buffer);
+    if (NS_WARN_IF(!child->SendAddChunk(buffer))) {
+      return nullptr;
+    }
   }
 
   return child;
@@ -667,9 +672,12 @@ SerializeInputStreamInChunks(nsIInputStream* aInputStream, uint64_t aLength,
 void
 DeleteStreamMemoryFromBlobDataStream(BlobDataStream& aStream)
 {
-  PMemoryStreamChild* actor = aStream.streamChild();
-  if (actor) {
-    actor->Send__delete__(actor);
+  if (aStream.type() == BlobDataStream::TMemoryBlobDataStream) {
+    PMemoryStreamChild* actor =
+      aStream.get_MemoryBlobDataStream().streamChild();
+    if (actor) {
+      actor->Send__delete__(actor);
+    }
   }
 }
 
@@ -749,17 +757,36 @@ CreateBlobImpl(const BlobDataStream& aStream,
 {
   MOZ_ASSERT(gProcessType == GeckoProcessType_Default);
 
-  MemoryStreamParent* actor =
-    static_cast<MemoryStreamParent*>(aStream.streamParent());
-
   nsCOMPtr<nsIInputStream> inputStream;
-  actor->GetStream(getter_AddRefs(inputStream));
-  if (!inputStream) {
-    ASSERT_UNLESS_FUZZING();
-    return nullptr;
-  }
+  uint64_t length;
 
-  uint64_t length = aStream.length();
+  if (aStream.type() == BlobDataStream::TMemoryBlobDataStream) {
+    const MemoryBlobDataStream& memoryBlobDataStream =
+      aStream.get_MemoryBlobDataStream();
+
+    MemoryStreamParent* actor =
+      static_cast<MemoryStreamParent*>(memoryBlobDataStream.streamParent());
+
+    actor->GetStream(getter_AddRefs(inputStream));
+    if (!inputStream) {
+      ASSERT_UNLESS_FUZZING();
+      return nullptr;
+    }
+
+    length = memoryBlobDataStream.length();
+  } else {
+    MOZ_ASSERT(aStream.type() == BlobDataStream::TIPCStream);
+    inputStream = DeserializeIPCStream(aStream.get_IPCStream());
+    if (!inputStream) {
+      ASSERT_UNLESS_FUZZING();
+      return nullptr;
+    }
+
+    nsresult rv = inputStream->Available(&length);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return nullptr;
+    }
+  }
 
   RefPtr<BlobImpl> blobImpl;
   if (!aMetadata.mHasRecursed && aMetadata.IsFile()) {
@@ -947,7 +974,8 @@ CreateBlobImpl(const ParentBlobConstructorParams& aParams,
 template <class ChildManagerType>
 bool
 BlobDataFromBlobImpl(ChildManagerType* aManager, BlobImpl* aBlobImpl,
-                     BlobData& aBlobData)
+                     BlobData& aBlobData,
+                     nsTArray<UniquePtr<AutoIPCStream>>& aIPCStreams)
 {
   MOZ_ASSERT(gProcessType != GeckoProcessType_Default);
   MOZ_ASSERT(aBlobImpl);
@@ -966,7 +994,7 @@ BlobDataFromBlobImpl(ChildManagerType* aManager, BlobImpl* aBlobImpl,
          index < count;
          index++) {
       if (!BlobDataFromBlobImpl(aManager, subBlobs->ElementAt(index),
-                                subBlobDatas[index])) {
+                                subBlobDatas[index], aIPCStreams)) {
         return false;
       }
     }
@@ -991,13 +1019,33 @@ BlobDataFromBlobImpl(ChildManagerType* aManager, BlobImpl* aBlobImpl,
   aBlobImpl->GetInternalStream(getter_AddRefs(inputStream), rv);
   MOZ_ALWAYS_TRUE(!rv.Failed());
 
+  nsCOMPtr<nsIIPCSerializableInputStream> serializable =
+    do_QueryInterface(inputStream);
+
+  // ExpectedSerializedLength() returns the length of the stream if serialized.
+  // This is useful to decide if we want to continue using the serialization
+  // directly, or if it's better to use IPCStream.
+  uint64_t expectedLength =
+    serializable ? serializable->ExpectedSerializedLength().valueOr(0) : 0;
+
+  // If a stream is known to be larger than 1MB, prefer sending it in chunks.
+  const uint64_t kTooLargeStream = 1024 * 1024;
+  if (serializable && expectedLength < kTooLargeStream) {
+    UniquePtr<AutoIPCStream> autoStream(new AutoIPCStream());
+    autoStream->Serialize(inputStream, aManager);
+    aBlobData = autoStream->TakeValue();
+
+    aIPCStreams.AppendElement(Move(autoStream));
+    return true;
+  }
+
   PMemoryStreamChild* streamActor =
     SerializeInputStreamInChunks(inputStream, length, aManager);
   if (!streamActor) {
     return false;
   }
 
-  aBlobData = BlobDataStream(nullptr, streamActor, length);
+  aBlobData = MemoryBlobDataStream(nullptr, streamActor, length);
   return true;
 }
 
@@ -1089,6 +1137,10 @@ RemoteInputStream::SetStream(nsIInputStream* aStream)
 nsresult
 RemoteInputStream::BlockAndWaitForStream()
 {
+  if (mStream) {
+    return NS_OK;
+  }
+
   if (IsOnOwningThread()) {
     if (NS_IsMainThread()) {
       NS_WARNING("Blocking the main thread is not supported!");
@@ -1468,9 +1520,7 @@ class InputStreamParent final
   InputStreamParams* mParams;
   OptionalFileDescriptorSet* mFDs;
 
-#ifdef DEBUG
-  PRThread* mOwningThread;
-#endif
+  NS_DECL_OWNINGTHREAD
 
 public:
   InputStreamParent()
@@ -1478,10 +1528,6 @@ public:
     , mParams(nullptr)
     , mFDs(nullptr)
   {
-#ifdef DEBUG
-    mOwningThread = PR_GetCurrentThread();
-#endif
-
     AssertIsOnOwningThread();
 
     MOZ_COUNT_CTOR(InputStreamParent);
@@ -1494,10 +1540,6 @@ public:
     , mParams(aParams)
     , mFDs(aFDs)
   {
-#ifdef DEBUG
-    mOwningThread = PR_GetCurrentThread();
-#endif
-
     AssertIsOnOwningThread();
     MOZ_ASSERT(aSyncLoopGuard);
     MOZ_ASSERT(!*aSyncLoopGuard);
@@ -1517,9 +1559,7 @@ public:
   void
   AssertIsOnOwningThread() const
   {
-#ifdef DEBUG
-    MOZ_ASSERT(PR_GetCurrentThread() == mOwningThread);
-#endif
+    NS_ASSERT_OWNINGTHREAD(InputStreamParent);
   }
 
   bool
@@ -2714,19 +2754,44 @@ CreateStreamHelper::GetStream(nsIInputStream** aInputStream)
   MOZ_ASSERT(baseRemoteBlobImpl);
 
   if (EventTargetIsOnCurrentThread(baseRemoteBlobImpl->GetActorEventTarget())) {
+    // RunInternal will populate mInputStream using the correct mStart/mLength
+    // value.
     RunInternal(baseRemoteBlobImpl, false);
   } else if (PBackgroundChild* manager = mozilla::ipc::BackgroundChild::GetForCurrentThread()) {
+    // In case we are on a PBackground thread and this is not the owning thread,
+    // we need to create a new actor here. This actor must be created for the
+    // baseRemoteBlobImpl, which can be the mRemoteBlobImpl or the parent one,
+    // in case we are dealing with a sliced blob.
     BlobChild* blobChild = BlobChild::GetOrCreate(manager, baseRemoteBlobImpl);
     MOZ_ASSERT(blobChild);
 
-    RefPtr<BlobImpl> blobImpl = blobChild->GetBlobImpl();
-    MOZ_ASSERT(blobImpl);
+    // Note that baseBlobImpl is generated by the actor, and the actor is
+    // created from the baseRemoteBlobImpl. This means that baseBlobImpl is the
+    // remote blobImpl on PBackground of baseRemoteBlobImpl.
+    RefPtr<BlobImpl> baseBlobImpl = blobChild->GetBlobImpl();
+    MOZ_ASSERT(baseBlobImpl);
 
     ErrorResult rv;
-    blobImpl->GetInternalStream(aInputStream, rv);
+    nsCOMPtr<nsIInputStream> baseInputStream;
+    baseBlobImpl->GetInternalStream(getter_AddRefs(baseInputStream), rv);
+    if (NS_WARN_IF(rv.Failed())) {
+      return rv.StealNSResult();
+    }
+
+    // baseInputStream is the stream of the baseRemoteBlobImpl. If
+    // mRemoteBlobImpl is a slice of baseRemoteBlobImpl, here we need to slice
+    // baseInputStream.
+    if (mRemoteBlobImpl->IsSlice()) {
+      RefPtr<SlicedInputStream> slicedInputStream =
+        new SlicedInputStream(baseInputStream, mStart, mLength);
+      slicedInputStream.forget(aInputStream);
+    } else {
+      baseInputStream.forget(aInputStream);
+    }
+
     mRemoteBlobImpl = nullptr;
     mDone = true;
-    return rv.StealNSResult();
+    return NS_OK;
   } else {
     nsresult rv = baseRemoteBlobImpl->DispatchToTarget(this);
     if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -3589,6 +3654,7 @@ BlobChild::GetOrCreateFromImpl(ChildManagerType* aManager,
   MOZ_ASSERT(!aBlobImpl->IsDateUnknown());
 
   AnyBlobConstructorParams blobParams;
+  nsTArray<UniquePtr<AutoIPCStream>> autoIPCStreams;
 
   if (gProcessType == GeckoProcessType_Default) {
     RefPtr<BlobImpl> sameProcessImpl = aBlobImpl;
@@ -3600,7 +3666,8 @@ BlobChild::GetOrCreateFromImpl(ChildManagerType* aManager,
     // BlobData is going to be populate here and it _must_ be send via IPC in
     // order to avoid leaks.
     BlobData blobData;
-    if (NS_WARN_IF(!BlobDataFromBlobImpl(aManager, aBlobImpl, blobData))) {
+    if (NS_WARN_IF(!BlobDataFromBlobImpl(aManager, aBlobImpl, blobData,
+                                         autoIPCStreams))) {
       return nullptr;
     }
 
@@ -3639,6 +3706,7 @@ BlobChild::GetOrCreateFromImpl(ChildManagerType* aManager,
 
   DeleteStreamMemory(params.blobParams());
 
+  autoIPCStreams.Clear();
   return actor;
 }
 
@@ -4722,12 +4790,7 @@ BlobParent::RecvBlobStreamSync(const uint64_t& aStart,
 
   // The actor is alive and will be doing asynchronous work to load the stream.
   // Spin a nested loop here while we wait for it.
-  nsIThread* currentThread = NS_GetCurrentThread();
-  MOZ_ASSERT(currentThread);
-
-  while (!finished) {
-    MOZ_ALWAYS_TRUE(NS_ProcessNextEvent(currentThread));
-  }
+  MOZ_ALWAYS_TRUE(SpinEventLoopUntil([&]() { return finished; }));
 
   return IPC_OK();
 }

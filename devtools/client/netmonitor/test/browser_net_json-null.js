@@ -11,11 +11,11 @@ add_task(function* () {
   let { tab, monitor } = yield initNetMonitor(JSON_BASIC_URL + "?name=null");
   info("Starting test... ");
 
-  let { document, gStore, windowRequire } = monitor.panelWin;
+  let { document, store, windowRequire } = monitor.panelWin;
   let { L10N } = windowRequire("devtools/client/netmonitor/src/utils/l10n");
   let Actions = windowRequire("devtools/client/netmonitor/src/actions/index");
 
-  gStore.dispatch(Actions.batchEnable(false));
+  store.dispatch(Actions.batchEnable(false));
 
   let wait = waitForNetworkEvents(monitor, 1);
   yield ContentTask.spawn(tab.linkedBrowser, {}, function* () {
@@ -55,7 +55,7 @@ add_task(function* () {
     let jsonView = panel.querySelector(".tree-section .treeLabel") || {};
     is(jsonView.textContent === L10N.getStr("jsonScopeName"), true,
       "The response json view has the intended visibility.");
-    is(panel.querySelector(".editor-mount iframe") === null, true,
+    is(panel.querySelector(".CodeMirror-code") === null, true,
       "The response editor doesn't have the intended visibility.");
     is(panel.querySelector(".response-image-box") === null, true,
       "The response image box doesn't have the intended visibility.");

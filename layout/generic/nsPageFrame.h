@@ -31,13 +31,6 @@ public:
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsDisplayListSet& aLists) override;
 
-  /**
-   * Get the "type" of the frame
-   *
-   * @see nsGkAtoms::pageFrame
-   */
-  virtual nsIAtom* GetType() const override;
-
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult  GetFrameName(nsAString& aResult) const override;
 #endif
@@ -110,12 +103,10 @@ class nsPageBreakFrame : public nsLeafFrame
   explicit nsPageBreakFrame(nsStyleContext* aContext);
   ~nsPageBreakFrame();
 
-  virtual void Reflow(nsPresContext*          aPresContext,
-                          ReflowOutput&     aDesiredSize,
-                          const ReflowInput& aReflowInput,
-                          nsReflowStatus&          aStatus) override;
-
-  virtual nsIAtom* GetType() const override;
+  virtual void Reflow(nsPresContext* aPresContext,
+                      ReflowOutput& aDesiredSize,
+                      const ReflowInput& aReflowInput,
+                      nsReflowStatus& aStatus) override;
 
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult  GetFrameName(nsAString& aResult) const override;
@@ -126,9 +117,10 @@ protected:
   virtual nscoord GetIntrinsicISize() override;
   virtual nscoord GetIntrinsicBSize() override;
 
-    bool mHaveReflowed;
+  bool mHaveReflowed;
 
-    friend nsIFrame* NS_NewPageBreakFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
+  friend nsIFrame* NS_NewPageBreakFrame(nsIPresShell* aPresShell,
+                                        nsStyleContext* aContext);
 };
 
 #endif /* nsPageFrame_h___ */

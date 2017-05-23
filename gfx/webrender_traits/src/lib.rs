@@ -3,8 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #![cfg_attr(feature = "nightly", feature(nonzero))]
+#![cfg_attr(feature = "cargo-clippy", allow(too_many_arguments, float_cmp))]
 
 extern crate app_units;
+extern crate bincode;
 extern crate byteorder;
 #[cfg(feature = "nightly")]
 extern crate core;
@@ -19,6 +21,10 @@ extern crate offscreen_gl_context;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate time;
+
+#[cfg(target_os = "macos")]
+extern crate core_foundation;
 
 #[cfg(target_os = "macos")]
 extern crate core_graphics;

@@ -193,7 +193,7 @@ WMFAudioMFTManager::Input(MediaRawData* aSample)
 {
   return mDecoder->Input(aSample->Data(),
                          uint32_t(aSample->Size()),
-                         aSample->mTime);
+                         aSample->mTime.ToMicroseconds());
 }
 
 HRESULT
@@ -336,8 +336,8 @@ WMFAudioMFTManager::Output(int64_t aStreamOffset,
   NS_ENSURE_TRUE(duration.IsValid(), E_FAIL);
 
   aOutData = new AudioData(aStreamOffset,
-                           timestamp.ToMicroseconds(),
-                           duration.ToMicroseconds(),
+                           timestamp,
+                           duration,
                            numFrames,
                            Move(audioData),
                            mAudioChannels,

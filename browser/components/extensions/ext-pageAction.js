@@ -5,10 +5,9 @@
 XPCOMUtils.defineLazyModuleGetter(this, "PanelPopup",
                                   "resource:///modules/ExtensionPopups.jsm");
 
-Cu.import("resource://gre/modules/Task.jsm");
 
 var {
-  SingletonEventManager,
+  DefaultWeakMap,
   IconDetails,
 } = ExtensionUtils;
 
@@ -23,6 +22,8 @@ this.pageAction = class extends ExtensionAPI {
   onManifestEntry(entryName) {
     let {extension} = this;
     let options = extension.manifest.page_action;
+
+    this.iconData = new DefaultWeakMap(icons => this.getIconData(icons));
 
     this.id = makeWidgetId(extension.id) + "-page-action";
 
@@ -105,31 +106,40 @@ this.pageAction = class extends ExtensionAPI {
       return;
     }
 
-    let button = this.getButton(window);
+    window.requestAnimationFrame(() => {
+      let button = this.getButton(window);
 
-    if (tabData.show) {
-      // Update the title and icon only if the button is visible.
+      if (tabData.show) {
+        // Update the title and icon only if the button is visible.
 
-      let title = tabData.title || this.extension.name;
-      button.setAttribute("tooltiptext", title);
-      button.setAttribute("aria-label", title);
+        let title = tabData.title || this.extension.name;
+        button.setAttribute("tooltiptext", title);
+        button.setAttribute("aria-label", title);
+        button.classList.add("webextension-page-action");
 
-      // These URLs should already be properly escaped, but make doubly sure CSS
-      // string escape characters are escaped here, since they could lead to a
-      // sandbox break.
-      let escape = str => str.replace(/[\\\s"]/g, encodeURIComponent);
+        let {style} = this.iconData.get(tabData.icon);
 
-      let getIcon = size => escape(IconDetails.getPreferredIcon(tabData.icon, this.extension, size).icon);
+        button.setAttribute("style", style);
+      }
 
-      button.setAttribute("style", `
-        --webextension-urlbar-image: url("${getIcon(16)}");
-        --webextension-urlbar-image-2x: url("${getIcon(32)}");
-      `);
+      button.hidden = !tabData.show;
+    });
+  }
 
-      button.classList.add("webextension-page-action");
-    }
+  getIconData(icons) {
+    // These URLs should already be properly escaped, but make doubly sure CSS
+    // string escape characters are escaped here, since they could lead to a
+    // sandbox break.
+    let escape = str => str.replace(/[\\\s"]/g, encodeURIComponent);
 
-    button.hidden = !tabData.show;
+    let getIcon = size => escape(IconDetails.getPreferredIcon(icons, this.extension, size).icon);
+
+    let style = `
+      --webextension-urlbar-image: url("${getIcon(16)}");
+      --webextension-urlbar-image-2x: url("${getIcon(32)}");
+    `;
+
+    return {style};
   }
 
   // Create an |image| node and add it to the |urlbar-icons|
@@ -186,6 +196,10 @@ this.pageAction = class extends ExtensionAPI {
         break;
 
       case "popupshowing":
+        if (!global.actionContextMenu) {
+          break;
+        }
+
         const menu = event.target;
         const trigger = menu.triggerNode;
 

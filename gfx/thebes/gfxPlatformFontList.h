@@ -122,6 +122,9 @@ public:
 
     void UpdateFontList();
 
+    // Initialize the contained mLangService (for stylo, must be done in advance on main thread)
+    void InitLangService();
+
     virtual void ClearLangGroupPrefFonts();
 
     virtual void GetFontFamilyList(nsTArray<RefPtr<gfxFontFamily> >& aFamilyArray);
@@ -269,6 +272,47 @@ protected:
         NS_DECL_ISUPPORTS
         NS_DECL_NSIMEMORYREPORTER
     };
+
+    template<bool ForNameList>
+    class PrefNameMaker final : public nsAutoCString
+    {
+        void Init(const nsACString& aGeneric, const nsACString& aLangGroup)
+        {
+            Assign(ForNameList ? NS_LITERAL_CSTRING("font.name-list.")
+                               : NS_LITERAL_CSTRING("font.name."));
+            Append(aGeneric);
+            if (!aLangGroup.IsEmpty()) {
+                Append('.');
+                Append(aLangGroup);
+            }
+        }
+
+    public:
+        PrefNameMaker(const nsACString& aGeneric,
+                      const nsACString& aLangGroup)
+        {
+            Init(aGeneric, aLangGroup);
+        }
+
+        PrefNameMaker(const char* aGeneric,
+                      const char* aLangGroup)
+        {
+            Init(nsDependentCString(aGeneric), nsDependentCString(aLangGroup));
+        }
+
+        PrefNameMaker(const char* aGeneric,
+                      nsIAtom* aLangGroup)
+        {
+            if (aLangGroup) {
+                Init(nsDependentCString(aGeneric), nsAtomCString(aLangGroup));
+            } else {
+                Init(nsDependentCString(aGeneric), nsAutoCString());
+            }
+        }
+    };
+
+    typedef PrefNameMaker<false> NamePref;
+    typedef PrefNameMaker<true>  NameListPref;
 
     explicit gfxPlatformFontList(bool aNeedFullnamePostscriptNames = true);
 

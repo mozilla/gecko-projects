@@ -10,30 +10,23 @@
 // Keep others in (case-insensitive) order:
 #include "gfxUtils.h"
 #include "mozilla/Preferences.h"
+#include "nsContentUtils.h"
 #include "nsIFrame.h"
 #include "nsPresContext.h"
+#include "nsStyleStruct.h"
 
 namespace mozilla {
 
 /* static */ void
-SVGImageContext::MaybeInitAndStoreContextPaint(Maybe<SVGImageContext>& aContext,
-                                               nsIFrame* aFromFrame,
-                                               imgIContainer* aImgContainer)
+SVGImageContext::MaybeStoreContextPaint(Maybe<SVGImageContext>& aContext,
+                                        nsIFrame* aFromFrame,
+                                        imgIContainer* aImgContainer)
 {
-  static bool sEnabledForContent = false;
-  static bool sEnabledForContentCached = false;
+  const nsStyleSVG* style = aFromFrame->StyleSVG();
 
-  MOZ_ASSERT(!aContext, "The emplace() call below with overwrite this object");
-
-  if (!sEnabledForContentCached) {
-    Preferences::AddBoolVarCache(&sEnabledForContent,
-                                 "svg.context-properties.content.enabled", false);
-    sEnabledForContentCached = true;
-  }
-
-  if (!sEnabledForContent &&
-      !aFromFrame->PresContext()->IsChrome()) {
-    // Context paint is pref'ed off for content and this is a content doc.
+  if (!style->ExposesContextProperties()) {
+    // Content must have '-moz-context-properties' set to the names of the
+    // properties it wants to expose to images it links to.
     return;
   }
 
@@ -42,27 +35,25 @@ SVGImageContext::MaybeInitAndStoreContextPaint(Maybe<SVGImageContext>& aContext,
     return;
   }
 
-  // XXX return early if the 'context-properties' property is not set.
-
   bool haveContextPaint = false;
 
   RefPtr<SVGEmbeddingContextPaint> contextPaint = new SVGEmbeddingContextPaint();
 
-  const nsStyleSVG* style = aFromFrame->StyleSVG();
-
-  // XXX don't set values for properties not listed in 'context-properties'.
-
-  if (style->mFill.Type() == eStyleSVGPaintType_Color) {
+  if ((style->mContextPropsBits & NS_STYLE_CONTEXT_PROPERTY_FILL) &&
+      style->mFill.Type() == eStyleSVGPaintType_Color) {
     haveContextPaint = true;
     contextPaint->SetFill(style->mFill.GetColor());
   }
-  if (style->mStroke.Type() == eStyleSVGPaintType_Color) {
+  if ((style->mContextPropsBits & NS_STYLE_CONTEXT_PROPERTY_STROKE) &&
+      style->mStroke.Type() == eStyleSVGPaintType_Color) {
     haveContextPaint = true;
     contextPaint->SetStroke(style->mStroke.GetColor());
   }
 
   if (haveContextPaint) {
-    aContext.emplace();
+    if (!aContext) {
+      aContext.emplace();
+    }
     aContext->mContextPaint = contextPaint.forget();
   }
 }

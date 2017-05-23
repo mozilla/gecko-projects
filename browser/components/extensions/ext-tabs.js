@@ -15,10 +15,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
 
-var {
-  SingletonEventManager,
-} = ExtensionUtils;
-
 let tabListener = {
   tabReadyInitialized: false,
   tabReadyPromises: new WeakMap(),
@@ -103,16 +99,20 @@ this.tabs = class extends ExtensionAPI {
 
     let self = {
       tabs: {
-        onActivated: new WindowEventManager(context, "tabs.onActivated", "TabSelect", (fire, event) => {
-          let nativeTab = event.originalTarget;
-          let tabId = tabTracker.getId(nativeTab);
-          let windowId = windowTracker.getId(nativeTab.ownerGlobal);
-          fire.async({tabId, windowId});
+        onActivated: new SingletonEventManager(context, "tabs.onActivated", fire => {
+          let listener = (eventName, event) => {
+            fire.async(event);
+          };
+
+          tabTracker.on("tab-activated", listener);
+          return () => {
+            tabTracker.off("tab-activated", listener);
+          };
         }).api(),
 
         onCreated: new SingletonEventManager(context, "tabs.onCreated", fire => {
           let listener = (eventName, event) => {
-            fire.async(tabManager.convert(event.nativeTab));
+            fire.async(tabManager.convert(event.nativeTab, event.currentTab));
           };
 
           tabTracker.on("tab-created", listener);
@@ -127,11 +127,15 @@ this.tabs = class extends ExtensionAPI {
          * the tabId in an array to match the API.
          * @see  https://developer.mozilla.org/en-US/Add-ons/WebExtensions/API/Tabs/onHighlighted
         */
-        onHighlighted: new WindowEventManager(context, "tabs.onHighlighted", "TabSelect", (fire, event) => {
-          let nativeTab = event.originalTarget;
-          let tabIds = [tabTracker.getId(nativeTab)];
-          let windowId = windowTracker.getId(nativeTab.ownerGlobal);
-          fire.async({tabIds, windowId});
+        onHighlighted: new SingletonEventManager(context, "tabs.onHighlighted", fire => {
+          let listener = (eventName, event) => {
+            fire.async({tabIds: [event.tabId], windowId: event.windowId});
+          };
+
+          tabTracker.on("tab-activated", listener);
+          return () => {
+            tabTracker.off("tab-activated", listener);
+          };
         }).api(),
 
         onAttached: new SingletonEventManager(context, "tabs.onAttached", fire => {
@@ -307,7 +311,7 @@ this.tabs = class extends ExtensionAPI {
                 Services.obs.removeObserver(obs, "browser-delayed-startup-finished");
                 resolve(window);
               };
-              Services.obs.addObserver(obs, "browser-delayed-startup-finished", false);
+              Services.obs.addObserver(obs, "browser-delayed-startup-finished");
             } else {
               resolve(window);
             }
@@ -356,6 +360,7 @@ this.tabs = class extends ExtensionAPI {
             options.disallowInheritPrincipal = true;
 
             tabListener.initTabReady();
+            let currentTab = window.gBrowser.selectedTab;
             let nativeTab = window.gBrowser.addTab(url || window.BROWSER_NEW_TAB_URL, options);
 
             let active = true;
@@ -390,7 +395,7 @@ this.tabs = class extends ExtensionAPI {
               tabListener.initializingTabs.add(nativeTab);
             }
 
-            return tabManager.convert(nativeTab);
+            return tabManager.convert(nativeTab, currentTab);
           });
         },
 
@@ -516,7 +521,6 @@ this.tabs = class extends ExtensionAPI {
         },
 
         async move(tabIds, moveProperties) {
-          let index = moveProperties.index;
           let tabsMoved = [];
           if (!Array.isArray(tabIds)) {
             tabIds = [tabIds];
@@ -539,6 +543,7 @@ this.tabs = class extends ExtensionAPI {
                 -> tabA to 0, tabB to 0 if tabA and tabB are in different windows
           */
           let indexMap = new Map();
+          let lastInsertion = new Map();
 
           let tabs = tabIds.map(tabId => tabTracker.getTab(tabId));
           for (let nativeTab of tabs) {
@@ -546,7 +551,7 @@ this.tabs = class extends ExtensionAPI {
             let window = destinationWindow || nativeTab.ownerGlobal;
             let gBrowser = window.gBrowser;
 
-            let insertionPoint = indexMap.get(window) || index;
+            let insertionPoint = indexMap.get(window) || moveProperties.index;
             // If the index is -1 it should go to the end of the tabs.
             if (insertionPoint == -1) {
               insertionPoint = gBrowser.tabs.length;
@@ -562,7 +567,16 @@ this.tabs = class extends ExtensionAPI {
               continue;
             }
 
-            indexMap.set(window, insertionPoint + 1);
+            // If this is not the first tab to be inserted into this window and
+            // the insertion point is the same as the last insertion and
+            // the tab is further to the right than the current insertion point
+            // then you need to bump up the insertion point. See bug 1323311.
+            if (lastInsertion.has(window) &&
+                lastInsertion.get(window) === insertionPoint &&
+                nativeTab._tPos > insertionPoint) {
+              insertionPoint++;
+              indexMap.set(window, insertionPoint);
+            }
 
             if (nativeTab.ownerGlobal != window) {
               // If the window we are moving the tab in is different, then move the tab
@@ -572,6 +586,7 @@ this.tabs = class extends ExtensionAPI {
               // If the window we are moving is the same, just move the tab.
               gBrowser.moveTabTo(nativeTab, insertionPoint);
             }
+            lastInsertion.set(window, nativeTab._tPos);
             tabsMoved.push(nativeTab);
           }
 

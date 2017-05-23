@@ -6,6 +6,12 @@
 
 "use strict";
 
+const CONTENT_MIME_TYPE_ABBREVIATIONS = {
+  "ecmascript": "js",
+  "javascript": "js",
+  "x-javascript": "js"
+};
+
 /**
  * Extracts any urlencoded form data sections (e.g. "?foo=bar&baz=42") from a
  * POST request.
@@ -112,7 +118,8 @@ function getAbbreviatedMimeType(mimeType) {
   if (!mimeType) {
     return "";
   }
-  return (mimeType.split(";")[0].split("/")[1] || "").split("+")[0];
+  let abbrevType = (mimeType.split(";")[0].split("/")[1] || "").split("+")[0];
+  return CONTENT_MIME_TYPE_ABBREVIATIONS[abbrevType] || abbrevType;
 }
 
 /**
@@ -170,6 +177,17 @@ function getUrlHost(url) {
 }
 
 /**
+ * Helpers for getting the shceme portion of a url.
+ * For example helper returns "http" from http://domain.com/path/basename
+ *
+ * @param {string} url - url string
+ * @return {string} string scheme of a url
+ */
+function getUrlScheme(url) {
+  return (new URL(url)).protocol.replace(":", "").toLowerCase();
+}
+
+/**
  * Extract several details fields from a URL at once.
  */
 function getUrlDetails(url) {
@@ -177,6 +195,7 @@ function getUrlDetails(url) {
   let host = getUrlHost(url);
   let hostname = getUrlHostName(url);
   let unicodeUrl = decodeUnicodeUrl(url);
+  let scheme = getUrlScheme(url);
 
   // Mark local hosts specially, where "local" is  as defined in the W3C
   // spec for secure contexts.
@@ -195,6 +214,7 @@ function getUrlDetails(url) {
   return {
     baseNameWithQuery,
     host,
+    scheme,
     unicodeUrl,
     isLocal
   };
@@ -240,6 +260,86 @@ function parseFormData(sections) {
   });
 }
 
+/**
+ * Reduces an IP address into a number for easier sorting
+ *
+ * @param {string} ip - IP address to reduce
+ * @return {number} the number representing the IP address
+ */
+function ipToLong(ip) {
+  if (!ip) {
+    // Invalid IP
+    return -1;
+  }
+
+  let base;
+  let octets = ip.split(".");
+
+  if (octets.length === 4) { // IPv4
+    base = 10;
+  } else if (ip.includes(":")) { // IPv6
+    let numberOfZeroSections = 8 - ip.replace(/^:+|:+$/g, "").split(/:+/g).length;
+    octets = ip
+      .replace("::", `:${"0:".repeat(numberOfZeroSections)}`)
+      .replace(/^:|:$/g, "")
+      .split(":");
+    base = 16;
+  } else { // Invalid IP
+    return -1;
+  }
+  return octets.map((val, ix, arr) => {
+    return parseInt(val, base) * Math.pow(256, (arr.length - 1) - ix);
+  }).reduce((sum, val) => {
+    return sum + val;
+  }, 0);
+}
+
+/**
+ * Compare two objects on a subset of their properties
+ */
+function propertiesEqual(props, item1, item2) {
+  return item1 === item2 || props.every(p => item1[p] === item2[p]);
+}
+
+/**
+ * Calculate the start time of a request, which is the time from start
+ * of 1st request until the start of this request.
+ *
+ * Without a firstRequestStartedMillis argument the wrong time will be returned.
+ * However, it can be omitted when comparing two start times and neither supplies
+ * a firstRequestStartedMillis.
+ */
+function getStartTime(item, firstRequestStartedMillis = 0) {
+  return item.startedMillis - firstRequestStartedMillis;
+}
+
+/**
+ * Calculate the end time of a request, which is the time from start
+ * of 1st request until the end of this response.
+ *
+ * Without a firstRequestStartedMillis argument the wrong time will be returned.
+ * However, it can be omitted when comparing two end times and neither supplies
+ * a firstRequestStartedMillis.
+ */
+function getEndTime(item, firstRequestStartedMillis = 0) {
+  let { startedMillis, totalTime } = item;
+  return startedMillis + totalTime - firstRequestStartedMillis;
+}
+
+/**
+ * Calculate the response time of a request, which is the time from start
+ * of 1st request until the beginning of download of this response.
+ *
+ * Without a firstRequestStartedMillis argument the wrong time will be returned.
+ * However, it can be omitted when comparing two response times and neither supplies
+ * a firstRequestStartedMillis.
+ */
+function getResponseTime(item, firstRequestStartedMillis = 0) {
+  let { startedMillis, totalTime, eventTimings = { timings: {} } } = item;
+  return startedMillis + totalTime - firstRequestStartedMillis -
+    eventTimings.timings.receive;
+}
+
 module.exports = {
   getFormDataSections,
   fetchHeaders,
@@ -247,12 +347,18 @@ module.exports = {
   writeHeaderText,
   decodeUnicodeUrl,
   getAbbreviatedMimeType,
+  getEndTime,
+  getResponseTime,
+  getStartTime,
   getUrlBaseName,
-  getUrlQuery,
   getUrlBaseNameWithQuery,
-  getUrlHostName,
-  getUrlHost,
   getUrlDetails,
+  getUrlHost,
+  getUrlHostName,
+  getUrlQuery,
+  getUrlScheme,
   parseQueryString,
   parseFormData,
+  propertiesEqual,
+  ipToLong,
 };

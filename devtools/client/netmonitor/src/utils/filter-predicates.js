@@ -4,6 +4,8 @@
 
 "use strict";
 
+const { isFreetextMatch } = require("./filter-text-utils");
+
 /**
  * Predicates used when filtering items.
  *
@@ -76,7 +78,7 @@ function isWS({ requestHeaders, responseHeaders }) {
 
   // Find the 'upgrade' header.
   let upgradeHeader = requestHeaders.headers.find(header => {
-    return (header.name == "Upgrade");
+    return (header.name.toLowerCase() == "upgrade");
   });
 
   // If no header found on request, check response - mainly to get
@@ -85,7 +87,7 @@ function isWS({ requestHeaders, responseHeaders }) {
   if (!upgradeHeader && responseHeaders &&
       Array.isArray(responseHeaders.headers)) {
     upgradeHeader = responseHeaders.headers.find(header => {
-      return (header.name == "Upgrade");
+      return (header.name.toLowerCase() == "upgrade");
     });
   }
 
@@ -102,32 +104,19 @@ function isOther(item) {
   return tests.every(is => !is(item));
 }
 
-function isFreetextMatch({ url }, text) {
-  let lowerCaseUrl = url.toLowerCase();
-  let lowerCaseText = text.toLowerCase();
-  let textLength = text.length;
-  // Support negative filtering
-  if (text.startsWith("-") && textLength > 1) {
-    lowerCaseText = lowerCaseText.substring(1, textLength);
-    return !lowerCaseUrl.includes(lowerCaseText);
-  }
-
-  // no text is a positive match
-  return !text || lowerCaseUrl.includes(lowerCaseText);
-}
-
-exports.Filters = {
-  all: all,
-  html: isHtml,
-  css: isCss,
-  js: isJs,
-  xhr: isXHR,
-  fonts: isFont,
-  images: isImage,
-  media: isMedia,
-  flash: isFlash,
-  ws: isWS,
-  other: isOther,
+module.exports = {
+  Filters: {
+    all: all,
+    html: isHtml,
+    css: isCss,
+    js: isJs,
+    xhr: isXHR,
+    fonts: isFont,
+    images: isImage,
+    media: isMedia,
+    flash: isFlash,
+    ws: isWS,
+    other: isOther,
+  },
+  isFreetextMatch,
 };
-
-exports.isFreetextMatch = isFreetextMatch;

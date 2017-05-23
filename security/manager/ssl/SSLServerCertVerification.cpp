@@ -110,7 +110,6 @@
 #include "cert.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Casting.h"
-#include "mozilla/Mutex.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/UniquePtr.h"
@@ -150,14 +149,6 @@ namespace {
 // do not use a nsCOMPtr to avoid static initializer/destructor
 nsIThreadPool* gCertVerificationThreadPool = nullptr;
 
-// We avoid using a mutex for the success case to avoid lock-related
-// performance issues. However, we do use a lock in the error case to simplify
-// the code, since performance in the error case is not important.
-Mutex* gSSLVerificationTelemetryMutex = nullptr;
-
-// We add a mutex to serialize PKCS11 database operations
-Mutex* gSSLVerificationPK11Mutex = nullptr;
-
 } // unnamed namespace
 
 // Called when the socket transport thread starts, to initialize the SSL cert
@@ -173,8 +164,6 @@ Mutex* gSSLVerificationPK11Mutex = nullptr;
 void
 InitializeSSLServerCertVerificationThreads()
 {
-  gSSLVerificationTelemetryMutex = new Mutex("SSLVerificationTelemetryMutex");
-  gSSLVerificationPK11Mutex = new Mutex("SSLVerificationPK11Mutex");
   // TODO: tuning, make parameters preferences
   // XXX: instantiate nsThreadPool directly, to make this more bulletproof.
   // Currently, the nsThreadPool.h header isn't exported for us to do so.
@@ -206,14 +195,6 @@ void StopSSLServerCertVerificationThreads()
   if (gCertVerificationThreadPool) {
     gCertVerificationThreadPool->Shutdown();
     NS_RELEASE(gCertVerificationThreadPool);
-  }
-  if (gSSLVerificationTelemetryMutex) {
-    delete gSSLVerificationTelemetryMutex;
-    gSSLVerificationTelemetryMutex = nullptr;
-  }
-  if (gSSLVerificationPK11Mutex) {
-    delete gSSLVerificationPK11Mutex;
-    gSSLVerificationPK11Mutex = nullptr;
   }
 }
 
@@ -1526,6 +1507,11 @@ SSLServerCertVerificationJob::Dispatch(
     return SECFailure;
   }
 
+  if (!gCertVerificationThreadPool) {
+    PR_SetError(PR_INVALID_STATE_ERROR, 0);
+    return SECFailure;
+  }
+
   // Copy the certificate list so the runnable can take ownership of it in the
   // constructor.
   // We can safely skip checking if NSS has already shut down here since we're
@@ -1544,28 +1530,22 @@ SSLServerCertVerificationJob::Dispatch(
                                      stapledOCSPResponse, sctsFromTLSExtension,
                                      providerFlags, time, prtime));
 
-  nsresult nrv;
-  if (!gCertVerificationThreadPool) {
-    nrv = NS_ERROR_NOT_INITIALIZED;
-  } else {
-    nrv = gCertVerificationThreadPool->Dispatch(job, NS_DISPATCH_NORMAL);
-  }
+  nsresult nrv = gCertVerificationThreadPool->Dispatch(job, NS_DISPATCH_NORMAL);
   if (NS_FAILED(nrv)) {
     // We can't call SetCertVerificationResult here to change
     // mCertVerificationState because SetCertVerificationResult will call
     // libssl functions that acquire SSL locks that are already being held at
-    // this point. infoObject->mCertVerificationState will be stuck at
-    // waiting_for_cert_verification here, but that is OK because we already
-    // have to be able to handle cases where we encounter non-cert errors while
-    // in that state.
+    // this point. However, we can set an error with PR_SetError and return
+    // SECFailure, and the correct thing will happen (the error will be
+    // propagated and this connection will be terminated).
     PRErrorCode error = nrv == NS_ERROR_OUT_OF_MEMORY
-                      ? SEC_ERROR_NO_MEMORY
+                      ? PR_OUT_OF_MEMORY_ERROR
                       : PR_INVALID_STATE_ERROR;
-    PORT_SetError(error);
+    PR_SetError(error, 0);
     return SECFailure;
   }
 
-  PORT_SetError(PR_WOULD_BLOCK_ERROR);
+  PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
   return SECWouldBlock;
 }
 
@@ -1610,11 +1590,10 @@ SSLServerCertVerificationJob::Run()
     // Note: the interval is not calculated once as PR_GetError MUST be called
     // before any other  function call
     error = PR_GetError();
-    {
-      TimeStamp now = TimeStamp::Now();
-      MutexAutoLock telemetryMutex(*gSSLVerificationTelemetryMutex);
-      Telemetry::AccumulateTimeDelta(failureTelemetry, mJobStartTime, now);
-    }
+
+    TimeStamp now = TimeStamp::Now();
+    Telemetry::AccumulateTimeDelta(failureTelemetry, mJobStartTime, now);
+
     if (error != 0) {
       RefPtr<CertErrorRunnable> runnable(
           CreateCertErrorRunnable(*mCertVerifier, error, mInfoObject, mCert,
@@ -1872,9 +1851,7 @@ SSLServerCertVerificationResult::Run()
   if (mTelemetryID != Telemetry::HistogramCount) {
      Telemetry::Accumulate(mTelemetryID, mTelemetryValue);
   }
-  // XXX: This cast will be removed by the next patch
-  ((nsNSSSocketInfo*) mInfoObject.get())
-    ->SetCertVerificationResult(mErrorCode, mErrorMessageType);
+  mInfoObject->SetCertVerificationResult(mErrorCode, mErrorMessageType);
   return NS_OK;
 }
 

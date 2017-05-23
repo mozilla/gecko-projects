@@ -34,7 +34,6 @@
 #include "mozilla/Preferences.h"
 #include "nsIResProtocolHandler.h"
 #include "nsIScriptError.h"
-#include "nsIXPConnect.h"
 #include "nsIXULRuntime.h"
 
 #define SELECTED_SKIN_PREF   "general.skins.selectedSkin"
@@ -619,15 +618,6 @@ nsChromeRegistry::ManifestProcessingContext::GetManifestURI()
   return mManifestURI;
 }
 
-nsIXPConnect*
-nsChromeRegistry::ManifestProcessingContext::GetXPConnect()
-{
-  if (!mXPConnect)
-    mXPConnect = do_GetService("@mozilla.org/js/xpc/XPConnect;1");
-
-  return mXPConnect;
-}
-
 already_AddRefed<nsIURI>
 nsChromeRegistry::ManifestProcessingContext::ResolveURI(const char* uri)
 {
@@ -737,10 +727,19 @@ nsChromeRegistryChrome::ManifestLocale(ManifestProcessingContext& cx, int lineno
     SendManifestEntry(chromePackage);
   }
 
-  if (strcmp(package, "global") == 0) {
+  // We use mainPackage as the package we track for reporting new locales being
+  // registered. For most cases it will be "global", but for Fennec it will be
+  // "browser".
+  nsAutoCString mainPackage;
+  nsresult rv = OverrideLocalePackage(NS_LITERAL_CSTRING("global"), mainPackage);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  if (mainPackage.Equals(package)) {
     // We should refresh the LocaleService, since the available
     // locales changed.
-    LocaleService::GetInstance()->Refresh();
+    LocaleService::GetInstance()->OnAvailableLocalesChanged();
   }
 }
 

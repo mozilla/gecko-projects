@@ -42,12 +42,6 @@ nsFirstLetterFrame::GetFrameName(nsAString& aResult) const
 }
 #endif
 
-nsIAtom*
-nsFirstLetterFrame::GetType() const
-{
-  return nsGkAtoms::letterFrame;
-}
-
 void
 nsFirstLetterFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                      const nsDisplayListSet& aLists)
@@ -221,7 +215,7 @@ nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
     LogicalSize convertedSize = kidMetrics.Size(lineWM).ConvertTo(wm, lineWM);
     kid->SetRect(nsRect(bp.IStart(wm), bp.BStart(wm),
                         convertedSize.ISize(wm), convertedSize.BSize(wm)));
-    kid->FinishAndStoreOverflow(&kidMetrics);
+    kid->FinishAndStoreOverflow(&kidMetrics, rs.mStyleDisplay);
     kid->DidReflow(aPresContext, nullptr, nsDidReflowStatus::FINISHED);
 
     convertedSize.ISize(wm) += bp.IStartEnd(wm);
@@ -237,7 +231,7 @@ nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
     aMetrics.UnionOverflowAreasWithDesiredBounds();
     ConsiderChildOverflow(aMetrics.mOverflowAreas, kid);
 
-    FinishAndStoreOverflow(&aMetrics);
+    FinishAndStoreOverflow(&aMetrics, aReflowInput.mStyleDisplay);
   } else {
     // Pretend we are a span and reflow the child frame
     nsLineLayout* ll = aReflowInput.mLineLayout;

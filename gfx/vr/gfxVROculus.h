@@ -136,8 +136,8 @@ class VRSystemManagerOculus : public VRSystemManager
 {
 public:
   static already_AddRefed<VRSystemManagerOculus> Create();
-  virtual bool Init() override;
   virtual void Destroy() override;
+  virtual void Shutdown() override;
   virtual void GetHMDs(nsTArray<RefPtr<VRDisplayHost> >& aHMDResult) override;
   virtual bool GetIsPresenting() override;
   virtual void HandleInput() override;
@@ -151,29 +151,34 @@ public:
 
 protected:
   VRSystemManagerOculus()
-    : mSession(nullptr), mOculusInitialized(false)
-  { }
+    : mOvrLib(nullptr), mSession(nullptr), mStarted(false)
+  {}
+
+  bool Startup();
+  bool LoadOvrLib();
+  void UnloadOvrLib();
 
 private:
   void HandleButtonPress(uint32_t aControllerIdx,
                          uint32_t aButton,
                          uint64_t aButtonMask,
-                         uint64_t aButtonPressed);
+                         uint64_t aButtonPressed,
+                         uint64_t aButtonTouched);
   void HandleAxisMove(uint32_t aControllerIdx, uint32_t aAxis,
                       float aValue);
   void HandlePoseTracking(uint32_t aControllerIdx,
                           const dom::GamepadPoseState& aPose,
                           VRControllerHost* aController);
-  void HandleTriggerPress(uint32_t aControllerIdx, uint32_t aButton,
-                          float aValue);
+  void HandleIndexTriggerPress(uint32_t aControllerIdx, uint32_t aButton, float aValue);
+  void HandleHandTriggerPress(uint32_t aControllerIdx, uint32_t aButton, float aValue);
   void HandleTouchEvent(uint32_t aControllerIdx, uint32_t aButton,
                         uint64_t aTouchMask, uint64_t aTouched);
-
+  PRLibrary* mOvrLib;
   RefPtr<impl::VRDisplayOculus> mHMDInfo;
   nsTArray<RefPtr<impl::VRControllerOculus>> mOculusController;
   RefPtr<nsIThread> mOculusThread;
   ovrSession mSession;
-  bool mOculusInitialized;
+  bool mStarted;
 };
 
 } // namespace gfx

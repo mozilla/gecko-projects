@@ -15,8 +15,57 @@ Components.utils.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "LoginHelper",
   "resource://gre/modules/LoginHelper.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "WebNavigationFrames",
+  "resource://gre/modules/WebNavigationFrames.jsm");
 
 var gContextMenuContentData = null;
+
+function openContextMenu(aMessage) {
+  let data = aMessage.data;
+  let browser = aMessage.target;
+
+  let spellInfo = data.spellInfo;
+  if (spellInfo)
+    spellInfo.target = aMessage.target.messageManager;
+  let documentURIObject = makeURI(data.docLocation,
+                                  data.charSet,
+                                  makeURI(data.baseURI));
+  gContextMenuContentData = { isRemote: true,
+                              event: aMessage.objects.event,
+                              popupNode: aMessage.objects.popupNode,
+                              popupNodeSelectors: data.popupNodeSelectors,
+                              browser,
+                              editFlags: data.editFlags,
+                              spellInfo,
+                              principal: data.principal,
+                              customMenuItems: data.customMenuItems,
+                              addonInfo: data.addonInfo,
+                              documentURIObject,
+                              docLocation: data.docLocation,
+                              charSet: data.charSet,
+                              referrer: data.referrer,
+                              referrerPolicy: data.referrerPolicy,
+                              contentType: data.contentType,
+                              contentDisposition: data.contentDisposition,
+                              frameOuterWindowID: data.frameOuterWindowID,
+                              selectionInfo: data.selectionInfo,
+                              disableSetDesktopBackground: data.disableSetDesktopBg,
+                              loginFillInfo: data.loginFillInfo,
+                              parentAllowsMixedContent: data.parentAllowsMixedContent,
+                              userContextId: data.userContextId,
+                            };
+  let popup = browser.ownerDocument.getElementById("contentAreaContextMenu");
+  let event = gContextMenuContentData.event;
+
+  // Set touch mode to get larger menu items.
+  if (event.mozInputSource == MouseEvent.MOZ_SOURCE_TOUCH) {
+    popup.setAttribute("touchmode", "true");
+  } else {
+    popup.removeAttribute("touchmode");
+  }
+
+  popup.openPopupAtScreen(event.screenX, event.screenY, true);
+}
 
 function nsContextMenu(aXulMenu, aIsShift) {
   this.shouldDisplay = true;
@@ -62,9 +111,10 @@ nsContextMenu.prototype = {
         pageUrl: this.browser ? this.browser.currentURI.spec : undefined,
         linkUrl: this.linkURL,
         selectionText: this.isTextSelected ? this.selectionInfo.text : undefined,
+        frameId: this.frameOuterWindowID,
       };
       subject.wrappedJSObject = subject;
-      Services.obs.notifyObservers(subject, "on-build-contextmenu", null);
+      Services.obs.notifyObservers(subject, "on-build-contextmenu");
     }
 
     this.isFrameImage = document.getElementById("isFrameImage");
@@ -174,15 +224,15 @@ nsContextMenu.prototype = {
   initNavigationItems: function CM_initNavigationItems() {
     var shouldShow = !(this.isContentSelected || this.onLink || this.onImage ||
                        this.onCanvas || this.onVideo || this.onAudio ||
-                       this.onTextInput || this.onSocial);
+                       this.onTextInput) && this.inTabBrowser;
     this.showItem("context-navigation", shouldShow);
     this.showItem("context-sep-navigation", shouldShow);
 
     let stopped = XULBrowserWindow.stopCommand.getAttribute("disabled") == "true";
 
     let stopReloadItem = "";
-    if (shouldShow || this.onSocial) {
-      stopReloadItem = (stopped || this.onSocial) ? "reload" : "stop";
+    if (shouldShow || !this.inTabBrowser) {
+      stopReloadItem = (stopped || !this.inTabBrowser) ? "reload" : "stop";
     }
 
     this.showItem("context-reload", stopReloadItem == "reload");
@@ -249,9 +299,12 @@ nsContextMenu.prototype = {
                        this.onImage || this.onCanvas ||
                        this.onVideo || this.onAudio ||
                        this.onLink || this.onTextInput);
-    var showInspect = !this.onSocial && gPrefService.getBoolPref("devtools.inspector.enabled");
+    var showInspect = this.inTabBrowser && gPrefService.getBoolPref("devtools.inspector.enabled");
     this.showItem("context-viewsource", shouldShow);
     this.showItem("context-viewinfo", shouldShow);
+    // The page info is broken for WebExtension popups, as the browser is
+    // destroyed when the popup is closed.
+    this.setItemAttr("context-viewinfo", "disabled", this.webExtBrowserType === "popup");
     this.showItem("inspect-separator", showInspect);
     this.showItem("context-inspect", showInspect);
 
@@ -300,6 +353,9 @@ nsContextMenu.prototype = {
             .disabled = !this.hasBGImage;
 
     this.showItem("context-viewimageinfo", this.onImage);
+    // The image info popup is broken for WebExtension popups, since the browser
+    // is destroyed when the popup is closed.
+    this.setItemAttr("context-viewimageinfo", "disabled", this.webExtBrowserType === "popup");
     this.showItem("context-viewimagedesc", this.onImage && this.imageDescURL !== "");
   },
 
@@ -309,11 +365,12 @@ nsContextMenu.prototype = {
     this.showItem(bookmarkPage,
                   !(this.isContentSelected || this.onTextInput || this.onLink ||
                     this.onImage || this.onVideo || this.onAudio || this.onSocial ||
-                    this.onCanvas));
+                    this.onCanvas || this.inWebExtBrowser));
     bookmarkPage.setAttribute("tooltiptext", bookmarkPage.getAttribute("buttontooltiptext"));
 
     this.showItem("context-bookmarklink", (this.onLink && !this.onMailtoLink &&
-                                           !this.onSocial) || this.onPlainTextLink);
+                                           !this.onSocial && !this.onMozExtLink) ||
+                                          this.onPlainTextLink);
     this.showItem("context-keywordfield",
                   this.onTextInput && this.onKeywordField);
     this.showItem("frame", this.inFrame);
@@ -357,13 +414,14 @@ nsContextMenu.prototype = {
     let shareEnabled = shareButton && !shareButton.disabled && !this.onSocial;
     let pageShare = shareEnabled && !(this.isContentSelected ||
                             this.onTextInput || this.onLink || this.onImage ||
-                            this.onVideo || this.onAudio || this.onCanvas);
+                            this.onVideo || this.onAudio || this.onCanvas ||
+                            this.inWebExtBrowser);
     this.showItem("context-sharepage", pageShare);
     this.showItem("context-shareselect", shareEnabled && this.isContentSelected);
-    this.showItem("context-sharelink", shareEnabled && (this.onLink || this.onPlainTextLink) && !this.onMailtoLink);
+    this.showItem("context-sharelink", shareEnabled && (this.onLink || this.onPlainTextLink) && !this.onMailtoLink && !this.onMozExtLink);
     this.showItem("context-shareimage", shareEnabled && this.onImage);
     this.showItem("context-sharevideo", shareEnabled && this.onVideo);
-    this.setItemAttr("context-sharevideo", "disabled", !this.mediaURL || this.mediaURL.startsWith("blob:"));
+    this.setItemAttr("context-sharevideo", "disabled", !this.mediaURL || this.mediaURL.startsWith("blob:") || this.mediaURL.startsWith("moz-extension:"));
   },
 
   initSpellingItems() {
@@ -560,7 +618,7 @@ nsContextMenu.prototype = {
   },
 
   initSyncItems() {
-    gFxAccounts.initPageContextMenu(this);
+    gSync.initPageContextMenu(this);
   },
 
   openPasswordManager() {
@@ -571,7 +629,7 @@ nsContextMenu.prototype = {
     let gBrowser = this.browser.ownerGlobal.gBrowser;
     let { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
     let { gDevToolsBrowser } = require("devtools/client/framework/devtools-browser");
-    return gDevToolsBrowser.inspectNode(gBrowser.selectedTab, this.target);
+    return gDevToolsBrowser.inspectNode(gBrowser.selectedTab, this.targetSelectors);
   },
 
   /**
@@ -636,6 +694,10 @@ nsContextMenu.prototype = {
     this.onCTPPlugin       = false;
     this.canSpellCheck     = false;
     this.onPassword        = false;
+    this.webExtBrowserType = "";
+    this.inWebExtBrowser   = false;
+    this.inTabBrowser      = true;
+    this.onMozExtLink      = false;
 
     if (this.isRemote) {
       this.selectionInfo = gContextMenuContentData.selectionInfo;
@@ -648,6 +710,12 @@ nsContextMenu.prototype = {
 
     // Remember the node that was clicked.
     this.target = aNode;
+
+    // Remember the CSS selectors corresponding to clicked node. gContextMenuContentData
+    // can be null if the menu was triggered by tests in which case use an empty array.
+    this.targetSelectors = gContextMenuContentData
+                              ? gContextMenuContentData.popupNodeSelectors
+                              : [];
 
     let ownerDoc = this.target.ownerDocument;
     this.ownerDoc = ownerDoc;
@@ -669,12 +737,13 @@ nsContextMenu.prototype = {
                              .QueryInterface(Ci.nsIDocShell)
                              .chromeEventHandler;
       this.principal = ownerDoc.nodePrincipal;
-      this.frameOuterWindowID = ownerDoc.defaultView
-                                        .QueryInterface(Ci.nsIInterfaceRequestor)
-                                        .getInterface(Ci.nsIDOMWindowUtils)
-                                        .outerWindowID;
+      this.frameOuterWindowID = WebNavigationFrames.getFrameId(ownerDoc.defaultView);
     }
     this.onSocial = !!this.browser.getAttribute("origin");
+    this.webExtBrowserType = this.browser.getAttribute("webextension-view-type");
+    this.inWebExtBrowser = !!this.webExtBrowserType;
+    this.inTabBrowser = this.browser.ownerGlobal.gBrowser ?
+      !!this.browser.ownerGlobal.gBrowser.getTabForBrowser(this.browser) : false;
 
     // Check if we are in a synthetic document (stand alone image, video, etc.).
     this.inSyntheticDoc = ownerDoc.mozSyntheticDocument;
@@ -812,14 +881,17 @@ nsContextMenu.prototype = {
     while (elem) {
       if (elem.nodeType == Node.ELEMENT_NODE) {
         // Link?
+        const XLINKNS = "http://www.w3.org/1999/xlink";
         if (!this.onLink &&
             // Be consistent with what hrefAndLinkNodeForClickEvent
             // does in browser.js
              (this._isXULTextLinkLabel(elem) ||
               (elem instanceof HTMLAnchorElement && elem.href) ||
+              (elem instanceof SVGAElement &&
+               (elem.href || elem.hasAttributeNS(XLINKNS, "href"))) ||
               (elem instanceof HTMLAreaElement && elem.href) ||
               elem instanceof HTMLLinkElement ||
-              elem.getAttributeNS("http://www.w3.org/1999/xlink", "type") == "simple")) {
+              elem.getAttributeNS(XLINKNS, "type") == "simple")) {
 
           // Target is a link or a descendant of a link.
           this.onLink = true;
@@ -831,6 +903,7 @@ nsContextMenu.prototype = {
           this.linkTextStr = this.getLinkText();
           this.linkProtocol = this.getLinkProtocol();
           this.onMailtoLink = (this.linkProtocol == "mailto");
+          this.onMozExtLink = (this.linkProtocol == "moz-extension");
           this.onSaveableLink = this.isLinkSaveable( this.link );
           this.linkHasNoReferrer = BrowserUtils.linkHasNoReferrer(elem);
           try {
@@ -995,10 +1068,11 @@ nsContextMenu.prototype = {
     }
 
     if (!this.isRemote) {
-      params.frameOuterWindowID = this.target.ownerGlobal
-                                      .QueryInterface(Ci.nsIInterfaceRequestor)
-                                      .getInterface(Ci.nsIDOMWindowUtils).outerWindowID;
+      // Propagate the frameOuterWindowID value saved when
+      // the context menu has been opened.
+      params.frameOuterWindowID = this.frameOuterWindowID;
     }
+
     // If we want to change userContextId, we must be sure that we don't
     // propagate the referrer.
     if ("userContextId" in params &&
@@ -1604,8 +1678,13 @@ nsContextMenu.prototype = {
   // Generate fully qualified URL for clicked-on link.
   getLinkURL() {
     var href = this.link.href;
-    if (href)
+    if (href) {
+      // Handle SVG links:
+      if (typeof href == "object" && href.animVal) {
+        return href.animVal;
+      }
       return href;
+    }
 
     href = this.link.getAttribute("href") ||
            this.link.getAttributeNS("http://www.w3.org/1999/xlink", "href");
@@ -1875,7 +1954,7 @@ nsContextMenu.prototype = {
   _getTelemetryPageContextInfo() {
     let rv = [];
     for (let k of ["isContentSelected", "onLink", "onImage", "onCanvas", "onVideo", "onAudio",
-                   "onTextInput", "onSocial"]) {
+                   "onTextInput", "onSocial", "inWebExtBrowser", "inTabBrowser"]) {
       if (this[k]) {
         rv.push(k.replace(/^(?:is|on)(.)/, (match, firstLetter) => firstLetter.toLowerCase()));
       }

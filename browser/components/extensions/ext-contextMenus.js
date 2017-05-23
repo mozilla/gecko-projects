@@ -2,6 +2,7 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
+Cu.import("resource://gre/modules/ExtensionManagement.jsm");
 Cu.import("resource://gre/modules/MatchPattern.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
@@ -11,7 +12,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
 var {
   ExtensionError,
   IconDetails,
-  SingletonEventManager,
 } = ExtensionUtils;
 
 const ACTION_MENU_TOP_LEVEL_LIMIT = 6;
@@ -147,6 +147,13 @@ var gMenuBuilder = {
     let menuPopup = element.firstChild;
     if (menuPopup && menuPopup.childNodes.length == 1) {
       let onlyChild = menuPopup.firstChild;
+
+      // Keep single checkbox items in the submenu on Linux since
+      // the extension icon overlaps the checkbox otherwise.
+      if (AppConstants.platform === "linux" && onlyChild.getAttribute("type") === "checkbox") {
+        return element;
+      }
+
       onlyChild.remove();
       return onlyChild;
     }
@@ -192,6 +199,11 @@ var gMenuBuilder = {
       }
 
       element.setAttribute("label", label);
+    }
+
+    if (item.id && item.extension && item.extension.id) {
+      element.setAttribute("id",
+        `${makeWidgetId(item.extension.id)}_${item.id}`);
     }
 
     if (item.type == "checkbox") {
@@ -323,13 +335,16 @@ function getContexts(contextData) {
     contexts.add("browser_action");
   }
 
+  if (contextData.onTab) {
+    contexts.add("tab");
+  }
+
   if (contexts.size === 0) {
     contexts.add("page");
   }
 
-  if (contextData.onTab) {
-    contexts.add("tab");
-  } else {
+  // New non-content contexts supported in Firefox are not part of "all".
+  if (!contextData.onTab) {
     contexts.add("all");
   }
 
@@ -512,6 +527,7 @@ MenuItem.prototype = {
     setIfDefined("srcUrl", contextData.srcUrl);
     setIfDefined("pageUrl", contextData.pageUrl);
     setIfDefined("frameUrl", contextData.frameUrl);
+    setIfDefined("frameId", contextData.frameId);
     setIfDefined("selectionText", contextData.selectionText);
 
     if ((this.type === "checkbox") || (this.type === "radio")) {
@@ -557,7 +573,7 @@ MenuItem.prototype = {
 // for contex-menu events from both content and chrome.
 const contextMenuTracker = {
   register() {
-    Services.obs.addObserver(this, "on-build-contextmenu", false);
+    Services.obs.addObserver(this, "on-build-contextmenu");
     for (const window of windowTracker.browserWindows()) {
       this.onWindowOpen(window);
     }

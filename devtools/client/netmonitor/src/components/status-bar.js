@@ -10,7 +10,6 @@ const {
 } = require("devtools/client/shared/vendor/react");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 const { PluralForm } = require("devtools/shared/plural-form");
-
 const Actions = require("../actions/index");
 const {
   getDisplayedRequestsSummary,
@@ -18,12 +17,11 @@ const {
 } = require("../selectors/index");
 const {
   getFormattedSize,
-  getFormattedTime
+  getFormattedTime,
 } = require("../utils/format-utils");
 const { L10N } = require("../utils/l10n");
 
-// Components
-const { div, button, span } = DOM;
+const { button, div } = DOM;
 
 function StatusBar({ summary, openStatistics, timingMarkers }) {
   let { count, contentSize, transferredSize, millis } = summary;
@@ -32,31 +30,48 @@ function StatusBar({ summary, openStatistics, timingMarkers }) {
     load,
   } = timingMarkers;
 
-  let text = (count === 0) ? L10N.getStr("networkMenu.empty") :
-    PluralForm.get(count, L10N.getStr("networkMenu.summary3"))
-    .replace("#1", count)
-    .replace("#2", getFormattedSize(contentSize))
-    .replace("#3", getFormattedSize(transferredSize))
-    .replace("#4", getFormattedTime(millis));
+  let countText = count === 0 ? L10N.getStr("networkMenu.summary.requestsCountEmpty") :
+    PluralForm.get(
+      count, L10N.getFormatStrWithNumbers("networkMenu.summary.requestsCount", count)
+  );
+  let transferText = L10N.getFormatStrWithNumbers("networkMenu.summary.transferred",
+    getFormattedSize(contentSize), getFormattedSize(transferredSize));
+  let finishText = L10N.getFormatStrWithNumbers("networkMenu.summary.finish",
+    getFormattedTime(millis));
 
   return (
-    div({ className: "devtools-toolbar devtools-toolbar-bottom" },
+    div({ className: "devtools-toolbar devtools-status-bottom" },
       button({
         className: "devtools-button requests-list-network-summary-button",
-        title: count ? text : L10N.getStr("netmonitor.toolbar.perf"),
+        title: L10N.getStr("networkMenu.summary.tooltip.perf"),
         onClick: openStatistics,
       },
-        span({ className: "summary-info-icon" }),
-        span({ className: "summary-info-text" }, text),
+        div({ className: "summary-info-icon" }),
       ),
-
+      div({
+        className: "status-bar-label requests-list-network-summary-count",
+        title: L10N.getStr("networkMenu.summary.tooltip.requestsCount"),
+      }, countText),
+      count !== 0 &&
+        div({
+          className: "status-bar-label requests-list-network-summary-transfer",
+          title: L10N.getStr("networkMenu.summary.tooltip.transferred"),
+        }, transferText),
+      count !== 0 &&
+        div({
+          className: "status-bar-label requests-list-network-summary-finish",
+          title: L10N.getStr("networkMenu.summary.tooltip.finish"),
+        }, finishText),
       DOMContentLoaded > -1 &&
-      span({ className: "status-bar-label dom-content-loaded" },
-        `DOMContentLoaded: ${getFormattedTime(DOMContentLoaded)}`),
-
+        div({
+          className: "status-bar-label dom-content-loaded",
+          title: L10N.getStr("networkMenu.summary.tooltip.domContentLoaded"),
+        }, `DOMContentLoaded: ${getFormattedTime(DOMContentLoaded)}`),
       load > -1 &&
-      span({ className: "status-bar-label load" },
-        `load: ${getFormattedTime(load)}`),
+        div({
+          className: "status-bar-label load",
+          title: L10N.getStr("networkMenu.summary.tooltip.load"),
+        }, `load: ${getFormattedTime(load)}`),
     )
   );
 }

@@ -20,7 +20,7 @@ class nsSVGStopFrame : public nsFrame
   NS_NewSVGStopFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 protected:
   explicit nsSVGStopFrame(nsStyleContext* aContext)
-    : nsFrame(aContext)
+    : nsFrame(aContext, LayoutFrameType::SVGStop)
   {
     AddStateBits(NS_FRAME_IS_NONDISPLAY);
   }
@@ -41,13 +41,6 @@ public:
   virtual nsresult AttributeChanged(int32_t         aNameSpaceID,
                                     nsIAtom*        aAttribute,
                                     int32_t         aModType) override;
-
-  /**
-   * Get the "type" of the frame
-   *
-   * @see nsGkAtoms::svgStopFrame
-   */
-  virtual nsIAtom* GetType() const override;
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
@@ -82,12 +75,6 @@ nsSVGStopFrame::Init(nsIContent*       aContent,
 }
 #endif /* DEBUG */
 
-nsIAtom *
-nsSVGStopFrame::GetType() const
-{
-  return nsGkAtoms::svgStopFrame;
-}
-
 nsresult
 nsSVGStopFrame::AttributeChanged(int32_t         aNameSpaceID,
                                  nsIAtom*        aAttribute,
@@ -95,8 +82,8 @@ nsSVGStopFrame::AttributeChanged(int32_t         aNameSpaceID,
 {
   if (aNameSpaceID == kNameSpaceID_None &&
       aAttribute == nsGkAtoms::offset) {
-    MOZ_ASSERT(GetParent()->GetType() == nsGkAtoms::svgLinearGradientFrame ||
-               GetParent()->GetType() == nsGkAtoms::svgRadialGradientFrame,
+    MOZ_ASSERT(GetParent()->IsSVGLinearGradientFrame() ||
+               GetParent()->IsSVGRadialGradientFrame(),
                "Observers observe the gradient, so that's what we must invalidate");
     nsSVGEffects::InvalidateDirectRenderingObservers(GetParent());
   }

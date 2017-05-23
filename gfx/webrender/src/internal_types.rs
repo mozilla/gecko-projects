@@ -15,11 +15,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tiling;
 use renderer::BlendMode;
-use webrender_traits::{Epoch, ColorF, PipelineId};
-use webrender_traits::{ImageFormat, NativeFontHandle};
-use webrender_traits::{ExternalImageId, ScrollLayerId};
-use webrender_traits::{ImageData};
-use webrender_traits::{DeviceUintRect};
+use webrender_traits::{ClipId, ColorF, DeviceUintRect, Epoch, ExternalImageData, ExternalImageId};
+use webrender_traits::{ImageData, ImageFormat, NativeFontHandle, PipelineId};
 
 // An ID for a texture that is owned by the
 // texture cache module. This can include atlases
@@ -43,7 +40,7 @@ pub struct CacheTextureId(pub usize);
 pub enum SourceTexture {
     Invalid,
     TextureCache(CacheTextureId),
-    External(ExternalImageId),
+    External(ExternalImageData),
     #[cfg_attr(not(feature = "webgl"), allow(dead_code))]
     /// This is actually a gl::GLuint, with the shared texture id between the
     /// main context and the WebGL context.
@@ -59,7 +56,7 @@ pub const ORTHO_FAR_PLANE: f32 = 1000000.0;
 
 #[derive(Clone)]
 pub enum FontTemplate {
-    Raw(Arc<Vec<u8>>),
+    Raw(Arc<Vec<u8>>, u32),
     Native(NativeFontHandle),
 }
 
@@ -68,7 +65,6 @@ pub enum TextureSampler {
     Color0,
     Color1,
     Color2,
-    Mask,
     CacheA8,
     CacheRGBA8,
     Data16,
@@ -80,6 +76,7 @@ pub enum TextureSampler {
     Geometry,
     ResourceRects,
     Gradients,
+    SplitGeometry,
     Dither,
 }
 
@@ -197,19 +194,19 @@ pub struct PackedTexel {
 
 impl PackedTexel {
     pub fn high_bytes(color: &ColorF) -> PackedTexel {
-        Self::extract_bytes(color, COLOR_FLOAT_TO_FIXED)
+        Self::extract_bytes(color, 8)
     }
 
     pub fn low_bytes(color: &ColorF) -> PackedTexel {
-        Self::extract_bytes(color, COLOR_FLOAT_TO_FIXED_WIDE)
+        Self::extract_bytes(color, 0)
     }
 
-    fn extract_bytes(color: &ColorF, multiplier: f32) -> PackedTexel {
+    fn extract_bytes(color: &ColorF, shift_by: i32) -> PackedTexel {
         PackedTexel {
-            b: ((0.5 + color.b * multiplier).floor() as u32 & 0xff) as u8,
-            g: ((0.5 + color.g * multiplier).floor() as u32 & 0xff) as u8,
-            r: ((0.5 + color.r * multiplier).floor() as u32 & 0xff) as u8,
-            a: ((0.5 + color.a * multiplier).floor() as u32 & 0xff) as u8,
+            b: ((0.5 + color.b * COLOR_FLOAT_TO_FIXED_WIDE).floor() as u32 >> shift_by & 0xff) as u8,
+            g: ((0.5 + color.g * COLOR_FLOAT_TO_FIXED_WIDE).floor() as u32 >> shift_by & 0xff) as u8,
+            r: ((0.5 + color.r * COLOR_FLOAT_TO_FIXED_WIDE).floor() as u32 >> shift_by & 0xff) as u8,
+            a: ((0.5 + color.a * COLOR_FLOAT_TO_FIXED_WIDE).floor() as u32 >> shift_by & 0xff) as u8,
         }
     }
 }
@@ -287,7 +284,9 @@ pub enum TextureUpdateOp {
     UpdateForExternalBuffer {
         rect: DeviceUintRect,
         id: ExternalImageId,
+        channel_index: u8,
         stride: Option<u32>,
+        offset: u32,
     },
     Grow {
         width: u32,
@@ -298,8 +297,6 @@ pub enum TextureUpdateOp {
     },
     Free,
 }
-
-pub type ExternalImageUpdateList = Vec<ExternalImageId>;
 
 pub struct TextureUpdate {
     pub id: CacheTextureId,
@@ -330,14 +327,14 @@ pub struct RendererFrame {
     /// been rendered, which is necessary for reftests.
     pub pipeline_epoch_map: HashMap<PipelineId, Epoch, BuildHasherDefault<FnvHasher>>,
     /// The layers that are currently affected by the over-scrolling animation.
-    pub layers_bouncing_back: HashSet<ScrollLayerId, BuildHasherDefault<FnvHasher>>,
+    pub layers_bouncing_back: HashSet<ClipId, BuildHasherDefault<FnvHasher>>,
 
     pub frame: Option<tiling::Frame>,
 }
 
 impl RendererFrame {
     pub fn new(pipeline_epoch_map: HashMap<PipelineId, Epoch, BuildHasherDefault<FnvHasher>>,
-               layers_bouncing_back: HashSet<ScrollLayerId, BuildHasherDefault<FnvHasher>>,
+               layers_bouncing_back: HashSet<ClipId, BuildHasherDefault<FnvHasher>>,
                frame: Option<tiling::Frame>)
                -> RendererFrame {
         RendererFrame {
@@ -350,7 +347,7 @@ impl RendererFrame {
 
 pub enum ResultMsg {
     RefreshShader(PathBuf),
-    NewFrame(RendererFrame, TextureUpdateList, ExternalImageUpdateList, BackendProfileCounters),
+    NewFrame(RendererFrame, TextureUpdateList, BackendProfileCounters),
 }
 
 #[repr(u32)]
@@ -387,13 +384,13 @@ pub enum LowLevelFilterOp {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum HardwareCompositeOp {
-    Alpha,
+    PremultipliedAlpha,
 }
 
 impl HardwareCompositeOp {
     pub fn to_blend_mode(&self) -> BlendMode {
-        match self {
-            &HardwareCompositeOp::Alpha => BlendMode::Alpha,
+        match *self {
+            HardwareCompositeOp::PremultipliedAlpha => BlendMode::PremultipliedAlpha,
         }
     }
 }

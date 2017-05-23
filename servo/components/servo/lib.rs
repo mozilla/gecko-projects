@@ -126,6 +126,8 @@ impl<Window> Browser<Window> where Window: WindowMethods + 'static {
         // Global configuration options, parsed from the command line.
         let opts = opts::get();
 
+        // Make sure the gl context is made current.
+        window.prepare_for_composite(0, 0);
 
         // Get both endpoints of a special channel for communication between
         // the client window and the compositor. This channel is unique because
@@ -181,6 +183,7 @@ impl<Window> Browser<Window> where Window: WindowMethods + 'static {
                 resource_override_path: Some(resource_path),
                 enable_aa: opts.enable_text_antialiasing,
                 enable_profiler: opts.webrender_stats,
+                enable_batcher: opts.webrender_batch,
                 debug: opts.webrender_debug,
                 recorder: recorder,
                 precache_shaders: opts.precache_shaders,

@@ -49,13 +49,18 @@ public:
 
   // default constructor supplied by the compiler
 
-  nsTableCellFrame(nsStyleContext* aContext, nsTableFrame* aTableFrame);
+  nsTableCellFrame(nsStyleContext* aContext, nsTableFrame* aTableFrame)
+    : nsTableCellFrame(aContext,
+                       aTableFrame,
+                       mozilla::LayoutFrameType::TableCell)
+  {}
+
   ~nsTableCellFrame();
 
   nsTableRowFrame* GetTableRowFrame() const
   {
     nsIFrame* parent = GetParent();
-    MOZ_ASSERT(parent && parent->GetType() == nsGkAtoms::tableRowFrame);
+    MOZ_ASSERT(parent && parent->IsTableRowFrame());
     return static_cast<nsTableRowFrame*>(parent);
   }
 
@@ -106,11 +111,6 @@ public:
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsDisplayListSet& aLists) override;
 
-  DrawResult PaintCellBackground(nsRenderingContext& aRenderingContext,
-                                 const nsRect& aDirtyRect, nsPoint aPt,
-                                 uint32_t aFlags);
-
- 
   virtual nsresult ProcessBorders(nsTableFrame* aFrame,
                                   nsDisplayListBuilder* aBuilder,
                                   const nsDisplayListSet& aLists);
@@ -123,13 +123,6 @@ public:
                       ReflowOutput& aDesiredSize,
                       const ReflowInput& aReflowInput,
                       nsReflowStatus&      aStatus) override;
-
-  /**
-   * Get the "type" of the frame
-   *
-   * @see nsLayoutAtoms::tableCellFrame
-   */
-  virtual nsIAtom* GetType() const override;
 
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override;
@@ -239,6 +232,10 @@ public:
   virtual void InvalidateFrameForRemoval() override { InvalidateFrameSubtree(); }
 
 protected:
+  nsTableCellFrame(nsStyleContext* aContext,
+                   nsTableFrame* aTableFrame,
+                   mozilla::LayoutFrameType aType);
+
   virtual LogicalSides
   GetLogicalSkipSides(const ReflowInput* aReflowInput = nullptr) const override;
 
@@ -312,8 +309,6 @@ public:
   nsBCTableCellFrame(nsStyleContext* aContext, nsTableFrame* aTableFrame);
 
   ~nsBCTableCellFrame();
-
-  virtual nsIAtom* GetType() const override;
 
   virtual nsMargin GetUsedBorder() const override;
   virtual bool GetBorderRadii(const nsSize& aFrameSize,

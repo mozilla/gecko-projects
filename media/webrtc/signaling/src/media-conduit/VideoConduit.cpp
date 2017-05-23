@@ -120,12 +120,15 @@ WebrtcVideoConduit::SendStreamStatistics::Update(
   if (!aStats.substreams.empty()) {
     const webrtc::FrameCounts& fc =
       aStats.substreams.begin()->second.frame_counts;
-    CSFLogVerbose(logTag, "%s: framerate: %u, bitrate: %u, dropped frames delta: %u",
-                  __FUNCTION__, aStats.encode_frame_rate, aStats.media_bitrate_bps,
-                  (mSentFrames - (fc.key_frames + fc.delta_frames)) - mDroppedFrames);
-    mDroppedFrames = mSentFrames - (fc.key_frames + fc.delta_frames);
+    mFramesEncoded = fc.key_frames + fc.delta_frames;
+    CSFLogVerbose(logTag,
+                  "%s: framerate: %u, bitrate: %u, dropped frames delta: %u",
+                  __FUNCTION__, aStats.encode_frame_rate,
+                  aStats.media_bitrate_bps,
+                  mFramesDeliveredToEncoder - mFramesEncoded - mDroppedFrames);
+    mDroppedFrames = mFramesDeliveredToEncoder - mFramesEncoded;
   } else {
-    CSFLogVerbose(logTag, "%s aStats.substreams is empty", __FUNCTION__);
+    CSFLogVerbose(logTag, "%s stats.substreams is empty", __FUNCTION__);
   }
 };
 
@@ -212,10 +215,17 @@ WebrtcVideoConduit::WebrtcVideoConduit(RefPtr<WebRtcCallWrapper> aCall)
     auto self = static_cast<WebrtcVideoConduit*>(aClosure);
     MutexAutoLock lock(self->mCodecMutex);
     if (self->mEngineTransmitting && self->mSendStream) {
-      self->mSendStreamStats.Update(self->mSendStream->GetStats());
+      const auto& stats = self->mSendStream->GetStats();
+      self->mSendStreamStats.Update(stats);
+      if (!stats.substreams.empty()) {
+          self->mSendPacketCounts =
+            stats.substreams.begin()->second.rtcp_packet_type_counts;
+      }
     }
     if (self->mEngineReceiving && self->mRecvStream) {
-      self->mRecvStreamStats.Update(self->mRecvStream->GetStats());
+      const auto& stats = self->mRecvStream->GetStats();
+      self->mRecvStreamStats.Update(stats);
+      self->mRecvPacketCounts = stats.rtcp_packet_type_counts;
     }
   };
   mVideoStatsTimer->InitWithFuncCallback(
@@ -239,15 +249,12 @@ WebrtcVideoConduit::~WebrtcVideoConduit()
 }
 
 void
-WebrtcVideoConduit::AddLocalRTPExtensions(bool aIsSend,
+WebrtcVideoConduit::SetLocalRTPExtensions(bool aIsSend,
   const std::vector<webrtc::RtpExtension> & aExtensions)
 {
   auto& extList = aIsSend ? mSendStreamConfig.rtp.extensions :
                   mRecvStreamConfig.rtp.extensions;
-  std::remove_if(extList.begin(), extList.end(), [&](const webrtc::RtpExtension & i) {
-    return std::find(aExtensions.begin(), aExtensions.end(),i) != aExtensions.end();
-  });
-  extList.insert(extList.end(), aExtensions.begin(), aExtensions.end());
+  extList = aExtensions;
 }
 
 std::vector<webrtc::RtpExtension>
@@ -494,6 +501,7 @@ WebrtcVideoConduit::ConfigureSendMediaCodec(const VideoCodecConfig* codecConfig)
 
   mSendingFramerate = 0;
   mEncoderConfig.ClearStreams();
+  mSendStreamConfig.rtp.rids.clear();
 
   unsigned short width = 320;
   unsigned short height = 240;
@@ -568,8 +576,10 @@ WebrtcVideoConduit::ConfigureSendMediaCodec(const VideoCodecConfig* codecConfig)
     video_stream.height = height >> idx;
     video_stream.max_framerate = mSendingFramerate;
     auto& simulcastEncoding = codecConfig->mSimulcastEncodings[idx];
-    // leave vector temporal_layer_thresholds_bps empty
-    video_stream.temporal_layer_thresholds_bps.clear();
+    // The underlying code (as of 49 and 57) actually ignores the values in
+    // the array, and uses the size of the array + 1.  Chrome uses 3 for
+    // temporal layers when simulcast is in use (see simulcast.cc)
+    video_stream.temporal_layer_thresholds_bps.resize(streamCount > 1 ? 3 : 1);
     // Calculate these first
     video_stream.max_bitrate_bps = MinIgnoreZero(simulcastEncoding.constraints.maxBr,
                                                  kDefaultMaxBitrate_bps);
@@ -747,11 +757,36 @@ WebrtcVideoConduit::GetRemoteSSRC(unsigned int* ssrc)
 }
 
 bool
+WebrtcVideoConduit::GetSendPacketTypeStats(
+    webrtc::RtcpPacketTypeCounter* aPacketCounts)
+{
+  MutexAutoLock lock(mCodecMutex);
+  if (!mEngineTransmitting || !mSendStream) { // Not transmitting
+    return false;
+  }
+  *aPacketCounts = mSendPacketCounts;
+  return true;
+}
+
+bool
+WebrtcVideoConduit::GetRecvPacketTypeStats(
+    webrtc::RtcpPacketTypeCounter* aPacketCounts)
+{
+  MutexAutoLock lock(mCodecMutex);
+  if (!mEngineReceiving || !mRecvStream) { // Not receiving
+    return false;
+  }
+  *aPacketCounts = mRecvPacketCounts;
+  return true;
+}
+
+bool
 WebrtcVideoConduit::GetVideoEncoderStats(double* framerateMean,
                                          double* framerateStdDev,
                                          double* bitrateMean,
                                          double* bitrateStdDev,
-                                         uint32_t* droppedFrames)
+                                         uint32_t* droppedFrames,
+                                         uint32_t* framesEncoded)
 {
   {
     MutexAutoLock lock(mCodecMutex);
@@ -761,6 +796,7 @@ WebrtcVideoConduit::GetVideoEncoderStats(double* framerateMean,
     mSendStreamStats.GetVideoStreamStats(*framerateMean, *framerateStdDev,
       *bitrateMean, *bitrateStdDev);
     mSendStreamStats.DroppedFrames(*droppedFrames);
+    *framesEncoded = mSendStreamStats.FramesEncoded();
     return true;
   }
 }
@@ -840,12 +876,7 @@ bool WebrtcVideoConduit::GetRTCPReceiverReport(DOMHighResTimeStamp* timestamp,
     *cumulativeLost = ind->second.rtcp_stats.cumulative_lost;
     *bytesReceived = ind->second.rtp_stats.MediaPayloadBytes();
     *packetsReceived = ind->second.rtp_stats.transmitted.packets;
-    int64_t rtt = mSendStream->GetRtt(); // TODO: BUG 1241066, mozRtt is 0 or 1
-    if (rtt >= 0) {
-      *rttMs = rtt;
-    } else {
-      *rttMs = 0;
-    }
+    int64_t rtt = mSendStream->GetRtt();
 #ifdef DEBUG
     if (rtt > INT32_MAX) {
       CSFLogError(logTag,
@@ -853,6 +884,11 @@ bool WebrtcVideoConduit::GetRTCPReceiverReport(DOMHighResTimeStamp* timestamp,
         " maximum size of an RTCP RTT.", __FUNCTION__, this);
     }
 #endif
+    if (rtt > 0) {
+      *rttMs = rtt;
+    } else {
+      *rttMs = 0;
+    }
     // Note: timestamp is not correct per the spec... should be time the rtcp
     // was received (remote) or sent (local)
     *timestamp = webrtc::Clock::GetRealTimeClock()->TimeInMilliseconds();
@@ -1176,6 +1212,9 @@ WebrtcVideoConduit::ConfigureRecvMediaCodecs(
       mRecvStreamConfig.rtp.fec.red_rtx_payload_type = -1;
     }
 
+    // SetRemoteSSRC should have populated this already
+    mRecvSSRC = mRecvStreamConfig.rtp.remote_ssrc;
+
     // XXX ugh! same SSRC==0 problem that webrtc.org has
     if (mRecvSSRC == 0) {
       // Handle un-signalled SSRCs by creating a random one and then when it actually gets set,
@@ -1190,9 +1229,8 @@ WebrtcVideoConduit::ConfigureRecvMediaCodecs(
       } while (ssrc == 0); // webrtc.org code has fits if you select an SSRC of 0
 
       mRecvStreamConfig.rtp.remote_ssrc = ssrc;
+      mRecvSSRC = ssrc;
     }
-    // Either set via SetRemoteSSRC, or temp one we created.
-    mRecvSSRC = mRecvStreamConfig.rtp.remote_ssrc;
 
     // 0 isn't allowed.  Would be best to ask for a random SSRC from the
     // RTP code.  Would need to call rtp_sender.cc -- GenerateNewSSRC(),
@@ -1774,7 +1812,7 @@ WebrtcVideoConduit::SendVideoFrame(webrtc::VideoFrame& frame)
     }
   }
 
-  mSendStreamStats.SentFrame();
+  mSendStreamStats.FrameDeliveredToEncoder();
   CSFLogDebug(logTag, "%s Inserted a frame", __FUNCTION__);
   return kMediaConduitNoError;
 }

@@ -33,7 +33,10 @@ class DrawTarget;
 
 namespace layers {
 class ImageContainer;
+class StackingContextHelper;
 class WebRenderDisplayItemLayer;
+class WebRenderParentCommand;
+class LayerManager;
 } // namespace layers
 
 namespace wr {
@@ -103,6 +106,7 @@ struct nsCSSRendering {
   typedef mozilla::gfx::Rect Rect;
   typedef mozilla::gfx::Size Size;
   typedef mozilla::gfx::RectCornerRadii RectCornerRadii;
+  typedef mozilla::layers::LayerManager LayerManager;
   typedef mozilla::image::DrawResult DrawResult;
   typedef nsIFrame::Sides Sides;
 
@@ -490,19 +494,24 @@ struct nsCSSRendering {
                                                nsStyleContext *mBackgroundSC,
                                                const nsStyleBorder& aBorder);
 
-  static bool CanBuildWebRenderDisplayItemsForStyleImageLayer(nsPresContext& aPresCtx,
+  static bool CanBuildWebRenderDisplayItemsForStyleImageLayer(LayerManager* aManager,
+                                                              nsPresContext& aPresCtx,
                                                               nsIFrame *aFrame,
                                                               const nsStyleBackground* aBackgroundStyle,
                                                               int32_t aLayer);
-  static void BuildWebRenderDisplayItemsForStyleImageLayer(const PaintBGParams& aParams,
-                                                           mozilla::wr::DisplayListBuilder& aBuilder,
-                                                           mozilla::layers::WebRenderDisplayItemLayer* aLayer);
-
-  static void BuildWebRenderDisplayItemsForStyleImageLayerWithSC(const PaintBGParams& aParams,
+  static DrawResult BuildWebRenderDisplayItemsForStyleImageLayer(const PaintBGParams& aParams,
                                                                  mozilla::wr::DisplayListBuilder& aBuilder,
-                                                                 mozilla::layers::WebRenderDisplayItemLayer* aLayer,
-                                                                 nsStyleContext *mBackgroundSC,
-                                                                 const nsStyleBorder& aBorder);
+                                                                 const mozilla::layers::StackingContextHelper& aSc,
+                                                                 nsTArray<mozilla::layers::WebRenderParentCommand>& aParentCommands,
+                                                                 mozilla::layers::WebRenderDisplayItemLayer* aLayer);
+
+  static DrawResult BuildWebRenderDisplayItemsForStyleImageLayerWithSC(const PaintBGParams& aParams,
+                                                                       mozilla::wr::DisplayListBuilder& aBuilder,
+                                                                       const mozilla::layers::StackingContextHelper& aSc,
+                                                                       nsTArray<mozilla::layers::WebRenderParentCommand>& aParentCommands,
+                                                                       mozilla::layers::WebRenderDisplayItemLayer* aLayer,
+                                                                       nsStyleContext *mBackgroundSC,
+                                                                       const nsStyleBorder& aBorder);
 
   /**
    * Returns the rectangle covered by the given background layer image, taking

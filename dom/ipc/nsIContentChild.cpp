@@ -21,6 +21,7 @@
 #include "mozilla/ipc/PChildToParentStreamChild.h"
 #include "mozilla/ipc/PParentToChildStreamChild.h"
 #include "mozilla/dom/ipc/MemoryStreamChild.h"
+#include "mozilla/dom/ipc/IPCBlobInputStreamChild.h"
 
 #include "nsPrintfCString.h"
 #include "xpcpublic.h"
@@ -46,6 +47,7 @@ nsIContentChild::DeallocPJavaScriptChild(PJavaScriptChild* aChild)
 
 PBrowserChild*
 nsIContentChild::AllocPBrowserChild(const TabId& aTabId,
+                                    const TabId& aSameTabGroupAs,
                                     const IPCTabContext& aContext,
                                     const uint32_t& aChromeFlags,
                                     const ContentParentId& aCpID,
@@ -64,7 +66,8 @@ nsIContentChild::AllocPBrowserChild(const TabId& aTabId,
   }
 
   RefPtr<TabChild> child =
-    TabChild::Create(this, aTabId, tc.GetTabContext(), aChromeFlags);
+    TabChild::Create(this, aTabId, aSameTabGroupAs,
+                     tc.GetTabContext(), aChromeFlags);
 
   // The ref here is released in DeallocPBrowserChild.
   return child.forget().take();
@@ -81,6 +84,7 @@ nsIContentChild::DeallocPBrowserChild(PBrowserChild* aIframe)
 mozilla::ipc::IPCResult
 nsIContentChild::RecvPBrowserConstructor(PBrowserChild* aActor,
                                          const TabId& aTabId,
+                                         const TabId& aSameTabGroupAs,
                                          const IPCTabContext& aContext,
                                          const uint32_t& aChromeFlags,
                                          const ContentParentId& aCpID,
@@ -113,6 +117,26 @@ bool
 nsIContentChild::DeallocPMemoryStreamChild(PMemoryStreamChild* aActor)
 {
   delete aActor;
+  return true;
+}
+
+PIPCBlobInputStreamChild*
+nsIContentChild::AllocPIPCBlobInputStreamChild(const nsID& aID,
+                                               const uint64_t& aSize)
+{
+  // IPCBlobInputStreamChild is refcounted. Here it's created and in
+  // DeallocPIPCBlobInputStreamChild is released.
+
+  RefPtr<IPCBlobInputStreamChild> actor =
+    new IPCBlobInputStreamChild(aID, aSize);
+  return actor.forget().take();
+}
+
+bool
+nsIContentChild::DeallocPIPCBlobInputStreamChild(PIPCBlobInputStreamChild* aActor)
+{
+  RefPtr<IPCBlobInputStreamChild> actor =
+    dont_AddRef(static_cast<IPCBlobInputStreamChild*>(aActor));
   return true;
 }
 

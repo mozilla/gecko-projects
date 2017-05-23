@@ -11,11 +11,17 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/UpdateUtils.jsm");
 Cu.import("resource://gre/modules/AppConstants.jsm");
 
- // The amount of people to be part of e10s
+// The amount of people to be part of e10s
 const TEST_THRESHOLD = {
-  "beta": 0.5,  // 50%
+  "beta": 0.9,  // 90%
   "release": 1.0,  // 100%
   "esr": 1.0,  // 100%
+};
+
+// If a user qualifies for the e10s-multi experiement, this is how many
+// content processes to use.
+const MULTI_BUCKETS = {
+  "beta": { 1: .5, 4: 1, },
 };
 
 const ADDON_ROLLOUT_POLICY = {
@@ -51,6 +57,10 @@ const PREF_TOGGLE_E10S         = "browser.tabs.remote.autostart.2";
 const PREF_E10S_ADDON_POLICY   = "extensions.e10s.rollout.policy";
 const PREF_E10S_ADDON_BLOCKLIST = "extensions.e10s.rollout.blocklist";
 const PREF_E10S_HAS_NONEXEMPT_ADDON = "extensions.e10s.rollout.hasAddon";
+const PREF_E10S_MULTI_OPTOUT   = "dom.ipc.multiOptOut";
+const PREF_E10S_PROCESSCOUNT   = "dom.ipc.processCount";
+const PREF_E10S_MULTI_ADDON_BLOCKS = "extensions.e10sMultiBlocksEnabling";
+const PREF_E10S_MULTI_BLOCKED_BY_ADDONS = "extensions.e10sMultiBlockedByAddons";
 
 function startup() {
   // In theory we only need to run this once (on install()), but
@@ -87,15 +97,10 @@ function defineCohort() {
   if (updateChannel in ADDON_ROLLOUT_POLICY) {
     addonPolicy = ADDON_ROLLOUT_POLICY[updateChannel];
     Preferences.set(PREF_E10S_ADDON_POLICY, addonPolicy);
+
     // This is also the proper place to set the blocklist pref
     // in case it is necessary.
-
-    Preferences.set(PREF_E10S_ADDON_BLOCKLIST,
-                    // bug 1185672 - Tab Mix Plus
-                    "{dc572301-7619-498c-a57d-39143191b318};"
-                    // bug 1344345 - Mega
-                    + "firefox@mega.co.nz"
-                    );
+    Preferences.set(PREF_E10S_ADDON_BLOCKLIST, "");
   } else {
     Preferences.reset(PREF_E10S_ADDON_POLICY);
   }
@@ -104,7 +109,7 @@ function defineCohort() {
   let userOptedIn = optedIn();
   let disqualified = (Services.appinfo.multiprocessBlockPolicy != 0);
   let testThreshold = TEST_THRESHOLD[updateChannel];
-  let testGroup = (getUserSample() < testThreshold);
+  let testGroup = (getUserSample(false) < testThreshold);
   let hasNonExemptAddon = Preferences.get(PREF_E10S_HAS_NONEXEMPT_ADDON, false);
   let temporaryDisqualification = getTemporaryDisqualification();
   let temporaryQualification = getTemporaryQualification();
@@ -116,10 +121,14 @@ function defineCohort() {
     cohortPrefix = `addons-set${addonPolicy}-`;
   }
 
-  if (userOptedOut) {
+  let eligibleForMulti = false;
+  if (userOptedOut.e10s || userOptedOut.multi) {
+    // If we detected that the user opted out either for multi or e10s, then
+    // the proper prefs must already be set.
     setCohort("optedOut");
-  } else if (userOptedIn) {
+  } else if (userOptedIn.e10s) {
     setCohort("optedIn");
+    eligibleForMulti = true;
   } else if (temporaryDisqualification != "") {
     // Users who are disqualified by the backend (from multiprocessBlockPolicy)
     // can be put into either the test or control groups, because e10s will
@@ -131,6 +140,7 @@ function defineCohort() {
     // here will be accumulated as "2 - Disabled", which is fine too.
     setCohort(`temp-disqualified-${temporaryDisqualification}`);
     Preferences.reset(PREF_TOGGLE_E10S);
+    Preferences.reset(PREF_E10S_PROCESSCOUNT + ".web");
   } else if (!disqualified && testThreshold < 1.0 &&
              temporaryQualification != "") {
     // Users who are qualified for e10s and on channels where some population
@@ -138,12 +148,52 @@ function defineCohort() {
     // qualification which overrides the user sample value when non-empty.
     setCohort(`temp-qualified-${temporaryQualification}`);
     Preferences.set(PREF_TOGGLE_E10S, true);
+    eligibleForMulti = true;
   } else if (testGroup) {
     setCohort(`${cohortPrefix}test`);
     Preferences.set(PREF_TOGGLE_E10S, true);
+    eligibleForMulti = true;
   } else {
     setCohort(`${cohortPrefix}control`);
     Preferences.reset(PREF_TOGGLE_E10S);
+    Preferences.reset(PREF_E10S_PROCESSCOUNT + ".web");
+  }
+
+  // Now determine if this user should be in the e10s-multi experiment.
+  // - We only run the experiment on channels defined in MULTI_BUCKETS.
+  // - We decided above whether this user qualifies for the experiment.
+  // - If the user already opted into multi, then their prefs are already set
+  //   correctly, we're done.
+  // - If the user has addons that disqualify them for multi, leave them with
+  //   the default number of content processes (1 on beta) but still in the
+  //   test cohort.
+  if (!(updateChannel in MULTI_BUCKETS) ||
+      !eligibleForMulti ||
+      userOptedIn.multi ||
+      disqualified) {
+    Preferences.reset(PREF_E10S_PROCESSCOUNT + ".web");
+    return;
+  }
+
+  // If we got here with a cohortPrefix, it must be "addons-set50allmpc-",
+  // which means that there's at least one add-on installed. If
+  // getAddonsDisqualifyForMulti returns false, that means that all installed
+  // addons are webextension based, so note that in the cohort name.
+  if (cohortPrefix && !getAddonsDisqualifyForMulti()) {
+    cohortPrefix = "webextensions-";
+  }
+
+  // The user is in the multi experiment!
+  // Decide how many content processes to use for this user.
+  let buckets = MULTI_BUCKETS[updateChannel];
+
+  let multiUserSample = getUserSample(true);
+  for (let sampleName of Object.getOwnPropertyNames(buckets)) {
+    if (multiUserSample < buckets[sampleName]) {
+      setCohort(`${cohortPrefix}multiBucket${sampleName}`);
+      Preferences.set(PREF_E10S_PROCESSCOUNT + ".web", sampleName);
+      break;
+    }
   }
 }
 
@@ -153,8 +203,9 @@ function shutdown(data, reason) {
 function uninstall() {
 }
 
-function getUserSample() {
-  let prefValue = Preferences.get(PREF_COHORT_SAMPLE, undefined);
+function getUserSample(multi) {
+  let pref = multi ? (PREF_COHORT_SAMPLE + ".multi") : PREF_COHORT_SAMPLE;
+  let prefValue = Preferences.get(pref, undefined);
   let value = 0.0;
 
   if (typeof(prefValue) == "string") {
@@ -169,7 +220,7 @@ function getUserSample() {
     value = Math.random();
   }
 
-  Preferences.set(PREF_COHORT_SAMPLE, value.toString().substr(0, 8));
+  Preferences.set(pref, value.toString().substr(0, 8));
   return value;
 }
 
@@ -183,17 +234,22 @@ function setCohort(cohortName) {
 }
 
 function optedIn() {
-  return Preferences.get(PREF_E10S_OPTED_IN, false) ||
-         Preferences.get(PREF_E10S_FORCE_ENABLED, false);
+  let e10s = Preferences.get(PREF_E10S_OPTED_IN, false) ||
+             Preferences.get(PREF_E10S_FORCE_ENABLED, false);
+  let multi = Preferences.isSet(PREF_E10S_PROCESSCOUNT);
+  return { e10s, multi };
 }
 
 function optedOut() {
   // Users can also opt-out by toggling back the pref to false.
   // If they reset the pref instead they might be re-enabled if
   // they are still part of the threshold.
-  return Preferences.get(PREF_E10S_FORCE_DISABLED, false) ||
-         (Preferences.isSet(PREF_TOGGLE_E10S) &&
-          Preferences.get(PREF_TOGGLE_E10S) == false);
+  let e10s = Preferences.get(PREF_E10S_FORCE_DISABLED, false) ||
+               (Preferences.isSet(PREF_TOGGLE_E10S) &&
+                Preferences.get(PREF_TOGGLE_E10S) == false);
+  let multi = Preferences.get(PREF_E10S_MULTI_OPTOUT, 0) >=
+              Services.appinfo.E10S_MULTI_EXPERIMENT;
+  return { e10s, multi };
 }
 
 /* If this function returns a non-empty string, it
@@ -224,4 +280,9 @@ function getTemporaryQualification() {
   }
 
   return "";
+}
+
+function getAddonsDisqualifyForMulti() {
+  return Preferences.get("extensions.e10sMultiBlocksEnabling", false) &&
+         Preferences.get("extensions.e10sMultiBlockedByAddons", false);
 }

@@ -49,6 +49,7 @@ public:
 
   // nsWrapperCache
   using nsWrapperCache::GetWrapperPreserveColor;
+  using nsWrapperCache::PreserveWrapper;
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 protected:
   virtual ~TableRowsCollection();
@@ -56,6 +57,10 @@ protected:
   virtual JSObject* GetWrapperPreserveColorInternal() override
   {
     return nsWrapperCache::GetWrapperPreserveColor();
+  }
+  virtual void PreserveWrapperInternal(nsISupports* aScriptObjectHolder) override
+  {
+    nsWrapperCache::PreserveWrapper(aScriptObjectHolder);
   }
 
   // Those rows that are not in table sections
@@ -884,7 +889,9 @@ HTMLTableElement::BuildInheritedAttributes()
 
       if (modifiableMapped) {
         nsAttrValue val(*value);
-        modifiableMapped->SetAndTakeAttr(nsGkAtoms::cellpadding, val);
+        bool oldValueSet;
+        modifiableMapped->SetAndSwapAttr(nsGkAtoms::cellpadding, val,
+                                         &oldValueSet);
       }
       newAttrs = sheet->UniqueMappedAttributes(modifiableMapped);
       NS_ASSERTION(newAttrs, "out of memory, but handling gracefully");
@@ -945,13 +952,13 @@ HTMLTableElement::BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
 nsresult
 HTMLTableElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                                const nsAttrValue* aValue,
-                               bool aNotify)
+                               const nsAttrValue* aOldValue, bool aNotify)
 {
   if (aName == nsGkAtoms::cellpadding && aNameSpaceID == kNameSpaceID_None) {
     BuildInheritedAttributes();
   }
   return nsGenericHTMLElement::AfterSetAttr(aNameSpaceID, aName, aValue,
-                                            aNotify);
+                                            aOldValue, aNotify);
 }
 
 } // namespace dom

@@ -424,14 +424,19 @@ SdpHelper::SetDefaultAddresses(const std::string& defaultCandidateAddr,
                                SdpMediaSection* msection)
 {
   msection->GetConnection().SetAddress(defaultCandidateAddr);
-  msection->SetPort(defaultCandidatePort);
+  SdpAttributeList& attrList = msection->GetAttributeList();
+
+  // only set the port if there is no bundle-only attribute
+  if (!attrList.HasAttribute(SdpAttribute::kBundleOnlyAttribute)) {
+    msection->SetPort(defaultCandidatePort);
+  }
 
   if (!defaultRtcpCandidateAddr.empty()) {
     sdp::AddrType ipVersion = sdp::kIPv4;
     if (defaultRtcpCandidateAddr.find(':') != std::string::npos) {
       ipVersion = sdp::kIPv6;
     }
-    msection->GetAttributeList().SetAttribute(new SdpRtcpAttribute(
+    attrList.SetAttribute(new SdpRtcpAttribute(
           defaultRtcpCandidatePort,
           sdp::kInternet,
           ipVersion,
@@ -755,7 +760,8 @@ SdpHelper::AddCommonExtmaps(
 
       auto negotiatedExt = theirExt;
 
-      negotiatedExt.direction = ~negotiatedExt.direction & ourExt.direction;
+      negotiatedExt.direction =
+        reverse(negotiatedExt.direction) & ourExt.direction;
       if (negotiatedExt.direction ==
             SdpDirectionAttribute::Direction::kInactive) {
         continue;

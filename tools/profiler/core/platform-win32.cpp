@@ -38,15 +38,6 @@ Thread::GetCurrentId()
   return GetCurrentThreadId();
 }
 
-static void
-SleepMicro(int aMicroseconds)
-{
-  aMicroseconds = std::max(0, aMicroseconds);
-  int aMilliseconds = std::max(1, aMicroseconds / 1000);
-
-  ::Sleep(aMilliseconds);
-}
-
 class PlatformData
 {
 public:
@@ -56,7 +47,7 @@ public:
   // not work in this case. We're using OpenThread because DuplicateHandle
   // for some reason doesn't work in Chrome's sandbox.
   explicit PlatformData(int aThreadId)
-    : profiled_thread_(OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME |
+    : mProfiledThread(OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME |
                                   THREAD_QUERY_INFORMATION,
                                   false,
                                   aThreadId))
@@ -66,23 +57,23 @@ public:
 
   ~PlatformData()
   {
-    if (profiled_thread_ != nullptr) {
-      CloseHandle(profiled_thread_);
-      profiled_thread_ = nullptr;
+    if (mProfiledThread != nullptr) {
+      CloseHandle(mProfiledThread);
+      mProfiledThread = nullptr;
     }
     MOZ_COUNT_DTOR(PlatformData);
   }
 
-  HANDLE profiled_thread() { return profiled_thread_; }
+  HANDLE ProfiledThread() { return mProfiledThread; }
 
 private:
-  HANDLE profiled_thread_;
+  HANDLE mProfiledThread;
 };
 
 uintptr_t
 GetThreadHandle(PlatformData* aData)
 {
-  return (uintptr_t) aData->profiled_thread();
+  return (uintptr_t) aData->ProfiledThread();
 }
 
 static const HANDLE kNoThread = INVALID_HANDLE_VALUE;
@@ -98,7 +89,7 @@ ThreadEntry(void* aArg)
   return 0;
 }
 
-SamplerThread::SamplerThread(PS::LockRef aLock, uint32_t aActivityGeneration,
+SamplerThread::SamplerThread(PSLockRef aLock, uint32_t aActivityGeneration,
                              double aIntervalMilliseconds)
     : mActivityGeneration(aActivityGeneration)
     , mIntervalMicroseconds(
@@ -139,7 +130,7 @@ SamplerThread::~SamplerThread()
 }
 
 void
-SamplerThread::Stop(PS::LockRef aLock)
+SamplerThread::Stop(PSLockRef aLock)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
@@ -157,11 +148,34 @@ SamplerThread::Stop(PS::LockRef aLock)
 }
 
 void
-SamplerThread::SuspendAndSampleAndResumeThread(PS::LockRef aLock,
-                                               TickSample* aSample)
+SamplerThread::SleepMicro(uint32_t aMicroseconds)
 {
-  uintptr_t thread = GetThreadHandle(aSample->mThreadInfo->GetPlatformData());
-  HANDLE profiled_thread = reinterpret_cast<HANDLE>(thread);
+  // For now, keep the old behaviour of minimum Sleep(1), even for
+  // smaller-than-usual sleeps after an overshoot, unless the user has
+  // explicitly opted into a sub-millisecond profiler interval.
+  if (mIntervalMicroseconds >= 1000) {
+    ::Sleep(std::max(1u, aMicroseconds / 1000));
+  } else {
+    TimeStamp start = TimeStamp::Now();
+    TimeStamp end = start + TimeDuration::FromMicroseconds(aMicroseconds);
+
+    // First, sleep for as many whole milliseconds as possible.
+    if (aMicroseconds >= 1000) {
+      ::Sleep(aMicroseconds / 1000);
+    }
+
+    // Then, spin until enough time has passed.
+    while (TimeStamp::Now() < end) {
+      _mm_pause();
+    }
+  }
+}
+
+void
+SamplerThread::SuspendAndSampleAndResumeThread(PSLockRef aLock,
+                                               TickSample& aSample)
+{
+  HANDLE profiled_thread = aSample.mPlatformData->ProfiledThread();
   if (profiled_thread == nullptr)
     return;
 
@@ -203,18 +217,16 @@ SamplerThread::SuspendAndSampleAndResumeThread(PS::LockRef aLock,
   // platform-linux-android.cpp for details.
 
 #if defined(GP_ARCH_amd64)
-  aSample->mPC = reinterpret_cast<Address>(context.Rip);
-  aSample->mSP = reinterpret_cast<Address>(context.Rsp);
-  aSample->mFP = reinterpret_cast<Address>(context.Rbp);
+  aSample.mPC = reinterpret_cast<Address>(context.Rip);
+  aSample.mSP = reinterpret_cast<Address>(context.Rsp);
+  aSample.mFP = reinterpret_cast<Address>(context.Rbp);
 #else
-  aSample->mPC = reinterpret_cast<Address>(context.Eip);
-  aSample->mSP = reinterpret_cast<Address>(context.Esp);
-  aSample->mFP = reinterpret_cast<Address>(context.Ebp);
+  aSample.mPC = reinterpret_cast<Address>(context.Eip);
+  aSample.mSP = reinterpret_cast<Address>(context.Esp);
+  aSample.mFP = reinterpret_cast<Address>(context.Ebp);
 #endif
 
-  aSample->mContext = &context;
-
-  Tick(aLock, gPS->Buffer(aLock), aSample);
+  Tick(aLock, ActivePS::Buffer(aLock), aSample);
 
   //----------------------------------------------------------------//
   // Resume the target thread.
@@ -230,25 +242,26 @@ SamplerThread::SuspendAndSampleAndResumeThread(PS::LockRef aLock,
 ////////////////////////////////////////////////////////////////////////
 
 static void
-PlatformInit(PS::LockRef aLock)
+PlatformInit(PSLockRef aLock)
 {
 }
 
 void
-TickSample::PopulateContext(CONTEXT* aContext)
+TickSample::PopulateContext()
 {
-  MOZ_ASSERT(aContext);
-  mContext = aContext;
-  RtlCaptureContext(aContext);
+  MOZ_ASSERT(mIsSynchronous);
+
+  CONTEXT context;
+  RtlCaptureContext(&context);
 
 #if defined(GP_ARCH_amd64)
-  mPC = reinterpret_cast<Address>(aContext->Rip);
-  mSP = reinterpret_cast<Address>(aContext->Rsp);
-  mFP = reinterpret_cast<Address>(aContext->Rbp);
+  mPC = reinterpret_cast<Address>(context.Rip);
+  mSP = reinterpret_cast<Address>(context.Rsp);
+  mFP = reinterpret_cast<Address>(context.Rbp);
 #elif defined(GP_ARCH_x86)
-  mPC = reinterpret_cast<Address>(aContext->Eip);
-  mSP = reinterpret_cast<Address>(aContext->Esp);
-  mFP = reinterpret_cast<Address>(aContext->Ebp);
+  mPC = reinterpret_cast<Address>(context.Eip);
+  mSP = reinterpret_cast<Address>(context.Esp);
+  mFP = reinterpret_cast<Address>(context.Ebp);
 #endif
 }
 

@@ -16,7 +16,7 @@ struct nsCSSSelector;
 
 // Defines for various style related constants
 
-enum nsChangeHint {
+enum nsChangeHint : uint32_t {
   nsChangeHint_Empty = 0,
 
   // change was visual only (e.g., COLOR=)
@@ -222,6 +222,16 @@ enum nsChangeHint {
    */
   nsChangeHint_AddOrRemoveTransform = 1 << 27,
 
+  /**
+   * Indicates that the overflow-x and/or overflow-y property changed.
+   *
+   * In most cases, this is equivalent to nsChangeHint_ReconstructFrame. But
+   * in some special cases where the change is really targeting the viewport's
+   * scrollframe, this is instead equivalent to nsChangeHint_AllReflowHints
+   * (because the viewport always has an associated scrollframe).
+   */
+  nsChangeHint_CSSOverflowChange = 1 << 28,
+
   // IMPORTANT NOTE: When adding a new hint, you will need to add it to
   // one of:
   //
@@ -237,7 +247,7 @@ enum nsChangeHint {
   /**
    * Dummy hint value for all hints. It exists for compile time check.
    */
-  nsChangeHint_AllHints = (1 << 28) - 1,
+  nsChangeHint_AllHints = (1 << 29) - 1,
 };
 
 // Redefine these operators to return nothing. This will catch any use
@@ -326,6 +336,7 @@ inline nsChangeHint operator^=(nsChangeHint& aLeft, nsChangeHint aRight)
 #define nsChangeHint_Hints_NeverHandledForDescendants (    \
   nsChangeHint_BorderStyleNoneChange |                     \
   nsChangeHint_ChildrenOnlyTransform |                     \
+  nsChangeHint_CSSOverflowChange |                         \
   nsChangeHint_InvalidateRenderingObservers |              \
   nsChangeHint_RecomputePosition |                         \
   nsChangeHint_UpdateBackgroundPosition |                  \
@@ -472,7 +483,7 @@ NS_RemoveSubsumedHints(nsChangeHint aOurChange, nsChangeHint aHintsHandled)
  * NOTE: When adding new restyle hints, please also add them to
  * RestyleManager::RestyleHintToString.
  */
-enum nsRestyleHint {
+enum nsRestyleHint : uint32_t {
   // Rerun selector matching on the element.  If a new style context
   // results, update the style contexts of descendants.  (Irrelevant if
   // eRestyle_Subtree is also set, since that implies a superset of the

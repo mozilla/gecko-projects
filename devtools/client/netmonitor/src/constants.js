@@ -16,11 +16,13 @@ const actionTypes = {
   OPEN_NETWORK_DETAILS: "OPEN_NETWORK_DETAILS",
   OPEN_STATISTICS: "OPEN_STATISTICS",
   REMOVE_SELECTED_CUSTOM_REQUEST: "REMOVE_SELECTED_CUSTOM_REQUEST",
+  RESET_COLUMNS: "RESET_COLUMNS",
   SELECT_REQUEST: "SELECT_REQUEST",
   SELECT_DETAILS_PANEL_TAB: "SELECT_DETAILS_PANEL_TAB",
   SEND_CUSTOM_REQUEST: "SEND_CUSTOM_REQUEST",
   SET_REQUEST_FILTER_TEXT: "SET_REQUEST_FILTER_TEXT",
   SORT_BY: "SORT_BY",
+  TOGGLE_COLUMN: "TOGGLE_COLUMN",
   TOGGLE_REQUEST_FILTER_TYPE: "TOGGLE_REQUEST_FILTER_TYPE",
   UPDATE_REQUEST: "UPDATE_REQUEST",
   WATERFALL_RESIZE: "WATERFALL_RESIZE",
@@ -45,10 +47,6 @@ const ACTIVITY_TYPE = {
 
 // The panel's window global is an EventEmitter firing the following events:
 const EVENTS = {
-  // When the monitored target begins and finishes navigating.
-  TARGET_WILL_NAVIGATE: "NetMonitor:TargetWillNavigate",
-  TARGET_DID_NAVIGATE: "NetMonitor:TargetNavigate",
-
   // When a network or timeline event is received.
   // See https://developer.mozilla.org/docs/Tools/Web_Console/remoting for
   // more information about what each packet is supposed to deliver.
@@ -91,29 +89,145 @@ const EVENTS = {
   UPDATING_RESPONSE_CONTENT: "NetMonitor:NetworkEventUpdating:ResponseContent",
   RECEIVED_RESPONSE_CONTENT: "NetMonitor:NetworkEventUpdated:ResponseContent",
 
-  // When the request post params are displayed in the UI.
-  REQUEST_POST_PARAMS_DISPLAYED: "NetMonitor:RequestPostParamsAvailable",
-
-  // When the image response thumbnail is displayed in the UI.
-  RESPONSE_IMAGE_THUMBNAIL_DISPLAYED:
-    "NetMonitor:ResponseImageThumbnailAvailable",
-
-  // Fired when charts have been displayed in the PerformanceStatisticsView.
-  PLACEHOLDER_CHARTS_DISPLAYED: "NetMonitor:PlaceholderChartsDisplayed",
-  PRIMED_CACHE_CHART_DISPLAYED: "NetMonitor:PrimedChartsDisplayed",
-  EMPTY_CACHE_CHART_DISPLAYED: "NetMonitor:EmptyChartsDisplayed",
-
-  // Fired once the NetMonitorController establishes a connection to the debug
-  // target.
+  // Fired once the connection is established
   CONNECTED: "connected",
+};
+
+const HEADERS = [
+  {
+    name: "status",
+    label: "status3",
+    canFilter: true,
+    filterKey: "status-code"
+  },
+  {
+    name: "method",
+    canFilter: true,
+  },
+  {
+    name: "file",
+    canFilter: false,
+  },
+  {
+    name: "protocol",
+    canFilter: true,
+  },
+  {
+    name: "scheme",
+    canFilter: true,
+  },
+  {
+    name: "domain",
+    canFilter: true,
+  },
+  {
+    name: "remoteip",
+    canFilter: true,
+    filterKey: "remote-ip",
+  },
+  {
+    name: "cause",
+    canFilter: true,
+  },
+  {
+    name: "type",
+    canFilter: false,
+  },
+  {
+    name: "cookies",
+    canFilter: false,
+  },
+  {
+    name: "setCookies",
+    boxName: "set-cookies",
+    canFilter: false,
+  },
+  {
+    name: "transferred",
+    canFilter: true,
+  },
+  {
+    name: "contentSize",
+    boxName: "size",
+    filterKey: "size",
+    canFilter: true,
+  },
+  {
+    name: "startTime",
+    boxName: "start-time",
+    canFilter: false,
+    subMenu: "timings",
+  },
+  {
+    name: "endTime",
+    boxName: "end-time",
+    canFilter: false,
+    subMenu: "timings",
+  },
+  {
+    name: "responseTime",
+    boxName: "response-time",
+    canFilter: false,
+    subMenu: "timings",
+  },
+  {
+    name: "duration",
+    canFilter: false,
+    subMenu: "timings",
+  },
+  {
+    name: "latency",
+    canFilter: false,
+    subMenu: "timings",
+  },
+  {
+    name: "waterfall",
+    canFilter: false,
+  }
+];
+
+const HEADER_FILTERS = HEADERS
+  .filter(h => h.canFilter)
+  .map(h => h.filterKey || h.name);
+
+const FILTER_FLAGS = [
+  ...HEADER_FILTERS,
+  "set-cookie-domain",
+  "set-cookie-name",
+  "set-cookie-value",
+  "mime-type",
+  "larger-than",
+  "transferred-larger-than",
+  "is",
+  "has-response-header",
+  "regexp",
+];
+
+const REQUESTS_WATERFALL = {
+  BACKGROUND_TICKS_MULTIPLE: 5, // ms
+  BACKGROUND_TICKS_SCALES: 3,
+  BACKGROUND_TICKS_SPACING_MIN: 10, // px
+  BACKGROUND_TICKS_COLOR_RGB: [128, 136, 144],
+  // 8-bit value of the alpha component of the tick color
+  BACKGROUND_TICKS_OPACITY_MIN: 32,
+  BACKGROUND_TICKS_OPACITY_ADD: 32,
+  // RGBA colors for the timing markers
+  DOMCONTENTLOADED_TICKS_COLOR_RGBA: [0, 0, 255, 128],
+  HEADER_TICKS_MULTIPLE: 5, // ms
+  HEADER_TICKS_SPACING_MIN: 60, // px
+  LOAD_TICKS_COLOR_RGBA: [255, 0, 0, 128],
+  // Reserve extra space for rendering waterfall time label
+  LABEL_WIDTH: 50, // px
 };
 
 const general = {
   ACTIVITY_TYPE,
   EVENTS,
   FILTER_SEARCH_DELAY: 200,
-  // 100 KB in bytes
-  SOURCE_SYNTAX_HIGHLIGHT_MAX_FILE_SIZE: 102400,
+  HEADERS,
+  FILTER_FLAGS,
+  SOURCE_EDITOR_SYNTAX_HIGHLIGHT_MAX_SIZE: 51200, // 50 KB in bytes
+  REQUESTS_WATERFALL,
 };
 
 // flatten constants

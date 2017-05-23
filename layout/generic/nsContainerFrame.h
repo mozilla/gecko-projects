@@ -532,7 +532,10 @@ public:
 #endif
 
 protected:
-  explicit nsContainerFrame(nsStyleContext* aContext) : nsSplittableFrame(aContext) {}
+  nsContainerFrame(nsStyleContext* aContext, mozilla::LayoutFrameType aType)
+    : nsSplittableFrame(aContext, aType)
+  {}
+
   ~nsContainerFrame();
 
   /**

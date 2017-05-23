@@ -11,6 +11,17 @@
 
 namespace js {
 
+class ProxyObject;
+
+enum DeadProxyIsCallableIsConstructorOption
+{
+    DeadProxyNotCallableNotConstructor,
+    DeadProxyNotCallableIsConstructor,
+    DeadProxyIsCallableNotConstructor,
+    DeadProxyIsCallableIsConstructor
+};
+
+template <DeadProxyIsCallableIsConstructorOption CC>
 class DeadObjectProxy : public BaseProxyHandler
 {
   public:
@@ -52,12 +63,29 @@ class DeadObjectProxy : public BaseProxyHandler
     virtual bool regexp_toShared(JSContext* cx, HandleObject proxy,
                                  MutableHandle<RegExpShared*> shared) const override;
 
+    virtual bool isCallable(JSObject* obj) const override {
+        return CC == DeadProxyIsCallableIsConstructor || CC == DeadProxyIsCallableNotConstructor;
+    }
+    virtual bool isConstructor(JSObject* obj) const override {
+        return CC == DeadProxyIsCallableIsConstructor || CC == DeadProxyNotCallableIsConstructor;
+    }
+
+    static const DeadObjectProxy* singleton() {
+        static DeadObjectProxy singleton;
+        return &singleton;
+    }
+
     static const char family;
-    static const DeadObjectProxy singleton;
 };
 
 bool
 IsDeadProxyObject(JSObject* obj);
+
+const BaseProxyHandler*
+SelectDeadProxyHandler(ProxyObject* obj);
+
+JSObject*
+NewDeadProxyObject(JSContext* cx, JSObject* origObj = nullptr);
 
 } /* namespace js */
 

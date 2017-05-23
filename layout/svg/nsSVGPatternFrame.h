@@ -27,7 +27,7 @@ class nsSVGAnimatedTransformList;
  * Patterns can refer to other patterns. We create an nsSVGPaintingProperty
  * with property type nsGkAtoms::href to track the referenced pattern.
  */
-class nsSVGPatternFrame : public nsSVGPaintServerFrame
+class nsSVGPatternFrame final : public nsSVGPaintServerFrame
 {
   typedef mozilla::gfx::SourceSurface SourceSurface;
 
@@ -40,14 +40,14 @@ public:
   explicit nsSVGPatternFrame(nsStyleContext* aContext);
 
   // nsSVGPaintServerFrame methods:
-  virtual mozilla::Pair<DrawResult, RefPtr<gfxPattern>>
+  virtual already_AddRefed<gfxPattern>
     GetPaintServerPattern(nsIFrame *aSource,
                           const DrawTarget* aDrawTarget,
                           const gfxMatrix& aContextMatrix,
                           nsStyleSVGPaint nsStyleSVG::*aFillOrStroke,
                           float aOpacity,
-                          const gfxRect *aOverrideBounds,
-                          uint32_t aFlags) override;
+                          imgDrawingParams& aImgParams,
+                          const gfxRect* aOverrideBounds) override;
 
 public:
   typedef mozilla::SVGAnimatedPreserveAspectRatio SVGAnimatedPreserveAspectRatio;
@@ -65,13 +65,6 @@ public:
                     nsContainerFrame* aParent,
                     nsIFrame*         aPrevInFlow) override;
 #endif
-
-  /**
-   * Get the "type" of the frame
-   *
-   * @see nsGkAtoms::svgPatternFrame
-   */
-  virtual nsIAtom* GetType() const override;
 
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override
@@ -107,7 +100,7 @@ protected:
     return GetLengthValue(aIndex, mContent);
   }
 
-  mozilla::Pair<DrawResult, RefPtr<SourceSurface>>
+  already_AddRefed<SourceSurface>
   PaintPattern(const DrawTarget* aDrawTarget,
                Matrix *patternMatrix,
                const Matrix &aContextMatrix,
@@ -115,7 +108,7 @@ protected:
                nsStyleSVGPaint nsStyleSVG::*aFillOrStroke,
                float aGraphicOpacity,
                const gfxRect *aOverrideBounds,
-               uint32_t aFlags);
+               imgDrawingParams& aImgParams);
 
   /**
    * A <pattern> element may reference another <pattern> element using
@@ -142,8 +135,8 @@ private:
   // this is a *temporary* reference to the frame of the element currently
   // referencing our pattern.  This must be temporary because different
   // referencing frames will all reference this one frame
-  mozilla::SVGGeometryFrame        *mSource;
-  nsAutoPtr<gfxMatrix>              mCTM;
+  mozilla::SVGGeometryFrame* mSource;
+  nsAutoPtr<gfxMatrix> mCTM;
 
 protected:
   // This flag is used to detect loops in xlink:href processing

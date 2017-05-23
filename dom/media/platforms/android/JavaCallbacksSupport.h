@@ -5,7 +5,7 @@
 #ifndef JavaCallbacksSupport_h_
 #define JavaCallbacksSupport_h_
 
-#include "FennecJNINatives.h"
+#include "GeneratedJNINatives.h"
 #include "MediaResult.h"
 #include "MediaCodec.h"
 
@@ -23,12 +23,12 @@ public:
 
   virtual ~JavaCallbacksSupport() { }
 
-  virtual void HandleInputExhausted() = 0;
+  virtual void HandleInput(int64_t aTimestamp, bool aProcessed) = 0;
 
-  void OnInputExhausted()
+  void OnInputStatus(jlong aTimestamp, bool aProcessed)
   {
     if (!mCanceled) {
-      HandleInputExhausted();
+      HandleInput(aTimestamp, aProcessed);
     }
   }
 

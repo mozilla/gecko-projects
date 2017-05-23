@@ -115,7 +115,7 @@ public:
                                      nsProxyInfo *aProxyInfo,
                                      uint32_t aProxyResolveFlags,
                                      nsIURI *aProxyURI,
-                                     const nsID& aChannelId);
+                                     uint64_t aChannelId);
 
   // nsIRequest
   NS_IMETHOD GetName(nsACString& aName) override;
@@ -135,6 +135,7 @@ public:
   NS_IMETHOD SetOwner(nsISupports *aOwner) override;
   NS_IMETHOD GetLoadInfo(nsILoadInfo **aLoadInfo) override;
   NS_IMETHOD SetLoadInfo(nsILoadInfo *aLoadInfo) override;
+  NS_IMETHOD GetIsDocument(bool *aIsDocument) override;
   NS_IMETHOD GetNotificationCallbacks(nsIInterfaceRequestor **aCallbacks) override;
   NS_IMETHOD SetNotificationCallbacks(nsIInterfaceRequestor *aCallbacks) override;
   NS_IMETHOD GetContentType(nsACString& aContentType) override;
@@ -194,16 +195,16 @@ public:
   NS_IMETHOD GetResponseStatusText(nsACString& aValue) override;
   NS_IMETHOD GetRequestSucceeded(bool *aValue) override;
   NS_IMETHOD RedirectTo(nsIURI *newURI) override;
-  NS_IMETHOD GetRequestContextID(nsID *aRCID) override;
+  NS_IMETHOD GetRequestContextID(uint64_t *aRCID) override;
   NS_IMETHOD GetTransferSize(uint64_t *aTransferSize) override;
   NS_IMETHOD GetDecodedBodySize(uint64_t *aDecodedBodySize) override;
   NS_IMETHOD GetEncodedBodySize(uint64_t *aEncodedBodySize) override;
-  NS_IMETHOD SetRequestContextID(const nsID aRCID) override;
+  NS_IMETHOD SetRequestContextID(uint64_t aRCID) override;
   NS_IMETHOD GetIsMainDocumentChannel(bool* aValue) override;
   NS_IMETHOD SetIsMainDocumentChannel(bool aValue) override;
   NS_IMETHOD GetProtocolVersion(nsACString & aProtocolVersion) override;
-  NS_IMETHOD GetChannelId(nsACString& aChannelId) override;
-  NS_IMETHOD SetChannelId(const nsACString& aChannelId) override;
+  NS_IMETHOD GetChannelId(uint64_t *aChannelId) override;
+  NS_IMETHOD SetChannelId(uint64_t aChannelId) override;
   NS_IMETHOD GetTopLevelContentWindowId(uint64_t *aContentWindowId) override;
   NS_IMETHOD SetTopLevelContentWindowId(uint64_t aContentWindowId) override;
   NS_IMETHOD GetTopLevelOuterContentWindowId(uint64_t *aWindowId) override;
@@ -353,9 +354,10 @@ public: /* Necko internal use only... */
     DoApplyContentConversions(nsIStreamListener *aNextListener,
                               nsIStreamListener **aNewNextListener);
 
-    // Callback on main thread when NS_AsyncCopy() is finished populating
-    // the new mUploadStream.
-    void EnsureUploadStreamIsCloneableComplete(nsresult aStatus);
+    // Callback on STS thread called by CopyComplete when NS_AsyncCopy()
+    // is finished. This function works as a proxy function to dispatch
+    // |EnsureUploadStreamIsCloneableComplete| to main thread.
+    virtual void OnCopyComplete(nsresult aStatus);
 
     void SetIsTrackingResource()
     {
@@ -412,6 +414,10 @@ protected:
   // Returns true if this channel should intercept the network request and prepare
   // for a possible synthesized response instead.
   bool ShouldIntercept(nsIURI* aURI = nullptr);
+
+  // Callback on main thread when NS_AsyncCopy() is finished populating
+  // the new mUploadStream.
+  void EnsureUploadStreamIsCloneableComplete(nsresult aStatus);
 
 #ifdef DEBUG
   // Check if mPrivateBrowsingId matches between LoadInfo and LoadContext.
@@ -560,6 +566,12 @@ protected:
   TimeStamp                         mAsyncOpenTime;
   TimeStamp                         mCacheReadStart;
   TimeStamp                         mCacheReadEnd;
+  TimeStamp                         mLaunchServiceWorkerStart;
+  TimeStamp                         mLaunchServiceWorkerEnd;
+  TimeStamp                         mDispatchFetchEventStart;
+  TimeStamp                         mDispatchFetchEventEnd;
+  TimeStamp                         mHandleFetchEventStart;
+  TimeStamp                         mHandleFetchEventEnd;
   // copied from the transaction before we null out mTransaction
   // so that the timing can still be queried from OnStopRequest
   TimingStruct                      mTransactionTimings;
@@ -587,7 +599,7 @@ protected:
   // The network interface id that's associated with this channel.
   nsCString mNetworkInterfaceId;
 
-  nsID mRequestContextID;
+  uint64_t mRequestContextID;
   bool EnsureRequestContextID();
 
   // ID of the top-level document's inner window this channel is being
@@ -611,7 +623,7 @@ protected:
   bool mForceMainDocumentChannel;
   bool mIsTrackingResource;
 
-  nsID mChannelId;
+  uint64_t mChannelId;
 
   nsString mIntegrityMetadata;
 
@@ -646,8 +658,8 @@ public:
   // AsyncCall calls a member function asynchronously (via an event).
   // retval isn't refcounted and is set only when event was successfully
   // posted, the event is returned for the purpose of cancelling when needed
-  MOZ_MUST_USE nsresult AsyncCall(void (T::*funcPtr)(),
-                                  nsRunnableMethod<T> **retval = nullptr);
+  MOZ_MUST_USE virtual nsresult AsyncCall(void (T::*funcPtr)(),
+                                          nsRunnableMethod<T> **retval = nullptr);
 private:
   T *mThis;
 

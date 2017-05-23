@@ -415,9 +415,16 @@ RasterImage::WillDrawOpaqueNow()
     return false;
   }
 
-  if (mAnimationState && !gfxPrefs::ImageMemAnimatedDiscardable()) {
-    // We never discard frames of animated images.
-    return true;
+  if (mAnimationState) {
+    if (!gfxPrefs::ImageMemAnimatedDiscardable()) {
+      // We never discard frames of animated images.
+      return true;
+    } else {
+      if (mAnimationState->GetCompositedFrameInvalid()) {
+        // We're not going to draw anything at all.
+        return false;
+      }
+    }
   }
 
   // If we are not locked our decoded data could get discard at any time (ie
@@ -464,7 +471,9 @@ RasterImage::OnSurfaceDiscardedInternal(bool aAnimatedFramesDiscarded)
 
   if (aAnimatedFramesDiscarded && mAnimationState) {
     MOZ_ASSERT(gfxPrefs::ImageMemAnimatedDiscardable());
-    mAnimationState->UpdateState(mAnimationFinished, this, mSize);
+    gfx::IntRect rect =
+      mAnimationState->UpdateState(mAnimationFinished, this, mSize);
+    NotifyProgress(NoProgress, rect);
   }
 
   if (mProgressTracker) {
@@ -1077,7 +1086,9 @@ RasterImage::Discard()
   SurfaceCache::RemoveImage(ImageKey(this));
 
   if (mAnimationState) {
-    mAnimationState->UpdateState(mAnimationFinished, this, mSize);
+    gfx::IntRect rect =
+      mAnimationState->UpdateState(mAnimationFinished, this, mSize);
+    NotifyProgress(NoProgress, rect);
   }
 
   // Notify that we discarded.
@@ -1250,13 +1261,21 @@ RasterImage::Decode(const IntSize& aSize,
     task = DecoderFactory::CreateAnimationDecoder(mDecoderType, WrapNotNull(this),
                                                   mSourceBuffer, mSize,
                                                   decoderFlags, surfaceFlags);
-    mAnimationState->UpdateState(mAnimationFinished, this, mSize);
-    // If the animation is finished we can draw right away because we just draw
-    // the final frame all the time from now on. See comment in
-    // AnimationState::UpdateState.
-    if (mAnimationFinished) {
-      mAnimationState->SetCompositedFrameInvalid(false);
-    }
+    // We may not be able to send an invalidation right here because of async
+    // notifications but that shouldn't be a problem because we shouldn't be
+    // getting a non-empty rect back from UpdateState. This is because UpdateState
+    // will only return a non-empty rect if we are currently decoded, or the
+    // animation is finished. We can't be decoded because we are creating a decoder
+    // here. If the animation is finished then the composited frame would have
+    // been valid when the animation finished, and it's not possible to mark
+    // the composited frame as invalid when the animation is finished. So
+    // the composited frame can't change from invalid to valid in this UpdateState
+    // call, and hence no rect can be returned.
+#ifdef DEBUG
+    gfx::IntRect rect =
+#endif
+      mAnimationState->UpdateState(mAnimationFinished, this, mSize);
+    MOZ_ASSERT(rect.IsEmpty());
   } else {
     task = DecoderFactory::CreateDecoder(mDecoderType, WrapNotNull(this),
                                          mSourceBuffer, mSize, aSize,
@@ -1714,7 +1733,10 @@ RasterImage::NotifyDecodeComplete(const DecoderFinalStatus& aStatus,
     // We've finished a full decode of all animation frames and our AnimationState
     // has been notified about them all, so let it know not to expect anymore.
     mAnimationState->NotifyDecodeComplete();
-    mAnimationState->UpdateState(mAnimationFinished, this, mSize);
+    gfx::IntRect rect = mAnimationState->UpdateState(mAnimationFinished, this, mSize);
+    if (!rect.IsEmpty()) {
+      NotifyProgress(NoProgress, rect);
+    }
   }
 
   // Do some telemetry if this isn't a metadata decode.

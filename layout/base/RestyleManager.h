@@ -161,6 +161,9 @@ public:
   inline void PostRestyleEvent(dom::Element* aElement,
                                nsRestyleHint aRestyleHint,
                                nsChangeHint aMinChangeHint);
+  inline void PostRestyleEventForCSSRuleChanges(dom::Element* aElement,
+                                                 nsRestyleHint aRestyleHint,
+                                                 nsChangeHint aMinChangeHint);
   inline void RebuildAllStyleData(nsChangeHint aExtraHint,
                                   nsRestyleHint aRestyleHint);
   inline void PostRebuildAllStyleDataEvent(nsChangeHint aExtraHint,
@@ -179,6 +182,27 @@ public:
                                int32_t aModType,
                                const nsAttrValue* aOldValue);
   inline nsresult ReparentStyleContext(nsIFrame* aFrame);
+
+  inline void UpdateOnlyAnimationStyles();
+
+  // Get a counter that increments on every style change, that we use to
+  // track whether off-main-thread animations are up-to-date.
+  uint64_t GetAnimationGeneration() const { return mAnimationGeneration; }
+
+  static uint64_t GetAnimationGenerationForFrame(nsIFrame* aFrame);
+
+  // Update the animation generation count to mark that animation state
+  // has changed.
+  //
+  // This is normally performed automatically by ProcessPendingRestyles
+  // but it is also called when we have out-of-band changes to animations
+  // such as changes made through the Web Animations API.
+  void IncrementAnimationGeneration();
+
+  static void AddLayerChangesForAnimation(nsIFrame* aFrame,
+                                          nsIContent* aContent,
+                                          nsStyleChangeList&
+                                            aChangeListToProcess);
 
 protected:
   RestyleManager(StyleBackendType aType, nsPresContext* aPresContext);
@@ -230,6 +254,10 @@ private:
 protected:
   // True if we're in the middle of a nsRefreshDriver refresh
   bool mInStyleRefresh;
+
+  // The total number of animation flushes by this frame constructor.
+  // Used to keep the layer and animation manager in sync.
+  uint64_t mAnimationGeneration;
 
   OverflowChangedTracker mOverflowChangedTracker;
 

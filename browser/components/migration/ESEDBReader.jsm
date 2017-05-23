@@ -231,11 +231,11 @@ function unloadLibraries() {
 }
 
 function loadLibraries() {
-  Services.obs.addObserver(unloadLibraries, "xpcom-shutdown", false);
+  Services.obs.addObserver(unloadLibraries, "xpcom-shutdown");
   gLibs.ese = ctypes.open("esent.dll");
   gLibs.kernel = ctypes.open("kernel32.dll");
   KERNEL.FileTimeToSystemTime = gLibs.kernel.declare("FileTimeToSystemTime",
-    ctypes.default_abi, ctypes.int, KERNEL.FILETIME.ptr, KERNEL.SYSTEMTIME.ptr);
+    ctypes.winapi_abi, ctypes.int, KERNEL.FILETIME.ptr, KERNEL.SYSTEMTIME.ptr);
 
   declareESEFunctions();
 }

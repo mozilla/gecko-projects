@@ -6,13 +6,15 @@
 
 #![deny(missing_docs)]
 
+use context::QuirksMode;
 use cssparser::{DeclarationListParser, parse_important};
 use cssparser::{Parser, AtRuleParser, DeclarationParser, Delimiter};
 use error_reporting::ParseErrorReporter;
-use parser::{ParserContext, log_css_error};
+use parser::{PARSING_MODE_DEFAULT, ParsingMode, ParserContext, log_css_error};
 use std::fmt;
+use std::slice::Iter;
 use style_traits::ToCss;
-use stylesheets::{Origin, UrlExtraData};
+use stylesheets::{CssRuleType, Origin, UrlExtraData};
 use super::*;
 #[cfg(feature = "gecko")] use properties::animated_properties::AnimationValueMap;
 
@@ -53,6 +55,25 @@ pub struct PropertyDeclarationBlock {
     longhands: LonghandIdSet,
 }
 
+/// Iterator for PropertyDeclaration to be generated from PropertyDeclarationBlock.
+#[derive(Clone)]
+pub struct PropertyDeclarationIterator<'a> {
+    iter: Iter<'a, (PropertyDeclaration, Importance)>,
+}
+
+impl<'a> Iterator for PropertyDeclarationIterator<'a> {
+    type Item = &'a PropertyDeclaration;
+    #[inline]
+    fn next(&mut self) -> Option<&'a PropertyDeclaration> {
+        // we use this function because a closure won't be `Clone`
+        fn get_declaration(dec: &(PropertyDeclaration, Importance))
+            -> &PropertyDeclaration {
+            &dec.0
+        }
+        self.iter.next().map(get_declaration as fn(_) -> _)
+    }
+}
+
 impl fmt::Debug for PropertyDeclarationBlock {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.declarations.fmt(f)
@@ -60,6 +81,11 @@ impl fmt::Debug for PropertyDeclarationBlock {
 }
 
 impl PropertyDeclarationBlock {
+    /// Returns the number of declarations in the block.
+    pub fn len(&self) -> usize {
+        self.declarations.len()
+    }
+
     /// Create an empty block
     pub fn new() -> Self {
         PropertyDeclarationBlock {
@@ -85,6 +111,13 @@ impl PropertyDeclarationBlock {
     /// The declarations in this block
     pub fn declarations(&self) -> &[(PropertyDeclaration, Importance)] {
         &self.declarations
+    }
+
+    /// Iterate over only PropertyDeclaration.
+    pub fn declarations_iter(&self) -> PropertyDeclarationIterator {
+        PropertyDeclarationIterator {
+            iter: self.declarations.iter(),
+        }
     }
 
     /// Returns whether this block contains any declaration with `!important`.
@@ -196,14 +229,62 @@ impl PropertyDeclarationBlock {
     }
 
     /// Adds or overrides the declaration for a given property in this block,
-    /// except if an existing declaration for the same property is more important.
+    /// **except** if an existing declaration for the same property is more important.
+    pub fn extend(&mut self, drain: SourcePropertyDeclarationDrain, importance: Importance) {
+        self.extend_common(drain, importance, false);
+    }
+
+    /// Adds or overrides the declaration for a given property in this block,
+    /// **even** if an existing declaration for the same property is more important.
+    ///
+    /// Return whether anything changed.
+    pub fn extend_reset(&mut self, drain: SourcePropertyDeclarationDrain,
+                        importance: Importance) -> bool {
+        self.extend_common(drain, importance, true)
+    }
+
+    fn extend_common(&mut self, mut drain: SourcePropertyDeclarationDrain,
+                     importance: Importance, overwrite_more_important: bool) -> bool {
+        let all_shorthand_len = match drain.all_shorthand {
+            AllShorthand::NotSet => 0,
+            AllShorthand::CSSWideKeyword(_) |
+            AllShorthand::WithVariables(_) => ShorthandId::All.longhands().len()
+        };
+        let push_calls_count = drain.declarations.len() + all_shorthand_len;
+
+        // With deduplication the actual length increase may be less than this.
+        self.declarations.reserve(push_calls_count);
+
+        let mut changed = false;
+        for decl in &mut drain.declarations {
+            changed |= self.push_common(decl, importance, overwrite_more_important);
+        }
+        match drain.all_shorthand {
+            AllShorthand::NotSet => {}
+            AllShorthand::CSSWideKeyword(keyword) => {
+                for &id in ShorthandId::All.longhands() {
+                    let decl = PropertyDeclaration::CSSWideKeyword(id, keyword);
+                    changed |= self.push_common(decl, importance, overwrite_more_important);
+                }
+            }
+            AllShorthand::WithVariables(unparsed) => {
+                for &id in ShorthandId::All.longhands() {
+                    let decl = PropertyDeclaration::WithVariables(id, unparsed.clone());
+                    changed |= self.push_common(decl, importance, overwrite_more_important);
+                }
+            }
+        }
+        changed
+    }
+
+    /// Adds or overrides the declaration for a given property in this block,
+    /// **except** if an existing declaration for the same property is more important.
     pub fn push(&mut self, declaration: PropertyDeclaration, importance: Importance) {
         self.push_common(declaration, importance, false);
     }
 
-    /// Implementation detail of push and ParsedDeclaration::expand*
-    pub fn push_common(&mut self, declaration: PropertyDeclaration, importance: Importance,
-                       overwrite_more_important: bool) -> bool {
+    fn push_common(&mut self, declaration: PropertyDeclaration, importance: Importance,
+                   overwrite_more_important: bool) -> bool {
         let definitely_new = if let PropertyDeclarationId::Longhand(id) = declaration.id() {
             !self.longhands.contains(id)
         } else {
@@ -315,15 +396,10 @@ impl PropertyDeclarationBlock {
                 }
             }
             Ok(shorthand) => {
-                // we use this function because a closure won't be `Clone`
-                fn get_declaration(dec: &(PropertyDeclaration, Importance))
-                    -> &PropertyDeclaration {
-                    &dec.0
-                }
                 if !self.declarations.iter().all(|decl| decl.0.shorthands().contains(&shorthand)) {
                     return Err(fmt::Error)
                 }
-                let iter = self.declarations.iter().map(get_declaration as fn(_) -> _);
+                let iter = self.declarations_iter();
                 match shorthand.get_shorthand_appendable_value(iter) {
                     Some(AppendableValue::Css { css, .. }) => {
                         dest.write_str(css)
@@ -353,6 +429,21 @@ impl PropertyDeclarationBlock {
             important_count: 0,
             longhands: longhands,
         }
+    }
+
+    /// Returns true if the declaration block has a CSSWideKeyword for the given
+    /// property.
+    #[cfg(feature = "gecko")]
+    pub fn has_css_wide_keyword(&self, property: &PropertyId) -> bool {
+        if let PropertyId::Longhand(id) = *property {
+            if !self.longhands.contains(id) {
+                return false
+            }
+        }
+        self.declarations.iter().any(|&(ref decl, _)|
+            decl.id().is_or_is_longhand_of(property) &&
+            decl.get_css_wide_keyword().is_some()
+        )
     }
 }
 
@@ -459,12 +550,23 @@ impl ToCss for PropertyDeclarationBlock {
                     };
 
                     // Substeps 7 and 8
-                    append_serialization::<_, Cloned<slice::Iter< _>>, _>(
-                         dest,
-                         &shorthand,
-                         value,
-                         importance,
-                         &mut is_first_serialization)?;
+                    // We need to check the shorthand whether it's an alias property or not.
+                    // If it's an alias property, it should be serialized like its longhand.
+                    if shorthand.flags().contains(SHORTHAND_ALIAS_PROPERTY) {
+                        append_serialization::<_, Cloned<slice::Iter< _>>, _>(
+                             dest,
+                             &property,
+                             value,
+                             importance,
+                             &mut is_first_serialization)?;
+                    } else {
+                        append_serialization::<_, Cloned<slice::Iter< _>>, _>(
+                             dest,
+                             &shorthand,
+                             value,
+                             importance,
+                             &mut is_first_serialization)?;
+                    }
 
                     for current_longhand in &current_longhands {
                         // Substep 9
@@ -610,25 +712,38 @@ pub fn append_serialization<'a, W, I, N>(dest: &mut W,
 /// shared between Servo and Gecko.
 pub fn parse_style_attribute(input: &str,
                              url_data: &UrlExtraData,
-                             error_reporter: &ParseErrorReporter)
+                             error_reporter: &ParseErrorReporter,
+                             quirks_mode: QuirksMode)
                              -> PropertyDeclarationBlock {
-    let context = ParserContext::new(Origin::Author, url_data, error_reporter);
+    let context = ParserContext::new(Origin::Author,
+                                     url_data,
+                                     error_reporter,
+                                     Some(CssRuleType::Style),
+                                     PARSING_MODE_DEFAULT,
+                                     quirks_mode);
     parse_property_declaration_list(&context, &mut Parser::new(input))
 }
 
 /// Parse a given property declaration. Can result in multiple
 /// `PropertyDeclaration`s when expanding a shorthand, for example.
 ///
-/// The vector returned will not have the importance set;
-/// this does not attempt to parse !important at all
-pub fn parse_one_declaration(id: PropertyId,
-                             input: &str,
-                             url_data: &UrlExtraData,
-                             error_reporter: &ParseErrorReporter)
-                             -> Result<ParsedDeclaration, ()> {
-    let context = ParserContext::new(Origin::Author, url_data, error_reporter);
+/// This does not attempt to parse !important at all.
+pub fn parse_one_declaration_into(declarations: &mut SourcePropertyDeclaration,
+                                  id: PropertyId,
+                                  input: &str,
+                                  url_data: &UrlExtraData,
+                                  error_reporter: &ParseErrorReporter,
+                                  parsing_mode: ParsingMode,
+                                  quirks_mode: QuirksMode)
+                                  -> Result<(), ()> {
+    let context = ParserContext::new(Origin::Author,
+                                     url_data,
+                                     error_reporter,
+                                     Some(CssRuleType::Style),
+                                     parsing_mode,
+                                     quirks_mode);
     Parser::new(input).parse_entirely(|parser| {
-        ParsedDeclaration::parse(id, &context, parser, false)
+        PropertyDeclaration::parse_into(declarations, id, &context, parser)
             .map_err(|_| ())
     })
 }
@@ -636,24 +751,23 @@ pub fn parse_one_declaration(id: PropertyId,
 /// A struct to parse property declarations.
 struct PropertyDeclarationParser<'a, 'b: 'a> {
     context: &'a ParserContext<'b>,
+    declarations: &'a mut SourcePropertyDeclaration,
 }
 
 
 /// Default methods reject all at rules.
 impl<'a, 'b> AtRuleParser for PropertyDeclarationParser<'a, 'b> {
     type Prelude = ();
-    type AtRule = (ParsedDeclaration, Importance);
+    type AtRule = Importance;
 }
 
-
 impl<'a, 'b> DeclarationParser for PropertyDeclarationParser<'a, 'b> {
-    type Declaration = (ParsedDeclaration, Importance);
+    type Declaration = Importance;
 
-    fn parse_value(&mut self, name: &str, input: &mut Parser)
-                   -> Result<(ParsedDeclaration, Importance), ()> {
+    fn parse_value(&mut self, name: &str, input: &mut Parser) -> Result<Importance, ()> {
         let id = try!(PropertyId::parse(name.into()));
-        let parsed = input.parse_until_before(Delimiter::Bang, |input| {
-            ParsedDeclaration::parse(id, self.context, input, false)
+        input.parse_until_before(Delimiter::Bang, |input| {
+            PropertyDeclaration::parse_into(self.declarations, id, self.context, input)
                 .map_err(|_| ())
         })?;
         let importance = match input.try(parse_important) {
@@ -661,10 +775,8 @@ impl<'a, 'b> DeclarationParser for PropertyDeclarationParser<'a, 'b> {
             Err(()) => Importance::Normal,
         };
         // In case there is still unparsed text in the declaration, we should roll back.
-        if !input.is_exhausted() {
-            return Err(())
-        }
-        Ok((parsed, importance))
+        input.expect_exhausted()?;
+        Ok(importance)
     }
 }
 
@@ -674,15 +786,20 @@ impl<'a, 'b> DeclarationParser for PropertyDeclarationParser<'a, 'b> {
 pub fn parse_property_declaration_list(context: &ParserContext,
                                        input: &mut Parser)
                                        -> PropertyDeclarationBlock {
+    let mut declarations = SourcePropertyDeclaration::new();
     let mut block = PropertyDeclarationBlock::new();
     let parser = PropertyDeclarationParser {
         context: context,
+        declarations: &mut declarations,
     };
     let mut iter = DeclarationListParser::new(input, parser);
     while let Some(declaration) = iter.next() {
         match declaration {
-            Ok((parsed, importance)) => parsed.expand_push_into(&mut block, importance),
+            Ok(importance) => {
+                block.extend(iter.parser.declarations.drain(), importance);
+            }
             Err(range) => {
+                iter.parser.declarations.clear();
                 let pos = range.start;
                 let message = format!("Unsupported property declaration: '{}'",
                                       iter.input.slice(range));

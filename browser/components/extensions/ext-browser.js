@@ -1,7 +1,7 @@
 "use strict";
 
 XPCOMUtils.defineLazyModuleGetter(global, "EventEmitter",
-                                  "resource://devtools/shared/event-emitter.js");
+                                  "resource://gre/modules/EventEmitter.jsm");
 
 // This function is pretty tightly tied to Extension.jsm.
 // Its job is to fill in the |tab| property of the sender.
@@ -53,7 +53,6 @@ extensions.on("page-shutdown", (type, context) => {
     }
   }
 });
-/* eslint-enable mozilla/balanced-listeners */
 /* eslint-enable mozilla/balanced-listeners */
 
 global.openOptionsPage = (extension) => {
@@ -178,6 +177,14 @@ extensions.registerModules({
     manifest: ["page_action"],
     paths: [
       ["pageAction"],
+    ],
+  },
+  geckoProfiler: {
+    url: "chrome://browser/content/ext-geckoProfiler.js",
+    schema: "chrome://browser/content/schemas/geckoProfiler.json",
+    scopes: ["addon_parent"],
+    paths: [
+      ["geckoProfiler"],
     ],
   },
   sessions: {

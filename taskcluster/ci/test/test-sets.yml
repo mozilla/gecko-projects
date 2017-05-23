@@ -64,9 +64,13 @@ talos:
     - talos-other
     - talos-svgr
     - talos-tp5o
+    - talos-perf-reftest
 
 awsy:
     - awsy
+
+headless:
+    - marionette-headless
 
 ##
 # Limited test sets for specific platforms
@@ -77,6 +81,11 @@ stylo-tests:
     - reftest-stylo
     - mochitest-style
     - mochitest-chrome-style
+
+stylo-sequential-tests:
+    - crashtest
+    - reftest-stylo
+    - mochitest-style
 
 qr-tests:
     - cppunit
@@ -133,6 +142,7 @@ windows-vm-tests:
     - jsreftest
     - marionette
     - mochitest
+    - mochitest-a11y
     - mochitest-browser-chrome
     - mochitest-devtools-chrome
     - mochitest-jetpack
@@ -144,13 +154,13 @@ windows-vm-tests:
 windows-gpu-tests:
     - reftest
     - reftest-no-accel
+    - mochitest-gpu
     - mochitest-webgl
 
 # these tests currently run on hardware, but may migrate above when validated
-#    - mochitest-a11y
+# see https://bugzilla.mozilla.org/show_bug.cgi?id=1280474#c36
 #    - mochitest-chrome
 #    - mochitest-clipboard
-#    - mochitest-gpu
 
 macosx64-tests-debug:
     - cppunit
@@ -185,6 +195,7 @@ macosx64-tests-talos:
     - talos-other
     - talos-svgr
     - talos-tp5o
+    - talos-perf-reftest
 
 linux32-tests:
     - cppunit
@@ -226,7 +237,6 @@ android-common-tests:
     - mochitest-clipboard
     - mochitest-gpu
     - mochitest-media
-    - mochitest-webgl
     - reftest
     - xpcshell
 
@@ -240,6 +250,7 @@ android-opt-tests:
 android-gradle-tests:
     - mochitest-chrome
     - robocop
+    - geckoview
 
 android-x86-tests:
     - mochitest-chrome

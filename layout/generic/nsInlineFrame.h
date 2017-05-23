@@ -40,7 +40,6 @@ public:
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override;
 #endif
-  virtual nsIAtom* GetType() const override;
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
@@ -141,7 +140,14 @@ protected:
     }
   };
 
-  explicit nsInlineFrame(nsStyleContext* aContext) : nsContainerFrame(aContext) {}
+  nsInlineFrame(nsStyleContext* aContext, mozilla::LayoutFrameType aType)
+    : nsContainerFrame(aContext, aType)
+    , mBaseline(NS_INTRINSIC_WIDTH_UNKNOWN)
+  {}
+
+  explicit nsInlineFrame(nsStyleContext* aContext)
+    : nsInlineFrame(aContext, mozilla::LayoutFrameType::Inline)
+  {}
 
   virtual LogicalSides GetLogicalSkipSides(const ReflowInput* aReflowInput = nullptr) const override;
 
@@ -213,7 +219,6 @@ public:
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override;
 #endif
-  virtual nsIAtom* GetType() const override;
   virtual void Reflow(nsPresContext* aPresContext,
                       ReflowOutput& aDesiredSize,
                       const ReflowInput& aReflowInput,
@@ -226,7 +231,9 @@ public:
   virtual bool DrainSelfOverflowList() override;
 
 protected:
-  explicit nsFirstLineFrame(nsStyleContext* aContext) : nsInlineFrame(aContext) {}
+  explicit nsFirstLineFrame(nsStyleContext* aContext)
+    : nsInlineFrame(aContext, mozilla::LayoutFrameType::Line)
+  {}
 
   virtual nsIFrame* PullOneFrame(nsPresContext* aPresContext,
                                  InlineReflowInput& rs,

@@ -12,11 +12,11 @@ function promiseClearHistory() {
         resolve();
       }
     };
-    Services.obs.addObserver(observer, "browser:purge-domain-data", false);
+    Services.obs.addObserver(observer, "browser:purge-domain-data");
   });
 }
 
-add_task(function* () {
+add_task(async function() {
   // utility functions
   function countClosedTabsByTitle(aClosedTabList, aTitle) {
     return aClosedTabList.filter(aData => aData.title == aTitle).length;
@@ -93,8 +93,10 @@ add_task(function* () {
   ss.setBrowserState(JSON.stringify(testState));
 
   // purge domain & check that we purged correctly for closed windows
-  yield ForgetAboutSite.removeDataFromDomain("mozilla.org");
-  yield promiseClearHistory();
+  let clearHistoryPromise = promiseClearHistory();
+  await ForgetAboutSite.removeDataFromDomain("mozilla.org");
+  await clearHistoryPromise;
+
   let closedWindowData = JSON.parse(ss.getClosedWindowData());
 
   // First set of tests for _closedWindows[0] - tests basics

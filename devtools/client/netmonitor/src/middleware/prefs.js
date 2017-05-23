@@ -4,25 +4,40 @@
 
 "use strict";
 
+const Services = require("Services");
 const {
   ENABLE_REQUEST_FILTER_TYPE_ONLY,
+  RESET_COLUMNS,
+  TOGGLE_COLUMN,
   TOGGLE_REQUEST_FILTER_TYPE,
 } = require("../constants");
-const { Prefs } = require("../utils/prefs");
 const { getRequestFilterTypes } = require("../selectors/index");
 
 /**
-  * Whenever the User clicks on a filter in the network monitor, save the new
-  * filters for future tabs
+  * Update the relevant prefs when:
+  *   - a column has been toggled
+  *   - a filter type has been set
   */
 function prefsMiddleware(store) {
   return next => action => {
     const res = next(action);
-    if (action.type === ENABLE_REQUEST_FILTER_TYPE_ONLY ||
-        action.type === TOGGLE_REQUEST_FILTER_TYPE) {
-      Prefs.filters = getRequestFilterTypes(store.getState())
-        .filter(([type, check]) => check)
-        .map(([type, check]) => type);
+    switch (action.type) {
+      case ENABLE_REQUEST_FILTER_TYPE_ONLY:
+      case TOGGLE_REQUEST_FILTER_TYPE:
+        let filters = getRequestFilterTypes(store.getState())
+          .filter(([type, check]) => check)
+          .map(([type, check]) => type);
+        Services.prefs.setCharPref(
+          "devtools.netmonitor.filters", JSON.stringify(filters));
+        break;
+      case TOGGLE_COLUMN:
+      case RESET_COLUMNS:
+        let hiddenColumns = [...store.getState().ui.columns]
+          .filter(([column, shown]) => !shown)
+          .map(([column, shown]) => column);
+        Services.prefs.setCharPref(
+          "devtools.netmonitor.hiddenColumns", JSON.stringify(hiddenColumns));
+        break;
     }
     return res;
   };

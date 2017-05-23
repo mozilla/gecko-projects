@@ -390,12 +390,6 @@ nsHTMLCanvasFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                           nsISelectionDisplay::DISPLAY_IMAGES);
 }
 
-nsIAtom*
-nsHTMLCanvasFrame::GetType() const
-{
-  return nsGkAtoms::HTMLCanvasFrame;
-}
-
 // get the offset into the content area of the image where aImg starts if it is a continuation.
 // from nsImageFrame
 nscoord

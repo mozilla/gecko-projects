@@ -86,27 +86,32 @@ TabGroup::GetChromeTabGroup()
 }
 
 /* static */ TabGroup*
-TabGroup::GetFromWindowActor(mozIDOMWindowProxy* aWindow)
+TabGroup::GetFromWindow(mozIDOMWindowProxy* aWindow)
+{
+  if (TabChild* tabChild = TabChild::GetFrom(aWindow)) {
+    return tabChild->TabGroup();
+  }
+
+  return nullptr;
+}
+
+/* static */ TabGroup*
+TabGroup::GetFromActor(TabChild* aTabChild)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
-  TabChild* tabChild = TabChild::GetFrom(aWindow);
-  if (!tabChild) {
-    return nullptr;
-  }
-
   ContentChild* cc = ContentChild::GetSingleton();
-  nsCOMPtr<nsIEventTarget> target = cc->GetActorEventTarget(tabChild);
+  nsCOMPtr<nsIEventTarget> target = cc->GetActorEventTarget(aTabChild);
   if (!target) {
     return nullptr;
   }
 
   // We have an event target. We assume the IPC code created it via
   // TabGroup::CreateEventTarget.
-  RefPtr<ValidatingDispatcher> dispatcher =
-    ValidatingDispatcher::FromEventTarget(target);
-  MOZ_RELEASE_ASSERT(dispatcher);
-  auto tabGroup = dispatcher->AsTabGroup();
+  RefPtr<SchedulerGroup> group =
+    SchedulerGroup::FromEventTarget(target);
+  MOZ_RELEASE_ASSERT(group);
+  auto tabGroup = group->AsTabGroup();
   MOZ_RELEASE_ASSERT(tabGroup);
 
   // We delay creating the event targets until now since the TabGroup
@@ -216,7 +221,7 @@ TabGroup::FindItemWithName(const nsAString& aName,
 }
 
 nsTArray<nsPIDOMWindowOuter*>
-TabGroup::GetTopLevelWindows()
+TabGroup::GetTopLevelWindows() const
 {
   MOZ_ASSERT(NS_IsMainThread());
   nsTArray<nsPIDOMWindowOuter*> array;
@@ -241,7 +246,7 @@ TabGroup::EventTargetFor(TaskCategory aCategory) const
   if (aCategory == TaskCategory::Worker || aCategory == TaskCategory::Timer) {
     MOZ_RELEASE_ASSERT(mThrottledQueuesInitialized || mIsChrome);
   }
-  return ValidatingDispatcher::EventTargetFor(aCategory);
+  return SchedulerGroup::EventTargetFor(aCategory);
 }
 
 AbstractThread*
@@ -255,8 +260,20 @@ TabGroup::AbstractMainThreadForImpl(TaskCategory aCategory)
     return AbstractThread::MainThread();
   }
 
-  return ValidatingDispatcher::AbstractMainThreadForImpl(aCategory);
+  return SchedulerGroup::AbstractMainThreadForImpl(aCategory);
 }
 
+bool
+TabGroup::IsBackground() const
+{
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
+
+  for (nsPIDOMWindowOuter* outerWindow : GetTopLevelWindows()) {
+    if (!outerWindow->IsBackground()) {
+      return false;
+    }
+  }
+  return true;
+}
 } // namespace dom
 } // namespace mozilla

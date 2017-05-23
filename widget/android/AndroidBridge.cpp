@@ -129,7 +129,7 @@ AndroidBridge::ConstructBridge()
      * to call dlclose() while we're already inside dlclose().
      * Conveniently, NSS has an env var that can prevent it from unloading.
      */
-    putenv("NSS_DISABLE_UNLOAD=1");
+    putenv(const_cast<char*>("NSS_DISABLE_UNLOAD=1"));
 
     MOZ_ASSERT(!sBridge);
     sBridge = new AndroidBridge();
@@ -173,9 +173,7 @@ AndroidBridge::AndroidBridge()
     AutoJNIClass string(jEnv, "java/lang/String");
     jStringClass = string.getGlobalRef();
 
-    if (!GetStaticIntField("android/os/Build$VERSION", "SDK_INT", &mAPIVersion, jEnv)) {
-        ALOG_BRIDGE("Failed to find API version");
-    }
+    mAPIVersion = jni::GetAPIVersion();
 
     AutoJNIClass channels(jEnv, "java/nio/channels/Channels");
     jChannels = channels.getGlobalRef();

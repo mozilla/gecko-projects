@@ -2,14 +2,8 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-var {
-  SingletonEventManager,
-} = ExtensionUtils;
-
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
                                   "resource://gre/modules/PlacesUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Task",
-                                  "resource://gre/modules/Task.jsm");
 
 let listenerCount = 0;
 
@@ -174,7 +168,7 @@ function decrementListeners() {
 function incrementListeners() {
   listenerCount++;
   if (listenerCount == 1) {
-    PlacesUtils.bookmarks.addObserver(observer, false);
+    PlacesUtils.bookmarks.addObserver(observer);
   }
 }
 
@@ -182,20 +176,22 @@ this.bookmarks = class extends ExtensionAPI {
   getAPI(context) {
     return {
       bookmarks: {
-        get: function(idOrIdList) {
+        async get(idOrIdList) {
           let list = Array.isArray(idOrIdList) ? idOrIdList : [idOrIdList];
 
-          return Task.spawn(function* () {
+          try {
             let bookmarks = [];
             for (let id of list) {
-              let bookmark = yield PlacesUtils.bookmarks.fetch({guid: id});
+              let bookmark = await PlacesUtils.bookmarks.fetch({guid: id});
               if (!bookmark) {
                 throw new Error("Bookmark not found");
               }
               bookmarks.push(convert(bookmark));
             }
             return bookmarks;
-          }).catch(error => Promise.reject({message: error.message}));
+          } catch (error) {
+            return Promise.reject({message: error.message});
+          }
         },
 
         getChildren: function(id) {

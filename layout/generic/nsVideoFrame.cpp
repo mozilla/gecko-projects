@@ -75,7 +75,7 @@ SwapScaleWidthHeightForRotation(IntSize& aSize, VideoInfo::Rotation aDegrees)
 }
 
 nsVideoFrame::nsVideoFrame(nsStyleContext* aContext)
-  : nsContainerFrame(aContext)
+  : nsContainerFrame(aContext, LayoutFrameType::HTMLVideo)
 {
   EnableVisibilityTracking();
 }
@@ -515,7 +515,7 @@ nsVideoFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // always add to the display list.
   for (nsIFrame* child : mFrames) {
     if (child->GetContent() != mPosterImage || shouldDisplayPoster ||
-        child->GetType() == nsGkAtoms::boxFrame) {
+        child->IsBoxFrame()) {
 
       nsDisplayListBuilder::AutoBuildingDisplayList
         buildingForChild(aBuilder, child,
@@ -526,12 +526,6 @@ nsVideoFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       child->BuildDisplayListForStackingContext(aBuilder, aLists.Content());
     }
   }
-}
-
-nsIAtom*
-nsVideoFrame::GetType() const
-{
-  return nsGkAtoms::HTMLVideoFrame;
 }
 
 #ifdef ACCESSIBILITY

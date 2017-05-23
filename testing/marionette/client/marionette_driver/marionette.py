@@ -540,7 +540,7 @@ class Alert(object):
     def send_keys(self, *string):
         """Send keys to the currently displayed text input area in an open
         tab modal dialog."""
-        body = {"value": Marionette.convert_keys(*string)}
+        body = {"text": Marionette.convert_keys(*string)}
         self.marionette._send_message("sendKeysToDialog", body)
 
 
@@ -599,7 +599,7 @@ class Marionette(object):
         self.socket_timeout = socket_timeout
         self.crashed = 0
 
-        startup_timeout = startup_timeout or self.DEFAULT_STARTUP_TIMEOUT
+        self.startup_timeout = int(startup_timeout or self.DEFAULT_STARTUP_TIMEOUT)
         if self.bin:
             if not Marionette.is_port_available(self.port, host=self.host):
                 ex_msg = "{0}:{1} is unavailable.".format(self.host, self.port)
@@ -608,7 +608,7 @@ class Marionette(object):
             self.instance = GeckoInstance.create(
                 app, host=self.host, port=self.port, bin=self.bin, **instance_args)
             self.instance.start()
-            self.raise_for_port(timeout=startup_timeout)
+            self.raise_for_port(timeout=self.startup_timeout)
 
         self.timeout = Timeouts(self)
 
@@ -1315,6 +1315,7 @@ class Marionette(object):
 
         # Call wait_for_port() before attempting to connect in
         # the event gecko hasn't started yet.
+        timeout = timeout or self.startup_timeout
         self.wait_for_port(timeout=timeout)
         self.protocol, _ = self.client.connect()
 
@@ -2218,3 +2219,12 @@ class Marionette(object):
         should be equivalent to the user pressing the the maximize button
         """
         return self._send_message("maximizeWindow")
+
+    def fullscreen(self):
+        """ Synchronously sets the user agent window to full screen as if the user
+        had done "View > Enter Full Screen",  or restores it if it is already
+        in full screen.
+
+        :returns: dictionary representation of current window width and height
+        """
+        return self._send_message("fullscreen")

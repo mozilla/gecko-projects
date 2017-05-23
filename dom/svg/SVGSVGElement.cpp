@@ -183,7 +183,6 @@ SVGSVGElement::SVGSVGElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo
                                 aFromParser == FROM_PARSER_FRAGMENT ||
                                 aFromParser == FROM_PARSER_XSLT),
     mImageNeedsTransformInvalidation(false),
-    mIsPaintingSVGImageElement(false),
     mHasChildrenOnlyTransform(false)
 {
 }
@@ -193,7 +192,8 @@ SVGSVGElement::SVGSVGElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo
 
 // From NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGSVGElement)
 nsresult
-SVGSVGElement::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const
+SVGSVGElement::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                     bool aPreallocateChildren) const
 {
   *aResult = nullptr;
   already_AddRefed<mozilla::dom::NodeInfo> ni = RefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();
@@ -201,7 +201,7 @@ SVGSVGElement::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const
 
   nsCOMPtr<nsINode> kungFuDeathGrip = it;
   nsresult rv1 = it->Init();
-  nsresult rv2 = const_cast<SVGSVGElement*>(this)->CopyInnerTo(it);
+  nsresult rv2 = const_cast<SVGSVGElement*>(this)->CopyInnerTo(it, aPreallocateChildren);
   if (NS_SUCCEEDED(rv1) && NS_SUCCEEDED(rv2)) {
     kungFuDeathGrip.swap(*aResult);
   }
@@ -475,7 +475,7 @@ SVGSVGElement::SetZoomAndPan(uint16_t aZoomAndPan, ErrorResult& rv)
 }
 
 //----------------------------------------------------------------------
-// helper methods for implementing SVGZoomEvent:
+// helper method for implementing SetCurrentScale/Translate
 
 void
 SVGSVGElement::SetCurrentScaleTranslate(float s, float x, float y)
@@ -499,6 +499,9 @@ SVGSVGElement::SetCurrentScaleTranslate(float s, float x, float y)
   // change that caused the event's dispatch, which is *not* necessarily the
   // same thing as the values of currentScale and currentTranslate prior to
   // their own last change.
+  //
+  // XXX This comment is out-of-date due to removal of SVGZoomEvent.  Can we
+  // remove some of this code?
   mPreviousScale = mCurrentScale;
   mPreviousTranslate = mCurrentTranslate;
   
@@ -511,10 +514,7 @@ SVGSVGElement::SetCurrentScaleTranslate(float s, float x, float y)
     nsCOMPtr<nsIPresShell> presShell = doc->GetShell();
     if (presShell && IsRoot()) {
       nsEventStatus status = nsEventStatus_eIgnore;
-      if (mPreviousScale != mCurrentScale) {
-        InternalSVGZoomEvent svgZoomEvent(true, eSVGZoom);
-        presShell->HandleDOMEventWithTarget(this, &svgZoomEvent, &status);
-      } else {
+      if (mPreviousScale == mCurrentScale) {
         WidgetEvent svgScrollEvent(true, eSVGScroll);
         presShell->HandleDOMEventWithTarget(this, &svgScrollEvent, &status);
       }
@@ -1061,14 +1061,9 @@ SVGSVGElement::HasViewBoxRect() const
 bool
 SVGSVGElement::ShouldSynthesizeViewBox() const
 {
-  MOZ_ASSERT(!HasViewBoxRect(),
-             "Should only be called if we lack a viewBox");
+  MOZ_ASSERT(!HasViewBoxRect(), "Should only be called if we lack a viewBox");
 
-  nsIDocument* doc = GetUncomposedDoc();
-  return doc &&
-    doc->IsBeingUsedAsImage() &&
-    !mIsPaintingSVGImageElement &&
-    !GetParent();
+  return IsRoot() && OwnerDoc()->IsBeingUsedAsImage();
 }
 
 bool
@@ -1106,12 +1101,6 @@ SVGSVGElement::ClearPreserveAspectRatioProperty()
   void* valPtr = UnsetProperty(nsGkAtoms::overridePreserveAspectRatio);
   delete static_cast<SVGPreserveAspectRatio*>(valPtr);
   return valPtr;
-}
-
-void
-SVGSVGElement::SetIsPaintingForSVGImageElement(bool aIsPaintingSVGImageElement)
-{
-  mIsPaintingSVGImageElement = aIsPaintingSVGImageElement;
 }
 
 void

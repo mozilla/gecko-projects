@@ -46,6 +46,7 @@ var gIgnoreWindowSize = false;
 var gShuffle = false;
 var gRepeat = null;
 var gRunUntilFailure = false;
+var gCleanupPendingCrashes = false;
 var gTotalChunks = 0;
 var gThisChunk = 0;
 var gContainingWindow = null;
@@ -117,12 +118,15 @@ var gExpectingProcessCrash = false;
 var gExpectedCrashDumpFiles = [];
 var gUnexpectedCrashDumpFiles = { };
 var gCrashDumpDir;
+var gPendinCrashDumpDir;
 var gFailedNoPaint = false;
 var gFailedNoDisplayList = false;
 var gFailedOpaqueLayer = false;
 var gFailedOpaqueLayerMessages = [];
 var gFailedAssignedLayer = false;
 var gFailedAssignedLayerMessages = [];
+
+var gStartAfter = undefined;
 
 // The enabled-state of the test-plugins, stored so they can be reset later
 var gTestPluginEnabledStates = null;
@@ -273,6 +277,12 @@ this.OnRefTestLoad = function OnRefTestLoad(win)
                     .get("ProfD", CI.nsIFile);
     gCrashDumpDir.append("minidumps");
 
+    gPendingCrashDumpDir = CC[NS_DIRECTORY_SERVICE_CONTRACTID]
+                    .getService(CI.nsIProperties)
+                    .get("UAppData", CI.nsIFile);
+    gPendingCrashDumpDir.append("Crash Reports");
+    gPendingCrashDumpDir.append("pending");
+
     var env = CC["@mozilla.org/process/environment;1"].
               getService(CI.nsIEnvironment);
 
@@ -382,6 +392,12 @@ function InitAndStartRefTests()
         gFocusFilterMode = prefs.getCharPref("reftest.focusFilterMode");
     } catch(e) {}
 
+    try {
+        gStartAfter = prefs.getCharPref("reftest.startAfter");
+    } catch(e) {
+        gStartAfter = undefined;
+    }
+
 #ifdef MOZ_STYLO
     try {
         gCompareStyloToGecko = prefs.getBoolPref("reftest.compareStyloToGecko");
@@ -460,6 +476,8 @@ function StartTests()
 
     gRunUntilFailure = prefs.getBoolPref("reftest.runUntilFailure", false);
 
+    gCleanupPendingCrashes = prefs.getBoolPref("reftest.cleanupPendingCrashes", false);
+
     // When we repeat this function is called again, so really only want to set
     // gRepeat once.
     if (gRepeat == null) {
@@ -535,7 +553,24 @@ function StartTests()
         }
 
         if (gShuffle) {
+            if (gStartAfter !== undefined) {
+                logger.error("Can't resume from a crashed test when " +
+                             "--shuffle is enabled, continue by shuffling " +
+                             "all the tests");
+                DoneTests();
+                return;
+            }
             Shuffle(gURLs);
+        } else if (gStartAfter !== undefined) {
+            // Skip through previously crashed test
+            // We have to do this after chunking so we don't break the numbers
+            var crash_idx = gURLs.map(function(url) {
+                return url['url1']['spec'];
+            }).indexOf(gStartAfter);
+            if (crash_idx == -1) {
+                throw "Can't find the previously crashed test";
+            }
+            gURLs = gURLs.slice(crash_idx + 1);
         }
 
         gTotalTests = gURLs.length;
@@ -588,6 +623,8 @@ function BuildConditionSandbox(aURL) {
     var xr = CC[NS_XREAPPINFO_CONTRACTID].getService(CI.nsIXULRuntime);
     var appInfo = CC[NS_XREAPPINFO_CONTRACTID].getService(CI.nsIXULAppInfo);
     sandbox.isDebugBuild = gDebug.isDebugBuild;
+    var prefs = CC["@mozilla.org/preferences-service;1"].
+                getService(CI.nsIPrefBranch);
 
     // xr.XPCOMABI throws exception for configurations without full ABI
     // support (mobile builds on ARM)
@@ -678,10 +715,11 @@ function BuildConditionSandbox(aURL) {
     sandbox.webrtc = false;
 #endif
 
+sandbox.stylo =
 #ifdef MOZ_STYLO
-    sandbox.stylo = true;
+    prefs.getBoolPref("layout.css.servo.enabled", false);
 #else
-    sandbox.stylo = false;
+    false;
 #endif
 
 #ifdef RELEASE_OR_BETA
@@ -707,15 +745,11 @@ function BuildConditionSandbox(aURL) {
 
     // see if we have the test plugin available,
     // and set a sandox prop accordingly
-    var navigator = gContainingWindow.navigator;
-    var testPlugin = navigator.plugins["Test Plug-in"];
-    sandbox.haveTestPlugin = !!testPlugin;
+    sandbox.haveTestPlugin = !!getTestPlugin("Test Plug-in");
 
     // Set a flag on sandbox if the windows default theme is active
     sandbox.windowsDefaultTheme = gContainingWindow.matchMedia("(-moz-windows-default-theme)").matches;
 
-    var prefs = CC["@mozilla.org/preferences-service;1"].
-                getService(CI.nsIPrefBranch);
     try {
         sandbox.nativeThemePref = !prefs.getBoolPref("mozilla.widget.disable-native-theme");
     } catch (e) {
@@ -766,11 +800,20 @@ function AddPrefSettings(aWhere, aPrefName, aPrefValExpression, aSandbox, aTestP
     var setting = { name: aPrefName,
                     type: prefType,
                     value: prefVal };
-    if (aWhere != "ref-") {
-        aTestPrefSettings.push(setting);
-    }
-    if (aWhere != "test-") {
-        aRefPrefSettings.push(setting);
+
+    if (gCompareStyloToGecko && aPrefName != "layout.css.servo.enabled") {
+        // ref-pref() is ignored, test-pref() and pref() are added to both
+        if (aWhere != "ref-") {
+            aTestPrefSettings.push(setting);
+            aRefPrefSettings.push(setting);
+        }
+    } else {
+        if (aWhere != "ref-") {
+            aTestPrefSettings.push(setting);
+        }
+        if (aWhere != "test-") {
+            aRefPrefSettings.push(setting);
+        }
     }
     return true;
 }
@@ -1123,8 +1166,12 @@ function ReadManifest(aURL, inherited_status, aFilter)
                                              CI.nsIScriptSecurityManager.DISALLOW_SCRIPT);
             secMan.checkLoadURIWithPrincipal(principal, refURI,
                                              CI.nsIScriptSecurityManager.DISALLOW_SCRIPT);
-
-            AddTestItem({ type: items[0],
+            var type = items[0];
+            if (gCompareStyloToGecko) {
+                type = TYPE_REFTEST_EQUAL;
+                refURI = testURI;
+            }
+            AddTestItem({ type: type,
                           expected: expected_status,
                           allowSilentFail: allow_silent_fail,
                           prettyPath: prettyPath,
@@ -1823,10 +1870,29 @@ function FindUnexpectedCrashDumpFiles()
     }
 }
 
+function RemovePendingCrashDumpFiles()
+{
+    if (!gPendingCrashDumpDir.exists()) {
+        return;
+    }
+
+    let entries = gPendingCrashDumpDir.directoryEntries;
+    while (entries.hasMoreElements()) {
+        let file = entries.getNext().QueryInterface(CI.nsIFile);
+        if (file.isFile()) {
+          file.remove(false);
+          logger.info("This test left pending crash dumps; deleted "+file.path);
+        }
+    }
+}
+
 function CleanUpCrashDumpFiles()
 {
     RemoveExpectedCrashDumpFiles();
     FindUnexpectedCrashDumpFiles();
+    if (gCleanupPendingCrashes) {
+      RemovePendingCrashDumpFiles();
+    }
     gExpectingProcessCrash = false;
 }
 
@@ -2069,8 +2135,8 @@ function RegisterProcessCrashObservers()
 {
     var os = CC[NS_OBSERVER_SERVICE_CONTRACTID]
              .getService(CI.nsIObserverService);
-    os.addObserver(OnProcessCrashed, "plugin-crashed", false);
-    os.addObserver(OnProcessCrashed, "ipc:content-shutdown", false);
+    os.addObserver(OnProcessCrashed, "plugin-crashed");
+    os.addObserver(OnProcessCrashed, "ipc:content-shutdown");
 }
 
 function RecvExpectProcessCrash()

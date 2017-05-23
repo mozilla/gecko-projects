@@ -140,7 +140,6 @@ public:
   bool IsFloatContainingBlock() const override;
   void BuildDisplayList(nsDisplayListBuilder* aBuilder,
                         const nsDisplayListSet& aLists) override;
-  nsIAtom* GetType() const override;
   bool IsFrameOfType(uint32_t aFlags) const override
   {
     return nsContainerFrame::IsFrameOfType(aFlags &
@@ -397,8 +396,8 @@ public:
   };
 
 protected:
-  explicit nsBlockFrame(nsStyleContext* aContext)
-    : nsContainerFrame(aContext)
+  nsBlockFrame(nsStyleContext* aContext, mozilla::LayoutFrameType aType)
+    : nsContainerFrame(aContext, aType)
     , mMinWidth(NS_INTRINSIC_WIDTH_UNKNOWN)
     , mPrefWidth(NS_INTRINSIC_WIDTH_UNKNOWN)
   {
@@ -406,6 +405,11 @@ protected:
   InitDebugFlags();
 #endif
   }
+
+  explicit nsBlockFrame(nsStyleContext* aContext)
+    : nsBlockFrame(aContext, mozilla::LayoutFrameType::Block)
+  {}
+
   virtual ~nsBlockFrame();
 
 #ifdef DEBUG

@@ -52,7 +52,15 @@ Preferences
 
 ``toolkit.telemetry.shutdownPingSender.enabled``
 
-  Allow the ``shutdown`` ping to be sent when the browser shuts down, instead of the next restart, using the :doc:`ping sender <pingsender>`.
+  Allow the ``shutdown`` ping to be sent when the browser shuts down, from the second browsing session on, instead of the next restart, using the :doc:`ping sender <pingsender>`.
+
+``toolkit.telemetry.newProfilePing.enabled``
+
+  Enable the :doc:`../data/new-profile` ping on new profiles.
+
+``toolkit.telemetry.newProfilePing.delay``
+
+  Controls the delay after which the :doc:`../data/new-profile` is sent on new profiles.
 
 Data-choices notification
 -------------------------

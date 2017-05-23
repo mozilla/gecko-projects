@@ -154,12 +154,6 @@ public:
   static already_AddRefed<AudioContext>
   Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
 
-  // Constructor for regular AudioContext. A default audio channel is needed.
-  static already_AddRefed<AudioContext>
-  Constructor(const GlobalObject& aGlobal,
-              AudioChannel aChannel,
-              ErrorResult& aRv);
-
   // Constructor for offline AudioContext
   static already_AddRefed<AudioContext>
   Constructor(const GlobalObject& aGlobal,
@@ -312,10 +306,6 @@ public:
 
   JSObject* GetGlobalJSObject() const;
 
-  AudioChannel MozAudioChannelType() const;
-
-  AudioChannel TestAudioChannelInAudioNodeStream();
-
   void RegisterNode(AudioNode* aNode);
   void UnregisterNode(AudioNode* aNode);
 
@@ -323,10 +313,9 @@ public:
 
   BasicWaveFormCache* GetBasicWaveFormCache();
 
-  IMPL_EVENT_HANDLER(mozinterruptbegin)
-  IMPL_EVENT_HANDLER(mozinterruptend)
-
   bool CheckClosed(ErrorResult& aRv);
+
+  void Dispatch(already_AddRefed<nsIRunnable>&& aRunnable);
 
 private:
   void DisconnectFromWindow();

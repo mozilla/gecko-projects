@@ -9,6 +9,8 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MemoryReporting.h"
 
+#include <stddef.h>
+
 #include "jscntxt.h"
 #include "jsfriendapi.h"
 #include "jsgc.h"
@@ -117,7 +119,7 @@ JSCompartment::~JSCompartment()
     js_delete(debugEnvs);
     js_delete(objectMetadataTable);
     js_delete(lazyArrayBuffers);
-    js_delete(nonSyntacticLexicalEnvironments_),
+    js_delete(nonSyntacticLexicalEnvironments_);
     js_free(enumerators);
 
 #ifdef DEBUG
@@ -696,7 +698,7 @@ JSCompartment::traceOutgoingCrossCompartmentWrappers(JSTracer* trc)
 /* static */ void
 JSCompartment::traceIncomingCrossCompartmentEdgesForZoneGC(JSTracer* trc)
 {
-    gcstats::AutoPhase ap(trc->runtime()->gc.stats(), gcstats::PHASE_MARK_CCWS);
+    gcstats::AutoPhase ap(trc->runtime()->gc.stats(), gcstats::PhaseKind::MARK_CCWS);
     MOZ_ASSERT(JS::CurrentThreadIsHeapMajorCollecting());
     for (CompartmentsIter c(trc->runtime(), SkipAtoms); !c.done(); c.next()) {
         if (!c->zone()->isCollecting())
@@ -706,8 +708,12 @@ JSCompartment::traceIncomingCrossCompartmentEdgesForZoneGC(JSTracer* trc)
 }
 
 void
-JSCompartment::trace(JSTracer* trc)
+JSCompartment::traceGlobal(JSTracer* trc)
 {
+    // Trace things reachable from the compartment's global. Note that these
+    // edges must be swept too in case the compartment is live but the global is
+    // not.
+
     savedStacks_.trace(trc);
 
     // The template registry strongly holds everything in it by design and
@@ -786,8 +792,6 @@ JSCompartment::traceRoots(JSTracer* trc, js::gc::GCRuntime::TraceOrMarkRuntime t
 
     if (nonSyntacticLexicalEnvironments_)
         nonSyntacticLexicalEnvironments_->trace(trc);
-
-    wasm.trace(trc);
 }
 
 void
@@ -830,13 +834,16 @@ JSCompartment::sweepSavedStacks()
 }
 
 void
-JSCompartment::sweepGlobalObject(FreeOp* fop)
+JSCompartment::sweepTemplateLiteralMap()
 {
-    if (global_ && IsAboutToBeFinalized(&global_)) {
-        if (isDebuggee())
-            Debugger::detachAllDebuggersFromGlobal(fop, global_.unbarrieredGet());
+    templateLiteralMap_.sweep();
+}
+
+void
+JSCompartment::sweepGlobalObject()
+{
+    if (global_ && IsAboutToBeFinalized(&global_))
         global_.set(nullptr);
-    }
 }
 
 void
@@ -904,6 +911,13 @@ void
 JSCompartment::sweepVarNames()
 {
     varNames_.sweep();
+}
+
+void
+JSCompartment::sweepWatchpoints()
+{
+    if (watchpointMap)
+        watchpointMap->sweep();
 }
 
 namespace {
@@ -1039,6 +1053,7 @@ JSCompartment::purge()
     dtoaCache.purge();
     newProxyCache.purge();
     lastCachedNativeIterator = nullptr;
+    objectGroups.purge();
 }
 
 void
@@ -1204,7 +1219,8 @@ JSCompartment::updateDebuggerObservesFlag(unsigned flag)
     MOZ_ASSERT(isDebuggee());
     MOZ_ASSERT(flag == DebuggerObservesAllExecution ||
                flag == DebuggerObservesCoverage ||
-               flag == DebuggerObservesAsmJS);
+               flag == DebuggerObservesAsmJS ||
+               flag == DebuggerObservesBinarySource);
 
     GlobalObject* global = zone()->runtimeFromActiveCooperatingThread()->gc.isForegroundSweeping()
                            ? unsafeUnbarrieredMaybeGlobal()
@@ -1214,7 +1230,8 @@ JSCompartment::updateDebuggerObservesFlag(unsigned flag)
         Debugger* dbg = *p;
         if (flag == DebuggerObservesAllExecution ? dbg->observesAllExecution() :
             flag == DebuggerObservesCoverage ? dbg->observesCoverage() :
-            dbg->observesAsmJS())
+            flag == DebuggerObservesAsmJS ? dbg->observesAsmJS() :
+            dbg->observesBinarySource())
         {
             debugModeBits |= flag;
             return;
@@ -1367,7 +1384,7 @@ JSCompartment::reportTelemetry()
              : JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT;
 
     // Call back into Firefox's Telemetry reporter.
-    for (size_t i = 0; i < DeprecatedLanguageExtensionCount; i++) {
+    for (size_t i = 0; i < size_t(DeprecatedLanguageExtension::Count); i++) {
         if (sawDeprecatedLanguageExtension[i])
             runtime_->addTelemetry(id, i);
     }
@@ -1382,7 +1399,7 @@ JSCompartment::addTelemetry(const char* filename, DeprecatedLanguageExtension e)
     if (!creationOptions_.addonIdOrNull() && (!filename || strncmp(filename, "http", 4) != 0))
         return;
 
-    sawDeprecatedLanguageExtension[e] = true;
+    sawDeprecatedLanguageExtension[size_t(e)] = true;
 }
 
 HashNumber
@@ -1442,4 +1459,3 @@ AutoSetNewObjectMetadata::~AutoSetNewObjectMetadata()
         cx_->compartment()->objectMetadataState = prevState_;
     }
 }
-

@@ -7,14 +7,27 @@ extern crate geckoservo;
 
 extern crate mp4parse_capi;
 extern crate nsstring;
+extern crate nserror;
 extern crate rust_url_capi;
 #[cfg(feature = "quantum_render")]
 extern crate webrender_bindings;
+#[cfg(feature = "cubeb_pulse_rust")]
+extern crate cubeb_pulse;
 
 use std::boxed::Box;
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::panic;
+
+
+
+// This workaround is fixed in Rust 1.19. For details, see bug 1358151.
+thread_local!(static UNUSED_THREAD_LOCAL: () = ());
+#[no_mangle]
+pub extern "C" fn rust_init_please_remove_this_after_updating_rust_1_19() {
+    UNUSED_THREAD_LOCAL.with(|_| ());
+}
+
 
 /// Used to implement `nsIDebug2::RustPanic` for testing purposes.
 #[no_mangle]

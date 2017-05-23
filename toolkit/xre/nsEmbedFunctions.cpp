@@ -39,6 +39,7 @@
 #include "nsJSUtils.h"
 #include "nsWidgetsCID.h"
 #include "nsXREDirProvider.h"
+#include "ThreadAnnotation.h"
 
 #include "mozilla/Omnijar.h"
 #if defined(XP_MACOSX)
@@ -56,6 +57,8 @@
 #include "chrome/common/ipc_channel.h"
 #include "mozilla/jni/Utils.h"
 #endif //  defined(MOZ_WIDGET_ANDROID)
+
+#include "mozilla/AbstractThread.h"
 
 #include "mozilla/ipc/BrowserProcessSubThread.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
@@ -419,6 +422,10 @@ XRE_InitChildProcess(int aArgc,
   PROFILER_LABEL("Startup", "XRE_InitChildProcess",
     js::ProfileEntry::Category::OTHER);
 
+  // Ensure AbstractThread is minimally setup, so async IPC messages
+  // work properly.
+  AbstractThread::InitTLS();
+
   // Complete 'task_t' exchange for Mac OS X. This structure has the same size
   // regardless of architecture so we don't have any cross-arch issues here.
 #ifdef XP_MACOSX
@@ -521,6 +528,9 @@ XRE_InitChildProcess(int aArgc,
 #  else
 #    error "OOP crash reporting unsupported on this platform"
 #  endif
+
+  // For Init/Shutdown thread name annotations in the crash reporter.
+  CrashReporter::InitThreadAnnotationRAII annotation;
 #endif // if defined(MOZ_CRASHREPORTER)
 
   gArgv = aArgv;
@@ -769,6 +779,14 @@ XRE_InitParentProcess(int aArgc,
   NS_ENSURE_ARG_MIN(aArgc, 1);
   NS_ENSURE_ARG_POINTER(aArgv);
   NS_ENSURE_ARG_POINTER(aArgv[0]);
+
+  // Set main thread before we initialize the profiler
+  NS_SetMainThread();
+
+  mozilla::LogModule::Init();
+
+  char aLocal;
+  GeckoProfilerInitRAII profiler(&aLocal);
 
   ScopedXREEmbed embed;
 

@@ -150,13 +150,13 @@ nsImageBoxFrame::AttributeChanged(int32_t aNameSpaceID,
   return rv;
 }
 
-nsImageBoxFrame::nsImageBoxFrame(nsStyleContext* aContext):
-  nsLeafBoxFrame(aContext),
-  mIntrinsicSize(0,0),
-  mLoadFlags(nsIRequest::LOAD_NORMAL),
-  mRequestRegistered(false),
-  mUseSrcAttr(false),
-  mSuppressStyleCheck(false)
+nsImageBoxFrame::nsImageBoxFrame(nsStyleContext* aContext)
+  : nsLeafBoxFrame(aContext, LayoutFrameType::ImageBox)
+  , mIntrinsicSize(0, 0)
+  , mLoadFlags(nsIRequest::LOAD_NORMAL)
+  , mRequestRegistered(false)
+  , mUseSrcAttr(false)
+  , mSuppressStyleCheck(false)
 {
   MarkIntrinsicISizesDirty();
 }
@@ -342,21 +342,9 @@ nsImageBoxFrame::PaintImage(nsRenderingContext& aRenderingContext,
                             const nsRect& aDirtyRect, nsPoint aPt,
                             uint32_t aFlags)
 {
-  nsRect constraintRect;
-  GetXULClientRect(constraintRect);
-
-  constraintRect += aPt;
-
   if (!mImageRequest) {
     // This probably means we're drawn by a native theme.
     return DrawResult::SUCCESS;
-  }
-
-  // don't draw if the image is not dirty
-  // XXX(seth): Can this actually happen anymore?
-  nsRect dirty;
-  if (!dirty.IntersectRect(aDirtyRect, constraintRect)) {
-    return DrawResult::TEMPORARY_ERROR;
   }
 
   // Don't draw if the image's size isn't available.
@@ -373,9 +361,40 @@ nsImageBoxFrame::PaintImage(nsRenderingContext& aRenderingContext,
     return DrawResult::NOT_READY;
   }
 
+  Maybe<nsPoint> anchorPoint;
+  nsRect dest = GetDestRect(aPt, anchorPoint);
+
+  // don't draw if the image is not dirty
+  // XXX(seth): Can this actually happen anymore?
+  nsRect dirty;
+  if (!dirty.IntersectRect(aDirtyRect, dest)) {
+    return DrawResult::TEMPORARY_ERROR;
+  }
+
   bool hasSubRect = !mUseSrcAttr && (mSubRect.width > 0 || mSubRect.height > 0);
 
-  Maybe<nsPoint> anchorPoint;
+  Maybe<SVGImageContext> svgContext;
+  SVGImageContext::MaybeStoreContextPaint(svgContext, this, imgCon);
+  return nsLayoutUtils::DrawSingleImage(
+           *aRenderingContext.ThebesContext(),
+           PresContext(), imgCon,
+           nsLayoutUtils::GetSamplingFilterForFrame(this),
+           dest, dirty,
+           svgContext, aFlags,
+           anchorPoint.ptrOr(nullptr),
+           hasSubRect ? &mSubRect : nullptr);
+}
+
+nsRect
+nsImageBoxFrame::GetDestRect(const nsPoint& aOffset, Maybe<nsPoint>& aAnchorPoint)
+{
+  nsCOMPtr<imgIContainer> imgCon;
+  mImageRequest->GetImage(getter_AddRefs(imgCon));
+  MOZ_ASSERT(imgCon);
+
+  nsRect clientRect;
+  GetXULClientRect(clientRect);
+  clientRect += aOffset;
   nsRect dest;
   if (!mUseSrcAttr) {
     // Our image (if we have one) is coming from the CSS property
@@ -384,7 +403,7 @@ nsImageBoxFrame::PaintImage(nsRenderingContext& aRenderingContext,
     // XXXdholbert Should we even honor these properties in this case? They only
     // apply to replaced elements, and I'm not sure we count as a replaced
     // element when our image data is determined by CSS.
-    dest = constraintRect;
+    dest = clientRect;
   } else {
     // Determine dest rect based on intrinsic size & ratio, along with
     // 'object-fit' & 'object-position' properties:
@@ -400,25 +419,15 @@ nsImageBoxFrame::PaintImage(nsRenderingContext& aRenderingContext,
       // Try to look up intrinsic ratio and use that at least.
       imgCon->GetIntrinsicRatio(&intrinsicRatio);
     }
-    anchorPoint.emplace();
-    dest = nsLayoutUtils::ComputeObjectDestRect(constraintRect,
+    aAnchorPoint.emplace();
+    dest = nsLayoutUtils::ComputeObjectDestRect(clientRect,
                                                 intrinsicSize,
                                                 intrinsicRatio,
                                                 StylePosition(),
-                                                anchorPoint.ptr());
+                                                aAnchorPoint.ptr());
   }
 
-  Maybe<SVGImageContext> svgContext;
-  SVGImageContext::MaybeInitAndStoreContextPaint(svgContext, this, imgCon);
-
-  return nsLayoutUtils::DrawSingleImage(
-           *aRenderingContext.ThebesContext(),
-           PresContext(), imgCon,
-           nsLayoutUtils::GetSamplingFilterForFrame(this),
-           dest, dirty,
-           svgContext, aFlags,
-           anchorPoint.ptrOr(nullptr),
-           hasSubRect ? &mSubRect : nullptr);
+  return dest;
 }
 
 void nsDisplayXULImage::Paint(nsDisplayListBuilder* aBuilder,
@@ -494,12 +503,8 @@ nsDisplayXULImage::GetImage()
 nsRect
 nsDisplayXULImage::GetDestRect() const
 {
-  nsImageBoxFrame* imageFrame = static_cast<nsImageBoxFrame*>(mFrame);
-
-  nsRect clientRect;
-  imageFrame->GetXULClientRect(clientRect);
-
-  return clientRect + ToReferenceFrame();
+  Maybe<nsPoint> anchorPoint;
+  return static_cast<nsImageBoxFrame*>(mFrame)->GetDestRect(ToReferenceFrame(), anchorPoint);
 }
 
 bool
@@ -659,12 +664,6 @@ nscoord
 nsImageBoxFrame::GetXULBoxAscent(nsBoxLayoutState& aState)
 {
   return GetXULPrefSize(aState).height;
-}
-
-nsIAtom*
-nsImageBoxFrame::GetType() const
-{
-  return nsGkAtoms::imageBoxFrame;
 }
 
 #ifdef DEBUG_FRAME_DUMP

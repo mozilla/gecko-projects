@@ -12,7 +12,7 @@ const {
 } = require("devtools/client/shared/vendor/react");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 const Actions = require("../actions/index");
-const { FILTER_SEARCH_DELAY } = require("../constants");
+const { FILTER_SEARCH_DELAY, FILTER_FLAGS } = require("../constants");
 const {
   getDisplayedRequestsSummary,
   getRequestFilterTypes,
@@ -92,6 +92,11 @@ const Toolbar = createClass({
       );
     });
 
+    // Setup autocomplete list
+    let negativeAutocompleteList = FILTER_FLAGS.map((item) => `-${item}`);
+    let autocompleteList = [...FILTER_FLAGS, ...negativeAutocompleteList]
+      .map((item) => `${item}:`);
+
     return (
       span({ className: "devtools-toolbar devtools-toolbar-container" },
         span({ className: "devtools-toolbar-group" },
@@ -109,6 +114,7 @@ const Toolbar = createClass({
             placeholder: SEARCH_PLACE_HOLDER,
             type: "filter",
             onChange: setRequestFilterText,
+            autocompleteList,
           }),
           button({
             className: toggleButtonClassName.join(" "),

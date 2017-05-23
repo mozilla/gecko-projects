@@ -68,7 +68,7 @@ public:
   NS_IMPL_FROMCONTENT(nsGenericHTMLElement, kNameSpaceID_XHTML)
 
   // From Element
-  nsresult CopyInnerTo(mozilla::dom::Element* aDest);
+  nsresult CopyInnerTo(mozilla::dom::Element* aDest, bool aPreallocateChildren);
 
   void GetTitle(mozilla::dom::DOMString& aTitle)
   {
@@ -943,7 +943,9 @@ private:
 
 protected:
   virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                                const nsAttrValue* aValue, bool aNotify) override;
+                                const nsAttrValue* aValue,
+                                const nsAttrValue* aOldValue,
+                                bool aNotify) override;
 
   virtual mozilla::EventListenerManager*
     GetEventListenerManagerForAttr(nsIAtom* aAttrName,
@@ -1226,7 +1228,7 @@ public:
     return mForm;
   }
   virtual void SetForm(nsIDOMHTMLFormElement* aForm) override;
-  virtual void ClearForm(bool aRemoveFromForm) override;
+  virtual void ClearForm(bool aRemoveFromForm, bool aUnbindOrDelete) override;
 
   nsresult GetForm(nsIDOMHTMLFormElement** aForm);
 
@@ -1301,7 +1303,15 @@ protected:
                                  bool aNotify) override;
 
   virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                                const nsAttrValue* aValue, bool aNotify) override;
+                                const nsAttrValue* aValue,
+                                const nsAttrValue* aOldValue,
+                                bool aNotify) override;
+
+  virtual void BeforeSetForm(bool aBindToTree) {}
+
+  virtual void AfterClearForm(bool aUnbindOrDelete) {}
+
+  void SetForm(mozilla::dom::HTMLFormElement* aForm, bool aBindToTree);
 
   /**
    * This method will update the form owner, using @form or looking to a parent.

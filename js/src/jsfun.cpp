@@ -454,6 +454,33 @@ ResolveInterpretedFunctionPrototype(JSContext* cx, HandleFunction fun, HandleId 
                           JSPROP_PERMANENT | JSPROP_RESOLVING);
 }
 
+bool
+JSFunction::needsPrototypeProperty()
+{
+    /*
+     * Built-in functions do not have a .prototype property per ECMA-262,
+     * or (Object.prototype, Function.prototype, etc.) have that property
+     * created eagerly.
+     *
+     * ES5 15.3.4.5: bound functions don't have a prototype property. The
+     * isBuiltin() test covers this case because bound functions are native
+     * (and thus built-in) functions by definition/construction.
+     *
+     * ES6 9.2.8 MakeConstructor defines the .prototype property on constructors.
+     * Generators are not constructors, but they have a .prototype property anyway,
+     * according to errata to ES6. See bug 1191486.
+     *
+     * Thus all of the following don't get a .prototype property:
+     * - Methods (that are not class-constructors or generators)
+     * - Arrow functions
+     * - Function.prototype
+     */
+    if (isBuiltin())
+        return IsWrappedAsyncGenerator(this);
+
+    return isConstructor() || isStarGenerator() || isLegacyGenerator() || isAsync();
+}
+
 static bool
 fun_mayResolve(const JSAtomState& names, jsid id, JSObject*)
 {
@@ -473,32 +500,8 @@ fun_resolve(JSContext* cx, HandleObject obj, HandleId id, bool* resolvedp)
     RootedFunction fun(cx, &obj->as<JSFunction>());
 
     if (JSID_IS_ATOM(id, cx->names().prototype)) {
-        /*
-         * Built-in functions do not have a .prototype property per ECMA-262,
-         * or (Object.prototype, Function.prototype, etc.) have that property
-         * created eagerly.
-         *
-         * ES5 15.3.4.5: bound functions don't have a prototype property. The
-         * isBuiltin() test covers this case because bound functions are native
-         * (and thus built-in) functions by definition/construction.
-         *
-         * ES6 9.2.8 MakeConstructor defines the .prototype property on constructors.
-         * Generators are not constructors, but they have a .prototype property anyway,
-         * according to errata to ES6. See bug 1191486.
-         *
-         * Thus all of the following don't get a .prototype property:
-         * - Methods (that are not class-constructors or generators)
-         * - Arrow functions
-         * - Function.prototype
-         */
-        if (!IsWrappedAsyncGenerator(fun)) {
-            if (fun->isBuiltin())
-                return true;
-            if (!fun->isConstructor()) {
-                if (!fun->isStarGenerator() && !fun->isLegacyGenerator() && !fun->isAsync())
-                    return true;
-            }
-        }
+        if (!fun->needsPrototypeProperty())
+            return true;
 
         if (!ResolveInterpretedFunctionPrototype(cx, fun, id))
             return false;
@@ -537,9 +540,12 @@ fun_resolve(JSContext* cx, HandleObject obj, HandleId id, bool* resolvedp)
             if (fun->hasResolvedName())
                 return true;
 
+            RootedAtom name(cx);
+            if (!JSFunction::getUnresolvedName(cx, fun, &name))
+                return false;
+
             // Don't define an own .name property for unnamed functions.
-            JSAtom* name = fun->getUnresolvedName(cx);
-            if (name == nullptr)
+            if (!name)
                 return true;
 
             v.setString(name);
@@ -729,6 +735,9 @@ js::fun_symbolHasInstance(JSContext* cx, unsigned argc, Value* vp)
 bool
 JS::OrdinaryHasInstance(JSContext* cx, HandleObject objArg, HandleValue v, bool* bp)
 {
+    AssertHeapIsIdle();
+    assertSameCompartment(cx, objArg, v);
+
     RootedObject obj(cx, objArg);
 
     /* Step 1. */
@@ -879,7 +888,8 @@ CreateFunctionPrototype(JSContext* cx, JSProtoKey key)
                                              sourceObject,
                                              begin,
                                              ss->length(),
-                                             0));
+                                             0,
+                                             ss->length()));
     if (!script || !JSScript::initFunctionPrototype(cx, script, functionProto))
         return nullptr;
 
@@ -1016,7 +1026,13 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool prettyPrint)
     }
 
     bool funIsNonArrowLambda = fun->isLambda() && !fun->isArrow();
-    bool haveSource = fun->isInterpreted() && !fun->isSelfHostedBuiltin();
+
+    // Default class constructors are self-hosted, but have their source
+    // objects overridden to refer to the span of the class statement or
+    // expression. Non-default class constructors are never self-hosted. So,
+    // all class constructors always have source.
+    bool haveSource = fun->isInterpreted() && (fun->isClassConstructor() ||
+                                               !fun->isSelfHostedBuiltin());
 
     // If we're not in pretty mode, put parentheses around lambda functions
     // so that eval returns lambda, not function statement.
@@ -1031,7 +1047,7 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool prettyPrint)
         return nullptr;
     }
 
-    auto AppendPrelude = [&out, &fun]() {
+    auto AppendPrelude = [cx, &out, &fun]() {
         if (fun->isAsync()) {
             if (!out.append("async "))
                 return false;
@@ -1050,6 +1066,10 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool prettyPrint)
         if (fun->explicitName()) {
             if (!out.append(' '))
                 return false;
+            if (fun->isBoundFunction()) {
+                if (!out.append(cx->names().boundWithSpace))
+                    return false;
+            }
             if (!out.append(fun->explicitName()))
                 return false;
         }
@@ -1057,7 +1077,7 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool prettyPrint)
     };
 
     if (haveSource) {
-        Rooted<JSFlatString*> src(cx, JSScript::sourceDataWithPrelude(cx, script));
+        Rooted<JSFlatString*> src(cx, JSScript::sourceDataForToString(cx, script));
         if (!src)
             return nullptr;
 
@@ -1077,27 +1097,20 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool prettyPrint)
             return nullptr;
         }
     } else {
-        bool derived = fun->infallibleIsDefaultClassConstructor(cx);
-        if (derived && fun->isDerivedClassConstructor()) {
-            if (!AppendPrelude() ||
-                !out.append("(...args) {\n    ") ||
-                !out.append("super(...args);\n}"))
-            {
-                return nullptr;
-            }
-        } else {
-            if (!AppendPrelude() ||
-                !out.append("() {\n    "))
-                return nullptr;
+        // Default class constructors should always haveSource unless source
+        // has been discarded for the whole compartment.
+        MOZ_ASSERT(!fun->infallibleIsDefaultClassConstructor(cx) ||
+                   fun->compartment()->behaviors().discardSource());
 
-            if (!derived) {
-                if (!out.append("[native code]"))
-                    return nullptr;
-            }
+        if (!AppendPrelude() ||
+            !out.append("() {\n    "))
+            return nullptr;
 
-            if (!out.append("\n}"))
-                return nullptr;
-        }
+        if (!out.append("[native code]"))
+            return nullptr;
+
+        if (!out.append("\n}"))
+            return nullptr;
     }
     return out.finishString();
 }
@@ -1359,23 +1372,42 @@ JSFunction::getUnresolvedLength(JSContext* cx, HandleFunction fun, MutableHandle
     return true;
 }
 
-JSAtom*
-JSFunction::getUnresolvedName(JSContext* cx)
+/* static */ bool
+JSFunction::getUnresolvedName(JSContext* cx, HandleFunction fun, MutableHandleAtom v)
 {
-    MOZ_ASSERT(!IsInternalFunctionObject(*this));
-    MOZ_ASSERT(!hasResolvedName());
+    MOZ_ASSERT(!IsInternalFunctionObject(*fun));
+    MOZ_ASSERT(!fun->hasResolvedName());
 
-    if (isClassConstructor()) {
+    JSAtom* name = fun->explicitOrCompileTimeName();
+    if (fun->isClassConstructor()) {
         // It's impossible to have an empty named class expression. We use
         // empty as a sentinel when creating default class constructors.
-        MOZ_ASSERT(explicitOrCompileTimeName() != cx->names().empty);
+        MOZ_ASSERT(name != cx->names().empty);
 
         // Unnamed class expressions should not get a .name property at all.
-        return explicitOrCompileTimeName();
+        if (name)
+            v.set(name);
+        return true;
     }
 
-    return explicitOrCompileTimeName() != nullptr ? explicitOrCompileTimeName()
-                                                  : cx->names().empty;
+    if (fun->isBoundFunction()) {
+        // Bound functions are never unnamed.
+        MOZ_ASSERT(name);
+
+        StringBuffer sb(cx);
+        if (!sb.append(cx->names().boundWithSpace) || !sb.append(name))
+            return false;
+
+        JSAtom* boundName = sb.finishAtom();
+        if (!boundName)
+            return false;
+
+        v.set(boundName);
+        return true;
+    }
+
+    v.set(name != nullptr ? name : cx->names().empty);
+    return true;
 }
 
 static const js::Value&
@@ -1492,11 +1524,12 @@ JSFunction::createScriptForLazilyInterpretedFunction(JSContext* cx, HandleFuncti
         // Parse and compile the script from source.
         size_t lazyLength = lazy->end() - lazy->begin();
         UncompressedSourceCache::AutoHoldEntry holder;
-        const char16_t* chars = lazy->scriptSource()->chars(cx, holder, lazy->begin(), lazyLength);
-        if (!chars)
+        ScriptSource::PinnedChars chars(cx, lazy->scriptSource(), holder,
+                                        lazy->begin(), lazyLength);
+        if (!chars.get())
             return false;
 
-        if (!frontend::CompileLazyFunction(cx, lazy, chars, lazyLength)) {
+        if (!frontend::CompileLazyFunction(cx, lazy, chars.get(), lazyLength)) {
             // The frontend may have linked the function and the non-lazy
             // script together during bytecode compilation. Reset it now on
             // error.
@@ -1677,7 +1710,7 @@ FunctionConstructor(JSContext* cx, const CallArgs& args, GeneratorKind generator
     }
     if (!sb.append("function"))
          return false;
-    if (isStarGenerator && !isAsync) {
+    if (isStarGenerator) {
         if (!sb.append('*'))
             return false;
     }
@@ -1762,9 +1795,12 @@ FunctionConstructor(JSContext* cx, const CallArgs& args, GeneratorKind generator
 
     // Step 25-32 (reordered).
     RootedObject globalLexical(cx, &global->lexicalEnvironment());
+    JSFunction::Flags flags = (isStarGenerator || isAsync)
+                              ? JSFunction::INTERPRETED_LAMBDA_GENERATOR_OR_ASYNC
+                              : JSFunction::INTERPRETED_LAMBDA;
     AllocKind allocKind = isAsync ? AllocKind::FUNCTION_EXTENDED : AllocKind::FUNCTION;
     RootedFunction fun(cx, NewFunctionWithProto(cx, nullptr, 0,
-                                                JSFunction::INTERPRETED_LAMBDA, globalLexical,
+                                                flags, globalLexical,
                                                 anonymousAtom, proto,
                                                 allocKind, TenuredObject));
     if (!fun)
@@ -2078,7 +2114,11 @@ NewFunctionClone(JSContext* cx, HandleFunction fun, NewObjectKind newKind,
 
     clone->setArgCount(fun->nargs());
     clone->setFlags(flags);
-    clone->initAtom(fun->displayAtom());
+
+    JSAtom* atom = fun->displayAtom();
+    if (atom)
+        cx->markAtom(atom);
+    clone->initAtom(atom);
 
     if (allocKind == AllocKind::FUNCTION_EXTENDED) {
         if (fun->isExtended() && fun->compartment() == cx->compartment()) {

@@ -9,6 +9,7 @@ const {
   DOM,
   PropTypes,
 } = require("devtools/client/shared/vendor/react");
+const { viewSourceInDebugger } = require("../connector/index");
 
 const { div } = DOM;
 
@@ -22,9 +23,7 @@ function StackTracePanel({ request }) {
     div({ className: "panel-container" },
       StackTrace({
         stacktrace,
-        onViewSourceInDebugger: (name, line) => {
-          window.NetMonitorController.viewSourceInDebugger(name, line);
-        },
+        onViewSourceInDebugger: ({ url, line }) => viewSourceInDebugger(url, line),
       }),
     )
   );

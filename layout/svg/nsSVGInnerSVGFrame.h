@@ -13,14 +13,18 @@
 
 class gfxContext;
 
-class nsSVGInnerSVGFrame : public nsSVGDisplayContainerFrame
-                         , public nsISVGSVGFrame
+class nsSVGInnerSVGFrame final
+  : public nsSVGDisplayContainerFrame
+  , public nsISVGSVGFrame
 {
   friend nsIFrame*
   NS_NewSVGInnerSVGFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 protected:
   explicit nsSVGInnerSVGFrame(nsStyleContext* aContext)
-    : nsSVGDisplayContainerFrame(aContext) {}
+    : nsSVGDisplayContainerFrame(aContext,
+                                 mozilla::LayoutFrameType::SVGInnerSVG)
+  {
+  }
 
 public:
   NS_DECL_QUERYFRAME_TARGET(nsSVGInnerSVGFrame)
@@ -32,13 +36,6 @@ public:
                     nsContainerFrame* aParent,
                     nsIFrame*         aPrevInFlow) override;
 #endif
-
-  /**
-   * Get the "type" of the frame
-   *
-   * @see nsGkAtoms::svgInnerSVGFrame
-   */
-  virtual nsIAtom* GetType() const override;
 
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override
@@ -52,10 +49,10 @@ public:
                                      int32_t         aModType) override;
 
   // nsSVGDisplayableFrame interface:
-  virtual DrawResult PaintSVG(gfxContext& aContext,
-                              const gfxMatrix& aTransform,
-                              const nsIntRect *aDirtyRect = nullptr,
-                              uint32_t aFlags = 0) override;
+  virtual void PaintSVG(gfxContext& aContext,
+                        const gfxMatrix& aTransform,
+                        imgDrawingParams& aImgParams,
+                        const nsIntRect* aDirtyRect = nullptr) override;
   virtual void ReflowSVG() override;
   virtual void NotifySVGChanged(uint32_t aFlags) override;
   SVGBBox GetBBoxContribution(const Matrix &aToBBoxUserspace,

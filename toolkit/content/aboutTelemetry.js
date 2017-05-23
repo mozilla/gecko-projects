@@ -245,9 +245,9 @@ var Settings = {
           // The advanced subpanes are only supported in the old organization, which will
           // be removed by bug 1349689.
           if (Preferences.get("browser.preferences.useOldOrganization", false)) {
-            mainWindow.openAdvancedPreferences("dataChoicesTab");
+            mainWindow.openAdvancedPreferences("dataChoicesTab", {origin: "aboutTelemetry"});
           } else {
-            mainWindow.openPreferences("paneAdvanced");
+            mainWindow.openPreferences("paneAdvanced", {origin: "aboutTelemetry"});
           }
         }
       });
@@ -1188,8 +1188,7 @@ var ThreadHangStats = {
       let hangDiv = Histogram.render(
         div, hangName, hang.histogram, {exponential: true}, true);
       let stackDiv = document.createElement("div");
-      let stack = hang.nativeStack || hang.stack;
-      stack.forEach((frame) => {
+      hang.stack.forEach((frame) => {
         stackDiv.appendChild(document.createTextNode(frame));
         // Leave an extra <br> at the end of the stack listing
         stackDiv.appendChild(document.createElement("br"));

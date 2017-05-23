@@ -143,6 +143,7 @@ ContentPrincipal::GenerateOriginNoSuffixFromURI(nsIURI* aURI,
   MOZ_ASSERT(!NS_IsAboutBlank(origin),
              "The inner URI for about:blank must be moz-safe-about:blank");
 
+  // Handle non-strict file:// uris.
   if (!nsScriptSecurityManager::GetStrictFileOriginPolicy() &&
       NS_URIIsLocalFile(origin)) {
     // If strict file origin policy is not in effect, all local files are
@@ -151,22 +152,17 @@ ContentPrincipal::GenerateOriginNoSuffixFromURI(nsIURI* aURI,
     return NS_OK;
   }
 
-  nsAutoCString hostPort;
 
-  // chrome: URLs don't have a meaningful origin, so make
-  // sure we just get the full spec for them.
-  // XXX this should be removed in favor of the solution in
-  // bug 160042.
-  bool isChrome;
-  nsresult rv = origin->SchemeIs("chrome", &isChrome);
-  if (NS_SUCCEEDED(rv) && !isChrome) {
-    rv = origin->GetAsciiHostPort(hostPort);
-    // Some implementations return an empty string, treat it as no support
-    // for asciiHost by that implementation.
-    if (hostPort.IsEmpty()) {
-      rv = NS_ERROR_FAILURE;
-    }
+  nsresult rv;
+// NB: This is only compiled for Thunderbird/Suite.
+#if IS_ORIGIN_IS_FULL_SPEC_DEFINED
+  bool fullSpec = false;
+  rv = NS_URIChainHasFlags(origin, nsIProtocolHandler::ORIGIN_IS_FULL_SPEC, &fullSpec);
+  NS_ENSURE_SUCCESS(rv, rv);
+  if (fullSpec) {
+    return origin->GetAsciiSpec(aOriginNoSuffix);
   }
+#endif
 
   // We want the invariant that prinA.origin == prinB.origin i.f.f.
   // prinA.equals(prinB). However, this requires that we impose certain constraints
@@ -197,14 +193,6 @@ ContentPrincipal::GenerateOriginNoSuffixFromURI(nsIURI* aURI,
     return NS_OK;
   }
 
-  if (NS_SUCCEEDED(rv) && !isChrome) {
-    rv = origin->GetScheme(aOriginNoSuffix);
-    NS_ENSURE_SUCCESS(rv, rv);
-    aOriginNoSuffix.AppendLiteral("://");
-    aOriginNoSuffix.Append(hostPort);
-    return NS_OK;
-  }
-
   // This URL can be a blobURL. In this case, we should use the 'parent'
   // principal instead.
   nsCOMPtr<nsIURIWithPrincipal> uriWithPrincipal = do_QueryInterface(origin);
@@ -230,7 +218,24 @@ ContentPrincipal::GenerateOriginNoSuffixFromURI(nsIURI* aURI,
     return NS_ERROR_FAILURE;
   }
 
-  rv = origin->GetAsciiSpec(aOriginNoSuffix);
+  // See whether we have a useful hostPort. If we do, use that.
+  nsAutoCString hostPort;
+  bool isChrome = false;
+  rv = origin->SchemeIs("chrome", &isChrome);
+  NS_ENSURE_SUCCESS(rv, rv);
+  if (!isChrome) {
+    rv = origin->GetAsciiHostPort(hostPort);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+  if (!hostPort.IsEmpty()) {
+    rv = origin->GetScheme(aOriginNoSuffix);
+    NS_ENSURE_SUCCESS(rv, rv);
+    aOriginNoSuffix.AppendLiteral("://");
+    aOriginNoSuffix.Append(hostPort);
+    return NS_OK;
+  }
+
+  rv = aURI->GetAsciiSpec(aOriginNoSuffix);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // The origin, when taken from the spec, should not contain the ref part of

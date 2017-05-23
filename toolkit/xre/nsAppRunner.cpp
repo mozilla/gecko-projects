@@ -19,6 +19,7 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/intl/LocaleService.h"
 
 #include "nsAppRunner.h"
 #include "mozilla/XREAppData.h"
@@ -89,6 +90,7 @@
 #include "nsIDocShell.h"
 #include "nsAppShellCID.h"
 #include "mozilla/scache/StartupCache.h"
+#include "gfxPlatform.h"
 #include "gfxPrefs.h"
 
 #include "mozilla/Unused.h"
@@ -222,6 +224,12 @@
 extern uint32_t gRestartMode;
 extern void InstallSignalHandlers(const char *ProgramName);
 
+// This workaround is fixed in Rust 1.19. For details, see bug 1358151.
+// Implementation in toolkit/library/rust/shared/lib.rs
+extern "C" {
+  void rust_init_please_remove_this_after_updating_rust_1_19();
+}
+
 #define FILE_COMPATIBILITY_INFO NS_LITERAL_CSTRING("compatibility.ini")
 #define FILE_INVALIDATE_CACHES NS_LITERAL_CSTRING(".purgecaches")
 
@@ -287,6 +295,7 @@ using mozilla::Unused;
 using mozilla::scache::StartupCache;
 using mozilla::dom::ContentParent;
 using mozilla::dom::ContentChild;
+using mozilla::intl::LocaleService;
 
 // Save literal putenv string to environment variable.
 static void
@@ -311,7 +320,7 @@ EnvHasValue(const char *name)
 static void
 SaveWordToEnv(const char *name, const nsACString & word)
 {
-  char *expr = PR_smprintf("%s=%s", name, PromiseFlatCString(word).get());
+  char *expr = Smprintf("%s=%s", name, PromiseFlatCString(word).get()).release();
   if (expr)
     PR_SetEnv(expr);
   // We intentionally leak |expr| here since it is required by PR_SetEnv.
@@ -432,7 +441,7 @@ static MOZ_FORMAT_PRINTF(2, 3) void Output(bool isError, const char *fmt, ... )
   va_start(ap, fmt);
 
 #if defined(XP_WIN) && !MOZ_WINCONSOLE
-  char *msg = mozilla::Vsmprintf(fmt, ap);
+  SmprintfPointer msg = mozilla::Vsmprintf(fmt, ap);
   if (msg)
   {
     UINT flags = MB_OK;
@@ -444,13 +453,12 @@ static MOZ_FORMAT_PRINTF(2, 3) void Output(bool isError, const char *fmt, ... )
     wchar_t wide_msg[1024];
     MultiByteToWideChar(CP_ACP,
                         0,
-                        msg,
+                        msg.get(),
                         -1,
                         wide_msg,
                         sizeof(wide_msg) / sizeof(wchar_t));
 
     MessageBoxW(nullptr, wide_msg, L"XULRunner", flags);
-    mozilla::SmprintfFree(msg);
   }
 #else
   vfprintf(stderr, fmt, ap);
@@ -618,10 +626,7 @@ ProcessDDE(nsINativeAppSupport* aNative, bool aWait)
       // This is just a guesstimate based on testing different values.
       // If count is 8 or less windows will display an error dialog.
       int32_t count = 20;
-      while(--count >= 0) {
-        NS_ProcessNextEvent(thread);
-        PR_Sleep(PR_MillisecondsToInterval(1));
-      }
+      SpinEventLoopUntil([&]() { return --count < 0; });
     }
   }
 }
@@ -928,6 +933,13 @@ NS_IMETHODIMP
 nsXULAppInfo::GetBrowserTabsRemoteAutostart(bool* aResult)
 {
   *aResult = BrowserTabsRemoteAutostart();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsXULAppInfo::GetMaxWebProcessCount(uint32_t* aResult)
+{
+  *aResult = mozilla::GetMaxWebProcessCount();
   return NS_OK;
 }
 
@@ -1648,6 +1660,10 @@ DumpHelp()
   printf("  --console          Start %s with a debugging console.\n", (const char*) gAppData->name);
 #endif
 
+#ifdef MOZ_WIDGET_GTK
+  printf("  --headless         Run without a GUI.\n");
+#endif
+
   // this works, but only after the components have registered.  so if you drop in a new command line handler, --help
   // won't not until the second run.
   // out of the bug, because we ship a component.reg file, it works correctly.
@@ -1814,9 +1830,7 @@ static nsresult LaunchChild(nsINativeAppSupport* aNative,
 
   SaveToEnv("MOZ_LAUNCHED_CHILD=1");
 
-#if defined(MOZ_WIDGET_ANDROID)
-  java::GeckoAppShell::ScheduleRestart();
-#else
+#if !defined(MOZ_WIDGET_ANDROID) // Android has separate restart code.
 #if defined(XP_MACOSX)
   CommandLineServiceMac::SetupMacCommandLine(gRestartArgc, gRestartArgv, true);
   LaunchChildMac(gRestartArgc, gRestartArgv);
@@ -1943,6 +1957,12 @@ ProfileLockedDialog(nsIFile* aProfileDir, nsIFile* aProfileLocalDir,
 
     if (!killMessage || !killTitle)
       return NS_ERROR_FAILURE;
+
+    if (gfxPlatform::IsHeadless()) {
+      // TODO: make a way to turn off all dialogs when headless.
+      Output(true, "%s\n", NS_LossyConvertUTF16toASCII(killMessage).get());
+      return NS_ERROR_FAILURE;
+    }
 
     nsCOMPtr<nsIPromptService> ps
       (do_GetService(NS_PROMPTSERVICE_CONTRACTID));
@@ -2795,7 +2815,7 @@ static void SaveStateForAppInitiatedRestart()
   for (auto & savedVar : gSavedVars) {
     const char *s = PR_GetEnv(savedVar.name);
     if (s)
-      savedVar.value = PR_smprintf("%s=%s", savedVar.name, s);
+      savedVar.value = Smprintf("%s=%s", savedVar.name, s).release();
   }
 }
 
@@ -3099,6 +3119,9 @@ XREMain::XRE_mainInit(bool* aExitFlag)
     return 1;
   *aExitFlag = false;
 
+  // This workaround is fixed in Rust 1.19. For details, see bug 1358151.
+  rust_init_please_remove_this_after_updating_rust_1_19();
+
   atexit(UnexpectedExit);
   auto expectedShutdown = mozilla::MakeScopeExit([&] {
     MozExpectedExit();
@@ -3118,6 +3141,19 @@ XREMain::XRE_mainInit(bool* aExitFlag)
 
   if (ChaosMode::isActive(ChaosFeature::Any)) {
     printf_stderr("*** You are running in chaos test mode. See ChaosMode.h. ***\n");
+  }
+
+  if (CheckArg("headless")) {
+    PR_SetEnv("MOZ_HEADLESS=1");
+  }
+
+  if (gfxPlatform::IsHeadless()) {
+#ifdef MOZ_WIDGET_GTK
+    Output(false, "*** You are running in headless mode.\n");
+#else
+    Output(true, "Error: headless mode is not currently supported on this platform.\n");
+    return 1;
+#endif
   }
 
   nsresult rv;
@@ -3789,31 +3825,38 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
 
 #if defined(MOZ_WIDGET_GTK)
   // display_name is owned by gdk.
-  const char *display_name = gdk_get_display_arg_name();
+  const char *display_name = nullptr;
   bool saveDisplayArg = false;
-  if (display_name) {
-    saveDisplayArg = true;
-  } else {
-    display_name = DetectDisplay();
-    if (!display_name) {
-      return 1;
+  if (!gfxPlatform::IsHeadless()) {
+    display_name = gdk_get_display_arg_name();
+    if (display_name) {
+      saveDisplayArg = true;
+    } else {
+      display_name = DetectDisplay();
+      if (!display_name) {
+        return 1;
+      }
     }
   }
 #endif /* MOZ_WIDGET_GTK */
 #ifdef MOZ_X11
   // Init X11 in thread-safe mode. Must be called prior to the first call to XOpenDisplay
   // (called inside gdk_display_open). This is a requirement for off main tread compositing.
-  XInitThreads();
+  if (!gfxPlatform::IsHeadless()) {
+    XInitThreads();
+  }
 #endif
 #if defined(MOZ_WIDGET_GTK)
-  mGdkDisplay = gdk_display_open(display_name);
-  if (!mGdkDisplay) {
-    PR_fprintf(PR_STDERR, "Error: cannot open display: %s\n", display_name);
-    return 1;
+  if (!gfxPlatform::IsHeadless()) {
+    mGdkDisplay = gdk_display_open(display_name);
+    if (!mGdkDisplay) {
+      PR_fprintf(PR_STDERR, "Error: cannot open display: %s\n", display_name);
+      return 1;
+    }
+    gdk_display_manager_set_default_display (gdk_display_manager_get(),
+                                             mGdkDisplay);
   }
-  gdk_display_manager_set_default_display (gdk_display_manager_get(),
-                                           mGdkDisplay);
-  if (GDK_IS_X11_DISPLAY(mGdkDisplay)) {
+  if (!gfxPlatform::IsHeadless() && GDK_IS_X11_DISPLAY(mGdkDisplay)) {
     if (saveDisplayArg) {
       SaveWordToEnv("DISPLAY", nsDependentCString(display_name));
     }
@@ -3947,7 +3990,13 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
   }
 #endif
 
-#if defined(MOZ_UPDATER) && !defined(MOZ_WIDGET_ANDROID)
+  // Support exiting early for testing startup sequence. Bug 1360493
+  if (CheckArg("test-launch-without-hang")) {
+    *aExitFlag = true;
+    return 0;
+  }
+
+#if defined(MOZ_UPDATER) && !defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_WIDGET_GONK)
   // Check for and process any available updates
   nsCOMPtr<nsIFile> updRoot;
   bool persistent;
@@ -4353,13 +4402,8 @@ XREMain::XRE_mainRun()
 
 #ifdef MOZ_CRASHREPORTER
   nsCString userAgentLocale;
-  // Try a localized string first. This pref is always a localized string in
-  // Fennec, and might be elsewhere, too.
-  if (NS_SUCCEEDED(Preferences::GetLocalizedCString("general.useragent.locale", &userAgentLocale))) {
-    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("useragent_locale"), userAgentLocale);
-  } else if (NS_SUCCEEDED(Preferences::GetCString("general.useragent.locale", &userAgentLocale))) {
-    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("useragent_locale"), userAgentLocale);
-  }
+  LocaleService::GetInstance()->GetAppLocaleAsLangTag(userAgentLocale);
+  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("useragent_locale"), userAgentLocale);
 #endif
 
   appStartup->GetShuttingDown(&mShuttingDown);
@@ -4393,9 +4437,9 @@ XREMain::XRE_mainRun()
   // Ugly details in http://bugzil.la/1175039#c27
   char appFile[MAX_PATH];
   if (GetEnvironmentVariableA("XUL_APP_FILE", appFile, sizeof(appFile))) {
-    char* saved = mozilla::Smprintf("XUL_APP_FILE=%s", appFile);
-    PR_SetEnv(saved);
-    mozilla::SmprintfFree(saved);
+    SmprintfPointer saved = mozilla::Smprintf("XUL_APP_FILE=%s", appFile);
+    // We intentionally leak the string here since it is required by PR_SetEnv.
+    PR_SetEnv(saved.release());
   }
 #endif
 
@@ -4748,7 +4792,9 @@ XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig)
     }
 
 #ifdef MOZ_WIDGET_GTK
-    MOZ_gdk_display_close(mGdkDisplay);
+    if (!gfxPlatform::IsHeadless()) {
+      MOZ_gdk_display_close(mGdkDisplay);
+    }
 #endif
 
     {
@@ -4765,7 +4811,9 @@ XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig)
 #ifdef MOZ_WIDGET_GTK
   // gdk_display_close also calls gdk_display_manager_set_default_display
   // appropriately when necessary.
-  MOZ_gdk_display_close(mGdkDisplay);
+  if (!gfxPlatform::IsHeadless()) {
+    MOZ_gdk_display_close(mGdkDisplay);
+  }
 #endif
 
 #ifdef MOZ_CRASHREPORTER
@@ -4890,10 +4938,20 @@ XRE_IsGPUProcess()
   return XRE_GetProcessType() == GeckoProcessType_GPU;
 }
 
+/**
+ * Returns true in the e10s parent process and in the main process when e10s
+ * is disabled.
+ */
 bool
 XRE_IsParentProcess()
 {
   return XRE_GetProcessType() == GeckoProcessType_Default;
+}
+
+bool
+XRE_IsE10sParentProcess()
+{
+  return XRE_IsParentProcess() && BrowserTabsRemoteAutostart();
 }
 
 bool
@@ -5001,8 +5059,10 @@ MultiprocessBlockPolicy() {
   return 0;
 }
 
+namespace mozilla {
+
 bool
-mozilla::BrowserTabsRemoteAutostart()
+BrowserTabsRemoteAutostart()
 {
   if (gBrowserTabsRemoteAutostartInitialized) {
     return gBrowserTabsRemoteAutostart;
@@ -5061,13 +5121,40 @@ mozilla::BrowserTabsRemoteAutostart()
   return gBrowserTabsRemoteAutostart;
 }
 
-namespace mozilla {
+uint32_t
+GetMaxWebProcessCount()
+{
+  // multiOptOut is in int to allow us to run multiple experiments without
+  // introducing multiple prefs a la the autostart.N prefs.
+  if (Preferences::GetInt("dom.ipc.multiOptOut", 0) >=
+          nsIXULRuntime::E10S_MULTI_EXPERIMENT) {
+    return 1;
+  }
+
+  const char* optInPref = "dom.ipc.processCount";
+  uint32_t optInPrefValue = Preferences::GetInt(optInPref, 1);
+
+  // If the user has set dom.ipc.processCount, respect their decision
+  // regardless of add-ons that might affect their experience or experiment
+  // cohort.
+  if (Preferences::HasUserValue(optInPref)) {
+    return std::max(1u, optInPrefValue);
+  }
+
+  if (Preferences::HasUserValue("dom.ipc.processCount.web")) {
+    // The user didn't opt in or out so read the .web version of the pref.
+    return std::max(1, Preferences::GetInt("dom.ipc.processCount.web", 1));
+  }
+  return optInPrefValue;
+}
+
 const char*
 PlatformBuildID()
 {
   return gToolkitBuildID;
 }
-}
+
+} // namespace mozilla
 
 void
 SetupErrorHandling(const char* progname)

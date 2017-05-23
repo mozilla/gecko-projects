@@ -8,9 +8,12 @@ const {
   ACTIVITY_TYPE,
   OPEN_NETWORK_DETAILS,
   OPEN_STATISTICS,
+  RESET_COLUMNS,
   SELECT_DETAILS_PANEL_TAB,
+  TOGGLE_COLUMN,
   WATERFALL_RESIZE,
 } = require("../constants");
+const { triggerActivity } = require("../connector/index");
 
 /**
  * Change network details panel.
@@ -31,11 +34,21 @@ function openNetworkDetails(open) {
  */
 function openStatistics(open) {
   if (open) {
-    window.NetMonitorController.triggerActivity(ACTIVITY_TYPE.RELOAD.WITH_CACHE_ENABLED);
+    triggerActivity(ACTIVITY_TYPE.RELOAD.WITH_CACHE_ENABLED);
   }
   return {
     type: OPEN_STATISTICS,
     open,
+  };
+}
+
+/**
+ * Resets all columns to their default state.
+ *
+ */
+function resetColumns() {
+  return {
+    type: RESET_COLUMNS,
   };
 }
 
@@ -62,6 +75,18 @@ function selectDetailsPanelTab(id) {
 }
 
 /**
+ * Toggles a column
+ *
+ * @param {string} column - The column that is going to be toggled
+ */
+function toggleColumn(column) {
+  return {
+    type: TOGGLE_COLUMN,
+    column,
+  };
+}
+
+/**
  * Toggle network details panel.
  */
 function toggleNetworkDetails() {
@@ -80,8 +105,10 @@ function toggleStatistics() {
 module.exports = {
   openNetworkDetails,
   openStatistics,
+  resetColumns,
   resizeWaterfall,
   selectDetailsPanelTab,
+  toggleColumn,
   toggleNetworkDetails,
   toggleStatistics,
 };

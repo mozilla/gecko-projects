@@ -286,7 +286,7 @@ interface nsIHttpChannel : nsIChannel
 
    /** Indicates whether channel should be treated as the main one for the
     *  current document.  If manually set to true, will always remain true.  Otherwise,
-    *  will be true iff LOAD_DOCUMENT_URI is set in the channel's loadflags.
+    *  will be true if LOAD_DOCUMENT_URI is set in the channel's loadflags.
     */
     [must_use] attribute boolean isMainDocumentChannel;
 
@@ -447,14 +447,14 @@ interface nsIHttpChannel : nsIChannel
     /**
      * Identifies the request context for this load.
      */
-    [noscript, must_use] attribute nsID requestContextID;
+    [noscript, must_use] attribute uint64_t requestContextID;
 
     /**
      * Unique ID of the channel, shared between parent and child. Needed if
      * the channel activity needs to be monitored across process boundaries,
      * like in devtools net monitor. See bug 1274556.
      */
-    [must_use] attribute ACString channelId;
+    [must_use] attribute uint64_t channelId;
 
     /**
      * ID of the top-level document's inner window.  Identifies the content

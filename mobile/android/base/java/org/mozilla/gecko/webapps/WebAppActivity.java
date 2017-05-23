@@ -12,10 +12,11 @@ import android.app.ActivityManager;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
+import android.support.v7.view.ActionMode;
 import android.support.v7.widget.Toolbar;
 import android.support.v7.app.ActionBar;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
 import android.view.Window;
@@ -28,10 +29,12 @@ import org.json.JSONException;
 
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.EventDispatcher;
-import org.mozilla.gecko.GeckoApp;
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoProfile;
+import org.mozilla.gecko.SingleTabActivity;
+import org.mozilla.gecko.Telemetry;
+import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.icons.decoders.FaviconDecoder;
+import org.mozilla.gecko.icons.decoders.LoadFaviconResult;
 import org.mozilla.gecko.mozglue.SafeIntent;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Tab;
@@ -40,27 +43,37 @@ import org.mozilla.gecko.util.ColorUtil;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.FileUtils;
 import org.mozilla.gecko.util.GeckoBundle;
+import org.mozilla.gecko.widget.ActionModePresenter;
+import org.mozilla.gecko.widget.AnchoredPopup;
 
-public class WebAppActivity extends GeckoApp {
+import static org.mozilla.gecko.Tabs.TabEvents;
 
-    public static final String INTENT_KEY = "IS_A_WEBAPP";
-    public static final String MANIFEST_PATH = "MANIFEST_PATH";
-
+public class WebAppActivity extends SingleTabActivity {
     private static final String LOGTAG = "WebAppActivity";
 
+    public static final String MANIFEST_PATH = "MANIFEST_PATH";
+    private static final String SAVED_INTENT = "savedIntent";
+
     private TextView mUrlView;
-    private String mManifestPath;
+    private View doorhangerOverlay;
+
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
+        if ((getIntent().getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0 &&
+        savedInstanceState != null) {
+            // Even though we're a single task activity, Android's task switcher has the
+            // annoying habit of never updating its stored intent after our initial creation,
+            // even if we've been subsequently started with a new intent.
 
-        if (savedInstanceState != null) {
-            mManifestPath = savedInstanceState.getString(WebAppActivity.MANIFEST_PATH, null);
-        } else {
-            mManifestPath = getIntent().getStringExtra(WebAppActivity.MANIFEST_PATH);
+            // This below is needed if we should ever decide to store a custom class as intent extra.
+            savedInstanceState.setClassLoader(getClass().getClassLoader());
+
+            Intent lastLaunchIntent = savedInstanceState.getParcelable(SAVED_INTENT);
+            setIntent(lastLaunchIntent);
         }
-        loadManifest(mManifestPath);
+
+        super.onCreate(savedInstanceState);
 
         final Toolbar toolbar = (Toolbar) findViewById(R.id.actionbar);
         setSupportActionBar(toolbar);
@@ -74,15 +87,22 @@ public class WebAppActivity extends GeckoApp {
         actionBar.setDisplayShowTitleEnabled(false);
         actionBar.hide();
 
+        doorhangerOverlay = findViewById(R.id.custom_tabs_doorhanger_overlay);
+
         final View customView = actionBar.getCustomView();
         mUrlView = (TextView) customView.findViewById(R.id.webapps_action_bar_url);
 
         EventDispatcher.getInstance().registerUiThreadListener(this,
-                    "Website:AppEntered",
-                    "Website:AppLeft",
-                    null);
+                "Website:AppEntered",
+                "Website:AppLeft",
+                null);
 
         Tabs.registerOnTabsChangedListener(this);
+    }
+
+    @Override
+    public View getDoorhangerOverlay() {
+        return doorhangerOverlay;
     }
 
     @Override
@@ -93,6 +113,13 @@ public class WebAppActivity extends GeckoApp {
     @Override
     public void handleMessage(final String event, final GeckoBundle message,
                               final EventCallback callback) {
+        super.handleMessage(event, message, callback);
+
+        if (message == null ||
+                !message.containsKey("tabId") || message.getInt("tabId") != mLastSelectedTabId) {
+            return;
+        }
+
         switch (event) {
             case "Website:AppEntered":
                 getSupportActionBar().hide();
@@ -106,11 +133,13 @@ public class WebAppActivity extends GeckoApp {
 
     @Override
     public void onTabChanged(Tab tab, Tabs.TabEvents msg, String data) {
-        if (!Tabs.getInstance().isSelectedTab(tab)) {
+        if (tab == null || !Tabs.getInstance().isSelectedTab(tab) ||
+                tab.getType() != Tab.TabType.WEBAPP) {
             return;
         }
 
-        if (msg == Tabs.TabEvents.LOCATION_CHANGE) {
+        if (msg == TabEvents.LOCATION_CHANGE ||
+                msg == TabEvents.SELECTED) {
             mUrlView.setText(tab.getURL());
         }
     }
@@ -119,16 +148,16 @@ public class WebAppActivity extends GeckoApp {
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
 
-        outState.putString(WebAppActivity.MANIFEST_PATH, mManifestPath);
+        outState.putParcelable(SAVED_INTENT, getIntent());
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
         EventDispatcher.getInstance().unregisterUiThreadListener(this,
-              "Website:AppEntered",
-              "Website:AppLeft",
-              null);
+                "Website:AppEntered",
+                "Website:AppLeft",
+                null);
         Tabs.unregisterOnTabsChangedListener(this);
     }
 
@@ -137,32 +166,68 @@ public class WebAppActivity extends GeckoApp {
         return Tabs.LOADURL_WEBAPP | super.getNewTabFlags();
     }
 
+    @Override
+    protected void onTabOpenFromIntent(Tab tab) {
+        super.onTabOpenFromIntent(tab);
+        Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL, TelemetryContract.Method.INTENT, "webapp");
+        loadManifest(tab.getManifestPath());
+    }
+
     /**
-     * In case this activity is reused (the user has opened > 10 current web apps)
-     * we check that app launched is still within the same host as the
-     * shortcut has set, if not we reload the homescreens url
+     * In case this activity and its tab are reused (the user has opened
+     *  > 10 current web apps), we check that app launched is still within
+     * the same host as the intent has set.
+     * If it isn't, we reload the intent URL.
      */
     @Override
-    protected void onNewIntent(Intent externalIntent) {
+    protected void onTabSelectFromIntent(Tab tab) {
+        super.onTabSelectFromIntent(tab);
 
-        restoreLastSelectedTab();
+        SafeIntent intent = new SafeIntent(getIntent());
 
-        final SafeIntent intent = new SafeIntent(externalIntent);
         final String launchUrl = intent.getDataString();
-        final String currentUrl = Tabs.getInstance().getSelectedTab().getURL();
+        final String currentUrl = tab.getURL();
         final boolean isSameDomain = Uri.parse(currentUrl).getHost()
-            .equals(Uri.parse(launchUrl).getHost());
+                .equals(Uri.parse(launchUrl).getHost());
 
+        final String manifestPath;
         if (!isSameDomain) {
-            mManifestPath = externalIntent.getStringExtra(WebAppActivity.MANIFEST_PATH);
-            loadManifest(mManifestPath);
+            Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL, TelemetryContract.Method.INTENT, "webapp");
+            manifestPath = intent.getStringExtra(MANIFEST_PATH);
+            tab.setManifestUrl(manifestPath);
             Tabs.getInstance().loadUrl(launchUrl);
+        } else {
+            manifestPath = tab.getManifestPath();
         }
+        loadManifest(manifestPath);
+    }
+
+    @Override
+    protected ActionModePresenter getTextSelectPresenter() {
+        return new ActionModePresenter() {
+            private ActionMode mMode;
+
+            @Override
+            public void startActionMode(ActionMode.Callback callback) {
+                mMode = startSupportActionMode(callback);
+            }
+
+            @Override
+            public void endActionMode() {
+                if (mMode != null) {
+                    mMode.finish();
+                }
+            }
+        };
     }
 
     private void loadManifest(String manifestPath) {
-        if (manifestPath == null) {
+        if (TextUtils.isEmpty(manifestPath)) {
             Log.e(LOGTAG, "Missing manifest");
+            return;
+        }
+        // The customisations defined in the manifest only work on Android API 21+
+        if (AppConstants.Versions.preLollipop) {
             return;
         }
 
@@ -174,8 +239,8 @@ public class WebAppActivity extends GeckoApp {
             final String name = readNameFromManifest(manifestField);
             final Bitmap icon = readIconFromManifest(manifest);
             final ActivityManager.TaskDescription taskDescription = (color == null)
-                ? new ActivityManager.TaskDescription(name, icon)
-                : new ActivityManager.TaskDescription(name, icon, color);
+                    ? new ActivityManager.TaskDescription(name, icon)
+                    : new ActivityManager.TaskDescription(name, icon, color);
 
             updateStatusBarColor(color);
             setTaskDescription(taskDescription);
@@ -186,7 +251,7 @@ public class WebAppActivity extends GeckoApp {
     }
 
     private void updateStatusBarColor(final Integer themeColor) {
-        if (themeColor != null && !AppConstants.Versions.preLollipop) {
+        if (themeColor != null) {
             final Window window = getWindow();
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
             window.setStatusBarColor(ColorUtil.darken(themeColor, 0.25));
@@ -214,11 +279,14 @@ public class WebAppActivity extends GeckoApp {
 
     private Bitmap readIconFromManifest(JSONObject manifest) {
         final String iconStr = manifest.optString("cached_icon", null);
-        if (iconStr != null) {
-            return FaviconDecoder
-                .decodeDataURI(getContext(), iconStr)
-                .getBestBitmap(GeckoAppShell.getPreferredIconSize());
+        if (iconStr == null) {
+            return null;
         }
-        return null;
+        final LoadFaviconResult loadIconResult = FaviconDecoder
+            .decodeDataURI(getContext(), iconStr);
+        if (loadIconResult == null) {
+            return null;
+        }
+        return loadIconResult.getBestBitmap(GeckoAppShell.getPreferredIconSize());
     }
 }

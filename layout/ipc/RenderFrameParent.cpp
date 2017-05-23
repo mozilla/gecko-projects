@@ -114,15 +114,22 @@ RenderFrameParent::Init(nsFrameLoader* aFrameLoader)
 
   TabParent* browser = TabParent::GetFrom(mFrameLoader);
   if (XRE_IsParentProcess()) {
+    PCompositorBridgeChild* compositor = nullptr;
+    if (lm) {
+      compositor = lm->GetCompositorBridgeChild();
+    }
+
     // Our remote frame will push layers updates to the compositor,
     // and we'll keep an indirect reference to that tree.
-    browser->Manager()->AsContentParent()->AllocateLayerTreeId(browser, &mLayersId);
-    if (lm && lm->GetCompositorBridgeChild()) {
-      mLayersConnected = lm->GetCompositorBridgeChild()->SendNotifyChildCreated(mLayersId);
-    }
+    GPUProcessManager* gpm = GPUProcessManager::Get();
+    mLayersConnected = gpm->AllocateAndConnectLayerTreeId(
+      compositor,
+      browser->Manager()->AsContentParent()->OtherPid(),
+      &mLayersId,
+      &mCompositorOptions);
   } else if (XRE_IsContentProcess()) {
     ContentChild::GetSingleton()->SendAllocateLayerTreeId(browser->Manager()->ChildID(), browser->GetTabId(), &mLayersId);
-    mLayersConnected = CompositorBridgeChild::Get()->SendNotifyChildCreated(mLayersId);
+    mLayersConnected = CompositorBridgeChild::Get()->SendNotifyChildCreated(mLayersId, &mCompositorOptions);
   }
 
   mInitted = true;
@@ -139,6 +146,7 @@ void
 RenderFrameParent::Destroy()
 {
   mFrameLoaderDestroyed = true;
+  mLayerManager = nullptr;
 }
 
 already_AddRefed<Layer>
@@ -199,18 +207,35 @@ RenderFrameParent::BuildLayer(nsDisplayListBuilder* aBuilder,
   return layer.forget();
 }
 
+LayerManager*
+RenderFrameParent::AttachLayerManager()
+{
+  RefPtr<LayerManager> lm;
+
+  if (mFrameLoader) {
+    nsIContent* content = mFrameLoader->GetOwnerContent();
+    if (content) {
+      lm = nsContentUtils::LayerManagerForContent(content);
+    }
+  }
+
+  // Perhaps the document containing this frame currently has no presentation?
+  if (lm && lm->GetCompositorBridgeChild() && lm != mLayerManager) {
+    mLayersConnected = lm->GetCompositorBridgeChild()->SendAdoptChild(mLayersId);
+    FrameLayerBuilder::InvalidateAllLayers(lm);
+  }
+
+  mLayerManager = lm.forget();
+  return mLayerManager;
+}
+
 void
 RenderFrameParent::OwnerContentChanged(nsIContent* aContent)
 {
   MOZ_ASSERT(!mFrameLoader || mFrameLoader->GetOwnerContent() == aContent,
              "Don't build new map if owner is same!");
 
-  RefPtr<LayerManager> lm = mFrameLoader ? GetFrom(mFrameLoader) : nullptr;
-  // Perhaps the document containing this frame currently has no presentation?
-  if (lm && lm->GetCompositorBridgeChild()) {
-    mLayersConnected = lm->GetCompositorBridgeChild()->SendAdoptChild(mLayersId);
-    FrameLayerBuilder::InvalidateAllLayers(lm);
-  }
+  Unused << AttachLayerManager();
 }
 
 void
@@ -225,6 +250,7 @@ RenderFrameParent::ActorDestroy(ActorDestroyReason why)
   }
 
   mFrameLoader = nullptr;
+  mLayerManager = nullptr;
 }
 
 mozilla::ipc::IPCResult
@@ -300,7 +326,7 @@ RenderFrameParent::TakeFocusForClickFromTap()
 }
 
 void
-RenderFrameParent::EnsureLayersConnected()
+RenderFrameParent::EnsureLayersConnected(CompositorOptions* aCompositorOptions)
 {
   RefPtr<LayerManager> lm = GetFrom(mFrameLoader);
   if (!lm) {
@@ -311,7 +337,8 @@ RenderFrameParent::EnsureLayersConnected()
     return;
   }
 
-  mLayersConnected = lm->GetCompositorBridgeChild()->SendNotifyChildRecreated(mLayersId);
+  mLayersConnected = lm->GetCompositorBridgeChild()->SendNotifyChildRecreated(mLayersId, &mCompositorOptions);
+  *aCompositorOptions = mCompositorOptions;
 }
 
 } // namespace layout

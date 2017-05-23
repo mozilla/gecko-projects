@@ -676,7 +676,7 @@ NotificationController::WillRefresh(mozilla::TimeStamp aTime)
         }
   #endif
 
-        mDocument->ContentRemoved(containerElm, textNode);
+        mDocument->ContentRemoved(textAcc);
         continue;
       }
 
@@ -794,10 +794,6 @@ NotificationController::WillRefresh(mozilla::TimeStamp aTime)
   // Process invalidation list of the document after all accessible tree
   // modification are done.
   mDocument->ProcessInvalidationList();
-
-  // We cannot rely on DOM tree to keep aria-owns relations updated. Make
-  // a validation to remove dead links.
-  mDocument->ValidateARIAOwned();
 
   // Process relocation list.
   for (uint32_t idx = 0; idx < mRelocations.Length(); idx++) {

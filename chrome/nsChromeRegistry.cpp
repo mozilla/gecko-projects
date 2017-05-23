@@ -19,7 +19,6 @@
 #include "nsIConsoleService.h"
 #include "nsIDocument.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMLocation.h"
 #include "nsIDOMWindowCollection.h"
 #include "nsIDOMWindow.h"
 #include "nsIObserverService.h"
@@ -31,6 +30,7 @@
 #include "mozilla/Printf.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
+#include "mozilla/dom/Location.h"
 
 #ifdef ENABLE_INTL_API
 #include "unicode/uloc.h"
@@ -42,6 +42,7 @@ nsChromeRegistry* nsChromeRegistry::gChromeRegistry;
 // mozilla::TextRange and a TextRange in OSX headers.
 using mozilla::StyleSheet;
 using mozilla::dom::IsChromeURI;
+using mozilla::dom::Location;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -55,13 +56,12 @@ nsChromeRegistry::LogMessage(const char* aMsg, ...)
 
   va_list args;
   va_start(args, aMsg);
-  char* formatted = mozilla::Vsmprintf(aMsg, args);
+  mozilla::SmprintfPointer formatted = mozilla::Vsmprintf(aMsg, args);
   va_end(args);
   if (!formatted)
     return;
 
-  console->LogStringMessage(NS_ConvertUTF8toUTF16(formatted).get());
-  mozilla::SmprintfFree(formatted);
+  console->LogStringMessage(NS_ConvertUTF8toUTF16(formatted.get()).get());
 }
 
 void
@@ -80,7 +80,7 @@ nsChromeRegistry::LogMessageWithContext(nsIURI* aURL, uint32_t aLineNumber, uint
 
   va_list args;
   va_start(args, aMsg);
-  char* formatted = mozilla::Vsmprintf(aMsg, args);
+  mozilla::SmprintfPointer formatted = mozilla::Vsmprintf(aMsg, args);
   va_end(args);
   if (!formatted)
     return;
@@ -89,11 +89,10 @@ nsChromeRegistry::LogMessageWithContext(nsIURI* aURL, uint32_t aLineNumber, uint
   if (aURL)
     aURL->GetSpec(spec);
 
-  rv = error->Init(NS_ConvertUTF8toUTF16(formatted),
+  rv = error->Init(NS_ConvertUTF8toUTF16(formatted.get()),
                    NS_ConvertUTF8toUTF16(spec),
                    EmptyString(),
                    aLineNumber, 0, flags, "chrome registration");
-  mozilla::SmprintfFree(formatted);
 
   if (NS_FAILED(rv))
     return;
@@ -293,16 +292,6 @@ nsChromeRegistry::ConvertChromeURL(nsIURI* aChromeURI, nsIURI* *aResult)
   rv = GetFlagsFromPackage(package, &flags);
   if (NS_FAILED(rv))
     return rv;
-
-  if (flags & PLATFORM_PACKAGE) {
-#if defined(XP_WIN)
-    path.Insert("win/", 0);
-#elif defined(XP_MACOSX)
-    path.Insert("mac/", 0);
-#else
-    path.Insert("unix/", 0);
-#endif
-  }
 
   if (!baseURI) {
     LogMessage("No chrome package registered for chrome://%s/%s/%s",
@@ -510,7 +499,7 @@ nsChromeRegistry::ReloadChrome()
         if (NS_SUCCEEDED(rv)) {
           nsCOMPtr<nsPIDOMWindowOuter> domWindow = do_QueryInterface(protoWindow);
           if (domWindow) {
-            nsIDOMLocation* location = domWindow->GetLocation();
+            Location* location = domWindow->GetLocation();
             if (location) {
               rv = location->Reload(false);
               if (NS_FAILED(rv)) return rv;

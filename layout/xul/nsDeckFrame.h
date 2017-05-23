@@ -17,7 +17,7 @@
 #include "mozilla/Attributes.h"
 #include "nsBoxFrame.h"
 
-class nsDeckFrame : public nsBoxFrame
+class nsDeckFrame final : public nsBoxFrame
 {
 public:
   NS_DECL_QUERYFRAME_TARGET(nsDeckFrame)
@@ -41,12 +41,10 @@ public:
 
   virtual void BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
                                            const nsDisplayListSet& aLists) override;
-                                         
+
   virtual void Init(nsIContent*       aContent,
                     nsContainerFrame* aParent,
                     nsIFrame*         aPrevInFlow) override;
-
-  virtual nsIAtom* GetType() const override;
 
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override

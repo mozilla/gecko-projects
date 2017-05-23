@@ -4,6 +4,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+with Files('**'):
+    BUG_COMPONENT = ('Toolkit', 'WebExtensions: General')
+
 EXTRA_JS_MODULES += [
     'Extension.jsm',
     'ExtensionAPI.jsm',
@@ -11,6 +14,7 @@ EXTRA_JS_MODULES += [
     'ExtensionCommon.jsm',
     'ExtensionContent.jsm',
     'ExtensionManagement.jsm',
+    'ExtensionPageChild.jsm',
     'ExtensionParent.jsm',
     'ExtensionPermissions.jsm',
     'ExtensionPreferencesManager.jsm',
@@ -35,7 +39,10 @@ TESTING_JS_MODULES += [
     'ExtensionXPCShellUtils.jsm',
 ]
 
-DIRS += ['schemas']
+DIRS += [
+    'schemas',
+    'webrequest',
+]
 
 JAR_MANIFESTS += ['jar.mn']
 

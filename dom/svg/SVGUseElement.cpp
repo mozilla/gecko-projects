@@ -15,6 +15,8 @@
 #include "mozilla/dom/Element.h"
 #include "nsContentUtils.h"
 #include "nsIURI.h"
+#include "mozilla/URLExtraData.h"
+#include "nsSVGEffects.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Use)
 
@@ -87,7 +89,8 @@ SVGUseElement::~SVGUseElement()
 // nsIDOMNode methods
 
 nsresult
-SVGUseElement::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const
+SVGUseElement::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
+                     bool aPreallocateChildren) const
 {
   *aResult = nullptr;
   already_AddRefed<mozilla::dom::NodeInfo> ni = RefPtr<mozilla::dom::NodeInfo>(aNodeInfo).forget();
@@ -95,7 +98,7 @@ SVGUseElement::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult) const
 
   nsCOMPtr<nsINode> kungFuDeathGrip(it);
   nsresult rv1 = it->Init();
-  nsresult rv2 = const_cast<SVGUseElement*>(this)->CopyInnerTo(it);
+  nsresult rv2 = const_cast<SVGUseElement*>(this)->CopyInnerTo(it, aPreallocateChildren);
 
   // SVGUseElement specific portion - record who we cloned from
   it->mOriginal = const_cast<SVGUseElement*>(this);
@@ -327,10 +330,13 @@ SVGUseElement::CreateAnonymousContent()
   }
 
   // Store the base URI
-  mContentBaseURI = targetContent->GetBaseURI();
-  if (!mContentBaseURI) {
+  nsCOMPtr<nsIURI> baseURI = targetContent->GetBaseURI();
+  if (!baseURI) {
     return nullptr;
   }
+  mContentURLData = new URLExtraData(baseURI.forget(),
+                                     do_AddRef(OwnerDoc()->GetDocumentURI()),
+                                     do_AddRef(NodePrincipal()));
 
   targetContent->AddMutationObserver(this);
   mClone = newcontent;
@@ -418,11 +424,15 @@ SVGUseElement::LookupHref()
     return;
   }
 
+  nsCOMPtr<nsIURI> originURI =
+    mOriginal ? mOriginal->GetBaseURI() : GetBaseURI();
+  nsCOMPtr<nsIURI> baseURI = nsContentUtils::IsLocalRefURL(href)
+    ? nsSVGEffects::GetBaseURLForLocalRef(this, originURI)
+    : originURI;
+
   nsCOMPtr<nsIURI> targetURI;
-  nsCOMPtr<nsIURI> baseURI = mOriginal ? mOriginal->GetBaseURI() : GetBaseURI();
   nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(targetURI), href,
                                             GetComposedDoc(), baseURI);
-
   mSource.Reset(this, targetURI);
 }
 

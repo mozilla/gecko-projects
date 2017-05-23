@@ -10,7 +10,6 @@
 
 Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/AppConstants.jsm");
-Components.utils.import("resource://gre/modules/Task.jsm");
 
 const TYPE_MAYBE_FEED = "application/vnd.mozilla.maybe.feed";
 const TYPE_MAYBE_VIDEO_FEED = "application/vnd.mozilla.maybe.video.feed";
@@ -224,7 +223,7 @@ HandlerInfoWrapper.prototype = {
       if (possibleApps.getNext().equals(aNewHandler))
         return;
     }
-    this.possibleApplicationHandlers.appendElement(aNewHandler, false);
+    this.possibleApplicationHandlers.appendElement(aNewHandler);
   },
 
   removePossibleApplicationHandler(aHandler) {
@@ -574,13 +573,13 @@ FeedHandlerInfo.prototype = {
       let preferredApp = getLocalHandlerApp(preferredAppFile);
       let defaultApp = this._defaultApplicationHandler;
       if (!defaultApp || !defaultApp.equals(preferredApp))
-        this._possibleApplicationHandlers.appendElement(preferredApp, false);
+        this._possibleApplicationHandlers.appendElement(preferredApp);
     }
 
     // Add the registered web handlers.  There can be any number of these.
     var webHandlers = this._converterSvc.getContentHandlers(this.type);
     for (let webHandler of webHandlers)
-      this._possibleApplicationHandlers.appendElement(webHandler, false);
+      this._possibleApplicationHandlers.appendElement(webHandler);
 
     return this._possibleApplicationHandlers;
   },
@@ -801,7 +800,7 @@ InternalHandlerInfoWrapper.prototype = {
   // or unregistration of this handler.
   store() {
     HandlerInfoWrapper.prototype.store.call(this);
-    Services.obs.notifyObservers(null, this._handlerChanged, null);
+    Services.obs.notifyObservers(null, this._handlerChanged);
   },
 
   get enabled() {
@@ -887,22 +886,22 @@ var gApplicationsPane = {
 
     // Observe preferences that influence what we display so we can rebuild
     // the view when they change.
-    this._prefSvc.addObserver(PREF_SHOW_PLUGINS_IN_LIST, this, false);
-    this._prefSvc.addObserver(PREF_HIDE_PLUGINS_WITHOUT_EXTENSIONS, this, false);
-    this._prefSvc.addObserver(PREF_FEED_SELECTED_APP, this, false);
-    this._prefSvc.addObserver(PREF_FEED_SELECTED_WEB, this, false);
-    this._prefSvc.addObserver(PREF_FEED_SELECTED_ACTION, this, false);
-    this._prefSvc.addObserver(PREF_FEED_SELECTED_READER, this, false);
+    this._prefSvc.addObserver(PREF_SHOW_PLUGINS_IN_LIST, this);
+    this._prefSvc.addObserver(PREF_HIDE_PLUGINS_WITHOUT_EXTENSIONS, this);
+    this._prefSvc.addObserver(PREF_FEED_SELECTED_APP, this);
+    this._prefSvc.addObserver(PREF_FEED_SELECTED_WEB, this);
+    this._prefSvc.addObserver(PREF_FEED_SELECTED_ACTION, this);
+    this._prefSvc.addObserver(PREF_FEED_SELECTED_READER, this);
 
-    this._prefSvc.addObserver(PREF_VIDEO_FEED_SELECTED_APP, this, false);
-    this._prefSvc.addObserver(PREF_VIDEO_FEED_SELECTED_WEB, this, false);
-    this._prefSvc.addObserver(PREF_VIDEO_FEED_SELECTED_ACTION, this, false);
-    this._prefSvc.addObserver(PREF_VIDEO_FEED_SELECTED_READER, this, false);
+    this._prefSvc.addObserver(PREF_VIDEO_FEED_SELECTED_APP, this);
+    this._prefSvc.addObserver(PREF_VIDEO_FEED_SELECTED_WEB, this);
+    this._prefSvc.addObserver(PREF_VIDEO_FEED_SELECTED_ACTION, this);
+    this._prefSvc.addObserver(PREF_VIDEO_FEED_SELECTED_READER, this);
 
-    this._prefSvc.addObserver(PREF_AUDIO_FEED_SELECTED_APP, this, false);
-    this._prefSvc.addObserver(PREF_AUDIO_FEED_SELECTED_WEB, this, false);
-    this._prefSvc.addObserver(PREF_AUDIO_FEED_SELECTED_ACTION, this, false);
-    this._prefSvc.addObserver(PREF_AUDIO_FEED_SELECTED_READER, this, false);
+    this._prefSvc.addObserver(PREF_AUDIO_FEED_SELECTED_APP, this);
+    this._prefSvc.addObserver(PREF_AUDIO_FEED_SELECTED_WEB, this);
+    this._prefSvc.addObserver(PREF_AUDIO_FEED_SELECTED_ACTION, this);
+    this._prefSvc.addObserver(PREF_AUDIO_FEED_SELECTED_READER, this);
 
 
     setEventListener("focusSearch1", "command", gApplicationsPane.focusFilterBox);
@@ -946,7 +945,7 @@ var gApplicationsPane = {
 
       // Notify observers that the UI is now ready
       Cc["@mozilla.org/observer-service;1"].getService(Ci.nsIObserverService).
-      notifyObservers(window, "app-handler-pane-loaded", null);
+      notifyObservers(window, "app-handler-pane-loaded");
     }
     setTimeout(_delayedPaneLoad, 0, this);
   },
@@ -1697,7 +1696,7 @@ var gApplicationsPane = {
     aEvent.stopPropagation();
 
     var handlerApp;
-    let chooseAppCallback = function(aHandlerApp) {
+    let chooseAppCallback = aHandlerApp => {
       // Rebuild the actions menu whether the user picked an app or canceled.
       // If they picked an app, we want to add the app to the menu and select it.
       // If they canceled, we want to go back to their previous selection.
@@ -1718,7 +1717,7 @@ var gApplicationsPane = {
           }
         }
       }
-    }.bind(this);
+    };
 
     if (AppConstants.platform == "win") {
       var params = {};
@@ -1753,7 +1752,7 @@ var gApplicationsPane = {
     } else {
       let winTitle = this._prefsBundle.getString("fpTitleChooseApp");
       let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
-      let fpCallback = function fpCallback_done(aResult) {
+      let fpCallback = aResult => {
         if (aResult == Ci.nsIFilePicker.returnOK && fp.file &&
             this._isValidHandlerExecutable(fp.file)) {
           handlerApp = Cc["@mozilla.org/uriloader/local-handler-app;1"].
@@ -1767,7 +1766,7 @@ var gApplicationsPane = {
 
           chooseAppCallback(handlerApp);
         }
-      }.bind(this);
+      };
 
       // Prompt the user to pick an app.  If they pick one, and it's a valid
       // selection, then add it to the list of possible handlers.
@@ -1953,12 +1952,12 @@ var gApplicationsPane = {
   chooseFolder() {
     return this.chooseFolderTask().catch(Components.utils.reportError);
   },
-  chooseFolderTask: Task.async(function* () {
+  async chooseFolderTask() {
     let bundlePreferences = document.getElementById("bundlePreferences");
     let title = bundlePreferences.getString("chooseDownloadFolderTitle");
     let folderListPref = document.getElementById("browser.download.folderList");
-    let currentDirPref = yield this._indexToFolder(folderListPref.value);
-    let defDownloads = yield this._indexToFolder(1);
+    let currentDirPref = await this._indexToFolder(folderListPref.value);
+    let defDownloads = await this._indexToFolder(1);
     let fp = Components.classes["@mozilla.org/filepicker;1"].
              createInstance(Components.interfaces.nsIFilePicker);
 
@@ -1972,22 +1971,22 @@ var gApplicationsPane = {
       fp.displayDirectory = defDownloads;
     } else {
       // Fall back to Desktop
-      fp.displayDirectory = yield this._indexToFolder(0);
+      fp.displayDirectory = await this._indexToFolder(0);
     }
 
-    let result = yield new Promise(resolve => fp.open(resolve));
+    let result = await new Promise(resolve => fp.open(resolve));
     if (result != Components.interfaces.nsIFilePicker.returnOK) {
       return;
     }
 
     let downloadDirPref = document.getElementById("browser.download.dir");
     downloadDirPref.value = fp.file;
-    folderListPref.value = yield this._folderToIndex(fp.file);
+    folderListPref.value = await this._folderToIndex(fp.file);
     // Note, the real prefs will not be updated yet, so dnld manager's
     // userDownloadsDirectory may not return the right folder after
     // this code executes. displayDownloadDirPref will be called on
     // the assignment above to update the UI.
-  }),
+  },
 
   /**
    * Initializes the download folder display settings based on the user's
@@ -2000,7 +1999,7 @@ var gApplicationsPane = {
     return undefined;
   },
 
-  displayDownloadDirPrefTask: Task.async(function* () {
+  async displayDownloadDirPrefTask() {
     var folderListPref = document.getElementById("browser.download.folderList");
     var bundlePreferences = document.getElementById("bundlePreferences");
     var downloadFolder = document.getElementById("downloadFolder");
@@ -2020,24 +2019,15 @@ var gApplicationsPane = {
       iconUrlSpec = fph.getURLSpecFromFile(currentDirPref.value);
     } else if (folderListPref.value == 1) {
       // 'Downloads'
-      // In 1.5, this pointed to a folder we created called 'My Downloads'
-      // and was available as an option in the 1.5 drop down. On XP this
-      // was in My Documents, on OSX it was in User Docs. In 2.0, we did
-      // away with the drop down option, although the special label was
-      // still supported for the folder if it existed. Because it was
-      // not exposed it was rarely used.
-      // With 3.0, a new desktop folder - 'Downloads' was introduced for
-      // platforms and versions that don't support a default system downloads
-      // folder. See nsDownloadManager for details.
       downloadFolder.label = bundlePreferences.getString("downloadsFolderName");
-      iconUrlSpec = fph.getURLSpecFromFile(yield this._indexToFolder(1));
+      iconUrlSpec = fph.getURLSpecFromFile(await this._indexToFolder(1));
     } else {
       // 'Desktop'
       downloadFolder.label = bundlePreferences.getString("desktopFolderName");
-      iconUrlSpec = fph.getURLSpecFromFile(yield this._getDownloadsFolder("Desktop"));
+      iconUrlSpec = fph.getURLSpecFromFile(await this._getDownloadsFolder("Desktop"));
     }
     downloadFolder.image = "moz-icon://" + iconUrlSpec + "?size=16";
-  }),
+  },
 
   /**
    * Returns the textual path of a folder in readable form.
@@ -2057,18 +2047,18 @@ var gApplicationsPane = {
    *
    * @throws if aFolder is not "Desktop" or "Downloads"
    */
-  _getDownloadsFolder: Task.async(function* (aFolder) {
+  async _getDownloadsFolder(aFolder) {
     switch (aFolder) {
       case "Desktop":
         var fileLoc = Components.classes["@mozilla.org/file/directory_service;1"]
                                     .getService(Components.interfaces.nsIProperties);
         return fileLoc.get("Desk", Components.interfaces.nsILocalFile);
       case "Downloads":
-        let downloadsDir = yield Downloads.getSystemDownloadsDirectory();
+        let downloadsDir = await Downloads.getSystemDownloadsDirectory();
         return new FileUtils.File(downloadsDir);
     }
     throw "ASSERTION FAILED: folder type should be 'Desktop' or 'Downloads'";
-  }),
+  },
 
   /**
    * Determines the type of the given folder.
@@ -2080,13 +2070,13 @@ var gApplicationsPane = {
    *          1 if aFolder is the Downloads folder,
    *          2 otherwise
    */
-  _folderToIndex: Task.async(function* (aFolder) {
-    if (!aFolder || aFolder.equals(yield this._getDownloadsFolder("Desktop")))
+  async _folderToIndex(aFolder) {
+    if (!aFolder || aFolder.equals(await this._getDownloadsFolder("Desktop")))
       return 0;
-    else if (aFolder.equals(yield this._getDownloadsFolder("Downloads")))
+    else if (aFolder.equals(await this._getDownloadsFolder("Downloads")))
       return 1;
     return 2;
-  }),
+  },
 
   /**
    * Converts an integer into the corresponding folder.
@@ -2097,15 +2087,15 @@ var gApplicationsPane = {
    *          the Downloads folder if aIndex == 1,
    *          the folder stored in browser.download.dir
    */
-  _indexToFolder: Task.async(function* (aIndex) {
+  async _indexToFolder(aIndex) {
     switch (aIndex) {
       case 0:
-        return yield this._getDownloadsFolder("Desktop");
+        return await this._getDownloadsFolder("Desktop");
       case 1:
-        return yield this._getDownloadsFolder("Downloads");
+        return await this._getDownloadsFolder("Downloads");
     }
     var currentDirPref = document.getElementById("browser.download.dir");
     return currentDirPref.value;
-  })
+  }
 
 };

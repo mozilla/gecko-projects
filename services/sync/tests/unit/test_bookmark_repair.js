@@ -3,7 +3,6 @@
 
 // Tests the bookmark repair requestor and responder end-to-end (ie, without
 // many mocks)
-Cu.import("resource://gre/modules/PlacesUtils.jsm");
 Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://services-sync/bookmark_repair.js");
@@ -74,7 +73,7 @@ async function promiseValidationDone(expected) {
   actual.sort((a, b) => String(a.name).localeCompare(b.name));
   expected.sort((a, b) => String(a.name).localeCompare(b.name));
   deepEqual(actual, expected);
-};
+}
 
 async function cleanup(server) {
   bookmarksEngine._store.wipe();
@@ -89,26 +88,7 @@ add_task(async function test_bookmark_repair_integration() {
 
   _("Ensure that a validation error triggers a repair request.");
 
-  let contents = {
-    meta: {
-      global: {
-        engines: {
-          clients: {
-            version: clientsEngine.version,
-            syncID: clientsEngine.syncID,
-          },
-          bookmarks: {
-            version: bookmarksEngine.version,
-            syncID: bookmarksEngine.syncID,
-          },
-        }
-      }
-    },
-    clients: {},
-    bookmarks: {},
-    crypto: {},
-  };
-  let server = serverForUsers({"foo": "password"}, contents);
+  let server = serverForFoo(bookmarksEngine);
   await SyncTestingInfrastructure(server);
 
   let user = server.user("foo");
@@ -166,8 +146,8 @@ add_task(async function test_bookmark_repair_integration() {
     // sync again - we should have a few problems...
     _("Sync again to trigger repair");
     validationPromise = promiseValidationDone([
-      {"name":"missingChildren","count":1},
-      {"name":"structuralDifferences","count":1},
+      {"name": "missingChildren", "count": 1},
+      {"name": "structuralDifferences", "count": 1},
     ]);
     Service.sync();
     await validationPromise;
@@ -329,31 +309,9 @@ add_task(async function test_repair_client_missing() {
 
   _("Ensure that a record missing from the client only will get re-downloaded from the server");
 
-  let contents = {
-    meta: {
-      global: {
-        engines: {
-          clients: {
-            version: clientsEngine.version,
-            syncID: clientsEngine.syncID,
-          },
-          bookmarks: {
-            version: bookmarksEngine.version,
-            syncID: bookmarksEngine.syncID,
-          },
-        }
-      }
-    },
-    clients: {},
-    bookmarks: {},
-    crypto: {},
-  };
-  let server = serverForUsers({"foo": "password"}, contents);
+  let server = serverForFoo(bookmarksEngine);
   await SyncTestingInfrastructure(server);
 
-  let user = server.user("foo");
-
-  let initialID = Service.clientsEngine.localID;
   let remoteID = Utils.makeGUID();
   try {
 
@@ -396,8 +354,8 @@ add_task(async function test_repair_client_missing() {
     // sync again - we should have a few problems...
     _("Syncing again.");
     validationPromise = promiseValidationDone([
-      {"name":"clientMissing","count":1},
-      {"name":"structuralDifferences","count":1},
+      {"name": "clientMissing", "count": 1},
+      {"name": "structuralDifferences", "count": 1},
     ]);
     Service.sync();
     await validationPromise;
@@ -420,31 +378,11 @@ add_task(async function test_repair_server_missing() {
 
   _("Ensure that a record missing from the server only will get re-upload from the client");
 
-  let contents = {
-    meta: {
-      global: {
-        engines: {
-          clients: {
-            version: clientsEngine.version,
-            syncID: clientsEngine.syncID,
-          },
-          bookmarks: {
-            version: bookmarksEngine.version,
-            syncID: bookmarksEngine.syncID,
-          },
-        }
-      }
-    },
-    clients: {},
-    bookmarks: {},
-    crypto: {},
-  };
-  let server = serverForUsers({"foo": "password"}, contents);
+  let server = serverForFoo(bookmarksEngine);
   await SyncTestingInfrastructure(server);
 
   let user = server.user("foo");
 
-  let initialID = Service.clientsEngine.localID;
   let remoteID = Utils.makeGUID();
   try {
 
@@ -480,8 +418,8 @@ add_task(async function test_repair_server_missing() {
     // sync again - we should have a few problems...
     _("Syncing again.");
     validationPromise = promiseValidationDone([
-      {"name":"serverMissing","count":1},
-      {"name":"missingChildren","count":1},
+      {"name": "serverMissing", "count": 1},
+      {"name": "missingChildren", "count": 1},
     ]);
     Service.sync();
     await validationPromise;
@@ -504,31 +442,9 @@ add_task(async function test_repair_server_deleted() {
 
   _("Ensure that a record marked as deleted on the server but present on the client will get deleted on the client");
 
-  let contents = {
-    meta: {
-      global: {
-        engines: {
-          clients: {
-            version: clientsEngine.version,
-            syncID: clientsEngine.syncID,
-          },
-          bookmarks: {
-            version: bookmarksEngine.version,
-            syncID: bookmarksEngine.syncID,
-          },
-        }
-      }
-    },
-    clients: {},
-    bookmarks: {},
-    crypto: {},
-  };
-  let server = serverForUsers({"foo": "password"}, contents);
+  let server = serverForFoo(bookmarksEngine);
   await SyncTestingInfrastructure(server);
 
-  let user = server.user("foo");
-
-  let initialID = Service.clientsEngine.localID;
   let remoteID = Utils.makeGUID();
   try {
 
@@ -567,9 +483,9 @@ add_task(async function test_repair_server_deleted() {
     // sync again - we should have a few problems...
     _("Syncing again.");
     validationPromise = promiseValidationDone([
-      {"name":"serverDeleted","count":1},
-      {"name":"deletedChildren","count":1},
-      {"name":"orphans","count":1}
+      {"name": "serverDeleted", "count": 1},
+      {"name": "deletedChildren", "count": 1},
+      {"name": "orphans", "count": 1}
     ]);
     Service.sync();
     await validationPromise;

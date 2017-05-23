@@ -4,6 +4,10 @@
 
 <!-- Advanced panel -->
 
+#ifdef MOZ_UPDATER
+  <script type="application/javascript" src="chrome://browser/content/aboutDialog-appUpdater.js"/>
+#endif
+
 <script type="application/javascript"
         src="chrome://browser/content/preferences/in-content/advanced.js"/>
 
@@ -11,13 +15,6 @@
   <preference id="browser.preferences.advanced.selectedTabIndex"
               name="browser.preferences.advanced.selectedTabIndex"
               type="int"/>
-
-<!-- Data Choices tab -->
-#ifdef MOZ_CRASHREPORTER
-  <preference id="browser.crashReports.unsubmittedCheck.autoSubmit"
-              name="browser.crashReports.unsubmittedCheck.autoSubmit"
-              type="bool"/>
-#endif
 
 <!-- Update tab -->
 #ifdef MOZ_UPDATER
@@ -54,96 +51,144 @@
       hidden="true"
       data-category="paneAdvanced">
   <label class="header-name" flex="1">&paneUpdates.title;</label>
-  <html:a class="help-button" target="_blank" aria-label="&helpButton.label;"></html:a>
 </hbox>
 
 <!-- Update -->
-#ifdef MOZ_UPDATER
-<groupbox id="updateApp" align="start" data-category="paneAdvanced" hidden="true">
+<groupbox id="updateApp" data-category="paneAdvanced" hidden="true">
   <caption><label>&updateApplication.label;</label></caption>
-  <radiogroup id="updateRadioGroup" align="start">
+  <hbox align="start">
+    <vbox flex="1">
+      <description>
+        &updateApplication.version.pre;<label id="version"/>&updateApplication.version.post;
+        <label id="releasenotes" class="learnMore text-link" hidden="true">&releaseNotes.link;</label>
+      </description>
+      <description id="distribution" class="text-blurb" hidden="true"/>
+      <description id="distributionId" class="text-blurb" hidden="true"/>
+    </vbox>
+#ifdef MOZ_UPDATER
+    <spacer flex="1"/>
+    <vbox>
+      <button id="showUpdateHistory"
+              class="accessory-button"
+              label="&updateHistory2.label;"
+              accesskey="&updateHistory2.accesskey;"
+              preference="app.update.disable_button.showUpdateHistory"/>
+    </vbox>
+#endif
+  </hbox>
+#ifdef MOZ_UPDATER
+  <vbox id="updateBox">
+    <deck id="updateDeck" orient="vertical">
+      <hbox id="checkForUpdates" align="center">
+        <spacer flex="1"/>
+        <button id="checkForUpdatesButton"
+                label="&update.checkForUpdatesButton.label;"
+                accesskey="&update.checkForUpdatesButton.accesskey;"
+                oncommand="gAppUpdater.checkForUpdates();"/>
+      </hbox>
+      <hbox id="downloadAndInstall" align="center">
+        <spacer flex="1"/>
+        <button id="downloadAndInstallButton"
+                oncommand="gAppUpdater.startDownload();"/>
+                <!-- label and accesskey will be filled by JS -->
+      </hbox>
+      <hbox id="apply" align="center">
+        <spacer flex="1"/>
+        <button id="updateButton"
+                label="&update.updateButton.label3;"
+                accesskey="&update.updateButton.accesskey;"
+                oncommand="gAppUpdater.buttonRestartAfterDownload();"/>
+      </hbox>
+      <hbox id="checkingForUpdates" align="center">
+        <image class="update-throbber"/><label>&update.checkingForUpdates;</label>
+        <spacer flex="1"/>
+        <button label="&update.checkForUpdatesButton.label;"
+                accesskey="&update.checkForUpdatesButton.accesskey;"
+                disabled="true"/>
+      </hbox>
+      <hbox id="downloading" align="center">
+        <image class="update-throbber"/><label>&update.downloading.start;</label><label id="downloadStatus"/><label>&update.downloading.end;</label>
+      </hbox>
+      <hbox id="applying" align="center">
+        <image class="update-throbber"/><label>&update.applying;</label>
+      </hbox>
+      <hbox id="downloadFailed" align="center">
+        <label>&update.failed.start;</label><label id="failedLink" class="text-link">&update.failed.linkText;</label><label>&update.failed.end;</label>
+        <spacer flex="1"/>
+        <button label="&update.checkForUpdatesButton.label;"
+                accesskey="&update.checkForUpdatesButton.accesskey;"
+                oncommand="gAppUpdater.checkForUpdates();"/>
+      </hbox>
+      <hbox id="adminDisabled" align="center">
+        <label>&update.adminDisabled;</label>
+        <spacer flex="1"/>
+        <button label="&update.checkForUpdatesButton.label;"
+                accesskey="&update.checkForUpdatesButton.accesskey;"
+                disabled="true"/>
+      </hbox>
+      <hbox id="noUpdatesFound" align="center">
+        <label>&update.noUpdatesFound;</label>
+        <spacer flex="1"/>
+        <button label="&update.checkForUpdatesButton.label;"
+                accesskey="&update.checkForUpdatesButton.accesskey;"
+                oncommand="gAppUpdater.checkForUpdates();"/>
+      </hbox>
+      <hbox id="otherInstanceHandlingUpdates" align="center">
+        <label>&update.otherInstanceHandlingUpdates;</label>
+        <spacer flex="1"/>
+        <button label="&update.checkForUpdatesButton.label;"
+                accesskey="&update.checkForUpdatesButton.accesskey;"
+                disabled="true"/>
+      </hbox>
+      <hbox id="manualUpdate" align="center">
+        <label>&update.manual.start;</label><label id="manualLink" class="text-link"/><label>&update.manual.end;</label>
+        <spacer flex="1"/>
+        <button label="&update.checkForUpdatesButton.label;"
+                accesskey="&update.checkForUpdatesButton.accesskey;"
+                disabled="true"/>
+      </hbox>
+      <hbox id="unsupportedSystem" align="center">
+        <label>&update.unsupported.start;</label><label id="unsupportedLink" class="text-link">&update.unsupported.linkText;</label><label>&update.unsupported.end;</label>
+        <spacer flex="1"/>
+        <button label="&update.checkForUpdatesButton.label;"
+                accesskey="&update.checkForUpdatesButton.accesskey;"
+                disabled="true"/>
+      </hbox>
+      <hbox id="restarting" align="center">
+        <image class="update-throbber"/><label>&update.restarting;</label>
+        <spacer flex="1"/>
+        <button label="&update.updateButton.label3;"
+                accesskey="&update.updateButton.accesskey;"
+                disabled="true"/>
+      </hbox>
+    </deck>
+  </vbox>
+#endif
+
+  <separator/>
+#ifdef MOZ_UPDATER
+  <description>&updateApplication.description;</description>
+  <radiogroup id="updateRadioGroup">
     <radio id="autoDesktop"
            value="auto"
-           label="&updateAuto1.label;"
-           accesskey="&updateAuto1.accesskey;"/>
+           label="&updateAuto2.label;"
+           accesskey="&updateAuto2.accesskey;"/>
     <radio value="checkOnly"
-          label="&updateCheckChoose.label;"
-          accesskey="&updateCheckChoose.accesskey;"/>
+          label="&updateCheckChoose2.label;"
+          accesskey="&updateCheckChoose2.accesskey;"/>
     <radio value="manual"
-          label="&updateManual.label;"
-          accesskey="&updateManual.accesskey;"/>
+          label="&updateManual2.label;"
+          accesskey="&updateManual2.accesskey;"/>
   </radiogroup>
-  <separator class="thin"/>
-  <hbox>
-    <button id="showUpdateHistory"
-            label="&updateHistory.label;"
-            accesskey="&updateHistory.accesskey;"
-            preference="app.update.disable_button.showUpdateHistory"/>
-  </hbox>
-
 #ifdef MOZ_MAINTENANCE_SERVICE
   <checkbox id="useService"
             label="&useService.label;"
             accesskey="&useService.accesskey;"
             preference="app.update.service.enabled"/>
 #endif
-</groupbox>
 #endif
-<groupbox id="updateOthers" align="start" data-category="paneAdvanced" hidden="true">
-  <caption><label>&autoUpdateOthers.label;</label></caption>
   <checkbox id="enableSearchUpdate"
-            label="&enableSearchUpdate.label;"
-            accesskey="&enableSearchUpdate.accesskey;"
+            label="&enableSearchUpdate2.label;"
+            accesskey="&enableSearchUpdate2.accesskey;"
             preference="browser.search.update"/>
 </groupbox>
-
-<!-- Data Choices -->
-#ifdef MOZ_TELEMETRY_REPORTING
-<groupbox id="historyGroup" data-category="paneAdvanced" hidden="true">
-<caption><label>&reports.label;</label></caption>
-  <vbox>
-    <caption>
-    <checkbox id="submitHealthReportBox" label="&enableHealthReport.label;"
-              accesskey="&enableHealthReport.accesskey;"/>
-  </caption>
-    <hbox class="indent" flex="1">
-      <label flex="1">&healthReportDesc.label;</label>
-      <label id="FHRLearnMore" flex="1"
-             class="learnMore text-link">&healthReportLearnMore.label;</label>
-    </hbox>
-    <hbox class="indent">
-      <groupbox flex="1">
-        <caption>
-          <checkbox id="submitTelemetryBox" preference="toolkit.telemetry.enabled"
-                    label="&enableTelemetryData.label;"
-                    accesskey="&enableTelemetryData.accesskey;"/>
-        </caption>
-        <hbox class="indent" flex="1">
-          <label id="telemetryDataDesc" flex="1">&telemetryDesc.label;</label>
-          <label id="telemetryLearnMore" flex="1"
-                 class="learnMore text-link">&telemetryLearnMore.label;</label>
-        </hbox>
-      </groupbox>
-    </hbox>
-  </vbox>
-</groupbox>
-#endif
-
-#ifdef MOZ_DATA_REPORTING
-#ifdef MOZ_CRASHREPORTER
-<groupbox data-category="paneAdvanced" hidden="true">
-  <caption>
-    <checkbox id="automaticallySubmitCrashesBox"
-              preference="browser.crashReports.unsubmittedCheck.autoSubmit"
-              label="&alwaysSubmitCrashReports.label;"
-              accesskey="&alwaysSubmitCrashReports.accesskey;"/>
-  </caption>
-  <hbox class="indent" flex="1">
-    <label flex="1">&crashReporterDesc2.label;</label>
-    <label id="crashReporterLearnMore" flex="1"
-           class="learnMore text-link">&crashReporterLearnMore.label;</label>
-  </hbox>
-</groupbox>
-
-#endif
-#endif

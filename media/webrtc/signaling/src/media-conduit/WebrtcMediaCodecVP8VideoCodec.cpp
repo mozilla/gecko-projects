@@ -44,9 +44,10 @@ static const char* logTag ="WebrtcMediaCodecVP8VideoCodec";
 class CallbacksSupport final : public JavaCallbacksSupport
 {
 public:
-  CallbacksSupport(webrtc::EncodedImageCallback* aCallback) :
-    mCallback(aCallback),
-    mCritSect(webrtc::CriticalSectionWrapper::CreateCriticalSection()) {
+  CallbacksSupport(webrtc::EncodedImageCallback* aCallback)
+    : mCallback(aCallback)
+    , mCritSect(webrtc::CriticalSectionWrapper::CreateCriticalSection())
+    , mPictureId(0) {
     CSFLogDebug(logTag,  "%s %p", __FUNCTION__, this);
     memset(&mEncodedImage, 0, sizeof(mEncodedImage));
   }
@@ -76,7 +77,7 @@ public:
     }
   }
 
-  void HandleInputExhausted() override
+  void HandleInput(jlong aTimestamp, bool aProcessed) override
   {
     CSFLogDebug(logTag,  "%s %p", __FUNCTION__, this);
   }
@@ -124,7 +125,8 @@ public:
 
       webrtc::CodecSpecificInfo info;
       info.codecType = webrtc::kVideoCodecVP8;
-      info.codecSpecific.VP8.pictureId = -1;
+      info.codecSpecific.VP8.pictureId = mPictureId;
+      mPictureId = (mPictureId + 1) & 0x7FFF;
       info.codecSpecific.VP8.tl0PicIdx = -1;
       info.codecSpecific.VP8.keyIdx = -1;
       info.codecSpecific.VP8.temporalIdx = 1;
@@ -152,6 +154,7 @@ private:
   Atomic<bool> mCanceled;
   webrtc::EncodedImage mEncodedImage;
   rtc::scoped_ptr<webrtc::CriticalSectionWrapper> mCritSect;
+  uint32_t mPictureId;
 };
 
 static MediaCodec::LocalRef CreateDecoder(const char* aMimeType)
@@ -1152,10 +1155,10 @@ int32_t WebrtcMediaCodecVP8VideoDecoder::Decode(
     const webrtc::CodecSpecificInfo* codecSpecificInfo,
     int64_t renderTimeMs) {
 
-  CSFLogDebug(logTag,  "%s, renderTimeMs = %lld ", __FUNCTION__, renderTimeMs);
+  CSFLogDebug(logTag,  "%s, renderTimeMs = %" PRId64, __FUNCTION__, renderTimeMs);
 
   if (inputImage._length== 0 || !inputImage._buffer) {
-    CSFLogDebug(logTag,  "%s, input Image invalid. length = %d", __FUNCTION__, inputImage._length);
+    CSFLogDebug(logTag,  "%s, input Image invalid. length = %" PRIdPTR, __FUNCTION__, inputImage._length);
     return WEBRTC_VIDEO_CODEC_ERROR;
   }
 

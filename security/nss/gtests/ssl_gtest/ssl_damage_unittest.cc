@@ -63,4 +63,57 @@ TEST_F(TlsConnectTest, DamageSecretHandleServerFinished) {
   server_->CheckErrorCode(SSL_ERROR_BAD_MAC_READ);
 }
 
+TEST_P(TlsConnectGenericPre13, DamageServerSignature) {
+  EnsureTlsSetup();
+  auto filter =
+      std::make_shared<TlsLastByteDamager>(kTlsHandshakeServerKeyExchange);
+  server_->SetTlsRecordFilter(filter);
+  ExpectAlert(client_, kTlsAlertDecryptError);
+  ConnectExpectFail();
+  client_->CheckErrorCode(SEC_ERROR_BAD_SIGNATURE);
+  server_->CheckErrorCode(SSL_ERROR_DECRYPT_ERROR_ALERT);
+}
+
+TEST_P(TlsConnectTls13, DamageServerSignature) {
+  EnsureTlsSetup();
+  auto filter =
+      std::make_shared<TlsLastByteDamager>(kTlsHandshakeCertificateVerify);
+  server_->SetTlsRecordFilter(filter);
+  filter->EnableDecryption();
+  client_->ExpectSendAlert(kTlsAlertDecryptError);
+  // The server can't read the client's alert, so it also sends an alert.
+  if (variant_ == ssl_variant_stream) {
+    server_->ExpectSendAlert(kTlsAlertBadRecordMac);
+    ConnectExpectFail();
+    server_->CheckErrorCode(SSL_ERROR_BAD_MAC_READ);
+  } else {
+    ConnectExpectFailOneSide(TlsAgent::CLIENT);
+  }
+  client_->CheckErrorCode(SEC_ERROR_BAD_SIGNATURE);
+}
+
+TEST_P(TlsConnectGeneric, DamageClientSignature) {
+  EnsureTlsSetup();
+  client_->SetupClientAuth();
+  server_->RequestClientAuth(true);
+  auto filter =
+      std::make_shared<TlsLastByteDamager>(kTlsHandshakeCertificateVerify);
+  client_->SetTlsRecordFilter(filter);
+  server_->ExpectSendAlert(kTlsAlertDecryptError);
+  filter->EnableDecryption();
+  // Do these handshakes by hand to avoid race condition on
+  // the client processing the server's alert.
+  client_->StartConnect();
+  server_->StartConnect();
+  client_->Handshake();
+  server_->Handshake();
+  client_->Handshake();
+  server_->Handshake();
+  EXPECT_EQ(version_ >= SSL_LIBRARY_VERSION_TLS_1_3
+                ? TlsAgent::STATE_CONNECTED
+                : TlsAgent::STATE_CONNECTING,
+            client_->state());
+  server_->CheckErrorCode(SEC_ERROR_BAD_SIGNATURE);
+}
+
 }  // namespace nspr_test

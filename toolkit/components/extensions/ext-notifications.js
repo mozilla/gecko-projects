@@ -1,10 +1,9 @@
 "use strict";
 
 XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
-                                  "resource://devtools/shared/event-emitter.js");
+                                  "resource://gre/modules/EventEmitter.jsm");
 
 var {
-  SingletonEventManager,
   ignoreEvent,
 } = ExtensionUtils;
 

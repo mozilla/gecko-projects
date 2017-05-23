@@ -91,6 +91,9 @@ enum class FullscreenReason
 
 namespace mozilla {
 namespace dom {
+
+class Location;
+
 // The states in this enum represent the different possible outcomes which the
 // window could be experiencing of loading a document with the
 // Large-Allocation header. The NONE case represents the case where no
@@ -313,7 +316,12 @@ public:
   virtual void SetOpenerWindow(nsPIDOMWindowOuter* aOpener,
                                bool aOriginalOpener) = 0;
 
-  virtual void EnsureSizeUpToDate() = 0;
+  /**
+   * Ensure the size and position of this window are up-to-date by doing
+   * a layout flush in the parent (which will in turn, do a layout flush
+   * in its parent, etc.).
+   */
+  virtual void EnsureSizeAndPositionUpToDate() = 0;
 
   /**
    * Callback for notifying a window about a modal dialog being
@@ -565,7 +573,7 @@ public:
 
   virtual nsIDOMScreen* GetScreen() = 0;
   virtual nsIDOMNavigator* GetNavigator() = 0;
-  virtual nsIDOMLocation* GetLocation() = 0;
+  virtual mozilla::dom::Location* GetLocation() = 0;
   virtual nsresult GetPrompter(nsIPrompt** aPrompt) = 0;
   virtual nsresult GetControllers(nsIControllers** aControllers) = 0;
   virtual already_AddRefed<nsISelection> GetSelection() = 0;
@@ -664,6 +672,7 @@ protected:
   bool                   mMayHavePaintEventListener;
   bool                   mMayHaveTouchEventListener;
   bool                   mMayHaveMouseEnterLeaveEventListener;
+  bool                   mMayHaveMouseMoveEventListener;
   bool                   mMayHavePointerEnterLeaveEventListener;
 
   // Used to detect whether we have called FreeInnerObjects() (e.g. to ensure
@@ -811,6 +820,24 @@ public:
 
   /**
    * Call this to check whether some node (this window, its document,
+   * or content in that document) has or had a mousemove event listener.
+   */
+  bool HasMouseMoveEventListeners()
+  {
+    return mMayHaveMouseMoveEventListener;
+  }
+
+  /**
+   * Call this to indicate that some node (this window, its document,
+   * or content in that document) has or had a mousemove event listener.
+   */
+  void SetHasMouseMoveEventListeners()
+  {
+    mMayHaveMouseMoveEventListener = true;
+  }
+
+  /**
+   * Call this to check whether some node (this window, its document,
    * or content in that document) has a mouseenter/leave event listener.
    */
   bool HasMouseEnterLeaveEventListeners()
@@ -884,6 +911,8 @@ public:
   void SyncStateFromParentWindow();
 
   bool IsPlayingAudio();
+
+  bool IsDocumentLoaded() const;
 
   mozilla::dom::TimeoutManager& TimeoutManager();
 

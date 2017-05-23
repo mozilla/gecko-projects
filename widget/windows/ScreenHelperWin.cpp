@@ -16,7 +16,7 @@ namespace mozilla {
 namespace widget {
 
 BOOL CALLBACK
-CollectMonitors(HMONITOR aMon, HDC, LPRECT, LPARAM ioParam)
+CollectMonitors(HMONITOR aMon, HDC hDCScreen, LPRECT, LPARAM ioParam)
 {
   auto screens = reinterpret_cast<nsTArray<RefPtr<Screen>>*>(ioParam);
   BOOL success = FALSE;
@@ -34,21 +34,14 @@ CollectMonitors(HMONITOR aMon, HDC, LPRECT, LPARAM ioParam)
   } else {
     contentsScaleFactor.scale = scale;
   }
-  CSSToLayoutDeviceScale defaultCssScaleFactor(nsIWidget::DefaultScaleOverride());
-  if (defaultCssScaleFactor.scale <= 0.0) {
-    defaultCssScaleFactor.scale = scale;
-  }
+  CSSToLayoutDeviceScale defaultCssScaleFactor(scale);
   LayoutDeviceIntRect rect(info.rcMonitor.left, info.rcMonitor.top,
                            info.rcMonitor.right - info.rcMonitor.left,
                            info.rcMonitor.bottom - info.rcMonitor.top);
   LayoutDeviceIntRect availRect(info.rcWork.left, info.rcWork.top,
                                 info.rcWork.right - info.rcWork.left,
                                 info.rcWork.bottom - info.rcWork.top);
-  //XXX not sure how to get this info for multiple monitors, this might be ok...
-  HDC hDCScreen = ::GetDC(nullptr);
-  NS_ASSERTION(hDCScreen,"GetDC Failure");
   uint32_t pixelDepth = ::GetDeviceCaps(hDCScreen, BITSPIXEL);
-  ::ReleaseDC(nullptr, hDCScreen);
   if (pixelDepth == 32) {
     // If a device uses 32 bits per pixel, it's still only using 8 bits
     // per color component, which is what our callers want to know.
@@ -70,22 +63,18 @@ CollectMonitors(HMONITOR aMon, HDC, LPRECT, LPARAM ioParam)
   return TRUE;
 }
 
-float
-ScreenHelperWin::GetSystemDefaultScale()
-{
-  HMONITOR primary = widget::WinUtils::GetPrimaryMonitor();
-  return float(widget::WinUtils::LogToPhysFactor(primary));
-}
-
 void
 ScreenHelperWin::RefreshScreens()
 {
   MOZ_LOG(sScreenLog, LogLevel::Debug, ("Refreshing screens"));
 
   AutoTArray<RefPtr<Screen>, 4> screens;
-  BOOL result = ::EnumDisplayMonitors(nullptr, nullptr,
+  HDC hdc = ::CreateDC(L"DISPLAY", nullptr, nullptr, nullptr);
+  NS_ASSERTION(hdc,"CreateDC Failure");
+  BOOL result = ::EnumDisplayMonitors(hdc, nullptr,
                                       (MONITORENUMPROC)CollectMonitors,
                                       (LPARAM)&screens);
+  ::DeleteDC(hdc);
   if (!result) {
     NS_WARNING("Unable to EnumDisplayMonitors");
   }

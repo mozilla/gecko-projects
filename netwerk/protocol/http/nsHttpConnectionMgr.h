@@ -19,6 +19,7 @@
 #include "AlternateServices.h"
 #include "ARefBase.h"
 #include "nsWeakReference.h"
+#include "TCPFastOpen.h"
 
 #include "nsIObserver.h"
 #include "nsITimer.h"
@@ -93,6 +94,14 @@ public:
     // added to the connection manager via AddTransaction.
     MOZ_MUST_USE nsresult RescheduleTransaction(nsHttpTransaction *,
                                                 int32_t priority);
+
+    // tells the transaction to stop receiving the response when |throttle|
+    // is true.  to start receiving again, this must be called with |throttle|
+    // set to false.  calling multiple times with the same value of |throttle|
+    // has no effect.  called by nsHttpChannels with the Throttleable class set
+    // and controlled by net::ThrottlingService.
+    // there is nothing to do when this fails, hence the void result.
+    void ThrottleTransaction(nsHttpTransaction *, bool throttle);
 
     // cancels a transaction w/ the given reason.
     MOZ_MUST_USE nsresult CancelTransaction(nsHttpTransaction *,
@@ -225,6 +234,8 @@ private:
 
         // This table provides a mapping from top level outer content window id
         // to a queue of pending transaction information.
+        // The transaction's order in pending queue is decided by whether it's a
+        // blocking transaction and its priority.
         // Note that the window id could be 0 if the http request
         // is initialized without a window.
         nsClassHashtable<nsUint64HashKey,
@@ -244,12 +255,8 @@ private:
 
         // Spdy sometimes resolves the address in the socket manager in order
         // to re-coalesce sharded HTTP hosts. The dotted decimal address is
-        // combined with the Anonymous flag from the connection information
+        // combined with the Anonymous flag and OA from the connection information
         // to build the hash key for hosts in the same ip pool.
-        //
-        // When a set of hosts are coalesced together one of them is marked
-        // mSpdyPreferred. The mapping is maintained in the connection mananger
-        // mSpdyPreferred hash.
         //
         nsTArray<nsCString> mCoalescingKeys;
 
@@ -257,8 +264,6 @@ private:
         // entry has done NPN=spdy/* at some point. It does not mean every
         // connection is currently using spdy.
         bool mUsingSpdy : 1;
-
-        bool mInPreferredHash : 1;
 
         // Flags to remember our happy-eyeballs decision.
         // Reset only by Ctrl-F5 reload.
@@ -271,6 +276,9 @@ private:
 
         // True if this connection entry has initiated a socket
         bool mUsedForConnection : 1;
+
+        // Try using TCP Fast Open.
+        bool mUseFastOpen : 1;
 
         // Set the IP family preference flags according the connected family
         void RecordIPFamilyPreference(uint16_t family);
@@ -307,6 +315,7 @@ private:
 
 public:
     static nsAHttpConnection *MakeConnectionHandle(nsHttpConnection *aWrapped);
+    void RegisterOriginCoalescingKey(nsHttpConnection *, const nsACString &host, int32_t port);
 
 private:
 
@@ -317,7 +326,8 @@ private:
                                    public nsITransportEventSink,
                                    public nsIInterfaceRequestor,
                                    public nsITimerCallback,
-                                   public nsSupportsWeakReference
+                                   public nsSupportsWeakReference,
+                                   public TCPFastOpen
     {
         ~nsHalfOpenSocket();
 
@@ -363,7 +373,23 @@ private:
 
         bool Claim();
         void Unclaim();
+
+        bool FastOpenEnabled() override;
+        nsresult StartFastOpen() override;
+        void SetFastOpenConnected(nsresult) override;
+        void FastOpenNotSupported() override;
+        void SetFastOpenStatus(uint8_t tfoStatus) override;
+
+        bool IsFastOpenBackupHalfOpen()
+        {
+            return mConnectionNegotiatingFastOpen;
+        }
+
+        void CancelFastOpenConnection();
     private:
+        nsresult SetupConn(nsIAsyncOutputStream *out,
+                           bool aFastOpen);
+
         // To find out whether |mTransaction| is still in the connection entry's
         // pending queue. If the transaction is found and |removeWhenFound| is
         // true, the transaction will be removed from the pending queue.
@@ -416,6 +442,9 @@ private:
         // transactions.
         bool                           mFreeToUse;
         nsresult                       mPrimaryStreamStatus;
+
+        bool                           mUsingFastOpen;
+        RefPtr<nsHttpConnection>       mConnectionNegotiatingFastOpen;
     };
     friend class nsHalfOpenSocket;
 
@@ -473,10 +502,14 @@ private:
                                    nsConnectionEntry *ent,
                                    bool considerAll);
 
-    // Given the connection entry, return the available count for creating
-    // new connections. Return 0 if the active connection count is
-    // exceeded |mMaxPersistConnsPerProxy| or |mMaxPersistConnsPerHost|.
-    uint32_t AvailableNewConnectionCount(nsConnectionEntry * ent);
+    // Return total active connection count, which is the sum of
+    // active connections and unconnected half open connections.
+    uint32_t TotalActiveConnections(nsConnectionEntry *ent) const;
+
+    // Return |mMaxPersistConnsPerProxy| or |mMaxPersistConnsPerHost|,
+    // depending whether the proxy is used.
+    uint32_t MaxPersistConnections(nsConnectionEntry *ent) const;
+
     bool     AtActiveConnectionLimit(nsConnectionEntry *, uint32_t caps);
     MOZ_MUST_USE nsresult TryDispatchTransaction(nsConnectionEntry *ent,
                                                  bool onlyReusedConnection,
@@ -518,16 +551,14 @@ private:
     MOZ_MUST_USE nsresult MakeNewConnection(nsConnectionEntry *ent,
                                             PendingTransactionInfo *pendingTransInfo);
 
-    // Manage the preferred spdy connection entry for this address
-    nsConnectionEntry *GetSpdyPreferredEnt(nsConnectionEntry *aOriginalEntry);
-    nsConnectionEntry *LookupPreferredHash(nsConnectionEntry *ent);
-    void               StorePreferredHash(nsConnectionEntry *ent);
-    void               RemovePreferredHash(nsConnectionEntry *ent);
-    nsHttpConnection  *GetSpdyPreferredConn(nsConnectionEntry *ent);
-    nsDataHashtable<nsCStringHashKey, nsConnectionEntry *>   mSpdyPreferredHash;
-    nsConnectionEntry *LookupConnectionEntry(nsHttpConnectionInfo *ci,
-                                             nsHttpConnection *conn,
-                                             nsHttpTransaction *trans);
+    // Manage h2 connection coalescing
+    // The hashtable contains arrays of weak pointers to nsHttpConnections
+    nsClassHashtable<nsCStringHashKey, nsTArray<nsWeakPtr> > mCoalescingHash;
+
+    nsHttpConnection *FindCoalescableConnection(nsConnectionEntry *ent, bool justKidding);
+    nsHttpConnection *FindCoalescableConnectionByHashKey(nsConnectionEntry *ent, const nsCString &key, bool justKidding);
+    void UpdateCoalescingForNewConn(nsHttpConnection *conn, nsConnectionEntry *ent);
+    nsHttpConnection *GetSpdyActiveConn(nsConnectionEntry *ent);
 
     void               ProcessSpdyPendingQ(nsConnectionEntry *ent);
     void               DispatchSpdyPendingQ(nsTArray<RefPtr<PendingTransactionInfo>> &pendingQ,
@@ -551,6 +582,7 @@ private:
     void OnMsgShutdownConfirm      (int32_t, ARefBase *);
     void OnMsgNewTransaction       (int32_t, ARefBase *);
     void OnMsgReschedTransaction   (int32_t, ARefBase *);
+    void OnMsgThrottleTransaction  (int32_t, ARefBase *);
     void OnMsgCancelTransaction    (int32_t, ARefBase *);
     void OnMsgCancelTransactions   (int32_t, ARefBase *);
     void OnMsgProcessPendingQ      (int32_t, ARefBase *);

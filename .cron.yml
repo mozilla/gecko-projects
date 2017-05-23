@@ -18,8 +18,28 @@ jobs:
             # Match buildbot starts for now
             date: [{hour: 15, minute: 0}]
             mozilla-central: [{hour: 10, minute: 0}]
-            mozilla-aurora: [{hour: 7, minute: 45}]  # Buildbot uses minute 40
+            mozilla-aurora: [] # bug 1358976
             # No default
+
+    - name: nightly-desktop-osx
+      job:
+          type: decision-task
+          treeherder-symbol: Nd-OSX
+          triggered-by: nightly
+          target-tasks-method: nightly_macosx
+      run-on-projects:
+          - date
+      when: [] # never (hook only)
+
+    - name: nightly-desktop-win64
+      job:
+          type: decision-task
+          treeherder-symbol: Nd-Win64
+          triggered-by: nightly
+          target-tasks-method: nightly_win64
+      run-on-projects:
+          - date
+      when: [] # never (hook only)
 
     - name: nightly-android
       job:
@@ -36,7 +56,7 @@ jobs:
             # Match buildbot starts for now
             date: [{hour: 15, minute: 0}]
             mozilla-central: [{hour: 10, minute: 0}]
-            mozilla-aurora: [{hour: 7, minute: 45}]  # Buildbot uses minute 40
+            mozilla-aurora: [] # bug 1358976
             # No default
 
     - name: nightly-mochitest-valgrind

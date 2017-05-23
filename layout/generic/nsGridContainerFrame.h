@@ -23,6 +23,14 @@ nsContainerFrame* NS_NewGridContainerFrame(nsIPresShell* aPresShell,
                                            nsStyleContext* aContext);
 
 namespace mozilla {
+
+// Forward-declare typedefs for grid item iterator helper-class:
+template<typename Iterator> class CSSOrderAwareFrameIteratorT;
+typedef CSSOrderAwareFrameIteratorT<nsFrameList::iterator>
+  CSSOrderAwareFrameIterator;
+typedef CSSOrderAwareFrameIteratorT<nsFrameList::reverse_iterator>
+  ReverseCSSOrderAwareFrameIterator;
+
 /**
  * The number of implicit / explicit tracks and their sizes.
  */
@@ -90,7 +98,6 @@ public:
   nscoord GetMinISize(nsRenderingContext* aRenderingContext) override;
   nscoord GetPrefISize(nsRenderingContext* aRenderingContext) override;
   void MarkIntrinsicISizesDirty() override;
-  nsIAtom* GetType() const override;
   bool IsFrameOfType(uint32_t aFlags) const override
   {
     return nsContainerFrame::IsFrameOfType(aFlags &
@@ -218,11 +225,6 @@ public:
   struct TrackSize;
   struct GridItemInfo;
   struct GridReflowInput;
-  template<typename Iterator> class GridItemCSSOrderIteratorT;
-  typedef GridItemCSSOrderIteratorT<nsFrameList::iterator>
-    GridItemCSSOrderIterator;
-  typedef GridItemCSSOrderIteratorT<nsFrameList::reverse_iterator>
-    ReverseGridItemCSSOrderIterator;
   struct FindItemInGridOrderResult
   {
     // The first(last) item in (reverse) grid order.
@@ -237,6 +239,9 @@ protected:
   typedef mozilla::LogicalPoint LogicalPoint;
   typedef mozilla::LogicalRect LogicalRect;
   typedef mozilla::LogicalSize LogicalSize;
+  typedef mozilla::CSSOrderAwareFrameIterator CSSOrderAwareFrameIterator;
+  typedef mozilla::ReverseCSSOrderAwareFrameIterator
+    ReverseCSSOrderAwareFrameIterator;
   typedef mozilla::WritingMode WritingMode;
   typedef mozilla::css::GridNamedArea GridNamedArea;
   typedef mozilla::layout::AutoFrameListPtr AutoFrameListPtr;
@@ -252,7 +257,7 @@ protected:
   friend nsContainerFrame* NS_NewGridContainerFrame(nsIPresShell* aPresShell,
                                                     nsStyleContext* aContext);
   explicit nsGridContainerFrame(nsStyleContext* aContext)
-    : nsContainerFrame(aContext)
+    : nsContainerFrame(aContext, mozilla::LayoutFrameType::GridContainer)
     , mCachedMinISize(NS_INTRINSIC_WIDTH_UNKNOWN)
     , mCachedPrefISize(NS_INTRINSIC_WIDTH_UNKNOWN)
   {
@@ -323,7 +328,7 @@ protected:
     eBoth  = eFirst | eLast,
   };
   void CalculateBaselines(BaselineSet                   aBaselineSet,
-                          GridItemCSSOrderIterator*     aIter,
+                          CSSOrderAwareFrameIterator*   aIter,
                           const nsTArray<GridItemInfo>* aGridItems,
                           const Tracks&    aTracks,
                           uint32_t         aFragmentStartTrack,
@@ -350,7 +355,7 @@ protected:
    * axis as aMajor.  Pass zero if that's not the axis we're fragmenting in.
    */
   static FindItemInGridOrderResult
-  FindFirstItemInGridOrder(GridItemCSSOrderIterator& aIter,
+  FindFirstItemInGridOrder(CSSOrderAwareFrameIterator& aIter,
                            const nsTArray<GridItemInfo>& aGridItems,
                            LineRange GridArea::* aMajor,
                            LineRange GridArea::* aMinor,
@@ -364,7 +369,7 @@ protected:
    * Pass the number of tracks if that's not the axis we're fragmenting in.
    */
   static FindItemInGridOrderResult
-  FindLastItemInGridOrder(ReverseGridItemCSSOrderIterator& aIter,
+  FindLastItemInGridOrder(ReverseCSSOrderAwareFrameIterator& aIter,
                           const nsTArray<GridItemInfo>& aGridItems,
                           LineRange GridArea::* aMajor,
                           LineRange GridArea::* aMinor,
@@ -450,7 +455,7 @@ private:
   // If true, NS_STATE_GRID_DID_PUSH_ITEMS may be set even though all pushed
   // frames may have been removed.  This is used to suppress an assertion
   // in case RemoveFrame removed all associated child frames.
-  bool mDidPushItemsBitMayLie;
+  bool mDidPushItemsBitMayLie { false };
 #endif
 };
 

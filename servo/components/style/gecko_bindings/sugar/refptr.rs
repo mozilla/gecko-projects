@@ -6,11 +6,10 @@
 
 use gecko_bindings::structs;
 use gecko_bindings::sugar::ownership::HasArcFFI;
-use heapsize::HeapSizeOf;
 use std::{mem, ptr};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use stylearc::Arc;
 
 /// Trait for all objects that have Addref() and Release
 /// methods and can be placed inside RefPtr<T>
@@ -86,6 +85,7 @@ impl<T: RefCounted> RefPtr<T> {
     pub fn forget(self) -> structs::RefPtr<T> {
         let ret = structs::RefPtr {
             mRawPtr: self.ptr,
+            _phantom_0: PhantomData,
         };
         mem::forget(self);
         ret
@@ -231,10 +231,6 @@ impl<T: RefCounted> Clone for RefPtr<T> {
     }
 }
 
-impl<T: RefCounted> HeapSizeOf for RefPtr<T> {
-    fn heap_size_of_children(&self) -> usize { 0 }
-}
-
 impl<T: RefCounted> PartialEq for RefPtr<T> {
     fn eq(&self, other: &Self) -> bool {
         self.ptr == other.ptr
@@ -259,6 +255,8 @@ macro_rules! impl_refcount {
 
 impl_refcount!(::gecko_bindings::structs::nsCSSFontFaceRule,
                Gecko_CSSFontFaceRule_AddRef, Gecko_CSSFontFaceRule_Release);
+impl_refcount!(::gecko_bindings::structs::nsCSSCounterStyleRule,
+               Gecko_CSSCounterStyleRule_AddRef, Gecko_CSSCounterStyleRule_Release);
 
 // Companion of NS_DECL_THREADSAFE_FFI_REFCOUNTING.
 //
@@ -282,3 +280,10 @@ impl_threadsafe_refcount!(::gecko_bindings::structs::nsCSSValueSharedList,
 impl_threadsafe_refcount!(::gecko_bindings::structs::mozilla::css::URLValue,
                           Gecko_AddRefCSSURLValueArbitraryThread,
                           Gecko_ReleaseCSSURLValueArbitraryThread);
+impl_threadsafe_refcount!(::gecko_bindings::structs::mozilla::css::GridTemplateAreasValue,
+                          Gecko_AddRefGridTemplateAreasValueArbitraryThread,
+                          Gecko_ReleaseGridTemplateAreasValueArbitraryThread);
+impl_threadsafe_refcount!(::gecko_bindings::structs::ImageValue,
+                          Gecko_AddRefImageValueArbitraryThread,
+                          Gecko_ReleaseImageValueArbitraryThread);
+
