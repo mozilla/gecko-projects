@@ -4981,35 +4981,21 @@ public:
     return false;
   }
 
-  void Merge(const nsDisplayItem* aItem) override
+  virtual void RestoreState() override
   {
-    // TODO: The current item merging behavior is not compatible with text merging.
-#if 0
-    if (aItem->GetType() != TYPE_TEXT)
-      return false;
-    if (aItem->GetClipChain() != GetClipChain())
-      return false;
-
-    nsDisplayText* other = static_cast<nsDisplayText*>(aItem);
-    if (!mFont || !other->mFont || mFont != other->mFont) {
-      return false;
+    if (mState) {
+      nsDisplayItem::RestoreState();
+      mOpacity = *mState;
     }
-    if (mOpacity != other->mOpacity) {
-      return false;
-    }
+  }
 
-    mBounds.UnionRect(mBounds, other->mBounds);
-    mVisibleRect.UnionRect(mVisibleRect, other->mVisibleRect);
-    mMergedFrames.AppendElement(static_cast<nsTextFrame*>(other->mFrame));
-    mMergedFrames.AppendElements(mozilla::Move(other->mMergedFrames));
-
-    for (GlyphArray& g : other->mGlyphs) {
-      GlyphArray* append = mGlyphs.AppendElement();
-      append->color() = g.color();
-      append->glyphs().SwapElements(g.glyphs());
+  virtual void SaveState() override
+  {
+    if (!mState) {
+      nsDisplayItem::SaveState();
+      mState.emplace(mOpacity);
     }
-#endif
-}
+  }
 
   RefPtr<ScaledFont> mFont;
   nsTArray<GlyphArray> mGlyphs;
@@ -5017,6 +5003,7 @@ public:
   nsRect mBounds;
 
   float mOpacity;
+  mozilla::Maybe<float> mState;
 };
 
 class nsDisplayTextGeometry : public nsCharClipGeometry

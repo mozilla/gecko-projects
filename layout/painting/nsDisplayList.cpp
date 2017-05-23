@@ -1554,12 +1554,12 @@ nsDisplayListBuilder::IsAnimatedGeometryRoot(nsIFrame* aFrame,
                             // to being an AGR without a style change.
 
   LayoutFrameType parentType = parent->Type();
-  
+
   if (aFrame->IsTransformed()) {
     aIsAsync = EffectCompositor::HasAnimationsForCompositor(aFrame, eCSSProperty_transform);
     result = AGR_YES;
   }
-  
+
   if (parentType == LayoutFrameType::Scroll ||
       parentType == LayoutFrameType::ListControl) {
     nsIScrollableFrame* sf = do_QueryFrame(parent);
@@ -1578,7 +1578,7 @@ nsDisplayListBuilder::IsAnimatedGeometryRoot(nsIFrame* aFrame,
   if (result == AGR_YES) {
     return result;
   }
-  
+
   if (nsLayoutUtils::IsPopup(aFrame))
     return AGR_YES;
   if (ActiveLayerTracker::IsOffsetOrMarginStyleAnimated(aFrame)) {
@@ -5960,25 +5960,51 @@ nsDisplayOpacity::CanApplyOpacity() const
   return true;
 }
 
+static bool
+CopyItemsWithOpacity(nsDisplayList* aList,
+                     nsTArray<nsDisplayItem*>& aArray,
+                     const size_t aMaxChildCount)
+{
+  for (nsDisplayItem* i = aList->GetBottom(); i; i = i->GetAbove()) {
+    nsDisplayList* children = i->GetChildren();
+
+    if (children) {
+      // The current display item has children, process them first.
+      if (!CopyItemsWithOpacity(children, aArray, aMaxChildCount)) {
+        return false;
+      }
+
+      // Don't add the item itself to the list.
+      continue;
+    }
+
+    if (i->GetType() == TYPE_LAYER_EVENT_REGIONS) {
+      continue;
+    }
+
+    if (!i->CanApplyOpacity() || aArray.Length() == aMaxChildCount) {
+      return false;
+    }
+
+    aArray.AppendElement(i);
+  }
+
+  return true;
+}
+
+// TODO: Flattened and non-flattened nsDisplayOpacities can cause different
+// rendering result. This is a bug that some reftests rely on. Below is a
+// non-exhaustive list of such reftests.
+//
+// layout/reftests/box-shadow/boxshadow-opacity.html
+// layout/reftests/bugs/759036-1.html
+// layout/reftests/bugs/797797-1.html
+// layout/reftests/bugs/797797-2.html
+// layout/reftests/bugs/991046-1.html
+// layout/reftests/text/475092-pos.html
 bool
 nsDisplayOpacity::ShouldFlattenAway(nsDisplayListBuilder* aBuilder)
 {
-  // TODO: This currently mutates items and breaks merging.
-  return false;
-
-  // Unfortunately, disabling nsDisplayOpacity flattening currently breaks some
-  // reftests. Most of these are only off by a a couple of pixels, and could be
-  // made fuzzy. It would be a good idea to go through these later.
-  //
-  // Broken reftests:
-  // layout/reftests/box-shadow/boxshadow-opacity.html
-  // layout/reftests/bugs/759036-1.html
-  // layout/reftests/bugs/797797-1.html
-  // layout/reftests/bugs/797797-2.html
-  // layout/reftests/bugs/991046-1.html
-  // layout/reftests/text/475092-pos.html
-
-#if 0
   if (NeedsActiveLayer(aBuilder, mFrame) || mOpacity == 0.0) {
     // If our opacity is zero then we'll discard all descendant display items
     // except for layer event regions, so there's no point in doing this
@@ -5987,36 +6013,37 @@ nsDisplayOpacity::ShouldFlattenAway(nsDisplayListBuilder* aBuilder)
     return false;
   }
 
-  nsDisplayItem* child = mList.GetBottom();
-  // Only try folding our opacity down if we have at most three children
-  // that don't overlap and can all apply the opacity to themselves.
-  if (!child) {
-    return false;
-  }
-  struct {
-    nsDisplayItem* item;
-    nsRect bounds;
-  } children[3];
-  bool snap;
-  uint32_t numChildren = 0;
-  for (; numChildren < ArrayLength(children) && child; numChildren++, child = child->GetAbove()) {
-    if (child->GetType() == TYPE_LAYER_EVENT_REGIONS) {
-      numChildren--;
-      continue;
-    }
-    if (!child->CanApplyOpacity()) {
-      return false;
-    }
-    children[numChildren].item = child;
-    children[numChildren].bounds = child->GetBounds(aBuilder, &snap);
-  }
-  if (child) {
-    // we have a fourth (or more) child
+  if (mList.IsEmpty()) {
     return false;
   }
 
-  for (uint32_t i = 0; i < numChildren; i++) {
-    for (uint32_t j = i+1; j < numChildren; j++) {
+  // Only try folding our opacity down if we have at most kMaxChildCount
+  // children that don't overlap and can all apply the opacity to themselves.
+  static const size_t kMaxChildCount = 3;
+
+  // Copy and flatten the children. This is required because the child display
+  // items might be nsDisplayWrapLists.
+  AutoTArray<nsDisplayItem*, kMaxChildCount> items;
+
+  if (!CopyItemsWithOpacity(&mList, items, kMaxChildCount)) {
+    return false;
+  }
+
+  struct {
+    nsDisplayItem* item;
+    nsRect bounds;
+  } children[kMaxChildCount];
+
+  bool snap;
+  size_t childCount = 0;
+  for (nsDisplayItem* item : items) {
+    children[childCount].item = item;
+    children[childCount].bounds = item->GetBounds(aBuilder, &snap);
+    childCount++;
+  }
+
+  for (size_t i = 0; i < childCount; i++) {
+    for (size_t j = i+1; j < childCount; j++) {
       if (children[i].bounds.Intersects(children[j].bounds)) {
         return false;
       }
@@ -6029,13 +6056,13 @@ nsDisplayOpacity::ShouldFlattenAway(nsDisplayListBuilder* aBuilder)
   // usually never have their own clip because during display item creation
   // time we propagated the clip to our contents, so maybe we should just
   // remove the clip parameter from ApplyOpacity completely.
-  DisplayItemClipChain clip = { GetClip(), mActiveScrolledRoot, nullptr };
+  DisplayItemClipChain clip(GetClip(), mActiveScrolledRoot, nullptr);
 
-  for (uint32_t i = 0; i < numChildren; i++) {
+  for (uint32_t i = 0; i < childCount; i++) {
     children[i].item->ApplyOpacity(aBuilder, mOpacity, mClip ? &clip : nullptr);
   }
+
   return true;
-#endif
 }
 
 nsDisplayItem::LayerState
