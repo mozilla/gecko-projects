@@ -4537,8 +4537,8 @@ CSSParserImpl::ParseSupportsRule(RuleAppendFunc aAppendFunc, void* aProcessData)
   // errors don't get reported.
   nsAutoFailingSupportsRule failing(this, conditionMet);
 
-  RefPtr<css::GroupRule> rule = new CSSSupportsRule(conditionMet, condition,
-                                                      linenum, colnum);
+  RefPtr<css::GroupRule> rule =
+    new mozilla::CSSSupportsRule(conditionMet, condition, linenum, colnum);
   return ParseGroupRule(rule, aAppendFunc, aProcessData);
 }
 
@@ -14025,14 +14025,15 @@ CSSParserImpl::ParseCounterData(nsCSSPropertyID aPropID)
       if (!ParseCustomIdent(cur->mXValue, mToken.mIdent, kCounterDataKTable)) {
         return false;
       }
-      if (!GetToken(true)) {
-        break;
+      int32_t value = aPropID == eCSSProperty_counter_increment ? 1 : 0;
+      if (GetToken(true)) {
+        if (mToken.mType == eCSSToken_Number && mToken.mIntegerValid) {
+          value = mToken.mInteger;
+        } else {
+          UngetToken();
+        }
       }
-      if (mToken.mType == eCSSToken_Number && mToken.mIntegerValid) {
-        cur->mYValue.SetIntValue(mToken.mInteger, eCSSUnit_Integer);
-      } else {
-        UngetToken();
-      }
+      cur->mYValue.SetIntValue(value, eCSSUnit_Integer);
       if (!GetToken(true)) {
         break;
       }

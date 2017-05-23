@@ -11,7 +11,7 @@ use cssparser::{DeclarationListParser, DeclarationParser, parse_one_rule};
 use error_reporting::NullReporter;
 use parser::{PARSING_MODE_DEFAULT, ParserContext, log_css_error};
 use properties::{Importance, PropertyDeclaration, PropertyDeclarationBlock, PropertyId};
-use properties::{PropertyDeclarationId, LonghandId, ParsedDeclaration};
+use properties::{PropertyDeclarationId, LonghandId, SourcePropertyDeclaration};
 use properties::LonghandIdSet;
 use properties::animated_properties::TransitionProperty;
 use properties::longhands::transition_timing_function::single_value::SpecifiedValue as SpecifiedTimingFunction;
@@ -71,8 +71,21 @@ impl KeyframePercentage {
 
 /// A keyframes selector is a list of percentages or from/to symbols, which are
 /// converted at parse time to percentages.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct KeyframeSelector(Vec<KeyframePercentage>);
+
+impl ToCss for KeyframeSelector {
+    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+        let mut iter = self.0.iter();
+        iter.next().unwrap().to_css(dest)?;
+        for percentage in iter {
+            write!(dest, ", ")?;
+            percentage.to_css(dest)?;
+        }
+        Ok(())
+    }
+}
+
 impl KeyframeSelector {
     /// Return the list of percentages this selector contains.
     #[inline]
@@ -108,19 +121,13 @@ pub struct Keyframe {
 impl ToCssWithGuard for Keyframe {
     fn to_css<W>(&self, guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
     where W: fmt::Write {
-        let mut iter = self.selector.percentages().iter();
-        try!(iter.next().unwrap().to_css(dest));
-        for percentage in iter {
-            try!(write!(dest, ", "));
-            try!(percentage.to_css(dest));
-        }
+        self.selector.to_css(dest)?;
         try!(dest.write_str(" { "));
         try!(self.block.read_with(guard).to_css(dest));
         try!(dest.write_str(" }"));
         Ok(())
     }
 }
-
 
 impl Keyframe {
     /// Parse a CSS keyframe.
@@ -135,9 +142,11 @@ impl Keyframe {
                                          parent_stylesheet.quirks_mode);
         let mut input = Parser::new(css);
 
+        let mut declarations = SourcePropertyDeclaration::new();
         let mut rule_parser = KeyframeListParser {
             context: &context,
             shared_lock: &parent_stylesheet.shared_lock,
+            declarations: &mut declarations,
         };
         parse_one_rule(&mut input, &mut rule_parser)
     }
@@ -338,14 +347,17 @@ impl KeyframesAnimation {
 struct KeyframeListParser<'a> {
     context: &'a ParserContext<'a>,
     shared_lock: &'a SharedRwLock,
+    declarations: &'a mut SourcePropertyDeclaration,
 }
 
 /// Parses a keyframe list from CSS input.
 pub fn parse_keyframe_list(context: &ParserContext, input: &mut Parser, shared_lock: &SharedRwLock)
                            -> Vec<Arc<Locked<Keyframe>>> {
+    let mut declarations = SourcePropertyDeclaration::new();
     RuleListParser::new_for_nested_rule(input, KeyframeListParser {
         context: context,
         shared_lock: shared_lock,
+        declarations: &mut declarations,
     }).filter_map(Result::ok).collect()
 }
 
@@ -376,13 +388,17 @@ impl<'a> QualifiedRuleParser for KeyframeListParser<'a> {
         let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Keyframe));
         let parser = KeyframeDeclarationParser {
             context: &context,
+            declarations: self.declarations,
         };
         let mut iter = DeclarationListParser::new(input, parser);
         let mut block = PropertyDeclarationBlock::new();
         while let Some(declaration) = iter.next() {
             match declaration {
-                Ok(parsed) => parsed.expand_push_into(&mut block, Importance::Normal),
+                Ok(()) => {
+                    block.extend(iter.parser.declarations.drain(), Importance::Normal);
+                }
                 Err(range) => {
+                    iter.parser.declarations.clear();
                     let pos = range.start;
                     let message = format!("Unsupported keyframe property declaration: '{}'",
                                           iter.input.slice(range));
@@ -400,27 +416,24 @@ impl<'a> QualifiedRuleParser for KeyframeListParser<'a> {
 
 struct KeyframeDeclarationParser<'a, 'b: 'a> {
     context: &'a ParserContext<'b>,
+    declarations: &'a mut SourcePropertyDeclaration,
 }
 
 /// Default methods reject all at rules.
 impl<'a, 'b> AtRuleParser for KeyframeDeclarationParser<'a, 'b> {
     type Prelude = ();
-    type AtRule = ParsedDeclaration;
+    type AtRule = ();
 }
 
 impl<'a, 'b> DeclarationParser for KeyframeDeclarationParser<'a, 'b> {
-    type Declaration = ParsedDeclaration;
+    type Declaration = ();
 
-    fn parse_value(&mut self, name: &str, input: &mut Parser) -> Result<ParsedDeclaration, ()> {
+    fn parse_value(&mut self, name: &str, input: &mut Parser) -> Result<(), ()> {
         let id = try!(PropertyId::parse(name.into()));
-        match ParsedDeclaration::parse(id, self.context, input) {
-            Ok(parsed) => {
+        match PropertyDeclaration::parse_into(self.declarations, id, self.context, input) {
+            Ok(()) => {
                 // In case there is still unparsed text in the declaration, we should roll back.
-                if !input.is_exhausted() {
-                    Err(())
-                } else {
-                    Ok(parsed)
-                }
+                input.expect_exhausted()
             }
             Err(_) => Err(())
         }

@@ -285,16 +285,20 @@ nsDOMCSSDeclaration::GetServoCSSParsingEnvironmentForRule(const css::Rule* aRule
 {
   StyleSheet* sheet = aRule ? aRule->GetStyleSheet() : nullptr;
   if (!sheet) {
-    return ServoCSSParsingEnvironment(nullptr, eCompatibility_FullStandards);
+    return { nullptr, eCompatibility_FullStandards };
   }
 
   if (nsIDocument* document = aRule->GetDocument()) {
-    return ServoCSSParsingEnvironment(sheet->AsServo()->URLData(),
-      document->GetCompatibilityMode());
-  } else {
-    return ServoCSSParsingEnvironment(sheet->AsServo()->URLData(),
-                                      eCompatibility_FullStandards);
+    return {
+      sheet->AsServo()->URLData(),
+      document->GetCompatibilityMode(),
+    };
   }
+
+  return {
+    sheet->AsServo()->URLData(),
+    eCompatibility_FullStandards,
+  };
 }
 
 template<typename GeckoFunc, typename ServoFunc>
@@ -346,7 +350,7 @@ nsDOMCSSDeclaration::ParsePropertyValue(const nsCSSPropertyID aPropID,
                                         bool aIsImportant)
 {
   return ModifyDeclaration(
-    [&](Declaration* decl, CSSParsingEnvironment& env, bool* changed) {
+    [&](css::Declaration* decl, CSSParsingEnvironment& env, bool* changed) {
       nsCSSParser cssParser(env.mCSSLoader);
       cssParser.ParseProperty(aPropID, aPropValue,
                               env.mSheetURI, env.mBaseURI, env.mPrincipal,
@@ -367,7 +371,7 @@ nsDOMCSSDeclaration::ParseCustomPropertyValue(const nsAString& aPropertyName,
 {
   MOZ_ASSERT(nsCSSProps::IsCustomPropertyName(aPropertyName));
   return ModifyDeclaration(
-    [&](Declaration* decl, CSSParsingEnvironment& env, bool* changed) {
+    [&](css::Declaration* decl, CSSParsingEnvironment& env, bool* changed) {
       nsCSSParser cssParser(env.mCSSLoader);
       auto propName = Substring(aPropertyName, CSS_CUSTOM_NAME_PREFIX_LENGTH);
       cssParser.ParseVariable(propName, aPropValue, env.mSheetURI,

@@ -7,6 +7,8 @@
 // HttpLog.h should generally be included first
 #include "HttpLog.h"
 
+#include "prsystem.h"
+
 #include "nsHttp.h"
 #include "nsHttpHandler.h"
 #include "nsHttpChannel.h"
@@ -270,17 +272,22 @@ nsHttpHandler::SetFastOpenOSSupport()
     return;
 #else
 
-    nsCOMPtr<nsIPropertyBag2> infoService =
-        do_GetService("@mozilla.org/system-info;1");
-    MOZ_ASSERT(infoService, "Could not find a system info service");
     nsAutoCString version;
     nsresult rv;
 #ifdef ANDROID
+    nsCOMPtr<nsIPropertyBag2> infoService =
+        do_GetService("@mozilla.org/system-info;1");
+    MOZ_ASSERT(infoService, "Could not find a system info service");
     rv = infoService->GetPropertyAsACString(
         NS_LITERAL_STRING("sdk_version"), version);
 #else
-    rv = infoService->GetPropertyAsACString(
-        NS_LITERAL_STRING("version"), version);
+    char buf[SYS_INFO_BUFFER_LENGTH];
+    if (PR_GetSystemInfo(PR_SI_RELEASE, buf, sizeof(buf)) == PR_SUCCESS) {
+        version = buf;
+        rv = NS_OK;
+    } else {
+        rv = NS_ERROR_FAILURE;
+    }
 #endif
 
     LOG(("nsHttpHandler::SetFastOpenOSSupport version %s", version.get()));
@@ -324,6 +331,19 @@ nsHttpHandler::SetFastOpenOSSupport()
 
     LOG(("nsHttpHandler::SetFastOpenOSSupport %s supported.\n",
          mFastOpenSupported ? "" : "not"));
+}
+
+void
+nsHttpHandler::EnsureUAOverridesInit()
+{
+    MOZ_ASSERT(XRE_IsParentProcess());
+    MOZ_ASSERT(NS_IsMainThread());
+
+    nsresult rv;
+    nsCOMPtr<nsISupports> bootstrapper
+        = do_GetService("@mozilla.org/network/ua-overrides-bootstrapper;1", &rv);
+    MOZ_ASSERT(bootstrapper);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
 }
 
 nsHttpHandler::~nsHttpHandler()
@@ -473,6 +493,11 @@ nsHttpHandler::Init()
         obsService->AddObserver(this,
                                 "net:current-toplevel-outer-content-windowid",
                                 true);
+
+        if (mFastOpenSupported) {
+            obsService->AddObserver(this, "captive-portal-login", true);
+            obsService->AddObserver(this, "captive-portal-login-success", true);
+        }
 
         // disabled as its a nop right now
         // obsService->AddObserver(this, "net:failed-to-process-uri-content", true);
@@ -641,7 +666,6 @@ nsHttpHandler::IncrementFastOpenConsecutiveFailureCounter()
         if (mFastOpenConsecutiveFailureCounter == mFastOpenConsecutiveFailureLimit) {
             LOG(("nsHttpHandler::IncrementFastOpenConsecutiveFailureCounter - "
                  "Fast open failed too many times"));
-            SetFastOpenNotSupported();
         }
     }
 }
@@ -2092,6 +2116,11 @@ nsHttpHandler::NewProxiedChannel2(nsIURI *uri,
         net_EnsurePSMInit();
     }
 
+    if (XRE_IsParentProcess()) {
+        // Load UserAgentOverrides.jsm before any HTTP request is issued.
+        EnsureUAOverridesInit();
+    }
+
     uint64_t channelId;
     rv = NewChannelId(channelId);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -2308,6 +2337,11 @@ nsHttpHandler::Observe(nsISupports *subject,
                 }
             }
         }
+    } else if (!strcmp(topic, "captive-portal-login") ||
+               !strcmp(topic, "captive-portal-login-success")) {
+         // We have detected a captive portal and we will reset the Fast Open
+         // failure counter.
+         ResetFastOpenConsecutiveFailureCounter();
     }
 
     return NS_OK;

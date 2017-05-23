@@ -8,9 +8,6 @@
 
 #include "mozilla/Logging.h"
 
-#include "nsServiceManagerUtils.h"
-#include "nsILanguageAtomService.h"
-
 #include "gfxFontEntry.h"
 #include "gfxTextRun.h"
 #include "gfxPlatform.h"
@@ -348,12 +345,12 @@ gfxFontEntry::GetSVGGlyphExtents(DrawTarget* aDrawTarget, uint32_t aGlyphId,
     return mSVGGlyphs->GetGlyphExtents(aGlyphId, svgToAppSpace, aResult);
 }
 
-bool
+void
 gfxFontEntry::RenderSVGGlyph(gfxContext *aContext, uint32_t aGlyphId,
                              SVGContextPaint* aContextPaint)
 {
     NS_ASSERTION(mSVGInitialized, "SVG data has not yet been loaded. TryGetSVGData() first.");
-    return mSVGGlyphs->RenderGlyph(aContext, aGlyphId, aContextPaint);
+    mSVGGlyphs->RenderGlyph(aContext, aGlyphId, aContextPaint);
 }
 
 bool

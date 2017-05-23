@@ -46,6 +46,7 @@
 #include "nsIAuthPrompt2.h"
 #include "nsIOutputStream.h"
 #include "nsISupportsPrimitives.h"
+#include "nsISupportsPriority.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsStreamUtils.h"
 #include "nsThreadUtils.h"
@@ -2550,6 +2551,37 @@ XMLHttpRequestMainThread::CreateChannel()
   return NS_OK;
 }
 
+void
+XMLHttpRequestMainThread::MaybeLowerChannelPriority()
+{
+  nsCOMPtr<nsIDocument> doc = GetDocumentIfCurrent();
+  if (!doc) {
+    return;
+  }
+
+  AutoJSAPI jsapi;
+  if (!jsapi.Init(GetOwnerGlobal())) {
+    return;
+  }
+
+  JSContext* cx = jsapi.cx();
+  nsAutoCString fileNameString;
+  if (!nsJSUtils::GetCallingLocation(cx, fileNameString)) {
+    return;
+  }
+
+  if (!doc->IsScriptTracking(fileNameString)) {
+    return;
+  }
+
+  nsCOMPtr<nsISupportsPriority> p = do_QueryInterface(mChannel);
+  if (!p) {
+    return;
+  }
+
+  p->SetPriority(nsISupportsPriority::PRIORITY_LOWEST);
+}
+
 nsresult
 XMLHttpRequestMainThread::InitiateFetch(nsIInputStream* aUploadStream,
                                         int64_t aUploadLength,
@@ -2737,6 +2769,12 @@ XMLHttpRequestMainThread::InitiateFetch(nsIInputStream* aUploadStream,
   // because JS wouldn't be able to use it. So create a listener around 'this'.
   // Make sure to hold a strong reference so that we don't leak the wrapper.
   nsCOMPtr<nsIStreamListener> listener = new net::nsStreamListenerWrapper(this);
+
+  // Check if this XHR is created from a tracking script.
+  // If yes, lower the channel's priority.
+  if (nsContentUtils::IsLowerNetworkPriority()) {
+    MaybeLowerChannelPriority();
+  }
 
   // Start reading from the channel
   rv = mChannel->AsyncOpen2(listener);
@@ -2948,7 +2986,7 @@ XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody)
 
   mIsMappedArrayBuffer = false;
   if (mResponseType == XMLHttpRequestResponseType::Arraybuffer &&
-      Preferences::GetBool("dom.mapped_arraybuffer.enabled", true)) {
+      IsMappedArrayBufferEnabled()) {
     nsCOMPtr<nsIURI> uri;
     nsAutoCString scheme;
 
@@ -3047,6 +3085,40 @@ XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody)
   }
 
   return rv;
+}
+
+/* static */
+bool
+XMLHttpRequestMainThread::IsMappedArrayBufferEnabled()
+{
+  static bool sMappedArrayBufferAdded = false;
+  static bool sIsMappedArrayBufferEnabled;
+
+  if (!sMappedArrayBufferAdded) {
+    Preferences::AddBoolVarCache(&sIsMappedArrayBufferEnabled,
+                                 "dom.mapped_arraybuffer.enabled",
+                                 true);
+    sMappedArrayBufferAdded = true;
+  }
+
+  return sIsMappedArrayBufferEnabled;
+}
+
+/* static */
+bool
+XMLHttpRequestMainThread::IsLowercaseResponseHeader()
+{
+  static bool sLowercaseResponseHeaderAdded = false;
+  static bool sIsLowercaseResponseHeaderEnabled;
+
+  if (!sLowercaseResponseHeaderAdded) {
+    Preferences::AddBoolVarCache(&sIsLowercaseResponseHeaderEnabled,
+                                 "dom.xhr.lowercase_header.enabled",
+                                 false);
+    sLowercaseResponseHeaderAdded = true;
+  }
+
+  return sIsLowercaseResponseHeaderEnabled;
 }
 
 // http://dvcs.w3.org/hg/xhr/raw-file/tip/Overview.html#dom-xmlhttprequest-setrequestheader
@@ -3767,7 +3839,7 @@ NS_IMETHODIMP XMLHttpRequestMainThread::
 nsHeaderVisitor::VisitHeader(const nsACString &header, const nsACString &value)
 {
   if (mXHR.IsSafeHeader(header, mHttpChannel)) {
-    if (!Preferences::GetBool("dom.xhr.lowercase_header.enabled", false)) {
+    if (!IsLowercaseResponseHeader()) {
       if(!mHeaderList.InsertElementSorted(HeaderEntry(header, value),
                                           fallible)) {
         return NS_ERROR_OUT_OF_MEMORY;

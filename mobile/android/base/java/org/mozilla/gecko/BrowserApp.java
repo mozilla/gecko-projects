@@ -24,6 +24,7 @@ import org.mozilla.gecko.bookmarks.BookmarkEditFragment;
 import org.mozilla.gecko.bookmarks.BookmarkUtils;
 import org.mozilla.gecko.bookmarks.EditBookmarkTask;
 import org.mozilla.gecko.cleanup.FileCleanupController;
+import org.mozilla.gecko.dawn.DawnHelper;
 import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.db.SuggestedSites;
@@ -58,6 +59,7 @@ import org.mozilla.gecko.icons.Icons;
 import org.mozilla.gecko.media.VideoPlayer;
 import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuItem;
+import org.mozilla.gecko.mma.MmaDelegate;
 import org.mozilla.gecko.mozglue.GeckoLoader;
 import org.mozilla.gecko.mozglue.SafeIntent;
 import org.mozilla.gecko.notifications.NotificationHelper;
@@ -760,6 +762,7 @@ public class BrowserApp extends GeckoApp
             null);
 
         EventDispatcher.getInstance().registerUiThreadListener(this,
+            "Accessibility:Enabled",
             "Menu:Open",
             "Menu:Update",
             "Menu:Add",
@@ -873,7 +876,7 @@ public class BrowserApp extends GeckoApp
      * Initializes the default Switchboard URLs the first time.
      * @param intent
      */
-    private static void initSwitchboard(final Context context, final SafeIntent intent, final boolean isInAutomation) {
+    private void initSwitchboard(final Context context, final SafeIntent intent, final boolean isInAutomation) {
         if (isInAutomation) {
             Log.d(LOGTAG, "Switchboard disabled - in automation");
             return;
@@ -884,7 +887,19 @@ public class BrowserApp extends GeckoApp
 
         final String serverExtra = intent.getStringExtra(INTENT_KEY_SWITCHBOARD_SERVER);
         final String serverUrl = TextUtils.isEmpty(serverExtra) ? SWITCHBOARD_SERVER : serverExtra;
-        new AsyncConfigLoader(context, serverUrl).execute();
+        new AsyncConfigLoader(context, serverUrl) {
+            @Override
+            protected Void doInBackground(Void... params) {
+                super.doInBackground(params);
+                SwitchBoard.loadConfig(context, serverUrl);
+                if (SwitchBoard.isInExperiment(context, Experiments.LEANPLUM) &&
+                        GeckoPreferences.getBooleanPref(context, GeckoPreferences.PREFS_HEALTHREPORT_UPLOAD_ENABLED, true)) {
+                    // Do LeanPlum start/init here
+                    MmaDelegate.init(BrowserApp.this.getApplication());
+                }
+                return null;
+            }
+        }.execute();
     }
 
     private static void initTelemetryUploader(final boolean isInAutomation) {
@@ -1097,6 +1112,8 @@ public class BrowserApp extends GeckoApp
     public void onAttachedToWindow() {
         // We can't show the first run experience until Gecko has finished initialization (bug 1077583).
         checkFirstrun(this, new SafeIntent(getIntent()));
+
+        DawnHelper.conditionallyNotifyDawn(this);
     }
 
     @Override
@@ -1164,13 +1181,6 @@ public class BrowserApp extends GeckoApp
 
     @Override
     protected void restoreLastSelectedTab() {
-        if (mIgnoreLastSelectedTab) {
-            // We're either the first activity to run, so our startup code will (have) handle(d) tab
-            // selection, or else we've received a new intent and want to open and select a new tab
-            // as well.
-            return;
-        }
-
         if (mLastSelectedTabId < 0) {
             // Normally, session restore will select the correct tab when starting up, however this
             // is linked to Gecko powering up. If we're not the first activity to launch, the
@@ -1477,7 +1487,7 @@ public class BrowserApp extends GeckoApp
             ThreadUtils.postToBackgroundThread(new Runnable() {
                 @Override
                 public void run() {
-                    GeckoAppShell.createShortcut(title, url);
+                    GeckoApplication.createShortcut(title, url);
                 }
             });
 
@@ -1507,12 +1517,6 @@ public class BrowserApp extends GeckoApp
         }
 
         return false;
-    }
-
-    @Override
-    public void setAccessibilityEnabled(boolean enabled) {
-        super.setAccessibilityEnabled(enabled);
-        mDynamicToolbar.setAccessibilityEnabled(enabled);
     }
 
     @Override
@@ -1563,6 +1567,7 @@ public class BrowserApp extends GeckoApp
             null);
 
         EventDispatcher.getInstance().unregisterUiThreadListener(this,
+            "Accessibility:Enabled",
             "Menu:Open",
             "Menu:Update",
             "Menu:Add",
@@ -1696,7 +1701,15 @@ public class BrowserApp extends GeckoApp
 
     @Override
     public void toggleToolbarChrome(final boolean aShow) {
-        toggleChrome(aShow);
+        if (aShow) {
+            mBrowserChrome.setVisibility(View.VISIBLE);
+        } else {
+            // The chrome needs to be INVISIBLE instead of GONE so that
+            // it will continue update when the layout changes. This
+            // ensures the bitmap generated for the static toolbar
+            // snapshot is the correct size.
+            mBrowserChrome.setVisibility(View.INVISIBLE);
+        }
     }
 
     public void refreshToolbarHeight() {
@@ -1718,22 +1731,17 @@ public class BrowserApp extends GeckoApp
 
     @Override
     void toggleChrome(final boolean aShow) {
-        if (aShow) {
-            mBrowserChrome.setVisibility(View.VISIBLE);
-        } else {
-            // The chrome needs to be INVISIBLE instead of GONE so that
-            // it will continue update when the layout changes. This
-            // ensures the bitmap generated for the static toolbar
-            // snapshot is the correct size.
-            mBrowserChrome.setVisibility(View.INVISIBLE);
+        if (mDynamicToolbar != null) {
+            mDynamicToolbar.setVisible(aShow, VisibilityTransition.IMMEDIATE);
         }
-
         super.toggleChrome(aShow);
     }
 
     @Override
     void focusChrome() {
-        mBrowserChrome.setVisibility(View.VISIBLE);
+        if (mDynamicToolbar != null) {
+            mDynamicToolbar.setVisible(true, VisibilityTransition.IMMEDIATE);
+        }
         mActionBarFlipper.requestFocusFromTouch();
 
         super.focusChrome();
@@ -1832,6 +1840,10 @@ public class BrowserApp extends GeckoApp
                 }
 
                 FeedService.setup(this);
+                break;
+
+            case "Accessibility:Enabled":
+                mDynamicToolbar.setAccessibilityEnabled(message.getBoolean("enabled"));
                 break;
 
             case "Menu:Open":
@@ -2075,7 +2087,7 @@ public class BrowserApp extends GeckoApp
                 if (loadIconResult != null) {
                     final Bitmap icon = loadIconResult
                         .getBestBitmap(GeckoAppShell.getPreferredIconSize());
-                    createAppShortcut(name, startUrl, manifestPath, icon);
+                    GeckoApplication.createAppShortcut(name, startUrl, manifestPath, icon);
                 } else {
                     Log.e(LOGTAG, "Failed to load icon!");
                 }
@@ -2085,7 +2097,7 @@ public class BrowserApp extends GeckoApp
             case "Website:AppInstallFailed":
                 final String title = message.getString("title");
                 final String bookmarkUrl = message.getString("url");
-                createBrowserShortcut(title, bookmarkUrl);
+                GeckoApplication.createBrowserShortcut(title, bookmarkUrl);
                 break;
 
             case "Updater:Launch":
@@ -2304,7 +2316,6 @@ public class BrowserApp extends GeckoApp
         return false;
     }
 
-    @Override
     public boolean areTabsShown() {
         return (mTabsPanel != null && mTabsPanel.isShown());
     }

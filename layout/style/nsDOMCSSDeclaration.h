@@ -11,8 +11,10 @@
 #include "nsICSSDeclaration.h"
 
 #include "mozilla/Attributes.h"
+#include "mozilla/URLExtraData.h"
 #include "nsIURI.h"
 #include "nsCOMPtr.h"
+#include "nsCompatibility.h"
 
 class nsIPrincipal;
 class nsIDocument;
@@ -147,12 +149,16 @@ protected:
   };
 
   // Information neded to parse a declaration for Servo side.
-  struct MOZ_STACK_CLASS ServoCSSParsingEnvironment {
+  struct MOZ_STACK_CLASS ServoCSSParsingEnvironment
+  {
     mozilla::URLExtraData* mUrlExtraData;
     nsCompatibility mCompatMode;
 
-    ServoCSSParsingEnvironment(mozilla::URLExtraData* aUrlData, nsCompatibility aCompatMode)
-      : mUrlExtraData(aUrlData), mCompatMode(aCompatMode) {}
+    ServoCSSParsingEnvironment(mozilla::URLExtraData* aUrlData,
+                               nsCompatibility aCompatMode)
+      : mUrlExtraData(aUrlData)
+      , mCompatMode(aCompatMode)
+    {}
   };
 
   // On failure, mPrincipal should be set to null in aCSSParseEnv.

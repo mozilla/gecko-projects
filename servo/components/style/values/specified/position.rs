@@ -10,10 +10,9 @@
 use cssparser::Parser;
 use parser::{Parse, ParserContext};
 use std::fmt;
-use style_traits::ToCss;
-use values::HasViewportPercentage;
-use values::computed::{CalcLengthOrPercentage, ComputedValueAsSpecified, Context};
-use values::computed::{LengthOrPercentage as ComputedLengthOrPercentage, ToComputedValue};
+use style_traits::{HasViewportPercentage, ToCss};
+use values::computed::{CalcLengthOrPercentage, LengthOrPercentage as ComputedLengthOrPercentage};
+use values::computed::{Context, ToComputedValue};
 use values::generics::position::Position as GenericPosition;
 use values::specified::{AllowQuirks, LengthOrPercentage, Percentage};
 
@@ -234,19 +233,14 @@ impl<S: Side> ToComputedValue for PositionComponent<S> {
             PositionComponent::Side(ref keyword, Some(ref length)) if !keyword.is_start() => {
                 match length.to_computed_value(context) {
                     ComputedLengthOrPercentage::Length(length) => {
-                        ComputedLengthOrPercentage::Calc(CalcLengthOrPercentage {
-                            length: -length,
-                            percentage: Some(1.0),
-                        })
+                        ComputedLengthOrPercentage::Calc(CalcLengthOrPercentage::new(-length, Some(1.0)))
                     },
                     ComputedLengthOrPercentage::Percentage(p) => {
                         ComputedLengthOrPercentage::Percentage(1.0 - p)
                     },
                     ComputedLengthOrPercentage::Calc(calc) => {
-                        ComputedLengthOrPercentage::Calc(CalcLengthOrPercentage {
-                            length: -calc.length,
-                            percentage: Some(1.0 - calc.percentage.unwrap_or(0.)),
-                        })
+                        let p = 1. - calc.percentage.unwrap_or(0.);
+                        ComputedLengthOrPercentage::Calc(CalcLengthOrPercentage::new(-calc.unclamped_length(), Some(p)))
                     },
                 }
             },

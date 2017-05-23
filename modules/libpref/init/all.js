@@ -209,6 +209,16 @@ pref("dom.keyboardevent.dispatch_during_composition", false);
 // significantly increase the number of compartments in the system.
 pref("dom.compartment_per_addon", true);
 
+// Whether to enable the JavaScript start-up cache. This causes one of the first
+// execution to record the bytecode of the JavaScript function used, and save it
+// in the existing cache entry. On the following loads of the same script, the
+// bytecode would be loaded from the cache instead of being generated once more.
+pref("dom.script_loader.bytecode_cache.enabled", false); // Not tuned yet.
+
+// Ignore the heuristics of the bytecode cache, and always record on the first
+// visit. (used for testing purposes).
+pref("dom.script_loader.bytecode_cache.eager", false);
+
 // Fastback caching - if this pref is negative, then we calculate the number
 // of content viewers to cache based on the amount of available memory.
 pref("browser.sessionhistory.max_total_viewers", -1);
@@ -2781,6 +2791,8 @@ pref("layout.css.prefixes.transitions", true);
 pref("layout.css.prefixes.animations", true);
 pref("layout.css.prefixes.box-sizing", true);
 pref("layout.css.prefixes.font-features", true);
+
+// Is -moz-prefixed gradient functions enabled?
 pref("layout.css.prefixes.gradients", true);
 
 // Are webkit-prefixed properties & property-values supported?
@@ -2833,10 +2845,6 @@ pref("layout.css.contain.enabled", false);
 
 // Is support for CSS display:flow-root enabled?
 pref("layout.css.display-flow-root.enabled", true);
-
-// Is support for CSS [-moz-]appearance enabled for web content?
-pref("layout.css.appearance.enabled", true);
-pref("layout.css.moz-appearance.enabled", true);
 
 // Is support for CSS box-decoration-break enabled?
 pref("layout.css.box-decoration-break.enabled", true);
@@ -3143,7 +3151,7 @@ pref("browser.tabs.remote.separateFileUriProcess", false);
 // This has been added in case breaking any window references between these
 // sorts of pages, which we have to do when we run them in the normal web
 // content process, causes compatibility issues.
-pref("browser.tabs.remote.allowLinkedWebInFileUriProcess", false);
+pref("browser.tabs.remote.allowLinkedWebInFileUriProcess", true);
 
 // Enable caching of Moz2D Path objects for SVG geometry elements
 pref("svg.path-caching.enabled", true);
@@ -4808,6 +4816,7 @@ pref("xpinstall.signatures.required", false);
 pref("extensions.alwaysUnpack", false);
 pref("extensions.minCompatiblePlatformVersion", "2.0");
 pref("extensions.webExtensionsMinPlatformVersion", "42.0a1");
+pref("extensions.legacy.enabled", true);
 pref("extensions.allow-non-mpc-extensions", true);
 
 // Other webextensions prefs
@@ -5055,12 +5064,6 @@ pref("dom.idle-observers-api.fuzz_time.disabled", true);
 // a restart is required to enable a new value.
 pref("network.activity.blipIntervalMilliseconds", 0);
 
-// If true, reuse the same global for everything loaded by the component loader
-// (JS components, JSMs, etc).  This saves memory, but makes it possible for
-// the scripts to interfere with each other.  A restart is required for this
-// to take effect.
-pref("jsloader.reuseGlobal", false);
-
 // When we're asked to take a screenshot, don't wait more than 2000ms for the
 // event loop to become idle before actually taking the screenshot.
 pref("dom.browserElement.maxScreenshotDelayMS", 2000);
@@ -5227,7 +5230,7 @@ pref("urlclassifier.gethashnoise", 4);
 // Gethash timeout for Safebrowsing.
 pref("urlclassifier.gethash.timeout_ms", 5000);
 // Update server response timeout for Safebrowsing.
-pref("urlclassifier.update.response_timeout_ms", 5000);
+pref("urlclassifier.update.response_timeout_ms", 15000);
 // Download update timeout for Safebrowsing.
 pref("urlclassifier.update.timeout_ms", 60000);
 
@@ -5545,8 +5548,6 @@ pref("narrate.filter-voices", true);
 pref("media.gmp.insecure.allow", false);
 #endif
 
-pref("dom.audiochannel.mutedByDefault", false);
-
 // HTML <dialog> element
 pref("dom.dialog_element.enabled", false);
 
@@ -5638,9 +5639,11 @@ pref("media.block-autoplay-until-in-foreground", false);
 pref("media.block-autoplay-until-in-foreground", true);
 #endif
 
-#ifdef MOZ_STYLO
 // Is the Servo-backed style system enabled?
+#ifdef MOZ_STYLO_ENABLE
 pref("layout.css.servo.enabled", true);
+#else
+pref("layout.css.servo.enabled", false);
 #endif
 
 // HSTS Priming
@@ -5658,14 +5661,17 @@ pref("security.mixed_content.send_hsts_priming", true);
 pref("security.mixed_content.use_hsts", true);
 #endif
 // Approximately 1 week default cache for HSTS priming failures, in seconds
-pref ("security.mixed_content.hsts_priming_cache_timeout", 604800);
+pref("security.mixed_content.hsts_priming_cache_timeout", 604800);
 // Force the channel to timeout in 3 seconds if we have not received
 // expects a time in milliseconds
-pref ("security.mixed_content.hsts_priming_request_timeout", 3000);
+pref("security.mixed_content.hsts_priming_request_timeout", 3000);
 
-// If true, data: URIs inherit the principal (security context) of the parent.
-// If false, data: URIs use a NullPrincipal as the security context.
-pref ("security.data_uri.inherit_security_context", true);
+// TODO: Bug 1324406: Treat 'data:' documents as unique, opaque origins
+// If true, data: URIs will be treated as unique opaque origins, hence will use
+// a NullPrincipal as the security context.
+// Otherwise it will inherit the origin from parent node, this is the legacy
+// behavior of Firefox.
+pref("security.data_uri.unique_opaque_origin", false);
 
 // Disable Storage api in release builds.
 #if defined(NIGHTLY_BUILD) && !defined(MOZ_WIDGET_ANDROID)
@@ -5698,9 +5704,9 @@ pref("dom.IntersectionObserver.enabled", true);
 // Whether module scripts (<script type="module">) are enabled for content.
 pref("dom.moduleScripts.enabled", false);
 
-// Maximum number of setTimeout()/setInterval() callbacks to run in a single
-// event loop runnable. Minimum value of 1.
-pref("dom.timeout.max_consecutive_callbacks", 5);
+// Maximum amount of time in milliseconds consecutive setTimeout()/setInterval()
+// callback are allowed to run before yielding the event loop.
+pref("dom.timeout.max_consecutive_callbacks_ms", 4);
 
 #ifdef FUZZING
 pref("fuzzing.enabled", false);
@@ -5712,13 +5718,25 @@ pref("fuzzing.enabled", false);
 // it to a boolean as appropriate. In particular, do NOT add ifdefs here to
 // turn these on and off, instead use the conditional-pref code in gfxPrefs.h
 // to do that.
+pref("layers.advanced.background-color", 2);
+pref("layers.advanced.background-image", 2);
 pref("layers.advanced.border-layers", 2);
 pref("layers.advanced.boxshadow-inset-layers", 2);
 pref("layers.advanced.boxshadow-outer-layers", 2);
+pref("layers.advanced.bullet-layers", 2);
+pref("layers.advanced.button-foreground-layers", 2);
+pref("layers.advanced.canvas-background-color", 2);
 pref("layers.advanced.caret-layers", 2);
+pref("layers.advanced.columnRule-layers", 2);
 pref("layers.advanced.displaybuttonborder-layers", 2);
+pref("layers.advanced.image-layers", 2);
 pref("layers.advanced.outline-layers", 2);
-pref("layers.advanced.solid-color-layers", 2);
+pref("layers.advanced.solid-color", 2);
+pref("layers.advanced.table", 2);
+pref("layers.advanced.text-layers", 2);
+
+// Whether webrender should be used as much as possible.
+pref("gfx.webrendest.enabled", false);
 
 // Enable lowercased response header name
 pref("dom.xhr.lowercase_header.enabled", true);

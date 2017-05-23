@@ -378,7 +378,7 @@ impl ImageFragmentInfo {
         });
 
         let (image, metadata) = match image_or_metadata {
-            Some(ImageOrMetadataAvailable::ImageAvailable(i)) => {
+            Some(ImageOrMetadataAvailable::ImageAvailable(i, _)) => {
                 (Some(i.clone()), Some(ImageMetadata { height: i.height, width: i.width } ))
             }
             Some(ImageOrMetadataAvailable::MetadataAvailable(m)) => {
@@ -907,8 +907,8 @@ impl Fragment {
         // cascading.
         let padding = if flags.contains(INTRINSIC_INLINE_SIZE_INCLUDES_PADDING) {
             let padding = style.logical_padding();
-            (model::specified(padding.inline_start, Au(0)) +
-             model::specified(padding.inline_end, Au(0)))
+            (padding.inline_start.to_used_value(Au(0)) +
+             padding.inline_end.to_used_value(Au(0)))
         } else {
             Au(0)
         };
@@ -935,8 +935,8 @@ impl Fragment {
         if flags.contains(INTRINSIC_INLINE_SIZE_INCLUDES_SPECIFIED) {
             specified = MaybeAuto::from_style(style.content_inline_size(),
                                               Au(0)).specified_or_zero();
-            specified = max(model::specified(style.min_inline_size(), Au(0)), specified);
-            if let Some(max) = model::specified_or_none(style.max_inline_size(), Au(0)) {
+            specified = max(style.min_inline_size().to_used_value(Au(0)), specified);
+            if let Some(max) = style.max_inline_size().to_used_value(Au(0)) {
                 specified = min(specified, max)
             }
 
@@ -1058,7 +1058,7 @@ impl Fragment {
                     // Note: We can not precompute the ratio and store it as a float, because
                     // doing so may result one pixel difference in calculation for certain
                     // images, thus make some tests fail.
-                    Au((inline_size.0 as i64 * intrinsic_block_size.0 as i64 /
+                    Au::new((inline_size.0 as i64 * intrinsic_block_size.0 as i64 /
                         intrinsic_inline_size.0 as i64) as i32)
                 } else {
                     intrinsic_block_size
@@ -1068,7 +1068,7 @@ impl Fragment {
             (MaybeAuto::Auto, MaybeAuto::Specified(block_size)) => {
                 let block_size = block_constraint.clamp(block_size);
                 let inline_size = if self.has_intrinsic_ratio() {
-                    Au((block_size.0 as i64 * intrinsic_inline_size.0 as i64 /
+                    Au::new((block_size.0 as i64 * intrinsic_inline_size.0 as i64 /
                        intrinsic_block_size.0 as i64) as i32)
                 } else {
                     intrinsic_inline_size
@@ -1084,10 +1084,10 @@ impl Fragment {
                     // First, create two rectangles that keep aspect ratio while may be clamped
                     // by the contraints;
                     let first_isize = inline_constraint.clamp(intrinsic_inline_size);
-                    let first_bsize = Au((first_isize.0 as i64 * intrinsic_block_size.0 as i64 /
+                    let first_bsize = Au::new((first_isize.0 as i64 * intrinsic_block_size.0 as i64 /
                                           intrinsic_inline_size.0 as i64) as i32);
                     let second_bsize = block_constraint.clamp(intrinsic_block_size);
-                    let second_isize = Au((second_bsize.0 as i64 * intrinsic_inline_size.0 as i64 /
+                    let second_isize = Au::new((second_bsize.0 as i64 * intrinsic_inline_size.0 as i64 /
                                            intrinsic_block_size.0 as i64) as i32);
                     let (inline_size, block_size) = match (first_isize.cmp(&intrinsic_inline_size) ,
                                                            second_isize.cmp(&intrinsic_inline_size)) {
@@ -1159,10 +1159,10 @@ impl Fragment {
         let border_width = self.border_width();
         SpeculatedInlineContentEdgeOffsets {
             start: MaybeAuto::from_style(logical_margin.inline_start, Au(0)).specified_or_zero() +
-                model::specified(logical_padding.inline_start, Au(0)) +
+                logical_padding.inline_start.to_used_value(Au(0)) +
                 border_width.inline_start,
             end: MaybeAuto::from_style(logical_margin.inline_end, Au(0)).specified_or_zero() +
-                model::specified(logical_padding.inline_end, Au(0)) +
+                logical_padding.inline_end.to_used_value(Au(0)) +
                 border_width.inline_end,
         }
     }
@@ -1491,10 +1491,10 @@ impl Fragment {
                         // the size constraints work properly.
                         // TODO(stshine): Find a cleaner way to do this.
                         let padding = self.style.logical_padding();
-                        self.border_padding.inline_start = model::specified(padding.inline_start, Au(0));
-                        self.border_padding.inline_end = model::specified(padding.inline_end, Au(0));
-                        self.border_padding.block_start = model::specified(padding.block_start, Au(0));
-                        self.border_padding.block_end = model::specified(padding.block_end, Au(0));
+                        self.border_padding.inline_start = padding.inline_start.to_used_value(Au(0));
+                        self.border_padding.inline_end = padding.inline_end.to_used_value(Au(0));
+                        self.border_padding.block_start = padding.block_start.to_used_value(Au(0));
+                        self.border_padding.block_end = padding.block_end.to_used_value(Au(0));
                         let border = self.border_width();
                         self.border_padding.inline_start += border.inline_start;
                         self.border_padding.inline_end += border.inline_end;
@@ -1504,7 +1504,11 @@ impl Fragment {
                         result_inline
                     }
                     LengthOrPercentageOrAuto::Length(length) => length,
-                    LengthOrPercentageOrAuto::Calc(calc) => calc.length(),
+                    LengthOrPercentageOrAuto::Calc(calc) => {
+                        // TODO(nox): This is probably wrong, because it accounts neither for
+                        // clamping (not sure if necessary here) nor percentage.
+                        calc.unclamped_length()
+                    },
                 };
 
                 let size_constraint = self.size_constraint(None, Direction::Inline);
@@ -2233,8 +2237,7 @@ impl Fragment {
                     offset -= minimum_line_metrics.space_needed().scale_by(percentage)
                 }
                 vertical_align::T::LengthOrPercentage(LengthOrPercentage::Calc(formula)) => {
-                    offset -= minimum_line_metrics.space_needed().scale_by(formula.percentage()) +
-                        formula.length()
+                    offset -= formula.to_used_value(Some(minimum_line_metrics.space_needed())).unwrap()
                 }
             }
         }
@@ -2847,12 +2850,14 @@ impl Fragment {
 
         let mut transform = Matrix4D::identity();
         let transform_origin = &self.style.get_box().transform_origin;
-        let transform_origin_x = model::specified(transform_origin.horizontal,
-                                                  stacking_relative_border_box.size
-                                                                              .width).to_f32_px();
-        let transform_origin_y = model::specified(transform_origin.vertical,
-                                                  stacking_relative_border_box.size
-                                                                              .height).to_f32_px();
+        let transform_origin_x =
+            transform_origin.horizontal
+                .to_used_value(stacking_relative_border_box.size.width)
+                .to_f32_px();
+        let transform_origin_y =
+            transform_origin.vertical
+                .to_used_value(stacking_relative_border_box.size.height)
+                .to_f32_px();
         let transform_origin_z = transform_origin.depth.to_f32_px();
 
         let pre_transform = Matrix4D::create_translation(transform_origin_x,
@@ -2875,10 +2880,8 @@ impl Fragment {
                     Matrix4D::create_scale(sx, sy, sz)
                 }
                 transform::ComputedOperation::Translate(tx, ty, tz) => {
-                    let tx =
-                        model::specified(tx, stacking_relative_border_box.size.width).to_f32_px();
-                    let ty =
-                        model::specified(ty, stacking_relative_border_box.size.height).to_f32_px();
+                    let tx = tx.to_used_value(stacking_relative_border_box.size.width).to_f32_px();
+                    let ty = ty.to_used_value(stacking_relative_border_box.size.height).to_f32_px();
                     let tz = tz.to_f32_px();
                     Matrix4D::create_translation(tx, ty, tz)
                 }
@@ -2907,10 +2910,13 @@ impl Fragment {
             Either::First(length) => {
                 let perspective_origin = self.style().get_box().perspective_origin;
                 let perspective_origin =
-                    Point2D::new(model::specified(perspective_origin.horizontal,
-                                                  stacking_relative_border_box.size.width).to_f32_px(),
-                                 model::specified(perspective_origin.vertical,
-                                                  stacking_relative_border_box.size.height).to_f32_px());
+                    Point2D::new(
+                        perspective_origin.horizontal
+                            .to_used_value(stacking_relative_border_box.size.width)
+                            .to_f32_px(),
+                        perspective_origin.vertical
+                            .to_used_value(stacking_relative_border_box.size.height)
+                            .to_f32_px());
 
                 let pre_transform = Matrix4D::create_translation(perspective_origin.x,
                                                                  perspective_origin.y,

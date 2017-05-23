@@ -19,10 +19,11 @@ fn size_of_selectors_dummy_types() {
     assert_eq!(align_of::<dummies::Atom>(), align_of::<style::Atom>());
 }
 
-#[test]
-fn size_of_property_declaration() {
-    ::style::properties::test_size_of_property_declaration();
-}
+size_of_test!(test_size_of_property_declaration, style::properties::PropertyDeclaration, 32);
+
+// This is huge, but we allocate it on the stack and then never move it,
+// we only pass `&mut SourcePropertyDeclaration` references around.
+size_of_test!(test_size_of_parsed_declaration, style::properties::SourcePropertyDeclaration, 704);
 
 #[test]
 fn size_of_specified_values() {

@@ -202,6 +202,7 @@ EXPORTS.mozilla.layers += [
     'TextureWrapperImage.h',
     'TransactionIdAllocator.h',
     'UpdateImageHelper.h',
+    'wr/ScrollingLayersHelper.h',
     'wr/StackingContextHelper.h',
     'wr/WebRenderBridgeChild.h',
     'wr/WebRenderBridgeParent.h',
@@ -397,6 +398,7 @@ UNIFIED_SOURCES += [
     'SourceSurfaceVolatileData.cpp',
     'TextureSourceProvider.cpp',
     'TextureWrapperImage.cpp',
+    'wr/ScrollingLayersHelper.cpp',
     'wr/StackingContextHelper.cpp',
     'wr/WebRenderBridgeChild.cpp',
     'wr/WebRenderBridgeParent.cpp',
@@ -461,6 +463,15 @@ IPDL_SOURCES += [
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+  GENERATED_FILES = [
+      'CompositorD3D11Shaders.h',
+  ]
+
+  d3d11_shaders = GENERATED_FILES['CompositorD3D11Shaders.h']
+  d3d11_shaders.script = 'd3d11/genshaders.py'
+  d3d11_shaders.inputs = ['d3d11/shaders.manifest']
 
 LOCAL_INCLUDES += [
     '/docshell/base',  # for nsDocShell.h

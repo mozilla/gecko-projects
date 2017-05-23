@@ -23,7 +23,7 @@ pref("toolkit.browser.cacheRatioHeight", 3000);
 // expires.
 pref("toolkit.browser.contentViewExpire", 3000);
 
-pref("toolkit.defaultChromeURI", "chrome://browser/content/browser.xul");
+pref("toolkit.defaultChromeURI", "chrome://geckoview/content/geckoview.xul");
 pref("browser.chromeURL", "chrome://browser/content/");
 
 // If a tab has not been active for this long (seconds), then it may be
@@ -878,10 +878,6 @@ pref("dom.push.maxRecentMessageIDsPerSubscription", 0);
 #ifdef MOZ_ANDROID_GCM
 pref("dom.push.enabled", true);
 #endif
-
-// Maximum number of setTimeout()/setInterval() callbacks to run in a single
-// event loop runnable. Minimum value of 1.
-pref("dom.timeout.max_consecutive_callbacks", 3);
 
 // The remote content URL where FxAccountsWebChannel messages originate.  Must use HTTPS.
 pref("identity.fxaccounts.remote.webchannel.uri", "https://accounts.firefox.com");

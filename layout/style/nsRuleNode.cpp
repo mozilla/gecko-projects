@@ -1501,6 +1501,7 @@ struct SetEnumValueHelper
   DEFINE_ENUM_CLASS_SETTER(StyleFloat, None, InlineEnd)
   DEFINE_ENUM_CLASS_SETTER(StyleFloatEdge, ContentBox, MarginBox)
   DEFINE_ENUM_CLASS_SETTER(StyleHyphens, None, Auto)
+  DEFINE_ENUM_CLASS_SETTER(StyleStackSizing, Ignore, IgnoreVertical)
   DEFINE_ENUM_CLASS_SETTER(StyleTextJustify, None, InterCharacter)
   DEFINE_ENUM_CLASS_SETTER(StyleUserFocus, None, SelectMenu)
   DEFINE_ENUM_CLASS_SETTER(StyleUserSelect, None, MozText)
@@ -6067,14 +6068,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
   // See ReflowInput::CalculateHypotheticalBox
   display->mOriginalDisplay = display->mDisplay;
 
-  // -moz-appearance: enum, inherit, initial
-  SetValue(*aRuleData->ValueForMozAppearance(),
-           display->mMozAppearance, conditions,
-           SETVAL_ENUMERATED | SETVAL_UNSET_INITIAL,
-           parentDisplay->mMozAppearance,
-           NS_THEME_NONE);
-
-  // appearance: none | auto
+  // appearance: enum, inherit, initial
   SetValue(*aRuleData->ValueForAppearance(),
            display->mAppearance, conditions,
            SETVAL_ENUMERATED | SETVAL_UNSET_INITIAL,
@@ -8971,14 +8965,9 @@ nsRuleNode::ComputeContentData(void* aStartStruct,
 
     count = 0;
     for (const nsCSSValuePairList* p = ourIncrement; p; p = p->mNext, count++) {
-      int32_t increment;
-      if (p->mYValue.GetUnit() == eCSSUnit_Integer) {
-        increment = p->mYValue.GetIntValue();
-      } else {
-        increment = 1;
-      }
+      MOZ_ASSERT(p->mYValue.GetUnit() == eCSSUnit_Integer);
       p->mXValue.GetStringValue(buffer);
-      content->SetCounterIncrementAt(count, buffer, increment);
+      content->SetCounterIncrementAt(count, buffer, p->mYValue.GetIntValue());
     }
     break;
   }
@@ -9019,14 +9008,9 @@ nsRuleNode::ComputeContentData(void* aStartStruct,
     content->AllocateCounterResets(count);
     count = 0;
     for (const nsCSSValuePairList* p = ourReset; p; p = p->mNext, count++) {
-      int32_t reset;
-      if (p->mYValue.GetUnit() == eCSSUnit_Integer) {
-        reset = p->mYValue.GetIntValue();
-      } else {
-        reset = 0;
-      }
+      MOZ_ASSERT(p->mYValue.GetUnit() == eCSSUnit_Integer);
       p->mXValue.GetStringValue(buffer);
-      content->SetCounterResetAt(count, buffer, reset);
+      content->SetCounterResetAt(count, buffer, p->mYValue.GetIntValue());
     }
     break;
   }
@@ -9088,17 +9072,11 @@ nsRuleNode::ComputeXULData(void* aStartStruct,
            SETVAL_INTEGER | SETVAL_UNSET_INITIAL,
            parentXUL->mBoxOrdinal, 1);
 
-  const nsCSSValue* stackSizingValue = aRuleData->ValueForStackSizing();
-  if (eCSSUnit_Inherit == stackSizingValue->GetUnit()) {
-    conditions.SetUncacheable();
-    xul->mStretchStack = parentXUL->mStretchStack;
-  } else if (eCSSUnit_Initial == stackSizingValue->GetUnit() ||
-             eCSSUnit_Unset == stackSizingValue->GetUnit()) {
-    xul->mStretchStack = true;
-  } else if (eCSSUnit_Enumerated == stackSizingValue->GetUnit()) {
-    xul->mStretchStack = stackSizingValue->GetIntValue() ==
-      NS_STYLE_STACK_SIZING_STRETCH_TO_FIT;
-  }
+  SetValue(*aRuleData->ValueForStackSizing(),
+           xul->mStackSizing, conditions,
+           SETVAL_ENUMERATED | SETVAL_UNSET_INITIAL,
+           parentXUL->mStackSizing,
+           StyleStackSizing::StretchToFit);
 
   COMPUTE_END_RESET(XUL, xul)
 }

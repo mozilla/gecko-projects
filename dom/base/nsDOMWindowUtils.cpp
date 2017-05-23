@@ -338,6 +338,7 @@ nsDOMWindowUtils::UpdateLayerTree()
     if (view) {
       presShell->Paint(view, view->GetBounds(),
           nsIPresShell::PAINT_LAYERS | nsIPresShell::PAINT_SYNC_DECODE_IMAGES);
+      presShell->GetLayerManager()->WaitOnTransactionProcessed();
     }
   }
   return NS_OK;
@@ -2807,6 +2808,7 @@ nsDOMWindowUtils::GetUnanimatedComputedStyle(nsIDOMElement* aElement,
     RefPtr<nsComputedDOMStyle> computedStyle =
       NS_NewComputedDOMStyle(
        element, aPseudoElement, shell,
+       nsComputedDOMStyle::StyleType::eAll,
        nsComputedDOMStyle::AnimationFlag::eWithoutAnimation);
     computedStyle->GetPropertyValue(propertyID, aResult);
     return NS_OK;

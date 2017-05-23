@@ -100,18 +100,19 @@ nsSVGContainerFrame::ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas)
  * inherited font-size of an ancestor changes, or a delayed webfont loads and
  * applies.
  *
- * We assume that any change that requires the anonymous kid of an
- * SVGTextFrame to reflow will result in an NS_FRAME_IS_DIRTY reflow. When
+ * However, we only need to do this work if we were reflowed with
+ * NS_FRAME_IS_DIRTY, which implies that all descendants are dirty.  When
  * that reflow reaches an NS_FRAME_IS_NONDISPLAY frame it would normally
  * stop, but this helper looks for any SVGTextFrame descendants of such
- * frames and marks them NS_FRAME_IS_DIRTY so that the next time that they are
- * painted their anonymous kid will first get the necessary reflow.
+ * frames and marks them NS_FRAME_IS_DIRTY so that the next time that they
+ * are painted their anonymous kid will first get the necessary reflow.
  */
 /* static */ void
 nsSVGContainerFrame::ReflowSVGNonDisplayText(nsIFrame* aContainer)
 {
-  NS_ASSERTION(aContainer->GetStateBits() & NS_FRAME_IS_DIRTY,
-               "expected aContainer to be NS_FRAME_IS_DIRTY");
+  if (!(aContainer->GetStateBits() & NS_FRAME_IS_DIRTY)) {
+    return;
+  }
   NS_ASSERTION((aContainer->GetStateBits() & NS_FRAME_IS_NONDISPLAY) ||
                !aContainer->IsFrameOfType(nsIFrame::eSVG),
                "it is wasteful to call ReflowSVGNonDisplayText on a container "
@@ -252,11 +253,11 @@ nsSVGDisplayContainerFrame::IsSVGTransformed(gfx::Matrix *aOwnTransform,
 //----------------------------------------------------------------------
 // nsSVGDisplayableFrame methods
 
-DrawResult
+void
 nsSVGDisplayContainerFrame::PaintSVG(gfxContext& aContext,
                                      const gfxMatrix& aTransform,
-                                     const nsIntRect *aDirtyRect,
-                                     uint32_t aFlags)
+                                     imgDrawingParams& aImgParams,
+                                     const nsIntRect *aDirtyRect)
 {
   NS_ASSERTION(!NS_SVGDisplayListPaintingEnabled() ||
                (mState & NS_FRAME_IS_NONDISPLAY) ||
@@ -265,7 +266,7 @@ nsSVGDisplayContainerFrame::PaintSVG(gfxContext& aContext,
                "SVG should take this code path");
 
   if (StyleEffects()->mOpacity == 0.0) {
-    return DrawResult::SUCCESS;
+    return;
   }
 
   gfxMatrix matrix = aTransform;
@@ -273,11 +274,10 @@ nsSVGDisplayContainerFrame::PaintSVG(gfxContext& aContext,
     matrix = static_cast<const nsSVGElement*>(GetContent())->
                PrependLocalTransformsTo(matrix, eChildToUserSpace);
     if (matrix.IsSingular()) {
-      return DrawResult::SUCCESS;
+      return;
     }
   }
 
-  DrawResult result = DrawResult::SUCCESS;
   for (nsIFrame* kid = mFrames.FirstChild(); kid;
        kid = kid->GetNextSibling()) {
     gfxMatrix m = matrix;
@@ -294,14 +294,8 @@ nsSVGDisplayContainerFrame::PaintSVG(gfxContext& aContext,
         continue;
       }
     }
-    result = nsSVGUtils::PaintFrameWithEffects(kid, aContext, m, aDirtyRect,
-                                               aFlags);
-    if (result != DrawResult::SUCCESS) {
-      return result;
-    }
+    nsSVGUtils::PaintFrameWithEffects(kid, aContext, m, aImgParams, aDirtyRect);
   }
-
-  return result;
 }
 
 nsIFrame*

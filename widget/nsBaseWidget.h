@@ -279,11 +279,6 @@ public:
                             const mozilla::WidgetPluginEvent& aEvent) override
                           { }
   virtual MOZ_MUST_USE nsresult AttachNativeKeyEvent(mozilla::WidgetKeyboardEvent& aEvent) override { return NS_ERROR_NOT_IMPLEMENTED; }
-  virtual bool            ExecuteNativeKeyBinding(
-                            NativeKeyBindingsType aType,
-                            const mozilla::WidgetKeyboardEvent& aEvent,
-                            DoCommandCallback aCallback,
-                            void* aCallbackData) override { return false; }
   bool                    ComputeShouldAccelerate();
   virtual bool            WidgetTypeSupportsAcceleration() { return true; }
   virtual MOZ_MUST_USE nsresult OnDefaultButtonLoaded(const LayoutDeviceIntRect& aButtonRect) override { return NS_ERROR_NOT_IMPLEMENTED; }
@@ -549,6 +544,8 @@ protected:
 
   nsPopupType PopupType() const { return mPopupType; }
 
+  bool HasRemoteContent() const { return mHasRemoteContent; }
+
   void NotifyRollupGeometryChange()
   {
     // XULPopupManager isn't interested in this notification, so only
@@ -683,6 +680,7 @@ protected:
   nsPopupLevel      mPopupLevel;
   nsPopupType       mPopupType;
   SizeConstraints   mSizeConstraints;
+  bool              mHasRemoteContent;
 
   CompositorWidgetDelegate* mCompositorWidgetDelegate;
 

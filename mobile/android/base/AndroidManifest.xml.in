@@ -235,7 +235,8 @@
         </service>
 
         <service android:name="org.mozilla.gecko.media.MediaControlService"
-                 android:exported="false">
+                 android:exported="false"
+                 android:stopWithTask="true">
         </service>
 
         <receiver
@@ -479,6 +480,10 @@
             android:exported="false"
             android:isolatedProcess="false">
         </service>
+
+#ifdef MOZ_ANDROID_MMA
+#include MmaAndroidManifest_services.xml.in
+#endif
 
     </application>
 </manifest>

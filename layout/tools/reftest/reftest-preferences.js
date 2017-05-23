@@ -63,8 +63,7 @@ user_pref("browser.search.isUS", true);
 user_pref("browser.search.countryCode", "US");
 user_pref("browser.search.geoSpecificDefaults", false);
 
-// Make sure SelfSupport doesn't hit the network.
-user_pref("browser.selfsupport.url", "https://localhost/selfsupport-dummy/");
+// Make sure Shield doesn't hit the network.
 user_pref("extensions.shield-recipe-client.api_url", "https://localhost/selfsupport-dummy/");
 
 // use about:blank, not browser.startup.homepage
@@ -84,8 +83,12 @@ user_pref("toolkit.telemetry.unified", false);
 // Likewise for safebrowsing.
 user_pref("browser.safebrowsing.phishing.enabled", false);
 user_pref("browser.safebrowsing.malware.enabled", false);
-user_pref("browser.safebrowsing.forbiddenURIs.enabled", false);
 user_pref("browser.safebrowsing.blockedURIs.enabled", false);
+user_pref("browser.safebrowsing.downloads.remote.url", "http://127.0.0.1/safebrowsing-dummy/gethash");
+user_pref("browser.safebrowsing.provider.google.gethashURL", "http://127.0.0.1/safebrowsing-dummy/gethash");
+user_pref("browser.safebrowsing.provider.google.updateURL", "http://127.0.0.1/safebrowsing-dummy/update");
+user_pref("browser.safebrowsing.provider.google4.gethashURL", "http://127.0.0.1/safebrowsing-dummy/gethash");
+user_pref("browser.safebrowsing.provider.google4.updateURL", "http://127.0.0.1/safebrowsing-dummy/update");
 // Likewise for tracking protection.
 user_pref("privacy.trackingprotection.enabled", false);
 user_pref("privacy.trackingprotection.pbmode.enabled", false);

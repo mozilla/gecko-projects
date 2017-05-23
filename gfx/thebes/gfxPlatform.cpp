@@ -836,7 +836,13 @@ gfxPlatform::InitMoz2DLogging()
 /* static */ bool
 gfxPlatform::IsHeadless()
 {
-    return PR_GetEnv("MOZ_HEADLESS");
+    static bool initialized = false;
+    static bool headless = false;
+    if (!initialized) {
+      initialized = true;
+      headless = PR_GetEnv("MOZ_HEADLESS");
+    }
+    return headless;
 }
 
 static bool sLayersIPCIsUp = false;
@@ -862,7 +868,6 @@ gfxPlatform::Shutdown()
     // These may be called before the corresponding subsystems have actually
     // started up. That's OK, they can handle it.
     gfxFontCache::Shutdown();
-    gfxFontGroup::Shutdown();
     gfxGradientCache::Shutdown();
     gfxAlphaBoxBlur::ShutdownBlurCache();
     gfxGraphiteShaper::Shutdown();

@@ -30,6 +30,7 @@ function SourceMapURLService(target, sourceMapService) {
  * Reset the service.  This flushes the internal cache.
  */
 SourceMapURLService.prototype.reset = function () {
+  this._sourceMapService.clearSourceMaps();
   this._urls.clear();
 };
 
@@ -83,7 +84,13 @@ SourceMapURLService.prototype.originalPositionFor = async function (url, line, c
   await this._sourceMapService.getOriginalURLs(urlInfo);
   const location = { sourceId: urlInfo.id, line, column, sourceUrl: url };
   let resolvedLocation = await this._sourceMapService.getOriginalLocation(location);
-  return resolvedLocation === location ? null : resolvedLocation;
+  if (!resolvedLocation ||
+      (resolvedLocation.line === location.line &&
+       resolvedLocation.column === location.column &&
+       resolvedLocation.sourceUrl === location.sourceUrl)) {
+    return null;
+  }
+  return resolvedLocation;
 };
 
 exports.SourceMapURLService = SourceMapURLService;

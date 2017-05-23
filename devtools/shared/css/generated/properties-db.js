@@ -1234,6 +1234,8 @@ exports.CSS_PROPERTIES = {
     "supports": [],
     "values": [
       "ignore",
+      "ignore-horizontal",
+      "ignore-vertical",
       "inherit",
       "initial",
       "stretch-to-fit",
@@ -1741,20 +1743,6 @@ exports.CSS_PROPERTIES = {
       "step-end",
       "step-start",
       "steps",
-      "unset"
-    ]
-  },
-  "-webkit-appearance": {
-    "isInherited": false,
-    "subproperties": [
-      "appearance"
-    ],
-    "supports": [],
-    "values": [
-      "auto",
-      "inherit",
-      "initial",
-      "none",
       "unset"
     ]
   },
@@ -2870,7 +2858,6 @@ exports.CSS_PROPERTIES = {
       "animation-play-state",
       "animation-timing-function",
       "-moz-appearance",
-      "appearance",
       "backface-visibility",
       "background-attachment",
       "background-blend-mode",
@@ -3402,6 +3389,8 @@ exports.CSS_PROPERTIES = {
       "icon",
       "ideographic",
       "ignore",
+      "ignore-horizontal",
+      "ignore-vertical",
       "inactive",
       "infinite",
       "inherit",
@@ -3897,20 +3886,6 @@ exports.CSS_PROPERTIES = {
       "step-end",
       "step-start",
       "steps",
-      "unset"
-    ]
-  },
-  "appearance": {
-    "isInherited": false,
-    "subproperties": [
-      "appearance"
-    ],
-    "supports": [],
-    "values": [
-      "auto",
-      "inherit",
-      "initial",
-      "none",
       "unset"
     ]
   },
@@ -9818,14 +9793,6 @@ exports.PREFERENCES = [
     "layout.css.all-shorthand.enabled"
   ],
   [
-    "-moz-appearance",
-    "layout.css.moz-appearance.enabled"
-  ],
-  [
-    "appearance",
-    "layout.css.appearance.enabled"
-  ],
-  [
     "background-blend-mode",
     "layout.css.background-blend-mode.enabled"
   ],
@@ -10148,10 +10115,6 @@ exports.PREFERENCES = [
   [
     "-webkit-animation-timing-function",
     "layout.css.prefixes.webkit"
-  ],
-  [
-    "-webkit-appearance",
-    "layout.css.appearance.enabled"
   ],
   [
     "-webkit-filter",
