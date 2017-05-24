@@ -5572,6 +5572,12 @@ public:
     }
   }
 
+  virtual void Destroy(nsDisplayListBuilder* aBuilder) override
+  {
+    mList.GetChildren()->DeleteAll(aBuilder);
+    nsDisplayItem::Destroy(aBuilder);
+  }
+
 private:
   nsDisplayWrapList mList;
   nsIFrame* mTransformFrame;
