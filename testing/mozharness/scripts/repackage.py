@@ -60,8 +60,8 @@ class Repackage(BaseScript):
         dirs = self.query_abs_dirs()
         for repack_config in config["repackage_config"]:
             command = [sys.executable, 'mach', '--log-no-times', 'repackage']
-            for arg in repack_config["repackage_args"]:
-                command.append(arg % repack_config)
+            for args in repack_config["repackage_args"]:
+                command.extend(args)
             self.run_command(
                 command=command,
                 cwd=dirs['abs_mozilla_dir'],

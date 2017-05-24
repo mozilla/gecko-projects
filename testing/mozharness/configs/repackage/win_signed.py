@@ -9,7 +9,7 @@ else:
 
 config = {
     "input_home": "/home/worker/workspace/inputs",
-    "src_mozconfig": "browser/config/mozconfigs/win64/repack",
+    "src_mozconfig": "browser/config/mozconfigs/{}/repack".format(plat),
 
     "download_config": {
         "target.zip": os.environ.get("SIGNED_ZIP"),

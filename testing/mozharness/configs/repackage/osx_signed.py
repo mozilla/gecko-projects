@@ -9,7 +9,7 @@ config = {
     },
 
     "repackage_config": [[
-        "dmg", "-i", "target.tar.gz", "-o" "target.dmg"
+        "dmg", "-i", "target.tar.gz", "-o", "target.dmg"
     ]],
 
     # ToolTool
