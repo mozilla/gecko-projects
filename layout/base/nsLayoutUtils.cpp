@@ -3680,6 +3680,46 @@ nsLayoutUtils::MaybeCreateDisplayPortInFirstScrollFrameEncountered(
   return false;
 }
 
+static void
+AddExtraBackgroundItems(nsDisplayListBuilder& aBuilder,
+                        nsDisplayList& aList,
+                        nsIFrame* aFrame,
+                        const nsRect& aCanvasArea,
+                        const nsRegion& aVisibleRegion,
+                        nscolor aBackstop)
+{
+  LayoutFrameType frameType = aFrame->Type();
+  nsPresContext* presContext = aFrame->PresContext();
+  nsIPresShell* presShell = presContext->PresShell();
+
+  // For the viewport frame in print preview/page layout we want to paint
+  // the grey background behind the page, not the canvas color.
+  if (frameType == LayoutFrameType::Viewport &&
+      nsLayoutUtils::NeedsPrintPreviewBackground(presContext)) {
+    nsRect bounds = nsRect(aBuilder.ToReferenceFrame(aFrame),
+                           aFrame->GetSize());
+    nsDisplayListBuilder::AutoBuildingDisplayList
+      buildingDisplayList(&aBuilder, aFrame, bounds, bounds, false);
+    presShell->AddPrintPreviewBackgroundItem(aBuilder, aList, aFrame, bounds);
+  } else if (frameType != LayoutFrameType::Page) {
+    // For printing, this function is first called on an nsPageFrame, which
+    // creates a display list with a PageContent item. The PageContent item's
+    // paint function calls this function on the nsPageFrame's child which is
+    // an nsPageContentFrame. We only want to add the canvas background color
+    // item once, for the nsPageContentFrame.
+
+    // Add the canvas background color to the bottom of the list. This
+    // happens after we've built the list so that AddCanvasBackgroundColorItem
+    // can monkey with the contents if necessary.
+    nsRect canvasArea = aVisibleRegion.GetBounds();
+    canvasArea.IntersectRect(aCanvasArea, canvasArea);
+    nsDisplayListBuilder::AutoBuildingDisplayList
+      buildingDisplayList(&aBuilder, aFrame, canvasArea, canvasArea, false);
+    presShell->AddCanvasBackgroundColorItem(
+      aBuilder, aList, aFrame, canvasArea, aBackstop);
+  }
+}
+
 nsresult
 nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFrame,
                           const nsRegion& aDirtyRegion, nscolor aBackstop,
@@ -4046,6 +4086,9 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         list.DeleteAll(&builder);
         builder.SetDirtyRect(dirtyRect);
         aFrame->BuildDisplayListForStackingContext(&builder, &list);
+        // TODO: We only build this when we do a complete build, but we need to make
+        // sure we do a rebuild if anything might change it.
+        AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
       }
     }
 
@@ -4056,34 +4099,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     }
     if (retainedBuilder) {
       retainedBuilder->mNeedsFullRebuild = false;
-    }
-
-    LayoutFrameType frameType = aFrame->Type();
-
-    // For the viewport frame in print preview/page layout we want to paint
-    // the grey background behind the page, not the canvas color.
-    if (frameType == LayoutFrameType::Viewport &&
-        nsLayoutUtils::NeedsPrintPreviewBackground(presContext)) {
-      nsRect bounds = nsRect(builder.ToReferenceFrame(aFrame),
-                             aFrame->GetSize());
-      nsDisplayListBuilder::AutoBuildingDisplayList
-        buildingDisplayList(&builder, aFrame, bounds, bounds, false);
-      presShell->AddPrintPreviewBackgroundItem(builder, list, aFrame, bounds);
-    } else if (frameType != LayoutFrameType::Page) {
-      // For printing, this function is first called on an nsPageFrame, which
-      // creates a display list with a PageContent item. The PageContent item's
-      // paint function calls this function on the nsPageFrame's child which is
-      // an nsPageContentFrame. We only want to add the canvas background color
-      // item once, for the nsPageContentFrame.
-
-      // Add the canvas background color to the bottom of the list. This
-      // happens after we've built the list so that AddCanvasBackgroundColorItem
-      // can monkey with the contents if necessary.
-      canvasArea.IntersectRect(canvasArea, visibleRegion.GetBounds());
-      nsDisplayListBuilder::AutoBuildingDisplayList
-        buildingDisplayList(&builder, aFrame, canvasArea, canvasArea, false);
-      presShell->AddCanvasBackgroundColorItem(
-             builder, list, aFrame, canvasArea, aBackstop);
     }
 
     builder.LeavePresShell(aFrame, &list);
@@ -4291,7 +4306,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
 
   // Flush the list so we don't trigger the IsEmpty-on-destruction assertion
-  if (aBuilderMode != nsDisplayListBuilderMode::PAINTING) {
+  if (!retainedBuilder) {
     list.DeleteAll(&builder);
     delete listPtr;
     delete builderPtr;
