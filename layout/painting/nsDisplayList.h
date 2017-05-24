@@ -592,6 +592,9 @@ public:
    * that we make.
    */
   bool IsBuildingCaret() { return mBuildCaret; }
+
+  bool IsPartialUpdate() { return mPartialUpdate; }
+  void SetPartialUpdate(bool aPartial) { mPartialUpdate = aPartial; }
   /**
    * Allows callers to selectively override the regular paint suppression checks,
    * so that methods like GetFrameForPoint work when painting is suppressed.
@@ -1662,6 +1665,7 @@ private:
   bool                           mIsBuildingScrollbar;
   bool                           mCurrentScrollbarWillHaveLayer;
   bool                           mBuildCaret;
+  bool                           mPartialUpdate;
   bool                           mIgnoreSuppression;
   bool                           mIsAtRootOfPseudoStackingContext;
   bool                           mIncludeAllOutOfFlows;
@@ -2762,6 +2766,7 @@ struct RetainedDisplayListBuilder {
                              nsDisplayListBuilderMode aMode,
                              bool aBuildCaret)
     : mBuilder(aReferenceFrame, aMode, aBuildCaret)
+    , mNeedsFullRebuild(false)
   {}
   ~RetainedDisplayListBuilder()
   {
@@ -2770,6 +2775,7 @@ struct RetainedDisplayListBuilder {
 
   nsDisplayListBuilder mBuilder;
   nsDisplayList mList;
+  bool mNeedsFullRebuild;
 
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(Cached, RetainedDisplayListBuilder)
 };

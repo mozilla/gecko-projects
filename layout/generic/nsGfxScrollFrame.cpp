@@ -3717,7 +3717,9 @@ ScrollFrameHelper::DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
     if (usingDisplayPort) {
       // Override the dirty rectangle if the displayport has been set.
       *aVisibleRect = displayPort;
-      if (mOuter->HasOverrideDirtyRegion()) {
+      if (!aBuilder->IsPartialUpdate()) {
+        *aDirtyRect = displayPort;
+      } else if (mOuter->HasOverrideDirtyRegion()) {
         nsRect* rect =
           mOuter->Properties().Get(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect());
         if (rect) {

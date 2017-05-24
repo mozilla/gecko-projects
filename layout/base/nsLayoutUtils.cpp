@@ -1422,10 +1422,13 @@ nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
     }
   }
 
-  if (changed && aRepaintMode == RepaintMode::Repaint) {
+  if (changed) {
     nsIFrame* frame = aContent->GetPrimaryFrame();
     if (frame) {
-      frame->SchedulePaint();
+      if (aRepaintMode == RepaintMode::Repaint) {
+        frame->SchedulePaint();
+      }
+      frame->InvalidateAllDisplayLists();
     }
   }
 
@@ -3716,9 +3719,10 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
   nsDisplayListBuilder* builderPtr = nullptr;
   nsDisplayList* listPtr = nullptr;
-  if (aBuilderMode == nsDisplayListBuilderMode::PAINTING) {
-    RetainedDisplayListBuilder* retainedBuilder =
-      aFrame->Properties().Get(RetainedDisplayListBuilder::Cached());
+  RetainedDisplayListBuilder* retainedBuilder = nullptr;
+  if (aBuilderMode == nsDisplayListBuilderMode::PAINTING &&
+      (aFlags & PaintFrameFlags::PAINT_WIDGET_LAYERS)) {
+    retainedBuilder = aFrame->Properties().Get(RetainedDisplayListBuilder::Cached());
     if (!retainedBuilder) {
       retainedBuilder =
         new RetainedDisplayListBuilder(aFrame, aBuilderMode,
@@ -3856,7 +3860,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       builder.SetVisibleRect(dirtyRect);
 
       bool merged = false;
-      if ((aFlags & PaintFrameFlags::PAINT_WIDGET_LAYERS) &&
+      if (retainedBuilder && !retainedBuilder->mNeedsFullRebuild &&
           aFrame->Properties().Get(nsIFrame::ModifiedFrameList())) {
         std::vector<WeakFrame>* modifiedFrames = aFrame->Properties().Get(nsIFrame::ModifiedFrameList());
         nsTArray<nsIFrame*>* deletedFrames = aFrame->Properties().Get(nsIFrame::DeletedFrameList());
@@ -4003,7 +4007,9 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           builder.SetDirtyRect(modifiedDirty);
 
           nsDisplayList modifiedDL;
+          builder.SetPartialUpdate(true);
           aFrame->BuildDisplayListForStackingContext(&builder, &modifiedDL);
+          builder.SetPartialUpdate(false);
           //printf_stderr("Painting --- Modified list (dirty %d,%d,%d,%d):\n",
           //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
           //nsFrame::PrintDisplayList(&builder, modifiedDL);
@@ -4047,6 +4053,9 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     // during display list merging.
     for (nsDisplayItem* i = list.GetBottom(); i; i = i->GetAbove()) {
       i->SaveState();
+    }
+    if (retainedBuilder) {
+      retainedBuilder->mNeedsFullRebuild = false;
     }
 
     LayoutFrameType frameType = aFrame->Type();

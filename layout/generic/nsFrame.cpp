@@ -6449,15 +6449,32 @@ static void InvalidateRenderingObservers(nsIFrame* aFrame, bool aFrameChanged = 
   // root (which is the root stacking context, but not necessarily the one for the current frame)
   if (XRE_IsContentProcess() && !aFrame->IsFrameModified()) {
     nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
-    std::vector<WeakFrame>* modifiedFrames = displayRoot->Properties().Get(nsIFrame::ModifiedFrameList());
-    if (!modifiedFrames) {
-      modifiedFrames = new std::vector<WeakFrame>;
-      displayRoot->Properties().Set(nsIFrame::ModifiedFrameList(), modifiedFrames);
+    RetainedDisplayListBuilder* retainedBuilder =
+      aFrame->Properties().Get(RetainedDisplayListBuilder::Cached());
+    if (retainedBuilder && !retainedBuilder->mNeedsFullRebuild) {
+      std::vector<WeakFrame>* modifiedFrames = displayRoot->Properties().Get(nsIFrame::ModifiedFrameList());
+      if (!modifiedFrames) {
+        modifiedFrames = new std::vector<WeakFrame>;
+        displayRoot->Properties().Set(nsIFrame::ModifiedFrameList(), modifiedFrames);
+      }
+      MOZ_ASSERT(aFrame->PresContext()->LayoutPhaseCount(eLayoutPhase_DisplayListBuilding) == 0);
+      modifiedFrames->push_back(aFrame);
+      aFrame->SetFrameIsModified(true);
     }
-    MOZ_ASSERT(aFrame->PresContext()->LayoutPhaseCount(eLayoutPhase_DisplayListBuilding) == 0);
-    modifiedFrames->push_back(aFrame);
-    aFrame->SetFrameIsModified(true);
   }
+}
+
+void
+nsIFrame::InvalidateAllDisplayLists()
+{
+  nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(this);
+  RetainedDisplayListBuilder* retainedBuilder =
+    displayRoot->Properties().Get(RetainedDisplayListBuilder::Cached());
+  if (retainedBuilder) {
+    retainedBuilder->mNeedsFullRebuild = true;
+  }
+  displayRoot->Properties().Delete(nsIFrame::ModifiedFrameList());
+  displayRoot->Properties().Delete(nsIFrame::DeletedFrameList());
 }
 
 void
