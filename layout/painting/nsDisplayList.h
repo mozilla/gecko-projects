@@ -3614,6 +3614,22 @@ public:
     , mColor(Color::FromABGR(aColor))
   { }
 
+  virtual void RestoreState() override
+  {
+    if (mState) {
+      nsDisplayItem::RestoreState();
+      mColor = *mState;
+    }
+  }
+
+  virtual void SaveState() override
+  {
+    if (!mState) {
+      nsDisplayItem::SaveState();
+      mState.emplace(mColor);
+    }
+  }
+
   virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
                                    LayerManager* aManager,
                                    const ContainerLayerParameters& aParameters) override;
@@ -3665,6 +3681,9 @@ protected:
   const nsRect mBackgroundRect;
   const nsStyleBackground* mBackgroundStyle;
   mozilla::gfx::Color mColor;
+
+private:
+  mozilla::Maybe<mozilla::gfx::Color> mState;
 };
 
 class nsDisplayTableBackgroundColor : public nsDisplayBackgroundColor
@@ -3750,6 +3769,22 @@ public:
   }
 #endif
 
+  virtual void RestoreState() override
+  {
+    if (mState) {
+      nsDisplayItem::RestoreState();
+      mOpacity = *mState;
+    }
+  }
+
+  virtual void SaveState() override
+  {
+    if (!mState) {
+      nsDisplayItem::SaveState();
+      mState.emplace(mOpacity);
+    }
+  }
+
   virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) override;
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
                            bool* aSnap) const override;
@@ -3799,6 +3834,8 @@ private:
   nsRegion mVisibleRegion;
   nsRect mBounds;
   float mOpacity;
+
+  mozilla::Maybe<float> mState;
 };
 
 /**
@@ -4281,6 +4318,22 @@ public:
     return new (aBuilder) nsDisplayOpacity(*this);
   }
 
+  virtual void RestoreState() override
+  {
+    if (mState) {
+      nsDisplayWrapList::RestoreState();
+      mOpacity = *mState;
+    }
+  }
+
+  virtual void SaveState() override
+  {
+    if (!mState) {
+      nsDisplayWrapList::SaveState();
+      mState.emplace(mOpacity);
+    }
+  }
+
   virtual nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
                                    bool* aSnap) const override;
   virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
@@ -4327,6 +4380,8 @@ public:
 private:
   float mOpacity;
   bool mForEventsAndPluginsOnly;
+
+  mozilla::Maybe<float> mState;
 };
 
 class nsDisplayBlendMode : public nsDisplayWrapList {
