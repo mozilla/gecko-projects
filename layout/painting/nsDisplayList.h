@@ -45,6 +45,7 @@
 
 #include <stdlib.h>
 #include <algorithm>
+#include <list>
 
 class nsIContent;
 class nsRenderingContext;
@@ -1782,44 +1783,34 @@ public:
     aBuilder->Destroy(type, this);
   }
 
+  struct AutoVarState {
+    AutoVarState() = default;
+    virtual ~AutoVarState() = default;
+  };
+
+
+  template<typename T>
+  struct AutoVarStateImpl : public AutoVarState {
+    AutoVarStateImpl(T& aVar) : mVal(aVar), mVar(aVar) {}
+    ~AutoVarStateImpl() { mVar = mVal; }
+    T mVal;
+    T& mVar;
+  };
+
   /**
-   * Restores the previous state for this display item and its children.
-   * Does nothing if there is no state to restore.
+   * Restores the previous state for this display item.
    */
   virtual void RestoreState()
   {
-    if (!mState) {
-      // There is no state to restore.
-      return;
+    while (!mStates.empty()) {
+      mStates.pop_back();
     }
-
-    mozilla::Tie(mClipChain, mClip, mDisableSubpixelAA) = *mState;
-
-    VisitChildren([](nsDisplayItem* i) { i->RestoreState(); });
   }
 
-  /**
-   * Saves the current state for the display item and its children.
-   * Does nothing if the state has already been saved.
-   */
-  virtual void SaveState()
+  template<typename T> void SaveVar(T& aVar)
   {
-    if (mState) {
-      // The initial item state is already saved, and since we are assuming that
-      // the item creation is deterministic, there is no need to save it again.
-      return;
-    }
-
-    // State for FuseClipChainUpTo() and DisableComponentAlpha().
-    mState.emplace(mClipChain, mClip, mDisableSubpixelAA);
-
-    VisitChildren([](nsDisplayItem* i) { i->SaveState(); });
+    mStates.emplace_back(new AutoVarStateImpl<T>(aVar));
   }
-
-  /**
-   * Visits all child display items and calls the given function on them.
-   */
-  virtual void VisitChildren(void (*aCallBack)(nsDisplayItem*));
 
   /**
    * Downcasts this item to nsDisplayWrapList, if possible.
@@ -1834,7 +1825,23 @@ public:
     return nullptr;
   }
 
-  nsDisplayItem(const nsDisplayItem& aOther) = default;
+  /**
+   * The custom copy-constructor is implemented to prevent copying the saved
+   * state of the item.
+   * This is currently only used when creating temporary items for merging.
+   */
+  nsDisplayItem(const nsDisplayItem& aOther)
+    : mFrame(aOther.mFrame)
+    , mClipChain(aOther.mClipChain)
+    , mClip(aOther.mClip)
+    , mActiveScrolledRoot(aOther.mActiveScrolledRoot)
+    , mReferenceFrame(aOther.mReferenceFrame)
+    , mAnimatedGeometryRoot(aOther.mAnimatedGeometryRoot)
+    , mToReferenceFrame(aOther.mToReferenceFrame)
+    , mVisibleRect(aOther.mVisibleRect)
+    , mForceNotVisible(aOther.mForceNotVisible)
+    , mDisableSubpixelAA(aOther.mDisableSubpixelAA)
+  {}
 
   struct HitTestState {
     explicit HitTestState() : mInPreserves3D(false) {}
@@ -2363,7 +2370,11 @@ public:
   /**
    * Disable usage of component alpha. Currently only relevant for items that have text.
    */
-  void DisableComponentAlpha() { mDisableSubpixelAA = true; }
+  void DisableComponentAlpha()
+  {
+    SaveVar(mDisableSubpixelAA);
+    mDisableSubpixelAA = true;
+  }
 
   /**
    * Check if we can add async animations to the layer for this display item.
@@ -2436,10 +2447,7 @@ protected:
 #endif
 
 private:
-  using State = mozilla::Tuple<RefPtr<const DisplayItemClipChain>,
-                               const DisplayItemClip*,
-                               bool>;
-  mozilla::Maybe<State> mState;
+  std::list<mozilla::UniquePtr<AutoVarState>> mStates;
 };
 
 /**
@@ -3614,22 +3622,6 @@ public:
     , mColor(Color::FromABGR(aColor))
   { }
 
-  virtual void RestoreState() override
-  {
-    if (mState) {
-      nsDisplayItem::RestoreState();
-      mColor = *mState;
-    }
-  }
-
-  virtual void SaveState() override
-  {
-    if (!mState) {
-      nsDisplayItem::SaveState();
-      mState.emplace(mColor);
-    }
-  }
-
   virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
                                    LayerManager* aManager,
                                    const ContainerLayerParameters& aParameters) override;
@@ -3681,9 +3673,6 @@ protected:
   const nsRect mBackgroundRect;
   const nsStyleBackground* mBackgroundStyle;
   mozilla::gfx::Color mColor;
-
-private:
-  mozilla::Maybe<mozilla::gfx::Color> mState;
 };
 
 class nsDisplayTableBackgroundColor : public nsDisplayBackgroundColor
@@ -3769,22 +3758,6 @@ public:
   }
 #endif
 
-  virtual void RestoreState() override
-  {
-    if (mState) {
-      nsDisplayItem::RestoreState();
-      mOpacity = *mState;
-    }
-  }
-
-  virtual void SaveState() override
-  {
-    if (!mState) {
-      nsDisplayItem::SaveState();
-      mState.emplace(mOpacity);
-    }
-  }
-
   virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) override;
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
                            bool* aSnap) const override;
@@ -3802,6 +3775,7 @@ public:
                             const DisplayItemClipChain* aClip) override
   {
     NS_ASSERTION(CanApplyOpacity(), "ApplyOpacity should be allowed");
+    SaveVar(mOpacity);
     mOpacity = aOpacity;
     IntersectClip(aBuilder, aClip);
   }
@@ -3834,8 +3808,6 @@ private:
   nsRegion mVisibleRegion;
   nsRect mBounds;
   float mOpacity;
-
-  mozilla::Maybe<float> mState;
 };
 
 /**
@@ -4318,22 +4290,6 @@ public:
     return new (aBuilder) nsDisplayOpacity(*this);
   }
 
-  virtual void RestoreState() override
-  {
-    if (mState) {
-      nsDisplayWrapList::RestoreState();
-      mOpacity = *mState;
-    }
-  }
-
-  virtual void SaveState() override
-  {
-    if (!mState) {
-      nsDisplayWrapList::SaveState();
-      mState.emplace(mOpacity);
-    }
-  }
-
   virtual nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
                                    bool* aSnap) const override;
   virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
@@ -4380,8 +4336,6 @@ public:
 private:
   float mOpacity;
   bool mForEventsAndPluginsOnly;
-
-  mozilla::Maybe<float> mState;
 };
 
 class nsDisplayBlendMode : public nsDisplayWrapList {

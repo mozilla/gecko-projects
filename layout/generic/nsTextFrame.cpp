@@ -4950,6 +4950,7 @@ public:
                     const DisplayItemClipChain* aClip) override
   {
     NS_ASSERTION(CanApplyOpacity(), "ApplyOpacity should be allowed");
+    SaveVar(mOpacity);
     mOpacity = aOpacity;
     IntersectClip(aBuilder, aClip);
   }
@@ -4981,29 +4982,12 @@ public:
     return false;
   }
 
-  virtual void RestoreState() override
-  {
-    if (mState) {
-      nsDisplayItem::RestoreState();
-      mOpacity = *mState;
-    }
-  }
-
-  virtual void SaveState() override
-  {
-    if (!mState) {
-      nsDisplayItem::SaveState();
-      mState.emplace(mOpacity);
-    }
-  }
-
   RefPtr<ScaledFont> mFont;
   nsTArray<GlyphArray> mGlyphs;
   nsTArray<nsTextFrame*> mMergedFrames;
   nsRect mBounds;
 
   float mOpacity;
-  mozilla::Maybe<float> mState;
 };
 
 class nsDisplayTextGeometry : public nsCharClipGeometry

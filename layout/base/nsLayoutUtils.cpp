@@ -3582,6 +3582,10 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   }
 
   for (nsDisplayItem* i = aOldList->GetBottom(); i != nullptr; i = i->GetAbove()) {
+    // Restore the previously saved state of the display items in the old
+    // display list.
+    i->RestoreState();
+
     oldListLookup[std::make_pair(i->Frame(), i->GetPerFrameKey())] = i;
   }
 
@@ -3911,12 +3915,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         nsRect modifiedDirty;
         bool success = true;
 
-        // Restore the previously saved state of the display items in the old
-        // display list.
-        for (nsDisplayItem* i = list.GetBottom(); i; i = i->GetAbove()) {
-          i->RestoreState();
-        }
-
         //printf_stderr("Dirty frames: ");
         for (nsIFrame* f : *modifiedFrames) {
           if (!f) {
@@ -4092,11 +4090,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       }
     }
 
-    // Save the current state of the display items so that they can be reused
-    // during display list merging.
-    for (nsDisplayItem* i = list.GetBottom(); i; i = i->GetAbove()) {
-      i->SaveState();
-    }
     if (retainedBuilder) {
       retainedBuilder->mNeedsFullRebuild = false;
     }

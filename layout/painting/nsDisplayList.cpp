@@ -2688,22 +2688,6 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
       aBuilder->GetCurrentFrameOffsetToReferenceFrame();
 }
 
-void
-nsDisplayItem::VisitChildren(void (*aCallBack)(nsDisplayItem*))
-{
-  if (!GetChildren()) {
-    return;
-  }
-
-  for (nsDisplayItem* i = GetChildren()->GetBottom(); i; i = i->GetAbove()) {
-    aCallBack(i);
-
-    if (i->GetChildren()) {
-      i->VisitChildren(aCallBack);
-    }
-  }
-}
-
 /* static */ bool
 nsDisplayItem::ForceActiveLayers()
 {
@@ -2785,6 +2769,9 @@ nsDisplayItem::SetClipChain(const DisplayItemClipChain* aClipChain)
 void
 nsDisplayItem::FuseClipChainUpTo(nsDisplayListBuilder* aBuilder, const ActiveScrolledRoot* aASR)
 {
+  SaveVar(mClip);
+  SaveVar(mClipChain);
+
   const DisplayItemClipChain* sc = mClipChain;
   DisplayItemClip mergedClip;
   while (sc && ActiveScrolledRoot::PickDescendant(aASR, sc->mASR) == sc->mASR) {
@@ -2845,6 +2832,9 @@ nsDisplayItem::IntersectClip(nsDisplayListBuilder* aBuilder,
   if (!aOther) {
     return;
   }
+
+  SaveVar(mClip);
+  SaveVar(mClipChain);
 
   // aOther might be a reference to a clip on the stack. We need to make sure
   // that CreateClipChainIntersection will allocate the actual intersected
@@ -4162,6 +4152,7 @@ nsDisplayBackgroundColor::ApplyOpacity(nsDisplayListBuilder* aBuilder,
                                        const DisplayItemClipChain* aClip)
 {
   NS_ASSERTION(CanApplyOpacity(), "ApplyOpacity should be allowed");
+  SaveVar(mColor);
   mColor.a = mColor.a * aOpacity;
   IntersectClip(aBuilder, aClip);
 }
@@ -5951,6 +5942,7 @@ nsDisplayOpacity::ApplyOpacity(nsDisplayListBuilder* aBuilder,
                              const DisplayItemClipChain* aClip)
 {
   NS_ASSERTION(CanApplyOpacity(), "ApplyOpacity should be allowed");
+  SaveVar(mOpacity);
   mOpacity = mOpacity * aOpacity;
   IntersectClip(aBuilder, aClip);
 }
