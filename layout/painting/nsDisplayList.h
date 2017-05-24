@@ -3525,6 +3525,8 @@ public:
   }
 
   virtual bool IsInvalid(nsRect& aRect) const override;
+
+  NS_DISPLAY_DECL_NAME("TableBackgroundImage", TYPE_TABLE_BACKGROUND_IMAGE)
 protected:
   virtual nsIFrame* StyleFrame() override { return mStyleFrame; }
 
@@ -3675,6 +3677,8 @@ public:
     return (static_cast<uint8_t>(mTableType) << TYPE_BITS) |
            nsDisplayItem::GetPerFrameKey();
   }
+
+  NS_DISPLAY_DECL_NAME("TableBackgroundColor", TYPE_TABLE_BACKGROUND_COLOR)
 protected:
   TableType mTableType;
 };
@@ -4704,6 +4708,8 @@ public:
            (static_cast<uint8_t>(mTableType) << TYPE_BITS) |
            nsDisplayItem::GetPerFrameKey();
   }
+
+  NS_DISPLAY_DECL_NAME("TableFixedPosition", TYPE_TABLE_FIXED_POSITION)
 protected:
   nsDisplayTableFixedPosition(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                               nsDisplayList* aList, uint32_t aIndex, nsIFrame* aAncestorFrame);
