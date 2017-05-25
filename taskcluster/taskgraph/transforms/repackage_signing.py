@@ -62,29 +62,31 @@ def make_repackage_signing_description(config, jobs):
             'build_platform': dep_job.attributes.get('build_platform'),
             'build_type': dep_job.attributes.get('build_type'),
         }
+        locale_str = ""
         if dep_job.attributes.get('locale'):
             treeherder['symbol'] = 'tc-rs({})'.format(dep_job.attributes.get('locale'))
             attributes['locale'] = dep_job.attributes.get('locale')
+            locale_str = "{}/".format(locale)
 
         upstream_artifacts = [{
             "taskId": {"task-reference": "<repackage>"},
             "taskType": "repackage",
             "paths": [
-                "public/build/installer.exe",
+                "public/build/{}installer.exe".format(locale_str),
             ],
             "formats": ["sha2signcode"]
         }, {
             "taskId": {"task-reference": "<repackage>"},
             "taskType": "repackage",
             "paths": [
-                "public/build/installer-stub.exe",
+                "public/build/{}installer-stub.exe".format(locale_str),
             ],
             "formats": ["sha2signcode-stub"]
         }, {
             "taskId": {"task-reference": "<repackage>"},
             "taskType": "repackage",
             "paths": [
-                "public/build/target.complete.mar",
+                "public/build/{}target.complete.mar".format(locale_str),
             ],
             "formats": ["mar"]
         }]

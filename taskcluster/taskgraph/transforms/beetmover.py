@@ -120,6 +120,7 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
     'android-api-15-nightly-multi': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_MULTI,
     'android-api-15-old-id-nightly-multi': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_MULTI,
     'macosx64-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
+    'win64-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
 }
 UPSTREAM_ARTIFACT_SIGNED_PATHS = {
     'linux64-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_EN_US + [
@@ -166,6 +167,9 @@ UPSTREAM_ARTIFACT_SIGNED_PATHS = {
     'macosx64-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_L10N + [
         "target.dmg",
         "target.dmg.asc",
+    ],
+    'win64-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_L10N + [
+        "target.zip",
     ],
 
 }
