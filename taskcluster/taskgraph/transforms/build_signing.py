@@ -54,6 +54,16 @@ def make_signing_description(config, jobs):
                    'format': 'mar',
                 },
             ]
+        elif dep_job.attributes.get('build_platform').startswith('win'):
+            job_specs = [
+                {
+                    'artifacts': [
+                         'public/build/target.zip', 'public/build/setup.exe',
+                         'public/build/setup-stub.exe'
+                    ],
+                    'format': 'sha2signcode',
+                },
+            ]
         else:
             job_specs = [
                 {
