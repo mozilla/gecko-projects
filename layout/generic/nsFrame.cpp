@@ -6450,7 +6450,7 @@ static void InvalidateRenderingObservers(nsIFrame* aFrame, bool aFrameChanged = 
   if (XRE_IsContentProcess() && !aFrame->IsFrameModified()) {
     nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
     RetainedDisplayListBuilder* retainedBuilder =
-      aFrame->Properties().Get(RetainedDisplayListBuilder::Cached());
+      displayRoot->Properties().Get(RetainedDisplayListBuilder::Cached());
     if (retainedBuilder && !retainedBuilder->mNeedsFullRebuild) {
       std::vector<WeakFrame>* modifiedFrames = displayRoot->Properties().Get(nsIFrame::ModifiedFrameList());
       if (!modifiedFrames) {

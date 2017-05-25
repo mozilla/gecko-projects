@@ -3569,7 +3569,9 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
                        nsTHashtable<nsPtrHashKey<nsIFrame>>& aDeletedFrames,
                        nsDisplayList* aNewList,
                        nsDisplayList* aOldList,
-                       nsDisplayList* aOutList)
+                       nsDisplayList* aOutList,
+                       uint32_t& aTotalDisplayItems,
+                       uint32_t& aReusedDisplayItems)
 {
   nsDisplayList merged;
   nsDisplayItem* old;
@@ -3603,11 +3605,13 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
           if (nsDisplayItem* newItem = newListLookup[std::make_pair(old->Frame(), old->GetPerFrameKey())]) {
             if (old->GetChildren()) {
               MOZ_ASSERT(newItem->GetChildren());
-              MergeDisplayLists(aBuilder, aDeletedFrames, newItem->GetChildren(), old->GetChildren(), newItem->GetChildren());
+              MergeDisplayLists(aBuilder, aDeletedFrames, newItem->GetChildren(), old->GetChildren(), newItem->GetChildren(), aTotalDisplayItems, aReusedDisplayItems);
             }
             old->Destroy(aBuilder);
           } else {
             merged.AppendToTop(old);
+            aTotalDisplayItems++;
+            aReusedDisplayItems++;
             old->SetReused();
           }
         } else {
@@ -3624,13 +3628,14 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
       MOZ_ASSERT(old && IsSameItem(i, old));
       if (old->GetChildren()) {
         MOZ_ASSERT(i->GetChildren());
-        MergeDisplayLists(aBuilder, aDeletedFrames, i->GetChildren(), old->GetChildren(), i->GetChildren());
+        MergeDisplayLists(aBuilder, aDeletedFrames, i->GetChildren(), old->GetChildren(), i->GetChildren(), aTotalDisplayItems, aReusedDisplayItems);
       }
 
       old->Destroy(aBuilder);
     }
 
     merged.AppendToTop(i);
+    aTotalDisplayItems++;
   }
 
   while ((old = aOldList->RemoveBottom())) {
@@ -3638,6 +3643,8 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
         !IsAnyAncestorModified(old->Frame())) {
       merged.AppendToTop(old);
       old->SetReused();
+      aTotalDisplayItems++;
+      aReusedDisplayItems++;
     } else {
       old->Destroy(aBuilder);
     }
@@ -3907,6 +3914,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       builder.SetDisplayListReady(false);
 
       bool merged = false;
+      uint32_t totalDisplayItems = 0;
+      uint32_t reusedDisplayItems = 0;
       if (retainedBuilder && !retainedBuilder->mNeedsFullRebuild &&
           aFrame->Properties().Get(nsIFrame::ModifiedFrameList())) {
         std::vector<WeakFrame>* modifiedFrames = aFrame->Properties().Get(nsIFrame::ModifiedFrameList());
@@ -4059,7 +4068,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           builder.EnterPresShell(aFrame);
 
 
-          MergeDisplayLists(&builder, deletions, &modifiedDL, &list, &list);
+          MergeDisplayLists(&builder, deletions, &modifiedDL, &list, &list, totalDisplayItems, reusedDisplayItems);
           merged = true;
         }
 
@@ -4091,6 +4100,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         // sure we do a rebuild if anything might change it.
         AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
       }
+      printf("nsLayoutUtils::PaintFrame - recycled %d/%d (%.2f%%) display items\n", reusedDisplayItems, totalDisplayItems, reusedDisplayItems * 100 / float(totalDisplayItems));
     }
 
     builder.SetDisplayListReady(true);
