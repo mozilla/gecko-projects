@@ -77,6 +77,12 @@ def make_repackage_description(config, jobs):
 def make_task_description(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']
+        dependencies = {dep_job.attributes.get('kind'): dep_job.label}
+        if len(dep_job.dependencies) > 1:
+            raise NotImplementedError(
+                "Can't repackage a signing task with multiple dependencies")
+        signing_dependencies = dep_job.dependencies
+        dependencies.update(signing_dependencies)
 
         treeherder = job.get('treeherder', {})
         treeherder.setdefault('symbol', 'tc(Nr)')
@@ -85,6 +91,15 @@ def make_task_description(config, jobs):
         treeherder.setdefault('platform', "{}/opt".format(dep_th_platform))
         treeherder.setdefault('tier', 1)
         treeherder.setdefault('kind', 'build')
+        build_task = None
+        signing_task = None
+        for dependency in dependencies.keys():
+            if 'signing' in dependency:
+                signing_task = dependency
+            else:
+                build_task = dependency
+        signing_task_ref = "<{}>".format(signing_task)
+        build_task_ref = "<{}>".format(build_task)
 
         attributes = {
             'nightly': dep_job.attributes.get('nightly', False),
@@ -102,16 +117,72 @@ def make_task_description(config, jobs):
                    '/home/worker/workspace/build/src/taskcluster/scripts/builder/repackage.sh'
                    ]
 
-        dependencies = {dep_job.attributes.get('kind'): dep_job.label}
-        if job.get('locale'):
-            input_string = 'https://queue.taskcluster.net/v1/task/<nightly-l10n-signing>/' + \
-                'artifacts/public/build/{}/target.tar.gz'
-            input_string = input_string.format(job['locale'])
-        else:
-            input_string = 'https://queue.taskcluster.net/v1/task/<build-signing>/artifacts/' + \
-                'public/build/target.tar.gz'
-        signed_input = {'task-reference': input_string}
         level = config.params['level']
+
+        task_env = {
+            'MOZ_BUILD_DATE': config.params['moz_build_date'],
+            'MH_BUILD_POOL': 'taskcluster',
+            'HG_STORE_PATH': '/home/worker/checkouts/hg-store',
+            'GECKO_HEAD_REV': config.params['head_rev'],
+            'MH_BRANCH': config.params['project'],
+            'MOZ_SCM_LEVEL': level,
+            'MOZHARNESS_ACTIONS': 'download_input setup repackage',
+            'NEED_XVFB': 'true',
+            'GECKO_BASE_REPOSITORY': config.params['base_repository'],
+            'TOOLTOOL_CACHE': '/home/worker/tooltool-cache',
+            'GECKO_HEAD_REPOSITORY': config.params['head_repository'],
+            'USE_SCCACHE': '1',
+            'MOZHARNESS_SCRIPT': 'mozharness/scripts/repackage.py'
+        }
+
+        if attributes['build_platform'].startswith('macosx'):
+            if job.get('locale'):
+                input_string = 'https://queue.taskcluster.net/v1/task/' + \
+                    '<nightly-l10n-signing>/artifacts/public/build/{}/target.tar.gz'
+                input_string = input_string.format(job['locale'])
+            else:
+                input_string = 'https://queue.taskcluster.net/v1/task/' + \
+                    '<build-signing>/artifacts/public/build/target.tar.gz'
+            task_env.update(
+                SIGNED_INPUT={'task-reference': input_string},
+                MOZHARNESS_CONFIG='repackage/osx_signed.py',
+            )
+            output_files = [{
+                'type': 'file',
+                'path': '/home/worker/workspace/build/upload/target.dmg',
+                'name': 'public/build/target.dmg',
+            }]
+        elif attributes['build_platform'].startswith('win'):
+            if job.get('locale'):
+                signed_prefix = 'https://queue.taskcluster.net/v1/task/' + \
+                    '{}/artifacts/public/build/{}/'.format(signing_task_ref, job['locale'])
+                build_prefix = 'https://queue.taskcluster.net/v1/task/' + \
+                    '{}/artifacts/public/build/{}/'.format(build_task_ref, job['locale'])
+            else:
+                signed_prefix = 'https://queue.taskcluster.net/v1/task/' + \
+                    '{}/artifacts/public/build/'.format(signing_task_ref)
+                build_prefix = 'https://queue.taskcluster.net/v1/task/' + \
+                    '{}/artifacts/public/build/'.format(build_task_ref)
+            task_env.update(
+                SIGNED_ZIP={'task-reference': "{}target.zip".format(signed_prefix)},
+                SIGNED_SETUP_STUB={'task-reference': "{}setup-stub.exe".format(signed_prefix)},
+                SIGNED_SETUP={'task-reference': "{}setup.exe".format(signed_prefix)},
+                UNSIGNED_MAR={'task-reference': "{}mar.exe".format(build_prefix)},
+                MOZHARNESS_CONFIG='repackage/win_signed.py',
+            )
+            output_files = [{
+                'type': 'file',
+                'path': '/home/worker/workspace/build/upload/installer.exe',
+                'name': 'public/build/installer.exe',
+            }, {
+                'type': 'file',
+                'path': '/home/worker/workspace/build/upload/installer-stub.exe',
+                'name': 'public/build/installer-stub.exe',
+            }, {
+                'type': 'file',
+                'path': '/home/worker/workspace/build/upload/target.complete.mar',
+                'name': 'public/build/target.complete.mar',
+            }]
 
         task = {
             'label': job['label'],
@@ -140,28 +211,8 @@ def make_task_description(config, jobs):
                                    'name': 'level-%s-checkouts-v1' % level,
                                    'mount-point': '/home/worker/checkouts',
                                  }],
-                       'artifacts': [{
-                                       'type': 'file',
-                                       'path': '/home/worker/workspace/build/upload/target.dmg',
-                                       'name': 'public/build/target.dmg',
-                                     }],
-                       'env': {
-                               'SIGNED_INPUT': signed_input,
-                               'MOZ_BUILD_DATE': config.params['moz_build_date'],
-                               'MH_BUILD_POOL': 'taskcluster',
-                               'HG_STORE_PATH': '/home/worker/checkouts/hg-store',
-                               'GECKO_HEAD_REV': config.params['head_rev'],
-                               'MH_BRANCH': config.params['project'],
-                               'MOZ_SCM_LEVEL': level,
-                               'MOZHARNESS_ACTIONS': 'download_input setup repackage',
-                               'NEED_XVFB': 'true',
-                               'GECKO_BASE_REPOSITORY': config.params['base_repository'],
-                               'TOOLTOOL_CACHE': '/home/worker/tooltool-cache',
-                               'GECKO_HEAD_REPOSITORY': config.params['head_repository'],
-                               'MOZHARNESS_CONFIG': 'repackage/osx_signed.py',
-                               'USE_SCCACHE': '1',
-                               'MOZHARNESS_SCRIPT': 'mozharness/scripts/repackage.py'
-                               },
+                       'artifacts': output_files,
+                       'env': task_env,
                        'command': command,
                        'chain-of-trust': True,
                        'relengapi-proxy': True,
