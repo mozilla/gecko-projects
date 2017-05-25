@@ -26,6 +26,7 @@ function checkExternalFunction(entry)
         "ceil",
         /memchr/,
         "strlen",
+        /Servo_DeclarationBlock_GetCssText/,
         // Assume that atomic accesses are threadsafe.
         /^__atomic_fetch_/,
         /^__atomic_load_/,
@@ -184,6 +185,7 @@ function treatAsSafeArgument(entry, varName, csuName)
         [/Gecko_CopyCounter.*?From/, "aContent", null],
         [/Gecko_SetContentDataImageValue/, "aList", null],
         [/Gecko_SetContentData/, "aContent", null],
+        ["Gecko_SetCounterFunction", "aContent", null],
         [/Gecko_EnsureStyle.*?ArrayLength/, "aArray", null],
         ["Gecko_GetOrCreateKeyframeAtStart", "aKeyframes", null],
         ["Gecko_GetOrCreateInitialKeyframe", "aKeyframes", null],

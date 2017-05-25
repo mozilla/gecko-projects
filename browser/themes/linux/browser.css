@@ -16,13 +16,13 @@
 %include ../shared/browser.inc.css
 
 :root {
-  --backbutton-border-color: var(--urlbar-border-color-hover);
-  --backbutton-background: rgba(255,255,255,.15);
-
 %ifdef MOZ_PHOTON_THEME
   --toolbarbutton-border-radius: 2px;
 %else
   --toolbarbutton-border-radius: 1px;
+
+  --backbutton-background: rgba(255,255,255,.15);
+  --backbutton-border-color: var(--urlbar-border-color-hover);
 %endif
 
   --toolbarbutton-vertical-text-padding: calc(var(--toolbarbutton-inner-padding) - 1px);
@@ -179,7 +179,7 @@ menuitem.bookmark-item {
 
 /* Bookmark items */
 .bookmark-item {
-  list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.png");
+  list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.svg");
 }
 
 .bookmark-item[container] {
@@ -265,14 +265,6 @@ menuitem.bookmark-item {
 }
 
 /* Location bar */
-#main-window {
-  --urlbar-border-color: ThreeDShadow;
-  --urlbar-border-color-hover: var(--urlbar-border-color);
-}
-
-#navigator-toolbox:-moz-lwtheme {
-  --urlbar-border-color: rgba(0,0,0,.3);
-}
 
 #urlbar {
   /* override textbox[enablehistory="true"] styling: */
@@ -283,12 +275,26 @@ menuitem.bookmark-item {
 
 %ifdef MOZ_PHOTON_THEME
 
+#urlbar:not(:-moz-lwtheme):not([focused="true"]),
+.searchbar-textbox:not(:-moz-lwtheme):not([focused="true"]) {
+  border-color: ThreeDShadow;
+}
+
 #urlbar[focused="true"],
 .searchbar-textbox[focused="true"] {
   border-color: Highlight;
 }
 
 %else
+
+#main-window {
+  --urlbar-border-color: ThreeDShadow;
+  --urlbar-border-color-hover: var(--urlbar-border-color);
+}
+
+#navigator-toolbox:-moz-lwtheme {
+  --urlbar-border-color: rgba(0,0,0,.3);
+}
 
 #urlbar,
 .searchbar-textbox {
@@ -1055,7 +1061,7 @@ html|span.ac-emphasize-text-url {
 
 /* All tabs menupopup */
 .alltabs-item > .menu-iconic-left > .menu-iconic-icon {
-  list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.png");
+  list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.svg");
 }
 
 .alltabs-item[selected="true"] {

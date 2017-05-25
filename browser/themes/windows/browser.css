@@ -26,6 +26,9 @@
 
   --toolbarbutton-hover-background: rgba(0,0,0,.1);
   --toolbarbutton-active-background: rgba(0,0,0,.15);
+
+  --backbutton-border-color: var(--urlbar-border-color-hover);
+  --backbutton-background: rgba(255,255,255,.15);
 %endif
 
   --toolbarbutton-hover-bordercolor: rgba(0,0,0,.2);
@@ -35,10 +38,6 @@
   --toolbarbutton-active-boxshadow: 0 0 0 1px rgba(0,0,0,.15) inset;
 
   --toolbarbutton-checkedhover-backgroundcolor: rgba(0,0,0,.1);
-
-  --backbutton-border-color: var(--urlbar-border-color-hover);
-
-  --backbutton-background: rgba(255,255,255,.15);
 
   --urlbar-dropmarker-url: url("chrome://browser/skin/urlbar-history-dropmarker.png");
   --urlbar-dropmarker-region: rect(0px, 11px, 14px, 0px);
@@ -412,7 +411,7 @@ menuitem.bookmark-item {
 /* ::::: bookmark items ::::: */
 
 .bookmark-item  {
-  list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.png");
+  list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.svg");
 }
 
 .bookmark-item[container] {
@@ -653,29 +652,20 @@ toolbar[brighttext] #close-button {
 
 /* ::::: Location Bar ::::: */
 
-#main-window {
-  --urlbar-border-color: ThreeDShadow;
-  --urlbar-border-color-hover: var(--urlbar-border-color);
-}
-
-#navigator-toolbox:-moz-lwtheme {
-  --urlbar-border-color: var(--toolbarbutton-hover-bordercolor);
-}
-
 %include ../shared/urlbar-searchbar.inc.css
 
 %ifdef MOZ_PHOTON_THEME
 
-@media (-moz-windows-default-theme) {
-  #main-window:not(:-moz-lwtheme) {
-    --urlbar-border-color: hsla(240, 5%, 5%, .25);
-    --urlbar-border-color-hover: hsla(240, 5%, 5%, .35);
-  }
-}
-
 #urlbar,
 .searchbar-textbox {
   font-size: 1.15em;
+}
+
+@media (-moz-windows-default-theme: 0) {
+  #urlbar:not(:-moz-lwtheme):not([focused="true"]),
+  .searchbar-textbox:not(:-moz-lwtheme):not([focused="true"]) {
+    border-color: ThreeDShadow;
+  }
 }
 
 #urlbar[focused="true"],
@@ -684,6 +674,15 @@ toolbar[brighttext] #close-button {
 }
 
 %else
+
+#main-window {
+  --urlbar-border-color: ThreeDShadow;
+  --urlbar-border-color-hover: var(--urlbar-border-color);
+}
+
+#navigator-toolbox:-moz-lwtheme {
+  --urlbar-border-color: var(--toolbarbutton-hover-bordercolor);
+}
 
 @media (-moz-windows-default-theme) {
   @media (-moz-os-version: windows-win7),
@@ -1519,7 +1518,7 @@ treechildren.searchbar-treebody::-moz-tree-row(selected) {
 
 /* All tabs menupopup */
 .alltabs-item > .menu-iconic-left > .menu-iconic-icon {
-  list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.png");
+  list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.svg");
 }
 
 .alltabs-item[selected="true"] {

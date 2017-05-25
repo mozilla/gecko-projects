@@ -306,7 +306,7 @@ TimeoutManager::TimeoutManager(nsGlobalWindow& aWindow)
     mRunningTimeout(nullptr),
     mIdleCallbackTimeoutCounter(1),
     mBackPressureDelayMS(0),
-    mThrottleTrackingTimeouts(gTrackingTimeoutThrottlingDelay <= 0)
+    mThrottleTrackingTimeouts(false)
 {
   MOZ_DIAGNOSTIC_ASSERT(aWindow.IsInnerWindow());
 
@@ -1579,7 +1579,7 @@ void
 TimeoutManager::MaybeStartThrottleTrackingTimout()
 {
   if (gTrackingTimeoutThrottlingDelay <= 0 ||
-      mWindow.AsInner()->InnerObjectsFreed()) {
+      mWindow.AsInner()->InnerObjectsFreed() || mWindow.IsSuspended()) {
     return;
   }
 

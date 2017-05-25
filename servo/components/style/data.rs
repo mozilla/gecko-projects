@@ -6,15 +6,13 @@
 
 use context::SharedStyleContext;
 use dom::TElement;
-use properties::ComputedValues;
+use properties::{AnimationRules, ComputedValues, PropertyDeclarationBlock};
 use properties::longhands::display::computed_value as display;
 use restyle_hints::{HintComputationContext, RestyleReplacements, RestyleHint};
 use rule_tree::StrongRuleNode;
 use selector_parser::{EAGER_PSEUDO_COUNT, PseudoElement, RestyleDamage};
-use shared_lock::StylesheetGuards;
-#[cfg(feature = "servo")] use std::collections::HashMap;
+use shared_lock::{Locked, StylesheetGuards};
 use std::fmt;
-#[cfg(feature = "servo")] use std::hash::BuildHasherDefault;
 use stylearc::Arc;
 use traversal::TraversalFlags;
 
@@ -145,14 +143,6 @@ impl EagerPseudoStyles {
     }
 }
 
-/// A cache of precomputed and lazy pseudo-elements, used by servo. This isn't
-/// a very efficient design, but is the result of servo having previously used
-/// the eager pseudo map (when it was a map) for this cache.
-#[cfg(feature = "servo")]
-type PseudoElementCache = HashMap<PseudoElement, ComputedStyle, BuildHasherDefault<::fnv::FnvHasher>>;
-#[cfg(feature = "gecko")]
-type PseudoElementCache = ();
-
 /// The styles associated with a node, including the styles for any
 /// pseudo-elements.
 #[derive(Clone, Debug)]
@@ -161,8 +151,6 @@ pub struct ElementStyles {
     pub primary: ComputedStyle,
     /// A list of the styles for the element's eagerly-cascaded pseudo-elements.
     pub pseudos: EagerPseudoStyles,
-    /// NB: This is an empty field for gecko.
-    pub cached_pseudos: PseudoElementCache,
 }
 
 impl ElementStyles {
@@ -171,7 +159,6 @@ impl ElementStyles {
         ElementStyles {
             primary: primary,
             pseudos: EagerPseudoStyles(None),
-            cached_pseudos: PseudoElementCache::default(),
         }
     }
 
@@ -570,5 +557,30 @@ impl ElementData {
     /// not have restyle data.
     pub fn restyle_mut(&mut self) -> &mut RestyleData {
         self.get_restyle_mut().expect("Calling restyle_mut without RestyleData")
+    }
+
+    /// Returns SMIL overriden value if exists.
+    pub fn get_smil_override(&self) -> Option<&Arc<Locked<PropertyDeclarationBlock>>> {
+        if cfg!(feature = "servo") {
+            // Servo has no knowledge of a SMIL rule, so just avoid looking for it.
+            return None;
+        }
+
+        match self.get_styles() {
+            Some(s) => s.primary.rules.get_smil_animation_rule(),
+            None => None,
+        }
+    }
+
+    /// Returns AnimationRules that has processed during animation-only restyles.
+    pub fn get_animation_rules(&self) -> AnimationRules {
+        if cfg!(feature = "servo") {
+            return AnimationRules(None, None)
+        }
+
+        match self.get_styles() {
+            Some(s) => s.primary.rules.get_animation_rules(),
+            None => AnimationRules(None, None),
+        }
     }
 }

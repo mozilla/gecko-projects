@@ -305,7 +305,7 @@ fuzzy-if(Android,3,50) fuzzy-if(skiaContent,1,133) == 273681-1.html 273681-1-ref
 == 283686-2.html 283686-2-ref.html
 == 283686-3.html about:blank
 fails-if(stylo) == 289384-1.xhtml 289384-ref.xhtml
-random-if(d2d) fuzzy-if(Android,8,1439) skip-if(stylo) HTTP == 289480.html#top 289480-ref.html # basically-verbatim acid2 test, HTTP for a 404 page -- bug 578114 for the d2d failures
+random-if(d2d) fuzzy-if(Android,8,1439) skip-if(stylo) HTTP == 289480.html#top 289480-ref.html # basically-verbatim acid2 test, HTTP for a 404 page -- bug 578114 for the d2d failures, bug 1354406
 == 290129-1.html 290129-1-ref.html
 fails-if(stylo) == 291078-1.html 291078-1-ref.html
 == 291078-2.html 291078-2-ref.html
@@ -557,9 +557,9 @@ fuzzy-if(skiaContent||Android,4,11) == 363858-1.html 363858-1-ref.html
 == 363858-3.html 363858-3-ref.html
 == 363858-4.html 363858-4-ref.html
 fuzzy-if(OSX,45,2) fuzzy-if(winWidget,114,1) == 363858-5a.html 363858-5-ref.html
-fails-if(stylo) == 363858-5b.html 363858-5-ref.html
+== 363858-5b.html 363858-5-ref.html
 fuzzy-if(OSX,45,2) fuzzy-if(winWidget,114,1) == 363858-6a.html 363858-6-ref.html
-fails-if(stylo) == 363858-6b.html 363858-6-ref.html
+== 363858-6b.html 363858-6-ref.html
 == 363874.html 363874-ref.html
 == 363874-max-width.html 363874-max-width-ref.html
 == 364066-1.html 364066-1-ref.html
@@ -751,9 +751,9 @@ test-pref(layout.float-fragments-inside-column.enabled,true) == 386147-1.html 38
 == 386401-1.html 386401-1-ref.html
 == 386401-2.html 386401-2-ref.html
 == 386401-3.html 386401-3-ref.html
-fails-if(stylo) == 386470-1a.html 386470-1-ref.html
-fails-if(stylo) == 386470-1b.html 386470-1-ref.html
-fails-if(stylo) == 386470-1c.html 386470-1-ref.html
+== 386470-1a.html 386470-1-ref.html
+== 386470-1b.html 386470-1-ref.html
+== 386470-1c.html 386470-1-ref.html
 == 386920-1.html 386920-1-ref.html
 == 387201-1.html 387201-1-ref.html
 == 387201-2.html about:blank  # Really an assertion test rather than a rendering test
@@ -890,7 +890,7 @@ random == 403134-1.html 403134-1-ref.html # bug 405377
 != 404030-1-notref.html 404030-1.html
 != 404030-1-notref2.html 404030-1.html
 fuzzy-if(skiaContent,2,4) == 404123-1.html 404123-1-ref.html
-fails-if(stylo) == 404123-2.html 404123-2-ref.html
+== 404123-2.html 404123-2-ref.html
 != 404123-3.html 404123-3-ref.html
 # may fail "randomly" on OS X, doesn't seem to be rendering usefully anyhow - bug 602469
 random-if(cocoaWidget) HTTP(..) == 404149-1.xul 404149-1-ref.xul # HTTP for fonts directory access
@@ -900,7 +900,7 @@ random-if(cocoaWidget) HTTP(..) == 404149-1.xul 404149-1-ref.xul # HTTP for font
 == 404309-1b.html 404309-1-ref.html
 # Disabled due to compartments for now.
 #!= data:application/xml,<foo/> data:text/plain, # ensure we pretty-print this XML instead of letting it appear blank (test for bug 404419)
-fuzzy-if(Android,8,50) fails-if(stylo) == 404553-1.html 404553-1-ref.html  # assertion test, also tests that marquee binding is applied correctly
+fuzzy-if(Android,8,50) == 404553-1.html 404553-1-ref.html  # assertion test, also tests that marquee binding is applied correctly
 == 404666-1.html 404666-1-ref.html
 == 404666-2.html 404666-2-ref.html
 == 405186-1.xhtml about:blank
@@ -912,8 +912,8 @@ fuzzy-if(Android,8,50) fails-if(stylo) == 404553-1.html 404553-1-ref.html  # ass
 # == 405952-1.html 405952-1-ref.html
 == 406484-1.html 406484-1-ref.html
 == 406568-1.html 406568-1-ref.html
-fails-if(stylo) == 407016-1-a.html 407016-1-ref.html
-fails-if(stylo) == 407016-1-b.html 407016-1-ref.html
+== 407016-1-a.html 407016-1-ref.html
+== 407016-1-b.html 407016-1-ref.html
 == 407078-1.html 407078-1-ref.html
 == 407095-1.html 407095-1-ref.html
 fuzzy-if(Android,13,9) == 407111-1.html 407111-1-ref.html  # Bug 1128229
@@ -1473,7 +1473,7 @@ random == 536061.html 536061-ref.html # fixedpoint division in blur code makes t
 == 539323-3.html 539323-3-ref.html
 == 539880-1.html 539880-1-ref.html
 == 539880-1-dynamic.html 539880-1-ref.html
-fuzzy-if(Android,12,1000) skip-if(stylo) == 539949-1.html#test2 539949-1-ref.html#test2
+fuzzy-if(Android,12,1000) skip-if(stylo) == 539949-1.html#test2 539949-1-ref.html#test2 # bug 1354406
 == 541382-1.html 541382-1-ref.html
 random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)||!haveTestPlugin) HTTP == 541406-1.html 541406-1-ref.html
 needs-focus != 542116-1.html 542116-1-ref.html
@@ -1668,13 +1668,13 @@ fuzzy-if(Android,8,500) == 637852-3.html 637852-3-ref.html
 == 641770-1.html 641770-1-ref.html
 == 641856-1.html 641856-1-ref.html
 fails-if(stylo) == 645491-1.html 645491-1-ref.html
-fails-if(stylo) == 645647-1.html 645647-1-ref.html
+== 645647-1.html 645647-1-ref.html
 == 645647-2.html 645647-2-ref.html
 == 645768-1.html 645768-1-ref.html
 fails-if(layersGPUAccelerated&&cocoaWidget) fuzzy-if(!layersGPUAccelerated,41,260) fuzzy-if(skiaContent,57,11000) == 650228-1.html 650228-1-ref.html # Quartz alpha blending doesn't match GL alpha blending
 needs-focus == 652301-1a.html 652301-1-ref.html
 needs-focus == 652301-1b.html 652301-1-ref.html
-fuzzy-if(skiaContent,2,5) fails-if(stylo) == 652775-1.html 652775-1-ref.html
+fuzzy-if(skiaContent,2,5) == 652775-1.html 652775-1-ref.html
 HTTP == 652991-1a.html 652991-1-ref.html
 HTTP == 652991-1b.html 652991-1-ref.html
 HTTP == 652991-2.html 652991-2-ref.html

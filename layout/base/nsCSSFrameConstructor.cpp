@@ -1771,13 +1771,12 @@ nsCSSFrameConstructor::CreateGeneratedContent(nsFrameConstructorState& aState,
 
     case eStyleContentType_Counter:
     case eStyleContentType_Counters: {
-      nsCSSValue::Array* counters = data.GetCounters();
-      nsCounterList* counterList = mCounterManager.CounterListFor(
-          nsDependentString(counters->Item(0).GetStringBufferValue()));
+      nsStyleContentData::CounterFunction* counters = data.GetCounters();
+      nsCounterList* counterList =
+        mCounterManager.CounterListFor(counters->mIdent);
 
       nsCounterUseNode* node =
-        new nsCounterUseNode(mPresShell->GetPresContext(),
-                             counters, aContentIndex,
+        new nsCounterUseNode(counters, aContentIndex,
                              type == eStyleContentType_Counters);
 
       nsGenConInitializer* initializer =
@@ -3773,7 +3772,7 @@ nsCSSFrameConstructor::FindInputData(Element* aElement,
   // not (respectively) NS_THEME_RADIO and NS_THEME_CHECKBOX.)
   if ((controlType == NS_FORM_INPUT_CHECKBOX ||
        controlType == NS_FORM_INPUT_RADIO) &&
-      aStyleContext->StyleDisplay()->UsedAppearance() == NS_THEME_NONE) {
+      aStyleContext->StyleDisplay()->mAppearance == NS_THEME_NONE) {
     return nullptr;
   }
 #endif
@@ -9027,7 +9026,7 @@ void
 nsCSSFrameConstructor::NotifyCounterStylesAreDirty()
 {
   NS_PRECONDITION(mUpdateCount != 0, "Should be in an update");
-  mCounterManager.SetAllCounterStylesDirty();
+  mCounterManager.SetAllDirty();
   CountersDirty();
 }
 

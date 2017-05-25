@@ -5701,7 +5701,8 @@ class MToString :
         setResultType(MIRType::String);
         setMovable();
 
-        // Objects might override toString and Symbols throw.
+        // Objects might override toString and Symbols throw. We bailout in
+        // those cases and run side-effects in baseline instead.
         if (def->mightBeType(MIRType::Object) || def->mightBeType(MIRType::Symbol))
             setGuard();
     }
@@ -5721,7 +5722,8 @@ class MToString :
     }
 
     bool fallible() const {
-        return input()->mightBeType(MIRType::Object);
+        return input()->mightBeType(MIRType::Object) ||
+               input()->mightBeType(MIRType::Symbol);
     }
 
     ALLOW_CLONE(MToString)
@@ -7327,6 +7329,11 @@ class MConcat
 
         setMovable();
         setResultType(MIRType::String);
+
+        // StringConcat throws a catchable exception. Even though we bail to
+        // baseline in that case, we must set Guard to ensure the bailout
+        // happens.
+        setGuard();
     }
 
   public:
@@ -11633,6 +11640,9 @@ class MNewLexicalEnvironmentObject
     bool appendRoots(MRootList& roots) const override {
         return roots.append(scope_);
     }
+    AliasSet getAliasSet() const override {
+        return AliasSet::None();
+    }
 };
 
 // Allocate a new LexicalEnvironmentObject from existing one
@@ -11659,6 +11669,11 @@ class MCopyLexicalEnvironmentObject
     }
     bool possiblyCalls() const override {
         return true;
+    }
+    AliasSet getAliasSet() const override {
+        return AliasSet::Load(AliasSet::ObjectFields |
+                              AliasSet::FixedSlot |
+                              AliasSet::DynamicSlot);
     }
 };
 

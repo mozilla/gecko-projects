@@ -181,7 +181,8 @@ public:
                                                              bool* aOutWindowOpened,
                                                              TextureFactoryIdentifier* aTextureFactoryIdentifier,
                                                              uint64_t* aLayersId,
-                                                             CompositorOptions* aCompositorOptions) override;
+                                                             CompositorOptions* aCompositorOptions,
+                                                             uint32_t* aMaxTouchPoints) override;
 
   virtual mozilla::ipc::IPCResult
   RecvSyncMessage(const nsString& aMessage,
@@ -314,8 +315,6 @@ public:
   virtual mozilla::ipc::IPCResult RecvGetDefaultScale(double* aValue) override;
 
   virtual mozilla::ipc::IPCResult RecvGetWidgetRounding(int32_t* aValue) override;
-
-  virtual mozilla::ipc::IPCResult RecvGetMaxTouchPoints(uint32_t* aTouchPoints) override;
 
   virtual mozilla::ipc::IPCResult RecvGetWidgetNativeData(WindowsHandle* aValue) override;
 
@@ -577,10 +576,6 @@ public:
 
   layout::RenderFrameParent* GetRenderFrame();
 
-  void AudioChannelChangeNotification(nsPIDOMWindowOuter* aWindow,
-                                      AudioChannel aAudioChannel,
-                                      float aVolume,
-                                      bool aMuted);
   bool SetRenderFrame(PRenderFrameParent* aRFParent);
   bool GetRenderFrameInfo(TextureFactoryIdentifier* aTextureFactoryIdentifier,
                           uint64_t* aLayersId);
@@ -590,8 +585,6 @@ public:
   // LiveResizeListener implementation
   void LiveResizeStarted() override;
   void LiveResizeStopped() override;
-
-  void DispatchTabChildNotReadyEvent();
 
 protected:
   bool ReceiveMessage(const nsString& aMessage,
@@ -625,9 +618,6 @@ protected:
                                                     const int32_t& aCx, const int32_t& aCy) override;
 
   virtual mozilla::ipc::IPCResult RecvGetTabCount(uint32_t* aValue) override;
-
-  virtual mozilla::ipc::IPCResult RecvAudioChannelActivityNotification(const uint32_t& aAudioChannel,
-                                                                       const bool& aActive) override;
 
   virtual mozilla::ipc::IPCResult RecvSHistoryUpdate(const uint32_t& aCount,
                                                      const uint32_t& aLocalIndex,

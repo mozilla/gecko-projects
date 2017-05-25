@@ -8,7 +8,6 @@
 
 #include "TabParent.h"
 
-#include "AudioChannelService.h"
 #ifdef ACCESSIBILITY
 #include "mozilla/a11y/DocAccessibleParent.h"
 #include "nsAccessibilityService.h"
@@ -304,11 +303,6 @@ TabParent::AddWindowListeners()
                                       this, false, false);
       }
     }
-
-    RefPtr<AudioChannelService> acs = AudioChannelService::GetOrCreate();
-    if (acs) {
-      acs->RegisterTabParent(this);
-    }
   }
 }
 
@@ -322,11 +316,6 @@ TabParent::RemoveWindowListeners()
       eventTarget->RemoveEventListener(NS_LITERAL_STRING("MozUpdateWindowPos"),
                                        this, false);
     }
-  }
-
-  RefPtr<AudioChannelService> acs = AudioChannelService::GetOrCreate();
-  if (acs) {
-    acs->UnregisterTabParent(this);
   }
 }
 
@@ -2307,18 +2296,6 @@ TabParent::RecvGetWidgetRounding(int32_t* aValue)
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult
-TabParent::RecvGetMaxTouchPoints(uint32_t* aTouchPoints)
-{
-  nsCOMPtr<nsIWidget> widget = GetWidget();
-  if (widget) {
-    *aTouchPoints = widget->GetMaxTouchPoints();
-  } else {
-    *aTouchPoints = 0;
-  }
-  return IPC_OK();
-}
-
 already_AddRefed<nsIWidget>
 TabParent::GetTopLevelWidget()
 {
@@ -2508,28 +2485,6 @@ TabParent::GetRenderFrameInfo(TextureFactoryIdentifier* aTextureFactoryIdentifie
   return true;
 }
 
-mozilla::ipc::IPCResult
-TabParent::RecvAudioChannelActivityNotification(const uint32_t& aAudioChannel,
-                                                const bool& aActive)
-{
-  if (aAudioChannel >= NUMBER_OF_AUDIO_CHANNELS) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-
-  nsCOMPtr<nsIObserverService> os = services::GetObserverService();
-  if (os) {
-    nsAutoCString topic;
-    topic.Assign("audiochannel-activity-");
-    topic.Append(AudioChannelService::GetAudioChannelTable()[aAudioChannel].tag);
-
-    os->NotifyObservers(NS_ISUPPORTS_CAST(nsITabParent*, this),
-                        topic.get(),
-                        aActive ? u"active" : u"inactive");
-  }
-
-  return IPC_OK();
-}
-
 already_AddRefed<nsFrameLoader>
 TabParent::GetFrameLoader(bool aUseCachedFrameLoaderAfterDestroy) const
 {
@@ -2622,7 +2577,8 @@ TabParent::RecvBrowserFrameOpenWindow(PBrowserParent* aOpener,
                                       bool* aOutWindowOpened,
                                       TextureFactoryIdentifier* aTextureFactoryIdentifier,
                                       uint64_t* aLayersId,
-                                      CompositorOptions* aCompositorOptions)
+                                      CompositorOptions* aCompositorOptions,
+                                      uint32_t* aMaxTouchPoints)
 {
   BrowserElementParent::OpenWindowResult opened =
     BrowserElementParent::OpenWindowOOP(TabParent::GetFrom(aOpener),
@@ -2630,6 +2586,8 @@ TabParent::RecvBrowserFrameOpenWindow(PBrowserParent* aOpener,
                                         aTextureFactoryIdentifier, aLayersId);
   *aCompositorOptions = static_cast<RenderFrameParent*>(aRenderFrame)->GetCompositorOptions();
   *aOutWindowOpened = (opened == BrowserElementParent::OPEN_WINDOW_ADDED);
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  *aMaxTouchPoints = widget ? widget->GetMaxTouchPoints() : 0;
   if (!*aOutWindowOpened) {
     Destroy();
   }
@@ -3217,33 +3175,6 @@ TabParent::GetShowInfo()
                   false, mDPI, mRounding, mDefaultScale.scale);
 }
 
-void
-TabParent::AudioChannelChangeNotification(nsPIDOMWindowOuter* aWindow,
-                                          AudioChannel aAudioChannel,
-                                          float aVolume,
-                                          bool aMuted)
-{
-  if (!mFrameElement || !mFrameElement->OwnerDoc()) {
-    return;
-  }
-
-  nsCOMPtr<nsPIDOMWindowOuter> window = mFrameElement->OwnerDoc()->GetWindow();
-  while (window) {
-    if (window == aWindow) {
-      Unused << SendAudioChannelChangeNotification(static_cast<uint32_t>(aAudioChannel),
-                                                   aVolume, aMuted);
-      break;
-    }
-
-    nsCOMPtr<nsPIDOMWindowOuter> win = window->GetScriptableParentOrNull();
-    if (!win) {
-      break;
-    }
-
-    window = win;
-  }
-}
-
 mozilla::ipc::IPCResult
 TabParent::RecvGetTabCount(uint32_t* aValue)
 {
@@ -3325,52 +3256,6 @@ void
 TabParent::LiveResizeStopped()
 {
   SuppressDisplayport(false);
-}
-
-void
-TabParent::DispatchTabChildNotReadyEvent()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  nsCOMPtr<mozilla::dom::EventTarget> target = do_QueryInterface(mFrameElement);
-  if (!target) {
-    NS_WARNING("Could not locate target for tab child not ready event.");
-    return;
-  }
-
-  if (mHasPresented) {
-    // We shouldn't dispatch this event because clearly the
-    // TabChild _became_ ready by the time we were told to
-    // dispatch.
-    return;
-  }
-
-  if (!mDocShellIsActive) {
-    return;
-  }
-
-  RefPtr<nsFrameLoader> frameLoader = GetFrameLoader(true);
-  if (!frameLoader) {
-    return;
-  }
-
-  nsCOMPtr<Element> frameElement(mFrameElement);
-  nsCOMPtr<nsIFrameLoaderOwner> owner = do_QueryInterface(frameElement);
-  if (!owner) {
-    return;
-  }
-
-  RefPtr<nsFrameLoader> currentFrameLoader = owner->GetFrameLoader();
-  if (currentFrameLoader != frameLoader) {
-    return;
-  }
-
-  RefPtr<Event> event = NS_NewDOMEvent(mFrameElement, nullptr, nullptr);
-  event->InitEvent(NS_LITERAL_STRING("MozTabChildNotReady"), true, false);
-  event->SetTrusted(true);
-  event->WidgetEventPtr()->mFlags.mOnlyChromeDispatch = true;
-  bool dummy;
-  mFrameElement->DispatchEvent(event, &dummy);
 }
 
 NS_IMETHODIMP

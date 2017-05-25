@@ -715,7 +715,11 @@ DrainJobQueue(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    MOZ_ASSERT(!GetShellContext(cx)->quitting);
+    if (GetShellContext(cx)->quitting) {
+        JS_ReportErrorASCII(cx, "Mustn't drain the job queue when the shell is quitting");
+        return false;
+    }
+
     js::RunJobs(cx);
 
     args.rval().setUndefined();
@@ -1645,7 +1649,7 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
         // register ahead the fact that every JSFunction which is being
         // delazified should be encoded at the end of the delazification.
         if (saveIncrementalBytecode) {
-            if (!StartIncrementalEncoding(cx, saveBuffer, script))
+            if (!StartIncrementalEncoding(cx, script))
                 return false;
         }
 
@@ -1671,7 +1675,7 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
         // Serialize the encoded bytecode, recorded before the execution, into a
         // buffer which can be deserialized linearly.
         if (saveIncrementalBytecode) {
-            if (!FinishIncrementalEncoding(cx, script))
+            if (!FinishIncrementalEncoding(cx, script, saveBuffer))
                 return false;
         }
     }

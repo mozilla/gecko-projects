@@ -11,11 +11,27 @@ use cssparser::{DeclarationListParser, parse_important};
 use cssparser::{Parser, AtRuleParser, DeclarationParser, Delimiter};
 use error_reporting::ParseErrorReporter;
 use parser::{PARSING_MODE_DEFAULT, ParsingMode, ParserContext, log_css_error};
+use shared_lock::Locked;
 use std::fmt;
+use std::slice::Iter;
 use style_traits::ToCss;
 use stylesheets::{CssRuleType, Origin, UrlExtraData};
 use super::*;
 #[cfg(feature = "gecko")] use properties::animated_properties::AnimationValueMap;
+
+/// The animation rules.
+///
+/// The first one is for Animation cascade level, and the second one is for
+/// Transition cascade level.
+pub struct AnimationRules<'a>(pub Option<&'a Arc<Locked<PropertyDeclarationBlock>>>,
+                              pub Option<&'a Arc<Locked<PropertyDeclarationBlock>>>);
+
+impl<'a> AnimationRules<'a> {
+    /// Returns whether these animation rules represents an actual rule or not.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_none() && self.1.is_none()
+    }
+}
 
 /// A declaration [importance][importance].
 ///
@@ -52,6 +68,25 @@ pub struct PropertyDeclarationBlock {
     important_count: usize,
 
     longhands: LonghandIdSet,
+}
+
+/// Iterator for PropertyDeclaration to be generated from PropertyDeclarationBlock.
+#[derive(Clone)]
+pub struct PropertyDeclarationIterator<'a> {
+    iter: Iter<'a, (PropertyDeclaration, Importance)>,
+}
+
+impl<'a> Iterator for PropertyDeclarationIterator<'a> {
+    type Item = &'a PropertyDeclaration;
+    #[inline]
+    fn next(&mut self) -> Option<&'a PropertyDeclaration> {
+        // we use this function because a closure won't be `Clone`
+        fn get_declaration(dec: &(PropertyDeclaration, Importance))
+            -> &PropertyDeclaration {
+            &dec.0
+        }
+        self.iter.next().map(get_declaration as fn(_) -> _)
+    }
 }
 
 impl fmt::Debug for PropertyDeclarationBlock {
@@ -91,6 +126,13 @@ impl PropertyDeclarationBlock {
     /// The declarations in this block
     pub fn declarations(&self) -> &[(PropertyDeclaration, Importance)] {
         &self.declarations
+    }
+
+    /// Iterate over only PropertyDeclaration.
+    pub fn declarations_iter(&self) -> PropertyDeclarationIterator {
+        PropertyDeclarationIterator {
+            iter: self.declarations.iter(),
+        }
     }
 
     /// Returns whether this block contains any declaration with `!important`.
@@ -369,15 +411,10 @@ impl PropertyDeclarationBlock {
                 }
             }
             Ok(shorthand) => {
-                // we use this function because a closure won't be `Clone`
-                fn get_declaration(dec: &(PropertyDeclaration, Importance))
-                    -> &PropertyDeclaration {
-                    &dec.0
-                }
                 if !self.declarations.iter().all(|decl| decl.0.shorthands().contains(&shorthand)) {
                     return Err(fmt::Error)
                 }
-                let iter = self.declarations.iter().map(get_declaration as fn(_) -> _);
+                let iter = self.declarations_iter();
                 match shorthand.get_shorthand_appendable_value(iter) {
                     Some(AppendableValue::Css { css, .. }) => {
                         dest.write_str(css)

@@ -3340,7 +3340,6 @@ nsStyleDisplay::nsStyleDisplay(const nsPresContext* aContext)
   : mDisplay(StyleDisplay::Inline)
   , mOriginalDisplay(StyleDisplay::Inline)
   , mContain(NS_STYLE_CONTAIN_NONE)
-  , mMozAppearance(NS_THEME_NONE)
   , mAppearance(NS_THEME_NONE)
   , mPosition(NS_STYLE_POSITION_STATIC)
   , mFloat(StyleFloat::None)
@@ -3403,7 +3402,6 @@ nsStyleDisplay::nsStyleDisplay(const nsStyleDisplay& aSource)
   , mDisplay(aSource.mDisplay)
   , mOriginalDisplay(aSource.mOriginalDisplay)
   , mContain(aSource.mContain)
-  , mMozAppearance(aSource.mMozAppearance)
   , mAppearance(aSource.mAppearance)
   , mPosition(aSource.mPosition)
   , mFloat(aSource.mFloat)
@@ -3522,10 +3520,10 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
    * if this does become common perhaps a faster-path might be worth while.
    */
 
-  if ((mMozAppearance == NS_THEME_TEXTFIELD &&
-       aNewData.mMozAppearance != NS_THEME_TEXTFIELD) ||
-      (mMozAppearance != NS_THEME_TEXTFIELD &&
-       aNewData.mMozAppearance == NS_THEME_TEXTFIELD)) {
+  if ((mAppearance == NS_THEME_TEXTFIELD &&
+       aNewData.mAppearance != NS_THEME_TEXTFIELD) ||
+      (mAppearance != NS_THEME_TEXTFIELD &&
+       aNewData.mAppearance == NS_THEME_TEXTFIELD)) {
     // This is for <input type=number> where we allow authors to specify a
     // |-moz-appearance:textfield| to get a control without a spinner. (The
     // spinner is present for |-moz-appearance:number-input| but also other
@@ -3554,7 +3552,6 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
       || mBreakInside != aNewData.mBreakInside
       || mBreakBefore != aNewData.mBreakBefore
       || mBreakAfter != aNewData.mBreakAfter
-      || mMozAppearance != aNewData.mMozAppearance
       || mAppearance != aNewData.mAppearance
       || mOrient != aNewData.mOrient
       || mOverflowClipBox != aNewData.mOverflowClipBox) {
@@ -3811,6 +3808,16 @@ nsStyleContentData::nsStyleContentData(const nsStyleContentData& aOther)
   }
 }
 
+bool
+nsStyleContentData::
+CounterFunction::operator==(const CounterFunction& aOther) const
+{
+  return mIdent == aOther.mIdent &&
+    mSeparator == aOther.mSeparator &&
+    mCounterStyle == aOther.mCounterStyle &&
+    mCounterStyleName == aOther.mCounterStyleName;
+}
+
 nsStyleContentData&
 nsStyleContentData::operator=(const nsStyleContentData& aOther)
 {
@@ -3837,6 +3844,31 @@ nsStyleContentData::operator==(const nsStyleContentData& aOther) const
     return *mContent.mCounters == *aOther.mContent.mCounters;
   }
   return safe_strcmp(mContent.mString, aOther.mContent.mString) == 0;
+}
+
+void
+nsStyleContentData::Resolve(nsPresContext* aPresContext)
+{
+  switch (mType) {
+    case eStyleContentType_Image:
+      if (!mContent.mImage->IsResolved()) {
+        mContent.mImage->Resolve(aPresContext);
+      }
+      break;
+    case eStyleContentType_Counter:
+    case eStyleContentType_Counters: {
+      CounterFunction* counters = mContent.mCounters;
+      if (counters->mCounterStyleName) {
+        MOZ_ASSERT(!counters->mCounterStyle);
+        counters->mCounterStyle = aPresContext->CounterStyleManager()->
+          BuildCounterStyle(counters->mCounterStyleName);
+        counters->mCounterStyleName = nullptr;
+      }
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 
@@ -3895,6 +3927,10 @@ nsStyleContent::CalcDifference(const nsStyleContent& aNewData) const
   // Unfortunately we need to reframe even if the content lengths are the same;
   // a simple reflow will not pick up different text or different image URLs,
   // since we set all that up in the CSSFrameConstructor
+  //
+  // Also note that we also rely on this to return ReconstructFrame when
+  // content changes to ensure that nsCounterUseNode wouldn't reference
+  // to stale counter stylex.
   if (mContents != aNewData.mContents ||
       mIncrements != aNewData.mIncrements ||
       mResets != aNewData.mResets) {

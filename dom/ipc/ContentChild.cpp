@@ -41,7 +41,6 @@
 #include "mozilla/dom/workers/ServiceWorkerManager.h"
 #include "mozilla/dom/nsIContentChild.h"
 #include "mozilla/dom/URLClassifierChild.h"
-#include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/psm/PSMContentListener.h"
 #include "mozilla/hal_sandbox/PHalChild.h"
@@ -825,6 +824,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
   TextureFactoryIdentifier textureFactoryIdentifier;
   uint64_t layersId = 0;
   CompositorOptions compositorOptions;
+  uint32_t maxTouchPoints = 0;
 
   if (aIframeMoz) {
     MOZ_ASSERT(aTabOpener);
@@ -841,7 +841,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
     newChild->SendBrowserFrameOpenWindow(aTabOpener, renderFrame, NS_ConvertUTF8toUTF16(url),
                                          name, NS_ConvertUTF8toUTF16(features),
                                          aWindowIsNew, &textureFactoryIdentifier,
-                                         &layersId, &compositorOptions);
+                                         &layersId, &compositorOptions, &maxTouchPoints);
   } else {
     nsAutoCString baseURIString;
     float fullZoom;
@@ -865,7 +865,8 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
                           &urlToLoad,
                           &textureFactoryIdentifier,
                           &layersId,
-                          &compositorOptions)) {
+                          &compositorOptions,
+                          &maxTouchPoints)) {
       PRenderFrameChild::Send__delete__(renderFrame);
       return NS_ERROR_NOT_AVAILABLE;
     }
@@ -895,6 +896,8 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
                         aTabOpener->mDPI, aTabOpener->mRounding,
                         aTabOpener->mDefaultScale);
   }
+
+  newChild->SetMaxTouchPoints(maxTouchPoints);
 
   // Set the opener window for this window before we start loading the document
   // inside of it. We have to do this before loading the remote scripts, because
@@ -988,8 +991,6 @@ ContentChild::InitXPCOM(const XPCOMInitData& aXPCOMInit,
   if (!BackgroundChild::GetOrCreateForCurrentThread(callback)) {
     MOZ_CRASH("Failed to create PBackgroundChild!");
   }
-
-  BlobChild::Startup(BlobChild::FriendKey());
 
   nsCOMPtr<nsIConsoleService> svc(do_GetService(NS_CONSOLESERVICE_CONTRACTID));
   if (!svc) {
@@ -1633,18 +1634,6 @@ ContentChild::DeallocPBrowserChild(PBrowserChild* aIframe)
   return nsIContentChild::DeallocPBrowserChild(aIframe);
 }
 
-PMemoryStreamChild*
-ContentChild::AllocPMemoryStreamChild(const uint64_t& aSize)
-{
-  return nsIContentChild::AllocPMemoryStreamChild(aSize);
-}
-
-bool
-ContentChild::DeallocPMemoryStreamChild(PMemoryStreamChild* aActor)
-{
-  return nsIContentChild::DeallocPMemoryStreamChild(aActor);
-}
-
 PIPCBlobInputStreamChild*
 ContentChild::AllocPIPCBlobInputStreamChild(const nsID& aID,
                                             const uint64_t& aSize)
@@ -1656,12 +1645,6 @@ bool
 ContentChild::DeallocPIPCBlobInputStreamChild(PIPCBlobInputStreamChild* aActor)
 {
   return nsIContentChild::DeallocPIPCBlobInputStreamChild(aActor);
-}
-
-PBlobChild*
-ContentChild::AllocPBlobChild(const BlobConstructorParams& aParams)
-{
-  return nsIContentChild::AllocPBlobChild(aParams);
 }
 
 mozilla::PRemoteSpellcheckEngineChild *
@@ -1676,33 +1659,6 @@ ContentChild::DeallocPRemoteSpellcheckEngineChild(PRemoteSpellcheckEngineChild *
 {
   delete child;
   return true;
-}
-
-bool
-ContentChild::DeallocPBlobChild(PBlobChild* aActor)
-{
-  return nsIContentChild::DeallocPBlobChild(aActor);
-}
-
-PBlobChild*
-ContentChild::SendPBlobConstructor(PBlobChild* aActor,
-                                   const BlobConstructorParams& aParams)
-{
-  if (IsShuttingDown()) {
-    return nullptr;
-  }
-
-  return PContentChild::SendPBlobConstructor(aActor, aParams);
-}
-
-PMemoryStreamChild*
-ContentChild::SendPMemoryStreamConstructor(const uint64_t& aSize)
-{
-  if (IsShuttingDown()) {
-    return nullptr;
-  }
-
-  return PContentChild::SendPMemoryStreamConstructor(aSize);
 }
 
 PPresentationChild*

@@ -10,6 +10,7 @@
 #include <inttypes.h>
 
 #include "mozilla/dom/nsCSPContext.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/SizePrintfMacros.h"
 #include "mozilla/Sprintf.h"
 
@@ -106,7 +107,6 @@
 #include "HSTSPrimerListener.h"
 #include "CacheStorageService.h"
 #include "HttpChannelParent.h"
-#include "nsIThrottlingService.h"
 #include "nsIBufferedStreams.h"
 #include "nsIFileStreams.h"
 #include "nsIMIMEInputStream.h"
@@ -710,7 +710,7 @@ nsHttpChannel::ContinueConnect()
     while (suspendCount--)
         mTransactionPump->Suspend();
 
-    if (mSuspendCount && mClassOfService & nsIClassOfService::Throttleable) {
+    if (mClassOfService & nsIClassOfService::Throttleable) {
         gHttpHandler->ThrottleTransaction(mTransaction, true);
     }
 
@@ -1388,12 +1388,6 @@ nsHttpChannel::CallOnStartRequest()
                        "CORS preflight must have been finished by the time we "
                        "call OnStartRequest");
 
-    nsresult rv = EnsureMIMEOfScript(mURI, mResponseHead, mLoadInfo);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = ProcessXCTO(mURI, mResponseHead, mLoadInfo);
-    NS_ENSURE_SUCCESS(rv, rv);
-
     if (mOnStartRequestCalled) {
         // This can only happen when a range request loading rest of the data
         // after interrupted concurrent cache read asynchronously failed, e.g.
@@ -1409,6 +1403,27 @@ nsHttpChannel::CallOnStartRequest()
     }
 
     mTracingEnabled = false;
+
+    // Ensure mListener->OnStartRequest will be invoked before exiting
+    // this function.
+    auto onStartGuard = MakeScopeExit([&] {
+        LOG(("  calling mListener->OnStartRequest by ScopeExit [this=%p, "
+             "listener=%p]\n", this, mListener.get()));
+        MOZ_ASSERT(!mOnStartRequestCalled);
+
+        if (mListener) {
+            nsCOMPtr<nsIStreamListener> deleteProtector(mListener);
+            deleteProtector->OnStartRequest(this, mListenerContext);
+        }
+
+        mOnStartRequestCalled = true;
+    });
+
+    nsresult rv = EnsureMIMEOfScript(mURI, mResponseHead, mLoadInfo);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rv = ProcessXCTO(mURI, mResponseHead, mLoadInfo);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     // Allow consumers to override our content type
     if (mLoadFlags & LOAD_CALL_CONTENT_SNIFFERS) {
@@ -1476,6 +1491,10 @@ nsHttpChannel::CallOnStartRequest()
     }
 
     LOG(("  calling mListener->OnStartRequest [this=%p, listener=%p]\n", this, mListener.get()));
+
+    // About to call OnStartRequest, dismiss the guard object.
+    onStartGuard.release();
+
     if (mListener) {
         MOZ_ASSERT(!mOnStartRequestCalled,
                    "We should not call OsStartRequest twice");
@@ -2736,6 +2755,8 @@ nsHttpChannel::StartRedirectChannelToURI(nsIURI *upgradedURI, uint32_t flags)
     LOG(("nsHttpChannel::StartRedirectChannelToURI()\n"));
 
     nsCOMPtr<nsIChannel> newChannel;
+    nsCOMPtr<nsILoadInfo> redirectLoadInfo = CloneLoadInfoForRedirect(upgradedURI,
+                                                                      flags);
 
     nsCOMPtr<nsIIOService> ioService;
     rv = gHttpHandler->GetIOService(getter_AddRefs(ioService));
@@ -2743,7 +2764,7 @@ nsHttpChannel::StartRedirectChannelToURI(nsIURI *upgradedURI, uint32_t flags)
 
     rv = NS_NewChannelInternal(getter_AddRefs(newChannel),
                                upgradedURI,
-                               mLoadInfo,
+                               redirectLoadInfo,
                                nullptr, // aLoadGroup
                                nullptr, // aCallbacks
                                nsIRequest::LOAD_NORMAL,
@@ -5601,21 +5622,22 @@ nsHttpChannel::ContinueProcessRedirectionAfterFallback(nsresult rv)
     rv = gHttpHandler->GetIOService(getter_AddRefs(ioService));
     if (NS_FAILED(rv)) return rv;
 
-    nsCOMPtr<nsIChannel> newChannel;
-    rv = NS_NewChannelInternal(getter_AddRefs(newChannel),
-                               mRedirectURI,
-                               mLoadInfo,
-                               nullptr, // aLoadGroup
-                               nullptr, // aCallbacks
-                               nsIRequest::LOAD_NORMAL,
-                               ioService);
-    NS_ENSURE_SUCCESS(rv, rv);
-
     uint32_t redirectFlags;
     if (nsHttp::IsPermanentRedirect(mRedirectType))
         redirectFlags = nsIChannelEventSink::REDIRECT_PERMANENT;
     else
         redirectFlags = nsIChannelEventSink::REDIRECT_TEMPORARY;
+
+    nsCOMPtr<nsIChannel> newChannel;
+    nsCOMPtr<nsILoadInfo> redirectLoadInfo = CloneLoadInfoForRedirect(mRedirectURI, redirectFlags);
+    rv = NS_NewChannelInternal(getter_AddRefs(newChannel),
+                               mRedirectURI,
+                               redirectLoadInfo,
+                               nullptr, // aLoadGroup
+                               nullptr, // aCallbacks
+                               nsIRequest::LOAD_NORMAL,
+                               ioService);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     rv = SetupReplacementChannel(mRedirectURI, newChannel,
                                  !rewriteToGET, redirectFlags);
@@ -6604,17 +6626,8 @@ nsHttpChannel::OnClassOfServiceUpdated()
 {
     bool throttleable = !!(mClassOfService & nsIClassOfService::Throttleable);
 
-    if (mSuspendCount && mTransaction) {
+    if (mTransaction) {
         gHttpHandler->ThrottleTransaction(mTransaction, throttleable);
-    }
-
-    nsIThrottlingService *throttler = gHttpHandler->GetThrottlingService();
-    if (throttler) {
-        if (throttleable) {
-            throttler->AddChannel(this);
-        } else {
-            throttler->RemoveChannel(this);
-        }
     }
 }
 
@@ -7354,6 +7367,8 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
 
     if (mListener) {
         LOG(("  calling OnStopRequest\n"));
+        MOZ_ASSERT(mOnStartRequestCalled,
+                   "OnStartRequest should be called before OnStopRequest");
         MOZ_ASSERT(!mOnStopRequestCalled,
                    "We should not call OnStopRequest twice");
         mListener->OnStopRequest(this, mListenerContext, status);

@@ -1091,8 +1091,13 @@ CodeGenerator::visitValueToString(LValueToString* lir)
     }
 
     // Symbol
-    if (lir->mir()->input()->mightBeType(MIRType::Symbol))
-        masm.branchTestSymbol(Assembler::Equal, tag, ool->entry());
+    if (lir->mir()->input()->mightBeType(MIRType::Symbol)) {
+        // Bail.
+        MOZ_ASSERT(lir->mir()->fallible());
+        Label bail;
+        masm.branchTestSymbol(Assembler::Equal, tag, &bail);
+        bailoutFrom(&bail, lir->snapshot());
+    }
 
 #ifdef DEBUG
     masm.assumeUnreachable("Unexpected type for MValueToString.");
@@ -7431,21 +7436,29 @@ CodeGenerator::visitIsNullOrLikeUndefinedAndBranchT(LIsNullOrLikeUndefinedAndBra
     }
 }
 
-typedef JSString* (*ConcatStringsFn)(JSContext*, HandleString, HandleString);
-static const VMFunction ConcatStringsInfo =
-    FunctionInfo<ConcatStringsFn>(ConcatStrings<CanGC>, "ConcatStrings");
+typedef bool (*ConcatStringsPureFn)(JSContext*, JSString*, JSString*, JSString**);
+static const VMFunction ConcatStringsPureInfo =
+    FunctionInfo<ConcatStringsPureFn>(ConcatStringsPure, "ConcatStringsPure");
 
 void
 CodeGenerator::emitConcat(LInstruction* lir, Register lhs, Register rhs, Register output)
 {
-    OutOfLineCode* ool = oolCallVM(ConcatStringsInfo, lir, ArgList(lhs, rhs),
+    OutOfLineCode* ool = oolCallVM(ConcatStringsPureInfo, lir, ArgList(lhs, rhs),
                                    StoreRegisterTo(output));
 
+    Label done, bail;
     JitCode* stringConcatStub = gen->compartment->jitCompartment()->stringConcatStubNoBarrier();
     masm.call(stringConcatStub);
-    masm.branchTestPtr(Assembler::Zero, output, output, ool->entry());
+    masm.branchTestPtr(Assembler::NonZero, output, output, &done);
 
+    // If the concat would otherwise throw, we instead return nullptr and use
+    // this to signal a bailout. This allows MConcat to be movable.
+    masm.jump(ool->entry());
     masm.bind(ool->rejoin());
+    masm.branchTestPtr(Assembler::Zero, output, output, &bail);
+
+    masm.bind(&done);
+    bailoutFrom(&bail, lir->snapshot());
 }
 
 void
@@ -9558,12 +9571,8 @@ CodeGenerator::generateWasm(wasm::SigIdDesc sigId, wasm::BytecodeOffset trapOffs
     // functions with small framePushed). Perform overflow-checking after
     // pushing framePushed to catch cases with really large frames.
     Label onOverflow;
-    if (!omitOverRecursedCheck()) {
-        masm.branchPtr(Assembler::AboveOrEqual,
-                       Address(WasmTlsReg, offsetof(wasm::TlsData, stackLimit)),
-                       masm.getStackPointer(),
-                       &onOverflow);
-    }
+    if (!omitOverRecursedCheck())
+        masm.wasmEmitStackCheck(masm.getStackPointer(), ABINonArgReg0, &onOverflow);
 
     if (!generateBody())
         return false;

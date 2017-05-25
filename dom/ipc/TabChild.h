@@ -503,7 +503,15 @@ public:
 
   bool IsTransparent() const { return mIsTransparent; }
 
-  void GetMaxTouchPoints(uint32_t* aTouchPoints);
+  void GetMaxTouchPoints(uint32_t* aTouchPoints)
+  {
+    *aTouchPoints = mMaxTouchPoints;
+  }
+
+  void SetMaxTouchPoints(uint32_t aMaxTouchPoints)
+  {
+    mMaxTouchPoints = aMaxTouchPoints;
+  }
 
   ScreenOrientationInternal GetOrientation() const { return mOrientation; }
 
@@ -589,10 +597,6 @@ public:
   virtual mozilla::ipc::IPCResult RecvHandleAccessKey(const WidgetKeyboardEvent& aEvent,
                                                       nsTArray<uint32_t>&& aCharCodes,
                                                       const int32_t& aModifierMask) override;
-
-  virtual mozilla::ipc::IPCResult RecvAudioChannelChangeNotification(const uint32_t& aAudioChannel,
-                                                                     const float& aVolume,
-                                                                     const bool& aMuted) override;
 
   virtual mozilla::ipc::IPCResult RecvSetUseGlobalHistory(const bool& aUse) override;
 
@@ -791,6 +795,7 @@ private:
   RefPtr<nsIContentChild> mManager;
   RefPtr<TabChildSHistoryListener> mHistoryListener;
   uint32_t mChromeFlags;
+  uint32_t mMaxTouchPoints;
   int32_t mActiveSuppressDisplayport;
   uint64_t mLayersId;
   int64_t mBeforeUnloadListeners;
@@ -844,8 +849,6 @@ private:
   mozilla::TimeStamp mLastWheelProcessedTimeFromParent;
   mozilla::TimeDuration mLastWheelProcessingDuration;
   CoalescedWheelData mCoalescedWheelData;
-
-  AutoTArray<bool, NUMBER_OF_AUDIO_CHANNELS> mAudioChannelsActive;
 
   RefPtr<layers::IAPZCTreeManager> mApzcTreeManager;
 
