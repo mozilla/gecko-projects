@@ -106,6 +106,8 @@ def make_task_description(config, jobs):
             'build_platform': dep_job.attributes.get('build_platform'),
             'build_type': dep_job.attributes.get('build_type'),
         }
+        if job.get('locale'):
+            attributes['locale'] = job['locale']
 
         command = ['/home/worker/bin/run-task',
                    # Various caches/volumes are default owned by root:root.

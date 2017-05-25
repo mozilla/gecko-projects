@@ -66,7 +66,7 @@ def make_repackage_signing_description(config, jobs):
         if dep_job.attributes.get('locale'):
             treeherder['symbol'] = 'tc-rs({})'.format(dep_job.attributes.get('locale'))
             attributes['locale'] = dep_job.attributes.get('locale')
-            locale_str = "{}/".format(locale)
+            locale_str = "{}/".format(dep_job.attributes.get('locale'))
 
         upstream_artifacts = [{
             "taskId": {"task-reference": "<repackage>"},
