@@ -103,6 +103,7 @@ BEETMOVER_SCOPE_ALIAS_TO_TARGET_TASK = [[
         'nightly_fennec',
         'nightly_linux',
         'nightly_macosx',
+        'nightly_win64',
         'mozilla_beta_tasks',
         'mozilla_release_tasks',
         'date_tasks',
