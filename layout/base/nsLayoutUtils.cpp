@@ -3608,6 +3608,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
             old->Destroy(aBuilder);
           } else {
             merged.AppendToTop(old);
+            old->SetReused();
           }
         } else {
           // TODO: Is it going to be safe to call the dtor on a display item that belongs
@@ -3636,6 +3637,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
     if (!aDeletedFrames.Contains(old->Frame()) &&
         !IsAnyAncestorModified(old->Frame())) {
       merged.AppendToTop(old);
+      old->SetReused();
     } else {
       old->Destroy(aBuilder);
     }

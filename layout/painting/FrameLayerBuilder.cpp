@@ -4573,9 +4573,15 @@ FrameLayerBuilder::ComputeGeometryChangeForItem(DisplayItemData* aData)
     return;
   }
 
-  PaintedLayerItemsEntry* entry = mPaintedLayerItems.GetEntry(paintedLayer);
-
+  // If we're a reused display item, then we can't be invalid, so no need to
+  // do an in-depth comparison.
   nsAutoPtr<nsDisplayItemGeometry> geometry;
+  if (item->IsReused()) {
+    aData->EndUpdate(geometry);
+    return;
+  }
+
+  PaintedLayerItemsEntry* entry = mPaintedLayerItems.GetEntry(paintedLayer);
 
   PaintedDisplayItemLayerUserData* layerData =
     static_cast<PaintedDisplayItemLayerUserData*>(aData->mLayer->GetUserData(&gPaintedDisplayItemLayerUserData));

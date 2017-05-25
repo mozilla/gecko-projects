@@ -2686,6 +2686,7 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
   , mAnimatedGeometryRoot(nullptr)
   , mForceNotVisible(aBuilder->IsBuildingInvisibleItems())
   , mDisableSubpixelAA(false)
+  , mReusedItem(false)
 #ifdef MOZ_DUMP_PAINTING
   , mPainted(false)
 #endif

@@ -2425,6 +2425,15 @@ public:
     return mFrame->GetContent() == aOther->Frame()->GetContent();
   }
 
+  bool IsReused() const
+  {
+    return mReusedItem && mStates.empty();
+  }
+  void SetReused()
+  {
+    mReusedItem = true;
+  }
+
 protected:
   nsDisplayItem() = delete;
 
@@ -2449,6 +2458,7 @@ protected:
   nsRect    mVisibleRect;
   bool      mForceNotVisible;
   bool      mDisableSubpixelAA;
+  bool      mReusedItem;
 #ifdef MOZ_DUMP_PAINTING
   // True if this frame has been painted.
   bool      mPainted;
