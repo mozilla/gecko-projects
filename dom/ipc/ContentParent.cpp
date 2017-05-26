@@ -66,7 +66,6 @@
 #include "mozilla/dom/quota/QuotaManagerService.h"
 #include "mozilla/dom/time/DateCacheCleaner.h"
 #include "mozilla/dom/URLClassifierParent.h"
-#include "mozilla/dom/ipc/BlobParent.h"
 #include "mozilla/embedding/printingui/PrintingParent.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/GPUProcessManager.h"
@@ -630,8 +629,6 @@ ContentParent::StartUp()
   RegisterStrongMemoryReporter(new ContentParentsMemoryReporter());
 
   mozilla::dom::time::InitializeDateCacheCleaner();
-
-  BlobParent::Startup(BlobParent::FriendKey());
 
   BackgroundChild::Startup();
 
@@ -2838,30 +2835,6 @@ ContentParent::DeallocPBrowserParent(PBrowserParent* frame)
   return nsIContentParent::DeallocPBrowserParent(frame);
 }
 
-PBlobParent*
-ContentParent::AllocPBlobParent(const BlobConstructorParams& aParams)
-{
-  return nsIContentParent::AllocPBlobParent(aParams);
-}
-
-bool
-ContentParent::DeallocPBlobParent(PBlobParent* aActor)
-{
-  return nsIContentParent::DeallocPBlobParent(aActor);
-}
-
-PMemoryStreamParent*
-ContentParent::AllocPMemoryStreamParent(const uint64_t& aSize)
-{
-  return nsIContentParent::AllocPMemoryStreamParent(aSize);
-}
-
-bool
-ContentParent::DeallocPMemoryStreamParent(PMemoryStreamParent* aActor)
-{
-  return nsIContentParent::DeallocPMemoryStreamParent(aActor);
-}
-
 PIPCBlobInputStreamParent*
 ContentParent::AllocPIPCBlobInputStreamParent(const nsID& aID,
                                               const uint64_t& aSize)
@@ -2873,21 +2846,6 @@ bool
 ContentParent::DeallocPIPCBlobInputStreamParent(PIPCBlobInputStreamParent* aActor)
 {
   return nsIContentParent::DeallocPIPCBlobInputStreamParent(aActor);
-}
-
-mozilla::ipc::IPCResult
-ContentParent::RecvPBlobConstructor(PBlobParent* aActor,
-                                    const BlobConstructorParams& aParams)
-{
-  const ParentBlobConstructorParams& params = aParams.get_ParentBlobConstructorParams();
-  if (params.blobParams().type() == AnyBlobConstructorParams::TKnownBlobConstructorParams) {
-    if (!aActor->SendCreatedFromKnownBlob()) {
-      return IPC_FAIL_NO_REASON(this);
-    }
-    return IPC_OK();
-  }
-
-  return IPC_OK();
 }
 
 mozilla::PRemoteSpellcheckEngineParent *
@@ -3878,13 +3836,6 @@ ContentParent::DoSendAsyncMessage(JSContext* aCx,
   return NS_OK;
 }
 
-PBlobParent*
-ContentParent::SendPBlobConstructor(PBlobParent* aActor,
-                                    const BlobConstructorParams& aParams)
-{
-  return PContentParent::SendPBlobConstructor(aActor, aParams);
-}
-
 PIPCBlobInputStreamParent*
 ContentParent::SendPIPCBlobInputStreamConstructor(PIPCBlobInputStreamParent* aActor,
                                                   const nsID& aID,
@@ -4263,23 +4214,6 @@ ContentParent::RecvNotifyTabDestroying(const TabId& aTabId,
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult
-ContentParent::RecvTabChildNotReady(const TabId& aTabId)
-{
-  ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
-  RefPtr<TabParent> tp =
-    cpm->GetTopLevelTabParentByProcessAndTabId(this->ChildID(), aTabId);
-
-  if (!tp) {
-    NS_WARNING("Couldn't find TabParent for TabChildNotReady message.");
-    return IPC_OK();
-  }
-
-  tp->DispatchTabChildNotReadyEvent();
-
-  return IPC_OK();
-}
-
 nsTArray<TabContext>
 ContentParent::GetManagedTabContext()
 {
@@ -4617,7 +4551,8 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
                                 nsCString* aURLToLoad,
                                 TextureFactoryIdentifier* aTextureFactoryIdentifier,
                                 uint64_t* aLayersId,
-                                CompositorOptions* aCompositorOptions)
+                                CompositorOptions* aCompositorOptions,
+                                uint32_t* aMaxTouchPoints)
 {
   // We always expect to open a new window here. If we don't, it's an error.
   *aWindowIsNew = true;
@@ -4670,6 +4605,9 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
     *aResult = NS_ERROR_FAILURE;
   }
   *aCompositorOptions = rfp->GetCompositorOptions();
+
+  nsCOMPtr<nsIWidget> widget = newTab->GetWidget();
+  *aMaxTouchPoints = widget ? widget->GetMaxTouchPoints() : 0;
 
   return IPC_OK();
 }

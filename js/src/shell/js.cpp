@@ -387,8 +387,7 @@ ShellContext::ShellContext(JSContext* cx)
     quitting(false),
     readLineBufPos(0),
     errFilePtr(nullptr),
-    outFilePtr(nullptr),
-    geckoProfilingStackSize(0)
+    outFilePtr(nullptr)
 {}
 
 ShellContext*
@@ -1649,7 +1648,7 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
         // register ahead the fact that every JSFunction which is being
         // delazified should be encoded at the end of the delazification.
         if (saveIncrementalBytecode) {
-            if (!StartIncrementalEncoding(cx, saveBuffer, script))
+            if (!StartIncrementalEncoding(cx, script))
                 return false;
         }
 
@@ -1675,7 +1674,7 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
         // Serialize the encoded bytecode, recorded before the execution, into a
         // buffer which can be deserialized linearly.
         if (saveIncrementalBytecode) {
-            if (!FinishIncrementalEncoding(cx, script))
+            if (!FinishIncrementalEncoding(cx, script, saveBuffer))
                 return false;
         }
     }
@@ -5217,8 +5216,7 @@ EnableGeckoProfiling(JSContext* cx, unsigned argc, Value* vp)
     if (cx->runtime()->geckoProfiler().installed())
         MOZ_ALWAYS_TRUE(cx->runtime()->geckoProfiler().enable(false));
 
-    SetContextProfilingStack(cx, sc->geckoProfilingStack, &sc->geckoProfilingStackSize,
-                             ShellContext::GeckoProfilingMaxStackSize);
+    SetContextProfilingStack(cx, &sc->geckoProfilingStack);
     cx->runtime()->geckoProfiler().enableSlowAssertions(false);
     if (!cx->runtime()->geckoProfiler().enable(true))
         JS_ReportErrorASCII(cx, "Cannot ensure single threaded execution in profiler");
@@ -5250,8 +5248,7 @@ EnableGeckoProfilingWithSlowAssertions(JSContext* cx, unsigned argc, Value* vp)
     if (cx->runtime()->geckoProfiler().installed())
         MOZ_ALWAYS_TRUE(cx->runtime()->geckoProfiler().enable(false));
 
-    SetContextProfilingStack(cx, sc->geckoProfilingStack, &sc->geckoProfilingStackSize,
-                             ShellContext::GeckoProfilingMaxStackSize);
+    SetContextProfilingStack(cx, &sc->geckoProfilingStack);
     cx->runtime()->geckoProfiler().enableSlowAssertions(true);
     if (!cx->runtime()->geckoProfiler().enable(true))
         JS_ReportErrorASCII(cx, "Cannot ensure single threaded execution in profiler");

@@ -107,7 +107,6 @@
 #include "HSTSPrimerListener.h"
 #include "CacheStorageService.h"
 #include "HttpChannelParent.h"
-#include "nsIThrottlingService.h"
 #include "nsIBufferedStreams.h"
 #include "nsIFileStreams.h"
 #include "nsIMIMEInputStream.h"
@@ -711,7 +710,7 @@ nsHttpChannel::ContinueConnect()
     while (suspendCount--)
         mTransactionPump->Suspend();
 
-    if (mSuspendCount && mClassOfService & nsIClassOfService::Throttleable) {
+    if (mClassOfService & nsIClassOfService::Throttleable) {
         gHttpHandler->ThrottleTransaction(mTransaction, true);
     }
 
@@ -6624,17 +6623,8 @@ nsHttpChannel::OnClassOfServiceUpdated()
 {
     bool throttleable = !!(mClassOfService & nsIClassOfService::Throttleable);
 
-    if (mSuspendCount && mTransaction) {
+    if (mTransaction) {
         gHttpHandler->ThrottleTransaction(mTransaction, throttleable);
-    }
-
-    nsIThrottlingService *throttler = gHttpHandler->GetThrottlingService();
-    if (throttler) {
-        if (throttleable) {
-            throttler->AddChannel(this);
-        } else {
-            throttler->RemoveChannel(this);
-        }
     }
 }
 
@@ -8874,10 +8864,10 @@ nsHttpChannel::ReportRcwnStats(nsIRequest* firstResponseRequest)
         kRaceUsedCache = 3
     };
     static const Telemetry::HistogramID kRcwnTelemetry[4] = {
-        Telemetry::NETWORK_RACE_CACHE_BANDWITH_NOT_RACE,
-        Telemetry::NETWORK_RACE_CACHE_BANDWITH_NOT_RACE,
-        Telemetry::NETWORK_RACE_CACHE_BANDWITH_RACE_NETWORK_WIN,
-        Telemetry::NETWORK_RACE_CACHE_BANDWITH_RACE_CACHE_WIN
+        Telemetry::NETWORK_RACE_CACHE_BANDWIDTH_NOT_RACE,
+        Telemetry::NETWORK_RACE_CACHE_BANDWIDTH_NOT_RACE,
+        Telemetry::NETWORK_RACE_CACHE_BANDWIDTH_RACE_NETWORK_WIN,
+        Telemetry::NETWORK_RACE_CACHE_BANDWIDTH_RACE_CACHE_WIN
     };
 
     RaceCacheAndNetStatus rcwnStatus = kDidNotRaceUsedNetwork;

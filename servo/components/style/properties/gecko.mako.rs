@@ -57,6 +57,7 @@ use logical_geometry::WritingMode;
 use media_queries::Device;
 use properties::animated_properties::TransitionProperty;
 use properties::longhands;
+use properties:: FontComputationData;
 use properties::{Importance, LonghandId};
 use properties::{PropertyDeclaration, PropertyDeclarationBlock, PropertyDeclarationId};
 use std::fmt::{self, Debug};
@@ -74,6 +75,7 @@ pub mod style_structs {
     % endfor
 }
 
+
 #[derive(Clone, Debug)]
 pub struct ComputedValues {
     % for style_struct in data.style_structs:
@@ -82,31 +84,19 @@ pub struct ComputedValues {
 
     custom_properties: Option<Arc<ComputedValuesMap>>,
     pub writing_mode: WritingMode,
-    pub root_font_size: Au,
-    /// font-size keyword values (and font-size-relative values applied
-    /// to keyword values) need to preserve their identity as originating
-    /// from keywords and relative font sizes. We store this information
-    /// out of band in the ComputedValues. When None, the font size on the
-    /// current struct was computed from a value that was not a keyword
-    /// or a chain of font-size-relative values applying to successive parents
-    /// terminated by a keyword. When Some, this means the font-size was derived
-    /// from a keyword value or a keyword value on some ancestor with only
-    /// font-size-relative keywords and regular inheritance in between. The
-    /// integer stores the final ratio of the chain of font size relative values.
-    /// and is 1 when there was just a keyword and no relative values.
-    ///
-    /// When this is Some, we compute font sizes by computing the keyword against
-    /// the generic font, and then multiplying it by the ratio.
-    pub font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
-    /// The cached system font. See longhand/font.mako.rs
-    pub cached_system_font: Option<longhands::system_font::ComputedSystemFont>,
+    pub font_computation_data: FontComputationData,
+
+    /// The element's computed values if visited, only computed if there's a
+    /// relevant link for this element. A element's "relevant link" is the
+    /// element being matched if it is a link or the nearest ancestor link.
+    visited_style: Option<Arc<ComputedValues>>,
 }
 
 impl ComputedValues {
     pub fn new(custom_properties: Option<Arc<ComputedValuesMap>>,
                writing_mode: WritingMode,
-               root_font_size: Au,
                font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
+               visited_style: Option<Arc<ComputedValues>>,
                % for style_struct in data.style_structs:
                ${style_struct.ident}: Arc<style_structs::${style_struct.name}>,
                % endfor
@@ -114,9 +104,8 @@ impl ComputedValues {
         ComputedValues {
             custom_properties: custom_properties,
             writing_mode: writing_mode,
-            root_font_size: root_font_size,
-            cached_system_font: None,
-            font_size_keyword: font_size_keyword,
+            font_computation_data: FontComputationData::new(font_size_keyword),
+            visited_style: visited_style,
             % for style_struct in data.style_structs:
             ${style_struct.ident}: ${style_struct.ident},
             % endfor
@@ -127,14 +116,14 @@ impl ComputedValues {
         Arc::new(ComputedValues {
             custom_properties: None,
             writing_mode: WritingMode::empty(), // FIXME(bz): This seems dubious
-            root_font_size: longhands::font_size::get_initial_value(), // FIXME(bz): Also seems dubious?
-            font_size_keyword: Some((Default::default(), 1.)),
-            cached_system_font: None,
+            font_computation_data: FontComputationData::default_values(),
+            visited_style: None,
             % for style_struct in data.style_structs:
                 ${style_struct.ident}: style_structs::${style_struct.name}::default(pres_context),
             % endfor
         })
     }
+
 
     #[inline]
     pub fn is_display_contents(&self) -> bool {
@@ -167,6 +156,23 @@ impl ComputedValues {
         Arc::make_mut(&mut self.${style_struct.ident})
     }
     % endfor
+
+    /// Gets a reference to the visited computed values, if any.
+    pub fn get_visited_style(&self) -> Option<<&Arc<ComputedValues>> {
+        self.visited_style.as_ref()
+    }
+
+    /// Gets a reference to the visited computed values. Panic if the element
+    /// does not have visited computed values.
+    pub fn visited_style(&self) -> &Arc<ComputedValues> {
+        self.get_visited_style().unwrap()
+    }
+
+    /// Clone the visited computed values Arc.  Used for inheriting parent styles
+    /// in StyleBuilder::for_inheritance.
+    pub fn clone_visited_style(&self) -> Option<Arc<ComputedValues>> {
+        self.visited_style.clone()
+    }
 
     pub fn custom_properties(&self) -> Option<Arc<ComputedValuesMap>> {
         self.custom_properties.clone()
@@ -959,8 +965,7 @@ fn static_assert() {
 
     pub fn set_border_image_outset(&mut self, v: longhands::border_image_outset::computed_value::T) {
         % for side in SIDES:
-            v.${side.index}.to_gecko_style_coord(&mut self.gecko.mBorderImageOutset
-                                                          .data_at_mut(${side.index}));
+        v.${side.ident}.to_gecko_style_coord(&mut self.gecko.mBorderImageOutset.data_at_mut(${side.index}));
         % endfor
     }
 
@@ -994,17 +999,17 @@ fn static_assert() {
     }
 
     pub fn set_border_image_width(&mut self, v: longhands::border_image_width::computed_value::T) {
-        use properties::longhands::border_image_width::computed_value::SingleComputedValue;
+        use values::generics::border::BorderImageWidthSide;
 
         % for side in SIDES:
-        match v.${side.index} {
-            SingleComputedValue::Auto => {
+        match v.${side.ident} {
+            BorderImageWidthSide::Auto => {
                 self.gecko.mBorderImageWidth.data_at_mut(${side.index}).set_value(CoordDataValue::Auto)
             },
-            SingleComputedValue::LengthOrPercentage(l) => {
+            BorderImageWidthSide::Length(l) => {
                 l.to_gecko_style_coord(&mut self.gecko.mBorderImageWidth.data_at_mut(${side.index}))
             },
-            SingleComputedValue::Number(n) => {
+            BorderImageWidthSide::Number(n) => {
                 self.gecko.mBorderImageWidth.data_at_mut(${side.index}).set_value(CoordDataValue::Factor(n))
             },
         }
@@ -1021,9 +1026,9 @@ fn static_assert() {
     pub fn set_border_image_slice(&mut self, v: longhands::border_image_slice::computed_value::T) {
         use gecko_bindings::structs::{NS_STYLE_BORDER_IMAGE_SLICE_NOFILL, NS_STYLE_BORDER_IMAGE_SLICE_FILL};
 
-        for (i, corner) in v.corners.iter().enumerate() {
-            corner.to_gecko_style_coord(&mut self.gecko.mBorderImageSlice.data_at_mut(i));
-        }
+        % for side in SIDES:
+        v.offsets.${side.ident}.to_gecko_style_coord(&mut self.gecko.mBorderImageSlice.data_at_mut(${side.index}));
+        % endfor
 
         let fill = if v.fill {
             NS_STYLE_BORDER_IMAGE_SLICE_FILL
@@ -3769,7 +3774,7 @@ fn static_assert() {
     }
     pub fn set_text_overflow(&mut self, v: longhands::text_overflow::computed_value::T) {
         use gecko_bindings::structs::nsStyleTextOverflowSide;
-        use properties::longhands::text_overflow::{SpecifiedValue, Side};
+        use properties::longhands::text_overflow::Side;
 
         fn set(side: &mut nsStyleTextOverflowSide, value: &Side) {
             let ty = match *value {
@@ -3784,13 +3789,10 @@ fn static_assert() {
         }
 
         self.clear_overflow_sides_if_string();
-        self.gecko.mTextOverflow.mLogicalDirections = v.second.is_none();
+        self.gecko.mTextOverflow.mLogicalDirections = v.sides_are_logical;
 
-        let SpecifiedValue { ref first, ref second } = v;
-        let second = second.as_ref().unwrap_or(&first);
-
-        set(&mut self.gecko.mTextOverflow.mLeft, first);
-        set(&mut self.gecko.mTextOverflow.mRight, second);
+        set(&mut self.gecko.mTextOverflow.mLeft, &v.first);
+        set(&mut self.gecko.mTextOverflow.mRight, &v.second);
     }
 
     pub fn copy_text_overflow_from(&mut self, other: &Self) {
@@ -3992,7 +3994,7 @@ clip-path
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="InheritedSVG"
-                  skip_longhands="paint-order stroke-dasharray"
+                  skip_longhands="paint-order stroke-dasharray stroke-dashoffset stroke-width"
                   skip_additionals="*">
     pub fn set_paint_order(&mut self, v: longhands::paint_order::computed_value::T) {
         use self::longhands::paint_order;
@@ -4059,6 +4061,46 @@ clip-path
             }
         }
         longhands::stroke_dasharray::computed_value::T(vec)
+    }
+
+    pub fn set_stroke_dashoffset(&mut self, v: longhands::stroke_dashoffset::computed_value::T) {
+        match v {
+            Either::First(number) => self.gecko.mStrokeDashoffset.set_value(CoordDataValue::Factor(number)),
+            Either::Second(lop) => self.gecko.mStrokeDashoffset.set(lop),
+        }
+    }
+
+    ${impl_coord_copy('stroke_dashoffset', 'mStrokeDashoffset')}
+
+    pub fn clone_stroke_dashoffset(&self) -> longhands::stroke_dashoffset::computed_value::T {
+        use values::computed::LengthOrPercentage;
+        match self.gecko.mStrokeDashoffset.as_value() {
+            CoordDataValue::Factor(number) => Either::First(number),
+            CoordDataValue::Coord(coord) => Either::Second(LengthOrPercentage::Length(Au(coord))),
+            CoordDataValue::Percent(p) => Either::Second(LengthOrPercentage::Percentage(p)),
+            CoordDataValue::Calc(calc) => Either::Second(LengthOrPercentage::Calc(calc.into())),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn set_stroke_width(&mut self, v: longhands::stroke_width::computed_value::T) {
+        match v {
+            Either::First(number) => self.gecko.mStrokeWidth.set_value(CoordDataValue::Factor(number)),
+            Either::Second(lop) => self.gecko.mStrokeWidth.set(lop),
+        }
+    }
+
+    ${impl_coord_copy('stroke_width', 'mStrokeWidth')}
+
+    pub fn clone_stroke_width(&self) -> longhands::stroke_width::computed_value::T {
+        use values::computed::LengthOrPercentage;
+        match self.gecko.mStrokeWidth.as_value() {
+            CoordDataValue::Factor(number) => Either::First(number),
+            CoordDataValue::Coord(coord) => Either::Second(LengthOrPercentage::Length(Au(coord))),
+            CoordDataValue::Percent(p) => Either::Second(LengthOrPercentage::Percentage(p)),
+            CoordDataValue::Calc(calc) => Either::Second(LengthOrPercentage::Calc(calc.into())),
+            _ => unreachable!(),
+        }
     }
 </%self:impl_trait>
 
@@ -4215,7 +4257,9 @@ clip-path
         use properties::longhands::content::computed_value::T;
         use properties::longhands::content::computed_value::ContentItem;
         use values::generics::CounterStyleOrNone;
-        use gecko_bindings::structs::nsCSSValue;
+        use gecko_bindings::structs::nsIAtom;
+        use gecko_bindings::structs::nsStyleContentData;
+        use gecko_bindings::structs::nsStyleContentType;
         use gecko_bindings::structs::nsStyleContentType::*;
         use gecko_bindings::bindings::Gecko_ClearAndResizeStyleContents;
 
@@ -4229,11 +4273,23 @@ clip-path
             ptr
         }
 
-        fn set_counter_style(style: CounterStyleOrNone, dest: &mut nsCSSValue) {
-            dest.set_atom_ident(match style {
+        fn set_counter_function(data: &mut nsStyleContentData,
+                                content_type: nsStyleContentType,
+                                name: &str, sep: &str, style: CounterStyleOrNone) {
+            debug_assert!(content_type == eStyleContentType_Counter ||
+                          content_type == eStyleContentType_Counters);
+            let counter_func = unsafe {
+                bindings::Gecko_SetCounterFunction(data, content_type).as_mut().unwrap()
+            };
+            counter_func.mIdent.assign_utf8(name);
+            if content_type == eStyleContentType_Counters {
+                counter_func.mSeparator.assign_utf8(sep);
+            }
+            let ptr = match style {
                 CounterStyleOrNone::None_ => atom!("none"),
                 CounterStyleOrNone::Name(name) => name.0,
-            });
+            }.into_addrefed();
+            unsafe { counter_func.mCounterStyleName.set_raw_from_addrefed::<nsIAtom>(ptr); }
         }
 
         match v {
@@ -4296,23 +4352,12 @@ clip-path
                         ContentItem::NoCloseQuote
                             => self.gecko.mContents[i].mType = eStyleContentType_NoCloseQuote,
                         ContentItem::Counter(name, style) => {
-                            unsafe {
-                                bindings::Gecko_SetContentDataArray(&mut self.gecko.mContents[i],
-                                                                    eStyleContentType_Counter, 2)
-                            }
-                            let mut array = unsafe { &mut **self.gecko.mContents[i].mContent.mCounters.as_mut() };
-                            array[0].set_string(&name);
-                            set_counter_style(style, &mut array[1]);
+                            set_counter_function(&mut self.gecko.mContents[i],
+                                                 eStyleContentType_Counter, &name, "", style);
                         }
                         ContentItem::Counters(name, sep, style) => {
-                            unsafe {
-                                bindings::Gecko_SetContentDataArray(&mut self.gecko.mContents[i],
-                                                                    eStyleContentType_Counters, 3)
-                            }
-                            let mut array = unsafe { &mut **self.gecko.mContents[i].mContent.mCounters.as_mut() };
-                            array[0].set_string(&name);
-                            array[1].set_string(&sep);
-                            set_counter_style(style, &mut array[2]);
+                            set_counter_function(&mut self.gecko.mContents[i],
+                                                 eStyleContentType_Counters, &name, &sep, style);
                         }
                         ContentItem::Url(ref url) => {
                             unsafe {

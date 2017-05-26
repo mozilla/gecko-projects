@@ -122,7 +122,7 @@
   box-shadow: none;
   border: 2px solid -moz-dialog;
   /* "!important" is necessary to override the rule in toolbarbutton.css */
-  margin: -8px 0 0 !important;
+  margin: -9px 0 0 !important;
   margin-inline-end: -6px !important;
   min-width: 16px;
   min-height: 16px;
@@ -198,13 +198,19 @@ panelmultiview[nosubviews=true] > .panel-viewcontainer > .panel-viewstack > .pan
   display: none;
 }
 
-.panel-viewstack:not([viewtype="main"]) > .panel-mainview > #PanelUI-mainView {
+panelview {
+  -moz-box-orient: vertical;
   -moz-box-flex: 1;
 }
 
 .panel-subview-body {
   overflow-y: auto;
   overflow-x: hidden;
+  -moz-box-flex: 1;
+}
+
+.panel-view-body-unscrollable {
+  overflow: hidden;
   -moz-box-flex: 1;
 }
 
@@ -225,6 +231,8 @@ panelmultiview[nosubviews=true] > .panel-viewcontainer > .panel-viewstack > .pan
   border-bottom: 1px solid var(--panel-separator-color);
   color: GrayText;
   font-variant: small-caps;
+  /* Workaround for min-height not being accounted for in vertical layout. */
+  height: 41px;
 }
 
 .cui-widget-panelview .panel-subview-header,
@@ -332,7 +340,6 @@ panelview:not([mainview]) .toolbarbutton-text,
 
 #appMenu-popup > .panel-arrowcontainer > .panel-arrowcontent {
   padding: 0;
-  margin: 0;
   border-radius: 0;
 }
 
@@ -747,6 +754,10 @@ toolbarpaletteitem[place="palette"] > toolbaritem > toolbarbutton {
 
 #appMenu-fxa-icon[syncstatus="active"] {
   list-style-image: url(chrome://browser/skin/syncProgress-horizontalbar.png);
+}
+
+#appMenu-fxa-status {
+  -moz-box-align: center;
 }
 
 #appMenu-fxa-avatar {
@@ -1285,15 +1296,45 @@ photonpanelmultiview .PanelUI-subView .panel-subview-footer {
   font-size: 1.2rem;
 }
 
+photonpanelmultiview .subviewbutton {
+  -moz-context-properties: fill;
+  fill: currentColor;
+}
+
 photonpanelmultiview .subviewbutton[checked="true"] {
   background: none;
   list-style-image: url(chrome://browser/skin/menu-icons/check.svg);
-  -moz-context-properties: fill;
 }
 
 photonpanelmultiview .subviewbutton > .menu-iconic-left {
   -moz-appearance: none;
   margin-inline-end: 0;
+}
+
+photonpanelmultiview .toolbaritem-combined-buttons:-moz-any(:not([cui-areatype="toolbar"]), [overflowedItem="true"]) {
+  -moz-box-align: center;
+  -moz-box-orient: horizontal;
+  border: 0;
+  margin-inline-end: 8px;
+}
+
+photonpanelmultiview .toolbaritem-combined-buttons > label {
+  -moz-box-flex: 1;
+  font: menu;
+  margin: 0;
+  padding-inline-start: 36px; /* 12px toolbarbutton padding + 16px icon + 8px label padding start */
+}
+
+photonpanelmultiview .PanelUI-subView .toolbaritem-combined-buttons > .subviewbutton {
+  -moz-box-flex: 0;
+  height: auto;
+  margin-inline-start: 18px;
+  min-width: auto;
+  padding: 4px;
+}
+
+photonpanelmultiview .PanelUI-subView .toolbaritem-combined-buttons > .subviewbutton > .toolbarbutton-text {
+  display: none;
 }
 
 /* END photon adjustments */
@@ -1977,8 +2018,6 @@ menuitem[checked="true"].subviewbutton > .menu-iconic-left {
   #PanelUI-menu-button[badge-status="update-manual"] > .toolbarbutton-badge-stack > .toolbarbutton-badge,
   #PanelUI-menu-button[badge-status="update-restart"] > .toolbarbutton-badge-stack > .toolbarbutton-badge {
     border: 1px solid -moz-dialog;
-    /* "!important" is necessary to override the rule in toolbarbutton.css */
-    margin: -9px 0 0 !important;
   }
 }
 

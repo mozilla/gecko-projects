@@ -174,7 +174,9 @@ BALROG_SERVER_SCOPES = {
 """
 BALROG_CHANNEL_SCOPES = {
     'nightly': [
-        'project:releng:balrog:channel:nightly'
+        'project:releng:balrog:channel:nightly',
+        'project:releng:balrog:channel:nightly-old-id',
+        'project:releng:balrog:channel:aurora'
     ],
     'nightly-old-id': [
         'project:releng:balrog:channel:nightly'
@@ -198,14 +200,15 @@ BALROG_CHANNEL_SCOPES = {
         'project:releng:balrog:channel:esr-cdntest'
     ],
     'default': [
-        'project:releng:balrog:channel:nightly'
+        'project:releng:balrog:channel:nightly',
+        'project:releng:balrog:channel:nightly-old-id',
         'project:releng:balrog:channel:aurora'
         'project:releng:balrog:channel:beta',
         'project:releng:balrog:channel:beta-localtest',
-        'project:releng:balrog:channel:beta-cdntest'
+        'project:releng:balrog:channel:beta-cdntest',
         'project:releng:balrog:channel:release',
         'project:releng:balrog:channel:release-localtest',
-        'project:releng:balrog:channel:release-cdntest'
+        'project:releng:balrog:channel:release-cdntest',
         'project:releng:balrog:channel:esr',
         'project:releng:balrog:channel:esr-localtest',
         'project:releng:balrog:channel:esr-cdntest'
@@ -238,7 +241,7 @@ PUSH_APK_SCOPES = {
 
 # See https://github.com/mozilla-releng/pushapkscript#aurora-beta-release-vs-alpha-beta-production
 PUSH_APK_GOOGLE_PLAY_TRACT = {
-    'central': 'beta',
+    'central': 'alpha',
     'beta': 'rollout',
     'release': 'rollout',
     'default': 'invalid',
@@ -253,7 +256,7 @@ PUSH_APK_BREAKPOINT_WORKER_TYPE = {
 }
 
 PUSH_APK_DRY_RUN_OPTION = {
-    'aurora': True,
+    'central': False,
     'beta': False,
     'release': False,
     'default': True,

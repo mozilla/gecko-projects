@@ -3536,12 +3536,22 @@ class MNewObject
 };
 
 
-class MNewArrayIterator
+class MNewIterator
   : public MUnaryInstruction,
     public NoTypePolicy::Data
 {
-    explicit MNewArrayIterator(CompilerConstraintList* constraints, MConstant* templateConst)
-      : MUnaryInstruction(templateConst)
+  public:
+    enum Type {
+        ArrayIterator,
+        StringIterator,
+    };
+
+private:
+    Type type_;
+
+    MNewIterator(CompilerConstraintList* constraints, MConstant* templateConst, Type type)
+      : MUnaryInstruction(templateConst),
+        type_(type)
     {
         setResultType(MIRType::Object);
         setResultTypeSet(MakeSingletonTypeSet(constraints, templateObject()));
@@ -3549,8 +3559,12 @@ class MNewArrayIterator
     }
 
   public:
-    INSTRUCTION_HEADER(NewArrayIterator)
+    INSTRUCTION_HEADER(NewIterator)
     TRIVIAL_NEW_WRAPPERS
+
+    Type type() const {
+        return type_;
+    }
 
     JSObject* templateObject() {
         return getOperand(0)->toConstant()->toObjectOrNull();
@@ -7329,6 +7343,11 @@ class MConcat
 
         setMovable();
         setResultType(MIRType::String);
+
+        // StringConcat throws a catchable exception. Even though we bail to
+        // baseline in that case, we must set Guard to ensure the bailout
+        // happens.
+        setGuard();
     }
 
   public:
@@ -11635,6 +11654,9 @@ class MNewLexicalEnvironmentObject
     bool appendRoots(MRootList& roots) const override {
         return roots.append(scope_);
     }
+    AliasSet getAliasSet() const override {
+        return AliasSet::None();
+    }
 };
 
 // Allocate a new LexicalEnvironmentObject from existing one
@@ -11661,6 +11683,11 @@ class MCopyLexicalEnvironmentObject
     }
     bool possiblyCalls() const override {
         return true;
+    }
+    AliasSet getAliasSet() const override {
+        return AliasSet::Load(AliasSet::ObjectFields |
+                              AliasSet::FixedSlot |
+                              AliasSet::DynamicSlot);
     }
 };
 

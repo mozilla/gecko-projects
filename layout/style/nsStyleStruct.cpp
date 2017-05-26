@@ -1643,28 +1643,11 @@ nsStylePosition::CalcDifference(const nsStylePosition& aNewData,
   if (aOldStyleVisibility) {
     bool isVertical = WritingMode(aOldStyleVisibility).IsVertical();
     if (isVertical ? widthChanged : heightChanged) {
-      // Block-size changes can affect descendant intrinsic sizes due to
-      // replaced elements with percentage bsizes in descendants which
-      // also have percentage bsizes. This is handled via
-      // nsChangeHint_UpdateComputedBSize which clears intrinsic sizes
-      // for frames that have such replaced elements.
-      //
-      // We need to use nsChangeHint_ClearAncestorIntrinsics for
-      // block-size changes so we clear results of cached CSS Flex
-      // measuring reflows.
-      hint |= nsChangeHint_NeedReflow |
-              nsChangeHint_UpdateComputedBSize |
-              nsChangeHint_ReflowChangesSizeOrPosition |
-              nsChangeHint_ClearAncestorIntrinsics;
+      hint |= nsChangeHint_ReflowHintsForBSizeChange;
     }
 
     if (isVertical ? heightChanged : widthChanged) {
-      // None of our inline-size differences can affect descendant
-      // intrinsic sizes and none of them need to force children to
-      // reflow.
-      hint |= nsChangeHint_AllReflowHints &
-              ~(nsChangeHint_ClearDescendantIntrinsics |
-                nsChangeHint_NeedDirtyReflow);
+      hint |= nsChangeHint_ReflowHintsForISizeChange;
     }
   } else {
     if (widthChanged || heightChanged) {
@@ -3808,6 +3791,16 @@ nsStyleContentData::nsStyleContentData(const nsStyleContentData& aOther)
   }
 }
 
+bool
+nsStyleContentData::
+CounterFunction::operator==(const CounterFunction& aOther) const
+{
+  return mIdent == aOther.mIdent &&
+    mSeparator == aOther.mSeparator &&
+    mCounterStyle == aOther.mCounterStyle &&
+    mCounterStyleName == aOther.mCounterStyleName;
+}
+
 nsStyleContentData&
 nsStyleContentData::operator=(const nsStyleContentData& aOther)
 {
@@ -3834,6 +3827,31 @@ nsStyleContentData::operator==(const nsStyleContentData& aOther) const
     return *mContent.mCounters == *aOther.mContent.mCounters;
   }
   return safe_strcmp(mContent.mString, aOther.mContent.mString) == 0;
+}
+
+void
+nsStyleContentData::Resolve(nsPresContext* aPresContext)
+{
+  switch (mType) {
+    case eStyleContentType_Image:
+      if (!mContent.mImage->IsResolved()) {
+        mContent.mImage->Resolve(aPresContext);
+      }
+      break;
+    case eStyleContentType_Counter:
+    case eStyleContentType_Counters: {
+      CounterFunction* counters = mContent.mCounters;
+      if (counters->mCounterStyleName) {
+        MOZ_ASSERT(!counters->mCounterStyle);
+        counters->mCounterStyle = aPresContext->CounterStyleManager()->
+          BuildCounterStyle(counters->mCounterStyleName);
+        counters->mCounterStyleName = nullptr;
+      }
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 
@@ -3892,6 +3910,10 @@ nsStyleContent::CalcDifference(const nsStyleContent& aNewData) const
   // Unfortunately we need to reframe even if the content lengths are the same;
   // a simple reflow will not pick up different text or different image URLs,
   // since we set all that up in the CSSFrameConstructor
+  //
+  // Also note that we also rely on this to return ReconstructFrame when
+  // content changes to ensure that nsCounterUseNode wouldn't reference
+  // to stale counter stylex.
   if (mContents != aNewData.mContents ||
       mIncrements != aNewData.mIncrements ||
       mResets != aNewData.mResets) {
