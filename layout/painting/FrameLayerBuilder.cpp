@@ -1619,9 +1619,11 @@ struct CSSMaskLayerUserData : public LayerUserData
     : mMaskStyle(nsStyleImageLayers::LayerType::Mask)
   { }
 
-  CSSMaskLayerUserData(nsIFrame* aFrame, const nsIntRect& aMaskBounds)
+  CSSMaskLayerUserData(nsIFrame* aFrame, const nsIntRect& aMaskBounds,
+                       const nsPoint& aMaskLayerOffset)
     : mMaskBounds(aMaskBounds),
-      mMaskStyle(aFrame->StyleSVGReset()->mMask)
+      mMaskStyle(aFrame->StyleSVGReset()->mMask),
+      mMaskLayerOffset(aMaskLayerOffset)
   {
   }
 
@@ -1629,33 +1631,18 @@ struct CSSMaskLayerUserData : public LayerUserData
   {
     mMaskBounds = aOther.mMaskBounds;
     mMaskStyle = Move(aOther.mMaskStyle);
+    mMaskLayerOffset = aOther.mMaskLayerOffset;
   }
 
   bool
-  IsEqual(const CSSMaskLayerUserData& aOther, nsIFrame* aMaskedFrame) const
+  operator==(const CSSMaskLayerUserData& aOther) const
   {
-    // Even if the frame is valid, check the size of the display item's
-    // boundary is still necessary. For example, if we scale the masked frame
-    // by adding a transform property on it, the masked frame is valid itself
-    // but we have to regenerate mask according to the new size in device
-    // space.
-    if (mMaskBounds.Size() != aOther.mMaskBounds.Size()) {
+    if (!mMaskBounds.IsEqualInterior(aOther.mMaskBounds)) {
       return false;
     }
 
-    // For SVG mask(or clipPath):
-    // The coordinate space of the mask layer that we created is in
-    // objectBoundingBox. If any of maskUnits or
-    // maskContentUnits is userSpaceOnUse, then mask/maskContent and the mask
-    // layer, where the mask was drawn, stay in different coordinate space.
-    // Since they are in different coordinate space, change the position of any
-    // one of them makes mask layer not reusable, and modifying the position of
-    // the masked frame does change the position of mask layer.
-    //
-    // CSS image mask's coordinate space is always objectBoudingBox, we do not
-    // have to worry about it.
-    if (mMaskBounds.TopLeft() != aOther.mMaskBounds.TopLeft() &&
-        nsSVGEffects::HasUserSpaceOnUseUnitsMaskOrClipPath(aMaskedFrame)) {
+    // Make sure we draw the same portion of the mask onto mask layer.
+    if (mMaskLayerOffset != aOther.mMaskLayerOffset) {
       return false;
     }
 
@@ -1665,6 +1652,8 @@ struct CSSMaskLayerUserData : public LayerUserData
 private:
   nsIntRect mMaskBounds;
   nsStyleImageLayers mMaskStyle;
+  nsPoint mMaskLayerOffset; // The offset from the origin of mask bounds to
+                            // the origin of mask layer.
 };
 
 /*
@@ -3903,10 +3892,11 @@ ContainerState::SetupMaskLayerForCSSMask(Layer* aLayer,
   matrix.PreTranslate(mParameters.mOffset.x, mParameters.mOffset.y, 0);
   maskLayer->SetBaseTransform(matrix);
 
-  CSSMaskLayerUserData newUserData(aMaskItem->Frame(), itemRect);
+  nsPoint maskLayerOffset = aMaskItem->ToReferenceFrame() - bounds.TopLeft();
+    
+  CSSMaskLayerUserData newUserData(aMaskItem->Frame(), itemRect, maskLayerOffset);
   nsRect dirtyRect;
-  if (!aMaskItem->IsInvalid(dirtyRect) &&
-      oldUserData->IsEqual(newUserData, aMaskItem->Frame())) {
+  if (!aMaskItem->IsInvalid(dirtyRect) && *oldUserData == newUserData) {
     aLayer->SetMaskLayer(maskLayer);
     return;
   }
