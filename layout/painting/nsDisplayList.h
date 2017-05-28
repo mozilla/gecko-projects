@@ -1572,7 +1572,9 @@ private:
   struct PresShellState {
     nsIPresShell* mPresShell;
     // TODO: Using a Maybe for this is silly, we always want to instantiate it.
+#ifdef DEBUG
     mozilla::Maybe<nsAutoLayoutPhase> mAutoLayoutPhase;
+#endif
     nsIFrame*     mCaretFrame;
     nsRect        mCaretRect;
     mozilla::Maybe<OutOfFlowDisplayData> mFixedBackgroundDisplayData;
