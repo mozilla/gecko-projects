@@ -19,7 +19,6 @@
 #include "mozilla/EnumSet.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/TemplateLib.h" // mozilla::tl::Max
-#include "Mozilla/Tuple.h"
 #include "nsCOMPtr.h"
 #include "nsContainerFrame.h"
 #include "nsPoint.h"
@@ -1793,7 +1792,7 @@ public:
 
   template<typename T>
   struct AutoVarStateImpl : public AutoVarState {
-    AutoVarStateImpl(T& aVar) : mVal(aVar), mVar(aVar) {}
+    explicit AutoVarStateImpl(T& aVar) : mVal(aVar), mVar(aVar) {}
     ~AutoVarStateImpl() { mVar = mVal; }
     T mVal;
     T& mVar;

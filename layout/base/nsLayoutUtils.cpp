@@ -3946,7 +3946,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
               nsIScrollableFrame* sf = do_QueryFrame(currentFrame);
               MOZ_ASSERT(sf);
               nsRect displayPort;
-              bool hasDisplayPort =
+              DebugOnly<bool> hasDisplayPort =
                 GetDisplayPort(currentFrame->GetContent(), &displayPort, RelativeTo::ScrollPort);
               MOZ_ASSERT(hasDisplayPort);
               // get it relative to the scrollport (from the scrollframe)
