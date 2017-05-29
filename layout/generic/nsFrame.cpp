@@ -6454,11 +6454,11 @@ static void InvalidateRenderingObservers(nsIFrame* aFrame, bool aFrameChanged = 
     if (retainedBuilder && !retainedBuilder->mNeedsFullRebuild) {
       std::vector<WeakFrame>* modifiedFrames = displayRoot->Properties().Get(nsIFrame::ModifiedFrameList());
       if (!modifiedFrames) {
-        modifiedFrames = new std::vector<WeakFrame>;
+        modifiedFrames = new std::vector<WeakFrame>();
         displayRoot->Properties().Set(nsIFrame::ModifiedFrameList(), modifiedFrames);
       }
       MOZ_ASSERT(aFrame->PresContext()->LayoutPhaseCount(eLayoutPhase_DisplayListBuilding) == 0);
-      modifiedFrames->push_back(aFrame);
+      modifiedFrames->emplace_back(aFrame);
       aFrame->SetFrameIsModified(true);
     }
   }
