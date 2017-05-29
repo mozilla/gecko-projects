@@ -146,10 +146,28 @@ def target_tasks_ash(full_task_graph, parameters):
 def target_tasks_cedar(full_task_graph, parameters):
     """Target tasks that only run on the cedar branch."""
     def filter(task):
-        platform = task.attributes.get('build_platform')
+        platform = str(task.attributes.get('build_platform'))
         # disable mobile jobs - Photon does not affect mobile.
-        if str(platform).startswith('android'):
+        if platform.startswith('android'):
             return False
+
+        if platform in ('linux64-ccov', 'linux64-jsdcov'):
+            return False
+
+        if platform.startswith('linux32'):
+            return False
+
+        if platform.endswith('-pgo'):
+            return False
+
+        if platform.endswith('-devedition'):
+            return False
+
+        if platform.endswith('-add-on-devel'):
+            return False
+
+        if platform in ('lint'):
+            return True
 
         # Just run mochitest, xpcshell and firefox-ui tests for now
         if task.attributes.get('unittest_suite'):
