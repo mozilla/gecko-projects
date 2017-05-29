@@ -146,36 +146,27 @@ def target_tasks_ash(full_task_graph, parameters):
 def target_tasks_cedar(full_task_graph, parameters):
     """Target tasks that only run on the cedar branch."""
     def filter(task):
-        platform = str(task.attributes.get('build_platform'))
-        # disable mobile jobs - Photon does not affect mobile.
-        if platform.startswith('android'):
+        platform = task.attributes.get('build_platform')
+        # Early return if platform is None
+        if not platform:
             return False
-
-        if platform in ('linux64-ccov', 'linux64-jsdcov'):
+        # Only on Linux platforms
+        if 'linux' not in platform:
             return False
-
-        if platform.startswith('linux32'):
-            return False
-
-        if platform.endswith('-pgo'):
-            return False
-
-        if platform.endswith('-devedition'):
-            return False
-
-        if platform.endswith('-add-on-devel'):
-            return False
-
-        if platform in ('lint'):
-            return True
-
-        # Just run mochitest, xpcshell and firefox-ui tests for now
-        if task.attributes.get('unittest_suite'):
-            if not (task.attributes['unittest_suite'].startswith('mochitest') or
-                    'xpcshell' in task.attributes['unittest_suite'] or
-                    'firefox-ui' in task.attributes['unittest_suite']):
+        # No random non-build jobs either. This is being purposely done as a
+        # blacklist so newly-added jobs aren't missed by default.
+        for p in ('nightly', 'haz', 'artifact', 'cov', 'add-on'):
+            if p in platform:
                 return False
-
+        for k in ('toolchain', 'l10n', 'static-analysis'):
+            if k in task.attributes['kind']:
+                return False
+        # and none of this linux64-asan/debug stuff
+        if platform == 'linux64-asan' and task.attributes['build_type'] == 'debug':
+            return False
+        # don't upload symbols
+        if task.attributes['kind'] == 'upload-symbols':
+            return False
         return True
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
