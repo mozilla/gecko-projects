@@ -3902,6 +3902,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       nsDisplayListBuilder::AutoCurrentScrollParentIdSetter idSetter(&builder, id);
 
       builder.SetVisibleRect(dirtyRect);
+      builder.SetDisplayListReady(false);
 
       bool merged = false;
       if (retainedBuilder && !retainedBuilder->mNeedsFullRebuild &&
@@ -4089,6 +4090,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
       }
     }
+
+    builder.SetDisplayListReady(true);
 
     if (retainedBuilder) {
       retainedBuilder->mNeedsFullRebuild = false;

@@ -595,6 +595,10 @@ public:
 
   bool IsPartialUpdate() { return mPartialUpdate; }
   void SetPartialUpdate(bool aPartial) { mPartialUpdate = aPartial; }
+
+  bool IsDisplayListReady() const { return mDisplayListReady; }
+  void SetDisplayListReady(bool aIsReady) { mDisplayListReady = aIsReady; }
+
   /**
    * Allows callers to selectively override the regular paint suppression checks,
    * so that methods like GetFrameForPoint work when painting is suppressed.
@@ -1697,6 +1701,7 @@ private:
   bool                           mAsyncPanZoomEnabled;
   bool                           mBuildingInvisibleItems;
   bool                           mHitTestShouldStopAtFirstOpaque;
+  bool                           mDisplayListReady;
 };
 
 class nsDisplayItem;

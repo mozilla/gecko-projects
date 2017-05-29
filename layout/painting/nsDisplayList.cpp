@@ -929,7 +929,8 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
       mForceLayerForScrollParent(false),
       mAsyncPanZoomEnabled(nsLayoutUtils::AsyncPanZoomEnabled(aReferenceFrame)),
       mBuildingInvisibleItems(false),
-      mHitTestShouldStopAtFirstOpaque(false)
+      mHitTestShouldStopAtFirstOpaque(false),
+      mDisplayListReady(false)
 {
   MOZ_COUNT_CTOR(nsDisplayListBuilder);
 
@@ -2758,6 +2759,7 @@ nsDisplayItem::RecomputeVisibility(nsDisplayListBuilder* aBuilder,
 
     nsRegion itemVisible;
     itemVisible.And(*aVisibleRegion, bounds);
+    SaveVar(mVisibleRect);
     mVisibleRect = itemVisible.GetBounds();
   }
 
@@ -2765,6 +2767,7 @@ nsDisplayItem::RecomputeVisibility(nsDisplayListBuilder* aBuilder,
   // expand the visible region for content behind plugins (the plugin
   // is not in the layer).
   if (!ComputeVisibility(aBuilder, aVisibleRegion)) {
+    SaveVar(mVisibleRect);
     mVisibleRect = nsRect();
     return false;
   }
@@ -2848,8 +2851,10 @@ nsDisplayItem::IntersectClip(nsDisplayListBuilder* aBuilder,
     return;
   }
 
-  SaveVar(mClip);
-  SaveVar(mClipChain);
+  if (aBuilder->IsDisplayListReady()) {
+    SaveVar(mClip);
+    SaveVar(mClipChain);
+  }
 
   // aOther might be a reference to a clip on the stack. We need to make sure
   // that CreateClipChainIntersection will allocate the actual intersected
@@ -5219,6 +5224,7 @@ nsDisplayBoxShadowOuter::ComputeVisibility(nsDisplayListBuilder* aBuilder,
   }
 
   // Store the actual visible region
+  // SaveVar(mVisibleRegion);
   mVisibleRegion.And(*aVisibleRegion, mVisibleRect);
   return true;
 }
@@ -5589,6 +5595,7 @@ nsDisplayBoxShadowInner::ComputeVisibility(nsDisplayListBuilder* aBuilder,
   }
 
   // Store the actual visible region
+  // SaveVar(mVisibleRegion);
   mVisibleRegion.And(*aVisibleRegion, mVisibleRect);
   return true;
 }
