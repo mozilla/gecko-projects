@@ -1306,14 +1306,25 @@ nsDisplayListBuilder::LeavePresShell(nsIFrame* aReferenceFrame, nsDisplayList* a
 
     mActiveScrolledRoots.Clear();
 
-    // Reverse iterate the clip chains, so that we destroy descendants
-    // first which will drop the ref count on their ancestors.
-    for (int32_t i = mClipChainsToDestroy.Length() - 1; i >= 0; i--) {
-      DisplayItemClipChain* clip = mClipChainsToDestroy[i];
-      if (!clip->mRefCount) {
-        mClipChainsToDestroy.RemoveElementAt(i);
-        delete clip;
-      }
+    FreeClipChains();
+  }
+}
+
+void
+nsDisplayListBuilder::FreeClipChains()
+{
+  // Reverse iterate the clip chains, so that we destroy descendants
+  // first which will drop the ref count on their ancestors.
+  auto it = mClipChainsToDestroy.begin();
+
+  while(it != mClipChainsToDestroy.end()) {
+    DisplayItemClipChain* clip = *it;
+
+    if (!clip->mRefCount) {
+      it = mClipChainsToDestroy.erase(it);
+      delete clip;
+    } else {
+      ++it;
     }
   }
 }
@@ -1419,7 +1430,7 @@ nsDisplayListBuilder::AllocateDisplayItemClipChain(const DisplayItemClip& aClip,
                                                    const DisplayItemClipChain* aParent)
 {
   DisplayItemClipChain* c = new DisplayItemClipChain(aClip, aASR, aParent);
-  mClipChainsToDestroy.AppendElement(c);
+  mClipChainsToDestroy.emplace_front(c);
   return c;
 }
 
