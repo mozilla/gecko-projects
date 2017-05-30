@@ -79,13 +79,6 @@ def make_repackage_signing_description(config, jobs):
             "taskId": {"task-reference": "<repackage>"},
             "taskType": "repackage",
             "paths": [
-                "public/build/{}installer-stub.exe".format(locale_str),
-            ],
-            "formats": ["sha2signcode-stub"]
-        }, {
-            "taskId": {"task-reference": "<repackage>"},
-            "taskType": "repackage",
-            "paths": [
                 "public/build/{}target.complete.mar".format(locale_str),
             ],
             "formats": ["mar"]
@@ -103,7 +96,6 @@ def make_repackage_signing_description(config, jobs):
             'scopes': [
                 signing_cert_scope,
                 "project:releng:signing:format:sha2signcode",
-                "project:releng:signing:format:sha2signcode-stub",
                 "project:releng:signing:format:mar"
             ],
             'dependencies': dependencies,

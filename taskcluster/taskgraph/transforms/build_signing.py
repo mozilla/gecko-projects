@@ -58,8 +58,8 @@ def make_signing_description(config, jobs):
             job_specs = [
                 {
                     'artifacts': [
-                         'public/build/target.zip', 'public/build/setup.exe',
-                         'public/build/setup-stub.exe'
+                         'public/build/target.zip',
+                         'public/build/setup.exe',
                     ],
                     'format': 'sha2signcode',
                 },

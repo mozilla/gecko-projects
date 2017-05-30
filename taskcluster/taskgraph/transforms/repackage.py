@@ -167,7 +167,6 @@ def make_task_description(config, jobs):
                     '{}/artifacts/public/build/'.format(build_task_ref)
             task_env.update(
                 SIGNED_ZIP={'task-reference': "{}target.zip".format(signed_prefix)},
-                SIGNED_SETUP_STUB={'task-reference': "{}setup-stub.exe".format(signed_prefix)},
                 SIGNED_SETUP={'task-reference': "{}setup.exe".format(signed_prefix)},
                 UNSIGNED_MAR={'task-reference': "{}mar.exe".format(build_prefix)},
                 MOZHARNESS_CONFIG='repackage/win_signed.py',
@@ -176,10 +175,6 @@ def make_task_description(config, jobs):
                 'type': 'file',
                 'path': '/home/worker/workspace/build/upload/installer.exe',
                 'name': 'public/build/installer.exe',
-            }, {
-                'type': 'file',
-                'path': '/home/worker/workspace/build/upload/installer-stub.exe',
-                'name': 'public/build/installer-stub.exe',
             }, {
                 'type': 'file',
                 'path': '/home/worker/workspace/build/upload/target.complete.mar',
