@@ -316,15 +316,13 @@ typedef mozilla::ArenaAllocator<4096, 8> VarStateAllocator;
 
 struct VarState {
   virtual ~VarState() = default;
-
-protected:
-  VarState() = default;
+  virtual void Restore() = 0;
 };
 
 template<typename T>
 struct VarStateImpl : public VarState {
   explicit VarStateImpl(T& aVar) : mVal(aVar), mVar(aVar) {}
-  ~VarStateImpl() { mVar = mVal; }
+  void Restore() override { mVar = mVal; }
 
   void* operator new(size_t aSize, VarStateAllocator& aAllocator)
   {
@@ -338,10 +336,18 @@ private:
 
 class StateStack {
 public:
+  ~StateStack()
+  {
+    for (VarState* state : mStates) {
+      state->~VarState();
+    }
+  }
+
   void RestoreState()
   {
     // Restore the state in the reverse order.
     for (VarState* state : mozilla::Reversed(mStates)) {
+      state->Restore();
       state->~VarState();
     }
 
