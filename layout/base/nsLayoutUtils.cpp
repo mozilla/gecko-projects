@@ -3618,51 +3618,49 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   nsDisplayList merged;
   nsDisplayItem* old;
 
-  nsDataHashtable<DisplayItemHashEntry, nsDisplayItem*> newListLookup2;
-  nsDataHashtable<DisplayItemHashEntry, nsDisplayItem*> oldListLookup2;
-
-  for (nsDisplayItem* i = aNewList->GetBottom(); i != nullptr; i = i->GetAbove()) {
-    newListLookup2.Put({ i->Frame(), i->GetPerFrameKey() }, i);
-  }
+  nsDataHashtable<DisplayItemHashEntry, nsDisplayItem*> oldListLookup;
 
   for (nsDisplayItem* i = aOldList->GetBottom(); i != nullptr; i = i->GetAbove()) {
     // Restore the previously saved state of the display items in the old
     // display list.
     i->RestoreState();
+    i->SetReused(false);
 
-    oldListLookup2.Put({ i->Frame(), i->GetPerFrameKey() }, i);
+    oldListLookup.Put({ i->Frame(), i->GetPerFrameKey() }, i);
   }
 
   while (nsDisplayItem* i = aNewList->RemoveBottom()) {
     // If the new item has a matching counterpart in the old list, copy all items
     // up to that one into the merged list, but discard the repeat.
-    if (oldListLookup2.Get({ i->Frame(), i->GetPerFrameKey() }, nullptr)) {
-      while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
-        oldListLookup2.Remove({ old->Frame(), old->GetPerFrameKey() });
-        if (old->CanBeReused() &&
-            !aDeletedFrames.Contains(old->Frame()) &&
-            !IsAnyAncestorModified(old->Frame())) {
+    if (nsDisplayItem* oldItem = oldListLookup.Get({ i->Frame(), i->GetPerFrameKey() })) {
+      if (oldItem->IsReused()) {
+        // If we've already put the old item into the merged list (we might have iterated over it earlier)
+        // then stick with that one. Merge any child lists, and then delete the new item.
 
-          // If the old item is in the new list (but further forward), then do the sub-list merging
-          // now and delete us, and we'll add the new item when we get to it.
-          if (nsDisplayItem* newItem = newListLookup2.Get({ old->Frame(), old->GetPerFrameKey() })) {
-            if (old->GetChildren()) {
-              MOZ_ASSERT(newItem->GetChildren());
-              MergeDisplayLists(aBuilder, aDeletedFrames, newItem->GetChildren(), old->GetChildren(), newItem->GetChildren(), aTotalDisplayItems, aReusedDisplayItems);
-            }
-            old->Destroy(aBuilder);
-          } else {
+        if (oldItem->GetChildren()) {
+          MOZ_ASSERT(i->GetChildren());
+          MergeDisplayLists(aBuilder, aDeletedFrames, i->GetChildren(), oldItem->GetChildren(), oldItem->GetChildren(), aTotalDisplayItems, aReusedDisplayItems);
+        }
+        i->Destroy(aBuilder);
+      } else {
+        while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
+          if (old->CanBeReused() &&
+              !aDeletedFrames.Contains(old->Frame()) &&
+              !IsAnyAncestorModified(old->Frame())) {
+
             merged.AppendToTop(old);
             aTotalDisplayItems++;
             aReusedDisplayItems++;
-            old->SetReused();
+            old->SetReused(true);
+          } else {
+            // TODO: Is it going to be safe to call the dtor on a display item that belongs
+            // to a deleted frame? Can we ensure that it is? Or do we need to make sure we
+            // destroy display items during frame deletion.
+            oldListLookup.Remove({ old->Frame(), old->GetPerFrameKey() });
+            old->Destroy(aBuilder);
           }
-        } else {
-          // TODO: Is it going to be safe to call the dtor on a display item that belongs
-          // to a deleted frame? Can we ensure that it is? Or do we need to make sure we
-          // destroy display items during frame deletion.
-          old->Destroy(aBuilder);
         }
+        MOZ_ASSERT(IsSameItem(i, old));
       }
 
       // Recursively merge any child lists.
@@ -3675,10 +3673,12 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
       }
 
       old->Destroy(aBuilder);
+      merged.AppendToTop(i);
+      aTotalDisplayItems++;
+    } else {
+      merged.AppendToTop(i);
+      aTotalDisplayItems++;
     }
-
-    merged.AppendToTop(i);
-    aTotalDisplayItems++;
   }
 
   while ((old = aOldList->RemoveBottom())) {
@@ -3686,7 +3686,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
         !aDeletedFrames.Contains(old->Frame()) &&
         !IsAnyAncestorModified(old->Frame())) {
       merged.AppendToTop(old);
-      old->SetReused();
+      old->SetReused(true);
       aTotalDisplayItems++;
       aReusedDisplayItems++;
     } else {

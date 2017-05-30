@@ -2430,11 +2430,15 @@ public:
 
   bool IsReused() const
   {
-    return mReusedItem && mStates.empty();
+    return mReusedItem;
   }
-  void SetReused()
+  bool HasSavedState() const
   {
-    mReusedItem = true;
+    return !mStates.empty();
+  }
+  void SetReused(bool aReused)
+  {
+    mReusedItem = aReused;
   }
   virtual bool CanBeReused() const { return true; }
 
