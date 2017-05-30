@@ -14,6 +14,7 @@
 #define NSDISPLAYLIST_H_
 
 #include "mozilla/Attributes.h"
+#include "mozilla/ArenaAllocator.h"
 #include "mozilla/Array.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/EnumSet.h"
@@ -311,6 +312,53 @@ private:
 
 }
 
+typedef mozilla::ArenaAllocator<4096, 8> VarStateAllocator;
+
+struct VarState {
+  virtual ~VarState() = default;
+
+protected:
+  VarState() = default;
+};
+
+template<typename T>
+struct VarStateImpl : public VarState {
+  explicit VarStateImpl(T& aVar) : mVal(aVar), mVar(aVar) {}
+  ~VarStateImpl() { mVar = mVal; }
+
+  void* operator new(size_t aSize, VarStateAllocator& aAllocator)
+  {
+    return aAllocator.Allocate(aSize);
+  }
+
+private:
+  T mVal;
+  T& mVar;
+};
+
+class StateStack {
+public:
+  void RestoreState()
+  {
+    // Restore the state in the reverse order.
+    for (VarState* state : mozilla::Reversed(mStates)) {
+      state->~VarState();
+    }
+
+    mStates.Clear();
+    mPool.Clear();
+  }
+
+  template<typename T> void SaveVar(T& aVar)
+  {
+    mStates.AppendElement(new (mPool) VarStateImpl<T>(aVar));
+  }
+
+private:
+  nsTArray<VarState*> mStates;
+  VarStateAllocator mPool;
+};
+
 enum class nsDisplayListBuilderMode : uint8_t {
   PAINTING,
   EVENT_DELIVERY,
@@ -598,6 +646,8 @@ public:
 
   bool IsDisplayListReady() const { return mDisplayListReady; }
   void SetDisplayListReady(bool aIsReady) { mDisplayListReady = aIsReady; }
+
+  StateStack* GetStateStack() { return &mStateStack; }
 
   /**
    * Allows callers to selectively override the regular paint suppression checks,
@@ -1702,6 +1752,7 @@ private:
   bool                           mBuildingInvisibleItems;
   bool                           mHitTestShouldStopAtFirstOpaque;
   bool                           mDisplayListReady;
+  StateStack                     mStateStack;
 };
 
 class nsDisplayItem;
@@ -1764,6 +1815,7 @@ public:
   nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame);
   nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                 const ActiveScrolledRoot* aActiveScrolledRoot);
+
   /**
    * This constructor is only used in rare cases when we need to construct
    * temporary items.
@@ -1791,33 +1843,11 @@ public:
     aBuilder->Destroy(type, this);
   }
 
-  struct AutoVarState {
-    AutoVarState() = default;
-    virtual ~AutoVarState() = default;
-  };
-
-
-  template<typename T>
-  struct AutoVarStateImpl : public AutoVarState {
-    explicit AutoVarStateImpl(T& aVar) : mVal(aVar), mVar(aVar) {}
-    ~AutoVarStateImpl() { mVar = mVal; }
-    T mVal;
-    T& mVar;
-  };
-
-  /**
-   * Restores the previous state for this display item.
-   */
-  virtual void RestoreState()
-  {
-    while (!mStates.empty()) {
-      mStates.pop_back();
-    }
-  }
-
   template<typename T> void SaveVar(T& aVar)
   {
-    mStates.emplace_back(new AutoVarStateImpl<T>(aVar));
+    MOZ_ASSERT(mStateStack);
+    mStateStack->SaveVar(aVar);
+    mHasSavedState = true;
   }
 
   /**
@@ -1838,6 +1868,8 @@ public:
    * state of the item.
    * This is currently only used when creating temporary items for merging.
    */
+  nsDisplayItem(const nsDisplayItem&) = default;
+  /*
   nsDisplayItem(const nsDisplayItem& aOther)
     : mFrame(aOther.mFrame)
     , mClipChain(aOther.mClipChain)
@@ -1849,7 +1881,9 @@ public:
     , mVisibleRect(aOther.mVisibleRect)
     , mForceNotVisible(aOther.mForceNotVisible)
     , mDisableSubpixelAA(aOther.mDisableSubpixelAA)
+    , mStateStack(aOther.mStateStack)
   {}
+  */
 
   struct HitTestState {
     explicit HitTestState() : mInPreserves3D(false) {}
@@ -2434,11 +2468,16 @@ public:
   }
   bool HasSavedState() const
   {
-    return !mStates.empty();
+    return mHasSavedState;
   }
   void SetReused(bool aReused)
   {
     mReusedItem = aReused;
+
+    // When the item is marked as not reused, there cannot be saved state.
+    if (!aReused) {
+      mHasSavedState = false;
+    }
   }
   virtual bool CanBeReused() const { return true; }
 
@@ -2471,9 +2510,8 @@ protected:
   // True if this frame has been painted.
   bool      mPainted;
 #endif
-
-private:
-  std::list<mozilla::UniquePtr<AutoVarState>> mStates;
+  bool      mHasSavedState;
+  StateStack* mStateStack;
 };
 
 /**

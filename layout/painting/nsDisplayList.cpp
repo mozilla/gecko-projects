@@ -2687,6 +2687,8 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
 #ifdef MOZ_DUMP_PAINTING
   , mPainted(false)
 #endif
+  , mHasSavedState(false)
+  , mStateStack(aBuilder->GetStateStack())
 {
   mReferenceFrame = aBuilder->FindReferenceFrameFor(aFrame, &mToReferenceFrame);
   // This can return the wrong result if the item override ShouldFixToViewport(),

@@ -3566,7 +3566,7 @@ bool IsSameItem(nsDisplayItem* aFirst, nsDisplayItem* aSecond)
 }
 
 struct DisplayItemKey {
-  
+
   bool operator ==(const DisplayItemKey& aOther) const {
     return mFrame == aOther.mFrame &&
            mKey == aOther.mKey;
@@ -3621,11 +3621,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   nsDataHashtable<DisplayItemHashEntry, nsDisplayItem*> oldListLookup(aOldList->Count());
 
   for (nsDisplayItem* i = aOldList->GetBottom(); i != nullptr; i = i->GetAbove()) {
-    // Restore the previously saved state of the display items in the old
-    // display list.
-    i->RestoreState();
     i->SetReused(false);
-
     oldListLookup.Put({ i->Frame(), i->GetPerFrameKey() }, i);
   }
 
@@ -3956,6 +3952,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
       builder.SetVisibleRect(dirtyRect);
       builder.SetDisplayListReady(false);
+      builder.GetStateStack()->RestoreState();
 
       bool merged = false;
       uint32_t totalDisplayItems = 0;
@@ -4111,7 +4108,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           builder.LeavePresShell(aFrame, &modifiedDL);
           builder.EnterPresShell(aFrame);
 
-
           MergeDisplayLists(&builder, deletions, &modifiedDL, &list, &list, totalDisplayItems, reusedDisplayItems);
           merged = true;
         }
@@ -4149,7 +4145,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     if (retainedBuilder) {
       retainedBuilder->mNeedsFullRebuild = false;
     }
-        
+
     // TODO: This only adds temporary items (that return false for CanBeReused) and changes saved
     // state so we can do it every time. This doesn't work for nested nsSubDocumentFrames though,
     // we need to handle this separately, possibly by tracking which ones exist and doing
