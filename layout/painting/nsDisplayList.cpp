@@ -2760,16 +2760,14 @@ nsDisplayItem::RecomputeVisibility(nsDisplayListBuilder* aBuilder,
 
     nsRegion itemVisible;
     itemVisible.And(*aVisibleRegion, bounds);
-    SaveVar(mVisibleRect);
-    mVisibleRect = itemVisible.GetBounds();
+    SetVisibleRect(itemVisible.GetBounds());
   }
 
   // When we recompute visibility within layers we don't need to
   // expand the visible region for content behind plugins (the plugin
   // is not in the layer).
   if (!ComputeVisibility(aBuilder, aVisibleRegion)) {
-    SaveVar(mVisibleRect);
-    mVisibleRect = nsRect();
+    SetVisibleRect(nsRect());
     return false;
   }
 

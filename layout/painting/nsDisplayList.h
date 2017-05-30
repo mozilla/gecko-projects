@@ -2291,7 +2291,10 @@ public:
    */
   const nsRect& GetVisibleRect() const { return mVisibleRect; }
 
-  void SetVisibleRect(const nsRect& aVisibleRect) { mVisibleRect = aVisibleRect; }
+  void SetVisibleRect(const nsRect& aVisibleRect) {
+    SaveVar(mVisibleRect);
+    mVisibleRect = aVisibleRect;
+  }
 
   /**
    * Returns the visible rect for the children, relative to their

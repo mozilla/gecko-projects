@@ -6231,10 +6231,10 @@ FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
     // PaintedLayers. If aDirtyRegion has not changed since the previous call
     // then we can skip this.
 
-    //int32_t appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
-    //RecomputeVisibilityForItems(entry->mItems, builder, aDirtyRegion,
-    //                            offset, appUnitsPerDevPixel,
-    //                            userData->mXScale, userData->mYScale);
+    int32_t appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
+    RecomputeVisibilityForItems(entry->mItems, builder, aDirtyRegion,
+                                offset, appUnitsPerDevPixel,
+                                userData->mXScale, userData->mYScale);
     userData->mVisibilityComputedRegion = aDirtyRegion;
   }
 
