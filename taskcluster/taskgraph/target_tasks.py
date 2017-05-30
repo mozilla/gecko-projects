@@ -151,7 +151,7 @@ def target_tasks_cedar(full_task_graph, parameters):
         if not platform:
             return False
         # Only on Linux platforms
-        if 'linux' not in platform:
+        if platform not in ('linux64', 'macosx64'):
             return False
         # No random non-build jobs either. This is being purposely done as a
         # blacklist so newly-added jobs aren't missed by default.
@@ -161,11 +161,20 @@ def target_tasks_cedar(full_task_graph, parameters):
         for k in ('toolchain', 'l10n', 'static-analysis'):
             if k in task.attributes['kind']:
                 return False
-        # and none of this linux64-asan/debug stuff
-        if platform == 'linux64-asan' and task.attributes['build_type'] == 'debug':
-            return False
         # don't upload symbols
         if task.attributes['kind'] == 'upload-symbols':
+            return False
+        # No Quantum Render
+        if str(platform).endswith('-qr'):
+            return False
+        # No Stylo
+        if str(platform).endswith('-stylo'):
+            return False
+        # No PGO
+        if str(platform).endswith('-pgo'):
+            return False
+        # No ASAN
+        if str(platform).endswith('-asan'):
             return False
         return True
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
