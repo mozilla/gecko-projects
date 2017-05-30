@@ -3565,6 +3565,48 @@ bool IsSameItem(nsDisplayItem* aFirst, nsDisplayItem* aSecond)
          aFirst->GetPerFrameKey() == aSecond->GetPerFrameKey();
 }
 
+struct DisplayItemKey {
+  
+  bool operator ==(const DisplayItemKey& aOther) const {
+    return mFrame == aOther.mFrame &&
+           mKey == aOther.mKey;
+  }
+
+  nsIFrame* mFrame;
+  uint32_t mKey;
+};
+
+class DisplayItemHashEntry : public PLDHashEntryHdr
+{
+public:
+  typedef DisplayItemKey KeyType;
+  typedef const DisplayItemKey* KeyTypePointer;
+
+  explicit DisplayItemHashEntry(KeyTypePointer aKey)
+    : mKey(*aKey) {}
+  explicit DisplayItemHashEntry(const DisplayItemHashEntry& aCopy)=default;
+
+  ~DisplayItemHashEntry() = default;
+
+  KeyType GetKey() const { return mKey; }
+  bool KeyEquals(KeyTypePointer aKey) const
+  {
+    return mKey == *aKey;
+  }
+
+  static KeyTypePointer KeyToPointer(KeyType& aKey) { return &aKey; }
+  static PLDHashNumber HashKey(KeyTypePointer aKey)
+  {
+    if (!aKey)
+      return 0;
+
+    return mozilla::HashGeneric(aKey->mFrame, aKey->mKey);
+  }
+  enum { ALLOW_MEMMOVE = true };
+
+  DisplayItemKey mKey;
+};
+
 void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
                        nsTHashtable<nsPtrHashKey<nsIFrame>>& aDeletedFrames,
                        nsDisplayList* aNewList,
@@ -3576,11 +3618,11 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   nsDisplayList merged;
   nsDisplayItem* old;
 
-  std::map<std::pair<nsIFrame*, uint32_t>, nsDisplayItem*> newListLookup;
-  std::map<std::pair<nsIFrame*, uint32_t>, nsDisplayItem*> oldListLookup;
+  nsDataHashtable<DisplayItemHashEntry, nsDisplayItem*> newListLookup2;
+  nsDataHashtable<DisplayItemHashEntry, nsDisplayItem*> oldListLookup2;
 
   for (nsDisplayItem* i = aNewList->GetBottom(); i != nullptr; i = i->GetAbove()) {
-    newListLookup[std::make_pair(i->Frame(), i->GetPerFrameKey())] = i;
+    newListLookup2.Put({ i->Frame(), i->GetPerFrameKey() }, i);
   }
 
   for (nsDisplayItem* i = aOldList->GetBottom(); i != nullptr; i = i->GetAbove()) {
@@ -3588,21 +3630,22 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
     // display list.
     i->RestoreState();
 
-    oldListLookup[std::make_pair(i->Frame(), i->GetPerFrameKey())] = i;
+    oldListLookup2.Put({ i->Frame(), i->GetPerFrameKey() }, i);
   }
 
   while (nsDisplayItem* i = aNewList->RemoveBottom()) {
     // If the new item has a matching counterpart in the old list, copy all items
     // up to that one into the merged list, but discard the repeat.
-    if (oldListLookup[std::make_pair(i->Frame(), i->GetPerFrameKey())]) {
+    if (oldListLookup2.Get({ i->Frame(), i->GetPerFrameKey() }, nullptr)) {
       while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
-        oldListLookup.erase(std::make_pair(old->Frame(), old->GetPerFrameKey()));
-        if (!aDeletedFrames.Contains(old->Frame()) &&
+        oldListLookup2.Remove({ old->Frame(), old->GetPerFrameKey() });
+        if (old->CanBeReused() &&
+            !aDeletedFrames.Contains(old->Frame()) &&
             !IsAnyAncestorModified(old->Frame())) {
 
           // If the old item is in the new list (but further forward), then do the sub-list merging
           // now and delete us, and we'll add the new item when we get to it.
-          if (nsDisplayItem* newItem = newListLookup[std::make_pair(old->Frame(), old->GetPerFrameKey())]) {
+          if (nsDisplayItem* newItem = newListLookup2.Get({ old->Frame(), old->GetPerFrameKey() })) {
             if (old->GetChildren()) {
               MOZ_ASSERT(newItem->GetChildren());
               MergeDisplayLists(aBuilder, aDeletedFrames, newItem->GetChildren(), old->GetChildren(), newItem->GetChildren(), aTotalDisplayItems, aReusedDisplayItems);
