@@ -1650,38 +1650,6 @@
     "n_buckets": 20,
     "description": "Maximum retention time for the gradient cache. (ms)"
   },
-  "WORD_CACHE_HITS_CONTENT": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 256,
-    "n_buckets": 30,
-    "description": "Word cache hits, content text (chars)"
-  },
-  "WORD_CACHE_HITS_CHROME": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 256,
-    "n_buckets": 30,
-    "description": "Word cache hits, chrome text (chars)"
-  },
-  "WORD_CACHE_MISSES_CONTENT": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 256,
-    "n_buckets": 30,
-    "description": "Word cache misses, content text (chars)"
-  },
-  "WORD_CACHE_MISSES_CHROME": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 256,
-    "n_buckets": 30,
-    "description": "Word cache misses, chrome text (chars)"
-  },
   "FONT_CACHE_HIT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -7177,6 +7145,26 @@
     "n_buckets": 20,
     "description": "Time (ms) it takes for checking if the pending pings are over-quota"
   },
+  "TELEMETRY_PENDING_LOAD_MS": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["telemetry-client-dev@mozilla.com", "chutten@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 2000,
+    "n_buckets": 20,
+    "bug_numbers": [1033860],
+    "description": "Time (ms) it takes for loading pending pings from disk"
+  },
+  "TELEMETRY_ARCHIVE_LOAD_MS": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["telemetry-client-dev@mozilla.com", "chutten@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 2000,
+    "n_buckets": 20,
+    "bug_numbers": [1033860],
+    "description": "Time (ms) it takes for loading archived pings from disk"
+  },
   "TELEMETRY_PING_SIZE_EXCEEDED_SEND": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["telemetry-client-dev@mozilla.com"],
@@ -8139,7 +8127,7 @@
     "alert_emails": ["bsmedberg@mozilla.com"]
   },
   "PLUGINS_INFOBAR_SHOWN": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "releaseChannelCollection": "opt-out",
     "expires_in_version": "60",
     "kind": "boolean",
@@ -8148,7 +8136,7 @@
     "alert_emails": ["bsmedberg@mozilla.com"]
   },
   "PLUGINS_INFOBAR_BLOCK": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "releaseChannelCollection": "opt-out",
     "expires_in_version": "60",
     "kind": "boolean",
@@ -8157,12 +8145,21 @@
     "alert_emails": ["bsmedberg@mozilla.com"]
   },
   "PLUGINS_INFOBAR_ALLOW": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "releaseChannelCollection": "opt-out",
     "expires_in_version": "60",
     "kind": "boolean",
     "description": "Count the number of times the user clicked 'allow' on the hidden-plugin infobar.",
     "bug_numbers": [902075, 1345894],
+    "alert_emails": ["bsmedberg@mozilla.com"]
+  },
+  "PLUGINS_INFOBAR_DISMISSED": {
+    "record_in_processes": ["main"],
+    "releaseChannelCollection": "opt-out",
+    "expires_in_version": "60",
+    "kind": "boolean",
+    "description": "Count the number of times the user explicitly dismisses the hidden-plugin infobar without choosing allow or continue-blocking.",
+    "bug_numbers": [1368060],
     "alert_emails": ["bsmedberg@mozilla.com"]
   },
   "POPUP_NOTIFICATION_STATS": {
@@ -13245,5 +13242,16 @@
     "n_buckets": 40,
     "keyed": true,
     "description": "Measures the number of milliseconds we spend processing sync IPC messages in the receiving process, keyed by message name. Note: only messages that take over 500 microseconds are included in this probe."
+  },
+  "WEBEXT_BACKGROUND_PAGE_LOAD_MS": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["addons-dev-internal@mozilla.com"],
+    "bug_numbers": [1353172],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "releaseChannelCollection": "opt-out",
+    "high": 60000,
+    "n_buckets": 100,
+    "description": "The amount of time it takes to load a WebExtensions background page, from when the build function is called to when the page has finished processing the onload event."
   }
 }
