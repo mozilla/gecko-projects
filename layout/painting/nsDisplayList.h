@@ -2502,7 +2502,8 @@ public:
    * Create an empty list.
    */
   nsDisplayList()
-    : mIsOpaque(false)
+    : mLength(0)
+    , mIsOpaque(false)
     , mForceTransparentSurface(false)
   {
     mTop = &mSentinel;
@@ -2523,6 +2524,7 @@ public:
     NS_ASSERTION(!aItem->mAbove, "Already in a list!");
     mTop->mAbove = aItem;
     mTop = aItem;
+    mLength++;
   }
 
   /**
@@ -2557,6 +2559,7 @@ public:
     if (mTop == &mSentinel) {
       mTop = aItem;
     }
+    mLength++;
   }
 
   /**
@@ -2568,6 +2571,8 @@ public:
       mTop = aList->mTop;
       aList->mTop = &aList->mSentinel;
       aList->mSentinel.mAbove = nullptr;
+      mLength += aList->mLength;
+      aList->mLength = 0;
     }
   }
 
@@ -2584,6 +2589,8 @@ public:
 
       aList->mTop = &aList->mSentinel;
       aList->mSentinel.mAbove = nullptr;
+      mLength += aList->mLength;
+      aList->mLength = 0;
     }
   }
 
@@ -2785,6 +2792,8 @@ private:
 
   nsDisplayItemLink  mSentinel;
   nsDisplayItemLink* mTop;
+
+  uint32_t mLength;
 
   // This is set to true by FrameLayerBuilder if the final visible region
   // is empty (i.e. everything that was visible is covered by some

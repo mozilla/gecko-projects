@@ -3618,7 +3618,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   nsDisplayList merged;
   nsDisplayItem* old;
 
-  nsDataHashtable<DisplayItemHashEntry, nsDisplayItem*> oldListLookup;
+  nsDataHashtable<DisplayItemHashEntry, nsDisplayItem*> oldListLookup(aOldList->Count());
 
   for (nsDisplayItem* i = aOldList->GetBottom(); i != nullptr; i = i->GetAbove()) {
     // Restore the previously saved state of the display items in the old
@@ -4141,7 +4141,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         builder.SetDirtyRect(dirtyRect);
         aFrame->BuildDisplayListForStackingContext(&builder, &list);
       }
-      printf("nsLayoutUtils::PaintFrame - recycled %d/%d (%.2f%%) display items\n", reusedDisplayItems, totalDisplayItems, reusedDisplayItems * 100 / float(totalDisplayItems));
+      //printf("nsLayoutUtils::PaintFrame - recycled %d/%d (%.2f%%) display items\n", reusedDisplayItems, totalDisplayItems, reusedDisplayItems * 100 / float(totalDisplayItems));
     }
 
     builder.SetDisplayListReady(true);

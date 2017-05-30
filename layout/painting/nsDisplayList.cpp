@@ -2411,11 +2411,7 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
 }
 
 uint32_t nsDisplayList::Count() const {
-  uint32_t count = 0;
-  for (nsDisplayItem* i = GetBottom(); i; i = i->GetAbove()) {
-    ++count;
-  }
-  return count;
+  return mLength;
 }
 
 nsDisplayItem* nsDisplayList::RemoveBottom() {
@@ -2428,6 +2424,7 @@ nsDisplayItem* nsDisplayList::RemoveBottom() {
     mTop = &mSentinel;
   }
   item->mAbove = nullptr;
+  mLength--;
   return item;
 }
 
