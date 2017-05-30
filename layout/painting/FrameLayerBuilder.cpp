@@ -1096,6 +1096,13 @@ public:
    * the child layers.
    */
   void ProcessDisplayItems(nsDisplayList* aList);
+  void ProcessDisplayItems(nsDisplayList* aList,
+                           AnimatedGeometryRoot* aLastAnimatedGeometryRoot,
+                           const ActiveScrolledRoot* aLastASR,
+                           const nsPoint& aLastAGRTopLeft,
+                           nsPoint& aTopLeft,
+                           int32_t aMaxLayers,
+                           int& aLayerCount);
   /**
    * This finalizes all the open PaintedLayers by popping every element off
    * mPaintedLayerDataStack, then sets the children of the container layer
@@ -3939,13 +3946,12 @@ ContainerState::SetupMaskLayerForCSSMask(Layer* aLayer,
 
 static nsDisplayItem*
 MergeItems(nsDisplayListBuilder* aBuilder,
-           std::list<nsDisplayItem*>& aMergedItems)
+           nsTArray<nsDisplayItem*>& aMergedItems)
 {
   nsDisplayItem* merged = nullptr;
 
   // Clone the last item in the aMergedItems list and merge the items into it.
-  for (auto i = aMergedItems.rbegin(); i != aMergedItems.rend(); ++i) {
-    nsDisplayItem* item = *i;
+  for (nsDisplayItem* item : Reversed(aMergedItems)) {
     MOZ_ASSERT(item);
 
     if (!merged) {
@@ -4000,21 +4006,25 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
   int32_t maxLayers = gfxPrefs::MaxActiveLayers();
   int layerCount = 0;
 
+  ProcessDisplayItems(aList, lastAnimatedGeometryRoot, lastASR,
+                      lastAGRTopLeft, topLeft, maxLayers, layerCount);
+}
+
+void
+ContainerState::ProcessDisplayItems(nsDisplayList* aList,
+                                    AnimatedGeometryRoot* aLastAnimatedGeometryRoot,
+                                    const ActiveScrolledRoot* aLastASR,
+                                    const nsPoint& aLastAGRTopLeft,
+                                    nsPoint& aTopLeft,
+                                    int32_t aMaxLayers,
+                                    int& aLayerCount)
+{
   // In order to simplify flattening and merging of the display items, we create
   // a local mutable copy of the display list. Since we keep track of the
   // current iterator and append items only to that position, the modifications
   // to the local list take constant time.
-  std::list<nsDisplayItem*> list;
-  auto CopyList = [&](nsDisplayList* aOtherList,
-                      std::list<nsDisplayItem*>::iterator aIterator) {
-    for (nsDisplayItem* i = aOtherList->GetBottom(); i; i = i->GetAbove()) {
-      aIterator = list.insert(++aIterator, i);
-    }
-  };
-
-  CopyList(aList, list.begin());
-  for (auto it = list.begin(); it != list.end(); ++it) {
-    nsDisplayItem* item = *it;
+  for (nsDisplayItem* i = aList->GetBottom(); i; i = i->GetAbove()) {
+    nsDisplayItem* item = i;
     MOZ_ASSERT(item);
 
     DisplayItemType itemType = item->GetType();
@@ -4032,21 +4042,20 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
 
     // Peek ahead to the next item and try merging the current item with it.
     // This will create a list of consecutive items that can be merged together.
-    std::list<nsDisplayItem*> mergedItems { item };
-    for (auto i = std::next(it); i != list.end(); ++i) {
-      nsDisplayItem* nextItem = *i;
-
-      if (!item->CanMerge(nextItem)) {
+    AutoTArray<nsDisplayItem*, 1> mergedItems;
+    mergedItems.AppendElement(item);
+    for (nsDisplayItem* peek = item->GetAbove(); peek; peek = peek->GetAbove()) {
+      if (!item->CanMerge(peek)) {
         break;
       }
 
-      mergedItems.push_back(nextItem);
+      mergedItems.AppendElement(peek);
 
       // Move the iterator forward since we will merge this item.
-      it = i;
+      i = peek;
     }
 
-    if (mergedItems.size() > 1) {
+    if (mergedItems.Length() > 1) {
       item = MergeItems(mBuilder, mergedItems);
       MOZ_ASSERT(item && itemType == item->GetType());
     }
@@ -4055,9 +4064,8 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
 
     if (item->ShouldFlattenAway(mBuilder)) {
       MOZ_ASSERT(childItems);
-
-      // Copy the items from the child display list after the current item.
-      CopyList(childItems, it);
+      ProcessDisplayItems(childItems, aLastAnimatedGeometryRoot, aLastASR,
+                          aLastAGRTopLeft, aTopLeft, aMaxLayers, aLayerCount);
       continue;
     }
 
@@ -4088,9 +4096,9 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
     const DisplayItemClipChain* layerClipChain = nullptr;
     if (mFlattenToSingleLayer && layerState != LAYER_ACTIVE_FORCE) {
       forceInactive = true;
-      animatedGeometryRoot = lastAnimatedGeometryRoot;
-      itemASR = lastASR;
-      topLeft = lastAGRTopLeft;
+      animatedGeometryRoot = aLastAnimatedGeometryRoot;
+      itemASR = aLastASR;
+      aTopLeft = aLastAGRTopLeft;
       item->FuseClipChainUpTo(mBuilder, mContainerASR);
     } else {
       forceInactive = false;
@@ -4112,7 +4120,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
         itemASR = mContainerASR;
         item->FuseClipChainUpTo(mBuilder, mContainerASR);
       }
-      topLeft = (*animatedGeometryRoot)->GetOffsetToCrossDoc(mContainerReferenceFrame);
+      aTopLeft = (*animatedGeometryRoot)->GetOffsetToCrossDoc(mContainerReferenceFrame);
     }
 
     const ActiveScrolledRoot* scrollMetadataASR =
@@ -4167,7 +4175,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
     itemVisibleRect = itemVisibleRect.Intersect(
       ScaleToOutsidePixels(item->GetVisibleRect(), false));
 
-    if (maxLayers != -1 && layerCount >= maxLayers) {
+    if (aMaxLayers != -1 && aLayerCount >= aMaxLayers) {
       forceInactive = true;
     }
 
@@ -4178,7 +4186,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
          (layerState == LAYER_ACTIVE_EMPTY ||
           layerState == LAYER_ACTIVE))) {
 
-      layerCount++;
+      aLayerCount++;
 
       // LAYER_ACTIVE_EMPTY means the layer is created just for its metadata.
       // We should never see an empty layer with any visible content!
@@ -4378,12 +4386,11 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
         nsDisplayMask* maskItem = static_cast<nsDisplayMask*>(item);
         SetupMaskLayerForCSSMask(ownLayer, maskItem);
 
-        auto next = std::next(it);
-        if (next != list.end() &&
-            (*next)->GetType() == TYPE_SCROLL_INFO_LAYER) {
+        if (i->GetAbove() &&
+            i->GetAbove()->GetType() == TYPE_SCROLL_INFO_LAYER) {
           // Since we do build a layer for mask, there is no need for this
           // scroll info layer anymore.
-          it = next;
+          i = i->GetAbove();
         }
       }
 
@@ -4485,7 +4492,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
                                                   item->Frame()->In3DContextAndBackfaceIsHidden(),
                                                   [&]() {
           return NewPaintedLayerData(item, animatedGeometryRoot, itemASR, layerClipChain, scrollMetadataASR,
-                                     topLeft);
+                                     aTopLeft);
         });
 
       if (itemType == TYPE_LAYER_EVENT_REGIONS) {
@@ -4510,7 +4517,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
         if (!paintedLayerData->mLayer) {
           // Try to recycle the old layer of this display item.
           RefPtr<PaintedLayer> layer =
-            AttemptToRecyclePaintedLayer(animatedGeometryRoot, item, topLeft);
+            AttemptToRecyclePaintedLayer(animatedGeometryRoot, item, aTopLeft);
           if (layer) {
             paintedLayerData->mLayer = layer;
 
