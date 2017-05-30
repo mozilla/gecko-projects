@@ -179,6 +179,7 @@ public:
 
   void SetExtraBackgroundColor(nscolor aColor)
   {
+    SaveVar(mColor);
     mColor = aColor;
   }
 

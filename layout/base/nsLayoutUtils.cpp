@@ -3639,7 +3639,8 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   }
 
   while ((old = aOldList->RemoveBottom())) {
-    if (!aDeletedFrames.Contains(old->Frame()) &&
+    if (old->CanBeReused() &&
+        !aDeletedFrames.Contains(old->Frame()) &&
         !IsAnyAncestorModified(old->Frame())) {
       merged.AppendToTop(old);
       old->SetReused();
@@ -4096,9 +4097,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         list.DeleteAll(&builder);
         builder.SetDirtyRect(dirtyRect);
         aFrame->BuildDisplayListForStackingContext(&builder, &list);
-        // TODO: We only build this when we do a complete build, but we need to make
-        // sure we do a rebuild if anything might change it.
-        AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
       }
       printf("nsLayoutUtils::PaintFrame - recycled %d/%d (%.2f%%) display items\n", reusedDisplayItems, totalDisplayItems, reusedDisplayItems * 100 / float(totalDisplayItems));
     }
@@ -4108,6 +4106,12 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     if (retainedBuilder) {
       retainedBuilder->mNeedsFullRebuild = false;
     }
+        
+    // TODO: This only adds temporary items (that return false for CanBeReused) and changes saved
+    // state so we can do it every time. This doesn't work for nested nsSubDocumentFrames though,
+    // we need to handle this separately, possibly by tracking which ones exist and doing
+    // them here.
+    AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
 
     builder.LeavePresShell(aFrame, &list);
 

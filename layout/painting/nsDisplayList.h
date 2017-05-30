@@ -2436,6 +2436,7 @@ public:
   {
     mReusedItem = true;
   }
+  virtual bool CanBeReused() const { return true; }
 
 protected:
   nsDisplayItem() = delete;
@@ -3264,8 +3265,9 @@ protected:
 class nsDisplaySolidColor : public nsDisplaySolidColorBase {
 public:
   nsDisplaySolidColor(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                      const nsRect& aBounds, nscolor aColor)
+                      const nsRect& aBounds, nscolor aColor, bool aCanBeReused = true)
     : nsDisplaySolidColorBase(aBuilder, aFrame, aColor), mBounds(aBounds)
+    , mCanBeReused(aCanBeReused)
   {
     NS_ASSERTION(NS_GET_A(aColor) > 0, "Don't create invisible nsDisplaySolidColors!");
     MOZ_COUNT_CTOR(nsDisplaySolidColor);
@@ -3292,8 +3294,11 @@ public:
 
   NS_DISPLAY_DECL_NAME("SolidColor", TYPE_SOLID_COLOR)
 
+  virtual bool CanBeReused() const override { return mCanBeReused; }
+
 private:
   nsRect  mBounds;
+  bool mCanBeReused;
 };
 
 /**
