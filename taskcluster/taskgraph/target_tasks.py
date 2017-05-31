@@ -150,7 +150,7 @@ def target_tasks_cedar(full_task_graph, parameters):
         # Early return if platform is None
         if not platform:
             return False
-        if 'linux64' not in platform or 'macosx64' not in platform:
+        if 'linux64' not in platform and 'macosx64' not in platform:
             return False
         # No random non-build jobs either. This is being purposely done as a
         # blacklist so newly-added jobs aren't missed by default.
@@ -164,16 +164,16 @@ def target_tasks_cedar(full_task_graph, parameters):
         if task.attributes['kind'] == 'upload-symbols':
             return False
         # No Quantum Render
-        if str(platform).endswith('-qr'):
+        if '-qr' in platform:
             return False
         # No Stylo
-        if str(platform).endswith('-stylo'):
+        if '-stylo' in platform:
             return False
         # No PGO
-        if str(platform).endswith('-pgo'):
+        if '-pgo' in platform:
             return False
         # No ASAN
-        if str(platform).endswith('-asan'):
+        if '-asan' in platform:
             return False
         return True
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
