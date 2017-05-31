@@ -152,6 +152,7 @@ def target_tasks_cedar(full_task_graph, parameters):
             return False
         if 'linux64' not in platform and 'macosx64' not in platform:
             return False
+
         # No random non-build jobs either. This is being purposely done as a
         # blacklist so newly-added jobs aren't missed by default.
         for p in ('nightly', 'haz', 'artifact', 'cov', 'add-on'):
@@ -178,6 +179,12 @@ def target_tasks_cedar(full_task_graph, parameters):
         # No ASAN
         if '-asan' in platform:
             return False
+
+        # No valgrind
+        if task.attributes.get('unittest_suite', '').startswith('mochitest') and \
+           task.attributes.get('unittest_flavor', '').startswith('valgrind-plain'):
+            return False
+
         return True
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
