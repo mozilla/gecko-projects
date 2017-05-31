@@ -348,11 +348,6 @@ def make_job_description(config, jobs):
     for job in jobs:
         job_description = {
             'name': job['name'],
-            'worker': {
-                'docker-image': {'in-tree': 'desktop-build'},
-                'max-run-time': job['run-time'],
-                'chain-of-trust': True,
-            },
             'extra': job['extra'],
             'worker-type': job['worker-type'],
             'description': job['description'],
@@ -363,8 +358,6 @@ def make_job_description(config, jobs):
                 'script': job['mozharness']['script'],
                 'actions': job['mozharness']['actions'],
                 'options': job['mozharness']['options'],
-                'tooltool-downloads': job['tooltool'],
-                'need-xvfb': True,
             },
             'attributes': job['attributes'],
             'treeherder': {
@@ -375,6 +368,22 @@ def make_job_description(config, jobs):
             },
             'run-on-projects': job.get('run-on-projects') if job.get('run-on-projects') else [],
         }
+
+        if job['worker-type'].endswith("-b-win2012"):
+            job_description['worker'] = {
+                'os': 'windows',
+                'max-run-time': 7200,
+            }
+            #print("XXX: CALLEK: WORKER {}".format(job['build-platform']))
+        else:
+            job_description['worker'] = {
+                'docker-image': {'in-tree': 'desktop-build'},
+                'max-run-time': job['run-time'],
+                'chain-of-trust': True,
+            }
+            job_description['run']['tooltool-downloads'] = job['tooltool']
+            job_description['run']['need-xvfb'] = True
+            #print("XXX: CALLEK: OLD WORKER: {}".format(job['build-platform']))
 
         if job.get('index'):
             job_description['index'] = {

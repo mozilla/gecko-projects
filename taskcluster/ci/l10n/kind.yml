@@ -46,6 +46,7 @@ job-template:
       by-build-platform:
          default: aws-provisioner-v1/gecko-{level}-b-linux
          android: aws-provisioner-v1/gecko-{level}-b-android
+         win64: aws-provisioner-v1/gecko-{level}-b-win2012
    treeherder:
       symbol: tc(L10n)
       tier:
