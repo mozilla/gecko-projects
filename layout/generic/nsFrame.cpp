@@ -6473,7 +6473,6 @@ nsIFrame::InvalidateAllDisplayLists()
   if (retainedBuilder) {
     retainedBuilder->mNeedsFullRebuild = true;
   }
-  displayRoot->Properties().Delete(nsIFrame::ModifiedFrameList());
   displayRoot->Properties().Delete(nsIFrame::DeletedFrameList());
 }
 

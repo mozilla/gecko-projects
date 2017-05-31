@@ -2853,7 +2853,7 @@ struct RetainedDisplayListBuilder {
                              nsDisplayListBuilderMode aMode,
                              bool aBuildCaret)
     : mBuilder(aReferenceFrame, aMode, aBuildCaret)
-    , mNeedsFullRebuild(false)
+    , mNeedsFullRebuild(true)
   {}
   ~RetainedDisplayListBuilder()
   {
