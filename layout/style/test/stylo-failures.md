@@ -55,7 +55,6 @@ to mochitest command.
   * test_font_loading_api.html `weight` [1]
 * @namespace support:
   * test_namespace_rule.html: bug 1355715 [6]
-* test_dont_use_document_colors.html: support of disabling document color bug 1355716 [21]
 * test_font_feature_values_parsing.html: \@font-feature-values support bug 1355721 [107]
 * Grid support bug 1341802
   * test_grid_computed_values.html [4]
@@ -139,8 +138,6 @@ to mochitest command.
 * test_property_syntax_errors.html `linear-gradient(0,`: unitless zero as degree bug 1363292 [10]
 * test_specified_value_serialization.html `-webkit-radial-gradient`: bug 1367299 [1]
 * test_variables.html `var(--var6)`: irrelevant test for stylo bug 1367306 [1]
-* Difference in rect serialization bug 1367028
-  * test_shorthand_property_getters.html `5 5 5 5` [1]
 
 ## Unknown / Unsure
 

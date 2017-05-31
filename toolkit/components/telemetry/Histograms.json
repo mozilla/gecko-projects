@@ -24,14 +24,6 @@
     "kind": "flag",
     "description": "has the IAccessibleTable accessibility interface been used"
   },
-  "A11Y_UPDATE_TIME": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "default",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "time spent updating accessibility (ms)"
-  },
   "ADDON_CONTENT_POLICY_SHIM_BLOCKING_LOADING_MS": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "58",
@@ -5818,6 +5810,16 @@
     "bug_numbers": [893505],
     "releaseChannelCollection": "opt-out",
     "description": "Update: the application update doorhanger type that was displayed.",
+    "labels": ["restart", "available", "manual"]
+  },
+  "UPDATE_NOTIFICATION_BADGE_SHOWN": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["application-update-telemetry-alerts@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "categorical",
+    "bug_numbers": [893505, 1365204],
+    "releaseChannelCollection": "opt-out",
+    "description": "Update: the application update badge type that was displayed.",
     "labels": ["restart", "available", "manual"]
   },
   "UPDATE_NOTIFICATION_DISMISSED": {
@@ -13253,5 +13255,16 @@
     "high": 60000,
     "n_buckets": 100,
     "description": "The amount of time it takes to load a WebExtensions background page, from when the build function is called to when the page has finished processing the onload event."
+  },
+  "WEBEXT_EXTENSION_STARTUP_MS": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["addons-dev-internal@mozilla.com"],
+    "bug_numbers": [1353171],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "releaseChannelCollection": "opt-out",
+    "high": 50000,
+    "n_buckets": 100,
+    "description": "The amount of time it takes for a WebExtension to start up, from when the startup function is called to when the startup promise resolves."
   }
 }

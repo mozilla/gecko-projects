@@ -150,8 +150,7 @@ def target_tasks_cedar(full_task_graph, parameters):
         # Early return if platform is None
         if not platform:
             return False
-        # Only on Linux platforms
-        if platform not in ('linux64', 'macosx64'):
+        if 'linux64' not in platform or 'macosx64' not in platform:
             return False
         # No random non-build jobs either. This is being purposely done as a
         # blacklist so newly-added jobs aren't missed by default.
