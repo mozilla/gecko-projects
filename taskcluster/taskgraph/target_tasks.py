@@ -163,8 +163,11 @@ def target_tasks_cedar(full_task_graph, parameters):
         # don't upload symbols
         if task.attributes['kind'] == 'upload-symbols':
             return False
+
+        test_platform = task.attributes.get('test_platform', '').split('/')[0]
+
         # No Quantum Render
-        if '-qr' in platform:
+        if '-qr' in test_platform:
             return False
         # No Stylo
         if '-stylo' in platform:
