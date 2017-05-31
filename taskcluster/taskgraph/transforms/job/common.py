@@ -16,9 +16,12 @@ ARTIFACT_URL = 'https://queue.taskcluster.net/v1/task/{}/artifacts/{}'
 SECRET_SCOPE = 'secrets:get:project/releng/gecko/{}/level-{}/{}'
 
 
-def docker_worker_add_workspace_cache(config, job, taskdesc):
+def docker_worker_add_workspace_cache(config, job, taskdesc, extra=None):
     """Add the workspace cache based on the build platform/type and level,
-    except on try where workspace caches are not used."""
+    except on try where workspace caches are not used.
+    
+    extra, is an optional kwarg passed in that supports extending the cache
+           key name to avoid undesired conflicts with other caches."""
     if config.params['project'] == 'try':
         return
 
@@ -31,6 +34,10 @@ def docker_worker_add_workspace_cache(config, job, taskdesc):
         ),
         'mount-point': "/home/worker/workspace",
     })
+    if extra:
+        taskdesc['worker']['caches'][-1]['name'] += '-{}'.format(
+            extra
+        )
 
 
 def docker_worker_add_tc_vcs_cache(config, job, taskdesc):

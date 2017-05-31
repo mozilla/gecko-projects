@@ -101,7 +101,7 @@ transforms = TransformSequence()
 def validate(config, jobs):
     for job in jobs:
         yield validate_schema(job_description_schema, job,
-                              "In job {!r}:".format(job['name']))
+                              "In job {!r}:".format(job.get('name', job.get('label'))))
 
 
 @transforms.add
@@ -138,7 +138,7 @@ def make_task_description(config, jobs):
             if 'name' not in job:
                 raise Exception("job has neither a name nor a label")
             job['label'] = '{}-{}'.format(config.kind, job['name'])
-        if job['name']:
+        if job.get('name'):
             del job['name']
         taskdesc = copy.deepcopy(job)
 

@@ -109,34 +109,9 @@ def make_task_description(config, jobs):
         if job.get('locale'):
             attributes['locale'] = job['locale']
 
-        command = ['/home/worker/bin/run-task',
-                   # Various caches/volumes are default owned by root:root.
-                   '--chown-recursive', '/home/worker/workspace',
-                   '--chown-recursive', '/home/worker/tooltool-cache',
-                   '--vcs-checkout', '/home/worker/workspace/build/src',
-                   '--tools-checkout', '/home/worker/workspace/build/tools',
-                   '--',
-                   '/home/worker/workspace/build/src/taskcluster/scripts/builder/repackage.sh'
-                   ]
-
         level = config.params['level']
 
-        task_env = {
-            'MOZ_BUILD_DATE': config.params['moz_build_date'],
-            'MH_BUILD_POOL': 'taskcluster',
-            'HG_STORE_PATH': '/home/worker/checkouts/hg-store',
-            'GECKO_HEAD_REV': config.params['head_rev'],
-            'MH_BRANCH': config.params['project'],
-            'MOZ_SCM_LEVEL': level,
-            'MOZHARNESS_ACTIONS': 'download_input setup repackage',
-            'NEED_XVFB': 'true',
-            'GECKO_BASE_REPOSITORY': config.params['base_repository'],
-            'TOOLTOOL_CACHE': '/home/worker/tooltool-cache',
-            'GECKO_HEAD_REPOSITORY': config.params['head_repository'],
-            'USE_SCCACHE': '1',
-            'MOZHARNESS_SCRIPT': 'mozharness/scripts/repackage.py'
-        }
-
+        task_env = {}
         if attributes['build_platform'].startswith('macosx'):
             if job.get('locale'):
                 input_string = 'https://queue.taskcluster.net/v1/task/' + \
@@ -147,8 +122,8 @@ def make_task_description(config, jobs):
                     '<build-signing>/artifacts/public/build/target.tar.gz'
             task_env.update(
                 SIGNED_INPUT={'task-reference': input_string},
-                MOZHARNESS_CONFIG='repackage/osx_signed.py',
             )
+            mozharness_config = ['repackage/osx_signed.py']
             output_files = [{
                 'type': 'file',
                 'path': '/home/worker/workspace/build/upload/target.dmg',
@@ -169,8 +144,8 @@ def make_task_description(config, jobs):
                 SIGNED_ZIP={'task-reference': "{}target.zip".format(signed_prefix)},
                 SIGNED_SETUP={'task-reference': "{}setup.exe".format(signed_prefix)},
                 UNSIGNED_MAR={'task-reference': "{}mar.exe".format(build_prefix)},
-                MOZHARNESS_CONFIG='repackage/win_signed.py',
             )
+            mozharness_config = ['repackage/win_signed.py']
             output_files = [{
                 'type': 'file',
                 'path': '/home/worker/workspace/build/upload/installer.exe',
@@ -192,28 +167,21 @@ def make_task_description(config, jobs):
             'treeherder': treeherder,
             'routes': job.get('routes', []),
             'extra': job.get('extra', {}),
-            'scopes':
-            ['docker-worker:relengapi-proxy:tooltool.download.internal',
-             'secrets:get:project/taskcluster/gecko/hgfingerprint',
-             'docker-worker:relengapi-proxy:tooltool.download.public',
-             'project:releng:signing:format:dmg'],
             'worker': {'implementation': 'docker-worker',
                        'docker-image': {"in-tree": "desktop-build"},
-                       'caches': [{
-                                   'type': 'persistent',
-                                   'name': 'tooltool-cache',
-                                   'mount-point': '/home/worker/tooltool-cache',
-                                 }, {
-                                   'type': 'persistent',
-                                   'name': 'level-%s-checkouts-v1' % level,
-                                   'mount-point': '/home/worker/checkouts',
-                                 }],
                        'artifacts': output_files,
                        'env': task_env,
-                       'command': command,
                        'chain-of-trust': True,
-                       'relengapi-proxy': True,
                        'max-run-time': 3600
-                       }
+                       },
+            'run': {
+                'using': 'mozharness',
+                'script': 'mozharness/scripts/repackage.py',
+                'config': mozharness_config,
+                'job-script': 'taskcluster/scripts/builder/repackage.sh',
+                'actions': ['download_input', 'setup', 'repackage'],
+                'tooltool-downloads': 'internal',
+                'extra-workspace-cache-key': 'repackage',
+            }
         }
         yield task
