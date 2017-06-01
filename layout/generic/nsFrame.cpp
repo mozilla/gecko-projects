@@ -3085,12 +3085,14 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     awayFromCommonPath = true;
   }
 
+  bool hasOverrideDirtyRect = false;
   if (child->HasOverrideDirtyRegion()) {
     nsDisplayListBuilder::DisplayListBuildingData* data =
       child->Properties().Get(nsDisplayListBuilder::DisplayListBuildingRect());
     if (data) {
       dirty = data->mDirtyRect;
       dirty.IntersectRect(dirty, visible);
+      hasOverrideDirtyRect = true;
     }
   }
 
@@ -3172,6 +3174,15 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
   DisplayListClipState::AutoClipMultiple clipState(aBuilder);
   nsDisplayListBuilder::AutoCurrentActiveScrolledRootSetter asrSetter(aBuilder);
   CheckForApzAwareEventHandlers(aBuilder, child);
+
+  if (hasOverrideDirtyRect && gfxPrefs::LayoutDisplayListShowArea()) {
+    nsDisplaySolidColor* color =
+     new (aBuilder) nsDisplaySolidColor(aBuilder, child,
+                                        dirty + aBuilder->GetCurrentFrameOffsetToReferenceFrame(),
+                                        NS_RGBA(255, 0, 0, 64), false);
+    color->SetOverrideZIndex(INT32_MAX);
+    aLists.PositionedDescendants()->AppendNewToTop(color);
+  }
 
   if (savedOutOfFlowData) {
     aBuilder->SetBuildingInvisibleItems(false);

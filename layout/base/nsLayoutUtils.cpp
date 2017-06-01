@@ -3690,9 +3690,6 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
     }
   }
 
-  //printf_stderr("Painting --- Merged list:\n");
-  //nsFrame::PrintDisplayList(aBuilder, merged);
-
   aOutList->AppendToTop(&merged);
 }
 
@@ -4123,6 +4120,9 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           builder.EnterPresShell(aFrame);
 
           MergeDisplayLists(&builder, deletions, &modifiedDL, &list, &list, totalDisplayItems, reusedDisplayItems);
+
+          //printf_stderr("Painting --- Merged list:\n");
+          //nsFrame::PrintDisplayList(aBuilder, merged);
           merged = true;
         }
 

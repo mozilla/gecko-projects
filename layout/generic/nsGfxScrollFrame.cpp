@@ -3292,8 +3292,9 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     dirtyRect = dirtyRect.Intersect(mScrollPort);
   }
 
+  bool usingDisplayPortInvalidRect = false;
   Unused << DecideScrollableLayer(aBuilder, &visibleRect, &dirtyRect,
-              /* aAllowCreateDisplayPort = */ !mIsRoot);
+              /* aAllowCreateDisplayPort = */ !mIsRoot, &usingDisplayPortInvalidRect);
 
   bool usingDisplayPort = aBuilder->IsPaintingToWindow() &&
     nsLayoutUtils::HasDisplayPort(mOuter->GetContent());
@@ -3521,6 +3522,15 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
         building(aBuilder, mOuter, visibleRect, dirtyRect, aBuilder->IsAtRootOfPseudoStackingContext());
 
       mOuter->BuildDisplayListForChild(aBuilder, mScrolledFrame, scrolledContent);
+
+      if (usingDisplayPortInvalidRect && gfxPrefs::LayoutDisplayListShowArea()) {
+        nsDisplaySolidColor* color =
+          new (aBuilder) nsDisplaySolidColor(aBuilder, mOuter,
+                                             dirtyRect + aBuilder->GetCurrentFrameOffsetToReferenceFrame(),
+                                             NS_RGBA(0, 0, 255, 64), false);
+        color->SetOverrideZIndex(INT32_MAX);
+        scrolledContent.PositionedDescendants()->AppendNewToTop(color);
+      }
     }
 
     if (extraContentBoxClipForNonCaretContent) {
@@ -3558,7 +3568,7 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
         nsRect copyOfDirtyRect = dirtyRect;
         nsRect copyOfVisibleRect = visibleRect;
         Unused << DecideScrollableLayer(aBuilder, &copyOfVisibleRect, &copyOfDirtyRect,
-                    /* aAllowCreateDisplayPort = */ false);
+                    /* aAllowCreateDisplayPort = */ false, nullptr);
         if (mWillBuildScrollableLayer) {
           asrSetter.InsertScrollFrame(sf);
         }
@@ -3596,6 +3606,7 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   }
   // Now display overlay scrollbars and the resizer, if we have one.
   AppendScrollPartsTo(aBuilder, scrolledContent, createLayersForScrollbars, true);
+
   scrolledContent.MoveTo(aLists);
 }
 
@@ -3603,7 +3614,8 @@ bool
 ScrollFrameHelper::DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
                                          nsRect* aVisibleRect,
                                          nsRect* aDirtyRect,
-                                         bool aAllowCreateDisplayPort)
+                                         bool aAllowCreateDisplayPort,
+                                         bool* aUsingDisplayPortInvalidRect)
 {
   // Save and check if this changes so we can recompute the current agr.
   bool oldWillBuildScrollableLayer = mWillBuildScrollableLayer;
@@ -3724,6 +3736,9 @@ ScrollFrameHelper::DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
           mOuter->Properties().Get(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect());
         if (rect) {
           *aDirtyRect = *rect;
+          if (aUsingDisplayPortInvalidRect) {
+            *aUsingDisplayPortInvalidRect = true;
+          }
         }
       }
     } else if (mIsRoot) {

@@ -3353,9 +3353,23 @@ public:
 
   virtual bool CanBeReused() const override { return mCanBeReused; }
 
+  int32_t ZIndex() const override
+  {
+    if (mOverrideZIndex) {
+      return mOverrideZIndex.value();
+    }
+    return nsDisplaySolidColorBase::ZIndex();
+  }
+
+  void SetOverrideZIndex(int32_t aZIndex)
+  {
+    mOverrideZIndex = mozilla::Some(aZIndex);
+  }
+
 private:
   nsRect  mBounds;
   bool mCanBeReused;
+  mozilla::Maybe<int32_t> mOverrideZIndex;
 };
 
 /**
