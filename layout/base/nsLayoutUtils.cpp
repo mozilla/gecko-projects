@@ -3773,6 +3773,134 @@ AddExtraBackgroundItems(nsDisplayListBuilder& aBuilder,
   }
 }
 
+bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
+                          std::vector<WeakFrame>& aModifiedFrames,
+                          nsIFrame* aDisplayRootFrame,
+                          const nsRect& aRootDirtyRect,
+                          nsRect* aOutDirty,
+                          AnimatedGeometryRoot** aOutModifiedAGR,
+                          nsTArray<nsIFrame*>* aOutFramesWithProps)
+{
+  for (nsIFrame* f : aModifiedFrames) {
+    if (!f) {
+      continue;
+    }
+    // TODO: There is almost certainly a faster way of doing this, probably can be combined with the ancestor
+    // walk for TransformFrameRectToAncestor.
+    AnimatedGeometryRoot* agr = aBuilder.FindAnimatedGeometryRootFor(f)->GetAsyncAGR();
+
+
+    // Convert the frame's overflow rect into the coordinate space
+    // of the nearest stacking context that has an existing display item.
+    // We store the overflow rect on that stacking context so that we build
+    // all items that intersect that changed frame within the stacking context,
+    // and then we use MarkFrameForDisplayIfVisible to make sure the stacking
+    // context itself gets built. We don't need to build items that intersect outside
+    // of the stacking context, since we know the stacking context item exists in
+    // the old list, so we can trivially merge without needing other items.
+    nsRect overflow = f->GetVisualOverflowRectRelativeToSelf();
+    nsIFrame* currentFrame = f;
+
+    while (currentFrame != aDisplayRootFrame) {
+      overflow = nsLayoutUtils::TransformFrameRectToAncestor(currentFrame, overflow, aDisplayRootFrame,
+                                                             nullptr, nullptr,
+                                                             /* aStopAtStackingContextAndDisplayPort = */ true,
+                                                             &currentFrame);
+
+      if (nsLayoutUtils::FrameHasDisplayPort(currentFrame)) {
+        nsIScrollableFrame* sf = do_QueryFrame(currentFrame);
+        MOZ_ASSERT(sf);
+        nsRect displayPort;
+        DebugOnly<bool> hasDisplayPort =
+          nsLayoutUtils::GetDisplayPort(currentFrame->GetContent(), &displayPort, RelativeTo::ScrollPort);
+        MOZ_ASSERT(hasDisplayPort);
+        // get it relative to the scrollport (from the scrollframe)
+        nsRect r = overflow - sf->GetScrollPortRect().TopLeft();
+        r.IntersectRect(r, displayPort);
+        if (!r.IsEmpty()) {
+          nsRect* rect =
+            currentFrame->Properties().Get(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect());
+          if (!rect) {
+            rect = new nsRect();
+            currentFrame->Properties().Set(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect(), rect);
+            currentFrame->SetHasOverrideDirtyRegion(true);
+          }
+          rect->UnionRect(*rect, r);
+          aOutFramesWithProps->AppendElement(currentFrame);
+
+          // TODO: Can we just use MarkFrameForDisplayIfVisible, plus MarkFramesForDifferentAGR to
+          // ensure that this displayport, plus any items that move relative to it get rebuilt,
+          // and then not contribute to the root dirty area?
+          overflow = sf->GetScrollPortRect();
+        } else {
+          // Don't contribute to the root dirty area at all.
+          overflow.SetEmpty();
+          break;
+        }
+      }
+
+      if (currentFrame->IsStackingContext()) {
+        // If we found an intermediate stacking context with an existing display item
+        // then we can store the dirty rect there and stop.
+        if (currentFrame != aDisplayRootFrame &&
+            FrameLayerBuilder::HasRetainedDataFor(currentFrame)) {
+
+          // Convert directly into aDisplayRootFrames coordinate space.
+          // TODO: Don't we need to take ancestor displayports into account here? Plus also, isn't just
+          // MarkFrameForDisplayIfVisible sufficient and we don't need to check if it intersects?
+          nsRect rootOverflow = nsLayoutUtils::TransformFrameRectToAncestor(currentFrame, overflow, aDisplayRootFrame);
+          rootOverflow.IntersectRect(rootOverflow, aRootDirtyRect);
+
+          // If the stacking context intersected the visible region then make
+          // sure we build display items for it.
+          // TODO: Isn't this always true, unless we've invalidated the stacking context itself (
+          // or an ancestor of it), in which case we'll be rebuilding all the things anyway?
+          if (!rootOverflow.IsEmpty()) {
+            aBuilder.MarkFrameForDisplayIfVisible(currentFrame);
+
+            // Store the stacking context relative dirty area such
+            // that display list building will pick it up when it
+            // gets to it.
+            nsDisplayListBuilder::DisplayListBuildingData* data =
+              currentFrame->Properties().Get(nsDisplayListBuilder::DisplayListBuildingRect());
+            if (!data) {
+              data = new nsDisplayListBuilder::DisplayListBuildingData;
+              currentFrame->Properties().Set(nsDisplayListBuilder::DisplayListBuildingRect(), data);
+              currentFrame->SetHasOverrideDirtyRegion(true);
+              aOutFramesWithProps->AppendElement(currentFrame);
+            }
+            data->mDirtyRect.UnionRect(data->mDirtyRect, overflow);
+            if (!data->mModifiedAGR) {
+              data->mModifiedAGR = agr;
+            } else if (data->mModifiedAGR != agr) {
+              data->mDirtyRect = currentFrame->GetVisualOverflowRectRelativeToSelf();
+            }
+          }
+
+          // Don't contribute to the root dirty area at all.
+          overflow.SetEmpty();
+          break;
+        }
+      }
+    }
+    aOutDirty->UnionRect(*aOutDirty, overflow);
+
+    // If we get changed frames from multiple AGRS, then just give up as it gets really complex to
+    // track which items would need to be marked in MarkFramesForDifferentAGR.
+    // TODO: We should store the modifiedAGR on the per-stacking context data and only do the
+    // marking within the scope of the current stacking context.
+    if (!*aOutModifiedAGR) {
+      *aOutModifiedAGR = agr;
+    } else if (*aOutModifiedAGR != agr) {
+      return false;
+    }
+  }
+
+  // TODO: Return false if modified Dirty is empty, and we didn't mark any sub-stacking
+  // contexts as needing-paint-if-visible.
+  return true;
+}
+
 nsresult
 nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFrame,
                           const nsRegion& aDirtyRegion, nscolor aBackstop,
@@ -3963,132 +4091,15 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         std::vector<WeakFrame>* modifiedFrames = aFrame->Properties().Get(nsIFrame::ModifiedFrameList());
         nsTArray<nsIFrame*>* deletedFrames = aFrame->Properties().Get(nsIFrame::DeletedFrameList());
 
-        nsTArray<nsIFrame*> framesWithProps;
-
-        AnimatedGeometryRoot* modifiedAGR = nullptr;
-        nsRect modifiedDirty;
-        bool success = true;
 
         //printf("Attempting merge build with %d modified frames\n", modifiedFrames->size());
 
-        //printf_stderr("Dirty frames: ");
-        for (nsIFrame* f : *modifiedFrames) {
-          if (!f) {
-            continue;
-          }
-          // TODO: There is almost certainly a faster way of doing this, probably can be combined with the ancestor
-          // walk for TransformFrameRectToAncestor.
-          AnimatedGeometryRoot* agr = builder.FindAnimatedGeometryRootFor(f)->GetAsyncAGR();
-
-
-          // Convert the frame's overflow rect into the coordinate space
-          // of the nearest stacking context that has an existing display item.
-          // We store the overflow rect on that stacking context so that we build
-          // all items that intersect that changed frame within the stacking context,
-          // and then we use MarkFrameForDisplayIfVisible to make sure the stacking
-          // context itself gets built. We don't need to build items that intersect outside
-          // of the stacking context, since we know the stacking context item exists in
-          // the old list, so we can trivially merge without needing other items.
-          nsRect overflow = f->GetVisualOverflowRectRelativeToSelf();
-          nsIFrame* currentFrame = f;
-
-          while (currentFrame != aFrame) {
-            overflow = TransformFrameRectToAncestor(currentFrame, overflow, aFrame,
-                                                    nullptr, nullptr,
-                                                    /* aStopAtStackingContextAndDisplayPort = */ true,
-                                                    &currentFrame);
-
-            if (FrameHasDisplayPort(currentFrame)) {
-              nsIScrollableFrame* sf = do_QueryFrame(currentFrame);
-              MOZ_ASSERT(sf);
-              nsRect displayPort;
-              DebugOnly<bool> hasDisplayPort =
-                GetDisplayPort(currentFrame->GetContent(), &displayPort, RelativeTo::ScrollPort);
-              MOZ_ASSERT(hasDisplayPort);
-              // get it relative to the scrollport (from the scrollframe)
-              nsRect r = overflow - sf->GetScrollPortRect().TopLeft();
-              r.IntersectRect(r, displayPort);
-              if (!r.IsEmpty()) {
-                nsRect* rect =
-                  currentFrame->Properties().Get(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect());
-                if (!rect) {
-                  rect = new nsRect();
-                  currentFrame->Properties().Set(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect(), rect);
-                  currentFrame->SetHasOverrideDirtyRegion(true);
-                }
-                rect->UnionRect(*rect, r);
-                framesWithProps.AppendElement(currentFrame);
-                overflow = sf->GetScrollPortRect();
-              } else {
-                // Don't contribute to the root dirty area at all.
-                overflow.SetEmpty();
-                break;
-              }
-            }
-
-            if (currentFrame->IsStackingContext()) {
-              // If we found an intermediate stacking context with an existing display item
-              // then we can store the dirty rect there and stop.
-              if (currentFrame != aFrame &&
-                  FrameLayerBuilder::HasRetainedDataFor(currentFrame)) {
-
-                // Convert directly into aFrames coordinate space.
-                nsRect rootOverflow = TransformFrameRectToAncestor(currentFrame, overflow, aFrame);
-                rootOverflow.IntersectRect(rootOverflow, dirtyRect);
-
-                // If the stacking context intersected the visible region then make
-                // sure we build display items for it.
-                // TODO: Isn't this always true, unless we've invalidated the stacking context itself (
-                // or an ancestor of it), in which case we'll be rebuilding all the things anyway?
-                if (!rootOverflow.IsEmpty()) {
-                  builder.MarkFrameForDisplayIfVisible(currentFrame);
-
-                  // Store the stacking context relative dirty area such
-                  // that display list building will pick it up when it
-                  // gets to it.
-                  nsDisplayListBuilder::DisplayListBuildingData* data=
-                    currentFrame->Properties().Get(nsDisplayListBuilder::DisplayListBuildingRect());
-                  if (!data) {
-                    data = new nsDisplayListBuilder::DisplayListBuildingData;
-                    currentFrame->Properties().Set(nsDisplayListBuilder::DisplayListBuildingRect(), data);
-                    currentFrame->SetHasOverrideDirtyRegion(true);
-                    framesWithProps.AppendElement(currentFrame);
-                  }
-                  data->mDirtyRect.UnionRect(data->mDirtyRect, overflow);
-                  if (!data->mModifiedAGR) {
-                    data->mModifiedAGR = agr;
-                  } else if (data->mModifiedAGR != agr) {
-                    data->mDirtyRect = currentFrame->GetVisualOverflowRectRelativeToSelf();
-                  }
-                }
-
-                // Don't contribute to the root dirty area at all.
-                overflow.SetEmpty();
-                break;
-              }
-            }
-          }
-          modifiedDirty.UnionRect(modifiedDirty, overflow);
-
-          // If we get changed frames from multiple AGRS, then just give up as it gets really complex to
-          // track which items would need to be marked in MarkFramesForDifferentAGR.
-          // TODO: We should store the modifiedAGR on the per-stacking context data and only do the
-          // marking within the scope of the current stacking context.
-          if (!modifiedAGR) {
-            modifiedAGR = agr;
-          } else if (modifiedAGR != agr) {
-            success = false;
-            break;
-          }
-        }
-        //printf_stderr("\n");
-
-        modifiedDirty.IntersectRect(modifiedDirty, dirtyRect);
-
-        // TODO: Early return if modified Dirty is empty, and we didn't mark any sub-stacking
-        // contexts as needing-paint-if-visible.
-
-        if (success) {
+        nsRect modifiedDirty;
+        AnimatedGeometryRoot* modifiedAGR = nullptr;
+        nsTArray<nsIFrame*> framesWithProps;
+        if (ComputeRebuildRegion(builder, *modifiedFrames, aFrame, dirtyRect,
+                                 &modifiedDirty, &modifiedAGR, &framesWithProps)) {
+          modifiedDirty.IntersectRect(modifiedDirty, dirtyRect);
           nsTHashtable<nsPtrHashKey<nsIFrame>> deletions;
           if (deletedFrames) {
             for (nsIFrame* f : *deletedFrames) {
