@@ -27,7 +27,7 @@ class Repackage(BaseScript):
     def download_input(self):
         config = self.config
 
-        for path, url in config["download_config"]:
+        for path, url in config["download_config"].items():
             status = self.download_file(url=url,
                                         file_name=path,
                                         parent_dir=config['input_home'])
@@ -59,9 +59,7 @@ class Repackage(BaseScript):
         config = self.config
         dirs = self.query_abs_dirs()
         for repack_config in config["repackage_config"]:
-            command = [sys.executable, 'mach', '--log-no-times', 'repackage']
-            for args in repack_config["repackage_args"]:
-                command.extend(args)
+            command = [sys.executable, 'mach', '--log-no-times', 'repackage'] + repack_config
             self.run_command(
                 command=command,
                 cwd=dirs['abs_mozilla_dir'],
