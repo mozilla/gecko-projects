@@ -3656,21 +3656,19 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
             old->Destroy(aBuilder);
           }
         }
-        MOZ_ASSERT(IsSameItem(i, old));
-      }
+        // Recursively merge any child lists.
+        // TODO: We may need to call UpdateBounds on any non-flattenable nsDisplayWrapLists
+        // here. Is there any other cached state that we need to update?
+        MOZ_ASSERT(old && IsSameItem(i, old));
+        if (old->GetChildren()) {
+          MOZ_ASSERT(i->GetChildren());
+          MergeDisplayLists(aBuilder, aDeletedFrames, i->GetChildren(), old->GetChildren(), i->GetChildren(), aTotalDisplayItems, aReusedDisplayItems);
+        }
 
-      // Recursively merge any child lists.
-      // TODO: We may need to call UpdateBounds on any non-flattenable nsDisplayWrapLists
-      // here. Is there any other cached state that we need to update?
-      MOZ_ASSERT(old && IsSameItem(i, old));
-      if (old->GetChildren()) {
-        MOZ_ASSERT(i->GetChildren());
-        MergeDisplayLists(aBuilder, aDeletedFrames, i->GetChildren(), old->GetChildren(), i->GetChildren(), aTotalDisplayItems, aReusedDisplayItems);
+        old->Destroy(aBuilder);
+        merged.AppendToTop(i);
+        aTotalDisplayItems++;
       }
-
-      old->Destroy(aBuilder);
-      merged.AppendToTop(i);
-      aTotalDisplayItems++;
     } else {
       merged.AppendToTop(i);
       aTotalDisplayItems++;
