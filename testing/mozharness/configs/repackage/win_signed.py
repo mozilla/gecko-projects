@@ -39,6 +39,7 @@ config = {
     "tooltool_manifest_src": 'browser/config/tooltool-manifests/{}/releng.manifest'.format(plat),
     "tooltool_url": 'http://relengapi/tooltool/',
     "tooltool_bootstrap": "setup.sh",
-    'tooltool_script': [sys.executable, os.path.join(os.environ['MOZILLABUILD'], "/tooltool.py")],
+    'tooltool_script': [sys.executable,
+                        'C:/mozilla-build/tooltool.py'],
     'tooltool_cache': os.environ.get('TOOLTOOL_CACHE'),
 }
