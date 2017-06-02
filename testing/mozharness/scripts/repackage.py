@@ -72,11 +72,10 @@ class Repackage(BaseScript):
         if not config.get('tooltool_manifest_src'):
             return self.warning(ERROR_MSGS['tooltool_manifest_undetermined'])
 
-        python = self.query_exe('python2.7')
         tooltool_manifest_path = os.path.join(dirs['abs_mozilla_dir'],
                                               config['tooltool_manifest_src'])
         cmd = [
-            python, '-u',
+            sys.executable, '-u',
             os.path.join(dirs['abs_mozilla_dir'], 'mach'),
             'artifact',
             'toolchain',
@@ -135,8 +134,7 @@ class Repackage(BaseScript):
 
     def _run_configure(self):
         dirs = self.query_abs_dirs()
-        python = self.query_exe('python2.7')
-        command = [python, 'mach', '--log-no-times', 'configure']
+        command = [sys.executable, 'mach', '--log-no-times', 'configure']
         return self.run_command(
             command=command,
             cwd=dirs['abs_mozilla_dir'],
