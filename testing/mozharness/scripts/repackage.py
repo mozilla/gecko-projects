@@ -77,7 +77,7 @@ class Repackage(BaseScript):
                                               config['tooltool_manifest_src'])
         cmd = [
             python, '-u',
-            os.path.join(dirs['abs_src_dir'], 'mach'),
+            os.path.join(dirs['abs_mozilla_dir'], 'mach'),
             'artifact',
             'toolchain',
             '-v',
