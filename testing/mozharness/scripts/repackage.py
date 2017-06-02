@@ -71,23 +71,47 @@ class Repackage(BaseScript):
         dirs = self.query_abs_dirs()
         if not config.get('tooltool_manifest_src'):
             return self.warning(ERROR_MSGS['tooltool_manifest_undetermined'])
-        fetch_script_path = os.path.join(dirs['abs_tools_dir'],
-                                         'scripts/tooltool/tooltool_wrapper.sh')
+
+        python = self.query_exe('python2.7')
         tooltool_manifest_path = os.path.join(dirs['abs_mozilla_dir'],
                                               config['tooltool_manifest_src'])
         cmd = [
-            'sh',
-            fetch_script_path,
+            python, '-u',
+            os.path.join(dirs['abs_src_dir'], 'mach'),
+            'artifact',
+            'toolchain',
+            '-v',
+            '--retry', '4',
+            '--tooltool-manifest',
             tooltool_manifest_path,
+            '--tooltool-url',
             config['tooltool_url'],
-            config['tooltool_bootstrap'],
         ]
-        cmd.extend(config['tooltool_script'])
+        auth_file = self._get_tooltool_auth_file()
+        if auth_file:
+            cmd.extend(['--authentication-file', auth_file])
         cache = config.get('tooltool_cache')
         if cache:
-            cmd.extend(['-c', cache])
+            cmd.extend(['--cache-dir', cache])
         self.info(str(cmd))
         self.run_command(cmd, cwd=dirs['abs_mozilla_dir'], halt_on_failure=True)
+
+    def _get_tooltool_auth_file(self):
+        # set the default authentication file based on platform; this
+        # corresponds to where puppet puts the token
+        if 'tooltool_authentication_file' in self.config:
+            fn = self.config['tooltool_authentication_file']
+        elif self._is_windows():
+            fn = r'c:\builds\relengapi.tok'
+        else:
+            fn = '/builds/relengapi.tok'
+
+        # if the file doesn't exist, don't pass it to tooltool (it will just
+        # fail).  In taskcluster, this will work OK as the relengapi-proxy will
+        # take care of auth.  Everywhere else, we'll get auth failures if
+        # necessary.
+        if os.path.exists(fn):
+            return fn
 
     def _get_mozconfig(self):
         """assign mozconfig."""
