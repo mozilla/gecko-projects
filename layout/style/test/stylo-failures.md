@@ -80,7 +80,7 @@ to mochitest command.
 * Unsupported values
   * SVG-in-OpenType values not supported servo/servo#15211 bug 1355412
     * test_value_storage.html `context-` [7]
-    * test_bug798843_pref.html [7]
+    * test_bug798843_pref.html [3]
 * Incorrect parsing
   * different parsing bug 1364260
     * test_supports_rules.html [6]
@@ -91,7 +91,7 @@ to mochitest command.
   * place-{content,items,self} shorthands bug 1363971
     * test_align_shorthand_serialization.html [6]
   * system font serialization with subprop specified bug 1364286
-    * test_system_font_serialization.html [5]
+    * test_system_font_serialization.html [3]
   * serialize subprops to -moz-use-system-font when using system font bug 1364289
     * test_value_storage.html `'font'` [224]
   * different serialization for gradient functions in computed value bug 1367274

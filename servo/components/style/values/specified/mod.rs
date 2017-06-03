@@ -6,9 +6,9 @@
 //!
 //! TODO(emilio): Enhance docs.
 
-use app_units::Au;
+use Namespace;
 use context::QuirksMode;
-use cssparser::{self, Parser, Token};
+use cssparser::{self, Parser, Token, serialize_identifier};
 use itoa;
 use parser::{ParserContext, Parse};
 use self::grid::TrackSizeOrRepeat;
@@ -24,13 +24,14 @@ use super::computed::{self, Context};
 use super::computed::{Shadow as ComputedShadow, ToComputedValue};
 use super::generics::grid::{TrackBreadth as GenericTrackBreadth, TrackSize as GenericTrackSize};
 use super::generics::grid::TrackList as GenericTrackList;
+use values::computed::ComputedValueAsSpecified;
 use values::specified::calc::CalcNode;
 
 #[cfg(feature = "gecko")]
 pub use self::align::{AlignItems, AlignJustifyContent, AlignJustifySelf, JustifyItems};
 pub use self::background::BackgroundSize;
 pub use self::border::{BorderCornerRadius, BorderImageSlice, BorderImageWidth};
-pub use self::border::{BorderImageWidthSide, BorderRadius};
+pub use self::border::{BorderImageSideWidth, BorderRadius, BorderSideWidth};
 pub use self::color::Color;
 pub use self::rect::LengthOrNumberRect;
 pub use super::generics::grid::GridLine;
@@ -42,6 +43,7 @@ pub use self::length::{Percentage, LengthOrNone, LengthOrNumber, LengthOrPercent
 pub use self::length::{LengthOrPercentageOrNone, LengthOrPercentageOrAutoOrContent, NoCalcLength};
 pub use self::length::{MaxLength, MozLength};
 pub use self::position::{Position, PositionComponent};
+pub use self::text::{LetterSpacing, LineHeight, WordSpacing};
 pub use self::transform::TransformOrigin;
 
 #[cfg(feature = "gecko")]
@@ -56,6 +58,7 @@ pub mod image;
 pub mod length;
 pub mod position;
 pub mod rect;
+pub mod text;
 pub mod transform;
 
 /// Common handling for the specified value CSS url() values.
@@ -427,92 +430,6 @@ impl Angle {
             }
             _ => Err(())
         }
-    }
-}
-
-#[allow(missing_docs)]
-pub fn parse_border_width(context: &ParserContext, input: &mut Parser) -> Result<Length, ()> {
-    input.try(|i| Length::parse_non_negative(context, i)).or_else(|()| {
-        match_ignore_ascii_case! { &try!(input.expect_ident()),
-            "thin" => Ok(Length::from_px(1.)),
-            "medium" => Ok(Length::from_px(3.)),
-            "thick" => Ok(Length::from_px(5.)),
-            _ => Err(())
-        }
-    })
-}
-
-#[derive(Clone, Debug, HasViewportPercentage, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[allow(missing_docs)]
-pub enum BorderWidth {
-    Thin,
-    Medium,
-    Thick,
-    Width(Length),
-}
-
-impl Parse for BorderWidth {
-    fn parse(context: &ParserContext, input: &mut Parser) -> Result<BorderWidth, ()> {
-        Self::parse_quirky(context, input, AllowQuirks::No)
-    }
-}
-
-impl BorderWidth {
-    /// Parses a border width, allowing quirks.
-    pub fn parse_quirky(context: &ParserContext,
-                        input: &mut Parser,
-                        allow_quirks: AllowQuirks)
-                        -> Result<BorderWidth, ()> {
-        match input.try(|i| Length::parse_non_negative_quirky(context, i, allow_quirks)) {
-            Ok(length) => Ok(BorderWidth::Width(length)),
-            Err(_) => match_ignore_ascii_case! { &try!(input.expect_ident()),
-               "thin" => Ok(BorderWidth::Thin),
-               "medium" => Ok(BorderWidth::Medium),
-               "thick" => Ok(BorderWidth::Thick),
-               _ => Err(())
-            }
-        }
-    }
-}
-
-impl BorderWidth {
-    #[allow(missing_docs)]
-    pub fn from_length(length: Length) -> Self {
-        BorderWidth::Width(length)
-    }
-}
-
-impl ToCss for BorderWidth {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            BorderWidth::Thin => dest.write_str("thin"),
-            BorderWidth::Medium => dest.write_str("medium"),
-            BorderWidth::Thick => dest.write_str("thick"),
-            BorderWidth::Width(ref length) => length.to_css(dest)
-        }
-    }
-}
-
-impl ToComputedValue for BorderWidth {
-    type ComputedValue = Au;
-
-    #[inline]
-    fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
-        // We choose the pixel length of the keyword values the same as both spec and gecko.
-        // Spec: https://drafts.csswg.org/css-backgrounds-3/#line-width
-        // Gecko: https://bugzilla.mozilla.org/show_bug.cgi?id=1312155#c0
-        match *self {
-            BorderWidth::Thin => Length::from_px(1.).to_computed_value(context),
-            BorderWidth::Medium => Length::from_px(3.).to_computed_value(context),
-            BorderWidth::Thick => Length::from_px(5.).to_computed_value(context),
-            BorderWidth::Width(ref length) => length.to_computed_value(context)
-        }
-    }
-
-    #[inline]
-    fn from_computed_value(computed: &Self::ComputedValue) -> Self {
-        BorderWidth::Width(ToComputedValue::from_computed_value(computed))
     }
 }
 
@@ -1363,3 +1280,111 @@ impl AllowQuirks {
         self == AllowQuirks::Yes && quirks_mode == QuirksMode::Quirks
     }
 }
+
+#[cfg(feature = "gecko")]
+/// A namespace ID
+pub type NamespaceId = i32;
+
+
+#[cfg(feature = "servo")]
+/// A namespace ID (used by gecko only)
+pub type NamespaceId = ();
+
+/// An attr(...) rule
+///
+/// `[namespace? `|`]? ident`
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+pub struct Attr {
+    /// Optional namespace
+    pub namespace: Option<(Namespace, NamespaceId)>,
+    /// Attribute name
+    pub attribute: String,
+}
+
+impl Parse for Attr {
+    fn parse(context: &ParserContext, input: &mut Parser) -> Result<Attr, ()> {
+        input.expect_function_matching("attr")?;
+        input.parse_nested_block(|i| Attr::parse_function(context, i))
+    }
+}
+
+#[cfg(feature = "gecko")]
+/// Get the namespace id from the namespace map
+fn get_id_for_namespace(namespace: &Namespace, context: &ParserContext) -> Result<NamespaceId, ()> {
+    let namespaces_map = match context.namespaces {
+        Some(map) => map,
+        None => {
+            // If we don't have a namespace map (e.g. in inline styles)
+            // we can't parse namespaces
+            return Err(());
+        }
+    };
+
+    match namespaces_map.prefixes.get(&namespace.0) {
+        Some(entry) => Ok(entry.1),
+        None => Err(()),
+    }
+}
+
+#[cfg(feature = "servo")]
+/// Get the namespace id from the namespace map
+fn get_id_for_namespace(_: &Namespace, _: &ParserContext) -> Result<NamespaceId, ()> {
+    Ok(())
+}
+
+impl Attr {
+    /// Parse contents of attr() assuming we have already parsed `attr` and are
+    /// within a parse_nested_block()
+    pub fn parse_function(context: &ParserContext, input: &mut Parser) -> Result<Attr, ()> {
+        // Syntax is `[namespace? `|`]? ident`
+        // no spaces allowed
+        let first = input.try(|i| i.expect_ident()).ok();
+        if let Ok(token) = input.try(|i| i.next_including_whitespace()) {
+            match token {
+                Token::Delim('|') => {}
+                _ => return Err(()),
+            }
+            // must be followed by an ident
+            let second_token = match input.next_including_whitespace()? {
+                Token::Ident(second) => second,
+                _ => return Err(()),
+            };
+
+            let ns_with_id = if let Some(ns) = first {
+                let ns: Namespace = ns.into();
+                let id = get_id_for_namespace(&ns, context)?;
+                Some((ns, id))
+            } else {
+                None
+            };
+            return Ok(Attr {
+                namespace: ns_with_id,
+                attribute: second_token.into_owned(),
+            })
+        }
+
+        if let Some(first) = first {
+            Ok(Attr {
+                namespace: None,
+                attribute: first.into_owned(),
+            })
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl ToCss for Attr {
+    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+        dest.write_str("attr(")?;
+        if let Some(ref ns) = self.namespace {
+            serialize_identifier(&ns.0.to_string(), dest)?;
+            dest.write_str("|")?;
+        }
+        serialize_identifier(&self.attribute, dest)?;
+        dest.write_str(")")
+    }
+}
+
+impl ComputedValueAsSpecified for Attr {}

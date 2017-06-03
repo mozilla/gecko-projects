@@ -1534,6 +1534,7 @@ struct SetEnumValueHelper
   DEFINE_ENUM_CLASS_SETTER(StyleWindowDragging, Default, NoDrag)
   DEFINE_ENUM_CLASS_SETTER(StyleOrient, Inline, Vertical)
   DEFINE_ENUM_CLASS_SETTER(StyleGeometryBox, BorderBox, ViewBox)
+  DEFINE_ENUM_CLASS_SETTER(StyleWhiteSpace, Normal, PreSpace)
 #ifdef MOZ_XUL
   DEFINE_ENUM_CLASS_SETTER(StyleDisplay, None, MozPopup)
 #else
@@ -4834,7 +4835,7 @@ nsRuleNode::ComputeTextData(void* aStartStruct,
   SetValue(*aRuleData->ValueForWhiteSpace(), text->mWhiteSpace, conditions,
            SETVAL_ENUMERATED | SETVAL_UNSET_INHERIT,
            parentText->mWhiteSpace,
-           NS_STYLE_WHITESPACE_NORMAL);
+           StyleWhiteSpace::Normal);
 
   // word-break: enum, inherit, initial
   SetValue(*aRuleData->ValueForWordBreak(), text->mWordBreak, conditions,
@@ -9648,6 +9649,10 @@ nsRuleNode::ComputeSVGData(void* aStartStruct,
         svg->mContextPropsBits |= NS_STYLE_CONTEXT_PROPERTY_FILL;
       } else if (atom == nsGkAtoms::stroke) {
         svg->mContextPropsBits |= NS_STYLE_CONTEXT_PROPERTY_STROKE;
+      } else if (atom == nsGkAtoms::fill_opacity) {
+        svg->mContextPropsBits |= NS_STYLE_CONTEXT_PROPERTY_FILL_OPACITY;
+      } else if (atom == nsGkAtoms::stroke_opacity) {
+        svg->mContextPropsBits |= NS_STYLE_CONTEXT_PROPERTY_STROKE_OPACITY;
       }
     }
     break;
