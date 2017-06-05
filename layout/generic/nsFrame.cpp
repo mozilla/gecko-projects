@@ -6462,7 +6462,7 @@ static void InvalidateRenderingObservers(nsIFrame* aFrame, bool aFrameChanged = 
     nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
     RetainedDisplayListBuilder* retainedBuilder =
       displayRoot->Properties().Get(RetainedDisplayListBuilder::Cached());
-    if (retainedBuilder && !retainedBuilder->mNeedsFullRebuild) {
+    if (retainedBuilder) {
       std::vector<WeakFrame>* modifiedFrames = displayRoot->Properties().Get(nsIFrame::ModifiedFrameList());
       if (!modifiedFrames) {
         modifiedFrames = new std::vector<WeakFrame>();
@@ -6473,18 +6473,6 @@ static void InvalidateRenderingObservers(nsIFrame* aFrame, bool aFrameChanged = 
       aFrame->SetFrameIsModified(true);
     }
   }
-}
-
-void
-nsIFrame::InvalidateAllDisplayLists()
-{
-  nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(this);
-  RetainedDisplayListBuilder* retainedBuilder =
-    displayRoot->Properties().Get(RetainedDisplayListBuilder::Cached());
-  if (retainedBuilder) {
-    retainedBuilder->mNeedsFullRebuild = true;
-  }
-  displayRoot->Properties().Delete(nsIFrame::DeletedFrameList());
 }
 
 void

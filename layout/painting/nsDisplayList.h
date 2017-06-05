@@ -2853,7 +2853,6 @@ struct RetainedDisplayListBuilder {
                              nsDisplayListBuilderMode aMode,
                              bool aBuildCaret)
     : mBuilder(aReferenceFrame, aMode, aBuildCaret)
-    , mNeedsFullRebuild(true)
   {}
   ~RetainedDisplayListBuilder()
   {
@@ -2862,7 +2861,6 @@ struct RetainedDisplayListBuilder {
 
   nsDisplayListBuilder mBuilder;
   nsDisplayList mList;
-  bool mNeedsFullRebuild;
 
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(Cached, RetainedDisplayListBuilder)
 };

@@ -1422,13 +1422,10 @@ nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
     }
   }
 
-  if (changed) {
+  if (changed && aRepaintMode == RepaintMode::Repaint) {
     nsIFrame* frame = aContent->GetPrimaryFrame();
     if (frame) {
-      if (aRepaintMode == RepaintMode::Repaint) {
-        frame->SchedulePaint();
-      }
-      frame->InvalidateAllDisplayLists();
+      frame->SchedulePaint();
     }
   }
 
@@ -4081,7 +4078,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       bool merged = false;
       uint32_t totalDisplayItems = 0;
       uint32_t reusedDisplayItems = 0;
-      if (retainedBuilder && !retainedBuilder->mNeedsFullRebuild &&
+      if (retainedBuilder &&
           aFrame->Properties().Get(nsIFrame::ModifiedFrameList())) {
         std::vector<WeakFrame>* modifiedFrames = aFrame->Properties().Get(nsIFrame::ModifiedFrameList());
         nsTArray<nsIFrame*>* deletedFrames = aFrame->Properties().Get(nsIFrame::DeletedFrameList());
@@ -4165,10 +4162,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     }
 
     builder.SetDisplayListReady(true);
-
-    if (retainedBuilder) {
-      retainedBuilder->mNeedsFullRebuild = false;
-    }
 
     // TODO: This only adds temporary items (that return false for CanBeReused) and changes saved
     // state so we can do it every time. This doesn't work for nested nsSubDocumentFrames though,

@@ -1838,8 +1838,6 @@ public:
    */
   uint32_t GetDepthInFrameTree() const;
 
-  void InvalidateAllDisplayLists();
-
   /**
    * Event handling of GUI events.
    *
