@@ -1378,6 +1378,54 @@ nsLayoutUtils::GetDisplayPortForVisibilityTesting(
   return usingDisplayPort;
 }
 
+void
+nsLayoutUtils::InvalidateForDisplayPortChange(nsIContent* aContent,
+                                              bool aHadDisplayPort,
+                                              nsRect& aOldDisplayPort,
+                                              nsRect& aNewDisplayPort,
+                                              RepaintMode aRepaintMode)
+{
+  if (aRepaintMode != RepaintMode::Repaint) {
+    return;
+  }
+
+  bool changed = !aHadDisplayPort ||
+        !aOldDisplayPort.IsEqualEdges(aNewDisplayPort);
+
+  nsIFrame* frame = GetScrollFrameFromContent(aContent);
+  if (frame) {
+    frame = do_QueryFrame(frame->GetScrollTargetFrame());
+  }
+
+  if (changed && frame) {
+    // It is important to call SchedulePaint on the same frame that we set the dirty
+    // rect properties on so we can find the frame later to remove the properties.
+    frame->SchedulePaint();
+
+    nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(frame);
+    RetainedDisplayListBuilder* retainedBuilder =
+      displayRoot->Properties().Get(RetainedDisplayListBuilder::Cached());
+    if (retainedBuilder) {
+      nsRect* rect =
+        frame->Properties().Get(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect());
+      if (!rect) {
+        rect = new nsRect();
+        frame->Properties().Set(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect(), rect);
+        frame->SetHasOverrideDirtyRegion(true);
+      }
+      if (aHadDisplayPort) {
+        // We only need to build a display list for any new areas added
+        nsRegion newRegion(aNewDisplayPort);
+        newRegion.SubOut(aOldDisplayPort);
+        rect->UnionRect(*rect, newRegion.GetBounds());
+      } else {
+        rect->UnionRect(*rect, aNewDisplayPort);
+      }
+    }
+  }
+
+}
+
 bool
 nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
                                      nsIPresShell* aPresShell,
@@ -1406,9 +1454,6 @@ nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
   DebugOnly<bool> hasDisplayPort = GetHighResolutionDisplayPort(aContent, &newDisplayPort);
   MOZ_ASSERT(hasDisplayPort);
 
-  bool changed = !hadDisplayPort ||
-        !oldDisplayPort.IsEqualEdges(newDisplayPort);
-
   if (gfxPrefs::LayoutUseContainersForRootFrames()) {
     nsIFrame* rootScrollFrame = aPresShell->GetRootScrollFrame();
     if (rootScrollFrame &&
@@ -1422,12 +1467,8 @@ nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
     }
   }
 
-  if (changed && aRepaintMode == RepaintMode::Repaint) {
-    nsIFrame* frame = aContent->GetPrimaryFrame();
-    if (frame) {
-      frame->SchedulePaint();
-    }
-  }
+  InvalidateForDisplayPortChange(aContent, hadDisplayPort, oldDisplayPort,
+    newDisplayPort, aRepaintMode);
 
   nsIFrame* frame = GetScrollFrameFromContent(aContent);
   nsIScrollableFrame* scrollableFrame = frame ? frame->GetScrollTargetFrame() : nullptr;
@@ -3777,6 +3818,11 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
     if (!f) {
       continue;
     }
+
+    if (f->HasOverrideDirtyRegion()) {
+      aOutFramesWithProps->AppendElement(f);
+    }
+
     // TODO: There is almost certainly a faster way of doing this, probably can be combined with the ancestor
     // walk for TransformFrameRectToAncestor.
     AnimatedGeometryRoot* agr = aBuilder.FindAnimatedGeometryRootFor(f)->GetAsyncAGR();

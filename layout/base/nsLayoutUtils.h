@@ -239,6 +239,15 @@ public:
   };
 
   /**
+   * Invalidate for displayport change.
+   */
+  static void InvalidateForDisplayPortChange(nsIContent* aContent,
+                                             bool aHadDisplayPort,
+                                             nsRect& aOldDisplayPort,
+                                             nsRect& aNewDisplayPort,
+                                             RepaintMode aRepaintMode = RepaintMode::Repaint);
+
+  /**
    * Set the display port margins for a content element to be used with a
    * display port base (see SetDisplayPortBase()).
    * See also nsIDOMWindowUtils.setDisplayPortMargins.

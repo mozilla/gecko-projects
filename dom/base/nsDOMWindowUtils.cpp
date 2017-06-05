@@ -435,6 +435,9 @@ nsDOMWindowUtils::SetDisplayPortForElement(float aXPx, float aYPx,
     }
   }
 
+  nsLayoutUtils::InvalidateForDisplayPortChange(content, !!currentData,
+    currentData->mRect, displayport);
+
   nsIFrame* rootFrame = presShell->FrameManager()->GetRootFrame();
   if (rootFrame) {
     rootFrame->SchedulePaint();
