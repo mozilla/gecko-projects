@@ -40,7 +40,8 @@ SERVO_BINDING_FUNC(Servo_StyleSheet_ClearAndUpdate,
                    mozilla::ServoStyleSheet* gecko_stylesheet,
                    const nsACString* data,
                    RawGeckoURLExtraData* extra_data,
-                   uint32_t line_number_offset)
+                   uint32_t line_number_offset,
+                   mozilla::css::LoaderReusableStyleSheets* reusable_sheets)
 SERVO_BINDING_FUNC(Servo_StyleSheet_HasRules, bool,
                    RawServoStyleSheetBorrowed sheet)
 SERVO_BINDING_FUNC(Servo_StyleSheet_GetRules, ServoCssRulesStrong,
@@ -53,6 +54,8 @@ SERVO_BINDING_FUNC(Servo_StyleSet_Init, RawServoStyleSetOwned, RawGeckoPresConte
 SERVO_BINDING_FUNC(Servo_StyleSet_Clear, void,
                    RawServoStyleSetBorrowed set)
 SERVO_BINDING_FUNC(Servo_StyleSet_RebuildData, void,
+                   RawServoStyleSetBorrowed set)
+SERVO_BINDING_FUNC(Servo_StyleSet_MediumFeaturesChanged, bool,
                    RawServoStyleSetBorrowed set)
 SERVO_BINDING_FUNC(Servo_StyleSet_Drop, void, RawServoStyleSetOwned set)
 SERVO_BINDING_FUNC(Servo_StyleSet_AppendStyleSheet, void,
@@ -235,6 +238,18 @@ SERVO_BINDING_FUNC(Servo_AnimationValues_Interpolate,
 SERVO_BINDING_FUNC(Servo_AnimationValues_IsInterpolable, bool,
                    RawServoAnimationValueBorrowed from,
                    RawServoAnimationValueBorrowed to)
+SERVO_BINDING_FUNC(Servo_AnimationValues_Add,
+                   RawServoAnimationValueStrong,
+                   RawServoAnimationValueBorrowed a,
+                   RawServoAnimationValueBorrowed b)
+SERVO_BINDING_FUNC(Servo_AnimationValues_Accumulate,
+                   RawServoAnimationValueStrong,
+                   RawServoAnimationValueBorrowed a,
+                   RawServoAnimationValueBorrowed b,
+                   uint64_t count)
+SERVO_BINDING_FUNC(Servo_AnimationValues_GetZeroValue,
+                   RawServoAnimationValueStrong,
+                   RawServoAnimationValueBorrowed value_to_match)
 SERVO_BINDING_FUNC(Servo_AnimationValues_ComputeDistance, double,
                    RawServoAnimationValueBorrowed from,
                    RawServoAnimationValueBorrowed to)

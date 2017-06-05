@@ -65,12 +65,12 @@ use style::gecko_bindings::bindings::nsTimingFunctionBorrowed;
 use style::gecko_bindings::bindings::nsTimingFunctionBorrowedMut;
 use style::gecko_bindings::structs;
 use style::gecko_bindings::structs::{CSSPseudoElementType, CompositeOperation};
+use style::gecko_bindings::structs::{Loader, LoaderReusableStyleSheets};
 use style::gecko_bindings::structs::{RawServoStyleRule, ServoStyleSheet};
 use style::gecko_bindings::structs::{SheetParsingMode, nsIAtom, nsCSSPropertyID};
 use style::gecko_bindings::structs::{nsCSSFontFaceRule, nsCSSCounterStyleRule};
 use style::gecko_bindings::structs::{nsRestyleHint, nsChangeHint, PropertyValuePair};
 use style::gecko_bindings::structs::IterationCompositeOperation;
-use style::gecko_bindings::structs::Loader;
 use style::gecko_bindings::structs::MallocSizeOf;
 use style::gecko_bindings::structs::RawGeckoPresContextOwned;
 use style::gecko_bindings::structs::ServoElementSnapshotTable;
@@ -83,7 +83,6 @@ use style::gecko_bindings::sugar::ownership::{FFIArcHelpers, HasFFI, HasArcFFI, 
 use style::gecko_bindings::sugar::ownership::{HasSimpleFFI, Strong};
 use style::gecko_bindings::sugar::refptr::RefPtr;
 use style::gecko_properties::{self, style_structs};
-use style::keyframes::{Keyframe, KeyframeSelector, KeyframesStepValue};
 use style::media_queries::{MediaList, parse_media_query_list};
 use style::parallel;
 use style::parser::{PARSING_MODE_DEFAULT, ParserContext};
@@ -104,8 +103,9 @@ use style::stylesheets::{CssRule, CssRules, CssRuleType, CssRulesHelpers, Docume
 use style::stylesheets::{ImportRule, KeyframesRule, MallocSizeOfWithGuard, MediaRule};
 use style::stylesheets::{NamespaceRule, Origin, PageRule, Stylesheet, StyleRule, SupportsRule};
 use style::stylesheets::StylesheetLoader as StyleStylesheetLoader;
+use style::stylesheets::keyframes_rule::{Keyframe, KeyframeSelector, KeyframesStepValue};
+use style::stylesheets::supports_rule::parse_condition_or_declaration;
 use style::stylist::RuleInclusion;
-use style::supports::parse_condition_or_declaration;
 use style::thread_state;
 use style::timer::Timer;
 use style::traversal::{ANIMATION_ONLY, DomTraversal, FOR_CSS_RULE_CHANGES, FOR_RECONSTRUCT};
@@ -311,6 +311,48 @@ pub extern "C" fn Servo_AnimationValues_IsInterpolable(from: RawServoAnimationVa
     let from_value = AnimationValue::as_arc(&from);
     let to_value = AnimationValue::as_arc(&to);
     from_value.interpolate(to_value, 0.5).is_ok()
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_AnimationValues_Add(a: RawServoAnimationValueBorrowed,
+                                            b: RawServoAnimationValueBorrowed)
+     -> RawServoAnimationValueStrong
+{
+    let a_value = AnimationValue::as_arc(&a);
+    let b_value = AnimationValue::as_arc(&b);
+    if let Ok(value) = a_value.add(b_value) {
+        Arc::new(value).into_strong()
+    } else {
+        RawServoAnimationValueStrong::null()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_AnimationValues_Accumulate(a: RawServoAnimationValueBorrowed,
+                                                   b: RawServoAnimationValueBorrowed,
+                                                   count: u64)
+     -> RawServoAnimationValueStrong
+{
+    let a_value = AnimationValue::as_arc(&a);
+    let b_value = AnimationValue::as_arc(&b);
+    if let Ok(value) = a_value.accumulate(b_value, count) {
+        Arc::new(value).into_strong()
+    } else {
+        RawServoAnimationValueStrong::null()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_AnimationValues_GetZeroValue(
+    value_to_match: RawServoAnimationValueBorrowed)
+    -> RawServoAnimationValueStrong
+{
+    let value_to_match = AnimationValue::as_arc(&value_to_match);
+    if let Some(zero_value) = value_to_match.get_zero_value() {
+        Arc::new(zero_value).into_strong()
+    } else {
+        RawServoAnimationValueStrong::null()
+    }
 }
 
 #[no_mangle]
@@ -679,7 +721,7 @@ pub extern "C" fn Servo_StyleSheet_FromUTF8Bytes(loader: *mut Loader,
     let loader = if loader.is_null() {
         None
     } else {
-        Some(StylesheetLoader::new(loader, stylesheet))
+        Some(StylesheetLoader::new(loader, stylesheet, ptr::null_mut()))
     };
 
     // FIXME(emilio): loader.as_ref() doesn't typecheck for some reason?
@@ -708,7 +750,8 @@ pub extern "C" fn Servo_StyleSheet_ClearAndUpdate(stylesheet: RawServoStyleSheet
                                                   gecko_stylesheet: *mut ServoStyleSheet,
                                                   data: *const nsACString,
                                                   extra_data: *mut URLExtraData,
-                                                  line_number_offset: u32)
+                                                  line_number_offset: u32,
+                                                  reusable_sheets: *mut LoaderReusableStyleSheets)
 {
     let input = unsafe { data.as_ref().unwrap().as_str_unchecked() };
     let url_data = unsafe { RefPtr::from_ptr_ref(&extra_data) };
@@ -716,7 +759,7 @@ pub extern "C" fn Servo_StyleSheet_ClearAndUpdate(stylesheet: RawServoStyleSheet
     let loader = if loader.is_null() {
         None
     } else {
-        Some(StylesheetLoader::new(loader, gecko_stylesheet))
+        Some(StylesheetLoader::new(loader, gecko_stylesheet, reusable_sheets))
     };
 
     // FIXME(emilio): loader.as_ref() doesn't typecheck for some reason?
@@ -745,6 +788,32 @@ pub extern "C" fn Servo_StyleSet_AppendStyleSheet(raw_data: RawServoStyleSetBorr
         unique_id,
         &guard);
     data.clear_stylist();
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_StyleSet_MediumFeaturesChanged(
+    raw_data: RawServoStyleSetBorrowed,
+) -> bool {
+    let global_style_data = &*GLOBAL_STYLE_DATA;
+    let guard = global_style_data.shared_lock.read();
+
+    // NOTE(emilio): We don't actually need to flush the stylist here and ensure
+    // it's up to date.
+    //
+    // In case it isn't we would trigger a rebuild + restyle as needed too.
+    //
+    // We need to ensure the default computed values are up to date though,
+    // because those can influence the result of media query evaluation.
+    //
+    // FIXME(emilio, bug 1369984): do the computation conditionally, to do it
+    // less often.
+    let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
+
+    data.stylist.device_mut().reset_computed_values();
+    data.stylist.media_features_change_changed_style(
+        data.stylesheets.iter(),
+        &guard,
+    )
 }
 
 #[no_mangle]
@@ -882,7 +951,7 @@ pub extern "C" fn Servo_CssRules_InsertRule(rules: ServoCssRulesBorrowed,
     let loader = if loader.is_null() {
         None
     } else {
-        Some(StylesheetLoader::new(loader, gecko_stylesheet))
+        Some(StylesheetLoader::new(loader, gecko_stylesheet, ptr::null_mut()))
     };
     let loader = loader.as_ref().map(|loader| loader as &StyleStylesheetLoader);
     let rule = unsafe { rule.as_ref().unwrap().as_str_unchecked() };
@@ -1408,8 +1477,11 @@ pub extern "C" fn Servo_StyleSet_Init(pres_context: RawGeckoPresContextOwned)
 pub extern "C" fn Servo_StyleSet_RebuildData(raw_data: RawServoStyleSetBorrowed) {
     let global_style_data = &*GLOBAL_STYLE_DATA;
     let guard = global_style_data.shared_lock.read();
+
     let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
-    data.reset_device(&guard);
+    data.stylist.device_mut().reset();
+    data.stylesheets.force_dirty();
+    data.flush_stylesheets::<GeckoElement>(&guard, None);
 }
 
 #[no_mangle]

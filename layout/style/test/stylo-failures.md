@@ -115,7 +115,7 @@ to mochitest command.
 * getComputedStyle style doesn't contain custom properties bug 1336891
   * test_variable_serialization_computed.html [35]
   * test_variables.html `custom property name` [2]
-* test_css_supports.html: issues around @supports syntax servo/servo#15482 [8]
+* test_css_supports.html: issues around @supports syntax servo/servo#15482 [7]
 * test_author_specified_style.html: support serializing color as author specified bug 1348165 [27]
 * browser_newtab_share_rule_processors.js: agent style sheet sharing [1]
 * :visited support (bug 1328509)
@@ -140,7 +140,7 @@ to mochitest command.
 
 * test_selectors_on_anonymous_content.html: xbl and :nth-child [1]
 * test_parse_rule.html `rgb(0, 128, 0)`: color properties not getting computed [5]
-* test_selectors.html `:nth-child`: &lt;an+b&gt; parsing difference bug 1364009 [14]
+* test_selectors.html `:nth-child`: https://github.com/servo/rust-cssparser/issues/153 [4]
 
 ## Ignore
 

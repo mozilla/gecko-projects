@@ -7,12 +7,21 @@ module.exports = {
     "Ci": true,
     "Cr": true,
     "Cu": true,
+    "StructuredCloneHolder": false,
     "TextDecoder": false,
     "TextEncoder": false,
+
+    "MatchGlob": false,
+    "MatchPattern": true,
+    "MatchPatternSet": false,
+    "WebExtensionContentScript": false,
+    "WebExtensionPolicy": false,
+
     // Specific to WebExtensions:
     "AppConstants": true,
     "Extension": true,
     "ExtensionAPI": true,
+    "ExtensionCommon": true,
     "ExtensionManagement": true,
     "ExtensionUtils": true,
     "extensions": true,
