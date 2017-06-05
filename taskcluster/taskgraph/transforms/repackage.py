@@ -155,33 +155,48 @@ def make_task_description(config, jobs):
                 'path': '/home/worker/workspace/build/upload/target.complete.mar',
                 'name': 'public/build/target.complete.mar',
             }]
+            
+        run = {
+            'using': 'mozharness',
+            'script': 'mozharness/scripts/repackage.py',
+            'config': mozharness_config,
+            'job-script': 'taskcluster/scripts/builder/repackage.sh',
+            'actions': ['download_input', 'setup', 'repackage'],
+            'extra-workspace-cache-key': 'repackage',
+        }
+
+        if attributes["build_platform"].startswith('win'):
+            worker = {
+                'implementation': 'generic-worker',
+                'max-run-time': 7200,
+                'env': task_env,
+                'artifacts': output_files,
+                'chain-of-trust': True,
+            }
+            worker_type = 'aws-provisioner-v1/gecko-%s-b-win2012' % level
+        else:
+            worker = {'implementation': 'docker-worker',
+                       'docker-image': {"in-tree": "desktop-build"},
+                       'artifacts': output_files,
+                       'env': task_env,
+                       'chain-of-trust': True,
+                       'max-run-time': 3600
+                       }
+            run["tooltool-downloads"] = 'internal'
+            worker_type = 'aws-provisioner-v1/gecko-%s-b-macosx64' % level
 
         task = {
             'label': job['label'],
             'description': "{} Repackage".format(
                 dep_job.task["metadata"]["description"]),
-            'worker-type': 'aws-provisioner-v1/gecko-%s-b-macosx64' % level,
+            'worker-type': worker_type,
             'dependencies': dependencies,
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
             'treeherder': treeherder,
             'routes': job.get('routes', []),
             'extra': job.get('extra', {}),
-            'worker': {'implementation': 'docker-worker',
-                       'docker-image': {"in-tree": "desktop-build"},
-                       'artifacts': output_files,
-                       'env': task_env,
-                       'chain-of-trust': True,
-                       'max-run-time': 3600
-                       },
-            'run': {
-                'using': 'mozharness',
-                'script': 'mozharness/scripts/repackage.py',
-                'config': mozharness_config,
-                'job-script': 'taskcluster/scripts/builder/repackage.sh',
-                'actions': ['download_input', 'setup', 'repackage'],
-                'tooltool-downloads': 'internal',
-                'extra-workspace-cache-key': 'repackage',
-            }
+            'worker': worker,
+            'run': run,
         }
         yield task

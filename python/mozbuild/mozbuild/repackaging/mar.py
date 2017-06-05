@@ -3,6 +3,7 @@
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import os
+import sys
 import tempfile
 import shutil
 import zipfile
@@ -34,9 +35,14 @@ def repackage_mar(topsrcdir, package, mar, output):
 
         env = os.environ.copy()
         env['MOZ_FULL_PRODUCT_VERSION'] = get_application_ini_value(tmpdir, 'App', 'Version')
-        env['MAR'] = mar
+        env['MAR'] = mozpath.normpath(mar)
 
-        subprocess.check_call([env['SHELL'], make_full_update, output, ffxdir], env=env)
+        cmd = [make_full_update, output, ffxdir]
+        if sys.platform == 'win32':
+            # make_full_update.sh is a bash script, and Windows needs to
+            # explicitly call out the shell to execute the script from Python.
+            cmd.insert(0, env['MOZILLABUILD'] + '/msys/bin/bash.exe')
+        subprocess.check_call(cmd, env=env)
 
     finally:
         shutil.rmtree(tmpdir)

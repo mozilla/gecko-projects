@@ -26,18 +26,22 @@ class Repackage(BaseScript):
 
     def download_input(self):
         config = self.config
+        dirs = self.query_abs_dirs()
+
+        input_home = config['input_home'].format(**dirs)
 
         for path, url in config["download_config"].items():
             status = self.download_file(url=url,
                                         file_name=path,
-                                        parent_dir=config['input_home'])
+                                        parent_dir=input_home)
             if not status:
                 self.fatal("Unable to fetch signed input from %s" % url)
 
     def setup(self):
         self._run_tooltool()
-        self._get_mozconfig()
-        self._run_configure()
+        if self.config.get("run_configure", True):
+            self._get_mozconfig()
+            self._run_configure()
 
     def query_abs_dirs(self):
         if self.abs_dirs:
@@ -49,6 +53,7 @@ class Repackage(BaseScript):
         dirs = {}
         dirs['abs_tools_dir'] = os.path.join(abs_dirs['abs_work_dir'], 'tools')
         dirs['abs_mozilla_dir'] = os.path.join(abs_dirs['abs_work_dir'], 'src')
+        dirs['output_home'] = os.path.join(abs_dirs['abs_work_dir'], 'artifacts')
         for key in dirs.keys():
             if key not in abs_dirs:
                 abs_dirs[key] = dirs[key]
@@ -58,8 +63,14 @@ class Repackage(BaseScript):
     def repackage(self):
         config = self.config
         dirs = self.query_abs_dirs()
+
+        # Make sure the upload dir is around.
+        self.mkdir_p(dirs['output_home'])
+
         for repack_config in config["repackage_config"]:
-            command = [sys.executable, 'mach', '--log-no-times', 'repackage'] + repack_config
+            command = [sys.executable, 'mach', '--log-no-times', 'repackage'] + \
+                [arg.format(**dirs)
+                    for arg in list(repack_config)]
             self.run_command(
                 command=command,
                 cwd=dirs['abs_mozilla_dir'],
