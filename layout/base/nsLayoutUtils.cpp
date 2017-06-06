@@ -3916,6 +3916,7 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
           }
 
           // Don't contribute to the root dirty area at all.
+          agr = nullptr;
           overflow.SetEmpty();
           break;
         }
@@ -3929,7 +3930,7 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
     // marking within the scope of the current stacking context.
     if (!*aOutModifiedAGR) {
       *aOutModifiedAGR = agr;
-    } else if (*aOutModifiedAGR != agr) {
+    } else if (agr && *aOutModifiedAGR != agr) {
       return false;
     }
   }
