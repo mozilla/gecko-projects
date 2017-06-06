@@ -9,11 +9,13 @@ import zipfile
 import subprocess
 import mozpack.path as mozpath
 from application_ini import get_application_ini_value
+from mozbuild.util import ensureParentDir
 
 def repackage_mar(topsrcdir, package, mar, output):
     if not zipfile.is_zipfile(package):
         raise Exception("Package file %s is not a valid .zip file." % package)
 
+    ensureParentDir(output)
     tmpdir = tempfile.mkdtemp()
     try:
         z = zipfile.ZipFile(package)

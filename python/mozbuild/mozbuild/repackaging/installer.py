@@ -8,6 +8,7 @@ import shutil
 import zipfile
 import mozpack.path as mozpath
 from mozbuild.action.exe_7z_archive import archive_exe
+from mozbuild.util import ensureParentDir
 
 def repackage_installer(topsrcdir, tag, setupexe, package, output):
     if package and not zipfile.is_zipfile(package):
@@ -16,6 +17,7 @@ def repackage_installer(topsrcdir, tag, setupexe, package, output):
     # We need the full path for the tag and output, since we chdir later.
     tag = mozpath.realpath(tag)
     output = mozpath.realpath(output)
+    ensureParentDir(output)
 
     tmpdir = tempfile.mkdtemp()
     saved_dir = os.getcwd()
