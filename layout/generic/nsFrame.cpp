@@ -997,9 +997,6 @@ nsFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 
   RemoveStateBits(NS_FRAME_SIMPLE_EVENT_REGIONS |
                   NS_FRAME_SIMPLE_DISPLAYLIST);
-  if (mParent) {
-    SchedulePaint();
-  }
 }
 
 void
