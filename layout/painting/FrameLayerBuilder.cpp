@@ -270,8 +270,13 @@ DisplayItemData::~DisplayItemData()
     array.RemoveElement(this);
   }
 
-  MOZ_RELEASE_ASSERT(sAliveDisplayItemDatas && sAliveDisplayItemDatas->Contains(this));
-  sAliveDisplayItemDatas->RemoveEntry(this);
+  MOZ_RELEASE_ASSERT(sAliveDisplayItemDatas);
+  nsPtrHashKey<mozilla::DisplayItemData>* entry
+    = sAliveDisplayItemDatas->GetEntry(this);
+  MOZ_RELEASE_ASSERT(entry);
+
+  sAliveDisplayItemDatas->RemoveEntry(entry);
+
   if (sAliveDisplayItemDatas->Count() == 0) {
     delete sAliveDisplayItemDatas;
     sAliveDisplayItemDatas = nullptr;
@@ -1075,7 +1080,7 @@ public:
       const_cast<nsIFrame*>(aContainerItem ? aContainerItem->ReferenceFrameForChildren() :
                                              mBuilder->FindReferenceFrameFor(mContainerFrame));
     bool isAtRoot = !aContainerItem || (aContainerItem->Frame() == mBuilder->RootReferenceFrame());
-    MOZ_ASSERT_IF(isAtRoot, mContainerReferenceFrame == mBuilder->RootReferenceFrame());
+    MOZ_ASSERT(!isAtRoot || mContainerReferenceFrame == mBuilder->RootReferenceFrame());
     mContainerAnimatedGeometryRoot = isAtRoot
       ? aBuilder->GetRootAnimatedGeometryRoot()
       : aContainerItem->GetAnimatedGeometryRoot();

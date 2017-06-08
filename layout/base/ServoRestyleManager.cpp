@@ -74,10 +74,22 @@ ServoRestyleManager::PostRestyleEventForCSSRuleChanges()
 }
 
 /* static */ void
-ServoRestyleManager::PostRestyleEventForAnimations(Element* aElement,
-                                                   nsRestyleHint aRestyleHint)
+ServoRestyleManager::PostRestyleEventForAnimations(
+  Element* aElement,
+  CSSPseudoElementType aPseudoType,
+  nsRestyleHint aRestyleHint)
 {
-  Servo_NoteExplicitHints(aElement, aRestyleHint, nsChangeHint(0));
+  Element* elementToRestyle =
+    EffectCompositor::GetElementToRestyle(aElement, aPseudoType);
+
+  if (!elementToRestyle) {
+    // FIXME: Bug 1371107: When reframing happens,
+    // EffectCompositor::mElementsToRestyle still has unbinded old pseudo
+    // element. We should drop it.
+    return;
+  }
+
+  Servo_NoteExplicitHints(elementToRestyle, aRestyleHint, nsChangeHint(0));
 }
 
 void
@@ -300,7 +312,7 @@ ServoRestyleManager::ProcessPostTraversal(Element* aElement,
     changeHint |= nsChangeHint_ReconstructFrame;
     // The only time the primary frame is non-null is when image maps do hacky
     // SetPrimaryFrame calls.
-    MOZ_ASSERT_IF(styleFrame, styleFrame->IsImageFrame());
+    MOZ_ASSERT(!styleFrame || styleFrame->IsImageFrame());
     styleFrame = nullptr;
   }
 
@@ -510,7 +522,7 @@ ServoRestyleManager::SnapshotFor(Element* aElement)
 ServoRestyleManager::FrameForPseudoElement(const nsIContent* aContent,
                                            nsIAtom* aPseudoTagOrNull)
 {
-  MOZ_ASSERT_IF(aPseudoTagOrNull, aContent->IsElement());
+  MOZ_ASSERT(!aPseudoTagOrNull || aContent->IsElement());
   if (!aPseudoTagOrNull) {
     return aContent->GetPrimaryFrame();
   }
@@ -792,7 +804,7 @@ ServoRestyleManager::AttributeChanged(Element* aElement, int32_t aNameSpaceID,
                                       const nsAttrValue* aOldValue)
 {
   MOZ_ASSERT(!mInStyleRefresh);
-  MOZ_ASSERT_IF(mSnapshots.Get(aElement), mSnapshots.Get(aElement)->HasAttrs());
+  MOZ_ASSERT(!mSnapshots.Get(aElement) || mSnapshots.Get(aElement)->HasAttrs());
 
   nsIFrame* primaryFrame = aElement->GetPrimaryFrame();
   if (primaryFrame) {
@@ -807,12 +819,16 @@ ServoRestyleManager::AttributeChanged(Element* aElement, int32_t aNameSpaceID,
   if (aAttribute == nsGkAtoms::style) {
     PostRestyleEvent(aElement, eRestyle_StyleAttribute, nsChangeHint(0));
   }
-  // <td> is affected by the cellpadding on its ancestor table,
-  // so we should restyle the whole subtree
-  if (aAttribute == nsGkAtoms::cellpadding && aElement->IsHTMLElement(nsGkAtoms::table)) {
+
+  // For some attribute changes we must restyle the whole subtree:
+  //
+  // * <td> is affected by the cellpadding on its ancestor table
+  // * lang="" and xml:lang="" can affect all descendants due to :lang()
+  if ((aAttribute == nsGkAtoms::cellpadding &&
+       aElement->IsHTMLElement(nsGkAtoms::table)) ||
+      aAttribute == nsGkAtoms::lang) {
     PostRestyleEvent(aElement, eRestyle_Subtree, nsChangeHint(0));
-  }
-  if (aElement->IsAttributeMapped(aAttribute)) {
+  } else if (aElement->IsAttributeMapped(aAttribute)) {
     Servo_NoteExplicitHints(aElement, eRestyle_Self, nsChangeHint(0));
   }
 }
