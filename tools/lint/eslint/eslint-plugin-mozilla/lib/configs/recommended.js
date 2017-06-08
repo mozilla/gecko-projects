@@ -11,6 +11,7 @@ module.exports = {
     "BrowserFeedWriter": false,
     "CSSPrimitiveValue": false,
     "CSSValueList": false,
+    "CheckerboardReportService": false,
     // Specific to Firefox (Chrome code only).
     "ChromeUtils": false,
     "ChromeWindow": false,
@@ -37,6 +38,7 @@ module.exports = {
     // generators, see bug 968038.
     "StopIteration": false,
     "WebAssembly": false,
+    "WebrtcGlobalInformation": false,
     // Non-standard, specific to Firefox.
     "XULElement": false,
     "dump": true,
@@ -139,10 +141,13 @@ module.exports = {
     // "new-parens": "error",
 
     // Use [] instead of Array()
-    // "no-array-constructor": "error",
+    "no-array-constructor": "error",
 
     // Disallow assignment operators in conditional statements
     "no-cond-assign": "error",
+
+    // Disallow control characters in regular expressions.
+    "no-control-regex": "error",
 
     // Disallow the use of debugger
     "no-debugger": "error",

@@ -962,6 +962,8 @@ class ICUpdatedStub : public ICStub
         return firstUpdateStub_;
     }
 
+    void resetUpdateStubChain(Zone* zone);
+
     bool hasTypeUpdateStub(ICStub::Kind kind) {
         ICStub* stub = firstUpdateStub_;
         do {
@@ -1208,7 +1210,8 @@ class ICMonitoredFallbackStub : public ICFallbackStub
 
   public:
     MOZ_MUST_USE bool initMonitoringChain(JSContext* cx, ICStubSpace* space);
-    MOZ_MUST_USE bool addMonitorStubForValue(JSContext* cx, BaselineFrame* frame, HandleValue val);
+    MOZ_MUST_USE bool addMonitorStubForValue(JSContext* cx, BaselineFrame* frame,
+                                             StackTypeSet* types, HandleValue val);
 
     inline ICTypeMonitor_Fallback* fallbackMonitorStub() const {
         return fallbackMonitorStub_;
@@ -1468,7 +1471,8 @@ class ICTypeMonitor_Fallback : public ICStub
 
     // Create a new monitor stub for the type of the given value, and
     // add it to this chain.
-    MOZ_MUST_USE bool addMonitorStubForValue(JSContext* cx, BaselineFrame* frame, HandleValue val);
+    MOZ_MUST_USE bool addMonitorStubForValue(JSContext* cx, BaselineFrame* frame,
+                                             StackTypeSet* types, HandleValue val);
 
     void resetMonitorStubChain(Zone* zone);
 
@@ -1603,6 +1607,29 @@ class ICTypeMonitor_ObjectGroup : public ICStub
     };
 };
 
+class ICTypeMonitor_AnyValue : public ICStub
+{
+    friend class ICStubSpace;
+
+    explicit ICTypeMonitor_AnyValue(JitCode* stubCode)
+      : ICStub(TypeMonitor_AnyValue, stubCode)
+    {}
+
+  public:
+    class Compiler : public ICStubCompiler {
+      protected:
+        MOZ_MUST_USE bool generateStubCode(MacroAssembler& masm);
+
+      public:
+        explicit Compiler(JSContext* cx)
+          : ICStubCompiler(cx, TypeMonitor_AnyValue, Engine::Baseline)
+        { }
+
+        ICTypeMonitor_AnyValue* getStub(ICStubSpace* space) {
+            return newStub<ICTypeMonitor_AnyValue>(space, getStubCode());
+        }
+    };
+};
 
 // BinaryArith
 //      JSOP_ADD, JSOP_SUB, JSOP_MUL, JOP_DIV, JSOP_MOD

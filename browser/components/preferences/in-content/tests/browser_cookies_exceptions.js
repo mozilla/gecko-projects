@@ -334,15 +334,17 @@ var testRunner = {
         Services.prefs.clearUserPref("privacy.history.custom");
       });
 
-      openPreferencesViaOpenPreferencesAPI("panePrivacy", {leaveOpen: true}).then(function() {
+      openPreferencesViaOpenPreferencesAPI("panePrivacy", null, {leaveOpen: true}).then(function() {
         let doc = gBrowser.contentDocument;
         let historyMode = doc.getElementById("historyMode");
         historyMode.value = "custom";
         historyMode.doCommand();
+
+        let promiseSubDialogLoaded =
+          promiseLoadSubDialog("chrome://browser/content/preferences/permissions.xul");
         doc.getElementById("cookieExceptions").doCommand();
 
-        let subDialogURL = "chrome://browser/content/preferences/permissions.xul";
-        promiseLoadSubDialog(subDialogURL).then(function(win) {
+        promiseSubDialogLoaded.then(function(win) {
           helperFunctions.windowLoad(win);
         });
       });

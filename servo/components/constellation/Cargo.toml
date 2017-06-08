@@ -13,13 +13,15 @@ path = "lib.rs"
 backtrace = "0.3"
 bluetooth_traits = { path = "../bluetooth_traits" }
 canvas = {path = "../canvas"}
+clipboard = "0.3"
 canvas_traits = {path = "../canvas_traits"}
 compositing = {path = "../compositing"}
 debugger = {path = "../debugger"}
 devtools_traits = {path = "../devtools_traits"}
-euclid = "0.11"
+euclid = "0.13"
 gfx = {path = "../gfx"}
 gfx_traits = {path = "../gfx_traits"}
+hyper = "0.10"
 ipc-channel = "0.7"
 itertools = "0.5"
 layout_traits = {path = "../layout_traits"}

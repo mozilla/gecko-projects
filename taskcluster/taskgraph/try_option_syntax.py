@@ -120,9 +120,9 @@ UNITTEST_PLATFORM_PRETTY_NAMES = {
     'Ubuntu': ['linux32', 'linux64', 'linux64-asan'],
     'x64': ['linux64', 'linux64-asan'],
     'Android 4.3': ['android-4.3-arm7-api-15'],
+    '10.10': ['macosx64'],
     # other commonly-used substrings for platforms not yet supported with
     # in-tree taskgraphs:
-    # '10.10': [..TODO..],
     # '10.10.5': [..TODO..],
     # '10.6': [..TODO..],
     # '10.8': [..TODO..],
@@ -194,20 +194,18 @@ def escape_whitespace_in_brackets(input_str):
     return result
 
 
-def find_try_idx(message):
+def split_try_msg(message):
+    try:
+        try_idx = message.index('try:')
+    except ValueError:
+        return []
+    message = message[try_idx:].split('\n')[0]
     # shlex used to ensure we split correctly when giving values to argparse.
-    parts = shlex.split(escape_whitespace_in_brackets(message))
-    try_idx = None
-    for idx, part in enumerate(parts):
-        if part == TRY_DELIMITER:
-            try_idx = idx
-            break
-
-    return try_idx, parts
+    return shlex.split(escape_whitespace_in_brackets(message))
 
 
 def parse_message(message):
-    try_idx, parts = find_try_idx(message)
+    parts = split_try_msg(message)
 
     # Argument parser based on try flag flags
     parser = argparse.ArgumentParser()
@@ -240,7 +238,6 @@ def parse_message(message):
 
     # In order to run test jobs multiple times
     parser.add_argument('--rebuild', dest='trigger_tests', type=int, default=1)
-    parts = parts[try_idx:] if try_idx is not None else []
     args, _ = parser.parse_known_args(parts)
     return args
 
@@ -290,8 +287,8 @@ class TryOptionSyntax(object):
         self.tag = None
         self.no_retry = False
 
-        try_idx, _ = find_try_idx(message)
-        if try_idx is None:
+        parts = split_try_msg(message)
+        if not parts:
             return None
 
         args = parse_message(message)
@@ -586,9 +583,16 @@ class TryOptionSyntax(object):
 
         job_try_name = attr('job_try_name')
         if job_try_name:
-            if self.jobs is None or job_try_name in self.jobs:
+            # Beware the subtle distinction between [] and None for self.jobs and self.platforms.
+            # They will be [] if there was no try syntax, and None if try syntax was detected but
+            # they remained unspecified.
+            if self.jobs and job_try_name not in self.jobs:
+                return False
+            elif not self.jobs and attr('build_platform'):
                 if self.platforms is None or attr('build_platform') in self.platforms:
                     return True
+                return False
+            return True
         elif attr('kind') == 'test':
             return match_test(self.unittests, 'unittest_try_name') \
                  or match_test(self.talos, 'talos_try_name')

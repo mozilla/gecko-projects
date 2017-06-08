@@ -197,7 +197,7 @@ pref("dom.gamepad.non_standard_events.enabled", false);
 #else
 pref("dom.gamepad.non_standard_events.enabled", true);
 #endif
-pref("dom.gamepad.extensions.enabled", false);
+pref("dom.gamepad.extensions.enabled", true);
 
 // If this is true, TextEventDispatcher dispatches keydown and keyup events
 // even during composition (keypress events are never fired during composition
@@ -217,7 +217,20 @@ pref("dom.script_loader.bytecode_cache.enabled", false); // Not tuned yet.
 
 // Ignore the heuristics of the bytecode cache, and always record on the first
 // visit. (used for testing purposes).
-pref("dom.script_loader.bytecode_cache.eager", false);
+
+// Choose one strategy to use to decide when the bytecode should be encoded and
+// saved. The following strategies are available right now:
+//   * -2 : (reader mode) The bytecode cache would be read, but it would never
+//          be saved.
+//   * -1 : (eager mode) The bytecode would be saved as soon as the script is
+//          seen for the first time, independently of the size or last access
+//          time.
+//   *  0 : (default) The bytecode would be saved in order to minimize the
+//          page-load time.
+//
+// Other values might lead to experimental strategies. For more details, have a
+// look at: ScriptLoader::ShouldCacheBytecode function.
+pref("dom.script_loader.bytecode_cache.strategy", 0);
 
 // Fastback caching - if this pref is negative, then we calculate the number
 // of content viewers to cache based on the amount of available memory.
@@ -312,6 +325,22 @@ pref("media.cache_resume_threshold", 30);
 // amounts of network bandwidth prefetching huge videos.
 pref("media.cache_readahead_limit", 60);
 
+// Cache size hint (in bytes) for each MediaResourceIndex.
+// 0 -> no cache. Will use next power of 2, clamped to 32B-128KB.
+pref("media.cache.resource-index", 8192);
+
+// We'll throttle the download if the download rate is throttle-factor times
+// the estimated playback rate, AND we satisfy the cache readahead_limit
+// above. The estimated playback rate is time_duration/length_in_bytes.
+// This means we'll only throttle the download if there's no concern that
+// throttling would cause us to stop and buffer.
+pref("media.throttle-factor", 2);
+// By default, we'll throttle media download once we've reached the the
+// readahead_limit if the download is fast. This pref toggles the "and the
+// download is fast" check off, so that we can always throttle the download
+// once the readaheadd limit is reached even on a slow network.
+pref("media.throttle-regardless-of-download-rate", false);
+
 // Master HTML5 media volume scale.
 pref("media.volume_scale", "1.0");
 
@@ -325,9 +354,6 @@ pref("media.play-stand-alone", true);
 pref("media.hardware-video-decoding.enabled", true);
 pref("media.hardware-video-decoding.force-enabled", false);
 
-#ifdef MOZ_DIRECTSHOW
-pref("media.directshow.enabled", true);
-#endif
 #ifdef MOZ_FMP4
 pref("media.mp4.enabled", true);
 // Specifies whether the PDMFactory can create a test decoder that
@@ -341,10 +367,11 @@ pref("media.wmf.decoder.thread-count", -1);
 pref("media.wmf.low-latency.enabled", false);
 pref("media.wmf.skip-blacklist", false);
 #ifdef NIGHTLY_BUILD
-pref("media.wmf.vp9.enabled", true);
+pref("media.wmf.vp9.force.enabled", true);
 #else
-pref("media.wmf.vp9.enabled", false);
+pref("media.wmf.vp9.force.enabled", false);
 #endif
+pref("media.wmf.vp9.enabled", true);
 pref("media.wmf.allow-unsupported-resolutions", false);
 pref("media.windows-media-foundation.allow-d3d11-dxva", true);
 pref("media.wmf.disable-d3d11-for-dlls", "igd11dxva64.dll: 20.19.15.4463, 20.19.15.4454, 20.19.15.4444, 20.19.15.4416, 20.19.15.4404, 20.19.15.4390, 20.19.15.4380, 20.19.15.4377, 20.19.15.4364, 20.19.15.4360, 20.19.15.4352, 20.19.15.4331, 20.19.15.4326, 20.19.15.4300; igd10iumd32.dll: 20.19.15.4444, 20.19.15.4424, 20.19.15.4409, 20.19.15.4390, 20.19.15.4380, 20.19.15.4360, 10.18.10.4358, 20.19.15.4331, 20.19.15.4312, 20.19.15.4300, 10.18.15.4281, 10.18.15.4279, 10.18.10.4276, 10.18.15.4268, 10.18.15.4256, 10.18.10.4252, 10.18.15.4248, 10.18.14.4112, 10.18.10.3958, 10.18.10.3496, 10.18.10.3431, 10.18.10.3412, 10.18.10.3355, 9.18.10.3234, 9.18.10.3071, 9.18.10.3055, 9.18.10.3006; igd10umd32.dll: 9.17.10.4229, 9.17.10.3040, 9.17.10.2857, 8.15.10.2274, 8.15.10.2272, 8.15.10.2246, 8.15.10.1840, 8.15.10.1808; igd10umd64.dll: 9.17.10.4229, 9.17.10.2857, 10.18.10.3496; isonyvideoprocessor.dll: 4.1.2247.8090, 4.1.2153.6200; tosqep.dll: 1.2.15.526, 1.1.12.201, 1.0.11.318, 1.0.11.215, 1.0.10.1224; tosqep64.dll: 1.1.12.201, 1.0.11.215; nvwgf2um.dll: 10.18.13.6510, 10.18.13.5891, 10.18.13.5887, 10.18.13.5582, 10.18.13.5382, 9.18.13.4195, 9.18.13.3165; atidxx32.dll: 21.19.151.3, 21.19.142.257, 21.19.137.514, 21.19.137.1, 21.19.134.1, 21.19.128.7, 21.19.128.4, 20.19.0.32837, 20.19.0.32832, 8.17.10.682, 8.17.10.671, 8.17.10.661, 8.17.10.648, 8.17.10.644, 8.17.10.625, 8.17.10.605, 8.17.10.581, 8.17.10.569, 8.17.10.560, 8.17.10.545, 8.17.10.539, 8.17.10.531, 8.17.10.525, 8.17.10.520, 8.17.10.519, 8.17.10.514, 8.17.10.511, 8.17.10.494, 8.17.10.489, 8.17.10.483, 8.17.10.453, 8.17.10.451, 8.17.10.441, 8.17.10.436, 8.17.10.432, 8.17.10.425, 8.17.10.418, 8.17.10.414, 8.17.10.401, 8.17.10.395, 8.17.10.385, 8.17.10.378, 8.17.10.362, 8.17.10.355, 8.17.10.342, 8.17.10.331, 8.17.10.318, 8.17.10.310, 8.17.10.286, 8.17.10.269, 8.17.10.261, 8.17.10.247, 8.17.10.240, 8.15.10.212; atidxx64.dll: 21.19.151.3, 21.19.142.257, 21.19.137.514, 21.19.137.1, 21.19.134.1, 21.19.128.7, 21.19.128.4, 20.19.0.32832, 8.17.10.682, 8.17.10.661, 8.17.10.644, 8.17.10.625; nvumdshim.dll: 10.18.13.6822");
@@ -655,13 +682,8 @@ pref("apz.axis_lock.breakout_threshold", "0.03125");  // 1/32 inches
 pref("apz.axis_lock.breakout_angle", "0.3926991");    // PI / 8 (22.5 degrees)
 pref("apz.axis_lock.direct_pan_angle", "1.047197");   // PI / 3 (60 degrees)
 pref("apz.content_response_timeout", 400);
-#ifdef NIGHTLY_BUILD
 pref("apz.drag.enabled", true);
 pref("apz.drag.initial.enabled", true);
-#else
-pref("apz.drag.enabled", false);
-pref("apz.drag.initial.enabled", false);
-#endif
 pref("apz.danger_zone_x", 50);
 pref("apz.danger_zone_y", 100);
 pref("apz.disable_for_scroll_linked_effects", false);
@@ -1221,6 +1243,14 @@ pref("dom.send_after_paint_to_content", false);
 pref("dom.min_timeout_value", 4);
 // And for background windows
 pref("dom.min_background_timeout_value", 1000);
+// Timeout clamp in ms for tracking timeouts we clamp
+// Note that this requires the privacy.trackingprotection.annotate_channels pref to be on in order to have any effect.
+pref("dom.min_tracking_timeout_value", 4);
+// And for background windows
+// Note that this requires the privacy.trackingprotection.annotate_channels pref to be on in order to have any effect.
+pref("dom.min_tracking_background_timeout_value", 10000);
+// Delay in ms from document load until we start throttling tracking timeouts.
+pref("dom.timeout.tracking_throttling_delay", 30000);
 
 // Don't use new input types
 pref("dom.experimental_forms", false);
@@ -1232,8 +1262,12 @@ pref("dom.forms.number", true);
 // platforms which don't have a color picker implemented yet.
 pref("dom.forms.color", true);
 
-// Support for input type=date and type=time. By default, disabled.
+// Support for input type=date and type=time. Enabled by default on Nightly.
+#ifdef NIGHTLY_BUILD
+pref("dom.forms.datetime", true);
+#else
 pref("dom.forms.datetime", false);
+#endif
 
 // Support for input type=month, type=week and type=datetime-local. By default,
 // disabled.
@@ -1301,6 +1335,14 @@ pref("privacy.trackingprotection.enabled",  false);
 pref("privacy.trackingprotection.pbmode.enabled",  true);
 // Annotate channels based on the tracking protection list in all modes
 pref("privacy.trackingprotection.annotate_channels",  true);
+// First Party Isolation (double keying), disabled by default
+pref("privacy.firstparty.isolate",                        false);
+// If false, two windows in the same domain with different first party domains
+// (top level URLs) can access resources through window.opener.
+// This pref is effective only when "privacy.firstparty.isolate" is true.
+pref("privacy.firstparty.isolate.restrict_opener_access", true);
+// Anti-fingerprinting, disabled by default
+pref("privacy.resistFingerprinting", false);
 // Lower the priority of network loads for resources on the tracking protection list.
 // Note that this requires the privacy.trackingprotection.annotate_channels pref to be on in order to have any effect.
 #ifdef NIGHTLY_BUILD
@@ -1668,8 +1710,8 @@ pref("network.http.max_response_header_size", 393216);
 
 // If we should attempt to race the cache and network
 pref("network.http.rcwn.enabled", false);
-pref("network.http.rcwn.cache_queue_normal_threshold", 50);
-pref("network.http.rcwn.cache_queue_priority_threshold", 10);
+pref("network.http.rcwn.cache_queue_normal_threshold", 8);
+pref("network.http.rcwn.cache_queue_priority_threshold", 2);
 // We might attempt to race the cache with the network only if a resource
 // is smaller than this size.
 pref("network.http.rcwn.small_resource_size_kb", 256);
@@ -2055,11 +2097,15 @@ pref("network.auth.subresource-img-cross-origin-http-auth-allow", true);
 // in that case default credentials will always be used.
 pref("network.auth.private-browsing-sso", false);
 
-// Control how the throttling service works - number of ms that each
+// Control how throttling of http responses works - number of ms that each
 // suspend and resume period lasts (prefs named appropriately)
-pref("network.throttle.suspend-for", 3000);
-pref("network.throttle.resume-for", 200);
-pref("network.throttle.enable", true);
+pref("network.http.throttle.enable", true);
+pref("network.http.throttle.suspend-for", 3000);
+pref("network.http.throttle.resume-for", 200);
+// Delay we resume throttled background responses after the last unthrottled
+// response has finished.  Prevents resuming too soon during an active page load
+// at which sub-resource reqeusts quickly come and go.
+pref("network.http.throttle.resume-background-in", 400);
 
 pref("permissions.default.image",           1); // 1-Accept, 2-Deny, 3-dontAcceptForeign
 
@@ -2809,9 +2855,6 @@ pref("layout.css.scope-pseudo.enabled", true);
 // Is support for background-blend-mode enabled?
 pref("layout.css.background-blend-mode.enabled", true);
 
-// Is support for background-clip:text enabled?
-pref("layout.css.background-clip-text.enabled", true);
-
 // Is support for CSS text-combine-upright (tate-chu-yoko) enabled?
 pref("layout.css.text-combine-upright.enabled", true);
 // Is support for CSS text-combine-upright: digits 2-4 enabled?
@@ -2842,13 +2885,6 @@ pref("layout.css.grid-template-subgrid-value.enabled", false);
 
 // Is support for CSS contain enabled?
 pref("layout.css.contain.enabled", false);
-
-// Is support for CSS display:flow-root enabled?
-pref("layout.css.display-flow-root.enabled", true);
-
-// Is support for CSS [-moz-]appearance enabled for web content?
-pref("layout.css.appearance.enabled", true);
-pref("layout.css.moz-appearance.enabled", true);
 
 // Is support for CSS box-decoration-break enabled?
 pref("layout.css.box-decoration-break.enabled", true);
@@ -2898,11 +2934,7 @@ pref("layout.css.control-characters.visible", true);
 pref("layout.css.column-span.enabled", false);
 
 // Is effect of xml:base disabled for style attribute?
-#ifdef RELEASE_OR_BETA
-pref("layout.css.style-attr-with-xml-base.disabled", false);
-#else
 pref("layout.css.style-attr-with-xml-base.disabled", true);
-#endif
 
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
@@ -3105,21 +3137,10 @@ pref("dom.ipc.plugins.unloadTimeoutSecs", 30);
 // Asynchronous plugin initialization is on hold.
 pref("dom.ipc.plugins.asyncInit.enabled", false);
 
-#ifdef RELEASE_OR_BETA
-#ifdef _AMD64_
 // Allow Flash async drawing mode in 64-bit release builds
 pref("dom.ipc.plugins.asyncdrawing.enabled", true);
 // Force the accelerated direct path for a subset of Flash wmode values
 pref("dom.ipc.plugins.forcedirect.enabled", true);
-#else
-// Disable async drawing for 32-bit release builds
-pref("dom.ipc.plugins.asyncdrawing.enabled", false);
-#endif // _AMD64_
-#else
-// Enable in dev channels
-pref("dom.ipc.plugins.asyncdrawing.enabled", true);
-pref("dom.ipc.plugins.forcedirect.enabled", true);
-#endif
 
 #ifdef RELEASE_OR_BETA
 pref("dom.ipc.processCount", 1);
@@ -4718,7 +4739,7 @@ pref("layers.tiles.adjust", true);
 // 0  -> full-tilt mode: Recomposite even if not transaction occured.
 pref("layers.offmainthreadcomposition.frame-rate", -1);
 
-#ifdef XP_MACOSX
+#if defined(XP_MACOSX) || defined (OS_OPENBSD)
 pref("layers.enable-tiles", true);
 pref("layers.tile-width", 512);
 pref("layers.tile-height", 512);
@@ -4833,9 +4854,11 @@ pref("extensions.webextensions.themes.enabled", false);
 pref("extensions.webextensions.themes.icons.enabled", false);
 pref("extensions.webextensions.remote", false);
 
+pref("layers.popups.compositing.enabled", false);
+
 // Report Site Issue button
 pref("extensions.webcompat-reporter.newIssueEndpoint", "https://webcompat.com/issues/new");
-#ifdef NIGHTLY_BUILD
+#ifndef RELEASE_OR_BETA
 pref("extensions.webcompat-reporter.enabled", true);
 #else
 pref("extensions.webcompat-reporter.enabled", false);
@@ -5125,41 +5148,11 @@ pref("gfx.vr.osvr.clientLibPath", "");
 pref("gfx.vr.osvr.clientKitLibPath", "");
 // Puppet device, used for simulating VR hardware within tests and dev tools
 pref("dom.vr.puppet.enabled", false);
+// Allow displaying the result of vr submitframe (0: disable, 1: store the
+// result as a base64 image, 2: show it on the screen).
+pref("dom.vr.puppet.submitframe", 0);
+// VR test system.
 pref("dom.vr.test.enabled", false);
-// MMS UA Profile settings
-pref("wap.UAProf.url", "");
-pref("wap.UAProf.tagname", "x-wap-profile");
-
-// MMS version 1.1 = 0x11 (or decimal 17)
-// MMS version 1.3 = 0x13 (or decimal 19)
-// @see OMA-TS-MMS_ENC-V1_3-20110913-A clause 7.3.34
-pref("dom.mms.version", 19);
-
-pref("dom.mms.requestStatusReport", true);
-
-// Retrieval mode for MMS
-// manual: Manual retrieval mode.
-// automatic: Automatic retrieval mode even in roaming.
-// automatic-home: Automatic retrieval mode in home network.
-// never: Never retrieval mode.
-pref("dom.mms.retrieval_mode", "manual");
-
-pref("dom.mms.sendRetryCount", 3);
-pref("dom.mms.sendRetryInterval", "10000,60000,180000");
-
-pref("dom.mms.retrievalRetryCount", 4);
-pref("dom.mms.retrievalRetryIntervals", "60000,300000,600000,1800000");
-// Numeric default service id for MMS API calls with |serviceId| parameter
-// omitted.
-pref("dom.mms.defaultServiceId", 0);
-// Debug enabler for MMS.
-pref("mms.debugging.enabled", false);
-
-// Request read report while sending MMS.
-pref("dom.mms.requestReadReport", true);
-
-// Number of RadioInterface instances to create.
-pref("ril.numRadioInterfaces", 0);
 
 // If the user puts a finger down on an element and we think the user
 // might be executing a pan gesture, how long do we wait before
@@ -5665,14 +5658,17 @@ pref("security.mixed_content.send_hsts_priming", true);
 pref("security.mixed_content.use_hsts", true);
 #endif
 // Approximately 1 week default cache for HSTS priming failures, in seconds
-pref ("security.mixed_content.hsts_priming_cache_timeout", 604800);
+pref("security.mixed_content.hsts_priming_cache_timeout", 604800);
 // Force the channel to timeout in 3 seconds if we have not received
 // expects a time in milliseconds
-pref ("security.mixed_content.hsts_priming_request_timeout", 3000);
+pref("security.mixed_content.hsts_priming_request_timeout", 3000);
 
-// If true, data: URIs inherit the principal (security context) of the parent.
-// If false, data: URIs use a NullPrincipal as the security context.
-pref ("security.data_uri.inherit_security_context", true);
+// TODO: Bug 1324406: Treat 'data:' documents as unique, opaque origins
+// If true, data: URIs will be treated as unique opaque origins, hence will use
+// a NullPrincipal as the security context.
+// Otherwise it will inherit the origin from parent node, this is the legacy
+// behavior of Firefox.
+pref("security.data_uri.unique_opaque_origin", false);
 
 // Disable Storage api in release builds.
 #if defined(NIGHTLY_BUILD) && !defined(MOZ_WIDGET_ANDROID)
@@ -5709,6 +5705,9 @@ pref("dom.moduleScripts.enabled", false);
 // callback are allowed to run before yielding the event loop.
 pref("dom.timeout.max_consecutive_callbacks_ms", 4);
 
+// Use this preference to house "Payment Request API" during development
+pref("dom.payments.request.enabled", false);
+
 #ifdef FUZZING
 pref("fuzzing.enabled", false);
 #endif
@@ -5735,6 +5734,7 @@ pref("layers.advanced.outline-layers", 2);
 pref("layers.advanced.solid-color", 2);
 pref("layers.advanced.table", 2);
 pref("layers.advanced.text-layers", 2);
+pref("layers.advanced.filter-layers", 2);
 
 // Whether webrender should be used as much as possible.
 pref("gfx.webrendest.enabled", false);

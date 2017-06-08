@@ -69,8 +69,7 @@ pub enum TextureSampler {
     CacheRGBA8,
     Data16,
     Data32,
-    Data64,
-    Data128,
+    ResourceCache,
     Layers,
     RenderTasks,
     Geometry,
@@ -118,22 +117,8 @@ pub enum VertexAttribute {
     Color,
     ColorTexCoord,
     // instance-frequency primitive attributes
-    GlobalPrimId,
-    PrimitiveAddress,
-    TaskIndex,
-    ClipTaskIndex,
-    LayerIndex,
-    ElementIndex,
-    UserData,
-    ZIndex,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum ClearAttribute {
-    // vertex frequency
-    Position,
-    // instance frequency
-    Rectangle,
+    Data0,
+    Data1,
 }
 
 #[derive(Clone, Copy, Debug)]

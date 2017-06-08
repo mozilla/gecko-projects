@@ -17,73 +17,15 @@ const EXPECTED_REFLOWS = [
   // by IME and that will cause reflow.
   [
     "select@chrome://global/content/bindings/textbox.xml",
-    "focusAndSelectUrlBar@chrome://browser/content/browser.js",
-    "openLinkIn@chrome://browser/content/utilityOverlay.js",
-    "openUILinkIn@chrome://browser/content/utilityOverlay.js",
-    "BrowserOpenTab@chrome://browser/content/browser.js",
-  ],
-
-  // selection change notification may cause querying the focused editor content
-  // by IME and that will cause reflow.
-  [
-    "select@chrome://global/content/bindings/textbox.xml",
-    "focusAndSelectUrlBar@chrome://browser/content/browser.js",
-    "openLinkIn@chrome://browser/content/utilityOverlay.js",
-    "openUILinkIn@chrome://browser/content/utilityOverlay.js",
-    "BrowserOpenTab@chrome://browser/content/browser.js",
-  ],
-
-  [
-    "select@chrome://global/content/bindings/textbox.xml",
-    "focusAndSelectUrlBar@chrome://browser/content/browser.js",
-    "openLinkIn@chrome://browser/content/utilityOverlay.js",
-    "openUILinkIn@chrome://browser/content/utilityOverlay.js",
-    "BrowserOpenTab@chrome://browser/content/browser.js",
-  ],
-
-  [
-    "openLinkIn@chrome://browser/content/utilityOverlay.js",
-    "openUILinkIn@chrome://browser/content/utilityOverlay.js",
-    "BrowserOpenTab@chrome://browser/content/browser.js",
   ],
 ];
-
-if (!gMultiProcessBrowser) {
-  EXPECTED_REFLOWS.push(
-    [
-      "_adjustFocusAfterTabSwitch@chrome://browser/content/tabbrowser.xml",
-      "updateCurrentBrowser@chrome://browser/content/tabbrowser.xml",
-      "onselect@chrome://browser/content/browser.xul",
-    ],
-  );
-}
 
 /*
  * This test ensures that there are no unexpected
  * uninterruptible reflows when opening new tabs.
  */
 add_task(async function() {
-  // If we've got a preloaded browser, get rid of it so that it
-  // doesn't interfere with the test if it's loading. We have to
-  // do this before we disable preloading or changing the new tab
-  // URL, otherwise _getPreloadedBrowser will return null, despite
-  // the preloaded browser existing.
-  let preloaded = gBrowser._getPreloadedBrowser();
-  if (preloaded) {
-    preloaded.remove();
-  }
-
-  await SpecialPowers.pushPrefEnv({
-    set: [["browser.newtab.preload", false]],
-  });
-
-  let aboutNewTabService = Cc["@mozilla.org/browser/aboutnewtab-service;1"]
-                             .getService(Ci.nsIAboutNewTabService);
-  aboutNewTabService.newTabURL = "about:blank";
-
-  registerCleanupFunction(() => {
-    aboutNewTabService.resetNewTabURL();
-  });
+  await ensureNoPreloadedBrowser();
 
   // Because the tab strip is a scrollable frame, we can't use the
   // default dirtying function from withReflowObserver and reliably
@@ -105,4 +47,3 @@ add_task(async function() {
   await BrowserTestUtils.removeTab(gBrowser.selectedTab);
   await switchDone;
 });
-

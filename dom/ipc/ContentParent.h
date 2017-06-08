@@ -22,6 +22,7 @@
 #include "mozilla/UniquePtr.h"
 
 #include "nsDataHashtable.h"
+#include "nsPluginTags.h"
 #include "nsFrameMessageManager.h"
 #include "nsHashKeys.h"
 #include "nsIObserver.h"
@@ -30,7 +31,6 @@
 #include "nsIDOMGeoPositionErrorCallback.h"
 #include "nsRefPtrHashtable.h"
 #include "PermissionMessageUtils.h"
-#include "ProfilerControllingProcess.h"
 #include "DriverCrashGuard.h"
 
 #define CHILD_PROCESS_SHUTDOWN_MESSAGE NS_LITERAL_STRING("child-process-shutdown")
@@ -56,9 +56,6 @@ class nsIWidget;
 
 namespace mozilla {
 class PRemoteSpellcheckEngineParent;
-#ifdef MOZ_GECKO_PROFILER
-class CrossProcessProfilerController;
-#endif
 
 #if defined(XP_LINUX) && defined(MOZ_CONTENT_SANDBOX)
 class SandboxBroker;
@@ -114,7 +111,6 @@ class ContentParent final : public PContentParent
                           , public mozilla::LinkedListElement<ContentParent>
                           , public gfx::GPUProcessListener
                           , public mozilla::MemoryReportingProcess
-                          , public mozilla::ProfilerControllingProcess
 {
   typedef mozilla::ipc::GeckoChildProcessHost GeckoChildProcessHost;
   typedef mozilla::ipc::OptionalURIParams OptionalURIParams;
@@ -181,6 +177,14 @@ public:
                              hal::ProcessPriority aPriority =
                              hal::ProcessPriority::PROCESS_PRIORITY_FOREGROUND,
                              ContentParent* aOpener = nullptr);
+
+  /**
+   * Get or create a content process for a JS plugin. aPluginID is the id of the JS plugin
+   * (@see nsFakePlugin::mId). There is a maximum of one process per JS plugin.
+   */
+  static already_AddRefed<ContentParent>
+  GetNewOrUsedJSPluginProcess(uint32_t aPluginID,
+                              const hal::ProcessPriority& aPriority);
 
   /**
    * Get or create a content process for the given TabContext.  aFrameElement
@@ -294,6 +298,8 @@ public:
                                                  uint32_t* aRunID,
                                                  Endpoint<PPluginModuleParent>* aEndpoint) override;
 
+  virtual mozilla::ipc::IPCResult RecvMaybeReloadPlugins() override;
+
   virtual mozilla::ipc::IPCResult RecvConnectPluginBridge(const uint32_t& aPluginId,
                                                           nsresult* aRv,
                                                           Endpoint<PPluginModuleParent>* aEndpoint) override;
@@ -301,21 +307,11 @@ public:
   virtual mozilla::ipc::IPCResult RecvGetBlocklistState(const uint32_t& aPluginId,
                                                         uint32_t* aIsBlocklisted) override;
 
-  virtual mozilla::ipc::IPCResult RecvFindPlugins(const uint32_t& aPluginEpoch,
-                                                  nsresult* aRv,
-                                                  nsTArray<PluginTag>* aPlugins,
-                                                  uint32_t* aNewPluginEpoch) override;
-
   virtual mozilla::ipc::IPCResult RecvUngrabPointer(const uint32_t& aTime) override;
 
   virtual mozilla::ipc::IPCResult RecvRemovePermission(const IPC::Principal& aPrincipal,
                                                        const nsCString& aPermissionType,
                                                        nsresult* aRv) override;
-
-  void SendStartProfiler(const ProfilerInitParams& aParams) override;
-  void SendStopProfiler() override;
-  void SendPauseProfiler(const bool& aPause) override;
-  void SendGatherProfile() override;
 
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(ContentParent, nsIObserver)
 
@@ -370,6 +366,10 @@ public:
   virtual bool IsForBrowser() const override
   {
     return mIsForBrowser;
+  }
+  virtual bool IsForJSPlugin() const override
+  {
+    return mJSPluginID != nsFakePluginTag::NOT_JSPLUGIN;
   }
 
   GeckoChildProcessHost* Process() const
@@ -482,18 +482,12 @@ public:
                             nsICycleCollectorLogSink* aSink,
                             nsIDumpGCAndCCLogsCallback* aCallback);
 
-  virtual PBlobParent*
-  SendPBlobConstructor(PBlobParent* aActor,
-                       const BlobConstructorParams& aParams) override;
-
   virtual mozilla::ipc::IPCResult RecvUnregisterRemoteFrame(const TabId& aTabId,
                                                             const ContentParentId& aCpId,
                                                             const bool& aMarkedDestroying) override;
 
   virtual mozilla::ipc::IPCResult RecvNotifyTabDestroying(const TabId& aTabId,
                                                           const ContentParentId& aCpId) override;
-
-  virtual mozilla::ipc::IPCResult RecvTabChildNotReady(const TabId& aTabId) override;
 
   nsTArray<TabContext> GetManagedTabContext();
 
@@ -549,7 +543,8 @@ public:
                    nsCString* aURLToLoad,
                    layers::TextureFactoryIdentifier* aTextureFactoryIdentifier,
                    uint64_t* aLayersId,
-                   mozilla::layers::CompositorOptions* aCompositorOptions) override;
+                   mozilla::layers::CompositorOptions* aCompositorOptions,
+                   uint32_t* aMaxTouchPoints) override;
 
   virtual mozilla::ipc::IPCResult RecvCreateWindowInDifferentProcess(
     PBrowserParent* aThisTab,
@@ -648,9 +643,6 @@ public:
                     nsresult* aRv,
                     nsTArray<nsCString>* aResults) override;
 
-  virtual mozilla::ipc::IPCResult
-  RecvAllocPipelineId(RefPtr<AllocPipelineIdPromise>&& aPromise) override;
-
   // Use the PHangMonitor channel to ask the child to repaint a tab.
   void ForceTabPaint(TabParent* aTabParent, uint64_t aLayerObserverEpoch);
 
@@ -685,6 +677,7 @@ private:
    */
   static nsClassHashtable<nsStringHashKey, nsTArray<ContentParent*>>* sBrowserContentParents;
   static nsTArray<ContentParent*>* sPrivateContent;
+  static nsDataHashtable<nsUint32HashKey, ContentParent*> *sJSPluginContentParents;
   static StaticAutoPtr<LinkedList<ContentParent> > sContentParents;
 
   static void JoinProcessesIOThread(const nsTArray<ContentParent*>* aProcesses,
@@ -728,8 +721,17 @@ private:
 
   FORWARD_SHMEM_ALLOCATOR_TO(PContentParent)
 
+  explicit ContentParent(int32_t aPluginID)
+    : ContentParent(nullptr, EmptyString(), aPluginID)
+  {}
   ContentParent(ContentParent* aOpener,
-                const nsAString& aRemoteType);
+                const nsAString& aRemoteType)
+    : ContentParent(aOpener, aRemoteType, nsFakePluginTag::NOT_JSPLUGIN)
+  {}
+
+  ContentParent(ContentParent* aOpener,
+                const nsAString& aRemoteType,
+                int32_t aPluginID);
 
   // Launch the subprocess and associated initialization.
   // Returns false if the process fails to start.
@@ -748,12 +750,6 @@ private:
   // should be send from this function. This function should only be
   // called after the process has been transformed to browser.
   void ForwardKnownInfo();
-
-  // Set the child process's priority and then check whether the child is
-  // still alive.  Returns true if the process is still alive, and false
-  // otherwise.  If you pass a FOREGROUND* priority here, it's (hopefully)
-  // unlikely that the process will be killed after this point.
-  bool SetPriorityAndCheckIsAlive(hal::ProcessPriority aPriority);
 
   /**
    * Decide whether the process should be kept alive even when it would normally
@@ -844,16 +840,6 @@ private:
 
   virtual bool DeallocPBrowserParent(PBrowserParent* frame) override;
 
-  virtual PBlobParent*
-  AllocPBlobParent(const BlobConstructorParams& aParams) override;
-
-  virtual bool DeallocPBlobParent(PBlobParent* aActor) override;
-
-  virtual PMemoryStreamParent*
-  AllocPMemoryStreamParent(const uint64_t& aSize) override;
-
-  virtual bool DeallocPMemoryStreamParent(PMemoryStreamParent* aActor) override;
-
   virtual PIPCBlobInputStreamParent*
   SendPIPCBlobInputStreamConstructor(PIPCBlobInputStreamParent* aActor,
                                      const nsID& aID,
@@ -865,10 +851,6 @@ private:
 
   virtual bool
   DeallocPIPCBlobInputStreamParent(PIPCBlobInputStreamParent* aActor) override;
-
-  virtual mozilla::ipc::IPCResult
-  RecvPBlobConstructor(PBlobParent* aActor,
-                       const BlobConstructorParams& params) override;
 
   virtual mozilla::ipc::IPCResult RecvNSSU2FTokenIsCompatibleVersion(const nsString& aVersion,
                                                                      bool* aIsCompatible) override;
@@ -1087,7 +1069,8 @@ private:
                                                           const TabId& aTabId,
                                                           uint64_t* aId) override;
 
-  virtual mozilla::ipc::IPCResult RecvDeallocateLayerTreeId(const uint64_t& aId) override;
+  virtual mozilla::ipc::IPCResult RecvDeallocateLayerTreeId(const ContentParentId& aCpId,
+                                                            const uint64_t& aId) override;
 
   virtual mozilla::ipc::IPCResult RecvGraphicsError(const nsCString& aError) override;
 
@@ -1131,8 +1114,7 @@ private:
   virtual mozilla::ipc::IPCResult RecvUpdateDropEffect(const uint32_t& aDragAction,
                                                        const uint32_t& aDropEffect) override;
 
-  virtual mozilla::ipc::IPCResult RecvProfile(const nsCString& aProfile,
-                                              const bool& aIsExitProfile) override;
+  virtual mozilla::ipc::IPCResult RecvShutdownProfile(const nsCString& aProfile) override;
 
   virtual mozilla::ipc::IPCResult RecvGetGraphicsDeviceInitData(ContentDeviceData* aOut) override;
 
@@ -1191,6 +1173,8 @@ public:
                                const bool& aMinimizeMemoryUsage,
                                const MaybeFileDesc& aDMDFile) override;
 
+  bool CanCommunicateWith(ContentParentId aOtherProcess);
+
 private:
 
   // If you add strong pointers to cycle collected objects here, be sure to
@@ -1205,6 +1189,12 @@ private:
 
   ContentParentId mChildID;
   int32_t mGeolocationWatchID;
+
+  // This contains the id for the JS plugin (@see nsFakePluginTag) if this is the
+  // ContentParent for a process containing iframes for that JS plugin.
+  // If this is not a ContentParent for a JS plugin then it contains the value
+  // nsFakePluginTag::NOT_JSPLUGIN.
+  int32_t mJSPluginID;
 
   nsCString mKillHardAnnotation;
 
@@ -1248,10 +1238,6 @@ private:
 #endif
 
   PProcessHangMonitorParent* mHangMonitorActor;
-
-#ifdef MOZ_GECKO_PROFILER
-  UniquePtr<mozilla::CrossProcessProfilerController> mProfilerController;
-#endif
 
   UniquePtr<gfx::DriverCrashGuard> mDriverCrashGuard;
   UniquePtr<MemoryReportRequestHost> mMemoryReportRequest;

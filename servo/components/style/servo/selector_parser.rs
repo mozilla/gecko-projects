@@ -16,7 +16,6 @@ use restyle_hints::ElementSnapshot;
 use selector_parser::{ElementExt, PseudoElementCascadeType, SelectorParser};
 use selectors::Element;
 use selectors::attr::{AttrSelectorOperation, NamespaceConstraint};
-use selectors::matching::{MatchingContext, MatchingMode};
 use selectors::parser::SelectorMethods;
 use selectors::visitor::SelectorVisitor;
 use std::borrow::Cow;
@@ -152,6 +151,12 @@ impl PseudoElement {
             PseudoElement::ServoInlineAbsolute => PseudoElementCascadeType::Precomputed,
         }
     }
+
+    /// Covert non-canonical pseudo-element to canonical one, and keep a
+    /// canonical one as it is.
+    pub fn canonical(&self) -> PseudoElement {
+        self.clone()
+    }
 }
 
 /// A non tree-structural pseudo-class.
@@ -262,6 +267,12 @@ impl NonTSPseudoClass {
     /// Returns true if the given pseudoclass should trigger style sharing cache revalidation.
     pub fn needs_cache_revalidation(&self) -> bool {
         self.state_flag().is_empty()
+    }
+
+    /// Returns true if the evaluation of the pseudo-class depends on the
+    /// element's attributes.
+    pub fn is_attr_based(&self) -> bool {
+        false
     }
 }
 
@@ -425,11 +436,11 @@ impl<'a> ::selectors::Parser for SelectorParser<'a> {
     }
 
     fn default_namespace(&self) -> Option<Namespace> {
-        self.namespaces.default.clone()
+        self.namespaces.default.as_ref().map(|&(ref ns, _)| ns.clone())
     }
 
     fn namespace_for_prefix(&self, prefix: &Prefix) -> Option<Namespace> {
-        self.namespaces.prefixes.get(prefix).cloned()
+        self.namespaces.prefixes.get(prefix).map(|&(ref ns, _)| ns.clone())
     }
 }
 
@@ -595,13 +606,6 @@ impl ServoElementSnapshot {
 }
 
 impl<E: Element<Impl=SelectorImpl> + Debug> ElementExt for E {
-    fn is_link(&self) -> bool {
-        let mut context = MatchingContext::new(MatchingMode::Normal, None);
-        self.match_non_ts_pseudo_class(&NonTSPseudoClass::AnyLink,
-                                       &mut context,
-                                       &mut |_, _| {})
-    }
-
     #[inline]
     fn matches_user_and_author_rules(&self) -> bool {
         true

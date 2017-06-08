@@ -3,10 +3,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#define BS_HEADER_VECS 4
+
 void main(void) {
     Primitive prim = load_primitive();
     BoxShadow bs = fetch_boxshadow(prim.prim_index);
-    RectWithSize segment_rect = fetch_instance_geometry(prim.sub_index);
+    RectWithSize segment_rect = fetch_instance_geometry(prim.prim_index + BS_HEADER_VECS + prim.user_data0);
 
     VertexInfo vi = write_vertex(segment_rect,
                                  prim.local_clip_rect,
@@ -15,7 +17,7 @@ void main(void) {
                                  prim.task,
                                  prim.local_rect.p0);
 
-    RenderTaskData child_task = fetch_render_task(prim.user_data.x);
+    RenderTaskData child_task = fetch_render_task(prim.user_data1);
     vUv.z = child_task.data1.x;
 
     // Constant offsets to inset from bilinear filtering border.

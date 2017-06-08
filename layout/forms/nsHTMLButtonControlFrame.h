@@ -19,8 +19,7 @@ class nsHTMLButtonControlFrame : public nsContainerFrame,
 {
 public:
   explicit nsHTMLButtonControlFrame(nsStyleContext* aContext)
-    : nsHTMLButtonControlFrame(aContext,
-                               mozilla::LayoutFrameType::HTMLButtonControl)
+    : nsHTMLButtonControlFrame(aContext, kClassID)
   {}
 
   ~nsHTMLButtonControlFrame();
@@ -28,7 +27,7 @@ public:
   virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
 
   NS_DECL_QUERYFRAME
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsHTMLButtonControlFrame)
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsDisplayListSet& aLists) override;
@@ -105,8 +104,7 @@ public:
                                      nsStyleChangeList& aChangeList,
                                      nsChangeHint aHintForThisFrame) override;
 protected:
-  nsHTMLButtonControlFrame(nsStyleContext* aContext,
-                           mozilla::LayoutFrameType aType);
+  nsHTMLButtonControlFrame(nsStyleContext* aContext, nsIFrame::ClassID aID);
 
   virtual bool IsInput() { return false; }
 

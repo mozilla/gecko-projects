@@ -82,7 +82,7 @@ AccessibleWrap::AccessibleWrap(nsIContent* aContent, DocAccessible* aDoc) :
 AccessibleWrap::~AccessibleWrap()
 {
   if (mID != kNoID) {
-    sIDGen.ReleaseID(this);
+    sIDGen.ReleaseID(WrapNotNull(this));
   }
 }
 
@@ -118,6 +118,14 @@ AccessibleWrap::QueryInterface(REFIID iid, void** ppv)
 
   *ppv = nullptr;
 
+  if (IID_IClientSecurity == iid) {
+    // Some code might QI(IID_IClientSecurity) to detect whether or not we are
+    // a proxy. Right now that can potentially happen off the main thread, so we
+    // look for this condition immediately so that we don't trigger other code
+    // that might not be thread-safe.
+    return E_NOINTERFACE;
+  }
+
   if (IID_IUnknown == iid)
     *ppv = static_cast<IAccessible*>(this);
   else if (IID_IDispatch == iid || IID_IAccessible == iid)
@@ -134,7 +142,7 @@ AccessibleWrap::QueryInterface(REFIID iid, void** ppv)
     if (IsDefunct() || (!HasOwnContent() && !IsDoc()))
       return E_NOINTERFACE;
 
-    *ppv = static_cast<ISimpleDOMNode*>(new sdnAccessible(GetNode()));
+    *ppv = static_cast<ISimpleDOMNode*>(new sdnAccessible(WrapNotNull(this)));
   }
 
   if (nullptr == *ppv) {
@@ -1559,19 +1567,43 @@ AccessibleWrap::UpdateSystemCaretFor(Accessible* aAccessible)
 
   nsIWidget* widget = nullptr;
   LayoutDeviceIntRect caretRect = text->GetCaretRect(&widget);
-  HWND caretWnd;
-  if (caretRect.IsEmpty() || !(caretWnd = (HWND)widget->GetNativeData(NS_NATIVE_WINDOW))) {
+
+  if (!widget) {
+    return;
+  }
+
+  HWND caretWnd = reinterpret_cast<HWND>(widget->GetNativeData(NS_NATIVE_WINDOW));
+  UpdateSystemCaretFor(caretWnd, caretRect);
+}
+
+/* static */ void
+AccessibleWrap::UpdateSystemCaretFor(ProxyAccessible* aProxy,
+                                     const LayoutDeviceIntRect& aCaretRect)
+{
+  ::DestroyCaret();
+
+  // The HWND should be the real widget HWND, not an emulated HWND.
+  // We get the HWND from the proxy's outer doc to bypass window emulation.
+  Accessible* outerDoc = aProxy->OuterDocOfRemoteBrowser();
+  UpdateSystemCaretFor(GetHWNDFor(outerDoc), aCaretRect);
+}
+
+/* static */ void
+AccessibleWrap::UpdateSystemCaretFor(HWND aCaretWnd,
+                                     const LayoutDeviceIntRect& aCaretRect)
+{
+  if (!aCaretWnd || aCaretRect.IsEmpty()) {
     return;
   }
 
   // Create invisible bitmap for caret, otherwise its appearance interferes
   // with Gecko caret
-  nsAutoBitmap caretBitMap(CreateBitmap(1, caretRect.height, 1, 1, nullptr));
-  if (::CreateCaret(caretWnd, caretBitMap, 1, caretRect.height)) {  // Also destroys the last caret
-    ::ShowCaret(caretWnd);
+  nsAutoBitmap caretBitMap(CreateBitmap(1, aCaretRect.height, 1, 1, nullptr));
+  if (::CreateCaret(aCaretWnd, caretBitMap, 1, aCaretRect.height)) {  // Also destroys the last caret
+    ::ShowCaret(aCaretWnd);
     RECT windowRect;
-    ::GetWindowRect(caretWnd, &windowRect);
-    ::SetCaretPos(caretRect.x - windowRect.left, caretRect.y - windowRect.top);
+    ::GetWindowRect(aCaretWnd, &windowRect);
+    ::SetCaretPos(aCaretRect.x - windowRect.left, aCaretRect.y - windowRect.top);
   }
 }
 
@@ -1685,3 +1717,14 @@ AccessibleWrap::DispatchTextChangeToHandler(bool aIsInsert,
   return SUCCEEDED(hr);
 }
 
+/* static */ void
+AccessibleWrap::AssignChildIDTo(NotNull<sdnAccessible*> aSdnAcc)
+{
+  aSdnAcc->SetUniqueID(sIDGen.GetID());
+}
+
+/* static */ void
+AccessibleWrap::ReleaseChildID(NotNull<sdnAccessible*> aSdnAcc)
+{
+  sIDGen.ReleaseID(aSdnAcc);
+}

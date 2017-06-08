@@ -14,6 +14,8 @@
     use values::generics::CounterStyleOrNone;
     #[cfg(feature = "gecko")]
     use values::specified::url::SpecifiedUrl;
+    #[cfg(feature = "gecko")]
+    use values::specified::Attr;
 
     #[cfg(feature = "servo")]
     use super::list_style_type;
@@ -36,6 +38,9 @@
         #[cfg(feature = "gecko")]
         type CounterStyleType = ::values::generics::CounterStyleOrNone;
 
+        #[cfg(feature = "gecko")]
+        use values::specified::Attr;
+
         #[derive(Debug, PartialEq, Eq, Clone)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub enum ContentItem {
@@ -55,10 +60,8 @@
             NoCloseQuote,
 
             % if product == "gecko":
-                /// `-moz-alt-content`
-                MozAltContent,
                 /// `attr([namespace? `|`]? ident)`
-                Attr(Option<String>, String),
+                Attr(Attr),
                 /// `url(url)`
                 Url(SpecifiedUrl),
             % endif
@@ -92,15 +95,8 @@
                     ContentItem::NoCloseQuote => dest.write_str("no-close-quote"),
 
                     % if product == "gecko":
-                        ContentItem::MozAltContent => dest.write_str("-moz-alt-content"),
-                        ContentItem::Attr(ref ns, ref attr) => {
-                            dest.write_str("attr(")?;
-                            if let Some(ref ns) = *ns {
-                                cssparser::Token::Ident((&**ns).into()).to_css(dest)?;
-                                dest.write_str("|")?;
-                            }
-                            cssparser::Token::Ident((&**attr).into()).to_css(dest)?;
-                            dest.write_str(")")
+                        ContentItem::Attr(ref attr) => {
+                            attr.to_css(dest)
                         }
                         ContentItem::Url(ref url) => url.to_css(dest),
                     % endif
@@ -108,21 +104,25 @@
             }
         }
 
-        #[allow(non_camel_case_types)]
         #[derive(Debug, PartialEq, Eq, Clone)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub enum T {
-            normal,
-            none,
-            Content(Vec<ContentItem>),
+            Normal,
+            None,
+            #[cfg(feature = "gecko")]
+            MozAltContent,
+            Items(Vec<ContentItem>),
         }
 
         impl ToCss for T {
             fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
                 match *self {
-                    T::normal => dest.write_str("normal"),
-                    T::none => dest.write_str("none"),
-                    T::Content(ref content) => {
+                    T::Normal => dest.write_str("normal"),
+                    T::None => dest.write_str("none"),
+                    % if product == "gecko":
+                        T::MozAltContent => dest.write_str("-moz-alt-content"),
+                    % endif
+                    T::Items(ref content) => {
                         let mut iter = content.iter();
                         try!(iter.next().unwrap().to_css(dest));
                         for c in iter {
@@ -136,8 +136,8 @@
         }
     }
     #[inline]
-    pub fn get_initial_value() -> computed_value::T  {
-        computed_value::T::normal
+    pub fn get_initial_value() -> computed_value::T {
+        computed_value::T::Normal
     }
 
     #[cfg(feature = "servo")]
@@ -162,11 +162,17 @@
     pub fn parse(context: &ParserContext, input: &mut Parser)
                  -> Result<SpecifiedValue, ()> {
         if input.try(|input| input.expect_ident_matching("normal")).is_ok() {
-            return Ok(SpecifiedValue::normal)
+            return Ok(SpecifiedValue::Normal)
         }
         if input.try(|input| input.expect_ident_matching("none")).is_ok() {
-            return Ok(SpecifiedValue::none)
+            return Ok(SpecifiedValue::None)
         }
+        % if product == "gecko":
+            if input.try(|input| input.expect_ident_matching("-moz-alt-content")).is_ok() {
+                return Ok(SpecifiedValue::MozAltContent)
+            }
+        % endif
+
         let mut content = vec![];
         loop {
             % if product == "gecko":
@@ -196,31 +202,7 @@
                         }),
                         % if product == "gecko":
                             "attr" => input.parse_nested_block(|input| {
-                                // Syntax is `[namespace? `|`]? ident`
-                                // no spaces allowed
-                                // FIXME (bug 1346693) we should be checking that
-                                // this is a valid namespace and encoding it as a namespace
-                                // number from the map
-                                let first = input.try(|i| i.expect_ident()).ok().map(|i| i.into_owned());
-                                if let Ok(token) = input.try(|i| i.next_including_whitespace()) {
-                                    match token {
-                                        Token::Delim('|') => {
-                                            // must be followed by an ident
-                                            let tok2 = input.next_including_whitespace()?;
-                                            if let Token::Ident(second) = tok2 {
-                                                return Ok(ContentItem::Attr(first, second.into_owned()))
-                                            } else {
-                                                return Err(())
-                                            }
-                                        }
-                                        _ => return Err(())
-                                    }
-                                }
-                                if let Some(first) = first {
-                                    Ok(ContentItem::Attr(None, first))
-                                } else {
-                                    Err(())
-                                }
+                                Ok(ContentItem::Attr(Attr::parse_function(context, input)?))
                             }),
                         % endif
                         _ => return Err(())
@@ -233,10 +215,6 @@
                         "no-open-quote" => content.push(ContentItem::NoOpenQuote),
                         "no-close-quote" => content.push(ContentItem::NoCloseQuote),
 
-                        % if product == "gecko":
-                            "-moz-alt-content" => content.push(ContentItem::MozAltContent),
-                        % endif
-
                         _ => return Err(())
                     }
                 }
@@ -244,11 +222,10 @@
                 _ => return Err(())
             }
         }
-        if !content.is_empty() {
-            Ok(SpecifiedValue::Content(content))
-        } else {
-            Err(())
+        if content.is_empty() {
+            return Err(());
         }
+        Ok(SpecifiedValue::Items(content))
     }
 </%helpers:longhand>
 

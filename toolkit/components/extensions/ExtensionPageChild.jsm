@@ -21,8 +21,8 @@ const Cr = Components.results;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionManagement",
-                                  "resource://gre/modules/ExtensionManagement.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ExtensionChildDevToolsUtils",
+                                  "resource://gre/modules/ExtensionChildDevToolsUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
                                   "resource://gre/modules/Schemas.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "WebNavigationFrames",
@@ -264,6 +264,8 @@ class DevToolsContextChild extends ExtensionBaseContextChild {
     super(extension, Object.assign(params, {envType: "devtools_child"}));
 
     this.devtoolsToolboxInfo = params.devtoolsToolboxInfo;
+    ExtensionChildDevToolsUtils.initThemeChangeObserver(
+      params.devtoolsToolboxInfo.themeName, this);
 
     this.extension.devtoolsViews.add(this);
   }
@@ -402,7 +404,7 @@ ExtensionPageChild = {
   },
 
   init(global) {
-    if (!ExtensionManagement.isExtensionProcess) {
+    if (!WebExtensionPolicy.isExtensionProcess) {
       throw new Error("Cannot init extension page global in current process");
     }
 
@@ -436,7 +438,7 @@ ExtensionPageChild = {
   initExtensionContext(extension, contentWindow) {
     this._init();
 
-    if (!ExtensionManagement.isExtensionProcess) {
+    if (!WebExtensionPolicy.isExtensionProcess) {
       throw new Error("Cannot create an extension page context in current process");
     }
 

@@ -33,9 +33,6 @@
 #include "prclist.h"
 #include "PluginQuirks.h"
 #include "gfxPlatform.h"
-#ifdef MOZ_GECKO_PROFILER
-#include "CrossProcessProfilerController.h"
-#endif
 #include "GeckoProfiler.h"
 #include "nsPluginTags.h"
 #include "nsUnicharUtils.h"
@@ -55,12 +52,13 @@
 #include "PluginUtilsOSX.h"
 #endif
 
+#ifdef MOZ_GECKO_PROFILER
+#include "ProfilerParent.h"
+#endif
+
 using base::KillProcess;
 
 using mozilla::PluginLibrary;
-#ifdef MOZ_GECKO_PROFILER
-using mozilla::CrossProcessProfilerController;
-#endif
 using mozilla::ipc::MessageChannel;
 using mozilla::ipc::GeckoChildProcessHost;
 
@@ -638,7 +636,7 @@ PluginModuleChromeParent::OnProcessLaunched(const bool aSucceeded)
     }
 
 #ifdef MOZ_GECKO_PROFILER
-    mProfilerController = MakeUnique<CrossProcessProfilerController>(this);
+    Unused << SendInitProfiler(ProfilerParent::CreateForProcess(OtherPid()));
 #endif
 }
 
@@ -778,10 +776,6 @@ PluginModuleChromeParent::~PluginModuleChromeParent()
     if (!OkToCleanup()) {
         MOZ_CRASH("unsafe destruction");
     }
-
-#ifdef MOZ_GECKO_PROFILER
-    mProfilerController = nullptr;
-#endif
 
 #ifdef XP_WIN
     // If we registered for audio notifications, stop.
@@ -3264,18 +3258,6 @@ PluginModuleChromeParent::OnCrash(DWORD processID)
 #endif // MOZ_CRASHREPORTER_INJECTOR
 
 mozilla::ipc::IPCResult
-PluginModuleChromeParent::RecvProfile(const nsCString& aProfile,
-                                      const bool& aIsExitProfile)
-{
-#ifdef MOZ_GECKO_PROFILER
-    if (mProfilerController) {
-        mProfilerController->RecvProfile(aProfile, aIsExitProfile);
-    }
-#endif
-    return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
 PluginModuleParent::AnswerGetKeyState(const int32_t& aVirtKey, int16_t* aRet)
 {
     return IPC_FAIL_NO_REASON(this);
@@ -3356,5 +3338,17 @@ PluginModuleChromeParent::AnswerGetFileName(const GetFileNameFunc& aFunc,
     MOZ_ASSERT_UNREACHABLE("GetFileName IPC message is only available on "
                            "Windows builds with sandbox.");
     return IPC_FAIL_NO_REASON(this);
+#endif
+}
+
+mozilla::ipc::IPCResult
+PluginModuleChromeParent::AnswerSetCursorPos(const int &x, const int &y,
+                                             bool* aResult)
+{
+#if defined(XP_WIN)
+    *aResult = ::SetCursorPos(x, y);
+    return IPC_OK();
+#else
+    return PluginModuleParent::AnswerSetCursorPos(x, y, aResult);
 #endif
 }

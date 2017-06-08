@@ -1086,6 +1086,13 @@ DetermineEVAndCTStatusAndSetNewCert(RefPtr<nsSSLStatus> sslStatus,
     return;
   }
 
+  UniqueCERTCertList peerCertChain(SSL_PeerCertificateChain(fd));
+  MOZ_ASSERT(peerCertChain,
+             "SSL_PeerCertificateChain failed in TLS handshake callback?");
+  if (!peerCertChain) {
+    return;
+  }
+
   RefPtr<SharedCertVerifier> certVerifier(GetDefaultCertVerifier());
   MOZ_ASSERT(certVerifier,
              "Certificate verifier uninitialized in TLS handshake callback?");
@@ -1125,8 +1132,9 @@ DetermineEVAndCTStatusAndSetNewCert(RefPtr<nsSSLStatus> sslStatus,
     sctsFromTLSExtension,
     mozilla::pkix::Now(),
     infoObject,
-    infoObject->GetHostNameRaw(),
+    infoObject->GetHostName(),
     unusedBuiltChain,
+    &peerCertChain,
     saveIntermediates,
     flags,
     infoObject->GetOriginAttributes(),

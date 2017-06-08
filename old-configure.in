@@ -66,7 +66,7 @@ W32API_VERSION=3.14
 GCONF_VERSION=1.2.1
 STARTUP_NOTIFICATION_VERSION=0.8
 DBUS_VERSION=0.60
-SQLITE_VERSION=3.18.0
+SQLITE_VERSION=3.19.2
 
 dnl Set various checks
 dnl ========================================================
@@ -888,7 +888,11 @@ case "$target" in
 *-*linux*)
     if test "$GNU_CC" -o "$GNU_CXX"; then
         MOZ_PGO_OPTIMIZE_FLAGS="-O3"
-        MOZ_OPTIMIZE_FLAGS="-Os"
+        if test -n "$MOZ_DEBUG"; then
+            MOZ_OPTIMIZE_FLAGS="-Os"
+        else
+            MOZ_OPTIMIZE_FLAGS="-O2"
+        fi
         if test -z "$CLANG_CC"; then
            MOZ_OPTIMIZE_FLAGS="-freorder-blocks $MOZ_OPTIMIZE_FLAGS"
         fi
@@ -938,7 +942,7 @@ case "$target" in
         # in the same library as dllimport caller. To work around it, we build NSPR
         # and NSS with -mnop-fun-dllimport flag. The drawback of this solution is that
         # function thunks need to be generated for cross-DLL calls.
-        MOZ_FOLD_LIBS_FLAGS=-mnop-fun-dllimport
+        MOZ_FOLD_LIBS_FLAGS="-mnop-fun-dllimport"
     else
         TARGET_COMPILER_ABI=msvc
         if test "$AS_BIN"; then
@@ -969,8 +973,7 @@ case "$target" in
         CFLAGS="$CFLAGS -W3 -Gy -Zc:inline"
         CXXFLAGS="$CXXFLAGS -W3 -Gy -Zc:inline"
         if test -z "$CLANG_CL"; then
-            CFLAGS="$CFLAGS -utf-8"
-            CXXFLAGS="$CXXFLAGS -utf-8"
+            CPPFLAGS="$CPPFLAGS -utf-8"
         fi
         if test "$CPU_ARCH" = "x86"; then
             dnl VS2012+ defaults to -arch:SSE2. We want to target nothing
@@ -2182,7 +2185,6 @@ MOZ_VORBIS=
 MOZ_TREMOR=
 MOZ_SAMPLE_TYPE_FLOAT32=
 MOZ_SAMPLE_TYPE_S16=
-MOZ_DIRECTSHOW=
 MOZ_WEBRTC=1
 MOZ_PEERCONNECTION=
 MOZ_SRTP=
@@ -2789,23 +2791,6 @@ if test -n "$MOZ_APPLEMEDIA"; then
     [AC_MSG_ERROR([MacOS X 10.7 SDK or later is required])])
 fi
 fi # COMPILE_ENVIRONMENT
-
-dnl ========================================================
-dnl = DirectShow support
-dnl ========================================================
-if test "$OS_ARCH" = "WINNT"; then
-    dnl Enable DirectShow support by default.
-    MOZ_DIRECTSHOW=1
-fi
-
-MOZ_ARG_DISABLE_BOOL(directshow,
-[  --disable-directshow  Disable support for DirectShow],
-    MOZ_DIRECTSHOW=,
-    MOZ_DIRECTSHOW=1)
-
-if test -n "$MOZ_DIRECTSHOW"; then
-    AC_DEFINE(MOZ_DIRECTSHOW)
-fi;
 
 dnl ========================================================
 dnl = Built-in fragmented MP4 support.
@@ -4102,7 +4087,7 @@ if test -n "$MOZ_REPLACE_MALLOC"; then
                  dnl - "flat namespace" when -flat_namespace alone is needed
                  dnl - "dummy library" when a dummy library and -flat_namespace are needed
                  dnl - "compiler support" when nothing is needed
-                 if test -n "$_DYLD_INFO" && dyldinfo -bind conftest${DLL_SUFFIX} 2> /dev/null | grep "_foo (weak import)" > /dev/null; then
+                 if test -n "$_DYLD_INFO" && ${TOOLCHAIN_PREFIX}dyldinfo -bind conftest${DLL_SUFFIX} 2> /dev/null | grep "_foo (weak import)" > /dev/null; then
                      if test -n "$_CLASSIC_INFO"; then
                          ac_cv_weak_dynamic_linking="flat namespace"
                      else
@@ -5036,9 +5021,11 @@ else
   AC_SUBST(MOZ_CHILD_PROCESS_NAME_PIE)
 fi
 MOZ_CHILD_PROCESS_BUNDLE="plugin-container.app/Contents/MacOS/"
+MOZ_CHILD_PROCESS_BUNDLENAME="${MOZ_APP_DISPLAYNAME}CP"
 
 AC_SUBST(MOZ_CHILD_PROCESS_NAME)
 AC_SUBST(MOZ_CHILD_PROCESS_BUNDLE)
+AC_SUBST(MOZ_CHILD_PROCESS_BUNDLENAME)
 
 # The following variables are available to branding and application
 # configuration ($BRANDING/configure.sh and $APPLICATION/confvars.sh):
@@ -5087,7 +5074,20 @@ if test -z "$MOZ_APP_VERSION_DISPLAY"; then
 fi
 
 if test -z "$ANDROID_PACKAGE_NAME" ; then
-   ANDROID_PACKAGE_NAME="org.mozilla.$MOZ_APP_NAME"
+   # When we got rid of the Aurora channel we decided to replace the old
+   # Nightly ANDROID_PACKAGE_NAME with Aurora. To make sure this is inherited
+   # by all mozilla-central based branches we make this the new "default"
+   # for Fennec. Non mozilla-central based branches set ANDROID_PACKAGE_NAME
+   # in their mozconfig, so they will never get this. If there are ever
+   # non-Fennec builds for Android, they will fall into the else block
+   # and use their own default name.
+   # https://bugzilla.mozilla.org/show_bug.cgi?id=1357808 has additional
+   # background on this.
+   if test "$MOZ_APP_NAME" = "fennec"; then
+      ANDROID_PACKAGE_NAME="org.mozilla.fennec_aurora"
+   else
+      ANDROID_PACKAGE_NAME="org.mozilla.$MOZ_APP_NAME"
+   fi
 fi
 
 # Mozilla released Firefox for Android {Release,Beta} and {Aurora,Nightly} to
@@ -5317,7 +5317,6 @@ AC_SUBST(MOZ_VORBIS)
 AC_SUBST(MOZ_TREMOR)
 AC_SUBST(MOZ_FFVPX)
 AC_SUBST_LIST(FFVPX_ASFLAGS)
-AC_SUBST(MOZ_DIRECTSHOW)
 AC_SUBST(MOZ_ANDROID_OMX)
 AC_SUBST(MOZ_OMX_PLUGIN)
 AC_SUBST(VPX_USE_YASM)
@@ -5334,7 +5333,7 @@ AC_SUBST(MOZ_DEVTOOLS)
 
 AC_SUBST(MOZ_PACKAGE_JSSHELL)
 AC_SUBST(MOZ_FOLD_LIBS)
-AC_SUBST(MOZ_FOLD_LIBS_FLAGS)
+AC_SUBST_LIST(MOZ_FOLD_LIBS_FLAGS)
 AC_SUBST(SOCORRO_SYMBOL_UPLOAD_TOKEN_FILE)
 
 AC_SUBST(DMG_TOOL)
@@ -5472,36 +5471,6 @@ NSS_DISABLE_LIBPKIX=1
 AC_SUBST(NSS_DISABLE_LIBPKIX)
 
 MOZ_CREATE_CONFIG_STATUS()
-
-# Run freetype configure script
-
-if test "$MOZ_TREE_FREETYPE"; then
-   export CFLAGS="$CFLAGS $MOZ_DEBUG_FLAGS -std=c99"
-   export CPPFLAGS="$CPPFLAGS $MOZ_DEBUG_FLAGS"
-   export CXXFLAGS="$CXXFLAGS $MOZ_DEBUG_FLAGS"
-   export LDFLAGS="$LDFLAGS $MOZ_DEBUG_LDFLAGS"
-   # Spaces in the *_CFLAGS and *_LIBS variables are intentionally placed
-   # to force freetype to use our settings rather than autodetecting
-   if test -n "$MOZ_SYSTEM_PNG"; then
-     export LIBPNG_CFLAGS="$MOZ_PNG_CFLAGS "
-   else
-     export LIBPNG_CFLAGS="-I$_objdir/dist/include"
-   fi
-   export LIBPNG_LIBS="$MOZ_PNG_LIBS "
-   export ZLIB_CFLAGS="$MOZ_ZLIB_CFLAGS "
-   export ZLIB_LIBS="$MOZ_ZLIB_LIBS "
-   export CONFIG_FILES="unix-cc.mk:unix-cc.in unix-def.mk:unix-def.in freetype-config freetype2.pc:freetype2.in"
-   ac_configure_args="$ac_configure_args --host=$target --disable-shared --with-pic=yes --with-zlib=yes --without-bzip2 --with-png=yes --without-harfbuzz"
-
-   if ! test -e modules; then
-     mkdir modules
-   fi
-   # Only export CC, CXX and RANLIB for the subconfigure, and avoid spilling
-   # that further down the road.
-   (export CC CXX RANLIB;
-    AC_OUTPUT_SUBDIRS(modules/freetype2)
-   ) || exit 1
-fi
 
 if test -z "$direct_nspr_config"; then
     dnl ========================================================

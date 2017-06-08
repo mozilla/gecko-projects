@@ -22,6 +22,7 @@ class CSSStyleSheet;
 class ServoStyleSet;
 namespace dom {
 class Element;
+class ShadowRoot;
 } // namespace dom
 } // namespace mozilla
 class nsCSSCounterStyleRule;
@@ -153,6 +154,11 @@ public:
     inline StyleSheet* StyleSheetAt(SheetType aType, int32_t aIndex) const;
     inline nsresult RemoveDocStyleSheet(StyleSheet* aSheet);
     inline nsresult AddDocStyleSheet(StyleSheet* aSheet, nsIDocument* aDocument);
+    inline void RecordStyleSheetChange(StyleSheet* aSheet, StyleSheet::ChangeType);
+    inline void RecordShadowStyleChange(mozilla::dom::ShadowRoot* aShadowRoot);
+    inline bool StyleSheetsHaveChanged() const;
+    inline void InvalidateStyleForCSSRuleChanges();
+    inline bool MediumFeaturesChanged();
     inline already_AddRefed<nsStyleContext>
     ProbePseudoElementStyle(dom::Element* aParentElement,
                             mozilla::CSSPseudoElementType aType,
@@ -176,6 +182,9 @@ public:
 
     inline bool AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray);
     inline nsCSSCounterStyleRule* CounterStyleRuleForName(nsIAtom* aName);
+
+    inline bool EnsureUniqueInnerOnCSSSheets();
+    inline void SetNeedsRestyleAfterEnsureUniqueInner();
 
   private:
     // Stores a pointer to an nsStyleSet or a ServoStyleSet.  The least
@@ -215,6 +224,11 @@ public:
   // Make StyleSetHandle usable in boolean contexts.
   explicit operator bool() const { return !!mPtr.mValue; }
   bool operator!() const { return !mPtr.mValue; }
+  bool operator==(const StyleSetHandle& aOth) const
+  {
+    return mPtr.mValue == aOth.mPtr.mValue;
+  }
+  bool operator!=(const StyleSetHandle& aOth) const { return !(*this == aOth); }
 
   // Make StyleSetHandle behave like a smart pointer.
   Ptr* operator->() { return &mPtr; }

@@ -122,7 +122,6 @@ public:
   virtual nsIPageSequenceFrame* GetPageSequenceFrame() const override;
   virtual nsCanvasFrame* GetCanvasFrame() const override;
 
-  virtual nsIFrame* GetPlaceholderFrameFor(nsIFrame* aFrame) const override;
   virtual void FrameNeedsReflow(nsIFrame *aFrame, IntrinsicDirty aIntrinsicDirty,
                                 nsFrameState aBitToAdd,
                                 ReflowRootHandling aRootHandling =
@@ -370,11 +369,12 @@ public:
   virtual void LoadComplete() override;
 
   void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                              nsArenaMemoryStats *aArenaObjectsSize,
-                              size_t *aPresShellSize,
-                              size_t *aStyleSetsSize,
-                              size_t *aTextRunsSize,
-                              size_t *aPresContextSize) override;
+                              nsArenaMemoryStats* aArenaObjectsSize,
+                              size_t* aPresShellSize,
+                              size_t* aStyleSetsSize,
+                              size_t* aTextRunsSize,
+                              size_t* aPresContextSize,
+                              size_t* aFramePropertiesSize) override;
   size_t SizeOfTextRuns(mozilla::MallocSizeOf aMallocSizeOf) const;
 
   // This data is stored as a content property (nsGkAtoms::scrolling) on
@@ -523,7 +523,8 @@ protected:
   void ShowEventTargetDebug();
 #endif
 
-  void RecordStyleSheetChange(mozilla::StyleSheet* aStyleSheet);
+  void RecordStyleSheetChange(mozilla::StyleSheet* aStyleSheet,
+                              StyleSheet::ChangeType);
 
   void RemovePreferenceStyles();
 

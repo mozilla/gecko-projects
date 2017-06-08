@@ -84,7 +84,7 @@ def verify_copy_to_s3(bucket_name, aws_access_key_id, aws_secret_access_key,
                 return key.generate_url(expires_in=0, query_auth=False,
                                         version_id=key.version_id)
         else:
-            if get_hash(key.get_contents_as_string()) == \
+            if get_hash(retry(key.get_contents_as_string)) == \
                     get_hash(open(dest).read()):
                 log.info("%s has the same MD5 checksum, not uploading...",
                          name)
@@ -116,6 +116,7 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_const",
                         dest="loglevel", const=logging.DEBUG,
                         default=logging.INFO)
+    parser.add_argument("--product", help="Override product name from application.ini")
     args = parser.parse_args()
     logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s",
                         level=args.loglevel)
@@ -156,8 +157,9 @@ def main():
             partial_info[0]["previousBuildNumber"] = e["previousBuildNumber"]
             submitter = ReleaseSubmitterV4(api_root=args.api_root, auth=auth,
                                            dummy=args.dummy)
+            productName = args.product or e["appName"]
             retry(lambda: submitter.run(
-                platform=e["platform"], productName=e["appName"],
+                platform=e["platform"], productName=productName,
                 version=e["toVersion"],
                 build_number=e["toBuildNumber"],
                 appVersion=e["version"], extVersion=e["version"],
@@ -191,9 +193,10 @@ def main():
             partial_info[0]["from_buildid"] = e["from_buildid"]
             submitter = NightlySubmitterV4(api_root=args.api_root, auth=auth,
                                            dummy=args.dummy)
+            productName = args.product or e["appName"]
             retry(lambda: submitter.run(
                 platform=e["platform"], buildID=e["to_buildid"],
-                productName=e["appName"], branch=e["branch"],
+                productName=productName, branch=e["branch"],
                 appVersion=e["version"], locale=e["locale"],
                 hashFunction='sha512', extVersion=e["version"],
                 partialInfo=partial_info, completeInfo=complete_info),

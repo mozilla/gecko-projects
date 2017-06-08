@@ -184,9 +184,11 @@ SyncScheduler.prototype = {
           } else {
             this._log.warn(`Resync attempt ${this._resyncs} exceeded ` +
                            `maximum ${this.maxResyncs}`);
+            Svc.Obs.notify("weave:service:resyncs-finished");
           }
         } else {
           this._resyncs = 0;
+          Svc.Obs.notify("weave:service:resyncs-finished");
         }
 
         this._syncErrors = 0;
@@ -611,7 +613,8 @@ ErrorHandler.prototype = {
     let logs = ["Sync", "FirefoxAccounts", "Hawk", "Common.TokenServerClient",
                 "Sync.SyncMigration", "browserwindow.syncui",
                 "Services.Common.RESTRequest", "Services.Common.RESTRequest",
-                "BookmarkSyncUtils"
+                "BookmarkSyncUtils",
+                "addons.xpi",
                ];
 
     this._logManager = new LogManager(Svc.Prefs, logs, "sync");

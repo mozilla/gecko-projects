@@ -4,8 +4,8 @@
 
 use attr::{ParsedAttrSelectorOperation, AttrSelectorOperation, NamespaceConstraint};
 use bloom::BloomFilter;
-use parser::{Combinator, ComplexSelector, Component, LocalName};
-use parser::{Selector, SelectorInner, SelectorIter};
+use parser::{AncestorHashes, Combinator, Component, LocalName};
+use parser::{Selector, SelectorIter, SelectorList};
 use std::borrow::Borrow;
 use tree::Element;
 
@@ -21,16 +21,11 @@ bitflags! {
     /// This is used to implement efficient sharing.
     #[derive(Default)]
     pub flags StyleRelations: usize {
-        /// Whether this element is affected by an ID selector.
-        const AFFECTED_BY_ID_SELECTOR = 1 << 0,
-        /// Whether this element has a style attribute. Computed
-        /// externally.
-        const AFFECTED_BY_STYLE_ATTRIBUTE = 1 << 1,
         /// Whether this element is affected by presentational hints. This is
         /// computed externally (that is, in Servo).
-        const AFFECTED_BY_PRESENTATIONAL_HINTS = 1 << 2,
+        const AFFECTED_BY_PRESENTATIONAL_HINTS = 1 << 0,
         /// Whether this element has pseudo-element styles. Computed externally.
-        const AFFECTED_BY_PSEUDO_ELEMENTS = 1 << 3,
+        const AFFECTED_BY_PSEUDO_ELEMENTS = 1 << 1,
     }
 }
 
@@ -75,7 +70,7 @@ impl ElementSelectorFlags {
 ///
 /// There are two modes of selector matching. The difference is only noticeable
 /// in presence of pseudo-elements.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum MatchingMode {
     /// Don't ignore any pseudo-element selectors.
     Normal,
@@ -94,18 +89,36 @@ pub enum MatchingMode {
     ForStatelessPseudoElement,
 }
 
+/// The mode to use when matching unvisited and visited links.
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+pub enum VisitedHandlingMode {
+    /// All links are matched as if they are unvisted.
+    AllLinksUnvisited,
+    /// A element's "relevant link" is the element being matched if it is a link
+    /// or the nearest ancestor link. The relevant link is matched as though it
+    /// is visited, and all other links are matched as if they are unvisited.
+    RelevantLinkVisited,
+}
 
 /// Data associated with the matching process for a element.  This context is
 /// used across many selectors for an element, so it's not appropriate for
 /// transient data that applies to only a single selector.
+#[derive(Clone)]
 pub struct MatchingContext<'a> {
     /// Output that records certains relations between elements noticed during
     /// matching (and also extended after matching).
     pub relations: StyleRelations,
-    /// The matching mode we should use when matching selectors.
+    /// Input with the matching mode we should use when matching selectors.
     pub matching_mode: MatchingMode,
-    /// The bloom filter used to fast-reject selectors.
+    /// Input with the bloom filter used to fast-reject selectors.
     pub bloom_filter: Option<&'a BloomFilter>,
+    /// Input that controls how matching for links is handled.
+    pub visited_handling: VisitedHandlingMode,
+    /// Output that records whether we encountered a "relevant link" while
+    /// matching _any_ selector for this element. (This differs from
+    /// `RelevantLinkStatus` which tracks the status for the _current_ selector
+    /// only.)
+    pub relevant_link_found: bool,
 }
 
 impl<'a> MatchingContext<'a> {
@@ -118,31 +131,51 @@ impl<'a> MatchingContext<'a> {
             relations: StyleRelations::empty(),
             matching_mode: matching_mode,
             bloom_filter: bloom_filter,
+            visited_handling: VisitedHandlingMode::AllLinksUnvisited,
+            relevant_link_found: false,
+        }
+    }
+
+    /// Constructs a new `MatchingContext` for use in visited matching.
+    pub fn new_for_visited(matching_mode: MatchingMode,
+                           bloom_filter: Option<&'a BloomFilter>,
+                           visited_handling: VisitedHandlingMode)
+                           -> Self
+    {
+        Self {
+            relations: StyleRelations::empty(),
+            matching_mode: matching_mode,
+            bloom_filter: bloom_filter,
+            visited_handling: visited_handling,
+            relevant_link_found: false,
         }
     }
 }
 
-pub fn matches_selector_list<E>(selector_list: &[Selector<E::Impl>],
+pub fn matches_selector_list<E>(selector_list: &SelectorList<E::Impl>,
                                 element: &E,
                                 context: &mut MatchingContext)
                                 -> bool
     where E: Element
 {
-    selector_list.iter().any(|selector| {
-        matches_selector(&selector.inner,
+    selector_list.0.iter().any(|selector_and_hashes| {
+        matches_selector(&selector_and_hashes.selector,
+                         0,
+                         &selector_and_hashes.hashes,
                          element,
                          context,
                          &mut |_, _| {})
     })
 }
 
-fn may_match<E>(sel: &SelectorInner<E::Impl>,
+#[inline(always)]
+fn may_match<E>(hashes: &AncestorHashes,
                 bf: &BloomFilter)
                 -> bool
     where E: Element,
 {
     // Check against the list of precomputed hashes.
-    for hash in sel.ancestor_hashes.iter() {
+    for hash in hashes.0.iter() {
         // If we hit the 0 sentinel hash, that means the rest are zero as well.
         if *hash == 0 {
             break;
@@ -154,6 +187,100 @@ fn may_match<E>(sel: &SelectorInner<E::Impl>,
     }
 
     true
+}
+
+/// Tracks whether we are currently looking for relevant links for a given
+/// complex selector. A "relevant link" is the element being matched if it is a
+/// link or the nearest ancestor link.
+///
+/// `matches_complex_selector` creates a new instance of this for each complex
+/// selector we try to match for an element. This is done because `is_visited`
+/// and `is_unvisited` are based on relevant link state of only the current
+/// complex selector being matched (not the global relevant link status for all
+/// selectors in `MatchingContext`).
+#[derive(PartialEq, Eq, Copy, Clone)]
+pub enum RelevantLinkStatus {
+    /// Looking for a possible relevant link.  This is the initial mode when
+    /// matching a selector.
+    Looking,
+    /// Not looking for a relevant link.  We transition to this mode if we
+    /// encounter a sibiling combinator (since only ancestor combinators are
+    /// allowed for this purpose).
+    NotLooking,
+    /// Found a relevant link for the element being matched.
+    Found,
+}
+
+impl Default for RelevantLinkStatus {
+    fn default() -> Self {
+        RelevantLinkStatus::NotLooking
+    }
+}
+
+impl RelevantLinkStatus {
+    /// If we found the relevant link for this element, record that in the
+    /// overall matching context for the element as a whole and stop looking for
+    /// addtional links.
+    fn examine_potential_link<E>(&self, element: &E, context: &mut MatchingContext)
+                                 -> RelevantLinkStatus
+        where E: Element,
+    {
+        if *self != RelevantLinkStatus::Looking {
+            return *self
+        }
+
+        if !element.is_link() {
+            return *self
+        }
+
+        // We found a relevant link. Record this in the `MatchingContext`,
+        // where we track whether one was found for _any_ selector (meaning
+        // this field might already be true from a previous selector).
+        context.relevant_link_found = true;
+        // Also return `Found` to update the relevant link status for _this_
+        // specific selector's matching process.
+        RelevantLinkStatus::Found
+    }
+
+    /// Returns whether an element is considered visited for the purposes of
+    /// matching.  This is true only if the element is a link, an relevant link
+    /// exists for the element, and the visited handling mode is set to accept
+    /// relevant links as visited.
+    pub fn is_visited<E>(&self, element: &E, context: &MatchingContext) -> bool
+        where E: Element,
+    {
+        if !element.is_link() {
+            return false
+        }
+
+        // Non-relevant links are always unvisited.
+        if *self != RelevantLinkStatus::Found {
+            return false
+        }
+
+        context.visited_handling == VisitedHandlingMode::RelevantLinkVisited
+    }
+
+    /// Returns whether an element is considered unvisited for the purposes of
+    /// matching.  Assuming the element is a link, this is always true for
+    /// non-relevant links, since only relevant links can potentially be treated
+    /// as visited.  If this is a relevant link, then is it unvisited if the
+    /// visited handling mode is set to treat all links as unvisted (including
+    /// relevant links).
+    pub fn is_unvisited<E>(&self, element: &E, context: &MatchingContext) -> bool
+        where E: Element,
+    {
+        if !element.is_link() {
+            return false
+        }
+
+        // Non-relevant links are always unvisited.
+        if *self != RelevantLinkStatus::Found {
+            return true
+        }
+
+        context.visited_handling == VisitedHandlingMode::AllLinksUnvisited
+    }
 }
 
 /// A result of selector matching, includes 3 failure types,
@@ -206,8 +333,18 @@ enum SelectorMatchingResult {
     NotMatchedGlobally,
 }
 
-/// Matches an inner selector.
-pub fn matches_selector<E, F>(selector: &SelectorInner<E::Impl>,
+/// Matches a selector, fast-rejecting against a bloom filter.
+///
+/// We accept an offset to allow consumers to represent and match against partial
+/// selectors (indexed from the right). We use this API design, rather than
+/// having the callers pass a SelectorIter, because creating a SelectorIter
+/// requires dereferencing the selector to get the length, which adds an
+/// unncessary cache miss for cases when we can fast-reject with AncestorHashes
+/// (which the caller can store inline with the selector pointer).
+#[inline(always)]
+pub fn matches_selector<E, F>(selector: &Selector<E::Impl>,
+                              offset: usize,
+                              hashes: &AncestorHashes,
                               element: &E,
                               context: &mut MatchingContext,
                               flags_setter: &mut F)
@@ -217,18 +354,17 @@ pub fn matches_selector<E, F>(selector: &SelectorInner<E::Impl>,
 {
     // Use the bloom filter to fast-reject.
     if let Some(filter) = context.bloom_filter {
-        if !may_match::<E>(&selector, filter) {
+        if !may_match::<E>(hashes, filter) {
             return false;
         }
     }
 
-    matches_complex_selector(&selector.complex, element, context, flags_setter)
+    matches_complex_selector(selector, offset, element, context, flags_setter)
 }
 
 /// Matches a complex selector.
-///
-/// Use `matches_selector` if you need to skip pseudos.
-pub fn matches_complex_selector<E, F>(complex_selector: &ComplexSelector<E::Impl>,
+pub fn matches_complex_selector<E, F>(complex_selector: &Selector<E::Impl>,
+                                      offset: usize,
                                       element: &E,
                                       context: &mut MatchingContext,
                                       flags_setter: &mut F)
@@ -236,11 +372,15 @@ pub fn matches_complex_selector<E, F>(complex_selector: &ComplexSelector<E::Impl
     where E: Element,
           F: FnMut(&E, ElementSelectorFlags),
 {
-    let mut iter = complex_selector.iter();
+    let mut iter = if offset == 0 {
+        complex_selector.iter()
+    } else {
+        complex_selector.iter_from(offset)
+    };
 
     if cfg!(debug_assertions) {
         if context.matching_mode == MatchingMode::ForStatelessPseudoElement {
-            assert!(complex_selector.iter().any(|c| {
+            assert!(iter.clone().any(|c| {
                 matches!(*c, Component::PseudoElement(..))
             }));
         }
@@ -267,6 +407,7 @@ pub fn matches_complex_selector<E, F>(complex_selector: &ComplexSelector<E::Impl
     match matches_complex_selector_internal(iter,
                                             element,
                                             context,
+                                            RelevantLinkStatus::Looking,
                                             flags_setter) {
         SelectorMatchingResult::Matched => true,
         _ => false
@@ -276,13 +417,16 @@ pub fn matches_complex_selector<E, F>(complex_selector: &ComplexSelector<E::Impl
 fn matches_complex_selector_internal<E, F>(mut selector_iter: SelectorIter<E::Impl>,
                                            element: &E,
                                            context: &mut MatchingContext,
+                                           relevant_link: RelevantLinkStatus,
                                            flags_setter: &mut F)
                                            -> SelectorMatchingResult
      where E: Element,
            F: FnMut(&E, ElementSelectorFlags),
 {
+    let mut relevant_link = relevant_link.examine_potential_link(element, context);
+
     let matches_all_simple_selectors = selector_iter.all(|simple| {
-        matches_simple_selector(simple, element, context, flags_setter)
+        matches_simple_selector(simple, element, context, &relevant_link, flags_setter)
     });
 
     let combinator = selector_iter.next_sequence();
@@ -300,6 +444,9 @@ fn matches_complex_selector_internal<E, F>(mut selector_iter: SelectorIter<E::Im
         Some(c) => {
             let (mut next_element, candidate_not_found) = match c {
                 Combinator::NextSibling | Combinator::LaterSibling => {
+                    // Only ancestor combinators are allowed while looking for
+                    // relevant links, so switch to not looking.
+                    relevant_link = RelevantLinkStatus::NotLooking;
                     (element.prev_sibling_element(),
                      SelectorMatchingResult::NotMatchedAndRestartFromClosestDescendant)
                 }
@@ -321,6 +468,7 @@ fn matches_complex_selector_internal<E, F>(mut selector_iter: SelectorIter<E::Im
                 let result = matches_complex_selector_internal(selector_iter.clone(),
                                                                &element,
                                                                context,
+                                                               relevant_link,
                                                                flags_setter);
                 match (result, c) {
                     // Return the status immediately.
@@ -365,22 +513,12 @@ fn matches_simple_selector<E, F>(
         selector: &Component<E::Impl>,
         element: &E,
         context: &mut MatchingContext,
+        relevant_link: &RelevantLinkStatus,
         flags_setter: &mut F)
         -> bool
     where E: Element,
           F: FnMut(&E, ElementSelectorFlags),
 {
-    macro_rules! relation_if {
-        ($ex:expr, $flag:ident) => {
-            if $ex {
-                context.relations |= $flag;
-                true
-            } else {
-                false
-            }
-        }
-    }
-
     match *selector {
         Component::Combinator(_) => unreachable!(),
         Component::PseudoElement(ref pseudo) => {
@@ -404,8 +542,7 @@ fn matches_simple_selector<E, F>(
         }
         // TODO: case-sensitivity depends on the document type and quirks mode
         Component::ID(ref id) => {
-            relation_if!(element.get_id().map_or(false, |attr| attr == *id),
-                         AFFECTED_BY_ID_SELECTOR)
+            element.get_id().map_or(false, |attr| attr == *id)
         }
         Component::Class(ref class) => {
             element.has_class(class)
@@ -465,7 +602,7 @@ fn matches_simple_selector<E, F>(
             )
         }
         Component::NonTSPseudoClass(ref pc) => {
-            element.match_non_ts_pseudo_class(pc, context, flags_setter)
+            element.match_non_ts_pseudo_class(pc, context, relevant_link, flags_setter)
         }
         Component::FirstChild => {
             matches_first_child(element, flags_setter)
@@ -509,7 +646,7 @@ fn matches_simple_selector<E, F>(
             matches_generic_nth_child(element, 0, 1, true, true, flags_setter)
         }
         Component::Negation(ref negated) => {
-            !negated.iter().all(|ss| matches_simple_selector(ss, element, context, flags_setter))
+            !negated.iter().all(|ss| matches_simple_selector(ss, element, context, relevant_link, flags_setter))
         }
     }
 }

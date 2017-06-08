@@ -7,6 +7,7 @@
 
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Move.h"
+#include "mozilla/CheckedInt.h"
 #include "imgIContainer.h"
 #include "LookupResult.h"
 #include "MainThreadUtils.h"
@@ -14,6 +15,7 @@
 #include "gfxPrefs.h"
 
 #include "pixman.h"
+#include <algorithm>
 
 namespace mozilla {
 
@@ -28,7 +30,8 @@ namespace image {
 const gfx::IntRect
 AnimationState::UpdateState(bool aAnimationFinished,
                             RasterImage *aImage,
-                            const gfx::IntSize& aSize)
+                            const gfx::IntSize& aSize,
+                            bool aAllowInvalidation /* = true */)
 {
   LookupResult result =
     SurfaceCache::Lookup(ImageKey(aImage),
@@ -42,7 +45,8 @@ AnimationState::UpdateState(bool aAnimationFinished,
 const gfx::IntRect
 AnimationState::UpdateStateInternal(LookupResult& aResult,
                                     bool aAnimationFinished,
-                                    const gfx::IntSize& aSize)
+                                    const gfx::IntSize& aSize,
+                                    bool aAllowInvalidation /* = true */)
 {
   // Update mDiscarded and mIsCurrentlyDecoded.
   if (aResult.Type() == MatchType::NOT_FOUND) {
@@ -76,31 +80,33 @@ AnimationState::UpdateStateInternal(LookupResult& aResult,
 
   gfx::IntRect ret;
 
-  // Update the value of mCompositedFrameInvalid.
-  if (mIsCurrentlyDecoded || aAnimationFinished) {
-    // Animated images that have finished their animation (ie because it is a
-    // finite length animation) don't have RequestRefresh called on them, and so
-    // mCompositedFrameInvalid would never get cleared. We clear it here (and
-    // also in RasterImage::Decode when we create a decoder for an image that
-    // has finished animated so it can display sooner than waiting until the
-    // decode completes). We also do it if we are fully decoded. This is safe
-    // to do for images that aren't finished animating because before we paint
-    // the refresh driver will call into us to advance to the correct frame,
-    // and that will succeed because we have all the frames.
-    if (mCompositedFrameInvalid) {
-      // Invalidate if we are marking the composited frame valid.
-      ret.SizeTo(aSize);
+  if (aAllowInvalidation) {
+    // Update the value of mCompositedFrameInvalid.
+    if (mIsCurrentlyDecoded || aAnimationFinished) {
+      // Animated images that have finished their animation (ie because it is a
+      // finite length animation) don't have RequestRefresh called on them, and so
+      // mCompositedFrameInvalid would never get cleared. We clear it here (and
+      // also in RasterImage::Decode when we create a decoder for an image that
+      // has finished animated so it can display sooner than waiting until the
+      // decode completes). We also do it if we are fully decoded. This is safe
+      // to do for images that aren't finished animating because before we paint
+      // the refresh driver will call into us to advance to the correct frame,
+      // and that will succeed because we have all the frames.
+      if (mCompositedFrameInvalid) {
+        // Invalidate if we are marking the composited frame valid.
+        ret.SizeTo(aSize);
+      }
+      mCompositedFrameInvalid = false;
+    } else if (aResult.Type() == MatchType::NOT_FOUND ||
+               aResult.Type() == MatchType::PENDING) {
+      if (mHasBeenDecoded) {
+        MOZ_ASSERT(gfxPrefs::ImageMemAnimatedDiscardable());
+        mCompositedFrameInvalid = true;
+      }
     }
-    mCompositedFrameInvalid = false;
-  } else if (aResult.Type() == MatchType::NOT_FOUND ||
-             aResult.Type() == MatchType::PENDING) {
-    if (mHasBeenDecoded) {
-      MOZ_ASSERT(gfxPrefs::ImageMemAnimatedDiscardable());
-      mCompositedFrameInvalid = true;
-    }
+    // Otherwise don't change the value of mCompositedFrameInvalid, it will be
+    // updated by RequestRefresh.
   }
-  // Otherwise don't change the value of mCompositedFrameInvalid, it will be
-  // updated by RequestRefresh.
 
   return ret;
 }
@@ -336,17 +342,32 @@ FrameAnimator::AdvanceFrame(AnimationState& aState,
   // If we can get closer to the current time by a multiple of the image's loop
   // time, we should. We can only do this if we're done decoding; otherwise, we
   // don't know the full loop length, and LoopLength() will have to return
-  // FrameTimeout::Forever().
+  // FrameTimeout::Forever(). We also skip this for images with a finite loop
+  // count if we have initialized mLoopRemainingCount (it only gets initialized
+  // after one full loop).
   FrameTimeout loopTime = aState.LoopLength();
-  if (loopTime != FrameTimeout::Forever()) {
+  if (loopTime != FrameTimeout::Forever() &&
+      (aState.LoopCount() < 0 || aState.mLoopRemainingCount >= 0)) {
     TimeDuration delay = aTime - aState.mCurrentAnimationFrameTime;
     if (delay.ToMilliseconds() > loopTime.AsMilliseconds()) {
       // Explicitly use integer division to get the floor of the number of
       // loops.
       uint64_t loops = static_cast<uint64_t>(delay.ToMilliseconds())
                      / loopTime.AsMilliseconds();
+
+      // If we have a finite loop count limit the number of loops we advance.
+      if (aState.mLoopRemainingCount >= 0) {
+        MOZ_ASSERT(aState.LoopCount() >= 0);
+        loops = std::min(loops, CheckedUint64(aState.mLoopRemainingCount).value());
+      }
+
       aState.mCurrentAnimationFrameTime +=
         TimeDuration::FromMilliseconds(loops * loopTime.AsMilliseconds());
+
+      if (aState.mLoopRemainingCount >= 0) {
+        MOZ_ASSERT(loops <= CheckedUint64(aState.mLoopRemainingCount).value());
+        aState.mLoopRemainingCount -= CheckedInt32(loops).value();
+      }
     }
   }
 

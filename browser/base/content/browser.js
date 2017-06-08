@@ -532,7 +532,7 @@ const gStoragePressureObserver = {
           // The advanced subpanes are only supported in the old organization, which will
           // be removed by bug 1349689.
           let win = gBrowser.ownerGlobal;
-          if (Preferences.get("browser.preferences.useOldOrganization", false)) {
+          if (Preferences.get("browser.preferences.useOldOrganization")) {
             win.openAdvancedPreferences("networkTab", {origin: "storagePressure"});
           } else {
             win.openPreferences("panePrivacy", {origin: "storagePressure"});
@@ -1314,6 +1314,9 @@ var gBrowserInit = {
     // have been initialized.
     Services.obs.notifyObservers(window, "browser-window-before-show");
 
+    gUIDensity.update();
+    gPrefService.addObserver(gUIDensity.prefDomain, gUIDensity);
+
     let isResistFingerprintingEnabled = gPrefService.getBoolPref("privacy.resistFingerprinting");
 
     // Set a sane starting width/height for all resolutions on new profiles.
@@ -1426,7 +1429,11 @@ var gBrowserInit = {
         // This function throws for certain malformed URIs, so use exception handling
         // so that we don't disrupt startup
         try {
-          gBrowser.loadTabs(specs, false, true);
+          gBrowser.loadTabs(specs, {
+            inBackground: false,
+            replace: true,
+            triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+          });
         } catch (e) {}
       } else if (uriToLoad instanceof XULElement) {
         // swap the given tab with the default about:blank tab and then close
@@ -1490,7 +1497,7 @@ var gBrowserInit = {
       } else {
         // Note: loadOneOrMoreURIs *must not* be called if window.arguments.length >= 3.
         // Such callers expect that window.arguments[0] is handled as a single URI.
-        loadOneOrMoreURIs(uriToLoad);
+        loadOneOrMoreURIs(uriToLoad, Services.scriptSecurityManager.getSystemPrincipal());
       }
     }
 
@@ -1637,8 +1644,6 @@ var gBrowserInit = {
 
     gBrowserThumbnails.init();
 
-    gMenuButtonUpdateBadge.init();
-
     gExtensionsNotifications.init();
 
     let wasMinimized = window.windowState == window.STATE_MINIMIZED;
@@ -1712,8 +1717,6 @@ var gBrowserInit = {
       }
     });
 
-    gPageActionButton.init();
-
     this.delayedStartupFinished = true;
 
     _resolveDelayedStartup();
@@ -1770,6 +1773,8 @@ var gBrowserInit = {
 
     Services.obs.removeObserver(gPluginHandler.NPAPIPluginCrashed, "plugin-crashed");
 
+    gPrefService.removeObserver(gUIDensity.prefDomain, gUIDensity);
+
     try {
       gBrowser.removeProgressListener(window.XULBrowserWindow);
       gBrowser.removeTabsProgressListener(window.TabsProgressListener);
@@ -1799,8 +1804,6 @@ var gBrowserInit = {
     RefreshBlocker.uninit();
 
     CaptivePortalWatcher.uninit();
-
-    gMenuButtonUpdateBadge.uninit();
 
     SidebarUI.uninit();
 
@@ -2162,13 +2165,16 @@ function BrowserGoHome(aEvent) {
   // openUILinkIn in utilityOverlay.js doesn't handle loading multiple pages
   switch (where) {
   case "current":
-    loadOneOrMoreURIs(homePage);
+    loadOneOrMoreURIs(homePage, Services.scriptSecurityManager.getSystemPrincipal());
     break;
   case "tabshifted":
   case "tab":
     urls = homePage.split("|");
     var loadInBackground = getBoolPref("browser.tabs.loadBookmarksInBackground", false);
-    gBrowser.loadTabs(urls, loadInBackground);
+    gBrowser.loadTabs(urls, {
+      inBackground: loadInBackground,
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+    });
     break;
   case "window":
     OpenBrowserWindow();
@@ -2176,7 +2182,7 @@ function BrowserGoHome(aEvent) {
   }
 }
 
-function loadOneOrMoreURIs(aURIString) {
+function loadOneOrMoreURIs(aURIString, aTriggeringPrincipal) {
   // we're not a browser window, pass the URI string to a new browser window
   if (window.location.href != getBrowserURL()) {
     window.openDialog(getBrowserURL(), "_blank", "all,dialog=no", aURIString);
@@ -2186,7 +2192,11 @@ function loadOneOrMoreURIs(aURIString) {
   // This function throws for certain malformed URIs, so use exception handling
   // so that we don't disrupt startup
   try {
-    gBrowser.loadTabs(aURIString.split("|"), false, true);
+    gBrowser.loadTabs(aURIString.split("|"), {
+      inBackground: false,
+      replace: true,
+      triggeringPrincipal: aTriggeringPrincipal,
+    });
   } catch (e) {
   }
 }
@@ -2235,6 +2245,13 @@ function openLocation() {
 }
 
 function BrowserOpenTab(event) {
+  // A notification intended to be useful for modular peformance tracking
+  // starting as close as is reasonably possible to the time when the user
+  // expressed the intent to open a new tab.  Since there are a lot of
+  // entry points, this won't catch every single tab created, but most
+  // initiated by the user should go through here.
+  Services.obs.notifyObservers(null, "browser-open-newtab-start");
+
   let where = "tab";
   let relatedToCurrent = false;
 
@@ -2274,11 +2291,14 @@ function delayedOpenWindow(chrome, flags, href, postData) {
    the URI kicked off before becoming the active content area. */
 function delayedOpenTab(aUrl, aReferrer, aCharset, aPostData, aAllowThirdPartyFixup) {
   gBrowser.loadOneTab(aUrl, {
-                      referrerURI: aReferrer,
-                      charset: aCharset,
-                      postData: aPostData,
-                      inBackground: false,
-                      allowThirdPartyFixup: aAllowThirdPartyFixup});
+    referrerURI: aReferrer,
+    charset: aCharset,
+    postData: aPostData,
+    inBackground: false,
+    allowThirdPartyFixup: aAllowThirdPartyFixup,
+    // Bug 1367168: only use systemPrincipal till we can remove that function
+    triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+  });
 }
 
 var gLastOpenDirectory = {
@@ -2586,7 +2606,8 @@ function BrowserViewSourceOfDocument(aArgsOrDocument) {
         relatedToCurrent: true,
         inBackground: false,
         preferredRemoteType,
-        sameProcessAsFrameLoader: args.browser ? args.browser.frameLoader : null
+        sameProcessAsFrameLoader: args.browser ? args.browser.frameLoader : null,
+        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
       });
       args.viewSourceBrowser = tabBrowser.getBrowserForTab(tab);
       top.gViewSourceUtils.viewSourceInBrowser(args);
@@ -2856,224 +2877,6 @@ function PageProxyClickHandler(aEvent) {
   if (aEvent.button == 1 && gPrefService.getBoolPref("middlemouse.paste"))
     middleMousePaste(aEvent);
 }
-
-// Setup the hamburger button badges for updates, if enabled.
-var gMenuButtonUpdateBadge = {
-  kTopics: [
-    "update-staged",
-    "update-downloaded",
-    "update-available",
-    "update-error",
-  ],
-
-  timeouts: [],
-
-  get enabled() {
-    return Services.prefs.getBoolPref("app.update.doorhanger", false);
-  },
-
-  get badgeWaitTime() {
-    return Services.prefs.getIntPref("app.update.badgeWaitTime", 4 * 24 * 3600); // 4 days
-  },
-
-  init() {
-    if (this.enabled) {
-      this.kTopics.forEach(t => {
-        Services.obs.addObserver(this, t);
-      });
-    }
-  },
-
-  uninit() {
-    if (this.enabled) {
-      this.kTopics.forEach(t => {
-        Services.obs.removeObserver(this, t);
-      });
-    }
-
-    this.reset();
-  },
-
-  reset() {
-    PanelUI.removeNotification(/^update-/);
-    this.clearCallbacks();
-  },
-
-  clearCallbacks() {
-    this.timeouts.forEach(t => clearTimeout(t));
-    this.timeouts = [];
-  },
-
-  addTimeout(time, callback) {
-    this.timeouts.push(setTimeout(() => {
-      this.clearCallbacks();
-      callback();
-    }, time));
-  },
-
-  replaceReleaseNotes(update, whatsNewId) {
-    let whatsNewLink = document.getElementById(whatsNewId);
-    if (update && update.detailsURL) {
-      whatsNewLink.href = update.detailsURL;
-    } else {
-      whatsNewLink.href = Services.urlFormatter.formatURLPref("app.update.url.details");
-    }
-  },
-
-  requestRestart() {
-    let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"]
-                     .createInstance(Ci.nsISupportsPRBool);
-    Services.obs.notifyObservers(cancelQuit, "quit-application-requested", "restart");
-
-    if (!cancelQuit.data) {
-      Services.startup.quit(Services.startup.eAttemptQuit | Services.startup.eRestart);
-    }
-  },
-
-  openManualUpdateUrl() {
-    let manualUpdateUrl = Services.urlFormatter.formatURLPref("app.update.url.manual");
-    openUILinkIn(manualUpdateUrl, "tab");
-  },
-
-  showUpdateNotification(type, dismissed, mainAction) {
-    let action = {
-      callback(fromDoorhanger) {
-        if (fromDoorhanger) {
-          Services.telemetry.getHistogramById("UPDATE_NOTIFICATION_MAIN_ACTION_DOORHANGER").add(type);
-        } else {
-          Services.telemetry.getHistogramById("UPDATE_NOTIFICATION_MAIN_ACTION_MENU").add(type);
-        }
-        mainAction();
-      }
-    };
-
-    let secondaryAction = {
-      callback() {
-        Services.telemetry.getHistogramById("UPDATE_NOTIFICATION_DISMISSED").add(type);
-      },
-      dismiss: true
-    };
-
-    PanelUI.showNotification("update-" + type, action, [secondaryAction], { dismissed });
-    Services.telemetry.getHistogramById("UPDATE_NOTIFICATION_SHOWN").add(type);
-  },
-
-  showRestartNotification(dismissed) {
-    this.showUpdateNotification("restart", dismissed, () => gMenuButtonUpdateBadge.requestRestart());
-  },
-
-  showUpdateAvailableNotification(update, dismissed) {
-    this.replaceReleaseNotes(update, "update-available-whats-new");
-    this.showUpdateNotification("available", dismissed, () => {
-      let updateService = Cc["@mozilla.org/updates/update-service;1"]
-                          .getService(Ci.nsIApplicationUpdateService);
-      updateService.downloadUpdate(update, true);
-    });
-  },
-
-  showManualUpdateNotification(update, dismissed) {
-    this.replaceReleaseNotes(update, "update-manual-whats-new");
-
-    this.showUpdateNotification("manual", dismissed, () => gMenuButtonUpdateBadge.openManualUpdateUrl());
-  },
-
-  handleUpdateError(update, status) {
-    switch (status) {
-      case "download-attempt-failed":
-        this.clearCallbacks();
-        this.showUpdateAvailableNotification(update, false);
-        break;
-      case "download-attempts-exceeded":
-        this.clearCallbacks();
-        this.showManualUpdateNotification(update, false);
-        break;
-      case "elevation-attempt-failed":
-        this.clearCallbacks();
-        this.showRestartNotification(update, false);
-        break;
-      case "elevation-attempts-exceeded":
-        this.clearCallbacks();
-        this.showManualUpdateNotification(update, false);
-        break;
-      case "check-attempts-exceeded":
-      case "unknown":
-        // Background update has failed, let's show the UI responsible for
-        // prompting the user to update manually.
-        this.clearCallbacks();
-        this.showManualUpdateNotification(update, false);
-        break;
-    }
-  },
-
-  handleUpdateStagedOrDownloaded(update, status) {
-    switch (status) {
-      case "applied":
-      case "pending":
-      case "applied-service":
-      case "pending-service":
-      case "success":
-        this.clearCallbacks();
-
-        let badgeWaitTimeMs = this.badgeWaitTime * 1000;
-        let doorhangerWaitTimeMs = update.promptWaitTime * 1000;
-
-        if (badgeWaitTimeMs < doorhangerWaitTimeMs) {
-          this.addTimeout(badgeWaitTimeMs, () => {
-            this.showRestartNotification(true);
-
-            // doorhangerWaitTimeMs is relative to when we initially received
-            // the event. Since we've already waited badgeWaitTimeMs, subtract
-            // that from doorhangerWaitTimeMs.
-            let remainingTime = doorhangerWaitTimeMs - badgeWaitTimeMs;
-            this.addTimeout(remainingTime, () => {
-              this.showRestartNotification(false);
-            });
-          });
-        } else {
-          this.addTimeout(doorhangerWaitTimeMs, () => {
-            this.showRestartNotification(false);
-          });
-        }
-        break;
-    }
-  },
-
-  handleUpdateAvailable(update, status) {
-    switch (status) {
-      case "show-prompt":
-        // If an update is available and had the showPrompt flag set, then
-        // show an update available doorhanger.
-        this.clearCallbacks();
-        this.showUpdateAvailableNotification(update, false);
-        break;
-      case "cant-apply":
-        this.clearCallbacks();
-        this.showManualUpdateNotification(update, false);
-        break;
-    }
-  },
-
-  observe(subject, topic, status) {
-    if (!this.enabled) {
-      return;
-    }
-
-    let update = subject && subject.QueryInterface(Ci.nsIUpdate);
-
-    switch (topic) {
-      case "update-available":
-        this.handleUpdateAvailable(update, status);
-        break;
-      case "update-staged":
-      case "update-downloaded":
-        this.handleUpdateStagedOrDownloaded(update, status);
-        break;
-      case "update-error":
-        this.handleUpdateError(update, status);
-        break;
-    }
-  }
-};
 
 // Values for telemtery bins: see TLS_ERROR_REPORT_UI in Histograms.json
 const TLS_ERROR_REPORT_TELEMETRY_AUTO_CHECKED   = 2;
@@ -3613,7 +3416,8 @@ var PrintPreviewListener = {
     return gBrowser.loadOneTab("about:printpreview", {
       inBackground: true,
       preferredRemoteType,
-      sameProcessAsFrameLoader: browser.frameLoader
+      sameProcessAsFrameLoader: browser.frameLoader,
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
     });
   },
   getPrintPreviewBrowser() {
@@ -3638,7 +3442,8 @@ var PrintPreviewListener = {
     let browser = this.getSourceBrowser();
     this._simplifyPageTab = gBrowser.loadOneTab("about:printpreview", {
       inBackground: true,
-      sameProcessAsFrameLoader: browser.frameLoader
+      sameProcessAsFrameLoader: browser.frameLoader,
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
      });
     return this.getSimplifiedSourceBrowser();
   },
@@ -4223,7 +4028,6 @@ function FillHistoryMenu(aParent) {
       let item = existingIndex < children.length ?
                    children[existingIndex] : document.createElement("menuitem");
 
-      let entryURI = Services.io.newURI(entry.url, entry.charset);
       item.setAttribute("uri", uri);
       item.setAttribute("label", entry.title || uri);
       item.setAttribute("index", j);
@@ -4232,12 +4036,8 @@ function FillHistoryMenu(aParent) {
       item.setAttribute("historyindex", j - index);
 
       if (j != index) {
-        PlacesUtils.favicons.getFaviconURLForPage(entryURI, function(aURI) {
-          if (aURI) {
-            let iconURL = PlacesUtils.favicons.getFaviconLinkForIcon(aURI).spec;
-            item.style.listStyleImage = "url(" + iconURL + ")";
-          }
-        });
+        item.setAttribute("image",
+                          PlacesUtils.urlWithSizeRef(window, "page-icon:" + uri, 16));
       }
 
       if (j < index) {
@@ -4285,7 +4085,7 @@ function addToUrlbarHistory(aUrlToAdd) {
   if (!PrivateBrowsingUtils.isWindowPrivate(window) &&
       aUrlToAdd &&
       !aUrlToAdd.includes(" ") &&
-      !/[\x00-\x1F]/.test(aUrlToAdd))
+      !/[\x00-\x1F]/.test(aUrlToAdd)) // eslint-disable-line no-control-regex
     PlacesUIUtils.markPageAsTyped(aUrlToAdd);
 }
 
@@ -5634,6 +5434,31 @@ function displaySecurityInfo() {
   BrowserPageInfo(null, "securityTab");
 }
 
+// Updates the UI density (for touch and compact mode) based on the uidensity pref.
+var gUIDensity = {
+  prefDomain: "browser.uidensity",
+  observe(aSubject, aTopic, aPrefName) {
+    if (aTopic != "nsPref:changed" || aPrefName != this.prefDomain)
+      return;
+
+    this.update();
+  },
+
+  update() {
+    let doc = document.documentElement;
+    switch (gPrefService.getIntPref(this.prefDomain)) {
+    case 1:
+      doc.setAttribute("uidensity", "compact");
+      break;
+    case 2:
+      doc.setAttribute("uidensity", "touch");
+      break;
+    default:
+      doc.removeAttribute("uidensity");
+      break;
+    }
+  },
+};
 
 var gHomeButton = {
   prefDomain: "browser.startup.homepage",
@@ -5682,12 +5507,19 @@ const nodeToTooltipMap = {
   "context-stop": "stopButton.tooltip",
   "downloads-button": "downloads.tooltip",
   "fullscreen-button": "fullscreenButton.tooltip",
+  "appMenu-fullscreen-button": "fullscreenButton.tooltip",
   "new-window-button": "newWindowButton.tooltip",
   "new-tab-button": "newTabButton.tooltip",
   "tabs-newtab-button": "newTabButton.tooltip",
   "reload-button": "reloadButton.tooltip",
   "stop-button": "stopButton.tooltip",
   "urlbar-zoom-button": "urlbar-zoom-button.tooltip",
+  "appMenu-cut-button": "cut-button.tooltip",
+  "appMenu-copy-button": "copy-button.tooltip",
+  "appMenu-paste-button": "paste-button.tooltip",
+  "appMenu-zoomEnlarge-button": "zoomEnlarge-button.tooltip",
+  "appMenu-zoomReset-button": "zoomReset-button.tooltip",
+  "appMenu-zoomReduce-button": "zoomReduce-button.tooltip",
 };
 const nodeToShortcutMap = {
   "bookmarks-menu-button": "manBookmarkKb",
@@ -5695,12 +5527,19 @@ const nodeToShortcutMap = {
   "context-stop": "key_stop",
   "downloads-button": "key_openDownloads",
   "fullscreen-button": "key_fullScreen",
+  "appMenu-fullscreen-button": "key_fullScreen",
   "new-window-button": "key_newNavigator",
   "new-tab-button": "key_newNavigatorTab",
   "tabs-newtab-button": "key_newNavigatorTab",
   "reload-button": "key_reload",
   "stop-button": "key_stop",
   "urlbar-zoom-button": "key_fullZoomReset",
+  "appMenu-cut-button": "key_cut",
+  "appMenu-copy-button": "key_copy",
+  "appMenu-paste-button": "key_paste",
+  "appMenu-zoomEnlarge-button": "key_fullZoomEnlarge",
+  "appMenu-zoomReset-button": "key_fullZoomReset",
+  "appMenu-zoomReduce-button": "key_fullZoomReduce",
 };
 
 if (AppConstants.platform == "macosx") {
@@ -6045,14 +5884,15 @@ function stripUnsafeProtocolOnPaste(pasteData) {
 }
 
 // handleDroppedLink has the following 2 overloads:
-//   handleDroppedLink(event, url, name)
-//   handleDroppedLink(event, links)
-function handleDroppedLink(event, urlOrLinks, name) {
+//   handleDroppedLink(event, url, name, triggeringPrincipal)
+//   handleDroppedLink(event, links, triggeringPrincipal)
+function handleDroppedLink(event, urlOrLinks, nameOrTriggeringPrincipal, triggeringPrincipal) {
   let links;
   if (Array.isArray(urlOrLinks)) {
     links = urlOrLinks;
+    triggeringPrincipal = nameOrTriggeringPrincipal;
   } else {
-    links = [{ url: urlOrLinks, name, type: "" }];
+    links = [{ url: urlOrLinks, nameOrTriggeringPrincipal, type: "" }];
   }
 
   let lastLocationChange = gBrowser.selectedBrowser.lastLocationChange;
@@ -6083,6 +5923,7 @@ function handleDroppedLink(event, urlOrLinks, name) {
         allowThirdPartyFixup: false,
         postDatas,
         userContextId,
+        triggeringPrincipal,
       });
     }
   })();
@@ -6473,7 +6314,7 @@ var OfflineApps = {
   manage() {
     // The advanced subpanes are only supported in the old organization, which will
     // be removed by bug 1349689.
-    if (Preferences.get("browser.preferences.useOldOrganization", false)) {
+    if (Preferences.get("browser.preferences.useOldOrganization")) {
       openAdvancedPreferences("networkTab", {origin: "offlineApps"});
     } else {
       openPreferences("panePrivacy", {origin: "offlineApps"});
@@ -7328,7 +7169,8 @@ var gIdentityHandler = {
     this._sharingState = tab._sharingState;
 
     if (this._identityPopup.state == "open") {
-      this._handleHeightChange(() => this.updateSitePermissions());
+      this.updateSitePermissions();
+      this._identityPopupMultiView.descriptionHeightWorkaround();
     }
   },
 
@@ -7839,20 +7681,6 @@ var gIdentityHandler = {
     }
   },
 
-  _handleHeightChange(aFunction, aWillShowReloadHint) {
-    let heightBefore = getComputedStyle(this._permissionList).height;
-    aFunction();
-    let heightAfter = getComputedStyle(this._permissionList).height;
-    // Showing the reload hint increases the height, we need to account for it.
-    if (aWillShowReloadHint) {
-      heightAfter = parseInt(heightAfter) +
-                    parseInt(getComputedStyle(this._permissionList.nextSibling).height);
-    }
-    let heightChange = parseInt(heightAfter) - parseInt(heightBefore);
-    if (heightChange)
-      this._identityPopupMultiView.setHeightToFit(heightChange);
-  },
-
   _createPermissionItem(aPermission) {
     let container = document.createElement("hbox");
     container.setAttribute("class", "identity-popup-permission-item");
@@ -7889,9 +7717,7 @@ var gIdentityHandler = {
     button.setAttribute("tooltiptext", tooltiptext);
     button.addEventListener("command", () => {
       let browser = gBrowser.selectedBrowser;
-      // Only resize the window if the reload hint was previously hidden.
-      this._handleHeightChange(() => this._permissionList.removeChild(container),
-                               this._permissionReloadHint.hasAttribute("hidden"));
+      this._permissionList.removeChild(container);
       if (aPermission.inUse &&
           ["camera", "microphone", "screen"].includes(aPermission.id)) {
         let windowId = this._sharingState.windowId;
@@ -7922,6 +7748,7 @@ var gIdentityHandler = {
       SitePermissions.remove(gBrowser.currentURI, aPermission.id, browser);
 
       this._permissionReloadHint.removeAttribute("hidden");
+      this._identityPopupMultiView.descriptionHeightWorkaround();
 
       // Set telemetry values for clearing a permission
       let histogram = Services.telemetry.getKeyedHistogramById("WEB_PERMISSION_CLEARED");
@@ -7967,10 +7794,9 @@ var gPageActionButton = {
     return this.panel = document.getElementById("page-action-panel");
   },
 
-  init() {
-    if (getBoolPref("browser.photon.structure.enabled")) {
-      this.button.hidden = false;
-    }
+  get sendToDeviceBody() {
+    delete this.sendToDeviceBody;
+    return this.sendToDeviceBody = document.getElementById("page-action-sendToDeviceView-body");
   },
 
   onEvent(event) {
@@ -7982,8 +7808,21 @@ var gPageActionButton = {
       return; // Left click, space or enter only
     }
 
+    this._preparePanelToBeShown();
     this.panel.hidden = false;
     this.panel.openPopup(this.button, "bottomcenter topright");
+  },
+
+  _preparePanelToBeShown() {
+    // Update the bookmark item's label.
+    BookmarkingUI.updateBookmarkPageMenuItem();
+
+    // Update the send-to-device item's disabled state.
+    let browser = gBrowser.selectedBrowser;
+    let url = browser.currentURI.spec;
+    let sendToDeviceItem =
+      document.getElementById("page-action-send-to-device-button");
+    sendToDeviceItem.disabled = !gSync.isSendableURI(url);
   },
 
   copyURL() {
@@ -7996,6 +7835,44 @@ var gPageActionButton = {
   emailLink() {
     this.panel.hidePopup();
     MailIntegration.sendLinkForBrowser(gBrowser.selectedBrowser);
+  },
+
+  showSendToDeviceView(subviewButton) {
+    let browser = gBrowser.selectedBrowser;
+    let url = browser.currentURI.spec;
+    let title = browser.contentTitle;
+    let body = this.sendToDeviceBody;
+
+    gSync.populateSendTabToDevicesMenu(body, url, title, (clientId, name, clientType) => {
+      if (!name) {
+        return document.createElement("toolbarseparator");
+      }
+      let item = document.createElement("toolbarbutton");
+      item.classList.add("page-action-sendToDevice-device", "subviewbutton");
+      if (clientId) {
+        item.classList.add("subviewbutton-iconic");
+      }
+      return item;
+    });
+
+    if (gSync.remoteClients.length) {
+      body.setAttribute("hasdevices", "true");
+    } else {
+      body.removeAttribute("hasdevices");
+    }
+
+    if (UIState.get().status == UIState.STATUS_SIGNED_IN) {
+      body.setAttribute("signedin", "true");
+    } else {
+      body.removeAttribute("signedin");
+    }
+
+    PanelUI.showSubView("page-action-sendToDeviceView", subviewButton);
+  },
+
+  fxaButtonClicked() {
+    this.panel.hidePopup();
+    gSync.openPrefs();
   },
 };
 

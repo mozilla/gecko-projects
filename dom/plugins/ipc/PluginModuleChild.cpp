@@ -53,7 +53,9 @@
 #include "mozilla/ipc/CrashReporterClient.h"
 #endif
 
-#include "GeckoProfiler.h"
+#ifdef MOZ_GECKO_PROFILER
+#include "ChildProfilerController.h"
+#endif
 
 using namespace mozilla;
 using namespace mozilla::ipc;
@@ -107,6 +109,10 @@ typedef BOOL (WINAPI *GetOpenFileNameWPtr)(LPOPENFILENAMEW lpofn);
 static GetOpenFileNameWPtr sGetOpenFileNameWPtrStub = nullptr;
 typedef BOOL (WINAPI *GetSaveFileNameWPtr)(LPOPENFILENAMEW lpofn);
 static GetSaveFileNameWPtr sGetSaveFileNameWPtrStub = nullptr;
+
+typedef BOOL (WINAPI *SetCursorPosPtr)(int x, int y);
+static SetCursorPosPtr sSetCursorPosPtrStub = nullptr;
+
 #endif
 
 /* static */
@@ -204,6 +210,15 @@ PluginModuleChild::InitForContent(Endpoint<PPluginModuleChild>&& aEndpoint)
     mFunctions = GetChrome()->mFunctions;
 
     return true;
+}
+
+mozilla::ipc::IPCResult
+PluginModuleChild::RecvInitProfiler(Endpoint<mozilla::PProfilerChild>&& aEndpoint)
+{
+#ifdef MOZ_GECKO_PROFILER
+    mProfilerController = ChildProfilerController::Create(Move(aEndpoint));
+#endif
+    return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
@@ -746,6 +761,13 @@ PluginModuleChild::AnswerInitCrashReporter(Shmem&& aShmem, mozilla::dom::NativeT
 void
 PluginModuleChild::ActorDestroy(ActorDestroyReason why)
 {
+#ifdef MOZ_GECKO_PROFILER
+    if (mProfilerController) {
+        mProfilerController->Shutdown();
+        mProfilerController = nullptr;
+    }
+#endif
+
     if (!mIsChrome) {
         PluginModuleChild* chromeInstance = PluginModuleChild::GetChrome();
         if (chromeInstance) {
@@ -2097,52 +2119,45 @@ PMCGetKeyState(int aVirtKey)
     return sGetKeyStatePtrStub(aVirtKey);
 }
 
-BOOL WINAPI PMCGetSaveFileNameW(LPOPENFILENAMEW lpofn);
-BOOL WINAPI PMCGetOpenFileNameW(LPOPENFILENAMEW lpofn);
+class PluginThreadTaskData
+{
+public:
+    virtual bool RunTask() = 0;
+};
 
-// Runnable that performs GetOpenFileNameW and GetSaveFileNameW
-// on the main thread so that the call can be
+// Runnable that performs a task on the main thread so that the call can be
 // synchronously run on the PluginModuleParent via IPC.
 // The task alerts the given semaphore when it is finished.
-class GetFileNameTask : public Runnable
+class PluginThreadTask : public Runnable
 {
-    BOOL* mReturnValue;
-    void* mLpOpenFileName;
+    bool mSuccess;
+    PluginThreadTaskData* mTaskData;
     HANDLE mSemaphore;
-    GetFileNameFunc mFunc;
 
 public:
-    explicit GetFileNameTask(GetFileNameFunc func, void* aLpOpenFileName,
-                             HANDLE aSemaphore, BOOL* aReturnValue) :
-        Runnable("GetFileNameTask"), mLpOpenFileName(aLpOpenFileName),
-        mSemaphore(aSemaphore), mReturnValue(aReturnValue),
-        mFunc(func)
+    explicit PluginThreadTask(PluginThreadTaskData* aTaskData,
+                              HANDLE aSemaphore) :
+        Runnable("PluginThreadTask"), mTaskData(aTaskData),
+        mSemaphore(aSemaphore), mSuccess(false)
     {}
 
     NS_IMETHOD Run() override
     {
         PLUGIN_LOG_DEBUG_METHOD;
         AssertPluginThread();
-        switch (mFunc) {
-        case OPEN_FUNC:
-            *mReturnValue =
-                PMCGetOpenFileNameW(static_cast<LPOPENFILENAMEW>(mLpOpenFileName));
-            break;
-        case SAVE_FUNC:
-            *mReturnValue =
-                PMCGetSaveFileNameW(static_cast<LPOPENFILENAMEW>(mLpOpenFileName));
-            break;
-        }
+        mSuccess = mTaskData->RunTask();
         if (!ReleaseSemaphore(mSemaphore, 1, nullptr)) {
             return NS_ERROR_FAILURE;
         }
         return NS_OK;
     }
+
+    bool Success() { return mSuccess; }
 };
 
 // static
 BOOL
-PostToPluginThread(GetFileNameFunc aFunc, void* aLpofn)
+PostToPluginThread(PluginThreadTaskData* aTaskData)
 {
     MOZ_ASSERT(!IsPluginThread());
 
@@ -2155,13 +2170,11 @@ PostToPluginThread(GetFileNameFunc aFunc, void* aLpofn)
         return FALSE;
     }
 
-    BOOL returnValue = FALSE;
-    RefPtr<GetFileNameTask> task =
-        new GetFileNameTask(aFunc, aLpofn, semaphore, &returnValue);
-    ProcessChild::message_loop()->PostTask(task.forget());
+    RefPtr<PluginThreadTask> task = new PluginThreadTask(aTaskData, semaphore);
+    ProcessChild::message_loop()->PostTask(do_AddRef(task));
     DWORD err = WaitForSingleObject(semaphore, INFINITE);
     if (err != WAIT_FAILED) {
-        return returnValue;
+        return task->Success();
     }
     PLUGIN_LOG_DEBUG(("Error while waiting for semaphore: %d",
                       GetLastError()));
@@ -2169,12 +2182,39 @@ PostToPluginThread(GetFileNameFunc aFunc, void* aLpofn)
     return FALSE;
 }
 
+BOOL WINAPI PMCGetSaveFileNameW(LPOPENFILENAMEW lpofn);
+BOOL WINAPI PMCGetOpenFileNameW(LPOPENFILENAMEW lpofn);
+
+class GetFileNameTaskData : public PluginThreadTaskData
+{
+public:
+    GetFileNameTaskData(GetFileNameFunc aFunc, void* aLpOpenFileName) :
+        mFunc(aFunc), mLpOpenFileName(aLpOpenFileName)
+    {}
+
+    bool RunTask()
+    {
+        switch (mFunc) {
+        case OPEN_FUNC:
+            return PMCGetOpenFileNameW(static_cast<LPOPENFILENAMEW>(mLpOpenFileName));
+        case SAVE_FUNC:
+            return PMCGetSaveFileNameW(static_cast<LPOPENFILENAMEW>(mLpOpenFileName));
+        }
+        return false;
+    }
+
+private:
+    GetFileNameFunc mFunc;
+    void* mLpOpenFileName;
+};
+
 // static
 BOOL WINAPI
 PMCGetFileNameW(GetFileNameFunc aFunc, LPOPENFILENAMEW aLpofn)
 {
     if (!IsPluginThread()) {
-        return PostToPluginThread(aFunc, aLpofn);
+        GetFileNameTaskData gfnData(aFunc, aLpofn);
+        return PostToPluginThread(&gfnData);
     }
 
     PluginModuleChild* chromeInstance = PluginModuleChild::GetChrome();
@@ -2215,6 +2255,38 @@ PMCGetOpenFileNameW(LPOPENFILENAMEW aLpofn)
 {
     return PMCGetFileNameW(OPEN_FUNC, aLpofn);
 }
+
+BOOL WINAPI PMCSetCursorPos(int x, int y);
+
+class SetCursorPosTaskData : public PluginThreadTaskData
+{
+public:
+    SetCursorPosTaskData(int x, int y) : mX(x), mY(y) {}
+    bool RunTask() { return PMCSetCursorPos(mX, mY); }
+private:
+    int mX, mY;
+};
+
+// static
+BOOL WINAPI
+PMCSetCursorPos(int x, int y)
+{
+    if (!IsPluginThread()) {
+        SetCursorPosTaskData scpData(x, y);
+        return PostToPluginThread(&scpData);
+    }
+
+    PluginModuleChild* chromeInstance = PluginModuleChild::GetChrome();
+    if (chromeInstance) {
+        bool ret = FALSE;
+        chromeInstance->CallSetCursorPos(x, y, &ret);
+        return ret;
+    }
+
+    return sSetCursorPosPtrStub(x, y);
+}
+
+
 #endif
 
 PPluginInstanceChild*
@@ -2245,6 +2317,11 @@ PluginModuleChild::AllocPPluginInstanceChild(const nsCString& aMimeType,
         !sGetKeyStatePtrStub) {
         sUser32Intercept.AddHook("GetKeyState", reinterpret_cast<intptr_t>(PMCGetKeyState),
                                  (void**) &sGetKeyStatePtrStub);
+    }
+
+    if (!sSetCursorPosPtrStub) {
+        sUser32Intercept.AddHook("SetCursorPos", reinterpret_cast<intptr_t>(PMCSetCursorPos),
+                                 (void**) &sSetCursorPosPtrStub);
     }
 
     sComDlg32Intercept.Init("comdlg32.dll");
@@ -2664,54 +2741,6 @@ PluginModuleChild::ProcessNativeEvents() {
     CallProcessSomeEvents();    
 }
 #endif
-
-mozilla::ipc::IPCResult
-PluginModuleChild::RecvStartProfiler(const ProfilerInitParams& params)
-{
-    nsTArray<const char*> filterArray;
-    for (size_t i = 0; i < params.filters().Length(); ++i) {
-        filterArray.AppendElement(params.filters()[i].get());
-    }
-
-    profiler_start(params.entries(), params.interval(), params.features(),
-                   filterArray.Elements(), filterArray.Length());
-
-    return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-PluginModuleChild::RecvStopProfiler()
-{
-    profiler_stop();
-    return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-PluginModuleChild::RecvPauseProfiler(const bool& aPause)
-{
-    if (aPause) {
-        profiler_pause();
-    } else {
-        profiler_resume();
-    }
-
-    return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-PluginModuleChild::RecvGatherProfile()
-{
-    nsCString profileCString;
-    UniquePtr<char[]> profile = profiler_get_profile();
-    if (profile != nullptr) {
-        profileCString = nsCString(profile.get(), strlen(profile.get()));
-    } else {
-        profileCString = nsCString("", 0);
-    }
-
-    Unused << SendProfile(profileCString, false);
-    return IPC_OK();
-}
 
 NPError
 PluginModuleChild::PluginRequiresAudioDeviceChanges(

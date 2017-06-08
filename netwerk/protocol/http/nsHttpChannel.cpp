@@ -10,6 +10,7 @@
 #include <inttypes.h>
 
 #include "mozilla/dom/nsCSPContext.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/SizePrintfMacros.h"
 #include "mozilla/Sprintf.h"
 
@@ -63,6 +64,7 @@
 #include "nsIClassOfService.h"
 #include "nsIPermissionManager.h"
 #include "nsIPrincipal.h"
+#include "nsIScriptError.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsISSLStatus.h"
 #include "nsISSLStatusProvider.h"
@@ -106,7 +108,6 @@
 #include "HSTSPrimerListener.h"
 #include "CacheStorageService.h"
 #include "HttpChannelParent.h"
-#include "nsIThrottlingService.h"
 #include "nsIBufferedStreams.h"
 #include "nsIFileStreams.h"
 #include "nsIMIMEInputStream.h"
@@ -709,10 +710,6 @@ nsHttpChannel::ContinueConnect()
     uint32_t suspendCount = mSuspendCount;
     while (suspendCount--)
         mTransactionPump->Suspend();
-
-    if (mSuspendCount && mClassOfService & nsIClassOfService::Throttleable) {
-        gHttpHandler->ThrottleTransaction(mTransaction, true);
-    }
 
     return NS_OK;
 }
@@ -1388,12 +1385,6 @@ nsHttpChannel::CallOnStartRequest()
                        "CORS preflight must have been finished by the time we "
                        "call OnStartRequest");
 
-    nsresult rv = EnsureMIMEOfScript(mURI, mResponseHead, mLoadInfo);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = ProcessXCTO(mURI, mResponseHead, mLoadInfo);
-    NS_ENSURE_SUCCESS(rv, rv);
-
     if (mOnStartRequestCalled) {
         // This can only happen when a range request loading rest of the data
         // after interrupted concurrent cache read asynchronously failed, e.g.
@@ -1409,6 +1400,27 @@ nsHttpChannel::CallOnStartRequest()
     }
 
     mTracingEnabled = false;
+
+    // Ensure mListener->OnStartRequest will be invoked before exiting
+    // this function.
+    auto onStartGuard = MakeScopeExit([&] {
+        LOG(("  calling mListener->OnStartRequest by ScopeExit [this=%p, "
+             "listener=%p]\n", this, mListener.get()));
+        MOZ_ASSERT(!mOnStartRequestCalled);
+
+        if (mListener) {
+            nsCOMPtr<nsIStreamListener> deleteProtector(mListener);
+            deleteProtector->OnStartRequest(this, mListenerContext);
+        }
+
+        mOnStartRequestCalled = true;
+    });
+
+    nsresult rv = EnsureMIMEOfScript(mURI, mResponseHead, mLoadInfo);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rv = ProcessXCTO(mURI, mResponseHead, mLoadInfo);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     // Allow consumers to override our content type
     if (mLoadFlags & LOAD_CALL_CONTENT_SNIFFERS) {
@@ -1476,6 +1488,10 @@ nsHttpChannel::CallOnStartRequest()
     }
 
     LOG(("  calling mListener->OnStartRequest [this=%p, listener=%p]\n", this, mListener.get()));
+
+    // About to call OnStartRequest, dismiss the guard object.
+    onStartGuard.release();
+
     if (mListener) {
         MOZ_ASSERT(!mOnStartRequestCalled,
                    "We should not call OsStartRequest twice");
@@ -6602,19 +6618,8 @@ nsHttpChannel::ContinueBeginConnect()
 void
 nsHttpChannel::OnClassOfServiceUpdated()
 {
-    bool throttleable = !!(mClassOfService & nsIClassOfService::Throttleable);
-
-    if (mSuspendCount && mTransaction) {
-        gHttpHandler->ThrottleTransaction(mTransaction, throttleable);
-    }
-
-    nsIThrottlingService *throttler = gHttpHandler->GetThrottlingService();
-    if (throttler) {
-        if (throttleable) {
-            throttler->AddChannel(this);
-        } else {
-            throttler->RemoveChannel(this);
-        }
+    if (mTransaction) {
+        gHttpHandler->UpdateClassOfServiceOnTransaction(mTransaction, mClassOfService);
     }
 }
 
@@ -7354,6 +7359,8 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
 
     if (mListener) {
         LOG(("  calling OnStopRequest\n"));
+        MOZ_ASSERT(mOnStartRequestCalled,
+                   "OnStartRequest should be called before OnStopRequest");
         MOZ_ASSERT(!mOnStopRequestCalled,
                    "We should not call OnStopRequest twice");
         mListener->OnStopRequest(this, mListenerContext, status);
@@ -7692,6 +7699,30 @@ nsHttpChannel::IsFromCache(bool *value)
 }
 
 NS_IMETHODIMP
+nsHttpChannel::GetCacheTokenFetchCount(int32_t *_retval)
+{
+    NS_ENSURE_ARG_POINTER(_retval);
+    nsCOMPtr<nsICacheEntry> cacheEntry = mCacheEntry ? mCacheEntry : mAltDataCacheEntry;
+    if (!cacheEntry) {
+        return NS_ERROR_NOT_AVAILABLE;
+    }
+
+    return cacheEntry->GetFetchCount(_retval);
+}
+
+NS_IMETHODIMP
+nsHttpChannel::GetCacheTokenLastFetched(uint32_t *_retval)
+{
+    NS_ENSURE_ARG_POINTER(_retval);
+    nsCOMPtr<nsICacheEntry> cacheEntry = mCacheEntry ? mCacheEntry : mAltDataCacheEntry;
+    if (!cacheEntry) {
+        return NS_ERROR_NOT_AVAILABLE;
+    }
+
+    return cacheEntry->GetLastFetched(_retval);
+}
+
+NS_IMETHODIMP
 nsHttpChannel::GetCacheTokenExpirationTime(uint32_t *_retval)
 {
     NS_ENSURE_ARG_POINTER(_retval);
@@ -7995,10 +8026,6 @@ nsHttpChannel::DoAuthRetry(nsAHttpConnection *conn)
     uint32_t suspendCount = mSuspendCount;
     while (suspendCount--)
         mTransactionPump->Suspend();
-
-    if (mSuspendCount && mClassOfService & nsIClassOfService::Throttleable) {
-        gHttpHandler->ThrottleTransaction(mTransaction, true);
-    }
 
     return NS_OK;
 }
@@ -8706,10 +8733,6 @@ nsHttpChannel::SuspendInternal()
 
     if (mSuspendCount == 1) {
         mSuspendTimestamp = TimeStamp::NowLoRes();
-
-        if (mClassOfService & nsIClassOfService::Throttleable && mTransaction) {
-            gHttpHandler->ThrottleTransaction(mTransaction, true);
-        }
     }
 
     nsresult rvTransaction = NS_OK;
@@ -8734,10 +8757,6 @@ nsHttpChannel::ResumeInternal()
     if (--mSuspendCount == 0) {
         mSuspendTotalTime += (TimeStamp::NowLoRes() - mSuspendTimestamp).
                                ToMilliseconds();
-
-        if (mClassOfService & nsIClassOfService::Throttleable && mTransaction) {
-            gHttpHandler->ThrottleTransaction(mTransaction, false);
-        }
 
         if (mCallOnResume) {
             nsresult rv = AsyncCall(mCallOnResume);
@@ -8852,10 +8871,10 @@ nsHttpChannel::ReportRcwnStats(nsIRequest* firstResponseRequest)
         kRaceUsedCache = 3
     };
     static const Telemetry::HistogramID kRcwnTelemetry[4] = {
-        Telemetry::NETWORK_RACE_CACHE_BANDWITH_NOT_RACE,
-        Telemetry::NETWORK_RACE_CACHE_BANDWITH_NOT_RACE,
-        Telemetry::NETWORK_RACE_CACHE_BANDWITH_RACE_NETWORK_WIN,
-        Telemetry::NETWORK_RACE_CACHE_BANDWITH_RACE_CACHE_WIN
+        Telemetry::NETWORK_RACE_CACHE_BANDWIDTH_NOT_RACE,
+        Telemetry::NETWORK_RACE_CACHE_BANDWIDTH_NOT_RACE,
+        Telemetry::NETWORK_RACE_CACHE_BANDWIDTH_RACE_NETWORK_WIN,
+        Telemetry::NETWORK_RACE_CACHE_BANDWIDTH_RACE_CACHE_WIN
     };
 
     RaceCacheAndNetStatus rcwnStatus = kDidNotRaceUsedNetwork;

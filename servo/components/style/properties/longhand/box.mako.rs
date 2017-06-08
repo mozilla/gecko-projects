@@ -152,9 +152,8 @@ ${helpers.single_keyword("-moz-top-layer", "none top",
                          spec="Internal (not web-exposed)")}
 
 ${helpers.single_keyword("position", "static absolute relative fixed",
-                         need_clone="True",
                          extra_gecko_values="sticky",
-                         animation_value_type="none",
+                         animation_value_type="discrete",
                          flags="CREATES_STACKING_CONTEXT ABSPOS_CB",
                          spec="https://drafts.csswg.org/css-position/#position-property")}
 
@@ -163,8 +162,7 @@ ${helpers.single_keyword("position", "static absolute relative fixed",
                                   // https://drafts.csswg.org/css-logical-props/#float-clear
                                   extra_specified="inline-start inline-end"
                                   needs_conversion="True"
-                                  animation_value_type="none"
-                                  need_clone="True"
+                                  animation_value_type="discrete"
                                   gecko_enum_prefix="StyleFloat"
                                   gecko_inexhaustive="True"
                                   gecko_ffi_name="mFloat"
@@ -203,7 +201,8 @@ ${helpers.single_keyword("position", "static absolute relative fixed",
                                   // https://drafts.csswg.org/css-logical-props/#float-clear
                                   extra_specified="inline-start inline-end"
                                   needs_conversion="True"
-                                  animation_value_type="none"
+                                  gecko_inexhaustive="True"
+                                  animation_value_type="discrete"
                                   gecko_enum_prefix="StyleClear"
                                   gecko_ffi_name="mBreakType"
                                   spec="https://www.w3.org/TR/CSS2/visuren.html#flow-control">
@@ -382,7 +381,7 @@ ${helpers.single_keyword("-servo-overflow-clip-box", "padding-box content-box",
           may be standardized in the future (https://developer.mozilla.org/en-US/docs/Web/CSS/overflow-clip-box)")}
 
 ${helpers.single_keyword("overflow-clip-box", "padding-box content-box",
-    products="gecko", animation_value_type="none", internal=True,
+    products="gecko", animation_value_type="discrete", internal=True,
     spec="Internal, not web-exposed, \
           may be standardized in the future (https://developer.mozilla.org/en-US/docs/Web/CSS/overflow-clip-box)")}
 
@@ -392,377 +391,38 @@ ${helpers.single_keyword("overflow-clip-box", "padding-box content-box",
 
 // FIXME(pcwalton, #2742): Implement scrolling for `scroll` and `auto`.
 ${helpers.single_keyword("overflow-x", "visible hidden scroll auto",
-                         need_clone=True, animation_value_type="none",
+                         need_clone=True, animation_value_type="discrete",
                          extra_gecko_values="-moz-hidden-unscrollable",
                          custom_consts=overflow_custom_consts,
                          gecko_constant_prefix="NS_STYLE_OVERFLOW",
                          spec="https://drafts.csswg.org/css-overflow/#propdef-overflow-x")}
 
 // FIXME(pcwalton, #2742): Implement scrolling for `scroll` and `auto`.
-<%helpers:longhand name="overflow-y" need_clone="True" animation_value_type="none"
+<%helpers:longhand name="overflow-y" need_clone="True" animation_value_type="discrete"
                    spec="https://drafts.csswg.org/css-overflow/#propdef-overflow-y">
     pub use super::overflow_x::{SpecifiedValue, parse, get_initial_value, computed_value};
 </%helpers:longhand>
 
-<%helpers:vector_longhand name="transition-duration"
-                          need_index="True"
-                          animation_value_type="none"
-                          extra_prefixes="moz webkit"
-                          spec="https://drafts.csswg.org/css-transitions/#propdef-transition-duration">
-    use values::specified::Time;
+${helpers.predefined_type("transition-duration",
+                          "Time",
+                          "computed::Time::zero()",
+                          initial_specified_value="specified::Time::zero()",
+                          parse_method="parse_non_negative",
+                          vector=True,
+                          need_index=True,
+                          animation_value_type="none",
+                          extra_prefixes="moz webkit",
+                          spec="https://drafts.csswg.org/css-transitions/#propdef-transition-duration")}
 
-    pub use values::specified::Time as SpecifiedValue;
-    no_viewport_percentage!(SpecifiedValue);
-
-    pub mod computed_value {
-        pub use values::computed::Time as T;
-    }
-
-    #[inline]
-    pub fn get_initial_value() -> computed_value::T {
-        computed_value::T::zero()
-    }
-
-    #[inline]
-    pub fn get_initial_specified_value() -> SpecifiedValue {
-        Time::zero()
-    }
-
-    pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue,()> {
-        Time::parse_non_negative(context, input)
-    }
-</%helpers:vector_longhand>
-
-// TODO(pcwalton): Lots more timing functions.
-<%helpers:vector_longhand name="transition-timing-function"
-                          need_index="True"
-                          animation_value_type="none"
-                          extra_prefixes="moz webkit"
-                          spec="https://drafts.csswg.org/css-transitions/#propdef-transition-timing-function">
-    use self::computed_value::StartEnd;
-    use values::specified::Number;
-    use euclid::point::{Point2D, TypedPoint2D};
-    use std::fmt;
-    use style_traits::ToCss;
-
-    // FIXME: This could use static variables and const functions when they are available.
-    #[inline(always)]
-    fn ease() -> computed_value::T {
-        computed_value::T::CubicBezier(TypedPoint2D::new(0.25, 0.1),
-                                       TypedPoint2D::new(0.25, 1.0))
-    }
-
-    #[inline(always)]
-    fn linear() -> computed_value::T {
-        computed_value::T::CubicBezier(TypedPoint2D::new(0.0, 0.0),
-                                       TypedPoint2D::new(1.0, 1.0))
-    }
-
-    #[inline(always)]
-    fn ease_in() -> computed_value::T {
-        computed_value::T::CubicBezier(TypedPoint2D::new(0.42, 0.0),
-                                       TypedPoint2D::new(1.0, 1.0))
-    }
-
-    #[inline(always)]
-    fn ease_out() -> computed_value::T {
-        computed_value::T::CubicBezier(TypedPoint2D::new(0.0, 0.0),
-                                       TypedPoint2D::new(0.58, 1.0))
-    }
-
-    #[inline(always)]
-    fn ease_in_out() -> computed_value::T {
-        computed_value::T::CubicBezier(TypedPoint2D::new(0.42, 0.0),
-                                       TypedPoint2D::new(0.58, 1.0))
-    }
-
-    static STEP_START: computed_value::T =
-        computed_value::T::Steps(1, StartEnd::Start);
-    static STEP_END: computed_value::T =
-        computed_value::T::Steps(1, StartEnd::End);
-
-    pub mod computed_value {
-        use euclid::point::Point2D;
-        use std::fmt;
-        use style_traits::ToCss;
-        use super::FunctionKeyword;
-        use values::specified;
-
-        pub use super::parse;
-
-        #[derive(Copy, Clone, Debug, PartialEq)]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-        pub enum T {
-            CubicBezier(Point2D<f32>, Point2D<f32>),
-            Steps(u32, StartEnd),
-            Frames(u32),
-            Keyword(FunctionKeyword),
-        }
-
-        impl ToCss for T {
-            fn to_css<W>(&self, dest: &mut W) -> fmt::Result
-                where W: fmt::Write,
-            {
-                match *self {
-                    T::CubicBezier(p1, p2) => {
-                        try!(dest.write_str("cubic-bezier("));
-                        try!(p1.x.to_css(dest));
-                        try!(dest.write_str(", "));
-                        try!(p1.y.to_css(dest));
-                        try!(dest.write_str(", "));
-                        try!(p2.x.to_css(dest));
-                        try!(dest.write_str(", "));
-                        try!(p2.y.to_css(dest));
-                        dest.write_str(")")
-                    },
-                    T::Steps(steps, start_end) => {
-                        super::serialize_steps(dest, specified::Integer::new(steps as i32), start_end)
-                    },
-                    T::Frames(frames) => {
-                        try!(dest.write_str("frames("));
-                        try!(frames.to_css(dest));
-                        dest.write_str(")")
-                    },
-                    T::Keyword(keyword) => {
-                        super::serialize_keyword(dest, keyword)
-                    }
-                }
-            }
-        }
-
-        #[derive(Copy, Clone, Debug, PartialEq)]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-        pub enum StartEnd {
-            Start,
-            End,
-        }
-
-        impl ToCss for StartEnd {
-            fn to_css<W>(&self, dest: &mut W) -> fmt::Result
-                where W: fmt::Write,
-            {
-                match *self {
-                    StartEnd::Start => dest.write_str("start"),
-                    StartEnd::End => dest.write_str("end"),
-                }
-            }
-        }
-    }
-
-    define_css_keyword_enum!(FunctionKeyword:
-                             "ease" => Ease,
-                             "linear" => Linear,
-                             "ease-in" => EaseIn,
-                             "ease-out" => EaseOut,
-                             "ease-in-out" => EaseInOut,
-                             "step-start" => StepStart,
-                             "step-end" => StepEnd);
-
-    #[derive(Copy, Clone, Debug, PartialEq)]
-    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-    pub enum SpecifiedValue {
-        CubicBezier(Point2D<Number>, Point2D<Number>),
-        Steps(specified::Integer, StartEnd),
-        Frames(specified::Integer),
-        Keyword(FunctionKeyword),
-    }
-
-    impl Parse for SpecifiedValue {
-        fn parse(context: &ParserContext, input: &mut ::cssparser::Parser) -> Result<Self, ()> {
-            if let Ok(function_name) = input.try(|input| input.expect_function()) {
-                return match_ignore_ascii_case! { &function_name,
-                    "cubic-bezier" => {
-                        let (mut p1x, mut p1y, mut p2x, mut p2y) =
-                            (Number::new(0.0), Number::new(0.0), Number::new(0.0), Number::new(0.0));
-                        try!(input.parse_nested_block(|input| {
-                            p1x = try!(specified::parse_number(context, input));
-                            try!(input.expect_comma());
-                            p1y = try!(specified::parse_number(context, input));
-                            try!(input.expect_comma());
-                            p2x = try!(specified::parse_number(context, input));
-                            try!(input.expect_comma());
-                            p2y = try!(specified::parse_number(context, input));
-                            Ok(())
-                        }));
-                        if p1x.get() < 0.0 || p1x.get() > 1.0 ||
-                           p2x.get() < 0.0 || p2x.get() > 1.0 {
-                            return Err(())
-                        }
-
-                        let (p1, p2) = (Point2D::new(p1x, p1y), Point2D::new(p2x, p2y));
-                        Ok(SpecifiedValue::CubicBezier(p1, p2))
-                    },
-                    "steps" => {
-                        let (mut step_count, mut start_end) = (specified::Integer::new(0), StartEnd::End);
-                        try!(input.parse_nested_block(|input| {
-                            step_count = try!(specified::parse_integer(context, input));
-                            if step_count.value() < 1 {
-                                return Err(())
-                            }
-
-                            if input.try(|input| input.expect_comma()).is_ok() {
-                                start_end = try!(match_ignore_ascii_case! {
-                                    &try!(input.expect_ident()),
-                                    "start" => Ok(StartEnd::Start),
-                                    "end" => Ok(StartEnd::End),
-                                    _ => Err(())
-                                });
-                            }
-                            Ok(())
-                        }));
-                        Ok(SpecifiedValue::Steps(step_count, start_end))
-                    },
-                    "frames" => {
-                        // https://drafts.csswg.org/css-timing/#frames-timing-functions
-                        let frames = try!(input.parse_nested_block(|input| {
-                            specified::Integer::parse_with_minimum(context, input, 2)
-                        }));
-                        Ok(SpecifiedValue::Frames(frames))
-                    },
-                    _ => Err(())
-                }
-            }
-            Ok(SpecifiedValue::Keyword(try!(FunctionKeyword::parse(input))))
-        }
-    }
-
-    fn serialize_steps<W>(dest: &mut W,
-                          steps: specified::Integer,
-                          start_end: StartEnd) -> fmt::Result
-        where W: fmt::Write,
-    {
-        try!(dest.write_str("steps("));
-        try!(steps.to_css(dest));
-        if let StartEnd::Start = start_end {
-            try!(dest.write_str(", start"));
-        }
-        dest.write_str(")")
-    }
-
-    fn serialize_keyword<W>(dest: &mut W, keyword: FunctionKeyword) -> fmt::Result
-        where W: fmt::Write,
-    {
-        match keyword {
-            FunctionKeyword::StepStart => {
-                serialize_steps(dest, specified::Integer::new(1), StartEnd::Start)
-            },
-            FunctionKeyword::StepEnd => {
-                serialize_steps(dest, specified::Integer::new(1), StartEnd::End)
-            },
-            _ => {
-                keyword.to_css(dest)
-            },
-        }
-    }
-
-    // https://drafts.csswg.org/css-transitions/#serializing-a-timing-function
-    impl ToCss for SpecifiedValue {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            match *self {
-                SpecifiedValue::CubicBezier(p1, p2) => {
-                    try!(dest.write_str("cubic-bezier("));
-                    try!(p1.x.to_css(dest));
-                    try!(dest.write_str(", "));
-                    try!(p1.y.to_css(dest));
-                    try!(dest.write_str(", "));
-                    try!(p2.x.to_css(dest));
-                    try!(dest.write_str(", "));
-                    try!(p2.y.to_css(dest));
-                    dest.write_str(")")
-                },
-                SpecifiedValue::Steps(steps, start_end) => {
-                    serialize_steps(dest, steps, start_end)
-                },
-                SpecifiedValue::Frames(frames) => {
-                    try!(dest.write_str("frames("));
-                    try!(frames.to_css(dest));
-                    dest.write_str(")")
-                },
-                SpecifiedValue::Keyword(keyword) => {
-                    serialize_keyword(dest, keyword)
-                },
-            }
-        }
-    }
-
-    impl ToComputedValue for SpecifiedValue {
-        type ComputedValue = computed_value::T;
-
-        #[inline]
-        fn to_computed_value(&self, context: &Context) -> computed_value::T {
-            match *self {
-                SpecifiedValue::CubicBezier(p1, p2) => {
-                    computed_value::T::CubicBezier(
-                        Point2D::new(p1.x.to_computed_value(context), p1.y.to_computed_value(context)),
-                        Point2D::new(p2.x.to_computed_value(context), p2.y.to_computed_value(context)))
-                },
-                SpecifiedValue::Steps(count, start_end) => {
-                    computed_value::T::Steps(count.to_computed_value(context) as u32, start_end)
-                },
-                SpecifiedValue::Frames(frames) => {
-                    computed_value::T::Frames(frames.to_computed_value(context) as u32)
-                },
-                SpecifiedValue::Keyword(keyword) => {
-                    computed_value::T::Keyword(keyword)
-                },
-            }
-        }
-        #[inline]
-        fn from_computed_value(computed: &computed_value::T) -> Self {
-            match *computed {
-                computed_value::T::CubicBezier(p1, p2) => {
-                    SpecifiedValue::CubicBezier(
-                        Point2D::new(Number::from_computed_value(&p1.x),
-                                     Number::from_computed_value(&p1.y)),
-                        Point2D::new(Number::from_computed_value(&p2.x),
-                                     Number::from_computed_value(&p2.y)))
-                },
-                computed_value::T::Steps(count, start_end) => {
-                    let int_count = count as i32;
-                    SpecifiedValue::Steps(specified::Integer::from_computed_value(&int_count), start_end)
-                },
-                computed_value::T::Frames(frames) => {
-                    let frames = frames as i32;
-                    SpecifiedValue::Frames(specified::Integer::from_computed_value(&frames))
-                },
-                computed_value::T::Keyword(keyword) => {
-                    SpecifiedValue::Keyword(keyword)
-                },
-            }
-        }
-    }
-
-    impl FunctionKeyword {
-        #[inline]
-        pub fn to_non_keyword_value(&self) -> computed_value::T {
-            match *self {
-                FunctionKeyword::Ease => ease(),
-                FunctionKeyword::Linear => linear(),
-                FunctionKeyword::EaseIn => ease_in(),
-                FunctionKeyword::EaseOut => ease_out(),
-                FunctionKeyword::EaseInOut => ease_in_out(),
-                FunctionKeyword::StepStart => STEP_START,
-                FunctionKeyword::StepEnd => STEP_END,
-            }
-        }
-    }
-
-    no_viewport_percentage!(SpecifiedValue);
-
-    #[inline]
-    pub fn get_initial_value() -> computed_value::T {
-        computed_value::T::Keyword(FunctionKeyword::Ease)
-    }
-
-    #[inline]
-    pub fn get_initial_specified_value() -> SpecifiedValue {
-        SpecifiedValue::Keyword(FunctionKeyword::Ease)
-    }
-
-    pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue,()> {
-        SpecifiedValue::parse(context, input)
-    }
-</%helpers:vector_longhand>
+${helpers.predefined_type("transition-timing-function",
+                          "TimingFunction",
+                          "computed::TimingFunction::ease()",
+                          initial_specified_value="specified::TimingFunction::ease()",
+                          vector=True,
+                          need_index=True,
+                          animation_value_type="none",
+                          extra_prefixes="moz webkit",
+                          spec="https://drafts.csswg.org/css-transitions/#propdef-transition-timing-function")}
 
 <%helpers:vector_longhand name="transition-property"
                           allow_empty="True"
@@ -795,20 +455,15 @@ ${helpers.single_keyword("overflow-x", "visible hidden scroll auto",
     impl ComputedValueAsSpecified for SpecifiedValue { }
 </%helpers:vector_longhand>
 
-<%helpers:vector_longhand name="transition-delay"
-                          need_index="True"
-                          animation_value_type="none"
-                          extra_prefixes="moz webkit"
-                          spec="https://drafts.csswg.org/css-transitions/#propdef-transition-delay">
-    pub use properties::longhands::transition_duration::single_value::SpecifiedValue;
-    pub use properties::longhands::transition_duration::single_value::computed_value;
-    pub use properties::longhands::transition_duration::single_value::{get_initial_value, get_initial_specified_value};
-
-    pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
-        use values::specified::Time;
-        Time::parse(context, input)
-    }
-</%helpers:vector_longhand>
+${helpers.predefined_type("transition-delay",
+                          "Time",
+                          "computed::Time::zero()",
+                          initial_specified_value="specified::Time::zero()",
+                          vector=True,
+                          need_index=True,
+                          animation_value_type="none",
+                          extra_prefixes="moz webkit",
+                          spec="https://drafts.csswg.org/css-transitions/#propdef-transition-duration")}
 
 <%helpers:vector_longhand name="animation-name"
                           need_index="True"
@@ -881,17 +536,16 @@ ${helpers.single_keyword("overflow-x", "visible hidden scroll auto",
     impl ComputedValueAsSpecified for SpecifiedValue {}
 </%helpers:vector_longhand>
 
-<%helpers:vector_longhand name="animation-duration"
-                          need_index="True"
+${helpers.predefined_type("animation-duration",
+                          "Time",
+                          "computed::Time::zero()",
+                          initial_specified_value="specified::Time::zero()",
+                          parse_method="parse_non_negative",
+                          vector=True,
+                          need_index=True,
                           animation_value_type="none",
-                          extra_prefixes="moz webkit"
-                          spec="https://drafts.csswg.org/css-animations/#propdef-animation-duration",
-                          allowed_in_keyframe_block="False">
-    pub use properties::longhands::transition_duration::single_value::computed_value;
-    pub use properties::longhands::transition_duration::single_value::get_initial_specified_value;
-    pub use properties::longhands::transition_duration::single_value::{get_initial_value, parse};
-    pub use properties::longhands::transition_duration::single_value::SpecifiedValue;
-</%helpers:vector_longhand>
+                          extra_prefixes="moz webkit",
+                          spec="https://drafts.csswg.org/css-transitions/#propdef-transition-duration")}
 
 <%helpers:vector_longhand name="animation-timing-function"
                           need_index="True"
@@ -1596,28 +1250,28 @@ ${helpers.predefined_type("scroll-snap-coordinate",
                 },
                 "rotate" => {
                     try!(input.parse_nested_block(|input| {
-                        let theta = try!(specified::Angle::parse_with_unitless(context,input));
+                        let theta = try!(specified::Angle::parse_with_unitless(context, input));
                         result.push(SpecifiedOperation::Rotate(theta));
                         Ok(())
                     }))
                 },
                 "rotatex" => {
                     try!(input.parse_nested_block(|input| {
-                        let theta = try!(specified::Angle::parse_with_unitless(context,input));
+                        let theta = try!(specified::Angle::parse_with_unitless(context, input));
                         result.push(SpecifiedOperation::RotateX(theta));
                         Ok(())
                     }))
                 },
                 "rotatey" => {
                     try!(input.parse_nested_block(|input| {
-                        let theta = try!(specified::Angle::parse_with_unitless(context,input));
+                        let theta = try!(specified::Angle::parse_with_unitless(context, input));
                         result.push(SpecifiedOperation::RotateY(theta));
                         Ok(())
                     }))
                 },
                 "rotatez" => {
                     try!(input.parse_nested_block(|input| {
-                        let theta = try!(specified::Angle::parse_with_unitless(context,input));
+                        let theta = try!(specified::Angle::parse_with_unitless(context, input));
                         result.push(SpecifiedOperation::RotateZ(theta));
                         Ok(())
                     }))
@@ -1630,7 +1284,7 @@ ${helpers.predefined_type("scroll-snap-coordinate",
                         try!(input.expect_comma());
                         let az = try!(specified::parse_number(context, input));
                         try!(input.expect_comma());
-                        let theta = try!(specified::Angle::parse_with_unitless(context,input));
+                        let theta = try!(specified::Angle::parse_with_unitless(context, input));
                         // TODO(gw): Check the axis can be normalized!!
                         result.push(SpecifiedOperation::Rotate3D(ax, ay, az, theta));
                         Ok(())
@@ -1650,14 +1304,14 @@ ${helpers.predefined_type("scroll-snap-coordinate",
                 },
                 "skewx" => {
                     try!(input.parse_nested_block(|input| {
-                        let theta_x = try!(specified::Angle::parse_with_unitless(context,input));
+                        let theta_x = try!(specified::Angle::parse_with_unitless(context, input));
                         result.push(SpecifiedOperation::SkewX(theta_x));
                         Ok(())
                     }))
                 },
                 "skewy" => {
                     try!(input.parse_nested_block(|input| {
-                        let theta_y = try!(specified::Angle::parse_with_unitless(context,input));
+                        let theta_y = try!(specified::Angle::parse_with_unitless(context, input));
                         result.push(SpecifiedOperation::SkewY(theta_y));
                         Ok(())
                     }))
@@ -2005,14 +1659,14 @@ ${helpers.single_keyword("scroll-behavior",
                          "auto smooth",
                          products="gecko",
                          spec="https://drafts.csswg.org/cssom-view/#propdef-scroll-behavior",
-                         animation_value_type="none")}
+                         animation_value_type="discrete")}
 
 ${helpers.single_keyword("scroll-snap-type-x",
                          "none mandatory proximity",
                          products="gecko",
                          gecko_constant_prefix="NS_STYLE_SCROLL_SNAP_TYPE",
                          spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/scroll-snap-type-x)",
-                         animation_value_type="none")}
+                         animation_value_type="discrete")}
 
 <%helpers:longhand products="gecko" name="scroll-snap-type-y" animation_value_type="none"
                    spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/scroll-snap-type-x)">
@@ -2029,26 +1683,26 @@ ${helpers.single_keyword("isolation",
                          products="gecko",
                          spec="https://drafts.fxtf.org/compositing/#isolation",
                          flags="CREATES_STACKING_CONTEXT",
-                         animation_value_type="none")}
+                         animation_value_type="discrete")}
 
 // TODO add support for logical values recto and verso
 ${helpers.single_keyword("page-break-after",
                          "auto always avoid left right",
                          products="gecko",
                          spec="https://drafts.csswg.org/css2/page.html#propdef-page-break-after",
-                         animation_value_type="none")}
+                         animation_value_type="discrete")}
 ${helpers.single_keyword("page-break-before",
                          "auto always avoid left right",
                          products="gecko",
                          spec="https://drafts.csswg.org/css2/page.html#propdef-page-break-before",
-                         animation_value_type="none")}
+                         animation_value_type="discrete")}
 ${helpers.single_keyword("page-break-inside",
                          "auto avoid",
                          products="gecko",
                          gecko_ffi_name="mBreakInside",
                          gecko_constant_prefix="NS_STYLE_PAGE_BREAK",
                          spec="https://drafts.csswg.org/css2/page.html#propdef-page-break-inside",
-                         animation_value_type="none")}
+                         animation_value_type="discrete")}
 
 // CSS Basic User Interface Module Level 3
 // http://dev.w3.org/csswg/css-ui
@@ -2057,7 +1711,7 @@ ${helpers.single_keyword("resize",
                          "none both horizontal vertical",
                          products="gecko",
                          spec="https://drafts.csswg.org/css-ui/#propdef-resize",
-                         animation_value_type="none")}
+                         animation_value_type="discrete")}
 
 
 ${helpers.predefined_type("perspective",
@@ -2082,14 +1736,15 @@ ${helpers.single_keyword("backface-visibility",
                          "visible hidden",
                          spec="https://drafts.csswg.org/css-transforms/#backface-visibility-property",
                          extra_prefixes="moz webkit",
-                         animation_value_type="none")}
+                         animation_value_type="discrete")}
 
 ${helpers.single_keyword("transform-box",
                          "border-box fill-box view-box",
                          gecko_enum_prefix="StyleGeometryBox",
                          products="gecko",
                          spec="https://drafts.csswg.org/css-transforms/#transform-box",
-                         animation_value_type="none")}
+                         gecko_inexhaustive="True",
+                         animation_value_type="discrete")}
 
 // `auto` keyword is not supported in gecko yet.
 ${helpers.single_keyword("transform-style",
@@ -2098,127 +1753,21 @@ ${helpers.single_keyword("transform-style",
                          spec="https://drafts.csswg.org/css-transforms/#transform-style-property",
                          extra_prefixes="moz webkit",
                          flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
-                         animation_value_type="none")}
+                         animation_value_type="discrete")}
 
-<%helpers:longhand name="transform-origin" animation_value_type="ComputedValue" extra_prefixes="moz webkit" boxed="True"
-                   spec="https://drafts.csswg.org/css-transforms/#transform-origin-property">
-    use app_units::Au;
-    use std::fmt;
-    use style_traits::ToCss;
-    use values::specified::{NoCalcLength, LengthOrPercentage, Percentage};
-
-    pub mod computed_value {
-        use properties::animated_properties::Animatable;
-        use values::computed::{Length, LengthOrPercentage};
-
-        #[derive(Clone, Copy, Debug, PartialEq)]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-        pub struct T {
-            pub horizontal: LengthOrPercentage,
-            pub vertical: LengthOrPercentage,
-            pub depth: Length,
-        }
-
-        impl Animatable for T {
-            #[inline]
-            fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64)
-                -> Result<Self, ()> {
-                Ok(T {
-                    horizontal: try!(self.horizontal.add_weighted(&other.horizontal,
-                                                                  self_portion, other_portion)),
-                    vertical: try!(self.vertical.add_weighted(&other.vertical,
-                                                              self_portion, other_portion)),
-                    depth: try!(self.depth.add_weighted(&other.depth, self_portion, other_portion)),
-                })
-            }
-
-            #[inline]
-            fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
-                self.compute_squared_distance(other).map(|sd| sd.sqrt())
-            }
-
-            #[inline]
-            fn compute_squared_distance(&self, other: &Self) -> Result<f64, ()> {
-                Ok(try!(self.horizontal.compute_squared_distance(&other.horizontal)) +
-                   try!(self.vertical.compute_squared_distance(&other.vertical)) +
-                   try!(self.depth.compute_squared_distance(&other.depth)))
-            }
-        }
-    }
-
-    #[derive(Clone, Debug, HasViewportPercentage, PartialEq)]
-    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-    pub struct SpecifiedValue {
-        horizontal: LengthOrPercentage,
-        vertical: LengthOrPercentage,
-        depth: NoCalcLength,
-    }
-
-    impl ToCss for computed_value::T {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            try!(self.horizontal.to_css(dest));
-            try!(dest.write_str(" "));
-            try!(self.vertical.to_css(dest));
-            try!(dest.write_str(" "));
-            self.depth.to_css(dest)
-        }
-    }
-
-    impl ToCss for SpecifiedValue {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            try!(self.horizontal.to_css(dest));
-            try!(dest.write_str(" "));
-            try!(self.vertical.to_css(dest));
-            try!(dest.write_str(" "));
-            self.depth.to_css(dest)
-        }
-    }
-
-    #[inline]
-    pub fn get_initial_value() -> computed_value::T {
-        computed_value::T {
-            horizontal: computed::LengthOrPercentage::Percentage(0.5),
-            vertical: computed::LengthOrPercentage::Percentage(0.5),
-            depth: Au(0),
-        }
-    }
-
-    pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue,()> {
-        let result = try!(super::parse_origin(context, input));
-        Ok(SpecifiedValue {
-            horizontal: result.horizontal.unwrap_or(LengthOrPercentage::Percentage(Percentage(0.5))),
-            vertical: result.vertical.unwrap_or(LengthOrPercentage::Percentage(Percentage(0.5))),
-            depth: result.depth.unwrap_or(NoCalcLength::zero()),
-        })
-    }
-
-    impl ToComputedValue for SpecifiedValue {
-        type ComputedValue = computed_value::T;
-
-        #[inline]
-        fn to_computed_value(&self, context: &Context) -> computed_value::T {
-            computed_value::T {
-                horizontal: self.horizontal.to_computed_value(context),
-                vertical: self.vertical.to_computed_value(context),
-                depth: self.depth.to_computed_value(context),
-            }
-        }
-
-        #[inline]
-        fn from_computed_value(computed: &computed_value::T) -> Self {
-            SpecifiedValue {
-                horizontal: ToComputedValue::from_computed_value(&computed.horizontal),
-                vertical: ToComputedValue::from_computed_value(&computed.vertical),
-                depth: ToComputedValue::from_computed_value(&computed.depth),
-            }
-        }
-    }
-</%helpers:longhand>
+${helpers.predefined_type("transform-origin",
+                          "TransformOrigin",
+                          "computed::TransformOrigin::initial_value()",
+                          animation_value_type="ComputedValue",
+                          extra_prefixes="moz webkit",
+                          boxed=True,
+                          spec="https://drafts.csswg.org/css-transforms/#transform-origin-property")}
 
 // FIXME: `size` and `content` values are not implemented and `strict` is implemented
 // like `content`(layout style paint) in gecko. We should implement `size` and `content`,
 // also update the glue once they are implemented in gecko.
 <%helpers:longhand name="contain" animation_value_type="none" products="gecko" need_clone="True"
+                   flags="FIXPOS_CB"
                    spec="https://drafts.csswg.org/css-contain/#contain-property">
     use std::fmt;
     use style_traits::ToCss;
@@ -2310,15 +1859,6 @@ ${helpers.single_keyword("transform-style",
     }
 </%helpers:longhand>
 
-${helpers.single_keyword("appearance",
-                         "auto none",
-                         gecko_ffi_name="mAppearance",
-                         gecko_constant_prefix="NS_THEME",
-                         products="gecko",
-                         spec="https://drafts.csswg.org/css-ui-4/#appearance-switching",
-                         alias="-webkit-appearance",
-                         animation_value_type="none")}
-
 // Non-standard
 ${helpers.single_keyword("-moz-appearance",
                          """none button button-arrow-down button-arrow-next button-arrow-previous button-arrow-up
@@ -2347,8 +1887,8 @@ ${helpers.single_keyword("-moz-appearance",
                             -moz-window-frame-bottom -moz-window-frame-left -moz-window-frame-right -moz-window-titlebar
                             -moz-window-titlebar-maximized
                          """,
-                         gecko_ffi_name="mMozAppearance",
-                         gecko_constant_prefix="NS_THEME",
+                         gecko_ffi_name="mAppearance",
+                         gecko_constant_prefix="ThemeWidgetType_NS_THEME",
                          products="gecko",
                          spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/-moz-appearance)",
                          animation_value_type="none")}
@@ -2367,7 +1907,8 @@ ${helpers.single_keyword("-moz-orient",
                           gecko_ffi_name="mOrient",
                           gecko_enum_prefix="StyleOrient",
                           spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/-moz-orient)",
-                          animation_value_type="none")}
+                          gecko_inexhaustive="True",
+                          animation_value_type="discrete")}
 
 <%helpers:longhand name="will-change" products="gecko" animation_value_type="none"
                    spec="https://drafts.csswg.org/css-will-change/#will-change">

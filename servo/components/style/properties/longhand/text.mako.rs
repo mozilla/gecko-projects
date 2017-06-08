@@ -16,10 +16,8 @@
                    spec="https://drafts.csswg.org/css-ui/#propdef-text-overflow">
     use std::fmt;
     use style_traits::ToCss;
-    use values::computed::ComputedValueAsSpecified;
     use cssparser;
 
-    impl ComputedValueAsSpecified for SpecifiedValue {}
     no_viewport_percentage!(SpecifiedValue);
 
     #[derive(PartialEq, Eq, Clone, Debug)]
@@ -38,14 +36,73 @@
     }
 
     pub mod computed_value {
-        pub type T = super::SpecifiedValue;
+        pub use super::Side;
+
+        #[derive(Debug, Clone, PartialEq)]
+        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        pub struct T {
+            // When the specified value only has one side, that's the "second"
+            // side, and the sides are logical, so "second" means "end".  The
+            // start side is Clip in that case.
+            //
+            // When the specified value has two sides, those are our "first"
+            // and "second" sides, and they are physical sides ("left" and
+            // "right").
+            pub first: Side,
+            pub second: Side,
+            pub sides_are_logical: bool
+        }
+    }
+
+    impl ToCss for computed_value::T {
+        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+            if self.sides_are_logical {
+                assert!(self.first == Side::Clip);
+                try!(self.second.to_css(dest));
+            } else {
+                try!(self.first.to_css(dest));
+                try!(dest.write_str(" "));
+                try!(self.second.to_css(dest));
+            }
+            Ok(())
+        }
+    }
+
+    impl ToComputedValue for SpecifiedValue {
+        type ComputedValue = computed_value::T;
+
+        #[inline]
+        fn to_computed_value(&self, _context: &Context) -> Self::ComputedValue {
+            if let Some(ref second) = self.second {
+                Self::ComputedValue { first: self.first.clone(),
+                                      second: second.clone(),
+                                      sides_are_logical: false }
+            } else {
+                Self::ComputedValue { first: Side::Clip,
+                                      second: self.first.clone(),
+                                      sides_are_logical: true }
+            }
+        }
+
+        #[inline]
+        fn from_computed_value(computed: &Self::ComputedValue) -> Self {
+            if computed.sides_are_logical {
+                assert!(computed.first == Side::Clip);
+                SpecifiedValue { first: computed.second.clone(),
+                                 second: None }
+            } else {
+                SpecifiedValue { first: computed.first.clone(),
+                                 second: Some(computed.second.clone()) }
+            }
+        }
     }
 
     #[inline]
     pub fn get_initial_value() -> computed_value::T {
-        SpecifiedValue {
+        computed_value::T {
             first: Side::Clip,
-            second: None
+            second: Side::Clip,
+            sides_are_logical: true,
         }
     }
     pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
@@ -96,7 +153,7 @@
 
 ${helpers.single_keyword("unicode-bidi",
                          "normal embed isolate bidi-override isolate-override plaintext",
-                         animation_value_type="none",
+                         animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-writing-modes/#propdef-unicode-bidi")}
 
 // FIXME: This prop should be animatable.
@@ -217,7 +274,7 @@ ${helpers.single_keyword("unicode-bidi",
 ${helpers.single_keyword("text-decoration-style",
                          "solid double dotted dashed wavy -moz-none",
                          products="gecko",
-                         animation_value_type="none",
+                         animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-text-decor/#propdef-text-decoration-style")}
 
 ${helpers.predefined_type(
@@ -227,6 +284,7 @@ ${helpers.predefined_type(
     complex_color=True,
     products="gecko",
     animation_value_type="IntermediateColor",
+    ignored_when_colors_disabled=True,
     spec="https://drafts.csswg.org/css-text-decor/#propdef-text-decoration-color")}
 
 <%helpers:longhand name="initial-letter"

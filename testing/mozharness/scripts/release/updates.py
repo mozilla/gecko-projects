@@ -178,6 +178,10 @@ class UpdatesBumper(MercurialScript, BuildbotMixin,
             channel_config["patcher_config"])
         return patcher_config
 
+    def query_patcher_config_product(self, channel_config):
+        return channel_config.get("patcher_config_product_override") or \
+            self.config["product"]
+
     def query_update_verify_config(self, channel, platform):
         dirs = self.query_abs_dirs()
         uvc = os.path.join(
@@ -196,10 +200,11 @@ class UpdatesBumper(MercurialScript, BuildbotMixin,
         script = os.path.join(
             dirs["abs_tools_dir"], "release/patcher-config-bump.pl")
         patcher_config = self.query_patcher_config(channel_config)
+        patcher_config_product = self.query_patcher_config_product(channel_config)
         cmd = [self.query_exe("perl"), script]
         cmd.extend([
-            "-p", self.config["product"],
-            "-r", self.config["product"].capitalize(),
+            "-p", patcher_config_product,
+            "-r", patcher_config_product.capitalize(),
             "-v", self.config["version"],
             "-a", self.config["appVersion"],
             "-o", get_previous_version(
@@ -216,6 +221,10 @@ class UpdatesBumper(MercurialScript, BuildbotMixin,
             cmd.extend(["--platform", p])
         for mar_channel_id in channel_config["mar_channel_ids"]:
             cmd.extend(["--mar-channel-id", mar_channel_id])
+        if "stage_product" in self.config:
+            cmd.extend(["--stage-product", self.config["stage_product"]])
+        if "bouncer_product" in self.config:
+            cmd.extend(["--bouncer-product", self.config["bouncer_product"]])
         self.run_command(cmd, halt_on_failure=True, env=env)
 
     def bump_update_verify_configs(self, channel, channel_config):
@@ -224,8 +233,9 @@ class UpdatesBumper(MercurialScript, BuildbotMixin,
             dirs["abs_tools_dir"],
             "scripts/build-promotion/create-update-verify-config.py")
         patcher_config = self.query_patcher_config(channel_config)
+        patcher_config_product = self.query_patcher_config_product(channel_config)
         for platform in self.config["platforms"]:
-            cmd = [self.query_exe("python"), script]
+            cmd = [sys.executable, script]
             output = self.query_update_verify_config(channel, platform)
             cmd.extend([
                 "--config", patcher_config,
@@ -236,10 +246,12 @@ class UpdatesBumper(MercurialScript, BuildbotMixin,
                 "--archive-prefix", self.config["archive_prefix"],
                 "--previous-archive-prefix",
                 self.config["previous_archive_prefix"],
-                "--product", self.config["product"],
+                "--product", patcher_config_product,
                 "--balrog-url", self.config["balrog_url"],
                 "--build-number", str(self.config["build_number"]),
             ])
+            if "stage_product" in self.config:
+                cmd.extend(["--stage-product", self.config["stage_product"]])
 
             self.run_command(cmd, halt_on_failure=True)
 
@@ -262,7 +274,7 @@ class UpdatesBumper(MercurialScript, BuildbotMixin,
         dirs = self.query_abs_dirs()
         auth = os.path.join(os.getcwd(), self.config['credentials_file'])
         cmd = [
-            self.query_exe("python"),
+            sys.executable,
             os.path.join(dirs["abs_tools_dir"],
                          "scripts/build-promotion/balrog-release-pusher.py")]
         cmd.extend([

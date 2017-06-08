@@ -175,19 +175,6 @@ MP4VideoInfo::Update(const MetaData* aMetaData, const char* aMimeType)
   mRotation = VideoInfo::ToSupportedRotation(FindInt32(aMetaData, kKeyRotation));
 
   FindData(aMetaData, kKeyAVCC, mExtraData);
-  if (!mExtraData->Length()) {
-    if (FindData(aMetaData, kKeyESDS, mExtraData)) {
-      ESDS esds(mExtraData->Elements(), mExtraData->Length());
-
-      const void* data;
-      size_t size;
-      if (esds.getCodecSpecificInfo(&data, &size) == OK) {
-        const uint8_t* cdata = reinterpret_cast<const uint8_t*>(data);
-        mCodecSpecificConfig->AppendElements(cdata, size);
-      }
-    }
-  }
-
 }
 
 static void
@@ -261,6 +248,8 @@ MP4VideoInfo::Update(const mp4parse_track_info* track,
     mMimeType = MEDIA_MIMETYPE_VIDEO_AVC;
   } else if (track->codec == mp4parse_codec_VP9) {
     mMimeType = NS_LITERAL_CSTRING("video/vp9");
+  } else if (track->codec == mp4parse_codec_MP4V) {
+    mMimeType = MEDIA_MIMETYPE_VIDEO_MPEG4;
   }
   mTrackId = track->track_id;
   mDuration = TimeUnit::FromMicroseconds(track->duration);

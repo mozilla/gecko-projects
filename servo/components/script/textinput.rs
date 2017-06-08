@@ -613,17 +613,17 @@ impl<T: ClipboardProvider> TextInput<T> {
                 self.adjust_horizontal_to_line_end(Direction::Forward, maybe_select);
                 KeyReaction::RedrawSelection
             },
-            (Some('a'), _) if is_control_key(mods) => {
+            (_, Key::A) if is_control_key(mods) => {
                 self.select_all();
                 KeyReaction::RedrawSelection
             },
-            (Some('c'), _) if is_control_key(mods) => {
+            (_, Key::C) if is_control_key(mods) => {
                 if let Some(text) = self.get_selection_text() {
                     self.clipboard_provider.set_clipboard_contents(text);
                 }
                 KeyReaction::DispatchInput
             },
-            (Some('v'), _) if is_control_key(mods) => {
+            (_, Key::V) if is_control_key(mods) => {
                 let contents = self.clipboard_provider.clipboard_contents();
                 self.insert_string(contents);
                 KeyReaction::DispatchInput
@@ -631,14 +631,6 @@ impl<T: ClipboardProvider> TextInput<T> {
             (Some(c), _) => {
                 self.insert_char(c);
                 KeyReaction::DispatchInput
-            },
-            #[cfg(target_os = "macos")]
-            (None, Key::Home) => {
-                KeyReaction::RedrawSelection
-            },
-            #[cfg(target_os = "macos")]
-            (None, Key::End) => {
-                KeyReaction::RedrawSelection
             },
             (None, Key::Delete) => {
                 self.delete_char(Direction::Forward);
@@ -694,12 +686,18 @@ impl<T: ClipboardProvider> TextInput<T> {
             },
             (None, Key::Enter) | (None, Key::KpEnter) => self.handle_return(),
             (None, Key::Home) => {
-                self.edit_point.index = 0;
+                #[cfg(not(target_os = "macos"))]
+                {
+                    self.edit_point.index = 0;
+                }
                 KeyReaction::RedrawSelection
             },
             (None, Key::End) => {
-                self.edit_point.index = self.current_line_length();
-                self.assert_ok_selection();
+                #[cfg(not(target_os = "macos"))]
+                {
+                    self.edit_point.index = self.current_line_length();
+                    self.assert_ok_selection();
+                }
                 KeyReaction::RedrawSelection
             },
             (None, Key::PageUp) => {

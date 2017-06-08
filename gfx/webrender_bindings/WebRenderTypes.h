@@ -11,6 +11,7 @@
 #include "mozilla/gfx/Matrix.h"
 #include "mozilla/gfx/Types.h"
 #include "mozilla/gfx/Tools.h"
+#include "mozilla/layers/LayersTypes.h"
 #include "mozilla/Range.h"
 #include "Units.h"
 #include "nsStyleConsts.h"
@@ -363,7 +364,9 @@ static inline WrRepeatMode ToWrRepeatMode(uint8_t repeatMode)
   return WrRepeatMode::Stretch;
 }
 
-static inline WrTransformProperty ToWrTransformProperty(uint64_t id, gfx::Matrix4x4& transform)
+template<class S, class T>
+static inline WrTransformProperty ToWrTransformProperty(uint64_t id,
+                                                        const gfx::Matrix4x4Typed<S, T>& transform)
 {
   WrTransformProperty prop;
   prop.id = id;
@@ -548,6 +551,38 @@ struct BuiltDisplayList {
   VecU8 dl;
   WrBuiltDisplayListDescriptor dl_desc;
 };
+
+static inline WrFilterOpType ToWrFilterOpType(const layers::CSSFilterType type) {
+  switch (type) {
+    case layers::CSSFilterType::BLUR:
+      return WrFilterOpType::Blur;
+    case layers::CSSFilterType::BRIGHTNESS:
+      return WrFilterOpType::Brightness;
+    case layers::CSSFilterType::CONTRAST:
+      return WrFilterOpType::Contrast;
+    case layers::CSSFilterType::GRAYSCALE:
+      return WrFilterOpType::Grayscale;
+    case layers::CSSFilterType::HUE_ROTATE:
+      return WrFilterOpType::HueRotate;
+    case layers::CSSFilterType::INVERT:
+      return WrFilterOpType::Invert;
+    case layers::CSSFilterType::OPACITY:
+      return WrFilterOpType::Opacity;
+    case layers::CSSFilterType::SATURATE:
+      return WrFilterOpType::Saturate;
+    case layers::CSSFilterType::SEPIA:
+      return WrFilterOpType::Sepia;
+  }
+  MOZ_ASSERT_UNREACHABLE("Tried to convert unknown filter type.");
+  return WrFilterOpType::Grayscale;
+}
+
+static inline WrFilterOp ToWrFilterOp(const layers::CSSFilter& filter) {
+  return {
+    ToWrFilterOpType(filter.type),
+    filter.argument,
+  };
+}
 
 } // namespace wr
 } // namespace mozilla

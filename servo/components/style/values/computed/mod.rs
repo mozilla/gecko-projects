@@ -17,14 +17,17 @@ use std::f32::consts::PI;
 use std::fmt;
 use style_traits::ToCss;
 use super::{CSSFloat, CSSInteger, RGBA};
-use super::generics::BorderRadiusSize as GenericBorderRadiusSize;
 use super::generics::grid::{TrackBreadth as GenericTrackBreadth, TrackSize as GenericTrackSize};
 use super::generics::grid::TrackList as GenericTrackList;
 use super::specified;
 
 pub use app_units::Au;
 pub use cssparser::Color as CSSColor;
+pub use self::background::BackgroundSize;
+pub use self::border::{BorderImageSlice, BorderImageWidth, BorderImageSideWidth};
+pub use self::border::{BorderRadius, BorderCornerRadius};
 pub use self::image::{Gradient, GradientItem, ImageLayer, LineDirection, Image, ImageRect};
+pub use self::rect::LengthOrNumberRect;
 pub use super::{Auto, Either, None_};
 #[cfg(feature = "gecko")]
 pub use super::specified::{AlignItems, AlignJustifyContent, AlignJustifySelf, JustifyItems};
@@ -35,11 +38,18 @@ pub use self::length::{CalcLengthOrPercentage, Length, LengthOrNumber, LengthOrP
 pub use self::length::{LengthOrPercentageOrAutoOrContent, LengthOrPercentageOrNone, LengthOrNone};
 pub use self::length::{MaxLength, MozLength};
 pub use self::position::Position;
+pub use self::text::{LetterSpacing, LineHeight, WordSpacing};
+pub use self::transform::{TimingFunction, TransformOrigin};
 
+pub mod background;
 pub mod basic_shape;
+pub mod border;
 pub mod image;
 pub mod length;
 pub mod position;
+pub mod rect;
+pub mod text;
+pub mod transform;
 
 /// A `Context` is all the data a specified value could ever need to compute
 /// itself and be transformed to a computed value.
@@ -100,6 +110,8 @@ impl<'a> Context<'a> {
     pub fn style(&self) -> &StyleBuilder { &self.style }
     /// A mutable reference to the current style.
     pub fn mutate_style(&mut self) -> &mut StyleBuilder<'a> { &mut self.style }
+    /// Get a mutable reference to the current style as well as the device
+    pub fn mutate_style_with_device(&mut self) -> (&mut StyleBuilder<'a>, &Device) { (&mut self.style, &self.device) }
 }
 
 /// An iterator over a slice of computed values
@@ -454,20 +466,6 @@ impl ComputedValueAsSpecified for specified::AlignJustifyContent {}
 impl ComputedValueAsSpecified for specified::AlignJustifySelf {}
 impl ComputedValueAsSpecified for specified::BorderStyle {}
 
-/// The computed value of `BorderRadiusSize`
-pub type BorderRadiusSize = GenericBorderRadiusSize<LengthOrPercentage>;
-
-impl BorderRadiusSize {
-    /// Create a null value.
-    #[inline]
-    pub fn zero() -> BorderRadiusSize {
-        let zero = LengthOrPercentage::zero();
-        GenericBorderRadiusSize(Size2D::new(zero.clone(), zero))
-    }
-}
-
-impl Copy for BorderRadiusSize {}
-
 #[derive(Debug, PartialEq, Clone, Copy)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
@@ -483,9 +481,9 @@ pub struct Shadow {
 /// A `<number>` value.
 pub type Number = CSSFloat;
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Copy, Debug, PartialEq, ToCss)]
 pub enum NumberOrPercentage {
     Percentage(Percentage),
     Number(Number),
@@ -514,15 +512,6 @@ impl ToComputedValue for specified::NumberOrPercentage {
     }
 }
 
-impl ToCss for NumberOrPercentage {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            NumberOrPercentage::Percentage(percentage) => percentage.to_css(dest),
-            NumberOrPercentage::Number(number) => number.to_css(dest),
-        }
-    }
-}
-
 /// A type used for opacity.
 pub type Opacity = CSSFloat;
 
@@ -543,23 +532,15 @@ impl IntegerOrAuto {
     }
 }
 
-
-/// An SVG paint value
-///
-/// https://www.w3.org/TR/SVG2/painting.html#SpecifyingPaint
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-pub struct SVGPaint {
-    /// The paint source
-    pub kind: SVGPaintKind,
-    /// The fallback color
-    pub fallback: Option<CSSColor>,
-}
+/// Computed SVG Paint value
+pub type SVGPaint = ::values::generics::SVGPaint<CSSColor>;
+/// Computed SVG Paint Kind value
+pub type SVGPaintKind = ::values::generics::SVGPaintKind<CSSColor>;
 
 impl Default for SVGPaint {
     fn default() -> Self {
         SVGPaint {
-            kind: SVGPaintKind::None,
+            kind: ::values::generics::SVGPaintKind::None,
             fallback: None,
         }
     }
@@ -570,51 +551,9 @@ impl SVGPaint {
     pub fn black() -> Self {
         let rgba = RGBA::from_floats(0., 0., 0., 1.);
         SVGPaint {
-            kind: SVGPaintKind::Color(CSSColor::RGBA(rgba)),
+            kind: ::values::generics::SVGPaintKind::Color(CSSColor::RGBA(rgba)),
             fallback: None,
         }
-    }
-}
-
-/// An SVG paint value without the fallback
-///
-/// Whereas the spec only allows PaintServer
-/// to have a fallback, Gecko lets the context
-/// properties have a fallback as well.
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-pub enum SVGPaintKind {
-    /// `none`
-    None,
-    /// `<color>`
-    Color(CSSColor),
-    /// `url(...)`
-    PaintServer(SpecifiedUrl),
-    /// `context-fill`
-    ContextFill,
-    /// `context-stroke`
-    ContextStroke,
-}
-
-impl ToCss for SVGPaintKind {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            SVGPaintKind::None => dest.write_str("none"),
-            SVGPaintKind::ContextStroke => dest.write_str("context-stroke"),
-            SVGPaintKind::ContextFill => dest.write_str("context-fill"),
-            SVGPaintKind::Color(ref color) => color.to_css(dest),
-            SVGPaintKind::PaintServer(ref server) => server.to_css(dest),
-        }
-    }
-}
-
-impl ToCss for SVGPaint {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        self.kind.to_css(dest)?;
-        if let Some(ref fallback) = self.fallback {
-            fallback.to_css(dest)?;
-        }
-        Ok(())
     }
 }
 

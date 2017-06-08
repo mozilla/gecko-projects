@@ -1481,10 +1481,8 @@ js::FinishCompilation(JSContext* cx, HandleScript script, CompilerConstraintList
         // Add this compilation to the inlinedCompilations list of each inlined
         // script, so we can invalidate it on changes to stack type sets.
         if (entry.script != script) {
-            if (!entry.script->types()->addInlinedCompilation(*precompileInfo)) {
-                ReportOutOfMemory(cx);
-                return false;
-            }
+            if (!entry.script->types()->addInlinedCompilation(*precompileInfo))
+                succeeded = false;
         }
 
         // If necessary, add constraints to trigger invalidation on the script
@@ -3335,6 +3333,22 @@ js::TypeMonitorResult(JSContext* cx, JSScript* script, jsbytecode* pc, TypeSet::
     StackTypeSet* types = TypeScript::BytecodeTypes(script, pc);
     if (types->hasType(type))
         return;
+
+    InferSpew(ISpewOps, "bytecodeType: %p %05" PRIuSIZE ": %s",
+              script, script->pcToOffset(pc), TypeSet::TypeString(type));
+    types->addType(cx, type);
+}
+
+void
+js::TypeMonitorResult(JSContext* cx, JSScript* script, jsbytecode* pc, StackTypeSet* types,
+                      TypeSet::Type type)
+{
+    assertSameCompartment(cx, script, type);
+
+    AutoEnterAnalysis enter(cx);
+
+    MOZ_ASSERT(types == TypeScript::BytecodeTypes(script, pc));
+    MOZ_ASSERT(!types->hasType(type));
 
     InferSpew(ISpewOps, "bytecodeType: %p %05" PRIuSIZE ": %s",
               script, script->pcToOffset(pc), TypeSet::TypeString(type));

@@ -3,7 +3,7 @@
     "message": "Tomar clips y capturas de pantalla de la web y guardarlos temporalmente o permanentemente."
   },
   "addonAuthorsList": {
-    "message": "Mozilla <screenshots-feedback@mozilla.org>"
+    "message": "Mozilla <screenshots-feedback@mozilla.com>"
   },
   "contextMenuLabel": {
     "message": "Tomar captura de pantalla"
@@ -63,6 +63,9 @@
   },
   "selfScreenshotErrorTitle": {
     "message": "¡No puedes tomar una captura de la página de capturas de pantalla de Firefox!"
+  },
+  "emptySelectionErrorTitle": {
+    "message": "Tu selección es demasiado pequeña"
   },
   "genericErrorTitle": {
     "message": "¡Oye! Las capturas de pantalla de Firefox salieron mal."

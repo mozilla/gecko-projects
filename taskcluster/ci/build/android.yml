@@ -8,11 +8,10 @@ android-api-15/debug:
         symbol: tc(B)
     worker-type: aws-provisioner-v1/gecko-{level}-b-android
     worker:
-        implementation: docker-worker
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build generate-build-stats multi-l10n update]
+        actions: [get-secrets build multi-l10n update]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -32,11 +31,10 @@ android-x86/opt:
         symbol: tc(B)
     worker-type: aws-provisioner-v1/gecko-{level}-b-android
     worker:
-        implementation: docker-worker
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build generate-build-stats multi-l10n update]
+        actions: [get-secrets build multi-l10n update]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -59,11 +57,10 @@ android-x86-nightly/opt:
         symbol: tc(N)
     worker-type: aws-provisioner-v1/gecko-{level}-b-android
     worker:
-        implementation: docker-worker
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build generate-build-stats multi-l10n update]
+        actions: [get-secrets build multi-l10n update]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -84,11 +81,10 @@ android-api-15/opt:
         symbol: tc(B)
     worker-type: aws-provisioner-v1/gecko-{level}-b-android
     worker:
-        implementation: docker-worker
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build generate-build-stats multi-l10n update]
+        actions: [get-secrets build multi-l10n update]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -111,11 +107,10 @@ android-api-15-nightly/opt:
         symbol: tc(N)
     worker-type: aws-provisioner-v1/gecko-{level}-b-android
     worker:
-        implementation: docker-worker
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build generate-build-stats multi-l10n update]
+        actions: [get-secrets build multi-l10n update]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -125,6 +120,110 @@ android-api-15-nightly/opt:
         secrets: true
         custom-build-variant-cfg: api-15
         tooltool-downloads: internal
+
+android-x86-old-id/opt:
+    description: "Android 4.2 x86 Opt OldId"
+    index:
+        product: mobile
+        job-name: android-x86-old-id-opt
+    treeherder:
+        platform: android-4-2-x86-old-id/opt
+        symbol: tc(B)
+    worker-type: aws-provisioner-v1/gecko-{level}-b-android
+    worker:
+        max-run-time: 7200
+    run:
+        using: mozharness
+        actions: [get-secrets build multi-l10n update]
+        config:
+            - builds/releng_base_android_64_builds.py
+            - disable_signing.py
+            - platform_supports_post_upload_to_latest.py
+        script: "mozharness/scripts/fx_desktop_build.py"
+        secrets: true
+        custom-build-variant-cfg: x86-old-id
+        tooltool-downloads: internal
+    run-on-projects: [ 'mozilla-central' ]
+
+android-x86-old-id-nightly/opt:
+    description: "Android 4.2 x86 OldId Nightly"
+    attributes:
+        nightly: true
+    index:
+        product: mobile
+        job-name: android-x86-old-id-opt
+        type: nightly
+    treeherder:
+        platform: android-4-2-x86-old-id/opt
+        symbol: tc(N)
+    worker-type: aws-provisioner-v1/gecko-{level}-b-android
+    worker:
+        max-run-time: 7200
+    run:
+        using: mozharness
+        actions: [get-secrets build multi-l10n update]
+        config:
+            - builds/releng_base_android_64_builds.py
+            - disable_signing.py
+            - platform_supports_post_upload_to_latest.py
+            - taskcluster_nightly.py
+        script: "mozharness/scripts/fx_desktop_build.py"
+        secrets: true
+        custom-build-variant-cfg: x86-old-id
+        tooltool-downloads: internal
+    run-on-projects: [ 'mozilla-central' ]
+
+android-api-15-old-id/opt:
+    description: "Android 4.0 API15+ Opt OldId"
+    index:
+        product: mobile
+        job-name: android-api-15-old-id-opt
+    treeherder:
+        platform: android-4-0-armv7-api15-old-id/opt
+        symbol: tc(B)
+    worker-type: aws-provisioner-v1/gecko-{level}-b-android
+    worker:
+        max-run-time: 7200
+    run:
+        using: mozharness
+        actions: [get-secrets build multi-l10n update]
+        config:
+            - builds/releng_base_android_64_builds.py
+            - disable_signing.py
+            - platform_supports_post_upload_to_latest.py
+        script: "mozharness/scripts/fx_desktop_build.py"
+        secrets: true
+        custom-build-variant-cfg: api-15-old-id
+        tooltool-downloads: internal
+    run-on-projects: [ 'mozilla-central' ]
+
+android-api-15-old-id-nightly/opt:
+    description: "Android 4.0 API15+ OldId Nightly"
+    attributes:
+        nightly: true
+    index:
+        product: mobile
+        job-name: android-api-15-old-id-opt
+        type: nightly-with-multi-l10n
+    treeherder:
+        platform: android-4-0-armv7-api15-old-id/opt
+        symbol: tc(N)
+    worker-type: aws-provisioner-v1/gecko-{level}-b-android
+    worker:
+        max-run-time: 7200
+    run:
+        using: mozharness
+        actions: [get-secrets build multi-l10n update]
+        config:
+            - builds/releng_base_android_64_builds.py
+            - disable_signing.py
+            - platform_supports_post_upload_to_latest.py
+            - taskcluster_nightly.py
+        script: "mozharness/scripts/fx_desktop_build.py"
+        secrets: true
+        custom-build-variant-cfg: api-15-old-id
+        tooltool-downloads: internal
+    run-on-projects: [ 'mozilla-central' ]
 
 android-api-15-gradle/opt:
     description: "Android 4.0 API15+ (Gradle) Opt"
@@ -137,7 +236,6 @@ android-api-15-gradle/opt:
         tier: 2
     worker-type: aws-provisioner-v1/gecko-{level}-b-android
     worker:
-        implementation: docker-worker
         max-run-time: 7200
         env:
             # Bug 1292762 - Set GRADLE_USER_HOME to avoid sdk-manager-plugin intermittent
@@ -154,7 +252,7 @@ android-api-15-gradle/opt:
             type: directory
     run:
         using: mozharness
-        actions: [get-secrets build generate-build-stats multi-l10n update]
+        actions: [get-secrets build multi-l10n update]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -162,4 +260,54 @@ android-api-15-gradle/opt:
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         custom-build-variant-cfg: api-15-gradle
+        tooltool-downloads: internal
+
+android-aarch64/opt:
+    description: "Android 5.0 AArch64 Opt"
+    index:
+        product: mobile
+        job-name: android-aarch64-opt
+    treeherder:
+        platform: android-5-0-aarch64/opt
+        symbol: tc(B)
+    worker-type: aws-provisioner-v1/gecko-{level}-b-android
+    worker:
+        max-run-time: 7200
+    run:
+        using: mozharness
+        actions: [get-secrets build multi-l10n update]
+        config:
+            - builds/releng_base_android_64_builds.py
+            - disable_signing.py
+            - platform_supports_post_upload_to_latest.py
+        script: "mozharness/scripts/fx_desktop_build.py"
+        secrets: true
+        custom-build-variant-cfg: aarch64
+        tooltool-downloads: internal
+
+android-aarch64-nightly/opt:
+    description: "Android 5.0 AArch64 Nightly"
+    attributes:
+        nightly: true
+    index:
+        product: mobile
+        job-name: android-aarch64-opt
+        type: nightly
+    treeherder:
+        platform: android-5-0-aarch64/opt
+        symbol: tc(N)
+    worker-type: aws-provisioner-v1/gecko-{level}-b-android
+    worker:
+        max-run-time: 7200
+    run:
+        using: mozharness
+        actions: [get-secrets build multi-l10n update]
+        config:
+            - builds/releng_base_android_64_builds.py
+            - disable_signing.py
+            - platform_supports_post_upload_to_latest.py
+            - taskcluster_nightly.py
+        script: "mozharness/scripts/fx_desktop_build.py"
+        secrets: true
+        custom-build-variant-cfg: aarch64
         tooltool-downloads: internal

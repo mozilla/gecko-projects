@@ -1076,8 +1076,9 @@ nsSiteSecurityService::ProcessPKPHeader(
                                         nullptr, // stapledOCSPResponse
                                         nullptr, // sctsFromTLSExtension
                                         now, nullptr, // pinarg
-                                        host.get(), // hostname
+                                        host, // hostname
                                         certList,
+                                        nullptr, // no peerCertChain
                                         false, // don't store intermediates
                                         flags,
                                         aOriginAttributes)

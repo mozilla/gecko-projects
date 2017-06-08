@@ -53,7 +53,6 @@
 #include "nsComponentManagerUtils.h"
 #include "nsSocketTransportService2.h"
 #include "nsIOService.h"
-#include "nsIThrottlingService.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIXULRuntime.h"
 #include "nsCharSeparatedTokenizer.h"
@@ -192,6 +191,10 @@ nsHttpHandler::nsHttpHandler()
     , mMaxConnections(24)
     , mMaxPersistentConnectionsPerServer(2)
     , mMaxPersistentConnectionsPerProxy(4)
+    , mThrottleEnabled(true)
+    , mThrottleSuspendFor(3000)
+    , mThrottleResumeFor(200)
+    , mThrottleResumeIn(400)
     , mRedirectionLimit(10)
     , mPhishyUserPassLength(1)
     , mQoSBits(0x00)
@@ -550,7 +553,11 @@ nsHttpHandler::InitConnectionMgr()
                         mMaxConnections,
                         mMaxPersistentConnectionsPerServer,
                         mMaxPersistentConnectionsPerProxy,
-                        mMaxRequestDelay);
+                        mMaxRequestDelay,
+                        mThrottleEnabled,
+                        mThrottleSuspendFor,
+                        mThrottleResumeFor,
+                        mThrottleResumeIn);
     return rv;
 }
 
@@ -713,17 +720,6 @@ nsHttpHandler::GetIOService(nsIIOService** result)
 
     NS_ADDREF(*result = mIOService);
     return NS_OK;
-}
-
-nsIThrottlingService *
-nsHttpHandler::GetThrottlingService()
-{
-    if (!mThrottlingService) {
-        nsCOMPtr<nsIThrottlingService> service = do_GetService(NS_THROTTLINGSERVICE_CONTRACTID);
-        mThrottlingService = new nsMainThreadPtrHolder<nsIThrottlingService>(service);
-    }
-
-    return mThrottlingService;
 }
 
 uint32_t
@@ -956,31 +952,6 @@ nsHttpHandler::InitUserAgentComponents()
         }
     }
 #endif // MOZ_MULET
-
-#if defined(MOZ_WIDGET_GONK)
-    // Device model identifier should be a simple token, which can be composed
-    // of letters, numbers, hyphen ("-") and dot (".").
-    // Any other characters means the identifier is invalid and ignored.
-    nsCString deviceId;
-    rv = Preferences::GetCString("general.useragent.device_id", &deviceId);
-    if (NS_SUCCEEDED(rv)) {
-        bool valid = true;
-        deviceId.Trim(" ", true, true);
-        for (size_t i = 0; i < deviceId.Length(); i++) {
-            char c = deviceId.CharAt(i);
-            if (!(isalnum(c) || c == '-' || c == '.')) {
-                valid = false;
-                break;
-            }
-        }
-        if (valid) {
-            mDeviceModelId = deviceId;
-        } else {
-            LOG(("nsHttpHandler: Ignore invalid device ID: [%s]\n",
-                  deviceId.get()));
-        }
-    }
-#endif
 
 #ifndef MOZ_UA_OS_AGNOSTIC
     // Gather OS/CPU.
@@ -1257,8 +1228,8 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
             mSpoofReferrerSource = cVar;
     }
 
-    if (PREF_CHANGED(HTTP_PREF("referer.spoofOnionSource"))) {
-        rv = prefs->GetBoolPref(HTTP_PREF("referer.spoofOnionSource"), &cVar);
+    if (PREF_CHANGED(HTTP_PREF("referer.hideOnionSource"))) {
+        rv = prefs->GetBoolPref(HTTP_PREF("referer.hideOnionSource"), &cVar);
         if (NS_SUCCEEDED(rv))
             mHideOnionReferrerSource = cVar;
     }
@@ -1580,6 +1551,41 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         rv = prefs->GetIntPref(HTTP_PREF("max_response_header_size"), &val);
         if (NS_SUCCEEDED(rv)) {
             mMaxHttpResponseHeaderSize = val;
+        }
+    }
+
+    if (PREF_CHANGED("network.http.throttle.enable")) {
+        rv = prefs->GetBoolPref("network.http.throttle.enable", &mThrottleEnabled);
+        if (NS_SUCCEEDED(rv) && mConnMgr) {
+            Unused << mConnMgr->UpdateParam(nsHttpConnectionMgr::THROTTLING_ENABLED,
+                                            static_cast<int32_t>(mThrottleEnabled));
+        }
+    }
+
+    if (PREF_CHANGED("network.http.throttle.suspend-for")) {
+        rv = prefs->GetIntPref("network.http.throttle.suspend-for", &val);
+        mThrottleSuspendFor = (uint32_t)clamped(val, 0, 120000);
+        if (NS_SUCCEEDED(rv) && mConnMgr) {
+            Unused << mConnMgr->UpdateParam(nsHttpConnectionMgr::THROTTLING_SUSPEND_FOR,
+                                            mThrottleSuspendFor);
+        }
+    }
+
+    if (PREF_CHANGED("network.http.throttle.resume-for")) {
+        rv = prefs->GetIntPref("network.http.throttle.resume-for", &val);
+        mThrottleResumeFor = (uint32_t)clamped(val, 0, 120000);
+        if (NS_SUCCEEDED(rv) && mConnMgr) {
+            Unused << mConnMgr->UpdateParam(nsHttpConnectionMgr::THROTTLING_RESUME_FOR,
+                                            mThrottleResumeFor);
+        }
+    }
+
+    if (PREF_CHANGED("network.http.throttle.resume-background-in")) {
+        rv = prefs->GetIntPref("network.http.throttle.resume-background-in", &val);
+        mThrottleResumeIn = (uint32_t)clamped(val, 0, 120000);
+        if (NS_SUCCEEDED(rv) && mConnMgr) {
+            Unused << mConnMgr->UpdateParam(nsHttpConnectionMgr::THROTTLING_RESUME_IN,
+                                            mThrottleResumeIn);
         }
     }
 

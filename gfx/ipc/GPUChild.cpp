@@ -20,8 +20,9 @@
 #include "mozilla/ipc/CrashReporterHost.h"
 #include "mozilla/layers/LayerTreeOwnerTracker.h"
 #include "mozilla/Unused.h"
+
 #ifdef MOZ_GECKO_PROFILER
-#include "CrossProcessProfilerController.h"
+#include "ProfilerParent.h"
 #endif
 
 namespace mozilla {
@@ -78,7 +79,7 @@ GPUChild::Init()
   gfxVars::AddReceiver(this);
 
 #ifdef MOZ_GECKO_PROFILER
-  mProfilerController = MakeUnique<CrossProcessProfilerController>(this);
+  Unused << SendInitProfiler(ProfilerParent::CreateForProcess(OtherPid()));
 #endif
 }
 
@@ -165,35 +166,35 @@ GPUChild::RecvNotifyUiObservers(const nsCString& aTopic)
 mozilla::ipc::IPCResult
 GPUChild::RecvAccumulateChildHistograms(InfallibleTArray<Accumulation>&& aAccumulations)
 {
-  TelemetryIPC::AccumulateChildHistograms(GeckoProcessType_GPU, aAccumulations);
+  TelemetryIPC::AccumulateChildHistograms(Telemetry::ProcessID::Gpu, aAccumulations);
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
 GPUChild::RecvAccumulateChildKeyedHistograms(InfallibleTArray<KeyedAccumulation>&& aAccumulations)
 {
-  TelemetryIPC::AccumulateChildKeyedHistograms(GeckoProcessType_GPU, aAccumulations);
+  TelemetryIPC::AccumulateChildKeyedHistograms(Telemetry::ProcessID::Gpu, aAccumulations);
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
 GPUChild::RecvUpdateChildScalars(InfallibleTArray<ScalarAction>&& aScalarActions)
 {
-  TelemetryIPC::UpdateChildScalars(GeckoProcessType_GPU, aScalarActions);
+  TelemetryIPC::UpdateChildScalars(Telemetry::ProcessID::Gpu, aScalarActions);
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
 GPUChild::RecvUpdateChildKeyedScalars(InfallibleTArray<KeyedScalarAction>&& aScalarActions)
 {
-  TelemetryIPC::UpdateChildKeyedScalars(GeckoProcessType_GPU, aScalarActions);
+  TelemetryIPC::UpdateChildKeyedScalars(Telemetry::ProcessID::Gpu, aScalarActions);
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
 GPUChild::RecvRecordChildEvents(nsTArray<mozilla::Telemetry::ChildEventData>&& aEvents)
 {
-  TelemetryIPC::RecordChildEvents(GeckoProcessType_GPU, aEvents);
+  TelemetryIPC::RecordChildEvents(Telemetry::ProcessID::Gpu, aEvents);
   return IPC_OK();
 }
 
@@ -202,17 +203,6 @@ GPUChild::RecvNotifyDeviceReset(const GPUDeviceData& aData)
 {
   gfxPlatform::GetPlatform()->ImportGPUDeviceData(aData);
   mHost->mListener->OnProcessDeviceReset(mHost);
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-GPUChild::RecvProfile(const nsCString& aProfile, const bool& aIsExitProfile)
-{
-#ifdef MOZ_GECKO_PROFILER
-  if (mProfilerController) {
-    mProfilerController->RecvProfile(aProfile, aIsExitProfile);
-  }
-#endif
   return IPC_OK();
 }
 
@@ -251,30 +241,6 @@ GPUChild::RecvFinishMemoryReport(const uint32_t& aGeneration)
 }
 
 void
-GPUChild::SendStartProfiler(const ProfilerInitParams& aParams)
-{
-  Unused << PGPUChild::SendStartProfiler(aParams);
-}
-
-void
-GPUChild::SendStopProfiler()
-{
-  Unused << PGPUChild::SendStopProfiler();
-}
-
-void
-GPUChild::SendPauseProfiler(const bool& aPause)
-{
-  Unused << PGPUChild::SendPauseProfiler(aPause);
-}
-
-void
-GPUChild::SendGatherProfile()
-{
-  Unused << PGPUChild::SendGatherProfile();
-}
-
-void
 GPUChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   if (aWhy == AbnormalShutdown) {
@@ -294,10 +260,6 @@ GPUChild::ActorDestroy(ActorDestroyReason aWhy)
     }
 
   }
-
-#ifdef MOZ_GECKO_PROFILER
-  mProfilerController = nullptr;
-#endif
 
   gfxVars::RemoveReceiver(this);
   mHost->OnChannelClosed();

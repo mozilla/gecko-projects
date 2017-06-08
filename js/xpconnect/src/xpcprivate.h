@@ -2300,7 +2300,7 @@ class nsJSIID : public nsIJSIID,
 public:
     NS_DECL_ISUPPORTS
 
-    // we manually delagate these to nsJSID
+    // we manually delegate these to nsJSID
     NS_DECL_NSIJSID
 
     // we implement the rest...
@@ -2325,7 +2325,7 @@ class nsJSCID : public nsIJSCID, public nsIXPCScriptable
 public:
     NS_DECL_ISUPPORTS
 
-    // we manually delagate these to nsJSID
+    // we manually delegate these to nsJSID
     NS_DECL_NSIJSID
 
     // we implement the rest...
@@ -2756,6 +2756,7 @@ struct GlobalProperties {
     bool fetch : 1;
     bool caches : 1;
     bool fileReader: 1;
+    bool messageChannel: 1;
 private:
     bool Define(JSContext* cx, JS::HandleObject obj);
 };

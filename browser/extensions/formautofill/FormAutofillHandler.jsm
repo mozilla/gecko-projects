@@ -84,15 +84,35 @@ FormAutofillHandler.prototype = {
       // 1. the focused input which is filled in FormFillController.
       // 2. a non-empty input field
       // 3. the invalid value set
+      // 4. value already chosen in select element
 
       let element = fieldDetail.elementWeakRef.get();
-      if (!element || element === focusedInput || element.value) {
+      if (!element || element === focusedInput) {
         continue;
       }
 
       let value = profile[fieldDetail.fieldName];
-      if (value) {
+      if (element instanceof Ci.nsIDOMHTMLInputElement && value) {
+        if (element.value) {
+          continue;
+        }
         element.setUserInput(value);
+      } else if (element instanceof Ci.nsIDOMHTMLSelectElement) {
+        for (let option of element.options) {
+          if (value === option.textContent || value === option.value) {
+            // Do not change value if the option is already selected.
+            // Use case for multiple select is not considered here.
+            if (option.selected) {
+              break;
+            }
+            // TODO: Using dispatchEvent does not 100% simulate select change.
+            //       Should investigate further in Bug 1365895.
+            option.selected = true;
+            element.dispatchEvent(new Event("input", {"bubbles": true}));
+            element.dispatchEvent(new Event("change", {"bubbles": true}));
+            break;
+          }
+        }
       }
     }
   },
@@ -132,5 +152,28 @@ FormAutofillHandler.prototype = {
       }
     }
     */
+  },
+
+  /**
+   * Return the profile that is converted from fieldDetails and only non-empty fields
+   * are included.
+   *
+   * @returns {Object} The new profile that convert from details with trimmed result.
+   */
+  createProfile() {
+    let profile = {};
+
+    this.fieldDetails.forEach(detail => {
+      let element = detail.elementWeakRef.get();
+      // Remove the unnecessary spaces
+      let value = element && element.value.trim();
+      if (!value) {
+        return;
+      }
+
+      profile[detail.fieldName] = value;
+    });
+
+    return profile;
   },
 };

@@ -15,7 +15,6 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use style::context::QuirksMode;
 use style::error_reporting::ParseErrorReporter;
-use style::keyframes::{Keyframe, KeyframeSelector, KeyframePercentage};
 use style::media_queries::MediaList;
 use style::properties::Importance;
 use style::properties::{CSSWideKeyword, DeclaredValueOwned, PropertyDeclaration, PropertyDeclarationBlock};
@@ -25,6 +24,7 @@ use style::shared_lock::SharedRwLock;
 use style::stylearc::Arc;
 use style::stylesheets::{Origin, Namespaces};
 use style::stylesheets::{Stylesheet, NamespaceRule, CssRule, CssRules, StyleRule, KeyframesRule};
+use style::stylesheets::keyframes_rule::{Keyframe, KeyframeSelector, KeyframePercentage};
 use style::values::{KeyframesName, CustomIdent};
 use style::values::specified::{LengthOrPercentageOrAuto, Percentage, PositionComponent};
 
@@ -70,7 +70,7 @@ fn test_parse_stylesheet() {
     let stylesheet = Stylesheet::from_str(css, url.clone(), Origin::UserAgent, media, lock,
                                           None, &CSSErrorReporterTest, QuirksMode::NoQuirks, 0u64);
     let mut namespaces = Namespaces::default();
-    namespaces.default = Some(ns!(html));
+    namespaces.default = Some((ns!(html), ()));
     let expected = Stylesheet {
         origin: Origin::UserAgent,
         media: Arc::new(stylesheet.shared_lock.wrap(MediaList::empty())),
@@ -90,26 +90,23 @@ fn test_parse_stylesheet() {
                 },
             }))),
             CssRule::Style(Arc::new(stylesheet.shared_lock.wrap(StyleRule {
-                selectors: SelectorList(vec![
-                    Selector::new_for_unit_testing(
-                        SelectorInner::from_vec(vec![
-                            Component::DefaultNamespace(NsAtom::from("http://www.w3.org/1999/xhtml")),
-                            Component::LocalName(LocalName {
-                                name: local_name!("input"),
-                                lower_name: local_name!("input"),
-                            }),
-                            Component::AttributeInNoNamespace {
-                                local_name: local_name!("type"),
-                                local_name_lower: local_name!("type"),
-                                operator: AttrSelectorOperator::Equal,
-                                value: "hidden".to_owned(),
-                                case_sensitivity: ParsedCaseSensitivity::AsciiCaseInsensitive,
-                                never_matches: false,
-                            }
-                        ]),
-                        (0 << 20) + (1 << 10) + (1 << 0)
-                    ),
-                ]),
+                selectors: SelectorList::from_vec(vec!(
+                    Selector::from_vec(vec!(
+                        Component::DefaultNamespace(NsAtom::from("http://www.w3.org/1999/xhtml")),
+                        Component::LocalName(LocalName {
+                            name: local_name!("input"),
+                            lower_name: local_name!("input"),
+                        }),
+                        Component::AttributeInNoNamespace {
+                            local_name: local_name!("type"),
+                            local_name_lower: local_name!("type"),
+                            operator: AttrSelectorOperator::Equal,
+                            value: "hidden".to_owned(),
+                            case_sensitivity: ParsedCaseSensitivity::AsciiCaseInsensitive,
+                            never_matches: false,
+                        }
+                    ), (0 << 20) + (1 << 10) + (1 << 0))
+                )),
                 block: Arc::new(stylesheet.shared_lock.wrap(block_from(vec![
                     (PropertyDeclaration::Display(longhands::display::SpecifiedValue::none),
                      Importance::Important),
@@ -123,28 +120,23 @@ fn test_parse_stylesheet() {
                 },
             }))),
             CssRule::Style(Arc::new(stylesheet.shared_lock.wrap(StyleRule {
-                selectors: SelectorList(vec![
-                    Selector::new_for_unit_testing(
-                        SelectorInner::from_vec(vec![
+                selectors: SelectorList::from_vec(vec!(
+                    Selector::from_vec(vec!(
                             Component::DefaultNamespace(NsAtom::from("http://www.w3.org/1999/xhtml")),
                             Component::LocalName(LocalName {
                                 name: local_name!("html"),
                                 lower_name: local_name!("html"),
                             }),
-                        ]),
-                        (0 << 20) + (0 << 10) + (1 << 0)
+                        ), (0 << 20) + (0 << 10) + (1 << 0)),
+                    Selector::from_vec(vec!(
+                        Component::DefaultNamespace(NsAtom::from("http://www.w3.org/1999/xhtml")),
+                        Component::LocalName(LocalName {
+                            name: local_name!("body"),
+                            lower_name: local_name!("body"),
+                        })
+                        ), (0 << 20) + (0 << 10) + (1 << 0)
                     ),
-                    Selector::new_for_unit_testing(
-                        SelectorInner::from_vec(vec![
-                            Component::DefaultNamespace(NsAtom::from("http://www.w3.org/1999/xhtml")),
-                            Component::LocalName(LocalName {
-                                name: local_name!("body"),
-                                lower_name: local_name!("body"),
-                            }),
-                        ]),
-                        (0 << 20) + (0 << 10) + (1 << 0)
-                    ),
-                ]),
+                )),
                 block: Arc::new(stylesheet.shared_lock.wrap(block_from(vec![
                     (PropertyDeclaration::Display(longhands::display::SpecifiedValue::block),
                      Importance::Normal),
@@ -155,18 +147,15 @@ fn test_parse_stylesheet() {
                 },
             }))),
             CssRule::Style(Arc::new(stylesheet.shared_lock.wrap(StyleRule {
-                selectors: SelectorList(vec![
-                    Selector::new_for_unit_testing(
-                        SelectorInner::from_vec(vec![
-                            Component::DefaultNamespace(NsAtom::from("http://www.w3.org/1999/xhtml")),
-                            Component::ID(Atom::from("d1")),
-                            Component::Combinator(Combinator::Child),
-                            Component::DefaultNamespace(NsAtom::from("http://www.w3.org/1999/xhtml")),
-                            Component::Class(Atom::from("ok")),
-                        ]),
-                        (1 << 20) + (1 << 10) + (0 << 0)
-                    ),
-                ]),
+                selectors: SelectorList::from_vec(vec!(
+                    Selector::from_vec(vec!(
+                        Component::DefaultNamespace(NsAtom::from("http://www.w3.org/1999/xhtml")),
+                        Component::ID(Atom::from("d1")),
+                        Component::Combinator(Combinator::Child),
+                        Component::DefaultNamespace(NsAtom::from("http://www.w3.org/1999/xhtml")),
+                        Component::Class(Atom::from("ok"))
+                    ), (1 << 20) + (1 << 10) + (0 << 0))
+                )),
                 block: Arc::new(stylesheet.shared_lock.wrap(block_from(vec![
                     (PropertyDeclaration::BackgroundColor(
                         longhands::background_color::SpecifiedValue {

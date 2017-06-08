@@ -203,6 +203,7 @@
 #include "mozilla/dom/Gamepad.h"
 #include "mozilla/dom/GamepadManager.h"
 
+#include "gfxVR.h"
 #include "mozilla/dom/VRDisplay.h"
 #include "mozilla/dom/VRDisplayEvent.h"
 #include "mozilla/dom/VRDisplayEventBinding.h"
@@ -563,7 +564,7 @@ NS_INTERFACE_MAP_END_INHERITING(TimeoutHandler)
 class IdleRequestExecutor final : public nsIRunnable
                                 , public nsICancelableRunnable
                                 , public nsINamed
-                                , public nsIIncrementalRunnable
+                                , public nsIIdleRunnable
 {
 public:
   explicit IdleRequestExecutor(nsGlobalWindow* aWindow)
@@ -650,7 +651,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(IdleRequestExecutor)
   NS_INTERFACE_MAP_ENTRY(nsIRunnable)
   NS_INTERFACE_MAP_ENTRY(nsICancelableRunnable)
   NS_INTERFACE_MAP_ENTRY(nsINamed)
-  NS_INTERFACE_MAP_ENTRY(nsIIncrementalRunnable)
+  NS_INTERFACE_MAP_ENTRY(nsIIdleRunnable)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIRunnable)
 NS_INTERFACE_MAP_END
 
@@ -867,7 +868,11 @@ nsGlobalWindow::ExecuteIdleRequest(TimeStamp aDeadline)
   mIdleRequestExecutor->MaybeUpdateIdlePeriodLimit();
   nsresult result = RunIdleRequest(request, deadline, false);
 
-  mIdleRequestExecutor->MaybeDispatch();
+  // Running the idle callback could've suspended the window, in which
+  // case mIdleRequestExecutor will be null.
+  if (mIdleRequestExecutor) {
+    mIdleRequestExecutor->MaybeDispatch();
+  }
   return result;
 }
 
@@ -1568,6 +1573,7 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
     mFocusByKeyOccurred(false),
     mHasGamepad(false),
     mHasVREvents(false),
+    mHasVRDisplayActivateEvents(false),
     mHasSeenGamepadInput(false),
     mNotifiedIDDestroyed(false),
     mAllowScriptsToClose(false),
@@ -1997,6 +2003,7 @@ nsGlobalWindow::CleanUp()
     mHasGamepad = false;
     DisableVRUpdates();
     mHasVREvents = false;
+    mHasVRDisplayActivateEvents = false;
 #ifdef MOZ_B2G
     DisableTimeChangeNotifications();
 #endif
@@ -2004,6 +2011,7 @@ nsGlobalWindow::CleanUp()
   } else {
     MOZ_ASSERT(!mHasGamepad);
     MOZ_ASSERT(!mHasVREvents);
+    MOZ_ASSERT(!mHasVRDisplayActivateEvents);
   }
 
   if (mCleanMessageManager) {
@@ -2166,6 +2174,7 @@ nsGlobalWindow::FreeInnerObjects()
   mGamepads.Clear();
   DisableVRUpdates();
   mHasVREvents = false;
+  mHasVRDisplayActivateEvents = false;
   mVRDisplays.Clear();
 
   if (mTabChild) {
@@ -5129,7 +5138,7 @@ nsGlobalWindow::MayResolve(jsid aId)
 }
 
 void
-nsGlobalWindow::GetOwnPropertyNames(JSContext* aCx, nsTArray<nsString>& aNames,
+nsGlobalWindow::GetOwnPropertyNames(JSContext* aCx, JS::AutoIdVector& aNames,
                                     ErrorResult& aRv)
 {
   MOZ_ASSERT(IsInnerWindow());
@@ -5140,13 +5149,37 @@ nsGlobalWindow::GetOwnPropertyNames(JSContext* aCx, nsTArray<nsString>& aNames,
   if (nameSpaceManager) {
     JS::Rooted<JSObject*> wrapper(aCx, GetWrapper());
 
-    WebIDLGlobalNameHash::GetNames(aCx, wrapper, aNames);
+    // There are actually two ways we can get called here: For normal
+    // enumeration or for Xray enumeration.  In the latter case, we want to
+    // return all possible WebIDL names, because we don't really support
+    // deleting these names off our Xray; trying to resolve them will just make
+    // them come back.  In the former case, we want to avoid returning deleted
+    // names.  But the JS engine already knows about the non-deleted
+    // already-resolved names, so we can just return the so-far-unresolved ones.
+    //
+    // We can tell which case we're in by whether aCx is in our wrapper's
+    // compartment.  If not, we're in the Xray case.
+    WebIDLGlobalNameHash::NameType nameType =
+      js::IsObjectInContextCompartment(wrapper, aCx) ?
+        WebIDLGlobalNameHash::UnresolvedNamesOnly :
+        WebIDLGlobalNameHash::AllNames;
+    if (!WebIDLGlobalNameHash::GetNames(aCx, wrapper, nameType, aNames)) {
+      aRv.NoteJSContextException(aCx);
+    }
 
     for (auto i = nameSpaceManager->GlobalNameIter(); !i.Done(); i.Next()) {
       const GlobalNameMapEntry* entry = i.Get();
       if (nsWindowSH::NameStructEnabled(aCx, this, entry->mKey,
                                         entry->mGlobalName)) {
-        aNames.AppendElement(entry->mKey);
+        // Just append all of these; even if they get deleted our resolve hook
+        // just goes ahead and recreates them.
+        JSString* str = JS_AtomizeUCStringN(aCx,
+                                            entry->mKey.BeginReading(),
+                                            entry->mKey.Length());
+        if (!str || !aNames.append(NON_INTEGER_ATOM_TO_JSID(str))) {
+          aRv.NoteJSContextException(aCx);
+          return;
+        }
       }
     }
   }
@@ -9651,8 +9684,7 @@ public:
                                                                   : js::NukeWindowReferences);
         } else {
           // We only want to nuke wrappers for the chrome->content case
-          js::NukeCrossCompartmentWrappers(cx, BrowserCompartmentMatcher(),
-                                           js::SingleCompartment(cpt),
+          js::NukeCrossCompartmentWrappers(cx, BrowserCompartmentMatcher(), cpt,
                                            win->IsInnerWindow() ? js::DontNukeWindowReferences
                                                                 : js::NukeWindowReferences,
                                            js::NukeIncomingReferences);
@@ -13520,6 +13552,10 @@ nsGlobalWindow::EventListenerAdded(nsIAtom* aType)
     NotifyVREventListenerAdded();
   }
 
+  if (aType == nsGkAtoms::onvrdisplayactivate) {
+    mHasVRDisplayActivateEvents = true;
+  }
+
   if (aType == nsGkAtoms::onbeforeunload &&
       mTabChild &&
       (!mDoc || !(mDoc->GetSandboxFlags() & SANDBOXED_MODALS))) {
@@ -13563,7 +13599,30 @@ nsGlobalWindow::HasUsedVR() const
 {
   MOZ_ASSERT(IsInnerWindow());
 
+  // Returns true only if any WebVR API call or related event
+  // has been used
   return mHasVREvents;
+}
+
+bool
+nsGlobalWindow::IsVRContentDetected() const
+{
+  MOZ_ASSERT(IsInnerWindow());
+
+  // Returns true only if the content will respond to
+  // the VRDisplayActivate event.
+  return mHasVRDisplayActivateEvents;
+}
+
+bool
+nsGlobalWindow::IsVRContentPresenting() const
+{
+  for (auto display : mVRDisplays) {
+    if (display->IsAnyPresenting(gfx::kVRGroupAll)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void
@@ -13760,7 +13819,7 @@ nsGlobalWindow::DispatchVRDisplayActivate(uint32_t aDisplayID,
   for (auto display : mVRDisplays) {
     if (display->DisplayId() == aDisplayID) {
       if (aReason != VRDisplayEventReason::Navigation &&
-          display->IsAnyPresenting()) {
+          display->IsAnyPresenting(gfx::kVRGroupContent)) {
         // We only want to trigger this event if nobody is presenting to the
         // display already or when a page is loaded by navigating away
         // from a page with an active VR Presentation.

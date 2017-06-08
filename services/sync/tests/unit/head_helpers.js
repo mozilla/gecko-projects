@@ -16,6 +16,7 @@ Cu.import("resource://testing-common/PlacesTestUtils.jsm");
 Cu.import("resource://services-sync/util.js");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/PlacesUtils.jsm");
+Cu.import("resource://gre/modules/ObjectUtils.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "SyncPingSchema", function() {
   let ns = {};
@@ -489,6 +490,8 @@ function promiseNextTick() {
 // Avoid an issue where `client.name2` containing unicode characters causes
 // a number of tests to fail, due to them assuming that we do not need to utf-8
 // encode or decode data sent through the mocked server (see bug 1268912).
+// We stash away the original implementation so test_utils_misc.js can test it.
+Utils._orig_getDefaultDeviceName = Utils.getDefaultDeviceName;
 Utils.getDefaultDeviceName = function() {
   return "Test device name";
 };
@@ -602,4 +605,36 @@ async function addVisit(suffix, referrer = null, transition = PlacesUtils.histor
   await visitAddedPromise;
 
   return uri;
+}
+
+function bookmarkNodesToInfos(nodes) {
+  return nodes.map(node => {
+    let info = {
+      guid: node.guid,
+      index: node.index,
+    };
+    if (node.children) {
+      info.children = bookmarkNodesToInfos(node.children);
+    }
+    if (node.annos) {
+      let orphanAnno = node.annos.find(anno =>
+        anno.name == "sync/parent"
+      );
+      if (orphanAnno) {
+        info.requestedParent = orphanAnno.value;
+      }
+    }
+    return info;
+  });
+}
+
+async function assertBookmarksTreeMatches(rootGuid, expected, message) {
+  let root = await PlacesUtils.promiseBookmarksTree(rootGuid);
+  let actual = bookmarkNodesToInfos(root.children);
+
+  if (!ObjectUtils.deepEqual(actual, expected)) {
+    _(`Expected structure for ${rootGuid}`, JSON.stringify(expected));
+    _(`Actual structure for ${rootGuid}`, JSON.stringify(actual));
+    throw new Assert.constructor.AssertionError({ actual, expected, message });
+  }
 }

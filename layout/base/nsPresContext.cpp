@@ -25,7 +25,7 @@
 #include "nsIFrame.h"
 #include "nsIDocument.h"
 #include "nsIPrintSettings.h"
-#include "nsILanguageAtomService.h"
+#include "nsLanguageAtomService.h"
 #include "mozilla/LookAndFeel.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIDOMHTMLDocument.h"
@@ -879,7 +879,7 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
     }
   }
 
-  mLangService = do_GetService(NS_LANGUAGEATOMSERVICE_CONTRACTID);
+  mLangService = nsLanguageAtomService::GetService();
 
   // Register callbacks so we're notified when the preferences change
   Preferences::RegisterPrefixCallback(nsPresContext::PrefChangedCallback,
@@ -985,10 +985,8 @@ nsPresContext::AttachShell(nsIPresShell* aShell, StyleBackendType aBackendType)
         mImageAnimationMode = imgIContainer::kNormalAnimMode;
     }
 
-    if (mLangService) {
-      doc->AddCharSetObserver(this);
-      UpdateCharSet(doc->GetDocumentCharacterSet());
-    }
+    doc->AddCharSetObserver(this);
+    UpdateCharSet(doc->GetDocumentCharacterSet());
   }
 }
 
@@ -1059,17 +1057,15 @@ nsPresContext::DoChangeCharSet(const nsCString& aCharSet)
 void
 nsPresContext::UpdateCharSet(const nsCString& aCharSet)
 {
-  if (mLangService) {
-    mLanguage = mLangService->LookupCharSet(aCharSet);
-    // this will be a language group (or script) code rather than a true language code
+  mLanguage = mLangService->LookupCharSet(aCharSet);
+  // this will be a language group (or script) code rather than a true language code
 
-    // bug 39570: moved from nsLanguageAtomService::LookupCharSet()
-    if (mLanguage == nsGkAtoms::Unicode) {
-      mLanguage = mLangService->GetLocaleLanguage();
-    }
-    mLangGroupFontPrefs.Reset();
-    mFontGroupCacheDirty = true;
+  // bug 39570: moved from nsLanguageAtomService::LookupCharSet()
+  if (mLanguage == nsGkAtoms::Unicode) {
+    mLanguage = mLangService->GetLocaleLanguage();
   }
+  mLangGroupFontPrefs.Reset();
+  mFontGroupCacheDirty = true;
 
   switch (GET_BIDI_OPTION_TEXTTYPE(GetBidi())) {
 
@@ -2074,26 +2070,19 @@ nsPresContext::MediaFeatureValuesChanged(nsRestyleHint aRestyleHint,
   mPendingMediaFeatureValuesChanged = false;
 
   // MediumFeaturesChanged updates the applied rules, so it always gets called.
-  if (mShell) {
-    // XXXheycam ServoStyleSets don't support responding to medium
-    // changes yet.
-    if (mShell->StyleSet()->IsGecko()) {
-      if (mShell->StyleSet()->AsGecko()->MediumFeaturesChanged()) {
-        aRestyleHint |= eRestyle_Subtree;
-      }
-    } else {
-      NS_WARNING("stylo: ServoStyleSets don't support responding to medium "
-                 "changes yet. See bug 1290228.");
-      aRestyleHint |= eRestyle_Subtree;
-    }
+  if (mShell && mShell->StyleSet()->MediumFeaturesChanged()) {
+    aRestyleHint |= eRestyle_Subtree;
   }
 
-  if (mUsesViewportUnits && mPendingViewportChange) {
+  if (mPendingViewportChange &&
+      (mUsesViewportUnits || mDocument->IsStyledByServo())) {
     // Rebuild all style data without rerunning selector matching.
     //
-    // TODO(emilio, bug 1328652): We don't set mUsesViewportUnits in stylo yet.
-    // This is wallpapered given we assume medium feature changes
-    // unconditionally, but we need to fix this.
+    // FIXME(emilio, bug 1328652): We don't set mUsesViewportUnits in stylo yet,
+    // so assume the worst.
+    //
+    // Also, in this case we don't need to do a rebuild of the style data, only
+    // post a restyle.
     aRestyleHint |= eRestyle_ForceDescendants;
   }
 
@@ -2385,14 +2374,7 @@ nsPresContext::NotifyMissingFonts()
 void
 nsPresContext::EnsureSafeToHandOutCSSRules()
 {
-  nsStyleSet* styleSet = mShell->StyleSet()->GetAsGecko();
-  if (!styleSet) {
-    // ServoStyleSets do not need to handle copy-on-write style sheet
-    // innards like with CSSStyleSheets.
-    return;
-  }
-
-  if (!styleSet->EnsureUniqueInnerOnCSSSheets()) {
+  if (!mShell->StyleSet()->EnsureUniqueInnerOnCSSSheets()) {
     // Nothing to do.
     return;
   }
@@ -2970,8 +2952,7 @@ nsPresContext::GetPrimaryFrameFor(nsIContent* aContent)
 size_t
 nsPresContext::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
-  return mPropertyTable.SizeOfExcludingThis(aMallocSizeOf) +
-         mLangGroupFontPrefs.SizeOfExcludingThis(aMallocSizeOf);
+  return mLangGroupFontPrefs.SizeOfExcludingThis(aMallocSizeOf);
 
   // Measurement of other members may be added later if DMD finds it is
   // worthwhile.

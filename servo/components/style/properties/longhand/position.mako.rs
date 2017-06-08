@@ -37,11 +37,11 @@ ${helpers.predefined_type("z-index", "IntegerOrAuto",
 // Flex container properties
 ${helpers.single_keyword("flex-direction", "row row-reverse column column-reverse",
                          spec="https://drafts.csswg.org/css-flexbox/#flex-direction-property",
-                         extra_prefixes="webkit", animation_value_type="none")}
+                         extra_prefixes="webkit", animation_value_type="discrete")}
 
 ${helpers.single_keyword("flex-wrap", "nowrap wrap wrap-reverse",
                          spec="https://drafts.csswg.org/css-flexbox/#flex-wrap-property",
-                         extra_prefixes="webkit", animation_value_type="none")}
+                         extra_prefixes="webkit", animation_value_type="discrete")}
 
 % if product == "servo":
     // FIXME: Update Servo to support the same Syntax as Gecko.
@@ -205,10 +205,13 @@ ${helpers.single_keyword("box-sizing",
                          "content-box border-box",
                          extra_prefixes="moz webkit",
                          spec="https://drafts.csswg.org/css-ui/#propdef-box-sizing",
-                         animation_value_type="none")}
+                         gecko_enum_prefix="StyleBoxSizing",
+                         custom_consts={ "content-box": "Content", "border-box": "Border" },
+                         gecko_inexhaustive=True,
+                         animation_value_type="discrete")}
 
 ${helpers.single_keyword("object-fit", "fill contain cover none scale-down",
-                         products="gecko", animation_value_type="none",
+                         products="gecko", animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-images/#propdef-object-fit")}
 
 ${helpers.predefined_type("object-position",
@@ -223,6 +226,7 @@ ${helpers.predefined_type("object-position",
     ${helpers.predefined_type("grid-%s-gap" % kind,
                               "LengthOrPercentage",
                               "computed::LengthOrPercentage::Length(Au(0))",
+                              "parse_non_negative",
                               spec="https://drafts.csswg.org/css-grid/#propdef-grid-%s-gap" % kind,
                               animation_value_type="ComputedValue",
                               products="gecko")}
@@ -396,6 +400,13 @@ ${helpers.predefined_type("object-position",
             while let Ok(string) = input.try(Parser::expect_string) {
                 strings.push(string.into_owned().into_boxed_str());
             }
+
+            TemplateAreas::from_vec(strings)
+        }
+    }
+
+    impl TemplateAreas {
+        pub fn from_vec(strings: Vec<Box<str>>) -> Result<TemplateAreas, ()> {
             if strings.is_empty() {
                 return Err(());
             }

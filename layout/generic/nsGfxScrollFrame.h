@@ -687,7 +687,7 @@ public:
                                                   bool aIsRoot);
 
   NS_DECL_QUERYFRAME
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsHTMLScrollFrame)
 
   virtual void BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                 const nsDisplayListSet& aLists) override {
@@ -1071,11 +1071,11 @@ public:
 
 protected:
   nsHTMLScrollFrame(nsStyleContext* aContext, bool aIsRoot)
-    : nsHTMLScrollFrame(aContext, mozilla::LayoutFrameType::Scroll, aIsRoot)
+    : nsHTMLScrollFrame(aContext, kClassID, aIsRoot)
   {}
 
   nsHTMLScrollFrame(nsStyleContext* aContext,
-                    mozilla::LayoutFrameType aType,
+                    nsIFrame::ClassID aID,
                     bool aIsRoot);
   void SetSuppressScrollbarUpdate(bool aSuppress) {
     mHelper.mSupppressScrollbarUpdate = aSuppress;
@@ -1122,7 +1122,7 @@ public:
   typedef mozilla::CSSIntPoint CSSIntPoint;
 
   NS_DECL_QUERYFRAME
-  NS_DECL_FRAMEARENA_HELPERS
+  NS_DECL_FRAMEARENA_HELPERS(nsXULScrollFrame)
 
   friend nsXULScrollFrame* NS_NewXULScrollFrame(nsIPresShell* aPresShell,
                                                 nsStyleContext* aContext,

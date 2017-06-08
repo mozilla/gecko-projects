@@ -3,7 +3,7 @@
     "message": "Speichern Sie Ausschnitte und Bildschirmfotos von Webseiten, die Sie temporär oder dauerhaft speichern können."
   },
   "addonAuthorsList": {
-    "message": "Mozilla <screenshots-feedback@mozilla.org>"
+    "message": "Mozilla <screenshots-feedback@mozilla.com>"
   },
   "contextMenuLabel": {
     "message": "Bildschirmfoto aufnehmen"
@@ -63,6 +63,9 @@
   },
   "selfScreenshotErrorTitle": {
     "message": "Sie können kein Bildschirmfoto einer Firefox-Screenshots-Seite machen!"
+  },
+  "emptySelectionErrorTitle": {
+    "message": "Ihr Auswahlbereich ist zu klein"
   },
   "genericErrorTitle": {
     "message": "Firefox Screenshots funktioniert nicht richtig."

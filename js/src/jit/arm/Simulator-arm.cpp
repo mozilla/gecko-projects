@@ -1558,9 +1558,10 @@ Simulator::handleWasmInterrupt()
     void* pc = (void*)get_pc();
     uint8_t* fp = (uint8_t*)get_register(r11);
 
-    WasmActivation* activation = wasm::MaybeActiveActivation(cx_);
-    const wasm::Code* code = activation->compartment()->wasm.lookupCode(pc);
-    if (!code || !code->segmentTier().containsFunctionPC(pc))
+    WasmActivation* activation = wasm::ActivationIfInnermost(cx_);
+    const wasm::CodeSegment* segment;
+    const wasm::Code* code = activation->compartment()->wasm.lookupCode(pc, &segment);
+    if (!code || !segment->containsFunctionPC(pc))
         return;
 
     // fp can be null during the prologue/epilogue of the entry function.
@@ -1568,7 +1569,7 @@ Simulator::handleWasmInterrupt()
         return;
 
     activation->startInterrupt(pc, fp);
-    set_pc(int32_t(code->segmentTier().interruptCode()));
+    set_pc(int32_t(segment->interruptCode()));
 }
 
 // WebAssembly memories contain an extra region of guard pages (see
@@ -1580,7 +1581,7 @@ Simulator::handleWasmInterrupt()
 bool
 Simulator::handleWasmFault(int32_t addr, unsigned numBytes)
 {
-    WasmActivation* act = wasm::MaybeActiveActivation(cx_);
+    WasmActivation* act = wasm::ActivationIfInnermost(cx_);
     if (!act)
         return false;
 
@@ -1590,15 +1591,18 @@ Simulator::handleWasmFault(int32_t addr, unsigned numBytes)
     if (!instance || !instance->memoryAccessInGuardRegion((uint8_t*)addr, numBytes))
         return false;
 
-    const wasm::MemoryAccess* memoryAccess = instance->code().lookupMemoryAccess(pc);
+    const wasm::CodeSegment* segment;
+    const wasm::MemoryAccess* memoryAccess = instance->code().lookupMemoryAccess(pc, &segment);
     if (!memoryAccess) {
         act->startInterrupt(pc, fp);
-        set_pc(int32_t(instance->codeSegmentTier().outOfBoundsCode()));
+        if (!instance->code().containsCodePC(pc, &segment))
+            MOZ_CRASH("Cannot map PC to trap handler");
+        set_pc(int32_t(segment->outOfBoundsCode()));
         return true;
     }
 
     MOZ_ASSERT(memoryAccess->hasTrapOutOfLineCode());
-    set_pc(int32_t(memoryAccess->trapOutOfLineCode(instance->codeBaseTier())));
+    set_pc(int32_t(memoryAccess->trapOutOfLineCode(segment->base())));
     return true;
 }
 

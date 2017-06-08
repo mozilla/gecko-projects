@@ -305,6 +305,9 @@ include selection/reftest.list
 # sticky positioning
 include position-sticky/reftest.list
 
+# stylesheet cloning
+include stylesheet-cloning/reftest.list
+
 # svg/
 include svg/reftest.list
 
@@ -373,6 +376,9 @@ include usercss/reftest.list
 
 include view-source/reftest.list
 
+# vr
+include ../../dom/vr/test/reftest/reftest.list
+
 # web-animations
 include web-animations/reftest.list
 
@@ -429,3 +435,6 @@ include ../../gfx/layers/apz/test/reftest/reftest.list
 
 # Display list building
 include display-list/reftest.list
+
+# Media
+include ../../dom/media/test/reftest/reftest.list

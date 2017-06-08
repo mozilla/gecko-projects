@@ -112,7 +112,7 @@ impl FontRelativeLength {
 
         let reference_font_size = base_size.resolve(context);
 
-        let root_font_size = context.style().root_font_size;
+        let root_font_size = context.device.root_font_size();
         match *self {
             FontRelativeLength::Em(length) => reference_font_size.scale_by(length),
             FontRelativeLength::Ex(length) => {
@@ -531,8 +531,8 @@ impl NoCalcLength {
 /// This is commonly used for the `<length>` values.
 ///
 /// https://drafts.csswg.org/css-values/#lengths
-#[derive(Clone, Debug, HasViewportPercentage, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Debug, HasViewportPercentage, PartialEq, ToCss)]
 pub enum Length {
     /// The internal length type that cannot parse `calc`
     NoCalc(NoCalcLength),
@@ -546,15 +546,6 @@ impl From<NoCalcLength> for Length {
     #[inline]
     fn from(len: NoCalcLength) -> Self {
         Length::NoCalc(len)
-    }
-}
-
-impl ToCss for Length {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            Length::NoCalc(ref inner) => inner.to_css(dest),
-            Length::Calc(ref calc) => calc.to_css(dest),
-        }
     }
 }
 
@@ -734,6 +725,18 @@ impl Percentage {
     pub fn parse_non_negative(input: &mut Parser) -> Result<Self, ()> {
         Self::parse_with_clamping_mode(input, AllowedNumericType::NonNegative)
     }
+
+    /// 0%
+    #[inline]
+    pub fn zero() -> Self {
+        Percentage(0.)
+    }
+
+    /// 100%
+    #[inline]
+    pub fn hundred() -> Self {
+        Percentage(1.)
+    }
 }
 
 impl Parse for Percentage {
@@ -746,9 +749,9 @@ impl Parse for Percentage {
 impl ComputedValueAsSpecified for Percentage {}
 
 /// A length or a percentage value.
-#[derive(Clone, Debug, HasViewportPercentage, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Debug, HasViewportPercentage, PartialEq, ToCss)]
 pub enum LengthOrPercentage {
     Length(NoCalcLength),
     Percentage(Percentage),
@@ -775,16 +778,6 @@ impl From<Percentage> for LengthOrPercentage {
     #[inline]
     fn from(pc: Percentage) -> Self {
         LengthOrPercentage::Percentage(pc)
-    }
-}
-
-impl ToCss for LengthOrPercentage {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            LengthOrPercentage::Length(ref length) => length.to_css(dest),
-            LengthOrPercentage::Percentage(percentage) => percentage.to_css(dest),
-            LengthOrPercentage::Calc(ref calc) => calc.to_css(dest),
-        }
     }
 }
 
@@ -993,6 +986,11 @@ impl LengthOrPercentageOrAuto {
     pub fn zero() -> Self {
         LengthOrPercentageOrAuto::Length(NoCalcLength::zero())
     }
+
+    /// Returns a value representing `0%`.
+    pub fn zero_percent() -> Self {
+        LengthOrPercentageOrAuto::Percentage(Percentage::zero())
+    }
 }
 
 impl Parse for LengthOrPercentageOrAuto {
@@ -1151,6 +1149,11 @@ impl LengthOrPercentageOrAutoOrContent {
     pub fn zero() -> Self {
         LengthOrPercentageOrAutoOrContent::Length(NoCalcLength::zero())
     }
+
+    /// Returns a value representing `0%`.
+    pub fn zero_percent() -> Self {
+        LengthOrPercentageOrAutoOrContent::Percentage(Percentage::zero())
+    }
 }
 
 impl ToCss for LengthOrPercentageOrAutoOrContent {
@@ -1180,28 +1183,23 @@ impl LengthOrNumber {
 
         Length::parse_non_negative(context, input).map(Either::First)
     }
+
+    /// Returns `0`.
+    #[inline]
+    pub fn zero() -> Self {
+        Either::Second(Number::new(0.))
+    }
 }
 
 /// A value suitable for a `min-width` or `min-height` property.
 /// Unlike `max-width` or `max-height` properties, a MozLength can be
 /// `auto`, and cannot be `none`.
-#[derive(Clone, Debug, HasViewportPercentage, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Debug, HasViewportPercentage, PartialEq, ToCss)]
 pub enum MozLength {
     LengthOrPercentageOrAuto(LengthOrPercentageOrAuto),
     ExtremumLength(ExtremumLength),
-}
-
-impl ToCss for MozLength {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            MozLength::LengthOrPercentageOrAuto(ref lopoa) =>
-                lopoa.to_css(dest),
-            MozLength::ExtremumLength(ref ext) =>
-                ext.to_css(dest),
-        }
-    }
 }
 
 impl Parse for MozLength {
@@ -1222,23 +1220,12 @@ impl MozLength {
 }
 
 /// A value suitable for a `max-width` or `max-height` property.
-#[derive(Clone, Debug, HasViewportPercentage, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Debug, HasViewportPercentage, PartialEq, ToCss)]
 pub enum MaxLength {
     LengthOrPercentageOrNone(LengthOrPercentageOrNone),
     ExtremumLength(ExtremumLength),
-}
-
-impl ToCss for MaxLength {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            MaxLength::LengthOrPercentageOrNone(ref lopon) =>
-                lopon.to_css(dest),
-            MaxLength::ExtremumLength(ref ext) =>
-                ext.to_css(dest),
-        }
-    }
 }
 
 impl Parse for MaxLength {

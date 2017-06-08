@@ -50,15 +50,6 @@ function promisePopupShown(popup) {
   });
 }
 
-XPCOMUtils.defineLazyGetter(this, "popupStylesheets", () => {
-  let stylesheets = ["chrome://browser/content/extension.css"];
-
-  if (AppConstants.platform === "macosx") {
-    stylesheets.push("chrome://browser/content/extension-mac.css");
-  }
-  return stylesheets;
-});
-
 XPCOMUtils.defineLazyGetter(this, "standaloneStylesheets", () => {
   let stylesheets = [];
 
@@ -168,7 +159,7 @@ class BasePopup {
     let sheets = [];
 
     if (this.browserStyle) {
-      sheets.push(...popupStylesheets);
+      sheets.push(...ExtensionParent.extensionStylesheets);
     }
     if (!this.fixedWidth) {
       sheets.push(...standaloneStylesheets);
@@ -234,6 +225,7 @@ class BasePopup {
     browser.setAttribute("webextension-view-type", "popup");
     browser.setAttribute("tooltip", "aHTMLTooltip");
     browser.setAttribute("contextmenu", "contentAreaContextMenu");
+    browser.setAttribute("autocompletepopup", "PopupAutoComplete");
 
     if (this.extension.remote) {
       browser.setAttribute("remote", "true");

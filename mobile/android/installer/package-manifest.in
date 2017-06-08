@@ -126,6 +126,7 @@
 @BINPATH@/components/dom_html.xpt
 @BINPATH@/components/dom_offline.xpt
 @BINPATH@/components/dom_json.xpt
+@BINPATH@/components/dom_payments.xpt
 @BINPATH@/components/dom_power.xpt
 #ifdef MOZ_ANDROID_GCM
 @BINPATH@/components/dom_push.xpt
@@ -172,7 +173,6 @@
 @BINPATH@/components/layout_xul_tree.xpt
 @BINPATH@/components/layout_xul.xpt
 @BINPATH@/components/locale.xpt
-@BINPATH@/components/lwbrk.xpt
 #ifdef MOZ_GECKO_PROFILER
 @BINPATH@/components/memory_profiler.xpt
 #endif
@@ -351,8 +351,6 @@
 @BINPATH@/components/nsInputListAutoComplete.js
 @BINPATH@/components/contentAreaDropListener.manifest
 @BINPATH@/components/contentAreaDropListener.js
-@BINPATH@/components/messageWakeupService.js
-@BINPATH@/components/messageWakeupService.manifest
 @BINPATH@/components/nsINIProcessor.manifest
 @BINPATH@/components/nsINIProcessor.js
 @BINPATH@/components/servicesComponents.manifest
@@ -443,6 +441,7 @@
 ; [Extensions]
 @BINPATH@/components/extensions-toolkit.manifest
 @BINPATH@/components/extensions-mobile.manifest
+@BINPATH@/components/extension-process-script.js
 
 ; Features
 @BINPATH@/features/*

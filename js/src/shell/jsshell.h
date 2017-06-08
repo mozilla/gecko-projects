@@ -171,6 +171,7 @@ using StackChars = Vector<char16_t, 0, SystemAllocPolicy>;
 struct ShellContext
 {
     explicit ShellContext(JSContext* cx);
+
     bool isWorker;
     double timeoutInterval;
     double startTime;
@@ -203,9 +204,7 @@ struct ShellContext
     js::shell::RCFile** errFilePtr;
     js::shell::RCFile** outFilePtr;
 
-    static const uint32_t GeckoProfilingMaxStackSize = 1000;
-    js::ProfileEntry geckoProfilingStack[GeckoProfilingMaxStackSize];
-    mozilla::Atomic<uint32_t> geckoProfilingStackSize;
+    UniquePtr<PseudoStack> geckoProfilingStack;
 
     OffThreadState offThreadState;
 

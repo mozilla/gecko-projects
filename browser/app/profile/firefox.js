@@ -63,9 +63,6 @@ pref("extensions.hotfix.certs.2.sha1Fingerprint", "39:E7:2B:7A:5B:CF:37:78:F9:5D
 // Check AUS for system add-on updates.
 pref("extensions.systemAddon.update.url", "https://aus5.mozilla.org/update/3/SystemAddons/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
 
-// Disable screenshots for now, Shield will enable this.
-pref("extensions.screenshots.system-disabled", true);
-
 // Disable add-ons that are not installed by the user in all scopes by default.
 // See the SCOPE constants in AddonManager.jsm for values to use here.
 pref("extensions.autoDisableScopes", 15);
@@ -75,7 +72,7 @@ pref("extensions.startupScanScopes", 0);
 // This is where the profiler WebExtension API will look for breakpad symbols.
 // NOTE: deliberately http right now since https://symbols.mozilla.org is not supported.
 pref("extensions.geckoProfiler.symbols.url", "http://symbols.mozilla.org/");
-pref("extensions.geckoProfiler.acceptedExtensionIds", "geckoprofiler@mozilla.com");
+pref("extensions.geckoProfiler.acceptedExtensionIds", "geckoprofiler@mozilla.com,quantum-foxfooding@mozilla.com");
 #if defined(XP_LINUX) || defined (XP_MACOSX)
 pref("extensions.geckoProfiler.getSymbolRules", "localBreakpad,remoteBreakpad,nm");
 #else // defined(XP_WIN)
@@ -138,6 +135,10 @@ pref("app.update.enabled", true);
 // Whether or not to use the doorhanger application update UI.
 pref("app.update.doorhanger", true);
 
+// Ids of the links to the "What's new" update documentation
+pref("app.update.link.updateAvailableWhatsNew", "update-available-whats-new");
+pref("app.update.link.updateManualWhatsNew", "update-manual-whats-new");
+
 // How many times we should let downloads fail before prompting the user to
 // download a fresh installer.
 pref("app.update.download.promptMaxAttempts", 2);
@@ -194,11 +195,12 @@ pref("extensions.dss.switchPending", false);    // Non-dynamic switch pending af
 pref("extensions.{972ce4c6-7e08-4474-a285-3208198ce6fd}.name", "chrome://browser/locale/browser.properties");
 pref("extensions.{972ce4c6-7e08-4474-a285-3208198ce6fd}.description", "chrome://browser/locale/browser.properties");
 
+pref("extensions.webextensions.themes.enabled", true);
 pref("extensions.webextensions.themes.icons.buttons", "back,forward,reload,stop,bookmark_star,bookmark_menu,downloads,home,app_menu,cut,copy,paste,new_window,new_private_window,save_page,print,history,full_screen,find,options,addons,developer,synced_tabs,open_file,sidebars,share_page,subscribe,text_encoding,email_link,forget,pocket");
 
 pref("lightweightThemes.update.enabled", true);
 pref("lightweightThemes.getMoreURL", "https://addons.mozilla.org/%LOCALE%/firefox/themes");
-pref("lightweightThemes.recommendedThemes", "[{\"id\":\"recommended-1\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/a-web-browser-renaissance/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.header.jpg\",\"footerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.footer.jpg\",\"textcolor\":\"#000000\",\"accentcolor\":\"#f2d9b1\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.icon.jpg\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.preview.jpg\",\"author\":\"Sean.Martell\",\"version\":\"0\"},{\"id\":\"recommended-2\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/space-fantasy/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.header.jpg\",\"footerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.footer.jpg\",\"textcolor\":\"#ffffff\",\"accentcolor\":\"#d9d9d9\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.icon.jpg\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.preview.jpg\",\"author\":\"fx5800p\",\"version\":\"1.0\"},{\"id\":\"recommended-4\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/pastel-gradient/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.header.png\",\"footerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.footer.png\",\"textcolor\":\"#000000\",\"accentcolor\":\"#000000\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.icon.png\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.preview.png\",\"author\":\"darrinhenein\",\"version\":\"1.0\"}]");
+pref("lightweightThemes.recommendedThemes", "[{\"id\":\"recommended-1\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/a-web-browser-renaissance/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.header.jpg\",\"textcolor\":\"#000000\",\"accentcolor\":\"#f2d9b1\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.icon.jpg\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/1.preview.jpg\",\"author\":\"Sean.Martell\",\"version\":\"0\"},{\"id\":\"recommended-2\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/space-fantasy/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.header.jpg\",\"textcolor\":\"#ffffff\",\"accentcolor\":\"#d9d9d9\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.icon.jpg\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/2.preview.jpg\",\"author\":\"fx5800p\",\"version\":\"1.0\"},{\"id\":\"recommended-4\",\"homepageURL\":\"https://addons.mozilla.org/firefox/addon/pastel-gradient/\",\"headerURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.header.png\",\"textcolor\":\"#000000\",\"accentcolor\":\"#000000\",\"iconURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.icon.png\",\"previewURL\":\"resource:///chrome/browser/content/browser/defaultthemes/4.preview.png\",\"author\":\"darrinhenein\",\"version\":\"1.0\"}]");
 
 #if defined(MOZ_WIDEVINE_EME)
 pref("browser.eme.ui.enabled", true);
@@ -231,15 +233,15 @@ pref("general.autoScroll", false);
 pref("general.autoScroll", true);
 #endif
 
+// UI density of the browser chrome. This mostly affects toolbarbutton
+// and urlbar spacing. The possible values are 0=normal, 1=compact, 2=touch.
+pref("browser.uidensity", 0);
+
 // At startup, check if we're the default browser and prompt user if not.
 pref("browser.shell.checkDefaultBrowser", true);
 pref("browser.shell.shortcutFavicons",true);
 pref("browser.shell.mostRecentDateSetAsDefault", "");
-#ifdef RELEASE_OR_BETA
-pref("browser.shell.skipDefaultBrowserCheckOnFirstRun", false);
-#else
 pref("browser.shell.skipDefaultBrowserCheckOnFirstRun", true);
-#endif
 pref("browser.shell.didSkipDefaultBrowserCheckOnFirstRun", false);
 pref("browser.shell.defaultBrowserCheckCount", 0);
 pref("browser.defaultbrowser.notificationbar", false);
@@ -318,7 +320,7 @@ pref("browser.urlbar.match.url", "@");
 pref("browser.urlbar.suggest.history",              true);
 pref("browser.urlbar.suggest.bookmark",             true);
 pref("browser.urlbar.suggest.openpage",             true);
-pref("browser.urlbar.suggest.searches",             false);
+pref("browser.urlbar.suggest.searches",             true);
 pref("browser.urlbar.userMadeSearchSuggestionsChoice", false);
 // The suggestion opt-in notification will be shown on 4 different days.
 pref("browser.urlbar.daysBeforeHidingSuggestionsPrompt", 4);
@@ -337,11 +339,7 @@ pref("browser.urlbar.suggest.history.onlyTyped",    false);
 pref("browser.urlbar.formatting.enabled", true);
 pref("browser.urlbar.trimURLs", true);
 
-#if defined(NIGHTLY_BUILD)
 pref("browser.urlbar.oneOffSearches", true);
-#else
-pref("browser.urlbar.oneOffSearches", false);
-#endif
 
 // If changed to true, copying the entire URL from the location bar will put the
 // human readable (percent-decoded) URL on the clipboard.
@@ -405,6 +403,12 @@ pref("browser.search.context.loadInBackground", false);
 
 // comma seperated list of of engines to hide in the search panel.
 pref("browser.search.hiddenOneOffs", "");
+
+// Mirrors whether the search-container widget is in the navigation toolbar. The
+// default value of this preference must match the DEFAULT_AREA_PLACEMENTS of
+// UITelemetry.jsm, the navbarPlacements of CustomizableUI.jsm, and the
+// position and attributes of the search-container element in browser.xul.
+pref("browser.search.widget.inNavBar", true);
 
 #ifndef RELEASE_OR_BETA
 pref("browser.search.reset.enabled", true);
@@ -551,10 +555,6 @@ pref("privacy.sanitize.migrateFx3Prefs",    false);
 
 pref("privacy.panicButton.enabled",         true);
 
-pref("privacy.firstparty.isolate",                        false);
-pref("privacy.firstparty.isolate.restrict_opener_access", true);
-pref("privacy.resistFingerprinting", false);
-
 // Time until temporary permissions expire, in ms
 pref("privacy.temporary_permission_expire_time_ms",  3600000);
 
@@ -670,6 +670,12 @@ pref("accessibility.loadedInLastSession", false);
 pref("plugins.click_to_play", true);
 pref("plugins.testmode", false);
 
+// Should plugins that are hidden show the infobar UI?
+pref("plugins.show_infobar", true);
+
+// Should dismissing the hidden plugin infobar suppress it permanently?
+pref("plugins.remember_infobar_dismissal", false);
+
 pref("plugin.default.state", 1);
 
 // Plugins bundled in XPIs are enabled by default.
@@ -701,6 +707,13 @@ pref("browser.preferences.instantApply", true);
 
 // Toggling Search bar on and off in about:preferences
 pref("browser.preferences.search", false);
+
+// Use the new in-content about:preferences in Nightly only for now
+#if defined(NIGHTLY_BUILD)
+pref("browser.preferences.useOldOrganization", false);
+#else
+pref("browser.preferences.useOldOrganization", true);
+#endif
 
 // Once the Storage Management is completed.
 // (The Storage Management-related prefs are browser.storageManager.* )
@@ -1037,7 +1050,7 @@ pref("security.sandbox.gpu.level", 0);
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
 // This pref is discussed in bug 1083344, the naming is inspired from its
 // Windows counterpart, but on Mac it's an integer which means:
-// 0 -> "no sandbox"
+// 0 -> "no sandbox" (nightly only)
 // 1 -> "preliminary content sandboxing enabled: write access to
 //       home directory is prevented"
 // 2 -> "preliminary content sandboxing enabled with profile protection:
@@ -1280,6 +1293,9 @@ pref("pdfjs.previousHandler.alwaysAskBeforeHandling", false);
 // (This is intentionally on the high side; see bug 746055.)
 pref("image.mem.max_decoded_image_kb", 256000);
 
+// Is the sidebar positioned ahead of the content browser
+pref("sidebar.position_start", true);
+
 // Activation from inside of share panel is possible if activationPanelEnabled
 // is true. Pref'd off for release while usage testing is done through beta.
 pref("social.share.activationPanelEnabled", true);
@@ -1463,6 +1479,8 @@ pref("browser.translation.engine", "bing");
 pref("toolkit.telemetry.archive.enabled", true);
 // Enables sending the shutdown ping when Firefox shuts down.
 pref("toolkit.telemetry.shutdownPingSender.enabled", true);
+// Enables sending the 'new-profile' ping on new profiles.
+pref("toolkit.telemetry.newProfilePing.enabled", true);
 
 // Telemetry experiments settings.
 pref("experiments.enabled", true);
@@ -1593,6 +1611,7 @@ pref("browser.migrate.automigrate.enabled", false);
 // hidden the 4th day, so it will actually be shown on 3 different days.
 pref("browser.migrate.automigrate.daysToOfferUndo", 4);
 pref("browser.migrate.automigrate.ui.enabled", true);
+pref("browser.migrate.automigrate.inpage.ui.enabled", false);
 
 // See comments in bug 1340115 on how we got to these numbers.
 pref("browser.migrate.chrome.history.limit", 2000);
@@ -1609,15 +1628,12 @@ pref("signon.schemeUpgrades", true);
 // in toolkit.
 //
 // This feature is only enabled on Nightly for Linux until bug 1306295 is fixed.
-// For non-Linux, this feature is only enabled up to early Beta.
 #ifdef UNIX_BUT_NOT_MAC
 #if defined(NIGHTLY_BUILD)
 pref("print.use_simplify_page", true);
 #endif
 #else
-#if defined(EARLY_BETA_OR_EARLIER)
 pref("print.use_simplify_page", true);
-#endif
 #endif
 
 // Space separated list of URLS that are allowed to send objects (instead of
@@ -1647,6 +1663,7 @@ pref("extensions.formautofill.experimental", true);
 pref("extensions.formautofill.experimental", false);
 #endif
 pref("extensions.formautofill.addresses.enabled", true);
+pref("extensions.formautofill.heuristics.enabled", false);
 pref("extensions.formautofill.loglevel", "Warn");
 
 // Whether or not to restore a session with lazy-browser tabs.
@@ -1659,3 +1676,6 @@ pref("urlclassifier.phishTable", "goog-phish-shavar,goog-phish-proto,test-phish-
 #endif
 
 pref("browser.suppress_first_window_animation", true);
+
+// Preferences for Photon onboarding system extension
+pref("browser.onboarding.enabled", true);

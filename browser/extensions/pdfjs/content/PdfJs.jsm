@@ -67,10 +67,10 @@ function getIntPref(aPref, aDefaultValue) {
 }
 
 function isDefaultHandler() {
- if (Services.appinfo.processType === Services.appinfo.PROCESS_TYPE_CONTENT) {
-   return PdfjsContentUtils.isDefaultHandlerApp();
- }
- return PdfjsChromeUtils.isDefaultHandlerApp();
+  if (Services.appinfo.processType !== Services.appinfo.PROCESS_TYPE_DEFAULT) {
+    throw new Error("isDefaultHandler should only get called in the parent process.");
+  }
+  return PdfjsChromeUtils.isDefaultHandlerApp();
 }
 
 function initializeDefaultPreferences() {
@@ -80,6 +80,7 @@ function initializeDefaultPreferences() {
   "defaultZoomValue": "",
   "sidebarViewOnLoad": 0,
   "enableHandToolOnLoad": false,
+  "cursorToolOnLoad": 0,
   "enableWebGL": false,
   "pdfBugEnabled": false,
   "disableRange": false,
@@ -143,7 +144,7 @@ Factory.prototype = {
       registrar.unregisterFactory(this._classID2, this._factory);
     }
     this._factory = null;
-  }
+  },
 };
 
 var PdfJs = {
@@ -268,13 +269,14 @@ var PdfJs = {
 
   // nsIObserver
   observe: function observe(aSubject, aTopic, aData) {
-    this.updateRegistration();
-    if (Services.appinfo.processType ===
-        Services.appinfo.PROCESS_TYPE_DEFAULT) {
-      let jsm = "resource://pdf.js/PdfjsChromeUtils.jsm";
-      let PdfjsChromeUtils = Components.utils.import(jsm, {}).PdfjsChromeUtils;
-      PdfjsChromeUtils.notifyChildOfSettingsChange();
+    if (Services.appinfo.processType !== Services.appinfo.PROCESS_TYPE_DEFAULT) {
+      throw new Error("Only the parent process should be observing PDF handler changes.");
     }
+
+    this.updateRegistration();
+    let jsm = "resource://pdf.js/PdfjsChromeUtils.jsm";
+    let PdfjsChromeUtils = Components.utils.import(jsm, {}).PdfjsChromeUtils;
+    PdfjsChromeUtils.notifyChildOfSettingsChange(this.enabled);
   },
 
   /**
@@ -342,6 +344,6 @@ var PdfJs = {
     delete this._pdfStreamConverterFactory;
 
     this._registered = false;
-  }
+  },
 };
 

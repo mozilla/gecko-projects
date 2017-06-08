@@ -1329,7 +1329,7 @@ NS_DECLARE_FRAME_PROPERTY_DELETABLE(TextNodeCorrespondenceProperty,
 static uint32_t
 GetUndisplayedCharactersBeforeFrame(nsTextFrame* aFrame)
 {
-  void* value = aFrame->Properties().Get(TextNodeCorrespondenceProperty());
+  void* value = aFrame->GetProperty(TextNodeCorrespondenceProperty());
   TextNodeCorrespondence* correspondence =
     static_cast<TextNodeCorrespondence*>(value);
   if (!correspondence) {
@@ -1518,8 +1518,8 @@ TextNodeCorrespondenceRecorder::TraverseAndRecord(nsIFrame* aFrame)
   }
 
   // Set the frame property.
-  frame->Properties().Set(TextNodeCorrespondenceProperty(),
-                          new TextNodeCorrespondence(undisplayed));
+  frame->SetProperty(TextNodeCorrespondenceProperty(),
+                     new TextNodeCorrespondence(undisplayed));
 
   // Remember how far into the current nsTextNode we are.
   mNodeCharIndex = frame->GetContentEnd();
@@ -3394,7 +3394,7 @@ SVGTextFrame::HandleAttributeChangeInDescendant(Element* aElement,
       // Blow away our reference, if any
       nsIFrame* childElementFrame = aElement->GetPrimaryFrame();
       if (childElementFrame) {
-        childElementFrame->Properties().Delete(
+        childElementFrame->DeleteProperty(
           nsSVGEffects::HrefAsTextPathProperty());
         NotifyGlyphMetricsChange();
       }
@@ -4820,7 +4820,7 @@ SVGPathElement*
 SVGTextFrame::GetTextPathPathElement(nsIFrame* aTextPathFrame)
 {
   nsSVGTextPathProperty *property =
-    aTextPathFrame->Properties().Get(nsSVGEffects::HrefAsTextPathProperty());
+    aTextPathFrame->GetProperty(nsSVGEffects::HrefAsTextPathProperty());
 
   if (!property) {
     nsIContent* content = aTextPathFrame->GetContent();

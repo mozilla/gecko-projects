@@ -62,7 +62,8 @@
 #include "nsIXULRuntime.h"
 #include "nsICacheInfoChannel.h"
 #include "nsIDOMWindowUtils.h"
-#include "nsIThrottlingService.h"
+#include "nsHttpChannel.h"
+#include "nsRedirectHistoryEntry.h"
 
 #include <algorithm>
 #include "HttpBaseChannel.h"
@@ -1066,7 +1067,7 @@ public:
   InterceptFailedOnStop(nsIStreamListener *arg, HttpBaseChannel *chan)
   : mNext(arg)
   , mChannel(chan) {}
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   NS_IMETHOD OnStartRequest(nsIRequest *aRequest, nsISupports *aContext) override
   {
@@ -3005,13 +3006,6 @@ HttpBaseChannel::ReleaseListeners()
 {
   MOZ_ASSERT(NS_IsMainThread(), "Should only be called on the main thread.");
 
-  if (mClassOfService & nsIClassOfService::Throttleable) {
-    nsIThrottlingService *throttler = gHttpHandler->GetThrottlingService();
-    if (throttler) {
-      throttler->RemoveChannel(this);
-    }
-  }
-
   mListener = nullptr;
   mListenerContext = nullptr;
   mCallbacks = nullptr;
@@ -3152,6 +3146,11 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
   newChannel->SetNotificationCallbacks(mCallbacks);
   newChannel->SetLoadFlags(newLoadFlags);
 
+  nsCOMPtr<nsIClassOfService> cos(do_QueryInterface(newChannel));
+  if (cos) {
+    cos->SetClassFlags(mClassOfService);
+  }
+
   // Try to preserve the privacy bit if it has been overridden
   if (mPrivateBrowsingOverriden) {
     nsCOMPtr<nsIPrivateBrowsingChannel> newPBChannel =
@@ -3203,7 +3202,12 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
     bool isInternalRedirect =
       (redirectFlags & (nsIChannelEventSink::REDIRECT_INTERNAL |
                         nsIChannelEventSink::REDIRECT_STS_UPGRADE));
-    newLoadInfo->AppendRedirectedPrincipal(GetURIPrincipal(), isInternalRedirect);
+    nsCString remoteAddress;
+    Unused << GetRemoteAddress(remoteAddress);
+    nsCOMPtr<nsIRedirectHistoryEntry> entry =
+      new nsRedirectHistoryEntry(GetURIPrincipal(), mReferrer, remoteAddress);
+
+    newLoadInfo->AppendRedirectHistoryEntry(entry, isInternalRedirect);
     newChannel->SetLoadInfo(newLoadInfo);
   }
   else {

@@ -221,11 +221,12 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["network.proxy.ssl", {what: RECORD_PREF_STATE}],
   ["pdfjs.disabled", {what: RECORD_PREF_VALUE}],
   ["places.history.enabled", {what: RECORD_PREF_VALUE}],
+  ["plugins.remember_infobar_dismissal", {what: RECORD_PREF_VALUE}],
+  ["plugins.show_infobar", {what: RECORD_PREF_VALUE}],
   ["privacy.trackingprotection.enabled", {what: RECORD_PREF_VALUE}],
   ["privacy.donottrackheader.enabled", {what: RECORD_PREF_VALUE}],
   ["security.mixed_content.block_active_content", {what: RECORD_PREF_VALUE}],
   ["security.mixed_content.block_display_content", {what: RECORD_PREF_VALUE}],
-  ["security.sandbox.content.level", {what: RECORD_PREF_VALUE}],
   ["xpinstall.signatures.required", {what: RECORD_PREF_VALUE}],
 ]);
 
@@ -251,6 +252,7 @@ const EXPERIMENTS_CHANGED_TOPIC = "experiments-changed";
 const GFX_FEATURES_READY_TOPIC = "gfx-features-ready";
 const SEARCH_ENGINE_MODIFIED_TOPIC = "browser-search-engine-modified";
 const SEARCH_SERVICE_TOPIC = "browser-search-service";
+const SESSIONSTORE_WINDOWS_RESTORED_TOPIC = "sessionstore-windows-restored";
 
 /**
  * Enforces the parameter to a boolean value.
@@ -777,6 +779,9 @@ function EnvironmentCache() {
 
   this._shutdown = false;
   this._delayedInitFinished = false;
+  // Don't allow querying the search service too early to prevent
+  // impacting the startup performance.
+  this._canQuerySearch = false;
 
   // A map of listeners that will be called on environment changes.
   this._changeListeners = new Map();
@@ -792,8 +797,6 @@ function EnvironmentCache() {
   };
 
   this._updateSettings();
-  // Fill in the default search engine, if the search provider is already initialized.
-  this._updateSearchEngine();
   this._addObservers();
 
   // Build the remaining asynchronous parts of the environment. Don't register change listeners
@@ -1008,6 +1011,7 @@ EnvironmentCache.prototype = {
 
   _addObservers() {
     // Watch the search engine change and service topics.
+    Services.obs.addObserver(this, SESSIONSTORE_WINDOWS_RESTORED_TOPIC);
     Services.obs.addObserver(this, COMPOSITOR_CREATED_TOPIC);
     Services.obs.addObserver(this, COMPOSITOR_PROCESS_ABORTED_TOPIC);
     Services.obs.addObserver(this, DISTRIBUTION_CUSTOMIZATION_COMPLETE_TOPIC);
@@ -1017,6 +1021,7 @@ EnvironmentCache.prototype = {
   },
 
   _removeObservers() {
+    Services.obs.removeObserver(this, SESSIONSTORE_WINDOWS_RESTORED_TOPIC);
     Services.obs.removeObserver(this, COMPOSITOR_CREATED_TOPIC);
     Services.obs.removeObserver(this, COMPOSITOR_PROCESS_ABORTED_TOPIC);
     try {
@@ -1042,6 +1047,7 @@ EnvironmentCache.prototype = {
           return;
         }
         // Now that the search engine init is complete, record the default search choice.
+        this._canQuerySearch = true;
         this._updateSearchEngine();
         break;
       case GFX_FEATURES_READY_TOPIC:
@@ -1061,6 +1067,11 @@ EnvironmentCache.prototype = {
         // partner prefs again when they are ready.
         this._updatePartner();
         Services.obs.removeObserver(this, aTopic);
+        break;
+      case SESSIONSTORE_WINDOWS_RESTORED_TOPIC:
+        // Make sure to initialize the search service once we've done restoring
+        // the windows, so that we don't risk loosing search data.
+        Services.search.init();
         break;
     }
   },
@@ -1094,6 +1105,11 @@ EnvironmentCache.prototype = {
    * Update the default search engine value.
    */
   _updateSearchEngine() {
+    if (!this._canQuerySearch) {
+      this._log.trace("_updateSearchEngine - ignoring early call");
+      return;
+    }
+
     if (!Services.search) {
       // Just ignore cases where the search service is not implemented.
       return;
@@ -1250,6 +1266,7 @@ EnvironmentCache.prototype = {
         autoDownload: Preferences.get(PREF_UPDATE_AUTODOWNLOAD, true),
       },
       userPrefs: this._getPrefData(),
+      sandbox: this._getSandboxData(),
     };
 
     this._currentEnvironment.settings.addonCompatibilityCheckEnabled =
@@ -1261,6 +1278,19 @@ EnvironmentCache.prototype = {
     }
 
     this._updateSearchEngine();
+  },
+
+  _getSandboxData() {
+    let effectiveContentProcessLevel = null;
+    try {
+      let sandboxSettings = Cc["@mozilla.org/sandbox/sandbox-settings;1"].
+                            getService(Ci.mozISandboxSettings);
+      effectiveContentProcessLevel =
+        sandboxSettings.effectiveContentSandboxLevel;
+    } catch (e) {}
+    return {
+      effectiveContentProcessLevel,
+    };
   },
 
   /**

@@ -30,24 +30,14 @@ to mochitest command.
 ## Failures
 
 * Media query support:
-  * test_media_queries.html [38]
-  * test_media_queries_dynamic.html [6]
-  * test_media_queries_dynamic_xbl.html [2]
-  * test_webkit_device_pixel_ratio.html: -webkit-device-pixel-ratio [3]
-  * browser_bug453896.js [8]
+  * "layout.css.prefixes.device-pixel-ratio-webkit" support bug 1366956
+    * test_media_queries.html `-device-pixel-ratio` [27]
+    * test_webkit_device_pixel_ratio.html [3]
+  * test_media_queries_dynamic.html `restyle`: bug 1357461 [4]
+  * test_media_queries_dynamic_xbl.html: xbl support bug 1290276 [2]
 * Animation support:
-  * test_animations.html [1]
-  * test_animations_dynamic_changes.html [1]
-  * test_bug716226.html [3]
-  * OMTA
-    * test_animations_omta.html: bug 1361938, bug 1361663 [85]
   * SMIL Animation
     * test_restyles_in_smil_animation.html [2]
-* CSSOM support:
-  * \@import bug 1352968
-    * test_bug221428.html [1]
-    * test_css_eof_handling.html [1]
-* test_bug397427.html: @import issue bug 1331291 and CSSOM support of @import [1]
 * console support bug 1352669
   * test_bug413958.html `monitorConsole` [3]
   * test_parser_diagnostics_unprintables.html [550]
@@ -56,60 +46,42 @@ to mochitest command.
   * test_transitions_and_reframes.html `pseudo-element`: bug 1366422 [4]
   * Events:
     * test_animations_event_order.html [2]
-* test_computed_style.html `gradient`: -webkit-prefixed gradient values [13]
-* test_bug829816.html: counter-{reset,increment} serialization difference bug 1363968 [8]
-* dynamic change on \@counter-style rule bug 1363590
-  * test_counter_style.html asserts [11]
-  * test_counter_descriptor_storage.html asserts [110]
-* symbols() function and string value on list-style-type bug 1363596
-  * test_value_storage.html `symbols(` [30]
-  * ... `list-style-type` [8]
-  * ... `'list-style'` [18]
 * Unimplemented \@font-face descriptors:
   * test_font_face_parser.html `font-language-override`: bug 1355364 [8]
-* test_font_face_parser.html `font-weight`: keyword values should be preserved in \@font-face [4]
+* keyword values should be preserved in \@font-face bug 1355368
+  * test_font_face_parser.html `font-weight` [4]
+  * test_font_loading_api.html `weight` [1]
 * @namespace support:
   * test_namespace_rule.html: bug 1355715 [6]
-* test_dont_use_document_colors.html: support of disabling document color bug 1355716 [21]
 * test_font_feature_values_parsing.html: \@font-feature-values support bug 1355721 [107]
 * Grid support bug 1341802
   * test_grid_computed_values.html [4]
   * test_grid_container_shorthands.html [65]
   * test_grid_item_shorthands.html [23]
   * test_grid_shorthand_serialization.html [28]
-  * test_inherit_computation.html `grid` [4]
-  * test_inherit_storage.html `'grid` [13]
-  * ... `"grid` [2]
-  * test_initial_computation.html `grid` [8]
-  * test_initial_storage.html `grid` [30]
-  * test_property_syntax_errors.html `grid`: actually there are issues with this [28]
-  * test_value_storage.html `'grid` [577]
-  * test_exposed_prop_accessors.html `grid` [2]
-* Unimplemented prefixed properties:
-  * test_variables.html `var(--var6)`: -x-system-font [1]
+  * test_inherit_computation.html `grid` [2]
+  * test_initial_computation.html `grid` [4]
+  * test_property_syntax_errors.html `grid`: actually there are issues with this [8]
+  * test_value_storage.html `'grid` [195]
 * Unimplemented CSS properties:
-  * font-variant-{alternates,east-asian,ligatures,numeric} properties servo/servo#15957
+  * font-variant shorthand bug 1356134
+    * test_value_storage.html `'font-variant'` [65]
+  * font-variant-alternates property bug 1355721
     * test_property_syntax_errors.html `font-variant-alternates` [2]
-    * test_value_storage.html `font-variant` [167]
+    * test_value_storage.html `font-variant-alternates` [22]
     * test_specified_value_serialization.html `bug-721136` [1]
 * Unsupported prefixed values
   * moz-prefixed gradient functions bug 1337655
     * test_value_storage.html `-moz-linear-gradient` [322]
     * ... `-moz-radial-gradient` [309]
     * ... `-moz-repeating-` [298]
-  * serialization of prefixed gradient functions bug 1358710
-    * test_specified_value_serialization.html `-webkit-radial-gradient` [1]
   * -webkit-{flex,inline-flex} for display servo/servo#15400
     * test_webkit_flex_display.html [4]
 * Unsupported values
   * SVG-in-OpenType values not supported servo/servo#15211 bug 1355412
     * test_value_storage.html `context-` [7]
-    * test_bug798843_pref.html [7]
+    * test_bug798843_pref.html [3]
 * Incorrect parsing
-  * -moz-alt-content parsing is wrong: servo/servo#15726
-    * test_property_syntax_errors.html `-moz-alt-content` [4]
-  * mask shorthand servo/servo#15772
-    * test_property_syntax_errors.html `mask'` [76]
   * different parsing bug 1364260
     * test_supports_rules.html [6]
     * test_condition_text.html [1]
@@ -119,23 +91,21 @@ to mochitest command.
   * place-{content,items,self} shorthands bug 1363971
     * test_align_shorthand_serialization.html [6]
   * system font serialization with subprop specified bug 1364286
-    * test_system_font_serialization.html [5]
+    * test_system_font_serialization.html [3]
   * serialize subprops to -moz-use-system-font when using system font bug 1364289
-    * test_value_storage.html `'font'` [144]
+    * test_value_storage.html `'font'` [224]
+  * different serialization for gradient functions in computed value bug 1367274
+    * test_computed_style.html `gradient` [13]
 * Unsupported pseudo-elements or anon boxes
   * :-moz-tree bits bug 1348488
     * test_selectors.html `:-moz-tree` [10]
-  * :-moz-placeholder bug 1348490
-    * test_selectors.html `:-moz-placeholder` [1]
 * Unsupported pseudo-classes
-  * :-moz-locale-dir
+  * :-moz-locale-dir is internal bug 1367310
     * test_selectors.html `:-moz-locale-dir` [15]
-  * :-moz-lwtheme-*
+  * :-moz-lwtheme-* bug 1367312
     * test_selectors.html `:-moz-lwtheme` [3]
   * :-moz-window-inactive bug 1348489
     * test_selectors.html `:-moz-window-inactive` [2]
-  * :dir
-    * test_selectors.html `:dir` [11]
 * Quirks mode support
   * test_hover_quirk.html: hover quirks bug 1355724 [6]
 * Unit should be preserved after parsing servo/servo#15346
@@ -143,31 +113,31 @@ to mochitest command.
 * getComputedStyle style doesn't contain custom properties bug 1336891
   * test_variable_serialization_computed.html [35]
   * test_variables.html `custom property name` [2]
-* test_css_supports.html: issues around @supports syntax servo/servo#15482 [8]
+* test_css_supports.html: issues around @supports syntax servo/servo#15482 [2]
 * test_author_specified_style.html: support serializing color as author specified bug 1348165 [27]
 * browser_newtab_share_rule_processors.js: agent style sheet sharing [1]
-* test_default_computed_style.html: getDefaultComputedStyle bug 1366157 [1]
+* :visited support (bug 1328509)
+  * test_visited_reftests.html `selector-descendant-2.xhtml` [2]
+  * ... `selector-child-2.xhtml` [2]
+  * ... `color-on-bullets-1.html` [2]
+  * ... `inherit-keyword-1.xhtml` [2]
+  * ... `mathml-links.html` [2]
+  * ... `caret-color-on-visited-1.html` [2]
 
 ## Assertions
 
 ## Need Gecko change
 
 * Servo is correct but Gecko is wrong
-  * flex-basis should be 0px when omitted in flex shorthand bug 1331530
-    * test_flexbox_flex_shorthand.html `flex-basis` [10]
   * Gecko rejects calc() in -webkit-gradient bug 1363349
     * test_property_syntax_errors.html `-webkit-gradient` [20]
-* test_property_syntax_errors.html `linear-gradient(0,`: unitless zero as degree [10]
-
-## Spec Unclear
-
-* test_property_syntax_errors.html `'background'`: whether background shorthand should accept "text" [200]
+* test_specified_value_serialization.html `-webkit-radial-gradient`: bug 1367299 [1]
+* test_variables.html `var(--var6)`: irrelevant test for stylo bug 1367306 [1]
 
 ## Unknown / Unsure
 
 * test_selectors_on_anonymous_content.html: xbl and :nth-child [1]
 * test_parse_rule.html `rgb(0, 128, 0)`: color properties not getting computed [5]
-* test_selectors.html `:nth-child`: &lt;an+b&gt; parsing difference bug 1364009 [14]
 
 ## Ignore
 

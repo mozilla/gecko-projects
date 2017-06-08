@@ -3,7 +3,7 @@
     "message": "Zajemajte posnetke zaslona s spleta ter jih shranite začasno ali trajno."
   },
   "addonAuthorsList": {
-    "message": "Mozilla <screenshots-feedback@mozilla.org>"
+    "message": "Mozilla <screenshots-feedback@mozilla.com>"
   },
   "contextMenuLabel": {
     "message": "Zajemi posnetek zaslona"
@@ -63,6 +63,9 @@
   },
   "selfScreenshotErrorTitle": {
     "message": "Posnetka strani Firefox Screenshots ni mogoče zajeti!"
+  },
+  "emptySelectionErrorTitle": {
+    "message": "Vaš izbor je premajhen"
   },
   "genericErrorTitle": {
     "message": "Uf! Firefox Screenshots se je pokvaril."

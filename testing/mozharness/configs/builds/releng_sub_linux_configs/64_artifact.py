@@ -8,7 +8,6 @@ config = {
         'checkout-sources',
         'setup-mock',
         'build',
-        # 'generate-build-stats',
         'sendchange',
     ],
     "buildbot_json_path": "buildprops.json",
@@ -33,7 +32,7 @@ config = {
     'enable_count_ctors': True,
     # allows triggering of dependent jobs when --artifact try syntax is detected on buildbot
     'enable_unittest_sendchange': True,
-    'enable_talos_sendchange': True,
+    'enable_talos_sendchange': False,
     'perfherder_extra_options': ['artifact'],
     #########################################################################
 

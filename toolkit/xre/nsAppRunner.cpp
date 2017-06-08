@@ -110,8 +110,11 @@
 #endif
 #endif
 
-#if (defined(XP_WIN) || defined(XP_MACOSX)) && defined(MOZ_CONTENT_SANDBOX)
+#if defined(MOZ_CONTENT_SANDBOX)
+#include "mozilla/SandboxSettings.h"
+#if (defined(XP_WIN) || defined(XP_MACOSX))
 #include "nsIUUIDGenerator.h"
+#endif
 #endif
 
 #ifdef ACCESSIBILITY
@@ -3362,9 +3365,7 @@ XREMain::XRE_mainInit(bool* aExitFlag)
 #if defined(MOZ_SANDBOX) && defined(XP_WIN)
   if (mAppData->sandboxBrokerServices) {
     SandboxBroker::Initialize(mAppData->sandboxBrokerServices);
-    Telemetry::Accumulate(Telemetry::SANDBOX_BROKER_INITIALIZED, true);
   } else {
-    Telemetry::Accumulate(Telemetry::SANDBOX_BROKER_INITIALIZED, false);
 #if defined(MOZ_CONTENT_SANDBOX)
     // If we're sandboxing content and we fail to initialize, then crashing here
     // seems like the sensible option.
@@ -4193,7 +4194,7 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
 void AddSandboxAnnotations()
 {
   // Include the sandbox content level, regardless of platform
-  int level = Preferences::GetInt("security.sandbox.content.level");
+  int level = GetEffectiveContentSandboxLevel();
 
   nsAutoCString levelString;
   levelString.AppendInt(level);
@@ -4441,6 +4442,10 @@ XREMain::XRE_mainRun()
     // We intentionally leak the string here since it is required by PR_SetEnv.
     PR_SetEnv(saved.release());
   }
+
+  // Call SandboxBroker to cache directories needed for policy rules, this must
+  // be called after mDirProvider.DoStartup as it needs the profile dir.
+  SandboxBroker::CacheRulesDirectories();
 #endif
 
   SaveStateForAppInitiatedRestart();

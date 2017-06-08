@@ -37,7 +37,7 @@
 #include "mozilla/Unused.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "nsIIdlePeriod.h"
-#include "nsIIncrementalRunnable.h"
+#include "nsIIdleRunnable.h"
 #include "nsThreadSyncDispatch.h"
 #include "LeakRefPtr.h"
 #include "GeckoProfiler.h"
@@ -644,6 +644,7 @@ nsThread::nsThread(MainThreadFlag aMainThread, uint32_t aStackSize)
   , mIsMainThread(aMainThread)
   , mLastUnlabeledRunnable(TimeStamp::Now())
   , mCanInvokeJS(false)
+  , mHasPendingEventsPromisedIdleEvent(false)
 {
 }
 
@@ -1037,6 +1038,43 @@ nsThread::Shutdown()
   return NS_OK;
 }
 
+TimeStamp
+nsThread::GetIdleDeadline()
+{
+  TimeStamp idleDeadline;
+  {
+    // Releasing the lock temporarily since getting the idle period
+    // might need to lock the timer thread. Unlocking here might make
+    // us receive an event on the main queue, but we've committed to
+    // run an idle event anyhow.
+    MutexAutoUnlock unlock(mLock);
+    mIdlePeriod->GetIdlePeriodHint(&idleDeadline);
+  }
+
+  // If HasPendingEvents() has been called and it has returned true because of
+  // pending idle events, there is a risk that we may decide here that we aren't
+  // idle and return null, in which case HasPendingEvents() has effectively
+  // lied.  Since we can't go back and fix the past, we have to adjust what we
+  // do here and forcefully pick the idle queue task here.  Note that this means
+  // that we are choosing to run a task from the idle queue when we would
+  // normally decide that we aren't in an idle period, but this can only happen
+  // if we fall out of the idle period in between the call to HasPendingEvents()
+  // and here, which should hopefully be quite rare.  We are effectively
+  // choosing to prioritize the sanity of our API semantics over the optimal
+  // scheduling.
+  if (!mHasPendingEventsPromisedIdleEvent &&
+      (!idleDeadline || idleDeadline < TimeStamp::Now())) {
+    return TimeStamp();
+  }
+  if (mHasPendingEventsPromisedIdleEvent && !idleDeadline) {
+    // If HasPendingEvents() has been called and it has returned true, but we're no
+    // longer in the idle period, we must return a valid timestamp to pretend that
+    // we are still in the idle period.
+    return TimeStamp::Now();
+  }
+  return idleDeadline;
+}
+
 NS_IMETHODIMP
 nsThread::HasPendingEvents(bool* aResult)
 {
@@ -1046,7 +1084,21 @@ nsThread::HasPendingEvents(bool* aResult)
 
   {
     MutexAutoLock lock(mLock);
-    *aResult = mEvents->HasPendingEvent(lock);
+    mHasPendingEventsPromisedIdleEvent = false;
+    bool hasPendingEvent = mEvents->HasPendingEvent(lock);
+    bool hasPendingIdleEvent = false;
+    if (!hasPendingEvent) {
+      // Note that GetIdleDeadline() checks mHasPendingEventsPromisedIdleEvent,
+      // but that's OK since we set it to false in the beginning of this method!
+      TimeStamp idleDeadline = GetIdleDeadline();
+
+      // Only examine the idle queue if we are in an idle period.
+      if (idleDeadline) {
+        hasPendingIdleEvent = mIdleEvents.HasPendingEvent(lock);
+        mHasPendingEventsPromisedIdleEvent = hasPendingIdleEvent;
+      }
+    }
+    *aResult = hasPendingEvent || hasPendingIdleEvent;
   }
   return NS_OK;
 }
@@ -1086,6 +1138,13 @@ nsThread::IdleDispatch(already_AddRefed<nsIRunnable> aEvent)
 
   mIdleEvents.PutEvent(event.take(), lock);
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsThread::IdleDispatchFromScript(nsIRunnable* aEvent)
+{
+  nsCOMPtr<nsIRunnable> event(aEvent);
+  return IdleDispatch(event.forget());
 }
 
 #ifdef MOZ_CANARY
@@ -1146,10 +1205,14 @@ nsThread::GetIdleEvent(nsIRunnable** aEvent, MutexAutoLock& aProofOfLock)
   MOZ_ASSERT(PR_GetCurrentThread() == mThread);
   MOZ_ASSERT(aEvent);
 
-  TimeStamp idleDeadline;
-  mIdlePeriod->GetIdlePeriodHint(&idleDeadline);
+  if (!mIdleEvents.HasPendingEvent(aProofOfLock)) {
+    MOZ_ASSERT(!mHasPendingEventsPromisedIdleEvent);
+    aEvent = nullptr;
+    return;
+  }
 
-  if (!idleDeadline || idleDeadline < TimeStamp::Now()) {
+  TimeStamp idleDeadline = GetIdleDeadline();
+  if (!idleDeadline) {
     aEvent = nullptr;
     return;
   }
@@ -1157,9 +1220,9 @@ nsThread::GetIdleEvent(nsIRunnable** aEvent, MutexAutoLock& aProofOfLock)
   mIdleEvents.GetEvent(false, aEvent, aProofOfLock);
 
   if (*aEvent) {
-    nsCOMPtr<nsIIncrementalRunnable> incrementalEvent(do_QueryInterface(*aEvent));
-    if (incrementalEvent) {
-      incrementalEvent->SetDeadline(idleDeadline);
+    nsCOMPtr<nsIIdleRunnable> idleEvent(do_QueryInterface(*aEvent));
+    if (idleEvent) {
+      idleEvent->SetDeadline(idleDeadline);
     }
   }
 }
@@ -1171,6 +1234,10 @@ nsThread::GetEvent(bool aWait, nsIRunnable** aEvent,
 {
   MOZ_ASSERT(PR_GetCurrentThread() == mThread);
   MOZ_ASSERT(aEvent);
+
+  MakeScopeExit([&] {
+    mHasPendingEventsPromisedIdleEvent = false;
+  });
 
   // We'll try to get an event to execute in three stages.
   // [1] First we just try to get it from the regular queue without waiting.

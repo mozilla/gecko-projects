@@ -7609,10 +7609,6 @@ nsresult
 nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
                         nsIChannel* aChannel, nsresult aStatus)
 {
-  // We can release any pressure we may have had on the throttling service and
-  // let background channels continue.
-  mThrottler.reset();
-
   if (!aChannel) {
     return NS_ERROR_NULL_POINTER;
   }
@@ -9593,61 +9589,6 @@ nsDocShell::CheckLoadingPermissions()
 // nsDocShell: Site Loading
 //*****************************************************************************
 
-namespace {
-
-#ifdef MOZ_PLACES
-// Callback used by CopyFavicon to inform the favicon service that one URI
-// (mNewURI) has the same favicon URI (OnComplete's aFaviconURI) as another.
-class nsCopyFaviconCallback final : public nsIFaviconDataCallback
-{
-public:
-  NS_DECL_ISUPPORTS
-
-  nsCopyFaviconCallback(mozIAsyncFavicons* aSvc,
-                        nsIURI* aNewURI,
-                        nsIPrincipal* aLoadingPrincipal,
-                        bool aInPrivateBrowsing)
-    : mSvc(aSvc)
-    , mNewURI(aNewURI)
-    , mLoadingPrincipal(aLoadingPrincipal)
-    , mInPrivateBrowsing(aInPrivateBrowsing)
-  {
-  }
-
-  NS_IMETHOD
-  OnComplete(nsIURI* aFaviconURI, uint32_t aDataLen,
-             const uint8_t* aData, const nsACString& aMimeType, uint16_t aWidth) override
-  {
-    // Continue only if there is an associated favicon.
-    if (!aFaviconURI) {
-      return NS_OK;
-    }
-
-    MOZ_ASSERT(aDataLen == 0,
-               "We weren't expecting the callback to deliver data.");
-
-    nsCOMPtr<mozIPlacesPendingOperation> po;
-    return mSvc->SetAndFetchFaviconForPage(
-      mNewURI, aFaviconURI, false,
-      mInPrivateBrowsing ? nsIFaviconService::FAVICON_LOAD_PRIVATE :
-                           nsIFaviconService::FAVICON_LOAD_NON_PRIVATE,
-      nullptr, mLoadingPrincipal, getter_AddRefs(po));
-  }
-
-private:
-  ~nsCopyFaviconCallback() {}
-
-  nsCOMPtr<mozIAsyncFavicons> mSvc;
-  nsCOMPtr<nsIURI> mNewURI;
-  nsCOMPtr<nsIPrincipal> mLoadingPrincipal;
-  bool mInPrivateBrowsing;
-};
-
-NS_IMPL_ISUPPORTS(nsCopyFaviconCallback, nsIFaviconDataCallback)
-#endif
-
-} // namespace
-
 void
 nsDocShell::CopyFavicon(nsIURI* aOldURI,
                         nsIURI* aNewURI,
@@ -9671,11 +9612,9 @@ nsDocShell::CopyFavicon(nsIURI* aOldURI,
   nsCOMPtr<mozIAsyncFavicons> favSvc =
     do_GetService("@mozilla.org/browser/favicon-service;1");
   if (favSvc) {
-    nsCOMPtr<nsIFaviconDataCallback> callback =
-      new nsCopyFaviconCallback(favSvc, aNewURI,
-                                aLoadingPrincipal,
-                                aInPrivateBrowsing);
-    favSvc->GetFaviconURLForPage(aOldURI, callback, 0);
+    favSvc->CopyFavicons(aOldURI, aNewURI,
+      aInPrivateBrowsing ? nsIFaviconService::FAVICON_LOAD_PRIVATE
+                         : nsIFaviconService::FAVICON_LOAD_NON_PRIVATE, nullptr);
   }
 #endif
 }
@@ -10799,16 +10738,6 @@ nsDocShell::InternalLoad(nsIURI* aURI,
   net::PredictorPredict(aURI, nullptr,
                         nsINetworkPredictor::PREDICT_LOAD, attrs, nullptr);
 
-  // Increase pressure on the throttling service so background channels will be
-  // appropriately de-prioritized. We need to explicitly check for http[s] here
-  // so that we don't throttle while loading, say, about:blank.
-  bool isHTTP, isHTTPS;
-  aURI->SchemeIs("http", &isHTTP);
-  aURI->SchemeIs("https", &isHTTPS);
-  if (isHTTP || isHTTPS) {
-    mThrottler.reset(new mozilla::net::Throttler());
-  }
-
   nsCOMPtr<nsIRequest> req;
   rv = DoURILoad(aURI, aOriginalURI, aLoadReplace, aReferrer,
                  !(aFlags & INTERNAL_LOAD_FLAGS_DONT_SEND_REFERRER),
@@ -11031,6 +10960,28 @@ nsDocShell::DoURILoad(nsIURI* aURI,
                    securityFlags) :
       new LoadInfo(loadingPrincipal, aTriggeringPrincipal, loadingNode,
                    securityFlags, aContentPolicyType);
+
+  if (aContentPolicyType == nsIContentPolicy::TYPE_DOCUMENT) {
+    enum TopLevelDataState {
+      DATA_NAVIGATED = 0,
+      DATA_TYPED = 1,
+      NO_DATA = 2,
+    };
+    bool isDataURI = (NS_SUCCEEDED(aURI->SchemeIs("data", &isDataURI)) && isDataURI);
+    if (isDataURI) {
+      // In all cases where the toplevel document is navigated to a data: URI
+      // the triggeringPrincipal is a CodeBasePrincipal. In all other cases
+      // e.g. typing a data: URL into the URL-Bar or also clicking a bookmark 
+      // uses a SystemPrincipal as the triggeringPrincipal.
+      if (aTriggeringPrincipal->GetIsCodebasePrincipal()) {
+        Telemetry::Accumulate(Telemetry::DOCUMENT_DATA_URI_LOADS, DATA_NAVIGATED);
+      } else {
+        Telemetry::Accumulate(Telemetry::DOCUMENT_DATA_URI_LOADS, DATA_TYPED);
+      }
+    } else {
+      Telemetry::Accumulate(Telemetry::DOCUMENT_DATA_URI_LOADS, NO_DATA);
+    }
+  }
 
   if (aPrincipalToInherit) {
     loadInfo->SetPrincipalToInherit(aPrincipalToInherit);

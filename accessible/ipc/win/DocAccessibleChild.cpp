@@ -6,6 +6,7 @@
 
 #include "DocAccessibleChild.h"
 
+#include "nsAccessibilityService.h"
 #include "Accessible-inl.h"
 #include "mozilla/a11y/PlatformChild.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -159,15 +160,64 @@ DocAccessibleChild::SendStateChangeEvent(const uint64_t& aID,
   return true;
 }
 
+LayoutDeviceIntRect
+DocAccessibleChild::GetCaretRectFor(const uint64_t& aID)
+{
+  Accessible* target;
+
+  if (aID) {
+    target = reinterpret_cast<Accessible*>(aID);
+  } else {
+    target = mDoc;
+  }
+
+  MOZ_ASSERT(target);
+
+  HyperTextAccessible* text = target->AsHyperText();
+  if (!text) {
+    return LayoutDeviceIntRect();
+  }
+
+  nsIWidget* widget = nullptr;
+  return text->GetCaretRect(&widget);
+}
+
+bool
+DocAccessibleChild::SendFocusEvent(const uint64_t& aID)
+{
+  return SendFocusEvent(aID, GetCaretRectFor(aID));
+}
+
+bool
+DocAccessibleChild::SendFocusEvent(const uint64_t& aID,
+                                   const LayoutDeviceIntRect& aCaretRect)
+{
+  if (IsConstructedInParentProcess()) {
+    return PDocAccessibleChild::SendFocusEvent(aID, aCaretRect);
+  }
+
+  PushDeferredEvent(MakeUnique<SerializedFocus>(this, aID, aCaretRect));
+  return true;
+}
+
 bool
 DocAccessibleChild::SendCaretMoveEvent(const uint64_t& aID,
                                        const int32_t& aOffset)
 {
+  return SendCaretMoveEvent(aID, GetCaretRectFor(aID), aOffset);
+}
+
+bool
+DocAccessibleChild::SendCaretMoveEvent(const uint64_t& aID,
+                                       const LayoutDeviceIntRect& aCaretRect,
+                                       const int32_t& aOffset)
+{
   if (IsConstructedInParentProcess()) {
-    return PDocAccessibleChild::SendCaretMoveEvent(aID, aOffset);
+    return PDocAccessibleChild::SendCaretMoveEvent(aID, aCaretRect, aOffset);
   }
 
-  PushDeferredEvent(MakeUnique<SerializedCaretMove>(this, aID, aOffset));
+  PushDeferredEvent(MakeUnique<SerializedCaretMove>(this, aID, aCaretRect,
+                                                    aOffset));
   return true;
 }
 
@@ -256,6 +306,13 @@ DocAccessibleChild::SendBindChildDoc(DocAccessibleChild* aChildDoc,
   PushDeferredEvent(MakeUnique<SerializedBindChildDoc>(this, aChildDoc,
                                                        aNewParentID));
   return true;
+}
+
+ipc::IPCResult
+DocAccessibleChild::RecvRestoreFocus()
+{
+  FocusMgr()->ForceFocusEvent();
+  return IPC_OK();
 }
 
 } // namespace a11y

@@ -32,9 +32,6 @@ module.exports = {
     // Disallow use of alert(), confirm(), and prompt().
     "no-alert": "error",
 
-    // Use [] instead of Array()
-    "no-array-constructor": "error",
-
     // Disallow use of arguments.caller or arguments.callee.
     "no-caller": "error",
 
@@ -54,14 +51,8 @@ module.exports = {
     // Disallow constant expressions in conditions (except for loops).
     "no-constant-condition": ["error", { "checkLoops": false }],
 
-    // Disallow control characters in regular expressions.
-    "no-control-regex": "error",
-
     // Disallow duplicate class members.
     "no-dupe-class-members": "error",
-
-    // Disallow use of eval().
-    "no-eval": "error",
 
     // Disallow extending of native objects.
     "no-extend-native": "error",

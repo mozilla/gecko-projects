@@ -1223,6 +1223,9 @@ public:
     }
   }
 
+  // Ensure that this layer has a valid (non-zero) animations id. This value is
+  // unique across layers.
+  void EnsureAnimationsId();
   // Call AddAnimation to add a new animation to this layer from layout code.
   // Caller must fill in all the properties of the returned animation.
   // A later animation overrides an earlier one.
@@ -1810,6 +1813,8 @@ public:
   // matches the frame metrics array length.
 
   virtual void ClearCachedResources() {}
+
+  virtual bool SupportsAsyncUpdate() { return false; }
 private:
   void ScrollMetadataChanged();
 public:
@@ -2245,6 +2250,12 @@ public:
     return mEventRegionsOverride;
   }
 
+  void SetFilterChain(nsTArray<CSSFilter>&& aFilterChain) {
+    mFilterChain = aFilterChain;
+  }
+
+  nsTArray<CSSFilter>& GetFilterChain() { return mFilterChain; }
+
 protected:
   friend class ReadbackProcessor;
 
@@ -2331,6 +2342,7 @@ protected:
   // the intermediate surface.
   bool mChildrenChanged;
   EventRegionsOverride mEventRegionsOverride;
+  nsTArray<CSSFilter> mFilterChain;
 };
 
 /**

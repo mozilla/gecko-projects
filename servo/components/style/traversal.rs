@@ -4,15 +4,17 @@
 
 //! Traversing the DOM tree; the bloom filter.
 
-use atomic_refcell::{AtomicRefCell, AtomicRefMut};
+use atomic_refcell::AtomicRefCell;
 use context::{SharedStyleContext, StyleContext, ThreadLocalStyleContext};
 use data::{ElementData, ElementStyles, StoredRestyleHint};
 use dom::{DirtyDescendants, NodeInfo, OpaqueNode, TElement, TNode};
 use matching::{ChildCascadeRequirement, MatchMethods};
-use restyle_hints::{HintComputationContext, RestyleHint};
+use restyle_hints::{CascadeHint, HintComputationContext, RECASCADE_SELF};
+use restyle_hints::{RECASCADE_DESCENDANTS, RestyleHint};
 use selector_parser::RestyleDamage;
-use sharing::StyleSharingBehavior;
+use sharing::{StyleSharingBehavior, StyleSharingTarget};
 #[cfg(feature = "servo")] use servo_config::opts;
+use smallvec::SmallVec;
 use std::borrow::BorrowMut;
 
 /// A per-traversal-level chunk of data. This is sent down by the traversal, and
@@ -41,6 +43,8 @@ bitflags! {
         /// Traverse and update all elements with CSS animations since
         /// @keyframes rules may have changed
         const FOR_CSS_RULE_CHANGES = 0x08,
+        /// Only include user agent style sheets when selector matching.
+        const FOR_DEFAULT_STYLES = 0x10,
     }
 }
 
@@ -63,6 +67,12 @@ impl TraversalFlags {
     /// Returns true if the traversal is triggered by CSS rule changes.
     pub fn for_css_rule_changes(&self) -> bool {
         self.contains(FOR_CSS_RULE_CHANGES)
+    }
+
+    /// Returns true if the traversal is to compute the default computed
+    /// styles for an element.
+    pub fn for_default_styles(&self) -> bool {
+        self.contains(FOR_DEFAULT_STYLES)
     }
 }
 
@@ -342,7 +352,8 @@ pub trait DomTraversal<E: TElement> : Sync {
                 None => return false,
             };
             return data.get_restyle()
-                       .map_or(false, |r| r.hint.has_animation_hint() || r.recascade);
+                       .map_or(false, |r| r.hint.has_animation_hint() ||
+                                          r.hint.has_recascade_self());
         }
 
         // If the dirty descendants bit is set, we need to traverse no
@@ -372,7 +383,7 @@ pub trait DomTraversal<E: TElement> : Sync {
             // since that can return true even if we have a restyle hint
             // indicating that the element's descendants (but not necessarily
             // the element) need restyling.
-            if !r.hint.is_empty() || r.recascade {
+            if !r.hint.is_empty() {
                 return true;
             }
         }
@@ -537,10 +548,13 @@ fn resolve_style_internal<E, F>(context: &mut StyleContext<E>,
                                   StyleSharingBehavior::Disallow);
         context.thread_local.end_element(element);
 
-        // Conservatively mark us as having dirty descendants, since there might
-        // be other unstyled siblings we miss when walking straight up the parent
-        // chain.
-        unsafe { element.note_descendants::<DirtyDescendants>() };
+        if !context.shared.traversal_flags.for_default_styles() {
+            // Conservatively mark us as having dirty descendants, since there might
+            // be other unstyled siblings we miss when walking straight up the parent
+            // chain.  No need to do this if we're computing default styles, since
+            // resolve_default_style will want the tree to be left as it is.
+            unsafe { element.note_descendants::<DirtyDescendants>() };
+        }
     }
 
     // If we're display:none and none of our ancestors are, we're the root
@@ -598,6 +612,47 @@ pub fn resolve_style<E, F, G, H>(context: &mut StyleContext<E>, element: E,
     }
 }
 
+/// Manually resolve default styles for the given Element, which are the styles
+/// only taking into account user agent and user cascade levels.  The resolved
+/// style is made available via a callback, and will be dropped by the time this
+/// function returns.
+pub fn resolve_default_style<E, F, G, H>(context: &mut StyleContext<E>,
+                                         element: E,
+                                         ensure_data: &F,
+                                         set_data: &G,
+                                         callback: H)
+    where E: TElement,
+          F: Fn(E),
+          G: Fn(E, Option<ElementData>) -> Option<ElementData>,
+          H: FnOnce(&ElementStyles)
+{
+    // Save and clear out element data from the element and its ancestors.
+    let mut old_data: SmallVec<[(E, Option<ElementData>); 8]> = SmallVec::new();
+    {
+        let mut e = element;
+        loop {
+            old_data.push((e, set_data(e, None)));
+            match e.parent_element() {
+                Some(parent) => e = parent,
+                None => break,
+            }
+        }
+    }
+
+    // Resolve styles up the tree.
+    resolve_style_internal(context, element, ensure_data);
+
+    // Make them available for the scope of the callback. The callee may use the
+    // argument, or perform any other processing that requires the styles to exist
+    // on the Element.
+    callback(element.borrow_data().unwrap().styles());
+
+    // Swap the old element data back into the element and its ancestors.
+    for entry in old_data {
+        set_data(entry.0, entry.1);
+    }
+}
+
 /// Calculates the style for a single node.
 #[inline]
 #[allow(unsafe_code)]
@@ -605,11 +660,11 @@ pub fn recalc_style_at<E, D>(traversal: &D,
                              traversal_data: &PerLevelTraversalData,
                              context: &mut StyleContext<E>,
                              element: E,
-                             mut data: &mut AtomicRefMut<ElementData>)
+                             data: &mut ElementData)
     where E: TElement,
           D: DomTraversal<E>
 {
-    context.thread_local.begin_element(element, &data);
+    context.thread_local.begin_element(element, data);
     context.thread_local.statistics.elements_traversed += 1;
     debug_assert!(!element.has_snapshot() || element.handled_snapshot(),
                   "Should've handled snapshots here already");
@@ -618,16 +673,19 @@ pub fn recalc_style_at<E, D>(traversal: &D,
     }), "Should've computed the final hint and handled later_siblings already");
 
     let compute_self = !element.has_current_styles(data);
-    let mut inherited_style_changed = false;
+    let mut cascade_hint = CascadeHint::empty();
 
     debug!("recalc_style_at: {:?} (compute_self={:?}, dirty_descendants={:?}, data={:?})",
            element, compute_self, element.has_dirty_descendants(), data);
 
     // Compute style for this element if necessary.
     if compute_self {
-        match compute_style(traversal, traversal_data, context, element, &mut data) {
-            ChildCascadeRequirement::MustCascade => {
-                inherited_style_changed = true;
+        match compute_style(traversal, traversal_data, context, element, data) {
+            ChildCascadeRequirement::MustCascadeChildren => {
+                cascade_hint |= RECASCADE_SELF;
+            }
+            ChildCascadeRequirement::MustCascadeDescendants => {
+                cascade_hint |= RECASCADE_SELF | RECASCADE_DESCENDANTS;
             }
             ChildCascadeRequirement::CanSkipCascade => {}
         };
@@ -643,20 +701,24 @@ pub fn recalc_style_at<E, D>(traversal: &D,
 
     // Now that matching and cascading is done, clear the bits corresponding to
     // those operations and compute the propagated restyle hint.
-    let propagated_hint = match data.get_restyle_mut() {
+    let mut propagated_hint = match data.get_restyle_mut() {
         None => StoredRestyleHint::empty(),
         Some(r) => {
             debug_assert!(context.shared.traversal_flags.for_animation_only() ||
                           !r.hint.has_animation_hint(),
                           "animation restyle hint should be handled during \
                            animation-only restyles");
-            r.recascade = false;
             r.hint.propagate(&context.shared.traversal_flags)
         },
     };
-    trace!("propagated_hint={:?}, inherited_style_changed={:?}, \
+
+    // FIXME(bholley): Need to handle explicitly-inherited reset properties
+    // somewhere.
+    propagated_hint.insert_cascade_hint(cascade_hint);
+
+    trace!("propagated_hint={:?}, cascade_hint={:?}, \
             is_display_none={:?}, implementing_pseudo={:?}",
-           propagated_hint, inherited_style_changed,
+           propagated_hint, cascade_hint,
            data.styles().is_display_none(),
            element.implemented_pseudo_element());
     debug_assert!(element.has_current_styles(data) ||
@@ -677,8 +739,7 @@ pub fn recalc_style_at<E, D>(traversal: &D,
                                           &data,
                                           DontLog) &&
         (has_dirty_descendants_for_this_restyle ||
-         !propagated_hint.is_empty() ||
-         inherited_style_changed) {
+         !propagated_hint.is_empty()) {
         let damage_handled = data.get_restyle().map_or(RestyleDamage::empty(), |r| {
             r.damage_handled() | r.damage.handled_for_descendants()
         });
@@ -687,8 +748,7 @@ pub fn recalc_style_at<E, D>(traversal: &D,
                                     traversal_data,
                                     element,
                                     propagated_hint,
-                                    damage_handled,
-                                    inherited_style_changed);
+                                    damage_handled);
     }
 
     // If we are in a restyle for reconstruction, drop the existing restyle
@@ -728,7 +788,8 @@ fn compute_style<E, D>(_traversal: &D,
                        traversal_data: &PerLevelTraversalData,
                        context: &mut StyleContext<E>,
                        element: E,
-                       mut data: &mut AtomicRefMut<ElementData>) -> ChildCascadeRequirement
+                       data: &mut ElementData)
+                       -> ChildCascadeRequirement
     where E: TElement,
           D: DomTraversal<E>,
 {
@@ -738,19 +799,6 @@ fn compute_style<E, D>(_traversal: &D,
     context.thread_local.statistics.elements_styled += 1;
     let kind = data.restyle_kind();
 
-    // First, try the style sharing cache. If we get a match we can skip the rest
-    // of the work.
-    if let MatchAndCascade = kind {
-        let sharing_result = unsafe {
-            element.share_style_if_possible(context, &mut data)
-        };
-        if let StyleWasShared(index, had_damage) = sharing_result {
-            context.thread_local.statistics.styles_shared += 1;
-            context.thread_local.style_sharing_candidate_cache.touch(index);
-            return had_damage;
-        }
-    }
-
     match kind {
         MatchAndCascade => {
             // Ensure the bloom filter is up to date.
@@ -759,27 +807,39 @@ fn compute_style<E, D>(_traversal: &D,
                                               traversal_data.current_dom_depth);
 
             context.thread_local.bloom_filter.assert_complete(element);
+
+            // Now that our bloom filter is set up, try the style sharing
+            // cache. If we get a match we can skip the rest of the work.
+            let target = StyleSharingTarget::new(element);
+            let sharing_result = target.share_style_if_possible(context, data);
+
+            if let StyleWasShared(index, had_damage) = sharing_result {
+                context.thread_local.statistics.styles_shared += 1;
+                context.thread_local.style_sharing_candidate_cache.touch(index);
+                return had_damage;
+            }
+
             context.thread_local.statistics.elements_matched += 1;
 
             // Perform the matching and cascading.
             element.match_and_cascade(
                 context,
-                &mut data,
+                data,
                 StyleSharingBehavior::Allow
             )
         }
         CascadeWithReplacements(flags) => {
-            let rules_changed = element.replace_rules(flags, context, &mut data);
+            let important_rules_changed = element.replace_rules(flags, context, data);
             element.cascade_primary_and_pseudos(
                 context,
-                &mut data,
-                rules_changed.important_rules_changed()
+                data,
+                important_rules_changed
             )
         }
         CascadeOnly => {
             element.cascade_primary_and_pseudos(
                 context,
-                &mut data,
+                data,
                 /* important_rules_changed = */ false
             )
         }
@@ -790,8 +850,7 @@ fn preprocess_children<E, D>(context: &mut StyleContext<E>,
                              parent_traversal_data: &PerLevelTraversalData,
                              element: E,
                              mut propagated_hint: StoredRestyleHint,
-                             damage_handled: RestyleDamage,
-                             parent_inherited_style_changed: bool)
+                             damage_handled: RestyleDamage)
     where E: TElement,
           D: DomTraversal<E>,
 {
@@ -834,17 +893,14 @@ fn preprocess_children<E, D>(context: &mut StyleContext<E>,
         // If the child doesn't have pre-existing RestyleData and we don't have
         // any reason to create one, avoid the useless allocation and move on to
         // the next child.
-        if propagated_hint.is_empty() && !parent_inherited_style_changed &&
-           damage_handled.is_empty() && !child_data.has_restyle() {
+        if propagated_hint.is_empty() && damage_handled.is_empty() && !child_data.has_restyle() {
             continue;
         }
 
         let mut restyle_data = child_data.ensure_restyle();
 
         // Propagate the parent and sibling restyle hint.
-        if !propagated_hint.is_empty() {
-            restyle_data.hint.insert_from(&propagated_hint);
-        }
+        restyle_data.hint.insert_from(&propagated_hint);
 
         if later_siblings {
             propagated_hint.insert(RestyleHint::subtree().into());
@@ -852,15 +908,6 @@ fn preprocess_children<E, D>(context: &mut StyleContext<E>,
 
         // Store the damage already handled by ancestors.
         restyle_data.set_damage_handled(damage_handled);
-
-        // If properties that we inherited from the parent changed, we need to
-        // recascade.
-        //
-        // FIXME(bholley): Need to handle explicitly-inherited reset properties
-        // somewhere.
-        if parent_inherited_style_changed {
-            restyle_data.recascade = true;
-        }
     }
 }
 

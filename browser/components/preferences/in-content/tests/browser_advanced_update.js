@@ -93,7 +93,7 @@ function formatInstallDate(sec) {
 registerCleanupFunction(resetPreferences);
 
 add_task(async function() {
-  await openPreferencesViaOpenPreferencesAPI("advanced", { leaveOpen: true });
+  await openPreferencesViaOpenPreferencesAPI("advanced", "updateTab", { leaveOpen: true });
   resetPreferences();
   Services.prefs.setBoolPref("browser.search.update", false);
 
@@ -110,26 +110,22 @@ add_task(async function() {
 });
 
 add_task(async function() {
-  await openPreferencesViaOpenPreferencesAPI("advanced", { leaveOpen: true });
+  mockUpdateManager.register();
+
+  await openPreferencesViaOpenPreferencesAPI("advanced", "updateTab", { leaveOpen: true });
   let doc = gBrowser.selectedBrowser.contentDocument;
 
   let showBtn = doc.getElementById("showUpdateHistory");
-  let dialogOverlay = doc.getElementById("dialogOverlay");
-
-  // XXX: For unknown reasons, this mock cannot be loaded by
-  // XPCOMUtils.defineLazyServiceGetter() called in aboutDialog-appUpdater.js.
-  // It is registered here so that we could assert update history subdialog
-  // without stopping the preferences advanced pane from loading.
-  // See bug 1361929.
-  mockUpdateManager.register();
+  let dialogOverlay = content.gSubDialog._preloadDialog._overlay;
 
   // Test the dialog window opens
   is(dialogOverlay.style.visibility, "", "The dialog should be invisible");
+  let promiseSubDialogLoaded = promiseLoadSubDialog("chrome://mozapps/content/update/history.xul");
   showBtn.doCommand();
-  await promiseLoadSubDialog("chrome://mozapps/content/update/history.xul");
+  await promiseSubDialogLoaded;
   is(dialogOverlay.style.visibility, "visible", "The dialog should be visible");
 
-  let dialogFrame = doc.getElementById("dialogFrame");
+  let dialogFrame = dialogOverlay.querySelector(".dialogFrame");
   let frameDoc = dialogFrame.contentDocument;
   let updates = frameDoc.querySelectorAll("update");
 
@@ -151,7 +147,7 @@ add_task(async function() {
   }
 
   // Test the dialog window closes
-  let closeBtn = doc.getElementById("dialogClose");
+  let closeBtn = dialogOverlay.querySelector(".dialogClose");
   closeBtn.doCommand();
   is(dialogOverlay.style.visibility, "", "The dialog should be invisible");
 

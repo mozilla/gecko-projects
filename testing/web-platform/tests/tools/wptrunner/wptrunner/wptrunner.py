@@ -158,8 +158,6 @@ def run_tests(config, test_paths, product, **kwargs):
                 logger.critical("Error starting test environment: %s" % e.message)
                 raise
 
-            browser_kwargs = get_browser_kwargs(ssl_env=ssl_env, **kwargs)
-
             repeat = kwargs["repeat"]
             repeat_count = 0
             repeat_until_unexpected = kwargs["repeat_until_unexpected"]
@@ -186,9 +184,11 @@ def run_tests(config, test_paths, product, **kwargs):
                     else:
                         browser_cls = target_browser_cls
 
-                    for test in test_loader.disabled_tests[test_type]:
-                        logger.test_start(test.id)
-                        logger.test_end(test.id, status="SKIP")
+                    browser_kwargs = get_browser_kwargs(test_type,
+                                                        run_info,
+                                                        ssl_env=ssl_env,
+                                                        **kwargs)
+
 
                     executor_cls = executor_classes.get(test_type)
                     executor_kwargs = get_executor_kwargs(test_type,
@@ -202,6 +202,9 @@ def run_tests(config, test_paths, product, **kwargs):
                                      (test_type, product))
                         continue
 
+                    for test in test_loader.disabled_tests[test_type]:
+                        logger.test_start(test.id)
+                        logger.test_end(test.id, status="SKIP")
 
                     with ManagerGroup("web-platform-tests",
                                       kwargs["processes"],
@@ -231,6 +234,13 @@ def run_tests(config, test_paths, product, **kwargs):
 
     return unexpected_total == 0
 
+def start(**kwargs):
+    if kwargs["list_test_groups"]:
+        list_test_groups(**kwargs)
+    elif kwargs["list_disabled"]:
+        list_disabled(**kwargs)
+    else:
+        return not run_tests(**kwargs)
 
 def main():
     """Main entry point when calling from the command line"""
@@ -242,12 +252,7 @@ def main():
 
         setup_logging(kwargs, {"raw": sys.stdout})
 
-        if kwargs["list_test_groups"]:
-            list_test_groups(**kwargs)
-        elif kwargs["list_disabled"]:
-            list_disabled(**kwargs)
-        else:
-            return not run_tests(**kwargs)
+        return start(**kwargs)
     except Exception:
         if kwargs["pdb"]:
             import pdb, traceback

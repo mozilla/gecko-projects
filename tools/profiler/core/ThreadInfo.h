@@ -12,7 +12,7 @@
 
 #include "platform.h"
 #include "ProfileBuffer.h"
-#include "PseudoStack.h"
+#include "js/ProfilingStack.h"
 
 // Stub eventMarker function for js-engine event generation.
 void ProfilerJSEventMarker(const char* aEvent);
@@ -54,10 +54,10 @@ public:
     return n;
   }
 
-  void AddPendingMarker(const char* aMarkerStr, ProfilerMarkerPayload* aPayload,
-                        double aTime)
+  void AddPendingMarker(const char* aMarkerName,
+                        ProfilerMarkerPayload* aPayload, double aTime)
   {
-    ProfilerMarker* marker = new ProfilerMarker(aMarkerStr, aPayload, aTime);
+    ProfilerMarker* marker = new ProfilerMarker(aMarkerName, aPayload, aTime);
     mPendingMarkers.insert(marker);
   }
 
@@ -204,12 +204,13 @@ private:
 
 public:
   void StreamJSON(ProfileBuffer* aBuffer, SpliceableJSONWriter& aWriter,
-                  const mozilla::TimeStamp& aStartTime, double aSinceTime);
+                  const mozilla::TimeStamp& aProcessStartTime,
+                  double aSinceTime);
 
   // Call this method when the JS entries inside the buffer are about to
   // become invalid, i.e., just before JS shutdown.
   void FlushSamplesAndMarkers(ProfileBuffer* aBuffer,
-                              const mozilla::TimeStamp& aStartTime);
+                              const mozilla::TimeStamp& aProcessStartTime);
 
   // Returns nullptr if this is not the main thread or if this thread is not
   // being profiled.
@@ -230,11 +231,10 @@ public:
 
     mContext = aContext;
 
-    js::SetContextProfilingStack(
-      aContext,
-      (js::ProfileEntry*) RacyInfo()->mStack,
-      RacyInfo()->AddressOfStackPointer(),
-      (uint32_t) mozilla::ArrayLength(RacyInfo()->mStack));
+    // We give the JS engine a non-owning reference to the RacyInfo (just the
+    // PseudoStack, really). It's important that the JS engine doesn't touch
+    // this once the thread dies.
+    js::SetContextProfilingStack(aContext, RacyInfo());
 
     PollJSSampling();
   }
@@ -367,7 +367,7 @@ void
 StreamSamplesAndMarkers(const char* aName, int aThreadId,
                         ProfileBuffer* aBuffer,
                         SpliceableJSONWriter& aWriter,
-                        const mozilla::TimeStamp& aStartTime,
+                        const mozilla::TimeStamp& aProcessStartTime,
                         double aSinceTime,
                         JSContext* aContext,
                         char* aSavedStreamedSamples,

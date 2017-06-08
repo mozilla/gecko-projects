@@ -256,7 +256,6 @@ private:
    */
 
   already_AddRefed<CSSValue> DoGetAppearance();
-  already_AddRefed<CSSValue> DoGetMozAppearance();
 
   /* Box properties */
   already_AddRefed<CSSValue> DoGetBoxAlign();
@@ -670,6 +669,12 @@ private:
                               PercentageBaseGetter aPercentageBaseGetter,
                               nscoord aDefaultValue,
                               bool aClampNegativeCalc);
+
+  /**
+   * Append coord values from four sides. It omits values when possible.
+   */
+  void AppendFourSideCoordValues(nsDOMCSSValueList* aList,
+                                 const nsStyleSides& aValues);
 
   bool GetCBContentWidth(nscoord& aWidth);
   bool GetCBContentHeight(nscoord& aWidth);

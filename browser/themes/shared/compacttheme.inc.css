@@ -9,7 +9,9 @@
 :root {
   --tab-toolbar-navbar-overlap: 0px;
   --navbar-tab-toolbar-highlight-overlap: 0px;
+%ifndef MOZ_PHOTON_THEME
   --space-above-tabbar: 0px;
+%endif
   --toolbarbutton-text-shadow: none;
   --backbutton-urlbar-overlap: 0px;
   /* 18px icon + 2 * 5px padding + 1 * 1px border */
@@ -98,12 +100,13 @@ toolbar:-moz-lwtheme-darktext {
   --toolbarbutton-checkedhover-backgroundcolor: #d7d7d8;
 }
 
+%ifndef MOZ_PHOTON_THEME
 /* Give some space to drag the window around while customizing
    (normal space to left and right of tabs doesn't work in this case) */
 #main-window[tabsintitlebar][customizing] {
   --space-above-tabbar: 9px;
 }
-
+%endif
 /* Override @tabCurveHalfWidth@ and @tabCurveWidth@.  XXX: Switch to a CSS variable once the perf is sorted out - bug 1088771 */
 .tab-background-middle {
   border-left-width: 0;
@@ -181,6 +184,7 @@ toolbar:-moz-lwtheme-darktext {
 #TabsToolbar {
   text-shadow: none !important;
 }
+%ifndef MOZ_PHOTON_THEME
 
 /* Back and forward button */
 
@@ -200,11 +204,9 @@ toolbar:-moz-lwtheme-darktext {
   box-shadow: none !important;
 }
 
-%ifndef MOZ_PHOTON_THEME
 #forward-button > .toolbarbutton-icon {
   border-inline-start: none !important;
 }
-%endif
 
 /* Override a box shadow for disabled back button */
 #main-window:not([customizing]) #back-button[disabled] > .toolbarbutton-icon {
@@ -228,6 +230,7 @@ toolbar:-moz-lwtheme-darktext {
   padding-top: 2px;
   padding-bottom: 2px;
 }
+%endif
 
 /* URL bar and search bar*/
 #urlbar,
@@ -242,14 +245,15 @@ toolbar:-moz-lwtheme-darktext {
 #identity-icon:-moz-lwtheme-brighttext,
 #tracking-protection-icon:-moz-lwtheme-brighttext,
 #connection-icon:-moz-lwtheme-brighttext,
+.notification-anchor-icon:-moz-lwtheme-brighttext,
+#blocked-permissions-container > .blocked-permission-icon:-moz-lwtheme-brighttext,
 #extension-icon:-moz-lwtheme-brighttext {
   fill: rgba(255,255,255,.7);
 }
 
-#urlbar {
 %ifndef MOZ_PHOTON_THEME
+#urlbar {
   border-inline-start: none !important;
-%endif
   opacity: 1 !important;
 }
 
@@ -267,7 +271,7 @@ window:not([chromehidden~="toolbar"]) #urlbar-wrapper > #urlbar:-moz-locale-dir(
      value is set in the previous rule set. o_O */
   margin-inline-start: 0;
 }
-
+%endif
 #urlbar-zoom-button:-moz-lwtheme-brighttext:hover {
   background-color: rgba(255,255,255,.2);
 }
@@ -354,7 +358,7 @@ window:not([chromehidden~="toolbar"]) #urlbar-wrapper > #urlbar:-moz-locale-dir(
 
 .tab-icon-sound[soundplaying],
 .tab-icon-sound[muted] {
-  filter: url(chrome://global/skin/filters.svg#fill) !important; /* removes drop-shadow filter */
+  filter: none !important; /* removes drop-shadow filter */
 }
 
 /* Don't need space for the tab curves (66px - 30px) */

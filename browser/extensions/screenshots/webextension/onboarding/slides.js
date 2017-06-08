@@ -1,4 +1,4 @@
-/* globals log, catcher, onboardingHtml, onboardingCss, browser, util, shooter, callBackground, assertIsTrusted */
+/* globals log, catcher, onboardingHtml, onboardingCss, util, shooter, callBackground, assertIsTrusted */
 
 "use strict";
 
@@ -46,6 +46,8 @@ this.slides = (function() {
           doc.documentElement
         );
         doc.addEventListener("keyup", onKeyUp);
+        doc.documentElement.dir = browser.i18n.getMessage("@@bidi_dir");
+        doc.documentElement.lang = browser.i18n.getMessage("@@ui_locale");
         localizeText(doc);
         activateSlide(doc);
         resolve();

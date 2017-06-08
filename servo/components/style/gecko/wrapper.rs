@@ -18,7 +18,7 @@ use app_units::Au;
 use atomic_refcell::AtomicRefCell;
 use context::{QuirksMode, SharedStyleContext, UpdateAnimationsTasks};
 use data::ElementData;
-use dom::{self, AnimationRules, DescendantsBit, LayoutIterator, NodeInfo, TElement, TNode, UnsafeNode};
+use dom::{self, DescendantsBit, LayoutIterator, NodeInfo, TElement, TNode, UnsafeNode};
 use dom::{OpaqueNode, PresentationalHintsSynthesizer};
 use element_state::ElementState;
 use error_reporting::RustLogReporter;
@@ -35,14 +35,18 @@ use gecko_bindings::bindings::Gecko_ClassOrClassList;
 use gecko_bindings::bindings::Gecko_ElementHasAnimations;
 use gecko_bindings::bindings::Gecko_ElementHasCSSAnimations;
 use gecko_bindings::bindings::Gecko_ElementHasCSSTransitions;
+use gecko_bindings::bindings::Gecko_GetActiveLinkAttrDeclarationBlock;
 use gecko_bindings::bindings::Gecko_GetAnimationRule;
 use gecko_bindings::bindings::Gecko_GetExtraContentStyleDeclarations;
 use gecko_bindings::bindings::Gecko_GetHTMLPresentationAttrDeclarationBlock;
 use gecko_bindings::bindings::Gecko_GetSMILOverrideDeclarationBlock;
 use gecko_bindings::bindings::Gecko_GetStyleAttrDeclarationBlock;
 use gecko_bindings::bindings::Gecko_GetStyleContext;
+use gecko_bindings::bindings::Gecko_GetUnvisitedLinkAttrDeclarationBlock;
+use gecko_bindings::bindings::Gecko_GetVisitedLinkAttrDeclarationBlock;
 use gecko_bindings::bindings::Gecko_IsSignificantChild;
 use gecko_bindings::bindings::Gecko_MatchStringArgPseudo;
+use gecko_bindings::bindings::Gecko_UnsetDirtyStyleAttr;
 use gecko_bindings::bindings::Gecko_UpdateAnimations;
 use gecko_bindings::structs;
 use gecko_bindings::structs::{RawGeckoElement, RawGeckoNode};
@@ -66,12 +70,15 @@ use selector_parser::ElementExt;
 use selectors::Element;
 use selectors::attr::{AttrSelectorOperation, AttrSelectorOperator, CaseSensitivity, NamespaceConstraint};
 use selectors::matching::{ElementSelectorFlags, MatchingContext, MatchingMode};
+use selectors::matching::{RelevantLinkStatus, VisitedHandlingMode};
 use shared_lock::Locked;
 use sink::Push;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::mem;
+use std::ops::DerefMut;
 use std::ptr;
 use string_cache::{Atom, Namespace, WeakAtom, WeakNamespace};
 use stylearc::Arc;
@@ -422,9 +429,27 @@ impl<'le> GeckoElement<'le> {
         }
     }
 
-    #[inline]
-    fn may_have_animations(&self) -> bool {
-        self.as_node().get_bool_flag(nsINode_BooleanFlag::ElementHasAnimations)
+    /// Sets the specified element data, return any existing data.
+    ///
+    /// Like `ensure_data`, only safe to call with exclusive access to the
+    /// element.
+    pub unsafe fn set_data(&self, replace_data: Option<ElementData>) -> Option<ElementData> {
+        match (self.get_data(), replace_data) {
+            (Some(old), Some(replace_data)) => {
+                Some(mem::replace(old.borrow_mut().deref_mut(), replace_data))
+            }
+            (Some(old), None) => {
+                let old_data = mem::replace(old.borrow_mut().deref_mut(), ElementData::new(None));
+                self.0.mServoData.set(ptr::null_mut());
+                Some(old_data)
+            }
+            (None, Some(replace_data)) => {
+                let ptr = Box::into_raw(Box::new(AtomicRefCell::new(replace_data)));
+                self.0.mServoData.set(ptr);
+                None
+            }
+            (None, None) => None,
+        }
     }
 
     #[inline]
@@ -608,14 +633,17 @@ impl<'le> TElement for GeckoElement<'le> {
         declarations.map_or(None, |s| s.as_arc_opt())
     }
 
+    fn unset_dirty_style_attribute(&self) {
+        if !self.may_have_style_attribute() {
+            return;
+        }
+
+        unsafe { Gecko_UnsetDirtyStyleAttr(self.0) };
+    }
+
     fn get_smil_override(&self) -> Option<&Arc<Locked<PropertyDeclarationBlock>>> {
         let declarations = unsafe { Gecko_GetSMILOverrideDeclarationBlock(self.0) };
         declarations.map(|s| s.as_arc_opt()).unwrap_or(None)
-    }
-
-    fn get_animation_rules(&self) -> AnimationRules {
-        AnimationRules(self.get_animation_rule(),
-                       self.get_transition_rule())
     }
 
     fn get_animation_rule_by_cascade(&self, cascade_level: ServoCascadeLevel)
@@ -780,6 +808,11 @@ impl<'le> TElement for GeckoElement<'le> {
     fn has_selector_flags(&self, flags: ElementSelectorFlags) -> bool {
         let node_flags = selector_flags_to_node_flags(flags);
         (self.flags() & node_flags) == node_flags
+    }
+
+    #[inline]
+    fn may_have_animations(&self) -> bool {
+        self.as_node().get_bool_flag(nsINode_BooleanFlag::ElementHasAnimations)
     }
 
     fn update_animations(&self,
@@ -1007,7 +1040,9 @@ impl<'le> Hash for GeckoElement<'le> {
 }
 
 impl<'le> PresentationalHintsSynthesizer for GeckoElement<'le> {
-    fn synthesize_presentational_hints_for_legacy_attributes<V>(&self, hints: &mut V)
+    fn synthesize_presentational_hints_for_legacy_attributes<V>(&self,
+                                                                visited_handling: VisitedHandlingMode,
+                                                                hints: &mut V)
         where V: Push<ApplicableDeclarationBlock>,
     {
         use properties::longhands::_x_lang::SpecifiedValue as SpecifiedLang;
@@ -1067,6 +1102,37 @@ impl<'le> PresentationalHintsSynthesizer for GeckoElement<'le> {
             hints.push(
                 ApplicableDeclarationBlock::from_declarations(Clone::clone(decl), ServoCascadeLevel::PresHints)
             );
+        }
+
+        // Support for link, vlink, and alink presentation hints on <body>
+        if self.is_link() {
+            // Unvisited vs. visited styles are computed up-front based on the
+            // visited mode (not the element's actual state).
+            let declarations = match visited_handling {
+                VisitedHandlingMode::AllLinksUnvisited => unsafe {
+                    Gecko_GetUnvisitedLinkAttrDeclarationBlock(self.0)
+                },
+                VisitedHandlingMode::RelevantLinkVisited => unsafe {
+                    Gecko_GetVisitedLinkAttrDeclarationBlock(self.0)
+                },
+            };
+            let declarations = declarations.and_then(|s| s.as_arc_opt());
+            if let Some(decl) = declarations {
+                hints.push(
+                    ApplicableDeclarationBlock::from_declarations(Clone::clone(decl), ServoCascadeLevel::PresHints)
+                );
+            }
+
+            let active = self.get_state().intersects(NonTSPseudoClass::Active.state_flag());
+            if active {
+                let declarations = unsafe { Gecko_GetActiveLinkAttrDeclarationBlock(self.0) };
+                let declarations = declarations.and_then(|s| s.as_arc_opt());
+                if let Some(decl) = declarations {
+                    hints.push(
+                        ApplicableDeclarationBlock::from_declarations(Clone::clone(decl), ServoCascadeLevel::PresHints)
+                    );
+                }
+            }
         }
 
         // xml:lang has precedence over lang, which can be
@@ -1241,6 +1307,7 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
     fn match_non_ts_pseudo_class<F>(&self,
                                     pseudo_class: &NonTSPseudoClass,
                                     context: &mut MatchingContext,
+                                    relevant_link: &RelevantLinkStatus,
                                     flags_setter: &mut F)
                                     -> bool
         where F: FnMut(&Self, ElementSelectorFlags),
@@ -1248,8 +1315,6 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
         use selectors::matching::*;
         match *pseudo_class {
             NonTSPseudoClass::AnyLink |
-            NonTSPseudoClass::Link |
-            NonTSPseudoClass::Visited |
             NonTSPseudoClass::Active |
             NonTSPseudoClass::Focus |
             NonTSPseudoClass::Hover |
@@ -1298,6 +1363,8 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
                 // here, to handle `:any-link` correctly.
                 self.get_state().intersects(pseudo_class.state_flag())
             },
+            NonTSPseudoClass::Link => relevant_link.is_unvisited(self, context),
+            NonTSPseudoClass::Visited => relevant_link.is_visited(self, context),
             NonTSPseudoClass::MozFirstNode => {
                 flags_setter(self, HAS_EDGE_CHILD_SELECTOR);
                 let mut elem = self.as_node();
@@ -1335,9 +1402,10 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
             NonTSPseudoClass::MozIsHTML => {
                 self.is_html_element_in_html_document()
             }
+            NonTSPseudoClass::MozPlaceholder => false,
             NonTSPseudoClass::MozAny(ref sels) => {
                 sels.iter().any(|s| {
-                    matches_complex_selector(s, self, context, flags_setter)
+                    matches_complex_selector(s, 0, self, context, flags_setter)
                 })
             }
             NonTSPseudoClass::MozSystemMetric(ref s) |
@@ -1368,9 +1436,18 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
         // match the proper pseudo-element, given how we rulehash the stuff
         // based on the pseudo.
         match self.implemented_pseudo_element() {
-            Some(ref pseudo) => pseudo == pseudo_element,
+            Some(ref pseudo) => *pseudo == pseudo_element.canonical(),
             None => false,
         }
+    }
+
+    #[inline]
+    fn is_link(&self) -> bool {
+        let mut context = MatchingContext::new(MatchingMode::Normal, None);
+        self.match_non_ts_pseudo_class(&NonTSPseudoClass::AnyLink,
+                                       &mut context,
+                                       &RelevantLinkStatus::default(),
+                                       &mut |_, _| {})
     }
 
     fn get_id(&self) -> Option<Atom> {
@@ -1424,14 +1501,6 @@ impl<'a> NamespaceConstraintHelpers for NamespaceConstraint<&'a Namespace> {
 }
 
 impl<'le> ElementExt for GeckoElement<'le> {
-    #[inline]
-    fn is_link(&self) -> bool {
-        let mut context = MatchingContext::new(MatchingMode::Normal, None);
-        self.match_non_ts_pseudo_class(&NonTSPseudoClass::AnyLink,
-                                       &mut context,
-                                       &mut |_, _| {})
-    }
-
     #[inline]
     fn matches_user_and_author_rules(&self) -> bool {
         self.flags() & (NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE as u32) == 0

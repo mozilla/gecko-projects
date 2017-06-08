@@ -550,7 +550,7 @@ void log_device(cubeb_device_info * device_info)
 
 int cubeb_enumerate_devices(cubeb * context,
                             cubeb_device_type devtype,
-                            cubeb_device_collection ** collection)
+                            cubeb_device_collection * collection)
 {
   int rv;
   if ((devtype & (CUBEB_DEVICE_TYPE_INPUT | CUBEB_DEVICE_TYPE_OUTPUT)) == 0)
@@ -563,41 +563,35 @@ int cubeb_enumerate_devices(cubeb * context,
   rv = context->ops->enumerate_devices(context, devtype, collection);
 
   if (g_cubeb_log_callback) {
-    for (uint32_t i = 0; i < (*collection)->count; i++) {
-      log_device((*collection)->device[i]);
+    for (size_t i = 0; i < collection->count; i++) {
+      log_device(&collection->device[i]);
     }
   }
 
   return rv;
 }
 
-int cubeb_device_collection_destroy(cubeb_device_collection * collection)
+int cubeb_device_collection_destroy(cubeb * context,
+                                    cubeb_device_collection * collection)
 {
-  uint32_t i;
+  int r;
 
-  if (collection == NULL)
+  if (context == NULL || collection == NULL)
     return CUBEB_ERROR_INVALID_PARAMETER;
 
-  for (i = 0; i < collection->count; i++)
-    cubeb_device_info_destroy(collection->device[i]);
+  if (!context->ops->device_collection_destroy)
+    return CUBEB_ERROR_NOT_SUPPORTED;
 
-  free(collection);
-  return CUBEB_OK;
-}
+  if (!collection->device)
+    return CUBEB_OK;
 
-int cubeb_device_info_destroy(cubeb_device_info * info)
-{
-  if (info == NULL) {
-    return CUBEB_ERROR_INVALID_PARAMETER;
+  r = context->ops->device_collection_destroy(context, collection);
+  if (r == CUBEB_OK) {
+    collection->device = NULL;
+    collection->count = 0;
   }
 
-  free((void *) info->device_id);
-  free((void *) info->friendly_name);
-  free((void *) info->group_id);
-  free((void *) info->vendor_name);
-
-  free(info);
-  return CUBEB_OK;
+  return r;
 }
 
 int cubeb_register_device_collection_changed(cubeb * context,

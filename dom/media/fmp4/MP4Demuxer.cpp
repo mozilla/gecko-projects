@@ -57,6 +57,8 @@ public:
 
   void BreakCycles() override;
 
+  void NotifyDataRemoved();
+
 private:
   friend class MP4Demuxer;
   void NotifyDataArrived();
@@ -328,10 +330,10 @@ void
 MP4Demuxer::NotifyDataRemoved()
 {
   for (auto& dmx : mAudioDemuxers) {
-    dmx->NotifyDataArrived();
+    dmx->NotifyDataRemoved();
   }
   for (auto& dmx : mVideoDemuxers) {
-    dmx->NotifyDataArrived();
+    dmx->NotifyDataRemoved();
   }
 }
 
@@ -415,22 +417,10 @@ MP4TrackDemuxer::Seek(const media::TimeUnit& aTime)
   mIterator->Seek(seekTime.ToMicroseconds());
 
   // Check what time we actually seeked to.
-  RefPtr<MediaRawData> sample;
-  do {
-    sample = GetNextSample();
-    if (!sample) {
-      return SeekPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_END_OF_STREAM,
-                                          __func__);
-    }
-    if (!sample->Size()) {
-      // This sample can't be decoded, continue searching.
-      continue;
-    }
-    if (sample->mKeyframe) {
-      mQueuedSample = sample;
-      seekTime = mQueuedSample->mTime;
-    }
-  } while (!mQueuedSample);
+  mQueuedSample = GetNextSample();
+  if (mQueuedSample) {
+    seekTime = mQueuedSample->mTime;
+  }
 
   SetNextKeyFrameTime();
 
@@ -509,8 +499,8 @@ MP4TrackDemuxer::GetSamples(int32_t aNumSamples)
   }
 
   if (mQueuedSample) {
-    MOZ_ASSERT(mQueuedSample->mKeyframe,
-               "mQueuedSample must be a keyframe");
+    NS_ASSERTION(mQueuedSample->mKeyframe,
+                 "mQueuedSample must be a keyframe");
     samples->mSamples.AppendElement(mQueuedSample);
     mQueuedSample = nullptr;
     aNumSamples--;
@@ -620,6 +610,19 @@ void
 MP4TrackDemuxer::NotifyDataArrived()
 {
   mNeedReIndex = true;
+}
+
+void
+MP4TrackDemuxer::NotifyDataRemoved()
+{
+  AutoPinned<MediaResource> resource(mParent->mResource);
+  MediaByteRangeSet byteRanges;
+  nsresult rv = resource->GetCachedRanges(byteRanges);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+  mIndex->UpdateMoofIndex(byteRanges, true /* can evict */);
+  mNeedReIndex = false;
 }
 
 void

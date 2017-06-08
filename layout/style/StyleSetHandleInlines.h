@@ -220,6 +220,36 @@ StyleSetHandle::Ptr::AddDocStyleSheet(StyleSheet* aSheet,
                                      (aSheet->AsServo(), aDocument));
 }
 
+void
+StyleSetHandle::Ptr::RecordStyleSheetChange(StyleSheet* aSheet,
+                                            StyleSheet::ChangeType aChangeType)
+{
+  FORWARD_CONCRETE(RecordStyleSheetChange, (aSheet->AsGecko(), aChangeType),
+                                           (aSheet->AsServo(), aChangeType));
+}
+
+void
+StyleSetHandle::Ptr::RecordShadowStyleChange(mozilla::dom::ShadowRoot* aShadowRoot)
+{
+  FORWARD(RecordShadowStyleChange, (aShadowRoot));
+}
+
+bool
+StyleSetHandle::Ptr::StyleSheetsHaveChanged() const
+{
+  FORWARD(StyleSheetsHaveChanged, ());
+}
+bool
+StyleSetHandle::Ptr::MediumFeaturesChanged()
+{
+  FORWARD(MediumFeaturesChanged, ());
+}
+void
+StyleSetHandle::Ptr::InvalidateStyleForCSSRuleChanges()
+{
+  FORWARD(InvalidateStyleForCSSRuleChanges, ());
+}
+
 // check whether there is ::before/::after style for an element
 already_AddRefed<nsStyleContext>
 StyleSetHandle::Ptr::ProbePseudoElementStyle(dom::Element* aParentElement,
@@ -294,6 +324,18 @@ nsCSSCounterStyleRule*
 StyleSetHandle::Ptr::CounterStyleRuleForName(nsIAtom* aName)
 {
   FORWARD(CounterStyleRuleForName, (aName));
+}
+
+bool
+StyleSetHandle::Ptr::EnsureUniqueInnerOnCSSSheets()
+{
+  FORWARD(EnsureUniqueInnerOnCSSSheets, ());
+}
+
+void
+StyleSetHandle::Ptr::SetNeedsRestyleAfterEnsureUniqueInner()
+{
+  FORWARD(SetNeedsRestyleAfterEnsureUniqueInner, ());
 }
 
 } // namespace mozilla

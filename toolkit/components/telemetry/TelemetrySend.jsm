@@ -39,8 +39,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "OS",
 XPCOMUtils.defineLazyServiceGetter(this, "Telemetry",
                                    "@mozilla.org/base/telemetry;1",
                                    "nsITelemetry");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryLog",
-                                  "resource://gre/modules/TelemetryLog.jsm");
 
 const Utils = TelemetryUtils;
 
@@ -94,8 +92,15 @@ const SEND_MAXIMUM_BACKOFF_DELAY_MS = 120 * MS_IN_A_MINUTE;
 // The age of a pending ping to be considered overdue (in milliseconds).
 const OVERDUE_PING_FILE_AGE = 7 * 24 * 60 * MS_IN_A_MINUTE; // 1 week
 
-// TelemetryLog Key for logging failures to send Telemetry
-const LOG_FAILURE_KEY = "TELEMETRY_SEND_FAILURE";
+// Strings to map from XHR.errorCode to TELEMETRY_SEND_FAILURE_TYPE.
+// Echoes XMLHttpRequestMainThread's ErrorType enum.
+const XHR_ERROR_TYPE = [
+  "eOK",
+  "eRequest",
+  "eUnreachable",
+  "eChannelOpen",
+  "eRedirect",
+];
 
 function monotonicNow() {
   try {
@@ -1096,8 +1101,12 @@ var TelemetrySendImpl = {
     let onRequestFinished = (success, event) => {
       let onCompletion = () => {
         if (success) {
+          let histogram = Telemetry.getHistogramById("TELEMETRY_SUCCESSFUL_SEND_PINGS_SIZE_KB");
+          histogram.add(compressedPingSizeKB);
           deferred.resolve();
         } else {
+          let histogram = Telemetry.getHistogramById("TELEMETRY_FAILED_SEND_PINGS_SIZE_KB");
+          histogram.add(compressedPingSizeKB);
           deferred.reject(event);
         }
       };
@@ -1112,8 +1121,13 @@ var TelemetrySendImpl = {
     };
 
     let errorhandler = (event) => {
-      TelemetryLog.log(LOG_FAILURE_KEY, ["errorhandler", event.type]);
-      this._log.error("_doPing - error making request to " + url + ": " + event.type);
+      let failure = event.type;
+      if (failure === "error") {
+        failure = XHR_ERROR_TYPE[request.errorCode];
+      }
+      Telemetry.getHistogramById("TELEMETRY_SEND_FAILURE_TYPE").add(failure);
+
+      this._log.error("_doPing - error making request to " + url + ": " + failure);
       onRequestFinished(false, event);
     };
     request.onerror = errorhandler;
@@ -1136,18 +1150,15 @@ var TelemetrySendImpl = {
         Telemetry.getHistogramById("TELEMETRY_PING_EVICTED_FOR_SERVER_ERRORS").add();
         // TODO: we should handle this better, but for now we should avoid resubmitting
         // broken requests by pretending success.
-        TelemetryLog.log(LOG_FAILURE_KEY, ["4xx 'failure'", status]);
         success = true;
       } else if (statusClass === 500) {
         // 5XX means there was a server-side error and we should try again later.
         this._log.error("_doPing - error submitting to " + url + ", status: " + status
                         + " - server error, should retry later");
-        TelemetryLog.log(LOG_FAILURE_KEY, ["5xx failure", status]);
       } else {
         // We received an unexpected status code.
         this._log.error("_doPing - error submitting to " + url + ", status: " + status
                         + ", type: " + event.type);
-        TelemetryLog.log(LOG_FAILURE_KEY, ["Unhandled HTTP failure", status]);
       }
 
       onRequestFinished(success, event);
@@ -1180,6 +1191,8 @@ var TelemetrySendImpl = {
                         .createInstance(Ci.nsIStringInputStream);
     startTime = new Date();
     payloadStream.data = gzipCompressString(utf8Payload);
+
+    const compressedPingSizeKB = Math.floor(payloadStream.data.length / 1024);
     Telemetry.getHistogramById("TELEMETRY_COMPRESS").add(new Date() - startTime);
     startTime = new Date();
     request.send(payloadStream);
@@ -1303,6 +1316,7 @@ var TelemetrySendImpl = {
     let process = Cc["@mozilla.org/process/util;1"]
                   .createInstance(Ci.nsIProcess);
     process.init(exe);
+    process.startHidden = true;
     process.run(/* blocking */ false, [url, pingPath], 2);
   },
 };

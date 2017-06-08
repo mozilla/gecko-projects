@@ -8,7 +8,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/TabChild.h"
-#include "mozilla/dom/ipc/BlobChild.h"
+#include "mozilla/dom/TabGroup.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "base/task.h"
@@ -59,19 +59,6 @@ ContentBridgeChild::RecvAsyncMessage(const nsString& aMsg,
                                      const ClonedMessageData& aData)
 {
   return nsIContentChild::RecvAsyncMessage(aMsg, Move(aCpows), aPrincipal, aData);
-}
-
-PBlobChild*
-ContentBridgeChild::SendPBlobConstructor(PBlobChild* actor,
-                                         const BlobConstructorParams& params)
-{
-  return PContentBridgeChild::SendPBlobConstructor(actor, params);
-}
-
-PMemoryStreamChild*
-ContentBridgeChild::SendPMemoryStreamConstructor(const uint64_t& aSize)
-{
-  return PContentBridgeChild::SendPMemoryStreamConstructor(aSize);
 }
 
 bool
@@ -168,30 +155,6 @@ ContentBridgeChild::RecvPBrowserConstructor(PBrowserChild* aActor,
                                                   aIsForBrowser);
 }
 
-PBlobChild*
-ContentBridgeChild::AllocPBlobChild(const BlobConstructorParams& aParams)
-{
-  return nsIContentChild::AllocPBlobChild(aParams);
-}
-
-bool
-ContentBridgeChild::DeallocPBlobChild(PBlobChild* aActor)
-{
-  return nsIContentChild::DeallocPBlobChild(aActor);
-}
-
-PMemoryStreamChild*
-ContentBridgeChild::AllocPMemoryStreamChild(const uint64_t& aSize)
-{
-  return nsIContentChild::AllocPMemoryStreamChild(aSize);
-}
-
-bool
-ContentBridgeChild::DeallocPMemoryStreamChild(PMemoryStreamChild* aActor)
-{
-  return nsIContentChild::DeallocPMemoryStreamChild(aActor);
-}
-
 PIPCBlobInputStreamChild*
 ContentBridgeChild::AllocPIPCBlobInputStreamChild(const nsID& aID,
                                                   const uint64_t& aSize)
@@ -260,6 +223,23 @@ ContentBridgeChild::RecvParentActivated(PBrowserChild* aTab, const bool& aActiva
 {
   TabChild* tab = static_cast<TabChild*>(aTab);
   return tab->RecvParentActivated(aActivated);
+}
+
+already_AddRefed<nsIEventTarget>
+ContentBridgeChild::GetConstructedEventTarget(const Message& aMsg)
+{
+  // Currently we only set targets for PBrowser.
+  if (aMsg.type() != PContentBridge::Msg_PBrowserConstructor__ID) {
+    return nullptr;
+  }
+
+  return nsIContentChild::GetConstructedEventTarget(aMsg);
+}
+
+already_AddRefed<nsIEventTarget>
+ContentBridgeChild::GetEventTargetFor(TabChild* aTabChild)
+{
+  return IToplevelProtocol::GetActorEventTarget(aTabChild);
 }
 
 } // namespace dom

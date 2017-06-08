@@ -1569,7 +1569,7 @@ nsFocusManager::CheckIfFocusable(nsIContent* aContent, uint32_t aFlags)
 
   // Make sure that our frames are up to date
   mEventHandlingNeedsFlush = false;
-  doc->FlushPendingNotifications(FlushType::Layout);
+  doc->FlushPendingNotifications(FlushType::Frames);
 
   nsIPresShell *shell = doc->GetShell();
   if (!shell)
@@ -3730,6 +3730,37 @@ nsFocusManager::MarkUncollectableForCCGeneration(uint32_t aGeneration)
     sInstance->mMouseButtonEventHandlingDocument->
       MarkUncollectableForCCGeneration(aGeneration);
   }
+}
+
+bool
+nsFocusManager::CanSkipFocus(nsIContent* aContent)
+{
+  if (!aContent ||
+      nsContentUtils::IsChromeDoc(aContent->OwnerDoc())) {
+    return false;
+  }
+
+  if (mFocusedContent == aContent) {
+    return true;
+  }
+
+  nsIDocShell* ds = aContent->OwnerDoc()->GetDocShell();
+  if (!ds) {
+    return true;
+  }
+
+  nsCOMPtr<nsIDocShellTreeItem> root;
+  ds->GetRootTreeItem(getter_AddRefs(root));
+  nsCOMPtr<nsPIDOMWindowOuter> newRootWindow =
+    root ? root->GetWindow() : nullptr;
+  if (mActiveWindow != newRootWindow) {
+    nsPIDOMWindowOuter* outerWindow = aContent->OwnerDoc()->GetWindow();
+    if (outerWindow && outerWindow->GetFocusedNode() == aContent) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 nsresult

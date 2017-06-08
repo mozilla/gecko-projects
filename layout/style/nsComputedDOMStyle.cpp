@@ -598,6 +598,15 @@ nsComputedDOMStyle::DoGetStyleContextNoFlush(Element* aElement,
       return nullptr;
   }
 
+  auto pseudoType = CSSPseudoElementType::NotPseudo;
+  if (aPseudo) {
+    pseudoType = nsCSSPseudoElements::
+      GetPseudoType(aPseudo, CSSEnabledState::eIgnoreEnabledState);
+    if (pseudoType >= CSSPseudoElementType::Count) {
+      return nullptr;
+    }
+  }
+
   // XXX the !aElement->IsHTMLElement(nsGkAtoms::area)
   // check is needed due to bug 135040 (to avoid using
   // mPrimaryFrame). Remove it once that's fixed.
@@ -628,9 +637,11 @@ nsComputedDOMStyle::DoGetStyleContextNoFlush(Element* aElement,
             return styleSet->ResolveStyleByRemovingAnimation(
                      aElement, result, eRestyle_AllHintsWithAnimations);
           } else {
-            NS_WARNING("stylo: Getting the unanimated style context is not yet"
-                       " supported for Servo");
-            return nullptr;
+            RefPtr<ServoComputedValues> baseComputedValues =
+              presContext->StyleSet()->AsServo()->
+                GetBaseComputedValuesForElement(aElement, pseudoType);
+            return NS_NewStyleContext(nullptr, presContext, aPseudo,
+                                      pseudoType, baseComputedValues.forget());
           }
         }
 
@@ -650,23 +661,22 @@ nsComputedDOMStyle::DoGetStyleContextNoFlush(Element* aElement,
 
   StyleSetHandle styleSet = presShell->StyleSet();
 
-  auto type = CSSPseudoElementType::NotPseudo;
-  if (aPseudo) {
-    type = nsCSSPseudoElements::
-      GetPseudoType(aPseudo, CSSEnabledState::eIgnoreEnabledState);
-    if (type >= CSSPseudoElementType::Count) {
-      return nullptr;
-    }
-  }
-
   // For Servo, compute the result directly without recursively building up
   // a throwaway style context chain.
   if (ServoStyleSet* servoSet = styleSet->GetAsServo()) {
-    if (aStyleType == eDefaultOnly) {
-      NS_WARNING("stylo: ServoStyleSets cannot supply UA-only styles yet");
-      return nullptr;
+    StyleRuleInclusion rules = aStyleType == eDefaultOnly
+                               ? StyleRuleInclusion::DefaultOnly
+                               : StyleRuleInclusion::All;
+    RefPtr<nsStyleContext> result =
+       servoSet->ResolveTransientStyle(aElement, aPseudo, pseudoType, rules);
+    if (aAnimationFlag == eWithAnimation) {
+      return result.forget();
     }
-    return servoSet->ResolveTransientStyle(aElement, aPseudo, type);
+
+    RefPtr<ServoComputedValues> baseComputedValues =
+      servoSet->GetBaseComputedValuesForElement(aElement, pseudoType);
+    return NS_NewStyleContext(nullptr, presContext, aPseudo,
+                              pseudoType, baseComputedValues.forget());
   }
 
   RefPtr<nsStyleContext> parentContext;
@@ -681,14 +691,14 @@ nsComputedDOMStyle::DoGetStyleContextNoFlush(Element* aElement,
 
   if (aAnimationFlag == eWithAnimation) {
     return styleResolver.ResolveWithAnimation(styleSet,
-                                              aElement, type,
+                                              aElement, pseudoType,
                                               parentContext,
                                               aStyleType,
                                               inDocWithShell);
   }
 
   return styleResolver.ResolveWithoutAnimation(styleSet,
-                                               aElement, type,
+                                               aElement, pseudoType,
                                                parentContext,
                                                inDocWithShell);
 }
@@ -1265,6 +1275,46 @@ nsComputedDOMStyle::DoGetColumnRuleColor()
   return val.forget();
 }
 
+static void
+AppendCounterStyle(CounterStyle* aStyle, nsAString& aString)
+{
+  AnonymousCounterStyle* anonymous = aStyle->AsAnonymous();
+  if (!anonymous) {
+    // want SetIdent
+    nsString type;
+    aStyle->GetStyleName(type);
+    nsStyleUtil::AppendEscapedCSSIdent(type, aString);
+  } else if (anonymous->IsSingleString()) {
+    const nsTArray<nsString>& symbols = anonymous->GetSymbols();
+    MOZ_ASSERT(symbols.Length() == 1);
+    nsStyleUtil::AppendEscapedCSSString(symbols[0], aString);
+  } else {
+    aString.AppendLiteral("symbols(");
+
+    uint8_t system = anonymous->GetSystem();
+    NS_ASSERTION(system == NS_STYLE_COUNTER_SYSTEM_CYCLIC ||
+                 system == NS_STYLE_COUNTER_SYSTEM_NUMERIC ||
+                 system == NS_STYLE_COUNTER_SYSTEM_ALPHABETIC ||
+                 system == NS_STYLE_COUNTER_SYSTEM_SYMBOLIC ||
+                 system == NS_STYLE_COUNTER_SYSTEM_FIXED,
+                 "Invalid system for anonymous counter style.");
+    if (system != NS_STYLE_COUNTER_SYSTEM_SYMBOLIC) {
+      AppendASCIItoUTF16(nsCSSProps::ValueToKeyword(
+              system, nsCSSProps::kCounterSystemKTable), aString);
+      aString.Append(' ');
+    }
+
+    const nsTArray<nsString>& symbols = anonymous->GetSymbols();
+    NS_ASSERTION(symbols.Length() > 0,
+                 "No symbols in the anonymous counter style");
+    for (size_t i = 0, iend = symbols.Length(); i < iend; i++) {
+      nsStyleUtil::AppendEscapedCSSString(symbols[i], aString);
+      aString.Append(' ');
+    }
+    aString.Replace(aString.Length() - 1, 1, char16_t(')'));
+  }
+}
+
 already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetContent()
 {
@@ -1323,26 +1373,15 @@ nsComputedDOMStyle::DoGetContent()
         else {
           str.AppendLiteral("counters(");
         }
-        // WRITE ME
-        nsCSSValue::Array* a = data.GetCounters();
-
-        nsStyleUtil::AppendEscapedCSSIdent(
-          nsDependentString(a->Item(0).GetStringBufferValue()), str);
-        int32_t typeItem = 1;
+        nsStyleContentData::CounterFunction* counters = data.GetCounters();
+        nsStyleUtil::AppendEscapedCSSIdent(counters->mIdent, str);
         if (type == eStyleContentType_Counters) {
-          typeItem = 2;
           str.AppendLiteral(", ");
-          nsStyleUtil::AppendEscapedCSSString(
-            nsDependentString(a->Item(1).GetStringBufferValue()), str);
+          nsStyleUtil::AppendEscapedCSSString(counters->mSeparator, str);
         }
-        MOZ_ASSERT(eCSSUnit_None != a->Item(typeItem).GetUnit(),
-                   "'none' should be handled as identifier value");
-        nsString type;
-        a->Item(typeItem).AppendToString(eCSSProperty_list_style_type,
-                                         type, nsCSSValue::eNormalized);
-        if (!type.LowerCaseEqualsLiteral("decimal")) {
+        if (counters->mCounterStyle != CounterStyleManager::GetDecimalStyle()) {
           str.AppendLiteral(", ");
-          str.Append(type);
+          AppendCounterStyle(counters->mCounterStyle, str);
         }
 
         str.Append(char16_t(')'));
@@ -3751,43 +3790,8 @@ already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetListStyleType()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  CounterStyle* style = StyleList()->mCounterStyle;
-  AnonymousCounterStyle* anonymous = style->AsAnonymous();
   nsAutoString tmp;
-  if (!anonymous) {
-    // want SetIdent
-    nsString type;
-    style->GetStyleName(type);
-    nsStyleUtil::AppendEscapedCSSIdent(type, tmp);
-  } else if (anonymous->IsSingleString()) {
-    const nsTArray<nsString>& symbols = anonymous->GetSymbols();
-    MOZ_ASSERT(symbols.Length() == 1);
-    nsStyleUtil::AppendEscapedCSSString(symbols[0], tmp);
-  } else {
-    tmp.AppendLiteral("symbols(");
-
-    uint8_t system = anonymous->GetSystem();
-    NS_ASSERTION(system == NS_STYLE_COUNTER_SYSTEM_CYCLIC ||
-                 system == NS_STYLE_COUNTER_SYSTEM_NUMERIC ||
-                 system == NS_STYLE_COUNTER_SYSTEM_ALPHABETIC ||
-                 system == NS_STYLE_COUNTER_SYSTEM_SYMBOLIC ||
-                 system == NS_STYLE_COUNTER_SYSTEM_FIXED,
-                 "Invalid system for anonymous counter style.");
-    if (system != NS_STYLE_COUNTER_SYSTEM_SYMBOLIC) {
-      AppendASCIItoUTF16(nsCSSProps::ValueToKeyword(
-              system, nsCSSProps::kCounterSystemKTable), tmp);
-      tmp.Append(' ');
-    }
-
-    const nsTArray<nsString>& symbols = anonymous->GetSymbols();
-    NS_ASSERTION(symbols.Length() > 0,
-                 "No symbols in the anonymous counter style");
-    for (size_t i = 0, iend = symbols.Length(); i < iend; i++) {
-      nsStyleUtil::AppendEscapedCSSString(symbols[i], tmp);
-      tmp.Append(' ');
-    }
-    tmp.Replace(tmp.Length() - 1, 1, char16_t(')'));
-  }
+  AppendCounterStyle(StyleList()->mCounterStyle, tmp);
   val->SetString(tmp);
   return val.forget();
 }
@@ -4378,14 +4382,6 @@ nsComputedDOMStyle::DoGetAppearance()
   return val.forget();
 }
 
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetMozAppearance()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  val->SetIdent(nsCSSProps::ValueToKeywordEnum(StyleDisplay()->mMozAppearance,
-                                               nsCSSProps::kMozAppearanceKTable));
-  return val.forget();
-}
 
 already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetBoxAlign()
@@ -4465,18 +4461,38 @@ nsComputedDOMStyle::DoGetBorderImageSource()
   return val.forget();
 }
 
+void
+nsComputedDOMStyle::AppendFourSideCoordValues(nsDOMCSSValueList* aList,
+                                              const nsStyleSides& aValues)
+{
+  const nsStyleCoord& top = aValues.Get(eSideTop);
+  const nsStyleCoord& right = aValues.Get(eSideRight);
+  const nsStyleCoord& bottom = aValues.Get(eSideBottom);
+  const nsStyleCoord& left = aValues.Get(eSideLeft);
+
+  auto appendValue = [this, aList](const nsStyleCoord& value) {
+    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+    SetValueToCoord(val, value, true);
+    aList->AppendCSSValue(val.forget());
+  };
+  appendValue(top);
+  if (top != right || top != bottom || top != left) {
+    appendValue(right);
+    if (top != bottom || right != left) {
+      appendValue(bottom);
+      if (right != left) {
+        appendValue(left);
+      }
+    }
+  }
+}
+
 already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetBorderImageSlice()
 {
-  RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
-
   const nsStyleBorder* border = StyleBorder();
-  // Four slice numbers.
-  NS_FOR_CSS_SIDES (side) {
-    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-    SetValueToCoord(val, border->mBorderImageSlice.Get(side), true, nullptr);
-    valueList->AppendCSSValue(val.forget());
-  }
+  RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
+  AppendFourSideCoordValues(valueList, border->mBorderImageSlice);
 
   // Fill keyword.
   if (NS_STYLE_BORDER_IMAGE_SLICE_FILL == border->mBorderImageFill) {
@@ -4493,30 +4509,16 @@ nsComputedDOMStyle::DoGetBorderImageWidth()
 {
   const nsStyleBorder* border = StyleBorder();
   RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
-  NS_FOR_CSS_SIDES (side) {
-    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-    SetValueToCoord(val, border->mBorderImageWidth.Get(side),
-                    true, nullptr);
-    valueList->AppendCSSValue(val.forget());
-  }
-
+  AppendFourSideCoordValues(valueList, border->mBorderImageWidth);
   return valueList.forget();
 }
 
 already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetBorderImageOutset()
 {
-  RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
-
   const nsStyleBorder* border = StyleBorder();
-  // four slice numbers
-  NS_FOR_CSS_SIDES (side) {
-    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-    SetValueToCoord(val, border->mBorderImageOutset.Get(side),
-                    true, nullptr);
-    valueList->AppendCSSValue(val.forget());
-  }
-
+  RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
+  AppendFourSideCoordValues(valueList, border->mBorderImageOutset);
   return valueList.forget();
 }
 

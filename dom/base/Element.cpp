@@ -154,6 +154,8 @@
 
 #include "nsISpeculativeConnect.h"
 
+#include "DOMMatrix.h"
+
 using namespace mozilla;
 using namespace mozilla::dom;
 
@@ -663,7 +665,7 @@ Element::GetStyledFrame()
 }
 
 nsIScrollableFrame*
-Element::GetScrollFrame(nsIFrame **aStyledFrame, bool aFlushLayout)
+Element::GetScrollFrame(nsIFrame **aStyledFrame, FlushType aFlushType)
 {
   // it isn't clear what to return for SVG nodes, so just return nothing
   if (IsSVGElement()) {
@@ -673,9 +675,8 @@ Element::GetScrollFrame(nsIFrame **aStyledFrame, bool aFlushLayout)
     return nullptr;
   }
 
-  // Inline version of GetStyledFrame to use FlushType::None if needed.
-  nsIFrame* frame =
-    GetPrimaryFrame(aFlushLayout ? FlushType::Layout : FlushType::None);
+  // Inline version of GetStyledFrame to use the given FlushType.
+  nsIFrame* frame = GetPrimaryFrame(aFlushType);
   if (frame) {
     frame = nsLayoutUtils::GetStyleFrame(frame);
   }
@@ -683,30 +684,42 @@ Element::GetScrollFrame(nsIFrame **aStyledFrame, bool aFlushLayout)
   if (aStyledFrame) {
     *aStyledFrame = frame;
   }
-  if (!frame) {
-    return nullptr;
-  }
-
-  // menu frames implement GetScrollTargetFrame but we don't want
-  // to use it here.  Similar for comboboxes.
-  LayoutFrameType type = frame->Type();
-  if (type != LayoutFrameType::Menu &&
-      type != LayoutFrameType::ComboboxControl) {
-    nsIScrollableFrame *scrollFrame = frame->GetScrollTargetFrame();
-    if (scrollFrame)
-      return scrollFrame;
+  if (frame) {
+    // menu frames implement GetScrollTargetFrame but we don't want
+    // to use it here.  Similar for comboboxes.
+    LayoutFrameType type = frame->Type();
+    if (type != LayoutFrameType::Menu &&
+        type != LayoutFrameType::ComboboxControl) {
+      nsIScrollableFrame *scrollFrame = frame->GetScrollTargetFrame();
+      if (scrollFrame) {
+        MOZ_ASSERT(!OwnerDoc()->IsScrollingElement(this),
+                   "How can we have a scrollframe if we're the "
+                   "scrollingElement for our document?");
+        return scrollFrame;
+      }
+    }
   }
 
   nsIDocument* doc = OwnerDoc();
-  bool quirksMode = doc->GetCompatibilityMode() == eCompatibility_NavQuirks;
-  Element* elementWithRootScrollInfo =
-    quirksMode ? doc->GetBodyElement() : doc->GetRootElement();
-  if (this == elementWithRootScrollInfo) {
-    // In quirks mode, the scroll info for the body element should map to the
-    // root scrollable frame.
-    // In strict mode, the scroll info for the root element should map to the
-    // the root scrollable frame.
-    return frame->PresContext()->PresShell()->GetRootScrollFrameAsScrollable();
+  // Note: This IsScrollingElement() call can flush frames, if we're the body of
+  // a quirks mode document.
+  bool isScrollingElement = OwnerDoc()->IsScrollingElement(this);
+  // Now reget *aStyledFrame if the caller asked for it, because that frame
+  // flush can kill it.
+  if (aStyledFrame) {
+    nsIFrame* frame = GetPrimaryFrame(FlushType::None);
+    if (frame) {
+      *aStyledFrame = nsLayoutUtils::GetStyleFrame(frame);
+    } else {
+      *aStyledFrame = nullptr;
+    }
+  }
+
+  if (isScrollingElement) {
+    // Our scroll info should map to the root scrollable frame if there is one.
+    if (nsIPresShell* shell = doc->GetShell()) {
+      return shell->GetRootScrollFrameAsScrollable();
+    }
   }
 
   return nullptr;
@@ -856,7 +869,15 @@ Element::ScrollTop()
 void
 Element::SetScrollTop(int32_t aScrollTop)
 {
-  nsIScrollableFrame* sf = GetScrollFrame();
+  // When aScrollTop is 0, we don't need to flush layout to scroll to that
+  // point; we know 0 is always in range.  At least we think so...  But we do
+  // need to flush frames so we ensure we find the right scrollable frame if
+  // there is one.
+  //
+  // If aScrollTop is nonzero, we need to flush layout because we need to figure
+  // out what our real scrollTopMax is.
+  FlushType flushType = aScrollTop == 0 ? FlushType::Frames : FlushType::Layout;
+  nsIScrollableFrame* sf = GetScrollFrame(nullptr, flushType);
   if (sf) {
     nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
     if (sf->GetScrollbarStyles().mScrollBehavior == NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
@@ -878,6 +899,9 @@ Element::ScrollLeft()
 void
 Element::SetScrollLeft(int32_t aScrollLeft)
 {
+  // We can't assume things here based on the value of aScrollLeft, because
+  // depending on our direction and layout 0 may or may not be in our scroll
+  // range.  So we need to flush layout no matter what.
   nsIScrollableFrame* sf = GetScrollFrame();
   if (sf) {
     nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
@@ -895,7 +919,7 @@ Element::SetScrollLeft(int32_t aScrollLeft)
 bool
 Element::ScrollByNoFlush(int32_t aDx, int32_t aDy)
 {
-  nsIScrollableFrame* sf = GetScrollFrame(nullptr, false);
+  nsIScrollableFrame* sf = GetScrollFrame(nullptr, FlushType::None);
   if (!sf) {
     return false;
   }
@@ -917,7 +941,7 @@ Element::ScrollByNoFlush(int32_t aDx, int32_t aDy)
 void
 Element::MozScrollSnap()
 {
-  nsIScrollableFrame* sf = GetScrollFrame(nullptr, false);
+  nsIScrollableFrame* sf = GetScrollFrame(nullptr, FlushType::None);
   if (sf) {
     sf->ScrollSnap();
   }
@@ -3421,6 +3445,58 @@ Element::GetGridFragments(nsTArray<RefPtr<Grid>>& aResult)
   }
 }
 
+already_AddRefed<DOMMatrixReadOnly>
+Element::GetTransformToAncestor(Element& aAncestor)
+{
+  nsIFrame* primaryFrame = GetPrimaryFrame();
+  nsIFrame* ancestorFrame = aAncestor.GetPrimaryFrame();
+
+  Matrix4x4 transform;
+  if (primaryFrame) {
+    // If aAncestor is not actually an ancestor of this (including nullptr),
+    // then the call to GetTransformToAncestor will return the transform
+    // all the way up through the parent chain.
+    transform = nsLayoutUtils::GetTransformToAncestor(primaryFrame,
+      ancestorFrame, false, true);
+  }
+
+  DOMMatrixReadOnly* matrix = new DOMMatrix(this, transform);
+  RefPtr<DOMMatrixReadOnly> result(matrix);
+  return result.forget();
+}
+
+already_AddRefed<DOMMatrixReadOnly>
+Element::GetTransformToParent()
+{
+  nsIFrame* primaryFrame = GetPrimaryFrame();
+
+  Matrix4x4 transform;
+  if (primaryFrame) {
+    nsIFrame* parentFrame = primaryFrame->GetParent();
+    transform = nsLayoutUtils::GetTransformToAncestor(primaryFrame,
+      parentFrame, false, true);
+  }
+
+  DOMMatrixReadOnly* matrix = new DOMMatrix(this, transform);
+  RefPtr<DOMMatrixReadOnly> result(matrix);
+  return result.forget();
+}
+
+already_AddRefed<DOMMatrixReadOnly>
+Element::GetTransformToViewport()
+{
+  nsIFrame* primaryFrame = GetPrimaryFrame();
+  Matrix4x4 transform;
+  if (primaryFrame) {
+    transform = nsLayoutUtils::GetTransformToAncestor(primaryFrame,
+      nsLayoutUtils::GetDisplayRootFrame(primaryFrame), false, true);
+  }
+
+  DOMMatrixReadOnly* matrix = new DOMMatrix(this, transform);
+  RefPtr<DOMMatrixReadOnly> result(matrix);
+  return result.forget();
+}
+
 already_AddRefed<Animation>
 Element::Animate(JSContext* aContext,
                  JS::Handle<JSObject*> aKeyframes,
@@ -3945,6 +4021,11 @@ Element::RegisteredIntersectionObservers()
   return &slots->mRegisteredIntersectionObservers;
 }
 
+enum nsPreviousIntersectionThreshold {
+  eUninitialized = -2,
+  eNonIntersecting = -1
+};
+
 void
 Element::RegisterIntersectionObserver(DOMIntersectionObserver* aObserver)
 {
@@ -3953,7 +4034,13 @@ Element::RegisterIntersectionObserver(DOMIntersectionObserver* aObserver)
   if (observers->Contains(aObserver)) {
     return;
   }
-  RegisteredIntersectionObservers()->Put(aObserver, -1);
+
+  // Value can be:
+  //   -2:   Makes sure next calculated threshold always differs, leading to a
+  //         notification task being scheduled.
+  //   -1:   Non-intersecting.
+  //   >= 0: Intersecting, valid index of aObserver->mThresholds.
+  RegisteredIntersectionObservers()->Put(aObserver, eUninitialized);
 }
 
 void

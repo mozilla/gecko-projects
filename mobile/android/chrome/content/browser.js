@@ -129,8 +129,6 @@ var GlobalEventDispatcher = EventDispatcher.instance;
 var WindowEventDispatcher = EventDispatcher.for(window);
 
 var lazilyLoadedBrowserScripts = [
-  ["SelectHelper", "chrome://browser/content/SelectHelper.js"],
-  ["InputWidgetHelper", "chrome://browser/content/InputWidgetHelper.js"],
   ["MasterPassword", "chrome://browser/content/MasterPassword.js"],
   ["PluginHelper", "chrome://browser/content/PluginHelper.js"],
   ["OfflineApps", "chrome://browser/content/OfflineApps.js"],
@@ -159,7 +157,8 @@ var lazilyLoadedObserverScripts = [
 
 if (AppConstants.MOZ_WEBRTC) {
   lazilyLoadedObserverScripts.push(
-    ["WebrtcUI", ["getUserMedia:request",
+    ["WebrtcUI", ["getUserMedia:ask-device-permission",
+                  "getUserMedia:request",
                   "PeerConnection:request",
                   "recording-device-events",
                   "VideoCapture:Paused",
@@ -888,11 +887,15 @@ var BrowserApp = {
       }
     });
 
+
     NativeWindow.contextmenus.add(stringGetter("contextmenu.saveImage"),
       NativeWindow.contextmenus.imageSaveableContext,
       function(aTarget) {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_save_image");
         UITelemetry.addEvent("save.1", "contextmenu", null, "image");
+        WindowEventDispatcher.sendRequest({
+          type: "Mma:web_save_image",
+        });
 
         RuntimePermissions.waitForPermissions(RuntimePermissions.WRITE_EXTERNAL_STORAGE).then(function(permissionGranted) {
             if (!permissionGranted) {
@@ -938,6 +941,9 @@ var BrowserApp = {
       function(aTarget) {
         UITelemetry.addEvent("action.1", "contextmenu", null, "web_save_media");
         UITelemetry.addEvent("save.1", "contextmenu", null, "media");
+        WindowEventDispatcher.sendRequest({
+          type: "Mma:web_save_media",
+        });
 
         let url = aTarget.currentSrc || aTarget.src;
 
@@ -2250,21 +2256,6 @@ var NativeWindow = {
       "Menu:Clicked",
     ]);
     this.contextmenus.init();
-  },
-
-  loadDex: function(zipFile, implClass) {
-    GlobalEventDispatcher.sendRequest({
-      type: "Dex:Load",
-      zipfile: zipFile,
-      impl: implClass || "Main"
-    });
-  },
-
-  unloadDex: function(zipFile) {
-    GlobalEventDispatcher.sendRequest({
-      type: "Dex:Unload",
-      zipfile: zipFile
-    });
   },
 
   menu: {
@@ -4733,9 +4724,6 @@ var BrowserEventHandler = {
     BrowserApp.deck.addEventListener("MozMouseHittest", this, true);
     BrowserApp.deck.addEventListener("OpenMediaWithExternalApp", this, true);
 
-    InitLater(() => BrowserApp.deck.addEventListener("click", InputWidgetHelper, true));
-    InitLater(() => BrowserApp.deck.addEventListener("click", SelectHelper, true));
-
     // ReaderViews support backPress listeners.
     WindowEventDispatcher.registerListener((event, data, callback) => {
       callback.onSuccess(Reader.onBackPress(BrowserApp.selectedTab.id));
@@ -5366,6 +5354,7 @@ var XPInstallObserver = {
         }
 
         new Prompt({
+          window: window,
           title: Strings.browser.GetStringFromName("addonError.titleError"),
           message: message,
           buttons: buttons
@@ -5400,6 +5389,7 @@ var XPInstallObserver = {
             strings.GetStringFromName("unsignedAddonsDisabled.dismiss")
         ];
         new Prompt({
+          window: window,
           title: Strings.browser.GetStringFromName("addonError.titleBlocked"),
           message: message,
           buttons: buttons
@@ -5416,6 +5406,7 @@ var XPInstallObserver = {
           return;
 
         new Prompt({
+          window: window,
           title: Strings.browser.GetStringFromName("addonError.titleBlocked"),
           message: strings.formatStringFromName("xpinstallPromptWarningDirect", [brandShortName], 1),
           buttons: [strings.GetStringFromName("unsignedAddonsDisabled.dismiss")]
@@ -6641,6 +6632,7 @@ var ExternalApps = {
         if (apps.length > 1) {
           // Use the HelperApps prompt here to filter out any Http handlers
           HelperApps.prompt(apps, {
+            window: window,
             title: Strings.browser.GetStringFromName("openInApp.pageAction"),
             buttons: [
               Strings.browser.GetStringFromName("openInApp.ok"),

@@ -55,7 +55,11 @@ public:
         MAX_CONNECTIONS,
         MAX_PERSISTENT_CONNECTIONS_PER_HOST,
         MAX_PERSISTENT_CONNECTIONS_PER_PROXY,
-        MAX_REQUEST_DELAY
+        MAX_REQUEST_DELAY,
+        THROTTLING_ENABLED,
+        THROTTLING_SUSPEND_FOR,
+        THROTTLING_RESUME_FOR,
+        THROTTLING_RESUME_IN
     };
 
     //-------------------------------------------------------------------------
@@ -68,7 +72,11 @@ public:
                                uint16_t maxConnections,
                                uint16_t maxPersistentConnectionsPerHost,
                                uint16_t maxPersistentConnectionsPerProxy,
-                               uint16_t maxRequestDelay);
+                               uint16_t maxRequestDelay,
+                               bool throttleEnabled,
+                               uint32_t throttleSuspendFor,
+                               uint32_t throttleResumeFor,
+                               uint32_t throttleResumeIn);
     MOZ_MUST_USE nsresult Shutdown();
 
     //-------------------------------------------------------------------------
@@ -95,13 +103,9 @@ public:
     MOZ_MUST_USE nsresult RescheduleTransaction(nsHttpTransaction *,
                                                 int32_t priority);
 
-    // tells the transaction to stop receiving the response when |throttle|
-    // is true.  to start receiving again, this must be called with |throttle|
-    // set to false.  calling multiple times with the same value of |throttle|
-    // has no effect.  called by nsHttpChannels with the Throttleable class set
-    // and controlled by net::ThrottlingService.
-    // there is nothing to do when this fails, hence the void result.
-    void ThrottleTransaction(nsHttpTransaction *, bool throttle);
+    // TOOD
+    void UpdateClassOfServiceOnTransaction(nsHttpTransaction *,
+                                           uint32_t classOfService);
 
     // cancels a transaction w/ the given reason.
     MOZ_MUST_USE nsresult CancelTransaction(nsHttpTransaction *,
@@ -211,6 +215,17 @@ public:
 
     nsresult UpdateCurrentTopLevelOuterContentWindowId(uint64_t aWindowId);
 
+    // tracks and untracks active transactions according their throttle status
+    void AddActiveTransaction(nsHttpTransaction* aTrans, bool aThrottled);
+    void RemoveActiveTransaction(nsHttpTransaction* aTrans, bool aThrottled);
+    void MoveActiveTransaction(nsHttpTransaction* aTrans, bool aThrottled);
+
+    // called by nsHttpTransaction::WriteSegments.  decides whether the transaction
+    // should stop reading data based on: the throttling ticker status, overall
+    // status of all active transactions regarding active tab and respective
+    // throttling state.
+    bool ShouldStopReading(nsHttpTransaction* aTrans, bool aThrottled);
+
 private:
     virtual ~nsHttpConnectionMgr();
 
@@ -243,6 +258,7 @@ private:
         nsTArray<RefPtr<nsHttpConnection> >  mActiveConns; // active connections
         nsTArray<RefPtr<nsHttpConnection> >  mIdleConns;   // idle persistent connections
         nsTArray<nsHalfOpenSocket*>  mHalfOpens;   // half open connections
+        nsTArray<RefPtr<nsHalfOpenSocket> >  mHalfOpenFastOpenBackups;   // backup half open connections for connection in fast open phase
 
         bool AvailableForDispatchNow();
 
@@ -291,7 +307,8 @@ private:
         // Add a transaction information into the pending queue in
         // |mPendingTransactionTable| according to the transaction's
         // top level outer content window id.
-        void InsertTransaction(PendingTransactionInfo *info);
+        void InsertTransaction(PendingTransactionInfo *info,
+                               bool aInsertAsFirstForTheSamePriority = false);
 
         // Append transactions to the |result| whose window id
         // is equal to |windowId|.
@@ -376,15 +393,9 @@ private:
 
         bool FastOpenEnabled() override;
         nsresult StartFastOpen() override;
-        void SetFastOpenConnected(nsresult) override;
+        void SetFastOpenConnected(nsresult, bool aWillRetry) override;
         void FastOpenNotSupported() override;
         void SetFastOpenStatus(uint8_t tfoStatus) override;
-
-        bool IsFastOpenBackupHalfOpen()
-        {
-            return mConnectionNegotiatingFastOpen;
-        }
-
         void CancelFastOpenConnection();
     private:
         nsresult SetupConn(nsIAsyncOutputStream *out,
@@ -443,7 +454,7 @@ private:
         bool                           mFreeToUse;
         nsresult                       mPrimaryStreamStatus;
 
-        bool                           mUsingFastOpen;
+        bool                           mFastOpenInProgress;
         RefPtr<nsHttpConnection>       mConnectionNegotiatingFastOpen;
     };
     friend class nsHalfOpenSocket;
@@ -490,6 +501,10 @@ private:
     uint16_t mMaxPersistConnsPerHost;
     uint16_t mMaxPersistConnsPerProxy;
     uint16_t mMaxRequestDelay; // in seconds
+    bool mThrottleEnabled;
+    uint32_t mThrottleSuspendFor;
+    uint32_t mThrottleResumeFor;
+    uint32_t mThrottleResumeIn;
     Atomic<bool, mozilla::Relaxed> mIsShuttingDown;
 
     //-------------------------------------------------------------------------
@@ -543,7 +558,8 @@ private:
                                PendingTransactionInfo * pendingTransInfo);
 
     void InsertTransactionSorted(nsTArray<RefPtr<PendingTransactionInfo> > &pendingQ,
-                                 PendingTransactionInfo *pendingTransInfo);
+                                 PendingTransactionInfo *pendingTransInfo,
+                                 bool aInsertAsFirstForTheSamePriority = false);
 
     nsConnectionEntry *GetOrCreateConnectionEntry(nsHttpConnectionInfo *,
                                                   bool allowWildCard);
@@ -582,7 +598,7 @@ private:
     void OnMsgShutdownConfirm      (int32_t, ARefBase *);
     void OnMsgNewTransaction       (int32_t, ARefBase *);
     void OnMsgReschedTransaction   (int32_t, ARefBase *);
-    void OnMsgThrottleTransaction  (int32_t, ARefBase *);
+    void OnMsgUpdateClassOfServiceOnTransaction  (int32_t, ARefBase *);
     void OnMsgCancelTransaction    (int32_t, ARefBase *);
     void OnMsgCancelTransactions   (int32_t, ARefBase *);
     void OnMsgProcessPendingQ      (int32_t, ARefBase *);
@@ -643,6 +659,58 @@ private:
 
     nsCString mLogData;
     uint64_t mCurrentTopLevelOuterContentWindowId;
+
+    // Called on a pref change
+    void SetThrottlingEnabled(bool aEnable);
+
+    // Two hashtalbes keeping track of active transactions regarding window id and throttling.
+    // Used by the throttling algorithm to obtain number of transactions for the active tab
+    // and for inactive tabs according their throttle status.
+    // mActiveTransactions[0] are all unthrottled transactions, mActiveTransactions[1] throttled.
+    nsClassHashtable<nsUint64HashKey, nsTArray<RefPtr<nsHttpTransaction>>> mActiveTransactions[2];
+
+    // Whether we are inside the "stop reading" interval, altered by the throttle ticker
+    bool mThrottlingInhibitsReading;
+
+    // ticker for the 'stop reading'/'resume reading' signal
+    nsCOMPtr<nsITimer> mThrottleTicker;
+    // Checks if the combination of active transactions requires the ticker.
+    bool IsThrottleTickerNeeded();
+    // The method also unschedules the delayed resume of background tabs timer
+    // if the ticker was about to be scheduled.
+    void EnsureThrottleTickerIfNeeded();
+    // Drops also the mThrottlingInhibitsReading flag.  Immediate or delayed resume
+    // of currently throttled transactions is not affected by this method.
+    void DestroyThrottleTicker();
+    // Handler for the ticker: alters the mThrottlingInhibitsReading flag.
+    void ThrottlerTick();
+
+    // mechanism to delay immediate resume of background tabs and chrome initiated
+    // throttled transactions after the last transaction blocking their unthrottle
+    // has been removed.  Needs to be delayed because during a page load there is
+    // a number of intervals when there is no transaction that would cause throttling.
+    // Hence, throttling of long standing responses, like downloads, would be mostly
+    // ineffective if resumed during every such interval.
+    nsCOMPtr<nsITimer> mDelayedResumeReadTimer;
+    // Schedule the resume
+    void DelayedResumeBackgroundThrottledTransactions();
+    // Simply destroys the timer
+    void CancelDelayedResumeBackgroundThrottledTransactions();
+    // Handler for the timer: resumes all background throttled transactions
+    void ResumeBackgroundThrottledTransactions();
+
+    // Simple helpers, iterates the given hash/array and resume.
+    // @param excludeActive: skip active tabid transactions.
+    void ResumeReadOf(nsClassHashtable<nsUint64HashKey, nsTArray<RefPtr<nsHttpTransaction>>>&,
+                      bool excludeActive = false);
+    void ResumeReadOf(nsTArray<RefPtr<nsHttpTransaction>>*);
+
+    // Cached status of the active tab active transactions existence,
+    // saves a lot of hashtable lookups
+    bool mActiveTabTransactionsExist;
+    bool mActiveTabUnthrottledTransactionsExist;
+
+    void LogActiveTransactions(char);
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsHttpConnectionMgr::nsHalfOpenSocket, NS_HALFOPENSOCKET_IID)

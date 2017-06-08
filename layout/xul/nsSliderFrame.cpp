@@ -84,7 +84,7 @@ NS_QUERYFRAME_HEAD(nsSliderFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBoxFrame)
 
 nsSliderFrame::nsSliderFrame(nsStyleContext* aContext)
-  : nsBoxFrame(aContext, LayoutFrameType::Slider)
+  : nsBoxFrame(aContext, kClassID)
   , mRatio(0.0f)
   , mDragStart(0)
   , mThumbStart(0)
@@ -421,6 +421,23 @@ nsSliderFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
       // TODO: Should we be setting visible and dirty to the same thing here?
       nsDisplayListBuilder::AutoBuildingDisplayList
         buildingDisplayList(aBuilder, this, dirty, dirty, false);
+
+      // Clip the thumb layer to the slider track. This is necessary to ensure
+      // FrameLayerBuilder is able to merge content before and after the
+      // scrollframe into the same layer (otherwise it thinks the thumb could
+      // potentially move anywhere within the existing clip).
+      DisplayListClipState::AutoSaveRestore thumbClipState(aBuilder);
+      aBuilder->GetCurrentReferenceFrame();
+      thumbClipState.ClipContainingBlockDescendants(
+          GetRectRelativeToSelf() + aBuilder->ToReferenceFrame(this));
+
+      // Have the thumb's container layer capture the current clip, so
+      // it doesn't apply to the thumb's contents. This allows the contents
+      // to be fully rendered even if they're partially or fully offscreen,
+      // so async scrolling can still bring it into view.
+      DisplayListClipState::AutoSaveRestore thumbContentsClipState(aBuilder);
+      thumbContentsClipState.Clear();
+
       nsDisplayListBuilder::AutoContainerASRTracker contASRTracker(aBuilder);
       nsDisplayListCollection tempLists;
       nsBoxFrame::BuildDisplayListForChildren(aBuilder, tempLists);
@@ -435,10 +452,11 @@ nsSliderFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
       masterList.AppendToTop(tempLists.PositionedDescendants());
       masterList.AppendToTop(tempLists.Outlines());
 
+      // Restore the saved clip so it applies to the thumb container layer.
+      thumbContentsClipState.Restore();
+
       // Wrap the list to make it its own layer.
       const ActiveScrolledRoot* ownLayerASR = contASRTracker.GetContainerASR();
-      DisplayListClipState::AutoSaveRestore ownLayerClipState(aBuilder);
-      ownLayerClipState.ClearUpToASR(ownLayerASR);
       aLists.Content()->AppendNewToTop(new (aBuilder)
         nsDisplayOwnLayer(aBuilder, this, &masterList, ownLayerASR,
                           flags, scrollTargetId,

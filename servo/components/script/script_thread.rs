@@ -60,7 +60,7 @@ use dom::worklet::WorkletThreadPool;
 use dom::workletglobalscope::WorkletGlobalScopeInit;
 use euclid::Rect;
 use euclid::point::Point2D;
-use hyper::header::{ContentType, HttpDate, LastModified, Headers};
+use hyper::header::{ContentType, HttpDate, Headers, LastModified};
 use hyper::header::ReferrerPolicy as ReferrerPolicyHeader;
 use hyper::mime::{Mime, SubLevel, TopLevel};
 use hyper_serde::Serde;
@@ -73,13 +73,12 @@ use js::jsval::UndefinedValue;
 use js::rust::Runtime;
 use mem::heap_size_of_self_and_children;
 use microtask::{MicrotaskQueue, Microtask};
-use msg::constellation_msg::{BrowsingContextId, FrameType, PipelineId, PipelineNamespace};
-use net_traits::{CoreResourceMsg, FetchMetadata, FetchResponseListener};
-use net_traits::{IpcSend, Metadata, ReferrerPolicy, ResourceThreads};
+use msg::constellation_msg::{BrowsingContextId, FrameType, PipelineId, PipelineNamespace, TopLevelBrowsingContextId};
+use net_traits::{FetchMetadata, FetchResponseListener, FetchResponseMsg};
+use net_traits::{Metadata, NetworkError, ReferrerPolicy, ResourceThreads};
 use net_traits::image_cache::{ImageCache, PendingImageResponse};
-use net_traits::request::{CredentialsMode, Destination, RequestInit};
+use net_traits::request::{CredentialsMode, Destination, RedirectMode, RequestInit};
 use net_traits::storage_thread::StorageType;
-use network_listener::NetworkListener;
 use profile_traits::mem::{self, OpaqueSender, Report, ReportKind, ReportsChan};
 use profile_traits::time::{self, ProfilerCategory, profile};
 use script_layout_interface::message::{self, NewLayoutThreadInfo, ReflowQueryType};
@@ -105,7 +104,7 @@ use std::option::Option;
 use std::ptr;
 use std::rc::Rc;
 use std::result::Result;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Select, Sender, channel};
 use std::thread;
@@ -143,8 +142,10 @@ pub unsafe fn trace_thread(tr: *mut JSTracer) {
 struct InProgressLoad {
     /// The pipeline which requested this load.
     pipeline_id: PipelineId,
-    /// The frame being loaded into.
+    /// The browsing context being loaded into.
     browsing_context_id: BrowsingContextId,
+    /// The top level ancestor browsing context.
+    top_level_browsing_context_id: TopLevelBrowsingContextId,
     /// The parent pipeline and frame type associated with this load, if any.
     parent_info: Option<(PipelineId, FrameType)>,
     /// The current window size associated with this pipeline.
@@ -165,6 +166,7 @@ impl InProgressLoad {
     /// Create a new InProgressLoad object.
     fn new(id: PipelineId,
            browsing_context_id: BrowsingContextId,
+           top_level_browsing_context_id: TopLevelBrowsingContextId,
            parent_info: Option<(PipelineId, FrameType)>,
            layout_chan: Sender<message::Msg>,
            window_size: Option<WindowSizeData>,
@@ -173,6 +175,7 @@ impl InProgressLoad {
         InProgressLoad {
             pipeline_id: id,
             browsing_context_id: browsing_context_id,
+            top_level_browsing_context_id: top_level_browsing_context_id,
             parent_info: parent_info,
             layout_chan: layout_chan,
             window_size: window_size,
@@ -407,6 +410,8 @@ pub struct ScriptThread {
     window_proxies: DOMRefCell<HashMap<BrowsingContextId, JS<WindowProxy>>>,
     /// A list of data pertaining to loads that have not yet received a network response
     incomplete_loads: DOMRefCell<Vec<InProgressLoad>>,
+    /// A vector containing parser contexts which have not yet been fully processed
+    incomplete_parser_contexts: DOMRefCell<Vec<(PipelineId, ParserContext)>>,
     /// A map to store service worker registrations for a given origin
     registration_map: DOMRefCell<HashMap<ServoUrl, JS<ServiceWorkerRegistration>>>,
     /// A job queue for Service Workers keyed by their scope url
@@ -548,11 +553,12 @@ impl ScriptThreadFactory for ScriptThread {
         thread::Builder::new().name(format!("ScriptThread {:?}", state.id)).spawn(move || {
             thread_state::initialize(thread_state::SCRIPT);
             PipelineNamespace::install(state.pipeline_namespace_id);
-            BrowsingContextId::install(state.top_level_browsing_context_id);
+            TopLevelBrowsingContextId::install(state.top_level_browsing_context_id);
             let roots = RootCollection::new();
             let _stack_roots_tls = StackRootTLS::new(&roots);
             let id = state.id;
             let browsing_context_id = state.browsing_context_id;
+            let top_level_browsing_context_id = state.top_level_browsing_context_id;
             let parent_info = state.parent_info;
             let mem_profiler_chan = state.mem_profiler_chan.clone();
             let window_size = state.window_size;
@@ -567,9 +573,9 @@ impl ScriptThreadFactory for ScriptThread {
             let mut failsafe = ScriptMemoryFailsafe::new(&script_thread);
 
             let origin = MutableOrigin::new(load_data.url.origin());
-            let new_load = InProgressLoad::new(id, browsing_context_id, parent_info,
+            let new_load = InProgressLoad::new(id, browsing_context_id, top_level_browsing_context_id, parent_info,
                                                layout_chan, window_size, load_data.url.clone(), origin);
-            script_thread.start_page_load(new_load, load_data);
+            script_thread.pre_page_load(new_load, load_data);
 
             let reporter_name = format!("script-reporter-{}", id);
             mem_profiler_chan.run_with_memory_reporting(|| {
@@ -753,6 +759,7 @@ impl ScriptThread {
             documents: DOMRefCell::new(Documents::new()),
             window_proxies: DOMRefCell::new(HashMap::new()),
             incomplete_loads: DOMRefCell::new(vec!()),
+            incomplete_parser_contexts: DOMRefCell::new(vec!()),
             registration_map: DOMRefCell::new(HashMap::new()),
             job_queue_map: Rc::new(JobQueue::new()),
 
@@ -1100,6 +1107,14 @@ impl ScriptThread {
 
     fn handle_msg_from_constellation(&self, msg: ConstellationControlMsg) {
         match msg {
+            ConstellationControlMsg::NavigationResponse(id, fetch_data) => {
+                match fetch_data {
+                    FetchResponseMsg::ProcessResponse(metadata) => self.handle_fetch_metadata(id, metadata),
+                    FetchResponseMsg::ProcessResponseChunk(chunk) => self.handle_fetch_chunk(id, chunk),
+                    FetchResponseMsg::ProcessResponseEOF(eof) => self.handle_fetch_eof(id, eof),
+                    _ => unreachable!(),
+                };
+            },
             ConstellationControlMsg::Navigate(parent_pipeline_id, browsing_context_id, load_data, replace) =>
                 self.handle_navigate(parent_pipeline_id, Some(browsing_context_id), load_data, replace),
             ConstellationControlMsg::SendEvent(id, event) =>
@@ -1117,10 +1132,10 @@ impl ScriptThread {
             ConstellationControlMsg::PostMessage(pipeline_id, origin, data) =>
                 self.handle_post_message_msg(pipeline_id, origin, data),
             ConstellationControlMsg::MozBrowserEvent(parent_pipeline_id,
-                                                     browsing_context_id,
+                                                     top_level_browsing_context_id,
                                                      event) =>
                 self.handle_mozbrowser_event_msg(parent_pipeline_id,
-                                                 browsing_context_id,
+                                                 top_level_browsing_context_id,
                                                  event),
             ConstellationControlMsg::UpdatePipelineId(parent_pipeline_id,
                                                       browsing_context_id,
@@ -1275,8 +1290,8 @@ impl ScriptThread {
                 webdriver_handlers::handle_get_rect(&*documents, pipeline_id, node_id, reply),
             WebDriverScriptCommand::GetElementText(node_id, reply) =>
                 webdriver_handlers::handle_get_text(&*documents, pipeline_id, node_id, reply),
-            WebDriverScriptCommand::GetPipelineId(browsing_context_id, reply) =>
-                webdriver_handlers::handle_get_pipeline_id(&*documents, pipeline_id, browsing_context_id, reply),
+            WebDriverScriptCommand::GetBrowsingContextId(webdriver_frame_id, reply) =>
+                webdriver_handlers::handle_get_browsing_context_id(&*documents, pipeline_id, webdriver_frame_id, reply),
             WebDriverScriptCommand::GetUrl(reply) =>
                 webdriver_handlers::handle_get_url(&*documents, pipeline_id, reply),
             WebDriverScriptCommand::IsEnabled(element_id, reply) =>
@@ -1344,6 +1359,7 @@ impl ScriptThread {
             parent_info,
             new_pipeline_id,
             browsing_context_id,
+            top_level_browsing_context_id,
             load_data,
             window_size,
             pipeline_port,
@@ -1379,13 +1395,18 @@ impl ScriptThread {
         };
 
         // Kick off the fetch for the new resource.
-        let new_load = InProgressLoad::new(new_pipeline_id, browsing_context_id, parent_info,
-                                           layout_chan, window_size,
-                                           load_data.url.clone(), origin);
+        let new_load = InProgressLoad::new(new_pipeline_id,
+                                           browsing_context_id,
+                                           top_level_browsing_context_id,
+                                           parent_info,
+                                           layout_chan,
+                                           window_size,
+                                           load_data.url.clone(),
+                                           origin);
         if load_data.url.as_str() == "about:blank" {
             self.start_page_load_about_blank(new_load);
         } else {
-            self.start_page_load(new_load, load_data);
+            self.pre_page_load(new_load, load_data);
         }
     }
 
@@ -1495,17 +1516,18 @@ impl ScriptThread {
     /// https://developer.mozilla.org/en-US/docs/Web/Events/mozbrowserloadstart
     fn handle_mozbrowser_event_msg(&self,
                                    parent_pipeline_id: PipelineId,
-                                   browsing_context_id: Option<BrowsingContextId>,
+                                   top_level_browsing_context_id: Option<TopLevelBrowsingContextId>,
                                    event: MozBrowserEvent) {
         let doc = match { self.documents.borrow().find_document(parent_pipeline_id) } {
             None => return warn!("Mozbrowser event after pipeline {} closed.", parent_pipeline_id),
             Some(doc) => doc,
         };
 
-        match browsing_context_id {
+        match top_level_browsing_context_id {
             None => doc.window().dispatch_mozbrowser_event(event),
-            Some(browsing_context_id) => match doc.find_iframe(browsing_context_id) {
-                None => warn!("Mozbrowser event after iframe {}/{} closed.", parent_pipeline_id, browsing_context_id),
+            Some(top_level_browsing_context_id) => match doc.find_mozbrowser_iframe(top_level_browsing_context_id) {
+                None => warn!("Mozbrowser event after iframe {}/{} closed.",
+                              parent_pipeline_id, top_level_browsing_context_id),
                 Some(frame_element) => frame_element.dispatch_mozbrowser_event(event),
             },
         }
@@ -1779,9 +1801,10 @@ impl ScriptThread {
     // construct a new dissimilar-origin browsing context, add it
     // to the `window_proxies` map, and return it.
     fn remote_window_proxy(&self,
-                               global_to_clone: &GlobalScope,
-                               pipeline_id: PipelineId)
-                               -> Option<Root<WindowProxy>>
+                           global_to_clone: &GlobalScope,
+                           top_level_browsing_context_id: TopLevelBrowsingContextId,
+                           pipeline_id: PipelineId)
+                           -> Option<Root<WindowProxy>>
     {
         let browsing_context_id = match self.ask_constellation_for_browsing_context_id(pipeline_id) {
             Some(browsing_context_id) => browsing_context_id,
@@ -1791,10 +1814,15 @@ impl ScriptThread {
             return Some(Root::from_ref(window_proxy));
         }
         let parent = match self.ask_constellation_for_parent_info(pipeline_id) {
-            Some((parent_id, FrameType::IFrame)) => self.remote_window_proxy(global_to_clone, parent_id),
+            Some((parent_id, FrameType::IFrame)) => self.remote_window_proxy(global_to_clone,
+                                                                             top_level_browsing_context_id,
+                                                                             parent_id),
             _ => None,
         };
-        let window_proxy = WindowProxy::new_dissimilar_origin(global_to_clone, browsing_context_id, parent.r());
+        let window_proxy = WindowProxy::new_dissimilar_origin(global_to_clone,
+                                                              browsing_context_id,
+                                                              top_level_browsing_context_id,
+                                                              parent.r());
         self.window_proxies.borrow_mut().insert(browsing_context_id, JS::from_ref(&*window_proxy));
         Some(window_proxy)
     }
@@ -1806,10 +1834,11 @@ impl ScriptThread {
     // construct a new similar-origin browsing context, add it
     // to the `window_proxies` map, and return it.
     fn local_window_proxy(&self,
-                              window: &Window,
-                              browsing_context_id: BrowsingContextId,
-                              parent_info: Option<(PipelineId, FrameType)>)
-                              -> Root<WindowProxy>
+                          window: &Window,
+                          browsing_context_id: BrowsingContextId,
+                          top_level_browsing_context_id: TopLevelBrowsingContextId,
+                          parent_info: Option<(PipelineId, FrameType)>)
+                          -> Root<WindowProxy>
     {
         if let Some(window_proxy) = self.window_proxies.borrow().get(&browsing_context_id) {
             window_proxy.set_currently_active(&*window);
@@ -1821,10 +1850,16 @@ impl ScriptThread {
         };
         let parent = match (parent_info, iframe.as_ref()) {
             (_, Some(iframe)) => Some(window_from_node(&**iframe).window_proxy()),
-            (Some((parent_id, FrameType::IFrame)), _) => self.remote_window_proxy(window.upcast(), parent_id),
+            (Some((parent_id, FrameType::IFrame)), _) => self.remote_window_proxy(window.upcast(),
+                                                                                  top_level_browsing_context_id,
+                                                                                  parent_id),
             _ => None,
         };
-        let window_proxy = WindowProxy::new(&window, browsing_context_id, iframe.r().map(Castable::upcast), parent.r());
+        let window_proxy = WindowProxy::new(&window,
+                                            browsing_context_id,
+                                            top_level_browsing_context_id,
+                                            iframe.r().map(Castable::upcast),
+                                            parent.r());
         self.window_proxies.borrow_mut().insert(browsing_context_id, JS::from_ref(&*window_proxy));
         window_proxy
     }
@@ -1882,7 +1917,10 @@ impl ScriptThread {
                                  self.webvr_thread.clone());
 
         // Initialize the browsing context for the window.
-        let window_proxy = self.local_window_proxy(&window, incomplete.browsing_context_id, incomplete.parent_info);
+        let window_proxy = self.local_window_proxy(&window,
+                                                   incomplete.browsing_context_id,
+                                                   incomplete.top_level_browsing_context_id,
+                                                   incomplete.parent_info);
         window.init_window_proxy(&window_proxy);
 
         let last_modified = metadata.headers.as_ref().and_then(|headers| {
@@ -2197,43 +2235,65 @@ impl ScriptThread {
         window.evaluate_media_queries_and_report_changes();
     }
 
-    /// Initiate a non-blocking fetch for a specified resource. Stores the InProgressLoad
+    /// Instructs the constellation to fetch the document that will be loaded. Stores the InProgressLoad
     /// argument until a notification is received that the fetch is complete.
-    fn start_page_load(&self, incomplete: InProgressLoad, mut load_data: LoadData) {
+    fn pre_page_load(&self, incomplete: InProgressLoad, load_data: LoadData) {
         let id = incomplete.pipeline_id.clone();
-
-        let context = Arc::new(Mutex::new(ParserContext::new(id, load_data.url.clone())));
-        let (action_sender, action_receiver) = ipc::channel().unwrap();
-        let listener = NetworkListener {
-            context: context,
-            task_source: self.networking_task_source.clone(),
-            wrapper: None,
-        };
-        ROUTER.add_route(action_receiver.to_opaque(), box move |message| {
-            listener.notify_fetch(message.to().unwrap());
-        });
-
-        if load_data.url.scheme() == "javascript" {
-            load_data.url = ServoUrl::parse("about:blank").unwrap();
-        }
-
-        let request = RequestInit {
+        let mut req_init = RequestInit {
             url: load_data.url.clone(),
             method: load_data.method,
             destination: Destination::Document,
             credentials_mode: CredentialsMode::Include,
             use_url_credentials: true,
-            origin: load_data.url,
+            origin: load_data.url.clone(),
             pipeline_id: Some(id),
             referrer_url: load_data.referrer_url,
             referrer_policy: load_data.referrer_policy,
             headers: load_data.headers,
             body: load_data.data,
+            redirect_mode: RedirectMode::Manual,
             .. RequestInit::default()
         };
 
-        self.resource_threads.send(CoreResourceMsg::Fetch(request, action_sender)).unwrap();
+        if req_init.url.scheme() == "javascript" {
+            req_init.url = ServoUrl::parse("about:blank").unwrap();
+        }
+
+        let context = ParserContext::new(id, load_data.url);
+        self.incomplete_parser_contexts.borrow_mut().push((id, context));
+
+        self.constellation_chan.send(ConstellationMsg::InitiateNavigateRequest(req_init, id)).unwrap();
         self.incomplete_loads.borrow_mut().push(incomplete);
+    }
+
+    fn handle_fetch_metadata(&self, id: PipelineId, fetch_metadata: Result<FetchMetadata, NetworkError>) {
+        match fetch_metadata {
+            Ok(_) => {},
+            Err(ref e) => warn!("Network error: {:?}", e),
+        };
+        let mut incomplete_parser_contexts = self.incomplete_parser_contexts.borrow_mut();
+        let parser = incomplete_parser_contexts.iter_mut().find(|&&mut (pipeline_id, _)| pipeline_id == id);
+        if let Some(&mut (_, ref mut ctxt)) = parser {
+            ctxt.process_response(fetch_metadata);
+        }
+    }
+
+    fn handle_fetch_chunk(&self, id: PipelineId, chunk: Vec<u8>) {
+        let mut incomplete_parser_contexts = self.incomplete_parser_contexts.borrow_mut();
+        let parser = incomplete_parser_contexts.iter_mut().find(|&&mut (pipeline_id, _)| pipeline_id == id);
+        if let Some(&mut (_, ref mut ctxt)) = parser {
+            ctxt.process_response_chunk(chunk);
+        }
+    }
+
+    fn handle_fetch_eof(&self, id: PipelineId, eof: Result<(), NetworkError>) {
+        let idx = self.incomplete_parser_contexts.borrow().iter().position(|&(pipeline_id, _)| {
+            pipeline_id == id
+        });
+        if let Some(idx) = idx {
+            let (_, mut ctxt) = self.incomplete_parser_contexts.borrow_mut().remove(idx);
+            ctxt.process_response_eof(eof);
+        }
     }
 
     /// Synchronously fetch `about:blank`. Stores the `InProgressLoad`

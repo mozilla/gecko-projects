@@ -1,6 +1,5 @@
 window.shot = (function () {let exports={}; // Note: in this library we can't use any "system" dependencies because this can be used from multiple
 // environments
-/* globals console */
 
 /** Throws an error if the condition isn't true.  Any extra arguments after the condition
     are used as console.error() arguments. */
@@ -9,7 +8,7 @@ function assert(condition, ...args) {
     return;
   }
   console.error("Failed assertion", ...args);
-  throw new Error("Failed assertion", ...args);
+  throw new Error(`Failed assertion: ${args.join(" ")}`);
 }
 
 /** True if `url` is a valid URL */
@@ -493,6 +492,9 @@ class AbstractShot {
       throw new Error("No existing clip with id: " + name);
     }
     delete this._clips[name];
+  }
+  delAllClips() {
+    this._clips = {};
   }
   biggestClipSortOrder() {
     let biggest = 0;

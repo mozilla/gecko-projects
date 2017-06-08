@@ -382,7 +382,6 @@ MediaDecoder::MediaDecoder(MediaDecoderOwner* aOwner)
   , mAbstractMainThread(aOwner->AbstractMainThread())
   , mFrameStats(new FrameStatistics())
   , mVideoFrameContainer(aOwner->GetVideoFrameContainer())
-  , mPlaybackStatistics(new MediaChannelStatistics())
   , mPinnedForSeek(false)
   , mMinimizePreroll(false)
   , mFiredMetadataLoaded(false)
@@ -540,10 +539,10 @@ MediaDecoder::OnPlaybackEvent(MediaEventType aEvent)
 {
   switch (aEvent) {
     case MediaEventType::PlaybackStarted:
-      mPlaybackStatistics->Start();
+      mPlaybackStatistics.Start();
       break;
     case MediaEventType::PlaybackStopped:
-      mPlaybackStatistics->Stop();
+      mPlaybackStatistics.Stop();
       ComputePlaybackRate();
       break;
     case MediaEventType::PlaybackEnded:
@@ -1016,7 +1015,7 @@ MediaDecoder::ComputePlaybackRate()
   }
 
   bool reliable = false;
-  mPlaybackBytesPerSecond = mPlaybackStatistics->GetRateAtLastStop(&reliable);
+  mPlaybackBytesPerSecond = mPlaybackStatistics.GetRateAtLastStop(&reliable);
   mPlaybackRateReliable = reliable;
 }
 
@@ -1052,6 +1051,29 @@ MediaDecoder::NotifySuspendedStatusChanged()
   }
 }
 
+bool
+MediaDecoder::ShouldThrottleDownload()
+{
+  // We throttle the download if either the throttle override pref is set
+  // (so that we can always throttle in Firefox on mobile) or if the download
+  // is fast enough that there's no concern about playback being interrupted.
+  MOZ_ASSERT(NS_IsMainThread());
+  NS_ENSURE_TRUE(mDecoderStateMachine, false);
+
+  if (Preferences::GetBool("media.throttle-regardless-of-download-rate",
+                           false)) {
+    return true;
+  }
+
+  MediaStatistics stats = GetStatistics();
+  if (!stats.mDownloadRateReliable || !stats.mPlaybackRateReliable) {
+    return false;
+  }
+  uint32_t factor =
+    std::max(2u, Preferences::GetUint("media.throttle-factor", 2));
+  return stats.mDownloadRate > factor * stats.mPlaybackRate;
+}
+
 void
 MediaDecoder::NotifyBytesDownloaded()
 {
@@ -1059,7 +1081,7 @@ MediaDecoder::NotifyBytesDownloaded()
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
   UpdatePlaybackRate();
   GetOwner()->DownloadProgressed();
-  mResource->ThrottleReadahead(CanPlayThrough());
+  mResource->ThrottleReadahead(ShouldThrottleDownload());
 }
 
 void
@@ -1110,7 +1132,7 @@ MediaDecoder::NotifyBytesConsumed(int64_t aBytes, int64_t aOffset)
 
   MOZ_ASSERT(mDecoderStateMachine);
   if (aOffset >= mDecoderPosition) {
-    mPlaybackStatistics->AddBytes(aBytes);
+    mPlaybackStatistics.AddBytes(aBytes);
   }
   mDecoderPosition = aOffset + aBytes;
 }

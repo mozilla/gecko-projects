@@ -52,7 +52,6 @@ public:
   uint32_t SpdyVersion() override;
   bool TestJoinConnection(const nsACString &hostname, int32_t port) override;
   bool JoinConnection(const nsACString &hostname, int32_t port) override;
-  void ThrottleResponse(bool aThrottle) override;
 
   // When the connection is active this is called up to once every 1 second
   // return the interval (in seconds) that the connection next wants to
@@ -170,11 +169,12 @@ public:
     kFrameTypeBytes + kFrameStreamIDBytes;
 
   enum {
-    kLeaderGroupID =     0x3,
+    kLeaderGroupID =      0x3,
     kOtherGroupID =       0x5,
     kBackgroundGroupID =  0x7,
     kSpeculativeGroupID = 0x9,
-    kFollowerGroupID =    0xB
+    kFollowerGroupID =    0xB,
+    kUrgentStartGroupID = 0xD
     // Hey, you! YES YOU! If you add/remove any groups here, you almost
     // certainly need to change the lookup of the stream/ID hash in
     // Http2Session::OnTransportStatus. Yeah, that's right. YOU!

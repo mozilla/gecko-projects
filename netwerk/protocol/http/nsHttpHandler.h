@@ -27,7 +27,6 @@ class nsIIOService;
 class nsIRequestContextService;
 class nsISiteSecurityService;
 class nsIStreamConverterService;
-class nsIThrottlingService;
 
 
 namespace mozilla {
@@ -225,10 +224,10 @@ public:
         return mConnMgr->RescheduleTransaction(trans, priority);
     }
 
-    void ThrottleTransaction(nsHttpTransaction *trans,
-                                              bool throttle)
+    void UpdateClassOfServiceOnTransaction(nsHttpTransaction *trans,
+                                           uint32_t classOfService)
     {
-        mConnMgr->ThrottleTransaction(trans, throttle);
+        mConnMgr->UpdateClassOfServiceOnTransaction(trans, classOfService);
     }
 
     // Called to cancel a transaction, which may or may not be assigned to
@@ -296,7 +295,6 @@ public:
     MOZ_MUST_USE nsresult GetIOService(nsIIOService** service);
     nsICookieService * GetCookieService(); // not addrefed
     nsISiteSecurityService * GetSSService();
-    nsIThrottlingService * GetThrottlingService();
 
     // callable from socket thread only
     uint32_t Get32BitsOfPseudoRandom();
@@ -412,7 +410,6 @@ private:
     nsMainThreadPtrHandle<nsIStreamConverterService> mStreamConvSvc;
     nsMainThreadPtrHandle<nsICookieService>          mCookieService;
     nsMainThreadPtrHandle<nsISiteSecurityService>    mSSService;
-    nsMainThreadPtrHandle<nsIThrottlingService>      mThrottlingService;
 
     // the authentication credentials cache
     nsHttpAuthCache mAuthCache;
@@ -450,6 +447,11 @@ private:
     uint16_t mMaxConnections;
     uint8_t  mMaxPersistentConnectionsPerServer;
     uint8_t  mMaxPersistentConnectionsPerProxy;
+
+    bool mThrottleEnabled;
+    uint32_t mThrottleSuspendFor;
+    uint32_t mThrottleResumeFor;
+    uint32_t mThrottleResumeIn;
 
     uint8_t  mRedirectionLimit;
 

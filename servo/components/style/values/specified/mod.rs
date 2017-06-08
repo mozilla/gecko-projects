@@ -6,10 +6,9 @@
 //!
 //! TODO(emilio): Enhance docs.
 
-use app_units::Au;
+use Namespace;
 use context::QuirksMode;
-use cssparser::{self, Parser, Token};
-use euclid::size::Size2D;
+use cssparser::{self, Parser, Token, serialize_identifier};
 use itoa;
 use parser::{ParserContext, Parse};
 use self::grid::TrackSizeOrRepeat;
@@ -23,14 +22,18 @@ use style_traits::values::specified::AllowedNumericType;
 use super::{Auto, CSSFloat, CSSInteger, Either, None_};
 use super::computed::{self, Context};
 use super::computed::{Shadow as ComputedShadow, ToComputedValue};
-use super::generics::BorderRadiusSize as GenericBorderRadiusSize;
 use super::generics::grid::{TrackBreadth as GenericTrackBreadth, TrackSize as GenericTrackSize};
 use super::generics::grid::TrackList as GenericTrackList;
+use values::computed::ComputedValueAsSpecified;
 use values::specified::calc::CalcNode;
 
 #[cfg(feature = "gecko")]
 pub use self::align::{AlignItems, AlignJustifyContent, AlignJustifySelf, JustifyItems};
+pub use self::background::BackgroundSize;
+pub use self::border::{BorderCornerRadius, BorderImageSlice, BorderImageWidth};
+pub use self::border::{BorderImageSideWidth, BorderRadius, BorderSideWidth};
 pub use self::color::Color;
+pub use self::rect::LengthOrNumberRect;
 pub use super::generics::grid::GridLine;
 pub use self::image::{ColorStop, EndingShape as GradientEndingShape, Gradient};
 pub use self::image::{GradientItem, GradientKind, Image, ImageRect, ImageLayer};
@@ -40,16 +43,23 @@ pub use self::length::{Percentage, LengthOrNone, LengthOrNumber, LengthOrPercent
 pub use self::length::{LengthOrPercentageOrNone, LengthOrPercentageOrAutoOrContent, NoCalcLength};
 pub use self::length::{MaxLength, MozLength};
 pub use self::position::{Position, PositionComponent};
+pub use self::text::{LetterSpacing, LineHeight, WordSpacing};
+pub use self::transform::{TimingFunction, TransformOrigin};
 
 #[cfg(feature = "gecko")]
 pub mod align;
+pub mod background;
 pub mod basic_shape;
+pub mod border;
 pub mod calc;
 pub mod color;
 pub mod grid;
 pub mod image;
 pub mod length;
 pub mod position;
+pub mod rect;
+pub mod text;
+pub mod transform;
 
 /// Common handling for the specified value CSS url() values.
 pub mod url {
@@ -172,6 +182,15 @@ impl CSSColor {
             authored: None,
         })
     }
+
+    /// Returns false if the color is completely transparent, and
+    /// true otherwise.
+    pub fn is_non_transparent(&self) -> bool {
+        match self.parsed {
+            Color::RGBA(rgba) if rgba.alpha == 0 => false,
+            _ => true,
+        }
+    }
 }
 
 no_viewport_percentage!(CSSColor);
@@ -272,19 +291,6 @@ pub fn parse_number_with_clamping_mode(context: &ParserContext,
             })
         }
         _ => Err(())
-    }
-}
-
-/// The specified value of `BorderRadiusSize`
-pub type BorderRadiusSize = GenericBorderRadiusSize<LengthOrPercentage>;
-
-impl Parse for BorderRadiusSize {
-    #[inline]
-    fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
-        let first = try!(LengthOrPercentage::parse_non_negative(context, input));
-        let second = input.try(|i| LengthOrPercentage::parse_non_negative(context, i))
-            .unwrap_or_else(|()| first.clone());
-        Ok(GenericBorderRadiusSize(Size2D::new(first, second)))
     }
 }
 
@@ -427,107 +433,6 @@ impl Angle {
     }
 }
 
-#[allow(missing_docs)]
-pub fn parse_border_radius(context: &ParserContext, input: &mut Parser) -> Result<BorderRadiusSize, ()> {
-    input.try(|i| BorderRadiusSize::parse(context, i)).or_else(|_| {
-        match_ignore_ascii_case! { &try!(input.expect_ident()),
-            "thin" => Ok(BorderRadiusSize::circle(
-                             LengthOrPercentage::Length(NoCalcLength::from_px(1.)))),
-            "medium" => Ok(BorderRadiusSize::circle(
-                               LengthOrPercentage::Length(NoCalcLength::from_px(3.)))),
-            "thick" => Ok(BorderRadiusSize::circle(
-                              LengthOrPercentage::Length(NoCalcLength::from_px(5.)))),
-            _ => Err(())
-        }
-    })
-}
-
-#[allow(missing_docs)]
-pub fn parse_border_width(context: &ParserContext, input: &mut Parser) -> Result<Length, ()> {
-    input.try(|i| Length::parse_non_negative(context, i)).or_else(|()| {
-        match_ignore_ascii_case! { &try!(input.expect_ident()),
-            "thin" => Ok(Length::from_px(1.)),
-            "medium" => Ok(Length::from_px(3.)),
-            "thick" => Ok(Length::from_px(5.)),
-            _ => Err(())
-        }
-    })
-}
-
-#[derive(Clone, Debug, HasViewportPercentage, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[allow(missing_docs)]
-pub enum BorderWidth {
-    Thin,
-    Medium,
-    Thick,
-    Width(Length),
-}
-
-impl Parse for BorderWidth {
-    fn parse(context: &ParserContext, input: &mut Parser) -> Result<BorderWidth, ()> {
-        Self::parse_quirky(context, input, AllowQuirks::No)
-    }
-}
-
-impl BorderWidth {
-    /// Parses a border width, allowing quirks.
-    pub fn parse_quirky(context: &ParserContext,
-                        input: &mut Parser,
-                        allow_quirks: AllowQuirks)
-                        -> Result<BorderWidth, ()> {
-        match input.try(|i| Length::parse_non_negative_quirky(context, i, allow_quirks)) {
-            Ok(length) => Ok(BorderWidth::Width(length)),
-            Err(_) => match_ignore_ascii_case! { &try!(input.expect_ident()),
-               "thin" => Ok(BorderWidth::Thin),
-               "medium" => Ok(BorderWidth::Medium),
-               "thick" => Ok(BorderWidth::Thick),
-               _ => Err(())
-            }
-        }
-    }
-}
-
-impl BorderWidth {
-    #[allow(missing_docs)]
-    pub fn from_length(length: Length) -> Self {
-        BorderWidth::Width(length)
-    }
-}
-
-impl ToCss for BorderWidth {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            BorderWidth::Thin => dest.write_str("thin"),
-            BorderWidth::Medium => dest.write_str("medium"),
-            BorderWidth::Thick => dest.write_str("thick"),
-            BorderWidth::Width(ref length) => length.to_css(dest)
-        }
-    }
-}
-
-impl ToComputedValue for BorderWidth {
-    type ComputedValue = Au;
-
-    #[inline]
-    fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
-        // We choose the pixel length of the keyword values the same as both spec and gecko.
-        // Spec: https://drafts.csswg.org/css-backgrounds-3/#line-width
-        // Gecko: https://bugzilla.mozilla.org/show_bug.cgi?id=1312155#c0
-        match *self {
-            BorderWidth::Thin => Length::from_px(1.).to_computed_value(context),
-            BorderWidth::Medium => Length::from_px(3.).to_computed_value(context),
-            BorderWidth::Thick => Length::from_px(5.).to_computed_value(context),
-            BorderWidth::Width(ref length) => length.to_computed_value(context)
-        }
-    }
-
-    #[inline]
-    fn from_computed_value(computed: &Self::ComputedValue) -> Self {
-        BorderWidth::Width(ToComputedValue::from_computed_value(computed))
-    }
-}
-
 // The integer values here correspond to the border conflict resolution rules in CSS 2.1 §
 // 17.6.2.1. Higher values override lower values.
 define_numbered_css_keyword_enum! { BorderStyle:
@@ -553,7 +458,7 @@ impl BorderStyle {
 }
 
 /// A time in seconds according to CSS-VALUES § 6.2.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct Time {
     seconds: CSSFloat,
@@ -747,9 +652,9 @@ impl ToCss for Number {
 
 /// <number-percentage>
 /// Accepts only non-negative numbers.
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Copy, Debug, PartialEq, ToCss)]
 pub enum NumberOrPercentage {
     Percentage(Percentage),
     Number(Number),
@@ -781,18 +686,9 @@ impl Parse for NumberOrPercentage {
     }
 }
 
-impl ToCss for NumberOrPercentage {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            NumberOrPercentage::Percentage(percentage) => percentage.to_css(dest),
-            NumberOrPercentage::Number(number) => number.to_css(dest),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, ToCss)]
 pub struct Opacity(Number);
 
 no_viewport_percentage!(Opacity);
@@ -814,12 +710,6 @@ impl ToComputedValue for Opacity {
     #[inline]
     fn from_computed_value(computed: &CSSFloat) -> Self {
         Opacity(Number::from_computed_value(computed))
-    }
-}
-
-impl ToCss for Opacity {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        self.0.to_css(dest)
     }
 }
 
@@ -1043,103 +933,11 @@ impl Shadow {
 
 no_viewport_percentage!(SVGPaint);
 
-/// An SVG paint value
-///
-/// https://www.w3.org/TR/SVG2/painting.html#SpecifyingPaint
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-pub struct SVGPaint {
-    /// The paint source
-    pub kind: SVGPaintKind,
-    /// The fallback color
-    pub fallback: Option<CSSColor>,
-}
+/// Specified SVG Paint value
+pub type SVGPaint = ::values::generics::SVGPaint<CSSColor>;
 
-/// An SVG paint value without the fallback
-///
-/// Whereas the spec only allows PaintServer
-/// to have a fallback, Gecko lets the context
-/// properties have a fallback as well.
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-pub enum SVGPaintKind {
-    /// `none`
-    None,
-    /// `<color>`
-    Color(CSSColor),
-    /// `url(...)`
-    PaintServer(SpecifiedUrl),
-    /// `context-fill`
-    ContextFill,
-    /// `context-stroke`
-    ContextStroke,
-}
-
-impl SVGPaintKind {
-    fn parse_ident(input: &mut Parser) -> Result<Self, ()> {
-        Ok(match_ignore_ascii_case! { &input.expect_ident()?,
-            "none" => SVGPaintKind::None,
-            "context-fill" => SVGPaintKind::ContextFill,
-            "context-stroke" => SVGPaintKind::ContextStroke,
-            _ => return Err(())
-        })
-    }
-}
-
-impl Parse for SVGPaint {
-    fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
-        if let Ok(url) = input.try(|i| SpecifiedUrl::parse(context, i)) {
-            let fallback = input.try(|i| CSSColor::parse(context, i));
-            Ok(SVGPaint {
-                kind: SVGPaintKind::PaintServer(url),
-                fallback: fallback.ok(),
-            })
-        } else if let Ok(kind) = input.try(SVGPaintKind::parse_ident) {
-            if kind == SVGPaintKind::None {
-                Ok(SVGPaint {
-                    kind: kind,
-                    fallback: None,
-                })
-            } else {
-                let fallback = input.try(|i| CSSColor::parse(context, i));
-                Ok(SVGPaint {
-                    kind: kind,
-                    fallback: fallback.ok(),
-                })
-            }
-        } else if let Ok(color) = input.try(|i| CSSColor::parse(context, i)) {
-            Ok(SVGPaint {
-                kind: SVGPaintKind::Color(color),
-                fallback: None,
-            })
-        } else {
-            Err(())
-        }
-    }
-}
-
-impl ToCss for SVGPaintKind {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            SVGPaintKind::None => dest.write_str("none"),
-            SVGPaintKind::ContextStroke => dest.write_str("context-stroke"),
-            SVGPaintKind::ContextFill => dest.write_str("context-fill"),
-            SVGPaintKind::Color(ref color) => color.to_css(dest),
-            SVGPaintKind::PaintServer(ref server) => server.to_css(dest),
-        }
-    }
-}
-
-impl ToCss for SVGPaint {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        self.kind.to_css(dest)?;
-        if let Some(ref fallback) = self.fallback {
-            fallback.to_css(dest)?;
-        }
-        Ok(())
-    }
-}
-
+/// Specified SVG Paint Kind value
+pub type SVGPaintKind = ::values::generics::SVGPaintKind<CSSColor>;
 
 impl ToComputedValue for SVGPaint {
     type ComputedValue = super::computed::SVGPaint;
@@ -1166,32 +964,17 @@ impl ToComputedValue for SVGPaintKind {
 
     #[inline]
     fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
-        match *self {
-            SVGPaintKind::None => super::computed::SVGPaintKind::None,
-            SVGPaintKind::ContextStroke => super::computed::SVGPaintKind::ContextStroke,
-            SVGPaintKind::ContextFill => super::computed::SVGPaintKind::ContextFill,
-            SVGPaintKind::Color(ref color) => {
-                super::computed::SVGPaintKind::Color(color.to_computed_value(context))
+        self.convert(|color| {
+            match color.parsed {
+                Color::CurrentColor => cssparser::Color::RGBA(context.style().get_color().clone_color()),
+                _ => color.to_computed_value(context),
             }
-            SVGPaintKind::PaintServer(ref server) => {
-                super::computed::SVGPaintKind::PaintServer(server.to_computed_value(context))
-            }
-        }
+        })
     }
 
     #[inline]
     fn from_computed_value(computed: &Self::ComputedValue) -> Self {
-        match *computed {
-            super::computed::SVGPaintKind::None => SVGPaintKind::None,
-            super::computed::SVGPaintKind::ContextStroke => SVGPaintKind::ContextStroke,
-            super::computed::SVGPaintKind::ContextFill => SVGPaintKind::ContextFill,
-            super::computed::SVGPaintKind::Color(ref color) => {
-                SVGPaintKind::Color(ToComputedValue::from_computed_value(color))
-            }
-            super::computed::SVGPaintKind::PaintServer(ref server) => {
-                SVGPaintKind::PaintServer(ToComputedValue::from_computed_value(server))
-            }
-        }
+        computed.convert(ToComputedValue::from_computed_value)
     }
 }
 
@@ -1371,3 +1154,111 @@ impl AllowQuirks {
         self == AllowQuirks::Yes && quirks_mode == QuirksMode::Quirks
     }
 }
+
+#[cfg(feature = "gecko")]
+/// A namespace ID
+pub type NamespaceId = i32;
+
+
+#[cfg(feature = "servo")]
+/// A namespace ID (used by gecko only)
+pub type NamespaceId = ();
+
+/// An attr(...) rule
+///
+/// `[namespace? `|`]? ident`
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+pub struct Attr {
+    /// Optional namespace
+    pub namespace: Option<(Namespace, NamespaceId)>,
+    /// Attribute name
+    pub attribute: String,
+}
+
+impl Parse for Attr {
+    fn parse(context: &ParserContext, input: &mut Parser) -> Result<Attr, ()> {
+        input.expect_function_matching("attr")?;
+        input.parse_nested_block(|i| Attr::parse_function(context, i))
+    }
+}
+
+#[cfg(feature = "gecko")]
+/// Get the namespace id from the namespace map
+fn get_id_for_namespace(namespace: &Namespace, context: &ParserContext) -> Result<NamespaceId, ()> {
+    let namespaces_map = match context.namespaces {
+        Some(map) => map,
+        None => {
+            // If we don't have a namespace map (e.g. in inline styles)
+            // we can't parse namespaces
+            return Err(());
+        }
+    };
+
+    match namespaces_map.prefixes.get(&namespace.0) {
+        Some(entry) => Ok(entry.1),
+        None => Err(()),
+    }
+}
+
+#[cfg(feature = "servo")]
+/// Get the namespace id from the namespace map
+fn get_id_for_namespace(_: &Namespace, _: &ParserContext) -> Result<NamespaceId, ()> {
+    Ok(())
+}
+
+impl Attr {
+    /// Parse contents of attr() assuming we have already parsed `attr` and are
+    /// within a parse_nested_block()
+    pub fn parse_function(context: &ParserContext, input: &mut Parser) -> Result<Attr, ()> {
+        // Syntax is `[namespace? `|`]? ident`
+        // no spaces allowed
+        let first = input.try(|i| i.expect_ident()).ok();
+        if let Ok(token) = input.try(|i| i.next_including_whitespace()) {
+            match token {
+                Token::Delim('|') => {}
+                _ => return Err(()),
+            }
+            // must be followed by an ident
+            let second_token = match input.next_including_whitespace()? {
+                Token::Ident(second) => second,
+                _ => return Err(()),
+            };
+
+            let ns_with_id = if let Some(ns) = first {
+                let ns: Namespace = ns.into();
+                let id = get_id_for_namespace(&ns, context)?;
+                Some((ns, id))
+            } else {
+                None
+            };
+            return Ok(Attr {
+                namespace: ns_with_id,
+                attribute: second_token.into_owned(),
+            })
+        }
+
+        if let Some(first) = first {
+            Ok(Attr {
+                namespace: None,
+                attribute: first.into_owned(),
+            })
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl ToCss for Attr {
+    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+        dest.write_str("attr(")?;
+        if let Some(ref ns) = self.namespace {
+            serialize_identifier(&ns.0.to_string(), dest)?;
+            dest.write_str("|")?;
+        }
+        serialize_identifier(&self.attribute, dest)?;
+        dest.write_str(")")
+    }
+}
+
+impl ComputedValueAsSpecified for Attr {}

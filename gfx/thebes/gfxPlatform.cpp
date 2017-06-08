@@ -868,7 +868,6 @@ gfxPlatform::Shutdown()
     // These may be called before the corresponding subsystems have actually
     // started up. That's OK, they can handle it.
     gfxFontCache::Shutdown();
-    gfxFontGroup::Shutdown();
     gfxGradientCache::Shutdown();
     gfxAlphaBoxBlur::ShutdownBlurCache();
     gfxGraphiteShaper::Shutdown();
@@ -2437,15 +2436,11 @@ already_AddRefed<ScaledFont>
 gfxPlatform::GetScaledFontForFontWithCairoSkia(DrawTarget* aTarget, gfxFont* aFont)
 {
     NativeFont nativeFont;
-    if (aTarget->GetBackendType() == BackendType::CAIRO || aTarget->GetBackendType() == BackendType::SKIA) {
-        nativeFont.mType = NativeFontType::CAIRO_FONT_FACE;
-        nativeFont.mFont = aFont->GetCairoScaledFont();
-        return Factory::CreateScaledFontForNativeFont(nativeFont,
-                                                      aFont->GetUnscaledFont(),
-                                                      aFont->GetAdjustedSize());
-    }
-
-    return nullptr;
+    nativeFont.mType = NativeFontType::CAIRO_FONT_FACE;
+    nativeFont.mFont = aFont->GetCairoScaledFont();
+    return Factory::CreateScaledFontForNativeFont(nativeFont,
+                                                  aFont->GetUnscaledFont(),
+                                                  aFont->GetAdjustedSize());
 }
 
 /* static */ bool

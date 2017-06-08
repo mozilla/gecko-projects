@@ -7,12 +7,21 @@ module.exports = {
     "Ci": true,
     "Cr": true,
     "Cu": true,
+    "StructuredCloneHolder": false,
     "TextDecoder": false,
     "TextEncoder": false,
+
+    "MatchGlob": false,
+    "MatchPattern": true,
+    "MatchPatternSet": false,
+    "WebExtensionContentScript": false,
+    "WebExtensionPolicy": false,
+
     // Specific to WebExtensions:
     "AppConstants": true,
     "Extension": true,
     "ExtensionAPI": true,
+    "ExtensionCommon": true,
     "ExtensionManagement": true,
     "ExtensionUtils": true,
     "extensions": true,
@@ -83,9 +92,6 @@ module.exports = {
 
     // Always require parenthesis for new calls
     "new-parens": "error",
-
-    // Use [] instead of Array()
-    "no-array-constructor": "error",
 
     // Disallow empty statements. This will report an error for:
     // try { something(); } catch (e) {}
@@ -197,14 +203,8 @@ module.exports = {
     // Allow use of the continue statement.
     "no-continue": "off",
 
-    // Disallow control characters in regular expressions.
-    "no-control-regex": "error",
-
     // Allow division operators explicitly at beginning of regular expression.
     "no-div-regex": "off",
-
-    // Disallow use of eval(). We have other APIs to evaluate code in content.
-    "no-eval": "error",
 
     // Disallow adding to native types
     "no-extend-native": "error",
@@ -329,9 +329,6 @@ module.exports = {
 
     // Disallow Yoda conditions (where literal value comes first).
     "yoda": "error",
-
-    // disallow use of eval()-like methods
-    "no-implied-eval": "error",
 
     // Disallow function or variable declarations in nested blocks
     "no-inner-declarations": "error",

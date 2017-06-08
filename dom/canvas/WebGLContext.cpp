@@ -166,7 +166,6 @@ WebGLContext::WebGLContext()
     mDitherEnabled = 1;
     mRasterizerDiscardEnabled = 0; // OpenGL ES 3.0 spec p244
     mScissorTestEnabled = 0;
-    mDepthTestEnabled = 0;
     mStencilTestEnabled = 0;
 
     if (NS_IsMainThread()) {
@@ -2353,7 +2352,7 @@ WebGLContext::GetVRFrame()
 
     if (sharedSurface && sharedSurface->GetAllocator() != vrmc) {
         RefPtr<SharedSurfaceTextureClient> dest =
-        screen->Factory()->NewTexClient(sharedSurface->GetSize());
+        screen->Factory()->NewTexClient(sharedSurface->GetSize(), vrmc);
         if (!dest) {
             return nullptr;
         }

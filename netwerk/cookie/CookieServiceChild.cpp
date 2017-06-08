@@ -6,6 +6,7 @@
 #include "mozilla/net/CookieServiceChild.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/BasePrincipal.h"
+#include "mozilla/dom/ContentChild.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/net/NeckoChild.h"
 #include "nsIChannel.h"
@@ -46,6 +47,12 @@ CookieServiceChild::CookieServiceChild()
   , mThirdPartySession(false)
 {
   NS_ASSERTION(IsNeckoChild(), "not a child process");
+
+  mozilla::dom::ContentChild* cc =
+    static_cast<mozilla::dom::ContentChild*>(gNeckoChild->Manager());
+  if (cc->IsShuttingDown()) {
+    return;
+  }
 
   // This corresponds to Release() in DeallocPCookieService.
   NS_ADDREF_THIS();
@@ -144,7 +151,8 @@ nsresult
 CookieServiceChild::SetCookieStringInternal(nsIURI *aHostURI,
                                             nsIChannel *aChannel,
                                             const char *aCookieString,
-                                            const char *aServerTime)
+                                            const char *aServerTime,
+                                            bool aFromHttp)
 {
   NS_ENSURE_ARG(aHostURI);
   NS_ENSURE_ARG_POINTER(aCookieString);
@@ -179,7 +187,7 @@ CookieServiceChild::SetCookieStringInternal(nsIURI *aHostURI,
 
   // Synchronously call the parent.
   SendSetCookieString(uriParams, !!isForeign, cookieString, serverTime,
-                      attrs);
+                      attrs, aFromHttp);
   return NS_OK;
 }
 
@@ -220,7 +228,8 @@ CookieServiceChild::SetCookieString(nsIURI *aHostURI,
                                     const char *aCookieString,
                                     nsIChannel *aChannel)
 {
-  return SetCookieStringInternal(aHostURI, aChannel, aCookieString, nullptr);
+  return SetCookieStringInternal(aHostURI, aChannel, aCookieString,
+                                 nullptr, false);
 }
 
 NS_IMETHODIMP
@@ -231,7 +240,8 @@ CookieServiceChild::SetCookieStringFromHttp(nsIURI     *aHostURI,
                                             const char *aServerTime,
                                             nsIChannel *aChannel) 
 {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  return SetCookieStringInternal(aHostURI, aChannel, aCookieString,
+                                 aServerTime, true);
 }
 
 } // namespace net

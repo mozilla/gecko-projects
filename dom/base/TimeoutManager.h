@@ -18,6 +18,7 @@ namespace mozilla {
 namespace dom {
 
 class OrderedTimeoutIterator;
+class TimeoutExecutor;
 
 // This class manages the timeouts in a Window's setTimeout/setInterval pool.
 class TimeoutManager final
@@ -47,22 +48,12 @@ public:
                     mozilla::dom::Timeout::Reason aReason);
 
   // The timeout implementation functions.
-  void RunTimeout(mozilla::dom::Timeout* aTimeout);
+  void RunTimeout(const TimeStamp& aNow, const TimeStamp& aTargetDeadline);
   // Return true if |aTimeout| needs to be reinserted into the timeout list.
-  bool RescheduleTimeout(mozilla::dom::Timeout* aTimeout, const TimeStamp& now,
-                         bool aRunningPendingTimeouts);
+  bool RescheduleTimeout(mozilla::dom::Timeout* aTimeout, const TimeStamp& now);
 
   void ClearAllTimeouts();
   uint32_t GetTimeoutId(mozilla::dom::Timeout::Reason aReason);
-
-  // Apply back pressure to the window if the TabGroup ThrottledEventQueue
-  // exists and has too many runnables waiting to run.  For example, increase
-  // the minimum timer delay, etc.
-  void MaybeApplyBackPressure();
-
-  // Check the current ThrottledEventQueue depth and update the back pressure
-  // state.  If the queue has drained back pressure may be canceled.
-  void CancelOrUpdateBackPressure(nsGlobalWindow* aWindow);
 
   // When timers are being throttled and we reduce the thottle delay we must
   // reschedule.  The amount of the old throttle delay must be provided in
@@ -119,6 +110,9 @@ public:
   void BeginSyncOperation();
   void EndSyncOperation();
 
+  nsIEventTarget*
+  EventTarget();
+
   static const uint32_t InvalidFiringId;
 
 private:
@@ -134,17 +128,21 @@ private:
   DestroyFiringId(uint32_t aFiringId);
 
   bool
+  IsValidFiringId(uint32_t aFiringId) const;
+
+  bool
   IsInvalidFiringId(uint32_t aFiringId) const;
 
 private:
   struct Timeouts {
-    Timeouts()
-      : mTimeoutInsertionPoint(nullptr)
+    explicit Timeouts(const TimeoutManager& aManager)
+      : mManager(aManager)
     {
     }
 
     // Insert aTimeout into the list, before all timeouts that would
-    // fire after it, but no earlier than mTimeoutInsertionPoint, if any.
+    // fire after it, but no earlier than the last Timeout with a
+    // valid FiringId.
     enum class SortBy
     {
       TimeRemaining,
@@ -153,8 +151,7 @@ private:
     void Insert(mozilla::dom::Timeout* aTimeout, SortBy aSortBy);
     nsresult ResetTimersForThrottleReduction(int32_t aPreviousThrottleDelayMS,
                                              const TimeoutManager& aTimeoutManager,
-                                             SortBy aSortBy,
-                                             nsIEventTarget* aQueue);
+                                             SortBy aSortBy);
 
     const Timeout* GetFirst() const { return mTimeoutList.getFirst(); }
     Timeout* GetFirst() { return mTimeoutList.getFirst(); }
@@ -163,15 +160,6 @@ private:
     bool IsEmpty() const { return mTimeoutList.isEmpty(); }
     void InsertFront(Timeout* aTimeout) { mTimeoutList.insertFront(aTimeout); }
     void Clear() { mTimeoutList.clear(); }
-
-    void SetInsertionPoint(Timeout* aTimeout)
-    {
-      mTimeoutInsertionPoint = aTimeout;
-    }
-    Timeout* InsertionPoint()
-    {
-      return mTimeoutInsertionPoint;
-    }
 
     template <class Callable>
     void ForEach(Callable c)
@@ -200,17 +188,15 @@ private:
     friend class OrderedTimeoutIterator;
 
   private:
-    typedef mozilla::LinkedList<mozilla::dom::Timeout> TimeoutList;
+    // The TimeoutManager that owns this Timeouts structure.  This is
+    // mainly used to call state inspecting methods like IsValidFiringId().
+    const TimeoutManager&     mManager;
 
-    // mTimeoutList is generally sorted by mWhen, unless mTimeoutInsertionPoint is
-    // non-null.  In that case, the dummy timeout pointed to by
-    // mTimeoutInsertionPoint may have a later mWhen than some of the timeouts
-    // that come after it.
+    typedef mozilla::LinkedList<RefPtr<Timeout>> TimeoutList;
+
+    // mTimeoutList is generally sorted by mWhen, but new values are always
+    // inserted after any Timeouts with a valid FiringId.
     TimeoutList               mTimeoutList;
-    // If mTimeoutInsertionPoint is non-null, insertions should happen after it.
-    // This is a dummy timeout at the moment; if that ever changes, the logic in
-    // ResetTimersForThrottleReduction needs to change.
-    mozilla::dom::Timeout*    mTimeoutInsertionPoint;
   };
 
   friend class OrderedTimeoutIterator;
@@ -218,6 +204,10 @@ private:
   // Each nsGlobalWindow object has a TimeoutManager member.  This reference
   // points to that holder object.
   nsGlobalWindow&             mWindow;
+  // The executor is specific to the nsGlobalWindow/TimeoutManager, but it
+  // can live past the destruction of the window if its scheduled.  Therefore
+  // it must be a separate ref-counted object.
+  RefPtr<TimeoutExecutor>     mExecutor;
   // The list of timeouts coming from non-tracking scripts.
   Timeouts                    mNormalTimeouts;
   // The list of timeouts coming from scripts on the tracking protection list.
@@ -229,8 +219,6 @@ private:
 
    // The current idle request callback timeout handle
   uint32_t                    mIdleCallbackTimeoutCounter;
-
-  int32_t                     mBackPressureDelayMS;
 
   nsCOMPtr<nsITimer>          mThrottleTrackingTimeoutsTimer;
   bool                        mThrottleTrackingTimeouts;

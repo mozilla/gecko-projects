@@ -114,6 +114,8 @@
 #include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/dom/TimeoutManager.h"
 #include "mozilla/PreloadedStyleSheet.h"
+#include "mozilla/layers/WebRenderBridgeChild.h"
+#include "mozilla/layers/WebRenderLayerManager.h"
 
 #ifdef XP_WIN
 #undef GetClassName
@@ -2525,6 +2527,14 @@ nsDOMWindowUtils::SetAsyncScrollOffset(nsIDOMNode* aNode,
   if (!manager) {
     return NS_ERROR_FAILURE;
   }
+  if (WebRenderLayerManager* wrlm = manager->AsWebRenderLayerManager()) {
+    WebRenderBridgeChild* wrbc = wrlm->WrBridge();
+    if (!wrbc) {
+      return NS_ERROR_UNEXPECTED;
+    }
+    wrbc->SendSetAsyncScrollOffset(viewId, aX, aY);
+    return NS_OK;
+  }
   ShadowLayerForwarder* forwarder = manager->AsShadowForwarder();
   if (!forwarder || !forwarder->HasShadowManager()) {
     return NS_ERROR_UNEXPECTED;
@@ -2552,6 +2562,14 @@ nsDOMWindowUtils::SetAsyncZoom(nsIDOMNode* aRootElement, float aValue)
   if (!manager) {
     return NS_ERROR_FAILURE;
   }
+  if (WebRenderLayerManager* wrlm = manager->AsWebRenderLayerManager()) {
+    WebRenderBridgeChild* wrbc = wrlm->WrBridge();
+    if (!wrbc) {
+      return NS_ERROR_UNEXPECTED;
+    }
+    wrbc->SendSetAsyncZoom(viewId, aValue);
+    return NS_OK;
+  }
   ShadowLayerForwarder* forwarder = manager->AsShadowForwarder();
   if (!forwarder || !forwarder->HasShadowManager()) {
     return NS_ERROR_UNEXPECTED;
@@ -2576,6 +2594,14 @@ nsDOMWindowUtils::FlushApzRepaints(bool* aOutResult)
   LayerManager* manager = widget->GetLayerManager();
   if (!manager) {
     *aOutResult = false;
+    return NS_OK;
+  }
+  if (WebRenderLayerManager* wrlm = manager->AsWebRenderLayerManager()) {
+    WebRenderBridgeChild* wrbc = wrlm->WrBridge();
+    if (!wrbc) {
+      return NS_ERROR_UNEXPECTED;
+    }
+    wrbc->SendFlushApzRepaints();
     return NS_OK;
   }
   ShadowLayerForwarder* forwarder = manager->AsShadowForwarder();
@@ -3904,6 +3930,10 @@ nsDOMWindowUtils::GetContentAPZTestData(JSContext* aContext,
       if (!clm->GetAPZTestData().ToJS(aOutContentTestData, aContext)) {
         return NS_ERROR_FAILURE;
       }
+    } else if (WebRenderLayerManager* wrlm = lm->AsWebRenderLayerManager()) {
+      if (!wrlm->GetAPZTestData().ToJS(aOutContentTestData, aContext)) {
+        return NS_ERROR_FAILURE;
+      }
     }
   }
 
@@ -3919,12 +3949,19 @@ nsDOMWindowUtils::GetCompositorAPZTestData(JSContext* aContext,
     if (!lm) {
       return NS_OK;
     }
+    APZTestData compositorSideData;
     if (ClientLayerManager* clm = lm->AsClientLayerManager()) {
-      APZTestData compositorSideData;
       clm->GetCompositorSideAPZTestData(&compositorSideData);
-      if (!compositorSideData.ToJS(aOutCompositorTestData, aContext)) {
+    } else if (WebRenderLayerManager* wrlm = lm->AsWebRenderLayerManager()) {
+      if (!wrlm->WrBridge()) {
+        return NS_ERROR_UNEXPECTED;
+      }
+      if (!wrlm->WrBridge()->SendGetAPZTestData(&compositorSideData)) {
         return NS_ERROR_FAILURE;
       }
+    }
+    if (!compositorSideData.ToJS(aOutCompositorTestData, aContext)) {
+      return NS_ERROR_FAILURE;
     }
   }
 
@@ -4059,14 +4096,14 @@ nsDOMWindowUtils::AskPermission(nsIContentPermissionRequest* aRequest)
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::GetElementsRestyled(uint64_t* aResult)
+nsDOMWindowUtils::GetRestyleGeneration(uint64_t* aResult)
 {
   nsPresContext* presContext = GetPresContext();
   if (!presContext) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  *aResult = presContext->ElementsRestyledCount();
+  *aResult = presContext->GetRestyleGeneration();
   return NS_OK;
 }
 

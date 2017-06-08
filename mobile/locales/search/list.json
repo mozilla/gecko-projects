@@ -75,7 +75,7 @@
     "be": {
       "default": {
         "visibleDefaultEngines": [
-          "google", "wikipedia-be", "bing", "yahoo", "yandex.by"
+          "google", "bing", "yahoo", "duckduckgo", "wikipedia-be", "yandex.by"
         ]
       }
     },
@@ -152,7 +152,7 @@
     "el": {
       "default": {
         "visibleDefaultEngines": [
-          "google", "skroutz", "twitter", "wikipedia-el"
+          "google", "yahoo", "bing", "skroutz", "twitter", "wikipedia-el"
         ]
       }
     },

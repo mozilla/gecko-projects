@@ -6,9 +6,10 @@
 
 use app_units::Au;
 use context::QuirksMode;
-use cssparser::{CssStringWriter, Parser, Token};
+use cssparser::{CssStringWriter, Parser, RGBA, Token};
 use euclid::Size2D;
 use font_metrics::get_metrics_provider_for_product;
+use gecko::values::convert_nscolor_to_rgba;
 use gecko_bindings::bindings;
 use gecko_bindings::structs::{nsCSSKeyword, nsCSSProps_KTableEntry, nsCSSValue, nsCSSUnit, nsStringBuffer};
 use gecko_bindings::structs::{nsMediaExpression_Range, nsMediaFeature};
@@ -17,7 +18,9 @@ use gecko_bindings::structs::RawGeckoPresContextOwned;
 use media_queries::MediaType;
 use parser::ParserContext;
 use properties::{ComputedValues, StyleBuilder};
+use properties::longhands::font_size;
 use std::fmt::{self, Write};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use str::starts_with_ignore_ascii_case;
 use string_cache::Atom;
 use style_traits::ToCss;
@@ -35,7 +38,22 @@ pub struct Device {
     pub pres_context: RawGeckoPresContextOwned,
     default_values: Arc<ComputedValues>,
     viewport_override: Option<ViewportConstraints>,
+    /// The font size of the root element
+    /// This is set when computing the style of the root
+    /// element, and used for rem units in other elements.
+    ///
+    /// When computing the style of the root element, there can't be any
+    /// other style being computed at the same time, given we need the style of
+    /// the parent to compute everything else. So it is correct to just use
+    /// a relaxed atomic here.
+    root_font_size: AtomicIsize,
+    /// Whether any styles computed in the document relied on the root font-size
+    /// by using rem units.
+    used_root_font_size: AtomicBool,
 }
+
+unsafe impl Sync for Device {}
+unsafe impl Send for Device {}
 
 impl Device {
     /// Trivially constructs a new `Device`.
@@ -45,6 +63,8 @@ impl Device {
             pres_context: pres_context,
             default_values: ComputedValues::default_values(unsafe { &*pres_context }),
             viewport_override: None,
+            root_font_size: AtomicIsize::new(font_size::get_initial_value().0 as isize), // FIXME(bz): Seems dubious?
+            used_root_font_size: AtomicBool::new(false),
         }
     }
 
@@ -73,6 +93,30 @@ impl Device {
         &self.default_values
     }
 
+    /// Get the font size of the root element (for rem)
+    pub fn root_font_size(&self) -> Au {
+        self.used_root_font_size.store(true, Ordering::Relaxed);
+        Au::new(self.root_font_size.load(Ordering::Relaxed) as i32)
+    }
+
+    /// Set the font size of the root element (for rem)
+    pub fn set_root_font_size(&self, size: Au) {
+        self.root_font_size.store(size.0 as isize, Ordering::Relaxed)
+    }
+
+    /// Recreates the default computed values.
+    pub fn reset_computed_values(&mut self) {
+        // NB: A following stylesheet flush will populate this if appropriate.
+        self.viewport_override = None;
+        self.default_values = ComputedValues::default_values(unsafe { &*self.pres_context });
+        self.used_root_font_size.store(false, Ordering::Relaxed);
+    }
+
+    /// Returns whether we ever looked up the root font size of the Device.
+    pub fn used_root_font_size(&self) -> bool {
+        self.used_root_font_size.load(Ordering::Relaxed)
+    }
+
     /// Recreates all the temporary state that the `Device` stores.
     ///
     /// This includes the viewport override from `@viewport` rules, and also the
@@ -80,7 +124,7 @@ impl Device {
     pub fn reset(&mut self) {
         // NB: A following stylesheet flush will populate this if appropriate.
         self.viewport_override = None;
-        self.default_values = ComputedValues::default_values(unsafe { &*self.pres_context });
+        self.reset_computed_values();
     }
 
     /// Returns the current media type of the device.
@@ -109,10 +153,17 @@ impl Device {
                         Au((*self.pres_context).mVisibleArea.height))
         })
     }
-}
 
-unsafe impl Sync for Device {}
-unsafe impl Send for Device {}
+    /// Returns whether document colors are enabled.
+    pub fn use_document_colors(&self) -> bool {
+        unsafe { (*self.pres_context).mUseDocumentColors() != 0 }
+    }
+
+    /// Returns the default background color.
+    pub fn default_background_color(&self) -> RGBA {
+        convert_nscolor_to_rgba(unsafe { (*self.pres_context).mBackgroundColor })
+    }
+}
 
 /// A expression for gecko contains a reference to the media feature, the value
 /// the media query contained, and the range to evaluate.
@@ -128,6 +179,10 @@ impl ToCss for Expression {
         where W: fmt::Write,
     {
         dest.write_str("(")?;
+
+        if (self.feature.mReqFlags & nsMediaFeature_RequirementFlags::eHasWebkitPrefix as u8) != 0 {
+            dest.write_str("-webkit-")?;
+        }
         match self.range {
             nsMediaExpression_Range::eMin => dest.write_str("min-")?,
             nsMediaExpression_Range::eMax => dest.write_str("max-")?,
@@ -180,6 +235,10 @@ impl Resolution {
             },
             _ => return Err(()),
         };
+
+        if value <= 0. {
+            return Err(())
+        }
 
         Ok(match_ignore_ascii_case! { &unit,
             "dpi" => Resolution::Dpi(value),

@@ -52,7 +52,6 @@
 #include "nsIContentIterator.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h" // for Event::GetEventPopupControlState()
-#include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/PointerEvent.h"
 #include "nsIDocument.h"
 #include "nsAnimationManager.h"
@@ -784,7 +783,6 @@ nsIPresShell::nsIPresShell()
     , mCanvasBackgroundColor(NS_RGBA(0,0,0,0))
     , mSelectionFlags(0)
     , mRenderFlags(0)
-    , mStylesHaveChanged(false)
     , mDidInitialize(false)
     , mIsDestroying(false)
     , mIsReflowing(false)
@@ -1164,6 +1162,12 @@ PresShell::Destroy()
 {
   // Do not add code before this line please!
   if (mHaveShutDown) {
+    // If we never got a root frame the root view could exist now still.
+    // In that case assert that it has no children and no frame.
+    MOZ_RELEASE_ASSERT(!mViewManager || !mViewManager->GetRootView() ||
+      (!mViewManager->GetRootView()->GetFrame() &&
+       !mViewManager->GetRootView()->GetFirstChild()));
+    MOZ_RELEASE_ASSERT(!mFrameConstructor || !mFrameConstructor->GetRootFrame());
     return;
   }
 
@@ -1385,19 +1389,6 @@ PresShell::Destroy()
   // Destroy the frame manager. This will destroy the frame hierarchy
   mFrameConstructor->WillDestroyFrameTree();
 
-  // Destroy all frame properties (whose destruction was suppressed
-  // while destroying the frame tree, but which might contain more
-  // frames within the properties.
-  if (mPresContext) {
-    // Clear out the prescontext's property table -- since our frame tree is
-    // now dead, we shouldn't be looking up any more properties in that table.
-    // We want to do this before we call DetachShell() on the prescontext, so
-    // property destructors can usefully call GetPresShell() on the
-    // prescontext.
-    mPresContext->PropertyTable()->DeleteAll();
-  }
-
-
   NS_WARNING_ASSERTION(!mAutoWeakFrames && mWeakFrames.IsEmpty(),
                        "Weak frames alive after destroying FrameManager");
   while (mAutoWeakFrames) {
@@ -1544,7 +1535,6 @@ PresShell::AddUserSheet(StyleSheet* aSheet)
   }
 
   mStyleSet->EndUpdate();
-
   RestyleForCSSRuleChanges();
 }
 
@@ -2080,10 +2070,10 @@ PresShell::NotifyDestroyingFrame(nsIFrame* aFrame)
 {
   nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
   if (displayRoot != aFrame) {
-    nsTArray<nsIFrame*>* deletedFrames = displayRoot->Properties().Get(nsIFrame::DeletedFrameList());
+    nsTArray<nsIFrame*>* deletedFrames = displayRoot->GetProperty(nsIFrame::DeletedFrameList());
     if (!deletedFrames) {
       deletedFrames = new nsTArray<nsIFrame*>;
-      displayRoot->Properties().Set(nsIFrame::DeletedFrameList(), deletedFrames);
+      displayRoot->SetProperty(nsIFrame::DeletedFrameList(), deletedFrames);
     }
     deletedFrames->AppendElement(aFrame);
   }
@@ -2107,7 +2097,7 @@ PresShell::NotifyDestroyingFrame(nsIFrame* aFrame)
     }
 
     // Remove frame properties
-    mPresContext->NotifyDestroyingFrame(aFrame);
+    aFrame->DeleteAllProperties();
 
     if (aFrame == mCurrentEventFrame) {
       mCurrentEventContent = aFrame->GetContent();
@@ -2545,8 +2535,9 @@ PresShell::EndUpdate(nsIDocument *aDocument, nsUpdateType aUpdateType)
 
   if (aUpdateType & UPDATE_STYLE) {
     mStyleSet->EndUpdate();
-    if (mStylesHaveChanged || !mChangedScopeStyleRoots.IsEmpty())
+    if (mStyleSet->StyleSheetsHaveChanged()) {
       RestyleForCSSRuleChanges();
+    }
   }
 
   mFrameConstructor->EndUpdate();
@@ -3937,7 +3928,8 @@ PresShell::UnsuppressPainting()
 nsresult
 PresShell::PostReflowCallback(nsIReflowCallback* aCallback)
 {
-  void* result = AllocateMisc(sizeof(nsCallbackEventRequest));
+  void* result = AllocateByObjectID(eArenaObjectID_nsCallbackEventRequest,
+                                    sizeof(nsCallbackEventRequest));
   nsCallbackEventRequest* request = (nsCallbackEventRequest*)result;
 
   request->callback = aCallback;
@@ -3978,7 +3970,7 @@ PresShell::CancelReflowCallback(nsIReflowCallback* aCallback)
           mLastCallbackEventRequest = before;
         }
 
-        FreeMisc(sizeof(nsCallbackEventRequest), toFree);
+        FreeByObjectID(eArenaObjectID_nsCallbackEventRequest, toFree);
       } else {
         before = node;
         node = node->next;
@@ -3996,7 +3988,7 @@ PresShell::CancelPostedReflowCallbacks()
       mLastCallbackEventRequest = nullptr;
     }
     nsIReflowCallback* callback = node->callback;
-    FreeMisc(sizeof(nsCallbackEventRequest), node);
+    FreeByObjectID(eArenaObjectID_nsCallbackEventRequest, node);
     if (callback) {
       callback->ReflowCallbackCanceled();
     }
@@ -4015,7 +4007,7 @@ PresShell::HandlePostedReflowCallbacks(bool aInterruptible)
        mLastCallbackEventRequest = nullptr;
      }
      nsIReflowCallback* callback = node->callback;
-     FreeMisc(sizeof(nsCallbackEventRequest), node);
+     FreeByObjectID(eArenaObjectID_nsCallbackEventRequest, node);
      if (callback) {
        if (callback->ReflowFinished()) {
          shouldFlush = true;
@@ -4555,17 +4547,6 @@ PresShell::ReconstructFrames()
 void
 nsIPresShell::RestyleForCSSRuleChanges()
 {
-  AutoTArray<RefPtr<mozilla::dom::Element>,1> scopeRoots;
-  mChangedScopeStyleRoots.SwapElements(scopeRoots);
-
-  if (mStylesHaveChanged) {
-    // If we need to restyle everything, no need to restyle individual
-    // scoped style roots.
-    scopeRoots.Clear();
-  }
-
-  mStylesHaveChanged = false;
-
   if (mIsDestroying) {
     // We don't want to mess with restyles at this point
     return;
@@ -4577,61 +4558,23 @@ nsIPresShell::RestyleForCSSRuleChanges()
     mPresContext->RebuildCounterStyles();
   }
 
-  Element* root = mDocument->GetRootElement();
   if (!mDidInitialize) {
     // Nothing to do here, since we have no frames yet
     return;
   }
 
-  if (!root) {
-    // No content to restyle
-    return;
-  }
-
-  RestyleManager* restyleManager = mPresContext->RestyleManager();
-
-  if (scopeRoots.IsEmpty()) {
-    // If scopeRoots is empty, we know that mStylesHaveChanged was true at
-    // the beginning of this function, and that we need to restyle the whole
-    // document.
-    restyleManager->PostRestyleEventForCSSRuleChanges(root,
-                                                      eRestyle_Subtree,
-                                                      nsChangeHint(0));
-  } else {
-    for (Element* scopeRoot : scopeRoots) {
-      restyleManager->PostRestyleEventForCSSRuleChanges(scopeRoot,
-                                                        eRestyle_Subtree,
-                                                        nsChangeHint(0));
-    }
-  }
+  mStyleSet->InvalidateStyleForCSSRuleChanges();
 }
 
 void
-PresShell::RecordStyleSheetChange(StyleSheet* aStyleSheet)
+PresShell::RecordStyleSheetChange(StyleSheet* aStyleSheet,
+                                  StyleSheet::ChangeType aChangeType)
 {
   // too bad we can't check that the update is UPDATE_STYLE
   NS_ASSERTION(mUpdateCount != 0, "must be in an update");
+  MOZ_ASSERT(aStyleSheet->IsServo() == mStyleSet->IsServo());
 
-  if (mStylesHaveChanged)
-    return;
-
-  // Tell Servo that the contents of style sheets have changed.
-  if (ServoStyleSet* set = mStyleSet->GetAsServo()) {
-    set->NoteStyleSheetsChanged();
-  }
-
-  if (aStyleSheet->IsGecko()) {
-    // XXXheycam ServoStyleSheets don't support <style scoped> yet.
-    Element* scopeElement = aStyleSheet->AsGecko()->GetScopeElement();
-    if (scopeElement) {
-      mChangedScopeStyleRoots.AppendElement(scopeElement);
-      return;
-    }
-  } else {
-    NS_WARNING("stylo: ServoStyleSheets don't support <style scoped>");
-  }
-
-  mStylesHaveChanged = true;
+  mStyleSet->RecordStyleSheetChange(aStyleSheet, aChangeType);
 }
 
 void
@@ -4642,7 +4585,7 @@ PresShell::StyleSheetAdded(StyleSheet* aStyleSheet,
   NS_PRECONDITION(aStyleSheet, "Must have a style sheet!");
 
   if (aStyleSheet->IsApplicable() && aStyleSheet->HasRules()) {
-    RecordStyleSheetChange(aStyleSheet);
+    RecordStyleSheetChange(aStyleSheet, StyleSheet::ChangeType::Added);
   }
 }
 
@@ -4654,7 +4597,7 @@ PresShell::StyleSheetRemoved(StyleSheet* aStyleSheet,
   NS_PRECONDITION(aStyleSheet, "Must have a style sheet!");
 
   if (aStyleSheet->IsApplicable() && aStyleSheet->HasRules()) {
-    RecordStyleSheetChange(aStyleSheet);
+    RecordStyleSheetChange(aStyleSheet, StyleSheet::ChangeType::Removed);
   }
 }
 
@@ -4662,32 +4605,27 @@ void
 PresShell::StyleSheetApplicableStateChanged(StyleSheet* aStyleSheet)
 {
   if (aStyleSheet->HasRules()) {
-    RecordStyleSheetChange(aStyleSheet);
+    RecordStyleSheetChange(
+        aStyleSheet, StyleSheet::ChangeType::ApplicableStateChanged);
   }
 }
 
 void
 PresShell::StyleRuleChanged(StyleSheet* aStyleSheet)
 {
-  RecordStyleSheetChange(aStyleSheet);
+  RecordStyleSheetChange(aStyleSheet, StyleSheet::ChangeType::RuleChanged);
 }
 
 void
 PresShell::StyleRuleAdded(StyleSheet* aStyleSheet)
 {
-  RecordStyleSheetChange(aStyleSheet);
+  RecordStyleSheetChange(aStyleSheet, StyleSheet::ChangeType::RuleAdded);
 }
 
 void
 PresShell::StyleRuleRemoved(StyleSheet* aStyleSheet)
 {
-  RecordStyleSheetChange(aStyleSheet);
-}
-
-nsIFrame*
-PresShell::GetPlaceholderFrameFor(nsIFrame* aFrame) const
-{
-  return mFrameConstructor->GetPlaceholderFrameFor(aFrame);
+  RecordStyleSheetChange(aStyleSheet, StyleSheet::ChangeType::RuleRemoved);
 }
 
 nsresult
@@ -6362,7 +6300,7 @@ private:
 void
 PresShell::RecordShadowStyleChange(ShadowRoot* aShadowRoot)
 {
-  mChangedScopeStyleRoots.AppendElement(aShadowRoot->GetHost()->AsElement());
+  mStyleSet->RecordShadowStyleChange(aShadowRoot);
 }
 
 void
@@ -7488,7 +7426,12 @@ PresShell::HandleEvent(nsIFrame* aFrame,
       nsPoint eventPoint;
       uint32_t flags = 0;
       if (aEvent->mMessage == eTouchStart) {
-        flags |= INPUT_IGNORE_ROOT_SCROLL_FRAME;
+        if (gfxPrefs::APZAllowZooming()) {
+          // Setting this flag will skip the scrollbars on the root frame from
+          // participating in hit-testing, and we only want that to happen on
+          // zoomable platforms (for now).
+          flags |= INPUT_IGNORE_ROOT_SCROLL_FRAME;
+        }
         WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent();
         // if this is a continuing session, ensure that all these events are
         // in the same document by taking the target of the events already in
@@ -9715,12 +9658,8 @@ PresShell::Observe(nsISupports* aSubject,
           nsAutoScriptBlocker scriptBlocker;
           ++mChangeNestCount;
           RestyleManager* restyleManager = mPresContext->RestyleManager();
-          if (restyleManager->IsServo()) {
-            MOZ_CRASH("stylo: PresShell::Observe(\"chrome-flush-skin-caches\") "
-                      "not implemented for Servo-backed style system");
-          }
-          restyleManager->AsGecko()->ProcessRestyledFrames(changeList);
-          restyleManager->AsGecko()->FlushOverflowChangedTracker();
+          restyleManager->ProcessRestyledFrames(changeList);
+          restyleManager->FlushOverflowChangedTracker();
           --mChangeNestCount;
         }
       }
@@ -11028,11 +10967,12 @@ PresShell::GetRootPresShell()
 
 void
 PresShell::AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
-                                  nsArenaMemoryStats *aArenaObjectsSize,
-                                  size_t *aPresShellSize,
-                                  size_t *aStyleSetsSize,
-                                  size_t *aTextRunsSize,
-                                  size_t *aPresContextSize)
+                                  nsArenaMemoryStats* aArenaObjectsSize,
+                                  size_t* aPresShellSize,
+                                  size_t* aStyleSetsSize,
+                                  size_t* aTextRunsSize,
+                                  size_t* aPresContextSize,
+                                  size_t* aFramePropertiesSize)
 {
   mFrameArena.AddSizeOfExcludingThis(aMallocSizeOf, aArenaObjectsSize);
   *aPresShellSize += aMallocSizeOf(this);
@@ -11054,6 +10994,12 @@ PresShell::AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
   *aTextRunsSize += SizeOfTextRuns(aMallocSizeOf);
 
   *aPresContextSize += mPresContext->SizeOfIncludingThis(aMallocSizeOf);
+
+  nsIFrame* rootFrame = mFrameConstructor->GetRootFrame();
+  if (rootFrame) {
+    *aFramePropertiesSize +=
+      rootFrame->SizeOfFramePropertiesForTree(aMallocSizeOf);
+  }
 }
 
 size_t

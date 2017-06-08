@@ -34,7 +34,8 @@ TimerThread::TimerThread() :
   mShutdown(false),
   mWaiting(false),
   mNotified(false),
-  mSleeping(false)
+  mSleeping(false),
+  mAllowedEarlyFiringMicroseconds(0)
 {
 }
 
@@ -407,7 +408,7 @@ TimerThread::Run()
 
   // Half of the amount of microseconds needed to get positive PRIntervalTime.
   // We use this to decide how to round our wait times later
-  int32_t halfMicrosecondsIntervalResolution = usIntervalResolution / 2;
+  mAllowedEarlyFiringMicroseconds = usIntervalResolution / 2;
   bool forceRunNextTimer = false;
 
   while (!mShutdown) {
@@ -490,7 +491,7 @@ TimerThread::Run()
         // is due now or overdue.
         //
         // Note that we can only sleep for integer values of a certain
-        // resolution. We use halfMicrosecondsIntervalResolution, calculated
+        // resolution. We use mAllowedEarlyFiringMicroseconds, calculated
         // before, to do the optimal rounding (i.e., of how to decide what
         // interval is so small we should not wait at all).
         double microseconds = (timeout - now).ToMilliseconds() * 1000;
@@ -507,7 +508,7 @@ TimerThread::Run()
           forceRunNextTimer = true;
         }
 
-        if (microseconds < halfMicrosecondsIntervalResolution) {
+        if (microseconds < mAllowedEarlyFiringMicroseconds) {
           forceRunNextTimer = false;
           goto next; // round down; execute event now
         }
@@ -587,6 +588,64 @@ TimerThread::RemoveTimer(nsTimerImpl* aTimer)
   }
 
   return NS_OK;
+}
+
+TimeStamp
+TimerThread::FindNextFireTimeForCurrentThread(TimeStamp aDefault, uint32_t aSearchBound)
+{
+  MonitorAutoLock lock(mMonitor);
+  TimeStamp timeStamp = aDefault;
+  uint32_t index = 0;
+
+#ifdef DEBUG
+  TimeStamp firstTimeStamp;
+  if (!mTimers.IsEmpty()) {
+    firstTimeStamp = mTimers[0]->Timeout();
+  }
+#endif
+
+  auto end = mTimers.end();
+  while(end != mTimers.begin()) {
+    nsTimerImpl* timer = mTimers[0]->Value();
+    if (timer) {
+      if (timer->mTimeout > aDefault) {
+        timeStamp = aDefault;
+        break;
+      }
+
+      // Don't yield to timers created with the *_LOW_PRIORITY type.
+      if (!timer->IsLowPriority()) {
+        bool isOnCurrentThread = false;
+        nsresult rv = timer->mEventTarget->IsOnCurrentThread(&isOnCurrentThread);
+        if (NS_SUCCEEDED(rv) && isOnCurrentThread) {
+          timeStamp = timer->mTimeout;
+          break;
+        }
+      }
+
+      if (++index > aSearchBound) {
+        // Track the currently highest timeout so that we can bail out when we
+        // reach the bound or when we find a timer for the current thread.
+        // This won't give accurate information if we stop before finding
+        // any timer for the current thread, but at least won't report too
+        // long idle period.
+        timeStamp = timer->mTimeout;
+        break;
+      }
+    }
+
+    std::pop_heap(mTimers.begin(), end, Entry::UniquePtrLessThan);
+    --end;
+  }
+
+  while (end != mTimers.end()) {
+    ++end;
+    std::push_heap(mTimers.begin(), end, Entry::UniquePtrLessThan);
+  }
+
+  MOZ_ASSERT_IF(!mTimers.IsEmpty(), firstTimeStamp == mTimers[0]->Timeout());
+
+  return timeStamp;
 }
 
 // This function must be called from within a lock
@@ -757,4 +816,10 @@ TimerThread::Observe(nsISupports* /* aSubject */, const char* aTopic,
   }
 
   return NS_OK;
+}
+
+uint32_t
+TimerThread::AllowedEarlyFiringMicroseconds() const
+{
+  return mAllowedEarlyFiringMicroseconds;
 }

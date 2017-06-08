@@ -23,6 +23,7 @@ class CompositorWidget;
 
 namespace layers {
 class CompositorBridgeParentBase;
+class WebRenderBridgeParent;
 }
 
 namespace wr {
@@ -125,6 +126,7 @@ protected:
   bool mUseANGLE;
 
   friend class DisplayListBuilder;
+  friend class layers::WebRenderBridgeParent;
 };
 
 /// This is a simple C++ wrapper around WrState defined in the rust bindings.
@@ -145,15 +147,11 @@ public:
                 wr::BuiltDisplayList& aOutDisplayList);
 
   void PushStackingContext(const WrRect& aBounds, // TODO: We should work with strongly typed rects
-                           const float aOpacity,
-                           const gfx::Matrix4x4& aTransform,
-                           const WrMixBlendMode& aMixBlendMode);
-
-  void PushStackingContext(const WrRect& aBounds, // TODO: We should work with strongly typed rects
                            const uint64_t& aAnimationId,
                            const float* aOpacity,
                            const gfx::Matrix4x4* aTransform,
-                           const WrMixBlendMode& aMixBlendMode);
+                           const WrMixBlendMode& aMixBlendMode,
+                           const nsTArray<WrFilterOp>& aFilters);
   void PopStackingContext();
 
   void PushClip(const WrRect& aClipRect,
@@ -207,18 +205,21 @@ public:
                             wr::ImageKey aImageChannel0,
                             wr::ImageKey aImageChannel1,
                             wr::ImageKey aImageChannel2,
-                            WrYuvColorSpace aColorSpace);
+                            WrYuvColorSpace aColorSpace,
+                            wr::ImageRendering aFilter);
 
   void PushNV12Image(const WrRect& aBounds,
                      const WrClipRegionToken aClip,
                      wr::ImageKey aImageChannel0,
                      wr::ImageKey aImageChannel1,
-                     WrYuvColorSpace aColorSpace);
+                     WrYuvColorSpace aColorSpace,
+                     wr::ImageRendering aFilter);
 
   void PushYCbCrInterleavedImage(const WrRect& aBounds,
                                  const WrClipRegionToken aClip,
                                  wr::ImageKey aImageChannel0,
-                                 WrYuvColorSpace aColorSpace);
+                                 WrYuvColorSpace aColorSpace,
+                                 wr::ImageRendering aFilter);
 
   void PushIFrame(const WrRect& aBounds,
                   const WrClipRegionToken aClip,

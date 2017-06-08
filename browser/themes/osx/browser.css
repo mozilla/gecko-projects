@@ -6,7 +6,6 @@
 
 %include shared.inc
 %define toolbarButtonPressed :hover:active:not([disabled="true"]):not([cui-areatype="menu-panel"])
-%define windowButtonMarginTop 11px
 
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
 @namespace html url("http://www.w3.org/1999/xhtml");
@@ -15,7 +14,6 @@
 %include ../shared/browser.inc.css
 
 :root {
-  --space-above-tabbar: 9px;
   --tabs-toolbar-color: #333;
 
   --toolbarbutton-vertical-text-padding: calc(var(--toolbarbutton-inner-padding) + 1px);
@@ -23,6 +21,8 @@
 %ifdef MOZ_PHOTON_THEME
   --toolbarbutton-border-radius: 4px;
 %else
+  --space-above-tabbar: 9px;
+
   --toolbarbutton-border-radius: 3px;
 
   --toolbarbutton-hover-background: hsla(0,0%,100%,.1) linear-gradient(hsla(0,0%,100%,.3), hsla(0,0%,100%,.1)) padding-box;
@@ -31,7 +31,6 @@
   --backbutton-border-color: rgba(0,0,0,0.2);
   --backbutton-background: linear-gradient(rgba(255,255,255,0.9),
                                            rgba(255,255,255,0.7)) repeat-x;
-%endif
 
   --toolbarbutton-hover-bordercolor: hsla(0,0%,0%,.2);
   --toolbarbutton-hover-boxshadow: 0 1px 0 hsla(0,0%,100%,.5),
@@ -41,6 +40,7 @@
   --toolbarbutton-active-boxshadow: 0 1px 0 hsla(0,0%,100%,.5),
                                     0 1px 0 hsla(0,0%,0%,.05) inset,
                                     0 1px 1px hsla(0,0%,0%,.2) inset;
+%endif
 
   --toolbarbutton-checkedhover-backgroundcolor: hsla(0,0%,0%,.09);
 
@@ -66,12 +66,12 @@ toolbar:-moz-lwtheme {
                               rgba(255,255,255,0.1) 50%,
                               rgba(255,255,255,0.2)) repeat-x;
 }
-%endif
 
 #urlbar:-moz-lwtheme:not([focused="true"]),
 .searchbar-textbox:-moz-lwtheme:not([focused="true"]) {
   opacity: .9;
 }
+%endif
 
 #navigator-toolbox::after {
   -moz-box-ordinal-group: 101; /* tabs toolbar is 100 */
@@ -134,7 +134,11 @@ toolbar:-moz-lwtheme {
  * tabstrip can overlap it.
  */
 #main-window[tabsintitlebar] > #titlebar {
+%ifndef MOZ_PHOTON_THEME
   min-height: calc(var(--tab-min-height) + var(--space-above-tabbar) - var(--tab-toolbar-navbar-overlap));
+%else
+  min-height: calc(var(--tab-min-height) - var(--tab-toolbar-navbar-overlap));
+%endif
 }
 
 /**
@@ -146,7 +150,11 @@ toolbar:-moz-lwtheme {
 
 #main-window[tabsintitlebar] > #titlebar > #titlebar-content > #titlebar-buttonbox-container,
 #main-window[tabsintitlebar] > #titlebar > #titlebar-content > #titlebar-secondary-buttonbox > #titlebar-fullscreen-button {
-  margin-top: @windowButtonMarginTop@;
+%ifdef MOZ_PHOTON_THEME
+  margin-top: 6px;
+%else
+  margin-top: 11px;
+%endif
 }
 
 #main-window:not([tabsintitlebar]) > #titlebar > #titlebar-content > #titlebar-buttonbox-container,
@@ -320,13 +328,6 @@ toolbarbutton.chevron:-moz-locale-dir(rtl) > .toolbarbutton-icon {
 
 /* ----- BOOKMARK BUTTONS ----- */
 
-.bookmark-item > .toolbarbutton-menu-dropmarker {
-  list-style-image: url("chrome://browser/skin/places/arrow-down.svg");
-  fill: currentColor;
-  margin-top: 1px;
-  margin-inline-start: 3px;
-}
-
 .bookmark-item[container] {
   list-style-image: url("chrome://global/skin/tree/folder.png");
 }
@@ -482,6 +483,14 @@ toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-p
   border: none;
 }
 
+/* On Mac, native buttons keep their full opacity when they become disabled
+ * and only the glyph or text on top of them becomes less opaque. */
+#back-button[disabled="true"] > .toolbarbutton-icon {
+  opacity: 1 !important;
+  -moz-context-properties: fill, fill-opacity;
+  fill-opacity: 0.4;
+}
+
 /* Inactive elements are faded out on OSX */
 .toolbarbutton-1:not(:hover):-moz-window-inactive,
 #main-window:not([customizing]) .toolbarbutton-1:-moz-window-inactive[disabled="true"] {
@@ -526,20 +535,15 @@ toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-p
 
 %ifdef MOZ_PHOTON_THEME
 
-#main-window {
-  --urlbar-border-color: hsla(240, 5%, 5%, .25);
-  --urlbar-border-color-hover: hsla(240, 5%, 5%, .35);
+#urlbar,
+.searchbar-textbox {
+  font-size: 1.25em;
 }
 
 #urlbar[focused="true"],
 .searchbar-textbox[focused="true"] {
   border-color: -moz-mac-focusring;
   box-shadow: var(--focus-ring-box-shadow);
-}
-
-#urlbar,
-.searchbar-textbox {
-  font-size: 1.25em;
 }
 
 %else
@@ -1362,6 +1366,11 @@ html|span.ac-emphasize-text-url {
   -moz-appearance: -moz-mac-source-list;
 }
 
+#sidebar-header {
+  /* match the font size used in side bar content */
+  font-size: 12px;
+}
+
 /* ----- CONTENT ----- */
 
 .browserContainer > findbar {
@@ -1542,10 +1551,11 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
   text-shadow: @loweredShadow@;
 }
 
+%ifndef MOZ_PHOTON_THEME
 #navigator-toolbox[inFullscreen] > #TabsToolbar {
   padding-top: var(--space-above-tabbar);
 }
-
+%endif
 #tabbrowser-tabs {
   -moz-box-align: stretch;
 }
@@ -1730,7 +1740,7 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
 
   #TabsToolbar > #new-tab-button > .toolbarbutton-icon,
   #TabsToolbar > toolbarpaletteitem > #new-tab-button > .toolbarbutton-icon {
-    width: 18px;
+    max-width: 18px;
   }
 }
 
@@ -2217,7 +2227,9 @@ html|*.addon-webext-perm-list {
 }
 
 #TabsToolbar > .private-browsing-indicator {
+%ifndef MOZ_PHOTON_THEME
   transform: translateY(calc(-1 * var(--space-above-tabbar)));
+%endif
   /* We offset by 38px for mask graphic, plus 4px to account for the
    * margin-left, which sums to 42px.
    */

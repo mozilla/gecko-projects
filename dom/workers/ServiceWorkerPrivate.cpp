@@ -357,8 +357,12 @@ private:
     MOZ_ASSERT(mWorkerPrivate);
     mWorkerPrivate->AssertIsOnWorkerThread();
     MOZ_DIAGNOSTIC_ASSERT(mPendingPromisesCount > 0);
-    MOZ_ASSERT(mSelfRef);
-    MOZ_ASSERT(mKeepAliveToken);
+
+    // Note: mSelfRef and mKeepAliveToken can be nullptr here
+    //       if MaybeCleanup() was called just before a promise
+    //       settled.  This can happen, for example, if the
+    //       worker thread is being terminated for running too
+    //       long, browser shutdown, etc.
 
     mRejected |= (aResult == Rejected);
 
@@ -1805,7 +1809,7 @@ ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
   info.mOriginAttributes = mInfo->GetOriginAttributes();
 
   // Verify that we don't have any CSP on pristine principal.
-#if defined(DEBUG) || !defined(RELEASE_OR_BETA)
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
   nsCOMPtr<nsIContentSecurityPolicy> csp;
   Unused << info.mPrincipal->GetCsp(getter_AddRefs(csp));
   MOZ_DIAGNOSTIC_ASSERT(!csp);

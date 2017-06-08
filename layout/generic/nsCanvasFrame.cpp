@@ -363,8 +363,8 @@ nsDisplayCanvasBackgroundImage::Paint(nsDisplayListBuilder* aBuilder,
     // to snap for this context, because we checked HasNonIntegerTranslation
     // above.
     destRect.Round();
-    RefPtr<DrawTarget> dt =
-      Frame()->Properties().Get(nsIFrame::CachedBackgroundImageDT());
+    RefPtr<DrawTarget> dt = 
+      Frame()->GetProperty(nsIFrame::CachedBackgroundImageDT());
     DrawTarget* destDT = dest->GetDrawTarget();
     if (dt) {
       BlitSurface(destDT, destRect, dt);
@@ -381,7 +381,7 @@ nsDisplayCanvasBackgroundImage::Paint(nsDisplayListBuilder* aBuilder,
       nsRenderingContext context(ctx);
       PaintInternal(aBuilder, &context, bgClipRect, &bgClipRect);
       BlitSurface(dest->GetDrawTarget(), destRect, dt);
-      frame->Properties().Set(nsIFrame::CachedBackgroundImageDT(),
+      frame->SetProperty(nsIFrame::CachedBackgroundImageDT(),
                               dt.forget().take());
       return;
     }

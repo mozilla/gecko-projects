@@ -346,14 +346,14 @@ class BuildOptionParser(object):
         'add-on-devel': 'builds/releng_sub_%s_configs/%s_add-on-devel.py',
         'asan': 'builds/releng_sub_%s_configs/%s_asan.py',
         'asan-tc': 'builds/releng_sub_%s_configs/%s_asan_tc.py',
+        'fuzzing-asan-tc': 'builds/releng_sub_%s_configs/%s_fuzzing_asan_tc.py',
         'tsan': 'builds/releng_sub_%s_configs/%s_tsan.py',
         'cross-debug': 'builds/releng_sub_%s_configs/%s_cross_debug.py',
         'cross-debug-st-an': 'builds/releng_sub_%s_configs/%s_cross_debug_st_an.py',
         'cross-debug-artifact': 'builds/releng_sub_%s_configs/%s_cross_debug_artifact.py',
+        'cross-noopt-debug': 'builds/releng_sub_%s_configs/%s_cross_noopt_debug.py',
         'cross-opt-st-an': 'builds/releng_sub_%s_configs/%s_cross_opt_st_an.py',
         'cross-artifact': 'builds/releng_sub_%s_configs/%s_cross_artifact.py',
-        'cross-qr-debug': 'builds/releng_sub_%s_configs/%s_cross_qr_debug.py',
-        'cross-qr-opt': 'builds/releng_sub_%s_configs/%s_cross_qr_opt.py',
         'debug': 'builds/releng_sub_%s_configs/%s_debug.py',
         'asan-and-debug': 'builds/releng_sub_%s_configs/%s_asan_and_debug.py',
         'asan-tc-and-debug': 'builds/releng_sub_%s_configs/%s_asan_tc_and_debug.py',
@@ -362,16 +362,20 @@ class BuildOptionParser(object):
         'source': 'builds/releng_sub_%s_configs/%s_source.py',
         'stylo': 'builds/releng_sub_%s_configs/%s_stylo.py',
         'stylo-debug': 'builds/releng_sub_%s_configs/%s_stylo_debug.py',
+        'noopt-debug': 'builds/releng_sub_%s_configs/%s_noopt_debug.py',
         'api-15-gradle-dependencies': 'builds/releng_sub_%s_configs/%s_api_15_gradle_dependencies.py',
         'api-15': 'builds/releng_sub_%s_configs/%s_api_15.py',
+        'api-15-old-id': 'builds/releng_sub_%s_configs/%s_api_15_old_id.py',
         'api-15-artifact': 'builds/releng_sub_%s_configs/%s_api_15_artifact.py',
         'api-15-debug': 'builds/releng_sub_%s_configs/%s_api_15_debug.py',
         'api-15-debug-artifact': 'builds/releng_sub_%s_configs/%s_api_15_debug_artifact.py',
         'api-15-gradle': 'builds/releng_sub_%s_configs/%s_api_15_gradle.py',
         'api-15-gradle-artifact': 'builds/releng_sub_%s_configs/%s_api_15_gradle_artifact.py',
         'x86': 'builds/releng_sub_%s_configs/%s_x86.py',
+        'x86-old-id': 'builds/releng_sub_%s_configs/%s_x86_old_id.py',
         'x86-artifact': 'builds/releng_sub_%s_configs/%s_x86_artifact.py',
         'api-15-partner-sample1': 'builds/releng_sub_%s_configs/%s_api_15_partner_sample1.py',
+        'aarch64': 'builds/releng_sub_%s_configs/%s_aarch64.py',
         'android-test': 'builds/releng_sub_%s_configs/%s_test.py',
         'android-checkstyle': 'builds/releng_sub_%s_configs/%s_checkstyle.py',
         'android-lint': 'builds/releng_sub_%s_configs/%s_lint.py',
@@ -379,8 +383,6 @@ class BuildOptionParser(object):
         'valgrind' : 'builds/releng_sub_%s_configs/%s_valgrind.py',
         'artifact': 'builds/releng_sub_%s_configs/%s_artifact.py',
         'debug-artifact': 'builds/releng_sub_%s_configs/%s_debug_artifact.py',
-        'qr-debug': 'builds/releng_sub_%s_configs/%s_qr_debug.py',
-        'qr-opt': 'builds/releng_sub_%s_configs/%s_qr_opt.py',
         'devedition': 'builds/releng_sub_%s_configs/%s_devedition.py',
     }
     build_pool_cfg_file = 'builds/build_pool_specifics.py'
@@ -1115,10 +1117,13 @@ or run without that action (ie: --no-{action})"
         )
         c = self.config
         dirs = self.query_abs_dirs()
-        if not c.get('tooltool_manifest_src'):
+        manifest_src = os.environ.get('TOOLTOOL_MANIFEST')
+        if not manifest_src:
+            manifest_src = c.get('tooltool_manifest_src')
+        if not manifest_src:
             return self.warning(ERROR_MSGS['tooltool_manifest_undetermined'])
         tooltool_manifest_path = os.path.join(dirs['abs_src_dir'],
-                                              c['tooltool_manifest_src'])
+                                              manifest_src)
         cmd = [
             sys.executable, '-u',
             os.path.join(dirs['abs_src_dir'], 'mach'),
@@ -1617,8 +1622,16 @@ or run without that action (ie: --no-{action})"
                 buildprops,
                 os.path.join(dirs['abs_work_dir'], 'buildprops.json'))
 
+        if 'MOZILLABUILD' in os.environ:
+            mach = [
+                os.path.join(os.environ['MOZILLABUILD'], 'msys', 'bin', 'bash.exe'),
+                os.path.join(dirs['abs_src_dir'], 'mach')
+            ]
+        else:
+            mach = [sys.executable, 'mach']
+
         return_code = self.run_command_m(
-            command=[sys.executable, 'mach', '--log-no-times', 'build', '-v'],
+            command=mach + ['--log-no-times', 'build', '-v'],
             cwd=dirs['abs_src_dir'],
             env=env,
             output_timeout=self.config.get('max_build_output_timeout', 60 * 40)
@@ -1630,6 +1643,9 @@ or run without that action (ie: --no-{action})"
             )
             self.fatal("'mach build' did not run successfully. Please check "
                        "log for errors.")
+
+        self.generate_build_props(console_output=True, halt_on_failure=True)
+        self._generate_build_stats()
 
     def multi_l10n(self):
         if not self.query_is_nightly():
@@ -1724,10 +1740,8 @@ or run without that action (ie: --no-{action})"
         self._taskcluster_upload(abs_files, self.routes_json['l10n'],
                                  locale='multi')
 
-    def postflight_build(self, console_output=True):
+    def postflight_build(self):
         """grabs properties from post build and calls ccache -s"""
-        self.generate_build_props(console_output=console_output,
-                                  halt_on_failure=True)
         # A list of argument lists.  Better names gratefully accepted!
         mach_commands = self.config.get('postflight_build_mach_commands', [])
         for mach_command in mach_commands:
@@ -1905,28 +1919,9 @@ or run without that action (ie: --no-{action})"
             'subtests': [],
         }
 
-    def generate_build_stats(self):
-        """grab build stats following a compile.
-
-        This action handles all statistics from a build: 'count_ctors'
-        and then posts to graph server the results.
-        We only post to graph server for non nightly build
-        """
-        if self.config.get('forced_artifact_build'):
-            self.info('Skipping due to forced artifact build.')
-            return
-
+    def _get_package_metrics(self):
         import tarfile
         import zipfile
-        c = self.config
-
-        if c.get('enable_count_ctors'):
-            self.info("counting ctors...")
-            self._count_ctors()
-        else:
-            self.info("ctors counts are disabled for this build.")
-
-        # Report some important file sizes for display in treeherder
 
         dirs = self.query_abs_dirs()
         packageName = self.query_buildbot_property('packageFilename')
@@ -1981,12 +1976,55 @@ or run without that action (ie: --no-{action})"
                                     subtests[name] = size
                 for name in subtests:
                     if subtests[name] is not None:
-                        self.info('TinderboxPrint: Size of %s<br/>%s bytes\n' % (
-                            name, subtests[name]))
-                        size_measurements.append({'name': name, 'value': subtests[name]})
+                        self.info('TinderboxPrint: Size of %s<br/>%s bytes\n' %
+                                  (name, subtests[name]))
+                        size_measurements.append(
+                            {'name': name, 'value': subtests[name]})
             except:
                 self.info('Unable to search %s for component sizes.' % installer)
                 size_measurements = []
+
+        if not installer_size and not size_measurements:
+            return
+
+        if installer.endswith('.apk'): # Android
+            yield {
+                "name": "installer size",
+                "value": installer_size,
+                "alertChangeType": "absolute",
+                "alertThreshold": (200 * 1024),
+                "subtests": size_measurements
+            }
+        else:
+            yield {
+                "name": "installer size",
+                "value": installer_size,
+                "alertThreshold": 1.0,
+                "subtests": size_measurements
+            }
+
+    def _generate_build_stats(self):
+        """grab build stats following a compile.
+
+        This action handles all statistics from a build: 'count_ctors'
+        and then posts to graph server the results.
+        We only post to graph server for non nightly build
+        """
+        self.info('Collecting build metrics')
+
+        if self.config.get('forced_artifact_build'):
+            self.info('Skipping due to forced artifact build.')
+            return
+
+        c = self.config
+
+        if c.get('enable_count_ctors'):
+            self.info("counting ctors...")
+            self._count_ctors()
+        else:
+            self.info("ctors counts are disabled for this build.")
+
+        # Report some important file sizes for display in treeherder
 
         perfherder_data = {
             "framework": {
@@ -1994,22 +2032,9 @@ or run without that action (ie: --no-{action})"
             },
             "suites": [],
         }
-        if (installer_size or size_measurements) and not c.get('debug_build'):
-            if installer.endswith('.apk'): # Android
-                perfherder_data["suites"].append({
-                    "name": "installer size",
-                    "value": installer_size,
-                    "alertChangeType": "absolute",
-                    "alertThreshold": (200 * 1024),
-                    "subtests": size_measurements
-                })
-            else:
-                perfherder_data["suites"].append({
-                    "name": "installer size",
-                    "value": installer_size,
-                    "alertThreshold": 1.0,
-                    "subtests": size_measurements
-                })
+
+        if not c.get('debug_build') and not c.get('disable_package_metrics'):
+            perfherder_data['suites'].extend(self._get_package_metrics())
 
         # Extract compiler warnings count.
         warnings = self.get_output_from_command(

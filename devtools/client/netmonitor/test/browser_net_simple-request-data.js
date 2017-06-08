@@ -15,7 +15,7 @@ function test() {
 
   let { L10N } = require("devtools/client/netmonitor/src/utils/l10n");
 
-  initNetMonitor(SIMPLE_SJS).then(({ tab, monitor }) => {
+  initNetMonitor(SIMPLE_SJS).then(async ({ tab, monitor }) => {
     info("Starting test... ");
 
     let { document, store, windowRequire } = monitor.panelWin;
@@ -29,11 +29,18 @@ function test() {
 
     store.dispatch(Actions.batchEnable(false));
 
-    waitForNetworkEvents(monitor, 1)
-      .then(() => teardown(monitor))
-      .then(finish);
+    let promiseList = [];
+    promiseList.push(waitForNetworkEvents(monitor, 1));
 
-    monitor.panelWin.once(EVENTS.NETWORK_EVENT, () => {
+    function expectEvent(evt, cb) {
+      promiseList.push(new Promise((resolve, reject) => {
+        monitor.panelWin.once(evt, _ => {
+          cb().then(resolve, reject);
+        });
+      }));
+    }
+
+    expectEvent(EVENTS.NETWORK_EVENT, async () => {
       is(getSelectedRequest(store.getState()), null,
         "There shouldn't be any selected item in the requests menu.");
       is(store.getState().requests.requests.size, 1,
@@ -96,10 +103,10 @@ function test() {
       );
     });
 
-    monitor.panelWin.once(EVENTS.RECEIVED_REQUEST_HEADERS, async () => {
+    expectEvent(EVENTS.RECEIVED_REQUEST_HEADERS, async () => {
       await waitUntil(() => {
         let requestItem = getSortedRequests(store.getState()).get(0);
-        return requestItem.requestHeaders;
+        return requestItem && requestItem.requestHeaders;
       });
 
       let requestItem = getSortedRequests(store.getState()).get(0);
@@ -122,17 +129,17 @@ function test() {
       );
     });
 
-    monitor.panelWin.once(EVENTS.RECEIVED_REQUEST_COOKIES, async () => {
+    expectEvent(EVENTS.RECEIVED_REQUEST_COOKIES, async () => {
       await waitUntil(() => {
         let requestItem = getSortedRequests(store.getState()).get(0);
-        return requestItem.requestCookies;
+        return requestItem && requestItem.requestCookies;
       });
 
       let requestItem = getSortedRequests(store.getState()).get(0);
 
       ok(requestItem.requestCookies,
         "There should be a requestCookies data available.");
-      is(requestItem.requestCookies.cookies.length, 2,
+      is(requestItem.requestCookies.length, 2,
         "The requestCookies data has an incorrect |cookies| property.");
 
       verifyRequestItemTarget(
@@ -148,10 +155,10 @@ function test() {
       ok(false, "Trap listener: this request doesn't have any post data.");
     });
 
-    monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_HEADERS, async () => {
+    expectEvent(EVENTS.RECEIVED_RESPONSE_HEADERS, async () => {
       await waitUntil(() => {
         let requestItem = getSortedRequests(store.getState()).get(0);
-        return requestItem.responseHeaders;
+        return requestItem && requestItem.responseHeaders;
       });
 
       let requestItem = getSortedRequests(store.getState()).get(0);
@@ -172,17 +179,17 @@ function test() {
       );
     });
 
-    monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_COOKIES, async () => {
+    expectEvent(EVENTS.RECEIVED_RESPONSE_COOKIES, async () => {
       await waitUntil(() => {
         let requestItem = getSortedRequests(store.getState()).get(0);
-        return requestItem.responseCookies;
+        return requestItem && requestItem.responseCookies;
       });
 
       let requestItem = getSortedRequests(store.getState()).get(0);
 
       ok(requestItem.responseCookies,
         "There should be a responseCookies data available.");
-      is(requestItem.responseCookies.cookies.length, 2,
+      is(requestItem.responseCookies.length, 2,
         "The responseCookies data has an incorrect |cookies| property.");
 
       verifyRequestItemTarget(
@@ -194,10 +201,11 @@ function test() {
       );
     });
 
-    monitor.panelWin.once(EVENTS.STARTED_RECEIVING_RESPONSE, async () => {
+    expectEvent(EVENTS.STARTED_RECEIVING_RESPONSE, async () => {
       await waitUntil(() => {
         let requestItem = getSortedRequests(store.getState()).get(0);
-        return requestItem.httpVersion &&
+        return requestItem &&
+               requestItem.httpVersion &&
                requestItem.status &&
                requestItem.statusText &&
                requestItem.headersSize;
@@ -227,10 +235,11 @@ function test() {
       );
     });
 
-    monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_CONTENT, async () => {
+    expectEvent(EVENTS.RECEIVED_RESPONSE_CONTENT, async () => {
       await waitUntil(() => {
         let requestItem = getSortedRequests(store.getState()).get(0);
-        return requestItem.transferredSize &&
+        return requestItem &&
+               requestItem.transferredSize &&
                requestItem.contentSize &&
                requestItem.mimeType &&
                requestItem.responseContent;
@@ -275,10 +284,10 @@ function test() {
       );
     });
 
-    monitor.panelWin.once(EVENTS.UPDATING_EVENT_TIMINGS, async () => {
+    expectEvent(EVENTS.UPDATING_EVENT_TIMINGS, async () => {
       await waitUntil(() => {
         let requestItem = getSortedRequests(store.getState()).get(0);
-        return requestItem.eventTimings;
+        return requestItem && requestItem.eventTimings;
       });
 
       let requestItem = getSortedRequests(store.getState()).get(0);
@@ -300,7 +309,7 @@ function test() {
       );
     });
 
-    monitor.panelWin.once(EVENTS.RECEIVED_EVENT_TIMINGS, () => {
+    expectEvent(EVENTS.RECEIVED_EVENT_TIMINGS, async () => {
       let requestItem = getSortedRequests(store.getState()).get(0);
 
       ok(requestItem.eventTimings,
@@ -333,5 +342,9 @@ function test() {
     });
 
     tab.linkedBrowser.reload();
+
+    await Promise.all(promiseList);
+    await teardown(monitor);
+    finish();
   });
 }

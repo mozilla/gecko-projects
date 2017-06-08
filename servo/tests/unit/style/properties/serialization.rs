@@ -9,7 +9,7 @@ use style::properties::longhands::outline_color::computed_value::T as ComputedCo
 use style::properties::parse_property_declaration_list;
 use style::values::{RGBA, Auto};
 use style::values::CustomIdent;
-use style::values::specified::{BorderStyle, BorderWidth, CSSColor, Length, LengthOrPercentage};
+use style::values::specified::{BorderStyle, BorderSideWidth, CSSColor, Length, LengthOrPercentage};
 use style::values::specified::{LengthOrPercentageOrAuto, LengthOrPercentageOrAutoOrContent};
 use style::values::specified::{NoCalcLength, PositionComponent};
 use style::values::specified::position::Y;
@@ -221,8 +221,8 @@ mod shorthand_serialization {
           properties.push(PropertyDeclaration::BorderBottomStyle(solid.clone()));
           properties.push(PropertyDeclaration::BorderLeftStyle(solid.clone()));
 
-          let px_30 = BorderWidth::from_length(Length::from_px(30f32));
-          let px_10 = BorderWidth::from_length(Length::from_px(10f32));
+          let px_30 = BorderSideWidth::Length(Length::from_px(30f32));
+          let px_10 = BorderSideWidth::Length(Length::from_px(10f32));
 
           properties.push(PropertyDeclaration::BorderTopWidth(px_30.clone()));
           properties.push(PropertyDeclaration::BorderRightWidth(px_30.clone()));
@@ -255,7 +255,7 @@ mod shorthand_serialization {
           properties.push(PropertyDeclaration::BorderBottomStyle(solid.clone()));
           properties.push(PropertyDeclaration::BorderLeftStyle(solid.clone()));
 
-          let px_30 = BorderWidth::from_length(Length::from_px(30f32));
+          let px_30 = BorderSideWidth::Length(Length::from_px(30f32));
 
           properties.push(PropertyDeclaration::BorderTopWidth(px_30.clone()));
           properties.push(PropertyDeclaration::BorderRightWidth(px_30.clone()));
@@ -295,11 +295,11 @@ mod shorthand_serialization {
         fn border_width_should_serialize_correctly() {
             let mut properties = Vec::new();
 
-            let top_px = BorderWidth::from_length(Length::from_px(10f32));
-            let bottom_px = BorderWidth::from_length(Length::from_px(10f32));
+            let top_px = BorderSideWidth::Length(Length::from_px(10f32));
+            let bottom_px = BorderSideWidth::Length(Length::from_px(10f32));
 
-            let right_px = BorderWidth::from_length(Length::from_px(15f32));
-            let left_px = BorderWidth::from_length(Length::from_px(15f32));
+            let right_px = BorderSideWidth::Length(Length::from_px(15f32));
+            let left_px = BorderSideWidth::Length(Length::from_px(15f32));
 
             properties.push(PropertyDeclaration::BorderTopWidth(top_px));
             properties.push(PropertyDeclaration::BorderRightWidth(right_px));
@@ -314,10 +314,10 @@ mod shorthand_serialization {
         fn border_width_with_keywords_should_serialize_correctly() {
             let mut properties = Vec::new();
 
-            let top_px = BorderWidth::Thin;
-            let right_px = BorderWidth::Medium;
-            let bottom_px = BorderWidth::Thick;
-            let left_px = BorderWidth::from_length(Length::from_px(15f32));
+            let top_px = BorderSideWidth::Thin;
+            let right_px = BorderSideWidth::Medium;
+            let bottom_px = BorderSideWidth::Thick;
+            let left_px = BorderSideWidth::Length(Length::from_px(15f32));
 
             properties.push(PropertyDeclaration::BorderTopWidth(top_px));
             properties.push(PropertyDeclaration::BorderRightWidth(right_px));
@@ -368,22 +368,22 @@ mod shorthand_serialization {
             assert_eq!(serialization, "border-style: solid dotted;");
         }
 
-        use style::values::specified::BorderRadiusSize;
+        use style::values::specified::BorderCornerRadius;
         use style::values::specified::length::Percentage;
 
         #[test]
         fn border_radius_should_serialize_correctly() {
             let mut properties = Vec::new();
-            properties.push(PropertyDeclaration::BorderTopLeftRadius(Box::new(BorderRadiusSize::new(
+            properties.push(PropertyDeclaration::BorderTopLeftRadius(Box::new(BorderCornerRadius::new(
                 Percentage(0.01).into(), Percentage(0.05).into()
             ))));
-            properties.push(PropertyDeclaration::BorderTopRightRadius(Box::new(BorderRadiusSize::new(
+            properties.push(PropertyDeclaration::BorderTopRightRadius(Box::new(BorderCornerRadius::new(
                 Percentage(0.02).into(), Percentage(0.06).into()
             ))));
-            properties.push(PropertyDeclaration::BorderBottomRightRadius(Box::new(BorderRadiusSize::new(
+            properties.push(PropertyDeclaration::BorderBottomRightRadius(Box::new(BorderCornerRadius::new(
                 Percentage(0.03).into(), Percentage(0.07).into()
             ))));
-            properties.push(PropertyDeclaration::BorderBottomLeftRadius(Box::new(BorderRadiusSize::new(
+            properties.push(PropertyDeclaration::BorderBottomLeftRadius(Box::new(BorderCornerRadius::new(
                 Percentage(0.04).into(), Percentage(0.08).into()
             ))));
 
@@ -403,7 +403,7 @@ mod shorthand_serialization {
         fn directional_border_should_show_all_properties_when_values_are_set() {
             let mut properties = Vec::new();
 
-            let width = BorderWidth::from_length(Length::from_px(4f32));
+            let width = BorderSideWidth::Length(Length::from_px(4f32));
             let style = BorderStyle::solid;
             let color = CSSColor {
                 parsed: ComputedColor::RGBA(RGBA::new(255, 0, 0, 255)),
@@ -418,8 +418,8 @@ mod shorthand_serialization {
             assert_eq!(serialization, "border-top: 4px solid rgb(255, 0, 0);");
         }
 
-        fn get_border_property_values() -> (BorderWidth, BorderStyle, CSSColor) {
-            (BorderWidth::from_length(Length::from_px(4f32)),
+        fn get_border_property_values() -> (BorderSideWidth, BorderStyle, CSSColor) {
+            (BorderSideWidth::Length(Length::from_px(4f32)),
              BorderStyle::solid,
              CSSColor::currentcolor())
         }
@@ -523,7 +523,6 @@ mod shorthand_serialization {
     }
 
     mod outline {
-        use style::properties::longhands::outline_width::SpecifiedValue as WidthContainer;
         use style::values::Either;
         use super::*;
 
@@ -531,7 +530,7 @@ mod shorthand_serialization {
         fn outline_should_show_all_properties_when_set() {
             let mut properties = Vec::new();
 
-            let width = WidthContainer(Length::from_px(4f32));
+            let width = BorderSideWidth::Length(Length::from_px(4f32));
             let style = Either::Second(BorderStyle::solid);
             let color = CSSColor {
                 parsed: ComputedColor::RGBA(RGBA::new(255, 0, 0, 255)),
@@ -550,7 +549,7 @@ mod shorthand_serialization {
         fn outline_should_serialize_correctly_when_style_is_auto() {
             let mut properties = Vec::new();
 
-            let width = WidthContainer(Length::from_px(4f32));
+            let width = BorderSideWidth::Length(Length::from_px(4f32));
             let style = Either::First(Auto);
             let color = CSSColor {
                 parsed: ComputedColor::RGBA(RGBA::new(255, 0, 0, 255)),
@@ -806,6 +805,7 @@ mod shorthand_serialization {
         use style::properties::longhands::mask_repeat as repeat;
         use style::properties::longhands::mask_size as size;
         use style::values::Either;
+        use style::values::generics::background::BackgroundSize;
         use style::values::generics::image::Image;
         use super::*;
 
@@ -852,13 +852,12 @@ mod shorthand_serialization {
                 )
             );
 
-            let size = single_vec_variant_value!(size,
-                size::single_value::SpecifiedValue::Explicit(
-                    size::single_value::ExplicitSize {
-                        width: LengthOrPercentageOrAuto::Length(NoCalcLength::from_px(70f32)),
-                        height: LengthOrPercentageOrAuto::Length(NoCalcLength::from_px(50f32))
-                    }
-                )
+            let size = single_vec_variant_value!(
+                size,
+                BackgroundSize::Explicit {
+                    width: LengthOrPercentageOrAuto::Length(NoCalcLength::from_px(70f32)),
+                    height: LengthOrPercentageOrAuto::Length(NoCalcLength::from_px(50f32)),
+                }
             );
 
             let repeat = single_vec_keyword_value!(repeat, RepeatX);
@@ -903,13 +902,12 @@ mod shorthand_serialization {
                 PositionComponent::Length(LengthOrPercentage::Length(NoCalcLength::from_px(4f32)))
             );
 
-            let size = single_vec_variant_value!(size,
-                size::single_value::SpecifiedValue::Explicit(
-                    size::single_value::ExplicitSize {
-                        width: LengthOrPercentageOrAuto::Length(NoCalcLength::from_px(70f32)),
-                        height: LengthOrPercentageOrAuto::Length(NoCalcLength::from_px(50f32))
-                    }
-                )
+            let size = single_vec_variant_value!(
+                size,
+                BackgroundSize::Explicit {
+                    width: LengthOrPercentageOrAuto::Length(NoCalcLength::from_px(70f32)),
+                    height: LengthOrPercentageOrAuto::Length(NoCalcLength::from_px(50f32)),
+                }
             );
 
             let repeat = single_vec_keyword_value!(repeat, RepeatX);

@@ -49,11 +49,14 @@ public:
 
   bool IsScrollInfoLayer() const { return mIsScrollInfoLayer; }
   gfx::Matrix4x4 GetTransform() const { return mTransform; }
+  CSSTransformMatrix GetTransformTyped() const;
   bool GetTransformIsPerspective() const { return mTransformIsPerspective; }
   EventRegions GetEventRegions() const { return mEventRegions; }
+  const LayerIntRegion& GetVisibleRegion() const { return mVisibleRegion; }
   Maybe<uint64_t> GetReferentId() const { return mReferentId; }
   EventRegionsOverride GetEventRegionsOverride() const { return mEventRegionsOverride; }
   const ScrollThumbData& GetScrollThumbData() const { return mScrollThumbData; }
+  const uint64_t& GetScrollbarAnimationId() const { return mScrollbarAnimationId; }
   FrameMetrics::ViewID GetScrollbarTargetContainerId() const { return mScrollbarTargetContainerId; }
   bool IsScrollbarContainer() const { return mIsScrollbarContainer; }
   FrameMetrics::ViewID GetFixedPositionScrollContainerId() const { return mFixedPosScrollContainerId; }
@@ -80,9 +83,11 @@ private:
   gfx::Matrix4x4 mTransform;
   bool mTransformIsPerspective;
   EventRegions mEventRegions;
+  LayerIntRegion mVisibleRegion;
   Maybe<uint64_t> mReferentId;
   EventRegionsOverride mEventRegionsOverride;
   ScrollThumbData mScrollThumbData;
+  uint64_t mScrollbarAnimationId;
   FrameMetrics::ViewID mScrollbarTargetContainerId;
   bool mIsScrollbarContainer;
   FrameMetrics::ViewID mFixedPosScrollContainerId;
@@ -116,6 +121,8 @@ public:
 
   void SetIsFirstPaint();
   bool IsFirstPaint() const;
+  void SetPaintSequenceNumber(uint32_t aPaintSequenceNumber);
+  uint32_t GetPaintSequenceNumber() const;
 
   friend struct IPC::ParamTraits<WebRenderScrollData>;
 
@@ -141,6 +148,7 @@ private:
   nsTArray<WebRenderLayerScrollData> mLayerScrollData;
 
   bool mIsFirstPaint;
+  uint32_t mPaintSequenceNumber;
 };
 
 } // namespace layers
@@ -173,9 +181,11 @@ struct ParamTraits<mozilla::layers::WebRenderLayerScrollData>
     WriteParam(aMsg, aParam.mTransform);
     WriteParam(aMsg, aParam.mTransformIsPerspective);
     WriteParam(aMsg, aParam.mEventRegions);
+    WriteParam(aMsg, aParam.mVisibleRegion);
     WriteParam(aMsg, aParam.mReferentId);
     WriteParam(aMsg, aParam.mEventRegionsOverride);
     WriteParam(aMsg, aParam.mScrollThumbData);
+    WriteParam(aMsg, aParam.mScrollbarAnimationId);
     WriteParam(aMsg, aParam.mScrollbarTargetContainerId);
     WriteParam(aMsg, aParam.mIsScrollbarContainer);
     WriteParam(aMsg, aParam.mFixedPosScrollContainerId);
@@ -190,9 +200,11 @@ struct ParamTraits<mozilla::layers::WebRenderLayerScrollData>
         && ReadParam(aMsg, aIter, &aResult->mTransform)
         && ReadParam(aMsg, aIter, &aResult->mTransformIsPerspective)
         && ReadParam(aMsg, aIter, &aResult->mEventRegions)
+        && ReadParam(aMsg, aIter, &aResult->mVisibleRegion)
         && ReadParam(aMsg, aIter, &aResult->mReferentId)
         && ReadParam(aMsg, aIter, &aResult->mEventRegionsOverride)
         && ReadParam(aMsg, aIter, &aResult->mScrollThumbData)
+        && ReadParam(aMsg, aIter, &aResult->mScrollbarAnimationId)
         && ReadParam(aMsg, aIter, &aResult->mScrollbarTargetContainerId)
         && ReadParam(aMsg, aIter, &aResult->mIsScrollbarContainer)
         && ReadParam(aMsg, aIter, &aResult->mFixedPosScrollContainerId);
@@ -210,6 +222,7 @@ struct ParamTraits<mozilla::layers::WebRenderScrollData>
     WriteParam(aMsg, aParam.mScrollMetadatas);
     WriteParam(aMsg, aParam.mLayerScrollData);
     WriteParam(aMsg, aParam.mIsFirstPaint);
+    WriteParam(aMsg, aParam.mPaintSequenceNumber);
   }
 
   static bool
@@ -217,7 +230,8 @@ struct ParamTraits<mozilla::layers::WebRenderScrollData>
   {
     return ReadParam(aMsg, aIter, &aResult->mScrollMetadatas)
         && ReadParam(aMsg, aIter, &aResult->mLayerScrollData)
-        && ReadParam(aMsg, aIter, &aResult->mIsFirstPaint);
+        && ReadParam(aMsg, aIter, &aResult->mIsFirstPaint)
+        && ReadParam(aMsg, aIter, &aResult->mPaintSequenceNumber);
   }
 };
 

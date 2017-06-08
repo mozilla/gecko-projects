@@ -143,7 +143,7 @@ function getUrlBaseName(url) {
  * @return {string} unicode query of a url
  */
 function getUrlQuery(url) {
-  return decodeUnicodeUrl((new URL(url)).search.replace(/^\?/, ""));
+  return (new URL(url)).search.replace(/^\?/, "");
 }
 
 /**
@@ -340,6 +340,22 @@ function getResponseTime(item, firstRequestStartedMillis = 0) {
     eventTimings.timings.receive;
 }
 
+/**
+ * Format the protocols used by the request.
+ */
+function getFormattedProtocol(item) {
+  let { httpVersion = "", responseHeaders = { headers: [] } } = item;
+  let protocol = [httpVersion];
+  responseHeaders.headers.some(h => {
+    if (h.hasOwnProperty("name") && h.name.toLowerCase() === "x-firefox-spdy") {
+      protocol.push(h.value);
+      return true;
+    }
+    return false;
+  });
+  return protocol.join("+");
+}
+
 module.exports = {
   getFormDataSections,
   fetchHeaders,
@@ -348,6 +364,7 @@ module.exports = {
   decodeUnicodeUrl,
   getAbbreviatedMimeType,
   getEndTime,
+  getFormattedProtocol,
   getResponseTime,
   getStartTime,
   getUrlBaseName,

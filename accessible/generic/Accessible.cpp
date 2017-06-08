@@ -335,6 +335,10 @@ Accessible::VisibilityState()
   if (!frame->StyleVisibility()->IsVisible())
     return states::INVISIBLE;
 
+  // Offscreen state if the document's visibility state is not visible.
+  if (Document()->IsHidden())
+    return states::OFFSCREEN;
+
   nsIFrame* curFrame = frame;
   do {
     nsView* view = curFrame->GetView();
@@ -891,6 +895,12 @@ Accessible::HandleAccEvent(AccEvent* aEvent)
           ipcDoc->SendSelectionEvent(id, widgetID, aEvent->GetEventType());
           break;
         }
+#if defined(XP_WIN)
+        case nsIAccessibleEvent::EVENT_FOCUS: {
+          ipcDoc->SendFocusEvent(id);
+          break;
+        }
+#endif
         default:
           ipcDoc->SendEvent(id, aEvent->GetEventType());
       }

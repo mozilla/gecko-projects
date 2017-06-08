@@ -90,8 +90,37 @@ WebRenderContainerLayer::RenderLayer(wr::DisplayListBuilder& aBuilder,
     WrBridge()->AddWebRenderParentCommand(anim);
   }
 
+  // If APZ is enabled and this layer is a scroll thumb, then it might need
+  // to move in the compositor to represent the async scroll position. So we
+  // ensure that there is an animations id set on it, we will use this to give
+  // WebRender updated transforms for composition.
+  if (WrManager()->AsyncPanZoomEnabled() &&
+      GetScrollThumbData().mDirection != ScrollDirection::NONE) {
+    // A scroll thumb better not have a transform animation already or we're
+    // going to end up clobbering it with APZ animating it too.
+    MOZ_ASSERT(transformForSC);
+
+    EnsureAnimationsId();
+    animationsId = GetCompositorAnimationsId();
+    // We need to set the transform in the stacking context to null for it to
+    // pick up and install the animation id.
+    transformForSC = nullptr;
+  }
+
+  if (transformForSC && transform.IsIdentity()) {
+    // If the transform is an identity transform, strip it out so that WR
+    // doesn't turn this stacking context into a reference frame, as it
+    // affects positioning. Bug 1345577 tracks a better fix.
+    transformForSC = nullptr;
+  }
+
+  nsTArray<WrFilterOp> filters;
+  for (const CSSFilter& filter : this->GetFilterChain()) {
+    filters.AppendElement(wr::ToWrFilterOp(filter));
+  }
+
   ScrollingLayersHelper scroller(this, aBuilder, aSc);
-  StackingContextHelper sc(aSc, aBuilder, this, animationsId, opacityForSC, transformForSC);
+  StackingContextHelper sc(aSc, aBuilder, this, animationsId, opacityForSC, transformForSC, filters);
 
   LayerRect rect = Bounds();
   DumpLayerInfo("ContainerLayer", rect);

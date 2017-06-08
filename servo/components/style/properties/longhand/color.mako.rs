@@ -10,10 +10,9 @@
 
 <%helpers:longhand name="color" need_clone="True"
                    animation_value_type="IntermediateRGBA"
+                   ignored_when_colors_disabled="True"
                    spec="https://drafts.csswg.org/css-color/#color">
     use cssparser::RGBA;
-    use std::fmt;
-    use style_traits::ToCss;
     use values::specified::{AllowQuirks, Color, CSSColor};
 
     impl ToComputedValue for SpecifiedValue {
@@ -30,16 +29,10 @@
         }
     }
 
-    #[derive(Clone, PartialEq, Debug)]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+    #[derive(Clone, Debug, PartialEq, ToCss)]
     pub struct SpecifiedValue(pub CSSColor);
     no_viewport_percentage!(SpecifiedValue);
-
-    impl ToCss for SpecifiedValue {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            self.0.to_css(dest)
-        }
-    }
 
     pub mod computed_value {
         use cssparser;
@@ -90,6 +83,9 @@
         %>
         use gecko_bindings::bindings::Gecko_GetLookAndFeelSystemColor;
         use gecko_bindings::structs::root::mozilla::LookAndFeel_ColorID;
+        use std::fmt;
+        use style_traits::ToCss;
+
         pub type SystemColor = LookAndFeel_ColorID;
 
         impl ToCss for SystemColor {

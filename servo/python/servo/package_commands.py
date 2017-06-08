@@ -7,13 +7,17 @@
 # option. This file may not be copied, modified, or distributed
 # except according to those terms.
 
-from __future__ import print_function, unicode_literals
+from __future__ import absolute_import, print_function, unicode_literals
 
+from datetime import datetime
+import hashlib
 import json
 import os
 import os.path as path
 import shutil
 import subprocess
+import sys
+import tempfile
 
 from mach.decorators import (
     CommandArgument,
@@ -33,6 +37,44 @@ from servo.command_base import (
     get_browserhtml_path,
 )
 from servo.util import delete
+
+
+PACKAGES = {
+    'android': [
+        'target/arm-linux-androideabi/release/servo.apk',
+    ],
+    'linux': [
+        'target/release/servo-tech-demo.tar.gz',
+    ],
+    'mac': [
+        'target/release/servo-tech-demo.dmg',
+    ],
+    'macbrew': [
+        'target/release/brew/servo.tar.gz',
+    ],
+    'windows-msvc': [
+        r'target\release\msi\Servo.msi',
+        r'target\release\msi\Servo.zip',
+    ],
+}
+
+
+TemporaryDirectory = None
+if sys.version_info >= (3, 2):
+    TemporaryDirectory = tempfile.TemporaryDirectory
+else:
+    import contextlib
+
+    # Not quite as robust as tempfile.TemporaryDirectory,
+    # but good enough for most purposes
+    @contextlib.contextmanager
+    def TemporaryDirectory(**kwargs):
+        dir_name = tempfile.mkdtemp(**kwargs)
+        try:
+            yield dir_name
+        except Exception as e:
+            shutil.rmtree(dir_name)
+            raise e
 
 
 def otool(s):
@@ -133,10 +175,18 @@ class PackageCommands(CommandBase):
                      default=None,
                      action='store_true',
                      help='Package Android')
-    def package(self, release=False, dev=False, android=None, debug=False, debugger=None):
+    @CommandArgument('--target', '-t',
+                     default=None,
+                     help='Package for given target platform')
+    def package(self, release=False, dev=False, android=None, debug=False, debugger=None, target=None):
         env = self.build_env()
         if android is None:
             android = self.config["build"]["android"]
+        if target and android:
+            print("Please specify either --target or --android.")
+            sys.exit(1)
+        if not android:
+            android = self.handle_android_target(target)
         binary_path = self.get_binary_path(release, dev, android=android)
         dir_to_root = self.get_top_dir()
         target_dir = path.dirname(binary_path)
@@ -224,7 +274,11 @@ class PackageCommands(CommandBase):
                 os.remove(dmg_path)
 
             try:
-                subprocess.check_call(['hdiutil', 'create', '-volname', 'Servo', dmg_path, '-srcfolder', dir_to_dmg])
+                subprocess.check_call(['hdiutil', 'create',
+                                       '-volname', 'Servo',
+                                       '-megabytes', '900',
+                                       dmg_path,
+                                       '-srcfolder', dir_to_dmg])
             except subprocess.CalledProcessError as e:
                 print("Packaging MacOS dmg exited with return value %d" % e.returncode)
                 return e.returncode
@@ -342,7 +396,15 @@ class PackageCommands(CommandBase):
     @CommandArgument('--android',
                      action='store_true',
                      help='Install on Android')
-    def install(self, release=False, dev=False, android=False):
+    @CommandArgument('--target', '-t',
+                     default=None,
+                     help='Install the given target platform')
+    def install(self, release=False, dev=False, android=False, target=None):
+        if target and android:
+            print("Please specify either --target or --android.")
+            sys.exit(1)
+        if not android:
+            android = self.handle_android_target(target)
         try:
             binary_path = self.get_binary_path(release, dev, android=android)
         except BuildNotFound:
@@ -374,3 +436,103 @@ class PackageCommands(CommandBase):
 
         print(" ".join(exec_command))
         return subprocess.call(exec_command, env=self.build_env())
+
+    @Command('upload-nightly',
+             description='Upload Servo nightly to S3',
+             category='package')
+    @CommandArgument('platform',
+                     choices=PACKAGES.keys(),
+                     help='Package platform type to upload')
+    def upload_nightly(self, platform):
+        import boto3
+
+        def nightly_filename(package, timestamp):
+            return '{}-{}'.format(
+                timestamp.isoformat() + 'Z',  # The `Z` denotes UTC
+                path.basename(package)
+            )
+
+        def upload_to_s3(platform, package, timestamp):
+            s3 = boto3.client('s3')
+            BUCKET = 'servo-builds'
+
+            nightly_dir = 'nightly/{}'.format(platform)
+            filename = nightly_filename(package, timestamp)
+            package_upload_key = '{}/{}'.format(nightly_dir, filename)
+            extension = path.basename(package).partition('.')[2]
+            latest_upload_key = '{}/servo-latest.{}'.format(nightly_dir, extension)
+
+            s3.upload_file(package, BUCKET, package_upload_key)
+            copy_source = {
+                'Bucket': BUCKET,
+                'Key': package_upload_key,
+            }
+            s3.copy(copy_source, BUCKET, latest_upload_key)
+
+        def update_brew(package, timestamp):
+            print("Updating brew formula")
+
+            package_url = 'https://download.servo.org/nightly/macbrew/{}'.format(
+                nightly_filename(package, timestamp)
+            )
+            with open(package) as p:
+                digest = hashlib.sha256(p.read()).hexdigest()
+
+            brew_version = timestamp.strftime('%Y.%m.%d')
+
+            with TemporaryDirectory(prefix='homebrew-servo') as tmp_dir:
+                def call_git(cmd, **kwargs):
+                    subprocess.check_call(
+                        ['git', '-C', tmp_dir] + cmd,
+                        **kwargs
+                    )
+
+                call_git([
+                    'clone',
+                    'https://github.com/servo/homebrew-servo.git',
+                    '.',
+                ])
+
+                script_dir = path.dirname(path.realpath(__file__))
+                with open(path.join(script_dir, 'servo-binary-formula.rb.in')) as f:
+                    formula = f.read()
+                formula = formula.replace('PACKAGEURL', package_url)
+                formula = formula.replace('SHA', digest)
+                formula = formula.replace('VERSION', brew_version)
+                with open(path.join(tmp_dir, 'Formula', 'servo-bin.rb'), 'w') as f:
+                    f.write(formula)
+
+                call_git(['add', path.join('.', 'Formula', 'servo-bin.rb')])
+                call_git([
+                    '-c', 'user.name=Tom Servo',
+                    '-c', 'user.email=servo@servo.org',
+                    'commit',
+                    '--message=Version Bump: {}'.format(brew_version),
+                ])
+
+                push_url = 'https://{}@github.com/servo/homebrew-servo.git'
+                # TODO(aneeshusa): Use subprocess.DEVNULL with Python 3.3+
+                with open(os.devnull, 'wb') as DEVNULL:
+                    call_git([
+                        'push',
+                        '-qf',
+                        push_url.format(os.environ['GITHUB_HOMEBREW_TOKEN']),
+                        'master',
+                    ], stdout=DEVNULL, stderr=DEVNULL)
+
+        timestamp = datetime.utcnow().replace(microsecond=0)
+        for package in PACKAGES[platform]:
+            if not path.isfile(package):
+                print("Could not find package for {} at {}".format(
+                    platform,
+                    package
+                ), file=sys.stderr)
+                return 1
+            upload_to_s3(platform, package, timestamp)
+
+        if platform == 'macbrew':
+            packages = PACKAGES[platform]
+            assert(len(packages) == 1)
+            update_brew(packages[0], timestamp)
+
+        return 0

@@ -8,16 +8,16 @@
 
 ${helpers.single_keyword("border-collapse", "separate collapse",
                          gecko_constant_prefix="NS_STYLE_BORDER",
-                         animation_value_type="none",
+                         animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-tables/#propdef-border-collapse")}
 ${helpers.single_keyword("empty-cells", "show hide",
                          gecko_constant_prefix="NS_STYLE_TABLE_EMPTY_CELLS",
-                         animation_value_type="none",
+                         animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-tables/#propdef-empty-cells")}
 ${helpers.single_keyword("caption-side", "top bottom",
                          extra_gecko_values="right left top-outside bottom-outside",
                          needs_conversion="True",
-                         animation_value_type="none",
+                         animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-tables/#propdef-caption-side")}
 
 <%helpers:longhand name="border-spacing" animation_value_type="ComputedValue" boxed="True"
@@ -31,8 +31,8 @@ ${helpers.single_keyword("caption-side", "top bottom",
         use app_units::Au;
         use properties::animated_properties::Animatable;
 
-        #[derive(Clone, Copy, Debug, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(Clone, Copy, Debug, PartialEq, ToCss)]
         pub struct T {
             pub horizontal: Au,
             pub vertical: Au,
@@ -89,14 +89,6 @@ ${helpers.single_keyword("caption-side", "top bottom",
                 vertical.to_css(dest)?;
             }
             Ok(())
-        }
-    }
-
-    impl ToCss for computed_value::T {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            try!(self.horizontal.to_css(dest));
-            try!(dest.write_str(" "));
-            self.vertical.to_css(dest)
         }
     }
 

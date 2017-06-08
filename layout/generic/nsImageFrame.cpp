@@ -135,8 +135,8 @@ NS_NewImageFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsImageFrame)
 
-nsImageFrame::nsImageFrame(nsStyleContext* aContext, LayoutFrameType aType)
-  : nsAtomicContainerFrame(aContext, aType)
+nsImageFrame::nsImageFrame(nsStyleContext* aContext, ClassID aID)
+  : nsAtomicContainerFrame(aContext, aID)
   , mComputedSize(0, 0)
   , mIntrinsicRatio(0, 0)
   , mDisplayingIcon(false)
@@ -800,7 +800,7 @@ nsImageFrame::EnsureIntrinsicSizeAndRatio()
       // image request is null or image size not known, probably an
       // invalid image specified
       if (!(GetStateBits() & NS_FRAME_GENERATED_CONTENT)) {
-        bool imageBroken = false;
+        bool imageInvalid = false;
         // check for broken images. valid null images (eg. img src="") are
         // not considered broken because they have no image requests
         nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(mContent);
@@ -808,14 +808,21 @@ nsImageFrame::EnsureIntrinsicSizeAndRatio()
           nsCOMPtr<imgIRequest> currentRequest;
           imageLoader->GetRequest(nsIImageLoadingContent::CURRENT_REQUEST,
                                   getter_AddRefs(currentRequest));
-          uint32_t imageStatus;
-          imageBroken =
-            currentRequest &&
-            NS_SUCCEEDED(currentRequest->GetImageStatus(&imageStatus)) &&
-            (imageStatus & imgIRequest::STATUS_ERROR);
+          if (currentRequest) {
+            uint32_t imageStatus;
+            imageInvalid =
+              NS_SUCCEEDED(currentRequest->GetImageStatus(&imageStatus)) &&
+              (imageStatus & imgIRequest::STATUS_ERROR);
+          } else {
+            // check if images are user-disabled (or blocked for other
+            // reasons)
+            int16_t imageBlockingStatus;
+            imageLoader->GetImageBlockingStatus(&imageBlockingStatus);
+            imageInvalid = imageBlockingStatus != nsIContentPolicy::ACCEPT;
+          }
         }
         // invalid image specified. make the image big enough for the "broken" icon
-        if (imageBroken) {
+        if (imageInvalid) {
           nscoord edgeLengthToUse =
             nsPresContext::CSSPixelsToAppUnits(
               ICON_SIZE + (2 * (ICON_PADDING + ALT_BORDER_WIDTH)));
@@ -1629,6 +1636,12 @@ nsDisplayImage::GetLayerState(nsDisplayListBuilder* aBuilder,
                  : imgIContainer::FLAG_NONE;
 
   if (!mImage->IsImageContainerAvailable(aManager, flags)) {
+    return LAYER_NONE;
+  }
+
+  // Image layer doesn't support draw focus ring for image map.
+  nsImageFrame* f = static_cast<nsImageFrame*>(mFrame);
+  if (f->HasImageMap()) {
     return LAYER_NONE;
   }
 

@@ -35,6 +35,7 @@ struct LookAndFeelInt;
 
 namespace mozilla {
 class RemoteSpellcheckEngineChild;
+class ChildProfilerController;
 
 using mozilla::loader::PScriptCacheChild;
 
@@ -150,6 +151,9 @@ public:
   RecvInitGMPService(Endpoint<PGMPServiceChild>&& aGMPService) override;
 
   mozilla::ipc::IPCResult
+  RecvInitProfiler(Endpoint<PProfilerChild>&& aEndpoint) override;
+
+  mozilla::ipc::IPCResult
   RecvGMPsChanged(nsTArray<GMPCapabilityData>&& capabilities) override;
 
   mozilla::ipc::IPCResult
@@ -183,17 +187,6 @@ public:
                                             const bool& aIsForBrowser) override;
 
   virtual bool DeallocPBrowserChild(PBrowserChild*) override;
-
-  virtual PBlobChild*
-  AllocPBlobChild(const BlobConstructorParams& aParams) override;
-
-  virtual bool DeallocPBlobChild(PBlobChild* aActor) override;
-
-  virtual PMemoryStreamChild*
-  AllocPMemoryStreamChild(const uint64_t& aSize) override;
-
-  virtual bool
-  DeallocPMemoryStreamChild(PMemoryStreamChild* aActor) override;
 
   virtual PIPCBlobInputStreamChild*
   AllocPIPCBlobInputStreamChild(const nsID& aID,
@@ -452,14 +445,6 @@ public:
 
   virtual mozilla::ipc::IPCResult RecvUpdateWindow(const uintptr_t& aChildId) override;
 
-  virtual mozilla::ipc::IPCResult RecvStartProfiler(const ProfilerInitParams& params) override;
-
-  virtual mozilla::ipc::IPCResult RecvPauseProfiler(const bool& aPause) override;
-
-  virtual mozilla::ipc::IPCResult RecvStopProfiler() override;
-
-  virtual mozilla::ipc::IPCResult RecvGatherProfile() override;
-
   virtual mozilla::ipc::IPCResult RecvDomainSetChanged(const uint32_t& aSetType,
                                                        const uint32_t& aChangeType,
                                                        const OptionalURIParams& aDomain) override;
@@ -518,13 +503,6 @@ public:
 #endif
 
   bool IsForBrowser() const { return mIsForBrowser; }
-
-  virtual PBlobChild*
-  SendPBlobConstructor(PBlobChild* actor,
-                       const BlobConstructorParams& params) override;
-
-  virtual PMemoryStreamChild*
-  SendPMemoryStreamConstructor(const uint64_t& aSize) override;
 
   virtual PFileDescriptorSetChild*
   SendPFileDescriptorSetConstructor(const FileDescriptor&) override;
@@ -681,6 +659,11 @@ public:
   typedef std::function<void(PRFileDesc*)> AnonymousTemporaryFileCallback;
   nsresult AsyncOpenAnonymousTemporaryFile(const AnonymousTemporaryFileCallback& aCallback);
 
+  virtual already_AddRefed<nsIEventTarget> GetEventTargetFor(TabChild* aTabChild) override;
+
+  mozilla::ipc::IPCResult
+  RecvSetPluginList(const uint32_t& aPluginEpoch, nsTArray<PluginTag>&& aPluginTags, nsTArray<FakePluginTag>&& aFakePluginTags) override;
+
 private:
   static void ForceKillTimerCallback(nsITimer* aTimer, void* aClosure);
   void StartForceKillTimer();
@@ -691,8 +674,6 @@ private:
 
   virtual already_AddRefed<nsIEventTarget>
   GetConstructedEventTarget(const Message& aMsg) override;
-
-  void GatherProfile(bool aIsExitProfile);
 
   InfallibleTArray<nsAutoPtr<AlertObserver> > mAlertObservers;
   RefPtr<ConsoleListener> mConsoleListener;
@@ -737,6 +718,10 @@ private:
 
   nsCOMPtr<nsIDomainPolicy> mPolicy;
   nsCOMPtr<nsITimer> mForceKillTimer;
+
+#ifdef MOZ_GECKO_PROFILER
+  RefPtr<ChildProfilerController> mProfilerController;
+#endif
 
 #if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
   nsCOMPtr<nsIFile> mProfileDir;

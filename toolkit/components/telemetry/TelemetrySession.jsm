@@ -45,13 +45,8 @@ const HISTOGRAM_SUFFIXES = {
   PARENT: "",
   CONTENT: "#content",
   GPU: "#gpu",
-}
-
-const INTERNAL_PROCESSES_NAMES = {
-  PARENT: "default",
-  CONTENT: "tab",
-  GPU: "gpu",
-}
+  EXTENSION: "#extension",
+};
 
 const ENVIRONMENT_CHANGE_LISTENER = "TelemetrySession::onEnvironmentChange";
 
@@ -679,9 +674,6 @@ var Impl = {
   _logger: null,
   _prevValues: {},
   _slowSQLStartup: {},
-  _hasWindowRestoredObserver: false,
-  _hasXulWindowVisibleObserver: false,
-  _hasActiveTicksObservers: false,
   // The activity state for the user. If false, don't count the next
   // active tick. Otherwise, increment the active ticks as usual.
   _isUserActive: true,
@@ -744,6 +736,18 @@ var Impl = {
   // We save whether the "new-profile" ping was sent yet, to
   // survive profile refresh and migrations.
   _newProfilePingSent: false,
+  // Keep track of the active observers
+  _observedTopics: new Set(),
+
+  addObserver(aTopic) {
+    Services.obs.addObserver(this, aTopic)
+    this._observedTopics.add(aTopic)
+  },
+
+  removeObserver(aTopic) {
+    Services.obs.removeObserver(this, aTopic)
+    this._observedTopics.delete(aTopic)
+  },
 
   get _log() {
     if (!this._logger) {
@@ -1101,10 +1105,6 @@ var Impl = {
    * Pull values from about:memory into corresponding histograms
    */
   gatherMemory: function gatherMemory() {
-    if (!Telemetry.canRecordExtended) {
-      return;
-    }
-
     let mgr;
     try {
       mgr = Cc["@mozilla.org/memory-reporter-manager;1"].
@@ -1153,6 +1153,13 @@ var Impl = {
     let cc = (id, n) => h(id, Ci.nsIMemoryReporter.UNITS_COUNT_CUMULATIVE, n);
     let p = (id, n) => h(id, Ci.nsIMemoryReporter.UNITS_PERCENTAGE, n);
 
+    // GHOST_WINDOWS is opt-out as of Firefox 55
+    c("GHOST_WINDOWS", "ghostWindows");
+
+    if (!Telemetry.canRecordExtended) {
+      return;
+    }
+
     b("MEMORY_VSIZE", "vsize");
     b("MEMORY_VSIZE_MAX_CONTIGUOUS", "vsizeMaxContiguous");
     b("MEMORY_RESIDENT_FAST", "residentFast");
@@ -1166,7 +1173,6 @@ var Impl = {
     b("MEMORY_STORAGE_SQLITE", "storageSQLite");
     cc("LOW_MEMORY_EVENTS_VIRTUAL", "lowMemoryEventsVirtual");
     cc("LOW_MEMORY_EVENTS_PHYSICAL", "lowMemoryEventsPhysical");
-    c("GHOST_WINDOWS", "ghostWindows");
     cc("PAGE_FAULTS_HARD", "pageFaultsHard");
 
     if (!Utils.isContentProcess && !this._totalMemoryTimeout) {
@@ -1307,30 +1313,37 @@ var Impl = {
     payloadObj.keyedHistograms = keyedHistograms[HISTOGRAM_SUFFIXES.PARENT] || {};
     payloadObj.processes = {
       parent: {
-        scalars: scalars[INTERNAL_PROCESSES_NAMES.PARENT] || {},
-        keyedScalars: keyedScalars[INTERNAL_PROCESSES_NAMES.PARENT] || {},
-        events: events[INTERNAL_PROCESSES_NAMES.PARENT] || [],
+        scalars: scalars["parent"] || {},
+        keyedScalars: keyedScalars["parent"] || {},
+        events: events["parent"] || [],
       },
       content: {
-        scalars: scalars[INTERNAL_PROCESSES_NAMES.CONTENT],
-        keyedScalars: keyedScalars[INTERNAL_PROCESSES_NAMES.CONTENT],
+        scalars: scalars["content"],
+        keyedScalars: keyedScalars["content"],
         histograms: histograms[HISTOGRAM_SUFFIXES.CONTENT],
         keyedHistograms: keyedHistograms[HISTOGRAM_SUFFIXES.CONTENT],
-        events: events[INTERNAL_PROCESSES_NAMES.CONTENT] || [],
+        events: events["content"] || [],
+      },
+      extension: {
+        scalars: scalars["extension"],
+        keyedScalars: keyedScalars["extension"],
+        histograms: histograms[HISTOGRAM_SUFFIXES.EXTENSION],
+        keyedHistograms: keyedHistograms[HISTOGRAM_SUFFIXES.EXTENSION],
+        events: events["extension"] || [],
       },
     };
 
     // Only include the GPU process if we've accumulated data for it.
     if (HISTOGRAM_SUFFIXES.GPU in histograms ||
         HISTOGRAM_SUFFIXES.GPU in keyedHistograms ||
-        INTERNAL_PROCESSES_NAMES.GPU in scalars ||
-        INTERNAL_PROCESSES_NAMES.GPU in keyedScalars) {
+        "gpu" in scalars ||
+        "gpu" in keyedScalars) {
       payloadObj.processes.gpu = {
-        scalars: scalars[INTERNAL_PROCESSES_NAMES.GPU],
-        keyedScalars: keyedScalars[INTERNAL_PROCESSES_NAMES.GPU],
+        scalars: scalars["gpu"],
+        keyedScalars: keyedScalars["gpu"],
         histograms: histograms[HISTOGRAM_SUFFIXES.GPU],
         keyedHistograms: keyedHistograms[HISTOGRAM_SUFFIXES.GPU],
-        events: events[INTERNAL_PROCESSES_NAMES.GPU] || [],
+        events: events["gpu"] || [],
       };
     }
 
@@ -1446,41 +1459,26 @@ var Impl = {
    * chrome process.
    */
   attachEarlyObservers() {
-    Services.obs.addObserver(this, "sessionstore-windows-restored");
+    this.addObserver("sessionstore-windows-restored");
     if (AppConstants.platform === "android") {
-      Services.obs.addObserver(this, "application-background");
+      this.addObserver("application-background");
     }
-    Services.obs.addObserver(this, "xul-window-visible");
-    this._hasWindowRestoredObserver = true;
-    this._hasXulWindowVisibleObserver = true;
+    this.addObserver("xul-window-visible");
 
     // Attach the active-ticks related observers.
-    Services.obs.addObserver(this, "user-interaction-active");
-    Services.obs.addObserver(this, "user-interaction-inactive");
-    this._hasActiveTicksObservers = true;
+    this.addObserver("user-interaction-active");
+    this.addObserver("user-interaction-inactive");
   },
 
   attachObservers: function attachObservers() {
     if (!this._initialized)
       return;
-    Services.obs.addObserver(this, "idle-daily");
+    this.addObserver("idle-daily");
     if (Telemetry.canRecordExtended) {
-      Services.obs.addObserver(this, TOPIC_CYCLE_COLLECTOR_BEGIN);
+      this.addObserver(TOPIC_CYCLE_COLLECTOR_BEGIN);
     }
   },
 
-  detachObservers: function detachObservers() {
-    if (!this._initialized)
-      return;
-    Services.obs.removeObserver(this, "idle-daily");
-    try {
-      // Tests may flip Telemetry.canRecordExtended on and off. Just try to remove this
-      // observer and catch if it fails because the observer was not added.
-      Services.obs.removeObserver(this, TOPIC_CYCLE_COLLECTOR_BEGIN);
-    } catch (e) {
-      this._log.warn("detachObservers - Failed to remove " + TOPIC_CYCLE_COLLECTOR_BEGIN, e);
-    }
-  },
 
   /**
    * Lightweight init function, called as soon as Firefox starts.
@@ -1614,7 +1612,7 @@ var Impl = {
       return;
     }
 
-    Services.obs.addObserver(this, "content-child-shutdown");
+    this.addObserver("content-child-shutdown");
     cpml.addMessageListener(MESSAGE_TELEMETRY_GET_CHILD_THREAD_HANGS, this);
     cpml.addMessageListener(MESSAGE_TELEMETRY_GET_CHILD_USS, this);
 
@@ -1854,24 +1852,17 @@ var Impl = {
   /**
    * Do some shutdown work that is common to all process types.
    */
-  uninstall: function uninstall() {
-    this.detachObservers();
-    if (this._hasWindowRestoredObserver) {
-      Services.obs.removeObserver(this, "sessionstore-windows-restored");
-      this._hasWindowRestoredObserver = false;
+  uninstall() {
+    for (let topic of this._observedTopics) {
+      try {
+        // Tests may flip Telemetry.canRecordExtended on and off. It can be the case
+        // that the observer TOPIC_CYCLE_COLLECTOR_BEGIN was not added.
+        this.removeObserver(topic);
+      } catch (e) {
+        this._log.warn("uninstall - Failed to remove " + topic, e);
+      }
     }
-    if (this._hasXulWindowVisibleObserver) {
-      Services.obs.removeObserver(this, "xul-window-visible");
-      this._hasXulWindowVisibleObserver = false;
-    }
-    if (AppConstants.platform === "android") {
-      Services.obs.removeObserver(this, "application-background");
-    }
-    if (this._hasActiveTicksObservers) {
-      Services.obs.removeObserver(this, "user-interaction-active");
-      Services.obs.removeObserver(this, "user-interaction-inactive");
-      this._hasActiveTicksObservers = false;
-    }
+
     GCTelemetry.shutdown();
   },
 
@@ -1975,7 +1966,6 @@ var Impl = {
     switch (aTopic) {
     case "content-child-shutdown":
       // content-child-shutdown is only registered for content processes.
-      Services.obs.removeObserver(this, "content-child-shutdown");
       this.uninstall();
       Telemetry.flushBatchedChildTelemetry();
       this.sendContentProcessPing(REASON_SAVED_SESSION);
@@ -1989,8 +1979,7 @@ var Impl = {
       }
       break;
     case "xul-window-visible":
-      Services.obs.removeObserver(this, "xul-window-visible");
-      this._hasXulWindowVisibleObserver = false;
+      this.removeObserver("xul-window-visible");
       var counters = processInfo.getCounters();
       if (counters) {
         [this._startupIO.startupWindowVisibleReadBytes,
@@ -1998,8 +1987,7 @@ var Impl = {
       }
       break;
     case "sessionstore-windows-restored":
-      Services.obs.removeObserver(this, "sessionstore-windows-restored");
-      this._hasWindowRestoredObserver = false;
+      this.removeObserver("sessionstore-windows-restored");
       // Check whether debugger was attached during startup
       let debugService = Cc["@mozilla.org/xpcom/debug;1"].getService(Ci.nsIDebug2);
       gWasDebuggerAttached = debugService.isDebuggerAttached;

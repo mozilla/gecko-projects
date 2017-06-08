@@ -263,7 +263,9 @@ public:
   bool EvaluateSupportsCondition(const nsAString& aCondition,
                                  nsIURI* aDocURL,
                                  nsIURI* aBaseURL,
-                                 nsIPrincipal* aDocPrincipal);
+                                 nsIPrincipal* aDocPrincipal,
+                                 SupportsParsingSettings aSettings
+                                  = SupportsParsingSettings::Normal);
 
   already_AddRefed<nsIAtom> ParseCounterStyleName(const nsAString& aBuffer,
                                                   nsIURI* aURL);
@@ -2414,7 +2416,8 @@ bool
 CSSParserImpl::EvaluateSupportsCondition(const nsAString& aDeclaration,
                                          nsIURI* aDocURL,
                                          nsIURI* aBaseURL,
-                                         nsIPrincipal* aDocPrincipal)
+                                         nsIPrincipal* aDocPrincipal,
+                                         SupportsParsingSettings aSettings)
 {
   nsCSSScanner scanner(aDeclaration, 0);
   css::ErrorReporter reporter(scanner, mSheet, mChildLoader, aDocURL);
@@ -2422,7 +2425,13 @@ CSSParserImpl::EvaluateSupportsCondition(const nsAString& aDeclaration,
   nsAutoSuppressErrors suppressErrors(this);
 
   bool conditionMet;
-  bool parsedOK = ParseSupportsCondition(conditionMet) && !GetToken(true);
+  bool parsedOK;
+
+  if (aSettings == SupportsParsingSettings::ImpliedParentheses) {
+    parsedOK = ParseSupportsConditionInParensInsideParens(conditionMet) && !GetToken(true);
+  } else {
+    parsedOK = ParseSupportsCondition(conditionMet) && !GetToken(true);
+  }
 
   CLEAR_ERROR();
   ReleaseScanner();
@@ -6331,9 +6340,10 @@ CSSParserImpl::ParsePseudoClassWithNthPairArg(nsCSSSelector& aSelector,
                                               CSSPseudoClassType aType)
 {
   int32_t numbers[2] = { 0, 0 };
-  int32_t sign[2] = { 1, 1 };
-  bool hasSign[2] = { false, false };
   bool lookForB = true;
+  bool onlyN = false;
+  bool hasSign = false;
+  int sign = 1;
 
   // Follow the whitespace rules as proposed in
   // http://lists.w3.org/Archives/Public/www-style/2008Mar/0121.html
@@ -6343,23 +6353,27 @@ CSSParserImpl::ParsePseudoClassWithNthPairArg(nsCSSSelector& aSelector,
     return eSelectorParsingStatus_Error;
   }
 
-  if (mToken.IsSymbol('+') || mToken.IsSymbol('-')) {
-    hasSign[0] = true;
-    if (mToken.IsSymbol('-')) {
-      sign[0] = -1;
-    }
-    if (! GetToken(false)) {
-      REPORT_UNEXPECTED_EOF(PEPseudoClassArgEOF);
-      return eSelectorParsingStatus_Error;
-    }
-  }
-
   // A helper function that checks if the token starts with literal string
   // |aStr| using a case-insensitive match.
   auto TokenBeginsWith = [this] (const nsLiteralString& aStr) {
     return StringBeginsWith(mToken.mIdent, aStr,
                             nsASCIICaseInsensitiveStringComparator());
   };
+
+  if (mToken.IsSymbol('+')) {
+    // This can only be +n, since +an, -an, +a, -a will all
+    // parse a number as the first token, and -n is an ident token.
+    numbers[0] = 1;
+    onlyN = true;
+
+    // consume the `n`
+    // We do not allow whitespace here
+    // https://drafts.csswg.org/css-syntax-3/#the-anb-type
+    if (! GetToken(false)) {
+      REPORT_UNEXPECTED_EOF(PEPseudoClassArgEOF);
+      return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
+    }
+  }
 
   if (eCSSToken_Ident == mToken.mType || eCSSToken_Dimension == mToken.mType) {
     // The CSS tokenization doesn't handle :nth-child() containing - well:
@@ -6370,7 +6384,7 @@ CSSParserImpl::ParsePseudoClassWithNthPairArg(nsCSSSelector& aSelector,
     uint32_t truncAt = 0;
     if (TokenBeginsWith(NS_LITERAL_STRING("n-"))) {
       truncAt = 1;
-    } else if (TokenBeginsWith(NS_LITERAL_STRING("-n-")) && !hasSign[0]) {
+    } else if (TokenBeginsWith(NS_LITERAL_STRING("-n-"))) {
       truncAt = 2;
     }
     if (truncAt != 0) {
@@ -6379,76 +6393,58 @@ CSSParserImpl::ParsePseudoClassWithNthPairArg(nsCSSSelector& aSelector,
     }
   }
 
-  if (eCSSToken_Ident == mToken.mType) {
-    if (mToken.mIdent.LowerCaseEqualsLiteral("odd") && !hasSign[0]) {
-      numbers[0] = 2;
-      numbers[1] = 1;
-      lookForB = false;
-    }
-    else if (mToken.mIdent.LowerCaseEqualsLiteral("even") && !hasSign[0]) {
-      numbers[0] = 2;
-      numbers[1] = 0;
-      lookForB = false;
-    }
-    else if (mToken.mIdent.LowerCaseEqualsLiteral("n")) {
-      numbers[0] = sign[0];
-    }
-    else if (mToken.mIdent.LowerCaseEqualsLiteral("-n") && !hasSign[0]) {
-      numbers[0] = -1;
-    }
-    else {
+  if (onlyN) {
+    // If we parsed a + or -, check that the truncated
+    // token is an "n"
+    if (eCSSToken_Ident != mToken.mType || !mToken.mIdent.LowerCaseEqualsLiteral("n")) {
       REPORT_UNEXPECTED_TOKEN(PEPseudoClassArgNotNth);
-      return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
+      return eSelectorParsingStatus_Error;
     }
-  }
-  else if (eCSSToken_Number == mToken.mType) {
-    if (!mToken.mIntegerValid) {
-      REPORT_UNEXPECTED_TOKEN(PEPseudoClassArgNotNth);
-      return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
-    }
-    // for +-an case
-    if (mToken.mHasSign && hasSign[0]) {
-      REPORT_UNEXPECTED_TOKEN(PEPseudoClassArgNotNth);
-      return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
-    }
-    int32_t intValue = mToken.mInteger * sign[0];
-    // for -a/**/n case
-    if (! GetToken(false)) {
-      numbers[1] = intValue;
-      lookForB = false;
-    }
-    else {
-      if (eCSSToken_Ident == mToken.mType && mToken.mIdent.LowerCaseEqualsLiteral("n")) {
-        numbers[0] = intValue;
-      }
-      else if (eCSSToken_Ident == mToken.mType && TokenBeginsWith(NS_LITERAL_STRING("n-"))) {
-        numbers[0] = intValue;
-        mScanner->Backup(mToken.mIdent.Length() - 1);
-      }
-      else {
-        UngetToken();
-        numbers[1] = intValue;
+  } else {
+    if (eCSSToken_Ident == mToken.mType) {
+      if (mToken.mIdent.LowerCaseEqualsLiteral("odd")) {
+        numbers[0] = 2;
+        numbers[1] = 1;
         lookForB = false;
       }
+      else if (mToken.mIdent.LowerCaseEqualsLiteral("even")) {
+        numbers[0] = 2;
+        numbers[1] = 0;
+        lookForB = false;
+      }
+      else if (mToken.mIdent.LowerCaseEqualsLiteral("n")) {
+          numbers[0] = 1;
+      }
+      else if (mToken.mIdent.LowerCaseEqualsLiteral("-n")) {
+        numbers[0] = -1;
+      }
+      else {
+        REPORT_UNEXPECTED_TOKEN(PEPseudoClassArgNotNth);
+        return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
+      }
     }
-  }
-  else if (eCSSToken_Dimension == mToken.mType) {
-    if (!mToken.mIntegerValid || !mToken.mIdent.LowerCaseEqualsLiteral("n")) {
+    else if (eCSSToken_Number == mToken.mType) {
+      if (!mToken.mIntegerValid) {
+        REPORT_UNEXPECTED_TOKEN(PEPseudoClassArgNotNth);
+        return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
+      }
+
+      numbers[1] = mToken.mInteger;
+      lookForB = false;
+    }
+    else if (eCSSToken_Dimension == mToken.mType) {
+      if (!mToken.mIntegerValid || !mToken.mIdent.LowerCaseEqualsLiteral("n")) {
+        REPORT_UNEXPECTED_TOKEN(PEPseudoClassArgNotNth);
+        return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
+      }
+      numbers[0] = mToken.mInteger;
+    }
+    // XXX If it's a ')', is that valid?  (as 0n+0)
+    else {
       REPORT_UNEXPECTED_TOKEN(PEPseudoClassArgNotNth);
+      UngetToken();
       return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
     }
-    // for +-an case
-    if ( mToken.mHasSign && hasSign[0] ) {
-      REPORT_UNEXPECTED_TOKEN(PEPseudoClassArgNotNth);
-      return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
-    }
-    numbers[0] = mToken.mInteger * sign[0];
-  }
-  // XXX If it's a ')', is that valid?  (as 0n+0)
-  else {
-    REPORT_UNEXPECTED_TOKEN(PEPseudoClassArgNotNth);
-    UngetToken();
-    return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
   }
 
   if (! GetToken(true)) {
@@ -6460,9 +6456,9 @@ CSSParserImpl::ParsePseudoClassWithNthPairArg(nsCSSSelector& aSelector,
     // If it is separated by whitespace from what follows it, it appears
     // as a separate token rather than part of the number token.
     if (mToken.IsSymbol('+') || mToken.IsSymbol('-')) {
-      hasSign[1] = true;
+      hasSign = true;
       if (mToken.IsSymbol('-')) {
-        sign[1] = -1;
+        sign = -1;
       }
       if (! GetToken(true)) {
         REPORT_UNEXPECTED_EOF(PEPseudoClassArgEOF);
@@ -6470,12 +6466,12 @@ CSSParserImpl::ParsePseudoClassWithNthPairArg(nsCSSSelector& aSelector,
       }
     }
     if (eCSSToken_Number != mToken.mType ||
-        !mToken.mIntegerValid || mToken.mHasSign == hasSign[1]) {
+        !mToken.mIntegerValid || mToken.mHasSign == hasSign) {
       REPORT_UNEXPECTED_TOKEN(PEPseudoClassArgNotNth);
       UngetToken();
       return eSelectorParsingStatus_Error; // our caller calls SkipUntil(')')
     }
-    numbers[1] = mToken.mInteger * sign[1];
+    numbers[1] = mToken.mInteger * sign;
     if (! GetToken(true)) {
       REPORT_UNEXPECTED_EOF(PEPseudoClassArgEOF);
       return eSelectorParsingStatus_Error;
@@ -6699,6 +6695,33 @@ GetEnumColorValue(nsCSSKeyword aKeyword, bool aIsChrome)
   return Some(value);
 }
 
+/// Returns the number of digits in a positive number
+/// assuming it has <= 6 digits
+static uint32_t
+CountNumbersForHashlessColor(uint32_t number) {
+  /// Just use a simple match instead of calculating a log
+  /// or dividing in a loop to be more efficient.
+  if (number < 10) {
+    return 1;
+  } else if (number < 100) {
+    return 2;
+  } else if (number < 1000) {
+    return 3;
+  } else if (number < 10000) {
+    return 4;
+  } else if (number < 100000) {
+    return 5;
+  } else if (number < 1000000) {
+    return 6;
+  } else {
+    // we don't care about numbers with more than 6 digits other
+    // than the fact that they have more than 6 digits, so just return something
+    // larger than 6 here. This is incorrect in the general case.
+    return 100;
+  }
+}
+
+
 CSSParseResult
 CSSParserImpl::ParseColor(nsCSSValue& aValue)
 {
@@ -6808,16 +6831,20 @@ CSSParserImpl::ParseColor(nsCSSValue& aValue)
 
   // try 'xxyyzz' without '#' prefix for compatibility with IE and Nav4x (bug 23236 and 45804)
   if (mHashlessColorQuirk) {
+    // https://quirks.spec.whatwg.org/#the-hashless-hex-color-quirk
+    //
     // - If the string starts with 'a-f', the nsCSSScanner builds the
     //   token as a eCSSToken_Ident and we can parse the string as a
     //   'xxyyzz' RGB color.
-    // - If it only contains '0-9' digits, the token is a
+    // - If it only contains up to six '0-9' digits, the token is a
     //   eCSSToken_Number and it must be converted back to a 6
-    //   characters string to be parsed as a RGB color.
+    //   characters string to be parsed as a RGB color. The number cannot
+    //   be specified as more than six digits.
     // - If it starts with '0-9' and contains any 'a-f', the token is a
     //   eCSSToken_Dimension, the mNumber part must be converted back to
     //   a string and the mIdent part must be appended to that string so
-    //   that the resulting string has 6 characters.
+    //   that the resulting string has 6 characters. The combined
+    //   dimension cannot be longer than 6 characters.
     // Note: This is a hack for Nav compatibility.  Do not attempt to
     // simplify it by hacking into the ncCSSScanner.  This would be very
     // bad.
@@ -6829,15 +6856,17 @@ CSSParserImpl::ParseColor(nsCSSValue& aValue)
         break;
 
       case eCSSToken_Number:
-        if (tk->mIntegerValid) {
+        if (tk->mIntegerValid && tk->mInteger < 1000000 && tk->mInteger >= 0) {
           SprintfLiteral(buffer, "%06d", tk->mInteger);
           str.AssignWithConversion(buffer);
         }
         break;
 
       case eCSSToken_Dimension:
-        if (tk->mIdent.Length() <= 6) {
-          SprintfLiteral(buffer, "%06.0f", tk->mNumber);
+        if (tk->mIntegerValid &&
+            tk->mIdent.Length() + CountNumbersForHashlessColor(tk->mInteger) <= 6 &&
+            tk->mInteger >= 0) {
+          SprintfLiteral(buffer, "%06d", tk->mInteger);
           nsAutoString temp;
           temp.AssignWithConversion(buffer);
           temp.Right(str, 6 - tk->mIdent.Length());
@@ -10249,7 +10278,8 @@ CSSParserImpl::ParseLinearGradient(nsCSSValue& aValue,
     UngetToken();
 
     // <angle> ,
-    if (ParseSingleTokenVariant(cssGradient->mAngle, VARIANT_ANGLE, nullptr) &&
+    if (ParseSingleTokenVariant(cssGradient->mAngle,
+                                VARIANT_ANGLE_OR_ZERO, nullptr) &&
         !ExpectSymbol(',', true)) {
       SkipUntil(')');
       return false;
@@ -12309,11 +12339,16 @@ CSSParserImpl::ParseImageLayersItem(
        haveAttach = false,
        havePositionAndSize = false,
        haveOrigin = false,
+       haveClip = false,
        haveComposite = false,
        haveMode = false,
        haveSomething = false;
 
-  const KTableEntry* originTable = nsCSSProps::kKeywordTableTable[aTable[nsStyleImageLayers::origin]];
+  const KTableEntry* originTable =
+    nsCSSProps::kKeywordTableTable[aTable[nsStyleImageLayers::origin]];
+  const KTableEntry* clipTable =
+    nsCSSProps::kKeywordTableTable[aTable[nsStyleImageLayers::clip]];
+
   while (GetToken(true)) {
     nsCSSTokenType tt = mToken.mType;
     UngetToken(); // ...but we'll still cheat and use mToken
@@ -12330,9 +12365,7 @@ CSSParserImpl::ParseImageLayersItem(
           keyword == eCSSKeyword_initial ||
           keyword == eCSSKeyword_unset) {
         return false;
-      } else if (keyword == eCSSKeyword_none) {
-        if (haveImage)
-          return false;
+      } else if (!haveImage && keyword == eCSSKeyword_none) {
         haveImage = true;
         if (ParseSingleValueProperty(aState.mImage->mValue,
                                      aTable[nsStyleImageLayers::image]) !=
@@ -12340,12 +12373,11 @@ CSSParserImpl::ParseImageLayersItem(
           NS_NOTREACHED("should be able to parse");
           return false;
         }
-      } else if (aTable[nsStyleImageLayers::attachment] !=
+      } else if (!haveAttach &&
+                 aTable[nsStyleImageLayers::attachment] !=
                    eCSSProperty_UNKNOWN &&
-                 nsCSSProps::FindKeyword(keyword,
-                   nsCSSProps::kImageLayerAttachmentKTable, dummy)) {
-        if (haveAttach)
-          return false;
+                 nsCSSProps::FindKeyword(
+                   keyword, nsCSSProps::kImageLayerAttachmentKTable, dummy)) {
         haveAttach = true;
         if (ParseSingleValueProperty(aState.mAttachment->mValue,
                                      aTable[nsStyleImageLayers::attachment]) !=
@@ -12353,10 +12385,9 @@ CSSParserImpl::ParseImageLayersItem(
           NS_NOTREACHED("should be able to parse");
           return false;
         }
-      } else if (nsCSSProps::FindKeyword(keyword,
-                   nsCSSProps::kImageLayerRepeatKTable, dummy)) {
-        if (haveRepeat)
-          return false;
+      } else if (!haveRepeat &&
+                 nsCSSProps::FindKeyword(
+                   keyword, nsCSSProps::kImageLayerRepeatKTable, dummy)) {
         haveRepeat = true;
         nsCSSValuePair scratch;
         if (!ParseImageLayerRepeatValues(scratch)) {
@@ -12365,10 +12396,9 @@ CSSParserImpl::ParseImageLayersItem(
         }
         aState.mRepeat->mXValue = scratch.mXValue;
         aState.mRepeat->mYValue = scratch.mYValue;
-      } else if (nsCSSProps::FindKeyword(keyword,
+      } else if (!havePositionAndSize &&
+                 nsCSSProps::FindKeyword(keyword,
                    nsCSSProps::kImageLayerPositionKTable, dummy)) {
-        if (havePositionAndSize)
-          return false;
         havePositionAndSize = true;
 
         if (!ParsePositionValueSeparateCoords(aState.mPositionX->mValue,
@@ -12383,9 +12413,8 @@ CSSParserImpl::ParseImageLayersItem(
           aState.mSize->mXValue = scratch.mXValue;
           aState.mSize->mYValue = scratch.mYValue;
         }
-      } else if (nsCSSProps::FindKeyword(keyword, originTable, dummy)) {
-        if (haveOrigin)
-          return false;
+      } else if (!haveOrigin &&
+                 nsCSSProps::FindKeyword(keyword, originTable, dummy)) {
         haveOrigin = true;
         if (ParseSingleValueProperty(aState.mOrigin->mValue,
                                      aTable[nsStyleImageLayers::origin]) !=
@@ -12393,36 +12422,37 @@ CSSParserImpl::ParseImageLayersItem(
           NS_NOTREACHED("should be able to parse");
           return false;
         }
-
-        // The spec allows a second box value (for background-clip),
-        // immediately following the first one (for background-origin).
-
+        // Set clip value to origin if clip is not set yet.
+        // Note that we don't set haveClip here so that it can be
+        // overridden if we see it later.
+        if (!haveClip) {
 #ifdef DEBUG
-        const KTableEntry* clipTable = nsCSSProps::kKeywordTableTable[aTable[nsStyleImageLayers::clip]];
-        for (size_t i = 0; originTable[i].mValue != -1; i++) {
-          // For each keyword & value in kOriginKTable, ensure that
-          // kBackgroundKTable has a matching entry at the same position.
-          MOZ_ASSERT(originTable[i].mKeyword == clipTable[i].mKeyword);
-          MOZ_ASSERT(originTable[i].mValue == clipTable[i].mValue);
-        }
+          for (size_t i = 0; originTable[i].mValue != -1; i++) {
+            // For each keyword & value in kOriginKTable, ensure that
+            // kBackgroundKTable has a matching entry at the same position.
+            MOZ_ASSERT(originTable[i].mKeyword == clipTable[i].mKeyword);
+            MOZ_ASSERT(originTable[i].mValue == clipTable[i].mValue);
+          }
 #endif
-        CSSParseResult result =
-          ParseSingleValueProperty(aState.mClip->mValue,
-                                   aTable[nsStyleImageLayers::clip]);
-        MOZ_ASSERT(result != CSSParseResult::Error,
-                   "how can failing to parse a single background-clip value "
-                   "consume tokens?");
-        if (result == CSSParseResult::NotFound) {
-          // When exactly one <box> value is set, it is used for both
-          // 'background-origin' and 'background-clip'.
-          // See assertions above showing these values are compatible.
           aState.mClip->mValue = aState.mOrigin->mValue;
         }
-      } else if (aTable[nsStyleImageLayers::composite] != eCSSProperty_UNKNOWN &&
-                 nsCSSProps::FindKeyword(keyword,
-                   nsCSSProps::kImageLayerCompositeKTable, dummy)) {
-        if (haveComposite)
+      } else if (!haveClip &&
+                 nsCSSProps::FindKeyword(keyword, clipTable, dummy)) {
+        // It is important that we try parsing clip later than origin
+        // because if there are two <box> / <geometry-box> values, the
+        // first should be origin, and the second should be clip.
+        haveClip = true;
+        if (ParseSingleValueProperty(aState.mClip->mValue,
+                                     aTable[nsStyleImageLayers::clip]) !=
+            CSSParseResult::Ok) {
+          NS_NOTREACHED("should be able to parse");
           return false;
+        }
+      } else if (!haveComposite &&
+                 aTable[nsStyleImageLayers::composite] !=
+                   eCSSProperty_UNKNOWN &&
+                 nsCSSProps::FindKeyword(
+                   keyword, nsCSSProps::kImageLayerCompositeKTable, dummy)) {
         haveComposite = true;
         if (ParseSingleValueProperty(aState.mComposite->mValue,
                                      aTable[nsStyleImageLayers::composite]) !=
@@ -12430,11 +12460,10 @@ CSSParserImpl::ParseImageLayersItem(
           NS_NOTREACHED("should be able to parse");
           return false;
         }
-      } else if (aTable[nsStyleImageLayers::maskMode] != eCSSProperty_UNKNOWN &&
-                 nsCSSProps::FindKeyword(keyword,
-                   nsCSSProps::kImageLayerModeKTable, dummy)) {
-        if (haveMode)
-          return false;
+      } else if (!haveMode &&
+                 aTable[nsStyleImageLayers::maskMode] != eCSSProperty_UNKNOWN &&
+                 nsCSSProps::FindKeyword(
+                   keyword, nsCSSProps::kImageLayerModeKTable, dummy)) {
         haveMode = true;
         if (ParseSingleValueProperty(aState.mMode->mValue,
                                      aTable[nsStyleImageLayers::maskMode]) !=
@@ -12442,9 +12471,8 @@ CSSParserImpl::ParseImageLayersItem(
           NS_NOTREACHED("should be able to parse");
           return false;
         }
-      } else if (aTable[nsStyleImageLayers::color] != eCSSProperty_UNKNOWN) {
-        if (haveColor)
-          return false;
+      } else if (!haveColor &&
+                 aTable[nsStyleImageLayers::color] != eCSSProperty_UNKNOWN) {
         haveColor = true;
         if (ParseSingleValueProperty(aState.mColor,
                                      aTable[nsStyleImageLayers::color]) !=
@@ -14025,14 +14053,15 @@ CSSParserImpl::ParseCounterData(nsCSSPropertyID aPropID)
       if (!ParseCustomIdent(cur->mXValue, mToken.mIdent, kCounterDataKTable)) {
         return false;
       }
-      if (!GetToken(true)) {
-        break;
+      int32_t value = aPropID == eCSSProperty_counter_increment ? 1 : 0;
+      if (GetToken(true)) {
+        if (mToken.mType == eCSSToken_Number && mToken.mIntegerValid) {
+          value = mToken.mInteger;
+        } else {
+          UngetToken();
+        }
       }
-      if (mToken.mType == eCSSToken_Number && mToken.mIntegerValid) {
-        cur->mYValue.SetIntValue(mToken.mInteger, eCSSUnit_Integer);
-      } else {
-        UngetToken();
-      }
+      cur->mYValue.SetIntValue(value, eCSSUnit_Integer);
       if (!GetToken(true)) {
         break;
       }
@@ -17291,8 +17320,7 @@ CSSParserImpl::ParsePaint(nsCSSPropertyID aPropID)
 {
   nsCSSValue x, y;
 
-  if (ParseVariant(x, VARIANT_HC | VARIANT_NONE | VARIANT_URL |
-                      VARIANT_OPENTYPE_SVG_KEYWORD,
+  if (ParseVariant(x, VARIANT_HC | VARIANT_NONE | VARIANT_URL | VARIANT_KEYWORD,
                    nsCSSProps::kContextPatternKTable) != CSSParseResult::Ok) {
     return false;
   }
@@ -18169,10 +18197,12 @@ bool
 nsCSSParser::EvaluateSupportsCondition(const nsAString& aCondition,
                                        nsIURI* aDocURL,
                                        nsIURI* aBaseURL,
-                                       nsIPrincipal* aDocPrincipal)
+                                       nsIPrincipal* aDocPrincipal,
+                                       SupportsParsingSettings aSettings)
 {
   return static_cast<CSSParserImpl*>(mImpl)->
-    EvaluateSupportsCondition(aCondition, aDocURL, aBaseURL, aDocPrincipal);
+    EvaluateSupportsCondition(aCondition, aDocURL, aBaseURL,
+                              aDocPrincipal, aSettings);
 }
 
 bool

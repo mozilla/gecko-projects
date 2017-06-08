@@ -161,7 +161,7 @@ struct AnimatedGeometryRoot
   {
     RefPtr<AnimatedGeometryRoot> result;
     if (aFrame->HasAnimatedGeometryRoot()) {
-      result = aFrame->Properties().Get(AnimatedGeometryRootCache());
+      result = aFrame->GetProperty(AnimatedGeometryRootCache());
       result->mParentAGR = aParent;
       result->mIsAsync = aIsAsync;
     } else {
@@ -202,14 +202,14 @@ protected:
   {
     MOZ_ASSERT(mParentAGR || mIsAsync);
     aFrame->SetHasAnimatedGeometryRoot(true);
-    aFrame->Properties().Set(AnimatedGeometryRootCache(), this);
+    aFrame->SetProperty(AnimatedGeometryRootCache(), this);
   }
 
   ~AnimatedGeometryRoot()
   {
     if (mFrame) {
       mFrame->SetHasAnimatedGeometryRoot(false);
-      mFrame->Properties().Delete(AnimatedGeometryRootCache());
+      mFrame->DeleteProperty(AnimatedGeometryRootCache());
     }
   }
 };
@@ -241,12 +241,12 @@ struct ActiveScrolledRoot {
 
     RefPtr<ActiveScrolledRoot> asr;
     if (f->HasActiveScrolledRoot()) {
-      asr = f->Properties().Get(ActiveScrolledRootCache());
+      asr = f->GetProperty(ActiveScrolledRootCache());
     } else {
       asr = new ActiveScrolledRoot(aParent, aScrollableFrame);
 
       f->SetHasActiveScrolledRoot(true);
-      f->Properties().Set(ActiveScrolledRootCache(), asr);
+      f->SetProperty(ActiveScrolledRootCache(), asr);
     }
     asr->mParent = aParent;
     asr->mScrollableFrame = aScrollableFrame;
@@ -293,7 +293,7 @@ private:
     if (mScrollableFrame) {
       nsIFrame* f = do_QueryFrame(mScrollableFrame);
       f->SetHasActiveScrolledRoot(false);
-      f->Properties().Delete(ActiveScrolledRootCache());
+      f->DeleteProperty(ActiveScrolledRootCache());
     }
   }
 
@@ -1435,7 +1435,7 @@ public:
 
   static OutOfFlowDisplayData* GetOutOfFlowData(nsIFrame* aFrame)
   {
-    return aFrame->Properties().Get(OutOfFlowDisplayDataProperty());
+    return aFrame->GetProperty(OutOfFlowDisplayDataProperty());
   }
 
   nsPresContext* CurrentPresContext() {
@@ -1614,6 +1614,7 @@ public:
   AnimatedGeometryRoot* FindAnimatedGeometryRootFor(nsDisplayItem* aItem);
 
   friend class nsDisplayItem;
+  friend class nsDisplayOwnLayer;
   AnimatedGeometryRoot* FindAnimatedGeometryRootFor(nsIFrame* aFrame);
 
   AnimatedGeometryRoot* WrapAGRForFrame(nsIFrame* aAnimatedGeometryRoot,
@@ -4601,7 +4602,6 @@ public:
 #ifdef NS_BUILD_REFCNT_LOGGING
   virtual ~nsDisplayOwnLayer();
 #endif
-
   nsDisplayOwnLayer(const nsDisplayOwnLayer& aOther)
     : nsDisplayWrapList(aOther)
     , mFlags(aOther.mFlags)
@@ -4612,6 +4612,7 @@ public:
     MOZ_COUNT_CTOR(nsDisplayOwnLayer);
   }
 
+  virtual bool ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder) const override;
   virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
                                              LayerManager* aManager,
                                              const ContainerLayerParameters& aContainerParameters) override;
@@ -4629,6 +4630,7 @@ public:
   }
 
   uint32_t GetFlags() { return mFlags; }
+  bool IsScrollThumbLayer() const;
   NS_DISPLAY_DECL_NAME("OwnLayer", TYPE_OWN_LAYER)
 protected:
   uint32_t mFlags;
@@ -5039,9 +5041,10 @@ public:
                     LayerManager* aManager);
 
   /*
-   * Paint mask onto aMaskContext in mFrame's coordinate space.
+   * Paint mask onto aMaskContext in mFrame's coordinate space and
+   * return whether the mask layer was painted successfully.
    */
-  void PaintMask(nsDisplayListBuilder* aBuilder, gfxContext* aMaskContext);
+  bool PaintMask(nsDisplayListBuilder* aBuilder, gfxContext* aMaskContext);
 
   const nsTArray<nsRect>& GetDestRects()
   {

@@ -30,7 +30,6 @@ class CSSRuleListImpl;
 class nsCSSRuleProcessor;
 class nsIURI;
 class nsMediaQueryResultCacheKey;
-class nsStyleSet;
 class nsPresContext;
 class nsXMLNameSpaceMap;
 
@@ -59,7 +58,7 @@ struct CSSStyleSheetInner : public StyleSheetInfo
                      CSSStyleSheet* aPrimarySheet);
   ~CSSStyleSheetInner();
 
-  CSSStyleSheetInner* CloneFor(CSSStyleSheet* aPrimarySheet);
+  StyleSheetInfo* CloneFor(StyleSheet* aPrimarySheet) override;
   void RemoveSheet(StyleSheet* aSheet) override;
 
   void RebuildNameSpaces();
@@ -114,21 +113,14 @@ public:
   int32_t StyleRuleCount() const;
   css::Rule* GetStyleRuleAt(int32_t aIndex) const;
 
-  void SetOwnerRule(css::ImportRule* aOwnerRule) { mOwnerRule = aOwnerRule; /* Not ref counted */ }
-  css::ImportRule* GetOwnerRule() const { return mOwnerRule; }
-  // Workaround overloaded-virtual warning in GCC.
-  using StyleSheet::GetOwnerRule;
-
   nsXMLNameSpaceMap* GetNameSpaceMap() const {
     return Inner()->mNameSpaceMap;
   }
 
-  virtual already_AddRefed<StyleSheet> Clone(StyleSheet* aCloneParent,
-    css::ImportRule* aCloneOwnerRule,
+  already_AddRefed<StyleSheet> Clone(StyleSheet* aCloneParent,
+    dom::CSSImportRule* aCloneOwnerRule,
     nsIDocument* aCloneDocument,
     nsINode* aCloneOwningNode) const final;
-
-  bool IsModified() const final { return mDirty; }
 
   void SetModifiedByChildRule() {
     NS_ASSERTION(mDirty,
@@ -139,17 +131,9 @@ public:
   nsresult AddRuleProcessor(nsCSSRuleProcessor* aProcessor);
   nsresult DropRuleProcessor(nsCSSRuleProcessor* aProcessor);
 
-  void AddStyleSet(nsStyleSet* aStyleSet);
-  void DropStyleSet(nsStyleSet* aStyleSet);
-
   // nsICSSLoaderObserver interface
   NS_IMETHOD StyleSheetLoaded(StyleSheet* aSheet, bool aWasAlternate,
                               nsresult aStatus) override;
-
-  void EnsureUniqueInner();
-
-  // Append all of this sheet's child sheets to aArray.
-  void AppendAllChildSheets(nsTArray<CSSStyleSheet*>& aArray);
 
   bool UseForPresentation(nsPresContext* aPresContext,
                             nsMediaQueryResultCacheKey& aKey) const;
@@ -168,19 +152,12 @@ public:
   dom::Element* GetScopeElement() const { return mScopeElement; }
   void SetScopeElement(dom::Element* aScopeElement);
 
-  // WebIDL CSSStyleSheet API
-  // Can't be inline because we can't include ImportRule here.  And can't be
-  // called GetOwnerRule because that would be ambiguous with the ImportRule
-  // version.
-  css::Rule* GetDOMOwnerRule() const final;
-
-  void WillDirty();
-  void DidDirty();
+  void DidDirty() override;
 
 private:
   CSSStyleSheet(const CSSStyleSheet& aCopy,
                 CSSStyleSheet* aParentToUse,
-                css::ImportRule* aOwnerRuleToUse,
+                dom::CSSImportRule* aOwnerRuleToUse,
                 nsIDocument* aDocumentToUse,
                 nsINode* aOwningNodeToUse);
 
@@ -220,15 +197,11 @@ protected:
 
   void EnabledStateChangedInternal();
 
-  css::ImportRule*      mOwnerRule; // weak ref
-
   RefPtr<CSSRuleListImpl> mRuleCollection;
-  bool                  mDirty; // has been modified 
   bool                  mInRuleProcessorCache;
   RefPtr<dom::Element> mScopeElement;
 
   AutoTArray<nsCSSRuleProcessor*, 8>* mRuleProcessors;
-  nsTArray<nsStyleSet*> mStyleSets;
 
   friend class mozilla::StyleSheet;
   friend class ::nsCSSRuleProcessor;

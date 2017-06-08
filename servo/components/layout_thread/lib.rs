@@ -44,7 +44,7 @@ use euclid::point::Point2D;
 use euclid::rect::Rect;
 use euclid::scale_factor::ScaleFactor;
 use euclid::size::Size2D;
-use fnv::FnvHasher;
+use fnv::FnvHashMap;
 use gfx::display_list::{OpaqueNode, WebRenderImageInfo};
 use gfx::font;
 use gfx::font_cache_thread::FontCacheThread;
@@ -74,7 +74,8 @@ use layout::webrender_helpers::WebRenderDisplayListConverter;
 use layout::wrapper::LayoutNodeLayoutData;
 use layout::wrapper::drop_style_and_layout_data;
 use layout_traits::LayoutThreadFactory;
-use msg::constellation_msg::{BrowsingContextId, PipelineId};
+use msg::constellation_msg::PipelineId;
+use msg::constellation_msg::TopLevelBrowsingContextId;
 use net_traits::image_cache::{ImageCache, UsePlaceholder};
 use parking_lot::RwLock;
 use profile_traits::mem::{self, Report, ReportKind, ReportsChan};
@@ -98,7 +99,6 @@ use servo_url::ServoUrl;
 use std::borrow::ToOwned;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::hash::BuildHasherDefault;
 use std::marker::PhantomData;
 use std::mem as std_mem;
 use std::ops::{Deref, DerefMut};
@@ -129,6 +129,9 @@ use style::traversal::{DomTraversal, TraversalDriver, TraversalFlags};
 pub struct LayoutThread {
     /// The ID of the pipeline that we belong to.
     id: PipelineId,
+
+    /// The ID of the top-level browsing context that we belong to.
+    top_level_browsing_context_id: TopLevelBrowsingContextId,
 
     /// The URL of the pipeline that we belong to.
     url: ServoUrl,
@@ -199,10 +202,10 @@ pub struct LayoutThread {
     document_shared_lock: Option<SharedRwLock>,
 
     /// The list of currently-running animations.
-    running_animations: StyleArc<RwLock<HashMap<OpaqueNode, Vec<Animation>>>>,
+    running_animations: StyleArc<RwLock<FnvHashMap<OpaqueNode, Vec<Animation>>>>,
 
     /// The list of animations that have expired since the last style recalculation.
-    expired_animations: StyleArc<RwLock<HashMap<OpaqueNode, Vec<Animation>>>>,
+    expired_animations: StyleArc<RwLock<FnvHashMap<OpaqueNode, Vec<Animation>>>>,
 
     /// A counter for epoch messages
     epoch: Cell<Epoch>,
@@ -220,9 +223,8 @@ pub struct LayoutThread {
     /// The CSS error reporter for all CSS loaded in this layout thread
     error_reporter: CSSErrorReporter,
 
-    webrender_image_cache: Arc<RwLock<HashMap<(ServoUrl, UsePlaceholder),
-                                              WebRenderImageInfo,
-                                              BuildHasherDefault<FnvHasher>>>>,
+    webrender_image_cache: Arc<RwLock<FnvHashMap<(ServoUrl, UsePlaceholder),
+                                                 WebRenderImageInfo>>>,
 
     /// Webrender interface.
     webrender_api: webrender_traits::RenderApi,
@@ -244,7 +246,7 @@ impl LayoutThreadFactory for LayoutThread {
 
     /// Spawns a new layout thread.
     fn create(id: PipelineId,
-              top_level_browsing_context_id: Option<BrowsingContextId>,
+              top_level_browsing_context_id: TopLevelBrowsingContextId,
               url: ServoUrl,
               is_iframe: bool,
               chan: (Sender<Msg>, Receiver<Msg>),
@@ -261,13 +263,13 @@ impl LayoutThreadFactory for LayoutThread {
         thread::Builder::new().name(format!("LayoutThread {:?}", id)).spawn(move || {
             thread_state::initialize(thread_state::LAYOUT);
 
-            if let Some(top_level_browsing_context_id) = top_level_browsing_context_id {
-                BrowsingContextId::install(top_level_browsing_context_id);
-            }
+            // In order to get accurate crash reports, we install the top-level bc id.
+            TopLevelBrowsingContextId::install(top_level_browsing_context_id);
 
             { // Ensures layout thread is destroyed before we send shutdown message
                 let sender = chan.0;
                 let layout = LayoutThread::new(id,
+                                               top_level_browsing_context_id,
                                                url,
                                                is_iframe,
                                                chan.1,
@@ -417,6 +419,7 @@ fn add_font_face_rules(stylesheet: &Stylesheet,
 impl LayoutThread {
     /// Creates a new `LayoutThread` structure.
     fn new(id: PipelineId,
+           top_level_browsing_context_id: TopLevelBrowsingContextId,
            url: ServoUrl,
            is_iframe: bool,
            port: Receiver<Msg>,
@@ -457,7 +460,7 @@ impl LayoutThread {
         for stylesheet in &ua_stylesheets.user_or_user_agent_stylesheets {
             add_font_face_rules(stylesheet,
                                 &guard,
-                                &stylist.device,
+                                stylist.device(),
                                 &font_cache_thread,
                                 &ipc_font_cache_sender,
                                 &outstanding_web_fonts_counter);
@@ -465,6 +468,7 @@ impl LayoutThread {
 
         LayoutThread {
             id: id,
+            top_level_browsing_context_id: top_level_browsing_context_id,
             url: url,
             is_iframe: is_iframe,
             port: port,
@@ -486,8 +490,8 @@ impl LayoutThread {
             outstanding_web_fonts: outstanding_web_fonts_counter,
             root_flow: RefCell::new(None),
             document_shared_lock: None,
-            running_animations: StyleArc::new(RwLock::new(HashMap::new())),
-            expired_animations: StyleArc::new(RwLock::new(HashMap::new())),
+            running_animations: StyleArc::new(RwLock::new(FnvHashMap::default())),
+            expired_animations: StyleArc::new(RwLock::new(FnvHashMap::default())),
             epoch: Cell::new(Epoch(0)),
             viewport_size: Size2D::new(Au(0), Au(0)),
             webrender_api: webrender_api_sender.create_api(),
@@ -515,7 +519,7 @@ impl LayoutThread {
                 script_chan: Arc::new(Mutex::new(script_chan)),
             },
             webrender_image_cache:
-                Arc::new(RwLock::new(HashMap::with_hasher(Default::default()))),
+                Arc::new(RwLock::new(FnvHashMap::default())),
             timer:
                 if PREFS.get("layout.animations.test.enabled")
                            .as_boolean().unwrap_or(false) {
@@ -732,7 +736,7 @@ impl LayoutThread {
 
     fn create_layout_thread(&self, info: NewLayoutThreadInfo) {
         LayoutThread::create(info.id,
-                             BrowsingContextId::installed(),
+                             self.top_level_browsing_context_id,
                              info.url.clone(),
                              info.is_parent,
                              info.layout_pair,
@@ -789,10 +793,10 @@ impl LayoutThread {
 
         let rw_data = possibly_locked_rw_data.lock();
         let guard = stylesheet.shared_lock.read();
-        if stylesheet.is_effective_for_device(&self.stylist.device, &guard) {
+        if stylesheet.is_effective_for_device(self.stylist.device(), &guard) {
             add_font_face_rules(&*stylesheet,
                                 &guard,
-                                &self.stylist.device,
+                                self.stylist.device(),
                                 &self.font_cache_thread,
                                 &self.font_cache_sender,
                                 &self.outstanding_web_fonts);
@@ -1167,7 +1171,7 @@ impl LayoutThread {
 
             // If we haven't styled this node yet, we don't need to track a
             // restyle.
-            let mut data = match el.mutate_layout_data() {
+            let style_data = match el.get_data() {
                 Some(d) => d,
                 None => {
                     unsafe { el.unset_snapshot_flags() };
@@ -1180,7 +1184,7 @@ impl LayoutThread {
                 map.insert(el.as_node().opaque(), s);
             }
 
-            let mut style_data = &mut data.base.style_data;
+            let mut style_data = style_data.borrow_mut();
             let mut restyle_data = style_data.ensure_restyle();
 
             // Stash the data on the element for processing by the style system.
@@ -1255,11 +1259,11 @@ impl LayoutThread {
         }
 
         if opts::get().dump_rule_tree {
-            layout_context.style_context.stylist.rule_tree.dump_stdout(&guards);
+            layout_context.style_context.stylist.rule_tree().dump_stdout(&guards);
         }
 
         // GC the rule tree if some heuristics are met.
-        unsafe { layout_context.style_context.stylist.rule_tree.maybe_gc(); }
+        unsafe { layout_context.style_context.stylist.rule_tree().maybe_gc(); }
 
         // Perform post-style recalculation layout passes.
         if let Some(mut root_flow) = self.root_flow.borrow().clone() {

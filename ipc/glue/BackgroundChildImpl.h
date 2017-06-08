@@ -70,18 +70,6 @@ protected:
   DeallocPBackgroundIndexedDBUtilsChild(PBackgroundIndexedDBUtilsChild* aActor)
                                         override;
 
-  virtual PBlobChild*
-  AllocPBlobChild(const BlobConstructorParams& aParams) override;
-
-  virtual bool
-  DeallocPBlobChild(PBlobChild* aActor) override;
-
-  virtual PMemoryStreamChild*
-  AllocPMemoryStreamChild(const uint64_t& aSize) override;
-
-  virtual bool
-  DeallocPMemoryStreamChild(PMemoryStreamChild* aActor) override;
-
   virtual PPendingIPCBlobChild*
   AllocPPendingIPCBlobChild(const IPCBlob& aBlob) override;
 
@@ -214,6 +202,12 @@ protected:
 
   virtual bool
   DeallocPWebAuthnTransactionChild(PWebAuthnTransactionChild* aActor) override;
+
+  virtual PHttpBackgroundChannelChild*
+  AllocPHttpBackgroundChannelChild(const uint64_t& aChannelId) override;
+
+  virtual bool
+  DeallocPHttpBackgroundChannelChild(PHttpBackgroundChannelChild* aActor) override;
 };
 
 class BackgroundChildImpl::ThreadLocal final

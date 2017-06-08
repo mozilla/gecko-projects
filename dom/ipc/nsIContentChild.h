@@ -42,12 +42,10 @@ class CpowEntry;
 namespace dom {
 
 class Blob;
-class BlobChild;
 class BlobImpl;
 class BlobConstructorParams;
 class ClonedMessageData;
 class IPCTabContext;
-class PBlobChild;
 class PBrowserChild;
 
 class nsIContentChild : public nsISupports
@@ -56,16 +54,6 @@ class nsIContentChild : public nsISupports
 {
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ICONTENTCHILD_IID)
-
-  BlobChild* GetOrCreateActorForBlob(Blob* aBlob);
-  BlobChild* GetOrCreateActorForBlobImpl(BlobImpl* aImpl);
-
-  virtual PBlobChild*
-  SendPBlobConstructor(PBlobChild* aActor,
-                       const BlobConstructorParams& aParams) = 0;
-
-  virtual mozilla::ipc::PMemoryStreamChild*
-  SendPMemoryStreamConstructor(const uint64_t& aSize) = 0;
 
   virtual bool
   SendPBrowserConstructor(PBrowserChild* aActor,
@@ -81,6 +69,9 @@ public:
 
   virtual mozilla::ipc::PChildToParentStreamChild*
   SendPChildToParentStreamConstructor(mozilla::ipc::PChildToParentStreamChild*) = 0;
+
+  virtual already_AddRefed<nsIEventTarget>
+  GetEventTargetFor(TabChild* aTabChild) = 0;
 
 protected:
   virtual jsipc::PJavaScriptChild* AllocPJavaScriptChild();
@@ -101,15 +92,6 @@ protected:
                                                           const uint32_t& aChromeFlags,
                                                           const ContentParentId& aCpID,
                                                           const bool& aIsForBrowse);
-
-  virtual PBlobChild* AllocPBlobChild(const BlobConstructorParams& aParams);
-
-  virtual bool DeallocPBlobChild(PBlobChild* aActor);
-
-  virtual mozilla::ipc::PMemoryStreamChild*
-  AllocPMemoryStreamChild(const uint64_t& aSize);
-
-  virtual bool DeallocPMemoryStreamChild(mozilla::ipc::PMemoryStreamChild* aActor);
 
   virtual mozilla::ipc::PIPCBlobInputStreamChild*
   AllocPIPCBlobInputStreamChild(const nsID& aID, const uint64_t& aSize);
@@ -137,6 +119,8 @@ protected:
                                                    InfallibleTArray<jsipc::CpowEntry>&& aCpows,
                                                    const IPC::Principal& aPrincipal,
                                                    const ClonedMessageData& aData);
+
+  static already_AddRefed<nsIEventTarget> GetConstructedEventTarget(const IPC::Message& aMsg);
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIContentChild, NS_ICONTENTCHILD_IID)

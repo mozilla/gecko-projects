@@ -154,6 +154,9 @@ if CONFIG['ENABLE_MARIONETTE']:
         '/testing/marionette',
     ]
 
+if CONFIG['ENABLE_GECKODRIVER']:
+    DIRS += ['/testing/geckodriver']
+
 DIRS += [
     '/tools/quitter',
     '/media/gmp-clearkey/0.1',

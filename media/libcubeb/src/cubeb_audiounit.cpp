@@ -29,7 +29,6 @@
 #endif
 #include "cubeb_resampler.h"
 #include "cubeb_ring_array.h"
-#include "cubeb_utils.h"
 #include <algorithm>
 #include <atomic>
 #include <vector>
@@ -115,6 +114,7 @@ struct cubeb_stream {
   cubeb_data_callback data_callback = nullptr;
   cubeb_state_callback state_callback = nullptr;
   cubeb_device_changed_callback device_changed_callback = nullptr;
+  owned_critical_section device_changed_callback_lock;
   /* Stream creation parameters */
   cubeb_stream_params input_stream_params = { CUBEB_SAMPLE_FLOAT32NE, 0, 0, CUBEB_LAYOUT_UNDEFINED };
   cubeb_stream_params output_stream_params = { CUBEB_SAMPLE_FLOAT32NE, 0, 0, CUBEB_LAYOUT_UNDEFINED };
@@ -388,8 +388,9 @@ is_extra_input_needed(cubeb_stream * stm)
 
 static void
 audiounit_mix_output_buffer(cubeb_stream * stm,
+                            long output_frames,
                             void * output_buffer,
-                            long output_frames)
+                            unsigned long output_buffer_length)
 {
   cubeb_stream_params output_mixer_params = {
     stm->output_stream_params.format,
@@ -400,7 +401,9 @@ audiounit_mix_output_buffer(cubeb_stream * stm,
 
   // The downmixing(from 5.1) supports in-place conversion, so we can use
   // the same buffer for both input and output of the mixer.
-  cubeb_mixer_mix(stm->mixer.get(), output_buffer, output_frames, output_buffer,
+  cubeb_mixer_mix(stm->mixer.get(), output_frames,
+                  output_buffer, output_buffer_length,
+                  output_buffer, output_buffer_length,
                   &stm->output_stream_params, &output_mixer_params);
 }
 
@@ -522,7 +525,8 @@ audiounit_output_callback(void * user_ptr,
   }
 
   /* Mixing */
-  audiounit_mix_output_buffer(stm, output_buffer, output_frames);
+  unsigned long output_buffer_length = outBufferList->mBuffers[0].mDataByteSize;
+  audiounit_mix_output_buffer(stm, output_frames, output_buffer, output_buffer_length);
 
   return noErr;
 }
@@ -603,6 +607,7 @@ audiounit_get_input_device_id(AudioDeviceID * device_id)
 
 static int audiounit_stream_get_volume(cubeb_stream * stm, float * volume);
 static int audiounit_stream_set_volume(cubeb_stream * stm, float volume);
+static int audiounit_uninstall_device_changed_callback(cubeb_stream * stm);
 
 static int
 audiounit_reinit_stream(cubeb_stream * stm)
@@ -612,10 +617,18 @@ audiounit_reinit_stream(cubeb_stream * stm)
     audiounit_stream_stop_internal(stm);
   }
 
+  int r = audiounit_uninstall_device_changed_callback(stm);
+  if (r != CUBEB_OK) {
+    LOG("(%p) Could not uninstall the device changed callback", stm);
+  }
+
   {
     auto_lock lock(stm->mutex);
     float volume = 0.0;
-    int vol_rv = audiounit_stream_get_volume(stm, &volume);
+    int vol_rv = CUBEB_ERROR;
+    if (has_output(stm)) {
+      vol_rv = audiounit_stream_get_volume(stm, &volume);
+    }
 
     audiounit_close_stream(stm);
 
@@ -677,11 +690,8 @@ audiounit_property_listener_callback(AudioObjectID /* id */, UInt32 address_coun
         break;
       case kAudioDevicePropertyDataSource: {
           LOG("Event[%u] - mSelector == kAudioHardwarePropertyDataSource", (unsigned int) i);
-          if (has_output(stm)) {
-              stm->output_device = 0;
-          }
+          return noErr;
         }
-        break;
       default:
         LOG("Event[%u] - mSelector == Unexpected Event id %d, return", (unsigned int) i, addresses[i].mSelector);
         return noErr;
@@ -695,7 +705,7 @@ audiounit_property_listener_callback(AudioObjectID /* id */, UInt32 address_coun
     case kAudioDevicePropertyDeviceIsAlive:
       /* fall through */
     case kAudioDevicePropertyDataSource: {
-        auto_lock lock(stm->mutex);
+        auto_lock dev_cb_lock(stm->device_changed_callback_lock);
         if (stm->device_changed_callback) {
           stm->device_changed_callback(stm->user_ptr);
         }
@@ -2516,11 +2526,6 @@ audiounit_close_stream(cubeb_stream *stm)
 {
   stm->mutex.assert_current_thread_owns();
 
-  int r = audiounit_uninstall_device_changed_callback(stm);
-  if (r != CUBEB_OK) {
-    LOG("(%p) Could not uninstall the device changed callback", stm);
-  }
-
   if (stm->input_unit) {
     AudioUnitUninitialize(stm->input_unit);
     AudioComponentInstanceDispose(stm->input_unit);
@@ -2554,13 +2559,20 @@ audiounit_stream_destroy(cubeb_stream * stm)
     LOG("(%p) Could not uninstall the device changed callback", stm);
   }
 
+  r = audiounit_uninstall_device_changed_callback(stm);
+  if (r != CUBEB_OK) {
+    LOG("(%p) Could not uninstall the device changed callback", stm);
+  }
+
   auto_lock context_lock(stm->context->mutex);
   audiounit_stream_stop_internal(stm);
 
-  {
+  // Execute close in serial queue to avoid collision
+  // with reinit when un/plug devices
+  dispatch_sync(stm->context->serial_queue, ^() {
     auto_lock lock(stm->mutex);
     audiounit_close_stream(stm);
-  }
+  });
 
   assert(stm->context->active_streams >= 1);
   stm->context->active_streams -= 1;
@@ -2629,8 +2641,7 @@ audiounit_stream_stop(cubeb_stream * stm)
 static int
 audiounit_stream_get_position(cubeb_stream * stm, uint64_t * position)
 {
-  auto_lock lock(stm->mutex);
-
+  assert(stm);
   *position = stm->frames_played;
   return CUBEB_OK;
 }
@@ -2860,14 +2871,11 @@ int audiounit_stream_device_destroy(cubeb_stream * /* stream */,
 int audiounit_stream_register_device_changed_callback(cubeb_stream * stream,
                                                       cubeb_device_changed_callback device_changed_callback)
 {
+  auto_lock dev_cb_lock(stream->device_changed_callback_lock);
   /* Note: second register without unregister first causes 'nope' error.
    * Current implementation requires unregister before register a new cb. */
   assert(!stream->device_changed_callback);
-
-  auto_lock lock(stream->mutex);
-
   stream->device_changed_callback = device_changed_callback;
-
   return CUBEB_OK;
 }
 
@@ -2910,11 +2918,12 @@ audiounit_strref_to_cstr_utf8(CFStringRef strref)
   }
 
   len = CFStringGetLength(strref);
-  size = CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8);
-  ret = static_cast<char *>(malloc(size));
+  // Add 1 to size to allow for '\0' termination character.
+  size = CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8) + 1;
+  ret = new char[size];
 
   if (!CFStringGetCString(strref, ret, size, kCFStringEncodingUTF8)) {
-    free(ret);
+    delete [] ret;
     ret = NULL;
   }
 
@@ -3011,12 +3020,11 @@ audiounit_get_device_presentation_latency(AudioObjectID devid, AudioObjectProper
   return dev + stream + offset;
 }
 
-static cubeb_device_info *
-audiounit_create_device_from_hwdev(AudioObjectID devid, cubeb_device_type type)
+static int
+audiounit_create_device_from_hwdev(cubeb_device_info * ret, AudioObjectID devid, cubeb_device_type type)
 {
   AudioObjectPropertyAddress adr = { 0, 0, kAudioObjectPropertyElementMaster };
   UInt32 size, ch, latency;
-  cubeb_device_info * ret;
   CFStringRef str = NULL;
   AudioValueRange range;
 
@@ -3025,15 +3033,14 @@ audiounit_create_device_from_hwdev(AudioObjectID devid, cubeb_device_type type)
   } else if (type == CUBEB_DEVICE_TYPE_INPUT) {
     adr.mScope = kAudioDevicePropertyScopeInput;
   } else {
-    return NULL;
+    return CUBEB_ERROR;
   }
 
   ch = audiounit_get_channel_count(devid, adr.mScope);
   if (ch == 0) {
-    return NULL;
+    return CUBEB_ERROR;
   }
 
-  ret = new cubeb_device_info;
   PodZero(ret, 1);
 
   size = sizeof(CFStringRef);
@@ -3042,7 +3049,7 @@ audiounit_create_device_from_hwdev(AudioObjectID devid, cubeb_device_type type)
     ret->device_id = audiounit_strref_to_cstr_utf8(str);
     static_assert(sizeof(cubeb_devid) >= sizeof(decltype(devid)), "cubeb_devid can't represent devid");
     ret->devid = reinterpret_cast<cubeb_devid>(devid);
-    ret->group_id = strdup(ret->device_id);
+    ret->group_id = ret->device_id;
     CFRelease(str);
   }
 
@@ -3100,12 +3107,12 @@ audiounit_create_device_from_hwdev(AudioObjectID devid, cubeb_device_type type)
     ret->latency_hi = 100 * ret->default_rate / 1000; /* Default to 100ms */
   }
 
-  return ret;
+  return CUBEB_OK;
 }
 
 static int
 audiounit_enumerate_devices(cubeb * /* context */, cubeb_device_type type,
-                            cubeb_device_collection ** collection)
+                            cubeb_device_collection * collection)
 {
   std::vector<AudioObjectID> hwdevs;
   uint32_t i;
@@ -3116,25 +3123,51 @@ audiounit_enumerate_devices(cubeb * /* context */, cubeb_device_type type,
     return CUBEB_ERROR;
   }
 
-  *collection = static_cast<cubeb_device_collection *>(malloc(sizeof(cubeb_device_collection) +
-							      sizeof(cubeb_device_info*) * (hwdevs.size() > 0 ? hwdevs.size() - 1 : 0)));
-  (*collection)->count = 0;
+  auto devices = new cubeb_device_info[hwdevs.size()];
+  collection->count = 0;
 
   if (type & CUBEB_DEVICE_TYPE_OUTPUT) {
     for (i = 0; i < hwdevs.size(); i++) {
-      cubeb_device_info * cur = audiounit_create_device_from_hwdev(hwdevs[i], CUBEB_DEVICE_TYPE_OUTPUT);
-      if (cur != nullptr)
-	(*collection)->device[(*collection)->count++] = cur;
+      auto device = &devices[collection->count];
+      auto err = audiounit_create_device_from_hwdev(device, hwdevs[i], CUBEB_DEVICE_TYPE_OUTPUT);
+      if (err != CUBEB_OK) {
+        continue;
+      }
+      collection->count += 1;
     }
   }
 
   if (type & CUBEB_DEVICE_TYPE_INPUT) {
     for (i = 0; i < hwdevs.size(); i++) {
-      cubeb_device_info * cur = audiounit_create_device_from_hwdev(hwdevs[i], CUBEB_DEVICE_TYPE_INPUT);
-      if (cur != nullptr)
-	(*collection)->device[(*collection)->count++] = cur;
+      auto device = &devices[collection->count];
+      auto err = audiounit_create_device_from_hwdev(device, hwdevs[i], CUBEB_DEVICE_TYPE_INPUT);
+      if (err != CUBEB_OK) {
+        continue;
+      }
+      collection->count += 1;
     }
   }
+
+  if (collection->count > 0) {
+    collection->device = devices;
+  } else {
+    delete [] devices;
+    collection->device = NULL;
+  }
+
+  return CUBEB_OK;
+}
+
+static int
+audiounit_device_collection_destroy(cubeb * /* context */,
+                                    cubeb_device_collection * collection)
+{
+  for (size_t i = 0; i < collection->count; i++) {
+    delete [] collection->device[i].device_id;
+    delete [] collection->device[i].friendly_name;
+    delete [] collection->device[i].vendor_name;
+  }
+  delete [] collection->device;
 
   return CUBEB_OK;
 }
@@ -3297,6 +3330,7 @@ cubeb_ops const audiounit_ops = {
   /*.get_preferred_sample_rate =*/ audiounit_get_preferred_sample_rate,
   /*.get_preferred_channel_layout =*/ audiounit_get_preferred_channel_layout,
   /*.enumerate_devices =*/ audiounit_enumerate_devices,
+  /*.device_collection_destroy =*/ audiounit_device_collection_destroy,
   /*.destroy =*/ audiounit_destroy,
   /*.stream_init =*/ audiounit_stream_init,
   /*.stream_destroy =*/ audiounit_stream_destroy,

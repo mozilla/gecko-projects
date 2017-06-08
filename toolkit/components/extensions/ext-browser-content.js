@@ -9,6 +9,8 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "clearTimeout",
                                   "resource://gre/modules/Timer.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ExtensionCommon",
+                                  "resource://gre/modules/ExtensionCommon.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "require",
@@ -19,10 +21,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "setTimeout",
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 const {
   getWinUtils,
-  stylesheetMap,
 } = ExtensionUtils;
 
-/* globals addMessageListener, addEventListener, content, docShell, removeEventListener, sendAsyncMessage */
+/* eslint-env mozilla/frame-script */
 
 // Minimum time between two resizes.
 const RESIZE_TIMEOUT = 100;
@@ -71,6 +72,9 @@ const BrowserListener = {
     this.maxWidth = maxWidth;
     this.maxHeight = maxHeight;
 
+    this.blockParser = blockParser;
+    this.needsResize = fixedWidth || maxHeight || maxWidth;
+
     this.oldBackground = null;
 
     if (allowScriptsToClose) {
@@ -80,27 +84,30 @@ const BrowserListener = {
     // Force external links to open in tabs.
     docShell.isAppTab = true;
 
-    if (blockParser) {
+    if (this.blockParser) {
       this.blockingPromise = new Promise(resolve => {
         this.unblockParser = resolve;
       });
+      addEventListener("DOMDocElementInserted", this, true);
     }
 
-    addEventListener("DOMWindowCreated", this, true);
     addEventListener("load", this, true);
+    addEventListener("DOMWindowCreated", this, true);
     addEventListener("DOMContentLoaded", this, true);
     addEventListener("DOMWindowClose", this, true);
     addEventListener("MozScrolledAreaChanged", this, true);
-    addEventListener("DOMDocElementInserted", this, true);
   },
 
   destroy() {
-    removeEventListener("DOMWindowCreated", this, true);
+    if (this.blockParser) {
+      removeEventListener("DOMDocElementInserted", this, true);
+    }
+
     removeEventListener("load", this, true);
+    removeEventListener("DOMWindowCreated", this, true);
     removeEventListener("DOMContentLoaded", this, true);
     removeEventListener("DOMWindowClose", this, true);
     removeEventListener("MozScrolledAreaChanged", this, true);
-    removeEventListener("DOMDocElementInserted", this, true);
   },
 
   receiveMessage({name, data}) {
@@ -118,7 +125,7 @@ const BrowserListener = {
     let winUtils = getWinUtils(content);
 
     for (let url of this.stylesheets) {
-      winUtils.addSheet(stylesheetMap.get(url), winUtils.AGENT_SHEET);
+      winUtils.addSheet(ExtensionCommon.stylesheetMap.get(url), winUtils.AGENT_SHEET);
     }
   },
 
@@ -147,7 +154,10 @@ const BrowserListener = {
       case "DOMContentLoaded":
         if (event.target === content.document) {
           sendAsyncMessage("Extension:BrowserContentLoaded", {url: content.location.href});
-          this.handleDOMChange(true);
+
+          if (this.needsResize) {
+            this.handleDOMChange(true);
+          }
         }
         break;
 
@@ -164,6 +174,10 @@ const BrowserListener = {
           }
           sendAsyncMessage("Extension:BrowserContentLoaded", {url: content.location.href});
         } else if (event.target !== content.document) {
+          break;
+        }
+
+        if (!this.needsResize) {
           break;
         }
 
@@ -187,7 +201,9 @@ const BrowserListener = {
         break;
 
       case "MozScrolledAreaChanged":
-        this.handleDOMChange();
+        if (this.needsResize) {
+          this.handleDOMChange();
+        }
         break;
     }
   },

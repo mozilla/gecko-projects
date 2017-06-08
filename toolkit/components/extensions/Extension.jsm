@@ -62,10 +62,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "Locale",
                                   "resource://gre/modules/Locale.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Log",
                                   "resource://gre/modules/Log.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "MatchGlobs",
-                                  "resource://gre/modules/MatchPattern.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "MatchPattern",
-                                  "resource://gre/modules/MatchPattern.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
                                   "resource://gre/modules/MessageChannel.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
@@ -80,8 +76,14 @@ XPCOMUtils.defineLazyModuleGetter(this, "require",
                                   "resource://devtools/shared/Loader.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
                                   "resource://gre/modules/Schemas.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
+                                  "resource://gre/modules/TelemetryStopwatch.jsm");
 
-Cu.import("resource://gre/modules/ExtensionManagement.jsm");
+XPCOMUtils.defineLazyGetter(
+  this, "processScript",
+  () => Cc["@mozilla.org/webextensions/extension-process-script;1"]
+          .getService().wrappedJSObject);
+
 Cu.import("resource://gre/modules/ExtensionParent.jsm");
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 
@@ -89,16 +91,18 @@ XPCOMUtils.defineLazyServiceGetter(this, "uuidGen",
                                    "@mozilla.org/uuid-generator;1",
                                    "nsIUUIDGenerator");
 
+XPCOMUtils.defineLazyPreferenceGetter(this, "useRemoteWebExtensions",
+                                      "extensions.webextensions.remote", false);
+
 var {
   GlobalManager,
   ParentAPIManager,
+  StartupCache,
   apiManager: Management,
 } = ExtensionParent;
 
 const {
-  classifyPermission,
   EventEmitter,
-  StartupCache,
   getUniqueId,
 } = ExtensionUtils;
 
@@ -138,6 +142,29 @@ function validateThemeManifest(manifestProperties) {
     }
   }
   return invalidProps;
+}
+
+/**
+ * Classify an individual permission from a webextension manifest
+ * as a host/origin permission, an api permission, or a regular permission.
+ *
+ * @param {string} perm  The permission string to classify
+ *
+ * @returns {object}
+ *          An object with exactly one of the following properties:
+ *          "origin" to indicate this is a host/origin permission.
+ *          "api" to indicate this is an api permission
+ *                (as used for webextensions experiments).
+ *          "permission" to indicate this is a regular permission.
+ */
+function classifyPermission(perm) {
+  let match = /^(\w+)(?:\.(\w+)(?:\.\w+)*)?$/.exec(perm);
+  if (!match) {
+    return {origin: perm};
+  } else if (match[1] == "experiments" && match[2]) {
+    return {api: match[2]};
+  }
+  return {permission: perm};
 }
 
 const LOGGER_ID_BASE = "addons.webextension.";
@@ -425,7 +452,7 @@ this.ExtensionData = class {
   // they should also be added here.
   get userPermissions() {
     let result = {
-      origins: this.whiteListedHosts.pat,
+      origins: this.whiteListedHosts.patterns.map(matcher => matcher.pattern),
       apis: [...this.apiNames],
     };
 
@@ -525,10 +552,6 @@ this.ExtensionData = class {
 
     let whitelist = [];
     for (let perm of this.manifest.permissions) {
-      if (perm == "contextualIdentities" && !Preferences.get("privacy.userContext.enabled")) {
-        continue;
-      }
-
       if (perm === "geckoProfiler") {
         const acceptedExtensions = Preferences.get("extensions.geckoProfiler.acceptedExtensionIds");
         if (!acceptedExtensions.split(",").includes(this.id)) {
@@ -537,15 +560,19 @@ this.ExtensionData = class {
         }
       }
 
-      this.permissions.add(perm);
       let type = classifyPermission(perm);
       if (type.origin) {
-        whitelist.push(perm);
+        let matcher = new MatchPattern(perm, {ignorePath: true});
+
+        whitelist.push(matcher);
+        perm = matcher.pattern;
       } else if (type.api) {
         this.apiNames.add(type.api);
       }
+
+      this.permissions.add(perm);
     }
-    this.whiteListedHosts = new MatchPattern(whitelist);
+    this.whiteListedHosts = new MatchPatternSet(whitelist);
 
     for (let api of this.apiNames) {
       this.dependencies.add(`${api}@experiments.addons.mozilla.org`);
@@ -706,11 +733,16 @@ this.Extension = class extends ExtensionData {
       StartupCache.clearAddonData(addonData.id);
     }
 
-    this.remote = ExtensionManagement.useRemoteWebExtensions;
+    this.remote = useRemoteWebExtensions;
 
     if (this.remote && processCount !== 1) {
       throw new Error("Out-of-process WebExtensions are not supported with multiple child processes");
     }
+    if (this.remote && !Services.prefs.getBoolPref("layers.popups.compositing.enabled", false)) {
+      Cu.reportError(new Error("Remote extensions should not be enabled without also setting " +
+                               "the layers.popups.compositing.enabled preference to true"));
+    }
+
     // This is filled in the first time an extension child is created.
     this.parentMessageManager = null;
 
@@ -739,8 +771,14 @@ this.Extension = class extends ExtensionData {
       }
 
       if (permissions.origins.length > 0) {
-        this.whiteListedHosts = new MatchPattern(this.whiteListedHosts.pat.concat(...permissions.origins));
+        let patterns = this.whiteListedHosts.patterns.map(host => host.pattern);
+
+        this.whiteListedHosts = new MatchPatternSet([...patterns, ...permissions.origins],
+                                                    {ignorePath: true});
       }
+
+      this.policy.permissions = Array.from(this.permissions);
+      this.policy.allowedOrigins = this.whiteListedHosts;
     });
 
     this.on("remove-permissions", (ignoreEvent, permissions) => {
@@ -748,9 +786,15 @@ this.Extension = class extends ExtensionData {
         this.permissions.delete(perm);
       }
 
-      for (let origin of permissions.origins) {
-        this.whiteListedHosts.removeOne(origin);
-      }
+      let origins = permissions.origins.map(
+        origin => new MatchPattern(origin, {ignorePath: true}).pattern);
+
+      this.whiteListedHosts = new MatchPatternSet(
+        this.whiteListedHosts.patterns
+            .filter(host => !origins.includes(host.pattern)));
+
+      this.policy.permissions = Array.from(this.permissions);
+      this.policy.allowedOrigins = this.whiteListedHosts;
     });
     /* eslint-enable mozilla/balanced-listeners */
   }
@@ -857,8 +901,8 @@ this.Extension = class extends ExtensionData {
       resourceURL: this.addonData.resourceURI.spec,
       baseURL: this.baseURI.spec,
       content_scripts: this.manifest.content_scripts || [],  // eslint-disable-line camelcase
-      webAccessibleResources: this.webAccessibleResources.serialize(),
-      whiteListedHosts: this.whiteListedHosts.serialize(),
+      webAccessibleResources: this.webAccessibleResources.map(res => res.glob),
+      whiteListedHosts: this.whiteListedHosts.patterns.map(pat => pat.pattern),
       localeData: this.localeData.serialize(),
       permissions: this.permissions,
       principal: this.principal,
@@ -901,14 +945,6 @@ this.Extension = class extends ExtensionData {
   }
 
   runManifest(manifest) {
-    // Strip leading slashes from web_accessible_resources.
-    let strippedWebAccessibleResources = [];
-    if (manifest.web_accessible_resources) {
-      strippedWebAccessibleResources = manifest.web_accessible_resources.map(path => path.replace(/^\/+/, ""));
-    }
-
-    this.webAccessibleResources = new MatchGlobs(strippedWebAccessibleResources);
-
     let promises = [];
     for (let directive in manifest) {
       if (manifest[directive] !== null) {
@@ -968,13 +1004,26 @@ this.Extension = class extends ExtensionData {
   }
 
   async _startup() {
-    this.started = false;
+    // Create a temporary policy object for the devtools and add-on
+    // manager callers that depend on it being available early.
+    this.policy = new WebExtensionPolicy({
+      id: this.id,
+      mozExtensionHostname: this.uuid,
+      baseURL: this.baseURI.spec,
+      allowedOrigins: new MatchPatternSet([]),
+      localizeCallback() {},
+    });
+    if (!WebExtensionPolicy.getByID(this.id)) {
+      // The add-on manager doesn't handle async startup and shutdown,
+      // so during upgrades and add-on restarts, startup() gets called
+      // before the last shutdown has completed, and this fails when
+      // there's another active add-on with the same ID.
+      this.policy.active = true;
+    }
 
+    TelemetryStopwatch.start("WEBEXT_EXTENSION_STARTUP_MS", this);
     try {
       let [, perms] = await Promise.all([this.loadManifest(), ExtensionPermissions.get(this)]);
-
-      ExtensionManagement.startupExtension(this.uuid, this.addonData.resourceURI, this);
-      this.started = true;
 
       if (!this.hasShutdown) {
         await this.initLocale();
@@ -995,8 +1044,21 @@ this.Extension = class extends ExtensionData {
         this.permissions.add(perm);
       }
       if (perms.origins.length > 0) {
-        this.whiteListedHosts = new MatchPattern(this.whiteListedHosts.pat.concat(...perms.origins));
+        let patterns = this.whiteListedHosts.patterns.map(host => host.pattern);
+
+        this.whiteListedHosts = new MatchPatternSet([...patterns, ...perms.origins],
+                                                    {ignorePath: true});
       }
+
+      // Normalize all patterns to contain a single leading /
+      let resources = (this.manifest.web_accessible_resources || [])
+          .map(path => path.replace(/^\/*/, "/"));
+
+      this.webAccessibleResources = resources.map(res => new MatchGlob(res));
+
+
+      this.policy.active = false;
+      this.policy = processScript.initExtension(this.serialize(), this);
 
       // The "startup" Management event sent on the extension instance itself
       // is emitted just before the Management "startup" event,
@@ -1009,13 +1071,13 @@ this.Extension = class extends ExtensionData {
 
       Management.emit("ready", this);
       this.emit("ready");
+      TelemetryStopwatch.finish("WEBEXT_EXTENSION_STARTUP_MS", this);
     } catch (e) {
       dump(`Extension error: ${e.message} ${e.filename || e.fileName}:${e.lineNumber} :: ${e.stack || new Error().stack}\n`);
       Cu.reportError(e);
 
-      if (this.started) {
-        this.started = false;
-        ExtensionManagement.shutdownExtension(this.uuid);
+      if (this.policy) {
+        this.policy.active = false;
       }
 
       this.cleanupGeneratedFile();
@@ -1057,7 +1119,7 @@ this.Extension = class extends ExtensionData {
     this.shutdownReason = reason;
     this.hasShutdown = true;
 
-    if (!this.started) {
+    if (!this.policy) {
       return;
     }
 
@@ -1072,10 +1134,9 @@ this.Extension = class extends ExtensionData {
     Services.ppmm.removeMessageListener(this.MESSAGE_EMIT_EVENT, this);
 
     if (!this.manifest) {
-      ExtensionManagement.shutdownExtension(this.uuid);
+      this.policy.active = false;
 
-      this.cleanupGeneratedFile();
-      return;
+      return this.cleanupGeneratedFile();
     }
 
     GlobalManager.uninit(this);
@@ -1093,11 +1154,11 @@ this.Extension = class extends ExtensionData {
     Management.emit("shutdown", this);
     this.emit("shutdown");
 
-    Services.ppmm.broadcastAsyncMessage("Extension:Shutdown", {id: this.id});
+    await this.broadcast("Extension:Shutdown", {id: this.id});
 
     MessageChannel.abortResponses({extensionId: this.id});
 
-    ExtensionManagement.shutdownExtension(this.uuid);
+    this.policy.active = false;
 
     return this.cleanupGeneratedFile();
   }
@@ -1132,12 +1193,8 @@ this.Extension = class extends ExtensionData {
   get optionalOrigins() {
     if (this._optionalOrigins == null) {
       let origins = this.manifest.optional_permissions.filter(perm => classifyPermission(perm).origin);
-      this._optionalOrigins = new MatchPattern(origins);
+      this._optionalOrigins = new MatchPatternSet(origins, {ignorePath: true});
     }
     return this._optionalOrigins;
   }
 };
-
-Services.ppmm.loadProcessScript("data:,new " + function() {
-  Components.utils.import("resource://gre/modules/ExtensionContent.jsm");
-}, true);

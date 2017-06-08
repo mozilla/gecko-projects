@@ -769,6 +769,7 @@ public class BrowserApp extends GeckoApp
             "Menu:Remove",
             "Menu:AddBrowserAction",
             "Menu:RemoveBrowserAction",
+            "Menu:UpdateBrowserAction",
             "LightweightTheme:Update",
             "Tab:Added",
             "Video:Play",
@@ -895,7 +896,7 @@ public class BrowserApp extends GeckoApp
                 if (SwitchBoard.isInExperiment(context, Experiments.LEANPLUM) &&
                         GeckoPreferences.getBooleanPref(context, GeckoPreferences.PREFS_HEALTHREPORT_UPLOAD_ENABLED, true)) {
                     // Do LeanPlum start/init here
-                    MmaDelegate.init(BrowserApp.this.getApplication());
+                    MmaDelegate.init(BrowserApp.this);
                 }
                 return null;
             }
@@ -1110,10 +1111,14 @@ public class BrowserApp extends GeckoApp
 
     @Override
     public void onAttachedToWindow() {
-        // We can't show the first run experience until Gecko has finished initialization (bug 1077583).
-        checkFirstrun(this, new SafeIntent(getIntent()));
+        final SafeIntent intent = new SafeIntent(getIntent());
 
-        DawnHelper.conditionallyNotifyDawn(this);
+        // We can't show the first run experience until Gecko has finished initialization (bug 1077583).
+        checkFirstrun(this, intent);
+
+        if (!IntentUtils.getIsInAutomationFromEnvironment(intent)) {
+            DawnHelper.conditionallyNotifyDawn(this);
+        }
     }
 
     @Override
@@ -1181,13 +1186,6 @@ public class BrowserApp extends GeckoApp
 
     @Override
     protected void restoreLastSelectedTab() {
-        if (mIgnoreLastSelectedTab) {
-            // We're either the first activity to run, so our startup code will (have) handle(d) tab
-            // selection, or else we've received a new intent and want to open and select a new tab
-            // as well.
-            return;
-        }
-
         if (mLastSelectedTabId < 0) {
             // Normally, session restore will select the correct tab when starting up, however this
             // is linked to Gecko powering up. If we're not the first activity to launch, the
@@ -1581,6 +1579,7 @@ public class BrowserApp extends GeckoApp
             "Menu:Remove",
             "Menu:AddBrowserAction",
             "Menu:RemoveBrowserAction",
+            "Menu:UpdateBrowserAction",
             "LightweightTheme:Update",
             "Tab:Added",
             "Video:Play",
@@ -1794,7 +1793,7 @@ public class BrowserApp extends GeckoApp
                 // Display notification for Mozilla data reporting, if data should be collected.
                 if (AppConstants.MOZ_DATA_REPORTING &&
                         Restrictions.isAllowed(this, Restrictable.DATA_CHOICES)) {
-                    DataReportingNotification.checkAndNotifyPolicy(GeckoAppShell.getContext());
+                    DataReportingNotification.checkAndNotifyPolicy(this);
                 }
                 break;
 
@@ -1902,6 +1901,11 @@ public class BrowserApp extends GeckoApp
                 removeBrowserActionMenuItem(message.getString("uuid"));
                 break;
 
+            case "Menu:UpdateBrowserAction":
+                updateBrowserActionMenuItem(message.getString("uuid"),
+                                            message.getBundle("options"));
+                break;
+
             case "LightweightTheme:Update":
                 mDynamicToolbar.setVisible(true, VisibilityTransition.ANIMATE);
                 break;
@@ -1985,12 +1989,12 @@ public class BrowserApp extends GeckoApp
                 break;
 
             case "Experiments:SetOverride":
-                Experiments.setOverride(getContext(), message.getString("name"),
+                Experiments.setOverride(this, message.getString("name"),
                                         message.getBoolean("isEnabled"));
                 break;
 
             case "Experiments:ClearOverride":
-                Experiments.clearOverride(getContext(), message.getString("name"));
+                Experiments.clearOverride(this, message.getString("name"));
                 break;
 
             case "Favicon:Request":
@@ -2036,7 +2040,7 @@ public class BrowserApp extends GeckoApp
                 break;
 
             case "Sanitize:ClearSyncedTabs":
-                FennecTabsRepository.deleteNonLocalClientsAndTabs(getContext());
+                FennecTabsRepository.deleteNonLocalClientsAndTabs(this);
                 callback.sendSuccess(null);
                 break;
 
@@ -2065,7 +2069,7 @@ public class BrowserApp extends GeckoApp
                 Telemetry.addToHistogram("FENNEC_CUSTOM_HOMEPAGE",
                         (Tabs.hasHomepage(this) ? 1 : 0));
 
-                final SharedPreferences prefs = GeckoSharedPrefs.forProfile(getContext());
+                final SharedPreferences prefs = GeckoSharedPrefs.forProfile(this);
                 final boolean hasCustomHomepanels =
                         prefs.contains(HomeConfigPrefsBackend.PREFS_CONFIG_KEY) ||
                         prefs.contains(HomeConfigPrefsBackend.PREFS_CONFIG_KEY_OLD);
@@ -2073,7 +2077,7 @@ public class BrowserApp extends GeckoApp
                 Telemetry.addToHistogram("FENNEC_HOMEPANELS_CUSTOM", hasCustomHomepanels ? 1 : 0);
 
                 Telemetry.addToHistogram("FENNEC_READER_VIEW_CACHE_SIZE",
-                        SavedReaderViewHelper.getSavedReaderViewHelper(getContext())
+                        SavedReaderViewHelper.getSavedReaderViewHelper(this)
                                              .getDiskSpacedUsedKB());
 
                 if (Versions.feature16Plus) {
@@ -2082,7 +2086,7 @@ public class BrowserApp extends GeckoApp
                 }
 
                 Telemetry.addToHistogram("FENNEC_ORBOT_INSTALLED",
-                    ContextUtils.isPackageInstalled(getContext(), "org.torproject.android") ? 1 : 0);
+                    ContextUtils.isPackageInstalled(this, "org.torproject.android") ? 1 : 0);
                 break;
 
             case "Website:AppInstalled":
@@ -2090,7 +2094,7 @@ public class BrowserApp extends GeckoApp
                 final String startUrl = message.getString("start_url");
                 final String manifestPath = message.getString("manifest_path");
                 final LoadFaviconResult loadIconResult = FaviconDecoder
-                    .decodeDataURI(getContext(), message.getString("icon"));
+                    .decodeDataURI(this, message.getString("icon"));
                 if (loadIconResult != null) {
                     final Bitmap icon = loadIconResult
                         .getBestBitmap(GeckoAppShell.getPreferredIconSize());
@@ -2827,9 +2831,9 @@ public class BrowserApp extends GeckoApp
     }
 
     private void showFirstrunPager() {
-        if (Experiments.isInExperimentLocal(getContext(), Experiments.ONBOARDING3_A)) {
+        if (Experiments.isInExperimentLocal(this, Experiments.ONBOARDING3_A)) {
             Telemetry.startUISession(TelemetryContract.Session.EXPERIMENT, Experiments.ONBOARDING3_A);
-            GeckoSharedPrefs.forProfile(getContext()).edit().putString(Experiments.PREF_ONBOARDING_VERSION, Experiments.ONBOARDING3_A).apply();
+            GeckoSharedPrefs.forProfile(this).edit().putString(Experiments.PREF_ONBOARDING_VERSION, Experiments.ONBOARDING3_A).apply();
             Telemetry.stopUISession(TelemetryContract.Session.EXPERIMENT, Experiments.ONBOARDING3_A);
             return;
         }
@@ -3338,6 +3342,33 @@ public class BrowserApp extends GeckoApp
         final MenuItem menuItem = mMenu.findItem(id);
         if (menuItem != null) {
             mMenu.removeItem(id);
+        }
+    }
+
+    /**
+     * Updates the WebExtension browser action with the specified UUID.
+     */
+    private void updateBrowserActionMenuItem(String uuid, final GeckoBundle options) {
+        int id = -1;
+
+        // Set attribute for the menu item in cache, if available
+        if (mBrowserActionItemsCache != null && !mBrowserActionItemsCache.isEmpty()) {
+            for (BrowserActionItemInfo item : mBrowserActionItemsCache) {
+                if (item.uuid.equals(uuid)) {
+                    id = item.id;
+                    item.label = options.getString("name", item.label);
+                    break;
+                }
+            }
+        }
+
+        if (mMenu == null || id == -1) {
+            return;
+        }
+
+        final MenuItem menuItem = mMenu.findItem(id);
+        if (menuItem != null) {
+            menuItem.setTitle(options.getString("name", menuItem.getTitle().toString()));
         }
     }
 
@@ -4091,7 +4122,7 @@ public class BrowserApp extends GeckoApp
             // for topsites where we do not indicate that a page is an offline reader-view bookmark too.
             final String pageURL;
             if (!flags.contains(OnUrlOpenListener.Flags.NO_READER_VIEW)) {
-                pageURL = SavedReaderViewHelper.getReaderURLIfCached(getContext(), url);
+                pageURL = SavedReaderViewHelper.getReaderURLIfCached(this, url);
             } else {
                 pageURL = url;
             }
@@ -4115,7 +4146,7 @@ public class BrowserApp extends GeckoApp
 
         // We only use onUrlOpenInBackgroundListener for the homepanel context menus, hence
         // we should always be checking whether we want the readermode version
-        final String pageURL = SavedReaderViewHelper.getReaderURLIfCached(getContext(), url);
+        final String pageURL = SavedReaderViewHelper.getReaderURLIfCached(this, url);
 
         final boolean isPrivate = flags.contains(OnUrlOpenInBackgroundListener.Flags.PRIVATE);
 

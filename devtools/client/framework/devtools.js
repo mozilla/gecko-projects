@@ -14,6 +14,7 @@ loader.lazyRequireGetter(this, "TargetFactory", "devtools/client/framework/targe
 loader.lazyRequireGetter(this, "Toolbox", "devtools/client/framework/toolbox", true);
 loader.lazyRequireGetter(this, "ToolboxHostManager", "devtools/client/framework/toolbox-host-manager", true);
 loader.lazyRequireGetter(this, "gDevToolsBrowser", "devtools/client/framework/devtools-browser", true);
+loader.lazyImporter(this, "ScratchpadManager", "resource://devtools/client/scratchpad/scratchpad-manager.jsm");
 
 const {defaultTools: DefaultTools, defaultThemes: DefaultThemes} =
   require("devtools/client/definitions");
@@ -21,6 +22,8 @@ const EventEmitter = require("devtools/shared/event-emitter");
 const {JsonView} = require("devtools/client/jsonview/main");
 const AboutDevTools = require("devtools/client/framework/about-devtools-toolbox");
 const {Task} = require("devtools/shared/task");
+const {getTheme, setTheme, addThemeObserver, removeThemeObserver} =
+  require("devtools/client/shared/theme");
 
 const FORBIDDEN_IDS = new Set(["toolbox", ""]);
 const MAX_ORDINAL = 99;
@@ -42,6 +45,10 @@ function DevTools() {
   AboutDevTools.register();
 
   EventEmitter.decorate(this);
+
+  // Listen for changes to the theme pref.
+  this._onThemeChanged = this._onThemeChanged.bind(this);
+  addThemeObserver(this._onThemeChanged);
 
   // This is important step in initialization codepath where we are going to
   // start registering all default tools and themes: create menuitems, keys, emit
@@ -244,6 +251,23 @@ DevTools.prototype = {
   },
 
   /**
+   * Returns the name of the current theme for devtools.
+   *
+   * @return {string} theme
+   *         The name of the current devtools theme.
+   */
+  getTheme() {
+    return getTheme();
+  },
+
+  /**
+   * Called when the developer tools theme changes.
+   */
+  _onThemeChanged() {
+    this.emit("theme-changed", getTheme());
+  },
+
+  /**
    * Register a new theme for developer tools toolbox.
    *
    * A definition is a light object that holds various information about a
@@ -297,7 +321,7 @@ DevTools.prototype = {
       themeId = theme.id;
     }
 
-    let currTheme = Services.prefs.getCharPref("devtools.theme");
+    let currTheme = getTheme();
 
     // Note that we can't check if `theme` is an item
     // of `DefaultThemes` as we end up reloading definitions
@@ -310,7 +334,7 @@ DevTools.prototype = {
     if (!Services.startup.shuttingDown &&
         !isCoreTheme &&
         theme.id == currTheme) {
-      Services.prefs.setCharPref("devtools.theme", "light");
+      setTheme("light");
 
       this.emit("theme-unregistered", theme);
     }
@@ -369,6 +393,27 @@ DevTools.prototype = {
     }
 
     return definitions.sort(this.ordinalSort);
+  },
+
+  /**
+   * Get the array of currently opened scratchpad windows.
+   *
+   * @return {Array} array of currently opened scratchpad windows.
+   *         Empty array if the scratchpad manager is not loaded.
+   */
+  getOpenedScratchpads: function () {
+    // Check if the module is loaded to avoid loading ScratchpadManager for no reason.
+    if (!Cu.isModuleLoaded("resource://devtools/client/scratchpad/scratchpad-manager.jsm")) {
+      return [];
+    }
+    return ScratchpadManager.getSessionState();
+  },
+
+  /**
+   * Restore the provided array of scratchpad window states.
+   */
+  restoreScratchpadSession: function (scratchpads) {
+    ScratchpadManager.restoreSession(scratchpads);
   },
 
   /**
@@ -515,9 +560,16 @@ DevTools.prototype = {
 
     gDevTools.unregisterDefaults();
 
-    // Notify the DevToolsShim that DevTools are no longer available, particularly if the
-    // destroy was caused by disabling/removing the DevTools add-on.
-    DevToolsShim.unregister();
+    removeThemeObserver(this._onThemeChanged);
+
+    // Do not unregister devtools from the DevToolsShim if the destroy is caused by an
+    // application shutdown. For instance SessionStore needs to save the Scratchpad
+    // manager state on shutdown.
+    if (!shuttingDown) {
+      // Notify the DevToolsShim that DevTools are no longer available, particularly if
+      // the destroy was caused by disabling/removing the DevTools add-on.
+      DevToolsShim.unregister();
+    }
 
     // Cleaning down the toolboxes: i.e.
     //   for (let [target, toolbox] of this._toolboxes) toolbox.destroy();

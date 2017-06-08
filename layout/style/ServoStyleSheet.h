@@ -22,6 +22,7 @@ class ServoCSSRuleList;
 
 namespace css {
 class Loader;
+class LoaderReusableStyleSheets;
 }
 
 // -------------------------------
@@ -33,6 +34,11 @@ struct ServoStyleSheetInner : public StyleSheetInfo
   ServoStyleSheetInner(CORSMode aCORSMode,
                        ReferrerPolicy aReferrerPolicy,
                        const dom::SRIMetadata& aIntegrity);
+  ServoStyleSheetInner(ServoStyleSheetInner& aCopy,
+                       ServoStyleSheet* aPrimarySheet);
+  ~ServoStyleSheetInner();
+
+  StyleSheetInfo* CloneFor(StyleSheet* aPrimarySheet) override;
 
   size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
 
@@ -50,6 +56,14 @@ struct ServoStyleSheetInner : public StyleSheetInfo
 /**
  * CSS style sheet object that is a wrapper for a Servo Stylesheet.
  */
+
+// CID for the ServoStyleSheet class
+// a6f31472-ab69-4beb-860f-c221431ead77
+#define NS_SERVO_STYLE_SHEET_IMPL_CID     \
+{ 0xa6f31472, 0xab69, 0x4beb, \
+  { 0x86, 0x0f, 0xc2, 0x21, 0x43, 0x1e, 0xad, 0x77 } }
+
+
 class ServoStyleSheet : public StyleSheet
 {
 public:
@@ -61,6 +75,8 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ServoStyleSheet, StyleSheet)
 
+  NS_DECLARE_STATIC_IID_ACCESSOR(NS_SERVO_STYLE_SHEET_IMPL_CID)
+
   bool HasRules() const;
 
   MOZ_MUST_USE nsresult ParseSheet(css::Loader* aLoader,
@@ -69,7 +85,8 @@ public:
                                    nsIURI* aBaseURI,
                                    nsIPrincipal* aSheetPrincipal,
                                    uint32_t aLineNumber,
-                                   nsCompatibility aCompatMode);
+                                   nsCompatibility aCompatMode,
+                                   css::LoaderReusableStyleSheets* aReusableSheets = nullptr);
 
   /**
    * Called instead of ParseSheet to initialize the Servo stylesheet object
@@ -77,6 +94,8 @@ public:
    * adding a ServoStyleSheet to a ServoStyleSet.
    */
   void LoadFailed();
+
+  nsresult ReparseSheet(const nsAString& aInput);
 
   const RawServoStyleSheet* RawSheet() const {
     return Inner()->mSheet;
@@ -88,19 +107,10 @@ public:
 
   URLExtraData* URLData() const { return Inner()->mURLData; }
 
-  // WebIDL CSSStyleSheet API
-  // Can't be inline because we can't include ImportRule here.  And can't be
-  // called GetOwnerRule because that would be ambiguous with the ImportRule
-  // version.
-  css::Rule* GetDOMOwnerRule() const final;
+  void DidDirty() override {}
 
-  void WillDirty() {}
-  void DidDirty() {}
-
-  bool IsModified() const final { return false; }
-
-  virtual already_AddRefed<StyleSheet> Clone(StyleSheet* aCloneParent,
-    css::ImportRule* aCloneOwnerRule,
+  already_AddRefed<StyleSheet> Clone(StyleSheet* aCloneParent,
+    dom::CSSImportRule* aCloneOwnerRule,
     nsIDocument* aCloneDocument,
     nsINode* aCloneOwningNode) const final;
 
@@ -132,7 +142,7 @@ protected:
 private:
   ServoStyleSheet(const ServoStyleSheet& aCopy,
                   ServoStyleSheet* aParentToUse,
-                  css::ImportRule* aOwnerRuleToUse,
+                  dom::CSSImportRule* aOwnerRuleToUse,
                   nsIDocument* aDocumentToUse,
                   nsINode* aOwningNodeToUse);
 
@@ -142,6 +152,8 @@ private:
 
   friend class StyleSheet;
 };
+
+NS_DEFINE_STATIC_IID_ACCESSOR(ServoStyleSheet, NS_SERVO_STYLE_SHEET_IMPL_CID)
 
 } // namespace mozilla
 

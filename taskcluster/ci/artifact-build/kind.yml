@@ -22,12 +22,11 @@ jobs:
             tier: 2
         worker-type: aws-provisioner-v1/gecko-{level}-b-linux
         worker:
-            implementation: docker-worker
             docker-image: {in-tree: desktop-build}
             max-run-time: 36000
         run:
             using: mozharness
-            actions: [get-secrets build generate-build-stats]
+            actions: [get-secrets build]
             config:
                 - builds/releng_sub_linux_configs/64_artifact.py
                 - balrog/production.py

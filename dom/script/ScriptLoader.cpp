@@ -61,6 +61,7 @@
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/TimeStamp.h"
 #include "mozilla/Unused.h"
 #include "nsIScriptError.h"
 #include "nsIOutputStream.h"
@@ -804,35 +805,6 @@ ScriptLoader::InstantiateModuleTree(ModuleLoadRequest* aRequest)
   return true;
 }
 
-/* static */ bool
-ScriptLoader::IsBytecodeCacheEnabled()
-{
-  static bool sExposeTestInterfaceEnabled = false;
-  static bool sExposeTestInterfacePrefCached = false;
-  if (!sExposeTestInterfacePrefCached) {
-    sExposeTestInterfacePrefCached = true;
-    Preferences::AddBoolVarCache(&sExposeTestInterfaceEnabled,
-                                 "dom.script_loader.bytecode_cache.enabled",
-                                 false);
-  }
-  return sExposeTestInterfaceEnabled;
-}
-
-/* static */ bool
-ScriptLoader::IsEagerBytecodeCache()
-{
-  // When testing, we want to force use of the bytecode cache.
-  static bool sEagerBytecodeCache = false;
-  static bool sForceBytecodeCachePrefCached = false;
-  if (!sForceBytecodeCachePrefCached) {
-    sForceBytecodeCachePrefCached = true;
-    Preferences::AddBoolVarCache(&sEagerBytecodeCache,
-                                 "dom.script_loader.bytecode_cache.eager",
-                                 false);
-  }
-  return sEagerBytecodeCache;
-}
-
 nsresult
 ScriptLoader::RestartLoad(ScriptLoadRequest* aRequest)
 {
@@ -940,7 +912,8 @@ ScriptLoader::StartLoad(ScriptLoadRequest* aRequest)
   // build-id is part of the kBytecodeMimeType constant.
   aRequest->mCacheInfo = nullptr;
   nsCOMPtr<nsICacheInfoChannel> cic(do_QueryInterface(channel));
-  if (cic && IsBytecodeCacheEnabled() && aRequest->mJSVersion == JSVERSION_DEFAULT) {
+  if (cic && nsContentUtils::IsBytecodeCacheEnabled() &&
+      aRequest->mJSVersion == JSVERSION_DEFAULT) {
     if (!aRequest->IsLoadingSource()) {
       // Inform the HTTP cache that we prefer to have information coming from the
       // bytecode cache instead of the sources, if such entry is already registered.
@@ -1879,14 +1852,158 @@ ScriptLoader::FillCompileOptionsForRequest(const AutoJSAPI&jsapi,
     aOptions->setElement(&elementVal.toObject());
   }
 
-  // At the moment, the bytecode cache is only triggered if a script is large
-  // enough to be parsed out of the main thread.  Thus, for testing purposes, we
-  // force parsing any script out of the main thread.
-  if (IsEagerBytecodeCache()) {
-    aOptions->forceAsync = true;
+  return NS_OK;
+}
+
+/* static */ bool
+ScriptLoader::ShouldCacheBytecode(ScriptLoadRequest* aRequest)
+{
+  using mozilla::TimeStamp;
+  using mozilla::TimeDuration;
+
+  // We need the nsICacheInfoChannel to exist to be able to open the alternate
+  // data output stream. This pointer would only be non-null if the bytecode was
+  // activated at the time the channel got created in StartLoad.
+  if (!aRequest->mCacheInfo) {
+    LOG(("ScriptLoadRequest (%p): Cannot cache anything (cacheInfo = %p)",
+         aRequest, aRequest->mCacheInfo.get()));
+    return false;
   }
 
-  return NS_OK;
+  // Look at the preference to know which strategy (parameters) should be used
+  // when the bytecode cache is enabled.
+  int32_t strategy = nsContentUtils::BytecodeCacheStrategy();
+
+  // List of parameters used by the strategies.
+  bool hasSourceLengthMin = false;
+  bool hasFetchCountMin = false;
+  bool hasTimeSinceLastFetched = false;
+  size_t sourceLengthMin = 100;
+  int32_t fetchCountMin = 5;
+  TimeDuration timeSinceLastFetched;
+
+  LOG(("ScriptLoadRequest (%p): Bytecode-cache: strategy = %d.", aRequest, strategy));
+  switch (strategy) {
+    case -2: {
+      // Reader mode, keep requesting alternate data but no longer save it.
+      LOG(("ScriptLoadRequest (%p): Bytecode-cache: Encoding disabled.", aRequest));
+      return false;
+    }
+    case -1: {
+      // Eager mode, skip heuristics!
+      hasSourceLengthMin = false;
+      hasFetchCountMin = false;
+      hasTimeSinceLastFetched = false;
+      break;
+    }
+    default:
+    case 0: {
+      hasSourceLengthMin = true;
+      hasFetchCountMin = true;
+      hasTimeSinceLastFetched = true;
+      sourceLengthMin = 1024;
+      fetchCountMin = 5;
+      timeSinceLastFetched = TimeDuration::FromSeconds(72 * 3600);
+      break;
+    }
+
+    // The following strategies are made-up to study what impact each parameter
+    // has when compared to the default case.
+    case 1: {
+      hasSourceLengthMin = true;
+      hasFetchCountMin = true;
+      hasTimeSinceLastFetched = false;
+      sourceLengthMin = 1024;
+      fetchCountMin = 5;
+      break;
+    }
+    case 2: {
+      hasSourceLengthMin = true;
+      hasFetchCountMin = false;
+      hasTimeSinceLastFetched = true;
+      sourceLengthMin = 1024;
+      timeSinceLastFetched = TimeDuration::FromSeconds(72 * 3600);
+      break;
+    }
+    case 3: {
+      hasSourceLengthMin = false;
+      hasFetchCountMin = true;
+      hasTimeSinceLastFetched = true;
+      fetchCountMin = 5;
+      timeSinceLastFetched = TimeDuration::FromSeconds(72 * 3600);
+      break;
+    }
+
+    // The following strategies are made-up to study what impact each parameter
+    // has individually.
+    case 4: {
+      hasSourceLengthMin = false;
+      hasFetchCountMin = false;
+      hasTimeSinceLastFetched = true;
+      timeSinceLastFetched = TimeDuration::FromSeconds(72 * 3600);
+      break;
+    }
+    case 5: {
+      hasSourceLengthMin = false;
+      hasFetchCountMin = true;
+      hasTimeSinceLastFetched = false;
+      fetchCountMin = 5;
+      break;
+    }
+    case 6: {
+      hasSourceLengthMin = true;
+      hasFetchCountMin = false;
+      hasTimeSinceLastFetched = false;
+      sourceLengthMin = 1024;
+      break;
+    }
+  }
+
+  // If the script is too small/large, do not attempt at creating a bytecode
+  // cache for this script, as the overhead of parsing it might not be worth the
+  // effort.
+  if (hasSourceLengthMin && aRequest->mScriptText.length() < sourceLengthMin) {
+    LOG(("ScriptLoadRequest (%p): Bytecode-cache: Script is too small.", aRequest));
+    return false;
+  }
+
+  // Check that we loaded the cache entry a few times before attempting any
+  // bytecode-cache optimization, such that we do not waste time on entry which
+  // are going to be dropped soon.
+  if (hasFetchCountMin) {
+    int32_t fetchCount = 0;
+    if (NS_FAILED(aRequest->mCacheInfo->GetCacheTokenFetchCount(&fetchCount))) {
+      LOG(("ScriptLoadRequest (%p): Bytecode-cache: Cannot get fetchCount.", aRequest));
+      return false;
+    }
+    LOG(("ScriptLoadRequest (%p): Bytecode-cache: fetchCount = %d.", aRequest, fetchCount));
+    if (fetchCount < fetchCountMin) {
+      return false;
+    }
+  }
+
+  // Check that the cache entry got accessed recently, before caching it.
+  if (hasTimeSinceLastFetched) {
+    uint32_t lastFetched = 0;
+    if (NS_FAILED(aRequest->mCacheInfo->GetCacheTokenLastFetched(&lastFetched))) {
+      LOG(("ScriptLoadRequest (%p): Bytecode-cache: Cannot get lastFetched.", aRequest));
+      return false;
+    }
+    TimeStamp now = TimeStamp::NowLoRes();
+    TimeStamp last = TimeStamp() + TimeDuration::FromSeconds(lastFetched);
+    if (now < last) {
+      LOG(("ScriptLoadRequest (%p): Bytecode-cache: (What?) lastFetched set in the future.", aRequest));
+      return false;
+    }
+    LOG(("ScriptLoadRequest (%p): Bytecode-cache: lastFetched = %f sec. ago.",
+         aRequest, (now - last).ToSeconds()));
+    if (now - last >= timeSinceLastFetched) {
+      return false;
+    }
+  }
+
+  LOG(("ScriptLoadRequest (%p): Bytecode-cache: Trigger encoding.", aRequest));
+  return true;
 }
 
 nsresult
@@ -1993,50 +2110,41 @@ ScriptLoader::EvaluateScript(ScriptLoadRequest* aRequest)
           MOZ_ASSERT(!aRequest->mCacheInfo);
         } else {
           MOZ_ASSERT(aRequest->IsSource());
-          if (aRequest->mOffThreadToken) {
-            // Off-main-thread parsing.
-            LOG(("ScriptLoadRequest (%p): Join (off-thread parsing) and Execute",
-                 aRequest));
-            {
-              nsJSUtils::ExecutionContext exec(aes.cx(), global);
-              JS::Rooted<JSScript*> script(aes.cx());
-              if (!aRequest->mCacheInfo) {
-                TRACE_FOR_TEST(aRequest->mElement, "scriptloader_execute");
-                rv = exec.JoinAndExec(&aRequest->mOffThreadToken, &script);
-                LOG(("ScriptLoadRequest (%p): Cannot cache anything (cacheInfo = nullptr)",
-                     aRequest));
-              } else {
-                TRACE_FOR_TEST(aRequest->mElement, "scriptloader_encode_and_execute");
-                MOZ_ASSERT(aRequest->mBytecodeOffset ==
-                           aRequest->mScriptBytecode.length());
-                rv = exec.JoinEncodeAndExec(&aRequest->mOffThreadToken,
-                                            aRequest->mScriptBytecode,
-                                            &script);
-                // Queue the current script load request to later save the bytecode.
-                if (NS_SUCCEEDED(rv)) {
-                  aRequest->mScript = script;
-                  HoldJSObjects(aRequest);
-                  RegisterForBytecodeEncoding(aRequest);
-                } else {
-                  LOG(("ScriptLoadRequest (%p): Cannot cache anything (rv = %X, script = %p, cacheInfo = %p)",
-                       aRequest, unsigned(rv), script.get(), aRequest->mCacheInfo.get()));
-                  TRACE_FOR_TEST_NONE(aRequest->mElement, "scriptloader_bytecode_failed");
-                  aRequest->mCacheInfo = nullptr;
-                }
-              }
-            }
-          } else {
-            // Main thread parsing (inline and small scripts)
-            LOG(("ScriptLoadRequest (%p): Compile And Exec", aRequest));
+          JS::Rooted<JSScript*> script(aes.cx());
+          bool encodeBytecode = ShouldCacheBytecode(aRequest);
+
+          {
             nsJSUtils::ExecutionContext exec(aes.cx(), global);
-            nsAutoString inlineData;
-            SourceBufferHolder srcBuf = GetScriptSource(aRequest, inlineData);
+            exec.SetEncodeBytecode(encodeBytecode);
             TRACE_FOR_TEST(aRequest->mElement, "scriptloader_execute");
-            rv = exec.CompileAndExec(options, srcBuf);
+            if (aRequest->mOffThreadToken) {
+              // Off-main-thread parsing.
+              LOG(("ScriptLoadRequest (%p): Join (off-thread parsing) and Execute",
+                   aRequest));
+              rv = exec.JoinAndExec(&aRequest->mOffThreadToken, &script);
+            } else {
+              // Main thread parsing (inline and small scripts)
+              LOG(("ScriptLoadRequest (%p): Compile And Exec", aRequest));
+              nsAutoString inlineData;
+              SourceBufferHolder srcBuf = GetScriptSource(aRequest, inlineData);
+              rv = exec.CompileAndExec(options, srcBuf, &script);
+            }
+          }
+
+          // Queue the current script load request to later save the bytecode.
+          if (script && encodeBytecode) {
+            aRequest->mScript = script;
+            HoldJSObjects(aRequest);
+            TRACE_FOR_TEST(aRequest->mElement, "scriptloader_encode");
+            MOZ_ASSERT(aRequest->mBytecodeOffset == aRequest->mScriptBytecode.length());
+            RegisterForBytecodeEncoding(aRequest);
+          } else {
+            LOG(("ScriptLoadRequest (%p): Bytecode-cache: disabled (rv = %X, script = %p)",
+                 aRequest, unsigned(rv), script.get()));
+            TRACE_FOR_TEST_NONE(aRequest->mElement, "scriptloader_no_encode");
             aRequest->mCacheInfo = nullptr;
           }
         }
-
       }
     }
 
@@ -2140,7 +2248,7 @@ ScriptLoader::EncodeRequestBytecode(JSContext* aCx, ScriptLoadRequest* aRequest)
   });
 
   JS::RootedScript script(aCx, aRequest->mScript);
-  if (!JS::FinishIncrementalEncoding(aCx, script)) {
+  if (!JS::FinishIncrementalEncoding(aCx, script, aRequest->mScriptBytecode)) {
     LOG(("ScriptLoadRequest (%p): Cannot serialize bytecode",
          aRequest));
     return;
@@ -2188,7 +2296,8 @@ ScriptLoader::GiveUpBytecodeEncoding()
 {
   // Ideally we prefer to properly end the incremental encoder, such that we
   // would not keep a large buffer around.  If we cannot, we fallback on the
-  // removal of all request from the current list.
+  // removal of all request from the current list and these large buffers would
+  // be removed at the same time as the source object.
   nsCOMPtr<nsIScriptGlobalObject> globalObject = GetScriptGlobalObject();
   if (globalObject) {
     nsCOMPtr<nsIScriptContext> context = globalObject->GetScriptContext();
@@ -2200,7 +2309,8 @@ ScriptLoader::GiveUpBytecodeEncoding()
         LOG(("ScriptLoadRequest (%p): Cannot serialize bytecode", request.get()));
         TRACE_FOR_TEST_NONE(request->mElement, "scriptloader_bytecode_failed");
         script.set(request->mScript);
-        Unused << JS::FinishIncrementalEncoding(aes.cx(), script);
+        Unused << JS::FinishIncrementalEncoding(aes.cx(), script,
+                                                request->mScriptBytecode);
         request->mScriptBytecode.clearAndFree();
         request->DropBytecodeCacheReferences();
       }
@@ -2212,11 +2322,8 @@ ScriptLoader::GiveUpBytecodeEncoding()
     RefPtr<ScriptLoadRequest> request = mBytecodeEncodingQueue.StealFirst();
     LOG(("ScriptLoadRequest (%p): Cannot serialize bytecode", request.get()));
     TRACE_FOR_TEST_NONE(request->mElement, "scriptloader_bytecode_failed");
-    // Note: Do not clear the mScriptBytecode buffer, because the incremental
-    // encoder owned by the ScriptSource object still has a reference to this
-    // buffer. This reference would be removed as soon as the ScriptSource
-    // object would be GC.
-    request->mCacheInfo = nullptr;
+    request->mScriptBytecode.clearAndFree();
+    request->DropBytecodeCacheReferences();
   }
 }
 

@@ -255,6 +255,12 @@ EdgeInclusiveIntersection(const nsRect& aRect, const nsRect& aOtherRect)
   return Some(nsRect(left, top, right - left, bottom - top));
 }
 
+enum class BrowsingContextInfo {
+  SimilarOriginBrowsingContext,
+  DifferentOriginBrowsingContext,
+  UnknownBrowsingContext
+};
+
 void
 DOMIntersectionObserver::Update(nsIDocument* aDocument, DOMHighResTimeStamp time)
 {
@@ -324,6 +330,7 @@ DOMIntersectionObserver::Update(nsIDocument* aDocument, DOMHighResTimeStamp time
     nsIFrame* targetFrame = target->GetPrimaryFrame();
     nsRect targetRect;
     Maybe<nsRect> intersectionRect;
+    bool isSameDoc = root && root->GetComposedDoc() == target->GetComposedDoc();
 
     if (rootFrame && targetFrame) {
       // If mRoot is set we are testing intersection with a container element
@@ -332,7 +339,7 @@ DOMIntersectionObserver::Update(nsIDocument* aDocument, DOMHighResTimeStamp time
         // Skip further processing of this target if it is not in the same
         // Document as the intersection root, e.g. if root is an element of
         // the main document and target an element from an embedded iframe.
-        if (target->GetComposedDoc() != root->GetComposedDoc()) {
+        if (!isSameDoc) {
           continue;
         }
         // Skip further processing of this target if is not a descendant of the
@@ -374,11 +381,22 @@ DOMIntersectionObserver::Update(nsIDocument* aDocument, DOMHighResTimeStamp time
       }
     }
 
-    nsRect rootIntersectionRect = rootRect;
-    bool isInSimilarOriginBrowsingContext = rootFrame && targetFrame &&
-                                            CheckSimilarOrigin(root, target);
+    nsRect rootIntersectionRect;
+    BrowsingContextInfo isInSimilarOriginBrowsingContext =
+      BrowsingContextInfo::UnknownBrowsingContext;
 
-    if (isInSimilarOriginBrowsingContext) {
+    if (rootFrame && targetFrame) {
+      rootIntersectionRect = rootRect;
+    }
+
+    if (root && target) {
+      isInSimilarOriginBrowsingContext = CheckSimilarOrigin(root, target) ?
+        BrowsingContextInfo::SimilarOriginBrowsingContext :
+        BrowsingContextInfo::DifferentOriginBrowsingContext;
+    }
+
+    if (isInSimilarOriginBrowsingContext ==
+        BrowsingContextInfo::SimilarOriginBrowsingContext) {
       rootIntersectionRect.Inflate(rootMargin);
     }
 
@@ -393,19 +411,25 @@ DOMIntersectionObserver::Update(nsIDocument* aDocument, DOMHighResTimeStamp time
         intersectionRectRelativeToRoot,
         rootIntersectionRect
       );
-      if (intersectionRect.isSome()) {
-        intersectionRect = Some(nsLayoutUtils::TransformFrameRectToAncestor(
-          nsLayoutUtils::GetContainingBlockForClientRect(rootFrame),
-          intersectionRect.value(),
-          targetFrame->PresContext()->PresShell()->GetRootScrollFrame()
-        ));
+      if (intersectionRect.isSome() && !isSameDoc) {
+        nsRect rect = intersectionRect.value();
+        nsPresContext* presContext = targetFrame->PresContext();
+        nsLayoutUtils::TransformRect(rootFrame,
+          presContext->PresShell()->GetRootScrollFrame(), rect);
+        intersectionRect = Some(rect);
       }
     }
 
     double targetArea = targetRect.width * targetRect.height;
     double intersectionArea = !intersectionRect ?
       0 : intersectionRect->width * intersectionRect->height;
-    double intersectionRatio = targetArea > 0.0 ? intersectionArea / targetArea : 0.0;
+    
+    double intersectionRatio;
+    if (targetArea > 0.0) {
+      intersectionRatio = intersectionArea / targetArea;
+    } else {
+      intersectionRatio = intersectionRect.isSome() ? 1.0 : 0.0;
+    }
 
     size_t threshold = -1;
     if (intersectionRatio > 0.0) {
@@ -428,7 +452,9 @@ DOMIntersectionObserver::Update(nsIDocument* aDocument, DOMHighResTimeStamp time
     if (target->UpdateIntersectionObservation(this, threshold)) {
       QueueIntersectionObserverEntry(
         target, time,
-        isInSimilarOriginBrowsingContext ? Some(rootIntersectionRect) : Nothing(),
+        isInSimilarOriginBrowsingContext ==
+          BrowsingContextInfo::DifferentOriginBrowsingContext ?
+          Nothing() : Some(rootIntersectionRect),
         targetRect, intersectionRect, intersectionRatio
       );
     }

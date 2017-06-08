@@ -33,9 +33,6 @@ SERVO_BINDING_FUNC(Servo_StyleSheet_FromUTF8Bytes, RawServoStyleSheetStrong,
                    RawGeckoURLExtraData* extra_data,
                    uint32_t line_number_offset,
                    nsCompatibility quirks_mode)
-SERVO_BINDING_FUNC(Servo_ImportRule_GetSheet,
-                   RawServoStyleSheetStrong,
-                   const RawServoImportRuleBorrowed import_rule)
 SERVO_BINDING_FUNC(Servo_StyleSheet_ClearAndUpdate,
                    void,
                    RawServoStyleSheetBorrowed stylesheet,
@@ -43,15 +40,22 @@ SERVO_BINDING_FUNC(Servo_StyleSheet_ClearAndUpdate,
                    mozilla::ServoStyleSheet* gecko_stylesheet,
                    const nsACString* data,
                    RawGeckoURLExtraData* extra_data,
-                   uint32_t line_number_offset)
+                   uint32_t line_number_offset,
+                   mozilla::css::LoaderReusableStyleSheets* reusable_sheets)
 SERVO_BINDING_FUNC(Servo_StyleSheet_HasRules, bool,
                    RawServoStyleSheetBorrowed sheet)
 SERVO_BINDING_FUNC(Servo_StyleSheet_GetRules, ServoCssRulesStrong,
                    RawServoStyleSheetBorrowed sheet)
+SERVO_BINDING_FUNC(Servo_StyleSheet_Clone, RawServoStyleSheetStrong,
+                   RawServoStyleSheetBorrowed sheet)
+SERVO_BINDING_FUNC(Servo_StyleSheet_SizeOfIncludingThis, size_t,
+                   mozilla::MallocSizeOf malloc_size_of, RawServoStyleSheetBorrowed sheet)
 SERVO_BINDING_FUNC(Servo_StyleSet_Init, RawServoStyleSetOwned, RawGeckoPresContextOwned pres_context)
 SERVO_BINDING_FUNC(Servo_StyleSet_Clear, void,
                    RawServoStyleSetBorrowed set)
 SERVO_BINDING_FUNC(Servo_StyleSet_RebuildData, void,
+                   RawServoStyleSetBorrowed set)
+SERVO_BINDING_FUNC(Servo_StyleSet_MediumFeaturesChanged, bool,
                    RawServoStyleSetBorrowed set)
 SERVO_BINDING_FUNC(Servo_StyleSet_Drop, void, RawServoStyleSetOwned set)
 SERVO_BINDING_FUNC(Servo_StyleSet_AppendStyleSheet, void,
@@ -70,7 +74,8 @@ SERVO_BINDING_FUNC(Servo_StyleSet_InsertStyleSheetBefore, void,
                    RawServoStyleSheetBorrowed sheet,
                    uint64_t unique_id,
                    uint64_t before_unique_id)
-SERVO_BINDING_FUNC(Servo_StyleSet_FlushStyleSheets, void, RawServoStyleSetBorrowed set)
+SERVO_BINDING_FUNC(Servo_StyleSet_FlushStyleSheets, void, RawServoStyleSetBorrowed set,
+                   RawGeckoElementBorrowedOrNull doc_elem)
 SERVO_BINDING_FUNC(Servo_StyleSet_NoteStyleSheetsChanged, void,
                    RawServoStyleSetBorrowed set, bool author_style_disabled)
 SERVO_BINDING_FUNC(Servo_StyleSet_GetKeyframesForName, bool,
@@ -120,6 +125,7 @@ SERVO_BINDING_FUNC(Servo_CssRules_DeleteRule, nsresult,
   SERVO_BINDING_FUNC(Servo_##type_##Rule_GetRules, ServoCssRulesStrong, \
                      RawServo##type_##RuleBorrowed rule)
 BASIC_RULE_FUNCS(Style)
+BASIC_RULE_FUNCS(Import)
 BASIC_RULE_FUNCS_WITHOUT_GETTER(Keyframe)
 BASIC_RULE_FUNCS(Keyframes)
 GROUP_RULE_FUNCS(Media)
@@ -141,6 +147,10 @@ SERVO_BINDING_FUNC(Servo_StyleRule_SetStyle, void,
                    RawServoDeclarationBlockBorrowed declarations)
 SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorText, void,
                    RawServoStyleRuleBorrowed rule, nsAString* result)
+SERVO_BINDING_FUNC(Servo_ImportRule_GetHref, void,
+                   RawServoImportRuleBorrowed rule, nsAString* result)
+SERVO_BINDING_FUNC(Servo_ImportRule_GetSheet, const RawServoStyleSheet*,
+                   RawServoImportRuleBorrowed rule)
 SERVO_BINDING_FUNC(Servo_Keyframe_GetKeyText, void,
                    RawServoKeyframeBorrowed keyframe, nsAString* result)
 // Returns whether it successfully changes the key text.
@@ -198,8 +208,8 @@ SERVO_BINDING_FUNC(Servo_ParseEasing, bool,
                    nsTimingFunctionBorrowedMut output)
 SERVO_BINDING_FUNC(Servo_GetComputedKeyframeValues, void,
                    RawGeckoKeyframeListBorrowed keyframes,
+                   RawGeckoElementBorrowed element,
                    ServoComputedValuesBorrowed style,
-                   ServoComputedValuesBorrowedOrNull parent_style,
                    RawServoStyleSetBorrowed set,
                    RawGeckoComputedKeyframeValuesListBorrowedMut result)
 SERVO_BINDING_FUNC(Servo_AnimationValueMap_Push, void,
@@ -228,6 +238,18 @@ SERVO_BINDING_FUNC(Servo_AnimationValues_Interpolate,
 SERVO_BINDING_FUNC(Servo_AnimationValues_IsInterpolable, bool,
                    RawServoAnimationValueBorrowed from,
                    RawServoAnimationValueBorrowed to)
+SERVO_BINDING_FUNC(Servo_AnimationValues_Add,
+                   RawServoAnimationValueStrong,
+                   RawServoAnimationValueBorrowed a,
+                   RawServoAnimationValueBorrowed b)
+SERVO_BINDING_FUNC(Servo_AnimationValues_Accumulate,
+                   RawServoAnimationValueStrong,
+                   RawServoAnimationValueBorrowed a,
+                   RawServoAnimationValueBorrowed b,
+                   uint64_t count)
+SERVO_BINDING_FUNC(Servo_AnimationValues_GetZeroValue,
+                   RawServoAnimationValueStrong,
+                   RawServoAnimationValueBorrowed value_to_match)
 SERVO_BINDING_FUNC(Servo_AnimationValues_ComputeDistance, double,
                    RawServoAnimationValueBorrowed from,
                    RawServoAnimationValueBorrowed to)
@@ -248,9 +270,9 @@ SERVO_BINDING_FUNC(Servo_AnimationValue_Uncompute,
                    RawServoAnimationValueBorrowed value)
 SERVO_BINDING_FUNC(Servo_AnimationValue_Compute,
                    RawServoAnimationValueStrong,
+                   RawGeckoElementBorrowed element,
                    RawServoDeclarationBlockBorrowed declarations,
                    ServoComputedValuesBorrowed style,
-                   ServoComputedValuesBorrowedOrNull parent_style,
                    RawServoStyleSetBorrowed raw_data)
 
 // Style attribute
@@ -316,7 +338,9 @@ SERVO_BINDING_FUNC(Servo_AnimationCompose, void,
                    void* base_values,
                    nsCSSPropertyID property,
                    RawGeckoAnimationPropertySegmentBorrowed animation_segment,
-                   RawGeckoComputedTimingBorrowed computed_timing)
+                   RawGeckoAnimationPropertySegmentBorrowed last_segment,
+                   RawGeckoComputedTimingBorrowed computed_timing,
+                   mozilla::dom::IterationCompositeOperation iteration_composite)
 
 // presentation attributes
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_PropertyIsSet, bool,
@@ -408,6 +432,9 @@ SERVO_BINDING_FUNC(Servo_ComputedValues_Inherit, ServoComputedValuesStrong,
                    RawServoStyleSetBorrowed set,
                    ServoComputedValuesBorrowedOrNull parent_style,
                    mozilla::InheritTarget target)
+SERVO_BINDING_FUNC(Servo_ComputedValues_GetVisitedStyle,
+                   ServoComputedValuesStrong,
+                   ServoComputedValuesBorrowed values)
 
 // Initialize Servo components. Should be called exactly once at startup.
 SERVO_BINDING_FUNC(Servo_Initialize, void,
@@ -449,6 +476,7 @@ SERVO_BINDING_FUNC(Servo_HasAuthorSpecifiedRules, bool,
 SERVO_BINDING_FUNC(Servo_ResolveStyleLazily, ServoComputedValuesStrong,
                    RawGeckoElementBorrowed element,
                    mozilla::CSSPseudoElementType pseudo_type,
+                   mozilla::StyleRuleInclusion rule_inclusion,
                    const mozilla::ServoElementSnapshotTable* snapshots,
                    RawServoStyleSetBorrowed set)
 

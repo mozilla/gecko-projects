@@ -15,7 +15,6 @@ body {
   background-color: var(--theme-body-background);
   padding: 0;
   margin: 0;
-  overflow-x: hidden;
 }
 
 *:focus {
@@ -28,9 +27,13 @@ pre {
   font-family: var(--monospace-font-family);
 }
 
-#json,
-#headers {
-  display: none;
+#content {
+  display: flow-root;
+}
+
+#json {
+  margin: 8px;
+  white-space: pre-wrap;
 }
 
 /******************************************************************************/

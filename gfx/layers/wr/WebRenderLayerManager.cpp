@@ -7,8 +7,6 @@
 
 #include "gfxPrefs.h"
 #include "LayersLogging.h"
-#include "mozilla/dom/ContentChild.h"
-#include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/StackingContextHelper.h"
 #include "mozilla/layers/TextureClient.h"
@@ -34,6 +32,7 @@ WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget)
   , mNeedsComposite(false)
   , mIsFirstPaint(false)
   , mTarget(nullptr)
+  , mPaintSequenceNumber(0)
 {
   MOZ_COUNT_CTOR(WebRenderLayerManager);
 }
@@ -126,6 +125,13 @@ WebRenderLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
 bool
 WebRenderLayerManager::BeginTransaction()
 {
+  // Increment the paint sequence number even if test logging isn't
+  // enabled in this process; it may be enabled in the parent process,
+  // and the parent process expects unique sequence numbers.
+  ++mPaintSequenceNumber;
+  if (gfxPrefs::APZTestLoggingEnabled()) {
+    mApzTestData.StartNewPaint(mPaintSequenceNumber);
+  }
   return true;
 }
 
@@ -211,6 +217,7 @@ WebRenderLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback
       scrollData.SetIsFirstPaint();
       mIsFirstPaint = false;
     }
+    scrollData.SetPaintSequenceNumber(mPaintSequenceNumber);
     if (mRoot) {
       PopulateScrollData(scrollData, mRoot.get());
     }
@@ -466,9 +473,16 @@ WebRenderLayerManager::RemoveDidCompositeObserver(DidCompositeObserver* aObserve
 void
 WebRenderLayerManager::FlushRendering()
 {
-  CompositorBridgeChild* bridge = GetCompositorBridgeChild();
-  if (bridge) {
-    bridge->SendFlushRendering();
+  CompositorBridgeChild* cBridge = GetCompositorBridgeChild();
+  if (!cBridge) {
+    return;
+  }
+  MOZ_ASSERT(mWidget);
+
+  if (mWidget->SynchronouslyRepaintOnResize() || gfxPrefs::LayersForceSynchronousResize()) {
+    cBridge->SendFlushRendering();
+  } else {
+    cBridge->SendFlushRenderingAsync();
   }
 }
 
@@ -491,25 +505,6 @@ void
 WebRenderLayerManager::Composite()
 {
   WrBridge()->SendForceComposite();
-}
-
-RefPtr<PipelineIdPromise>
-WebRenderLayerManager::AllocPipelineId()
-{
-  if (XRE_IsParentProcess()) {
-    GPUProcessManager* pm = GPUProcessManager::Get();
-    if (!pm) {
-      return PipelineIdPromise::CreateAndReject(ipc::PromiseRejectReason::HandlerRejected, __func__);
-    }
-    return PipelineIdPromise::CreateAndResolve(wr::AsPipelineId(pm->AllocateLayerTreeId()), __func__);;
-  }
-
-  MOZ_ASSERT(XRE_IsContentProcess());
-  RefPtr<dom::ContentChild> contentChild = dom::ContentChild::GetSingleton();
-  if (!contentChild) {
-    return PipelineIdPromise::CreateAndReject(ipc::PromiseRejectReason::HandlerRejected, __func__);
-  }
-  return contentChild->SendAllocPipelineId();
 }
 
 void

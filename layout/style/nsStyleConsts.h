@@ -933,12 +933,14 @@ enum class StyleGridTrackBreadth : uint8_t {
 #define NS_STYLE_TABSIZE_INITIAL                8
 
 // See nsStyleText
-#define NS_STYLE_WHITESPACE_NORMAL               0
-#define NS_STYLE_WHITESPACE_PRE                  1
-#define NS_STYLE_WHITESPACE_NOWRAP               2
-#define NS_STYLE_WHITESPACE_PRE_WRAP             3
-#define NS_STYLE_WHITESPACE_PRE_LINE             4
-#define NS_STYLE_WHITESPACE_PRE_SPACE            5
+enum class StyleWhiteSpace : uint8_t {
+  Normal = 0,
+  Pre,
+  Nowrap,
+  PreWrap,
+  PreLine,
+  PreSpace,
+};
 
 // See nsStyleText
 #define NS_STYLE_WORDBREAK_NORMAL               0
@@ -1060,6 +1062,19 @@ enum class StyleGridTrackBreadth : uint8_t {
 // -moz-context-properties
 #define NS_STYLE_CONTEXT_PROPERTY_FILL          (1 << 0)
 #define NS_STYLE_CONTEXT_PROPERTY_STROKE        (1 << 1)
+#define NS_STYLE_CONTEXT_PROPERTY_FILL_OPACITY   (1 << 2)
+#define NS_STYLE_CONTEXT_PROPERTY_STROKE_OPACITY (1 << 3)
+
+/*
+ * -moz-window-shadow
+ * Also used in widget code
+ */
+
+#define NS_STYLE_WINDOW_SHADOW_NONE             0
+#define NS_STYLE_WINDOW_SHADOW_DEFAULT          1
+#define NS_STYLE_WINDOW_SHADOW_MENU             2
+#define NS_STYLE_WINDOW_SHADOW_TOOLTIP          3
+#define NS_STYLE_WINDOW_SHADOW_SHEET            4
 
 // dominant-baseline
 #define NS_STYLE_DOMINANT_BASELINE_AUTO              0

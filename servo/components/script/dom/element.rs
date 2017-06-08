@@ -87,8 +87,9 @@ use ref_filter_map::ref_filter_map;
 use script_layout_interface::message::ReflowQueryType;
 use script_thread::Runnable;
 use selectors::attr::{AttrSelectorOperation, NamespaceConstraint};
-use selectors::matching::{ElementSelectorFlags, MatchingContext, MatchingMode, matches_selector_list};
+use selectors::matching::{ElementSelectorFlags, MatchingContext, MatchingMode};
 use selectors::matching::{HAS_EDGE_CHILD_SELECTOR, HAS_SLOW_SELECTOR, HAS_SLOW_SELECTOR_LATER_SIBLINGS};
+use selectors::matching::{RelevantLinkStatus, matches_selector_list};
 use servo_atoms::Atom;
 use std::ascii::AsciiExt;
 use std::borrow::Cow;
@@ -645,7 +646,7 @@ impl LayoutElementHelpers for LayoutJS<Element> {
         };
 
         if let Some(border) = border {
-            let width_value = specified::BorderWidth::from_length(specified::Length::from_px(border as f32));
+            let width_value = specified::BorderSideWidth::Length(specified::Length::from_px(border as f32));
             hints.push(from_declaration(
                 shared_lock,
                 PropertyDeclaration::BorderTopWidth(width_value.clone())));
@@ -2060,7 +2061,7 @@ impl ElementMethods for Element {
             Err(()) => Err(Error::Syntax),
             Ok(selectors) => {
                 let mut ctx = MatchingContext::new(MatchingMode::Normal, None);
-                Ok(matches_selector_list(&selectors.0, &Root::from_ref(self), &mut ctx))
+                Ok(matches_selector_list(&selectors, &Root::from_ref(self), &mut ctx))
             }
         }
     }
@@ -2079,7 +2080,7 @@ impl ElementMethods for Element {
                 for element in root.inclusive_ancestors() {
                     if let Some(element) = Root::downcast::<Element>(element) {
                         let mut ctx = MatchingContext::new(MatchingMode::Normal, None);
-                        if matches_selector_list(&selectors.0, &element, &mut ctx) {
+                        if matches_selector_list(&selectors, &element, &mut ctx) {
                             return Ok(Some(element));
                         }
                     }
@@ -2429,6 +2430,7 @@ impl<'a> ::selectors::Element for Root<Element> {
     fn match_non_ts_pseudo_class<F>(&self,
                                     pseudo_class: &NonTSPseudoClass,
                                     _: &mut MatchingContext,
+                                    _: &RelevantLinkStatus,
                                     _: &mut F)
                                     -> bool
         where F: FnMut(&Self, ElementSelectorFlags),
@@ -2475,6 +2477,20 @@ impl<'a> ::selectors::Element for Root<Element> {
             NonTSPseudoClass::PlaceholderShown |
             NonTSPseudoClass::Target =>
                 Element::state(self).contains(pseudo_class.state_flag()),
+        }
+    }
+
+    fn is_link(&self) -> bool {
+        // FIXME: This is HTML only.
+        let node = self.upcast::<Node>();
+        match node.type_id() {
+            // https://html.spec.whatwg.org/multipage/#selector-link
+            NodeTypeId::Element(ElementTypeId::HTMLElement(HTMLElementTypeId::HTMLAnchorElement)) |
+            NodeTypeId::Element(ElementTypeId::HTMLElement(HTMLElementTypeId::HTMLAreaElement)) |
+            NodeTypeId::Element(ElementTypeId::HTMLElement(HTMLElementTypeId::HTMLLinkElement)) => {
+                self.has_attribute(&local_name!("href"))
+            },
+            _ => false,
         }
     }
 
@@ -2589,20 +2605,6 @@ impl Element {
                 }
                 None
             }
-        }
-    }
-
-    fn is_link(&self) -> bool {
-        // FIXME: This is HTML only.
-        let node = self.upcast::<Node>();
-        match node.type_id() {
-            // https://html.spec.whatwg.org/multipage/#selector-link
-            NodeTypeId::Element(ElementTypeId::HTMLElement(HTMLElementTypeId::HTMLAnchorElement)) |
-            NodeTypeId::Element(ElementTypeId::HTMLElement(HTMLElementTypeId::HTMLAreaElement)) |
-            NodeTypeId::Element(ElementTypeId::HTMLElement(HTMLElementTypeId::HTMLLinkElement)) => {
-                self.has_attribute(&local_name!("href"))
-            },
-            _ => false,
         }
     }
 

@@ -7,8 +7,8 @@
 #define GFX_WEBRENDERLAYERMANAGER_H
 
 #include "Layers.h"
-#include "mozilla/ipc/MessageChannel.h"
 #include "mozilla/MozPromise.h"
+#include "mozilla/layers/APZTestData.h"
 #include "mozilla/layers/TransactionIdAllocator.h"
 #include "mozilla/webrender/WebRenderTypes.h"
 
@@ -21,8 +21,6 @@ class CompositorBridgeChild;
 class KnowsCompositor;
 class PCompositorBridgeChild;
 class WebRenderBridgeChild;
-
-typedef MozPromise<mozilla::wr::PipelineId, mozilla::ipc::PromiseRejectReason, false> PipelineIdPromise;
 
 class WebRenderLayerManager final : public LayerManager
 {
@@ -129,7 +127,15 @@ public:
   void SetTransactionIncomplete() { mTransactionIncomplete = true; }
   bool IsMutatedLayer(Layer* aLayer);
 
-  RefPtr<PipelineIdPromise> AllocPipelineId();
+  // See equivalent function in ClientLayerManager
+  void LogTestDataForCurrentPaint(FrameMetrics::ViewID aScrollId,
+                                  const std::string& aKey,
+                                  const std::string& aValue) {
+    mApzTestData.LogTestDataForPaint(mPaintSequenceNumber, aScrollId, aKey, aValue);
+  }
+  // See equivalent function in ClientLayerManager
+  const APZTestData& GetAPZTestData() const
+  { return mApzTestData; }
 
 private:
   /**
@@ -183,6 +189,11 @@ private:
  // being drawn to the default target, and then copy those pixels
  // back to mTarget.
  RefPtr<gfxContext> mTarget;
+
+  // See equivalent field in ClientLayerManager
+  uint32_t mPaintSequenceNumber;
+  // See equivalent field in ClientLayerManager
+  APZTestData mApzTestData;
 };
 
 } // namespace layers

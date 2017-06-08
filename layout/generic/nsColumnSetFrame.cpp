@@ -87,6 +87,12 @@ nsDisplayColumnRule::GetLayerState(nsDisplayListBuilder* aBuilder,
     return LAYER_NONE;
   }
 
+  for (auto iter = mBorderRenderers.begin(); iter != mBorderRenderers.end(); iter++) {
+    if (!iter->CanCreateWebRenderCommands()) {
+      return LAYER_NONE;
+    }
+  }
+
   return LAYER_ACTIVE;
 }
 
@@ -129,7 +135,7 @@ NS_NewColumnSetFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, nsFrame
 NS_IMPL_FRAMEARENA_HELPERS(nsColumnSetFrame)
 
 nsColumnSetFrame::nsColumnSetFrame(nsStyleContext* aContext)
-  : nsContainerFrame(aContext, LayoutFrameType::ColumnSet)
+  : nsContainerFrame(aContext, kClassID)
   , mLastBalanceBSize(NS_INTRINSICSIZE)
 {
 }

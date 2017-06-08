@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include protocol PBackground;
-include protocol PBlob;
 include protocol PBrowser;
 include protocol PCompositorBridge;
 include protocol PContentBridge;
@@ -21,7 +20,6 @@ include protocol PProcessHangMonitor;
 include protocol PImageBridge;
 include protocol PIPCBlobInputStream;
 include protocol PMedia;
-include protocol PMemoryStream;
 include protocol PNecko;
 include protocol PGMPContent;
 include protocol PGMPService;
@@ -45,6 +43,7 @@ include protocol PURLClassifierLocal;
 include protocol PVRManager;
 include protocol PVideoDecoderManager;
 include protocol PFlyWebPublishedServer;
+include protocol PProfiler;
 include protocol PScriptCache;
 include DOMTypes;
 include JavaScriptTypes;
@@ -58,14 +57,12 @@ include PBackgroundSharedTypes;
 include PContentPermission;
 include ServiceWorkerConfiguration;
 include GraphicsMessages;
-include ProfilerTypes;
 include MemoryReportTypes;
 
 // Workaround to prevent error if PContentChild.cpp & PContentBridgeParent.cpp
 // are put into different UnifiedProtocolsXX.cpp files.
 // XXX Remove this once bug 1069073 is fixed
 include "mozilla/dom/PContentBridgeParent.h";
-include "mozilla/layers/WebRenderMessageUtils.h";
 
 using GeoPosition from "nsGeoPositionIPCSerialiser.h";
 using AlertNotificationType from "mozilla/AlertNotificationIPCSerializer.h";
@@ -98,7 +95,6 @@ using mozilla::Telemetry::KeyedAccumulation from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::ScalarAction from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::KeyedScalarAction from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::ChildEventData from "mozilla/TelemetryComms.h";
-using mozilla::wr::PipelineId from "mozilla/webrender/WebRenderTypes.h";
 
 union ChromeRegistryItem
 {
@@ -283,7 +279,6 @@ struct XPCOMInitData
  */
 nested(upto inside_cpow) sync protocol PContent
 {
-    manages PBlob;
     manages PBrowser;
     manages PContentPermissionRequest;
     manages PCycleCollectWithLogs;
@@ -295,7 +290,6 @@ nested(upto inside_cpow) sync protocol PContent
     manages PHeapSnapshotTempFileHelper;
     manages PIPCBlobInputStream;
     manages PMedia;
-    manages PMemoryStream;
     manages PNecko;
     manages POfflineCacheUpdate;
     manages PPrinting;
@@ -341,8 +335,6 @@ both:
                    IPCTabContext context, uint32_t chromeFlags,
                    ContentParentId cpId, bool isForBrowser);
 
-    async PBlob(BlobConstructorParams params);
-
     async PFileDescriptorSet(FileDescriptor fd);
 
     // For parent->child, aBrowser must be non-null; aOuterWindowID can
@@ -356,6 +348,7 @@ child:
     async InitGMPService(Endpoint<PGMPServiceChild> service);
     async InitProcessHangMonitor(Endpoint<PProcessHangMonitorChild> hangMonitor);
     async InitContentBridgeChild(Endpoint<PContentBridgeChild> endpoint);
+    async InitProfiler(Endpoint<PProfilerChild> aEndpoint);
 
     // Give the content process its endpoints to the compositor.
     async InitRendering(
@@ -511,15 +504,6 @@ child:
      */
     async LoadPluginResult(uint32_t aPluginId, bool aResult);
 
-    /**
-     * Control the Gecko Profiler in the child process.
-     */
-    async StartProfiler(ProfilerInitParams params);
-    async StopProfiler();
-    async PauseProfiler(bool aPause);
-
-    async GatherProfile();
-
     async InvokeDragSession(IPCDataTransfer[] transfers, uint32_t action);
 
     async EndDragSession(bool aDoneDrag, bool aUserCancelled,
@@ -627,6 +611,17 @@ child:
 
     async PIPCBlobInputStream(nsID aID, uint64_t aSize);
 
+    /**
+     * This call takes the set of plugins loaded in the chrome process, and
+     * sends them to the content process. However, in many cases this set will
+     * not have changed since the last SetPluginList message. To keep track of
+     * this, the chrome process increments an epoch number every time the set of
+     * plugins changes. The chrome process sends up the last epoch it observed.
+     * If the epoch last seen by the content process is the same, the content
+     * process ignores the update. Otherwise the content process updates its
+     * list and reloads its plugins.
+     **/
+    async SetPluginList(uint32_t pluginEpoch, PluginTag[] plugins, FakePluginTag[] fakePlugins);
 parent:
     async InitBackground(Endpoint<PBackgroundParent> aEndpoint);
 
@@ -662,25 +657,9 @@ parent:
      */
     sync GetBlocklistState(uint32_t aPluginId) returns (uint32_t aState);
 
-    /**
-     * This call returns the set of plugins loaded in the chrome
-     * process. However, in many cases this set will not have changed since the
-     * last FindPlugins message. Consequently, the chrome process increments an
-     * epoch number every time the set of plugins changes. The content process
-     * sends up the last epoch it observed. If the epochs are the same, the
-     * chrome process returns no plugins. Otherwise it returns a complete list.
-     *
-     * |pluginEpoch| is the epoch last observed by the content
-     * process. |newPluginEpoch| is the current epoch in the chrome process. If
-     * |pluginEpoch == newPluginEpoch|, then |plugins| will be left empty.
-     */
-    sync FindPlugins(uint32_t pluginEpoch) returns (nsresult aResult, PluginTag[] plugins, uint32_t newPluginEpoch);
-
     async PJavaScript();
 
     async PRemoteSpellcheckEngine();
-
-    async PMemoryStream(uint64_t aSize);
 
     async InitCrashReporter(Shmem shmem, NativeThreadId tid);
 
@@ -864,7 +843,7 @@ parent:
     // Tell the compositor to allocate a layer tree id for nested remote mozbrowsers.
     sync AllocateLayerTreeId(ContentParentId cpId, TabId tabId)
         returns (uint64_t id);
-    async DeallocateLayerTreeId(uint64_t id);
+    async DeallocateLayerTreeId(ContentParentId cpId, uint64_t id);
 
     /**
      * Notifies the parent about a recording device is starting or shutdown.
@@ -930,9 +909,6 @@ parent:
      */
     async NotifyTabDestroying(TabId tabId,
                               ContentParentId cpId);
-
-    async TabChildNotReady(TabId tabId);
-
     /**
      * Starts an offline application cache update.
      * @param manifestURI
@@ -995,7 +971,7 @@ parent:
     async PContentPermissionRequest(PermissionRequest[] aRequests, Principal aPrincipal,
                                     TabId tabId);
 
-    async Profile(nsCString aProfile, bool aIsExitProfile);
+    async ShutdownProfile(nsCString aProfile);
 
     /**
      * Request graphics initialization information from the parent.
@@ -1020,7 +996,8 @@ parent:
                nsCString urlToLoad,
                TextureFactoryIdentifier textureFactoryIdentifier,
                uint64_t layersId,
-               CompositorOptions compositorOptions);
+               CompositorOptions compositorOptions,
+               uint32_t maxTouchPoints);
 
     async CreateWindowInDifferentProcess(
       PBrowser aThisTab,
@@ -1114,8 +1091,7 @@ parent:
     async AddMemoryReport(MemoryReport aReport);
     async FinishMemoryReport(uint32_t aGeneration);
 
-    async AllocPipelineId() returns (PipelineId pipelineId);
-
+    async MaybeReloadPlugins();
 both:
      async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,
                         Principal aPrincipal, ClonedMessageData aData);

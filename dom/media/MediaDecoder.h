@@ -642,6 +642,8 @@ protected:
 
   void OnMetadataUpdate(TimedMetadata&& aMetadata);
 
+  bool ShouldThrottleDownload();
+
   // This should only ever be accessed from the main thread.
   // It is set in the constructor and cleared in Shutdown when the element goes
   // away. The decoder does not add a reference the element.
@@ -658,7 +660,7 @@ protected:
   // Data needed to estimate playback data rate. The timeline used for
   // this estimate is "decode time" (where the "current time" is the
   // time of the last decoded video frame).
-  RefPtr<MediaChannelStatistics> mPlaybackStatistics;
+  MediaChannelStatistics mPlaybackStatistics;
 
   // True when our media stream has been pinned. We pin the stream
   // while seeking.

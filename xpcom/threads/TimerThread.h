@@ -46,6 +46,7 @@ public:
 
   nsresult AddTimer(nsTimerImpl* aTimer);
   nsresult RemoveTimer(nsTimerImpl* aTimer);
+  TimeStamp FindNextFireTimeForCurrentThread(TimeStamp aDefault, uint32_t aSearchBound);
 
   void DoBeforeSleep();
   void DoAfterSleep();
@@ -54,6 +55,9 @@ public:
   {
     return mThread == NS_GetCurrentThread();
   }
+
+  uint32_t
+  AllowedEarlyFiringMicroseconds() const;
 
 private:
   ~TimerThread();
@@ -112,9 +116,15 @@ private:
       // the front of the heap.  We want that to be the earliest timer.
       return aRight->mTimeout < aLeft->mTimeout;
     }
+
+    TimeStamp Timeout() const
+    {
+      return mTimeout;
+    }
   };
 
   nsTArray<UniquePtr<Entry>> mTimers;
+  uint32_t mAllowedEarlyFiringMicroseconds;
 };
 
 struct TimerAdditionComparator

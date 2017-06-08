@@ -32,7 +32,6 @@ class CSSStyleSheet;
 class ServoRestyleManager;
 class ServoStyleSheet;
 struct Keyframe;
-struct ServoComputedValuesWithParent;
 class ServoElementSnapshotTable;
 } // namespace mozilla
 class nsCSSCounterStyleRule;
@@ -45,6 +44,26 @@ struct RawServoRuleNode;
 struct TreeMatchContext;
 
 namespace mozilla {
+
+/**
+ * A few flags used to track which kind of stylist state we may need to
+ * update.
+ */
+enum class StylistState : uint8_t {
+  /** The stylist is not dirty, we should do nothing */
+  NotDirty = 0,
+
+  /** The style sheets have changed, so we need to update the style data. */
+  StyleSheetsDirty = 1 << 0,
+
+  /**
+   * All style data is dirty and both style sheet data and default computed
+   * values need to be recomputed.
+   */
+  FullyDirty = 1 << 1,
+};
+
+MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(StylistState)
 
 /**
  * The set of style sheets that apply to a document, backed by a Servo
@@ -104,6 +123,23 @@ public:
   void Init(nsPresContext* aPresContext);
   void BeginShutdown();
   void Shutdown();
+
+  void RecordStyleSheetChange(mozilla::ServoStyleSheet*, StyleSheet::ChangeType);
+
+  void RecordShadowStyleChange(mozilla::dom::ShadowRoot* aShadowRoot) {
+    // FIXME(emilio): When we properly support shadow dom we'll need to do
+    // better.
+    ForceAllStyleDirty();
+  }
+
+  bool StyleSheetsHaveChanged() const
+  {
+    return StylistNeedsUpdate();
+  }
+
+  bool MediumFeaturesChanged() const;
+
+  void InvalidateStyleForCSSRuleChanges();
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
   const RawServoStyleSet& RawSet() const { return *mRawSet; }
@@ -172,13 +208,17 @@ public:
   already_AddRefed<nsStyleContext>
   ResolveTransientStyle(dom::Element* aElement,
                         nsIAtom* aPseudoTag,
-                        CSSPseudoElementType aPseudoType);
+                        CSSPseudoElementType aPseudoType,
+                        StyleRuleInclusion aRules =
+                          StyleRuleInclusion::All);
 
   // Similar to ResolveTransientStyle() but returns ServoComputedValues.
   // Unlike ResolveServoStyle() this function calls PreTraverseSync().
   already_AddRefed<ServoComputedValues>
   ResolveTransientServoStyle(dom::Element* aElement,
-                             CSSPseudoElementType aPseudoTag);
+                             CSSPseudoElementType aPseudoTag,
+                             StyleRuleInclusion aRules =
+                               StyleRuleInclusion::All);
 
   // Get a style context for an anonymous box.  aPseudoTag is the pseudo-tag to
   // use and must be non-null.  It must be an anon box, and must be one that
@@ -278,7 +318,18 @@ public:
    * restyle.  Calling this will ensure that the Stylist rebuilds its
    * selector maps.
    */
-  void NoteStyleSheetsChanged();
+  void ForceAllStyleDirty();
+
+  /**
+   * Helper for correctly calling RebuildStylist without paying the cost of an
+   * extra function call in the common no-rebuild-needed case.
+   */
+  void UpdateStylistIfNeeded()
+  {
+    if (StylistNeedsUpdate()) {
+      UpdateStylist();
+    }
+  }
 
 #ifdef DEBUG
   void AssertTreeIsClean();
@@ -307,8 +358,7 @@ public:
   nsTArray<ComputedKeyframeValues>
   GetComputedKeyframeValuesFor(const nsTArray<Keyframe>& aKeyframes,
                                dom::Element* aElement,
-                               const ServoComputedValuesWithParent&
-                                 aServoValues);
+                               ServoComputedValuesBorrowed aComputedValues);
 
   bool AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray);
 
@@ -328,8 +378,9 @@ public:
                          RawServoDeclarationBlockBorrowed aDeclarations);
 
   already_AddRefed<RawServoAnimationValue>
-  ComputeAnimationValue(RawServoDeclarationBlock* aDeclaration,
-                        const ServoComputedValuesWithParent& aComputedValues);
+  ComputeAnimationValue(dom::Element* aElement,
+                        RawServoDeclarationBlock* aDeclaration,
+                        ServoComputedValuesBorrowed aComputedValues);
 
   void AppendTask(PostTraversalTask aTask)
   {
@@ -342,6 +393,16 @@ public:
     AssertIsMainThreadOrServoFontMetricsLocked();
 
     mPostTraversalTasks.AppendElement(aTask);
+  }
+
+  // Returns true if a restyle of the document is needed due to cloning
+  // sheet inners.
+  bool EnsureUniqueInnerOnCSSSheets();
+
+  // Called by StyleSheet::EnsureUniqueInner to let us know it cloned
+  // its inner.
+  void SetNeedsRestyleAfterEnsureUniqueInner() {
+    mNeedsRestyleAfterEnsureUniqueInner = true;
   }
 
 private:
@@ -432,29 +493,11 @@ private:
   void PreTraverseSync();
 
   /**
-   * A tri-state used to track which kind of stylist state we may need to
-   * update.
-   */
-  enum class StylistState : uint8_t {
-    /** The stylist is not dirty, we should do nothing */
-    NotDirty,
-    /** The style sheets have changed, so we need to update the style data. */
-    StyleSheetsDirty,
-    /**
-     * All style data is dirty and both style sheet data and default computed
-     * values need to be recomputed.
-     */
-    FullyDirty,
-  };
-
-  /**
    * Note that the stylist needs a style flush due to style sheet changes.
    */
   void SetStylistStyleSheetsDirty()
   {
-    if (mStylistState == StylistState::NotDirty) {
-      mStylistState = StylistState::StyleSheetsDirty;
-    }
+    mStylistState |= StylistState::StyleSheetsDirty;
   }
 
   bool StylistNeedsUpdate() const
@@ -469,19 +512,11 @@ private:
    */
   void UpdateStylist();
 
-  /**
-   * Helper for correctly calling RebuildStylist without paying the cost of an
-   * extra function call in the common no-rebuild-needed case.
-   */
-  void UpdateStylistIfNeeded()
-  {
-    if (StylistNeedsUpdate()) {
-      UpdateStylist();
-    }
-  }
-
   already_AddRefed<ServoComputedValues>
-    ResolveStyleLazily(dom::Element* aElement, CSSPseudoElementType aPseudoType);
+    ResolveStyleLazily(dom::Element* aElement,
+                       CSSPseudoElementType aPseudoType,
+                       StyleRuleInclusion aRules =
+                         StyleRuleInclusion::All);
 
   void RunPostTraversalTasks();
 
@@ -505,6 +540,9 @@ private:
   bool mAllowResolveStaleStyles;
   bool mAuthorStyleDisabled;
   StylistState mStylistState;
+  uint64_t mUserFontSetUpdateGeneration;
+
+  bool mNeedsRestyleAfterEnsureUniqueInner;
 
   // Stores pointers to our cached style contexts for non-inheriting anonymous
   // boxes.

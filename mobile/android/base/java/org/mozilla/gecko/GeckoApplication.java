@@ -8,7 +8,6 @@ import android.app.Application;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -19,6 +18,7 @@ import android.graphics.RectF;
 import android.net.Uri;
 import android.os.Process;
 import android.os.SystemClock;
+import android.text.TextUtils;
 import android.util.Log;
 
 import com.squareup.leakcanary.LeakCanary;
@@ -43,20 +43,19 @@ import org.mozilla.gecko.notifications.NotificationClient;
 import org.mozilla.gecko.notifications.NotificationHelper;
 import org.mozilla.gecko.preferences.DistroSharedPrefsImport;
 import org.mozilla.gecko.util.ActivityUtils;
+import org.mozilla.gecko.telemetry.TelemetryBackgroundReceiver;
 import org.mozilla.gecko.util.BundleEventListener;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.PRNGFixes;
 import org.mozilla.gecko.util.ThreadUtils;
-import org.mozilla.gecko.util.UUIDUtil;
 
 import java.io.File;
 import java.lang.reflect.Method;
 import java.util.UUID;
 
-public class GeckoApplication extends Application
-    implements ContextGetter {
+public class GeckoApplication extends Application {
     private static final String LOG_TAG = "GeckoApplication";
     private static final String MEDIA_DECODING_PROCESS_CRASH = "MEDIA_DECODING_PROCESS_CRASH";
 
@@ -135,16 +134,6 @@ public class GeckoApplication extends Application
         context.startService(intent);
     }
 
-    @Override
-    public Context getContext() {
-        return this;
-    }
-
-    @Override
-    public SharedPreferences getSharedPreferences() {
-        return GeckoSharedPrefs.forApp(this);
-    }
-
     /**
      * We need to do locale work here, because we need to intercept
      * each hit to onConfigurationChanged.
@@ -173,32 +162,29 @@ public class GeckoApplication extends Application
         super.onConfigurationChanged(config);
     }
 
-    public void onActivityPause(GeckoActivityStatus activity) {
+    public void onApplicationBackground() {
         mInBackground = true;
 
-        if ((activity.isFinishing() == false) &&
-            (activity.isGeckoActivityOpened() == false)) {
-            // Notify Gecko that we are pausing; the cache service will be
-            // shutdown, closing the disk cache cleanly. If the android
-            // low memory killer subsequently kills us, the disk cache will
-            // be left in a consistent state, avoiding costly cleanup and
-            // re-creation.
-            GeckoThread.onPause();
-            mPausedGecko = true;
+        // Notify Gecko that we are pausing; the cache service will be
+        // shutdown, closing the disk cache cleanly. If the android
+        // low memory killer subsequently kills us, the disk cache will
+        // be left in a consistent state, avoiding costly cleanup and
+        // re-creation.
+        GeckoThread.onPause();
+        mPausedGecko = true;
 
-            final BrowserDB db = BrowserDB.from(this);
-            ThreadUtils.postToBackgroundThread(new Runnable() {
-                @Override
-                public void run() {
-                    db.expireHistory(getContentResolver(), BrowserContract.ExpirePriority.NORMAL);
-                }
-            });
+        final BrowserDB db = BrowserDB.from(this);
+        ThreadUtils.postToBackgroundThread(new Runnable() {
+            @Override
+            public void run() {
+                db.expireHistory(getContentResolver(), BrowserContract.ExpirePriority.NORMAL);
+            }
+        });
 
-            GeckoNetworkManager.getInstance().stop();
-        }
+        GeckoNetworkManager.getInstance().stop();
     }
 
-    public void onActivityResume(GeckoActivityStatus activity) {
+    public void onApplicationForeground() {
         if (mIsInitialResume) {
             GeckoBatteryManager.getInstance().start(this);
             GeckoFontScaleListener.getInstance().initialize(this);
@@ -236,16 +222,51 @@ public class GeckoApplication extends Application
 
         sSessionUUID = UUID.randomUUID().toString();
 
-        registerActivityLifecycleCallbacks(GeckoActivityMonitor.getInstance());
+        GeckoActivityMonitor.getInstance().initialize(this);
+        MemoryMonitor.getInstance().init(this);
 
         final Context context = getApplicationContext();
         GeckoAppShell.setApplicationContext(context);
+        GeckoAppShell.setGeckoInterface(new GeckoAppShell.GeckoInterface() {
+            @Override
+            public boolean openUriExternal(final String targetURI, final String mimeType,
+                                           final String packageName, final String className,
+                                           final String action, final String title) {
+                // Default to showing prompt in private browsing to be safe.
+                return IntentHelper.openUriExternal(targetURI, mimeType, packageName,
+                                                    className, action, title, true);
+            }
+
+            @Override
+            public String[] getHandlersForMimeType(final String mimeType,
+                                                   final String action) {
+                final Intent intent = IntentHelper.getIntentForActionString(action);
+                if (mimeType != null && mimeType.length() > 0) {
+                    intent.setType(mimeType);
+                }
+                return IntentHelper.getHandlersForIntent(intent);
+            }
+
+            @Override
+            public String[] getHandlersForURL(final String url, final String action) {
+                // May contain the whole URL or just the protocol.
+                final Uri uri = url.indexOf(':') >= 0 ? Uri.parse(url)
+                                                      : new Uri.Builder().scheme(url).build();
+                final Intent intent = IntentHelper.getOpenURIIntent(
+                        getApplicationContext(), uri.toString(), "",
+                        TextUtils.isEmpty(action) ? Intent.ACTION_VIEW : action, "");
+                return IntentHelper.getHandlersForIntent(intent);
+            }
+        });
+
         HardwareUtils.init(context);
         FilePicker.init(context);
         DownloadsIntegration.init();
         HomePanelsManager.getInstance().init(context);
 
         GlobalPageMetadata.getInstance().init();
+
+        TelemetryBackgroundReceiver.getInstance().init(context);
 
         // We need to set the notification client before launching Gecko, since Gecko could start
         // sending notifications immediately after startup, which we don't want to lose/crash on.

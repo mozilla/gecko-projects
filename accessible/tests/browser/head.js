@@ -110,7 +110,7 @@ function shutdownPromise(contentBrowser) {
 
 /**
  * Simpler verions of waitForEvent defined in
- * accessible/tests/browser/e10s/events.js
+ * accessible/tests/browser/events.js
  */
 function waitForEvent(eventType, expectedId) {
   return new Promise(resolve => {
@@ -133,9 +133,9 @@ function waitForEvent(eventType, expectedId) {
  */
 function forceGC() {
   SpecialPowers.gc();
-  SpecialPowers.forceGC();
+  SpecialPowers.forceShrinkingGC();
   SpecialPowers.forceCC();
   SpecialPowers.gc();
-  SpecialPowers.forceGC();
+  SpecialPowers.forceShrinkingGC();
   SpecialPowers.forceCC();
 }

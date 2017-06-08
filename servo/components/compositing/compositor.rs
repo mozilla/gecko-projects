@@ -120,9 +120,6 @@ pub struct IOCompositor<Window: WindowMethods> {
     /// The position and size of the window within the rendering area.
     window_rect: TypedRect<u32, DevicePixel>,
 
-    /// The overridden viewport.
-    viewport: Option<(TypedPoint2D<u32, DevicePixel>, TypedSize2D<u32, DevicePixel>)>,
-
     /// "Mobile-style" zoom that does not reflow the page.
     viewport_zoom: PinchZoomFactor,
 
@@ -159,11 +156,6 @@ pub struct IOCompositor<Window: WindowMethods> {
 
     /// The time of the last zoom action has started.
     zoom_time: f64,
-
-    /// Whether the page being rendered has loaded completely.
-    /// Differs from ReadyState because we can finish loading (ready)
-    /// many times for a single page.
-    got_load_complete_message: bool,
 
     /// The current frame tree ID (used to reject old paint buffers)
     frame_tree_id: FrameTreeId,
@@ -373,7 +365,6 @@ impl<Window: WindowMethods> IOCompositor<Window> {
             frame_size: frame_size,
             window_rect: window_rect,
             scale: ScaleFactor::new(1.0),
-            viewport: None,
             scale_factor: scale_factor,
             channel_to_self: state.sender.clone_compositor_proxy(),
             delayed_composition_timer: DelayedCompositionTimerProxy::new(state.sender),
@@ -389,7 +380,6 @@ impl<Window: WindowMethods> IOCompositor<Window> {
             max_viewport_zoom: None,
             zoom_action: false,
             zoom_time: 0f64,
-            got_load_complete_message: false,
             frame_tree_id: FrameTreeId(0),
             constellation_chan: state.constellation_chan,
             time_profiler_chan: state.time_profiler_chan,
@@ -520,8 +510,6 @@ impl<Window: WindowMethods> IOCompositor<Window> {
             }
 
             (Msg::LoadComplete, ShutdownState::NotShuttingDown) => {
-                self.got_load_complete_message = true;
-
                 // If we're painting in headless mode, schedule a recomposite.
                 if opts::get().output_file.is_some() || opts::get().exit_after_load {
                     self.composite_if_necessary(CompositingReason::Headless);
@@ -754,10 +742,15 @@ impl<Window: WindowMethods> IOCompositor<Window> {
 
         let initial_viewport = self.window_rect.size.to_f32() / dppx;
 
-        let msg = ConstellationMsg::WindowSize(WindowSizeData {
+        let data = WindowSizeData {
             device_pixel_ratio: dppx,
             initial_viewport: initial_viewport,
-        }, size_type);
+        };
+        let top_level_browsing_context_id = match self.root_pipeline {
+            Some(ref pipeline) => pipeline.top_level_browsing_context_id,
+            None => return warn!("Window resize without root pipeline."),
+        };
+        let msg = ConstellationMsg::WindowSize(top_level_browsing_context_id, data, size_type);
 
         if let Err(e) = self.constellation_chan.send(msg) {
             warn!("Sending window resize to constellation failed ({}).", e);
@@ -791,10 +784,6 @@ impl<Window: WindowMethods> IOCompositor<Window> {
 
             WindowEvent::InitializeCompositing => {
                 self.initialize_compositing();
-            }
-
-            WindowEvent::Viewport(point, size) => {
-              self.viewport = Some((point, size));
             }
 
             WindowEvent::Resize(size) => {
@@ -866,7 +855,11 @@ impl<Window: WindowMethods> IOCompositor<Window> {
             }
 
             WindowEvent::Reload => {
-                let msg = ConstellationMsg::Reload;
+                let top_level_browsing_context_id = match self.root_pipeline {
+                    Some(ref pipeline) => pipeline.top_level_browsing_context_id,
+                    None => return warn!("Window reload without root pipeline."),
+                };
+                let msg = ConstellationMsg::Reload(top_level_browsing_context_id);
                 if let Err(e) = self.constellation_chan.send(msg) {
                     warn!("Sending reload to constellation failed ({}).", e);
                 }
@@ -900,7 +893,6 @@ impl<Window: WindowMethods> IOCompositor<Window> {
 
     fn on_load_url_window_event(&mut self, url_string: String) {
         debug!("osmain: loading URL `{}`", url_string);
-        self.got_load_complete_message = false;
         match ServoUrl::parse(&url_string) {
             Ok(url) => {
                 let msg = match self.root_pipeline {
@@ -1338,7 +1330,11 @@ impl<Window: WindowMethods> IOCompositor<Window> {
             windowing::WindowNavigateMsg::Forward => TraversalDirection::Forward(1),
             windowing::WindowNavigateMsg::Back => TraversalDirection::Back(1),
         };
-        let msg = ConstellationMsg::TraverseHistory(None, direction);
+        let top_level_browsing_context_id = match self.root_pipeline {
+            Some(ref pipeline) => pipeline.top_level_browsing_context_id,
+            None => return warn!("Sending navigation to constellation with no root pipeline."),
+        };
+        let msg = ConstellationMsg::TraverseHistory(top_level_browsing_context_id, direction);
         if let Err(e) = self.constellation_chan.send(msg) {
             warn!("Sending navigation to constellation failed ({}).", e);
         }

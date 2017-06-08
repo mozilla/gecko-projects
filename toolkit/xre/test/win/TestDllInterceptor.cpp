@@ -397,6 +397,17 @@ bool TestProcessCaretEvents(void* aFunc)
   return true;
 }
 
+bool TestSetCursorPos(void* aFunc)
+{
+  // SetCursorPos has some issues in automation -- see bug 1368033.
+  // For that reason, we don't check the return value -- we only
+  // check that the method runs without producing an exception.
+  auto patchedSetCursorPos =
+    reinterpret_cast<decltype(&SetCursorPos)>(aFunc);
+  patchedSetCursorPos(512, 512);
+  return true;
+}
+
 static DWORD sTlsIndex = 0;
 
 bool TestTlsAlloc(void* aFunc)
@@ -517,8 +528,12 @@ int main()
 #ifdef _M_IX86
       TestHook(TestSendMessageTimeoutW, "user32.dll", "SendMessageTimeoutW") &&
 #endif
+      TestHook(TestSetCursorPos, "user32.dll", "SetCursorPos") &&
       TestHook(TestTlsAlloc, "kernel32.dll", "TlsAlloc") &&
       TestHook(TestTlsFree, "kernel32.dll", "TlsFree") &&
+#ifdef _M_IX86
+      TestDetour("kernel32.dll", "BaseThreadInitThunk") &&
+#endif
       TestDetour("ntdll.dll", "LdrLoadDll")) {
     printf("TEST-PASS | WindowsDllInterceptor | all checks passed\n");
     return 0;

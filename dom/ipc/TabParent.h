@@ -118,14 +118,6 @@ public:
 
   void CacheFrameLoader(nsFrameLoader* aFrameLoader);
 
-  /**
-   * Returns true iff this TabParent's nsIFrameLoader is visible.
-   *
-   * The frameloader's visibility can be independent of e.g. its docshell's
-   * visibility.
-   */
-  bool IsVisible() const;
-
   nsIBrowserDOMWindow *GetBrowserDOMWindow() const { return mBrowserDOMWindow; }
 
   void SetBrowserDOMWindow(nsIBrowserDOMWindow* aBrowserDOMWindow)
@@ -161,7 +153,8 @@ public:
                                                   const int32_t& aShellItemWidth,
                                                   const int32_t& aShellItemHeight) override;
 
-  virtual mozilla::ipc::IPCResult RecvDropLinks(nsTArray<nsString>&& aLinks) override;
+  virtual mozilla::ipc::IPCResult RecvDropLinks(nsTArray<nsString>&& aLinks,
+                                                const PrincipalInfo& aTriggeringPrincipalInfo) override;
 
   virtual mozilla::ipc::IPCResult RecvEvent(const RemoteDOMEvent& aEvent) override;
 
@@ -181,7 +174,8 @@ public:
                                                              bool* aOutWindowOpened,
                                                              TextureFactoryIdentifier* aTextureFactoryIdentifier,
                                                              uint64_t* aLayersId,
-                                                             CompositorOptions* aCompositorOptions) override;
+                                                             CompositorOptions* aCompositorOptions,
+                                                             uint32_t* aMaxTouchPoints) override;
 
   virtual mozilla::ipc::IPCResult
   RecvSyncMessage(const nsString& aMessage,
@@ -314,8 +308,6 @@ public:
   virtual mozilla::ipc::IPCResult RecvGetDefaultScale(double* aValue) override;
 
   virtual mozilla::ipc::IPCResult RecvGetWidgetRounding(int32_t* aValue) override;
-
-  virtual mozilla::ipc::IPCResult RecvGetMaxTouchPoints(uint32_t* aTouchPoints) override;
 
   virtual mozilla::ipc::IPCResult RecvGetWidgetNativeData(WindowsHandle* aValue) override;
 
@@ -554,6 +546,12 @@ public:
   virtual bool
   DeallocPPluginWidgetParent(PPluginWidgetParent* aActor) override;
 
+  virtual PPaymentRequestParent*
+  AllocPPaymentRequestParent() override;
+
+  virtual bool
+  DeallocPPaymentRequestParent(PPaymentRequestParent* aActor) override;
+
   void SetInitedByParent() { mInitedByParent = true; }
 
   bool IsInitedByParent() const { return mInitedByParent; }
@@ -586,8 +584,6 @@ public:
   // LiveResizeListener implementation
   void LiveResizeStarted() override;
   void LiveResizeStopped() override;
-
-  void DispatchTabChildNotReadyEvent();
 
 protected:
   bool ReceiveMessage(const nsString& aMessage,
