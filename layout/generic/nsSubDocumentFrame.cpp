@@ -312,7 +312,7 @@ WrapBackgroundColorInOwnLayer(nsDisplayListBuilder* aBuilder,
   nsDisplayList tempItems;
   nsDisplayItem* item;
   while ((item = aList->RemoveBottom()) != nullptr) {
-    if (item->GetType() == nsDisplayItem::TYPE_BACKGROUND_COLOR) {
+    if (item->GetType() == TYPE_BACKGROUND_COLOR) {
       nsDisplayList tmpList;
       tmpList.AppendToTop(item);
       item = new (aBuilder) nsDisplayOwnLayer(aBuilder, aFrame, &tmpList, aBuilder->CurrentActiveScrolledRoot());
@@ -324,7 +324,6 @@ WrapBackgroundColorInOwnLayer(nsDisplayListBuilder* aBuilder,
 
 void
 nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                     const nsRect&           aDirtyRect,
                                      const nsDisplayListSet& aLists)
 {
   if (!IsVisibleForPainting(aBuilder))
@@ -365,7 +364,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   }
 
   if (rfp) {
-    rfp->BuildDisplayList(aBuilder, this, aDirtyRect, aLists);
+    rfp->BuildDisplayList(aBuilder, this, aLists);
     return;
   }
 
@@ -384,23 +383,28 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   int32_t parentAPD = PresContext()->AppUnitsPerDevPixel();
   int32_t subdocAPD = presContext->AppUnitsPerDevPixel();
 
+  nsRect visible;
   nsRect dirty;
   bool haveDisplayPort = false;
   bool ignoreViewportScrolling = false;
   nsIFrame* savedIgnoreScrollFrame = nullptr;
   if (subdocRootFrame) {
     // get the dirty rect relative to the root frame of the subdoc
-    dirty = aDirtyRect + GetOffsetToCrossDoc(subdocRootFrame);
+    visible = aBuilder->GetVisibleRect() + GetOffsetToCrossDoc(subdocRootFrame);
+    dirty = aBuilder->GetDirtyRect() + GetOffsetToCrossDoc(subdocRootFrame);
     // and convert into the appunits of the subdoc
+    visible = visible.ScaleToOtherAppUnitsRoundOut(parentAPD, subdocAPD);
     dirty = dirty.ScaleToOtherAppUnitsRoundOut(parentAPD, subdocAPD);
 
     if (nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame()) {
       nsIScrollableFrame* rootScrollableFrame = presShell->GetRootScrollFrameAsScrollable();
       MOZ_ASSERT(rootScrollableFrame);
-      // Use a copy, so the dirty rect doesn't get modified to the display port.
-      nsRect copy = dirty;
+      // Use a copy, so the rects don't get modified.
+      nsRect copyOfDirty = dirty;
+      nsRect copyOfVisible = visible;
       haveDisplayPort = rootScrollableFrame->DecideScrollableLayer(aBuilder,
-                          &copy, /* aAllowCreateDisplayPort = */ true);
+                          &copyOfVisible, &copyOfDirty,
+                          /* aAllowCreateDisplayPort = */ true);
       if (!gfxPrefs::LayoutUseContainersForRootFrames()) {
         haveDisplayPort = false;
       }
@@ -414,7 +418,8 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
     aBuilder->EnterPresShell(subdocRootFrame, pointerEventsNone);
   } else {
-    dirty = aDirtyRect;
+    visible = aBuilder->GetVisibleRect();
+    dirty = aBuilder->GetDirtyRect();
   }
 
   DisplayListClipState::AutoSaveRestore clipState(aBuilder);
@@ -452,6 +457,13 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       // nsDisplayZoom changes the meaning of appunits.
       nestedClipState.Clear();
     }
+        
+    // Invoke AutoBuildingDisplayList to ensure that the correct dirty rect
+    // is used to compute the visible rect if AddCanvasBackgroundColorItem
+    // creates a display item.
+    nsIFrame* frame = subdocRootFrame ? subdocRootFrame : this;
+    nsDisplayListBuilder::AutoBuildingDisplayList
+      building(aBuilder, frame, visible, dirty, true);
 
     if (subdocRootFrame) {
       nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame();
@@ -463,7 +475,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
       aBuilder->SetAncestorHasApzAwareEventHandler(false);
       subdocRootFrame->
-        BuildDisplayListForStackingContext(aBuilder, dirty, &childItems);
+        BuildDisplayListForStackingContext(aBuilder, &childItems);
     }
 
     if (!aBuilder->IsForEventDelivery()) {
@@ -485,12 +497,6 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
           *aBuilder, childItems, subdocRootFrame ? subdocRootFrame : this,
           bounds);
       } else {
-        // Invoke AutoBuildingDisplayList to ensure that the correct dirty rect
-        // is used to compute the visible rect if AddCanvasBackgroundColorItem
-        // creates a display item.
-        nsIFrame* frame = subdocRootFrame ? subdocRootFrame : this;
-        nsDisplayListBuilder::AutoBuildingDisplayList
-          building(aBuilder, frame, dirty, true);
         // Add the canvas background color to the bottom of the list. This
         // happens after we've built the list so that AddCanvasBackgroundColorItem
         // can monkey with the contents if necessary.
@@ -562,7 +568,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // is used to compute the visible rect if AddCanvasBackgroundColorItem
     // creates a display item.
     nsDisplayListBuilder::AutoBuildingDisplayList
-      building(aBuilder, this, dirty, true);
+      building(aBuilder, this, visible, dirty, true);
     // Add the canvas background color to the bottom of the list. This
     // happens after we've built the list so that AddCanvasBackgroundColorItem
     // can monkey with the contents if necessary.
@@ -574,7 +580,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   if (aBuilder->IsForFrameVisibility()) {
     // We don't add the childItems to the return list as we're dealing with them here.
     presShell->RebuildApproximateFrameVisibilityDisplayList(childItems);
-    childItems.DeleteAll();
+    childItems.DeleteAll(aBuilder);
   } else {
     aLists.Content()->AppendToTop(&childItems);
   }

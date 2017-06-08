@@ -152,6 +152,7 @@ public:
   using PropertyType = typename detail::FramePropertyTypeHelper<T>::Type;
 
   explicit FrameProperties()
+    : mInDeleteAll(false)
   {
   }
 
@@ -289,10 +290,12 @@ public:
    */
   void DeleteAll(const nsIFrame* aFrame) {
     mozilla::DebugOnly<size_t> len = mProperties.Length();
+    mInDeleteAll = true;
     for (auto& prop : mProperties) {
       prop.DestroyValueFor(aFrame);
       MOZ_ASSERT(mProperties.Length() == len);
     }
+    mInDeleteAll = false;
     mProperties.Clear();
   }
 
@@ -371,6 +374,9 @@ private:
       : mProperty(aProperty), mValue(aValue) {}
 
     void DestroyValueFor(const nsIFrame* aFrame) {
+      if (!mProperty) {
+        return;
+      }
       if (mProperty->mDestructor) {
         mProperty->mDestructor(mValue);
       } else if (mProperty->mDestructorWithFrame) {
@@ -400,6 +406,7 @@ private:
   };
 
   nsTArray<PropertyValue> mProperties;
+  bool mInDeleteAll;
 };
 
 
@@ -469,7 +476,13 @@ FrameProperties::RemoveInternal(UntypedDescriptor aProperty, bool* aFoundResult)
   }
 
   void* result = mProperties.ElementAt(index).mValue;
-  mProperties.RemoveElementAt(index);
+
+  if (mInDeleteAll) {
+    mProperties.ElementAt(index).mProperty = nullptr;
+    mProperties.ElementAt(index).mValue = nullptr;
+  } else {
+    mProperties.RemoveElementAt(index);
+  }
 
   return result;
 }
@@ -484,7 +497,12 @@ FrameProperties::DeleteInternal(UntypedDescriptor aProperty,
   auto index = mProperties.IndexOf(aProperty, 0, PropertyComparator());
   if (index != nsTArray<PropertyValue>::NoIndex) {
     mProperties.ElementAt(index).DestroyValueFor(aFrame);
-    mProperties.RemoveElementAt(index);
+    if (mInDeleteAll) {
+      mProperties.ElementAt(index).mProperty = nullptr;
+      mProperties.ElementAt(index).mValue = nullptr;
+    } else {
+      mProperties.RemoveElementAt(index);
+    }
   }
 }
 

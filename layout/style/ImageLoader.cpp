@@ -327,10 +327,10 @@ ImageLoader::GetPresContext()
 void InvalidateImagesCallback(nsIFrame* aFrame, 
                               DisplayItemData* aItem)
 {
-  nsDisplayItem::Type type = nsDisplayItem::GetDisplayItemTypeFromKey(aItem->GetDisplayItemKey());
-  uint8_t flags = nsDisplayItem::GetDisplayItemFlagsForType(type);
+  DisplayItemType type = GetDisplayItemTypeFromKey(aItem->GetDisplayItemKey());
+  uint8_t flags = GetDisplayItemFlagsForType(type);
 
-  if (flags & nsDisplayItem::TYPE_RENDERS_NO_IMAGES) {
+  if (flags & TYPE_RENDERS_NO_IMAGES) {
     return;
   }
 

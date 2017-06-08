@@ -63,11 +63,9 @@ public:
   virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
 
   virtual void BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
-                                           const nsRect&           aDirtyRect,
                                            const nsDisplayListSet& aLists) override;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
  
   virtual nsresult AttributeChanged(int32_t aNameSpaceID,
@@ -138,6 +136,9 @@ public:
   // StartAPZDrag() was rejected by APZ, and the slider frame should
   // fall back to main-thread dragging.
   void AsyncScrollbarDragRejected();
+
+  // Returns the associated scrollframe that contains this slider if any.
+  nsIScrollableFrame* GetScrollFrame();
 
 private:
 

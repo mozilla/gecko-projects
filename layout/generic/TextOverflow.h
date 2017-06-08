@@ -38,7 +38,7 @@ class TextOverflow {
    * the content edges.  Add display items for text-overflow markers as needed
    * and remove or clip items that would overlap a marker.
    */
-  void ProcessLine(const nsDisplayListSet& aLists, nsLineBox* aLine);
+  void ProcessLine(nsDisplayListBuilder* aBuilder, const nsDisplayListSet& aLists, nsLineBox* aLine);
 
   /**
    * Get the resulting text-overflow markers (the list may be empty).
@@ -189,7 +189,8 @@ class TextOverflow {
    * @param aFramesToHide remove display items for these frames
    * @param aInsideMarkersArea is the area inside the markers
    */
-  void PruneDisplayListContents(nsDisplayList* aList,
+  void PruneDisplayListContents(nsDisplayListBuilder* aBuilder,
+                                nsDisplayList* aList,
                                 const FrameHashtable& aFramesToHide,
                                 const LogicalRect& aInsideMarkersArea);
 

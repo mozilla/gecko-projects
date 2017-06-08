@@ -70,11 +70,9 @@ public:
   void Destroy();
 
   void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                        const nsRect&           aDirtyRect,
                         const nsDisplayListSet& aLists);
 
   void AppendScrollPartsTo(nsDisplayListBuilder*   aBuilder,
-                           const nsRect&           aDirtyRect,
                            const nsDisplayListSet& aLists,
                            bool                    aCreateLayer,
                            bool                    aPositioned);
@@ -350,6 +348,11 @@ private:
 public:
   bool IsScrollbarOnRight() const;
   bool IsScrollingActive(nsDisplayListBuilder* aBuilder) const;
+  bool MayBeAsynchronouslyScrolled() const {
+    // If this is true, then we'll build an ASR, and that's what we want
+    // to know I think.
+    return mWillBuildScrollableLayer;
+  }
   bool IsMaybeScrollingActive() const;
   bool IsProcessingAsyncScroll() const {
     return mAsyncScroll != nullptr || mAsyncSmoothMSDScroll != nullptr;
@@ -409,8 +412,10 @@ public:
   ScrollSnapInfo GetScrollSnapInfo() const;
 
   bool DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
+                             nsRect* aVisibleRect,
                              nsRect* aDirtyRect,
-                             bool aAllowCreateDisplayPort);
+                             bool aAllowCreateDisplayPort,
+                             bool* aUsingDisplayPortDirtyRect = nullptr);
   void NotifyApproximateFrameVisibilityUpdate(bool aIgnoreDisplayPort);
   bool GetDisplayPortAtLastApproximateFrameVisibilityUpdate(nsRect* aDisplayPort);
 
@@ -684,10 +689,9 @@ public:
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS(nsHTMLScrollFrame)
 
-  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
+  virtual void BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                 const nsDisplayListSet& aLists) override {
-    mHelper.BuildDisplayList(aBuilder, aDirtyRect, aLists);
+    mHelper.BuildDisplayList(aBuilder, aLists);
   }
 
   bool TryLayout(ScrollReflowInput* aState,
@@ -889,6 +893,12 @@ public:
   virtual bool IsScrollingActive(nsDisplayListBuilder* aBuilder) override {
     return mHelper.IsScrollingActive(aBuilder);
   }
+  virtual bool IsMaybeScrollingActive() const override {
+    return mHelper.IsMaybeScrollingActive();
+  }
+  virtual bool MayBeAsynchronouslyScrolled() override {
+    return mHelper.MayBeAsynchronouslyScrolled();
+  }
   virtual bool IsProcessingAsyncScroll() override {
     return mHelper.IsProcessingAsyncScroll();
   }
@@ -945,9 +955,10 @@ public:
     return mHelper.UsesContainerScrolling();
   }
   virtual bool DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
+                                     nsRect* aVisibleRect,
                                      nsRect* aDirtyRect,
                                      bool aAllowCreateDisplayPort) override {
-    return mHelper.DecideScrollableLayer(aBuilder, aDirtyRect, aAllowCreateDisplayPort);
+    return mHelper.DecideScrollableLayer(aBuilder, aVisibleRect, aDirtyRect, aAllowCreateDisplayPort);
   }
   virtual void NotifyApproximateFrameVisibilityUpdate(bool aIgnoreDisplayPort) override {
     mHelper.NotifyApproximateFrameVisibilityUpdate(aIgnoreDisplayPort);
@@ -1119,9 +1130,8 @@ public:
                                                 bool aClipAllDescendants);
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override {
-    mHelper.BuildDisplayList(aBuilder, aDirtyRect, aLists);
+    mHelper.BuildDisplayList(aBuilder, aLists);
   }
 
   // XXXldb Is this actually used?
@@ -1326,6 +1336,12 @@ public:
   virtual bool IsScrollingActive(nsDisplayListBuilder* aBuilder) override {
     return mHelper.IsScrollingActive(aBuilder);
   }
+  virtual bool IsMaybeScrollingActive() const override {
+    return mHelper.IsMaybeScrollingActive();
+  }
+  virtual bool MayBeAsynchronouslyScrolled() override {
+    return mHelper.MayBeAsynchronouslyScrolled();
+  }
   virtual bool IsProcessingAsyncScroll() override {
     return mHelper.IsProcessingAsyncScroll();
   }
@@ -1457,9 +1473,10 @@ public:
     mHelper.SetZoomableByAPZ(aZoomable);
   }
   virtual bool DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
+                                     nsRect* aVisibleRect,
                                      nsRect* aDirtyRect,
                                      bool aAllowCreateDisplayPort) override {
-    return mHelper.DecideScrollableLayer(aBuilder, aDirtyRect, aAllowCreateDisplayPort);
+    return mHelper.DecideScrollableLayer(aBuilder, aVisibleRect, aDirtyRect, aAllowCreateDisplayPort);
   }
   virtual void NotifyApproximateFrameVisibilityUpdate(bool aIgnoreDisplayPort) override {
     mHelper.NotifyApproximateFrameVisibilityUpdate(aIgnoreDisplayPort);

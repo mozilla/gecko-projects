@@ -1058,10 +1058,10 @@ HTMLCanvasElement::InvalidateCanvasContent(const gfx::Rect* damageRect)
     nsIntSize size = GetWidthHeight();
     if (size.width != 0 && size.height != 0) {
       gfx::IntRect invalRect = gfx::IntRect::Truncate(*damageRect);
-      layer = frame->InvalidateLayer(nsDisplayItem::TYPE_CANVAS, &invalRect);
+      layer = frame->InvalidateLayer(TYPE_CANVAS, &invalRect);
     }
   } else {
-    layer = frame->InvalidateLayer(nsDisplayItem::TYPE_CANVAS);
+    layer = frame->InvalidateLayer(TYPE_CANVAS);
   }
   if (layer) {
     static_cast<CanvasLayer*>(layer)->Updated();

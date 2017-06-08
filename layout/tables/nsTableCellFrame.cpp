@@ -424,7 +424,7 @@ public:
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      nsRenderingContext* aCtx) override;
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
-                           bool* aSnap) override;
+                           bool* aSnap) const override;
   NS_DISPLAY_DECL_NAME("TableCellBackground", TYPE_TABLE_CELL_BACKGROUND)
 };
 
@@ -440,7 +440,7 @@ void nsDisplayTableCellBackground::Paint(nsDisplayListBuilder* aBuilder,
 
 nsRect
 nsDisplayTableCellBackground::GetBounds(nsDisplayListBuilder* aBuilder,
-                                        bool* aSnap)
+                                        bool* aSnap) const
 {
   // revert from nsDisplayTableItem's implementation ... cell backgrounds
   // don't overflow the cell
@@ -472,7 +472,6 @@ PaintTableCellSelection(nsIFrame* aFrame, DrawTarget* aDrawTarget,
 
 void
 nsTableCellFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                   const nsRect&           aDirtyRect,
                                    const nsDisplayListSet& aLists)
 {
   DO_GLOBAL_REFLOW_COUNT_DSP("nsTableCellFrame");
@@ -514,7 +513,7 @@ nsTableCellFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       aLists.BorderBackground()->AppendNewToTop(new (aBuilder)
         nsDisplayGeneric(aBuilder, this, ::PaintTableCellSelection,
                          "TableCellSelection",
-                         nsDisplayItem::TYPE_TABLE_CELL_SELECTION));
+                         TYPE_TABLE_CELL_SELECTION));
     }
   }
 
@@ -534,7 +533,7 @@ nsTableCellFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // because that/ would put the child's background in the Content() list
   // which isn't right (e.g., would end up on top of our child floats for
   // event handling).
-  BuildDisplayListForChild(aBuilder, kid, aDirtyRect, aLists);
+  BuildDisplayListForChild(aBuilder, kid, aLists);
 }
 
 nsIFrame::LogicalSides

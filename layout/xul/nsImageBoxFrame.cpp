@@ -307,10 +307,9 @@ nsImageBoxFrame::UpdateLoadFlags()
 
 void
 nsImageBoxFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                  const nsRect&           aDirtyRect,
                                   const nsDisplayListSet& aLists)
 {
-  nsLeafBoxFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
+  nsLeafBoxFrame::BuildDisplayList(aBuilder, aLists);
 
   if ((0 == mRect.width) || (0 == mRect.height)) {
     // Do not render when given a zero area. This avoids some useless
@@ -459,7 +458,7 @@ nsDisplayXULImage::AllocateGeometry(nsDisplayListBuilder* aBuilder)
 void
 nsDisplayXULImage::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                              const nsDisplayItemGeometry* aGeometry,
-                                             nsRegion* aInvalidRegion)
+                                             nsRegion* aInvalidRegion) const
 {
   auto boxFrame = static_cast<nsImageBoxFrame*>(mFrame);
   auto geometry =
@@ -497,12 +496,12 @@ nsDisplayXULImage::GetImage()
 
   nsCOMPtr<imgIContainer> imgCon;
   imageFrame->mImageRequest->GetImage(getter_AddRefs(imgCon));
-  
+
   return imgCon.forget();
 }
 
 nsRect
-nsDisplayXULImage::GetDestRect()
+nsDisplayXULImage::GetDestRect() const
 {
   Maybe<nsPoint> anchorPoint;
   return static_cast<nsImageBoxFrame*>(mFrame)->GetDestRect(ToReferenceFrame(), anchorPoint);
@@ -775,8 +774,8 @@ nsImageBoxFrame::OnFrameUpdate(imgIRequest* aRequest)
   if ((0 == mRect.width) || (0 == mRect.height)) {
     return NS_OK;
   }
- 
-  InvalidateLayer(nsDisplayItem::TYPE_XUL_IMAGE);
+
+  InvalidateLayer(TYPE_XUL_IMAGE);
 
   return NS_OK;
 }

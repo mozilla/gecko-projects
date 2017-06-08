@@ -75,7 +75,8 @@ public:
   NS_DISPLAY_DECL_NAME("nsDisplayCanvas", TYPE_CANVAS)
 
   virtual nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
-                                   bool* aSnap) override {
+                                   bool* aSnap) const override
+  {
     *aSnap = false;
     nsHTMLCanvasFrame* f = static_cast<nsHTMLCanvasFrame*>(Frame());
     HTMLCanvasElement* canvas =
@@ -104,7 +105,8 @@ public:
   }
 
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
-                           bool* aSnap) override {
+                           bool* aSnap) const override
+  {
     *aSnap = true;
     nsHTMLCanvasFrame* f = static_cast<nsHTMLCanvasFrame*>(Frame());
     return f->GetInnerArea() + ToReferenceFrame();
@@ -305,7 +307,7 @@ nsHTMLCanvasFrame::Reflow(nsPresContext*           aPresContext,
 // removed.  That needs to be fixed.
 // XXXdholbert As in nsImageFrame, this function's clients should probably
 // just be calling GetContentRectRelativeToSelf().
-nsRect 
+nsRect
 nsHTMLCanvasFrame::GetInnerArea() const
 {
   nsMargin bp = mBorderPadding.GetPhysicalMargin(GetWritingMode());
@@ -367,7 +369,6 @@ nsHTMLCanvasFrame::BuildLayer(nsDisplayListBuilder* aBuilder,
 
 void
 nsHTMLCanvasFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                    const nsRect&           aDirtyRect,
                                     const nsDisplayListSet& aLists)
 {
   if (!IsVisibleForPainting(aBuilder))

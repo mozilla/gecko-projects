@@ -437,7 +437,8 @@ public:
   // away completely (e.g. because of a decoder error). The problem would
   // be especially acute if we have off-main-thread rendering.
 
-  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) override
+  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
+                           bool* aSnap) const override
   {
     *aSnap = true;
     nsIFrame* f = Frame();
@@ -472,7 +473,6 @@ public:
 
 void
 nsVideoFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                               const nsRect&           aDirtyRect,
                                const nsDisplayListSet& aLists)
 {
   if (!IsVisibleForPainting(aBuilder))
@@ -508,14 +508,16 @@ nsVideoFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // but only want to draw mPosterImage conditionally. Others we
   // always add to the display list.
   for (nsIFrame* child : mFrames) {
-    if (child->GetContent() != mPosterImage || shouldDisplayPoster) {
-      child->BuildDisplayListForStackingContext(aBuilder,
-                                                aDirtyRect - child->GetOffsetTo(this),
-                                                aLists.Content());
-    } else if (child->IsBoxFrame()) {
-      child->BuildDisplayListForStackingContext(aBuilder,
-                                                aDirtyRect - child->GetOffsetTo(this),
-                                                aLists.Content());
+    if (child->GetContent() != mPosterImage || shouldDisplayPoster ||
+        child->IsBoxFrame()) {
+
+      nsDisplayListBuilder::AutoBuildingDisplayList
+        buildingForChild(aBuilder, child,
+                         aBuilder->GetVisibleRect() - child->GetOffsetTo(this),
+                         aBuilder->GetDirtyRect() - child->GetOffsetTo(this),
+                         aBuilder->IsAtRootOfPseudoStackingContext());
+
+      child->BuildDisplayListForStackingContext(aBuilder, aLists.Content());
     }
   }
 }

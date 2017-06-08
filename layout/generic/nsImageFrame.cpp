@@ -212,10 +212,10 @@ nsImageFrame::DestroyFrom(nsIFrame* aDestructRoot)
 
       imageLoader->RemoveObserver(mListener);
     }
-    
+
     reinterpret_cast<nsImageListener*>(mListener.get())->SetFrame(nullptr);
   }
-  
+
   mListener = nullptr;
 
   // If we were displaying an icon, take ourselves off the list
@@ -270,7 +270,7 @@ nsImageFrame::Init(nsIContent*       aContent,
   imageLoader->AddObserver(mListener);
 
   nsPresContext *aPresContext = PresContext();
-  
+
   if (!gIconLoad)
     LoadIcons(aPresContext);
 
@@ -472,7 +472,7 @@ nsImageFrame::ShouldCreateImageFrameFor(Element* aElement,
   //  - if QuirksMode, and the IMG has a size show an icon.
   //  - otherwise, skip the icon
   bool useSizedBox;
-  
+
   if (aStyleContext->StyleUIReset()->mForceBrokenImageIcon) {
     useSizedBox = true;
   }
@@ -539,7 +539,7 @@ SizeIsAvailable(imgIRequest* aRequest)
   uint32_t imageStatus = 0;
   nsresult rv = aRequest->GetImageStatus(&imageStatus);
 
-  return NS_SUCCEEDED(rv) && (imageStatus & imgIRequest::STATUS_SIZE_AVAILABLE); 
+  return NS_SUCCEEDED(rv) && (imageStatus & imgIRequest::STATUS_SIZE_AVAILABLE);
 }
 
 nsresult
@@ -582,10 +582,10 @@ nsImageFrame::OnSizeAvailable(imgIRequest* aRequest, imgIContainer* aImage)
   if (intrinsicSizeChanged && (mState & IMAGE_GOTINITIALREFLOW)) {
     // Now we need to reflow if we have an unconstrained size and have
     // already gotten the initial reflow
-    if (!(mState & IMAGE_SIZECONSTRAINED)) { 
+    if (!(mState & IMAGE_SIZECONSTRAINED)) {
       nsIPresShell *presShell = presContext->GetPresShell();
       NS_ASSERTION(presShell, "No PresShell.");
-      if (presShell) { 
+      if (presShell) {
         presShell->FrameNeedsReflow(this, nsIPresShell::eStyleChange,
                                     NS_FRAME_IS_DIRTY);
       }
@@ -610,7 +610,7 @@ nsImageFrame::OnFrameUpdate(imgIRequest* aRequest, const nsIntRect* aRect)
     // Don't bother to do anything; we have a reflow coming up!
     return NS_OK;
   }
-  
+
   if (mFirstFrameComplete && !StyleVisibility()->IsVisible()) {
     return NS_OK;
   }
@@ -639,12 +639,12 @@ void
 nsImageFrame::InvalidateSelf(const nsIntRect* aLayerInvalidRect,
                              const nsRect* aFrameInvalidRect)
 {
-  InvalidateLayer(nsDisplayItem::TYPE_IMAGE,
+  InvalidateLayer(TYPE_IMAGE,
                   aLayerInvalidRect,
                   aFrameInvalidRect);
 
   if (!mFirstFrameComplete) {
-    InvalidateLayer(nsDisplayItem::TYPE_ALT_FEEDBACK,
+    InvalidateLayer(TYPE_ALT_FEEDBACK,
                     aLayerInvalidRect,
                     aFrameInvalidRect);
   }
@@ -893,7 +893,7 @@ nsImageFrame::ComputeSize(nsRenderingContext *aRenderingContext,
 
 // XXXdholbert This function's clients should probably just be calling
 // GetContentRectRelativeToSelf() directly.
-nsRect 
+nsRect
 nsImageFrame::GetInnerArea() const
 {
   return GetContentRectRelativeToSelf();
@@ -910,7 +910,7 @@ nsImageFrame::GetMapElement() const
 }
 
 // get the offset into the content area of the image where aImg starts if it is a continuation.
-nscoord 
+nscoord
 nsImageFrame::GetContinuationOffset() const
 {
   nscoord offset = 0;
@@ -988,7 +988,7 @@ nsImageFrame::Reflow(nsPresContext*          aPresContext,
     mState |= IMAGE_GOTINITIALREFLOW;
   }
 
-  mComputedSize = 
+  mComputedSize =
     nsSize(aReflowInput.ComputedWidth(), aReflowInput.ComputedHeight());
 
   aMetrics.Width() = mComputedSize.width;
@@ -997,7 +997,7 @@ nsImageFrame::Reflow(nsPresContext*          aPresContext,
   // add borders and padding
   aMetrics.Width()  += aReflowInput.ComputedPhysicalBorderPadding().LeftRight();
   aMetrics.Height() += aReflowInput.ComputedPhysicalBorderPadding().TopBottom();
-  
+
   if (GetPrevInFlow()) {
     aMetrics.Width() = GetPrevInFlow()->GetSize().width;
     nscoord y = GetContinuationOffset();
@@ -1021,8 +1021,8 @@ nsImageFrame::Reflow(nsPresContext*          aPresContext,
   }
   if (aPresContext->IsPaginated() &&
       ((loadStatus & imgIRequest::STATUS_SIZE_AVAILABLE) || (mState & IMAGE_SIZECONSTRAINED)) &&
-      NS_UNCONSTRAINEDSIZE != aReflowInput.AvailableHeight() && 
-      aMetrics.Height() > aReflowInput.AvailableHeight()) { 
+      NS_UNCONSTRAINEDSIZE != aReflowInput.AvailableHeight() &&
+      aMetrics.Height() > aReflowInput.AvailableHeight()) {
     // our desired height was greater than 0, so to avoid infinite
     // splitting, use 1 pixel as the min
     aMetrics.Height() = std::max(nsPresContext::CSSPixelsToAppUnits(1), aReflowInput.AvailableHeight());
@@ -1123,7 +1123,7 @@ nsImageFrame::MeasureString(const char16_t*     aString,
         break;
       }
     }
-  
+
     // Measure this chunk of text, and see if it fits
     nscoord width =
       nsLayoutUtils::AppUnitWidthOfStringBidi(aString, len, this, aFontMetrics,
@@ -1300,7 +1300,7 @@ public:
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion* aInvalidRegion) override
+                                         nsRegion* aInvalidRegion) const override
   {
     auto geometry =
       static_cast<const nsDisplayItemGenericImageGeometry*>(aGeometry);
@@ -1315,7 +1315,7 @@ public:
   }
 
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
-                           bool* aSnap) override
+                           bool* aSnap) const override
   {
     *aSnap = false;
     return mFrame->GetVisualOverflowRectRelativeToSelf() + ToReferenceFrame();
@@ -1388,7 +1388,7 @@ nsImageFrame::DisplayAltFeedback(nsRenderingContext& aRenderingContext,
 
   // Adjust the inner rect to account for the one pixel recessed border,
   // and a six pixel padding on each edge
-  inner.Deflate(nsPresContext::CSSPixelsToAppUnits(ICON_PADDING+ALT_BORDER_WIDTH), 
+  inner.Deflate(nsPresContext::CSSPixelsToAppUnits(ICON_PADDING+ALT_BORDER_WIDTH),
                 nsPresContext::CSSPixelsToAppUnits(ICON_PADDING+ALT_BORDER_WIDTH));
   if (inner.IsEmpty()) {
     return DrawResult::SUCCESS;
@@ -1553,7 +1553,7 @@ nsDisplayImage::AllocateGeometry(nsDisplayListBuilder* aBuilder)
 void
 nsDisplayImage::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                           const nsDisplayItemGeometry* aGeometry,
-                                          nsRegion* aInvalidRegion)
+                                          nsRegion* aInvalidRegion) const
 {
   auto geometry =
     static_cast<const nsDisplayItemGenericImageGeometry*>(aGeometry);
@@ -1575,7 +1575,7 @@ nsDisplayImage::GetImage()
 }
 
 nsRect
-nsDisplayImage::GetDestRect()
+nsDisplayImage::GetDestRect() const
 {
   bool snap = true;
   const nsRect frameContentBox = GetBounds(&snap);
@@ -1651,7 +1651,7 @@ nsDisplayImage::GetLayerState(nsDisplayListBuilder* aBuilder,
 
 /* virtual */ nsRegion
 nsDisplayImage::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
-                                bool* aSnap)
+                                bool* aSnap) const
 {
   *aSnap = false;
   if (mImage && mImage->WillDrawOpaqueNow()) {
@@ -1759,7 +1759,6 @@ nsImageFrame::PaintImage(nsRenderingContext& aRenderingContext, nsPoint aPt,
 
 void
 nsImageFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                               const nsRect&           aDirtyRect,
                                const nsDisplayListSet& aLists)
 {
   if (!IsVisibleForPainting(aBuilder))
@@ -1824,7 +1823,7 @@ nsImageFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       if (GetShowFrameBorders() && GetImageMap()) {
         aLists.Outlines()->AppendNewToTop(new (aBuilder)
           nsDisplayGeneric(aBuilder, this, PaintDebugImageMap, "DebugImageMap",
-                           nsDisplayItem::TYPE_DEBUG_IMAGE_MAP));
+                           TYPE_DEBUG_IMAGE_MAP));
       }
 #endif
     }
@@ -1849,7 +1848,7 @@ nsImageFrame::ShouldDisplaySelection()
 #if IMAGE_EDITOR_CHECK
   //check to see if this frame is in an editor context
   //isEditor check. this needs to be changed to have better way to check
-  if (displaySelection == nsISelectionDisplay::DISPLAY_ALL) 
+  if (displaySelection == nsISelectionDisplay::DISPLAY_ALL)
   {
     nsCOMPtr<nsISelectionController> selCon;
     result = GetSelectionController(presContext, getter_AddRefs(selCon));
@@ -1965,7 +1964,7 @@ nsImageFrame::GetAnchorHREFTargetAndNode(nsIURI** aHref, nsString& aTarget,
   return status;
 }
 
-nsresult  
+nsresult
 nsImageFrame::GetContentForEvent(WidgetEvent* aEvent,
                                  nsIContent** aContent)
 {
@@ -2086,7 +2085,7 @@ nsImageFrame::GetCursor(const nsPoint& aPoint,
       // technically correct, but it's probably the right thing to do
       // here, since it means that areas on which the cursor isn't
       // specified will inherit the style from the image.
-      RefPtr<nsStyleContext> areaStyle = 
+      RefPtr<nsStyleContext> areaStyle =
         PresContext()->PresShell()->StyleSet()->
           ResolveStyleFor(area->AsElement(), StyleContext(),
                           LazyComputeBehavior::Allow);
@@ -2267,8 +2266,8 @@ nsImageFrame::SpecToURI(const nsAString& aSpec, nsIIOService *aIOService,
   }
   nsAutoCString charset;
   GetDocumentCharacterSet(charset);
-  NS_NewURI(aURI, aSpec, 
-            charset.IsEmpty() ? nullptr : charset.get(), 
+  NS_NewURI(aURI, aSpec,
+            charset.IsEmpty() ? nullptr : charset.get(),
             baseURI, aIOService);
 }
 

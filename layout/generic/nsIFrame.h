@@ -615,12 +615,37 @@ public:
     , mNextSibling(nullptr)
     , mPrevSibling(nullptr)
     , mState(NS_FRAME_FIRST_REFLOW | NS_FRAME_IS_DIRTY)
+    , mFrameIsModified(false)
+    , mHasOverrideDirtyRegion(false)
+    , mHasAnimatedGeometryRoot(false)
+    , mHasActiveScrolledRoot(false)
+    , mBuiltDisplayList(false)
+    , mForceDescendIntoIfVisible(false)
     , mClass(aID)
     , mMayHaveRoundedCorners(false)
     , mHasImageRequest(false)
   {
     mozilla::PodZero(&mOverflow);
   }
+
+  bool IsFrameModified() { return mFrameIsModified; }
+  void SetFrameIsModified(bool aFrameIsModified) { mFrameIsModified = aFrameIsModified; }
+
+  bool HasOverrideDirtyRegion() { return mHasOverrideDirtyRegion; }
+  void SetHasOverrideDirtyRegion(bool aHasDirtyRegion) { mHasOverrideDirtyRegion = aHasDirtyRegion; }
+
+
+  bool HasAnimatedGeometryRoot() { return mHasAnimatedGeometryRoot; }
+  void SetHasAnimatedGeometryRoot(bool aHasAGR) { mHasAnimatedGeometryRoot = aHasAGR; }
+
+  bool HasActiveScrolledRoot() { return mHasActiveScrolledRoot; }
+  void SetHasActiveScrolledRoot(bool aHasASR) { mHasActiveScrolledRoot = aHasASR; }
+
+  bool BuiltDisplayList() { return mBuiltDisplayList; }
+  void SetBuiltDisplayList(bool aBuilt) { mBuiltDisplayList = aBuilt; }
+
+  bool ForceDescendIntoIfVisible() { return mForceDescendIntoIfVisible; }
+  void SetForceDescendIntoIfVisible(bool aForce) { mForceDescendIntoIfVisible = aForce; }
 
   nsPresContext* PresContext() const {
     return StyleContext()->PresContext();
@@ -974,6 +999,9 @@ public:
    * we don't bother as the cost of the allocation has already been paid.)
    */
   void SetRect(const nsRect& aRect) {
+    if (aRect == mRect) {
+      return;
+    }
     if (mOverflow.mType != NS_FRAME_OVERFLOW_LARGE &&
         mOverflow.mType != NS_FRAME_OVERFLOW_NONE) {
       nsOverflowAreas overflow = GetOverflowAreas();
@@ -982,6 +1010,7 @@ public:
     } else {
       mRect = aRect;
     }
+    SchedulePaint();
   }
   /**
    * Set this frame's rect from a logical rect in its own writing direction
@@ -1034,15 +1063,15 @@ public:
     SetRect(nsRect(mRect.TopLeft(), aSize));
   }
 
-  void SetPosition(const nsPoint& aPt) { mRect.MoveTo(aPt); }
+  void SetPosition(const nsPoint& aPt) { if (mRect.TopLeft() == aPt) { return; } mRect.MoveTo(aPt); SchedulePaint(); }
   void SetPosition(mozilla::WritingMode aWritingMode,
                    const mozilla::LogicalPoint& aPt,
                    const nsSize& aContainerSize) {
     // We subtract mRect.Size() from the container size to account for
     // the fact that logical origins in RTL coordinate systems are at
     // the top right of the frame instead of the top left.
-    mRect.MoveTo(aPt.GetPhysicalPoint(aWritingMode,
-                                      aContainerSize - mRect.Size()));
+    SetPosition(aPt.GetPhysicalPoint(aWritingMode,
+                                    aContainerSize - mRect.Size()));
   }
 
   /**
@@ -1197,6 +1226,9 @@ public:
 
   NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(GenConProperty, ContentArray,
                                       DestroyContentArray)
+
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(ModifiedFrameList, std::vector<WeakFrame>)
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(DeletedFrameList, nsTArray<nsIFrame*>)
 
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(BidiDataProperty, mozilla::FrameBidiData)
 
@@ -1603,21 +1635,14 @@ public:
    * BuildDisplayListForChild.
    *
    * See nsDisplayList.h for more information about display lists.
-   *
-   * @param aDirtyRect content outside this rectangle can be ignored; the
-   * rectangle is in frame coordinates
    */
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) {}
   /**
    * Displays the caret onto the given display list builder. The caret is
    * painted on top of the rest of the display list items.
-   *
-   * @param aDirtyRect is the dirty rectangle that we're repainting.
    */
   void DisplayCaret(nsDisplayListBuilder* aBuilder,
-                    const nsRect&         aDirtyRect,
                     nsDisplayList*        aList);
 
   /**
@@ -1651,11 +1676,8 @@ public:
   /**
    * Builds a display list for the content represented by this frame,
    * treating this frame as the root of a stacking context.
-   * @param aDirtyRect content outside this rectangle can be ignored; the
-   * rectangle is in frame coordinates
    */
   void BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
-                                          const nsRect&         aDirtyRect,
                                           nsDisplayList*        aList);
 
   enum {
@@ -1674,7 +1696,6 @@ public:
    */
   void BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
                                 nsIFrame*               aChild,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists,
                                 uint32_t                aFlags = 0);
 
@@ -2753,6 +2774,7 @@ public:
    */
   Matrix4x4 GetTransformMatrix(const nsIFrame* aStopAtAncestor,
                                nsIFrame **aOutAncestor,
+                               bool aStopAtStackingContextAndDisplayPort = false,
                                bool aInCSSUnits = false);
 
   /**
@@ -2982,7 +3004,7 @@ public:
     PAINT_COMPOSITE_ONLY,
     PAINT_DELAYED_COMPRESS
   };
-  void SchedulePaint(PaintType aType = PAINT_DEFAULT);
+  void SchedulePaint(PaintType aType = PAINT_DEFAULT, bool aFrameChanged = true);
 
   /**
    * Checks if the layer tree includes a dedicated layer for this
@@ -3352,6 +3374,9 @@ public:
    */
   bool IsPseudoStackingContextFromStyle();
 
+  bool IsVisuallyAtomic();
+  bool IsStackingContext();
+
   virtual bool HonorPrintBackgroundSettings() { return true; }
 
   /**
@@ -3695,6 +3720,10 @@ public:
   // Checks if we (or any of our descendents) have NS_FRAME_PAINTED_THEBES set, and
   // clears this bit if so.
   bool CheckAndClearPaintedState();
+  
+  // Checks if we (or any of our descendents) have NS_FRAME_BUILT_DISPLAY_LIST set, and
+  // clears this bit if so.
+  bool CheckAndClearDisplayListState();
 
   // CSS visibility just doesn't cut it because it doesn't inherit through
   // documents. Also if this frame is in a hidden card of a deck then it isn't
@@ -3925,7 +3954,7 @@ private:
   nsIFrame*        mPrevSibling;  // Do not touch outside SetNextSibling!
   DisplayItemArray mDisplayItemData;
 
-  void MarkAbsoluteFramesForDisplayList(nsDisplayListBuilder* aBuilder, const nsRect& aDirtyRect);
+  void MarkAbsoluteFramesForDisplayList(nsDisplayListBuilder* aBuilder);
 
   static void DestroyPaintedPresShellList(nsTArray<nsWeakPtr>* list) {
     list->Clear();
@@ -3965,6 +3994,14 @@ protected:
   }
 
   nsFrameState     mState;
+
+  // TODO: Make this a frame state bit.
+  bool mFrameIsModified : 1;
+  bool mHasOverrideDirtyRegion : 1;
+  bool mHasAnimatedGeometryRoot : 1;
+  bool mHasActiveScrolledRoot : 1;
+  bool mBuiltDisplayList : 1;
+  bool mForceDescendIntoIfVisible : 1;
 
   /**
    * List of properties attached to the frame.

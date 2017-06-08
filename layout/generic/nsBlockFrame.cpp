@@ -6609,13 +6609,14 @@ static void DebugOutputDrawLine(int32_t aDepth, nsLineBox* aLine, bool aDrawn) {
 
 static void
 DisplayLine(nsDisplayListBuilder* aBuilder, const nsRect& aLineArea,
-            const nsRect& aDirtyRect, nsBlockFrame::LineIterator& aLine,
+            nsBlockFrame::LineIterator& aLine,
             int32_t aDepth, int32_t& aDrawnLines, const nsDisplayListSet& aLists,
             nsBlockFrame* aFrame, TextOverflow* aTextOverflow) {
   // If the line's combined area (which includes child frames that
   // stick outside of the line's bounding box or our bounding box)
   // intersects the dirty rect then paint the line.
-  bool intersect = aLineArea.Intersects(aDirtyRect);
+  bool intersect = aLineArea.Intersects(aBuilder->GetDirtyRect());
+  bool visible = aLineArea.Intersects(aBuilder->GetVisibleRect());
 #ifdef DEBUG
   if (nsBlockFrame::gLamePaintMetrics) {
     aDrawnLines++;
@@ -6631,7 +6632,7 @@ DisplayLine(nsDisplayListBuilder* aBuilder, const nsRect& aLineArea,
   // frame in the line, it's also true for aFrame.
   bool lineInline = aLine->IsInline();
   bool lineMayHaveTextOverflow = aTextOverflow && lineInline;
-  if (!intersect && !aBuilder->ShouldDescendIntoFrame(aFrame) &&
+  if (!intersect && !aBuilder->ShouldDescendIntoFrame(aFrame, visible) &&
       !lineMayHaveTextOverflow)
     return;
 
@@ -6650,13 +6651,12 @@ DisplayLine(nsDisplayListBuilder* aBuilder, const nsRect& aLineArea,
   nsIFrame* kid = aLine->mFirstChild;
   int32_t n = aLine->GetChildCount();
   while (--n >= 0) {
-    aFrame->BuildDisplayListForChild(aBuilder, kid, aDirtyRect,
-                                     childLists, flags);
+    aFrame->BuildDisplayListForChild(aBuilder, kid, childLists, flags);
     kid = kid->GetNextSibling();
   }
 
   if (lineMayHaveTextOverflow) {
-    aTextOverflow->ProcessLine(collection, aLine.get());
+    aTextOverflow->ProcessLine(aBuilder, collection, aLine.get());
   }
 
   collection.MoveTo(aLists);
@@ -6664,13 +6664,13 @@ DisplayLine(nsDisplayListBuilder* aBuilder, const nsRect& aLineArea,
 
 void
 nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                               const nsRect&           aDirtyRect,
                                const nsDisplayListSet& aLists)
 {
   int32_t drawnLines; // Will only be used if set (gLamePaintMetrics).
   int32_t depth = 0;
 #ifdef DEBUG
   if (gNoisyDamageRepair) {
+      nsRect dirty = aBuilder->GetDirtyRect();
       depth = GetDepth();
       nsRect ca;
       ::ComputeVisualOverflowArea(mLines, mRect.width, mRect.height, ca);
@@ -6678,7 +6678,7 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       ListTag(stdout);
       printf(": bounds=%d,%d,%d,%d dirty(absolute)=%d,%d,%d,%d ca=%d,%d,%d,%d\n",
              mRect.x, mRect.y, mRect.width, mRect.height,
-             aDirtyRect.x, aDirtyRect.y, aDirtyRect.width, aDirtyRect.height,
+             dirty.x, dirty.y, dirty.width, dirty.height,
              ca.x, ca.y, ca.width, ca.height);
   }
   PRTime start = 0; // Initialize these variables to silence the compiler.
@@ -6691,14 +6691,14 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   DisplayBorderBackgroundOutline(aBuilder, aLists);
 
   if (GetPrevInFlow()) {
-    DisplayOverflowContainers(aBuilder, aDirtyRect, aLists);
+    DisplayOverflowContainers(aBuilder, aLists);
     for (nsIFrame* f : mFloats) {
       if (f->GetStateBits() & NS_FRAME_IS_PUSHED_FLOAT)
-         BuildDisplayListForChild(aBuilder, f, aDirtyRect, aLists);
+         BuildDisplayListForChild(aBuilder, f, aLists);
     }
   }
 
-  aBuilder->MarkFramesForDisplayList(this, mFloats, aDirtyRect);
+  aBuilder->MarkFramesForDisplayList(this, mFloats);
 
   // Prepare for text-overflow processing.
   UniquePtr<TextOverflow> textOverflow(
@@ -6714,8 +6714,8 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // on all our child frames, but that might be expensive.  So we
   // approximate it by checking it on |this|; if it's true for any
   // frame in our child list, it's also true for |this|.
-  nsLineBox* cursor = aBuilder->ShouldDescendIntoFrame(this) ?
-    nullptr : GetFirstLineContaining(aDirtyRect.y);
+  nsLineBox* cursor = aBuilder->ShouldDescendIntoFrame(this, true) ?
+    nullptr : GetFirstLineContaining(aBuilder->GetDirtyRect().y);
   LineIterator line_end = LinesEnd();
 
   if (cursor) {
@@ -6726,10 +6726,10 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       if (!lineArea.IsEmpty()) {
         // Because we have a cursor, the combinedArea.ys are non-decreasing.
         // Once we've passed aDirtyRect.YMost(), we can never see it again.
-        if (lineArea.y >= aDirtyRect.YMost()) {
+        if (lineArea.y >= aBuilder->GetDirtyRect().YMost()) {
           break;
         }
-        DisplayLine(aBuilder, lineArea, aDirtyRect, line, depth, drawnLines,
+        DisplayLine(aBuilder, lineArea, line, depth, drawnLines,
                     linesDisplayListCollection, this, textOverflow.get());
       }
     }
@@ -6742,7 +6742,7 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
          line != line_end;
          ++line) {
       nsRect lineArea = line->GetVisualOverflowArea();
-      DisplayLine(aBuilder, lineArea, aDirtyRect, line, depth, drawnLines,
+      DisplayLine(aBuilder, lineArea, line, depth, drawnLines,
                   linesDisplayListCollection, this, textOverflow.get());
       if (!lineArea.IsEmpty()) {
         if (lineArea.y < lastY
@@ -6772,7 +6772,7 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   if (HasOutsideBullet()) {
     // Display outside bullets manually
     nsIFrame* bullet = GetOutsideBullet();
-    BuildDisplayListForChild(aBuilder, bullet, aDirtyRect, aLists);
+    BuildDisplayListForChild(aBuilder, bullet, aLists);
   }
 
 #ifdef DEBUG

@@ -437,6 +437,9 @@ nsDOMWindowUtils::SetDisplayPortForElement(float aXPx, float aYPx,
     }
   }
 
+  nsLayoutUtils::InvalidateForDisplayPortChange(content, !!currentData,
+    currentData->mRect, displayport);
+
   nsIFrame* rootFrame = presShell->FrameManager()->GetRootFrame();
   if (rootFrame) {
     rootFrame->SchedulePaint();
@@ -3034,6 +3037,40 @@ nsDOMWindowUtils::CheckAndClearPaintedState(nsIDOMElement* aElement, bool* aResu
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::CheckAndClearDisplayListState(nsIDOMElement* aElement, bool* aResult)
+{
+  if (!aElement) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  nsresult rv;
+  nsCOMPtr<nsIContent> content = do_QueryInterface(aElement, &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsIFrame* frame = content->GetPrimaryFrame();
+
+  if (!frame) {
+    *aResult = false;
+    return NS_OK;
+  }
+
+  // Get the outermost frame for the content node, so that we can test
+  // canvasframe invalidations by observing the documentElement.
+  for (;;) {
+    nsIFrame* parentFrame = frame->GetParent();
+    if (parentFrame && parentFrame->GetContent() == content) {
+      frame = parentFrame;
+    } else {
+      break;
+    }
+  }
+
+  *aResult = frame->CheckAndClearDisplayListState();
+  return NS_OK;
+
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::IsPartOfOpaqueLayer(nsIDOMElement* aElement, bool* aResult)
 {
   if (!aElement) {
@@ -3769,7 +3806,7 @@ nsDOMWindowUtils::GetOMTAStyle(nsIDOMElement* aElement,
     if (aProperty.EqualsLiteral("opacity")) {
       Layer* layer =
         FrameLayerBuilder::GetDedicatedLayer(frame,
-                                             nsDisplayItem::TYPE_OPACITY);
+                                             TYPE_OPACITY);
       if (layer) {
         ShadowLayerForwarder* forwarder = layer->Manager()->AsShadowForwarder();
         if (forwarder && forwarder->HasShadowManager()) {
@@ -3789,7 +3826,7 @@ nsDOMWindowUtils::GetOMTAStyle(nsIDOMElement* aElement,
     } else if (aProperty.EqualsLiteral("transform")) {
       Layer* layer =
         FrameLayerBuilder::GetDedicatedLayer(frame,
-                                             nsDisplayItem::TYPE_TRANSFORM);
+                                             TYPE_TRANSFORM);
       if (layer) {
         ShadowLayerForwarder* forwarder = layer->Manager()->AsShadowForwarder();
         if (forwarder && forwarder->HasShadowManager()) {

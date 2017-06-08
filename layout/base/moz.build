@@ -37,6 +37,7 @@ EXPORTS += [
     'FrameProperties.h',
     'LayoutLogging.h',
     'nsArenaMemoryStats.h',
+    'nsAutoLayoutPhase.h',
     'nsBidi.h',
     'nsBidiPresUtils.h',
     'nsCaret.h',

@@ -96,7 +96,6 @@ public:
   NS_IMETHOD SetHasFocus(bool aHasFocus);
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) override;
 
   void PaintFocus(mozilla::gfx::DrawTarget* aRenderingContext, nsPoint aPt);
@@ -143,7 +142,8 @@ public:
   {
     return NS_GET_A(mColor) > 0;
   }
-  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) override
+  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
+                           bool* aSnap) const override
   {
     nsCanvasFrame* frame = static_cast<nsCanvasFrame*>(mFrame);
     *aSnap = true;
@@ -178,6 +178,7 @@ public:
 
   void SetExtraBackgroundColor(nscolor aColor)
   {
+    SaveVar(mColor);
     mColor = aColor;
   }
 
@@ -196,20 +197,20 @@ public:
 
   virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) override;
 
-  virtual void NotifyRenderingChanged() override
+  virtual void NotifyRenderingChanged() const override
   {
     mFrame->DeleteProperty(nsIFrame::CachedBackgroundImageDT());
   }
- 
-  // We still need to paint a background color as well as an image for this item, 
+
+  // We still need to paint a background color as well as an image for this item,
   // so we can't support this yet.
-  virtual bool SupportsOptimizingToImage() override { return false; }
+  virtual bool SupportsOptimizingToImage() const override { return false; }
 
   bool IsSingleFixedPositionImage(nsDisplayListBuilder* aBuilder,
                                   const nsRect& aClipRect,
                                   gfxRect* aDestRect);
-  
-  
+
+
   NS_DISPLAY_DECL_NAME("CanvasBackgroundImage", TYPE_CANVAS_BACKGROUND_IMAGE)
 };
 

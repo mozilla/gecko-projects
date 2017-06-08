@@ -201,6 +201,12 @@ public:
   static bool HasDisplayPort(nsIContent* aContent);
 
   /**
+   * Check whether the given frame has a displayport. It returns false
+   * for scrolled frames and true for the corresponding scroll frame.
+   */
+  static bool FrameHasDisplayPort(nsIFrame* aFrame);
+
+  /**
    * Check if the given element has a margins based displayport but is missing a
    * displayport base rect that it needs to properly compute a displayport rect.
    */
@@ -231,6 +237,15 @@ public:
     Repaint,
     DoNotRepaint
   };
+
+  /**
+   * Invalidate for displayport change.
+   */
+  static void InvalidateForDisplayPortChange(nsIContent* aContent,
+                                             bool aHadDisplayPort,
+                                             nsRect& aOldDisplayPort,
+                                             nsRect& aNewDisplayPort,
+                                             RepaintMode aRepaintMode = RepaintMode::Repaint);
 
   /**
    * Set the display port margins for a content element to be used with a
@@ -574,18 +589,6 @@ public:
   static bool IsFixedPosFrameInDisplayPort(const nsIFrame* aFrame);
 
   /**
-   * Store whether aThumbFrame wants its own layer. This sets a property on
-   * the frame.
-   */
-  static void SetScrollbarThumbLayerization(nsIFrame* aThumbFrame, bool aLayerize);
-
-  /**
-   * Returns whether aThumbFrame wants its own layer due to having called
-   * SetScrollbarThumbLayerization.
-   */
-  static bool IsScrollbarThumbLayerized(nsIFrame* aThumbFrame);
-
-  /**
     * GetScrollableFrameFor returns the scrollable frame for a scrolled frame
     */
   static nsIScrollableFrame* GetScrollableFrameFor(const nsIFrame *aScrolledFrame);
@@ -844,7 +847,9 @@ public:
                                              const nsRect& aRect,
                                              const nsIFrame* aAncestor,
                                              bool* aPreservesAxisAlignedRectangles = nullptr,
-                                             mozilla::Maybe<Matrix4x4>* aMatrixCache = nullptr);
+                                             mozilla::Maybe<Matrix4x4>* aMatrixCache = nullptr,
+                                             bool aStopAtStackingContextAndDisplayPort = false,
+                                             nsIFrame** aOutAncestor = nullptr);
 
 
   /**
@@ -854,7 +859,9 @@ public:
    */
   static Matrix4x4 GetTransformToAncestor(nsIFrame *aFrame,
                                           const nsIFrame *aAncestor,
-                                          bool aInCSSUnits = false);
+                                          bool aStopAtStackingContextAndDisplayPort = false,
+                                          bool aInCSSUnits = false,
+                                          nsIFrame** aOutAncestor = nullptr);
 
   /**
    * Gets the scale factors of the transform for aFrame relative to the root
@@ -1033,6 +1040,10 @@ public:
   static bool RoundedRectIntersectsRect(const nsRect& aRoundedRect,
                                         const nscoord aRadii[8],
                                         const nsRect& aTestRect);
+
+  static bool MaybeCreateDisplayPortInFirstScrollFrameEncountered(
+    nsIFrame* aFrame, nsDisplayListBuilder& aBuilder);
+
 
   enum class PaintFrameFlags : uint32_t {
     PAINT_IN_TRANSFORM = 0x01,
@@ -2763,10 +2774,15 @@ public:
    * displayport yet (as tracked by |aBuilder|), calculate and set a
    * displayport.
    *
-   * This is intended to be called during display list building.
+   * If this is called during display list building pass DoNotRepaint in
+   * aRepaintMode.
+   *
+   * Returns true if there is a displayport on an async scrollable scrollframe
+   * after this call, either because one was just added or it already existed.
    */
-  static void MaybeCreateDisplayPort(nsDisplayListBuilder& aBuilder,
-                                     nsIFrame* aScrollFrame);
+  static bool MaybeCreateDisplayPort(nsDisplayListBuilder& aBuilder,
+                                     nsIFrame* aScrollFrame,
+                                     RepaintMode aRepaintMode);
 
   static nsIScrollableFrame* GetAsyncScrollableAncestorFrame(nsIFrame* aTarget);
 

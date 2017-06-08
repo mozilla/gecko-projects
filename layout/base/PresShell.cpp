@@ -255,7 +255,7 @@ struct RangePaintInfo {
 
   ~RangePaintInfo()
   {
-    mList.DeleteAll();
+    mList.DeleteAll(&mBuilder);
     MOZ_COUNT_DTOR(RangePaintInfo);
   }
 };
@@ -2068,6 +2068,16 @@ PresShell::SetIgnoreFrameDestruction(bool aIgnore)
 void
 PresShell::NotifyDestroyingFrame(nsIFrame* aFrame)
 {
+  nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
+  if (displayRoot != aFrame) {
+    nsTArray<nsIFrame*>* deletedFrames = displayRoot->GetProperty(nsIFrame::DeletedFrameList());
+    if (!deletedFrames) {
+      deletedFrames = new nsTArray<nsIFrame*>;
+      displayRoot->SetProperty(nsIFrame::DeletedFrameList(), deletedFrames);
+    }
+    deletedFrames->AppendElement(aFrame);
+  }
+
   // We must remove these from FrameLayerBuilder::DisplayItemData::mFrameList here,
   // otherwise the DisplayItemData destructor will use the destroyed frame when it
   // tries to remove it from the (array) value of this property.
@@ -4799,7 +4809,7 @@ PresShell::ClipListToRange(nsDisplayListBuilder *aBuilder,
 
           DisplayItemClip newClip;
           newClip.SetTo(textRect);
-          DisplayItemClipChain newClipChain = { newClip, i->GetActiveScrolledRoot(), nullptr };
+          DisplayItemClipChain newClipChain(newClip, i->GetActiveScrolledRoot(), nullptr);
           i->IntersectClip(aBuilder, &newClipChain);
           itemToInsert = i;
         }
@@ -4833,7 +4843,7 @@ PresShell::ClipListToRange(nsDisplayListBuilder *aBuilder,
     }
     else {
       // otherwise, just delete the item and don't readd it to the list
-      i->~nsDisplayItem();
+      i->Destroy(aBuilder);
     }
   }
 
@@ -4910,8 +4920,9 @@ PresShell::CreateRangePaintInfo(nsIDOMRange* aRange,
     nsIFrame* frame = aNode->AsContent()->GetPrimaryFrame();
     // XXX deal with frame being null due to display:contents
     for (; frame; frame = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(frame)) {
-      frame->BuildDisplayListForStackingContext(&info->mBuilder,
-               frame->GetVisualOverflowRect(), &info->mList);
+      info->mBuilder.SetVisibleRect(frame->GetVisualOverflowRect());
+      info->mBuilder.SetDirtyRect(frame->GetVisualOverflowRect());
+      frame->BuildDisplayListForStackingContext(&info->mBuilder, &info->mList);
     }
   };
   if (startParent->NodeType() == nsIDOMNode::TEXT_NODE) {
@@ -5201,7 +5212,7 @@ PresShell::AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
                                          const nsRect&         aBounds)
 {
   aList.AppendNewToBottom(new (&aBuilder)
-    nsDisplaySolidColor(&aBuilder, aFrame, aBounds, NS_RGB(115, 115, 115)));
+    nsDisplaySolidColor(&aBuilder, aFrame, aBounds, NS_RGB(115, 115, 115), false));
 }
 
 static bool
@@ -5210,14 +5221,14 @@ AddCanvasBackgroundColor(const nsDisplayList& aList, nsIFrame* aCanvasFrame,
 {
   for (nsDisplayItem* i = aList.GetBottom(); i; i = i->GetAbove()) {
     if (i->Frame() == aCanvasFrame &&
-        i->GetType() == nsDisplayItem::TYPE_CANVAS_BACKGROUND_COLOR) {
+        i->GetType() == DisplayItemType::TYPE_CANVAS_BACKGROUND_COLOR) {
       nsDisplayCanvasBackgroundColor* bg = static_cast<nsDisplayCanvasBackgroundColor*>(i);
       bg->SetExtraBackgroundColor(aColor);
       return true;
     }
     nsDisplayList* sublist = i->GetSameCoordinateSystemChildren();
     if (sublist &&
-        !(i->GetType() == nsDisplayItem::TYPE_BLEND_CONTAINER && !aCSSBackgroundColor) &&
+        !(i->GetType() == DisplayItemType::TYPE_BLEND_CONTAINER && !aCSSBackgroundColor) &&
         AddCanvasBackgroundColor(*sublist, aCanvasFrame, aColor, aCSSBackgroundColor))
       return true;
   }
@@ -5285,7 +5296,7 @@ PresShell::AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
 
   if (!addedScrollingBackgroundColor || forceUnscrolledItem) {
     aList.AppendNewToBottom(
-      new (&aBuilder) nsDisplaySolidColor(&aBuilder, aFrame, aBounds, bgcolor));
+      new (&aBuilder) nsDisplaySolidColor(&aBuilder, aFrame, aBounds, bgcolor, false));
   }
 }
 
@@ -6105,7 +6116,7 @@ PresShell::DoUpdateApproximateFrameVisibility(bool aRemoveOnly)
 
   ClearApproximateFrameVisibilityVisited(rootFrame->GetView(), true);
 
-  list.DeleteAll();
+  list.DeleteAll(&builder);
 #endif
 }
 
@@ -9201,12 +9212,11 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
     timeStart = TimeStamp::Now();
   }
 
-  target->SchedulePaint();
-  nsIFrame *parent = nsLayoutUtils::GetCrossDocParentFrame(target);
-  while (parent) {
-    nsSVGEffects::InvalidateDirectRenderingObservers(parent);
-    parent = nsLayoutUtils::GetCrossDocParentFrame(parent);
-  }
+  // Schedule a paint, but don't actually mark this frame as changed for
+  // retained DL building purposes. If any child frames get moved, then
+  // they will schedule paint again. We could probaby skip this, and just
+  // schedule a similar paint when a frame is deleted.
+  target->SchedulePaint(nsIFrame::PAINT_DEFAULT, false);
 
 #ifdef MOZ_GECKO_PROFILER
   nsIURI* uri = mDocument->GetDocumentURI();

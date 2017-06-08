@@ -39,6 +39,7 @@
 #include "nsViewManager.h"
 #include "nsPlaceholderFrame.h"
 #include "nsIScrollableFrame.h"
+#include "nsSubDocumentFrame.h"
 #include "nsIDOMEvent.h"
 #include "nsDisplayList.h"
 #include "nsRegion.h"
@@ -121,6 +122,7 @@
 #include "mozilla/StyleSetHandleInlines.h"
 #include "RegionBuilder.h"
 #include "SVGSVGElement.h"
+#include "nsAutoLayoutPhase.h"
 #include "DisplayItemClip.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 
@@ -1312,6 +1314,54 @@ nsLayoutUtils::GetDisplayPortForVisibilityTesting(
   return usingDisplayPort;
 }
 
+void
+nsLayoutUtils::InvalidateForDisplayPortChange(nsIContent* aContent,
+                                              bool aHadDisplayPort,
+                                              nsRect& aOldDisplayPort,
+                                              nsRect& aNewDisplayPort,
+                                              RepaintMode aRepaintMode)
+{
+  if (aRepaintMode != RepaintMode::Repaint) {
+    return;
+  }
+
+  bool changed = !aHadDisplayPort ||
+        !aOldDisplayPort.IsEqualEdges(aNewDisplayPort);
+
+  nsIFrame* frame = GetScrollFrameFromContent(aContent);
+  if (frame) {
+    frame = do_QueryFrame(frame->GetScrollTargetFrame());
+  }
+
+  if (changed && frame) {
+    // It is important to call SchedulePaint on the same frame that we set the dirty
+    // rect properties on so we can find the frame later to remove the properties.
+    frame->SchedulePaint();
+
+    nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(frame);
+    RetainedDisplayListBuilder* retainedBuilder =
+      displayRoot->GetProperty(RetainedDisplayListBuilder::Cached());
+    if (retainedBuilder) {
+      nsRect* rect =
+        frame->GetProperty(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect());
+      if (!rect) {
+        rect = new nsRect();
+        frame->SetProperty(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect(), rect);
+        frame->SetHasOverrideDirtyRegion(true);
+      }
+      if (aHadDisplayPort) {
+        // We only need to build a display list for any new areas added
+        nsRegion newRegion(aNewDisplayPort);
+        newRegion.SubOut(aOldDisplayPort);
+        rect->UnionRect(*rect, newRegion.GetBounds());
+      } else {
+        rect->UnionRect(*rect, aNewDisplayPort);
+      }
+    }
+  }
+
+}
+
 bool
 nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
                                      nsIPresShell* aPresShell,
@@ -1340,9 +1390,6 @@ nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
   DebugOnly<bool> hasDisplayPort = GetHighResolutionDisplayPort(aContent, &newDisplayPort);
   MOZ_ASSERT(hasDisplayPort);
 
-  bool changed = !hadDisplayPort ||
-        !oldDisplayPort.IsEqualEdges(newDisplayPort);
-
   if (gfxPrefs::LayoutUseContainersForRootFrames()) {
     nsIFrame* rootScrollFrame = aPresShell->GetRootScrollFrame();
     if (rootScrollFrame &&
@@ -1356,12 +1403,8 @@ nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
     }
   }
 
-  if (changed && aRepaintMode == RepaintMode::Repaint) {
-    nsIFrame* frame = aContent->GetPrimaryFrame();
-    if (frame) {
-      frame->SchedulePaint();
-    }
-  }
+  InvalidateForDisplayPortChange(aContent, hadDisplayPort, oldDisplayPort,
+    newDisplayPort, aRepaintMode);
 
   nsIFrame* frame = GetScrollFrameFromContent(aContent);
   nsIScrollableFrame* scrollableFrame = frame ? frame->GetScrollTargetFrame() : nullptr;
@@ -2082,20 +2125,6 @@ nsLayoutUtils::IsFixedPosFrameInDisplayPort(const nsIFrame* aFrame)
   return ViewportHasDisplayPort(aFrame->PresContext());
 }
 
-NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(ScrollbarThumbLayerized, bool)
-
-/* static */ void
-nsLayoutUtils::SetScrollbarThumbLayerization(nsIFrame* aThumbFrame, bool aLayerize)
-{
-  aThumbFrame->SetProperty(ScrollbarThumbLayerized(), aLayerize);
-}
-
-bool
-nsLayoutUtils::IsScrollbarThumbLayerized(nsIFrame* aThumbFrame)
-{
-  return aThumbFrame->GetProperty(ScrollbarThumbLayerized());
-}
-
 // static
 nsIScrollableFrame*
 nsLayoutUtils::GetNearestScrollableFrameForDirection(nsIFrame* aFrame,
@@ -2641,22 +2670,44 @@ nsLayoutUtils::PostTranslate(Matrix4x4& aTransform, const nsPoint& aOrigin, floa
   aTransform.PostTranslate(gfxOrigin);
 }
 
+// We want to this return true for the scroll frame, but not the
+// scrolled frame (which has the same content).
+bool
+nsLayoutUtils::FrameHasDisplayPort(nsIFrame* aFrame)
+{
+  if (!aFrame->GetContent() || !HasDisplayPort(aFrame->GetContent())) {
+    return false;
+  }
+  nsIScrollableFrame* sf = do_QueryFrame(aFrame);
+  if (sf) {
+    return true;
+  }
+  return false;
+}
+
 Matrix4x4
 nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame,
                                       const nsIFrame *aAncestor,
-                                      bool aInCSSUnits)
+                                      bool aStopAtStackingContextAndDisplayPort,
+                                      bool aInCSSUnits,
+                                      nsIFrame** aOutAncestor)
 {
   nsIFrame* parent;
   Matrix4x4 ctm;
   if (aFrame == aAncestor) {
     return ctm;
   }
-  ctm = aFrame->GetTransformMatrix(aAncestor, &parent, aInCSSUnits);
-  while (parent && parent != aAncestor) {
+  ctm = aFrame->GetTransformMatrix(aAncestor, &parent, aStopAtStackingContextAndDisplayPort, aInCSSUnits);
+  while (parent && parent != aAncestor &&
+    (!aStopAtStackingContextAndDisplayPort ||
+      (!parent->IsStackingContext() && !FrameHasDisplayPort(parent)))) {
     if (!parent->Extend3DContext()) {
       ctm.ProjectTo2D();
     }
-    ctm = ctm * parent->GetTransformMatrix(aAncestor, &parent, aInCSSUnits);
+    ctm = ctm * parent->GetTransformMatrix(aAncestor, &parent, aStopAtStackingContextAndDisplayPort, aInCSSUnits);
+  }
+  if (aOutAncestor) {
+    *aOutAncestor = parent;
   }
   return ctm;
 }
@@ -2958,7 +3009,9 @@ TransformGfxRectToAncestor(nsIFrame *aFrame,
                            const Rect &aRect,
                            const nsIFrame *aAncestor,
                            bool* aPreservesAxisAlignedRectangles = nullptr,
-                           Maybe<Matrix4x4>* aMatrixCache = nullptr)
+                           Maybe<Matrix4x4>* aMatrixCache = nullptr,
+                           bool aStopAtStackingContextAndDisplayPort = false,
+                           nsIFrame** aOutAncestor = nullptr)
 {
   Matrix4x4 ctm;
   if (aMatrixCache && *aMatrixCache) {
@@ -2966,7 +3019,7 @@ TransformGfxRectToAncestor(nsIFrame *aFrame,
     ctm = aMatrixCache->value();
   } else {
     // Else, compute it
-    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor);
+    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor, aStopAtStackingContextAndDisplayPort, false, aOutAncestor);
     if (aMatrixCache) {
       // and put it in the cache, if provided
       *aMatrixCache = Some(ctm);
@@ -3027,7 +3080,9 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
                                             const nsRect& aRect,
                                             const nsIFrame* aAncestor,
                                             bool* aPreservesAxisAlignedRectangles /* = nullptr */,
-                                            Maybe<Matrix4x4>* aMatrixCache /* = nullptr */)
+                                            Maybe<Matrix4x4>* aMatrixCache /* = nullptr */,
+                                            bool aStopAtStackingContextAndDisplayPort /* = false */,
+                                            nsIFrame** aOutAncestor /* = nullptr */)
 {
   SVGTextFrame* text = GetContainingSVGTextFrame(aFrame);
 
@@ -3035,8 +3090,13 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
   Rect result;
 
   if (text) {
+    // TODO: Is it possible that there is a stacking context between aFrame
+    // and 'text'? I don't think it matters, the stacking context thing is
+    // just for retained-dl optimizations, not a requirement.
     result = ToRect(text->TransformFrameRectFromTextChild(aRect, aFrame));
-    result = TransformGfxRectToAncestor(text, result, aAncestor, nullptr, aMatrixCache);
+    result = TransformGfxRectToAncestor(text, result, aAncestor,
+                                        nullptr, aMatrixCache,
+                                        aStopAtStackingContextAndDisplayPort, aOutAncestor);
     // TransformFrameRectFromTextChild could involve any kind of transform, we
     // could drill down into it to get an answer out of it but we don't yet.
     if (aPreservesAxisAlignedRectangles)
@@ -3046,7 +3106,9 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
                   NSAppUnitsToFloatPixels(aRect.y, srcAppUnitsPerDevPixel),
                   NSAppUnitsToFloatPixels(aRect.width, srcAppUnitsPerDevPixel),
                   NSAppUnitsToFloatPixels(aRect.height, srcAppUnitsPerDevPixel));
-    result = TransformGfxRectToAncestor(aFrame, result, aAncestor, aPreservesAxisAlignedRectangles, aMatrixCache);
+    result = TransformGfxRectToAncestor(aFrame, result, aAncestor,
+                                        aPreservesAxisAlignedRectangles, aMatrixCache,
+                                        aStopAtStackingContextAndDisplayPort, aOutAncestor);
   }
 
   float destAppUnitsPerDevPixel = aAncestor->PresContext()->AppUnitsPerDevPixel();
@@ -3215,7 +3277,11 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
   }
 
   builder.EnterPresShell(aFrame);
-  aFrame->BuildDisplayListForStackingContext(&builder, aRect, &list);
+
+  builder.SetVisibleRect(aRect);
+  builder.SetDirtyRect(aRect);
+
+  aFrame->BuildDisplayListForStackingContext(&builder, &list);
   builder.LeavePresShell(aFrame, nullptr);
 
 #ifdef MOZ_DUMP_PAINTING
@@ -3231,7 +3297,7 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
   nsDisplayItem::HitTestState hitTestState;
   builder.SetHitTestShouldStopAtFirstOpaque(aFlags & ONLY_VISIBLE);
   list.HitTest(&builder, aRect, &hitTestState, &aOutFrames);
-  list.DeleteAll();
+  list.DeleteAll(&builder);
   return NS_OK;
 }
 
@@ -3316,13 +3382,14 @@ nsLayoutUtils::CalculateAndSetDisplayPortMargins(nsIScrollableFrame* aScrollFram
       content, presShell, displayportMargins, 0, aRepaintMode);
 }
 
-void
+bool
 nsLayoutUtils::MaybeCreateDisplayPort(nsDisplayListBuilder& aBuilder,
-                                      nsIFrame* aScrollFrame) {
+                                      nsIFrame* aScrollFrame,
+                                      RepaintMode aRepaintMode) {
   nsIContent* content = aScrollFrame->GetContent();
   nsIScrollableFrame* scrollableFrame = do_QueryFrame(aScrollFrame);
   if (!content || !scrollableFrame) {
-    return;
+    return false;
   }
 
   bool haveDisplayPort = HasDisplayPort(content);
@@ -3338,7 +3405,7 @@ nsLayoutUtils::MaybeCreateDisplayPort(nsDisplayListBuilder& aBuilder,
 
     // If we don't already have a displayport, calculate and set one.
     if (!haveDisplayPort) {
-      CalculateAndSetDisplayPortMargins(scrollableFrame, nsLayoutUtils::RepaintMode::DoNotRepaint);
+      CalculateAndSetDisplayPortMargins(scrollableFrame, aRepaintMode);
 #ifdef DEBUG
       haveDisplayPort = HasDisplayPort(content);
       MOZ_ASSERT(haveDisplayPort, "should have a displayport after having just set it");
@@ -3347,7 +3414,9 @@ nsLayoutUtils::MaybeCreateDisplayPort(nsDisplayListBuilder& aBuilder,
 
     // Record that the we now have a scrollable display port.
     aBuilder.SetHaveScrollableDisplayPort();
+    return true;
   }
+  return false;
 }
 
 nsIScrollableFrame*
@@ -3419,6 +3488,395 @@ nsLayoutUtils::ExpireDisplayPortOnAsyncScrollableAncestor(nsIFrame* aFrame)
   }
 }
 
+// TODO: We currently descend into all children even if we don't have an AGR
+// to mark, as child stacking contexts might. It would be nice if we could
+// jump into those immediately rather than walking the entire thing.
+void MarkFramesForDifferentAGR(nsDisplayListBuilder* aBuilder,
+                               nsTHashtable<nsPtrHashKey<nsIFrame>>& aDeletedFrames,
+                               nsDisplayList* aList,
+                               AnimatedGeometryRoot* aAGR)
+{
+  for (nsDisplayItem* i = aList->GetBottom(); i; i = i->GetAbove()) {
+    if (aDeletedFrames.Contains(i->Frame())) {
+      continue;
+    }
+
+    if (i->GetChildren()) {
+      AnimatedGeometryRoot *childAGR = aAGR;
+      if (i->Frame()->IsStackingContext()) {
+        if (i->Frame()->HasOverrideDirtyRegion()) {
+          childAGR = i->Frame()->GetProperty(nsDisplayListBuilder::DisplayListBuildingRect())->mModifiedAGR;
+        } else {
+          childAGR = nullptr;
+        }
+      }
+      MarkFramesForDifferentAGR(aBuilder, aDeletedFrames, i->GetChildren(), childAGR);
+    }
+
+    // TODO: We should be able to check the clipped bounds relative
+    // to the common AGR (of both the existing item and the invalidated
+    // frame) and determine if they can ever intersect.
+    if (aAGR && i->GetAnimatedGeometryRoot()->GetAsyncAGR() != aAGR) {
+      aBuilder->MarkFrameForDisplayIfVisible(i->Frame());
+    }
+  }
+}
+
+bool IsAnyAncestorModified(nsIFrame* aFrame)
+{
+  nsIFrame* f = aFrame;
+  while (f) {
+    if (f->IsFrameModified()) {
+      return true;
+    }
+    f = nsLayoutUtils::GetCrossDocParentFrame(f);
+  }
+  return false;
+}
+
+bool IsSameItem(nsDisplayItem* aFirst, nsDisplayItem* aSecond)
+{
+  return aFirst->Frame() == aSecond->Frame() &&
+         aFirst->GetPerFrameKey() == aSecond->GetPerFrameKey();
+}
+
+struct DisplayItemKey {
+
+  bool operator ==(const DisplayItemKey& aOther) const {
+    return mFrame == aOther.mFrame &&
+           mKey == aOther.mKey;
+  }
+
+  nsIFrame* mFrame;
+  uint32_t mKey;
+};
+
+class DisplayItemHashEntry : public PLDHashEntryHdr
+{
+public:
+  typedef DisplayItemKey KeyType;
+  typedef const DisplayItemKey* KeyTypePointer;
+
+  explicit DisplayItemHashEntry(KeyTypePointer aKey)
+    : mKey(*aKey) {}
+  explicit DisplayItemHashEntry(const DisplayItemHashEntry& aCopy)=default;
+
+  ~DisplayItemHashEntry() = default;
+
+  KeyType GetKey() const { return mKey; }
+  bool KeyEquals(KeyTypePointer aKey) const
+  {
+    return mKey == *aKey;
+  }
+
+  static KeyTypePointer KeyToPointer(KeyType& aKey) { return &aKey; }
+  static PLDHashNumber HashKey(KeyTypePointer aKey)
+  {
+    if (!aKey)
+      return 0;
+
+    return mozilla::HashGeneric(aKey->mFrame, aKey->mKey);
+  }
+  enum { ALLOW_MEMMOVE = true };
+
+  DisplayItemKey mKey;
+};
+
+void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
+                       nsTHashtable<nsPtrHashKey<nsIFrame>>& aDeletedFrames,
+                       nsDisplayList* aNewList,
+                       nsDisplayList* aOldList,
+                       nsDisplayList* aOutList,
+                       uint32_t& aTotalDisplayItems,
+                       uint32_t& aReusedDisplayItems)
+{
+  nsDisplayList merged;
+  nsDisplayItem* old;
+
+  nsDataHashtable<DisplayItemHashEntry, nsDisplayItem*> oldListLookup(aOldList->Count());
+
+  for (nsDisplayItem* i = aOldList->GetBottom(); i != nullptr; i = i->GetAbove()) {
+    i->SetReused(false);
+    oldListLookup.Put({ i->Frame(), i->GetPerFrameKey() }, i);
+  }
+
+  while (nsDisplayItem* i = aNewList->RemoveBottom()) {
+    // If the new item has a matching counterpart in the old list, copy all items
+    // up to that one into the merged list, but discard the repeat.
+    if (nsDisplayItem* oldItem = oldListLookup.Get({ i->Frame(), i->GetPerFrameKey() })) {
+      if (oldItem->IsReused()) {
+        // If we've already put the old item into the merged list (we might have iterated over it earlier)
+        // then stick with that one. Merge any child lists, and then delete the new item.
+
+        if (oldItem->GetChildren()) {
+          MOZ_ASSERT(i->GetChildren());
+          MergeDisplayLists(aBuilder, aDeletedFrames, i->GetChildren(), oldItem->GetChildren(), oldItem->GetChildren(), aTotalDisplayItems, aReusedDisplayItems);
+        }
+        i->Destroy(aBuilder);
+      } else {
+        while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
+          if (old->CanBeReused() &&
+              !aDeletedFrames.Contains(old->Frame()) &&
+              !IsAnyAncestorModified(old->Frame())) {
+
+            merged.AppendToTop(old);
+            aTotalDisplayItems++;
+            aReusedDisplayItems++;
+            old->SetReused(true);
+          } else {
+            // TODO: Is it going to be safe to call the dtor on a display item that belongs
+            // to a deleted frame? Can we ensure that it is? Or do we need to make sure we
+            // destroy display items during frame deletion.
+            oldListLookup.Remove({ old->Frame(), old->GetPerFrameKey() });
+            old->Destroy(aBuilder);
+          }
+        }
+        // Recursively merge any child lists.
+        // TODO: We may need to call UpdateBounds on any non-flattenable nsDisplayWrapLists
+        // here. Is there any other cached state that we need to update?
+        MOZ_ASSERT(old && IsSameItem(i, old));
+        if (old->GetChildren()) {
+          MOZ_ASSERT(i->GetChildren());
+          MergeDisplayLists(aBuilder, aDeletedFrames, i->GetChildren(), old->GetChildren(), i->GetChildren(), aTotalDisplayItems, aReusedDisplayItems);
+        }
+
+        old->Destroy(aBuilder);
+        merged.AppendToTop(i);
+        aTotalDisplayItems++;
+      }
+    } else {
+      merged.AppendToTop(i);
+      aTotalDisplayItems++;
+    }
+  }
+
+  while ((old = aOldList->RemoveBottom())) {
+    if (old->CanBeReused() &&
+        !aDeletedFrames.Contains(old->Frame()) &&
+        !IsAnyAncestorModified(old->Frame())) {
+      merged.AppendToTop(old);
+      old->SetReused(true);
+      aTotalDisplayItems++;
+      aReusedDisplayItems++;
+    } else {
+      old->Destroy(aBuilder);
+    }
+  }
+
+  aOutList->AppendToTop(&merged);
+}
+
+bool
+nsLayoutUtils::MaybeCreateDisplayPortInFirstScrollFrameEncountered(
+  nsIFrame* aFrame, nsDisplayListBuilder& aBuilder)
+{
+  nsIScrollableFrame* sf = do_QueryFrame(aFrame);
+  if (sf) {
+    if (MaybeCreateDisplayPort(aBuilder, aFrame, RepaintMode::Repaint)) {
+      return true;
+    }
+  }
+  if (aFrame->IsPlaceholderFrame()) {
+    nsPlaceholderFrame* placeholder = static_cast<nsPlaceholderFrame*>(aFrame);
+    if (MaybeCreateDisplayPortInFirstScrollFrameEncountered(
+          placeholder->GetOutOfFlowFrame(), aBuilder)) {
+      return true;
+    }
+  }
+  if (aFrame->IsSubDocumentFrame()) {
+    nsIPresShell* presShell =
+      static_cast<nsSubDocumentFrame*>(aFrame)->GetSubdocumentPresShellForPainting(0);
+    nsIFrame* root = presShell ? presShell->GetRootFrame() : nullptr;
+    if (root) {
+      if (MaybeCreateDisplayPortInFirstScrollFrameEncountered(root, aBuilder)) {
+        return true;
+      }
+    }
+  }
+
+  for (nsIFrame* child : aFrame->PrincipalChildList()) {
+    if (MaybeCreateDisplayPortInFirstScrollFrameEncountered(child, aBuilder)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+static void
+AddExtraBackgroundItems(nsDisplayListBuilder& aBuilder,
+                        nsDisplayList& aList,
+                        nsIFrame* aFrame,
+                        const nsRect& aCanvasArea,
+                        const nsRegion& aVisibleRegion,
+                        nscolor aBackstop)
+{
+  LayoutFrameType frameType = aFrame->Type();
+  nsPresContext* presContext = aFrame->PresContext();
+  nsIPresShell* presShell = presContext->PresShell();
+
+  // For the viewport frame in print preview/page layout we want to paint
+  // the grey background behind the page, not the canvas color.
+  if (frameType == LayoutFrameType::Viewport &&
+      nsLayoutUtils::NeedsPrintPreviewBackground(presContext)) {
+    nsRect bounds = nsRect(aBuilder.ToReferenceFrame(aFrame),
+                           aFrame->GetSize());
+    nsDisplayListBuilder::AutoBuildingDisplayList
+      buildingDisplayList(&aBuilder, aFrame, bounds, bounds, false);
+    presShell->AddPrintPreviewBackgroundItem(aBuilder, aList, aFrame, bounds);
+  } else if (frameType != LayoutFrameType::Page) {
+    // For printing, this function is first called on an nsPageFrame, which
+    // creates a display list with a PageContent item. The PageContent item's
+    // paint function calls this function on the nsPageFrame's child which is
+    // an nsPageContentFrame. We only want to add the canvas background color
+    // item once, for the nsPageContentFrame.
+
+    // Add the canvas background color to the bottom of the list. This
+    // happens after we've built the list so that AddCanvasBackgroundColorItem
+    // can monkey with the contents if necessary.
+    nsRect canvasArea = aVisibleRegion.GetBounds();
+    canvasArea.IntersectRect(aCanvasArea, canvasArea);
+    nsDisplayListBuilder::AutoBuildingDisplayList
+      buildingDisplayList(&aBuilder, aFrame, canvasArea, canvasArea, false);
+    presShell->AddCanvasBackgroundColorItem(
+      aBuilder, aList, aFrame, canvasArea, aBackstop);
+  }
+}
+
+bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
+                          std::vector<WeakFrame>& aModifiedFrames,
+                          nsIFrame* aDisplayRootFrame,
+                          const nsRect& aRootDirtyRect,
+                          nsRect* aOutDirty,
+                          AnimatedGeometryRoot** aOutModifiedAGR,
+                          nsTArray<nsIFrame*>* aOutFramesWithProps)
+{
+  for (nsIFrame* f : aModifiedFrames) {
+    if (!f) {
+      continue;
+    }
+
+    if (f->HasOverrideDirtyRegion()) {
+      aOutFramesWithProps->AppendElement(f);
+    }
+
+    // TODO: There is almost certainly a faster way of doing this, probably can be combined with the ancestor
+    // walk for TransformFrameRectToAncestor.
+    AnimatedGeometryRoot* agr = aBuilder.FindAnimatedGeometryRootFor(f)->GetAsyncAGR();
+
+
+    // Convert the frame's overflow rect into the coordinate space
+    // of the nearest stacking context that has an existing display item.
+    // We store the overflow rect on that stacking context so that we build
+    // all items that intersect that changed frame within the stacking context,
+    // and then we use MarkFrameForDisplayIfVisible to make sure the stacking
+    // context itself gets built. We don't need to build items that intersect outside
+    // of the stacking context, since we know the stacking context item exists in
+    // the old list, so we can trivially merge without needing other items.
+    nsRect overflow = f->GetVisualOverflowRectRelativeToSelf();
+    nsIFrame* currentFrame = f;
+
+    while (currentFrame != aDisplayRootFrame) {
+      overflow = nsLayoutUtils::TransformFrameRectToAncestor(currentFrame, overflow, aDisplayRootFrame,
+                                                             nullptr, nullptr,
+                                                             /* aStopAtStackingContextAndDisplayPort = */ true,
+                                                             &currentFrame);
+
+      if (nsLayoutUtils::FrameHasDisplayPort(currentFrame)) {
+        nsIScrollableFrame* sf = do_QueryFrame(currentFrame);
+        MOZ_ASSERT(sf);
+        nsRect displayPort;
+        DebugOnly<bool> hasDisplayPort =
+          nsLayoutUtils::GetDisplayPort(currentFrame->GetContent(), &displayPort, RelativeTo::ScrollPort);
+        MOZ_ASSERT(hasDisplayPort);
+        // get it relative to the scrollport (from the scrollframe)
+        nsRect r = overflow - sf->GetScrollPortRect().TopLeft();
+        r.IntersectRect(r, displayPort);
+        if (!r.IsEmpty()) {
+          nsRect* rect =
+            currentFrame->GetProperty(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect());
+          if (!rect) {
+            rect = new nsRect();
+            currentFrame->SetProperty(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect(), rect);
+            currentFrame->SetHasOverrideDirtyRegion(true);
+          }
+          rect->UnionRect(*rect, r);
+          aOutFramesWithProps->AppendElement(currentFrame);
+
+          // TODO: Can we just use MarkFrameForDisplayIfVisible, plus MarkFramesForDifferentAGR to
+          // ensure that this displayport, plus any items that move relative to it get rebuilt,
+          // and then not contribute to the root dirty area?
+          overflow = sf->GetScrollPortRect();
+        } else {
+          // Don't contribute to the root dirty area at all.
+          overflow.SetEmpty();
+          break;
+        }
+      }
+
+      if (currentFrame->IsStackingContext()) {
+        // If we found an intermediate stacking context with an existing display item
+        // then we can store the dirty rect there and stop.
+        if (currentFrame != aDisplayRootFrame &&
+            FrameLayerBuilder::HasRetainedDataFor(currentFrame)) {
+
+          // Convert directly into aDisplayRootFrames coordinate space.
+          // TODO: Don't we need to take ancestor displayports into account here? Plus also, isn't just
+          // MarkFrameForDisplayIfVisible sufficient and we don't need to check if it intersects?
+          nsRect rootOverflow = nsLayoutUtils::TransformFrameRectToAncestor(currentFrame, overflow, aDisplayRootFrame);
+          rootOverflow.IntersectRect(rootOverflow, aRootDirtyRect);
+
+          // If the stacking context intersected the visible region then make
+          // sure we build display items for it.
+          // TODO: Isn't this always true, unless we've invalidated the stacking context itself (
+          // or an ancestor of it), in which case we'll be rebuilding all the things anyway?
+          if (!rootOverflow.IsEmpty()) {
+            aBuilder.MarkFrameForDisplayIfVisible(currentFrame);
+
+            // Store the stacking context relative dirty area such
+            // that display list building will pick it up when it
+            // gets to it.
+            nsDisplayListBuilder::DisplayListBuildingData* data =
+              currentFrame->GetProperty(nsDisplayListBuilder::DisplayListBuildingRect());
+            if (!data) {
+              data = new nsDisplayListBuilder::DisplayListBuildingData;
+              currentFrame->SetProperty(nsDisplayListBuilder::DisplayListBuildingRect(), data);
+              currentFrame->SetHasOverrideDirtyRegion(true);
+              aOutFramesWithProps->AppendElement(currentFrame);
+            }
+            data->mDirtyRect.UnionRect(data->mDirtyRect, overflow);
+            if (!data->mModifiedAGR) {
+              data->mModifiedAGR = agr;
+            } else if (data->mModifiedAGR != agr) {
+              data->mDirtyRect = currentFrame->GetVisualOverflowRectRelativeToSelf();
+            }
+          }
+
+          // Don't contribute to the root dirty area at all.
+          agr = nullptr;
+          overflow.SetEmpty();
+          break;
+        }
+      }
+    }
+    aOutDirty->UnionRect(*aOutDirty, overflow);
+
+    // If we get changed frames from multiple AGRS, then just give up as it gets really complex to
+    // track which items would need to be marked in MarkFramesForDifferentAGR.
+    // TODO: We should store the modifiedAGR on the per-stacking context data and only do the
+    // marking within the scope of the current stacking context.
+    if (!*aOutModifiedAGR) {
+      *aOutModifiedAGR = agr;
+    } else if (agr && *aOutModifiedAGR != agr) {
+      return false;
+    }
+  }
+
+  // TODO: Return false if modified Dirty is empty, and we didn't mark any sub-stacking
+  // contexts as needing-paint-if-visible.
+  return true;
+}
+
 nsresult
 nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFrame,
                           const nsRegion& aDirtyRegion, nscolor aBackstop,
@@ -3455,8 +3913,29 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   }
 
   TimeStamp startBuildDisplayList = TimeStamp::Now();
-  nsDisplayListBuilder builder(aFrame, aBuilderMode,
-                               !(aFlags & PaintFrameFlags::PAINT_HIDE_CARET));
+
+  nsDisplayListBuilder* builderPtr = nullptr;
+  nsDisplayList* listPtr = nullptr;
+  RetainedDisplayListBuilder* retainedBuilder = nullptr;
+  if (aBuilderMode == nsDisplayListBuilderMode::PAINTING &&
+      (aFlags & PaintFrameFlags::PAINT_WIDGET_LAYERS)) {
+    retainedBuilder = aFrame->GetProperty(RetainedDisplayListBuilder::Cached());
+    if (!retainedBuilder) {
+      retainedBuilder =
+        new RetainedDisplayListBuilder(aFrame, aBuilderMode,
+                                       !(aFlags & PaintFrameFlags::PAINT_HIDE_CARET));
+      aFrame->SetProperty(RetainedDisplayListBuilder::Cached(), retainedBuilder);
+    }
+    builderPtr = &retainedBuilder->mBuilder;
+    listPtr = &retainedBuilder->mList;
+  } else {
+    builderPtr = new nsDisplayListBuilder(aFrame, aBuilderMode,
+        !(aFlags & PaintFrameFlags::PAINT_HIDE_CARET));
+    listPtr = new nsDisplayList;
+  }
+  nsDisplayListBuilder& builder = *builderPtr;
+  nsDisplayList& list = *listPtr;
+
   if (aFlags & PaintFrameFlags::PAINT_IN_TRANSFORM) {
     builder.SetInTransform(true);
   }
@@ -3476,7 +3955,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     nsIScrollableFrame* rootScrollableFrame = presShell->GetRootScrollFrameAsScrollable();
     MOZ_ASSERT(rootScrollableFrame);
     nsRect displayPortBase = aFrame->GetVisualOverflowRectRelativeToSelf();
-    Unused << rootScrollableFrame->DecideScrollableLayer(&builder, &displayPortBase,
+    nsRect temp = displayPortBase;
+    Unused << rootScrollableFrame->DecideScrollableLayer(&builder, &displayPortBase, &temp,
                 /* aAllowCreateDisplayPort = */ true);
   }
 
@@ -3492,8 +3972,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   } else {
     visibleRegion = aDirtyRegion;
   }
-
-  nsDisplayList list;
 
   // If the root has embedded plugins, flag the builder so we know we'll need
   // to update plugin geometry after painting.
@@ -3534,6 +4012,11 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     }
   }
 
+  builder.ClearHaveScrollableDisplayPort();
+  if (builder.IsPaintingToWindow()) {
+    MaybeCreateDisplayPortInFirstScrollFrameEncountered(aFrame, builder);
+  }
+
   nsRect dirtyRect = visibleRegion.GetBounds();
 
   {
@@ -3542,6 +4025,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     GeckoProfilerTracingRAII tracer("Paint", "DisplayList");
 
     PaintTelemetry::AutoRecord record(PaintTelemetry::Metric::DisplayList);
+    TimeStamp dlStart = TimeStamp::Now();
 
     builder.EnterPresShell(aFrame);
     {
@@ -3571,43 +4055,110 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
       nsDisplayListBuilder::AutoCurrentScrollParentIdSetter idSetter(&builder, id);
 
-      aFrame->BuildDisplayListForStackingContext(&builder, dirtyRect, &list);
+      builder.SetVisibleRect(dirtyRect);
+      builder.SetDisplayListReady(false);
+      builder.GetStateStack()->RestoreState();
+
+      bool merged = false;
+      uint32_t totalDisplayItems = 0;
+      uint32_t reusedDisplayItems = 0;
+      if (retainedBuilder &&
+          aFrame->GetProperty(nsIFrame::ModifiedFrameList())) {
+        std::vector<WeakFrame>* modifiedFrames = aFrame->GetProperty(nsIFrame::ModifiedFrameList());
+        nsTArray<nsIFrame*>* deletedFrames = aFrame->GetProperty(nsIFrame::DeletedFrameList());
+
+
+        //printf("Attempting merge build with %d modified frames\n", modifiedFrames->size());
+
+        nsRect modifiedDirty;
+        AnimatedGeometryRoot* modifiedAGR = nullptr;
+        nsTArray<nsIFrame*> framesWithProps;
+        if (ComputeRebuildRegion(builder, *modifiedFrames, aFrame, dirtyRect,
+                                 &modifiedDirty, &modifiedAGR, &framesWithProps)) {
+          modifiedDirty.IntersectRect(modifiedDirty, dirtyRect);
+          nsTHashtable<nsPtrHashKey<nsIFrame>> deletions;
+          if (deletedFrames) {
+            for (nsIFrame* f : *deletedFrames) {
+              deletions.PutEntry(f);
+            }
+          }
+
+          MarkFramesForDifferentAGR(&builder, deletions, &list, modifiedAGR);
+
+          builder.SetDirtyRect(modifiedDirty);
+
+          nsDisplayList modifiedDL;
+          builder.SetPartialUpdate(true);
+          aFrame->BuildDisplayListForStackingContext(&builder, &modifiedDL);
+          builder.SetPartialUpdate(false);
+          //printf_stderr("Painting --- Modified list (dirty %d,%d,%d,%d):\n",
+          //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
+          //nsFrame::PrintDisplayList(&builder, modifiedDL);
+
+          builder.LeavePresShell(aFrame, &modifiedDL);
+          builder.EnterPresShell(aFrame);
+
+          MergeDisplayLists(&builder, deletions, &modifiedDL, &list, &list, totalDisplayItems, reusedDisplayItems);
+
+          //printf_stderr("Painting --- Merged list:\n");
+          //nsFrame::PrintDisplayList(aBuilder, merged);
+          merged = true;
+        }
+
+        // TODO: Do we mark frames as modified during displaylist building? If
+        // we do this isn't gonna work.
+        for (nsIFrame* f : *modifiedFrames) {
+          if (f) {
+            f->SetFrameIsModified(false);
+          }
+        }
+        modifiedFrames->clear();
+        if (deletedFrames) {
+
+          deletedFrames->Clear();
+        }
+
+        for (nsIFrame* f: framesWithProps) {
+          f->SetHasOverrideDirtyRegion(false);
+          f->DeleteProperty(nsDisplayListBuilder::DisplayListBuildingRect());
+          f->DeleteProperty(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect());
+        }
+      }
+
+      if (merged && gfxPrefs::LayoutDisplayListBuildTwice()) {
+        merged = false;
+        if (gfxPrefs::LayersDrawFPS()) {
+          if (RefPtr<LayerManager> lm = builder.GetWidgetLayerManager()) {
+            if (PaintTiming* pt = ClientLayerManager::MaybeGetPaintTiming(lm)) {
+              pt->dl2Ms() = (TimeStamp::Now() - dlStart).ToMilliseconds();
+            }
+          }
+        }
+        dlStart = TimeStamp::Now();
+      }
+
+      if (!merged) {
+        list.DeleteAll(&builder);
+        builder.SetDirtyRect(dirtyRect);
+        aFrame->BuildDisplayListForStackingContext(&builder, &list);
+      }
+      //printf("nsLayoutUtils::PaintFrame - recycled %d/%d (%.2f%%) display items\n", reusedDisplayItems, totalDisplayItems, reusedDisplayItems * 100 / float(totalDisplayItems));
     }
 
-    LayoutFrameType frameType = aFrame->Type();
+    builder.SetDisplayListReady(true);
 
-    // For the viewport frame in print preview/page layout we want to paint
-    // the grey background behind the page, not the canvas color.
-    if (frameType == LayoutFrameType::Viewport &&
-        nsLayoutUtils::NeedsPrintPreviewBackground(presContext)) {
-      nsRect bounds = nsRect(builder.ToReferenceFrame(aFrame),
-                             aFrame->GetSize());
-      nsDisplayListBuilder::AutoBuildingDisplayList
-        buildingDisplayList(&builder, aFrame, bounds, false);
-      presShell->AddPrintPreviewBackgroundItem(builder, list, aFrame, bounds);
-    } else if (frameType != LayoutFrameType::Page) {
-      // For printing, this function is first called on an nsPageFrame, which
-      // creates a display list with a PageContent item. The PageContent item's
-      // paint function calls this function on the nsPageFrame's child which is
-      // an nsPageContentFrame. We only want to add the canvas background color
-      // item once, for the nsPageContentFrame.
-
-      // Add the canvas background color to the bottom of the list. This
-      // happens after we've built the list so that AddCanvasBackgroundColorItem
-      // can monkey with the contents if necessary.
-      canvasArea.IntersectRect(canvasArea, visibleRegion.GetBounds());
-      nsDisplayListBuilder::AutoBuildingDisplayList
-        buildingDisplayList(&builder, aFrame, canvasArea, false);
-      presShell->AddCanvasBackgroundColorItem(
-             builder, list, aFrame, canvasArea, aBackstop);
-    }
+    // TODO: This only adds temporary items (that return false for CanBeReused) and changes saved
+    // state so we can do it every time. This doesn't work for nested nsSubDocumentFrames though,
+    // we need to handle this separately, possibly by tracking which ones exist and doing
+    // them here.
+    AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
 
     builder.LeavePresShell(aFrame, &list);
 
-    if (!record.GetStart().IsNull() && gfxPrefs::LayersDrawFPS()) {
+    if (gfxPrefs::LayersDrawFPS()) {
       if (RefPtr<LayerManager> lm = builder.GetWidgetLayerManager()) {
         if (PaintTiming* pt = ClientLayerManager::MaybeGetPaintTiming(lm)) {
-          pt->dlMs() = (TimeStamp::Now() - record.GetStart()).ToMilliseconds();
+          pt->dlMs() = (TimeStamp::Now() - dlStart).ToMilliseconds();
         }
       }
     }
@@ -3807,7 +4358,11 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
 
   // Flush the list so we don't trigger the IsEmpty-on-destruction assertion
-  list.DeleteAll();
+  if (!retainedBuilder) {
+    list.DeleteAll(&builder);
+    delete listPtr;
+    delete builderPtr;
+  }
   return NS_OK;
 }
 

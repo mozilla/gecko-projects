@@ -55,6 +55,15 @@ public:
     Free(aID, aPtr);
   }
 
+  void* AllocateByCustomID(uint32_t aID, size_t aSize)
+  {
+    return Allocate(aID, aSize);
+  }
+  void FreeByCustomID(uint32_t aID, void* ptr)
+  {
+    Free(aID, ptr);
+  }
+
   /**
    * Register an ArenaRefPtr to be cleared when this arena is about to
    * be destroyed.
