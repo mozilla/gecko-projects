@@ -88,19 +88,27 @@ def make_task_description(config, jobs):
             signing_format_scopes.append("project:releng:signing:format:{}".format(format))
 
         treeherder = job.get('treeherder', {})
-        treeherder.setdefault('symbol', 'tc(Ns)')
+        is_nightly = dep_job.attributes.get('nightly', False)
+        treeherder.setdefault('symbol', 'tc(Ns)' if is_nightly else 'tc(Bs)')
+
         dep_th_platform = dep_job.task.get('extra', {}).get(
             'treeherder', {}).get('machine', {}).get('platform', '')
-        treeherder.setdefault('platform', "{}/opt".format(dep_th_platform))
-        treeherder.setdefault('tier', 1)
+        build_type = dep_job.attributes.get('build_type')
+        build_platform = dep_job.attributes.get('build_platform')
+        treeherder.setdefault('platform', _generate_treeherder_platform(
+            dep_th_platform, build_platform, build_type
+        ))
+
+        # TODO: Make non-nightly (aka build-signing-ci) Tier 1 once mature enough
+        treeherder.setdefault('tier', 1 if is_nightly else 3)
         treeherder.setdefault('kind', 'build')
 
         label = job.get('label', "{}-signing".format(dep_job.label))
 
         attributes = {
-            'nightly': dep_job.attributes.get('nightly', False),
-            'build_platform': dep_job.attributes.get('build_platform'),
-            'build_type': dep_job.attributes.get('build_type'),
+            'nightly': is_nightly,
+            'build_platform': build_platform,
+            'build_type': build_type,
             'signed': True,
         }
         if dep_job.attributes.get('chunk_locales'):
@@ -137,3 +145,8 @@ def make_task_description(config, jobs):
                 project=config.params['project'], level=config.params['level']))
 
         yield task
+
+
+def _generate_treeherder_platform(dep_th_platform, build_platform, build_type):
+    actual_build_type = 'pgo' if '-pgo' in build_platform else build_type
+    return '{}/{}'.format(dep_th_platform, actual_build_type)
