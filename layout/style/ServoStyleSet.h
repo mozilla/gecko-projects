@@ -142,7 +142,9 @@ public:
   void InvalidateStyleForCSSRuleChanges();
 
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
-  const RawServoStyleSet& RawSet() const { return *mRawSet; }
+  const RawServoStyleSet* RawSet() const {
+    return mRawSet.get();
+  }
 
   bool GetAuthorStyleDisabled() const;
   nsresult SetAuthorStyleDisabled(bool aStyleDisabled);
@@ -359,6 +361,12 @@ public:
   GetComputedKeyframeValuesFor(const nsTArray<Keyframe>& aKeyframes,
                                dom::Element* aElement,
                                ServoComputedValuesBorrowed aComputedValues);
+
+  void
+  GetAnimationValues(RawServoDeclarationBlock* aDeclarations,
+                     dom::Element* aElement,
+                     ServoComputedValuesBorrowed aComputedValues,
+                     nsTArray<RefPtr<RawServoAnimationValue>>& aAnimationValues);
 
   bool AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray);
 

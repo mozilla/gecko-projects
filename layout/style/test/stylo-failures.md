@@ -34,7 +34,7 @@ to mochitest command.
     * test_media_queries.html `-device-pixel-ratio` [27]
     * test_webkit_device_pixel_ratio.html [3]
   * test_media_queries_dynamic.html `restyle`: bug 1357461 [4]
-  * test_media_queries_dynamic_xbl.html: xbl support bug 1290276 [2]
+  * test_media_queries_dynamic_xbl.html: xbl support bug 1290276 [1]
 * Animation support:
   * SMIL Animation
     * test_restyles_in_smil_animation.html [2]
@@ -99,8 +99,6 @@ to mochitest command.
   * :-moz-tree bits bug 1348488
     * test_selectors.html `:-moz-tree` [10]
 * Unsupported pseudo-classes
-  * :-moz-locale-dir is internal bug 1367310
-    * test_selectors.html `:-moz-locale-dir` [15]
   * :-moz-lwtheme-* bug 1367312
     * test_selectors.html `:-moz-lwtheme` [3]
   * :-moz-window-inactive bug 1348489

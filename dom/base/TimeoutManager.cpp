@@ -424,8 +424,6 @@ TimeoutManager::SetTimeout(nsITimeoutHandler* aHandler,
 
   // If we're not suspended, then set the timer.
   if (!mWindow.IsSuspended()) {
-    MOZ_ASSERT(!timeout->When().IsNull());
-
     nsresult rv = mExecutor->MaybeSchedule(timeout->When());
     if (NS_FAILED(rv)) {
       return rv;
@@ -491,6 +489,7 @@ TimeoutManager::ClearTimeout(int32_t aTimerId, Timeout::Reason aReason)
   uint32_t timerId = (uint32_t)aTimerId;
 
   bool firstTimeout = true;
+  bool deferredDeletion = false;
 
   ForEachUnorderedTimeoutAbortable([&](Timeout* aTimeout) {
     MOZ_LOG(gLog, LogLevel::Debug,
@@ -504,6 +503,7 @@ TimeoutManager::ClearTimeout(int32_t aTimerId, Timeout::Reason aReason)
            aTimeout for deferred deletion by the code in
            RunTimeout() */
         aTimeout->mIsInterval = false;
+        deferredDeletion = true;
       }
       else {
         /* Delete the aTimeout from the pending aTimeout list */
@@ -517,18 +517,22 @@ TimeoutManager::ClearTimeout(int32_t aTimerId, Timeout::Reason aReason)
     return false;
   });
 
-  if (!firstTimeout) {
+  // We don't need to reschedule the executor if any of the following are true:
+  //  * If the we weren't cancelling the first timeout, then the executor's
+  //    state doesn't need to change.  It will only reflect the next soonest
+  //    Timeout.
+  //  * If we did cancel the first Timeout, but its currently running, then
+  //    RunTimeout() will handle rescheduling the executor.
+  //  * If the window has become suspended then we should not start executing
+  //    Timeouts.
+  if (!firstTimeout || deferredDeletion || mWindow.IsSuspended()) {
     return;
   }
 
-  // If the first timeout was cancelled we need to stop the executor and
-  // restart at the next soonest deadline.
+  // Stop the executor and restart it at the next soonest deadline.
   mExecutor->Cancel();
 
-  OrderedTimeoutIterator iter(mNormalTimeouts,
-                              mTrackingTimeouts,
-                              nullptr,
-                              nullptr);
+  OrderedTimeoutIterator iter(mNormalTimeouts, mTrackingTimeouts);
   Timeout* nextTimeout = iter.Next();
   if (nextTimeout) {
     MOZ_ALWAYS_SUCCEEDS(mExecutor->MaybeSchedule(nextTimeout->When()));
@@ -541,11 +545,10 @@ TimeoutManager::RunTimeout(const TimeStamp& aNow, const TimeStamp& aTargetDeadli
   MOZ_DIAGNOSTIC_ASSERT(!aNow.IsNull());
   MOZ_DIAGNOSTIC_ASSERT(!aTargetDeadline.IsNull());
 
+  MOZ_ASSERT_IF(mWindow.IsFrozen(), mWindow.IsSuspended());
   if (mWindow.IsSuspended()) {
     return;
   }
-
-  NS_ASSERTION(!mWindow.IsFrozen(), "Timeout running on a window in the bfcache!");
 
   // Limit the overall time spent in RunTimeout() to reduce jank.
   uint32_t totalTimeLimitMS = std::max(1u, gMaxConsecutiveCallbacksMilliseconds);
@@ -564,10 +567,6 @@ TimeoutManager::RunTimeout(const TimeStamp& aNow, const TimeStamp& aTargetDeadli
   // the time budget until at least one Timeout has run, though.
   TimeStamp now(aNow);
   TimeStamp start = now;
-
-  Timeout* last_expired_normal_timeout = nullptr;
-  Timeout* last_expired_tracking_timeout = nullptr;
-  bool     last_expired_timeout_is_normal = false;
 
   uint32_t firingId = CreateFiringId();
   auto guard = MakeScopeExit([&] {
@@ -598,6 +597,7 @@ TimeoutManager::RunTimeout(const TimeStamp& aNow, const TimeStamp& aTargetDeadli
   }
 
   TimeStamp nextDeadline;
+  uint32_t numTimersToRun = 0;
 
   // The timeout list is kept in deadline order. Discover the latest timeout
   // whose deadline has expired. On some platforms, native timeout events fire
@@ -608,12 +608,7 @@ TimeoutManager::RunTimeout(const TimeStamp& aNow, const TimeStamp& aTargetDeadli
   {
     // Use a nested scope in order to make sure the strong references held by
     // the iterator are freed after the loop.
-    OrderedTimeoutIterator expiredIter(mNormalTimeouts,
-                                       mTrackingTimeouts,
-                                       nullptr,
-                                       nullptr);
-
-    uint32_t numTimersToRun = 0;
+    OrderedTimeoutIterator expiredIter(mNormalTimeouts, mTrackingTimeouts);
 
     while (true) {
       Timeout* timeout = expiredIter.Next();
@@ -628,12 +623,6 @@ TimeoutManager::RunTimeout(const TimeStamp& aNow, const TimeStamp& aTargetDeadli
         // Mark any timeouts that are on the list to be fired with the
         // firing depth so that we can reentrantly run timeouts
         timeout->mFiringId = firingId;
-        last_expired_timeout_is_normal = expiredIter.PickedNormalIter();
-        if (last_expired_timeout_is_normal) {
-          last_expired_normal_timeout = timeout;
-        } else {
-          last_expired_tracking_timeout = timeout;
-        }
 
         numTimersToRun += 1;
 
@@ -660,13 +649,17 @@ TimeoutManager::RunTimeout(const TimeStamp& aNow, const TimeStamp& aTargetDeadli
   // of them spins the event loop the executor must already be scheduled
   // in order for timeouts to fire properly.
   if (!nextDeadline.IsNull()) {
+    // Note, we verified the window is not suspended at the top of
+    // method and the window should not have been suspended while
+    // executing the loop above since it doesn't call out to js.
+    MOZ_DIAGNOSTIC_ASSERT(!mWindow.IsSuspended());
     MOZ_ALWAYS_SUCCEEDS(mExecutor->MaybeSchedule(nextDeadline));
   }
 
   // Maybe the timeout that the event was fired for has been deleted
   // and there are no others timeouts with deadlines that make them
   // eligible for execution yet. Go away.
-  if (!last_expired_normal_timeout && !last_expired_tracking_timeout) {
+  if (!numTimersToRun) {
     return;
   }
 
@@ -680,14 +673,7 @@ TimeoutManager::RunTimeout(const TimeStamp& aNow, const TimeStamp& aTargetDeadli
   {
     // Use a nested scope in order to make sure the strong references held by
     // the iterator are freed after the loop.
-    OrderedTimeoutIterator runIter(mNormalTimeouts,
-                                   mTrackingTimeouts,
-                                   last_expired_normal_timeout ?
-                                     last_expired_normal_timeout->getNext() :
-                                     nullptr,
-                                   last_expired_tracking_timeout ?
-                                     last_expired_tracking_timeout->getNext() :
-                                     nullptr);
+    OrderedTimeoutIterator runIter(mNormalTimeouts, mTrackingTimeouts);
     while (true) {
       RefPtr<Timeout> timeout = runIter.Next();
       if (!timeout) {
@@ -696,10 +682,24 @@ TimeoutManager::RunTimeout(const TimeStamp& aNow, const TimeStamp& aTargetDeadli
       }
       runIter.UpdateIterator();
 
+      // We should only execute callbacks for the set of expired Timeout
+      // objects we computed above.
       if (timeout->mFiringId != firingId) {
-        // We skip the timeout since it's on the list to run at another
-        // depth.
-        continue;
+        // If the FiringId does not match, but is still valid, then this is
+        // a TImeout for another RunTimeout() on the call stack.  Just
+        // skip it.
+        if (IsValidFiringId(timeout->mFiringId)) {
+          continue;
+        }
+
+        // If, however, the FiringId is invalid then we have reached Timeout
+        // objects beyond the list we calculated above.  This can happen
+        // if the Timeout just beyond our last expired Timeout is cancelled
+        // by one of the callbacks we've just executed.  In this case we
+        // should just stop iterating.  We're done.
+        else {
+          break;
+        }
       }
 
       MOZ_ASSERT_IF(mWindow.IsFrozen(), mWindow.IsSuspended());
@@ -771,10 +771,14 @@ TimeoutManager::RunTimeout(const TimeStamp& aNow, const TimeStamp& aTargetDeadli
       TimeDuration elapsed = now - start;
       if (elapsed >= totalTimeLimit) {
         // We ran out of time.  Make sure to schedule the executor to
-        // run immediately for the next timer, if it exists.
-        RefPtr<Timeout> timeout = runIter.Next();
-        if (timeout) {
-          MOZ_ALWAYS_SUCCEEDS(mExecutor->MaybeSchedule(timeout->When()));
+        // run immediately for the next timer, if it exists.  Its possible,
+        // however, that the last timeout handler suspended the window.  If
+        // that happened then we must skip this step.
+        if (!mWindow.IsSuspended()) {
+          RefPtr<Timeout> timeout = runIter.Next();
+          if (timeout) {
+            MOZ_ALWAYS_SUCCEEDS(mExecutor->MaybeSchedule(timeout->When()));
+          }
         }
         break;
       }
@@ -831,26 +835,21 @@ TimeoutManager::ResetTimersForThrottleReduction(int32_t aPreviousThrottleDelayMS
 {
   MOZ_ASSERT(aPreviousThrottleDelayMS > 0);
 
-  if (mWindow.IsFrozen() || mWindow.IsSuspended()) {
+  MOZ_ASSERT_IF(mWindow.IsFrozen(), mWindow.IsSuspended());
+  if (mWindow.IsSuspended()) {
     return NS_OK;
   }
 
-  Timeouts::SortBy sortBy = mWindow.IsFrozen() ? Timeouts::SortBy::TimeRemaining
-                                               : Timeouts::SortBy::TimeWhen;
-
   nsresult rv = mNormalTimeouts.ResetTimersForThrottleReduction(aPreviousThrottleDelayMS,
                                                                 *this,
-                                                                sortBy);
+                                                                Timeouts::SortBy::TimeWhen);
   NS_ENSURE_SUCCESS(rv, rv);
   rv = mTrackingTimeouts.ResetTimersForThrottleReduction(aPreviousThrottleDelayMS,
                                                          *this,
-                                                         sortBy);
+                                                         Timeouts::SortBy::TimeWhen);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  OrderedTimeoutIterator iter(mNormalTimeouts,
-                              mTrackingTimeouts,
-                              nullptr,
-                              nullptr);
+  OrderedTimeoutIterator iter(mNormalTimeouts, mTrackingTimeouts);
   Timeout* firstTimeout = iter.Next();
   if (firstTimeout) {
     rv = mExecutor->MaybeSchedule(firstTimeout->When());

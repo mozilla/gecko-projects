@@ -160,7 +160,7 @@ pub struct Stylist {
     /// on state that is not otherwise visible to the cache, like attributes or
     /// tree-structural state like child index and pseudos).
     #[cfg_attr(feature = "servo", ignore_heap_size_of = "Arc")]
-    selectors_for_cache_revalidation: SelectorMap<SelectorAndHashes<SelectorImpl>>,
+    selectors_for_cache_revalidation: SelectorMap<RevalidationSelectorAndHashes>,
 
     /// The total number of selectors.
     num_selectors: usize,
@@ -474,7 +474,8 @@ impl Stylist {
 
                         self.dependencies.note_selector(selector_and_hashes);
                         if needs_revalidation(&selector_and_hashes.selector) {
-                            self.selectors_for_cache_revalidation.insert(selector_and_hashes.clone());
+                            self.selectors_for_cache_revalidation.insert(
+                                RevalidationSelectorAndHashes::new(&selector_and_hashes));
                         }
                         selector_and_hashes.selector.visit(&mut AttributeAndStateDependencyVisitor {
                             attribute_dependencies: &mut self.attribute_dependencies,
@@ -917,6 +918,26 @@ impl Stylist {
         self.quirks_mode = quirks_mode;
     }
 
+    /// Returns the applicable CSS declarations for the given element by
+    /// treating us as an XBL stylesheet-only stylist.
+    pub fn push_applicable_declarations_as_xbl_only_stylist<E, V>(&self,
+                                                                  element: &E,
+                                                                  applicable_declarations: &mut V)
+        where E: TElement,
+              V: Push<ApplicableDeclarationBlock> + VecLike<ApplicableDeclarationBlock>,
+    {
+        let mut matching_context =
+            MatchingContext::new(MatchingMode::Normal, None);
+        let mut dummy_flag_setter = |_: &E, _: ElementSelectorFlags| {};
+
+        self.element_map.author.get_all_matching_rules(element,
+                                                       element,
+                                                       applicable_declarations,
+                                                       &mut matching_context,
+                                                       &mut dummy_flag_setter,
+                                                       CascadeLevel::XBL);
+    }
+
     /// Returns the applicable CSS declarations for the given element.
     ///
     /// This corresponds to `ElementRuleCollector` in WebKit.
@@ -1019,15 +1040,26 @@ impl Stylist {
             debug!("skipping user rules");
         }
 
+        // Step 3b: XBL rules.
+        let cut_off_inheritance =
+            rule_hash_target.get_declarations_from_xbl_bindings(applicable_declarations);
+        debug!("XBL: {:?}", context.relations);
+
         if rule_hash_target.matches_user_and_author_rules() && !only_default_rules {
-            // Step 3b: Author normal rules.
-            map.author.get_all_matching_rules(element,
-                                              &rule_hash_target,
-                                              applicable_declarations,
-                                              context,
-                                              flags_setter,
-                                              CascadeLevel::AuthorNormal);
-            debug!("author normal: {:?}", context.relations);
+            // Gecko skips author normal rules if cutting off inheritance.
+            // See nsStyleSet::FileRules().
+            if !cut_off_inheritance {
+                // Step 3c: Author normal rules.
+                map.author.get_all_matching_rules(element,
+                                                  &rule_hash_target,
+                                                  applicable_declarations,
+                                                  context,
+                                                  flags_setter,
+                                                  CascadeLevel::AuthorNormal);
+                debug!("author normal: {:?}", context.relations);
+            } else {
+                debug!("Skipping author normal rules due to cut off inheritance");
+            }
 
             // Step 4: Normal style attributes.
             if let Some(sa) = style_attribute {
@@ -1134,7 +1166,7 @@ impl Stylist {
         let mut results = BitVec::new();
         self.selectors_for_cache_revalidation.lookup(*element, &mut |selector_and_hashes| {
             results.push(matches_selector(&selector_and_hashes.selector,
-                                          0,
+                                          selector_and_hashes.selector_offset,
                                           &selector_and_hashes.hashes,
                                           element,
                                           &mut matching_context,
@@ -1288,7 +1320,52 @@ impl<'a> SelectorVisitor for MappedIdVisitor<'a> {
     }
 }
 
-/// Visitor determine whether a selector requires cache revalidation.
+/// SelectorMapEntry implementation for use in our revalidation selector map.
+#[derive(Clone, Debug)]
+struct RevalidationSelectorAndHashes {
+    selector: Selector<SelectorImpl>,
+    selector_offset: usize,
+    hashes: AncestorHashes,
+}
+
+impl RevalidationSelectorAndHashes {
+    fn new(selector_and_hashes: &SelectorAndHashes<SelectorImpl>) -> Self {
+        // We basically want to check whether the first combinator is a
+        // pseudo-element combinator.  If it is, we want to use the offset one
+        // past it.  Otherwise, our offset is 0.
+        let mut index = 0;
+        let mut iter = selector_and_hashes.selector.iter();
+
+        // First skip over the first ComplexSelector.  We can't check what sort
+        // of combinator we have until we do that.
+        for _ in &mut iter {
+            index += 1; // Simple selector
+        }
+
+        let offset = match iter.next_sequence() {
+            Some(Combinator::PseudoElement) => index + 1, // +1 for the combinator
+            _ => 0
+        };
+
+        RevalidationSelectorAndHashes {
+            selector: selector_and_hashes.selector.clone(),
+            selector_offset: offset,
+            hashes: selector_and_hashes.hashes.clone(),
+        }
+    }
+}
+
+impl SelectorMapEntry for RevalidationSelectorAndHashes {
+    fn selector(&self) -> SelectorIter<SelectorImpl> {
+        self.selector.iter_from(self.selector_offset)
+    }
+
+    fn hashes(&self) -> &AncestorHashes {
+        &self.hashes
+    }
+}
+
+/// Visitor to determine whether a selector requires cache revalidation.
 ///
 /// Note that we just check simple selectors and eagerly return when the first
 /// need for revalidation is found, so we don't need to store state on the
@@ -1447,9 +1524,9 @@ impl Rule {
                                            -> ApplicableDeclarationBlock {
         ApplicableDeclarationBlock {
             source: StyleSource::Style(self.style_rule.clone()),
-            level: level,
             source_order: self.source_order,
             specificity: self.specificity(),
+            level: level,
         }
     }
 
@@ -1480,12 +1557,12 @@ pub struct ApplicableDeclarationBlock {
     /// The style source, either a style rule, or a property declaration block.
     #[cfg_attr(feature = "servo", ignore_heap_size_of = "Arc")]
     pub source: StyleSource,
-    /// The cascade level this applicable declaration block is in.
-    pub level: CascadeLevel,
     /// The source order of this block.
     pub source_order: usize,
     /// The specificity of the selector this block is represented by.
     pub specificity: u32,
+    /// The cascade level this applicable declaration block is in.
+    pub level: CascadeLevel,
 }
 
 impl ApplicableDeclarationBlock {
@@ -1497,9 +1574,9 @@ impl ApplicableDeclarationBlock {
                              -> Self {
         ApplicableDeclarationBlock {
             source: StyleSource::Declarations(declarations),
-            level: level,
             source_order: 0,
             specificity: 0,
+            level: level,
         }
     }
 }

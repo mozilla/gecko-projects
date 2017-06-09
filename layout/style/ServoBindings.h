@@ -64,6 +64,7 @@ struct nsStyleGradientStop;
 class nsStyleGradient;
 class nsStyleCoord;
 struct nsStyleDisplay;
+class nsXBLBinding;
 
 #define NS_DECL_THREADSAFE_FFI_REFCOUNTING(class_, name_)                     \
   void Gecko_AddRef##name_##ArbitraryThread(class_* aPtr);                    \
@@ -176,15 +177,16 @@ nsIAtom* Gecko_GetXMLLangValue(RawGeckoElementBorrowed element);
   bool prefix_##AttrEquals(implementor_ element, nsIAtom* ns, nsIAtom* name,  \
                            nsIAtom* str, bool ignoreCase);                    \
   bool prefix_##AttrDashEquals(implementor_ element, nsIAtom* ns,             \
-                               nsIAtom* name, nsIAtom* str);                  \
+                               nsIAtom* name, nsIAtom* str, bool ignore_case);\
   bool prefix_##AttrIncludes(implementor_ element, nsIAtom* ns,               \
-                             nsIAtom* name, nsIAtom* str);                    \
+                             nsIAtom* name, nsIAtom* str, bool ignore_case);  \
   bool prefix_##AttrHasSubstring(implementor_ element, nsIAtom* ns,           \
-                                 nsIAtom* name, nsIAtom* str);                \
+                                 nsIAtom* name, nsIAtom* str,                 \
+                                 bool ignore_case);                           \
   bool prefix_##AttrHasPrefix(implementor_ element, nsIAtom* ns,              \
-                              nsIAtom* name, nsIAtom* str);                   \
+                              nsIAtom* name, nsIAtom* str, bool ignore_case); \
   bool prefix_##AttrHasSuffix(implementor_ element, nsIAtom* ns,              \
-                              nsIAtom* name, nsIAtom* str);                   \
+                              nsIAtom* name, nsIAtom* str, bool ignore_case); \
   uint32_t prefix_##ClassOrClassList(implementor_ element, nsIAtom** class_,  \
                                      nsIAtom*** classList);
 
@@ -221,7 +223,6 @@ bool Gecko_StyleAnimationsEquals(RawGeckoStyleAnimationListBorrowed,
 void Gecko_UpdateAnimations(RawGeckoElementBorrowed aElementOrPseudo,
                             ServoComputedValuesBorrowedOrNull aOldComputedValues,
                             ServoComputedValuesBorrowedOrNull aComputedValues,
-                            ServoComputedValuesBorrowedOrNull aParentComputedValues,
                             mozilla::UpdateAnimationsTasks aTasks);
 bool Gecko_ElementHasAnimations(RawGeckoElementBorrowed aElementOrPseudo);
 bool Gecko_ElementHasCSSAnimations(RawGeckoElementBorrowed aElementOrPseudo);
@@ -527,6 +528,12 @@ void Gecko_nsStyleFont_FixupMinFontSize(nsStyleFont* font,
                                         RawGeckoPresContextBorrowed pres_context);
 FontSizePrefs Gecko_GetBaseSize(nsIAtom* lang);
 
+// XBL related functions.
+RawGeckoElementBorrowedOrNull Gecko_GetBindingParent(RawGeckoElementBorrowed aElement);
+RawGeckoXBLBindingBorrowedOrNull Gecko_GetXBLBinding(RawGeckoElementBorrowed aElement);
+RawServoStyleSetBorrowedOrNull Gecko_XBLBinding_GetRawServoStyleSet(RawGeckoXBLBindingBorrowed aXBLBinding);
+bool Gecko_XBLBinding_InheritsStyle(RawGeckoXBLBindingBorrowed aXBLBinding);
+
 struct GeckoFontMetrics
 {
   nscoord mChSize;
@@ -550,12 +557,14 @@ const char* Gecko_CSSKeywordString(nsCSSKeyword keyword, uint32_t* len);
 // Font face rule
 // Creates and returns a new (already-addrefed) nsCSSFontFaceRule object.
 nsCSSFontFaceRule* Gecko_CSSFontFaceRule_Create(uint32_t line, uint32_t column);
+nsCSSFontFaceRule* Gecko_CSSFontFaceRule_Clone(const nsCSSFontFaceRule* rule);
 void Gecko_CSSFontFaceRule_GetCssText(const nsCSSFontFaceRule* rule, nsAString* result);
 NS_DECL_FFI_REFCOUNTING(nsCSSFontFaceRule, CSSFontFaceRule);
 
 // Counter style rule
 // Creates and returns a new (already-addrefed) nsCSSCounterStyleRule object.
 nsCSSCounterStyleRule* Gecko_CSSCounterStyle_Create(nsIAtom* name);
+nsCSSCounterStyleRule* Gecko_CSSCounterStyle_Clone(const nsCSSCounterStyleRule* rule);
 void Gecko_CSSCounterStyle_GetCssText(const nsCSSCounterStyleRule* rule, nsAString* result);
 NS_DECL_FFI_REFCOUNTING(nsCSSCounterStyleRule, CSSCounterStyleRule);
 
