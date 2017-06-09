@@ -67,8 +67,6 @@ def make_repackage_description(config, jobs):
         label = job.get('label',
                         dep_job.label.replace("signing-", "repackage-"))
         job['label'] = label
-        cot = job.setdefault('extra', {}).setdefault('chainOfTrust', {})
-        cot.setdefault('inputs', {})['docker-image'] = {"task-reference": "<docker-image>"}
 
         yield job
 
@@ -167,7 +165,6 @@ def make_task_description(config, jobs):
 
         if attributes["build_platform"].startswith('win'):
             worker = {
-                #'implementation': 'generic-worker',
                 'max-run-time': 7200,
                 'env': task_env,
                 'artifacts': output_files,
@@ -175,15 +172,17 @@ def make_task_description(config, jobs):
             }
             worker_type = 'aws-provisioner-v1/gecko-%s-b-win2012' % level
         else:
-            worker = {#'implementation': 'docker-worker',
-                       'docker-image': {"in-tree": "desktop-build"},
-                       'artifacts': output_files,
-                       'env': task_env,
-                       'chain-of-trust': True,
-                       'max-run-time': 3600
-                       }
+            worker = {
+                'docker-image': {"in-tree": "desktop-build"},
+                'artifacts': output_files,
+                'env': task_env,
+                'chain-of-trust': True,
+                'max-run-time': 3600
+            }
             run["tooltool-downloads"] = 'internal'
             worker_type = 'aws-provisioner-v1/gecko-%s-b-macosx64' % level
+            cot = job.setdefault('extra', {}).setdefault('chainOfTrust', {})
+            cot.setdefault('inputs', {})['docker-image'] = {"task-reference": "<docker-image>"}
 
         task = {
             'label': job['label'],
