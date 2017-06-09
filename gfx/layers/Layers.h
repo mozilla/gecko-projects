@@ -1813,6 +1813,8 @@ public:
   // matches the frame metrics array length.
 
   virtual void ClearCachedResources() {}
+
+  virtual bool SupportsAsyncUpdate() { return false; }
 private:
   void ScrollMetadataChanged();
 public:
@@ -2248,6 +2250,12 @@ public:
     return mEventRegionsOverride;
   }
 
+  void SetFilterChain(nsTArray<CSSFilter>&& aFilterChain) {
+    mFilterChain = aFilterChain;
+  }
+
+  nsTArray<CSSFilter>& GetFilterChain() { return mFilterChain; }
+
 protected:
   friend class ReadbackProcessor;
 
@@ -2334,6 +2342,7 @@ protected:
   // the intermediate surface.
   bool mChildrenChanged;
   EventRegionsOverride mEventRegionsOverride;
+  nsTArray<CSSFilter> mFilterChain;
 };
 
 /**

@@ -33,6 +33,14 @@ function getVisibleMessages(state) {
   return state.messages.visibleMessages.map(id => getMessage(state, id));
 }
 
+function getAllRepeatById(state) {
+  return state.messages.repeatById;
+}
+
+function getAllNetworkMessagesUpdateById(state) {
+  return state.messages.networkMessagesUpdateById;
+}
+
 module.exports = {
   getMessage,
   getAllMessagesById,
@@ -41,4 +49,6 @@ module.exports = {
   getAllGroupsById,
   getCurrentGroup,
   getVisibleMessages,
+  getAllRepeatById,
+  getAllNetworkMessagesUpdateById,
 };

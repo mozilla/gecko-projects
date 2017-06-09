@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::ffi::CString;
 use std::{mem, slice};
 use std::path::PathBuf;
-use std::os::raw::{c_void, c_char};
+use std::os::raw::{c_void, c_char, c_float};
 use std::collections::HashMap;
 use gleam::gl;
 
@@ -58,6 +58,27 @@ type WrYuvColorSpace = YuvColorSpace;
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct WrExternalImageId(pub u64);
+
+#[repr(u32)]
+#[derive(Copy, Clone)]
+pub enum WrFilterOpType {
+  Blur = 0,
+  Brightness = 1,
+  Contrast = 2,
+  Grayscale = 3,
+  HueRotate = 4,
+  Invert = 5,
+  Opacity = 6,
+  Saturate = 7,
+  Sepia = 8,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct WrFilterOp {
+    filter_type: WrFilterOpType,
+    argument: c_float,
+}
 
 impl Into<ExternalImageId> for WrExternalImageId {
     fn into(self) -> ExternalImageId {
@@ -1245,12 +1266,28 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
                                               animation_id: u64,
                                               opacity: *const f32,
                                               transform: *const WrMatrix,
-                                              mix_blend_mode: WrMixBlendMode) {
+                                              mix_blend_mode: WrMixBlendMode,
+                                              filters: *const WrFilterOp,
+                                              filter_count: usize) {
     assert!(unsafe { !is_in_render_thread() });
 
     let bounds = bounds.into();
 
-    let mut filters: Vec<FilterOp> = Vec::new();
+    let c_filters = make_slice(filters, filter_count);
+    let mut filters : Vec<FilterOp> = c_filters.iter().map(|c_filter| {
+        match c_filter.filter_type {
+            WrFilterOpType::Blur => FilterOp::Blur(Au::from_f32_px(c_filter.argument)),
+            WrFilterOpType::Brightness => FilterOp::Brightness(c_filter.argument),
+            WrFilterOpType::Contrast => FilterOp::Contrast(c_filter.argument),
+            WrFilterOpType::Grayscale => FilterOp::Grayscale(c_filter.argument),
+            WrFilterOpType::HueRotate => FilterOp::HueRotate(c_filter.argument),
+            WrFilterOpType::Invert => FilterOp::Invert(c_filter.argument),
+            WrFilterOpType::Opacity => FilterOp::Opacity(PropertyBinding::Value(c_filter.argument)),
+            WrFilterOpType::Saturate => FilterOp::Saturate(c_filter.argument),
+            WrFilterOpType::Sepia => FilterOp::Sepia(c_filter.argument),
+        }
+    }).collect();
+
     let opacity = unsafe { opacity.as_ref() };
     if let Some(opacity) = opacity {
         if *opacity < 1.0 {
@@ -1289,12 +1326,22 @@ pub extern "C" fn wr_dp_pop_stacking_context(state: &mut WrState) {
 #[no_mangle]
 pub extern "C" fn wr_dp_push_clip(state: &mut WrState,
                                   clip_rect: WrRect,
-                                  mask: *const WrImageMask) {
+                                  mask: *const WrImageMask)
+                                  -> u64 {
     assert!(unsafe { is_in_main_thread() });
     let clip_rect = clip_rect.into();
     let mask = unsafe { mask.as_ref() }.map(|x| x.into());
     let clip_region = state.frame_builder.dl_builder.push_clip_region(&clip_rect, vec![], mask);
-    state.frame_builder.dl_builder.push_clip_node(clip_rect, clip_region, None);
+    let clip_id = state.frame_builder.dl_builder.define_clip(clip_rect, clip_region, None);
+    state.frame_builder.dl_builder.push_clip_id(clip_id);
+    // return the u64 id value from inside the ClipId::Clip(..)
+    match clip_id {
+        ClipId::Clip(id, pipeline_id) => {
+            assert!(pipeline_id == state.pipeline_id);
+            id
+        },
+        _ => panic!("Got unexpected clip id type"),
+    }
 }
 
 #[no_mangle]
@@ -1339,6 +1386,28 @@ pub extern "C" fn wr_scroll_layer_with_id(api: &mut WrAPI,
 }
 
 #[no_mangle]
+pub extern "C" fn wr_dp_push_clip_and_scroll_info(state: &mut WrState,
+                                                  scroll_id: u64,
+                                                  clip_id: *const u64) {
+    assert!(unsafe { is_in_main_thread() });
+    let scroll_id = ClipId::new(scroll_id, state.pipeline_id);
+    let info = if let Some(&id) = unsafe { clip_id.as_ref() } {
+        ClipAndScrollInfo::new(
+            scroll_id,
+            ClipId::Clip(id, state.pipeline_id))
+    } else {
+        ClipAndScrollInfo::simple(scroll_id)
+    };
+    state.frame_builder.dl_builder.push_clip_and_scroll_info(info);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_dp_pop_clip_and_scroll_info(state: &mut WrState) {
+    assert!(unsafe { is_in_main_thread() });
+    state.frame_builder.dl_builder.pop_clip_id();
+}
+
+#[no_mangle]
 pub extern "C" fn wr_dp_push_iframe(state: &mut WrState,
                                     rect: WrRect,
                                     clip: WrClipRegionToken,
@@ -1366,7 +1435,7 @@ pub extern "C" fn wr_dp_push_image(state: &mut WrState,
                                    tile_spacing: WrSize,
                                    image_rendering: WrImageRendering,
                                    key: WrImageKey) {
-    assert!(unsafe { !is_in_render_thread() });
+    assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
     state.frame_builder
          .dl_builder
@@ -1388,7 +1457,7 @@ pub extern "C" fn wr_dp_push_yuv_planar_image(state: &mut WrState,
                                               image_key_2: WrImageKey,
                                               color_space: WrYuvColorSpace,
                                               image_rendering: WrImageRendering) {
-    assert!(unsafe { is_in_main_thread() });
+    assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
     state.frame_builder
          .dl_builder
@@ -1408,7 +1477,7 @@ pub extern "C" fn wr_dp_push_yuv_NV12_image(state: &mut WrState,
                                             image_key_1: WrImageKey,
                                             color_space: WrYuvColorSpace,
                                             image_rendering: WrImageRendering) {
-    assert!(unsafe { is_in_main_thread() });
+    assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
     state.frame_builder
          .dl_builder
@@ -1427,7 +1496,7 @@ pub extern "C" fn wr_dp_push_yuv_interleaved_image(state: &mut WrState,
                                                    image_key_0: WrImageKey,
                                                    color_space: WrYuvColorSpace,
                                                    image_rendering: WrImageRendering) {
-    assert!(unsafe { is_in_main_thread() });
+    assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
     state.frame_builder
          .dl_builder

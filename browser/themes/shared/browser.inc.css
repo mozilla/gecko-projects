@@ -6,11 +6,11 @@
 %ifdef CAN_DRAW_IN_TITLEBAR
 /* Add space for dragging the window */
 %ifdef MENUBAR_CAN_AUTOHIDE
-:root[tabsintitlebar] #toolbar-menubar[autohide=true] ~ #TabsToolbar {
+:root[tabsintitlebar][sizemode=normal] #toolbar-menubar[autohide=true] ~ #TabsToolbar {
   padding-inline-start: 40px;
 }
 %else
-:root[tabsintitlebar] #TabsToolbar {
+:root[tabsintitlebar][sizemode=normal] #TabsToolbar {
   padding-inline-start: 40px;
 }
 %endif
@@ -93,6 +93,7 @@
   list-style-image: url("chrome://browser/skin/page-action.svg");
   margin: 0;
   padding: 0 6px;
+  color: inherit;
   -moz-context-properties: fill;
   fill: currentColor;
 }

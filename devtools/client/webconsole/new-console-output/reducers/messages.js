@@ -35,6 +35,11 @@ const MessageState = Immutable.Record({
   // List of removed messages is used to release related (parameters) actors.
   // This array is not supposed to be consumed by any UI component.
   removedMessages: [],
+  // Map of the form {messageId : numberOfRepeat}
+  repeatById: {},
+  // Map of the form {messageId : networkInformation}
+  // `networkInformation` holds request, response, totalTime, ...
+  networkMessagesUpdateById: {},
 });
 
 function messages(state = new MessageState(), action, filtersState, prefsState) {
@@ -42,8 +47,10 @@ function messages(state = new MessageState(), action, filtersState, prefsState) 
     messagesById,
     messagesUiById,
     messagesTableDataById,
+    networkMessagesUpdateById,
     groupsById,
     currentGroup,
+    repeatById,
     visibleMessages,
   } = state;
 
@@ -65,13 +72,15 @@ function messages(state = new MessageState(), action, filtersState, prefsState) 
 
       if (newMessage.allowRepeating && messagesById.size > 0) {
         let lastMessage = messagesById.last();
-        if (lastMessage.repeatId === newMessage.repeatId) {
+        if (
+          lastMessage.repeatId === newMessage.repeatId
+          && lastMessage.groupId === currentGroup
+        ) {
           return state.set(
-            "messagesById",
-            messagesById.set(
-              lastMessage.id,
-              lastMessage.set("repeat", lastMessage.repeat + 1)
-            )
+            "repeatById",
+            Object.assign({}, repeatById, {
+              [lastMessage.id]: (repeatById[lastMessage.id] || 1) + 1
+            })
           );
         }
       }
@@ -184,11 +193,12 @@ function messages(state = new MessageState(), action, filtersState, prefsState) 
       const {id, data} = action;
       return state.set("messagesTableDataById", messagesTableDataById.set(id, data));
     case constants.NETWORK_MESSAGE_UPDATE:
-      let updateMessage = action.message;
-      return state.set("messagesById", messagesById.set(
-        updateMessage.id,
-        updateMessage
-      ));
+      return state.set(
+        "networkMessagesUpdateById",
+        Object.assign({}, networkMessagesUpdateById, {
+          [action.message.id]: action.message
+        })
+      );
 
     case constants.REMOVED_MESSAGES_CLEAR:
       return state.set("removedMessages", []);
@@ -307,6 +317,13 @@ function limitTopLevelMessageCount(state, record, logLimit) {
   const isInRemovedId = id => removedMessagesId.includes(id);
   const mapHasRemovedIdKey = map => map.findKey((value, id) => isInRemovedId(id));
   const cleanUpCollection = map => removedMessagesId.forEach(id => map.remove(id));
+  const cleanUpObject = object => [...Object.entries(object)]
+    .reduce((res, [id, value]) => {
+      if (!isInRemovedId(id)) {
+        res[id] = value;
+      }
+      return res;
+    }, {});
 
   record.set("messagesById", record.messagesById.withMutations(cleanUpCollection));
 
@@ -319,6 +336,15 @@ function limitTopLevelMessageCount(state, record, logLimit) {
   }
   if (mapHasRemovedIdKey(record.groupsById)) {
     record.set("groupsById", record.groupsById.withMutations(cleanUpCollection));
+  }
+
+  if (Object.keys(record.repeatById).includes(removedMessagesId)) {
+    record.set("repeatById", cleanUpObject(record.repeatById));
+  }
+
+  if (Object.keys(record.networkMessagesUpdateById).includes(removedMessagesId)) {
+    record.set("networkMessagesUpdateById",
+      cleanUpObject(record.networkMessagesUpdateById));
   }
 
   return record;
@@ -395,7 +421,7 @@ function matchCssFilters(message, filters) {
 }
 
 function matchSearchFilters(message, filters) {
-  let text = filters.text || "";
+  let text = (filters.text || "").trim();
   return (
     text === ""
     // Look for a match in parameters.

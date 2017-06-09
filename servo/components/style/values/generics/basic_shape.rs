@@ -19,7 +19,7 @@ pub type ClippingShape<BasicShape> = ShapeSource<BasicShape, GeometryBox>;
 /// https://drafts.fxtf.org/css-masking-1/#typedef-geometry-box
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, ToCss)]
 pub enum GeometryBox {
     FillBox,
     StrokeBox,
@@ -53,7 +53,7 @@ pub enum ShapeSource<BasicShape, ReferenceBox> {
 
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, PartialEq, ToComputedValue)]
+#[derive(Clone, Debug, PartialEq, ToComputedValue, ToCss)]
 pub enum BasicShape<H, V, LengthOrPercentage> {
     Inset(InsetRect<LengthOrPercentage>),
     Circle(Circle<H, V, LengthOrPercentage>),
@@ -138,34 +138,6 @@ impl<B: ToCss, T: ToCss> ToCss for ShapeSource<B, T> {
             ShapeSource::Shape(ref shape, None) => shape.to_css(dest),
             ShapeSource::Box(ref val) => val.to_css(dest),
             ShapeSource::None => dest.write_str("none"),
-        }
-    }
-}
-
-impl ToCss for GeometryBox {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            GeometryBox::FillBox => dest.write_str("fill-box"),
-            GeometryBox::StrokeBox => dest.write_str("stroke-box"),
-            GeometryBox::ViewBox => dest.write_str("view-box"),
-            GeometryBox::ShapeBox(s) => s.to_css(dest),
-        }
-    }
-}
-
-impl<H, V, L> ToCss for BasicShape<H, V, L>
-    where H: ToCss,
-          V: ToCss,
-          L: PartialEq + ToCss,
-          Circle<H, V, L>: ToCss,
-          Ellipse<H, V, L>: ToCss,
-{
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            BasicShape::Inset(ref rect) => rect.to_css(dest),
-            BasicShape::Circle(ref circle) => circle.to_css(dest),
-            BasicShape::Ellipse(ref ellipse) => ellipse.to_css(dest),
-            BasicShape::Polygon(ref polygon) => polygon.to_css(dest),
         }
     }
 }

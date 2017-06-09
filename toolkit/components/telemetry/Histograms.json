@@ -5803,6 +5803,17 @@
     "releaseChannelCollection": "opt-out",
     "description": "Update: the update wizard page displayed when the UI was closed (mapped in toolkit/mozapps/update/UpdateTelemetry.jsm)"
   },
+  "UPTAKE_REMOTE_CONTENT_RESULT_1": {
+    "record_in_processes": ["all"],
+    "expires_in_version": "never",
+    "kind": "categorical",
+    "keyed": true,
+    "labels": ["up_to_date", "success", "backoff", "pref_disabled", "parse_error", "content_error", "sign_error", "sign_retry_error", "conflict_error", "sync_error", "apply_error", "server_error", "certificate_error", "download_error", "timeout_error", "network_error", "offline_error", "cleanup_error", "unknown_error", "custom_1_error", "custom_2_error", "custom_3_error", "custom_4_error", "custom_5_error"],
+    "releaseChannelCollection": "opt-out",
+    "alert_emails": ["storage-team@mozilla.com"],
+    "bug_numbers": [1254099],
+    "description": "Generic histogram to track uptake of remote content like blocklists, settings or updates."
+  },
   "UPDATE_NOTIFICATION_SHOWN": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["application-update-telemetry-alerts@mozilla.com"],
@@ -6599,11 +6610,13 @@
     "description": "Count of messages sent by SessionRestore from child frames to the parent and that cannot be transmitted as they eat up too much memory."
   },
   "FX_SESSION_RESTORE_DOM_STORAGE_SIZE_ESTIMATE_CHARS": {
+    "alert_emails": ["session-restore-telemetry-alerts@mozilla.com"],
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "default",
+    "expires_in_version": "61",
     "kind": "exponential",
     "high": 30000000,
     "n_buckets": 20,
+    "bug_numbers": [1362058],
     "description": "Session restore: Number of characters in DOM Storage for a tab. Pages without DOM Storage or with an empty DOM Storage are ignored."
   },
   "FX_SESSION_RESTORE_AUTO_RESTORE_DURATION_UNTIL_EAGER_TABS_RESTORED_MS": {
@@ -7167,6 +7180,26 @@
     "n_buckets": 20,
     "bug_numbers": [1033860],
     "description": "Time (ms) it takes for loading archived pings from disk"
+  },
+  "TELEMETRY_SUCCESSFUL_SEND_PINGS_SIZE_KB": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "61",
+    "kind": "exponential",
+    "low": 10,
+    "high": 1024,
+    "n_buckets": 20,
+    "description": "The size (KB) of the Telemetry successfully sent pings"
+  },
+  "TELEMETRY_FAILED_SEND_PINGS_SIZE_KB": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "61",
+    "kind": "exponential",
+    "low": 10,
+    "high": 1024,
+    "n_buckets": 20,
+    "description": "The size (KB) of the Telemetry unsuccessfully sent pings"
   },
   "TELEMETRY_PING_SIZE_EXCEEDED_SEND": {
     "record_in_processes": ["main", "content"],
@@ -8398,6 +8431,16 @@
     "n_values": 32,
     "description": "Maximum number of owners for each MediaCache block. Recorded at every MediaCache destruction, i.e., whenever there is no more media data to be downloaded or kept for playback."
   },
+  "MEDIACACHESTREAM_LENGTH_KB": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["gsquelart@mozilla.com"],
+    "bug_numbers": [1369538],
+    "expires_in_version": "60",
+    "kind": "linear",
+    "high": 520000,
+    "n_buckets": 66,
+    "description": "MediaCacheStream stream length size in KB; Either known size from the HTTP header if available, or otherwise the size actually downloaded. Recorded at every MediaCacheStream destruction."
+  },
   "VIDEO_MFT_OUTPUT_NULL_SAMPLES": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["cpearce@mozilla.com"],
@@ -9411,24 +9454,6 @@
     "description": "Number of times the DevTools WebIDE has been opened.",
     "releaseChannelCollection": "opt-out"
   },
-  "DEVTOOLS_WEBIDE_PROJECT_EDITOR_OPENED_COUNT": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org"],
-    "expires_in_version": "never",
-    "kind": "count",
-    "bug_numbers": [1247985],
-    "description": "Number of times the DevTools WebIDE project editor has been opened.",
-    "releaseChannelCollection": "opt-out"
-  },
-  "DEVTOOLS_WEBIDE_PROJECT_EDITOR_SAVE_COUNT": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org"],
-    "expires_in_version": "never",
-    "kind": "count",
-    "bug_numbers": [1247985],
-    "description": "Number of times a file has been saved in the DevTools WebIDE project editor.",
-    "releaseChannelCollection": "opt-out"
-  },
   "DEVTOOLS_WEBIDE_NEW_PROJECT_COUNT": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["dev-developer-tools@lists.mozilla.org"],
@@ -9702,14 +9727,6 @@
     "high": 10000000,
     "n_buckets": 100,
     "description": "How long has WebIDE been active (seconds)"
-  },
-  "DEVTOOLS_WEBIDE_PROJECT_EDITOR_TIME_ACTIVE_SECONDS": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000000,
-    "n_buckets": 100,
-    "description": "How long has WebIDE's project editor been active (seconds)"
   },
   "DEVTOOLS_CUSTOM_TIME_ACTIVE_SECONDS": {
     "record_in_processes": ["main", "content"],
@@ -10056,15 +10073,6 @@
     "kind": "boolean",
     "releaseChannelCollection": "opt-out",
     "description": "True if the browser was unable to set Firefox as the default browser"
-  },
-  "BROWSER_SET_DEFAULT_TIME_TO_COMPLETION_SECONDS": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 500,
-    "n_buckets": 15,
-    "releaseChannelCollection": "opt-out",
-    "description": "Time to successfully set Firefox as the default browser after clicking 'Set Firefox as Default'. Should be near-instant in some environments, others require user interaction. Measured in seconds."
   },
   "BROWSER_IS_ASSIST_DEFAULT": {
     "record_in_processes": ["main", "content"],
@@ -12396,14 +12404,6 @@
     "keyed": true,
     "description": "Each key is the message name, with digits removed, from an async message manager message that was rejected for being over approximately 128MB, recorded in the sending process at the time of sending."
   },
-  "SANDBOX_BROKER_INITIALIZED": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["bowen@mozilla.com"],
-    "bug_numbers": [1256992],
-    "expires_in_version": "55",
-    "kind": "boolean",
-    "description": "Result of call to SandboxBroker::Initialize"
-  },
   "SANDBOX_HAS_SECCOMP_BPF": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["gcp@mozilla.com"],
@@ -13289,6 +13289,17 @@
     "keyed": true,
     "description": "Measures the number of milliseconds we spend processing sync IPC messages in the receiving process, keyed by message name. Note: only messages that take over 500 microseconds are included in this probe."
   },
+  "IDLE_RUNNABLE_BUDGET_OVERUSE_MS": {
+    "record_in_processes": ["main", "content", "gpu"],
+    "alert_emails": ["farre@mozilla.com"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "keyed": true,
+    "high": 10000,
+    "n_buckets": 10,
+    "bug_numbers": [1292600],
+    "description": "The time a given runnable exceeds its budget as set in nsIRunnable::SetDeadline (in milliseconds). The key comes from the runnables nsINamed::name value."
+  },
   "WEBEXT_BACKGROUND_PAGE_LOAD_MS": {
     "record_in_processes": ["main"],
     "alert_emails": ["addons-dev-internal@mozilla.com"],
@@ -13310,5 +13321,17 @@
     "high": 50000,
     "n_buckets": 100,
     "description": "The amount of time it takes for a WebExtension to start up, from when the startup function is called to when the startup promise resolves."
+  },
+  "NOTIFY_OBSERVERS_LATENCY_MS": {
+    "record_in_processes": ["main", "content", "gpu"],
+    "alert_emails": ["michael@thelayzells.com"],
+    "bug_numbers": [1368524],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "low": 3,
+    "high": 512,
+    "n_buckets": 20,
+    "keyed": true,
+    "description": "Measures the number of milliseconds we spend synchronously notifying observers, keyed by topic. Note: only NotifyObservers calls which take over 500 microseconds are included in this probe."
   }
 }

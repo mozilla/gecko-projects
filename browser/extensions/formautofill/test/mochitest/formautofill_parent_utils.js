@@ -1,5 +1,6 @@
 // assert is available to chrome scripts loaded via SpecialPowers.loadChromeScript.
 /* global assert */
+/* eslint-env mozilla/frame-script */
 
 "use strict";
 
@@ -43,7 +44,6 @@ var ParentUtils = {
   },
 };
 
-ParentUtils.cleanUpAddress();
 Services.obs.addObserver(ParentUtils, "formautofill-storage-changed");
 
 addMessageListener("FormAutofillTest:AddAddress", (msg) => {

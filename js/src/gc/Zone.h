@@ -336,7 +336,7 @@ struct Zone : public JS::shadow::Zone,
     // This zone's gray roots.
     typedef js::Vector<js::gc::Cell*, 0, js::SystemAllocPolicy> GrayRootVector;
   private:
-    js::ZoneGroupData<GrayRootVector> gcGrayRoots_;
+    js::ZoneGroupOrGCTaskData<GrayRootVector> gcGrayRoots_;
   public:
     GrayRootVector& gcGrayRoots() { return gcGrayRoots_.ref(); }
 
@@ -404,7 +404,12 @@ struct Zone : public JS::shadow::Zone,
     bool addTypeDescrObject(JSContext* cx, HandleObject obj);
 
     bool triggerGCForTooMuchMalloc() {
-        return runtimeFromAnyThread()->gc.triggerZoneGC(this, JS::gcreason::TOO_MUCH_MALLOC);
+        JSRuntime* rt = runtimeFromAnyThread();
+
+        if (CurrentThreadCanAccessRuntime(rt))
+            return rt->gc.triggerZoneGC(this, JS::gcreason::TOO_MUCH_MALLOC);
+        else
+            return false;
     }
 
     void resetGCMallocBytes() { gcMallocCounter.reset(); }

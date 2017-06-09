@@ -36,10 +36,12 @@ XPCOMUtils.defineLazyModuleGetter(this, "ChromeManifestParser",
                                   "resource://gre/modules/ChromeManifestParser.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ExtensionData",
                                   "resource://gre/modules/Extension.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Locale",
+                                  "resource://gre/modules/Locale.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
                                   "resource://gre/modules/FileUtils.jsm");
 XPCOMUtils.defineLazyGetter(this, "IconDetails", () => {
-  return Cu.import("resource://gre/modules/ExtensionUtils.jsm", {}).ExtensionUtils.IconDetails;
+  return Cu.import("resource://gre/modules/ExtensionParent.jsm", {}).ExtensionParent.IconDetails;
 });
 XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
                                   "resource://gre/modules/LightweightThemeManager.jsm");
@@ -155,14 +157,12 @@ const TYPES = {
   locale: 8,
   dictionary: 64,
   experiment: 128,
+  apiextension: 256,
 };
-
-if (!AppConstants.RELEASE_OR_BETA)
-   TYPES.apiextension = 256;
 
 const COMPATIBLE_BY_DEFAULT_TYPES = {
   extension: true,
-  dictionary: true
+  dictionary: true,
 };
 
 const RESTARTLESS_TYPES = new Set([

@@ -35,12 +35,12 @@ ${helpers.predefined_type(
     "fill", "SVGPaint",
     "::values::computed::SVGPaint::black()",
     products="gecko",
-    animation_value_type="none",
+    animation_value_type="IntermediateSVGPaint",
     boxed=True,
     spec="https://www.w3.org/TR/SVG2/painting.html#SpecifyingFillPaint")}
 
 ${helpers.predefined_type("fill-opacity", "Opacity", "1.0",
-                          products="gecko", animation_value_type="none",
+                          products="gecko", animation_value_type="ComputedValue",
                           spec="https://www.w3.org/TR/SVG11/painting.html#FillOpacityProperty")}
 
 ${helpers.single_keyword("fill-rule", "nonzero evenodd",
@@ -59,7 +59,7 @@ ${helpers.predefined_type(
     "stroke", "SVGPaint",
     "Default::default()",
     products="gecko",
-    animation_value_type="none",
+    animation_value_type="IntermediateSVGPaint",
     boxed=True,
     spec="https://www.w3.org/TR/SVG2/painting.html#SpecifyingStrokePaint")}
 

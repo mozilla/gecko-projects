@@ -644,6 +644,7 @@ nsThread::nsThread(MainThreadFlag aMainThread, uint32_t aStackSize)
   , mIsMainThread(aMainThread)
   , mLastUnlabeledRunnable(TimeStamp::Now())
   , mCanInvokeJS(false)
+  , mHasPendingEventsPromisedIdleEvent(false)
 {
 }
 
@@ -1037,6 +1038,43 @@ nsThread::Shutdown()
   return NS_OK;
 }
 
+TimeStamp
+nsThread::GetIdleDeadline()
+{
+  TimeStamp idleDeadline;
+  {
+    // Releasing the lock temporarily since getting the idle period
+    // might need to lock the timer thread. Unlocking here might make
+    // us receive an event on the main queue, but we've committed to
+    // run an idle event anyhow.
+    MutexAutoUnlock unlock(mLock);
+    mIdlePeriod->GetIdlePeriodHint(&idleDeadline);
+  }
+
+  // If HasPendingEvents() has been called and it has returned true because of
+  // pending idle events, there is a risk that we may decide here that we aren't
+  // idle and return null, in which case HasPendingEvents() has effectively
+  // lied.  Since we can't go back and fix the past, we have to adjust what we
+  // do here and forcefully pick the idle queue task here.  Note that this means
+  // that we are choosing to run a task from the idle queue when we would
+  // normally decide that we aren't in an idle period, but this can only happen
+  // if we fall out of the idle period in between the call to HasPendingEvents()
+  // and here, which should hopefully be quite rare.  We are effectively
+  // choosing to prioritize the sanity of our API semantics over the optimal
+  // scheduling.
+  if (!mHasPendingEventsPromisedIdleEvent &&
+      (!idleDeadline || idleDeadline < TimeStamp::Now())) {
+    return TimeStamp();
+  }
+  if (mHasPendingEventsPromisedIdleEvent && !idleDeadline) {
+    // If HasPendingEvents() has been called and it has returned true, but we're no
+    // longer in the idle period, we must return a valid timestamp to pretend that
+    // we are still in the idle period.
+    return TimeStamp::Now();
+  }
+  return idleDeadline;
+}
+
 NS_IMETHODIMP
 nsThread::HasPendingEvents(bool* aResult)
 {
@@ -1046,7 +1084,21 @@ nsThread::HasPendingEvents(bool* aResult)
 
   {
     MutexAutoLock lock(mLock);
-    *aResult = mEvents->HasPendingEvent(lock);
+    mHasPendingEventsPromisedIdleEvent = false;
+    bool hasPendingEvent = mEvents->HasPendingEvent(lock);
+    bool hasPendingIdleEvent = false;
+    if (!hasPendingEvent) {
+      // Note that GetIdleDeadline() checks mHasPendingEventsPromisedIdleEvent,
+      // but that's OK since we set it to false in the beginning of this method!
+      TimeStamp idleDeadline = GetIdleDeadline();
+
+      // Only examine the idle queue if we are in an idle period.
+      if (idleDeadline) {
+        hasPendingIdleEvent = mIdleEvents.HasPendingEvent(lock);
+        mHasPendingEventsPromisedIdleEvent = hasPendingIdleEvent;
+      }
+    }
+    *aResult = hasPendingEvent || hasPendingIdleEvent;
   }
   return NS_OK;
 }
@@ -1154,21 +1206,13 @@ nsThread::GetIdleEvent(nsIRunnable** aEvent, MutexAutoLock& aProofOfLock)
   MOZ_ASSERT(aEvent);
 
   if (!mIdleEvents.HasPendingEvent(aProofOfLock)) {
+    MOZ_ASSERT(!mHasPendingEventsPromisedIdleEvent);
     aEvent = nullptr;
     return;
   }
 
-  TimeStamp idleDeadline;
-  {
-    // Releasing the lock temporarily since getting the idle period
-    // might need to lock the timer thread. Unlocking here might make
-    // us receive an event on the main queue, but we've committed to
-    // run an idle event anyhow.
-    MutexAutoUnlock unlock(mLock);
-    mIdlePeriod->GetIdlePeriodHint(&idleDeadline);
-  }
-
-  if (!idleDeadline || idleDeadline < TimeStamp::Now()) {
+  TimeStamp idleDeadline = GetIdleDeadline();
+  if (!idleDeadline) {
     aEvent = nullptr;
     return;
   }
@@ -1180,6 +1224,12 @@ nsThread::GetIdleEvent(nsIRunnable** aEvent, MutexAutoLock& aProofOfLock)
     if (idleEvent) {
       idleEvent->SetDeadline(idleDeadline);
     }
+
+#ifndef RELEASE_OR_BETA
+    // Store the next idle deadline to be able to determine budget use
+    // in ProcessNextEvent.
+    mNextIdleDeadline = idleDeadline;
+#endif
   }
 }
 
@@ -1190,6 +1240,16 @@ nsThread::GetEvent(bool aWait, nsIRunnable** aEvent,
 {
   MOZ_ASSERT(PR_GetCurrentThread() == mThread);
   MOZ_ASSERT(aEvent);
+
+  MakeScopeExit([&] {
+    mHasPendingEventsPromisedIdleEvent = false;
+  });
+
+#ifndef RELEASE_OR_BETA
+  // Clear mNextIdleDeadline so that it is possible to determine that
+  // we're running an idle runnable in ProcessNextEvent.
+  mNextIdleDeadline = TimeStamp();
+#endif
 
   // We'll try to get an event to execute in three stages.
   // [1] First we just try to get it from the regular queue without waiting.
@@ -1219,6 +1279,27 @@ nsThread::GetEvent(bool aWait, nsIRunnable** aEvent,
     mEvents->GetEvent(aWait, aEvent, aPriority, aProofOfLock);
   }
 }
+
+#ifndef RELEASE_OR_BETA
+static bool
+GetLabeledRunnableName(nsIRunnable* aEvent, nsACString& aName)
+{
+  bool labeled = false;
+  if (RefPtr<SchedulerGroup::Runnable> groupRunnable = do_QueryObject(aEvent)) {
+    labeled = true;
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(groupRunnable->GetName(aName)));
+  } else if (nsCOMPtr<nsINamed> named = do_QueryInterface(aEvent)) {
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(named->GetName(aName)));
+  } else {
+    aName.AssignLiteral("non-nsINamed runnable");
+  }
+  if (aName.IsEmpty()) {
+    aName.AssignLiteral("anonymous runnable");
+  }
+
+  return labeled;
+}
+#endif
 
 NS_IMETHODIMP
 nsThread::ProcessNextEvent(bool aMayWait, bool* aResult)
@@ -1285,39 +1366,43 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult)
 
     if (event) {
       LOG(("THRD(%p) running [%p]\n", this, event.get()));
-#ifndef RELEASE_OR_BETA
-      Maybe<Telemetry::AutoTimer<Telemetry::MAIN_THREAD_RUNNABLE_MS>> timer;
-#endif
+
       if (MAIN_THREAD == mIsMainThread) {
         HangMonitor::NotifyActivity();
+      }
 
 #ifndef RELEASE_OR_BETA
+      Maybe<Telemetry::AutoTimer<Telemetry::MAIN_THREAD_RUNNABLE_MS>> timer;
+      Maybe<Telemetry::AutoTimer<Telemetry::IDLE_RUNNABLE_BUDGET_OVERUSE_MS>> idleTimer;
+
+      if ((MAIN_THREAD == mIsMainThread) || mNextIdleDeadline) {
         nsCString name;
-        bool labeled = false;
-        if (RefPtr<SchedulerGroup::Runnable> groupRunnable = do_QueryObject(event)) {
-          labeled = true;
-          MOZ_ALWAYS_TRUE(NS_SUCCEEDED(groupRunnable->GetName(name)));
-        } else if (nsCOMPtr<nsINamed> named = do_QueryInterface(event)) {
-          MOZ_ALWAYS_TRUE(NS_SUCCEEDED(named->GetName(name)));
-        } else {
-          name.AssignLiteral("non-nsINamed runnable");
-        }
-        if (name.IsEmpty()) {
-          name.AssignLiteral("anonymous runnable");
+        bool labeled = GetLabeledRunnableName(event, name);
+
+        if (MAIN_THREAD == mIsMainThread) {
+          timer.emplace(name);
+
+          // High-priority runnables are ignored here since they'll run right away
+          // even with the cooperative scheduler.
+          if (!labeled && priority == nsIRunnablePriority::PRIORITY_NORMAL) {
+            TimeStamp now = TimeStamp::Now();
+            double diff = (now - mLastUnlabeledRunnable).ToMilliseconds();
+            Telemetry::Accumulate(Telemetry::TIME_BETWEEN_UNLABELED_RUNNABLES_MS, diff);
+            mLastUnlabeledRunnable = now;
+          }
         }
 
-        // High-priority runnables are ignored here since they'll run right away
-        // even with the cooperative scheduler.
-        if (!labeled && priority == nsIRunnablePriority::PRIORITY_NORMAL) {
-          TimeStamp now = TimeStamp::Now();
-          double diff = (now - mLastUnlabeledRunnable).ToMilliseconds();
-          Telemetry::Accumulate(Telemetry::TIME_BETWEEN_UNLABELED_RUNNABLES_MS, diff);
-          mLastUnlabeledRunnable = now;
+        if (mNextIdleDeadline) {
+          // If we construct the AutoTimer with the deadline, then we'll
+          // compute TimeStamp::Now() - mNextIdleDeadline when
+          // accumulating telemetry.  If that is positive we've
+          // overdrawn our idle budget, if it's negative it will go in
+          // the 0 bucket of the histogram.
+          idleTimer.emplace(name, mNextIdleDeadline);
         }
-
-        timer.emplace(name);
-#endif
       }
+#endif
+
       event->Run();
     } else if (aMayWait) {
       MOZ_ASSERT(ShuttingDown(),

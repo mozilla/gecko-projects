@@ -14,7 +14,9 @@ const { connect } = require("devtools/client/shared/vendor/react-redux");
 const {
   getAllMessagesUiById,
   getAllMessagesTableDataById,
+  getAllNetworkMessagesUpdateById,
   getVisibleMessages,
+  getAllRepeatById,
 } = require("devtools/client/webconsole/new-console-output/selectors/messages");
 const MessageContainer = createFactory(require("devtools/client/webconsole/new-console-output/components/message-container").MessageContainer);
 
@@ -32,6 +34,8 @@ const ConsoleOutput = createClass({
     dispatch: PropTypes.func.isRequired,
     timestampsVisible: PropTypes.bool,
     messagesTableData: PropTypes.object.isRequired,
+    messagesRepeat: PropTypes.object.isRequired,
+    networkMessagesUpdate: PropTypes.object.isRequired,
     visibleMessages: PropTypes.array.isRequired,
   },
 
@@ -75,6 +79,8 @@ const ConsoleOutput = createClass({
       visibleMessages,
       messagesUi,
       messagesTableData,
+      messagesRepeat,
+      networkMessagesUpdate,
       serviceContainer,
       timestampsVisible,
     } = this.props;
@@ -90,6 +96,8 @@ const ConsoleOutput = createClass({
           tableData: messagesTableData.get(message.id),
           indent: message.indent,
           timestampsVisible,
+          repeat: messagesRepeat[message.id],
+          networkMessageUpdate: networkMessagesUpdate[message.id],
         })
       );
     });
@@ -123,6 +131,8 @@ function mapStateToProps(state, props) {
     visibleMessages: getVisibleMessages(state),
     messagesUi: getAllMessagesUiById(state),
     messagesTableData: getAllMessagesTableDataById(state),
+    messagesRepeat: getAllRepeatById(state),
+    networkMessagesUpdate: getAllNetworkMessagesUpdateById(state),
     timestampsVisible: state.ui.timestampsVisible,
   };
 }

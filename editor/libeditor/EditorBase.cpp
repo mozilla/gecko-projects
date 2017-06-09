@@ -617,6 +617,17 @@ EditorBase::GetSelectionController(nsISelectionController** aSel)
 {
   NS_ENSURE_TRUE(aSel, NS_ERROR_NULL_POINTER);
   *aSel = nullptr; // init out param
+  nsCOMPtr<nsISelectionController> selCon = GetSelectionController();
+  if (NS_WARN_IF(!selCon)) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+  selCon.forget(aSel);
+  return NS_OK;
+}
+
+already_AddRefed<nsISelectionController>
+EditorBase::GetSelectionController()
+{
   nsCOMPtr<nsISelectionController> selCon;
   if (mSelConWeak) {
     selCon = do_QueryReferent(mSelConWeak);
@@ -624,11 +635,7 @@ EditorBase::GetSelectionController(nsISelectionController** aSel)
     nsCOMPtr<nsIPresShell> presShell = GetPresShell();
     selCon = do_QueryInterface(presShell);
   }
-  if (!selCon) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-  NS_ADDREF(*aSel = selCon);
-  return NS_OK;
+  return selCon.forget();
 }
 
 NS_IMETHODIMP
@@ -651,8 +658,7 @@ EditorBase::GetSelection(SelectionType aSelectionType,
 {
   NS_ENSURE_TRUE(aSelection, NS_ERROR_NULL_POINTER);
   *aSelection = nullptr;
-  nsCOMPtr<nsISelectionController> selcon;
-  GetSelectionController(getter_AddRefs(selcon));
+  nsCOMPtr<nsISelectionController> selcon = GetSelectionController();
   if (!selcon) {
     return NS_ERROR_NOT_INITIALIZED;
   }
@@ -1070,12 +1076,12 @@ EditorBase::BeginningOfDocument()
   nsCOMPtr<nsINode> firstNode = GetFirstEditableNode(rootElement);
   if (!firstNode) {
     // just the root node, set selection to inside the root
-    return selection->CollapseNative(rootElement, 0);
+    return selection->Collapse(rootElement, 0);
   }
 
   if (firstNode->NodeType() == nsIDOMNode::TEXT_NODE) {
     // If firstNode is text, set selection to beginning of the text node.
-    return selection->CollapseNative(firstNode, 0);
+    return selection->Collapse(firstNode, 0);
   }
 
   // Otherwise, it's a leaf node and we set the selection just in front of it.
@@ -1085,7 +1091,7 @@ EditorBase::BeginningOfDocument()
   }
 
   int32_t offsetInParent = parent->IndexOf(firstNode);
-  return selection->CollapseNative(parent, offsetInParent);
+  return selection->Collapse(parent, offsetInParent);
 }
 
 NS_IMETHODIMP
@@ -1108,7 +1114,7 @@ EditorBase::EndOfDocument()
   }
 
   uint32_t length = node->Length();
-  return selection->CollapseNative(node, int32_t(length));
+  return selection->Collapse(node, int32_t(length));
 }
 
 NS_IMETHODIMP

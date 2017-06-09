@@ -51,6 +51,20 @@ enum class WrExternalImageType : uint32_t {
   Sentinel /* this must be last for serialization purposes. */
 };
 
+enum class WrFilterOpType : uint32_t {
+  Blur = 0,
+  Brightness = 1,
+  Contrast = 2,
+  Grayscale = 3,
+  HueRotate = 4,
+  Invert = 5,
+  Opacity = 6,
+  Saturate = 7,
+  Sepia = 8,
+
+  Sentinel /* this must be last for serialization purposes. */
+};
+
 enum class WrGradientExtendMode : uint32_t {
   Clamp = 0,
   Repeat = 1,
@@ -423,6 +437,16 @@ struct WrComplexClipRegion {
   }
 };
 
+struct WrFilterOp {
+  WrFilterOpType filter_type;
+  float argument;
+
+  bool operator==(const WrFilterOp& aOther) const {
+    return filter_type == aOther.filter_type &&
+           argument == aOther.argument;
+  }
+};
+
 struct WrGlyphInstance {
   uint32_t index;
   WrPoint point;
@@ -631,6 +655,10 @@ void wr_dp_pop_clip(WrState *aState)
 WR_FUNC;
 
 WR_INLINE
+void wr_dp_pop_clip_and_scroll_info(WrState *aState)
+WR_FUNC;
+
+WR_INLINE
 void wr_dp_pop_scroll_layer(WrState *aState)
 WR_FUNC;
 
@@ -708,9 +736,15 @@ void wr_dp_push_built_display_list(WrState *aState,
 WR_FUNC;
 
 WR_INLINE
-void wr_dp_push_clip(WrState *aState,
-                     WrRect aClipRect,
-                     const WrImageMask *aMask)
+uint64_t wr_dp_push_clip(WrState *aState,
+                         WrRect aClipRect,
+                         const WrImageMask *aMask)
+WR_FUNC;
+
+WR_INLINE
+void wr_dp_push_clip_and_scroll_info(WrState *aState,
+                                     uint64_t aScrollId,
+                                     const uint64_t *aClipId)
 WR_FUNC;
 
 WR_INLINE
@@ -784,7 +818,9 @@ void wr_dp_push_stacking_context(WrState *aState,
                                  uint64_t aAnimationId,
                                  const float *aOpacity,
                                  const WrMatrix *aTransform,
-                                 WrMixBlendMode aMixBlendMode)
+                                 WrMixBlendMode aMixBlendMode,
+                                 const WrFilterOp *aFilters,
+                                 size_t aFilterCount)
 WR_FUNC;
 
 WR_INLINE

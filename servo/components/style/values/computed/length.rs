@@ -222,6 +222,13 @@ pub enum LengthOrPercentage {
     Calc(CalcLengthOrPercentage),
 }
 
+impl From<Au> for LengthOrPercentage {
+    #[inline]
+    fn from(length: Au) -> Self {
+        LengthOrPercentage::Length(length)
+    }
+}
+
 impl LengthOrPercentage {
     #[inline]
     #[allow(missing_docs)]
@@ -616,9 +623,9 @@ pub type LengthOrNormal = Either<Length, Normal>;
 
 /// A value suitable for a `min-width`, `min-height`, `width` or `height` property.
 /// See specified/values/length.rs for more details.
-#[derive(Debug, Copy, Clone, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Copy, Debug, PartialEq, ToCss)]
 pub enum MozLength {
     LengthOrPercentageOrAuto(LengthOrPercentageOrAuto),
     ExtremumLength(ExtremumLength),
@@ -658,22 +665,11 @@ impl ToComputedValue for specified::MozLength {
     }
 }
 
-impl ToCss for MozLength {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            MozLength::LengthOrPercentageOrAuto(lopoa) =>
-                lopoa.to_css(dest),
-            MozLength::ExtremumLength(ext) =>
-                ext.to_css(dest),
-        }
-    }
-}
-
 /// A value suitable for a `max-width` or `max-height` property.
 /// See specified/values/length.rs for more details.
-#[derive(Debug, Copy, Clone, PartialEq)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Copy, Debug, PartialEq, ToCss)]
 pub enum MaxLength {
     LengthOrPercentageOrNone(LengthOrPercentageOrNone),
     ExtremumLength(ExtremumLength),
@@ -708,17 +704,6 @@ impl ToComputedValue for specified::MaxLength {
                     specified::LengthOrPercentageOrNone::from_computed_value(&lopon)),
             MaxLength::ExtremumLength(ref ext) =>
                 specified::MaxLength::ExtremumLength(ext.clone()),
-        }
-    }
-}
-
-impl ToCss for MaxLength {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            MaxLength::LengthOrPercentageOrNone(lopon) =>
-                lopon.to_css(dest),
-            MaxLength::ExtremumLength(ext) =>
-                ext.to_css(dest),
         }
     }
 }

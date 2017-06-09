@@ -24,6 +24,8 @@ public:
 
   virtual void ClearCachedResources() override;
 
+  virtual bool SupportsAsyncUpdate() override;
+
 protected:
   virtual ~WebRenderImageLayer();
 
@@ -41,7 +43,7 @@ protected:
   wr::MaybeExternalImageId mExternalImageId;
   Maybe<wr::ImageKey> mKey;
   RefPtr<ImageClient> mImageClient;
-  CompositableType mImageClientTypeContainer;
+  CompositableType mImageClientContainerType;
   Maybe<wr::PipelineId> mPipelineId;
 };
 

@@ -170,7 +170,7 @@ ArraySetLength(JSContext* cx, Handle<ArrayObject*> obj, HandleId id,
  * to the next element and moving the ObjectElements header in memory (so it's
  * stored where the shifted Value used to be).
  *
- * Shifted elements can be unshifted when we grow the array, when the array is
+ * Shifted elements can be moved when we grow the array, when the array is
  * frozen (for simplicity, shifted elements are not supported on objects that
  * are frozen, have copy-on-write elements, or on arrays with non-writable
  * length).
@@ -205,7 +205,7 @@ class ObjectElements
     };
 
     // The flags word stores both the flags and the number of shifted elements.
-    // Allow shifting 2047 elements before unshifting.
+    // Allow shifting 2047 elements before actually moving the elements.
     static const size_t NumShiftedElementsBits = 11;
     static const size_t MaxShiftedElements = (1 << NumShiftedElementsBits) - 1;
     static const size_t NumShiftedElementsShift = 32 - NumShiftedElementsBits;
@@ -283,6 +283,16 @@ class ObjectElements
         capacity -= count;
         initializedLength -= count;
     }
+    void unshiftShiftedElements(uint32_t count) {
+        MOZ_ASSERT(count > 0);
+        MOZ_ASSERT(!(flags & (NONWRITABLE_ARRAY_LENGTH | FROZEN | COPY_ON_WRITE)));
+        uint32_t numShifted = numShiftedElements();
+        MOZ_ASSERT(count <= numShifted);
+        numShifted -= count;
+        flags = (numShifted << NumShiftedElementsShift) | (flags & FlagsMask);
+        capacity += count;
+        initializedLength += count;
+    }
     void clearShiftedElements() {
         flags &= FlagsMask;
         MOZ_ASSERT(numShiftedElements() == 0);
@@ -344,11 +354,6 @@ class ObjectElements
         MOZ_ASSERT(!isFrozen());
         MOZ_ASSERT(!isCopyOnWrite());
         flags |= FROZEN;
-    }
-    void markNotFrozen() {
-        MOZ_ASSERT(isFrozen());
-        MOZ_ASSERT(!isCopyOnWrite());
-        flags &= ~FROZEN;
     }
 
     uint8_t elementAttributes() const {
@@ -955,6 +960,8 @@ class NativeObject : public ShapedObject
             getSlotAddressUnchecked(i)->HeapSlot::~HeapSlot();
     }
 
+    inline void shiftDenseElementsUnchecked(uint32_t count);
+
   public:
     static bool rollbackProperties(JSContext* cx, HandleNativeObject obj,
                                    uint32_t slotSpan);
@@ -1074,11 +1081,15 @@ class NativeObject : public ShapedObject
     // Try to shift |count| dense elements, see the "Shifted elements" comment.
     inline bool tryShiftDenseElements(uint32_t count);
 
-    // Unshift all shifted elements so that numShiftedElements is 0.
-    void unshiftElements();
+    // Try to make space for |count| dense elements at the start of the array.
+    bool tryUnshiftDenseElements(uint32_t count);
 
-    // If this object has many shifted elements, unshift them.
-    void maybeUnshiftElements();
+    // Move the elements header and all shifted elements to the start of the
+    // allocated elements space, so that numShiftedElements is 0 afterwards.
+    void moveShiftedElements();
+
+    // If this object has many shifted elements call moveShiftedElements.
+    void maybeMoveShiftedElements();
 
     static bool goodElementsAllocationAmount(JSContext* cx, uint32_t reqAllocated,
                                              uint32_t length, uint32_t* goodAmount);

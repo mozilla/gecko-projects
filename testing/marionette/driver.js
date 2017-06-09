@@ -35,7 +35,6 @@ Cu.import("chrome://marionette/content/logging.js");
 Cu.import("chrome://marionette/content/modal.js");
 Cu.import("chrome://marionette/content/proxy.js");
 Cu.import("chrome://marionette/content/session.js");
-Cu.import("chrome://marionette/content/simpletest.js");
 Cu.import("chrome://marionette/content/wait.js");
 
 this.EXPORTED_SYMBOLS = ["GeckoDriver", "Context"];
@@ -872,11 +871,13 @@ GeckoDriver.prototype.execute_ = function (script, args, timeout, opts = {}) {
     case Context.CONTENT:
       // evaluate in content with lasting side-effects
       if (!opts.sandboxName) {
-        return this.listener.execute(script, args, timeout, opts);
+        return this.listener.execute(script, args, timeout, opts)
+            .then(evaluate.toJSON);
 
       // evaluate in content with sandbox
       } else {
-        return this.listener.executeInSandbox(script, args, timeout, opts);
+        return this.listener.executeInSandbox(script, args, timeout, opts)
+            .then(evaluate.toJSON);
       }
 
     case Context.CHROME:
@@ -888,51 +889,8 @@ GeckoDriver.prototype.execute_ = function (script, args, timeout, opts = {}) {
 
       opts.timeout = timeout;
       let wargs = evaluate.fromJSON(args, this.curBrowser.seenEls, sb.window);
-      let evaluatePromise = evaluate.sandbox(sb, script, wargs, opts);
-      return evaluatePromise.then(res => evaluate.toJSON(res, this.curBrowser.seenEls));
-  }
-};
-
-/**
- * Execute pure JavaScript.  Used to execute simpletest harness tests,
- * which are like mochitests only injected using Marionette.
- *
- * Scripts are expected to call the {@code finish} global when done.
- */
-GeckoDriver.prototype.executeJSScript = function* (cmd, resp) {
-  let win = assert.window(this.getCurrentWindow());
-
-  let {script, args, scriptTimeout} = cmd.parameters;
-  scriptTimeout = scriptTimeout || this.timeouts.script;
-
-  let opts = {
-    filename: cmd.parameters.filename,
-    line: cmd.parameters.line,
-    async: cmd.parameters.async,
-  };
-
-  switch (this.context) {
-    case Context.CHROME:
-      let wargs = evaluate.fromJSON(args, this.curBrowser.seenEls, win);
-      let harness = new simpletest.Harness(
-          win,
-          Context.CHROME,
-          this.marionetteLog,
-          scriptTimeout,
-          function() {},
-          this.testName);
-
-      let sb = sandbox.createSimpleTest(win, harness);
-      // TODO(ato): Not sure this is needed:
-      sb = sandbox.augment(sb, new logging.Adapter(this.marionetteLog));
-
-      let res = yield evaluate.sandbox(sb, script, wargs, opts);
-      resp.body.value = evaluate.toJSON(res, this.curBrowser.seenEls);
-      break;
-
-    case Context.CONTENT:
-      resp.body.value = yield this.listener.executeSimpleTest(script, args, scriptTimeout, opts);
-      break;
+      return evaluate.sandbox(sb, script, wargs, opts)
+          .then(res => evaluate.toJSON(res, this.curBrowser.seenEls));
   }
 };
 
@@ -2390,15 +2348,6 @@ GeckoDriver.prototype.sendKeysToElement = function* (cmd, resp) {
       yield this.listener.sendKeysToElement(id, text);
       break;
   }
-};
-
-/** Sets the test name.  The test name is used for logging purposes. */
-GeckoDriver.prototype.setTestName = function*(cmd, resp) {
-  assert.window(this.getCurrentWindow());
-
-  let val = cmd.parameters.value;
-  this.testName = val;
-  yield this.listener.setTestName({value: val});
 };
 
 /**

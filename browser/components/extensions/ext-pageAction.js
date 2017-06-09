@@ -2,14 +2,23 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
+// The ext-* files are imported into the same scopes.
+/* import-globals-from ext-browserAction.js */
+/* import-globals-from ext-utils.js */
+
 XPCOMUtils.defineLazyModuleGetter(this, "PanelPopup",
                                   "resource:///modules/ExtensionPopups.jsm");
 
 
 var {
   DefaultWeakMap,
-  IconDetails,
 } = ExtensionUtils;
+
+Cu.import("resource://gre/modules/ExtensionParent.jsm");
+
+var {
+  IconDetails,
+} = ExtensionParent;
 
 // WeakMap[Extension -> PageAction]
 let pageActionMap = new WeakMap();

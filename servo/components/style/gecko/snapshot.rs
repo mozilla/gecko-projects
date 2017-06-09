@@ -55,6 +55,13 @@ impl GeckoElementSnapshot {
         self
     }
 
+    /// Returns true if the snapshot has stored state for pseudo-classes
+    /// that depend on things other than `ElementState`.
+    #[inline]
+    pub fn has_other_pseudo_class_state(&self) -> bool {
+        self.has_any(Flags::OtherPseudoClassState)
+    }
+
     /// selectors::Element::attr_matches
     pub fn attr_matches(&self,
                         ns: &NamespaceConstraint<&Namespace>,
@@ -87,30 +94,35 @@ impl GeckoElementSnapshot {
                             ns.atom_or_null(),
                             local_name.as_ptr(),
                             expected_value.as_ptr(),
+                            ignore_case,
                         ),
                         AttrSelectorOperator::DashMatch => bindings::Gecko_SnapshotAttrDashEquals(
                             self,
                             ns.atom_or_null(),
                             local_name.as_ptr(),
                             expected_value.as_ptr(),
+                            ignore_case,
                         ),
                         AttrSelectorOperator::Prefix => bindings::Gecko_SnapshotAttrHasPrefix(
                             self,
                             ns.atom_or_null(),
                             local_name.as_ptr(),
                             expected_value.as_ptr(),
+                            ignore_case,
                         ),
                         AttrSelectorOperator::Suffix => bindings::Gecko_SnapshotAttrHasSuffix(
                             self,
                             ns.atom_or_null(),
                             local_name.as_ptr(),
                             expected_value.as_ptr(),
+                            ignore_case,
                         ),
                         AttrSelectorOperator::Substring => bindings::Gecko_SnapshotAttrHasSubstring(
                             self,
                             ns.atom_or_null(),
                             local_name.as_ptr(),
                             expected_value.as_ptr(),
+                            ignore_case,
                         ),
                     }
                 }
@@ -173,5 +185,15 @@ impl ElementSnapshot for GeckoElementSnapshot {
         snapshot_helpers::each_class(self.as_ptr(),
                                      callback,
                                      bindings::Gecko_SnapshotClassOrClassList)
+    }
+
+    #[inline]
+    fn lang_attr(&self) -> Option<Atom> {
+        let ptr = unsafe { bindings::Gecko_SnapshotLangValue(self) };
+        if ptr.is_null() {
+            None
+        } else {
+            Some(unsafe { Atom::from_addrefed(ptr) })
+        }
     }
 }

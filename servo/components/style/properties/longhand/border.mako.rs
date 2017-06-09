@@ -16,8 +16,8 @@
             return "https://drafts.csswg.org/css-backgrounds/#border-%s-%s" % (side[0], kind)
 %>
 % for side in ALL_SIDES:
-    ${helpers.predefined_type("border-%s-color" % side[0], "CSSColor",
-                              "::cssparser::Color::CurrentColor",
+    ${helpers.predefined_type("border-%s-color" % side[0], "Color",
+                              "computed_value::T::currentcolor()",
                               alias=maybe_moz_logical_alias(product, side, "-moz-border-%s-color"),
                               spec=maybe_logical_spec(side, "color"),
                               animation_value_type="IntermediateColor",
@@ -32,7 +32,9 @@
                               spec=maybe_logical_spec(side, "style"),
                               animation_value_type="none", logical=side[1])}
 
-    ${helpers.predefined_type("border-%s-width" % side[0], "BorderWidth", "Au::from_px(3)",
+    ${helpers.predefined_type("border-%s-width" % side[0],
+                              "BorderSideWidth",
+                              "Au::from_px(3)",
                               computed_type="::app_units::Au",
                               alias=maybe_moz_logical_alias(product, side, "-moz-border-%s-width"),
                               spec=maybe_logical_spec(side, "width"),
@@ -64,21 +66,21 @@ ${helpers.gecko_keyword_conversion(Keyword('border-style',
                        ignored_when_colors_disabled="True">
         use std::fmt;
         use style_traits::ToCss;
-        use values::specified::CSSColor;
+        use values::specified::RGBAColor;
         no_viewport_percentage!(SpecifiedValue);
 
         pub mod computed_value {
-            use values::computed::CSSColor;
+            use cssparser::RGBA;
             #[derive(Debug, Clone, PartialEq)]
             #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-            pub struct T(pub Option<Vec<CSSColor>>);
+            pub struct T(pub Option<Vec<RGBA>>);
         }
 
         #[derive(Debug, Clone, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub enum SpecifiedValue {
             None,
-            Colors(Vec<CSSColor>),
+            Colors(Vec<RGBAColor>),
         }
 
         impl ToCss for computed_value::T {
@@ -166,7 +168,7 @@ ${helpers.gecko_keyword_conversion(Keyword('border-style',
             }
 
             let mut result = Vec::new();
-            while let Ok(value) = input.try(|i| CSSColor::parse(context, i)) {
+            while let Ok(value) = input.try(|i| RGBAColor::parse(context, i)) {
                 result.push(value);
             }
 
@@ -220,8 +222,8 @@ ${helpers.predefined_type("border-image-outset", "LengthOrNumberRect",
     pub mod computed_value {
         pub use super::RepeatKeyword;
 
-        #[derive(Debug, Clone, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(Debug, Clone, PartialEq, ToCss)]
         pub struct T(pub RepeatKeyword, pub RepeatKeyword);
     }
 
@@ -236,14 +238,6 @@ ${helpers.predefined_type("border-image-outset", "LengthOrNumberRect",
                              "round" => Round,
                              "space" => Space);
 
-
-    impl ToCss for computed_value::T {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            try!(self.0.to_css(dest));
-            try!(dest.write_str(" "));
-            self.1.to_css(dest)
-        }
-    }
     impl ToCss for SpecifiedValue {
         fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
             try!(self.0.to_css(dest));
@@ -287,8 +281,8 @@ ${helpers.predefined_type("border-image-outset", "LengthOrNumberRect",
 </%helpers:longhand>
 
 ${helpers.predefined_type("border-image-width", "BorderImageWidth",
-    initial_value="computed::BorderImageWidthSide::one().into()",
-    initial_specified_value="specified::BorderImageWidthSide::one().into()",
+    initial_value="computed::BorderImageSideWidth::one().into()",
+    initial_specified_value="specified::BorderImageSideWidth::one().into()",
     spec="https://drafts.csswg.org/css-backgrounds/#border-image-width",
     animation_value_type="none",
     boxed=True)}

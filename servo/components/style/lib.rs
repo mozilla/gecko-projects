@@ -72,8 +72,8 @@ extern crate pdqsort;
 #[cfg(feature = "gecko")] extern crate precomputed_hash;
 extern crate rayon;
 extern crate selectors;
-#[cfg(feature = "servo")] extern crate serde;
 #[cfg(feature = "servo")] #[macro_use] extern crate serde_derive;
+pub extern crate servo_arc;
 #[cfg(feature = "servo")] #[macro_use] extern crate servo_atoms;
 #[cfg(feature = "servo")] extern crate servo_config;
 #[cfg(feature = "servo")] extern crate servo_url;
@@ -101,7 +101,6 @@ pub mod context;
 pub mod counter_style;
 pub mod custom_properties;
 pub mod data;
-pub mod document_condition;
 pub mod dom;
 pub mod element_state;
 #[cfg(feature = "servo")] mod encoding_support;
@@ -111,7 +110,6 @@ pub mod font_metrics;
 #[cfg(feature = "gecko")] #[allow(unsafe_code)] pub mod gecko;
 #[cfg(feature = "gecko")] #[allow(unsafe_code)] pub mod gecko_bindings;
 pub mod invalidation;
-pub mod keyframes;
 #[allow(missing_docs)] // TODO.
 pub mod logical_geometry;
 pub mod matching;
@@ -131,17 +129,18 @@ pub mod sequential;
 pub mod sink;
 pub mod str;
 pub mod style_adjuster;
-pub mod stylearc;
 pub mod stylesheet_set;
 pub mod stylesheets;
-pub mod supports;
 pub mod thread_state;
 pub mod timer;
 pub mod traversal;
 #[macro_use]
 #[allow(non_camel_case_types)]
 pub mod values;
-pub mod viewport;
+
+// Compat shim for the old name when it lived in the style crate.
+// FIXME(bholley) Remove this.
+pub use servo_arc as stylearc;
 
 use std::fmt;
 use style_traits::ToCss;

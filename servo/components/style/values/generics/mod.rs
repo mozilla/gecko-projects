@@ -11,14 +11,18 @@ use parser::{Parse, ParserContext};
 use std::fmt;
 use style_traits::{OneOrMoreCommaSeparated, ToCss};
 use super::CustomIdent;
+use values::specified::url::SpecifiedUrl;
 
 pub mod background;
 pub mod basic_shape;
 pub mod border;
+#[cfg(feature = "gecko")]
+pub mod gecko;
 pub mod grid;
 pub mod image;
 pub mod position;
 pub mod rect;
+pub mod text;
 pub mod transform;
 
 // https://drafts.csswg.org/css-counter-styles/#typedef-symbols-type
@@ -178,22 +182,13 @@ impl<T: Parse> Parse for FontSettingTag<T> {
 
 
 /// A font settings value for font-variation-settings or font-feature-settings
-#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Debug, Eq, PartialEq, ToCss)]
 pub enum FontSettings<T> {
     /// No settings (default)
     Normal,
     /// Set of settings
     Tag(Vec<FontSettingTag<T>>)
-}
-
-impl<T: ToCss> ToCss for FontSettings<T> {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match *self {
-            FontSettings::Normal => dest.write_str("normal"),
-            FontSettings::Tag(ref ftvs) => ftvs.to_css(dest)
-        }
-    }
 }
 
 impl<T: Parse> Parse for FontSettings<T> {
@@ -267,3 +262,121 @@ impl ToCss for FontSettingTagFloat {
         self.0.to_css(dest)
     }
 }
+
+
+/// An SVG paint value
+///
+/// https://www.w3.org/TR/SVG2/painting.html#SpecifyingPaint
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+pub struct SVGPaint<ColorType> {
+    /// The paint source
+    pub kind: SVGPaintKind<ColorType>,
+    /// The fallback color
+    pub fallback: Option<ColorType>,
+}
+
+/// An SVG paint value without the fallback
+///
+/// Whereas the spec only allows PaintServer
+/// to have a fallback, Gecko lets the context
+/// properties have a fallback as well.
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Debug, PartialEq, ToCss)]
+pub enum SVGPaintKind<ColorType> {
+    /// `none`
+    None,
+    /// `<color>`
+    Color(ColorType),
+    /// `url(...)`
+    PaintServer(SpecifiedUrl),
+    /// `context-fill`
+    ContextFill,
+    /// `context-stroke`
+    ContextStroke,
+}
+
+impl<ColorType> SVGPaintKind<ColorType> {
+    /// Convert to a value with a different kind of color
+    pub fn convert<F, OtherColor>(&self, f: F) -> SVGPaintKind<OtherColor>
+        where F: Fn(&ColorType) -> OtherColor {
+            match *self {
+                SVGPaintKind::None => SVGPaintKind::None,
+                SVGPaintKind::ContextStroke => SVGPaintKind::ContextStroke,
+                SVGPaintKind::ContextFill => SVGPaintKind::ContextFill,
+                SVGPaintKind::Color(ref color) => {
+                    SVGPaintKind::Color(f(color))
+                }
+                SVGPaintKind::PaintServer(ref server) => {
+                    SVGPaintKind::PaintServer(server.clone())
+                }
+            }
+    }
+}
+
+impl<ColorType> SVGPaint<ColorType> {
+    /// Convert to a value with a different kind of color
+    pub fn convert<F, OtherColor>(&self, f: F) -> SVGPaint<OtherColor>
+        where F: Fn(&ColorType) -> OtherColor {
+        SVGPaint {
+            kind: self.kind.convert(&f),
+            fallback: self.fallback.as_ref().map(|color| f(color))
+        }
+    }
+}
+
+impl<ColorType> SVGPaintKind<ColorType> {
+    /// Parse a keyword value only
+    fn parse_ident(input: &mut Parser) -> Result<Self, ()> {
+        Ok(match_ignore_ascii_case! { &input.expect_ident()?,
+            "none" => SVGPaintKind::None,
+            "context-fill" => SVGPaintKind::ContextFill,
+            "context-stroke" => SVGPaintKind::ContextStroke,
+            _ => return Err(())
+        })
+    }
+}
+
+impl<ColorType: Parse> Parse for SVGPaint<ColorType> {
+    fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
+        if let Ok(url) = input.try(|i| SpecifiedUrl::parse(context, i)) {
+            let fallback = input.try(|i| ColorType::parse(context, i));
+            Ok(SVGPaint {
+                kind: SVGPaintKind::PaintServer(url),
+                fallback: fallback.ok(),
+            })
+        } else if let Ok(kind) = input.try(SVGPaintKind::parse_ident) {
+            if let SVGPaintKind::None = kind {
+                Ok(SVGPaint {
+                    kind: kind,
+                    fallback: None,
+                })
+            } else {
+                let fallback = input.try(|i| ColorType::parse(context, i));
+                Ok(SVGPaint {
+                    kind: kind,
+                    fallback: fallback.ok(),
+                })
+            }
+        } else if let Ok(color) = input.try(|i| ColorType::parse(context, i)) {
+            Ok(SVGPaint {
+                kind: SVGPaintKind::Color(color),
+                fallback: None,
+            })
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl<ColorType: ToCss> ToCss for SVGPaint<ColorType> {
+    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+        self.kind.to_css(dest)?;
+        if let Some(ref fallback) = self.fallback {
+            fallback.to_css(dest)?;
+        }
+        Ok(())
+    }
+}
+
+

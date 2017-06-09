@@ -9,7 +9,8 @@ use context::{SharedStyleContext, StyleContext, ThreadLocalStyleContext};
 use data::{ElementData, ElementStyles, StoredRestyleHint};
 use dom::{DirtyDescendants, NodeInfo, OpaqueNode, TElement, TNode};
 use matching::{ChildCascadeRequirement, MatchMethods};
-use restyle_hints::{HintComputationContext, RestyleHint};
+use restyle_hints::{CascadeHint, HintComputationContext, RECASCADE_SELF};
+use restyle_hints::{RECASCADE_DESCENDANTS, RestyleHint};
 use selector_parser::RestyleDamage;
 use sharing::{StyleSharingBehavior, StyleSharingTarget};
 #[cfg(feature = "servo")] use servo_config::opts;
@@ -672,7 +673,7 @@ pub fn recalc_style_at<E, D>(traversal: &D,
     }), "Should've computed the final hint and handled later_siblings already");
 
     let compute_self = !element.has_current_styles(data);
-    let mut inherited_style_changed = false;
+    let mut cascade_hint = CascadeHint::empty();
 
     debug!("recalc_style_at: {:?} (compute_self={:?}, dirty_descendants={:?}, data={:?})",
            element, compute_self, element.has_dirty_descendants(), data);
@@ -680,11 +681,20 @@ pub fn recalc_style_at<E, D>(traversal: &D,
     // Compute style for this element if necessary.
     if compute_self {
         match compute_style(traversal, traversal_data, context, element, data) {
-            ChildCascadeRequirement::MustCascade => {
-                inherited_style_changed = true;
+            ChildCascadeRequirement::MustCascadeChildren => {
+                cascade_hint |= RECASCADE_SELF;
+            }
+            ChildCascadeRequirement::MustCascadeDescendants => {
+                cascade_hint |= RECASCADE_SELF | RECASCADE_DESCENDANTS;
             }
             ChildCascadeRequirement::CanSkipCascade => {}
         };
+
+        // We must always cascade native anonymous subtrees, since they inherit styles
+        // from their first non-NAC ancestor.
+        if element.is_native_anonymous() {
+            cascade_hint |= RECASCADE_SELF;
+        }
 
         // If we're restyling this element to display:none, throw away all style
         // data in the subtree, notify the caller to early-return.
@@ -708,15 +718,13 @@ pub fn recalc_style_at<E, D>(traversal: &D,
         },
     };
 
-    if inherited_style_changed {
-        // FIXME(bholley): Need to handle explicitly-inherited reset properties
-        // somewhere.
-        propagated_hint.insert(StoredRestyleHint::recascade_self());
-    }
+    // FIXME(bholley): Need to handle explicitly-inherited reset properties
+    // somewhere.
+    propagated_hint.insert_cascade_hint(cascade_hint);
 
-    trace!("propagated_hint={:?}, inherited_style_changed={:?}, \
+    trace!("propagated_hint={:?}, cascade_hint={:?}, \
             is_display_none={:?}, implementing_pseudo={:?}",
-           propagated_hint, inherited_style_changed,
+           propagated_hint, cascade_hint,
            data.styles().is_display_none(),
            element.implemented_pseudo_element());
     debug_assert!(element.has_current_styles(data) ||
@@ -797,19 +805,6 @@ fn compute_style<E, D>(_traversal: &D,
     context.thread_local.statistics.elements_styled += 1;
     let kind = data.restyle_kind();
 
-    // First, try the style sharing cache. If we get a match we can skip the rest
-    // of the work.
-    if let MatchAndCascade = kind {
-        let target = StyleSharingTarget::new(element);
-        let sharing_result = target.share_style_if_possible(context, data);
-
-        if let StyleWasShared(index, had_damage) = sharing_result {
-            context.thread_local.statistics.styles_shared += 1;
-            context.thread_local.style_sharing_candidate_cache.touch(index);
-            return had_damage;
-        }
-    }
-
     match kind {
         MatchAndCascade => {
             // Ensure the bloom filter is up to date.
@@ -818,6 +813,18 @@ fn compute_style<E, D>(_traversal: &D,
                                               traversal_data.current_dom_depth);
 
             context.thread_local.bloom_filter.assert_complete(element);
+
+            // Now that our bloom filter is set up, try the style sharing
+            // cache. If we get a match we can skip the rest of the work.
+            let target = StyleSharingTarget::new(element);
+            let sharing_result = target.share_style_if_possible(context, data);
+
+            if let StyleWasShared(index, had_damage) = sharing_result {
+                context.thread_local.statistics.styles_shared += 1;
+                context.thread_local.style_sharing_candidate_cache.touch(index);
+                return had_damage;
+            }
+
             context.thread_local.statistics.elements_matched += 1;
 
             // Perform the matching and cascading.

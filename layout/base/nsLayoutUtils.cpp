@@ -122,6 +122,7 @@
 #include "RegionBuilder.h"
 #include "SVGSVGElement.h"
 #include "DisplayItemClip.h"
+#include "mozilla/layers/WebRenderLayerManager.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
@@ -152,7 +153,6 @@ using namespace mozilla::gfx;
 #define GRID_ENABLED_PREF_NAME "layout.css.grid.enabled"
 #define GRID_TEMPLATE_SUBGRID_ENABLED_PREF_NAME "layout.css.grid-template-subgrid-value.enabled"
 #define WEBKIT_PREFIXES_ENABLED_PREF_NAME "layout.css.prefixes.webkit"
-#define DISPLAY_FLOW_ROOT_ENABLED_PREF_NAME "layout.css.display-flow-root.enabled"
 #define TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME "layout.css.text-align-unsafe-value.enabled"
 #define FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME "layout.css.float-logical-values.enabled"
 
@@ -316,36 +316,6 @@ WebkitPrefixEnabledPrefChangeCallback(const char* aPrefName, void* aClosure)
     nsCSSProps::kDisplayKTable[sIndexOfWebkitInlineFlexInDisplayTable].mKeyword =
       isWebkitPrefixSupportEnabled ?
       eCSSKeyword__webkit_inline_flex : eCSSKeyword_UNKNOWN;
-  }
-}
-
-// When the pref "layout.css.display-flow-root.enabled" changes, this function is
-// invoked to let us update kDisplayKTable, to selectively disable or restore
-// the entries for "flow-root" in that table.
-static void
-DisplayFlowRootEnabledPrefChangeCallback(const char* aPrefName, void* aClosure)
-{
-  NS_ASSERTION(strcmp(aPrefName, DISPLAY_FLOW_ROOT_ENABLED_PREF_NAME) == 0,
-               "Did you misspell " DISPLAY_FLOW_ROOT_ENABLED_PREF_NAME " ?");
-
-  static bool sIsDisplayFlowRootKeywordIndexInitialized;
-  static int32_t sIndexOfFlowRootInDisplayTable;
-  bool isDisplayFlowRootEnabled =
-    Preferences::GetBool(DISPLAY_FLOW_ROOT_ENABLED_PREF_NAME, false);
-
-  if (!sIsDisplayFlowRootKeywordIndexInitialized) {
-    // First run: find the position of "flow-root" in kDisplayKTable.
-    sIndexOfFlowRootInDisplayTable =
-      nsCSSProps::FindIndexOfKeyword(eCSSKeyword_flow_root,
-                                     nsCSSProps::kDisplayKTable);
-    sIsDisplayFlowRootKeywordIndexInitialized = true;
-  }
-
-  // OK -- now, stomp on or restore the "flow-root" entry in kDisplayKTable,
-  // depending on whether the pref is enabled vs. disabled.
-  if (sIndexOfFlowRootInDisplayTable >= 0) {
-    nsCSSProps::kDisplayKTable[sIndexOfFlowRootInDisplayTable].mKeyword =
-      isDisplayFlowRootEnabled ? eCSSKeyword_flow_root : eCSSKeyword_UNKNOWN;
   }
 }
 
@@ -2865,10 +2835,10 @@ nsLayoutUtils::TransformRect(nsIFrame* aFromFrame, nsIFrame* aToFrame,
          -std::numeric_limits<Float>::max() * devPixelsPerAppUnitFromFrame * 0.5f,
          std::numeric_limits<Float>::max() * devPixelsPerAppUnitFromFrame,
          std::numeric_limits<Float>::max() * devPixelsPerAppUnitFromFrame));
-  aRect.x = toDevPixels.x / devPixelsPerAppUnitToFrame;
-  aRect.y = toDevPixels.y / devPixelsPerAppUnitToFrame;
-  aRect.width = toDevPixels.width / devPixelsPerAppUnitToFrame;
-  aRect.height = toDevPixels.height / devPixelsPerAppUnitToFrame;
+  aRect.x = NSToCoordRound(toDevPixels.x / devPixelsPerAppUnitToFrame);
+  aRect.y = NSToCoordRound(toDevPixels.y / devPixelsPerAppUnitToFrame);
+  aRect.width = NSToCoordRound(toDevPixels.width / devPixelsPerAppUnitToFrame);
+  aRect.height = NSToCoordRound(toDevPixels.height / devPixelsPerAppUnitToFrame);
   return TRANSFORM_SUCCEEDED;
 }
 
@@ -7779,8 +7749,6 @@ static const PrefCallbacks kPrefCallbacks[] = {
     WebkitPrefixEnabledPrefChangeCallback },
   { TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME,
     TextAlignUnsafeEnabledPrefChangeCallback },
-  { DISPLAY_FLOW_ROOT_ENABLED_PREF_NAME,
-    DisplayFlowRootEnabledPrefChangeCallback },
   { FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME,
     FloatLogicalValuesEnabledPrefChangeCallback },
 };
@@ -8508,6 +8476,8 @@ nsLayoutUtils::DoLogTestDataForPaint(LayerManager* aManager,
 {
   if (ClientLayerManager* mgr = aManager->AsClientLayerManager()) {
     mgr->LogTestDataForCurrentPaint(aScrollId, aKey, aValue);
+  } else if (WebRenderLayerManager* wrlm = aManager->AsWebRenderLayerManager()) {
+    wrlm->LogTestDataForCurrentPaint(aScrollId, aKey, aValue);
   }
 }
 

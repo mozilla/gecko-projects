@@ -22,12 +22,14 @@ use selectors::Element;
 use selectors::attr::{AttrSelectorOperation, NamespaceConstraint};
 use selectors::matching::{ElementSelectorFlags, MatchingContext, MatchingMode};
 use selectors::matching::{RelevantLinkStatus, VisitedHandlingMode, matches_selector};
-use selectors::parser::{Combinator, Component, Selector, SelectorInner, SelectorMethods};
+use selectors::parser::{AncestorHashes, Combinator, Component};
+use selectors::parser::{Selector, SelectorAndHashes, SelectorIter, SelectorMethods};
 use selectors::visitor::SelectorVisitor;
 use smallvec::SmallVec;
 use std::cell::Cell;
 use std::clone::Clone;
 use std::cmp;
+use std::fmt;
 
 /// When the ElementState of an element (like IN_HOVER_STATE) changes,
 /// certain pseudo-classes (like :hover) may require us to restyle that
@@ -446,6 +448,12 @@ impl RestyleHint {
         self.insert_from(&other)
     }
 
+    /// Inserts the specified `CascadeHint`.
+    #[inline]
+    pub fn insert_cascade_hint(&mut self, cascade_hint: CascadeHint) {
+        self.recascade.insert(cascade_hint);
+    }
+
     /// Returns whether this `RestyleHint` represents at least as much restyle
     /// work as the specified one.
     #[inline]
@@ -547,8 +555,12 @@ pub trait ElementSnapshot : Sized {
     /// only be called if `has_attrs()` returns true.
     fn each_class<F>(&self, F)
         where F: FnMut(&Atom);
+
+    /// The `xml:lang=""` or `lang=""` attribute value per this snapshot.
+    fn lang_attr(&self) -> Option<AttrValue>;
 }
 
+#[derive(Clone)]
 struct ElementWrapper<'a, E>
     where E: TElement,
 {
@@ -598,6 +610,35 @@ impl<'a, E> ElementWrapper<'a, E>
             None => ElementState::empty(),
         }
     }
+
+    /// Returns the value of the `xml:lang=""` (or, if appropriate, `lang=""`)
+    /// attribute from this element's snapshot or the closest ancestor
+    /// element snapshot with the attribute specified.
+    fn get_lang(&self) -> Option<AttrValue> {
+        let mut current = self.clone();
+        loop {
+            let lang = match self.snapshot() {
+                Some(snapshot) if snapshot.has_attrs() => snapshot.lang_attr(),
+                _ => current.element.lang_attr(),
+            };
+            if lang.is_some() {
+                return lang;
+            }
+            match current.parent_element() {
+                Some(parent) => current = parent,
+                None => return None,
+            }
+        }
+    }
+}
+
+impl<'a, E> fmt::Debug for ElementWrapper<'a, E>
+    where E: TElement,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Ignore other fields for now, can change later if needed.
+        self.element.fmt(f)
+    }
 }
 
 #[cfg(feature = "gecko")]
@@ -629,30 +670,27 @@ impl<'a, E> Element for ElementWrapper<'a, E>
                                     -> bool
         where F: FnMut(&Self, ElementSelectorFlags),
     {
-        // :moz-any is quite special, because we need to keep matching as a
-        // snapshot.
-        #[cfg(feature = "gecko")]
-        {
-            use selectors::matching::matches_complex_selector;
-            if let NonTSPseudoClass::MozAny(ref selectors) = *pseudo_class {
+        // Some pseudo-classes need special handling to evaluate them against
+        // the snapshot.
+        match *pseudo_class {
+            #[cfg(feature = "gecko")]
+            NonTSPseudoClass::MozAny(ref selectors) => {
+                use selectors::matching::matches_complex_selector;
                 return selectors.iter().any(|s| {
-                    matches_complex_selector(s, self, context, _setter)
+                    matches_complex_selector(s, 0, self, context, _setter)
                 })
             }
-        }
 
-        // :dir needs special handling.  It's implemented in terms of state
-        // flags, but which state flag it maps to depends on the argument to
-        // :dir.  That means we can't just add its state flags to the
-        // NonTSPseudoClass, because if we added all of them there, and tested
-        // via intersects() here, we'd get incorrect behavior for :not(:dir())
-        // cases.
-        //
-        // FIXME(bz): How can I set this up so once Servo adds :dir() support we
-        // don't forget to update this code?
-        #[cfg(feature = "gecko")]
-        {
-            if let NonTSPseudoClass::Dir(ref s) = *pseudo_class {
+            // :dir is implemented in terms of state flags, but which state flag
+            // it maps to depends on the argument to :dir.  That means we can't
+            // just add its state flags to the NonTSPseudoClass, because if we
+            // added all of them there, and tested via intersects() here, we'd
+            // get incorrect behavior for :not(:dir()) cases.
+            //
+            // FIXME(bz): How can I set this up so once Servo adds :dir()
+            // support we don't forget to update this code?
+            #[cfg(feature = "gecko")]
+            NonTSPseudoClass::Dir(ref s) => {
                 let selector_flag = dir_selector_to_state(s);
                 if selector_flag.is_empty() {
                     // :dir() with some random argument; does not match.
@@ -664,16 +702,42 @@ impl<'a, E> Element for ElementWrapper<'a, E>
                 };
                 return state.contains(selector_flag);
             }
-        }
 
-        // For :link and :visited, we don't actually want to test the element
-        // state directly.  Instead, we use the `relevant_link` to determine if
-        // they match.
-        if *pseudo_class == NonTSPseudoClass::Link {
-            return relevant_link.is_unvisited(self, context)
-        }
-        if *pseudo_class == NonTSPseudoClass::Visited {
-            return relevant_link.is_visited(self, context)
+            // For :link and :visited, we don't actually want to test the element
+            // state directly.  Instead, we use the `relevant_link` to determine if
+            // they match.
+            NonTSPseudoClass::Link => {
+                return relevant_link.is_unvisited(self, context);
+            }
+            NonTSPseudoClass::Visited => {
+                return relevant_link.is_visited(self, context);
+            }
+
+            #[cfg(feature = "gecko")]
+            NonTSPseudoClass::MozTableBorderNonzero => {
+                if let Some(snapshot) = self.snapshot() {
+                    if snapshot.has_other_pseudo_class_state() {
+                        return snapshot.mIsTableBorderNonzero();
+                    }
+                }
+            }
+
+            #[cfg(feature = "gecko")]
+            NonTSPseudoClass::MozBrowserFrame => {
+                if let Some(snapshot) = self.snapshot() {
+                    if snapshot.has_other_pseudo_class_state() {
+                        return snapshot.mIsMozBrowserFrame();
+                    }
+                }
+            }
+
+            // :lang() needs to match using the closest ancestor xml:lang="" or
+            // lang="" attribtue from snapshots.
+            NonTSPseudoClass::Lang(ref lang_arg) => {
+                return self.element.match_element_lang(Some(self.get_lang()), lang_arg);
+            }
+
+            _ => {}
         }
 
         let flag = pseudo_class.state_flag();
@@ -801,24 +865,25 @@ fn selector_to_state(sel: &Component<SelectorImpl>) -> ElementState {
     }
 }
 
-fn is_attr_selector(sel: &Component<SelectorImpl>) -> bool {
+fn is_attr_based_selector(sel: &Component<SelectorImpl>) -> bool {
     match *sel {
         Component::ID(_) |
         Component::Class(_) |
         Component::AttributeInNoNamespaceExists { .. } |
         Component::AttributeInNoNamespace { .. } |
         Component::AttributeOther(_) => true,
+        Component::NonTSPseudoClass(ref pc) => pc.is_attr_based(),
         _ => false,
     }
 }
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-/// The aspects of an selector which are sensitive.
+/// The characteristics that a selector is sensitive to.
 pub struct Sensitivities {
-    /// The states which are sensitive.
+    /// The states which the selector is sensitive to.
     pub states: ElementState,
-    /// Whether attributes are sensitive.
+    /// Whether the selector is sensitive to attributes.
     pub attrs: bool,
 }
 
@@ -860,8 +925,15 @@ impl Sensitivities {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct Dependency {
+    /// The dependency selector.
     #[cfg_attr(feature = "servo", ignore_heap_size_of = "Arc")]
-    selector: SelectorInner<SelectorImpl>,
+    selector: Selector<SelectorImpl>,
+    /// The offset into the selector that we should match on.
+    selector_offset: usize,
+    /// The ancestor hashes associated with the above selector at the given
+    /// offset.
+    #[cfg_attr(feature = "servo", ignore_heap_size_of = "No heap data")]
+    hashes: AncestorHashes,
     /// The hint associated with this dependency.
     pub hint: RestyleHint,
     /// The sensitivities associated with this dependency.
@@ -869,8 +941,12 @@ pub struct Dependency {
 }
 
 impl SelectorMapEntry for Dependency {
-    fn selector(&self) -> &SelectorInner<SelectorImpl> {
-        &self.selector
+    fn selector(&self) -> SelectorIter<SelectorImpl> {
+        self.selector.iter_from(self.selector_offset)
+    }
+
+    fn hashes(&self) -> &AncestorHashes {
+        &self.hashes
     }
 }
 
@@ -885,7 +961,7 @@ impl SelectorVisitor for SensitivitiesVisitor {
     type Impl = SelectorImpl;
     fn visit_simple_selector(&mut self, s: &Component<SelectorImpl>) -> bool {
         self.sensitivities.states.insert(selector_to_state(s));
-        self.sensitivities.attrs |= is_attr_selector(s);
+        self.sensitivities.attrs |= is_attr_based_selector(s);
         true
     }
 }
@@ -934,9 +1010,9 @@ pub enum HintComputationContext<'a, E: 'a>
 
 impl DependencySet {
     /// Adds a selector to this `DependencySet`.
-    pub fn note_selector(&mut self, selector: &Selector<SelectorImpl>) {
+    pub fn note_selector(&mut self, selector_and_hashes: &SelectorAndHashes<SelectorImpl>) {
         let mut combinator = None;
-        let mut iter = selector.inner.complex.iter();
+        let mut iter = selector_and_hashes.selector.iter();
         let mut index = 0;
         let mut child_combinators_seen = 0;
         let mut saw_descendant_combinator = false;
@@ -986,17 +1062,21 @@ impl DependencySet {
                     None => RestyleHint::for_self(),
                 };
 
-                let dep_selector = if sequence_start == 0 {
-                    // Reuse the bloom hashes if this is the base selector.
-                    selector.inner.clone()
+                // Reuse the bloom hashes if this is the base selector. Otherwise,
+                // rebuild them.
+                let hashes = if sequence_start == 0 {
+                    selector_and_hashes.hashes.clone()
                 } else {
-                    SelectorInner::new(selector.inner.complex.slice_from(sequence_start))
+                    let seq_iter = selector_and_hashes.selector.iter_from(sequence_start);
+                    AncestorHashes::from_iter(seq_iter)
                 };
 
                 self.dependencies.insert(Dependency {
                     sensitivities: visitor.sensitivities,
                     hint: hint,
-                    selector: dep_selector,
+                    selector: selector_and_hashes.selector.clone(),
+                    selector_offset: sequence_start,
+                    hashes: hashes,
                 });
             }
 
@@ -1124,14 +1204,20 @@ impl DependencySet {
                 MatchingContext::new_for_visited(MatchingMode::Normal, None,
                                                  VisitedHandlingMode::AllLinksUnvisited);
             let matched_then =
-                matches_selector(&dep.selector, &snapshot_el,
+                matches_selector(&dep.selector,
+                                 dep.selector_offset,
+                                 &dep.hashes,
+                                 &snapshot_el,
                                  &mut then_context,
                                  &mut |_, _| {});
             let mut now_context =
                 MatchingContext::new_for_visited(MatchingMode::Normal, bloom_filter,
                                                  VisitedHandlingMode::AllLinksUnvisited);
             let matches_now =
-                matches_selector(&dep.selector, el,
+                matches_selector(&dep.selector,
+                                 dep.selector_offset,
+                                 &dep.hashes,
+                                 el,
                                  &mut now_context,
                                  &mut |_, _| {});
 
@@ -1156,12 +1242,18 @@ impl DependencySet {
                dep.sensitivities.states.intersects(IN_VISITED_OR_UNVISITED_STATE) {
                 then_context.visited_handling = VisitedHandlingMode::RelevantLinkVisited;
                 let matched_then =
-                    matches_selector(&dep.selector, &snapshot_el,
+                    matches_selector(&dep.selector,
+                                     dep.selector_offset,
+                                     &dep.hashes,
+                                     &snapshot_el,
                                      &mut then_context,
                                      &mut |_, _| {});
                 now_context.visited_handling = VisitedHandlingMode::RelevantLinkVisited;
                 let matches_now =
-                    matches_selector(&dep.selector, el,
+                    matches_selector(&dep.selector,
+                                     dep.selector_offset,
+                                     &dep.hashes,
+                                     el,
                                      &mut now_context,
                                      &mut |_, _| {});
                 if matched_then != matches_now {

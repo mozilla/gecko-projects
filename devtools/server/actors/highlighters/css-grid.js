@@ -17,7 +17,6 @@ const {
   getCurrentZoom,
   getDisplayPixelRatio,
   setIgnoreLayoutChanges,
-  getNodeBounds,
   getViewportDimensions,
 } = require("devtools/shared/layout/utils");
 const {
@@ -26,10 +25,14 @@ const {
   translate,
   multiply,
   scale,
+  isIdentity,
   getNodeTransformationMatrix,
-  getNodeTransformOrigin
 } = require("devtools/shared/layout/dom-matrix-2d");
 const { stringifyGridFragments } = require("devtools/server/actors/utils/css-grid-utils");
+const { LocalizationHelper } = require("devtools/shared/l10n");
+
+const LAYOUT_STRINGS_URI = "devtools/client/locales/layout.properties";
+const LAYOUT_L10N = new LocalizationHelper(LAYOUT_STRINGS_URI);
 
 const CSS_GRID_ENABLED_PREF = "layout.css.grid.enabled";
 
@@ -96,6 +99,77 @@ const CANVAS_SIZE = 4096;
 const CANVAS_INFINITY = CANVAS_SIZE << 8;
 
 /**
+ * Returns an array containing the four coordinates of a rectangle, given its diagonal
+ * as input; optionally applying a matrix, and a function to each of the coordinates'
+ * value.
+ *
+ * @param {Number} x1
+ *        The x-axis coordinate of the rectangle's diagonal start point.
+ * @param {Number} y1
+ *        The y-axis coordinate of the rectangle's diagonal start point.
+ * @param {Number} x2
+ *        The x-axis coordinate of the rectangle's diagonal end point.
+ * @param {Number} y2
+ *        The y-axis coordinate of the rectangle's diagonal end point.
+ * @param {Array} [matrix=identity()]
+ *        A transformation matrix to apply.
+ * @return {Array}
+ *        The rect four corners' points transformed by the matrix given.
+ */
+function getPointsFromDiagonal(x1, y1, x2, y2, matrix = identity()) {
+  return [
+    [x1, y1],
+    [x2, y1],
+    [x2, y2],
+    [x1, y2]
+  ].map(point => {
+    let transformedPoint = apply(matrix, point);
+
+    return {x: transformedPoint[0], y: transformedPoint[1]};
+  });
+}
+
+/**
+ * Takes an array of four points and returns a DOMRect-like object, represent the
+ * boundaries defined by the points given.
+ *
+ * @param {Array} points
+ *        The four points.
+ * @return {Object}
+ *         A DOMRect-like object.
+ */
+function getBoundsFromPoints(points) {
+  let bounds = {};
+
+  bounds.left = Math.min(points[0].x, points[1].x, points[2].x, points[3].x);
+  bounds.right = Math.max(points[0].x, points[1].x, points[2].x, points[3].x);
+  bounds.top = Math.min(points[0].y, points[1].y, points[2].y, points[3].y);
+  bounds.bottom = Math.max(points[0].y, points[1].y, points[2].y, points[3].y);
+
+  bounds.x = bounds.left;
+  bounds.y = bounds.top;
+  bounds.width = bounds.right - bounds.left;
+  bounds.height = bounds.bottom - bounds.top;
+
+  return bounds;
+}
+
+/**
+ * Takes an array of four points and returns a string represent a path description.
+ *
+ * @param {Array} points
+ *        The four points.
+ * @return {String}
+ *         A Path Description that can be used in svg's <path> element.
+ */
+function getPathDescriptionFromPoints(points) {
+  return "M" + points[0].x + "," + points[0].y + " " +
+         "L" + points[1].x + "," + points[1].y + " " +
+         "L" + points[2].x + "," + points[2].y + " " +
+         "L" + points[3].x + "," + points[3].y;
+}
+
+/**
  * Draws a line to the context given, applying a transformation matrix if passed.
  *
  * @param {CanvasRenderingContext2D} ctx
@@ -137,18 +211,13 @@ function drawLine(ctx, x1, y1, x2, y2, matrix = identity()) {
  *        The transformation matrix to apply.
  */
 function drawRect(ctx, x1, y1, x2, y2, matrix = identity()) {
-  let p = [
-    [x1, y1],
-    [x2, y1],
-    [x2, y2],
-    [x1, y2]
-  ].map(point => apply(matrix, point).map(Math.round));
+  let p = getPointsFromDiagonal(x1, y1, x2, y2, matrix);
 
   ctx.beginPath();
-  ctx.moveTo(p[0][0], p[0][1]);
-  ctx.lineTo(p[1][0], p[1][1]);
-  ctx.lineTo(p[2][0], p[2][1]);
-  ctx.lineTo(p[3][0], p[3][1]);
+  ctx.moveTo(Math.round(p[0].x), Math.round(p[0].y));
+  ctx.lineTo(Math.round(p[1].x), Math.round(p[1].y));
+  ctx.lineTo(Math.round(p[2].x), Math.round(p[2].y));
+  ctx.lineTo(Math.round(p[3].x), Math.round(p[3].y));
   ctx.closePath();
 }
 
@@ -742,10 +811,17 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     setIgnoreLayoutChanges(true);
 
     let root = this.getElement("root");
+    let cells = this.getElement("cells");
+    let areas = this.getElement("areas");
+
     // Hide the root element and force the reflow in order to get the proper window's
     // dimensions without increasing them.
     root.setAttribute("style", "display: none");
     this.win.document.documentElement.offsetWidth;
+
+    // Set the grid cells and areas fill to the current grid colour.
+    cells.setAttribute("style", `fill: ${this.color}`);
+    areas.setAttribute("style", `fill: ${this.color}`);
 
     let { width, height } = this._winDimensions;
 
@@ -797,18 +873,11 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
    *
    * @param  {GridArea} area
    *         The grid area object.
-   * @param  {Number} x1
-   *         The first x-coordinate of the grid area rectangle.
-   * @param  {Number} x2
-   *         The second x-coordinate of the grid area rectangle.
-   * @param  {Number} y1
-   *         The first y-coordinate of the grid area rectangle.
-   * @param  {Number} y2
-   *         The second y-coordinate of the grid area rectangle.
+   * @param  {Object} bounds
+   *          A DOMRect-like object represent the grid area rectangle.
    */
-  _updateGridAreaInfobar(area, x1, x2, y1, y2) {
-    let width = x2 - x1;
-    let height = y2 - y1;
+  _updateGridAreaInfobar(area, bounds) {
+    let { width, height } = bounds;
     let dim = parseFloat(width.toPrecision(6)) +
               " \u00D7 " +
               parseFloat(height.toPrecision(6));
@@ -817,25 +886,35 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     this.getElement("area-infobar-dimensions").setTextContent(dim);
 
     let container = this.getElement("area-infobar-container");
-    this._moveInfobar(container, x1, x2, y1, y2, {
+    moveInfobar(container, bounds, this.win, {
       position: "bottom",
       hideIfOffscreen: true
     });
   },
 
-  _updateGridCellInfobar(rowNumber, columnNumber, x1, x2, y1, y2) {
-    let width = x2 - x1;
-    let height = y2 - y1;
+  /**
+   * Update the grid information displayed in the grid cell info bar.
+   *
+   * @param  {Number} rowNumber
+   *         The grid cell's row number.
+   * @param  {Number} columnNumber
+   *         The grid cell's column number.
+   * @param  {Object} bounds
+   *          A DOMRect-like object represent the grid cell rectangle.
+   */
+  _updateGridCellInfobar(rowNumber, columnNumber, bounds) {
+    let { width, height } = bounds;
     let dim = parseFloat(width.toPrecision(6)) +
               " \u00D7 " +
               parseFloat(height.toPrecision(6));
-    let position = `${rowNumber}\/${columnNumber}`;
+    let position = LAYOUT_L10N.getFormatStr("layout.rowColumnPositions",
+                   rowNumber, columnNumber);
 
     this.getElement("cell-infobar-position").setTextContent(position);
     this.getElement("cell-infobar-dimensions").setTextContent(dim);
 
     let container = this.getElement("cell-infobar-container");
-    this._moveInfobar(container, x1, x2, y1, y2, {
+    moveInfobar(container, bounds, this.win, {
       position: "top",
       hideIfOffscreen: true
     });
@@ -858,34 +937,8 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     this.getElement("line-infobar-names").setTextContent(gridLineNames);
 
     let container = this.getElement("line-infobar-container");
-    this._moveInfobar(container, x, x, y, y);
-  },
-
-  /**
-   * Move the given grid infobar to the right place in the highlighter.
-   *
-   * @param  {Number} x1
-   *         The first x-coordinate of the grid rectangle.
-   * @param  {Number} x2
-   *         The second x-coordinate of the grid rectangle.
-   * @param  {Number} y1
-   *         The first y-coordinate of the grid rectangle.
-   * @param  {Number} y2
-   *         The second y-coordinate of the grid rectangle.
-   */
-  _moveInfobar(container, x1, x2, y1, y2, options) {
-    let bounds = {
-      bottom: y2,
-      height: y2 - y1,
-      left: x1,
-      right: x2,
-      top: y1,
-      width: x2 - x1,
-      x: x1,
-      y: y1,
-    };
-
-    moveInfobar(container, bounds, this.win, options);
+    moveInfobar(container,
+      getBoundsFromPoints([{x, y}, {x, y}, {x, y}, {x, y}]), this.win);
   },
 
   /**
@@ -979,8 +1032,8 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
   },
 
   /**
-   * Updates the current matrix taking in account the following transformations, in this
-   * order:
+   * Updates the current matrices for both canvas drawing and SVG, taking in account the
+   * following transformations, in this order:
    *   1. The scale given by the display pixel ratio.
    *   2. The translation to the top left corner of the element.
    *   3. The scale given by the current zoom.
@@ -993,38 +1046,31 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
    *  bug 1355675).
    */
   updateCurrentMatrix() {
-    let origin = getNodeTransformOrigin(this.currentNode);
-    let bounds = getNodeBounds(this.win, this.currentNode);
-    let nodeMatrix = getNodeTransformationMatrix(this.currentNode);
     let computedStyle = this.currentNode.ownerGlobal.getComputedStyle(this.currentNode);
 
     let paddingTop = parseFloat(computedStyle.paddingTop);
     let paddingLeft = parseFloat(computedStyle.paddingLeft);
+    let borderTop = parseFloat(computedStyle.borderTopWidth);
+    let borderLeft = parseFloat(computedStyle.borderLeftWidth);
 
-    // Subtract padding values to compensate for top/left being moved by padding.
-    let ox = origin[0] - paddingLeft;
-    let oy = origin[1] - paddingTop;
+    let nodeMatrix = getNodeTransformationMatrix(this.currentNode,
+      this.win.document.documentElement);
 
     let m = identity();
 
-    // First, we scale based on the display's current pixel ratio.
-    m = multiply(m, scale(getDisplayPixelRatio(this.win)));
-    // Then we translate the origin to the node's top left corner.
-    m = multiply(m, translate(bounds.p1.x, bounds.p1.y));
-    // And scale based on the current zoom factor.
-    m = multiply(m, scale(getCurrentZoom(this.win)));
-    // Then translate the origin based on the node's padding values.
-    m = multiply(m, translate(paddingLeft, paddingTop));
-    // Finally, we can apply the current node's transformation matrix, taking in account
-    // the `transform-origin` property and the node's top and left padding.
-    if (nodeMatrix) {
-      m = multiply(m, translate(ox, oy));
-      m = multiply(m, nodeMatrix);
-      m = multiply(m, translate(-ox, -oy));
-      this.hasNodeTransformations = true;
-    } else {
+    // First, we scale based on the device pixel ratio.
+    m = multiply(m, scale(this.win.devicePixelRatio));
+    // Then, we apply the current node's transformation matrix, relative to the
+    // inspected window's root element, but only if it's not a identity matrix.
+    if (isIdentity(nodeMatrix)) {
       this.hasNodeTransformations = false;
+    } else {
+      m = multiply(m, nodeMatrix);
+      this.hasNodeTransformations = true;
     }
+
+    // Finally, we translate the origin based on the node's padding and border values.
+    m = multiply(m, translate(paddingLeft + borderLeft, paddingTop + borderTop));
 
     this.currentMatrix = m;
   },
@@ -1144,7 +1190,6 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     let { rowStart, rowEnd, columnStart, columnEnd } = area;
     let { devicePixelRatio } = this.win;
     let displayPixelRatio = getDisplayPixelRatio(this.win);
-    let currentZoom = getCurrentZoom(this.win);
     let offset = (displayPixelRatio / 2) % 1;
     let fontSize = (GRID_AREA_NAME_FONT_SIZE * displayPixelRatio);
 
@@ -1154,9 +1199,8 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     let canvasY = Math.round(this._canvasPosition.y * devicePixelRatio);
     this.ctx.translate(offset - canvasX, offset - canvasY);
 
-    this.ctx.font = (fontSize * currentZoom) + "px " + GRID_FONT_FAMILY;
+    this.ctx.font = fontSize + "px " + GRID_FONT_FAMILY;
     this.ctx.strokeStyle = this.color;
-    this.ctx.fillStyle = this.color;
     this.ctx.textAlign = "center";
     this.ctx.textBaseline = "middle";
 
@@ -1169,15 +1213,38 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
         // Check if the font size is exceeds the bounds of the containing grid cell.
         if (fontSize > column.breadth || fontSize > row.breadth) {
           fontSize = (column.breadth + row.breadth) / 2;
-          this.ctx.font = (fontSize * currentZoom) + "px " + GRID_FONT_FAMILY;
+          this.ctx.font = fontSize + "px " + GRID_FONT_FAMILY;
         }
+
+        let textWidth = this.ctx.measureText(area.name).width;
+
+        // The width of the character 'm' approximates the height of the text.
+        let textHeight = this.ctx.measureText("m").width;
+
+        // Padding in pixels for the line number text inside of the line number container.
+        let padding = 3 * displayPixelRatio;
+
+        let boxWidth = textWidth + 2 * padding;
+        let boxHeight = textHeight + 2 * padding;
 
         let x = column.start + column.breadth / 2;
         let y = row.start + row.breadth / 2;
 
         [x, y] = apply(this.currentMatrix, [x, y]);
 
-        this.ctx.fillText(area.name, x, y);
+        let rectXPos = x - boxWidth / 2;
+        let rectYPos = y - boxHeight / 2;
+
+        // Draw a rounded rectangle with a border width of 1 pixel,
+        // a border color matching the grid color, and a white background
+        this.ctx.lineWidth = 1 * displayPixelRatio;
+        this.ctx.strokeStyle = this.color;
+        this.ctx.fillStyle = "white";
+        let radius = 2 * displayPixelRatio;
+        drawRoundedRect(this.ctx, rectXPos, rectYPos, boxWidth, boxHeight, radius);
+
+        this.ctx.fillStyle = this.color;
+        this.ctx.fillText(area.name, x, y + padding);
       }
     }
 
@@ -1469,11 +1536,11 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
    */
   renderGridArea(areaName) {
     let paths = [];
-    let currentZoom = getCurrentZoom(this.win);
+    let { devicePixelRatio } = this.win;
+    let displayPixelRatio = getDisplayPixelRatio(this.win);
 
     for (let i = 0; i < this.gridData.length; i++) {
       let fragment = this.gridData[i];
-      let {bounds} = this.currentQuads.content[i];
 
       for (let area of fragment.areas) {
         if (areaName && areaName != area.name) {
@@ -1485,23 +1552,33 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
         let columnStart = fragment.cols.lines[area.columnStart - 1];
         let columnEnd = fragment.cols.lines[area.columnEnd - 1];
 
-        let x1 = columnStart.start + columnStart.breadth +
-          (bounds.left / currentZoom);
-        let x2 = columnEnd.start + (bounds.left / currentZoom);
-        let y1 = rowStart.start + rowStart.breadth +
-          (bounds.top / currentZoom);
-        let y2 = rowEnd.start + (bounds.top / currentZoom);
+        let x1 = columnStart.start + columnStart.breadth;
+        let y1 = rowStart.start + rowStart.breadth;
+        let x2 = columnEnd.start;
+        let y2 = rowEnd.start;
 
-        let path = "M" + x1 + "," + y1 + " " +
-                   "L" + x2 + "," + y1 + " " +
-                   "L" + x2 + "," + y2 + " " +
-                   "L" + x1 + "," + y2;
-        paths.push(path);
+        let points = getPointsFromDiagonal(x1, y1, x2, y2, this.currentMatrix);
+
+        // Scale down by `devicePixelRatio` since SVG element already take them into
+        // account.
+        let svgPoints = points.map(point => ({
+          x: Math.round(point.x / devicePixelRatio),
+          y: Math.round(point.y / devicePixelRatio)
+        }));
+
+        // Scale down by `displayPixelRatio` since infobar's HTML elements already take it
+        // into account; and the zoom scaling is handled by `moveInfobar`.
+        let bounds = getBoundsFromPoints(points.map(point => ({
+          x: Math.round(point.x / displayPixelRatio),
+          y: Math.round(point.y / displayPixelRatio)
+        })));
+
+        paths.push(getPathDescriptionFromPoints(svgPoints));
 
         // Update and show the info bar when only displaying a single grid area.
         if (areaName) {
           this._showGridAreaInfoBar();
-          this._updateGridAreaInfobar(area, x1, x2, y1, y2);
+          this._updateGridAreaInfobar(area, bounds);
         }
       }
     }
@@ -1535,23 +1612,34 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
       return;
     }
 
-    let currentZoom = getCurrentZoom(this.win);
-    let {bounds} = this.currentQuads.content[gridFragmentIndex];
+    let x1 = column.start;
+    let y1 = row.start;
+    let x2 = column.start + column.breadth;
+    let y2 = row.start + row.breadth;
 
-    let x1 = column.start + (bounds.left / currentZoom);
-    let x2 = column.start + column.breadth + (bounds.left / currentZoom);
-    let y1 = row.start + (bounds.top / currentZoom);
-    let y2 = row.start + row.breadth + (bounds.top / currentZoom);
+    let { devicePixelRatio } = this.win;
+    let displayPixelRatio = getDisplayPixelRatio(this.win);
 
-    let path = "M" + x1 + "," + y1 + " " +
-               "L" + x2 + "," + y1 + " " +
-               "L" + x2 + "," + y2 + " " +
-               "L" + x1 + "," + y2;
+    let points = getPointsFromDiagonal(x1, y1, x2, y2, this.currentMatrix);
+
+    // Scale down by `devicePixelRatio` since SVG element already take them into account.
+    let svgPoints = points.map(point => ({
+      x: Math.round(point.x / devicePixelRatio),
+      y: Math.round(point.y / devicePixelRatio)
+    }));
+
+    // Scale down by `displayPixelRatio` since infobar's HTML elements already take it
+    // into account, and the zoom scaling is handled by `moveInfobar`.
+    let bounds = getBoundsFromPoints(points.map(point => ({
+      x: Math.round(point.x / displayPixelRatio),
+      y: Math.round(point.y / displayPixelRatio)
+    })));
+
     let cells = this.getElement("cells");
-    cells.setAttribute("d", path);
+    cells.setAttribute("d", getPathDescriptionFromPoints(svgPoints));
 
     this._showGridCellInfoBar();
-    this._updateGridCellInfobar(rowNumber, columnNumber, x1, x2, y1, y2);
+    this._updateGridCellInfobar(rowNumber, columnNumber, bounds);
   },
 
   /**

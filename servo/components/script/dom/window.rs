@@ -32,6 +32,7 @@ use dom::bindings::utils::{GlobalStaticData, WindowProxyHandler};
 use dom::bluetooth::BluetoothExtraPermissionData;
 use dom::crypto::Crypto;
 use dom::cssstyledeclaration::{CSSModificationAccess, CSSStyleDeclaration, CSSStyleOwner};
+use dom::customelementregistry::CustomElementRegistry;
 use dom::document::{AnimationFrameCallback, Document};
 use dom::element::Element;
 use dom::event::Event;
@@ -50,6 +51,7 @@ use dom::storage::Storage;
 use dom::testrunner::TestRunner;
 use dom::windowproxy::WindowProxy;
 use dom::worklet::Worklet;
+use dom::workletglobalscope::WorkletGlobalScopeType;
 use dom_struct::dom_struct;
 use euclid::{Point2D, Rect, Size2D};
 use fetch;
@@ -179,6 +181,7 @@ pub struct Window {
     window_proxy: MutNullableJS<WindowProxy>,
     document: MutNullableJS<Document>,
     history: MutNullableJS<History>,
+    custom_element_registry: MutNullableJS<CustomElementRegistry>,
     performance: MutNullableJS<Performance>,
     navigation_start: u64,
     navigation_start_precise: f64,
@@ -277,6 +280,8 @@ pub struct Window {
 
     /// Worklets
     test_worklet: MutNullableJS<Worklet>,
+    /// https://drafts.css-houdini.org/css-paint-api-1/#paint-worklet
+    paint_worklet: MutNullableJS<Worklet>,
 }
 
 impl Window {
@@ -369,6 +374,14 @@ impl Window {
 
     pub fn webvr_thread(&self) -> Option<IpcSender<WebVRMsg>> {
         self.webvr_thread.clone()
+    }
+
+    fn new_paint_worklet(&self) -> Root<Worklet> {
+        debug!("Creating new paint worklet.");
+        let worklet = Worklet::new(self, WorkletGlobalScopeType::Paint);
+        let executor = Arc::new(worklet.executor());
+        let _ = self.layout_chan.send(Msg::SetPaintWorkletExecutor(executor));
+        worklet
     }
 
     pub fn permission_state_invocation_results(&self) -> &DOMRefCell<HashMap<String, PermissionState>> {
@@ -531,6 +544,11 @@ impl WindowMethods for Window {
     // https://html.spec.whatwg.org/multipage/#dom-history
     fn History(&self) -> Root<History> {
         self.history.or_init(|| History::new(self))
+    }
+
+    // https://html.spec.whatwg.org/multipage/#dom-window-customelements
+    fn CustomElements(&self) -> Root<CustomElementRegistry> {
+        self.custom_element_registry.or_init(|| CustomElementRegistry::new(self))
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-location
@@ -1004,6 +1022,11 @@ impl WindowMethods for Window {
         fetch::Fetch(&self.upcast(), input, init)
     }
 
+    // https://drafts.css-houdini.org/css-paint-api-1/#paint-worklet
+    fn PaintWorklet(&self) -> Root<Worklet> {
+        self.paint_worklet.or_init(|| self.new_paint_worklet())
+    }
+
     fn TestRunner(&self) -> Root<TestRunner> {
         self.test_runner.or_init(|| TestRunner::new(self.upcast()))
     }
@@ -1030,6 +1053,12 @@ impl Window {
         // nodes to dispose of their layout data. This messages the layout
         // thread, informing it that it can safely free the memory.
         self.Document().upcast::<Node>().teardown();
+
+        // Clean up any active promises
+        // https://github.com/servo/servo/issues/15318
+        if let Some(custom_elements) = self.custom_element_registry.get() {
+            custom_elements.teardown();
+        }
 
         // The above code may not catch all DOM objects (e.g. DOM
         // objects removed from the tree that haven't been collected
@@ -1805,6 +1834,7 @@ impl Window {
             image_cache: image_cache.clone(),
             navigator: Default::default(),
             history: Default::default(),
+            custom_element_registry: Default::default(),
             window_proxy: Default::default(),
             document: Default::default(),
             performance: Default::default(),
@@ -1842,6 +1872,7 @@ impl Window {
             pending_layout_images: DOMRefCell::new(HashMap::new()),
             unminified_js_dir: DOMRefCell::new(None),
             test_worklet: Default::default(),
+            paint_worklet: Default::default(),
         };
 
         unsafe {

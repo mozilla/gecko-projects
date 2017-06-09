@@ -3,35 +3,19 @@
 module.exports = {
 
   "globals": {
+    // These are defined in the WebExtension script scopes by ExtensionCommon.jsm
     "Cc": true,
     "Ci": true,
     "Cr": true,
     "Cu": true,
-    "TextDecoder": false,
-    "TextEncoder": false,
-    // Specific to WebExtensions:
     "AppConstants": true,
-    "Extension": true,
     "ExtensionAPI": true,
-    "ExtensionManagement": true,
+    "ExtensionCommon": true,
     "ExtensionUtils": true,
     "extensions": true,
-    "getContainerForCookieStoreId": true,
-    "getCookieStoreIdForContainer": true,
     "global": true,
-    "isContainerCookieStoreId": true,
-    "isDefaultCookieStoreId": true,
-    "isPrivateCookieStoreId": true,
-    "isValidCookieStoreId": true,
-    "NetUtil": true,
-    "openOptionsPage": true,
     "require": false,
-    "runSafe": true,
-    "runSafeSync": true,
-    "runSafeSyncWithoutClone": true,
     "Services": true,
-    "SingletonEventManager": true,
-    "tabTracker": false,
     "XPCOMUtils": true,
   },
 
@@ -193,9 +177,6 @@ module.exports = {
 
     // Allow use of the continue statement.
     "no-continue": "off",
-
-    // Disallow control characters in regular expressions.
-    "no-control-regex": "error",
 
     // Allow division operators explicitly at beginning of regular expression.
     "no-div-regex": "off",

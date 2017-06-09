@@ -9,6 +9,7 @@
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
+extern crate app_units;
 extern crate bluetooth_traits;
 extern crate canvas_traits;
 extern crate cookie as cookie_rs;
@@ -30,6 +31,7 @@ extern crate rustc_serialize;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate servo_atoms;
 extern crate servo_url;
 extern crate style_traits;
 extern crate time;
@@ -39,6 +41,7 @@ extern crate webvr_traits;
 mod script_msg;
 pub mod webdriver_msg;
 
+use app_units::Au;
 use bluetooth_traits::BluetoothRequest;
 use devtools_traits::{DevtoolScriptControlMsg, ScriptToDevtoolsControlMsg, WorkerId};
 use euclid::Size2D;
@@ -55,7 +58,7 @@ use ipc_channel::ipc::{IpcReceiver, IpcSender};
 use libc::c_void;
 use msg::constellation_msg::{BrowsingContextId, TopLevelBrowsingContextId, FrameType, Key, KeyModifiers, KeyState};
 use msg::constellation_msg::{PipelineId, PipelineNamespaceId, TraversalDirection};
-use net_traits::{ReferrerPolicy, ResourceThreads};
+use net_traits::{FetchResponseMsg, ReferrerPolicy, ResourceThreads};
 use net_traits::image::base::Image;
 use net_traits::image_cache::ImageCache;
 use net_traits::response::HttpsState;
@@ -63,12 +66,13 @@ use net_traits::storage_thread::StorageType;
 use profile_traits::mem;
 use profile_traits::time as profile_time;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use servo_atoms::Atom;
 use servo_url::ImmutableOrigin;
 use servo_url::ServoUrl;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, RecvTimeoutError};
 use style_traits::CSSPixel;
 use webdriver_msg::{LoadStatus, WebDriverScriptCommand};
 use webrender_traits::ClipId;
@@ -232,6 +236,9 @@ pub enum UpdatePipelineIdReason {
 /// Messages sent from the constellation or layout to the script thread.
 #[derive(Deserialize, Serialize)]
 pub enum ConstellationControlMsg {
+    /// Sends the final response to script thread for fetching after all redirections
+    /// have been resolved
+    NavigationResponse(PipelineId, FetchResponseMsg),
     /// Gives a channel and ID to a layout thread, as well as the ID of that layout's parent
     AttachLayout(NewLayoutInfo),
     /// Window resized.  Sends a DOM event eventually, but first we combine events.
@@ -304,6 +311,7 @@ impl fmt::Debug for ConstellationControlMsg {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         use self::ConstellationControlMsg::*;
         let variant = match *self {
+            NavigationResponse(..) => "NavigationResponse",
             AttachLayout(..) => "AttachLayout",
             Resize(..) => "Resize",
             ResizeInactive(..) => "ResizeInactive",
@@ -809,3 +817,28 @@ pub struct WorkerScriptLoadOrigin {
     /// the pipeline id of the entity requesting the load
     pub pipeline_id: Option<PipelineId>,
 }
+
+/// Errors from executing a paint worklet
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub enum PaintWorkletError {
+    /// Execution timed out.
+    Timeout,
+    /// No such worklet.
+    WorkletNotFound,
+}
+
+impl From<RecvTimeoutError> for PaintWorkletError {
+    fn from(_: RecvTimeoutError) -> PaintWorkletError {
+        PaintWorkletError::Timeout
+    }
+}
+
+/// Execute paint code in the worklet thread pool.<
+pub trait PaintWorkletExecutor: Sync + Send {
+    /// https://drafts.css-houdini.org/css-paint-api/#draw-a-paint-image
+    fn draw_a_paint_image(&self,
+                          name: Atom,
+                          concrete_object_size: Size2D<Au>)
+                          -> Result<Image, PaintWorkletError>;
+}
+

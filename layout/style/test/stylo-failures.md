@@ -34,7 +34,7 @@ to mochitest command.
     * test_media_queries.html `-device-pixel-ratio` [27]
     * test_webkit_device_pixel_ratio.html [3]
   * test_media_queries_dynamic.html `restyle`: bug 1357461 [4]
-  * test_media_queries_dynamic_xbl.html: xbl support bug 1290276 [2]
+  * test_media_queries_dynamic_xbl.html: xbl support bug 1290276 [1]
 * Animation support:
   * SMIL Animation
     * test_restyles_in_smil_animation.html [2]
@@ -42,7 +42,6 @@ to mochitest command.
   * test_bug413958.html `monitorConsole` [3]
   * test_parser_diagnostics_unprintables.html [550]
 * Transition support:
-  * test_transitions.html: pseudo elements [4]
   * test_transitions_and_reframes.html `pseudo-element`: bug 1366422 [4]
   * Events:
     * test_animations_event_order.html [2]
@@ -100,14 +99,10 @@ to mochitest command.
   * :-moz-tree bits bug 1348488
     * test_selectors.html `:-moz-tree` [10]
 * Unsupported pseudo-classes
-  * :-moz-locale-dir is internal bug 1367310
-    * test_selectors.html `:-moz-locale-dir` [15]
   * :-moz-lwtheme-* bug 1367312
     * test_selectors.html `:-moz-lwtheme` [3]
   * :-moz-window-inactive bug 1348489
     * test_selectors.html `:-moz-window-inactive` [2]
-  * :dir case-sensitivity and syntax bug 1367315
-    * test_selectors.html `:dir` [11]
 * Quirks mode support
   * test_hover_quirk.html: hover quirks bug 1355724 [6]
 * Unit should be preserved after parsing servo/servo#15346
@@ -115,13 +110,11 @@ to mochitest command.
 * getComputedStyle style doesn't contain custom properties bug 1336891
   * test_variable_serialization_computed.html [35]
   * test_variables.html `custom property name` [2]
-* test_css_supports.html: issues around @supports syntax servo/servo#15482 [8]
+* test_css_supports.html: issues around @supports syntax servo/servo#15482 [2]
 * test_author_specified_style.html: support serializing color as author specified bug 1348165 [27]
 * browser_newtab_share_rule_processors.js: agent style sheet sharing [1]
 * :visited support (bug 1328509)
-  * test_visited_reftests.html `selector-descendant-2.xhtml` [2]
-  * ... `selector-child-2.xhtml` [2]
-  * ... `color-on-bullets-1.html` [2]
+  * test_visited_reftests.html `color-on-bullets-1.html` [2]
   * ... `inherit-keyword-1.xhtml` [2]
   * ... `mathml-links.html` [2]
   * ... `caret-color-on-visited-1.html` [2]
@@ -140,7 +133,6 @@ to mochitest command.
 
 * test_selectors_on_anonymous_content.html: xbl and :nth-child [1]
 * test_parse_rule.html `rgb(0, 128, 0)`: color properties not getting computed [5]
-* test_selectors.html `:nth-child`: &lt;an+b&gt; parsing difference bug 1364009 [14]
 
 ## Ignore
 

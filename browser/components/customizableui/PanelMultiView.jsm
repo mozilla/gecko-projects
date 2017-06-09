@@ -381,21 +381,23 @@ this.PanelMultiView = class {
   }
 
   showMainView() {
-    if (this.panelViews) {
-      this.showSubView(this._mainViewId);
-    } else {
-      if (this.showingSubView) {
-        let viewNode = this._currentSubView;
-        let evt = new this.window.CustomEvent("ViewHiding", { bubbles: true, cancelable: true });
-        viewNode.dispatchEvent(evt);
-
+    if (this.showingSubView) {
+      let viewNode = this._currentSubView;
+      let evt = new this.window.CustomEvent("ViewHiding", { bubbles: true, cancelable: true });
+      viewNode.dispatchEvent(evt);
+      if (this.panelViews) {
+        viewNode.removeAttribute("current");
+        this.showSubView(this._mainViewId);
+      } else {
         this._transitionHeight(() => {
           viewNode.removeAttribute("current");
           this._currentSubView = null;
           this.node.setAttribute("viewtype", "main");
         });
       }
+    }
 
+    if (!this.panelViews) {
       this._shiftMainView();
     }
   }
@@ -433,8 +435,8 @@ this.PanelMultiView = class {
           // of the main view, i.e. 'forever', during the instance lifetime.
           if (!this._mainViewWidth) {
             this._mainViewWidth = previousRect.width;
-            let top = dwu.getBoundsWithoutFlushing(previousViewNode.firstChild).top;
-            let bottom = dwu.getBoundsWithoutFlushing(previousViewNode.lastChild).bottom;
+            let top = dwu.getBoundsWithoutFlushing(previousViewNode.firstChild || previousViewNode).top;
+            let bottom = dwu.getBoundsWithoutFlushing(previousViewNode.lastChild || previousViewNode).bottom;
             this._viewVerticalPadding = previousRect.height - (bottom - top);
           }
           // Here go the measures that have the same caching lifetime as the height
@@ -530,6 +532,8 @@ this.PanelMultiView = class {
         this._viewContainer.style.width = previousRect.width + "px";
 
         this._transitioning = true;
+        if (this._autoResizeWorkaroundTimer)
+          window.clearTimeout(this._autoResizeWorkaroundTimer);
         this._viewContainer.setAttribute("transition-reverse", reverse);
         let nodeToAnimate = reverse ? previousViewNode : viewNode;
 
@@ -602,7 +606,7 @@ this.PanelMultiView = class {
             // another few milliseconds to remove the width and height 'fixtures',
             // to be sure we don't flicker annoyingly.
             // NB: HACK! Bug 1363756 is there to fix this.
-            window.setTimeout(() => {
+            this._autoResizeWorkaroundTimer = window.setTimeout(() => {
               // Only remove the height when the view is larger than the main
               // view, otherwise it'll snap back to its own height.
               if (viewNode == this._mainView || viewRect.height > this._mainViewHeight)
@@ -642,7 +646,7 @@ this.PanelMultiView = class {
         });
         this._shiftMainView(aAnchor);
       }
-    })();
+    })().catch(e => Cu.reportError(e));
   }
 
   /**
@@ -826,6 +830,12 @@ this.PanelMultiView = class {
         this.node.removeAttribute("panelopen");
         this.showMainView();
         if (this.panelViews) {
+          for (let panelView of this._viewStack.children) {
+            if (panelView.nodeName != "children") {
+              panelView.style.removeProperty("min-width");
+              panelView.style.removeProperty("max-width");
+            }
+          }
           this.window.removeEventListener("keydown", this);
           this._panel.removeEventListener("mousemove", this);
           this._resetKeyNavigation();
@@ -1002,22 +1012,27 @@ this.PanelMultiView = class {
       // Take the label for toolbarbuttons; it only exists on those elements.
       element = element.labelElement || element;
 
-      let bounds = this._dwu.getBoundsWithoutFlushing(element);
+      let bounds = element.getBoundingClientRect();
       let previous = this._multiLineElementsMap.get(element);
-      // Only remove the 'height' property, which will cause a layout flush, when
-      // absolutely necessary.
+      // We don't need to (re-)apply the workaround for invisible elements or
+      // on elements we've seen before and haven't changed in the meantime.
       if (!bounds.width || !bounds.height ||
           (previous && element.textContent == previous.textContent &&
                        bounds.width == previous.bounds.width)) {
         continue;
       }
 
-      element.style.removeProperty("height");
       items.push({ element });
     }
 
+    // Removing the 'height' property will only cause a layout flush in the next
+    // loop below if it was set.
+    for (let item of items) {
+      item.element.style.removeProperty("height");
+    }
+
     // We now read the computed style to store the height of any element that
-    // may contain wrapping text, which will be zero if the element is hidden.
+    // may contain wrapping text.
     for (let item of items) {
       item.bounds = item.element.getBoundingClientRect();
     }

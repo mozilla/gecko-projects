@@ -2,6 +2,9 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
+// The ext-* files are imported into the same scopes.
+/* import-globals-from ext-toolkit.js */
+
 XPCOMUtils.defineLazyGetter(this, "strBundle", function() {
   const stringSvc = Cc["@mozilla.org/intl/stringbundle;1"].getService(Ci.nsIStringBundleService);
   return stringSvc.createBundle("chrome://global/locale/extensions.properties");
@@ -56,10 +59,14 @@ function getExtensionInfoForAddon(extension, addon) {
 
   if (extension) {
     let m = extension.manifest;
+
+    let hostPerms = extension.whiteListedHosts.patterns.map(matcher => matcher.pattern);
+
     extInfo.permissions = Array.from(extension.permissions).filter(perm => {
-      return !extension.whiteListedHosts.pat.includes(perm);
+      return !hostPerms.includes(perm);
     });
-    extInfo.hostPermissions = extension.whiteListedHosts.pat;
+    extInfo.hostPermissions = hostPerms;
+
     extInfo.shortName = m.short_name || "";
     if (m.icons) {
       extInfo.icons = Object.keys(m.icons).map(key => {

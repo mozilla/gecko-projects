@@ -65,6 +65,9 @@ class WebPlatformTestsRunner(MozbuildObject):
 
         kwargs["capture_stdio"] = True
 
+        if kwargs["webdriver_binary"] is None:
+            kwargs["webdriver_binary"] = self.get_binary_path("geckodriver", validate_exists=False)
+
         kwargs = wptcommandline.check_args(kwargs)
 
     def setup_kwargs_wptrun(self, kwargs):
@@ -75,15 +78,23 @@ class WebPlatformTestsRunner(MozbuildObject):
 
         import wptrun
 
+        product = kwargs["product"]
+
         setup_func = {
             "chrome": wptrun.setup_chrome,
             "edge": wptrun.setup_edge,
             "servo": wptrun.setup_servo,
-        }[kwargs["product"]]
+        }[product]
 
-        setup_func(wptrun.virtualenv.Virtualenv(self.virtualenv_manager.virtualenv_root),
-                   kwargs,
-                   True)
+        try:
+            wptrun.check_environ(product)
+
+            setup_func(wptrun.virtualenv.Virtualenv(self.virtualenv_manager.virtualenv_root),
+                       kwargs,
+                       True)
+        except wptrun.WptrunError as e:
+            print(e.message, file=sys.stderr)
+            sys.exit(1)
 
         kwargs["tests_root"] = os.path.join(here, "tests")
 
@@ -288,12 +299,12 @@ testing/web-platform/tests for tests that may be shared
 
 
 class WPTManifestUpdater(MozbuildObject):
-    def run_update(self, check_clean=False, **kwargs):
+    def run_update(self, check_clean=False, rebuild=False, **kwargs):
         import manifestupdate
         from wptrunner import wptlogging
         logger = wptlogging.setup(kwargs, {"mach": sys.stdout})
         wpt_dir = os.path.abspath(os.path.join(self.topsrcdir, 'testing', 'web-platform'))
-        manifestupdate.update(logger, wpt_dir, check_clean)
+        manifestupdate.update(logger, wpt_dir, check_clean, rebuild)
 
 
 def create_parser_wpt():

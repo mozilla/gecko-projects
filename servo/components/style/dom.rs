@@ -17,10 +17,12 @@ use properties::{ComputedValues, PropertyDeclarationBlock};
 #[cfg(feature = "gecko")] use properties::animated_properties::AnimationValue;
 #[cfg(feature = "gecko")] use properties::animated_properties::TransitionProperty;
 use rule_tree::CascadeLevel;
-use selector_parser::{ElementExt, PreExistingComputedValues, PseudoElement};
-use selectors::matching::ElementSelectorFlags;
+use selector_parser::{AttrValue, ElementExt, PreExistingComputedValues};
+use selector_parser::{PseudoClassStringArg, PseudoElement};
+use selectors::matching::{ElementSelectorFlags, VisitedHandlingMode};
 use shared_lock::Locked;
 use sink::Push;
+use smallvec::VecLike;
 use std::fmt;
 #[cfg(feature = "gecko")] use std::collections::HashMap;
 use std::fmt::Debug;
@@ -270,7 +272,9 @@ pub unsafe fn raw_note_descendants<E, B>(element: E) -> bool
 pub trait PresentationalHintsSynthesizer {
     /// Generate the proper applicable declarations due to presentational hints,
     /// and insert them into `hints`.
-    fn synthesize_presentational_hints_for_legacy_attributes<V>(&self, hints: &mut V)
+    fn synthesize_presentational_hints_for_legacy_attributes<V>(&self,
+                                                                visited_handling: VisitedHandlingMode,
+                                                                hints: &mut V)
         where V: Push<ApplicableDeclarationBlock>;
 }
 
@@ -363,9 +367,6 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
 
     /// Whether this element has an attribute with a given namespace.
     fn has_attr(&self, namespace: &Namespace, attr: &LocalName) -> bool;
-
-    /// Whether an attribute value equals `value`.
-    fn attr_equals(&self, namespace: &Namespace, attr: &LocalName, value: &Atom) -> bool;
 
     /// Internal iterator for the classes of this element.
     fn each_class<F>(&self, callback: F) where F: FnMut(&Atom);
@@ -559,6 +560,14 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
                    .map_or(false, |r| r.hint.has_animation_hint());
     }
 
+    /// Gets declarations from XBL bindings from the element. Only gecko element could have this.
+    fn get_declarations_from_xbl_bindings<V>(&self,
+                                             _: &mut V)
+                                             -> bool
+        where V: Push<ApplicableDeclarationBlock> + VecLike<ApplicableDeclarationBlock> {
+        false
+    }
+
     /// Gets the current existing CSS transitions, by |property, end value| pairs in a HashMap.
     #[cfg(feature = "gecko")]
     fn get_css_transitions_info(&self)
@@ -595,6 +604,20 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
                                              existing_transitions: &HashMap<TransitionProperty,
                                                                             Arc<AnimationValue>>)
                                              -> bool;
+
+    /// Returns the value of the `xml:lang=""` attribute (or, if appropriate,
+    /// the `lang=""` attribute) on this element.
+    fn lang_attr(&self) -> Option<AttrValue>;
+
+    /// Returns whether this element's language matches the language tag
+    /// `value`.  If `override_lang` is not `None`, it specifies the value
+    /// of the `xml:lang=""` or `lang=""` attribute to use in place of
+    /// looking at the element and its ancestors.  (This argument is used
+    /// to implement matching of `:lang()` against snapshots.)
+    fn match_element_lang(&self,
+                          override_lang: Option<Option<AttrValue>>,
+                          value: &PseudoClassStringArg)
+                          -> bool;
 }
 
 /// Trait abstracting over different kinds of dirty-descendants bits.

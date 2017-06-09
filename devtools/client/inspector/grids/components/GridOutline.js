@@ -129,7 +129,7 @@ module.exports = createClass({
     return height;
   },
 
-  highlightCell(e) {
+  onHighlightCell({ target, type }) {
     // Debounce the highlighting of cells.
     // This way we don't end up sending many requests to the server for highlighting when
     // cells get hovered in a rapid succession We only send a request if the user settles
@@ -139,12 +139,12 @@ module.exports = createClass({
     }
 
     this.highlightTimeout = setTimeout(() => {
-      this.doHighlightCell(e);
+      this.doHighlightCell(target, type === "mouseleave");
       this.highlightTimeout = null;
     }, GRID_HIGHLIGHTING_DEBOUNCE);
   },
 
-  doHighlightCell({ target }) {
+  doHighlightCell(target, hide) {
     const {
       grids,
       onShowGridAreaHighlight,
@@ -157,6 +157,12 @@ module.exports = createClass({
     const rowNumber = target.dataset.gridRow;
     const columnNumber = target.dataset.gridColumn;
 
+    if (hide) {
+      onShowGridAreaHighlight(grids[id].nodeFront, null, color);
+      onShowGridCellHighlight(grids[id].nodeFront, color);
+      return;
+    }
+
     if (name) {
       onShowGridAreaHighlight(grids[id].nodeFront, name, color);
     }
@@ -168,9 +174,8 @@ module.exports = createClass({
   },
 
   /**
-    * Displays a message text "Cannot show outline for this grid".
-    *
-    */
+   * Displays a message text "Cannot show outline for this grid".
+   */
   renderCannotShowOutlineText() {
     return dom.div(
       {
@@ -187,11 +192,11 @@ module.exports = createClass({
   },
 
   /**
-    * Renders the grid outline for the given grid container object.
-    *
-    * @param  {Object} grid
-    *         A single grid container in the document.
-    */
+   * Renders the grid outline for the given grid container object.
+   *
+   * @param  {Object} grid
+   *         A single grid container in the document.
+   */
   renderGrid(grid) {
     // TODO: We are drawing the first fragment since only one is currently being stored.
     // In the future we will need to iterate over all fragments of a grid.
@@ -281,8 +286,8 @@ module.exports = createClass({
         width,
         height,
         fill: "none",
-        onMouseOver: this.onMouseOverCell,
-        onMouseOut: this.onMouseLeaveCell,
+        onMouseEnter: this.onHighlightCell,
+        onMouseLeave: this.onHighlightCell,
       }
     );
   },
@@ -311,24 +316,6 @@ module.exports = createClass({
         height: borderHeight
       }
     );
-  },
-
-  onMouseLeaveCell({ target }) {
-    const {
-      grids,
-      onShowGridAreaHighlight,
-      onShowGridCellHighlight,
-    } = this.props;
-    const id = target.dataset.gridId;
-    const color = target.closest(".grid-cell-group").dataset.gridLineColor;
-
-    onShowGridAreaHighlight(grids[id].nodeFront, null, color);
-    onShowGridCellHighlight(grids[id].nodeFront, color);
-  },
-
-  onMouseOverCell(event) {
-    event.persist();
-    this.highlightCell(event);
   },
 
   renderOutline() {

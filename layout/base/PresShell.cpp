@@ -971,6 +971,13 @@ PresShell::Init(nsIDocument* aDocument,
   mStyleSet = aStyleSet;
   mStyleSet->Init(aPresContext);
 
+  // Set up our style rule observer. We don't need to inform a ServoStyleSet
+  // of the binding manager because it gets XBL style sheets from bindings
+  // in a different way.
+  if (mStyleSet->IsGecko()) {
+    mStyleSet->AsGecko()->SetBindingManager(mDocument->BindingManager());
+  }
+
   // Notify our prescontext that it now has a compatibility mode.  Note that
   // this MUST happen after we set up our style set but before we create any
   // frames.
@@ -1162,6 +1169,12 @@ PresShell::Destroy()
 {
   // Do not add code before this line please!
   if (mHaveShutDown) {
+    // If we never got a root frame the root view could exist now still.
+    // In that case assert that it has no children and no frame.
+    MOZ_RELEASE_ASSERT(!mViewManager || !mViewManager->GetRootView() ||
+      (!mViewManager->GetRootView()->GetFrame() &&
+       !mViewManager->GetRootView()->GetFirstChild()));
+    MOZ_RELEASE_ASSERT(!mFrameConstructor || !mFrameConstructor->GetRootFrame());
     return;
   }
 
@@ -2069,7 +2082,9 @@ PresShell::NotifyDestroyingFrame(nsIFrame* aFrame)
   aFrame->DisplayItemData().Clear();
 
   if (!mIgnoreFrameDestruction) {
-    mDocument->StyleImageLoader()->DropRequestsForFrame(aFrame);
+    if (aFrame->HasImageRequest()) {
+      mDocument->StyleImageLoader()->DropRequestsForFrame(aFrame);
+    }
 
     mFrameConstructor->NotifyDestroyingFrame(aFrame);
 
@@ -4361,9 +4376,9 @@ static inline nsINode*
 RealContainer(nsIDocument* aDocument, nsIContent* aContainer, nsIContent* aContent)
 {
   MOZ_ASSERT(aDocument);
-  MOZ_ASSERT_IF(aContainer, aContainer->OwnerDoc() == aDocument);
+  MOZ_ASSERT(!aContainer || aContainer->OwnerDoc() == aDocument);
   MOZ_ASSERT(aContent->OwnerDoc() == aDocument);
-  MOZ_ASSERT_IF(!aContainer, aContent->GetParentNode() == aDocument);
+  MOZ_ASSERT(aContainer || aContent->GetParentNode() == aDocument);
   if (!aContainer) {
     return aDocument;
   }
@@ -8117,6 +8132,11 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent,
         MOZ_ASSERT(nsContentUtils::IsSafeToRunScript(),
           "Somebody changed aEvent to cause a DOM event!");
         nsPresShellEventCB eventCB(this);
+        if (nsIFrame* target = GetCurrentEventFrame()) {
+          if (target->OnlySystemGroupDispatch(aEvent->mMessage)) {
+              aEvent->StopPropagation();
+          }
+        }
         if (aEvent->mClass == eTouchEventClass) {
           DispatchTouchEventToDOM(aEvent, aStatus, &eventCB, touchIsNew);
         } else {

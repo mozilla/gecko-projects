@@ -133,6 +133,12 @@ ServoStyleSet::InvalidateStyleForCSSRuleChanges()
   mPresContext->RestyleManager()->AsServo()->PostRestyleEventForCSSRuleChanges();
 }
 
+bool
+ServoStyleSet::MediumFeaturesChanged() const
+{
+  return Servo_StyleSet_MediumFeaturesChanged(mRawSet.get());
+}
+
 size_t
 ServoStyleSet::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
@@ -370,7 +376,7 @@ ServoStyleSet::PrepareAndTraverseSubtree(
     aRestyleBehavior == TraversalRestyleBehavior::ForAnimationOnly;
   bool postTraversalRequired = Servo_TraverseSubtree(
     aRoot, mRawSet.get(), &snapshots, aRootBehavior, aRestyleBehavior);
-  MOZ_ASSERT_IF(isInitial || forReconstruct, !postTraversalRequired);
+  MOZ_ASSERT(!(isInitial || forReconstruct) || !postTraversalRequired);
 
   // Don't need to trigger a second traversal if this restyle only needs
   // animation-only restyle.
@@ -1033,6 +1039,20 @@ ServoStyleSet::GetComputedKeyframeValuesFor(
                                   mRawSet.get(),
                                   &result);
   return result;
+}
+
+void
+ServoStyleSet::GetAnimationValues(
+  RawServoDeclarationBlock* aDeclarations,
+  Element* aElement,
+  ServoComputedValuesBorrowed aComputedValues,
+  nsTArray<RefPtr<RawServoAnimationValue>>& aAnimationValues)
+{
+  Servo_GetAnimationValues(aDeclarations,
+                           aElement,
+                           aComputedValues,
+                           mRawSet.get(),
+                           &aAnimationValues);
 }
 
 already_AddRefed<ServoComputedValues>
