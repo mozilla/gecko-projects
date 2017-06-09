@@ -142,15 +142,16 @@ def make_task_description(config, jobs):
                 SIGNED_ZIP={'task-reference': "{}target.zip".format(signed_prefix)},
                 SIGNED_SETUP={'task-reference': "{}setup.exe".format(signed_prefix)},
                 UNSIGNED_MAR={'task-reference': "{}mar.exe".format(build_prefix)},
+                NO_MAGIC_MH_BUILD_ARGS='1', # XXXCallek make mozharness using more generic
             )
             mozharness_config = ['repackage/win_signed.py']
             output_files = [{
                 'type': 'file',
-                'path': '/home/worker/workspace/build/upload/installer.exe',
+                'path': 'artifacts/installer.exe',
                 'name': 'public/build/installer.exe',
             }, {
                 'type': 'file',
-                'path': '/home/worker/workspace/build/upload/target.complete.mar',
+                'path': 'artifacts/target.complete.mar',
                 'name': 'public/build/target.complete.mar',
             }]
             
