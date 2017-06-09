@@ -167,7 +167,7 @@ def make_task_description(config, jobs):
 
         if attributes["build_platform"].startswith('win'):
             worker = {
-                'implementation': 'generic-worker',
+                #'implementation': 'generic-worker',
                 'max-run-time': 7200,
                 'env': task_env,
                 'artifacts': output_files,
@@ -175,7 +175,7 @@ def make_task_description(config, jobs):
             }
             worker_type = 'aws-provisioner-v1/gecko-%s-b-win2012' % level
         else:
-            worker = {'implementation': 'docker-worker',
+            worker = {#'implementation': 'docker-worker',
                        'docker-image': {"in-tree": "desktop-build"},
                        'artifacts': output_files,
                        'env': task_env,
@@ -198,6 +198,6 @@ def make_task_description(config, jobs):
             'extra': job.get('extra', {}),
             'worker': worker,
             'run': run,
-                       'os': 'linux',
+                       #'os': 'linux',
         }
         yield task
