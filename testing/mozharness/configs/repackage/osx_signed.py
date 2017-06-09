@@ -1,7 +1,7 @@
 import os
 
 config = {
-    "input_home": "/home/worker/workspace/inputs",
+    "input_home": "{abs_work_dir}/inputs",
     "src_mozconfig": "browser/config/mozconfigs/macosx64/repack",
 
     "download_config": {
