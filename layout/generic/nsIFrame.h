@@ -24,7 +24,7 @@
 #include <stdio.h>
 
 #include "CaretAssociationHint.h"
-#include "FramePropertyTable.h"
+#include "FrameProperties.h"
 #include "mozilla/layout/FrameChildList.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/SmallPointerArray.h"
@@ -83,6 +83,7 @@ class nsLineList_iterator;
 class nsAbsoluteContainingBlock;
 class nsIContent;
 class nsContainerFrame;
+class nsPlaceholderFrame;
 class nsStyleChangeList;
 
 struct nsPeekOffsetStruct;
@@ -590,7 +591,6 @@ public:
   using Visibility = mozilla::Visibility;
 
   typedef mozilla::FrameProperties FrameProperties;
-  typedef mozilla::ConstFrameProperties ConstFrameProperties;
   typedef mozilla::layers::Layer Layer;
   typedef mozilla::layout::FrameChildList ChildList;
   typedef mozilla::layout::FrameChildListID ChildListID;
@@ -616,6 +616,7 @@ public:
     , mPrevSibling(nullptr)
     , mState(NS_FRAME_FIRST_REFLOW | NS_FRAME_IS_DIRTY)
     , mClass(aID)
+    , mMayHaveRoundedCorners(false)
   {
     mozilla::PodZero(&mOverflow);
   }
@@ -834,6 +835,16 @@ public:
    * out-of-flow frames.
    */
   inline nsContainerFrame* GetInFlowParent();
+
+  /**
+   * Return the placeholder for this frame (which must be out-of-flow).
+   * @note this will only return non-null if |this| is the first-in-flow
+   * although we don't assert that here for legacy reasons.
+   */
+  inline nsPlaceholderFrame* GetPlaceholderFrame() const {
+    MOZ_ASSERT(HasAnyStateBits(NS_FRAME_OUT_OF_FLOW));
+    return GetProperty(PlaceholderFrameProperty());
+  }
 
   /**
    * Set this frame's parent to aParent.
@@ -1066,9 +1077,12 @@ public:
   nsRect GetNormalRect() const;
 
   /**
-   * Return frame's position without relative positioning
+   * Return frame's position without relative positioning.
+   * If aHasProperty is provided, returns whether the normal position
+   * was stored in a frame property.
    */
-  nsPoint GetNormalPosition() const;
+  inline nsPoint GetNormalPosition(bool* aHasProperty = nullptr) const;
+
   mozilla::LogicalPoint
   GetLogicalNormalPosition(mozilla::WritingMode aWritingMode,
                            const nsSize& aContainerSize) const
@@ -1131,8 +1145,8 @@ public:
 #define NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(prop, type) \
   NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(prop, mozilla::SmallValueHolder<type>)
 
-  NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(IBSplitSibling, nsIFrame)
-  NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(IBSplitPrevSibling, nsIFrame)
+  NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(IBSplitSibling, nsContainerFrame)
+  NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(IBSplitPrevSibling, nsContainerFrame)
 
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(NormalPositionProperty, nsPoint)
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(ComputedOffsetProperty, nsMargin)
@@ -1141,6 +1155,8 @@ public:
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(PreEffectsBBoxProperty, nsRect)
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(PreTransformOverflowAreasProperty,
                                       nsOverflowAreas)
+
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(OverflowAreasProperty, nsOverflowAreas)
 
   // The initial overflow area passed to FinishAndStoreOverflow. This is only set
   // on frames that Preserve3D() or HasPerspective() or IsTransformed(), and
@@ -1183,11 +1199,12 @@ public:
 
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(BidiDataProperty, mozilla::FrameBidiData)
 
+  NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(PlaceholderFrameProperty, nsPlaceholderFrame)
+
   mozilla::FrameBidiData GetBidiData() const
   {
     bool exists;
-    mozilla::FrameBidiData bidiData =
-      Properties().Get(BidiDataProperty(), &exists);
+    mozilla::FrameBidiData bidiData = GetProperty(BidiDataProperty(), &exists);
     if (!exists) {
       bidiData.precedingControl = mozilla::kBidiLevelNone;
     }
@@ -1662,7 +1679,7 @@ public:
 
   bool RefusedAsyncAnimation() const
   {
-    return Properties().Get(RefusedAsyncAnimationProperty());
+    return GetProperty(RefusedAsyncAnimationProperty());
   }
 
   /**
@@ -2734,7 +2751,8 @@ public:
    *   into points in aOutAncestor's coordinate space.
    */
   Matrix4x4 GetTransformMatrix(const nsIFrame* aStopAtAncestor,
-                               nsIFrame **aOutAncestor);
+                               nsIFrame **aOutAncestor,
+                               bool aInCSSUnits = false);
 
   /**
    * Bit-flags to pass to IsFrameOfType()
@@ -3378,13 +3396,63 @@ public:
     return mContent == aParentContent;
   }
 
-  FrameProperties Properties() {
-    return FrameProperties(PresContext()->PropertyTable(), this);
+  /**
+   * Support for reading and writing properties on the frame.
+   * These call through to the frame's FrameProperties object, if it
+   * exists, but avoid creating it if no property is ever set.
+   */
+  template<typename T>
+  FrameProperties::PropertyType<T>
+  GetProperty(FrameProperties::Descriptor<T> aProperty,
+              bool* aFoundResult = nullptr) const
+  {
+    return mProperties.Get(aProperty, aFoundResult);
   }
 
-  ConstFrameProperties Properties() const {
-    return ConstFrameProperties(PresContext()->PropertyTable(), this);
+  template<typename T>
+  bool HasProperty(FrameProperties::Descriptor<T> aProperty) const
+  {
+    return mProperties.Has(aProperty);
   }
+
+  // Add a property, or update an existing property for the given descriptor.
+  template<typename T>
+  void SetProperty(FrameProperties::Descriptor<T> aProperty,
+                   FrameProperties::PropertyType<T> aValue)
+  {
+    mProperties.Set(aProperty, aValue, this);
+  }
+
+  // Unconditionally add a property; use ONLY if the descriptor is known
+  // to NOT already be present.
+  template<typename T>
+  void AddProperty(FrameProperties::Descriptor<T> aProperty,
+                   FrameProperties::PropertyType<T> aValue)
+  {
+    mProperties.Add(aProperty, aValue);
+  }
+
+  template<typename T>
+  FrameProperties::PropertyType<T>
+  RemoveProperty(FrameProperties::Descriptor<T> aProperty,
+                 bool* aFoundResult = nullptr)
+  {
+    return mProperties.Remove(aProperty, aFoundResult);
+  }
+
+  template<typename T>
+  void DeleteProperty(FrameProperties::Descriptor<T> aProperty)
+  {
+    mProperties.Delete(aProperty, this);
+  }
+
+  void DeleteAllProperties()
+  {
+    mProperties.DeleteAll(this);
+  }
+
+  // Reports size of the FrameProperties for this frame and its descendants
+  size_t SizeOfFramePropertiesForTree(mozilla::MallocSizeOf aMallocSizeOf) const;
 
   /**
    * Return true if and only if this frame obeys visibility:hidden.
@@ -3742,7 +3810,7 @@ public:
    */
   bool FrameIsNonFirstInIBSplit() const {
     return (GetStateBits() & NS_FRAME_PART_OF_IBSPLIT) &&
-      FirstContinuation()->Properties().Get(nsIFrame::IBSplitPrevSibling());
+      FirstContinuation()->GetProperty(nsIFrame::IBSplitPrevSibling());
   }
 
   /**
@@ -3751,7 +3819,7 @@ public:
    */
   bool FrameIsNonLastInIBSplit() const {
     return (GetStateBits() & NS_FRAME_PART_OF_IBSPLIT) &&
-      FirstContinuation()->Properties().Get(nsIFrame::IBSplitSibling());
+      FirstContinuation()->GetProperty(nsIFrame::IBSplitSibling());
   }
 
   /**
@@ -3860,11 +3928,11 @@ private:
                                       DestroyPaintedPresShellList)
 
   nsTArray<nsWeakPtr>* PaintedPresShellList() {
-    nsTArray<nsWeakPtr>* list = Properties().Get(PaintedPresShellsProperty());
+    nsTArray<nsWeakPtr>* list = GetProperty(PaintedPresShellsProperty());
 
     if (!list) {
       list = new nsTArray<nsWeakPtr>();
-      Properties().Set(PaintedPresShellsProperty(), list);
+      SetProperty(PaintedPresShellsProperty(), list);
     }
 
     return list;
@@ -3885,6 +3953,11 @@ protected:
   }
 
   nsFrameState     mState;
+
+  /**
+   * List of properties attached to the frame.
+   */
+  FrameProperties  mProperties;
 
   // When there is an overflow area only slightly larger than mRect,
   // we store a set of four 1-byte deltas from the edges of mRect
@@ -3920,6 +3993,9 @@ protected:
 
   /** The ClassID of the concrete class of this instance. */
   ClassID mClass; // 1 byte
+
+  bool mMayHaveRoundedCorners : 1;
+  // There should be a 15-bit gap left here.
 
   // Helpers
   /**
@@ -4014,7 +4090,14 @@ protected:
   nsresult PeekOffsetParagraph(nsPeekOffsetStruct *aPos);
 
 private:
-  nsOverflowAreas* GetOverflowAreasProperty();
+  // Get a pointer to the overflow areas property attached to the frame.
+  nsOverflowAreas* GetOverflowAreasProperty() const {
+    MOZ_ASSERT(mOverflow.mType == NS_FRAME_OVERFLOW_LARGE);
+    nsOverflowAreas* overflow = GetProperty(OverflowAreasProperty());
+    MOZ_ASSERT(overflow);
+    return overflow;
+  }
+
   nsRect GetVisualOverflowFromDeltas() const {
     MOZ_ASSERT(mOverflow.mType != NS_FRAME_OVERFLOW_LARGE,
                "should not be called when overflow is in a property");
@@ -4475,6 +4558,24 @@ nsIFrame::IsFrameListSorted(nsFrameList& aFrameList)
 
   // We made it to the end without returning early, so the list is sorted.
   return true;
+}
+
+// Needs to be defined here rather than nsIFrameInlines.h, because it is used
+// within this header.
+nsPoint
+nsIFrame::GetNormalPosition(bool* aHasProperty) const
+{
+  nsPoint* normalPosition = GetProperty(NormalPositionProperty());
+  if (normalPosition) {
+    if (aHasProperty) {
+      *aHasProperty = true;
+    }
+    return *normalPosition;
+  }
+  if (aHasProperty) {
+    *aHasProperty = false;
+  }
+  return GetPosition();
 }
 
 #endif /* nsIFrame_h___ */

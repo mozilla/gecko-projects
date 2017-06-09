@@ -42,11 +42,15 @@ void write_color(vec4 color, float style, bool flip) {
 
     switch (int(style)) {
         case BORDER_STYLE_GROOVE:
+        {
             modulate = flip ? vec2(1.3, 0.7) : vec2(0.7, 1.3);
             break;
+        }
         case BORDER_STYLE_RIDGE:
+        {
             modulate = flip ? vec2(0.7, 1.3) : vec2(1.3, 0.7);
             break;
+        }
         default:
             modulate = vec2(1.0);
             break;
@@ -101,7 +105,7 @@ void write_clip_params(float style,
 void main(void) {
     Primitive prim = load_primitive();
     Border border = fetch_border(prim.prim_index);
-    int sub_part = prim.sub_index;
+    int sub_part = prim.user_data0;
     BorderCorners corners = get_border_corners(border, prim.local_rect);
     vec4 color = border.colors[sub_part];
 
@@ -180,14 +184,14 @@ void main(void) {
                                                     prim.z,
                                                     prim.layer,
                                                     prim.task,
-                                                    prim.local_rect.p0);
+                                                    prim.local_rect);
 #else
     VertexInfo vi = write_vertex(segment_rect,
                                  prim.local_clip_rect,
                                  prim.z,
                                  prim.layer,
                                  prim.task,
-                                 prim.local_rect.p0);
+                                 prim.local_rect);
 #endif
 
     vLocalPos = vi.local_pos;

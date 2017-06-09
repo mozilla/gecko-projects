@@ -198,5 +198,6 @@ def make_task_description(config, jobs):
             'extra': job.get('extra', {}),
             'worker': worker,
             'run': run,
+                       'os': 'linux',
         }
         yield task

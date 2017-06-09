@@ -106,8 +106,10 @@ public:
                                         const WebRenderScrollData& aScrollData) override;
   mozilla::ipc::IPCResult RecvDPGetSnapshot(PTextureParent* aTexture) override;
 
-  mozilla::ipc::IPCResult RecvAddExternalImageId(const ExternalImageId& aImageId,
-                                                 const CompositableHandle& aHandle) override;
+  mozilla::ipc::IPCResult RecvAddPipelineIdForAsyncCompositable(const wr::PipelineId& aPipelineIds,
+                                                                const CompositableHandle& aHandle) override;
+  mozilla::ipc::IPCResult RecvRemovePipelineIdForAsyncCompositable(const wr::PipelineId& aPipelineId) override;
+
   mozilla::ipc::IPCResult RecvAddExternalImageIdForCompositable(const ExternalImageId& aImageId,
                                                                 const CompositableHandle& aHandle) override;
   mozilla::ipc::IPCResult RecvRemoveExternalImageId(const ExternalImageId& aImageId) override;
@@ -115,6 +117,15 @@ public:
 
   mozilla::ipc::IPCResult RecvClearCachedResources() override;
   mozilla::ipc::IPCResult RecvForceComposite() override;
+
+  mozilla::ipc::IPCResult RecvSetConfirmedTargetAPZC(const uint64_t& aBlockId,
+                                                     nsTArray<ScrollableLayerGuid>&& aTargets) override;
+  mozilla::ipc::IPCResult RecvSetAsyncScrollOffset(const FrameMetrics::ViewID& aScrollId,
+                                                   const float& aX,
+                                                   const float& aY) override;
+  mozilla::ipc::IPCResult RecvSetAsyncZoom(const FrameMetrics::ViewID& aScrollId,
+                                           const float& aZoom) override;
+  mozilla::ipc::IPCResult RecvFlushApzRepaints() override;
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
   void SetWebRenderProfilerEnabled(bool aEnabled);
@@ -168,9 +179,14 @@ public:
     return ++sIdNameSpace;
   }
 
+  void FlushRendering(bool aIsSync);
+
+  void ScheduleComposition();
+
 private:
   virtual ~WebRenderBridgeParent();
 
+  uint64_t GetLayersId() const;
   void DeleteOldImages();
   void ProcessWebRenderCommands(const gfx::IntSize &aSize,
                                 InfallibleTArray<WebRenderParentCommand>& commands,
@@ -178,7 +194,6 @@ private:
                                 const WrSize& aContentSize,
                                 const ByteBuffer& dl,
                                 const WrBuiltDisplayListDescriptor& dlDesc);
-  void ScheduleComposition();
   void ClearResources();
   uint64_t GetChildLayerObserverEpoch() const { return mChildLayerObserverEpoch; }
   bool ShouldParentObserveEpoch();
@@ -203,6 +218,10 @@ private:
   // is populated with the property update details.
   bool PushAPZStateToWR(nsTArray<WrTransformProperty>& aTransformArray);
 
+  // Helper method to get an APZC reference from a scroll id. Uses the layers
+  // id of this bridge, and may return null if the APZC wasn't found.
+  already_AddRefed<AsyncPanZoomController> GetTargetAPZC(const FrameMetrics::ViewID& aId);
+
 private:
   struct PendingTransactionId {
     PendingTransactionId(wr::Epoch aEpoch, uint64_t aId)
@@ -222,6 +241,7 @@ private:
   std::vector<wr::ImageKey> mKeysToDelete;
   // XXX How to handle active keys of non-ExternalImages?
   nsDataHashtable<nsUint64HashKey, wr::ImageKey> mActiveKeys;
+  nsDataHashtable<nsUint64HashKey, RefPtr<WebRenderImageHost>> mAsyncCompositables;
   nsDataHashtable<nsUint64HashKey, RefPtr<WebRenderImageHost>> mExternalImageIds;
   nsTArray<ImageCompositeNotificationInfo> mImageCompositeNotifications;
 
@@ -238,7 +258,7 @@ private:
 
   bool mPaused;
   bool mDestroyed;
-  bool mIsSnapshotting;
+  bool mForceRendering;
 
   // Can only be accessed on the compositor thread.
   WebRenderScrollData mScrollData;

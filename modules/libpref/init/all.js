@@ -312,6 +312,22 @@ pref("media.cache_resume_threshold", 30);
 // amounts of network bandwidth prefetching huge videos.
 pref("media.cache_readahead_limit", 60);
 
+// Cache size hint (in bytes) for each MediaResourceIndex.
+// 0 -> no cache. Will use next power of 2, clamped to 32B-128KB.
+pref("media.cache.resource-index", 8192);
+
+// We'll throttle the download if the download rate is throttle-factor times
+// the estimated playback rate, AND we satisfy the cache readahead_limit
+// above. The estimated playback rate is time_duration/length_in_bytes.
+// This means we'll only throttle the download if there's no concern that
+// throttling would cause us to stop and buffer.
+pref("media.throttle-factor", 2);
+// By default, we'll throttle media download once we've reached the the
+// readahead_limit if the download is fast. This pref toggles the "and the
+// download is fast" check off, so that we can always throttle the download
+// once the readaheadd limit is reached even on a slow network.
+pref("media.throttle-regardless-of-download-rate", false);
+
 // Master HTML5 media volume scale.
 pref("media.volume_scale", "1.0");
 
@@ -341,10 +357,11 @@ pref("media.wmf.decoder.thread-count", -1);
 pref("media.wmf.low-latency.enabled", false);
 pref("media.wmf.skip-blacklist", false);
 #ifdef NIGHTLY_BUILD
-pref("media.wmf.vp9.enabled", true);
+pref("media.wmf.vp9.force.enabled", true);
 #else
-pref("media.wmf.vp9.enabled", false);
+pref("media.wmf.vp9.force.enabled", false);
 #endif
+pref("media.wmf.vp9.enabled", true);
 pref("media.wmf.allow-unsupported-resolutions", false);
 pref("media.windows-media-foundation.allow-d3d11-dxva", true);
 pref("media.wmf.disable-d3d11-for-dlls", "igd11dxva64.dll: 20.19.15.4463, 20.19.15.4454, 20.19.15.4444, 20.19.15.4416, 20.19.15.4404, 20.19.15.4390, 20.19.15.4380, 20.19.15.4377, 20.19.15.4364, 20.19.15.4360, 20.19.15.4352, 20.19.15.4331, 20.19.15.4326, 20.19.15.4300; igd10iumd32.dll: 20.19.15.4444, 20.19.15.4424, 20.19.15.4409, 20.19.15.4390, 20.19.15.4380, 20.19.15.4360, 10.18.10.4358, 20.19.15.4331, 20.19.15.4312, 20.19.15.4300, 10.18.15.4281, 10.18.15.4279, 10.18.10.4276, 10.18.15.4268, 10.18.15.4256, 10.18.10.4252, 10.18.15.4248, 10.18.14.4112, 10.18.10.3958, 10.18.10.3496, 10.18.10.3431, 10.18.10.3412, 10.18.10.3355, 9.18.10.3234, 9.18.10.3071, 9.18.10.3055, 9.18.10.3006; igd10umd32.dll: 9.17.10.4229, 9.17.10.3040, 9.17.10.2857, 8.15.10.2274, 8.15.10.2272, 8.15.10.2246, 8.15.10.1840, 8.15.10.1808; igd10umd64.dll: 9.17.10.4229, 9.17.10.2857, 10.18.10.3496; isonyvideoprocessor.dll: 4.1.2247.8090, 4.1.2153.6200; tosqep.dll: 1.2.15.526, 1.1.12.201, 1.0.11.318, 1.0.11.215, 1.0.10.1224; tosqep64.dll: 1.1.12.201, 1.0.11.215; nvwgf2um.dll: 10.18.13.6510, 10.18.13.5891, 10.18.13.5887, 10.18.13.5582, 10.18.13.5382, 9.18.13.4195, 9.18.13.3165; atidxx32.dll: 21.19.151.3, 21.19.142.257, 21.19.137.514, 21.19.137.1, 21.19.134.1, 21.19.128.7, 21.19.128.4, 20.19.0.32837, 20.19.0.32832, 8.17.10.682, 8.17.10.671, 8.17.10.661, 8.17.10.648, 8.17.10.644, 8.17.10.625, 8.17.10.605, 8.17.10.581, 8.17.10.569, 8.17.10.560, 8.17.10.545, 8.17.10.539, 8.17.10.531, 8.17.10.525, 8.17.10.520, 8.17.10.519, 8.17.10.514, 8.17.10.511, 8.17.10.494, 8.17.10.489, 8.17.10.483, 8.17.10.453, 8.17.10.451, 8.17.10.441, 8.17.10.436, 8.17.10.432, 8.17.10.425, 8.17.10.418, 8.17.10.414, 8.17.10.401, 8.17.10.395, 8.17.10.385, 8.17.10.378, 8.17.10.362, 8.17.10.355, 8.17.10.342, 8.17.10.331, 8.17.10.318, 8.17.10.310, 8.17.10.286, 8.17.10.269, 8.17.10.261, 8.17.10.247, 8.17.10.240, 8.15.10.212; atidxx64.dll: 21.19.151.3, 21.19.142.257, 21.19.137.514, 21.19.137.1, 21.19.134.1, 21.19.128.7, 21.19.128.4, 20.19.0.32832, 8.17.10.682, 8.17.10.661, 8.17.10.644, 8.17.10.625; nvumdshim.dll: 10.18.13.6822");
@@ -655,13 +672,8 @@ pref("apz.axis_lock.breakout_threshold", "0.03125");  // 1/32 inches
 pref("apz.axis_lock.breakout_angle", "0.3926991");    // PI / 8 (22.5 degrees)
 pref("apz.axis_lock.direct_pan_angle", "1.047197");   // PI / 3 (60 degrees)
 pref("apz.content_response_timeout", 400);
-#ifdef NIGHTLY_BUILD
 pref("apz.drag.enabled", true);
 pref("apz.drag.initial.enabled", true);
-#else
-pref("apz.drag.enabled", false);
-pref("apz.drag.initial.enabled", false);
-#endif
 pref("apz.danger_zone_x", 50);
 pref("apz.danger_zone_y", 100);
 pref("apz.disable_for_scroll_linked_effects", false);
@@ -1240,8 +1252,12 @@ pref("dom.forms.number", true);
 // platforms which don't have a color picker implemented yet.
 pref("dom.forms.color", true);
 
-// Support for input type=date and type=time. By default, disabled.
+// Support for input type=date and type=time. Enabled by default on Nightly.
+#ifdef NIGHTLY_BUILD
+pref("dom.forms.datetime", true);
+#else
 pref("dom.forms.datetime", false);
+#endif
 
 // Support for input type=month, type=week and type=datetime-local. By default,
 // disabled.
@@ -2071,11 +2087,15 @@ pref("network.auth.subresource-img-cross-origin-http-auth-allow", true);
 // in that case default credentials will always be used.
 pref("network.auth.private-browsing-sso", false);
 
-// Control how the throttling service works - number of ms that each
+// Control how throttling of http responses works - number of ms that each
 // suspend and resume period lasts (prefs named appropriately)
-pref("network.throttle.suspend-for", 3000);
-pref("network.throttle.resume-for", 200);
-pref("network.throttle.enable", true);
+pref("network.http.throttle.enable", true);
+pref("network.http.throttle.suspend-for", 3000);
+pref("network.http.throttle.resume-for", 200);
+// Delay we resume throttled background responses after the last unthrottled
+// response has finished.  Prevents resuming too soon during an active page load
+// at which sub-resource reqeusts quickly come and go.
+pref("network.http.throttle.resume-background-in", 400);
 
 pref("permissions.default.image",           1); // 1-Accept, 2-Deny, 3-dontAcceptForeign
 
@@ -2907,11 +2927,7 @@ pref("layout.css.control-characters.visible", true);
 pref("layout.css.column-span.enabled", false);
 
 // Is effect of xml:base disabled for style attribute?
-#ifdef RELEASE_OR_BETA
-pref("layout.css.style-attr-with-xml-base.disabled", false);
-#else
 pref("layout.css.style-attr-with-xml-base.disabled", true);
-#endif
 
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
@@ -4716,7 +4732,7 @@ pref("layers.tiles.adjust", true);
 // 0  -> full-tilt mode: Recomposite even if not transaction occured.
 pref("layers.offmainthreadcomposition.frame-rate", -1);
 
-#ifdef XP_MACOSX
+#if defined(XP_MACOSX) || defined (OS_OPENBSD)
 pref("layers.enable-tiles", true);
 pref("layers.tile-width", 512);
 pref("layers.tile-height", 512);
@@ -4831,9 +4847,11 @@ pref("extensions.webextensions.themes.enabled", false);
 pref("extensions.webextensions.themes.icons.enabled", false);
 pref("extensions.webextensions.remote", false);
 
+pref("layers.popups.compositing.enabled", false);
+
 // Report Site Issue button
 pref("extensions.webcompat-reporter.newIssueEndpoint", "https://webcompat.com/issues/new");
-#ifdef NIGHTLY_BUILD
+#ifndef RELEASE_OR_BETA
 pref("extensions.webcompat-reporter.enabled", true);
 #else
 pref("extensions.webcompat-reporter.enabled", false);

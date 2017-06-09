@@ -512,7 +512,11 @@ ReparentFrames(nsCSSFrameConstructor* aFrameConstructor,
 static inline bool
 IsFramePartOfIBSplit(nsIFrame* aFrame)
 {
-  return (aFrame->GetStateBits() & NS_FRAME_PART_OF_IBSPLIT) != 0;
+  bool result = (aFrame->GetStateBits() & NS_FRAME_PART_OF_IBSPLIT) != 0;
+  MOZ_ASSERT(!result || static_cast<nsBlockFrame*>(do_QueryFrame(aFrame)) ||
+                        static_cast<nsInlineFrame*>(do_QueryFrame(aFrame)),
+             "only block/inline frames can have NS_FRAME_PART_OF_IBSPLIT");
+  return result;
 }
 
 static nsContainerFrame* GetIBSplitSibling(nsIFrame* aFrame)
@@ -521,9 +525,8 @@ static nsContainerFrame* GetIBSplitSibling(nsIFrame* aFrame)
 
   // We only store the "ib-split sibling" annotation with the first
   // frame in the continuation chain. Walk back to find that frame now.
-  return static_cast<nsContainerFrame*>
-    (aFrame->FirstContinuation()->
-       Properties().Get(nsIFrame::IBSplitSibling()));
+  return aFrame->FirstContinuation()->
+           GetProperty(nsIFrame::IBSplitSibling());
 }
 
 static nsContainerFrame* GetIBSplitPrevSibling(nsIFrame* aFrame)
@@ -532,9 +535,8 @@ static nsContainerFrame* GetIBSplitPrevSibling(nsIFrame* aFrame)
 
   // We only store the ib-split sibling annotation with the first
   // frame in the continuation chain. Walk back to find that frame now.
-  return static_cast<nsContainerFrame*>
-    (aFrame->FirstContinuation()->
-       Properties().Get(nsIFrame::IBSplitPrevSibling()));
+  return aFrame->FirstContinuation()->
+           GetProperty(nsIFrame::IBSplitPrevSibling());
 }
 
 static nsContainerFrame*
@@ -555,7 +557,7 @@ GetLastIBSplitSibling(nsIFrame* aFrame, bool aReturnEmptyTrailingInline)
 }
 
 static void
-SetFrameIsIBSplit(nsContainerFrame* aFrame, nsIFrame* aIBSplitSibling)
+SetFrameIsIBSplit(nsContainerFrame* aFrame, nsContainerFrame* aIBSplitSibling)
 {
   NS_PRECONDITION(aFrame, "bad args!");
 
@@ -576,9 +578,8 @@ SetFrameIsIBSplit(nsContainerFrame* aFrame, nsIFrame* aIBSplitSibling)
 
     // Store the ib-split sibling (if we were given one) with the
     // first frame in the flow.
-    FramePropertyTable* props = aFrame->PresContext()->PropertyTable();
-    props->Set(aFrame, nsIFrame::IBSplitSibling(), aIBSplitSibling);
-    props->Set(aIBSplitSibling, nsIFrame::IBSplitPrevSibling(), aFrame);
+    aFrame->SetProperty(nsIFrame::IBSplitSibling(), aIBSplitSibling);
+    aIBSplitSibling->SetProperty(nsIFrame::IBSplitPrevSibling(), aFrame);
   }
 }
 
@@ -723,10 +724,9 @@ nsAbsoluteItems::nsAbsoluteItems(nsContainerFrame* aContainingBlock)
 void
 nsAbsoluteItems::AddChild(nsIFrame* aChild)
 {
-  NS_ASSERTION(aChild->PresContext()->FrameManager()->
-               GetPlaceholderFrameFor(aChild),
-               "Child without placeholder being added to nsAbsoluteItems?");
   aChild->AddStateBits(NS_FRAME_OUT_OF_FLOW);
+  NS_ASSERTION(aChild->GetPlaceholderFrame(),
+               "Child without placeholder being added to nsAbsoluteItems?");
   nsFrameItems::AddChild(aChild);
 }
 
@@ -3090,13 +3090,11 @@ nsCSSFrameConstructor::CreatePlaceholderFrameFor(nsIPresShell*     aPresShell,
 
   placeholderFrame->Init(aContent, aParentFrame, aPrevInFlow);
 
-  // The placeholder frame has a pointer back to the out-of-flow frame
+  // Associate the placeholder/out-of-flow with each other.
   placeholderFrame->SetOutOfFlowFrame(aFrame);
+  aFrame->SetProperty(nsIFrame::PlaceholderFrameProperty(), placeholderFrame);
 
   aFrame->AddStateBits(NS_FRAME_OUT_OF_FLOW);
-
-  // Add mapping from absolutely positioned frame to its placeholder frame
-  aPresShell->FrameManager()->RegisterPlaceholderFrame(placeholderFrame);
 
   return placeholderFrame;
 }
@@ -3811,6 +3809,9 @@ nsCSSFrameConstructor::FindObjectData(Element* aElement,
     SIMPLE_INT_CREATE(nsIObjectLoadingContent::TYPE_IMAGE,
                       NS_NewImageFrame),
     SIMPLE_INT_CREATE(nsIObjectLoadingContent::TYPE_DOCUMENT,
+                      NS_NewSubDocumentFrame),
+    // Fake plugin handlers load as documents
+    SIMPLE_INT_CREATE(nsIObjectLoadingContent::TYPE_FAKE_PLUGIN,
                       NS_NewSubDocumentFrame)
     // Nothing for TYPE_NULL so we'll construct frames by display there
   };
@@ -6176,11 +6177,11 @@ AddGenConPseudoToFrame(nsIFrame* aOwnerFrame, nsIContent* aContent)
   // FIXME(emilio): Remove this property, and use the frame of the generated
   // content itself to tear the content down? It should be quite simpler.
 
-  FrameProperties props = aOwnerFrame->Properties();
-  nsIFrame::ContentArray* value = props.Get(nsIFrame::GenConProperty());
+  nsIFrame::ContentArray* value =
+    aOwnerFrame->GetProperty(nsIFrame::GenConProperty());
   if (!value) {
     value = new nsIFrame::ContentArray;
-    props.Set(nsIFrame::GenConProperty(), value);
+    aOwnerFrame->AddProperty(nsIFrame::GenConProperty(), value);
   }
   value->AppendElement(aContent);
 }
@@ -6436,7 +6437,7 @@ AdjustAppendParentForAfterContent(nsFrameManager* aFrameManager,
   // frames to find the first one that is either a ::after frame for an
   // ancestor of aChild or a frame that is for a node later in the
   // document than aChild and return that in aAfterFrame.
-  if (aParentFrame->Properties().Get(nsIFrame::GenConProperty()) ||
+  if (aParentFrame->GetProperty(nsIFrame::GenConProperty()) ||
       nsLayoutUtils::HasPseudoStyle(aContainer, aParentFrame->StyleContext(),
                                     CSSPseudoElementType::after,
                                     aParentFrame->PresContext()) ||
@@ -6792,7 +6793,7 @@ nsCSSFrameConstructor::FindFrameForContentSibling(nsIContent* aContent,
   // If the frame is out-of-flow, GetPrimaryFrame() will have returned the
   // out-of-flow frame; we want the placeholder.
   if (sibling->GetStateBits() & NS_FRAME_OUT_OF_FLOW) {
-    nsIFrame* placeholderFrame = GetPlaceholderFrameFor(sibling);
+    nsIFrame* placeholderFrame = sibling->GetPlaceholderFrame();
     NS_ASSERTION(placeholderFrame, "no placeholder for out-of-flow frame");
     sibling = placeholderFrame;
   }
@@ -8219,7 +8220,7 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aContainer,
         // the placeholder frame.
         if (insertion.mParentFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW) {
           nsPlaceholderFrame* placeholderFrame =
-            GetPlaceholderFrameFor(insertion.mParentFrame);
+            insertion.mParentFrame->GetPlaceholderFrame();
           NS_ASSERTION(placeholderFrame, "No placeholder for out-of-flow?");
           insertion.mParentFrame = placeholderFrame->GetParent();
         } else {
@@ -8577,7 +8578,7 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent*  aContainer,
     }
 
     nsIFrame* ancestorFrame = ancestor->GetPrimaryFrame();
-    if (ancestorFrame->Properties().Get(nsIFrame::GenConProperty())) {
+    if (ancestorFrame->GetProperty(nsIFrame::GenConProperty())) {
       *aDidReconstruct = true;
       LAYOUT_PHASE_TEMP_EXIT();
 
@@ -8730,7 +8731,7 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent*  aContainer,
     // :first-letter style applies.
     nsIFrame* inflowChild = childFrame;
     if (childFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW) {
-      inflowChild = GetPlaceholderFrameFor(childFrame);
+      inflowChild = childFrame->GetPlaceholderFrame();
       NS_ASSERTION(inflowChild, "No placeholder for out-of-flow?");
     }
     nsContainerFrame* containingBlock =
@@ -8786,7 +8787,7 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent*  aContainer,
 
     // Notify the parent frame that it should delete the frame
     if (childFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW) {
-      childFrame = GetPlaceholderFrameFor(childFrame);
+      childFrame = childFrame->GetPlaceholderFrame();
       NS_ASSERTION(childFrame, "Missing placeholder frame for out of flow.");
       parentFrame = childFrame->GetParent();
     }
@@ -9428,7 +9429,7 @@ nsCSSFrameConstructor::ReplicateFixedFrames(nsPageContentFrame* aParentFrame)
   // are within fixed frames, because that would cause duplicates on the new
   // page - bug 389619)
   for (nsIFrame* fixed = firstFixed; fixed; fixed = fixed->GetNextSibling()) {
-    nsIFrame* prevPlaceholder = GetPlaceholderFrameFor(fixed);
+    nsIFrame* prevPlaceholder = fixed->GetPlaceholderFrame();
     if (prevPlaceholder &&
         nsLayoutUtils::IsProperAncestorFrame(prevCanvasFrame, prevPlaceholder)) {
       // We want to use the same style as the primary style frame for
@@ -9694,7 +9695,7 @@ nsCSSFrameConstructor::MaybeRecreateContainerForFrameRemoval(nsIFrame* aFrame,
   // Now check for possibly needing to reconstruct due to a pseudo parent
   nsIFrame* inFlowFrame =
     (aFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW) ?
-      GetPlaceholderFrameFor(aFrame) : aFrame;
+      aFrame->GetPlaceholderFrame() : aFrame;
   MOZ_ASSERT(inFlowFrame, "How did that happen?");
   MOZ_ASSERT(inFlowFrame == inFlowFrame->FirstContinuation(),
              "placeholder for primary frame has previous continuations?");
@@ -11893,7 +11894,7 @@ nsCSSFrameConstructor::RemoveFloatingFirstLetterFrames(
   }
 
   // Discover the placeholder frame for the letter frame
-  nsPlaceholderFrame* placeholderFrame = GetPlaceholderFrameFor(floatFrame);
+  nsPlaceholderFrame* placeholderFrame = floatFrame->GetPlaceholderFrame();
   if (!placeholderFrame) {
     // Somethings really wrong
     return;

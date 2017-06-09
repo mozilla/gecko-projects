@@ -32,7 +32,6 @@ class CSSStyleSheet;
 class ServoRestyleManager;
 class ServoStyleSheet;
 struct Keyframe;
-struct ServoComputedValuesWithParent;
 class ServoElementSnapshotTable;
 } // namespace mozilla
 class nsCSSCounterStyleRule;
@@ -45,6 +44,26 @@ struct RawServoRuleNode;
 struct TreeMatchContext;
 
 namespace mozilla {
+
+/**
+ * A few flags used to track which kind of stylist state we may need to
+ * update.
+ */
+enum class StylistState : uint8_t {
+  /** The stylist is not dirty, we should do nothing */
+  NotDirty = 0,
+
+  /** The style sheets have changed, so we need to update the style data. */
+  StyleSheetsDirty = 1 << 0,
+
+  /**
+   * All style data is dirty and both style sheet data and default computed
+   * values need to be recomputed.
+   */
+  FullyDirty = 1 << 1,
+};
+
+MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(StylistState)
 
 /**
  * The set of style sheets that apply to a document, backed by a Servo
@@ -105,18 +124,12 @@ public:
   void BeginShutdown();
   void Shutdown();
 
-  void RecordStyleSheetChange(mozilla::ServoStyleSheet*, StyleSheet::ChangeType)
-  {
-    // TODO(emilio): Record which kind of changes have we handled, and act
-    // properly in InvalidateStyleForCSSRuleChanges instead of invalidating the
-    // whole document.
-    NoteStyleSheetsChanged();
-  }
+  void RecordStyleSheetChange(mozilla::ServoStyleSheet*, StyleSheet::ChangeType);
 
   void RecordShadowStyleChange(mozilla::dom::ShadowRoot* aShadowRoot) {
     // FIXME(emilio): When we properly support shadow dom we'll need to do
     // better.
-    NoteStyleSheetsChanged();
+    ForceAllStyleDirty();
   }
 
   bool StyleSheetsHaveChanged() const
@@ -303,7 +316,7 @@ public:
    * restyle.  Calling this will ensure that the Stylist rebuilds its
    * selector maps.
    */
-  void NoteStyleSheetsChanged();
+  void ForceAllStyleDirty();
 
   /**
    * Helper for correctly calling RebuildStylist without paying the cost of an
@@ -343,8 +356,7 @@ public:
   nsTArray<ComputedKeyframeValues>
   GetComputedKeyframeValuesFor(const nsTArray<Keyframe>& aKeyframes,
                                dom::Element* aElement,
-                               const ServoComputedValuesWithParent&
-                                 aServoValues);
+                               ServoComputedValuesBorrowed aComputedValues);
 
   bool AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray);
 
@@ -364,8 +376,9 @@ public:
                          RawServoDeclarationBlockBorrowed aDeclarations);
 
   already_AddRefed<RawServoAnimationValue>
-  ComputeAnimationValue(RawServoDeclarationBlock* aDeclaration,
-                        const ServoComputedValuesWithParent& aComputedValues);
+  ComputeAnimationValue(dom::Element* aElement,
+                        RawServoDeclarationBlock* aDeclaration,
+                        ServoComputedValuesBorrowed aComputedValues);
 
   void AppendTask(PostTraversalTask aTask)
   {
@@ -478,29 +491,11 @@ private:
   void PreTraverseSync();
 
   /**
-   * A tri-state used to track which kind of stylist state we may need to
-   * update.
-   */
-  enum class StylistState : uint8_t {
-    /** The stylist is not dirty, we should do nothing */
-    NotDirty,
-    /** The style sheets have changed, so we need to update the style data. */
-    StyleSheetsDirty,
-    /**
-     * All style data is dirty and both style sheet data and default computed
-     * values need to be recomputed.
-     */
-    FullyDirty,
-  };
-
-  /**
    * Note that the stylist needs a style flush due to style sheet changes.
    */
   void SetStylistStyleSheetsDirty()
   {
-    if (mStylistState == StylistState::NotDirty) {
-      mStylistState = StylistState::StyleSheetsDirty;
-    }
+    mStylistState |= StylistState::StyleSheetsDirty;
   }
 
   bool StylistNeedsUpdate() const

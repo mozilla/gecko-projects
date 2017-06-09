@@ -321,6 +321,8 @@
          <observes element="viewTabsSidebar" attribute="checked"/>
        </toolbarbutton>
       <toolbarseparator/>
+      <vbox id="sidebar-extensions"></vbox>
+      <toolbarseparator/>
       <toolbarbutton id="sidebar-reverse-position"
                      class="subviewbutton"
                      oncommand="SidebarUI.reversePosition()"/>
@@ -333,6 +335,8 @@
     <menupopup id="toolbar-context-menu"
                onpopupshowing="onViewToolbarsPopupShowing(event, document.getElementById('viewToolbarsMenuSeparator'));">
       <menuitem oncommand="gCustomizeMode.addToPanel(document.popupNode)"
+                photonaccesskey="&customizeMenu.pinToOverflowMenu.accesskey;"
+                photonlabel="&customizeMenu.pinToOverflowMenu.label;"
                 accesskey="&customizeMenu.moveToPanel.accesskey;"
                 label="&customizeMenu.moveToPanel.label;"
                 contexttype="toolbaritem"
@@ -457,6 +461,12 @@
         <panelview id="page-action-mainView"
                    class="PanelUI-subView">
           <vbox class="panel-subview-body">
+            <toolbarbutton id="page-action-bookmark-button"
+                           class="subviewbutton subviewbutton-iconic"
+                           observes="bookmarkThisPageBroadcaster"
+                           command="Browser:AddBookmarkAs"
+                           onclick="gPageActionButton.panel.hidePopup();"/>
+            <toolbarseparator/>
             <toolbarbutton id="page-action-copy-url-button"
                            class="subviewbutton subviewbutton-iconic"
                            label="&copyURLCmd.label;"
@@ -601,6 +611,7 @@
                 id="syncedTabsRefreshFilter"/>
     </menupopup>
   </popupset>
+  <box id="appMenu-viewCache" hidden="true"/>
 
 #ifdef CAN_DRAW_IN_TITLEBAR
 <vbox id="titlebar">
@@ -1184,6 +1195,11 @@
                      type="checkbox"
                      label="&fullScreenCmd.label;"
                      tooltip="dynamic-shortcut-tooltip"/>
+#ifdef MOZ_PHOTON_THEME
+      <toolbarbutton id="library-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
+                     oncommand="PanelUI.showSubView('appMenu-libraryView', this, null, true);"
+                     label="&places.library.title;"/>
+#endif
     </toolbarpalette>
   </toolbox>
 

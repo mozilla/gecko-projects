@@ -56,7 +56,7 @@
 #include "mozilla/StyleAnimationValue.h"
 #include "mozilla/SystemGroup.h"
 #include "mozilla/ServoMediaList.h"
-#include "mozilla/ServoComputedValuesWithParent.h"
+#include "mozilla/RWLock.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ElementInlines.h"
 #include "mozilla/dom/HTMLTableCellElement.h"
@@ -83,6 +83,37 @@ using namespace mozilla::dom;
 
 
 static Mutex* sServoFontMetricsLock = nullptr;
+static RWLock* sServoLangFontPrefsLock = nullptr;
+
+
+static
+const nsFont*
+ThreadSafeGetDefaultFontHelper(const nsPresContext* aPresContext, nsIAtom* aLanguage)
+{
+  bool needsCache = false;
+  const nsFont* retval;
+
+  {
+    AutoReadLock guard(*sServoLangFontPrefsLock);
+    retval = aPresContext->GetDefaultFont(kPresContext_DefaultVariableFont_ID,
+                                          aLanguage, &needsCache);
+  }
+  if (!needsCache) {
+    return retval;
+  }
+  {
+    AutoWriteLock guard(*sServoLangFontPrefsLock);
+  retval = aPresContext->GetDefaultFont(kPresContext_DefaultVariableFont_ID,
+                                        aLanguage, nullptr);
+  }
+  return retval;
+}
+
+void
+AssertIsMainThreadOrServoLangFontPrefsCacheLocked()
+{
+  MOZ_ASSERT(NS_IsMainThread() || sServoLangFontPrefsLock->LockedForWritingByCurrentThread());
+}
 
 uint32_t
 Gecko_ChildrenCount(RawGeckoNodeBorrowed aNode)
@@ -379,6 +410,22 @@ Gecko_GetStyleAttrDeclarationBlock(RawGeckoElementBorrowed aElement)
   return decl->AsServo()->RefRawStrong();
 }
 
+void
+Gecko_UnsetDirtyStyleAttr(RawGeckoElementBorrowed aElement)
+{
+  DeclarationBlock* decl = aElement->GetInlineStyleDeclaration();
+  if (!decl) {
+    return;
+  }
+  if (decl->IsGecko()) {
+    // XXX This can happen when nodes are adopted from a Gecko-style-backend
+    //     document into a Servo-style-backend document.  See bug 1330051.
+    NS_WARNING("stylo: requesting a Gecko declaration block?");
+    return;
+  }
+  decl->UnsetDirty();
+}
+
 RawServoDeclarationBlockStrongBorrowedOrNull
 Gecko_GetSMILOverrideDeclarationBlock(RawGeckoElementBorrowed aElement)
 {
@@ -509,8 +556,6 @@ Gecko_UpdateAnimations(RawGeckoElementBorrowed aElement,
 
   nsIAtom* pseudoTag = PseudoTagAndCorrectElementForAnimation(aElement);
   if (presContext->IsDynamic() && aElement->IsInComposedDoc()) {
-    const ServoComputedValuesWithParent servoValues =
-      { aComputedValues, aParentComputedValues };
     CSSPseudoElementType pseudoType =
       nsCSSPseudoElements::GetPseudoType(pseudoTag,
                                          CSSEnabledState::eForAllContent);
@@ -518,7 +563,7 @@ Gecko_UpdateAnimations(RawGeckoElementBorrowed aElement,
     if (aTasks & UpdateAnimationsTasks::CSSAnimations) {
       presContext->AnimationManager()->
         UpdateAnimations(const_cast<dom::Element*>(aElement), pseudoType,
-                         servoValues);
+                         aComputedValues);
     }
 
     // aComputedValues might be nullptr if the target element is now in a
@@ -533,16 +578,14 @@ Gecko_UpdateAnimations(RawGeckoElementBorrowed aElement,
 
     if (aTasks & UpdateAnimationsTasks::CSSTransitions) {
       MOZ_ASSERT(aOldComputedValues);
-      const ServoComputedValuesWithParent oldServoValues =
-        { aOldComputedValues, nullptr };
       presContext->TransitionManager()->
         UpdateTransitions(const_cast<dom::Element*>(aElement), pseudoType,
-                          oldServoValues, servoValues);
+                          aOldComputedValues, aComputedValues);
     }
 
     if (aTasks & UpdateAnimationsTasks::EffectProperties) {
       presContext->EffectCompositor()->UpdateEffectProperties(
-        servoValues, const_cast<dom::Element*>(aElement), pseudoType);
+        aComputedValues, const_cast<dom::Element*>(aElement), pseudoType);
     }
 
     if (aTasks & UpdateAnimationsTasks::CascadeResults) {
@@ -1083,9 +1126,7 @@ Gecko_nsFont_InitSystem(nsFont* aDest, int32_t aFontId,
                         const nsStyleFont* aFont, RawGeckoPresContextBorrowed aPresContext)
 {
   MutexAutoLock lock(*sServoFontMetricsLock);
-  const nsFont* defaultVariableFont =
-    aPresContext->GetDefaultFont(kPresContext_DefaultVariableFont_ID,
-                                 aFont->mLanguage);
+  const nsFont* defaultVariableFont = ThreadSafeGetDefaultFontHelper(aPresContext, aFont->mLanguage);
 
   // We have passed uninitialized memory to this function,
   // initialize it. We can't simply return an nsFont because then
@@ -1129,15 +1170,33 @@ Gecko_CopyImageOrientationFrom(nsStyleVisibility* aDst,
 }
 
 void
-Gecko_SetListStyleType(nsStyleList* aList, nsIAtom* aName)
+Gecko_SetCounterStyleToName(CounterStylePtr* aPtr, nsIAtom* aName)
 {
-  aList->SetListStyleType(aName);
+  *aPtr = already_AddRefed<nsIAtom>(aName);
 }
 
 void
-Gecko_CopyListStyleTypeFrom(nsStyleList* aDst, const nsStyleList* aSrc)
+Gecko_SetCounterStyleToSymbols(CounterStylePtr* aPtr, uint8_t aSymbolsType,
+                               nsACString const* const* aSymbols,
+                               uint32_t aSymbolsCount)
 {
-  aDst->CopyListStyleTypeFrom(*aSrc);
+  nsTArray<nsString> symbols(aSymbolsCount);
+  for (uint32_t i = 0; i < aSymbolsCount; i++) {
+    symbols.AppendElement(NS_ConvertUTF8toUTF16(*aSymbols[i]));
+  }
+  *aPtr = new AnonymousCounterStyle(aSymbolsType, Move(symbols));
+}
+
+void
+Gecko_SetCounterStyleToString(CounterStylePtr* aPtr, const nsACString* aSymbol)
+{
+  *aPtr = new AnonymousCounterStyle(NS_ConvertUTF8toUTF16(*aSymbol));
+}
+
+void
+Gecko_CopyCounterStyle(CounterStylePtr* aDst, const CounterStylePtr* aSrc)
+{
+  *aDst = *aSrc;
 }
 
 already_AddRefed<css::URLValue>
@@ -1694,6 +1753,21 @@ Gecko_nsStyleSVG_CopyDashArray(nsStyleSVG* aDst, const nsStyleSVG* aSrc)
   aDst->mStrokeDasharray = aSrc->mStrokeDasharray;
 }
 
+void
+Gecko_nsStyleSVG_SetContextPropertiesLength(nsStyleSVG* aSvg, uint32_t aLen)
+{
+  aSvg->mContextProps.Clear();
+  aSvg->mContextProps.SetLength(aLen);
+}
+
+void
+Gecko_nsStyleSVG_CopyContextProperties(nsStyleSVG* aDst, const nsStyleSVG* aSrc)
+{
+  aDst->mContextProps = aSrc->mContextProps;
+  aDst->mContextPropsBits = aSrc->mContextPropsBits;
+}
+
+
 css::URLValue*
 Gecko_NewURLValue(ServoBundledURI aURI)
 {
@@ -1954,11 +2028,29 @@ void
 Gecko_nsStyleFont_FixupNoneGeneric(nsStyleFont* aFont,
                                    RawGeckoPresContextBorrowed aPresContext)
 {
-  const nsFont* defaultVariableFont =
-    aPresContext->GetDefaultFont(kPresContext_DefaultVariableFont_ID,
-                                 aFont->mLanguage);
+  const nsFont* defaultVariableFont = ThreadSafeGetDefaultFontHelper(aPresContext, aFont->mLanguage);
   nsRuleNode::FixupNoneGeneric(&aFont->mFont, aPresContext,
                                aFont->mGenericID, defaultVariableFont);
+}
+
+void
+Gecko_nsStyleFont_FixupMinFontSize(nsStyleFont* aFont,
+                                   RawGeckoPresContextBorrowed aPresContext)
+{
+  nscoord minFontSize;
+  bool needsCache = false;
+
+  {
+    AutoReadLock guard(*sServoLangFontPrefsLock);
+    minFontSize = aPresContext->MinFontSize(aFont->mLanguage, &needsCache);
+  }
+
+  if (needsCache) {
+    AutoWriteLock guard(*sServoLangFontPrefsLock);
+    minFontSize = aPresContext->MinFontSize(aFont->mLanguage, nullptr);
+  }
+
+  nsRuleNode::ApplyMinFontSize(aFont, aPresContext, minFontSize);
 }
 
 void
@@ -1993,12 +2085,14 @@ InitializeServo()
   Servo_Initialize(URLExtraData::Dummy());
 
   sServoFontMetricsLock = new Mutex("Gecko_GetFontMetrics");
+  sServoLangFontPrefsLock = new RWLock("nsPresContext::GetDefaultFont");
 }
 
 void
 ShutdownServo()
 {
   delete sServoFontMetricsLock;
+  delete sServoLangFontPrefsLock;
   Servo_Shutdown();
 }
 
@@ -2138,6 +2232,23 @@ Gecko_AddPropertyToSet(nsCSSPropertyIDSetBorrowedMut aPropertySet,
                        nsCSSPropertyID aProperty)
 {
   aPropertySet->AddProperty(aProperty);
+}
+
+int32_t
+Gecko_RegisterNamespace(nsIAtom* aNamespace)
+{
+  int32_t id;
+
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsAutoString str;
+  aNamespace->ToString(str);
+  nsresult rv = nsContentUtils::NameSpaceManager()->RegisterNameSpace(str, id);
+
+  if (NS_FAILED(rv)) {
+    return -1;
+  }
+  return id;
 }
 
 NS_IMPL_FFI_REFCOUNTING(nsCSSFontFaceRule, CSSFontFaceRule);

@@ -346,14 +346,13 @@ class BuildOptionParser(object):
         'add-on-devel': 'builds/releng_sub_%s_configs/%s_add-on-devel.py',
         'asan': 'builds/releng_sub_%s_configs/%s_asan.py',
         'asan-tc': 'builds/releng_sub_%s_configs/%s_asan_tc.py',
+        'fuzzing-asan-tc': 'builds/releng_sub_%s_configs/%s_fuzzing_asan_tc.py',
         'tsan': 'builds/releng_sub_%s_configs/%s_tsan.py',
         'cross-debug': 'builds/releng_sub_%s_configs/%s_cross_debug.py',
         'cross-debug-st-an': 'builds/releng_sub_%s_configs/%s_cross_debug_st_an.py',
         'cross-debug-artifact': 'builds/releng_sub_%s_configs/%s_cross_debug_artifact.py',
         'cross-opt-st-an': 'builds/releng_sub_%s_configs/%s_cross_opt_st_an.py',
         'cross-artifact': 'builds/releng_sub_%s_configs/%s_cross_artifact.py',
-        'cross-qr-debug': 'builds/releng_sub_%s_configs/%s_cross_qr_debug.py',
-        'cross-qr-opt': 'builds/releng_sub_%s_configs/%s_cross_qr_opt.py',
         'debug': 'builds/releng_sub_%s_configs/%s_debug.py',
         'asan-and-debug': 'builds/releng_sub_%s_configs/%s_asan_and_debug.py',
         'asan-tc-and-debug': 'builds/releng_sub_%s_configs/%s_asan_tc_and_debug.py',
@@ -382,8 +381,6 @@ class BuildOptionParser(object):
         'valgrind' : 'builds/releng_sub_%s_configs/%s_valgrind.py',
         'artifact': 'builds/releng_sub_%s_configs/%s_artifact.py',
         'debug-artifact': 'builds/releng_sub_%s_configs/%s_debug_artifact.py',
-        'qr-debug': 'builds/releng_sub_%s_configs/%s_qr_debug.py',
-        'qr-opt': 'builds/releng_sub_%s_configs/%s_qr_opt.py',
         'devedition': 'builds/releng_sub_%s_configs/%s_devedition.py',
     }
     build_pool_cfg_file = 'builds/build_pool_specifics.py'
@@ -1620,8 +1617,16 @@ or run without that action (ie: --no-{action})"
                 buildprops,
                 os.path.join(dirs['abs_work_dir'], 'buildprops.json'))
 
+        if 'MOZILLABUILD' in os.environ:
+            mach = [
+                os.path.join(os.environ['MOZILLABUILD'], 'msys', 'bin', 'bash.exe'),
+                os.path.join(dirs['abs_src_dir'], 'mach')
+            ]
+        else:
+            mach = [sys.executable, 'mach']
+
         return_code = self.run_command_m(
-            command=[sys.executable, 'mach', '--log-no-times', 'build', '-v'],
+            command=mach + ['--log-no-times', 'build', '-v'],
             cwd=dirs['abs_src_dir'],
             env=env,
             output_timeout=self.config.get('max_build_output_timeout', 60 * 40)

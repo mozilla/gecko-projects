@@ -218,10 +218,12 @@ CustomizeMode.prototype = {
     }
 
     if (!gTab) {
-      this.setTab(this.browser.loadOneTab("about:blank",
-                                          { inBackground: false,
-                                            forceNotRemote: true,
-                                            skipAnimation: true }));
+      this.setTab(this.browser.loadOneTab("about:blank", {
+        inBackground: false,
+        forceNotRemote: true,
+        skipAnimation: true,
+        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+      }));
       return;
     }
     if (!gTab.selected) {
@@ -776,7 +778,9 @@ CustomizeMode.prototype = {
     if (aNode.localName == "toolbarpaletteitem" && aNode.firstChild) {
       aNode = aNode.firstChild;
     }
-    CustomizableUI.addWidgetToArea(aNode.id, CustomizableUI.AREA_PANEL);
+    let panel = gPhotonStructure ? CustomizableUI.AREA_FIXED_OVERFLOW_PANEL
+                                 : CustomizableUI.AREA_PANEL;
+    CustomizableUI.addWidgetToArea(aNode.id, panel);
     if (!this._customizing) {
       CustomizableUI.dispatchToolboxEvent("customizationchange");
     }

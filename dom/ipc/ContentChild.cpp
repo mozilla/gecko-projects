@@ -73,7 +73,12 @@
 #include "imgLoader.h"
 #include "GMPServiceChild.h"
 
+#ifdef MOZ_GECKO_PROFILER
+#include "ChildProfilerController.h"
+#endif
+
 #if defined(MOZ_CONTENT_SANDBOX)
+#include "mozilla/SandboxSettings.h"
 #if defined(XP_WIN)
 #define TARGET_SANDBOX_EXPORTS
 #include "mozilla/sandboxTarget.h"
@@ -1127,6 +1132,15 @@ ContentChild::RecvInitGMPService(Endpoint<PGMPServiceChild>&& aGMPService)
 }
 
 mozilla::ipc::IPCResult
+ContentChild::RecvInitProfiler(Endpoint<PProfilerChild>&& aEndpoint)
+{
+#ifdef MOZ_GECKO_PROFILER
+  mProfilerController = ChildProfilerController::Create(Move(aEndpoint));
+#endif
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
 ContentChild::RecvGMPsChanged(nsTArray<GMPCapabilityData>&& capabilities)
 {
   GeckoMediaPluginServiceChild::UpdateGMPCapabilities(Move(capabilities));
@@ -1329,7 +1343,7 @@ GetDirectoryPath(const char *aPath) {
 static bool
 StartMacOSContentSandbox()
 {
-  int sandboxLevel = Preferences::GetInt("security.sandbox.content.level");
+  int sandboxLevel = GetEffectiveContentSandboxLevel();
   if (sandboxLevel < 1) {
     return false;
   }
@@ -2608,60 +2622,6 @@ ContentChild::DeallocPOfflineCacheUpdateChild(POfflineCacheUpdateChild* actor)
 }
 
 mozilla::ipc::IPCResult
-ContentChild::RecvStartProfiler(const ProfilerInitParams& params)
-{
-  nsTArray<const char*> filterArray;
-  for (size_t i = 0; i < params.filters().Length(); ++i) {
-    filterArray.AppendElement(params.filters()[i].get());
-  }
-
-  profiler_start(params.entries(), params.interval(), params.features(),
-                 filterArray.Elements(), filterArray.Length());
-
- return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-ContentChild::RecvStopProfiler()
-{
-  profiler_stop();
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-ContentChild::RecvPauseProfiler(const bool& aPause)
-{
-  if (aPause) {
-    profiler_pause();
-  } else {
-    profiler_resume();
-  }
-
-  return IPC_OK();
-}
-
-void
-ContentChild::GatherProfile(bool aIsExitProfile)
-{
-  nsCString profileCString;
-  UniquePtr<char[]> profile = profiler_get_profile();
-  if (profile) {
-    profileCString = nsCString(profile.get(), strlen(profile.get()));
-  } else {
-    profileCString = EmptyCString();
-  }
-
-  Unused << SendProfile(profileCString, aIsExitProfile);
-}
-
-mozilla::ipc::IPCResult
-ContentChild::RecvGatherProfile()
-{
-  GatherProfile(false);
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
 ContentChild::RecvLoadPluginResult(const uint32_t& aPluginId,
                                    const bool& aResult)
 {
@@ -2827,11 +2787,12 @@ ContentChild::RecvShutdown()
   GetIPCChannel()->SetAbortOnError(false);
 
 #ifdef MOZ_GECKO_PROFILER
-  if (profiler_is_active()) {
-    // We're shutting down while we were profiling. Send the
-    // profile up to the parent so that we don't lose this
-    // information.
-    GatherProfile(true);
+  if (mProfilerController) {
+    nsCString shutdownProfile = mProfilerController->GrabShutdownProfileAndShutdown();
+    mProfilerController = nullptr;
+    // Send the shutdown profile to the parent process through our own
+    // message channel, which we know will survive for long enough.
+    Unused << SendShutdownProfile(shutdownProfile);
   }
 #endif
 
@@ -3279,37 +3240,7 @@ ContentChild::GetConstructedEventTarget(const Message& aMsg)
     return nullptr;
   }
 
-  ActorHandle handle;
-  TabId tabId, sameTabGroupAs;
-  PickleIterator iter(aMsg);
-  if (!IPC::ReadParam(&aMsg, &iter, &handle)) {
-    return nullptr;
-  }
-  aMsg.IgnoreSentinel(&iter);
-  if (!IPC::ReadParam(&aMsg, &iter, &tabId)) {
-    return nullptr;
-  }
-  aMsg.IgnoreSentinel(&iter);
-  if (!IPC::ReadParam(&aMsg, &iter, &sameTabGroupAs)) {
-    return nullptr;
-  }
-
-  // If sameTabGroupAs is non-zero, then the new tab will be in the same
-  // TabGroup as a previously created tab. Rather than try to find the
-  // previously created tab (whose constructor message may not even have been
-  // processed yet, in theory) and look up its event target, we just use the
-  // default event target. This means that runnables for this tab will not be
-  // labeled. However, this path is only taken for print preview and view
-  // source, which are not performance-sensitive.
-  if (sameTabGroupAs) {
-    return nullptr;
-  }
-
-  // If the request for a new TabChild is coming from the parent process, then
-  // there is no opener. Therefore, we create a fresh TabGroup.
-  RefPtr<TabGroup> tabGroup = new TabGroup();
-  nsCOMPtr<nsIEventTarget> target = tabGroup->EventTargetFor(TaskCategory::Other);
-  return target.forget();
+  return nsIContentChild::GetConstructedEventTarget(aMsg);
 }
 
 void
@@ -3435,6 +3366,12 @@ ContentChild::RecvRefreshScreens(nsTArray<ScreenDetails>&& aScreens)
   ScreenManager& screenManager = ScreenManager::GetSingleton();
   screenManager.Refresh(Move(aScreens));
   return IPC_OK();
+}
+
+already_AddRefed<nsIEventTarget>
+ContentChild::GetEventTargetFor(TabChild* aTabChild)
+{
+  return IToplevelProtocol::GetActorEventTarget(aTabChild);
 }
 
 } // namespace dom

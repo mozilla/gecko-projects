@@ -73,6 +73,11 @@ protected:
   AllocPIPCBlobInputStreamParent(const nsID& aID,
                                  const uint64_t& aSize) override;
 
+  virtual mozilla::ipc::IPCResult
+  RecvPIPCBlobInputStreamConstructor(PIPCBlobInputStreamParent* aActor,
+                                     const nsID& aID,
+                                     const uint64_t& aSize) override;
+
   virtual bool
   DeallocPIPCBlobInputStreamParent(PIPCBlobInputStreamParent* aActor) override;
 
@@ -221,6 +226,15 @@ protected:
 
   virtual bool
   DeallocPWebAuthnTransactionParent(PWebAuthnTransactionParent* aActor) override;
+
+  virtual PHttpBackgroundChannelParent*
+  AllocPHttpBackgroundChannelParent(const uint64_t& aChannelId) override;
+
+  virtual mozilla::ipc::IPCResult
+  RecvPHttpBackgroundChannelConstructor(PHttpBackgroundChannelParent *aActor,
+                                        const uint64_t& aChannelId) override;
+  virtual bool
+  DeallocPHttpBackgroundChannelParent(PHttpBackgroundChannelParent *aActor) override;
 };
 
 } // namespace ipc

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use gleam::gl;
 
 use webrender_traits::*;
-use webrender::renderer::{Renderer, RendererOptions};
+use webrender::renderer::{ReadPixelsFormat, Renderer, RendererOptions};
 use webrender::renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource};
 use webrender::{ApiRecordingReceiver, BinaryRecorder};
 use app_units::Au;
@@ -67,16 +67,6 @@ impl Into<ExternalImageId> for WrExternalImageId {
 impl Into<WrExternalImageId> for ExternalImageId {
     fn into(self) -> WrExternalImageId {
         WrExternalImageId(self.0)
-    }
-}
-
-const GL_FORMAT_BGRA_GL: gl::GLuint = gl::BGRA;
-const GL_FORMAT_BGRA_GLES: gl::GLuint = gl::BGRA_EXT;
-
-fn get_gl_format_bgra(gl: &gl::Gl) -> gl::GLuint {
-    match gl.get_type() {
-        gl::GlType::Gl => GL_FORMAT_BGRA_GL,
-        gl::GlType::Gles => GL_FORMAT_BGRA_GLES,
     }
 }
 
@@ -790,17 +780,12 @@ pub unsafe extern "C" fn wr_renderer_readback(renderer: &mut WrRenderer,
                                               buffer_size: usize) {
     assert!(is_in_render_thread());
 
-    renderer.gl().flush();
-
     let mut slice = make_slice_mut(dst_buffer, buffer_size);
-    renderer.gl()
-            .read_pixels_into_buffer(0,
-                                     0,
-                                     width as gl::GLsizei,
-                                     height as gl::GLsizei,
-                                     get_gl_format_bgra(renderer.gl()),
-                                     gl::UNSIGNED_BYTE,
-                                     slice);
+    renderer.read_pixels_into(DeviceUintRect::new(
+                                DeviceUintPoint::new(0, 0),
+                                DeviceUintSize::new(width, height)),
+                              ReadPixelsFormat::Bgra8,
+                              &mut slice);
 }
 
 #[no_mangle]
@@ -896,6 +881,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         enable_profiler: enable_profiler,
         recorder: recorder,
         blob_image_renderer: Some(Box::new(Moz2dImageRenderer::new())),
+        cache_expiry_frames: 60, // see https://github.com/servo/webrender/pull/1294#issuecomment-304318800
         ..Default::default()
     };
 
@@ -1024,6 +1010,7 @@ pub extern "C" fn wr_api_set_window_parameters(api: &mut WrAPI,
 
 #[no_mangle]
 pub unsafe extern "C" fn wr_api_set_root_display_list(api: &mut WrAPI,
+                                                      color: WrColor,
                                                       epoch: WrEpoch,
                                                       viewport_width: f32,
                                                       viewport_height: f32,
@@ -1032,7 +1019,11 @@ pub unsafe extern "C" fn wr_api_set_root_display_list(api: &mut WrAPI,
                                                       dl_descriptor: WrBuiltDisplayListDescriptor,
                                                       dl_data: *mut u8,
                                                       dl_size: usize) {
-    let root_background_color = ColorF::new(0.3, 0.0, 0.0, 1.0);
+    let color = if color.a == 0.0 {
+        None
+    } else {
+        Some(color.into())
+    };
     // See the documentation of set_display_list in api.rs. I don't think
     // it makes a difference in gecko at the moment(until APZ is figured out)
     // but I suppose it is a good default.
@@ -1044,7 +1035,7 @@ pub unsafe extern "C" fn wr_api_set_root_display_list(api: &mut WrAPI,
     dl_vec.extend_from_slice(dl_slice);
     let dl = BuiltDisplayList::from_data(dl_vec, dl_descriptor);
 
-    api.set_display_list(Some(root_background_color),
+    api.set_display_list(color,
                          epoch,
                          LayoutSize::new(viewport_width, viewport_height),
                          (pipeline_id, content_size.into(), dl),
@@ -1055,11 +1046,10 @@ pub unsafe extern "C" fn wr_api_set_root_display_list(api: &mut WrAPI,
 pub unsafe extern "C" fn wr_api_clear_root_display_list(api: &mut WrAPI,
                                                         epoch: WrEpoch,
                                                         pipeline_id: WrPipelineId) {
-    let root_background_color = ColorF::new(0.3, 0.0, 0.0, 1.0);
     let preserve_frame_state = true;
     let frame_builder = WebRenderFrameBuilder::new(pipeline_id, WrSize::zero());
 
-    api.set_display_list(Some(root_background_color),
+    api.set_display_list(None,
                          epoch,
                          LayoutSize::new(0.0, 0.0),
                          frame_builder.dl_builder.finalize(),
@@ -1182,7 +1172,7 @@ pub struct WrState {
 #[no_mangle]
 pub extern "C" fn wr_state_new(pipeline_id: WrPipelineId,
                                content_size: WrSize) -> *mut WrState {
-    assert!(unsafe { is_in_main_thread() });
+    assert!(unsafe { !is_in_render_thread() });
 
     let state = Box::new(WrState {
                              pipeline_id: pipeline_id,
@@ -1196,7 +1186,7 @@ pub extern "C" fn wr_state_new(pipeline_id: WrPipelineId,
 /// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub extern "C" fn wr_state_delete(state: *mut WrState) {
-    assert!(unsafe { is_in_main_thread() });
+    assert!(unsafe { !is_in_render_thread() });
 
     unsafe {
         Box::from_raw(state);
@@ -1207,7 +1197,7 @@ pub extern "C" fn wr_state_delete(state: *mut WrState) {
 pub extern "C" fn wr_dp_begin(state: &mut WrState,
                               width: u32,
                               height: u32) {
-    assert!(unsafe { is_in_main_thread() });
+    assert!(unsafe { !is_in_render_thread() });
     state.frame_builder.dl_builder.data.clear();
 
     let bounds = LayoutRect::new(LayoutPoint::new(0.0, 0.0),
@@ -1226,7 +1216,7 @@ pub extern "C" fn wr_dp_begin(state: &mut WrState,
 
 #[no_mangle]
 pub extern "C" fn wr_dp_end(state: &mut WrState) {
-    assert!(unsafe { is_in_main_thread() });
+    assert!(unsafe { !is_in_render_thread() });
     state.frame_builder.dl_builder.pop_stacking_context();
 }
 
@@ -1237,7 +1227,7 @@ pub extern "C" fn wr_dp_push_clip_region(state: &mut WrState,
                                          complex_count: usize,
                                          image_mask: *const WrImageMask)
                                          -> WrClipRegionToken {
-    assert!(unsafe { is_in_main_thread() });
+    assert!(unsafe { !is_in_render_thread() });
 
     let main = main.into();
     let complex_slice = make_slice(complex, complex_count);
@@ -1256,7 +1246,7 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
                                               opacity: *const f32,
                                               transform: *const WrMatrix,
                                               mix_blend_mode: WrMixBlendMode) {
-    assert!(unsafe { is_in_main_thread() });
+    assert!(unsafe { !is_in_render_thread() });
 
     let bounds = bounds.into();
 
@@ -1271,16 +1261,19 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
     }
 
     let transform = unsafe { transform.as_ref() };
-    let transform_binding = match transform {
-        Some(transform) => PropertyBinding::Value(transform.into()),
-        None => PropertyBinding::Binding(PropertyBindingKey::new(animation_id)),
+    let transform_binding = match animation_id {
+        0 => match transform {
+            Some(transform) => Some(PropertyBinding::Value(transform.into())),
+            None => None,
+        },
+        _ => Some(PropertyBinding::Binding(PropertyBindingKey::new(animation_id))),
     };
 
     state.frame_builder
          .dl_builder
          .push_stacking_context(webrender_traits::ScrollPolicy::Scrollable,
                                 bounds,
-                                Some(transform_binding),
+                                transform_binding,
                                 TransformStyle::Flat,
                                 None,
                                 mix_blend_mode,
@@ -1289,7 +1282,7 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
 
 #[no_mangle]
 pub extern "C" fn wr_dp_pop_stacking_context(state: &mut WrState) {
-    assert!(unsafe { is_in_main_thread() });
+    assert!(unsafe { !is_in_render_thread() });
     state.frame_builder.dl_builder.pop_stacking_context();
 }
 
@@ -1306,7 +1299,7 @@ pub extern "C" fn wr_dp_push_clip(state: &mut WrState,
 
 #[no_mangle]
 pub extern "C" fn wr_dp_pop_clip(state: &mut WrState) {
-    assert!(unsafe { is_in_main_thread() });
+    assert!(unsafe { !is_in_render_thread() });
     state.frame_builder.dl_builder.pop_clip_node();
 }
 
@@ -1360,7 +1353,7 @@ pub extern "C" fn wr_dp_push_rect(state: &mut WrState,
                                   rect: WrRect,
                                   clip: WrClipRegionToken,
                                   color: WrColor) {
-    assert!(unsafe { is_in_main_thread() });
+    assert!(unsafe { !is_in_render_thread() });
 
     state.frame_builder.dl_builder.push_rect(rect.into(), clip.into(), color.into());
 }
@@ -1373,7 +1366,7 @@ pub extern "C" fn wr_dp_push_image(state: &mut WrState,
                                    tile_spacing: WrSize,
                                    image_rendering: WrImageRendering,
                                    key: WrImageKey) {
-    assert!(unsafe { is_in_main_thread() });
+    assert!(unsafe { !is_in_render_thread() });
 
     state.frame_builder
          .dl_builder
@@ -1393,7 +1386,8 @@ pub extern "C" fn wr_dp_push_yuv_planar_image(state: &mut WrState,
                                               image_key_0: WrImageKey,
                                               image_key_1: WrImageKey,
                                               image_key_2: WrImageKey,
-                                              color_space: WrYuvColorSpace) {
+                                              color_space: WrYuvColorSpace,
+                                              image_rendering: WrImageRendering) {
     assert!(unsafe { is_in_main_thread() });
 
     state.frame_builder
@@ -1401,7 +1395,8 @@ pub extern "C" fn wr_dp_push_yuv_planar_image(state: &mut WrState,
          .push_yuv_image(bounds.into(),
                          clip.into(),
                          YuvData::PlanarYCbCr(image_key_0, image_key_1, image_key_2),
-                         color_space);
+                         color_space,
+                         image_rendering);
 }
 
 /// Push a 2 planar NV12 image.
@@ -1411,7 +1406,8 @@ pub extern "C" fn wr_dp_push_yuv_NV12_image(state: &mut WrState,
                                             clip: WrClipRegionToken,
                                             image_key_0: WrImageKey,
                                             image_key_1: WrImageKey,
-                                            color_space: WrYuvColorSpace) {
+                                            color_space: WrYuvColorSpace,
+                                            image_rendering: WrImageRendering) {
     assert!(unsafe { is_in_main_thread() });
 
     state.frame_builder
@@ -1419,7 +1415,8 @@ pub extern "C" fn wr_dp_push_yuv_NV12_image(state: &mut WrState,
          .push_yuv_image(bounds.into(),
                          clip.into(),
                          YuvData::NV12(image_key_0, image_key_1),
-                         color_space);
+                         color_space,
+                         image_rendering);
 }
 
 /// Push a yuv interleaved image.
@@ -1428,7 +1425,8 @@ pub extern "C" fn wr_dp_push_yuv_interleaved_image(state: &mut WrState,
                                                    bounds: WrRect,
                                                    clip: WrClipRegionToken,
                                                    image_key_0: WrImageKey,
-                                                   color_space: WrYuvColorSpace) {
+                                                   color_space: WrYuvColorSpace,
+                                                   image_rendering: WrImageRendering) {
     assert!(unsafe { is_in_main_thread() });
 
     state.frame_builder
@@ -1436,7 +1434,8 @@ pub extern "C" fn wr_dp_push_yuv_interleaved_image(state: &mut WrState,
          .push_yuv_image(bounds.into(),
                          clip.into(),
                          YuvData::InterleavedYCbCr(image_key_0),
-                         color_space);
+                         color_space,
+                         image_rendering);
 }
 
 #[no_mangle]

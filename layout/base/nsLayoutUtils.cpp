@@ -2117,13 +2117,13 @@ NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(ScrollbarThumbLayerized, bool)
 /* static */ void
 nsLayoutUtils::SetScrollbarThumbLayerization(nsIFrame* aThumbFrame, bool aLayerize)
 {
-  aThumbFrame->Properties().Set(ScrollbarThumbLayerized(), aLayerize);
+  aThumbFrame->SetProperty(ScrollbarThumbLayerized(), aLayerize);
 }
 
 bool
 nsLayoutUtils::IsScrollbarThumbLayerized(nsIFrame* aThumbFrame)
 {
-  return aThumbFrame->Properties().Get(ScrollbarThumbLayerized());
+  return aThumbFrame->GetProperty(ScrollbarThumbLayerized());
 }
 
 // static
@@ -2672,19 +2672,21 @@ nsLayoutUtils::PostTranslate(Matrix4x4& aTransform, const nsPoint& aOrigin, floa
 }
 
 Matrix4x4
-nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame, const nsIFrame *aAncestor)
+nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame,
+                                      const nsIFrame *aAncestor,
+                                      bool aInCSSUnits)
 {
   nsIFrame* parent;
   Matrix4x4 ctm;
   if (aFrame == aAncestor) {
     return ctm;
   }
-  ctm = aFrame->GetTransformMatrix(aAncestor, &parent);
+  ctm = aFrame->GetTransformMatrix(aAncestor, &parent, aInCSSUnits);
   while (parent && parent != aAncestor) {
     if (!parent->Extend3DContext()) {
       ctm.ProjectTo2D();
     }
-    ctm = ctm * parent->GetTransformMatrix(aAncestor, &parent);
+    ctm = ctm * parent->GetTransformMatrix(aAncestor, &parent, aInCSSUnits);
   }
   return ctm;
 }
@@ -4495,8 +4497,7 @@ nsLayoutUtils::GetParentOrPlaceholderFor(nsIFrame* aFrame)
 {
   if ((aFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW)
       && !aFrame->GetPrevInFlow()) {
-    return aFrame->PresContext()->PresShell()->FrameManager()->
-      GetPlaceholderFrameFor(aFrame);
+    return aFrame->GetProperty(nsIFrame::PlaceholderFrameProperty());
   }
   return aFrame->GetParent();
 }
@@ -4522,7 +4523,7 @@ nsLayoutUtils::GetNextContinuationOrIBSplitSibling(nsIFrame *aFrame)
     // frame in the continuation chain. Walk back to find that frame now.
     aFrame = aFrame->FirstContinuation();
 
-    return aFrame->Properties().Get(nsIFrame::IBSplitSibling());
+    return aFrame->GetProperty(nsIFrame::IBSplitSibling());
   }
 
   return nullptr;
@@ -4535,7 +4536,7 @@ nsLayoutUtils::FirstContinuationOrIBSplitSibling(nsIFrame *aFrame)
   if (result->GetStateBits() & NS_FRAME_PART_OF_IBSPLIT) {
     while (true) {
       nsIFrame* f =
-        result->Properties().Get(nsIFrame::IBSplitPrevSibling());
+        result->GetProperty(nsIFrame::IBSplitPrevSibling());
       if (!f)
         break;
       result = f;
@@ -4551,10 +4552,10 @@ nsLayoutUtils::LastContinuationOrIBSplitSibling(nsIFrame *aFrame)
   nsIFrame *result = aFrame->FirstContinuation();
   if (result->GetStateBits() & NS_FRAME_PART_OF_IBSPLIT) {
     while (true) {
-      nsIFrame* f =
-        result->Properties().Get(nsIFrame::IBSplitSibling());
-      if (!f)
+      nsIFrame* f = result->GetProperty(nsIFrame::IBSplitSibling());
+      if (!f) {
         break;
+      }
       result = f;
     }
   }
@@ -4571,7 +4572,7 @@ nsLayoutUtils::IsFirstContinuationOrIBSplitSibling(nsIFrame *aFrame)
     return false;
   }
   if ((aFrame->GetStateBits() & NS_FRAME_PART_OF_IBSPLIT) &&
-      aFrame->Properties().Get(nsIFrame::IBSplitPrevSibling())) {
+      aFrame->GetProperty(nsIFrame::IBSplitPrevSibling())) {
     return false;
   }
 

@@ -5,13 +5,12 @@
 //! CSS handling for the [`basic-shape`](https://drafts.csswg.org/css-shapes/#typedef-basic-shape)
 //! types that are generic over their `ToCss` implementations.
 
-use euclid::size::Size2D;
-use properties::shorthands::serialize_four_sides;
 use std::fmt;
 use style_traits::{HasViewportPercentage, ToCss};
 use values::computed::ComputedValueAsSpecified;
-use values::generics::BorderRadiusSize;
+use values::generics::border::BorderRadius;
 use values::generics::position::Position;
+use values::generics::rect::Rect;
 use values::specified::url::SpecifiedUrl;
 
 /// A clipping shape, for `clip-path`.
@@ -67,27 +66,8 @@ pub enum BasicShape<H, V, LengthOrPercentage> {
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Debug, PartialEq, ToComputedValue)]
 pub struct InsetRect<LengthOrPercentage> {
-    pub top: LengthOrPercentage,
-    pub right: LengthOrPercentage,
-    pub bottom: LengthOrPercentage,
-    pub left: LengthOrPercentage,
+    pub rect: Rect<LengthOrPercentage>,
     pub round: Option<BorderRadius<LengthOrPercentage>>,
-}
-
-/// A generic type used for `border-radius`, `outline-radius` and `inset()` values.
-///
-/// https://drafts.csswg.org/css-backgrounds-3/#border-radius
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, PartialEq, ToComputedValue)]
-pub struct BorderRadius<LengthOrPercentage> {
-    /// The top left radius.
-    pub top_left: BorderRadiusSize<LengthOrPercentage>,
-    /// The top right radius.
-    pub top_right: BorderRadiusSize<LengthOrPercentage>,
-    /// The bottom right radius.
-    pub bottom_right: BorderRadiusSize<LengthOrPercentage>,
-    /// The bottom left radius.
-    pub bottom_left: BorderRadiusSize<LengthOrPercentage>,
 }
 
 /// https://drafts.csswg.org/css-shapes/#funcdef-circle
@@ -190,50 +170,17 @@ impl<H, V, L> ToCss for BasicShape<H, V, L>
     }
 }
 
-impl<L: ToCss + PartialEq> ToCss for InsetRect<L> {
-    // XXXManishearth We should try to reduce the number of values printed here
+impl<L> ToCss for InsetRect<L>
+    where L: ToCss + PartialEq
+{
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
         dest.write_str("inset(")?;
-        self.top.to_css(dest)?;
-        dest.write_str(" ")?;
-        self.right.to_css(dest)?;
-        dest.write_str(" ")?;
-        self.bottom.to_css(dest)?;
-        dest.write_str(" ")?;
-        self.left.to_css(dest)?;
+        self.rect.to_css(dest)?;
         if let Some(ref radius) = self.round {
             dest.write_str(" round ")?;
             radius.to_css(dest)?;
         }
-
         dest.write_str(")")
-    }
-}
-
-impl<L: ToCss + PartialEq> ToCss for BorderRadius<L> {
-    #[inline]
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        serialize_radius_values(dest, &self.top_left.0, &self.top_right.0,
-                                &self.bottom_right.0, &self.bottom_left.0)
-    }
-}
-
-/// Serialization helper for types of longhands like `border-radius` and `outline-radius`
-pub fn serialize_radius_values<L, W>(dest: &mut W, top_left: &Size2D<L>,
-                                     top_right: &Size2D<L>, bottom_right: &Size2D<L>,
-                                     bottom_left: &Size2D<L>) -> fmt::Result
-    where L: ToCss + PartialEq, W: fmt::Write
-{
-    if top_left.width == top_left.height && top_right.width == top_right.height &&
-       bottom_right.width == bottom_right.height && bottom_left.width == bottom_left.height {
-        serialize_four_sides(dest, &top_left.width, &top_right.width,
-                             &bottom_right.width, &bottom_left.width)
-    } else {
-        serialize_four_sides(dest, &top_left.width, &top_right.width,
-                             &bottom_right.width, &bottom_left.width)?;
-        dest.write_str(" / ")?;
-        serialize_four_sides(dest, &top_left.height, &top_right.height,
-                             &bottom_right.height, &bottom_left.height)
     }
 }
 

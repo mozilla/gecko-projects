@@ -17,27 +17,27 @@ ${helpers.four_sides_shorthand("border-style", "border-%s-style",
         ' '.join('border-%s-width' % side
                  for side in PHYSICAL_SIDES)}"
     spec="https://drafts.csswg.org/css-backgrounds/#border-width">
-    use super::parse_four_sides;
+    use values::generics::rect::Rect;
     use values::specified::{AllowQuirks, BorderWidth};
 
     pub fn parse_value(context: &ParserContext, input: &mut Parser) -> Result<Longhands, ()> {
-        let (top, right, bottom, left) = try!(parse_four_sides(input, |i| {
+        let rect = Rect::parse_with(context, input, |_, i| {
             BorderWidth::parse_quirky(context, i, AllowQuirks::Yes)
-        }));
+        })?;
         Ok(expanded! {
-            % for side in PHYSICAL_SIDES:
-                ${to_rust_ident('border-%s-width' % side)}: ${side},
-            % endfor
+            border_top_width: rect.0,
+            border_right_width: rect.1,
+            border_bottom_width: rect.2,
+            border_left_width: rect.3,
         })
     }
 
     impl<'a> ToCss for LonghandsToSerialize<'a>  {
         fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
             % for side in PHYSICAL_SIDES:
-                let ${side} = self.border_${side}_width.clone();
+            let ${side} = &self.border_${side}_width;
             % endfor
-
-            super::serialize_four_sides(dest, &top, &right, &bottom, &left)
+            Rect::new(top, right, bottom, left).to_css(dest)
         }
     }
 </%helpers:shorthand>
@@ -205,8 +205,8 @@ pub fn parse_border(context: &ParserContext, input: &mut Parser)
     'border-%s-radius' % (corner)
      for corner in ['top-left', 'top-right', 'bottom-right', 'bottom-left']
 )}" extra_prefixes="webkit" spec="https://drafts.csswg.org/css-backgrounds/#border-radius">
-    use values::generics::serialize_radius_values;
-    use values::specified::basic_shape::BorderRadius;
+    use values::generics::rect::Rect;
+    use values::specified::border::BorderRadius;
     use parser::Parse;
 
     pub fn parse_value(context: &ParserContext, input: &mut Parser) -> Result<Longhands, ()> {
@@ -221,11 +221,17 @@ pub fn parse_border(context: &ParserContext, input: &mut Parser)
 
     impl<'a> ToCss for LonghandsToSerialize<'a>  {
         fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            serialize_radius_values(dest,
-                                    &self.border_top_left_radius.0,
-                                    &self.border_top_right_radius.0,
-                                    &self.border_bottom_right_radius.0,
-                                    &self.border_bottom_left_radius.0)
+            let LonghandsToSerialize {
+                border_top_left_radius: ref tl,
+                border_top_right_radius: ref tr,
+                border_bottom_right_radius: ref br,
+                border_bottom_left_radius: ref bl,
+            } = *self;
+
+            let widths = Rect::new(&tl.0.width, &tr.0.width, &br.0.width, &bl.0.width);
+            let heights = Rect::new(&tl.0.height, &tr.0.height, &br.0.height, &bl.0.height);
+
+            BorderRadius::serialize_rects(widths, heights, dest)
         }
     }
 </%helpers:shorthand>

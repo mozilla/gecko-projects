@@ -12,7 +12,7 @@ void main(void) {
                                  prim.z,
                                  prim.layer,
                                  prim.task,
-                                 prim.local_rect.p0);
+                                 prim.local_rect);
 
     vPos = vi.local_pos - prim.local_rect.p0;
 
@@ -27,7 +27,7 @@ void main(void) {
     vTileRepeat = gradient.tile_size_repeat.zw;
 
     // V coordinate of gradient row in lookup texture.
-    vGradientIndex = float(prim.sub_index);
+    vGradientIndex = float(prim.user_data0);
 
     // The texture size of the lookup texture
     vGradientTextureSize = vec2(textureSize(sGradients, 0));

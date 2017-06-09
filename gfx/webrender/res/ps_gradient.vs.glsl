@@ -9,8 +9,8 @@ void main(void) {
 
     vec4 abs_start_end_point = gradient.start_end_point + prim.local_rect.p0.xyxy;
 
-    GradientStop g0 = fetch_gradient_stop(prim.sub_index + 0);
-    GradientStop g1 = fetch_gradient_stop(prim.sub_index + 1);
+    GradientStop g0 = fetch_gradient_stop(prim.user_data0 + 0);
+    GradientStop g1 = fetch_gradient_stop(prim.user_data0 + 1);
 
     RectWithSize segment_rect;
     vec2 axis;
@@ -62,7 +62,7 @@ void main(void) {
                                                     prim.z,
                                                     prim.layer,
                                                     prim.task,
-                                                    prim.local_rect.p0);
+                                                    prim.local_rect);
     vLocalPos = vi.local_pos;
     vec2 f = (vi.local_pos.xy - prim.local_rect.p0) / prim.local_rect.size;
 #else
@@ -71,7 +71,7 @@ void main(void) {
                                  prim.z,
                                  prim.layer,
                                  prim.task,
-                                 prim.local_rect.p0);
+                                 prim.local_rect);
 
     vec2 f = (vi.local_pos - segment_rect.p0) / segment_rect.size;
     vPos = vi.local_pos;

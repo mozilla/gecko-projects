@@ -808,7 +808,7 @@ nsDisplayListBuilder::AddAnimationsAndTransitionsToLayer(Layer* aLayer,
     // EffectCompositor needs to know that we refused to run this animation
     // asynchronously so that it will not throttle the main thread
     // animation.
-    aFrame->Properties().Set(nsIFrame::RefusedAsyncAnimationProperty(), true);
+    aFrame->SetProperty(nsIFrame::RefusedAsyncAnimationProperty(), true);
 
     // We need to schedule another refresh driver run so that EffectCompositor
     // gets a chance to unthrottle the animation.
@@ -1089,15 +1089,13 @@ void nsDisplayListBuilder::MarkOutOfFlowFrameForDisplay(nsIFrame* aDirtyFrame,
   const DisplayItemClipChain* combinedClipChain = mClipState.GetCurrentCombinedClipChain(this);
   const ActiveScrolledRoot* asr = mCurrentActiveScrolledRoot;
   OutOfFlowDisplayData* data = new OutOfFlowDisplayData(clipChain, combinedClipChain, asr, dirty);
-  aFrame->Properties().Set(nsDisplayListBuilder::OutOfFlowDisplayDataProperty(), data);
+  aFrame->SetProperty(nsDisplayListBuilder::OutOfFlowDisplayDataProperty(), data);
 
   MarkFrameForDisplay(aFrame, aDirtyFrame);
 }
 
 static void UnmarkFrameForDisplay(nsIFrame* aFrame) {
-  nsPresContext* presContext = aFrame->PresContext();
-  presContext->PropertyTable()->
-    Delete(aFrame, nsDisplayListBuilder::OutOfFlowDisplayDataProperty());
+  aFrame->DeleteProperty(nsDisplayListBuilder::OutOfFlowDisplayDataProperty());
 
   for (nsIFrame* f = aFrame; f;
        f = nsLayoutUtils::GetParentOrPlaceholderFor(f)) {
@@ -3990,8 +3988,8 @@ nsDisplayImageContainer::ConfigureLayer(ImageLayer* aLayer,
                         : IntSize(imageWidth, imageHeight);
 
   const int32_t factor = mFrame->PresContext()->AppUnitsPerDevPixel();
-  const LayoutDeviceRect destRect =
-    LayoutDeviceRect::FromAppUnits(GetDestRect(), factor);
+  const LayoutDeviceRect destRect(
+    LayoutDeviceIntRect::FromAppUnitsToNearest(GetDestRect(), factor));
 
   const LayoutDevicePoint p = destRect.TopLeft();
   Matrix transform = Matrix::Translation(p.x, p.y);
@@ -4047,8 +4045,8 @@ nsDisplayImageContainer::CanOptimizeToImageLayer(LayerManager* aManager,
   }
 
   const int32_t factor = mFrame->PresContext()->AppUnitsPerDevPixel();
-  const LayoutDeviceRect destRect =
-    LayoutDeviceRect::FromAppUnits(GetDestRect(), factor);
+  const LayoutDeviceRect destRect(
+    LayoutDeviceIntRect::FromAppUnitsToNearest(GetDestRect(), factor));
 
   // Calculate the scaling factor for the frame.
   const gfxSize scale = gfxSize(destRect.width / imageWidth,
@@ -4058,6 +4056,14 @@ nsDisplayImageContainer::CanOptimizeToImageLayer(LayerManager* aManager,
     // This would look awful as long as we can't use high-quality downscaling
     // for image layers (bug 803703), so don't turn this into an image layer.
     return false;
+  }
+
+  if (mFrame->IsImageFrame()) {
+    // Image layer doesn't support draw focus ring for image map.
+    nsImageFrame* f = static_cast<nsImageFrame*>(mFrame);
+    if (f->HasImageMap()) {
+      return false;
+    }
   }
 
   return true;
@@ -4416,6 +4422,10 @@ nsDisplayLayerEventRegions::AddFrame(nsDisplayListBuilder* aBuilder,
   if (borderBoxHasRoundedCorners ||
       (aFrame->GetStateBits() & NS_FRAME_SVG_LAYOUT)) {
     mMaybeHitRegion.Or(mMaybeHitRegion, borderBox);
+
+    // Avoid quadratic performance as a result of the region growing to include
+    // an arbitrarily large number of rects, which can happen on some pages.
+    mMaybeHitRegion.SimplifyOutward(8);
   } else {
     mHitRegion.Or(mHitRegion, borderBox);
   }
@@ -5180,14 +5190,6 @@ nsDisplayBoxShadowOuter::CanBuildWebRenderDisplayItems()
     }
   }
 
-  for (uint32_t j = shadows->Length(); j  > 0; j--) {
-    nsCSSShadowItem* shadow = shadows->ShadowAt(j - 1);
-    // Need WR support for clip out.
-    if (shadow->mRadius <= 0) {
-      return false;
-    }
-  }
-
   return true;
 }
 
@@ -5257,38 +5259,15 @@ nsDisplayBoxShadowOuter::CreateWebRenderCommands(wr::DisplayListBuilder& aBuilde
                                            : 0.0;
       float spreadRadius = float(shadow->mSpread) / float(appUnitsPerDevPixel);
 
-      if (blurRadius <= 0) {
-        MOZ_ASSERT(false, "WR needs clip out first");
-        // TODO: See nsContextBoxBlur::BlurRectangle. Just need to fill
-        // a rect here with the proper clip in/out, but WR doesn't support
-        // clip out yet
-        if (hasBorderRadius) {
-          LayerSize borderRadiusSize(borderRadius, borderRadius);
-          WrComplexClipRegion roundedRect =
-                                  wr::ToWrComplexClipRegion(deviceBoxRect,
-                                                            borderRadiusSize);
-          nsTArray<WrComplexClipRegion> clips;
-          clips.AppendElement(roundedRect);
-          aBuilder.PushRect(deviceBoxRect,
-                            aBuilder.PushClipRegion(deviceClipRect,
-                                                     clips),
-                            wr::ToWrColor(shadowColor));
-        } else {
-          aBuilder.PushRect(deviceBoxRect,
-                            aBuilder.PushClipRegion(deviceClipRect),
-                            wr::ToWrColor(shadowColor));
-        }
-      } else {
-        aBuilder.PushBoxShadow(deviceBoxRect,
-                              aBuilder.PushClipRegion(deviceClipRect),
-                              deviceBoxRect,
-                              wr::ToWrPoint(shadowOffset),
-                              wr::ToWrColor(shadowColor),
-                              blurRadius,
-                              spreadRadius,
-                              borderRadius,
-                              WrBoxShadowClipMode::Outset);
-      }
+      aBuilder.PushBoxShadow(deviceBoxRect,
+                             aBuilder.PushClipRegion(deviceClipRect),
+                             deviceBoxRect,
+                             wr::ToWrPoint(shadowOffset),
+                             wr::ToWrColor(shadowColor),
+                             blurRadius,
+                             spreadRadius,
+                             borderRadius,
+                             WrBoxShadowClipMode::Outset);
     }
   }
 }
@@ -5362,18 +5341,6 @@ nsDisplayBoxShadowInner::CanCreateWebRenderCommands(nsDisplayListBuilder* aBuild
   if (!shadows) {
     // Means we don't have to paint anything
     return true;
-  }
-
-  for (uint32_t i = shadows->Length(); i > 0; --i) {
-    nsCSSShadowItem *shadowItem = shadows->ShadowAt(i - 1);
-    if (!shadowItem->mInset) {
-      continue;
-    }
-
-    if (shadowItem->mXOffset <= 0 || shadowItem->mYOffset <= 0) {
-      // Need to wait for WR to support clip out.
-      return false;
-    }
   }
 
   return true;
@@ -8396,7 +8363,7 @@ nsDisplayMask::BuildLayer(nsDisplayListBuilder* aBuilder,
   return container.forget();
 }
 
-void
+bool
 nsDisplayMask::PaintMask(nsDisplayListBuilder* aBuilder,
                          gfxContext* aMaskContext)
 {
@@ -8415,6 +8382,8 @@ nsDisplayMask::PaintMask(nsDisplayListBuilder* aBuilder,
   nsSVGIntegrationUtils::PaintMask(params);
 
   nsDisplayMaskGeometry::UpdateDrawResult(this, imgParmas.result);
+
+  return imgParmas.result == mozilla::image::DrawResult::SUCCESS;
 }
 
 LayerState

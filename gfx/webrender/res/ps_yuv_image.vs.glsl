@@ -11,7 +11,7 @@ void main(void) {
                                                     prim.z,
                                                     prim.layer,
                                                     prim.task,
-                                                    prim.local_rect.p0);
+                                                    prim.local_rect);
     vLocalPos = vi.local_pos;
 #else
     VertexInfo vi = write_vertex(prim.local_rect,
@@ -19,17 +19,17 @@ void main(void) {
                                  prim.z,
                                  prim.layer,
                                  prim.task,
-                                 prim.local_rect.p0);
+                                 prim.local_rect);
     vLocalPos = vi.local_pos - prim.local_rect.p0;
 #endif
 
     write_clip(vi.screen_pos, prim.clip_area);
 
-    ResourceRect y_rect = fetch_resource_rect(prim.user_data.x);
+    ResourceRect y_rect = fetch_resource_rect(prim.user_data0);
 #ifndef WR_FEATURE_INTERLEAVED_Y_CB_CR  // only 1 channel
-    ResourceRect u_rect = fetch_resource_rect(prim.user_data.x + 1);
+    ResourceRect u_rect = fetch_resource_rect(prim.user_data0 + 1);
 #ifndef WR_FEATURE_NV12 // 2 channel
-    ResourceRect v_rect = fetch_resource_rect(prim.user_data.x + 2);
+    ResourceRect v_rect = fetch_resource_rect(prim.user_data0 + 2);
 #endif
 #endif
 

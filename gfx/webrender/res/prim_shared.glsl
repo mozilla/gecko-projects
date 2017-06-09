@@ -84,23 +84,16 @@ vec2 clamp_rect(vec2 point, RectWithEndpoint rect) {
     return clamp(point, rect.p0, rect.p1);
 }
 
-// Clamp 2 points at once.
-vec4 clamp_rect(vec4 points, RectWithSize rect) {
-    return clamp(points, rect.p0.xyxy, rect.p0.xyxy + rect.size.xyxy);
-}
-
-vec4 clamp_rect(vec4 points, RectWithEndpoint rect) {
-    return clamp(points, rect.p0.xyxy, rect.p1.xyxy);
+RectWithEndpoint intersect_rect(RectWithEndpoint a, RectWithEndpoint b) {
+    vec2 p0 = clamp_rect(a.p0, b);
+    vec2 p1 = clamp_rect(a.p1, b);
+    return RectWithEndpoint(p0, max(p0, p1));
 }
 
 RectWithSize intersect_rect(RectWithSize a, RectWithSize b) {
-    vec4 p = clamp_rect(vec4(a.p0, a.p0 + a.size), b);
-    return RectWithSize(p.xy, max(vec2(0.0), p.zw - p.xy));
-}
-
-RectWithEndpoint intersect_rect(RectWithEndpoint a, RectWithEndpoint b) {
-    vec4 p = clamp_rect(vec4(a.p0, a.p1), b);
-    return RectWithEndpoint(p.xy, max(p.xy, p.zw));
+    RectWithEndpoint r = intersect_rect(to_rect_with_endpoint(a),
+                                        to_rect_with_endpoint(b));
+    return to_rect_with_size(r);
 }
 
 float distance_to_line(vec2 p0, vec2 perp_dir, vec2 p) {
@@ -117,7 +110,7 @@ varying vec3 vClipMaskUv;
 
 #ifdef WR_VERTEX_SHADER
 
-#define VECS_PER_LAYER             13
+#define VECS_PER_LAYER              9
 #define VECS_PER_RENDER_TASK        3
 #define VECS_PER_PRIM_GEOM          2
 #define VECS_PER_SPLIT_GEOM         3
@@ -133,14 +126,8 @@ uniform sampler2D sData128;
 uniform sampler2D sResourceRects;
 
 // Instanced attributes
-in int aGlobalPrimId;
-in int aPrimitiveAddress;
-in int aTaskIndex;
-in int aClipTaskIndex;
-in int aLayerIndex;
-in int aElementIndex;
-in ivec2 aUserData;
-in int aZIndex;
+in ivec4 aData0;
+in ivec4 aData1;
 
 // get_fetch_uv is a macro to work around a macOS Intel driver parsing bug.
 // TODO: convert back to a function once the driver issues are resolved, if ever.
@@ -190,7 +177,6 @@ struct Layer {
     mat4 transform;
     mat4 inv_transform;
     RectWithSize local_clip_rect;
-    vec4 screen_vertices[4];
 };
 
 Layer fetch_layer(int index) {
@@ -216,11 +202,6 @@ Layer fetch_layer(int index) {
 
     vec4 clip_rect = texelFetchOffset(sLayers, uv1, 0, ivec2(0, 0));
     layer.local_clip_rect = RectWithSize(clip_rect.xy, clip_rect.zw);
-
-    layer.screen_vertices[0] = texelFetchOffset(sLayers, uv1, 0, ivec2(1, 0));
-    layer.screen_vertices[1] = texelFetchOffset(sLayers, uv1, 0, ivec2(2, 0));
-    layer.screen_vertices[2] = texelFetchOffset(sLayers, uv1, 0, ivec2(3, 0));
-    layer.screen_vertices[3] = texelFetchOffset(sLayers, uv1, 0, ivec2(4, 0));
 
     return layer;
 }
@@ -447,50 +428,51 @@ PrimitiveGeometry fetch_prim_geometry(int index) {
 
 struct PrimitiveInstance {
     int global_prim_index;
-    int specific_prim_index;
+    int specific_prim_address;
     int render_task_index;
     int clip_task_index;
     int layer_index;
-    int sub_index;
     int z;
-    ivec2 user_data;
+    int user_data0;
+    int user_data1;
 };
 
 PrimitiveInstance fetch_prim_instance() {
     PrimitiveInstance pi;
 
-    pi.global_prim_index = aGlobalPrimId;
-    pi.specific_prim_index = aPrimitiveAddress;
-    pi.render_task_index = aTaskIndex;
-    pi.clip_task_index = aClipTaskIndex;
-    pi.layer_index = aLayerIndex;
-    pi.sub_index = aElementIndex;
-    pi.user_data = aUserData;
-    pi.z = aZIndex;
+    pi.global_prim_index = aData0.x;
+    pi.specific_prim_address = aData0.y;
+    pi.render_task_index = aData0.z;
+    pi.clip_task_index = aData0.w;
+    pi.layer_index = aData1.x;
+    pi.z = aData1.y;
+    pi.user_data0 = aData1.z;
+    pi.user_data1 = aData1.w;
 
     return pi;
 }
 
-struct CachePrimitiveInstance {
-    int global_prim_index;
-    int specific_prim_index;
+struct CompositeInstance {
     int render_task_index;
-    int sub_index;
-    ivec2 user_data;
+    int src_task_index;
+    int backdrop_task_index;
+    int user_data0;
+    int user_data1;
+    float z;
 };
 
-CachePrimitiveInstance fetch_cache_instance() {
-    CachePrimitiveInstance cpi;
+CompositeInstance fetch_composite_instance() {
+    CompositeInstance ci;
 
-    PrimitiveInstance pi = fetch_prim_instance();
+    ci.render_task_index = aData0.x;
+    ci.src_task_index = aData0.y;
+    ci.backdrop_task_index = aData0.z;
+    ci.z = float(aData0.w);
 
-    cpi.global_prim_index = pi.global_prim_index;
-    cpi.specific_prim_index = pi.specific_prim_index;
-    cpi.render_task_index = pi.render_task_index;
-    cpi.sub_index = pi.sub_index;
-    cpi.user_data = pi.user_data;
+    ci.user_data0 = aData1.x;
+    ci.user_data1 = aData1.y;
 
-    return cpi;
+    return ci;
 }
 
 struct Primitive {
@@ -500,10 +482,8 @@ struct Primitive {
     RectWithSize local_rect;
     RectWithSize local_clip_rect;
     int prim_index;
-    // when sending multiple primitives of the same type (e.g. border segments)
-    // this index allows the vertex shader to recognize the difference
-    int sub_index;
-    ivec2 user_data;
+    int user_data0;
+    int user_data1;
     float z;
 };
 
@@ -518,9 +498,9 @@ Primitive load_primitive_custom(PrimitiveInstance pi) {
     prim.local_rect = pg.local_rect;
     prim.local_clip_rect = pg.local_clip_rect;
 
-    prim.prim_index = pi.specific_prim_index;
-    prim.sub_index = pi.sub_index;
-    prim.user_data = pi.user_data;
+    prim.prim_index = pi.specific_prim_address;
+    prim.user_data0 = pi.user_data0;
+    prim.user_data1 = pi.user_data1;
     prim.z = float(pi.z);
 
     return prim;
@@ -539,7 +519,7 @@ Primitive load_primitive() {
 bool ray_plane(vec3 normal, vec3 point, vec3 ray_origin, vec3 ray_dir, out float t)
 {
     float denom = dot(normal, ray_dir);
-    if (denom > 1e-6) {
+    if (abs(denom) > 1e-6) {
         vec3 d = point - ray_origin;
         t = dot(d, normal) / denom;
         return t >= 0.0;
@@ -568,13 +548,36 @@ vec4 untransform(vec2 ref, vec3 n, vec3 a, mat4 inv_transform) {
 
 // Given a CSS space position, transform it back into the layer space.
 vec4 get_layer_pos(vec2 pos, Layer layer) {
-    // get 3 of the layer corners in CSS space
-    vec3 a = layer.screen_vertices[0].xyz / layer.screen_vertices[0].w;
-    vec3 b = layer.screen_vertices[3].xyz / layer.screen_vertices[3].w;
-    vec3 c = layer.screen_vertices[2].xyz / layer.screen_vertices[2].w;
+    // get a point on the layer plane
+    vec4 ah = layer.transform * vec4(0.0, 0.0, 0.0, 1.0);
+    vec3 a = ah.xyz / ah.w;
     // get the normal to the layer plane
-    vec3 n = normalize(cross(b-a, c-a));
+    vec3 n = transpose(mat3(layer.inv_transform)) * vec3(0.0, 0.0, 1.0);
     return untransform(pos, n, a, layer.inv_transform);
+}
+
+// Compute a snapping offset in world space (adjusted to pixel ratio),
+// given local position on the layer and a snap rectangle.
+vec2 compute_snap_offset(vec2 local_pos,
+                         RectWithSize local_clip_rect,
+                         Layer layer,
+                         RectWithSize raw_snap_rect) {
+    // Clamp the snap rectangle.
+    RectWithSize snap_rect = intersect_rect(intersect_rect(raw_snap_rect, local_clip_rect),
+                                            layer.local_clip_rect);
+    // Transform the snap corners to the world space.
+    vec4 world_snap_p0 = layer.transform * vec4(snap_rect.p0, 0.0, 1.0);
+    vec4 world_snap_p1 = layer.transform * vec4(snap_rect.p0 + snap_rect.size, 0.0, 1.0);
+    // Snap bounds in world coordinates, adjusted for pixel ratio. XY = top left, ZW = bottom right
+    vec4 world_snap = uDevicePixelRatio * vec4(world_snap_p0.xy, world_snap_p1.xy) /
+                                          vec4(world_snap_p0.ww, world_snap_p1.ww);
+    /// World offsets applied to the corners of the snap rectangle.
+    vec4 snap_offsets = floor(world_snap + 0.5) - world_snap;
+
+    /// Compute the position of this vertex inside the snap rectangle.
+    vec2 normalized_snap_pos = (local_pos - snap_rect.p0) / snap_rect.size;
+    /// Compute the actual world offset for this vertex needed to make it snap.
+    return mix(snap_offsets.xy, snap_offsets.zw, normalized_snap_pos);
 }
 
 struct VertexInfo {
@@ -587,38 +590,32 @@ VertexInfo write_vertex(RectWithSize instance_rect,
                         float z,
                         Layer layer,
                         AlphaBatchTask task,
-                        vec2 snap_ref) {
+                        RectWithSize snap_rect) {
+
     // Select the corner of the local rect that we are processing.
     vec2 local_pos = instance_rect.p0 + instance_rect.size * aPosition.xy;
 
-    // xy = top left corner of the local rect, zw = position of current vertex.
-    vec4 local_p0_pos = vec4(snap_ref, local_pos);
-
     // Clamp to the two local clip rects.
-    local_p0_pos = clamp_rect(local_p0_pos, local_clip_rect);
-    local_p0_pos = clamp_rect(local_p0_pos, layer.local_clip_rect);
+    vec2 clamped_local_pos = clamp_rect(clamp_rect(local_pos, local_clip_rect),
+                                        layer.local_clip_rect);
 
-    // Transform the top corner and current vertex to world space.
-    vec4 world_p0 = layer.transform * vec4(local_p0_pos.xy, 0.0, 1.0);
-    world_p0.xyz /= world_p0.w;
-    vec4 world_pos = layer.transform * vec4(local_p0_pos.zw, 0.0, 1.0);
-    world_pos.xyz /= world_pos.w;
+    /// Compute the snapping offset.
+    vec2 snap_offset = compute_snap_offset(clamped_local_pos, local_clip_rect, layer, snap_rect);
 
-    // Convert the world positions to device pixel space. xy=top left corner. zw=current vertex.
-    vec4 device_p0_pos = vec4(world_p0.xy, world_pos.xy) * uDevicePixelRatio;
+    // Transform the current vertex to the world cpace.
+    vec4 world_pos = layer.transform * vec4(clamped_local_pos, 0.0, 1.0);
 
-    // Calculate the distance to snap the vertex by (snap top left corner).
-    vec2 snap_delta = device_p0_pos.xy - floor(device_p0_pos.xy + 0.5);
+    // Convert the world positions to device pixel space.
+    vec2 device_pos = world_pos.xy / world_pos.w * uDevicePixelRatio;
 
     // Apply offsets for the render task to get correct screen location.
-    vec2 final_pos = device_p0_pos.zw -
-                     snap_delta -
+    vec2 final_pos = device_pos + snap_offset -
                      task.screen_space_origin +
                      task.render_target_origin;
 
     gl_Position = uTransform * vec4(final_pos, z, 1.0);
 
-    VertexInfo vi = VertexInfo(local_p0_pos.zw, device_p0_pos.zw);
+    VertexInfo vi = VertexInfo(clamped_local_pos, device_pos);
     return vi;
 }
 
@@ -653,7 +650,7 @@ TransformVertexInfo write_transform_vertex(RectWithSize instance_rect,
                                            float z,
                                            Layer layer,
                                            AlphaBatchTask task,
-                                           vec2 snap_ref) {
+                                           RectWithSize snap_rect) {
     RectWithEndpoint local_rect = to_rect_with_endpoint(instance_rect);
 
     vec2 current_local_pos, prev_local_pos, next_local_pos;
@@ -712,22 +709,20 @@ TransformVertexInfo write_transform_vertex(RectWithSize instance_rect,
                                       adjusted_next_p0,
                                       adjusted_next_p1);
 
-    // Calculate the snap amount based on the first vertex as a reference point.
-    vec4 world_p0 = layer.transform * vec4(snap_ref, 0.0, 1.0);
-    vec2 device_p0 = uDevicePixelRatio * world_p0.xy / world_p0.w;
-    vec2 snap_delta = device_p0 - floor(device_p0 + 0.5);
+    vec4 layer_pos = get_layer_pos(device_pos / uDevicePixelRatio, layer);
+
+    /// Compute the snapping offset.
+    vec2 snap_offset = compute_snap_offset(layer_pos.xy / layer_pos.w,
+                                           local_clip_rect, layer, snap_rect);
 
     // Apply offsets for the render task to get correct screen location.
-    vec2 final_pos = device_pos -
-                     snap_delta -
+    vec2 final_pos = device_pos + snap_offset -
                      task.screen_space_origin +
                      task.render_target_origin;
 
     gl_Position = uTransform * vec4(final_pos, z, 1.0);
 
     vLocalBounds = vec4(local_rect.p0, local_rect.p1);
-
-    vec4 layer_pos = get_layer_pos(device_pos / uDevicePixelRatio, layer);
 
     return TransformVertexInfo(layer_pos.xyw, device_pos);
 }

@@ -67,14 +67,10 @@ ServoRestyleManager::PostRestyleEvent(Element* aElement,
 }
 
 void
-ServoRestyleManager::PostRestyleEventForCSSRuleChanges(
-  Element* aElement,
-  nsRestyleHint aRestyleHint,
-  nsChangeHint aMinChangeHint)
+ServoRestyleManager::PostRestyleEventForCSSRuleChanges()
 {
   mRestyleForCSSRuleChanges = true;
-
-  PostRestyleEvent(aElement, aRestyleHint, aMinChangeHint);
+  mPresContext->PresShell()->EnsureStyleFlush();
 }
 
 /* static */ void
@@ -517,6 +513,12 @@ ServoRestyleManager::FrameForPseudoElement(const nsIContent* aContent,
 
   if (aPseudoTagOrNull == nsCSSPseudoElements::after) {
     return nsLayoutUtils::GetAfterFrame(aContent);
+  }
+
+  if (aPseudoTagOrNull == nsCSSPseudoElements::firstLine ||
+      aPseudoTagOrNull == nsCSSPseudoElements::firstLetter) {
+    // TODO(emilio, bz): Figure out the best way to diff these styles.
+    return nullptr;
   }
 
   MOZ_CRASH("Unkown pseudo-element given to "

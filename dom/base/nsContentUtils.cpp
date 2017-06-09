@@ -199,7 +199,6 @@
 #include "nsTextFragment.h"
 #include "nsTextNode.h"
 #include "nsThreadUtils.h"
-#include "nsUnicharUtilCIID.h"
 #include "nsUnicodeProperties.h"
 #include "nsViewManager.h"
 #include "nsViewportInfo.h"
@@ -1759,9 +1758,9 @@ nsContentUtils::IsFirstLetterPunctuationAt(const nsTextFragment* aFrag, uint32_t
 // static
 bool nsContentUtils::IsAlphanumeric(uint32_t aChar)
 {
-  nsIUGenCategory::nsUGenCategory cat = mozilla::unicode::GetGenCategory(aChar);
+  nsUGenCategory cat = mozilla::unicode::GetGenCategory(aChar);
 
-  return (cat == nsIUGenCategory::kLetter || cat == nsIUGenCategory::kNumber);
+  return (cat == nsUGenCategory::kLetter || cat == nsUGenCategory::kNumber);
 }
 
 // static
@@ -4450,12 +4449,13 @@ nsContentUtils::GetSubdocumentWithOuterWindowId(nsIDocument *aDocument,
     return nullptr;
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> window = nsGlobalWindow::GetOuterWindowWithId(aOuterWindowId)->AsOuter();
+  RefPtr<nsGlobalWindow> window = nsGlobalWindow::GetOuterWindowWithId(aOuterWindowId);
   if (!window) {
     return nullptr;
   }
 
-  nsCOMPtr<nsIDocument> foundDoc = window->GetDoc();
+  nsCOMPtr<nsPIDOMWindowOuter> outerWindow = window->AsOuter();
+  nsCOMPtr<nsIDocument> foundDoc = outerWindow->GetDoc();
   if (nsContentUtils::ContentIsCrossDocDescendantOf(foundDoc, aDocument)) {
     // Note that ContentIsCrossDocDescendantOf will return true if
     // foundDoc == aDocument.
@@ -10352,8 +10352,26 @@ HtmlObjectContentSupportsDocument(const nsCString& aMimeType,
   return NS_SUCCEEDED(rv) && canConvert;
 }
 
+/* static */
+already_AddRefed<nsIPluginTag>
+nsContentUtils::PluginTagForType(const nsCString& aMIMEType, bool aNoFakePlugin)
+{
+  RefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
+  nsCOMPtr<nsIPluginTag> tag;
+  NS_ENSURE_TRUE(pluginHost, nullptr);
+
+  // ShouldPlay will handle the case where the plugin is disabled
+  pluginHost->GetPluginTagForType(aMIMEType,
+                                  aNoFakePlugin ? nsPluginHost::eExcludeFake
+                                                : nsPluginHost::eExcludeNone,
+                                  getter_AddRefs(tag));
+
+  return tag.forget();
+}
+
 /* static */ uint32_t
 nsContentUtils::HtmlObjectContentTypeForMIMEType(const nsCString& aMIMEType,
+                                                 bool aNoFakePlugin,
                                                  nsIContent* aContent)
 {
   if (aMIMEType.IsEmpty()) {
@@ -10376,10 +10394,17 @@ nsContentUtils::HtmlObjectContentTypeForMIMEType(const nsCString& aMIMEType,
   }
 
   RefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
-  if (pluginHost &&
-      pluginHost->HavePluginForType(aMIMEType, nsPluginHost::eExcludeNone)) {
-    // ShouldPlay will handle checking for disabled plugins
-    return nsIObjectLoadingContent::TYPE_PLUGIN;
+  if (pluginHost) {
+    nsCOMPtr<nsIPluginTag> tag = PluginTagForType(aMIMEType, aNoFakePlugin);
+    if (tag) {
+      if (!aNoFakePlugin &&
+          nsCOMPtr<nsIFakePluginTag>(do_QueryInterface(tag))) {
+        return nsIObjectLoadingContent::TYPE_FAKE_PLUGIN;
+      }
+
+      // ShouldPlay will handle checking for disabled plugins
+      return nsIObjectLoadingContent::TYPE_PLUGIN;
+    }
   }
 
   return nsIObjectLoadingContent::TYPE_NULL;

@@ -98,11 +98,11 @@ var whitelist = new Set([
    platforms: ["linux", "win"]},
   {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/mac/platformKeys.properties",
    platforms: ["linux", "win"]},
-  {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/gtk/accessible.properties",
+  {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/unix/accessible.properties",
    platforms: ["macosx", "win"]},
-  {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/gtk/intl.properties",
+  {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/unix/intl.properties",
    platforms: ["macosx", "win"]},
-  {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/gtk/platformKeys.properties",
+  {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/unix/platformKeys.properties",
    platforms: ["macosx", "win"]},
   {file: "resource://gre/chrome/en-US/locale/en-US/global-platform/win/accessible.properties",
    platforms: ["linux", "macosx"]},
@@ -129,8 +129,6 @@ var whitelist = new Set([
    platforms: ["linux", "win"]},
   {file: "chrome://browser/skin/customizableui/panelarrow-customizeTip@2x.png",
    platforms: ["linux", "win"]},
-  // Bug 1320058
-  {file: "chrome://browser/skin/preferences/saveFile.png", platforms: ["win"]},
   // Bug 1316187
   {file: "chrome://global/content/customizeToolbar.xul"},
   // Bug 1343837
@@ -139,28 +137,8 @@ var whitelist = new Set([
   {file: "chrome://global/content/url-classifier/unittests.xul"},
   // Bug 1343839
   {file: "chrome://global/locale/headsUpDisplay.properties"},
-  // Bug 1348358
-  {file: "chrome://global/skin/arrow.css"},
-  {file: "chrome://global/skin/arrow/arrow-dn-sharp.gif",
-   platforms: ["linux", "win"]},
-  {file: "chrome://global/skin/arrow/arrow-down.png",
-   platforms: ["linux", "win"]},
-  {file: "chrome://global/skin/arrow/arrow-lft-sharp-end.gif"},
-  {file: "chrome://global/skin/arrow/arrow-lft-sharp.gif",
-   platforms: ["linux", "win"]},
-  {file: "chrome://global/skin/arrow/arrow-rit-sharp-end.gif"},
-  {file: "chrome://global/skin/arrow/arrow-rit-sharp.gif",
-   platforms: ["linux", "win"]},
-  {file: "chrome://global/skin/arrow/arrow-up-sharp.gif",
-   platforms: ["linux", "win"]},
-  {file: "chrome://global/skin/arrow/panelarrow-horizontal.svg",
-   platforms: ["linux"]},
-  {file: "chrome://global/skin/arrow/panelarrow-vertical.svg",
-   platforms: ["linux"]},
   // Bug 1348362
   {file: "chrome://global/skin/icons/warning-64.png", platforms: ["linux", "win"]},
-  // Bug 1348524
-  {file: "chrome://global/skin/notification/close.png", platforms: ["macosx"]},
   // Bug 1348525
   {file: "chrome://global/skin/splitter/grip-bottom.gif", platforms: ["linux"]},
   {file: "chrome://global/skin/splitter/grip-left.gif", platforms: ["linux"]},

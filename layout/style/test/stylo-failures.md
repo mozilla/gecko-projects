@@ -33,18 +33,11 @@ to mochitest command.
   * "layout.css.prefixes.device-pixel-ratio-webkit" support bug 1366956
     * test_media_queries.html `-device-pixel-ratio` [27]
     * test_webkit_device_pixel_ratio.html [3]
-  * test_media_queries_dynamic.html `restyle count`: support elementsRestyled [6]
+  * test_media_queries_dynamic.html `restyle`: bug 1357461 [4]
   * test_media_queries_dynamic_xbl.html: xbl support bug 1290276 [2]
 * Animation support:
-  * OMTA
-    * test_animations_omta.html: bug 1361938, bug 1340005 [*]
   * SMIL Animation
     * test_restyles_in_smil_animation.html [2]
-* CSSOM support:
-  * \@import bug 1352968
-    * test_bug221428.html [1]
-    * test_css_eof_handling.html [1]
-* test_bug397427.html: @import issue bug 1331291 and CSSOM support of @import [1]
 * console support bug 1352669
   * test_bug413958.html `monitorConsole` [3]
   * test_parser_diagnostics_unprintables.html [550]
@@ -53,10 +46,6 @@ to mochitest command.
   * test_transitions_and_reframes.html `pseudo-element`: bug 1366422 [4]
   * Events:
     * test_animations_event_order.html [2]
-* symbols() function and string value on list-style-type bug 1363596
-  * test_value_storage.html `symbols(` [30]
-  * ... `list-style-type` [8]
-  * ... `'list-style'` [18]
 * Unimplemented \@font-face descriptors:
   * test_font_face_parser.html `font-language-override`: bug 1355364 [8]
 * keyword values should be preserved in \@font-face bug 1355368
@@ -64,7 +53,6 @@ to mochitest command.
   * test_font_loading_api.html `weight` [1]
 * @namespace support:
   * test_namespace_rule.html: bug 1355715 [6]
-* test_dont_use_document_colors.html: support of disabling document color bug 1355716 [21]
 * test_font_feature_values_parsing.html: \@font-feature-values support bug 1355721 [107]
 * Grid support bug 1341802
   * test_grid_computed_values.html [4]
@@ -92,7 +80,7 @@ to mochitest command.
 * Unsupported values
   * SVG-in-OpenType values not supported servo/servo#15211 bug 1355412
     * test_value_storage.html `context-` [7]
-    * test_bug798843_pref.html [7]
+    * test_bug798843_pref.html [3]
 * Incorrect parsing
   * different parsing bug 1364260
     * test_supports_rules.html [6]
@@ -103,7 +91,7 @@ to mochitest command.
   * place-{content,items,self} shorthands bug 1363971
     * test_align_shorthand_serialization.html [6]
   * system font serialization with subprop specified bug 1364286
-    * test_system_font_serialization.html [5]
+    * test_system_font_serialization.html [3]
   * serialize subprops to -moz-use-system-font when using system font bug 1364289
     * test_value_storage.html `'font'` [224]
   * different serialization for gradient functions in computed value bug 1367274
@@ -143,15 +131,10 @@ to mochitest command.
 ## Need Gecko change
 
 * Servo is correct but Gecko is wrong
-  * flex-basis should be 0px when omitted in flex shorthand bug 1331530
-    * test_flexbox_flex_shorthand.html `flex-basis` [10]
   * Gecko rejects calc() in -webkit-gradient bug 1363349
     * test_property_syntax_errors.html `-webkit-gradient` [20]
-* test_property_syntax_errors.html `linear-gradient(0,`: unitless zero as degree bug 1363292 [10]
 * test_specified_value_serialization.html `-webkit-radial-gradient`: bug 1367299 [1]
 * test_variables.html `var(--var6)`: irrelevant test for stylo bug 1367306 [1]
-* Difference in rect serialization bug 1367028
-  * test_shorthand_property_getters.html `5 5 5 5` [1]
 
 ## Unknown / Unsure
 

@@ -962,6 +962,8 @@ class ICUpdatedStub : public ICStub
         return firstUpdateStub_;
     }
 
+    void resetUpdateStubChain(Zone* zone);
+
     bool hasTypeUpdateStub(ICStub::Kind kind) {
         ICStub* stub = firstUpdateStub_;
         do {
@@ -1605,6 +1607,29 @@ class ICTypeMonitor_ObjectGroup : public ICStub
     };
 };
 
+class ICTypeMonitor_AnyValue : public ICStub
+{
+    friend class ICStubSpace;
+
+    explicit ICTypeMonitor_AnyValue(JitCode* stubCode)
+      : ICStub(TypeMonitor_AnyValue, stubCode)
+    {}
+
+  public:
+    class Compiler : public ICStubCompiler {
+      protected:
+        MOZ_MUST_USE bool generateStubCode(MacroAssembler& masm);
+
+      public:
+        explicit Compiler(JSContext* cx)
+          : ICStubCompiler(cx, TypeMonitor_AnyValue, Engine::Baseline)
+        { }
+
+        ICTypeMonitor_AnyValue* getStub(ICStubSpace* space) {
+            return newStub<ICTypeMonitor_AnyValue>(space, getStubCode());
+        }
+    };
+};
 
 // BinaryArith
 //      JSOP_ADD, JSOP_SUB, JSOP_MUL, JOP_DIV, JSOP_MOD

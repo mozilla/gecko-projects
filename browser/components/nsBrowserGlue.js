@@ -1709,7 +1709,7 @@ BrowserGlue.prototype = {
 
   // eslint-disable-next-line complexity
   _migrateUI: function BG__migrateUI() {
-    const UI_VERSION = 46;
+    const UI_VERSION = 47;
     const BROWSER_DOCURL = "chrome://browser/content/browser.xul";
 
     let currentUIVersion;
@@ -2012,19 +2012,30 @@ BrowserGlue.prototype = {
       }
     }
 
-    if (currentUIVersion < 46) {
+    // Version 46 has been replaced by 47
+    if (currentUIVersion < 47) {
       // Search suggestions are now on by default.
       // For privacy reasons, we want to respect previously made user's choice
       // regarding the feature, so if it's known reflect that choice into the
       // current pref.
       // Note that in case of downgrade/upgrade we won't guarantee anything.
       try {
-        Services.prefs.setBoolPref(
-          "browser.urlbar.suggest.searches",
-          Services.prefs.getBoolPref("browser.urlbar.searchSuggestionsChoice")
-        );
+        if (Services.prefs.prefHasUserValue("browser.urlbar.searchSuggestionsChoice")) {
+          Services.prefs.setBoolPref(
+            "browser.urlbar.suggest.searches",
+            Services.prefs.getBoolPref("browser.urlbar.searchSuggestionsChoice")
+          );
+        } else if (Services.prefs.getBoolPref("browser.urlbar.userMadeSearchSuggestionsChoice")) {
+          // If the user made a choice but searchSuggestionsChoice is not set,
+          // something went wrong in the upgrade path. For example, due to a
+          // now fixed bug, some profilespicking "no" at the opt-in bar and
+          // upgrading in the same session wouldn't mirror the pref.
+          // Users could also lack the mirrored pref due to skipping one version.
+          // In this case just fallback to the safest side and disable suggestions.
+          Services.prefs.setBoolPref("browser.urlbar.suggest.searches", false);
+        }
       } catch (ex) {
-        // The pref is not set, nothing to do.
+        // A missing pref is not a fatal error.
       }
     }
 
@@ -2180,27 +2191,35 @@ BrowserGlue.prototype = {
     chromeWindow.openPreferences(...args);
   },
 
+  _openURLInNewWindow(url) {
+    let urlString = Cc["@mozilla.org/supports-string;1"].createInstance(Ci.nsISupportsString);
+    urlString.data = url;
+    return new Promise(resolve => {
+      let win = Services.ww.openWindow(null, Services.prefs.getCharPref("browser.chromeURL"),
+                                       "_blank", "chrome,all,dialog=no", urlString);
+      win.addEventListener("load", () => { resolve(win); }, {once: true});
+    });
+  },
+
   /**
    * Called as an observer when Sync's "display URIs" notification is fired.
    *
    * We open the received URIs in background tabs.
    */
-  _onDisplaySyncURIs: function _onDisplaySyncURIs(data) {
+  async _onDisplaySyncURIs(data) {
     try {
       // The payload is wrapped weirdly because of how Sync does notifications.
       const URIs = data.wrappedJSObject.object;
 
-      const findWindow = () => RecentWindow.getMostRecentBrowserWindow({private: false});
-
       // win can be null, but it's ok, we'll assign it later in openTab()
-      let win = findWindow();
+      let win = RecentWindow.getMostRecentBrowserWindow({private: false});
 
-      const openTab = URI => {
+      const openTab = async (URI) => {
         let tab;
         if (!win) {
-          Services.appShell.hiddenDOMWindow.open(URI.uri);
-          win = findWindow();
-          tab = win.gBrowser.tabs[0];
+          win = await this._openURLInNewWindow(URI.uri);
+          let tabs = win.gBrowser.tabs;
+          tab = tabs[tabs.length - 1];
         } else {
           tab = win.gBrowser.addTab(URI.uri);
         }
@@ -2208,8 +2227,8 @@ BrowserGlue.prototype = {
         return tab;
       };
 
-      const firstTab = openTab(URIs[0]);
-      URIs.slice(1).forEach(URI => openTab(URI));
+      const firstTab = await openTab(URIs[0]);
+      await Promise.all(URIs.slice(1).map(URI => openTab(URI)));
 
       let title, body;
       const deviceName = Weave.Service.clientsEngine.getClientName(URIs[0].clientId);
@@ -2280,7 +2299,7 @@ BrowserGlue.prototype = {
       let url = await this.fxAccounts.promiseAccountsManageDevicesURI("device-connected-notification");
       let win = RecentWindow.getMostRecentBrowserWindow({private: false});
       if (!win) {
-        Services.appShell.hiddenDOMWindow.open(url);
+        this._openURLInNewWindow(url);
       } else {
         win.gBrowser.addTab(url);
       }

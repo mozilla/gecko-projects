@@ -124,11 +124,7 @@ nsTextControlFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
   mScrollEvent.Revoke();
 
-  EditorInitializer* initializer = Properties().Get(TextControlInitializer());
-  if (initializer) {
-    initializer->Revoke();
-    Properties().Delete(TextControlInitializer());
-  }
+  DeleteProperty(TextControlInitializer());
 
   // Unbind the text editor state object from the frame.  The editor will live
   // on, but things like controllers will be released.
@@ -394,12 +390,8 @@ nsTextControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   if (initEagerly) {
     NS_ASSERTION(!nsContentUtils::IsSafeToRunScript(),
                  "Someone forgot a script blocker?");
-    EditorInitializer* initializer = Properties().Get(TextControlInitializer());
-    if (initializer) {
-      initializer->Revoke();
-    }
-    initializer = new EditorInitializer(this);
-    Properties().Set(TextControlInitializer(),initializer);
+    EditorInitializer* initializer = new EditorInitializer(this);
+    SetProperty(TextControlInitializer(), initializer);
     nsContentUtils::AddScriptRunner(initializer);
   }
 
@@ -763,12 +755,12 @@ nsTextControlFrame::SetSelectionInternal(nsIDOMNode *aStartNode,
   // we have access to the node.
   nsCOMPtr<nsINode> start = do_QueryInterface(aStartNode);
   nsCOMPtr<nsINode> end = do_QueryInterface(aEndNode);
-  // XXXbz nsRange::Set takes int32_t (and ranges generally work on int32_t),
-  // but we're passing uint32_t.  The good news is that at this point our
-  // endpoints should really be within our length, so not really that big.  And
-  // if they _are_ that big, Set() will simply error out, which is not too bad
-  // for a case we don't expect to happen.
-  nsresult rv = range->Set(start, aStartOffset, end, aEndOffset);
+  // XXXbz nsRange::SetStartAndEnd takes int32_t (and ranges generally work on
+  // int32_t), but we're passing uint32_t.  The good news is that at this point
+  // our endpoints should really be within our length, so not really that big.
+  // And if they _are_ that big, SetStartAndEnd() will simply error out, which
+  // is not too bad for a case we don't expect to happen.
+  nsresult rv = range->SetStartAndEnd(start, aStartOffset, end, aEndOffset);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Get the selection, clear it and add the new range to it!
@@ -1131,7 +1123,7 @@ nsTextControlFrame::SetInitialChildList(ChildListID     aListID,
     NS_ASSERTION(txtCtrl, "Content not a text control element");
     txtCtrl->InitializeKeyboardEventListeners();
 
-    nsPoint* contentScrollPos = Properties().Get(ContentScrollPos());
+    nsPoint* contentScrollPos = GetProperty(ContentScrollPos());
     if (contentScrollPos) {
       // If we have a scroll pos stored to be passed to our anonymous
       // div, do it here!
@@ -1140,7 +1132,7 @@ nsTextControlFrame::SetInitialChildList(ChildListID     aListID,
       nsPresState fakePresState;
       fakePresState.SetScrollState(*contentScrollPos);
       statefulFrame->RestoreState(&fakePresState);
-      Properties().Remove(ContentScrollPos());
+      RemoveProperty(ContentScrollPos());
       delete contentScrollPos;
     }
   }
@@ -1290,7 +1282,7 @@ nsTextControlFrame::RestoreState(nsPresState* aState)
   // Most likely, we don't have our anonymous content constructed yet, which
   // would cause us to end up here.  In this case, we'll just store the scroll
   // pos ourselves, and forward it to the scroll frame later when it's created.
-  Properties().Set(ContentScrollPos(), new nsPoint(aState->GetScrollPosition()));
+  SetProperty(ContentScrollPos(), new nsPoint(aState->GetScrollPosition()));
   return NS_OK;
 }
 

@@ -73,6 +73,11 @@ const XMLURI_PARSE_ERROR = "http://www.mozilla.org/newlayout/xml/parsererror.xml
 
 var gViewDefault = "addons://discover/";
 
+XPCOMUtils.defineLazyGetter(this, "extensionStylesheets", () => {
+  const {ExtensionUtils} = Cu.import("resource://gre/modules/ExtensionUtils.jsm", {});
+  return ExtensionUtils.extensionStylesheets;
+});
+
 var gStrings = {};
 XPCOMUtils.defineLazyServiceGetter(gStrings, "bundleSvc",
                                    "@mozilla.org/intl/stringbundle;1",
@@ -95,13 +100,6 @@ XPCOMUtils.defineLazyGetter(gStrings, "appVersion", function() {
   return Services.appinfo.version;
 });
 
-XPCOMUtils.defineLazyGetter(this, "gInlineOptionsStylesheets", () => {
-  let stylesheets = ["chrome://browser/content/extension.css"];
-  if (AppConstants.platform === "macosx") {
-    stylesheets.push("chrome://browser/content/extension-mac.css");
-  }
-  return stylesheets;
-});
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "legacyWarningExceptions",
                                       PREF_LEGACY_EXCEPTIONS, "",
@@ -1547,7 +1545,7 @@ var gViewController = {
         let mainWindow = getMainWindowWithPreferencesPane();
         // The advanced subpanes are only supported in the old organization, which will
         // be removed by bug 1349689.
-        if (Preferences.get("browser.preferences.useOldOrganization", false)) {
+        if (Preferences.get("browser.preferences.useOldOrganization")) {
           mainWindow.openAdvancedPreferences("dataChoicesTab", {origin: "experimentsOpenPref"});
         } else {
           mainWindow.openPreferences("paneAdvanced", {origin: "experimentsOpenPref"});
@@ -3709,7 +3707,7 @@ var gDetailView = {
       };
 
       if (this._addon.optionsBrowserStyle) {
-        browserOptions.stylesheets = gInlineOptionsStylesheets;
+        browserOptions.stylesheets = extensionStylesheets;
       }
 
       mm.sendAsyncMessage("Extension:InitBrowser", browserOptions);

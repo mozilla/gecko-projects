@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "WebRenderAPI.h"
+#include "LayersLogging.h"
 #include "mozilla/webrender/RendererOGL.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/layers/CompositorThread.h"
@@ -11,8 +12,13 @@
 #include "mozilla/widget/CompositorWidget.h"
 #include "mozilla/layers/SynchronousTask.h"
 
+#define WRDL_LOG(...)
+//#define WRDL_LOG(...) printf_stderr("WRDL: " __VA_ARGS__)
+
 namespace mozilla {
 namespace wr {
+
+using layers::Stringify;
 
 class NewRenderer : public RendererEvent
 {
@@ -210,6 +216,7 @@ WebRenderAPI::SetRootDisplayList(gfx::Color aBgColor,
                                  size_t dl_size)
 {
     wr_api_set_root_display_list(mWrApi,
+                                 ToWrColor(aBgColor),
                                  aEpoch,
                                  aViewportSize.width, aViewportSize.height,
                                  pipeline_id,
@@ -556,23 +563,16 @@ DisplayListBuilder::PushStackingContext(const WrRect& aBounds,
     matrix = ToWrMatrix(*aTransform);
   }
   const WrMatrix* maybeTransform = aTransform ? &matrix : nullptr;
+  WRDL_LOG("PushStackingContext b=%s t=%s\n", Stringify(aBounds).c_str(),
+      aTransform ? Stringify(*aTransform).c_str() : "none");
   wr_dp_push_stacking_context(mWrState, aBounds, aAnimationId, aOpacity,
                               maybeTransform, aMixBlendMode);
 }
 
 void
-DisplayListBuilder::PushStackingContext(const WrRect& aBounds,
-                                        const float aOpacity,
-                                        const gfx::Matrix4x4& aTransform,
-                                        const WrMixBlendMode& aMixBlendMode)
-{
-  PushStackingContext(aBounds, 0, &aOpacity,
-                      &aTransform, aMixBlendMode);
-}
-
-void
 DisplayListBuilder::PopStackingContext()
 {
+  WRDL_LOG("PopStackingContext\n");
   wr_dp_pop_stacking_context(mWrState);
 }
 
@@ -580,12 +580,14 @@ void
 DisplayListBuilder::PushClip(const WrRect& aClipRect,
                              const WrImageMask* aMask)
 {
+  WRDL_LOG("PushClip r=%s m=%p\n", Stringify(aClipRect).c_str(), aMask);
   wr_dp_push_clip(mWrState, aClipRect, aMask);
 }
 
 void
 DisplayListBuilder::PopClip()
 {
+  WRDL_LOG("PopClip\n");
   wr_dp_pop_clip(mWrState);
 }
 
@@ -602,12 +604,15 @@ DisplayListBuilder::PushScrollLayer(const layers::FrameMetrics::ViewID& aScrollI
                                     const WrRect& aContentRect,
                                     const WrRect& aClipRect)
 {
+  WRDL_LOG("PushScrollLayer id=%" PRIu64 " co=%s cl=%s\n",
+      aScrollId, Stringify(aContentRect).c_str(), Stringify(aClipRect).c_str());
   wr_dp_push_scroll_layer(mWrState, aScrollId, aContentRect, aClipRect);
 }
 
 void
 DisplayListBuilder::PopScrollLayer()
 {
+  WRDL_LOG("PopScrollLayer\n");
   wr_dp_pop_scroll_layer(mWrState);
 }
 
@@ -616,6 +621,9 @@ DisplayListBuilder::PushRect(const WrRect& aBounds,
                              const WrClipRegionToken aClip,
                              const WrColor& aColor)
 {
+  WRDL_LOG("PushRect b=%s c=%s\n",
+      Stringify(aBounds).c_str(),
+      Stringify(aColor).c_str());
   wr_dp_push_rect(mWrState, aBounds, aClip, aColor);
 }
 
@@ -675,6 +683,8 @@ DisplayListBuilder::PushImage(const WrRect& aBounds,
                               wr::ImageRendering aFilter,
                               wr::ImageKey aImage)
 {
+  WRDL_LOG("PushImage b=%s s=%s t=%s\n", Stringify(aBounds).c_str(),
+      Stringify(aStretchSize).c_str(), Stringify(aTileSpacing).c_str());
   wr_dp_push_image(mWrState, aBounds, aClip, aStretchSize, aTileSpacing, aFilter, aImage);
 }
 
@@ -684,7 +694,8 @@ DisplayListBuilder::PushYCbCrPlanarImage(const WrRect& aBounds,
                                          wr::ImageKey aImageChannel0,
                                          wr::ImageKey aImageChannel1,
                                          wr::ImageKey aImageChannel2,
-                                         WrYuvColorSpace aColorSpace)
+                                         WrYuvColorSpace aColorSpace,
+                                         wr::ImageRendering aRendering)
 {
   wr_dp_push_yuv_planar_image(mWrState,
                               aBounds,
@@ -692,7 +703,8 @@ DisplayListBuilder::PushYCbCrPlanarImage(const WrRect& aBounds,
                               aImageChannel0,
                               aImageChannel1,
                               aImageChannel2,
-                              aColorSpace);
+                              aColorSpace,
+                              aRendering);
 }
 
 void
@@ -700,27 +712,31 @@ DisplayListBuilder::PushNV12Image(const WrRect& aBounds,
                                   const WrClipRegionToken aClip,
                                   wr::ImageKey aImageChannel0,
                                   wr::ImageKey aImageChannel1,
-                                  WrYuvColorSpace aColorSpace)
+                                  WrYuvColorSpace aColorSpace,
+                                  wr::ImageRendering aRendering)
 {
   wr_dp_push_yuv_NV12_image(mWrState,
                             aBounds,
                             aClip,
                             aImageChannel0,
                             aImageChannel1,
-                            aColorSpace);
+                            aColorSpace,
+                            aRendering);
 }
 
 void
 DisplayListBuilder::PushYCbCrInterleavedImage(const WrRect& aBounds,
                                               const WrClipRegionToken aClip,
                                               wr::ImageKey aImageChannel0,
-                                              WrYuvColorSpace aColorSpace)
+                                              WrYuvColorSpace aColorSpace,
+                                              wr::ImageRendering aRendering)
 {
   wr_dp_push_yuv_interleaved_image(mWrState,
                                    aBounds,
                                    aClip,
                                    aImageChannel0,
-                                   aColorSpace);
+                                   aColorSpace,
+                                   aRendering);
 }
 
 void
@@ -828,6 +844,7 @@ WrClipRegionToken
 DisplayListBuilder::PushClipRegion(const WrRect& aMain,
                                    const WrImageMask* aMask)
 {
+  WRDL_LOG("PushClipRegion r=%s m=%p\n", Stringify(aMain).c_str(), aMask);
   return wr_dp_push_clip_region(mWrState,
                                 aMain,
                                 nullptr, 0,
@@ -839,6 +856,8 @@ DisplayListBuilder::PushClipRegion(const WrRect& aMain,
                                    const nsTArray<WrComplexClipRegion>& aComplex,
                                    const WrImageMask* aMask)
 {
+  WRDL_LOG("PushClipRegion r=%s cl=%d m=%p\n", Stringify(aMain).c_str(),
+      (int)aComplex.Length(), aMask);
   return wr_dp_push_clip_region(mWrState,
                                 aMain,
                                 aComplex.Elements(), aComplex.Length(),

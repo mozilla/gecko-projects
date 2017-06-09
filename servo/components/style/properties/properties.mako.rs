@@ -32,14 +32,16 @@ use logical_geometry::WritingMode;
 use media_queries::Device;
 use parser::{PARSING_MODE_DEFAULT, Parse, ParserContext};
 use properties::animated_properties::TransitionProperty;
+#[cfg(feature = "gecko")] use properties::longhands::system_font::SystemFont;
 #[cfg(feature = "servo")] use servo_config::prefs::PREFS;
 use shared_lock::StylesheetGuards;
 use style_traits::{HasViewportPercentage, ToCss};
-use stylesheets::{CssRuleType, Origin, UrlExtraData};
+use stylesheets::{CssRuleType, MallocSizeOf, MallocSizeOfFn, Origin, UrlExtraData};
 #[cfg(feature = "servo")] use values::Either;
+use values::specified::Color;
 use values::computed;
 use cascade_info::CascadeInfo;
-use rule_tree::StrongRuleNode;
+use rule_tree::{CascadeLevel, StrongRuleNode};
 use style_adjuster::StyleAdjuster;
 #[cfg(feature = "servo")] use values::specified::BorderStyle;
 
@@ -52,7 +54,7 @@ macro_rules! property_name {
 }
 
 <%!
-    from data import Method, Keyword, to_rust_ident, to_camel_case
+    from data import Method, Keyword, to_rust_ident, to_camel_case, SYSTEM_FONT_LONGHANDS
     import os.path
 %>
 
@@ -129,10 +131,6 @@ macro_rules! expanded {
 /// A module with all the code for longhand properties.
 #[allow(missing_docs)]
 pub mod longhands {
-    use cssparser::Parser;
-    use parser::{Parse, ParserContext};
-    use values::specified;
-
     <%include file="/longhand/background.mako.rs" />
     <%include file="/longhand/border.mako.rs" />
     <%include file="/longhand/box.mako.rs" />
@@ -171,55 +169,6 @@ pub mod shorthands {
     use cssparser::Parser;
     use parser::{Parse, ParserContext};
     use values::specified;
-
-    /// Parses a property for four different sides per CSS syntax.
-    ///
-    ///  * Zero or more than four values is invalid.
-    ///  * One value sets them all
-    ///  * Two values set (top, bottom) and (left, right)
-    ///  * Three values set top, (left, right) and bottom
-    ///  * Four values set them in order
-    ///
-    /// returns the values in (top, right, bottom, left) order.
-    pub fn parse_four_sides<F, T>(input: &mut Parser, parse_one: F) -> Result<(T, T, T, T), ()>
-        where F: Fn(&mut Parser) -> Result<T, ()>,
-              T: Clone,
-    {
-        let top = try!(parse_one(input));
-        let right;
-        let bottom;
-        let left;
-        match input.try(|i| parse_one(i)) {
-            Err(()) => {
-                right = top.clone();
-                bottom = top.clone();
-                left = top.clone();
-            }
-            Ok(value) => {
-                right = value;
-                match input.try(|i| parse_one(i)) {
-                    Err(()) => {
-                        bottom = top.clone();
-                        left = right.clone();
-                    }
-                    Ok(value) => {
-                        bottom = value;
-                        match input.try(|i| parse_one(i)) {
-                            Err(()) => {
-                                left = right.clone();
-                            }
-                            Ok(value) => {
-                                left = value;
-                            }
-                        }
-
-                    }
-                }
-
-            }
-        }
-        Ok((top, right, bottom, left))
-    }
 
     <%include file="/shorthand/serialize.mako.rs" />
     <%include file="/shorthand/background.mako.rs" />
@@ -640,6 +589,15 @@ impl LonghandId {
         )
     }
 
+    /// Returns true if the property is one that is ignored when document
+    /// colors are disabled.
+    fn is_ignored_when_document_colors_disabled(&self) -> bool {
+        matches!(*self,
+            ${" | ".join([("LonghandId::" + p.camel_case)
+                          for p in data.longhands if p.ignored_when_colors_disabled])}
+        )
+    }
+
     /// The computed value of some properties depends on the (sometimes
     /// computed) value of *other* properties.
     ///
@@ -656,6 +614,7 @@ impl LonghandId {
             LonghandId::TransitionProperty |
             LonghandId::XLang |
             LonghandId::MozScriptLevel |
+            LonghandId::MozMinFontSizeRatio |
             % endif
             LonghandId::FontSize |
             LonghandId::FontFamily |
@@ -1219,6 +1178,14 @@ impl ToCss for PropertyDeclaration {
     % endif
 </%def>
 
+impl MallocSizeOf for PropertyDeclaration {
+    fn malloc_size_of_children(&self, _malloc_size_of: MallocSizeOfFn) -> usize {
+        // The variants of PropertyDeclaration mostly (entirely?) contain
+        // scalars, so this is reasonable.
+        0
+    }
+}
+
 impl PropertyDeclaration {
     /// Given a property declaration, return the property declaration id.
     pub fn id(&self) -> PropertyDeclarationId {
@@ -1279,6 +1246,35 @@ impl PropertyDeclaration {
             PropertyDeclaration::CSSWideKeyword(_, keyword) => Some(keyword),
             _ => None,
         }
+    }
+
+    /// Returns whether or not the property is set by a system font
+    #[cfg(feature = "gecko")]
+    pub fn get_system(&self) -> Option<SystemFont> {
+        match *self {
+            % for prop in SYSTEM_FONT_LONGHANDS:
+                PropertyDeclaration::${to_camel_case(prop)}(ref prop) => {
+                    prop.get_system()
+                }
+            % endfor
+            _ => None,
+        }
+    }
+
+    /// Is it the default value of line-height?
+    ///
+    /// (using match because it generates less code than)
+    pub fn is_default_line_height(&self) -> bool {
+        match *self {
+            PropertyDeclaration::LineHeight(longhands::line_height::SpecifiedValue::Normal) => true,
+            _ => false
+        }
+    }
+
+    #[cfg(feature = "servo")]
+    /// Dummy method to avoid cfg()s
+    pub fn get_system(&self) -> Option<()> {
+        None
     }
 
     /// Returns whether the declaration may be serialized as part of a shorthand.
@@ -1573,6 +1569,7 @@ pub mod style_structs {
     use super::longhands;
     use std::hash::{Hash, Hasher};
     use logical_geometry::WritingMode;
+    use media_queries::Device;
 
     % for style_struct in data.active_style_structs():
         % if style_struct.name == "Font":
@@ -1683,14 +1680,15 @@ pub mod style_structs {
 
                 /// (Servo does not handle MathML, so this just calls copy_font_size_from)
                 pub fn inherit_font_size_from(&mut self, parent: &Self,
-                                              _: Option<Au>) -> bool {
+                                              _: Option<Au>, _: &Device) -> bool {
                     self.copy_font_size_from(parent);
                     false
                 }
                 /// (Servo does not handle MathML, so this just calls set_font_size)
                 pub fn apply_font_size(&mut self,
                                        v: longhands::font_size::computed_value::T,
-                                       _: &Self) -> Option<Au> {
+                                       _: &Self,
+                                       _: &Device) -> Option<Au> {
                     self.set_font_size(v);
                     None
                 }
@@ -2483,6 +2481,15 @@ bitflags! {
         const SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP = 0x02,
         /// Whether to only cascade properties that are visited dependent.
         const VISITED_DEPENDENT_ONLY = 0x04,
+        /// Should we modify the device's root font size
+        /// when computing the root?
+        ///
+        /// Not set for native anonymous content since some NAC
+        /// form their own root, but share the device.
+        ///
+        /// ::backdrop and all NAC will resolve rem units against
+        /// the toplevel root element now.
+        const ALLOW_SET_ROOT_FONT_SIZE = 0x08,
     }
 }
 
@@ -2528,8 +2535,9 @@ pub fn cascade(device: &Device,
 
     let iter_declarations = || {
         rule_node.self_and_ancestors().flat_map(|node| {
+            let cascade_level = node.cascade_level();
             let declarations = match node.style_source() {
-                Some(source) => source.read(node.cascade_level().guard(guards)).declarations(),
+                Some(source) => source.read(cascade_level.guard(guards)).declarations(),
                 // The root node has no style source.
                 None => &[]
             };
@@ -2540,7 +2548,7 @@ pub fn cascade(device: &Device,
                 .rev()
                 .filter_map(move |&(ref declaration, declaration_importance)| {
                     if declaration_importance == node_importance {
-                        Some(declaration)
+                        Some((declaration, cascade_level))
                     } else {
                         None
                     }
@@ -2576,13 +2584,13 @@ pub fn apply_declarations<'a, F, I>(device: &Device,
                                     quirks_mode: QuirksMode)
                                     -> ComputedValues
     where F: Fn() -> I,
-          I: Iterator<Item = &'a PropertyDeclaration>,
+          I: Iterator<Item = (&'a PropertyDeclaration, CascadeLevel)>,
 {
     let default_style = device.default_computed_values();
     let inherited_custom_properties = inherited_style.custom_properties();
     let mut custom_properties = None;
     let mut seen_custom = HashSet::new();
-    for declaration in iter_declarations() {
+    for (declaration, _cascade_level) in iter_declarations() {
         if let PropertyDeclaration::Custom(ref name, ref value) = *declaration {
             ::custom_properties::cascade(
                 &mut custom_properties, &inherited_custom_properties,
@@ -2630,6 +2638,14 @@ pub fn apply_declarations<'a, F, I>(device: &Device,
         quirks_mode: quirks_mode,
     };
 
+    let ignore_colors = !device.use_document_colors();
+    let default_background_color_decl = if ignore_colors {
+        let color = device.default_background_color();
+        Some(PropertyDeclaration::BackgroundColor(Color::RGBA(color).into()))
+    } else {
+        None
+    };
+
     // Set computed values, overwriting earlier declarations for the same
     // property.
     //
@@ -2654,7 +2670,8 @@ pub fn apply_declarations<'a, F, I>(device: &Device,
             let mut font_size = None;
             let mut font_family = None;
         % endif
-        for declaration in iter_declarations() {
+        for (declaration, cascade_level) in iter_declarations() {
+            let mut declaration = declaration;
             let longhand_id = match declaration.id() {
                 PropertyDeclarationId::Longhand(id) => id,
                 PropertyDeclarationId::Custom(..) => continue,
@@ -2668,17 +2685,28 @@ pub fn apply_declarations<'a, F, I>(device: &Device,
                 continue
             }
 
-            // The computed value of some properties depends on the
-            // (sometimes computed) value of *other* properties.
-            //
-            // So we classify properties into "early" and "other", such that
-            // the only dependencies can be from "other" to "early".
-            //
-            // We iterate applicable_declarations twice, first cascading
-            // "early" properties then "other".
-            //
-            // Unfortunately, it’s not easy to check that this
-            // classification is correct.
+            // When document colors are disabled, skip properties that are
+            // marked as ignored in that mode, if they come from a UA or
+            // user style sheet.
+            if ignore_colors &&
+               longhand_id.is_ignored_when_document_colors_disabled() &&
+               !matches!(cascade_level,
+                         CascadeLevel::UANormal |
+                         CascadeLevel::UserNormal |
+                         CascadeLevel::UserImportant |
+                         CascadeLevel::UAImportant) {
+                if let PropertyDeclaration::BackgroundColor(ref color) = *declaration {
+                    // Treat background-color a bit differently.  If the specified
+                    // color is anything other than a fully transparent color, convert
+                    // it into the Device's default background color.
+                    if color.is_non_transparent() {
+                        declaration = default_background_color_decl.as_ref().unwrap();
+                    }
+                } else {
+                    continue
+                }
+            }
+
             if
                 % if category_to_cascade_now == "early":
                     !
@@ -2758,6 +2786,7 @@ pub fn apply_declarations<'a, F, I>(device: &Device,
             // scriptlevel changes.
             } else if seen.contains(LonghandId::XLang) ||
                       seen.contains(LonghandId::MozScriptLevel) ||
+                      seen.contains(LonghandId::MozMinFontSizeRatio) ||
                       font_family.is_some() {
                 let discriminant = LonghandId::FontSize as usize;
                 let size = PropertyDeclaration::CSSWideKeyword(
@@ -2773,7 +2802,7 @@ pub fn apply_declarations<'a, F, I>(device: &Device,
             % endif
             }
 
-            if is_root_element {
+            if is_root_element && flags.contains(ALLOW_SET_ROOT_FONT_SIZE) {
                 let s = context.style.get_font().clone_font_size();
                 context.device.set_root_font_size(s);
             }

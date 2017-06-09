@@ -443,6 +443,30 @@ nsRuleNode::FixupNoneGeneric(nsFont* aFont,
   }
 }
 
+/* static */
+void
+nsRuleNode::ApplyMinFontSize(nsStyleFont* aFont,
+                             const nsPresContext* aPresContext,
+                             nscoord aMinFontSize)
+{
+  nscoord fontSize = aFont->mSize;
+
+  // enforce the user' specified minimum font-size on the value that we expose
+  // (but don't change font-size:0, since that would unhide hidden text)
+  if (fontSize > 0) {
+    if (aMinFontSize < 0) {
+      aMinFontSize = 0;
+    } else {
+      aMinFontSize = (aMinFontSize * aFont->mMinFontSizeRatio) / 100;
+    }
+    if (fontSize < aMinFontSize && !aPresContext->IsChrome()) {
+      // override the minimum font-size constraint
+      fontSize = aMinFontSize;
+    }
+  }
+  aFont->mFont.size = fontSize;
+}
+
 static nsSize CalcViewportUnitsScale(nsPresContext* aPresContext)
 {
   // The caller is making use of viewport units, so notify the pres context
@@ -1510,6 +1534,7 @@ struct SetEnumValueHelper
   DEFINE_ENUM_CLASS_SETTER(StyleWindowDragging, Default, NoDrag)
   DEFINE_ENUM_CLASS_SETTER(StyleOrient, Inline, Vertical)
   DEFINE_ENUM_CLASS_SETTER(StyleGeometryBox, BorderBox, ViewBox)
+  DEFINE_ENUM_CLASS_SETTER(StyleWhiteSpace, Normal, PreSpace)
 #ifdef MOZ_XUL
   DEFINE_ENUM_CLASS_SETTER(StyleDisplay, None, MozPopup)
 #else
@@ -4041,23 +4066,8 @@ nsRuleNode::SetFont(nsPresContext* aPresContext, nsStyleContext* aContext,
   NS_ASSERTION(aFont->mScriptUnconstrainedSize <= aFont->mSize,
                "scriptminsize should never be making things bigger");
 
-  nscoord fontSize = aFont->mSize;
-
-  // enforce the user' specified minimum font-size on the value that we expose
-  // (but don't change font-size:0, since that would unhide hidden text)
-  if (fontSize > 0) {
-    nscoord minFontSize = aPresContext->MinFontSize(aFont->mLanguage);
-    if (minFontSize < 0) {
-      minFontSize = 0;
-    } else {
-      minFontSize = (minFontSize * aFont->mMinFontSizeRatio) / 100;
-    }
-    if (fontSize < minFontSize && !aPresContext->IsChrome()) {
-      // override the minimum font-size constraint
-      fontSize = minFontSize;
-    }
-  }
-  aFont->mFont.size = fontSize;
+  nsRuleNode::ApplyMinFontSize(aFont, aPresContext,
+                               aPresContext->MinFontSize(aFont->mLanguage));
 
   // font-size-adjust: number, none, inherit, initial, -moz-system-font
   const nsCSSValue* sizeAdjustValue = aRuleData->ValueForFontSizeAdjust();
@@ -4825,7 +4835,7 @@ nsRuleNode::ComputeTextData(void* aStartStruct,
   SetValue(*aRuleData->ValueForWhiteSpace(), text->mWhiteSpace, conditions,
            SETVAL_ENUMERATED | SETVAL_UNSET_INHERIT,
            parentText->mWhiteSpace,
-           NS_STYLE_WHITESPACE_NORMAL);
+           StyleWhiteSpace::Normal);
 
   // word-break: enum, inherit, initial
   SetValue(*aRuleData->ValueForWordBreak(), text->mWordBreak, conditions,
@@ -9639,6 +9649,10 @@ nsRuleNode::ComputeSVGData(void* aStartStruct,
         svg->mContextPropsBits |= NS_STYLE_CONTEXT_PROPERTY_FILL;
       } else if (atom == nsGkAtoms::stroke) {
         svg->mContextPropsBits |= NS_STYLE_CONTEXT_PROPERTY_STROKE;
+      } else if (atom == nsGkAtoms::fill_opacity) {
+        svg->mContextPropsBits |= NS_STYLE_CONTEXT_PROPERTY_FILL_OPACITY;
+      } else if (atom == nsGkAtoms::stroke_opacity) {
+        svg->mContextPropsBits |= NS_STYLE_CONTEXT_PROPERTY_STROKE_OPACITY;
       }
     }
     break;

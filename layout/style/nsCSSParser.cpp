@@ -10249,7 +10249,8 @@ CSSParserImpl::ParseLinearGradient(nsCSSValue& aValue,
     UngetToken();
 
     // <angle> ,
-    if (ParseSingleTokenVariant(cssGradient->mAngle, VARIANT_ANGLE, nullptr) &&
+    if (ParseSingleTokenVariant(cssGradient->mAngle,
+                                VARIANT_ANGLE_OR_ZERO, nullptr) &&
         !ExpectSymbol(',', true)) {
       SkipUntil(')');
       return false;
@@ -17290,8 +17291,7 @@ CSSParserImpl::ParsePaint(nsCSSPropertyID aPropID)
 {
   nsCSSValue x, y;
 
-  if (ParseVariant(x, VARIANT_HC | VARIANT_NONE | VARIANT_URL |
-                      VARIANT_OPENTYPE_SVG_KEYWORD,
+  if (ParseVariant(x, VARIANT_HC | VARIANT_NONE | VARIANT_URL | VARIANT_KEYWORD,
                    nsCSSProps::kContextPatternKTable) != CSSParseResult::Ok) {
     return false;
   }

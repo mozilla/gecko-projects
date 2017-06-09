@@ -71,11 +71,6 @@
 #include "nsNSSComponent.h"
 #include "nsIRedirectHistoryEntry.h"
 
-#ifdef MOZ_WIDGET_GONK
-#include "nsINetworkManager.h"
-#include "nsThreadUtils.h" // for NS_IsMainThread
-#endif
-
 #include <limits>
 
 using namespace mozilla;
@@ -389,7 +384,7 @@ NS_GetIsDocumentChannel(nsIChannel * aChannel, bool *aIsDocument)
   if (NS_FAILED(rv)) {
       return rv;
   }
-  if (nsContentUtils::HtmlObjectContentTypeForMIMEType(mimeType, nullptr) ==
+  if (nsContentUtils::HtmlObjectContentTypeForMIMEType(mimeType, false, nullptr) ==
       nsIObjectLoadingContent::TYPE_DOCUMENT) {
       *aIsDocument = true;
       return NS_OK;

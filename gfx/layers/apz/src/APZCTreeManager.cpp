@@ -86,7 +86,7 @@ struct APZCTreeManager::TreeBuildingState {
   // This map is populated as we place APZCs into the new tree. Its purpose is
   // to facilitate re-using the same APZC for different layers that scroll
   // together (and thus have the same ScrollableLayerGuid).
-  std::map<ScrollableLayerGuid, AsyncPanZoomController*> mApzcMap;
+  std::unordered_map<ScrollableLayerGuid, AsyncPanZoomController*, ScrollableLayerGuidHash> mApzcMap;
 };
 
 class APZCTreeManager::CheckerboardFlushObserver : public nsIObserver {
@@ -380,7 +380,7 @@ APZCTreeManager::PushStateToWR(wr::WebRenderAPI* aWrApi,
   // such as the one below to generate scrollbar transforms. Without this, perf
   // could end up being O(n^2) instead of O(n log n) because we'd have to search
   // the tree to find the corresponding APZC every time we hit a thumb node.
-  std::map<ScrollableLayerGuid, HitTestingTreeNode*> httnMap;
+  std::unordered_map<ScrollableLayerGuid, HitTestingTreeNode*, ScrollableLayerGuidHash> httnMap;
 
   bool activeAnimations = false;
   uint64_t lastLayersId = -1;
@@ -537,6 +537,8 @@ GetEventRegions(const ScrollNode& aLayer)
   }
   return aLayer.GetEventRegions();
 }
+
+
 
 already_AddRefed<HitTestingTreeNode>
 APZCTreeManager::RecycleOrCreateNode(TreeBuildingState& aState,
@@ -977,6 +979,13 @@ APZCTreeManager::ReceiveInputEvent(InputData& aEvent,
                                 + ((thumbData.mDirection == ScrollDirection::HORIZONTAL)
                                    ? thumbTransform._41 : thumbTransform._42);
             dragStart -= thumbStart;
+
+            // Content can't prevent scrollbar dragging with preventDefault(),
+            // so we don't need to wait for a content response. It's important
+            // to do this before calling ConfirmDragBlock() since that can
+            // potentially process and consume the block.
+            dragBlock->SetContentResponse(false);
+
             mInputQueue->ConfirmDragBlock(
                 dragBlockId, apzc,
                 AsyncDragMetrics(apzc->GetGuid().mScrollId,
@@ -984,9 +993,6 @@ APZCTreeManager::ReceiveInputEvent(InputData& aEvent,
                                  dragBlockId,
                                  dragStart,
                                  thumbData.mDirection));
-            // Content can't prevent scrollbar dragging with preventDefault(),
-            // so we don't need to wait for a content response.
-            dragBlock->SetContentResponse(false);
           }
         }
 
@@ -1802,6 +1808,25 @@ APZCTreeManager::GetTargetAPZC(const ScrollableLayerGuid& aGuid)
   return apzc.forget();
 }
 
+static bool
+GuidComparatorIgnoringPresShell(const ScrollableLayerGuid& aOne, const ScrollableLayerGuid& aTwo)
+{
+  return aOne.mLayersId == aTwo.mLayersId
+      && aOne.mScrollId == aTwo.mScrollId;
+}
+
+already_AddRefed<AsyncPanZoomController>
+APZCTreeManager::GetTargetAPZC(const uint64_t& aLayersId,
+                               const FrameMetrics::ViewID& aScrollId)
+{
+  MutexAutoLock lock(mTreeLock);
+  ScrollableLayerGuid guid(aLayersId, 0, aScrollId);
+  RefPtr<HitTestingTreeNode> node = GetTargetNode(guid, &GuidComparatorIgnoringPresShell);
+  MOZ_ASSERT(!node || node->GetApzc()); // any node returned must have an APZC
+  RefPtr<AsyncPanZoomController> apzc = node ? node->GetApzc() : nullptr;
+  return apzc.forget();
+}
+
 already_AddRefed<HitTestingTreeNode>
 APZCTreeManager::GetTargetNode(const ScrollableLayerGuid& aGuid,
                                GuidComparator aComparator) const
@@ -1840,13 +1865,6 @@ APZCTreeManager::GetTargetAPZC(const ScreenPoint& aPoint,
     *aOutHitResult = hitResult;
   }
   return target.forget();
-}
-
-static bool
-GuidComparatorIgnoringPresShell(const ScrollableLayerGuid& aOne, const ScrollableLayerGuid& aTwo)
-{
-  return aOne.mLayersId == aTwo.mLayersId
-      && aOne.mScrollId == aTwo.mScrollId;
 }
 
 RefPtr<const OverscrollHandoffChain>

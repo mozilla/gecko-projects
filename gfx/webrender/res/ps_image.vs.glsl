@@ -6,7 +6,7 @@
 void main(void) {
     Primitive prim = load_primitive();
     Image image = fetch_image(prim.prim_index);
-    ResourceRect res = fetch_resource_rect(prim.user_data.x);
+    ResourceRect res = fetch_resource_rect(prim.user_data0);
 
 #ifdef WR_FEATURE_TRANSFORM
     TransformVertexInfo vi = write_transform_vertex(prim.local_rect,
@@ -14,7 +14,7 @@ void main(void) {
                                                     prim.z,
                                                     prim.layer,
                                                     prim.task,
-                                                    prim.local_rect.p0);
+                                                    prim.local_rect);
     vLocalPos = vi.local_pos;
 #else
     VertexInfo vi = write_vertex(prim.local_rect,
@@ -22,7 +22,7 @@ void main(void) {
                                  prim.z,
                                  prim.layer,
                                  prim.task,
-                                 prim.local_rect.p0);
+                                 prim.local_rect);
     vLocalPos = vi.local_pos - prim.local_rect.p0;
 #endif
 

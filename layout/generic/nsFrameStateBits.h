@@ -140,7 +140,7 @@ FRAME_STATE_BIT(Generic, 14, NS_FRAME_INDEPENDENT_SELECTION)
 // If this bit is set, the frame is part of the mangled frame hierarchy
 // that results when an inline has been split because of a nested block.
 // See the comments in nsCSSFrameConstructor::ConstructInline for
-// more details.
+// more details.  (this is only set on nsBlockFrame/nsInlineFrame frames)
 FRAME_STATE_BIT(Generic, 15, NS_FRAME_PART_OF_IBSPLIT)
 
 // If this bit is set, then transforms (e.g. CSS or SVG transforms) are allowed
@@ -270,8 +270,8 @@ FRAME_STATE_BIT(Generic, 54, NS_FRAME_HAS_LAYER_ACTIVITY_PROPERTY)
 // a stylo tree traversal.
 FRAME_STATE_BIT(Generic, 55, NS_FRAME_OWNS_ANON_BOXES)
 
-// Frame has properties in the nsIFrame::Properties() hash.
-FRAME_STATE_BIT(Generic, 56, NS_FRAME_HAS_PROPERTIES)
+// ** currently unused Generic bit **
+// FRAME_STATE_BIT(Generic, 56, ...)
 
 // The display list of the frame can be handled by the shortcut for
 // COMMON CASE.

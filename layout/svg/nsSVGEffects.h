@@ -7,7 +7,7 @@
 #define NSSVGEFFECTS_H_
 
 #include "mozilla/Attributes.h"
-#include "FramePropertyTable.h"
+#include "FrameProperties.h"
 #include "mozilla/dom/Element.h"
 #include "nsHashKeys.h"
 #include "nsID.h"
@@ -683,13 +683,6 @@ public:
    */
   static already_AddRefed<nsIURI>
   GetBaseURLForLocalRef(nsIContent* aContent, nsIURI* aDocURI);
-
-  /**
-   * Return true if any of the value of
-   * maskUnits/maskContentUnits/clipPathUnits is userSpaceOnUse.
-   **/
-  static bool
-  HasUserSpaceOnUseUnitsMaskOrClipPath(nsIFrame* aFrame);
 };
 
 #endif /*NSSVGEFFECTS_H_*/

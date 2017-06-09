@@ -62,6 +62,7 @@
 #include "nsIXULRuntime.h"
 #include "nsICacheInfoChannel.h"
 #include "nsIDOMWindowUtils.h"
+#include "nsHttpChannel.h"
 #include "nsRedirectHistoryEntry.h"
 
 #include <algorithm>
@@ -1066,7 +1067,7 @@ public:
   InterceptFailedOnStop(nsIStreamListener *arg, HttpBaseChannel *chan)
   : mNext(arg)
   , mChannel(chan) {}
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   NS_IMETHOD OnStartRequest(nsIRequest *aRequest, nsISupports *aContext) override
   {
@@ -3144,6 +3145,11 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
   newChannel->SetLoadGroup(mLoadGroup);
   newChannel->SetNotificationCallbacks(mCallbacks);
   newChannel->SetLoadFlags(newLoadFlags);
+
+  nsCOMPtr<nsIClassOfService> cos(do_QueryInterface(newChannel));
+  if (cos) {
+    cos->SetClassFlags(mClassOfService);
+  }
 
   // Try to preserve the privacy bit if it has been overridden
   if (mPrivateBrowsingOverriden) {

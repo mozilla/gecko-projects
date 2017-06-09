@@ -12,11 +12,10 @@ const {
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 
 const {
-  getAllMessages,
   getAllMessagesUiById,
   getAllMessagesTableDataById,
+  getVisibleMessages,
 } = require("devtools/client/webconsole/new-console-output/selectors/messages");
-const { getScrollSetting } = require("devtools/client/webconsole/new-console-output/selectors/ui");
 const MessageContainer = createFactory(require("devtools/client/webconsole/new-console-output/components/message-container").MessageContainer);
 
 const ConsoleOutput = createClass({
@@ -24,17 +23,16 @@ const ConsoleOutput = createClass({
   displayName: "ConsoleOutput",
 
   propTypes: {
-    messages: PropTypes.object.isRequired,
     messagesUi: PropTypes.object.isRequired,
     serviceContainer: PropTypes.shape({
       attachRefToHud: PropTypes.func.isRequired,
       openContextMenu: PropTypes.func.isRequired,
       sourceMapService: PropTypes.object,
     }),
-    autoscroll: PropTypes.bool.isRequired,
     dispatch: PropTypes.func.isRequired,
     timestampsVisible: PropTypes.bool,
     messagesTableData: PropTypes.object.isRequired,
+    visibleMessages: PropTypes.array.isRequired,
   },
 
   componentDidMount() {
@@ -47,17 +45,16 @@ const ConsoleOutput = createClass({
   },
 
   componentWillUpdate(nextProps, nextState) {
-    if (!this.outputNode) {
+    const outputNode = this.outputNode;
+    if (!outputNode || !outputNode.lastChild) {
       return;
     }
 
-    const outputNode = this.outputNode;
-
     // Figure out if we are at the bottom. If so, then any new message should be scrolled
     // into view.
-    if (this.props.autoscroll && outputNode.lastChild) {
-      this.shouldScrollBottom = isScrolledToBottom(outputNode.lastChild, outputNode);
-    }
+    const lastChild = outputNode.lastChild;
+    const delta = nextProps.visibleMessages.length - this.props.visibleMessages.length;
+    this.shouldScrollBottom = delta > 0 && isScrolledToBottom(lastChild, outputNode);
   },
 
   componentDidUpdate() {
@@ -75,15 +72,14 @@ const ConsoleOutput = createClass({
   render() {
     let {
       dispatch,
-      autoscroll,
-      messages,
+      visibleMessages,
       messagesUi,
       messagesTableData,
       serviceContainer,
       timestampsVisible,
     } = this.props;
 
-    let messageNodes = messages.map((message) => {
+    let messageNodes = visibleMessages.map((message) => {
       return (
         MessageContainer({
           dispatch,
@@ -92,7 +88,6 @@ const ConsoleOutput = createClass({
           serviceContainer,
           open: messagesUi.includes(message.id),
           tableData: messagesTableData.get(message.id),
-          autoscroll,
           indent: message.indent,
           timestampsVisible,
         })
@@ -125,10 +120,9 @@ function isScrolledToBottom(outputNode, scrollNode) {
 
 function mapStateToProps(state, props) {
   return {
-    messages: getAllMessages(state),
+    visibleMessages: getVisibleMessages(state),
     messagesUi: getAllMessagesUiById(state),
     messagesTableData: getAllMessagesTableDataById(state),
-    autoscroll: getScrollSetting(state),
     timestampsVisible: state.ui.timestampsVisible,
   };
 }

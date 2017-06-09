@@ -13,8 +13,9 @@ use data::{ComputedStyle, ElementData, RestyleData};
 use dom::{TElement, TNode};
 use font_metrics::FontMetricsProvider;
 use log::LogLevel::Trace;
+use properties::{ALLOW_SET_ROOT_FONT_SIZE, SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP};
 use properties::{AnimationRules, CascadeFlags, ComputedValues};
-use properties::{SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP, VISITED_DEPENDENT_ONLY, cascade};
+use properties::{VISITED_DEPENDENT_ONLY, cascade};
 use properties::longhands::display::computed_value as display;
 use restyle_hints::{RESTYLE_CSS_ANIMATIONS, RESTYLE_CSS_TRANSITIONS, RestyleReplacements};
 use restyle_hints::{RESTYLE_STYLE_ATTRIBUTE, RESTYLE_SMIL};
@@ -22,7 +23,7 @@ use rule_tree::{CascadeLevel, StrongRuleNode};
 use selector_parser::{PseudoElement, RestyleDamage, SelectorImpl};
 use selectors::matching::{ElementSelectorFlags, MatchingContext, MatchingMode, StyleRelations};
 use selectors::matching::{VisitedHandlingMode, AFFECTED_BY_PSEUDO_ELEMENTS};
-use sharing::{StyleSharingBehavior, StyleSharingResult};
+use sharing::StyleSharingBehavior;
 use stylearc::Arc;
 use stylist::{ApplicableDeclarationList, RuleInclusion};
 
@@ -256,6 +257,9 @@ trait PrivateMatchMethods: TElement {
         if cascade_visited.visited_dependent_only() {
             cascade_flags.insert(VISITED_DEPENDENT_ONLY);
         }
+        if !self.is_native_anonymous() {
+            cascade_flags.insert(ALLOW_SET_ROOT_FONT_SIZE);
+        }
 
         // Grab the inherited values.
         let parent_el;
@@ -353,6 +357,7 @@ trait PrivateMatchMethods: TElement {
             // below like a lazy pseudo.
             let only_default_rules = context.shared.traversal_flags.for_default_styles();
             if pseudo.is_eager() && !only_default_rules {
+                debug_assert!(pseudo.is_before_or_after());
                 let parent = self.parent_element().unwrap();
                 if !parent.may_have_animations() ||
                    primary_style.rules.get_animation_rules().is_empty() {
@@ -851,17 +856,19 @@ pub trait MatchMethods : TElement {
             //
             // If we do have the results, grab them here to satisfy the borrow
             // checker.
-            let revalidation_match_results = context.thread_local
-                                                    .current_element_info
-                                                    .as_mut().unwrap()
-                                                    .revalidation_match_results
-                                                    .take();
+            let validation_data =
+                context.thread_local
+                    .current_element_info
+                    .as_mut().unwrap()
+                    .validation_data
+                    .take();
+
             context.thread_local
                    .style_sharing_candidate_cache
                    .insert_if_possible(self,
                                        data.styles().primary.values(),
                                        primary_results.relations,
-                                       revalidation_match_results);
+                                       validation_data);
         }
 
         child_cascade_requirement
@@ -1013,6 +1020,7 @@ pub trait MatchMethods : TElement {
                                                  &mut matching_context,
                                                  &mut set_selector_flags);
         }
+        self.unset_dirty_style_attribute();
 
         let primary_rule_node = stylist.rule_tree().compute_rule_node(
             &mut applicable_declarations,
@@ -1097,6 +1105,10 @@ pub trait MatchMethods : TElement {
             if visited_handling == VisitedHandlingMode::RelevantLinkVisited &&
                !data.styles().pseudos.has(&pseudo) {
                 return
+            }
+
+            if !self.may_generate_pseudo(&pseudo, data.styles().primary.values()) {
+                return;
             }
 
             debug_assert!(applicable_declarations.is_empty());
@@ -1247,8 +1259,10 @@ pub trait MatchMethods : TElement {
         let mut result = false;
         result |= self.replace_rules_internal(replacements, context, data,
                                               CascadeVisitedMode::Unvisited);
-        result |= self.replace_rules_internal(replacements, context, data,
-                                              CascadeVisitedMode::Visited);
+        if !context.shared.traversal_flags.for_animation_only() {
+            result |= self.replace_rules_internal(replacements, context, data,
+                                                  CascadeVisitedMode::Visited);
+        }
         result
     }
 
@@ -1295,6 +1309,7 @@ pub trait MatchMethods : TElement {
                 result |= replace_rule_node(CascadeLevel::StyleAttributeImportant,
                                             style_attribute,
                                             primary_rules);
+                self.unset_dirty_style_attribute();
             }
             return result;
         }
@@ -1335,30 +1350,6 @@ pub trait MatchMethods : TElement {
         }
 
         false
-    }
-
-    /// Attempts to share a style with another node. This method is unsafe
-    /// because it depends on the `style_sharing_candidate_cache` having only
-    /// live nodes in it, and we have no way to guarantee that at the type
-    /// system level yet.
-    unsafe fn share_style_if_possible(&self,
-                                      context: &mut StyleContext<Self>,
-                                      data: &mut ElementData)
-                                      -> StyleSharingResult {
-        let shared_context = &context.shared;
-        let current_element_info =
-            context.thread_local.current_element_info.as_mut().unwrap();
-        let selector_flags_map = &mut context.thread_local.selector_flags;
-        let bloom_filter = context.thread_local.bloom_filter.filter();
-
-        context.thread_local
-            .style_sharing_candidate_cache
-            .share_style_if_possible(shared_context,
-                                     current_element_info,
-                                     selector_flags_map,
-                                     bloom_filter,
-                                     *self,
-                                     data)
     }
 
     /// Given the old and new style of this element, and whether it's a

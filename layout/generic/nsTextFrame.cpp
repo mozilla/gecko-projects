@@ -830,7 +830,7 @@ static bool IsTrimmableSpace(const nsTextFragment* aFrag, uint32_t aPos,
   case ' ': return !aStyleText->WhiteSpaceIsSignificant() &&
                    !IsSpaceCombiningSequenceTail(aFrag, aPos + 1);
   case '\n': return !aStyleText->NewlineIsSignificantStyle() &&
-                    aStyleText->mWhiteSpace != NS_STYLE_WHITESPACE_PRE_SPACE;
+                    aStyleText->mWhiteSpace != mozilla::StyleWhiteSpace::PreSpace;
   case '\t':
   case '\r':
   case '\f': return !aStyleText->WhiteSpaceIsSignificant();
@@ -1386,8 +1386,7 @@ BuildTextRuns(DrawTarget* aDrawTarget, nsTextFrame* aForFrame,
   nsIFrame* lineContainerChild = aForFrame;
   if (!aLineContainer) {
     if (aForFrame->IsFloatingFirstLetterChild()) {
-      lineContainerChild = aForFrame->PresContext()->PresShell()->
-        GetPlaceholderFrameFor(aForFrame->GetParent());
+      lineContainerChild = aForFrame->GetParent()->GetPlaceholderFrame();
     }
     aLineContainer = FindLineContainer(lineContainerChild);
   } else {
@@ -1983,12 +1982,12 @@ GetHyphenTextRun(const gfxTextRun* aTextRun, DrawTarget* aDrawTarget,
     MakeHyphenTextRun(dt, aTextRun->GetAppUnitsPerDevUnit());
 }
 
-static_assert(NS_STYLE_WHITESPACE_NORMAL == 0, "Convention: NS_STYLE_WHITESPACE_NORMAL should be 0");
-static_assert(NS_STYLE_WHITESPACE_PRE == 1, "Convention: NS_STYLE_WHITESPACE_PRE should be 1");
-static_assert(NS_STYLE_WHITESPACE_NOWRAP == 2, "Convention: NS_STYLE_WHITESPACE_NOWRAP should be 2");
-static_assert(NS_STYLE_WHITESPACE_PRE_WRAP == 3, "Convention: NS_STYLE_WHITESPACE_PRE_WRAP should be 3");
-static_assert(NS_STYLE_WHITESPACE_PRE_LINE == 4, "Convention: NS_STYLE_WHITESPACE_PRE_LINE should be 4");
-static_assert(NS_STYLE_WHITESPACE_PRE_SPACE == 5, "Convention: NS_STYLE_WHITESPACE_PRE_SPACE should be 5");
+static_assert(uint8_t(mozilla::StyleWhiteSpace::Normal) == 0, "Convention: StyleWhiteSpace::Normal should be 0");
+static_assert(uint8_t(mozilla::StyleWhiteSpace::Pre) == 1, "Convention: StyleWhiteSpace::Pre should be 1");
+static_assert(uint8_t(mozilla::StyleWhiteSpace::Nowrap) == 2, "Convention: StyleWhiteSpace::NoWrap should be 2");
+static_assert(uint8_t(mozilla::StyleWhiteSpace::PreWrap) == 3, "Convention: StyleWhiteSpace::PreWrap should be 3");
+static_assert(uint8_t(mozilla::StyleWhiteSpace::PreLine) == 4, "Convention: StyleWhiteSpace::PreLine should be 4");
+static_assert(uint8_t(mozilla::StyleWhiteSpace::PreSpace) == 5, "Convention: StyleWhiteSpace::PreSpace should be 5");
 
 static nsTextFrameUtils::CompressionMode
 GetCSSWhitespaceToCompressionMode(nsTextFrame* aFrame,
@@ -2004,7 +2003,7 @@ GetCSSWhitespaceToCompressionMode(nsTextFrame* aFrame,
     nsTextFrameUtils::COMPRESS_NONE_TRANSFORM_TO_SPACE // -moz-pre-space
   };
 
-  auto compression = sModes[aStyleText->mWhiteSpace];
+  auto compression = sModes[uint8_t(aStyleText->mWhiteSpace)];
   if (compression == nsTextFrameUtils::COMPRESS_NONE &&
       !aStyleText->NewlineIsSignificant(aFrame)) {
     // If newline is set to be preserved, but then suppressed,
@@ -2841,9 +2840,9 @@ nsTextFrame::EnsureTextRun(TextRunType aWhichTextRun,
       return gfxSkipCharsIterator(gfxPlatform::
                                   GetPlatform()->EmptySkipChars(), 0);
     }
-    TabWidthStore* tabWidths = Properties().Get(TabWidthProperty());
+    TabWidthStore* tabWidths = GetProperty(TabWidthProperty());
     if (tabWidths && tabWidths->mValidForContentOffset != GetContentOffset()) {
-      Properties().Delete(TabWidthProperty());
+      DeleteProperty(TabWidthProperty());
     }
   }
 
@@ -3493,7 +3492,7 @@ PropertyProvider::CalcTabWidths(Range aRange, gfxFloat aTabWidth) const
       return;
     }
     if (!mReflowing) {
-      mTabWidths = mFrame->Properties().Get(TabWidthProperty());
+      mTabWidths = mFrame->GetProperty(TabWidthProperty());
 #ifdef DEBUG
       // If we're not reflowing, we should have already computed the
       // tab widths; check that they're available as far as the last
@@ -3538,7 +3537,7 @@ PropertyProvider::CalcTabWidths(Range aRange, gfxFloat aTabWidth) const
       } else {
         if (!mTabWidths) {
           mTabWidths = new TabWidthStore(mFrame->GetContentOffset());
-          mFrame->Properties().Set(TabWidthProperty(), mTabWidths);
+          mFrame->SetProperty(TabWidthProperty(), mTabWidths);
         }
         double nextTab = AdvanceToNextTab(mOffsetFromBlockOriginForTabs,
                                           aTabWidth);
@@ -3557,7 +3556,7 @@ PropertyProvider::CalcTabWidths(Range aRange, gfxFloat aTabWidth) const
 
   if (!mTabWidths) {
     // Delete any stale property that may be left on the frame
-    mFrame->Properties().Delete(TabWidthProperty());
+    mFrame->DeleteProperty(TabWidthProperty());
     mTabWidthsAnalyzedLimit = std::max(mTabWidthsAnalyzedLimit,
                                        aRange.end - startOffset);
   }
@@ -4365,7 +4364,7 @@ nsTextFrame::ClearFrameOffsetCache()
       // just destroys the frames in order, which means that the primary frame is already
       // dead if we're a continuing text frame, in which case, all of its properties are
       // gone, and we don't need to worry about deleting this property here.
-      primaryFrame->Properties().Delete(OffsetToFrameProperty());
+      primaryFrame->DeleteProperty(OffsetToFrameProperty());
     }
     RemoveStateBits(TEXT_IN_OFFSET_CACHE);
   }
@@ -4479,7 +4478,7 @@ nsContinuingTextFrame::Init(nsIContent*       aContent,
   if (aPrevInFlow->GetStateBits() & NS_FRAME_IS_BIDI) {
     FrameBidiData bidiData = aPrevInFlow->GetBidiData();
     bidiData.precedingControl = kBidiLevelNone;
-    Properties().Set(BidiDataProperty(), bidiData);
+    SetProperty(BidiDataProperty(), bidiData);
 
     if (nextContinuation) {
       SetNextContinuation(nextContinuation);
@@ -4710,7 +4709,7 @@ nsTextFrame::InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemK
 gfxTextRun*
 nsTextFrame::GetUninflatedTextRun()
 {
-  return Properties().Get(UninflatedTextRunProperty());
+  return GetProperty(UninflatedTextRunProperty());
 }
 
 void
@@ -4736,7 +4735,7 @@ nsTextFrame::SetTextRun(gfxTextRun* aTextRun, TextRunType aWhichTextRun,
       // Setting the property will not automatically increment the textrun's
       // reference count, so we need to do it here.
       aTextRun->AddRef();
-      Properties().Set(UninflatedTextRunProperty(), aTextRun);
+      SetProperty(UninflatedTextRunProperty(), aTextRun);
       return;
     }
     // fall through to setting mTextRun
@@ -4756,10 +4755,9 @@ nsTextFrame::RemoveTextRun(gfxTextRun* aTextRun)
     mTextRun = nullptr;
     return true;
   }
-  FrameProperties props = Properties();
   if ((GetStateBits() & TEXT_HAS_FONT_INFLATION) &&
-      props.Get(UninflatedTextRunProperty()) == aTextRun) {
-    props.Delete(UninflatedTextRunProperty());
+      GetProperty(UninflatedTextRunProperty()) == aTextRun) {
+    DeleteProperty(UninflatedTextRunProperty());
     return true;
   }
   return false;
@@ -4777,7 +4775,7 @@ nsTextFrame::ClearTextRun(nsTextFrame* aStartContinuation,
   DebugOnly<bool> checkmTextrun = textRun == mTextRun;
   UnhookTextRunFromFrames(textRun, aStartContinuation);
   MOZ_ASSERT(checkmTextrun ? !mTextRun
-                           : !Properties().Get(UninflatedTextRunProperty()));
+                           : !GetProperty(UninflatedTextRunProperty()));
 }
 
 void
@@ -4787,7 +4785,7 @@ nsTextFrame::DisconnectTextRuns()
              "Textrun mentions this frame in its user data so we can't just disconnect");
   mTextRun = nullptr;
   if ((GetStateBits() & TEXT_HAS_FONT_INFLATION)) {
-    Properties().Delete(UninflatedTextRunProperty());
+    DeleteProperty(UninflatedTextRunProperty());
   }
 }
 
@@ -4906,9 +4904,7 @@ public:
       // On OS X, web authors can turn off subpixel text rendering using the
       // CSS property -moz-osx-font-smoothing. If they do that, we don't need
       // to use component alpha layers for the affected text.
-      nsTextFrame* f = static_cast<nsTextFrame*>(mFrame);
-      const nsStyleFont* fontStyle = f->StyleFont();
-      if (fontStyle->mFont.smoothing == NS_FONT_SMOOTHING_GRAYSCALE) {
+      if (mFrame->StyleFont()->mFont.smoothing == NS_FONT_SMOOTHING_GRAYSCALE) {
         return nsRect();
       }
     }
@@ -5071,7 +5067,7 @@ NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(TextCombineScaleFactorProperty, float)
 static float
 GetTextCombineScaleFactor(nsTextFrame* aFrame)
 {
-  float factor = aFrame->Properties().Get(TextCombineScaleFactorProperty());
+  float factor = aFrame->GetProperty(TextCombineScaleFactorProperty());
   return factor ? factor : 1.0f;
 }
 
@@ -5335,7 +5331,7 @@ static nscoord
 LazyGetLineBaselineOffset(nsIFrame* aChildFrame, nsBlockFrame* aBlockFrame)
 {
   bool offsetFound;
-  nscoord offset = aChildFrame->Properties().Get(
+  nscoord offset = aChildFrame->GetProperty(
     nsIFrame::LineBaselineOffset(), &offsetFound);
 
   if (!offsetFound) {
@@ -5348,11 +5344,11 @@ LazyGetLineBaselineOffset(nsIFrame* aChildFrame, nsBlockFrame* aBlockFrame)
         for (nsIFrame* lineFrame = line->mFirstChild;
              n > 0; lineFrame = lineFrame->GetNextSibling(), --n) {
           offset = lineBaseline - lineFrame->GetNormalPosition().y;
-          lineFrame->Properties().Set(nsIFrame::LineBaselineOffset(), offset);
+          lineFrame->SetProperty(nsIFrame::LineBaselineOffset(), offset);
         }
       }
     }
-    return aChildFrame->Properties().Get(
+    return aChildFrame->GetProperty(
       nsIFrame::LineBaselineOffset(), &offsetFound);
   } else {
     return offset;
@@ -5599,7 +5595,7 @@ nsTextFrame::UpdateTextEmphasis(WritingMode aWM, PropertyProvider& aProvider)
 {
   const nsStyleText* styleText = StyleText();
   if (!styleText->HasTextEmphasis()) {
-    Properties().Delete(EmphasisMarkProperty());
+    DeleteProperty(EmphasisMarkProperty());
     return nsRect();
   }
 
@@ -5651,7 +5647,7 @@ nsTextFrame::UpdateTextEmphasis(WritingMode aWM, PropertyProvider& aProvider)
     overflowRect.BStart(aWM) += gap * (side == eLogicalSideBStart ? -1 : 1);
   }
 
-  Properties().Set(EmphasisMarkProperty(), info);
+  SetProperty(EmphasisMarkProperty(), info);
   return overflowRect.GetPhysicalRect(aWM, frameSize.GetPhysicalSize(aWM));
 }
 
@@ -6668,7 +6664,7 @@ nsTextFrame::DrawEmphasisMarks(gfxContext* aContext, WritingMode aWM,
                                const nscolor* aDecorationOverrideColor,
                                PropertyProvider* aProvider)
 {
-  const EmphasisMarkInfo* info = Properties().Get(EmphasisMarkProperty());
+  const EmphasisMarkInfo* info = GetProperty(EmphasisMarkProperty());
   if (!info) {
     return;
   }
@@ -7813,7 +7809,7 @@ nsTextFrame::GetChildFrameContainingOffset(int32_t   aContentOffset,
   int32_t offset = mContentOffset;
 
   // Try to look up the offset to frame property
-  nsTextFrame* cachedFrame = Properties().Get(OffsetToFrameProperty());
+  nsTextFrame* cachedFrame = GetProperty(OffsetToFrameProperty());
 
   if (cachedFrame) {
     f = cachedFrame;
@@ -7861,7 +7857,7 @@ nsTextFrame::GetChildFrameContainingOffset(int32_t   aContentOffset,
   *aOutFrame = f;
 
   // cache the frame we found
-  Properties().Set(OffsetToFrameProperty(), f);
+  SetProperty(OffsetToFrameProperty(), f);
   f->AddStateBits(TEXT_IN_OFFSET_CACHE);
 
   return NS_OK;
@@ -8395,7 +8391,7 @@ nsTextFrame::GetFontSizeInflation() const
   if (!HasFontSizeInflation()) {
     return 1.0f;
   }
-  return Properties().Get(FontSizeInflationProperty());
+  return GetProperty(FontSizeInflationProperty());
 }
 
 void
@@ -8404,13 +8400,13 @@ nsTextFrame::SetFontSizeInflation(float aInflation)
   if (aInflation == 1.0f) {
     if (HasFontSizeInflation()) {
       RemoveStateBits(TEXT_HAS_FONT_INFLATION);
-      Properties().Delete(FontSizeInflationProperty());
+      DeleteProperty(FontSizeInflationProperty());
     }
     return;
   }
 
   AddStateBits(TEXT_HAS_FONT_INFLATION);
-  Properties().Set(FontSizeInflationProperty(), aInflation);
+  SetProperty(FontSizeInflationProperty(), aInflation);
 }
 
 /* virtual */
@@ -9550,9 +9546,9 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
     gfxFloat em = fm->EmHeight();
     // Compress the characters in horizontal axis if necessary.
     if (width <= em) {
-      Properties().Remove(TextCombineScaleFactorProperty());
+      RemoveProperty(TextCombineScaleFactorProperty());
     } else {
-      Properties().Set(TextCombineScaleFactorProperty(), em / width);
+      SetProperty(TextCombineScaleFactorProperty(), em / width);
       finalSize.ISize(wm) = em;
     }
     // Make the characters be in an 1em square.
@@ -10079,7 +10075,7 @@ nsTextFrame::IsEmpty()
 
   bool isEmpty =
     IsAllWhitespace(mContent->GetText(),
-                    textStyle->mWhiteSpace != NS_STYLE_WHITESPACE_PRE_LINE);
+                    textStyle->mWhiteSpace != mozilla::StyleWhiteSpace::PreLine);
   mState |= (isEmpty ? TEXT_IS_ONLY_WHITESPACE : TEXT_ISNOT_ONLY_WHITESPACE);
   return isEmpty;
 }
@@ -10278,13 +10274,13 @@ nsTextFrame::AssignJustificationGaps(
   static_assert(sizeof(aAssign) == 1,
                 "The encoding might be broken if JustificationAssignment "
                 "is larger than 1 byte");
-  Properties().Set(JustificationAssignmentProperty(), encoded);
+  SetProperty(JustificationAssignmentProperty(), encoded);
 }
 
 mozilla::JustificationAssignment
 nsTextFrame::GetJustificationAssignment() const
 {
-  int32_t encoded = Properties().Get(JustificationAssignmentProperty());
+  int32_t encoded = GetProperty(JustificationAssignmentProperty());
   mozilla::JustificationAssignment result;
   result.mGapsAtStart = encoded >> 8;
   result.mGapsAtEnd = encoded & 0xFF;

@@ -887,35 +887,34 @@
     <%call expr="self.shorthand(name, sub_properties=sub_properties, **kwargs)">
         #[allow(unused_imports)]
         use parser::Parse;
-        use super::parse_four_sides;
+        use values::generics::rect::Rect;
         use values::specified;
 
         pub fn parse_value(context: &ParserContext, input: &mut Parser) -> Result<Longhands, ()> {
-            let (top, right, bottom, left) =
+            let rect = Rect::parse_with(context, input, |_c, i| {
             % if allow_quirks:
-                try!(parse_four_sides(input, |i| ${parser_function}_quirky(context, i, specified::AllowQuirks::Yes)));
+                ${parser_function}_quirky(_c, i, specified::AllowQuirks::Yes)
             % elif needs_context:
-                try!(parse_four_sides(input, |i| ${parser_function}(context, i)));
+                ${parser_function}(_c, i)
             % else:
-                try!(parse_four_sides(input, ${parser_function}));
-                let _unused = context;
+                ${parser_function}(i)
             % endif
+            })?;
             Ok(expanded! {
-                % for side in ["top", "right", "bottom", "left"]:
-                    ${to_rust_ident(sub_property_pattern % side)}: ${side},
+                % for index, side in enumerate(["top", "right", "bottom", "left"]):
+                    ${to_rust_ident(sub_property_pattern % side)}: rect.${index},
                 % endfor
             })
         }
 
         impl<'a> ToCss for LonghandsToSerialize<'a> {
             fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-                super::serialize_four_sides(
-                    dest,
-                    self.${to_rust_ident(sub_property_pattern % 'top')},
-                    self.${to_rust_ident(sub_property_pattern % 'right')},
-                    self.${to_rust_ident(sub_property_pattern % 'bottom')},
-                    self.${to_rust_ident(sub_property_pattern % 'left')}
-                )
+                let rect = Rect::new(
+                    % for side in ["top", "right", "bottom", "left"]:
+                    &self.${to_rust_ident(sub_property_pattern % side)},
+                    % endfor
+                );
+                rect.to_css(dest)
             }
         }
     </%call>
@@ -1100,9 +1099,14 @@
 
             /// Returns a value representing a `0` length.
             pub fn zero() -> Self {
-                use values::specified::length::{LengthOrPercentageOrAuto, NoCalcLength};
-                SpecifiedValue(MozLength::LengthOrPercentageOrAuto(
-                    LengthOrPercentageOrAuto::Length(NoCalcLength::zero())))
+                use values::specified::length::LengthOrPercentageOrAuto;
+                SpecifiedValue(MozLength::LengthOrPercentageOrAuto(LengthOrPercentageOrAuto::zero()))
+            }
+
+            /// Returns a value representing a `0%` length.
+            pub fn zero_percent() -> Self {
+                use values::specified::length::LengthOrPercentageOrAuto;
+                SpecifiedValue(MozLength::LengthOrPercentageOrAuto(LengthOrPercentageOrAuto::zero_percent()))
             }
         }
         % endif

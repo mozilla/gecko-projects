@@ -38,13 +38,12 @@ toolbar:-moz-lwtheme {
 %ifndef MOZ_PHOTON_THEME
   --toolbarbutton-hover-background: rgba(255,255,255,.25);
   --toolbarbutton-active-background: rgba(70%,70%,70%,.25);
-%endif
 
   --toolbarbutton-hover-bordercolor: rgba(0,0,0,.2);
 
   --toolbarbutton-active-bordercolor: rgba(0,0,0,.3);
   --toolbarbutton-active-boxshadow: 0 0 2px rgba(0,0,0,.6) inset;
-
+%endif
   --toolbarbutton-checkedhover-backgroundcolor: rgba(85%,85%,85%,.25);
 }
 
@@ -64,8 +63,8 @@ toolbar[brighttext] {
 #main-window:not([customizing]) .toolbarbutton-1[disabled=true] > .toolbarbutton-icon,
 #main-window:not([customizing]) .toolbarbutton-1[disabled=true] > .toolbarbutton-menu-dropmarker,
 #main-window:not([customizing]) .toolbarbutton-1[disabled=true] > .toolbarbutton-menubutton-dropmarker,
-#main-window:not([customizing]) .toolbarbutton-1[disabled=true] > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
-#main-window:not([customizing]) .toolbarbutton-1 > .toolbarbutton-menubutton-button[disabled=true] > .toolbarbutton-icon {
+#main-window:not([customizing]) .toolbarbutton-1 > .toolbarbutton-menubutton-button[disabled=true] > .toolbarbutton-icon,
+#main-window:not([customizing]) .toolbarbutton-1[disabled=true] > :-moz-any(.toolbarbutton-menubutton-button, .toolbarbutton-badge-stack) > .toolbarbutton-icon {
   opacity: 0.4;
 }
 

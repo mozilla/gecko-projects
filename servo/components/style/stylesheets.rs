@@ -37,9 +37,13 @@ use servo_config::prefs::PREFS;
 #[cfg(not(feature = "gecko"))]
 use servo_url::ServoUrl;
 use shared_lock::{SharedRwLock, Locked, ToCssWithGuard, SharedRwLockReadGuard};
+use smallvec::SmallVec;
+use std::{fmt, mem};
 use std::borrow::Borrow;
 use std::cell::Cell;
-use std::fmt;
+use std::mem::align_of;
+use std::os::raw::c_void;
+use std::slice;
 use std::sync::atomic::{AtomicBool, Ordering};
 use str::starts_with_ignore_ascii_case;
 use style_traits::ToCss;
@@ -47,6 +51,7 @@ use stylearc::Arc;
 use stylist::FnvHashMap;
 use supports::SupportsCondition;
 use values::{CustomIdent, KeyframesName};
+use values::specified::NamespaceId;
 use values::specified::url::SpecifiedUrl;
 use viewport::ViewportRule;
 
@@ -92,11 +97,64 @@ pub enum Origin {
 }
 
 /// A set of namespaces applying to a given stylesheet.
+///
+/// The namespace id is used in gecko
 #[derive(Clone, Default, Debug)]
 #[allow(missing_docs)]
 pub struct Namespaces {
-    pub default: Option<Namespace>,
-    pub prefixes: FnvHashMap<Prefix , Namespace>,
+    pub default: Option<(Namespace, NamespaceId)>,
+    pub prefixes: FnvHashMap<Prefix, (Namespace, NamespaceId)>,
+}
+
+/// Like gecko_bindings::structs::MallocSizeOf, but without the Option<> wrapper. Note that
+/// functions of this type should not be called via do_malloc_size_of(), rather than directly.
+pub type MallocSizeOfFn = unsafe extern "C" fn(ptr: *const c_void) -> usize;
+
+/// Call malloc_size_of on ptr, first checking that the allocation isn't empty.
+pub unsafe fn do_malloc_size_of<T>(malloc_size_of: MallocSizeOfFn, ptr: *const T) -> usize {
+    if ptr as usize <= align_of::<T>() {
+        0
+    } else {
+        malloc_size_of(ptr as *const c_void)
+    }
+}
+
+/// Trait for measuring the size of heap data structures.
+pub trait MallocSizeOf {
+    /// Measure the size of any heap-allocated structures that hang off this value, but not the
+    /// space taken up by the value itself.
+    fn malloc_size_of_children(&self, malloc_size_of: MallocSizeOfFn) -> usize;
+}
+
+/// Like MallocSizeOf, but operates with the global SharedRwLockReadGuard locked.
+pub trait MallocSizeOfWithGuard {
+    /// Like MallocSizeOf::malloc_size_of_children, but with a |guard| argument.
+    fn malloc_size_of_children(&self, guard: &SharedRwLockReadGuard,
+                               malloc_size_of: MallocSizeOfFn) -> usize;
+}
+
+impl<A: MallocSizeOf, B: MallocSizeOf> MallocSizeOf for (A, B) {
+    fn malloc_size_of_children(&self, malloc_size_of: MallocSizeOfFn) -> usize {
+        self.0.malloc_size_of_children(malloc_size_of) +
+            self.1.malloc_size_of_children(malloc_size_of)
+    }
+}
+
+impl<T: MallocSizeOf> MallocSizeOf for Vec<T> {
+    fn malloc_size_of_children(&self, malloc_size_of: MallocSizeOfFn) -> usize {
+        self.iter().fold(
+            unsafe { do_malloc_size_of(malloc_size_of, self.as_ptr()) },
+            |n, elem| n + elem.malloc_size_of_children(malloc_size_of))
+    }
+}
+
+impl<T: MallocSizeOfWithGuard> MallocSizeOfWithGuard for Vec<T> {
+    fn malloc_size_of_children(&self, guard: &SharedRwLockReadGuard,
+                               malloc_size_of: MallocSizeOfFn) -> usize {
+        self.iter().fold(
+            unsafe { do_malloc_size_of(malloc_size_of, self.as_ptr()) },
+            |n, elem| n + elem.malloc_size_of_children(guard, malloc_size_of))
+    }
 }
 
 /// A list of CSS rules.
@@ -116,6 +174,13 @@ impl CssRules {
         CssRules(
             self.0.iter().map(|ref x| x.deep_clone_with_lock(lock)).collect()
         )
+    }
+}
+
+impl MallocSizeOfWithGuard for CssRules {
+    fn malloc_size_of_children(&self, guard: &SharedRwLockReadGuard,
+                               malloc_size_of: MallocSizeOfFn) -> usize {
+        self.0.malloc_size_of_children(guard, malloc_size_of)
     }
 }
 
@@ -254,8 +319,8 @@ impl CssRulesHelpers for Arc<Locked<CssRules>> {
 
         Ok(new_rule)
     }
-
 }
+
 
 /// The structure servo uses to represent a stylesheet.
 #[derive(Debug)]
@@ -281,6 +346,13 @@ pub struct Stylesheet {
     pub quirks_mode: QuirksMode,
 }
 
+impl MallocSizeOfWithGuard for Stylesheet {
+    fn malloc_size_of_children(&self, guard: &SharedRwLockReadGuard,
+                               malloc_size_of: MallocSizeOfFn) -> usize {
+        // Measurement of other fields may be added later.
+        self.rules.read_with(guard).malloc_size_of_children(guard, malloc_size_of)
+    }
+}
 
 /// This structure holds the user-agent and user stylesheets.
 pub struct UserAgentStylesheets {
@@ -315,6 +387,28 @@ pub enum CssRule {
     Document(Arc<Locked<DocumentRule>>),
 }
 
+impl MallocSizeOfWithGuard for CssRule {
+    fn malloc_size_of_children(&self, guard: &SharedRwLockReadGuard,
+                               malloc_size_of: MallocSizeOfFn) -> usize {
+        match *self {
+            CssRule::Style(ref lock) => {
+                lock.read_with(guard).malloc_size_of_children(guard, malloc_size_of)
+            },
+            // Measurement of these fields may be added later.
+            CssRule::Import(_) => 0,
+            CssRule::Media(_) => 0,
+            CssRule::FontFace(_) => 0,
+            CssRule::CounterStyle(_) => 0,
+            CssRule::Keyframes(_) => 0,
+            CssRule::Namespace(_) => 0,
+            CssRule::Viewport(_) => 0,
+            CssRule::Supports(_) => 0,
+            CssRule::Page(_) => 0,
+            CssRule::Document(_)  => 0,
+        }
+    }
+}
+
 #[allow(missing_docs)]
 #[derive(PartialEq, Eq, Copy, Clone)]
 pub enum CssRuleType {
@@ -341,16 +435,6 @@ pub enum CssRuleType {
     FontFeatureValues   = 14,
     // https://drafts.csswg.org/css-device-adapt/#css-rule-interface
     Viewport            = 15,
-}
-
-/// Result type for with_nested_rules_mq_and_doc_rule()
-pub enum NestedRulesResult<'a> {
-    /// Only rules
-    Rules(&'a [CssRule]),
-    /// Rules with media queries
-    RulesWithMediaQueries(&'a [CssRule], &'a MediaList),
-    /// Rules with document rule
-    RulesWithDocument(&'a [CssRule], &'a DocumentRule)
 }
 
 #[allow(missing_docs)]
@@ -386,60 +470,6 @@ impl CssRule {
         }
     }
 
-    /// Call `f` with the slice of rules directly contained inside this rule.
-    ///
-    /// Note that only some types of rules can contain rules. An empty slice is
-    /// used for others.
-    ///
-    /// This will not recurse down unsupported @supports rules
-    pub fn with_nested_rules_mq_and_doc_rule<F, R>(&self, guard: &SharedRwLockReadGuard, mut f: F) -> R
-    where F: FnMut(NestedRulesResult) -> R {
-        match *self {
-            CssRule::Import(ref lock) => {
-                let rule = lock.read_with(guard);
-                let media = rule.stylesheet.media.read_with(guard);
-                let rules = rule.stylesheet.rules.read_with(guard);
-                // FIXME(emilio): Include the nested rules if the stylesheet is
-                // loaded.
-                f(NestedRulesResult::RulesWithMediaQueries(&rules.0, &media))
-            }
-            CssRule::Namespace(_) |
-            CssRule::Style(_) |
-            CssRule::FontFace(_) |
-            CssRule::CounterStyle(_) |
-            CssRule::Viewport(_) |
-            CssRule::Keyframes(_) |
-            CssRule::Page(_) => {
-                f(NestedRulesResult::Rules(&[]))
-            }
-            CssRule::Media(ref lock) => {
-                let media_rule = lock.read_with(guard);
-                let mq = media_rule.media_queries.read_with(guard);
-                let rules = &media_rule.rules.read_with(guard).0;
-                f(NestedRulesResult::RulesWithMediaQueries(rules, &mq))
-            }
-            CssRule::Supports(ref lock) => {
-                let supports_rule = lock.read_with(guard);
-                let enabled = supports_rule.enabled;
-                if enabled {
-                    let rules = &supports_rule.rules.read_with(guard).0;
-                    f(NestedRulesResult::Rules(rules))
-                } else {
-                    f(NestedRulesResult::Rules(&[]))
-                }
-            }
-            CssRule::Document(ref lock) => {
-                if cfg!(feature = "gecko") {
-                    let document_rule = lock.read_with(guard);
-                    let rules = &document_rule.rules.read_with(guard).0;
-                    f(NestedRulesResult::RulesWithDocument(rules, &document_rule))
-                } else {
-                    unimplemented!()
-                }
-            }
-        }
-    }
-
     // input state is None for a nested rule
     // Returns a parsed CSS rule and the final state of the parser
     #[allow(missing_docs)]
@@ -449,13 +479,13 @@ impl CssRule {
                  loader: Option<&StylesheetLoader>)
                  -> Result<(Self, State), SingleRuleParseError> {
         let error_reporter = NullReporter;
-        let mut namespaces = parent_stylesheet.namespaces.write();
-        let context = ParserContext::new(parent_stylesheet.origin,
-                                         &parent_stylesheet.url_data,
-                                         &error_reporter,
-                                         None,
-                                         PARSING_MODE_DEFAULT,
-                                         parent_stylesheet.quirks_mode);
+        let mut context = ParserContext::new(parent_stylesheet.origin,
+                                             &parent_stylesheet.url_data,
+                                             &error_reporter,
+                                             None,
+                                             PARSING_MODE_DEFAULT,
+                                             parent_stylesheet.quirks_mode);
+        context.namespaces = Some(&parent_stylesheet.namespaces);
         let mut input = Parser::new(css);
 
         // nested rules are in the body state
@@ -466,7 +496,6 @@ impl CssRule {
             shared_lock: &parent_stylesheet.shared_lock,
             loader: loader,
             state: Cell::new(state),
-            namespaces: &mut namespaces,
         };
         match parse_one_rule(&mut input, &mut rule_parser) {
             Ok(result) => Ok((result, rule_parser.state.get())),
@@ -606,6 +635,9 @@ pub struct ImportRule {
     /// It contains an empty list of rules and namespace set that is updated
     /// when it loads.
     pub stylesheet: Arc<Stylesheet>,
+
+    /// The line and column of the rule's source code.
+    pub source_location: SourceLocation,
 }
 
 impl Clone for ImportRule {
@@ -614,6 +646,7 @@ impl Clone for ImportRule {
         ImportRule {
             url: self.url.clone(),
             stylesheet: Arc::new(stylesheet.clone()),
+            source_location: self.source_location.clone(),
         }
     }
 }
@@ -825,6 +858,14 @@ pub struct StyleRule {
     pub source_location: SourceLocation,
 }
 
+impl MallocSizeOfWithGuard for StyleRule {
+    fn malloc_size_of_children(&self, guard: &SharedRwLockReadGuard,
+                               malloc_size_of: MallocSizeOfFn) -> usize {
+        // Measurement of other fields may be added later.
+        self.block.read_with(guard).malloc_size_of_children(malloc_size_of)
+    }
+}
+
 impl ToCssWithGuard for StyleRule {
     // https://drafts.csswg.org/cssom/#serialize-a-css-rule CSSStyleRule
     fn to_css<W>(&self, guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
@@ -906,6 +947,263 @@ impl DocumentRule {
     }
 }
 
+/// A trait that describes statically which rules are iterated for a given
+/// RulesIterator.
+pub trait NestedRuleIterationCondition {
+    /// Whether we should process the nested rules in a given `@import` rule.
+    fn process_import(
+        guard: &SharedRwLockReadGuard,
+        device: &Device,
+        quirks_mode: QuirksMode,
+        rule: &ImportRule)
+        -> bool;
+
+    /// Whether we should process the nested rules in a given `@media` rule.
+    fn process_media(
+        guard: &SharedRwLockReadGuard,
+        device: &Device,
+        quirks_mode: QuirksMode,
+        rule: &MediaRule)
+        -> bool;
+
+    /// Whether we should process the nested rules in a given `@-moz-document` rule.
+    fn process_document(
+        guard: &SharedRwLockReadGuard,
+        device: &Device,
+        quirks_mode: QuirksMode,
+        rule: &DocumentRule)
+        -> bool;
+
+    /// Whether we should process the nested rules in a given `@supports` rule.
+    fn process_supports(
+        guard: &SharedRwLockReadGuard,
+        device: &Device,
+        quirks_mode: QuirksMode,
+        rule: &SupportsRule)
+        -> bool;
+}
+
+/// A struct that represents the condition that a rule applies to the document.
+pub struct EffectiveRules;
+
+impl NestedRuleIterationCondition for EffectiveRules {
+    fn process_import(
+        guard: &SharedRwLockReadGuard,
+        device: &Device,
+        quirks_mode: QuirksMode,
+        rule: &ImportRule)
+        -> bool
+    {
+        rule.stylesheet.media.read_with(guard).evaluate(device, quirks_mode)
+    }
+
+    fn process_media(
+        guard: &SharedRwLockReadGuard,
+        device: &Device,
+        quirks_mode: QuirksMode,
+        rule: &MediaRule)
+        -> bool
+    {
+        rule.media_queries.read_with(guard).evaluate(device, quirks_mode)
+    }
+
+    fn process_document(
+        _: &SharedRwLockReadGuard,
+        device: &Device,
+        _: QuirksMode,
+        rule: &DocumentRule)
+        -> bool
+    {
+        rule.condition.evaluate(device)
+    }
+
+    fn process_supports(
+        _: &SharedRwLockReadGuard,
+        _: &Device,
+        _: QuirksMode,
+        rule: &SupportsRule)
+        -> bool
+    {
+        rule.enabled
+    }
+}
+
+/// A filter that processes all the rules in a rule list.
+pub struct AllRules;
+
+impl NestedRuleIterationCondition for AllRules {
+    fn process_import(
+        _: &SharedRwLockReadGuard,
+        _: &Device,
+        _: QuirksMode,
+        _: &ImportRule)
+        -> bool
+    {
+        true
+    }
+
+    /// Whether we should process the nested rules in a given `@media` rule.
+    fn process_media(
+        _: &SharedRwLockReadGuard,
+        _: &Device,
+        _: QuirksMode,
+        _: &MediaRule)
+        -> bool
+    {
+        true
+    }
+
+    /// Whether we should process the nested rules in a given `@-moz-document` rule.
+    fn process_document(
+        _: &SharedRwLockReadGuard,
+        _: &Device,
+        _: QuirksMode,
+        _: &DocumentRule)
+        -> bool
+    {
+        true
+    }
+
+    /// Whether we should process the nested rules in a given `@supports` rule.
+    fn process_supports(
+        _: &SharedRwLockReadGuard,
+        _: &Device,
+        _: QuirksMode,
+        _: &SupportsRule)
+        -> bool
+    {
+        true
+    }
+}
+
+/// An iterator over all the effective rules of a stylesheet.
+///
+/// NOTE: This iterator recurses into `@import` rules.
+pub type EffectiveRulesIterator<'a, 'b> = RulesIterator<'a, 'b, EffectiveRules>;
+
+/// An iterator over a list of rules.
+pub struct RulesIterator<'a, 'b, C>
+    where 'b: 'a,
+          C: NestedRuleIterationCondition + 'static,
+{
+    device: &'a Device,
+    quirks_mode: QuirksMode,
+    guard: &'a SharedRwLockReadGuard<'b>,
+    stack: SmallVec<[slice::Iter<'a, CssRule>; 3]>,
+    _phantom: ::std::marker::PhantomData<C>,
+}
+
+impl<'a, 'b, C> RulesIterator<'a, 'b, C>
+    where 'b: 'a,
+          C: NestedRuleIterationCondition + 'static,
+{
+    /// Creates a new `RulesIterator` to iterate over `rules`.
+    pub fn new(
+        device: &'a Device,
+        quirks_mode: QuirksMode,
+        guard: &'a SharedRwLockReadGuard<'b>,
+        rules: &'a CssRules)
+        -> Self
+    {
+        let mut stack = SmallVec::new();
+        stack.push(rules.0.iter());
+        Self {
+            device: device,
+            quirks_mode: quirks_mode,
+            guard: guard,
+            stack: stack,
+            _phantom: ::std::marker::PhantomData,
+        }
+    }
+
+    /// Skips all the remaining children of the last nested rule processed.
+    pub fn skip_children(&mut self) {
+        self.stack.pop();
+    }
+}
+
+impl<'a, 'b, C> Iterator for RulesIterator<'a, 'b, C>
+    where 'b: 'a,
+          C: NestedRuleIterationCondition + 'static,
+{
+    type Item = &'a CssRule;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut nested_iter_finished = false;
+        while !self.stack.is_empty() {
+            if nested_iter_finished {
+                self.stack.pop();
+                nested_iter_finished = false;
+                continue;
+            }
+
+            let rule;
+            let sub_iter;
+            {
+                let mut nested_iter = self.stack.last_mut().unwrap();
+                rule = match nested_iter.next() {
+                    Some(r) => r,
+                    None => {
+                        nested_iter_finished = true;
+                        continue
+                    }
+                };
+
+                sub_iter = match *rule {
+                    CssRule::Import(ref import_rule) => {
+                        let import_rule = import_rule.read_with(self.guard);
+
+                        if C::process_import(self.guard, self.device, self.quirks_mode, import_rule) {
+                            Some(import_rule.stylesheet.rules.read_with(self.guard).0.iter())
+                        } else {
+                            None
+                        }
+                    }
+                    CssRule::Document(ref doc_rule) => {
+                        let doc_rule = doc_rule.read_with(self.guard);
+                        if C::process_document(self.guard, self.device, self.quirks_mode, doc_rule) {
+                            Some(doc_rule.rules.read_with(self.guard).0.iter())
+                        } else {
+                            None
+                        }
+                    }
+                    CssRule::Media(ref lock) => {
+                        let media_rule = lock.read_with(self.guard);
+                        if C::process_media(self.guard, self.device, self.quirks_mode, media_rule) {
+                            Some(media_rule.rules.read_with(self.guard).0.iter())
+                        } else {
+                            None
+                        }
+                    }
+                    CssRule::Supports(ref lock) => {
+                        let supports_rule = lock.read_with(self.guard);
+                        if C::process_supports(self.guard, self.device, self.quirks_mode, supports_rule) {
+                            Some(supports_rule.rules.read_with(self.guard).0.iter())
+                        } else {
+                            None
+                        }
+                    }
+                    CssRule::Namespace(_) |
+                    CssRule::Style(_) |
+                    CssRule::FontFace(_) |
+                    CssRule::CounterStyle(_) |
+                    CssRule::Viewport(_) |
+                    CssRule::Keyframes(_) |
+                    CssRule::Page(_) => None,
+                };
+            }
+
+            if let Some(sub_iter) = sub_iter {
+                self.stack.push(sub_iter);
+            }
+
+            return Some(rule);
+        }
+
+        None
+    }
+}
+
 impl Stylesheet {
     /// Updates an empty stylesheet from a given string of text.
     pub fn update_from_str(existing: &Stylesheet,
@@ -914,14 +1212,14 @@ impl Stylesheet {
                            stylesheet_loader: Option<&StylesheetLoader>,
                            error_reporter: &ParseErrorReporter,
                            line_number_offset: u64) {
-        let mut namespaces = Namespaces::default();
+        let namespaces = RwLock::new(Namespaces::default());
         // FIXME: we really should update existing.url_data with the given url_data,
         // otherwise newly inserted rule may not have the right base url.
         let (rules, dirty_on_viewport_size_change) = Stylesheet::parse_rules(
-            css, url_data, existing.origin, &mut namespaces,
+            css, url_data, existing.origin, &namespaces,
             &existing.shared_lock, stylesheet_loader, error_reporter,
             existing.quirks_mode, line_number_offset);
-        *existing.namespaces.write() = namespaces;
+        mem::swap(&mut *existing.namespaces.write(), &mut *namespaces.write());
         existing.dirty_on_viewport_size_change
             .store(dirty_on_viewport_size_change, Ordering::Release);
 
@@ -933,7 +1231,7 @@ impl Stylesheet {
     fn parse_rules(css: &str,
                    url_data: &UrlExtraData,
                    origin: Origin,
-                   namespaces: &mut Namespaces,
+                   namespaces: &RwLock<Namespaces>,
                    shared_lock: &SharedRwLock,
                    stylesheet_loader: Option<&StylesheetLoader>,
                    error_reporter: &ParseErrorReporter,
@@ -942,14 +1240,16 @@ impl Stylesheet {
                    -> (Vec<CssRule>, bool) {
         let mut rules = Vec::new();
         let mut input = Parser::new(css);
+        let mut context = ParserContext::new_with_line_number_offset(origin, url_data, error_reporter,
+                                                                     line_number_offset,
+                                                                     PARSING_MODE_DEFAULT,
+                                                                     quirks_mode);
+        context.namespaces = Some(namespaces);
         let rule_parser = TopLevelRuleParser {
             stylesheet_origin: origin,
-            namespaces: namespaces,
             shared_lock: shared_lock,
             loader: stylesheet_loader,
-            context: ParserContext::new_with_line_number_offset(origin, url_data, error_reporter,
-                                                                line_number_offset, PARSING_MODE_DEFAULT,
-                                                                quirks_mode),
+            context: context,
             state: Cell::new(State::Start),
         };
 
@@ -987,15 +1287,15 @@ impl Stylesheet {
                     quirks_mode: QuirksMode,
                     line_number_offset: u64)
                     -> Stylesheet {
-        let mut namespaces = Namespaces::default();
+        let namespaces = RwLock::new(Namespaces::default());
         let (rules, dirty_on_viewport_size_change) = Stylesheet::parse_rules(
-            css, &url_data, origin, &mut namespaces,
+            css, &url_data, origin, &namespaces,
             &shared_lock, stylesheet_loader, error_reporter, quirks_mode, line_number_offset,
         );
         Stylesheet {
             origin: origin,
             url_data: url_data,
-            namespaces: RwLock::new(namespaces),
+            namespaces: namespaces,
             rules: CssRules::new(rules, &shared_lock),
             media: media,
             shared_lock: shared_lock,
@@ -1035,14 +1335,30 @@ impl Stylesheet {
 
     /// Return an iterator over the effective rules within the style-sheet, as
     /// according to the supplied `Device`.
-    ///
-    /// If a condition does not hold, its associated conditional group rule and
-    /// nested rules will be skipped. Use `rules` if all rules need to be
-    /// examined.
     #[inline]
-    pub fn effective_rules<F>(&self, device: &Device, guard: &SharedRwLockReadGuard, mut f: F)
-    where F: FnMut(&CssRule) {
-        effective_rules(&self.rules.read_with(guard).0, device, self.quirks_mode, guard, &mut f);
+    pub fn effective_rules<'a, 'b>(
+        &'a self,
+        device: &'a Device,
+        guard: &'a SharedRwLockReadGuard<'b>)
+        -> EffectiveRulesIterator<'a, 'b>
+    {
+        self.iter_rules::<'a, 'b, EffectiveRules>(device, guard)
+    }
+
+    /// Return an iterator using the condition `C`.
+    #[inline]
+    pub fn iter_rules<'a, 'b, C>(
+        &'a self,
+        device: &'a Device,
+        guard: &'a SharedRwLockReadGuard<'b>)
+        -> RulesIterator<'a, 'b, C>
+        where C: NestedRuleIterationCondition,
+    {
+        RulesIterator::new(
+            device,
+            self.quirks_mode,
+            guard,
+            &self.rules.read_with(guard))
     }
 
     /// Returns whether the stylesheet has been explicitly disabled through the
@@ -1092,51 +1408,20 @@ impl Clone for Stylesheet {
     }
 }
 
-fn effective_rules<F>(rules: &[CssRule],
-                      device: &Device,
-                      quirks_mode: QuirksMode,
-                      guard: &SharedRwLockReadGuard,
-                      f: &mut F)
-    where F: FnMut(&CssRule)
-{
-    for rule in rules {
-        f(rule);
-        rule.with_nested_rules_mq_and_doc_rule(guard, |result| {
-            let rules = match result {
-                NestedRulesResult::Rules(rules) => {
-                    rules
-                },
-                NestedRulesResult::RulesWithMediaQueries(rules, media_queries) => {
-                    if !media_queries.evaluate(device, quirks_mode) {
-                        return;
-                    }
-                    rules
-                },
-                NestedRulesResult::RulesWithDocument(rules, doc_rule) => {
-                    if !doc_rule.condition.evaluate(device) {
-                        return;
-                    }
-                    rules
-                },
-            };
-            effective_rules(rules, device, quirks_mode, guard, f)
-        })
-    }
-}
-
 macro_rules! rule_filter {
     ($( $method: ident($variant:ident => $rule_type: ident), )+) => {
         impl Stylesheet {
             $(
                 #[allow(missing_docs)]
                 pub fn $method<F>(&self, device: &Device, guard: &SharedRwLockReadGuard, mut f: F)
-                where F: FnMut(&$rule_type) {
-                    self.effective_rules(device, guard, |rule| {
+                    where F: FnMut(&$rule_type),
+                {
+                    for rule in self.effective_rules(device, guard) {
                         if let CssRule::$variant(ref lock) = *rule {
                             let rule = lock.read_with(guard);
                             f(&rule)
                         }
-                    })
+                    }
                 }
             )+
         }
@@ -1189,7 +1474,6 @@ impl StylesheetLoader for NoOpLoader {
 
 struct TopLevelRuleParser<'a> {
     stylesheet_origin: Origin,
-    namespaces: &'a mut Namespaces,
     shared_lock: &'a SharedRwLock,
     loader: Option<&'a StylesheetLoader>,
     context: ParserContext<'a>,
@@ -1202,7 +1486,6 @@ impl<'b> TopLevelRuleParser<'b> {
             stylesheet_origin: self.stylesheet_origin,
             shared_lock: self.shared_lock,
             context: &self.context,
-            namespaces: self.namespaces,
         }
     }
 }
@@ -1247,12 +1530,29 @@ enum AtRulePrelude {
 }
 
 
+#[cfg(feature = "gecko")]
+fn register_namespace(ns: &Namespace) -> Result<i32, ()> {
+    let id = unsafe { ::gecko_bindings::bindings::Gecko_RegisterNamespace(ns.0.as_ptr()) };
+    if id == -1 {
+        Err(())
+    } else {
+        Ok(id)
+    }
+}
+
+#[cfg(feature = "servo")]
+fn register_namespace(_: &Namespace) -> Result<(), ()> {
+    Ok(()) // servo doesn't use namespace ids
+}
+
 impl<'a> AtRuleParser for TopLevelRuleParser<'a> {
     type Prelude = AtRulePrelude;
     type AtRule = CssRule;
 
     fn parse_prelude(&mut self, name: &str, input: &mut Parser)
                      -> Result<AtRuleType<AtRulePrelude, CssRule>, ()> {
+        let location = get_location_with_offset(input.current_source_location(),
+                                                self.context.line_number_offset);
         match_ignore_ascii_case! { name,
             "import" => {
                 if self.state.get() <= State::Imports {
@@ -1284,7 +1584,8 @@ impl<'a> AtRuleParser for TopLevelRuleParser<'a> {
                                 dirty_on_viewport_size_change: AtomicBool::new(false),
                                 disabled: AtomicBool::new(false),
                                 quirks_mode: self.context.quirks_mode,
-                            })
+                            }),
+                            source_location: location,
                         }
                     }, &mut |import_rule| {
                         Arc::new(self.shared_lock.wrap(import_rule))
@@ -1299,18 +1600,19 @@ impl<'a> AtRuleParser for TopLevelRuleParser<'a> {
                 if self.state.get() <= State::Namespaces {
                     self.state.set(State::Namespaces);
 
-                    let location = get_location_with_offset(input.current_source_location(),
-                                                            self.context.line_number_offset);
-
                     let prefix_result = input.try(|input| input.expect_ident());
                     let url = Namespace::from(try!(input.expect_url_or_string()));
 
+                    let id = register_namespace(&url)?;
+
                     let opt_prefix = if let Ok(prefix) = prefix_result {
                         let prefix = Prefix::from(prefix);
-                        self.namespaces.prefixes.insert(prefix.clone(), url.clone());
+                        self.context.namespaces.expect("namespaces must be set whilst parsing rules")
+                                               .write().prefixes.insert(prefix.clone(), (url.clone(), id));
                         Some(prefix)
                     } else {
-                        self.namespaces.default = Some(url.clone());
+                        self.context.namespaces.expect("namespaces must be set whilst parsing rules")
+                                               .write().default = Some((url.clone(), id));
                         None
                     };
 
@@ -1369,7 +1671,6 @@ struct NestedRuleParser<'a, 'b: 'a> {
     stylesheet_origin: Origin,
     shared_lock: &'a SharedRwLock,
     context: &'a ParserContext<'b>,
-    namespaces: &'b Namespaces,
 }
 
 impl<'a, 'b> NestedRuleParser<'a, 'b> {
@@ -1379,7 +1680,6 @@ impl<'a, 'b> NestedRuleParser<'a, 'b> {
             stylesheet_origin: self.stylesheet_origin,
             shared_lock: self.shared_lock,
             context: &context,
-            namespaces: self.namespaces,
         };
         let mut iter = RuleListParser::new_for_nested_rule(input, nested_parser);
         let mut rules = Vec::new();
@@ -1555,9 +1855,10 @@ impl<'a, 'b> QualifiedRuleParser for NestedRuleParser<'a, 'b> {
     type QualifiedRule = CssRule;
 
     fn parse_prelude(&mut self, input: &mut Parser) -> Result<SelectorList<SelectorImpl>, ()> {
+        let ns = self.context.namespaces.expect("namespaces must be set when parsing rules").read();
         let selector_parser = SelectorParser {
             stylesheet_origin: self.stylesheet_origin,
-            namespaces: self.namespaces,
+            namespaces: &*ns,
         };
         SelectorList::parse(&selector_parser, input)
     }

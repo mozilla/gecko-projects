@@ -258,9 +258,12 @@ TEST(MozPromise, PromiseAllReject)
 // chaining upon task queue shutdown.
 TEST(MozPromise, Chaining)
 {
+  // We declare this variable before |atq| to ensure
+  // the destructor is run after |holder.Disconnect()|.
+  MozPromiseRequestHolder<TestPromise> holder;
+
   AutoTaskQueue atq;
   RefPtr<TaskQueue> queue = atq.Queue();
-  MozPromiseRequestHolder<TestPromise> holder;
 
   RunOnTaskQueue(queue, [queue, &holder] () {
     auto p = TestPromise::CreateAndResolve(42, __func__);
@@ -343,6 +346,63 @@ TEST(MozPromise, MoveOnlyType)
       EXPECT_EQ(nullptr, aVal.ResolveValue().get());
       EXPECT_EQ(87, *val.ResolveValue());
 
+      queue->BeginShutdown();
+    });
+}
+
+TEST(MozPromise, HeterogeneousChaining)
+{
+  using Promise1 = MozPromise<UniquePtr<char>, bool, true>;
+  using Promise2 = MozPromise<UniquePtr<int>, bool, true>;
+  using RRValue1 = Promise1::ResolveOrRejectValue;
+  using RRValue2 = Promise2::ResolveOrRejectValue;
+
+  MozPromiseRequestHolder<Promise2> holder;
+
+  AutoTaskQueue atq;
+  RefPtr<TaskQueue> queue = atq.Queue();
+
+  RunOnTaskQueue(queue, [queue, &holder]() {
+    Promise1::CreateAndResolve(MakeUnique<char>(0), __func__)
+      ->Then(queue,
+             __func__,
+             [&holder]() {
+               holder.Disconnect();
+               return Promise2::CreateAndResolve(MakeUnique<int>(0), __func__);
+             })
+      ->Then(queue,
+             __func__,
+             []() {
+               // Shouldn't be called for we've disconnected the request.
+               EXPECT_FALSE(true);
+             })
+      ->Track(holder);
+  });
+
+  Promise1::CreateAndResolve(MakeUnique<char>(87), __func__)
+    ->Then(queue,
+           __func__,
+           [](UniquePtr<char> aVal) {
+             EXPECT_EQ(87, *aVal);
+             return Promise2::CreateAndResolve(MakeUnique<int>(94), __func__);
+           },
+           []() {
+             return Promise2::CreateAndResolve(MakeUnique<int>(95), __func__);
+           })
+    ->Then(queue,
+           __func__,
+           [](UniquePtr<int> aVal) { EXPECT_EQ(94, *aVal); },
+           []() { EXPECT_FALSE(true); });
+
+  Promise1::CreateAndResolve(MakeUnique<char>(87), __func__)
+    ->Then(queue,
+           __func__,
+           [](RRValue1&& aVal) {
+             EXPECT_EQ(87, *aVal.ResolveValue());
+             return Promise2::CreateAndResolve(MakeUnique<int>(94), __func__);
+           })
+    ->Then(queue, __func__, [queue](RRValue2&& aVal) {
+      EXPECT_EQ(94, *aVal.ResolveValue());
       queue->BeginShutdown();
     });
 }

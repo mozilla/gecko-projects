@@ -131,23 +131,31 @@ fuzzy(106,354) == css-multicol-1/multicol-rule-double-000.xht css-multicol-1/mul
 fails-if(OSX||winWidget) == css-multicol-1/multicol-rule-fraction-001.xht css-multicol-1/multicol-rule-fraction-001-ref.xht
 fails-if(OSX||winWidget) == css-multicol-1/multicol-rule-fraction-002.xht css-multicol-1/multicol-rule-fraction-002-ref.xht
 fails-if(!styloVsGecko) == css-multicol-1/multicol-rule-fraction-003.xht css-multicol-1/multicol-rule-fraction-3-ref.xht
-fuzzy(106,354) == css-multicol-1/multicol-rule-groove-000.xht css-multicol-1/multicol-rule-groove-000-ref.xht
+fuzzy(106,354) fails-if(webrender) == css-multicol-1/multicol-rule-groove-000.xht css-multicol-1/multicol-rule-groove-000-ref.xht
+skip-if(!webrender) pref(layers.advanced.border-layers,1) == css-multicol-1/multicol-rule-groove-000.xht css-multicol-1/multicol-rule-groove-000-ref.xht
 fuzzy(94,256) == css-multicol-1/multicol-rule-hidden-000.xht css-multicol-1/multicol-rule-hidden-000-ref.xht
-fuzzy(106,354) == css-multicol-1/multicol-rule-inset-000.xht css-multicol-1/multicol-rule-ridge-000-ref.xht
+fuzzy(106,354) fails-if(webrender) == css-multicol-1/multicol-rule-inset-000.xht css-multicol-1/multicol-rule-ridge-000-ref.xht
+skip-if(!webrender) pref(layers.advanced.border-layers,1) == css-multicol-1/multicol-rule-inset-000.xht css-multicol-1/multicol-rule-ridge-000-ref.xht
 fuzzy(255,2808) == css-multicol-1/multicol-rule-large-001.xht css-multicol-1/multicol-rule-large-001-ref.xht
 fuzzy(94,256) == css-multicol-1/multicol-rule-none-000.xht css-multicol-1/multicol-rule-hidden-000-ref.xht
-fuzzy(106,354) == css-multicol-1/multicol-rule-outset-000.xht css-multicol-1/multicol-rule-groove-000-ref.xht
+fuzzy(106,354) fails-if(webrender) == css-multicol-1/multicol-rule-outset-000.xht css-multicol-1/multicol-rule-groove-000-ref.xht
+skip-if(!webrender) pref(layers.advanced.border-layers,1) == css-multicol-1/multicol-rule-outset-000.xht css-multicol-1/multicol-rule-groove-000-ref.xht
 == css-multicol-1/multicol-rule-percent-001.xht css-multicol-1/multicol-containing-002-ref.xht
 fails-if(!styloVsGecko) == css-multicol-1/multicol-rule-px-001.xht css-multicol-1/multicol-rule-ref.xht
-fuzzy(106,354) == css-multicol-1/multicol-rule-ridge-000.xht css-multicol-1/multicol-rule-ridge-000-ref.xht
+fuzzy(106,354) fails-if(webrender) == css-multicol-1/multicol-rule-ridge-000.xht css-multicol-1/multicol-rule-ridge-000-ref.xht
+skip-if(!webrender) pref(layers.advanced.border-layers,1) == css-multicol-1/multicol-rule-ridge-000.xht css-multicol-1/multicol-rule-ridge-000-ref.xht
 == css-multicol-1/multicol-rule-samelength-001.xht css-multicol-1/multicol-rule-samelength-001-ref.xht
 == css-multicol-1/multicol-rule-shorthand-001.xht css-multicol-1/multicol-rule-samelength-001-ref.xht
 fuzzy(106,354) == css-multicol-1/multicol-rule-solid-000.xht css-multicol-1/multicol-rule-solid-000-ref.xht
 fails-if(!styloVsGecko) == css-multicol-1/multicol-rule-stacking-001.xht css-multicol-1/multicol-rule-stacking-ref.xht
-== css-multicol-1/multicol-rule-style-groove-001.xht css-multicol-1/multicol-rule-style-groove-001-ref.xht
-== css-multicol-1/multicol-rule-style-inset-001.xht css-multicol-1/multicol-rule-style-ridge-001-ref.xht
-== css-multicol-1/multicol-rule-style-outset-001.xht css-multicol-1/multicol-rule-style-groove-001-ref.xht
-== css-multicol-1/multicol-rule-style-ridge-001.xht css-multicol-1/multicol-rule-style-ridge-001-ref.xht
+fails-if(webrender) == css-multicol-1/multicol-rule-style-groove-001.xht css-multicol-1/multicol-rule-style-groove-001-ref.xht
+skip-if(!webrender) pref(layers.advanced.table,1) == css-multicol-1/multicol-rule-style-groove-001.xht css-multicol-1/multicol-rule-style-groove-001-ref.xht
+fails-if(webrender) == css-multicol-1/multicol-rule-style-inset-001.xht css-multicol-1/multicol-rule-style-ridge-001-ref.xht
+skip-if(!webrender) pref(layers.advanced.table,1) == css-multicol-1/multicol-rule-style-inset-001.xht css-multicol-1/multicol-rule-style-ridge-001-ref.xht
+fails-if(webrender) == css-multicol-1/multicol-rule-style-outset-001.xht css-multicol-1/multicol-rule-style-groove-001-ref.xht
+skip-if(!webrender) pref(layers.advanced.table,1) == css-multicol-1/multicol-rule-style-outset-001.xht css-multicol-1/multicol-rule-style-groove-001-ref.xht
+fails-if(webrender) == css-multicol-1/multicol-rule-style-ridge-001.xht css-multicol-1/multicol-rule-style-ridge-001-ref.xht
+skip-if(!webrender) pref(layers.advanced.table,1) == css-multicol-1/multicol-rule-style-ridge-001.xht css-multicol-1/multicol-rule-style-ridge-001-ref.xht
 fails-if(!styloVsGecko) == css-multicol-1/multicol-shorthand-001.xht css-multicol-1/multicol-rule-ref.xht
 fails-if(!styloVsGecko) == css-multicol-1/multicol-span-000.xht css-multicol-1/multicol-span-000-ref.xht
 fails-if(!styloVsGecko) == css-multicol-1/multicol-span-all-001.xht css-multicol-1/multicol-span-all-001-ref.xht
@@ -219,20 +227,20 @@ fails-if(!styloVsGecko) == css-values-3/attr-px-invalid-cast.html css-values-3/r
 == css-values-3/attr-px-invalid-fallback.html css-values-3/reference/200-200-green.html
 fails-if(!styloVsGecko) == css-values-3/attr-px-valid.html css-values-3/reference/200-200-green.html
 == css-values-3/calc-in-calc.html css-values-3/reference/all-green.html
-fails == css-values-3/calc-in-media-queries-001.html css-values-3/reference/all-green.html
-fails == css-values-3/calc-in-media-queries-002.html css-values-3/reference/all-green.html
+fails-if(!stylo) == css-values-3/calc-in-media-queries-001.html css-values-3/reference/all-green.html
+fails-if(!stylo) == css-values-3/calc-in-media-queries-002.html css-values-3/reference/all-green.html
 == css-values-3/calc-invalid-range-clamping.html css-values-3/reference/200-200-green.html
 == css-values-3/calc-parenthesis-stack.html css-values-3/reference/all-green.html
 fuzzy-if(OSX,40,6) == css-values-3/ch-unit-001.html css-values-3/reference/ch-unit-001-ref.html
 == css-values-3/initial-background-color.html css-values-3/reference/all-green.html
 == css-values-3/vh-calc-support-pct.html css-values-3/reference/all-green.html
 == css-values-3/vh-calc-support.html css-values-3/reference/all-green.html
-fails-if(stylo) == css-values-3/vh-em-inherit.html css-values-3/reference/all-green.html
+== css-values-3/vh-em-inherit.html css-values-3/reference/all-green.html
 == css-values-3/vh-inherit.html css-values-3/reference/all-green.html
 == css-values-3/vh-interpolate-pct.html css-values-3/reference/all-green.html
 == css-values-3/vh-interpolate-px.html css-values-3/reference/all-green.html
 == css-values-3/vh-interpolate-vh.html css-values-3/reference/all-green.html
-fails-if(styloVsGecko) == css-values-3/vh-support-atviewport.html css-values-3/reference/all-green.html
+fails-if(styloVsGecko||stylo) == css-values-3/vh-support-atviewport.html css-values-3/reference/all-green.html
 == css-values-3/vh-support-margin.html css-values-3/reference/all-green.html
 skip == css-values-3/vh-support-transform-origin.html css-values-3/reference/all-green.html
 skip == css-values-3/vh-support-transform-translate.html css-values-3/reference/all-green.html
@@ -1032,10 +1040,10 @@ needs-focus == selectors-4/focus-within-004.html selectors-4/focus-within-001-re
 needs-focus == selectors-4/focus-within-005.html selectors-4/focus-within-001-ref.html
 needs-focus == selectors-4/focus-within-006.html selectors-4/focus-within-001-ref.html
 fails-if(!styloVsGecko) needs-focus == selectors-4/focus-within-shadow-001.html selectors-4/focus-within-shadow-001-ref.html
-pref(dom.webcomponents.enabled,true) needs-focus skip-if(styloVsGecko) == selectors-4/focus-within-shadow-002.html selectors-4/focus-within-shadow-001-ref.html
-pref(dom.webcomponents.enabled,true) needs-focus skip-if(styloVsGecko) == selectors-4/focus-within-shadow-003.html selectors-4/focus-within-shadow-001-ref.html
-pref(dom.webcomponents.enabled,true) needs-focus skip-if(styloVsGecko) == selectors-4/focus-within-shadow-004.html selectors-4/focus-within-shadow-001-ref.html
-pref(dom.webcomponents.enabled,true) needs-focus skip-if(styloVsGecko) == selectors-4/focus-within-shadow-005.html selectors-4/focus-within-shadow-001-ref.html
+pref(dom.webcomponents.enabled,true) needs-focus skip-if(styloVsGecko||stylo) == selectors-4/focus-within-shadow-002.html selectors-4/focus-within-shadow-001-ref.html
+pref(dom.webcomponents.enabled,true) needs-focus skip-if(styloVsGecko||stylo) == selectors-4/focus-within-shadow-003.html selectors-4/focus-within-shadow-001-ref.html
+pref(dom.webcomponents.enabled,true) needs-focus skip-if(styloVsGecko||stylo) == selectors-4/focus-within-shadow-004.html selectors-4/focus-within-shadow-001-ref.html
+pref(dom.webcomponents.enabled,true) needs-focus skip-if(styloVsGecko||stylo) == selectors-4/focus-within-shadow-005.html selectors-4/focus-within-shadow-001-ref.html
 == selectors-4/of-type-selectors.xhtml selectors-4/of-type-selectors-ref.xhtml
 == selectors-4/selector-required.html selectors-4/selector-required-ref.html
 == selectors-4/selectors-dir-selector-ltr-001.html selectors-4/selectors-dir-selector-ref.html
