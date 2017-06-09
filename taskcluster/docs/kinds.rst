@@ -14,6 +14,10 @@ actions for static analysis or to produce instrumented artifacts.
 build-signing
 -------------
 
+Many builds must be signed, the build-signing task takes the unsigned `build`
+kind artifacts and passess them through signingscriptworker to a signing server
+and returns signed results.
+
 
 artifact-build
 --------------
