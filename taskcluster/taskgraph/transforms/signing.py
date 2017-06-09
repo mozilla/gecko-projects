@@ -88,10 +88,18 @@ def make_task_description(config, jobs):
             signing_format_scopes.append("project:releng:signing:format:{}".format(format))
 
         treeherder = job.get('treeherder', {})
-        treeherder.setdefault('symbol', 'tc(Ns)')
+        treeherder.setdefault('symbol', _generate_treeherder_symbol(
+            dep_job.attributes.get('nightly')
+        ))
+
         dep_th_platform = dep_job.task.get('extra', {}).get(
             'treeherder', {}).get('machine', {}).get('platform', '')
-        treeherder.setdefault('platform', "{}/opt".format(dep_th_platform))
+        build_type = dep_job.attributes.get('build_type')
+        build_platform = dep_job.attributes.get('build_platform')
+        treeherder.setdefault('platform', _generate_treeherder_platform(
+            dep_th_platform, build_platform, build_type
+        ))
+
         treeherder.setdefault('tier', 1)
         treeherder.setdefault('kind', 'build')
 
@@ -99,8 +107,8 @@ def make_task_description(config, jobs):
 
         attributes = {
             'nightly': dep_job.attributes.get('nightly', False),
-            'build_platform': dep_job.attributes.get('build_platform'),
-            'build_type': dep_job.attributes.get('build_type'),
+            'build_platform': build_platform,
+            'build_type': build_type,
             'signed': True,
         }
         if dep_job.attributes.get('chunk_locales'):
@@ -114,7 +122,7 @@ def make_task_description(config, jobs):
           ['linux64-devedition-nightly', 'linux-devedition-nightly']):
             signing_cert_scope = get_devedition_signing_cert_scope(config)
         else:
-            signing_cert_scope = get_signing_cert_scope(config)
+            signing_cert_scope = get_signing_cert_scope(config, dep_job.attributes.get('nightly'))
 
         task = {
             'label': label,
@@ -137,3 +145,12 @@ def make_task_description(config, jobs):
                 project=config.params['project'], level=config.params['level']))
 
         yield task
+
+
+def _generate_treeherder_symbol(is_nightly):
+    return 'tc(Ns)' if is_nightly else 'tc(Bs)'
+
+
+def _generate_treeherder_platform(dep_th_platform, build_platform, build_type):
+    actual_build_type = 'pgo' if '-pgo' in build_platform else build_type
+    return '{}/{}'.format(dep_th_platform, actual_build_type)
