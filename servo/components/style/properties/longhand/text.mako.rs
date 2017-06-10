@@ -16,12 +16,11 @@
                    spec="https://drafts.csswg.org/css-ui/#propdef-text-overflow">
     use std::fmt;
     use style_traits::ToCss;
-    use cssparser;
 
     no_viewport_percentage!(SpecifiedValue);
 
-    #[derive(PartialEq, Eq, Clone, Debug)]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+    #[derive(Clone, Debug, Eq, PartialEq, ToCss)]
     pub enum Side {
         Clip,
         Ellipsis,
@@ -105,7 +104,8 @@
             sides_are_logical: true,
         }
     }
-    pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+    pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                         -> Result<SpecifiedValue, ParseError<'i>> {
         let first = try!(Side::parse(context, input));
         let second = input.try(|input| Side::parse(context, input)).ok();
         Ok(SpecifiedValue {
@@ -114,27 +114,16 @@
         })
     }
     impl Parse for Side {
-        fn parse(_context: &ParserContext, input: &mut Parser) -> Result<Side, ()> {
+        fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
+                         -> Result<Side, ParseError<'i>> {
             if let Ok(ident) = input.try(|input| input.expect_ident()) {
-                match_ignore_ascii_case! { &ident,
+                (match_ignore_ascii_case! { &ident,
                     "clip" => Ok(Side::Clip),
                     "ellipsis" => Ok(Side::Ellipsis),
                     _ => Err(())
-                }
+                }).map_err(|()| SelectorParseError::UnexpectedIdent(ident).into())
             } else {
                 Ok(Side::String(try!(input.expect_string()).into_owned().into_boxed_str()))
-            }
-        }
-    }
-
-    impl ToCss for Side {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            match *self {
-                Side::Clip => dest.write_str("clip"),
-                Side::Ellipsis => dest.write_str("ellipsis"),
-                Side::String(ref s) => {
-                    cssparser::serialize_string(s, dest)
-                }
             }
         }
     }
@@ -156,10 +145,9 @@ ${helpers.single_keyword("unicode-bidi",
                          animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-writing-modes/#propdef-unicode-bidi")}
 
-// FIXME: This prop should be animatable.
 <%helpers:longhand name="text-decoration-line"
                    custom_cascade="${product == 'servo'}"
-                   animation_value_type="none"
+                   animation_value_type="discrete"
                    spec="https://drafts.csswg.org/css-text-decor/#propdef-text-decoration-line">
     use std::fmt;
     use style_traits::ToCss;
@@ -172,8 +160,8 @@ ${helpers.single_keyword("unicode-bidi",
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         pub flags SpecifiedValue: u8 {
             const NONE = 0,
-            const OVERLINE = 0x01,
-            const UNDERLINE = 0x02,
+            const UNDERLINE = 0x01,
+            const OVERLINE = 0x02,
             const LINE_THROUGH = 0x04,
             const BLINK = 0x08,
         % if product == "gecko":
@@ -230,34 +218,39 @@ ${helpers.single_keyword("unicode-bidi",
         SpecifiedValue::empty()
     }
     /// none | [ underline || overline || line-through || blink ]
-    pub fn parse(_context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+    pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
+                         -> Result<SpecifiedValue, ParseError<'i>> {
         let mut result = SpecifiedValue::empty();
         if input.try(|input| input.expect_ident_matching("none")).is_ok() {
             return Ok(result)
         }
         let mut empty = true;
 
-        while input.try(|input| {
-                if let Ok(ident) = input.expect_ident() {
-                    match_ignore_ascii_case! { &ident,
-                        "underline" => if result.contains(UNDERLINE) { return Err(()) }
-                                       else { empty = false; result.insert(UNDERLINE) },
-                        "overline" => if result.contains(OVERLINE) { return Err(()) }
-                                      else { empty = false; result.insert(OVERLINE) },
-                        "line-through" => if result.contains(LINE_THROUGH) { return Err(()) }
-                                          else { empty = false; result.insert(LINE_THROUGH) },
-                        "blink" => if result.contains(BLINK) { return Err(()) }
-                                   else { empty = false; result.insert(BLINK) },
-                        _ => return Err(())
+        loop {
+            let result: Result<_, ParseError> = input.try(|input| {
+                match input.expect_ident() {
+                    Ok(ident) => {
+                        (match_ignore_ascii_case! { &ident,
+                            "underline" => if result.contains(UNDERLINE) { Err(()) }
+                                           else { empty = false; result.insert(UNDERLINE); Ok(()) },
+                            "overline" => if result.contains(OVERLINE) { Err(()) }
+                                          else { empty = false; result.insert(OVERLINE); Ok(()) },
+                            "line-through" => if result.contains(LINE_THROUGH) { Err(()) }
+                                              else { empty = false; result.insert(LINE_THROUGH); Ok(()) },
+                            "blink" => if result.contains(BLINK) { Err(()) }
+                                       else { empty = false; result.insert(BLINK); Ok(()) },
+                            _ => Err(())
+                        }).map_err(|()| SelectorParseError::UnexpectedIdent(ident).into())
                     }
-                } else {
-                    return Err(());
+                    Err(e) => return Err(e.into())
                 }
-                Ok(())
-            }).is_ok() {
+            });
+            if result.is_err() {
+                break;
+            }
         }
 
-        if !empty { Ok(result) } else { Err(()) }
+        if !empty { Ok(result) } else { Err(StyleParseError::UnspecifiedError.into()) }
     }
 
     % if product == "servo":
@@ -269,6 +262,9 @@ ${helpers.single_keyword("unicode-bidi",
                 longhands::_servo_text_decorations_in_effect::derive_from_text_decoration(context);
         }
     % endif
+
+    #[cfg(feature = "gecko")]
+    impl_bitflags_conversions!(SpecifiedValue);
 </%helpers:longhand>
 
 ${helpers.single_keyword("text-decoration-style",
@@ -291,6 +287,6 @@ ${helpers.predefined_type(
     "InitialLetter",
     "computed::InitialLetter::normal()",
     initial_specified_value="specified::InitialLetter::normal()",
-    animation_value_type="none",
+    animation_value_type="discrete",
     products="gecko",
     spec="https://drafts.csswg.org/css-inline/#sizing-drop-initials")}

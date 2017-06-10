@@ -18,18 +18,20 @@ ${helpers.predefined_type("line-height",
 ${helpers.single_keyword("text-transform",
                          "none capitalize uppercase lowercase",
                          extra_gecko_values="full-width",
-                         animation_value_type="none",
+                         animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-text/#propdef-text-transform")}
 
 ${helpers.single_keyword("hyphens", "manual none auto",
                          gecko_enum_prefix="StyleHyphens",
-                         products="gecko", animation_value_type="none", extra_prefixes="moz",
+                         gecko_inexhaustive=True,
+                         products="gecko", animation_value_type="discrete", extra_prefixes="moz",
                          spec="https://drafts.csswg.org/css-text/#propdef-hyphens")}
 
 // TODO: Support <percentage>
 ${helpers.single_keyword("-moz-text-size-adjust", "auto none",
                          gecko_constant_prefix="NS_STYLE_TEXT_SIZE_ADJUST",
-                         products="gecko", animation_value_type="none",
+                         gecko_ffi_name="mTextSizeAdjust",
+                         products="gecko", animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-size-adjust/#adjustment-control",
                          alias="-webkit-text-size-adjust")}
 
@@ -45,7 +47,7 @@ ${helpers.predefined_type("text-indent",
 ${helpers.single_keyword("overflow-wrap",
                          "normal break-word",
                          gecko_constant_prefix="NS_STYLE_OVERFLOWWRAP",
-                         animation_value_type="none",
+                         animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-text/#propdef-overflow-wrap",
                          alias="word-wrap")}
 
@@ -53,7 +55,7 @@ ${helpers.single_keyword("overflow-wrap",
 ${helpers.single_keyword("word-break",
                          "normal break-all keep-all",
                          gecko_constant_prefix="NS_STYLE_WORDBREAK",
-                         animation_value_type="none",
+                         animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-text/#propdef-word-break")}
 
 // TODO(pcwalton): Support `text-justify: distribute`.
@@ -62,7 +64,8 @@ ${helpers.single_keyword("word-break",
                                   extra_gecko_values="inter-character"
                                   extra_specified="${'distribute' if product == 'gecko' else ''}"
                                   gecko_enum_prefix="StyleTextJustify"
-                                  animation_value_type="none"
+                                  gecko_inexhaustive="True"
+                                  animation_value_type="discrete"
                                   spec="https://drafts.csswg.org/css-text/#propdef-text-justify">
     no_viewport_percentage!(SpecifiedValue);
 
@@ -101,11 +104,11 @@ ${helpers.single_keyword("text-align-last",
                          "auto start end left right center justify",
                          products="gecko",
                          gecko_constant_prefix="NS_STYLE_TEXT_ALIGN",
-                         animation_value_type="none",
+                         animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-text/#propdef-text-align-last")}
 
 // TODO make this a shorthand and implement text-align-last/text-align-all
-<%helpers:longhand name="text-align" animation_value_type="none" need_clone="True"
+<%helpers:longhand name="text-align" animation_value_type="discrete"
                    spec="https://drafts.csswg.org/css-text/#propdef-text-align">
     no_viewport_percentage!(SpecifiedValue);
     pub mod computed_value {
@@ -176,7 +179,8 @@ ${helpers.single_keyword("text-align-last",
             MatchParent,
             MozCenterOrInherit,
         }
-        pub fn parse(_context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+        pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
+                             -> Result<SpecifiedValue, ParseError<'i>> {
             // MozCenterOrInherit cannot be parsed, only set directly on th elements
             if let Ok(key) = input.try(computed_value::T::parse) {
                 Ok(SpecifiedValue::Keyword(key))
@@ -252,7 +256,8 @@ ${helpers.single_keyword("text-align-last",
         use values::computed::ComputedValueAsSpecified;
         impl ComputedValueAsSpecified for SpecifiedValue {}
         pub use self::computed_value::T as SpecifiedValue;
-        pub fn parse(_context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+        pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
+                             -> Result<SpecifiedValue, ParseError<'i>> {
             computed_value::T::parse(input)
         }
     % endif
@@ -360,7 +365,8 @@ ${helpers.predefined_type("word-spacing",
                                   extra_gecko_values="-moz-pre-space"
                                   gecko_enum_prefix="StyleWhiteSpace"
                                   needs_conversion="True"
-                                  animation_value_type="none"
+                                  gecko_inexhaustive="True"
+                                  animation_value_type="discrete"
                                   spec="https://drafts.csswg.org/css-text/#propdef-white-space">
     use values::computed::ComputedValueAsSpecified;
     impl ComputedValueAsSpecified for SpecifiedValue {}
@@ -411,7 +417,8 @@ ${helpers.predefined_type("word-spacing",
         pub type T = Shadow;
     }
 
-    pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<specified::Shadow, ()> {
+    pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                         -> Result<specified::Shadow, ParseError<'i>> {
         specified::Shadow::parse(context, input, true)
     }
 </%helpers:vector_longhand>
@@ -427,8 +434,8 @@ ${helpers.predefined_type("word-spacing",
     no_viewport_percentage!(SpecifiedValue);
 
     pub mod computed_value {
-        #[derive(Debug, Clone, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(Clone, Debug, PartialEq, ToCss)]
         pub enum T {
             Keyword(KeywordValue),
             None,
@@ -443,31 +450,12 @@ ${helpers.predefined_type("word-spacing",
         }
     }
 
-    #[derive(Debug, Clone, PartialEq)]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+    #[derive(Clone, Debug, PartialEq, ToCss)]
     pub enum SpecifiedValue {
         Keyword(KeywordValue),
         None,
         String(String),
-    }
-
-    impl ToCss for computed_value::T {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            match *self {
-                computed_value::T::Keyword(ref keyword) => keyword.to_css(dest),
-                computed_value::T::None => dest.write_str("none"),
-                computed_value::T::String(ref string) => write!(dest, "\"{}\"", string),
-            }
-        }
-    }
-    impl ToCss for SpecifiedValue {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            match *self {
-                SpecifiedValue::Keyword(ref keyword) => keyword.to_css(dest),
-                SpecifiedValue::None => dest.write_str("none"),
-                SpecifiedValue::String(ref string) => write!(dest, "\"{}\"", string),
-            }
-        }
     }
 
     #[derive(Debug, Clone, PartialEq)]
@@ -592,7 +580,8 @@ ${helpers.predefined_type("word-spacing",
         }
     }
 
-    pub fn parse(_context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+    pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
+                         -> Result<SpecifiedValue, ParseError<'i>> {
         if input.try(|input| input.expect_ident_matching("none")).is_ok() {
             return Ok(SpecifiedValue::None);
         }
@@ -618,13 +607,13 @@ ${helpers.predefined_type("word-spacing",
             (Some(fill), Ok(shape)) => KeywordValue::FillAndShape(fill,shape),
             (Some(fill), Err(_)) => KeywordValue::Fill(fill),
             (None, Ok(shape)) => KeywordValue::Shape(shape),
-            _ => return Err(()),
+            _ => return Err(StyleParseError::UnspecifiedError.into()),
         };
         Ok(SpecifiedValue::Keyword(keyword_value))
     }
 </%helpers:longhand>
 
-<%helpers:longhand name="text-emphasis-position" animation_value_type="none" products="gecko"
+<%helpers:longhand name="text-emphasis-position" animation_value_type="discrete" products="gecko"
                    spec="https://drafts.csswg.org/css-text-decor/#propdef-text-emphasis-position">
     use values::computed::ComputedValueAsSpecified;
     use style_traits::ToCss;
@@ -651,7 +640,8 @@ ${helpers.predefined_type("word-spacing",
         SpecifiedValue(HorizontalWritingModeValue::Over, VerticalWritingModeValue::Right)
     }
 
-    pub fn parse(_context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+    pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
+                         -> Result<SpecifiedValue, ParseError<'i>> {
        if let Ok(horizontal) = input.try(|input| HorizontalWritingModeValue::parse(input)) {
             let vertical = try!(VerticalWritingModeValue::parse(input));
             Ok(SpecifiedValue(horizontal, vertical))
@@ -680,6 +670,32 @@ ${helpers.predefined_type("word-spacing",
                     HorizontalWritingModeValue::Under
                 };
                 SpecifiedValue(horiz, vert)
+            }
+        }
+
+        impl From<u8> for SpecifiedValue {
+            fn from(bits: u8) -> SpecifiedValue {
+                SpecifiedValue::from_gecko_keyword(bits as u32)
+            }
+        }
+
+        impl From<SpecifiedValue> for u8 {
+            fn from(v: SpecifiedValue) -> u8 {
+                use gecko_bindings::structs;
+
+                let mut result = match v.0 {
+                    HorizontalWritingModeValue::Over => structs::NS_STYLE_TEXT_EMPHASIS_POSITION_OVER,
+                    HorizontalWritingModeValue::Under => structs::NS_STYLE_TEXT_EMPHASIS_POSITION_UNDER,
+                };
+                match v.1 {
+                    VerticalWritingModeValue::Right => {
+                        result |= structs::NS_STYLE_TEXT_EMPHASIS_POSITION_RIGHT;
+                    }
+                    VerticalWritingModeValue::Left => {
+                        result |= structs::NS_STYLE_TEXT_EMPHASIS_POSITION_LEFT;
+                    }
+                };
+                result as u8
             }
         }
     % endif
