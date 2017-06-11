@@ -1357,7 +1357,8 @@ protected:
                                        const ActiveScrolledRoot* aASR,
                                        const DisplayItemClipChain* aClipChain,
                                        const ActiveScrolledRoot* aScrollMetadataASR,
-                                       const nsPoint& aTopLeft);
+                                       const nsPoint& aTopLeft,
+                                       const bool aBackfaceHidden);
 
   /* Build a mask layer to represent the clipping region. Will return null if
    * there is no clipping specified or a mask layer cannot be built.
@@ -3644,7 +3645,8 @@ ContainerState::NewPaintedLayerData(nsDisplayItem* aItem,
                                     const ActiveScrolledRoot* aASR,
                                     const DisplayItemClipChain* aClipChain,
                                     const ActiveScrolledRoot* aScrollMetadataASR,
-                                    const nsPoint& aTopLeft)
+                                    const nsPoint& aTopLeft,
+                                    const bool aBackfaceHidden)
 {
   PaintedLayerData data;
   data.mAnimatedGeometryRoot = aAnimatedGeometryRoot;
@@ -3652,7 +3654,7 @@ ContainerState::NewPaintedLayerData(nsDisplayItem* aItem,
   data.mClipChain = aClipChain;
   data.mAnimatedGeometryRootOffset = aTopLeft;
   data.mReferenceFrame = aItem->ReferenceFrame();
-  data.mBackfaceHidden = aItem->Frame()->In3DContextAndBackfaceIsHidden();
+  data.mBackfaceHidden = aBackfaceHidden;
 
   data.mNewChildLayersIndex = mNewChildLayers.Length();
   NewLayerEntry* newLayerEntry = mNewChildLayers.AppendElement();
@@ -4508,13 +4510,15 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
        */
       mLayerBuilder->AddLayerDisplayItem(ownLayer, item, layerState, nullptr);
     } else {
+      bool backfaceHidden = item->In3DContextAndBackfaceIsHidden();
       PaintedLayerData* paintedLayerData =
-        mPaintedLayerDataTree.FindPaintedLayerFor(animatedGeometryRoot, itemASR, layerClipChain,
+        mPaintedLayerDataTree.FindPaintedLayerFor(animatedGeometryRoot, itemASR,
+                                                  layerClipChain,
                                                   itemVisibleRect,
-                                                  item->Frame()->In3DContextAndBackfaceIsHidden(),
+                                                  backfaceHidden,
                                                   [&]() {
           return NewPaintedLayerData(item, animatedGeometryRoot, itemASR, layerClipChain, scrollMetadataASR,
-                                     aTopLeft);
+                                     aTopLeft, backfaceHidden);
         });
 
       if (itemType == TYPE_LAYER_EVENT_REGIONS) {

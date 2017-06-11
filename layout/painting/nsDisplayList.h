@@ -2431,6 +2431,18 @@ public:
 
   virtual bool CanBeReused() const { return true; }
 
+  bool In3DContextAndBackfaceIsHidden()
+  {
+    if (mBackfaceHidden) {
+      return *mBackfaceHidden;
+    }
+
+    bool backfaceHidden = Frame()->In3DContextAndBackfaceIsHidden();
+    mBackfaceHidden.emplace(backfaceHidden);
+
+    return backfaceHidden;
+  }
+
 protected:
   nsDisplayItem() = delete;
 
@@ -2461,6 +2473,7 @@ protected:
   bool      mPainted;
 #endif
   bool      mHasSavedState;
+  mozilla::Maybe<bool> mBackfaceHidden;
 
   struct {
     nsRect mVisibleRect;
