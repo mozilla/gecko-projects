@@ -930,7 +930,7 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
       mAsyncPanZoomEnabled(nsLayoutUtils::AsyncPanZoomEnabled(aReferenceFrame)),
       mBuildingInvisibleItems(false),
       mHitTestShouldStopAtFirstOpaque(false),
-      mDisplayListReady(false)
+      mIsBuilding(false)
 {
   MOZ_COUNT_CTOR(nsDisplayListBuilder);
 
@@ -2078,7 +2078,7 @@ nsDisplayList::ComputeVisibilityForSublist(nsDisplayListBuilder* aBuilder,
 
       nsRegion itemVisible;
       itemVisible.And(*aVisibleRegion, bounds);
-      item->SetVisibleRect(itemVisible.GetBounds());
+      item->SetVisibleRect(itemVisible.GetBounds(), false);
     }
 
     if (item->ComputeVisibility(aBuilder, aVisibleRegion)) {
@@ -2675,8 +2675,6 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
 nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                              const ActiveScrolledRoot* aActiveScrolledRoot)
   : mFrame(aFrame)
-  , mClipChain(aBuilder->ClipState().GetCurrentCombinedClipChain(aBuilder))
-  , mClip(DisplayItemClipChain::ClipForASR(mClipChain, aActiveScrolledRoot))
   , mActiveScrolledRoot(aActiveScrolledRoot)
   , mAnimatedGeometryRoot(nullptr)
   , mForceNotVisible(aBuilder->IsBuildingInvisibleItems())
@@ -2686,7 +2684,6 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
   , mPainted(false)
 #endif
   , mHasSavedState(false)
-  , mStateStack(aBuilder->GetStateStack())
 {
   mReferenceFrame = aBuilder->FindReferenceFrameFor(aFrame, &mToReferenceFrame);
   // This can return the wrong result if the item override ShouldFixToViewport(),
@@ -2696,10 +2693,14 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                                                     *mAnimatedGeometryRoot), "Bad");
   NS_ASSERTION(aBuilder->GetVisibleRect().width >= 0 ||
                !aBuilder->IsForPainting(), "visible rect not set");
+
+  SetClipChain(aBuilder->ClipState().GetCurrentCombinedClipChain(aBuilder), true);
+
   // The dirty rect is for mCurrentFrame, so we have to use
   // mCurrentOffsetToReferenceFrame
-  mVisibleRect = aBuilder->GetVisibleRect() +
-      aBuilder->GetCurrentFrameOffsetToReferenceFrame();
+  nsRect visible = aBuilder->GetVisibleRect() +
+    aBuilder->GetCurrentFrameOffsetToReferenceFrame();
+  SetVisibleRect(visible, true);
 }
 
 /* static */ bool
@@ -2757,14 +2758,14 @@ nsDisplayItem::RecomputeVisibility(nsDisplayListBuilder* aBuilder,
 
     nsRegion itemVisible;
     itemVisible.And(*aVisibleRegion, bounds);
-    SetVisibleRect(itemVisible.GetBounds());
+    SetVisibleRect(itemVisible.GetBounds(), false);
   }
 
   // When we recompute visibility within layers we don't need to
   // expand the visible region for content behind plugins (the plugin
   // is not in the layer).
   if (!ComputeVisibility(aBuilder, aVisibleRegion)) {
-    SetVisibleRect(nsRect());
+    SetVisibleRect(nsRect(), false);
     return false;
   }
 
@@ -2774,18 +2775,22 @@ nsDisplayItem::RecomputeVisibility(nsDisplayListBuilder* aBuilder,
 }
 
 void
-nsDisplayItem::SetClipChain(const DisplayItemClipChain* aClipChain)
+nsDisplayItem::SetClipChain(const DisplayItemClipChain* aClipChain,
+                            bool aStore)
 {
   mClipChain = aClipChain;
   mClip = DisplayItemClipChain::ClipForASR(aClipChain, mActiveScrolledRoot);
+
+  if (aStore) {
+    mState.mClipChain = mClipChain;
+    mState.mClip = mClip;
+  }
 }
 
 void
-nsDisplayItem::FuseClipChainUpTo(nsDisplayListBuilder* aBuilder, const ActiveScrolledRoot* aASR)
+nsDisplayItem::FuseClipChainUpTo(nsDisplayListBuilder* aBuilder,
+                                 const ActiveScrolledRoot* aASR)
 {
-  SaveVar(mClip);
-  SaveVar(mClipChain);
-
   const DisplayItemClipChain* sc = mClipChain;
   DisplayItemClip mergedClip;
   while (sc && ActiveScrolledRoot::PickDescendant(aASR, sc->mASR) == sc->mASR) {
@@ -2847,11 +2852,6 @@ nsDisplayItem::IntersectClip(nsDisplayListBuilder* aBuilder,
     return;
   }
 
-  if (aBuilder->IsDisplayListReady()) {
-    SaveVar(mClip);
-    SaveVar(mClipChain);
-  }
-
   // aOther might be a reference to a clip on the stack. We need to make sure
   // that CreateClipChainIntersection will allocate the actual intersected
   // clip in the builder's arena, so for the mClipChain == nullptr case,
@@ -2859,7 +2859,9 @@ nsDisplayItem::IntersectClip(nsDisplayListBuilder* aBuilder,
   // clones the whole chain.
   const DisplayItemClipChain* ancestorClip =
     mClipChain ? FindCommonAncestorClipForIntersection(mClipChain, aOther) : nullptr;
-  SetClipChain(aBuilder->CreateClipChainIntersection(ancestorClip, mClipChain, aOther));
+
+  SetClipChain(aBuilder->CreateClipChainIntersection(ancestorClip, mClipChain, aOther),
+               aBuilder->IsBuilding());
 }
 
 nsRect
@@ -3086,7 +3088,7 @@ nsDisplayBackgroundImage::nsDisplayBackgroundImage(const InitData& aInitData)
     // viewport rect. This is necessary because the background's clip can move
     // asynchronously.
     if (Maybe<nsRect> viewportRect = GetViewportRectRelativeToReferenceFrame(aInitData.builder, mFrame)) {
-      mVisibleRect = mBounds.Intersect(*viewportRect);
+      SetVisibleRect(mBounds.Intersect(*viewportRect), true);
     }
   }
 }
@@ -4176,7 +4178,6 @@ nsDisplayBackgroundColor::ApplyOpacity(nsDisplayListBuilder* aBuilder,
                                        const DisplayItemClipChain* aClip)
 {
   NS_ASSERTION(CanApplyOpacity(), "ApplyOpacity should be allowed");
-  SaveVar(mColor);
   mColor.a = mColor.a * aOpacity;
   IntersectClip(aBuilder, aClip);
 }
@@ -5231,8 +5232,6 @@ nsDisplayBoxShadowOuter::ComputeVisibility(nsDisplayListBuilder* aBuilder,
     return false;
   }
 
-  // Store the actual visible region
-  // SaveVar(mVisibleRegion);
   mVisibleRegion.And(*aVisibleRegion, mVisibleRect);
   return true;
 }
@@ -5559,8 +5558,6 @@ nsDisplayBoxShadowInner::ComputeVisibility(nsDisplayListBuilder* aBuilder,
     return false;
   }
 
-  // Store the actual visible region
-  // SaveVar(mVisibleRegion);
   mVisibleRegion.And(*aVisibleRegion, mVisibleRect);
   return true;
 }
@@ -5606,8 +5603,11 @@ nsDisplayWrapList::nsDisplayWrapList(nsDisplayListBuilder* aBuilder,
     mReferenceFrame = i->ReferenceFrame();
     mToReferenceFrame = i->ToReferenceFrame();
   }
-  mVisibleRect = aBuilder->GetVisibleRect() +
-      aBuilder->GetCurrentFrameOffsetToReferenceFrame();
+
+  nsRect visible = aBuilder->GetVisibleRect() +
+    aBuilder->GetCurrentFrameOffsetToReferenceFrame();
+
+  SetVisibleRect(visible, true);
 }
 
 nsDisplayWrapList::nsDisplayWrapList(nsDisplayListBuilder* aBuilder,
@@ -5633,8 +5633,11 @@ nsDisplayWrapList::nsDisplayWrapList(nsDisplayListBuilder* aBuilder,
     mReferenceFrame = aItem->ReferenceFrame();
     mToReferenceFrame = aItem->ToReferenceFrame();
   }
-  mVisibleRect = aBuilder->GetVisibleRect() +
-      aBuilder->GetCurrentFrameOffsetToReferenceFrame();
+
+  nsRect visible = aBuilder->GetVisibleRect() +
+    aBuilder->GetCurrentFrameOffsetToReferenceFrame();
+
+  SetVisibleRect(visible, true);
 }
 
 nsDisplayWrapList::~nsDisplayWrapList() {
@@ -5764,12 +5767,6 @@ nsRect nsDisplayWrapList::GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder
 }
 
 void
-nsDisplayWrapList::SetVisibleRect(const nsRect& aRect)
-{
-  mVisibleRect = aRect;
-}
-
-void
 nsDisplayWrapList::SetReferenceFrame(const nsIFrame* aFrame)
 {
   mReferenceFrame = aFrame;
@@ -5856,6 +5853,7 @@ nsDisplayOpacity::nsDisplayOpacity(nsDisplayListBuilder* aBuilder,
     , mForEventsAndPluginsOnly(aForEventsAndPluginsOnly)
 {
   MOZ_COUNT_CTOR(nsDisplayOpacity);
+  mState.mOpacity = mOpacity;
 }
 
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -5929,7 +5927,6 @@ nsDisplayOpacity::ApplyOpacity(nsDisplayListBuilder* aBuilder,
                              const DisplayItemClipChain* aClip)
 {
   NS_ASSERTION(CanApplyOpacity(), "ApplyOpacity should be allowed");
-  SaveVar(mOpacity);
   mOpacity = mOpacity * aOpacity;
   IntersectClip(aBuilder, aClip);
 }
@@ -6649,14 +6646,21 @@ nsDisplayStickyPosition::nsDisplayStickyPosition(nsDisplayListBuilder* aBuilder,
   : nsDisplayOwnLayer(aBuilder, aFrame, aList, aActiveScrolledRoot)
 {
   MOZ_COUNT_CTOR(nsDisplayStickyPosition);
-  mClip = nullptr;
 }
 
 void
-nsDisplayStickyPosition::SetClipChain(const DisplayItemClipChain* aClipChain)
+nsDisplayStickyPosition::SetClipChain(const DisplayItemClipChain* aClipChain,
+                                      bool aStore)
 {
   mClipChain = aClipChain;
+  mClip = nullptr;
+
   MOZ_ASSERT(!mClip, "There should never be a clip on this item because no clip moves with it.");
+
+  if (aStore) {
+    mState.mClipChain = aClipChain;
+    mState.mClip = mClip;
+  }
 }
 
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -6955,15 +6959,16 @@ nsDisplayTransform::SetReferenceFrameToAncestor(nsDisplayListBuilder* aBuilder)
       mAnimatedGeometryRoot = mAnimatedGeometryRoot->mParentAGR;
     }
   }
-  mVisibleRect = aBuilder->GetVisibleRect() + mToReferenceFrame;
+
+  SetVisibleRect(aBuilder->GetVisibleRect() + mToReferenceFrame, true);
 }
 
 void
 nsDisplayTransform::Init(nsDisplayListBuilder* aBuilder)
 {
   mHasBounds = false;
-  mStoredList.SetClipChain(nullptr);
-  mStoredList.SetVisibleRect(mChildrenVisibleRect);
+  mStoredList.SetClipChain(nullptr, true);
+  mStoredList.SetVisibleRect(mChildrenVisibleRect, true);
 }
 
 nsDisplayTransform::nsDisplayTransform(nsDisplayListBuilder* aBuilder,

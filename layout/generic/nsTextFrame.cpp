@@ -4875,6 +4875,12 @@ public:
   }
 #endif
 
+  virtual void RestoreState() override
+  {
+    nsDisplayItem::RestoreState();
+    mOpacity = 1.0f;
+  }
+
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
                            bool* aSnap) const override {
     *aSnap = false;
@@ -4946,7 +4952,6 @@ public:
                     const DisplayItemClipChain* aClip) override
   {
     NS_ASSERTION(CanApplyOpacity(), "ApplyOpacity should be allowed");
-    SaveVar(mOpacity);
     mOpacity = aOpacity;
     IntersectClip(aBuilder, aClip);
   }

@@ -312,59 +312,6 @@ private:
 
 }
 
-typedef mozilla::ArenaAllocator<4096, 8> VarStateAllocator;
-
-struct VarState {
-  virtual ~VarState() = default;
-  virtual void Restore() = 0;
-};
-
-template<typename T>
-struct VarStateImpl : public VarState {
-  explicit VarStateImpl(T& aVar) : mVal(aVar), mVar(aVar) {}
-  void Restore() override { mVar = mVal; }
-
-  void* operator new(size_t aSize, VarStateAllocator& aAllocator)
-  {
-    return aAllocator.Allocate(aSize);
-  }
-
-private:
-  T mVal;
-  T& mVar;
-};
-
-class StateStack {
-public:
-  ~StateStack()
-  {
-    for (VarState* state : mStates) {
-      state->~VarState();
-    }
-  }
-
-  void RestoreState()
-  {
-    // Restore the state in the reverse order.
-    for (VarState* state : mozilla::Reversed(mStates)) {
-      state->Restore();
-      state->~VarState();
-    }
-
-    mStates.Clear();
-    mPool.Clear();
-  }
-
-  template<typename T> void SaveVar(T& aVar)
-  {
-    mStates.AppendElement(new (mPool) VarStateImpl<T>(aVar));
-  }
-
-private:
-  nsTArray<VarState*> mStates;
-  VarStateAllocator mPool;
-};
-
 enum class nsDisplayListBuilderMode : uint8_t {
   PAINTING,
   EVENT_DELIVERY,
@@ -650,10 +597,8 @@ public:
   bool IsPartialUpdate() { return mPartialUpdate; }
   void SetPartialUpdate(bool aPartial) { mPartialUpdate = aPartial; }
 
-  bool IsDisplayListReady() const { return mDisplayListReady; }
-  void SetDisplayListReady(bool aIsReady) { mDisplayListReady = aIsReady; }
-
-  StateStack* GetStateStack() { return &mStateStack; }
+  bool IsBuilding() const { return mIsBuilding; }
+  void SetIsBuilding(bool aIsBuilding) { mIsBuilding = aIsBuilding; }
 
   /**
    * Allows callers to selectively override the regular paint suppression checks,
@@ -1758,8 +1703,7 @@ private:
   bool                           mAsyncPanZoomEnabled;
   bool                           mBuildingInvisibleItems;
   bool                           mHitTestShouldStopAtFirstOpaque;
-  bool                           mDisplayListReady;
-  StateStack                     mStateStack;
+  bool                           mIsBuilding;
 };
 
 class nsDisplayItem;
@@ -1850,11 +1794,12 @@ public:
     aBuilder->Destroy(type, this);
   }
 
-  template<typename T> void SaveVar(T& aVar)
+  virtual void RestoreState()
   {
-    MOZ_ASSERT(mStateStack);
-    mStateStack->SaveVar(aVar);
-    mHasSavedState = true;
+    mVisibleRect = mState.mVisibleRect;
+    mClipChain = mState.mClipChain;
+    mClip = mState.mClip;
+    mDisableSubpixelAA = mState.mDisableSubpixelAA;
   }
 
   /**
@@ -1875,8 +1820,7 @@ public:
    * state of the item.
    * This is currently only used when creating temporary items for merging.
    */
-  nsDisplayItem(const nsDisplayItem&) = default;
-  /*
+  // nsDisplayItem(const nsDisplayItem&) = default;
   nsDisplayItem(const nsDisplayItem& aOther)
     : mFrame(aOther.mFrame)
     , mClipChain(aOther.mClipChain)
@@ -1888,9 +1832,7 @@ public:
     , mVisibleRect(aOther.mVisibleRect)
     , mForceNotVisible(aOther.mForceNotVisible)
     , mDisableSubpixelAA(aOther.mDisableSubpixelAA)
-    , mStateStack(aOther.mStateStack)
   {}
-  */
 
   struct HitTestState {
     explicit HitTestState() : mInPreserves3D(false) {}
@@ -2332,9 +2274,13 @@ public:
    */
   const nsRect& GetVisibleRect() const { return mVisibleRect; }
 
-  void SetVisibleRect(const nsRect& aVisibleRect) {
-    SaveVar(mVisibleRect);
+  void SetVisibleRect(const nsRect& aVisibleRect, bool aStore)
+  {
     mVisibleRect = aVisibleRect;
+
+    if (aStore) {
+      mState.mVisibleRect = mVisibleRect;
+    }
   }
 
   /**
@@ -2424,7 +2370,6 @@ public:
    */
   void DisableComponentAlpha()
   {
-    SaveVar(mDisableSubpixelAA);
     mDisableSubpixelAA = true;
   }
 
@@ -2446,7 +2391,8 @@ public:
   void SetActiveScrolledRoot(const ActiveScrolledRoot* aActiveScrolledRoot) { mActiveScrolledRoot = aActiveScrolledRoot; }
   const ActiveScrolledRoot* GetActiveScrolledRoot() const { return mActiveScrolledRoot; }
 
-  virtual void SetClipChain(const DisplayItemClipChain* aClipChain);
+  virtual void SetClipChain(const DisplayItemClipChain* aClipChain,
+                            bool aStore);
   const DisplayItemClipChain* GetClipChain() const { return mClipChain; }
 
   /**
@@ -2473,19 +2419,16 @@ public:
   {
     return mReusedItem;
   }
-  bool HasSavedState() const
-  {
-    return mHasSavedState;
-  }
+
   void SetReused(bool aReused)
   {
-    mReusedItem = aReused;
-
-    // When the item is marked as not reused, there cannot be saved state.
-    if (!aReused) {
-      mHasSavedState = false;
+    if (!mReusedItem && aReused) {
+      RestoreState();
     }
+
+    mReusedItem = aReused;
   }
+
   virtual bool CanBeReused() const { return true; }
 
 protected:
@@ -2518,7 +2461,13 @@ protected:
   bool      mPainted;
 #endif
   bool      mHasSavedState;
-  StateStack* mStateStack;
+
+  struct {
+    nsRect mVisibleRect;
+    RefPtr<const DisplayItemClipChain> mClipChain;
+    const DisplayItemClip* mClip;
+    bool mDisableSubpixelAA;
+  } mState;
 };
 
 /**
@@ -3716,7 +3665,9 @@ public:
     , mBackgroundRect(aBackgroundRect)
     , mBackgroundStyle(aBackgroundStyle)
     , mColor(Color::FromABGR(aColor))
-  { }
+  {
+    mState.mColor = mColor;
+  }
 
   virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
                                    LayerManager* aManager,
@@ -3769,6 +3720,10 @@ protected:
   const nsRect mBackgroundRect;
   const nsStyleBackground* mBackgroundStyle;
   mozilla::gfx::Color mColor;
+
+  struct {
+    mozilla::gfx::Color mColor;
+  } mState;
 };
 
 class nsDisplayTableBackgroundColor : public nsDisplayBackgroundColor
@@ -3844,7 +3799,8 @@ class nsDisplayBoxShadowOuter final : public nsDisplayItem {
 public:
   nsDisplayBoxShadowOuter(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
     : nsDisplayItem(aBuilder, aFrame)
-    , mOpacity(1.0) {
+    , mOpacity(1.0f)
+  {
     MOZ_COUNT_CTOR(nsDisplayBoxShadowOuter);
     mBounds = GetBoundsInternal();
   }
@@ -3871,13 +3827,19 @@ public:
                             const DisplayItemClipChain* aClip) override
   {
     NS_ASSERTION(CanApplyOpacity(), "ApplyOpacity should be allowed");
-    SaveVar(mOpacity);
     mOpacity = aOpacity;
     IntersectClip(aBuilder, aClip);
   }
   virtual bool CanApplyOpacity() const override
   {
     return true;
+  }
+
+  virtual void RestoreState() override
+  {
+    nsDisplayItem::RestoreState();
+    mVisibleRegion.SetEmpty();
+    mOpacity = 1.0f;
   }
 
   virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override
@@ -3920,6 +3882,12 @@ public:
     MOZ_COUNT_DTOR(nsDisplayBoxShadowInner);
   }
 #endif
+
+  virtual void RestoreState() override
+  {
+    nsDisplayItem::RestoreState();
+    mVisibleRegion.SetEmpty();
+  }
 
   virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) override;
   virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
@@ -4300,8 +4268,6 @@ public:
     mOverrideZIndex = aZIndex;
   }
 
-  void SetVisibleRect(const nsRect& aRect);
-
   void SetReferenceFrame(const nsIFrame* aFrame);
 
   /**
@@ -4380,6 +4346,12 @@ public:
   virtual ~nsDisplayOpacity();
 #endif
 
+  virtual void RestoreState() override
+  {
+    nsDisplayItem::RestoreState();
+    mOpacity = mState.mOpacity;
+  }
+
   virtual nsDisplayWrapList* Clone(nsDisplayListBuilder* aBuilder) const override
   {
     MOZ_COUNT_CTOR(nsDisplayOpacity);
@@ -4432,6 +4404,10 @@ public:
 private:
   float mOpacity;
   bool mForEventsAndPluginsOnly;
+
+  struct {
+    float mOpacity;
+  } mState;
 };
 
 class nsDisplayBlendMode : public nsDisplayWrapList {
@@ -4723,7 +4699,8 @@ public:
     return new (aBuilder) nsDisplayStickyPosition(*this);
   }
 
-  void SetClipChain(const DisplayItemClipChain* aClipChain) override;
+  void SetClipChain(const DisplayItemClipChain* aClipChain,
+                    bool aStore) override;
   virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
                                              LayerManager* aManager,
                                              const ContainerLayerParameters& aContainerParameters) override;
