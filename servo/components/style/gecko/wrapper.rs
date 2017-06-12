@@ -21,7 +21,7 @@ use data::ElementData;
 use dom::{self, DescendantsBit, LayoutIterator, NodeInfo, TElement, TNode, UnsafeNode};
 use dom::{OpaqueNode, PresentationalHintsSynthesizer};
 use element_state::ElementState;
-use error_reporting::RustLogReporter;
+use error_reporting::create_error_reporter;
 use font_metrics::{FontMetrics, FontMetricsProvider, FontMetricsQueryResult};
 use gecko::data::PerDocumentStyleData;
 use gecko::global_style_data::GLOBAL_STYLE_DATA;
@@ -34,6 +34,7 @@ use gecko_bindings::bindings::{Gecko_IsRootElement, Gecko_MatchesElement, Gecko_
 use gecko_bindings::bindings::{Gecko_SetNodeFlags, Gecko_UnsetNodeFlags};
 use gecko_bindings::bindings::Gecko_ClassOrClassList;
 use gecko_bindings::bindings::Gecko_ElementHasAnimations;
+use gecko_bindings::bindings::Gecko_ElementHasBindingWithAnonymousContent;
 use gecko_bindings::bindings::Gecko_ElementHasCSSAnimations;
 use gecko_bindings::bindings::Gecko_ElementHasCSSTransitions;
 use gecko_bindings::bindings::Gecko_GetActiveLinkAttrDeclarationBlock;
@@ -71,7 +72,7 @@ use rule_tree::CascadeLevel as ServoCascadeLevel;
 use selector_parser::{AttrValue, ElementExt, PseudoClassStringArg};
 use selectors::Element;
 use selectors::attr::{AttrSelectorOperation, AttrSelectorOperator, CaseSensitivity, NamespaceConstraint};
-use selectors::matching::{ElementSelectorFlags, MatchingContext, MatchingMode};
+use selectors::matching::{ElementSelectorFlags, LocalMatchingContext, MatchingContext};
 use selectors::matching::{RelevantLinkStatus, VisitedHandlingMode};
 use shared_lock::Locked;
 use sink::Push;
@@ -204,6 +205,16 @@ impl<'ln> GeckoNode<'ln> {
         true
     }
 
+    fn flattened_tree_parent(&self) -> Option<Self> {
+        let fast_path = self.flattened_tree_parent_is_parent();
+        debug_assert!(fast_path == unsafe { bindings::Gecko_FlattenedTreeParentIsParent(self.0) });
+        if fast_path {
+            unsafe { self.0.mParent.as_ref().map(GeckoNode) }
+        } else {
+            unsafe { bindings::Gecko_GetFlattenedTreeParentNode(self.0).map(GeckoNode) }
+        }
+    }
+
     /// This logic is duplicated in Gecko's nsIContent::IsRootOfNativeAnonymousSubtree.
     fn is_root_of_native_anonymous_subtree(&self) -> bool {
         use gecko_bindings::structs::NODE_IS_NATIVE_ANONYMOUS_ROOT;
@@ -240,13 +251,29 @@ impl<'ln> TNode for GeckoNode<'ln> {
         GeckoNode(&*(n.0 as *mut RawGeckoNode))
     }
 
-    fn children(self) -> LayoutIterator<GeckoChildrenIterator<'ln>> {
+    fn parent_node(&self) -> Option<Self> {
+        unsafe { self.0.mParent.as_ref().map(GeckoNode) }
+    }
+
+    fn children(&self) -> LayoutIterator<GeckoChildrenIterator<'ln>> {
+        LayoutIterator(self.dom_children())
+    }
+
+    fn traversal_parent(&self) -> Option<GeckoElement<'ln>> {
+        self.flattened_tree_parent().and_then(|n| n.as_element())
+    }
+
+    fn traversal_children(&self) -> LayoutIterator<GeckoChildrenIterator<'ln>> {
         let maybe_iter = unsafe { Gecko_MaybeCreateStyleChildrenIterator(self.0) };
         if let Some(iter) = maybe_iter.into_owned_opt() {
             LayoutIterator(GeckoChildrenIterator::GeckoIterator(iter))
         } else {
-            LayoutIterator(GeckoChildrenIterator::Current(self.first_child()))
+            LayoutIterator(self.dom_children())
         }
+    }
+
+    fn children_and_traversal_children_might_differ(&self) -> bool {
+        self.as_element().map_or(false, |e| unsafe { Gecko_ElementHasBindingWithAnonymousContent(e.0) })
     }
 
     fn opaque(&self) -> OpaqueNode {
@@ -275,16 +302,6 @@ impl<'ln> TNode for GeckoNode<'ln> {
     unsafe fn set_can_be_fragmented(&self, _value: bool) {
         // FIXME(SimonSapin): Servo uses this to implement CSS multicol / fragmentation
         // Maybe this isn’t useful for Gecko?
-    }
-
-    fn parent_node(&self) -> Option<Self> {
-        let fast_path = self.flattened_tree_parent_is_parent();
-        debug_assert!(fast_path == unsafe { bindings::Gecko_FlattenedTreeParentIsParent(self.0) });
-        if fast_path {
-            unsafe { self.0.mParent.as_ref().map(GeckoNode) }
-        } else {
-            unsafe { bindings::Gecko_GetParentNode(self.0).map(GeckoNode) }
-        }
     }
 
     fn is_in_doc(&self) -> bool {
@@ -399,7 +416,7 @@ impl<'le> GeckoElement<'le> {
     pub fn parse_style_attribute(value: &str,
                                  url_data: &UrlExtraData,
                                  quirks_mode: QuirksMode) -> PropertyDeclarationBlock {
-        parse_style_attribute(value, url_data, &RustLogReporter, quirks_mode)
+        parse_style_attribute(value, url_data, &create_error_reporter(), quirks_mode)
     }
 
     fn flags(&self) -> u32 {
@@ -644,9 +661,10 @@ impl<'le> TElement for GeckoElement<'le> {
 
     fn inheritance_parent(&self) -> Option<Self> {
         if self.is_native_anonymous() {
-            return self.closest_non_native_anonymous_ancestor();
+            self.closest_non_native_anonymous_ancestor()
+        } else {
+            self.as_node().flattened_tree_parent().and_then(|n| n.as_element())
         }
-        return self.parent_element();
     }
 
     fn closest_non_native_anonymous_ancestor(&self) -> Option<Self> {
@@ -1406,7 +1424,7 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
 
     fn match_non_ts_pseudo_class<F>(&self,
                                     pseudo_class: &NonTSPseudoClass,
-                                    context: &mut MatchingContext,
+                                    context: &mut LocalMatchingContext<Self::Impl>,
                                     relevant_link: &RelevantLinkStatus,
                                     flags_setter: &mut F)
                                     -> bool
@@ -1414,10 +1432,7 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
     {
         use selectors::matching::*;
         match *pseudo_class {
-            NonTSPseudoClass::AnyLink |
-            NonTSPseudoClass::Active |
             NonTSPseudoClass::Focus |
-            NonTSPseudoClass::Hover |
             NonTSPseudoClass::Enabled |
             NonTSPseudoClass::Disabled |
             NonTSPseudoClass::Checked |
@@ -1459,12 +1474,19 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
             NonTSPseudoClass::MozMeterSubSubOptimum |
             NonTSPseudoClass::MozAutofill |
             NonTSPseudoClass::MozAutofillPreview => {
-                // NB: It's important to use `intersect` instead of `contains`
-                // here, to handle `:any-link` correctly.
                 self.get_state().intersects(pseudo_class.state_flag())
             },
-            NonTSPseudoClass::Link => relevant_link.is_unvisited(self, context),
-            NonTSPseudoClass::Visited => relevant_link.is_visited(self, context),
+            NonTSPseudoClass::AnyLink => self.is_link(),
+            NonTSPseudoClass::Link => relevant_link.is_unvisited(self, context.shared),
+            NonTSPseudoClass::Visited => relevant_link.is_visited(self, context.shared),
+            NonTSPseudoClass::Active |
+            NonTSPseudoClass::Hover => {
+                if context.active_hover_quirk_matches() && !self.is_link() {
+                    false
+                } else {
+                    self.get_state().contains(pseudo_class.state_flag())
+                }
+            },
             NonTSPseudoClass::MozFirstNode => {
                 flags_setter(self, HAS_EDGE_CHILD_SELECTOR);
                 let mut elem = self.as_node();
@@ -1504,9 +1526,13 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
             }
             NonTSPseudoClass::MozPlaceholder => false,
             NonTSPseudoClass::MozAny(ref sels) => {
-                sels.iter().any(|s| {
+                let old_value = context.within_functional_pseudo_class_argument;
+                context.within_functional_pseudo_class_argument = true;
+                let result = sels.iter().any(|s| {
                     matches_complex_selector(s, 0, self, context, flags_setter)
-                })
+                });
+                context.within_functional_pseudo_class_argument = old_value;
+                result
             }
             NonTSPseudoClass::Lang(ref lang_arg) => {
                 self.match_element_lang(None, lang_arg)
@@ -1545,11 +1571,7 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
 
     #[inline]
     fn is_link(&self) -> bool {
-        let mut context = MatchingContext::new(MatchingMode::Normal, None);
-        self.match_non_ts_pseudo_class(&NonTSPseudoClass::AnyLink,
-                                       &mut context,
-                                       &RelevantLinkStatus::default(),
-                                       &mut |_, _| {})
+        self.get_state().intersects(NonTSPseudoClass::AnyLink.state_flag())
     }
 
     fn get_id(&self) -> Option<Atom> {

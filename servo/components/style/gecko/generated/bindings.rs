@@ -507,7 +507,7 @@ extern "C" {
                                     whitespace_is_significant: bool) -> bool;
 }
 extern "C" {
-    pub fn Gecko_GetParentNode(node: RawGeckoNodeBorrowed)
+    pub fn Gecko_GetFlattenedTreeParentNode(node: RawGeckoNodeBorrowed)
      -> RawGeckoNodeBorrowedOrNull;
 }
 extern "C" {
@@ -566,6 +566,11 @@ extern "C" {
 extern "C" {
     pub fn Gecko_GetNextStyleChild(it: StyleChildrenIteratorBorrowedMut)
      -> RawGeckoNodeBorrowedOrNull;
+}
+extern "C" {
+    pub fn Gecko_ElementHasBindingWithAnonymousContent(element:
+                                                           RawGeckoElementBorrowed)
+     -> bool;
 }
 extern "C" {
     pub fn Gecko_ElementState(element: RawGeckoElementBorrowed) -> u64;
@@ -1868,6 +1873,10 @@ extern "C" {
 extern "C" {
     pub fn Servo_StyleSet_MediumFeaturesChanged(set: RawServoStyleSetBorrowed)
      -> bool;
+}
+extern "C" {
+    pub fn Servo_StyleSet_CompatModeChanged(raw_data:
+                                                RawServoStyleSetBorrowed);
 }
 extern "C" {
     pub fn Servo_StyleSet_AppendStyleSheet(set: RawServoStyleSetBorrowed,

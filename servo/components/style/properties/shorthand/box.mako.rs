@@ -11,35 +11,36 @@
         use properties::longhands::overflow_x::SpecifiedValue;
     % endif
 
-    pub fn parse_value(context: &ParserContext, input: &mut Parser) -> Result<Longhands, ()> {
+    pub fn parse_value<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                               -> Result<Longhands, ParseError<'i>> {
         % if product == "gecko":
-            let moz_kw_found = input.try(|i| match_ignore_ascii_case! {
-                &i.expect_ident()?,
-                "-moz-scrollbars-horizontal" => {
-                    Ok(expanded! {
-                        overflow_x: SpecifiedValue::scroll,
-                        overflow_y: SpecifiedValue::hidden,
-                    })
+            let moz_kw_found = input.try(|i| {
+                try_match_ident_ignore_ascii_case! { i.expect_ident()?,
+                    "-moz-scrollbars-horizontal" => {
+                        Ok(expanded! {
+                            overflow_x: SpecifiedValue::scroll,
+                            overflow_y: SpecifiedValue::hidden,
+                        })
+                    }
+                    "-moz-scrollbars-vertical" => {
+                        Ok(expanded! {
+                            overflow_x: SpecifiedValue::hidden,
+                            overflow_y: SpecifiedValue::scroll,
+                        })
+                    }
+                    "-moz-scrollbars-none" => {
+                        Ok(expanded! {
+                            overflow_x: SpecifiedValue::hidden,
+                            overflow_y: SpecifiedValue::hidden,
+                        })
+                    }
                 }
-                "-moz-scrollbars-vertical" => {
-                    Ok(expanded! {
-                        overflow_x: SpecifiedValue::hidden,
-                        overflow_y: SpecifiedValue::scroll,
-                    })
-                }
-                "-moz-scrollbars-none" => {
-                    Ok(expanded! {
-                        overflow_x: SpecifiedValue::hidden,
-                        overflow_y: SpecifiedValue::hidden,
-                    })
-                }
-                _ => Err(())
             });
             if moz_kw_found.is_ok() {
                 return moz_kw_found
             }
         % endif
-        let overflow = try!(parse_overflow(context, input));
+        let overflow = parse_overflow(context, input)?;
         Ok(expanded! {
             overflow_x: overflow,
             overflow_y: overflow,
@@ -88,14 +89,16 @@ macro_rules! try_parse_one {
     use properties::longhands::transition_${prop};
     % endfor
 
-    pub fn parse_value(context: &ParserContext, input: &mut Parser) -> Result<Longhands, ()> {
+    pub fn parse_value<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                               -> Result<Longhands, ParseError<'i>> {
         struct SingleTransition {
             % for prop in "property duration timing_function delay".split():
             transition_${prop}: transition_${prop}::SingleSpecifiedValue,
             % endfor
         }
 
-        fn parse_one_transition(context: &ParserContext, input: &mut Parser) -> Result<SingleTransition,()> {
+        fn parse_one_transition<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                                        -> Result<SingleTransition,ParseError<'i>> {
             % for prop in "property duration timing_function delay".split():
             let mut ${prop} = None;
             % endfor
@@ -123,7 +126,7 @@ macro_rules! try_parse_one {
                     % endfor
                 })
             } else {
-                Err(())
+                Err(StyleParseError::UnspecifiedError.into())
             }
         }
 
@@ -202,14 +205,16 @@ macro_rules! try_parse_one {
     use properties::longhands::animation_${prop};
     % endfor
 
-    pub fn parse_value(context: &ParserContext, input: &mut Parser) -> Result<Longhands, ()> {
+    pub fn parse_value<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                               -> Result<Longhands, ParseError<'i>> {
         struct SingleAnimation {
             % for prop in props:
             animation_${prop}: animation_${prop}::SingleSpecifiedValue,
             % endfor
         }
 
-        fn parse_one_animation(context: &ParserContext, input: &mut Parser) -> Result<SingleAnimation,()> {
+        fn parse_one_animation<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                                       -> Result<SingleAnimation,ParseError<'i>> {
             % for prop in props:
             let mut ${prop} = None;
             % endfor
@@ -237,7 +242,7 @@ macro_rules! try_parse_one {
 
             // If nothing is parsed, this is an invalid entry.
             if parsed == 0 {
-                Err(())
+                Err(StyleParseError::UnspecifiedError.into())
             } else {
                 Ok(SingleAnimation {
                     % for prop in props:
@@ -303,7 +308,8 @@ macro_rules! try_parse_one {
                     spec="https://drafts.csswg.org/css-scroll-snap/#propdef-scroll-snap-type">
     use properties::longhands::scroll_snap_type_x;
 
-    pub fn parse_value(context: &ParserContext, input: &mut Parser) -> Result<Longhands, ()> {
+    pub fn parse_value<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                               -> Result<Longhands, ParseError<'i>> {
         let result = try!(scroll_snap_type_x::parse(context, input));
         Ok(expanded! {
             scroll_snap_type_x: result,
@@ -331,7 +337,8 @@ macro_rules! try_parse_one {
                     spec="Non-standard: https://developer.mozilla.org/en-US/docs/Web/CSS/transform">
     use properties::longhands::transform;
 
-    pub fn parse_value(context: &ParserContext, input: &mut Parser) -> Result<Longhands, ()> {
+    pub fn parse_value<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                               -> Result<Longhands, ParseError<'i>> {
         Ok(expanded! {
             transform: transform::parse_prefixed(context, input)?,
         })

@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use atomic_refcell::AtomicRefMut;
-use cssparser::Parser;
+use cssparser::{Parser, ParserInput};
 use cssparser::ToCss as ParserToCss;
 use env_logger::LogBuilder;
 use selectors::Element;
@@ -81,6 +81,7 @@ use style::gecko_bindings::structs::StyleRuleInclusion;
 use style::gecko_bindings::structs::URLExtraData;
 use style::gecko_bindings::structs::nsCSSValueSharedList;
 use style::gecko_bindings::structs::nsCompatibility;
+use style::gecko_bindings::structs::nsIDocument;
 use style::gecko_bindings::structs::nsStyleTransformMatrix::MatrixTransformOperator;
 use style::gecko_bindings::structs::nsresult;
 use style::gecko_bindings::sugar::ownership::{FFIArcHelpers, HasFFI, HasArcFFI, HasBoxFFI};
@@ -198,7 +199,7 @@ fn traverse_subtree(element: GeckoElement,
                     snapshots: &ServoElementSnapshotTable) {
     // When new content is inserted in a display:none subtree, we will call into
     // servo to try to style it. Detect that here and bail out.
-    if let Some(parent) = element.parent_element() {
+    if let Some(parent) = element.traversal_parent() {
         if parent.borrow_data().map_or(true, |d| d.styles().is_display_none()) {
             debug!("{:?} has unstyled parent {:?} - ignoring call to traverse_subtree", element, parent);
             return;
@@ -1228,7 +1229,8 @@ pub extern "C" fn Servo_Keyframe_GetKeyText(keyframe: RawServoKeyframeBorrowed, 
 #[no_mangle]
 pub extern "C" fn Servo_Keyframe_SetKeyText(keyframe: RawServoKeyframeBorrowed, text: *const nsACString) -> bool {
     let text = unsafe { text.as_ref().unwrap().as_str_unchecked() };
-    if let Ok(selector) = Parser::new(&text).parse_entirely(KeyframeSelector::parse) {
+    let mut input = ParserInput::new(&text);
+    if let Ok(selector) = Parser::new(&mut input).parse_entirely(KeyframeSelector::parse) {
         write_locked_arc(keyframe, |keyframe: &mut Keyframe| {
             keyframe.selector = selector;
         });
@@ -1545,6 +1547,21 @@ pub extern "C" fn Servo_StyleSet_Drop(data: RawServoStyleSetOwned) {
     let _ = data.into_box::<PerDocumentStyleData>();
 }
 
+
+/// Updating the stylesheets and redoing selector matching is always happens
+/// before the document element is inserted. Therefore we don't need to call
+/// `force_dirty` here.
+#[no_mangle]
+pub extern "C" fn Servo_StyleSet_CompatModeChanged(raw_data: RawServoStyleSetBorrowed) {
+    let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
+    let quirks_mode = unsafe {
+        (*(*data.stylist.device().pres_context).mDocument
+                                               .raw::<nsIDocument>()).mCompatMode
+    };
+
+    data.stylist.set_quirks_mode(quirks_mode.into());
+}
+
 fn parse_property_into(declarations: &mut SourcePropertyDeclaration,
                        property_id: PropertyId,
                        value: *const nsACString,
@@ -1603,7 +1620,8 @@ pub extern "C" fn Servo_ParseEasing(easing: *const nsAString,
                                      PARSING_MODE_DEFAULT,
                                      QuirksMode::NoQuirks);
     let easing = unsafe { (*easing).to_string() };
-    match transition_timing_function::single_value::parse(&context, &mut Parser::new(&easing)) {
+    let mut input = ParserInput::new(&easing);
+    match transition_timing_function::single_value::parse(&context, &mut Parser::new(&mut input)) {
         Ok(parsed_easing) => {
             *output = parsed_easing.into();
             true
@@ -1779,7 +1797,7 @@ macro_rules! get_property_id_from_property {
         let property = unsafe { $property.as_ref().unwrap().as_str_unchecked() };
         match PropertyId::parse(Cow::Borrowed(property)) {
             Ok(property_id) => property_id,
-            Err(()) => { return $ret; }
+            Err(_) => { return $ret; }
         }
     }}
 }
@@ -1911,7 +1929,8 @@ pub extern "C" fn Servo_MediaList_GetText(list: RawServoMediaListBorrowed, resul
 #[no_mangle]
 pub extern "C" fn Servo_MediaList_SetText(list: RawServoMediaListBorrowed, text: *const nsACString) {
     let text = unsafe { text.as_ref().unwrap().as_str_unchecked() };
-    let mut parser = Parser::new(&text);
+    let mut input = ParserInput::new(&text);
+    let mut parser = Parser::new(&mut input);
     let url_data = unsafe { dummy_url_data() };
     let reporter = RustLogReporter;
     let context = ParserContext::new_for_cssom(url_data, &reporter, Some(CssRuleType::Media),
@@ -2294,12 +2313,13 @@ pub extern "C" fn Servo_DeclarationBlock_SetColorValue(declarations:
 pub extern "C" fn Servo_DeclarationBlock_SetFontFamily(declarations:
                                                        RawServoDeclarationBlockBorrowed,
                                                        value: *const nsAString) {
-    use cssparser::Parser;
+    use cssparser::{Parser, ParserInput};
     use style::properties::PropertyDeclaration;
     use style::properties::longhands::font_family::SpecifiedValue as FontFamily;
 
     let string = unsafe { (*value).to_string() };
-    let mut parser = Parser::new(&string);
+    let mut input = ParserInput::new(&string);
+    let mut parser = Parser::new(&mut input);
     if let Ok(family) = FontFamily::parse(&mut parser) {
         if parser.is_exhausted() {
             let decl = PropertyDeclaration::FontFamily(Box::new(family));
@@ -2371,7 +2391,8 @@ pub extern "C" fn Servo_CSSSupports2(property: *const nsACString,
 #[no_mangle]
 pub extern "C" fn Servo_CSSSupports(cond: *const nsACString) -> bool {
     let condition = unsafe { cond.as_ref().unwrap().as_str_unchecked() };
-    let mut input = Parser::new(&condition);
+    let mut input = ParserInput::new(&condition);
+    let mut input = Parser::new(&mut input);
     let cond = input.parse_entirely(|i| parse_condition_or_declaration(i));
     if let Ok(cond) = cond {
         let url_data = unsafe { dummy_url_data() };
@@ -2398,7 +2419,7 @@ unsafe fn maybe_restyle<'a>(data: &'a mut AtomicRefMut<ElementData>,
     }
 
     // Propagate the bit up the chain.
-    if let Some(p) = element.parent_element() {
+    if let Some(p) = element.traversal_parent() {
         if animation_only {
             p.note_descendants::<AnimationOnlyDirtyDescendants>();
         } else {
@@ -2735,7 +2756,7 @@ pub extern "C" fn Servo_AssertTreeIsClean(root: RawGeckoElementBorrowed) {
     let root = GeckoElement(root);
     fn assert_subtree_is_clean<'le>(el: GeckoElement<'le>) {
         debug_assert!(!el.has_dirty_descendants() && !el.has_animation_only_dirty_descendants());
-        for child in el.as_node().children() {
+        for child in el.as_node().traversal_children() {
             if let Some(child) = child.as_element() {
                 assert_subtree_is_clean(child);
             }

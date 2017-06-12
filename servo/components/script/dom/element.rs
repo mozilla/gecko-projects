@@ -86,7 +86,7 @@ use ref_filter_map::ref_filter_map;
 use script_layout_interface::message::ReflowQueryType;
 use script_thread::Runnable;
 use selectors::attr::{AttrSelectorOperation, NamespaceConstraint};
-use selectors::matching::{ElementSelectorFlags, MatchingContext, MatchingMode};
+use selectors::matching::{ElementSelectorFlags, LocalMatchingContext, MatchingContext, MatchingMode};
 use selectors::matching::{HAS_EDGE_CHILD_SELECTOR, HAS_SLOW_SELECTOR, HAS_SLOW_SELECTOR_LATER_SIBLINGS};
 use selectors::matching::{RelevantLinkStatus, matches_selector_list};
 use servo_atoms::Atom;
@@ -2061,9 +2061,11 @@ impl ElementMethods for Element {
     // https://dom.spec.whatwg.org/#dom-element-matches
     fn Matches(&self, selectors: DOMString) -> Fallible<bool> {
         match SelectorParser::parse_author_origin_no_namespace(&selectors) {
-            Err(()) => Err(Error::Syntax),
+            Err(_) => Err(Error::Syntax),
             Ok(selectors) => {
-                let mut ctx = MatchingContext::new(MatchingMode::Normal, None);
+                let quirks_mode = document_from_node(self).quirks_mode();
+                let mut ctx = MatchingContext::new(MatchingMode::Normal, None,
+                                                   quirks_mode);
                 Ok(matches_selector_list(&selectors, &Root::from_ref(self), &mut ctx))
             }
         }
@@ -2077,12 +2079,14 @@ impl ElementMethods for Element {
     // https://dom.spec.whatwg.org/#dom-element-closest
     fn Closest(&self, selectors: DOMString) -> Fallible<Option<Root<Element>>> {
         match SelectorParser::parse_author_origin_no_namespace(&selectors) {
-            Err(()) => Err(Error::Syntax),
+            Err(_) => Err(Error::Syntax),
             Ok(selectors) => {
                 let root = self.upcast::<Node>();
                 for element in root.inclusive_ancestors() {
                     if let Some(element) = Root::downcast::<Element>(element) {
-                        let mut ctx = MatchingContext::new(MatchingMode::Normal, None);
+                        let quirks_mode = document_from_node(self).quirks_mode();
+                        let mut ctx = MatchingContext::new(MatchingMode::Normal, None,
+                                                           quirks_mode);
                         if matches_selector_list(&selectors, &element, &mut ctx) {
                             return Ok(Some(element));
                         }
@@ -2432,7 +2436,7 @@ impl<'a> ::selectors::Element for Root<Element> {
 
     fn match_non_ts_pseudo_class<F>(&self,
                                     pseudo_class: &NonTSPseudoClass,
-                                    _: &mut MatchingContext,
+                                    _: &mut LocalMatchingContext<Self::Impl>,
                                     _: &RelevantLinkStatus,
                                     _: &mut F)
                                     -> bool

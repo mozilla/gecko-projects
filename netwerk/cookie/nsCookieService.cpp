@@ -1474,10 +1474,6 @@ nsCookieService::TryInitDB(bool aRecreateDB)
     }
   }
 
-  // make operations on the table asynchronous, for performance
-  mDefaultDBState->dbConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-    "PRAGMA synchronous = OFF"));
-
   // Use write-ahead-logging for performance. We cap the autocheckpoint limit at
   // 16 pages (around 500KB).
   mDefaultDBState->dbConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
@@ -2262,6 +2258,27 @@ nsCookieService::CreatePurgeList(nsICookie2* aCookie)
     do_CreateInstance(NS_ARRAY_CONTRACTID);
   removedList->AppendElement(aCookie, false);
   return removedList.forget();
+}
+
+/******************************************************************************
+ * nsCookieService:
+ * public transaction helper impl
+ ******************************************************************************/
+
+NS_IMETHODIMP
+nsCookieService::RunInTransaction(nsICookieTransactionCallback* aCallback)
+{
+  NS_ENSURE_ARG(aCallback);
+  if (NS_WARN_IF(!mDefaultDBState->dbConn)) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  mozStorageTransaction transaction(mDefaultDBState->dbConn, true);
+
+  if (NS_FAILED(aCallback->Callback())) {
+    Unused << transaction.Rollback();
+    return NS_ERROR_FAILURE;
+  }
+  return NS_OK;
 }
 
 /******************************************************************************

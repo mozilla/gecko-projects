@@ -997,23 +997,46 @@ var createObjectURL = function createObjectURLClosure() {
     return buffer;
   };
 }();
+function resolveCall(fn, args, thisArg = null) {
+  if (!fn) {
+    return Promise.resolve(undefined);
+  }
+  return new Promise((resolve, reject) => {
+    resolve(fn.apply(thisArg, args));
+  });
+}
+function resolveOrReject(capability, success, reason) {
+  if (success) {
+    capability.resolve();
+  } else {
+    capability.reject(reason);
+  }
+}
+function finalize(promise) {
+  return Promise.resolve(promise).catch(() => {});
+}
 function MessageHandler(sourceName, targetName, comObj) {
   this.sourceName = sourceName;
   this.targetName = targetName;
   this.comObj = comObj;
-  this.callbackIndex = 1;
+  this.callbackId = 1;
+  this.streamId = 1;
   this.postMessageTransfers = true;
-  var callbacksCapabilities = this.callbacksCapabilities = Object.create(null);
-  var ah = this.actionHandler = Object.create(null);
+  this.streamSinks = Object.create(null);
+  this.streamControllers = Object.create(null);
+  let callbacksCapabilities = this.callbacksCapabilities = Object.create(null);
+  let ah = this.actionHandler = Object.create(null);
   this._onComObjOnMessage = event => {
-    var data = event.data;
+    let data = event.data;
     if (data.targetName !== this.sourceName) {
       return;
     }
-    if (data.isReply) {
-      var callbackId = data.callbackId;
+    if (data.stream) {
+      this._processStreamMessage(data);
+    } else if (data.isReply) {
+      let callbackId = data.callbackId;
       if (data.callbackId in callbacksCapabilities) {
-        var callback = callbacksCapabilities[callbackId];
+        let callback = callbacksCapabilities[callbackId];
         delete callbacksCapabilities[callbackId];
         if ('error' in data) {
           callback.reject(data.error);
@@ -1024,13 +1047,13 @@ function MessageHandler(sourceName, targetName, comObj) {
         error('Cannot resolve callback ' + callbackId);
       }
     } else if (data.action in ah) {
-      var action = ah[data.action];
+      let action = ah[data.action];
       if (data.callbackId) {
-        var sourceName = this.sourceName;
-        var targetName = data.sourceName;
+        let sourceName = this.sourceName;
+        let targetName = data.sourceName;
         Promise.resolve().then(function () {
           return action[0].call(action[1], data.data);
-        }).then(function (result) {
+        }).then(result => {
           comObj.postMessage({
             sourceName,
             targetName,
@@ -1038,7 +1061,7 @@ function MessageHandler(sourceName, targetName, comObj) {
             callbackId: data.callbackId,
             data: result
           });
-        }, function (reason) {
+        }, reason => {
           if (reason instanceof Error) {
             reason = reason + '';
           }
@@ -1050,6 +1073,8 @@ function MessageHandler(sourceName, targetName, comObj) {
             error: reason
           });
         });
+      } else if (data.streamId) {
+        this._createStreamSink(data);
       } else {
         action[0].call(action[1], data.data);
       }
@@ -1077,7 +1102,7 @@ MessageHandler.prototype = {
     this.postMessage(message, transfers);
   },
   sendWithPromise(actionName, data, transfers) {
-    var callbackId = this.callbackIndex++;
+    var callbackId = this.callbackId++;
     var message = {
       sourceName: this.sourceName,
       targetName: this.targetName,
@@ -1093,6 +1118,204 @@ MessageHandler.prototype = {
       capability.reject(e);
     }
     return capability.promise;
+  },
+  sendWithStream(actionName, data, queueingStrategy, transfers) {
+    let streamId = this.streamId++;
+    let sourceName = this.sourceName;
+    let targetName = this.targetName;
+    return new _streamsLib.ReadableStream({
+      start: controller => {
+        let startCapability = createPromiseCapability();
+        this.streamControllers[streamId] = {
+          controller,
+          startCall: startCapability
+        };
+        this.postMessage({
+          sourceName,
+          targetName,
+          action: actionName,
+          streamId,
+          data,
+          desiredSize: controller.desiredSize
+        });
+        return startCapability.promise;
+      },
+      pull: controller => {
+        let pullCapability = createPromiseCapability();
+        this.streamControllers[streamId].pullCall = pullCapability;
+        this.postMessage({
+          sourceName,
+          targetName,
+          stream: 'pull',
+          streamId,
+          desiredSize: controller.desiredSize
+        });
+        return pullCapability.promise;
+      },
+      cancel: reason => {
+        let cancelCapability = createPromiseCapability();
+        this.streamControllers[streamId].cancelCall = cancelCapability;
+        this.postMessage({
+          sourceName,
+          targetName,
+          stream: 'cancel',
+          reason,
+          streamId
+        });
+        return cancelCapability.promise;
+      }
+    }, queueingStrategy);
+  },
+  _createStreamSink(data) {
+    let self = this;
+    let action = this.actionHandler[data.action];
+    let streamId = data.streamId;
+    let desiredSize = data.desiredSize;
+    let sourceName = this.sourceName;
+    let targetName = data.sourceName;
+    let capability = createPromiseCapability();
+    let sendStreamRequest = ({ stream, chunk, success, reason }) => {
+      this.comObj.postMessage({
+        sourceName,
+        targetName,
+        stream,
+        streamId,
+        chunk,
+        success,
+        reason
+      });
+    };
+    let streamSink = {
+      enqueue(chunk, size = 1) {
+        let lastDesiredSize = this.desiredSize;
+        this.desiredSize -= size;
+        if (lastDesiredSize > 0 && this.desiredSize <= 0) {
+          this.sinkCapability = createPromiseCapability();
+          this.ready = this.sinkCapability.promise;
+        }
+        sendStreamRequest({
+          stream: 'enqueue',
+          chunk
+        });
+      },
+      close() {
+        sendStreamRequest({ stream: 'close' });
+        delete self.streamSinks[streamId];
+      },
+      error(reason) {
+        sendStreamRequest({
+          stream: 'error',
+          reason
+        });
+      },
+      sinkCapability: capability,
+      onPull: null,
+      onCancel: null,
+      desiredSize,
+      ready: null
+    };
+    streamSink.sinkCapability.resolve();
+    streamSink.ready = streamSink.sinkCapability.promise;
+    this.streamSinks[streamId] = streamSink;
+    resolveCall(action[0], [data.data, streamSink], action[1]).then(() => {
+      sendStreamRequest({
+        stream: 'start_complete',
+        success: true
+      });
+    }, reason => {
+      sendStreamRequest({
+        stream: 'start_complete',
+        success: false,
+        reason
+      });
+    });
+  },
+  _processStreamMessage(data) {
+    let sourceName = this.sourceName;
+    let targetName = data.sourceName;
+    let streamId = data.streamId;
+    let sendStreamResponse = ({ stream, success, reason }) => {
+      this.comObj.postMessage({
+        sourceName,
+        targetName,
+        stream,
+        success,
+        streamId,
+        reason
+      });
+    };
+    let deleteStreamController = () => {
+      Promise.all([this.streamControllers[data.streamId].startCall, this.streamControllers[data.streamId].pullCall, this.streamControllers[data.streamId].cancelCall].map(function (capability) {
+        return capability && finalize(capability.promise);
+      })).then(() => {
+        delete this.streamControllers[data.streamId];
+      });
+    };
+    switch (data.stream) {
+      case 'start_complete':
+        resolveOrReject(this.streamControllers[data.streamId].startCall, data.success, data.reason);
+        break;
+      case 'pull_complete':
+        resolveOrReject(this.streamControllers[data.streamId].pullCall, data.success, data.reason);
+        break;
+      case 'pull':
+        if (!this.streamSinks[data.streamId]) {
+          sendStreamResponse({
+            stream: 'pull_complete',
+            success: true
+          });
+          break;
+        }
+        if (this.streamSinks[data.streamId].desiredSize <= 0 && data.desiredSize > 0) {
+          this.streamSinks[data.streamId].sinkCapability.resolve();
+        }
+        this.streamSinks[data.streamId].desiredSize = data.desiredSize;
+        resolveCall(this.streamSinks[data.streamId].onPull).then(() => {
+          sendStreamResponse({
+            stream: 'pull_complete',
+            success: true
+          });
+        }, reason => {
+          sendStreamResponse({
+            stream: 'pull_complete',
+            success: false,
+            reason
+          });
+        });
+        break;
+      case 'enqueue':
+        this.streamControllers[data.streamId].controller.enqueue(data.chunk);
+        break;
+      case 'close':
+        this.streamControllers[data.streamId].controller.close();
+        deleteStreamController();
+        break;
+      case 'error':
+        this.streamControllers[data.streamId].controller.error(data.reason);
+        deleteStreamController();
+        break;
+      case 'cancel_complete':
+        resolveOrReject(this.streamControllers[data.streamId].cancelCall, data.success, data.reason);
+        deleteStreamController();
+        break;
+      case 'cancel':
+        resolveCall(this.streamSinks[data.streamId].onCancel, [data.reason]).then(() => {
+          sendStreamResponse({
+            stream: 'cancel_complete',
+            success: true
+          });
+        }, reason => {
+          sendStreamResponse({
+            stream: 'cancel_complete',
+            success: false,
+            reason
+          });
+        });
+        delete this.streamSinks[data.streamId];
+        break;
+      default:
+        throw new Error('Unexpected stream case');
+    }
   },
   postMessage(message, transfers) {
     if (transfers && this.postMessageTransfers) {
@@ -2186,7 +2409,7 @@ function getDocument(src, pdfDataRangeTransport, passwordCallback, progressCallb
   }
   if (!worker) {
     var workerPort = (0, _dom_utils.getDefaultSetting)('workerPort');
-    worker = workerPort ? new PDFWorker(null, workerPort) : new PDFWorker();
+    worker = workerPort ? PDFWorker.fromPort(workerPort) : new PDFWorker();
     task._worker = worker;
   }
   var docId = task.docId;
@@ -2664,7 +2887,7 @@ class LoopbackPort {
   }
 }
 var PDFWorker = function PDFWorkerClosure() {
-  var nextFakeWorkerId = 0;
+  let nextFakeWorkerId = 0;
   function getWorkerSrc() {
     if (typeof workerSrc !== 'undefined') {
       return workerSrc;
@@ -2674,7 +2897,7 @@ var PDFWorker = function PDFWorkerClosure() {
     }
     (0, _util.error)('No PDFJS.workerSrc specified');
   }
-  var fakeWorkerFilesLoadedCapability;
+  let fakeWorkerFilesLoadedCapability;
   function setupFakeWorkerGlobal() {
     var WorkerMessageHandler;
     if (fakeWorkerFilesLoadedCapability) {
@@ -2693,7 +2916,11 @@ var PDFWorker = function PDFWorkerClosure() {
     var wrapper = 'importScripts(\'' + url + '\');';
     return URL.createObjectURL(new Blob([wrapper]));
   }
+  let pdfWorkerPorts = new WeakMap();
   function PDFWorker(name, port) {
+    if (pdfWorkerPorts.has(port)) {
+      throw new Error('Cannot use more than one PDFWorker per port');
+    }
     this.name = name;
     this.destroyed = false;
     this._readyCapability = (0, _util.createPromiseCapability)();
@@ -2701,6 +2928,7 @@ var PDFWorker = function PDFWorkerClosure() {
     this._webWorker = null;
     this._messageHandler = null;
     if (port) {
+      pdfWorkerPorts.set(port, this);
       this._initializeFromPort(port);
       return;
     }
@@ -2836,6 +3064,12 @@ var PDFWorker = function PDFWorkerClosure() {
         this._messageHandler = null;
       }
     }
+  };
+  PDFWorker.fromPort = function (port) {
+    if (pdfWorkerPorts.has(port)) {
+      return pdfWorkerPorts.get(port);
+    }
+    return new PDFWorker(null, port);
   };
   return PDFWorker;
 }();
@@ -3408,8 +3642,8 @@ var _UnsupportedManager = function UnsupportedManagerClosure() {
 }();
 var version, build;
 {
-  exports.version = version = '1.8.423';
-  exports.build = build = '8654635b';
+  exports.version = version = '1.8.439';
+  exports.build = build = '08c64371';
 }
 exports.getDocument = getDocument;
 exports.LoopbackPort = LoopbackPort;
@@ -4411,8 +4645,8 @@ if (!_util.globalScope.PDFJS) {
 }
 var PDFJS = _util.globalScope.PDFJS;
 {
-  PDFJS.version = '1.8.423';
-  PDFJS.build = '8654635b';
+  PDFJS.version = '1.8.439';
+  PDFJS.build = '08c64371';
 }
 PDFJS.pdfBug = false;
 if (PDFJS.verbosity !== undefined) {
@@ -6028,7 +6262,7 @@ exports.PDFJS = PDFJS;
     }
     if (IsReadableStreamDefaultReader(reader) === true) {
       for (var i = 0; i < reader._readRequests.length; i++) {
-        var _resolve = reader._readRequests[i];
+        var _resolve = reader._readRequests[i]._resolve;
         _resolve(CreateIterResultObject(undefined, true));
       }
       reader._readRequests = [];
@@ -9653,7 +9887,7 @@ var TilingPattern = function TilingPatternClosure() {
   function TilingPattern(IR, color, ctx, canvasGraphicsFactory, baseTransform) {
     this.operatorList = IR[2];
     this.matrix = IR[3] || [1, 0, 0, 1, 0, 0];
-    this.bbox = _util.Util.normalizeRect(IR[4]);
+    this.bbox = IR[4];
     this.xstep = IR[5];
     this.ystep = IR[6];
     this.paintType = IR[7];
@@ -9759,8 +9993,8 @@ exports.TilingPattern = TilingPattern;
 "use strict";
 
 
-var pdfjsVersion = '1.8.423';
-var pdfjsBuild = '8654635b';
+var pdfjsVersion = '1.8.439';
+var pdfjsBuild = '08c64371';
 var pdfjsSharedUtil = __w_pdfjs_require__(0);
 var pdfjsDisplayGlobal = __w_pdfjs_require__(8);
 var pdfjsDisplayAPI = __w_pdfjs_require__(3);

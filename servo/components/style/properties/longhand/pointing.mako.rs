@@ -17,17 +17,19 @@
     no_viewport_percentage!(SpecifiedValue);
 
     pub mod computed_value {
+        #[cfg(feature = "gecko")]
         use std::fmt;
-        use style_traits::cursor::Cursor;
+        #[cfg(feature = "gecko")]
         use style_traits::ToCss;
+        use style_traits::cursor::Cursor;
         #[cfg(feature = "gecko")]
         use values::specified::url::SpecifiedUrl;
 
-        #[derive(Clone, PartialEq, Copy, Debug)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(Clone, Copy, Debug, PartialEq, ToCss)]
         pub enum Keyword {
-            AutoCursor,
-            SpecifiedCursor(Cursor),
+            Auto,
+            Cursor(Cursor),
         }
 
         #[cfg(not(feature = "gecko"))]
@@ -45,15 +47,6 @@
         pub struct T {
             pub images: Vec<Image>,
             pub keyword: Keyword,
-        }
-
-        impl ToCss for Keyword {
-            fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-                match *self {
-                    Keyword::AutoCursor => dest.write_str("auto"),
-                    Keyword::SpecifiedCursor(c) => c.to_css(dest),
-                }
-            }
         }
 
         #[cfg(feature = "gecko")]
@@ -85,7 +78,7 @@
     #[cfg(not(feature = "gecko"))]
     #[inline]
     pub fn get_initial_value() -> computed_value::T {
-        computed_value::Keyword::AutoCursor
+        computed_value::Keyword::Auto
     }
 
     #[cfg(feature = "gecko")]
@@ -93,42 +86,48 @@
     pub fn get_initial_value() -> computed_value::T {
         computed_value::T {
             images: vec![],
-            keyword: computed_value::Keyword::AutoCursor
+            keyword: computed_value::Keyword::Auto
         }
     }
 
     impl Parse for computed_value::Keyword {
-        fn parse(_context: &ParserContext, input: &mut Parser) -> Result<computed_value::Keyword, ()> {
+        fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
+                         -> Result<computed_value::Keyword, ParseError<'i>> {
             use std::ascii::AsciiExt;
             use style_traits::cursor::Cursor;
             let ident = try!(input.expect_ident());
             if ident.eq_ignore_ascii_case("auto") {
-                Ok(computed_value::Keyword::AutoCursor)
+                Ok(computed_value::Keyword::Auto)
             } else {
-                Cursor::from_css_keyword(&ident).map(computed_value::Keyword::SpecifiedCursor)
+                Cursor::from_css_keyword(&ident)
+                    .map(computed_value::Keyword::Cursor)
+                    .map_err(|()| SelectorParseError::UnexpectedIdent(ident).into())
             }
         }
     }
 
     #[cfg(feature = "gecko")]
-    fn parse_image(context: &ParserContext, input: &mut Parser) -> Result<computed_value::Image, ()> {
+    fn parse_image<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                           -> Result<computed_value::Image, ParseError<'i>> {
         Ok(computed_value::Image {
             url: try!(SpecifiedUrl::parse(context, input)),
             hotspot: match input.try(|input| input.expect_number()) {
                 Ok(number) => Some((number, try!(input.expect_number()))),
-                Err(()) => None,
+                Err(_) => None,
             },
         })
     }
 
     #[cfg(not(feature = "gecko"))]
-    pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+    pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                         -> Result<SpecifiedValue, ParseError<'i>> {
         computed_value::Keyword::parse(context, input)
     }
 
     /// cursor: [<url> [<number> <number>]?]# [auto | default | ...]
     #[cfg(feature = "gecko")]
-    pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+    pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                         -> Result<SpecifiedValue, ParseError<'i>> {
         let mut images = vec![];
         loop {
             match input.try(|input| parse_image(context, input)) {
@@ -136,7 +135,7 @@
                     image.url.build_image_value();
                     images.push(image)
                 }
-                Err(()) => break,
+                Err(_) => break,
             }
             try!(input.expect_comma());
         }

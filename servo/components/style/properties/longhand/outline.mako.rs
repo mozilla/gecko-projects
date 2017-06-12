@@ -16,7 +16,7 @@ ${helpers.predefined_type("outline-color", "Color", "computed_value::T::currentc
                           ignored_when_colors_disabled=True,
                           spec="https://drafts.csswg.org/css-ui/#propdef-outline-color")}
 
-<%helpers:longhand name="outline-style" need_clone="True" animation_value_type="none"
+<%helpers:longhand name="outline-style" animation_value_type="discrete"
                    spec="https://drafts.csswg.org/css-ui/#propdef-outline-style">
     use values::specified::BorderStyle;
 
@@ -46,14 +46,15 @@ ${helpers.predefined_type("outline-color", "Color", "computed_value::T::currentc
         pub type T = super::SpecifiedValue;
     }
 
-    pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+    pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                         -> Result<SpecifiedValue, ParseError<'i>> {
         SpecifiedValue::parse(context, input)
             .and_then(|result| {
                 if let Either::Second(BorderStyle::hidden) = result {
                     // The outline-style property accepts the same values as
                     // border-style, except that 'hidden' is not a legal outline
                     // style.
-                    Err(())
+                    Err(SelectorParseError::UnexpectedIdent("hidden".into()).into())
                 } else {
                     Ok(result)
                 }
