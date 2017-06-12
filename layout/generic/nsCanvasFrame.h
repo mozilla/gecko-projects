@@ -176,9 +176,15 @@ public:
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      nsRenderingContext* aCtx) override;
 
+  virtual void RestoreState() override
+  {
+    nsDisplayItem::RestoreState();
+    mColor = mState.mColor;
+  }
+
   void SetExtraBackgroundColor(nscolor aColor)
   {
-    SaveVar(mColor);
+    mState.mColor = mColor;
     mColor = aColor;
   }
 
@@ -186,6 +192,11 @@ public:
 #ifdef MOZ_DUMP_PAINTING
   virtual void WriteDebugInfo(std::stringstream& aStream) override;
 #endif
+
+private:
+  struct {
+    nscolor mColor;
+  } mState;
 };
 
 class nsDisplayCanvasBackgroundImage : public nsDisplayBackgroundImage {

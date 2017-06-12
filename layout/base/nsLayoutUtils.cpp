@@ -4056,8 +4056,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       nsDisplayListBuilder::AutoCurrentScrollParentIdSetter idSetter(&builder, id);
 
       builder.SetVisibleRect(dirtyRect);
-      builder.SetDisplayListReady(false);
-      builder.GetStateStack()->RestoreState();
+      builder.SetIsBuilding(true);
 
       bool merged = false;
       uint32_t totalDisplayItems = 0;
@@ -4145,7 +4144,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       //printf("nsLayoutUtils::PaintFrame - recycled %d/%d (%.2f%%) display items\n", reusedDisplayItems, totalDisplayItems, reusedDisplayItems * 100 / float(totalDisplayItems));
     }
 
-    builder.SetDisplayListReady(true);
+    builder.SetIsBuilding(false);
 
     // TODO: This only adds temporary items (that return false for CanBeReused) and changes saved
     // state so we can do it every time. This doesn't work for nested nsSubDocumentFrames though,
