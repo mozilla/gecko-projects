@@ -110,11 +110,13 @@ def make_task_description(config, jobs):
         level = config.params['level']
 
         task_env = {}
+        locale_output_path = ""
         if attributes['build_platform'].startswith('macosx'):
             if job.get('locale'):
                 input_string = 'https://queue.taskcluster.net/v1/task/' + \
                     '<nightly-l10n-signing>/artifacts/public/build/{}/target.tar.gz'
                 input_string = input_string.format(job['locale'])
+                locale_output_path = "{}/".format(job['locale'])
             else:
                 input_string = 'https://queue.taskcluster.net/v1/task/' + \
                     '<build-signing>/artifacts/public/build/target.tar.gz'
@@ -124,8 +126,8 @@ def make_task_description(config, jobs):
             mozharness_config = ['repackage/osx_signed.py']
             output_files = [{
                 'type': 'file',
-                'path': '/home/worker/workspace/build/upload/target.dmg',
-                'name': 'public/build/target.dmg',
+                'path': '/home/worker/workspace/build/artifacts/target.dmg',
+                'name': 'public/build/{}target.dmg'.format(locale_output_path),
             }]
         elif attributes['build_platform'].startswith('win'):
             if job.get('locale'):
@@ -133,6 +135,7 @@ def make_task_description(config, jobs):
                     '{}/artifacts/public/build/{}/'.format(signing_task_ref, job['locale'])
                 build_prefix = 'https://queue.taskcluster.net/v1/task/' + \
                     '{}/artifacts/public/build/{}/'.format(build_task_ref, job['locale'])
+                locale_output_path = "{}/".format(job['locale'])
             else:
                 signed_prefix = 'https://queue.taskcluster.net/v1/task/' + \
                     '{}/artifacts/public/build/'.format(signing_task_ref)
@@ -148,11 +151,11 @@ def make_task_description(config, jobs):
             output_files = [{
                 'type': 'file',
                 'path': 'artifacts/installer.exe',
-                'name': 'public/build/installer.exe',
+                'name': 'public/build/{}installer.exe'.format(locale_output_path),
             }, {
                 'type': 'file',
                 'path': 'artifacts/target.complete.mar',
-                'name': 'public/build/target.complete.mar',
+                'name': 'public/build/{}target.complete.mar'.format(locale_output_path),
             }]
             
         run = {
@@ -198,6 +201,5 @@ def make_task_description(config, jobs):
             'extra': job.get('extra', {}),
             'worker': worker,
             'run': run,
-                       #'os': 'linux',
         }
         yield task
