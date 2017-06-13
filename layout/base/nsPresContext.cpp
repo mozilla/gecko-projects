@@ -3129,8 +3129,7 @@ nsRootPresContext::ComputePluginGeometryUpdates(nsIFrame* aFrame,
     nsIFrame* rootFrame = FrameManager()->GetRootFrame();
 
     if (rootFrame && aBuilder->ContainsPluginItem()) {
-      aBuilder->SetForPluginGeometry();
-      aBuilder->SetAccurateVisibleRegions();
+      aBuilder->SetForPluginGeometry(true);
       // Merging and flattening has already been done and we should not do it
       // again. nsDisplayScroll(Info)Layer doesn't support trying to flatten
       // again.
@@ -3139,6 +3138,7 @@ nsRootPresContext::ComputePluginGeometryUpdates(nsIFrame* aFrame,
       // nsDisplayPlugin::ComputeVisibility will automatically set a non-hidden
       // widget configuration for the plugin, if it's visible.
       aList->ComputeVisibilityForRoot(aBuilder, &region);
+      aBuilder->SetForPluginGeometry(false);
     }
   }
 
