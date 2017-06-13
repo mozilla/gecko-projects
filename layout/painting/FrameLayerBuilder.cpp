@@ -4599,9 +4599,11 @@ FrameLayerBuilder::ComputeGeometryChangeForItem(DisplayItemData* aData)
   }
 
   // If we're a reused display item, then we can't be invalid, so no need to
-  // do an in-depth comparison.
+  // do an in-depth comparison. If we haven't previously stored geometry
+  // for this item (if it was an active layer), then we can't skip this
+  // yet.
   nsAutoPtr<nsDisplayItemGeometry> geometry;
-  if (item->IsReused()) {
+  if (item->IsReused() && aData->mGeometry) {
     aData->EndUpdate(geometry);
     return;
   }
