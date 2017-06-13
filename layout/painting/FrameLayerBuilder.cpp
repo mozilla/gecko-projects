@@ -4041,10 +4041,6 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
                                     int32_t aMaxLayers,
                                     int& aLayerCount)
 {
-  // In order to simplify flattening and merging of the display items, we create
-  // a local mutable copy of the display list. Since we keep track of the
-  // current iterator and append items only to that position, the modifications
-  // to the local list take constant time.
   for (nsDisplayItem* i = aList->GetBottom(); i; i = i->GetAbove()) {
     nsDisplayItem* item = i;
     MOZ_ASSERT(item);

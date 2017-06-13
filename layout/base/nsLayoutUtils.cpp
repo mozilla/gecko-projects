@@ -4078,8 +4078,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         nsTArray<const nsIFrame*> deletedFrames;
         FrameLayerBuilder::GetDeletedFramesForLayerManager(builder.GetWidgetLayerManager(), deletedFrames);
 
-
-        //printf("Attempting merge build with %d modified frames\n", modifiedFrames->size());
+        //printf("Attempting merge build with %lu modified frames\n", modifiedFrames->size());
 
         nsRect modifiedDirty;
         AnimatedGeometryRoot* modifiedAGR = nullptr;
