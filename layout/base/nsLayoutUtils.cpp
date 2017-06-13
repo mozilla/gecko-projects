@@ -3597,7 +3597,10 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
 
   for (nsDisplayItem* i = aOldList->GetBottom(); i != nullptr; i = i->GetAbove()) {
     i->SetReused(false);
-    oldListLookup.Put({ i->Frame(), i->GetPerFrameKey() }, i);
+
+    if (!aNewList->IsEmpty()) {
+      oldListLookup.Put({ i->Frame(), i->GetPerFrameKey() }, i);
+    }
   }
 
 #ifdef DEBUG
@@ -3648,7 +3651,9 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
         MOZ_ASSERT(old && IsSameItem(i, old));
         if (old->GetChildren()) {
           MOZ_ASSERT(i->GetChildren());
-          MergeDisplayLists(aBuilder, aDeletedFrames, i->GetChildren(), old->GetChildren(), i->GetChildren(), aTotalDisplayItems, aReusedDisplayItems);
+          MergeDisplayLists(aBuilder, aDeletedFrames, i->GetChildren(),
+                            old->GetChildren(), i->GetChildren(),
+                            aTotalDisplayItems, aReusedDisplayItems);
         }
 
         old->Destroy(aBuilder);
@@ -3661,6 +3666,9 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
     }
   }
 
+  MOZ_ASSERT(aNewList->IsEmpty());
+
+  // Reuse the remaining items from the old display list.
   while ((old = aOldList->RemoveBottom())) {
     if (old->CanBeReused() &&
         !aDeletedFrames.Contains(old->Frame()) &&
@@ -3669,6 +3677,18 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
       old->SetReused(true);
       aTotalDisplayItems++;
       aReusedDisplayItems++;
+
+      if (old->GetChildren()) {
+        // We are calling MergeDisplayLists() to ensure that the display items
+        // with modified or deleted children will be correctly handled.
+        // Passing an empty new display list as an argument skips the merging
+        // loop above and jumps back here.
+        nsDisplayList empty;
+
+        MergeDisplayLists(aBuilder, aDeletedFrames, &empty,
+                          old->GetChildren(), old->GetChildren(),
+                          aTotalDisplayItems, aReusedDisplayItems);
+      }
     } else {
       old->Destroy(aBuilder);
     }
