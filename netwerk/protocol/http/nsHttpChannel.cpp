@@ -1118,7 +1118,7 @@ nsHttpChannel::SetupTransaction()
     rv = mTransaction->Init(mCaps, mConnectionInfo, &mRequestHead,
                             mUploadStream, mReqContentLength,
                             mUploadStreamHasHeaders,
-                            NS_GetCurrentThread(), callbacks, this,
+                            GetCurrentThreadEventTarget(), callbacks, this,
                             mTopLevelOuterContentWindowId,
                             getter_AddRefs(responseStream));
     if (NS_FAILED(rv)) {
@@ -6830,7 +6830,15 @@ nsHttpChannel::SetProxyCredentials(const nsACString &value)
 NS_IMETHODIMP
 nsHttpChannel::SetWWWCredentials(const nsACString &value)
 {
-    return mRequestHead.SetHeader(nsHttp::Authorization, value);
+    // This method is called when various browser initiated authorization
+    // code sets the credentials.  We need to flag this header as the
+    // "browser default" so it does not show up in the ServiceWorker
+    // FetchEvent.  This may actually get called more than once, though,
+    // so we clear the header first since "default" headers are not
+    // allowed to overwrite normally.
+    Unused << mRequestHead.ClearHeader(nsHttp::Authorization);
+    return mRequestHead.SetHeader(nsHttp::Authorization, value, false,
+                                  nsHttpHeaderArray::eVarietyRequestDefault);
 }
 
 //-----------------------------------------------------------------------------
@@ -7559,7 +7567,7 @@ nsHttpChannel::RetargetDeliveryTo(nsIEventTarget* aNewTarget)
     MOZ_ASSERT(NS_IsMainThread(), "Should be called on main thread only");
 
     NS_ENSURE_ARG(aNewTarget);
-    if (aNewTarget == NS_GetCurrentThread()) {
+    if (aNewTarget->IsOnCurrentThread()) {
         NS_WARNING("Retargeting delivery to same thread");
         return NS_OK;
     }
@@ -7588,10 +7596,9 @@ nsHttpChannel::RetargetDeliveryTo(nsIEventTarget* aNewTarget)
 
         // If retarget fails for transaction pump, we must restore mCachePump.
         if (NS_FAILED(rv) && retargetableCachePump) {
-            nsCOMPtr<nsIThread> mainThread;
-            rv = NS_GetMainThread(getter_AddRefs(mainThread));
-            NS_ENSURE_SUCCESS(rv, rv);
-            rv = retargetableCachePump->RetargetDeliveryTo(mainThread);
+            nsCOMPtr<nsIEventTarget> main = GetMainThreadEventTarget();
+            NS_ENSURE_TRUE(main, NS_ERROR_UNEXPECTED);
+            rv = retargetableCachePump->RetargetDeliveryTo(main);
         }
     }
     return rv;
@@ -8417,7 +8424,7 @@ nsHttpChannel::UpdateAggregateCallbacks()
     }
     nsCOMPtr<nsIInterfaceRequestor> callbacks;
     NS_NewNotificationCallbacksAggregation(mCallbacks, mLoadGroup,
-                                           NS_GetCurrentThread(),
+                                           GetCurrentThreadEventTarget(),
                                            getter_AddRefs(callbacks));
     mTransaction->SetSecurityCallbacks(callbacks);
 }

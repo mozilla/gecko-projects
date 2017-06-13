@@ -10,6 +10,7 @@
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
+#include "mozilla/CheckedInt.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/net/WebSocketChannel.h"
 #include "mozilla/dom/File.h"
@@ -2484,7 +2485,14 @@ WebSocket::Send(nsIInputStream* aMsgStream,
   }
 
   // Always increment outgoing buffer len, even if closed
-  mOutgoingBufferedAmount += aMsgLength;
+  CheckedUint32 size = mOutgoingBufferedAmount;
+  size += aMsgLength;
+  if (!size.isValid()) {
+    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
+
+  mOutgoingBufferedAmount = size.value();
 
   if (readyState == CLOSING ||
       readyState == CLOSED) {
@@ -2870,6 +2878,12 @@ WebSocketImpl::IsOnCurrentThread(bool* aResult)
 {
   *aResult = IsTargetThread();
   return NS_OK;
+}
+
+NS_IMETHODIMP_(bool)
+WebSocketImpl::IsOnCurrentThreadInfallible()
+{
+  return IsTargetThread();
 }
 
 bool
