@@ -42,7 +42,6 @@ to mochitest command.
   * test_bug413958.html `monitorConsole` [3]
   * test_parser_diagnostics_unprintables.html [550]
 * Transition support:
-  * test_transitions_and_reframes.html `pseudo-element`: bug 1366422 [4]
   * Events:
     * test_animations_event_order.html [2]
 * Unimplemented \@font-face descriptors:
@@ -63,11 +62,10 @@ to mochitest command.
   * test_property_syntax_errors.html `grid`: actually there are issues with this [8]
   * test_value_storage.html `'grid` [195]
 * Unimplemented CSS properties:
-  * font-variant shorthand bug 1356134
-    * test_value_storage.html `'font-variant'` [65]
   * font-variant-alternates property bug 1355721
     * test_property_syntax_errors.html `font-variant-alternates` [2]
-    * test_value_storage.html `font-variant-alternates` [22]
+    * test_value_storage.html `'font-variant'` [14]
+    * ... `font-variant-alternates` [22]
     * test_specified_value_serialization.html `bug-721136` [1]
 * Unsupported prefixed values
   * moz-prefixed gradient functions bug 1337655
@@ -103,8 +101,6 @@ to mochitest command.
     * test_selectors.html `:-moz-lwtheme` [3]
   * :-moz-window-inactive bug 1348489
     * test_selectors.html `:-moz-window-inactive` [2]
-* Quirks mode support
-  * test_hover_quirk.html: hover quirks bug 1371963 [2]
 * Unit should be preserved after parsing servo/servo#15346
   * test_units_time.html [1]
 * getComputedStyle style doesn't contain custom properties bug 1336891

@@ -2,16 +2,19 @@ use std::collections::HashSet;
 use std::ffi::CString;
 use std::{mem, slice};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::os::raw::{c_void, c_char, c_float};
-use std::collections::HashMap;
 use gleam::gl;
 
 use webrender_traits::*;
 use webrender::renderer::{ReadPixelsFormat, Renderer, RendererOptions};
 use webrender::renderer::{ExternalImage, ExternalImageHandler, ExternalImageSource};
 use webrender::{ApiRecordingReceiver, BinaryRecorder};
+use thread_profiler::register_thread_with_profiler;
+use moz2d_renderer::Moz2dImageRenderer;
 use app_units::Au;
 use euclid::{TypedPoint2D, TypedSize2D, TypedRect, TypedMatrix4D, SideOffsets2D};
+use rayon;
 
 extern crate webrender_traits;
 
@@ -865,12 +868,33 @@ pub unsafe extern "C" fn wr_rendered_epochs_delete(pipeline_epochs: *mut WrRende
     Box::from_raw(pipeline_epochs);
 }
 
+pub struct WrThreadPool(Arc<rayon::ThreadPool>);
+
+#[no_mangle]
+pub unsafe extern "C" fn wr_thread_pool_new() -> *mut WrThreadPool {
+    let worker_config = rayon::Configuration::new()
+        .thread_name(|idx|{ format!("WebRender:Worker#{}", idx) })
+        .start_handler(|idx| {
+            register_thread_with_profiler(format!("WebRender:Worker#{}", idx));
+        });
+
+    let workers = Arc::new(rayon::ThreadPool::new(worker_config).unwrap());        
+
+    Box::into_raw(Box::new(WrThreadPool(workers)))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wr_thread_pool_delete(thread_pool: *mut WrThreadPool) {
+    Box::from_raw(thread_pool);
+}
+
 // Call MakeCurrent before this.
 #[no_mangle]
 pub extern "C" fn wr_window_new(window_id: WrWindowId,
                                 window_width: u32,
                                 window_height: u32,
                                 gl_context: *mut c_void,
+                                thread_pool: *mut WrThreadPool,
                                 enable_profiler: bool,
                                 out_api: &mut *mut WrAPI,
                                 out_renderer: &mut *mut WrRenderer)
@@ -896,12 +920,17 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
 
     println!("WebRender - OpenGL version new {}", version);
 
+    let workers = unsafe {
+        Arc::clone(&(*thread_pool).0)
+    };
+
     let opts = RendererOptions {
         enable_aa: true,
         enable_subpixel_aa: true,
         enable_profiler: enable_profiler,
         recorder: recorder,
-        blob_image_renderer: Some(Box::new(Moz2dImageRenderer::new())),
+        blob_image_renderer: Some(Box::new(Moz2dImageRenderer::new(workers.clone()))),
+        workers: Some(workers.clone()),
         cache_expiry_frames: 60, // see https://github.com/servo/webrender/pull/1294#issuecomment-304318800
         ..Default::default()
     };
@@ -1325,14 +1354,24 @@ pub extern "C" fn wr_dp_pop_stacking_context(state: &mut WrState) {
 
 #[no_mangle]
 pub extern "C" fn wr_dp_push_clip(state: &mut WrState,
-                                  clip_rect: WrRect,
+                                  rect: WrRect,
                                   mask: *const WrImageMask)
                                   -> u64 {
     assert!(unsafe { is_in_main_thread() });
-    let clip_rect = clip_rect.into();
-    let mask = unsafe { mask.as_ref() }.map(|x| x.into());
+    let content_rect: LayoutRect = rect.into();
+
+    // Both the clip rect and mask rect need to be relative to the
+    // content rect when the clip region is being used as part of a clip item.
+    // Since the clip_rect is the same as the content_rect we can just set the
+    // origin to zero.
+    let clip_rect = LayoutRect::new(LayoutPoint::zero(), content_rect.size);
+    let mut mask : Option<ImageMask> = unsafe { mask.as_ref() }.map(|x| x.into());
+    if let Some(ref mut m) = mask {
+        m.rect.origin = m.rect.origin - content_rect.origin;
+    }
+
     let clip_region = state.frame_builder.dl_builder.push_clip_region(&clip_rect, vec![], mask);
-    let clip_id = state.frame_builder.dl_builder.define_clip(clip_rect, clip_region, None);
+    let clip_id = state.frame_builder.dl_builder.define_clip(content_rect, clip_region, None);
     state.frame_builder.dl_builder.push_clip_id(clip_id);
     // return the u64 id value from inside the ClipId::Clip(..)
     match clip_id {
@@ -1360,8 +1399,14 @@ pub extern "C" fn wr_dp_push_scroll_layer(state: &mut WrState,
     // Avoid defining multiple scroll clips with the same clip id, as that
     // results in undefined behaviour or assertion failures.
     if !state.frame_builder.scroll_clips_defined.contains(&clip_id) {
-        let content_rect = content_rect.into();
-        let clip_rect = clip_rect.into();
+        let content_rect: LayoutRect = content_rect.into();
+
+        // Both the clip rect and mask rect need to be relative to the
+        // content_rect when the clip region is being used as part of a clip
+        // item. In this case there is no mask rect so that's a no-op.
+        let mut clip_rect: LayoutRect = clip_rect.into();
+        clip_rect.origin = clip_rect.origin - content_rect.origin;
+
         let clip_region = state.frame_builder.dl_builder.push_clip_region(&clip_rect, vec![], None);
         state.frame_builder.dl_builder.define_clip(content_rect, clip_region, Some(clip_id));
         state.frame_builder.scroll_clips_defined.insert(clip_id);
@@ -1759,73 +1804,15 @@ pub unsafe extern "C" fn wr_dp_push_built_display_list(state: &mut WrState,
     state.frame_builder.dl_builder.push_built_display_list(dl);
 }
 
-struct Moz2dImageRenderer {
-    images: HashMap<ImageKey, BlobImageData>,
-
-    // The images rendered in the current frame (not kept here between frames)
-    rendered_images: HashMap<BlobImageRequest, BlobImageResult>,
-}
-
-impl BlobImageRenderer for Moz2dImageRenderer {
-    fn add(&mut self, key: ImageKey, data: BlobImageData, _tiling: Option<TileSize>) {
-        self.images.insert(key, data);
-    }
-
-    fn update(&mut self, key: ImageKey, data: BlobImageData) {
-        self.images.insert(key, data);
-    }
-
-    fn delete(&mut self, key: ImageKey) {
-        self.images.remove(&key);
-    }
-
-    fn request(&mut self,
-               request: BlobImageRequest,
-               descriptor: &BlobImageDescriptor,
-               _dirty_rect: Option<DeviceUintRect>,
-               _images: &ImageStore) {
-        let data = self.images.get(&request.key).unwrap();
-        let buf_size = (descriptor.width * descriptor.height * descriptor.format.bytes_per_pixel().unwrap()) as usize;
-        let mut output = vec![255u8; buf_size];
-
-        unsafe {
-            if wr_moz2d_render_cb(WrByteSlice::new(&data[..]),
-                                  descriptor.width,
-                                  descriptor.height,
-                                  descriptor.format,
-                                  MutByteSlice::new(output.as_mut_slice())) {
-                self.rendered_images.insert(request,
-                                            Ok(RasterizedBlobImage {
-                              width: descriptor.width,
-                              height: descriptor.height,
-                              data: output,
-                          }));
-            }
-        }
-    }
-    fn resolve(&mut self, request: BlobImageRequest) -> BlobImageResult {
-        self.rendered_images.remove(&request).unwrap_or(Err(BlobImageError::InvalidKey))
-    }
-}
-
-impl Moz2dImageRenderer {
-    fn new() -> Self {
-        Moz2dImageRenderer {
-            images: HashMap::new(),
-            rendered_images: HashMap::new()
-        }
-    }
-}
-
 // TODO: nical
 // Update for the new blob image interface changes.
 //
 extern "C" {
      // TODO: figure out the API for tiled blob images.
-     fn wr_moz2d_render_cb(blob: WrByteSlice,
-                           width: u32,
-                           height: u32,
-                           format: WrImageFormat,
-                           output: MutByteSlice)
-                           -> bool;
+     pub fn wr_moz2d_render_cb(blob: WrByteSlice,
+                               width: u32,
+                               height: u32,
+                               format: WrImageFormat,
+                               output: MutByteSlice)
+                               -> bool;
 }
