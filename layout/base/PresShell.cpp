@@ -2068,16 +2068,6 @@ PresShell::SetIgnoreFrameDestruction(bool aIgnore)
 void
 PresShell::NotifyDestroyingFrame(nsIFrame* aFrame)
 {
-  nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
-  if (displayRoot != aFrame) {
-    nsTArray<nsIFrame*>* deletedFrames = displayRoot->GetProperty(nsIFrame::DeletedFrameList());
-    if (!deletedFrames) {
-      deletedFrames = new nsTArray<nsIFrame*>;
-      displayRoot->SetProperty(nsIFrame::DeletedFrameList(), deletedFrames);
-    }
-    deletedFrames->AppendElement(aFrame);
-  }
-
   // We must remove these from FrameLayerBuilder::DisplayItemData::mFrameList here,
   // otherwise the DisplayItemData destructor will use the destroyed frame when it
   // tries to remove it from the (array) value of this property.

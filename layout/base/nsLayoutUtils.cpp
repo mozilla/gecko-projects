@@ -3492,7 +3492,7 @@ nsLayoutUtils::ExpireDisplayPortOnAsyncScrollableAncestor(nsIFrame* aFrame)
 // to mark, as child stacking contexts might. It would be nice if we could
 // jump into those immediately rather than walking the entire thing.
 void MarkFramesForDifferentAGR(nsDisplayListBuilder* aBuilder,
-                               nsTHashtable<nsPtrHashKey<nsIFrame>>& aDeletedFrames,
+                               nsTHashtable<nsPtrHashKey<const nsIFrame>>& aDeletedFrames,
                                nsDisplayList* aList,
                                AnimatedGeometryRoot* aAGR)
 {
@@ -3583,7 +3583,7 @@ public:
 };
 
 void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
-                       nsTHashtable<nsPtrHashKey<nsIFrame>>& aDeletedFrames,
+                       nsTHashtable<nsPtrHashKey<const nsIFrame>>& aDeletedFrames,
                        nsDisplayList* aNewList,
                        nsDisplayList* aOldList,
                        nsDisplayList* aOutList,
@@ -4075,7 +4075,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       if (retainedBuilder &&
           aFrame->GetProperty(nsIFrame::ModifiedFrameList())) {
         std::vector<WeakFrame>* modifiedFrames = aFrame->GetProperty(nsIFrame::ModifiedFrameList());
-        nsTArray<nsIFrame*>* deletedFrames = aFrame->GetProperty(nsIFrame::DeletedFrameList());
+        nsTArray<const nsIFrame*> deletedFrames;
+        FrameLayerBuilder::GetDeletedFramesForLayerManager(builder.GetWidgetLayerManager(), deletedFrames);
 
 
         //printf("Attempting merge build with %d modified frames\n", modifiedFrames->size());
@@ -4086,11 +4087,9 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         if (ComputeRebuildRegion(builder, *modifiedFrames, aFrame, dirtyRect,
                                  &modifiedDirty, &modifiedAGR, &framesWithProps)) {
           modifiedDirty.IntersectRect(modifiedDirty, dirtyRect);
-          nsTHashtable<nsPtrHashKey<nsIFrame>> deletions;
-          if (deletedFrames) {
-            for (nsIFrame* f : *deletedFrames) {
-              deletions.PutEntry(f);
-            }
+          nsTHashtable<nsPtrHashKey<const nsIFrame>> deletions;
+          for (const nsIFrame* f : deletedFrames) {
+            deletions.PutEntry(f);
           }
 
           MarkFramesForDifferentAGR(&builder, deletions, &list, modifiedAGR);
@@ -4123,10 +4122,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           }
         }
         modifiedFrames->clear();
-        if (deletedFrames) {
-
-          deletedFrames->Clear();
-        }
 
         for (nsIFrame* f: framesWithProps) {
           f->SetHasOverrideDirtyRegion(false);

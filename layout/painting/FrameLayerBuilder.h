@@ -63,7 +63,6 @@ public:
   friend class FrameLayerBuilder;
 
   uint32_t GetDisplayItemKey() { return mDisplayItemKey; }
-  layers::Layer* GetLayer() { return mLayer; }
   nsDisplayItemGeometry* GetGeometry() const { return mGeometry.get(); }
   void Invalidate() { mIsInvalid = true; }
   void ClearAnimationCompositorState();
@@ -349,7 +348,7 @@ public:
    * Call this to notify that we have just started a transaction on the
    * retained layer manager aManager.
    */
-  void DidBeginRetainedLayerTransaction(LayerManager* aManager);
+  void DidBeginRetainedLayerTransaction(LayerManager* aManager, LayerManagerData* aParent = nullptr);
 
   /**
    * Call this just before we end a transaction.
@@ -420,6 +419,8 @@ public:
    */
   static void InvalidateAllLayers(LayerManager* aManager);
   static void InvalidateAllLayersForFrame(nsIFrame *aFrame);
+
+  static void GetDeletedFramesForLayerManager(LayerManager* aManager, nsTArray<const nsIFrame*>& aOutDeletedFrames);
 
   /**
    * Call this to determine if a frame has a dedicated (non-Painted) layer
@@ -523,7 +524,7 @@ public:
     Layer* layer = nullptr;
     for (DisplayItemData* data : array) {
       DisplayItemData::AssertDisplayItemData(data);
-      if (data->mLayer->GetType() != T::Type()) {
+      if (!data->mLayer || data->mLayer->GetType() != T::Type()) {
         continue;
       }
       if (layer && layer != data->mLayer) {
@@ -592,7 +593,6 @@ public:
   static void RemoveFrameFromLayerManager(const nsIFrame* aFrame,
                                           SmallPointerArray<DisplayItemData>& aArray);
 
-protected:
 
   friend class LayerManagerData;
 
@@ -614,6 +614,7 @@ protected:
                          uint32_t aDisplayItemKey,
                          Layer* aLayer,
                          LayerState aState);
+protected:
 
   // Flash the area within the context clip if paint flashing is enabled.
   static void FlashPaint(gfxContext *aContext);
