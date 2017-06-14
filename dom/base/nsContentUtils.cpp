@@ -54,7 +54,6 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/TabParent.h"
-#include "mozilla/dom/TextDecoder.h"
 #include "mozilla/dom/TouchEvent.h"
 #include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/XULCommandEvent.h"
@@ -222,6 +221,7 @@
 #include "nsPluginHost.h"
 #include "mozilla/HangAnnotations.h"
 #include "mozilla/ServoRestyleManager.h"
+#include "mozilla/Encoding.h"
 
 #include "nsIBidiKeyboard.h"
 
@@ -4497,25 +4497,17 @@ nsContentUtils::ConvertStringFromEncoding(const nsACString& aEncoding,
                                           uint32_t aInputLen,
                                           nsAString& aOutput)
 {
-  CheckedInt32 len = aInputLen;
-  if (!len.isValid()) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  nsAutoCString encoding;
+  const Encoding* encoding;
   if (aEncoding.IsEmpty()) {
-    encoding.AssignLiteral("UTF-8");
+    encoding = UTF_8_ENCODING;
   } else {
-    encoding.Assign(aEncoding);
+    encoding = Encoding::ForName(aEncoding);
   }
-
-  ErrorResult rv;
-  nsAutoPtr<TextDecoder> decoder(new TextDecoder());
-  decoder->InitWithEncoding(encoding, false);
-
-  decoder->Decode(aInput, len.value(), false,
-                  aOutput, rv);
-  return rv.StealNSResult();
+  nsresult rv = encoding->DecodeWithBOMRemoval(MakeSpan(reinterpret_cast<const uint8_t*>(aInput), aInputLen), aOutput);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  return NS_OK;
 }
 
 /* static */
@@ -4523,26 +4515,17 @@ bool
 nsContentUtils::CheckForBOM(const unsigned char* aBuffer, uint32_t aLength,
                             nsACString& aCharset)
 {
-  bool found = true;
-  aCharset.Truncate();
-  if (aLength >= 3 &&
-      aBuffer[0] == 0xEF &&
-      aBuffer[1] == 0xBB &&
-      aBuffer[2] == 0xBF) {
-    aCharset = "UTF-8";
+  auto span = MakeSpan(reinterpret_cast<const uint8_t*>(aBuffer), aLength);
+  const Encoding* encoding;
+  size_t bomLength;
+  Tie(encoding, bomLength) = Encoding::ForBOM(span);
+  Unused << bomLength;
+  if (!encoding) {
+    aCharset.Truncate();
+    return false;
   }
-  else if (aLength >= 2 &&
-           aBuffer[0] == 0xFE && aBuffer[1] == 0xFF) {
-    aCharset = "UTF-16BE";
-  }
-  else if (aLength >= 2 &&
-           aBuffer[0] == 0xFF && aBuffer[1] == 0xFE) {
-    aCharset = "UTF-16LE";
-  } else {
-    found = false;
-  }
-
-  return found;
+  encoding->Name(aCharset);
+  return true;
 }
 
 /* static */
@@ -9978,15 +9961,12 @@ nsContentUtils::LookupCustomElementDefinition(nsIDocument* aDoc,
 {
   MOZ_ASSERT(aDoc);
 
-  // To support imported document.
-  nsCOMPtr<nsIDocument> doc = aDoc->MasterDocument();
-
   if (aNameSpaceID != kNameSpaceID_XHTML ||
-      !doc->GetDocShell()) {
+      !aDoc->GetDocShell()) {
     return nullptr;
   }
 
-  nsCOMPtr<nsPIDOMWindowInner> window(doc->GetInnerWindow());
+  nsCOMPtr<nsPIDOMWindowInner> window(aDoc->GetInnerWindow());
   if (!window) {
     return nullptr;
   }
@@ -10010,9 +9990,6 @@ nsContentUtils::SetupCustomElement(Element* aElement,
   if (!doc) {
     return;
   }
-
-  // To support imported document.
-  doc = doc->MasterDocument();
 
   if (aElement->GetNameSpaceID() != kNameSpaceID_XHTML ||
       !doc->GetDocShell()) {
@@ -10041,14 +10018,11 @@ nsContentUtils::EnqueueLifecycleCallback(nsIDocument* aDoc,
 {
   MOZ_ASSERT(aDoc);
 
-  // To support imported document.
-  nsCOMPtr<nsIDocument> doc = aDoc->MasterDocument();
-
-  if (!doc->GetDocShell()) {
+  if (!aDoc->GetDocShell()) {
     return;
   }
 
-  nsCOMPtr<nsPIDOMWindowInner> window(doc->GetInnerWindow());
+  nsCOMPtr<nsPIDOMWindowInner> window(aDoc->GetInnerWindow());
   if (!window) {
     return;
   }
@@ -10069,15 +10043,12 @@ nsContentUtils::GetCustomPrototype(nsIDocument* aDoc,
 {
   MOZ_ASSERT(aDoc);
 
-  // To support imported document.
-  nsCOMPtr<nsIDocument> doc = aDoc->MasterDocument();
-
   if (aNamespaceID != kNameSpaceID_XHTML ||
-      !doc->GetDocShell()) {
+      !aDoc->GetDocShell()) {
     return;
   }
 
-  nsCOMPtr<nsPIDOMWindowInner> window(doc->GetInnerWindow());
+  nsCOMPtr<nsPIDOMWindowInner> window(aDoc->GetInnerWindow());
   if (!window) {
     return;
   }

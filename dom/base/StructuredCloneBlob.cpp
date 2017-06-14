@@ -27,8 +27,8 @@ StructuredCloneBlob::StructuredCloneBlob()
 
 /* static */ already_AddRefed<StructuredCloneBlob>
 StructuredCloneBlob::Constructor(GlobalObject& aGlobal, JS::HandleValue aValue,
-                                      JS::HandleObject aTargetGlobal,
-                                      ErrorResult& aRv)
+                                 JS::HandleObject aTargetGlobal,
+                                 ErrorResult& aRv)
 {
   JSContext* cx = aGlobal.Context();
 
@@ -38,7 +38,14 @@ StructuredCloneBlob::Constructor(GlobalObject& aGlobal, JS::HandleValue aValue,
   JS::RootedValue value(cx, aValue);
 
   if (aTargetGlobal) {
-    ac.emplace(cx, aTargetGlobal);
+    JS::RootedObject targetGlobal(cx, js::CheckedUnwrap(aTargetGlobal));
+    if (!targetGlobal) {
+      js::ReportAccessDenied(cx);
+      aRv.NoteJSContextException(cx);
+      return nullptr;
+    }
+
+    ac.emplace(cx, targetGlobal);
 
     if (!JS_WrapValue(cx, &value)) {
       aRv.NoteJSContextException(cx);
@@ -92,13 +99,14 @@ StructuredCloneBlob::Deserialize(JSContext* aCx, JS::HandleObject aTargetScope,
 
 
 /* static */ JSObject*
-StructuredCloneBlob::ReadStructuredClone(JSContext* aCx, JSStructuredCloneReader* aReader)
+StructuredCloneBlob::ReadStructuredClone(JSContext* aCx, JSStructuredCloneReader* aReader,
+                                         StructuredCloneHolder* aHolder)
 {
   JS::RootedObject obj(aCx);
   {
     RefPtr<StructuredCloneBlob> holder = new StructuredCloneBlob();
 
-    if (!holder->ReadStructuredCloneInternal(aCx, aReader) ||
+    if (!holder->ReadStructuredCloneInternal(aCx, aReader, aHolder) ||
         !holder->WrapObject(aCx, nullptr, &obj)) {
       return nullptr;
     }
@@ -107,12 +115,22 @@ StructuredCloneBlob::ReadStructuredClone(JSContext* aCx, JSStructuredCloneReader
 }
 
 bool
-StructuredCloneBlob::ReadStructuredCloneInternal(JSContext* aCx, JSStructuredCloneReader* aReader)
+StructuredCloneBlob::ReadStructuredCloneInternal(JSContext* aCx, JSStructuredCloneReader* aReader,
+                                                 StructuredCloneHolder* aHolder)
 {
   uint32_t length;
   uint32_t version;
   if (!JS_ReadUint32Pair(aReader, &length, &version)) {
     return false;
+  }
+
+  uint32_t blobOffset;
+  uint32_t blobCount;
+  if (!JS_ReadUint32Pair(aReader, &blobOffset, &blobCount)) {
+    return false;
+  }
+  if (blobCount) {
+    BlobImpls().AppendElements(&aHolder->BlobImpls()[blobOffset], blobCount);
   }
 
   JSStructuredCloneData data(length, length, 4096);
@@ -129,13 +147,17 @@ StructuredCloneBlob::ReadStructuredCloneInternal(JSContext* aCx, JSStructuredClo
 }
 
 bool
-StructuredCloneBlob::WriteStructuredClone(JSContext* aCx, JSStructuredCloneWriter* aWriter)
+StructuredCloneBlob::WriteStructuredClone(JSContext* aCx, JSStructuredCloneWriter* aWriter,
+                                          StructuredCloneHolder* aHolder)
 {
   auto& data = mBuffer->data();
   if (!JS_WriteUint32Pair(aWriter, SCTAG_DOM_STRUCTURED_CLONE_HOLDER, 0) ||
-      !JS_WriteUint32Pair(aWriter, data.Size(), JS_STRUCTURED_CLONE_VERSION)) {
+      !JS_WriteUint32Pair(aWriter, data.Size(), JS_STRUCTURED_CLONE_VERSION) ||
+      !JS_WriteUint32Pair(aWriter, aHolder->BlobImpls().Length(), BlobImpls().Length())) {
     return false;
   }
+
+  aHolder->BlobImpls().AppendElements(BlobImpls());
 
   auto iter = data.Iter();
   while (!iter.Done()) {

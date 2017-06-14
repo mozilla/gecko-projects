@@ -487,7 +487,7 @@ public:
   static bool MayResolve(jsid aId);
 
   void GetOwnPropertyNames(JSContext* aCx, JS::AutoIdVector& aNames,
-                           mozilla::ErrorResult& aRv);
+                           bool aEnumerableOnly, mozilla::ErrorResult& aRv);
 
   // Object Management
   static already_AddRefed<nsGlobalWindow> Create(nsGlobalWindow *aOuterWindow);
@@ -1819,6 +1819,8 @@ private:
   mozilla::dom::TabGroup* TabGroupOuter();
 
   bool IsBackgroundInternal() const;
+
+  void SetIsBackgroundInternal(bool aIsBackground);
 
 public:
   // Dispatch a runnable related to the global.

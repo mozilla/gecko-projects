@@ -123,6 +123,7 @@ win64-nightly/opt:
             - builds/taskcluster_firefox_windows_64_opt.py
             - disable_signing.py
             - taskcluster_nightly.py
+    run-on-projects: []
 
 win64/pgo:
     description: "Win64 Opt PGO"
@@ -208,7 +209,7 @@ win64-noopt/debug:
         script: mozharness/scripts/fx_desktop_build.py
         config:
             - builds/taskcluster_firefox_win64_noopt_debug.py
-    run-on-projects: [ 'stylo', 'autoland', 'mozilla-inbound', 'mozilla-central', 'try' ]
+    run-on-projects: [ 'trunk', 'try' ]
 
 win32-noopt/debug:
     description: "Win32 No-optimize Debug"
@@ -229,7 +230,7 @@ win32-noopt/debug:
         script: mozharness/scripts/fx_desktop_build.py
         config:
             - builds/taskcluster_firefox_win32_noopt_debug.py
-    run-on-projects: [ 'stylo', 'autoland', 'mozilla-inbound', 'mozilla-central', 'try' ]
+    run-on-projects: [ 'trunk', 'try' ]
 
 win64-asan/debug:
     description: "Win64 Debug ASAN"

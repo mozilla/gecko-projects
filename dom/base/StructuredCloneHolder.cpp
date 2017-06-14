@@ -250,7 +250,7 @@ StructuredCloneHolder::StructuredCloneHolder(CloningSupport aSupportsCloning,
   , mSupportsTransferring(aSupportsTransferring == TransferringSupported)
   , mParent(nullptr)
 #ifdef DEBUG
-  , mCreationThread(NS_GetCurrentThread())
+  , mCreationEventTarget(GetCurrentThreadEventTarget())
 #endif
 {}
 
@@ -277,7 +277,7 @@ StructuredCloneHolder::Write(JSContext* aCx,
                              ErrorResult& aRv)
 {
   MOZ_ASSERT_IF(mStructuredCloneScope == StructuredCloneScope::SameProcessSameThread,
-                mCreationThread == NS_GetCurrentThread());
+                mCreationEventTarget->IsOnCurrentThread());
 
   if (!StructuredCloneHolderBase::Write(aCx, aValue, aTransfer, cloneDataPolicy)) {
     aRv.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
@@ -292,7 +292,7 @@ StructuredCloneHolder::Read(nsISupports* aParent,
                             ErrorResult& aRv)
 {
   MOZ_ASSERT_IF(mStructuredCloneScope == StructuredCloneScope::SameProcessSameThread,
-                mCreationThread == NS_GetCurrentThread());
+                mCreationEventTarget->IsOnCurrentThread());
   MOZ_ASSERT(aParent);
 
   mozilla::AutoRestore<nsISupports*> guard(mParent);
@@ -334,7 +334,7 @@ StructuredCloneHolder::ReadFromBuffer(nsISupports* aParent,
                                       ErrorResult& aRv)
 {
   MOZ_ASSERT_IF(mStructuredCloneScope == StructuredCloneScope::SameProcessSameThread,
-                mCreationThread == NS_GetCurrentThread());
+                mCreationEventTarget->IsOnCurrentThread());
 
   MOZ_ASSERT(!mBuffer, "ReadFromBuffer() must be called without a Write().");
 
@@ -356,10 +356,6 @@ StructuredCloneHolder::ReadFullySerializableObjects(JSContext* aCx,
 {
   if (aTag == SCTAG_DOM_IMAGEDATA) {
     return ReadStructuredCloneImageData(aCx, aReader);
-  }
-
-  if (aTag == SCTAG_DOM_STRUCTURED_CLONE_HOLDER) {
-    return StructuredCloneBlob::ReadStructuredClone(aCx, aReader);
   }
 
   if (aTag == SCTAG_DOM_WEBCRYPTO_KEY || aTag == SCTAG_DOM_URLSEARCHPARAMS) {
@@ -455,14 +451,6 @@ StructuredCloneHolder::WriteFullySerializableObjects(JSContext* aCx,
     ImageData* imageData = nullptr;
     if (NS_SUCCEEDED(UNWRAP_OBJECT(ImageData, aObj, imageData))) {
       return WriteStructuredCloneImageData(aCx, aWriter, imageData);
-    }
-  }
-
-  // See if this is a StructuredCloneBlob object.
-  {
-    StructuredCloneBlob* holder = nullptr;
-    if (NS_SUCCEEDED(UNWRAP_OBJECT(StructuredCloneHolder, aObj, holder))) {
-      return holder->WriteStructuredClone(aCx, aWriter);
     }
   }
 
@@ -999,6 +987,10 @@ StructuredCloneHolder::CustomReadHandler(JSContext* aCx,
                                             parent, GetSurfaces(), aIndex);
   }
 
+  if (aTag == SCTAG_DOM_STRUCTURED_CLONE_HOLDER) {
+    return StructuredCloneBlob::ReadStructuredClone(aCx, aReader, this);
+  }
+
   if (aTag == SCTAG_DOM_WASM) {
     return ReadWasmModule(aCx, aIndex, this);
   }
@@ -1059,6 +1051,14 @@ StructuredCloneHolder::CustomWriteHandler(JSContext* aCx,
       return ImageBitmap::WriteStructuredClone(aWriter,
                                                GetSurfaces(),
                                                imageBitmap);
+    }
+  }
+
+  // See if this is a StructuredCloneBlob object.
+  {
+    StructuredCloneBlob* holder = nullptr;
+    if (NS_SUCCEEDED(UNWRAP_OBJECT(StructuredCloneHolder, aObj, holder))) {
+      return holder->WriteStructuredClone(aCx, aWriter, this);
     }
   }
 

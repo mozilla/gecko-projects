@@ -1367,8 +1367,13 @@ html|span.ac-emphasize-text-url {
 }
 
 #sidebar-header {
-  /* match the font size used in side bar content */
-  font-size: 12px;
+  /* system font size is a bit smaller in mac, so need more ems. */
+  font-size: 1.4545em;
+  border-bottom: 1px solid hsla(240, 5%, 5%, .1);
+}
+
+.sidebar-splitter {
+  border-color: hsla(240, 5%, 5%, .1);
 }
 
 /* ----- CONTENT ----- */
@@ -1986,17 +1991,20 @@ html|*.addon-webext-perm-list {
   margin-inline-start: 0;
 }
 
-.popup-notification-description[popupid="addon-webext-permissions"] {
-  margin: 0;
-  padding: 0;
-}
-
+.popup-notification-description[popupid="addon-webext-permissions"],
 .popup-notification-description[popupid="addon-installed"] {
   display: none;
 }
 
+.addon-webext-perm-notification-content,
 .addon-installed-notification-content {
   margin-top: 0;
+}
+
+#addon-webext-perm-header {
+  /* Align the text more closely with the icon by clearing some top line height. */
+  margin-top: -1px;
+  margin-inline-start: 0;
 }
 
 #addon-installed-notification-header {

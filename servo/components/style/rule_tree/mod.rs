@@ -6,17 +6,18 @@
 
 //! The rule tree.
 
+use applicable_declarations::ApplicableDeclarationList;
 #[cfg(feature = "servo")]
 use heapsize::HeapSizeOf;
 use properties::{AnimationRules, Importance, LonghandIdSet, PropertyDeclarationBlock};
 use shared_lock::{Locked, StylesheetGuards, SharedRwLockReadGuard};
 use smallvec::SmallVec;
 use std::io::{self, Write};
+use std::mem;
 use std::ptr;
 use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 use stylearc::{Arc, NonZeroPtrMut};
 use stylesheets::StyleRule;
-use stylist::ApplicableDeclarationList;
 use thread_state;
 
 /// The rule tree, the structure servo uses to preserve the results of selector
@@ -229,7 +230,7 @@ impl RuleTree {
                              guards: &StylesheetGuards)
                              -> StrongRuleNode
     {
-        let rules = applicable_declarations.drain().map(|d| (d.source, d.level));
+        let rules = applicable_declarations.drain().map(|d| d.order_and_level());
         let rule_node = self.insert_ordered_rules_with_important(rules, guards);
         rule_node
     }
@@ -425,10 +426,18 @@ pub enum CascadeLevel {
     /// User-agent important rules.
     UAImportant,
     /// Transitions
+    ///
+    /// NB: If this changes from being last, change from_byte below.
     Transitions,
 }
 
 impl CascadeLevel {
+    /// Converts a raw byte to a CascadeLevel.
+    pub unsafe fn from_byte(byte: u8) -> Self {
+        debug_assert!(byte <= CascadeLevel::Transitions as u8);
+        mem::transmute(byte)
+    }
+
     /// Select a lock guard for this level
     pub fn guard<'a>(&self, guards: &'a StylesheetGuards<'a>) -> &'a SharedRwLockReadGuard<'a> {
         match *self {
@@ -563,6 +572,17 @@ impl RuleNode {
         self.parent.is_none()
     }
 
+    fn next_sibling(&self) -> Option<WeakRuleNode> {
+        // We use acquire semantics here to ensure proper synchronization while
+        // inserting in the child list.
+        let ptr = self.next_sibling.load(Ordering::Acquire);
+        if ptr.is_null() {
+            None
+        } else {
+            Some(WeakRuleNode::from_ptr(ptr))
+        }
+    }
+
     /// Remove this rule node from the child list.
     ///
     /// This method doesn't use proper synchronization, and it's expected to be
@@ -628,7 +648,7 @@ impl RuleNode {
 
         let _ = write!(writer, "\n");
         for child in self.iter_children() {
-            child.get().dump(guards, writer, indent + INDENT_INCREMENT);
+            child.upgrade().get().dump(guards, writer, indent + INDENT_INCREMENT);
         }
     }
 
@@ -683,31 +703,30 @@ impl StrongRuleNode {
         WeakRuleNode::from_ptr(self.ptr())
     }
 
-    fn next_sibling(&self) -> Option<WeakRuleNode> {
-        // We use acquire semantics here to ensure proper synchronization while
-        // inserting in the child list.
-        let ptr = self.get().next_sibling.load(Ordering::Acquire);
-        if ptr.is_null() {
-            None
-        } else {
-            Some(WeakRuleNode::from_ptr(ptr))
-        }
-    }
-
     fn parent(&self) -> Option<&StrongRuleNode> {
         self.get().parent.as_ref()
     }
 
-    fn ensure_child(&self,
-                    root: WeakRuleNode,
-                    source: StyleSource,
-                    level: CascadeLevel) -> StrongRuleNode {
+    fn ensure_child(
+        &self,
+        root: WeakRuleNode,
+        source: StyleSource,
+        level: CascadeLevel
+    ) -> StrongRuleNode {
         let mut last = None;
-        // TODO(emilio): We could avoid all the refcount churn here.
+
+        // NB: This is an iterator over _weak_ nodes.
+        //
+        // It's fine though, because nothing can make us GC while this happens,
+        // and this happens to be hot.
+        //
+        // TODO(emilio): We could actually make this even less hot returning a
+        // WeakRuleNode, and implementing this on WeakRuleNode itself...
         for child in self.get().iter_children() {
-            if child.get().level == level &&
-                child.get().source.as_ref().unwrap().ptr_equals(&source) {
-                return child;
+            let child_node = unsafe { &*child.ptr() };
+            if child_node.level == level &&
+                child_node.source.as_ref().unwrap().ptr_equals(&source) {
+                return child.upgrade();
             }
             last = Some(child);
         }
@@ -719,11 +738,12 @@ impl StrongRuleNode {
         let new_ptr: *mut RuleNode = &mut *node;
 
         loop {
-            let strong;
+            let next;
 
             {
-                let next_sibling_ptr = match last {
-                    Some(ref l) => &l.get().next_sibling,
+                let last_node = last.as_ref().map(|l| unsafe { &*l.ptr() });
+                let next_sibling_ptr = match last_node {
+                    Some(ref l) => &l.next_sibling,
                     None => &self.get().first_child,
                 };
 
@@ -748,17 +768,17 @@ impl StrongRuleNode {
 
                 // Existing is not null: some thread inserted a child node since
                 // we accessed `last`.
-                strong = WeakRuleNode::from_ptr(existing).upgrade();
+                next = WeakRuleNode::from_ptr(existing);
 
-                if strong.get().source.as_ref().unwrap().ptr_equals(&source) {
+                if unsafe { &*next.ptr() }.source.as_ref().unwrap().ptr_equals(&source) {
                     // That node happens to be for the same style source, use
                     // that, and let node fall out of scope.
-                    return strong;
+                    return next.upgrade();
                 }
             }
 
             // Try again inserting after the new last child.
-            last = Some(strong);
+            last = Some(next);
         }
     }
 
@@ -1357,12 +1377,11 @@ struct RuleChildrenListIter {
 }
 
 impl Iterator for RuleChildrenListIter {
-    type Item = StrongRuleNode;
+    type Item = WeakRuleNode;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.current.take().map(|current| {
-            let current = current.upgrade();
-            self.current = current.next_sibling();
+            self.current = unsafe { &*current.ptr() }.next_sibling();
             current
         })
     }

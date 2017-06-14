@@ -10,7 +10,11 @@
 
 #include "chrome/common/ipc_message_utils.h"
 #include "FrameMetrics.h"
+#include "ipc/IPCMessageUtils.h"
 #include "LayersTypes.h"
+#include "mozilla/GfxMessageUtils.h"
+#include "mozilla/layers/LayerAttributes.h"
+#include "mozilla/layers/LayersMessageUtils.h"
 #include "mozilla/Maybe.h"
 #include "nsTArrayForwardDeclare.h"
 

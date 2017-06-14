@@ -88,15 +88,15 @@ use style::gecko_bindings::sugar::ownership::{FFIArcHelpers, HasFFI, HasArcFFI, 
 use style::gecko_bindings::sugar::ownership::{HasSimpleFFI, Strong};
 use style::gecko_bindings::sugar::refptr::RefPtr;
 use style::gecko_properties::{self, style_structs};
+use style::invalidation::element::restyle_hints::{self, RestyleHint};
 use style::media_queries::{MediaList, parse_media_query_list};
 use style::parallel;
-use style::parser::{PARSING_MODE_DEFAULT, ParserContext};
+use style::parser::ParserContext;
 use style::properties::{CascadeFlags, ComputedValues, Importance, SourcePropertyDeclaration};
 use style::properties::{LonghandIdSet, PropertyDeclaration, PropertyDeclarationBlock, PropertyId, StyleBuilder};
 use style::properties::SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP;
 use style::properties::animated_properties::{Animatable, AnimationValue, TransitionProperty};
 use style::properties::parse_one_declaration_into;
-use style::restyle_hints::{self, RestyleHint};
 use style::rule_tree::StyleSource;
 use style::selector_parser::PseudoElementCascadeType;
 use style::sequential;
@@ -118,7 +118,7 @@ use style::traversal::{FOR_DEFAULT_STYLES, TraversalDriver, TraversalFlags, UNST
 use style::traversal::{resolve_style, resolve_default_style};
 use style::values::{CustomIdent, KeyframesName};
 use style::values::computed::Context;
-use style_traits::ToCss;
+use style_traits::{PARSING_MODE_DEFAULT, ToCss};
 use super::stylesheet_loader::StylesheetLoader;
 
 /*
@@ -263,9 +263,11 @@ pub extern "C" fn Servo_TraverseSubtree(root: RawGeckoElementBorrowed,
 
     let traversal_flags = match (root_behavior, restyle_behavior) {
         (Root::Normal, Restyle::Normal) |
+        (Root::Normal, Restyle::ForNewlyBoundElement) |
         (Root::Normal, Restyle::ForAnimationOnly)
             => TraversalFlags::empty(),
         (Root::UnstyledChildrenOnly, Restyle::Normal) |
+        (Root::UnstyledChildrenOnly, Restyle::ForNewlyBoundElement) |
         (Root::UnstyledChildrenOnly, Restyle::ForAnimationOnly)
             => UNSTYLED_CHILDREN_ONLY,
         (Root::Normal, Restyle::ForCSSRuleChanges) => FOR_CSS_RULE_CHANGES,
@@ -290,6 +292,14 @@ pub extern "C" fn Servo_TraverseSubtree(root: RawGeckoElementBorrowed,
                      raw_data,
                      traversal_flags,
                      unsafe { &*snapshots });
+
+    if restyle_behavior == Restyle::ForNewlyBoundElement {
+        // In this mode, we only ever restyle new elements, so there is no
+        // need for a post-traversal, and the borrow_data().unwrap() call below
+        // could panic, so we don't bother computing whether a post-traversal
+        // is required.
+        return false;
+    }
 
     element.has_dirty_descendants() || element.borrow_data().unwrap().has_restyle()
 }
@@ -801,7 +811,7 @@ pub extern "C" fn Servo_StyleSheet_ClearAndUpdate(stylesheet: RawServoStyleSheet
     };
 
     let sheet = Stylesheet::as_arc(&stylesheet);
-    Stylesheet::update_from_str(&sheet, input, url_data, loader,
+    Stylesheet::update_from_str(&sheet, input, url_data.clone(), loader,
                                 &RustLogReporter, line_number_offset as u64);
 }
 
@@ -1187,14 +1197,15 @@ pub extern "C" fn Servo_StyleRule_GetSelectorText(rule: RawServoStyleRuleBorrowe
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_StyleRule_GetSelectorTextFromIndex(rule: RawServoStyleRuleBorrowed,
-                                                           aSelectorIndex: u32,
-                                                           result: *mut nsAString) {
+pub extern "C" fn Servo_StyleRule_GetSelectorTextAtIndex(rule: RawServoStyleRuleBorrowed,
+                                                         index: u32,
+                                                         result: *mut nsAString) {
     read_locked_arc(rule, |rule: &StyleRule| {
-        rule.selectors.to_css_from_index(
-            aSelectorIndex as usize,
-            unsafe { result.as_mut().unwrap() }
-        ).unwrap();
+        let index = index as usize;
+        if index >= rule.selectors.0.len() {
+            return;
+        }
+        rule.selectors.0[index].selector.to_css(unsafe { result.as_mut().unwrap() }).unwrap();
     })
 }
 
@@ -1202,6 +1213,21 @@ pub extern "C" fn Servo_StyleRule_GetSelectorTextFromIndex(rule: RawServoStyleRu
 pub extern "C" fn Servo_StyleRule_GetSelectorCount(rule: RawServoStyleRuleBorrowed, count: *mut u32) {
     read_locked_arc(rule, |rule: &StyleRule| {
         *unsafe { count.as_mut().unwrap() } = rule.selectors.0.len() as u32;
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_StyleRule_GetSpecificityAtIndex(rule: RawServoStyleRuleBorrowed,
+                                                        index: u32,
+                                                        specificity: *mut u64) {
+    read_locked_arc(rule, |rule: &StyleRule| {
+        let mut specificity =  unsafe { specificity.as_mut().unwrap() };
+        let index = index as usize;
+        if index >= rule.selectors.0.len() {
+            *specificity = 0;
+            return;
+        }
+        *specificity = rule.selectors.0[index].selector.specificity() as u64;
     })
 }
 
@@ -1568,7 +1594,7 @@ fn parse_property_into(declarations: &mut SourcePropertyDeclaration,
                        data: *mut URLExtraData,
                        parsing_mode: structs::ParsingMode,
                        quirks_mode: QuirksMode) -> Result<(), ()> {
-    use style::parser::ParsingMode;
+    use style_traits::ParsingMode;
     let value = unsafe { value.as_ref().unwrap().as_str_unchecked() };
     let url_data = unsafe { RefPtr::from_ptr_ref(&data) };
     let parsing_mode = ParsingMode::from_bits_truncate(parsing_mode);

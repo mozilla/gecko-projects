@@ -7,7 +7,7 @@
 use cssparser::{AtRuleParser, Parser, QualifiedRuleParser, RuleListParser, ParserInput};
 use cssparser::{DeclarationListParser, DeclarationParser, parse_one_rule, SourceLocation};
 use error_reporting::{NullReporter, ContextualParseError};
-use parser::{PARSING_MODE_DEFAULT, ParserContext, log_css_error};
+use parser::{ParserContext, log_css_error};
 use properties::{Importance, PropertyDeclaration, PropertyDeclarationBlock, PropertyId};
 use properties::{PropertyDeclarationId, LonghandId, SourcePropertyDeclaration};
 use properties::LonghandIdSet;
@@ -17,7 +17,7 @@ use selectors::parser::SelectorParseError;
 use shared_lock::{DeepCloneWithLock, SharedRwLock, SharedRwLockReadGuard, Locked, ToCssWithGuard};
 use std::borrow::Cow;
 use std::fmt;
-use style_traits::{ToCss, ParseError, StyleParseError};
+use style_traits::{PARSING_MODE_DEFAULT, ToCss, ParseError, StyleParseError};
 use stylearc::Arc;
 use stylesheets::{CssRuleType, Stylesheet};
 use stylesheets::rule_parser::VendorPrefix;
@@ -205,9 +205,10 @@ impl Keyframe {
     /// Parse a CSS keyframe.
     pub fn parse<'i>(css: &'i str, parent_stylesheet: &Stylesheet)
                      -> Result<Arc<Locked<Self>>, ParseError<'i>> {
+        let url_data = parent_stylesheet.url_data.read();
         let error_reporter = NullReporter;
         let context = ParserContext::new(parent_stylesheet.origin,
-                                         &parent_stylesheet.url_data,
+                                         &url_data,
                                          &error_reporter,
                                          Some(CssRuleType::Keyframe),
                                          PARSING_MODE_DEFAULT,

@@ -12,6 +12,7 @@ use data::StoredRestyleHint;
 use dom::{TElement, TNode};
 use fnv::FnvHashSet;
 use selector_parser::SelectorImpl;
+use selectors::attr::CaseSensitivity;
 use selectors::parser::{Component, Selector};
 use shared_lock::SharedRwLockReadGuard;
 use stylesheets::{CssRule, Stylesheet};
@@ -37,7 +38,7 @@ impl InvalidationScope {
     {
         match *self {
             InvalidationScope::Class(ref class) => {
-                element.has_class(class)
+                element.has_class(class, CaseSensitivity::CaseSensitive)
             }
             InvalidationScope::ID(ref id) => {
                 match element.get_id() {
@@ -115,10 +116,35 @@ impl StylesheetInvalidationSet {
         where E: TElement,
     {
         if let Some(e) = document_element {
-            self.process_invalidations_in_subtree(e);
+            self.process_invalidations(e);
         }
         self.invalid_scopes.clear();
         self.fully_invalid = false;
+    }
+
+    fn process_invalidations<E>(&self, element: E) -> bool
+        where E: TElement,
+    {
+        {
+            let mut data = match element.mutate_data() {
+                Some(data) => data,
+                None => return false,
+            };
+
+            if self.fully_invalid {
+                debug!("process_invalidations: fully_invalid({:?})",
+                       element);
+                data.ensure_restyle().hint.insert(StoredRestyleHint::subtree());
+                return true;
+            }
+        }
+
+        if self.invalid_scopes.is_empty() {
+            debug!("process_invalidations: empty invalidation set");
+            return false;
+        }
+
+        self.process_invalidations_in_subtree(element)
     }
 
     /// Process style invalidations in a given subtree, that is, look for all
@@ -145,13 +171,6 @@ impl StylesheetInvalidationSet {
                        element);
                 return false;
             }
-        }
-
-        if self.fully_invalid {
-            debug!("process_invalidations_in_subtree: fully_invalid({:?})",
-                   element);
-            data.ensure_restyle().hint.insert(StoredRestyleHint::subtree());
-            return true;
         }
 
         for scope in &self.invalid_scopes {

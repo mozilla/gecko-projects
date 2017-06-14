@@ -8,7 +8,6 @@
 
 #include "MediaStreamGraph.h"
 #include "mozilla/dom/MediaStreamTrack.h"
-#include "GetUserMediaRequest.h"
 #include "MediaStreamListener.h"
 #include "nsArray.h"
 #include "nsContentUtils.h"
@@ -1291,6 +1290,10 @@ public:
           callback.forget(),
           self->mWindowID,
           self->mOnFailure.forget())));
+      NS_DispatchToMainThread(NS_NewRunnableFunction([]() -> void {
+        RefPtr<MediaManager> manager = MediaManager::GetInstance();
+        manager->SendPendingGUMRequest();
+      }));
       return NS_OK;
     }));
 
@@ -1539,6 +1542,10 @@ public:
         Fail(NS_LITERAL_STRING("NotReadableError"),
              NS_ConvertUTF8toUTF16(errorMsg));
       }
+      NS_DispatchToMainThread(NS_NewRunnableFunction([]() -> void {
+        RefPtr<MediaManager> manager = MediaManager::GetInstance();
+        manager->SendPendingGUMRequest();
+      }));
       return NS_OK;
     }
     PeerIdentity* peerIdentity = nullptr;
@@ -2470,7 +2477,13 @@ MediaManager::GetUserMedia(nsPIDOMWindowInner* aWindow,
       } else {
         RefPtr<GetUserMediaRequest> req =
             new GetUserMediaRequest(window, callID, c, isHTTPS);
-        obs->NotifyObservers(req, "getUserMedia:request", nullptr);
+        if (!Preferences::GetBool("media.navigator.permission.force") && array->Length() > 1) {
+          // there is at least 1 pending gUM request
+          // For the scarySources test case, always send the request
+          self->mPendingGUMRequest.AppendElement(req.forget());
+        } else {
+          obs->NotifyObservers(req, "getUserMedia:request", nullptr);
+        }
       }
 
 #ifdef MOZ_WEBRTC
@@ -2950,6 +2963,7 @@ MediaManager::Shutdown()
   GetActiveWindows()->Clear();
   mActiveCallbacks.Clear();
   mCallIds.Clear();
+  mPendingGUMRequest.Clear();
 #ifdef MOZ_WEBRTC
   StopWebRtcLog();
 #endif
@@ -3022,6 +3036,16 @@ MediaManager::Shutdown()
     return NS_OK;
   }));
   mMediaThread->message_loop()->PostTask(shutdown.forget());
+}
+
+void
+MediaManager::SendPendingGUMRequest()
+{
+  if (mPendingGUMRequest.Length() > 0) {
+    nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
+    obs->NotifyObservers(mPendingGUMRequest[0], "getUserMedia:request", nullptr);
+    mPendingGUMRequest.RemoveElementAt(0);
+  }
 }
 
 nsresult
@@ -3132,6 +3156,7 @@ MediaManager::Observe(nsISupports* aSubject, const char* aTopic,
         return NS_OK;
       }
       array->RemoveElement(key);
+      SendPendingGUMRequest();
     }
     return NS_OK;
 
@@ -3468,7 +3493,7 @@ SourceListener::Activate(SourceMediaStream* aStream,
   }
 
   mActivated = true;
-  mMainThreadCheck = PR_GetCurrentThread();
+  mMainThreadCheck = GetCurrentVirtualThread();
   mStream = aStream;
   mAudioDevice = aAudioDevice;
   mVideoDevice = aVideoDevice;
@@ -3674,32 +3699,31 @@ void
 SourceListener::NotifyEvent(MediaStreamGraph* aGraph,
                             MediaStreamGraphEvent aEvent)
 {
-  nsresult rv;
-  nsCOMPtr<nsIThread> thread;
+  nsCOMPtr<nsIEventTarget> target;
 
   switch (aEvent) {
     case MediaStreamGraphEvent::EVENT_FINISHED:
-      rv = NS_GetMainThread(getter_AddRefs(thread));
-      if (NS_WARN_IF(NS_FAILED(rv))) {
+      target = GetMainThreadEventTarget();
+      if (NS_WARN_IF(!target)) {
         NS_ASSERTION(false, "Mainthread not available; running on current thread");
         // Ensure this really *was* MainThread (NS_GetCurrentThread won't work)
-        MOZ_RELEASE_ASSERT(mMainThreadCheck == PR_GetCurrentThread());
+        MOZ_RELEASE_ASSERT(mMainThreadCheck == GetCurrentVirtualThread());
         NotifyFinished();
         return;
       }
-      thread->Dispatch(NewRunnableMethod(this, &SourceListener::NotifyFinished),
+      target->Dispatch(NewRunnableMethod(this, &SourceListener::NotifyFinished),
                        NS_DISPATCH_NORMAL);
       break;
     case MediaStreamGraphEvent::EVENT_REMOVED:
-      rv = NS_GetMainThread(getter_AddRefs(thread));
-      if (NS_WARN_IF(NS_FAILED(rv))) {
+      target = GetMainThreadEventTarget();
+      if (NS_WARN_IF(!target)) {
         NS_ASSERTION(false, "Mainthread not available; running on current thread");
         // Ensure this really *was* MainThread (NS_GetCurrentThread won't work)
-        MOZ_RELEASE_ASSERT(mMainThreadCheck == PR_GetCurrentThread());
+        MOZ_RELEASE_ASSERT(mMainThreadCheck == GetCurrentVirtualThread());
         NotifyRemoved();
         return;
       }
-      thread->Dispatch(NewRunnableMethod(this, &SourceListener::NotifyRemoved),
+      target->Dispatch(NewRunnableMethod(this, &SourceListener::NotifyRemoved),
                        NS_DISPATCH_NORMAL);
       break;
     case MediaStreamGraphEvent::EVENT_HAS_DIRECT_LISTENERS:

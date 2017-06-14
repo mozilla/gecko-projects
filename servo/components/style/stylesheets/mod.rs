@@ -24,9 +24,10 @@ pub mod viewport_rule;
 
 use cssparser::{parse_one_rule, Parser, ParserInput};
 use error_reporting::NullReporter;
-use parser::{ParserContext, PARSING_MODE_DEFAULT};
+use parser::ParserContext;
 use shared_lock::{DeepCloneWithLock, Locked, SharedRwLock, SharedRwLockReadGuard, ToCssWithGuard};
 use std::fmt;
+use style_traits::PARSING_MODE_DEFAULT;
 use stylearc::Arc;
 
 pub use self::counter_style_rule::CounterStyleRule;
@@ -224,10 +225,11 @@ impl CssRule {
         state: Option<State>,
         loader: Option<&StylesheetLoader>
     ) -> Result<(Self, State), SingleRuleParseError> {
+        let url_data = parent_stylesheet.url_data.read();
         let error_reporter = NullReporter;
         let context = ParserContext::new(
             parent_stylesheet.origin,
-            &parent_stylesheet.url_data,
+            &url_data,
             &error_reporter,
             None,
             PARSING_MODE_DEFAULT,

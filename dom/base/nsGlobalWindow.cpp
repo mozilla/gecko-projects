@@ -1400,9 +1400,21 @@ bool
 nsOuterWindowProxy::getOwnEnumerablePropertyKeys(JSContext *cx, JS::Handle<JSObject*> proxy,
                                                  JS::AutoIdVector &props) const
 {
-  // BaseProxyHandler::keys seems to do what we want here: call
-  // ownPropertyKeys and then filter out the non-enumerable properties.
-  return js::BaseProxyHandler::getOwnEnumerablePropertyKeys(cx, proxy, props);
+  // Like ownPropertyKeys, our indexed stuff followed by our "normal" enumerable
+  // own property names.
+  //
+  // Note that this does not match current spec per
+  // https://github.com/whatwg/html/issues/2753 but as that issue says I believe
+  // the spec is wrong.
+  if (!AppendIndexedPropertyNames(cx, proxy, props)) {
+    return false;
+  }
+
+  JS::AutoIdVector innerProps(cx);
+  if (!js::Wrapper::getOwnEnumerablePropertyKeys(cx, proxy, innerProps)) {
+    return false;
+  }
+  return js::AppendUnique(cx, props, innerProps);
 }
 
 bool
@@ -3534,7 +3546,7 @@ nsGlobalWindow::SetDocShell(nsIDocShell* aDocShell)
 
   bool docShellActive;
   mDocShell->GetIsActive(&docShellActive);
-  mIsBackground = !docShellActive;
+  SetIsBackgroundInternal(!docShellActive);
 }
 
 void
@@ -5115,9 +5127,10 @@ nsGlobalWindow::MayResolve(jsid aId)
     return true;
   }
 
-  if (aId == XPCJSRuntime::Get()->GetStringID(XPCJSContext::IDX_CONTROLLERS)) {
-    // We only resolve .controllers in release builds and on non-chrome windows,
-    // but let's not worry about any of that stuff.
+  if (aId == XPCJSRuntime::Get()->GetStringID(XPCJSContext::IDX_CONTROLLERS) ||
+      aId == XPCJSRuntime::Get()->GetStringID(XPCJSContext::IDX_CONTROLLERS_CLASS)) {
+    // We only resolve .controllers/.Controllers in release builds and on non-chrome
+    // windows, but let's not worry about any of that stuff.
     return true;
   }
 
@@ -5139,8 +5152,22 @@ nsGlobalWindow::MayResolve(jsid aId)
 
 void
 nsGlobalWindow::GetOwnPropertyNames(JSContext* aCx, JS::AutoIdVector& aNames,
-                                    ErrorResult& aRv)
+                                    bool aEnumerableOnly, ErrorResult& aRv)
 {
+  if (aEnumerableOnly) {
+    // The names we would return from here get defined on the window via one of
+    // two codepaths.  The ones coming from the WebIDLGlobalNameHash will end up
+    // in the DefineConstructor function in BindingUtils, which always defines
+    // things as non-enumerable.  The ones coming from the script namespace
+    // manager get defined by nsDOMClassInfo::PostCreatePrototype calling
+    // ResolvePrototype and using the resulting descriptot to define the
+    // property.  ResolvePrototype always passes 0 to the FillPropertyDescriptor
+    // for the property attributes, so all those are non-enumerable as well.
+    //
+    // So in the aEnumerableOnly case we have nothing to do.
+    return;
+  }
+
   MOZ_ASSERT(IsInnerWindow());
   // "Components" is marked as enumerable but only resolved on demand :-/.
   //aNames.AppendElement(NS_LITERAL_STRING("Components"));
@@ -10644,13 +10671,16 @@ void nsGlobalWindow::SetIsBackground(bool aIsBackground)
 {
   MOZ_ASSERT(IsOuterWindow());
 
-  bool resetTimers = (!aIsBackground && AsOuter()->IsBackground());
-  nsPIDOMWindow::SetIsBackground(aIsBackground);
+  bool changed = aIsBackground != AsOuter()->IsBackground();
+  SetIsBackgroundInternal(aIsBackground);
 
   nsGlobalWindow* inner = GetCurrentInnerWindowInternal();
 
+  if (inner && changed) {
+    inner->mTimeoutManager->UpdateBackgroundState();
+  }
+
   if (aIsBackground) {
-    MOZ_ASSERT(!resetTimers);
     // Notify gamepadManager we are at the background window,
     // we need to stop vibrate.
     if (inner) {
@@ -10658,11 +10688,17 @@ void nsGlobalWindow::SetIsBackground(bool aIsBackground)
     }
     return;
   } else if (inner) {
-    if (resetTimers) {
-      inner->mTimeoutManager->ResetTimersForThrottleReduction();
-    }
     inner->SyncGamepadState();
   }
+}
+
+void
+nsGlobalWindow::SetIsBackgroundInternal(bool aIsBackground)
+{
+  if (mIsBackground != aIsBackground) {
+    TabGroup()->WindowChangedBackgroundStatus(aIsBackground);
+  }
+  mIsBackground = aIsBackground;
 }
 
 void nsGlobalWindow::MaybeUpdateTouchState()

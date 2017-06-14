@@ -6644,9 +6644,10 @@ pub mod root {
         #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
         pub enum TraversalRestyleBehavior {
             Normal = 0,
-            ForReconstruct = 1,
-            ForAnimationOnly = 2,
-            ForCSSRuleChanges = 3,
+            ForNewlyBoundElement = 1,
+            ForReconstruct = 2,
+            ForAnimationOnly = 3,
+            ForCSSRuleChanges = 4,
         }
         #[repr(i32)]
         #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -9234,31 +9235,106 @@ pub mod root {
                     unsafe { ::std::mem::transmute(unit_field_val) };
             }
             #[inline]
+            pub fn mClassAttributeChanged(&self) -> bool {
+                let mask = 32usize as u8;
+                let unit_field_val: u8 =
+                    unsafe { ::std::mem::transmute(self._bitfield_1) };
+                let val = (unit_field_val & mask) >> 5usize;
+                unsafe { ::std::mem::transmute(val as u8) }
+            }
+            #[inline]
+            pub fn set_mClassAttributeChanged(&mut self, val: bool) {
+                let mask = 32usize as u8;
+                let val = val as u8 as u8;
+                let mut unit_field_val: u8 =
+                    unsafe { ::std::mem::transmute(self._bitfield_1) };
+                unit_field_val &= !mask;
+                unit_field_val |= (val << 5usize) & mask;
+                self._bitfield_1 =
+                    unsafe { ::std::mem::transmute(unit_field_val) };
+            }
+            #[inline]
+            pub fn mIdAttributeChanged(&self) -> bool {
+                let mask = 64usize as u8;
+                let unit_field_val: u8 =
+                    unsafe { ::std::mem::transmute(self._bitfield_1) };
+                let val = (unit_field_val & mask) >> 6usize;
+                unsafe { ::std::mem::transmute(val as u8) }
+            }
+            #[inline]
+            pub fn set_mIdAttributeChanged(&mut self, val: bool) {
+                let mask = 64usize as u8;
+                let val = val as u8 as u8;
+                let mut unit_field_val: u8 =
+                    unsafe { ::std::mem::transmute(self._bitfield_1) };
+                unit_field_val &= !mask;
+                unit_field_val |= (val << 6usize) & mask;
+                self._bitfield_1 =
+                    unsafe { ::std::mem::transmute(unit_field_val) };
+            }
+            #[inline]
+            pub fn mOtherAttributeChanged(&self) -> bool {
+                let mask = 128usize as u8;
+                let unit_field_val: u8 =
+                    unsafe { ::std::mem::transmute(self._bitfield_1) };
+                let val = (unit_field_val & mask) >> 7usize;
+                unsafe { ::std::mem::transmute(val as u8) }
+            }
+            #[inline]
+            pub fn set_mOtherAttributeChanged(&mut self, val: bool) {
+                let mask = 128usize as u8;
+                let val = val as u8 as u8;
+                let mut unit_field_val: u8 =
+                    unsafe { ::std::mem::transmute(self._bitfield_1) };
+                unit_field_val &= !mask;
+                unit_field_val |= (val << 7usize) & mask;
+                self._bitfield_1 =
+                    unsafe { ::std::mem::transmute(unit_field_val) };
+            }
+            #[inline]
             pub fn new_bitfield_1(mIsHTMLElementInHTMLDocument: bool,
                                   mIsInChromeDocument: bool,
                                   mSupportsLangAttr: bool,
                                   mIsTableBorderNonzero: bool,
-                                  mIsMozBrowserFrame: bool) -> u8 {
+                                  mIsMozBrowserFrame: bool,
+                                  mClassAttributeChanged: bool,
+                                  mIdAttributeChanged: bool,
+                                  mOtherAttributeChanged: bool) -> u8 {
                 ({
                      ({
                           ({
                                ({
-                                    ({ 0 } |
-                                         ((mIsHTMLElementInHTMLDocument as u8
-                                               as u8) << 0usize) &
-                                             (1usize as u8))
+                                    ({
+                                         ({
+                                              ({
+                                                   ({ 0 } |
+                                                        ((mIsHTMLElementInHTMLDocument
+                                                              as u8 as u8) <<
+                                                             0usize) &
+                                                            (1usize as u8))
+                                               } |
+                                                   ((mIsInChromeDocument as u8
+                                                         as u8) << 1usize) &
+                                                       (2usize as u8))
+                                          } |
+                                              ((mSupportsLangAttr as u8 as u8)
+                                                   << 2usize) &
+                                                  (4usize as u8))
+                                     } |
+                                         ((mIsTableBorderNonzero as u8 as u8)
+                                              << 3usize) & (8usize as u8))
                                 } |
-                                    ((mIsInChromeDocument as u8 as u8) <<
-                                         1usize) & (2usize as u8))
+                                    ((mIsMozBrowserFrame as u8 as u8) <<
+                                         4usize) & (16usize as u8))
                            } |
-                               ((mSupportsLangAttr as u8 as u8) << 2usize) &
-                                   (4usize as u8))
+                               ((mClassAttributeChanged as u8 as u8) <<
+                                    5usize) & (32usize as u8))
                       } |
-                          ((mIsTableBorderNonzero as u8 as u8) << 3usize) &
-                              (8usize as u8))
+                          ((mIdAttributeChanged as u8 as u8) << 6usize) &
+                              (64usize as u8))
                  } |
-                     ((mIsMozBrowserFrame as u8 as u8) << 4usize) &
-                         (16usize as u8))
+                     ((mOtherAttributeChanged as u8 as u8) << 7usize) &
+                         (128usize as u8))
             }
         }
         #[repr(C)]
@@ -10436,6 +10512,12 @@ pub mod root {
             eFloatID_SpellCheckerUnderlineRelativeSize = 1,
             eFloatID_CaretAspectRatio = 2,
         }
+        pub const LookAndFeel_FontID_FontID_MINIMUM:
+                  root::mozilla::LookAndFeel_FontID =
+            LookAndFeel_FontID::eFont_Caption;
+        pub const LookAndFeel_FontID_FontID_MAXIMUM:
+                  root::mozilla::LookAndFeel_FontID =
+            LookAndFeel_FontID::eFont_Widget;
         #[repr(u32)]
         #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
         pub enum LookAndFeel_FontID {
@@ -34397,7 +34479,7 @@ pub mod root {
                    root::nsCharTraits ) ));
     }
     #[test]
-    fn __bindgen_test_layout__bindgen_ty_id_215166_instantiation_103() {
+    fn __bindgen_test_layout__bindgen_ty_id_215184_instantiation_103() {
         assert_eq!(::std::mem::size_of::<u8>() , 1usize , concat ! (
                    "Size of template specialization: " , stringify ! ( u8 )
                    ));
@@ -34406,7 +34488,7 @@ pub mod root {
                    ) ));
     }
     #[test]
-    fn __bindgen_test_layout__bindgen_ty_id_215202_instantiation_104() {
+    fn __bindgen_test_layout__bindgen_ty_id_215220_instantiation_104() {
         assert_eq!(::std::mem::size_of::<u8>() , 1usize , concat ! (
                    "Size of template specialization: " , stringify ! ( u8 )
                    ));

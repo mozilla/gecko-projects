@@ -14,7 +14,9 @@
 //! style system it's kind of pointless in the Stylo case, and only Servo forces
 //! the separation between the style system implementation and everything else.
 
+use CaseSensitivityExt;
 use app_units::Au;
+use applicable_declarations::ApplicableDeclarationBlock;
 use atomic_refcell::AtomicRefCell;
 use context::{QuirksMode, SharedStyleContext, UpdateAnimationsTasks};
 use data::ElementData;
@@ -87,7 +89,6 @@ use std::ptr;
 use string_cache::{Atom, Namespace, WeakAtom, WeakNamespace};
 use stylearc::Arc;
 use stylesheets::UrlExtraData;
-use stylist::ApplicableDeclarationBlock;
 
 /// A simple wrapper over a non-null Gecko node (`nsINode`) pointer.
 ///
@@ -407,6 +408,24 @@ impl<'le> fmt::Debug for GeckoElement<'le> {
         if let Some(id) = self.get_id() {
             try!(write!(f, " id={}", id));
         }
+
+        let mut first = true;
+        let mut any = false;
+        self.each_class(|c| {
+            if first {
+                first = false;
+                any = true;
+                let _ = f.write_str(" class=\"");
+            } else {
+                let _ = f.write_str(" ");
+            }
+            let _ = write!(f, "{}", c);
+        });
+
+        if any {
+            f.write_str("\"")?;
+        }
+
         write!(f, "> ({:#x})", self.as_node().opaque().0)
     }
 }
@@ -741,6 +760,23 @@ impl<'le> TElement for GeckoElement<'le> {
             bindings::Gecko_HasAttr(self.0,
                                     namespace.0.as_ptr(),
                                     attr.as_ptr())
+        }
+    }
+
+    fn get_id(&self) -> Option<Atom> {
+        if !self.has_id() {
+            return None
+        }
+
+        let ptr = unsafe {
+            bindings::Gecko_AtomAttrValue(self.0,
+                                          atom!("id").as_ptr())
+        };
+
+        if ptr.is_null() {
+            None
+        } else {
+            Some(Atom::from(ptr))
         }
     }
 
@@ -1222,6 +1258,10 @@ impl<'le> PresentationalHintsSynthesizer for GeckoElement<'le> {
             // Unvisited vs. visited styles are computed up-front based on the
             // visited mode (not the element's actual state).
             let declarations = match visited_handling {
+                VisitedHandlingMode::AllLinksVisitedAndUnvisited => {
+                    unreachable!("We should never try to selector match with \
+                                 AllLinksVisitedAndUnvisited");
+                },
                 VisitedHandlingMode::AllLinksUnvisited => unsafe {
                     Gecko_GetUnvisitedLinkAttrDeclarationBlock(self.0)
                 },
@@ -1526,12 +1566,12 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
             }
             NonTSPseudoClass::MozPlaceholder => false,
             NonTSPseudoClass::MozAny(ref sels) => {
-                let old_value = context.within_functional_pseudo_class_argument;
-                context.within_functional_pseudo_class_argument = true;
+                let old_value = context.hover_active_quirk_disabled;
+                context.hover_active_quirk_disabled = true;
                 let result = sels.iter().any(|s| {
-                    matches_complex_selector(s, 0, self, context, flags_setter)
+                    matches_complex_selector(s.iter(), self, context, flags_setter)
                 });
-                context.within_functional_pseudo_class_argument = old_value;
+                context.hover_active_quirk_disabled = old_value;
                 result
             }
             NonTSPseudoClass::Lang(ref lang_arg) => {
@@ -1574,30 +1614,30 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
         self.get_state().intersects(NonTSPseudoClass::AnyLink.state_flag())
     }
 
-    fn get_id(&self) -> Option<Atom> {
+    fn has_id(&self, id: &Atom, case_sensitivity: CaseSensitivity) -> bool {
         if !self.has_id() {
-            return None;
+            return false
         }
 
-        let ptr = unsafe {
-            bindings::Gecko_AtomAttrValue(self.0,
-                                          atom!("id").as_ptr())
-        };
+        unsafe {
+            let ptr = bindings::Gecko_AtomAttrValue(self.0, atom!("id").as_ptr());
 
-        if ptr.is_null() {
-            None
-        } else {
-            Some(Atom::from(ptr))
+            if ptr.is_null() {
+                false
+            } else {
+                case_sensitivity.eq_atom(WeakAtom::new(ptr), id)
+            }
         }
     }
 
-    fn has_class(&self, name: &Atom) -> bool {
+    fn has_class(&self, name: &Atom, case_sensitivity: CaseSensitivity) -> bool {
         if !self.may_have_class() {
             return false;
         }
 
         snapshot_helpers::has_class(self.0,
                                     name,
+                                    case_sensitivity,
                                     Gecko_ClassOrClassList)
     }
 

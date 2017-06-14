@@ -1377,6 +1377,14 @@ treechildren.searchbar-treebody::-moz-tree-row(selected) {
   background-color: Window;
 }
 
+#sidebar-header {
+  border-bottom: 1px solid ThreeDLightShadow;
+}
+
+.sidebar-splitter {
+  border-color: ThreeDLightShadow;
+}
+
 .browserContainer > findbar {
   background-color: -moz-dialog;
   color: -moz-DialogText;
@@ -1593,17 +1601,20 @@ html|*.addon-webext-perm-list {
   margin-inline-start: 0;
 }
 
-.popup-notification-description[popupid="addon-webext-permissions"] {
-  margin: 0;
-  padding: 0;
-}
-
+.popup-notification-description[popupid="addon-webext-permissions"],
 .popup-notification-description[popupid="addon-installed"] {
   display: none;
 }
 
+.addon-webext-perm-notification-content,
 .addon-installed-notification-content {
   margin-top: 0;
+}
+
+#addon-webext-perm-header {
+  /* Align the text more closely with the icon by clearing some top line height. */
+  margin-top: -1px;
+  margin-inline-start: 0;
 }
 
 #addon-installed-notification-header {

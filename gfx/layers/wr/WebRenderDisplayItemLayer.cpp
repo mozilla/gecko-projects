@@ -151,7 +151,7 @@ WebRenderDisplayItemLayer::PushItemAsBlobImage(wr::DisplayListBuilder& aBuilder,
   RefPtr<gfx::DrawEventRecorderMemory> recorder = MakeAndAddRef<gfx::DrawEventRecorderMemory>();
   RefPtr<gfx::DrawTarget> dummyDt =
     gfx::Factory::CreateDrawTarget(gfx::BackendType::SKIA, imageSize.ToUnknownSize(), gfx::SurfaceFormat::B8G8R8X8);
-  RefPtr<gfx::DrawTarget> dt = gfx::Factory::CreateRecordingDrawTarget(recorder, dummyDt);
+  RefPtr<gfx::DrawTarget> dt = gfx::Factory::CreateRecordingDrawTarget(recorder, dummyDt, imageSize.ToUnknownSize());
   LayerPoint offset = ViewAs<LayerPixel>(
       LayoutDevicePoint::FromAppUnits(mItem->ToReferenceFrame(), appUnitsPerDevPixel),
       PixelCastJustification::WebRenderHasUnitResolution);
@@ -161,8 +161,7 @@ WebRenderDisplayItemLayer::PushItemAsBlobImage(wr::DisplayListBuilder& aBuilder,
     RefPtr<gfxContext> context = gfxContext::CreateOrNull(dt, offset.ToUnknownPoint());
     MOZ_ASSERT(context);
 
-    nsRenderingContext ctx(context);
-    mItem->Paint(mBuilder, &ctx);
+    mItem->Paint(mBuilder, context);
   }
 
   wr::ByteBuffer bytes;

@@ -9,10 +9,11 @@ use error_reporting::{ParseErrorReporter, ContextualParseError};
 use fnv::FnvHashMap;
 use media_queries::{MediaList, Device};
 use parking_lot::RwLock;
-use parser::{PARSING_MODE_DEFAULT, ParserContext, log_css_error};
+use parser::{ParserContext, log_css_error};
 use shared_lock::{DeepCloneWithLock, Locked, SharedRwLock, SharedRwLockReadGuard};
 use std::mem;
 use std::sync::atomic::{AtomicBool, Ordering};
+use style_traits::PARSING_MODE_DEFAULT;
 use stylearc::Arc;
 use stylesheets::{CssRule, CssRules, Origin, UrlExtraData};
 use stylesheets::loader::StylesheetLoader;
@@ -52,7 +53,7 @@ pub struct Stylesheet {
     /// The origin of this stylesheet.
     pub origin: Origin,
     /// The url data this stylesheet should use.
-    pub url_data: UrlExtraData,
+    pub url_data: RwLock<UrlExtraData>,
     /// The lock used for objects inside this stylesheet
     pub shared_lock: SharedRwLock,
     /// The namespaces that apply to this stylesheet.
@@ -69,17 +70,15 @@ impl Stylesheet {
     /// Updates an empty stylesheet from a given string of text.
     pub fn update_from_str(existing: &Stylesheet,
                            css: &str,
-                           url_data: &UrlExtraData,
+                           url_data: UrlExtraData,
                            stylesheet_loader: Option<&StylesheetLoader>,
                            error_reporter: &ParseErrorReporter,
                            line_number_offset: u64) {
         let namespaces = RwLock::new(Namespaces::default());
-        // FIXME: we really should update existing.url_data with the given url_data,
-        // otherwise newly inserted rule may not have the right base url.
         let (rules, dirty_on_viewport_size_change) =
             Stylesheet::parse_rules(
                 css,
-                url_data,
+                &url_data,
                 existing.origin,
                 &mut *namespaces.write(),
                 &existing.shared_lock,
@@ -89,6 +88,7 @@ impl Stylesheet {
                 line_number_offset
             );
 
+        *existing.url_data.write() = url_data;
         mem::swap(&mut *existing.namespaces.write(), &mut *namespaces.write());
         existing.dirty_on_viewport_size_change
             .store(dirty_on_viewport_size_change, Ordering::Release);
@@ -184,7 +184,7 @@ impl Stylesheet {
 
         Stylesheet {
             origin: origin,
-            url_data: url_data,
+            url_data: RwLock::new(url_data),
             namespaces: namespaces,
             rules: CssRules::new(rules, &shared_lock),
             media: media,
@@ -287,7 +287,7 @@ impl Clone for Stylesheet {
             rules: Arc::new(lock.wrap(cloned_rules)),
             media: Arc::new(lock.wrap(cloned_media)),
             origin: self.origin,
-            url_data: self.url_data.clone(),
+            url_data: RwLock::new((*self.url_data.read()).clone()),
             shared_lock: lock,
             namespaces: RwLock::new((*self.namespaces.read()).clone()),
             dirty_on_viewport_size_change: AtomicBool::new(
