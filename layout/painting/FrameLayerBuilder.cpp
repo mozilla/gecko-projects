@@ -4788,16 +4788,7 @@ FrameLayerBuilder::AddPaintedDisplayItem(PaintedLayerData* aLayerData,
 
       // If BuildLayer didn't call BuildContainerLayerFor, then our new layer won't have been
       // stored in layerBuilder. Manually add it now.
-      if (mRetainingManager) {
-#ifdef DEBUG_DISPLAY_ITEM_DATA
-        LayerManagerData* parentLmd = static_cast<LayerManagerData*>
-          (layer->Manager()->GetUserData(&gLayerManagerUserData));
-        LayerManagerData* lmd = static_cast<LayerManagerData*>
-          (tempManager->GetUserData(&gLayerManagerUserData));
-        lmd->mParent = parentLmd;
-#endif
-        layerBuilder->StoreDataForFrame(aItem, tmpLayer, LAYER_ACTIVE);
-      }
+      layerBuilder->StoreDataForFrame(aItem, tmpLayer, LAYER_ACTIVE);
 
       tempManager->SetRoot(tmpLayer);
       layerBuilder->WillEndTransaction();
@@ -4848,6 +4839,10 @@ FrameLayerBuilder::AddPaintedDisplayItem(PaintedLayerData* aLayerData,
 DisplayItemData*
 FrameLayerBuilder::StoreDataForFrame(nsDisplayItem* aItem, Layer* aLayer, LayerState aState)
 {
+  if (!mRetainingManager) {
+    return nullptr;
+  }
+
   DisplayItemData* oldData = GetDisplayItemDataForManager(aItem, mRetainingManager);
   if (oldData) {
     if (!oldData->mUsed) {
@@ -4874,6 +4869,10 @@ FrameLayerBuilder::StoreDataForFrame(nsIFrame* aFrame,
                                      Layer* aLayer,
                                      LayerState aState)
 {
+  if (!mRetainingManager) {
+    return;
+  }
+
   DisplayItemData* oldData = GetDisplayItemData(aFrame, aDisplayItemKey);
   if (oldData && oldData->mFrameList.Length() == 1) {
     oldData->BeginUpdate(aLayer, aState, mContainerLayerGeneration);
@@ -5707,12 +5706,10 @@ FrameLayerBuilder::BuildContainerLayerFor(nsDisplayListBuilder* aBuilder,
   uint32_t oldGeneration = mContainerLayerGeneration;
   mContainerLayerGeneration = ++mMaxContainerLayerGeneration;
 
-  if (mRetainingManager) {
-    if (aContainerItem) {
-      StoreDataForFrame(aContainerItem, containerLayer, LAYER_ACTIVE);
-    } else {
-      StoreDataForFrame(aContainerFrame, containerDisplayItemKey, containerLayer, LAYER_ACTIVE);
-    }
+  if (aContainerItem) {
+    StoreDataForFrame(aContainerItem, containerLayer, LAYER_ACTIVE);
+  } else {
+    StoreDataForFrame(aContainerFrame, containerDisplayItemKey, containerLayer, LAYER_ACTIVE);
   }
 
   LayerManagerData* data = static_cast<LayerManagerData*>
