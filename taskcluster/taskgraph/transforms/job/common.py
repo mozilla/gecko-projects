@@ -15,7 +15,7 @@ SECRET_SCOPE = 'secrets:get:project/releng/gecko/{}/level-{}/{}'
 def docker_worker_add_workspace_cache(config, job, taskdesc, extra=None):
     """Add the workspace cache based on the build platform/type and level,
     except on try where workspace caches are not used.
-    
+
     extra, is an optional kwarg passed in that supports extending the cache
            key name to avoid undesired conflicts with other caches."""
     if config.params['project'] == 'try':
@@ -52,13 +52,16 @@ def add_public_artifacts(config, job, taskdesc, path):
         'type': 'directory',
     })
 
+
 def docker_worker_add_public_artifacts(config, job, taskdesc):
     """ Adds a public artifact directory to the task """
     add_public_artifacts(config, job, taskdesc, path='/home/worker/artifacts/')
 
+
 def generic_worker_add_public_artifacts(config, job, taskdesc):
     """ Adds a public artifact directory to the task """
     add_public_artifacts(config, job, taskdesc, path=r'public/build')
+
 
 def docker_worker_add_gecko_vcs_env_vars(config, job, taskdesc):
     """Add the GECKO_BASE_* and GECKO_HEAD_* env vars to the worker."""

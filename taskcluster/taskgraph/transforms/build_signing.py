@@ -13,6 +13,7 @@ transforms = TransformSequence()
 
 DESKTOP_BUILD_PLATFORM = ('linux', 'macosx', 'win')
 
+
 @transforms.add
 def add_signed_routes(config, jobs):
     """Add routes corresponding to the routes of the build task

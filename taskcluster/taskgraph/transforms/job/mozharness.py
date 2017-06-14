@@ -49,7 +49,7 @@ mozharness_run_schema = Schema({
 
     # --custom-build-variant-cfg value (not supported on Windows)
     Optional('custom-build-variant-cfg'): basestring,
-    
+
     # Extra metadata to use toward the workspace caching.
     # Only supported on docker-worker
     Optional('extra-workspace-cache-key'): basestring,
@@ -217,7 +217,7 @@ def mozharness_on_generic_worker(config, job, taskdesc):
     mh_command.append('\\'.join([r'.\build\src\testing', run['script'].replace('/', '\\')]))
     for cfg in run['config']:
         mh_command.append('--config ' + cfg.replace('/', '\\'))
-    if not 'NO_MAGIC_MH_BUILD_ARGS' in env:
+    if 'NO_MAGIC_MH_BUILD_ARGS' not in env:
         # XXXCallek this is a hack to genericize the mozharness run to not
         # force the passing of these params
         mh_command.append('--branch ' + config.params['project'])
