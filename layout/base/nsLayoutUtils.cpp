@@ -3505,7 +3505,11 @@ void MarkFramesForDifferentAGR(nsDisplayListBuilder* aBuilder,
       AnimatedGeometryRoot *childAGR = aAGR;
       if (i->Frame()->IsStackingContext()) {
         if (i->Frame()->HasOverrideDirtyRegion()) {
-          childAGR = i->Frame()->GetProperty(nsDisplayListBuilder::DisplayListBuildingRect())->mModifiedAGR;
+          nsDisplayListBuilder::DisplayListBuildingData* data =
+            i->Frame()->GetProperty(nsDisplayListBuilder::DisplayListBuildingRect());
+          if (data) {
+            childAGR = data->mModifiedAGR;
+          }
         } else {
           childAGR = nullptr;
         }
