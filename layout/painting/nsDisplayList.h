@@ -4026,8 +4026,9 @@ public:
  */
 class nsDisplayLayerEventRegions final : public nsDisplayItem {
 public:
-  nsDisplayLayerEventRegions(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
+  nsDisplayLayerEventRegions(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame, uint32_t aIndex = 0)
     : nsDisplayItem(aBuilder, aFrame)
+    , mIndex(aIndex)
   {
     MOZ_COUNT_CTOR(nsDisplayLayerEventRegions);
   }
@@ -4075,6 +4076,11 @@ public:
   int32_t ZIndex() const override;
   void SetOverrideZIndex(int32_t aZIndex);
 
+  virtual uint32_t GetPerFrameKey() const override
+  {
+    return (mIndex << TYPE_BITS) | nsDisplayItem::GetPerFrameKey();
+  }
+
   const nsRegion& HitRegion() { return mHitRegion; }
   const nsRegion& MaybeHitRegion() { return mMaybeHitRegion; }
   const nsRegion& DispatchToContentHitRegion() { return mDispatchToContentHitRegion; }
@@ -4109,6 +4115,7 @@ private:
   // in the scroll frame. This ensures that the event regions item remains on
   // top of the content after sorting items by z-index.
   mozilla::Maybe<int32_t> mOverrideZIndex;
+  uint32_t mIndex;
 };
 
 /**
