@@ -4100,7 +4100,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           MergeDisplayLists(&builder, deletions, &modifiedDL, &list, &list, totalDisplayItems, reusedDisplayItems);
 
           //printf_stderr("Painting --- Merged list:\n");
-          //nsFrame::PrintDisplayList(aBuilder, merged);
+          //nsFrame::PrintDisplayList(&builder, list);
           merged = true;
         }
 

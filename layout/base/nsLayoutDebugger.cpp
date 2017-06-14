@@ -151,8 +151,8 @@ PrintDisplayItemTo(nsDisplayListBuilder* aBuilder, nsDisplayItem* aItem,
   }
 #endif
 
-  aStream << nsPrintfCString("%s p=0x%p f=0x%p(%s) %sbounds(%d,%d,%d,%d) layerBounds(%d,%d,%d,%d) visible(%d,%d,%d,%d) componentAlpha(%d,%d,%d,%d) clip(%s) asr(%s) clipChain(%s)%s ref=0x%p agr=0x%p",
-          aItem->Name(), aItem, (void*)f, NS_ConvertUTF16toUTF8(contentData).get(),
+  aStream << nsPrintfCString("%s p=0x%p f=0x%p(%s) key=%d %sbounds(%d,%d,%d,%d) layerBounds(%d,%d,%d,%d) visible(%d,%d,%d,%d) componentAlpha(%d,%d,%d,%d) clip(%s) asr(%s) clipChain(%s)%s ref=0x%p agr=0x%p",
+          aItem->Name(), aItem, (void*)f, NS_ConvertUTF16toUTF8(contentData).get(), aItem->GetPerFrameKey(),
           (aItem->ZIndex() ? nsPrintfCString("z=%d ", aItem->ZIndex()).get() : ""),
           rect.x, rect.y, rect.width, rect.height,
           layerRect.x, layerRect.y, layerRect.width, layerRect.height,
