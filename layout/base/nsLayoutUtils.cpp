@@ -3600,6 +3600,17 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
     oldListLookup.Put({ i->Frame(), i->GetPerFrameKey() }, i);
   }
 
+#ifdef DEBUG
+  nsDataHashtable<DisplayItemHashEntry, nsDisplayItem*> newListLookup(aNewList->Count());
+  for (nsDisplayItem* i = aNewList->GetBottom(); i != nullptr; i = i->GetAbove()) {
+    if (newListLookup.Get({ i->Frame(), i->GetPerFrameKey() }, nullptr)) {
+       MOZ_CRASH_UNSAFE_PRINTF("Duplicate display items detected!: %s(0x%p) type=%d key=%d",
+                                i->Name(), i->Frame(), i->GetType(), i->GetPerFrameKey());
+    }
+    newListLookup.Put({ i->Frame(), i->GetPerFrameKey() }, i);
+  }
+#endif
+
   while (nsDisplayItem* i = aNewList->RemoveBottom()) {
     // If the new item has a matching counterpart in the old list, copy all items
     // up to that one into the merged list, but discard the repeat.
