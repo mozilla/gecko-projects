@@ -68,7 +68,7 @@ def _generate_upstream_artifacts(build_platform, is_nightly=False):
     elif 'win' in build_platform:
         artifacts_specificities = [{
             'artifacts': ['public/build/target.zip'],
-            'format': 'zip',
+            'format': 'sha2signcode',
         }]
     else:
         artifacts_specificities = [{
