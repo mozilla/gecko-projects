@@ -18,7 +18,7 @@ kind-dependencies:
 only-for-build-platforms:
   - win32/debug
   - win32/opt
-  - win32/pgo
+  - win32-pgo/opt
   - win64/debug
   - win64/opt
-  - win64/pgo
+  - win64-pgo/opt
