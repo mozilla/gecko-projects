@@ -4167,6 +4167,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
       if (!merged) {
         list.DeleteAll(&builder);
+        builder.ClearThemeGeometries();
         builder.SetDirtyRect(dirtyRect);
         aFrame->BuildDisplayListForStackingContext(&builder, &list);
       }

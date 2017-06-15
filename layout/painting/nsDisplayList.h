@@ -816,8 +816,6 @@ public:
    */
   void MarkPreserve3DFramesForDisplayList(nsIFrame* aDirtyFrame);
 
-  const nsTArray<ThemeGeometry>& GetThemeGeometries() { return mThemeGeometries; }
-
   /**
    * Returns true if we need to descend into this frame when building
    * the display list, even though it doesn't intersect the dirty
@@ -828,6 +826,19 @@ public:
       (aFrame->GetStateBits() & NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO) ||
       (aVisible && aFrame->ForceDescendIntoIfVisible()) ||
       GetIncludeAllOutOfFlows();
+  }
+
+  /**
+   * Clears the list of theme geometries.
+   */
+  void ClearThemeGeometries() { mThemeGeometries.Clear(); }
+
+  /**
+   * Returns the list of registered theme geometries.
+   */
+  const nsTArray<ThemeGeometry>& GetThemeGeometries() const
+  {
+    return mThemeGeometries;
   }
 
   /**
