@@ -20,7 +20,7 @@ def repackage_installer(topsrcdir, tag, setupexe, package, output):
     ensureParentDir(output)
 
     tmpdir = tempfile.mkdtemp()
-    saved_dir = os.getcwd()
+    old_cwd = os.getcwd()
     try:
         if package:
             z = zipfile.ZipFile(package)
@@ -41,5 +41,5 @@ def repackage_installer(topsrcdir, tag, setupexe, package, output):
         archive_exe(package_name, tag, sfx_package, output)
 
     finally:
-        os.chdir(saved_dir)
+        os.chdir(old_cwd)
         shutil.rmtree(tmpdir)

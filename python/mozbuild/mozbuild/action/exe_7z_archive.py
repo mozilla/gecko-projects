@@ -12,26 +12,21 @@ import tempfile
 import mozpack.path as mozpath
 
 def archive_exe(pkg_dir, tagfile, sfx_package, package):
-    def zip_package(pkg_dir, tmpdir):
-        if pkg_dir:
-            shutil.move(pkg_dir, 'core')
-        try:
-            subprocess.check_call(['7z', 'a', '-r', '-t7z', mozpath.join(tmpdir, 'app.7z'), '-mx', '-m0=BCJ2', '-m1=LZMA:d25', '-m2=LZMA:d19', '-m3=LZMA:d19', '-mb0:1', '-mb0s1:2', '-mb0s2:3'])
-        finally:
-            if pkg_dir:
-                shutil.move('core', pkg_dir)
-
     tmpdir = tempfile.mkdtemp(prefix='tmp')
     try:
+        if pkg_dir:
+            shutil.move(pkg_dir, 'core')
         subprocess.check_call(['upx', '--best', '-o', mozpath.join(tmpdir, '7zSD.sfx'), sfx_package])
 
-        zip_package(pkg_dir, tmpdir)
+        subprocess.check_call(['7z', 'a', '-r', '-t7z', mozpath.join(tmpdir, 'app.7z'), '-mx', '-m0=BCJ2', '-m1=LZMA:d25', '-m2=LZMA:d19', '-m3=LZMA:d19', '-mb0:1', '-mb0s1:2', '-mb0s2:3'])
 
         with open(package, 'wb') as o:
             for i in [mozpath.join(tmpdir, '7zSD.sfx'), tagfile, mozpath.join(tmpdir, 'app.7z')]:
                 shutil.copyfileobj(open(i, 'rb'), o)
         os.chmod(package, 0755)
     finally:
+        if pkg_dir:
+            shutil.move('core', pkg_dir)
         shutil.rmtree(tmpdir)
 
 def main(args):
