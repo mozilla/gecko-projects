@@ -405,7 +405,8 @@ public:
    */
   nsDisplayListBuilder(nsIFrame* aReferenceFrame,
                        nsDisplayListBuilderMode aMode,
-                       bool aBuildCaret);
+                       bool aBuildCaret,
+                       bool aRetainingDisplayList = false);
   ~nsDisplayListBuilder();
 
   void AddTemporaryItem(nsDisplayItem* aItem)
@@ -598,11 +599,20 @@ public:
    */
   bool IsBuildingCaret() { return mBuildCaret; }
 
+  bool IsRetainingDisplayList() { return mRetainingDisplayList; }
+
   bool IsPartialUpdate() { return mPartialUpdate; }
   void SetPartialUpdate(bool aPartial) { mPartialUpdate = aPartial; }
 
   bool IsBuilding() const { return mIsBuilding; }
-  void SetIsBuilding(bool aIsBuilding) { mIsBuilding = aIsBuilding; }
+  void SetIsBuilding(bool aIsBuilding)
+  {
+    mIsBuilding = aIsBuilding;
+    for (nsIFrame* aFrame : mModifiedFramesDuringBuilding) {
+      aFrame->SetFrameIsModified(false);
+    }
+    mModifiedFramesDuringBuilding.Clear();
+  }
 
   /**
    * Allows callers to selectively override the regular paint suppression checks,
@@ -1528,6 +1538,14 @@ public:
     mBuildingInvisibleItems = aBuildingInvisibleItems;
   }
 
+  void MarkFrameModifiedDuringBuilding(nsIFrame* aFrame)
+  {
+    if (!aFrame->IsFrameModified()) {
+      mModifiedFramesDuringBuilding.AppendElement(aFrame);
+      aFrame->SetFrameIsModified(true);
+    }
+  }
+
   /**
    * This is a convenience function to ease the transition until AGRs and ASRs
    * are unified.
@@ -1649,6 +1667,8 @@ private:
   // Set of frames already counted in budget
   nsTHashtable<nsPtrHashKey<nsIFrame> > mAGRBudgetSet;
 
+  nsTArray<nsIFrame*>           mModifiedFramesDuringBuilding;
+
   // Relative to mCurrentFrame.
   nsRect                         mVisibleRect;
   nsRect                         mDirtyRect;
@@ -1679,6 +1699,7 @@ private:
   bool                           mIsBuildingScrollbar;
   bool                           mCurrentScrollbarWillHaveLayer;
   bool                           mBuildCaret;
+  bool                           mRetainingDisplayList;
   bool                           mPartialUpdate;
   bool                           mIgnoreSuppression;
   bool                           mIsAtRootOfPseudoStackingContext;
@@ -2818,7 +2839,7 @@ struct RetainedDisplayListBuilder {
   RetainedDisplayListBuilder(nsIFrame* aReferenceFrame,
                              nsDisplayListBuilderMode aMode,
                              bool aBuildCaret)
-    : mBuilder(aReferenceFrame, aMode, aBuildCaret)
+    : mBuilder(aReferenceFrame, aMode, aBuildCaret, true)
   {}
   ~RetainedDisplayListBuilder()
   {

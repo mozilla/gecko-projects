@@ -164,6 +164,7 @@ protected:
   bool mPostedReflowCallback;
   bool mDidCreateDoc;
   bool mCallingShow;
+  Maybe<bool> mPreviouslyNeededLayer;
 };
 
 #endif /* NSSUBDOCUMENTFRAME_H_ */

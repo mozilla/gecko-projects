@@ -440,6 +440,20 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   {
     needsOwnLayer = true;
   }
+
+  // The value of needsOwnLayer can change between builds without
+  // an invalidation recorded for this frame. If this happens,
+  // then we need to notify the builder so that merging can
+  // happen correctly.
+  if (aBuilder->IsRetainingDisplayList()) {
+    if (!mPreviouslyNeededLayer ||
+        mPreviouslyNeededLayer.value() != needsOwnLayer) {
+      dirty = visible;
+      aBuilder->MarkFrameModifiedDuringBuilding(this);
+    }
+    mPreviouslyNeededLayer = Some(needsOwnLayer);
+  }
+
   if (!needsOwnLayer && aBuilder->IsBuildingLayerEventRegions() &&
       nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(presShell))
   {

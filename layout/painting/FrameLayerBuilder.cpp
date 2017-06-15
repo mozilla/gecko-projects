@@ -5389,7 +5389,7 @@ ContainerState::Finish(uint32_t* aTextContentFlags,
       // now.
       mContainerLayer->InsertAfter(layer, prevChild);
     } else {
-      NS_ASSERTION(layer->GetParent() == mContainerLayer,
+      MOZ_ASSERT(layer->GetParent() == mContainerLayer,
                    "Layer shouldn't be the child of some other container");
       if (layer->GetPrevSibling() != prevChild) {
         mContainerLayer->RepositionChild(layer, prevChild);
