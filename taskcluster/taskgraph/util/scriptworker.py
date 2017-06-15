@@ -41,7 +41,6 @@ SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'all-nightly-branches', set([
         'mozilla-central',
         'mozilla-aurora',
-        'date',
     ])
 ], [
     'all-release-branches', set([
