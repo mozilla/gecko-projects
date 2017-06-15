@@ -41,6 +41,7 @@ SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'all-nightly-branches', set([
         'mozilla-central',
         'mozilla-aurora',
+        'date',
     ])
 ], [
     'all-release-branches', set([
@@ -54,6 +55,18 @@ SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
 SIGNING_CERT_SCOPES = {
     'all-release-branches': 'project:releng:signing:cert:release-signing',
     'all-nightly-branches': 'project:releng:signing:cert:nightly-signing',
+    'default': 'project:releng:signing:cert:dep-signing',
+}
+
+
+CI_SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
+    'central', set([
+        'mozilla-central',
+    ]),
+]]
+
+CI_SIGNING_CERT_SCOPES = {
+    'central': 'project:releng:signing:cert:nightly-signing',
     'default': 'project:releng:signing:cert:dep-signing',
 }
 
@@ -341,6 +354,12 @@ get_signing_cert_scope = functools.partial(
     get_scope_from_project,
     SIGNING_SCOPE_ALIAS_TO_PROJECT,
     SIGNING_CERT_SCOPES
+)
+
+get_ci_signing_cert_scope = functools.partial(
+    get_scope_from_project,
+    CI_SIGNING_SCOPE_ALIAS_TO_PROJECT,
+    CI_SIGNING_CERT_SCOPES
 )
 
 get_devedition_signing_cert_scope = functools.partial(
