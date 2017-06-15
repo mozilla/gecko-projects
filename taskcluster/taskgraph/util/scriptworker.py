@@ -338,13 +338,11 @@ def get_scope_from_target_method_and_project(alias_to_tasks_map, alias_to_projec
     return aliases_to_scope_map['default']
 
 
-def get_signing_cert_scope(config, is_nightly=True):
-    if is_nightly:
-        return get_scope_from_project(
-            SIGNING_SCOPE_ALIAS_TO_PROJECT, SIGNING_CERT_SCOPES, config
-        )
-    else:
-        return SIGNING_CERT_SCOPES['default']
+get_signing_cert_scope = functools.partial(
+    get_scope_from_project,
+    SIGNING_SCOPE_ALIAS_TO_PROJECT,
+    SIGNING_CERT_SCOPES
+)
 
 get_devedition_signing_cert_scope = functools.partial(
     get_scope_from_project,
