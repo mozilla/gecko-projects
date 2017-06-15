@@ -43,16 +43,7 @@ mozharness_test_run_schema = Schema({
 
 def test_packages_url(taskdesc):
     """Account for different platforms that name their test packages differently"""
-    build_platform = taskdesc['attributes']['build_platform']
-    build_type = taskdesc['attributes']['build_type']
-
-    if build_platform == 'macosx64' and build_type == 'opt':
-        target = 'firefox-{}.en-US.{}'.format(get_firefox_version(), 'mac')
-    else:
-        target = 'target'
-
-    return get_artifact_url(
-        '<build>', 'public/build/{}.test_packages.json'.format(target))
+    return get_artifact_url('<build>', 'public/build/target.test_packages.json')
 
 
 @run_job_using('docker-engine', 'mozharness-test', schema=mozharness_test_run_schema)
