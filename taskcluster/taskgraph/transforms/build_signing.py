@@ -63,7 +63,7 @@ def _generate_upstream_artifacts(build_platform, is_nightly=False):
     elif 'macosx' in build_platform:
         artifacts_specificities = [{
             'artifacts': ['public/build/target.dmg'],
-            'format': 'dmg',
+            'format': 'macapp',
         }]
     elif 'win' in build_platform:
         artifacts_specificities = [{
