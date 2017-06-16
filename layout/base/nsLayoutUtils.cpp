@@ -3488,16 +3488,20 @@ nsLayoutUtils::ExpireDisplayPortOnAsyncScrollableAncestor(nsIFrame* aFrame)
   }
 }
 
+// Removes any display items that belonged to a frame that was deleted,
+// and mark frames that belong to a different AGR so that get their
+// items built again.
 // TODO: We currently descend into all children even if we don't have an AGR
 // to mark, as child stacking contexts might. It would be nice if we could
 // jump into those immediately rather than walking the entire thing.
-void MarkFramesForDifferentAGR(nsDisplayListBuilder* aBuilder,
-                               nsTHashtable<nsPtrHashKey<const nsIFrame>>& aDeletedFrames,
-                               nsDisplayList* aList,
-                               AnimatedGeometryRoot* aAGR)
+void PreProcessRetainedDisplayList(nsDisplayListBuilder* aBuilder,
+                                   nsDisplayList* aList,
+                                   AnimatedGeometryRoot* aAGR)
 {
-  for (nsDisplayItem* i = aList->GetBottom(); i; i = i->GetAbove()) {
-    if (aDeletedFrames.Contains(i->Frame())) {
+  nsDisplayList saved;
+  while (nsDisplayItem* i = aList->RemoveBottom()) {
+    if (i->HasDeletedFrame()) {
+      i->Destroy(aBuilder);
       continue;
     }
 
@@ -3514,7 +3518,7 @@ void MarkFramesForDifferentAGR(nsDisplayListBuilder* aBuilder,
           childAGR = nullptr;
         }
       }
-      MarkFramesForDifferentAGR(aBuilder, aDeletedFrames, i->GetChildren(), childAGR);
+      PreProcessRetainedDisplayList(aBuilder, i->GetChildren(), childAGR);
     }
 
     // TODO: We should be able to check the clipped bounds relative
@@ -3523,7 +3527,9 @@ void MarkFramesForDifferentAGR(nsDisplayListBuilder* aBuilder,
     if (aAGR && i->GetAnimatedGeometryRoot()->GetAsyncAGR() != aAGR) {
       aBuilder->MarkFrameForDisplayIfVisible(i->Frame());
     }
+    saved.AppendToTop(i);
   }
+  aList->AppendToTop(&saved);
 }
 
 bool IsAnyAncestorModified(nsIFrame* aFrame)
@@ -3587,7 +3593,6 @@ public:
 };
 
 void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
-                       nsTHashtable<nsPtrHashKey<const nsIFrame>>& aDeletedFrames,
                        nsDisplayList* aNewList,
                        nsDisplayList* aOldList,
                        nsDisplayList* aOutList,
@@ -3628,13 +3633,12 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
 
         if (oldItem->GetChildren()) {
           MOZ_ASSERT(i->GetChildren());
-          MergeDisplayLists(aBuilder, aDeletedFrames, i->GetChildren(), oldItem->GetChildren(), oldItem->GetChildren(), aTotalDisplayItems, aReusedDisplayItems);
+          MergeDisplayLists(aBuilder, i->GetChildren(), oldItem->GetChildren(), oldItem->GetChildren(), aTotalDisplayItems, aReusedDisplayItems);
         }
         i->Destroy(aBuilder);
       } else {
         while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
           if (old->CanBeReused() &&
-              !aDeletedFrames.Contains(old->Frame()) &&
               !IsAnyAncestorModified(old->Frame())) {
 
             merged.AppendToTop(old);
@@ -3655,7 +3659,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
         MOZ_ASSERT(old && IsSameItem(i, old));
         if (old->GetChildren()) {
           MOZ_ASSERT(i->GetChildren());
-          MergeDisplayLists(aBuilder, aDeletedFrames, i->GetChildren(),
+          MergeDisplayLists(aBuilder, i->GetChildren(),
                             old->GetChildren(), i->GetChildren(),
                             aTotalDisplayItems, aReusedDisplayItems);
         }
@@ -3675,7 +3679,6 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   // Reuse the remaining items from the old display list.
   while ((old = aOldList->RemoveBottom())) {
     if (old->CanBeReused() &&
-        !aDeletedFrames.Contains(old->Frame()) &&
         !IsAnyAncestorModified(old->Frame())) {
       merged.AppendToTop(old);
       old->SetReused(true);
@@ -3689,7 +3692,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
         // loop above and jumps back here.
         nsDisplayList empty;
 
-        MergeDisplayLists(aBuilder, aDeletedFrames, &empty,
+        MergeDisplayLists(aBuilder, &empty,
                           old->GetChildren(), old->GetChildren(),
                           aTotalDisplayItems, aReusedDisplayItems);
       }
@@ -4099,8 +4102,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       if (retainedBuilder &&
           aFrame->GetProperty(nsIFrame::ModifiedFrameList())) {
         std::vector<WeakFrame>* modifiedFrames = aFrame->GetProperty(nsIFrame::ModifiedFrameList());
-        nsTArray<const nsIFrame*> deletedFrames;
-        FrameLayerBuilder::GetDeletedFramesForLayerManager(builder.GetWidgetLayerManager(), deletedFrames);
 
         //printf("Attempting merge build with %lu modified frames\n", modifiedFrames->size());
 
@@ -4110,12 +4111,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         if (ComputeRebuildRegion(builder, *modifiedFrames, aFrame, dirtyRect,
                                  &modifiedDirty, &modifiedAGR, &framesWithProps)) {
           modifiedDirty.IntersectRect(modifiedDirty, dirtyRect);
-          nsTHashtable<nsPtrHashKey<const nsIFrame>> deletions;
-          for (const nsIFrame* f : deletedFrames) {
-            deletions.PutEntry(f);
-          }
 
-          MarkFramesForDifferentAGR(&builder, deletions, &list, modifiedAGR);
+          PreProcessRetainedDisplayList(&builder, &list, modifiedAGR);
 
           builder.SetDirtyRect(modifiedDirty);
 
@@ -4130,7 +4127,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
           builder.LeavePresShell(aFrame, &modifiedDL);
           builder.EnterPresShell(aFrame);
 
-          MergeDisplayLists(&builder, deletions, &modifiedDL, &list, &list, totalDisplayItems, reusedDisplayItems);
+          MergeDisplayLists(&builder, &modifiedDL, &list, &list, totalDisplayItems, reusedDisplayItems);
 
           //printf_stderr("Painting --- Merged list:\n");
           //nsFrame::PrintDisplayList(&builder, list);

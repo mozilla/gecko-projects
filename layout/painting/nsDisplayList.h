@@ -1817,9 +1817,15 @@ public:
     , mPainted(false)
 #endif
   {
+    mFrame->RealDisplayItemData().AppendElement(this);
   }
 protected:
-  virtual ~nsDisplayItem() {}
+  virtual ~nsDisplayItem() {
+    if (mFrame) {
+      mozilla::DebugOnly<bool> removed = mFrame->RealDisplayItemData().RemoveElement(this);
+      MOZ_ASSERT(removed);
+    }
+  }
 public:
 
   virtual void Destroy(nsDisplayListBuilder* aBuilder)
@@ -1835,6 +1841,11 @@ public:
     mClipChain = mState.mClipChain;
     mClip = mState.mClip;
     mDisableSubpixelAA = mState.mDisableSubpixelAA;
+  }
+
+  void SetFrameDeleted()
+  {
+    mFrame = nullptr;
   }
 
   /**
@@ -1867,7 +1878,9 @@ public:
     , mVisibleRect(aOther.mVisibleRect)
     , mForceNotVisible(aOther.mForceNotVisible)
     , mDisableSubpixelAA(aOther.mDisableSubpixelAA)
-  {}
+  {
+    mFrame->RealDisplayItemData().AppendElement(this);
+  }
 
   struct HitTestState {
     explicit HitTestState() : mInPreserves3D(false) {}
@@ -1914,7 +1927,13 @@ public:
    * items by z-index and content order and for some other uses. Never
    * returns null.
    */
-  inline nsIFrame* Frame() const { return mFrame; }
+  inline nsIFrame* Frame() const {
+    MOZ_ASSERT(mFrame, "Trying to use display item after deletion!");
+    return mFrame;
+  }
+  bool HasDeletedFrame() const {
+    return !mFrame;
+  }
   /**
    * Compute the used z-index of our frame; returns zero for elements to which
    * z-index does not apply, and for z-index:auto.

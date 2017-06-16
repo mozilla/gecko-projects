@@ -2074,6 +2074,11 @@ PresShell::NotifyDestroyingFrame(nsIFrame* aFrame)
   FrameLayerBuilder::RemoveFrameFromLayerManager(aFrame, aFrame->DisplayItemData());
   aFrame->DisplayItemData().Clear();
 
+  for (nsDisplayItem* item : aFrame->RealDisplayItemData()) {
+    item->SetFrameDeleted();
+  }
+  aFrame->RealDisplayItemData().Clear();
+
   if (!mIgnoreFrameDestruction) {
     if (aFrame->HasImageRequest()) {
       mDocument->StyleImageLoader()->DropRequestsForFrame(aFrame);

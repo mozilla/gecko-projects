@@ -420,8 +420,6 @@ public:
   static void InvalidateAllLayers(LayerManager* aManager);
   static void InvalidateAllLayersForFrame(nsIFrame *aFrame);
 
-  static void GetDeletedFramesForLayerManager(LayerManager* aManager, nsTArray<const nsIFrame*>& aOutDeletedFrames);
-
   /**
    * Call this to determine if a frame has a dedicated (non-Painted) layer
    * for the given display item key. If there isn't one, we return null,

@@ -73,6 +73,7 @@ class nsISelectionController;
 class nsBoxLayoutState;
 class nsBoxLayout;
 class nsILineIterator;
+class nsDisplayItem;
 class nsDisplayListBuilder;
 class nsDisplayListSet;
 class nsDisplayList;
@@ -603,6 +604,7 @@ public:
   typedef mozilla::Sides Sides;
   typedef mozilla::LogicalSides LogicalSides;
   typedef mozilla::SmallPointerArray<mozilla::DisplayItemData> DisplayItemArray;
+  typedef mozilla::SmallPointerArray<nsDisplayItem> RealDisplayItemArray;
   typedef nsQueryFrame::ClassID ClassID;
 
   NS_DECL_QUERYFRAME_TARGET(nsIFrame)
@@ -3927,6 +3929,8 @@ public:
 
   DisplayItemArray& DisplayItemData() { return mDisplayItemData; }
 
+  RealDisplayItemArray& RealDisplayItemData() { return mDisplayItems; }
+
 protected:
 
   /**
@@ -3951,7 +3955,11 @@ private:
   nsContainerFrame* mParent;
   nsIFrame*        mNextSibling;  // doubly-linked list of frames
   nsIFrame*        mPrevSibling;  // Do not touch outside SetNextSibling!
+
+  // These two arrays store very similar data, though with slightly different
+  // lifetimes. We should try unify them to save space here.
   DisplayItemArray mDisplayItemData;
+  RealDisplayItemArray mDisplayItems;
 
   void MarkAbsoluteFramesForDisplayList(nsDisplayListBuilder* aBuilder);
 

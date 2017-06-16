@@ -380,7 +380,6 @@ public:
   LayerManager *mLayerManager;
   LayerManagerData *mParent;
   nsTHashtable<nsRefPtrHashKey<DisplayItemData> > mDisplayItems;
-  nsTArray<const nsIFrame*> mDeletedFrames;
   bool mInvalidateAllLayers;
 };
 
@@ -1943,16 +1942,7 @@ FrameLayerBuilder::RemoveFrameFromLayerManager(const nsIFrame* aFrame,
   }
 #endif
 
-  bool first = true;
   for (DisplayItemData* data : aArray) {
-    if (first) {
-      LayerManagerData* lmd = data->mParent;
-      while (lmd->mParent) {
-        lmd = lmd->mParent;
-      }
-      lmd->mDeletedFrames.AppendElement(aFrame);
-      first = false;
-    }
     PaintedLayer* t = data->mLayer ? data->mLayer->AsPaintedLayer() : nullptr;
     if (t) {
       PaintedDisplayItemLayerUserData* paintedData =
@@ -5867,16 +5857,6 @@ FrameLayerBuilder::InvalidateAllLayersForFrame(nsIFrame *aFrame)
 
   for (uint32_t i = 0; i < array.Length(); i++) {
     DisplayItemData::AssertDisplayItemData(array.ElementAt(i))->mParent->mInvalidateAllLayers = true;
-  }
-}
-
-/* static */ void
-FrameLayerBuilder::GetDeletedFramesForLayerManager(LayerManager* aManager, nsTArray<const nsIFrame*>& aOutDeletedFrames)
-{
-  LayerManagerData* data = static_cast<LayerManagerData*>
-    (aManager->GetUserData(&gLayerManagerUserData));
-  if (data) {
-    aOutDeletedFrames = mozilla::Move(data->mDeletedFrames);
   }
 }
 
