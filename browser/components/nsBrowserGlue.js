@@ -530,9 +530,7 @@ BrowserGlue.prototype = {
     os.addObserver(this, "distribution-customization-complete");
     os.addObserver(this, "handle-xul-text-link");
     os.addObserver(this, "profile-before-change");
-    if (AppConstants.MOZ_TELEMETRY_REPORTING) {
-      os.addObserver(this, "keyword-search");
-    }
+    os.addObserver(this, "keyword-search");
     os.addObserver(this, "browser-search-engine-modified");
     os.addObserver(this, "restart-in-safe-mode");
     os.addObserver(this, "flash-plugin-hang");
@@ -585,9 +583,7 @@ BrowserGlue.prototype = {
       os.removeObserver(this, "places-database-locked");
     os.removeObserver(this, "handle-xul-text-link");
     os.removeObserver(this, "profile-before-change");
-    if (AppConstants.MOZ_TELEMETRY_REPORTING) {
-      os.removeObserver(this, "keyword-search");
-    }
+    os.removeObserver(this, "keyword-search");
     os.removeObserver(this, "browser-search-engine-modified");
     os.removeObserver(this, "flash-plugin-hang");
     os.removeObserver(this, "xpi-signature-changed");
@@ -2257,7 +2253,7 @@ BrowserGlue.prototype = {
           body = win.gURLBar.trimValue(body);
         }
       } else {
-        title = bundle.GetStringFromName("tabsArrivingNotification.title");
+        title = bundle.GetStringFromName("multipleTabsArrivingNotification.title");
         const allSameDevice = URIs.every(URI => URI.clientId == URIs[0].clientId);
         const unknownDevice = allSameDevice && !deviceName;
         let tabArrivingBody;
