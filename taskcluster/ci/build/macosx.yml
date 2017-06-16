@@ -44,7 +44,6 @@ macosx64/opt:
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         tooltool-downloads: internal
-    run-on-projects: []
 
 macosx64-noopt/debug:
     description: "MacOS X x64 No-optimize Debug"
