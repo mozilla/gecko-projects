@@ -157,15 +157,15 @@ typedef mozilla::EnumSet<mozilla::gfx::CompositionOp> BlendModeSet;
 struct AnimatedGeometryRoot
 {
   static already_AddRefed<AnimatedGeometryRoot>
-  CreateAGRForFrame(nsIFrame* aFrame, AnimatedGeometryRoot* aParent, bool aIsAsync)
+  CreateAGRForFrame(nsIFrame* aFrame, AnimatedGeometryRoot* aParent, bool aIsAsync, bool aIsRetained)
   {
     RefPtr<AnimatedGeometryRoot> result;
-    if (aFrame->HasAnimatedGeometryRoot()) {
+    if (aFrame->HasAnimatedGeometryRoot() && aIsRetained) {
       result = aFrame->GetProperty(AnimatedGeometryRootCache());
       result->mParentAGR = aParent;
       result->mIsAsync = aIsAsync;
     } else {
-      result = new AnimatedGeometryRoot(aFrame, aParent, aIsAsync);
+      result = new AnimatedGeometryRoot(aFrame, aParent, aIsAsync, aIsRetained);
     }
     return result.forget();
   }
@@ -187,6 +187,7 @@ struct AnimatedGeometryRoot
   nsIFrame* mFrame;
   RefPtr<AnimatedGeometryRoot> mParentAGR;
   bool mIsAsync;
+  bool mIsRetained;
 
 protected:
   static void DetachAGR(AnimatedGeometryRoot* aAGR) {
@@ -195,19 +196,22 @@ protected:
   }
   NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(AnimatedGeometryRootCache, AnimatedGeometryRoot, DetachAGR)
 
-  AnimatedGeometryRoot(nsIFrame* aFrame, AnimatedGeometryRoot* aParent, bool aIsAsync)
+  AnimatedGeometryRoot(nsIFrame* aFrame, AnimatedGeometryRoot* aParent, bool aIsAsync, bool aIsRetained)
     : mFrame(aFrame)
     , mParentAGR(aParent)
     , mIsAsync(aIsAsync)
+    , mIsRetained(aIsRetained)
   {
     MOZ_ASSERT(mParentAGR || mIsAsync);
-    aFrame->SetHasAnimatedGeometryRoot(true);
-    aFrame->SetProperty(AnimatedGeometryRootCache(), this);
+    if (mIsRetained) {
+      aFrame->SetHasAnimatedGeometryRoot(true);
+      aFrame->SetProperty(AnimatedGeometryRootCache(), this);
+    }
   }
 
   ~AnimatedGeometryRoot()
   {
-    if (mFrame) {
+    if (mFrame && mIsRetained) {
       mFrame->SetHasAnimatedGeometryRoot(false);
       mFrame->DeleteProperty(AnimatedGeometryRootCache());
     }

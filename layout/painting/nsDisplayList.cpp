@@ -890,7 +890,7 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
       mCurrentContainerASR(nullptr),
       mCurrentFrame(aReferenceFrame),
       mCurrentReferenceFrame(aReferenceFrame),
-      mRootAGR(AnimatedGeometryRoot::CreateAGRForFrame(aReferenceFrame, nullptr, true)),
+      mRootAGR(AnimatedGeometryRoot::CreateAGRForFrame(aReferenceFrame, nullptr, true, aRetainingDisplayList)),
       mCurrentAGR(mRootAGR),
       mUsedAGRBudget(0),
       mDirtyRect(-1,-1,-1,-1),
@@ -1004,7 +1004,7 @@ nsDisplayListBuilder::WrapAGRForFrame(nsIFrame* aAnimatedGeometryRoot,
         parent = WrapAGRForFrame(parentAGRFrame, isAsync);
       }
     }
-    result = AnimatedGeometryRoot::CreateAGRForFrame(aAnimatedGeometryRoot, parent, aIsAsync);
+    result = AnimatedGeometryRoot::CreateAGRForFrame(aAnimatedGeometryRoot, parent, aIsAsync, IsRetainingDisplayList());
     mFrameToAnimatedGeometryRootMap.Put(aAnimatedGeometryRoot, result);
   }
   MOZ_ASSERT(!aParent || result->mParentAGR == aParent);
