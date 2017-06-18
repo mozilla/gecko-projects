@@ -2790,6 +2790,12 @@ public:
     return new nsDisplayItemGenericImageGeometry(this, aBuilder);
   }
 
+  void Destroy(nsDisplayListBuilder* aBuilder) override
+  {
+    aBuilder->UnregisterThemeGeometry(mFrame);
+    nsDisplayItem::Destroy(aBuilder);
+  }
+
   void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                  const nsDisplayItemGeometry* aGeometry,
                                  nsRegion *aInvalidRegion) const override
@@ -2880,7 +2886,7 @@ nsTreeBodyFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
               nsRect rowRect(mInnerBox.x, mInnerBox.y + mRowHeight *
                              (i - FirstVisibleRow()), mInnerBox.width,
                              mRowHeight);
-              aBuilder->RegisterThemeGeometry(type,
+              aBuilder->RegisterThemeGeometry(type, this,
                 LayoutDeviceIntRect::FromUnknownRect(
                   (rowRect + aBuilder->ToReferenceFrame(this)).ToNearestPixels(
                     PresContext()->AppUnitsPerDevPixel())));
