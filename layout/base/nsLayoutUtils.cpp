@@ -3662,6 +3662,8 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
           MergeDisplayLists(aBuilder, i->GetChildren(),
                             old->GetChildren(), i->GetChildren(),
                             aTotalDisplayItems, aReusedDisplayItems);
+
+          old->UpdateBounds(aBuilder);
         }
 
         old->Destroy(aBuilder);
@@ -3695,6 +3697,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
         MergeDisplayLists(aBuilder, &empty,
                           old->GetChildren(), old->GetChildren(),
                           aTotalDisplayItems, aReusedDisplayItems);
+        old->UpdateBounds(aBuilder);
       }
     } else {
       old->Destroy(aBuilder);

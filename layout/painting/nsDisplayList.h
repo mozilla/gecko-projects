@@ -4289,6 +4289,7 @@ public:
     // frame contains placeholders for out-of-flows that aren't descendants of
     // the frame.
     mVisibleRect.UnionRect(mBaseVisibleRect, mListPtr->GetVisibleRect());
+    mState.mVisibleRect = mVisibleRect;
   }
   virtual void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
                        HitTestState* aState, nsTArray<nsIFrame*> *aOutFrames) override;
@@ -5287,6 +5288,11 @@ public:
     MOZ_COUNT_DTOR(nsDisplayTransform);
   }
 #endif
+
+  virtual void UpdateBounds(nsDisplayListBuilder* aBuilder) override
+  {
+    mStoredList.UpdateBounds(aBuilder);
+  }
 
   virtual void Destroy(nsDisplayListBuilder* aBuilder) override
   {
