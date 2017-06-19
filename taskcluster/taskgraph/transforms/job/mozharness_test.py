@@ -10,7 +10,6 @@ from taskgraph.transforms.job import run_job_using
 from taskgraph.util.schema import Schema
 from taskgraph.transforms.tests import (
     test_description_schema,
-    get_firefox_version,
     normpath
 )
 from taskgraph.transforms.job.common import (
