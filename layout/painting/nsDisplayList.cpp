@@ -3346,8 +3346,10 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
         DisplayListClipState::AutoSaveRestore bgImageClip(aBuilder);
         bgImageClip.Clear();
         if (aSecondaryReferenceFrame) {
-          bgItem = new (aBuilder) nsDisplayTableBackgroundImage(bgData,
-                                                                aSecondaryReferenceFrame);
+          nsDisplayBackgroundImage::InitData tableData = bgData;
+          nsIFrame* styleFrame = tableData.frame;
+          tableData.frame = aSecondaryReferenceFrame;
+          bgItem = new (aBuilder) nsDisplayTableBackgroundImage(tableData, styleFrame);
         } else {
           bgItem = new (aBuilder) nsDisplayBackgroundImage(bgData);
         }
@@ -3366,9 +3368,12 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
 
     } else {
       if (aSecondaryReferenceFrame) {
+        nsDisplayBackgroundImage::InitData tableData = bgData;
+        nsIFrame* styleFrame = tableData.frame;
+        tableData.frame = aSecondaryReferenceFrame;
+
         thisItemList.AppendNewToTop(
-          new (aBuilder) nsDisplayTableBackgroundImage(bgData,
-                                                       aSecondaryReferenceFrame));
+          new (aBuilder) nsDisplayTableBackgroundImage(tableData, styleFrame));
       } else {
         thisItemList.AppendNewToTop(new (aBuilder) nsDisplayBackgroundImage(bgData));
       }
@@ -3874,10 +3879,9 @@ nsDisplayBackgroundImage::GetBoundsInternal(nsDisplayListBuilder* aBuilder) {
 nsDisplayTableBackgroundImage::nsDisplayTableBackgroundImage(const InitData& aData,
                                                              nsIFrame* aCellFrame)
   : nsDisplayBackgroundImage(aData)
-  , mStyleFrame(aData.frame)
+  , mStyleFrame(aCellFrame)
   , mTableType(GetTableTypeFromFrame(mStyleFrame))
 {
-  mFrame = aCellFrame;
 }
 
 bool
