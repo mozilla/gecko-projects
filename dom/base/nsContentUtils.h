@@ -270,6 +270,7 @@ public:
                                   JS::MutableHandle<JS::PropertyDescriptor> aDesc);
 
   // Check whether we should avoid leaking distinguishing information to JS/CSS.
+  // This function can be called both in the main thread and worker threads.
   static bool ShouldResistFingerprinting();
   static bool ShouldResistFingerprinting(nsIDocShell* aDocShell);
 
@@ -616,42 +617,6 @@ public:
                                             const nsAString& aSpec,
                                             nsIDocument* aDocument,
                                             nsIURI* aBaseURI);
-
-  /**
-   * Convert aInput (in encoding aEncoding) to UTF16 in aOutput.
-   *
-   * @deprecated Use mozilla::Encoding::DecodeWithBOMRemoval() in new code.
-   * https://bugzilla.mozilla.org/show_bug.cgi?id=1369020
-   *
-   * @param aEncoding the Gecko-canonical name of the encoding or the empty
-   *                  string (meaning UTF-8)
-   */
-  static nsresult ConvertStringFromEncoding(const nsACString& aEncoding,
-                                            const char* aInput,
-                                            uint32_t aInputLen,
-                                            nsAString& aOutput);
-
-  static nsresult ConvertStringFromEncoding(const nsACString& aEncoding,
-                                            const nsACString& aInput,
-                                            nsAString& aOutput) {
-    return ConvertStringFromEncoding(
-        aEncoding, aInput.BeginReading(), aInput.Length(), aOutput);
-  }
-
-  /**
-   * Determine whether a buffer begins with a BOM for UTF-8, UTF-16LE,
-   * UTF-16BE
-   *
-   * @deprecated Use mozilla::Encoding::ForBOM() in new code.
-   * https://bugzilla.mozilla.org/show_bug.cgi?id=1369022
-   *
-   * @param aBuffer the buffer to check
-   * @param aLength the length of the buffer
-   * @param aCharset empty if not found
-   * @return boolean indicating whether a BOM was detected.
-   */
-  static bool CheckForBOM(const unsigned char* aBuffer, uint32_t aLength,
-                          nsACString& aCharset);
 
   /**
    * Returns true if |aName| is a valid name to be registered via
@@ -2202,7 +2167,7 @@ public:
   static bool ResistFingerprinting(mozilla::dom::CallerType aCallerType)
   {
     return aCallerType != mozilla::dom::CallerType::System &&
-           mozilla::nsRFPService::IsResistFingerprintingEnabled();
+           ShouldResistFingerprinting();
   }
 
   /**

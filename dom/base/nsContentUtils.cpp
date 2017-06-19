@@ -220,7 +220,6 @@
 #include "nsIWebNavigationInfo.h"
 #include "nsPluginHost.h"
 #include "mozilla/HangAnnotations.h"
-#include "mozilla/ServoRestyleManager.h"
 #include "mozilla/Encoding.h"
 
 #include "nsIBidiKeyboard.h"
@@ -2317,7 +2316,17 @@ nsContentUtils::IsCallerChrome()
 bool
 nsContentUtils::ShouldResistFingerprinting()
 {
-  return nsRFPService::IsResistFingerprintingEnabled();
+  if (NS_IsMainThread()) {
+    return nsRFPService::IsResistFingerprintingEnabled();
+  }
+
+  workers::WorkerPrivate* workerPrivate = workers::GetCurrentThreadWorkerPrivate();
+  if (NS_WARN_IF(!workerPrivate)) {
+    return false;
+  }
+  workerPrivate->AssertIsOnWorkerThread();
+
+  return workerPrivate->ResistFingerprintingEnabled();
 }
 
 bool
@@ -2327,7 +2336,7 @@ nsContentUtils::ShouldResistFingerprinting(nsIDocShell* aDocShell)
     return false;
   }
   bool isChrome = nsContentUtils::IsChromeDoc(aDocShell->GetDocument());
-  return !isChrome && nsRFPService::IsResistFingerprintingEnabled();
+  return !isChrome && ShouldResistFingerprinting();
 }
 
 /* static */
@@ -4489,45 +4498,6 @@ nsContentUtils::GetSubdocumentWithOuterWindowId(nsIDocument *aDocument,
   return nullptr;
 }
 
-// Convert the string from the given encoding to Unicode.
-/* static */
-nsresult
-nsContentUtils::ConvertStringFromEncoding(const nsACString& aEncoding,
-                                          const char* aInput,
-                                          uint32_t aInputLen,
-                                          nsAString& aOutput)
-{
-  const Encoding* encoding;
-  if (aEncoding.IsEmpty()) {
-    encoding = UTF_8_ENCODING;
-  } else {
-    encoding = Encoding::ForName(aEncoding);
-  }
-  nsresult rv = encoding->DecodeWithBOMRemoval(MakeSpan(reinterpret_cast<const uint8_t*>(aInput), aInputLen), aOutput);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-  return NS_OK;
-}
-
-/* static */
-bool
-nsContentUtils::CheckForBOM(const unsigned char* aBuffer, uint32_t aLength,
-                            nsACString& aCharset)
-{
-  auto span = MakeSpan(reinterpret_cast<const uint8_t*>(aBuffer), aLength);
-  const Encoding* encoding;
-  size_t bomLength;
-  Tie(encoding, bomLength) = Encoding::ForBOM(span);
-  Unused << bomLength;
-  if (!encoding) {
-    aCharset.Truncate();
-    return false;
-  }
-  encoding->Name(aCharset);
-  return true;
-}
-
 /* static */
 void
 nsContentUtils::RegisterShutdownObserver(nsIObserver* aObserver)
@@ -5324,12 +5294,6 @@ void
 nsContentUtils::DestroyAnonymousContent(nsCOMPtr<nsIContent>* aContent)
 {
   if (*aContent) {
-    // Don't wait until UnbindFromTree to clear ServoElementData, since
-    // leak checking at shutdown can run before the AnonymousContentDestroyer
-    // runs.
-    if ((*aContent)->IsStyledByServo() && (*aContent)->IsElement()) {
-      ServoRestyleManager::ClearServoDataFromSubtree((*aContent)->AsElement());
-    }
     AddScriptRunner(new AnonymousContentDestroyer(aContent));
   }
 }
@@ -5339,12 +5303,6 @@ void
 nsContentUtils::DestroyAnonymousContent(nsCOMPtr<Element>* aElement)
 {
   if (*aElement) {
-    // Don't wait until UnbindFromTree to clear ServoElementData, since
-    // leak checking at shutdown can run before the AnonymousContentDestroyer
-    // runs.
-    if ((*aElement)->IsStyledByServo()) {
-      ServoRestyleManager::ClearServoDataFromSubtree(*aElement);
-    }
     AddScriptRunner(new AnonymousContentDestroyer(aElement));
   }
 }

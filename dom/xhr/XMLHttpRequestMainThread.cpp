@@ -25,6 +25,7 @@
 #include "mozilla/dom/XMLDocument.h"
 #include "mozilla/dom/URLSearchParams.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
+#include "mozilla/Encoding.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/EventStateManager.h"
@@ -76,7 +77,6 @@
 #include "mozilla/Telemetry.h"
 #include "jsfriendapi.h"
 #include "GeckoProfiler.h"
-#include "mozilla/dom/EncodingUtils.h"
 #include "mozilla/dom/XMLHttpRequestBinding.h"
 #include "mozilla/Attributes.h"
 #include "MultipartBlobImpl.h"
@@ -201,7 +201,8 @@ XMLHttpRequestMainThread::XMLHttpRequestMainThread()
     mResultJSON(JS::UndefinedValue()),
     mResultArrayBuffer(nullptr),
     mIsMappedArrayBuffer(false),
-    mXPCOMifier(nullptr)
+    mXPCOMifier(nullptr),
+    mEventDispatchingSuspended(false)
 {
   mozilla::HoldJSObjects(this);
 }
@@ -502,22 +503,24 @@ XMLHttpRequestMainThread::DetectCharset()
   }
 
   nsAutoCString charsetVal;
+  const Encoding* encoding;
   bool ok = mChannel &&
             NS_SUCCEEDED(mChannel->GetContentCharset(charsetVal)) &&
-            EncodingUtils::FindEncodingForLabel(charsetVal, mResponseCharset);
-  if (!ok || mResponseCharset.IsEmpty()) {
+            (encoding = Encoding::ForLabel(charsetVal));
+  if (!ok) {
     // MS documentation states UTF-8 is default for responseText
-    mResponseCharset.AssignLiteral("UTF-8");
+    encoding = UTF_8_ENCODING;
   }
 
   if (mResponseType == XMLHttpRequestResponseType::Json &&
-      !mResponseCharset.EqualsLiteral("UTF-8")) {
+      encoding != UTF_8_ENCODING) {
     // The XHR spec says only UTF-8 is supported for responseType == "json"
     LogMessage("JSONCharsetWarning", GetOwner());
-    mResponseCharset.AssignLiteral("UTF-8");
+    encoding = UTF_8_ENCODING;
   }
 
-  mDecoder = EncodingUtils::DecoderForEncoding(mResponseCharset);
+  encoding->Name(mResponseCharset);
+  mDecoder = encoding->NewDecoderWithBOMRemoval();
 
   return NS_OK;
 }
@@ -1368,7 +1371,7 @@ XMLHttpRequestMainThread::FireReadystatechangeEvent()
   event->InitEvent(kLiteralString_readystatechange, false, false);
   // We assume anyone who managed to call CreateReadystatechangeEvent is trusted
   event->SetTrusted(true);
-  DispatchDOMEvent(nullptr, event, nullptr, nullptr);
+  DispatchOrStoreEvent(this, event);
   return NS_OK;
 }
 
@@ -1411,7 +1414,7 @@ XMLHttpRequestMainThread::DispatchProgressEvent(DOMEventTargetHelper* aTarget,
     ProgressEvent::Constructor(aTarget, typeString, init);
   event->SetTrusted(true);
 
-  aTarget->DispatchDOMEvent(nullptr, event, nullptr, nullptr);
+  DispatchOrStoreEvent(aTarget, event);
 
   if (aType == ProgressEventType::progress) {
     mInLoadProgressEvent = false;
@@ -1431,6 +1434,45 @@ XMLHttpRequestMainThread::DispatchProgressEvent(DOMEventTargetHelper* aTarget,
   if (aType == ProgressEventType::load || aType == ProgressEventType::error ||
       aType == ProgressEventType::timeout || aType == ProgressEventType::abort) {
     DispatchProgressEvent(aTarget, ProgressEventType::loadend, aLoaded, aTotal);
+  }
+}
+
+void
+XMLHttpRequestMainThread::DispatchOrStoreEvent(DOMEventTargetHelper* aTarget,
+                                               Event* aEvent)
+{
+  MOZ_ASSERT(aTarget);
+  MOZ_ASSERT(aEvent);
+
+  if (mEventDispatchingSuspended) {
+    PendingEvent* event = mPendingEvents.AppendElement();
+    event->mTarget = aTarget;
+    event->mEvent = aEvent;
+    return;
+  }
+
+  aTarget->DispatchDOMEvent(nullptr, aEvent, nullptr, nullptr);
+}
+
+void
+XMLHttpRequestMainThread::SuspendEventDispatching()
+{
+  MOZ_ASSERT(!mEventDispatchingSuspended);
+  mEventDispatchingSuspended = true;
+}
+
+void
+XMLHttpRequestMainThread::ResumeEventDispatching()
+{
+  MOZ_ASSERT(mEventDispatchingSuspended);
+  mEventDispatchingSuspended = false;
+
+  nsTArray<PendingEvent> pendingEvents;
+  pendingEvents.SwapElements(mPendingEvents);
+
+  for (uint32_t i = 0; i < pendingEvents.Length(); ++i) {
+    pendingEvents[i].mTarget->
+      DispatchDOMEvent(nullptr, pendingEvents[i].mEvent, nullptr, nullptr);
   }
 }
 
@@ -2391,7 +2433,7 @@ XMLHttpRequestMainThread::MatchCharsetAndDecoderToResponseDocument()
     mResponseCharset = mResponseXML->GetDocumentCharacterSet();
     TruncateResponseText();
     mResponseBodyDecodedPos = 0;
-    mDecoder = EncodingUtils::DecoderForEncoding(mResponseCharset);
+    mDecoder = Encoding::ForName(mResponseCharset)->NewDecoderWithBOMRemoval();
   }
 }
 
@@ -2407,10 +2449,6 @@ XMLHttpRequestMainThread::ChangeStateToDone()
 
   if (mTimeoutTimer) {
     mTimeoutTimer->Cancel();
-  }
-
-  if (mFlagSynchronous) {
-    UnsuppressEventHandlingAndResume();
   }
 
   // Per spec, fire the last download progress event, if any,
@@ -3033,6 +3071,7 @@ XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody)
       }
     }
 
+    SuspendEventDispatching();
     StopProgressEventTimer();
 
     SyncTimeoutType syncTimeoutType = MaybeStartSyncTimeoutTimer();
@@ -3056,6 +3095,7 @@ XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody)
     }
 
     UnsuppressEventHandlingAndResume();
+    ResumeEventDispatching();
   } else {
     // Now that we've successfully opened the channel, we can change state.  Note
     // that this needs to come after the AsyncOpen() and rv check, because this

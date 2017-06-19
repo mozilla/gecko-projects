@@ -150,19 +150,16 @@ public:
 
   /**
    * return the cell's specified row span. this is what was specified in the
-   * content model or in the style info, and is always >= 1.
+   * content model or in the style info, and is always >= 0.
    * to get the effective row span (the actual value that applies), use GetEffectiveRowSpan()
    * @see nsTableFrame::GetEffectiveRowSpan()
    */
-  virtual int32_t GetRowSpan();
+  int32_t GetRowSpan();
 
   // there is no set row index because row index depends on the cell's parent row only
 
-  // Update the style on the block wrappers around our kids.
-  virtual void DoUpdateStyleOfOwnedAnonBoxes(
-    mozilla::ServoStyleSet& aStyleSet,
-    nsStyleChangeList& aChangeList,
-    nsChangeHint aHintForThisFrame) override;
+  // Return our cell content frame.
+  void AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult) override;
 
   /*---------------- nsITableCellLayout methods ------------------------*/
 
@@ -182,7 +179,7 @@ public:
    * to get the effective col span (the actual value that applies), use GetEffectiveColSpan()
    * @see nsTableFrame::GetEffectiveColSpan()
    */
-  virtual int32_t GetColSpan();
+  int32_t GetColSpan();
 
   /** return the cell's column index (starting at 0 for the first column) */
   virtual nsresult GetColIndex(int32_t &aColIndex) const override;

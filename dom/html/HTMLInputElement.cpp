@@ -1873,8 +1873,12 @@ HTMLInputElement::SetValue(const nsAString& aValue, CallerType aCallerType,
       nsAutoString currentValue;
       GetValue(currentValue, aCallerType);
 
+      // Some types sanitize value, so GetValue doesn't return pure
+      // previous value correctly.
       nsresult rv =
         SetValueInternal(aValue,
+          (IsExperimentalMobileType(mType) || IsDateTimeInputType(mType)) ?
+            nullptr : &currentValue,
           nsTextEditorState::eSetValue_ByContent |
           nsTextEditorState::eSetValue_Notify |
           nsTextEditorState::eSetValue_MoveCursorToEndIfValueChanged);
@@ -3032,7 +3036,9 @@ HTMLInputElement::UpdateFileList()
 }
 
 nsresult
-HTMLInputElement::SetValueInternal(const nsAString& aValue, uint32_t aFlags)
+HTMLInputElement::SetValueInternal(const nsAString& aValue,
+                                   const nsAString* aOldValue,
+                                   uint32_t aFlags)
 {
   NS_PRECONDITION(GetValueMode() != VALUE_MODE_FILENAME,
                   "Don't call SetValueInternal for file inputs");
@@ -3056,7 +3062,7 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue, uint32_t aFlags)
       }
 
       if (IsSingleLineTextControl(false)) {
-        if (!mInputData.mState->SetValue(value, aFlags)) {
+        if (!mInputData.mState->SetValue(value, aOldValue, aFlags)) {
           return NS_ERROR_OUT_OF_MEMORY;
         }
         if (mType == NS_FORM_INPUT_EMAIL) {
@@ -8155,6 +8161,16 @@ HTMLInputElement::GetWebkitEntries(nsTArray<RefPtr<FileSystemEntry>>& aSequence)
 
   Telemetry::Accumulate(Telemetry::BLINK_FILESYSTEM_USED, true);
   aSequence.AppendElements(mFileData->mEntries);
+}
+
+already_AddRefed<nsINodeList>
+HTMLInputElement::GetLabels()
+{
+  if (!IsLabelable()) {
+    return nullptr;
+  }
+
+  return nsGenericHTMLElement::Labels();
 }
 
 } // namespace dom

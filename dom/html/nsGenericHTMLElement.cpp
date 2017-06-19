@@ -107,6 +107,7 @@
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
 #include "ReferrerPolicy.h"
+#include "mozilla/dom/HTMLLabelElement.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -177,7 +178,11 @@ NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElementBase)
 nsresult
 nsGenericHTMLElement::CopyInnerTo(Element* aDst, bool aPreallocateChildren)
 {
+  MOZ_ASSERT(!aDst->GetUncomposedDoc(),
+             "Should not CopyInnerTo an Element in a document");
   nsresult rv;
+
+  bool reparse = (aDst->OwnerDoc() != OwnerDoc());
 
   rv = static_cast<nsGenericHTMLElement*>(aDst)->mAttrsAndChildren.
        EnsureCapacityToClone(mAttrsAndChildren, aPreallocateChildren);
@@ -188,11 +193,14 @@ nsGenericHTMLElement::CopyInnerTo(Element* aDst, bool aPreallocateChildren)
     const nsAttrName *name = mAttrsAndChildren.AttrNameAt(i);
     const nsAttrValue *value = mAttrsAndChildren.AttrAt(i);
 
-    nsAutoString valStr;
-    value->ToString(valStr);
-
     if (name->Equals(nsGkAtoms::style, kNameSpaceID_None) &&
         value->Type() == nsAttrValue::eCSSDeclaration) {
+      // We still clone CSS attributes, even in the cross-document case.
+      // https://github.com/w3c/webappsec-csp/issues/212
+
+      nsAutoString valStr;
+      value->ToString(valStr);
+
       DeclarationBlock* decl = value->GetCSSDeclarationValue();
       // We can't just set this as a string, because that will fail
       // to reparse the string into style data until the node is
@@ -201,13 +209,19 @@ nsGenericHTMLElement::CopyInnerTo(Element* aDst, bool aPreallocateChildren)
 
       rv = aDst->SetInlineStyleDeclaration(declClone, &valStr, false);
       NS_ENSURE_SUCCESS(rv, rv);
+    } else if (reparse) {
+      nsAutoString valStr;
+      value->ToString(valStr);
 
-      continue;
+      rv = aDst->SetAttr(name->NamespaceID(), name->LocalName(),
+                         name->GetPrefix(), valStr, false);
+      NS_ENSURE_SUCCESS(rv, rv);
+    } else {
+      nsAttrValue valueCopy(*value);
+      rv = aDst->SetParsedAttr(name->NamespaceID(), name->LocalName(),
+                               name->GetPrefix(), valueCopy, false);
+      NS_ENSURE_SUCCESS(rv, rv);
     }
-
-    rv = aDst->SetAttr(name->NamespaceID(), name->LocalName(),
-                       name->GetPrefix(), valStr, false);
-    NS_ENSURE_SUCCESS(rv, rv);
   }
 
   return NS_OK;
@@ -498,6 +512,14 @@ nsGenericHTMLElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     }
   }
 
+  // We need to consider a labels element is moved to another subtree
+  // with different root, it needs to update labels list and its root
+  // as well.
+  nsDOMSlots* slots = GetExistingDOMSlots();
+  if (slots && slots->mLabelsList) {
+    slots->mLabelsList->MaybeResetRoot(SubtreeRoot());
+  }
+
   return rv;
 }
 
@@ -516,6 +538,13 @@ nsGenericHTMLElement::UnbindFromTree(bool aDeep, bool aNullParent)
     if (htmlDocument) {
       htmlDocument->ChangeContentEditableCount(this, -1);
     }
+  }
+
+  // We need to consider a labels element is removed from tree,
+  // it needs to update labels list and its root as well.
+  nsDOMSlots* slots = GetExistingDOMSlots();
+  if (slots && slots->mLabelsList) {
+    slots->mLabelsList->MaybeResetRoot(SubtreeRoot());
   }
 
   nsStyledElement::UnbindFromTree(aDeep, aNullParent);
@@ -1664,6 +1693,30 @@ bool
 nsGenericHTMLElement::IsLabelable() const
 {
   return IsAnyOfHTMLElements(nsGkAtoms::progress, nsGkAtoms::meter);
+}
+
+/* static */ bool
+nsGenericHTMLElement::MatchLabelsElement(Element* aElement, int32_t aNamespaceID,
+                                         nsIAtom* aAtom, void* aData)
+{
+  HTMLLabelElement* element = HTMLLabelElement::FromContent(aElement);
+  return element && element->GetControl() == aData;
+}
+
+already_AddRefed<nsINodeList>
+nsGenericHTMLElement::Labels()
+{
+  MOZ_ASSERT(IsLabelable(),
+             "Labels() only allow labelable elements to use it.");
+  nsDOMSlots* slots = DOMSlots();
+
+  if (!slots->mLabelsList) {
+    slots->mLabelsList = new nsLabelsNodeList(SubtreeRoot(), MatchLabelsElement,
+                                              nullptr, this);
+  }
+
+  RefPtr<nsLabelsNodeList> labels = slots->mLabelsList;
+  return labels.forget();
 }
 
 bool
