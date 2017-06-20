@@ -49,7 +49,7 @@ if CONFIG['MOZ_UPDATE_CHANNEL'] in ('beta', 'release', 'esr'):
     secondary_cert.inputs += ['release_secondary.der']
 elif CONFIG['MOZ_UPDATE_CHANNEL'] in ('nightly', 'aurora', 'nightly-elm',
                                       'nightly-profiling', 'nightly-oak',
-                                      'nightly-ux'):
+                                      'nightly-ux', 'nightly-date'):
     primary_cert.inputs += ['nightly_aurora_level3_primary.der']
     secondary_cert.inputs += ['nightly_aurora_level3_secondary.der']
 else:
