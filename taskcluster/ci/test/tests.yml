@@ -639,8 +639,8 @@ mochitest-browser-screenshots:
     loopback-video: true
     run-on-projects:
         by-test-platform:
-            windows.*: ['mozilla-central', 'try']
-            linux64/opt: ['mozilla-central', 'try']
+            windows.*: ['mozilla-central', 'try', 'cedar']
+            linux64/opt: ['mozilla-central', 'try', 'cedar']
             default: []
     e10s: true
     max-run-time: 3600
