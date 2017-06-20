@@ -1471,10 +1471,10 @@ add_task(async function ensureSameFlowIDs() {
     events.push({ object, method, value, extra });
   }
 
+  let server = serverForFoo(engine);
   try {
     // Setup 2 clients, send them a command, and ensure we get to events
     // written, both with the same flowID.
-    let server    = serverForFoo(engine);
     await SyncTestingInfrastructure(server);
 
     let remoteId   = Utils.makeGUID();
@@ -1506,7 +1506,10 @@ add_task(async function ensureSameFlowIDs() {
     equal(events.length, 2);
     // we don't know what the flowID is, but do know it should be the same.
     equal(events[0].extra.flowID, events[1].extra.flowID);
-
+    // Wipe remote clients to ensure deduping doesn't prevent us from adding the command.
+    for (let client of Object.values(engine._store._remoteClients)) {
+      client.commands = [];
+    }
     // check it's correctly used when we specify a flow ID
     events.length = 0;
     let flowID = Utils.makeGUID();
@@ -1516,6 +1519,11 @@ add_task(async function ensureSameFlowIDs() {
     equal(events[0].extra.flowID, flowID);
     equal(events[1].extra.flowID, flowID);
 
+    // Wipe remote clients to ensure deduping doesn't prevent us from adding the command.
+    for (let client of Object.values(engine._store._remoteClients)) {
+      client.commands = [];
+    }
+
     // and that it works when something else is in "extra"
     events.length = 0;
     engine.sendCommand("wipeAll", [], null, { reason: "testing" });
@@ -1524,6 +1532,10 @@ add_task(async function ensureSameFlowIDs() {
     equal(events[0].extra.flowID, events[1].extra.flowID);
     equal(events[0].extra.reason, "testing");
     equal(events[1].extra.reason, "testing");
+    // Wipe remote clients to ensure deduping doesn't prevent us from adding the command.
+    for (let client of Object.values(engine._store._remoteClients)) {
+      client.commands = [];
+    }
 
     // and when both are specified.
     events.length = 0;
@@ -1534,9 +1546,68 @@ add_task(async function ensureSameFlowIDs() {
     equal(events[1].extra.flowID, flowID);
     equal(events[0].extra.reason, "testing");
     equal(events[1].extra.reason, "testing");
+    // Wipe remote clients to ensure deduping doesn't prevent us from adding the command.
+    for (let client of Object.values(engine._store._remoteClients)) {
+      client.commands = [];
+    }
 
   } finally {
     Service.recordTelemetryEvent = origRecordTelemetryEvent;
+    cleanup();
+    await promiseStopServer(server);
+  }
+});
+
+add_task(async function test_duplicate_commands_telemetry() {
+  let events = []
+  let origRecordTelemetryEvent = Service.recordTelemetryEvent;
+  Service.recordTelemetryEvent = (object, method, value, extra) => {
+    events.push({ object, method, value, extra });
+  }
+
+  let server = serverForFoo(engine);
+  try {
+    await SyncTestingInfrastructure(server);
+
+    let remoteId   = Utils.makeGUID();
+    let remoteId2  = Utils.makeGUID();
+
+    _("Create remote client record 1");
+    server.insertWBO("foo", "clients", new ServerWBO(remoteId, encryptPayload({
+      id: remoteId,
+      name: "Remote client",
+      type: "desktop",
+      commands: [],
+      version: "48",
+      protocols: ["1.5"]
+    }), Date.now() / 1000));
+
+    _("Create remote client record 2");
+    server.insertWBO("foo", "clients", new ServerWBO(remoteId2, encryptPayload({
+      id: remoteId2,
+      name: "Remote client 2",
+      type: "mobile",
+      commands: [],
+      version: "48",
+      protocols: ["1.5"]
+    }), Date.now() / 1000));
+
+    engine._sync();
+    // Make sure deduping works before syncing
+    engine.sendURIToClientForDisplay("https://example.com", remoteId, "Example");
+    engine.sendURIToClientForDisplay("https://example.com", remoteId, "Example");
+    equal(events.length, 1);
+    engine._sync();
+    // And after syncing.
+    engine.sendURIToClientForDisplay("https://example.com", remoteId, "Example");
+    equal(events.length, 1);
+    // Ensure we aren't deduping commands to different clients
+    engine.sendURIToClientForDisplay("https://example.com", remoteId2, "Example");
+    equal(events.length, 2);
+  } finally {
+    Service.recordTelemetryEvent = origRecordTelemetryEvent;
+    cleanup();
+    await promiseStopServer(server);
   }
 });
 
@@ -1574,6 +1645,59 @@ add_task(async function test_other_clients_notified_on_first_sync() {
     cleanup();
     await promiseStopServer(server);
   }
+});
+
+add_task(async function device_disconnected_notification_updates_known_stale_clients() {
+  const spyUpdate = sinon.spy(engine, "updateKnownStaleClients");
+  const makeFakeClient = (id) => ({ id, fxaDeviceId: `fxa-${id}` });
+  const clients = [makeFakeClient("one"), makeFakeClient("two"), makeFakeClient("three")];
+  const stubRemoteClients = sinon.stub(engine._store, "_remoteClients").get(() => {
+    return clients;
+  });
+  const stubRefresh = sinon.stub(engine, "_refreshKnownStaleClients", () => {
+    engine._knownStaleFxADeviceIds = ["fxa-one", "fxa-two"];
+  });
+
+  engine._knownStaleFxADeviceIds = null;
+  Services.obs.notifyObservers(null, "fxaccounts:device_disconnected",
+                               JSON.stringify({ isLocalDevice: false }));
+  ok(spyUpdate.calledOnce, "updateKnownStaleClients should be called");
+  ok(clients[0].stale);
+  ok(clients[1].stale);
+  ok(!clients[2].stale);
+  spyUpdate.reset();
+
+  ok(engine._knownStaleFxADeviceIds)
+  Services.obs.notifyObservers(null, "fxaccounts:device_disconnected",
+                               JSON.stringify({ isLocalDevice: false }));
+  ok(spyUpdate.calledOnce, "updateKnownStaleClients should be called");
+  spyUpdate.reset();
+
+  Services.obs.notifyObservers(null, "fxaccounts:device_disconnected",
+                               JSON.stringify({ isLocalDevice: true }));
+  ok(spyUpdate.notCalled, "updateKnownStaleClients should not be called");
+
+  stubRemoteClients.restore();
+  spyUpdate.restore();
+  stubRefresh.restore();
+});
+
+add_task(async function process_incoming_refreshes_known_stale_clients() {
+  const stubProcessIncoming = sinon.stub(SyncEngine.prototype, "_processIncoming");
+  const stubRefresh = sinon.stub(engine, "_refreshKnownStaleClients", () => {
+    engine._knownStaleFxADeviceIds = ["one", "two"];
+  });
+
+  engine._knownStaleFxADeviceIds = null;
+  engine._processIncoming();
+  ok(stubRefresh.calledOnce, "Should refresh the known stale clients");
+  stubRefresh.reset();
+
+  engine._processIncoming();
+  ok(stubRefresh.notCalled, "Should not refresh the known stale clients since it's already populated");
+
+  stubProcessIncoming.restore();
+  stubRefresh.restore();
 });
 
 function run_test() {

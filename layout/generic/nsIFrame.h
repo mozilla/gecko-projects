@@ -1144,7 +1144,7 @@ public:
 #define NS_DECLARE_FRAME_PROPERTY_WITH_DTOR_NEVER_CALLED(prop, type)  \
   static void AssertOnDestroyingProperty##prop(type*) {               \
     MOZ_ASSERT_UNREACHABLE("Frame property " #prop " should never "   \
-                           "be destroyed by the FramePropertyTable"); \
+                           "be destroyed by the FrameProperties class");  \
   }                                                                   \
   NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(prop, type,                     \
                                       AssertOnDestroyingProperty##prop)
@@ -3933,6 +3933,19 @@ public:
    * Returns true if the frame is scrolled out of view.
    */
   bool IsScrolledOutOfView();
+
+  /**
+   * Computes a 2D matrix from the -moz-window-transform and
+   * -moz-window-transform-origin properties on aFrame.
+   * Values that don't result in a 2D matrix will be ignored and an identity
+   * matrix will be returned instead.
+   */
+  Matrix ComputeWidgetTransform();
+
+  /**
+   * Applies the values from the -moz-window-* properties to the widget.
+   */
+  virtual void UpdateWidgetProperties();
 
   /**
    * @return true iff this frame has one or more associated image requests.

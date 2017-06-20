@@ -234,8 +234,8 @@ pub mod shorthands {
             while let Ok(_) = input.next() {}  // Look for var()
             if input.seen_var_functions() {
                 input.reset(start);
-                let (first_token_type, css) = try!(
-                    ::custom_properties::parse_non_custom_with_var(input));
+                let (first_token_type, css) =
+                    ::custom_properties::parse_non_custom_with_var(input)?;
                 declarations.all_shorthand = AllShorthand::WithVariables(Arc::new(UnparsedValue {
                     css: css.into_owned(),
                     first_token_type: first_token_type,
@@ -1137,8 +1137,8 @@ impl HasViewportPercentage for PropertyDeclaration {
 
 impl fmt::Debug for PropertyDeclaration {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(self.id().to_css(f));
-        try!(f.write_str(": "));
+        self.id().to_css(f)?;
+        f.write_str(": ")?;
         self.to_css(f)
     }
 }
@@ -2536,10 +2536,12 @@ pub fn cascade(device: &Device,
     let iter_declarations = || {
         rule_node.self_and_ancestors().flat_map(|node| {
             let cascade_level = node.cascade_level();
-            let declarations = match node.style_source() {
-                Some(source) => source.read(cascade_level.guard(guards)).declarations(),
+            let source = node.style_source();
+            let declarations = if source.is_some() {
+                source.read(cascade_level.guard(guards)).declarations()
+            } else {
                 // The root node has no style source.
-                None => &[]
+                &[]
             };
             let node_importance = node.importance();
             declarations

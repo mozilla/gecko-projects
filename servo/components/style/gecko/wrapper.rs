@@ -407,9 +407,9 @@ pub struct GeckoElement<'le>(pub &'le RawGeckoElement);
 
 impl<'le> fmt::Debug for GeckoElement<'le> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(write!(f, "<{}", self.get_local_name()));
+        write!(f, "<{}", self.get_local_name())?;
         if let Some(id) = self.get_id() {
-            try!(write!(f, " id={}", id));
+            write!(f, " id={}", id)?;
         }
 
         let mut first = true;
@@ -1517,6 +1517,10 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
             NonTSPseudoClass::MozMeterOptimum |
             NonTSPseudoClass::MozMeterSubOptimum |
             NonTSPseudoClass::MozMeterSubSubOptimum |
+            NonTSPseudoClass::MozHasDirAttr |
+            NonTSPseudoClass::MozDirAttrLTR |
+            NonTSPseudoClass::MozDirAttrRTL |
+            NonTSPseudoClass::MozDirAttrLikeAuto |
             NonTSPseudoClass::MozAutofill |
             NonTSPseudoClass::MozAutofillPreview => {
                 self.get_state().intersects(pseudo_class.state_flag())

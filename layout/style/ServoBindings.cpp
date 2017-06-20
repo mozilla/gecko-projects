@@ -590,55 +590,57 @@ Gecko_UpdateAnimations(RawGeckoElementBorrowed aElement,
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aElement);
 
+  if (!aElement->IsInComposedDoc()) {
+    return;
+  }
+
   nsPresContext* presContext = nsContentUtils::GetContextForContent(aElement);
-  if (!presContext) {
+  if (!presContext || !presContext->IsDynamic()) {
     return;
   }
 
   nsIAtom* pseudoTag = PseudoTagAndCorrectElementForAnimation(aElement);
-  if (presContext->IsDynamic() && aElement->IsInComposedDoc()) {
-    CSSPseudoElementType pseudoType =
-      nsCSSPseudoElements::GetPseudoType(pseudoTag,
-                                         CSSEnabledState::eForAllContent);
+  CSSPseudoElementType pseudoType =
+    nsCSSPseudoElements::GetPseudoType(pseudoTag,
+                                       CSSEnabledState::eForAllContent);
 
-    if (aTasks & UpdateAnimationsTasks::CSSAnimations) {
-      presContext->AnimationManager()->
-        UpdateAnimations(const_cast<dom::Element*>(aElement), pseudoType,
-                         aComputedValues);
-    }
+  if (aTasks & UpdateAnimationsTasks::CSSAnimations) {
+    presContext->AnimationManager()->
+      UpdateAnimations(const_cast<dom::Element*>(aElement), pseudoType,
+                       aComputedValues);
+  }
 
-    // aComputedValues might be nullptr if the target element is now in a
-    // display:none subtree. We still call Gecko_UpdateAnimations in this case
-    // because we need to stop CSS animations in the display:none subtree.
-    // However, we don't need to update transitions since they are stopped by
-    // RestyleManager::AnimationsWithDestroyedFrame so we just return early
-    // here.
-    if (!aComputedValues) {
-      return;
-    }
+  // aComputedValues might be nullptr if the target element is now in a
+  // display:none subtree. We still call Gecko_UpdateAnimations in this case
+  // because we need to stop CSS animations in the display:none subtree.
+  // However, we don't need to update transitions since they are stopped by
+  // RestyleManager::AnimationsWithDestroyedFrame so we just return early
+  // here.
+  if (!aComputedValues) {
+    return;
+  }
 
-    if (aTasks & UpdateAnimationsTasks::CSSTransitions) {
-      MOZ_ASSERT(aOldComputedValues);
-      presContext->TransitionManager()->
-        UpdateTransitions(const_cast<dom::Element*>(aElement), pseudoType,
-                          aOldComputedValues, aComputedValues);
-    }
+  if (aTasks & UpdateAnimationsTasks::CSSTransitions) {
+    MOZ_ASSERT(aOldComputedValues);
+    presContext->TransitionManager()->
+      UpdateTransitions(const_cast<dom::Element*>(aElement), pseudoType,
+                        aOldComputedValues, aComputedValues);
+  }
 
-    if (aTasks & UpdateAnimationsTasks::EffectProperties) {
-      presContext->EffectCompositor()->UpdateEffectProperties(
-        aComputedValues, const_cast<dom::Element*>(aElement), pseudoType);
-    }
+  if (aTasks & UpdateAnimationsTasks::EffectProperties) {
+    presContext->EffectCompositor()->UpdateEffectProperties(
+      aComputedValues, const_cast<dom::Element*>(aElement), pseudoType);
+  }
 
-    if (aTasks & UpdateAnimationsTasks::CascadeResults) {
-      // This task will be scheduled if we detected any changes to !important
-      // rules. We post a restyle here so that we can update the cascade
-      // results in the pre-traversal of the next restyle.
-      presContext->EffectCompositor()
-                 ->RequestRestyle(const_cast<Element*>(aElement),
-                                  pseudoType,
-                                  EffectCompositor::RestyleType::Standard,
-                                  EffectCompositor::CascadeLevel::Animations);
-    }
+  if (aTasks & UpdateAnimationsTasks::CascadeResults) {
+    // This task will be scheduled if we detected any changes to !important
+    // rules. We post a restyle here so that we can update the cascade
+    // results in the pre-traversal of the next restyle.
+    presContext->EffectCompositor()
+               ->RequestRestyle(const_cast<Element*>(aElement),
+                                pseudoType,
+                                EffectCompositor::RestyleType::Standard,
+                                EffectCompositor::CascadeLevel::Animations);
   }
 }
 
@@ -819,24 +821,24 @@ Gecko_MatchLang(RawGeckoElementBorrowed aElement,
                                                  aValue, aElement->OwnerDoc());
   }
 
-  if (aOverrideLang) {
-    nsDependentAtomString overrideLang(aOverrideLang);
-    return nsCSSRuleProcessor::LangPseudoMatches(aElement, &overrideLang, true,
-                                                 aValue, aElement->OwnerDoc());
-  }
-
-  return nsCSSRuleProcessor::LangPseudoMatches(aElement, nullptr, true,
+  return nsCSSRuleProcessor::LangPseudoMatches(aElement, aOverrideLang, true,
                                                aValue, aElement->OwnerDoc());
 }
 
 nsIAtom*
 Gecko_GetXMLLangValue(RawGeckoElementBorrowed aElement)
 {
-  nsString string;
-  if (aElement->GetAttr(kNameSpaceID_XML, nsGkAtoms::lang, string)) {
-    return NS_Atomize(string).take();
+  const nsAttrValue* attr =
+    aElement->GetParsedAttr(nsGkAtoms::lang, kNameSpaceID_XML);
+
+  if (!attr) {
+    return nullptr;
   }
-  return nullptr;
+
+  MOZ_ASSERT(attr->Type() == nsAttrValue::eAtom);
+
+  nsCOMPtr<nsIAtom> atom = attr->GetAtomValue();
+  return atom.forget().take();
 }
 
 template <typename Implementor>
@@ -851,6 +853,7 @@ template <typename Implementor>
 static nsIAtom*
 LangValue(Implementor* aElement)
 {
+  // TODO(emilio): Deduplicate a bit with nsIContent::GetLang().
   const nsAttrValue* attr =
     aElement->GetParsedAttr(nsGkAtoms::lang, kNameSpaceID_XML);
   if (!attr && aElement->SupportsLangAttr()) {
@@ -861,9 +864,9 @@ LangValue(Implementor* aElement)
     return nullptr;
   }
 
-  nsString lang;
-  attr->ToString(lang);
-  return NS_Atomize(lang).take();
+  MOZ_ASSERT(attr->Type() == nsAttrValue::eAtom);
+  nsCOMPtr<nsIAtom> atom = attr->GetAtomValue();
+  return atom.forget().take();
 }
 
 template <typename Implementor, typename MatchFn>
