@@ -130,21 +130,19 @@ def make_task_description(config, jobs):
                 'name': 'public/build/{}target.dmg'.format(locale_output_path),
             }]
         elif attributes['build_platform'].startswith('win'):
+            mar_prefix = 'https://queue.taskcluster.net/v1/task/' + \
+                '{}/artifacts/public/build/host/bin'.format(build_task_ref)
             if job.get('locale'):
                 signed_prefix = 'https://queue.taskcluster.net/v1/task/' + \
                     '{}/artifacts/public/build/{}/'.format(signing_task_ref, job['locale'])
-                build_prefix = 'https://queue.taskcluster.net/v1/task/' + \
-                    '{}/artifacts/public/build/{}/'.format(build_task_ref, job['locale'])
                 locale_output_path = "{}/".format(job['locale'])
             else:
                 signed_prefix = 'https://queue.taskcluster.net/v1/task/' + \
                     '{}/artifacts/public/build/'.format(signing_task_ref)
-                build_prefix = 'https://queue.taskcluster.net/v1/task/' + \
-                    '{}/artifacts/public/build/'.format(build_task_ref)
             task_env.update(
                 SIGNED_ZIP={'task-reference': "{}target.zip".format(signed_prefix)},
                 SIGNED_SETUP={'task-reference': "{}setup.exe".format(signed_prefix)},
-                UNSIGNED_MAR={'task-reference': "{}mar.exe".format(build_prefix)},
+                UNSIGNED_MAR={'task-reference': "{}mar.exe".format(mar_prefix)},
                 NO_MAGIC_MH_BUILD_ARGS='1',  # XXXCallek make mozharness using more generic
             )
             mozharness_config = ['repackage/win_signed.py']
