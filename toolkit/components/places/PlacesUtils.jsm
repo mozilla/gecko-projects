@@ -249,6 +249,11 @@ const BOOKMARK_VALIDATORS = Object.freeze({
   },
   source: simpleValidateFunc(v => Number.isInteger(v) &&
                                   Object.values(PlacesUtils.bookmarks.SOURCES).includes(v)),
+  annos: simpleValidateFunc(v => Array.isArray(v) && v.length),
+  keyword: simpleValidateFunc(v => (typeof(v) == "string") && v.length),
+  charset: simpleValidateFunc(v => (typeof(v) == "string") && v.length),
+  postData: simpleValidateFunc(v => (typeof(v) == "string") && v.length),
+  tags: simpleValidateFunc(v => Array.isArray(v) && v.length),
 });
 
 // Sync bookmark records can contain additional properties.
@@ -1574,8 +1579,8 @@ this.PlacesUtils = {
   /**
    * Sets the character-set for a URI.
    *
-   * @param aURI nsIURI
-   * @param aCharset character-set value.
+   * @param {nsIURI} aURI
+   * @param {String} aCharset character-set value.
    * @return {Promise}
    */
   setCharsetForURI: function PU_setCharsetForURI(aURI, aCharset) {
@@ -1723,13 +1728,22 @@ this.PlacesUtils = {
    * @param aGuid
    *        an item GUID
    * @return {Promise}
-   * @resolves to the GUID.
+   * @resolves to the item id.
    * @rejects if there's no item for the given GUID.
    */
   promiseItemId(aGuid) {
     return GuidHelper.getItemId(aGuid)
   },
 
+  /**
+   * Get the item ids for multiple items (a bookmark, a folder or a separator)
+   * given the unique ids for each item.
+   *
+   * @param {Array} aGuids An array of item GUIDs.
+   * @return {Promise}
+   * @resolves to a Map of item ids.
+   * @rejects if not all of the GUIDs could be found.
+   */
   promiseManyItemIds(aGuids) {
     return GuidHelper.getManyItemIds(aGuids);
   },
@@ -3069,7 +3083,7 @@ PlacesCreateLivemarkTransaction.prototype = {
     // The getLivemark callback may fail, but it is used just to serialize,
     // so it doesn't matter.
     this._promise = PlacesUtils.livemarks.getLivemark({ id: this.item.id })
-      .then(null, null).then( () => {
+      .catch(() => {}).then(() => {
         PlacesUtils.bookmarks.removeItem(this.item.id);
       });
   }
@@ -3121,7 +3135,7 @@ PlacesRemoveLivemarkTransaction.prototype = {
     // The getLivemark callback is expected to receive a failure status but it
     // is used just to serialize, so doesn't matter.
     PlacesUtils.livemarks.getLivemark({ id: this.item.id })
-      .then(null, () => {
+      .catch(() => {
         PlacesUtils.livemarks.addLivemark({ parentId: this.item.parentId,
                                             title: this.item.title,
                                             siteURI: this.item.siteURI,

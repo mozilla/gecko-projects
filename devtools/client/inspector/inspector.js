@@ -620,14 +620,12 @@ Inspector.prototype = {
       INSPECTOR_L10N.getStr("inspector.sidebar.computedViewTitle"),
       defaultTab == "computedview");
 
-    if (Services.prefs.getBoolPref("devtools.layoutview.enabled")) {
-      // Grid and layout panels aren't lazy-loaded as their module end up
-      // calling inspector.addSidebarTab
-      this.gridInspector = new GridInspector(this, this.panelWin);
+    // Grid and layout panels aren't lazy-loaded as their module end up
+    // calling inspector.addSidebarTab
+    this.gridInspector = new GridInspector(this, this.panelWin);
 
-      const LayoutView = this.browserRequire("devtools/client/inspector/layout/layout");
-      this.layoutview = new LayoutView(this, this.panelWin);
-    }
+    const LayoutView = this.browserRequire("devtools/client/inspector/layout/layout");
+    this.layoutview = new LayoutView(this, this.panelWin);
 
     if (this.target.form.animationsActor) {
       this.sidebar.addFrameTab(
@@ -2154,7 +2152,7 @@ if (window.location.protocol === "chrome:" && url.search.length > 1) {
     );
     let inspectorUI = new Inspector(fakeToolbox);
     inspectorUI.init();
-  }).then(null, e => {
+  }).catch(e => {
     window.alert("Unable to start the inspector:" + e.message + "\n" + e.stack);
   });
 }
