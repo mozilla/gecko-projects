@@ -148,11 +148,11 @@ def make_task_description(config, jobs):
             mozharness_config = ['repackage/win_signed.py']
             output_files = [{
                 'type': 'file',
-                'path': 'artifacts/installer.exe',
+                'path': 'build/artifacts/installer.exe',
                 'name': 'public/build/{}installer.exe'.format(locale_output_path),
             }, {
                 'type': 'file',
-                'path': 'artifacts/target.complete.mar',
+                'path': 'build/artifacts/target.complete.mar',
                 'name': 'public/build/{}target.complete.mar'.format(locale_output_path),
             }]
 
