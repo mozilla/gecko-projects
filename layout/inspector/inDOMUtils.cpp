@@ -51,8 +51,8 @@
 #include "nsStyleUtil.h"
 #include "nsQueryObject.h"
 #include "mozilla/ServoBindings.h"
-#include "mozilla/ServoCSSRuleList.h"
 #include "mozilla/ServoStyleRule.h"
+#include "mozilla/ServoStyleRuleMap.h"
 
 using namespace mozilla;
 using namespace mozilla::css;
@@ -243,14 +243,13 @@ inDOMUtils::GetCSSStyleRules(nsIDOMElement *aElement,
     return NS_OK;
   }
 
-  NonOwningStyleContextSource source = styleContext->StyleSource();
-  if (source.IsNull()) {
-    return NS_OK;
-  }
 
   nsCOMPtr<nsIMutableArray> rules = nsArray::Create();
-  if (source.IsGeckoRuleNodeOrNull()) {
-    nsRuleNode* ruleNode = source.AsGeckoRuleNode();
+  if (auto gecko = styleContext->GetAsGecko()) {
+    nsRuleNode* ruleNode = gecko->RuleNode();
+    if (!ruleNode) {
+      return NS_OK;
+    }
 
     AutoTArray<nsRuleNode*, 16> ruleNodes;
     while (!ruleNode->IsRoot()) {
@@ -272,39 +271,23 @@ inDOMUtils::GetCSSStyleRules(nsIDOMElement *aElement,
     // the rule list.
     nsTArray<const RawServoStyleRule*> rawRuleList;
     Servo_Element_GetStyleRuleList(element, &rawRuleList);
-    size_t rawRuleCount = rawRuleList.Length();
 
-    // We have RawServoStyleRules, and now we'll map them to ServoStyleRules
-    // by looking them up in the ServoStyleSheets owned by this document.
-    ServoCSSRuleList::StyleRuleHashtable rawRulesToRules;
-
-    nsIDocument* document = element->GetOwnerDocument();
-    int32_t sheetCount = document->GetNumberOfStyleSheets();
-
-    for (int32_t i = 0; i < sheetCount; i++) {
-      StyleSheet* sheet = document->GetStyleSheetAt(i);
-      MOZ_ASSERT(sheet->IsServo());
-
-      ErrorResult ignored;
-      ServoCSSRuleList* ruleList = static_cast<ServoCSSRuleList*>(
-        sheet->GetCssRules(*nsContentUtils::SubjectPrincipal(), ignored));
-      if (ruleList) {
-        // Generate the map from raw rules to rules.
-        ruleList->FillStyleRuleHashtable(rawRulesToRules);
-      }
+    nsIDocument* doc = element->GetOwnerDocument();
+    nsIPresShell* shell = doc->GetShell();
+    if (!shell) {
+      return NS_OK;
     }
 
+    ServoStyleSet* styleSet = shell->StyleSet()->AsServo();
+    ServoStyleRuleMap* map = styleSet->StyleRuleMap();
+    map->EnsureTable();
+
     // Find matching rules in the table.
-    for (size_t j = 0; j < rawRuleCount; j++) {
-      const RawServoStyleRule* rawRule = rawRuleList.ElementAt(j);
-      ServoStyleRule* rule = nullptr;
-      if (rawRulesToRules.Get(rawRule, &rule)) {
-        MOZ_ASSERT(rule, "rule should not be null");
-        RefPtr<css::Rule> ruleObj(rule);
-        rules->AppendElement(ruleObj, false);
+    for (const RawServoStyleRule* rawRule : Reversed(rawRuleList)) {
+      if (ServoStyleRule* rule = map->Lookup(rawRule)) {
+        rules->AppendElement(static_cast<css::Rule*>(rule), false);
       } else {
-        // FIXME (bug 1359217): Need a reliable way to map raw rules to rules.
-        NS_WARNING("stylo: Could not map raw rule to a rule.");
+        MOZ_ASSERT_UNREACHABLE("We should be able to map a raw rule to a rule");
       }
     }
   }
@@ -787,6 +770,7 @@ PropertySupportsVariant(nsCSSPropertyID aPropertyID, uint32_t aVariant)
       case eCSSProperty__moz_outline_radius_topright:
       case eCSSProperty__moz_outline_radius_bottomleft:
       case eCSSProperty__moz_outline_radius_bottomright:
+      case eCSSProperty__moz_window_transform_origin:
         supported = VARIANT_LP;
         break;
 
@@ -1109,6 +1093,7 @@ inDOMUtils::SetContentState(nsIDOMElement* aElement,
 NS_IMETHODIMP
 inDOMUtils::RemoveContentState(nsIDOMElement* aElement,
                                EventStates::InternalType aState,
+                               bool aClearActiveDocument,
                                bool* aRetVal)
 {
   NS_ENSURE_ARG_POINTER(aElement);
@@ -1118,6 +1103,15 @@ inDOMUtils::RemoveContentState(nsIDOMElement* aElement,
   NS_ENSURE_TRUE(esm, NS_ERROR_INVALID_ARG);
 
   *aRetVal = esm->SetContentState(nullptr, EventStates(aState));
+
+  if (aClearActiveDocument && EventStates(aState) == NS_EVENT_STATE_ACTIVE) {
+    EventStateManager* activeESM = static_cast<EventStateManager*>(
+      EventStateManager::GetActiveEventStateManager());
+    if (activeESM == esm) {
+      EventStateManager::ClearGlobalActiveContent(nullptr);
+    }
+  }
+
   return NS_OK;
 }
 

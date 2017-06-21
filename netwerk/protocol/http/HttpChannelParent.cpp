@@ -7,7 +7,6 @@
 // HttpLog.h should generally be included first
 #include "HttpLog.h"
 
-#include "mozilla/AbstractThread.h"
 #include "mozilla/ipc/FileDescriptorSetParent.h"
 #include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/net/HttpChannelParent.h"
@@ -50,6 +49,7 @@
 #include "nsStreamUtils.h"
 #include "nsStringStream.h"
 #include "nsIStorageStream.h"
+#include "nsThreadUtils.h"
 #include "nsQueryObject.h"
 #include "nsIURIClassifier.h"
 
@@ -608,7 +608,8 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
       nsCOMPtr<nsIInterfaceRequestor> iir = static_cast<nsIInterfaceRequestor*>(this);
       nsMainThreadPtrHandle<nsIInterfaceRequestor> handle =
           nsMainThreadPtrHandle<nsIInterfaceRequestor>(
-              new nsMainThreadPtrHolder<nsIInterfaceRequestor>(iir));
+              new nsMainThreadPtrHolder<nsIInterfaceRequestor>(
+                "nsIInterfaceRequestor", iir));
       UniquePtr<UploadStreamClosure> closure(new UploadStreamClosure(handle));
 
       // Accumulate the stream contents as the child sends it. We will continue with
@@ -740,7 +741,7 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
   ++mAsyncOpenBarrier;
   RefPtr<GenericPromise> promise = WaitForBgParent();
   RefPtr<HttpChannelParent> self = this;
-  promise->Then(AbstractThread::MainThread(), __func__,
+  promise->Then(GetMainThreadSerialEventTarget(), __func__,
                 [self]() {
                   self->mRequest.Complete();
                   self->TryInvokeAsyncOpen(NS_OK);
@@ -822,7 +823,7 @@ HttpChannelParent::ConnectChannel(const uint32_t& registrarId, const bool& shoul
   // Waiting for background channel
   RefPtr<GenericPromise> promise = WaitForBgParent();
   RefPtr<HttpChannelParent> self = this;
-  promise->Then(AbstractThread::MainThread(), __func__,
+  promise->Then(GetMainThreadSerialEventTarget(), __func__,
                 [self]() {
                   self->mRequest.Complete();
                 },
@@ -1044,7 +1045,7 @@ HttpChannelParent::ContinueVerification(nsIAsyncVerifyRedirectReadyCallback* aCa
   // Otherwise, wait for the background channel.
   RefPtr<GenericPromise> promise = WaitForBgParent();
   nsCOMPtr<nsIAsyncVerifyRedirectReadyCallback> callback = aCallback;
-  promise->Then(AbstractThread::MainThread(), __func__,
+  promise->Then(GetMainThreadSerialEventTarget(), __func__,
                 [callback]() {
                   callback->ReadyToVerify(NS_OK);
                 },
@@ -1923,14 +1924,12 @@ HttpChannelParent::ResumeForDiversion()
     // The nsHttpChannel will deliver remaining OnData/OnStop for the transfer.
     nsresult rv = mChannel->ResumeInternal();
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      FailDiversion(NS_ERROR_UNEXPECTED, true);
       return rv;
     }
     mSuspendedForDiversion = false;
   }
 
   if (NS_WARN_IF(mIPCClosed || !DoSendDeleteSelf())) {
-    FailDiversion(NS_ERROR_UNEXPECTED);
     return NS_ERROR_UNEXPECTED;
   }
   return NS_OK;
@@ -2028,29 +2027,25 @@ class HTTPFailDiversionEvent : public Runnable
 {
 public:
   HTTPFailDiversionEvent(HttpChannelParent *aChannelParent,
-                         nsresult aErrorCode,
-                         bool aSkipResume)
+                         nsresult aErrorCode)
     : mChannelParent(aChannelParent)
     , mErrorCode(aErrorCode)
-    , mSkipResume(aSkipResume)
   {
     MOZ_RELEASE_ASSERT(aChannelParent);
     MOZ_RELEASE_ASSERT(NS_FAILED(aErrorCode));
   }
   NS_IMETHOD Run() override
   {
-    mChannelParent->NotifyDiversionFailed(mErrorCode, mSkipResume);
+    mChannelParent->NotifyDiversionFailed(mErrorCode);
     return NS_OK;
   }
 private:
   RefPtr<HttpChannelParent> mChannelParent;
   nsresult mErrorCode;
-  bool mSkipResume;
 };
 
 void
-HttpChannelParent::FailDiversion(nsresult aErrorCode,
-                                 bool aSkipResume)
+HttpChannelParent::FailDiversion(nsresult aErrorCode)
 {
   MOZ_RELEASE_ASSERT(NS_FAILED(aErrorCode));
   MOZ_RELEASE_ASSERT(mDivertingFromChild);
@@ -2058,12 +2053,11 @@ HttpChannelParent::FailDiversion(nsresult aErrorCode,
   MOZ_RELEASE_ASSERT(mChannel);
 
   NS_DispatchToCurrentThread(
-    new HTTPFailDiversionEvent(this, aErrorCode, aSkipResume));
+    new HTTPFailDiversionEvent(this, aErrorCode));
 }
 
 void
-HttpChannelParent::NotifyDiversionFailed(nsresult aErrorCode,
-                                         bool aSkipResume)
+HttpChannelParent::NotifyDiversionFailed(nsresult aErrorCode)
 {
   LOG(("HttpChannelParent::NotifyDiversionFailed [this=%p aErrorCode=%" PRIx32 "]\n",
        this, static_cast<uint32_t>(aErrorCode)));

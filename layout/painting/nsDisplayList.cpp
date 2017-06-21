@@ -2285,7 +2285,7 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
     rootPresContext->CollectPluginGeometryUpdates(layerManager);
   }
 
-  MaybeSetupTransactionIdAllocator(layerManager, view);
+  MaybeSetupTransactionIdAllocator(layerManager, presContext);
 
   layerManager->EndTransaction(FrameLayerBuilder::DrawPaintedLayer,
                                aBuilder, flags);
@@ -4441,12 +4441,14 @@ nsDisplayLayerEventRegions::AddFrame(nsDisplayListBuilder* aBuilder,
     // region on scrollbar frames that won't be placed in their own layer. See
     // bug 1213324 for details.
     mDispatchToContentHitRegion.Or(mDispatchToContentHitRegion, borderBox);
+    mDispatchToContentHitRegion.SimplifyOutward(8);
   } else if (aFrame->IsObjectFrame()) {
     // If the frame is a plugin frame and wants to handle wheel events as
     // default action, we should add the frame to dispatch-to-content region.
     nsPluginFrame* pluginFrame = do_QueryFrame(aFrame);
     if (pluginFrame && pluginFrame->WantsToHandleWheelEventAsDefaultAction()) {
       mDispatchToContentHitRegion.Or(mDispatchToContentHitRegion, borderBox);
+      mDispatchToContentHitRegion.SimplifyOutward(8);
     }
   }
 
@@ -4483,6 +4485,7 @@ nsDisplayLayerEventRegions::AddFrame(nsDisplayListBuilder* aBuilder,
     }
     if (alreadyHadRegions) {
       mDispatchToContentHitRegion.OrWith(CombinedTouchActionRegion());
+      mDispatchToContentHitRegion.SimplifyOutward(8);
     }
   }
 }
@@ -4492,6 +4495,7 @@ nsDisplayLayerEventRegions::AddInactiveScrollPort(const nsRect& aRect)
 {
   mHitRegion.Or(mHitRegion, aRect);
   mDispatchToContentHitRegion.Or(mDispatchToContentHitRegion, aRect);
+  mDispatchToContentHitRegion.SimplifyOutward(8);
 }
 
 bool
@@ -7069,47 +7073,18 @@ nsDisplayTransform::ComputePerspectiveMatrix(const nsIFrame* aFrame,
 
   TransformReferenceBox refBox(cbFrame);
 
-  /* Allows us to access named variables by index. */
-  Point3D perspectiveOrigin;
-  gfx::Float* coords[2] = {&perspectiveOrigin.x, &perspectiveOrigin.y};
-  TransformReferenceBox::DimensionGetter dimensionGetter[] =
-    { &TransformReferenceBox::Width, &TransformReferenceBox::Height };
-
-  /* For both of the coordinates, if the value of perspective-origin is a
-   * percentage, it's relative to the size of the frame.  Otherwise, if it's
-   * a distance, it's already computed for us!
-   */
-  for (uint8_t index = 0; index < 2; ++index) {
-    /* If the -transform-origin specifies a percentage, take the percentage
-     * of the size of the box.
-     */
-    const nsStyleCoord &coord = cbDisplay->mPerspectiveOrigin[index];
-    if (coord.GetUnit() == eStyleUnit_Calc) {
-      const nsStyleCoord::Calc *calc = coord.GetCalcValue();
-      *coords[index] =
-        NSAppUnitsToFloatPixels((refBox.*dimensionGetter[index])(), aAppUnitsPerPixel) *
-          calc->mPercent +
-        NSAppUnitsToFloatPixels(calc->mLength, aAppUnitsPerPixel);
-    } else if (coord.GetUnit() == eStyleUnit_Percent) {
-      *coords[index] =
-        NSAppUnitsToFloatPixels((refBox.*dimensionGetter[index])(), aAppUnitsPerPixel) *
-        coord.GetPercentValue();
-    } else {
-      MOZ_ASSERT(coord.GetUnit() == eStyleUnit_Coord, "unexpected unit");
-      *coords[index] =
-        NSAppUnitsToFloatPixels(coord.GetCoordValue(), aAppUnitsPerPixel);
-    }
-  }
+  Point perspectiveOrigin =
+    nsStyleTransformMatrix::Convert2DPosition(cbDisplay->mPerspectiveOrigin,
+                                              refBox, aAppUnitsPerPixel);
 
   /* GetOffsetTo computes the offset required to move from 0,0 in cbFrame to 0,0
    * in aFrame. Although we actually want the inverse of this, it's faster to
    * compute this way.
    */
   nsPoint frameToCbOffset = -aFrame->GetOffsetTo(cbFrame);
-  Point3D frameToCbGfxOffset(
+  Point frameToCbGfxOffset(
             NSAppUnitsToFloatPixels(frameToCbOffset.x, aAppUnitsPerPixel),
-            NSAppUnitsToFloatPixels(frameToCbOffset.y, aAppUnitsPerPixel),
-            0.0f);
+            NSAppUnitsToFloatPixels(frameToCbOffset.y, aAppUnitsPerPixel));
 
   /* Move the perspective origin to be relative to aFrame, instead of relative
    * to the containing block which is how it was specified in the style system.
@@ -7119,7 +7094,7 @@ nsDisplayTransform::ComputePerspectiveMatrix(const nsIFrame* aFrame,
   aOutMatrix._34 =
     -1.0 / NSAppUnitsToFloatPixels(perspective, aAppUnitsPerPixel);
 
-  aOutMatrix.ChangeBasis(perspectiveOrigin);
+  aOutMatrix.ChangeBasis(Point3D(perspectiveOrigin.x, perspectiveOrigin.y, 0));
   return true;
 }
 

@@ -51,12 +51,12 @@ SurfaceFormatToWrImageFormat(gfx::SurfaceFormat aFormat) {
   switch (aFormat) {
     case gfx::SurfaceFormat::R8G8B8X8:
       // TODO: use RGBA + opaque flag
-      return Some(WrImageFormat::RGBA8);
+      return Some(WrImageFormat::BGRA8);
     case gfx::SurfaceFormat::B8G8R8X8:
       // TODO: WebRender will have a BGRA + opaque flag for this but does not
       // have it yet (cf. issue #732).
     case gfx::SurfaceFormat::B8G8R8A8:
-      return Some(WrImageFormat::RGBA8);
+      return Some(WrImageFormat::BGRA8);
     case gfx::SurfaceFormat::B8G8R8:
       return Some(WrImageFormat::RGB8);
     case gfx::SurfaceFormat::A8:
@@ -73,7 +73,7 @@ SurfaceFormatToWrImageFormat(gfx::SurfaceFormat aFormat) {
 inline gfx::SurfaceFormat
 WrImageFormatToSurfaceFormat(ImageFormat aFormat) {
   switch (aFormat) {
-    case ImageFormat::RGBA8:
+    case ImageFormat::BGRA8:
       return gfx::SurfaceFormat::B8G8R8A8;
     case ImageFormat::A8:
       return gfx::SurfaceFormat::A8;
@@ -113,6 +113,26 @@ inline uint64_t AsUint64(const WindowId& aId) {
 inline uint64_t AsUint64(const ImageKey& aId) {
   return (static_cast<uint64_t>(aId.mNamespace) << 32)
         + static_cast<uint64_t>(aId.mHandle);
+}
+
+inline ImageKey AsImageKey(const uint64_t& aId) {
+  ImageKey imageKey;
+  imageKey.mNamespace = aId >> 32;
+  imageKey.mHandle = aId;
+  return imageKey;
+}
+
+// Whenever possible, use wr::FontKey instead of manipulating uint64_t.
+inline uint64_t AsUint64(const FontKey& aId) {
+  return (static_cast<uint64_t>(aId.mNamespace) << 32)
+        + static_cast<uint64_t>(aId.mHandle);
+}
+
+inline FontKey AsFontKey(const uint64_t& aId) {
+  FontKey fontKey;
+  fontKey.mNamespace = aId >> 32;
+  fontKey.mHandle = aId;
+  return fontKey;
 }
 
 // Whenever possible, use wr::PipelineId instead of manipulating uint64_t.
@@ -583,6 +603,14 @@ static inline WrFilterOp ToWrFilterOp(const layers::CSSFilter& filter) {
     filter.argument,
   };
 }
+
+// Corresponds to an "internal" webrender clip id. That is, a
+// ClipId::Clip(x,pipeline_id) maps to a WrClipId{x}. We use a struct wrapper
+// instead of a typedef so that this is a distinct type from FrameMetrics::ViewID
+// and the compiler will catch accidental conversions between the two.
+struct WrClipId {
+  uint64_t id;
+};
 
 } // namespace wr
 } // namespace mozilla

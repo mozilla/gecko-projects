@@ -4,13 +4,12 @@
 
 //! Gecko-specific bits for selector-parsing.
 
-use cssparser::{Parser, ToCss};
+use cssparser::{Parser, ToCss, CompactCowStr};
 use element_state::ElementState;
 use gecko_bindings::structs::CSSPseudoClassType;
 use selector_parser::{SelectorParser, PseudoElementCascadeType};
 use selectors::parser::{Selector, SelectorMethods, SelectorParseError};
 use selectors::visitor::SelectorVisitor;
-use std::borrow::Cow;
 use std::fmt;
 use string_cache::{Atom, Namespace, WeakAtom, WeakNamespace};
 use style_traits::{ParseError, StyleParseError};
@@ -177,16 +176,29 @@ impl NonTSPseudoClass {
 
     /// Returns true if the given pseudoclass should trigger style sharing cache revalidation.
     pub fn needs_cache_revalidation(&self) -> bool {
-        // :dir() depends on state only, but doesn't use state_flag because its
-        // semantics don't quite match.  Nevertheless, it doesn't need cache
-        // revalidation, because we already compare states for elements and
-        // candidates.
         self.state_flag().is_empty() &&
         !matches!(*self,
+                  // :-moz-any is handled by the revalidation visitor walking
+                  // the things inside it; it does not need to cause
+                  // revalidation on its own.
                   NonTSPseudoClass::MozAny(_) |
+                  // :dir() depends on state only, but doesn't use state_flag
+                  // because its semantics don't quite match.  Nevertheless, it
+                  // doesn't need cache revalidation, because we already compare
+                  // states for elements and candidates.
                   NonTSPseudoClass::Dir(_) |
+                  // :-moz-is-html only depends on the state of the document and
+                  // the namespace of the element; the former is invariant
+                  // across all the elements involved and the latter is already
+                  // checked for by our caching precondtions.
                   NonTSPseudoClass::MozIsHTML |
-                  NonTSPseudoClass::MozPlaceholder)
+                  // :-moz-placeholder is parsed but never matches.
+                  NonTSPseudoClass::MozPlaceholder |
+                  // :-moz-locale-dir depends only on the state of the document,
+                  // which is invariant across all the elements involved in a
+                  // given style cache.
+                  NonTSPseudoClass::MozLocaleDir(_)
+        )
     }
 
     /// Convert NonTSPseudoClass to Gecko's CSSPseudoClassType.
@@ -249,7 +261,7 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
     type Impl = SelectorImpl;
     type Error = StyleParseError<'i>;
 
-    fn parse_non_ts_pseudo_class(&self, name: Cow<'i, str>)
+    fn parse_non_ts_pseudo_class(&self, name: CompactCowStr<'i>)
                                  -> Result<NonTSPseudoClass, ParseError<'i>> {
         macro_rules! pseudo_class_parse {
             (bare: [$(($css:expr, $name:ident, $gecko_type:tt, $state:tt, $flags:tt),)*],
@@ -271,7 +283,7 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
     }
 
     fn parse_non_ts_functional_pseudo_class<'t>(&self,
-                                                name: Cow<'i, str>,
+                                                name: CompactCowStr<'i>,
                                                 parser: &mut Parser<'i, 't>)
                                                 -> Result<NonTSPseudoClass, ParseError<'i>> {
         macro_rules! pseudo_class_string_parse {
@@ -315,7 +327,7 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
         }
     }
 
-    fn parse_pseudo_element(&self, name: Cow<'i, str>) -> Result<PseudoElement, ParseError<'i>> {
+    fn parse_pseudo_element(&self, name: CompactCowStr<'i>) -> Result<PseudoElement, ParseError<'i>> {
         PseudoElement::from_slice(&name, self.in_user_agent_stylesheet())
             .ok_or(SelectorParseError::UnexpectedIdent(name.clone()).into())
     }

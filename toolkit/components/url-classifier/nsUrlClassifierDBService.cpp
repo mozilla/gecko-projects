@@ -102,11 +102,6 @@ LazyLogModule gUrlClassifierDbServiceLog("UrlClassifierDbService");
 // 30 minutes as the maximum negative cache duration.
 #define MAXIMUM_NEGATIVE_CACHE_DURATION_SEC (30 * 60 * 1000)
 
-// TODO: The following two prefs are to be removed after we
-//       roll out full v4 hash completion. See Bug 1331534.
-#define TAKE_V4_COMPLETION_RESULT_PREF    "browser.safebrowsing.temporary.take_v4_completion_result"
-#define TAKE_V4_COMPLETION_RESULT_DEFAULT false
-
 class nsUrlClassifierDBServiceWorker;
 
 // Singleton instance.
@@ -1057,7 +1052,8 @@ NS_IMPL_ISUPPORTS(nsUrlClassifierLookupCallback,
 nsUrlClassifierLookupCallback::~nsUrlClassifierLookupCallback()
 {
   if (mCallback) {
-    NS_ReleaseOnMainThread(mCallback.forget());
+    NS_ReleaseOnMainThread(
+      "nsUrlClassifierLookupCallback::mCallback", mCallback.forget());
   }
 }
 
@@ -1287,14 +1283,6 @@ nsUrlClassifierLookupCallback::HandleResults()
     if (!result.Confirmed()) {
       LOG(("Skipping result %s from table %s (not confirmed)",
            result.PartialHashHex().get(), result.mTableName.get()));
-      continue;
-    }
-
-    if (StringEndsWith(result.mTableName, NS_LITERAL_CSTRING("-proto")) &&
-        !Preferences::GetBool(TAKE_V4_COMPLETION_RESULT_PREF,
-                              TAKE_V4_COMPLETION_RESULT_DEFAULT)) {
-      // Bug 1331534 - We temporarily ignore hash completion result
-      // for v4 tables.
       continue;
     }
 
@@ -1839,7 +1827,8 @@ nsUrlClassifierDBService::AsyncClassifyLocalWithTables(nsIURI *aURI,
 
   // Since aCallback will be passed around threads...
   nsMainThreadPtrHandle<nsIURIClassifierCallback> callback(
-    new nsMainThreadPtrHolder<nsIURIClassifierCallback>(aCallback));
+    new nsMainThreadPtrHolder<nsIURIClassifierCallback>(
+      "nsIURIClassifierCallback", aCallback));
 
   nsCOMPtr<nsIRunnable> r =
     NS_NewRunnableFunction([worker, key, tables, callback, startTime] () -> void {

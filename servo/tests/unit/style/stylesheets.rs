@@ -116,7 +116,7 @@ fn test_parse_stylesheet() {
                 ]))),
                 source_location: SourceLocation {
                     line: 3,
-                    column: 31,
+                    column: 9,
                 },
             }))),
             CssRule::Style(Arc::new(stylesheet.shared_lock.wrap(StyleRule {
@@ -143,7 +143,7 @@ fn test_parse_stylesheet() {
                 ]))),
                 source_location: SourceLocation {
                     line: 11,
-                    column: 27,
+                    column: 9,
                 },
             }))),
             CssRule::Style(Arc::new(stylesheet.shared_lock.wrap(StyleRule {
@@ -205,7 +205,7 @@ fn test_parse_stylesheet() {
                 ]))),
                 source_location: SourceLocation {
                     line: 15,
-                    column: 20,
+                    column: 9,
                 },
             }))),
             CssRule::Keyframes(Arc::new(stylesheet.shared_lock.wrap(KeyframesRule {
@@ -249,8 +249,8 @@ fn test_parse_stylesheet() {
 
 struct CSSError {
     pub url : ServoUrl,
-    pub line: usize,
-    pub column: usize,
+    pub line: u32,
+    pub column: u32,
     pub message: String
 }
 
@@ -275,7 +275,7 @@ impl ParseErrorReporter for CSSInvalidErrorReporterTest {
                         line_number_offset: u64) {
 
         let location = input.source_location(position);
-        let line_offset = location.line + line_number_offset as usize;
+        let line_offset = location.line + line_number_offset as u32;
 
         let mut errors = self.errors.lock().unwrap();
         errors.push(

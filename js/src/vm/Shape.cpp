@@ -290,7 +290,7 @@ Shape::replaceLastProperty(JSContext* cx, StackBaseShape& base,
  * which must be lastProperty() if inDictionaryMode(), else parent must be
  * one of lastProperty() or lastProperty()->parent.
  */
-/* static */ Shape*
+/* static */ MOZ_ALWAYS_INLINE Shape*
 NativeObject::getChildProperty(JSContext* cx,
                                HandleNativeObject obj, HandleShape parent,
                                MutableHandle<StackShape> child)
@@ -350,7 +350,7 @@ NativeObject::getChildProperty(JSContext* cx,
         return shape;
     }
 
-    Shape* shape = cx->zone()->propertyTree().getChild(cx, parent, child);
+    Shape* shape = cx->zone()->propertyTree().inlinedGetChild(cx, parent, child);
     if (!shape)
         return nullptr;
     //MOZ_ASSERT(shape->parent == parent);
@@ -416,30 +416,6 @@ js::NativeObject::toDictionaryMode(JSContext* cx, HandleNativeObject obj)
     root->base()->setSlotSpan(span);
 
     return true;
-}
-
-/* static */ Shape*
-NativeObject::addProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
-                          GetterOp getter, SetterOp setter, uint32_t slot, unsigned attrs,
-                          unsigned flags, bool allowDictionary)
-{
-    MOZ_ASSERT(!JSID_IS_VOID(id));
-    MOZ_ASSERT(getter != JS_PropertyStub);
-    MOZ_ASSERT(setter != JS_StrictPropertyStub);
-    MOZ_ASSERT(obj->nonProxyIsExtensible());
-    MOZ_ASSERT(!obj->containsPure(id));
-
-    AutoKeepShapeTables keep(cx);
-    ShapeTable::Entry* entry = nullptr;
-    if (obj->inDictionaryMode()) {
-        ShapeTable* table = obj->lastProperty()->ensureTableForDictionary(cx, keep);
-        if (!table)
-            return nullptr;
-        entry = &table->search<MaybeAdding::Adding>(id, keep);
-    }
-
-    return addPropertyInternal(cx, obj, id, getter, setter, slot, attrs, flags, entry,
-                               allowDictionary, keep);
 }
 
 static bool
@@ -1288,12 +1264,12 @@ Zone::checkBaseShapeTableAfterMovingGC()
     if (!baseShapes().initialized())
         return;
 
-    for (BaseShapeSet::Enum e(baseShapes()); !e.empty(); e.popFront()) {
-        UnownedBaseShape* base = e.front().unbarrieredGet();
+    for (auto r = baseShapes().all(); !r.empty(); r.popFront()) {
+        UnownedBaseShape* base = r.front().unbarrieredGet();
         CheckGCThingAfterMovingGC(base);
 
         BaseShapeSet::Ptr ptr = baseShapes().lookup(base);
-        MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &e.front());
+        MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &r.front());
     }
 }
 
@@ -1349,8 +1325,8 @@ Zone::checkInitialShapesTableAfterMovingGC()
      * initialShapes that points into the nursery, and that the hash table
      * entries are discoverable.
      */
-    for (InitialShapeSet::Enum e(initialShapes()); !e.empty(); e.popFront()) {
-        InitialShapeEntry entry = e.front();
+    for (auto r = initialShapes().all(); !r.empty(); r.popFront()) {
+        InitialShapeEntry entry = r.front();
         JSProtoKey protoKey = entry.proto.key();
         TaggedProto proto = entry.proto.proto().unbarrieredGet();
         Shape* shape = entry.shape.unbarrieredGet();
@@ -1365,7 +1341,7 @@ Zone::checkInitialShapesTableAfterMovingGC()
                       shape->numFixedSlots(),
                       shape->getObjectFlags());
         InitialShapeSet::Ptr ptr = initialShapes().lookup(lookup);
-        MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &e.front());
+        MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &r.front());
     }
 }
 
@@ -1384,13 +1360,13 @@ EmptyShape::new_(JSContext* cx, Handle<UnownedBaseShape*> base, uint32_t nfixed)
     return shape;
 }
 
-inline HashNumber
+MOZ_ALWAYS_INLINE HashNumber
 ShapeHasher::hash(const Lookup& l)
 {
     return l.hash();
 }
 
-inline bool
+MOZ_ALWAYS_INLINE bool
 ShapeHasher::match(const Key k, const Lookup& l)
 {
     return k->matches(l);
@@ -1488,10 +1464,9 @@ Shape::removeChild(Shape* child)
     }
 }
 
-Shape*
-PropertyTree::getChild(JSContext* cx, Shape* parentArg, Handle<StackShape> child)
+MOZ_ALWAYS_INLINE Shape*
+PropertyTree::inlinedGetChild(JSContext* cx, Shape* parent, Handle<StackShape> child)
 {
-    RootedShape parent(cx, parentArg);
     MOZ_ASSERT(parent);
 
     Shape* existingShape = nullptr;
@@ -1526,30 +1501,38 @@ PropertyTree::getChild(JSContext* cx, Shape* parentArg, Handle<StackShape> child
             Shape* tmp = existingShape;
             TraceManuallyBarrieredEdge(zone->barrierTracer(), &tmp, "read barrier");
             MOZ_ASSERT(tmp == existingShape);
-        } else if (IsAboutToBeFinalizedUnbarriered(&existingShape)) {
-            /*
-             * The shape we've found is unreachable and due to be finalized, so
-             * remove our weak reference to it and don't use it.
-             */
-            MOZ_ASSERT(parent->isMarked());
-            parent->removeChild(existingShape);
-            existingShape = nullptr;
-        } else if (existingShape->isMarked(gc::GRAY)) {
-            UnmarkGrayShapeRecursively(existingShape);
+            return existingShape;
         }
+        if (!zone->isGCSweepingOrCompacting() ||
+            !IsAboutToBeFinalizedUnbarriered(&existingShape))
+        {
+            if (existingShape->isMarked(gc::GRAY))
+                UnmarkGrayShapeRecursively(existingShape);
+            return existingShape;
+        }
+        /*
+         * The shape we've found is unreachable and due to be finalized, so
+         * remove our weak reference to it and don't use it.
+         */
+        MOZ_ASSERT(parent->isMarked());
+        parent->removeChild(existingShape);
     }
 
-    if (existingShape)
-        return existingShape;
-
-    Shape* shape = Shape::new_(cx, child, parent->numFixedSlots());
+    RootedShape parentRoot(cx, parent);
+    Shape* shape = Shape::new_(cx, child, parentRoot->numFixedSlots());
     if (!shape)
         return nullptr;
 
-    if (!insertChild(cx, parent, shape))
+    if (!insertChild(cx, parentRoot, shape))
         return nullptr;
 
     return shape;
+}
+
+Shape*
+PropertyTree::getChild(JSContext* cx, Shape* parent, Handle<StackShape> child)
+{
+    return inlinedGetChild(cx, parent, child);
 }
 
 void

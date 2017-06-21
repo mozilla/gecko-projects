@@ -2273,8 +2273,7 @@ InvalidateEntirePaintedLayer(PaintedLayer* aLayer, AnimatedGeometryRoot* aAnimat
     printf_stderr("Invalidating entire layer %p: %s\n", aLayer, aReason);
   }
 #endif
-  nsIntRect invalidate = aLayer->GetValidRegion().GetBounds();
-  aLayer->InvalidateRegion(invalidate);
+  aLayer->InvalidateWholeLayer();
   aLayer->SetInvalidRectToVisibleRegion();
   ResetScrollPositionForLayerPixelAlignment(aAnimatedGeometryRoot);
 }
@@ -2313,14 +2312,17 @@ ContainerState::AttemptToRecyclePaintedLayer(AnimatedGeometryRoot* aAnimatedGeom
                                              const nsPoint& aTopLeft)
 {
   Layer* oldLayer = mLayerBuilder->GetOldLayerFor(aItem);
-  if (!oldLayer || !oldLayer->AsPaintedLayer() ||
-      !mPaintedLayersAvailableForRecycling.Contains(oldLayer->AsPaintedLayer())) {
+  if (!oldLayer || !oldLayer->AsPaintedLayer()) {
     return nullptr;
   }
 
-  // Try to recycle a layer
+  if (!mPaintedLayersAvailableForRecycling.EnsureRemoved(oldLayer->AsPaintedLayer())) {
+    // Not found.
+    return nullptr;
+  }
+
+  // Try to recycle the layer.
   RefPtr<PaintedLayer> layer = oldLayer->AsPaintedLayer();
-  mPaintedLayersAvailableForRecycling.RemoveEntry(layer);
 
   // Check if the layer hint has changed and whether or not the layer should
   // be recreated because of it.
@@ -3206,7 +3208,7 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
       ParentLayerIntRect emptyRect;
       data->mLayer->SetClipRect(Some(emptyRect));
       data->mLayer->SetVisibleRegion(LayerIntRegion());
-      data->mLayer->InvalidateRegion(data->mLayer->GetValidRegion().GetBounds());
+      data->mLayer->InvalidateWholeLayer();
       data->mLayer->SetEventRegions(EventRegions());
 
       for (auto& item : data->mAssignedDisplayItems) {
@@ -3272,7 +3274,7 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
         printf_stderr("Invalidating layer %p: %s\n", data->mLayer, str.get());
       }
 #endif
-      data->mLayer->InvalidateRegion(data->mLayer->GetValidRegion());
+      data->mLayer->InvalidateWholeLayer();
     }
     userData->mForcedBackgroundColor = backgroundColor;
 
@@ -4549,8 +4551,6 @@ FrameLayerBuilder::ComputeGeometryChangeForItem(DisplayItemData* aData)
     return;
   }
 
-  PaintedLayerItemsEntry* entry = mPaintedLayerItems.GetEntry(paintedLayer);
-
   nsAutoPtr<nsDisplayItemGeometry> geometry;
 
   PaintedDisplayItemLayerUserData* layerData =
@@ -4612,6 +4612,7 @@ FrameLayerBuilder::ComputeGeometryChangeForItem(DisplayItemData* aData)
                changedFrameInvalidations.IsEmpty() == 0) {
       notifyRenderingChanged = false;
     }
+    PaintedLayerItemsEntry* entry = mPaintedLayerItems.GetEntry(paintedLayer);
     aData->mClip.AddOffsetAndComputeDifference(entry->mCommonClipCount,
                                                shift, aData->mGeometry->ComputeInvalidationRegion(),
                                                clip, entry->mLastCommonClipCount,
@@ -6355,7 +6356,7 @@ ContainerState::SetupMaskLayer(Layer *aLayer,
   if (paintedData &&
       aRoundedRectClipCount < paintedData->mMaskClipCount) {
     PaintedLayer* painted = aLayer->AsPaintedLayer();
-    painted->InvalidateRegion(painted->GetValidRegion().GetBounds());
+    painted->InvalidateWholeLayer();
   }
 
   // don't build an unnecessary mask

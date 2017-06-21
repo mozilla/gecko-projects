@@ -56,6 +56,7 @@
 #include "nsISupportsPrimitives.h"
 #include "nsIXULRuntime.h"
 #include "nsCharSeparatedTokenizer.h"
+#include "nsRFPService.h"
 
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/net/NeckoParent.h"
@@ -388,7 +389,8 @@ nsHttpHandler::Init()
         NS_WARNING("unable to continue without io service");
         return rv;
     }
-    mIOService = new nsMainThreadPtrHolder<nsIIOService>(service);
+    mIOService = new nsMainThreadPtrHolder<nsIIOService>(
+      "nsHttpHandler::mIOService", service);
 
     if (IsNeckoChild())
         NeckoChild::InitNeckoChild();
@@ -436,6 +438,17 @@ nsHttpHandler::Init()
         mAppVersion.AssignLiteral(MOZ_APP_UA_VERSION);
     }
 
+    // Generating the spoofed userAgent for fingerprinting resistance. We will
+    // round the version to the nearest 10. By doing so, the anonymity group will
+    // cover more versions instead of one version.
+    uint32_t spoofedVersion = mAppVersion.ToInteger(&rv);
+    if (NS_SUCCEEDED(rv)) {
+        spoofedVersion = spoofedVersion - (spoofedVersion % 10);
+        mSpoofedUserAgent.Assign(nsPrintfCString(
+            "Mozilla/5.0 (%s; rv:%d.0) Gecko/%s Firefox/%d.0",
+            SPOOFED_OSCPU, spoofedVersion, LEGACY_BUILD_ID, spoofedVersion));
+    }
+
     mSessionStartTime = NowInSeconds();
     mHandlerActive = true;
 
@@ -454,7 +467,7 @@ nsHttpHandler::Init()
 #if defined(ANDROID) || defined(MOZ_MULET)
     mProductSub.AssignLiteral(MOZILLA_UAVERSION);
 #else
-    mProductSub.AssignLiteral("20100101");
+    mProductSub.AssignLiteral(LEGACY_BUILD_ID);
 #endif
 
 #if DEBUG
@@ -686,7 +699,8 @@ nsHttpHandler::GetStreamConverterService(nsIStreamConverterService **result)
             do_GetService(NS_STREAMCONVERTERSERVICE_CONTRACTID, &rv);
         if (NS_FAILED(rv))
             return rv;
-        mStreamConvSvc = new nsMainThreadPtrHolder<nsIStreamConverterService>(service);
+        mStreamConvSvc = new nsMainThreadPtrHolder<nsIStreamConverterService>(
+          "nsHttpHandler::mStreamConvSvc", service);
     }
     *result = mStreamConvSvc;
     NS_ADDREF(*result);
@@ -698,7 +712,8 @@ nsHttpHandler::GetSSService()
 {
     if (!mSSService) {
         nsCOMPtr<nsISiteSecurityService> service = do_GetService(NS_SSSERVICE_CONTRACTID);
-        mSSService = new nsMainThreadPtrHolder<nsISiteSecurityService>(service);
+        mSSService = new nsMainThreadPtrHolder<nsISiteSecurityService>(
+          "nsHttpHandler::mSSService", service);
     }
     return mSSService;
 }
@@ -708,7 +723,8 @@ nsHttpHandler::GetCookieService()
 {
     if (!mCookieService) {
         nsCOMPtr<nsICookieService> service = do_GetService(NS_COOKIESERVICE_CONTRACTID);
-        mCookieService = new nsMainThreadPtrHolder<nsICookieService>(service);
+        mCookieService = new nsMainThreadPtrHolder<nsICookieService>(
+          "nsHttpHandler::mCookieService", service);
     }
     return mCookieService;
 }
@@ -778,6 +794,12 @@ nsHttpHandler::GenerateHostPort(const nsCString& host, int32_t port,
 const nsAFlatCString &
 nsHttpHandler::UserAgent()
 {
+    if (nsContentUtils::ShouldResistFingerprinting() &&
+        !mSpoofedUserAgent.IsEmpty()) {
+        LOG(("using spoofed userAgent : %s\n", mSpoofedUserAgent.get()));
+        return mSpoofedUserAgent;
+    }
+
     if (mUserAgentOverride) {
         LOG(("using general.useragent.override : %s\n", mUserAgentOverride.get()));
         return mUserAgentOverride;
@@ -1337,7 +1359,7 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
                                 getter_Copies(sval));
         if (NS_SUCCEEDED(rv)) {
             if (sval.IsEmpty())
-                mDefaultSocketType.Adopt(0);
+                mDefaultSocketType.Adopt(nullptr);
             else {
                 // verify that this socket type is actually valid
                 nsCOMPtr<nsISocketProviderService> sps(
@@ -1899,13 +1921,13 @@ PrepareAcceptLanguages(const char *i_AcceptLanguages, nsACString &o_AcceptLangua
     count_n = 0;
     p2 = q_Accept;
     for (token = nsCRT::strtok(o_Accept, ",", &p);
-         token != (char *) 0;
+         token != nullptr;
          token = nsCRT::strtok(p, ",", &p))
     {
         token = net_FindCharNotInSet(token, HTTP_LWS);
         char* trim;
         trim = net_FindCharInSet(token, ";" HTTP_LWS);
-        if (trim != (char*)0)  // remove "; q=..." if present
+        if (trim != nullptr)  // remove "; q=..." if present
             *trim = '\0';
 
         if (*token != '\0') {
@@ -2412,7 +2434,7 @@ nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
     nsCOMPtr<nsIURI> clone;
     if (NS_SUCCEEDED(sss->IsSecureURI(nsISiteSecurityService::HEADER_HSTS,
                                       aURI, flags, originAttributes,
-                                      nullptr, &isStsHost)) &&
+                                      nullptr, nullptr, &isStsHost)) &&
                                       isStsHost) {
         if (NS_SUCCEEDED(NS_GetSecureUpgradedURI(aURI,
                                                  getter_AddRefs(clone)))) {

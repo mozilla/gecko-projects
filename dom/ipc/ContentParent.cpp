@@ -3560,7 +3560,7 @@ ContentParent::RecvIsSecureURI(const uint32_t& aType,
     return IPC_FAIL_NO_REASON(this);
   }
   nsresult rv = sss->IsSecureURI(aType, ourURI, aFlags, aOriginAttributes, nullptr,
-                                 aIsSecureURI);
+                                 nullptr, aIsSecureURI);
   if (NS_FAILED(rv)) {
     return IPC_FAIL_NO_REASON(this);
   }
@@ -4637,7 +4637,8 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
                                 TextureFactoryIdentifier* aTextureFactoryIdentifier,
                                 uint64_t* aLayersId,
                                 CompositorOptions* aCompositorOptions,
-                                uint32_t* aMaxTouchPoints)
+                                uint32_t* aMaxTouchPoints,
+                                DimensionInfo* aDimensions)
 {
   // We always expect to open a new window here. If we don't, it's an error.
   *aWindowIsNew = true;
@@ -4693,6 +4694,9 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
 
   nsCOMPtr<nsIWidget> widget = newTab->GetWidget();
   *aMaxTouchPoints = widget ? widget->GetMaxTouchPoints() : 0;
+
+  // NOTE: widget must be set for this to return a meaningful value.
+  *aDimensions = widget ? newTab->GetDimensionInfo() : DimensionInfo();
 
   return IPC_OK();
 }
@@ -5372,5 +5376,16 @@ ContentParent::RecvMaybeReloadPlugins()
 {
   RefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
   pluginHost->ReloadPlugins();
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentParent::RecvDeviceReset()
+{
+  GPUProcessManager* pm = GPUProcessManager::Get();
+  if (pm) {
+    pm->TriggerDeviceResetForTesting();
+  }
+
   return IPC_OK();
 }

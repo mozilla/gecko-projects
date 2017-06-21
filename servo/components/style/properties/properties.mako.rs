@@ -20,7 +20,7 @@ use stylearc::{Arc, UniqueArc};
 use app_units::Au;
 #[cfg(feature = "servo")] use cssparser::RGBA;
 use cssparser::{Parser, TokenSerializationType, serialize_identifier};
-use cssparser::ParserInput;
+use cssparser::{ParserInput, CompactCowStr};
 use error_reporting::ParseErrorReporter;
 #[cfg(feature = "servo")] use euclid::SideOffsets2D;
 use computed_values;
@@ -234,8 +234,8 @@ pub mod shorthands {
             while let Ok(_) = input.next() {}  // Look for var()
             if input.seen_var_functions() {
                 input.reset(start);
-                let (first_token_type, css) = try!(
-                    ::custom_properties::parse_non_custom_with_var(input));
+                let (first_token_type, css) =
+                    ::custom_properties::parse_non_custom_with_var(input)?;
                 declarations.all_shorthand = AllShorthand::WithVariables(Arc::new(UnparsedValue {
                     css: css.into_owned(),
                     first_token_type: first_token_type,
@@ -491,7 +491,7 @@ impl CSSWideKeyword {
 
     /// Takes the result of cssparser::Parser::expect_ident() and converts it
     /// to a CSSWideKeyword.
-    pub fn from_ident<'i>(ident: &Cow<'i, str>) -> Option<Self> {
+    pub fn from_ident<'i>(ident: &str) -> Option<Self> {
         match_ignore_ascii_case! { ident,
             // If modifying this set of keyword, also update values::CustomIdent::from_ident
             "initial" => Some(CSSWideKeyword::Initial),
@@ -986,7 +986,7 @@ impl PropertyId {
     /// Returns a given property from the string `s`.
     ///
     /// Returns Err(()) for unknown non-custom properties
-    pub fn parse<'i>(property_name: Cow<'i, str>) -> Result<Self, ParseError<'i>> {
+    pub fn parse<'i>(property_name: CompactCowStr<'i>) -> Result<Self, ParseError<'i>> {
         if let Ok(name) = ::custom_properties::parse_name(&property_name) {
             return Ok(PropertyId::Custom(::custom_properties::Name::from(name)))
         }
@@ -1137,8 +1137,8 @@ impl HasViewportPercentage for PropertyDeclaration {
 
 impl fmt::Debug for PropertyDeclaration {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(self.id().to_css(f));
-        try!(f.write_str(": "));
+        self.id().to_css(f)?;
+        f.write_str(": ")?;
         self.to_css(f)
     }
 }
@@ -1895,6 +1895,13 @@ impl ComputedValues {
         self.visited_style.clone()
     }
 
+    // Aah! The << in the return type below is not valid syntax, but we must
+    // escape < that way for Mako.
+    /// Gets a reference to the custom properties map (if one exists).
+    pub fn get_custom_properties(&self) -> Option<<&::custom_properties::ComputedValuesMap> {
+        self.custom_properties.as_ref().map(|x| &**x)
+    }
+
     /// Get the custom properties map if necessary.
     ///
     /// Cloning the Arc here is fine because it only happens in the case where
@@ -2057,7 +2064,7 @@ impl ComputedValues {
         let effects = self.get_effects();
         // TODO(gw): Add clip-path, isolation, mask-image, mask-border-source when supported.
         effects.opacity < 1.0 ||
-           !effects.filter.is_empty() ||
+           !effects.filter.0.is_empty() ||
            !effects.clip.is_auto() ||
            effects.mix_blend_mode != mix_blend_mode::T::normal
     }
@@ -2479,6 +2486,10 @@ bitflags! {
         /// ::backdrop and all NAC will resolve rem units against
         /// the toplevel root element now.
         const ALLOW_SET_ROOT_FONT_SIZE = 0x08,
+        /// Whether to convert display:contents into display:inline.  This
+        /// is used by Gecko to prevent display:contents on generated
+        /// content.
+        const PROHIBIT_DISPLAY_CONTENTS = 0x10,
     }
 }
 
@@ -2525,10 +2536,12 @@ pub fn cascade(device: &Device,
     let iter_declarations = || {
         rule_node.self_and_ancestors().flat_map(|node| {
             let cascade_level = node.cascade_level();
-            let declarations = match node.style_source() {
-                Some(source) => source.read(cascade_level.guard(guards)).declarations(),
+            let source = node.style_source();
+            let declarations = if source.is_some() {
+                source.read(cascade_level.guard(guards)).declarations()
+            } else {
                 // The root node has no style source.
-                None => &[]
+                &[]
             };
             let node_importance = node.importance();
             declarations
@@ -2851,8 +2864,7 @@ pub fn apply_declarations<'a, F, I>(device: &Device,
 
     {
         StyleAdjuster::new(&mut style, is_root_element)
-            .adjust(context.layout_parent_style,
-                    flags.contains(SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP));
+            .adjust(context.layout_parent_style, flags);
     }
 
     % if product == "gecko":

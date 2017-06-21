@@ -93,8 +93,10 @@ class ImageTracker;
 #define NS_STYLE_HAS_CHILD_THAT_USES_RESET_STYLE 0x400000000
 // See nsStyleContext::IsTextCombined
 #define NS_STYLE_IS_TEXT_COMBINED          0x800000000
+// Whether a style context is a Gecko or Servo context
+#define NS_STYLE_CONTEXT_IS_GECKO          0x1000000000
 // See nsStyleContext::GetPseudoEnum
-#define NS_STYLE_CONTEXT_TYPE_SHIFT        36
+#define NS_STYLE_CONTEXT_TYPE_SHIFT        37
 
 // Additional bits for nsRuleNode's mDependentBits:
 #define NS_RULE_NODE_IS_ANIMATION_RULE      0x01000000
@@ -3226,6 +3228,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUIReset
   uint8_t                      mIMEMode;        // [reset]
   mozilla::StyleWindowDragging mWindowDragging; // [reset]
   uint8_t                      mWindowShadow;   // [reset]
+  float                        mWindowOpacity;  // [reset]
+  RefPtr<nsCSSValueSharedList> mSpecifiedWindowTransform; // [reset]
+  nsStyleCoord                 mWindowTransformOrigin[2]; // [reset] percent, coord, calc
 };
 
 struct nsCursorImage

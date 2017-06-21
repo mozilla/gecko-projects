@@ -546,10 +546,26 @@ impl Stylist {
     pub fn might_have_attribute_dependency(&self,
                                            local_name: &LocalName)
                                            -> bool {
-        if *local_name == local_name!("style") {
+        if self.is_cleared || self.is_device_dirty {
+            // We can't tell what attributes are in our style rules until
+            // we rebuild.
+            true
+        } else if *local_name == local_name!("style") {
             self.style_attribute_dependency
         } else {
-            self.attribute_dependencies.might_contain(local_name)
+            self.attribute_dependencies.might_contain_hash(local_name.get_hash())
+        }
+    }
+
+    /// Returns whether the given ElementState bit might be relied upon by a
+    /// selector of some rule in the stylist.
+    pub fn might_have_state_dependency(&self, state: ElementState) -> bool {
+        if self.is_cleared || self.is_device_dirty {
+            // If self.is_cleared is true, we can't tell what states our style
+            // rules rely on until we rebuild.
+            true
+        } else {
+            self.state_dependencies.intersects(state)
         }
     }
 
@@ -1169,7 +1185,7 @@ impl Stylist {
     /// of our rule maps.
     #[inline]
     pub fn may_have_rules_for_id(&self, id: &Atom) -> bool {
-        self.mapped_ids.might_contain(id)
+        self.mapped_ids.might_contain_hash(id.get_hash())
     }
 
     /// Return whether the device is dirty, that is, whether the screen size or
@@ -1283,10 +1299,10 @@ impl Drop for Stylist {
         // dropped all strong rule node references before now, then we will
         // leak them, since there will be no way to call gc() on the rule tree
         // after this point.
-        //
-        // TODO(emilio): We can at least assert all the elements in the free
-        // list are indeed free.
         unsafe { self.rule_tree.gc(); }
+
+        // Assert against leaks.
+        debug_assert!(self.rule_tree.is_empty());
     }
 }
 
@@ -1304,16 +1320,11 @@ impl<'a> SelectorVisitor for AttributeAndStateDependencyVisitor<'a> {
     fn visit_attribute_selector(&mut self, _ns: &NamespaceConstraint<&Namespace>,
                                 name: &LocalName, lower_name: &LocalName)
                                 -> bool {
-        #[cfg(feature = "servo")]
-        let style_lower_name = local_name!("style");
-        #[cfg(feature = "gecko")]
-        let style_lower_name = atom!("style");
-
-        if *lower_name == style_lower_name {
+        if *lower_name == local_name!("style") {
             *self.style_attribute_dependency = true;
         } else {
-            self.attribute_dependencies.insert(&name);
-            self.attribute_dependencies.insert(&lower_name);
+            self.attribute_dependencies.insert_hash(name.get_hash());
+            self.attribute_dependencies.insert_hash(lower_name.get_hash());
         }
         true
     }
@@ -1337,7 +1348,7 @@ impl<'a> SelectorVisitor for MappedIdVisitor<'a> {
     /// We just want to insert all the ids we find into mapped_ids.
     fn visit_simple_selector(&mut self, s: &Component<SelectorImpl>) -> bool {
         if let Component::ID(ref id) = *s {
-            self.mapped_ids.insert(id);
+            self.mapped_ids.insert_hash(id.get_hash());
         }
         true
     }

@@ -317,7 +317,7 @@ pref("mathml.scale_stretchy_operators.enabled", true);
 
 pref("media.dormant-on-pause-timeout-ms", 5000);
 
-// Media cache size in kilobytes
+// File-backed MediaCache size in kilobytes
 pref("media.cache_size", 512000);
 // When a network connection is suspended, don't resume it until the
 // amount of buffered data falls below this threshold (in seconds).
@@ -326,6 +326,14 @@ pref("media.cache_resume_threshold", 30);
 // of the current playback position. This limit can stop us from using arbitrary
 // amounts of network bandwidth prefetching huge videos.
 pref("media.cache_readahead_limit", 60);
+// If a resource is known to be smaller than this size (in kilobytes), a
+// memory-backed MediaCache may be used; otherwise the (single shared
+// global) file-backed MediaCache is used.
+pref("media.memory_cache_max_size", 8192);
+// Don't create more memory-backed MediaCaches if their combined size would go
+// above the lowest limit (in kilobytes or in percent of physical memory size).
+pref("media.memory_caches_combined_limit_kb", 524288);
+pref("media.memory_caches_combined_limit_pc_sysmem", 5);
 
 // Cache size hint (in bytes) for each MediaResourceIndex.
 // 0 -> no cache. Will use next power of 2, clamped to 32B-128KB.
@@ -376,7 +384,7 @@ pref("media.wmf.vp9.force.enabled", false);
 pref("media.wmf.vp9.enabled", true);
 pref("media.wmf.allow-unsupported-resolutions", false);
 pref("media.windows-media-foundation.allow-d3d11-dxva", true);
-pref("media.wmf.disable-d3d11-for-dlls", "igd11dxva64.dll: 20.19.15.4463, 20.19.15.4454, 20.19.15.4444, 20.19.15.4416, 20.19.15.4404, 20.19.15.4390, 20.19.15.4380, 20.19.15.4377, 20.19.15.4364, 20.19.15.4360, 20.19.15.4352, 20.19.15.4331, 20.19.15.4326, 20.19.15.4300; igd10iumd32.dll: 20.19.15.4444, 20.19.15.4424, 20.19.15.4409, 20.19.15.4390, 20.19.15.4380, 20.19.15.4360, 10.18.10.4358, 20.19.15.4331, 20.19.15.4312, 20.19.15.4300, 10.18.15.4281, 10.18.15.4279, 10.18.10.4276, 10.18.15.4268, 10.18.15.4256, 10.18.10.4252, 10.18.15.4248, 10.18.14.4112, 10.18.10.3958, 10.18.10.3496, 10.18.10.3431, 10.18.10.3412, 10.18.10.3355, 9.18.10.3234, 9.18.10.3071, 9.18.10.3055, 9.18.10.3006; igd10umd32.dll: 9.17.10.4229, 9.17.10.3040, 9.17.10.2857, 8.15.10.2274, 8.15.10.2272, 8.15.10.2246, 8.15.10.1840, 8.15.10.1808; igd10umd64.dll: 9.17.10.4229, 9.17.10.2857, 10.18.10.3496; isonyvideoprocessor.dll: 4.1.2247.8090, 4.1.2153.6200; tosqep.dll: 1.2.15.526, 1.1.12.201, 1.0.11.318, 1.0.11.215, 1.0.10.1224; tosqep64.dll: 1.1.12.201, 1.0.11.215; nvwgf2um.dll: 10.18.13.6510, 10.18.13.5891, 10.18.13.5887, 10.18.13.5582, 10.18.13.5382, 9.18.13.4195, 9.18.13.3165; atidxx32.dll: 21.19.151.3, 21.19.142.257, 21.19.137.514, 21.19.137.1, 21.19.134.1, 21.19.128.7, 21.19.128.4, 20.19.0.32837, 20.19.0.32832, 8.17.10.682, 8.17.10.671, 8.17.10.661, 8.17.10.648, 8.17.10.644, 8.17.10.625, 8.17.10.605, 8.17.10.581, 8.17.10.569, 8.17.10.560, 8.17.10.545, 8.17.10.539, 8.17.10.531, 8.17.10.525, 8.17.10.520, 8.17.10.519, 8.17.10.514, 8.17.10.511, 8.17.10.494, 8.17.10.489, 8.17.10.483, 8.17.10.453, 8.17.10.451, 8.17.10.441, 8.17.10.436, 8.17.10.432, 8.17.10.425, 8.17.10.418, 8.17.10.414, 8.17.10.401, 8.17.10.395, 8.17.10.385, 8.17.10.378, 8.17.10.362, 8.17.10.355, 8.17.10.342, 8.17.10.331, 8.17.10.318, 8.17.10.310, 8.17.10.286, 8.17.10.269, 8.17.10.261, 8.17.10.247, 8.17.10.240, 8.15.10.212; atidxx64.dll: 21.19.151.3, 21.19.142.257, 21.19.137.514, 21.19.137.1, 21.19.134.1, 21.19.128.7, 21.19.128.4, 20.19.0.32832, 8.17.10.682, 8.17.10.661, 8.17.10.644, 8.17.10.625; nvumdshim.dll: 10.18.13.6822");
+pref("media.wmf.disable-d3d11-for-dlls", "igd11dxva64.dll: 20.19.15.4463, 20.19.15.4454, 20.19.15.4444, 20.19.15.4416, 20.19.15.4404, 20.19.15.4390, 20.19.15.4380, 20.19.15.4377, 20.19.15.4364, 20.19.15.4360, 20.19.15.4352, 20.19.15.4331, 20.19.15.4326, 20.19.15.4300; igd10iumd32.dll: 20.19.15.4444, 20.19.15.4424, 20.19.15.4409, 20.19.15.4390, 20.19.15.4380, 20.19.15.4360, 10.18.10.4358, 20.19.15.4331, 20.19.15.4312, 20.19.15.4300, 10.18.15.4281, 10.18.15.4279, 10.18.10.4276, 10.18.15.4268, 10.18.15.4256, 10.18.10.4252, 10.18.15.4248, 10.18.14.4112, 10.18.10.3958, 10.18.10.3496, 10.18.10.3431, 10.18.10.3412, 10.18.10.3355, 9.18.10.3234, 9.18.10.3071, 9.18.10.3055, 9.18.10.3006; igd10umd32.dll: 9.17.10.4229, 9.17.10.3040, 9.17.10.2857, 8.15.10.2274, 8.15.10.2272, 8.15.10.2246, 8.15.10.1840, 8.15.10.1808; igd10umd64.dll: 9.17.10.4229, 9.17.10.2857, 10.18.10.3496; isonyvideoprocessor.dll: 4.1.2247.8090, 4.1.2153.6200; tosqep.dll: 1.2.15.526, 1.1.12.201, 1.0.11.318, 1.0.11.215, 1.0.10.1224; tosqep64.dll: 1.1.12.201, 1.0.11.215; nvwgf2um.dll: 22.21.13.8253, 22.21.13.8233, 22.21.13.8205, 22.21.13.8189, 22.21.13.8178, 22.21.13.8165, 21.21.13.7892, 21.21.13.7878, 21.21.13.7866, 21.21.13.7849, 21.21.13.7654, 21.21.13.7653, 21.21.13.7633, 21.21.13.7619, 21.21.13.7563, 21.21.13.7306, 21.21.13.7290, 21.21.13.7270, 21.21.13.7254, 21.21.13.6939, 21.21.13.6926, 21.21.13.6909, 21.21.13.4201, 21.21.13.4200, 10.18.13.6881, 10.18.13.6839, 10.18.13.6510, 10.18.13.6472, 10.18.13.6143, 10.18.13.5946, 10.18.13.5923, 10.18.13.5921, 10.18.13.5891, 10.18.13.5887, 10.18.13.5582, 10.18.13.5445, 10.18.13.5382, 10.18.13.5362, 9.18.13.4788, 9.18.13.4752, 9.18.13.4725, 9.18.13.4709, 9.18.13.4195, 9.18.13.4192, 9.18.13.4144, 9.18.13.4052, 9.18.13.3788, 9.18.13.3523, 9.18.13.3235, 9.18.13.3165, 9.18.13.2723, 9.18.13.2702, 9.18.13.1422, 9.18.13.1407, 9.18.13.1106, 9.18.13.546; atidxx32.dll: 21.19.151.3, 21.19.142.257, 21.19.137.514, 21.19.137.1, 21.19.134.1, 21.19.128.7, 21.19.128.4, 20.19.0.32837, 20.19.0.32832, 8.17.10.682, 8.17.10.671, 8.17.10.661, 8.17.10.648, 8.17.10.644, 8.17.10.625, 8.17.10.605, 8.17.10.581, 8.17.10.569, 8.17.10.560, 8.17.10.545, 8.17.10.539, 8.17.10.531, 8.17.10.525, 8.17.10.520, 8.17.10.519, 8.17.10.514, 8.17.10.511, 8.17.10.494, 8.17.10.489, 8.17.10.483, 8.17.10.453, 8.17.10.451, 8.17.10.441, 8.17.10.436, 8.17.10.432, 8.17.10.425, 8.17.10.418, 8.17.10.414, 8.17.10.401, 8.17.10.395, 8.17.10.385, 8.17.10.378, 8.17.10.362, 8.17.10.355, 8.17.10.342, 8.17.10.331, 8.17.10.318, 8.17.10.310, 8.17.10.286, 8.17.10.269, 8.17.10.261, 8.17.10.247, 8.17.10.240, 8.15.10.212; atidxx64.dll: 21.19.151.3, 21.19.142.257, 21.19.137.514, 21.19.137.1, 21.19.134.1, 21.19.128.7, 21.19.128.4, 20.19.0.32832, 8.17.10.682, 8.17.10.661, 8.17.10.644, 8.17.10.625; nvumdshim.dll: 10.18.13.6822");
 pref("media.wmf.disable-d3d9-for-dlls", "igdumd64.dll: 8.15.10.2189, 8.15.10.2119, 8.15.10.2104, 8.15.10.2102, 8.771.1.0; atiumd64.dll: 7.14.10.833, 7.14.10.867, 7.14.10.885, 7.14.10.903, 7.14.10.911, 8.14.10.768, 9.14.10.1001, 9.14.10.1017, 9.14.10.1080, 9.14.10.1128, 9.14.10.1162, 9.14.10.1171, 9.14.10.1183, 9.14.10.1197, 9.14.10.945, 9.14.10.972, 9.14.10.984, 9.14.10.996");
 #endif
 #if defined(MOZ_FFMPEG)
@@ -405,7 +413,7 @@ pref("media.wave.enabled", true);
 pref("media.webm.enabled", true);
 
 pref("media.eme.chromium-api.enabled", true);
-pref("media.eme.chromium-api.video-shmems", 4);
+pref("media.eme.chromium-api.video-shmems", 6);
 
 #ifdef MOZ_APPLEMEDIA
 #ifdef MOZ_WIDGET_UIKIT
@@ -622,6 +630,9 @@ pref("media.video_stats.enabled", true);
 
 // Whether to check the decoder supports recycling.
 pref("media.decoder.recycle.enabled", false);
+
+//Weather MFR should try to skip to next key frame or not.
+pref("media.decoder.skip-to-next-key-frame.enabled", true);
 
 // Log level for cubeb, the audio input/output system. Valid values are
 // "verbose", "normal" and "" (log disabled).
@@ -923,6 +934,9 @@ pref("accessibility.AOM.enabled", false);
 // See bug 781791.
 pref("accessibility.delay_plugins", false);
 pref("accessibility.delay_plugin_time", 10000);
+
+// The COM handler used for Windows e10s performance and live regions
+pref("accessibility.handler.enabled", true);
 #endif
 
 pref("focusmanager.testmode", false);
@@ -4768,6 +4782,8 @@ pref("widget.content.allow-gtk-dark-theme", false);
 #endif
 #endif
 
+pref("widget.window-transforms.disabled", false);
+
 #ifdef XP_WIN
 // Whether to disable the automatic detection and use of direct2d.
 pref("gfx.direct2d.disabled", false);
@@ -4973,7 +4989,7 @@ pref("dom.w3c_touch_events.enabled", 2);
 #endif
 
 // W3C draft pointer events
-#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+#if !defined(ANDROID) && defined(NIGHTLY_BUILD)
 pref("dom.w3c_pointer_events.enabled", true);
 #else
 pref("dom.w3c_pointer_events.enabled", false);
@@ -5199,13 +5215,8 @@ pref("urlclassifier.phishTable", "googpub-phish-shavar,test-phish-simple");
 #endif
 
 // Tables for application reputation.
-#ifdef NIGHTLY_BUILD
-pref("urlclassifier.downloadAllowTable", "goog-downloadwhite-digest256,goog-downloadwhite-proto");
-pref("urlclassifier.downloadBlockTable", "goog-badbinurl-shavar,goog-badbinurl-proto");
-#else
-pref("urlclassifier.downloadAllowTable", "goog-downloadwhite-digest256");
-pref("urlclassifier.downloadBlockTable", "goog-badbinurl-shavar");
-#endif // NIGHTLY_BUILD
+pref("urlclassifier.downloadAllowTable", "goog-downloadwhite-proto");
+pref("urlclassifier.downloadBlockTable", "goog-badbinurl-proto");
 
 pref("urlclassifier.disallow_completions", "test-malware-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,test-block-simple,test-flashallow-simple,testexcept-flashallow-simple,test-flash-simple,testexcept-flash-simple,test-flashsubdoc-simple,testexcept-flashsubdoc-simple,goog-downloadwhite-digest256,base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,except-flashinfobar-digest256");
 
@@ -5258,11 +5269,7 @@ pref("browser.safebrowsing.provider.google.reportMalwareMistakeURL", "https://%L
 pref("browser.safebrowsing.provider.google4.pver", "4");
 pref("browser.safebrowsing.provider.google4.lists", "goog-badbinurl-proto,goog-downloadwhite-proto,goog-phish-proto,googpub-phish-proto,goog-malware-proto,goog-unwanted-proto");
 pref("browser.safebrowsing.provider.google4.updateURL", "https://safebrowsing.googleapis.com/v4/threatListUpdates:fetch?$ct=application/x-protobuf&key=%GOOGLE_API_KEY%&$httpMethod=POST");
-#ifdef NIGHTLY_BUILD
 pref("browser.safebrowsing.provider.google4.gethashURL", "https://safebrowsing.googleapis.com/v4/fullHashes:find?$ct=application/x-protobuf&key=%GOOGLE_API_KEY%&$httpMethod=POST");
-#else
-pref("browser.safebrowsing.provider.google4.gethashURL", "");
-#endif // NIGHTLY_BUILD
 pref("browser.safebrowsing.provider.google4.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
 pref("browser.safebrowsing.provider.google4.reportPhishMistakeURL", "https://%LOCALE%.phish-error.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.provider.google4.reportMalwareMistakeURL", "https://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%&url=");
@@ -5307,12 +5314,6 @@ pref("browser.safebrowsing.allowOverride", true);
 pref("browser.safebrowsing.id", "navclient-auto-ffox");
 #else
 pref("browser.safebrowsing.id", "Firefox");
-#endif
-
-#ifdef NIGHTLY_BUILD
-pref("browser.safebrowsing.temporary.take_v4_completion_result", true);
-#else
-pref("browser.safebrowsing.temporary.take_v4_completion_result", false);
 #endif
 
 // Turn off Spatial navigation by default.
@@ -5732,3 +5733,14 @@ pref("layers.advanced.filter-layers", 2);
 
 // Enable lowercased response header name
 pref("dom.xhr.lowercase_header.enabled", false);
+
+// When a crash happens, whether to include heap regions of the crash context
+// in the minidump. Enabled by default on nightly and aurora.
+#ifdef RELEASE_OR_BETA
+pref("toolkit.crashreporter.include_context_heap", false);
+#else
+pref("toolkit.crashreporter.include_context_heap", true);
+#endif
+
+// Open noopener links in a new process
+pref("dom.noopener.newprocess.enabled", true);

@@ -152,6 +152,48 @@ NS_IdleDispatchToCurrentThread(already_AddRefed<nsIRunnable>&& aEvent);
 extern nsresult
 NS_IdleDispatchToCurrentThread(already_AddRefed<nsIRunnable>&& aEvent, uint32_t aTimeout);
 
+/**
+ * Dispatch the given event to the idle queue of a thread.
+ *
+ * @param aEvent The event to dispatch.
+ *
+ * @param aThread The target thread for the dispatch.
+ *
+ * @returns NS_ERROR_INVALID_ARG
+ *   If event is null.
+ * @returns NS_ERROR_UNEXPECTED
+ *   If the thread is shutting down.
+ */
+extern nsresult
+NS_IdleDispatchToThread(already_AddRefed<nsIRunnable>&& aEvent,
+                        nsIThread* aThread);
+
+/**
+ * Dispatch the given event to the idle queue of a thread.
+ *
+ * @param aEvent The event to dispatch. If the event implements
+ *   nsIIdleRunnable, it will receive a call on
+ *   nsIIdleRunnable::SetTimer when dispatched, with the value of
+ *   aTimeout.
+ *
+ * @param aTimeout The time in milliseconds until the event should be
+ *   moved from the idle queue to the regular queue, if it hasn't been
+ *   executed. If aEvent is also an nsIIdleRunnable, it is expected
+ *   that it should handle the timeout itself, after a call to
+ *   nsIIdleRunnable::SetTimer.
+ *
+ * @param aThread The target thread for the dispatch.
+ *
+ * @returns NS_ERROR_INVALID_ARG
+ *   If event is null.
+ * @returns NS_ERROR_UNEXPECTED
+ *   If the thread is shutting down.
+ */
+extern nsresult
+NS_IdleDispatchToThread(already_AddRefed<nsIRunnable>&& aEvent,
+                        uint32_t aTimeout,
+                        nsIThread* aThread);
+
 #ifndef XPCOM_GLUE_AVOID_NSPR
 /**
  * Process all pending events for the given thread before returning.  This
@@ -392,14 +434,15 @@ public:
 
 protected:
   virtual ~Runnable() {}
-private:
-  Runnable(const Runnable&) = delete;
-  Runnable& operator=(const Runnable&) = delete;
-  Runnable& operator=(const Runnable&&) = delete;
 
 #ifndef RELEASE_OR_BETA
   const char* mName = nullptr;
 #endif
+
+private:
+  Runnable(const Runnable&) = delete;
+  Runnable& operator=(const Runnable&) = delete;
+  Runnable& operator=(const Runnable&&) = delete;
 };
 
 // This class is designed to be subclassed.
@@ -673,7 +716,7 @@ public:
   typedef typename ReturnTypeEnforcer<ReturnType>::ReturnTypeIsSafe check;
 };
 
-template<class ClassType, bool Owning, bool Idle>
+template<class ClassType, bool Owning>
 struct nsRunnableMethodReceiver
 {
   RefPtr<ClassType> mObj;
@@ -681,27 +724,15 @@ struct nsRunnableMethodReceiver
   ~nsRunnableMethodReceiver() { Revoke(); }
   ClassType* Get() const { return mObj.get(); }
   void Revoke() { mObj = nullptr; }
-  void SetDeadline(mozilla::TimeStamp aDeadline) { if (mObj) mObj->SetDeadline(aDeadline); }
 };
 
 template<class ClassType>
-struct nsRunnableMethodReceiver<ClassType, false, false>
+struct nsRunnableMethodReceiver<ClassType, false>
 {
   ClassType* MOZ_NON_OWNING_REF mObj;
   explicit nsRunnableMethodReceiver(ClassType* aObj) : mObj(aObj) {}
   ClassType* Get() const { return mObj; }
   void Revoke() { mObj = nullptr; }
-  void SetDeadline(mozilla::TimeStamp aDeadline) {}
-};
-
-template<class ClassType>
-struct nsRunnableMethodReceiver<ClassType, false, true>
-{
-  ClassType* MOZ_NON_OWNING_REF mObj;
-  explicit nsRunnableMethodReceiver(ClassType* aObj) : mObj(aObj) {}
-  ClassType* Get() const { return mObj; }
-  void Revoke() { mObj = nullptr; }
-  void SetDeadline(mozilla::TimeStamp aDeadline) { if (mObj) mObj->SetDeadline(aDeadline); }
 };
 
 static inline constexpr bool
@@ -709,17 +740,6 @@ IsIdle(mozilla::RunnableKind aKind)
 {
   return aKind == mozilla::Idle || aKind == mozilla::IdleWithTimer;
 }
-
-template<class ClassType>
-struct nsRunnableMethodReceiver<ClassType, true, false>
-{
-  RefPtr<ClassType> mObj;
-  explicit nsRunnableMethodReceiver(ClassType* aObj) : mObj(aObj) {}
-  ~nsRunnableMethodReceiver() { Revoke(); }
-  ClassType* Get() const { return mObj.get(); }
-  void Revoke() { mObj = nullptr; }
-  void SetDeadline(mozilla::TimeStamp aDeadline) {}
-};
 
 template<typename PtrType, typename Method, bool Owning, mozilla::RunnableKind Kind>
 struct nsRunnableMethodTraits;
@@ -1061,10 +1081,37 @@ struct ParameterStorage
                          typename NonParameterStorageClass<T>::Type>
 {};
 
+template<class T>
+using SetDeadline_t = decltype(
+  mozilla::DeclVal<T>().SetDeadline(mozilla::DeclVal<mozilla::TimeStamp>()));
+
+template<class T>
+static auto
+HasSetDeadlineTest(int) -> SFINAE1True<SetDeadline_t<T>>;
+
+template<class T>
+static auto
+HasSetDeadlineTest(long) -> mozilla::FalseType;
+
+template<class T>
+struct HasSetDeadline : decltype(HasSetDeadlineTest<T>(0))
+{};
+
+template <class T>
+typename mozilla::EnableIf<::detail::HasSetDeadline<T>::value>::Type
+SetDeadlineImpl(T* aObj, mozilla::TimeStamp aTimeStamp)
+{
+  aObj->SetDeadline(aTimeStamp);
+}
+
+template <class T>
+typename mozilla::EnableIf<!::detail::HasSetDeadline<T>::value>::Type
+SetDeadlineImpl(T* aObj, mozilla::TimeStamp aTimeStamp)
+{
+}
 } /* namespace detail */
 
 namespace mozilla {
-
 namespace detail {
 
 // struct used to store arguments and later apply them to a method.
@@ -1100,7 +1147,7 @@ class RunnableMethodImpl final
 
   typedef typename Traits::class_type ClassType;
   typedef typename Traits::base_type BaseType;
-  ::nsRunnableMethodReceiver<ClassType, Owning, IsIdle(Kind)> mReceiver;
+  ::nsRunnableMethodReceiver<ClassType, Owning> mReceiver;
   Method mMethod;
   RunnableMethodArguments<Storages...> mArgs;
   using BaseType::GetTimer;
@@ -1151,7 +1198,9 @@ public:
 
   void SetDeadline(TimeStamp aDeadline)
   {
-    mReceiver.SetDeadline(aDeadline);
+    if (MOZ_LIKELY(mReceiver.Get())) {
+      ::detail::SetDeadlineImpl(mReceiver.Get(), aDeadline);
+    }
   }
 
   void SetTimer(uint32_t aDelay, nsIEventTarget* aTarget)

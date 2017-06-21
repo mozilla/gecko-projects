@@ -587,13 +587,13 @@ DisplayListBuilder::PushClip(const WrRect& aClipRect,
   WRDL_LOG("PushClip id=%" PRIu64 " r=%s m=%p b=%s\n", clip_id,
       Stringify(aClipRect).c_str(), aMask,
       aMask ? Stringify(aMask->rect).c_str() : "none");
-  mClipIdStack.push_back(clip_id);
+  mClipIdStack.push_back(WrClipId { clip_id });
 }
 
 void
 DisplayListBuilder::PopClip()
 {
-  WRDL_LOG("PopClip id=%" PRIu64 "\n", mClipIdStack.back());
+  WRDL_LOG("PopClip id=%" PRIu64 "\n", mClipIdStack.back().id);
   mClipIdStack.pop_back();
   wr_dp_pop_clip(mWrState);
 }
@@ -614,6 +614,13 @@ DisplayListBuilder::PushScrollLayer(const layers::FrameMetrics::ViewID& aScrollI
   WRDL_LOG("PushScrollLayer id=%" PRIu64 " co=%s cl=%s\n",
       aScrollId, Stringify(aContentRect).c_str(), Stringify(aClipRect).c_str());
   wr_dp_push_scroll_layer(mWrState, aScrollId, aContentRect, aClipRect);
+  if (!mScrollIdStack.empty()) {
+    auto it = mScrollParents.insert({aScrollId, mScrollIdStack.back()});
+    if (!it.second) { // aScrollId was already a key in mScrollParents
+                      // so check that the parent value is the same.
+      MOZ_ASSERT(it.first->second == mScrollIdStack.back());
+    }
+  }
   mScrollIdStack.push_back(aScrollId);
 }
 
@@ -627,11 +634,12 @@ DisplayListBuilder::PopScrollLayer()
 
 void
 DisplayListBuilder::PushClipAndScrollInfo(const layers::FrameMetrics::ViewID& aScrollId,
-                                          const uint64_t* aClipId)
+                                          const WrClipId* aClipId)
 {
   WRDL_LOG("PushClipAndScroll s=%" PRIu64 " c=%s\n", aScrollId,
-      aClipId ? Stringify(*aClipId).c_str() : "none");
-  wr_dp_push_clip_and_scroll_info(mWrState, aScrollId, aClipId);
+      aClipId ? Stringify(aClipId->id).c_str() : "none");
+  wr_dp_push_clip_and_scroll_info(mWrState, aScrollId,
+      aClipId ? &(aClipId->id) : nullptr);
 }
 
 void
@@ -891,7 +899,7 @@ DisplayListBuilder::PushClipRegion(const WrRect& aMain,
                                 aMask);
 }
 
-Maybe<uint64_t>
+Maybe<WrClipId>
 DisplayListBuilder::TopmostClipId()
 {
   if (mClipIdStack.empty()) {
@@ -903,15 +911,8 @@ DisplayListBuilder::TopmostClipId()
 Maybe<layers::FrameMetrics::ViewID>
 DisplayListBuilder::ParentScrollIdFor(layers::FrameMetrics::ViewID aScrollId)
 {
-  // Finds the scrollId in mScrollIdStack immediately before aScrollId, or
-  // returns Nothing() if it can't find one
-  for (auto it = mScrollIdStack.rbegin(); it != mScrollIdStack.rend(); it++) {
-    if (*it == aScrollId) {
-      it++;
-      return (it == mScrollIdStack.rend() ? Nothing() : Some(*it));
-    }
-  }
-  return Nothing();
+  auto it = mScrollParents.find(aScrollId);
+  return (it == mScrollParents.end() ? Nothing() : Some(it->second));
 }
 
 } // namespace wr

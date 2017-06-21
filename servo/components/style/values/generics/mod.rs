@@ -9,13 +9,15 @@ use counter_style::{Symbols, parse_counter_style_name};
 use cssparser::Parser;
 use parser::{Parse, ParserContext};
 use std::fmt;
-use style_traits::{OneOrMoreCommaSeparated, ToCss, ParseError, StyleParseError};
+use style_traits::{OneOrMoreSeparated, CommaSeparator, ToCss, ParseError, StyleParseError};
 use super::CustomIdent;
 use values::specified::url::SpecifiedUrl;
 
 pub mod background;
 pub mod basic_shape;
 pub mod border;
+pub mod effects;
+pub mod flex;
 #[cfg(feature = "gecko")]
 pub mod gecko;
 pub mod grid;
@@ -122,7 +124,9 @@ pub struct FontSettingTag<T> {
     pub value: T,
 }
 
-impl<T> OneOrMoreCommaSeparated for FontSettingTag<T> {}
+impl<T> OneOrMoreSeparated for FontSettingTag<T> {
+    type S = CommaSeparator;
+}
 
 impl<T: ToCss> ToCss for FontSettingTag<T> {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
@@ -147,7 +151,7 @@ impl<T: Parse> Parse for FontSettingTag<T> {
         use byteorder::{ReadBytesExt, BigEndian};
         use std::io::Cursor;
 
-        let tag = try!(input.expect_string());
+        let tag = input.expect_string()?;
 
         // allowed strings of length 4 containing chars: <U+20, U+7E>
         if tag.len() != 4 ||

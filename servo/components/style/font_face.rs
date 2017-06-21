@@ -12,47 +12,31 @@
 use computed_values::{font_feature_settings, font_stretch, font_style, font_weight};
 use computed_values::font_family::FamilyName;
 use cssparser::{AtRuleParser, DeclarationListParser, DeclarationParser, Parser};
-use cssparser::SourceLocation;
+use cssparser::{SourceLocation, CompactCowStr};
 use error_reporting::ContextualParseError;
 #[cfg(feature = "gecko")] use gecko_bindings::structs::CSSFontFaceDescriptors;
 #[cfg(feature = "gecko")] use cssparser::UnicodeRange;
 use parser::{ParserContext, log_css_error, Parse};
 use selectors::parser::SelectorParseError;
 use shared_lock::{SharedRwLockReadGuard, ToCssWithGuard};
-use std::borrow::Cow;
 use std::fmt;
-use style_traits::{ToCss, OneOrMoreCommaSeparated, ParseError, StyleParseError};
+use style_traits::{ToCss, OneOrMoreSeparated, CommaSeparator, ParseError, StyleParseError};
 use values::specified::url::SpecifiedUrl;
 
 /// A source for a font-face rule.
-#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
+#[derive(Clone, Debug, Eq, PartialEq, ToCss)]
 pub enum Source {
     /// A `url()` source.
     Url(UrlSource),
     /// A `local()` source.
+    #[css(function)]
     Local(FamilyName),
 }
 
-impl ToCss for Source {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result
-        where W: fmt::Write,
-    {
-        match *self {
-            Source::Url(ref url) => {
-                try!(dest.write_str("url(\""));
-                try!(url.to_css(dest));
-            },
-            Source::Local(ref family) => {
-                try!(dest.write_str("local(\""));
-                try!(family.to_css(dest));
-            },
-        }
-        dest.write_str("\")")
-    }
+impl OneOrMoreSeparated for Source {
+    type S = CommaSeparator;
 }
-
-impl OneOrMoreCommaSeparated for Source {}
 
 /// A `UrlSource` represents a font-face source that has been specified with a
 /// `url()` function.
@@ -71,7 +55,7 @@ impl ToCss for UrlSource {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result
         where W: fmt::Write,
     {
-        dest.write_str(self.url.as_str())
+        self.url.to_css(dest)
     }
 }
 
@@ -256,7 +240,7 @@ macro_rules! font_face_descriptors_common {
            type Declaration = ();
            type Error = SelectorParseError<'i, StyleParseError<'i>>;
 
-           fn parse_value<'t>(&mut self, name: Cow<'i, str>, input: &mut Parser<'i, 't>)
+           fn parse_value<'t>(&mut self, name: CompactCowStr<'i>, input: &mut Parser<'i, 't>)
                               -> Result<(), ParseError<'i>> {
                 match_ignore_ascii_case! { &*name,
                     $(

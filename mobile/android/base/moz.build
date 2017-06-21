@@ -88,28 +88,28 @@ with Files('java/org/mozilla/gecko/*GuestSession*'):
 with Files('locales/**'):
     BUG_COMPONENT = ('Firefox for Android', 'General')
 
-with Files('resources/**'):
+with Files('../app/src/*/res/**'):
     BUG_COMPONENT = ('Firefox for Android', 'General')
 
-with Files('resources/anim/**'):
+with Files('../app/src/*/res/anim/**'):
     BUG_COMPONENT = ('Firefox for Android', 'Overlays')
 
-with Files('resources/raw/*favicon*'):
+with Files('../app/src/*/res/raw/*favicon*'):
     BUG_COMPONENT = ('Firefox for Android', 'Favicon Handling')
 
-with Files('resources/xml*/*preference*'):
+with Files('../app/src/*/res/xml*/*preference*'):
     BUG_COMPONENT = ('Firefox for Android', 'Settings and Preferences')
 
-with Files('resources/menu/**'):
+with Files('../app/src/*/res/menu/**'):
     BUG_COMPONENT = ('Firefox for Android', 'General')
 
-with Files('resources/menu/*home*'):
+with Files('../app/src/*/res/menu/*home*'):
     BUG_COMPONENT = ('Firefox for Android', 'Awesomescreen')
 
-with Files('resources/menu/*activitystream*'):
+with Files('../app/src/*/res/menu/*activitystream*'):
     BUG_COMPONENT = ('Firefox for Android', 'Awesomescreen')
 
-with Files('resources/menu/browsersearch_contextmenu.xml'):
+with Files('../app/src/*/res/menu/browsersearch_contextmenu.xml'):
     BUG_COMPONENT = ('Firefox for Android', 'Awesomescreen')
 
 DIRS += ['locales']
@@ -415,12 +415,19 @@ gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
     'InputMethods.java',
     'media/AsyncCodec.java',
     'media/AsyncCodecFactory.java',
+    'media/BaseHlsPlayer.java',
     'media/Codec.java',
     'media/CodecProxy.java',
     'media/FormatParam.java',
+    'media/GeckoAudioInfo.java',
+    'media/GeckoHLSDemuxerWrapper.java',
+    'media/GeckoHLSResourceWrapper.java',
+    'media/GeckoHLSSample.java',
     'media/GeckoMediaDrm.java',
     'media/GeckoMediaDrmBridgeV21.java',
     'media/GeckoMediaDrmBridgeV23.java',
+    'media/GeckoPlayerFactory.java',
+    'media/GeckoVideoInfo.java',
     'media/JellyBeanAsyncCodec.java',
     'media/LollipopAsyncCodec.java',
     'media/MediaDrmProxy.java',
@@ -459,15 +466,10 @@ gvjar.sources += [geckoview_thirdparty_source_dir + f for f in [
 
 if CONFIG['MOZ_ANDROID_HLS_SUPPORT']:
     gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x for x in [
-        'media/GeckoAudioInfo.java',
         'media/GeckoHlsAudioRenderer.java',
-        'media/GeckoHLSDemuxerWrapper.java',
         'media/GeckoHlsPlayer.java',
         'media/GeckoHlsRendererBase.java',
-        'media/GeckoHLSResourceWrapper.java',
-        'media/GeckoHLSSample.java',
         'media/GeckoHlsVideoRenderer.java',
-        'media/GeckoVideoInfo.java',
         'media/Utils.java',
     ]]
 
@@ -1368,7 +1370,19 @@ if CONFIG['MOZ_ANDROID_MMA']:
 # Putting branding earlier allows branders to override default resources.
 ANDROID_RES_DIRS += [
     '/' + CONFIG['MOZ_BRANDING_DIRECTORY'] + '/res',
-    'resources',
+]
+
+if CONFIG['MOZ_ANDROID_PHOTON']:
+    ANDROID_RES_DIRS += [
+        '/mobile/android/app/src/photon/res',
+    ]
+else:
+    ANDROID_RES_DIRS += [
+        '/mobile/android/app/src/australis/res',
+    ]
+
+ANDROID_RES_DIRS += [
+    '/mobile/android/app/src/main/res',
     '/mobile/android/services/src/main/res',
     '!res',
 ]

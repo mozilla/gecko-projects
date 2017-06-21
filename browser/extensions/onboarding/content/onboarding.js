@@ -2,12 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* global content */
+/* eslint-env mozilla/frame-script */
 
 "use strict";
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/Preferences.jsm");
 
 const ONBOARDING_CSS_URL = "resource://onboarding/onboarding.css";
 const ABOUT_HOME_URL = "about:home";
@@ -32,8 +33,6 @@ const BRAND_SHORT_NAME = Services.strings
  *   // Add no-button css class in the div if this tour does not need a button.
  *   // The overlay layout will responsively position and distribute space for these 3 sections based on viewport size
  *   getPage() {},
- *   isCompleted() {},
- *   setCompleted() {},
  * },
  **/
 var onboardingTours = [
@@ -56,13 +55,45 @@ var onboardingTours = [
       `;
       return div;
     },
-    isCompleted() {
-      // TODO: determine completion by looking up preferences.
-      return false;
+  },
+  {
+    id: "onboarding-tour-addons",
+    tourNameId: "onboarding.tour-addons",
+    getPage(win) {
+      let div = win.document.createElement("div");
+      div.innerHTML = `
+        <section class="onboarding-tour-description">
+          <h1 data-l10n-id="onboarding.tour-addons.title"></h1>
+          <p data-l10n-id="onboarding.tour-addons.description"></p>
+        </section>
+        <section class="onboarding-tour-content">
+          <img src="resource://onboarding/img/figure_addons.svg" />
+        </section>
+        <aside class="onboarding-tour-button">
+          <button id="onboarding-tour-addons-button" data-l10n-id="onboarding.tour-addons.button"></button>
+        </aside>
+      `;
+      return div;
     },
-    setCompleted() {
-      // TODO: set completion to preferences.
-      return true;
+  },
+  {
+    id: "onboarding-tour-customize",
+    tourNameId: "onboarding.tour-customize",
+    getPage(win) {
+      let div = win.document.createElement("div");
+      div.innerHTML = `
+        <section class="onboarding-tour-description">
+          <h1 data-l10n-id="onboarding.tour-customize.title"></h1>
+          <p data-l10n-id="onboarding.tour-customize.description"></p>
+        </section>
+        <section class="onboarding-tour-content">
+          <img src="resource://onboarding/img/figure_customize.svg" />
+        </section>
+        <aside class="onboarding-tour-button">
+          <button id="onboarding-tour-customize-button" data-l10n-id="onboarding.tour-customize.button"></button>
+        </aside>
+      `;
+      return div;
     },
   },
   {
@@ -84,13 +115,27 @@ var onboardingTours = [
       `;
       return div;
     },
-    isCompleted() {
-      // TODO: determine completion by looking up preferences.
-      return false;
-    },
-    setCompleted() {
-      // TODO: set completion to preferences.
-      return true;
+  },
+  {
+    id: "onboarding-tour-default-browser",
+    tourNameId: "onboarding.tour-default-browser",
+    getPage(win) {
+      let div = win.document.createElement("div");
+      let defaultBrowserButtonId = win.matchMedia("(-moz-os-version: windows-win7)").matches ?
+        "onboarding.tour-default-browser.win7.button" : "onboarding.tour-default-browser.button";
+      div.innerHTML = `
+        <section class="onboarding-tour-description">
+          <h1 data-l10n-id="onboarding.tour-default-browser.title"></h1>
+          <p data-l10n-id="onboarding.tour-default-browser.description"></p>
+        </section>
+        <section class="onboarding-tour-content">
+          <img src="resource://onboarding/img/figure_default.svg" />
+        </section>
+        <aside class="onboarding-tour-button">
+          <button id="onboarding-tour-default-browser-button" data-l10n-id="${defaultBrowserButtonId}"></button>
+        </aside>
+      `;
+      return div;
     },
   },
 ];
@@ -125,6 +170,43 @@ class Onboarding {
     // Destroy on unload. This is to ensure we remove all the stuff we left.
     // No any leak out there.
     this._window.addEventListener("unload", () => this.destroy());
+
+    this._initPrefObserver();
+  }
+
+  _initPrefObserver() {
+    if (this._prefsObserved) {
+      return;
+    }
+
+    this._prefsObserved = new Map();
+    this._prefsObserved.set("browser.onboarding.hidden", prefValue => {
+      if (prefValue) {
+        this.destroy();
+      }
+    });
+    for (let [name, callback] of this._prefsObserved) {
+      Preferences.observe(name, callback);
+    }
+  }
+
+  _clearPrefObserver() {
+    if (this._prefsObserved) {
+      for (let [name, callback] of this._prefsObserved) {
+        Preferences.ignore(name, callback);
+      }
+      this._prefsObserved = null;
+    }
+  }
+
+  /**
+   * @param {String} action the action to ask the chrome to do
+   * @param {Array} params the parameters for the action
+   */
+  sendMessageToChrome(action, params) {
+    sendAsyncMessage("Onboarding:OnContentMessage", {
+      action, params
+    });
   }
 
   handleEvent(evt) {
@@ -144,6 +226,7 @@ class Onboarding {
   }
 
   destroy() {
+    this._clearPrefObserver();
     this._overlayIcon.remove();
     this._overlay.remove();
   }
@@ -152,6 +235,13 @@ class Onboarding {
     if (this._tourItems.length == 0) {
       // Lazy loading until first toggle.
       this._loadTours(onboardingTours);
+    }
+
+    this._overlay.classList.toggle("opened");
+    let hiddenCheckbox = this._window.document.getElementById("onboarding-tour-hidden-checkbox");
+    if (hiddenCheckbox.checked) {
+      this.hide();
+      return;
     }
 
     this._overlay.classList.toggle("onboarding-opened");
@@ -171,6 +261,19 @@ class Onboarding {
     }
   }
 
+  hide() {
+    this.sendMessageToChrome("set-prefs", [
+      {
+        name: "browser.onboarding.hidden",
+        value: true
+      },
+      {
+        name: "browser.onboarding.notification.finished",
+        value: true
+      }
+    ]);
+  }
+
   _renderOverlay() {
     let div = this._window.document.createElement("div");
     div.id = "onboarding-overlay";
@@ -185,10 +288,13 @@ class Onboarding {
           <ul id="onboarding-tour-list"></ul>
         </nav>
         <footer id="onboarding-footer">
+          <input type="checkbox" id="onboarding-tour-hidden-checkbox" /><label for="onboarding-tour-hidden-checkbox"></label>
         </footer>
       </div>
     `;
 
+    div.querySelector("label[for='onboarding-tour-hidden-checkbox']").textContent =
+       this._bundle.GetStringFromName("onboarding.hidden-checkbox-label");
     div.querySelector("#onboarding-header").textContent =
        this._bundle.formatStringFromName("onboarding.overlay-title", [BRAND_SHORT_NAME], 1);
     return div;
@@ -264,20 +370,22 @@ class Onboarding {
   }
 }
 
-addEventListener("load", function onLoad(evt) {
-  if (!content || evt.target != content.document) {
-    return;
-  }
-  removeEventListener("load", onLoad);
+// Load onboarding module only when we enable it.
+if (Services.prefs.getBoolPref("browser.onboarding.enabled", false) &&
+    !Services.prefs.getBoolPref("browser.onboarding.hidden", false)) {
 
-  let window = evt.target.defaultView;
-  // Load onboarding module only when we enable it.
-  if ((window.location.href == ABOUT_NEWTAB_URL ||
-       window.location.href == ABOUT_HOME_URL) &&
-      Services.prefs.getBoolPref("browser.onboarding.enabled", false)) {
+  addEventListener("load", function onLoad(evt) {
+    if (!content || evt.target != content.document) {
+      return;
+    }
+    removeEventListener("load", onLoad);
 
-    window.requestIdleCallback(() => {
-      new Onboarding(window);
-    });
-  }
-}, true);
+    let window = evt.target.defaultView;
+    let location = window.location.href;
+    if (location == ABOUT_NEWTAB_URL || location == ABOUT_HOME_URL) {
+      window.requestIdleCallback(() => {
+        new Onboarding(window);
+      });
+    }
+  }, true);
+}

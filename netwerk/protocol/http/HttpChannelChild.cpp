@@ -63,6 +63,10 @@ using namespace mozilla::ipc;
 namespace mozilla {
 namespace net {
 
+#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION) || defined(DEBUG)
+static bool gIPCSecurityDisabled = false;
+#endif
+
 NS_IMPL_ISUPPORTS(InterceptStreamListener,
                   nsIStreamListener,
                   nsIRequestObserver,
@@ -181,6 +185,15 @@ HttpChannelChild::HttpChannelChild()
   mChannelCreationTimestamp = TimeStamp::Now();
   mAsyncOpenTime = TimeStamp::Now();
   mEventQ = new ChannelEventQueue(static_cast<nsIHttpChannel*>(this));
+
+#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION) || defined(DEBUG)
+  static bool sSecurityPrefChecked = false;
+  if (!sSecurityPrefChecked) {
+    Preferences::AddBoolVarCache(&gIPCSecurityDisabled,
+                                 "network.disable.ipc.security");
+    sSecurityPrefChecked = true;
+  }
+#endif
 }
 
 HttpChannelChild::~HttpChannelChild()
@@ -1493,9 +1506,10 @@ HttpChannelChild::SetupRedirect(nsIURI* uri,
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIChannel> newChannel;
+  nsCOMPtr<nsILoadInfo> redirectLoadInfo = CloneLoadInfoForRedirect(uri, redirectFlags);
   rv = NS_NewChannelInternal(getter_AddRefs(newChannel),
                              uri,
-                             mLoadInfo,
+                             redirectLoadInfo,
                              nullptr, // aLoadGroup
                              nullptr, // aCallbacks
                              nsIRequest::LOAD_NORMAL,
@@ -1825,9 +1839,12 @@ HttpChannelChild::ConnectParent(uint32_t registrarId)
   HttpChannelConnectArgs connectArgs(registrarId, mShouldParentIntercept);
   PBrowserOrId browser = static_cast<ContentChild*>(gNeckoChild->Manager())
                          ->GetBrowserOrId(tabChild);
+  IPC::SerializedLoadContext slc(this);
+  MOZ_DIAGNOSTIC_ASSERT(gIPCSecurityDisabled || slc.IsNotNull(),
+                        "SerializedLoadContext should not be null");
   if (!gNeckoChild->
         SendPHttpChannelConstructor(this, browser,
-                                    IPC::SerializedLoadContext(this),
+                                    slc,
                                     connectArgs)) {
     return NS_ERROR_FAILURE;
   }
@@ -2468,8 +2485,11 @@ HttpChannelChild::ContinueAsyncOpen()
   AddIPDLReference();
 
   PBrowserOrId browser = cc->GetBrowserOrId(tabChild);
+  IPC::SerializedLoadContext slc(this);
+  MOZ_DIAGNOSTIC_ASSERT(gIPCSecurityDisabled || slc.IsNotNull(),
+                        "SerializedLoadContext should not be null");
   if (!gNeckoChild->SendPHttpChannelConstructor(this, browser,
-                                                IPC::SerializedLoadContext(this),
+                                                slc,
                                                 openArgs)) {
     return NS_ERROR_FAILURE;
   }
@@ -3163,7 +3183,9 @@ HttpChannelChild::ResetInterception()
 
   // The chance to intercept any further requests associated with this channel
   // (such as redirects) has passed.
-  mLoadFlags |= LOAD_BYPASS_SERVICE_WORKER;
+  if (mRedirectMode != nsIHttpChannelInternal::REDIRECT_MODE_MANUAL) {
+    mLoadFlags |= LOAD_BYPASS_SERVICE_WORKER;
+  }
 
   // Continue with the original cross-process request
   nsresult rv = ContinueAsyncOpen();

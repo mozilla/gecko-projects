@@ -306,8 +306,8 @@ ROLE(OUTLINE,
 
 ROLE(OUTLINEITEM,
      "outlineitem",
-     ATK_ROLE_LIST_ITEM,
-     NSAccessibilityRowRole,  //XXX: use OutlineRow as subrole.
+     ATK_ROLE_TREE_ITEM,
+     NSAccessibilityRowRole,
      ROLE_SYSTEM_OUTLINEITEM,
      ROLE_SYSTEM_OUTLINEITEM,
      eNameFromSubtreeRule)
@@ -1034,7 +1034,7 @@ ROLE(DEFINITION_LIST,
 
 ROLE(TERM,
      "term",
-     ATK_ROLE_LIST_ITEM,
+     ATK_ROLE_DESCRIPTION_TERM,
      NSAccessibilityGroupRole,
      ROLE_SYSTEM_LISTITEM,
      ROLE_SYSTEM_LISTITEM,
@@ -1390,4 +1390,12 @@ ROLE(FOOTNOTE,
      NSAccessibilityGroupRole,
      USE_ROLE_STRING,
      IA2_ROLE_FOOTNOTE,
+     eNoNameRule)
+
+ROLE(ARTICLE,
+     "article",
+     ATK_ROLE_ARTICLE,
+     NSAccessibilityGroupRole,
+     ROLE_SYSTEM_DOCUMENT,
+     ROLE_SYSTEM_DOCUMENT,
      eNoNameRule)

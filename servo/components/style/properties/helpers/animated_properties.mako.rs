@@ -7,7 +7,7 @@
 <% from data import SYSTEM_FONT_LONGHANDS %>
 
 use app_units::Au;
-use cssparser::{Parser, RGBA, serialize_identifier};
+use cssparser::{Parser, RGBA};
 use euclid::{Point2D, Size2D};
 #[cfg(feature = "gecko")] use gecko_bindings::bindings::RawServoAnimationValueMap;
 #[cfg(feature = "gecko")] use gecko_bindings::structs::RawGeckoGfxMatrix4x4;
@@ -28,22 +28,22 @@ use properties::longhands::vertical_align::computed_value::T as VerticalAlign;
 use properties::longhands::visibility::computed_value::T as Visibility;
 #[cfg(feature = "gecko")] use properties::{PropertyDeclarationId, LonghandId};
 use selectors::parser::SelectorParseError;
-#[cfg(feature = "servo")] use servo_atoms::Atom;
 use smallvec::SmallVec;
 use std::cmp;
 #[cfg(feature = "gecko")] use std::collections::HashMap;
-use std::fmt;
-use style_traits::{ToCss, ParseError};
+use style_traits::ParseError;
 use super::ComputedValues;
-use values::CSSFloat;
-use values::{Auto, Either};
+use values::{Auto, CSSFloat, CustomIdent, Either};
+use values::animated::effects::{Filter as AnimatedFilter, FilterList as AnimatedFilterList};
 use values::computed::{Angle, LengthOrPercentageOrAuto, LengthOrPercentageOrNone};
 use values::computed::{BorderCornerRadius, ClipRect};
 use values::computed::{CalcLengthOrPercentage, Color, Context, ComputedValueAsSpecified};
 use values::computed::{LengthOrPercentage, MaxLength, MozLength, Shadow, ToComputedValue};
 use values::generics::{SVGPaint, SVGPaintKind};
 use values::generics::border::BorderCornerRadius as GenericBorderCornerRadius;
+use values::generics::effects::Filter;
 use values::generics::position as generic_position;
+use values::specified::length::Percentage;
 
 
 /// A longhand property whose animation type is not "none".
@@ -180,8 +180,8 @@ pub fn nscsspropertyid_is_animatable(property: nsCSSPropertyID) -> bool {
 /// a shorthand with at least one transitionable longhand component, or an unsupported property.
 // NB: This needs to be here because it needs all the longhands generated
 // beforehand.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, ToCss)]
 pub enum TransitionProperty {
     /// All, any transitionable property changing should generate a transition.
     All,
@@ -193,7 +193,7 @@ pub enum TransitionProperty {
     % endfor
     /// Unrecognized property which could be any non-transitionable, custom property, or
     /// unknown property.
-    Unsupported(Atom)
+    Unsupported(CustomIdent)
 }
 
 no_viewport_percentage!(TransitionProperty);
@@ -225,22 +225,23 @@ impl TransitionProperty {
 
     /// Parse a transition-property value.
     pub fn parse<'i, 't>(input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
-        let ident = try!(input.expect_ident());
-        (match_ignore_ascii_case! { &ident,
-            "all" => Ok(TransitionProperty::All),
+        let ident = input.expect_ident()?;
+        let supported = match_ignore_ascii_case! { &ident,
+            "all" => Ok(Some(TransitionProperty::All)),
             % for prop in data.longhands + data.shorthands_except_all():
                 % if prop.transitionable:
-                    "${prop.name}" => Ok(TransitionProperty::${prop.camel_case}),
+                    "${prop.name}" => Ok(Some(TransitionProperty::${prop.camel_case})),
                 % endif
             % endfor
             "none" => Err(()),
-            _ => {
-                match CSSWideKeyword::from_ident(&ident) {
-                    Some(_) => Err(()),
-                    None => Ok(TransitionProperty::Unsupported((&*ident).into()))
-                }
-            }
-        }).map_err(|()| SelectorParseError::UnexpectedIdent(ident.into()).into())
+            _ => Ok(None),
+        };
+
+        match supported {
+            Ok(Some(property)) => Ok(property),
+            Ok(None) => CustomIdent::from_ident(ident, &[]).map(TransitionProperty::Unsupported),
+            Err(()) => Err(SelectorParseError::UnexpectedIdent(ident).into()),
+        }
     }
 
     /// Return transitionable longhands of this shorthand TransitionProperty, except for "all".
@@ -279,26 +280,6 @@ impl TransitionProperty {
     }
 }
 
-impl ToCss for TransitionProperty {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result
-        where W: fmt::Write,
-    {
-        match *self {
-            TransitionProperty::All => dest.write_str("all"),
-            % for prop in data.longhands + data.shorthands_except_all():
-                % if prop.transitionable:
-                    TransitionProperty::${prop.camel_case} => dest.write_str("${prop.name}"),
-                % endif
-            % endfor
-            #[cfg(feature = "gecko")]
-            TransitionProperty::Unsupported(ref atom) => serialize_identifier(&atom.to_string(),
-                                                                              dest),
-            #[cfg(feature = "servo")]
-            TransitionProperty::Unsupported(ref atom) => serialize_identifier(atom, dest),
-        }
-    }
-}
-
 /// Convert to nsCSSPropertyID.
 #[cfg(feature = "gecko")]
 #[allow(non_upper_case_globals)]
@@ -329,7 +310,7 @@ impl From<nsCSSPropertyID> for TransitionProperty {
                         => TransitionProperty::${prop.camel_case},
                 % else:
                     ${helpers.to_nscsspropertyid(prop.ident)}
-                        => TransitionProperty::Unsupported(Atom::from("${prop.ident}")),
+                        => TransitionProperty::Unsupported(CustomIdent(Atom::from("${prop.ident}"))),
                 % endif
             % endfor
             nsCSSPropertyID::eCSSPropertyExtra_all_properties => TransitionProperty::All,
@@ -957,9 +938,36 @@ impl Animatable for i32 {
 impl Animatable for Angle {
     #[inline]
     fn add_weighted(&self, other: &Angle, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
-        self.radians()
-            .add_weighted(&other.radians(), self_portion, other_portion)
-            .map(Angle::from_radians)
+        match (*self, *other) {
+            % for angle_type in [ 'Degree', 'Gradian', 'Turn' ]:
+            (Angle::${angle_type}(val1), Angle::${angle_type}(val2)) => {
+                Ok(Angle::${angle_type}(
+                    try!(val1.add_weighted(&val2, self_portion, other_portion))
+                ))
+            }
+            % endfor
+            _ => {
+                self.radians()
+                    .add_weighted(&other.radians(), self_portion, other_portion)
+                    .map(Angle::from_radians)
+            }
+        }
+    }
+}
+
+/// https://drafts.csswg.org/css-transitions/#animtype-percentage
+impl Animatable for Percentage {
+    #[inline]
+    fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
+        Ok(Percentage((self.0 as f64 * self_portion + other.0 as f64 * other_portion) as f32))
+    }
+
+    #[inline]
+    fn get_zero_value(&self) -> Option<Self> { Some(Percentage(0.)) }
+
+    #[inline]
+    fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
+        Ok((self.0 as f64 - other.0 as f64).abs())
     }
 }
 
@@ -991,8 +999,8 @@ impl Animatable for Visibility {
 impl<T: Animatable + Copy> Animatable for Size2D<T> {
     #[inline]
     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
-        let width = try!(self.width.add_weighted(&other.width, self_portion, other_portion));
-        let height = try!(self.height.add_weighted(&other.height, self_portion, other_portion));
+        let width = self.width.add_weighted(&other.width, self_portion, other_portion)?;
+        let height = self.height.add_weighted(&other.height, self_portion, other_portion)?;
 
         Ok(Size2D::new(width, height))
     }
@@ -1001,8 +1009,8 @@ impl<T: Animatable + Copy> Animatable for Size2D<T> {
 impl<T: Animatable + Copy> Animatable for Point2D<T> {
     #[inline]
     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
-        let x = try!(self.x.add_weighted(&other.x, self_portion, other_portion));
-        let y = try!(self.y.add_weighted(&other.y, self_portion, other_portion));
+        let x = self.x.add_weighted(&other.x, self_portion, other_portion)?;
+        let y = self.y.add_weighted(&other.y, self_portion, other_portion)?;
 
         Ok(Point2D::new(x, y))
     }
@@ -1021,8 +1029,8 @@ impl Animatable for BorderCornerRadius {
 
     #[inline]
     fn compute_squared_distance(&self, other: &Self) -> Result<f64, ()> {
-        Ok(try!(self.0.width.compute_squared_distance(&other.0.width)) +
-           try!(self.0.height.compute_squared_distance(&other.0.height)))
+        Ok(self.0.width.compute_squared_distance(&other.0.width)? +
+           self.0.height.compute_squared_distance(&other.0.height)?)
     }
 }
 
@@ -1172,7 +1180,7 @@ impl Animatable for LengthOrPercentage {
             },
             (LengthOrPercentage::Percentage(ref this),
              LengthOrPercentage::Percentage(ref other)) => {
-                let diff = (this - other) as f64;
+                let diff = this.0 as f64 - other.0 as f64;
                 Ok(diff * diff)
             },
             (this, other) => {
@@ -1257,7 +1265,7 @@ impl Animatable for LengthOrPercentageOrAuto {
             },
             (LengthOrPercentageOrAuto::Percentage(ref this),
              LengthOrPercentageOrAuto::Percentage(ref other)) => {
-                let diff = (this - other) as f64;
+                let diff = this.0 as f64 - other.0 as f64;
                 Ok(diff * diff)
             },
             (this, other) => {
@@ -1492,10 +1500,8 @@ impl<H: Animatable, V: Animatable> Animatable for generic_position::Position<H, 
     #[inline]
     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
         Ok(generic_position::Position {
-            horizontal: try!(self.horizontal.add_weighted(&other.horizontal,
-                                                          self_portion, other_portion)),
-            vertical: try!(self.vertical.add_weighted(&other.vertical,
-                                                      self_portion, other_portion)),
+            horizontal: self.horizontal.add_weighted(&other.horizontal, self_portion, other_portion)?,
+            vertical: self.vertical.add_weighted(&other.vertical, self_portion, other_portion)?,
         })
     }
 
@@ -1514,8 +1520,8 @@ impl<H: Animatable, V: Animatable> Animatable for generic_position::Position<H, 
 
     #[inline]
     fn compute_squared_distance(&self, other: &Self) -> Result<f64, ()> {
-        Ok(try!(self.horizontal.compute_squared_distance(&other.horizontal)) +
-           try!(self.vertical.compute_squared_distance(&other.vertical)))
+        Ok(self.horizontal.compute_squared_distance(&other.horizontal)? +
+           self.vertical.compute_squared_distance(&other.vertical)?)
     }
 }
 
@@ -1528,10 +1534,10 @@ impl Animatable for ClipRect {
     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64)
         -> Result<Self, ()> {
         Ok(ClipRect {
-            top: try!(self.top.add_weighted(&other.top, self_portion, other_portion)),
-            right: try!(self.right.add_weighted(&other.right, self_portion, other_portion)),
-            bottom: try!(self.bottom.add_weighted(&other.bottom, self_portion, other_portion)),
-            left: try!(self.left.add_weighted(&other.left, self_portion, other_portion)),
+            top: self.top.add_weighted(&other.top, self_portion, other_portion)?,
+            right: self.right.add_weighted(&other.right, self_portion, other_portion)?,
+            bottom: self.bottom.add_weighted(&other.bottom, self_portion, other_portion)?,
+            left: self.left.add_weighted(&other.left, self_portion, other_portion)?,
         })
     }
 
@@ -1542,10 +1548,12 @@ impl Animatable for ClipRect {
 
     #[inline]
     fn compute_squared_distance(&self, other: &Self) -> Result<f64, ()> {
-        let list = [ try!(self.top.compute_distance(&other.top)),
-                     try!(self.right.compute_distance(&other.right)),
-                     try!(self.bottom.compute_distance(&other.bottom)),
-                     try!(self.left.compute_distance(&other.left)) ];
+        let list = [
+            self.top.compute_distance(&other.top)?,
+            self.right.compute_distance(&other.right)?,
+            self.bottom.compute_distance(&other.bottom)?,
+            self.left.compute_distance(&other.left)?
+        ];
         Ok(list.iter().fold(0.0f64, |sum, diff| sum + diff * diff))
     }
 }
@@ -1635,9 +1643,9 @@ fn add_weighted_with_initial_val<T: Animatable>(a: &T,
                                                 a_portion: f64,
                                                 b_portion: f64,
                                                 initial_val: &T) -> Result<T, ()> {
-    let a = try!(a.add_weighted(&initial_val, 1.0, -1.0));
-    let b = try!(b.add_weighted(&initial_val, 1.0, -1.0));
-    let result = try!(a.add_weighted(&b, a_portion, b_portion));
+    let a = a.add_weighted(&initial_val, 1.0, -1.0)?;
+    let b = b.add_weighted(&initial_val, 1.0, -1.0)?;
+    let result = a.add_weighted(&b, a_portion, b_portion)?;
     result.add_weighted(&initial_val, 1.0, 1.0)
 }
 
@@ -1798,12 +1806,12 @@ pub struct MatrixDecomposed2D {
 impl Animatable for InnerMatrix2D {
     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
         Ok(InnerMatrix2D {
-            m11: try!(add_weighted_with_initial_val(&self.m11, &other.m11,
-                                                    self_portion, other_portion, &1.0)),
-            m12: try!(self.m12.add_weighted(&other.m12, self_portion, other_portion)),
-            m21: try!(self.m21.add_weighted(&other.m21, self_portion, other_portion)),
-            m22: try!(add_weighted_with_initial_val(&self.m22, &other.m22,
-                                                    self_portion, other_portion, &1.0)),
+            m11: add_weighted_with_initial_val(&self.m11, &other.m11,
+                                               self_portion, other_portion, &1.0)?,
+            m12: self.m12.add_weighted(&other.m12, self_portion, other_portion)?,
+            m21: self.m21.add_weighted(&other.m21, self_portion, other_portion)?,
+            m22: add_weighted_with_initial_val(&self.m22, &other.m22,
+                                               self_portion, other_portion, &1.0)?,
         })
     }
 }
@@ -1811,8 +1819,8 @@ impl Animatable for InnerMatrix2D {
 impl Animatable for Translate2D {
     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
         Ok(Translate2D(
-            try!(self.0.add_weighted(&other.0, self_portion, other_portion)),
-            try!(self.1.add_weighted(&other.1, self_portion, other_portion))
+            self.0.add_weighted(&other.0, self_portion, other_portion)?,
+            self.1.add_weighted(&other.1, self_portion, other_portion)?,
         ))
     }
 }
@@ -1820,8 +1828,8 @@ impl Animatable for Translate2D {
 impl Animatable for Scale2D {
     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
         Ok(Scale2D(
-            try!(add_weighted_with_initial_val(&self.0, &other.0, self_portion, other_portion, &1.0)),
-            try!(add_weighted_with_initial_val(&self.1, &other.1, self_portion, other_portion, &1.0))
+            add_weighted_with_initial_val(&self.0, &other.0, self_portion, other_portion, &1.0)?,
+            add_weighted_with_initial_val(&self.1, &other.1, self_portion, other_portion, &1.0)?,
         ))
     }
 }
@@ -1858,11 +1866,10 @@ impl Animatable for MatrixDecomposed2D {
         }
 
         // Interpolate all values.
-        let translate = try!(self.translate.add_weighted(&other.translate,
-                                                         self_portion, other_portion));
-        let scale = try!(scale.add_weighted(&other.scale, self_portion, other_portion));
-        let angle = try!(angle.add_weighted(&other_angle, self_portion, other_portion));
-        let matrix = try!(self.matrix.add_weighted(&other.matrix, self_portion, other_portion));
+        let translate = self.translate.add_weighted(&other.translate, self_portion, other_portion)?;
+        let scale = scale.add_weighted(&other.scale, self_portion, other_portion)?;
+        let angle = angle.add_weighted(&other_angle, self_portion, other_portion)?;
+        let matrix = self.matrix.add_weighted(&other.matrix, self_portion, other_portion)?;
 
         Ok(MatrixDecomposed2D {
             translate: translate,
@@ -1880,7 +1887,7 @@ impl Animatable for ComputedMatrix {
             let decomposed_to = decompose_3d_matrix(*other);
             match (decomposed_from, decomposed_to) {
                 (Ok(from), Ok(to)) => {
-                    let sum = try!(from.add_weighted(&to, self_portion, other_portion));
+                    let sum = from.add_weighted(&to, self_portion, other_portion)?;
                     Ok(ComputedMatrix::from(sum))
                 },
                 _ => {
@@ -1891,8 +1898,7 @@ impl Animatable for ComputedMatrix {
         } else {
             let decomposed_from = MatrixDecomposed2D::from(*self);
             let decomposed_to = MatrixDecomposed2D::from(*other);
-            let sum = try!(decomposed_from.add_weighted(&decomposed_to,
-                                                        self_portion, other_portion));
+            let sum = decomposed_from.add_weighted(&decomposed_to, self_portion, other_portion)?;
             Ok(ComputedMatrix::from(sum))
         }
     }
@@ -2233,9 +2239,9 @@ fn cross(row1: [f32; 3], row2: [f32; 3]) -> [f32; 3] {
 impl Animatable for Translate3D {
     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
         Ok(Translate3D(
-            try!(self.0.add_weighted(&other.0, self_portion, other_portion)),
-            try!(self.1.add_weighted(&other.1, self_portion, other_portion)),
-            try!(self.2.add_weighted(&other.2, self_portion, other_portion))
+            self.0.add_weighted(&other.0, self_portion, other_portion)?,
+            self.1.add_weighted(&other.1, self_portion, other_portion)?,
+            self.2.add_weighted(&other.2, self_portion, other_portion)?,
         ))
     }
 }
@@ -2243,9 +2249,9 @@ impl Animatable for Translate3D {
 impl Animatable for Scale3D {
     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
         Ok(Scale3D(
-            try!(add_weighted_with_initial_val(&self.0, &other.0, self_portion, other_portion, &1.0)),
-            try!(add_weighted_with_initial_val(&self.1, &other.1, self_portion, other_portion, &1.0)),
-            try!(add_weighted_with_initial_val(&self.2, &other.2, self_portion, other_portion, &1.0))
+            add_weighted_with_initial_val(&self.0, &other.0, self_portion, other_portion, &1.0)?,
+            add_weighted_with_initial_val(&self.1, &other.1, self_portion, other_portion, &1.0)?,
+            add_weighted_with_initial_val(&self.2, &other.2, self_portion, other_portion, &1.0)?,
         ))
     }
 }
@@ -2253,9 +2259,9 @@ impl Animatable for Scale3D {
 impl Animatable for Skew {
     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
         Ok(Skew(
-            try!(self.0.add_weighted(&other.0, self_portion, other_portion)),
-            try!(self.1.add_weighted(&other.1, self_portion, other_portion)),
-            try!(self.2.add_weighted(&other.2, self_portion, other_portion))
+            self.0.add_weighted(&other.0, self_portion, other_portion)?,
+            self.1.add_weighted(&other.1, self_portion, other_portion)?,
+            self.2.add_weighted(&other.2, self_portion, other_portion)?,
         ))
     }
 }
@@ -2263,10 +2269,10 @@ impl Animatable for Skew {
 impl Animatable for Perspective {
     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
         Ok(Perspective(
-            try!(self.0.add_weighted(&other.0, self_portion, other_portion)),
-            try!(self.1.add_weighted(&other.1, self_portion, other_portion)),
-            try!(self.2.add_weighted(&other.2, self_portion, other_portion)),
-            try!(add_weighted_with_initial_val(&self.3, &other.3, self_portion, other_portion, &1.0))
+            self.0.add_weighted(&other.0, self_portion, other_portion)?,
+            self.1.add_weighted(&other.1, self_portion, other_portion)?,
+            self.2.add_weighted(&other.2, self_portion, other_portion)?,
+            add_weighted_with_initial_val(&self.3, &other.3, self_portion, other_portion, &1.0)?,
         ))
     }
 }
@@ -2282,12 +2288,10 @@ impl Animatable for MatrixDecomposed3D {
         let mut sum = *self;
 
         // Add translate, scale, skew and perspective components.
-        sum.translate = try!(self.translate.add_weighted(&other.translate,
-                                                         self_portion, other_portion));
-        sum.scale = try!(self.scale.add_weighted(&other.scale, self_portion, other_portion));
-        sum.skew = try!(self.skew.add_weighted(&other.skew, self_portion, other_portion));
-        sum.perspective = try!(self.perspective.add_weighted(&other.perspective,
-                                                             self_portion, other_portion));
+        sum.translate = self.translate.add_weighted(&other.translate, self_portion, other_portion)?;
+        sum.scale = self.scale.add_weighted(&other.scale, self_portion, other_portion)?;
+        sum.skew = self.skew.add_weighted(&other.skew, self_portion, other_portion)?;
+        sum.perspective = self.perspective.add_weighted(&other.perspective, self_portion, other_portion)?;
 
         // Add quaternions using spherical linear interpolation (Slerp).
         //
@@ -2739,25 +2743,22 @@ impl Animatable for IntermediateRGBA {
     #[inline]
     fn add_weighted(&self, other: &IntermediateRGBA, self_portion: f64, other_portion: f64)
         -> Result<Self, ()> {
-        let mut alpha = try!(self.alpha.add_weighted(&other.alpha, self_portion, other_portion));
+        let mut alpha = self.alpha.add_weighted(&other.alpha, self_portion, other_portion)?;
         if alpha <= 0. {
             // Ideally we should return color value that only alpha component is
             // 0, but this is what current gecko does.
             Ok(IntermediateRGBA::transparent())
         } else {
             alpha = alpha.min(1.);
-            let red = try!((self.red * self.alpha)
-                            .add_weighted(&(other.red * other.alpha),
-                                          self_portion, other_portion))
-                            * 1. / alpha;
-            let green = try!((self.green * self.alpha)
-                             .add_weighted(&(other.green * other.alpha),
-                                           self_portion, other_portion))
-                             * 1. / alpha;
-            let blue = try!((self.blue * self.alpha)
-                             .add_weighted(&(other.blue * other.alpha),
-                                           self_portion, other_portion))
-                             * 1. / alpha;
+            let red = (self.red * self.alpha).add_weighted(
+                &(other.red * other.alpha), self_portion, other_portion
+            )? * 1. / alpha;
+            let green = (self.green * self.alpha).add_weighted(
+                &(other.green * other.alpha), self_portion, other_portion
+            )? * 1. / alpha;
+            let blue = (self.blue * self.alpha).add_weighted(
+                &(other.blue * other.alpha), self_portion, other_portion
+            )? * 1. / alpha;
             Ok(IntermediateRGBA::new(red, green, blue, alpha))
         }
     }
@@ -3017,7 +3018,7 @@ impl Animatable for IntermediateSVGPaintKind {
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
 /// Intermediate type for box-shadow and text-shadow.
-/// The difference between normal shadow type is that this type uses
+/// The difference from normal shadow type is that this type uses
 /// IntermediateColor instead of ParserColor.
 pub struct IntermediateShadow {
     pub offset_x: Au,
@@ -3098,13 +3099,11 @@ impl Animatable for IntermediateShadow {
             return Err(());
         }
 
-        let x = try!(self.offset_x.add_weighted(&other.offset_x, self_portion, other_portion));
-        let y = try!(self.offset_y.add_weighted(&other.offset_y, self_portion, other_portion));
-        let color = try!(self.color.add_weighted(&other.color, self_portion, other_portion));
-        let blur = try!(self.blur_radius.add_weighted(&other.blur_radius,
-                                                      self_portion, other_portion));
-        let spread = try!(self.spread_radius.add_weighted(&other.spread_radius,
-                                                          self_portion, other_portion));
+        let x = self.offset_x.add_weighted(&other.offset_x, self_portion, other_portion)?;
+        let y = self.offset_y.add_weighted(&other.offset_y, self_portion, other_portion)?;
+        let color = self.color.add_weighted(&other.color, self_portion, other_portion)?;
+        let blur = self.blur_radius.add_weighted(&other.blur_radius, self_portion, other_portion)?;
+        let spread = self.spread_radius.add_weighted(&other.spread_radius, self_portion, other_portion)?;
 
         Ok(IntermediateShadow {
             offset_x: x,
@@ -3126,11 +3125,12 @@ impl Animatable for IntermediateShadow {
         if self.inset != other.inset {
             return Err(());
         }
-        let list = [ try!(self.offset_x.compute_distance(&other.offset_x)),
-                     try!(self.offset_y.compute_distance(&other.offset_y)),
-                     try!(self.blur_radius.compute_distance(&other.blur_radius)),
-                     try!(self.color.compute_distance(&other.color)),
-                     try!(self.spread_radius.compute_distance(&other.spread_radius)),
+        let list = [
+            self.offset_x.compute_distance(&other.offset_x)?,
+            self.offset_y.compute_distance(&other.offset_y)?,
+            self.blur_radius.compute_distance(&other.blur_radius)?,
+            self.color.compute_distance(&other.color)?,
+            self.spread_radius.compute_distance(&other.spread_radius)?,
         ];
         Ok(list.iter().fold(0.0f64, |sum, diff| sum + diff * diff))
     }
@@ -3160,8 +3160,9 @@ impl Animatable for IntermediateShadowList {
 
         for i in 0..max_len {
             let shadow = match (self.0.get(i), other.0.get(i)) {
-                (Some(shadow), Some(other)) =>
-                    try!(shadow.add_weighted(other, self_portion, other_portion)),
+                (Some(shadow), Some(other)) => {
+                    shadow.add_weighted(other, self_portion, other_portion)?
+                }
                 (Some(shadow), None) => {
                         zero.inset = shadow.inset;
                         shadow.add_weighted(&zero, self_portion, other_portion).unwrap()
@@ -3191,5 +3192,180 @@ impl Animatable for IntermediateShadowList {
         result.extend(other.0.iter().cloned());
 
         Ok(IntermediateShadowList(result))
+    }
+}
+
+<%
+    FILTER_FUNCTIONS = [ 'Blur', 'Brightness', 'Contrast', 'Grayscale',
+                         'HueRotate', 'Invert', 'Opacity', 'Saturate',
+                         'Sepia' ]
+%>
+
+/// https://drafts.fxtf.org/filters/#animation-of-filters
+fn add_weighted_filter_function_impl(from: &AnimatedFilter,
+                                     to: &AnimatedFilter,
+                                     self_portion: f64,
+                                     other_portion: f64)
+                                     -> Result<AnimatedFilter, ()> {
+    match (from, to) {
+        % for func in [ 'Blur', 'HueRotate' ]:
+            (&Filter::${func}(from_value), &Filter::${func}(to_value)) => {
+                Ok(Filter::${func}(from_value.add_weighted(
+                    &to_value,
+                    self_portion,
+                    other_portion,
+                )?))
+           },
+        % endfor
+        % for func in [ 'Grayscale', 'Invert', 'Sepia' ]:
+            (&Filter::${func}(from_value), &Filter::${func}(to_value)) => {
+                Ok(Filter::${func}(add_weighted_with_initial_val(
+                    &from_value,
+                    &to_value,
+                    self_portion,
+                    other_portion,
+                    &0.0,
+                )?))
+            },
+        % endfor
+        % for func in [ 'Brightness', 'Contrast', 'Opacity', 'Saturate' ]:
+            (&Filter::${func}(from_value), &Filter::${func}(to_value)) => {
+                Ok(Filter::${func}(add_weighted_with_initial_val(
+                    &from_value,
+                    &to_value,
+                    self_portion,
+                    other_portion,
+                    &1.0,
+                )?))
+                },
+        % endfor
+        % if product == "gecko":
+        (&Filter::DropShadow(ref from_value), &Filter::DropShadow(ref to_value)) => {
+            Ok(Filter::DropShadow(from_value.add_weighted(
+                &to_value,
+                self_portion,
+                other_portion,
+            )?))
+        },
+        (&Filter::Url(_), &Filter::Url(_)) => {
+            Err(())
+        },
+        % endif
+        _ => {
+            // If specified the different filter functions,
+            // we will need to interpolate as discreate.
+            Err(())
+        },
+    }
+}
+
+/// https://drafts.fxtf.org/filters/#animation-of-filters
+fn add_weighted_filter_function(from: Option<<&AnimatedFilter>,
+                                to: Option<<&AnimatedFilter>,
+                                self_portion: f64,
+                                other_portion: f64) -> Result<AnimatedFilter, ()> {
+    match (from, to) {
+        (Some(f), Some(t)) => {
+            add_weighted_filter_function_impl(f, t, self_portion, other_portion)
+        },
+        (Some(f), None) => {
+            add_weighted_filter_function_impl(f, f, self_portion, 0.0)
+        },
+        (None, Some(t)) => {
+            add_weighted_filter_function_impl(t, t, other_portion, 0.0)
+        },
+        _ => { Err(()) }
+    }
+}
+
+fn compute_filter_square_distance(from: &AnimatedFilter,
+                                  to: &AnimatedFilter)
+                                  -> Result<f64, ()> {
+    match (from, to) {
+        % for func in FILTER_FUNCTIONS :
+            (&Filter::${func}(f),
+             &Filter::${func}(t)) => {
+                Ok(try!(f.compute_squared_distance(&t)))
+            },
+        % endfor
+        % if product == "gecko":
+            (&Filter::DropShadow(ref f), &Filter::DropShadow(ref t)) => {
+                Ok(try!(f.compute_squared_distance(&t)))
+            },
+        % endif
+        _ => {
+            Err(())
+        }
+    }
+}
+
+impl Animatable for AnimatedFilterList {
+    #[inline]
+    fn add_weighted(&self, other: &Self,
+                    self_portion: f64, other_portion: f64) -> Result<Self, ()> {
+        let mut filters = vec![];
+        let mut from_iter = self.0.iter();
+        let mut to_iter = other.0.iter();
+
+        let mut from = from_iter.next();
+        let mut to = to_iter.next();
+        while from.is_some() || to.is_some() {
+            filters.push(try!(add_weighted_filter_function(from,
+                                                           to,
+                                                           self_portion,
+                                                           other_portion)));
+            if from.is_some() {
+                from = from_iter.next();
+            }
+            if to.is_some() {
+                to = to_iter.next();
+            }
+        }
+
+        Ok(filters.into())
+    }
+
+    fn add(&self, other: &Self) -> Result<Self, ()> {
+        Ok(self.0.iter().chain(other.0.iter()).cloned().collect::<Vec<_>>().into())
+    }
+
+    #[inline]
+    fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
+        self.compute_squared_distance(other).map(|sd| sd.sqrt())
+    }
+
+    #[inline]
+    fn compute_squared_distance(&self, other: &Self) -> Result<f64, ()> {
+        let mut square_distance: f64 = 0.0;
+        let mut from_iter = self.0.iter();
+        let mut to_iter = other.0.iter();
+
+        let mut from = from_iter.next();
+        let mut to = to_iter.next();
+        while from.is_some() || to.is_some() {
+            let current_square_distance: f64 ;
+            if from.is_none() {
+                let none = try!(add_weighted_filter_function(to, to, 0.0, 0.0));
+                current_square_distance =
+                    compute_filter_square_distance(&none, &(to.unwrap())).unwrap();
+
+                to = to_iter.next();
+            } else if to.is_none() {
+                let none = try!(add_weighted_filter_function(from, from, 0.0, 0.0));
+                current_square_distance =
+                    compute_filter_square_distance(&none, &(from.unwrap())).unwrap();
+
+                from = from_iter.next();
+            } else {
+                current_square_distance =
+                    compute_filter_square_distance(&(from.unwrap()),
+                                                   &(to.unwrap())).unwrap();
+
+                from = from_iter.next();
+                to = to_iter.next();
+            }
+            square_distance += current_square_distance;
+        }
+        Ok(square_distance.sqrt())
     }
 }

@@ -455,7 +455,11 @@ pref("browser.link.open_newwindow.disabled_in_fullscreen", true);
 pref("browser.link.open_newwindow.disabled_in_fullscreen", false);
 #endif
 
+#ifdef NIGHTLY_BUILD
+pref("browser.photon.structure.enabled", true);
+#else
 pref("browser.photon.structure.enabled", false);
+#endif
 
 // Tabbed browser
 pref("browser.tabs.closeWindowWithLastTab", true);
@@ -1686,15 +1690,18 @@ pref("extensions.formautofill.loglevel", "Warn");
 pref("browser.sessionstore.restore_tabs_lazily", true);
 
 // Enable safebrowsing v4 tables (suffixed by "-proto") update.
-#ifdef NIGHTLY_BUILD
-pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,goog-malware-proto,goog-unwanted-proto,test-malware-simple,test-unwanted-simple");
-pref("urlclassifier.phishTable", "goog-phish-shavar,goog-phish-proto,test-phish-simple");
-#endif
+pref("urlclassifier.malwareTable", "goog-malware-proto,goog-unwanted-proto,test-malware-simple,test-unwanted-simple");
+pref("urlclassifier.phishTable", "goog-phish-proto,test-phish-simple");
 
 pref("browser.suppress_first_window_animation", true);
 
 // Preferences for Photon onboarding system extension
 pref("browser.onboarding.enabled", true);
+pref("browser.onboarding.hidden", false);
+// On the Activity-Stream page, the snippet's position overlaps with our notification.
+// So use `browser.onboarding.notification.finished` to let the AS page know
+// if our notification is finished and safe to show their snippet.
+pref("browser.onboarding.notification.finished", false);
 
 // Preferences for the Screenshots feature:
 // Temporarily disable Screenshots in Beta & Release, so that we can gradually

@@ -183,13 +183,6 @@ this.AppConstants = Object.freeze({
   false,
 #endif
 
-  MOZ_VERIFY_MAR_SIGNATURE:
-#ifdef MOZ_VERIFY_MAR_SIGNATURE
-  true,
-#else
-  false,
-#endif
-
   MOZ_MAINTENANCE_SERVICE:
 #ifdef MOZ_MAINTENANCE_SERVICE
   true,
@@ -311,6 +304,13 @@ this.AppConstants = Object.freeze({
 
   MOZ_ANDROID_ACTIVITY_STREAM:
 #ifdef MOZ_ANDROID_ACTIVITY_STREAM
+  true,
+#else
+  false,
+#endif
+
+  MOZ_ANDROID_MOZILLA_ONLINE:
+#ifdef MOZ_ANDROID_MOZILLA_ONLINE
   true,
 #else
   false,

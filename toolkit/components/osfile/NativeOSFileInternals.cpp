@@ -6,6 +6,8 @@
  * Native implementation of some OS.File operations.
  */
 
+#include "NativeOSFileInternals.h"
+
 #include "nsString.h"
 #include "nsNetCID.h"
 #include "nsThreadUtils.h"
@@ -15,13 +17,11 @@
 #include "nsProxyRelease.h"
 
 #include "nsINativeOSFileInternals.h"
-#include "NativeOSFileInternals.h"
 #include "mozilla/dom/NativeOSFileInternalsBinding.h"
 
 #include "mozilla/Encoding.h"
 #include "nsIEventTarget.h"
 
-#include "mozilla/dom/EncodingUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Scoped.h"
 #include "mozilla/HoldDropJSObjects.h"
@@ -528,7 +528,7 @@ public:
       // Last ditch attempt to release on the main thread - some of
       // the members of event are not thread-safe, so letting the
       // pointer go out of scope would cause a crash.
-      NS_ReleaseOnMainThread(event.forget());
+      NS_ReleaseOnMainThread("AbstractDoEvent::ErrorEvent", event.forget());
     }
   }
 
@@ -545,7 +545,7 @@ public:
       // Last ditch attempt to release on the main thread - some of
       // the members of event are not thread-safe, so letting the
       // pointer go out of scope would cause a crash.
-      NS_ReleaseOnMainThread(event.forget());
+      NS_ReleaseOnMainThread("AbstractDoEvent::SuccessEvent", event.forget());
     }
 
   }
@@ -746,7 +746,7 @@ public:
     if (!mResult) {
       return;
     }
-    NS_ReleaseOnMainThread(mResult.forget());
+    NS_ReleaseOnMainThread("DoReadToTypedArrayEvent::mResult", mResult.forget());
   }
 
 protected:
@@ -783,7 +783,7 @@ public:
     if (!mResult) {
       return;
     }
-    NS_ReleaseOnMainThread(mResult.forget());
+    NS_ReleaseOnMainThread("DoReadToStringEvent::mResult", mResult.forget());
   }
 
 protected:
@@ -791,12 +791,12 @@ protected:
     // Obtain the decoder. We do this before reading to avoid doing
     // any unnecessary I/O in case the name of the encoding is incorrect.
     MOZ_ASSERT(!NS_IsMainThread());
-    nsAutoCString encodingName;
-    if (!dom::EncodingUtils::FindEncodingForLabel(mEncoding, encodingName)) {
+    const Encoding* encoding = Encoding::ForLabel(mEncoding);
+    if (!encoding) {
       Fail(NS_LITERAL_CSTRING("Decode"), mResult.forget(), OS_ERROR_INVAL);
       return NS_ERROR_FAILURE;
     }
-    mDecoder = dom::EncodingUtils::DecoderForEncoding(encodingName);
+    mDecoder = encoding->NewDecoderWithBOMRemoval();
     if (!mDecoder) {
       Fail(NS_LITERAL_CSTRING("DecoderForEncoding"), mResult.forget(), OS_ERROR_INVAL);
       return NS_ERROR_FAILURE;
@@ -890,10 +890,12 @@ NativeOSFileInternalsService::Read(const nsAString& aPath,
   // Prepare the off main thread event and dispatch it
   nsCOMPtr<nsINativeOSFileSuccessCallback> onSuccess(aOnSuccess);
   nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback> onSuccessHandle(
-    new nsMainThreadPtrHolder<nsINativeOSFileSuccessCallback>(onSuccess));
+    new nsMainThreadPtrHolder<nsINativeOSFileSuccessCallback>(
+      "nsINativeOSFileSuccessCallback", onSuccess));
   nsCOMPtr<nsINativeOSFileErrorCallback> onError(aOnError);
   nsMainThreadPtrHandle<nsINativeOSFileErrorCallback> onErrorHandle(
-    new nsMainThreadPtrHolder<nsINativeOSFileErrorCallback>(onError));
+    new nsMainThreadPtrHolder<nsINativeOSFileErrorCallback>(
+      "nsINativeOSFileErrorCallback", onError));
 
   RefPtr<AbstractDoEvent> event;
   if (encoding.IsEmpty()) {

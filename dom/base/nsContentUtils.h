@@ -20,6 +20,7 @@
 #include "js/TypeDecls.h"
 #include "js/Value.h"
 #include "js/RootingAPI.h"
+#include "mozilla/BasicEvents.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/GuardObjects.h"
 #include "mozilla/TaskCategory.h"
@@ -270,6 +271,7 @@ public:
                                   JS::MutableHandle<JS::PropertyDescriptor> aDesc);
 
   // Check whether we should avoid leaking distinguishing information to JS/CSS.
+  // This function can be called both in the main thread and worker threads.
   static bool ShouldResistFingerprinting();
   static bool ShouldResistFingerprinting(nsIDocShell* aDocShell);
 
@@ -616,42 +618,6 @@ public:
                                             const nsAString& aSpec,
                                             nsIDocument* aDocument,
                                             nsIURI* aBaseURI);
-
-  /**
-   * Convert aInput (in encoding aEncoding) to UTF16 in aOutput.
-   *
-   * @deprecated Use mozilla::Encoding::DecodeWithBOMRemoval() in new code.
-   * https://bugzilla.mozilla.org/show_bug.cgi?id=1369020
-   *
-   * @param aEncoding the Gecko-canonical name of the encoding or the empty
-   *                  string (meaning UTF-8)
-   */
-  static nsresult ConvertStringFromEncoding(const nsACString& aEncoding,
-                                            const char* aInput,
-                                            uint32_t aInputLen,
-                                            nsAString& aOutput);
-
-  static nsresult ConvertStringFromEncoding(const nsACString& aEncoding,
-                                            const nsACString& aInput,
-                                            nsAString& aOutput) {
-    return ConvertStringFromEncoding(
-        aEncoding, aInput.BeginReading(), aInput.Length(), aOutput);
-  }
-
-  /**
-   * Determine whether a buffer begins with a BOM for UTF-8, UTF-16LE,
-   * UTF-16BE
-   *
-   * @deprecated Use mozilla::Encoding::ForBOM() in new code.
-   * https://bugzilla.mozilla.org/show_bug.cgi?id=1369022
-   *
-   * @param aBuffer the buffer to check
-   * @param aLength the length of the buffer
-   * @param aCharset empty if not found
-   * @return boolean indicating whether a BOM was detected.
-   */
-  static bool CheckForBOM(const unsigned char* aBuffer, uint32_t aLength,
-                          nsACString& aCharset);
 
   /**
    * Returns true if |aName| is a valid name to be registered via
@@ -1273,6 +1239,33 @@ public:
                                        bool *aDefaultAction = nullptr);
 
   /**
+   * This method creates and dispatches a trusted event using an event message.
+   * @param aDoc           The document which will be used to create the event.
+   * @param aTarget        The target of the event, should be QIable to
+   *                       EventTarget.
+   * @param aEventMessage  The event message.
+   * @param aCanBubble     Whether the event can bubble.
+   * @param aCancelable    Is the event cancelable.
+   * @param aDefaultAction Set to true if default action should be taken,
+   *                       see nsIDOMEventTarget::DispatchEvent.
+   */
+  template <class WidgetEventType>
+  static nsresult DispatchTrustedEvent(nsIDocument* aDoc,
+                                       nsISupports* aTarget,
+                                       mozilla::EventMessage aEventMessage,
+                                       bool aCanBubble,
+                                       bool aCancelable,
+                                       bool *aDefaultAction = nullptr,
+                                       bool aOnlyChromeDispatch = false)
+  {
+    WidgetEventType event(true, aEventMessage);
+    MOZ_ASSERT(GetEventClassIDFromMessage(aEventMessage) == event.mClass);
+    return DispatchEvent(aDoc, aTarget, event, aEventMessage,
+                         aCanBubble, aCancelable, true,
+                         aDefaultAction, aOnlyChromeDispatch);
+  }
+
+  /**
    * This method creates and dispatches a untrusted event.
    * Works only with events which can be created by calling
    * nsIDOMDocument::CreateEvent() with parameter "Events".
@@ -1291,6 +1284,34 @@ public:
                                          bool aCanBubble,
                                          bool aCancelable,
                                          bool *aDefaultAction = nullptr);
+
+
+  /**
+   * This method creates and dispatches a untrusted event using an event message.
+   * @param aDoc           The document which will be used to create the event.
+   * @param aTarget        The target of the event, should be QIable to
+   *                       EventTarget.
+   * @param aEventMessage  The event message.
+   * @param aCanBubble     Whether the event can bubble.
+   * @param aCancelable    Is the event cancelable.
+   * @param aDefaultAction Set to true if default action should be taken,
+   *                       see nsIDOMEventTarget::DispatchEvent.
+   */
+  template <class WidgetEventType>
+  static nsresult DispatchUntrustedEvent(nsIDocument* aDoc,
+                                         nsISupports* aTarget,
+                                         mozilla::EventMessage aEventMessage,
+                                         bool aCanBubble,
+                                         bool aCancelable,
+                                         bool *aDefaultAction = nullptr,
+                                         bool aOnlyChromeDispatch = false)
+  {
+    WidgetEventType event(false, aEventMessage);
+    MOZ_ASSERT(GetEventClassIDFromMessage(aEventMessage) == event.mClass);
+    return DispatchEvent(aDoc, aTarget, event, aEventMessage,
+                         aCanBubble, aCancelable, false,
+                         aDefaultAction, aOnlyChromeDispatch);
+  }
 
   /**
    * This method creates and dispatches a trusted event to the chrome
@@ -2202,7 +2223,7 @@ public:
   static bool ResistFingerprinting(mozilla::dom::CallerType aCallerType)
   {
     return aCallerType != mozilla::dom::CallerType::System &&
-           mozilla::nsRFPService::IsResistFingerprintingEnabled();
+           ShouldResistFingerprinting();
   }
 
   /**
@@ -2911,6 +2932,16 @@ public:
       nsTArray<nsIContent*>& aElements);
 
   /**
+   * Appends all native anonymous content subtree roots generated by `aContent`
+   * to `aKids`.
+   *
+   * See `AllChildrenIterator` for the description of the `aFlags` parameter.
+   */
+  static void AppendNativeAnonymousChildren(const nsIContent* aContent,
+                                            nsTArray<nsIContent*>& aKids,
+                                            uint32_t aFlags);
+
+  /**
    * Returns the content policy type that should be used for loading images
    * for displaying in the UI.  The sources of such images can be <xul:image>,
    * <xul:menuitem> on OSX where we load the image through nsMenuItemIconX, etc.
@@ -3040,6 +3071,16 @@ private:
                                 bool *aDefaultAction = nullptr,
                                 bool aOnlyChromeDispatch = false);
 
+  static nsresult DispatchEvent(nsIDocument* aDoc,
+                                nsISupports* aTarget,
+                                mozilla::WidgetEvent& aWidgetEvent,
+                                mozilla::EventMessage aEventMessage,
+                                bool aCanBubble,
+                                bool aCancelable,
+                                bool aTrusted,
+                                bool *aDefaultAction = nullptr,
+                                bool aOnlyChromeDispatch = false);
+
   static void InitializeModifierStrings();
 
   static void DropFragmentParsers();
@@ -3050,6 +3091,9 @@ private:
   static void DestroyClassNameArray(void* aData);
   static void* AllocClassMatchingInfo(nsINode* aRootNode,
                                       const nsString* aClasses);
+
+  static mozilla::EventClassID
+  GetEventClassIDFromMessage(mozilla::EventMessage aEventMessage);
 
   // Fills in aInfo with the tokens from the supplied autocomplete attribute.
   static AutocompleteAttrState InternalSerializeAutocompleteAttribute(const nsAttrValue* aAttrVal,

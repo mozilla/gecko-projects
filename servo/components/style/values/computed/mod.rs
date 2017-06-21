@@ -28,6 +28,8 @@ pub use self::background::BackgroundSize;
 pub use self::border::{BorderImageSlice, BorderImageWidth, BorderImageSideWidth};
 pub use self::border::{BorderRadius, BorderCornerRadius};
 pub use self::color::{Color, RGBAColor};
+pub use self::effects::FilterList;
+pub use self::flex::FlexBasis;
 pub use self::image::{Gradient, GradientItem, ImageLayer, LineDirection, Image, ImageRect};
 #[cfg(feature = "gecko")]
 pub use self::gecko::ScrollSnapPoint;
@@ -38,9 +40,8 @@ pub use super::specified::{AlignItems, AlignJustifyContent, AlignJustifySelf, Ju
 pub use super::specified::{BorderStyle, Percentage, UrlOrNone};
 pub use super::generics::grid::GridLine;
 pub use super::specified::url::SpecifiedUrl;
-pub use self::length::{CalcLengthOrPercentage, Length, LengthOrNumber, LengthOrPercentage, LengthOrPercentageOrAuto};
-pub use self::length::{LengthOrPercentageOrAutoOrContent, LengthOrPercentageOrNone, LengthOrNone};
-pub use self::length::{MaxLength, MozLength};
+pub use self::length::{CalcLengthOrPercentage, Length, LengthOrNone, LengthOrNumber, LengthOrPercentage};
+pub use self::length::{LengthOrPercentageOrAuto, LengthOrPercentageOrNone, MaxLength, MozLength};
 pub use self::position::Position;
 pub use self::text::{InitialLetter, LetterSpacing, LineHeight, WordSpacing};
 pub use self::transform::{TimingFunction, TransformOrigin};
@@ -49,6 +50,8 @@ pub mod background;
 pub mod basic_shape;
 pub mod border;
 pub mod color;
+pub mod effects;
+pub mod flex;
 pub mod image;
 #[cfg(feature = "gecko")]
 pub mod gecko;
@@ -245,6 +248,22 @@ impl<T> ToComputedValue for Vec<T>
     #[inline]
     fn from_computed_value(computed: &Self::ComputedValue) -> Self {
         computed.iter().map(T::from_computed_value).collect()
+    }
+}
+
+impl<T> ToComputedValue for Box<[T]>
+    where T: ToComputedValue
+{
+    type ComputedValue = Box<[<T as ToComputedValue>::ComputedValue]>;
+
+    #[inline]
+    fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
+        self.iter().map(|item| item.to_computed_value(context)).collect::<Vec<_>>().into_boxed_slice()
+    }
+
+    #[inline]
+    fn from_computed_value(computed: &Self::ComputedValue) -> Self {
+        computed.iter().map(T::from_computed_value).collect::<Vec<_>>().into_boxed_slice()
     }
 }
 
@@ -520,32 +539,32 @@ pub struct ClipRect {
 
 impl ToCss for ClipRect {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        try!(dest.write_str("rect("));
+        dest.write_str("rect(")?;
         if let Some(top) = self.top {
-            try!(top.to_css(dest));
-            try!(dest.write_str(", "));
+            top.to_css(dest)?;
+            dest.write_str(", ")?;
         } else {
-            try!(dest.write_str("auto, "));
+            dest.write_str("auto, ")?;
         }
 
         if let Some(right) = self.right {
-            try!(right.to_css(dest));
-            try!(dest.write_str(", "));
+            right.to_css(dest)?;
+            dest.write_str(", ")?;
         } else {
-            try!(dest.write_str("auto, "));
+            dest.write_str("auto, ")?;
         }
 
         if let Some(bottom) = self.bottom {
-            try!(bottom.to_css(dest));
-            try!(dest.write_str(", "));
+            bottom.to_css(dest)?;
+            dest.write_str(", ")?;
         } else {
-            try!(dest.write_str("auto, "));
+            dest.write_str("auto, ")?;
         }
 
         if let Some(left) = self.left {
-            try!(left.to_css(dest));
+            left.to_css(dest)?;
         } else {
-            try!(dest.write_str("auto"));
+            dest.write_str("auto")?;
         }
         dest.write_str(")")
     }

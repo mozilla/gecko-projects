@@ -210,6 +210,7 @@ WebRenderLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback
   // In this case, leave the transaction open and let a full transaction happen.
   if (mTransactionIncomplete) {
     DiscardLocalImages();
+    WrBridge()->ProcessWebRenderParentCommands();
     return false;
   }
 
@@ -508,7 +509,7 @@ WebRenderLayerManager::SendInvalidRegion(const nsIntRegion& aRegion)
 }
 
 void
-WebRenderLayerManager::Composite()
+WebRenderLayerManager::ScheduleComposite()
 {
   WrBridge()->SendForceComposite();
 }

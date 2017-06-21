@@ -602,12 +602,7 @@ nsStyleList::nsStyleList(const nsPresContext* aContext)
   : mListStylePosition(NS_STYLE_LIST_STYLE_POSITION_OUTSIDE)
 {
   MOZ_COUNT_CTOR(nsStyleList);
-  if (aContext->StyleSet()->IsServo()) {
-    mCounterStyle = do_AddRef(nsGkAtoms::disc);
-  } else {
-    mCounterStyle = aContext->
-      CounterStyleManager()->BuildCounterStyle(nsGkAtoms::disc);
-  }
+  mCounterStyle = CounterStyleManager::GetDiscStyle();
   SetQuotesInitial();
 }
 
@@ -3470,7 +3465,9 @@ nsStyleDisplay::~nsStyleDisplay()
 #else
       false;
 #endif
-    NS_ReleaseOnMainThread(mSpecifiedTransform.forget(), alwaysProxy);
+    NS_ReleaseOnMainThread(
+      "nsStyleDisplay::mSpecifiedTransform",
+      mSpecifiedTransform.forget(), alwaysProxy);
   }
 
   MOZ_COUNT_DTOR(nsStyleDisplay);
@@ -3774,7 +3771,8 @@ nsStyleContentData::~nsStyleContentData()
   MOZ_COUNT_DTOR(nsStyleContentData);
 
   if (mType == eStyleContentType_Image) {
-    NS_ReleaseOnMainThread(dont_AddRef(mContent.mImage));
+    NS_ReleaseOnMainThread(
+      "nsStyleContentData::mContent.mImage", dont_AddRef(mContent.mImage));
     mContent.mImage = nullptr;
   } else if (mType == eStyleContentType_Counter ||
              mType == eStyleContentType_Counters) {
@@ -4331,6 +4329,10 @@ nsStyleUIReset::nsStyleUIReset(const nsPresContext* aContext)
   , mIMEMode(NS_STYLE_IME_MODE_AUTO)
   , mWindowDragging(StyleWindowDragging::Default)
   , mWindowShadow(NS_STYLE_WINDOW_SHADOW_DEFAULT)
+  , mWindowOpacity(1.0)
+  , mSpecifiedWindowTransform(nullptr)
+  , mWindowTransformOrigin{ {0.5f, eStyleUnit_Percent}, // Transform is centered on origin
+                            {0.5f, eStyleUnit_Percent} }
 {
   MOZ_COUNT_CTOR(nsStyleUIReset);
 }
@@ -4341,6 +4343,10 @@ nsStyleUIReset::nsStyleUIReset(const nsStyleUIReset& aSource)
   , mIMEMode(aSource.mIMEMode)
   , mWindowDragging(aSource.mWindowDragging)
   , mWindowShadow(aSource.mWindowShadow)
+  , mWindowOpacity(aSource.mWindowOpacity)
+  , mSpecifiedWindowTransform(aSource.mSpecifiedWindowTransform)
+  , mWindowTransformOrigin{ aSource.mWindowTransformOrigin[0],
+                            aSource.mWindowTransformOrigin[1] }
 {
   MOZ_COUNT_CTOR(nsStyleUIReset);
 }
@@ -4348,34 +4354,64 @@ nsStyleUIReset::nsStyleUIReset(const nsStyleUIReset& aSource)
 nsStyleUIReset::~nsStyleUIReset()
 {
   MOZ_COUNT_DTOR(nsStyleUIReset);
+
+  // See the nsStyleDisplay destructor for why we're doing this.
+  if (mSpecifiedWindowTransform && ServoStyleSet::IsInServoTraversal()) {
+    bool alwaysProxy =
+#ifdef DEBUG
+      true;
+#else
+      false;
+#endif
+    NS_ReleaseOnMainThread(
+      "nsStyleUIReset::mSpecifiedWindowTransform",
+      mSpecifiedWindowTransform.forget(), alwaysProxy);
+  }
 }
 
 nsChangeHint
 nsStyleUIReset::CalcDifference(const nsStyleUIReset& aNewData) const
 {
-  // ignore mIMEMode
+  nsChangeHint hint = nsChangeHint(0);
+
   if (mForceBrokenImageIcon != aNewData.mForceBrokenImageIcon) {
-    return nsChangeHint_ReconstructFrame;
+    hint |= nsChangeHint_ReconstructFrame;
   }
   if (mWindowShadow != aNewData.mWindowShadow) {
     // We really need just an nsChangeHint_SyncFrameView, except
     // on an ancestor of the frame, so we get that by doing a
     // reflow.
-    return NS_STYLE_HINT_REFLOW;
+    hint |= NS_STYLE_HINT_REFLOW;
   }
   if (mUserSelect != aNewData.mUserSelect) {
-    return NS_STYLE_HINT_VISUAL;
+    hint |= NS_STYLE_HINT_VISUAL;
   }
 
   if (mWindowDragging != aNewData.mWindowDragging) {
-    return nsChangeHint_SchedulePaint;
+    hint |= nsChangeHint_SchedulePaint;
   }
 
-  if (mIMEMode != aNewData.mIMEMode) {
-    return nsChangeHint_NeutralChange;
+  if (mWindowOpacity != aNewData.mWindowOpacity ||
+      !mSpecifiedWindowTransform != !aNewData.mSpecifiedWindowTransform ||
+      (mSpecifiedWindowTransform &&
+       *mSpecifiedWindowTransform != *aNewData.mSpecifiedWindowTransform)) {
+    hint |= nsChangeHint_UpdateWidgetProperties;
+  } else {
+    for (uint8_t index = 0; index < 2; ++index) {
+      if (mWindowTransformOrigin[index] !=
+            aNewData.mWindowTransformOrigin[index]) {
+        hint |= nsChangeHint_UpdateWidgetProperties;
+        break;
+      }
+    }
   }
 
-  return nsChangeHint(0);
+  if (!hint &&
+      mIMEMode != aNewData.mIMEMode) {
+    hint |= nsChangeHint_NeutralChange;
+  }
+
+  return hint;
 }
 
 //-----------------------

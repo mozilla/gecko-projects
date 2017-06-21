@@ -62,10 +62,10 @@
 #include "nsIDOMDOMImplementation.h"
 #include "nsIDOMDocumentXBL.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/FramingChecker.h"
 #include "nsGenericHTMLElement.h"
 #include "mozilla/dom/CDATASection.h"
 #include "mozilla/dom/ProcessingInstruction.h"
-#include "nsDSURIContentListener.h"
 #include "nsDOMString.h"
 #include "nsNodeUtils.h"
 #include "nsLayoutUtils.h" // for GetFrameForPoint
@@ -174,7 +174,7 @@
 
 #include "mozAutoDocUpdate.h"
 #include "nsGlobalWindow.h"
-#include "mozilla/dom/EncodingUtils.h"
+#include "mozilla/Encoding.h"
 #include "nsDOMNavigationTiming.h"
 
 #include "nsSMILAnimationController.h"
@@ -1287,7 +1287,7 @@ nsIDocument::nsIDocument()
     mBlockAllMixedContentPreloads(false),
     mUpgradeInsecureRequests(false),
     mUpgradeInsecurePreloads(false),
-    mCharacterSet(NS_LITERAL_CSTRING("ISO-8859-1")),
+    mCharacterSet(NS_LITERAL_CSTRING("windows-1252")),
     mCharacterSetSource(0),
     mParentDocument(nullptr),
     mCachedRootElement(nullptr),
@@ -1374,9 +1374,13 @@ nsIDocument::nsIDocument()
     mUseCounters(0),
     mChildDocumentUseCounters(0),
     mNotifiedPageForUseCounter(0),
+    mIncCounters(),
     mUserHasInteracted(false)
 {
   SetIsInDocument();
+  for (auto& cnt : mIncCounters) {
+    cnt = 0;
+  }
 }
 
 nsDocument::nsDocument(const char* aContentType)
@@ -2578,7 +2582,7 @@ nsDocument::StartDocumentLoad(const char* aCommand, nsIChannel* aChannel,
 
   // XFO needs to be checked after CSP because it is ignored if
   // the CSP defines frame-ancestors.
-  if (!nsDSURIContentListener::CheckFrameOptions(aChannel, docShell, NodePrincipal())) {
+  if (!FramingChecker::CheckFrameOptions(aChannel, docShell, NodePrincipal())) {
     MOZ_LOG(gCspPRLog, LogLevel::Debug,
             ("XFO doesn't like frame's ancestry, not loading."));
     // stop!  ERROR page!
@@ -3045,7 +3049,7 @@ nsIDocument::Dispatch(const char* aName,
   return DispatcherTrait::Dispatch(aName, aCategory, Move(aRunnable));
 }
 
-nsIEventTarget*
+nsISerialEventTarget*
 nsIDocument::EventTargetFor(TaskCategory aCategory) const
 {
   if (mDocGroup) {
@@ -3844,9 +3848,9 @@ nsDocument::TryChannelCharset(nsIChannel *aChannel,
     nsAutoCString charsetVal;
     nsresult rv = aChannel->GetContentCharset(charsetVal);
     if (NS_SUCCEEDED(rv)) {
-      nsAutoCString preferred;
-      if(EncodingUtils::FindEncodingForLabel(charsetVal, preferred)) {
-        aCharset = preferred;
+      const Encoding* preferred = Encoding::ForLabel(charsetVal);
+      if (preferred) {
+        preferred->Name(aCharset);
         aCharsetSource = kCharsetFromChannel;
         return;
       } else if (aExecutor && !charsetVal.IsEmpty()) {
@@ -5407,7 +5411,7 @@ void
 nsDocument::StyleRuleChanged(StyleSheet* aSheet,
                              css::Rule* aStyleRule)
 {
-  NS_DOCUMENT_NOTIFY_OBSERVERS(StyleRuleChanged, (aSheet));
+  NS_DOCUMENT_NOTIFY_OBSERVERS(StyleRuleChanged, (aSheet, aStyleRule));
 
   if (StyleSheetChangeEventsEnabled()) {
     DO_STYLESHEET_NOTIFICATION(StyleRuleChangeEvent,
@@ -5421,7 +5425,7 @@ void
 nsDocument::StyleRuleAdded(StyleSheet* aSheet,
                            css::Rule* aStyleRule)
 {
-  NS_DOCUMENT_NOTIFY_OBSERVERS(StyleRuleAdded, (aSheet));
+  NS_DOCUMENT_NOTIFY_OBSERVERS(StyleRuleAdded, (aSheet, aStyleRule));
 
   if (StyleSheetChangeEventsEnabled()) {
     DO_STYLESHEET_NOTIFICATION(StyleRuleChangeEvent,
@@ -5435,7 +5439,7 @@ void
 nsDocument::StyleRuleRemoved(StyleSheet* aSheet,
                              css::Rule* aStyleRule)
 {
-  NS_DOCUMENT_NOTIFY_OBSERVERS(StyleRuleRemoved, (aSheet));
+  NS_DOCUMENT_NOTIFY_OBSERVERS(StyleRuleRemoved, (aSheet, aStyleRule));
 
   if (StyleSheetChangeEventsEnabled()) {
     DO_STYLESHEET_NOTIFICATION(StyleRuleChangeEvent,
@@ -6049,54 +6053,40 @@ nsDocument::CustomElementConstructor(JSContext* aCx, unsigned aArgc, JS::Value* 
 bool
 nsDocument::IsWebComponentsEnabled(JSContext* aCx, JSObject* aObject)
 {
-  JS::Rooted<JSObject*> obj(aCx, aObject);
-
-  if (nsContentUtils::IsWebComponentsEnabled()) {
-    return true;
+  if (!nsContentUtils::IsWebComponentsEnabled()) {
+    return false;
   }
 
-  // Check for the webcomponents permission. See Bug 1181555.
+  JS::Rooted<JSObject*> obj(aCx, aObject);
+
   JSAutoCompartment ac(aCx, obj);
   JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForObject(aCx, obj));
   nsCOMPtr<nsPIDOMWindowInner> window =
     do_QueryInterface(nsJSUtils::GetStaticScriptGlobal(global));
 
-  return IsWebComponentsEnabled(window);
+  nsIDocument* doc = window ? window->GetExtantDoc() : nullptr;
+  if (doc && doc->IsStyledByServo()) {
+    NS_WARNING("stylo: Web Components not supported yet");
+    return false;
+  }
+
+  return true;
 }
 
 bool
 nsDocument::IsWebComponentsEnabled(dom::NodeInfo* aNodeInfo)
 {
-  if (nsContentUtils::IsWebComponentsEnabled()) {
-    return true;
+  if (!nsContentUtils::IsWebComponentsEnabled()) {
+    return false;
   }
 
   nsIDocument* doc = aNodeInfo->GetDocument();
-  // Use GetScopeObject() here so that data documents work the same way as the
-  // main document they're associated with.
-  nsCOMPtr<nsPIDOMWindowInner> window =
-    do_QueryInterface(doc->GetScopeObject());
-  return IsWebComponentsEnabled(window);
-}
-
-bool
-nsDocument::IsWebComponentsEnabled(nsPIDOMWindowInner* aWindow)
-{
-  if (aWindow) {
-    nsresult rv;
-    nsCOMPtr<nsIPermissionManager> permMgr =
-      do_GetService(NS_PERMISSIONMANAGER_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, false);
-
-    uint32_t perm;
-    rv = permMgr->TestPermissionFromWindow(
-      aWindow, "moz-extremely-unstable-and-will-change-webcomponents", &perm);
-    NS_ENSURE_SUCCESS(rv, false);
-
-    return perm == nsIPermissionManager::ALLOW_ACTION;
+  if (doc->IsStyledByServo()) {
+    NS_WARNING("stylo: Web Components not supported yet");
+    return false;
   }
 
-  return false;
+  return true;
 }
 
 void
@@ -9909,10 +9899,9 @@ nsDocument::ScrollToRef()
 
     if (NS_FAILED(rv)) {
       const nsACString &docCharset = GetDocumentCharacterSet();
+      const Encoding* encoding = Encoding::ForName(docCharset);
 
-      rv = nsContentUtils::ConvertStringFromEncoding(docCharset,
-                                                     unescapedRef,
-                                                     ref);
+      rv = encoding->DecodeWithoutBOMHandling(unescapedRef, ref);
 
       if (NS_SUCCEEDED(rv) && !ref.IsEmpty()) {
         rv = shell->GoToAnchor(ref, mChangeScrollPosWhenScrollingToRef);
@@ -12757,6 +12746,11 @@ nsDocument::ReportUseCounters(UseCounterReportKind aKind)
         }
       }
     }
+  }
+
+  if (IsContentDocument() || IsResourceDoc()) {
+    uint16_t num = mIncCounters[eIncCounter_ScriptTag];
+    Telemetry::Accumulate(Telemetry::DOM_SCRIPT_EVAL_PER_DOCUMENT, num);
   }
 }
 

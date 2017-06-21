@@ -41,6 +41,7 @@
 #include "nsStyleStruct.h"
 #include "Visibility.h"
 #include "nsChangeHint.h"
+#include "nsStyleContextInlines.h"
 
 #ifdef ACCESSIBILITY
 #include "mozilla/a11y/AccTypes.h"
@@ -1143,7 +1144,7 @@ public:
 #define NS_DECLARE_FRAME_PROPERTY_WITH_DTOR_NEVER_CALLED(prop, type)  \
   static void AssertOnDestroyingProperty##prop(type*) {               \
     MOZ_ASSERT_UNREACHABLE("Frame property " #prop " should never "   \
-                           "be destroyed by the FramePropertyTable"); \
+                           "be destroyed by the FrameProperties class");  \
   }                                                                   \
   NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(prop, type,                     \
                                       AssertOnDestroyingProperty##prop)
@@ -3309,6 +3310,22 @@ public:
     }
   }
 
+protected:
+  // This does the actual work of UpdateStyleOfOwnedAnonBoxes.  It calls
+  // AppendDirectlyOwnedAnonBoxes to find all of the anonymous boxes
+  // owned by this frame, and then updates styles on each of them.
+  void DoUpdateStyleOfOwnedAnonBoxes(mozilla::ServoStyleSet& aStyleSet,
+                                     nsStyleChangeList& aChangeList,
+                                     nsChangeHint aHintForThisFrame);
+
+  // A helper for DoUpdateStyleOfOwnedAnonBoxes for the specific case
+  // of the owned anon box being a child of this frame.
+  void UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
+                                 mozilla::ServoStyleSet& aStyleSet,
+                                 nsStyleChangeList& aChangeList,
+                                 nsChangeHint aHintForThisFrame);
+
+public:
   // A helper both for UpdateStyleOfChildAnonBox, and to update frame-backed
   // pseudo-elements in ServoRestyleManager.
   //
@@ -3317,17 +3334,57 @@ public:
   // and adding to the change list as appropriate.
   //
   // Returns the generated change hint for the frame.
-  nsChangeHint UpdateStyleOfOwnedChildFrame(nsIFrame* aChildFrame,
-                                            nsStyleContext* aNewStyleContext,
-                                            nsStyleChangeList& aChangeList);
+  nsChangeHint UpdateStyleOfOwnedChildFrame(
+      nsIFrame* aChildFrame,
+      nsStyleContext* aNewStyleContext,
+      nsStyleChangeList& aChangeList);
+
+  struct OwnedAnonBox
+  {
+    typedef void (*UpdateStyleFn)(nsIFrame* aOwningFrame, nsIFrame* aAnonBox,
+                                  mozilla::ServoStyleSet&,
+                                  nsStyleChangeList&, nsChangeHint);
+
+    explicit OwnedAnonBox(nsIFrame* aAnonBoxFrame,
+                          UpdateStyleFn aUpdateStyleFn = nullptr)
+      : mAnonBoxFrame(aAnonBoxFrame)
+      , mUpdateStyleFn(aUpdateStyleFn)
+    {}
+
+    nsIFrame* mAnonBoxFrame;
+    UpdateStyleFn mUpdateStyleFn;
+  };
 
   /**
-   * Hook subclasses can override to actually implement updating of style of
-   * owned anon boxes.
+   * Appends information about all of the anonymous boxes owned by this frame,
+   * including other anonymous boxes owned by those which this frame owns
+   * directly.
    */
-  virtual void DoUpdateStyleOfOwnedAnonBoxes(mozilla::ServoStyleSet& aStyleSet,
-                                             nsStyleChangeList& aChangeList,
-                                             nsChangeHint aHintForThisFrame);
+  void AppendOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult) {
+    if (GetStateBits() & NS_FRAME_OWNS_ANON_BOXES) {
+      if (IsInlineFrame()) {
+        // See comment in nsIFrame::DoUpdateStyleOfOwnedAnonBoxes for why
+        // we skip nsInlineFrames.
+        return;
+      }
+      DoAppendOwnedAnonBoxes(aResult);
+    }
+  }
+
+protected:
+  // This does the actual work of AppendOwnedAnonBoxes.
+  void DoAppendOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult);
+
+public:
+  /**
+   * Hook subclasses can override to return their owned anonymous boxes.
+   *
+   * This function only appends anonymous boxes that are directly owned by
+   * this frame, i.e. direct children or (for certain frames) a wrapper
+   * parent, unlike AppendOwnedAnonBoxes, which will append all anonymous
+   * boxes transitively owned by this frame.
+   */
+  virtual void AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult);
 
   /**
    * Determines whether a frame is visible for painting;
@@ -3876,6 +3933,19 @@ public:
    * Returns true if the frame is scrolled out of view.
    */
   bool IsScrolledOutOfView();
+
+  /**
+   * Computes a 2D matrix from the -moz-window-transform and
+   * -moz-window-transform-origin properties on aFrame.
+   * Values that don't result in a 2D matrix will be ignored and an identity
+   * matrix will be returned instead.
+   */
+  Matrix ComputeWidgetTransform();
+
+  /**
+   * Applies the values from the -moz-window-* properties to the widget.
+   */
+  virtual void UpdateWidgetProperties();
 
   /**
    * @return true iff this frame has one or more associated image requests.

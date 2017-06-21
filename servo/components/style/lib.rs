@@ -72,7 +72,7 @@ extern crate pdqsort;
 #[cfg(feature = "gecko")] extern crate precomputed_hash;
 extern crate rayon;
 extern crate selectors;
-#[cfg(feature = "servo")] #[macro_use] extern crate serde_derive;
+#[cfg(feature = "servo")] #[macro_use] extern crate serde;
 pub extern crate servo_arc;
 #[cfg(feature = "servo")] #[macro_use] extern crate servo_atoms;
 #[cfg(feature = "servo")] extern crate servo_config;
@@ -207,11 +207,11 @@ pub fn serialize_comma_separated_list<W, T>(dest: &mut W,
         return Ok(());
     }
 
-    try!(list[0].to_css(dest));
+    list[0].to_css(dest)?;
 
     for item in list.iter().skip(1) {
-        try!(write!(dest, ", "));
-        try!(item.to_css(dest));
+        write!(dest, ", ")?;
+        item.to_css(dest)?;
     }
 
     Ok(())

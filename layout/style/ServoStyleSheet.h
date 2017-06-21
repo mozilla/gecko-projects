@@ -118,8 +118,14 @@ public:
   NS_IMETHOD StyleSheetLoaded(StyleSheet* aSheet, bool aWasAlternate,
                               nsresult aStatus) final;
 
+  // Internal GetCssRules method which do not have security check and
+  // completelness check.
+  ServoCSSRuleList* GetCssRulesInternal();
+
 protected:
   virtual ~ServoStyleSheet();
+
+  void LastRelease();
 
   ServoStyleSheetInner* Inner() const
   {
@@ -127,7 +133,6 @@ protected:
   }
 
   // Internal methods which do not have security check and completeness check.
-  dom::CSSRuleList* GetCssRulesInternal(ErrorResult& aRv);
   uint32_t InsertRuleInternal(const nsAString& aRule,
                               uint32_t aIndex, ErrorResult& aRv);
   void DeleteRuleInternal(uint32_t aIndex, ErrorResult& aRv);

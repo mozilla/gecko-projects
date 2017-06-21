@@ -551,7 +551,7 @@ function writeStringToFile(file, string) {
     stream.init(file, FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE |
                             FileUtils.MODE_TRUNCATE, FileUtils.PERMS_FILE,
                            0);
-    converter.init(stream, "UTF-8", 0, 0x0000);
+    converter.init(stream, "UTF-8");
     converter.writeString(string);
   } finally {
     converter.close();
@@ -6050,7 +6050,7 @@ class MutableDirectoryInstallLocation extends DirectoryInstallLocation {
 
     OS.File.makeDir(this._directory.path);
     let stagepath = OS.Path.join(this._directory.path, DIR_STAGE);
-    return this._stagingDirPromise = OS.File.makeDir(stagepath).then(null, (e) => {
+    return this._stagingDirPromise = OS.File.makeDir(stagepath).catch((e) => {
       if (e instanceof OS.File.Error && e.becauseExists)
         return;
       logger.error("Failed to create staging directory", e);

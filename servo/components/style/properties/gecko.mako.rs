@@ -63,8 +63,9 @@ use std::mem::{forget, transmute, zeroed};
 use std::ptr;
 use stylearc::Arc;
 use std::cmp;
+use values::{Auto, CustomIdent, Either, KeyframesName};
 use values::computed::{Shadow, ToComputedValue};
-use values::{Either, Auto, KeyframesName};
+use values::specified::length::Percentage;
 use computed_values::border_style;
 
 pub mod style_structs {
@@ -1190,8 +1191,8 @@ fn static_assert() {
     pub fn set_${value.name}(&mut self, v: longhands::${value.name}::computed_value::T) {
         use gecko_bindings::structs::{nsStyleGridLine_kMinLine, nsStyleGridLine_kMaxLine};
 
-        let ident = v.ident.unwrap_or(String::new());
-        self.gecko.${value.gecko}.mLineName.assign_utf8(&ident);
+        let ident = v.ident.as_ref().map_or(&[] as &[_], |ident| ident.0.as_slice());
+        self.gecko.${value.gecko}.mLineName.assign(ident);
         self.gecko.${value.gecko}.mHasSpan = v.is_span;
         self.gecko.${value.gecko}.mInteger = v.line_num.map(|i| {
             // clamping the integer between a range
@@ -2430,8 +2431,8 @@ fn static_assert() {
             self.gecko.mTransitionPropertyCount = v.len() as u32;
             for (servo, gecko) in v.zip(self.gecko.mTransitions.iter_mut()) {
                 match servo {
-                    TransitionProperty::Unsupported(ref atom) => unsafe {
-                        Gecko_StyleTransition_SetUnsupportedProperty(gecko, atom.as_ptr())
+                    TransitionProperty::Unsupported(ref ident) => unsafe {
+                        Gecko_StyleTransition_SetUnsupportedProperty(gecko, ident.0.as_ptr())
                     },
                     _ => gecko.mProperty = (&servo).into(),
                 }
@@ -2466,11 +2467,11 @@ fn static_assert() {
         if property == eCSSProperty_UNKNOWN || property == eCSSPropertyExtra_variable {
             let atom = self.gecko.mTransitions[index].mUnknownProperty.raw::<nsIAtom>();
             debug_assert!(!atom.is_null());
-            TransitionProperty::Unsupported(atom.into())
+            TransitionProperty::Unsupported(CustomIdent(atom.into()))
         } else if property == eCSSPropertyExtra_no_properties {
             // Actually, we don't expect TransitionProperty::Unsupported also represents "none",
             // but if the caller wants to convert it, it is fine. Please use it carefully.
-            TransitionProperty::Unsupported(atom!("none"))
+            TransitionProperty::Unsupported(CustomIdent(atom!("none")))
         } else {
             property.into()
         }
@@ -2683,19 +2684,19 @@ fn static_assert() {
                 }
 
                 for feature in features.iter() {
-                    if feature == &atom!("scroll-position") {
+                    if feature.0 == atom!("scroll-position") {
                         self.gecko.mWillChangeBitField |= NS_STYLE_WILL_CHANGE_SCROLL as u8;
-                    } else if feature == &atom!("opacity") {
+                    } else if feature.0 == atom!("opacity") {
                         self.gecko.mWillChangeBitField |= NS_STYLE_WILL_CHANGE_OPACITY as u8;
-                    } else if feature == &atom!("transform") {
+                    } else if feature.0 == atom!("transform") {
                         self.gecko.mWillChangeBitField |= NS_STYLE_WILL_CHANGE_TRANSFORM as u8;
                     }
 
                     unsafe {
-                        Gecko_AppendWillChange(&mut self.gecko, feature.as_ptr());
+                        Gecko_AppendWillChange(&mut self.gecko, feature.0.as_ptr());
                     }
 
-                    if let Ok(prop_id) = PropertyId::parse(feature.to_string().into()) {
+                    if let Ok(prop_id) = PropertyId::parse(feature.0.to_string().into()) {
                         match prop_id.as_shorthand() {
                             Ok(shorthand) => {
                                 for longhand in shorthand.longhands() {
@@ -3433,8 +3434,17 @@ fn static_assert() {
         }
     }
 
+    <%
+    # This array is several filter function which has percentage or
+    # number value for function of clone / set.
+    # The setting / cloning process of other function(e.g. Blur / HueRotate) is
+    # different from these function. So this array don't include such function.
+    FILTER_FUNCTIONS = [ 'Brightness', 'Contrast', 'Grayscale', 'Invert',
+                         'Opacity', 'Saturate', 'Sepia' ]
+     %>
+
     pub fn set_filter(&mut self, v: longhands::filter::computed_value::T) {
-        use properties::longhands::filter::computed_value::Filter::*;
+        use values::generics::effects::Filter::*;
         use gecko_bindings::structs::nsCSSShadowArray;
         use gecko_bindings::structs::nsStyleFilter;
         use gecko_bindings::structs::NS_STYLE_FILTER_BLUR;
@@ -3454,40 +3464,25 @@ fn static_assert() {
         }
 
         unsafe {
-            Gecko_ResetFilters(&mut self.gecko, v.filters.len());
+            Gecko_ResetFilters(&mut self.gecko, v.0.len());
         }
-        debug_assert!(v.filters.len() == self.gecko.mFilters.len());
+        debug_assert!(v.0.len() == self.gecko.mFilters.len());
 
-        for (servo, gecko_filter) in v.filters.into_iter().zip(self.gecko.mFilters.iter_mut()) {
-            //TODO: URL, drop-shadow
+        for (servo, gecko_filter) in v.0.into_vec().into_iter().zip(self.gecko.mFilters.iter_mut()) {
             match servo {
-                Blur(len)          => fill_filter(NS_STYLE_FILTER_BLUR,
-                                                  CoordDataValue::Coord(len.0),
-                                                  gecko_filter),
-                Brightness(factor) => fill_filter(NS_STYLE_FILTER_BRIGHTNESS,
-                                                  CoordDataValue::Factor(factor),
-                                                  gecko_filter),
-                Contrast(factor)   => fill_filter(NS_STYLE_FILTER_CONTRAST,
-                                                  CoordDataValue::Factor(factor),
-                                                  gecko_filter),
-                Grayscale(factor)  => fill_filter(NS_STYLE_FILTER_GRAYSCALE,
-                                                  CoordDataValue::Factor(factor),
-                                                  gecko_filter),
-                HueRotate(angle)   => fill_filter(NS_STYLE_FILTER_HUE_ROTATE,
-                                                  CoordDataValue::from(angle),
-                                                  gecko_filter),
-                Invert(factor)     => fill_filter(NS_STYLE_FILTER_INVERT,
-                                                  CoordDataValue::Factor(factor),
-                                                  gecko_filter),
-                Opacity(factor)    => fill_filter(NS_STYLE_FILTER_OPACITY,
-                                                  CoordDataValue::Factor(factor),
-                                                  gecko_filter),
-                Saturate(factor)   => fill_filter(NS_STYLE_FILTER_SATURATE,
-                                                  CoordDataValue::Factor(factor),
-                                                  gecko_filter),
-                Sepia(factor)      => fill_filter(NS_STYLE_FILTER_SEPIA,
-                                                  CoordDataValue::Factor(factor),
-                                                  gecko_filter),
+                % for func in FILTER_FUNCTIONS:
+                ${func}(factor) => fill_filter(NS_STYLE_FILTER_${func.upper()},
+                                               CoordDataValue::Factor(factor),
+                                               gecko_filter),
+                % endfor
+                Blur(length) => fill_filter(NS_STYLE_FILTER_BLUR,
+                                            CoordDataValue::Coord(length.0),
+                                            gecko_filter),
+
+                HueRotate(angle) => fill_filter(NS_STYLE_FILTER_HUE_ROTATE,
+                                                CoordDataValue::from(angle),
+                                                gecko_filter),
+
                 DropShadow(shadow) => {
                     gecko_filter.mType = NS_STYLE_FILTER_DROP_SHADOW;
 
@@ -3502,13 +3497,13 @@ fn static_assert() {
                     }
 
                     let mut gecko_shadow = init_shadow(gecko_filter);
-                    gecko_shadow.mArray[0].set_from_shadow(shadow);
-                }
+                    gecko_shadow.mArray[0].set_from_drop_shadow(shadow);
+                },
                 Url(ref url) => {
                     unsafe {
                         bindings::Gecko_nsStyleFilter_SetURLValue(gecko_filter, url.for_ffi());
                     }
-                }
+                },
             }
         }
     }
@@ -3518,6 +3513,59 @@ fn static_assert() {
             Gecko_CopyFiltersFrom(&other.gecko as *const _ as *mut _, &mut self.gecko);
         }
     }
+
+    pub fn clone_filter(&self) -> longhands::filter::computed_value::T {
+        use values::generics::effects::{Filter, FilterList};
+        use values::specified::url::SpecifiedUrl;
+        use gecko_bindings::structs::NS_STYLE_FILTER_BLUR;
+        use gecko_bindings::structs::NS_STYLE_FILTER_BRIGHTNESS;
+        use gecko_bindings::structs::NS_STYLE_FILTER_CONTRAST;
+        use gecko_bindings::structs::NS_STYLE_FILTER_GRAYSCALE;
+        use gecko_bindings::structs::NS_STYLE_FILTER_INVERT;
+        use gecko_bindings::structs::NS_STYLE_FILTER_OPACITY;
+        use gecko_bindings::structs::NS_STYLE_FILTER_SATURATE;
+        use gecko_bindings::structs::NS_STYLE_FILTER_SEPIA;
+        use gecko_bindings::structs::NS_STYLE_FILTER_HUE_ROTATE;
+        use gecko_bindings::structs::NS_STYLE_FILTER_DROP_SHADOW;
+        use gecko_bindings::structs::NS_STYLE_FILTER_URL;
+
+        let mut filters = Vec::new();
+        for filter in self.gecko.mFilters.iter(){
+            match filter.mType {
+                % for func in FILTER_FUNCTIONS:
+                NS_STYLE_FILTER_${func.upper()} => {
+                    filters.push(Filter::${func}(
+                        GeckoStyleCoordConvertible::from_gecko_style_coord(
+                            &filter.mFilterParameter).unwrap()));
+                },
+                % endfor
+                NS_STYLE_FILTER_BLUR => {
+                    filters.push(Filter::Blur(Au::from_gecko_style_coord(
+                        &filter.mFilterParameter).unwrap()));
+                },
+                NS_STYLE_FILTER_HUE_ROTATE => {
+                    filters.push(Filter::HueRotate(
+                        GeckoStyleCoordConvertible::from_gecko_style_coord(
+                            &filter.mFilterParameter).unwrap()));
+                },
+                NS_STYLE_FILTER_DROP_SHADOW => {
+                    filters.push(unsafe {
+                        Filter::DropShadow((**filter.__bindgen_anon_1.mDropShadow.as_ref()).mArray[0].to_drop_shadow())
+                    });
+                },
+                NS_STYLE_FILTER_URL => {
+                    filters.push(unsafe {
+                        Filter::Url(
+                            SpecifiedUrl::from_url_value_data(&(**filter.__bindgen_anon_1.mURL.as_ref())._base).unwrap()
+                        )
+                    });
+                }
+                _ => {},
+            }
+        }
+        FilterList(filters.into_boxed_slice())
+    }
+
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="InheritedBox"
@@ -4045,7 +4093,7 @@ clip-path
                 CoordDataValue::Coord(coord) =>
                     vec.push(Either::Second(LengthOrPercentage::Length(Au(coord)))),
                 CoordDataValue::Percent(p) =>
-                    vec.push(Either::Second(LengthOrPercentage::Percentage(p))),
+                    vec.push(Either::Second(LengthOrPercentage::Percentage(Percentage(p)))),
                 CoordDataValue::Calc(calc) =>
                     vec.push(Either::Second(LengthOrPercentage::Calc(calc.into()))),
                 _ => unreachable!(),
@@ -4068,7 +4116,7 @@ clip-path
         match self.gecko.mStrokeDashoffset.as_value() {
             CoordDataValue::Factor(number) => Either::First(number),
             CoordDataValue::Coord(coord) => Either::Second(LengthOrPercentage::Length(Au(coord))),
-            CoordDataValue::Percent(p) => Either::Second(LengthOrPercentage::Percentage(p)),
+            CoordDataValue::Percent(p) => Either::Second(LengthOrPercentage::Percentage(Percentage(p))),
             CoordDataValue::Calc(calc) => Either::Second(LengthOrPercentage::Calc(calc.into())),
             _ => unreachable!(),
         }
@@ -4088,7 +4136,7 @@ clip-path
         match self.gecko.mStrokeWidth.as_value() {
             CoordDataValue::Factor(number) => Either::First(number),
             CoordDataValue::Coord(coord) => Either::Second(LengthOrPercentage::Length(Au(coord))),
-            CoordDataValue::Percent(p) => Either::Second(LengthOrPercentage::Percentage(p)),
+            CoordDataValue::Percent(p) => Either::Second(LengthOrPercentage::Percentage(Percentage(p))),
             CoordDataValue::Calc(calc) => Either::Second(LengthOrPercentage::Calc(calc.into())),
             _ => unreachable!(),
         }

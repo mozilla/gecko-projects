@@ -42,10 +42,11 @@
 #include "nsFrameManager.h"
 #include "nsLayoutUtils.h"
 #include "LayoutLogging.h"
+#include "mozilla/GeckoStyleContext.h"
 #include "mozilla/GeckoRestyleManager.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/RestyleManagerInlines.h"
-
+#include "nsInlineFrame.h"
 #include "nsIDOMNode.h"
 #include "nsISelection.h"
 #include "nsISelectionPrivate.h"
@@ -7197,7 +7198,7 @@ nsIFrame::ListGeneric(nsACString& aTo, const char* aPrefix, uint32_t aFlags) con
       pseudoTag->ToString(atomString);
       aTo += nsPrintfCString("%s", NS_LossyConvertUTF16toASCII(atomString).get());
     }
-    if (mStyleContext->StyleSource().IsGeckoRuleNodeOrNull()) {
+    if (mStyleContext->IsGecko()) {
       if (!mStyleContext->GetParent() ||
           (GetParent() && GetParent()->StyleContext() != mStyleContext->GetParent())) {
         aTo += nsPrintfCString("^%p", mStyleContext->GetParent());
@@ -10200,10 +10201,10 @@ nsFrame::BoxMetrics() const
 }
 
 void
-nsFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
-                                   ServoStyleSet& aStyleSet,
-                                   nsStyleChangeList& aChangeList,
-                                   nsChangeHint aHintForThisFrame)
+nsIFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
+                                    ServoStyleSet& aStyleSet,
+                                    nsStyleChangeList& aChangeList,
+                                    nsChangeHint aHintForThisFrame)
 {
   MOZ_ASSERT(aChildFrame->GetParent() == this,
              "This should only be used for children!");
@@ -10478,14 +10479,151 @@ nsIFrame::IsScrolledOutOfView()
   return IsFrameScrolledOutOfView(this);
 }
 
-/* virtual */
+gfx::Matrix
+nsIFrame::ComputeWidgetTransform()
+{
+  const nsStyleUIReset* uiReset = StyleUIReset();
+  if (!uiReset->mSpecifiedWindowTransform) {
+    return gfx::Matrix();
+  }
+
+  nsStyleTransformMatrix::TransformReferenceBox refBox;
+  refBox.Init(GetSize());
+
+  nsPresContext* presContext = PresContext();
+  int32_t appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
+  RuleNodeCacheConditions dummy;
+  bool dummyBool;
+  gfx::Matrix4x4 matrix =
+    nsStyleTransformMatrix::ReadTransforms(uiReset->mSpecifiedWindowTransform->mHead,
+                                           StyleContext(),
+                                           presContext,
+                                           dummy,
+                                           refBox,
+                                           float(appUnitsPerDevPixel),
+                                           &dummyBool);
+
+  // Apply the -moz-window-transform-origin translation to the matrix.
+  Point transformOrigin =
+    nsStyleTransformMatrix::Convert2DPosition(uiReset->mWindowTransformOrigin,
+                                              refBox, appUnitsPerDevPixel);
+  matrix.ChangeBasis(Point3D(transformOrigin.x, transformOrigin.y, 0));
+
+  gfx::Matrix result2d;
+  if (!matrix.CanDraw2D(&result2d)) {
+    // FIXME: It would be preferable to reject non-2D transforms at parse time.
+    NS_WARNING("-moz-window-transform does not describe a 2D transform, "
+               "but only 2d transforms are supported");
+    return gfx::Matrix();
+  }
+
+  return result2d;
+}
+
+static already_AddRefed<nsIWidget>
+GetWindowWidget(nsPresContext* aPresContext)
+{
+  // We want to obtain the widget for the window. We can't use any of these
+  // methods: nsPresContext::GetRootWidget, nsPresContext::GetNearestWidget,
+  // nsIFrame::GetNearestWidget because those deal with child widgets and
+  // there is no parent widget connection between child widgets and the
+  // window widget that contains them.
+  nsCOMPtr<nsISupports> container = aPresContext->Document()->GetContainer();
+  nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(container);
+  if (!baseWindow) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIWidget> mainWidget;
+  baseWindow->GetMainWidget(getter_AddRefs(mainWidget));
+  return mainWidget.forget();
+}
+
+void
+nsIFrame::UpdateWidgetProperties()
+{
+  nsPresContext* presContext = PresContext();
+  if (presContext->IsRoot() || !presContext->IsChrome()) {
+    // Don't do anything for documents that aren't the root chrome document.
+    return;
+  }
+  nsIFrame* rootFrame =
+    presContext->FrameConstructor()->GetRootElementStyleFrame();
+  if (this != rootFrame) {
+    // Only the window's root style frame is relevant for widget properties.
+    return;
+  }
+  if (nsCOMPtr<nsIWidget> widget = GetWindowWidget(presContext)) {
+    widget->SetWindowOpacity(StyleUIReset()->mWindowOpacity);
+    widget->SetWindowTransform(ComputeWidgetTransform());
+  }
+}
+
 void
 nsIFrame::DoUpdateStyleOfOwnedAnonBoxes(ServoStyleSet& aStyleSet,
-                                      nsStyleChangeList& aChangeList,
-                                      nsChangeHint aHintForThisFrame)
+                                        nsStyleChangeList& aChangeList,
+                                        nsChangeHint aHintForThisFrame)
+{
+  // As a special case, we check for {ib}-split block frames here, rather
+  // than have an nsInlineFrame::AppendDirectlyOwnedAnonBoxes implementation
+  // that returns them.
+  //
+  // (If we did handle them in AppendDirectlyOwnedAnonBoxes, we would have to
+  // return *all* of the in-flow {ib}-split block frames, not just the first
+  // one.  For restyling, we really just need the first in flow, and the other
+  // user of the AppendOwnedAnonBoxes API, AllChildIterator, doesn't need to
+  // know about them at all, since these block frames never create NAC.  So we
+  // avoid any unncessary hashtable lookups for the {ib}-split frames by calling
+  // UpdateStyleOfOwnedAnonBoxesForIBSplit directly here.)
+  if (IsInlineFrame()) {
+    if ((GetStateBits() & NS_FRAME_PART_OF_IBSPLIT)) {
+      static_cast<nsInlineFrame*>(this)->
+        UpdateStyleOfOwnedAnonBoxesForIBSplit(aStyleSet, aChangeList,
+                                              aHintForThisFrame);
+    }
+    return;
+  }
+
+  AutoTArray<OwnedAnonBox,4> frames;
+  AppendDirectlyOwnedAnonBoxes(frames);
+  for (OwnedAnonBox& box : frames) {
+    if (box.mUpdateStyleFn) {
+      box.mUpdateStyleFn(this, box.mAnonBoxFrame,
+                         aStyleSet, aChangeList, aHintForThisFrame);
+    } else {
+      UpdateStyleOfChildAnonBox(box.mAnonBoxFrame,
+                                aStyleSet, aChangeList, aHintForThisFrame);
+    }
+  }
+}
+
+/* virtual */ void
+nsIFrame::AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult)
 {
   MOZ_ASSERT(!(GetStateBits() & NS_FRAME_OWNS_ANON_BOXES));
   MOZ_ASSERT(false, "Why did this get called?");
+}
+
+void
+nsIFrame::DoAppendOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult)
+{
+  size_t i = aResult.Length();
+  AppendDirectlyOwnedAnonBoxes(aResult);
+
+  // After appending the directly owned anonymous boxes of this frame to
+  // aResult above, we need to check each of them to see if they own
+  // any anonymous boxes themselves.  Note that we keep progressing
+  // through aResult, looking for additional entries in aResult from these
+  // subsequent AppendDirectlyOwnedAnonBoxes calls.  (Thus we can't
+  // use a ranged for loop here.)
+
+  while (i < aResult.Length()) {
+    nsIFrame* f = aResult[i].mAnonBoxFrame;
+    if (f->GetStateBits() & NS_FRAME_OWNS_ANON_BOXES) {
+      f->AppendDirectlyOwnedAnonBoxes(aResult);
+    }
+    ++i;
+  }
 }
 
 nsIFrame::CaretPosition::CaretPosition()

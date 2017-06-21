@@ -4,13 +4,6 @@ const FORM_URL = "http://mochi.test:8888/browser/browser/extensions/formautofill
 const FTU_PREF = "extensions.formautofill.firstTimeUse";
 const ENABLED_PREF = "extensions.formautofill.addresses.enabled";
 
-registerCleanupFunction(async function() {
-  let addresses = await getAddresses();
-  if (addresses.length) {
-    await removeAddresses(addresses.map(address => address.guid));
-  }
-});
-
 add_task(async function test_first_time_save() {
   let addresses = await getAddresses();
   is(addresses.length, 0, "No profile in storage");
@@ -34,9 +27,8 @@ add_task(async function test_first_time_save() {
         form.querySelector("#tel").value = "1-345-345-3456";
 
         // Wait 500ms before submission to make sure the input value applied
-        setTimeout(() => {
-          form.querySelector("input[type=submit]").click();
-        }, 500);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        form.querySelector("input[type=submit]").click();
       });
 
       await promiseShown;
@@ -72,12 +64,11 @@ add_task(async function test_non_first_time_save() {
         form.querySelector("#tel").value = "1-650-903-0800";
 
         // Wait 500ms before submission to make sure the input value applied
-        setTimeout(() => {
-          form.querySelector("input[type=submit]").click();
-        }, 500);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        form.querySelector("input[type=submit]").click();
       });
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await sleep(1000);
       is(PopupNotifications.panel.state, "closed", "Doorhanger is hidden");
     }
   );

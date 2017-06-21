@@ -388,11 +388,15 @@ var BrowserApp = {
 
     Services.androidBridge.browserApp = this;
 
-    GlobalEventDispatcher.registerListener(this, [
+    WindowEventDispatcher.registerListener(this, [
+      "Session:Restore",
       "Tab:Load",
       "Tab:Selected",
       "Tab:Closed",
       "Tab:Move",
+    ]);
+
+    GlobalEventDispatcher.registerListener(this, [
       "Browser:LoadManifest",
       "Browser:Quit",
       "Fonts:Reload",
@@ -1849,6 +1853,10 @@ var BrowserApp = {
         webNav.reload(flags);
         break;
       }
+
+      case "Session:Restore":
+        GlobalEventDispatcher.dispatch("Session:Restore", data);
+        break;
 
       case "Session:Stop":
         browser.stop();
@@ -6836,7 +6844,7 @@ var Distribution = {
       } catch (e) {
         Cu.reportError("Distribution: Could not parse JSON: " + e);
       }
-    }).then(null, function onError(reason) {
+    }).catch(function onError(reason) {
       if (!(reason instanceof OS.File.Error && reason.becauseNoSuchFile)) {
         Cu.reportError("Distribution: Could not read from " + aFile.leafName + " file");
       }

@@ -9,6 +9,15 @@
 document.getElementById("onboarding-overlay-dialog")
                         .addEventListener("click", evt => {
   switch (evt.target.id) {
+    case "onboarding-tour-addons-button":
+      Mozilla.UITour.showHighlight("addons");
+      break;
+    case "onboarding-tour-customize-button":
+      Mozilla.UITour.showHighlight("customize");
+      break;
+   case "onboarding-tour-default-browser-button":
+      Mozilla.UITour.setConfiguration("defaultBrowser");
+      break;
     case "onboarding-tour-private-browsing-button":
       Mozilla.UITour.showHighlight("privateWindow");
       break;

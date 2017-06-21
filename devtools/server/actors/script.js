@@ -681,6 +681,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     if ("observeAsmJS" in options) {
       this.dbg.allowUnobservedAsmJS = !options.observeAsmJS;
     }
+    if ("wasmBinarySource" in options) {
+      this.dbg.allowWasmBinarySource = !!options.wasmBinarySource;
+    }
 
     Object.assign(this._options, options);
 
@@ -735,7 +738,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
                       column: originalLocation.originalColumn
                     };
                     resolve(onPacket(packet))
-          .then(null, error => {
+          .catch(error => {
             reportError(error);
             return {
               error: "unknownError",
@@ -1068,7 +1071,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       needNest = false;
       returnVal = resolvedVal;
     })
-    .then(null, (error) => {
+    .catch((error) => {
       reportError(error, "Error inside unsafeSynchronize:");
     })
     .then(() => {

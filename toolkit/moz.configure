@@ -749,6 +749,7 @@ def stylo(stylo_config, bindgen_config_paths, bindgen_enabled):
 
 set_config('MOZ_STYLO', stylo.build)
 set_define('MOZ_STYLO', stylo.build)
+set_config('MOZ_STYLO_ENABLE', stylo_config.enable)
 set_define('MOZ_STYLO_ENABLE', stylo_config.enable)
 
 set_config('MOZ_LIBCLANG_PATH', stylo.libclang_path)
@@ -1130,6 +1131,10 @@ def geckodriver(enable, automation, compile_env, cross_compile, hazard, target):
     default on supported CI build platforms.
     """
     if enable:
+        if not compile_env:
+            die("--enable-geckodriver is not available without a compile "
+                "environment. A geckodriver binary will be downloaded during "
+                "an artifact build by default where available.")
         return True
 
     if enable.origin == 'default':

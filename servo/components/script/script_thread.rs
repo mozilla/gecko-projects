@@ -1650,6 +1650,13 @@ impl ScriptThread {
             let load = self.incomplete_loads.borrow_mut().remove(idx);
             load.layout_chan.clone()
         } else if let Some(document) = self.documents.borrow_mut().remove(id) {
+            // We don't want to dispatch `mouseout` event pointing to non-existing element
+            if let Some(target) = self.topmost_mouse_over_target.get() {
+                if target.upcast::<Node>().owner_doc() == document {
+                    self.topmost_mouse_over_target.set(None);
+                }
+            }
+
             let window = document.window();
             if discard_bc == DiscardBrowsingContext::Yes {
                 window.window_proxy().discard_browsing_context();
@@ -2315,7 +2322,7 @@ impl ScriptThread {
     }
 
     fn handle_css_error_reporting(&self, pipeline_id: PipelineId, filename: String,
-                                  line: usize, column: usize, msg: String) {
+                                  line: u32, column: u32, msg: String) {
         let sender = match self.devtools_chan {
             Some(ref sender) => sender,
             None => return,

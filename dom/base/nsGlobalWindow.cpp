@@ -104,7 +104,6 @@
 #include "nsIDocShell.h"
 #include "nsIDocCharset.h"
 #include "nsIDocument.h"
-#include "nsIDocumentInlines.h"
 #include "Crypto.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMElement.h"
@@ -1000,7 +999,6 @@ nsPIDOMWindow<T>::nsPIDOMWindow(nsPIDOMWindowOuter *aOuterWindow)
   mIsHandlingResizeEvent(false), mIsInnerWindow(aOuterWindow != nullptr),
   mMayHavePaintEventListener(false), mMayHaveTouchEventListener(false),
   mMayHaveMouseEnterLeaveEventListener(false),
-  mMayHaveMouseMoveEventListener(false),
   mMayHavePointerEnterLeaveEventListener(false),
   mInnerObjectsFreed(false),
   mIsModalContentWindow(false),
@@ -1611,7 +1609,9 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
 #endif
     mCanSkipCCGeneration(0),
     mAutoActivateVRDisplayID(0),
-    mBeforeUnloadListenerCount(0)
+    mBeforeUnloadListenerCount(0),
+    mNumOfIndexedDBTransactions(0),
+    mNumOfIndexedDBDatabases(0)
 {
   AssertIsOnMainThread();
 
@@ -2081,23 +2081,6 @@ void
 nsGlobalWindow::FreeInnerObjects()
 {
   NS_ASSERTION(IsInnerWindow(), "Don't free inner objects on an outer window");
-
-  if (mDoc && !nsContentUtils::IsSystemPrincipal(mDoc->NodePrincipal())) {
-    EventTarget* win = this;
-    EventTarget* html = mDoc->GetHtmlElement();
-    EventTarget* body = mDoc->GetBodyElement();
-
-    bool mouseAware = AsInner()->HasMouseMoveEventListeners();
-    bool keyboardAware = win->MayHaveAPZAwareKeyEventListener() ||
-                         mDoc->MayHaveAPZAwareKeyEventListener() ||
-                         (html && html->MayHaveAPZAwareKeyEventListener()) ||
-                         (body && body->MayHaveAPZAwareKeyEventListener());
-
-    Telemetry::Accumulate(Telemetry::APZ_AWARE_MOUSEMOVE_LISTENERS,
-                          mouseAware ? 1 : 0);
-    Telemetry::Accumulate(Telemetry::APZ_AWARE_KEY_LISTENERS,
-                          keyboardAware ? 1 : 0);
-  }
 
   // Make sure that this is called before we null out the document and
   // other members that the window destroyed observers could
@@ -15336,7 +15319,7 @@ nsGlobalWindow::Dispatch(const char* aName,
   return DispatcherTrait::Dispatch(aName, aCategory, Move(aRunnable));
 }
 
-nsIEventTarget*
+nsISerialEventTarget*
 nsGlobalWindow::EventTargetFor(TaskCategory aCategory) const
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
@@ -15445,6 +15428,56 @@ nsGlobalWindow::GetIntlUtils(ErrorResult& aError)
   return mIntlUtils;
 }
 #endif
+
+#define DEFINE_INDEXEDDB_COUNTER_FOR(name)                                     \
+void                                                                           \
+nsPIDOMWindowInner::UpdateActive##name##Count(int32_t aDelta)                  \
+{                                                                              \
+  nsGlobalWindow::Cast(this)->UpdateActive##name##Count(aDelta);               \
+}                                                                              \
+                                                                               \
+bool nsPIDOMWindowInner::HasActive##name##s()                                  \
+{                                                                              \
+  return nsGlobalWindow::Cast(this)->HasActive##name##s();                     \
+}                                                                              \
+                                                                               \
+void                                                                           \
+nsGlobalWindow::UpdateActive##name##Count(int32_t aDelta)                      \
+{                                                                              \
+  if (aDelta == 0) {                                                           \
+    return;                                                                    \
+  }                                                                            \
+                                                                               \
+  DebugOnly<uint32_t> count = mNumOf##name##s;                                 \
+  mNumOf##name##s += aDelta;                                                   \
+  TabGroup()->name##Counter() += aDelta;                                       \
+  MOZ_ASSERT(                                                                  \
+    aDelta > 0 ? mNumOf##name##s > count : mNumOf##name##s < count,            \
+    "The counters are either overflow or underflow!");                         \
+}                                                                              \
+                                                                               \
+bool                                                                           \
+nsGlobalWindow::HasActive##name##s()                                           \
+{                                                                              \
+  MOZ_ASSERT(NS_IsMainThread());                                               \
+  MOZ_DIAGNOSTIC_ASSERT(IsInnerWindow());                                      \
+                                                                               \
+  if (!AsInner()->IsCurrentInnerWindow())                                      \
+  {                                                                            \
+    return false;                                                              \
+  }                                                                            \
+                                                                               \
+  nsCOMPtr<nsPIDOMWindowOuter> topOutterWindow = this->GetScriptableTop();     \
+  MOZ_ASSERT(topOutterWindow);                                                 \
+  RefPtr<nsGlobalWindow> topInnerWindow =                                      \
+    nsGlobalWindow::Cast(topOutterWindow->GetCurrentInnerWindow());            \
+                                                                               \
+  return topInnerWindow ? topInnerWindow->mNumOf##name##s > 0 : false;         \
+}
+
+DEFINE_INDEXEDDB_COUNTER_FOR(IndexedDBTransaction)
+DEFINE_INDEXEDDB_COUNTER_FOR(IndexedDBDatabase)
+#undef DEFINE_INDEXEDDB_COUNTER_FOR
 
 template class nsPIDOMWindow<mozIDOMWindowProxy>;
 template class nsPIDOMWindow<mozIDOMWindow>;

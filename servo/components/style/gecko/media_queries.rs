@@ -230,22 +230,21 @@ impl Resolution {
     }
 
     fn parse<'i, 't>(input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
-        let (value, unit) = match try!(input.next()) {
-            Token::Dimension(value, unit) => {
+        let (value, unit) = match input.next()? {
+            Token::Dimension { value, unit, .. } => {
                 (value, unit)
             },
             t => return Err(BasicParseError::UnexpectedToken(t).into()),
         };
 
-        let inner_value = value.value;
-        if inner_value <= 0. {
+        if value <= 0. {
             return Err(StyleParseError::UnspecifiedError.into())
         }
 
         (match_ignore_ascii_case! { &unit,
-            "dpi" => Ok(Resolution::Dpi(inner_value)),
-            "dppx" => Ok(Resolution::Dppx(inner_value)),
-            "dpcm" => Ok(Resolution::Dpcm(inner_value)),
+            "dpi" => Ok(Resolution::Dpi(value)),
+            "dppx" => Ok(Resolution::Dppx(value)),
+            "dpcm" => Ok(Resolution::Dpcm(value)),
             _ => Err(())
         }).map_err(|()| StyleParseError::UnexpectedDimension(unit).into())
     }
@@ -463,9 +462,9 @@ impl Expression {
     /// ```
     pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
                          -> Result<Self, ParseError<'i>> {
-        try!(input.expect_parenthesis_block());
+        input.expect_parenthesis_block()?;
         input.parse_nested_block(|input| {
-            let ident = try!(input.expect_ident());
+            let ident = input.expect_ident()?;
 
             let mut flags = 0;
             let result = {

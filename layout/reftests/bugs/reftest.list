@@ -1665,7 +1665,7 @@ random == 637597-1.html 637597-1-ref.html # bug 637597 was never really fixed!
 fuzzy-if(Android,8,500) == 637852-1.html 637852-1-ref.html
 fuzzy-if(Android,8,500) fuzzy-if(skiaContent,2,1) fuzzy-if(webrender,3,19) == 637852-2.html 637852-2-ref.html
 fuzzy-if(Android,8,500) == 637852-3.html 637852-3-ref.html
-== 641770-1.html 641770-1-ref.html
+fails-if(webrender&&asyncPan) == 641770-1.html 641770-1-ref.html # bug 1374326 for webrender+APZ
 == 641856-1.html 641856-1-ref.html
 == 645491-1.html 645491-1-ref.html
 == 645647-1.html 645647-1-ref.html
@@ -1856,7 +1856,7 @@ test-pref(layout.css.grid.enabled,true) == 1053035-1-grid.html 1053035-1-ref.htm
 == 1062108-1.html 1062108-1-ref.html
 == 1062792-1.html 1062792-1-ref.html
 == 1062963-floatmanager-reflow.html 1062963-floatmanager-reflow-ref.html
-test-pref(dom.webcomponents.enabled,true) == 1066554-1.html 1066554-1-ref.html
+test-pref(dom.webcomponents.enabled,true) fails-if(stylo||styloVsGecko) == 1066554-1.html 1066554-1-ref.html
 == 1069716-1.html 1069716-1-ref.html
 fails-if(webrender) == 1078262-1.html about:blank
 test-pref(layout.testing.overlay-scrollbars.always-visible,false) == 1081072-1.html 1081072-1-ref.html
@@ -1958,7 +1958,7 @@ random-if(gtkWidget) != 1238243-1.html 1238243-1-notref.html # may fail on Linux
 == 1238243-2.html 1238243-2-ref.html
 fuzzy(100,2000) == 1239564.html 1239564-ref.html
 == 1242172-1.html 1242172-1-ref.html
-fuzzy-if(webrender,0-1,0-2400) == 1242172-2.html 1242172-2-ref.html
+fuzzy-if(webrender,0-2,0-2601) == 1242172-2.html 1242172-2-ref.html
 == 1242781.html 1242781-ref.html
 == 1263845.html 1263845-ref.html
 == 1260543-1.html 1260543-1-ref.html
@@ -2006,9 +2006,12 @@ fails-if(styloVsGecko) == 1322512-1.html 1322512-1-ref.html
 == 1364360-1.html 1364360-1-ref.html
 == 1365159-1.html 1365159-1-ref.html
 fails-if(!stylo||styloVsGecko) == 1365162-1.html 1365162-1-ref.html
+== 1352306-1.html 1352306-1-ref.html
 == 1366144.html 1366144-ref.html
 == 1367592-1.html 1367592-1-ref.html
 == 1368113-1.html 1368113-1-ref.html
 == 1369584-1a.html 1369584-1-ref.html
 == 1369584-1b.html 1369584-1-ref.html
 == 1369954-1.xhtml 1369954-1-ref.xhtml
+== 1369985-1.html 1369985-1-ref.html
+== 1371130.xhtml 1371130-ref.xhtml

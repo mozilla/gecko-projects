@@ -13,6 +13,7 @@ use parser::{ParserContext, Parse};
 use self::grid::TrackSizeOrRepeat;
 use self::url::SpecifiedUrl;
 use std::ascii::AsciiExt;
+use std::borrow::Cow;
 use std::f32;
 use std::fmt;
 use style_traits::{ToCss, ParseError, StyleParseError};
@@ -32,16 +33,18 @@ pub use self::background::BackgroundSize;
 pub use self::border::{BorderCornerRadius, BorderImageSlice, BorderImageWidth};
 pub use self::border::{BorderImageSideWidth, BorderRadius, BorderSideWidth};
 pub use self::color::{Color, RGBAColor};
-pub use self::rect::LengthOrNumberRect;
+pub use self::effects::FilterList;
+pub use self::flex::FlexBasis;
 #[cfg(feature = "gecko")]
 pub use self::gecko::ScrollSnapPoint;
 pub use self::image::{ColorStop, EndingShape as GradientEndingShape, Gradient};
 pub use self::image::{GradientItem, GradientKind, Image, ImageRect, ImageLayer};
-pub use self::length::AbsoluteLength;
-pub use self::length::{FontRelativeLength, ViewportPercentageLength, CharacterWidth, Length, CalcLengthOrPercentage};
-pub use self::length::{Percentage, LengthOrNone, LengthOrNumber, LengthOrPercentage, LengthOrPercentageOrAuto};
-pub use self::length::{LengthOrPercentageOrNone, LengthOrPercentageOrAutoOrContent, NoCalcLength};
-pub use self::length::{MaxLength, MozLength};
+pub use self::length::{AbsoluteLength, CalcLengthOrPercentage, CharacterWidth};
+pub use self::length::{FontRelativeLength, Length, LengthOrNone, LengthOrNumber};
+pub use self::length::{LengthOrPercentage, LengthOrPercentageOrAuto};
+pub use self::length::{LengthOrPercentageOrNone, MaxLength, MozLength};
+pub use self::length::{NoCalcLength, Percentage, ViewportPercentageLength};
+pub use self::rect::LengthOrNumberRect;
 pub use self::position::{Position, PositionComponent};
 pub use self::text::{InitialLetter, LetterSpacing, LineHeight, WordSpacing};
 pub use self::transform::{TimingFunction, TransformOrigin};
@@ -54,6 +57,8 @@ pub mod basic_shape;
 pub mod border;
 pub mod calc;
 pub mod color;
+pub mod effects;
+pub mod flex;
 #[cfg(feature = "gecko")]
 pub mod gecko;
 pub mod grid;
@@ -78,8 +83,8 @@ pub use ::gecko::url::*;
 
 impl Parse for SpecifiedUrl {
     fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
-        let url = try!(input.expect_url());
-        Self::parse_from_string(url, context)
+        let url = input.expect_url()?;
+        Self::parse_from_string(url.into_owned(), context)
     }
 }
 
@@ -94,12 +99,12 @@ no_viewport_percentage!(SpecifiedUrl);
 /// Parse an `<integer>` value, handling `calc()` correctly.
 pub fn parse_integer<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
                              -> Result<Integer, ParseError<'i>> {
-    match try!(input.next()) {
-        Token::Number(ref value) => value.int_value.ok_or(StyleParseError::UnspecifiedError.into()).map(Integer::new),
+    match input.next()? {
+        Token::Number { int_value: Some(v), .. } => Ok(Integer::new(v)),
         Token::Function(ref name) if name.eq_ignore_ascii_case("calc") => {
-            let result = try!(input.parse_nested_block(|i| {
+            let result = input.parse_nested_block(|i| {
                 CalcNode::parse_integer(context, i)
-            }));
+            })?;
 
             Ok(Integer::from_calc(result))
         }
@@ -119,17 +124,17 @@ pub fn parse_number_with_clamping_mode<'i, 't>(context: &ParserContext,
                                                input: &mut Parser<'i, 't>,
                                                clamping_mode: AllowedNumericType)
                                                -> Result<Number, ParseError<'i>> {
-    match try!(input.next()) {
-        Token::Number(ref value) if clamping_mode.is_ok(context.parsing_mode, value.value) => {
+    match input.next()? {
+        Token::Number { value, .. } if clamping_mode.is_ok(context.parsing_mode, value) => {
             Ok(Number {
-                value: value.value.min(f32::MAX).max(f32::MIN),
+                value: value.min(f32::MAX).max(f32::MIN),
                 calc_clamping_mode: None,
             })
         },
         Token::Function(ref name) if name.eq_ignore_ascii_case("calc") => {
-            let result = try!(input.parse_nested_block(|i| {
+            let result = input.parse_nested_block(|i| {
                 CalcNode::parse_number(context, i)
-            }));
+            })?;
 
             Ok(Number {
                 value: result.min(f32::MAX).max(f32::MIN),
@@ -224,12 +229,10 @@ impl Angle {
 impl Parse for Angle {
     /// Parses an angle according to CSS-VALUES § 6.1.
     fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
-        let token = try!(input.next());
+        let token = input.next()?;
         match token {
-            Token::Dimension(ref value, ref unit) => {
-                Angle::parse_dimension(value.value,
-                                       unit,
-                                       /* from_calc = */ false)
+            Token::Dimension { value, ref unit, .. } => {
+                Angle::parse_dimension(value, unit, /* from_calc = */ false)
             }
             Token::Function(ref name) if name.eq_ignore_ascii_case("calc") => {
                 return input.parse_nested_block(|i| CalcNode::parse_angle(context, i))
@@ -266,14 +269,12 @@ impl Angle {
     /// https://github.com/w3c/csswg-drafts/issues/1162 is resolved.
     pub fn parse_with_unitless<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
                                        -> Result<Self, ParseError<'i>> {
-        let token = try!(input.next());
+        let token = input.next()?;
         match token {
-            Token::Dimension(ref value, ref unit) => {
-                Angle::parse_dimension(value.value,
-                                       unit,
-                                       /* from_calc = */ false)
+            Token::Dimension { value, ref unit, .. } => {
+                Angle::parse_dimension(value, unit, /* from_calc = */ false)
             }
-            Token::Number(ref value) if value.value == 0. => Ok(Angle::zero()),
+            Token::Number { value, .. } if value == 0. => Ok(Angle::zero()),
             Token::Function(ref name) if name.eq_ignore_ascii_case("calc") => {
                 return input.parse_nested_block(|i| CalcNode::parse_angle(context, i))
             }
@@ -372,8 +373,8 @@ impl Time {
             // values for SMIL regardless of clamping_mode, but in this Time
             // value case, the value does not animate for SMIL at all, so we use
             // PARSING_MODE_DEFAULT directly.
-            Ok(Token::Dimension(ref value, ref unit)) if clamping_mode.is_ok(PARSING_MODE_DEFAULT, value.value) => {
-                Time::parse_dimension(value.value, &unit, /* from_calc = */ false)
+            Ok(Token::Dimension { value, ref unit, .. }) if clamping_mode.is_ok(PARSING_MODE_DEFAULT, value) => {
+                Time::parse_dimension(value, unit, /* from_calc = */ false)
                     .map_err(|()| StyleParseError::UnspecifiedError.into())
             }
             Ok(Token::Function(ref name)) if name.eq_ignore_ascii_case("calc") => {
@@ -774,7 +775,7 @@ impl Shadow {
             if !lengths_parsed {
                 if let Ok(value) = input.try(|i| Length::parse(context, i)) {
                     lengths[0] = value;
-                    lengths[1] = try!(Length::parse(context, input));
+                    lengths[1] = Length::parse(context, input)?;
                     if let Ok(value) = input.try(|i| Length::parse_non_negative(context, i)) {
                         lengths[2] = value;
                         if !disable_spread_and_inset {
@@ -889,36 +890,36 @@ pub struct ClipRect {
 
 impl ToCss for ClipRect {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        try!(dest.write_str("rect("));
+        dest.write_str("rect(")?;
 
         if let Some(ref top) = self.top {
-            try!(top.to_css(dest));
-            try!(dest.write_str(", "));
+            top.to_css(dest)?;
+            dest.write_str(", ")?;
         } else {
-            try!(dest.write_str("auto, "));
+            dest.write_str("auto, ")?;
         }
 
         if let Some(ref right) = self.right {
-            try!(right.to_css(dest));
-            try!(dest.write_str(", "));
+            right.to_css(dest)?;
+            dest.write_str(", ")?;
         } else {
-            try!(dest.write_str("auto, "));
+            dest.write_str("auto, ")?;
         }
 
         if let Some(ref bottom) = self.bottom {
-            try!(bottom.to_css(dest));
-            try!(dest.write_str(", "));
+            bottom.to_css(dest)?;
+            dest.write_str(", ")?;
         } else {
-            try!(dest.write_str("auto, "));
+            dest.write_str("auto, ")?;
         }
 
         if let Some(ref left) = self.left {
-            try!(left.to_css(dest));
+            left.to_css(dest)?;
         } else {
-            try!(dest.write_str("auto"));
+            dest.write_str("auto")?;
         }
 
-        try!(dest.write_str(")"));
+        dest.write_str(")")?;
         Ok(())
     }
 }
@@ -968,27 +969,27 @@ impl ClipRect {
             }
         }
 
-        let func = try!(input.expect_function());
+        let func = input.expect_function()?;
         if !func.eq_ignore_ascii_case("rect") {
             return Err(StyleParseError::UnexpectedFunction(func).into())
         }
 
         input.parse_nested_block(|input| {
-            let top = try!(parse_argument(context, input, allow_quirks));
+            let top = parse_argument(context, input, allow_quirks)?;
             let right;
             let bottom;
             let left;
 
             if input.try(|input| input.expect_comma()).is_ok() {
-                right = try!(parse_argument(context, input, allow_quirks));
-                try!(input.expect_comma());
-                bottom = try!(parse_argument(context, input, allow_quirks));
-                try!(input.expect_comma());
-                left = try!(parse_argument(context, input, allow_quirks));
+                right = parse_argument(context, input, allow_quirks)?;
+                input.expect_comma()?;
+                bottom = parse_argument(context, input, allow_quirks)?;
+                input.expect_comma()?;
+                left = parse_argument(context, input, allow_quirks)?;
             } else {
-                right = try!(parse_argument(context, input, allow_quirks));
-                bottom = try!(parse_argument(context, input, allow_quirks));
-                left = try!(parse_argument(context, input, allow_quirks));
+                right = parse_argument(context, input, allow_quirks)?;
+                bottom = parse_argument(context, input, allow_quirks)?;
+                left = parse_argument(context, input, allow_quirks)?;
             }
             Ok(ClipRect {
                 top: top,
@@ -1106,7 +1107,7 @@ impl Attr {
             };
 
             let ns_with_id = if let Some(ns) = first {
-                let ns: Namespace = ns.into();
+                let ns = Namespace::from(Cow::from(ns));
                 let id: Result<_, ParseError> =
                     get_id_for_namespace(&ns, context)
                     .map_err(|()| StyleParseError::UnspecifiedError.into());

@@ -158,10 +158,6 @@ public:
 
   IterationCompositeOperation IterationComposite() const;
   CompositeOperation Composite() const;
-  void GetSpacing(nsString& aRetVal) const
-  {
-    mEffectOptions.GetSpacingAsString(aRetVal);
-  }
   void NotifyAnimationTimingUpdated();
   void RequestRestyle(EffectCompositor::RestyleType aRestyleType);
   void SetAnimation(Animation* aAnimation) override;
@@ -468,7 +464,7 @@ private:
 
   static const TimeDuration OverflowRegionRefreshInterval();
 
-  void UpadateEffectSet(mozilla::EffectSet* aEffectSet = nullptr) const;
+  void UpdateEffectSet(mozilla::EffectSet* aEffectSet = nullptr) const;
 
   // FIXME: This flag will be removed in bug 1324966.
   bool mIsComposingStyle = false;

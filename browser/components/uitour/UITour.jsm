@@ -576,6 +576,9 @@ this.UITour = {
           return false;
         }
 
+        if (data.email) {
+          p.append("email", data.email);
+        }
         // We want to replace the current tab.
         browser.loadURI("about:accounts?" + p.toString());
         break;
@@ -650,7 +653,7 @@ this.UITour = {
             searchbar.textbox.popup.addEventListener("popupshown", onPopupShown);
             searchbar.openSuggestionsPanel();
           }
-        }).then(null, Cu.reportError);
+        }).catch(Cu.reportError);
         break;
       }
 

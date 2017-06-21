@@ -68,9 +68,6 @@ pref("devtools.inspector.colorWidget.enabled", false);
 // Enable the Font Inspector
 pref("devtools.fontinspector.enabled", true);
 
-// Enable the Layout View
-pref("devtools.layoutview.enabled", false);
-
 // Counter to promote the inspector layout view.
 // @remove after release 56 (See Bug 1355747)
 pref("devtools.promote.layoutview", 1);
@@ -81,7 +78,6 @@ pref("devtools.promote.layoutview.showPromoteBar", true);
 // Grid highlighter preferences
 pref("devtools.gridinspector.showGridAreas", false);
 pref("devtools.gridinspector.showGridLineNumbers", false);
-pref("devtools.gridinspector.showGridOutline", false);
 pref("devtools.gridinspector.showInfiniteLines", false);
 
 // Whether or not the box model panel is opened in the computed view

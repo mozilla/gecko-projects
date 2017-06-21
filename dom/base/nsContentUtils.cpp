@@ -220,7 +220,6 @@
 #include "nsIWebNavigationInfo.h"
 #include "nsPluginHost.h"
 #include "mozilla/HangAnnotations.h"
-#include "mozilla/ServoRestyleManager.h"
 #include "mozilla/Encoding.h"
 
 #include "nsIBidiKeyboard.h"
@@ -846,20 +845,40 @@ nsContentUtils::InitializeModifierStrings()
   sModifierSeparator = new nsString(modifierSeparator);
 }
 
+mozilla::EventClassID
+nsContentUtils::GetEventClassIDFromMessage(EventMessage aEventMessage)
+{
+  switch (aEventMessage) {
+#define MESSAGE_TO_EVENT(name_, message_, type_, struct_) \
+  case message_: return struct_;
+#include "mozilla/EventNameList.h"
+#undef MESSAGE_TO_EVENT
+  default:
+    MOZ_ASSERT_UNREACHABLE("Invalid event message?");
+    return eBasicEventClass;
+  }
+}
+
+static nsIAtom*
+GetEventTypeFromMessage(EventMessage aEventMessage)
+{
+  switch (aEventMessage) {
+#define MESSAGE_TO_EVENT(name_, message_, type_, struct_) \
+  case message_: return nsGkAtoms::on##name_;
+#include "mozilla/EventNameList.h"
+#undef MESSAGE_TO_EVENT
+  default:
+    return nullptr;
+  }
+}
+
 // Because of SVG/SMIL we have several atoms mapped to the same
 // id, but we can rely on MESSAGE_TO_EVENT to map id to only one atom.
 static bool
 ShouldAddEventToStringEventTable(const EventNameMapping& aMapping)
 {
-  switch(aMapping.mMessage) {
-#define MESSAGE_TO_EVENT(name_, message_, type_, struct_) \
-  case message_: return nsGkAtoms::on##name_ == aMapping.mAtom;
-#include "mozilla/EventNameList.h"
-#undef MESSAGE_TO_EVENT
-  default:
-    break;
-  }
-  return false;
+  MOZ_ASSERT(aMapping.mAtom);
+  return GetEventTypeFromMessage(aMapping.mMessage) == aMapping.mAtom;
 }
 
 bool
@@ -871,6 +890,7 @@ nsContentUtils::InitializeEventTable() {
 #define EVENT(name_,  _message, _type, _class)          \
     { nsGkAtoms::on##name_, _type, _message, _class, false },
 #define WINDOW_ONLY_EVENT EVENT
+#define DOCUMENT_ONLY_EVENT EVENT
 #define NON_IDL_EVENT EVENT
 #include "mozilla/EventNameList.h"
 #undef WINDOW_ONLY_EVENT
@@ -2317,7 +2337,17 @@ nsContentUtils::IsCallerChrome()
 bool
 nsContentUtils::ShouldResistFingerprinting()
 {
-  return nsRFPService::IsResistFingerprintingEnabled();
+  if (NS_IsMainThread()) {
+    return nsRFPService::IsResistFingerprintingEnabled();
+  }
+
+  workers::WorkerPrivate* workerPrivate = workers::GetCurrentThreadWorkerPrivate();
+  if (NS_WARN_IF(!workerPrivate)) {
+    return false;
+  }
+  workerPrivate->AssertIsOnWorkerThread();
+
+  return workerPrivate->ResistFingerprintingEnabled();
 }
 
 bool
@@ -2327,7 +2357,7 @@ nsContentUtils::ShouldResistFingerprinting(nsIDocShell* aDocShell)
     return false;
   }
   bool isChrome = nsContentUtils::IsChromeDoc(aDocShell->GetDocument());
-  return !isChrome && nsRFPService::IsResistFingerprintingEnabled();
+  return !isChrome && ShouldResistFingerprinting();
 }
 
 /* static */
@@ -4338,7 +4368,7 @@ nsresult
 nsContentUtils::DispatchTrustedEvent(nsIDocument* aDoc, nsISupports* aTarget,
                                      const nsAString& aEventName,
                                      bool aCanBubble, bool aCancelable,
-                                     bool *aDefaultAction)
+                                     bool* aDefaultAction)
 {
   return DispatchEvent(aDoc, aTarget, aEventName, aCanBubble, aCancelable,
                        true, aDefaultAction);
@@ -4349,7 +4379,7 @@ nsresult
 nsContentUtils::DispatchUntrustedEvent(nsIDocument* aDoc, nsISupports* aTarget,
                                        const nsAString& aEventName,
                                        bool aCanBubble, bool aCancelable,
-                                       bool *aDefaultAction)
+                                       bool* aDefaultAction)
 {
   return DispatchEvent(aDoc, aTarget, aEventName, aCanBubble, aCancelable,
                        false, aDefaultAction);
@@ -4360,7 +4390,7 @@ nsresult
 nsContentUtils::DispatchEvent(nsIDocument* aDoc, nsISupports* aTarget,
                               const nsAString& aEventName,
                               bool aCanBubble, bool aCancelable,
-                              bool aTrusted, bool *aDefaultAction,
+                              bool aTrusted, bool* aDefaultAction,
                               bool aOnlyChromeDispatch)
 {
   nsCOMPtr<nsIDOMEvent> event;
@@ -4375,12 +4405,46 @@ nsContentUtils::DispatchEvent(nsIDocument* aDoc, nsISupports* aTarget,
   return target->DispatchEvent(event, aDefaultAction ? aDefaultAction : &dummy);
 }
 
+// static
+nsresult
+nsContentUtils::DispatchEvent(nsIDocument* aDoc, nsISupports* aTarget,
+                              WidgetEvent& aEvent,
+                              EventMessage aEventMessage,
+                              bool aCanBubble, bool aCancelable,
+                              bool aTrusted, bool *aDefaultAction,
+                              bool aOnlyChromeDispatch)
+{
+  MOZ_ASSERT_IF(aOnlyChromeDispatch, aTrusted);
+
+  nsCOMPtr<EventTarget> target(do_QueryInterface(aTarget));
+
+  aEvent.mTime = PR_Now();
+
+  aEvent.mSpecifiedEventType = GetEventTypeFromMessage(aEventMessage);
+  aEvent.SetDefaultComposed();
+  aEvent.SetDefaultComposedInNativeAnonymousContent();
+
+  aEvent.mFlags.mBubbles = aCanBubble;
+  aEvent.mFlags.mCancelable = aCancelable;
+  aEvent.mFlags.mOnlyChromeDispatch = aOnlyChromeDispatch;
+
+  aEvent.mTarget = target;
+
+  nsEventStatus status = nsEventStatus_eIgnore;
+  nsresult rv = EventDispatcher::DispatchDOMEvent(target, &aEvent, nullptr,
+                                                  nullptr, &status);
+  if (aDefaultAction) {
+    *aDefaultAction = (status != nsEventStatus_eConsumeNoDefault);
+  }
+  return rv;
+}
+
 nsresult
 nsContentUtils::DispatchChromeEvent(nsIDocument *aDoc,
                                     nsISupports *aTarget,
                                     const nsAString& aEventName,
                                     bool aCanBubble, bool aCancelable,
-                                    bool *aDefaultAction)
+                                    bool* aDefaultAction)
 {
 
   nsCOMPtr<nsIDOMEvent> event;
@@ -4487,45 +4551,6 @@ nsContentUtils::GetSubdocumentWithOuterWindowId(nsIDocument *aDocument,
   }
 
   return nullptr;
-}
-
-// Convert the string from the given encoding to Unicode.
-/* static */
-nsresult
-nsContentUtils::ConvertStringFromEncoding(const nsACString& aEncoding,
-                                          const char* aInput,
-                                          uint32_t aInputLen,
-                                          nsAString& aOutput)
-{
-  const Encoding* encoding;
-  if (aEncoding.IsEmpty()) {
-    encoding = UTF_8_ENCODING;
-  } else {
-    encoding = Encoding::ForName(aEncoding);
-  }
-  nsresult rv = encoding->DecodeWithBOMRemoval(MakeSpan(reinterpret_cast<const uint8_t*>(aInput), aInputLen), aOutput);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-  return NS_OK;
-}
-
-/* static */
-bool
-nsContentUtils::CheckForBOM(const unsigned char* aBuffer, uint32_t aLength,
-                            nsACString& aCharset)
-{
-  auto span = MakeSpan(reinterpret_cast<const uint8_t*>(aBuffer), aLength);
-  const Encoding* encoding;
-  size_t bomLength;
-  Tie(encoding, bomLength) = Encoding::ForBOM(span);
-  Unused << bomLength;
-  if (!encoding) {
-    aCharset.Truncate();
-    return false;
-  }
-  encoding->Name(aCharset);
-  return true;
 }
 
 /* static */
@@ -5324,12 +5349,6 @@ void
 nsContentUtils::DestroyAnonymousContent(nsCOMPtr<nsIContent>* aContent)
 {
   if (*aContent) {
-    // Don't wait until UnbindFromTree to clear ServoElementData, since
-    // leak checking at shutdown can run before the AnonymousContentDestroyer
-    // runs.
-    if ((*aContent)->IsStyledByServo() && (*aContent)->IsElement()) {
-      ServoRestyleManager::ClearServoDataFromSubtree((*aContent)->AsElement());
-    }
     AddScriptRunner(new AnonymousContentDestroyer(aContent));
   }
 }
@@ -5339,12 +5358,6 @@ void
 nsContentUtils::DestroyAnonymousContent(nsCOMPtr<Element>* aElement)
 {
   if (*aElement) {
-    // Don't wait until UnbindFromTree to clear ServoElementData, since
-    // leak checking at shutdown can run before the AnonymousContentDestroyer
-    // runs.
-    if ((*aElement)->IsStyledByServo()) {
-      ServoRestyleManager::ClearServoDataFromSubtree(*aElement);
-    }
     AddScriptRunner(new AnonymousContentDestroyer(aElement));
   }
 }
@@ -10229,6 +10242,45 @@ nsContentUtils::AppendDocumentLevelNativeAnonymousContentTo(
     }
   }
 }
+
+static void
+AppendNativeAnonymousChildrenFromFrame(
+    nsIFrame* aFrame,
+    nsTArray<nsIContent*>& aKids,
+    uint32_t aFlags)
+{
+  if (nsIAnonymousContentCreator* ac = do_QueryFrame(aFrame)) {
+    ac->AppendAnonymousContentTo(aKids, aFlags);
+  }
+}
+
+/* static */ void
+nsContentUtils::AppendNativeAnonymousChildren(
+    const nsIContent* aContent,
+    nsTArray<nsIContent*>& aKids,
+    uint32_t aFlags)
+{
+  if (nsIFrame* primaryFrame = aContent->GetPrimaryFrame()) {
+    // NAC created by the element's primary frame.
+    AppendNativeAnonymousChildrenFromFrame(primaryFrame, aKids, aFlags);
+
+    // NAC created by any other non-primary frames for the element.
+    AutoTArray<nsIFrame::OwnedAnonBox, 8> ownedAnonBoxes;
+    primaryFrame->AppendOwnedAnonBoxes(ownedAnonBoxes);
+    for (nsIFrame::OwnedAnonBox& box : ownedAnonBoxes) {
+      MOZ_ASSERT(box.mAnonBoxFrame->GetContent() == aContent);
+      AppendNativeAnonymousChildrenFromFrame(box.mAnonBoxFrame, aKids, aFlags);
+    }
+  }
+
+  // The root scroll frame is not the primary frame of the root element.
+  // Detect and handle this case.
+  if (!(aFlags & nsIContent::eSkipDocumentLevelNativeAnonymousContent) &&
+      aContent == aContent->OwnerDoc()->GetRootElement()) {
+    AppendDocumentLevelNativeAnonymousContentTo(aContent->OwnerDoc(), aKids);
+  }
+}
+
 
 /* static */ void
 nsContentUtils::GetContentPolicyTypeForUIImageLoading(nsIContent* aLoadingNode,

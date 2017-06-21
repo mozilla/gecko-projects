@@ -60,6 +60,9 @@ pub enum StyleSource {
     Style(Arc<Locked<StyleRule>>),
     /// A declaration block stable pointer.
     Declarations(Arc<Locked<PropertyDeclarationBlock>>),
+    /// Indicates no style source. Used to save an Option wrapper around the stylesource in
+    /// RuleNode
+    None,
 }
 
 impl PartialEq for StyleSource {
@@ -75,6 +78,7 @@ impl StyleSource {
         match (self, other) {
             (&Style(ref one), &Style(ref other)) => Arc::ptr_eq(one, other),
             (&Declarations(ref one), &Declarations(ref other)) => Arc::ptr_eq(one, other),
+            (&None, _) | (_, &None) => panic!("Should not check for equality between null StyleSource objects"),
             _ => false,
         }
     }
@@ -97,8 +101,17 @@ impl StyleSource {
         let block = match *self {
             StyleSource::Style(ref rule) => &rule.read_with(guard).block,
             StyleSource::Declarations(ref block) => block,
+            StyleSource::None => panic!("Cannot call read on StyleSource::None"),
         };
         block.read_with(guard)
+    }
+
+    /// Indicates if this StyleSource has a value
+    pub fn is_some(&self) -> bool {
+        match *self {
+            StyleSource::None => false,
+            _ => true,
+        }
     }
 }
 
@@ -120,6 +133,11 @@ impl RuleTree {
     /// Get the root rule node.
     pub fn root(&self) -> StrongRuleNode {
         self.root.clone()
+    }
+
+    /// Returns true if there are no nodes in the tree aside from the rule node.
+    pub fn is_empty(&self) -> bool {
+        self.root.get().first_child.load(Ordering::Relaxed).is_null()
     }
 
     fn dump<W: Write>(&self, guards: &StylesheetGuards, writer: &mut W) {
@@ -286,7 +304,7 @@ impl RuleTree {
         // First walk up until the first less-or-equally specific rule.
         let mut children = vec![];
         while current.get().level > level {
-            children.push((current.get().source.clone().unwrap(), current.get().level));
+            children.push((current.get().source.clone(), current.get().level));
             current = current.parent().unwrap().clone();
         }
 
@@ -311,8 +329,8 @@ impl RuleTree {
                 // also equally valid. This is less likely, and would require an
                 // in-place mutation of the source, which is, at best, fiddly,
                 // so let's skip it for now.
-                let is_here_already = match current.get().source.as_ref() {
-                    Some(&StyleSource::Declarations(ref already_here)) => {
+                let is_here_already = match &current.get().source {
+                    &StyleSource::Declarations(ref already_here) => {
                         Arc::ptr_eq(pdb, already_here)
                     },
                     _ => unreachable!("Replacing non-declarations style?"),
@@ -377,7 +395,7 @@ impl RuleTree {
         let mut children = vec![];
         for node in iter {
             if !node.cascade_level().is_animation() {
-                children.push((node.get().source.clone().unwrap(), node.cascade_level()));
+                children.push((node.get().source.clone(), node.cascade_level()));
             }
             last = node;
         }
@@ -498,6 +516,25 @@ impl CascadeLevel {
     }
 }
 
+// The root node never has siblings, but needs a free count. We use the same
+// storage for both to save memory.
+struct PrevSiblingOrFreeCount(AtomicPtr<RuleNode>);
+impl PrevSiblingOrFreeCount {
+    fn new() -> Self {
+        PrevSiblingOrFreeCount(AtomicPtr::new(ptr::null_mut()))
+    }
+
+    unsafe fn as_prev_sibling(&self) -> &AtomicPtr<RuleNode> {
+        &self.0
+    }
+
+    unsafe fn as_free_count(&self) -> &AtomicUsize {
+        unsafe {
+            mem::transmute(&self.0)
+        }
+    }
+}
+
 /// A node in the rule tree.
 pub struct RuleNode {
     /// The root node. Only the root has no root pointer, for obvious reasons.
@@ -508,7 +545,7 @@ pub struct RuleNode {
 
     /// The actual style source, either coming from a selector in a StyleRule,
     /// or a raw property declaration block (like the style attribute).
-    source: Option<StyleSource>,
+    source: StyleSource,
 
     /// The cascade level this rule is positioned at.
     level: CascadeLevel,
@@ -516,18 +553,16 @@ pub struct RuleNode {
     refcount: AtomicUsize,
     first_child: AtomicPtr<RuleNode>,
     next_sibling: AtomicPtr<RuleNode>,
-    prev_sibling: AtomicPtr<RuleNode>,
+
+    /// Previous sibling pointer for all non-root nodes.
+    ///
+    /// For the root, stores the of RuleNodes we have added to the free list
+    /// since the last GC. (We don't update this if we rescue a RuleNode from
+    /// the free list.  It's just used as a heuristic to decide when to run GC.)
+    prev_sibling_or_free_count: PrevSiblingOrFreeCount,
 
     /// The next item in the rule tree free list, that starts on the root node.
     next_free: AtomicPtr<RuleNode>,
-
-    /// Number of RuleNodes we have added to the free list since the last GC.
-    /// (We don't update this if we rescue a RuleNode from the free list.  It's
-    /// just used as a heuristic to decide when to run GC.)
-    ///
-    /// Only used on the root RuleNode.  (We could probably re-use one of the
-    /// sibling pointers to save space.)
-    free_count: AtomicUsize,
 }
 
 unsafe impl Sync for RuleTree {}
@@ -542,14 +577,13 @@ impl RuleNode {
         RuleNode {
             root: Some(root),
             parent: Some(parent),
-            source: Some(source),
+            source: source,
             level: level,
             refcount: AtomicUsize::new(1),
             first_child: AtomicPtr::new(ptr::null_mut()),
             next_sibling: AtomicPtr::new(ptr::null_mut()),
-            prev_sibling: AtomicPtr::new(ptr::null_mut()),
+            prev_sibling_or_free_count: PrevSiblingOrFreeCount::new(),
             next_free: AtomicPtr::new(ptr::null_mut()),
-            free_count: AtomicUsize::new(0),
         }
     }
 
@@ -557,14 +591,13 @@ impl RuleNode {
         RuleNode {
             root: None,
             parent: None,
-            source: None,
+            source: StyleSource::None,
             level: CascadeLevel::UANormal,
             refcount: AtomicUsize::new(1),
             first_child: AtomicPtr::new(ptr::null_mut()),
             next_sibling: AtomicPtr::new(ptr::null_mut()),
-            prev_sibling: AtomicPtr::new(ptr::null_mut()),
+            prev_sibling_or_free_count: PrevSiblingOrFreeCount::new(),
             next_free: AtomicPtr::new(FREE_LIST_SENTINEL),
-            free_count: AtomicUsize::new(0),
         }
     }
 
@@ -583,6 +616,16 @@ impl RuleNode {
         }
     }
 
+    fn prev_sibling(&self) -> &AtomicPtr<RuleNode> {
+        debug_assert!(!self.is_root());
+        unsafe { self.prev_sibling_or_free_count.as_prev_sibling() }
+    }
+
+    fn free_count(&self) -> &AtomicUsize {
+        debug_assert!(self.is_root());
+        unsafe { self.prev_sibling_or_free_count.as_free_count() }
+    }
+
     /// Remove this rule node from the child list.
     ///
     /// This method doesn't use proper synchronization, and it's expected to be
@@ -596,7 +639,7 @@ impl RuleNode {
         // NB: The other siblings we use in this function can also be dead, so
         // we can't use `get` here, since it asserts.
         let prev_sibling =
-            self.prev_sibling.swap(ptr::null_mut(), Ordering::Relaxed);
+            self.prev_sibling().swap(ptr::null_mut(), Ordering::Relaxed);
 
         let next_sibling =
             self.next_sibling.swap(ptr::null_mut(), Ordering::Relaxed);
@@ -615,7 +658,7 @@ impl RuleNode {
         // otherwise we're done.
         if !next_sibling.is_null() {
             let next = &*next_sibling;
-            next.prev_sibling.store(prev_sibling, Ordering::Relaxed);
+            next.prev_sibling().store(prev_sibling, Ordering::Relaxed);
         }
     }
 
@@ -634,16 +677,13 @@ impl RuleNode {
             let _ = write!(writer, " ");
         }
 
-        match self.source {
-            Some(ref source) => {
-                source.dump(self.level.guard(guards), writer);
+        if self.source.is_some() {
+            self.source.dump(self.level.guard(guards), writer);
+        } else {
+            if indent != 0 {
+                warn!("How has this happened?");
             }
-            None => {
-                if indent != 0 {
-                    warn!("How has this happened?");
-                }
-                let _ = write!(writer, "(root)");
-            }
+            let _ = write!(writer, "(root)");
         }
 
         let _ = write!(writer, "\n");
@@ -684,7 +724,7 @@ impl HeapSizeOf for StrongRuleNode {
 
 impl StrongRuleNode {
     fn new(n: Box<RuleNode>) -> Self {
-        debug_assert!(n.parent.is_none() == n.source.is_none());
+        debug_assert!(n.parent.is_none() == !n.source.is_some());
 
         let ptr = Box::into_raw(n);
 
@@ -725,7 +765,7 @@ impl StrongRuleNode {
         for child in self.get().iter_children() {
             let child_node = unsafe { &*child.ptr() };
             if child_node.level == level &&
-                child_node.source.as_ref().unwrap().ptr_equals(&source) {
+                child_node.source.ptr_equals(&source) {
                 return child.upgrade();
             }
             last = Some(child);
@@ -760,7 +800,7 @@ impl StrongRuleNode {
                     // only be accessed again in a single-threaded manner when
                     // we're sweeping possibly dead nodes.
                     if let Some(ref l) = last {
-                        node.prev_sibling.store(l.ptr(), Ordering::Relaxed);
+                        node.prev_sibling().store(l.ptr(), Ordering::Relaxed);
                     }
 
                     return StrongRuleNode::new(node);
@@ -770,7 +810,7 @@ impl StrongRuleNode {
                 // we accessed `last`.
                 next = WeakRuleNode::from_ptr(existing);
 
-                if unsafe { &*next.ptr() }.source.as_ref().unwrap().ptr_equals(&source) {
+                if unsafe { &*next.ptr() }.source.ptr_equals(&source) {
                     // That node happens to be for the same style source, use
                     // that, and let node fall out of scope.
                     return next.upgrade();
@@ -798,8 +838,8 @@ impl StrongRuleNode {
     /// Get the style source corresponding to this rule node. May return `None`
     /// if it's the root node, which means that the node hasn't matched any
     /// rules.
-    pub fn style_source(&self) -> Option<&StyleSource> {
-        self.get().source.as_ref()
+    pub fn style_source(&self) -> &StyleSource {
+        &self.get().source
     }
 
     /// The cascade level for this node
@@ -908,14 +948,14 @@ impl StrongRuleNode {
             let _ = Box::from_raw(weak.ptr());
         }
 
-        me.free_count.store(0, Ordering::Relaxed);
+        me.free_count().store(0, Ordering::Relaxed);
 
         debug_assert!(me.next_free.load(Ordering::Relaxed) == FREE_LIST_SENTINEL);
     }
 
     unsafe fn maybe_gc(&self) {
         debug_assert!(self.get().is_root(), "Can't call GC on a non-root node!");
-        if self.get().free_count.load(Ordering::Relaxed) > RULE_TREE_GC_INTERVAL {
+        if self.get().free_count().load(Ordering::Relaxed) > RULE_TREE_GC_INTERVAL {
             self.gc();
         }
     }
@@ -1047,9 +1087,11 @@ impl StrongRuleNode {
             let mut have_explicit_ua_inherit = false;
 
             for node in element_rule_node.self_and_ancestors() {
-                let declarations = match node.style_source() {
-                    Some(source) => source.read(node.cascade_level().guard(guards)).declarations(),
-                    None => continue
+                let source = node.style_source();
+                let declarations = if source.is_some() {
+                    source.read(node.cascade_level().guard(guards)).declarations()
+                } else {
+                    continue
                 };
 
                 // Iterate over declarations of the longhands we care about.
@@ -1070,8 +1112,7 @@ impl StrongRuleNode {
                     CascadeLevel::UANormal |
                     CascadeLevel::UAImportant |
                     CascadeLevel::UserNormal |
-                    CascadeLevel::UserImportant |
-                    CascadeLevel::XBL => {
+                    CascadeLevel::UserImportant  => {
                         for (id, declaration) in longhands {
                             if properties.contains(id) {
                                 // This property was set by a non-author rule.
@@ -1094,6 +1135,7 @@ impl StrongRuleNode {
                     }
                     // Author rules:
                     CascadeLevel::PresHints |
+                    CascadeLevel::XBL |
                     CascadeLevel::AuthorNormal |
                     CascadeLevel::StyleAttributeNormal |
                     CascadeLevel::SMILOverride |
@@ -1164,7 +1206,7 @@ impl StrongRuleNode {
                 .take_while(|node| node.cascade_level() > CascadeLevel::Animations);
         let mut result = (LonghandIdSet::new(), false);
         for node in iter {
-            let style = node.style_source().unwrap();
+            let style = node.style_source();
             for &(ref decl, important) in style.read(node.cascade_level().guard(guards))
                                                .declarations()
                                                .iter() {
@@ -1189,9 +1231,10 @@ impl StrongRuleNode {
     fn get_animation_style(&self) -> &Arc<Locked<PropertyDeclarationBlock>> {
         debug_assert!(self.cascade_level().is_animation(),
                       "The cascade level should be an animation level");
-        match *self.style_source().unwrap() {
+        match *self.style_source() {
             StyleSource::Declarations(ref block) => block,
             StyleSource::Style(_) => unreachable!("animating style should not be a style rule"),
+            StyleSource::None => unreachable!("animating style should not be none"),
         }
     }
 
@@ -1338,6 +1381,11 @@ impl Drop for StrongRuleNode {
         //
         // This can be relaxed since this pointer won't be read until GC.
         node.next_free.store(old_head, Ordering::Relaxed);
+
+        // Increment the free count. This doesn't need to be an RMU atomic
+        // operation, because the free list is "locked".
+        let old_free_count = root.free_count().load(Ordering::Relaxed);
+        root.free_count().store(old_free_count + 1, Ordering::Relaxed);
 
         // This can be release because of the locking of the free list, that
         // ensures that all the other nodes racing with this one are using

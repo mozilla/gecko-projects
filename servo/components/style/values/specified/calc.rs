@@ -15,7 +15,8 @@ use style_traits::{HasViewportPercentage, ToCss, ParseError, StyleParseError};
 use style_traits::values::specified::AllowedLengthType;
 use values::{CSSInteger, CSSFloat};
 use values::specified::{Angle, Time};
-use values::specified::length::{FontRelativeLength, NoCalcLength, ViewportPercentageLength};
+use values::specified::length::{FontRelativeLength, NoCalcLength};
+use values::specified::length::{Percentage, ViewportPercentageLength};
 
 /// A node inside a `Calc` expression's AST.
 #[derive(Clone, Debug)]
@@ -74,7 +75,7 @@ pub struct CalcLengthOrPercentage {
     pub ex: Option<CSSFloat>,
     pub ch: Option<CSSFloat>,
     pub rem: Option<CSSFloat>,
-    pub percentage: Option<CSSFloat>,
+    pub percentage: Option<Percentage>,
     #[cfg(feature = "gecko")]
     pub mozmm: Option<CSSFloat>,
 }
@@ -93,7 +94,7 @@ impl ToCss for CalcLengthOrPercentage {
         macro_rules! first_value_check {
             () => {
                 if !first_value {
-                    try!(dest.write_str(" + "));
+                    dest.write_str(" + ")?;
                 } else {
                     first_value = false;
                 }
@@ -105,14 +106,14 @@ impl ToCss for CalcLengthOrPercentage {
                 $(
                     if let Some(val) = self.$val {
                         first_value_check!();
-                        try!(val.to_css(dest));
-                        try!(dest.write_str(stringify!($val)));
+                        val.to_css(dest)?;
+                        dest.write_str(stringify!($val))?;
                     }
                 )*
             };
         }
 
-        try!(dest.write_str("calc("));
+        dest.write_str("calc(")?;
 
         serialize!(ch, em, ex, rem, vh, vmax, vmin, vw);
 
@@ -123,12 +124,12 @@ impl ToCss for CalcLengthOrPercentage {
 
         if let Some(val) = self.absolute {
             first_value_check!();
-            try!(val.to_css(dest));
+            val.to_css(dest)?;
         }
 
         if let Some(val) = self.percentage {
             first_value_check!();
-            try!(write!(dest, "{}%", val * 100.));
+            val.to_css(dest)?;
         }
 
         write!(dest, ")")
@@ -148,30 +149,26 @@ impl CalcNode {
         expected_unit: CalcUnit)
         -> Result<Self, ParseError<'i>>
     {
-        match (try!(input.next()), expected_unit) {
-            (Token::Number(ref value), _) => Ok(CalcNode::Number(value.value)),
-            (Token::Dimension(ref value, ref unit), CalcUnit::Length) |
-            (Token::Dimension(ref value, ref unit), CalcUnit::LengthOrPercentage) => {
-                NoCalcLength::parse_dimension(context, value.value, unit)
+        match (input.next()?, expected_unit) {
+            (Token::Number { value, .. }, _) => Ok(CalcNode::Number(value)),
+            (Token::Dimension { value, ref unit, .. }, CalcUnit::Length) |
+            (Token::Dimension { value, ref unit, .. }, CalcUnit::LengthOrPercentage) => {
+                NoCalcLength::parse_dimension(context, value, unit)
                     .map(CalcNode::Length)
                     .map_err(|()| StyleParseError::UnspecifiedError.into())
             }
-            (Token::Dimension(ref value, ref unit), CalcUnit::Angle) => {
-                Angle::parse_dimension(value.value,
-                                       unit,
-                                       /* from_calc = */ true)
+            (Token::Dimension { value, ref unit, .. }, CalcUnit::Angle) => {
+                Angle::parse_dimension(value, unit, /* from_calc = */ true)
                     .map(CalcNode::Angle)
                     .map_err(|()| StyleParseError::UnspecifiedError.into())
             }
-            (Token::Dimension(ref value, ref unit), CalcUnit::Time) => {
-                Time::parse_dimension(value.value,
-                                      unit,
-                                      /* from_calc = */ true)
+            (Token::Dimension { value, ref unit, .. }, CalcUnit::Time) => {
+                Time::parse_dimension(value, unit, /* from_calc = */ true)
                     .map(CalcNode::Time)
                     .map_err(|()| StyleParseError::UnspecifiedError.into())
             }
-            (Token::Percentage(ref value), CalcUnit::LengthOrPercentage) => {
-                Ok(CalcNode::Percentage(value.unit_value))
+            (Token::Percentage { unit_value, .. }, CalcUnit::LengthOrPercentage) => {
+                Ok(CalcNode::Percentage(unit_value))
             }
             (Token::ParenthesisBlock, _) => {
                 input.parse_nested_block(|i| {
@@ -298,7 +295,9 @@ impl CalcNode {
     {
         match *self {
             CalcNode::Percentage(pct) => {
-                ret.percentage = Some(ret.percentage.unwrap_or(0.) + pct * factor)
+                ret.percentage = Some(Percentage(
+                    ret.percentage.map_or(0., |p| p.0) + pct * factor,
+                ));
             }
             CalcNode::Length(ref l) => {
                 match *l {

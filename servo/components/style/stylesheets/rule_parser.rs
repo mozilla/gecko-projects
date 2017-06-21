@@ -6,7 +6,8 @@
 
 use {Namespace, Prefix};
 use counter_style::{parse_counter_style_body, parse_counter_style_name};
-use cssparser::{AtRuleParser, AtRuleType, Parser, QualifiedRuleParser, RuleListParser, SourceLocation};
+use cssparser::{AtRuleParser, AtRuleType, Parser, QualifiedRuleParser, RuleListParser};
+use cssparser::{CompactCowStr, SourceLocation};
 use error_reporting::ContextualParseError;
 use font_face::parse_font_face_block;
 use media_queries::{parse_media_query_list, MediaList};
@@ -144,7 +145,7 @@ impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
 
     fn parse_prelude<'t>(
         &mut self,
-        name: Cow<'i, str>,
+        name: CompactCowStr<'i>,
         input: &mut Parser<'i, 't>
     ) -> Result<AtRuleType<AtRulePrelude, CssRule>, ParseError<'i>> {
         let location = get_location_with_offset(input.current_source_location(),
@@ -158,7 +159,7 @@ impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
                 }
 
                 self.state = State::Imports;
-                let url_string = input.expect_url_or_string()?;
+                let url_string = input.expect_url_or_string()?.into_owned();
                 let specified_url = SpecifiedUrl::parse_from_string(url_string, &self.context)?;
 
                 let media = parse_media_query_list(&self.context, input);
@@ -203,7 +204,7 @@ impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
                 self.state = State::Namespaces;
 
                 let prefix_result = input.try(|input| input.expect_ident());
-                let url = Namespace::from(try!(input.expect_url_or_string()));
+                let url = Namespace::from(Cow::from(input.expect_url_or_string()?));
 
                 let id = register_namespace(&url)
                     .map_err(|()| StyleParseError::UnspecifiedError)?;
@@ -211,7 +212,7 @@ impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
                 let mut namespaces = self.namespaces.as_mut().unwrap();
 
                 let opt_prefix = if let Ok(prefix) = prefix_result {
-                    let prefix = Prefix::from(prefix);
+                    let prefix = Prefix::from(Cow::from(prefix));
                     namespaces
                         .prefixes
                         .insert(prefix.clone(), (url.clone(), id));
@@ -257,15 +258,19 @@ impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
     }
 }
 
+pub struct QualifiedRuleParserPrelude {
+    selectors: SelectorList<SelectorImpl>,
+    source_location: SourceLocation,
+}
 
 impl<'a, 'i> QualifiedRuleParser<'i> for TopLevelRuleParser<'a> {
-    type Prelude = SelectorList<SelectorImpl>;
+    type Prelude = QualifiedRuleParserPrelude;
     type QualifiedRule = CssRule;
     type Error = SelectorParseError<'i, StyleParseError<'i>>;
 
     #[inline]
     fn parse_prelude<'t>(&mut self, input: &mut Parser<'i, 't>)
-                         -> Result<SelectorList<SelectorImpl>, ParseError<'i>> {
+                         -> Result<QualifiedRuleParserPrelude, ParseError<'i>> {
         self.state = State::Body;
 
         // "Freeze" the namespace map (no more namespace rules can be parsed
@@ -281,7 +286,7 @@ impl<'a, 'i> QualifiedRuleParser<'i> for TopLevelRuleParser<'a> {
     #[inline]
     fn parse_block<'t>(
         &mut self,
-        prelude: SelectorList<SelectorImpl>,
+        prelude: QualifiedRuleParserPrelude,
         input: &mut Parser<'i, 't>
     ) -> Result<CssRule, ParseError<'i>> {
         QualifiedRuleParser::parse_block(&mut self.nested(), prelude, input)
@@ -333,7 +338,7 @@ impl<'a, 'b, 'i> AtRuleParser<'i> for NestedRuleParser<'a, 'b> {
 
     fn parse_prelude<'t>(
         &mut self,
-        name: Cow<'i, str>,
+        name: CompactCowStr<'i>,
         input: &mut Parser<'i, 't>
     ) -> Result<AtRuleType<AtRulePrelude, CssRule>, ParseError<'i>> {
         let location =
@@ -361,10 +366,10 @@ impl<'a, 'b, 'i> AtRuleParser<'i> for NestedRuleParser<'a, 'b> {
                     return Err(StyleParseError::UnsupportedAtRule(name.clone()).into())
                 }
                 let name = parse_counter_style_name(input)?;
-                // ASCII-case-insensitive matches for "decimal" are already
-                // lower-cased by `parse_counter_style_name`, so we can use ==
-                // here.
-                if name.0 == atom!("decimal") {
+                // ASCII-case-insensitive matches for "decimal" and "disc".
+                // The name is already lower-cased by `parse_counter_style_name`
+                // so we can use == here.
+                if name.0 == atom!("decimal") || name.0 == atom!("disc") {
                     return Err(StyleParseError::UnspecifiedError.into())
                 }
                 Ok(AtRuleType::WithBlock(AtRulePrelude::CounterStyle(name)))
@@ -447,7 +452,7 @@ impl<'a, 'b, 'i> AtRuleParser<'i> for NestedRuleParser<'a, 'b> {
             AtRulePrelude::Viewport => {
                 let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Viewport));
                 Ok(CssRule::Viewport(Arc::new(self.shared_lock.wrap(
-                   try!(ViewportRule::parse(&context, input))))))
+                   ViewportRule::parse(&context, input)?))))
             }
             AtRulePrelude::Keyframes(name, prefix, location) => {
                 let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Keyframes));
@@ -482,33 +487,38 @@ impl<'a, 'b, 'i> AtRuleParser<'i> for NestedRuleParser<'a, 'b> {
 }
 
 impl<'a, 'b, 'i> QualifiedRuleParser<'i> for NestedRuleParser<'a, 'b> {
-    type Prelude = SelectorList<SelectorImpl>;
+    type Prelude = QualifiedRuleParserPrelude;
     type QualifiedRule = CssRule;
     type Error = SelectorParseError<'i, StyleParseError<'i>>;
 
     fn parse_prelude<'t>(&mut self, input: &mut Parser<'i, 't>)
-                         -> Result<SelectorList<SelectorImpl>, ParseError<'i>> {
+                         -> Result<QualifiedRuleParserPrelude, ParseError<'i>> {
         let selector_parser = SelectorParser {
             stylesheet_origin: self.stylesheet_origin,
             namespaces: self.context.namespaces.unwrap(),
         };
 
-        SelectorList::parse(&selector_parser, input)
+        let location = get_location_with_offset(input.current_source_location(),
+                                                self.context.line_number_offset);
+        let selectors = SelectorList::parse(&selector_parser, input)?;
+
+        Ok(QualifiedRuleParserPrelude {
+            selectors: selectors,
+            source_location: location,
+        })
     }
 
     fn parse_block<'t>(
         &mut self,
-        prelude: SelectorList<SelectorImpl>,
+        prelude: QualifiedRuleParserPrelude,
         input: &mut Parser<'i, 't>
     ) -> Result<CssRule, ParseError<'i>> {
-        let location = get_location_with_offset(input.current_source_location(),
-                                                self.context.line_number_offset);
         let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Style));
         let declarations = parse_property_declaration_list(&context, input);
         Ok(CssRule::Style(Arc::new(self.shared_lock.wrap(StyleRule {
-            selectors: prelude,
+            selectors: prelude.selectors,
             block: Arc::new(self.shared_lock.wrap(declarations)),
-            source_location: location,
+            source_location: prelude.source_location,
         }))))
     }
 }
@@ -519,7 +529,7 @@ fn get_location_with_offset(
     offset: u64
 ) -> SourceLocation {
     SourceLocation {
-        line: location.line + offset as usize - 1,
+        line: location.line + offset as u32 - 1,
         column: location.column,
     }
 }

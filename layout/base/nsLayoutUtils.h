@@ -1808,6 +1808,9 @@ public:
    *   @param aRenderingContext Where to draw the image, set up with an
    *                            appropriate scale and transform for drawing in
    *                            app units.
+   *   @param aStyleContext     The style context of the nsIFrame (or
+   *                            pseudo-element) for which this image is being
+   *                            drawn.
    *   @param aImage            The image.
    *   @param aDest             Where one copy of the image should mapped to.
    *   @param aFill             The area to be filled with copies of the
@@ -1818,6 +1821,7 @@ public:
    *   @param aImageFlags       Image flags of the imgIContainer::FLAG_* variety
    */
   static DrawResult DrawImage(gfxContext&         aContext,
+                              nsStyleContext*     aStyleContext,
                               nsPresContext*      aPresContext,
                               imgIContainer*      aImage,
                               const SamplingFilter aSamplingFilter,
@@ -3076,7 +3080,8 @@ void StrokeLineWithSnapping(const nsPoint& aP1, const nsPoint& aP2,
       bool mOldValue;
     };
 
-    void MaybeSetupTransactionIdAllocator(layers::LayerManager* aManager, nsView* aView);
+    void MaybeSetupTransactionIdAllocator(layers::LayerManager* aManager,
+                                          nsPresContext* aPresContext);
 
   } // namespace layout
 } // namespace mozilla

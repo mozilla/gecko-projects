@@ -13,6 +13,7 @@ use parser::{Parse, ParserContext};
 use selectors::parser::SelectorParseError;
 #[cfg(feature = "servo")]
 use servo_url::ServoUrl;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::f32::consts::PI;
 use std::fmt;
@@ -137,7 +138,7 @@ impl Image {
         input.try(|i| i.expect_function_matching("-moz-element"))?;
         input.parse_nested_block(|i| {
             match i.next()? {
-                Token::IDHash(id) => Ok(Atom::from(id)),
+                Token::IDHash(id) => Ok(Atom::from(Cow::from(id))),
                 t => Err(BasicParseError::UnexpectedToken(t).into()),
             }
         })
@@ -151,7 +152,7 @@ impl Parse for Gradient {
             Radial,
         }
 
-        let func = try!(input.expect_function());
+        let func = input.expect_function()?;
         let result = match_ignore_ascii_case! { &func,
             "linear-gradient" => {
                 Some((Shape::Linear, false, CompatMode::Modern))
@@ -654,7 +655,7 @@ impl ShapeExtent {
     fn parse_with_compat_mode<'i, 't>(input: &mut Parser<'i, 't>,
                                       compat_mode: CompatMode)
                                       -> Result<Self, ParseError<'i>> {
-        match try!(Self::parse(input)) {
+        match Self::parse(input)? {
             ShapeExtent::Contain | ShapeExtent::Cover if compat_mode == CompatMode::Modern =>
                 Err(StyleParseError::UnspecifiedError.into()),
             keyword => Ok(keyword),
@@ -666,7 +667,7 @@ impl GradientItem {
     fn parse_comma_separated<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
                                      -> Result<Vec<Self>, ParseError<'i>> {
         let mut seen_stop = false;
-        let items = try!(input.parse_comma_separated(|input| {
+        let items = input.parse_comma_separated(|input| {
             if seen_stop {
                 if let Ok(hint) = input.try(|i| LengthOrPercentage::parse(context, i)) {
                     seen_stop = false;
@@ -675,7 +676,7 @@ impl GradientItem {
             }
             seen_stop = true;
             ColorStop::parse(context, input).map(GenericGradientItem::ColorStop)
-        }));
+        })?;
         if !seen_stop || items.len() < 2 {
             return Err(StyleParseError::UnspecifiedError.into());
         }
@@ -687,7 +688,7 @@ impl Parse for ColorStop {
     fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
                      -> Result<Self, ParseError<'i>> {
         Ok(ColorStop {
-            color: try!(RGBAColor::parse(context, input)),
+            color: RGBAColor::parse(context, input)?,
             position: input.try(|i| LengthOrPercentage::parse(context, i)).ok(),
         })
     }
@@ -699,7 +700,7 @@ impl Parse for PaintWorklet {
         input.parse_nested_block(|i| {
             let name = i.expect_ident()?;
             Ok(PaintWorklet {
-                name: Atom::from(name),
+                name: Atom::from(Cow::from(name)),
             })
         })
     }
@@ -710,7 +711,7 @@ impl Parse for ImageRect {
         input.try(|i| i.expect_function_matching("-moz-image-rect"))?;
         input.parse_nested_block(|i| {
             let string = i.expect_url_or_string()?;
-            let url = SpecifiedUrl::parse_from_string(string, context)?;
+            let url = SpecifiedUrl::parse_from_string(string.into_owned(), context)?;
             i.expect_comma()?;
             let top = NumberOrPercentage::parse_non_negative(context, i)?;
             i.expect_comma()?;

@@ -121,6 +121,7 @@
 #include "nsAccessibilityService.h"
 #if defined(XP_WIN)
 #include "mozilla/a11y/Compatibility.h"
+#include "mozilla/a11y/Platform.h"
 #endif
 #endif
 
@@ -962,6 +963,18 @@ nsXULAppInfo::GetAccessibilityEnabled(bool* aResult)
 {
 #ifdef ACCESSIBILITY
   *aResult = GetAccService() != nullptr;
+#else
+  *aResult = false;
+#endif
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsXULAppInfo::GetAccessibleHandlerUsed(bool* aResult)
+{
+#if defined(ACCESSIBILITY) && defined(XP_WIN)
+  *aResult = Preferences::GetBool("accessibility.handler.enabled", false) &&
+    a11y::IsHandlerRegistered();
 #else
   *aResult = false;
 #endif
@@ -4280,6 +4293,10 @@ XREMain::XRE_mainRun()
                                      nsPrintfCString("%.16" PRIu64, uint64_t(gMozillaPoisonBase)));
   CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("FramePoisonSize"),
                                      nsPrintfCString("%" PRIu32, uint32_t(gMozillaPoisonSize)));
+
+  bool includeContextHeap =
+    Preferences::GetBool("toolkit.crashreporter.include_context_heap", false);
+  CrashReporter::SetIncludeContextHeap(includeContextHeap);
 
 #ifdef XP_WIN
   PR_CreateThread(PR_USER_THREAD, AnnotateSystemManufacturer_ThreadStart, 0,

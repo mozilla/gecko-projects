@@ -111,13 +111,15 @@ WebRenderBridgeParent::WebRenderBridgeParent(CompositorBridgeParentBase* aCompos
                                              widget::CompositorWidget* aWidget,
                                              CompositorVsyncScheduler* aScheduler,
                                              RefPtr<wr::WebRenderAPI>&& aApi,
-                                             RefPtr<WebRenderCompositableHolder>&& aHolder)
+                                             RefPtr<WebRenderCompositableHolder>&& aHolder,
+                                             RefPtr<CompositorAnimationStorage>&& aAnimStorage)
   : mCompositorBridge(aCompositorBridge)
   , mPipelineId(aPipelineId)
   , mWidget(aWidget)
   , mApi(aApi)
   , mCompositableHolder(aHolder)
   , mCompositorScheduler(aScheduler)
+  , mAnimStorage(aAnimStorage)
   , mChildLayerObserverEpoch(0)
   , mParentLayerObserverEpoch(0)
   , mWrEpoch(0)
@@ -127,6 +129,7 @@ WebRenderBridgeParent::WebRenderBridgeParent(CompositorBridgeParentBase* aCompos
   , mForceRendering(false)
 {
   MOZ_ASSERT(mCompositableHolder);
+  MOZ_ASSERT(mAnimStorage);
   mCompositableHolder->AddPipeline(mPipelineId);
   if (mWidget) {
     MOZ_ASSERT(!mCompositorScheduler);
@@ -192,7 +195,10 @@ WebRenderBridgeParent::RecvAddImage(const wr::ImageKey& aImageKey,
     return IPC_OK();
   }
   MOZ_ASSERT(mApi);
+  MOZ_ASSERT(mActiveImageKeys.find(wr::AsUint64(aImageKey)) == mActiveImageKeys.end());
+
   wr::ImageDescriptor descriptor(aSize, aStride, aFormat);
+  mActiveImageKeys.insert(wr::AsUint64(aImageKey));
   mApi->AddImage(aImageKey, descriptor,
                  aBuffer.AsSlice());
 
@@ -210,7 +216,10 @@ WebRenderBridgeParent::RecvAddBlobImage(const wr::ImageKey& aImageKey,
     return IPC_OK();
   }
   MOZ_ASSERT(mApi);
+  MOZ_ASSERT(mActiveImageKeys.find(wr::AsUint64(aImageKey)) == mActiveImageKeys.end());
+
   wr::ImageDescriptor descriptor(aSize, aStride, aFormat);
+  mActiveImageKeys.insert(wr::AsUint64(aImageKey));
   mApi->AddBlobImage(aImageKey, descriptor,
                      aBuffer.AsSlice());
 
@@ -226,7 +235,10 @@ WebRenderBridgeParent::RecvAddRawFont(const wr::FontKey& aFontKey,
     return IPC_OK();
   }
   MOZ_ASSERT(mApi);
+  MOZ_ASSERT(mFontKeys.find(wr::AsUint64(aFontKey)) == mFontKeys.end());
+
   auto slice = aBuffer.AsSlice();
+  mFontKeys.insert(wr::AsUint64(aFontKey));
   mApi->AddRawFont(aFontKey, slice, aFontIndex);
 
   return IPC_OK();
@@ -239,7 +251,14 @@ WebRenderBridgeParent::RecvDeleteFont(const wr::FontKey& aFontKey)
     return IPC_OK();
   }
   MOZ_ASSERT(mApi);
-  mApi->DeleteFont(aFontKey);
+
+  if (mFontKeys.find(wr::AsUint64(aFontKey)) != mFontKeys.end()) {
+    mFontKeys.erase(wr::AsUint64(aFontKey));
+    mApi->DeleteFont(aFontKey);
+  } else {
+    MOZ_ASSERT_UNREACHABLE("invalid FontKey");
+  }
+
   return IPC_OK();
 }
 
@@ -266,10 +285,12 @@ WebRenderBridgeParent::RecvDeleteImage(const wr::ImageKey& aImageKey)
     return IPC_OK();
   }
   MOZ_ASSERT(mApi);
-  if (mActiveKeys.Get(wr::AsUint64(aImageKey), nullptr)) {
-    mActiveKeys.Remove(wr::AsUint64(aImageKey));
+  if (mActiveImageKeys.find(wr::AsUint64(aImageKey)) != mActiveImageKeys.end()) {
+    mActiveImageKeys.erase(wr::AsUint64(aImageKey));
+    mKeysToDelete.push_back(aImageKey);
+  } else {
+    MOZ_ASSERT_UNREACHABLE("invalid ImageKey");
   }
-  mKeysToDelete.push_back(aImageKey);
   return IPC_OK();
 }
 
@@ -280,13 +301,13 @@ WebRenderBridgeParent::RecvDeleteCompositorAnimations(InfallibleTArray<uint64_t>
     return IPC_OK();
   }
 
-  uint64_t storageId = mWidget ? 0 : GetLayersId();
-  CompositorAnimationStorage* storage =
-    mCompositorBridge->GetAnimationStorage(storageId);
-  MOZ_ASSERT(storage);
-
   for (uint32_t i = 0; i < aIds.Length(); i++) {
-    storage->ClearById(aIds[i]);
+    if (mActiveAnimations.find(aIds[i]) != mActiveAnimations.end()) {
+      mAnimStorage->ClearById(aIds[i]);
+      mActiveAnimations.erase(aIds[i]);
+    } else {
+      NS_ERROR("Tried to delete invalid animation");
+    }
   }
 
   return IPC_OK();
@@ -442,14 +463,19 @@ WebRenderBridgeParent::RecvDPSyncEnd(const gfx::IntSize &aSize,
   return IPC_OK();
 }
 
-void
-WebRenderBridgeParent::ProcessWebRenderCommands(const gfx::IntSize &aSize,
-                                                InfallibleTArray<WebRenderParentCommand>& aCommands, const wr::Epoch& aEpoch,
-                                                const WrSize& aContentSize, const ByteBuffer& dl,
-                                                const WrBuiltDisplayListDescriptor& dlDesc)
+mozilla::ipc::IPCResult
+WebRenderBridgeParent::RecvParentCommands(nsTArray<WebRenderParentCommand>&& aCommands)
 {
-  mCompositableHolder->SetCompositionTime(TimeStamp::Now());
+  if (mDestroyed) {
+    return IPC_OK();
+  }
+  ProcessWebRenderParentCommands(aCommands);
+  return IPC_OK();
+}
 
+void
+WebRenderBridgeParent::ProcessWebRenderParentCommands(InfallibleTArray<WebRenderParentCommand>& aCommands)
+{
   for (InfallibleTArray<WebRenderParentCommand>::index_type i = 0; i < aCommands.Length(); ++i) {
     const WebRenderParentCommand& cmd = aCommands[i];
     switch (cmd.type()) {
@@ -457,8 +483,8 @@ WebRenderBridgeParent::ProcessWebRenderCommands(const gfx::IntSize &aSize,
         const OpAddExternalImage& op = cmd.get_OpAddExternalImage();
         Range<const wr::ImageKey> keys(&op.key(), 1);
         MOZ_ASSERT(mExternalImageIds.Get(wr::AsUint64(op.externalImageId())).get());
-        MOZ_ASSERT(!mActiveKeys.Get(wr::AsUint64(keys[0]), nullptr));
-        mActiveKeys.Put(wr::AsUint64(keys[0]), keys[0]);
+        MOZ_ASSERT(mActiveImageKeys.find(wr::AsUint64(keys[0])) == mActiveImageKeys.end());
+        mActiveImageKeys.insert(wr::AsUint64(keys[0]));
 
         RefPtr<WebRenderImageHost> host = mExternalImageIds.Get(wr::AsUint64(op.externalImageId()));
         if (!host) {
@@ -501,8 +527,6 @@ WebRenderBridgeParent::ProcessWebRenderCommands(const gfx::IntSize &aSize,
                                                       op.scBounds(),
                                                       op.scTransform(),
                                                       op.scaleToSize(),
-                                                      op.clipRect(),
-                                                      op.mask(),
                                                       op.filter(),
                                                       op.mixBlendMode());
         break;
@@ -517,20 +541,16 @@ WebRenderBridgeParent::ProcessWebRenderCommands(const gfx::IntSize &aSize,
         const OpAddCompositorAnimations& op = cmd.get_OpAddCompositorAnimations();
         CompositorAnimations data(Move(op.data()));
         if (data.animations().Length()) {
-          uint64_t id = mWidget ? 0 : GetLayersId();
-          CompositorAnimationStorage* storage =
-            mCompositorBridge->GetAnimationStorage(id);
-          if (storage) {
-            storage->SetAnimations(data.id(), data.animations());
-            // Store the default opacity
-            if (op.opacity().type() == OptionalOpacity::Tfloat) {
-              storage->SetAnimatedValue(data.id(), op.opacity().get_float());
-            }
-            // Store the default transform
-            if (op.transform().type() == OptionalTransform::TMatrix4x4) {
-              Matrix4x4 transform(Move(op.transform().get_Matrix4x4()));
-              storage->SetAnimatedValue(data.id(), Move(transform));
-            }
+          mAnimStorage->SetAnimations(data.id(), data.animations());
+          mActiveAnimations.insert(data.id());
+          // Store the default opacity
+          if (op.opacity().type() == OptionalOpacity::Tfloat) {
+            mAnimStorage->SetAnimatedValue(data.id(), op.opacity().get_float());
+          }
+          // Store the default transform
+          if (op.transform().type() == OptionalTransform::TMatrix4x4) {
+            Matrix4x4 transform(Move(op.transform().get_Matrix4x4()));
+            mAnimStorage->SetAnimatedValue(data.id(), Move(transform));
           }
         }
         break;
@@ -541,6 +561,17 @@ WebRenderBridgeParent::ProcessWebRenderCommands(const gfx::IntSize &aSize,
       }
     }
   }
+}
+
+void
+WebRenderBridgeParent::ProcessWebRenderCommands(const gfx::IntSize &aSize,
+                                                InfallibleTArray<WebRenderParentCommand>& aCommands, const wr::Epoch& aEpoch,
+                                                const WrSize& aContentSize, const ByteBuffer& dl,
+                                                const WrBuiltDisplayListDescriptor& dlDesc)
+{
+  mCompositableHolder->SetCompositionTime(TimeStamp::Now());
+  ProcessWebRenderParentCommands(aCommands);
+
   if (mWidget) {
     LayoutDeviceIntSize size = mWidget->GetClientSize();
     mApi->SetWindowParameters(size);
@@ -811,17 +842,13 @@ void
 WebRenderBridgeParent::SampleAnimations(nsTArray<WrOpacityProperty>& aOpacityArray,
                                         nsTArray<WrTransformProperty>& aTransformArray)
 {
-  uint64_t id = mWidget ? 0 : GetLayersId();
-  CompositorAnimationStorage* storage =
-    mCompositorBridge->GetAnimationStorage(id);
-
-  AnimationHelper::SampleAnimations(storage,
+  AnimationHelper::SampleAnimations(mAnimStorage,
                                     mCompositorScheduler->
                                       GetLastComposeTime());
 
   // return the animated data if has
-  if (storage->AnimatedValueCount()) {
-    for(auto iter = storage->ConstAnimatedValueTableIter();
+  if (mAnimStorage->AnimatedValueCount()) {
+    for(auto iter = mAnimStorage->ConstAnimatedValueTableIter();
         !iter.Done(); iter.Next()) {
       AnimatedValue * value = iter.UserData();
       if (value->mType == AnimatedValue::TRANSFORM) {
@@ -1020,10 +1047,14 @@ WebRenderBridgeParent::ClearResources()
   mApi->ClearRootDisplayList(wr::NewEpoch(mWrEpoch), mPipelineId);
   // Schedule composition to clean up Pipeline
   mCompositorScheduler->ScheduleComposition();
-  for (auto iter = mActiveKeys.Iter(); !iter.Done(); iter.Next()) {
-    mKeysToDelete.push_back(iter.Data());
-    iter.Remove();
+  for (std::unordered_set<uint64_t>::iterator iter = mFontKeys.begin(); iter != mFontKeys.end(); iter++) {
+    mApi->DeleteFont(wr::AsFontKey(*iter));
   }
+  mFontKeys.clear();
+  for (std::unordered_set<uint64_t>::iterator iter = mActiveImageKeys.begin(); iter != mActiveImageKeys.end(); iter++) {
+    mKeysToDelete.push_back(wr::AsImageKey(*iter));
+  }
+  mActiveImageKeys.clear();
   DeleteOldImages();
   for (auto iter = mExternalImageIds.Iter(); !iter.Done(); iter.Next()) {
     iter.Data()->ClearWrBridge();
@@ -1040,9 +1071,15 @@ WebRenderBridgeParent::ClearResources()
 
   mCompositableHolder->RemovePipeline(mPipelineId, wr::NewEpoch(mWrEpoch));
 
+  for (std::unordered_set<uint64_t>::iterator iter = mActiveAnimations.begin(); iter != mActiveAnimations.end(); iter++) {
+    mAnimStorage->ClearById(*iter);
+  }
+  mActiveAnimations.clear();
+
   if (mWidget) {
     mCompositorScheduler->Destroy();
   }
+  mAnimStorage = nullptr;
   mCompositorScheduler = nullptr;
   mApi = nullptr;
   mCompositorBridge = nullptr;

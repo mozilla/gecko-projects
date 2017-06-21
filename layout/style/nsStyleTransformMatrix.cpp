@@ -514,7 +514,7 @@ ProcessMatrixOperator(Matrix4x4& aMatrix,
   Matrix4x4 matrix2 = readTransform(aData->Item(2));
   double progress = aData->Item(3).GetPercentValue();
 
-  if (aContext && aContext->StyleSource().IsServoComputedValues()) {
+  if (aContext && aContext->IsServo()) {
     aMatrix =
       OperateTransformMatrixByServo<Operator>(matrix1, matrix2, progress)
         * aMatrix;
@@ -1005,6 +1005,39 @@ ReadTransforms(const nsCSSValueList* aList,
   result.PostScale(scale, scale, scale);
 
   return result;
+}
+
+Point
+Convert2DPosition(nsStyleCoord const (&aValue)[2],
+                  TransformReferenceBox& aRefBox,
+                  int32_t aAppUnitsPerDevPixel)
+{
+  float position[2];
+  nsStyleTransformMatrix::TransformReferenceBox::DimensionGetter dimensionGetter[] =
+    { &nsStyleTransformMatrix::TransformReferenceBox::Width,
+      &nsStyleTransformMatrix::TransformReferenceBox::Height };
+  for (uint8_t index = 0; index < 2; ++index) {
+    const nsStyleCoord& value  = aValue[index];
+    if (value.GetUnit() == eStyleUnit_Calc) {
+      const nsStyleCoord::Calc *calc = value.GetCalcValue();
+      position[index] =
+        NSAppUnitsToFloatPixels((aRefBox.*dimensionGetter[index])(), aAppUnitsPerDevPixel) *
+          calc->mPercent +
+        NSAppUnitsToFloatPixels(calc->mLength, aAppUnitsPerDevPixel);
+    } else if (value.GetUnit() == eStyleUnit_Percent) {
+      position[index] =
+        NSAppUnitsToFloatPixels((aRefBox.*dimensionGetter[index])(), aAppUnitsPerDevPixel) *
+        value.GetPercentValue();
+    } else {
+      MOZ_ASSERT(value.GetUnit() == eStyleUnit_Coord,
+                "unexpected unit");
+      position[index] =
+        NSAppUnitsToFloatPixels(value.GetCoordValue(),
+                                aAppUnitsPerDevPixel);
+    }
+  }
+
+  return Point(position[0], position[1]);
 }
 
 /*

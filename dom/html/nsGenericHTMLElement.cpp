@@ -107,6 +107,7 @@
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
 #include "ReferrerPolicy.h"
+#include "mozilla/dom/HTMLLabelElement.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -177,7 +178,11 @@ NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElementBase)
 nsresult
 nsGenericHTMLElement::CopyInnerTo(Element* aDst, bool aPreallocateChildren)
 {
+  MOZ_ASSERT(!aDst->GetUncomposedDoc(),
+             "Should not CopyInnerTo an Element in a document");
   nsresult rv;
+
+  bool reparse = (aDst->OwnerDoc() != OwnerDoc());
 
   rv = static_cast<nsGenericHTMLElement*>(aDst)->mAttrsAndChildren.
        EnsureCapacityToClone(mAttrsAndChildren, aPreallocateChildren);
@@ -188,26 +193,34 @@ nsGenericHTMLElement::CopyInnerTo(Element* aDst, bool aPreallocateChildren)
     const nsAttrName *name = mAttrsAndChildren.AttrNameAt(i);
     const nsAttrValue *value = mAttrsAndChildren.AttrAt(i);
 
-    nsAutoString valStr;
-    value->ToString(valStr);
-
     if (name->Equals(nsGkAtoms::style, kNameSpaceID_None) &&
         value->Type() == nsAttrValue::eCSSDeclaration) {
-      DeclarationBlock* decl = value->GetCSSDeclarationValue();
+      // We still clone CSS attributes, even in the cross-document case.
+      // https://github.com/w3c/webappsec-csp/issues/212
+
       // We can't just set this as a string, because that will fail
       // to reparse the string into style data until the node is
       // inserted into the document.  Clone the Rule instead.
-      RefPtr<DeclarationBlock> declClone = decl->Clone();
-
-      rv = aDst->SetInlineStyleDeclaration(declClone, &valStr, false);
+      nsAttrValue valueCopy(*value);
+      rv = aDst->SetParsedAttr(name->NamespaceID(), name->LocalName(),
+                               name->GetPrefix(), valueCopy, false);
       NS_ENSURE_SUCCESS(rv, rv);
 
-      continue;
-    }
+      DeclarationBlock* cssDeclaration = value->GetCSSDeclarationValue();
+      cssDeclaration->SetImmutable();
+    } else if (reparse) {
+      nsAutoString valStr;
+      value->ToString(valStr);
 
-    rv = aDst->SetAttr(name->NamespaceID(), name->LocalName(),
-                       name->GetPrefix(), valStr, false);
-    NS_ENSURE_SUCCESS(rv, rv);
+      rv = aDst->SetAttr(name->NamespaceID(), name->LocalName(),
+                         name->GetPrefix(), valStr, false);
+      NS_ENSURE_SUCCESS(rv, rv);
+    } else {
+      nsAttrValue valueCopy(*value);
+      rv = aDst->SetParsedAttr(name->NamespaceID(), name->LocalName(),
+                               name->GetPrefix(), valueCopy, false);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
   }
 
   return NS_OK;
@@ -498,6 +511,14 @@ nsGenericHTMLElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     }
   }
 
+  // We need to consider a labels element is moved to another subtree
+  // with different root, it needs to update labels list and its root
+  // as well.
+  nsDOMSlots* slots = GetExistingDOMSlots();
+  if (slots && slots->mLabelsList) {
+    slots->mLabelsList->MaybeResetRoot(SubtreeRoot());
+  }
+
   return rv;
 }
 
@@ -516,6 +537,13 @@ nsGenericHTMLElement::UnbindFromTree(bool aDeep, bool aNullParent)
     if (htmlDocument) {
       htmlDocument->ChangeContentEditableCount(this, -1);
     }
+  }
+
+  // We need to consider a labels element is removed from tree,
+  // it needs to update labels list and its root as well.
+  nsDOMSlots* slots = GetExistingDOMSlots();
+  if (slots && slots->mLabelsList) {
+    slots->mLabelsList->MaybeResetRoot(SubtreeRoot());
   }
 
   nsStyledElement::UnbindFromTree(aDeep, aNullParent);
@@ -697,27 +725,48 @@ nsGenericHTMLElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
     }
     else if (aName == nsGkAtoms::dir) {
       Directionality dir = eDir_LTR;
+      // A boolean tracking whether we need to recompute our directionality.
+      // This needs to happen after we update our internal "dir" attribute
+      // state but before we call SetDirectionalityOnDescendants.
+      bool recomputeDirectionality = false;
+      // We don't want to have to keep getting the "dir" attribute in
+      // IntrinsicState, so we manually recompute our dir-related event states
+      // here and send the relevant update notifications.
+      EventStates dirStates;
       if (aValue && aValue->Type() == nsAttrValue::eEnum) {
         SetHasValidDir();
+        dirStates |= NS_EVENT_STATE_HAS_DIR_ATTR;
         Directionality dirValue = (Directionality)aValue->GetEnumValue();
         if (dirValue == eDir_Auto) {
-          SetHasDirAuto();
-          ClearHasFixedDir();
+          dirStates |= NS_EVENT_STATE_DIR_ATTR_LIKE_AUTO;
         } else {
           dir = dirValue;
           SetDirectionality(dir, aNotify);
-          ClearHasDirAuto();
-          SetHasFixedDir();
+          if (dirValue == eDir_LTR) {
+            dirStates |= NS_EVENT_STATE_DIR_ATTR_LTR;
+          } else {
+            MOZ_ASSERT(dirValue == eDir_RTL);
+            dirStates |= NS_EVENT_STATE_DIR_ATTR_RTL;
+          }
         }
       } else {
-        ClearHasValidDir();
-        ClearHasFixedDir();
-        if (NodeInfo()->Equals(nsGkAtoms::bdi)) {
-          SetHasDirAuto();
-        } else {
-          ClearHasDirAuto();
-          dir = RecomputeDirectionality(this, aNotify);
+        if (aValue) {
+          // We have a value, just not a valid one.
+          dirStates |= NS_EVENT_STATE_HAS_DIR_ATTR;
         }
+        ClearHasValidDir();
+        if (NodeInfo()->Equals(nsGkAtoms::bdi)) {
+          dirStates |= NS_EVENT_STATE_DIR_ATTR_LIKE_AUTO;
+        } else {
+          recomputeDirectionality = true;
+        }
+      }
+      // Now figure out what's changed about our dir states.
+      EventStates oldDirStates = State() & DIR_ATTR_STATES;
+      EventStates changedStates = dirStates ^ oldDirStates;
+      ToggleStates(changedStates, aNotify);
+      if (recomputeDirectionality) {
+        dir = RecomputeDirectionality(this, aNotify);
       }
       SetDirectionalityOnDescendants(this, dir, aNotify);
     } else if (aName == nsGkAtoms::contenteditable) {
@@ -1190,17 +1239,17 @@ MapLangAttributeInto(const nsMappedAttributes* aAttributes, GenericSpecifiedValu
   }
 
   const nsAttrValue* langValue = aAttributes->GetAttr(nsGkAtoms::lang);
-  if (!langValue || langValue->Type() != nsAttrValue::eString) {
+  if (!langValue) {
     return;
   }
-
+  MOZ_ASSERT(langValue->Type() == nsAttrValue::eAtom);
   if (aData->ShouldComputeStyleStruct(NS_STYLE_INHERIT_BIT(Font))) {
-    aData->SetIdentStringValueIfUnset(eCSSProperty__x_lang,
-                                      langValue->GetStringValue());
+    aData->SetIdentAtomValueIfUnset(eCSSProperty__x_lang,
+                                    langValue->GetAtomValue());
   }
   if (aData->ShouldComputeStyleStruct(NS_STYLE_INHERIT_BIT(Text))) {
     if (!aData->PropertyIsSet(eCSSProperty_text_emphasis_position)) {
-      const nsAString& lang = langValue->GetStringValue();
+      const nsIAtom* lang = langValue->GetAtomValue();
       if (nsStyleUtil::MatchesLanguagePrefix(lang, u"zh")) {
         aData->SetKeywordValue(eCSSProperty_text_emphasis_position,
                                NS_STYLE_TEXT_EMPHASIS_POSITION_DEFAULT_ZH);
@@ -1664,6 +1713,30 @@ bool
 nsGenericHTMLElement::IsLabelable() const
 {
   return IsAnyOfHTMLElements(nsGkAtoms::progress, nsGkAtoms::meter);
+}
+
+/* static */ bool
+nsGenericHTMLElement::MatchLabelsElement(Element* aElement, int32_t aNamespaceID,
+                                         nsIAtom* aAtom, void* aData)
+{
+  HTMLLabelElement* element = HTMLLabelElement::FromContent(aElement);
+  return element && element->GetControl() == aData;
+}
+
+already_AddRefed<nsINodeList>
+nsGenericHTMLElement::Labels()
+{
+  MOZ_ASSERT(IsLabelable(),
+             "Labels() only allow labelable elements to use it.");
+  nsDOMSlots* slots = DOMSlots();
+
+  if (!slots->mLabelsList) {
+    slots->mLabelsList = new nsLabelsNodeList(SubtreeRoot(), MatchLabelsElement,
+                                              nullptr, this);
+  }
+
+  RefPtr<nsLabelsNodeList> labels = slots->mLabelsList;
+  return labels.forget();
 }
 
 bool

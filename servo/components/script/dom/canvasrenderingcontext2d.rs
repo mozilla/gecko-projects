@@ -431,7 +431,7 @@ impl CanvasRenderingContext2D {
 
         let image_size = Size2D::new(img.width as i32, img.height as i32);
         let image_data = match img.format {
-            PixelFormat::RGBA8 => img.bytes.to_vec(),
+            PixelFormat::BGRA8 => img.bytes.to_vec(),
             PixelFormat::K8 => panic!("K8 color type not supported"),
             PixelFormat::RGB8 => panic!("RGB8 color type not supported"),
             PixelFormat::KA8 => panic!("KA8 color type not supported"),
@@ -1137,18 +1137,18 @@ impl CanvasRenderingContext2DMethods for CanvasRenderingContext2D {
                 // https://html.spec.whatwg.org/multipage/#img-error
                 // If the image argument is an HTMLImageElement object that is in the broken state,
                 // then throw an InvalidStateError exception
-                try!(self.fetch_image_data(image).ok_or(Error::InvalidState))
+                self.fetch_image_data(image).ok_or(Error::InvalidState)?
             },
             HTMLImageElementOrHTMLCanvasElementOrCanvasRenderingContext2D::HTMLCanvasElement(ref canvas) => {
                 let _ = canvas.get_or_init_2d_context();
 
-                try!(canvas.fetch_all_data().ok_or(Error::InvalidState))
+                canvas.fetch_all_data().ok_or(Error::InvalidState)?
             },
             HTMLImageElementOrHTMLCanvasElementOrCanvasRenderingContext2D::CanvasRenderingContext2D(ref context) => {
                 let canvas = context.Canvas();
                 let _ = canvas.get_or_init_2d_context();
 
-                try!(canvas.fetch_all_data().ok_or(Error::InvalidState))
+                canvas.fetch_all_data().ok_or(Error::InvalidState)?
             }
         };
 

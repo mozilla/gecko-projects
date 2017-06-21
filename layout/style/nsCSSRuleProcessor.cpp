@@ -18,6 +18,7 @@
 #include "PLDHashTable.h"
 #include "nsICSSPseudoComparator.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/css/ImportRule.h"
 #include "mozilla/css/StyleRule.h"
 #include "mozilla/css/GroupRule.h"
 #include "nsIDocument.h"
@@ -1677,7 +1678,7 @@ IsSignificantChildMaybeThreadSafe(const nsIContent* aContent,
 
 /* static */ bool
 nsCSSRuleProcessor::LangPseudoMatches(const mozilla::dom::Element* aElement,
-                                      const nsAString* aOverrideLang,
+                                      const nsIAtom* aOverrideLang,
                                       bool aHasOverrideLang,
                                       const char16_t* aString,
                                       const nsIDocument* aDocument)
@@ -1691,52 +1692,42 @@ nsCSSRuleProcessor::LangPseudoMatches(const mozilla::dom::Element* aElement,
   // this is currently no property and since the language is inherited
   // from the parent we have to be prepared to look at all parent
   // nodes.  The language itself is encoded in the LANG attribute.
-  bool haveLanguage = false;
-  nsAutoString language;
-  if (aHasOverrideLang) {
-    if (aOverrideLang) {
-      language = *aOverrideLang;
-      haveLanguage = true;
-    }
-  } else {
-    haveLanguage = aElement->GetLang(language);
-  }
-
-  if (haveLanguage) {
-    return nsStyleUtil::DashMatchCompare(language,
+  if (auto* language = aHasOverrideLang ? aOverrideLang : aElement->GetLang()) {
+    return nsStyleUtil::DashMatchCompare(nsDependentAtomString(language),
                                          nsDependentString(aString),
                                          nsASCIICaseInsensitiveStringComparator());
   }
 
-  if (aDocument) {
-    // Try to get the language from the HTTP header or if this
-    // is missing as well from the preferences.
-    // The content language can be a comma-separated list of
-    // language codes.
-    aDocument->GetContentLanguage(language);
-
-    nsDependentString langString(aString);
-    language.StripWhitespace();
-    int32_t begin = 0;
-    int32_t len = language.Length();
-    while (begin < len) {
-      int32_t end = language.FindChar(char16_t(','), begin);
-      if (end == kNotFound) {
-        end = len;
-      }
-      if (nsStyleUtil::DashMatchCompare(Substring(language, begin,
-                                                  end-begin),
-                                        langString,
-                                        nsASCIICaseInsensitiveStringComparator())) {
-        return true;
-      }
-      begin = end + 1;
-    }
-    if (begin < len) {
-      return true;
-    }
+  if (!aDocument) {
+    return false;
   }
 
+  // Try to get the language from the HTTP header or if this
+  // is missing as well from the preferences.
+  // The content language can be a comma-separated list of
+  // language codes.
+  nsAutoString language;
+  aDocument->GetContentLanguage(language);
+
+  nsDependentString langString(aString);
+  language.StripWhitespace();
+  int32_t begin = 0;
+  int32_t len = language.Length();
+  while (begin < len) {
+    int32_t end = language.FindChar(char16_t(','), begin);
+    if (end == kNotFound) {
+      end = len;
+    }
+    if (nsStyleUtil::DashMatchCompare(Substring(language, begin, end - begin),
+                                      langString,
+                                      nsASCIICaseInsensitiveStringComparator())) {
+      return true;
+    }
+    begin = end + 1;
+  }
+  if (begin < len) {
+    return true;
+  }
   return false;
 }
 
@@ -2434,6 +2425,12 @@ SelectorMatchesTree(Element* aPrevElement,
     // to test against is the parent
     else {
       nsIContent *content = prevElement->GetParent();
+      if (prevElement->IsRootOfUseElementShadowTree()) {
+        // 'prevElement' is the shadow root of an use-element shadow tree.
+        // According to the spec, we should not match rules cross the shadow
+        // DOM boundary.
+        content = nullptr;
+      }
       // GetParent could return a document fragment; we only want
       // element parents.
       if (content && content->IsElement()) {

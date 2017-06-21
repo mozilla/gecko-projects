@@ -38,6 +38,23 @@ Thread::GetCurrentId()
   return GetCurrentThreadId();
 }
 
+static void
+PopulateRegsFromContext(Registers& aRegs, CONTEXT* aContext)
+{
+#if defined(GP_ARCH_amd64)
+  aRegs.mPC = reinterpret_cast<Address>(aContext->Rip);
+  aRegs.mSP = reinterpret_cast<Address>(aContext->Rsp);
+  aRegs.mFP = reinterpret_cast<Address>(aContext->Rbp);
+#elif defined(GP_ARCH_x86)
+  aRegs.mPC = reinterpret_cast<Address>(aContext->Eip);
+  aRegs.mSP = reinterpret_cast<Address>(aContext->Esp);
+  aRegs.mFP = reinterpret_cast<Address>(aContext->Ebp);
+#else
+ #error "bad arch"
+#endif
+  aRegs.mLR = 0;
+}
+
 class PlatformData
 {
 public:
@@ -93,10 +110,10 @@ Sampler::Disable(PSLockRef aLock)
 template<typename Func>
 void
 Sampler::SuspendAndSampleAndResumeThread(PSLockRef aLock,
-                                         TickSample& aSample,
-                                         const Func& aDoSample)
+                                         const ThreadInfo& aThreadInfo,
+                                         const Func& aProcessRegs)
 {
-  HANDLE profiled_thread = aSample.mPlatformData->ProfiledThread();
+  HANDLE profiled_thread = aThreadInfo.GetPlatformData()->ProfiledThread();
   if (profiled_thread == nullptr) {
     return;
   }
@@ -138,17 +155,9 @@ Sampler::SuspendAndSampleAndResumeThread(PSLockRef aLock,
   // what we do here, or risk deadlock.  See the corresponding comment in
   // platform-linux-android.cpp for details.
 
-#if defined(GP_ARCH_amd64)
-  aSample.mPC = reinterpret_cast<Address>(context.Rip);
-  aSample.mSP = reinterpret_cast<Address>(context.Rsp);
-  aSample.mFP = reinterpret_cast<Address>(context.Rbp);
-#else
-  aSample.mPC = reinterpret_cast<Address>(context.Eip);
-  aSample.mSP = reinterpret_cast<Address>(context.Esp);
-  aSample.mFP = reinterpret_cast<Address>(context.Ebp);
-#endif
-
-  aDoSample();
+  Registers regs;
+  PopulateRegsFromContext(regs, &context);
+  aProcessRegs(regs);
 
   //----------------------------------------------------------------//
   // Resume the target thread.
@@ -263,22 +272,13 @@ PlatformInit(PSLockRef aLock)
 {
 }
 
+#if defined(HAVE_NATIVE_UNWIND)
 void
-TickSample::PopulateContext()
+Registers::SyncPopulate()
 {
-  MOZ_ASSERT(mIsSynchronous);
-
   CONTEXT context;
   RtlCaptureContext(&context);
-
-#if defined(GP_ARCH_amd64)
-  mPC = reinterpret_cast<Address>(context.Rip);
-  mSP = reinterpret_cast<Address>(context.Rsp);
-  mFP = reinterpret_cast<Address>(context.Rbp);
-#elif defined(GP_ARCH_x86)
-  mPC = reinterpret_cast<Address>(context.Eip);
-  mSP = reinterpret_cast<Address>(context.Esp);
-  mFP = reinterpret_cast<Address>(context.Ebp);
-#endif
+  PopulateRegsFromContext(*this, &context);
 }
+#endif
 

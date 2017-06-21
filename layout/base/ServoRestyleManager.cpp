@@ -134,6 +134,7 @@ ServoRestyleManager::ClearServoDataFromSubtree(Element* aElement)
 {
   if (!aElement->HasServoData()) {
     MOZ_ASSERT(!aElement->HasDirtyDescendantsForServo());
+    MOZ_ASSERT(!aElement->HasAnimationOnlyDirtyDescendantsForServo());
     return;
   }
 
@@ -146,13 +147,14 @@ ServoRestyleManager::ClearServoDataFromSubtree(Element* aElement)
 
   aElement->ClearServoData();
   aElement->UnsetHasDirtyDescendantsForServo();
+  aElement->UnsetHasAnimationOnlyDirtyDescendantsForServo();
 }
-
 
 /* static */ void
 ServoRestyleManager::ClearRestyleStateFromSubtree(Element* aElement)
 {
-  if (aElement->HasDirtyDescendantsForServo()) {
+  if (aElement->HasDirtyDescendantsForServo() ||
+      aElement->HasAnimationOnlyDirtyDescendantsForServo()) {
     StyleChildrenIterator it(aElement);
     for (nsIContent* n = it.GetNextChild(); n; n = it.GetNextChild()) {
       if (n->IsElement()) {
@@ -163,6 +165,7 @@ ServoRestyleManager::ClearRestyleStateFromSubtree(Element* aElement)
 
   Unused << Servo_TakeChangeHint(aElement);
   aElement->UnsetHasDirtyDescendantsForServo();
+  aElement->UnsetHasAnimationOnlyDirtyDescendantsForServo();
   aElement->UnsetFlags(NODE_DESCENDANTS_NEED_FRAMES);
 }
 
@@ -182,16 +185,19 @@ struct ServoRestyleManager::TextPostTraversalState
   bool mShouldPostHints;
   bool mShouldComputeHints;
   nsChangeHint mComputedHint;
+  nsChangeHint mHintsHandled;
 
   TextPostTraversalState(nsStyleContext& aParentContext,
                          ServoStyleSet& aStyleSet,
-                         bool aDisplayContentsParentStyleChanged)
+                         bool aDisplayContentsParentStyleChanged,
+                         nsChangeHint aHintsHandled)
     : mParentContext(aParentContext)
     , mStyleSet(aStyleSet)
     , mStyle(nullptr)
     , mShouldPostHints(aDisplayContentsParentStyleChanged)
     , mShouldComputeHints(aDisplayContentsParentStyleChanged)
     , mComputedHint(nsChangeHint_Empty)
+    , mHintsHandled(aHintsHandled)
   {}
 
   nsStyleContext& ComputeStyle(nsIContent* aTextNode)
@@ -230,6 +236,7 @@ struct ServoRestyleManager::TextPostTraversalState
         oldContext->CalcStyleDifference(&aNewContext,
                                         &equalStructs,
                                         &samePointerStructs);
+      mComputedHint = NS_RemoveSubsumedHints(mComputedHint, mHintsHandled);
     }
 
     if (mComputedHint) {
@@ -312,12 +319,15 @@ bool
 ServoRestyleManager::ProcessPostTraversal(Element* aElement,
                                           nsStyleContext* aParentContext,
                                           ServoStyleSet* aStyleSet,
-                                          nsStyleChangeList& aChangeList)
+                                          nsStyleChangeList& aChangeList,
+                                          nsChangeHint aChangesHandled)
 {
   nsIFrame* styleFrame = nsLayoutUtils::GetStyleFrame(aElement);
 
   // Grab the change hint from Servo.
   nsChangeHint changeHint = Servo_TakeChangeHint(aElement);
+  changeHint = NS_RemoveSubsumedHints(changeHint, aChangesHandled);
+  aChangesHandled |= changeHint;
 
   // Handle lazy frame construction by posting a reconstruct for any lazily-
   // constructed roots.
@@ -382,7 +392,7 @@ ServoRestyleManager::ProcessPostTraversal(Element* aElement,
   // elements, though that is buggy right now even in non-stylo mode, see
   // bug 1251799.
   const bool recreateContext = oldStyleContext &&
-    oldStyleContext->StyleSource().AsServoComputedValues() != computedValues;
+    oldStyleContext->ComputedValues() != computedValues;
 
   RefPtr<nsStyleContext> newContext = nullptr;
   if (recreateContext) {
@@ -437,7 +447,9 @@ ServoRestyleManager::ProcessPostTraversal(Element* aElement,
   const bool descendantsNeedFrames =
     aElement->HasFlag(NODE_DESCENDANTS_NEED_FRAMES);
   const bool traverseElementChildren =
-    aElement->HasDirtyDescendantsForServo() || descendantsNeedFrames;
+    aElement->HasDirtyDescendantsForServo() ||
+    aElement->HasAnimationOnlyDirtyDescendantsForServo() ||
+    descendantsNeedFrames;
   const bool traverseTextChildren = recreateContext || descendantsNeedFrames;
   bool recreatedAnyContext = recreateContext;
   if (traverseElementChildren || traverseTextChildren) {
@@ -446,12 +458,15 @@ ServoRestyleManager::ProcessPostTraversal(Element* aElement,
 
     StyleChildrenIterator it(aElement);
     TextPostTraversalState textState(
-        *upToDateContext, *aStyleSet, displayContentsNode && recreateContext);
+        *upToDateContext,
+        *aStyleSet,
+        displayContentsNode && recreateContext,
+        aChangesHandled);
     for (nsIContent* n = it.GetNextChild(); n; n = it.GetNextChild()) {
       if (traverseElementChildren && n->IsElement()) {
         recreatedAnyContext |=
           ProcessPostTraversal(n->AsElement(), upToDateContext,
-                               aStyleSet, aChangeList);
+                               aStyleSet, aChangeList, aChangesHandled);
       } else if (traverseTextChildren && n->IsNodeOfType(nsINode::eTEXT)) {
         recreatedAnyContext |=
           ProcessPostTraversalForText(n, aChangeList, textState);
@@ -460,6 +475,7 @@ ServoRestyleManager::ProcessPostTraversal(Element* aElement,
   }
 
   aElement->UnsetHasDirtyDescendantsForServo();
+  aElement->UnsetHasAnimationOnlyDirtyDescendantsForServo();
   aElement->UnsetFlags(NODE_DESCENDANTS_NEED_FRAMES);
   return recreatedAnyContext;
 }
@@ -616,7 +632,8 @@ ServoRestyleManager::DoProcessPendingRestyles(TraversalRestyleBehavior
     bool anyStyleChanged = false;
     while (Element* root = iter.GetNextStyleRoot()) {
       anyStyleChanged |=
-        ProcessPostTraversal(root, nullptr, styleSet, currentChanges);
+        ProcessPostTraversal(
+            root, nullptr, styleSet, currentChanges, nsChangeHint(0));
     }
 
     // Process the change hints.
@@ -668,6 +685,10 @@ ServoRestyleManager::DoProcessPendingRestyles(TraversalRestyleBehavior
   }
   mRestyleForCSSRuleChanges = false;
   mInStyleRefresh = false;
+
+  // Now that everything has settled, see if we have enough free rule nodes in
+  // the tree to warrant sweeping them.
+  styleSet->MaybeGCRuleTree();
 
   // Note: We are in the scope of |animationsWithDestroyedFrame|, so
   //       |mAnimationsWithDestroyedFrame| is still valid.
@@ -767,6 +788,16 @@ ServoRestyleManager::ContentStateChanged(nsIContent* aContent,
   ContentStateChangedInternal(aElement, aChangedBits, &changeHint,
                               &restyleHint);
 
+  // Don't bother taking a snapshot if no rules depend on these state bits.
+  //
+  // We always take a snapshot for the LTR/RTL event states, since Servo doesn't
+  // track those bits in the same way, and we know that :dir() rules are always
+  // present in UA style sheets.
+  if (!aChangedBits.HasAtLeastOneOfStates(DIRECTION_STATES) &&
+      !StyleSet()->HasStateDependency(aChangedBits)) {
+    return;
+  }
+
   ServoElementSnapshot& snapshot = SnapshotFor(aElement);
   EventStates previousState = aElement->StyleState() ^ aChangedBits;
   snapshot.AddState(previousState);
@@ -800,10 +831,22 @@ ServoRestyleManager::AttributeWillChange(Element* aElement,
     return;
   }
 
+  bool influencesOtherPseudoClassState =
+    AttributeInfluencesOtherPseudoClassState(aElement, aAttribute);
+
+  if (!influencesOtherPseudoClassState &&
+      !((aNameSpaceID == kNameSpaceID_None &&
+         (aAttribute == nsGkAtoms::id ||
+          aAttribute == nsGkAtoms::_class)) ||
+        aAttribute == nsGkAtoms::lang ||
+        StyleSet()->MightHaveAttributeDependency(aAttribute))) {
+    return;
+  }
+
   ServoElementSnapshot& snapshot = SnapshotFor(aElement);
   snapshot.AddAttrs(aElement, aNameSpaceID, aAttribute);
 
-  if (AttributeInfluencesOtherPseudoClassState(aElement, aAttribute)) {
+  if (influencesOtherPseudoClassState) {
     snapshot.AddOtherPseudoClassState(aElement);
   }
 
@@ -818,7 +861,6 @@ ServoRestyleManager::AttributeChanged(Element* aElement, int32_t aNameSpaceID,
                                       const nsAttrValue* aOldValue)
 {
   MOZ_ASSERT(!mInStyleRefresh);
-  MOZ_ASSERT(!mSnapshots.Get(aElement) || mSnapshots.Get(aElement)->HasAttrs());
 
   nsIFrame* primaryFrame = aElement->GetPrimaryFrame();
   if (primaryFrame) {

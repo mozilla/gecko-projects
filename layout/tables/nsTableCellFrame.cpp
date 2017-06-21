@@ -709,16 +709,18 @@ nsTableCellFrame::GetCellBaseline() const
          borderPadding;
 }
 
-int32_t nsTableCellFrame::GetRowSpan()
+int32_t
+nsTableCellFrame::GetRowSpan()
 {
   int32_t rowSpan=1;
-  nsGenericHTMLElement *hc = nsGenericHTMLElement::FromContent(mContent);
 
   // Don't look at the content's rowspan if we're a pseudo cell
-  if (hc && !StyleContext()->GetPseudo()) {
-    const nsAttrValue* attr = hc->GetParsedAttr(nsGkAtoms::rowspan);
+  if (!StyleContext()->GetPseudo()) {
+    dom::Element* elem = mContent->AsElement();
+    const nsAttrValue* attr = elem->GetParsedAttr(nsGkAtoms::rowspan);
     // Note that we don't need to check the tag name, because only table cells
-    // and table headers parse the "rowspan" attribute into an integer.
+    // (including MathML <mtd>) and table headers parse the "rowspan" attribute
+    // into an integer.
     if (attr && attr->Type() == nsAttrValue::eInteger) {
        rowSpan = attr->GetIntegerValue();
     }
@@ -726,16 +728,20 @@ int32_t nsTableCellFrame::GetRowSpan()
   return rowSpan;
 }
 
-int32_t nsTableCellFrame::GetColSpan()
+int32_t
+nsTableCellFrame::GetColSpan()
 {
   int32_t colSpan=1;
-  nsGenericHTMLElement *hc = nsGenericHTMLElement::FromContent(mContent);
 
   // Don't look at the content's colspan if we're a pseudo cell
-  if (hc && !StyleContext()->GetPseudo()) {
-    const nsAttrValue* attr = hc->GetParsedAttr(nsGkAtoms::colspan);
+  if (!StyleContext()->GetPseudo()) {
+    dom::Element* elem = mContent->AsElement();
+    const nsAttrValue* attr = elem->GetParsedAttr(
+      MOZ_UNLIKELY(elem->IsMathMLElement()) ? nsGkAtoms::columnspan_
+                                            : nsGkAtoms::colspan);
     // Note that we don't need to check the tag name, because only table cells
-    // and table headers parse the "colspan" attribute into an integer.
+    // (including MathML <mtd>) and table headers parse the "colspan" attribute
+    // into an integer.
     if (attr && attr->Type() == nsAttrValue::eInteger) {
        colSpan = attr->GetIntegerValue();
     }
@@ -1065,14 +1071,12 @@ nsTableCellFrame::GetBorderWidth(WritingMode aWM) const
 }
 
 void
-nsTableCellFrame::DoUpdateStyleOfOwnedAnonBoxes(ServoStyleSet& aStyleSet,
-                                                nsStyleChangeList& aChangeList,
-                                                nsChangeHint aHintForThisFrame)
+nsTableCellFrame::AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult)
 {
   nsIFrame* kid = mFrames.FirstChild();
   MOZ_ASSERT(kid && !kid->GetNextSibling(),
              "Table cells should have just one child");
-  UpdateStyleOfChildAnonBox(kid, aStyleSet, aChangeList, aHintForThisFrame);
+  aResult.AppendElement(OwnedAnonBox(kid));
 }
 
 #ifdef DEBUG_FRAME_DUMP

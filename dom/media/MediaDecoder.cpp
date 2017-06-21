@@ -186,25 +186,13 @@ MediaDecoder::ResourceCallback::NotifyNetworkError()
   }
 }
 
-void
-MediaDecoder::ResourceCallback::NotifyDecodeError()
-{
-  RefPtr<ResourceCallback> self = this;
-  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([=] () {
-    if (self->mDecoder) {
-      self->mDecoder->DecodeError(NS_ERROR_DOM_MEDIA_FATAL_ERR);
-    }
-  });
-  mAbstractMainThread->Dispatch(r.forget());
-}
-
 /* static */ void
 MediaDecoder::ResourceCallback::TimerCallback(nsITimer* aTimer, void* aClosure)
 {
   MOZ_ASSERT(NS_IsMainThread());
   ResourceCallback* thiz = static_cast<ResourceCallback*>(aClosure);
   MOZ_ASSERT(thiz->mDecoder);
-  thiz->mDecoder->NotifyDataArrived();
+  thiz->mDecoder->NotifyDataArrivedInternal();
   thiz->mTimerArmed = false;
 }
 
@@ -212,7 +200,13 @@ void
 MediaDecoder::ResourceCallback::NotifyDataArrived()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  if (!mDecoder || mTimerArmed) {
+  if (!mDecoder) {
+    return;
+  }
+
+  mDecoder->DownloadProgressed();
+
+  if (mTimerArmed) {
     return;
   }
   // In situations where these notifications come from stochastic network
@@ -222,15 +216,6 @@ MediaDecoder::ResourceCallback::NotifyDataArrived()
   mTimerArmed = true;
   mTimer->InitWithFuncCallback(
     TimerCallback, this, sDelay, nsITimer::TYPE_ONE_SHOT);
-}
-
-void
-MediaDecoder::ResourceCallback::NotifyBytesDownloaded()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (mDecoder) {
-    mDecoder->NotifyBytesDownloaded();
-  }
 }
 
 void
@@ -1045,6 +1030,15 @@ MediaDecoder::ShouldThrottleDownload()
   MOZ_ASSERT(NS_IsMainThread());
   NS_ENSURE_TRUE(mDecoderStateMachine, false);
 
+  int64_t length = mResource->GetLength();
+  if (length > 0 &&
+      length <= int64_t(MediaPrefs::MediaMemoryCacheMaxSize()) * 1024) {
+    // Don't throttle the download of small resources. This is to speed
+    // up seeking, as seeks into unbuffered ranges would require starting
+    // up a new HTTP transaction, which adds latency.
+    return false;
+  }
+
   if (Preferences::GetBool("media.throttle-regardless-of-download-rate",
                            false)) {
     return true;
@@ -1060,7 +1054,7 @@ MediaDecoder::ShouldThrottleDownload()
 }
 
 void
-MediaDecoder::NotifyBytesDownloaded()
+MediaDecoder::DownloadProgressed()
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
@@ -1555,11 +1549,18 @@ void MediaDecoder::AddSizeOfResources(ResourceSizes* aSizes)
 }
 
 void
-MediaDecoder::NotifyDataArrived()
+MediaDecoder::NotifyDataArrivedInternal()
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
   mDataArrivedEvent.Notify();
+}
+
+void
+MediaDecoder::NotifyDataArrived()
+{
+  NotifyDataArrivedInternal();
+  DownloadProgressed();
 }
 
 // Provide access to the state machine object

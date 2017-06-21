@@ -69,7 +69,7 @@ static const nsRoleMapEntry sWAIRoleMaps[] =
   },
   { // article
     &nsGkAtoms::article,
-    roles::DOCUMENT,
+    roles::ARTICLE,
     kUseMapRole,
     eNoValue,
     eNoAction,
@@ -141,7 +141,7 @@ static const nsRoleMapEntry sWAIRoleMaps[] =
     eOpenCloseAction,
     eNoLiveAttr,
     kGenericAccType,
-    states::COLLAPSED | states::HASPOPUP | states::VERTICAL,
+    states::COLLAPSED | states::HASPOPUP,
     eARIAAutoComplete,
     eARIAReadonly,
     eARIAOrientation
@@ -788,8 +788,7 @@ static const nsRoleMapEntry sWAIRoleMaps[] =
     eClickAction,
     eNoLiveAttr,
     kGenericAccType,
-    kNoReqStates,
-    eARIACheckedMixed
+    kNoReqStates
   },
   { // menuitemcheckbox
     &nsGkAtoms::menuitemcheckbox,
@@ -800,7 +799,8 @@ static const nsRoleMapEntry sWAIRoleMaps[] =
     eNoLiveAttr,
     kGenericAccType,
     kNoReqStates,
-    eARIACheckableMixed
+    eARIACheckableMixed,
+    eARIAReadonly
   },
   { // menuitemradio
     &nsGkAtoms::menuitemradio,
@@ -811,7 +811,8 @@ static const nsRoleMapEntry sWAIRoleMaps[] =
     eNoLiveAttr,
     kGenericAccType,
     kNoReqStates,
-    eARIACheckableBool
+    eARIACheckableBool,
+    eARIAReadonly
   },
   { // navigation
     &nsGkAtoms::navigation,
@@ -896,7 +897,8 @@ static const nsRoleMapEntry sWAIRoleMaps[] =
     eNoLiveAttr,
     kGenericAccType,
     kNoReqStates,
-    eARIAOrientation
+    eARIAOrientation,
+    eARIAReadonly
   },
   { // region
     &nsGkAtoms::region,
@@ -1029,7 +1031,8 @@ static const nsRoleMapEntry sWAIRoleMaps[] =
     eNoLiveAttr,
     kGenericAccType,
     kNoReqStates,
-    eARIACheckableBool
+    eARIACheckableBool,
+    eARIAReadonly
   },
   { // tab
     &nsGkAtoms::tab,
@@ -1073,6 +1076,16 @@ static const nsRoleMapEntry sWAIRoleMaps[] =
     eNoLiveAttr,
     kGenericAccType,
     kNoReqStates
+  },
+  { // term
+    &nsGkAtoms::term,
+    roles::TERM,
+    kUseMapRole,
+    eNoValue,
+    eNoAction,
+    eNoLiveAttr,
+    kGenericAccType,
+    states::READONLY
   },
   { // textbox
     &nsGkAtoms::textbox,
@@ -1139,7 +1152,7 @@ static const nsRoleMapEntry sWAIRoleMaps[] =
     eNoAction,
     eNoLiveAttr,
     eSelect | eTable,
-    states::VERTICAL,
+    kNoReqStates,
     eARIAReadonlyOrEditable,
     eARIAMultiSelectable,
     eFocusableUntilDisabled,

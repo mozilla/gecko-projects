@@ -196,6 +196,10 @@ let ProfileAutocomplete = {
     Services.obs.removeObserver(this, "autocomplete-will-enter-text");
   },
 
+  getProfileAutoCompleteResult() {
+    return this._lastAutoCompleteResult;
+  },
+
   setProfileAutoCompleteResult(result) {
     this._lastAutoCompleteResult = result;
     this._lastAutoCompleteFocusedInput = formFillController.focusedInput;
@@ -440,54 +444,42 @@ var FormAutofillContent = {
     return formDetails.map(record => record.fieldName);
   },
 
-  identifyAutofillFields(doc) {
-    this.log.debug("identifyAutofillFields:", "" + doc.location);
+  identifyAutofillFields(element) {
+    this.log.debug("identifyAutofillFields:", "" + element.ownerDocument.location);
 
     if (!this.savedFieldNames) {
       this.log.debug("identifyAutofillFields: savedFieldNames are not known yet");
       Services.cpmm.sendAsyncMessage("FormAutofill:InitStorage");
     }
 
-    let forms = [];
-
-    // Collects root forms from inputs.
-    for (let field of FormAutofillUtils.autofillFieldSelector(doc)) {
-      if (!FormAutofillUtils.isFieldEligibleForAutofill(field)) {
-        continue;
-      }
-
-      // For now skip consider fields in forms we've already seen before even
-      // if the specific field wasn't seen before. Ideally whether the field is
-      // already in the handler's form details would be considered.
-      if (this.getFormHandler(field)) {
-        continue;
-      }
-
-      let formLike = FormLikeFactory.createFromField(field);
-      if (!forms.some(form => form.rootElement === formLike.rootElement)) {
-        forms.push(formLike);
-      }
+    if (!FormAutofillUtils.isFieldEligibleForAutofill(element)) {
+      this.log.debug("Not an eligible field.");
+      return;
     }
 
-    this.log.debug("Found", forms.length, "forms");
+    let formHandler = this.getFormHandler(element);
+    if (!formHandler) {
+      let formLike = FormLikeFactory.createFromField(element);
+      formHandler = new FormAutofillHandler(formLike);
+    } else if (!formHandler.isFormChangedSinceLastCollection) {
+      this.log.debug("No control is removed or inserted since last collection.");
+      return;
+    }
 
-    // Collects the fields that can be autofilled from each form and marks them
-    // as autofill fields if the amount is above the threshold.
-    forms.forEach(form => {
-      let formHandler = new FormAutofillHandler(form);
-      formHandler.collectFormFields();
-      if (formHandler.fieldDetails.length < AUTOFILL_FIELDS_THRESHOLD) {
-        this.log.debug("Ignoring form since it has only", formHandler.fieldDetails.length,
-                       "field(s)");
-        return;
-      }
+    formHandler.collectFormFields();
 
-      this._formsDetails.set(form.rootElement, formHandler);
-      this.log.debug("Adding form handler to _formsDetails:", formHandler);
-      formHandler.fieldDetails.forEach(detail =>
-        this._markAsAutofillField(detail.elementWeakRef.get())
-      );
-    });
+    this._formsDetails.set(formHandler.form.rootElement, formHandler);
+    this.log.debug("Adding form handler to _formsDetails:", formHandler);
+
+    if (formHandler.fieldDetails.length < AUTOFILL_FIELDS_THRESHOLD) {
+      this.log.debug("Ignoring form since it has only", formHandler.fieldDetails.length,
+                     "field(s)");
+      return;
+    }
+
+    formHandler.fieldDetails.forEach(detail =>
+      this._markAsAutofillField(detail.elementWeakRef.get())
+    );
   },
 
   _markAsAutofillField(field) {
@@ -502,8 +494,11 @@ var FormAutofillContent = {
 
   _previewProfile(doc) {
     let selectedIndex = ProfileAutocomplete._getSelectedIndex(doc.ownerGlobal);
+    let lastAutoCompleteResult = ProfileAutocomplete.getProfileAutoCompleteResult();
 
-    if (selectedIndex === -1) {
+    if (selectedIndex === -1 ||
+        !lastAutoCompleteResult ||
+        lastAutoCompleteResult.getStyleAt(selectedIndex) != "autofill-profile") {
       ProfileAutocomplete._clearProfilePreview();
     } else {
       ProfileAutocomplete._previewSelectedProfile(selectedIndex);
@@ -516,6 +511,23 @@ var FormAutofillContent = {
               .QueryInterface(Ci.nsIDocShell)
               .QueryInterface(Ci.nsIInterfaceRequestor)
               .getInterface(Ci.nsIContentFrameMessageManager);
+  },
+
+  _onKeyDown(e) {
+    let lastAutoCompleteResult = ProfileAutocomplete.getProfileAutoCompleteResult();
+    let focusedInput = formFillController.focusedInput;
+
+    if (e.keyCode != Ci.nsIDOMKeyEvent.DOM_VK_RETURN || !lastAutoCompleteResult || !focusedInput) {
+      return;
+    }
+
+    let selectedIndex = ProfileAutocomplete._getSelectedIndex(e.target.ownerGlobal);
+    let selectedRowStyle = lastAutoCompleteResult.getStyleAt(selectedIndex);
+    if (selectedRowStyle == "autofill-footer") {
+      focusedInput.addEventListener("DOMAutoComplete", () => {
+        Services.cpmm.sendAsyncMessage("FormAutofill:OpenPreferences");
+      }, {once: true});
+    }
   },
 };
 

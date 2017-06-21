@@ -180,7 +180,7 @@ impl<N: TNode> Debug for ShowDataAndPrimaryValues<N> {
 pub struct ShowSubtree<N: TNode>(pub N);
 impl<N: TNode> Debug for ShowSubtree<N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(writeln!(f, "DOM Subtree:"));
+        writeln!(f, "DOM Subtree:")?;
         fmt_subtree(f, &|f, n| write!(f, "{:?}", n), self.0, 1)
     }
 }
@@ -190,7 +190,7 @@ impl<N: TNode> Debug for ShowSubtree<N> {
 pub struct ShowSubtreeData<N: TNode>(pub N);
 impl<N: TNode> Debug for ShowSubtreeData<N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(writeln!(f, "DOM Subtree:"));
+        writeln!(f, "DOM Subtree:")?;
         fmt_subtree(f, &|f, n| fmt_with_data(f, n), self.0, 1)
     }
 }
@@ -200,7 +200,7 @@ impl<N: TNode> Debug for ShowSubtreeData<N> {
 pub struct ShowSubtreeDataAndPrimaryValues<N: TNode>(pub N);
 impl<N: TNode> Debug for ShowSubtreeDataAndPrimaryValues<N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(writeln!(f, "DOM Subtree:"));
+        writeln!(f, "DOM Subtree:")?;
         fmt_subtree(f, &|f, n| fmt_with_data_and_primary_values(f, n), self.0, 1)
     }
 }
@@ -230,12 +230,12 @@ fn fmt_subtree<F, N: TNode>(f: &mut fmt::Formatter, stringify: &F, n: N, indent:
     where F: Fn(&mut fmt::Formatter, N) -> fmt::Result
 {
     for _ in 0..indent {
-        try!(write!(f, "  "));
+        write!(f, "  ")?;
     }
-    try!(stringify(f, n));
+    stringify(f, n)?;
     for kid in n.traversal_children() {
-        try!(writeln!(f, ""));
-        try!(fmt_subtree(f, stringify, kid, indent + 1));
+        writeln!(f, "")?;
+        fmt_subtree(f, stringify, kid, indent + 1)?;
     }
 
     Ok(())
@@ -331,6 +331,23 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
     fn inheritance_parent(&self) -> Option<Self> {
         self.parent_element()
     }
+
+    /// The ::before pseudo-element of this element, if it exists.
+    fn before_pseudo_element(&self) -> Option<Self> {
+        None
+    }
+
+    /// The ::after pseudo-element of this element, if it exists.
+    fn after_pseudo_element(&self) -> Option<Self> {
+        None
+    }
+
+    /// Execute `f` for each anonymous content child (apart from ::before and
+    /// ::after) whose originating element is `self`.
+    fn each_anonymous_content_child<F>(&self, _f: F)
+    where
+        F: FnMut(Self),
+    {}
 
     /// For a given NAC element, return the closest non-NAC ancestor, which is
     /// guaranteed to exist.
@@ -567,8 +584,15 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
             Some(d) => d,
             None => return false,
         };
-        return data.get_restyle()
-                   .map_or(false, |r| r.hint.has_animation_hint());
+        return data.restyle.hint.has_animation_hint()
+    }
+
+    /// Returns the anonymous content for the current element's XBL binding,
+    /// given if any.
+    ///
+    /// This is used in Gecko for XBL and shadow DOM.
+    fn xbl_binding_anonymous_content(&self) -> Option<Self::ConcreteNode> {
+        None
     }
 
     /// Gets declarations from XBL bindings from the element. Only gecko element could have this.
