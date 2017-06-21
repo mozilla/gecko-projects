@@ -900,6 +900,25 @@ AddAndRemoveImageAssociations(nsFrame* aFrame,
   }
 }
 
+void MarkFrameChanged(nsIFrame* aFrame)
+{
+  if (XRE_IsContentProcess() && !aFrame->IsFrameModified()) {
+    nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
+    RetainedDisplayListBuilder* retainedBuilder =
+      displayRoot->GetProperty(RetainedDisplayListBuilder::Cached());
+    if (retainedBuilder) {
+      std::vector<WeakFrame>* modifiedFrames = displayRoot->GetProperty(nsIFrame::ModifiedFrameList());
+      if (!modifiedFrames) {
+        modifiedFrames = new std::vector<WeakFrame>();
+        displayRoot->SetProperty(nsIFrame::ModifiedFrameList(), modifiedFrames);
+      }
+      MOZ_ASSERT(aFrame->PresContext()->LayoutPhaseCount(eLayoutPhase_DisplayListBuilding) == 0);
+      modifiedFrames->emplace_back(aFrame);
+      aFrame->SetFrameIsModified(true);
+    }
+  }
+}
+
 // Subclass hook for style post processing
 /* virtual */ void
 nsFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
@@ -1009,6 +1028,7 @@ nsFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 
   RemoveStateBits(NS_FRAME_SIMPLE_EVENT_REGIONS |
                   NS_FRAME_SIMPLE_DISPLAYLIST);
+  MarkFrameChanged(this);
 
   mMayHaveRoundedCorners = true;
 }
@@ -6466,23 +6486,7 @@ static void InvalidateRenderingObservers(nsIFrame* aFrame, bool aFrameChanged = 
     return;
   }
 
-  // TODO: We really should be storing this on the current stacking context, not the display
-  // root (which is the root stacking context, but not necessarily the one for the current frame)
-  if (XRE_IsContentProcess() && !aFrame->IsFrameModified()) {
-    nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
-    RetainedDisplayListBuilder* retainedBuilder =
-      displayRoot->GetProperty(RetainedDisplayListBuilder::Cached());
-    if (retainedBuilder) {
-      std::vector<WeakFrame>* modifiedFrames = displayRoot->GetProperty(nsIFrame::ModifiedFrameList());
-      if (!modifiedFrames) {
-        modifiedFrames = new std::vector<WeakFrame>();
-        displayRoot->SetProperty(nsIFrame::ModifiedFrameList(), modifiedFrames);
-      }
-      MOZ_ASSERT(aFrame->PresContext()->LayoutPhaseCount(eLayoutPhase_DisplayListBuilding) == 0);
-      modifiedFrames->emplace_back(aFrame);
-      aFrame->SetFrameIsModified(true);
-    }
-  }
+  MarkFrameChanged(aFrame);
 }
 
 void

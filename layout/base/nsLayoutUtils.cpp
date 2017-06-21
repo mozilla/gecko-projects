@@ -7653,6 +7653,9 @@ nsLayoutUtils::GetDisplayRootFrame(nsIFrame* aFrame)
   for (;;) {
     if (!f->HasAnyStateBits(NS_FRAME_IN_POPUP)) {
       f = f->PresContext()->FrameManager()->GetRootFrame();
+      if (!f) {
+        return aFrame;
+      }
     } else if (IsPopup(f)) {
       return f;
     }
