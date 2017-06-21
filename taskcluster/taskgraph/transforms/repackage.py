@@ -131,7 +131,7 @@ def make_task_description(config, jobs):
             }]
         elif attributes['build_platform'].startswith('win'):
             mar_prefix = 'https://queue.taskcluster.net/v1/task/' + \
-                '{}/artifacts/public/build/host/bin'.format(build_task_ref)
+                '{}/artifacts/public/build/host/bin/'.format(build_task_ref)
             if job.get('locale'):
                 signed_prefix = 'https://queue.taskcluster.net/v1/task/' + \
                     '{}/artifacts/public/build/{}/'.format(signing_task_ref, job['locale'])
