@@ -35,6 +35,7 @@ else:
 
 config = {
     "input_home": "{abs_work_dir}\\inputs",
+    "output_home": "{base_work_dir}\\public\\build",
     "src_mozconfig": "browser/config/mozconfigs/{}/repack".format(plat),
 
     "download_config": download_config,
