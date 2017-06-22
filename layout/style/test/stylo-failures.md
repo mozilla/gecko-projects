@@ -43,9 +43,6 @@ to mochitest command.
   * test_parser_diagnostics_unprintables.html [550]
 * Unimplemented \@font-face descriptors:
   * test_font_face_parser.html `font-language-override`: bug 1355364 [8]
-* keyword values should be preserved in \@font-face bug 1355368
-  * test_font_face_parser.html `font-weight` [4]
-  * test_font_loading_api.html `weight` [1]
 * @namespace support:
   * test_namespace_rule.html: bug 1355715 [6]
 * test_font_feature_values_parsing.html: \@font-feature-values support bug 1355721 [107]
@@ -120,7 +117,6 @@ to mochitest command.
   * Gecko rejects calc() in -webkit-gradient bug 1363349
     * test_property_syntax_errors.html `-webkit-gradient` [20]
 * test_specified_value_serialization.html `-webkit-radial-gradient`: bug 1367299 [1]
-* test_variables.html `var(--var6)`: irrelevant test for stylo bug 1367306 [1]
 
 ## Unknown / Unsure
 
