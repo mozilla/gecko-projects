@@ -22,4 +22,3 @@ only-for-build-platforms:
   - win64/debug
   - win64/opt
   - win64-pgo/opt
-  - win64-asan/opt
