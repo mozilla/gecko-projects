@@ -900,10 +900,11 @@ AddAndRemoveImageAssociations(nsFrame* aFrame,
   }
 }
 
-void MarkFrameChanged(nsIFrame* aFrame)
+void
+nsIFrame::MarkNeedsDisplayItemRebuild()
 {
-  if (XRE_IsContentProcess() && !aFrame->IsFrameModified()) {
-    nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
+  if (XRE_IsContentProcess() && !IsFrameModified()) {
+    nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(this);
     RetainedDisplayListBuilder* retainedBuilder =
       displayRoot->GetProperty(RetainedDisplayListBuilder::Cached());
     if (retainedBuilder) {
@@ -912,9 +913,9 @@ void MarkFrameChanged(nsIFrame* aFrame)
         modifiedFrames = new std::vector<WeakFrame>();
         displayRoot->SetProperty(nsIFrame::ModifiedFrameList(), modifiedFrames);
       }
-      MOZ_ASSERT(aFrame->PresContext()->LayoutPhaseCount(eLayoutPhase_DisplayListBuilding) == 0);
-      modifiedFrames->emplace_back(aFrame);
-      aFrame->SetFrameIsModified(true);
+      MOZ_ASSERT(PresContext()->LayoutPhaseCount(eLayoutPhase_DisplayListBuilding) == 0);
+      modifiedFrames->emplace_back(this);
+      SetFrameIsModified(true);
     }
   }
 }
@@ -1028,7 +1029,7 @@ nsFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 
   RemoveStateBits(NS_FRAME_SIMPLE_EVENT_REGIONS |
                   NS_FRAME_SIMPLE_DISPLAYLIST);
-  MarkFrameChanged(this);
+  this->MarkNeedsDisplayItemRebuild();
 
   mMayHaveRoundedCorners = true;
 }
@@ -6486,7 +6487,7 @@ static void InvalidateRenderingObservers(nsIFrame* aFrame, bool aFrameChanged = 
     return;
   }
 
-  MarkFrameChanged(aFrame);
+  aFrame->MarkNeedsDisplayItemRebuild();
 }
 
 void

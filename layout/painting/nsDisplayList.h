@@ -2894,6 +2894,7 @@ struct RetainedDisplayListBuilder {
 
   nsDisplayListBuilder mBuilder;
   nsDisplayList mList;
+  mozilla::Maybe<WeakFrame> mPreviousCaret;
 
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(Cached, RetainedDisplayListBuilder)
 };

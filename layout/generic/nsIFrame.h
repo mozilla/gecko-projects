@@ -3032,6 +3032,8 @@ public:
                          const nsRect* aFrameDamageRect = nullptr,
                          uint32_t aFlags = 0);
 
+  void MarkNeedsDisplayItemRebuild();
+
   /**
    * Returns a rect that encompasses everything that might be painted by
    * this frame.  This includes this frame, all its descendant frames, this
