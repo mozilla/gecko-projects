@@ -4107,16 +4107,16 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         std::vector<WeakFrame>* modifiedFrames = aFrame->GetProperty(nsIFrame::ModifiedFrameList());
 
         //printf("Attempting merge build with %lu modified frames\n", modifiedFrames->size());
-        if (!retainedBuilder->mPreviousCaret ||
-            retainedBuilder->mPreviousCaret.value() != builder.GetCaretFrame()) {
-          if (retainedBuilder->mPreviousCaret &&
-              retainedBuilder->mPreviousCaret.value()) {
-            retainedBuilder->mPreviousCaret.value()->MarkNeedsDisplayItemRebuild();
+        if (retainedBuilder->mPreviousCaret != builder.GetCaretFrame()) {
+          if (retainedBuilder->mPreviousCaret) {
+            builder.MarkFrameModifiedDuringBuilding(retainedBuilder->mPreviousCaret);
           }
+
           if (builder.GetCaretFrame()) {
-            builder.GetCaretFrame()->MarkNeedsDisplayItemRebuild();
+            builder.MarkFrameModifiedDuringBuilding(builder.GetCaretFrame());
           }
-          retainedBuilder->mPreviousCaret = Some(builder.GetCaretFrame());
+
+          retainedBuilder->mPreviousCaret = builder.GetCaretFrame();
         }
 
         nsRect modifiedDirty;

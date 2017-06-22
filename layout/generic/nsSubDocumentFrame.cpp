@@ -456,12 +456,11 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // Caret frame changed, rebuild the entire subdoc.
     // We could just invalidate the old and new frame
     // areas and save some work here.
-    if (!mPreviousCaret ||
-        mPreviousCaret.value() != aBuilder->GetCaretFrame()) {
+    if (mPreviousCaret != aBuilder->GetCaretFrame()) {
       dirty = visible;
       aBuilder->MarkFrameModifiedDuringBuilding(this);
     }
-    mPreviousCaret = Some(aBuilder->GetCaretFrame());
+    mPreviousCaret = aBuilder->GetCaretFrame();
   }
 
   if (!needsOwnLayer && aBuilder->IsBuildingLayerEventRegions() &&

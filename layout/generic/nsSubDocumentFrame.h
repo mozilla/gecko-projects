@@ -165,7 +165,7 @@ protected:
   bool mDidCreateDoc;
   bool mCallingShow;
   Maybe<bool> mPreviouslyNeededLayer;
-  Maybe<WeakFrame> mPreviousCaret;
+  WeakFrame mPreviousCaret;
 };
 
 #endif /* NSSUBDOCUMENTFRAME_H_ */
