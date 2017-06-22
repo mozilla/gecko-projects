@@ -1637,7 +1637,7 @@ xpcshell:
     treeherder-symbol: tc-X(X)
     run-on-projects:
         by-test-platform:
-            windows.*: []
+            windows.*: ['mozilla-central', 'date']
             linux64-qr/.*: ['mozilla-central', 'try']
             default: built-projects
     docker-image: {"in-tree": "desktop1604-test"}
@@ -1645,7 +1645,7 @@ xpcshell:
         by-test-platform:
             linux64/debug: 10
             android-4.2-x86/opt: 6
-            # windows.*: 1
+            windows.*: 8
             macosx.*: 1
             default: 8
     instance-size:
@@ -1687,3 +1687,7 @@ xpcshell:
                             - --xpcshell-suite=xpcshell-coverage
                         default:
                             - --xpcshell-suite=xpcshell
+                requires-signed-builds:
+                    by-test-platform:
+                        windows.*: true
+                        default: false
