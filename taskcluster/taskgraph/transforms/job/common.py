@@ -17,7 +17,7 @@ def docker_worker_add_workspace_cache(config, job, taskdesc, extra=None):
     except on try where workspace caches are not used.
 
     extra, is an optional kwarg passed in that supports extending the cache
-           key name to avoid undesired conflicts with other caches."""
+    key name to avoid undesired conflicts with other caches."""
     if config.params['project'] == 'try':
         return
 

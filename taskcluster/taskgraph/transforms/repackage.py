@@ -72,7 +72,7 @@ def make_repackage_description(config, jobs):
 
 
 @transforms.add
-def make_task_description(config, jobs):
+def make_job_description(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']
         dependencies = {dep_job.attributes.get('kind'): dep_job.label}
@@ -80,6 +80,8 @@ def make_task_description(config, jobs):
             raise NotImplementedError(
                 "Can't repackage a signing task with multiple dependencies")
         signing_dependencies = dep_job.dependencies
+        # This is so we get the build task in our dependencies to
+        # have better beetmover support.
         dependencies.update(signing_dependencies)
 
         treeherder = job.get('treeherder', {})
@@ -114,12 +116,12 @@ def make_task_description(config, jobs):
         if attributes['build_platform'].startswith('macosx'):
             if job.get('locale'):
                 input_string = 'https://queue.taskcluster.net/v1/task/' + \
-                    '<nightly-l10n-signing>/artifacts/public/build/{}/target.tar.gz'
-                input_string = input_string.format(job['locale'])
+                    '{}/artifacts/public/build/{}/target.tar.gz'
+                input_string = input_string.format(signing_task_ref, job['locale'])
                 locale_output_path = "{}/".format(job['locale'])
             else:
                 input_string = 'https://queue.taskcluster.net/v1/task/' + \
-                    '<build-signing>/artifacts/public/build/target.tar.gz'
+                    '{}/artifacts/public/build/target.tar.gz'.format(signing_task_ref)
             task_env.update(
                 SIGNED_INPUT={'task-reference': input_string},
             )
