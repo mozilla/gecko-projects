@@ -53,7 +53,8 @@ ChooseValidatorCompileOptions(const ShBuiltInResources& resources,
         // Work around that Mac drivers handle struct scopes incorrectly.
         options |= SH_REGENERATE_STRUCT_NAMES;
         options |= SH_INIT_OUTPUT_VARIABLES;
-    }
+
+        }
 #endif
 
     if (gfxPrefs::WebGLAllANGLEOptions()) {

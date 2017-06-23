@@ -98,6 +98,7 @@
 #include "mozInlineSpellChecker.h"
 #include "nsDocShell.h"
 #include "nsIConsoleListener.h"
+#include "nsIContentViewer.h"
 #include "nsICycleCollectorListener.h"
 #include "nsIIdlePeriod.h"
 #include "nsIDragService.h"
@@ -535,7 +536,7 @@ ContentChild::RecvSetXPCOMProcessAttributes(const XPCOMInitData& aXPCOMInit,
 {
   mLookAndFeelCache = aLookAndFeelIntCache;
   InitXPCOM(aXPCOMInit, aInitialData);
-  InitGraphicsDeviceData();
+  InitGraphicsDeviceData(aXPCOMInit.contentDeviceData());
 
 #ifdef NS_PRINTING
   // Force the creation of the nsPrintingProxy so that it's IPC counterpart,
@@ -997,11 +998,11 @@ ContentChild::AppendProcessId(nsACString& aName)
 }
 
 void
-ContentChild::InitGraphicsDeviceData()
+ContentChild::InitGraphicsDeviceData(const ContentDeviceData& aData)
 {
   // Initialize the graphics platform. This may contact the parent process
   // to read device preferences.
-  gfxPlatform::GetPlatform();
+  gfxPlatform::InitChild(aData);
 }
 
 void
@@ -1518,7 +1519,7 @@ ContentChild::RecvSetProcessSandbox(const MaybeFileDesc& aBroker)
     nsAdoptingCString extraSyscalls =
       Preferences::GetCString("security.sandbox.content.syscall_whitelist");
     if (extraSyscalls) {
-      for (const nsCSubstring& callNrString : extraSyscalls.Split(',')) {
+      for (const nsACString& callNrString : extraSyscalls.Split(',')) {
         nsresult rv;
         int callNr = PromiseFlatCString(callNrString).ToInteger(&rv);
         if (NS_SUCCEEDED(rv)) {
