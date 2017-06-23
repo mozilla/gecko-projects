@@ -72,7 +72,7 @@ def make_repackage_signing_description(config, jobs):
             "taskId": {"task-reference": "<repackage>"},
             "taskType": "repackage",
             "paths": [
-                "public/build/{}installer.exe".format(locale_str),
+                "public/build/{}target.installer.exe".format(locale_str),
             ],
             "formats": ["sha2signcode"]
         }, {
