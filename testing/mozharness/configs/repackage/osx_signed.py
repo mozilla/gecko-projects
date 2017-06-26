@@ -7,12 +7,18 @@ config = {
 
     "download_config": {
         "target.tar.gz": os.environ.get("SIGNED_INPUT"),
+        "mar.exe": os.environ.get("UNSIGNED_MAR"),
     },
 
     "repackage_config": [[
         "dmg",
         "-i", "{abs_work_dir}/inputs/target.tar.gz",
         "-o", "{output_home}/target.dmg"
+    ], [
+        "mar",
+        "-i", "{abs_work_dir}/inputs/target.tar.gz",
+        "--mar", "{abs_work_dir}/inputs/mar.exe",
+        "-o", "{output_home}/target.complete.mar"
     ]],
 
     # ToolTool

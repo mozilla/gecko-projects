@@ -113,6 +113,8 @@ def make_job_description(config, jobs):
 
         task_env = {}
         locale_output_path = ""
+        mar_prefix = 'https://queue.taskcluster.net/v1/task/' + \
+            '{}/artifacts/public/build/host/bin/'.format(build_task_ref)
         if attributes['build_platform'].startswith('macosx'):
             if job.get('locale'):
                 input_string = 'https://queue.taskcluster.net/v1/task/' + \
@@ -124,16 +126,19 @@ def make_job_description(config, jobs):
                     '{}/artifacts/public/build/target.tar.gz'.format(signing_task_ref)
             task_env.update(
                 SIGNED_INPUT={'task-reference': input_string},
+                UNSIGNED_MAR={'task-reference': "{}mar.exe".format(mar_prefix)},
             )
             mozharness_config = ['repackage/osx_signed.py']
             output_files = [{
                 'type': 'file',
                 'path': '/home/worker/workspace/build/artifacts/target.dmg',
                 'name': 'public/build/{}target.dmg'.format(locale_output_path),
+            }, {
+                'type': 'file',
+                'path': '/home/worker/workspace/build/artifacts/target.complete.mar',
+                'name': 'public/build/{}target.complete.mar'.format(locale_output_path),
             }]
         elif attributes['build_platform'].startswith('win'):
-            mar_prefix = 'https://queue.taskcluster.net/v1/task/' + \
-                '{}/artifacts/public/build/host/bin/'.format(build_task_ref)
             if job.get('locale'):
                 signed_prefix = 'https://queue.taskcluster.net/v1/task/' + \
                     '{}/artifacts/public/build/{}/'.format(signing_task_ref, job['locale'])
