@@ -30,7 +30,7 @@ use properties::longhands::visibility::computed_value::T as Visibility;
 use selectors::parser::SelectorParseError;
 use smallvec::SmallVec;
 use std::cmp;
-#[cfg(feature = "gecko")] use std::collections::HashMap;
+#[cfg(feature = "gecko")] use fnv::FnvHashMap;
 use style_traits::ParseError;
 use super::ComputedValues;
 use values::{Auto, CSSFloat, CustomIdent, Either};
@@ -440,7 +440,7 @@ impl AnimatedProperty {
 /// This HashMap stores the values that are the last AnimationValue to be
 /// composed for each TransitionProperty.
 #[cfg(feature = "gecko")]
-pub type AnimationValueMap = HashMap<AnimatableLonghand, AnimationValue>;
+pub type AnimationValueMap = FnvHashMap<AnimatableLonghand, AnimationValue>;
 #[cfg(feature = "gecko")]
 unsafe impl HasFFI for AnimationValueMap {
     type FFIType = RawServoAnimationValueMap;
@@ -2765,7 +2765,7 @@ impl Animatable for IntermediateRGBA {
 
     #[inline]
     fn get_zero_value(&self) -> Option<Self> {
-        Some(IntermediateRGBA::new(0., 0., 0., 1.))
+        Some(IntermediateRGBA::transparent())
     }
 
     #[inline]
@@ -2982,6 +2982,14 @@ impl Animatable for IntermediateSVGPaint {
         Ok(self.kind.compute_squared_distance(&other.kind)? +
             self.fallback.compute_squared_distance(&other.fallback)?)
     }
+
+    #[inline]
+    fn get_zero_value(&self) -> Option<Self> {
+        Some(IntermediateSVGPaint {
+            kind: option_try!(self.kind.get_zero_value()),
+            fallback: self.fallback.and_then(|v| v.get_zero_value()),
+        })
+    }
 }
 
 impl Animatable for IntermediateSVGPaintKind {
@@ -3010,6 +3018,18 @@ impl Animatable for IntermediateSVGPaintKind {
             (&SVGPaintKind::ContextFill, &SVGPaintKind::ContextFill) |
             (&SVGPaintKind::ContextStroke, &SVGPaintKind::ContextStroke)=> Ok(0.0),
             _ => Err(())
+        }
+    }
+
+    #[inline]
+    fn get_zero_value(&self) -> Option<Self> {
+        match self {
+            &SVGPaintKind::Color(ref color) => color.get_zero_value()
+                                                    .map(SVGPaintKind::Color),
+            &SVGPaintKind::None |
+            &SVGPaintKind::ContextFill |
+            &SVGPaintKind::ContextStroke =>  Some(self.clone()),
+            _ => None,
         }
     }
 }

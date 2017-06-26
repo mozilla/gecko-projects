@@ -27,7 +27,7 @@
 namespace mozilla {
 
 LazyIdleThread::LazyIdleThread(uint32_t aIdleTimeoutMS,
-                               const nsCSubstring& aName,
+                               const nsACString& aName,
                                ShutdownMethod aShutdownMethod,
                                nsIObserver* aIdleObserver)
   : mMutex("LazyIdleThread::mMutex")
@@ -508,12 +508,6 @@ LazyIdleThread::HasPendingEvents(bool* aHasPendingEvents)
 
 NS_IMETHODIMP
 LazyIdleThread::IdleDispatch(already_AddRefed<nsIRunnable> aEvent)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-LazyIdleThread::IdleDispatchFromScript(nsIRunnable* aEvent)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
