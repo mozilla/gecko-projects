@@ -69,8 +69,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-                                  "resource://gre/modules/Promise.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Sqlite",
                                   "resource://gre/modules/Sqlite.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
@@ -618,6 +616,19 @@ var Bookmarks = Object.freeze({
                                                updatedItem._parentId,
                                                updatedItem.guid,
                                                updatedItem.parentGuid, "",
+                                               updatedItem.source ]);
+        }
+        if (info.hasOwnProperty("dateAdded") &&
+            updateInfo.hasOwnProperty("dateAdded") &&
+            item.dateAdded != updatedItem.dateAdded) {
+          notify(observers, "onItemChanged", [ updatedItem._id, "dateAdded",
+                                               false, `${PlacesUtils.toPRTime(updatedItem.dateAdded)}`,
+                                               PlacesUtils.toPRTime(updatedItem.lastModified),
+                                               updatedItem.type,
+                                               updatedItem._parentId,
+                                               updatedItem.guid,
+                                               updatedItem.parentGuid,
+                                               "",
                                                updatedItem.source ]);
         }
         if (updateInfo.hasOwnProperty("title")) {
