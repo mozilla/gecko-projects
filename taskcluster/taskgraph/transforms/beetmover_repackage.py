@@ -79,8 +79,8 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_SIGNED_PATHS = {
-    'macosx64-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_EN_US,
-    'macosx64-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_L10N,
+    'macosx64-nightly': [],
+    'macosx64-nightly-l10n': [],
 }
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
 # need to be transfered to S3, please be aware you also need to follow-up
@@ -89,6 +89,14 @@ UPSTREAM_ARTIFACT_SIGNED_PATHS = {
 UPSTREAM_ARTIFACT_REPACKAGE_PATHS = {
     'macosx64-nightly': ["target.dmg"],
     'macosx64-nightly-l10n': ["target.dmg"],
+}
+# Until bug 1331141 is fixed, if you are adding any new artifacts here that
+# need to be transfered to S3, please be aware you also need to follow-up
+# with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
+# See example in bug 1348286
+UPSTREAM_ARTIFACT_SIGNED_REPACKAGE_PATHS = {
+    'macosx64-nightly': ["target.complete.mar"],
+    'macosx64-nightly-l10n': ["target.complete.mar"],
 }
 
 # Voluptuous uses marker objects as dictionary *keys*, but they are not
@@ -146,13 +154,14 @@ def make_task_description(config, jobs):
         treeherder.setdefault('kind', 'build')
         label = job.get('label', "beetmover-{}".format(dep_job.label))
         dependent_kind = str(dep_job.kind)
+
         dependencies = {dependent_kind: dep_job.label}
 
         # macosx nightly builds depend on repackage which use in tree docker
         # images and thus have two dependencies
         # change the signing_dependencies to be use the ones in
         docker_dependencies = {"docker-image":
-                               dep_job.dependencies["docker-image"]
+                               dep_job.dependencies['docker-image']
                                }
         dependencies.update(docker_dependencies)
 
@@ -171,6 +180,13 @@ def make_task_description(config, jobs):
                               dep_job.dependencies[build_name]
                               }
         dependencies.update(build_dependencies)
+
+        repackage_name = "repackage"
+        # repackage-l10n actually uses the repackage depname here
+        repackage_dependencies = {"repackage":
+                                  dep_job.dependencies[repackage_name]
+                                  }
+        dependencies.update(repackage_dependencies)
 
         attributes = {
             'nightly': dep_job.attributes.get('nightly', False),
@@ -200,12 +216,13 @@ def make_task_description(config, jobs):
 
 
 def generate_upstream_artifacts(signing_task_ref, build_task_ref,
-                                repackage_task_ref, platform,
-                                locale=None):
+                                repackage_task_ref, repackage_signing_task_ref,
+                                platform, locale=None):
 
     signing_mapping = UPSTREAM_ARTIFACT_SIGNED_PATHS
     build_mapping = UPSTREAM_ARTIFACT_UNSIGNED_PATHS
     repackage_mapping = UPSTREAM_ARTIFACT_REPACKAGE_PATHS
+    repackage_signing_mapping = UPSTREAM_ARTIFACT_SIGNED_REPACKAGE_PATHS
 
     artifact_prefix = 'public/build'
     if locale:
@@ -230,6 +247,12 @@ def generate_upstream_artifacts(signing_task_ref, build_task_ref,
         "paths": ["{}/{}".format(artifact_prefix, p)
                   for p in repackage_mapping[platform]],
         "locale": locale or "en-US",
+        }, {
+        "taskId": {"task-reference": repackage_signing_task_ref},
+        "taskType": "repackage",
+        "paths": ["{}/{}".format(artifact_prefix, p)
+                  for p in repackage_signing_mapping[platform]],
+        "locale": locale or "en-US",
     }]
 
     return upstream_artifacts
@@ -238,7 +261,7 @@ def generate_upstream_artifacts(signing_task_ref, build_task_ref,
 @transforms.add
 def make_task_worker(config, jobs):
     for job in jobs:
-        valid_beetmover_job = (len(job["dependencies"]) == 4 and
+        valid_beetmover_job = (len(job["dependencies"]) == 5 and
                                any(['repackage' in j for j in job['dependencies']]))
         if not valid_beetmover_job:
             raise NotImplementedError("Beetmover_repackage must have four dependencies.")
@@ -249,7 +272,9 @@ def make_task_worker(config, jobs):
         repackage_task = None
         signing_task = None
         for dependency in job["dependencies"].keys():
-            if 'repackage' in dependency:
+            if 'repackage-signing' in dependency:
+                repackage_signing_task = dependency
+            elif 'repackage' in dependency:
                 repackage_task = dependency
             elif 'signing' in dependency:
                 signing_task = dependency
@@ -259,8 +284,10 @@ def make_task_worker(config, jobs):
         signing_task_ref = "<" + str(signing_task) + ">"
         build_task_ref = "<" + str(build_task) + ">"
         repackage_task_ref = "<" + str(repackage_task) + ">"
+        repackage_signing_task_ref = "<" + str(repackage_signing_task) + ">"
         upstream_artifacts = generate_upstream_artifacts(
-            signing_task_ref, build_task_ref, repackage_task_ref, platform, locale
+            signing_task_ref, build_task_ref, repackage_task_ref,
+            repackage_signing_task_ref, platform, locale
         )
 
         worker = {'implementation': 'beetmover',

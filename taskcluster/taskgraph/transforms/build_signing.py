@@ -78,13 +78,10 @@ def _generate_upstream_artifacts(build_platform, is_nightly=False):
         artifacts_specificities = [{
             'artifacts': ['public/build/target.tar.bz2'],
             'format': 'gpg',
-        }]
-
-    if is_nightly and any(desktop in build_platform for desktop in DESKTOP_BUILD_PLATFORM):
-        artifacts_specificities.append({
+        }, {
             'artifacts': ['public/build/update/target.complete.mar'],
             'format': 'mar',
-        })
+        }]
 
     return [{
         'taskId': {'task-reference': '<build>'},

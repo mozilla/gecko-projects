@@ -13,4 +13,5 @@ kind-dependencies:
   - repackage-l10n
 
 only-for-build-platforms:
+  - macosx64-nightly/opt
   - win64-nightly/opt

@@ -54,9 +54,13 @@ def make_repackage_signing_description(config, jobs):
         treeherder.setdefault('tier', 1)
         treeherder.setdefault('kind', 'build')
 
-        label = job.get('label', "repackagesigning-{}".format(dep_job.label))
+        label = job.get('label', "repackage-signing-{}".format(dep_job.label))
         dependencies = {"repackage": dep_job.label}
 
+        signing_dependencies = dep_job.dependencies
+        # This is so we get the build task etc in our dependencies to
+        # have better beetmover support.
+        dependencies.update(signing_dependencies)
         attributes = {
             'nightly': dep_job.attributes.get('nightly', False),
             'build_platform': dep_job.attributes.get('build_platform'),
@@ -68,14 +72,10 @@ def make_repackage_signing_description(config, jobs):
             attributes['locale'] = dep_job.attributes.get('locale')
             locale_str = "{}/".format(dep_job.attributes.get('locale'))
 
+        scopes = [get_signing_cert_scope(config),
+                  "project:releng:signing:format:mar"]
+
         upstream_artifacts = [{
-            "taskId": {"task-reference": "<repackage>"},
-            "taskType": "repackage",
-            "paths": [
-                "public/build/{}target.installer.exe".format(locale_str),
-            ],
-            "formats": ["sha2signcode"]
-        }, {
             "taskId": {"task-reference": "<repackage>"},
             "taskType": "repackage",
             "paths": [
@@ -83,8 +83,17 @@ def make_repackage_signing_description(config, jobs):
             ],
             "formats": ["mar"]
         }]
+        if 'win' in dep_job.attributes.get('build_platform'):
+            upstream_artifacts.append({
+                "taskId": {"task-reference": "<repackage>"},
+                "taskType": "repackage",
+                "paths": [
+                    "public/build/{}target.installer.exe".format(locale_str),
+                ],
+                "formats": ["sha2signcode"]
+            })
+            scopes.append("project:releng:signing:format:sha2signcode")
 
-        signing_cert_scope = get_signing_cert_scope(config)
         task = {
             'label': label,
             'description': "Repackage signing {} ".format(
@@ -93,11 +102,7 @@ def make_repackage_signing_description(config, jobs):
             'worker': {'implementation': 'scriptworker-signing',
                        'upstream-artifacts': upstream_artifacts,
                        'max-run-time': 3600},
-            'scopes': [
-                signing_cert_scope,
-                "project:releng:signing:format:sha2signcode",
-                "project:releng:signing:format:mar"
-            ],
+            'scopes': scopes,
             'dependencies': dependencies,
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),

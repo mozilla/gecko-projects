@@ -771,7 +771,6 @@ def make_job_description(config, tests):
         jobdesc['dependencies'] = {'build': build_label}
 
         if test['mozharness']['requires-signed-builds'] is True:
-            print(test)
             jobdesc['dependencies']['build-signing-ci'] = test['build-signing-ci-label']
 
         jobdesc['expires-after'] = test['expires-after']

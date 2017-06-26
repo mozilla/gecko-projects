@@ -286,6 +286,6 @@ def mozharness_on_buildbot_bridge(config, job, taskdesc):
         'properties': {
             'product': product,
             'who': config.params['owner'],
-            'upload_to_task_id': slugid.nice(),
+            'upload_to_task_id': "{taskid}",
         }
     })
