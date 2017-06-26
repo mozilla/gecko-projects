@@ -126,7 +126,7 @@ def make_job_description(config, jobs):
                     '{}/artifacts/public/build/target.tar.gz'.format(signing_task_ref)
             task_env.update(
                 SIGNED_INPUT={'task-reference': input_string},
-                UNSIGNED_MAR={'task-reference': "{}mar.exe".format(mar_prefix)},
+                UNSIGNED_MAR={'task-reference': "{}mar".format(mar_prefix)},
             )
             mozharness_config = ['repackage/osx_signed.py']
             output_files = [{
