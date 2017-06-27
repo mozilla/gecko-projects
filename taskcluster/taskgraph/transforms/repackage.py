@@ -98,6 +98,10 @@ def make_job_description(config, jobs):
                 signing_task = dependency
             else:
                 build_task = dependency
+        if job.get('locale'):
+            # XXXCallek: todo: rewrite dep finding
+            import pdb;pdb.set_trace()
+            build_task = dependency
         signing_task_ref = "<{}>".format(signing_task)
         build_task_ref = "<{}>".format(build_task)
 
