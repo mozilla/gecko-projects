@@ -3915,6 +3915,10 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
 
   // TODO: Return false if modified Dirty is empty, and we didn't mark any sub-stacking
   // contexts as needing-paint-if-visible.
+  if (aOutDirty->IsEmpty()) {
+    return false;
+  }
+
   return true;
 }
 
@@ -3958,6 +3962,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   nsDisplayListBuilder* builderPtr = nullptr;
   nsDisplayList* listPtr = nullptr;
   RetainedDisplayListBuilder* retainedBuilder = nullptr;
+  std::vector<WeakFrame>* modifiedFrames = nullptr;
+
   if (aBuilderMode == nsDisplayListBuilderMode::PAINTING &&
       (aFlags & PaintFrameFlags::PAINT_WIDGET_LAYERS)) {
     retainedBuilder = aFrame->GetProperty(RetainedDisplayListBuilder::Cached());
@@ -3969,6 +3975,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     }
     builderPtr = &retainedBuilder->mBuilder;
     listPtr = &retainedBuilder->mList;
+    modifiedFrames = aFrame->GetProperty(nsIFrame::ModifiedFrameList());
   } else {
     builderPtr = new nsDisplayListBuilder(aFrame, aBuilderMode,
         !(aFlags & PaintFrameFlags::PAINT_HIDE_CARET));
@@ -4102,11 +4109,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       bool merged = false;
       uint32_t totalDisplayItems = 0;
       uint32_t reusedDisplayItems = 0;
-      if (retainedBuilder &&
-          aFrame->GetProperty(nsIFrame::ModifiedFrameList())) {
-        std::vector<WeakFrame>* modifiedFrames = aFrame->GetProperty(nsIFrame::ModifiedFrameList());
-
         //printf("Attempting merge build with %lu modified frames\n", modifiedFrames->size());
+      if (retainedBuilder && modifiedFrames) {
         if (retainedBuilder->mPreviousCaret != builder.GetCaretFrame()) {
           if (retainedBuilder->mPreviousCaret) {
             builder.MarkFrameModifiedDuringBuilding(retainedBuilder->mPreviousCaret);
@@ -4122,7 +4126,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         nsRect modifiedDirty;
         AnimatedGeometryRoot* modifiedAGR = nullptr;
         nsTArray<nsIFrame*> framesWithProps;
-        if (ComputeRebuildRegion(builder, *modifiedFrames, aFrame, dirtyRect,
+        if (!list.IsEmpty() &&
+            ComputeRebuildRegion(builder, *modifiedFrames, aFrame, dirtyRect,
                                  &modifiedDirty, &modifiedAGR, &framesWithProps)) {
           modifiedDirty.IntersectRect(modifiedDirty, dirtyRect);
 
