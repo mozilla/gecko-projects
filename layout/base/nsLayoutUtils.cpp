@@ -3792,6 +3792,9 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
                           AnimatedGeometryRoot** aOutModifiedAGR,
                           nsTArray<nsIFrame*>* aOutFramesWithProps)
 {
+
+  bool foundStackingContext = false;
+
   for (nsIFrame* f : aModifiedFrames) {
     if (!f) {
       continue;
@@ -3896,6 +3899,7 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
           // Don't contribute to the root dirty area at all.
           agr = nullptr;
           overflow.SetEmpty();
+          foundStackingContext = true;
           break;
         }
       }
@@ -3913,9 +3917,9 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
     }
   }
 
-  // TODO: Return false if modified Dirty is empty, and we didn't mark any sub-stacking
+  // Return false if modified Dirty is empty, and we didn't mark any sub-stacking
   // contexts as needing-paint-if-visible.
-  if (aOutDirty->IsEmpty()) {
+  if (aOutDirty->IsEmpty() && !foundStackingContext) {
     return false;
   }
 
