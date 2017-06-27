@@ -78,14 +78,6 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
 # need to be transfered to S3, please be aware you also need to follow-up
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
-UPSTREAM_ARTIFACT_SIGNED_PATHS = {
-    'macosx64-nightly': [],
-    'macosx64-nightly-l10n': [],
-}
-# Until bug 1331141 is fixed, if you are adding any new artifacts here that
-# need to be transfered to S3, please be aware you also need to follow-up
-# with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
-# See example in bug 1348286
 UPSTREAM_ARTIFACT_REPACKAGE_PATHS = {
     'macosx64-nightly': ["target.dmg"],
     'macosx64-nightly-l10n': ["target.dmg"],
@@ -219,7 +211,6 @@ def generate_upstream_artifacts(signing_task_ref, build_task_ref,
                                 repackage_task_ref, repackage_signing_task_ref,
                                 platform, locale=None):
 
-    signing_mapping = UPSTREAM_ARTIFACT_SIGNED_PATHS
     build_mapping = UPSTREAM_ARTIFACT_UNSIGNED_PATHS
     repackage_mapping = UPSTREAM_ARTIFACT_REPACKAGE_PATHS
     repackage_signing_mapping = UPSTREAM_ARTIFACT_SIGNED_REPACKAGE_PATHS
@@ -234,12 +225,6 @@ def generate_upstream_artifacts(signing_task_ref, build_task_ref,
         "taskType": "build",
         "paths": ["{}/{}".format(artifact_prefix, p)
                   for p in build_mapping[platform]],
-        "locale": locale or "en-US",
-        }, {
-        "taskId": {"task-reference": signing_task_ref},
-        "taskType": "signing",
-        "paths": ["{}/{}".format(artifact_prefix, p)
-                  for p in signing_mapping[platform]],
         "locale": locale or "en-US",
         }, {
         "taskId": {"task-reference": repackage_task_ref},
