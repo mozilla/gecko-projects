@@ -145,7 +145,11 @@ NS_IMPL_ISUPPORTS(nsXHRParseEndListener, nsIDOMEventListener)
 class nsResumeTimeoutsEvent : public Runnable
 {
 public:
-  explicit nsResumeTimeoutsEvent(nsPIDOMWindowInner* aWindow) : mWindow(aWindow) {}
+  explicit nsResumeTimeoutsEvent(nsPIDOMWindowInner* aWindow)
+    : Runnable("dom::nsResumeTimeoutsEvent")
+    , mWindow(aWindow)
+  {
+  }
 
   NS_IMETHOD Run() override
   {
@@ -178,6 +182,7 @@ XMLHttpRequestMainThread::sDontWarnAboutSyncXHR = false;
 
 XMLHttpRequestMainThread::XMLHttpRequestMainThread()
   : mResponseBodyDecodedPos(0),
+    mResponseCharset(nullptr),
     mResponseType(XMLHttpRequestResponseType::_empty),
     mRequestObserver(nullptr),
     mState(State::unsent),
@@ -492,7 +497,7 @@ XMLHttpRequestMainThread::GetResponseXML(ErrorResult& aRv)
 nsresult
 XMLHttpRequestMainThread::DetectCharset()
 {
-  mResponseCharset.Truncate();
+  mResponseCharset = nullptr;
   mDecoder = nullptr;
 
   if (mResponseType != XMLHttpRequestResponseType::_empty &&
@@ -519,7 +524,7 @@ XMLHttpRequestMainThread::DetectCharset()
     encoding = UTF_8_ENCODING;
   }
 
-  encoding->Name(mResponseCharset);
+  mResponseCharset = encoding;
   mDecoder = encoding->NewDecoderWithBOMRemoval();
 
   return NS_OK;
@@ -2431,7 +2436,7 @@ XMLHttpRequestMainThread::MatchCharsetAndDecoderToResponseDocument()
     mResponseCharset = mResponseXML->GetDocumentCharacterSet();
     TruncateResponseText();
     mResponseBodyDecodedPos = 0;
-    mDecoder = Encoding::ForName(mResponseCharset)->NewDecoderWithBOMRemoval();
+    mDecoder = mResponseCharset->NewDecoderWithBOMRemoval();
   }
 }
 
@@ -3121,9 +3126,11 @@ XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody)
     } else {
       // Defer the actual sending of async events just in case listeners
       // are attached after the send() method is called.
-      return DispatchToMainThread(NewRunnableMethod<ProgressEventType>(this,
-                 &XMLHttpRequestMainThread::CloseRequestWithError,
-                 ProgressEventType::error));
+      return DispatchToMainThread(NewRunnableMethod<ProgressEventType>(
+        "dom::XMLHttpRequestMainThread::CloseRequestWithError",
+        this,
+        &XMLHttpRequestMainThread::CloseRequestWithError,
+        ProgressEventType::error));
     }
   }
 

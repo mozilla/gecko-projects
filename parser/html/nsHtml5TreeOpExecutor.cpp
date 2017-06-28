@@ -51,7 +51,8 @@ class nsHtml5ExecutorReflusher : public Runnable
     RefPtr<nsHtml5TreeOpExecutor> mExecutor;
   public:
     explicit nsHtml5ExecutorReflusher(nsHtml5TreeOpExecutor* aExecutor)
-      : mExecutor(aExecutor)
+      : mozilla::Runnable("nsHtml5ExecutorReflusher")
+      , mExecutor(aExecutor)
     {}
     NS_IMETHOD Run() override
     {
@@ -240,7 +241,8 @@ nsHtml5TreeOpExecutor::MarkAsBroken(nsresult aReason)
   // a safer point.
   if (mParser) { // can mParser ever be null here?
     MOZ_ALWAYS_SUCCEEDS(
-      NS_DispatchToMainThread(NewRunnableMethod(GetParser(), &nsHtml5Parser::Terminate)));
+      NS_DispatchToMainThread(NewRunnableMethod("nsHtml5Parser::Terminate",
+                                                GetParser(), &nsHtml5Parser::Terminate)));
   }
   return aReason;
 }
@@ -719,7 +721,7 @@ nsHtml5TreeOpExecutor::Start()
 }
 
 void
-nsHtml5TreeOpExecutor::NeedsCharsetSwitchTo(const char* aEncoding,
+nsHtml5TreeOpExecutor::NeedsCharsetSwitchTo(NotNull<const Encoding*> aEncoding,
                                             int32_t aSource,
                                             uint32_t aLineNumber)
 {
@@ -737,7 +739,9 @@ nsHtml5TreeOpExecutor::NeedsCharsetSwitchTo(const char* aEncoding,
 
   // ask the webshellservice to load the URL
   if (NS_SUCCEEDED(wss->StopDocumentLoad())) {
-    wss->ReloadDocument(aEncoding, aSource);
+    nsAutoCString charset;
+    aEncoding->Name(charset);
+    wss->ReloadDocument(charset.get(), aSource);
   }
   // if the charset switch was accepted, wss has called Terminate() on the
   // parser by now
@@ -911,9 +915,9 @@ nsHtml5TreeOpExecutor::ConvertIfNotPreloadedYet(const nsAString& aURL)
   }
 
   nsIURI* base = BaseURIForPreload();
-  const nsCString& charset = mDocument->GetDocumentCharacterSet();
+  auto encoding = mDocument->GetDocumentCharacterSet();
   nsCOMPtr<nsIURI> uri;
-  nsresult rv = NS_NewURI(getter_AddRefs(uri), aURL, charset.get(), base);
+  nsresult rv = NS_NewURI(getter_AddRefs(uri), aURL, encoding, base);
   if (NS_FAILED(rv)) {
     NS_WARNING("Failed to create a URI");
     return nullptr;
@@ -1015,9 +1019,9 @@ nsHtml5TreeOpExecutor::PreloadEndPicture()
 void
 nsHtml5TreeOpExecutor::AddBase(const nsAString& aURL)
 {
-  const nsCString& charset = mDocument->GetDocumentCharacterSet();
+  auto encoding = mDocument->GetDocumentCharacterSet();
   nsresult rv = NS_NewURI(getter_AddRefs(mViewSourceBaseURI), aURL,
-                                     charset.get(), GetViewSourceBaseURI());
+                          encoding, GetViewSourceBaseURI());
   if (NS_FAILED(rv)) {
     mViewSourceBaseURI = nullptr;
   }
@@ -1029,9 +1033,9 @@ nsHtml5TreeOpExecutor::SetSpeculationBase(const nsAString& aURL)
     // the first one wins
     return;
   }
-  const nsCString& charset = mDocument->GetDocumentCharacterSet();
+  auto encoding = mDocument->GetDocumentCharacterSet();
   DebugOnly<nsresult> rv = NS_NewURI(getter_AddRefs(mSpeculationBaseURI), aURL,
-                                     charset.get(), mDocument->GetDocumentURI());
+                                     encoding, mDocument->GetDocumentURI());
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to create a URI");
 }
 

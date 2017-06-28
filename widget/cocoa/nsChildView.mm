@@ -2107,9 +2107,8 @@ nsChildView::AddWindowOverlayWebRenderCommands(layers::WebRenderBridgeChild* aWr
     }
 
     WrRect rect = wr::ToWrRect(mTitlebarRect);
-    WrClipRegionToken clip = aBuilder.PushClipRegion(rect, nullptr);
     aBuilder.PushImage(WrRect{ 0, 0, float(size.width), float(size.height) },
-                       clip, wr::ImageRendering::Auto, *mTitlebarImageKey);
+                       rect, wr::ImageRendering::Auto, *mTitlebarImageKey);
   }
 }
 
@@ -3272,7 +3271,7 @@ class WidgetsReleaserRunnable final : public mozilla::Runnable
 {
 public:
   explicit WidgetsReleaserRunnable(nsTArray<nsCOMPtr<nsIWidget>>&& aWidgetArray)
-    : mWidgetArray(aWidgetArray)
+    : mozilla::Runnable("WidgetsReleaserRunnable"), mWidgetArray(aWidgetArray)
   {
   }
 

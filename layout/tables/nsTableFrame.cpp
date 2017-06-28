@@ -5036,8 +5036,11 @@ GetPaintStyleInfo(const nsIFrame* aFrame,
 
 class nsDelayedCalcBCBorders : public Runnable {
 public:
-  explicit nsDelayedCalcBCBorders(nsIFrame* aFrame) :
-    mFrame(aFrame) {}
+  explicit nsDelayedCalcBCBorders(nsIFrame* aFrame)
+    : mozilla::Runnable("nsDelayedCalcBCBorders")
+    , mFrame(aFrame)
+  {
+  }
 
   NS_IMETHOD Run() override {
     if (mFrame) {
@@ -7432,10 +7435,9 @@ BCBlockDirSeg::CreateWebRenderCommands(BCPaintBorderIterator& aIter,
                                                      transformedRect.width,
                                                      transformedRect.width,
                                                      transformedRect.width);
-  WrClipRegionToken clipRegion = aBuilder.PushClipRegion(transformedRect);
   transformedRect.width *= 2.0f;
   aBuilder.PushBorder(transformedRect,
-                      clipRegion,
+                      transformedRect,
                       borderWidths,
                       wrSide[0], wrSide[1], wrSide[2], wrSide[3],
                       borderRadii);
@@ -7691,10 +7693,9 @@ BCInlineDirSeg::CreateWebRenderCommands(BCPaintBorderIterator& aIter,
                                                      transformedRect.height,
                                                      transformedRect.height,
                                                      transformedRect.height);
-  WrClipRegionToken clipRegion = aBuilder.PushClipRegion(transformedRect);
   transformedRect.height *= 2.0f;
   aBuilder.PushBorder(transformedRect,
-                      clipRegion,
+                      transformedRect,
                       borderWidths,
                       wrSide[0], wrSide[1], wrSide[2], wrSide[3],
                       borderRadii);
