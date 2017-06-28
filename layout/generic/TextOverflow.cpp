@@ -163,11 +163,11 @@ IsFrameDescendantOfAny(nsIFrame* aChild,
 class nsDisplayTextOverflowMarker : public nsDisplayItem
 {
 public:
-  nsDisplayTextOverflowMarker(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+  nsDisplayTextOverflowMarker(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame, nsIFrame* aStyleFrame,
                               const nsRect& aRect, nscoord aAscent,
                               const nsStyleTextOverflowSide* aStyle,
                               uint32_t aIndex)
-    : nsDisplayItem(aBuilder, aFrame), mRect(aRect),
+    : nsDisplayItem(aBuilder, aFrame), mStyleFrame(aStyleFrame), mRect(aRect),
       mStyle(aStyle), mAscent(aAscent), mIndex(aIndex) {
     MOZ_COUNT_CTOR(nsDisplayTextOverflowMarker);
   }
@@ -181,7 +181,7 @@ public:
   {
     *aSnap = false;
     nsRect shadowRect =
-      nsLayoutUtils::GetTextShadowRectsUnion(mRect, mFrame);
+      nsLayoutUtils::GetTextShadowRectsUnion(mRect, mStyleFrame);
     return mRect.Union(shadowRect);
   }
 
@@ -191,12 +191,21 @@ public:
       // On OS X, web authors can turn off subpixel text rendering using the
       // CSS property -moz-osx-font-smoothing. If they do that, we don't need
       // to use component alpha layers for the affected text.
-      if (mFrame->StyleFont()->mFont.smoothing == NS_FONT_SMOOTHING_GRAYSCALE) {
+      if (mStyleFrame->StyleFont()->mFont.smoothing == NS_FONT_SMOOTHING_GRAYSCALE) {
         return nsRect();
       }
     }
     bool snap;
     return GetBounds(aBuilder, &snap);
+  }
+
+  virtual bool IsInvalid(nsRect& aRect) const override
+  {
+    if (mStyleFrame->IsInvalid(aRect) && aRect.IsEmpty()) {
+      return true;
+    }
+    aRect += ToReferenceFrame();
+    return !aRect.IsEmpty();
   }
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,
@@ -210,6 +219,7 @@ public:
                           nsPoint aOffsetFromRect);
   NS_DISPLAY_DECL_NAME("TextOverflow", TYPE_TEXT_OVERFLOW)
 private:
+  nsIFrame*       mStyleFrame;
   nsRect          mRect;   // in reference frame coordinates
   const nsStyleTextOverflowSide* mStyle;
   nscoord         mAscent; // baseline for the marker text in mRect
@@ -231,10 +241,10 @@ nsDisplayTextOverflowMarker::Paint(nsDisplayListBuilder* aBuilder,
                                    nsRenderingContext*   aCtx)
 {
   nscolor foregroundColor = nsLayoutUtils::
-    GetColor(mFrame, &nsStyleText::mWebkitTextFillColor);
+    GetColor(mStyleFrame, &nsStyleText::mWebkitTextFillColor);
 
   // Paint the text-shadows for the overflow marker
-  nsLayoutUtils::PaintTextShadow(mFrame, aCtx, mRect, mVisibleRect,
+  nsLayoutUtils::PaintTextShadow(mStyleFrame, aCtx, mRect, mVisibleRect,
                                  foregroundColor, PaintTextShadowCallback,
                                  (void*)this);
   aCtx->ThebesContext()->SetColor(gfx::Color::FromABGR(foregroundColor));
@@ -245,24 +255,24 @@ void
 nsDisplayTextOverflowMarker::PaintTextToContext(nsRenderingContext* aCtx,
                                                 nsPoint aOffsetFromRect)
 {
-  WritingMode wm = mFrame->GetWritingMode();
+  WritingMode wm = mStyleFrame->GetWritingMode();
   nsPoint pt(mRect.x, mRect.y);
   if (wm.IsVertical()) {
     if (wm.IsVerticalLR()) {
       pt.x = NSToCoordFloor(nsLayoutUtils::GetSnappedBaselineX(
-        mFrame, aCtx->ThebesContext(), pt.x, mAscent));
+        mStyleFrame, aCtx->ThebesContext(), pt.x, mAscent));
     } else {
       pt.x = NSToCoordFloor(nsLayoutUtils::GetSnappedBaselineX(
-        mFrame, aCtx->ThebesContext(), pt.x + mRect.width, -mAscent));
+        mStyleFrame, aCtx->ThebesContext(), pt.x + mRect.width, -mAscent));
     }
   } else {
     pt.y = NSToCoordFloor(nsLayoutUtils::GetSnappedBaselineY(
-      mFrame, aCtx->ThebesContext(), pt.y, mAscent));
+      mStyleFrame, aCtx->ThebesContext(), pt.y, mAscent));
   }
   pt += aOffsetFromRect;
 
   if (mStyle->mType == NS_STYLE_TEXT_OVERFLOW_ELLIPSIS) {
-    gfxTextRun* textRun = GetEllipsisTextRun(mFrame);
+    gfxTextRun* textRun = GetEllipsisTextRun(mStyleFrame);
     if (textRun) {
       NS_ASSERTION(!textRun->IsRightToLeft(),
                    "Ellipsis textruns should always be LTR!");
@@ -272,8 +282,8 @@ nsDisplayTextOverflowMarker::PaintTextToContext(nsRenderingContext* aCtx,
     }
   } else {
     RefPtr<nsFontMetrics> fm =
-      nsLayoutUtils::GetInflatedFontMetricsForFrame(mFrame);
-    nsLayoutUtils::DrawString(mFrame, *fm, aCtx, mStyle->mString.get(),
+      nsLayoutUtils::GetInflatedFontMetricsForFrame(mStyleFrame);
+    nsLayoutUtils::DrawString(mStyleFrame, *fm, aCtx, mStyle->mString.get(),
                               mStyle->mString.Length(), pt);
   }
 }
@@ -806,6 +816,16 @@ TextOverflow::CreateMarkers(const nsLineBox* aLine,
                             const LogicalRect& aInsideMarkersArea,
                             const LogicalRect& aContentArea)
 {
+  if (!aCreateIStart && !aCreateIEnd) {
+    return;
+  }
+
+  nsDisplayListBuilder::AutoBuildingDisplayList
+    buildingForChild(mBuilder, aLine->mFirstChild,
+                     mBuilder->GetVisibleRect() - aLine->mFirstChild->GetOffsetTo(mBlock),
+                     mBuilder->GetDirtyRect() - aLine->mFirstChild->GetOffsetTo(mBlock),
+                     false);
+
   if (aCreateIStart) {
     DisplayListClipState::AutoSaveRestore clipState(mBuilder);
 
@@ -818,7 +838,7 @@ TextOverflow::CreateMarkers(const nsLineBox* aLine,
     ClipMarker(aContentArea.GetPhysicalRect(mBlockWM, mBlockSize) + offset,
                markerRect, clipState);
     nsDisplayItem* marker = new (mBuilder)
-      nsDisplayTextOverflowMarker(mBuilder, mBlock, markerRect,
+      nsDisplayTextOverflowMarker(mBuilder, aLine->mFirstChild, mBlock, markerRect,
                                   aLine->GetLogicalAscent(), mIStart.mStyle, 0);
     mMarkerList.AppendNewToTop(marker);
   }
@@ -835,7 +855,7 @@ TextOverflow::CreateMarkers(const nsLineBox* aLine,
     ClipMarker(aContentArea.GetPhysicalRect(mBlockWM, mBlockSize) + offset,
                markerRect, clipState);
     nsDisplayItem* marker = new (mBuilder)
-      nsDisplayTextOverflowMarker(mBuilder, mBlock, markerRect,
+      nsDisplayTextOverflowMarker(mBuilder, aLine->mFirstChild, mBlock, markerRect,
                                   aLine->GetLogicalAscent(), mIEnd.mStyle, 1);
     mMarkerList.AppendNewToTop(marker);
   }
