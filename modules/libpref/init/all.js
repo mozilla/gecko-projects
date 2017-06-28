@@ -701,6 +701,7 @@ pref("apz.fling_min_velocity_threshold", "0.5");
 pref("apz.fling_stop_on_tap_threshold", "0.05");
 pref("apz.fling_stopped_threshold", "0.01");
 pref("apz.highlight_checkerboarded_areas", false);
+pref("apz.keyboard.enabled", false);
 pref("apz.max_velocity_inches_per_ms", "-1.0");
 pref("apz.max_velocity_queue_size", 5);
 pref("apz.min_skate_speed", "1.0");
@@ -4874,6 +4875,8 @@ pref("extensions.webextensions.identity.redirectDomain", "extensions.allizom.org
 pref("extensions.webextensions.themes.enabled", false);
 pref("extensions.webextensions.themes.icons.enabled", false);
 pref("extensions.webextensions.remote", false);
+// Whether or not the moz-extension resource loads are remoted
+pref("extensions.webextensions.protocol.remote", true);
 
 pref("layers.popups.compositing.enabled", false);
 

@@ -1539,17 +1539,16 @@ ContentParent::RemoveFromList()
       }
     }
   } else if (sBrowserContentParents) {
-    nsTArray<ContentParent*>* contentParents =
-      sBrowserContentParents->Get(mRemoteType);
-    if (contentParents) {
+    if (auto entry = sBrowserContentParents->Lookup(mRemoteType)) {
+      nsTArray<ContentParent*>* contentParents = entry.Data();
       contentParents->RemoveElement(this);
       if (contentParents->IsEmpty()) {
-        sBrowserContentParents->Remove(mRemoteType);
-        if (sBrowserContentParents->IsEmpty()) {
-          delete sBrowserContentParents;
-          sBrowserContentParents = nullptr;
-        }
+        entry.Remove();
       }
+    }
+    if (sBrowserContentParents->IsEmpty()) {
+      delete sBrowserContentParents;
+      sBrowserContentParents = nullptr;
     }
   }
 
@@ -2298,7 +2297,12 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
     SerializeURI(nullptr, xpcomInit.userContentSheetURL());
   }
 
+  // 1. Build ContentDeviceData first, as it may affect some gfxVars.
   gfxPlatform::GetPlatform()->BuildContentDeviceData(&xpcomInit.contentDeviceData());
+  // 2. Gather non-default gfxVars.
+  xpcomInit.gfxNonDefaultVarUpdates() = gfxVars::FetchNonDefaultVars();
+  // 3. Start listening for gfxVars updates, to notify content process later on.
+  gfxVars::AddReceiver(this);
 
   nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
   if (gfxInfo) {
@@ -5085,11 +5089,7 @@ ContentParent::RecvGetFilesRequest(const nsID& aUUID,
 mozilla::ipc::IPCResult
 ContentParent::RecvDeleteGetFilesRequest(const nsID& aUUID)
 {
-  GetFilesHelper* helper = mGetFilesPendingRequests.GetWeak(aUUID);
-  if (helper) {
-    mGetFilesPendingRequests.Remove(aUUID);
-  }
-
+  mGetFilesPendingRequests.Remove(aUUID);
   return IPC_OK();
 }
 
@@ -5097,9 +5097,8 @@ void
 ContentParent::SendGetFilesResponseAndForget(const nsID& aUUID,
                                              const GetFilesResponseResult& aResult)
 {
-  GetFilesHelper* helper = mGetFilesPendingRequests.GetWeak(aUUID);
-  if (helper) {
-    mGetFilesPendingRequests.Remove(aUUID);
+  if (auto entry = mGetFilesPendingRequests.Lookup(aUUID)) {
+    entry.Remove();
     Unused << SendGetFilesResponse(aUUID, aResult);
   }
 }
