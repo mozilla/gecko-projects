@@ -292,6 +292,17 @@ TabParent::SetOwnerElement(Element* aElement)
 
   AddWindowListeners();
   TryCacheDPIAndScale();
+
+  // Try to send down WidgetNativeData, now that this TabParent is associated
+  // with a widget.
+  nsCOMPtr<nsIWidget> widget = GetTopLevelWidget();
+  if (widget) {
+    WindowsHandle widgetNativeData = reinterpret_cast<WindowsHandle>(
+      widget->GetNativeData(NS_NATIVE_SHAREABLE_WINDOW));
+    if (widgetNativeData) {
+      Unused << SendSetWidgetNativeData(widgetNativeData);
+    }
+  }
 }
 
 void
@@ -1798,10 +1809,9 @@ TabParent::RecvOnEventNeedingAckHandled(const EventMessage& aMessage)
 {
   // This is called when the child process receives WidgetCompositionEvent or
   // WidgetSelectionEvent.
+  // FYI: Don't check if widget is nullptr here because it's more important to
+  //      notify mContentCahce of this than handling something in it.
   nsCOMPtr<nsIWidget> widget = GetWidget();
-  if (!widget) {
-    return IPC_OK();
-  }
 
   // While calling OnEventNeedingAckHandled(), TabParent *might* be destroyed
   // since it may send notifications to IME.
@@ -2073,12 +2083,6 @@ TabParent::SendPasteTransferable(const IPCDataTransfer& aDataTransfer,
                                                aRequestingPrincipal);
 }
 
-void
-TabParent::OnDestroyTextComposition()
-{
-  mContentCache.OnDestroyTextComposition();
-}
-
 /*static*/ TabParent*
 TabParent::GetFrom(nsFrameLoader* aFrameLoader)
 {
@@ -2313,18 +2317,6 @@ TabParent::GetTopLevelWidget()
     }
   }
   return nullptr;
-}
-
-mozilla::ipc::IPCResult
-TabParent::RecvGetWidgetNativeData(WindowsHandle* aValue)
-{
-  *aValue = 0;
-  nsCOMPtr<nsIWidget> widget = GetTopLevelWidget();
-  if (widget) {
-    *aValue = reinterpret_cast<WindowsHandle>(
-      widget->GetNativeData(NS_NATIVE_SHAREABLE_WINDOW));
-  }
-  return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
@@ -2580,21 +2572,31 @@ TabParent::RecvBrowserFrameOpenWindow(PBrowserParent* aOpener,
                                       const nsString& aURL,
                                       const nsString& aName,
                                       const nsString& aFeatures,
-                                      bool* aOutWindowOpened,
-                                      TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                                      uint64_t* aLayersId,
-                                      CompositorOptions* aCompositorOptions,
-                                      uint32_t* aMaxTouchPoints)
+                                      BrowserFrameOpenWindowResolver&& aResolve)
 {
+  CreatedWindowInfo cwi;
+  cwi.rv() = NS_OK;
+  cwi.layersId() = 0;
+  cwi.maxTouchPoints() = 0;
+
   BrowserElementParent::OpenWindowResult opened =
     BrowserElementParent::OpenWindowOOP(TabParent::GetFrom(aOpener),
                                         this, aRenderFrame, aURL, aName, aFeatures,
-                                        aTextureFactoryIdentifier, aLayersId);
-  *aCompositorOptions = static_cast<RenderFrameParent*>(aRenderFrame)->GetCompositorOptions();
-  *aOutWindowOpened = (opened == BrowserElementParent::OPEN_WINDOW_ADDED);
+                                        &cwi.textureFactoryIdentifier(),
+                                        &cwi.layersId());
+  cwi.compositorOptions() =
+    static_cast<RenderFrameParent*>(aRenderFrame)->GetCompositorOptions();
+  cwi.windowOpened() = (opened == BrowserElementParent::OPEN_WINDOW_ADDED);
   nsCOMPtr<nsIWidget> widget = GetWidget();
-  *aMaxTouchPoints = widget ? widget->GetMaxTouchPoints() : 0;
-  if (!*aOutWindowOpened) {
+  if (widget) {
+    cwi.maxTouchPoints() = widget->GetMaxTouchPoints();
+    cwi.dimensions() = GetDimensionInfo();
+  }
+
+  // Resolve the request with the information we collected.
+  aResolve(cwi);
+
+  if (!cwi.windowOpened()) {
     Destroy();
   }
   return IPC_OK();

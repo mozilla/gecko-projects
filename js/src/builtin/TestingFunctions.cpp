@@ -576,7 +576,11 @@ WasmTextToBinary(JSContext* cx, unsigned argc, Value* vp)
 static bool
 WasmBinaryToText(JSContext* cx, unsigned argc, Value* vp)
 {
-    MOZ_ASSERT(cx->options().wasm());
+    if (!cx->options().wasm()) {
+        JS_ReportErrorASCII(cx, "wasm support unavailable");
+        return false;
+    }
+
     CallArgs args = CallArgsFromVp(argc, vp);
 
     if (!args.get(0).isObject() || !args.get(0).toObject().is<TypedArrayObject>()) {
@@ -640,7 +644,11 @@ WasmBinaryToText(JSContext* cx, unsigned argc, Value* vp)
 static bool
 WasmExtractCode(JSContext* cx, unsigned argc, Value* vp)
 {
-    MOZ_ASSERT(cx->options().wasm());
+    if (!cx->options().wasm()) {
+        JS_ReportErrorASCII(cx, "wasm support unavailable");
+        return false;
+    }
+
     CallArgs args = CallArgsFromVp(argc, vp);
 
     if (!args.get(0).isObject()) {
@@ -2378,8 +2386,10 @@ class CloneBufferObject : public NativeObject {
         size_t nbytes = JS_GetStringLength(args[0].toString());
         MOZ_ASSERT(nbytes % sizeof(uint64_t) == 0);
         auto buf = js::MakeUnique<JSStructuredCloneData>(0, 0, nbytes);
-        if (!buf->Init(nbytes, nbytes))
+        if (!buf->Init(nbytes, nbytes)) {
+            JS_free(cx, str);
             return false;
+        }
         js_memcpy(buf->Start(), str, nbytes);
         JS_free(cx, str);
         obj->setData(buf.release());

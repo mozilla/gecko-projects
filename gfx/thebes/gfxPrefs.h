@@ -581,6 +581,7 @@ private:
   DECL_GFX_PREF(Once, "layers.mlgpu.enable-depth-buffer",      AdvancedLayersEnableDepthBuffer, bool, false);
   DECL_GFX_PREF(Live, "layers.mlgpu.enable-invalidation",      AdvancedLayersUseInvalidation, bool, true);
   DECL_GFX_PREF(Once, "layers.mlgpu.enable-on-windows7",       AdvancedLayersEnableOnWindows7, bool, false);
+  DECL_GFX_PREF(Once, "layers.mlgpu.enable-container-resizing", AdvancedLayersEnableContainerResizing, bool, true);
   DECL_GFX_PREF(Once, "layers.offmainthreadcomposition.force-disabled", LayersOffMainThreadCompositionForceDisabled, bool, false);
   DECL_GFX_PREF(Live, "layers.offmainthreadcomposition.frame-rate", LayersCompositionFrameRate, int32_t,-1);
   DECL_GFX_PREF(Live, "layers.orientation.sync.timeout",       OrientationSyncMillis, uint32_t, (uint32_t)0);
@@ -648,7 +649,6 @@ private:
   DECL_GFX_PREF(Once, "media.windows-media-foundation.use-sync-texture", PDMWMFUseSyncTexture, bool, true);
   DECL_GFX_PREF(Live, "media.wmf.low-latency.enabled", PDMWMFLowLatencyEnabled, bool, false);
   DECL_GFX_PREF(Live, "media.wmf.skip-blacklist", PDMWMFSkipBlacklist, bool, false);
-  DECL_GFX_PREF(Live, "media.wmf.vp9.force.enabled", PDMWMFForceVP9, bool, false);
 #endif
 
   // These affect how line scrolls from wheel events will be accelerated.
