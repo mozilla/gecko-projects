@@ -6526,6 +6526,7 @@ static void InvalidateFrameInternal(nsIFrame *aFrame, bool aHasDisplayItem = tru
   }
 
 
+  aFrame->MarkNeedsDisplayItemRebuild();
   nsSVGEffects::InvalidateDirectRenderingObservers(aFrame);
   bool needsSchedulePaint = false;
   if (nsLayoutUtils::IsPopup(aFrame)) {
