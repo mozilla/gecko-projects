@@ -24,7 +24,7 @@ def loader(kind, path, config, params, loaded_tasks):
         )
 
     builds_by_platform = get_builds_by_platform(dep_kind='build', loaded_tasks=loaded_tasks)
-    signed_builds_by_platform = get_builds_by_platform(dep_kind='build-signing-ci', loaded_tasks=loaded_tasks)
+    signed_builds_by_platform = get_builds_by_platform(dep_kind='build-signing', loaded_tasks=loaded_tasks)
 
     # get the test platforms for those build tasks
     test_platforms_cfg = load_yaml(path, 'test-platforms.yml')
@@ -44,12 +44,12 @@ def loader(kind, path, config, params, loaded_tasks):
             test['build-platform'] = test_platform['build-platform']
             test['test-platform'] = test_platform_name
             test['build-label'] = test_platform['build-label']
-            if test_platform.get('build-signing-ci-label', None):
-                test['build-signing-ci-label'] = test_platform['build-signing-ci-label']
+            if test_platform.get('build-signing-label', None):
+                test['build-signing-label'] = test_platform['build-signing-label']
 
             test['build-attributes'] = test_platform['build-attributes']
             test['test-name'] = test_name
-            if test_platform['nightly']:
+            if test_platform.get('nightly'):
                 test.setdefault('attributes', {})['nightly'] = True
 
             logger.debug("Generating tasks for test {} on platform {}".format(
@@ -89,16 +89,19 @@ def get_test_platforms(test_platforms_cfg, builds_by_platform, signed_builds_by_
                     build_platform, test_platform))
             continue
         test_platforms[test_platform] = {
-            'nightly': builds_by_platform[build_platform].attributes.get('nightly', False),
             'build-platform': build_platform,
             'build-label': builds_by_platform[build_platform].label,
             'build-attributes': builds_by_platform[build_platform].attributes,
         }
+
+        if builds_by_platform[build_platform].attributes.get('nightly'):
+            test_platforms[test_platform]['nightly'] = builds_by_platform[build_platform].attributes['nightly']
+
         test_platforms[test_platform].update(cfg)
 
         if build_platform in signed_builds_by_platform:
             # Context: Signed builds are only used by Windows
-            test_platforms[test_platform]['build-signing-ci-label'] = \
+            test_platforms[test_platform]['build-signing-label'] = \
                 signed_builds_by_platform[build_platform].label
 
     return test_platforms

@@ -289,7 +289,7 @@ test_description_schema = Schema({
         Optional('files-changed'): [basestring],
     }),
 
-    Optional('build-signing-ci-label'): basestring,
+    Optional('build-signing-label'): basestring,
 
 }, required=True)
 
@@ -771,7 +771,7 @@ def make_job_description(config, tests):
         jobdesc['dependencies'] = {'build': build_label}
 
         if test['mozharness']['requires-signed-builds'] is True:
-            jobdesc['dependencies']['build-signing-ci'] = test['build-signing-ci-label']
+            jobdesc['dependencies']['build-signing'] = test['build-signing-label']
 
         jobdesc['expires-after'] = test['expires-after']
         jobdesc['routes'] = []

@@ -2,7 +2,7 @@ loader: taskgraph.loader.test:loader
 
 kind-dependencies:
     - build
-    - build-signing-ci
+    - build-signing
 
 transforms:
    - taskgraph.transforms.tests:transforms

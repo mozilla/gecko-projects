@@ -8,6 +8,7 @@ Transform the signing task into an actual task description.
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import get_signing_cert_scope, get_ci_signing_cert_scope, \
     get_devedition_signing_cert_scope
@@ -100,18 +101,15 @@ def make_task_description(config, jobs):
             dep_th_platform, build_platform, build_type
         ))
 
-        # TODO: Make non-nightly (aka build-signing-ci) Tier 1 once mature enough
+        # TODO: Make non-nightly (i.e. windows CI builds) Tier 1 once mature enough
         treeherder.setdefault('tier', 1 if is_nightly else 3)
         treeherder.setdefault('kind', 'build')
 
         label = job.get('label', "{}-signing".format(dep_job.label))
 
-        attributes = {
-            'nightly': is_nightly,
-            'build_platform': build_platform,
-            'build_type': build_type,
-            'signed': True,
-        }
+        attributes = copy_attributes_from_dependent_job(dep_job)
+        attributes['signed'] = True
+
         if dep_job.attributes.get('chunk_locales'):
             # Used for l10n attribute passthrough
             attributes['chunk_locales'] = dep_job.attributes.get('chunk_locales')

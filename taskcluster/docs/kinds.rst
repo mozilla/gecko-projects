@@ -18,11 +18,6 @@ Many builds must be signed. The build-signing task takes the unsigned `build`
 kind artifacts and passess them through signingscriptworker to a signing server
 and returns signed results.
 
-build-signing-ci
---------------
-Almost identical to build-signing. The difference: nightlies aren't signed, but builds for CI instead
-
-
 artifact-build
 --------------
 
