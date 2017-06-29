@@ -3968,22 +3968,27 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   RetainedDisplayListBuilder* retainedBuilder = nullptr;
   std::vector<WeakFrame>* modifiedFrames = nullptr;
 
-  if (aBuilderMode == nsDisplayListBuilderMode::PAINTING &&
+  const bool buildCaret = !(aFlags & PaintFrameFlags::PAINT_HIDE_CARET);
+  const bool retainDisplayList = gfxPrefs::LayoutRetainDisplayList();
+
+  if (retainDisplayList &&
+      aBuilderMode == nsDisplayListBuilderMode::PAINTING &&
       (aFlags & PaintFrameFlags::PAINT_WIDGET_LAYERS)) {
     retainedBuilder = aFrame->GetProperty(RetainedDisplayListBuilder::Cached());
+
     if (!retainedBuilder) {
       retainedBuilder =
-        new RetainedDisplayListBuilder(aFrame, aBuilderMode,
-                                       !(aFlags & PaintFrameFlags::PAINT_HIDE_CARET));
+        new RetainedDisplayListBuilder(aFrame, aBuilderMode, buildCaret);
       aFrame->SetProperty(RetainedDisplayListBuilder::Cached(), retainedBuilder);
     }
+
+    MOZ_ASSERT(retainedBuilder);
     builderPtr = &retainedBuilder->mBuilder;
     listPtr = &retainedBuilder->mList;
     modifiedFrames = aFrame->GetProperty(nsIFrame::ModifiedFrameList());
   } else {
-    builderPtr = new nsDisplayListBuilder(aFrame, aBuilderMode,
-        !(aFlags & PaintFrameFlags::PAINT_HIDE_CARET));
-    listPtr = new nsDisplayList;
+    builderPtr = new nsDisplayListBuilder(aFrame, aBuilderMode, buildCaret);
+    listPtr = new nsDisplayList();
   }
   nsDisplayListBuilder& builder = *builderPtr;
   nsDisplayList& list = *listPtr;
