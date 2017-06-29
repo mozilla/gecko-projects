@@ -2509,6 +2509,18 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     }
     inTransform = true;
   }
+
+  bool hasOverrideDirtyRect = false;
+  if (HasOverrideDirtyRegion()) {
+    nsDisplayListBuilder::DisplayListBuildingData* data =
+      GetProperty(nsDisplayListBuilder::DisplayListBuildingRect());
+    if (data) {
+      dirtyRect = data->mDirtyRect;
+      dirtyRect.IntersectRect(dirtyRect, visibleRect);
+      hasOverrideDirtyRect = true;
+    }
+  }
+
   bool usingFilter = StyleEffects()->HasFilters();
   bool usingMask = nsSVGIntegrationUtils::UsingMaskOrClipPathForFrame(this);
   bool usingSVGEffects = usingFilter || usingMask;
@@ -2657,6 +2669,15 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     set.Content()->DeleteAll(aBuilder);
     set.PositionedDescendants()->DeleteAll(aBuilder);
     set.Outlines()->DeleteAll(aBuilder);
+  }
+
+  if (hasOverrideDirtyRect && gfxPrefs::LayoutDisplayListShowArea()) {
+    nsDisplaySolidColor* color =
+     new (aBuilder) nsDisplaySolidColor(aBuilder, this,
+                                        dirtyRect + aBuilder->GetCurrentFrameOffsetToReferenceFrame(),
+                                        NS_RGBA(255, 0, 0, 64), false);
+    color->SetOverrideZIndex(INT32_MAX);
+    set.PositionedDescendants()->AppendNewToTop(color);
   }
 
   // Sort PositionedDescendants() in CSS 'z-order' order.  The list is already
@@ -3029,6 +3050,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     // dirty rect in child-relative coordinates
     nsRect dirty = aBuilder->GetDirtyRect() - child->GetOffsetTo(this);
     nsRect visible = aBuilder->GetVisibleRect() - child->GetOffsetTo(this);
+
     if (!DescendIntoChild(aBuilder, child, dirty, visible)) {
       return;
     }
@@ -3120,17 +3142,6 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     awayFromCommonPath = true;
   }
 
-  bool hasOverrideDirtyRect = false;
-  if (child->HasOverrideDirtyRegion()) {
-    nsDisplayListBuilder::DisplayListBuildingData* data =
-      child->GetProperty(nsDisplayListBuilder::DisplayListBuildingRect());
-    if (data) {
-      dirty = data->mDirtyRect;
-      dirty.IntersectRect(dirty, visible);
-      hasOverrideDirtyRect = true;
-    }
-  }
-
   NS_ASSERTION(!child->IsPlaceholderFrame(),
                "Should have dealt with placeholders already");
   if (aBuilder->GetSelectedFramesOnly() &&
@@ -3209,15 +3220,6 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
   DisplayListClipState::AutoClipMultiple clipState(aBuilder);
   nsDisplayListBuilder::AutoCurrentActiveScrolledRootSetter asrSetter(aBuilder);
   CheckForApzAwareEventHandlers(aBuilder, child);
-
-  if (hasOverrideDirtyRect && gfxPrefs::LayoutDisplayListShowArea()) {
-    nsDisplaySolidColor* color =
-     new (aBuilder) nsDisplaySolidColor(aBuilder, child,
-                                        dirty + aBuilder->GetCurrentFrameOffsetToReferenceFrame(),
-                                        NS_RGBA(255, 0, 0, 64), false);
-    color->SetOverrideZIndex(INT32_MAX);
-    aLists.PositionedDescendants()->AppendNewToTop(color);
-  }
 
   if (savedOutOfFlowData) {
     aBuilder->SetBuildingInvisibleItems(false);
