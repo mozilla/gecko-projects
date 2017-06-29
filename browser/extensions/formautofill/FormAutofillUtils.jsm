@@ -27,6 +27,7 @@ this.FormAutofillUtils = {
     "address-level2": "address",
     "postal-code": "address",
     "country": "address",
+    "country-name": "address",
     "tel": "tel",
     "email": "email",
     "cc-name": "creditCard",
@@ -53,6 +54,24 @@ this.FormAutofillUtils = {
       }
     }
     return categories;
+  },
+
+  getAddressSeparator() {
+    // The separator should be based on the L10N address format, and using a
+    // white space is a temporary solution.
+    return " ";
+  },
+
+  toOneLineAddress(address, delimiter = "\n") {
+    let array = typeof address == "string" ? address.split(delimiter) : address;
+
+    if (!Array.isArray(array)) {
+      return null;
+    }
+    return array
+      .map(s => s.trim())
+      .filter(s => s)
+      .join(this.getAddressSeparator());
   },
 
   defineLazyLogGetter(scope, logPrefix) {

@@ -37,6 +37,10 @@ class Repackage(BaseScript):
             if not status:
                 self.fatal("Unable to fetch signed input from %s" % url)
 
+            if 'mar' in path:
+                # Ensure mar is executable
+                self.chmod(os.path.join(input_home, path), 0755)
+
     def setup(self):
         self._run_tooltool()
         if self.config.get("run_configure", True):

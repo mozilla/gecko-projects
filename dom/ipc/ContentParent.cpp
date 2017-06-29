@@ -1179,7 +1179,7 @@ ContentParent::CreateBrowser(const TabContext& aContext,
                              TabParent* aSameTabGroupAs,
                              uint64_t aNextTabParentId)
 {
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
+  AUTO_PROFILER_LABEL("ContentParent::CreateBrowser", OTHER);
 
   if (!sCanLaunchSubprocesses) {
     return nullptr;
@@ -1539,17 +1539,16 @@ ContentParent::RemoveFromList()
       }
     }
   } else if (sBrowserContentParents) {
-    nsTArray<ContentParent*>* contentParents =
-      sBrowserContentParents->Get(mRemoteType);
-    if (contentParents) {
+    if (auto entry = sBrowserContentParents->Lookup(mRemoteType)) {
+      nsTArray<ContentParent*>* contentParents = entry.Data();
       contentParents->RemoveElement(this);
       if (contentParents->IsEmpty()) {
-        sBrowserContentParents->Remove(mRemoteType);
-        if (sBrowserContentParents->IsEmpty()) {
-          delete sBrowserContentParents;
-          sBrowserContentParents = nullptr;
-        }
+        entry.Remove();
       }
+    }
+    if (sBrowserContentParents->IsEmpty()) {
+      delete sBrowserContentParents;
+      sBrowserContentParents = nullptr;
     }
   }
 
@@ -1711,7 +1710,11 @@ DelayedDeleteSubprocess(GeckoChildProcessHost* aSubprocess)
 // system.
 struct DelayedDeleteContentParentTask : public Runnable
 {
-  explicit DelayedDeleteContentParentTask(ContentParent* aObj) : mObj(aObj) { }
+  explicit DelayedDeleteContentParentTask(ContentParent* aObj)
+    : Runnable("dom::DelayedDeleteContentParentTask")
+    , mObj(aObj)
+  {
+  }
 
   // No-op
   NS_IMETHOD Run() override { return NS_OK; }
@@ -1843,10 +1846,11 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
   // Destroy any processes created by this ContentParent
   for(uint32_t i = 0; i < childIDArray.Length(); i++) {
     ContentParent* cp = cpm->GetContentProcessById(childIDArray[i]);
-    MessageLoop::current()->PostTask(NewRunnableMethod
-                                     <ShutDownMethod>(cp,
-                                                      &ContentParent::ShutDownProcess,
-                                                      SEND_SHUTDOWN_MESSAGE));
+    MessageLoop::current()->PostTask(
+      NewRunnableMethod<ShutDownMethod>("dom::ContentParent::ShutDownProcess",
+                                        cp,
+                                        &ContentParent::ShutDownProcess,
+                                        SEND_SHUTDOWN_MESSAGE));
   }
   cpm->RemoveContentProcess(this->ChildID());
 
@@ -1972,10 +1976,12 @@ ContentParent::StartForceKillTimer()
   if (timeoutSecs > 0) {
     mForceKillTimer = do_CreateInstance("@mozilla.org/timer;1");
     MOZ_ASSERT(mForceKillTimer);
-    mForceKillTimer->InitWithFuncCallback(ContentParent::ForceKillTimerCallback,
-                                          this,
-                                          timeoutSecs * 1000,
-                                          nsITimer::TYPE_ONE_SHOT);
+    mForceKillTimer->InitWithNamedFuncCallback(
+      ContentParent::ForceKillTimerCallback,
+      this,
+      timeoutSecs * 1000,
+      nsITimer::TYPE_ONE_SHOT,
+      "dom::ContentParent::StartForceKillTimer");
   }
 }
 
@@ -2004,10 +2010,11 @@ ContentParent::NotifyTabDestroyed(const TabId& aTabId,
   if (tabIds.Length() == 1 && !ShouldKeepProcessAlive() && !TryToRecycle()) {
     // In the case of normal shutdown, send a shutdown message to child to
     // allow it to perform shutdown tasks.
-    MessageLoop::current()->PostTask(NewRunnableMethod
-                                     <ShutDownMethod>(this,
-                                                      &ContentParent::ShutDownProcess,
-                                                      SEND_SHUTDOWN_MESSAGE));
+    MessageLoop::current()->PostTask(
+      NewRunnableMethod<ShutDownMethod>("dom::ContentParent::ShutDownProcess",
+                                        this,
+                                        &ContentParent::ShutDownProcess,
+                                        SEND_SHUTDOWN_MESSAGE));
   }
 }
 
@@ -2042,7 +2049,7 @@ ContentParent::GetTestShellSingleton()
 bool
 ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PRIORITY_FOREGROUND */)
 {
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
+  AUTO_PROFILER_LABEL("ContentParent::LaunchSubprocess", OTHER);
 
   std::vector<std::string> extraArgs;
   extraArgs.push_back("-childID");
@@ -2290,7 +2297,12 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
     SerializeURI(nullptr, xpcomInit.userContentSheetURL());
   }
 
+  // 1. Build ContentDeviceData first, as it may affect some gfxVars.
   gfxPlatform::GetPlatform()->BuildContentDeviceData(&xpcomInit.contentDeviceData());
+  // 2. Gather non-default gfxVars.
+  xpcomInit.gfxNonDefaultVarUpdates() = gfxVars::FetchNonDefaultVars();
+  // 3. Start listening for gfxVars updates, to notify content process later on.
+  gfxVars::AddReceiver(this);
 
   nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
   if (gfxInfo) {
@@ -2948,7 +2960,7 @@ ContentParent::ForceKillTimerCallback(nsITimer* aTimer, void* aClosure)
 void
 ContentParent::KillHard(const char* aReason)
 {
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
+  AUTO_PROFILER_LABEL("ContentParent::KillHard", OTHER);
 
   // On Windows, calling KillHard multiple times causes problems - the
   // process handle becomes invalid on the first call, causing a second call
@@ -4115,7 +4127,8 @@ class AnonymousTemporaryFileRequestor final : public Runnable
 {
 public:
   AnonymousTemporaryFileRequestor(ContentParent* aCP, const uint64_t& aID)
-    : mCP(aCP)
+    : Runnable("dom::AnonymousTemporaryFileRequestor")
+    , mCP(aCP)
     , mID(aID)
     , mRv(NS_OK)
     , mPRFD(nullptr)
@@ -5076,11 +5089,7 @@ ContentParent::RecvGetFilesRequest(const nsID& aUUID,
 mozilla::ipc::IPCResult
 ContentParent::RecvDeleteGetFilesRequest(const nsID& aUUID)
 {
-  GetFilesHelper* helper = mGetFilesPendingRequests.GetWeak(aUUID);
-  if (helper) {
-    mGetFilesPendingRequests.Remove(aUUID);
-  }
-
+  mGetFilesPendingRequests.Remove(aUUID);
   return IPC_OK();
 }
 
@@ -5088,9 +5097,8 @@ void
 ContentParent::SendGetFilesResponseAndForget(const nsID& aUUID,
                                              const GetFilesResponseResult& aResult)
 {
-  GetFilesHelper* helper = mGetFilesPendingRequests.GetWeak(aUUID);
-  if (helper) {
-    mGetFilesPendingRequests.Remove(aUUID);
+  if (auto entry = mGetFilesPendingRequests.Lookup(aUUID)) {
+    entry.Remove();
     Unused << SendGetFilesResponse(aUUID, aResult);
   }
 }

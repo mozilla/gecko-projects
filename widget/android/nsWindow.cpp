@@ -81,7 +81,7 @@ using mozilla::Unused;
 #include "imgIEncoder.h"
 
 #include "nsString.h"
-#include "GeckoProfiler.h" // For PROFILER_LABEL
+#include "GeckoProfiler.h" // For AUTO_PROFILER_LABEL
 #include "nsIXULRuntime.h"
 #include "nsPrintfCString.h"
 
@@ -422,9 +422,13 @@ public:
         };
 
         NativePanZoomController::GlobalRef npzc = mNPZC;
-        AndroidBridge::Bridge()->PostTaskToUiThread(NewRunnableFunction(
+        RefPtr<nsThread> uiThread = GetAndroidUiThread();
+        if (!uiThread) {
+            return;
+        }
+        uiThread->Dispatch(NewRunnableFunction(
                 static_cast<void(*)(const NPZCRef&)>(callDestroy),
-                mozilla::Move(npzc)), 0);
+                mozilla::Move(npzc)), nsIThread::DISPATCH_NORMAL);
     }
 
 public:
@@ -1006,7 +1010,8 @@ public:
         if (!AndroidBridge::IsJavaUiThread()) {
             RefPtr<nsThread> uiThread = GetAndroidUiThread();
             if (uiThread) {
-                uiThread->Dispatch(NewRunnableMethod(child,
+                uiThread->Dispatch(NewRunnableMethod("layers::UiCompositorControllerChild::InvalidateAndRender",
+                                                     child,
                                                      &UiCompositorControllerChild::InvalidateAndRender),
                                    nsIThread::DISPATCH_NORMAL);
             }
@@ -1036,6 +1041,7 @@ public:
             RefPtr<nsThread> uiThread = GetAndroidUiThread();
             if (uiThread) {
                 uiThread->Dispatch(NewRunnableMethod<bool, int32_t>(
+                                       "layers::UiCompositorControllerChild::SetPinned",
                                        child, &UiCompositorControllerChild::SetPinned, aPinned, aReason),
                                    nsIThread::DISPATCH_NORMAL);
             }
@@ -1058,6 +1064,7 @@ public:
             RefPtr<nsThread> uiThread = GetAndroidUiThread();
             if (uiThread) {
                 uiThread->Dispatch(NewRunnableMethod<int32_t>(
+                                       "layers::UiCompositorControllerChild::ToolbarAnimatorMessageFromUI",
                                        child, &UiCompositorControllerChild::ToolbarAnimatorMessageFromUI, aMessage),
                                    nsIThread::DISPATCH_NORMAL);
             }
@@ -1253,8 +1260,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
 {
     MOZ_ASSERT(NS_IsMainThread());
 
-    PROFILER_LABEL("nsWindow", "GeckoViewSupport::Open",
-                   js::ProfileEntry::Category::OTHER);
+    AUTO_PROFILER_LABEL("nsWindow::GeckoViewSupport::Open", OTHER);
 
     nsCOMPtr<nsIWindowWatcher> ww = do_GetService(NS_WINDOWWATCHER_CONTRACTID);
     MOZ_RELEASE_ASSERT(ww);

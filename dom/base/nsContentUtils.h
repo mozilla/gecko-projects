@@ -2282,6 +2282,14 @@ public:
   }
 
   /**
+   * Returns true if the <style scoped> enabling pref is true.
+   */
+  static bool IsScopedStylePrefEnabled()
+  {
+    return sIsScopedStyleEnabled;
+  }
+
+  /**
    * Return true if this doc is controlled by a ServiceWorker.
    */
   static bool IsControlledByServiceWorker(nsIDocument* aDocument);
@@ -3030,6 +3038,11 @@ public:
   // if we want to lower the priority of the channel.
   static bool IsLowerNetworkPriority() { return sLowerNetworkPriority; }
 
+  // Check pref "dom.placeholder.show_on_focus" to see
+  // if we want to show the placeholder inside input elements
+  // when they have focus.
+  static bool ShowInputPlaceholderOnFocus() { return sShowInputPlaceholderOnFocus; }
+
   // Check pref "dom.script_loader.bytecode_cache.enabled" to see
   // if we want to cache JS bytecode on the cache entry.
   static bool IsBytecodeCacheEnabled() { return sIsBytecodeCacheEnabled; }
@@ -3189,9 +3202,11 @@ private:
   static bool sSkipCursorMoveForSameValueSet;
   static bool sRequestIdleCallbackEnabled;
   static bool sLowerNetworkPriority;
+  static bool sShowInputPlaceholderOnFocus;
 #ifndef RELEASE_OR_BETA
   static bool sBypassCSSOMOriginCheck;
 #endif
+  static bool sIsScopedStyleEnabled;
   static bool sIsBytecodeCacheEnabled;
   static int32_t sBytecodeCacheStrategy;
   static uint32_t sCookiesLifetimePolicy;

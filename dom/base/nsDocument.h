@@ -28,7 +28,7 @@
 #include "nsIPrincipal.h"
 #include "nsIParser.h"
 #include "nsBindingManager.h"
-#include "nsInterfaceHashtable.h"
+#include "nsRefPtrHashtable.h"
 #include "nsJSThingHashtable.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIURI.h"
@@ -59,6 +59,7 @@
 #include "mozilla/EventStates.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PendingAnimationTracker.h"
+#include "mozilla/dom/BoxObject.h"
 #include "mozilla/dom/DOMImplementation.h"
 #include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/StyleSheetList.h"
@@ -90,12 +91,10 @@ class nsWindowSizes;
 class nsHtml5TreeOpExecutor;
 class nsDocumentOnStack;
 class nsISecurityConsoleMessage;
-class nsPIBoxObject;
 
 namespace mozilla {
 class EventChainPreVisitor;
 namespace dom {
-class BoxObject;
 class ImageTracker;
 struct LifecycleCallbacks;
 class CallbackFunction;
@@ -425,10 +424,11 @@ public:
   virtual void GetBaseTarget(nsAString &aBaseTarget) override;
 
   /**
-   * Return a standard name for the document's character set. This will
+   * Set the document's character encoding. This will
    * trigger a startDocumentLoad if necessary to answer the question.
    */
-  virtual void SetDocumentCharacterSet(const nsACString& aCharSetID) override;
+  virtual void
+    SetDocumentCharacterSet(NotNull<const Encoding*> aEncoding) override;
 
   /**
    * Add an observer that gets notified whenever the charset changes.
@@ -1049,7 +1049,7 @@ protected:
 
   void TryChannelCharset(nsIChannel *aChannel,
                          int32_t& aCharsetSource,
-                         nsACString& aCharset,
+                         NotNull<const Encoding*>& aEncoding,
                          nsHtml5TreeOpExecutor* aExecutor);
 
   // Call this before the document does something that will unbind all content.
@@ -1267,7 +1267,7 @@ public:
 
   uint8_t mXMLDeclarationBits;
 
-  nsInterfaceHashtable<nsPtrHashKey<nsIContent>, nsPIBoxObject> *mBoxObjectTable;
+  nsRefPtrHashtable<nsPtrHashKey<nsIContent>, mozilla::dom::BoxObject>* mBoxObjectTable;
 
   // A document "without a browsing context" that owns the content of
   // HTMLTemplateElement.

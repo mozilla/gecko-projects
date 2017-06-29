@@ -94,7 +94,7 @@ mozilla::plugins::SetupBridge(uint32_t aPluginId,
                               uint32_t* runID,
                               ipc::Endpoint<PPluginModuleParent>* aEndpoint)
 {
-    PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
+    AUTO_PROFILER_LABEL("plugins::SetupBridge", OTHER);
     if (NS_WARN_IF(!rv) || NS_WARN_IF(!runID)) {
         return false;
     }
@@ -1267,7 +1267,8 @@ PluginModuleChromeParent::RetainPluginRef()
         // deadlocks when we are called from
         // PluginHangUIParent::RecvUserResponse().
         Unused << NS_DispatchToMainThread(
-            NewNonOwningRunnableMethod(mPlugin, &nsNPAPIPlugin::AddRef));
+            NewNonOwningRunnableMethod("nsNPAPIPlugin::AddRef",
+                                       mPlugin, &nsNPAPIPlugin::AddRef));
     }
 }
 
@@ -1283,7 +1284,8 @@ PluginModuleChromeParent::ReleasePluginRef()
     } else {
         // Async release the reference to mPlugin.
         Unused << NS_DispatchToMainThread(
-            NewNonOwningRunnableMethod(mPlugin, &nsNPAPIPlugin::Release));
+            NewNonOwningRunnableMethod("nsNPAPIPlugin::Release",
+                                       mPlugin, &nsNPAPIPlugin::Release));
     }
 }
 
@@ -1901,8 +1903,7 @@ PluginModuleParent::NPP_NewStream(NPP instance, NPMIMEType type,
                                   NPStream* stream, NPBool seekable,
                                   uint16_t* stype)
 {
-    PROFILER_LABEL("PluginModuleParent", "NPP_NewStream",
-      js::ProfileEntry::Category::OTHER);
+    AUTO_PROFILER_LABEL("PluginModuleParent::NPP_NewStream", OTHER);
     RESOLVE_AND_CALL(instance, NPP_NewStream(type, stream, seekable, stype));
 }
 

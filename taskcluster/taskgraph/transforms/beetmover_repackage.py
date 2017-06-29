@@ -47,23 +47,9 @@ _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US = [
 # need to be transfered to S3, please be aware you also need to follow-up
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
-_DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_EN_US = [
-    "update/target.complete.mar",
-]
-# Until bug 1331141 is fixed, if you are adding any new artifacts here that
-# need to be transfered to S3, please be aware you also need to follow-up
-# with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
-# See example in bug 1348286
 _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N = [
     "target.langpack.xpi",
     "balrog_props.json",
-]
-# Until bug 1331141 is fixed, if you are adding any new artifacts here that
-# need to be transfered to S3, please be aware you also need to follow-up
-# with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
-# See example in bug 1348286
-_DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_L10N = [
-    "target.complete.mar",
 ]
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
@@ -145,8 +131,8 @@ def make_task_description(config, jobs):
         treeherder.setdefault('tier', 1)
         treeherder.setdefault('kind', 'build')
         label = job.get('label', "beetmover-{}".format(dep_job.label))
-        dependent_kind = str(dep_job.kind)
 
+        dependent_kind = str(dep_job.kind)
         dependencies = {dependent_kind: dep_job.label}
 
         # macosx nightly builds depend on repackage which use in tree docker
@@ -207,9 +193,9 @@ def make_task_description(config, jobs):
         yield task
 
 
-def generate_upstream_artifacts(signing_task_ref, build_task_ref,
-                                repackage_task_ref, repackage_signing_task_ref,
-                                platform, locale=None):
+def generate_upstream_artifacts(build_task_ref, repackage_task_ref,
+                                repackage_signing_task_ref, platform,
+                                locale=None):
 
     build_mapping = UPSTREAM_ARTIFACT_UNSIGNED_PATHS
     repackage_mapping = UPSTREAM_ARTIFACT_REPACKAGE_PATHS
@@ -249,29 +235,28 @@ def make_task_worker(config, jobs):
         valid_beetmover_job = (len(job["dependencies"]) == 5 and
                                any(['repackage' in j for j in job['dependencies']]))
         if not valid_beetmover_job:
-            raise NotImplementedError("Beetmover_repackage must have four dependencies.")
+            raise NotImplementedError("Beetmover_repackage must have five dependencies.")
 
         locale = job["attributes"].get("locale")
         platform = job["attributes"]["build_platform"]
         build_task = None
         repackage_task = None
-        signing_task = None
+        repackage_signing_task = None
         for dependency in job["dependencies"].keys():
             if 'repackage-signing' in dependency:
                 repackage_signing_task = dependency
             elif 'repackage' in dependency:
                 repackage_task = dependency
             elif 'signing' in dependency:
-                signing_task = dependency
+                pass
             else:
                 build_task = "build"
 
-        signing_task_ref = "<" + str(signing_task) + ">"
         build_task_ref = "<" + str(build_task) + ">"
         repackage_task_ref = "<" + str(repackage_task) + ">"
         repackage_signing_task_ref = "<" + str(repackage_signing_task) + ">"
         upstream_artifacts = generate_upstream_artifacts(
-            signing_task_ref, build_task_ref, repackage_task_ref,
+            build_task_ref, repackage_task_ref,
             repackage_signing_task_ref, platform, locale
         )
 

@@ -614,7 +614,8 @@ public:
                    JS::RootingContext* aRootingCx,
                    xpc::ErrorReport* aReport,
                    JS::Handle<JS::Value> aError)
-    : mWindow(aWindow)
+    : mozilla::Runnable("ScriptErrorEvent")
+    , mWindow(aWindow)
     , mReport(aReport)
     , mError(aRootingCx, aError)
   {}
@@ -1363,9 +1364,8 @@ nsJSContext::GarbageCollectNow(JS::gcreason::Reason aReason,
                                IsShrinking aShrinking,
                                int64_t aSliceMillis)
 {
-  PROFILER_LABEL_DYNAMIC("nsJSContext", "GarbageCollectNow",
-                         js::ProfileEntry::Category::GC,
-                         JS::gcreason::ExplainReason(aReason));
+  AUTO_PROFILER_LABEL_DYNAMIC("nsJSContext::GarbageCollectNow", GC,
+                              JS::gcreason::ExplainReason(aReason));
 
   MOZ_ASSERT_IF(aSliceMillis, aIncremental == IncrementalGC);
 
@@ -1417,7 +1417,7 @@ nsJSContext::GarbageCollectNow(JS::gcreason::Reason aReason,
 static void
 FinishAnyIncrementalGC()
 {
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::GC);
+  AUTO_PROFILER_LABEL("FinishAnyIncrementalGC", GC);
 
   if (sCCLockedOut) {
     AutoJSAPI jsapi;
@@ -1680,8 +1680,7 @@ nsJSContext::CycleCollectNow(nsICycleCollectorListener *aListener,
     return;
   }
 
-  PROFILER_LABEL("nsJSContext", "CycleCollectNow",
-    js::ProfileEntry::Category::CC);
+  AUTO_PROFILER_LABEL("nsJSContext::CycleCollectNow", CC);
 
   gCCStats.PrepareForCycleCollectionSlice(TimeStamp(),
                                           aExtraForgetSkippableCalls);
@@ -1700,8 +1699,7 @@ nsJSContext::RunCycleCollectorSlice(TimeStamp aDeadline)
   AutoProfilerTracing
     tracing("CC", aDeadline.IsNull() ? "CCSlice" : "IdleCCSlice");
 
-  PROFILER_LABEL("nsJSContext", "RunCycleCollectorSlice",
-    js::ProfileEntry::Category::CC);
+  AUTO_PROFILER_LABEL("nsJSContext::RunCycleCollectorSlice", CC);
 
   gCCStats.PrepareForCycleCollectionSlice(aDeadline);
 
@@ -1756,8 +1754,7 @@ nsJSContext::RunCycleCollectorWorkSlice(int64_t aWorkBudget)
     return;
   }
 
-  PROFILER_LABEL("nsJSContext", "RunCycleCollectorWorkSlice",
-    js::ProfileEntry::Category::CC);
+  AUTO_PROFILER_LABEL("nsJSContext::RunCycleCollectorWorkSlice", CC);
 
   gCCStats.PrepareForCycleCollectionSlice();
 
@@ -2398,7 +2395,11 @@ class NotifyGCEndRunnable : public Runnable
   nsString mMessage;
 
 public:
-  explicit NotifyGCEndRunnable(const nsString& aMessage) : mMessage(aMessage) {}
+  explicit NotifyGCEndRunnable(const nsString& aMessage)
+    : mozilla::Runnable("NotifyGCEndRunnable")
+    , mMessage(aMessage)
+  {
+  }
 
   NS_DECL_NSIRUNNABLE
 };
@@ -2723,7 +2724,8 @@ class AsyncTaskRunnable final : public Runnable
 
 public:
   explicit AsyncTaskRunnable(JS::AsyncTask* aTask)
-    : mTask(aTask)
+    : mozilla::Runnable("AsyncTaskRunnable")
+    , mTask(aTask)
   {
     MOZ_ASSERT(mTask);
   }

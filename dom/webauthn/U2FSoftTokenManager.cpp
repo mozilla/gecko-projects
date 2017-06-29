@@ -234,6 +234,7 @@ U2FSoftTokenManager::GetOrCreateWrappingKey(const UniquePK11SlotInfo& aSlot,
           ("Key stored, nickname set to %s.", mSecretNickname.get()));
 
   GetMainThreadEventTarget()->Dispatch(NS_NewRunnableFunction(
+                                         "dom::U2FSoftTokenManager::GetOrCreateWrappingKey",
                                            [] () {
                                              MOZ_ASSERT(NS_IsMainThread());
                                              Preferences::SetUint(PREF_U2F_NSSTOKEN_COUNTER, 0);
@@ -817,6 +818,7 @@ U2FSoftTokenManager::Sign(const nsTArray<WebAuthnScopedCredentialDescriptor>& aD
   counterItem.data[3] = (mCounter >>  0) & 0xFF;
   uint32_t counter = mCounter;
   GetMainThreadEventTarget()->Dispatch(NS_NewRunnableFunction(
+                                         "dom::U2FSoftTokenManager::Sign",
                                            [counter] () {
                                              MOZ_ASSERT(NS_IsMainThread());
                                              Preferences::SetUint(PREF_U2F_NSSTOKEN_COUNTER, counter);
@@ -874,6 +876,12 @@ U2FSoftTokenManager::Sign(const nsTArray<WebAuthnScopedCredentialDescriptor>& aD
 
   aSignature = signatureBuf;
   return NS_OK;
+}
+
+void
+U2FSoftTokenManager::Cancel()
+{
+  // This implementation is sync, requests can't be aborted.
 }
 
 }

@@ -90,6 +90,14 @@ SurfaceFormatToDXGIFormat(gfx::SurfaceFormat aFormat)
   }
 }
 
+void
+ReportTextureMemoryUsage(ID3D11Texture2D* aTexture, size_t aBytes)
+{
+  aTexture->SetPrivateDataInterface(
+    sD3D11TextureUsage,
+    new TextureMemoryMeasurer(aBytes));
+}
+
 static uint32_t
 GetRequiredTilesD3D11(uint32_t aSize, uint32_t aMaxSize)
 {
@@ -910,7 +918,7 @@ DXGITextureHostD3D11::AddWRImage(wr::WebRenderAPI* aAPI,
 void
 DXGITextureHostD3D11::PushExternalImage(wr::DisplayListBuilder& aBuilder,
                                         const WrRect& aBounds,
-                                        const WrClipRegionToken aClip,
+                                        const WrRect& aClip,
                                         wr::ImageRendering aFilter,
                                         Range<const wr::ImageKey>& aImageKeys)
 {
@@ -1077,7 +1085,7 @@ DXGIYCbCrTextureHostD3D11::AddWRImage(wr::WebRenderAPI* aAPI,
 void
 DXGIYCbCrTextureHostD3D11::PushExternalImage(wr::DisplayListBuilder& aBuilder,
                                              const WrRect& aBounds,
-                                             const WrClipRegionToken aClip,
+                                             const WrRect& aClip,
                                              wr::ImageRendering aFilter,
                                              Range<const wr::ImageKey>& aImageKeys)
 {

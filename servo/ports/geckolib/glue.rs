@@ -19,7 +19,7 @@ use style::element_state::ElementState;
 use style::error_reporting::RustLogReporter;
 use style::font_metrics::{FontMetricsProvider, get_metrics_provider_for_product};
 use style::gecko::data::{PerDocumentStyleData, PerDocumentStyleDataImpl};
-use style::gecko::global_style_data::{GLOBAL_STYLE_DATA, GlobalStyleData};
+use style::gecko::global_style_data::{GLOBAL_STYLE_DATA, GlobalStyleData, STYLE_THREAD_POOL};
 use style::gecko::restyle_damage::GeckoRestyleDamage;
 use style::gecko::selector_parser::PseudoElement;
 use style::gecko::traversal::RecalcStyleOnly;
@@ -227,7 +227,8 @@ fn traverse_subtree(element: GeckoElement,
     debug!("Traversing subtree:");
     debug!("{:?}", ShowSubtreeData(element.as_node()));
 
-    let traversal_driver = if global_style_data.style_thread_pool.is_none() || !element.is_root() {
+    let style_thread_pool = &*STYLE_THREAD_POOL;
+    let traversal_driver = if style_thread_pool.style_thread_pool.is_none() || !element.is_root() {
         TraversalDriver::Sequential
     } else {
         TraversalDriver::Parallel
@@ -236,7 +237,7 @@ fn traverse_subtree(element: GeckoElement,
     let traversal = RecalcStyleOnly::new(shared_style_context, traversal_driver);
     if traversal_driver.is_parallel() {
         parallel::traverse_dom(&traversal, element, token,
-                               global_style_data.style_thread_pool.as_ref().unwrap());
+                               style_thread_pool.style_thread_pool.as_ref().unwrap());
     } else {
         sequential::traverse_dom(&traversal, element, token);
     }
@@ -729,7 +730,7 @@ pub extern "C" fn Servo_Property_IsDiscreteAnimatable(property: nsCSSPropertyID)
 
 #[no_mangle]
 pub extern "C" fn Servo_StyleWorkerThreadCount() -> u32 {
-    GLOBAL_STYLE_DATA.num_threads as u32
+    STYLE_THREAD_POOL.num_threads as u32
 }
 
 #[no_mangle]
@@ -1446,15 +1447,16 @@ pub extern "C" fn Servo_ComputedValues_GetForAnonymousBox(parent_style_or_null: 
 pub extern "C" fn Servo_ResolvePseudoStyle(element: RawGeckoElementBorrowed,
                                            pseudo_type: CSSPseudoElementType,
                                            is_probe: bool,
+                                           inherited_style: ServoComputedValuesBorrowedOrNull,
                                            raw_data: RawServoStyleSetBorrowed)
      -> ServoComputedValuesStrong
 {
     let element = GeckoElement(element);
     let data = unsafe { element.ensure_data() }.borrow_mut();
-    let doc_data = PerDocumentStyleData::from_ffi(raw_data);
+    let doc_data = PerDocumentStyleData::from_ffi(raw_data).borrow();
 
-    debug!("Servo_ResolvePseudoStyle: {:?} {:?}", element,
-           PseudoElement::from_pseudo_type(pseudo_type));
+    debug!("Servo_ResolvePseudoStyle: {:?} {:?}, is_probe: {}",
+           element, PseudoElement::from_pseudo_type(pseudo_type), is_probe);
 
     // FIXME(bholley): Assert against this.
     if !data.has_styles() {
@@ -1462,7 +1464,7 @@ pub extern "C" fn Servo_ResolvePseudoStyle(element: RawGeckoElementBorrowed,
         return if is_probe {
             Strong::null()
         } else {
-            doc_data.borrow().default_computed_values().clone().into_strong()
+            doc_data.default_computed_values().clone().into_strong()
         };
     }
 
@@ -1471,14 +1473,38 @@ pub extern "C" fn Servo_ResolvePseudoStyle(element: RawGeckoElementBorrowed,
 
     let global_style_data = &*GLOBAL_STYLE_DATA;
     let guard = global_style_data.shared_lock.read();
-    match get_pseudo_style(&guard, element, &pseudo, RuleInclusion::All,
-                           &data.styles, &*doc_data.borrow()) {
-        Some(values) => values.into_strong(),
-        // FIXME(emilio): This looks pretty wrong! Shouldn't it be at least an
-        // empty style inheriting from the element?
-        None if !is_probe => data.styles.primary().clone().into_strong(),
-        None => Strong::null(),
+    let style = get_pseudo_style(
+        &guard,
+        element,
+        &pseudo,
+        RuleInclusion::All,
+        &data.styles,
+        ComputedValues::arc_from_borrowed(&inherited_style).map(|v| v.as_ref()),
+        &*doc_data,
+        is_probe
+    );
+
+    match style {
+        Some(s) => s.into_strong(),
+        None => {
+            debug_assert!(is_probe);
+            Strong::null()
+        }
     }
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_SetExplicitStyle(element: RawGeckoElementBorrowed,
+                                         style: ServoComputedValuesBorrowed)
+{
+    let element = GeckoElement(element);
+    let style = ComputedValues::as_arc(&style);
+    debug!("Servo_SetExplicitStyle: {:?}", element);
+    // We only support this API for initial styling. There's no reason it couldn't
+    // work for other things, we just haven't had a reason to do so.
+    debug_assert!(element.get_data().is_none());
+    let mut data = unsafe { element.ensure_data() }.borrow_mut();
+    data.styles.primary = Some(style.clone());
 }
 
 #[no_mangle]
@@ -1501,18 +1527,53 @@ pub extern "C" fn Servo_HasAuthorSpecifiedRules(element: RawGeckoElementBorrowed
                                                      author_colors_allowed)
 }
 
-fn get_pseudo_style(guard: &SharedRwLockReadGuard,
-                    element: GeckoElement,
-                    pseudo: &PseudoElement,
-                    rule_inclusion: RuleInclusion,
-                    styles: &ElementStyles,
-                    doc_data: &PerDocumentStyleDataImpl)
-                    -> Option<Arc<ComputedValues>>
-{
-    match pseudo.cascade_type() {
-        PseudoElementCascadeType::Eager => styles.pseudos.get(&pseudo).map(|s| s.clone()),
+fn get_pseudo_style(
+    guard: &SharedRwLockReadGuard,
+    element: GeckoElement,
+    pseudo: &PseudoElement,
+    rule_inclusion: RuleInclusion,
+    styles: &ElementStyles,
+    inherited_styles: Option<&ComputedValues>,
+    doc_data: &PerDocumentStyleDataImpl,
+    is_probe: bool,
+) -> Option<Arc<ComputedValues>> {
+    let style = match pseudo.cascade_type() {
+        PseudoElementCascadeType::Eager => {
+            match *pseudo {
+                PseudoElement::FirstLetter => {
+                    // inherited_styles can be None when doing lazy resolution
+                    // (e.g. for computed style) or when probing.  In that case
+                    // we just inherit from our element, which is what Gecko
+                    // does in that situation.  What should actually happen in
+                    // the computed style case is a bit unclear.
+                    let inherited_styles =
+                        inherited_styles.unwrap_or(styles.primary());
+                    let guards = StylesheetGuards::same(guard);
+                    let metrics = get_metrics_provider_for_product();
+                    let rule_node = match styles.pseudos.get(&pseudo) {
+                        Some(styles) => styles.rules.as_ref(),
+                        None => None,
+                    };
+                    doc_data.stylist
+                        .compute_pseudo_element_style_with_rulenode(
+                            rule_node,
+                            &guards,
+                            inherited_styles,
+                            &metrics)
+                },
+                _ => {
+                    debug_assert!(inherited_styles.is_none() ||
+                                  ptr::eq(inherited_styles.unwrap(),
+                                          &**styles.primary()));
+                    styles.pseudos.get(&pseudo).cloned()
+                },
+            }
+        }
         PseudoElementCascadeType::Precomputed => unreachable!("No anonymous boxes"),
         PseudoElementCascadeType::Lazy => {
+            debug_assert!(inherited_styles.is_none() ||
+                          ptr::eq(inherited_styles.unwrap(),
+                                  &**styles.primary()));
             let base = if pseudo.inherits_from_default_values() {
                 doc_data.default_computed_values()
             } else {
@@ -1528,9 +1589,19 @@ fn get_pseudo_style(guard: &SharedRwLockReadGuard,
                     rule_inclusion,
                     base,
                     &metrics)
-                .map(|s| s.clone())
         },
+    };
+
+    if is_probe {
+        return style;
     }
+
+    Some(style.unwrap_or_else(|| {
+        Arc::new(StyleBuilder::for_inheritance(
+            styles.primary(),
+            doc_data.default_computed_values(),
+        ).build())
+    }))
 }
 
 #[no_mangle]
@@ -1568,6 +1639,14 @@ pub extern "C" fn Servo_ComputedValues_GetVisitedStyle(values: ServoComputedValu
         Some(v) => v.clone().into_strong(),
         None => Strong::null(),
     }
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_ComputedValues_SpecifiesAnimationsOrTransitions(values: ServoComputedValuesBorrowed)
+                                                                        -> bool {
+    let values = ComputedValues::as_arc(&values);
+    let b = values.get_box();
+    b.specifies_animations() || b.specifies_transitions()
 }
 
 /// See the comment in `Device` to see why it's ok to pass an owned reference to
@@ -2603,9 +2682,22 @@ pub extern "C" fn Servo_ResolveStyleLazily(element: RawGeckoElementBorrowed,
     let data = doc_data.borrow();
     let rule_inclusion = RuleInclusion::from(rule_inclusion);
     let finish = |styles: &ElementStyles| -> Arc<ComputedValues> {
-        PseudoElement::from_pseudo_type(pseudo_type).and_then(|ref pseudo| {
-            get_pseudo_style(&guard, element, pseudo, rule_inclusion, styles, &*data)
-        }).unwrap_or_else(|| styles.primary().clone())
+        match PseudoElement::from_pseudo_type(pseudo_type) {
+            Some(ref pseudo) => {
+                get_pseudo_style(
+                    &guard,
+                    element,
+                    pseudo,
+                    rule_inclusion,
+                    styles,
+                    /* inherited_styles = */ None,
+                    &*data,
+                    /* is_probe = */ false,
+                ).expect("We're not probing, so we should always get a style \
+                         back")
+            }
+            None => styles.primary().clone(),
+        }
     };
 
     // In the common case we already have the style. Check that before setting

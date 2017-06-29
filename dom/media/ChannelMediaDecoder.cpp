@@ -6,6 +6,7 @@
 
 #include "ChannelMediaDecoder.h"
 #include "MediaResource.h"
+#include "MediaShutdownManager.h"
 
 namespace mozilla {
 
@@ -98,7 +99,9 @@ void
 ChannelMediaDecoder::ResourceCallback::NotifyDataEnded(nsresult aStatus)
 {
   RefPtr<ResourceCallback> self = this;
-  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([=]() {
+  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction(
+    "ChannelMediaDecoder::ResourceCallback::NotifyDataEnded",
+    [=]() {
     if (!self->mDecoder) {
       return;
     }
@@ -140,7 +143,9 @@ ChannelMediaDecoder::ResourceCallback::NotifyBytesConsumed(int64_t aBytes,
                                                            int64_t aOffset)
 {
   RefPtr<ResourceCallback> self = this;
-  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([=]() {
+  nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction(
+    "ChannelMediaDecoder::ResourceCallback::NotifyBytesConsumed",
+    [=]() {
     if (self->mDecoder) {
       self->mDecoder->NotifyBytesConsumed(aBytes, aOffset);
     }
@@ -160,6 +165,69 @@ ChannelMediaDecoder::Shutdown()
 {
   mResourceCallback->Disconnect();
   MediaDecoder::Shutdown();
+}
+
+nsresult
+ChannelMediaDecoder::OpenResource(nsIStreamListener** aStreamListener)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  if (aStreamListener) {
+    *aStreamListener = nullptr;
+  }
+  return mResource->Open(aStreamListener);
+}
+
+nsresult
+ChannelMediaDecoder::Load(nsIChannel* aChannel,
+                          bool aIsPrivateBrowsing,
+                          nsIStreamListener** aStreamListener)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!mResource);
+
+  mResource =
+    MediaResource::Create(mResourceCallback, aChannel, aIsPrivateBrowsing);
+  if (!mResource) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsresult rv = MediaShutdownManager::Instance().Register(this);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = OpenResource(aStreamListener);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  SetStateMachine(CreateStateMachine());
+  NS_ENSURE_TRUE(GetStateMachine(), NS_ERROR_FAILURE);
+
+  return InitializeStateMachine();
+}
+
+nsresult
+ChannelMediaDecoder::Load(MediaResource* aOriginal)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!mResource);
+
+  mResource = aOriginal->CloneData(mResourceCallback);
+  if (!mResource) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsresult rv = MediaShutdownManager::Instance().Register(this);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = OpenResource(nullptr);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  SetStateMachine(CreateStateMachine());
+  NS_ENSURE_TRUE(GetStateMachine(), NS_ERROR_FAILURE);
+
+  return InitializeStateMachine();
 }
 
 } // namespace mozilla

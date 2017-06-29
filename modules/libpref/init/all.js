@@ -701,6 +701,7 @@ pref("apz.fling_min_velocity_threshold", "0.5");
 pref("apz.fling_stop_on_tap_threshold", "0.05");
 pref("apz.fling_stopped_threshold", "0.01");
 pref("apz.highlight_checkerboarded_areas", false);
+pref("apz.keyboard.enabled", false);
 pref("apz.max_velocity_inches_per_ms", "-1.0");
 pref("apz.max_velocity_queue_size", 5);
 pref("apz.min_skate_speed", "1.0");
@@ -2856,6 +2857,12 @@ pref("layout.css.prefixes.webkit", true);
 // pref is set to false.)
 pref("layout.css.prefixes.device-pixel-ratio-webkit", false);
 
+// Is support for <style scoped> enabled in content documents?
+//
+// If disabled, this will also disable the DOM API (HTMLStyleElement.scoped)
+// in chrome documents.
+pref("layout.css.scoped-style.enabled", false);
+
 // Is support for the :scope selector enabled?
 pref("layout.css.scope-pseudo.enabled", true);
 
@@ -4868,6 +4875,8 @@ pref("extensions.webextensions.identity.redirectDomain", "extensions.allizom.org
 pref("extensions.webextensions.themes.enabled", false);
 pref("extensions.webextensions.themes.icons.enabled", false);
 pref("extensions.webextensions.remote", false);
+// Whether or not the moz-extension resource loads are remoted
+pref("extensions.webextensions.protocol.remote", true);
 
 pref("layers.popups.compositing.enabled", false);
 
@@ -5714,6 +5723,14 @@ pref("dom.payments.request.enabled", false);
 
 #ifdef FUZZING
 pref("fuzzing.enabled", false);
+#endif
+
+#if defined(XP_WIN)
+pref("layers.mlgpu.dev-enabled", false);
+
+// Both this and the master "enabled" pref must be on to use Advanced LAyers
+// on Windows 7.
+pref("layers.mlgpu.enable-on-windows7", false);
 #endif
 
 // Set advanced layers preferences here to have them show up in about:config or

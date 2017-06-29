@@ -535,6 +535,7 @@ ContentChild::RecvSetXPCOMProcessAttributes(const XPCOMInitData& aXPCOMInit,
                                             nsTArray<LookAndFeelInt>&& aLookAndFeelIntCache)
 {
   mLookAndFeelCache = aLookAndFeelIntCache;
+  gfx::gfxVars::SetValuesForInitialize(aXPCOMInit.gfxNonDefaultVarUpdates());
   InitXPCOM(aXPCOMInit, aInitialData);
   InitGraphicsDeviceData(aXPCOMInit.contentDeviceData());
 
@@ -1000,8 +1001,6 @@ ContentChild::AppendProcessId(nsACString& aName)
 void
 ContentChild::InitGraphicsDeviceData(const ContentDeviceData& aData)
 {
-  // Initialize the graphics platform. This may contact the parent process
-  // to read device preferences.
   gfxPlatform::InitChild(aData);
 }
 
@@ -2321,9 +2320,8 @@ ContentChild::RecvAsyncMessage(const nsString& aMsg,
                                const ClonedMessageData& aData)
 {
   NS_LossyConvertUTF16toASCII messageNameCStr(aMsg);
-  PROFILER_LABEL_DYNAMIC("ContentChild", "RecvAsyncMessage",
-                        js::ProfileEntry::Category::EVENTS,
-                        messageNameCStr.get());
+  AUTO_PROFILER_LABEL_DYNAMIC("ContentChild::RecvAsyncMessage", EVENTS,
+                              messageNameCStr.get());
 
   CrossProcessCpowHolder cpows(this, aCpows);
   RefPtr<nsFrameMessageManager> cpm =
@@ -2777,10 +2775,12 @@ ContentChild::StartForceKillTimer()
   if (timeoutSecs > 0) {
     mForceKillTimer = do_CreateInstance("@mozilla.org/timer;1");
     MOZ_ASSERT(mForceKillTimer);
-    mForceKillTimer->InitWithFuncCallback(ContentChild::ForceKillTimerCallback,
+    mForceKillTimer->InitWithNamedFuncCallback(
+      ContentChild::ForceKillTimerCallback,
       this,
       timeoutSecs * 1000,
-      nsITimer::TYPE_ONE_SHOT);
+      nsITimer::TYPE_ONE_SHOT,
+      "dom::ContentChild::StartForceKillTimer");
   }
 }
 
@@ -2810,7 +2810,9 @@ ContentChild::RecvShutdown()
       // time (100ms) in the hopes that the event loop will have finished by
       // then.
       MessageLoop::current()->PostDelayedTask(
-        NewRunnableMethod(this, &ContentChild::RecvShutdown), 100);
+        NewRunnableMethod(
+          "dom::ContentChild::RecvShutdown", this, &ContentChild::RecvShutdown),
+        100);
       return IPC_OK();
     }
   }

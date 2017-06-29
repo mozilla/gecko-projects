@@ -733,9 +733,7 @@ DispatchErrorEvent(IDBRequest* aRequest,
   MOZ_ASSERT(NS_FAILED(aErrorCode));
   MOZ_ASSERT(NS_ERROR_GET_MODULE(aErrorCode) == NS_ERROR_MODULE_DOM_INDEXEDDB);
 
-  PROFILER_LABEL("IndexedDB",
-                 "DispatchErrorEvent",
-                 js::ProfileEntry::Category::STORAGE);
+  AUTO_PROFILER_LABEL("IndexedDB:DispatchErrorEvent", STORAGE);
 
   RefPtr<IDBRequest> request = aRequest;
   RefPtr<IDBTransaction> transaction = aTransaction;
@@ -808,9 +806,7 @@ DispatchSuccessEvent(ResultHelper* aResultHelper,
 {
   MOZ_ASSERT(aResultHelper);
 
-  PROFILER_LABEL("IndexedDB",
-                 "DispatchSuccessEvent",
-                 js::ProfileEntry::Category::STORAGE);
+  AUTO_PROFILER_LABEL("IndexedDB:DispatchSuccessEvent", STORAGE);
 
   RefPtr<IDBRequest> request = aResultHelper->Request();
   MOZ_ASSERT(request);
@@ -2227,17 +2223,7 @@ BackgroundDatabaseChild::RecvPBackgroundIDBVersionChangeTransactionConstructor(
                                         request,
                                         aNextObjectStoreId,
                                         aNextIndexId);
-  if (NS_WARN_IF(!transaction)) {
-    // This can happen if we receive events after a worker has begun its
-    // shutdown process.
-    MOZ_ASSERT(!NS_IsMainThread());
-
-    // Report this to the console.
-    IDB_REPORT_INTERNAL_ERR();
-
-    MOZ_ALWAYS_TRUE(aActor->SendDeleteMe());
-    return IPC_OK();
-  }
+  MOZ_ASSERT(transaction);
 
   transaction->AssertIsOnOwningThread();
 

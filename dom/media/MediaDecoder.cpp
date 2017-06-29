@@ -142,8 +142,6 @@ NS_IMPL_ISUPPORTS(MediaMemoryTracker, nsIMemoryReporter)
 
 NS_IMPL_ISUPPORTS0(MediaDecoder)
 
-
-
 void
 MediaDecoder::NotifyOwnerActivityChanged(bool aIsDocumentVisible,
                                          Visibility aElementVisibility,
@@ -338,10 +336,11 @@ MediaDecoder::Shutdown()
     // Ensure we always unregister asynchronously in order not to disrupt
     // the hashtable iterating in MediaShutdownManager::Shutdown().
     RefPtr<MediaDecoder> self = this;
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([self] () {
-      self->mVideoFrameContainer = nullptr;
-      MediaShutdownManager::Instance().Unregister(self);
-    });
+    nsCOMPtr<nsIRunnable> r =
+      NS_NewRunnableFunction("MediaDecoder::Shutdown", [self]() {
+        self->mVideoFrameContainer = nullptr;
+        MediaShutdownManager::Instance().Unregister(self);
+      });
     mAbstractMainThread->Dispatch(r.forget());
   }
 
@@ -450,36 +449,6 @@ MediaDecoder::FinishShutdown()
   SetStateMachine(nullptr);
   mVideoFrameContainer = nullptr;
   MediaShutdownManager::Instance().Unregister(this);
-}
-
-nsresult
-MediaDecoder::OpenResource(nsIStreamListener** aStreamListener)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (aStreamListener) {
-    *aStreamListener = nullptr;
-  }
-  return mResource->Open(aStreamListener);
-}
-
-nsresult
-MediaDecoder::Load(nsIStreamListener** aStreamListener)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mResource, "Can't load without a MediaResource");
-
-  nsresult rv = MediaShutdownManager::Instance().Register(this);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  rv = OpenResource(aStreamListener);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  SetStateMachine(CreateStateMachine());
-  NS_ENSURE_TRUE(GetStateMachine(), NS_ERROR_FAILURE);
-
-  return InitializeStateMachine();
 }
 
 nsresult

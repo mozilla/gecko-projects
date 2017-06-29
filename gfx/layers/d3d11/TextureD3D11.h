@@ -335,7 +335,7 @@ public:
 
   virtual void PushExternalImage(wr::DisplayListBuilder& aBuilder,
                                  const WrRect& aBounds,
-                                 const WrClipRegionToken aClip,
+                                 const WrRect& aClip,
                                  wr::ImageRendering aFilter,
                                  Range<const wr::ImageKey>& aImageKeys) override;
 
@@ -396,7 +396,7 @@ public:
 
   virtual void PushExternalImage(wr::DisplayListBuilder& aBuilder,
                                  const WrRect& aBounds,
-                                 const WrClipRegionToken aClip,
+                                 const WrRect& aClip,
                                  wr::ImageRendering aFilter,
                                  Range<const wr::ImageKey>& aImageKeys) override;
 
@@ -483,6 +483,7 @@ inline uint32_t GetMaxTextureSizeForFeatureLevel(D3D_FEATURE_LEVEL aFeatureLevel
 }
 
 uint32_t GetMaxTextureSizeFromDevice(ID3D11Device* aDevice);
+void ReportTextureMemoryUsage(ID3D11Texture2D* aTexture, size_t aBytes);
 
 class AutoLockD3D11Texture
 {
