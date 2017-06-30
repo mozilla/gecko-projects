@@ -3759,6 +3759,12 @@ public:
     mState.mColor = mColor;
   }
 
+  virtual void RestoreState() override
+  {
+    nsDisplayItem::RestoreState();
+    mColor = mState.mColor;
+  }
+
   virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
                                    LayerManager* aManager,
                                    const ContainerLayerParameters& aParameters) override;
