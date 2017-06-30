@@ -3792,9 +3792,6 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
                           AnimatedGeometryRoot** aOutModifiedAGR,
                           nsTArray<nsIFrame*>* aOutFramesWithProps)
 {
-
-  bool foundStackingContext = false;
-
   for (nsIFrame* f : aModifiedFrames) {
     if (!f) {
       continue;
@@ -3899,7 +3896,6 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
           // Don't contribute to the root dirty area at all.
           agr = nullptr;
           overflow.SetEmpty();
-          foundStackingContext = true;
           break;
         }
       }
@@ -3915,12 +3911,6 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
     } else if (agr && *aOutModifiedAGR != agr) {
       return false;
     }
-  }
-
-  // Return false if modified Dirty is empty, and we didn't mark any sub-stacking
-  // contexts as needing-paint-if-visible.
-  if (aOutDirty->IsEmpty() && !foundStackingContext) {
-    return false;
   }
 
   return true;
@@ -4142,23 +4132,30 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
           PreProcessRetainedDisplayList(&builder, &list, modifiedAGR);
 
-          builder.SetDirtyRect(modifiedDirty);
+          if (!modifiedDirty.IsEmpty() ||
+              !framesWithProps.IsEmpty()) {
+            builder.SetDirtyRect(modifiedDirty);
 
-          nsDisplayList modifiedDL;
-          builder.SetPartialUpdate(true);
-          aFrame->BuildDisplayListForStackingContext(&builder, &modifiedDL);
-          builder.SetPartialUpdate(false);
-          //printf_stderr("Painting --- Modified list (dirty %d,%d,%d,%d):\n",
-          //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
-          //nsFrame::PrintDisplayList(&builder, modifiedDL);
+            nsDisplayList modifiedDL;
+            builder.SetPartialUpdate(true);
+            aFrame->BuildDisplayListForStackingContext(&builder, &modifiedDL);
+            builder.SetPartialUpdate(false);
+            //printf_stderr("Painting --- Modified list (dirty %d,%d,%d,%d):\n",
+            //      modifiedDirty.x, modifiedDirty.y, modifiedDirty.width, modifiedDirty.height);
+            //nsFrame::PrintDisplayList(&builder, modifiedDL);
 
-          builder.LeavePresShell(aFrame, &modifiedDL);
-          builder.EnterPresShell(aFrame);
+            builder.LeavePresShell(aFrame, &modifiedDL);
+            builder.EnterPresShell(aFrame);
 
-          MergeDisplayLists(&builder, &modifiedDL, &list, &list, totalDisplayItems, reusedDisplayItems);
+            MergeDisplayLists(&builder, &modifiedDL, &list, &list, totalDisplayItems, reusedDisplayItems);
 
-          //printf_stderr("Painting --- Merged list:\n");
-          //nsFrame::PrintDisplayList(&builder, list);
+            //printf_stderr("Painting --- Merged list:\n");
+            //nsFrame::PrintDisplayList(&builder, list);
+          } else {
+            //TODO: We can also skip layer building and painting if
+            // PreProcessRetainedDisplayList didn't end up changing anything
+            //printf_stderr("Skipping display list building since nothing needed to be done\n");
+          }
           merged = true;
         }
 
@@ -4194,6 +4191,11 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
         list.DeleteAll(&builder);
         builder.SetDirtyRect(dirtyRect);
         aFrame->BuildDisplayListForStackingContext(&builder, &list);
+
+        //if (XRE_IsContentProcess()) {
+        //  printf_stderr("Painting --- Full list:\n");
+        //  nsFrame::PrintDisplayList(&builder, list);
+        //}
       }
 
       //printf("nsLayoutUtils::PaintFrame - recycled %d/%d (%.2f%%) display items\n", reusedDisplayItems, totalDisplayItems, reusedDisplayItems * 100 / float(totalDisplayItems));

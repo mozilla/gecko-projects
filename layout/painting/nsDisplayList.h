@@ -1829,6 +1829,8 @@ public:
     , mActiveScrolledRoot(nullptr)
     , mReferenceFrame(nullptr)
     , mForceNotVisible(false)
+    , mDisableSubpixelAA(false)
+    , mReusedItem(false)
 #ifdef MOZ_DUMP_PAINTING
     , mPainted(false)
 #endif
@@ -1894,6 +1896,7 @@ public:
     , mVisibleRect(aOther.mVisibleRect)
     , mForceNotVisible(aOther.mForceNotVisible)
     , mDisableSubpixelAA(aOther.mDisableSubpixelAA)
+    , mReusedItem(false)
   {
     mFrame->RealDisplayItemData().AppendElement(this);
   }
