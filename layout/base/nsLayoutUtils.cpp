@@ -3527,6 +3527,12 @@ void PreProcessRetainedDisplayList(nsDisplayListBuilder* aBuilder,
     if (aAGR && i->GetAnimatedGeometryRoot()->GetAsyncAGR() != aAGR) {
       aBuilder->MarkFrameForDisplayIfVisible(i->Frame());
     }
+
+    // TODO: This is here because we sometimes reuse the previous display list
+    // completely. For optimization, we could only restore the state for reused
+    // display items.
+    i->RestoreState();
+
     saved.AppendToTop(i);
   }
   aList->AppendToTop(&saved);
@@ -4105,8 +4111,9 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       bool merged = false;
       uint32_t totalDisplayItems = 0;
       uint32_t reusedDisplayItems = 0;
-        //printf("Attempting merge build with %lu modified frames\n", modifiedFrames->size());
       if (retainedBuilder && modifiedFrames) {
+        //printf("Attempting merge build with %lu modified frames\n", modifiedFrames->size());
+
         if (retainedBuilder->mPreviousCaret != builder.GetCaretFrame()) {
           if (retainedBuilder->mPreviousCaret) {
             builder.MarkFrameModifiedDuringBuilding(retainedBuilder->mPreviousCaret);
@@ -4149,8 +4156,9 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
             //printf_stderr("Painting --- Merged list:\n");
             //nsFrame::PrintDisplayList(&builder, list);
           } else {
-            //TODO: We can also skip layer building and painting if
+            // TODO: We can also skip layer building and painting if
             // PreProcessRetainedDisplayList didn't end up changing anything
+            // Invariant: display items should have their original state here.
             //printf_stderr("Skipping display list building since nothing needed to be done\n");
           }
           merged = true;

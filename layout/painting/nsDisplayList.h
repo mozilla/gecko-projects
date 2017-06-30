@@ -2495,10 +2495,6 @@ public:
 
   void SetReused(bool aReused)
   {
-    if (!mReusedItem && aReused) {
-      RestoreState();
-    }
-
     mReusedItem = aReused;
   }
 
