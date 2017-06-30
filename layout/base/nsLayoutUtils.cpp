@@ -3500,7 +3500,7 @@ void PreProcessRetainedDisplayList(nsDisplayListBuilder* aBuilder,
 {
   nsDisplayList saved;
   while (nsDisplayItem* i = aList->RemoveBottom()) {
-    if (i->HasDeletedFrame()) {
+    if (i->HasDeletedFrame() || !i->CanBeReused()) {
       i->Destroy(aBuilder);
       continue;
     }
@@ -3638,9 +3638,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
         i->Destroy(aBuilder);
       } else {
         while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
-          if (old->CanBeReused() &&
-              !IsAnyAncestorModified(old->Frame())) {
-
+          if (!IsAnyAncestorModified(old->Frame())) {
             merged.AppendToTop(old);
             aTotalDisplayItems++;
             aReusedDisplayItems++;
@@ -3680,8 +3678,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
 
   // Reuse the remaining items from the old display list.
   while ((old = aOldList->RemoveBottom())) {
-    if (old->CanBeReused() &&
-        !IsAnyAncestorModified(old->Frame())) {
+    if (!IsAnyAncestorModified(old->Frame())) {
       merged.AppendToTop(old);
       old->SetReused(true);
       aTotalDisplayItems++;
