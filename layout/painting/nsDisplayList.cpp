@@ -5955,9 +5955,6 @@ CopyItemsWithOpacity(nsDisplayList* aList,
       if (!CopyItemsWithOpacity(children, aArray, aMaxChildCount)) {
         return false;
       }
-
-      // Don't add the item itself to the list.
-      continue;
     }
 
     if (i->GetType() == TYPE_LAYER_EVENT_REGIONS) {
