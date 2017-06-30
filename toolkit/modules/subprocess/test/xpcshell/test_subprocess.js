@@ -721,9 +721,9 @@ add_task(async function test_subprocess_environmentAppend() {
   path = await read(proc.stdout);
   foo = await read(proc.stdout);
 
-  dump('LOOOOOL')
-  dump(path)
-  dump(env.get("PATH"))
+  do_print('LOOOOOL')
+  do_print(path)
+  do_print(env.get("PATH"))
   equal(path, env.get("PATH"), "Got expected $PATH value");
   equal(foo, "", "Got expected $FOO value");
 
