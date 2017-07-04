@@ -1143,11 +1143,11 @@ nsDisplayListBuilder::~nsDisplayListBuilder() {
 
   nsCSSRendering::EndFrameTreesLocked();
 
-  for (DisplayItemClipChain* c : mClipChainsToDestroy) {
-    delete c;
-  }
   for (nsDisplayItem* i : mTemporaryItems) {
     i->Destroy(this);
+  }
+  for (DisplayItemClipChain* c : mClipChainsToDestroy) {
+    delete c;
   }
 
   MOZ_COUNT_DTOR(nsDisplayListBuilder);
