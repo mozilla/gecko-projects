@@ -432,10 +432,11 @@ TabChild::TabChild(nsIContentChild* aManager,
 bool
 TabChild::AsyncPanZoomEnabled() const
 {
-  // By the time anybody calls this, we must have had InitRenderingState called
-  // already, and so mCompositorOptions should be populated.
-  MOZ_RELEASE_ASSERT(mCompositorOptions);
-  return mCompositorOptions->UseAPZ();
+  // This might get called by the TouchEvent::PrefEnabled code before we have
+  // mCompositorOptions populated (bug 1370089). In that case we just assume
+  // APZ is enabled because we're in a content process (because TabChild) and
+  // APZ is probably going to be enabled here since e10s is enabled.
+  return mCompositorOptions ? mCompositorOptions->UseAPZ() : true;
 }
 
 NS_IMETHODIMP
@@ -3061,17 +3062,18 @@ TabChild::ReinitRenderingForDeviceReset()
   InvalidateLayers();
 
   RefPtr<LayerManager> lm = mPuppetWidget->GetLayerManager();
-  ClientLayerManager* clm = lm->AsClientLayerManager();
-  if (!clm) {
+  if (WebRenderLayerManager* wlm = lm->AsWebRenderLayerManager()) {
+    wlm->DoDestroy(/* aIsSync */ true);
+  } else if (ClientLayerManager* clm = lm->AsClientLayerManager()) {
+    if (ShadowLayerForwarder* fwd = clm->AsShadowForwarder()) {
+      // Force the LayerTransactionChild to synchronously shutdown. It is
+      // okay to do this early, we'll simply stop sending messages. This
+      // step is necessary since otherwise the compositor will think we
+      // are trying to attach two layer trees to the same ID.
+      fwd->SynchronouslyShutdown();
+    }
+  } else {
     return;
-  }
-
-  if (ShadowLayerForwarder* fwd = clm->AsShadowForwarder()) {
-    // Force the LayerTransactionChild to synchronously shutdown. It is
-    // okay to do this early, we'll simply stop sending messages. This
-    // step is necessary since otherwise the compositor will think we
-    // are trying to attach two layer trees to the same ID.
-    fwd->SynchronouslyShutdown();
   }
 
   // Proceed with destroying and recreating the layer manager.

@@ -310,9 +310,6 @@ def get_active_tests(config):
         raise ConfigurationError("No definition found for test(s): %s"
                                  % missing)
 
-    # disabled DAMP on winXP: frequent hangs, <3% of devtools users on winXP
-    if utils.PLATFORM_TYPE == 'win_':
-        activeTests = [i for i in activeTests if i != 'damp']
     return activeTests
 
 
@@ -431,6 +428,7 @@ def get_browser_config(config):
                 'test_timeout': 1200,
                 'xperf_path': None,
                 'error_filename': None,
+                'no_upload_results': False,
                 }
     browser_config = dict(title=config['title'])
     browser_config.update(dict([(i, config[i]) for i in required]))

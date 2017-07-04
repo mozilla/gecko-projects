@@ -7,7 +7,7 @@
 use {Atom, LocalName, Namespace};
 use applicable_declarations::{ApplicableDeclarationBlock, ApplicableDeclarationList};
 use bit_vec::BitVec;
-use context::QuirksMode;
+use context::{CascadeInputs, QuirksMode};
 use dom::TElement;
 use element_state::ElementState;
 use error_reporting::create_error_reporter;
@@ -15,7 +15,8 @@ use font_metrics::FontMetricsProvider;
 #[cfg(feature = "gecko")]
 use gecko_bindings::structs::{nsIAtom, StyleRuleInclusion};
 use invalidation::element::invalidation_map::InvalidationMap;
-use invalidation::media_queries::EffectiveMediaQueryResults;
+use invalidation::media_queries::{EffectiveMediaQueryResults, ToMediaListKey};
+use matching::CascadeVisitedMode;
 use media_queries::Device;
 use properties::{self, CascadeFlags, ComputedValues};
 use properties::{AnimationRules, PropertyDeclarationBlock};
@@ -27,7 +28,7 @@ use selector_parser::{SelectorImpl, PseudoElement};
 use selectors::attr::NamespaceConstraint;
 use selectors::bloom::BloomFilter;
 use selectors::matching::{ElementSelectorFlags, matches_selector, MatchingContext, MatchingMode};
-use selectors::matching::AFFECTED_BY_PRESENTATIONAL_HINTS;
+use selectors::matching::{VisitedHandlingMode, AFFECTED_BY_PRESENTATIONAL_HINTS};
 use selectors::parser::{AncestorHashes, Combinator, Component, Selector, SelectorAndHashes};
 use selectors::parser::{SelectorIter, SelectorMethods};
 use selectors::sink::Push;
@@ -42,7 +43,7 @@ use stylearc::Arc;
 #[cfg(feature = "gecko")]
 use stylesheets::{CounterStyleRule, FontFaceRule};
 use stylesheets::{CssRule, StyleRule};
-use stylesheets::{Stylesheet, Origin, UserAgentStylesheets};
+use stylesheets::{StylesheetInDocument, Origin, UserAgentStylesheets};
 use stylesheets::keyframes_rule::KeyframesAnimation;
 use stylesheets::viewport_rule::{self, MaybeNew, ViewportRule};
 use thread_state;
@@ -341,14 +342,18 @@ impl Stylist {
     /// This method resets all the style data each time the stylesheets change
     /// (which is indicated by the `stylesheets_changed` parameter), or the
     /// device is dirty, which means we need to re-evaluate media queries.
-    pub fn rebuild<'a, 'b, I>(&mut self,
-                              doc_stylesheets: I,
-                              guards: &StylesheetGuards,
-                              ua_stylesheets: Option<&UserAgentStylesheets>,
-                              stylesheets_changed: bool,
-                              author_style_disabled: bool,
-                              extra_data: &mut ExtraStyleData<'a>) -> bool
-        where I: Iterator<Item = &'b Arc<Stylesheet>> + Clone,
+    pub fn rebuild<'a, 'b, I, S>(
+        &mut self,
+        doc_stylesheets: I,
+        guards: &StylesheetGuards,
+        ua_stylesheets: Option<&UserAgentStylesheets>,
+        stylesheets_changed: bool,
+        author_style_disabled: bool,
+        extra_data: &mut ExtraStyleData<'a>
+    ) -> bool
+    where
+        I: Iterator<Item = &'b S> + Clone,
+        S: StylesheetInDocument + ToMediaListKey + 'static,
     {
         debug_assert!(!self.is_cleared || self.is_device_dirty);
 
@@ -397,7 +402,7 @@ impl Stylist {
 
         if let Some(ua_stylesheets) = ua_stylesheets {
             for stylesheet in &ua_stylesheets.user_or_user_agent_stylesheets {
-                self.add_stylesheet(&stylesheet, guards.ua_or_user, extra_data);
+                self.add_stylesheet(stylesheet, guards.ua_or_user, extra_data);
             }
 
             if self.quirks_mode != QuirksMode::NoQuirks {
@@ -408,10 +413,10 @@ impl Stylist {
 
         // Only use author stylesheets if author styles are enabled.
         let sheets_to_add = doc_stylesheets.filter(|s| {
-            !author_style_disabled || s.origin != Origin::Author
+            !author_style_disabled || s.origin(guards.author) != Origin::Author
         });
 
-        for ref stylesheet in sheets_to_add {
+        for stylesheet in sheets_to_add {
             self.add_stylesheet(stylesheet, guards.author, extra_data);
         }
 
@@ -428,14 +433,18 @@ impl Stylist {
 
     /// clear the stylist and then rebuild it.  Chances are, you want to use
     /// either clear() or rebuild(), with the latter done lazily, instead.
-    pub fn update<'a, 'b, I>(&mut self,
-                             doc_stylesheets: I,
-                             guards: &StylesheetGuards,
-                             ua_stylesheets: Option<&UserAgentStylesheets>,
-                             stylesheets_changed: bool,
-                             author_style_disabled: bool,
-                             extra_data: &mut ExtraStyleData<'a>) -> bool
-        where I: Iterator<Item = &'b Arc<Stylesheet>> + Clone,
+    pub fn update<'a, 'b, I, S>(
+        &mut self,
+        doc_stylesheets: I,
+        guards: &StylesheetGuards,
+        ua_stylesheets: Option<&UserAgentStylesheets>,
+        stylesheets_changed: bool,
+        author_style_disabled: bool,
+        extra_data: &mut ExtraStyleData<'a>
+    ) -> bool
+    where
+        I: Iterator<Item = &'b S> + Clone,
+        S: StylesheetInDocument + ToMediaListKey + 'static,
     {
         debug_assert!(!self.is_cleared || self.is_device_dirty);
 
@@ -449,16 +458,23 @@ impl Stylist {
                      author_style_disabled, extra_data)
     }
 
-    fn add_stylesheet<'a>(&mut self,
-                          stylesheet: &Stylesheet,
-                          guard: &SharedRwLockReadGuard,
-                          _extra_data: &mut ExtraStyleData<'a>) {
-        if stylesheet.disabled() || !stylesheet.is_effective_for_device(&self.device, guard) {
+    fn add_stylesheet<'a, S>(
+        &mut self,
+        stylesheet: &S,
+        guard: &SharedRwLockReadGuard,
+        _extra_data: &mut ExtraStyleData<'a>
+    )
+    where
+        S: StylesheetInDocument + ToMediaListKey + 'static,
+    {
+        if !stylesheet.enabled() ||
+           !stylesheet.is_effective_for_device(&self.device, guard) {
             return;
         }
 
         self.effective_media_query_results.saw_effective(stylesheet);
 
+        let origin = stylesheet.origin(guard);
         for rule in stylesheet.effective_rules(&self.device, guard) {
             match *rule {
                 CssRule::Style(ref locked) => {
@@ -471,9 +487,9 @@ impl Stylist {
                             self.pseudos_map
                                 .entry(pseudo.canonical())
                                 .or_insert_with(PerPseudoElementSelectorMap::new)
-                                .borrow_for_origin(&stylesheet.origin)
+                                .borrow_for_origin(&origin)
                         } else {
-                            self.element_map.borrow_for_origin(&stylesheet.origin)
+                            self.element_map.borrow_for_origin(&origin)
                         };
 
                         map.insert(
@@ -528,7 +544,7 @@ impl Stylist {
                 }
                 #[cfg(feature = "gecko")]
                 CssRule::FontFace(ref rule) => {
-                    _extra_data.add_font_face(&rule, stylesheet.origin);
+                    _extra_data.add_font_face(&rule, origin);
                 }
                 #[cfg(feature = "gecko")]
                 CssRule::CounterStyle(ref rule) => {
@@ -679,47 +695,90 @@ impl Stylist {
                                                   element: &E,
                                                   pseudo: &PseudoElement,
                                                   rule_inclusion: RuleInclusion,
-                                                  parent_style: &ComputedValues,
+                                                  parent_style: &Arc<ComputedValues>,
+                                                  is_probe: bool,
                                                   font_metrics: &FontMetricsProvider)
                                                   -> Option<Arc<ComputedValues>>
         where E: TElement,
     {
-        let rule_node =
-            self.lazy_pseudo_rules(guards, element, pseudo, rule_inclusion);
-        self.compute_pseudo_element_style_with_rulenode(rule_node.as_ref(),
-                                                        guards,
-                                                        parent_style,
-                                                        font_metrics)
+        let cascade_inputs =
+            self.lazy_pseudo_rules(guards, element, pseudo, is_probe, rule_inclusion);
+        self.compute_pseudo_element_style_with_inputs(&cascade_inputs,
+                                                      guards,
+                                                      parent_style,
+                                                      font_metrics)
     }
 
-    /// Computes a pseudo-element style lazily using the given rulenode.  This
-    /// can be used for truly lazy pseudo-elements or to avoid redoing selector
-    /// matching for eager pseudo-elements when we need to recompute their style
-    /// with a new parent style.
-    pub fn compute_pseudo_element_style_with_rulenode(&self,
-                                                      rule_node: Option<&StrongRuleNode>,
-                                                      guards: &StylesheetGuards,
-                                                      parent_style: &ComputedValues,
-                                                      font_metrics: &FontMetricsProvider)
-                                                      -> Option<Arc<ComputedValues>>
+    /// Computes a pseudo-element style lazily using the given CascadeInputs.
+    /// This can be used for truly lazy pseudo-elements or to avoid redoing
+    /// selector matching for eager pseudo-elements when we need to recompute
+    /// their style with a new parent style.
+    pub fn compute_pseudo_element_style_with_inputs(&self,
+                                                    inputs: &CascadeInputs,
+                                                    guards: &StylesheetGuards,
+                                                    parent_style: &Arc<ComputedValues>,
+                                                    font_metrics: &FontMetricsProvider)
+                                                    -> Option<Arc<ComputedValues>>
     {
-        let rule_node = match rule_node {
-            Some(rule_node) => rule_node,
-            None => return None
+        // We may have only visited rules in cases when we are actually
+        // resolving, not probing, pseudo-element style.
+        if !inputs.has_rules() && !inputs.has_visited_rules() {
+            return None
+        }
+
+        // We need to compute visited values if we have visited rules or if our
+        // parent has visited values.
+        let visited_values = if inputs.has_visited_rules() || parent_style.get_visited_style().is_some() {
+            // Slightly annoying: we know that inputs has either rules or
+            // visited rules, but we can't do inputs.rules() up front because
+            // maybe it just has visited rules, so can't unwrap_or.
+            let rule_node = match inputs.get_visited_rules() {
+                Some(rules) => rules,
+                None => inputs.rules()
+            };
+            // We want to use the visited bits (if any) from our parent style as
+            // our parent.
+            let mode = CascadeVisitedMode::Visited;
+            let inherited_style = mode.values(parent_style);
+            let computed =
+                properties::cascade(&self.device,
+                                    rule_node,
+                                    guards,
+                                    Some(inherited_style),
+                                    Some(inherited_style),
+                                    None,
+                                    None,
+                                    &create_error_reporter(),
+                                    font_metrics,
+                                    CascadeFlags::empty(),
+                                    self.quirks_mode);
+
+            Some(Arc::new(computed))
+        } else {
+            None
+        };
+
+        // We may not have non-visited rules, if we only had visited ones.  In
+        // that case we want to use the root rulenode for our non-visited rules.
+        let root;
+        let rules = if let Some(rules) = inputs.get_rules() {
+            rules
+        } else {
+            root = self.rule_tree.root();
+            &root
         };
 
         // Read the comment on `precomputed_values_for_pseudo` to see why it's
         // difficult to assert that display: contents nodes never arrive here
         // (tl;dr: It doesn't apply for replaced elements and such, but the
         // computed value is still "contents").
-        // Bug 1364242: We need to add visited support for lazy pseudos
         let computed =
             properties::cascade(&self.device,
-                                rule_node,
+                                rules,
                                 guards,
                                 Some(parent_style),
                                 Some(parent_style),
-                                None,
+                                visited_values,
                                 None,
                                 &create_error_reporter(),
                                 font_metrics,
@@ -729,7 +788,7 @@ impl Stylist {
         Some(Arc::new(computed))
     }
 
-    /// Computes the rule node for a lazily-cascaded pseudo-element.
+    /// Computes the cascade inputs for a lazily-cascaded pseudo-element.
     ///
     /// See the documentation on lazy pseudo-elements in
     /// docs/components/style.md
@@ -737,14 +796,15 @@ impl Stylist {
                                 guards: &StylesheetGuards,
                                 element: &E,
                                 pseudo: &PseudoElement,
+                                is_probe: bool,
                                 rule_inclusion: RuleInclusion)
-                                -> Option<StrongRuleNode>
+                                -> CascadeInputs
         where E: TElement
     {
         let pseudo = pseudo.canonical();
         debug_assert!(pseudo.is_lazy());
         if self.pseudos_map.get(&pseudo).is_none() {
-            return None
+            return CascadeInputs::default()
         }
 
         // Apply the selector flags. We should be in sequential mode
@@ -777,7 +837,7 @@ impl Stylist {
             }
         };
 
-        // Bug 1364242: We need to add visited support for lazy pseudos
+        let mut inputs = CascadeInputs::default();
         let mut declarations = ApplicableDeclarationList::new();
         let mut matching_context =
             MatchingContext::new(MatchingMode::ForStatelessPseudoElement,
@@ -792,19 +852,52 @@ impl Stylist {
                                           &mut declarations,
                                           &mut matching_context,
                                           &mut set_selector_flags);
-        if declarations.is_empty() {
-            return None
-        }
 
-        let rule_node =
-            self.rule_tree.insert_ordered_rules_with_important(
+        if !declarations.is_empty() {
+            let rule_node = self.rule_tree.insert_ordered_rules_with_important(
                 declarations.into_iter().map(|a| a.order_and_level()),
                 guards);
-        if rule_node == self.rule_tree.root() {
-            None
-        } else {
-            Some(rule_node)
+            if rule_node != self.rule_tree.root() {
+                inputs.set_rules(VisitedHandlingMode::AllLinksUnvisited,
+                                 rule_node);
+            }
+        };
+
+        if is_probe && !inputs.has_rules() {
+            // When probing, don't compute visited styles if we have no
+            // unvisited styles.
+            return inputs;
         }
+
+        if matching_context.relevant_link_found {
+            let mut declarations = ApplicableDeclarationList::new();
+            let mut matching_context =
+                MatchingContext::new_for_visited(MatchingMode::ForStatelessPseudoElement,
+                                                 None,
+                                                 VisitedHandlingMode::RelevantLinkVisited,
+                                                 self.quirks_mode);
+            self.push_applicable_declarations(element,
+                                              Some(&pseudo),
+                                              None,
+                                              None,
+                                              AnimationRules(None, None),
+                                              rule_inclusion,
+                                              &mut declarations,
+                                              &mut matching_context,
+                                              &mut set_selector_flags);
+            if !declarations.is_empty() {
+                let rule_node =
+                    self.rule_tree.insert_ordered_rules_with_important(
+                        declarations.into_iter().map(|a| a.order_and_level()),
+                        guards);
+                if rule_node != self.rule_tree.root() {
+                    inputs.set_rules(VisitedHandlingMode::RelevantLinkVisited,
+                                     rule_node);
+                }
+            }
+        }
+
+        inputs
     }
 
     /// Set a given device, which may change the styles that apply to the
@@ -831,9 +924,13 @@ impl Stylist {
     pub fn set_device(&mut self,
                       mut device: Device,
                       guard: &SharedRwLockReadGuard,
-                      stylesheets: &[Arc<Stylesheet>]) {
+                      stylesheets: &[Arc<::stylesheets::Stylesheet>]) {
         let cascaded_rule = ViewportRule {
-            declarations: viewport_rule::Cascade::from_stylesheets(stylesheets.iter(), guard, &device).finish(),
+            declarations: viewport_rule::Cascade::from_stylesheets(
+                stylesheets.iter().map(|s| &**s),
+                guard,
+                &device
+            ).finish(),
         };
 
         self.viewport_constraints =
@@ -845,7 +942,7 @@ impl Stylist {
 
         self.device = device;
         let features_changed = self.media_features_change_changed_style(
-            stylesheets.iter(),
+            stylesheets.iter().map(|s| &**s),
             guard
         );
         self.is_device_dirty |= features_changed;
@@ -853,12 +950,14 @@ impl Stylist {
 
     /// Returns whether, given a media feature change, any previously-applicable
     /// style has become non-applicable, or vice-versa.
-    pub fn media_features_change_changed_style<'a, I>(
+    pub fn media_features_change_changed_style<'a, I, S>(
         &self,
         stylesheets: I,
         guard: &SharedRwLockReadGuard,
     ) -> bool
-        where I: Iterator<Item = &'a Arc<Stylesheet>>
+    where
+        I: Iterator<Item = &'a S>,
+        S: StylesheetInDocument + ToMediaListKey + 'static,
     {
         use invalidation::media_queries::PotentiallyEffectiveMediaRules;
 
@@ -866,11 +965,10 @@ impl Stylist {
 
         for stylesheet in stylesheets {
             let effective_now =
-                stylesheet.media.read_with(guard)
-                    .evaluate(&self.device, self.quirks_mode);
+                stylesheet.is_effective_for_device(&self.device, guard);
 
             let effective_then =
-                self.effective_media_query_results.was_effective(&**stylesheet);
+                self.effective_media_query_results.was_effective(stylesheet);
 
             if effective_now != effective_then {
                 debug!(" > Stylesheet changed -> {}, {}",
@@ -904,9 +1002,9 @@ impl Stylist {
                     }
                     CssRule::Import(ref lock) => {
                         let import_rule = lock.read_with(guard);
-                        let mq = import_rule.stylesheet.media.read_with(guard);
                         let effective_now =
-                            mq.evaluate(&self.device, self.quirks_mode);
+                            import_rule.stylesheet
+                                .is_effective_for_device(&self.device, guard);
                         let effective_then =
                             self.effective_media_query_results.was_effective(import_rule);
                         if effective_now != effective_then {
@@ -1288,21 +1386,6 @@ impl Stylist {
     /// Accessor for a shared reference to the rule tree.
     pub fn rule_tree(&self) -> &RuleTree {
         &self.rule_tree
-    }
-}
-
-impl Drop for Stylist {
-    fn drop(&mut self) {
-        // This is the last chance to GC the rule tree.  If we have dropped all
-        // strong rule node references before the Stylist is dropped, then this
-        // will cause the rule tree to be destroyed correctly.  If we haven't
-        // dropped all strong rule node references before now, then we will
-        // leak them, since there will be no way to call gc() on the rule tree
-        // after this point.
-        unsafe { self.rule_tree.gc(); }
-
-        // Assert against leaks.
-        debug_assert!(self.rule_tree.is_empty());
     }
 }
 

@@ -80,7 +80,6 @@
 
 #include "mozilla/Logging.h"
 #include "prtime.h"
-#include "prmem.h"
 #include "prenv.h"
 
 #include "mozilla/WidgetTraceEvent.h"
@@ -5194,12 +5193,19 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
 
     case WM_SETTINGCHANGE:
     {
-      if (IsWin10OrLater() && mWindowType == eWindowType_invisible && lParam) {
+      if (lParam) {
         auto lParamString = reinterpret_cast<const wchar_t*>(lParam);
-        if (!wcscmp(lParamString, L"UserInteractionMode")) {
-          nsCOMPtr<nsIWindowsUIUtils> uiUtils(do_GetService("@mozilla.org/windows-ui-utils;1"));
-          if (uiUtils) {
-            uiUtils->UpdateTabletModeState();
+        if (!wcscmp(lParamString, L"ImmersiveColorSet")) {
+          // WM_SYSCOLORCHANGE is not dispatched for accent color changes
+          OnSysColorChanged();
+          break;
+        }
+        if (IsWin10OrLater() && mWindowType == eWindowType_invisible) {
+          if (!wcscmp(lParamString, L"UserInteractionMode")) {
+            nsCOMPtr<nsIWindowsUIUtils> uiUtils(do_GetService("@mozilla.org/windows-ui-utils;1"));
+            if (uiUtils) {
+              uiUtils->UpdateTabletModeState();
+            }
           }
         }
       }

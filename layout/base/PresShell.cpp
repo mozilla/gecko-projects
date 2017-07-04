@@ -802,7 +802,6 @@ nsIPresShell::nsIPresShell()
     , mObservingLayoutFlushes(false)
     , mNeedThrottledAnimationFlush(true)
     , mPresShellId(0)
-    , mAPZFocusSequenceNumber(0)
     , mFontSizeInflationEmPerLine(0)
     , mFontSizeInflationMinTwips(0)
     , mFontSizeInflationLineThreshold(0)
@@ -831,6 +830,7 @@ PresShell::PresShell()
   , mLastCallbackEventRequest(nullptr)
   , mLastReflowStart(0.0)
   , mLastAnchorScrollPositionY(0)
+  , mAPZFocusSequenceNumber(0)
   , mChangeNestCount(0)
   , mDocumentLoading(false)
   , mIgnoreFrameDestruction(false)
@@ -971,14 +971,7 @@ PresShell::Init(nsIDocument* aDocument,
   // calling Init, since various subroutines need to find the style set off
   // the PresContext during initialization.
   mStyleSet = aStyleSet;
-  mStyleSet->Init(aPresContext);
-
-  // Set up our style rule observer. We don't need to inform a ServoStyleSet
-  // of the binding manager because it gets XBL style sheets from bindings
-  // in a different way.
-  if (mStyleSet->IsGecko()) {
-    mStyleSet->AsGecko()->SetBindingManager(mDocument->BindingManager());
-  }
+  mStyleSet->Init(aPresContext, mDocument->BindingManager());
 
   // Notify our prescontext that it now has a compatibility mode.  Note that
   // this MUST happen after we set up our style set but before we create any
@@ -1708,6 +1701,25 @@ PresShell::EndObservingDocument()
 char* nsPresShell_ReflowStackPointerTop;
 #endif
 
+class XBLConstructorRunner : public Runnable
+{
+public:
+  explicit XBLConstructorRunner(nsIDocument* aDocument)
+    : Runnable("XBLConstructorRunner")
+    , mDocument(aDocument)
+  {
+  }
+
+  NS_IMETHOD Run() override
+  {
+    mDocument->BindingManager()->ProcessAttachedQueue();
+    return NS_OK;
+  }
+
+private:
+  nsCOMPtr<nsIDocument> mDocument;
+};
+
 nsresult
 PresShell::Initialize(nscoord aWidth, nscoord aHeight)
 {
@@ -1803,24 +1815,14 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
       mFrameConstructor->EndUpdate();
     }
 
-    // nsAutoScriptBlocker going out of scope may have killed us too
+    // nsAutoCauseReflowNotifier (which sets up a script blocker) going out of
+    // scope may have killed us too
     NS_ENSURE_STATE(!mHaveShutDown);
 
-    // Run the XBL binding constructors for any new frames we've constructed
-    mDocument->BindingManager()->ProcessAttachedQueue();
-
-    // Constructors may have killed us too
-    NS_ENSURE_STATE(!mHaveShutDown);
-
-    // Now flush out pending restyles before we actually reflow, in
-    // case XBL constructors changed styles somewhere.
-    {
-      nsAutoScriptBlocker scriptBlocker;
-      mPresContext->RestyleManager()->ProcessPendingRestyles();
-    }
-
-    // And that might have run _more_ XBL constructors
-    NS_ENSURE_STATE(!mHaveShutDown);
+    // Run the XBL binding constructors for any new frames we've constructed.
+    // (Do this in a script runner, since our caller might have a script
+    // blocker on the stack.)
+    nsContentUtils::AddScriptRunner(new XBLConstructorRunner(mDocument));
   }
 
   NS_ASSERTION(rootFrame, "How did that happen?");
@@ -6370,6 +6372,10 @@ PresShell::Paint(nsView*         aViewToPaint,
     return;
   }
 
+  // Send an updated focus target with this transaction. Be sure to do this
+  // before we paint in the case this is an empty transaction.
+  layerManager->SetFocusTarget(mAPZFocusTarget);
+
   if (frame) {
     // Try to do an empty transaction, if the frame tree does not
     // need to be updated. Do not try to do an empty transaction on
@@ -7159,8 +7165,10 @@ PresShell::HandleEvent(nsIFrame* aFrame,
 
   // Update the latest focus sequence number with this new sequence number
   if (mAPZFocusSequenceNumber < aEvent->mFocusSequenceNumber) {
-    // XXX should we push a new FocusTarget to APZ here
     mAPZFocusSequenceNumber = aEvent->mFocusSequenceNumber;
+
+    // Schedule an empty transaction to transmit this focus update
+    aFrame->SchedulePaint(nsIFrame::PAINT_COMPOSITE_ONLY);
   }
 
   if (sPointerEventEnabled) {

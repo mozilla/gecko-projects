@@ -31,7 +31,10 @@ use std::cmp;
 #[cfg(feature = "gecko")] use fnv::FnvHashMap;
 use style_traits::ParseError;
 use super::ComputedValues;
-use values::{Auto, CSSFloat, CustomIdent, Either};
+#[cfg(any(feature = "gecko", feature = "testing"))]
+use values::Auto;
+use values::{CSSFloat, CustomIdent, Either};
+use values::animated::ToAnimatedValue;
 use values::animated::effects::BoxShadowList as AnimatedBoxShadowList;
 use values::animated::effects::Filter as AnimatedFilter;
 use values::animated::effects::FilterList as AnimatedFilterList;
@@ -408,7 +411,8 @@ impl AnimatedProperty {
                             };
                         % endif
                         % if not prop.is_animatable_with_computed_value:
-                            let value: longhands::${prop.ident}::computed_value::T = value.into();
+                            let value: longhands::${prop.ident}::computed_value::T =
+                                ToAnimatedValue::from_animated_value(value);
                         % endif
                         style.mutate_${prop.style_struct.ident.strip("_")}().set_${prop.ident}(value);
                     }
@@ -425,13 +429,21 @@ impl AnimatedProperty {
                                     -> AnimatedProperty {
         match *property {
             % for prop in data.longhands:
-                % if prop.animatable:
-                    AnimatableLonghand::${prop.camel_case} => {
-                        AnimatedProperty::${prop.camel_case}(
-                            old_style.get_${prop.style_struct.ident.strip("_")}().clone_${prop.ident}().into(),
-                            new_style.get_${prop.style_struct.ident.strip("_")}().clone_${prop.ident}().into())
-                    }
-                % endif
+            % if prop.animatable:
+                AnimatableLonghand::${prop.camel_case} => {
+                    let old_computed = old_style.get_${prop.style_struct.ident.strip("_")}().clone_${prop.ident}();
+                    let new_computed = new_style.get_${prop.style_struct.ident.strip("_")}().clone_${prop.ident}();
+                    AnimatedProperty::${prop.camel_case}(
+                    % if prop.is_animatable_with_computed_value:
+                        old_computed,
+                        new_computed,
+                    % else:
+                        old_computed.to_animated_value(),
+                        new_computed.to_animated_value(),
+                    % endif
+                    )
+                }
+            % endif
             % endfor
         }
     }
@@ -492,7 +504,7 @@ impl AnimationValue {
                                 % if prop.is_animatable_with_computed_value:
                                     from
                                 % else:
-                                    &from.clone().into()
+                                    &ToAnimatedValue::from_animated_value(from.clone())
                                 % endif
                                 ))
                             % if prop.boxed:
@@ -520,13 +532,14 @@ impl AnimationValue {
                     longhands::system_font::resolve_system_font(sf, context);
                 }
             % endif
-                Some(AnimationValue::${prop.camel_case}(
-                % if prop.is_animatable_with_computed_value:
-                    val.to_computed_value(context)
-                % else:
-                    From::from(val.to_computed_value(context))
-                % endif
-                ))
+            let computed = val.to_computed_value(context);
+            Some(AnimationValue::${prop.camel_case}(
+            % if prop.is_animatable_with_computed_value:
+                computed
+            % else:
+                computed.to_animated_value()
+            % endif
+            ))
             },
             % endif
             % endfor
@@ -555,7 +568,7 @@ impl AnimationValue {
                             },
                         };
                         % if not prop.is_animatable_with_computed_value:
-                            let computed = From::from(computed);
+                        let computed = computed.to_animated_value();
                         % endif
                         Some(AnimationValue::${prop.camel_case}(computed))
                     },
@@ -617,13 +630,16 @@ impl AnimationValue {
             % for prop in data.longhands:
                 % if prop.animatable:
                     AnimatableLonghand::${prop.camel_case} => {
+                        let computed = computed_values
+                            .get_${prop.style_struct.ident.strip("_")}()
+                            .clone_${prop.ident}();
                         AnimationValue::${prop.camel_case}(
                         % if prop.is_animatable_with_computed_value:
-                            computed_values.get_${prop.style_struct.ident.strip("_")}().clone_${prop.ident}())
+                            computed
                         % else:
-                            From::from(computed_values.get_${prop.style_struct.ident.strip("_")}()
-                                                                 .clone_${prop.ident}()))
+                            computed.to_animated_value()
                         % endif
+                        )
                     }
                 % endif
             % endfor
@@ -707,21 +723,16 @@ impl Animatable for AnimationValue {
         }
     }
 
-    fn get_zero_value(&self) -> Option<Self> {
-        match self {
+    fn get_zero_value(&self) -> Result<Self, ()> {
+        match *self {
             % for prop in data.longhands:
-                % if prop.animatable:
-                    % if prop.animation_value_type == "discrete":
-                        &AnimationValue::${prop.camel_case}(_) => {
-                            None
-                        }
-                    % else:
-                        &AnimationValue::${prop.camel_case}(ref base) => {
-                            base.get_zero_value().map(AnimationValue::${prop.camel_case})
-                        }
-                    % endif
-                % endif
+            % if prop.animatable and prop.animation_value_type != "discrete":
+            AnimationValue::${prop.camel_case}(ref base) => {
+                Ok(AnimationValue::${prop.camel_case}(base.get_zero_value()?))
+            },
+            % endif
             % endfor
+            _ => Err(()),
         }
     }
 
@@ -788,9 +799,8 @@ pub trait Animatable: Sized {
     /// This is not the necessarily the same as the initial value of a property. For example, the
     /// initial value of 'stroke-width' is 1, but the zero value is 0, since adding 1 to the
     /// underlying value will not produce the underlying value.
-    fn get_zero_value(&self) -> Option<Self> {
-        None
-    }
+    #[inline]
+    fn get_zero_value(&self) -> Result<Self, ()> { Err(()) }
 
     /// Compute distance between a value and another for a given property.
     fn compute_distance(&self, _other: &Self) -> Result<f64, ()>  { Err(()) }
@@ -848,7 +858,7 @@ impl Animatable for Au {
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> { Some(Au(0)) }
+    fn get_zero_value(&self) -> Result<Self, ()> { Ok(Au(0)) }
 
     #[inline]
     fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
@@ -901,7 +911,7 @@ impl Animatable for f32 {
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> { Some(0.) }
+    fn get_zero_value(&self) -> Result<Self, ()> { Ok(0.) }
 
     #[inline]
     fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
@@ -917,7 +927,7 @@ impl Animatable for f64 {
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> { Some(0.) }
+    fn get_zero_value(&self) -> Result<Self, ()> { Ok(0.) }
 
     #[inline]
     fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
@@ -933,7 +943,7 @@ impl Animatable for i32 {
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> { Some(0) }
+    fn get_zero_value(&self) -> Result<Self, ()> { Ok(0) }
 
     #[inline]
     fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
@@ -970,7 +980,7 @@ impl Animatable for Percentage {
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> { Some(Percentage(0.)) }
+    fn get_zero_value(&self) -> Result<Self, ()> { Ok(Percentage(0.)) }
 
     #[inline]
     fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
@@ -1156,7 +1166,9 @@ impl Animatable for LengthOrPercentage {
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> { Some(LengthOrPercentage::zero()) }
+    fn get_zero_value(&self) -> Result<Self, ()> {
+        Ok(LengthOrPercentage::zero())
+    }
 
     #[inline]
     fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
@@ -1231,14 +1243,14 @@ impl Animatable for LengthOrPercentageOrAuto {
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> {
+    fn get_zero_value(&self) -> Result<Self, ()> {
         match *self {
             LengthOrPercentageOrAuto::Length(_) |
             LengthOrPercentageOrAuto::Percentage(_) |
             LengthOrPercentageOrAuto::Calc(_) => {
-                Some(LengthOrPercentageOrAuto::Length(Au(0)))
+                Ok(LengthOrPercentageOrAuto::Length(Au(0)))
             },
-            LengthOrPercentageOrAuto::Auto => { None },
+            LengthOrPercentageOrAuto::Auto => Err(()),
         }
     }
 
@@ -1320,14 +1332,14 @@ impl Animatable for LengthOrPercentageOrNone {
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> {
+    fn get_zero_value(&self) -> Result<Self, ()> {
         match *self {
             LengthOrPercentageOrNone::Length(_) |
             LengthOrPercentageOrNone::Percentage(_) |
             LengthOrPercentageOrNone::Calc(_) => {
-                Some(LengthOrPercentageOrNone::Length(Au(0)))
+                Ok(LengthOrPercentageOrNone::Length(Au(0)))
             },
-            LengthOrPercentageOrNone::None => { None },
+            LengthOrPercentageOrNone::None => Err(()),
         }
     }
 
@@ -1434,7 +1446,7 @@ impl Animatable for FontWeight {
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> { Some(FontWeight::Weight400) }
+    fn get_zero_value(&self) -> Result<Self, ()> { Ok(FontWeight::Weight400) }
 
     #[inline]
     fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
@@ -1497,11 +1509,6 @@ impl Into<FontStretch> for f64 {
     }
 }
 
-// Like std::macros::try!, but for Option<>.
-macro_rules! option_try {
-    ($e:expr) => (match $e { Some(e) => e, None => return None })
-}
-
 /// https://drafts.csswg.org/css-transitions/#animtype-simple-list
 impl<H: Animatable, V: Animatable> Animatable for generic_position::Position<H, V> {
     #[inline]
@@ -1513,10 +1520,10 @@ impl<H: Animatable, V: Animatable> Animatable for generic_position::Position<H, 
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> {
-        Some(generic_position::Position {
-            horizontal: option_try!(self.horizontal.get_zero_value()),
-            vertical: option_try!(self.vertical.get_zero_value()),
+    fn get_zero_value(&self) -> Result<Self, ()> {
+        Ok(generic_position::Position {
+            horizontal: self.horizontal.get_zero_value()?,
+            vertical: self.vertical.get_zero_value()?,
         })
     }
 
@@ -2640,7 +2647,7 @@ impl Animatable for TransformList {
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> { Some(TransformList(None)) }
+    fn get_zero_value(&self) -> Result<Self, ()> { Ok(TransformList(None)) }
 }
 
 impl<T, U> Animatable for Either<T, U>
@@ -2663,10 +2670,14 @@ impl<T, U> Animatable for Either<T, U>
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> {
+    fn get_zero_value(&self) -> Result<Self, ()> {
         match *self {
-            Either::First(ref this) => { this.get_zero_value().map(Either::First) },
-            Either::Second(ref this) => { this.get_zero_value().map(Either::Second) },
+            Either::First(ref this) => {
+                Ok(Either::First(this.get_zero_value()?))
+            },
+            Either::Second(ref this) => {
+                Ok(Either::Second(this.get_zero_value()?))
+            },
         }
     }
 
@@ -2694,25 +2705,6 @@ impl<T, U> Animatable for Either<T, U>
             },
             _ => Err(())
         }
-    }
-}
-
-impl From<IntermediateRGBA> for RGBA {
-    fn from(extended_rgba: IntermediateRGBA) -> RGBA {
-        // RGBA::from_floats clamps each component values.
-        RGBA::from_floats(extended_rgba.red,
-                          extended_rgba.green,
-                          extended_rgba.blue,
-                          extended_rgba.alpha)
-    }
-}
-
-impl From<RGBA> for IntermediateRGBA {
-    fn from(rgba: RGBA) -> IntermediateRGBA {
-        IntermediateRGBA::new(rgba.red_f32(),
-                              rgba.green_f32(),
-                              rgba.blue_f32(),
-                              rgba.alpha_f32())
     }
 }
 
@@ -2744,6 +2736,31 @@ impl IntermediateRGBA {
     }
 }
 
+impl ToAnimatedValue for RGBA {
+    type AnimatedValue = IntermediateRGBA;
+
+    #[inline]
+    fn to_animated_value(self) -> Self::AnimatedValue {
+        IntermediateRGBA::new(
+            self.red_f32(),
+            self.green_f32(),
+            self.blue_f32(),
+            self.alpha_f32(),
+        )
+    }
+
+    #[inline]
+    fn from_animated_value(animated: Self::AnimatedValue) -> Self {
+        // RGBA::from_floats clamps each component values.
+        RGBA::from_floats(
+            animated.red,
+            animated.green,
+            animated.blue,
+            animated.alpha,
+        )
+    }
+}
+
 /// Unlike Animatable for RGBA we don't clamp any component values.
 impl Animatable for IntermediateRGBA {
     #[inline]
@@ -2770,8 +2787,8 @@ impl Animatable for IntermediateRGBA {
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> {
-        Some(IntermediateRGBA::transparent())
+    fn get_zero_value(&self) -> Result<Self, ()> {
+        Ok(IntermediateRGBA::transparent())
     }
 
     #[inline]
@@ -2795,24 +2812,6 @@ impl Animatable for IntermediateRGBA {
                                    n + diff * diff
                                });
         Ok(diff)
-    }
-}
-
-impl From<Either<Color, Auto>> for Either<IntermediateColor, Auto> {
-    fn from(from: Either<Color, Auto>) -> Either<IntermediateColor, Auto> {
-        match from {
-            Either::First(from) => Either::First(from.into()),
-            Either::Second(Auto) => Either::Second(Auto),
-        }
-    }
-}
-
-impl From<Either<IntermediateColor, Auto>> for Either<Color, Auto> {
-    fn from(from: Either<IntermediateColor, Auto>) -> Either<Color, Auto> {
-        match from {
-            Either::First(from) => Either::First(from.into()),
-            Either::Second(Auto) => Either::Second(Auto),
-        }
     }
 }
 
@@ -2852,6 +2851,26 @@ impl IntermediateColor {
         IntermediateRGBA {
             alpha: self.color.alpha * (1. - self.foreground_ratio),
             .. self.color
+        }
+    }
+}
+
+impl ToAnimatedValue for Color {
+    type AnimatedValue = IntermediateColor;
+
+    #[inline]
+    fn to_animated_value(self) -> Self::AnimatedValue {
+        IntermediateColor {
+            color: self.color.to_animated_value(),
+            foreground_ratio: self.foreground_ratio as f32 * (1. / 255.),
+        }
+    }
+
+    #[inline]
+    fn from_animated_value(animated: Self::AnimatedValue) -> Self {
+        Color {
+            color: RGBA::from_animated_value(animated.color),
+            foreground_ratio: (animated.foreground_ratio * 255.).round() as u8,
         }
     }
 }
@@ -2934,41 +2953,11 @@ impl Animatable for IntermediateColor {
     }
 }
 
-impl From<Color> for IntermediateColor {
-    fn from(color: Color) -> IntermediateColor {
-        IntermediateColor {
-            color: color.color.into(),
-            foreground_ratio: color.foreground_ratio as f32 * (1. / 255.),
-        }
-    }
-}
-
-impl From<IntermediateColor> for Color {
-    fn from(color: IntermediateColor) -> Color {
-        Color {
-            color: color.color.into(),
-            foreground_ratio: (color.foreground_ratio * 255.).round() as u8,
-        }
-    }
-}
-
 /// Animatable SVGPaint
 pub type IntermediateSVGPaint = SVGPaint<IntermediateRGBA>;
+
 /// Animatable SVGPaintKind
 pub type IntermediateSVGPaintKind = SVGPaintKind<IntermediateRGBA>;
-
-impl From<::values::computed::SVGPaint> for IntermediateSVGPaint {
-    fn from(paint: ::values::computed::SVGPaint) -> IntermediateSVGPaint {
-        paint.convert(|color| (*color).into())
-    }
-}
-
-impl From<IntermediateSVGPaint> for ::values::computed::SVGPaint {
-    fn from(paint: IntermediateSVGPaint) -> ::values::computed::SVGPaint {
-        paint.convert(|color| (*color).into())
-    }
-}
-
 
 impl Animatable for IntermediateSVGPaint {
     #[inline]
@@ -2991,10 +2980,10 @@ impl Animatable for IntermediateSVGPaint {
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> {
-        Some(IntermediateSVGPaint {
-            kind: option_try!(self.kind.get_zero_value()),
-            fallback: self.fallback.and_then(|v| v.get_zero_value()),
+    fn get_zero_value(&self) -> Result<Self, ()> {
+        Ok(IntermediateSVGPaint {
+            kind: self.kind.get_zero_value()?,
+            fallback: self.fallback.and_then(|v| v.get_zero_value().ok()),
         })
     }
 }
@@ -3029,14 +3018,15 @@ impl Animatable for IntermediateSVGPaintKind {
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Option<Self> {
-        match self {
-            &SVGPaintKind::Color(ref color) => color.get_zero_value()
-                                                    .map(SVGPaintKind::Color),
-            &SVGPaintKind::None |
-            &SVGPaintKind::ContextFill |
-            &SVGPaintKind::ContextStroke =>  Some(self.clone()),
-            _ => None,
+    fn get_zero_value(&self) -> Result<Self, ()> {
+        match *self {
+            SVGPaintKind::Color(ref color) => {
+                Ok(SVGPaintKind::Color(color.get_zero_value()?))
+            },
+            SVGPaintKind::None |
+            SVGPaintKind::ContextFill |
+            SVGPaintKind::ContextStroke => Ok(self.clone()),
+            _ => Err(()),
         }
     }
 }

@@ -53,6 +53,7 @@
 #include "mozilla/intl/LocaleService.h"
 #include "mozilla/ipc/TestShellChild.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
+#include "mozilla/jsipc/PJavaScript.h"
 #include "mozilla/layers/APZChild.h"
 #include "mozilla/layers/CompositorManagerChild.h"
 #include "mozilla/layers/ContentProcessController.h"
@@ -1520,12 +1521,25 @@ StartMacOSContentSandbox()
                    PR_GetEnv("MOZ_SANDBOX_LOGGING");
   info.appPath.assign(appPath.get());
   info.appBinaryPath.assign(appBinaryPath.get());
-  if (developer_repo_dir != nullptr) {
-    info.appDir.assign(developer_repo_dir);
-  } else {
-    info.appDir.assign(appDir.get());
-  }
+  info.appDir.assign(appDir.get());
   info.appTempDir.assign(tempDirPath.get());
+
+  // These paths are used to whitelist certain directories used by the testing
+  // system. They should not be considered a public API, and are only intended
+  // for use in automation.
+  nsAdoptingCString testingReadPath1 =
+    Preferences::GetCString("security.sandbox.content.mac.testing_read_path1");
+  if (!testingReadPath1.IsEmpty()) {
+    info.testingReadPath1.assign(testingReadPath1.get());
+  }
+  nsAdoptingCString testingReadPath2 =
+    Preferences::GetCString("security.sandbox.content.mac.testing_read_path2");
+  if (!testingReadPath2.IsEmpty()) {
+    info.testingReadPath2.assign(testingReadPath2.get());
+  }
+  if (developer_repo_dir) {
+    info.testingReadPath3.assign(developer_repo_dir);
+  }
 
   if (profileDir) {
     info.hasSandboxedProfile = true;
@@ -3524,6 +3538,17 @@ ContentChild::RecvShareCodeCoverageMutex(const CrossProcessMutexHandle& aHandle)
   NS_RUNTIMEABORT("Shouldn't receive this message in non-code coverage builds!");
   return IPC_FAIL_NO_REASON(this);
 #endif
+}
+
+already_AddRefed<nsIEventTarget>
+ContentChild::GetSpecificMessageEventTarget(const Message& aMsg)
+{
+  if (aMsg.type() == PJavaScript::Msg_DropTemporaryStrongReferences__ID
+      || aMsg.type() == PJavaScript::Msg_DropObject__ID) {
+    return do_AddRef(SystemGroup::EventTargetFor(TaskCategory::Other));
+  }
+
+  return nullptr;
 }
 
 } // namespace dom

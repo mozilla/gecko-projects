@@ -1,5 +1,5 @@
 import os
-from talos import filter, utils
+from talos import filter
 
 """
 test definitions for Talos
@@ -189,6 +189,18 @@ class sessionrestore_no_auto_restore(sessionrestore):
 
 
 @register_test()
+class sessionrestore_many_windows(sessionrestore):
+    """
+    A start up test measuring the time it takes to load a sessionstore.js file.
+
+    1. Set up Firefox to restore automatically from sessionstore.js file.
+    2. Launch Firefox.
+    3. Measure the delta between firstPaint and sessionRestored.
+    """
+    profile_path = '${talos}/startup_test/sessionrestore/profile-manywindows'
+
+
+@register_test()
 class tpaint(TsBase):
     """
     Tests the amount of time it takes the open a new window. This test does
@@ -299,10 +311,7 @@ class tps(PageloaderTest):
                                                      'tests',
                                                      'tp5o.html'),
         'addon.test.tabswitch.webserver': '${webserver}',
-        # limit the page set number for winxp as we have issues.
-        # see https://bugzilla.mozilla.org/show_bug.cgi?id=1195288
-        'addon.test.tabswitch.maxurls':
-            45 if utils.PLATFORM_TYPE == 'win_' else -1,
+        'addon.test.tabswitch.maxurls': -1,
     }
     unit = 'ms'
 
