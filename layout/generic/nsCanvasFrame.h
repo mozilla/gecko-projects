@@ -179,12 +179,11 @@ public:
   virtual void RestoreState() override
   {
     nsDisplayItem::RestoreState();
-    mColor = mState.mColor;
+    mColor = NS_RGBA(0, 0, 0, 0);
   }
 
   void SetExtraBackgroundColor(nscolor aColor)
   {
-    mState.mColor = mColor;
     mColor = aColor;
   }
 
@@ -192,11 +191,6 @@ public:
 #ifdef MOZ_DUMP_PAINTING
   virtual void WriteDebugInfo(std::stringstream& aStream) override;
 #endif
-
-private:
-  struct {
-    nscolor mColor;
-  } mState;
 };
 
 class nsDisplayCanvasBackgroundImage : public nsDisplayBackgroundImage {
