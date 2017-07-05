@@ -331,8 +331,9 @@ def mh_options_replace_project(config, jobs):
 def chain_of_trust(config, jobs):
     for job in jobs:
         # add the docker image to the chain of trust inputs in task.extra
-        cot = job.setdefault('extra', {}).setdefault('chainOfTrust', {})
-        cot.setdefault('inputs', {})['docker-image'] = {"task-reference": "<docker-image>"}
+        if not job['worker-type'].endswith("-b-win2012"):
+            cot = job.setdefault('extra', {}).setdefault('chainOfTrust', {})
+            cot.setdefault('inputs', {})['docker-image'] = {"task-reference": "<docker-image>"}
         yield job
 
 
@@ -348,7 +349,6 @@ def make_job_description(config, jobs):
     for job in jobs:
         job_description = {
             'name': job['name'],
-            'extra': job['extra'],
             'worker-type': job['worker-type'],
             'description': job['description'],
             'run': {
@@ -368,6 +368,8 @@ def make_job_description(config, jobs):
             },
             'run-on-projects': job.get('run-on-projects') if job.get('run-on-projects') else [],
         }
+        if job.get('extra'):
+            job_description['extra'] = job['extra']
 
         if job['worker-type'].endswith("-b-win2012"):
             job_description['worker'] = {
