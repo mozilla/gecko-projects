@@ -14,6 +14,7 @@
 #include "mozilla/dom/SVGTests.h"
 #include "nsContentUtils.h"
 #include "nsICSSDeclaration.h"
+#include "nsIContentInlines.h"
 #include "nsIDocument.h"
 #include "nsIDOMMutationEvent.h"
 #include "mozilla/InternalMutationEvent.h"
@@ -128,6 +129,17 @@ nsSVGElement::GetStyle(nsIDOMCSSStyleDeclaration** aStyle)
 void
 nsSVGElement::DidAnimateClass()
 {
+  // For Servo, snapshot the element before we change it.
+  nsIPresShell* shell = OwnerDoc()->GetShell();
+  if (shell) {
+    nsPresContext* presContext = shell->GetPresContext();
+    if (presContext && presContext->RestyleManager()->IsServo()) {
+      presContext->RestyleManager()
+                 ->AsServo()
+                 ->ClassAttributeWillBeChangedBySMIL(this);
+    }
+  }
+
   nsAutoString src;
   mClassAttribute.GetAnimValue(src, this);
   if (!mClassAnimAttr) {
@@ -135,7 +147,6 @@ nsSVGElement::DidAnimateClass()
   }
   mClassAnimAttr->ParseAtomArray(src);
 
-  nsIPresShell* shell = OwnerDoc()->GetShell();
   if (shell) {
     shell->RestyleForAnimation(this, eRestyle_Self);
   }

@@ -171,6 +171,7 @@ ${helpers.single_keyword("position", "static absolute relative fixed",
                                   gecko_enum_prefix="StyleFloat"
                                   gecko_inexhaustive="True"
                                   gecko_ffi_name="mFloat"
+                                  gecko_pref_ident="float_"
                                   spec="https://drafts.csswg.org/css-box/#propdef-float">
     no_viewport_percentage!(SpecifiedValue);
     impl ToComputedValue for SpecifiedValue {
@@ -655,7 +656,7 @@ ${helpers.predefined_type("animation-delay",
         "scroll-snap-points-" + axis,
         "ScrollSnapPoint",
         "computed::ScrollSnapPoint::none()",
-        animation_value_type="none",
+        animation_value_type="discrete",
         products="gecko",
         disable_when_testing=True,
         spec="Nonstandard (https://www.w3.org/TR/2015/WD-css-snappoints-1-20150326/#scroll-snap-points)",
@@ -678,8 +679,7 @@ ${helpers.predefined_type(
     products="gecko",
     spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/scroll-snap-destination)",
     animation_value_type="ComputedValue",
-    allow_empty="NotInitial",
-    delegate_animate=True,
+    allow_empty="NotInitial"
 )}
 
 <%helpers:longhand name="transform" extra_prefixes="webkit"
@@ -1873,7 +1873,7 @@ ${helpers.single_keyword("-moz-orient",
                           gecko_inexhaustive="True",
                           animation_value_type="discrete")}
 
-<%helpers:longhand name="will-change" products="gecko" animation_value_type="none"
+<%helpers:longhand name="will-change" products="gecko" animation_value_type="discrete"
                    spec="https://drafts.csswg.org/css-will-change/#will-change">
     use std::fmt;
     use style_traits::ToCss;

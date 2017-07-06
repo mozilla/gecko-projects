@@ -28,9 +28,9 @@ StyleSheet::StyleSheet(StyleBackendType aType, css::SheetParsingMode aParsingMod
   , mParsingMode(aParsingMode)
   , mType(aType)
   , mDisabled(false)
+  , mDirty(false)
   , mDocumentAssociationMode(NotOwnedByDocument)
   , mInner(nullptr)
-  , mDirty(false)
 {
 }
 
@@ -47,11 +47,11 @@ StyleSheet::StyleSheet(const StyleSheet& aCopy,
   , mParsingMode(aCopy.mParsingMode)
   , mType(aCopy.mType)
   , mDisabled(aCopy.mDisabled)
+  , mDirty(aCopy.mDirty)
   // We only use this constructor during cloning.  It's the cloner's
   // responsibility to notify us if we end up being owned by a document.
   , mDocumentAssociationMode(NotOwnedByDocument)
   , mInner(aCopy.mInner) // Shallow copy, but concrete subclasses will fix up.
-  , mDirty(aCopy.mDirty)
 {
   MOZ_ASSERT(mInner, "Should only copy StyleSheets with an mInner.");
   mInner->AddSheet(this);
@@ -457,24 +457,25 @@ StyleSheet::EnsureUniqueInner()
   mInner->RemoveSheet(this);
   mInner = clone;
 
-  // Ensure we're using the new rules.
-  //
-  // NOTE: In Servo, all kind of changes that change the set of selectors or
-  // rules we match are covered by the PresShell notifications. In Gecko that's
-  // true too, but this is probably needed because selectors are not refcounted
-  // and can become stale.
   if (CSSStyleSheet* geckoSheet = GetAsGecko()) {
+    // Ensure we're using the new rules.
+    //
+    // NOTE: In Servo, all kind of changes that change the set of selectors or
+    // rules we match are covered by the PresShell notifications. In Gecko
+    // that's true too, but this is probably needed because selectors are not
+    // refcounted and can become stale.
     geckoSheet->ClearRuleCascades();
+  } else {
+    // Fixup the child lists and parent links in the Servo sheet. This is done
+    // here instead of in StyleSheetInner::CloneFor, because it's just more
+    // convenient to do so instead.
+    AsServo()->BuildChildListAfterInnerClone();
   }
 
   // let our containing style sets know that if we call
   // nsPresContext::EnsureSafeToHandOutCSSRules we will need to restyle the
   // document
   for (StyleSetHandle& setHandle : mStyleSets) {
-    if (ServoStyleSet* servoSet = setHandle->GetAsServo()) {
-      MOZ_ASSERT(IsServo(), "Only servo sheets should be in servo stylesets.");
-      servoSet->UpdateStyleSheet(GetAsServo());
-    }
     setHandle->SetNeedsRestyleAfterEnsureUniqueInner();
   }
 }
@@ -718,9 +719,16 @@ StyleSheet::ClearAssociatedDocument()
 void
 StyleSheet::PrependStyleSheet(StyleSheet* aSheet)
 {
-  NS_PRECONDITION(nullptr != aSheet, "null arg");
-
   WillDirty();
+  PrependStyleSheetSilently(aSheet);
+  DidDirty();
+}
+
+void
+StyleSheet::PrependStyleSheetSilently(StyleSheet* aSheet)
+{
+  MOZ_ASSERT(aSheet);
+
   aSheet->mNext = SheetInfo().mFirstChild;
   SheetInfo().mFirstChild = aSheet;
 
@@ -728,7 +736,6 @@ StyleSheet::PrependStyleSheet(StyleSheet* aSheet)
   // it's going away.
   aSheet->mParent = this;
   aSheet->SetAssociatedDocument(mDocument, mDocumentAssociationMode);
-  DidDirty();
 }
 
 size_t

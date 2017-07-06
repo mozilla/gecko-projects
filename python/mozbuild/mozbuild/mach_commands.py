@@ -718,6 +718,54 @@ class Build(MachCommandBase):
         return self._run_command_in_objdir(args=args, pass_thru=True,
             ensure_exit_code=False)
 
+
+@CommandProvider
+class CargoProvider(MachCommandBase):
+    """Invoke cargo in useful ways."""
+
+    @Command('cargo', category='build',
+             description='Invoke cargo in useful ways.')
+    def cargo(self):
+        self.parser.print_usage()
+        return 1
+
+    @SubCommand('cargo', 'check',
+                description='Run `cargo check` on a given crate.  Defaults to gkrust.')
+    @CommandArgument('crates', default=None, nargs='*', help='The crate name(s) to check.')
+    def check(self, crates=None):
+        # XXX duplication with `mach vendor rust`
+        crates_and_roots = {
+            'gkrust': 'toolkit/library/rust',
+            'gkrust-gtest': 'toolkit/library/gtest/rust',
+            'mozjs_sys': 'js/src',
+            'geckodriver': 'testing/geckodriver',
+        }
+
+        if crates == None:
+            crates = ['gkrust']
+
+        for crate in crates:
+            root = crates_and_roots.get(crate, None)
+            if not root:
+                print('Cannot locate crate %s.  Please check your spelling or '
+                      'add the crate information to the list.' % crate)
+                return 1
+
+            check_targets = [
+                'force-cargo-library-check',
+                'force-cargo-host-library-check',
+                'force-cargo-program-check',
+                'force-cargo-host-program-check',
+            ]
+
+            ret = self._run_make(srcdir=False, directory=root,
+                                 ensure_exit_code=0, silent=True,
+                                 print_directory=False, target=check_targets)
+            if ret != 0:
+                return ret
+
+        return 0
+
 @CommandProvider
 class Doctor(MachCommandBase):
     """Provide commands for diagnosing common build environment problems"""
@@ -1255,6 +1303,8 @@ class RunProgram(MachCommandBase):
 
         if not enable_crash_reporter:
             extra_env['MOZ_CRASHREPORTER_DISABLE'] = '1'
+        else:
+            extra_env['MOZ_CRASHREPORTER'] = '1'
 
         if disable_e10s:
             extra_env['MOZ_FORCE_DISABLE_E10S'] = '1'

@@ -84,7 +84,7 @@ public:
     mOwningNode = aOwningNode;
   }
 
-  css::SheetParsingMode ParsingMode() { return mParsingMode; }
+  css::SheetParsingMode ParsingMode() const { return mParsingMode; }
   mozilla::dom::CSSStyleSheetParsingMode ParsingModeDOM();
 
   /**
@@ -144,7 +144,7 @@ public:
   void AppendAllChildSheets(nsTArray<StyleSheet*>& aArray);
 
   // style sheet owner info
-  enum DocumentAssociationMode {
+  enum DocumentAssociationMode : uint8_t {
     // OwnedByDocument means mDocument owns us (possibly via a chain of other
     // stylesheets).
     OwnedByDocument,
@@ -169,6 +169,9 @@ public:
   dom::CSSImportRule* GetOwnerRule() const { return mOwnerRule; }
 
   void PrependStyleSheet(StyleSheet* aSheet);
+
+  // Prepend a stylesheet to the child list without calling Will/DidDirty.
+  void PrependStyleSheetSilently(StyleSheet* aSheet);
 
   StyleSheet* GetFirstChild() const;
   StyleSheet* GetMostRecentlyAddedChildSheet() const {
@@ -334,6 +337,8 @@ protected:
   const StyleBackendType mType;
   bool                  mDisabled;
 
+  bool mDirty; // has been modified
+
   // mDocumentAssociationMode determines whether mDocument directly owns us (in
   // the sense that if it's known-live then we're known-live).  Always
   // NotOwnedByDocument when mDocument is null.
@@ -342,8 +347,6 @@ protected:
   // Core information we get from parsed sheets, which are shared amongst
   // StyleSheet clones.
   StyleSheetInfo* mInner;
-
-  bool mDirty; // has been modified
 
   nsTArray<StyleSetHandle> mStyleSets;
 

@@ -1583,6 +1583,9 @@ GetPseudo(const nsIContent* aContent, nsIAtom* aPseudoProperty)
 {
   MOZ_ASSERT(aPseudoProperty == nsGkAtoms::beforePseudoProperty ||
              aPseudoProperty == nsGkAtoms::afterPseudoProperty);
+  if (!aContent->MayHaveAnonymousChildren()) {
+    return nullptr;
+  }
   return static_cast<Element*>(aContent->GetProperty(aPseudoProperty));
 }
 
@@ -2641,7 +2644,7 @@ nsLayoutUtils::MatrixTransformPoint(const nsPoint &aPoint,
 {
   gfxPoint image = gfxPoint(NSAppUnitsToFloatPixels(aPoint.x, aFactor),
                             NSAppUnitsToFloatPixels(aPoint.y, aFactor));
-  image.Transform(aMatrix);
+  image = aMatrix.TransformPoint(image);
   return nsPoint(NSFloatPixelsToAppUnits(float(image.x), aFactor),
                  NSFloatPixelsToAppUnits(float(image.y), aFactor));
 }
@@ -3535,7 +3538,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
           nsLayoutUtils::PointToGfxPoint(pos,
                                          presContext->AppUnitsPerDevPixel());
         aRenderingContext->SetMatrix(
-          aRenderingContext->CurrentMatrix().Translate(devPixelOffset));
+          aRenderingContext->CurrentMatrix().PreTranslate(devPixelOffset));
       }
     }
     builder.SetIgnoreScrollFrame(rootScrollFrame);
@@ -6544,7 +6547,7 @@ ComputeSnappedImageDrawingParameters(gfxContext*     aCtx,
       imageSpaceAnchorPoint = StableRound(imageSpaceAnchorPoint);
       anchorPoint = imageSpaceAnchorPoint;
       anchorPoint = MapToFloatUserPixels(imageSize, devPixelDest, anchorPoint);
-      anchorPoint = currentMatrix.Transform(anchorPoint);
+      anchorPoint = currentMatrix.TransformPoint(anchorPoint);
       anchorPoint = StableRound(anchorPoint);
     }
 
@@ -6584,14 +6587,14 @@ ComputeSnappedImageDrawingParameters(gfxContext*     aCtx,
   if (didSnap && !invTransform.HasNonIntegerTranslation()) {
     // This form of Transform is safe to call since non-axis-aligned
     // transforms wouldn't be snapped.
-    devPixelDirty = currentMatrix.Transform(devPixelDirty);
+    devPixelDirty = currentMatrix.TransformRect(devPixelDirty);
     devPixelDirty.RoundOut();
     fill = fill.Intersect(devPixelDirty);
   }
   if (fill.IsEmpty())
     return SnappedImageDrawingParameters();
 
-  gfxRect imageSpaceFill(didSnap ? invTransform.Transform(fill)
+  gfxRect imageSpaceFill(didSnap ? invTransform.TransformRect(fill)
                                  : invTransform.TransformBounds(fill));
 
   // If we didn't snap, we need to post-multiply the matrix on the context to
@@ -8486,6 +8489,7 @@ nsLayoutUtils::DoLogTestDataForPaint(LayerManager* aManager,
                                      const std::string& aKey,
                                      const std::string& aValue)
 {
+  MOZ_ASSERT(nsLayoutUtils::IsAPZTestLoggingEnabled(), "don't call me");
   if (ClientLayerManager* mgr = aManager->AsClientLayerManager()) {
     mgr->LogTestDataForCurrentPaint(aScrollId, aKey, aValue);
   } else if (WebRenderLayerManager* wrlm = aManager->AsWebRenderLayerManager()) {
@@ -8796,13 +8800,17 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
     nsRect dp;
     if (nsLayoutUtils::GetDisplayPort(aContent, &dp)) {
       metrics.SetDisplayPort(CSSRect::FromAppUnits(dp));
-      nsLayoutUtils::LogTestDataForPaint(aLayer->Manager(), scrollId, "displayport",
-          metrics.GetDisplayPort());
+      if (IsAPZTestLoggingEnabled()) {
+        LogTestDataForPaint(aLayer->Manager(), scrollId, "displayport",
+                            metrics.GetDisplayPort());
+      }
     }
     if (nsLayoutUtils::GetCriticalDisplayPort(aContent, &dp)) {
       metrics.SetCriticalDisplayPort(CSSRect::FromAppUnits(dp));
-      nsLayoutUtils::LogTestDataForPaint(aLayer->Manager(), scrollId,
-          "criticalDisplayport", metrics.GetCriticalDisplayPort());
+      if (IsAPZTestLoggingEnabled()) {
+        LogTestDataForPaint(aLayer->Manager(), scrollId, "criticalDisplayport",
+                            metrics.GetCriticalDisplayPort());
+      }
     }
     DisplayPortMarginsPropertyData* marginsData =
         static_cast<DisplayPortMarginsPropertyData*>(aContent->GetProperty(nsGkAtoms::DisplayPortMargins));
@@ -8963,8 +8971,10 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
       nsAutoString contentDescription;
       content->Describe(contentDescription);
       metadata.SetContentDescription(NS_LossyConvertUTF16toASCII(contentDescription));
-      nsLayoutUtils::LogTestDataForPaint(aLayer->Manager(), scrollId, "contentDescription",
-          metadata.GetContentDescription().get());
+      if (IsAPZTestLoggingEnabled()) {
+        LogTestDataForPaint(aLayer->Manager(), scrollId, "contentDescription",
+                            metadata.GetContentDescription().get());
+      }
     }
   }
 

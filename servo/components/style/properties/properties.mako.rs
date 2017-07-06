@@ -375,7 +375,7 @@ impl PropertyDeclarationIdSet {
             % else:
                 value: &DeclaredValue<longhands::${property.ident}::SpecifiedValue>,
             % endif
-            custom_properties: &Option<Arc<::custom_properties::ComputedValuesMap>>,
+            custom_properties: &Option<Arc<::custom_properties::CustomPropertiesMap>>,
             f: &mut F,
             error_reporter: &ParseErrorReporter,
             quirks_mode: QuirksMode)
@@ -406,7 +406,7 @@ impl PropertyDeclarationIdSet {
                 first_token_type: TokenSerializationType,
                 url_data: &UrlExtraData,
                 from_shorthand: Option<ShorthandId>,
-                custom_properties: &Option<Arc<::custom_properties::ComputedValuesMap>>,
+                custom_properties: &Option<Arc<::custom_properties::CustomPropertiesMap>>,
                 f: &mut F,
                 error_reporter: &ParseErrorReporter,
                 quirks_mode: QuirksMode)
@@ -1179,29 +1179,45 @@ impl ToCss for PropertyDeclaration {
     }
 }
 
-<%def name="property_pref_check(property)">
-    % if property.experimental and product == "servo":
-        if !PREFS.get("${property.experimental}")
-            .as_boolean().unwrap_or(false) {
-            return Err(PropertyDeclarationParseError::ExperimentalProperty)
-        }
-    % endif
-    % if product == "gecko":
-        <%
-            # gecko can't use the identifier `float`
-            # and instead uses `float_`
-            # XXXManishearth make this an attr on the property
-            # itself?
-            pref_ident = property.ident
-            if pref_ident == "float":
-                pref_ident = "float_"
-        %>
-        if structs::root::mozilla::SERVO_PREF_ENABLED_${pref_ident} {
-            let id = structs::${helpers.to_nscsspropertyid(property.ident)};
-            let enabled = unsafe { bindings::Gecko_PropertyId_IsPrefEnabled(id) };
-            if !enabled {
-                return Err(PropertyDeclarationParseError::ExperimentalProperty)
+<%def name="property_exposure_check(property)">
+    // For properties that are experimental but not internal, the pref will
+    // control its availability in all sheets.   For properties that are
+    // both experimental and internal, the pref only controls its
+    // availability in non-UA sheets (and in UA sheets it is always available).
+    let is_experimental =
+        % if property.experimental and product == "servo":
+            true;
+        % elif product == "gecko":
+            structs::root::mozilla::SERVO_PREF_ENABLED_${property.gecko_pref_ident};
+        % else:
+            false;
+        % endif
+
+    let passes_pref_check =
+        % if property.experimental and product == "servo":
+            PREFS.get("${property.experimental}").as_boolean().unwrap_or(false);
+        % elif product == "gecko":
+            {
+                let id = structs::${helpers.to_nscsspropertyid(property.ident)};
+                unsafe { bindings::Gecko_PropertyId_IsPrefEnabled(id) }
+            };
+        % else:
+            true;
+        % endif
+
+    % if property.internal:
+        if context.stylesheet_origin != Origin::UserAgent {
+            if is_experimental {
+                if !passes_pref_check {
+                    return Err(PropertyDeclarationParseError::ExperimentalProperty);
+                }
+            } else {
+                return Err(PropertyDeclarationParseError::UnknownProperty);
             }
+        }
+    % else:
+        if is_experimental && !passes_pref_check {
+            return Err(PropertyDeclarationParseError::ExperimentalProperty);
         }
     % endif
 </%def>
@@ -1418,18 +1434,13 @@ impl PropertyDeclaration {
                                 return Err(PropertyDeclarationParseError::AnimationPropertyInKeyframeBlock)
                             }
                         % endif
-                        % if property.internal:
-                            if context.stylesheet_origin != Origin::UserAgent {
-                                return Err(PropertyDeclarationParseError::UnknownProperty)
-                            }
-                        % endif
                         % if not property.allowed_in_page_rule:
                             if rule_type == CssRuleType::Page {
                                 return Err(PropertyDeclarationParseError::NotAllowedInPageRule)
                             }
                         % endif
 
-                        ${property_pref_check(property)}
+                        ${property_exposure_check(property)}
 
                         match longhands::${property.ident}::parse_declared(context, input) {
                             Ok(value) => {
@@ -1452,18 +1463,13 @@ impl PropertyDeclaration {
                             return Err(PropertyDeclarationParseError::AnimationPropertyInKeyframeBlock)
                         }
                     % endif
-                    % if shorthand.internal:
-                        if context.stylesheet_origin != Origin::UserAgent {
-                            return Err(PropertyDeclarationParseError::UnknownProperty)
-                        }
-                    % endif
                     % if not shorthand.allowed_in_page_rule:
                         if rule_type == CssRuleType::Page {
                             return Err(PropertyDeclarationParseError::NotAllowedInPageRule)
                         }
                     % endif
 
-                    ${property_pref_check(shorthand)}
+                    ${property_exposure_check(shorthand)}
 
                     match input.try(|i| CSSWideKeyword::parse(context, i)) {
                         Ok(keyword) => {
@@ -1801,6 +1807,9 @@ pub mod style_structs {
 % endfor
 
 
+#[cfg(feature = "gecko")]
+pub use gecko_properties::ComputedValues;
+
 /// A legacy alias for a servo-version of ComputedValues. Should go away soon.
 #[cfg(feature = "servo")]
 pub type ServoComputedValues = ComputedValues;
@@ -1811,12 +1820,13 @@ pub type ServoComputedValues = ComputedValues;
 /// every kind of style struct.
 ///
 /// When needed, the structs may be copied in order to get mutated.
-#[derive(Clone)]
+#[cfg(feature = "servo")]
+#[cfg_attr(feature = "servo", derive(Clone))]
 pub struct ComputedValues {
     % for style_struct in data.active_style_structs():
         ${style_struct.ident}: Arc<style_structs::${style_struct.name}>,
     % endfor
-    custom_properties: Option<Arc<::custom_properties::ComputedValuesMap>>,
+    custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
     /// The writing mode of this computed values struct.
     pub writing_mode: WritingMode,
     /// The keyword behind the current font-size property, if any
@@ -1836,10 +1846,11 @@ pub struct ComputedValues {
     visited_style: Option<Arc<ComputedValues>>,
 }
 
+#[cfg(feature = "servo")]
 impl ComputedValues {
     /// Construct a `ComputedValues` instance.
     pub fn new(
-        custom_properties: Option<Arc<::custom_properties::ComputedValuesMap>>,
+        custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
         writing_mode: WritingMode,
         font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
         flags: ComputedValueFlags,
@@ -1862,6 +1873,9 @@ impl ComputedValues {
         % endfor
         }
     }
+
+    /// Get the initial computed values.
+    pub fn initial_values() -> &'static Self { &*INITIAL_SERVO_VALUES }
 
     % for style_struct in data.active_style_structs():
         /// Clone the ${style_struct.name} struct.
@@ -1889,30 +1903,6 @@ impl ComputedValues {
         }
     % endfor
 
-    /// Get the initial computed values.
-    #[cfg(feature = "servo")]
-    pub fn initial_values() -> &'static Self { &*INITIAL_SERVO_VALUES }
-
-    /// Get the default computed values for a given document.
-    ///
-    /// This takes into account zoom, etc.
-    #[cfg(feature = "gecko")]
-    pub fn default_values(
-        pres_context: bindings::RawGeckoPresContextBorrowed
-    ) -> Arc<Self> {
-        Arc::new(ComputedValues {
-            custom_properties: None,
-            writing_mode: WritingMode::empty(), // FIXME(bz): This seems dubious
-            font_computation_data: FontComputationData::default_values(),
-            flags: ComputedValueFlags::initial(),
-            rules: None,
-            visited_style: None,
-            % for style_struct in data.style_structs:
-                ${style_struct.ident}: style_structs::${style_struct.name}::default(pres_context),
-            % endfor
-        })
-    }
-
     /// Gets a reference to the rule node. Panic if no rule node exists.
     pub fn rules(&self) -> &StrongRuleNode {
         self.rules.as_ref().unwrap()
@@ -1937,7 +1927,7 @@ impl ComputedValues {
     // Aah! The << in the return type below is not valid syntax, but we must
     // escape < that way for Mako.
     /// Gets a reference to the custom properties map (if one exists).
-    pub fn get_custom_properties(&self) -> Option<<&::custom_properties::ComputedValuesMap> {
+    pub fn get_custom_properties(&self) -> Option<<&::custom_properties::CustomPropertiesMap> {
         self.custom_properties.as_ref().map(|x| &**x)
     }
 
@@ -1945,77 +1935,23 @@ impl ComputedValues {
     ///
     /// Cloning the Arc here is fine because it only happens in the case where
     /// we have custom properties, and those are both rare and expensive.
-    pub fn custom_properties(&self) -> Option<Arc<::custom_properties::ComputedValuesMap>> {
+    pub fn custom_properties(&self) -> Option<Arc<::custom_properties::CustomPropertiesMap>> {
         self.custom_properties.clone()
-    }
-
-    /// Get a declaration block representing the computed value for a given
-    /// property.
-    ///
-    /// Currently only implemented for animated properties.
-    pub fn to_declaration_block(
-        &self,
-        property: PropertyDeclarationId
-    ) -> PropertyDeclarationBlock {
-        use values::computed::ToComputedValue;
-
-        match property {
-            % for prop in data.longhands:
-                % if prop.animatable:
-                    PropertyDeclarationId::Longhand(LonghandId::${prop.camel_case}) => {
-                         PropertyDeclarationBlock::with_one(
-                            PropertyDeclaration::${prop.camel_case}(
-                                % if prop.boxed:
-                                    Box::new(
-                                % endif
-                                longhands::${prop.ident}::SpecifiedValue::from_computed_value(
-                                  &self.get_${prop.style_struct.ident.strip("_")}().clone_${prop.ident}())
-                                % if prop.boxed:
-                                    )
-                                % endif
-                            ),
-                            Importance::Normal
-                        )
-                    },
-                % endif
-            % endfor
-            PropertyDeclarationId::Custom(_name) => unimplemented!(),
-            _ => unimplemented!()
-        }
     }
 
     /// Whether this style has a -moz-binding value. This is always false for
     /// Servo for obvious reasons.
-    #[inline]
-    #[cfg(feature = "servo")]
     pub fn has_moz_binding(&self) -> bool { false }
-
-    /// Whether this style has a -moz-binding value.
-    #[inline]
-    #[cfg(feature = "gecko")]
-    pub fn has_moz_binding(&self) -> bool {
-        !self.get_box().gecko().mBinding.mPtr.mRawPtr.is_null()
-    }
 
     /// Returns whether this style's display value is equal to contents.
     ///
     /// Since this isn't supported in Servo, this is always false for Servo.
-    #[inline]
-    #[cfg(feature = "servo")]
     pub fn is_display_contents(&self) -> bool { false }
 
-    /// Returns whether this style's display value is equal to contents.
     #[inline]
-    #[cfg(feature = "gecko")]
-    pub fn is_display_contents(&self) -> bool {
-        self.get_box().clone_display() == longhands::display::computed_value::T::contents
-    }
-
     /// Returns whether the "content" property for the given style is completely
     /// ineffective, and would yield an empty `::before` or `::after`
     /// pseudo-element.
-    #[inline]
-    #[cfg(feature = "servo")]
     pub fn ineffective_content_property(&self) -> bool {
         use properties::longhands::content::computed_value::T;
         match self.get_counters().content {
@@ -2024,23 +1960,8 @@ impl ComputedValues {
         }
     }
 
-    /// Returns true if the value of the `content` property would make a
-    /// pseudo-element not rendered.
-    #[inline]
-    #[cfg(feature = "gecko")]
-    pub fn ineffective_content_property(&self) -> bool {
-        self.get_counters().ineffective_content_property()
-    }
-
-    #[inline]
-    #[cfg(feature = "gecko")]
     /// Whether the current style is multicolumn.
-    /// FIXME(bholley): Implement this properly.
-    pub fn is_multicol(&self) -> bool { false }
-
     #[inline]
-    #[cfg(feature = "servo")]
-    /// Whether the current style is multicolumn.
     pub fn is_multicol(&self) -> bool {
         let style = self.get_column();
         match style.column_width {
@@ -2051,10 +1972,7 @@ impl ComputedValues {
             }
         }
     }
-}
 
-#[cfg(feature = "servo")]
-impl ComputedValues {
     /// Resolves the currentColor keyword.
     ///
     /// Any color value from computed values (except for the 'color' property
@@ -2241,7 +2159,7 @@ impl ComputedValues {
             PropertyDeclarationId::Custom(name) => {
                 self.custom_properties
                     .as_ref()
-                    .and_then(|map| map.get(name))
+                    .and_then(|map| map.get_computed_value(name))
                     .map(|value| value.to_css_string())
                     .unwrap_or(String::new())
             }
@@ -2401,7 +2319,7 @@ pub struct StyleBuilder<'a> {
     /// The rule node representing the ordered list of rules matched for this
     /// node.
     rules: Option<StrongRuleNode>,
-    custom_properties: Option<Arc<::custom_properties::ComputedValuesMap>>,
+    custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
     /// The writing mode flags.
     ///
     /// TODO(emilio): Make private.
@@ -2423,7 +2341,7 @@ impl<'a> StyleBuilder<'a> {
         inherited_style: &'a ComputedValues,
         reset_style: &'a ComputedValues,
         rules: Option<StrongRuleNode>,
-        custom_properties: Option<Arc<::custom_properties::ComputedValuesMap>>,
+        custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
         writing_mode: WritingMode,
         font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
         visited_style: Option<Arc<ComputedValues>>,
@@ -2544,7 +2462,7 @@ impl<'a> StyleBuilder<'a> {
     ///
     /// Cloning the Arc here is fine because it only happens in the case where
     /// we have custom properties, and those are both rare and expensive.
-    fn custom_properties(&self) -> Option<Arc<::custom_properties::ComputedValuesMap>> {
+    fn custom_properties(&self) -> Option<Arc<::custom_properties::CustomPropertiesMap>> {
         self.custom_properties.clone()
     }
 }

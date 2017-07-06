@@ -322,7 +322,19 @@ class ProxyContextParent extends BaseContext {
 
     this.listenerProxies = new Map();
 
+    this.pendingEventBrowser = null;
+
     apiManager.emit("proxy-context-load", this);
+  }
+
+  withPendingBrowser(browser, callable) {
+    let savedBrowser = this.pendingEventBrowser;
+    this.pendingEventBrowser = browser;
+    try {
+      return callable();
+    } finally {
+      this.pendingEventBrowser = savedBrowser;
+    }
   }
 
   get cloneScope() {
@@ -614,8 +626,8 @@ ParentAPIManager = {
     try {
       let args = Cu.cloneInto(data.args, context.sandbox);
       let fun = await context.apiCan.asyncFindAPIPath(data.path);
-      let result = fun(...args);
-
+      let result = context.withPendingBrowser(context.pendingEventBrowser,
+                                              () => fun(...args));
       if (data.callId) {
         result = result || Promise.resolve();
 
@@ -647,6 +659,7 @@ ParentAPIManager = {
     }
 
     let {childId} = data;
+    let handlingUserInput = false;
 
     function listener(...listenerArgs) {
       return context.sendMessage(
@@ -654,6 +667,7 @@ ParentAPIManager = {
         "API:RunListener",
         {
           childId,
+          handlingUserInput,
           listenerId: data.listenerId,
           path: data.path,
           args: new StructuredCloneHolder(listenerArgs),
@@ -678,6 +692,9 @@ ParentAPIManager = {
     }
 
     let handler = await promise;
+    if (handler.setUserInput) {
+      handlingUserInput = true;
+    }
     handler.addListener(listener, ...args);
   },
 
@@ -1114,9 +1131,9 @@ let IconDetails = {
     let result = {};
 
     try {
-      if (details.imageData) {
-        let imageData = details.imageData;
+      let {imageData, path, themeIcons} = details;
 
+      if (imageData) {
         if (typeof imageData == "string") {
           imageData = {"19": imageData};
         }
@@ -1129,13 +1146,12 @@ let IconDetails = {
         }
       }
 
-      if (details.path) {
-        let path = details.path;
+      let baseURI = context ? context.uri : extension.baseURI;
+
+      if (path) {
         if (typeof path != "object") {
           path = {"19": path};
         }
-
-        let baseURI = context ? context.uri : extension.baseURI;
 
         for (let size of Object.keys(path)) {
           if (!INTEGER.test(size)) {
@@ -1148,16 +1164,27 @@ let IconDetails = {
           // relative paths. We currently accept absolute URLs as well,
           // which means we need to check that the extension is allowed
           // to load them. This will throw an error if it's not allowed.
-          try {
-            Services.scriptSecurityManager.checkLoadURIStrWithPrincipal(
-              extension.principal, url,
-              Services.scriptSecurityManager.DISALLOW_SCRIPT);
-          } catch (e) {
-            throw new ExtensionError(`Illegal URL ${url}`);
-          }
+          this._checkURL(url, extension.principal);
 
           result[size] = url;
         }
+      }
+
+      if (themeIcons) {
+        themeIcons.forEach(({size, light, dark}) => {
+          let lightURL = baseURI.resolve(light);
+          let darkURL = baseURI.resolve(dark);
+
+          this._checkURL(lightURL, extension.principal);
+          this._checkURL(darkURL, extension.principal);
+
+          let defaultURL = result[size];
+          result[size] = {
+            "default": defaultURL || lightURL, // Fallback to the light url if no default is specified.
+            "light": lightURL,
+            "dark": darkURL,
+          };
+        });
       }
     } catch (e) {
       // Function is called from extension code, delegate error.
@@ -1171,6 +1198,18 @@ let IconDetails = {
     }
 
     return result;
+  },
+
+  // Checks if the extension is allowed to load the given URL with the specified principal.
+  // This will throw an error if the URL is not allowed.
+  _checkURL(url, principal) {
+    try {
+      Services.scriptSecurityManager.checkLoadURIStrWithPrincipal(
+        principal, url,
+        Services.scriptSecurityManager.DISALLOW_SCRIPT);
+    } catch (e) {
+      throw new ExtensionError(`Illegal URL ${url}`);
+    }
   },
 
   // Returns the appropriate icon URL for the given icons object and the

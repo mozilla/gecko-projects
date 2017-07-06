@@ -61,15 +61,28 @@ pub struct StyleSystemOptions {
     pub disable_style_sharing_cache: bool,
     /// Whether we should dump statistics about the style system.
     pub dump_style_statistics: bool,
+    /// The minimum number of elements that must be traversed to trigger a dump
+    /// of style statistics.
+    pub style_statistics_threshold: usize,
 }
 
 #[cfg(feature = "gecko")]
-fn get_env(name: &str) -> bool {
+fn get_env_bool(name: &str) -> bool {
     use std::env;
     match env::var(name) {
         Ok(s) => !s.is_empty(),
         Err(_) => false,
     }
+}
+
+const DEFAULT_STATISTICS_THRESHOLD: usize = 50;
+
+#[cfg(feature = "gecko")]
+fn get_env_usize(name: &str) -> Option<usize> {
+    use std::env;
+    env::var(name).ok().map(|s| {
+        s.parse::<usize>().expect("Couldn't parse environmental variable as usize")
+    })
 }
 
 impl Default for StyleSystemOptions {
@@ -80,14 +93,17 @@ impl Default for StyleSystemOptions {
         StyleSystemOptions {
             disable_style_sharing_cache: opts::get().disable_share_style_cache,
             dump_style_statistics: opts::get().style_sharing_stats,
+            style_statistics_threshold: DEFAULT_STATISTICS_THRESHOLD,
         }
     }
 
     #[cfg(feature = "gecko")]
     fn default() -> Self {
         StyleSystemOptions {
-            disable_style_sharing_cache: get_env("DISABLE_STYLE_SHARING_CACHE"),
-            dump_style_statistics: get_env("DUMP_STYLE_STATISTICS"),
+            disable_style_sharing_cache: get_env_bool("DISABLE_STYLE_SHARING_CACHE"),
+            dump_style_statistics: get_env_bool("DUMP_STYLE_STATISTICS"),
+            style_statistics_threshold: get_env_usize("STYLE_STATISTICS_THRESHOLD")
+                                          .unwrap_or(DEFAULT_STATISTICS_THRESHOLD),
         }
     }
 }
@@ -184,7 +200,7 @@ impl Default for CascadeInputs {
 
 impl CascadeInputs {
     /// Construct inputs from previous cascade results, if any.
-    fn new_from_style(style: &Arc<ComputedValues>) -> Self {
+    pub fn new_from_style(style: &Arc<ComputedValues>) -> Self {
         CascadeInputs {
             rules: style.rules.clone(),
             visited_rules: style.get_visited_style().and_then(|v| v.rules.clone()),
@@ -202,6 +218,11 @@ impl CascadeInputs {
     /// Gets a mutable reference to the rule node, if any.
     pub fn get_rules_mut(&mut self) -> Option<&mut StrongRuleNode> {
         self.rules.as_mut()
+    }
+
+    /// Gets a reference to the rule node, if any.
+    pub fn get_rules(&self) -> Option<&StrongRuleNode> {
+        self.rules.as_ref()
     }
 
     /// Gets a reference to the rule node. Panic if the element does not have
@@ -610,6 +631,8 @@ pub struct TraversalStatistics {
     pub traversal_time_ms: f64,
     /// Whether this was a parallel traversal.
     pub is_parallel: Option<bool>,
+    /// Whether this is a "large" traversal.
+    pub is_large: Option<bool>,
 }
 
 /// Implementation of Add to aggregate statistics across different threads.
@@ -635,6 +658,7 @@ impl<'a> Add for &'a TraversalStatistics {
             stylist_rebuilds: 0,
             traversal_time_ms: 0.0,
             is_parallel: None,
+            is_large: None,
         }
     }
 }
@@ -670,7 +694,10 @@ impl TraversalStatistics {
         where E: TElement,
               D: DomTraversal<E>,
     {
+        let threshold = traversal.shared_context().options.style_statistics_threshold;
+
         self.is_parallel = Some(traversal.is_parallel());
+        self.is_large = Some(self.elements_traversed as usize >= threshold);
         self.traversal_time_ms = (time::precise_time_s() - start) * 1000.0;
         self.selectors = traversal.shared_context().stylist.num_selectors() as u32;
         self.revalidation_selectors = traversal.shared_context().stylist.num_revalidation_selectors() as u32;
@@ -683,7 +710,7 @@ impl TraversalStatistics {
     /// Returns whether this traversal is 'large' in order to avoid console spam
     /// from lots of tiny traversals.
     pub fn is_large_traversal(&self) -> bool {
-        self.elements_traversed >= 50
+        self.is_large.unwrap()
     }
 }
 

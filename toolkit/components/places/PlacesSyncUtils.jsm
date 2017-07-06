@@ -1361,7 +1361,8 @@ function validateNewBookmark(info) {
       title: { validIf: b => [ BookmarkSyncUtils.KINDS.BOOKMARK,
                                BookmarkSyncUtils.KINDS.QUERY,
                                BookmarkSyncUtils.KINDS.FOLDER,
-                               BookmarkSyncUtils.KINDS.LIVEMARK ].includes(b.kind) },
+                               BookmarkSyncUtils.KINDS.LIVEMARK ].includes(b.kind) ||
+                             b.title === "" },
       query: { validIf: b => b.kind == BookmarkSyncUtils.KINDS.QUERY },
       folder: { validIf: b => b.kind == BookmarkSyncUtils.KINDS.QUERY },
       tags: { validIf: b => [ BookmarkSyncUtils.KINDS.BOOKMARK,
@@ -1420,9 +1421,11 @@ function tagItem(item, tags) {
   // tag IDs, we temporarily tag a dummy URI, ensuring the tags exist.
   let dummyURI = PlacesUtils.toURI("about:weave#BStore_tagURI");
   let bookmarkURI = PlacesUtils.toURI(item.url.href);
-  PlacesUtils.tagging.tagURI(dummyURI, newTags, SOURCE_SYNC);
+  if (newTags && newTags.length > 0)
+    PlacesUtils.tagging.tagURI(dummyURI, newTags, SOURCE_SYNC);
   PlacesUtils.tagging.untagURI(bookmarkURI, null, SOURCE_SYNC);
-  PlacesUtils.tagging.tagURI(bookmarkURI, newTags, SOURCE_SYNC);
+  if (newTags && newTags.length > 0)
+    PlacesUtils.tagging.tagURI(bookmarkURI, newTags, SOURCE_SYNC);
   PlacesUtils.tagging.untagURI(dummyURI, null, SOURCE_SYNC);
 
   return newTags;

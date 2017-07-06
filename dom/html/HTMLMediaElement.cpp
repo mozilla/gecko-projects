@@ -148,9 +148,9 @@ static const uint32_t STALL_MS = 3000;
 
 // These constants are arbitrary
 // Minimum playbackRate for a media
-static const double MIN_PLAYBACKRATE = 0.25;
+static const double MIN_PLAYBACKRATE = 1.0 / 16;
 // Maximum playbackRate for a media
-static const double MAX_PLAYBACKRATE = 5.0;
+static const double MAX_PLAYBACKRATE = 16.0;
 // These are the limits beyonds which SoundTouch does not perform too well and when
 // speech is hard to understand anyway.
 // Threshold above which audio is muted
@@ -2507,7 +2507,8 @@ nsresult HTMLMediaElement::LoadResource()
       mPlaybackRate,
       mPreloadAction == HTMLMediaElement::PRELOAD_METADATA,
       mHasSuspendTaint,
-      HasAttr(kNameSpaceID_None, nsGkAtoms::loop));
+      HasAttr(kNameSpaceID_None, nsGkAtoms::loop),
+      MediaContainerType(MEDIAMIMETYPE("application/x.mediasource")));
 
     RefPtr<MediaSourceDecoder> decoder = new MediaSourceDecoder(decoderInit);
     if (!mMediaSource->Attach(decoder)) {
@@ -3398,24 +3399,34 @@ HTMLMediaElement::AddCaptureMediaTrackToOutputStream(MediaTrack* aTrack,
        track.get(), destinationTrackID, inputTrack, port.get()));
 }
 
+bool
+HTMLMediaElement::CanBeCaptured(bool aCaptureAudio)
+{
+  // Don't bother capturing when the document has gone away
+  nsPIDOMWindowInner* window = OwnerDoc()->GetInnerWindow();
+  if (!window) {
+    return false;
+  }
+
+  // Prevent capturing restricted video
+  if (!aCaptureAudio && ContainsRestrictedContent()) {
+    return false;
+  }
+  return true;
+}
+
 already_AddRefed<DOMMediaStream>
 HTMLMediaElement::CaptureStreamInternal(bool aFinishWhenEnded,
                                         bool aCaptureAudio,
                                         MediaStreamGraph* aGraph)
 {
   MOZ_RELEASE_ASSERT(aGraph);
+  MOZ_ASSERT(CanBeCaptured(aCaptureAudio));
 
   MarkAsContentSource(CallerAPI::CAPTURE_STREAM);
   MarkAsTainted();
 
-  nsPIDOMWindowInner* window = OwnerDoc()->GetInnerWindow();
-  if (!window) {
-    return nullptr;
-  }
-  if (!aCaptureAudio && ContainsRestrictedContent()) {
-    return nullptr;
-  }
-
+  // We don't support routing to a different graph.
   if (!mOutputStreams.IsEmpty() &&
       aGraph != mOutputStreams[0].mStream->GetInputStream()->Graph()) {
     return nullptr;
@@ -3423,6 +3434,7 @@ HTMLMediaElement::CaptureStreamInternal(bool aFinishWhenEnded,
 
   OutputMediaStream* out = mOutputStreams.AppendElement();
   MediaStreamTrackSourceGetter* getter = new CaptureStreamTrackSourceGetter(this);
+  nsPIDOMWindowInner* window = OwnerDoc()->GetInnerWindow();
   out->mStream = DOMMediaStream::CreateTrackUnionStreamAsInput(window, aGraph, getter);
   out->mStream->SetInactiveOnFinish();
   out->mFinishWhenEnded = aFinishWhenEnded;
@@ -3529,8 +3541,21 @@ HTMLMediaElement::MozCaptureStream(ErrorResult& aRv)
   MediaStreamGraph::GraphDriverType graphDriverType =
     HasAudio() ? MediaStreamGraph::AUDIO_THREAD_DRIVER
                : MediaStreamGraph::SYSTEM_THREAD_DRIVER;
+
+
+  nsPIDOMWindowInner* window = OwnerDoc()->GetInnerWindow();
+  if (!window) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  if (!CanBeCaptured(false)) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
   MediaStreamGraph* graph =
-    MediaStreamGraph::GetInstance(graphDriverType, mAudioChannel);
+    MediaStreamGraph::GetInstance(graphDriverType, mAudioChannel, window);
 
   RefPtr<DOMMediaStream> stream =
     CaptureStreamInternal(false, false, graph);
@@ -3548,8 +3573,20 @@ HTMLMediaElement::MozCaptureStreamUntilEnded(ErrorResult& aRv)
   MediaStreamGraph::GraphDriverType graphDriverType =
     HasAudio() ? MediaStreamGraph::AUDIO_THREAD_DRIVER
                : MediaStreamGraph::SYSTEM_THREAD_DRIVER;
+
+  nsPIDOMWindowInner* window = OwnerDoc()->GetInnerWindow();
+  if (!window) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  if (!CanBeCaptured(false)) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
   MediaStreamGraph* graph =
-    MediaStreamGraph::GetInstance(graphDriverType, mAudioChannel);
+    MediaStreamGraph::GetInstance(graphDriverType, mAudioChannel, window);
 
   RefPtr<DOMMediaStream> stream =
     CaptureStreamInternal(true, false, graph);
@@ -4650,15 +4687,16 @@ HTMLMediaElement::InitializeDecoderAsClone(ChannelMediaDecoder* aOriginal)
   if (!originalResource)
     return NS_ERROR_FAILURE;
 
-  MediaDecoderInit decoderInit(
-    this,
-    mAudioChannel,
-    mMuted ? 0.0 : mVolume,
-    mPreservesPitch,
-    mPlaybackRate,
-    mPreloadAction == HTMLMediaElement::PRELOAD_METADATA,
-    mHasSuspendTaint,
-    HasAttr(kNameSpaceID_None, nsGkAtoms::loop));
+  MediaDecoderInit decoderInit(this,
+                               mAudioChannel,
+                               mMuted ? 0.0 : mVolume,
+                               mPreservesPitch,
+                               mPlaybackRate,
+                               mPreloadAction ==
+                                 HTMLMediaElement::PRELOAD_METADATA,
+                               mHasSuspendTaint,
+                               HasAttr(kNameSpaceID_None, nsGkAtoms::loop),
+                               aOriginal->ContainerType());
 
   RefPtr<ChannelMediaDecoder> decoder = aOriginal->Clone(decoderInit);
   if (!decoder)
@@ -4683,23 +4721,33 @@ nsresult HTMLMediaElement::InitializeDecoderForChannel(nsIChannel* aChannel,
   NS_ASSERTION(mLoadingSrc, "mLoadingSrc must already be set");
 
   nsAutoCString mimeType;
+  DecoderDoctorDiagnostics diagnostics;
 
   aChannel->GetContentType(mimeType);
   NS_ASSERTION(!mimeType.IsEmpty(), "We should have the Content-Type.");
 
-  DecoderDoctorDiagnostics diagnostics;
-  MediaDecoderInit decoderInit(
-    this,
-    mAudioChannel,
-    mMuted ? 0.0 : mVolume,
-    mPreservesPitch,
-    mPlaybackRate,
-    mPreloadAction == HTMLMediaElement::PRELOAD_METADATA,
-    mHasSuspendTaint,
-    HasAttr(kNameSpaceID_None, nsGkAtoms::loop));
+  Maybe<MediaContainerType> containerType = MakeMediaContainerType(mimeType);
+  if (!containerType) {
+    diagnostics.StoreFormatDiagnostics(OwnerDoc(),
+                                       NS_ConvertASCIItoUTF16(mimeType),
+                                       /* aCanPlay = */ false,
+                                       __func__);
+    return NS_ERROR_FAILURE;
+  }
+
+  MediaDecoderInit decoderInit(this,
+                               mAudioChannel,
+                               mMuted ? 0.0 : mVolume,
+                               mPreservesPitch,
+                               mPlaybackRate,
+                               mPreloadAction ==
+                                 HTMLMediaElement::PRELOAD_METADATA,
+                               mHasSuspendTaint,
+                               HasAttr(kNameSpaceID_None, nsGkAtoms::loop),
+                               *containerType);
 
   RefPtr<ChannelMediaDecoder> decoder =
-    DecoderTraits::CreateDecoder(mimeType, decoderInit, &diagnostics);
+    DecoderTraits::CreateDecoder(decoderInit, &diagnostics);
   diagnostics.StoreFormatDiagnostics(OwnerDoc(),
                                      NS_ConvertASCIItoUTF16(mimeType),
                                      decoder != nullptr,
@@ -4821,8 +4869,7 @@ public:
     mBlocked(false),
     mFinished(false),
     mMutex(aName),
-    mPendingNotifyOutput(false),
-    mAbstractMainThread(aElement->AbstractMainThread())
+    mPendingNotifyOutput(false)
   {}
   void Forget()
   {
@@ -4890,14 +4937,12 @@ public:
         this,
         &StreamListener::DoNotifyUnblocked);
     }
-    aGraph->DispatchToMainThreadAfterStreamStateUpdate(mAbstractMainThread,
-                                                       event.forget());
+    aGraph->DispatchToMainThreadAfterStreamStateUpdate(event.forget());
   }
   virtual void NotifyHasCurrentData(MediaStreamGraph* aGraph) override
   {
     MutexAutoLock lock(mMutex);
     aGraph->DispatchToMainThreadAfterStreamStateUpdate(
-      mAbstractMainThread,
       NewRunnableMethod(
         "dom::HTMLMediaElement::StreamListener::DoNotifyHaveCurrentData",
         this,
@@ -4911,7 +4956,6 @@ public:
       return;
     mPendingNotifyOutput = true;
     aGraph->DispatchToMainThreadAfterStreamStateUpdate(
-      mAbstractMainThread,
       NewRunnableMethod("dom::HTMLMediaElement::StreamListener::DoNotifyOutput",
                         this,
                         &StreamListener::DoNotifyOutput));
@@ -4927,7 +4971,6 @@ private:
   // mMutex protects the fields below; they can be accessed on any thread
   Mutex mMutex;
   bool mPendingNotifyOutput;
-  const RefPtr<AbstractThread> mAbstractMainThread;
 };
 
 class HTMLMediaElement::MediaStreamTracksAvailableCallback:
@@ -6962,10 +7005,10 @@ HTMLMediaElement::DispatchEncrypted(const nsTArray<uint8_t>& aInitData,
 }
 
 bool
-HTMLMediaElement::IsEventAttributeName(nsIAtom* aName)
+HTMLMediaElement::IsEventAttributeNameInternal(nsIAtom* aName)
 {
   return aName == nsGkAtoms::onencrypted ||
-         nsGenericHTMLElement::IsEventAttributeName(aName);
+         nsGenericHTMLElement::IsEventAttributeNameInternal(aName);
 }
 
 already_AddRefed<nsIPrincipal>
@@ -7164,7 +7207,7 @@ HTMLMediaElement::AudioCaptureStreamChange(bool aCapture)
     uint64_t id = window->WindowID();
     MediaStreamGraph* msg =
       MediaStreamGraph::GetInstance(MediaStreamGraph::AUDIO_THREAD_DRIVER,
-                                    mAudioChannel);
+                                    mAudioChannel, window);
 
     if (GetSrcMediaStream()) {
       mCaptureStreamPort = msg->ConnectToCaptureStream(id, GetSrcMediaStream());

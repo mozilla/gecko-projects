@@ -857,8 +857,10 @@ AddAndRemoveImageAssociations(nsFrame* aFrame,
           continue;
         }
 
-        if (imgRequestProxy* req = oldImage.GetImageData()) {
-          imageLoader->DisassociateRequestFromFrame(req, aFrame);
+        if (aFrame->HasImageRequest()) {
+          if (imgRequestProxy* req = oldImage.GetImageData()) {
+            imageLoader->DisassociateRequestFromFrame(req, aFrame);
+          }
         }
       }
     }
@@ -972,7 +974,7 @@ nsFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
   // they won't have the correct size for the border either.
   if (oldBorderImage != newBorderImage) {
     // stop and restart the image loading/notification
-    if (oldBorderImage) {
+    if (oldBorderImage && HasImageRequest()) {
       imageLoader->DisassociateRequestFromFrame(oldBorderImage, this);
     }
     if (newBorderImage) {
@@ -8025,11 +8027,14 @@ nsIFrame::PeekOffset(nsPeekOffsetStruct* aPos)
         bool movingInFrameDirection =
           IsMovingInFrameDirection(current, aPos->mDirection, aPos->mVisual);
 
-        if (eatingNonRenderableWS)
+        if (eatingNonRenderableWS) {
           peekSearchState = current->PeekOffsetNoAmount(movingInFrameDirection, &offset); 
-        else
-          peekSearchState = current->PeekOffsetCharacter(movingInFrameDirection, &offset,
-                                              aPos->mAmount == eSelectCluster);
+        } else {
+          PeekOffsetCharacterOptions options;
+          options.mRespectClusters = aPos->mAmount == eSelectCluster;
+          peekSearchState = current->PeekOffsetCharacter(movingInFrameDirection,
+                                                         &offset, options);
+        }
 
         movedOverNonSelectableText |= (peekSearchState == CONTINUE_UNSELECTABLE);
 
@@ -8363,7 +8368,7 @@ nsFrame::PeekOffsetNoAmount(bool aForward, int32_t* aOffset)
 
 nsIFrame::FrameSearchResult
 nsFrame::PeekOffsetCharacter(bool aForward, int32_t* aOffset,
-                             bool aRespectClusters)
+                             PeekOffsetCharacterOptions aOptions)
 {
   NS_ASSERTION (aOffset && *aOffset <= 1, "aOffset out of range");
   int32_t startOffset = *aOffset;
@@ -10245,7 +10250,7 @@ nsIFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
   }
 }
 
-nsChangeHint
+/* static */ nsChangeHint
 nsIFrame::UpdateStyleOfOwnedChildFrame(
   nsIFrame* aChildFrame,
   nsStyleContext* aNewStyleContext,
@@ -10267,8 +10272,13 @@ nsIFrame::UpdateStyleOfOwnedChildFrame(
     aNewStyleContext,
     &equalStructs,
     &samePointerStructs);
-  childHint = NS_RemoveSubsumedHints(
-    childHint, aRestyleState.ChangesHandledFor(*aChildFrame));
+  // If aChildFrame is out of flow, then aRestyleState's "changes handled by the
+  // parent" doesn't apply to it, because it may have some other parent in the
+  // frame tree.
+  if (!aChildFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW)) {
+    childHint = NS_RemoveSubsumedHints(
+      childHint, aRestyleState.ChangesHandledFor(*aChildFrame));
+  }
   if (childHint) {
     if (childHint & nsChangeHint_ReconstructFrame) {
       // If we generate a reconstruct here, remove any non-reconstruct hints we

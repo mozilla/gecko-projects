@@ -266,7 +266,7 @@ nsSVGForeignObjectFrame::PaintSVG(gfxContext& aContext,
   float cssPxPerDevPx = PresContext()->
     AppUnitsToFloatCSSPixels(PresContext()->AppUnitsPerDevPixel());
   gfxMatrix canvasTMForChildren = aTransform;
-  canvasTMForChildren.Scale(cssPxPerDevPx, cssPxPerDevPx);
+  canvasTMForChildren.PreScale(cssPxPerDevPx, cssPxPerDevPx);
 
   aContext.Multiply(canvasTMForChildren);
 

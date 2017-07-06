@@ -34,9 +34,9 @@ const BRAND_SHORT_NAME = Services.strings
  *     - button: // The string of tour notification action button title
  *   // Return a div appended with elements for this tours.
  *   // Each tour should contain the following 3 sections in the div:
- *   // .onboarding-tour-description, .onboarding-tour-content, .onboarding-tour-button.
- *   // Add no-button css class in the div if this tour does not need a button.
- *   // The overlay layout will responsively position and distribute space for these 3 sections based on viewport size
+ *   // .onboarding-tour-description, .onboarding-tour-content, .onboarding-tour-button-container.
+ *   // Add onboarding-no-button css class in the div if this tour does not need a button container.
+ *   // If there was a .onboarding-tour-action-button present and was clicked, tour would be marked as completed.
  *   getPage() {},
  * },
  **/
@@ -55,14 +55,14 @@ var onboardingTours = [
       let div = win.document.createElement("div");
       div.innerHTML = `
         <section class="onboarding-tour-description">
-          <h1 data-l10n-id="onboarding.tour-private-browsing.title"></h1>
-          <p data-l10n-id="onboarding.tour-private-browsing.description"></p>
+          <h1 data-l10n-id="onboarding.tour-private-browsing.title2"></h1>
+          <p data-l10n-id="onboarding.tour-private-browsing.description2"></p>
         </section>
         <section class="onboarding-tour-content">
           <img src="resource://onboarding/img/figure_private.svg" />
         </section>
-        <aside class="onboarding-tour-button">
-          <button id="onboarding-tour-private-browsing-button" data-l10n-id="onboarding.tour-private-browsing.button"></button>
+        <aside class="onboarding-tour-button-container">
+          <button id="onboarding-tour-private-browsing-button" class="onboarding-tour-action-button" data-l10n-id="onboarding.tour-private-browsing.button"></button>
         </aside>
       `;
       return div;
@@ -82,14 +82,14 @@ var onboardingTours = [
       let div = win.document.createElement("div");
       div.innerHTML = `
         <section class="onboarding-tour-description">
-          <h1 data-l10n-id="onboarding.tour-addons.title"></h1>
-          <p data-l10n-id="onboarding.tour-addons.description"></p>
+          <h1 data-l10n-id="onboarding.tour-addons.title2"></h1>
+          <p data-l10n-id="onboarding.tour-addons.description2"></p>
         </section>
         <section class="onboarding-tour-content">
           <img src="resource://onboarding/img/figure_addons.svg" />
         </section>
-        <aside class="onboarding-tour-button">
-          <button id="onboarding-tour-addons-button" data-l10n-id="onboarding.tour-addons.button"></button>
+        <aside class="onboarding-tour-button-container">
+          <button id="onboarding-tour-addons-button" class="onboarding-tour-action-button" data-l10n-id="onboarding.tour-addons.button"></button>
         </aside>
       `;
       return div;
@@ -109,14 +109,14 @@ var onboardingTours = [
       let div = win.document.createElement("div");
       div.innerHTML = `
         <section class="onboarding-tour-description">
-          <h1 data-l10n-id="onboarding.tour-customize.title"></h1>
-          <p data-l10n-id="onboarding.tour-customize.description"></p>
+          <h1 data-l10n-id="onboarding.tour-customize.title2"></h1>
+          <p data-l10n-id="onboarding.tour-customize.description2"></p>
         </section>
         <section class="onboarding-tour-content">
           <img src="resource://onboarding/img/figure_customize.svg" />
         </section>
-        <aside class="onboarding-tour-button">
-          <button id="onboarding-tour-customize-button" data-l10n-id="onboarding.tour-customize.button"></button>
+        <aside class="onboarding-tour-button-container">
+          <button id="onboarding-tour-customize-button" class="onboarding-tour-action-button" data-l10n-id="onboarding.tour-customize.button"></button>
         </aside>
       `;
       return div;
@@ -124,7 +124,7 @@ var onboardingTours = [
   },
   {
     id: "onboarding-tour-search",
-    tourNameId: "onboarding.tour-search",
+    tourNameId: "onboarding.tour-search2",
     getNotificationStrings(bundle) {
       return {
         title: bundle.GetStringFromName("onboarding.notification.onboarding-tour-search.title"),
@@ -136,14 +136,14 @@ var onboardingTours = [
       let div = win.document.createElement("div");
       div.innerHTML = `
         <section class="onboarding-tour-description">
-          <h1 data-l10n-id="onboarding.tour-search.title"></h1>
-          <p data-l10n-id="onboarding.tour-search.description"></p>
+          <h1 data-l10n-id="onboarding.tour-search.title2"></h1>
+          <p data-l10n-id="onboarding.tour-search.description2"></p>
         </section>
         <section class="onboarding-tour-content">
           <img src="resource://onboarding/img/figure_search.svg" />
         </section>
-        <aside class="onboarding-tour-button">
-          <button id="onboarding-tour-search-button" data-l10n-id="onboarding.tour-search.button"></button>
+        <aside class="onboarding-tour-button-container">
+          <button id="onboarding-tour-search-button" class="onboarding-tour-action-button" data-l10n-id="onboarding.tour-search.button"></button>
         </aside>
       `;
       return div;
@@ -163,18 +163,52 @@ var onboardingTours = [
       let div = win.document.createElement("div");
       let defaultBrowserButtonId = win.matchMedia("(-moz-os-version: windows-win7)").matches ?
         "onboarding.tour-default-browser.win7.button" : "onboarding.tour-default-browser.button";
+      // eslint-disable-next-line no-unsanitized/property
       div.innerHTML = `
         <section class="onboarding-tour-description">
-          <h1 data-l10n-id="onboarding.tour-default-browser.title"></h1>
-          <p data-l10n-id="onboarding.tour-default-browser.description"></p>
+          <h1 data-l10n-id="onboarding.tour-default-browser.title2"></h1>
+          <p data-l10n-id="onboarding.tour-default-browser.description2"></p>
         </section>
         <section class="onboarding-tour-content">
           <img src="resource://onboarding/img/figure_default.svg" />
         </section>
-        <aside class="onboarding-tour-button">
-          <button id="onboarding-tour-default-browser-button" data-l10n-id="${defaultBrowserButtonId}"></button>
+        <aside class="onboarding-tour-button-container">
+          <button id="onboarding-tour-default-browser-button" class="onboarding-tour-action-button" data-l10n-id="${defaultBrowserButtonId}"></button>
         </aside>
       `;
+      return div;
+    },
+  },
+  {
+    id: "onboarding-tour-sync",
+    tourNameId: "onboarding.tour-sync2",
+    getNotificationStrings(bundle) {
+      return {
+        title: bundle.GetStringFromName("onboarding.notification.onboarding-tour-sync.title"),
+        message: bundle.GetStringFromName("onboarding.notification.onboarding-tour-sync.message"),
+        button: bundle.GetStringFromName("onboarding.button.learnMore"),
+      };
+    },
+    getPage(win, bundle) {
+      let div = win.document.createElement("div");
+      div.classList.add("onboarding-no-button");
+      div.innerHTML = `
+        <section class="onboarding-tour-description">
+          <h1 data-l10n-id="onboarding.tour-sync.title2"></h1>
+          <p data-l10n-id="onboarding.tour-sync.description2"></p>
+        </section>
+        <section class="onboarding-tour-content">
+          <form>
+            <h3 data-l10n-id="onboarding.tour-sync.form.title"></h3>
+            <p data-l10n-id="onboarding.tour-sync.form.description"></p>
+            <input id="onboarding-tour-sync-email-input" type="text"></input><br />
+            <button id="onboarding-tour-sync-button" class="onboarding-tour-action-button" data-l10n-id="onboarding.tour-sync.button"></button>
+          </form>
+          <img src="resource://onboarding/img/figure_sync.svg" />
+        </section>
+      `;
+      div.querySelector("#onboarding-tour-sync-email-input").placeholder =
+        bundle.GetStringFromName("onboarding.tour-sync.email-input.placeholder");
       return div;
     },
   },
@@ -193,6 +227,12 @@ class Onboarding {
     this._window = contentWindow;
     this._tourItems = [];
     this._tourPages = [];
+
+    // we only support the new user tour at this moment
+    if (Services.prefs.getStringPref("browser.onboarding.tour-type", "update") !== "new") {
+      return;
+    }
+
     // We want to create and append elements after CSS is loaded so
     // no flash of style changes and no additional reflow.
     await this._loadCSS();
@@ -221,7 +261,7 @@ class Onboarding {
     if (doc.hidden) {
       // When the preloaded-browser feature is on,
       // it would preload an hidden about:newtab in the background.
-      // We don't wnat to show notification in that hidden state.
+      // We don't want to show notification in that hidden state.
       let onVisible = () => {
         if (!doc.hidden) {
           doc.removeEventListener("visibilitychange", onVisible);
@@ -244,6 +284,12 @@ class Onboarding {
       if (prefValue) {
         this.destroy();
       }
+    });
+    onboardingTours.forEach(tour => {
+      let tourId = tour.id;
+      this._prefsObserved.set(`browser.onboarding.tour.${tourId}.completed`, () => {
+        this.markTourCompletionState(tourId);
+      });
     });
     for (let [name, callback] of this._prefsObserved) {
       Preferences.observe(name, callback);
@@ -279,19 +325,21 @@ class Onboarding {
       case "onboarding-overlay":
         this.toggleOverlay();
         break;
-
       case "onboarding-notification-close-btn":
         this.hideNotification();
         break;
-
       case "onboarding-notification-action-btn":
         let tourId = this._notificationBar.dataset.targetTourId;
         this.toggleOverlay();
         this.gotoPage(tourId);
         break;
     }
-    if (evt.target.classList.contains("onboarding-tour-item")) {
+    let classList = evt.target.classList;
+    if (classList.contains("onboarding-tour-item")) {
       this.gotoPage(evt.target.id);
+    } else if (classList.contains("onboarding-tour-action-button")) {
+      let activeItem = this._tourItems.find(item => item.classList.contains("onboarding-active"));
+      this.setToursCompleted([ activeItem.id ]);
     }
   }
 
@@ -335,6 +383,29 @@ class Onboarding {
 
   isTourCompleted(tourId) {
     return Preferences.get(`browser.onboarding.tour.${tourId}.completed`, false);
+  }
+
+  setToursCompleted(tourIds) {
+    let params = [];
+    tourIds.forEach(id => {
+      if (!this.isTourCompleted(id)) {
+        params.push({
+          name: `browser.onboarding.tour.${id}.completed`,
+          value: true
+        });
+      }
+    });
+    if (params.length > 0) {
+      this.sendMessageToChrome("set-prefs", params);
+    }
+  }
+
+  markTourCompletionState(tourId) {
+    // We are doing lazy load so there might be no items.
+    if (this._tourItems.length > 0 && this.isTourCompleted(tourId)) {
+      let targetItem = this._tourItems.find(item => item.id == tourId);
+      targetItem.classList.add("onboarding-complete");
+    }
   }
 
   showNotification() {
@@ -416,7 +487,7 @@ class Onboarding {
   _renderNotificationBar() {
     let div = this._window.document.createElement("div");
     div.id = "onboarding-notification-bar";
-    // Here we use `innerHTML` is for more friendly reading.
+    // We use `innerHTML` for more friendly reading.
     // The security should be fine because this is not from an external input.
     div.innerHTML = `
       <div id="onboarding-notification-icon"></div>
@@ -436,6 +507,7 @@ class Onboarding {
   }
 
   hide() {
+    this.setToursCompleted(onboardingTours.map(tour => tour.id));
     this.sendMessageToChrome("set-prefs", [
       {
         name: "browser.onboarding.hidden",
@@ -451,7 +523,7 @@ class Onboarding {
   _renderOverlay() {
     let div = this._window.document.createElement("div");
     div.id = "onboarding-overlay";
-    // Here we use `innerHTML` is for more friendly reading.
+    // We use `innerHTML` for more friendly reading.
     // The security should be fine because this is not from an external input.
     div.innerHTML = `
       <div id="onboarding-overlay-dialog">
@@ -467,7 +539,7 @@ class Onboarding {
     `;
 
     div.querySelector("label[for='onboarding-tour-hidden-checkbox']").textContent =
-       this._bundle.GetStringFromName("onboarding.hidden-checkbox-label");
+       this._bundle.GetStringFromName("onboarding.hidden-checkbox-label-text");
     div.querySelector("#onboarding-header").textContent =
        this._bundle.formatStringFromName("onboarding.overlay-title", [BRAND_SHORT_NAME], 1);
     return div;
@@ -490,7 +562,7 @@ class Onboarding {
       li.className = "onboarding-tour-item";
       itemsFrag.appendChild(li);
       // Dynamically create tour pages
-      let div = tour.getPage(this._window);
+      let div = tour.getPage(this._window, this._bundle);
 
       // Do a traverse for elements in the page that need to be localized.
       let l10nElements = div.querySelectorAll("[data-l10n-id]");
@@ -511,6 +583,7 @@ class Onboarding {
       this._tourItems.push(li);
       this._tourPages.push(div);
     }
+    tours.forEach(tour => this.markTourCompletionState(tour.id));
 
     let dialog = this._window.document.getElementById("onboarding-overlay-dialog");
     let ul = this._window.document.getElementById("onboarding-tour-list");

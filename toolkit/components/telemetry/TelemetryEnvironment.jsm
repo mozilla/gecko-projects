@@ -43,6 +43,7 @@ const MAX_ATTRIBUTION_STRING_LENGTH = 100;
 // The maximum lengths for the experiment id and branch in the experiments section.
 const MAX_EXPERIMENT_ID_LENGTH = 100;
 const MAX_EXPERIMENT_BRANCH_LENGTH = 100;
+const MAX_EXPERIMENT_TYPE_LENGTH = 20;
 
 /**
  * This is a policy object used to override behavior for testing.
@@ -87,9 +88,11 @@ this.TelemetryEnvironment = {
    *
    * @param {String} id The id of the active experiment.
    * @param {String} branch The experiment branch.
+   * @param {Object} [options] Optional object with options.
+   * @param {String} [options.type=false] The specific experiment type.
    */
-  setExperimentActive(id, branch) {
-    return getGlobal().setExperimentActive(id, branch);
+  setExperimentActive(id, branch, options = {}) {
+    return getGlobal().setExperimentActive(id, branch, options);
   },
 
   /**
@@ -184,7 +187,6 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["devtools.chrome.enabled", {what: RECORD_PREF_VALUE}],
   ["devtools.debugger.enabled", {what: RECORD_PREF_VALUE}],
   ["devtools.debugger.remote-enabled", {what: RECORD_PREF_VALUE}],
-  ["dom.ipc.plugins.asyncInit.enabled", {what: RECORD_PREF_VALUE}],
   ["dom.ipc.plugins.enabled", {what: RECORD_PREF_VALUE}],
   ["dom.ipc.processCount", {what: RECORD_PREF_VALUE}],
   ["dom.max_script_run_time", {what: RECORD_PREF_VALUE}],
@@ -217,6 +219,7 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["layers.prefer-d3d9", {what: RECORD_PREF_VALUE}],
   ["layers.prefer-opengl", {what: RECORD_PREF_VALUE}],
   ["layout.css.devPixelsPerPx", {what: RECORD_PREF_VALUE}],
+  ["layout.css.servo.enabled", {what: RECORD_PREF_VALUE}],
   ["network.proxy.autoconfig_url", {what: RECORD_PREF_STATE}],
   ["network.proxy.http", {what: RECORD_PREF_STATE}],
   ["network.proxy.ssl", {what: RECORD_PREF_STATE}],
@@ -891,7 +894,7 @@ EnvironmentCache.prototype = {
     this._changeListeners.delete(name);
   },
 
-  setExperimentActive(id, branch) {
+  setExperimentActive(id, branch, options) {
     this._log.trace("setExperimentActive");
     // Make sure both the id and the branch have sane lengths.
     const saneId = limitStringToLength(id, MAX_EXPERIMENT_ID_LENGTH);
@@ -906,10 +909,22 @@ EnvironmentCache.prototype = {
       this._log.warn("setExperimentActive - the experiment id or branch were truncated.");
     }
 
+    // Truncate the experiment type if present.
+    if (options.hasOwnProperty("type")) {
+      let type = limitStringToLength(options.type, MAX_EXPERIMENT_TYPE_LENGTH);
+      if (type.length != options.type.length) {
+        options.type = type;
+        this._log.warn("setExperimentActive - the experiment type was truncated.");
+      }
+    }
+
     let oldEnvironment = Cu.cloneInto(this._currentEnvironment, myScope);
     // Add the experiment annotation.
     let experiments = this._currentEnvironment.experiments || {};
     experiments[saneId] = { "branch": saneBranch };
+    if (options.hasOwnProperty("type")) {
+      experiments[saneId].type = options.type;
+    }
     this._currentEnvironment.experiments = experiments;
     // Notify of the change.
     this._onEnvironmentChange("experiment-annotation-changed", oldEnvironment);

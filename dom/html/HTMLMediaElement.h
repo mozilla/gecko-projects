@@ -653,7 +653,7 @@ public:
   void DispatchEncrypted(const nsTArray<uint8_t>& aInitData,
                          const nsAString& aInitDataType) override;
 
-  bool IsEventAttributeName(nsIAtom* aName) override;
+  bool IsEventAttributeNameInternal(nsIAtom* aName) override;
 
   // Returns the principal of the "top level" document; the origin displayed
   // in the URL bar of the browser window.
@@ -1265,6 +1265,9 @@ protected:
 
   // Anything we need to check after played success and not related with spec.
   void UpdateCustomPolicyAfterPlayed();
+
+  // True if this element can be captured, false otherwise.
+  bool CanBeCaptured(bool aCaptureAudio);
 
   class nsAsyncEventRunner;
   class nsNotifyAboutPlayingRunner;

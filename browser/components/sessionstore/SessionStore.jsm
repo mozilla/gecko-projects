@@ -3598,6 +3598,10 @@ var SessionStoreInternal = {
       tab.toggleMuteAudio(tabData.muteReason);
     }
 
+    if (!tabData.mediaBlocked) {
+      browser.resumeMedia();
+    }
+
     if (tabData.lastAccessed) {
       tab.updateLastAccessed(tabData.lastAccessed);
     }

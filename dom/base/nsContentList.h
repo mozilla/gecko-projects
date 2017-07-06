@@ -95,6 +95,9 @@ public:
   {
     mElements.SetCapacity(aCapacity);
   }
+
+  virtual void LastRelease() {}
+
 protected:
   virtual ~nsBaseContentList();
 
@@ -106,7 +109,7 @@ protected:
   {
   }
 
-  nsTArray< nsCOMPtr<nsIContent> > mElements;
+  AutoTArray<nsCOMPtr<nsIContent>, 10> mElements;
 };
 
 
@@ -351,6 +354,8 @@ public:
     mState = LIST_DIRTY;
     Reset();
   }
+
+  virtual void LastRelease() override;
 
 protected:
   /**

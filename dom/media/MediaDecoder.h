@@ -52,7 +52,7 @@ enum class Visibility : uint8_t;
 #undef GetCurrentTime
 #endif
 
-struct MediaDecoderInit
+struct MOZ_STACK_CLASS MediaDecoderInit
 {
   MediaDecoderOwner* const mOwner;
   const dom::AudioChannel mAudioChannel;
@@ -62,6 +62,7 @@ struct MediaDecoderInit
   const bool mMinimizePreroll;
   const bool mHasSuspendTaint;
   const bool mLooping;
+  const MediaContainerType mContainerType;
 
   MediaDecoderInit(MediaDecoderOwner* aOwner,
                    dom::AudioChannel aAudioChannel,
@@ -70,7 +71,8 @@ struct MediaDecoderInit
                    double aPlaybackRate,
                    bool aMinimizePreroll,
                    bool aHasSuspendTaint,
-                   bool aLooping)
+                   bool aLooping,
+                   const MediaContainerType& aContainerType)
     : mOwner(aOwner)
     , mAudioChannel(aAudioChannel)
     , mVolume(aVolume)
@@ -79,6 +81,7 @@ struct MediaDecoderInit
     , mMinimizePreroll(aMinimizePreroll)
     , mHasSuspendTaint(aHasSuspendTaint)
     , mLooping(aLooping)
+    , mContainerType(aContainerType)
   {
   }
 };
@@ -108,6 +111,10 @@ public:
 
   explicit MediaDecoder(MediaDecoderInit& aInit);
 
+  // Returns the container content type of the resource.
+  // Safe to call from any thread.
+  const MediaContainerType& ContainerType() const { return mContainerType; }
+
   // Create a new state machine to run this decoder.
   // Subclasses must implement this.
   virtual MediaDecoderStateMachine* CreateStateMachine() = 0;
@@ -124,8 +131,7 @@ public:
   // Called if the media file encounters a network error.
   void NetworkError();
 
-  // Get the current MediaResource being used. Its URI will be returned
-  // by currentSrc. Returns what was passed to Load(), if Load() has been called.
+  // Get the current MediaResource being used.
   // Note: The MediaResource is refcounted, but it outlives the MediaDecoder,
   // so it's OK to use the reference returned by this function without
   // refcounting, *unless* you need to store and use the reference after the
@@ -828,6 +834,7 @@ private:
   // Used to debug how mOwner becomes a dangling pointer in bug 1326294.
   bool mIsMediaElement;
   WeakPtr<dom::HTMLMediaElement> mElement;
+  const MediaContainerType mContainerType;
 };
 
 } // namespace mozilla

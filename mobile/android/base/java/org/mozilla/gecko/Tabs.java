@@ -27,6 +27,7 @@ import org.mozilla.gecko.notifications.WhatsNewReceiver;
 import org.mozilla.gecko.preferences.GeckoPreferences;
 import org.mozilla.gecko.promotion.AddToHomeScreenPromotion;
 import org.mozilla.gecko.reader.ReaderModeUtils;
+import org.mozilla.gecko.skin.SkinConfig;
 import org.mozilla.gecko.util.BundleEventListener;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoBundle;
@@ -52,7 +53,6 @@ import android.text.TextUtils;
 import android.util.Log;
 
 import static org.mozilla.gecko.Tab.TabType;
-import static org.mozilla.gecko.mma.MmaDelegate.VISITING_A_WEBSITE_WITH_MATCH_TO_PAST_HISTORY;
 
 public class Tabs implements BundleEventListener {
     private static final String LOGTAG = "GeckoTabs";
@@ -1095,7 +1095,6 @@ public class Tabs implements BundleEventListener {
 
         if (!delayLoad && !background) {
             selectTab(tabToSelect.getId());
-            tracking(url);
         }
 
         // Load favicon instantly for about:home page because it's already cached
@@ -1107,13 +1106,6 @@ public class Tabs implements BundleEventListener {
         return tabToSelect;
     }
 
-    private void tracking(String url) {
-        AddToHomeScreenPromotion.URLHistory history = AddToHomeScreenPromotion.getHistoryForURL(mAppContext, url);
-        if (history != null && history.visits > 0) {
-            MmaDelegate.track(VISITING_A_WEBSITE_WITH_MATCH_TO_PAST_HISTORY, history.visits);
-        }
-    }
-
     /**
      * Opens a new tab and loads either about:home or, if PREFS_HOMEPAGE_FOR_EVERY_NEW_TAB is set,
      * the user's homepage.
@@ -1123,7 +1115,11 @@ public class Tabs implements BundleEventListener {
     }
 
     public Tab addPrivateTab() {
-        return loadUrl(AboutPages.PRIVATEBROWSING, Tabs.LOADURL_NEW_TAB | Tabs.LOADURL_PRIVATE);
+        if (SkinConfig.isPhoton()) {
+            return loadUrl(getHomepageForNewTab(mAppContext), Tabs.LOADURL_NEW_TAB | Tabs.LOADURL_PRIVATE);
+        } else {
+            return loadUrl(AboutPages.PRIVATEBROWSING, Tabs.LOADURL_NEW_TAB | Tabs.LOADURL_PRIVATE);
+        }
     }
 
     /**

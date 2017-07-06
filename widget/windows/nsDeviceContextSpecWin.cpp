@@ -12,8 +12,6 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/RefPtr.h"
 
-#include "prmem.h"
-
 #include <winspool.h>
 
 #include "nsIWidget.h"
@@ -35,6 +33,11 @@
 #include "nsWindowsHelpers.h"
 
 #include "mozilla/gfx/Logging.h"
+
+#ifdef MOZ_ENABLE_SKIA_PDF
+#include "mozilla/gfx/PrintTargetSkPDF.h"
+#include "nsIUUIDGenerator.h"
+#endif
 
 static mozilla::LazyLogModule kWidgetPrintingLogMod("printing-widget");
 #define PR_PL(_p1)  MOZ_LOG(kWidgetPrintingLogMod, mozilla::LogLevel::Debug, _p1)
@@ -89,7 +92,9 @@ nsDeviceContextSpecWin::nsDeviceContextSpecWin()
   mDriverName    = nullptr;
   mDeviceName    = nullptr;
   mDevMode       = nullptr;
-
+#ifdef MOZ_ENABLE_SKIA_PDF
+  mPrintViaSkPDF = false;
+#endif
 }
 
 
@@ -133,6 +138,15 @@ NS_IMETHODIMP nsDeviceContextSpecWin::Init(nsIWidget* aWidget,
 
   nsresult rv = NS_ERROR_GFX_PRINTER_NO_PRINTER_AVAILABLE;
   if (aPrintSettings) {
+#ifdef MOZ_ENABLE_SKIA_PDF
+    const nsAdoptingString& printViaPdf =
+      mozilla::Preferences::GetString("print.print_via_pdf_encoder");
+
+    if (printViaPdf == NS_LITERAL_STRING("skia-pdf")) {
+      mPrintViaSkPDF = true;
+    }
+#endif
+
     // If we're in the child and printing via the parent or we're printing to
     // PDF we only need information from the print settings.
     mPrintSettings->GetOutputFormat(&mOutputFormat);
@@ -209,13 +223,13 @@ static void CleanAndCopyString(wchar_t*& aStr, const wchar_t* aNewStr)
       wcscpy(aStr, aNewStr);
       return;
     } else {
-      PR_Free(aStr);
+      free(aStr);
       aStr = nullptr;
     }
   }
 
   if (nullptr != aNewStr) {
-    aStr = (wchar_t *)PR_Malloc(sizeof(wchar_t)*(wcslen(aNewStr) + 1));
+    aStr = (wchar_t*) malloc(sizeof(wchar_t) * (wcslen(aNewStr) + 1));
     wcscpy(aStr, aNewStr);
   }
 }
@@ -223,6 +237,30 @@ static void CleanAndCopyString(wchar_t*& aStr, const wchar_t* aNewStr)
 already_AddRefed<PrintTarget> nsDeviceContextSpecWin::MakePrintTarget()
 {
   NS_ASSERTION(mDevMode, "DevMode can't be NULL here");
+
+#ifdef MOZ_ENABLE_SKIA_PDF
+  if (mPrintViaSkPDF) {
+    double width, height;
+    mPrintSettings->GetEffectivePageSize(&width, &height);
+    if (width <= 0 || height <= 0) {
+      return nullptr;
+    }
+
+    // convert twips to points
+    width  /= TWIPS_PER_POINT_FLOAT;
+    height /= TWIPS_PER_POINT_FLOAT;
+    IntSize size = IntSize::Truncate(width, height);
+
+    if (mOutputFormat == nsIPrintSettings::kOutputFormatPDF) {
+      nsXPIDLString filename;
+      mPrintSettings->GetToFileName(getter_Copies(filename));
+
+      nsAutoCString printFile(NS_ConvertUTF16toUTF8(filename).get());
+      auto skStream = MakeUnique<SkFILEWStream>(printFile.get());
+      return PrintTargetSkPDF::CreateOrNull(Move(skStream), size);
+    }
+  }
+#endif
 
   if (mOutputFormat == nsIPrintSettings::kOutputFormatPDF) {
     nsXPIDLString filename;

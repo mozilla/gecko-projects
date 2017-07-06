@@ -83,9 +83,7 @@
 #include "mozilla/HalTypes.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/Telemetry.h"
-#ifdef MOZ_GECKO_PROFILER
 #include "ProfilerMarkerPayload.h"
-#endif
 #include "mozilla/VsyncDispatcher.h"
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
 #include "VsyncSource.h"
@@ -540,7 +538,7 @@ mozilla::ipc::IPCResult
 CompositorBridgeParent::RecvFlushRendering()
 {
   if (gfxVars::UseWebRender()) {
-    mWrBridge->FlushRendering(/* aSync */ true);
+    mWrBridge->FlushRendering(/* aIsSync */ true);
     return IPC_OK();
   }
 
@@ -555,7 +553,7 @@ mozilla::ipc::IPCResult
 CompositorBridgeParent::RecvFlushRenderingAsync()
 {
   if (gfxVars::UseWebRender()) {
-    mWrBridge->FlushRendering(/* aSync */ false);
+    mWrBridge->FlushRendering(/* aIsSync */ false);
     return IPC_OK();
   }
 
@@ -1277,7 +1275,7 @@ CompositorBridgeParent::ForceComposite(LayerTransactionParent* aLayerTree)
 }
 
 bool
-CompositorBridgeParent::SetTestSampleTime(LayerTransactionParent* aLayerTree,
+CompositorBridgeParent::SetTestSampleTime(const uint64_t& aId,
                                           const TimeStamp& aTime)
 {
   if (aTime.IsNull()) {
@@ -1306,7 +1304,7 @@ CompositorBridgeParent::SetTestSampleTime(LayerTransactionParent* aLayerTree,
 }
 
 void
-CompositorBridgeParent::LeaveTestMode(LayerTransactionParent* aLayerTree)
+CompositorBridgeParent::LeaveTestMode(const uint64_t& aId)
 {
   mIsTesting = false;
 }
@@ -1517,14 +1515,14 @@ CompositorBridgeParent::AllocPLayerTransactionParent(const nsTArray<LayersBacken
 
   if (!mLayerManager) {
     NS_WARNING("Failed to initialise Compositor");
-    LayerTransactionParent* p = new LayerTransactionParent(nullptr, this, 0);
+    LayerTransactionParent* p = new LayerTransactionParent(/* aManager */ nullptr, this, /* aAnimStorage */ nullptr, 0);
     p->AddIPDLReference();
     return p;
   }
 
   mCompositionManager = new AsyncCompositionManager(this, mLayerManager);
 
-  LayerTransactionParent* p = new LayerTransactionParent(mLayerManager, this, 0);
+  LayerTransactionParent* p = new LayerTransactionParent(mLayerManager, this, GetAnimationStorage(0), 0);
   p->AddIPDLReference();
   return p;
 }
@@ -1646,10 +1644,22 @@ CompositorBridgeParent::RecvAdoptChild(const uint64_t& child)
     MOZ_ASSERT(sIndirectLayerTrees[child].mParent->mOptions == mOptions);
     NotifyChildCreated(child);
     if (sIndirectLayerTrees[child].mLayerTree) {
-      sIndirectLayerTrees[child].mLayerTree->SetLayerManager(mLayerManager);
+      sIndirectLayerTrees[child].mLayerTree->SetLayerManager(mLayerManager, GetAnimationStorage(0));
       // Trigger composition to handle a case that mLayerTree was not composited yet
       // by previous CompositorBridgeParent, since nsRefreshDriver might wait composition complete.
       ScheduleComposition();
+    }
+    if (mWrBridge && sIndirectLayerTrees[child].mWrBridge) {
+      sIndirectLayerTrees[child].mWrBridge->UpdateWebRender(mWrBridge->CompositorScheduler(),
+                                                            mWrBridge->GetWebRenderAPI(),
+                                                            mWrBridge->CompositableHolder(),
+                                                            GetAnimationStorage(0));
+      // Pretend we composited, since parent CompositorBridgeParent was replaced.
+      CrossProcessCompositorBridgeParent* cpcp = sIndirectLayerTrees[child].mCrossProcessParent;
+      if (cpcp) {
+        TimeStamp now = TimeStamp::Now();
+        cpcp->DidComposite(child, now, now);
+      }
     }
     parent = sIndirectLayerTrees[child].mApzcTreeManagerParent;
   }
@@ -1723,6 +1733,12 @@ RefPtr<WebRenderBridgeParent>
 CompositorBridgeParent::GetWebRenderBridgeParent() const
 {
   return mWrBridge;
+}
+
+Maybe<TimeStamp>
+CompositorBridgeParent::GetTestingTimeStamp() const
+{
+  return mIsTesting ? Some(mTestTime) : Nothing();
 }
 
 void
@@ -1826,12 +1842,10 @@ CompositorBridgeParent::GetAPZCTreeManager(uint64_t aLayersId)
 static void
 InsertVsyncProfilerMarker(TimeStamp aVsyncTimestamp)
 {
-#ifdef MOZ_GECKO_PROFILER
   MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
   profiler_add_marker(
     "VsyncTimestamp",
     MakeUnique<VsyncMarkerPayload>(aVsyncTimestamp));
-#endif
 }
 
 /*static */ void

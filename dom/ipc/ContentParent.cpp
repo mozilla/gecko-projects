@@ -1104,8 +1104,7 @@ ContentParent::RecvLoadPlugin(const uint32_t& aPluginId,
                               Endpoint<PPluginModuleParent>* aEndpoint)
 {
   *aRv = NS_OK;
-  if (!mozilla::plugins::SetupBridge(aPluginId, this, false, aRv, aRunID,
-                                     aEndpoint)) {
+  if (!mozilla::plugins::SetupBridge(aPluginId, this, aRv, aRunID, aEndpoint)) {
     return IPC_FAIL_NO_REASON(this);
   }
   return IPC_OK();
@@ -1141,7 +1140,7 @@ ContentParent::RecvConnectPluginBridge(const uint32_t& aPluginId,
   // in the first call to SetupBridge in RecvLoadPlugin, so we pass in a dummy
   // pointer and just throw it away.
   uint32_t dummy = 0;
-  if (!mozilla::plugins::SetupBridge(aPluginId, this, true, aRv, &dummy, aEndpoint)) {
+  if (!mozilla::plugins::SetupBridge(aPluginId, this, aRv, &dummy, aEndpoint)) {
     return IPC_FAIL(this, "SetupBridge failed");
   }
   return IPC_OK();
@@ -4504,7 +4503,8 @@ ContentParent::CommonCreateWindow(PBrowserParent* aThisTab,
                                   const nsString& aName,
                                   nsresult& aResult,
                                   nsCOMPtr<nsITabParent>& aNewTabParent,
-                                  bool* aWindowIsNew)
+                                  bool* aWindowIsNew,
+                                  nsIPrincipal* aTriggeringPrincipal)
 
 {
   // The content process should never be in charge of computing whether or
@@ -4582,6 +4582,8 @@ ContentParent::CommonCreateWindow(PBrowserParent* aThisTab,
     nsCOMPtr<nsIOpenURIInFrameParams> params =
       new nsOpenURIInFrameParams(openerOriginAttributes);
     params->SetReferrer(NS_ConvertUTF8toUTF16(aBaseURI));
+    MOZ_ASSERT(aTriggeringPrincipal, "need a valid triggeringPrincipal");
+    params->SetTriggeringPrincipal(aTriggeringPrincipal);
 
     nsCOMPtr<nsIFrameLoaderOwner> frameLoaderOwner;
     aResult = browserDOMWin->OpenURIInFrame(aURIToLoad, params, openLocation,
@@ -4647,6 +4649,7 @@ ContentParent::CommonCreateWindow(PBrowserParent* aThisTab,
     aResult = newBrowserDOMWin->OpenURI(aURIToLoad, openerWindow,
                                         nsIBrowserDOMWindow::OPEN_CURRENTWINDOW,
                                         nsIBrowserDOMWindow::OPEN_NEW,
+                                        aTriggeringPrincipal,
                                         getter_AddRefs(win));
   }
 
@@ -4664,25 +4667,31 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
                                 const nsCString& aFeatures,
                                 const nsCString& aBaseURI,
                                 const float& aFullZoom,
-                                nsresult* aResult,
-                                bool* aWindowIsNew,
-                                InfallibleTArray<FrameScriptInfo>* aFrameScripts,
-                                nsCString* aURLToLoad,
-                                TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                                uint64_t* aLayersId,
-                                CompositorOptions* aCompositorOptions,
-                                uint32_t* aMaxTouchPoints,
-                                DimensionInfo* aDimensions)
+                                const IPC::Principal& aTriggeringPrincipal,
+                                CreateWindowResolver&& aResolve)
 {
+  nsresult rv = NS_OK;
+  CreatedWindowInfo cwi;
+
   // We always expect to open a new window here. If we don't, it's an error.
-  *aWindowIsNew = true;
-  *aResult = NS_OK;
+  cwi.windowOpened() = true;
+  cwi.layersId() = 0;
+  cwi.maxTouchPoints() = 0;
+
+  // Make sure to resolve the resolver when this function exits, even if we
+  // failed to generate a valid response.
+  auto resolveOnExit = MakeScopeExit([&] {
+    // Copy over the nsresult, and then resolve.
+    cwi.rv() = rv;
+    aResolve(cwi);
+  });
 
   TabParent* newTab = TabParent::GetFrom(aNewTab);
   MOZ_ASSERT(newTab);
 
   auto destroyNewTabOnError = MakeScopeExit([&] {
-    if (!*aWindowIsNew || NS_FAILED(*aResult)) {
+    // We always expect to open a new window here. If we don't, it's an error.
+    if (!cwi.windowOpened() || NS_FAILED(rv)) {
       if (newTab) {
         newTab->Destroy();
       }
@@ -4693,7 +4702,7 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
   // we must have an opener.
   newTab->SetHasContentOpener(true);
 
-  TabParent::AutoUseNewTab aunt(newTab, aURLToLoad);
+  TabParent::AutoUseNewTab aunt(newTab, &cwi.urlToLoad());
   const uint64_t nextTabParentId = ++sNextTabParentId;
   sNextTabParents.Put(nextTabParentId, newTab);
 
@@ -4702,35 +4711,36 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
     CommonCreateWindow(aThisTab, /* aSetOpener = */ true, aChromeFlags,
                        aCalledFromJS, aPositionSpecified, aSizeSpecified,
                        nullptr, aFeatures, aBaseURI, aFullZoom,
-                       nextTabParentId, NullString(), *aResult,
-                       newRemoteTab, aWindowIsNew);
+                       nextTabParentId, NullString(), rv,
+                       newRemoteTab, &cwi.windowOpened(),
+                       aTriggeringPrincipal);
   if (!ipcResult) {
     return ipcResult;
   }
 
-  if (NS_WARN_IF(NS_FAILED(*aResult))) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return IPC_OK();
   }
 
   if (sNextTabParents.GetAndRemove(nextTabParentId).valueOr(nullptr)) {
-    *aWindowIsNew = false;
+    cwi.windowOpened() = false;
   }
   MOZ_ASSERT(TabParent::GetFrom(newRemoteTab) == newTab);
 
-  newTab->SwapFrameScriptsFrom(*aFrameScripts);
+  newTab->SwapFrameScriptsFrom(cwi.frameScripts());
 
   RenderFrameParent* rfp = static_cast<RenderFrameParent*>(aRenderFrame);
   if (!newTab->SetRenderFrame(rfp) ||
-      !newTab->GetRenderFrameInfo(aTextureFactoryIdentifier, aLayersId)) {
-    *aResult = NS_ERROR_FAILURE;
+      !newTab->GetRenderFrameInfo(&cwi.textureFactoryIdentifier(), &cwi.layersId())) {
+    rv = NS_ERROR_FAILURE;
   }
-  *aCompositorOptions = rfp->GetCompositorOptions();
+  cwi.compositorOptions() = rfp->GetCompositorOptions();
 
   nsCOMPtr<nsIWidget> widget = newTab->GetWidget();
-  *aMaxTouchPoints = widget ? widget->GetMaxTouchPoints() : 0;
-
-  // NOTE: widget must be set for this to return a meaningful value.
-  *aDimensions = widget ? newTab->GetDimensionInfo() : DimensionInfo();
+  if (widget) {
+    cwi.maxTouchPoints() = widget->GetMaxTouchPoints();
+    cwi.dimensions() = newTab->GetDimensionInfo();
+  }
 
   return IPC_OK();
 }
@@ -4746,7 +4756,8 @@ ContentParent::RecvCreateWindowInDifferentProcess(
   const nsCString& aFeatures,
   const nsCString& aBaseURI,
   const float& aFullZoom,
-  const nsString& aName)
+  const nsString& aName,
+  const IPC::Principal& aTriggeringPrincipal)
 {
   nsCOMPtr<nsITabParent> newRemoteTab;
   bool windowIsNew;
@@ -4757,7 +4768,7 @@ ContentParent::RecvCreateWindowInDifferentProcess(
                        aCalledFromJS, aPositionSpecified, aSizeSpecified,
                        uriToLoad, aFeatures, aBaseURI, aFullZoom,
                        /* aNextTabParentId = */ 0, aName, rv,
-                       newRemoteTab, &windowIsNew);
+                       newRemoteTab, &windowIsNew, aTriggeringPrincipal);
   if (!ipcResult) {
     return ipcResult;
   }
@@ -5097,8 +5108,7 @@ void
 ContentParent::SendGetFilesResponseAndForget(const nsID& aUUID,
                                              const GetFilesResponseResult& aResult)
 {
-  if (auto entry = mGetFilesPendingRequests.Lookup(aUUID)) {
-    entry.Remove();
+  if (mGetFilesPendingRequests.Remove(aUUID)) {
     Unused << SendGetFilesResponse(aUUID, aResult);
   }
 }

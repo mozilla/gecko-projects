@@ -332,9 +332,11 @@ CustomizeMode.prototype = {
         this.visiblePalette.hidden = true;
         this.visiblePalette.removeAttribute("showing");
 
-        // Disable the button-text fade-out mask
-        // during the transition for increased perf.
-        window.PanelUI.contents.setAttribute("customize-transitioning", "true");
+        if (!AppConstants.MOZ_PHOTON_THEME) {
+          // Disable the button-text fade-out mask
+          // during the transition for increased perf.
+          window.PanelUI.contents.setAttribute("customize-transitioning", "true");
+        }
 
         // Move the mainView in the panel to the holder so that we can see it
         // while customizing.
@@ -412,7 +414,9 @@ CustomizeMode.prototype = {
       this._updateEmptyPaletteNotice();
 
       this._updateLWThemeButtonIcon();
-      this.maybeShowTip(panelHolder);
+      if (!AppConstants.MOZ_PHOTON_THEME) {
+        this.maybeShowTip(panelHolder);
+      }
 
       this._handler.isEnteringCustomizeMode = false;
       if (!gPhotonStructure) {
@@ -634,6 +638,17 @@ CustomizeMode.prototype = {
    * excluding certain styles while in any phase of customize mode.
    */
   _doTransition(aEntering) {
+    if (AppConstants.MOZ_PHOTON_THEME) {
+      let docEl = this.document.documentElement;
+      if (aEntering) {
+        docEl.setAttribute("customizing", true);
+        docEl.setAttribute("customize-entered", true);
+      } else {
+        docEl.removeAttribute("customizing");
+        docEl.removeAttribute("customize-entered");
+      }
+      return Promise.resolve();
+    }
     let deck = this.document.getElementById("content-deck");
     let customizeTransitionEndPromise = new Promise(resolve => {
       let customizeTransitionEnd = (aEvent) => {
@@ -711,6 +726,7 @@ CustomizeMode.prototype = {
       // Put the tip contents in the popup.
       let bundle = this.document.getElementById("bundle_browser");
       const kLabelClass = "customization-tipPanel-link";
+      // eslint-disable-next-line no-unsanitized/property
       messageNode.innerHTML = bundle.getFormattedString("customizeTips.tip0", [
         "<label class=\"customization-tipPanel-em\" value=\"" +
           bundle.getString("customizeTips.tip0.hint") + "\"/>",
@@ -788,6 +804,12 @@ CustomizeMode.prototype = {
     CustomizableUI.addWidgetToArea(aNode.id, panel);
     if (!this._customizing) {
       CustomizableUI.dispatchToolboxEvent("customizationchange");
+    }
+
+    if (AppConstants.MOZ_PHOTON_ANIMATIONS &&
+        Services.prefs.getBoolPref("toolkit.cosmeticAnimations.enabled")) {
+      let overflowButton = this.document.getElementById("nav-bar-overflow-button");
+      overflowButton.setAttribute("animate", "true");
     }
   },
 
@@ -1112,6 +1134,10 @@ CustomizeMode.prototype = {
   },
 
   _addDragHandlers(aTarget) {
+    // Allow dropping on the padding of the arrow panel.
+    if (gPhotonStructure && aTarget.id == CustomizableUI.AREA_FIXED_OVERFLOW_PANEL) {
+      aTarget = this.document.getElementById("customization-panelHolder");
+    }
     aTarget.addEventListener("dragstart", this, true);
     aTarget.addEventListener("dragover", this, true);
     aTarget.addEventListener("dragexit", this, true);
@@ -1128,6 +1154,11 @@ CustomizeMode.prototype = {
   },
 
   _removeDragHandlers(aTarget) {
+    // Remove handler from different target if it was added to
+    // allow dropping on the padding of the arrow panel.
+    if (gPhotonStructure && aTarget.id == CustomizableUI.AREA_FIXED_OVERFLOW_PANEL) {
+      aTarget = this.document.getElementById("customization-panelHolder");
+    }
     aTarget.removeEventListener("dragstart", this, true);
     aTarget.removeEventListener("dragover", this, true);
     aTarget.removeEventListener("dragexit", this, true);
@@ -1359,6 +1390,98 @@ CustomizeMode.prototype = {
     aEvent.target.parentNode.parentNode.hidePopup();
     let getMoreURL = Services.urlFormatter.formatURLPref("lightweightThemes.getMoreURL");
     this.window.openUILinkIn(getMoreURL, "tab");
+  },
+
+  updateUIDensity(mode) {
+    this.window.gUIDensity.update(mode);
+  },
+
+  setUIDensity(mode) {
+    let win = this.window;
+    let gUIDensity = win.gUIDensity;
+    let currentDensity = gUIDensity.getCurrentDensity();
+    let panel = win.document.getElementById("customization-uidensity-menu");
+
+    Services.prefs.setIntPref(gUIDensity.uiDensityPref, mode);
+
+    // If the user is choosing a different UI density mode while
+    // the mode is overriden to Touch, remove the override.
+    if (currentDensity.overridden) {
+      Services.prefs.setBoolPref(gUIDensity.autoTouchModePref, false);
+    }
+
+    this._onUIChange();
+    panel.hidePopup();
+  },
+
+  resetUIDensity() {
+    this.window.gUIDensity.update();
+  },
+
+  onUIDensityMenuShowing() {
+    let win = this.window;
+    let doc = win.document;
+    let gUIDensity = win.gUIDensity;
+    let currentDensity = gUIDensity.getCurrentDensity();
+
+    let normalButton = doc.getElementById("customization-uidensity-menu-button-normal");
+    normalButton.mode = gUIDensity.MODE_NORMAL;
+
+    let compactButton = doc.getElementById("customization-uidensity-menu-button-compact");
+    compactButton.mode = gUIDensity.MODE_COMPACT;
+
+    let buttons = [normalButton, compactButton];
+
+    let touchButton = doc.getElementById("customization-uidensity-menu-button-touch");
+    // Touch mode can not be enabled in OSX right now.
+    if (touchButton) {
+      touchButton.mode = gUIDensity.MODE_TOUCH;
+      buttons.push(touchButton);
+    }
+
+    // Mark the active mode button.
+    for (let button of buttons) {
+      if (button.mode == currentDensity.mode) {
+        button.setAttribute("aria-checked", "true");
+        button.setAttribute("active", "true");
+      } else {
+        button.removeAttribute("aria-checked");
+        button.removeAttribute("active");
+      }
+    }
+
+    // Add menu items for automatically switching to Touch mode in Windows Tablet Mode,
+    // which is only available in Windows 10.
+    if (AppConstants.isPlatformAndVersionAtLeast("win", "10")) {
+      let spacer = doc.getElementById("customization-uidensity-touch-spacer");
+      let checkbox = doc.getElementById("customization-uidensity-autotouchmode-checkbox");
+      spacer.removeAttribute("hidden");
+      checkbox.removeAttribute("hidden");
+
+      // Show a hint that the UI density was overridden automatically.
+      if (currentDensity.overridden) {
+        let sb = Services.strings.createBundle("chrome://browser/locale/uiDensity.properties");
+        touchButton.setAttribute("acceltext",
+                                 sb.GetStringFromName("uiDensity.menu-button-touch.acceltext"));
+      } else {
+        touchButton.removeAttribute("acceltext");
+      }
+
+      let autoTouchMode = Services.prefs.getBoolPref(win.gUIDensity.autoTouchModePref);
+      if (autoTouchMode) {
+        checkbox.setAttribute("checked", "true");
+      } else {
+        checkbox.removeAttribute("checked");
+      }
+    }
+  },
+
+  updateAutoTouchMode(checked) {
+    Services.prefs.setBoolPref("browser.touchmode.auto", checked);
+    // Re-render the menu items since the active mode might have
+    // change because of this.
+    this.onUIDensityMenuShowing();
+    this._onUIChange();
   },
 
   onLWThemesMenuShowing(aEvent) {
@@ -2195,6 +2318,14 @@ CustomizeMode.prototype = {
   },
 
   _getCustomizableParent(aElement) {
+    if (gPhotonStructure && aElement) {
+      // Deal with drag/drop on the padding of the panel in photon.
+      let containingPanelHolder = aElement.closest("#customization-panelHolder");
+      if (containingPanelHolder) {
+        return containingPanelHolder.firstChild;
+      }
+    }
+
     let areas = CustomizableUI.areas;
     areas.push(kPaletteId);
     while (aElement) {
@@ -2203,6 +2334,7 @@ CustomizeMode.prototype = {
       }
       aElement = aElement.parentNode;
     }
+
     return null;
   },
 

@@ -238,6 +238,7 @@ EnqueueTask(already_AddRefed<nsIRunnable> aTask, int aDelayMs)
   AndroidUiTask* newTask = (aDelayMs ? new AndroidUiTask(mozilla::Move(aTask), aDelayMs)
                                  : new AndroidUiTask(mozilla::Move(aTask)));
 
+  bool headOfList = false;
   {
     MOZ_ASSERT(sTaskQueue);
     MOZ_ASSERT(sTaskQueueLock);
@@ -256,9 +257,10 @@ EnqueueTask(already_AddRefed<nsIRunnable> aTask, int aDelayMs)
     if (!newTask->isInList()) {
       sTaskQueue->insertBack(newTask);
     }
+    headOfList = !newTask->getPrevious();
   }
 
-  if (!newTask->getPrevious()) {
+  if (headOfList) {
     // if we're inserting it at the head of the queue, notify Java because
     // we need to get a callback at an earlier time than the last scheduled
     // callback

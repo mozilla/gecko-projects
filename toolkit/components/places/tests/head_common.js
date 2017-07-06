@@ -6,7 +6,7 @@
 // It is expected that the test files importing this file define Cu etc.
 /* global Cu, Ci, Cc, Cr */
 
-const CURRENT_SCHEMA_VERSION = 37;
+const CURRENT_SCHEMA_VERSION = 38;
 const FIRST_UPGRADABLE_SCHEMA_VERSION = 11;
 
 const NS_APP_USER_PROFILE_50_DIR = "ProfD";
@@ -32,8 +32,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
                                   "resource://gre/modules/FileUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-                                  "resource://gre/modules/Promise.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
                                   "resource://gre/modules/PromiseUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Services",

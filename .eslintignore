@@ -138,9 +138,6 @@ devtools/shared/tests/mochitest/*.html
 devtools/shared/webconsole/test/test_*.html
 
 # Ignore devtools pre-processed files
-devtools/client/framework/toolbox-process-window.js
-devtools/client/performance/system.js
-devtools/client/webide/webide-prefs.js
 devtools/client/preferences/**
 
 # Ignore devtools third-party libs
@@ -215,6 +212,7 @@ dom/locales/**
 dom/manifest/**
 dom/mathml/**
 dom/media/**
+!dom/media/*.js*
 dom/messagechannel/**
 dom/network/**
 dom/notification/**
@@ -250,6 +248,9 @@ dom/xhr/**
 dom/xml/**
 dom/xslt/**
 dom/xul/**
+
+# Third-party
+dom/media/webvtt/**
 
 # Exclude everything but self-hosted JS
 js/ductwork/**
@@ -297,15 +298,28 @@ security/nss/**
 services/sync/modules/constants.js
 services/sync/services-sync.js
 
-# testing/ exclusions
-testing/marionette/**
+# Remote protocol exclusions
+testing/marionette/test_*.js
+testing/marionette/atom.js
+testing/marionette/legacyaction.js
+testing/marionette/client/**
+testing/marionette/harness/**
+
+# other testing/ exclusions
 testing/mochitest/**
 # third party modules
 testing/modules/ajv-4.1.1.js
 testing/modules/sinon-2.3.2.js
 # octothorpe used for pref file comment causes parsing error
 testing/mozbase/mozprofile/tests/files/prefs_with_comments.js
-testing/talos/**
+testing/talos/talos/scripts/jszip.min.js
+testing/talos/talos/startup_test/sessionrestore/profile/sessionstore.js
+testing/talos/talos/startup_test/sessionrestore/profile-manywindows/sessionstore.js
+testing/talos/talos/tests/canvasmark/**
+testing/talos/talos/tests/dromaeo/**
+testing/talos/talos/tests/v8_7/**
+testing/talos/talos/tests/kraken/**
+
 testing/web-platform/**
 testing/xpcshell/moz-http2/**
 testing/xpcshell/node-http2/**

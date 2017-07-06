@@ -77,7 +77,7 @@ job-template:
          by-build-platform:
             linux64-nightly: linux64/opt
             linux-nightly: linux32/opt
-            macosx64-nightly: osx-10-7/opt
+            macosx64-nightly: osx-cross/opt
             win64-nightly: windows2012-64/opt
             android-api-15-nightly: android-4-0-armv7-api15/opt
    env:

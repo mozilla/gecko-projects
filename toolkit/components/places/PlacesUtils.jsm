@@ -210,6 +210,7 @@ function serializeNode(aNode, aIsLivemark) {
 // Imposed to limit database size.
 const DB_URL_LENGTH_MAX = 65536;
 const DB_TITLE_LENGTH_MAX = 4096;
+const DB_DESCRIPTION_LENGTH_MAX = 1024;
 
 /**
  * List of bookmark object validators, one per each known property.
@@ -229,10 +230,13 @@ const BOOKMARK_VALIDATORS = Object.freeze({
                                   PlacesUtils.bookmarks.TYPE_FOLDER,
                                   PlacesUtils.bookmarks.TYPE_SEPARATOR ].includes(v)),
   title: v => {
-    simpleValidateFunc(val => val === null || typeof(val) == "string").call(this, v);
-    if (!v)
-      return null;
-    return v.slice(0, DB_TITLE_LENGTH_MAX);
+    if (v === null) {
+      return "";
+    }
+    if (typeof(v) == "string") {
+      return v.slice(0, DB_TITLE_LENGTH_MAX);
+    }
+    throw new Error("Invalid title");
   },
   url: v => {
     simpleValidateFunc(val => (typeof(val) == "string" && val.length <= DB_URL_LENGTH_MAX) ||
@@ -388,6 +392,8 @@ this.PlacesUtils = {
    * @return microseconds from the epoch.
    */
   toPRTime(date) {
+    if (typeof date != "number" && date.constructor.name != "Date")
+      throw new Error("Invalid value passed to toPRTime");
     return date * 1000;
   },
 
@@ -399,6 +405,8 @@ this.PlacesUtils = {
    * @return a Date object.
    */
   toDate(time) {
+    if (typeof time != "number")
+      throw new Error("Invalid value passed to toDate");
     return new Date(parseInt(time / 1000));
   },
 
@@ -991,20 +999,52 @@ this.PlacesUtils = {
       visits: [],
     };
 
+    if (typeof pageInfo != "object" || !pageInfo) {
+      throw new TypeError("pageInfo must be an object");
+    }
+
     if (!pageInfo.url) {
       throw new TypeError("PageInfo object must have a url property");
     }
 
     info.url = this.normalizeToURLOrGUID(pageInfo.url);
 
-    if (!validateVisits) {
-      return info;
+    if (typeof pageInfo.guid === "string" && this.isValidGuid(pageInfo.guid)) {
+      info.guid = pageInfo.guid;
+    } else if (pageInfo.guid) {
+      throw new TypeError(`guid property of PageInfo object: ${pageInfo.guid} is invalid`);
     }
 
     if (typeof pageInfo.title === "string") {
       info.title = pageInfo.title;
     } else if (pageInfo.title != null && pageInfo.title != undefined) {
       throw new TypeError(`title property of PageInfo object: ${pageInfo.title} must be a string if provided`);
+    }
+
+    if (typeof pageInfo.description === "string" || pageInfo.description === null) {
+      info.description = pageInfo.description ? pageInfo.description.slice(0, DB_DESCRIPTION_LENGTH_MAX) : null;
+    } else if (pageInfo.description !== undefined) {
+      throw new TypeError(`description property of pageInfo object: ${pageInfo.description} must be either a string or null if provided`);
+    }
+
+    if (pageInfo.previewImageURL || pageInfo.previewImageURL === null) {
+      let previewImageURL = pageInfo.previewImageURL;
+
+      if (previewImageURL === null) {
+        info.previewImageURL = null;
+      } else if (typeof(previewImageURL) === "string" && previewImageURL.length <= DB_URL_LENGTH_MAX) {
+        info.previewImageURL = new URL(previewImageURL);
+      } else if (previewImageURL instanceof Ci.nsIURI && previewImageURL.spec.length <= DB_URL_LENGTH_MAX) {
+        info.previewImageURL = new URL(previewImageURL.spec);
+      } else if (previewImageURL instanceof URL && previewImageURL.href.length <= DB_URL_LENGTH_MAX) {
+        info.previewImageURL = previewImageURL;
+      } else {
+        throw new TypeError("previewImageURL property of pageInfo object: ${previewImageURL} is invalid");
+      }
+    }
+
+    if (!validateVisits) {
+      return info;
     }
 
     if (!pageInfo.visits || !Array.isArray(pageInfo.visits) || !pageInfo.visits.length) {
@@ -1078,6 +1118,9 @@ this.PlacesUtils = {
    */
   getFolderContents:
   function PU_getFolderContents(aFolderId, aExcludeItems, aExpandQueries) {
+    if (typeof aFolderId !== "number") {
+      throw new Error("aFolderId should be a number.");
+    }
     var query = this.history.getNewQuery();
     query.setFolders([aFolderId], 1);
     var options = this.history.getNewQueryOptions();
@@ -1911,8 +1954,8 @@ this.PlacesUtils = {
          FROM moz_bookmarks b2
          JOIN descendants ON b2.parent = descendants.id AND b2.id <> :tags_folder)
        SELECT d.level, d.id, d.guid, d.parent, d.parentGuid, d.type,
-              d.position AS [index], d.title, d.dateAdded, d.lastModified,
-              h.url, (SELECT icon_url FROM moz_icons i
+              d.position AS [index], IFNULL(d.title, "") AS title, d.dateAdded,
+              d.lastModified, h.url, (SELECT icon_url FROM moz_icons i
                       JOIN moz_icons_to_pages ON icon_id = i.id
                       JOIN moz_pages_w_icons pi ON page_id = pi.id
                       WHERE pi.page_url_hash = hash(h.url) AND pi.page_url = h.url

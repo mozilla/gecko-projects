@@ -1430,8 +1430,7 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       if (!mDoneCreating) {
         mShouldInitChecked = true;
       } else {
-        DoSetChecked(DefaultChecked(), true, true);
-        SetCheckedChanged(false);
+        DoSetChecked(DefaultChecked(), true, false);
       }
     }
 
@@ -3110,7 +3109,7 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue,
                    !(aFlags & nsTextEditorState::eSetValue_BySetUserInput)) {
           nsDateTimeControlFrame* frame = do_QueryFrame(GetPrimaryFrame());
           if (frame) {
-            frame->UpdateInputBoxValue();
+            frame->OnValueChanged();
           }
         }
         if (mDoneCreating) {
@@ -6555,8 +6554,7 @@ HTMLInputElement::DoneCreatingElement()
   // property.
   //
   if (!restoredCheckedState && mShouldInitChecked) {
-    DoSetChecked(DefaultChecked(), false, true);
-    DoSetCheckedChanged(false, false);
+    DoSetChecked(DefaultChecked(), false, false);
   }
 
   // Sanitize the value.

@@ -305,13 +305,21 @@ nsDisplayCanvasBackgroundColor::BuildLayer(nsDisplayListBuilder* aBuilder,
   return layer.forget();
 }
 
-void
+bool
 nsDisplayCanvasBackgroundColor::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
                                                         const StackingContextHelper& aSc,
                                                         nsTArray<WebRenderParentCommand>& aParentCommands,
-                                                        WebRenderDisplayItemLayer* aLayer)
+                                                        WebRenderLayerManager* aManager,
+                                                        nsDisplayListBuilder* aDisplayListBuilder)
 {
-  nsCanvasFrame* frame = static_cast<nsCanvasFrame*>(mFrame);
+  if (aManager->IsLayersFreeTransaction()) {
+    ContainerLayerParameters parameter;
+    if (GetLayerState(aDisplayListBuilder, aManager, parameter) != LAYER_ACTIVE) {
+      return false;
+    }
+  }
+
+  nsCanvasFrame *frame = static_cast<nsCanvasFrame *>(mFrame);
   nsPoint offset = ToReferenceFrame();
   nsRect bgClipRect = frame->CanvasArea() + offset;
   int32_t appUnitsPerDevPixel = mFrame->PresContext()->AppUnitsPerDevPixel();
@@ -323,6 +331,7 @@ nsDisplayCanvasBackgroundColor::CreateWebRenderCommands(mozilla::wr::DisplayList
   aBuilder.PushRect(transformedRect,
                     transformedRect,
                     wr::ToWrColor(ToDeviceColor(mColor)));
+  return true;
 }
 
 #ifdef MOZ_DUMP_PAINTING
@@ -379,7 +388,7 @@ nsDisplayCanvasBackgroundImage::Paint(nsDisplayListBuilder* aBuilder,
     if (dt && dt->IsValid()) {
       RefPtr<gfxContext> ctx = gfxContext::CreateOrNull(dt);
       MOZ_ASSERT(ctx); // already checked draw target above
-      ctx->SetMatrix(ctx->CurrentMatrix().Translate(-destRect.x, -destRect.y));
+      ctx->SetMatrix(ctx->CurrentMatrix().PreTranslate(-destRect.x, -destRect.y));
       PaintInternal(aBuilder, ctx, bgClipRect, &bgClipRect);
       BlitSurface(dest->GetDrawTarget(), destRect, dt);
       frame->SetProperty(nsIFrame::CachedBackgroundImageDT(),
