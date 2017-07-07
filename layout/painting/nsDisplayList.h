@@ -4111,11 +4111,42 @@ public:
   {
     MOZ_COUNT_CTOR(nsDisplayLayerEventRegions);
   }
-#ifdef NS_BUILD_REFCNT_LOGGING
+
   virtual ~nsDisplayLayerEventRegions() {
     MOZ_COUNT_DTOR(nsDisplayLayerEventRegions);
+
+    for (nsIFrame* f : mHitRegion.mFrames) {
+      if (f != mFrame) {
+        f->RealDisplayItemData().RemoveElement(this);
+      }
+    }
+    for (nsIFrame* f : mMaybeHitRegion.mFrames) {
+      if (f != mFrame) {
+        f->RealDisplayItemData().RemoveElement(this);
+      }
+    }
+    for (nsIFrame* f : mDispatchToContentHitRegion.mFrames) {
+      if (f != mFrame) {
+        f->RealDisplayItemData().RemoveElement(this);
+      }
+    }
+    for (nsIFrame* f : mNoActionRegion.mFrames) {
+      if (f != mFrame) {
+        f->RealDisplayItemData().RemoveElement(this);
+      }
+    }
+    for (nsIFrame* f : mHorizontalPanRegion.mFrames) {
+      if (f != mFrame) {
+        f->RealDisplayItemData().RemoveElement(this);
+      }
+    }
+    for (nsIFrame* f : mVerticalPanRegion.mFrames) {
+      if (f != mFrame) {
+        f->RealDisplayItemData().RemoveElement(this);
+      }
+    }
   }
-#endif
+
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
                            bool* aSnap) const override
   {
@@ -4125,7 +4156,9 @@ public:
   nsRect GetHitRegionBounds(nsDisplayListBuilder* aBuilder, bool* aSnap)
   {
     *aSnap = false;
-    return mHitRegion.GetBounds().Union(mMaybeHitRegion.GetBounds());
+    // TODO: This constructs the two regions, but we're also doing the same
+    // work in AccumulateEventRegions. We should avoid doing it twice.
+    return HitRegion().GetBounds().Union(MaybeHitRegion().GetBounds());
   }
 
   virtual void ApplyOpacity(nsDisplayListBuilder* aBuilder,
@@ -4148,7 +4181,7 @@ public:
   // Indicate that an inactive scrollframe's scrollport should be added to the
   // dispatch-to-content region, to ensure that APZ lets content create a
   // displayport.
-  void AddInactiveScrollPort(const nsRect& aRect);
+  void AddInactiveScrollPort(nsIFrame* aFrame, const nsRect& aRect);
 
   bool IsEmpty() const;
 
@@ -4160,35 +4193,90 @@ public:
     return (mIndex << TYPE_BITS) | nsDisplayItem::GetPerFrameKey();
   }
 
-  const nsRegion& HitRegion() { return mHitRegion; }
-  const nsRegion& MaybeHitRegion() { return mMaybeHitRegion; }
-  const nsRegion& DispatchToContentHitRegion() { return mDispatchToContentHitRegion; }
-  const nsRegion& NoActionRegion() { return mNoActionRegion; }
-  const nsRegion& HorizontalPanRegion() { return mHorizontalPanRegion; }
-  const nsRegion& VerticalPanRegion() { return mVerticalPanRegion; }
+  const nsRegion HitRegion()
+  {
+    return nsRegion(mozilla::gfx::ArrayView<pixman_box32_t>(mHitRegion.mBoxes));
+  }
+  const nsRegion MaybeHitRegion()
+  {
+    nsRegion result(mozilla::gfx::ArrayView<pixman_box32_t>(mMaybeHitRegion.mBoxes));
+
+    // Avoid quadratic performance as a result of the region growing to include
+    // an arbitrarily large number of rects, which can happen on some pages.
+    // TODO: It would be nice if we could ask the initial construction above
+    // to include simplification.
+    result.SimplifyOutward(8);
+    return result;
+  }
+  const nsRegion DispatchToContentHitRegion()
+  {
+    return nsRegion(mozilla::gfx::ArrayView<pixman_box32_t>(mDispatchToContentHitRegion.mBoxes));
+  }
+  const nsRegion NoActionRegion()
+  {
+    return nsRegion(mozilla::gfx::ArrayView<pixman_box32_t>(mNoActionRegion.mBoxes));
+  }
+  const nsRegion HorizontalPanRegion()
+  {
+    return nsRegion(mozilla::gfx::ArrayView<pixman_box32_t>(mHorizontalPanRegion.mBoxes));
+  }
+  const nsRegion VerticalPanRegion()
+  {
+    return nsRegion(mozilla::gfx::ArrayView<pixman_box32_t>(mVerticalPanRegion.mBoxes));
+  }
   nsRegion CombinedTouchActionRegion();
 
   virtual void WriteDebugInfo(std::stringstream& aStream) override;
 
+  // TODO: nsTArray (vector) might not be a great data structure
+  // choice since we need to remove elements from the middle.
+  // Should profile and try figure out the best approach
+  // here.
+  struct FrameRects {
+    void Add(nsIFrame* aFrame, const nsRect& aRect) {
+      mBoxes.AppendElement(nsRegion::RectToBox(aRect));
+      mFrames.AppendElement(aFrame);
+    }
+    void Add(nsIFrame* aFrame, const pixman_box32& aBox) {
+      mBoxes.AppendElement(aBox);
+      mFrames.AppendElement(aFrame);
+    }
+    void Add(const FrameRects& aOther) {
+      mBoxes.AppendElements(aOther.mBoxes);
+      mFrames.AppendElements(aOther.mFrames);
+    }
+
+    bool IsEmpty() const {
+      return mBoxes.IsEmpty();
+    }
+
+    nsTArray<pixman_box32_t> mBoxes;
+    nsTArray<nsIFrame*> mFrames;
+  };
+
+  void RemoveFrame(nsIFrame* aFrame);
+
 private:
+  friend void MergeLayerEventRegions(nsDisplayItem*, nsDisplayItem*, bool);
+
   // Relative to aFrame's reference frame.
   // These are the points that are definitely in the hit region.
-  nsRegion mHitRegion;
+  FrameRects mHitRegion;
   // These are points that may or may not be in the hit region. Only main-thread
   // event handling can tell for sure (e.g. because complex shapes are present).
-  nsRegion mMaybeHitRegion;
+  FrameRects mMaybeHitRegion;
   // These are points that need to be dispatched to the content thread for
   // resolution. Always contained in the union of mHitRegion and mMaybeHitRegion.
-  nsRegion mDispatchToContentHitRegion;
+  FrameRects mDispatchToContentHitRegion;
   // These are points where panning is disabled, as determined by the touch-action
   // property. Always contained in the union of mHitRegion and mMaybeHitRegion.
-  nsRegion mNoActionRegion;
+  FrameRects mNoActionRegion;
   // These are points where panning is horizontal, as determined by the touch-action
   // property. Always contained in the union of mHitRegion and mMaybeHitRegion.
-  nsRegion mHorizontalPanRegion;
+  FrameRects mHorizontalPanRegion;
   // These are points where panning is vertical, as determined by the touch-action
   // property. Always contained in the union of mHitRegion and mMaybeHitRegion.
-  nsRegion mVerticalPanRegion;
+  FrameRects mVerticalPanRegion;
   // If these event regions are for an inactive scroll frame, the z-index of
   // this display item is overridden to be the largest z-index of the content
   // in the scroll frame. This ensures that the event regions item remains on

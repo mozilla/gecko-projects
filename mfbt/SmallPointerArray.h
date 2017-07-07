@@ -128,6 +128,30 @@ public:
     return false;
   }
 
+  bool Contains(T* aElement) const {
+    MOZ_ASSERT(aElement != nullptr);
+    if (aElement == nullptr) {
+      return false;
+    }
+
+    if (mInlineElements[0] == aElement) {
+      return true;
+    }
+
+    if (mInlineElements[0]) {
+      if (mInlineElements[1] == aElement) {
+        return true;
+      }
+      return false;
+    }
+
+    if (mArray) {
+      return std::find(mArray->begin(), mArray->end(), aElement) != mArray->end();
+    }
+    return false;
+
+  }
+
   size_t Length() const
   {
     if (mInlineElements[0]) {

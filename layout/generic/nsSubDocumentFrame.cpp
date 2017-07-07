@@ -441,6 +441,12 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     needsOwnLayer = true;
   }
 
+  if (!needsOwnLayer && aBuilder->IsBuildingLayerEventRegions() &&
+      nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(presShell))
+  {
+    needsOwnLayer = true;
+  }
+
   if (aBuilder->IsRetainingDisplayList()) {
     // The value of needsOwnLayer can change between builds without
     // an invalidation recorded for this frame. If this happens,
@@ -462,13 +468,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     }
     mPreviousCaret = aBuilder->GetCaretFrame();
   }
-
-  if (!needsOwnLayer && aBuilder->IsBuildingLayerEventRegions() &&
-      nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(presShell))
-  {
-    needsOwnLayer = true;
-  }
-
+  
   nsDisplayList childItems;
 
   {
