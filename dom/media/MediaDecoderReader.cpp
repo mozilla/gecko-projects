@@ -68,7 +68,8 @@ public:
   size_t mSize;
 };
 
-MediaDecoderReader::MediaDecoderReader(AbstractMediaDecoder* aDecoder)
+MediaDecoderReader::MediaDecoderReader(AbstractMediaDecoder* aDecoder,
+                                       MediaResource* aResource)
   : mAudioCompactor(mAudioQueue)
   , mDecoder(aDecoder)
   , mTaskQueue(new TaskQueue(
@@ -81,6 +82,7 @@ MediaDecoderReader::MediaDecoderReader(AbstractMediaDecoder* aDecoder)
   , mIgnoreAudioOutputFormat(false)
   , mHitAudioDecodeError(false)
   , mShutdown(false)
+  , mResource(aResource)
 {
   MOZ_COUNT_CTOR(MediaDecoderReader);
   MOZ_ASSERT(NS_IsMainThread());
@@ -89,10 +91,6 @@ MediaDecoderReader::MediaDecoderReader(AbstractMediaDecoder* aDecoder)
 nsresult
 MediaDecoderReader::Init()
 {
-  if (mDecoder && mDecoder->DataArrivedEvent()) {
-    mDataArrivedListener = mDecoder->DataArrivedEvent()->Connect(
-      mTaskQueue, this, &MediaDecoderReader::NotifyDataArrived);
-  }
   // Dispatch initialization that needs to happen on that task queue.
   mTaskQueue->Dispatch(
     NewRunnableMethod("MediaDecoderReader::InitializationTask",
@@ -206,7 +204,7 @@ MediaDecoderReader::GetBuffered()
 {
   MOZ_ASSERT(OnTaskQueue());
 
-  AutoPinned<MediaResource> stream(mDecoder->GetResource());
+  AutoPinned<MediaResource> stream(mResource);
 
   if (!mDuration.Ref().isSome()) {
     return TimeIntervals();
@@ -372,8 +370,6 @@ MediaDecoderReader::Shutdown()
 
   mBaseAudioPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_END_OF_STREAM, __func__);
   mBaseVideoPromise.RejectIfExists(NS_ERROR_DOM_MEDIA_END_OF_STREAM, __func__);
-
-  mDataArrivedListener.DisconnectIfExists();
 
   ReleaseResources();
   mDuration.DisconnectIfConnected();

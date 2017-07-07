@@ -32,10 +32,8 @@ MP4Decoder::MP4Decoder(MediaDecoderInit& aInit)
 
 MediaDecoderStateMachine* MP4Decoder::CreateStateMachine()
 {
-  mReader =
-    new MediaFormatReader(this,
-                          new MP4Demuxer(GetResource()),
-                          GetVideoFrameContainer());
+  mReader = new MediaFormatReader(
+    this, new MP4Demuxer(mResource), GetVideoFrameContainer());
 
   return new MediaDecoderStateMachine(this, mReader);
 }
@@ -291,8 +289,10 @@ MP4Decoder::IsVideoAccelerated(layers::KnowsCompositor* aKnowsCompositor, nsIGlo
 void
 MP4Decoder::GetMozDebugReaderData(nsACString& aString)
 {
-  if (mReader) {
-    mReader->GetMozDebugReaderData(aString);
+  // This is definitely a MediaFormatReader. See CreateStateMachine() above.
+  auto reader = static_cast<MediaFormatReader*>(mReader.get());
+  if (reader) {
+    reader->GetMozDebugReaderData(aString);
   }
 }
 

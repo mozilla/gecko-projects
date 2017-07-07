@@ -100,14 +100,6 @@ HTMLFormElement::HTMLFormElement(already_AddRefed<mozilla::dom::NodeInfo>& aNode
     mSelectedRadioButtons(2),
     mRequiredRadioButtonCounts(2),
     mValueMissingRadioGroups(2),
-    mGeneratingSubmit(false),
-    mGeneratingReset(false),
-    mIsSubmitting(false),
-    mDeferSubmission(false),
-    mNotifiedObservers(false),
-    mNotifiedObserversResult(false),
-    mSubmitPopupState(openAbused),
-    mSubmitInitiatedFromUserInput(false),
     mPendingSubmission(nullptr),
     mSubmittingRequest(nullptr),
     mDefaultSubmitElement(nullptr),
@@ -115,7 +107,15 @@ HTMLFormElement::HTMLFormElement(already_AddRefed<mozilla::dom::NodeInfo>& aNode
     mFirstSubmitNotInElements(nullptr),
     mImageNameLookupTable(FORM_CONTROL_LIST_HASHTABLE_LENGTH),
     mPastNameLookupTable(FORM_CONTROL_LIST_HASHTABLE_LENGTH),
+    mSubmitPopupState(openAbused),
     mInvalidElementsCount(0),
+    mGeneratingSubmit(false),
+    mGeneratingReset(false),
+    mIsSubmitting(false),
+    mDeferSubmission(false),
+    mNotifiedObservers(false),
+    mNotifiedObserversResult(false),
+    mSubmitInitiatedFromUserInput(false),
     mEverTriedInvalidSubmit(false)
 {
   // We start out valid.
@@ -474,7 +474,10 @@ nsresult
 HTMLFormElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   aVisitor.mWantsWillHandleEvent = true;
-  if (aVisitor.mEvent->mOriginalTarget == static_cast<nsIContent*>(this)) {
+  // According to the UI events spec section "Trusted events", we shouldn't
+  // trigger UA default action with an untrusted event except click.
+  if (aVisitor.mEvent->mOriginalTarget == static_cast<nsIContent*>(this) &&
+      aVisitor.mEvent->IsTrusted()) {
     uint32_t msg = aVisitor.mEvent->mMessage;
     if (msg == eFormSubmit) {
       if (mGeneratingSubmit) {
@@ -516,7 +519,10 @@ HTMLFormElement::WillHandleEvent(EventChainPostVisitor& aVisitor)
 nsresult
 HTMLFormElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
 {
-  if (aVisitor.mEvent->mOriginalTarget == static_cast<nsIContent*>(this)) {
+  // According to the UI events spec section "Trusted events", we shouldn't
+  // trigger UA default action with an untrusted event except click.
+  if (aVisitor.mEvent->mOriginalTarget == static_cast<nsIContent*>(this) &&
+      aVisitor.mEvent->IsTrusted()) {
     EventMessage msg = aVisitor.mEvent->mMessage;
     if (msg == eFormSubmit) {
       // let the form know not to defer subsequent submissions

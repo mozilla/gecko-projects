@@ -15,12 +15,11 @@ namespace mozilla {
 
 MediaDecoderStateMachine* OggDecoder::CreateStateMachine()
 {
-  RefPtr<OggDemuxer> demuxer = new OggDemuxer(GetResource());
-  RefPtr<MediaFormatReader> reader =
-    new MediaFormatReader(this, demuxer, GetVideoFrameContainer());
-  demuxer->SetChainingEvents(&reader->TimedMetadataProducer(),
-                             &reader->MediaNotSeekableProducer());
-  return new MediaDecoderStateMachine(this, reader);
+  RefPtr<OggDemuxer> demuxer = new OggDemuxer(mResource);
+  mReader = new MediaFormatReader(this, demuxer, GetVideoFrameContainer());
+  demuxer->SetChainingEvents(&mReader->TimedMetadataProducer(),
+                             &mReader->MediaNotSeekableProducer());
+  return new MediaDecoderStateMachine(this, mReader);
 }
 
 /* static */

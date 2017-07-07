@@ -5011,6 +5011,15 @@
     "kind": "boolean",
     "description": "Whether a document with a CSP policy (report-only or enforcing) contains a referrer directive ('true') or not ('false')."
   },
+  "PLACES_DATABASE_CORRUPTION_HANDLING_STAGE": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["firefox-dev@mozilla.org"],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 6,
+    "releaseChannelCollection": "opt-out",
+    "description": "PLACES: stage reached when trying to fix a database corruption , see Places::Database::eCorruptDBReplaceStatus"
+  },
   "PLACES_PAGES_COUNT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -10063,12 +10072,11 @@
   },
   "DEVTOOLS_JAVASCRIPT_ERROR_DISPLAYED": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mphillips@mozilla.com"],
-    "bug_numbers": [1255133],
-    "expires_in_version": "55",
+    "bug_numbers": [1255133, 1378449],
+    "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
-    "description": "Measures whether a particular JavaScript error has been displayed in the webconsole."
+    "description": "Records the key-identifiers of error messages when they are displayed in the webconsole of the debugger. Nothing should be recorded unless they are visible on the user screen."
   },
   "DEVTOOLS_TOOLBOX_HOST": {
     "record_in_processes": ["main", "content"],
