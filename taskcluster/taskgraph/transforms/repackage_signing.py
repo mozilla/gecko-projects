@@ -59,6 +59,7 @@ def make_repackage_signing_description(config, jobs):
         # have better beetmover support.
         dependencies.update(signing_dependencies)
         attributes = copy_attributes_from_dependent_job(dep_job)
+        attributes['repackage_type'] = 'repackage-signing'
 
         locale_str = ""
         if dep_job.attributes.get('locale'):

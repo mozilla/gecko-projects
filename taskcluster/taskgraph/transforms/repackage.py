@@ -111,6 +111,7 @@ def make_job_description(config, jobs):
         build_task_ref = "<{}>".format(build_task)
 
         attributes = copy_attributes_from_dependent_job(dep_job)
+        attributes['repackage_type'] = 'repackage'
 
         if job.get('locale'):
             attributes['locale'] = job['locale']
