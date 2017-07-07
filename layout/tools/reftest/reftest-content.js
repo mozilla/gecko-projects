@@ -636,11 +636,16 @@ function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
                       SendFailedNoPaint();
                   }
               }
-              elements = getNoDisplayListElements(contentRootElement);
-              for (var i = 0; i < elements.length; ++i) {
-                  if (windowUtils().checkAndClearDisplayListState(elements[i])) {
-                      SendFailedNoDisplayList();
-                  }
+              // We only support retained display lists in the content process
+              // right now, so don't fail reftest-no-display-list tests when
+              // we don't have e10s.
+              if (gBrowserIsRemote) {
+                elements = getNoDisplayListElements(contentRootElement);
+                for (var i = 0; i < elements.length; ++i) {
+                    if (windowUtils().checkAndClearDisplayListState(elements[i])) {
+                        SendFailedNoDisplayList();
+                    }
+                }
               }
               CheckLayerAssertions(contentRootElement);
             }
