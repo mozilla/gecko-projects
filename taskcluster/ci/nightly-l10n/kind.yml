@@ -101,9 +101,12 @@ job-template:
          win.*:
             EN_US_PACKAGE_NAME: target.zip
             EN_US_BINARY_URL:
-               task-reference: https://queue.taskcluster.net/v1/task/<unsigned-build>/artifacts/public/build
+               task-reference: https://queue.taskcluster.net/v1/task/<signed-build>/artifacts/public/build
+            EN_US_INSTALLER_BINARY_URL:
+               task-reference: https://queue.taskcluster.net/v1/task/<repackage-signed>/artifacts/public/build
             MAR_TOOLS_URL:
                task-reference: https://queue.taskcluster.net/v1/task/<unsigned-build>/artifacts/public/build/host/bin
+            NO_MAGIC_MH_BUILD_ARGS: "1"
          android-api-15-nightly:
             EN_US_PACKAGE_NAME: target.apk
             EN_US_BINARY_URL:
@@ -159,10 +162,10 @@ job-template:
             default: [ ]
       actions:
          by-build-platform:
-            default: [clone-locales list-locales setup repack
-                      submit-to-balrog summary]
-            android-api-15-nightly: [clone-locales list-locales setup repack
-                                     upload-repacks submit-to-balrog summary]
+            default: ['clone-locales', 'list-locales', 'setup', 'repack',
+                      'submit-to-balrog', 'summary']
+            android-api-15-l10n: ['clone-locales', 'list-locales', 'setup', 'repack',
+                                  'upload-repacks', 'submit-to-balrog', 'summary']
       script:
          by-build-platform:
             default: mozharness/scripts/desktop_l10n.py

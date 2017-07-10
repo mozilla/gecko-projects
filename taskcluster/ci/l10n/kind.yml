@@ -96,9 +96,9 @@ job-template:
                - this-chunk=1
       actions:
          by-build-platform:
-            default: [clone-locales list-locales setup repack summary]
-            android-api-15-l10n: [clone-locales list-locales setup repack
-                                  upload-repacks summary]
+            default: ['clone-locales', 'list-locales', 'setup', 'repack', 'summary']
+            android-api-15-l10n: ['clone-locales', 'list-locales', 'setup', 'repack',
+                                  'upload-repacks', 'summary']
       script:
          by-build-platform:
             default: mozharness/scripts/desktop_l10n.py

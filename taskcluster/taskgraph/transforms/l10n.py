@@ -215,6 +215,12 @@ def setup_nightly_dependency(config, jobs):
             yield job
             continue  # do not add a dep unless we're a nightly
         job['dependencies'] = {'unsigned-build': job['dependent-task'].label}
+        if job['attributes']['build_platform'].startswith('win'):
+            # Weave these in and just assume they will be there in the resulting graph
+            job['dependencies'].update({
+                'signed-build': 'signing-{}'.format(job['name']),
+                'repackage-signed': 'repackage-signing-repackage-{}'.format(job['name'])
+            })
         yield job
 
 
@@ -376,7 +382,6 @@ def make_job_description(config, jobs):
                 'os': 'windows',
                 'max-run-time': 7200,
             }
-            #print("XXX: CALLEK: WORKER {}".format(job['build-platform']))
         else:
             job_description['worker'] = {
                 'docker-image': {'in-tree': 'desktop-build'},
@@ -385,7 +390,6 @@ def make_job_description(config, jobs):
             }
             job_description['run']['tooltool-downloads'] = job['tooltool']
             job_description['run']['need-xvfb'] = True
-            #print("XXX: CALLEK: OLD WORKER: {}".format(job['build-platform']))
 
         if job.get('index'):
             job_description['index'] = {

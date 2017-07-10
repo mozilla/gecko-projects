@@ -270,6 +270,8 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, MockMixin, BuildbotMixin,
         self.read_buildbot_config()
         if not self.buildbot_config:
             self.warning("Skipping buildbot properties overrides")
+            # Set an empty dict
+            self.buildbot_config = {"properties": {}}
             return
         props = self.buildbot_config["properties"]
         for prop in ['mar_tools_url']:
@@ -801,9 +803,11 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, MockMixin, BuildbotMixin,
             glob_name = "*.%s.*" % locale
             matches = (glob.glob(os.path.join(upload_target, glob_name)) +
                        glob.glob(os.path.join(upload_target, 'update', glob_name)) +
-                       glob.glob(os.path.join(upload_target, '*', 'xpi', glob_name)))
+                       glob.glob(os.path.join(upload_target, '*', 'xpi', glob_name)) +
+                       glob.glob(os.path.join(upload_target, 'install', 'sea', glob_name)))
             targets_exts = ["tar.bz2", "dmg", "langpack.xpi",
-                            "complete.mar", "checksums"]
+                            "complete.mar", "checksums", "zip",
+                            "installer.exe"]
             targets = ["target.%s" % ext for ext in targets_exts]
             for f in matches:
                 target_file = next(target_file for target_file in targets

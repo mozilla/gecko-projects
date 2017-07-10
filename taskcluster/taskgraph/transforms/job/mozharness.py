@@ -229,6 +229,7 @@ def mozharness_on_generic_worker(config, job, taskdesc):
         mh_command.append('--' + action)
 
     for option in run.get('options', []):
+        assert ' ' not in option
         mh_command.append('--' + option)
 
     hg_command = ['"c:\\Program Files\\Mercurial\\hg.exe"']
