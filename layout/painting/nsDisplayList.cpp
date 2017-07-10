@@ -4495,6 +4495,7 @@ nsDisplayLayerEventRegions::AddFrame(nsDisplayListBuilder* aBuilder,
   }
 
   if (aFrame != mFrame) {
+    MOZ_ASSERT(!aFrame->RealDisplayItemData().Contains(this));
     aFrame->RealDisplayItemData().AppendElement(this);
   }
 
@@ -4617,7 +4618,6 @@ RemoveFrameFromFrameRects(nsDisplayLayerEventRegions::FrameRects& aFrameRects, n
 void
 nsDisplayLayerEventRegions::RemoveFrame(nsIFrame* aFrame)
 {
-  MOZ_ASSERT(aFrame != mFrame);
   RemoveFrameFromFrameRects(mHitRegion, aFrame);
   RemoveFrameFromFrameRects(mMaybeHitRegion, aFrame);
   RemoveFrameFromFrameRects(mDispatchToContentHitRegion, aFrame);
