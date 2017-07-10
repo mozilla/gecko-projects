@@ -16,7 +16,6 @@ from taskgraph.transforms.job.common import (
     support_vcs_checkout,
 )
 import os
-import re
 
 BUILDER_NAME_PREFIX = {
     'linux64-pgo': 'Ubuntu VM 12.04 x64',
@@ -32,7 +31,29 @@ BUILDER_NAME_PREFIX = {
     'android-4.3-arm7-api-15': 'Android 4.3 armv7 API 15+',
     'android-4.2-x86': 'Android 4.2 x86 Emulator',
     'android-4.3-arm7-api-15-gradle': 'Android 4.3 armv7 API 15+',
+    'win64': 'Windows 10 64-bit',
+    'win32': 'Windows 7 32-bit',
 }
+
+VARIANTS = [
+    'nightly',
+    'devedition',
+    'pgo',
+    'asan',
+    'stylo',
+    'stylo-sequential',
+    'qr',
+    'ccov',
+    'jsdcov',
+]
+
+
+def get_variant(test_platform):
+    for v in VARIANTS:
+        if '-{}/'.format(v) in test_platform:
+            return v
+    return ''
+
 
 test_description_schema = {str(k): v for k, v in test_description_schema.schema.iteritems()}
 
@@ -430,9 +451,7 @@ def mozharness_test_buildbot_bridge(config, job, taskdesc):
         test_name = '{}-{}'.format(test_name, this_chunk)
 
     if test.get('suite', '') == 'talos':
-        # on linux64-<variant>/<build>, we add the variant to the buildername
-        m = re.match(r'\w+-([^/]+)/.*', test['test-platform'])
-        variant = m.group(1) if m and m.group(1) else ''
+        variant = get_variant(test['test-platform'])
 
         # On beta and release, we run nightly builds on-push; the talos
         # builders need to run against non-nightly buildernames

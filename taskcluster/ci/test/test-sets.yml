@@ -172,6 +172,30 @@ macosx64-tests-talos:
     - talos-tp5o
     - talos-perf-reftest
 
+win32-tests-talos:
+    - talos-chrome
+    - talos-dromaeojs
+    - talos-g1
+    - talos-g2
+    - talos-g4
+    - talos-g5
+    - talos-other
+    - talos-svgr
+    - talos-tp5o
+    - talos-perf-reftest
+
+win64-tests-talos:
+    - talos-chrome
+    - talos-dromaeojs
+    - talos-g1
+    - talos-g2
+    - talos-g4
+    - talos-g5
+    - talos-other
+    - talos-svgr
+    - talos-tp5o
+    - talos-perf-reftest
+
 linux32-tests:
     - cppunit
     - crashtest
