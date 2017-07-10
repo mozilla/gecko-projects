@@ -877,7 +877,8 @@ pub extern "C" fn Servo_StyleSet_InsertStyleSheetBefore(
         &data.stylist,
         unsafe { GeckoStyleSheet::new(sheet) },
         unsafe { GeckoStyleSheet::new(before_sheet) },
-        &guard);
+        &guard,
+    );
     data.clear_stylist();
 }
 
@@ -886,8 +887,15 @@ pub extern "C" fn Servo_StyleSet_RemoveStyleSheet(
     raw_data: RawServoStyleSetBorrowed,
     sheet: *const ServoStyleSheet
 ) {
+    let global_style_data = &*GLOBAL_STYLE_DATA;
     let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
-    data.stylesheets.remove_stylesheet(unsafe { GeckoStyleSheet::new(sheet) });
+    let mut data = &mut *data;
+    let guard = global_style_data.shared_lock.read();
+    data.stylesheets.remove_stylesheet(
+        &data.stylist,
+        unsafe { GeckoStyleSheet::new(sheet) },
+        &guard,
+    );
     data.clear_stylist();
 }
 
@@ -1589,25 +1597,24 @@ fn get_pseudo_style(
         PseudoElementCascadeType::Eager => {
             match *pseudo {
                 PseudoElement::FirstLetter => {
-                    // inherited_styles can be None when doing lazy resolution
-                    // (e.g. for computed style) or when probing.  In that case
-                    // we just inherit from our element, which is what Gecko
-                    // does in that situation.  What should actually happen in
-                    // the computed style case is a bit unclear.
-                    let inherited_styles =
-                        inherited_styles.unwrap_or(styles.primary());
-                    let guards = StylesheetGuards::same(guard);
-                    let metrics = get_metrics_provider_for_product();
-                    let inputs = match styles.pseudos.get(&pseudo) {
-                        Some(styles) => CascadeInputs::new_from_style(styles),
-                        None => return None,
-                    };
-                    doc_data.stylist
-                        .compute_pseudo_element_style_with_inputs(
-                            &inputs,
-                            &guards,
-                            inherited_styles,
-                            &metrics)
+                    styles.pseudos.get(&pseudo).and_then(|pseudo_styles| {
+                        // inherited_styles can be None when doing lazy resolution
+                        // (e.g. for computed style) or when probing.  In that case
+                        // we just inherit from our element, which is what Gecko
+                        // does in that situation.  What should actually happen in
+                        // the computed style case is a bit unclear.
+                        let inherited_styles =
+                            inherited_styles.unwrap_or(styles.primary());
+                        let guards = StylesheetGuards::same(guard);
+                        let metrics = get_metrics_provider_for_product();
+                        let inputs = CascadeInputs::new_from_style(pseudo_styles);
+                        doc_data.stylist
+                            .compute_pseudo_element_style_with_inputs(
+                                &inputs,
+                                &guards,
+                                inherited_styles,
+                                &metrics)
+                    })
                 },
                 _ => {
                     debug_assert!(inherited_styles.is_none() ||
@@ -1696,6 +1703,24 @@ pub extern "C" fn Servo_ComputedValues_SpecifiesAnimationsOrTransitions(values: 
     let values = ComputedValues::as_arc(&values);
     let b = values.get_box();
     b.specifies_animations() || b.specifies_transitions()
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_ComputedValues_GetStyleRuleList(values: ServoComputedValuesBorrowed,
+                                                        rules: RawGeckoServoStyleRuleListBorrowedMut) {
+    let values = ComputedValues::as_arc(&values);
+    if let Some(ref rule_node) = values.rules {
+        let mut result = vec![];
+        for node in rule_node.self_and_ancestors() {
+            if let &StyleSource::Style(ref rule) = node.style_source() {
+                result.push(Locked::<StyleRule>::arc_as_borrowed(&rule));
+            }
+        }
+        unsafe { rules.set_len(result.len() as u32) };
+        for (&src, dest) in result.into_iter().zip(rules.iter_mut()) {
+            *dest = src;
+        }
+    }
 }
 
 /// See the comment in `Device` to see why it's ok to pass an owned reference to
@@ -2617,30 +2642,6 @@ unsafe fn maybe_restyle<'a>(data: &'a mut AtomicRefMut<ElementData>,
 
     // Ensure and return the RestyleData.
     Some(&mut data.restyle)
-}
-
-#[no_mangle]
-pub extern "C" fn Servo_Element_GetStyleRuleList(element: RawGeckoElementBorrowed,
-                                                 rules: RawGeckoServoStyleRuleListBorrowedMut) {
-    let element = GeckoElement(element);
-    let data = match element.borrow_data() {
-        Some(element_data) => element_data,
-        None => return,
-    };
-    let computed = match data.styles.get_primary() {
-        Some(values) => values,
-        None => return,
-    };
-    let mut result = vec![];
-    for rule_node in computed.rules().self_and_ancestors() {
-        if let &StyleSource::Style(ref rule) = rule_node.style_source() {
-            result.push(Locked::<StyleRule>::arc_as_borrowed(&rule));
-        }
-    }
-    unsafe { rules.set_len(result.len() as u32) };
-    for (&src, dest) in result.into_iter().zip(rules.iter_mut()) {
-        *dest = src;
-    }
 }
 
 #[no_mangle]
