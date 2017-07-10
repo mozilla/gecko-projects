@@ -158,6 +158,12 @@ windows7-32/opt:
         - windows-gpu-tests
         - desktop-screenshot-capture
         - win32-tests-talos
+windows7-32-nightly/opt:
+    build-platform: win32-nightly/opt
+    test-sets:
+        - windows-gpu-tests
+        - desktop-screenshot-capture
+        - win32-tests-talos
 
 # win64 vm
 windows10-64-vm/debug:
@@ -172,6 +178,13 @@ windows10-64-vm/opt:
         - awsy
         - desktop-screenshot-capture
         - headless
+windows10-64-vm-nightly/opt:
+    build-platform: win64-nightly/opt
+    test-sets:
+        - windows-vm-tests
+        - awsy
+        - desktop-screenshot-capture
+        - headless
 
 # win64 gpu
 windows10-64/debug:
@@ -180,6 +193,12 @@ windows10-64/debug:
         - windows-gpu-tests
 windows10-64/opt:
     build-platform: win64/opt
+    test-sets:
+        - windows-gpu-tests
+        - desktop-screenshot-capture
+        - win64-tests-talos
+windows10-64-nightly/opt:
+    build-platform: win64-nightly/opt
     test-sets:
         - windows-gpu-tests
         - desktop-screenshot-capture

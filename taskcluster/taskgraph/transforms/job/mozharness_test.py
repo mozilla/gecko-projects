@@ -32,7 +32,9 @@ BUILDER_NAME_PREFIX = {
     'android-4.2-x86': 'Android 4.2 x86 Emulator',
     'android-4.3-arm7-api-15-gradle': 'Android 4.3 armv7 API 15+',
     'win64': 'Windows 10 64-bit',
-    'win32': 'Windows 7 32-bit',
+    'win64-nightly': 'Windows 10 64-bit',
+    'win32': 'windows 7 32-bit',
+    'win32-nightly': 'Windows 7 32-bit',
 }
 
 VARIANTS = [
