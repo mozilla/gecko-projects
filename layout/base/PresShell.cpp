@@ -2083,7 +2083,7 @@ PresShell::NotifyDestroyingFrame(nsIFrame* aFrame)
         static_cast<nsDisplayLayerEventRegions*>(item);
       regions->RemoveFrame(aFrame);
     }
-    if (item->Frame() == aFrame) {
+    if (!item->HasDeletedFrame() && item->Frame() == aFrame) {
       item->SetFrameDeleted();
     }
   }
