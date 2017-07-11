@@ -18,6 +18,12 @@ from voluptuous import Any, Required, Optional
 import logging
 logger = logging.getLogger(__name__)
 
+
+_WINDOWS_BUILD_PLATFORMS = [
+    'win64-nightly',
+    'win32-nightly'
+]
+
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
 # need to be transfered to S3, please be aware you also need to follow-up
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
@@ -164,13 +170,14 @@ def make_task_description(config, jobs):
         dependent_kind = str(dep_job.kind)
         dependencies = {dependent_kind: dep_job.label}
 
-        # macosx nightly builds depend on repackage which use in tree docker
-        # images and thus have two dependencies
-        # change the signing_dependencies to be use the ones in
-        docker_dependencies = {"docker-image":
-                               dep_job.dependencies['docker-image']
-                               }
-        dependencies.update(docker_dependencies)
+        if 'docker-image' in dep_job.dependencies:
+            # macosx nightly builds depend on repackage which use in tree
+            # docker images and thus have two dependencies
+            # change the signing_dependencies to be use the ones in
+            docker_dependencies = {"docker-image":
+                                   dep_job.dependencies['docker-image']
+                                   }
+            dependencies.update(docker_dependencies)
 
         signing_name = "build-signing"
         if job.get('locale'):
@@ -236,13 +243,13 @@ def generate_upstream_artifacts(build_task_ref, repackage_task_ref,
         "paths": ["{}/{}".format(artifact_prefix, p)
                   for p in build_mapping[platform]],
         "locale": locale or "en-US",
-        }, {
+    }, {
         "taskId": {"task-reference": repackage_task_ref},
         "taskType": "repackage",
         "paths": ["{}/{}".format(artifact_prefix, p)
                   for p in repackage_mapping[platform]],
         "locale": locale or "en-US",
-        }, {
+    }, {
         "taskId": {"task-reference": repackage_signing_task_ref},
         "taskType": "repackage",
         "paths": ["{}/{}".format(artifact_prefix, p)
@@ -253,12 +260,21 @@ def generate_upstream_artifacts(build_task_ref, repackage_task_ref,
     return upstream_artifacts
 
 
+def is_valid_beetmover_job(job):
+    # windows builds don't have docker-image, so fewer dependencies
+    if any(b in job['attributes']['build_platform'] for b in _WINDOWS_BUILD_PLATFORMS):
+        expected_dep_count = 4
+    else:
+        expected_dep_count = 5
+
+    return (len(job["dependencies"]) == expected_dep_count and
+            any(['repackage' in j for j in job['dependencies']]))
+
+
 @transforms.add
 def make_task_worker(config, jobs):
     for job in jobs:
-        valid_beetmover_job = (len(job["dependencies"]) == 5 and
-                               any(['repackage' in j for j in job['dependencies']]))
-        if not valid_beetmover_job:
+        if not is_valid_beetmover_job(job):
             raise NotImplementedError("Beetmover_repackage must have five dependencies.")
 
         locale = job["attributes"].get("locale")
