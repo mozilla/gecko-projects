@@ -397,8 +397,11 @@ ShouldLimitDeviceResets(uint32_t count, int32_t deltaMilliseconds)
 }
 
 void
-GPUProcessManager::TriggerDeviceResetForTesting()
+GPUProcessManager::SimulateDeviceReset()
 {
+  // Make sure we rebuild environment and configuration for accelerated features.
+  gfxPlatform::GetPlatform()->CompositorUpdated();
+
   if (mProcess) {
     OnRemoteProcessDeviceReset(mProcess);
   } else {
@@ -427,6 +430,17 @@ GPUProcessManager::OnRemoteProcessDeviceReset(GPUProcessHost* aHost)
   if (ShouldLimitDeviceResets(mDeviceResetCount, delta)) {
     DestroyProcess();
     DisableGPUProcess("GPU processed experienced too many device resets");
+
+    // Reaches the limited TDR attempts, fallback to software solution.
+    gfxConfig::SetFailed(Feature::HW_COMPOSITING,
+      FeatureStatus::Blocked,
+      "Too many attemps of D3D11 creation, fallback to software solution.");
+    gfxConfig::SetFailed(Feature::D3D11_COMPOSITING,
+      FeatureStatus::Blocked,
+      "Too many attemps of D3D11 creation, fallback to software solution.");
+    gfxConfig::SetFailed(Feature::DIRECT2D,
+      FeatureStatus::Blocked,
+      "Too many attemps of D3D11 creation, fallback to software solution.");
 
     HandleProcessLost();
     return;
