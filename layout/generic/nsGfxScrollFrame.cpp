@@ -3373,18 +3373,20 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // area to the dispatch to content layer event regions) necessary to activate
   // a scroll frame so it creates a scrollable layer.
   bool couldBuildLayer = false;
-  if (mWillBuildScrollableLayer) {
-    couldBuildLayer = true;
-  } else {
-    couldBuildLayer =
-      nsLayoutUtils::AsyncPanZoomEnabled(mOuter) &&
-      WantAsyncScroll() &&
-      // If we are using containers for root frames, and we are the root
-      // scroll frame for the display root, then we don't need a scroll
-      // info layer. nsDisplayList::PaintForFrame already calls
-      // ComputeFrameMetrics for us.
-      (!(gfxPrefs::LayoutUseContainersForRootFrames() && mIsRoot) ||
-       (aBuilder->RootReferenceFrame()->PresContext() != mOuter->PresContext()));
+  if (aBuilder->IsPaintingToWindow()) {
+    if (mWillBuildScrollableLayer) {
+      couldBuildLayer = true;
+    } else {
+      couldBuildLayer =
+        nsLayoutUtils::AsyncPanZoomEnabled(mOuter) &&
+        WantAsyncScroll() &&
+        // If we are using containers for root frames, and we are the root
+        // scroll frame for the display root, then we don't need a scroll
+        // info layer. nsDisplayList::PaintForFrame already calls
+        // ComputeFrameMetrics for us.
+        (!(gfxPrefs::LayoutUseContainersForRootFrames() && mIsRoot) ||
+         (aBuilder->RootReferenceFrame()->PresContext() != mOuter->PresContext()));
+    }
   }
 
   // Now display the scrollbars and scrollcorner. These parts are drawn
@@ -3623,9 +3625,9 @@ ScrollFrameHelper::DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
   bool wasUsingDisplayPort = false;
   bool usingDisplayPort = false;
   nsIContent* content = mOuter->GetContent();
-  if (aBuilder->IsPaintingToWindow()) {
-    wasUsingDisplayPort = nsLayoutUtils::HasDisplayPort(content);
+  usingDisplayPort = wasUsingDisplayPort = nsLayoutUtils::HasDisplayPort(content);
 
+  if (aBuilder->IsPaintingToWindow()) {
     if (aAllowCreateDisplayPort) {
       //nsLayoutUtils::MaybeCreateDisplayPort(*aBuilder, mOuter,
         //nsLayoutUtils::RepaintMode::DoNotRepaint);

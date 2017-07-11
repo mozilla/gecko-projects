@@ -405,7 +405,9 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       haveDisplayPort = rootScrollableFrame->DecideScrollableLayer(aBuilder,
                           &copyOfVisible, &copyOfDirty,
                           /* aAllowCreateDisplayPort = */ true);
-      if (!gfxPrefs::LayoutUseContainersForRootFrames()) {
+
+      if (!gfxPrefs::LayoutUseContainersForRootFrames() ||
+          !aBuilder->IsPaintingToWindow()) {
         haveDisplayPort = false;
       }
 
