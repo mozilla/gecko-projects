@@ -254,6 +254,14 @@ def handle_keyed_by(config, jobs):
 
 
 @transforms.add
+def disable_simple_package(config, jobs):
+    for job in jobs:
+        if job['attributes']['build_platform'].startswith('win'):
+            job['env'].update({'DISABLE_SIMPLE_PACKAGE': "1"})
+        yield job
+
+
+@transforms.add
 def all_locales_attribute(config, jobs):
     for job in jobs:
         locales_with_changesets = _parse_locales_file(job["locales-file"])
