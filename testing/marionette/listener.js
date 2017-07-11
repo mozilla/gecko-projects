@@ -54,7 +54,6 @@ var winUtil = content.QueryInterface(Ci.nsIInterfaceRequestor)
     .getInterface(Ci.nsIDOMWindowUtils);
 var listenerId = null; // unique ID of this listener
 var curContainer = {frame: content, shadowRoot: null};
-var isRemoteBrowser = () => curContainer.frame.contentWindow !== null;
 var previousContainer = null;
 
 var seenEls = new element.Store();
@@ -118,10 +117,10 @@ var sandboxes = new Sandboxes(() => curContainer.frame);
 var sandboxName = "default";
 
 /**
- * The load listener singleton helps to keep track of active page
- * load activities, and can be used by any command which might cause a
- * navigation to happen.  In the specific case of remoteness changes it
- * allows to continue observing the current page load.
+ * The load listener singleton helps to keep track of active page load
+ * activities, and can be used by any command which might cause a navigation
+ * to happen. In the specific case of a reload of the frame script it allows
+ * to continue observing the current page load.
  */
 var loadListener = {
   command_id: null,
@@ -157,7 +156,7 @@ var loadListener = {
         .createInstance(Ci.nsITimer);
     this.timerPageUnload = null;
 
-    // In case of a remoteness change, only wait the remaining time
+    // In case the frame script has been reloaded, wait the remaining time
     timeout = startTime + timeout - new Date().getTime();
 
     if (timeout <= 0) {
@@ -212,8 +211,8 @@ var loadListener = {
       }
     }
 
-    // In the case when the observer was added before a remoteness change,
-    // it will no longer be available. Exceptions can be silently ignored.
+    // In case the observer was added before the frame script has been
+    // reloaded, it will no longer be available. Exceptions can be ignored.
     try {
       Services.obs.removeObserver(this, "outer-window-destroyed");
     } catch (e) {}
@@ -223,7 +222,14 @@ var loadListener = {
    * Callback for registered DOM events.
    */
   handleEvent(event) {
-    let location = event.target.baseURI || event.target.location.href;
+    // Only care about events from the currently selected browsing context,
+    // whereby some of those do not bubble up to the window.
+    if (event.target != curContainer.frame &&
+        event.target != curContainer.frame.document) {
+      return;
+    }
+
+    let location = event.target.documentURI || event.target.location.href;
     logger.debug(`Received DOM event "${event.type}" for "${location}"`);
 
     switch (event.type) {
@@ -236,51 +242,49 @@ var loadListener = {
         break;
 
       case "pagehide":
-        if (event.target === curContainer.frame.document) {
-          this.seenUnload = true;
+        this.seenUnload = true;
 
-          removeEventListener("hashchange", this);
-          removeEventListener("pagehide", this);
+        removeEventListener("hashchange", this);
+        removeEventListener("pagehide", this);
 
-          // Now wait until the target page has been loaded
-          addEventListener("DOMContentLoaded", this, false);
-          addEventListener("pageshow", this, false);
-        }
+        // Now wait until the target page has been loaded
+        addEventListener("DOMContentLoaded", this, false);
+        addEventListener("pageshow", this, false);
+
         break;
 
       case "hashchange":
-        if (event.target === curContainer.frame) {
-          this.stop();
-          sendOk(this.command_id);
-        }
+        this.stop();
+        sendOk(this.command_id);
+
         break;
 
       case "DOMContentLoaded":
-        if (event.target.baseURI.startsWith("about:certerror")) {
+        if (event.target.documentURI.startsWith("about:certerror")) {
           this.stop();
           sendError(new InsecureCertificateError(), this.command_id);
 
-        } else if (/about:.*(error)\?/.exec(event.target.baseURI)) {
+        } else if (/about:.*(error)\?/.exec(event.target.documentURI)) {
           this.stop();
           sendError(new UnknownError("Reached error page: " +
-              event.target.baseURI), this.command_id);
+              event.target.documentURI), this.command_id);
 
         // Return early with a page load strategy of eager, and also
         // special-case about:blocked pages which should be treated as
         // non-error pages but do not raise a pageshow event.
         } else if ((capabilities.get("pageLoadStrategy") ===
             session.PageLoadStrategy.Eager) ||
-            /about:blocked\?/.exec(event.target.baseURI)) {
+            /about:blocked\?/.exec(event.target.documentURI)) {
           this.stop();
           sendOk(this.command_id);
         }
+
         break;
 
       case "pageshow":
-        if (event.target === curContainer.frame.document) {
-          this.stop();
-          sendOk(this.command_id);
-        }
+        this.stop();
+        sendOk(this.command_id);
+
         break;
     }
   },
@@ -344,8 +348,8 @@ var loadListener = {
   },
 
   /**
-   * Continue to listen for page load events after a remoteness change
-   * happened.
+   * Continue to listen for page load events after the frame script has been
+   * reloaded.
    *
    * @param {number} command_id
    *     ID of the currently handled message between the driver and
@@ -356,7 +360,7 @@ var loadListener = {
    * @param {number} startTime
    *     Unix timestap when the navitation request got triggered.
    */
-  waitForLoadAfterRemotenessChange(command_id, timeout, startTime) {
+  waitForLoadAfterFramescriptReload(command_id, timeout, startTime) {
     this.start(command_id, timeout, startTime, false);
   },
 
@@ -430,18 +434,13 @@ function registerSelf() {
   // register will have the ID and a boolean describing if this is the
   // main process or not
   let register = sendSyncMessage("Marionette:register", msg);
-
   if (register[0]) {
-    let {id, remotenessChange} = register[0][0];
+    listenerId = register[0][0];
     capabilities = session.Capabilities.fromJSON(register[0][1]);
-    listenerId = id;
-    if (typeof id != "undefined") {
+    if (typeof listenerId != "undefined") {
       startListeners();
-      let rv = {};
-      if (remotenessChange) {
-        rv.listenerId = id;
-      }
-      sendAsyncMessage("Marionette:listenersAttached", rv);
+      sendAsyncMessage("Marionette:listenersAttached",
+          {"listenerId": listenerId});
     }
   }
 }
@@ -1105,8 +1104,8 @@ function cancelRequest() {
 }
 
 /**
- * This implements the latter part of a get request (for the case we
- * need to resume one when a remoteness update happens in the middle of a
+ * This implements the latter part of a get request (for the case we need
+ * to resume one when the frame script has been reloaded in the middle of a
  * navigate request). This is most of of the work of a navigate request,
  * but doesn't assume DOMContentLoaded is yet to fire.
  *
@@ -1122,7 +1121,7 @@ function cancelRequest() {
 function waitForPageLoaded(msg) {
   let {command_id, pageTimeout, startTime} = msg.json;
 
-  loadListener.waitForLoadAfterRemotenessChange(
+  loadListener.waitForLoadAfterFramescriptReload(
       command_id, pageTimeout, startTime);
 }
 
@@ -1138,9 +1137,9 @@ function get(msg) {
   try {
     if (typeof url == "string") {
       try {
-        let requestedURL = new URL(url).toString();
         if (loadEventExpected === null) {
-          loadEventExpected = navigate.isLoadEventExpected(requestedURL);
+          loadEventExpected = navigate.isLoadEventExpected(
+              curContainer.frame.location, url);
         }
       } catch (e) {
         let err = new InvalidArgumentError("Malformed URL: " + e.message);

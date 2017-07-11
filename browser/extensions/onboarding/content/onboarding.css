@@ -135,8 +135,9 @@
 #onboarding-tour-list > li.onboarding-complete::before {
   content: url("img/icons_tour-complete.svg");
   position: relative;
-  left: 6px;
+  offset-inline-start: 3px;
   top: -10px;
+  float: inline-start;
 }
 
 #onboarding-tour-list > li.onboarding-complete {
@@ -352,6 +353,7 @@
 }
 
 #onboarding-notification-bar.onboarding-opened {
+  transition: none;
   transform: translateY(0px);
 }
 
@@ -372,6 +374,7 @@
 
 #onboarding-notification-icon::after {
   --height: 22px;
+  --vpadding: 3px;
   content: attr(data-tooltip);
   background: #5ce6e6;
   position: absolute;
@@ -379,11 +382,11 @@
   offset-inline-start: 68px;
   color: #10404a;
   font-size: 12px;
-  min-height: var(--height);
-  line-height: var(--height);
+  line-height: calc(var(--height) - var(--vpadding) * 2);
+  max-width: 90px;
   border-radius: calc(var(--height) / 2);
   border: 1px solid #fff;
-  padding: 0 10px;
+  padding: var(--vpadding) 10px;
   text-align: center;
 }
 
@@ -426,7 +429,7 @@
 }
 
 #onboarding-notification-tour-icon {
-  width: 64px;
+  min-width: 64px;
   height: 64px;
   background-size: 64px;
   background-repeat: no-repeat;

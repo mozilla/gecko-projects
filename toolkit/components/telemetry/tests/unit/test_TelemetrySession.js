@@ -447,7 +447,7 @@ function writeStringToFile(file, contents) {
   let ostream = Cc["@mozilla.org/network/safe-file-output-stream;1"]
                 .createInstance(Ci.nsIFileOutputStream);
   ostream.init(file, PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE,
-	       RW_OWNER, ostream.DEFER_OPEN);
+               RW_OWNER, ostream.DEFER_OPEN);
   ostream.write(contents, contents.length);
   ostream.QueryInterface(Ci.nsISafeOutputStream).finish();
   ostream.close();
@@ -473,6 +473,7 @@ add_task(async function test_setup() {
   // Addon manager needs a profile directory
   do_get_profile();
   loadAddonManager(APP_ID, APP_NAME, APP_VERSION, PLATFORM_VERSION);
+  finishAddonManagerStartup();
   // Make sure we don't generate unexpected pings due to pref changes.
   await setEmptyPrefWatchlist();
 

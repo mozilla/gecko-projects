@@ -523,7 +523,6 @@ impl AnimationValue {
     /// Construct an AnimationValue from a property declaration
     pub fn from_declaration(decl: &PropertyDeclaration, context: &mut Context,
                             initial: &ComputedValues) -> Option<Self> {
-        use error_reporting::create_error_reporter;
         use properties::LonghandId;
         use properties::DeclaredValue;
 
@@ -587,7 +586,6 @@ impl AnimationValue {
             },
             PropertyDeclaration::WithVariables(id, ref variables) => {
                 let custom_props = context.style().custom_properties();
-                let reporter = create_error_reporter();
                 match id {
                     % for prop in data.longhands:
                     % if prop.animatable:
@@ -612,7 +610,6 @@ impl AnimationValue {
                                 };
                                 result = AnimationValue::from_declaration(&declaration, context, initial);
                             },
-                            &reporter,
                             quirks_mode);
                         result
                     },
@@ -1415,38 +1412,21 @@ impl Animatable for MaxLength {
 impl Animatable for FontWeight {
     #[inline]
     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
-        let a = (*self as u32) as f64;
-        let b = (*other as u32) as f64;
+        let a = self.0 as f64;
+        let b = other.0 as f64;
         const NORMAL: f64 = 400.;
         let weight = (a - NORMAL) * self_portion + (b - NORMAL) * other_portion + NORMAL;
-        Ok(if weight < 150. {
-            FontWeight::Weight100
-        } else if weight < 250. {
-            FontWeight::Weight200
-        } else if weight < 350. {
-            FontWeight::Weight300
-        } else if weight < 450. {
-            FontWeight::Weight400
-        } else if weight < 550. {
-            FontWeight::Weight500
-        } else if weight < 650. {
-            FontWeight::Weight600
-        } else if weight < 750. {
-            FontWeight::Weight700
-        } else if weight < 850. {
-            FontWeight::Weight800
-        } else {
-            FontWeight::Weight900
-        })
+        let weight = (weight.min(100.).max(900.) / 100.).round() * 100.;
+        Ok(FontWeight(weight as u16))
     }
 
     #[inline]
-    fn get_zero_value(&self) -> Result<Self, ()> { Ok(FontWeight::Weight400) }
+    fn get_zero_value(&self) -> Result<Self, ()> { Ok(FontWeight::normal()) }
 
     #[inline]
     fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
-        let a = (*self as u32) as f64;
-        let b = (*other as u32) as f64;
+        let a = self.0 as f64;
+        let b = other.0 as f64;
         a.compute_distance(&b)
     }
 }
@@ -2289,9 +2269,11 @@ impl Animatable for MatrixDecomposed3D {
     /// https://drafts.csswg.org/css-transforms/#interpolation-of-decomposed-3d-matrix-values
     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64)
         -> Result<Self, ()> {
-        assert!(self_portion + other_portion == 1.0f64 ||
-                other_portion == 1.0f64,
-                "add_weighted should only be used for interpolating or accumulating transforms");
+        use std::f64;
+
+        debug_assert!((self_portion + other_portion - 1.0f64).abs() <= f64::EPSILON ||
+                      other_portion == 1.0f64,
+                      "add_weighted should only be used for interpolating or accumulating transforms");
 
         let mut sum = *self;
 

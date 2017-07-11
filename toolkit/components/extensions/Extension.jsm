@@ -49,6 +49,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
                                   "resource://gre/modules/AddonManager.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
                                   "resource://gre/modules/AppConstants.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "AsyncShutdown",
+                                  "resource://gre/modules/AsyncShutdown.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ExtensionAPIs",
                                   "resource://gre/modules/ExtensionAPI.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ExtensionCommon",
@@ -269,7 +271,9 @@ var UninstallObserver = {
 
     if (!this.leaveStorage) {
       // Clear browser.local.storage
-      ExtensionStorage.clear(addon.id);
+      AsyncShutdown.profileChangeTeardown.addBlocker(
+        `Clear Extension Storage ${addon.id}`,
+        ExtensionStorage.clear(addon.id));
 
       // Clear any IndexedDB storage created by the extension
       let baseURI = NetUtil.newURI(`moz-extension://${uuid}/`);
@@ -579,6 +583,13 @@ this.ExtensionData = class {
 
       this.permissions.add(perm);
     }
+
+    // An extension always gets permission to its own url.
+    if (this.id) {
+      let matcher = new MatchPattern(this.getURL(), {ignorePath: true});
+      whitelist.push(matcher);
+    }
+
     this.whiteListedHosts = new MatchPatternSet(whitelist);
 
     for (let api of this.apiNames) {
@@ -715,6 +726,8 @@ this.ExtensionData = class {
 
 const PROXIED_EVENTS = new Set(["test-harness-message", "add-permissions", "remove-permissions"]);
 
+const shutdownPromises = new Map();
+
 // We create one instance of this class per extension. |addonData|
 // comes directly from bootstrap.js when initializing.
 this.Extension = class extends ExtensionData {
@@ -745,10 +758,6 @@ this.Extension = class extends ExtensionData {
     if (this.remote && processCount !== 1) {
       throw new Error("Out-of-process WebExtensions are not supported with multiple child processes");
     }
-    if (this.remote && !Services.prefs.getBoolPref("layers.popups.compositing.enabled", false)) {
-      Cu.reportError(new Error("Remote extensions should not be enabled without also setting " +
-                               "the layers.popups.compositing.enabled preference to true"));
-    }
 
     // This is filled in the first time an extension child is created.
     this.parentMessageManager = null;
@@ -757,6 +766,8 @@ this.Extension = class extends ExtensionData {
     this.version = addonData.version;
     this.baseURI = NetUtil.newURI(this.getURL("")).QueryInterface(Ci.nsIURL);
     this.principal = this.createPrincipal();
+    this.views = new Set();
+    this._backgroundPageFrameLoader = null;
 
     this.onStartup = null;
 
@@ -805,6 +816,19 @@ this.Extension = class extends ExtensionData {
       this.policy.allowedOrigins = this.whiteListedHosts;
     });
     /* eslint-enable mozilla/balanced-listeners */
+  }
+
+  get groupFrameLoader() {
+    let frameLoader = this._backgroundPageFrameLoader;
+    for (let view of this.views) {
+      if (view.viewType === "background" && view.xulBrowser) {
+        return view.xulBrowser.frameLoader;
+      }
+      if (!frameLoader && view.xulBrowser) {
+        frameLoader = view.xulBrowser.frameLoader;
+      }
+    }
+    return frameLoader || ExtensionParent.DebugUtils.getFrameLoader(this.id);
   }
 
   static generateXPI(data) {
@@ -1033,6 +1057,10 @@ this.Extension = class extends ExtensionData {
   }
 
   async _startup() {
+    if (shutdownPromises.has(this.id)) {
+      await shutdownPromises.get(this.id);
+    }
+
     // Create a temporary policy object for the devtools and add-on
     // manager callers that depend on it being available early.
     this.policy = new WebExtensionPolicy({
@@ -1139,6 +1167,21 @@ this.Extension = class extends ExtensionData {
   }
 
   async shutdown(reason) {
+    let promise = this._shutdown(reason);
+
+    AsyncShutdown.profileChangeTeardown.addBlocker(
+      `Extension Shutdown: ${this.id} (${this.manifest && this.name})`,
+      promise.catch(() => {}));
+
+    let cleanup = () => {
+      shutdownPromises.delete(this.id);
+    };
+    shutdownPromises.set(this.id, promise.then(cleanup, cleanup));
+
+    return Promise.resolve(promise);
+  }
+
+  async _shutdown(reason) {
     try {
       if (this.startupPromise) {
         await this.startupPromise;
@@ -1152,6 +1195,11 @@ this.Extension = class extends ExtensionData {
 
     if (!this.policy) {
       return;
+    }
+
+    if (this.rootURI instanceof Ci.nsIJARURI) {
+      let file = this.rootURI.JARFile.QueryInterface(Ci.nsIFileURL).file;
+      Services.ppmm.broadcastAsyncMessage("Extension:FlushJarCache", {path: file.path});
     }
 
     if (this.cleanupFile ||

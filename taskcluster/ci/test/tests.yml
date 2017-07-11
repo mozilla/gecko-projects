@@ -1603,16 +1603,17 @@ xpcshell:
     treeherder-symbol: tc-X(X)
     run-on-projects:
         by-test-platform:
-            windows.*: ['mozilla-central', 'date']
             linux64-qr/.*: ['mozilla-central', 'try']
+            # TODO Windows: Turn on on the other branches once Bug 1374787 is fixed
+            windows.*: ['mozilla-central', 'try', 'date']
             default: built-projects
     docker-image: {"in-tree": "desktop1604-test"}
     chunks:
         by-test-platform:
             linux64/debug: 10
             android-4.2-x86/opt: 6
-            windows.*: 8
             macosx.*: 1
+            windows.*: 1
             default: 8
     instance-size:
         by-test-platform:
@@ -1658,5 +1659,6 @@ xpcshell:
                             - --xpcshell-suite=xpcshell
                 requires-signed-builds:
                     by-test-platform:
+                        windows10-64-asan/opt: false    # No XPCShell on ASAN yet
                         windows.*: true
                         default: false

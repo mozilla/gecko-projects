@@ -341,7 +341,6 @@ trait PrivateMatchMethods: TElement {
         if self.is_native_anonymous() || cascade_target == CascadeTarget::EagerPseudo {
             cascade_flags.insert(PROHIBIT_DISPLAY_CONTENTS);
         } else if self.is_root() {
-            debug_assert!(self.owner_doc_matches_for_testing(shared_context.stylist.device()));
             cascade_flags.insert(IS_ROOT_ELEMENT);
         }
 
@@ -402,7 +401,6 @@ trait PrivateMatchMethods: TElement {
                              layout_parent_style,
                              visited_values_to_insert,
                              Some(&mut cascade_info),
-                             &*shared_context.error_reporter,
                              font_metrics_provider,
                              cascade_flags,
                              shared_context.quirks_mode));
@@ -554,21 +552,35 @@ trait PrivateMatchMethods: TElement {
                                        None);
 
             // Handle root font-size changes.
-            if self.is_root() && !self.is_native_anonymous() {
-                // The new root font-size has already been updated on the Device
-                // in properties::apply_declarations.
+            //
+            // TODO(emilio): This should arguably be outside of the path for
+            // getComputedStyle/getDefaultComputedStyle, but it's unclear how to
+            // do it without duplicating a bunch of code.
+            if self.is_root() && !self.is_native_anonymous() &&
+                !context.shared.traversal_flags.for_default_styles() {
                 let device = context.shared.stylist.device();
                 let new_font_size = new_values.get_font().clone_font_size();
 
                 // If the root font-size changed since last time, and something
                 // in the document did use rem units, ensure we recascade the
                 // entire tree.
-                if old_values.map_or(false, |v| v.get_font().clone_font_size() != new_font_size) &&
-                   device.used_root_font_size() {
-                    child_cascade_requirement = ChildCascadeRequirement::MustCascadeDescendants;
+                if old_values.map_or(true, |v| v.get_font().clone_font_size() != new_font_size) {
+                    // FIXME(emilio): This can fire when called from a document
+                    // from the bfcache (bug 1376897).
+                    debug_assert!(self.owner_doc_matches_for_testing(device));
+                    device.set_root_font_size(new_font_size);
+                    if device.used_root_font_size() {
+                        child_cascade_requirement = ChildCascadeRequirement::MustCascadeDescendants;
+                    }
                 }
             }
         }
+
+        // If there were visited values to insert, ensure they do in fact exist
+        // inside the new values.
+        debug_assert!(!cascade_visited.visited_values_for_insertion() ||
+                      context.cascade_inputs().primary().has_visited_values() ==
+                      new_values.has_visited_style());
 
         // Set the new computed values.
         let primary_inputs = context.cascade_inputs_mut().primary_mut();
@@ -654,8 +666,9 @@ trait PrivateMatchMethods: TElement {
             return None;
         }
 
-        // This currently ignores visited styles, which seems acceptable,
-        // as existing browsers don't appear to transition visited styles.
+        // This currently passes through visited styles, if they exist.
+        // When fixing bug 868975, compute after change for visited styles as
+        // well, along with updating the rest of the animation processing.
         Some(self.cascade_with_rules(context.shared,
                                      &context.thread_local.font_metrics_provider,
                                      &without_transition_rules,
@@ -663,7 +676,7 @@ trait PrivateMatchMethods: TElement {
                                      CascadeTarget::Normal,
                                      CascadeVisitedMode::Unvisited,
                                      /* parent_info = */ None,
-                                     None))
+                                     primary_style.get_visited_style().cloned()))
     }
 
     #[cfg(feature = "gecko")]
@@ -708,6 +721,9 @@ trait PrivateMatchMethods: TElement {
                           important_rules_changed: bool) {
         use context::{CASCADE_RESULTS, CSS_ANIMATIONS, CSS_TRANSITIONS, EFFECT_PROPERTIES};
         use context::UpdateAnimationsTasks;
+
+        // Bug 868975: These steps should examine and update the visited styles
+        // in addition to the unvisited styles.
 
         let mut tasks = UpdateAnimationsTasks::empty();
         if self.needs_animations_update(context, old_values.as_ref(), new_values) {
@@ -1560,10 +1576,11 @@ pub trait MatchMethods : TElement {
             return RestyleDamage::compute_style_difference(source, new_values)
         }
 
-        let new_style_is_display_none =
-            new_values.get_box().clone_display() == display::T::none;
-        let old_style_is_display_none =
-            old_values.get_box().clone_display() == display::T::none;
+        let new_display = new_values.get_box().clone_display();
+        let old_display = old_values.get_box().clone_display();
+
+        let new_style_is_display_none = new_display == display::T::none;
+        let old_style_is_display_none = old_display == display::T::none;
 
         // If there's no style source, that likely means that Gecko couldn't
         // find a style context.
@@ -1610,11 +1627,20 @@ pub trait MatchMethods : TElement {
                                         StyleChange::Unchanged)
         }
 
-        // Something else. Be conservative for now.
-        warn!("Reframing due to lack of old style source: {:?}, pseudo: {:?}",
-               self, pseudo);
-        // Something else. Be conservative for now.
-        StyleDifference::new(RestyleDamage::reconstruct(), StyleChange::Changed)
+        // If we are changing display property we need to accumulate
+        // reconstruction damage for the change.
+        // FIXME: Bug 1378972: This is a workaround for bug 1374175, we should
+        // generate more accurate restyle damage in fallback cases.
+        let needs_reconstruction = new_display != old_display;
+        let damage = if needs_reconstruction {
+            RestyleDamage::reconstruct()
+        } else {
+            RestyleDamage::empty()
+        };
+        // We don't really know if there was a change in any style (since we
+        // didn't actually call compute_style_difference) but we return
+        // StyleChange::Changed conservatively.
+        StyleDifference::new(damage, StyleChange::Changed)
     }
 
     /// Performs the cascade for the element's eager pseudos.

@@ -41,6 +41,7 @@ class HTMLMediaElement;
 
 class AbstractThread;
 class VideoFrameContainer;
+class MediaDecoderReader;
 class MediaDecoderStateMachine;
 
 enum class MediaEventType : int8_t;
@@ -138,10 +139,7 @@ public:
   // MediaDecoder has been destroyed. You might need to do this if you're
   // wrapping the MediaResource in some kind of byte stream interface to be
   // passed to a platform decoder.
-  MediaResource* GetResource() const final override
-  {
-    return mResource;
-  }
+  MediaResource* GetResource() const { return mResource; }
 
   // Return the principal of the current URI being played or downloaded.
   virtual already_AddRefed<nsIPrincipal> GetCurrentPrincipal();
@@ -524,6 +522,8 @@ protected:
   // Media data resource.
   RefPtr<MediaResource> mResource;
 
+  RefPtr<MediaDecoderReader> mReader;
+
   // Amount of buffered data ahead of current time required to consider that
   // the next frame is available.
   // An arbitrary value of 250ms is used.
@@ -538,9 +538,6 @@ private:
   void MetadataLoaded(UniquePtr<MediaInfo> aInfo,
                       UniquePtr<MetadataTags> aTags,
                       MediaDecoderEventVisibility aEventVisibility);
-
-  MediaEventSource<void>*
-  DataArrivedEvent() override { return &mDataArrivedEvent; }
 
   // Called when the owner's activity changed.
   void NotifyCompositor();
@@ -563,7 +560,6 @@ private:
   void ConnectMirrors(MediaDecoderStateMachine* aObject);
   void DisconnectMirrors();
 
-  MediaEventProducer<void> mDataArrivedEvent;
   MediaEventProducer<RefPtr<layers::KnowsCompositor>> mCompositorUpdatedEvent;
 
   // The state machine object for handling the decoding. It is safe to
@@ -784,7 +780,6 @@ protected:
   Canonical<int64_t> mDecoderPosition;
 
 public:
-  AbstractCanonical<media::NullableTimeUnit>* CanonicalDurationOrNull() override;
   AbstractCanonical<double>* CanonicalVolume() { return &mVolume; }
   AbstractCanonical<bool>* CanonicalPreservesPitch()
   {

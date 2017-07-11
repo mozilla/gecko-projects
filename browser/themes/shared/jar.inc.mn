@@ -94,6 +94,7 @@
   skin/classic/browser/panel-icon-retry.svg                    (../shared/panel-icon-retry.svg)
   skin/classic/browser/preferences/in-content-new/favicon.ico      (../shared/incontentprefs/favicon.ico)
   skin/classic/browser/preferences/in-content-new/icons.svg        (../shared/incontentprefs/icons.svg)
+  skin/classic/browser/preferences/in-content-new/search-arrow-indicator.svg  (../shared/incontentprefs/search-arrow-indicator.svg)
   skin/classic/browser/preferences/in-content-new/search.css       (../shared/incontentprefs/search.css)
   skin/classic/browser/preferences/in-content-new/siteDataSettings.css (../shared/incontentprefs/siteDataSettings.css)
 * skin/classic/browser/preferences/in-content-new/containers.css   (../shared/incontentprefs/containers.css)
@@ -175,12 +176,18 @@
   skin/classic/browser/privateBrowsing.svg            (../shared/icons/privateBrowsing.svg)
   skin/classic/browser/quit.svg                       (../shared/icons/quit.svg)
   skin/classic/browser/reload.svg                     (../shared/icons/reload.svg)
+#ifdef MOZ_PHOTON_ANIMATIONS
+  skin/classic/browser/reload-to-stop.svg             (../shared/icons/reload-to-stop.svg)
+#endif
   skin/classic/browser/save.svg                       (../shared/icons/save.svg)
   skin/classic/browser/settings.svg                   (../shared/icons/settings.svg)
   skin/classic/browser/share.svg                      (../shared/icons/share.svg)
   skin/classic/browser/sidebars.svg                   (../shared/icons/sidebars.svg)
   skin/classic/browser/sidebars-right.svg             (../shared/icons/sidebars-right.svg)
   skin/classic/browser/stop.svg                       (../shared/icons/stop.svg)
+#ifdef MOZ_PHOTON_ANIMATIONS
+  skin/classic/browser/stop-to-reload.svg             (../shared/icons/stop-to-reload.svg)
+#endif
   skin/classic/browser/sync.svg                       (../shared/icons/sync.svg)
   skin/classic/browser/synced-tabs.svg                (../shared/icons/synced-tabs.svg)
   skin/classic/browser/webIDE.svg                     (../shared/icons/webIDE.svg)

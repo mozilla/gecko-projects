@@ -245,6 +245,9 @@ public:
 
   RefPtr<WebSocketEventService> mService;
 
+  // For dispatching runnables to main thread.
+  nsCOMPtr<nsIEventTarget> mMainThreadEventTarget;
+
 private:
   ~WebSocketImpl()
   {
@@ -617,6 +620,10 @@ WebSocketImpl::Disconnect()
 
   AssertIsOnTargetThread();
 
+  // DontKeepAliveAnyMore() and DisconnectInternal() can release the object. So
+  // hold a reference to this until the end of the method.
+  RefPtr<WebSocketImpl> kungfuDeathGrip = this;
+
   // Disconnect can be called from some control event (such as Notify() of
   // WorkerHolder). This will be schedulated before any other sync/async
   // runnable. In order to prevent some double Disconnect() calls, we use this
@@ -637,10 +644,6 @@ WebSocketImpl::Disconnect()
     // where to, exactly?
     rv.SuppressException();
   }
-
-  // DontKeepAliveAnyMore() can release the object. So hold a reference to this
-  // until the end of the method.
-  RefPtr<WebSocketImpl> kungfuDeathGrip = this;
 
   NS_ReleaseOnMainThread("WebSocketImpl::mChannel", mChannel.forget());
   NS_ReleaseOnMainThread("WebSocketImpl::mService", mService.forget());
@@ -1872,6 +1875,10 @@ WebSocketImpl::InitializeConnection(nsIPrincipal* aPrincipal)
 
   mChannel = wsChannel;
 
+  if (mIsMainThread && doc) {
+    mMainThreadEventTarget = doc->EventTargetFor(TaskCategory::Other);
+  }
+
   return NS_OK;
 }
 
@@ -2844,9 +2851,12 @@ NS_IMETHODIMP
 WebSocketImpl::Dispatch(already_AddRefed<nsIRunnable> aEvent, uint32_t aFlags)
 {
   nsCOMPtr<nsIRunnable> event_ref(aEvent);
-  // If the target is the main-thread we can just dispatch the runnable.
+  // If the target is the main-thread, we should try to dispatch the runnable
+  // to a labeled event target.
   if (mIsMainThread) {
-    return NS_DispatchToMainThread(event_ref.forget());
+    return mMainThreadEventTarget
+      ? mMainThreadEventTarget->Dispatch(event_ref.forget())
+      : GetMainThreadEventTarget()->Dispatch(event_ref.forget());
   }
 
   MutexAutoLock lock(mMutex);

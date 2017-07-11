@@ -18,6 +18,8 @@ import android.util.Log;
 import org.mozilla.gecko.Experiments;
 import org.mozilla.gecko.MmaConstants;
 import org.mozilla.gecko.PrefsHelper;
+import org.mozilla.gecko.Tab;
+import org.mozilla.gecko.Tabs;
 import org.mozilla.gecko.preferences.GeckoPreferences;
 import org.mozilla.gecko.switchboard.SwitchBoard;
 
@@ -35,6 +37,7 @@ public class MmaDelegate {
     public static final String SCREENSHOT = "E_Screenshot";
     public static final String SAVED_LOGIN_AND_PASSWORD = "E_Saved_Login_And_Password";
     public static final String LAUNCH_BUT_NOT_DEFAULT_BROWSER = "E_Launch_But_Not_Default_Browser";
+    public static final String NEW_TAB = "E_Opened_New_Tab";
 
 
     private static final String TAG = "MmaDelegate";
@@ -101,8 +104,10 @@ public class MmaDelegate {
 
         final boolean healthReport = GeckoPreferences.getBooleanPref(context, GeckoPreferences.PREFS_HEALTHREPORT_UPLOAD_ENABLED, true);
         final boolean inExperiment = SwitchBoard.isInExperiment(context, Experiments.LEANPLUM);
-
-        return inExperiment && healthReport && isGeckoPrefOn;
+        final Tab selectedTab = Tabs.getInstance().getSelectedTab();
+        // if selected tab is null or private, mma should be disabled.
+        final boolean isInPrivateBrowsing = selectedTab == null || selectedTab.isPrivate();
+        return inExperiment && healthReport && isGeckoPrefOn && !isInPrivateBrowsing;
     }
 
 

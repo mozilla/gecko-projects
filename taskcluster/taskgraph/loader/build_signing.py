@@ -4,15 +4,15 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-import copy
-
 from taskgraph.loader.single_dep import loader as base_loader
 
-
+# XXX: This logic should rely in kind.yml. This hasn't been done in the original
+# patch because it required some heavy changes in single_dep.
 LABELS_WHICH_SHOULD_SIGN_CI_BUILDS = (
     'build-win32/debug', 'build-win32/opt', 'build-win32-pgo/opt',
-    'build-win64/debug', 'build-win64/opt', 'build-win64-pgo/opt', 'build-win64-asan/opt'
+    'build-win64/debug', 'build-win64/opt', 'build-win64-pgo/opt',
 )
+
 
 def loader(kind, path, config, params, loaded_tasks):
     jobs = base_loader(kind, path, config, params, loaded_tasks)
@@ -20,5 +20,5 @@ def loader(kind, path, config, params, loaded_tasks):
     for job in jobs:
         dependent_task = job['dependent-task']
         if dependent_task.attributes.get('nightly') or \
-            dependent_task.label in LABELS_WHICH_SHOULD_SIGN_CI_BUILDS:
+                dependent_task.label in LABELS_WHICH_SHOULD_SIGN_CI_BUILDS:
             yield job

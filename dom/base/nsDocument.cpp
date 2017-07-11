@@ -2792,10 +2792,14 @@ nsDocument::InitCSP(nsIChannel* aChannel)
 
   mSandboxFlags |= cspSandboxFlags;
 
-  if (cspSandboxFlags & SANDBOXED_ORIGIN) {
-    // If the new CSP sandbox flags do not have the allow-same-origin flag
-    // reset the document principal to a null principal
-    principal = NullPrincipal::Create();
+  // Probably the iframe sandbox attribute already caused the creation of a
+  // new NullPrincipal. Only create a new NullPrincipal if CSP requires so
+  // and no one has been created yet.
+  bool needNewNullPrincipal =
+    (cspSandboxFlags & SANDBOXED_ORIGIN) && !(mSandboxFlags & SANDBOXED_ORIGIN);
+  if (needNewNullPrincipal) {
+    principal = NullPrincipal::CreateWithInheritedAttributes(principal);
+    principal->SetCsp(csp);
     SetPrincipal(principal);
   }
 
@@ -6022,7 +6026,8 @@ nsDocument::CustomElementConstructor(JSContext* aCx, unsigned aArgc, JS::Value* 
 
   JS::Rooted<JSObject*> global(aCx,
     JS_GetGlobalForObject(aCx, &args.callee()));
-  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryWrapper(aCx, global);
+  RefPtr<nsGlobalWindow> window;
+  UNWRAP_OBJECT(Window, global, window);
   MOZ_ASSERT(window, "Should have a non-null window");
 
   nsDocument* document = static_cast<nsDocument*>(window->GetDoc());
@@ -13490,11 +13495,30 @@ nsDocument::IsThirdParty()
   return mIsThirdParty.value();
 }
 
+static bool
+IsAboutReader(nsIURI* aURI)
+{
+  if (!aURI) {
+    return false;
+  }
+
+  nsCString spec;
+  aURI->GetSpec(spec);
+
+  // Reader mode URLs look like about:reader?[...].
+  return StringBeginsWith(spec, NS_LITERAL_CSTRING("about:reader"));
+}
+
 bool
 nsIDocument::IsScopedStyleEnabled()
 {
   if (mIsScopedStyleEnabled == eScopedStyle_Unknown) {
+    // We allow <style scoped> in about:reader pages since on Android
+    // we use it to inject some in-page UI.  (We currently don't
+    // support styling about:reader pages in stylo anyway, so for
+    // now it's OK to enable it here.)
     mIsScopedStyleEnabled = nsContentUtils::IsChromeDoc(this) ||
+                            IsAboutReader(mDocumentURI) ||
                             nsContentUtils::IsScopedStylePrefEnabled()
                               ? eScopedStyle_Enabled
                               : eScopedStyle_Disabled;

@@ -259,6 +259,7 @@ StyleSheetInfo::StyleSheetInfo(StyleSheetInfo& aCopy,
   , mComplete(aCopy.mComplete)
   , mFirstChild()  // We don't rebuild the child because we're making a copy
                    // without children.
+  , mSourceMapURL(aCopy.mSourceMapURL)
 #ifdef DEBUG
   , mPrincipalSet(aCopy.mPrincipalSet)
 #endif
@@ -506,6 +507,18 @@ StyleSheet::GetCssRules(nsIPrincipal& aSubjectPrincipal,
   FORWARD_INTERNAL(GetCssRulesInternal, ())
 }
 
+void
+StyleSheet::GetSourceMapURL(nsAString& aSourceMapURL)
+{
+  aSourceMapURL = mInner->mSourceMapURL;
+}
+
+void
+StyleSheet::SetSourceMapURL(const nsAString& aSourceMapURL)
+{
+  mInner->mSourceMapURL = aSourceMapURL;
+}
+
 css::Rule*
 StyleSheet::GetDOMOwnerRule() const
 {
@@ -596,6 +609,33 @@ StyleSheet::InsertRuleIntoGroup(const nsAString& aRule,
   }
 
   return NS_OK;
+}
+
+uint64_t
+StyleSheet::FindOwningWindowInnerID() const
+{
+  uint64_t windowID = 0;
+  if (mDocument) {
+    windowID = mDocument->InnerWindowID();
+  }
+
+  if (windowID == 0 && mOwningNode) {
+    windowID = mOwningNode->OwnerDoc()->InnerWindowID();
+  }
+
+  RefPtr<css::Rule> ownerRule;
+  if (windowID == 0 && (ownerRule = GetDOMOwnerRule())) {
+    RefPtr<StyleSheet> sheet = ownerRule->GetStyleSheet();
+    if (sheet) {
+      windowID = sheet->FindOwningWindowInnerID();
+    }
+  }
+
+  if (windowID == 0 && mParent) {
+    windowID = mParent->FindOwningWindowInnerID();
+  }
+
+  return windowID;
 }
 
 void

@@ -84,6 +84,10 @@ pref("extensions.geckoProfiler.getSymbolRules", "localBreakpad,remoteBreakpad");
 pref("extensions.webextensions.base-content-security-policy", "script-src 'self' https://* moz-extension: blob: filesystem: 'unsafe-eval' 'unsafe-inline'; object-src 'self' https://* moz-extension: blob: filesystem:;");
 pref("extensions.webextensions.default-content-security-policy", "script-src 'self'; object-src 'self';");
 
+#ifdef XP_WIN
+pref("extensions.webextensions.remote", true);
+#endif
+
 // Extensions that should not be flagged as legacy in about:addons
 pref("extensions.legacy.exceptions", "{972ce4c6-7e08-4474-a285-3208198ce6fd},testpilot@cliqz.com,@testpilot-containers,jid1-NeEaf3sAHdKHPA@jetpack,@activity-streams,pulse@mozilla.com,@testpilot-addon,@min-vid,tabcentertest1@mozilla.com,snoozetabs@mozilla.com,speaktome@mozilla.com,hoverpad@mozilla.com");
 
@@ -236,6 +240,8 @@ pref("general.autoScroll", false);
 #else
 pref("general.autoScroll", true);
 #endif
+
+pref("browser.stopReloadAnimation.enabled", true);
 
 // UI density of the browser chrome. This mostly affects toolbarbutton
 // and urlbar spacing. The possible values are 0=normal, 1=compact, 2=touch.
@@ -1074,7 +1080,7 @@ pref("security.sandbox.gpu.level", 0);
 // process is killed when all windows are closed, so a change will take effect
 // when the 1st window is opened.
 #if defined(NIGHTLY_BUILD)
-pref("security.sandbox.content.level", 2);
+pref("security.sandbox.content.level", 3);
 #else
 pref("security.sandbox.content.level", 1);
 #endif
@@ -1698,6 +1704,8 @@ pref("browser.onboarding.hidden", false);
 // So use `browser.onboarding.notification.finished` to let the AS page know
 // if our notification is finished and safe to show their snippet.
 pref("browser.onboarding.notification.finished", false);
+pref("browser.onboarding.newtour", "private,addons,customize,search,default,sync");
+pref("browser.onboarding.updatetour", "");
 
 // Preferences for the Screenshots feature:
 // Temporarily disable Screenshots in Beta & Release, so that we can gradually

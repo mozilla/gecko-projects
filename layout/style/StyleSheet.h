@@ -213,6 +213,8 @@ public:
   dom::MediaList* Media();
   bool Disabled() const { return mDisabled; }
   // The XPCOM SetDisabled is fine for WebIDL.
+  void GetSourceMapURL(nsAString& aTitle);
+  void SetSourceMapURL(const nsAString& aSourceMapURL);
 
   // WebIDL CSSStyleSheet API
   // Can't be inline because we can't include ImportRule here.  And can't be
@@ -261,6 +263,9 @@ public:
   nsresult DeleteRuleFromGroup(css::GroupRule* aGroup, uint32_t aIndex);
   nsresult InsertRuleIntoGroup(const nsAString& aRule,
                                css::GroupRule* aGroup, uint32_t aIndex);
+
+  // Find the ID of the owner inner window.
+  uint64_t FindOwningWindowInnerID() const;
 
   template<typename Func>
   void EnumerateChildSheets(Func aCallback) {

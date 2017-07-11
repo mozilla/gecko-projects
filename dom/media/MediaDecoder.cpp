@@ -197,13 +197,6 @@ MediaDecoder::GetDuration()
   return mDuration;
 }
 
-AbstractCanonical<media::NullableTimeUnit>*
-MediaDecoder::CanonicalDurationOrNull()
-{
-  MOZ_ASSERT(mDecoderStateMachine);
-  return mDecoderStateMachine->CanonicalDuration();
-}
-
 void
 MediaDecoder::SetInfinite(bool aInfinite)
 {
@@ -1383,7 +1376,10 @@ MediaDecoder::NotifyDataArrivedInternal()
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
-  mDataArrivedEvent.Notify();
+  mReader->OwnerThread()->Dispatch(
+    NewRunnableMethod("MediaDecoderReader::NotifyDataArrived",
+                      mReader.get(),
+                      &MediaDecoderReader::NotifyDataArrived));
 }
 
 void

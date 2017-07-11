@@ -11,8 +11,6 @@ from taskgraph.transforms.base import TransformSequence
 
 transforms = TransformSequence()
 
-DESKTOP_BUILD_PLATFORM = ('linux', 'macosx', 'win')
-
 
 @transforms.add
 def add_signed_routes(config, jobs):
@@ -31,6 +29,7 @@ def add_signed_routes(config, jobs):
                 rest = ".".join(dep_route.split(".")[4:])
                 job['routes'].append(
                     'index.gecko.v2.{}.signed-nightly.{}'.format(branch, rest))
+
         yield job
 
 
@@ -43,7 +42,9 @@ def make_signing_description(config, jobs):
             dep_job.attributes.get('build_platform'),
             dep_job.attributes.get('nightly')
         )
-        job['label'] = dep_job.label.replace("build-", "signing-")
+
+        label = dep_job.label.replace("build-", "signing-")
+        job['label'] = label
 
         # Announce job status on funsize specific routes, so that it can
         # start the partial generation for nightlies only.
@@ -61,6 +62,8 @@ def _generate_upstream_artifacts(build_platform, is_nightly=False):
             ],
             'format': 'jar',
         }]
+    # XXX: Mac and Windows don't sign mars because internal aren't signed at
+    # this stage of the release
     elif 'macosx' in build_platform:
         artifacts_specificities = [{
             'artifacts': ['public/build/target.dmg'],

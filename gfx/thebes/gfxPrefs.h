@@ -311,6 +311,7 @@ private:
   DECL_GFX_PREF(Live, "apz.fling_min_velocity_threshold",      APZFlingMinVelocityThreshold, float, 0.5f);
   DECL_GFX_PREF(Live, "apz.fling_stop_on_tap_threshold",       APZFlingStopOnTapThreshold, float, 0.05f);
   DECL_GFX_PREF(Live, "apz.fling_stopped_threshold",           APZFlingStoppedThreshold, float, 0.01f);
+  DECL_GFX_PREF(Live, "apz.frame_delay.enabled",               APZFrameDelayEnabled, bool, false);
   DECL_GFX_PREF(Live, "apz.highlight_checkerboarded_areas",    APZHighlightCheckerboardedAreas, bool, false);
   DECL_GFX_PREF(Once, "apz.keyboard.enabled",                  APZKeyboardEnabled, bool, false);
   DECL_GFX_PREF(Live, "apz.max_velocity_inches_per_ms",        APZMaxVelocity, float, -1.0f);
@@ -318,6 +319,7 @@ private:
   DECL_GFX_PREF(Live, "apz.min_skate_speed",                   APZMinSkateSpeed, float, 1.0f);
   DECL_GFX_PREF(Live, "apz.minimap.enabled",                   APZMinimap, bool, false);
   DECL_GFX_PREF(Live, "apz.minimap.visibility.enabled",        APZMinimapVisibilityEnabled, bool, false);
+  DECL_GFX_PREF(Live, "apz.one_touch_pinch.enabled",           APZOneTouchPinchEnabled, bool, true);
   DECL_GFX_PREF(Live, "apz.overscroll.enabled",                APZOverscrollEnabled, bool, false);
   DECL_GFX_PREF(Live, "apz.overscroll.min_pan_distance_ratio", APZMinPanDistanceRatio, float, 1.0f);
   DECL_GFX_PREF(Live, "apz.overscroll.spring_friction",        APZOverscrollSpringFriction, float, 0.015f);
@@ -446,8 +448,10 @@ private:
   // The maximums here are quite conservative, we can tighten them if problems show up.
   DECL_GFX_PREF(Once, "gfx.logging.texture-usage.enabled",     GfxLoggingTextureUsageEnabled, bool, false);
   DECL_GFX_PREF(Once, "gfx.logging.peak-texture-usage.enabled",GfxLoggingPeakTextureUsageEnabled, bool, false);
-  DECL_GFX_PREF(Once, "gfx.max-alloc-size",                    MaxAllocSize, int32_t, (int32_t)500000000);
-  DECL_GFX_PREF(Once, "gfx.max-texture-size",                  MaxTextureSize, int32_t, (int32_t)32767);
+  // Use gfxPlatform::MaxAllocSize instead of the pref directly
+  DECL_GFX_PREF(Once, "gfx.max-alloc-size",                    MaxAllocSizeDoNotUseDirectly, int32_t, (int32_t)500000000);
+  // Use gfxPlatform::MaxTextureSize instead of the pref directly
+  DECL_GFX_PREF(Once, "gfx.max-texture-size",                  MaxTextureSizeDoNotUseDirectly, int32_t, (int32_t)32767);
   DECL_GFX_PREF(Live, "gfx.partialpresent.force",              PartialPresent, int32_t, 0);
   DECL_GFX_PREF(Live, "gfx.perf-warnings.enabled",             PerfWarnings, bool, false);
   DECL_GFX_PREF(Live, "gfx.SurfaceTexture.detach.enabled",     SurfaceTextureDetachEnabled, bool, true);

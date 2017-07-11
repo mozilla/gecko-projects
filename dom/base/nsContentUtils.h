@@ -1057,7 +1057,7 @@ public:
    */
   static nsresult GenerateUUIDInPlace(nsID& aUUID);
 
-  static bool PrefetchEnabled(nsIDocShell* aDocShell);
+  static bool PrefetchPreloadEnabled(nsIDocShell* aDocShell);
 
   /**
    * Fill (with the parameters given) the localized string named |aKey| in
@@ -3081,6 +3081,16 @@ public:
    * "_parent" and "_self".
    */
   static bool IsOverridingWindowName(const nsAString& aName);
+
+  /**
+   * If there is a SourceMap (higher precedence) or X-SourceMap (lower
+   * precedence) response header in |aChannel|, set |aResult| to the
+   * header's value and return true.  Otherwise, return false.
+   *
+   * @param aChannel The HTTP channel
+   * @param aResult The string result.
+   */
+  static bool GetSourceMapURL(nsIHttpChannel* aChannel, nsACString& aResult);
 
 private:
   static bool InitializeEventTable();

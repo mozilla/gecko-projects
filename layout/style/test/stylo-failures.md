@@ -38,9 +38,6 @@ to mochitest command.
 * Animation support:
   * SMIL Animation
     * test_restyles_in_smil_animation.html [2]
-* console support bug 1352669
-  * test_bug413958.html `monitorConsole` [3]
-  * test_parser_diagnostics_unprintables.html [550]
 * @namespace support:
   * test_namespace_rule.html: bug 1355715 [6]
 * test_font_feature_values_parsing.html: \@font-feature-values support bug 1355721 [107]
@@ -49,7 +46,7 @@ to mochitest command.
   * test_grid_container_shorthands.html [65]
   * test_grid_item_shorthands.html [23]
   * test_grid_shorthand_serialization.html [28]
-  * test_value_storage.html `'grid` [53]
+  * test_value_storage.html `'grid` [21]
 * Unsupported values
   * SVG-in-OpenType values not supported servo/servo#15211 bug 1355412
     * test_value_storage.html `context-` [7]

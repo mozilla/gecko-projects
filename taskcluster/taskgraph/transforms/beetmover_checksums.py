@@ -65,7 +65,6 @@ def make_beetmover_checksums_description(config, jobs):
                 dependencies[k] = v
 
         attributes = copy_attributes_from_dependent_job(dep_job)
-        attributes['signed'] = dep_job.attributes.get('signed', False)
 
         if dep_job.attributes.get('locale'):
             treeherder['symbol'] = 'tc-BMcs({})'.format(dep_job.attributes.get('locale'))

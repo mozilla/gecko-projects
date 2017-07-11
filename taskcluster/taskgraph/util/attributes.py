@@ -91,11 +91,9 @@ def copy_attributes_from_dependent_job(dep_job):
         'build_type': dep_job.attributes.get('build_type'),
     }
 
-    for attribute_name in _OPTIONAL_ATTRIBUTES:
-        try:
-            attributes[attribute_name] = dep_job.attributes[attribute_name]
-        except KeyError:
-            # Don't set optional attributes if not set in the dependent job
-            pass
+    attributes.update({
+        attr: dep_job.attributes[attr]
+        for attr in _OPTIONAL_ATTRIBUTES if attr in dep_job.attributes
+    })
 
     return attributes

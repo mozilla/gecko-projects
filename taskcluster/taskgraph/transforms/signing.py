@@ -10,8 +10,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import validate_schema, Schema
-from taskgraph.util.scriptworker import get_signing_cert_scope, get_ci_signing_cert_scope, \
-    get_devedition_signing_cert_scope
+from taskgraph.util.scriptworker import get_signing_cert_scope, get_devedition_signing_cert_scope
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
@@ -91,7 +90,7 @@ def make_task_description(config, jobs):
 
         treeherder = job.get('treeherder', {})
         is_nightly = dep_job.attributes.get('nightly', False)
-        treeherder.setdefault('symbol', _generate_treeherder_symbol(is_nightly, dep_job.label))
+        treeherder.setdefault('symbol', _generate_treeherder_symbol(is_nightly))
 
         dep_th_platform = dep_job.task.get('extra', {}).get(
             'treeherder', {}).get('machine', {}).get('platform', '')
@@ -101,7 +100,8 @@ def make_task_description(config, jobs):
             dep_th_platform, build_platform, build_type
         ))
 
-        # TODO: Make non-nightly (i.e. windows CI builds) Tier 1 once mature enough
+        # TODO: Make non-nightly (i.e. windows CI builds) Tier 1 once green on
+        # central, inbound, autoland and try
         treeherder.setdefault('tier', 1 if is_nightly else 3)
         treeherder.setdefault('kind', 'build')
 
@@ -123,13 +123,13 @@ def make_task_description(config, jobs):
         elif is_nightly:
             signing_cert_scope = get_signing_cert_scope(config)
         else:
-            signing_cert_scope = get_ci_signing_cert_scope(config)
+            signing_cert_scope = 'project:releng:signing:cert:dep-signing'
 
         task = {
             'label': label,
             'description': "{} Signing".format(
                 dep_job.task["metadata"]["description"]),
-            'worker-type': "scriptworker-prov-v1/signing-linux-v1",
+            'worker-type': _generate_worker_type(signing_cert_scope),
             'worker': {'implementation': 'scriptworker-signing',
                        'upstream-artifacts': job['upstream-artifacts'],
                        'max-run-time': 3600},
@@ -153,10 +153,11 @@ def _generate_treeherder_platform(dep_th_platform, build_platform, build_type):
     actual_build_type = 'pgo' if '-pgo' in build_platform else build_type
     return '{}/{}'.format(dep_th_platform, actual_build_type)
 
-def _generate_treeherder_symbol(is_nightly, label):
-    if is_nightly:
-        return 'tc(Ns)'
-    elif '-asan' in label:
-        return 'tc(Bos)'
-    else:
-        return 'tc(Bs)'
+
+def _generate_treeherder_symbol(is_nightly):
+    return 'tc(Ns)' if is_nightly else 'tc(Bs)'
+
+
+def _generate_worker_type(signing_cert_scope):
+    worker_type = 'depsigning' if 'dep-signing' in signing_cert_scope else 'signing-linux-v1'
+    return 'scriptworker-prov-v1/{}'.format(worker_type)

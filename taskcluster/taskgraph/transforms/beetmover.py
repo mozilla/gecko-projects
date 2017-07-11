@@ -292,7 +292,6 @@ def make_task_description(config, jobs):
         dependencies.update(signing_dependencies)
 
         attributes = copy_attributes_from_dependent_job(dep_job)
-        attributes['signed'] = dep_job.attributes.get('signed', False)
 
         if job.get('locale'):
             attributes['locale'] = job['locale']

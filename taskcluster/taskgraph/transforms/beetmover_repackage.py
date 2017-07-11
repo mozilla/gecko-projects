@@ -167,7 +167,7 @@ def make_task_description(config, jobs):
                                   }
         dependencies.update(repackage_dependencies)
 
-	attributes = copy_attributes_from_dependent_job(dep_job)
+        attributes = copy_attributes_from_dependent_job(dep_job)
         if job.get('locale'):
             attributes['locale'] = job['locale']
 

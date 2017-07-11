@@ -7,6 +7,7 @@
 #include "mozilla/ServoStyleSet.h"
 
 #include "gfxPlatformFontList.h"
+#include "mozilla/AutoRestyleTimelineMarker.h"
 #include "mozilla/DocumentStyleRootIterator.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoRestyleManager.h"
@@ -36,7 +37,6 @@ using namespace mozilla::dom;
 
 ServoStyleSet::ServoStyleSet()
   : mPresContext(nullptr)
-  , mAllowResolveStaleStyles(false)
   , mAuthorStyleDisabled(false)
   , mStylistState(StylistState::NotDirty)
   , mUserFontSetUpdateGeneration(0)
@@ -341,6 +341,12 @@ ServoStyleSet::PrepareAndTraverseSubtree(
   TraversalRootBehavior aRootBehavior,
   TraversalRestyleBehavior aRestyleBehavior)
 {
+  bool forAnimationOnly =
+    aRestyleBehavior == TraversalRestyleBehavior::ForAnimationOnly;
+
+  AutoRestyleTimelineMarker marker(
+    mPresContext->GetDocShell(), forAnimationOnly);
+
   // Get the Document's root element to ensure that the cache is valid before
   // calling into the (potentially-parallel) Servo traversal, where a cache hit
   // is necessary to avoid a data race when updating the cache.
@@ -354,8 +360,6 @@ ServoStyleSet::PrepareAndTraverseSubtree(
   bool isInitial = !aRoot->HasServoData();
   bool forReconstruct =
     aRestyleBehavior == TraversalRestyleBehavior::ForReconstruct;
-  bool forAnimationOnly =
-    aRestyleBehavior == TraversalRestyleBehavior::ForAnimationOnly;
 #ifdef DEBUG
   bool forNewlyBoundElement =
     aRestyleBehavior == TraversalRestyleBehavior::ForNewlyBoundElement;
@@ -491,8 +495,8 @@ ServoStyleSet::ResolvePseudoElementStyle(Element* aOriginatingElement,
   RefPtr<ServoComputedValues> computedValues;
   if (aPseudoElement) {
     MOZ_ASSERT(aType == aPseudoElement->GetPseudoElementType());
-    computedValues = Servo_ResolveStyle(aPseudoElement, mRawSet.get(),
-                                        mAllowResolveStaleStyles).Consume();
+    computedValues = Servo_ResolveStyle(aPseudoElement,
+                                        mRawSet.get()).Consume();
   } else {
     const ServoComputedValues* parentStyle =
       aParentContext ? aParentContext->ComputedValues() : nullptr;
@@ -1025,7 +1029,6 @@ ServoStyleSet::AssertTreeIsClean()
 bool
 ServoStyleSet::GetKeyframesForName(const nsString& aName,
                                    const nsTimingFunction& aTimingFunction,
-                                   const ServoComputedValues* aComputedValues,
                                    nsTArray<Keyframe>& aKeyframes)
 {
   UpdateStylistIfNeeded();
@@ -1034,7 +1037,6 @@ ServoStyleSet::GetKeyframesForName(const nsString& aName,
   return Servo_StyleSet_GetKeyframesForName(mRawSet.get(),
                                             &name,
                                             &aTimingFunction,
-                                            aComputedValues,
                                             &aKeyframes);
 }
 
@@ -1149,8 +1151,7 @@ already_AddRefed<ServoComputedValues>
 ServoStyleSet::ResolveServoStyle(Element* aElement)
 {
   UpdateStylistIfNeeded();
-  return Servo_ResolveStyle(aElement, mRawSet.get(),
-                            mAllowResolveStaleStyles).Consume();
+  return Servo_ResolveStyle(aElement, mRawSet.get()).Consume();
 }
 
 void

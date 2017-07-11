@@ -1390,7 +1390,7 @@ ScrollFrameHelper::ScrollByLine(nsScrollbarFrame* aScrollbar, int32_t aDirection
       return;
     }
   }
-  
+
   nsIntPoint overflow;
   ScrollBy(delta, nsIScrollableFrame::LINES, nsIScrollableFrame::SMOOTH,
            &overflow, nsGkAtoms::other, nsIScrollableFrame::NOT_MOMENTUM,
@@ -2271,7 +2271,9 @@ ScrollFrameHelper::ScrollToWithOrigin(nsPoint aScrollPosition,
   }
 
   nsPresContext* presContext = mOuter->PresContext();
-  TimeStamp now = presContext->RefreshDriver()->MostRecentRefresh();
+  TimeStamp now = presContext->RefreshDriver()->IsTestControllingRefreshesEnabled()
+                ? presContext->RefreshDriver()->MostRecentRefresh()
+                : TimeStamp::Now();
   bool isSmoothScroll = (aMode == nsIScrollableFrame::SMOOTH) &&
                           IsSmoothScrollingEnabled();
 
@@ -2651,7 +2653,7 @@ ClampAndAlignWithPixels(nscoord aDesired,
       Abs(aligned - desired))
     return aBoundLower;
 
-  // Accept the nearest pixel-aligned value if it is within the allowed range. 
+  // Accept the nearest pixel-aligned value if it is within the allowed range.
   if (aligned >= destLower && aligned <= destUpper)
     return aligned;
 

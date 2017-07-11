@@ -177,7 +177,7 @@ ProxyMessenger = {
     MessageChannel.addListener(messageManagers, "Extension:Port:PostMessage", this);
   },
 
-  receiveMessage({target, messageName, channelId, sender, recipient, data, responseType}) {
+  async receiveMessage({target, messageName, channelId, sender, recipient, data, responseType}) {
     if (recipient.toNativeApp) {
       let {childId, toNativeApp} = recipient;
       if (messageName == "Extension:Message") {
@@ -194,13 +194,15 @@ ProxyMessenger = {
       return;
     }
 
+    const noHandlerError = {
+      result: MessageChannel.RESULT_NO_HANDLER,
+      message: "No matching message handler for the given recipient.",
+    };
+
     let extension = GlobalManager.extensionMap.get(sender.extensionId);
     let receiverMM = this.getMessageManagerForRecipient(recipient);
     if (!extension || !receiverMM) {
-      return Promise.reject({
-        result: MessageChannel.RESULT_NO_HANDLER,
-        message: "No matching message handler for the given recipient.",
-      });
+      return Promise.reject(noHandlerError);
     }
 
     if ((messageName == "Extension:Message" ||
@@ -209,11 +211,48 @@ ProxyMessenger = {
       // From ext-tabs.js, undefined on Android.
       apiManager.global.tabGetSender(extension, target, sender);
     }
-    return MessageChannel.sendMessage(receiverMM, messageName, data, {
+
+    let promise1 = MessageChannel.sendMessage(receiverMM, messageName, data, {
       sender,
       recipient,
       responseType,
     });
+
+    if (!extension.isEmbedded || !extension.remote) {
+      return promise1;
+    }
+
+    // If we have a remote, embedded extension, the legacy side is
+    // running in a different process than the WebExtension side.
+    // As a result, we need to dispatch the message to both the parent
+    // and extension processes, and manually merge the results.
+    let promise2 = MessageChannel.sendMessage(Services.ppmm.getChildAt(0), messageName, data, {
+      sender,
+      recipient,
+      responseType,
+    });
+
+    let result = undefined;
+    let failures = 0;
+    let tryPromise = async promise => {
+      try {
+        let res = await promise;
+        if (result === undefined) {
+          result = res;
+        }
+      } catch (e) {
+        if (e.result != MessageChannel.RESULT_NO_HANDLER) {
+          throw e;
+        }
+        failures++;
+      }
+    };
+
+    await Promise.all([tryPromise(promise1), tryPromise(promise2)]);
+    if (failures == 2) {
+      return Promise.reject(noHandlerError);
+    }
+    return result;
   },
 
   /**
@@ -327,11 +366,12 @@ class ProxyContextParent extends BaseContext {
     apiManager.emit("proxy-context-load", this);
   }
 
-  withPendingBrowser(browser, callable) {
+  async withPendingBrowser(browser, callable) {
     let savedBrowser = this.pendingEventBrowser;
     this.pendingEventBrowser = browser;
     try {
-      return callable();
+      let result = await callable();
+      return result;
     } finally {
       this.pendingEventBrowser = savedBrowser;
     }
@@ -396,6 +436,8 @@ class ExtensionPageContextParent extends ProxyContextParent {
 
     this.viewType = params.viewType;
 
+    this.extension.views.add(this);
+
     extension.emit("extension-proxy-context-load", this);
   }
 
@@ -437,6 +479,7 @@ class ExtensionPageContextParent extends ProxyContextParent {
 
   shutdown() {
     apiManager.emit("page-shutdown", this);
+    this.extension.views.delete(this);
     super.shutdown();
   }
 }
@@ -624,9 +667,10 @@ ParentAPIManager = {
     };
 
     try {
-      let args = Cu.cloneInto(data.args, context.sandbox);
+      let args = data.noClone ? data.args : Cu.cloneInto(data.args, context.sandbox);
+      let pendingBrowser = context.pendingEventBrowser;
       let fun = await context.apiCan.asyncFindAPIPath(data.path);
-      let result = context.withPendingBrowser(context.pendingEventBrowser,
+      let result = context.withPendingBrowser(pendingBrowser,
                                               () => fun(...args));
       if (data.callId) {
         result = result || Promise.resolve();
@@ -800,11 +844,14 @@ class HiddenXULWindow {
    * @param {Object} xulAttributes
    *        An object that contains the xul attributes to set of the newly
    *        created browser XUL element.
+   * @param {nsIFrameLoader} [groupFrameLoader]
+   *        The frame loader to load this browser into the same process
+   *        and tab group as.
    *
    * @returns {Promise<XULElement>}
    *          A Promise which resolves to the newly created browser XUL element.
    */
-  async createBrowserElement(xulAttributes) {
+  async createBrowserElement(xulAttributes, groupFrameLoader = null) {
     if (!xulAttributes || Object.keys(xulAttributes).length === 0) {
       throw new Error("missing mandatory xulAttributes parameter");
     }
@@ -816,6 +863,7 @@ class HiddenXULWindow {
     const browser = chromeDoc.createElement("browser");
     browser.setAttribute("type", "content");
     browser.setAttribute("disableglobalhistory", "true");
+    browser.sameProcessAsFrameLoader = groupFrameLoader;
 
     for (const [name, value] of Object.entries(xulAttributes)) {
       if (value != null) {
@@ -895,7 +943,7 @@ class HiddenExtensionPage extends HiddenXULWindow {
       "remote": this.extension.remote ? "true" : null,
       "remoteType": this.extension.remote ?
         E10SUtils.EXTENSION_REMOTE_TYPE : null,
-    });
+    }, this.extension.groupFrameLoader);
 
     return this.browser;
   }
@@ -974,7 +1022,7 @@ const DebugUtils = {
         "remote": extension.remote ? "true" : null,
         "remoteType": extension.remote ?
           E10SUtils.EXTENSION_REMOTE_TYPE : null,
-      });
+      }, extension.groupFrameLoader);
     };
 
     let browserPromise = this.debugBrowserPromises.get(extensionId);
@@ -983,7 +1031,11 @@ const DebugUtils = {
     if (!browserPromise) {
       browserPromise = createBrowser();
       this.debugBrowserPromises.set(extensionId, browserPromise);
-      browserPromise.catch(() => {
+      browserPromise.then(browser => {
+        browserPromise.browser = browser;
+      });
+      browserPromise.catch(e => {
+        Cu.reportError(e);
         this.debugBrowserPromises.delete(extensionId);
       });
     }
@@ -993,6 +1045,10 @@ const DebugUtils = {
     return browserPromise;
   },
 
+  getFrameLoader(extensionId) {
+    let promise = this.debugBrowserPromises.get(extensionId);
+    return promise && promise.browser && promise.browser.frameLoader;
+  },
 
   /**
    * Given the devtools actor that has retrieved an addon debug browser element,

@@ -2383,14 +2383,14 @@
       "n_buckets": 100,
       "description": "Time in milliseconds that http channel spent suspended between AsyncOpen and OnStartRequest."
   },
-  "NETWORK_RACE_CACHE_WITH_NETWORK_USAGE": {
+  "NETWORK_RACE_CACHE_WITH_NETWORK_USAGE_2": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "58",
     "alert_emails": ["necko@mozilla.com"],
-    "bug_numbers": [1354409],
-    "kind": "enumerated",
-    "n_values": 6,
-    "description": "Whether we raced network with the cache. (0=network & no racing, 1=cache & no racing, 2=network & raced, 3=cache & raced, 4=network & delayed race, 5=cache & delayed race)"
+    "bug_numbers": [1377340],
+    "kind": "categorical",
+    "labels": ["NetworkNoRace", "CacheNoRace", "NetworkRace", "CacheRace", "NetworkDelayedRace", "CacheDelayedRace"],
+    "description": "Whether we raced network with the cache."
   },
   "NETWORK_RACE_CACHE_WITH_NETWORK_SAVED_TIME": {
     "record_in_processes": ["main", "content"],
@@ -5010,6 +5010,15 @@
     "expires_in_version": "60",
     "kind": "boolean",
     "description": "Whether a document with a CSP policy (report-only or enforcing) contains a referrer directive ('true') or not ('false')."
+  },
+  "PLACES_DATABASE_CORRUPTION_HANDLING_STAGE": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["firefox-dev@mozilla.org"],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 6,
+    "releaseChannelCollection": "opt-out",
+    "description": "PLACES: stage reached when trying to fix a database corruption , see Places::Database::eCorruptDBReplaceStatus"
   },
   "PLACES_PAGES_COUNT": {
     "record_in_processes": ["main", "content"],
@@ -10062,13 +10071,13 @@
     "description": "The amount of time spent in a specific performance tool view, keyed by view name (waterfall, js-calltree, js-flamegraph, etc)."
   },
   "DEVTOOLS_JAVASCRIPT_ERROR_DISPLAYED": {
+    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mphillips@mozilla.com"],
-    "bug_numbers": [1255133],
-    "expires_in_version": "55",
+    "bug_numbers": [1255133, 1378449],
+    "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
-    "description": "Measures whether a particular JavaScript error has been displayed in the webconsole."
+    "description": "Records the key-identifiers of error messages when they are displayed in the webconsole of the debugger. Nothing should be recorded unless they are visible on the user screen."
   },
   "DEVTOOLS_TOOLBOX_HOST": {
     "record_in_processes": ["main", "content"],
@@ -13611,6 +13620,28 @@
     "high": 50000,
     "n_buckets": 100,
     "description": "The amount of time it takes for a PageAction popup to open."
+  },
+  "WEBEXT_STORAGE_LOCAL_GET_MS": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["addons-dev-internal@mozilla.com"],
+    "bug_numbers": [1371398],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "releaseChannelCollection": "opt-out",
+    "high": 50000,
+    "n_buckets": 100,
+    "description": "The amount of time it takes to perform a get via storage.local."
+  },
+  "WEBEXT_STORAGE_LOCAL_SET_MS": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["addons-dev-internal@mozilla.com"],
+    "bug_numbers": [1371398],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "releaseChannelCollection": "opt-out",
+    "high": 50000,
+    "n_buckets": 100,
+    "description": "The amount of time it takes to perform a set via storage.local."
   },
   "NOTIFY_OBSERVERS_LATENCY_MS": {
     "record_in_processes": ["main", "content", "gpu"],

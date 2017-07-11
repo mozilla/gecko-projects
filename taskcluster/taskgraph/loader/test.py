@@ -24,11 +24,15 @@ def loader(kind, path, config, params, loaded_tasks):
         )
 
     builds_by_platform = get_builds_by_platform(dep_kind='build', loaded_tasks=loaded_tasks)
-    signed_builds_by_platform = get_builds_by_platform(dep_kind='build-signing', loaded_tasks=loaded_tasks)
+    signed_builds_by_platform = get_builds_by_platform(
+        dep_kind='build-signing', loaded_tasks=loaded_tasks
+    )
 
     # get the test platforms for those build tasks
     test_platforms_cfg = load_yaml(path, 'test-platforms.yml')
-    test_platforms = get_test_platforms(test_platforms_cfg, builds_by_platform, signed_builds_by_platform)
+    test_platforms = get_test_platforms(
+        test_platforms_cfg, builds_by_platform, signed_builds_by_platform
+    )
 
     # expand the test sets for each of those platforms
     test_sets_cfg = load_yaml(path, 'test-sets.yml')
@@ -95,7 +99,8 @@ def get_test_platforms(test_platforms_cfg, builds_by_platform, signed_builds_by_
         }
 
         if builds_by_platform[build_platform].attributes.get('nightly'):
-            test_platforms[test_platform]['nightly'] = builds_by_platform[build_platform].attributes['nightly']
+            test_platforms[test_platform]['nightly'] = \
+                builds_by_platform[build_platform].attributes['nightly']
 
         test_platforms[test_platform].update(cfg)
 

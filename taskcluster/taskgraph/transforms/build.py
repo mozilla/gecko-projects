@@ -23,6 +23,7 @@ def set_defaults(config, jobs):
         job.setdefault('needs-sccache', True)
         worker = job.setdefault('worker', {})
         _, worker_os = worker_type_implementation(job['worker-type'])
+        worker = job.setdefault('worker', {})
         if worker_os == "linux":
             worker.setdefault('docker-image', {'in-tree': 'desktop-build'})
             worker['chain-of-trust'] = True
@@ -37,6 +38,7 @@ def set_defaults(config, jobs):
             worker['chain-of-trust'] = True
         elif worker_os == "macosx":
             worker.setdefault('env', {})
+
         yield job
 
 

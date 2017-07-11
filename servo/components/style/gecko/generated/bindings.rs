@@ -6,6 +6,7 @@ use gecko_bindings::structs::nsTArray;
 type nsACString_internal = nsACString;
 type nsAString_internal = nsAString;
 use gecko_bindings::structs::mozilla::css::GridTemplateAreasValue;
+use gecko_bindings::structs::mozilla::css::ErrorReporter;
 use gecko_bindings::structs::mozilla::css::ImageValue;
 use gecko_bindings::structs::mozilla::css::URLValue;
 use gecko_bindings::structs::mozilla::css::URLValueData;
@@ -71,6 +72,7 @@ use gecko_bindings::structs::nsChangeHint;
 use gecko_bindings::structs::nsCursorImage;
 use gecko_bindings::structs::nsFont;
 use gecko_bindings::structs::nsIAtom;
+use gecko_bindings::structs::nsIURI;
 use gecko_bindings::structs::nsCompatibility;
 use gecko_bindings::structs::nsMediaFeature;
 use gecko_bindings::structs::nsRestyleHint;
@@ -1934,8 +1936,6 @@ extern "C" {
                                               property: *const nsACString,
                                               timing_function:
                                                   nsTimingFunctionBorrowed,
-                                              computed_values:
-                                                  ServoComputedValuesBorrowed,
                                               keyframe_list:
                                                   RawGeckoKeyframeListBorrowedMut)
      -> bool;
@@ -2162,6 +2162,16 @@ extern "C" {
                                             count: *mut u32);
 }
 extern "C" {
+    pub fn Servo_StyleRule_SelectorMatchesElement(arg1:
+                                                      RawServoStyleRuleBorrowed,
+                                                  arg2:
+                                                      RawGeckoElementBorrowed,
+                                                  index: u32,
+                                                  pseudo_type:
+                                                      CSSPseudoElementType)
+     -> bool;
+}
+extern "C" {
     pub fn Servo_ImportRule_GetHref(rule: RawServoImportRuleBorrowed,
                                     result: *mut nsAString);
 }
@@ -2254,7 +2264,8 @@ extern "C" {
                                value: *const nsACString,
                                data: *mut RawGeckoURLExtraData,
                                parsing_mode: ParsingMode,
-                               quirks_mode: nsCompatibility)
+                               quirks_mode: nsCompatibility,
+                               loader: *mut Loader)
      -> RawServoDeclarationBlockStrong;
 }
 extern "C" {
@@ -2403,7 +2414,8 @@ extern "C" {
 extern "C" {
     pub fn Servo_ParseStyleAttribute(data: *const nsACString,
                                      extra_data: *mut RawGeckoURLExtraData,
-                                     quirks_mode: nsCompatibility)
+                                     quirks_mode: nsCompatibility,
+                                     loader: *mut Loader)
      -> RawServoDeclarationBlockStrong;
 }
 extern "C" {
@@ -2472,8 +2484,8 @@ extern "C" {
                                               is_important: bool,
                                               data: *mut RawGeckoURLExtraData,
                                               parsing_mode: ParsingMode,
-                                              quirks_mode: nsCompatibility)
-     -> bool;
+                                              quirks_mode: nsCompatibility,
+                                              loader: *mut Loader) -> bool;
 }
 extern "C" {
     pub fn Servo_DeclarationBlock_SetPropertyById(declarations:
@@ -2485,7 +2497,8 @@ extern "C" {
                                                       *mut RawGeckoURLExtraData,
                                                   parsing_mode: ParsingMode,
                                                   quirks_mode:
-                                                      nsCompatibility)
+                                                      nsCompatibility,
+                                                  loader: *mut Loader)
      -> bool;
 }
 extern "C" {
@@ -2665,15 +2678,16 @@ extern "C" {
      -> ServoComputedValuesStrong;
 }
 extern "C" {
+    pub fn Servo_ComputedValues_GetStyleRuleList(values:
+                                                     ServoComputedValuesBorrowed,
+                                                 rules:
+                                                     RawGeckoServoStyleRuleListBorrowedMut);
+}
+extern "C" {
     pub fn Servo_Initialize(dummy_url_data: *mut RawGeckoURLExtraData);
 }
 extern "C" {
     pub fn Servo_Shutdown();
-}
-extern "C" {
-    pub fn Servo_Element_GetStyleRuleList(element: RawGeckoElementBorrowed,
-                                          rules:
-                                              RawGeckoServoStyleRuleListBorrowedMut);
 }
 extern "C" {
     pub fn Servo_NoteExplicitHints(element: RawGeckoElementBorrowed,
@@ -2686,8 +2700,8 @@ extern "C" {
 }
 extern "C" {
     pub fn Servo_ResolveStyle(element: RawGeckoElementBorrowed,
-                              set: RawServoStyleSetBorrowed,
-                              allow_stale: bool) -> ServoComputedValuesStrong;
+                              set: RawServoStyleSetBorrowed)
+     -> ServoComputedValuesStrong;
 }
 extern "C" {
     pub fn Servo_ResolvePseudoStyle(element: RawGeckoElementBorrowed,
@@ -2881,4 +2895,24 @@ extern "C" {
     pub fn Servo_GetStyleEffects(computed_values:
                                      ServoComputedValuesBorrowedOrNull)
      -> *const nsStyleEffects;
+}
+extern "C" {
+    pub fn Gecko_CreateCSSErrorReporter(sheet: *mut ServoStyleSheet,
+                                        loader: *mut Loader, uri: *mut nsIURI)
+     -> *mut ErrorReporter;
+}
+extern "C" {
+    pub fn Gecko_DestroyCSSErrorReporter(reporter: *mut ErrorReporter);
+}
+extern "C" {
+    pub fn Gecko_ReportUnexpectedCSSError(reporter: *mut ErrorReporter,
+                                          message:
+                                              *const ::std::os::raw::c_char,
+                                          param:
+                                              *const ::std::os::raw::c_char,
+                                          paramLen: u32,
+                                          source:
+                                              *const ::std::os::raw::c_char,
+                                          sourceLen: u32, lineNumber: u32,
+                                          colNumber: u32, aURI: *mut nsIURI);
 }
