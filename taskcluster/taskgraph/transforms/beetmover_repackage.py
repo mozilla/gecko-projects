@@ -41,9 +41,8 @@ _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US = [
     "target.jsshell.zip",
     "mozharness.zip",
     "target.langpack.xpi",
-    "host/bin/mar",
-    "host/bin/mbsdiff",
 ]
+
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
 # need to be transfered to S3, please be aware you also need to follow-up
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
@@ -58,8 +57,21 @@ _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N = [
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
-    'macosx64-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
+    'macosx64-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
+        "host/bin/mar",
+        "host/bin/mbsdiff",
+    ],
     'macosx64-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
+    'win64-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
+        "host/bin/mar.exe",
+        "host/bin/mbsdiff.exe",
+    ],
+    'win64-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
+    'win32-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
+        "host/bin/mar.exe",
+        "host/bin/mbsdiff.exe",
+    ],
+    'win32-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
 }
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
 # need to be transfered to S3, please be aware you also need to follow-up
@@ -68,14 +80,30 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
 UPSTREAM_ARTIFACT_REPACKAGE_PATHS = {
     'macosx64-nightly': ["target.dmg"],
     'macosx64-nightly-l10n': ["target.dmg"],
+    'win64-nightly': ["target.zip"],
+    'win64-nightly-l10n': ["target.zip"],
+    'win32-nightly': ["target.zip"],
+    'win32-nightly-l10n': ["target.zip"],
 }
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
 # need to be transfered to S3, please be aware you also need to follow-up
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_SIGNED_REPACKAGE_PATHS = {
-    'macosx64-nightly': ["target.complete.mar"],
-    'macosx64-nightly-l10n': ["target.complete.mar"],
+    'macosx64-nightly': ['target.complete.mar'],
+    'macosx64-nightly-l10n': ['target.complete.mar'],
+    'win64-nightly': ['target.complete.mar', 'target.installer.exe'],
+    'win64-nightly-l10n': ['target.complete.mar', 'target.installer.exe'],
+    'win32-nightly': [
+        'target.complete.mar',
+        'target.installer.exe',
+        'target.installer-stub.exe'
+    ],
+    'win32-nightly-l10n': [
+        'target.complete.mar',
+        'target.installer.exe',
+        'target.installer-stub.exe'
+    ],
 }
 
 # Voluptuous uses marker objects as dictionary *keys*, but they are not
@@ -167,7 +195,7 @@ def make_task_description(config, jobs):
                                   }
         dependencies.update(repackage_dependencies)
 
-	attributes = copy_attributes_from_dependent_job(dep_job)
+        attributes = copy_attributes_from_dependent_job(dep_job)
         if job.get('locale'):
             attributes['locale'] = job['locale']
 
