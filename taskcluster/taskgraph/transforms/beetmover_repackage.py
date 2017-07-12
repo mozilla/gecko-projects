@@ -79,17 +79,32 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
     ],
     'win32-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
 }
+
+# Until bug 1331141 is fixed, if you are adding any new artifacts here that
+# need to be transfered to S3, please be aware you also need to follow-up
+# with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
+# See example in bug 1348286
+UPSTREAM_ARTIFACT_SIGNED_PATHS = {
+    'macosx64-nightly': [],
+    'macosx64-nightly-l10n': [],
+    'win64-nightly': ['target.zip'],
+    'win64-nightly-l10n': ['target.zip'],
+    'win32-nightly': ['target.zip'],
+    'win32-nightly-l10n': ['target.zip'],
+}
+
+
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
 # need to be transfered to S3, please be aware you also need to follow-up
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_REPACKAGE_PATHS = {
-    'macosx64-nightly': ["target.dmg"],
-    'macosx64-nightly-l10n': ["target.dmg"],
-    'win64-nightly': ["target.zip"],
-    'win64-nightly-l10n': ["target.zip"],
-    'win32-nightly': ["target.zip"],
-    'win32-nightly-l10n': ["target.zip"],
+    'macosx64-nightly': ['target.dmg'],
+    'macosx64-nightly-l10n': ['target.dmg'],
+    'win64-nightly': [],
+    'win64-nightly-l10n': [],
+    'win32-nightly': [],
+    'win32-nightly-l10n': [],
 }
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
 # need to be transfered to S3, please be aware you also need to follow-up
@@ -224,11 +239,12 @@ def make_task_description(config, jobs):
         yield task
 
 
-def generate_upstream_artifacts(build_task_ref, repackage_task_ref,
-                                repackage_signing_task_ref, platform,
-                                locale=None):
+def generate_upstream_artifacts(build_task_ref, build_signing_task_ref,
+                                repackage_task_ref, repackage_signing_task_ref,
+                                platform, locale=None):
 
     build_mapping = UPSTREAM_ARTIFACT_UNSIGNED_PATHS
+    build_signing_mapping = UPSTREAM_ARTIFACT_SIGNED_PATHS
     repackage_mapping = UPSTREAM_ARTIFACT_REPACKAGE_PATHS
     repackage_signing_mapping = UPSTREAM_ARTIFACT_SIGNED_REPACKAGE_PATHS
 
@@ -242,6 +258,12 @@ def generate_upstream_artifacts(build_task_ref, repackage_task_ref,
         "taskType": "build",
         "paths": ["{}/{}".format(artifact_prefix, p)
                   for p in build_mapping[platform]],
+        "locale": locale or "en-US",
+    }, {
+        "taskId": {"task-reference": build_signing_task_ref},
+        "taskType": "build-signing",
+        "paths": ["{}/{}".format(artifact_prefix, p)
+                  for p in build_signing_mapping[platform]],
         "locale": locale or "en-US",
     }, {
         "taskId": {"task-reference": repackage_task_ref},
@@ -280,6 +302,7 @@ def make_task_worker(config, jobs):
         locale = job["attributes"].get("locale")
         platform = job["attributes"]["build_platform"]
         build_task = None
+        build_signing_task = None
         repackage_task = None
         repackage_signing_task = None
         for dependency in job["dependencies"].keys():
@@ -288,15 +311,17 @@ def make_task_worker(config, jobs):
             elif 'repackage' in dependency:
                 repackage_task = dependency
             elif 'signing' in dependency:
-                pass
+                # catches build-signing and nightly-l10n-signing
+                build_signing_task = dependency
             else:
                 build_task = "build"
 
         build_task_ref = "<" + str(build_task) + ">"
+        build_signing_task_ref = "<" + str(build_signing_task) + ">"
         repackage_task_ref = "<" + str(repackage_task) + ">"
         repackage_signing_task_ref = "<" + str(repackage_signing_task) + ">"
         upstream_artifacts = generate_upstream_artifacts(
-            build_task_ref, repackage_task_ref,
+            build_task_ref, build_signing_task_ref, repackage_task_ref,
             repackage_signing_task_ref, platform, locale
         )
 
