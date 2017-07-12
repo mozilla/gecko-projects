@@ -261,7 +261,7 @@ def generate_upstream_artifacts(build_task_ref, build_signing_task_ref,
         "locale": locale or "en-US",
     }, {
         "taskId": {"task-reference": build_signing_task_ref},
-        "taskType": "build-signing",
+        "taskType": "signing",
         "paths": ["{}/{}".format(artifact_prefix, p)
                   for p in build_signing_mapping[platform]],
         "locale": locale or "en-US",
