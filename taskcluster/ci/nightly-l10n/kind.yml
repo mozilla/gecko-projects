@@ -32,6 +32,7 @@ job-template:
    chunks:
       by-build-platform:
          macosx64-nightly: 8
+         win.*: 10
          default: 6
    run-on-projects: ['mozilla-central', 'mozilla-beta', 'date']
    ignore-locales:
@@ -123,15 +124,8 @@ job-template:
             macosx64-nightly:
                - single_locale/tc_macosx64.py
                - taskcluster_nightly.py
-            win64-nightly:
-               - single_locale/tc_win64.py
-               - taskcluster_nightly.py
-            win32-nightly:
-               - single_locale/tc_win32.py
-               - taskcluster_nightly.py
-            win64-nightly:
-               - single_locale/tc_win64.py
-               - taskcluster_nightly.py
+            win32-nightly: []
+            win64-nightly: []
             android-api-15-nightly:
                - taskcluster_nightly.py
                - single_locale/{project}_android-api-15.py
@@ -155,10 +149,14 @@ job-template:
                - environment-config=single_locale/production.py
                - branch-config=single_locale/{project}.py
                - platform-config=single_locale/win32.py
+               - config=single_locale/tc_win32.py
+               - config=taskcluster_nightly.py
             win64-nightly:
                - environment-config=single_locale/production.py
                - branch-config=single_locale/{project}.py
                - platform-config=single_locale/win64.py
+               - config=single_locale/tc_win64.py
+               - config=taskcluster_nightly.py
             default: [ ]
       actions:
          by-build-platform:
