@@ -13,6 +13,8 @@ from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
+_TC_ARTIFACT_LOCATION = 'https://queue.taskcluster.net/v1/task/{task_id}/artifacts/public/build/{postfix}'
+
 transforms = TransformSequence()
 
 # Voluptuous uses marker objects as dictionary *keys*, but they are not
@@ -113,90 +115,38 @@ def make_job_description(config, jobs):
         attributes = copy_attributes_from_dependent_job(dep_job)
         attributes['repackage_type'] = 'repackage'
 
+        locale = None
         if job.get('locale'):
-            attributes['locale'] = job['locale']
+            locale = job['locale']
+            attributes['locale'] = locale
 
         level = config.params['level']
 
-        task_env = {}
-        locale_output_path = ""
-        mar_prefix = 'https://queue.taskcluster.net/v1/task/' + \
-            '{}/artifacts/public/build/host/bin/'.format(build_task_ref)
-        if attributes['build_platform'].startswith('macosx'):
-            if job.get('locale'):
-                input_string = 'https://queue.taskcluster.net/v1/task/' + \
-                    '{}/artifacts/public/build/{}/target.tar.gz'
-                input_string = input_string.format(signing_task_ref, job['locale'])
-                locale_output_path = "{}/".format(job['locale'])
-            else:
-                input_string = 'https://queue.taskcluster.net/v1/task/' + \
-                    '{}/artifacts/public/build/target.tar.gz'.format(signing_task_ref)
-            task_env.update(
-                SIGNED_INPUT={'task-reference': input_string},
-                UNSIGNED_MAR={'task-reference': "{}mar".format(mar_prefix)},
-            )
-            mozharness_config = ['repackage/osx_signed.py']
-            output_files = [{
-                'type': 'file',
-                'path': '/home/worker/workspace/build/artifacts/target.dmg',
-                'name': 'public/build/{}target.dmg'.format(locale_output_path),
-            }, {
-                'type': 'file',
-                'path': '/home/worker/workspace/build/artifacts/target.complete.mar',
-                'name': 'public/build/{}target.complete.mar'.format(locale_output_path),
-            }]
-        elif attributes['build_platform'].startswith('win'):
-            if job.get('locale'):
-                signed_prefix = 'https://queue.taskcluster.net/v1/task/' + \
-                    '{}/artifacts/public/build/{}/'.format(signing_task_ref, job['locale'])
-                locale_output_path = "{}/".format(job['locale'])
-            else:
-                signed_prefix = 'https://queue.taskcluster.net/v1/task/' + \
-                    '{}/artifacts/public/build/'.format(signing_task_ref)
-            task_env.update(
-                SIGNED_ZIP={'task-reference': "{}target.zip".format(signed_prefix)},
-                SIGNED_SETUP={'task-reference': "{}setup.exe".format(signed_prefix)},
-                UNSIGNED_MAR={'task-reference': "{}mar.exe".format(mar_prefix)},
-                NO_MAGIC_MH_BUILD_ARGS='1',  # XXXCallek make mozharness using more generic
-            )
-            mozharness_config = ['repackage/win_signed.py']
-            output_files = [{
-                'type': 'file',
-                'path': 'public/build/target.installer.exe',
-                'name': 'public/build/{}target.installer.exe'.format(locale_output_path),
-            }, {
-                'type': 'file',
-                'path': 'public/build/target.complete.mar',
-                'name': 'public/build/{}target.complete.mar'.format(locale_output_path),
-            }]
-
+        build_platform = attributes['build_platform']
         run = {
             'using': 'mozharness',
             'script': 'mozharness/scripts/repackage.py',
-            'config': mozharness_config,
+            'config': _generate_task_mozharness_config(build_platform),
             'job-script': 'taskcluster/scripts/builder/repackage.sh',
             'actions': ['download_input', 'setup', 'repackage'],
             'extra-workspace-cache-key': 'repackage',
         }
 
-        if attributes["build_platform"].startswith('win'):
-            worker = {
-                'max-run-time': 7200,
-                'env': task_env,
-                'artifacts': output_files,
-                'chain-of-trust': True,
-            }
+        worker = {
+            'env': _generate_task_env(build_platform, build_task_ref, signing_task_ref, locale=locale),
+            'artifacts': _generate_task_output_files(build_platform, locale=locale),
+            'chain-of-trust': True,
+            'max-run-time': 7200 if build_platform.startswith('win') else 3600,
+        }
+
+        if build_platform.startswith('win'):
             worker_type = 'aws-provisioner-v1/gecko-%s-b-win2012' % level
-        else:
-            worker = {
-                'docker-image': {"in-tree": "desktop-build"},
-                'artifacts': output_files,
-                'env': task_env,
-                'chain-of-trust': True,
-                'max-run-time': 3600
-            }
-            run["tooltool-downloads"] = 'internal'
+        elif build_platform.startswith('macosx'):
             worker_type = 'aws-provisioner-v1/gecko-%s-b-macosx64' % level
+
+            run['tooltool-downloads'] = 'internal'
+            worker['docker-image'] = {"in-tree": "desktop-build"},
+
             cot = job.setdefault('extra', {}).setdefault('chainOfTrust', {})
             cot.setdefault('inputs', {})['docker-image'] = {"task-reference": "<docker-image>"}
 
@@ -215,3 +165,83 @@ def make_job_description(config, jobs):
             'run': run,
         }
         yield task
+
+
+def _generate_task_mozharness_config(build_platform):
+    if build_platform.startswith('macosx'):
+        return ['repackage/osx_signed.py']
+    elif build_platform.startswith('win'):
+        return ['repackage/win32_signed.py'] if '32' in build_platform \
+            else ['repackage/win64_signed.py']
+    else:
+        raise NotImplemented('Unsupported build_platform: "{}"'.format(build_platform))
+
+
+def _generate_task_env(build_platform, build_task_ref, signing_task_ref, locale=None):
+    mar_prefix = _generate_taskcluster_prefix(build_task_ref, postfix='host/bin/', locale=None)
+    signed_prefix = _generate_taskcluster_prefix(signing_task_ref, locale=locale)
+
+    if build_platform.startswith('macosx'):
+        return {
+            'SIGNED_INPUT': {'task-reference': '{}target.tar.gz'.format(signed_prefix)},
+            'UNSIGNED_MAR': {'task-reference': '{}mar'.format(mar_prefix)},
+        }
+    elif build_platform.startswith('win'):
+        task_env = {
+            'SIGNED_ZIP': {'task-reference': '{}target.zip'.format(signed_prefix)},
+            'SIGNED_SETUP': {'task-reference': '{}setup.exe'.format(signed_prefix)},
+            'UNSIGNED_MAR': {'task-reference': '{}mar.exe'.format(mar_prefix)},
+            'NO_MAGIC_MH_BUILD_ARGS': '1',  # XXXCallek make mozharness using more generic
+        }
+
+        # Stub installer is only generated on win32
+        if '32' in build_platform:
+            build_prefix = _generate_taskcluster_prefix(build_task_ref, locale=locale)
+            task_env['SIGNED_SETUP_STUB'] = {'task-reference': '{}setup-stub.exe'.format(build_prefix)}
+        return task_env
+
+    else:
+        raise NotImplemented('Unsupported build_platform: "{}"'.format(build_platform))
+
+
+def _generate_taskcluster_prefix(task_id, postfix='', locale=None):
+    if locale:
+        postfix = '{}/{}'.format(locale, postfix)
+
+    return _TC_ARTIFACT_LOCATION.format(task_id=task_id, postfix=postfix)
+
+
+def _generate_task_output_files(build_platform, locale=None):
+    locale_output_path = '{}/'.format(locale) if locale else ''
+    if build_platform.startswith('macosx'):
+        return [{
+            'type': 'file',
+            'path': '/home/worker/workspace/build/artifacts/target.dmg',
+            'name': 'public/build/{}target.dmg'.format(locale_output_path),
+        }, {
+            'type': 'file',
+            'path': '/home/worker/workspace/build/artifacts/target.complete.mar',
+            'name': 'public/build/{}target.complete.mar'.format(locale_output_path),
+        }]
+    elif build_platform.startswith('win'):
+        output_files = [{
+            'type': 'file',
+            'path': 'public/build/target.installer.exe',
+            'name': 'public/build/{}target.installer.exe'.format(locale_output_path),
+        }, {
+            'type': 'file',
+            'path': 'public/build/target.complete.mar',
+            'name': 'public/build/{}target.complete.mar'.format(locale_output_path),
+        }]
+
+        # Stub installer is only generated on win32
+        if '32' in build_platform:
+            output_files.append({
+                'type': 'file',
+                'path': 'public/build/setup-stub.exe',
+                'name': 'public/build/{}setup-stub.exe'.format(locale_output_path),
+            })
+
+        return output_files
+    else:
+        raise NotImplemented('Unsupported build_platform: "{}"'.format(build_platform))
