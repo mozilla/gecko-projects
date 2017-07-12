@@ -238,8 +238,8 @@ def _generate_task_output_files(build_platform, locale=None):
         if '32' in build_platform:
             output_files.append({
                 'type': 'file',
-                'path': 'public/build/setup-stub.exe',
-                'name': 'public/build/{}setup-stub.exe'.format(locale_output_path),
+                'path': 'public/build/target.stub-installer.exe',
+                'name': 'public/build/{}target.stub-installer.exe'.format(locale_output_path),
             })
 
         return output_files
