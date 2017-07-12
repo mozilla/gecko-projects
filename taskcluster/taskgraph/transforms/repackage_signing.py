@@ -89,6 +89,18 @@ def make_repackage_signing_description(config, jobs):
             })
             scopes.append("project:releng:signing:format:sha2signcode")
 
+            # Stub installer is only generated on win32
+            if '32' in dep_job.attributes.get('build_platform'):
+                upstream_artifacts.append({
+                    "taskId": {"task-reference": "<repackage>"},
+                    "taskType": "repackage",
+                    "paths": [
+                        "public/build/{}target.stub-installer.exe".format(locale_str),
+                    ],
+                    "formats": ["sha2signcodestub"]
+                })
+                scopes.append("project:releng:signing:format:sha2signcodestub")
+
         task = {
             'label': label,
             'description': "Repackage signing {} ".format(
