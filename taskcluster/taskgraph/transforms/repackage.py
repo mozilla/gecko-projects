@@ -196,8 +196,7 @@ def _generate_task_env(build_platform, build_task_ref, signing_task_ref, locale=
 
         # Stub installer is only generated on win32
         if '32' in build_platform:
-            build_prefix = _generate_taskcluster_prefix(build_task_ref, locale=locale)
-            task_env['SIGNED_SETUP_STUB'] = {'task-reference': '{}setup-stub.exe'.format(build_prefix)}
+            task_env['SIGNED_SETUP_STUB'] = {'task-reference': '{}setup-stub.exe'.format(signed_prefix)}
         return task_env
 
     else:
