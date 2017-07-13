@@ -916,7 +916,7 @@ nsHttpConnectionMgr::DispatchPendingQ(nsTArray<RefPtr<nsHttpConnectionMgr::Pendi
     // if considerAll == true then try and dispatch all items.
     for (uint32_t i = 0; i < pendingQ.Length(); ) {
         pendingTransInfo = pendingQ[i];
-        LOG(("nsHttpConnectionMgr::ProcessPendingQForEntry "
+        LOG(("nsHttpConnectionMgr::DispatchPendingQ "
              "[trans=%p, halfOpen=%p, activeConn=%p]\n",
              pendingTransInfo->mTransaction.get(),
              pendingTransInfo->mHalfOpen.get(),
@@ -932,7 +932,7 @@ nsHttpConnectionMgr::DispatchPendingQ(nsTArray<RefPtr<nsHttpConnectionMgr::Pendi
             MOZ_ASSERT(!pendingTransInfo->mActiveConn);
             RefPtr<nsHalfOpenSocket> halfOpen =
                 do_QueryReferent(pendingTransInfo->mHalfOpen);
-            LOG(("nsHttpConnectionMgr::ProcessPendingQForEntry "
+            LOG(("nsHttpConnectionMgr::DispatchPendingQ "
                  "[trans=%p, halfOpen=%p]\n",
                  pendingTransInfo->mTransaction.get(), halfOpen.get()));
             if (halfOpen) {
@@ -945,7 +945,7 @@ nsHttpConnectionMgr::DispatchPendingQ(nsTArray<RefPtr<nsHttpConnectionMgr::Pendi
             MOZ_ASSERT(!pendingTransInfo->mHalfOpen);
             RefPtr<nsHttpConnection> activeConn =
                 do_QueryReferent(pendingTransInfo->mActiveConn);
-            LOG(("nsHttpConnectionMgr::ProcessPendingQForEntry "
+            LOG(("nsHttpConnectionMgr::DispatchPendingQ "
                  "[trans=%p, activeConn=%p]\n",
                  pendingTransInfo->mTransaction.get(), activeConn.get()));
             // Check if this transaction claimed a connection that is still
@@ -1028,6 +1028,20 @@ nsHttpConnectionMgr::ProcessPendingQForEntry(nsConnectionEntry *ent, bool consid
          ent->mConnInfo->HashKey().get(), ent, ent->mActiveConns.Length(),
          ent->mIdleConns.Length(), ent->mUrgentStartQ.Length(),
          ent->PendingQLength()));
+
+    if (LOG_ENABLED()) {
+      LOG(("urgent queue ["));
+      for (auto info : ent->mUrgentStartQ) {
+        LOG(("  %p", info->mTransaction.get()));
+      }
+      for (auto it = ent->mPendingTransactionTable.Iter(); !it.Done(); it.Next()) {
+        LOG(("] window id = %" PRIx64 " queue [", it.Key()));
+        for (auto info : *it.UserData()) {
+          LOG(("  %p", info->mTransaction.get()));
+        }
+      }
+      LOG(("]"));
+    }
 
     if (!ent->mUrgentStartQ.Length() && !ent->PendingQLength()) {
         return false;
@@ -2264,7 +2278,12 @@ void nsHttpConnectionMgr::OnMsgUpdateClassOfServiceOnTransaction(int32_t arg, AR
     uint32_t cos = static_cast<uint32_t>(arg);
     nsHttpTransaction *trans = static_cast<nsHttpTransaction *>(param);
 
+    uint32_t previous = trans->ClassOfService();
     trans->SetClassOfService(cos);
+
+    if ((previous ^ cos) & (NS_HTTP_LOAD_AS_BLOCKING | NS_HTTP_LOAD_UNBLOCKED)) {
+        Unused << RescheduleTransaction(trans, trans->Priority());
+    }
 }
 
 void
@@ -2624,7 +2643,6 @@ void
 nsHttpConnectionMgr::OnMsgReclaimConnection(int32_t, ARefBase *param)
 {
     MOZ_ASSERT(OnSocketThread(), "not on socket thread");
-    LOG(("nsHttpConnectionMgr::OnMsgReclaimConnection [conn=%p]\n", param));
 
     nsHttpConnection *conn = static_cast<nsHttpConnection *>(param);
 
@@ -2649,6 +2667,8 @@ nsHttpConnectionMgr::OnMsgReclaimConnection(int32_t, ARefBase *param)
 
     MOZ_ASSERT(ent);
     RefPtr<nsHttpConnectionInfo> ci(ent->mConnInfo);
+
+    LOG(("nsHttpConnectionMgr::OnMsgReclaimConnection [ent=%p conn=%p]\n", ent, conn));
 
     // If the connection is in the active list, remove that entry
     // and the reference held by the mActiveConns list.
@@ -2784,6 +2804,8 @@ nsHttpConnectionMgr::OnMsgUpdateParam(int32_t inParam, ARefBase *)
 // nsHttpConnectionMgr::nsConnectionEntry
 nsHttpConnectionMgr::nsConnectionEntry::~nsConnectionEntry()
 {
+    LOG(("nsConnectionEntry::~nsConnectionEntry this=%p", this));
+
     MOZ_DIAGNOSTIC_ASSERT(!mIdleConns.Length());
     MOZ_DIAGNOSTIC_ASSERT(!mActiveConns.Length());
     MOZ_DIAGNOSTIC_ASSERT(!mHalfOpens.Length());
@@ -4261,17 +4283,14 @@ nsHalfOpenSocket::SetFastOpenConnected(nsresult aError, bool aWillRetry)
         mStreamOut = nullptr;
         mStreamIn = nullptr;
 
-        // If backup transport ha already started put this HalfOpen back to
-        // mEnt list.
-        if (mBackupTransport) {
-            mEnt->mHalfOpens.AppendElement(this);
-            gHttpHandler->ConnMgr()->mNumHalfOpenConns++;
-        }
+        Abandon();
     }
 
     mFastOpenInProgress = false;
     mConnectionNegotiatingFastOpen = nullptr;
-    mEnt->mDoNotDestroy = false;
+    if (mEnt) {
+        mEnt->mDoNotDestroy = false;
+    }
 }
 
 void
@@ -4734,6 +4753,9 @@ nsConnectionEntry::nsConnectionEntry(nsHttpConnectionInfo *ci)
 {
     MOZ_COUNT_CTOR(nsConnectionEntry);
     mUseFastOpen = gHttpHandler->UseFastOpen();
+
+    LOG(("nsConnectionEntry::nsConnectionEntry this=%p key=%s",
+         this, ci->HashKey().get()));
 }
 
 bool
@@ -4930,8 +4952,8 @@ nsConnectionEntry::AppendPendingQForFocusedWindow(
     infoArray->RemoveElementsAt(0, countToAppend);
 
     LOG(("nsConnectionEntry::AppendPendingQForFocusedWindow [ci=%s], "
-         "pendingQ count=%" PRIuSIZE " for focused window (id=%" PRIu64 ")\n",
-         mConnInfo->HashKey().get(), result.Length(),
+         "pendingQ count=%" PRIuSIZE " window.count=%" PRIuSIZE " for focused window (id=%" PRIu64 ")\n",
+         mConnInfo->HashKey().get(), result.Length(), infoArray->Length(),
          windowId));
 }
 
