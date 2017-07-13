@@ -253,31 +253,31 @@ def generate_upstream_artifacts(build_task_ref, build_signing_task_ref,
         artifact_prefix = 'public/build/{}'.format(locale)
         platform = "{}-l10n".format(platform)
 
-    upstream_artifacts = [{
-        "taskId": {"task-reference": build_task_ref},
-        "taskType": "build",
-        "paths": ["{}/{}".format(artifact_prefix, p)
-                  for p in build_mapping[platform]],
-        "locale": locale or "en-US",
-    }, {
-        "taskId": {"task-reference": build_signing_task_ref},
-        "taskType": "signing",
-        "paths": ["{}/{}".format(artifact_prefix, p)
-                  for p in build_signing_mapping[platform]],
-        "locale": locale or "en-US",
-    }, {
-        "taskId": {"task-reference": repackage_task_ref},
-        "taskType": "repackage",
-        "paths": ["{}/{}".format(artifact_prefix, p)
-                  for p in repackage_mapping[platform]],
-        "locale": locale or "en-US",
-    }, {
-        "taskId": {"task-reference": repackage_signing_task_ref},
-        "taskType": "repackage",
-        "paths": ["{}/{}".format(artifact_prefix, p)
-                  for p in repackage_signing_mapping[platform]],
-        "locale": locale or "en-US",
-    }]
+    upstream_artifacts = []
+
+    task_refs = [
+        build_task_ref,
+        build_signing_task_ref,
+        repackage_task_ref,
+        repackage_signing_task_ref
+    ]
+    tasktypes = ['build', 'signing', 'repackage', 'repackage']
+    mapping = [
+        build_mapping,
+        build_signing_mapping,
+        repackage_mapping,
+        repackage_signing_mapping
+    ]
+
+    for ref, tasktype, mapping in zip(task_refs, tasktypes, mapping):
+        if platform in mapping:
+            upstream_artifacts.append({
+                "taskId": {"task-reference": ref},
+                "taskType": tasktype,
+                "paths": ["{}/{}".format(artifact_prefix, p)
+                          for p in mapping[platform]],
+                "locale": locale or "en-US",
+            })
 
     return upstream_artifacts
 
