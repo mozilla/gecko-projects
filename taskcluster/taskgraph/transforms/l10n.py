@@ -389,6 +389,7 @@ def make_job_description(config, jobs):
             job_description['worker'] = {
                 'os': 'windows',
                 'max-run-time': 7200,
+                'chain-of-trust': True,
             }
         else:
             job_description['worker'] = {
