@@ -16,7 +16,7 @@ mapping:
       s3_key: {{ s3_prefix }}{{ platform }}/{{ locale }}/Firefox Setup {{ version }}.exe
     {% if "esr" not in version %}
     stub_installer:
-      artifact: {{ artifact_base_url }}/target.installer-stub.exe
+      artifact: {{ artifact_base_url }}/target.stub-installer.exe
       s3_key: {{ s3_prefix }}{{ platform }}/{{ locale }}/Firefox Setup Stub {{ version }}.exe
     {% endif %}
   {% endif %}
