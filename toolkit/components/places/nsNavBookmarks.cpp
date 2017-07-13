@@ -94,7 +94,7 @@ public:
     nsCOMPtr<mozIStorageRow> row;
     while (NS_SUCCEEDED(aResultSet->GetNextRow(getter_AddRefs(row))) && row) {
       // Skip tags, for the use-cases of this async getter they are useless.
-      int64_t grandParentId, tagsFolderId;
+      int64_t grandParentId = -1, tagsFolderId = -1;
       nsresult rv = row->GetInt64(5, &grandParentId);
       NS_ENSURE_SUCCESS(rv, rv);
       rv = mBookmarksSvc->GetTagsFolder(&tagsFolderId);
@@ -555,9 +555,7 @@ nsNavBookmarks::InsertBookmarkInDB(int64_t aPlaceId,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  int64_t tagsRootId;
-  rv = GetTagsFolder(&tagsRootId);
-  NS_ENSURE_SUCCESS(rv, rv);
+  int64_t tagsRootId = TagsRootId();
   bool isTagging = aGrandParentId == tagsRootId;
   if (isTagging) {
     // If we're tagging a bookmark, increment the change counter for all
@@ -651,9 +649,7 @@ nsNavBookmarks::InsertBookmark(int64_t aFolder,
   NS_ENSURE_SUCCESS(rv, rv);
 
   // If not a tag, recalculate frecency for this entry, since it changed.
-  int64_t tagsRootId;
-  rv = GetTagsFolder(&tagsRootId);
-  NS_ENSURE_SUCCESS(rv, rv);
+  int64_t tagsRootId = TagsRootId();
   if (grandParentId != tagsRootId) {
     rv = history->UpdateFrecency(placeId);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -715,9 +711,7 @@ nsNavBookmarks::RemoveItem(int64_t aItemId, uint16_t aSource)
   mozStorageTransaction transaction(mDB->MainConn(), false);
 
   // First, if not a tag, remove item annotations.
-  int64_t tagsRootId;
-  rv = GetTagsFolder(&tagsRootId);
-  NS_ENSURE_SUCCESS(rv, rv);
+  int64_t tagsRootId = TagsRootId();
   bool isUntagging = bookmark.grandParentId == tagsRootId;
   if (bookmark.parentId != tagsRootId && !isUntagging) {
     nsAnnotationService* annosvc = nsAnnotationService::GetAnnotationService();
@@ -913,9 +907,7 @@ nsNavBookmarks::CreateContainerWithID(int64_t aItemId,
   rv = transaction.Commit();
   NS_ENSURE_SUCCESS(rv, rv);
 
-  int64_t tagsRootId;
-  rv = GetTagsFolder(&tagsRootId);
-  NS_ENSURE_SUCCESS(rv, rv);
+  int64_t tagsRootId = TagsRootId();
 
   NOTIFY_BOOKMARKS_OBSERVERS(mCanNotify, mCacheObservers, mObservers,
                              SKIP_TAGS(aParent == tagsRootId),
@@ -1131,7 +1123,7 @@ nsNavBookmarks::GetDescendantChildren(int64_t aFolderId,
     // kGetInfoIndex_* order, and additionally contains columns for position,
     // item_child, and folder_child from moz_bookmarks.
     nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
-      "SELECT h.id, h.url, IFNULL(b.title, h.title), h.rev_host, h.visit_count, "
+      "SELECT h.id, h.url, b.title, h.rev_host, h.visit_count, "
              "h.last_visit_date, null, b.id, b.dateAdded, b.lastModified, "
              "b.parent, null, h.frecency, h.hidden, h.guid, null, null, null, "
              "b.guid, b.position, b.type, b.fk, b.syncStatus "
@@ -1203,7 +1195,7 @@ nsNavBookmarks::RemoveFolderChildren(int64_t aFolderId, uint16_t aSource)
   AUTO_PROFILER_LABEL("nsNavBookmarks::RemoveFolderChilder", OTHER);
 
   NS_ENSURE_ARG_MIN(aFolderId, 1);
-  int64_t rootId;
+  int64_t rootId = -1;
   nsresult rv = GetPlacesRoot(&rootId);
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_ARG(aFolderId != rootId);
@@ -1267,9 +1259,7 @@ nsNavBookmarks::RemoveFolderChildren(int64_t aFolderId, uint16_t aSource)
                            RoundedPRNow());
   NS_ENSURE_SUCCESS(rv, rv);
 
-  int64_t tagsRootId;
-  rv = GetTagsFolder(&tagsRootId);
-  NS_ENSURE_SUCCESS(rv, rv);
+  int64_t tagsRootId = TagsRootId();
 
   if (syncChangeDelta) {
     nsTArray<TombstoneData> tombstones(folderChildrenArray.Length());
@@ -1508,9 +1498,7 @@ nsNavBookmarks::MoveItem(int64_t aItemId,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  int64_t tagsRootId;
-  rv = GetTagsFolder(&tagsRootId);
-  NS_ENSURE_SUCCESS(rv, rv);
+  int64_t tagsRootId = TagsRootId();
   bool isChangingTagFolder = bookmark.parentId == tagsRootId;
   if (isChangingTagFolder) {
     // Moving a tag folder out of the tags root untags all its bookmarks. This
@@ -1666,9 +1654,7 @@ nsNavBookmarks::SetItemDateAdded(int64_t aItemId, PRTime aDateAdded,
   BookmarkData bookmark;
   nsresult rv = FetchItemInfo(aItemId, bookmark);
   NS_ENSURE_SUCCESS(rv, rv);
-  int64_t tagsRootId;
-  rv = GetTagsFolder(&tagsRootId);
-  NS_ENSURE_SUCCESS(rv, rv);
+  int64_t tagsRootId = TagsRootId();
   bool isTagging = bookmark.grandParentId == tagsRootId;
   int64_t syncChangeDelta = DetermineSyncChangeDelta(aSource);
 
@@ -1739,9 +1725,7 @@ nsNavBookmarks::SetItemLastModified(int64_t aItemId, PRTime aLastModified,
   nsresult rv = FetchItemInfo(aItemId, bookmark);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  int64_t tagsRootId;
-  rv = GetTagsFolder(&tagsRootId);
-  NS_ENSURE_SUCCESS(rv, rv);
+  int64_t tagsRootId = TagsRootId();
   bool isTagging = bookmark.grandParentId == tagsRootId;
   int64_t syncChangeDelta = DetermineSyncChangeDelta(aSource);
 
@@ -2011,9 +1995,7 @@ nsNavBookmarks::SetItemTitle(int64_t aItemId, const nsACString& aTitle,
   nsresult rv = FetchItemInfo(aItemId, bookmark);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  int64_t tagsRootId;
-  rv = GetTagsFolder(&tagsRootId);
-  NS_ENSURE_SUCCESS(rv, rv);
+  int64_t tagsRootId = TagsRootId();
   bool isChangingTagFolder = bookmark.parentId == tagsRootId;
   int64_t syncChangeDelta = DetermineSyncChangeDelta(aSource);
 
@@ -2187,7 +2169,7 @@ nsNavBookmarks::QueryFolderChildren(
   // by mDBGetURLPageInfo, and additionally contains columns for position,
   // item_child, and folder_child from moz_bookmarks.
   nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
-    "SELECT h.id, h.url, IFNULL(b.title, h.title), h.rev_host, h.visit_count, "
+    "SELECT h.id, h.url, b.title, h.rev_host, h.visit_count, "
            "h.last_visit_date, null, b.id, b.dateAdded, b.lastModified, "
            "b.parent, null, h.frecency, h.hidden, h.guid, null, null, null, "
            "b.guid, b.position, b.type, b.fk "
@@ -2266,8 +2248,13 @@ nsNavBookmarks::ProcessFolderNodeRow(
     }
 
     nsAutoCString title;
-    rv = aRow->GetUTF8String(nsNavHistory::kGetInfoIndex_Title, title);
+    bool isNull;
+    rv = aRow->GetIsNull(nsNavHistory::kGetInfoIndex_Title, &isNull);
     NS_ENSURE_SUCCESS(rv, rv);
+    if (!isNull) {
+      rv = aRow->GetUTF8String(nsNavHistory::kGetInfoIndex_Title, title);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
 
     node = new nsNavHistoryFolderResultNode(title, aOptions, id);
 
@@ -2324,7 +2311,7 @@ nsNavBookmarks::QueryFolderChildrenAsync(
   // by mDBGetURLPageInfo, and additionally contains columns for position,
   // item_child, and folder_child from moz_bookmarks.
   nsCOMPtr<mozIStorageAsyncStatement> stmt = mDB->GetAsyncStatement(
-    "SELECT h.id, h.url, IFNULL(b.title, h.title), h.rev_host, h.visit_count, "
+    "SELECT h.id, h.url, b.title, h.rev_host, h.visit_count, "
            "h.last_visit_date, null, b.id, b.dateAdded, b.lastModified, "
            "b.parent, null, h.frecency, h.hidden, h.guid, null, null, null, "
            "b.guid, b.position, b.type, b.fk "
@@ -2521,9 +2508,7 @@ nsNavBookmarks::ChangeBookmarkURI(int64_t aBookmarkId, nsIURI* aNewURI,
 
   mozStorageTransaction transaction(mDB->MainConn(), false);
 
-  int64_t tagsRootId;
-  rv = GetTagsFolder(&tagsRootId);
-  NS_ENSURE_SUCCESS(rv, rv);
+  int64_t tagsRootId = TagsRootId();
   bool isTagging = bookmark.grandParentId == tagsRootId;
   int64_t syncChangeDelta = DetermineSyncChangeDelta(aSource);
 
@@ -2638,10 +2623,8 @@ nsNavBookmarks::GetBookmarkIdsForURITArray(nsIURI* aURI,
   NS_ENSURE_STATE(stmt);
   mozStorageStatementScoper scoper(stmt);
 
-  int64_t tagsRootId;
-  nsresult rv = GetTagsFolder(&tagsRootId);
-  NS_ENSURE_SUCCESS(rv, rv);
-  rv = URIBinder::Bind(stmt, NS_LITERAL_CSTRING("page_url"), aURI);
+  int64_t tagsRootId = TagsRootId();
+  nsresult rv = URIBinder::Bind(stmt, NS_LITERAL_CSTRING("page_url"), aURI);
   NS_ENSURE_SUCCESS(rv, rv);
   rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("tags_root"), tagsRootId);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2681,9 +2664,7 @@ nsNavBookmarks::GetBookmarksForURI(nsIURI* aURI,
   nsresult rv = URIBinder::Bind(stmt, NS_LITERAL_CSTRING("page_url"), aURI);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  int64_t tagsRootId;
-  rv = GetTagsFolder(&tagsRootId);
-  NS_ENSURE_SUCCESS(rv, rv);
+  int64_t tagsRootId = TagsRootId();
 
   bool more;
   nsAutoString tags;

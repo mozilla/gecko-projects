@@ -46,7 +46,7 @@ to mochitest command.
   * test_grid_container_shorthands.html [65]
   * test_grid_item_shorthands.html [23]
   * test_grid_shorthand_serialization.html [28]
-  * test_value_storage.html `'grid` [21]
+  * test_value_storage.html `'grid` [20]
 * Unsupported values
   * SVG-in-OpenType values not supported servo/servo#15211 bug 1355412
     * test_value_storage.html `context-` [7]
@@ -62,9 +62,6 @@ to mochitest command.
     * test_system_font_serialization.html [3]
   * different serialization for gradient functions in computed value bug 1367274
     * test_computed_style.html `gradient` [13]
-* Unsupported pseudo-elements or anon boxes
-  * :-moz-tree bits bug 1348488
-    * test_selectors.html `:-moz-tree` [10]
 * Unit should be preserved after parsing servo/servo#15346
   * test_units_time.html [1]
 * getComputedStyle style doesn't contain custom properties bug 1336891
