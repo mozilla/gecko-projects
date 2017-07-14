@@ -944,9 +944,20 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
     }
   }
 
-  nsCSSRendering::BeginFrameTreesLocked();
   static_assert(TYPE_MAX < (1 << TYPE_BITS),
                 "Check TYPE_MAX should not overflow");
+}
+
+void
+nsDisplayListBuilder::BeginFrame()
+{
+  nsCSSRendering::BeginFrameTreesLocked();
+}
+
+void
+nsDisplayListBuilder::EndFrame()
+{
+  nsCSSRendering::EndFrameTreesLocked();
 }
 
 void
@@ -1140,8 +1151,6 @@ nsDisplayListBuilder::~nsDisplayListBuilder() {
   NS_ASSERTION(mPresShellStates.Length() == 0,
                "All presshells should have been exited");
   NS_ASSERTION(!mCurrentTableItem, "No table item should be active");
-
-  nsCSSRendering::EndFrameTreesLocked();
 
   for (nsDisplayItem* i : mTemporaryItems) {
     i->Destroy(this);

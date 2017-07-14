@@ -2978,12 +2978,15 @@ nsLayoutUtils::GetLayerTransformForFrame(nsIFrame* aFrame,
   nsDisplayListBuilder builder(root,
                                nsDisplayListBuilderMode::TRANSFORM_COMPUTATION,
                                false/*don't build caret*/);
+  builder.BeginFrame();
   nsDisplayList list;
   nsDisplayTransform* item =
     new (&builder) nsDisplayTransform(&builder, aFrame, &list, nsRect());
 
   *aTransform = item->GetTransform();
   item->~nsDisplayTransform();
+
+  builder.EndFrame();
 
   return true;
 }
@@ -3259,6 +3262,7 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
   nsDisplayListBuilder builder(aFrame,
                                nsDisplayListBuilderMode::EVENT_DELIVERY,
                                false);
+  builder.BeginFrame();
   nsDisplayList list;
 
   if (aFlags & IGNORE_PAINT_SUPPRESSION) {
@@ -3298,6 +3302,7 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
   builder.SetHitTestShouldStopAtFirstOpaque(aFlags & ONLY_VISIBLE);
   list.HitTest(&builder, aRect, &hitTestState, &aOutFrames);
   list.DeleteAll(&builder);
+  builder.EndFrame();
   return NS_OK;
 }
 
@@ -4082,6 +4087,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   nsDisplayListBuilder& builder = *builderPtr;
   nsDisplayList& list = *listPtr;
 
+  builder.BeginFrame();
+
   if (aFlags & PaintFrameFlags::PAINT_IN_TRANSFORM) {
     builder.SetInTransform(true);
   }
@@ -4512,6 +4519,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
       layerManager->Composite();
     }
   }
+
+  builder.EndFrame();
 
 
   // Flush the list so we don't trigger the IsEmpty-on-destruction assertion

@@ -413,6 +413,9 @@ public:
                        bool aRetainingDisplayList = false);
   ~nsDisplayListBuilder();
 
+  void BeginFrame();
+  void EndFrame();
+
   void AddTemporaryItem(nsDisplayItem* aItem)
   {
     mTemporaryItems.AppendElement(aItem);
