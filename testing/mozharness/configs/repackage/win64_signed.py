@@ -24,7 +24,7 @@ repackage_config = [[
 
 config = {
     "input_home": "{abs_work_dir}\\inputs",
-    "output_home": "{base_work_dir}\\public\\build",
+    "output_home": "{base_work_dir}\\public\\build{locale}",
     "src_mozconfig": "browser/config/mozconfigs/{}/repack".format(platform),
 
     "download_config": download_config,

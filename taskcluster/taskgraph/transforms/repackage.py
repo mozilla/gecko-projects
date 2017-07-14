@@ -139,6 +139,10 @@ def make_job_description(config, jobs):
             'max-run-time': 7200 if build_platform.startswith('win') else 3600,
         }
 
+        if locale:
+            # Make sure we specify the locale-specific upload dir
+            worker['env'].extend(LOCALE=locale)
+
         if build_platform.startswith('win'):
             worker_type = 'aws-provisioner-v1/gecko-%s-b-win2012' % level
         elif build_platform.startswith('macosx'):
