@@ -183,6 +183,7 @@ win32-tests-talos:
     - talos-svgr
     - talos-tp5o
     - talos-perf-reftest
+    - talos-xperf
 
 win64-tests-talos:
     - talos-chrome

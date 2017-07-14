@@ -46,15 +46,19 @@ LINUX_WORKER_TYPES = {
 
 # windows / os x worker types keyed by test-platform
 WINDOWS_WORKER_TYPES = {
-    'windows7-32-vm': 'aws-provisioner-v1/gecko-t-win7-32',
     'windows7-32': 'aws-provisioner-v1/gecko-t-win7-32-gpu',
-    'windows7-32-vm-nightly': 'aws-provisioner-v1/gecko-t-win7-32',
+    'windows7-32-pgo': 'aws-provisioner-v1/gecko-t-win7-32-gpu',
     'windows7-32-nightly': 'aws-provisioner-v1/gecko-t-win7-32-gpu',
-    'windows10-64-vm': 'aws-provisioner-v1/gecko-t-win10-64',
-    'windows10-64-vm-nightly': 'aws-provisioner-v1/gecko-t-win10-64',
+    'windows7-32-vm': 'aws-provisioner-v1/gecko-t-win7-32',
+    'windows7-32-vm-pgo': 'aws-provisioner-v1/gecko-t-win7-32-gpu',
+    'windows7-32-vm-nightly': 'aws-provisioner-v1/gecko-t-win7-32',
     'windows10-64': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
+    'windows10-64-pgo': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
     'windows10-64-nightly': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
     'windows10-64-asan': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
+    'windows10-64-vm': 'aws-provisioner-v1/gecko-t-win10-64',
+    'windows10-64-vm-pgo': 'aws-provisioner-v1/gecko-t-win10-64',
+    'windows10-64-vm-nightly': 'aws-provisioner-v1/gecko-t-win10-64',
 }
 
 MACOSX_WORKER_TYPES = {
