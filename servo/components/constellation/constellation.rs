@@ -128,7 +128,7 @@ use style_traits::CSSPixel;
 use style_traits::cursor::Cursor;
 use style_traits::viewport::ViewportConstraints;
 use timer_scheduler::TimerScheduler;
-use webrender_traits;
+use webrender_api;
 use webvr_traits::{WebVREvent, WebVRMsg};
 
 /// The `Constellation` itself. In the servo browser, there is one
@@ -230,7 +230,7 @@ pub struct Constellation<Message, LTF, STF> {
 
     /// A channel for the constellation to send messages to the
     /// Webrender thread.
-    webrender_api_sender: webrender_traits::RenderApiSender,
+    webrender_api_sender: webrender_api::RenderApiSender,
 
     /// The set of all event loops in the browser. We generate a new
     /// event loop for each registered domain name (aka eTLD+1) in
@@ -326,7 +326,7 @@ pub struct InitialConstellationState {
     pub mem_profiler_chan: mem::ProfilerChan,
 
     /// Webrender API.
-    pub webrender_api_sender: webrender_traits::RenderApiSender,
+    pub webrender_api_sender: webrender_api::RenderApiSender,
 
     /// Whether the constellation supports the clipboard.
     /// TODO: this field is not used, remove it?
@@ -918,10 +918,6 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                     .and_then(|pipeline_id| self.pipelines.get(&pipeline_id))
                     .map(|pipeline| pipeline.top_level_browsing_context_id);
                 let _ = resp_chan.send(focus_browsing_context);
-            }
-            FromCompositorMsg::GetPipelineTitle(pipeline_id) => {
-                debug!("constellation got get-pipeline-title message");
-                self.handle_get_pipeline_title_msg(pipeline_id);
             }
             FromCompositorMsg::KeyEvent(ch, key, state, modifiers) => {
                 debug!("constellation got key event message");
@@ -1576,22 +1572,21 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
         };
 
         // Create the new pipeline, attached to the parent and push to pending changes
-        self.add_pending_change(SessionHistoryChange {
-            top_level_browsing_context_id: load_info.info.top_level_browsing_context_id,
-            browsing_context_id: load_info.info.browsing_context_id,
-            new_pipeline_id: load_info.info.new_pipeline_id,
-            load_data: load_data.clone(),
-            replace_instant: replace_instant,
-        });
-
         self.new_pipeline(load_info.info.new_pipeline_id,
                           load_info.info.browsing_context_id,
                           load_info.info.top_level_browsing_context_id,
                           Some((load_info.info.parent_pipeline_id, load_info.info.frame_type)),
                           window_size,
-                          load_data,
+                          load_data.clone(),
                           load_info.sandbox,
                           is_private);
+        self.add_pending_change(SessionHistoryChange {
+            top_level_browsing_context_id: load_info.info.top_level_browsing_context_id,
+            browsing_context_id: load_info.info.browsing_context_id,
+            new_pipeline_id: load_info.info.new_pipeline_id,
+            load_data: load_data,
+            replace_instant: replace_instant,
+        });
     }
 
     fn handle_script_new_iframe(&mut self,
@@ -1792,21 +1787,21 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
                 let new_pipeline_id = PipelineId::new();
                 let sandbox = IFrameSandboxState::IFrameUnsandboxed;
                 let replace_instant = if replace { Some(timestamp) } else { None };
-                self.add_pending_change(SessionHistoryChange {
-                    top_level_browsing_context_id: top_level_id,
-                    browsing_context_id: browsing_context_id,
-                    new_pipeline_id: new_pipeline_id,
-                    load_data: load_data.clone(),
-                    replace_instant: replace_instant,
-                });
                 self.new_pipeline(new_pipeline_id,
                                   browsing_context_id,
                                   top_level_id,
                                   None,
                                   window_size,
-                                  load_data,
+                                  load_data.clone(),
                                   sandbox,
                                   false);
+                self.add_pending_change(SessionHistoryChange {
+                    top_level_browsing_context_id: top_level_id,
+                    browsing_context_id: browsing_context_id,
+                    new_pipeline_id: new_pipeline_id,
+                    load_data: load_data,
+                    replace_instant: replace_instant,
+                });
                 Some(new_pipeline_id)
             }
         }
@@ -1910,16 +1905,6 @@ impl<Message, LTF, STF> Constellation<Message, LTF, STF>
         let result = match self.pipelines.get(&pipeline_id) {
             None => return warn!("Pipeline {} got reload event after closure.", pipeline_id),
             Some(pipeline) => pipeline.event_loop.send(msg),
-        };
-        if let Err(e) = result {
-            self.handle_send_error(pipeline_id, e);
-        }
-    }
-
-    fn handle_get_pipeline_title_msg(&mut self, pipeline_id: PipelineId) {
-        let result = match self.pipelines.get(&pipeline_id) {
-            None => return self.compositor_proxy.send(ToCompositorMsg::ChangePageTitle(pipeline_id, None)),
-            Some(pipeline) => pipeline.event_loop.send(ConstellationControlMsg::GetTitle(pipeline_id)),
         };
         if let Err(e) = result {
             self.handle_send_error(pipeline_id, e);

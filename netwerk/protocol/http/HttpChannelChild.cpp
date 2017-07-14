@@ -25,6 +25,7 @@
 #include "nsCOMPtr.h"
 #include "nsISupportsPrimitives.h"
 #include "nsChannelClassifier.h"
+#include "nsContentPolicyUtils.h"
 #include "nsGlobalWindow.h"
 #include "nsStringStream.h"
 #include "nsHttpChannel.h"
@@ -317,7 +318,11 @@ void
 HttpChannelChild::OnBackgroundChildDestroyed(HttpBackgroundChannelChild* aBgChild)
 {
   LOG(("HttpChannelChild::OnBackgroundChildDestroyed [this=%p]\n", this));
-  MOZ_ASSERT(OnSocketThread());
+  // This function might be called during shutdown phase, so OnSocketThread()
+  // might return false even on STS thread. Use IsOnCurrentThreadInfallible()
+  // to get correct information.
+  MOZ_ASSERT(gSocketTransportService);
+  MOZ_ASSERT(gSocketTransportService->IsOnCurrentThreadInfallible());
 
   nsCOMPtr<nsIRunnable> callback;
   {
@@ -1086,8 +1091,11 @@ HttpChannelChild::OnStopRequest(const nsresult& channelStatus,
 
   if (mLoadFlags & LOAD_DOCUMENT_URI) {
     // Keep IPDL channel open, but only for updating security info.
-    mKeptAlive = true;
-    SendDocumentChannelCleanup();
+    // If IPDL is already closed, then do nothing.
+    if (mIPCOpen) {
+      mKeptAlive = true;
+      SendDocumentChannelCleanup();
+    }
   } else {
     // The parent process will respond by sending a DeleteSelf message and
     // making sure not to send any more messages after that.
@@ -1105,6 +1113,29 @@ HttpChannelChild::DoPreOnStopRequest(nsresult aStatus)
   if (!mCanceled && NS_SUCCEEDED(mStatus)) {
     mStatus = aStatus;
   }
+
+  CollectOMTTelemetry();
+}
+
+void
+HttpChannelChild::CollectOMTTelemetry()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // Only collect telemetry for HTTP channel that is loaded successfully and
+  // completely.
+  if (mCanceled || NS_FAILED(mStatus)) {
+    return;
+  }
+
+  // Use content policy type to accumulate data by usage.
+  nsContentPolicyType type = mLoadInfo ?
+                             mLoadInfo->InternalContentPolicyType() :
+                             nsIContentPolicy::TYPE_OTHER;
+
+  nsAutoCString key(NS_CP_ContentTypeName(type));
+
+  Telemetry::AccumulateCategoricalKeyed(key, mOMTResult);
 }
 
 void
@@ -3274,6 +3305,7 @@ HttpChannelChild::RetargetDeliveryTo(nsIEventTarget* aNewTarget)
   NS_ENSURE_ARG(aNewTarget);
   if (aNewTarget->IsOnCurrentThread()) {
     NS_WARNING("Retargeting delivery to same thread");
+    mOMTResult = LABELS_HTTP_CHILD_OMT_STATS::successMainThread;
     return NS_OK;
   }
 
@@ -3284,12 +3316,14 @@ HttpChannelChild::RetargetDeliveryTo(nsIEventTarget* aNewTarget)
       do_QueryInterface(mListener, &rv);
   if (!retargetableListener || NS_FAILED(rv)) {
     NS_WARNING("Listener is not retargetable");
+    mOMTResult = LABELS_HTTP_CHILD_OMT_STATS::failListener;
     return NS_ERROR_NO_INTERFACE;
   }
 
   rv = retargetableListener->CheckListenerChain();
   if (NS_FAILED(rv)) {
     NS_WARNING("Subsequent listeners are not retargetable");
+    mOMTResult = LABELS_HTTP_CHILD_OMT_STATS::failListenerChain;
     return rv;
   }
 
@@ -3297,6 +3331,8 @@ HttpChannelChild::RetargetDeliveryTo(nsIEventTarget* aNewTarget)
     MutexAutoLock lock(mEventTargetMutex);
     mODATarget = aNewTarget;
   }
+
+  mOMTResult = LABELS_HTTP_CHILD_OMT_STATS::success;
   return NS_OK;
 }
 

@@ -90,7 +90,7 @@ use style::invalidation::element::restyle_hints::{self, RestyleHint};
 use style::media_queries::{MediaList, parse_media_query_list};
 use style::parallel;
 use style::parser::ParserContext;
-use style::properties::{CascadeFlags, ComputedValues, Importance, SourcePropertyDeclaration};
+use style::properties::{ComputedValues, Importance, SourcePropertyDeclaration};
 use style::properties::{LonghandIdSet, PropertyDeclaration, PropertyDeclarationBlock, PropertyId, StyleBuilder};
 use style::properties::SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP;
 use style::properties::animated_properties::{Animatable, AnimatableLonghand, AnimationValue};
@@ -113,8 +113,8 @@ use style::stylist::RuleInclusion;
 use style::thread_state;
 use style::timer::Timer;
 use style::traversal::{ANIMATION_ONLY, DomTraversal, FOR_CSS_RULE_CHANGES, FOR_RECONSTRUCT};
-use style::traversal::{FOR_DEFAULT_STYLES, TraversalDriver, TraversalFlags, UNSTYLED_CHILDREN_ONLY};
-use style::traversal::{resolve_style, resolve_default_style};
+use style::traversal::{TraversalDriver, TraversalFlags, UNSTYLED_CHILDREN_ONLY};
+use style::traversal::resolve_style;
 use style::values::{CustomIdent, KeyframesName};
 use style::values::computed::Context;
 use style_traits::{PARSING_MODE_DEFAULT, ToCss};
@@ -654,42 +654,70 @@ pub extern "C" fn Servo_AnimationValue_Uncompute(value: RawServoAnimationValueBo
 #[no_mangle]
 pub extern "C" fn Servo_StyleSet_GetBaseComputedValuesForElement(raw_data: RawServoStyleSetBorrowed,
                                                                  element: RawGeckoElementBorrowed,
+                                                                 computed_values: ServoComputedValuesBorrowed,
                                                                  snapshots: *const ServoElementSnapshotTable,
                                                                  pseudo_type: CSSPseudoElementType)
                                                                  -> ServoComputedValuesStrong
 {
-    use style::matching::MatchMethods;
+    use style::style_resolver::StyleResolverForElement;
+
     debug_assert!(!snapshots.is_null());
+    let computed_values = ComputedValues::as_arc(&computed_values);
 
-    let doc_data = PerDocumentStyleData::from_ffi(raw_data).borrow();
-    let global_style_data = &*GLOBAL_STYLE_DATA;
-    let guard = global_style_data.shared_lock.read();
-    let shared_context = create_shared_context(&global_style_data,
-                                               &guard,
-                                               &doc_data,
-                                               TraversalFlags::empty(),
-                                               unsafe { &*snapshots });
-    let element = GeckoElement(element);
-    let element_data = element.borrow_data().unwrap();
-    let styles = &element_data.styles;
-
-    let pseudo = PseudoElement::from_pseudo_type(pseudo_type);
-    let pseudos = &styles.pseudos;
-    let pseudo_style = match pseudo {
-        Some(ref p) => {
-            let style = pseudos.get(p);
-            debug_assert!(style.is_some());
-            style
-        }
-        None => None,
+    let rules = match computed_values.rules {
+        None => return computed_values.clone().into_strong(),
+        Some(ref rules) => rules,
     };
 
-    let provider = get_metrics_provider_for_product();
-    element.get_base_style(&shared_context,
-                           &provider,
-                           styles.primary(),
-                           pseudo_style)
-           .into_strong()
+    let doc_data = PerDocumentStyleData::from_ffi(raw_data).borrow();
+    let without_animations =
+        doc_data.stylist.rule_tree().remove_animation_rules(rules);
+
+    if without_animations == *rules {
+        return computed_values.clone().into_strong();
+    }
+
+    let element = GeckoElement(element);
+
+    let element_data = match element.borrow_data() {
+        Some(data) => data,
+        None => return computed_values.clone().into_strong(),
+    };
+    let styles = &element_data.styles;
+
+    if let Some(pseudo) = PseudoElement::from_pseudo_type(pseudo_type) {
+        // This style already doesn't have animations.
+        return styles
+            .pseudos
+            .get(&pseudo)
+            .expect("GetBaseComputedValuesForElement for an unexisting pseudo?")
+            .clone().into_strong();
+    }
+
+    let global_style_data = &*GLOBAL_STYLE_DATA;
+    let guard = global_style_data.shared_lock.read();
+    let shared = create_shared_context(&global_style_data,
+                                       &guard,
+                                       &doc_data,
+                                       TraversalFlags::empty(),
+                                       unsafe { &*snapshots });
+    let mut tlc = ThreadLocalStyleContext::new(&shared);
+    let mut context = StyleContext {
+        shared: &shared,
+        thread_local: &mut tlc,
+    };
+
+    // This currently ignores visited styles, which seems acceptable, as
+    // existing browsers don't appear to animate visited styles.
+    let inputs =
+        CascadeInputs {
+            rules: Some(without_animations),
+            visited_rules: None,
+        };
+
+    StyleResolverForElement::new(element, &mut context, RuleInclusion::All)
+        .cascade_style_and_visited_with_default_parents(inputs)
+        .into_strong()
 }
 
 #[no_mangle]
@@ -1235,7 +1263,7 @@ pub extern "C" fn Servo_StyleRule_GetSelectorTextAtIndex(rule: RawServoStyleRule
         if index >= rule.selectors.0.len() {
             return;
         }
-        rule.selectors.0[index].selector.to_css(unsafe { result.as_mut().unwrap() }).unwrap();
+        rule.selectors.0[index].to_css(unsafe { result.as_mut().unwrap() }).unwrap();
     })
 }
 
@@ -1259,7 +1287,7 @@ pub extern "C" fn Servo_StyleRule_GetSpecificityAtIndex(
             *specificity = 0;
             return;
         }
-        *specificity = rule.selectors.0[index].selector.specificity() as u64;
+        *specificity = rule.selectors.0[index].specificity() as u64;
     })
 }
 
@@ -1274,14 +1302,14 @@ pub extern "C" fn Servo_StyleRule_SelectorMatchesElement(rule: RawServoStyleRule
             return false;
         }
 
-        let selector_and_hashes = &rule.selectors.0[index];
+        let selector = &rule.selectors.0[index];
         let mut matching_mode = MatchingMode::Normal;
 
         match PseudoElement::from_pseudo_type(pseudo_type) {
             Some(pseudo) => {
                 // We need to make sure that the requested pseudo element type
                 // matches the selector pseudo element type before proceeding.
-                match selector_and_hashes.selector.pseudo_element() {
+                match selector.pseudo_element() {
                     Some(selector_pseudo) if *selector_pseudo == pseudo => {
                         matching_mode = MatchingMode::ForStatelessPseudoElement
                     },
@@ -1291,7 +1319,7 @@ pub extern "C" fn Servo_StyleRule_SelectorMatchesElement(rule: RawServoStyleRule
             None => {
                 // Do not attempt to match if a pseudo element is requested and
                 // this is not a pseudo element selector, or vice versa.
-                if selector_and_hashes.selector.has_pseudo_element() {
+                if selector.has_pseudo_element() {
                     return false;
                 }
             },
@@ -1299,8 +1327,7 @@ pub extern "C" fn Servo_StyleRule_SelectorMatchesElement(rule: RawServoStyleRule
 
         let element = GeckoElement(element);
         let mut ctx = MatchingContext::new(matching_mode, None, element.owner_document_quirks_mode());
-        matches_selector(&selector_and_hashes.selector, 0, &selector_and_hashes.hashes,
-                         &element, &mut ctx, &mut |_, _| {})
+        matches_selector(selector, 0, None, &element, &mut ctx, &mut |_, _| {})
     })
 }
 
@@ -1475,7 +1502,6 @@ pub extern "C" fn Servo_DocumentRule_GetConditionText(rule: RawServoDocumentRule
 #[no_mangle]
 pub extern "C" fn Servo_ComputedValues_GetForAnonymousBox(parent_style_or_null: ServoComputedValuesBorrowedOrNull,
                                                           pseudo_tag: *mut nsIAtom,
-                                                          skip_display_fixup: bool,
                                                           raw_data: RawServoStyleSetBorrowed)
      -> ServoComputedValuesStrong {
     let global_style_data = &*GLOBAL_STYLE_DATA;
@@ -1488,10 +1514,7 @@ pub extern "C" fn Servo_ComputedValues_GetForAnonymousBox(parent_style_or_null: 
 
 
     let maybe_parent = ComputedValues::arc_from_borrowed(&parent_style_or_null);
-    let mut cascade_flags = CascadeFlags::empty();
-    if skip_display_fixup {
-        cascade_flags.insert(SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP);
-    }
+    let cascade_flags = SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP;
     let metrics = get_metrics_provider_for_product();
     data.stylist.precomputed_values_for_pseudo(&guards, &pseudo, maybe_parent,
                                                cascade_flags, &metrics)
@@ -1697,11 +1720,35 @@ pub extern "C" fn Servo_ComputedValues_GetVisitedStyle(values: ServoComputedValu
 }
 
 #[no_mangle]
+pub extern "C" fn Servo_ComputedValues_GetStyleBits(values: ServoComputedValuesBorrowed) -> u64 {
+    use style::properties::computed_value_flags::*;
+    let flags = ComputedValues::as_arc(&values).flags;
+    let mut result = 0;
+    if flags.contains(HAS_TEXT_DECORATION_LINES) {
+        result |= structs::NS_STYLE_HAS_TEXT_DECORATION_LINES as u64;
+    }
+    if flags.contains(SHOULD_SUPPRESS_LINEBREAK) {
+        result |= structs::NS_STYLE_SUPPRESS_LINEBREAK as u64;
+    }
+    result
+}
+
+#[no_mangle]
 pub extern "C" fn Servo_ComputedValues_SpecifiesAnimationsOrTransitions(values: ServoComputedValuesBorrowed)
                                                                         -> bool {
     let values = ComputedValues::as_arc(&values);
     let b = values.get_box();
     b.specifies_animations() || b.specifies_transitions()
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_ComputedValues_EqualCustomProperties(
+    first: ServoComputedValuesBorrowed,
+    second: ServoComputedValuesBorrowed
+) -> bool {
+    let first = ComputedValues::as_arc(&first);
+    let second = ComputedValues::as_arc(&second);
+    first.get_custom_properties() == second.get_custom_properties()
 }
 
 #[no_mangle]
@@ -2769,39 +2816,20 @@ pub extern "C" fn Servo_ResolveStyleLazily(element: RawGeckoElementBorrowed,
         }
     }
 
-    let traversal_flags = match rule_inclusion {
-        RuleInclusion::All => TraversalFlags::empty(),
-        RuleInclusion::DefaultOnly => FOR_DEFAULT_STYLES,
-    };
-
     // We don't have the style ready. Go ahead and compute it as necessary.
-    let mut result = None;
     let shared = create_shared_context(&global_style_data,
                                        &guard,
                                        &data,
-                                       traversal_flags,
+                                       TraversalFlags::empty(),
                                        unsafe { &*snapshots });
     let mut tlc = ThreadLocalStyleContext::new(&shared);
     let mut context = StyleContext {
         shared: &shared,
         thread_local: &mut tlc,
     };
-    let ensure = |el: GeckoElement| { unsafe { el.ensure_data(); } };
 
-    match rule_inclusion {
-        RuleInclusion::All => {
-            let clear = |el: GeckoElement| el.clear_data();
-            resolve_style(&mut context, element, &ensure, &clear,
-                          |styles| result = Some(finish(styles)));
-        }
-        RuleInclusion::DefaultOnly => {
-            let set_data = |el: GeckoElement, data| { unsafe { el.set_data(data) } };
-            resolve_default_style(&mut context, element, &ensure, &set_data,
-                                  |styles| result = Some(finish(styles)));
-        }
-    }
-
-    result.unwrap().into_strong()
+    let styles = resolve_style(&mut context, element, rule_inclusion);
+    finish(&styles).into_strong()
 }
 
 #[cfg(feature = "gecko_debug")]

@@ -231,13 +231,6 @@ nsGenericHTMLElement::CopyInnerTo(Element* aDst, bool aPreallocateChildren)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsGenericHTMLElement::GetDataset(nsISupports** aDataset)
-{
-  *aDataset = Dataset().take();
-  return NS_OK;
-}
-
 static const nsAttrValue::EnumTable kDirTable[] = {
   { "ltr", eDir_LTR },
   { "rtl", eDir_RTL },
@@ -380,15 +373,6 @@ nsGenericHTMLElement::GetOffsetRect(CSSIntRect& aRect)
   aRect = CSSIntRect::FromAppUnitsRounded(rcFrame);
 
   return offsetParent ? offsetParent->AsElement() : nullptr;
-}
-
-NS_IMETHODIMP
-nsGenericHTMLElement::InsertAdjacentHTML(const nsAString& aPosition,
-                                         const nsAString& aText)
-{
-  ErrorResult rv;
-  Element::InsertAdjacentHTML(aPosition, aText, rv);
-  return rv.StealNSResult();
 }
 
 bool
@@ -1684,14 +1668,6 @@ nsGenericHTMLElement::GetURIAttr(nsIAtom* aAttr, nsIAtom* aBaseAttr, nsIURI** aU
   return true;
 }
 
-/* static */ bool
-nsGenericHTMLElement::IsScrollGrabAllowed(JSContext*, JSObject*)
-{
-  // Only allow scroll grabbing in chrome
-  nsIPrincipal* prin = nsContentUtils::SubjectPrincipal();
-  return nsContentUtils::IsSystemPrincipal(prin);
-}
-
 HTMLMenuElement*
 nsGenericHTMLElement::GetContextMenu() const
 {
@@ -1705,13 +1681,6 @@ nsGenericHTMLElement::GetContextMenu() const
     }
   }
   return nullptr;
-}
-
-NS_IMETHODIMP
-nsGenericHTMLElement::GetContextMenu(nsIDOMHTMLMenuElement** aContextMenu)
-{
-  NS_IF_ADDREF(*aContextMenu = GetContextMenu());
-  return NS_OK;
 }
 
 bool

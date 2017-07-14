@@ -37,6 +37,7 @@ extern crate script_layout_interface;
 extern crate script_traits;
 #[macro_use] extern crate serde;
 extern crate serde_json;
+extern crate servo_atoms;
 extern crate servo_config;
 extern crate servo_geometry;
 extern crate servo_url;
@@ -45,7 +46,7 @@ extern crate style;
 extern crate style_traits;
 extern crate unicode_bidi;
 extern crate unicode_script;
-extern crate webrender_traits;
+extern crate webrender_api;
 
 #[macro_use]
 pub mod layout_debug;

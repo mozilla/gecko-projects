@@ -357,6 +357,8 @@ private:
   DECL_GFX_PREF(Live, "dom.vr.controller_trigger_threshold",   VRControllerTriggerThreshold, float, 0.1f);
   DECL_GFX_PREF(Live, "dom.vr.navigation.timeout",             VRNavigationTimeout, int32_t, 1000);
   DECL_GFX_PREF(Once, "dom.vr.oculus.enabled",                 VROculusEnabled, bool, true);
+  DECL_GFX_PREF(Live, "dom.vr.oculus.present.timeout",         VROculusPresentTimeout, int32_t, 10000);
+  DECL_GFX_PREF(Live, "dom.vr.oculus.quit.timeout",            VROculusQuitTimeout, int32_t, 30000);
   DECL_GFX_PREF(Once, "dom.vr.openvr.enabled",                 VROpenVREnabled, bool, false);
   DECL_GFX_PREF(Once, "dom.vr.osvr.enabled",                   VROSVREnabled, bool, false);
   DECL_GFX_PREF(Live, "dom.vr.poseprediction.enabled",         VRPosePredictionEnabled, bool, true);
@@ -435,6 +437,8 @@ private:
   DECL_GFX_PREF(Live, "gfx.direct3d11.reuse-decoder-device",   Direct3D11ReuseDecoderDevice, int32_t, -1);
   DECL_GFX_PREF(Live, "gfx.direct3d11.allow-intel-mutex",      Direct3D11AllowIntelMutex, bool, true);
   DECL_GFX_PREF(Live, "gfx.direct3d11.use-double-buffering",   Direct3D11UseDoubleBuffering, bool, false);
+  DECL_GFX_PREF(Once, "gfx.direct3d11.enable-debug-layer",     Direct3D11EnableDebugLayer, bool, false);
+  DECL_GFX_PREF(Once, "gfx.direct3d11.break-on-error",         Direct3D11BreakOnError, bool, false);
   DECL_GFX_PREF(Live, "gfx.downloadable_fonts.keep_variation_tables", KeepVariationTables, bool, false);
   DECL_GFX_PREF(Live, "gfx.downloadable_fonts.otl_validation", ValidateOTLTables, bool, true);
   DECL_GFX_PREF(Live, "gfx.draw-color-bars",                   CompositorDrawColorBars, bool, false);
@@ -489,6 +493,7 @@ private:
   DECL_GFX_PREF(Live, "gl.multithreaded",                      GLMultithreaded, bool, false);
 #endif
   DECL_GFX_PREF(Live, "gl.require-hardware",                   RequireHardwareGL, bool, false);
+  DECL_GFX_PREF(Live, "gl.use-tls-is-current",                 UseTLSIsCurrent, int32_t, 0);
 
   DECL_GFX_PREF(Once, "image.cache.size",                      ImageCacheSize, int32_t, 5*1024*1024);
   DECL_GFX_PREF(Once, "image.cache.timeweight",                ImageCacheTimeWeight, int32_t, 500);
@@ -721,6 +726,7 @@ private:
 
   DECL_GFX_PREF(Live, "webgl.perf.max-warnings",                    WebGLMaxPerfWarnings, int32_t, 0);
   DECL_GFX_PREF(Live, "webgl.perf.max-acceptable-fb-status-invals", WebGLMaxAcceptableFBStatusInvals, int32_t, 0);
+  DECL_GFX_PREF(Live, "webgl.perf.spew-frame-allocs",          WebGLSpewFrameAllocs, bool, true);
 
   DECL_GFX_PREF(Live, "webgl.webgl2-compat-mode",              WebGL2CompatMode, bool, false);
   DECL_GFX_PREF(Live, "webrender.blob-images",                 WebRenderBlobImages, bool, false);

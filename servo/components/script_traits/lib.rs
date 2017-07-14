@@ -33,7 +33,7 @@ extern crate servo_atoms;
 extern crate servo_url;
 extern crate style_traits;
 extern crate time;
-extern crate webrender_traits;
+extern crate webrender_api;
 extern crate webvr_traits;
 
 mod script_msg;
@@ -69,7 +69,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, RecvTimeoutError};
 use style_traits::CSSPixel;
 use webdriver_msg::{LoadStatus, WebDriverScriptCommand};
-use webrender_traits::ClipId;
+use webrender_api::ClipId;
 use webvr_traits::{WebVREvent, WebVRMsg};
 
 pub use script_msg::{LayoutMsg, ScriptMsg, EventResult, LogEntry};
@@ -747,9 +747,6 @@ pub enum ConstellationMsg {
     /// Request that the constellation send the current focused top-level browsing context id,
     /// over a provided channel.
     GetFocusTopLevelBrowsingContext(IpcSender<Option<TopLevelBrowsingContextId>>),
-    /// Requests that the constellation inform the compositor of the title of the pipeline
-    /// immediately.
-    GetPipelineTitle(PipelineId),
     /// Request to load the initial page.
     InitLoadUrl(ServoUrl),
     /// Query the constellation to see if the current compositor output is stable
@@ -828,11 +825,11 @@ impl From<RecvTimeoutError> for PaintWorkletError {
 }
 
 /// Execute paint code in the worklet thread pool.
-pub trait PaintWorkletExecutor: Sync + Send {
+pub trait Painter: Sync + Send {
     /// https://drafts.css-houdini.org/css-paint-api/#draw-a-paint-image
     fn draw_a_paint_image(&self,
-                          name: Atom,
                           concrete_object_size: Size2D<Au>,
+                          properties: Vec<(Atom, String)>,
                           sender: IpcSender<CanvasData>);
 }
 

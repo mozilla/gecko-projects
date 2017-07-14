@@ -1739,6 +1739,8 @@ pref("network.http.rcwn.cache_queue_priority_threshold", 2);
 // is smaller than this size.
 pref("network.http.rcwn.small_resource_size_kb", 256);
 
+pref("network.http.rcwn.max_wait_before_racing_ms", 500);
+
 // The ratio of the transaction count for the focused window and the count of
 // all available active connections.
 pref("network.http.focused_window_transaction_ratio", "0.9");
@@ -1995,6 +1997,10 @@ pref("network.standard-url.max-length", 1048576);
 // C++ implementation. Requires restart for changes to take effect.
 pref("network.standard-url.enable-rust", false);
 
+// Whether nsIURI.host/.hostname/.spec should return a punycode string
+// If set to false we will revert to previous behaviour and return a unicode string.
+pref("network.standard-url.punycode-host", false);
+
 // Idle timeout for ftp control connections - 5 minute default
 pref("network.ftp.idleConnectionTimeout", 300);
 
@@ -2133,6 +2139,10 @@ pref("network.http.throttle.resume-for", 100);
 // at which sub-resource reqeusts quickly come and go.
 pref("network.http.throttle.resume-background-in", 1000);
 
+// Give higher priority to requests resulting from a user interaction event
+// like click-to-play, image fancy-box zoom, navigation.
+pref("network.http.on_click_priority", true);
+
 pref("permissions.default.image",           1); // 1-Accept, 2-Deny, 3-dontAcceptForeign
 
 pref("network.proxy.type",                  5);
@@ -2192,6 +2202,10 @@ pref("intl.charset.fallback.override",      "");
 pref("intl.charset.fallback.tld",           true);
 pref("intl.ellipsis",                       "chrome://global-platform/locale/intl.properties");
 pref("intl.locale.matchOS",                 false);
+// this pref allows user to request that all internationalization formatters
+// like date/time formatting, unit formatting, calendars etc. should use
+// OS locale set instead of the app locale set.
+pref("intl.regional_prefs.use_os_locales",  false);
 // fallback charset list for Unicode conversion (converting from Unicode)
 // currently used for mail send only to handle symbol characters (e.g Euro, trademark, smartquotes)
 // for ISO-8859-1
@@ -2855,6 +2869,13 @@ pref("layout.css.font-display.enabled", false);
 
 // Is support for variation fonts enabled?
 pref("layout.css.font-variations.enabled", false);
+
+// Is support for the frames() timing function enabled?
+#ifdef RELEASE_OR_BETA
+pref("layout.css.frames-timing.enabled", false);
+#else
+pref("layout.css.frames-timing.enabled", true);
+#endif
 
 // Are sets of prefixed properties supported?
 pref("layout.css.prefixes.border-image", true);
@@ -4627,6 +4648,7 @@ pref("gl.require-hardware", false);
 pref("gl.multithreaded", true);
 #endif
 pref("gl.ignore-dx-interop2-blacklist", false);
+pref("gl.use-tls-is-current", 0);
 
 pref("webgl.force-enabled", false);
 pref("webgl.disabled", false);
@@ -4653,6 +4675,7 @@ pref("webgl.webgl2-compat-mode", false);
 
 pref("webgl.perf.max-warnings", 0);
 pref("webgl.perf.max-acceptable-fb-status-invals", 0);
+pref("webgl.perf.spew-frame-allocs", true);
 
 pref("webgl.enable-webgl2", true);
 
@@ -4700,7 +4723,7 @@ pref("network.tcp.keepalive.retry_interval", 1); // seconds
 pref("network.tcp.keepalive.probe_count", 4);
 #endif
 
-pref("network.tcp.tcp_fastopen_enable", false);
+pref("network.tcp.tcp_fastopen_enable", true);
 pref("network.tcp.tcp_fastopen_consecutive_failure_limit", 5);
 
 // Whether to disable acceleration for all widgets.
@@ -4819,6 +4842,9 @@ pref("gfx.direct2d.disabled", false);
 // Whether to attempt to enable Direct2D regardless of automatic detection or
 // blacklisting
 pref("gfx.direct2d.force-enabled", false);
+
+pref("gfx.direct3d11.enable-debug-layer", false);
+pref("gfx.direct3d11.break-on-error", false);
 
 pref("layers.prefer-opengl", false);
 #endif
@@ -5163,6 +5189,22 @@ pref("dom.vr.controller_trigger_threshold", "0.1");
 pref("dom.vr.navigation.timeout", 5000);
 // Oculus device
 pref("dom.vr.oculus.enabled", true);
+// Minimum number of milliseconds after content has stopped VR presentation
+// before the Oculus session is re-initialized to an invisible / tracking
+// only mode.  If this value is too high, users will need to wait longer
+// after stopping WebVR presentation before automatically returning to the
+// Oculus home interface.  (They can immediately return to the Oculus Home
+// interface through the Oculus HUD without waiting this duration)
+// If this value is too low, the Oculus Home interface may be visible
+// momentarily during VR link navigation.
+pref("dom.vr.oculus.present.timeout", 10000);
+// Minimum number of milliseconds that the browser will wait before
+// reloading the Oculus OVR library after seeing a "ShouldQuit" flag set.
+// Oculus requests that we shut down and unload the OVR library, by setting
+// a "ShouldQuit" flag.  To ensure that we don't interfere with
+// Oculus software auto-updates, we will not attempt to re-load the
+// OVR library until this timeout has elapsed.
+pref("dom.vr.oculus.quit.timeout", 30000);
 // OSVR device
 pref("dom.vr.osvr.enabled", false);
 // OpenVR device

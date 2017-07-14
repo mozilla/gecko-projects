@@ -55,7 +55,7 @@ class CSSPseudoElementsAtomSource:
 
 
 class CSSAnonBoxesAtomSource:
-    PATTERN = re.compile('^(?:CSS_ANON_BOX|CSS_NON_INHERITING_ANON_BOX)\((.+),\s*"(.*)"(\,|\))')
+    PATTERN = re.compile('^(?:CSS_ANON_BOX|CSS_NON_INHERITING_ANON_BOX)\((.+),\s*"(.*)"\)')
     FILE = "include/nsCSSAnonBoxList.h"
     CLASS = "nsCSSAnonBoxes"
     TYPE = "nsICSSAnonBoxPseudo"
@@ -102,6 +102,9 @@ class Atom:
 
     def is_anon_box(self):
         return self.type() == "nsICSSAnonBoxPseudo"
+
+    def is_tree_pseudo_element(self):
+        return self.value.startswith(":-moz-tree-")
 
 
 def collect_atoms(objdir):

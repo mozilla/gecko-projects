@@ -33,11 +33,12 @@ extern crate script_layout_interface;
 extern crate script_traits;
 extern crate selectors;
 extern crate serde_json;
+extern crate servo_atoms;
 extern crate servo_config;
 extern crate servo_geometry;
 extern crate servo_url;
 extern crate style;
-extern crate webrender_traits;
+extern crate webrender_api;
 
 use app_units::Au;
 use euclid::{Point2D, Rect, Size2D, ScaleFactor};
@@ -53,6 +54,7 @@ use ipc_channel::router::ROUTER;
 use layout::animation;
 use layout::construct::ConstructionResult;
 use layout::context::LayoutContext;
+use layout::context::RegisteredPainter;
 use layout::context::heap_size_of_persistent_local_context;
 use layout::display_list_builder::ToGfxColor;
 use layout::flow::{self, Flow, ImmutableFlowUtils, MutableFlowUtils, MutableOwnedFlowUtils};
@@ -81,14 +83,13 @@ use profile_traits::time::{TimerMetadataFrameType, TimerMetadataReflowType};
 use script::layout_wrapper::{ServoLayoutElement, ServoLayoutDocument, ServoLayoutNode};
 use script_layout_interface::message::{Msg, NewLayoutThreadInfo, Reflow, ReflowQueryType};
 use script_layout_interface::message::{ScriptReflow, ReflowComplete};
-use script_layout_interface::reporter::CSSErrorReporter;
 use script_layout_interface::rpc::{LayoutRPC, MarginStyleResponse, NodeOverflowResponse, OffsetParentResponse};
 use script_layout_interface::rpc::TextIndexResponse;
 use script_layout_interface::wrapper_traits::LayoutNode;
 use script_traits::{ConstellationControlMsg, LayoutControlMsg, LayoutMsg as ConstellationMsg};
 use script_traits::{ScrollState, UntrustedNodeAddress};
-use script_traits::PaintWorkletExecutor;
 use selectors::Element;
+use servo_atoms::Atom;
 use servo_config::opts;
 use servo_config::prefs::PREFS;
 use servo_config::resource_files::read_resource_file;
@@ -114,6 +115,7 @@ use style::error_reporting::{NullReporter, RustLogReporter};
 use style::invalidation::element::restyle_hints::RestyleHint;
 use style::logical_geometry::LogicalPoint;
 use style::media_queries::{Device, MediaList, MediaType};
+use style::properties::PropertyId;
 use style::selector_parser::SnapshotMap;
 use style::servo::restyle_damage::{REFLOW, REFLOW_OUT_OF_FLOW, REPAINT, REPOSITION, STORE_OVERFLOW};
 use style::shared_lock::{SharedRwLock, SharedRwLockReadGuard, StylesheetGuards};
@@ -123,6 +125,7 @@ use style::stylist::{ExtraStyleData, Stylist};
 use style::thread_state;
 use style::timer::Timer;
 use style::traversal::{DomTraversal, TraversalDriver, TraversalFlags};
+use style::values::CompactCowStr;
 
 /// Information needed by the layout thread.
 pub struct LayoutThread {
@@ -223,10 +226,10 @@ pub struct LayoutThread {
                                                  WebRenderImageInfo>>>,
     /// The executor for paint worklets.
     /// Will be None if the script thread hasn't added any paint worklet modules.
-    paint_worklet_executor: Option<Arc<PaintWorkletExecutor>>,
+    registered_painters: Arc<RwLock<FnvHashMap<Atom, RegisteredPainter>>>,
 
     /// Webrender interface.
-    webrender_api: webrender_traits::RenderApi,
+    webrender_api: webrender_api::RenderApi,
 
     /// The timer object to control the timing of the animations. This should
     /// only be a test-mode timer during testing for animations.
@@ -257,7 +260,7 @@ impl LayoutThreadFactory for LayoutThread {
               time_profiler_chan: time::ProfilerChan,
               mem_profiler_chan: mem::ProfilerChan,
               content_process_shutdown_chan: Option<IpcSender<()>>,
-              webrender_api_sender: webrender_traits::RenderApiSender,
+              webrender_api_sender: webrender_api::RenderApiSender,
               layout_threads: usize) {
         thread::Builder::new().name(format!("LayoutThread {:?}", id)).spawn(move || {
             thread_state::initialize(thread_state::LAYOUT);
@@ -440,7 +443,7 @@ impl LayoutThread {
            font_cache_thread: FontCacheThread,
            time_profiler_chan: time::ProfilerChan,
            mem_profiler_chan: mem::ProfilerChan,
-           webrender_api_sender: webrender_traits::RenderApiSender,
+           webrender_api_sender: webrender_api::RenderApiSender,
            layout_threads: usize)
            -> LayoutThread {
         let device = Device::new(
@@ -491,7 +494,7 @@ impl LayoutThread {
             constellation_chan: constellation_chan.clone(),
             time_profiler_chan: time_profiler_chan,
             mem_profiler_chan: mem_profiler_chan,
-            paint_worklet_executor: None,
+            registered_painters: Arc::new(RwLock::new(FnvHashMap::default())),
             image_cache: image_cache.clone(),
             font_cache_thread: font_cache_thread,
             first_reflow: Cell::new(true),
@@ -584,7 +587,7 @@ impl LayoutThread {
             webrender_image_cache: self.webrender_image_cache.clone(),
             pending_images: if script_initiated_layout { Some(Mutex::new(vec![])) } else { None },
             newly_transitioning_nodes: if script_initiated_layout { Some(Mutex::new(vec![])) } else { None },
-            paint_worklet_executor: self.paint_worklet_executor.clone(),
+            registered_painters: self.registered_painters.clone(),
         }
     }
 
@@ -700,10 +703,19 @@ impl LayoutThread {
             Msg::SetFinalUrl(final_url) => {
                 self.url = final_url;
             },
-            Msg::SetPaintWorkletExecutor(executor) => {
-                debug!("Setting the paint worklet executor");
-                debug_assert!(self.paint_worklet_executor.is_none());
-                self.paint_worklet_executor = Some(executor);
+            Msg::RegisterPaint(name, mut properties, painter) => {
+                debug!("Registering the painter");
+                let properties = properties.drain(..)
+                    .filter_map(|name| PropertyId::parse(CompactCowStr::from(&*name)).ok().map(|id| (name.clone(), id)))
+                    .filter(|&(_, ref id)| id.as_shorthand().is_err())
+                    .collect();
+                let registered_painter = RegisteredPainter {
+                    name: name.clone(),
+                    properties: properties,
+                    painter: painter,
+                };
+                self.registered_painters.write()
+                    .insert(name, registered_painter);
             },
             Msg::PrepareToExit(response_chan) => {
                 self.prepare_to_exit(response_chan);
@@ -999,10 +1011,10 @@ impl LayoutThread {
             epoch.next();
             self.epoch.set(epoch);
 
-            let viewport_size = webrender_traits::LayoutSize::from_untyped(&viewport_size);
+            let viewport_size = webrender_api::LayoutSize::from_untyped(&viewport_size);
             self.webrender_api.set_display_list(
                 Some(get_root_flow_background_color(layout_root)),
-                webrender_traits::Epoch(epoch.0),
+                webrender_api::Epoch(epoch.0),
                 viewport_size,
                 builder.finalize(),
                 true);
@@ -1645,8 +1657,8 @@ impl LayoutThread {
 // clearing the frame buffer to white. This ensures that setting a background
 // color on an iframe element, while the iframe content itself has a default
 // transparent background color is handled correctly.
-fn get_root_flow_background_color(flow: &mut Flow) -> webrender_traits::ColorF {
-    let transparent = webrender_traits::ColorF { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
+fn get_root_flow_background_color(flow: &mut Flow) -> webrender_api::ColorF {
+    let transparent = webrender_api::ColorF { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
     if !flow.is_block_like() {
         return transparent;
     }

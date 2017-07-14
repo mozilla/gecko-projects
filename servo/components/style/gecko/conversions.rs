@@ -15,6 +15,7 @@ use gecko_bindings::bindings::{Gecko_InitializeImageCropRect, Gecko_SetImageElem
 use gecko_bindings::structs::{nsCSSUnit, nsStyleCoord_CalcValue, nsStyleImage};
 use gecko_bindings::structs::{nsresult, SheetType};
 use gecko_bindings::sugar::ns_style_coord::{CoordDataValue, CoordData, CoordDataMut};
+use std::f32::consts::PI;
 use stylesheets::{Origin, RulesMutateError};
 use values::computed::{Angle, CalcLengthOrPercentage, Gradient, Image};
 use values::computed::{LengthOrPercentage, LengthOrPercentageOrAuto};
@@ -215,10 +216,35 @@ impl nsStyleImage {
 
                 match direction {
                     LineDirection::Angle(angle) => {
+                        // PI radians (180deg) is ignored because it is the default value.
+                        if angle.radians() != PI {
+                            unsafe {
+                                (*gecko_gradient).mAngle.set(angle);
+                            }
+                        }
+                    },
+                    LineDirection::Horizontal(x) => {
+                        let x = match x {
+                            X::Left => 0.0,
+                            X::Right => 1.0,
+                        };
+
                         unsafe {
-                            (*gecko_gradient).mAngle.set(angle);
-                            (*gecko_gradient).mBgPosX.set_value(CoordDataValue::None);
-                            (*gecko_gradient).mBgPosY.set_value(CoordDataValue::None);
+                            (*gecko_gradient).mBgPosX
+                                             .set_value(CoordDataValue::Percent(x));
+                            (*gecko_gradient).mBgPosY
+                                             .set_value(CoordDataValue::Percent(0.5));
+                        }
+                    },
+                    LineDirection::Vertical(y) => {
+                        // Y::Bottom (to bottom) is ignored because it is the default value.
+                        if y == Y::Top {
+                            unsafe {
+                                (*gecko_gradient).mBgPosX
+                                                 .set_value(CoordDataValue::Percent(0.5));
+                                (*gecko_gradient).mBgPosY
+                                                 .set_value(CoordDataValue::Percent(0.0));
+                            }
                         }
                     },
                     LineDirection::Corner(horiz, vert) => {
@@ -232,7 +258,6 @@ impl nsStyleImage {
                         };
 
                         unsafe {
-                            (*gecko_gradient).mAngle.set_value(CoordDataValue::None);
                             (*gecko_gradient).mBgPosX
                                              .set_value(CoordDataValue::Percent(percent_x));
                             (*gecko_gradient).mBgPosY
@@ -245,14 +270,9 @@ impl nsStyleImage {
                             if let Some(position) = position {
                                 (*gecko_gradient).mBgPosX.set(position.horizontal);
                                 (*gecko_gradient).mBgPosY.set(position.vertical);
-                            } else {
-                                (*gecko_gradient).mBgPosX.set_value(CoordDataValue::None);
-                                (*gecko_gradient).mBgPosY.set_value(CoordDataValue::None);
                             }
                             if let Some(angle) = angle {
                                 (*gecko_gradient).mAngle.set(angle);
-                            } else {
-                                (*gecko_gradient).mAngle.set_value(CoordDataValue::None);
                             }
                         }
                     },
@@ -304,12 +324,7 @@ impl nsStyleImage {
                 unsafe {
                     if let Some(angle) = angle {
                         (*gecko_gradient).mAngle.set(angle);
-                    } else {
-                        (*gecko_gradient).mAngle.set_value(CoordDataValue::None);
                     }
-
-                    (*gecko_gradient).mBgPosX.set_value(CoordDataValue::None);
-                    (*gecko_gradient).mBgPosY.set_value(CoordDataValue::None);
                 }
 
                 // Setting radius values depending shape
@@ -370,7 +385,7 @@ impl nsStyleImage {
     pub unsafe fn into_image(self: &nsStyleImage) -> Option<Image> {
         use gecko_bindings::bindings::Gecko_GetImageElement;
         use gecko_bindings::structs::nsStyleImageType;
-        use values::computed::{NumberOrPercentage, ImageRect};
+        use values::computed::{NumberOrPercentage, MozImageRect};
 
         match self.mType {
             nsStyleImageType::eStyleImageType_Null => {
@@ -387,7 +402,7 @@ impl nsStyleImage {
                            NumberOrPercentage::from_gecko_style_coord(&rect.data_at(2)),
                            NumberOrPercentage::from_gecko_style_coord(&rect.data_at(3))) {
                         (Some(top), Some(right), Some(bottom), Some(left)) =>
-                            Some(GenericImage::Rect(ImageRect { url, top, right, bottom, left } )),
+                            Some(GenericImage::Rect(MozImageRect { url, top, right, bottom, left } )),
                         _ => {
                             debug_assert!(false, "mCropRect could not convert to NumberOrPercentage");
                             None
@@ -815,7 +830,7 @@ impl TrackSize<LengthOrPercentage> {
         if min == max {
             TrackSize::Breadth(max)
         } else {
-            TrackSize::MinMax(min, max)
+            TrackSize::Minmax(min, max)
         }
     }
 
@@ -836,7 +851,7 @@ impl TrackSize<LengthOrPercentage> {
                 breadth.to_gecko_style_coord(gecko_min);
                 breadth.to_gecko_style_coord(gecko_max);
             },
-            TrackSize::MinMax(ref min, ref max) => {
+            TrackSize::Minmax(ref min, ref max) => {
                 min.to_gecko_style_coord(gecko_min);
                 max.to_gecko_style_coord(gecko_max);
             },

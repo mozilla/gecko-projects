@@ -563,11 +563,14 @@ var TransactionsManager = {
       this._createdBatchEntry = false;
       let rv;
       try {
-        // We should return here, but bug 958949 makes that impossible.
         rv = await task();
       } finally {
-        this._batching = false;
-        this._createdBatchEntry = false;
+        // We must enqueue clearing batching mode to ensure that any existing
+        // transactions have completed before we clear the batching mode.
+        this._mainEnqueuer.enqueue(async () => {
+          this._batching = false;
+          this._createdBatchEntry = false;
+        });
       }
       return rv;
     });
@@ -1029,9 +1032,9 @@ async function createItemsFromBookmarksTree(tree, restoring = false,
 
     return guid;
   }
-  return await createItem(tree,
-                          tree.parentGuid,
-                          tree.index);
+  return createItem(tree,
+                    tree.parentGuid,
+                    tree.index);
 }
 
 /** ***************************************************************************

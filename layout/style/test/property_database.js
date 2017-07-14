@@ -408,6 +408,23 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.webkit")) {
     // but accepted here for better webkit emulation):
     "-webkit-linear-gradient(0, red, blue)",
 
+    // Linear-gradient with calc expression (bug 1363349)
+    "-webkit-gradient(linear, calc(5 + 5) top, calc(10 + 10) top, from(blue), to(lime))",
+    "-webkit-gradient(linear, calc(5 - 5) top, calc(10 + 10) top, from(blue), to(lime))",
+    "-webkit-gradient(linear, calc(5 * 5) top, calc(10 + 10) top, from(blue), to(lime))",
+    "-webkit-gradient(linear, calc(5 / 5) top, calc(10 + 10) top, from(blue), to(lime))",
+    "-webkit-gradient(linear, left calc(25% - 10%), right calc(75% + 10%), from(blue), to(lime))",
+    "-webkit-gradient(linear, calc(1) 2, 3 4)",
+
+    // Radial-gradient with calc expression (bug 1363349)
+    "-webkit-gradient(radial, 1 2, 0, 3 4, calc(1 + 5), from(blue), to(lime))",
+    "-webkit-gradient(radial, 1 2, calc(1 + 2), 3 4, calc(1 + 5), from(blue), to(lime))",
+    "-webkit-gradient(radial, 1 2, calc(1 - 2), 3 4, calc(1 + 5), from(blue), to(lime))",
+    "-webkit-gradient(radial, 1 2, calc(1 * 2), 3 4, calc(1 + 5), from(blue), to(lime))",
+    "-webkit-gradient(radial, 1 2, calc(1 / 2), 3 4, calc(1 + 5), from(blue), to(lime))",
+    "-webkit-gradient(radial, calc(0 + 1) calc(1 + 1), calc(1 + 2), calc(1 + 2) 4, calc(1 + 5), from(blue), to(lime))",
+    "-webkit-gradient(radial, 1 2, calc(8), 3 4, 9)",
+
     // Basic radial-gradient syntax (valid when prefixed or unprefixed):
     "-webkit-radial-gradient(circle, white, black)",
     "-webkit-radial-gradient(circle, white, black)",
@@ -483,7 +500,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.webkit")) {
     "-webkit-gradient(linear, 1px 2, 3 4)",
     "-webkit-gradient(linear, 1 2, 3 4px)",
     "-webkit-gradient(linear, 1px 2px, 3px 4px)",
-    "-webkit-gradient(linear, calc(1) 2, 3 4)",
     "-webkit-gradient(linear, 1 2em, 3 4)",
 
     // linear w/ <radius> (only valid for radial)
@@ -533,7 +549,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.webkit")) {
     // radial w/ incorrect units on radius (invalid; expecting <number>)
     "-webkit-gradient(radial, 1 2, 8%,      3 4, 9)",
     "-webkit-gradient(radial, 1 2, 8px,     3 4, 9)",
-    "-webkit-gradient(radial, 1 2, calc(8), 3 4, 9)",
     "-webkit-gradient(radial, 1 2, 8em,     3 4, 9)",
     "-webkit-gradient(radial, 1 2, top,     3 4, 9)",
 
@@ -557,6 +572,19 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.webkit")) {
     "-webkit-linear-gradient(30deg red, blue)",
     "-webkit-linear-gradient(top right red, blue)",
     "-webkit-linear-gradient(bottom red, blue)",
+
+    // Linear-gradient with calc expression containing mixed units or division
+    // by zero (bug 1363349)
+    "-webkit-gradient(linear, calc(5 + 5%) top, calc(10 + 10) top, from(blue), to(lime))",
+    "-webkit-gradient(linear, left calc(25 - 10%), right calc(75% + 10%), from(blue), to(lime))",
+    "-webkit-gradient(linear, calc(1 / 0) 2, 3 4)",
+
+    // Radial-gradient with calc expression containing mixed units, division
+    // by zero, or a percentage in the radius (bug 1363349)
+    "-webkit-gradient(radial, 1 2, 0, 3 4, calc(1% + 5%), from(blue), to(lime))",
+    "-webkit-gradient(radial, 1 2, calc(1 + 2), 3 4, calc(1 + 5%), from(blue), to(lime))",
+    "-webkit-gradient(radial, calc(0 + 1) calc(1 + 1), calc(1% + 2%), calc(1 + 2) 4, calc(1 + 5), from(blue), to(lime))",
+    "-webkit-gradient(radial, 1 2, calc(8 / 0), 3 4, 9)",
 
     // Linear syntax that's invalid for both -webkit & unprefixed, but valid
     // for -moz:
@@ -1028,8 +1056,8 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "ease" ],
-    other_values: [ "cubic-bezier(0.25, 0.1, 0.25, 1.0)", "linear", "ease-in", "ease-out", "ease-in-out", "linear, ease-in, cubic-bezier(0.1, 0.2, 0.8, 0.9)", "cubic-bezier(0.5, 0.5, 0.5, 0.5)", "cubic-bezier(0.25, 1.5, 0.75, -0.5)", "step-start", "step-end", "steps(1)", "steps(2, start)", "steps(386)", "steps(3, end)", "frames(2)", "frames(1000)", "frames( 2 )" ],
-    invalid_values: [ "none", "auto", "cubic-bezier(0.25, 0.1, 0.25)", "cubic-bezier(0.25, 0.1, 0.25, 0.25, 1.0)", "cubic-bezier(-0.5, 0.5, 0.5, 0.5)", "cubic-bezier(1.5, 0.5, 0.5, 0.5)", "cubic-bezier(0.5, 0.5, -0.5, 0.5)", "cubic-bezier(0.5, 0.5, 1.5, 0.5)", "steps(2, step-end)", "steps(0)", "steps(-2)", "steps(0, step-end, 1)", "frames(1)", "frames(-2)", "frames", "frames()", "frames(,)", "frames(a)", "frames(2.0)", "frames(2.5)", "frames(2 3)" ]
+    other_values: [ "cubic-bezier(0.25, 0.1, 0.25, 1.0)", "linear", "ease-in", "ease-out", "ease-in-out", "linear, ease-in, cubic-bezier(0.1, 0.2, 0.8, 0.9)", "cubic-bezier(0.5, 0.5, 0.5, 0.5)", "cubic-bezier(0.25, 1.5, 0.75, -0.5)", "step-start", "step-end", "steps(1)", "steps(2, start)", "steps(386)", "steps(3, end)" ],
+    invalid_values: [ "none", "auto", "cubic-bezier(0.25, 0.1, 0.25)", "cubic-bezier(0.25, 0.1, 0.25, 0.25, 1.0)", "cubic-bezier(-0.5, 0.5, 0.5, 0.5)", "cubic-bezier(1.5, 0.5, 0.5, 0.5)", "cubic-bezier(0.5, 0.5, -0.5, 0.5)", "cubic-bezier(0.5, 0.5, 1.5, 0.5)", "steps(2, step-end)", "steps(0)", "steps(-2)", "steps(0, step-end, 1)" ]
   },
   "-moz-appearance": {
     domProp: "MozAppearance",
@@ -3644,7 +3672,7 @@ var gCSSProperties = {
     subproperties: [ "padding-top", "padding-right", "padding-bottom", "padding-left" ],
     initial_values: [ "0", "0px 0 0em", "0% 0px 0em 0pt", "calc(0px) calc(0em) calc(-2px) calc(-1%)" ],
     other_values: [ "3px 0", "2em 4px 2pt", "1em 2em 3px 4px" ],
-    invalid_values: [ "1px calc(nonsense)", "1px red" ],
+    invalid_values: [ "1px calc(nonsense)", "1px red", "-1px" ],
     unbalanced_values: [ "1px calc(" ],
     quirks_values: { "5": "5px", "3px 6px 2 5px": "3px 6px 2px 5px" },
   },
@@ -5701,6 +5729,14 @@ if (IsCSSPropertyPrefEnabled("layout.css.font-variations.enabled")) {
       "'wdth\" 1", "\"wdth' 1" // mismatched quotes
     ]
   }
+}
+
+if (IsCSSPropertyPrefEnabled("layout.css.frames-timing.enabled")) {
+  gCSSProperties["animation-timing-function"].other_values.push(
+    "frames(2)", "frames(1000)", "frames( 2 )");
+  gCSSProperties["animation-timing-function"].invalid_values.push(
+    "frames(1)", "frames(-2)", "frames", "frames()", "frames(,)",
+    "frames(a)", "frames(2.0)", "frames(2.5)", "frames(2 3)");
 }
 
 if (IsCSSPropertyPrefEnabled("svg.paint-order.enabled")) {

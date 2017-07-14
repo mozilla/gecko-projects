@@ -3696,3 +3696,121 @@ CallIRGenerator::tryAttachStub()
     MOZ_ASSERT(strategy == OptStrategy::None);
     return false;
 }
+
+CompareIRGenerator::CompareIRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc,
+                                       ICState::Mode mode, JSOp op,
+                                       HandleValue lhsVal, HandleValue rhsVal)
+  : IRGenerator(cx, script, pc, CacheKind::Compare, mode),
+    op_(op), lhsVal_(lhsVal), rhsVal_(rhsVal)
+{ }
+
+bool
+CompareIRGenerator::tryAttachString(ValOperandId lhsId, ValOperandId rhsId)
+{
+    MOZ_ASSERT(IsEqualityOp(op_));
+
+    if (!lhsVal_.isString() || !rhsVal_.isString())
+        return false;
+
+    StringOperandId lhsStrId = writer.guardIsString(lhsId);
+    StringOperandId rhsStrId = writer.guardIsString(rhsId);
+    writer.compareStringResult(op_, lhsStrId, rhsStrId);
+    writer.returnFromIC();
+
+    trackAttached("String");
+    return true;
+}
+
+bool
+CompareIRGenerator::tryAttachObject(ValOperandId lhsId, ValOperandId rhsId)
+{
+    MOZ_ASSERT(IsEqualityOp(op_));
+
+    if (!lhsVal_.isObject() || !rhsVal_.isObject())
+        return false;
+
+    ObjOperandId lhsObjId = writer.guardIsObject(lhsId);
+    ObjOperandId rhsObjId = writer.guardIsObject(rhsId);
+    writer.compareObjectResult(op_, lhsObjId, rhsObjId);
+    writer.returnFromIC();
+
+    trackAttached("Object");
+    return true;
+}
+
+bool
+CompareIRGenerator::tryAttachSymbol(ValOperandId lhsId, ValOperandId rhsId)
+{
+    MOZ_ASSERT(IsEqualityOp(op_));
+
+    if (!lhsVal_.isSymbol() || !rhsVal_.isSymbol())
+        return false;
+
+    SymbolOperandId lhsSymId = writer.guardIsSymbol(lhsId);
+    SymbolOperandId rhsSymId = writer.guardIsSymbol(rhsId);
+    writer.compareSymbolResult(op_, lhsSymId, rhsSymId);
+    writer.returnFromIC();
+
+    trackAttached("Symbol");
+    return true;
+}
+
+bool
+CompareIRGenerator::tryAttachStub()
+{
+    MOZ_ASSERT(cacheKind_ == CacheKind::Compare);
+    MOZ_ASSERT(IsEqualityOp(op_) ||
+               op_ == JSOP_LE || op_ == JSOP_LT ||
+               op_ == JSOP_GE || op_ == JSOP_GT);
+
+    AutoAssertNoPendingException aanpe(cx_);
+
+    ValOperandId lhsId(writer.setInputOperandId(0));
+    ValOperandId rhsId(writer.setInputOperandId(1));
+
+    if (IsEqualityOp(op_)) {
+        if (tryAttachString(lhsId, rhsId))
+            return true;
+        if (tryAttachObject(lhsId, rhsId))
+            return true;
+        if (tryAttachSymbol(lhsId, rhsId))
+            return true;
+
+        trackNotAttached();
+        return false;
+    }
+
+    trackNotAttached();
+    return false;
+}
+
+void
+CompareIRGenerator::trackAttached(const char* name)
+{
+#ifdef JS_CACHEIR_SPEW
+    CacheIRSpewer& sp = CacheIRSpewer::singleton();
+    if (sp.enabled()) {
+        LockGuard<Mutex> guard(sp.lock());
+        sp.beginCache(guard, *this);
+        sp.valueProperty(guard, "lhs", lhsVal_);
+        sp.valueProperty(guard, "rhs", rhsVal_);
+        sp.attached(guard, name);
+        sp.endCache(guard);
+    }
+#endif
+}
+
+void
+CompareIRGenerator::trackNotAttached()
+{
+#ifdef JS_CACHEIR_SPEW
+    CacheIRSpewer& sp = CacheIRSpewer::singleton();
+    if (sp.enabled()) {
+        LockGuard<Mutex> guard(sp.lock());
+        sp.beginCache(guard, *this);
+        sp.valueProperty(guard, "lhs", lhsVal_);
+        sp.valueProperty(guard, "rhs", rhsVal_);
+        sp.endCache(guard);
+    }
+#endif
+}

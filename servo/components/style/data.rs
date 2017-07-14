@@ -4,15 +4,14 @@
 
 //! Per-node data used in style calculation.
 
-use arrayvec::ArrayVec;
 use context::SharedStyleContext;
 use dom::TElement;
 use invalidation::element::restyle_hints::RestyleHint;
-use properties::{AnimationRules, ComputedValues, PropertyDeclarationBlock};
+use properties::ComputedValues;
 use properties::longhands::display::computed_value as display;
 use rule_tree::StrongRuleNode;
 use selector_parser::{EAGER_PSEUDO_COUNT, PseudoElement, RestyleDamage};
-use shared_lock::{Locked, StylesheetGuards};
+use shared_lock::StylesheetGuards;
 use std::ops::{Deref, DerefMut};
 use stylearc::Arc;
 
@@ -105,7 +104,7 @@ impl RestyleData {
 /// not require duplicate allocations. We leverage the copy-on-write semantics of
 /// Arc::make_mut(), which is free (i.e. does not require atomic RMU operations)
 /// in servo_arc.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct EagerPseudoStyles(Option<Arc<EagerPseudoArray>>);
 
 #[derive(Debug, Default)]
@@ -157,20 +156,6 @@ impl EagerPseudoStyles {
         self.0.as_ref().and_then(|p| p[pseudo.eager_index()].as_ref())
     }
 
-    /// Returns a mutable reference to the style for a given eager pseudo, if it exists.
-    pub fn get_mut(&mut self, pseudo: &PseudoElement) -> Option<&mut Arc<ComputedValues>> {
-        debug_assert!(pseudo.is_eager());
-        match self.0 {
-            None => return None,
-            Some(ref mut arc) => Arc::make_mut(arc)[pseudo.eager_index()].as_mut(),
-        }
-    }
-
-    /// Returns true if the EagerPseudoStyles has the style for |pseudo|.
-    pub fn has(&self, pseudo: &PseudoElement) -> bool {
-        self.get(pseudo).is_some()
-    }
-
     /// Sets the style for the eager pseudo.
     pub fn set(&mut self, pseudo: &PseudoElement, value: Arc<ComputedValues>) {
         if self.0.is_none() {
@@ -179,62 +164,11 @@ impl EagerPseudoStyles {
         let arr = Arc::make_mut(self.0.as_mut().unwrap());
         arr[pseudo.eager_index()] = Some(value);
     }
-
-    /// Inserts a pseudo-element. The pseudo-element must not already exist.
-    pub fn insert(&mut self, pseudo: &PseudoElement, value: Arc<ComputedValues>) {
-        debug_assert!(!self.has(pseudo));
-        self.set(pseudo, value);
-    }
-
-    /// Removes a pseudo-element style if it exists, and returns it.
-    pub fn take(&mut self, pseudo: &PseudoElement) -> Option<Arc<ComputedValues>> {
-        let result = match self.0 {
-            None => return None,
-            Some(ref mut arc) => Arc::make_mut(arc)[pseudo.eager_index()].take(),
-        };
-        let empty = self.0.as_ref().unwrap().iter().all(|x| x.is_none());
-        if empty {
-            self.0 = None;
-        }
-        result
-    }
-
-    /// Returns a list of the pseudo-elements.
-    pub fn keys(&self) -> ArrayVec<[PseudoElement; EAGER_PSEUDO_COUNT]> {
-        let mut v = ArrayVec::new();
-        if let Some(ref arr) = self.0 {
-            for i in 0..EAGER_PSEUDO_COUNT {
-                if arr[i].is_some() {
-                    v.push(PseudoElement::from_eager_index(i));
-                }
-            }
-        }
-        v
-    }
-
-    /// Returns whether this map has the same set of pseudos as the given one.
-    pub fn has_same_pseudos_as(&self, other: &Self) -> bool {
-        // We could probably just compare self.keys() to other.keys(), but that
-        // seems like it'll involve a bunch more moving stuff around and
-        // whatnot.
-        match (&self.0, &other.0) {
-            (&Some(ref our_arr), &Some(ref other_arr)) => {
-                for i in 0..EAGER_PSEUDO_COUNT {
-                    if our_arr[i].is_some() != other_arr[i].is_some() {
-                        return false
-                    }
-                }
-                true
-            },
-            (&None, &None) => true,
-            _ => false,
-        }
-    }
 }
 
 /// The styles associated with a node, including the styles for any
 /// pseudo-elements.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ElementStyles {
     /// The element's style.
     pub primary: Option<Arc<ComputedValues>>,
@@ -242,25 +176,10 @@ pub struct ElementStyles {
     pub pseudos: EagerPseudoStyles,
 }
 
-impl Default for ElementStyles {
-    /// Construct an empty `ElementStyles`.
-    fn default() -> Self {
-        ElementStyles {
-            primary: None,
-            pseudos: EagerPseudoStyles(None),
-        }
-    }
-}
-
 impl ElementStyles {
     /// Returns the primary style.
     pub fn get_primary(&self) -> Option<&Arc<ComputedValues>> {
         self.primary.as_ref()
-    }
-
-    /// Returns the mutable primary style.
-    pub fn get_primary_mut(&mut self) -> Option<&mut Arc<ComputedValues>> {
-        self.primary.as_mut()
     }
 
     /// Returns the primary style.  Panic if no style available.
@@ -411,30 +330,5 @@ impl ElementData {
     /// Drops any restyle state from the element.
     pub fn clear_restyle_state(&mut self) {
         self.restyle.clear();
-    }
-
-    /// Returns SMIL overriden value if exists.
-    pub fn get_smil_override(&self) -> Option<&Arc<Locked<PropertyDeclarationBlock>>> {
-        if cfg!(feature = "servo") {
-            // Servo has no knowledge of a SMIL rule, so just avoid looking for it.
-            return None;
-        }
-
-        match self.styles.get_primary() {
-            Some(v) => v.rules().get_smil_animation_rule(),
-            None => None,
-        }
-    }
-
-    /// Returns AnimationRules that has processed during animation-only restyles.
-    pub fn get_animation_rules(&self) -> AnimationRules {
-        if cfg!(feature = "servo") {
-            return AnimationRules(None, None)
-        }
-
-        match self.styles.get_primary() {
-            Some(v) => v.rules().get_animation_rules(),
-            None => AnimationRules(None, None),
-        }
     }
 }

@@ -26,7 +26,7 @@ use style::properties::{CascadeFlags, ServoComputedValues};
 use style::selector_parser::{PseudoElement, PseudoElementCascadeType, SelectorImpl};
 use style::stylearc::Arc;
 use style::stylist::RuleInclusion;
-use webrender_traits::ClipId;
+use webrender_api::ClipId;
 
 #[derive(Copy, PartialEq, Clone, Debug)]
 pub enum PseudoElementType<T> {
@@ -346,7 +346,7 @@ pub trait ThreadSafeLayoutElement: Clone + Copy + Sized + Debug +
 
     #[inline]
     fn get_before_pseudo(&self) -> Option<Self> {
-        if self.style_data().styles.pseudos.has(&PseudoElement::Before) {
+        if self.style_data().styles.pseudos.get(&PseudoElement::Before).is_some() {
             Some(self.with_pseudo(PseudoElementType::Before(None)))
         } else {
             None
@@ -355,7 +355,7 @@ pub trait ThreadSafeLayoutElement: Clone + Copy + Sized + Debug +
 
     #[inline]
     fn get_after_pseudo(&self) -> Option<Self> {
-        if self.style_data().styles.pseudos.has(&PseudoElement::After) {
+        if self.style_data().styles.pseudos.get(&PseudoElement::After).is_some() {
             Some(self.with_pseudo(PseudoElementType::After(None)))
         } else {
             None

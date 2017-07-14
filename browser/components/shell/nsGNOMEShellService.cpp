@@ -32,6 +32,7 @@
 #include "nsIImageToPixbuf.h"
 #endif
 #include "nsXULAppAPI.h"
+#include "gfxPlatform.h"
 
 #include <glib.h>
 #include <glib-object.h>
@@ -85,6 +86,10 @@ nsresult
 nsGNOMEShellService::Init()
 {
   nsresult rv;
+
+  if (gfxPlatform::IsHeadless()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
   // GConf, GSettings or GIO _must_ be available, or we do not allow
   // CreateInstance to succeed.
@@ -284,7 +289,7 @@ nsGNOMEShellService::SetDefaultBrowser(bool aClaimAllTypes,
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsString brandShortName;
-    brandBundle->GetStringFromName(u"brandShortName",
+    brandBundle->GetStringFromName("brandShortName",
                                    getter_Copies(brandShortName));
 
     // use brandShortName as the application id.
@@ -402,7 +407,7 @@ nsGNOMEShellService::SetDesktopBackground(nsIDOMElement* aElement,
     rv = bundleService->CreateBundle(BRAND_PROPERTIES,
                                      getter_AddRefs(brandBundle));
     if (NS_SUCCEEDED(rv) && brandBundle) {
-      rv = brandBundle->GetStringFromName(u"brandShortName",
+      rv = brandBundle->GetStringFromName("brandShortName",
                                           getter_Copies(brandName));
       NS_ENSURE_SUCCESS(rv, rv);
     }

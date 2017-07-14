@@ -30,9 +30,10 @@ extern crate profile_traits;
 extern crate range;
 extern crate script_traits;
 extern crate selectors;
+extern crate servo_atoms;
 extern crate servo_url;
 extern crate style;
-extern crate webrender_traits;
+extern crate webrender_api;
 
 pub mod message;
 pub mod reporter;

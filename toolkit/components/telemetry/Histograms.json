@@ -2464,6 +2464,16 @@
     "releaseChannelCollection": "opt-out",
     "description": "Recorded once for each HTTP 401 response. The value records the type of authentication and the TLS-enabled status. (0=basic/clear, 1=basic/tls, 2=digest/clear, 3=digest/tls, 4=ntlm/clear, 5=ntlm/tls, 6=negotiate/clear, 7=negotiate/tls)"
   },
+  "HTTP_CHILD_OMT_STATS": {
+    "record_in_processes": ["content"],
+    "alert_emails": ["necko@mozilla.com"],
+    "bug_numbers": [1357682],
+    "expires_in_version": "61",
+    "kind": "categorical",
+    "keyed": true,
+    "description": "Stats about success rate of HTTP OMT request in content process, keyed by content policy.",
+    "labels": ["success", "successMainThread", "failListener", "failListenerChain", "notRequested"]
+  },
   "TCP_FAST_OPEN": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "61",
@@ -5973,22 +5983,24 @@
     "description": "Firefox: Time in ms spent updating UI in response to a tab switch"
   },
   "FX_TAB_SWITCH_TOTAL_MS": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "56",
+    "record_in_processes": ["main"],
+    "alert_emails": ["mconley@mozilla.com"],
+    "expires_in_version": "57",
     "kind": "exponential",
     "high": 1000,
     "n_buckets": 20,
     "releaseChannelCollection": "opt-out",
-    "description": "Firefox: Time in ms till a tab switch is complete including the first paint"
+    "description": "Firefox: Time in ms till a tab switch is complete including the first paint for non-e10s windows"
   },
   "FX_TAB_SWITCH_TOTAL_E10S_MS": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "56",
+    "record_in_processes": ["main"],
+    "alert_emails": ["mconley@mozilla.com"],
+    "expires_in_version": "60",
     "kind": "exponential",
     "high": 1000,
     "n_buckets": 20,
     "releaseChannelCollection": "opt-out",
-    "description": "Firefox: Time in ms between tab selection and tab content paint."
+    "description": "Firefox: Time in ms between tab selection and tab content paint in e10s windows"
   },
   "FX_TAB_SWITCH_SPINNER_VISIBLE_MS": {
     "record_in_processes": ["main", "content"],
@@ -8315,7 +8327,7 @@
     "record_in_processes": ["main", "content"],
     "alert_emails": ["carnold@mozilla.org"],
     "bug_numbers": [1275570],
-    "expires_in_version": "56",
+    "expires_in_version": "60",
     "kind": "count",
     "releaseChannelCollection": "opt-out",
     "description": "A counter incremented every time the browser enters print preview."
@@ -8324,7 +8336,7 @@
     "record_in_processes": ["main", "content"],
     "alert_emails": ["carnold@mozilla.org"],
     "bug_numbers": [1275570],
-    "expires_in_version": "56",
+    "expires_in_version": "60",
     "kind": "count",
     "releaseChannelCollection": "opt-out",
     "description": "A counter incremented every time the browser enters simplified mode on print preview."
@@ -8333,7 +8345,7 @@
     "record_in_processes": ["main", "content"],
      "alert_emails": ["carnold@mozilla.org"],
      "bug_numbers": [1287587],
-     "expires_in_version": "56",
+     "expires_in_version": "60",
      "kind": "count",
      "releaseChannelCollection": "opt-out",
      "description": "A counter incremented every time the simplified mode is unavailable on print preview."
@@ -8342,7 +8354,7 @@
     "record_in_processes": ["main", "content"],
     "alert_emails": ["carnold@mozilla.org"],
     "bug_numbers": [1306624],
-    "expires_in_version": "56",
+    "expires_in_version": "60",
     "kind": "count",
     "keyed": true,
     "releaseChannelCollection": "opt-out",
@@ -8352,7 +8364,7 @@
     "record_in_processes": ["main", "content"],
      "alert_emails": ["carnold@mozilla.org"],
      "bug_numbers": [1287587],
-     "expires_in_version": "56",
+     "expires_in_version": "60",
      "kind": "count",
      "keyed": true,
      "releaseChannelCollection": "opt-out",
@@ -13018,9 +13030,9 @@
   },
   "CONTENT_PAINT_TIME": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["danderson@mozilla.com"],
+    "alert_emails": ["danderson@mozilla.com","gfx-telemetry-alerts@mozilla.com"],
     "bug_numbers": [1309442],
-    "expires_in_version": "56",
+    "expires_in_version": "60",
     "kind": "exponential",
     "high": 1000,
     "n_buckets": 50,
@@ -13028,9 +13040,9 @@
   },
   "CONTENT_LARGE_PAINT_PHASE_WEIGHT": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["danderson@mozilla.com"],
+    "alert_emails": ["danderson@mozilla.com","gfx-telemetry-alerts@mozilla.com"],
     "bug_numbers": [1309442],
-    "expires_in_version": "56",
+    "expires_in_version": "60",
     "keyed": true,
     "kind": "linear",
     "high": 100,
@@ -13060,10 +13072,10 @@
     "description": "Time in MS that content is narrated in 10 second increments up to 5 minutes"
   },
   "TABCHILD_PAINT_TIME": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["content"],
     "alert_emails": ["mconley@mozilla.com"],
     "bug_numbers": [1313686],
-    "expires_in_version": "56",
+    "expires_in_version": "60",
     "kind": "exponential",
     "high": 1000,
     "n_buckets": 50,

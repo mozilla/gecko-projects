@@ -871,12 +871,12 @@ nsContentUtils::InitializeModifierStrings()
   nsXPIDLString modifierSeparator;
   if (bundle) {
     //macs use symbols for each modifier key, so fetch each from the bundle, which also covers i18n
-    bundle->GetStringFromName(u"VK_SHIFT", getter_Copies(shiftModifier));
-    bundle->GetStringFromName(u"VK_META", getter_Copies(metaModifier));
-    bundle->GetStringFromName(u"VK_WIN", getter_Copies(osModifier));
-    bundle->GetStringFromName(u"VK_ALT", getter_Copies(altModifier));
-    bundle->GetStringFromName(u"VK_CONTROL", getter_Copies(controlModifier));
-    bundle->GetStringFromName(u"MODIFIER_SEPARATOR", getter_Copies(modifierSeparator));
+    bundle->GetStringFromName("VK_SHIFT", getter_Copies(shiftModifier));
+    bundle->GetStringFromName("VK_META", getter_Copies(metaModifier));
+    bundle->GetStringFromName("VK_WIN", getter_Copies(osModifier));
+    bundle->GetStringFromName("VK_ALT", getter_Copies(altModifier));
+    bundle->GetStringFromName("VK_CONTROL", getter_Copies(controlModifier));
+    bundle->GetStringFromName("MODIFIER_SEPARATOR", getter_Copies(modifierSeparator));
   }
   //if any of these don't exist, we get  an empty string
   sShiftText = new nsString(shiftModifier);
@@ -949,6 +949,8 @@ nsContentUtils::InitializeEventTable() {
 
   // Subtract one from the length because of the trailing null
   for (uint32_t i = 0; i < ArrayLength(eventArray) - 1; ++i) {
+    MOZ_ASSERT(!sAtomEventTable->Lookup(eventArray[i].mAtom),
+               "Double-defining event name; fix your EventNameList.h");
     sAtomEventTable->Put(eventArray[i].mAtom, eventArray[i]);
     if (ShouldAddEventToStringEventTable(eventArray[i])) {
       sStringEventTable->Put(
@@ -3948,8 +3950,7 @@ nsresult nsContentUtils::GetLocalizedString(PropertiesFile aFile,
   NS_ENSURE_SUCCESS(rv, rv);
   nsIStringBundle *bundle = sStringBundles[aFile];
 
-  return bundle->GetStringFromName(NS_ConvertASCIItoUTF16(aKey).get(),
-                                   getter_Copies(aResult));
+  return bundle->GetStringFromName(aKey, getter_Copies(aResult));
 }
 
 /* static */
@@ -3964,11 +3965,10 @@ nsresult nsContentUtils::FormatLocalizedString(PropertiesFile aFile,
   nsIStringBundle *bundle = sStringBundles[aFile];
 
   if (!aParams || !aParamsLength) {
-    return bundle->GetStringFromName(NS_ConvertASCIItoUTF16(aKey).get(),
-                                     getter_Copies(aResult));
+    return bundle->GetStringFromName(aKey, getter_Copies(aResult));
   }
 
-  return bundle->FormatStringFromName(NS_ConvertASCIItoUTF16(aKey).get(),
+  return bundle->FormatStringFromName(aKey,
                                       aParams, aParamsLength,
                                       getter_Copies(aResult));
 }
@@ -6849,8 +6849,10 @@ nsContentUtils::IsUserFocusIgnored(nsINode* aNode)
 bool
 nsContentUtils::HasScrollgrab(nsIContent* aContent)
 {
-  nsGenericHTMLElement* element = nsGenericHTMLElement::FromContentOrNull(aContent);
-  return element && element->Scrollgrab();
+  // If we ever standardize this feature we'll want to hook this up properly
+  // again. For now we're removing all the DOM-side code related to it but
+  // leaving the layout and APZ handling for it in place.
+  return false;
 }
 
 void
@@ -7160,9 +7162,8 @@ nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
 {
   NS_ASSERTION(aDocument, "aDocument should be a valid pointer (not null)");
 
-  AutoJSAPI jsapi;
-  jsapi.Init();
-  JSContext* cx = jsapi.cx();
+  AutoJSContext cx;
+  AutoDisableJSInterruptCallback disabler(cx);
 
   // We can use the junk scope here, because we're just using it for
   // regexp evaluation, not actual script execution.
@@ -7458,9 +7459,9 @@ nsContentUtils::GetSelectionInTextControl(Selection* aSelection,
 
   // All the node pointers here are raw pointers for performance.  We shouldn't
   // be doing anything in this function that invalidates the node tree.
-  nsINode* startParent = range->GetStartParent();
+  nsINode* startContainer = range->GetStartContainer();
   uint32_t startOffset = range->StartOffset();
-  nsINode* endParent = range->GetEndParent();
+  nsINode* endContainer = range->GetEndContainer();
   uint32_t endOffset = range->EndOffset();
 
   // We have at most two children, consisting of an optional text node followed
@@ -7469,10 +7470,10 @@ nsContentUtils::GetSelectionInTextControl(Selection* aSelection,
   nsIContent* firstChild = aRoot->GetFirstChild();
 #ifdef DEBUG
   nsCOMPtr<nsIContent> lastChild = aRoot->GetLastChild();
-  NS_ASSERTION(startParent == aRoot || startParent == firstChild ||
-               startParent == lastChild, "Unexpected startParent");
-  NS_ASSERTION(endParent == aRoot || endParent == firstChild ||
-               endParent == lastChild, "Unexpected endParent");
+  NS_ASSERTION(startContainer == aRoot || startContainer == firstChild ||
+               startContainer == lastChild, "Unexpected startContainer");
+  NS_ASSERTION(endContainer == aRoot || endContainer == firstChild ||
+               endContainer == lastChild, "Unexpected endContainer");
   // firstChild is either text or a <br> (hence an element).
   MOZ_ASSERT_IF(firstChild,
                 firstChild->IsNodeOfType(nsINode::eTEXT) || firstChild->IsElement());
@@ -7487,12 +7488,12 @@ nsContentUtils::GetSelectionInTextControl(Selection* aSelection,
     // or the start of the root node, no change needed.  If it's in the root
     // node but not the start, or in the trailing <br>, we need to set the
     // offset to the end.
-    if ((startParent == aRoot && startOffset != 0) ||
-        (startParent != aRoot && startParent != firstChild)) {
+    if ((startContainer == aRoot && startOffset != 0) ||
+        (startContainer != aRoot && startContainer != firstChild)) {
       startOffset = firstChild->Length();
     }
-    if ((endParent == aRoot && endOffset != 0) ||
-        (endParent != aRoot && endParent != firstChild)) {
+    if ((endContainer == aRoot && endOffset != 0) ||
+        (endContainer != aRoot && endContainer != firstChild)) {
       endOffset = firstChild->Length();
     }
   }

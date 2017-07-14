@@ -65,7 +65,7 @@ net_traits = {path = "../net_traits"}
 num-traits = "0.1.32"
 offscreen_gl_context = { version = "0.11", features = ["serde"] }
 open = "1.1.1"
-parking_lot = "0.3"
+parking_lot = "0.4"
 phf = "0.7.18"
 profile_traits = {path = "../profile_traits"}
 range = {path = "../range"}
@@ -92,6 +92,6 @@ url = {version = "1.2", features = ["heap_size", "query_encoding"]}
 utf-8 = "0.7"
 uuid = {version = "0.5", features = ["v4"]}
 xml5ever = {version = "0.8", features = ["unstable"]}
-webrender_traits = {git = "https://github.com/servo/webrender", features = ["ipc"]}
+webrender_api = {git = "https://github.com/servo/webrender", features = ["ipc"]}
 webvr = {path = "../webvr"}
 webvr_traits = {path = "../webvr_traits"}

@@ -1485,9 +1485,8 @@ GetPropagatedScrollbarStylesForViewport(nsPresContext* aPresContext,
 
   // Check the style on the document root element
   StyleSetHandle styleSet = aPresContext->StyleSet();
-  RefPtr<nsStyleContext> rootStyle;
-  rootStyle = styleSet->ResolveStyleFor(docElement, nullptr,
-                                        LazyComputeBehavior::Allow);
+  RefPtr<nsStyleContext> rootStyle =
+    styleSet->ResolveStyleFor(docElement, nullptr, LazyComputeBehavior::Allow);
   if (CheckOverflow(rootStyle->StyleDisplay(), aStyles)) {
     // tell caller we stole the overflow style from the root element
     return docElement;
@@ -1514,9 +1513,9 @@ GetPropagatedScrollbarStylesForViewport(nsPresContext* aPresContext,
     return nullptr;
   }
 
-  RefPtr<nsStyleContext> bodyStyle;
-  bodyStyle = styleSet->ResolveStyleFor(bodyElement->AsElement(), rootStyle,
-                                        LazyComputeBehavior::Allow);
+  RefPtr<nsStyleContext> bodyStyle =
+    styleSet->ResolveStyleFor(bodyElement->AsElement(), rootStyle,
+                              LazyComputeBehavior::Allow);
 
   if (CheckOverflow(bodyStyle->StyleDisplay(), aStyles)) {
     // tell caller we stole the overflow style from the body element
@@ -1894,6 +1893,9 @@ nsPresContext::SysColorChangedInternal()
     LookAndFeel::Refresh();
     sLookAndFeelChanged = false;
   }
+
+  // Invalidate cached '-moz-windows-accent-color-applies' media query:
+  nsCSSRuleProcessor::FreeSystemMetrics();
 
   // Reset default background and foreground colors for the document since
   // they may be using system colors
@@ -3093,6 +3095,15 @@ nsPresContext::GetRestyleGeneration() const
     return 0;
   }
   return mRestyleManager->GetRestyleGeneration();
+}
+
+uint64_t
+nsPresContext::GetUndisplayedRestyleGeneration() const
+{
+  if (!mRestyleManager) {
+    return 0;
+  }
+  return mRestyleManager->GetUndisplayedRestyleGeneration();
 }
 
 nsBidi&

@@ -5,7 +5,6 @@
 
 package org.mozilla.gecko.home;
 
-import java.lang.ref.WeakReference;
 import java.util.concurrent.Future;
 
 import android.content.Context;
@@ -18,10 +17,7 @@ import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.TextView;
 
-import org.mozilla.gecko.AboutPages;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
@@ -35,14 +31,16 @@ import org.mozilla.gecko.icons.Icons;
 import org.mozilla.gecko.reader.ReaderModeUtils;
 import org.mozilla.gecko.reader.SavedReaderViewHelper;
 import org.mozilla.gecko.widget.FaviconView;
+import org.mozilla.gecko.widget.themed.ThemedLinearLayout;
+import org.mozilla.gecko.widget.themed.ThemedTextView;
 
-public class TwoLinePageRow extends LinearLayout
+public class TwoLinePageRow extends ThemedLinearLayout
                             implements Tabs.OnTabsChangedListener {
 
     protected static final int NO_ICON = 0;
 
-    private final TextView mTitle;
-    private final TextView mUrl;
+    private final ThemedTextView mTitle;
+    private final ThemedTextView mUrl;
     private final ImageView mStatusIcon;
 
     private int mSwitchToTabIconId;
@@ -70,8 +68,8 @@ public class TwoLinePageRow extends LinearLayout
         // Merge layouts lose their padding, so set it dynamically.
         ViewCompat.setPaddingRelative(this, 0, 0, (int) getResources().getDimension(R.dimen.page_row_edge_padding), 0);
 
-        mTitle = (TextView) findViewById(R.id.title);
-        mUrl = (TextView) findViewById(R.id.url);
+        mTitle = (ThemedTextView) findViewById(R.id.title);
+        mUrl = (ThemedTextView) findViewById(R.id.url);
         mStatusIcon = (ImageView) findViewById(R.id.status_icon_bookmark);
 
         mSwitchToTabIconId = NO_ICON;
@@ -205,13 +203,12 @@ public class TwoLinePageRow extends LinearLayout
     protected void updateDisplayedUrl() {
         final Tab selectedTab = Tabs.getInstance().getSelectedTab();
         final boolean isPrivate = (selectedTab != null) && (selectedTab.isPrivate());
-        final Tab.TabType type = selectedTab != null ? selectedTab.getType() : Tab.TabType.BROWSING;
 
         // We always want to display the underlying page url, however for readermode pages
         // we navigate to the about:reader equivalent, hence we need to use that url when finding
         // existing tabs
         final String navigationUrl = mHasReaderCacheItem ? ReaderModeUtils.getAboutReaderForUrl(mPageUrl) : mPageUrl;
-        Tab tab = Tabs.getInstance().getFirstTabForUrl(navigationUrl, isPrivate, type);
+        Tab tab = Tabs.getInstance().getFirstTabForUrl(navigationUrl, isPrivate);
 
 
         if (!mShowIcons || tab == null) {
@@ -291,6 +288,14 @@ public class TwoLinePageRow extends LinearLayout
         }
 
         updateDisplayedUrl(url, hasReaderCacheItem);
+    }
+
+    @Override
+    public void setPrivateMode(boolean isPrivate) {
+        super.setPrivateMode(isPrivate);
+
+        mTitle.setPrivateMode(isPrivate);
+        mUrl.setPrivateMode(isPrivate);
     }
 
     /**

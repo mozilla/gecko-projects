@@ -1261,16 +1261,16 @@ pref("browser.newtabpage.enabled", true);
 sticky_pref("browser.newtabpage.enhanced", true);
 
 // enables Activity Stream inspired layout
-pref("browser.newtabpage.compact", true);
+pref("browser.newtabpage.compact", false);
 
 // enables showing basic placeholders for missing thumbnails
 pref("browser.newtabpage.thumbnailPlaceholder", false);
 
 // number of rows of newtab grid
-pref("browser.newtabpage.rows", 2);
+pref("browser.newtabpage.rows", 3);
 
 // number of columns of newtab grid
-pref("browser.newtabpage.columns", 6);
+pref("browser.newtabpage.columns", 5);
 
 // directory tiles download URL
 pref("browser.newtabpage.directory.source", "https://tiles.services.mozilla.com/v3/links/fetch/%LOCALE%/%CHANNEL%");
@@ -1704,6 +1704,9 @@ pref("browser.onboarding.hidden", false);
 // So use `browser.onboarding.notification.finished` to let the AS page know
 // if our notification is finished and safe to show their snippet.
 pref("browser.onboarding.notification.finished", false);
+pref("browser.onboarding.notification.mute-duration-on-first-session-ms", 300000); // 5 mins
+pref("browser.onboarding.notification.max-life-time-per-tour-ms", 432000000); // 5 days
+pref("browser.onboarding.notification.max-prompt-count-per-tour", 8);
 pref("browser.onboarding.newtour", "private,addons,customize,search,default,sync");
 pref("browser.onboarding.updatetour", "");
 

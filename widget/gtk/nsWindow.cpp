@@ -3490,7 +3490,7 @@ GetBrandName(nsXPIDLString& brandName)
 
     if (bundle)
         bundle->GetStringFromName(
-            u"brandShortName",
+            "brandShortName",
             getter_Copies(brandName));
 
     if (brandName.IsEmpty())
@@ -6496,7 +6496,7 @@ nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
       return mLayerManager;
     }
 
-    if (!mLayerManager &&
+    if (!mLayerManager && !IsComposited() &&
         eTransparencyTransparent == GetTransparencyMode())
     {
         mLayerManager = CreateBasicLayerManager();

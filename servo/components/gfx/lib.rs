@@ -3,16 +3,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // For SIMD
-#![cfg_attr(any(target_os = "linux", target_os = "android"), feature(alloc, allocator_api))]
+#![cfg_attr(any(target_os = "linux", target_os = "android"), feature(allocator_api))]
 #![feature(box_syntax)]
 #![feature(cfg_target_feature)]
 #![feature(range_contains)]
 #![feature(unique)]
 
 #![deny(unsafe_code)]
-
-#[cfg(any(target_os = "linux", target_os = "android"))]
-extern crate alloc;
 
 extern crate app_units;
 #[macro_use]
@@ -66,7 +63,7 @@ extern crate style_traits;
 extern crate time;
 extern crate unicode_bidi;
 extern crate unicode_script;
-extern crate webrender_traits;
+extern crate webrender_api;
 extern crate xi_unicode;
 #[cfg(target_os = "android")]
 extern crate xml5ever;

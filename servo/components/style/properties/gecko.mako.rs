@@ -125,7 +125,7 @@ impl ComputedValues {
             custom_properties: None,
             writing_mode: WritingMode::empty(), // FIXME(bz): This seems dubious
             font_computation_data: FontComputationData::default_values(),
-            flags: ComputedValueFlags::initial(),
+            flags: ComputedValueFlags::empty(),
             rules: None,
             visited_style: None,
             % for style_struct in data.style_structs:
@@ -190,6 +190,11 @@ impl ComputedValues {
     /// StyleBuilder::for_inheritance.
     pub fn clone_visited_style(&self) -> Option<Arc<ComputedValues>> {
         self.visited_style.clone()
+    }
+
+    /// Gets a reference to the custom properties map (if one exists).
+    pub fn get_custom_properties(&self) -> Option<<&::custom_properties::CustomPropertiesMap> {
+        self.custom_properties.as_ref().map(|x| &**x)
     }
 
     pub fn custom_properties(&self) -> Option<Arc<CustomPropertiesMap>> {
@@ -1173,7 +1178,7 @@ fn static_assert() {
         BorderImageSlice {
             offsets:
                 NumberOrPercentageRect::from_gecko_rect(&self.gecko.mBorderImageSlice)
-                    .expect("mBorderImageSlice[${side.index}] could not convert to NumberOrPercentageRect"),
+                    .expect("mBorderImageSlice[${side}] could not convert to NumberOrPercentageRect"),
             fill: self.gecko.mBorderImageFill as u32 == NS_STYLE_BORDER_IMAGE_SLICE_FILL
         }
     }
@@ -1517,7 +1522,7 @@ fn static_assert() {
 
         // NB: This is needed to correctly handling the initial value of
         // outline-width when outline-style changes, see the
-        // update_border_${side} comment for more details.
+        // update_border_${side.ident} comment for more details.
         self.gecko.mActualOutlineWidth = self.gecko.mOutlineWidth;
     }
 
@@ -4514,7 +4519,7 @@ clip-path
                 Cursor::Pointer => structs::NS_STYLE_CURSOR_POINTER,
                 Cursor::ContextMenu => structs::NS_STYLE_CURSOR_CONTEXT_MENU,
                 Cursor::Help => structs::NS_STYLE_CURSOR_HELP,
-                Cursor::Progress => structs::NS_STYLE_CURSOR_DEFAULT, // Gecko doesn't support "progress" yet
+                Cursor::Progress => structs::NS_STYLE_CURSOR_SPINNING,
                 Cursor::Wait => structs::NS_STYLE_CURSOR_WAIT,
                 Cursor::Cell => structs::NS_STYLE_CURSOR_CELL,
                 Cursor::Crosshair => structs::NS_STYLE_CURSOR_CROSSHAIR,

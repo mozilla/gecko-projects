@@ -2302,7 +2302,7 @@ dnl ========================================================
 if test -z "$gonkdir" ; then
     case "$MOZ_BUILD_APP" in
     mobile/android)
-        MOZ_ANDROID_SDK(23, 23.0.3 23.0.1, 25.3.1)
+        MOZ_ANDROID_SDK(23, 23, 23.0.3 23.0.1, 25.3.2)
         ;;
     esac
 fi
@@ -5204,7 +5204,6 @@ AC_SUBST_LIST(VPX_ASFLAGS)
 AC_SUBST(VPX_AS_CONVERSION)
 AC_SUBST(VPX_X86_ASM)
 AC_SUBST(VPX_ARM_ASM)
-AC_SUBST(MOZ_CODE_COVERAGE)
 AC_SUBST(LIBJPEG_TURBO_USE_YASM)
 AC_SUBST_LIST(LIBJPEG_TURBO_ASFLAGS)
 AC_SUBST(MOZ_LIBAV_FFT)

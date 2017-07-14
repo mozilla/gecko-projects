@@ -49,7 +49,7 @@ pub extern crate servo_geometry;
 pub extern crate servo_url;
 pub extern crate style;
 pub extern crate style_traits;
-pub extern crate webrender_traits;
+pub extern crate webrender_api;
 pub extern crate webvr;
 pub extern crate webvr_traits;
 
@@ -175,8 +175,8 @@ impl<Window> Browser<Window> where Window: WindowMethods + 'static {
             };
 
             let framebuffer_size = window.framebuffer_size();
-            let framebuffer_size = webrender_traits::DeviceUintSize::new(framebuffer_size.width,
-                                                                         framebuffer_size.height);
+            let framebuffer_size = webrender_api::DeviceUintSize::new(framebuffer_size.width,
+                                                                      framebuffer_size.height);
 
             webrender::Renderer::new(window.gl(), webrender::RendererOptions {
                 device_pixel_ratio: device_pixel_ratio,
@@ -244,20 +244,12 @@ impl<Window> Browser<Window> where Window: WindowMethods + 'static {
         self.compositor.handle_events(events)
     }
 
-    pub fn set_webrender_profiler_enabled(&mut self, enabled: bool) {
-        self.compositor.set_webrender_profiler_enabled(enabled);
-    }
-
     pub fn repaint_synchronously(&mut self) {
         self.compositor.repaint_synchronously()
     }
 
     pub fn pinch_zoom_level(&self) -> f32 {
         self.compositor.pinch_zoom_level()
-    }
-
-    pub fn request_title_for_main_frame(&self) {
-        self.compositor.title_for_main_frame()
     }
 
     pub fn setup_logging(&self) {
@@ -295,7 +287,7 @@ fn create_constellation(user_agent: Cow<'static, str>,
                         devtools_chan: Option<Sender<devtools_traits::DevtoolsControlMsg>>,
                         supports_clipboard: bool,
                         webrender: &webrender::Renderer,
-                        webrender_api_sender: webrender_traits::RenderApiSender)
+                        webrender_api_sender: webrender_api::RenderApiSender)
                         -> (Sender<ConstellationMsg>, SWManagerSenders) {
     let bluetooth_thread: IpcSender<BluetoothRequest> = BluetoothThreadFactory::new();
 

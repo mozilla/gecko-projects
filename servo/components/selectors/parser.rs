@@ -131,6 +131,12 @@ pub trait Parser<'i> {
     type Impl: SelectorImpl;
     type Error: 'i;
 
+    /// Whether the name is a pseudo-element that can be specified with
+    /// the single colon syntax in addition to the double-colon syntax.
+    fn is_pseudo_element_allows_single_colon(name: &CompactCowStr<'i>) -> bool {
+        is_css2_pseudo_element(name)
+    }
+
     /// This function can return an "Err" pseudo-element in order to support CSS2.1
     /// pseudo-elements.
     fn parse_non_ts_pseudo_class(&self, name: CompactCowStr<'i>)
@@ -153,6 +159,13 @@ pub trait Parser<'i> {
         Err(ParseError::Custom(SelectorParseError::UnexpectedIdent(name)))
     }
 
+    fn parse_functional_pseudo_element<'t>
+        (&self, name: CompactCowStr<'i>, _arguments: &mut CssParser<'i, 't>)
+         -> Result<<Self::Impl as SelectorImpl>::PseudoElement,
+                   ParseError<'i, SelectorParseError<'i, Self::Error>>> {
+        Err(ParseError::Custom(SelectorParseError::UnexpectedIdent(name)))
+    }
+
     fn default_namespace(&self) -> Option<<Self::Impl as SelectorImpl>::NamespaceUrl> {
         None
     }
@@ -164,27 +177,7 @@ pub trait Parser<'i> {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct SelectorAndHashes<Impl: SelectorImpl> {
-    pub selector: Selector<Impl>,
-    pub hashes: AncestorHashes,
-}
-
-impl<Impl: SelectorImpl> SelectorAndHashes<Impl> {
-    pub fn new(selector: Selector<Impl>) -> Self {
-        let hashes = AncestorHashes::new(&selector);
-        Self::new_with_hashes(selector, hashes)
-    }
-
-    pub fn new_with_hashes(selector: Selector<Impl>, hashes: AncestorHashes) -> Self {
-        SelectorAndHashes {
-            selector: selector,
-            hashes: hashes,
-        }
-    }
-}
-
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub struct SelectorList<Impl: SelectorImpl>(pub Vec<SelectorAndHashes<Impl>>);
+pub struct SelectorList<Impl: SelectorImpl>(pub Vec<Selector<Impl>>);
 
 impl<Impl: SelectorImpl> SelectorList<Impl> {
     /// Parse a comma-separated list of Selectors.
@@ -194,13 +187,13 @@ impl<Impl: SelectorImpl> SelectorList<Impl> {
     pub fn parse<'i, 't, P, E>(parser: &P, input: &mut CssParser<'i, 't>)
                                -> Result<Self, ParseError<'i, SelectorParseError<'i, E>>>
     where P: Parser<'i, Impl=Impl, Error=E> {
-        input.parse_comma_separated(|input| parse_selector(parser, input).map(SelectorAndHashes::new))
+        input.parse_comma_separated(|input| parse_selector(parser, input))
              .map(SelectorList)
     }
 
     /// Creates a SelectorList from a Vec of selectors. Used in tests.
     pub fn from_vec(v: Vec<Selector<Impl>>) -> Self {
-        SelectorList(v.into_iter().map(SelectorAndHashes::new).collect())
+        SelectorList(v)
     }
 }
 
@@ -748,10 +741,10 @@ impl<Impl: SelectorImpl> ToCss for SelectorList<Impl> {
         let mut iter = self.0.iter();
         let first = iter.next()
             .expect("Empty SelectorList, should contain at least one selector");
-        first.selector.to_css(dest)?;
-        for selector_and_hashes in iter {
+        first.to_css(dest)?;
+        for selector in iter {
             dest.write_str(", ")?;
-            selector_and_hashes.selector.to_css(dest)?;
+            selector.to_css(dest)?;
         }
         Ok(())
     }
@@ -1471,6 +1464,17 @@ where Impl: SelectorImpl, F: FnOnce(i32, i32) -> Component<Impl> {
 }
 
 
+/// Returns whether the name corresponds to a CSS2 pseudo-element that
+/// can be specified with the single colon syntax (in addition to the
+/// double-colon syntax, which can be used for all pseudo-elements).
+pub fn is_css2_pseudo_element<'i>(name: &CompactCowStr<'i>) -> bool {
+    // ** Do not add to this list! **
+    return name.eq_ignore_ascii_case("before") ||
+           name.eq_ignore_ascii_case("after") ||
+           name.eq_ignore_ascii_case("first-line") ||
+           name.eq_ignore_ascii_case("first-letter");
+}
+
 /// Parse a simple selector other than a type selector.
 ///
 /// * `Err(())`: Invalid selector, abort
@@ -1490,13 +1494,12 @@ fn parse_one_simple_selector<'i, 't, P, E, Impl>(parser: &P,
             Ok(Some(SimpleSelectorParseResult::SimpleSelector(id)))
         }
         Ok(Token::Delim('.')) => {
-            match input.next_including_whitespace() {
-                Ok(Token::Ident(class)) => {
+            match input.next_including_whitespace()? {
+                Token::Ident(class) => {
                     let class = Component::Class(from_cow_str(class.into()));
                     Ok(Some(SimpleSelectorParseResult::SimpleSelector(class)))
                 }
-                Ok(t) => Err(ParseError::Basic(BasicParseError::UnexpectedToken(t))),
-                Err(e) => Err(ParseError::Basic(e)),
+                t => Err(ParseError::Basic(BasicParseError::UnexpectedToken(t))),
             }
         }
         Ok(Token::SquareBracketBlock) => {
@@ -1504,39 +1507,35 @@ fn parse_one_simple_selector<'i, 't, P, E, Impl>(parser: &P,
             Ok(Some(SimpleSelectorParseResult::SimpleSelector(attr)))
         }
         Ok(Token::Colon) => {
-            match input.next_including_whitespace() {
-                Ok(Token::Ident(name)) => {
-                    // Supported CSS 2.1 pseudo-elements only.
-                    // ** Do not add to this list! **
-                    if name.eq_ignore_ascii_case("before") ||
-                       name.eq_ignore_ascii_case("after") ||
-                       name.eq_ignore_ascii_case("first-line") ||
-                       name.eq_ignore_ascii_case("first-letter") {
-                        let pseudo_element = P::parse_pseudo_element(parser, name)?;
-                        Ok(Some(SimpleSelectorParseResult::PseudoElement(pseudo_element)))
-                    } else {
-                        let pseudo_class = parse_simple_pseudo_class(parser, name)?;
-                        Ok(Some(SimpleSelectorParseResult::SimpleSelector(pseudo_class)))
-                    }
-                }
-                Ok(Token::Function(name)) => {
-                    let pseudo = input.parse_nested_block(|input| {
+            let (is_single_colon, next_token) = match input.next_including_whitespace()? {
+                Token::Colon => (false, input.next_including_whitespace()?),
+                t => (true, t),
+            };
+            let (name, is_functional) = match next_token {
+                Token::Ident(name) => (name, false),
+                Token::Function(name) => (name, true),
+                t => return Err(ParseError::Basic(BasicParseError::UnexpectedToken(t))),
+            };
+            let is_pseudo_element = !is_single_colon ||
+                P::is_pseudo_element_allows_single_colon(&name);
+            if is_pseudo_element {
+                let pseudo_element = if is_functional {
+                    input.parse_nested_block(|input| {
+                        P::parse_functional_pseudo_element(parser, name, input)
+                    })?
+                } else {
+                    P::parse_pseudo_element(parser, name)?
+                };
+                Ok(Some(SimpleSelectorParseResult::PseudoElement(pseudo_element)))
+            } else {
+                let pseudo_class = if is_functional {
+                    input.parse_nested_block(|input| {
                         parse_functional_pseudo_class(parser, input, name, inside_negation)
-                    })?;
-                    Ok(Some(SimpleSelectorParseResult::SimpleSelector(pseudo)))
-                }
-                Ok(Token::Colon) => {
-                    match input.next_including_whitespace() {
-                        Ok(Token::Ident(name)) => {
-                            let pseudo = P::parse_pseudo_element(parser, name)?;
-                            Ok(Some(SimpleSelectorParseResult::PseudoElement(pseudo)))
-                        }
-                        Ok(t) => Err(ParseError::Basic(BasicParseError::UnexpectedToken(t))),
-                        Err(e) => Err(ParseError::Basic(e)),
-                    }
-                }
-                Ok(t) => Err(ParseError::Basic(BasicParseError::UnexpectedToken(t))),
-                Err(e) => Err(ParseError::Basic(e)),
+                    })?
+                } else {
+                    parse_simple_pseudo_class(parser, name)?
+                };
+                Ok(Some(SimpleSelectorParseResult::SimpleSelector(pseudo_class)))
             }
         }
         _ => {
@@ -1742,7 +1741,7 @@ pub mod tests {
         let result = SelectorList::parse(parser, &mut CssParser::new(&mut parser_input));
         if let Ok(ref selectors) = result {
             assert_eq!(selectors.0.len(), 1);
-            assert_eq!(selectors.0[0].selector.to_css_string(), input);
+            assert_eq!(selectors.0[0].to_css_string(), input);
         }
         result
     }
@@ -1934,7 +1933,7 @@ pub mod tests {
                 ].into_boxed_slice())
             ), specificity(0, 0, 1))
         ))));
-        assert_eq!(parse("[attr |= \"foo\"]"), Ok(SelectorList::from_vec(vec!(
+        assert_eq!(parse("[attr|=\"foo\"]"), Ok(SelectorList::from_vec(vec!(
             Selector::from_vec(vec!(
                 Component::AttributeInNoNamespace {
                     local_name: DummyAtom::from("attr"),
@@ -1993,7 +1992,7 @@ pub mod tests {
         parser.default_ns = None;
         assert!(parse(":not(#provel.old)").is_err());
         assert!(parse(":not(#provel > old)").is_err());
-        assert!(parse("table[rules]:not([rules = \"none\"]):not([rules = \"\"])").is_ok());
+        assert!(parse("table[rules]:not([rules=\"none\"]):not([rules=\"\"])").is_ok());
         assert_eq!(parse(":not(#provel)"), Ok(SelectorList::from_vec(vec!(
             Selector::from_vec(vec!(Component::Negation(vec!(
                     Component::ID(DummyAtom::from("provel")),
@@ -2047,7 +2046,7 @@ pub mod tests {
 
     #[test]
     fn test_pseudo_iter() {
-        let selector = &parse("q::before").unwrap().0[0].selector;
+        let selector = &parse("q::before").unwrap().0[0];
         assert!(!selector.is_universal());
         let mut iter = selector.iter();
         assert_eq!(iter.next(), Some(&Component::PseudoElement(PseudoElement::Before)));
@@ -2061,13 +2060,13 @@ pub mod tests {
 
     #[test]
     fn test_universal() {
-        let selector = &parse("*|*::before").unwrap().0[0].selector;
+        let selector = &parse("*|*::before").unwrap().0[0];
         assert!(selector.is_universal());
     }
 
     #[test]
     fn test_empty_pseudo_iter() {
-        let selector = &parse("::before").unwrap().0[0].selector;
+        let selector = &parse("::before").unwrap().0[0];
         assert!(selector.is_universal());
         let mut iter = selector.iter();
         assert_eq!(iter.next(), Some(&Component::PseudoElement(PseudoElement::Before)));
@@ -2093,11 +2092,11 @@ pub mod tests {
     #[test]
     fn visitor() {
         let mut test_visitor = TestVisitor { seen: vec![], };
-        parse(":not(:hover) ~ label").unwrap().0[0].selector.visit(&mut test_visitor);
+        parse(":not(:hover) ~ label").unwrap().0[0].visit(&mut test_visitor);
         assert!(test_visitor.seen.contains(&":hover".into()));
 
         let mut test_visitor = TestVisitor { seen: vec![], };
-        parse("::before:hover").unwrap().0[0].selector.visit(&mut test_visitor);
+        parse("::before:hover").unwrap().0[0].visit(&mut test_visitor);
         assert!(test_visitor.seen.contains(&":hover".into()));
     }
 }

@@ -35,16 +35,6 @@ macro_rules! impl_gecko_keyword_conversions {
 // Define ToComputedValue, ToCss, and other boilerplate for a specified value
 // which is of the form `enum SpecifiedValue {Value(..), System(SystemFont)}`
 <%def name="simple_system_boilerplate(name)">
-    impl ToCss for SpecifiedValue {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            match *self {
-                SpecifiedValue::Value(ref v) => v.to_css(dest),
-                SpecifiedValue::System(_) => Ok(())
-            }
-        }
-    }
-
-
     impl SpecifiedValue {
         pub fn system_font(f: SystemFont) -> Self {
             SpecifiedValue::System(f)
@@ -366,7 +356,7 @@ macro_rules! impl_gecko_keyword_conversions {
                     }
                     Ok(())
                 }
-                _ => Ok(())
+                SpecifiedValue::System(sys) => sys.to_css(dest),
             }
         }
     }
@@ -409,14 +399,12 @@ ${helpers.single_keyword_system("font-variant-caps",
 
 <%helpers:longhand name="font-weight" need_clone="True" animation_value_type="ComputedValue"
                    spec="https://drafts.csswg.org/css-fonts/#propdef-font-weight">
-    use std::fmt;
-    use style_traits::ToCss;
     use properties::longhands::system_font::SystemFont;
 
     no_viewport_percentage!(SpecifiedValue);
 
-    #[derive(Debug, Clone, PartialEq, Eq, Copy)]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, ToCss)]
     pub enum SpecifiedValue {
         Normal,
         Bold,
@@ -424,19 +412,6 @@ ${helpers.single_keyword_system("font-variant-caps",
         Lighter,
         Weight(computed_value::T),
         System(SystemFont),
-    }
-
-    impl ToCss for SpecifiedValue {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            match *self {
-                SpecifiedValue::Normal => dest.write_str("normal"),
-                SpecifiedValue::Bold => dest.write_str("bold"),
-                SpecifiedValue::Bolder => dest.write_str("bolder"),
-                SpecifiedValue::Lighter => dest.write_str("lighter"),
-                SpecifiedValue::Weight(weight) => weight.to_css(dest),
-                SpecifiedValue::System(_) => Ok(())
-            }
-        }
     }
 
     /// normal | bold | bolder | lighter | 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900
@@ -602,7 +577,7 @@ ${helpers.single_keyword_system("font-variant-caps",
                 SpecifiedValue::Keyword(kw, _) => kw.to_css(dest),
                 SpecifiedValue::Smaller => dest.write_str("smaller"),
                 SpecifiedValue::Larger => dest.write_str("larger"),
-                SpecifiedValue::System(_) => Ok(()),
+                SpecifiedValue::System(sys) => sys.to_css(dest),
             }
         }
     }
@@ -1013,29 +988,15 @@ ${helpers.single_keyword_system("font-variant-caps",
 <%helpers:longhand products="gecko" name="font-size-adjust" animation_value_type="ComputedValue"
                    spec="https://drafts.csswg.org/css-fonts/#propdef-font-size-adjust">
     use properties::longhands::system_font::SystemFont;
-    use std::fmt;
-    use style_traits::ToCss;
 
     no_viewport_percentage!(SpecifiedValue);
 
-    #[derive(Copy, Clone, Debug, PartialEq)]
+    #[derive(Clone, Copy, Debug, PartialEq, ToCss)]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub enum SpecifiedValue {
         None,
         Number(specified::Number),
         System(SystemFont),
-    }
-
-    impl ToCss for SpecifiedValue {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result
-            where W: fmt::Write,
-        {
-            match *self {
-                SpecifiedValue::None => dest.write_str("none"),
-                SpecifiedValue::Number(number) => number.to_css(dest),
-                SpecifiedValue::System(_) => Ok(()),
-            }
-        }
     }
 
     impl ToComputedValue for SpecifiedValue {
@@ -1272,7 +1233,7 @@ ${helpers.single_keyword_system("font-kerning",
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub struct VariantAlternatesList(pub Box<[VariantAlternates]>);
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, ToCss)]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
     pub enum SpecifiedValue {
         Value(VariantAlternatesList),
@@ -1481,7 +1442,7 @@ macro_rules! exclusive_value {
     }
 
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, ToCss)]
     pub enum SpecifiedValue {
         Value(VariantEastAsian),
         System(SystemFont)
@@ -1626,7 +1587,7 @@ macro_rules! exclusive_value {
     }
 
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, ToCss)]
     pub enum SpecifiedValue {
         Value(VariantLigatures),
         System(SystemFont)
@@ -1785,7 +1746,7 @@ macro_rules! exclusive_value {
 
 
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, ToCss)]
     pub enum SpecifiedValue {
         Value(VariantNumeric),
         System(SystemFont)
@@ -1920,11 +1881,9 @@ ${helpers.single_keyword_system("font-variant-position",
                    extra_prefixes="moz" boxed="True"
                    spec="https://drafts.csswg.org/css-fonts/#propdef-font-feature-settings">
     use properties::longhands::system_font::SystemFont;
-    use std::fmt;
-    use style_traits::ToCss;
     use values::generics::FontSettings;
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, ToCss)]
     pub enum SpecifiedValue {
         Value(computed_value::T),
         System(SystemFont)
@@ -2012,7 +1971,7 @@ https://drafts.csswg.org/css-fonts-4/#low-level-font-variation-settings-control-
             match *self {
                 SpecifiedValue::Normal => dest.write_str("normal"),
                 SpecifiedValue::Override(ref lang) => lang.to_css(dest),
-                SpecifiedValue::System(_) => Ok(())
+                SpecifiedValue::System(sys) => sys.to_css(dest),
             }
         }
     }
@@ -2380,8 +2339,9 @@ ${helpers.single_keyword("-moz-math-variant",
         //! whenever a font longhand on the same element needs the system font.
 
         use app_units::Au;
-        use cssparser::Parser;
+        use cssparser::{Parser, ToCss};
         use properties::longhands;
+        use std::fmt;
         use std::hash::{Hash, Hasher};
         use style_traits::ParseError;
         use values::computed::{ToComputedValue, Context};
@@ -2513,6 +2473,14 @@ ${helpers.single_keyword("-moz-math-variant",
                 }
             }
         }
+
+        impl ToCss for SystemFont {
+            fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+                // We may want to do something better in the future, see
+                // w3c/csswg-drafts#1586.
+                dest.write_str("-moz-use-system-font")
+            }
+        }
     }
 % else:
     pub mod system_font {
@@ -2522,7 +2490,7 @@ ${helpers.single_keyword("-moz-math-variant",
         // a lot of code with `if product == gecko` conditionals, we have a
         // dummy system font module that does nothing
 
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, ToCss)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         /// void enum for system font, can never exist
         pub enum SystemFont {}

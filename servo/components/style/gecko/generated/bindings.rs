@@ -804,6 +804,9 @@ extern "C" {
      -> f64;
 }
 extern "C" {
+    pub fn Gecko_IsFramesTimingEnabled() -> bool;
+}
+extern "C" {
     pub fn Gecko_AnimationGetBaseStyle(aBaseStyles:
                                            *mut ::std::os::raw::c_void,
                                        aProperty: nsCSSPropertyID)
@@ -2660,7 +2663,6 @@ extern "C" {
     pub fn Servo_ComputedValues_GetForAnonymousBox(parent_style_or_null:
                                                        ServoComputedValuesBorrowedOrNull,
                                                    pseudo_tag: *mut nsIAtom,
-                                                   skip_display_fixup: bool,
                                                    set:
                                                        RawServoStyleSetBorrowed)
      -> ServoComputedValuesStrong;
@@ -2676,6 +2678,18 @@ extern "C" {
     pub fn Servo_ComputedValues_GetVisitedStyle(values:
                                                     ServoComputedValuesBorrowed)
      -> ServoComputedValuesStrong;
+}
+extern "C" {
+    pub fn Servo_ComputedValues_GetStyleBits(values:
+                                                 ServoComputedValuesBorrowed)
+     -> u64;
+}
+extern "C" {
+    pub fn Servo_ComputedValues_EqualCustomProperties(first:
+                                                          ServoComputedValuesBorrowed,
+                                                      second:
+                                                          ServoComputedValuesBorrowed)
+     -> bool;
 }
 extern "C" {
     pub fn Servo_ComputedValues_GetStyleRuleList(values:
@@ -2749,6 +2763,8 @@ extern "C" {
                                                               RawServoStyleSetBorrowed,
                                                           element:
                                                               RawGeckoElementBorrowed,
+                                                          existing_style:
+                                                              ServoComputedValuesBorrowed,
                                                           snapshots:
                                                               *const ServoElementSnapshotTable,
                                                           pseudo_type:

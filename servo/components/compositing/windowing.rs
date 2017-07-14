@@ -16,7 +16,7 @@ use servo_url::ServoUrl;
 use std::fmt::{Debug, Error, Formatter};
 use std::rc::Rc;
 use style_traits::cursor::Cursor;
-use webrender_traits::ScrollLocation;
+use webrender_api::ScrollLocation;
 
 #[derive(Clone)]
 pub enum MouseWindowEvent {
@@ -44,9 +44,6 @@ pub enum WindowEvent {
     /// Sent when part of the window is marked dirty and needs to be redrawn. Before sending this
     /// message, the window must make the same GL context as in `PrepareRenderingEvent` current.
     Refresh,
-    /// Sent to initialize the GL context. The windowing system must have a valid, current GL
-    /// context when this message is sent.
-    InitializeCompositing,
     /// Sent when the window is resized.
     Resize(TypedSize2D<u32, DevicePixel>),
     /// Touchpad Pressure
@@ -76,6 +73,8 @@ pub enum WindowEvent {
     KeyEvent(Option<char>, Key, KeyState, KeyModifiers),
     /// Sent when Ctr+R/Apple+R is called to reload the current page.
     Reload,
+    /// Toggles the Web renderer profiler on and off
+    ToggleWebRenderProfiler,
 }
 
 impl Debug for WindowEvent {
@@ -83,7 +82,6 @@ impl Debug for WindowEvent {
         match *self {
             WindowEvent::Idle => write!(f, "Idle"),
             WindowEvent::Refresh => write!(f, "Refresh"),
-            WindowEvent::InitializeCompositing => write!(f, "InitializeCompositing"),
             WindowEvent::Resize(..) => write!(f, "Resize"),
             WindowEvent::TouchpadPressure(..) => write!(f, "TouchpadPressure"),
             WindowEvent::KeyEvent(..) => write!(f, "Key"),
@@ -98,6 +96,7 @@ impl Debug for WindowEvent {
             WindowEvent::Navigation(..) => write!(f, "Navigation"),
             WindowEvent::Quit => write!(f, "Quit"),
             WindowEvent::Reload => write!(f, "Reload"),
+            WindowEvent::ToggleWebRenderProfiler => write!(f, "ToggleWebRenderProfiler"),
         }
     }
 }

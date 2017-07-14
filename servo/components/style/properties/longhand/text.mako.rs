@@ -27,8 +27,8 @@
         String(Box<str>),
     }
 
-    #[derive(PartialEq, Eq, Clone, Debug)]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+    #[derive(Clone, Debug, Eq, PartialEq, ToCss)]
     pub struct SpecifiedValue {
         pub first: Side,
         pub second: Option<Side>
@@ -130,22 +130,12 @@
             }
         }
     }
-
-    impl ToCss for SpecifiedValue {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            self.first.to_css(dest)?;
-            if let Some(ref second) = self.second {
-                dest.write_str(" ")?;
-                second.to_css(dest)?;
-            }
-            Ok(())
-        }
-    }
 </%helpers:longhand>
 
 ${helpers.single_keyword("unicode-bidi",
                          "normal embed isolate bidi-override isolate-override plaintext",
                          animation_value_type="discrete",
+                         need_clone="True",
                          spec="https://drafts.csswg.org/css-writing-modes/#propdef-unicode-bidi")}
 
 <%helpers:longhand name="text-decoration-line"
