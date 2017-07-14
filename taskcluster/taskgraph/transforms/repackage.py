@@ -141,7 +141,7 @@ def make_job_description(config, jobs):
 
         if locale:
             # Make sure we specify the locale-specific upload dir
-            worker['env'].extend(LOCALE=locale)
+            worker['env'].update(LOCALE=locale)
 
         if build_platform.startswith('win'):
             worker_type = 'aws-provisioner-v1/gecko-%s-b-win2012' % level
