@@ -826,6 +826,14 @@ TextOverflow::CreateMarkers(const nsLineBox* aLine,
                      mBuilder->GetDirtyRect() - aLine->mFirstChild->GetOffsetTo(mBlock),
                      false);
 
+  if (aLine->mFirstChild->IsTransformed()) {
+    nsPoint toOuterReferenceFrame;
+    const nsIFrame* outerReferenceFrame =
+      mBuilder->FindReferenceFrameFor(mBlock, &toOuterReferenceFrame);
+    buildingForChild.SetReferenceFrameAndCurrentOffset(outerReferenceFrame,
+                                                       aLine->mFirstChild->GetOffsetToCrossDoc(outerReferenceFrame));
+  }
+
   if (aCreateIStart) {
     DisplayListClipState::AutoSaveRestore clipState(mBuilder);
 
