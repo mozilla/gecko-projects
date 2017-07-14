@@ -149,7 +149,7 @@ windows7-32-vm/opt:
 windows7-32-vm-pgo/opt:
     build-platform: win32-pgo/opt
     test-sets:
-        #- windows-vm-tests
+        - windows-vm-tests
         - awsy
         - desktop-screenshot-capture
         - headless
@@ -193,7 +193,7 @@ windows10-64-vm/opt:
 windows10-64-vm-pgo/opt:
     build-platform: win64-pgo/opt
     test-sets:
-        #- windows-vm-tests
+        - windows-vm-tests
         - awsy
         - desktop-screenshot-capture
         - headless
