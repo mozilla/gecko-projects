@@ -184,6 +184,7 @@ win32-tests-talos:
     - talos-tp5o
     - talos-perf-reftest
     - talos-xperf
+    - talos-quantum-pageload
 
 win64-tests-talos:
     - talos-chrome
@@ -196,6 +197,7 @@ win64-tests-talos:
     - talos-svgr
     - talos-tp5o
     - talos-perf-reftest
+    - talos-quantum-pageload
 
 linux32-tests:
     - cppunit
