@@ -56,7 +56,7 @@ use style::properties::longhands::border_image_repeat::computed_value::RepeatKey
 use style::properties::style_structs;
 use style::servo::restyle_damage::REPAINT;
 use style::values::{Either, RGBA};
-use style::values::computed::{Gradient, GradientItem, LengthOrPercentage};
+use style::values::computed::{Angle, Gradient, GradientItem, LengthOrPercentage};
 use style::values::computed::{LengthOrPercentageOrAuto, NumberOrPercentage, Position};
 use style::values::computed::effects::SimpleShadow;
 use style::values::computed::image::{EndingShape, LineDirection};
@@ -631,6 +631,18 @@ fn build_border_radius_for_inner_rect(outer_rect: &Rect<Au>,
     radii.bottom_left.height = cmp::max(Au(0), radii.bottom_left.height - border_widths.bottom);
     radii.bottom_right.height = cmp::max(Au(0), radii.bottom_right.height - border_widths.bottom);
     radii
+}
+
+fn build_inner_border_box_for_border_rect(border_box: &Rect<Au>,
+                                          style: &ServoComputedValues)
+                                          -> Rect<Au> {
+    let border_widths = style.logical_border_width().to_physical(style.writing_mode);
+    let mut inner_border_box = *border_box;
+    inner_border_box.origin.x += border_widths.left;
+    inner_border_box.origin.y += border_widths.top;
+    inner_border_box.size.width -= border_widths.right + border_widths.left;
+    inner_border_box.size.height -= border_widths.bottom + border_widths.top;
+    inner_border_box
 }
 
 fn convert_gradient_stops(gradient_items: &[GradientItem],
@@ -1214,6 +1226,18 @@ impl FragmentDisplayListBuilding for Fragment {
                                -> display_list::Gradient {
         let angle = match *direction {
             LineDirection::Angle(angle) => angle.radians(),
+            LineDirection::Horizontal(x) => {
+                match x {
+                    X::Left => Angle::Degree(270.).radians(),
+                    X::Right => Angle::Degree(90.).radians(),
+                }
+            },
+            LineDirection::Vertical(y) => {
+                match y {
+                    Y::Top => Angle::Degree(0.).radians(),
+                    Y::Bottom => Angle::Degree(180.).radians(),
+                }
+            },
             LineDirection::Corner(horizontal, vertical) => {
                 // This the angle for one of the diagonals of the box. Our angle
                 // will either be this one, this one + PI, or one of the other
@@ -2512,10 +2536,11 @@ impl BlockFlowDisplayListBuilding for BlockFlow {
             root_type = ScrollRootType::Clip;
         }
 
-        let mut clip = ClippingRegion::from_rect(&content_box);
+        let clip_rect = build_inner_border_box_for_border_rect(&border_box, &self.fragment.style);
+        let mut clip = ClippingRegion::from_rect(&clip_rect);
         let radii = build_border_radius_for_inner_rect(&border_box, &self.fragment.style);
         if !radii.is_square() {
-            clip.intersect_with_rounded_rect(&content_box, &radii)
+            clip.intersect_with_rounded_rect(&clip_rect, &radii)
         }
 
         let parent_id = self.scroll_root_id(state.layout_context.id);

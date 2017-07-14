@@ -4675,6 +4675,7 @@ pref("webgl.webgl2-compat-mode", false);
 
 pref("webgl.perf.max-warnings", 0);
 pref("webgl.perf.max-acceptable-fb-status-invals", 0);
+pref("webgl.perf.spew-frame-allocs", true);
 
 pref("webgl.enable-webgl2", true);
 
@@ -4841,6 +4842,9 @@ pref("gfx.direct2d.disabled", false);
 // Whether to attempt to enable Direct2D regardless of automatic detection or
 // blacklisting
 pref("gfx.direct2d.force-enabled", false);
+
+pref("gfx.direct3d11.enable-debug-layer", false);
+pref("gfx.direct3d11.break-on-error", false);
 
 pref("layers.prefer-opengl", false);
 #endif
