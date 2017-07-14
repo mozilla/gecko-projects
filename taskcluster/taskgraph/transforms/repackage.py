@@ -219,21 +219,21 @@ def _generate_task_output_files(build_platform, locale=None):
     if build_platform.startswith('macosx'):
         return [{
             'type': 'file',
-            'path': '/home/worker/workspace/build/artifacts/target.dmg',
+            'path': '/home/worker/workspace/build/artifacts/{}target.dmg'.format(locale_output_path),
             'name': 'public/build/{}target.dmg'.format(locale_output_path),
         }, {
             'type': 'file',
-            'path': '/home/worker/workspace/build/artifacts/target.complete.mar',
+            'path': '/home/worker/workspace/build/artifacts/{}target.complete.mar'.format(locale_output_path),
             'name': 'public/build/{}target.complete.mar'.format(locale_output_path),
         }]
     elif build_platform.startswith('win'):
         output_files = [{
             'type': 'file',
-            'path': 'public/build/target.installer.exe',
+            'path': 'public/build/{}target.installer.exe'.format(locale_output_path),
             'name': 'public/build/{}target.installer.exe'.format(locale_output_path),
         }, {
             'type': 'file',
-            'path': 'public/build/target.complete.mar',
+            'path': 'public/build/{}target.complete.mar'.format(locale_output_path),
             'name': 'public/build/{}target.complete.mar'.format(locale_output_path),
         }]
 
@@ -241,7 +241,7 @@ def _generate_task_output_files(build_platform, locale=None):
         if '32' in build_platform:
             output_files.append({
                 'type': 'file',
-                'path': 'public/build/target.stub-installer.exe',
+                'path': 'public/build/{}target.stub-installer.exe'.format(locale_output_path),
                 'name': 'public/build/{}target.stub-installer.exe'.format(locale_output_path),
             })
 
