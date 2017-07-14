@@ -163,7 +163,6 @@ windows7-32-nightly/opt:
     test-sets:
         - windows-gpu-tests
         - desktop-screenshot-capture
-        - win32-tests-talos
 
 # win64 vm
 windows10-64-vm/debug:
@@ -202,7 +201,6 @@ windows10-64-nightly/opt:
     test-sets:
         - windows-gpu-tests
         - desktop-screenshot-capture
-        - win64-tests-talos
 
 windows10-64-asan/opt:
     build-platform: win64-asan/opt
