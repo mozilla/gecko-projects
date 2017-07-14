@@ -805,11 +805,11 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, MockMixin, BuildbotMixin,
                        glob.glob(os.path.join(upload_target, 'update', glob_name)) +
                        glob.glob(os.path.join(upload_target, '*', 'xpi', glob_name)) +
                        glob.glob(os.path.join(upload_target, 'install', 'sea', glob_name)) +
-                       glob.glob(os.path.join(upload_target, 'l10n-stage', 'setup.exe')) +
-                       glob.glob(os.path.join(upload_target, 'l10n-stage', 'setup-stub.exe')))
+                       glob.glob(os.path.join(upload_target, 'setup.exe')) +
+                       glob.glob(os.path.join(upload_target, 'setup-stub.exe')))
             targets_exts = ["tar.bz2", "dmg", "langpack.xpi",
                             "complete.mar", "checksums", "zip",
-                            "installer.exe"]
+                            "installer.exe", "installer-stub.exe"]
             targets = ["target.%s" % ext for ext in targets_exts]
             targets.extend(['setup.exe', 'setup-stub.exe'])
             for f in matches:
