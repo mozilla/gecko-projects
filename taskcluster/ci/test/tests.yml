@@ -1544,7 +1544,7 @@ talos-xperf:
     treeherder-symbol: tc-T(x)
     run-on-projects:
         by-test-platform:
-            windows.*: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
+            windows7-32.*: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
             default: []
     max-run-time: 3600
     e10s: true
