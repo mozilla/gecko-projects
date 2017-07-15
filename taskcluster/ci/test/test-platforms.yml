@@ -158,7 +158,7 @@ windows7-32-pgo/opt:
         - windows-talos
 
 windows7-32-nightly/opt:
-    build-platform: win32-pgo/opt
+    build-platform: win32-nightly/opt
     test-sets:
         - awsy
         - desktop-screenshot-capture
