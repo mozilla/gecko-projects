@@ -27,6 +27,8 @@ config = {
     "output_home": "{base_work_dir}\\public\\build{locale}",
     "src_mozconfig": "browser/config/mozconfigs/{}/repack".format(platform),
 
+    "locale": os.environ.get("LOCALE"),
+
     "download_config": download_config,
 
     "repackage_config": repackage_config,
