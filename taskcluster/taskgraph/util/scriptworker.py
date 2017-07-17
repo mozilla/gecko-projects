@@ -57,18 +57,6 @@ SIGNING_CERT_SCOPES = {
     'default': 'project:releng:signing:cert:dep-signing',
 }
 
-
-CI_SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
-    'central', set([
-        'mozilla-central',
-    ]),
-]]
-
-CI_SIGNING_CERT_SCOPES = {
-    'central': 'project:releng:signing:cert:nightly-signing',
-    'default': 'project:releng:signing:cert:dep-signing',
-}
-
 DEVEDITION_SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'beta', set([
         'mozilla-beta',
@@ -183,9 +171,6 @@ BALROG_CHANNEL_SCOPES = {
         'project:releng:balrog:channel:nightly',
         'project:releng:balrog:channel:nightly-old-id',
         'project:releng:balrog:channel:aurora'
-    ],
-    'nightly-old-id': [
-        'project:releng:balrog:channel:nightly'
     ],
     'aurora': [
         'project:releng:balrog:channel:aurora'
@@ -348,12 +333,6 @@ get_signing_cert_scope = functools.partial(
     get_scope_from_project,
     SIGNING_SCOPE_ALIAS_TO_PROJECT,
     SIGNING_CERT_SCOPES
-)
-
-get_ci_signing_cert_scope = functools.partial(
-    get_scope_from_project,
-    CI_SIGNING_SCOPE_ALIAS_TO_PROJECT,
-    CI_SIGNING_CERT_SCOPES
 )
 
 get_devedition_signing_cert_scope = functools.partial(

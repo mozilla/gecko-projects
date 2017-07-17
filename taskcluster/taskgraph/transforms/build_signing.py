@@ -19,8 +19,8 @@ def add_signed_routes(config, jobs):
 
     for job in jobs:
         dep_job = job['dependent-task']
-        job['routes'] = []
 
+        job['routes'] = []
         if dep_job.attributes.get('nightly'):
             for dep_route in dep_job.task.get('routes', []):
                 if not dep_route.startswith('index.gecko.v2'):

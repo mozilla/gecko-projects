@@ -325,10 +325,6 @@ test_description_schema = Schema({
     # the label of the build task generating the materials to test
     'build-label': basestring,
 
-    # the label of the signing task generating the materials to test.
-    # Signed builds are used in xpcshell tests on Windows, for instance.
-    Optional('build-signing-label'): basestring,
-
     # the build's attributes
     'build-attributes': {basestring: object},
 
