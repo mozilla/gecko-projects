@@ -625,7 +625,7 @@ public:
    * Allows callers to selectively override the regular paint suppression checks,
    * so that methods like GetFrameForPoint work when painting is suppressed.
    */
-  void IgnorePaintSuppression() { mIgnoreSuppression = true; }
+  void IgnorePaintSuppression(bool aIgnore) { mIgnoreSuppression = aIgnore; }
   /**
    * @return Returns if this builder will ignore paint suppression.
    */

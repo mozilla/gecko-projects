@@ -3265,9 +3265,7 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
   builder.BeginFrame();
   nsDisplayList list;
 
-  if (aFlags & IGNORE_PAINT_SUPPRESSION) {
-    builder.IgnorePaintSuppression();
-  }
+  builder.IgnorePaintSuppression(aFlags & IGNORE_PAINT_SUPPRESSION);
 
   if (aFlags & IGNORE_ROOT_SCROLL_FRAME) {
     nsIFrame* rootScrollFrame =
@@ -4091,17 +4089,21 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
   if (aFlags & PaintFrameFlags::PAINT_IN_TRANSFORM) {
     builder.SetInTransform(true);
+  } else {
+    builder.SetInTransform(false);
   }
   if (aFlags & PaintFrameFlags::PAINT_SYNC_DECODE_IMAGES) {
     builder.SetSyncDecodeImages(true);
+  } else {
+    builder.SetSyncDecodeImages(false);
   }
   if (aFlags & (PaintFrameFlags::PAINT_WIDGET_LAYERS |
                 PaintFrameFlags::PAINT_TO_WINDOW)) {
     builder.SetPaintingToWindow(true);
+  } else {
+    builder.SetPaintingToWindow(false);
   }
-  if (aFlags & PaintFrameFlags::PAINT_IGNORE_SUPPRESSION) {
-    builder.IgnorePaintSuppression();
-  }
+  builder.IgnorePaintSuppression(aFlags & PaintFrameFlags::PAINT_IGNORE_SUPPRESSION);
 
   nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame();
   if (rootScrollFrame && !aFrame->GetParent()) {
