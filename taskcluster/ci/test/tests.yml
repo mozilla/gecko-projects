@@ -609,8 +609,12 @@ mochitest-chrome:
     e10s: false
     run-on-projects:
         by-test-platform:
-            windows.*: ['try']
+            windows7-32.*: ['try', 'date']
             default: built-projects
+    worker-type:
+        by-test-platform:
+            windows7-32.*: buildbot-bridge/buildbot-bridge
+            default: null
     mozharness:
         by-test-platform:
             android.*:
@@ -682,8 +686,12 @@ mochitest-clipboard:
         default: both
     run-on-projects:
         by-test-platform:
-            windows.*: ['try']
+            windows.*: ['try', 'date']
             default: built-projects
+    worker-type:
+        by-test-platform:
+            windows7-32.*: buildbot-bridge/buildbot-bridge
+            default: null
     mozharness:
         by-test-platform:
             android.*:

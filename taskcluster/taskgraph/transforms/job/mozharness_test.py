@@ -34,6 +34,7 @@ BUILDER_NAME_PREFIX = {
     'win64': 'Windows 10 64-bit',
     'win64-nightly': 'Windows 10 64-bit',
     'win64-pgo': 'Windows 10 64-bit',
+    'win64-asan': 'Windows 10 64-bit',
     'win32': 'Windows 7 32-bit',
     'win32-nightly': 'Windows 7 32-bit',
     'win32-pgo': 'Windows 7 32-bit',
