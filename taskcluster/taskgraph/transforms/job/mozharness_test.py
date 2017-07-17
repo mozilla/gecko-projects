@@ -25,19 +25,24 @@ BUILDER_NAME_PREFIX = {
     'linux64-ccov': 'Ubuntu Code Coverage VM 12.04 x64',
     'linux64-jsdcov': 'Ubuntu Code Coverage VM 12.04 x64',
     'linux64-stylo': 'Ubuntu VM 12.04 x64',
+    'linux64-stylo-sequential': 'Ubuntu VM 12.04 x64',
+    'linux64-devedition': 'Ubuntu VM 12.04 x64',
     'linux64-devedition-nightly': 'Ubuntu VM 12.04 x64',
     'macosx64': 'Rev7 MacOSX Yosemite 10.10.5',
     'macosx64-devedition': 'Rev7 MacOSX Yosemite 10.10.5 DevEdition',
     'android-4.3-arm7-api-15': 'Android 4.3 armv7 API 15+',
     'android-4.2-x86': 'Android 4.2 x86 Emulator',
     'android-4.3-arm7-api-15-gradle': 'Android 4.3 armv7 API 15+',
-    'win64': 'Windows 10 64-bit',
-    'win64-nightly': 'Windows 10 64-bit',
-    'win64-pgo': 'Windows 10 64-bit',
-    'win64-asan': 'Windows 10 64-bit',
-    'win32': 'Windows 7 32-bit',
-    'win32-nightly': 'Windows 7 32-bit',
-    'win32-pgo': 'Windows 7 32-bit',
+    'windows10-64': 'Windows 10 64-bit',
+    'windows10-64-nightly': 'Windows 10 64-bit',
+    'windows10-64-pgo': 'Windows 10 64-bit',
+    'windows10-64-asan': 'Windows 10 64-bit',
+    'windows7-32': 'Windows 7 32-bit',
+    'windows7-32-nightly': 'Windows 7 32-bit',
+    'windows7-32-pgo': 'Windows 7 32-bit',
+    'windows8-64': 'Windows 8 32-bit',
+    'windows8-64-nightly': 'Windows 8 64-bit',
+    'windows8-64-pgo': 'Windows 8 64-bit',
 }
 
 VARIANTS = [
@@ -418,7 +423,8 @@ def mozharness_test_buildbot_bridge(config, job, taskdesc):
     worker = taskdesc['worker']
 
     branch = config.params['project']
-    platform, build_type = test['build-platform'].split('/')
+    build_platform, build_type = test['build-platform'].split('/')
+    test_platform = test['test-platform'].split('/')[0]
     test_name = test.get('try-name', test['test-name'])
     mozharness = test['mozharness']
 
@@ -472,7 +478,7 @@ def mozharness_test_buildbot_bridge(config, job, taskdesc):
             name = '{prefix} {branch} talos {test_name}'
 
         buildername = name.format(
-            prefix=BUILDER_NAME_PREFIX[platform],
+            prefix=BUILDER_NAME_PREFIX[test_platform],
             variant=variant,
             branch=branch,
             test_name=test_name
@@ -482,7 +488,7 @@ def mozharness_test_buildbot_bridge(config, job, taskdesc):
             buildername = buildername.replace('VM', 'HW')
     else:
         buildername = '{} {} {} test {}'.format(
-            BUILDER_NAME_PREFIX[platform],
+            BUILDER_NAME_PREFIX[test_platform],
             branch,
             build_type,
             test_name

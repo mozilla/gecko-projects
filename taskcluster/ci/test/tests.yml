@@ -614,6 +614,7 @@ mochitest-chrome:
     worker-type:
         by-test-platform:
             windows7-32.*: buildbot-bridge/buildbot-bridge
+            windows8-64.*: buildbot-bridge/buildbot-bridge
             default: null
     mozharness:
         by-test-platform:
@@ -691,6 +692,7 @@ mochitest-clipboard:
     worker-type:
         by-test-platform:
             windows7-32.*: buildbot-bridge/buildbot-bridge
+            windows8-64.*: buildbot-bridge/buildbot-bridge
             default: null
     mozharness:
         by-test-platform:
@@ -979,6 +981,10 @@ mochitest-webgl:
         by-test-platform:
             windows10.*: []
             default: built-projects
+    worker-type:
+        by-test-platform:
+            windows8-64.*: buildbot-bridge/buildbot-bridge
+            default: null
     chunks:
         by-test-platform:
             android.*: 10

@@ -236,3 +236,8 @@ android-gradle-tests:
 android-x86-tests:
     - mochitest-chrome
     - xpcshell
+
+windows8-tests:
+    - mochitest-clipboard
+    - mochitest-chrome
+    - mochitest-webgl
