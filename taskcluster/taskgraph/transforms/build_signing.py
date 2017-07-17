@@ -81,7 +81,7 @@ def _generate_upstream_artifacts(build_platform, is_nightly=False):
             'format': 'sha2signcode',
         }]
         if is_nightly:
-            artifacts_specificities['artifacts'].append('public/build/setup-stub.exe')
+            artifacts_specificities[0]['artifacts'] += 'public/build/setup-stub.exe'
     elif 'linux' in build_platform:
         artifacts_specificities = [{
             'artifacts': ['public/build/target.tar.bz2'],
