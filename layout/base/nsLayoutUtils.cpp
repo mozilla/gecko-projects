@@ -4245,11 +4245,9 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
           PreProcessRetainedDisplayList(&builder, &list, modifiedAGR);
 
-          if (!modifiedDirty.IsEmpty() ||
-              !framesWithProps.IsEmpty()) {
+          nsDisplayList modifiedDL;
+          if (!modifiedDirty.IsEmpty() || !framesWithProps.IsEmpty()) {
             builder.SetDirtyRect(modifiedDirty);
-
-            nsDisplayList modifiedDL;
             builder.SetPartialUpdate(true);
             aFrame->BuildDisplayListForStackingContext(&builder, &modifiedDL);
             builder.SetPartialUpdate(false);
@@ -4259,17 +4257,24 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
             builder.LeavePresShell(aFrame, &modifiedDL);
             builder.EnterPresShell(aFrame);
-
-            MergeDisplayLists(&builder, &modifiedDL, &list, &list, totalDisplayItems, reusedDisplayItems);
-
-            //printf_stderr("Painting --- Merged list:\n");
-            //nsFrame::PrintDisplayList(&builder, list);
           } else {
             // TODO: We can also skip layer building and painting if
             // PreProcessRetainedDisplayList didn't end up changing anything
             // Invariant: display items should have their original state here.
             //printf_stderr("Skipping display list building since nothing needed to be done\n");
           }
+
+          // |modifiedDL| can sometimes be empty here. We still perform the
+          // display list merging to prune unused items (for example, items that
+          // are not visible anymore) from the old list.
+          // TODO: Optimization opportunity. In this case, MergeDisplayLists()
+          // unnecessarily creates a hashtable of the old items.
+          MergeDisplayLists(&builder, &modifiedDL, &list, &list,
+                            totalDisplayItems, reusedDisplayItems);
+
+          //printf_stderr("Painting --- Merged list:\n");
+          //nsFrame::PrintDisplayList(&builder, list);
+
           merged = true;
         }
 
