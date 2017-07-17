@@ -238,6 +238,14 @@ android-x86-tests:
     - xpcshell
 
 windows8-tests:
+    - crashtest
+    - mochitest
+    - mochitest-browser-chrome
+    - mochitest-devtools-chrome
+    - mochitest-media
+    - reftest
+    - reftest-no-accel
+    - mochitest-gpu
+    - mochitest-webgl
     - mochitest-clipboard
     - mochitest-chrome
-    - mochitest-webgl
