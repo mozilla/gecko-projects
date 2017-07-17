@@ -61,14 +61,25 @@ impl RestyleData {
         *self = Self::new();
     }
 
+    /// Clear restyle flags and damage.
+    fn clear_flags_and_damage(&mut self) {
+        self.damage = RestyleDamage::empty();
+        self.flags = RestyleFlags::empty();
+    }
+
     /// Returns whether this element or any ancestor is going to be
     /// reconstructed.
     pub fn reconstructed_self_or_ancestor(&self) -> bool {
-        self.reconstructed_ancestor() ||
+        self.reconstructed_ancestor() || self.reconstructed_self()
+    }
+
+    /// Returns whether this element is going to be reconstructed.
+    pub fn reconstructed_self(&self) -> bool {
         self.damage.contains(RestyleDamage::reconstruct())
     }
 
-    /// Returns whether any ancestor of this element was restyled.
+    /// Returns whether any ancestor of this element is going to be
+    /// reconstructed.
     fn reconstructed_ancestor(&self) -> bool {
         self.flags.contains(ANCESTOR_WAS_RECONSTRUCTED)
     }
@@ -222,14 +233,6 @@ pub enum RestyleKind {
 }
 
 impl ElementData {
-    /// Borrows both styles and restyle mutably at the same time.
-    pub fn styles_and_restyle_mut(
-        &mut self
-    ) -> (&mut ElementStyles, &mut RestyleData) {
-        (&mut self.styles,
-         &mut self.restyle)
-    }
-
     /// Invalidates style for this element, its descendants, and later siblings,
     /// based on the snapshot of the element that we took when attributes or
     /// state changed.
@@ -330,5 +333,10 @@ impl ElementData {
     /// Drops any restyle state from the element.
     pub fn clear_restyle_state(&mut self) {
         self.restyle.clear();
+    }
+
+    /// Drops restyle flags and damage from the element.
+    pub fn clear_restyle_flags_and_damage(&mut self) {
+        self.restyle.clear_flags_and_damage();
     }
 }

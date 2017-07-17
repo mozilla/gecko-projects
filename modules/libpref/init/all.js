@@ -1014,22 +1014,33 @@ pref("toolkit.asyncshutdown.log", false);
 // Enable deprecation warnings.
 pref("devtools.errorconsole.deprecation_warnings", true);
 
+#ifdef NIGHTLY_BUILD
+// Don't show the Browser Toolbox prompt on local builds / nightly
+pref("devtools.debugger.prompt-connection", false);
+#else
+pref("devtools.debugger.prompt-connection", true);
+#endif
+
+#ifdef MOZILLA_OFFICIAL
 // Disable debugging chrome
 pref("devtools.chrome.enabled", false);
+// Disable remote debugging connections
+pref("devtools.debugger.remote-enabled", false);
+#else
+// In local builds, enable the browser toolbox by default
+pref("devtools.chrome.enabled", true);
+pref("devtools.debugger.remote-enabled", true);
+#endif
+
 
 // Disable remote debugging protocol logging
 pref("devtools.debugger.log", false);
 pref("devtools.debugger.log.verbose", false);
 
-// Disable remote debugging connections
-pref("devtools.debugger.remote-enabled", false);
-
 pref("devtools.debugger.remote-port", 6000);
 pref("devtools.debugger.remote-websocket", false);
 // Force debugger server binding on the loopback interface
 pref("devtools.debugger.force-local", true);
-// Display a prompt when a new connection starts to accept/reject it
-pref("devtools.debugger.prompt-connection", true);
 // Block tools from seeing / interacting with certified apps
 pref("devtools.debugger.forbid-certified-apps", true);
 
@@ -4723,7 +4734,7 @@ pref("network.tcp.keepalive.retry_interval", 1); // seconds
 pref("network.tcp.keepalive.probe_count", 4);
 #endif
 
-pref("network.tcp.tcp_fastopen_enable", true);
+pref("network.tcp.tcp_fastopen_enable", false);
 pref("network.tcp.tcp_fastopen_consecutive_failure_limit", 5);
 
 // Whether to disable acceleration for all widgets.
@@ -4919,8 +4930,6 @@ pref("extensions.webextensions.themes.icons.enabled", false);
 pref("extensions.webextensions.remote", false);
 // Whether or not the moz-extension resource loads are remoted
 pref("extensions.webextensions.protocol.remote", true);
-
-pref("layers.popups.compositing.enabled", false);
 
 // Report Site Issue button
 pref("extensions.webcompat-reporter.newIssueEndpoint", "https://webcompat.com/issues/new");
@@ -5786,13 +5795,14 @@ pref("fuzzing.enabled", false);
 #if defined(XP_WIN)
 #if defined(NIGHTLY_BUILD)
 pref("layers.mlgpu.dev-enabled", true);
-#else
-pref("layers.mlgpu.dev-enabled", false);
-#endif
 
 // Both this and the master "enabled" pref must be on to use Advanced Layers
 // on Windows 7.
+pref("layers.mlgpu.enable-on-windows7", true);
+#else
+pref("layers.mlgpu.dev-enabled", false);
 pref("layers.mlgpu.enable-on-windows7", false);
+#endif
 #endif
 
 // Set advanced layers preferences here to have them show up in about:config or

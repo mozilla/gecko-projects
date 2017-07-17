@@ -1397,6 +1397,9 @@ toolbar#nav-bar {
         if manifest:
             if options.extra_mozinfo_json:
                 mozinfo.update(options.extra_mozinfo_json)
+            if 'STYLO_FORCE_ENABLED' in os.environ:
+                mozinfo.update({'stylo': True})
+
             info = mozinfo.info
 
             # Bug 1089034 - imptest failure expectations are encoded as
@@ -1591,6 +1594,8 @@ toolbar#nav-bar {
 
         if hasattr(options, "topsrcdir"):
             browserEnv["MOZ_DEVELOPER_REPO_DIR"] = options.topsrcdir
+        if hasattr(options, "topobjdir"):
+            browserEnv["MOZ_DEVELOPER_OBJ_DIR"] = options.topobjdir
 
         # These variables are necessary for correct application startup; change
         # via the commandline at your own risk.
