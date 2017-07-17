@@ -1397,14 +1397,8 @@ MediaFormatReader::OnDemuxerInitDone(const MediaResult& aResult)
     }
   }
 
-  if (aResult != NS_OK && mDecoder) {
-    RefPtr<AbstractMediaDecoder> decoder = mDecoder;
-    mDecoder->AbstractMainThread()->Dispatch(NS_NewRunnableFunction(
-      "MediaFormatReader::OnDemuxerInitDone", [decoder, aResult]() {
-        if (decoder->GetOwner()) {
-          decoder->GetOwner()->DecodeWarning(aResult);
-        }
-      }));
+  if (aResult != NS_OK) {
+    mOnDecodeWarning.Notify(aResult);
   }
 
   MaybeResolveMetadataPromise();
@@ -1739,9 +1733,7 @@ MediaFormatReader::NotifyWaitingForKey(TrackType aTrack)
 {
   MOZ_ASSERT(OnTaskQueue());
   auto& decoder = GetDecoderData(aTrack);
-  if (mDecoder) {
-    mDecoder->NotifyWaitingForKey();
-  }
+  mOnWaitingForKey.Notify();
   if (!decoder.mDecodeRequest.Exists()) {
     LOGV("WaitingForKey received while no pending decode. Ignoring");
     return;
@@ -2399,6 +2391,13 @@ MediaFormatReader::ReturnOutput(MediaData* aData, TrackType aTrack)
           videoData->mDisplay.width, videoData->mDisplay.height);
       mInfo.mVideo.mDisplay = videoData->mDisplay;
     }
+
+    TimeUnit nextKeyframe;
+    if (!mVideo.HasInternalSeekPending() &&
+        NS_SUCCEEDED(mVideo.mTrackDemuxer->GetNextRandomAccessPoint(&nextKeyframe))) {
+      videoData->SetNextKeyFrameTime(nextKeyframe);
+    }
+
     mVideo.ResolvePromise(videoData, __func__);
   }
 }

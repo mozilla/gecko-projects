@@ -4734,7 +4734,7 @@ pref("network.tcp.keepalive.retry_interval", 1); // seconds
 pref("network.tcp.keepalive.probe_count", 4);
 #endif
 
-pref("network.tcp.tcp_fastopen_enable", true);
+pref("network.tcp.tcp_fastopen_enable", false);
 pref("network.tcp.tcp_fastopen_consecutive_failure_limit", 5);
 
 // Whether to disable acceleration for all widgets.
@@ -4930,8 +4930,6 @@ pref("extensions.webextensions.themes.icons.enabled", false);
 pref("extensions.webextensions.remote", false);
 // Whether or not the moz-extension resource loads are remoted
 pref("extensions.webextensions.protocol.remote", true);
-
-pref("layers.popups.compositing.enabled", false);
 
 // Report Site Issue button
 pref("extensions.webcompat-reporter.newIssueEndpoint", "https://webcompat.com/issues/new");
@@ -5797,13 +5795,14 @@ pref("fuzzing.enabled", false);
 #if defined(XP_WIN)
 #if defined(NIGHTLY_BUILD)
 pref("layers.mlgpu.dev-enabled", true);
-#else
-pref("layers.mlgpu.dev-enabled", false);
-#endif
 
 // Both this and the master "enabled" pref must be on to use Advanced Layers
 // on Windows 7.
+pref("layers.mlgpu.enable-on-windows7", true);
+#else
+pref("layers.mlgpu.dev-enabled", false);
 pref("layers.mlgpu.enable-on-windows7", false);
+#endif
 #endif
 
 // Set advanced layers preferences here to have them show up in about:config or
