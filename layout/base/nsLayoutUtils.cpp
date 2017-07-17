@@ -4103,7 +4103,11 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   } else {
     builder.SetPaintingToWindow(false);
   }
-  builder.IgnorePaintSuppression(aFlags & PaintFrameFlags::PAINT_IGNORE_SUPPRESSION);
+  if (aFlags & PaintFrameFlags::PAINT_IGNORE_SUPPRESSION) {
+    builder.IgnorePaintSuppression(true);
+  } else {
+    builder.IgnorePaintSuppression(false);
+  }
 
   nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame();
   if (rootScrollFrame && !aFrame->GetParent()) {
