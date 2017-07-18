@@ -1686,6 +1686,7 @@ xpcshell:
     run-on-projects:
         by-test-platform:
             linux64-qr/.*: ['mozilla-central', 'try']
+            windows10-64-asan/opt: []  # No XPCShell on ASAN yet
             default: built-projects
     docker-image: {"in-tree": "desktop1604-test"}
     chunks:
