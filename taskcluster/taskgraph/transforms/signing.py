@@ -59,7 +59,6 @@ signing_description_schema = Schema({
 
     # Routes specific to this task, if defined
     Optional('routes'): [basestring],
-
 })
 
 
