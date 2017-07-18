@@ -6,3 +6,4 @@ skip-if(!asyncPan) == retained-dl-async-scrolled-1.html retained-dl-async-scroll
 == retained-dl-remove-for-ancestor-change-1.html retained-dl-remove-for-ancestor-change-1-ref.html
 == retained-dl-scroll-out-of-view-1.html retained-dl-scroll-out-of-view-1-ref.html
 == retained-dl-displayport-1.html retained-dl-displayport-1-ref.html
+== retained-dl-prerender-transform-1.html retained-dl-prerender-transform-1-ref.html

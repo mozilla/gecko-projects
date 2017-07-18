@@ -121,6 +121,7 @@ var gCrashDumpDir;
 var gPendinCrashDumpDir;
 var gFailedNoPaint = false;
 var gFailedNoDisplayList = false;
+var gFailedDisplayList = false;
 var gFailedOpaqueLayer = false;
 var gFailedOpaqueLayerMessages = [];
 var gFailedAssignedLayer = false;
@@ -1768,7 +1769,7 @@ function RecordResult(testRunTime, errorMsg, scriptResults)
                         differences >= gURLs[0].fuzzyMinPixels;
             }
 
-            var failedExtraCheck = gFailedNoPaint || gFailedNoDisplayList || gFailedOpaqueLayer || gFailedAssignedLayer;
+            var failedExtraCheck = gFailedNoPaint || gFailedNoDisplayList || gFailedDisplayList || gFailedOpaqueLayer || gFailedAssignedLayer;
 
             // whether the comparison result matches what is in the manifest
             var test_passed = (equal == (gURLs[0].type == TYPE_REFTEST_EQUAL)) && !failedExtraCheck;
@@ -1807,6 +1808,9 @@ function RecordResult(testRunTime, errorMsg, scriptResults)
                 }
                 if (gFailedNoDisplayList) {
                     failures.push("failed reftest-no-display-list");
+                }
+                if (gFailedDisplayList) {
+                    failures.push("failed reftest-display-list");
                 }
                 // The gFailed*Messages arrays will contain messages from both the test and the reference.
                 if (gFailedOpaqueLayer) {
@@ -1964,6 +1968,7 @@ function FinishTestItem()
     SendClear();
     gFailedNoPaint = false;
     gFailedNoDisplayList = false;
+    gFailedDisplayList = false;
     gFailedOpaqueLayer = false;
     gFailedOpaqueLayerMessages = [];
     gFailedAssignedLayer = false;
@@ -2053,6 +2058,10 @@ function RegisterMessageListenersAndLoadContentScript()
         function (m) { RecvFailedNoDisplayList(); }
     );
     gBrowserMessageManager.addMessageListener(
+        "reftest:FailedDisplayList",
+        function (m) { RecvFailedDisplayList(); }
+    );
+    gBrowserMessageManager.addMessageListener(
         "reftest:FailedOpaqueLayer",
         function (m) { RecvFailedOpaqueLayer(m.json.why); }
     );
@@ -2123,6 +2132,11 @@ function RecvFailedNoPaint()
 function RecvFailedNoDisplayList()
 {
     gFailedNoDisplayList = true;
+}
+
+function RecvFailedDisplayList()
+{
+    gFailedDisplayList = true;
 }
 
 function RecvFailedOpaqueLayer(why) {

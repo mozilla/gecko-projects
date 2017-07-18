@@ -376,6 +376,9 @@ function getNoPaintElements(contentRootElement) {
 function getNoDisplayListElements(contentRootElement) {
     return contentRootElement.getElementsByClassName('reftest-no-display-list');
 }
+function getDisplayListElements(contentRootElement) {
+    return contentRootElement.getElementsByClassName('reftest-display-list');
+}
 
 function getOpaqueLayerElements(contentRootElement) {
     return contentRootElement.getElementsByClassName('reftest-opaque-layer');
@@ -538,6 +541,10 @@ function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
                 for (var i = 0; i < elements.length; ++i) {
                   windowUtils().checkAndClearDisplayListState(elements[i]);
                 }
+                elements = getDisplayListElements(contentRootElement);
+                for (var i = 0; i < elements.length; ++i) {
+                  windowUtils().checkAndClearDisplayListState(elements[i]);
+                }
                 var notification = content.document.createEvent("Events");
                 notification.initEvent("MozReftestInvalidate", true, false);
                 contentRootElement.dispatchEvent(notification);
@@ -644,6 +651,12 @@ function WaitForTestEnd(contentRootElement, inPrintMode, spellCheckedElements) {
                 for (var i = 0; i < elements.length; ++i) {
                     if (windowUtils().checkAndClearDisplayListState(elements[i])) {
                         SendFailedNoDisplayList();
+                    }
+                }
+                elements = getDisplayListElements(contentRootElement);
+                for (var i = 0; i < elements.length; ++i) {
+                    if (!windowUtils().checkAndClearDisplayListState(elements[i])) {
+                        SendFailedDisplayList();
                     }
                 }
               }
@@ -1081,6 +1094,11 @@ function SendFailedNoPaint()
 function SendFailedNoDisplayList()
 {
     sendAsyncMessage("reftest:FailedNoDisplayList");
+}
+
+function SendFailedDisplayList()
+{
+    sendAsyncMessage("reftest:FailedDisplayList");
 }
 
 function SendFailedOpaqueLayer(why)
