@@ -2475,8 +2475,6 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     switch (decision) {
     case nsDisplayTransform::FullPrerender:
       allowAsyncAnimation = true;
-      // TODO: Deal with pre-rendering + retained display lists properly (probably
-      // using the displayport logic)
       visibleRect = dirtyRect;
       break;
     case nsDisplayTransform::PartialPrerender:

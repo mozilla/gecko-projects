@@ -3962,37 +3962,24 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
         // then we can store the dirty rect there and stop.
         if (currentFrame != aDisplayRootFrame &&
             FrameLayerBuilder::HasRetainedDataFor(currentFrame)) {
+          aBuilder.MarkFrameForDisplayIfVisible(currentFrame);
 
-          // Convert directly into aDisplayRootFrames coordinate space.
-          // TODO: Don't we need to take ancestor displayports into account here? Plus also, isn't just
-          // MarkFrameForDisplayIfVisible sufficient and we don't need to check if it intersects?
-          nsRect rootOverflow = nsLayoutUtils::TransformFrameRectToAncestor(currentFrame, overflow, aDisplayRootFrame);
-          rootOverflow.IntersectRect(rootOverflow, aRootDirtyRect);
-
-          // If the stacking context intersected the visible region then make
-          // sure we build display items for it.
-          // TODO: Isn't this always true, unless we've invalidated the stacking context itself (
-          // or an ancestor of it), in which case we'll be rebuilding all the things anyway?
-          if (!rootOverflow.IsEmpty()) {
-            aBuilder.MarkFrameForDisplayIfVisible(currentFrame);
-
-            // Store the stacking context relative dirty area such
-            // that display list building will pick it up when it
-            // gets to it.
-            nsDisplayListBuilder::DisplayListBuildingData* data =
-              currentFrame->GetProperty(nsDisplayListBuilder::DisplayListBuildingRect());
-            if (!data) {
-              data = new nsDisplayListBuilder::DisplayListBuildingData;
-              currentFrame->SetProperty(nsDisplayListBuilder::DisplayListBuildingRect(), data);
-              currentFrame->SetHasOverrideDirtyRegion(true);
-              aOutFramesWithProps->AppendElement(currentFrame);
-            }
-            data->mDirtyRect.UnionRect(data->mDirtyRect, overflow);
-            if (!data->mModifiedAGR) {
-              data->mModifiedAGR = agr;
-            } else if (data->mModifiedAGR != agr) {
-              data->mDirtyRect = currentFrame->GetVisualOverflowRectRelativeToSelf();
-            }
+          // Store the stacking context relative dirty area such
+          // that display list building will pick it up when it
+          // gets to it.
+          nsDisplayListBuilder::DisplayListBuildingData* data =
+            currentFrame->GetProperty(nsDisplayListBuilder::DisplayListBuildingRect());
+          if (!data) {
+            data = new nsDisplayListBuilder::DisplayListBuildingData;
+            currentFrame->SetProperty(nsDisplayListBuilder::DisplayListBuildingRect(), data);
+            currentFrame->SetHasOverrideDirtyRegion(true);
+            aOutFramesWithProps->AppendElement(currentFrame);
+          }
+          data->mDirtyRect.UnionRect(data->mDirtyRect, overflow);
+          if (!data->mModifiedAGR) {
+            data->mModifiedAGR = agr;
+          } else if (data->mModifiedAGR != agr) {
+            data->mDirtyRect = currentFrame->GetVisualOverflowRectRelativeToSelf();
           }
 
           // Don't contribute to the root dirty area at all.
