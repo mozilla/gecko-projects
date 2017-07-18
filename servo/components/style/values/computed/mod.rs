@@ -11,7 +11,7 @@ use font_metrics::FontMetricsProvider;
 use media_queries::Device;
 #[cfg(feature = "gecko")]
 use properties;
-use properties::{ComputedValues, StyleBuilder};
+use properties::{ComputedValuesInner, StyleBuilder};
 use std::f32;
 use std::f64;
 use std::f64::consts::PI;
@@ -38,11 +38,11 @@ pub use self::rect::LengthOrNumberRect;
 pub use super::{Auto, Either, None_};
 #[cfg(feature = "gecko")]
 pub use super::specified::{AlignItems, AlignJustifyContent, AlignJustifySelf, JustifyItems};
-pub use super::specified::{BorderStyle, Percentage, UrlOrNone};
+pub use super::specified::{BorderStyle, UrlOrNone};
 pub use super::generics::grid::GridLine;
 pub use super::specified::url::SpecifiedUrl;
 pub use self::length::{CalcLengthOrPercentage, Length, LengthOrNone, LengthOrNumber, LengthOrPercentage};
-pub use self::length::{LengthOrPercentageOrAuto, LengthOrPercentageOrNone, MaxLength, MozLength};
+pub use self::length::{LengthOrPercentageOrAuto, LengthOrPercentageOrNone, MaxLength, MozLength, Percentage};
 pub use self::position::Position;
 pub use self::text::{InitialLetter, LetterSpacing, LineHeight, WordSpacing};
 pub use self::transform::{TimingFunction, TransformOrigin};
@@ -72,13 +72,13 @@ pub struct Context<'a> {
     pub device: &'a Device,
 
     /// The style we're inheriting from.
-    pub inherited_style: &'a ComputedValues,
+    pub inherited_style: &'a ComputedValuesInner,
 
     /// The style of the layout parent node. This will almost always be
     /// `inherited_style`, except when `display: contents` is at play, in which
     /// case it's the style of the last ancestor with a `display` value that
     /// isn't `contents`.
-    pub layout_parent_style: &'a ComputedValues,
+    pub layout_parent_style: &'a ComputedValuesInner,
 
     /// Values accessed through this need to be in the properties "computed
     /// early": color, text-decoration, font-size, display, position, float,
@@ -115,7 +115,7 @@ impl<'a> Context<'a> {
     /// The current viewport size.
     pub fn viewport_size(&self) -> Size2D<Au> { self.device.au_viewport_size() }
     /// The style we're inheriting from.
-    pub fn inherited_style(&self) -> &ComputedValues { &self.inherited_style }
+    pub fn inherited_style(&self) -> &ComputedValuesInner { &self.inherited_style }
     /// The current style. Note that only "eager" properties should be accessed
     /// from here, see the comment in the member.
     pub fn style(&self) -> &StyleBuilder { &self.style }

@@ -768,7 +768,7 @@ MP4MetadataRust::Init()
   MOZ_LOG(sLog, LogLevel::Debug, ("rust parser returned %d\n", rv));
   Telemetry::Accumulate(Telemetry::MEDIA_RUST_MP4PARSE_SUCCESS,
                         rv == mp4parse_status_OK);
-  if (rv != mp4parse_status_OK) {
+  if (rv != mp4parse_status_OK && rv != mp4parse_status_TABLE_TOO_LARGE) {
     MOZ_LOG(sLog, LogLevel::Info, ("Rust mp4 parser fails to parse this stream."));
     MOZ_ASSERT(rv > 0);
     Telemetry::Accumulate(Telemetry::MEDIA_RUST_MP4PARSE_ERROR_CODE, rv);
@@ -829,9 +829,7 @@ MP4MetadataRust::GetNumberTracks(mozilla::TrackInfo::TrackType aType) const
     if (rv != mp4parse_status_OK) {
       continue;
     }
-    // JPEG 'video' decoder is not supported in media stack yet.
-    if (track_info.codec == mp4parse_codec::mp4parse_codec_JPEG ||
-        track_info.codec == mp4parse_codec::mp4parse_codec_UNKNOWN) {
+    if (track_info.codec == mp4parse_codec::mp4parse_codec_UNKNOWN) {
       continue;
     }
     if (TrackTypeEqual(aType, track_info.track_type)) {

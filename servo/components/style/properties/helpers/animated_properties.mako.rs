@@ -29,7 +29,7 @@ use smallvec::SmallVec;
 use std::cmp;
 #[cfg(feature = "gecko")] use fnv::FnvHashMap;
 use style_traits::ParseError;
-use super::ComputedValues;
+use super::ComputedValuesInner;
 #[cfg(any(feature = "gecko", feature = "testing"))]
 use values::Auto;
 use values::{CSSFloat, CustomIdent, Either};
@@ -41,12 +41,11 @@ use values::animated::effects::TextShadowList as AnimatedTextShadowList;
 use values::computed::{Angle, LengthOrPercentageOrAuto, LengthOrPercentageOrNone};
 use values::computed::{BorderCornerRadius, ClipRect};
 use values::computed::{CalcLengthOrPercentage, Color, Context, ComputedValueAsSpecified};
-use values::computed::{LengthOrPercentage, MaxLength, MozLength, ToComputedValue};
+use values::computed::{LengthOrPercentage, MaxLength, MozLength, Percentage, ToComputedValue};
 use values::generics::{SVGPaint, SVGPaintKind};
 use values::generics::border::BorderCornerRadius as GenericBorderCornerRadius;
 use values::generics::effects::Filter;
 use values::generics::position as generic_position;
-use values::specified::length::Percentage;
 
 
 /// A longhand property whose animation type is not "none".
@@ -395,7 +394,7 @@ impl AnimatedProperty {
 
     /// Update `style` with the proper computed style corresponding to this
     /// animation at `progress`.
-    pub fn update(&self, style: &mut ComputedValues, progress: f64) {
+    pub fn update(&self, style: &mut ComputedValuesInner, progress: f64) {
         match *self {
             % for prop in data.longhands:
                 % if prop.animatable:
@@ -428,8 +427,8 @@ impl AnimatedProperty {
     /// Get an animatable value from a transition-property, an old style, and a
     /// new style.
     pub fn from_animatable_longhand(property: &AnimatableLonghand,
-                                    old_style: &ComputedValues,
-                                    new_style: &ComputedValues)
+                                    old_style: &ComputedValuesInner,
+                                    new_style: &ComputedValuesInner)
                                     -> AnimatedProperty {
         match *property {
             % for prop in data.longhands:
@@ -522,7 +521,7 @@ impl AnimationValue {
 
     /// Construct an AnimationValue from a property declaration
     pub fn from_declaration(decl: &PropertyDeclaration, context: &mut Context,
-                            initial: &ComputedValues) -> Option<Self> {
+                            initial: &ComputedValuesInner) -> Option<Self> {
         use properties::LonghandId;
 
         match *decl {
@@ -594,7 +593,7 @@ impl AnimationValue {
 
     /// Get an AnimationValue for an AnimatableLonghand from a given computed values.
     pub fn from_computed_values(property: &AnimatableLonghand,
-                                computed_values: &ComputedValues)
+                                computed_values: &ComputedValuesInner)
                                 -> Self {
         match *property {
             % for prop in data.longhands:
@@ -1686,7 +1685,6 @@ fn add_weighted_transform_lists(from_list: &[TransformOperation],
             }
         }
     } else {
-        use values::specified::Percentage;
         let from_transform_list = TransformList(Some(from_list.to_vec()));
         let to_transform_list = TransformList(Some(to_list.to_vec()));
         result.push(

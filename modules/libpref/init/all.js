@@ -563,6 +563,9 @@ pref("media.peerconnection.capture_delay", 50);
 pref("media.getusermedia.playout_delay", 50);
 pref("media.navigator.audio.full_duplex", false);
 #endif
+// Use MediaDataDecoder API for WebRTC, this includes hardware acceleration for
+// decoding.
+pref("media.navigator.mediadatadecoder_enabled", false);
 #endif
 
 pref("dom.webaudio.enabled", true);
@@ -639,7 +642,7 @@ pref("media.decoder.skip-to-next-key-frame.enabled", true);
 
 // Log level for cubeb, the audio input/output system. Valid values are
 // "verbose", "normal" and "" (log disabled).
-pref("media.cubeb.log_level", "");
+pref("media.cubeb.logging_level", "");
 
 // Set to true to force demux/decode warnings to be treated as errors.
 pref("media.playback.warnings-as-errors", false);
@@ -717,6 +720,7 @@ pref("apz.overscroll.stretch_factor", "0.35");
 pref("apz.paint_skipping.enabled", true);
 // Fetch displayport updates early from the message queue
 pref("apz.peek_messages.enabled", true);
+pref("apz.popups.enabled", false);
 
 // Whether to print the APZC tree for debugging
 pref("apz.printtree", false);
@@ -4734,7 +4738,7 @@ pref("network.tcp.keepalive.retry_interval", 1); // seconds
 pref("network.tcp.keepalive.probe_count", 4);
 #endif
 
-pref("network.tcp.tcp_fastopen_enable", false);
+pref("network.tcp.tcp_fastopen_enable", true);
 pref("network.tcp.tcp_fastopen_consecutive_failure_limit", 5);
 
 // Whether to disable acceleration for all widgets.
@@ -5670,9 +5674,6 @@ pref("dom.input.fallbackUploadDir", "");
 
 // Turn rewriting of youtube embeds on/off
 pref("plugins.rewrite_youtube_embeds", true);
-
-// Don't hide Flash from navigator.plugins when it is click-to-activate
-pref("plugins.navigator_hide_disabled_flash", false);
 
 // Disable browser frames by default
 pref("dom.mozBrowserFramesEnabled", false);

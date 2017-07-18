@@ -3422,7 +3422,8 @@ IonBuilder::powTrySpecialized(bool* emitted, MDefinition* base, MDefinition* pow
 static inline bool
 SimpleArithOperand(MDefinition* op)
 {
-    return !op->mightBeType(MIRType::Object)
+    return !op->emptyResultTypeSet()
+        && !op->mightBeType(MIRType::Object)
         && !op->mightBeType(MIRType::String)
         && !op->mightBeType(MIRType::Symbol)
         && !op->mightBeType(MIRType::MagicOptimizedArguments)
@@ -6454,18 +6455,31 @@ IonBuilder::jsop_initprop(PropertyName* name)
         useSlowPath = true;
     }
 
-    if (useSlowPath) {
-        current->pop();
-        MInitProp* init = MInitProp::New(alloc(), obj, name, value);
-        current->add(init);
-        return resumeAfter(init);
-    }
-
     MInstruction* last = *current->rbegin();
 
-    // This is definitely initializing an 'own' property of the object, treat
-    // it as an assignment.
-    MOZ_TRY(jsop_setprop(name));
+    if (!useSlowPath && !forceInlineCaches()) {
+        // This is definitely initializing an 'own' property of the object, treat
+        // it as an assignment.
+        MOZ_TRY(jsop_setprop(name));
+    } else {
+        if (*pc != JSOP_INITPROP) {
+            current->pop();
+            MInitProp* init = MInitProp::New(alloc(), obj, name, value);
+            current->add(init);
+            return resumeAfter(init);
+        }
+
+        MDefinition* value = current->pop();
+        MDefinition* obj = current->pop();
+
+        TemporaryTypeSet* objTypes = obj->resultTypeSet();
+        bool barrier = PropertyWriteNeedsTypeBarrier(alloc(), constraints(), current, &obj, name, &value,
+                                                 /* canModify = */ true);
+
+        bool emitted = false;
+        MOZ_TRY(setPropTryCache(&emitted, obj, name, value, barrier, objTypes));
+        MOZ_ASSERT(emitted == true);
+    }
 
     // SETPROP pushed the value, instead of the object. Fix this on the stack,
     // and check the most recent resume point to see if it needs updating too.
@@ -7242,7 +7256,6 @@ IonBuilder::ensureDefiniteType(MDefinition* def, MIRType definiteType)
                 replace = MToDouble::New(alloc(), def);
                 break;
             }
-            MOZ_ASSERT(def->type() == definiteType);
             return def;
         }
         replace = MUnbox::New(alloc(), def, definiteType, MUnbox::Infallible);
