@@ -410,7 +410,7 @@ UPLOAD_FILES= \
   $(call QUOTED_WILDCARD,$(topobjdir)/browser/installer/windows/instgen/setup-stub.exe) \
   $(if $(UPLOAD_EXTRA_FILES), $(foreach f, $(UPLOAD_EXTRA_FILES), $(wildcard $(DIST)/$(f))))
 
-ifneq ($(AB_CD),x-test)
+ifneq ($(filter-out en-US x-test,$(AB_CD)),)
   UPLOAD_FILES += \
     $(call QUOTED_WILDCARD,$(topobjdir)/browser/installer/windows/l10ngen/setup.exe) \
     $(call QUOTED_WILDCARD,$(topobjdir)/browser/installer/windows/l10ngen/setup-stub.exe)
