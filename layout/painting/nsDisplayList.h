@@ -621,6 +621,8 @@ public:
     mModifiedFramesDuringBuilding.Clear();
   }
 
+  bool InInvalidSubtree() const { return mInInvalidSubtree; }
+
   /**
    * Allows callers to selectively override the regular paint suppression checks,
    * so that methods like GetFrameForPoint work when painting is suppressed.
@@ -979,7 +981,8 @@ public:
         mPrevAGR(aBuilder->mCurrentAGR),
         mPrevIsAtRootOfPseudoStackingContext(aBuilder->mIsAtRootOfPseudoStackingContext),
         mPrevAncestorHasApzAwareEventHandler(aBuilder->mAncestorHasApzAwareEventHandler),
-        mPrevBuildingInvisibleItems(aBuilder->mBuildingInvisibleItems)
+        mPrevBuildingInvisibleItems(aBuilder->mBuildingInvisibleItems),
+        mPrevInInvalidSubtree(aBuilder->mInInvalidSubtree)
     {
       if (aForChild->IsTransformed()) {
         aBuilder->mCurrentOffsetToReferenceFrame = nsPoint();
@@ -1005,6 +1008,8 @@ public:
       aBuilder->mVisibleRect = aVisibleRect;
       aBuilder->mDirtyRect = aDirtyRect;
       aBuilder->mIsAtRootOfPseudoStackingContext = aIsRoot;
+      // TODO: Handle the case where aForChild isn't a direct child of the old state
+      aBuilder->mInInvalidSubtree = aBuilder->mInInvalidSubtree || aForChild->IsFrameModified();
     }
     void SetReferenceFrameAndCurrentOffset(const nsIFrame* aFrame, const nsPoint& aOffset) {
       mBuilder->mCurrentReferenceFrame = aFrame;
@@ -1035,6 +1040,7 @@ public:
       mBuilder->mIsAtRootOfPseudoStackingContext = mPrevIsAtRootOfPseudoStackingContext;
       mBuilder->mAncestorHasApzAwareEventHandler = mPrevAncestorHasApzAwareEventHandler;
       mBuilder->mBuildingInvisibleItems = mPrevBuildingInvisibleItems;
+      mBuilder->mInInvalidSubtree = mPrevInInvalidSubtree;
     }
   private:
     nsDisplayListBuilder* mBuilder;
@@ -1050,6 +1056,7 @@ public:
     bool                  mPrevIsAtRootOfPseudoStackingContext;
     bool                  mPrevAncestorHasApzAwareEventHandler;
     bool                  mPrevBuildingInvisibleItems;
+    bool                  mPrevInInvalidSubtree;
   };
 
   /**
@@ -1770,6 +1777,7 @@ private:
   bool                           mBuildingInvisibleItems;
   bool                           mHitTestShouldStopAtFirstOpaque;
   bool                           mIsBuilding;
+  bool                           mInInvalidSubtree;
 };
 
 class nsDisplayItem;
