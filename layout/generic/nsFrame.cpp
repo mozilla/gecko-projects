@@ -3028,6 +3028,8 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
   nsIFrame* child = aChild;
   if (child->GetStateBits() & NS_FRAME_TOO_DEEP_IN_FRAME_TREE)
     return;
+  
+  aBuilder->ClearWillChangeBudget(child);
 
   const bool doingShortcut =
     (child->GetStateBits() & NS_FRAME_SIMPLE_DISPLAYLIST) &&
@@ -3106,6 +3108,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     isPlaceholder = true;
     nsPlaceholderFrame* placeholder = static_cast<nsPlaceholderFrame*>(child);
     child = placeholder->GetOutOfFlowFrame();
+    aBuilder->ClearWillChangeBudget(child);
     NS_ASSERTION(child, "No out of flow frame?");
     // If 'child' is a pushed float then it's owned by a block that's not an
     // ancestor of the placeholder, and it will be painted by that block and

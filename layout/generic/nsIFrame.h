@@ -623,6 +623,7 @@ public:
     , mHasActiveScrolledRoot(false)
     , mBuiltDisplayList(false)
     , mForceDescendIntoIfVisible(false)
+    , mMayHaveWillChangeBudget(false)
     , mClass(aID)
     , mMayHaveRoundedCorners(false)
     , mHasImageRequest(false)
@@ -648,6 +649,9 @@ public:
 
   bool ForceDescendIntoIfVisible() { return mForceDescendIntoIfVisible; }
   void SetForceDescendIntoIfVisible(bool aForce) { mForceDescendIntoIfVisible = aForce; }
+
+  bool MayHaveWillChangeBudget() { return mMayHaveWillChangeBudget; }
+  void SetMayHaveWillChangeBudget(bool aHasBudget) { mMayHaveWillChangeBudget = aHasBudget; }
 
   nsPresContext* PresContext() const {
     return StyleContext()->PresContext();
@@ -4011,6 +4015,7 @@ protected:
   bool mHasActiveScrolledRoot : 1;
   bool mBuiltDisplayList : 1;
   bool mForceDescendIntoIfVisible : 1;
+  bool mMayHaveWillChangeBudget : 1;
 
   /**
    * List of properties attached to the frame.

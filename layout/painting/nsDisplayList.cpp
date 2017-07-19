@@ -1808,7 +1808,7 @@ static uint32_t GetLayerizationCost(const nsSize& aSize) {
 bool
 nsDisplayListBuilder::AddToWillChangeBudget(nsIFrame* aFrame,
                                             const nsSize& aSize) {
-  if (mWillChangeBudgetSet.Contains(aFrame)) {
+  if (mWillChangeBudgetSet.Get(aFrame, nullptr)) {
     return true; // Already accounted
   }
 
@@ -1831,7 +1831,8 @@ nsDisplayListBuilder::AddToWillChangeBudget(nsIFrame* aFrame,
   if (onBudget) {
     budget.mBudget += cost;
     mWillChangeBudget.Put(key, budget);
-    mWillChangeBudgetSet.PutEntry(aFrame);
+    mWillChangeBudgetSet.Put(aFrame, cost);
+    aFrame->SetMayHaveWillChangeBudget(true);
   }
 
   return onBudget;
@@ -1861,6 +1862,26 @@ nsDisplayListBuilder::IsInWillChangeBudget(nsIFrame* aFrame,
       params, ArrayLength(params));
   }
   return onBudget;
+}
+
+void
+nsDisplayListBuilder::ClearWillChangeBudget(nsIFrame* aFrame)
+{
+  if (!aFrame->MayHaveWillChangeBudget()) {
+    return;
+  }
+  aFrame->SetMayHaveWillChangeBudget(false);
+
+  uint32_t cost = 0;
+  if (!mWillChangeBudgetSet.Get(aFrame, &cost)) {
+    return;
+  }
+  mWillChangeBudgetSet.Remove(aFrame);
+  
+  DocumentWillChangeBudget& budget = 
+    mWillChangeBudget.GetOrInsert(aFrame->PresContext());
+  MOZ_ASSERT(budget.mBudget >= cost);
+  budget.mBudget -= cost;
 }
 
 #ifdef MOZ_GFX_OPTIMIZE_MOBILE
