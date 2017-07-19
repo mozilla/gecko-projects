@@ -123,6 +123,7 @@ windows-tests:
     - mochitest-media
     - mochitest-webgl
     - reftest
+    - reftest-gpu
     - reftest-no-accel
     - web-platform-tests
     - web-platform-tests-reftests

@@ -1107,6 +1107,48 @@ reftest:
             linux64-qr/.*: 1
             default: default
 
+reftest-gpu:
+    description: "Reftest GPU run"
+    suite: reftest/reftest-gpu
+    treeherder-symbol: tc-R(Rg)
+    docker-image: {"in-tree": "desktop1604-test"}
+    run-on-projects:
+        by-test-platform:
+            windows10.*: []
+            windows8-64.*: []
+            default: built-projects
+    worker-type:
+        by-test-platform:
+            default: null
+    instance-size:
+        by-test-platform:
+            default: default
+    virtualization: virtual-with-gpu
+    max-run-time:
+        by-test-platform:
+            default: 3600
+    e10s: true
+    mozharness:
+        by-test-platform:
+            default:
+                script: desktop_unittest.py
+                no-read-buildbot-config: true
+                chunked:
+                  by-test-platform:
+                    default: false
+                config:
+                    by-test-platform:
+                        windows.*:
+                            - unittests/win_taskcluster_unittest.py
+                        macosx.*:
+                            - unittests/mac_unittest.py
+                        linux.*:
+                            - unittests/linux_unittest.py
+                            - remove_executables.py
+                extra-options:
+                    - --reftest-suite=reftest-gpu
+    tier: default
+
 reftest-no-accel:
     description: "Reftest not accelerated run"
     suite: reftest/reftest-no-accel
