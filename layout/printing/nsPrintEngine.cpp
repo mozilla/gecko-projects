@@ -392,8 +392,13 @@ nsresult
 nsPrintEngine::CommonPrint(bool                    aIsPrintPreview,
                            nsIPrintSettings*       aPrintSettings,
                            nsIWebProgressListener* aWebProgressListener,
-                           nsIDOMDocument* aDoc) {
-  RefPtr<nsPrintEngine> kungfuDeathGrip = this;
+                           nsIDOMDocument* aDoc)
+{
+  // Callers must hold a strong reference to |this| to ensure that we stay
+  // alive for the duration of this method, because our main owning reference
+  // (on nsDocumentViewer) might be cleared during this function (if we cause
+  // script to run and it cancels the print operation).
+
   nsresult rv = DoCommonPrint(aIsPrintPreview, aPrintSettings,
                               aWebProgressListener, aDoc);
   if (NS_FAILED(rv)) {
@@ -534,6 +539,14 @@ nsPrintEngine::DoCommonPrint(bool                    aIsPrintPreview,
     // Build the "tree" of PrintObjects
     BuildDocTree(printData->mPrintObject->mDocShell, &printData->mPrintDocList,
                  printData->mPrintObject);
+  }
+
+  // The nsAutoScriptBlocker above will now have been destroyed, which may
+  // cause our print/print-preview operation to finish. In this case, we
+  // should immediately return an error code so that the root caller knows
+  // it shouldn't continue to do anything with this instance.
+  if (mIsDestroying || (aIsPrintPreview && !GetIsCreatingPrintPreview())) {
+    return NS_ERROR_FAILURE;
   }
 
   if (!aIsPrintPreview) {
@@ -1683,7 +1696,16 @@ nsPrintEngine::ReconstructAndReflow(bool doSetPixelScale)
 nsresult
 nsPrintEngine::SetupToPrintContent()
 {
-  if (NS_WARN_IF(!mPrt)) {
+  // This method may be called while DoCommonPrint() initializes the instance
+  // when its script blocker goes out of scope.  In such case, this cannot do
+  // its job as expected because some objects in mPrt have not been initialized
+  // yet but they are necessary.
+  // Note: it shouldn't be possible for mPrt->mPrintObject to be null; we
+  // just check it for good measure, as we check its owner & members.
+  if (NS_WARN_IF(!mPrt) ||
+      NS_WARN_IF(!mPrt->mPrintObject) ||
+      NS_WARN_IF(!mPrt->mPrintObject->mPresShell) ||
+      NS_WARN_IF(!mPrt->mPrintObject->mPresContext)) {
     return NS_ERROR_FAILURE;
   }
 
@@ -3593,6 +3615,13 @@ nsPrintEngine::FinishPrintPreview()
 
   rv = DocumentReadyForPrinting();
 
+  // Note that this method may be called while the instance is being
+  // initialized.  Some methods which initialize the instance (e.g.,
+  // DoCommonPrint) may need to stop initializing and return error if
+  // this is called.  Therefore it's important to set IsCreatingPrintPreview
+  // state to false here.  If you need to remove this call of
+  // SetIsCreatingPrintPreview here, you need to keep them being able to
+  // check whether the owner stopped using this instance.
   SetIsCreatingPrintPreview(false);
 
   // mPrt may be cleared during a call of nsPrintData::OnEndPrinting()

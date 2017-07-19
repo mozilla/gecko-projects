@@ -643,7 +643,10 @@ impl<E: TElement> StyleSharingCandidateCache<E> {
             miss!(UserAndAuthorRules)
         }
 
-        if !checks::have_same_state_ignoring_visitedness(target.element, candidate) {
+        // We do not ignore visited state here, because Gecko
+        // needs to store extra bits on visited style contexts,
+        // so these contexts cannot be shared
+        if target.element.get_state() != candidate.get_state() {
             miss!(State)
         }
 
@@ -675,7 +678,7 @@ impl<E: TElement> StyleSharingCandidateCache<E> {
         }
 
         let data = candidate.element.borrow_data().unwrap();
-        debug_assert!(target.has_current_styles(&data));
+        debug_assert!(target.has_current_styles_for_traversal(&data, shared.traversal_flags));
 
         debug!("Sharing style between {:?} and {:?}",
                target.element, candidate.element);

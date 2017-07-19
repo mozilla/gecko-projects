@@ -997,6 +997,8 @@ pref("app.feedback.baseURL", "https://input.mozilla.org/%LOCALE%/feedback/firefo
 pref("app.feedback.baseURL", "https://input.mozilla.org/%LOCALE%/feedback/%APP%/%VERSION%/");
 #endif
 
+// base URL for web-based marketing pages
+pref("app.productInfo.baseURL", "https://www.mozilla.org/firefox/features/");
 
 // Name of alternate about: page for certificate errors (when undefined, defaults to about:neterror)
 pref("security.alternate_certificate_error_page", "certerror");
@@ -1623,13 +1625,15 @@ pref("browser.esedbreader.loglevel", "Error");
 
 pref("browser.laterrun.enabled", false);
 
-pref("dom.ipc.processPrelaunch.enabled", true);
-
-#ifdef EARLY_BETA_OR_EARLIER
-pref("browser.migrate.automigrate.enabled", true);
+// Disable prelaunch in the same way activity-stream is enabled addressing
+// bug 1381804 memory usage until bug 1376895 is fixed.
+#ifdef NIGHTLY_BUILD
+pref("dom.ipc.processPrelaunch.enabled", false);
 #else
-pref("browser.migrate.automigrate.enabled", false);
+pref("dom.ipc.processPrelaunch.enabled", true);
 #endif
+
+pref("browser.migrate.automigrate.enabled", false);
 // 4 here means the suggestion notification will be automatically
 // hidden the 4th day, so it will actually be shown on 3 different days.
 pref("browser.migrate.automigrate.daysToOfferUndo", 4);

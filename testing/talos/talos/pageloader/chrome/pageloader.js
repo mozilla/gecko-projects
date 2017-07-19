@@ -156,7 +156,7 @@ function plInit() {
     if (args.profilinginfo) profilingInfo = JSON.parse(args.profilinginfo)
 
     if (profilingInfo) {
-      Profiler.initFromObject(profilingInfo);
+      TalosParentProfiler.initFromObject(profilingInfo);
     }
 
     forceCC = !args.noForceCC;
@@ -204,7 +204,7 @@ function plInit() {
 
     pageIndex = 0;
     if (profilingInfo) {
-      Profiler.beginTest(getCurrentPageShortName());
+      TalosParentProfiler.beginTest(getCurrentPageShortName());
     }
 
     // Create a new chromed browser window for content
@@ -290,7 +290,7 @@ function plInit() {
           content.selectedBrowser.messageManager.loadFrameScript(contentScript, false, true);
           content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/talos-content.js", false);
           content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/tscroll.js", false, true);
-          content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/Profiler.js", false, true);
+          content.selectedBrowser.messageManager.loadFrameScript("chrome://talos-powers-content/content/TalosContentProfiler.js", false, true);
         }
 
         if (reportRSS) {
@@ -326,6 +326,10 @@ var ContentListener = {
 var removeLastAddedListener = null;
 var removeLastAddedMsgListener = null;
 function plLoadPage() {
+  if (profilingInfo) {
+    TalosParentProfiler.beginTest(getCurrentPageShortName() + "_pagecycle_" + pageCycle);
+  }
+
   var pageName = pages[pageIndex].url.spec;
 
   if (removeLastAddedListener) {
@@ -380,7 +384,7 @@ function plLoadPage() {
   failTimeout.register(loadFail, timeout);
 
   // record which page we are about to open
-  Profiler.mark("Opening " + pages[pageIndex].url.path);
+  TalosParentProfiler.mark("Opening " + pages[pageIndex].url.path);
 
   if (reportRSS) {
     collectMemory(startAndLoadURI, pageName);
@@ -394,8 +398,9 @@ function startAndLoadURI(pageName) {
     // Resume the profiler because we're really measuring page load time.
     // If the test is doing its own timing, it'll also need to do its own
     // profiler pausing / resuming.
-    Profiler.resume("Starting to load URI " + pageName, true);
+    TalosParentProfiler.resume("Starting to load URI " + pageName);
   }
+
   start_time = Date.now();
   if (loadNoCache) {
     content.loadURIWithFlags(pageName, Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CACHE);
@@ -429,8 +434,9 @@ function loadFail() {
   if (numRetries >= maxRetries) {
     dumpLine("__FAILTimeout in " + getTestName() + "__FAIL");
     dumpLine("__FAILTimeout (" + numRetries + "/" + maxRetries + ") exceeded on " + pageName + "__FAIL");
-    Profiler.finishTest();
-    plStop(true);
+    TalosParentProfiler.finishTest().then(() => {
+      plStop(true);
+    });
   } else {
     dumpLine("__WARNTimeout (" + numRetries + "/" + maxRetries + ") exceeded on " + pageName + "__WARN");
     // TODO: make this a cleaner cleanup
@@ -452,23 +458,19 @@ function loadFail() {
 
 var plNextPage = async function() {
   var doNextPage = false;
+
+  if (profilingInfo) {
+    await TalosParentProfiler.finishTest();
+  }
+
   if (pageCycle < numPageCycles) {
     pageCycle++;
     doNextPage = true;
-  } else {
-    if (profilingInfo) {
-      await Profiler.finishTestAsync();
-    }
-
-    if (pageIndex < pages.length - 1) {
-      pageIndex++;
-      if (profilingInfo) {
-        Profiler.beginTest(getCurrentPageShortName());
-      }
-      recordedName = null;
-      pageCycle = 1;
-      doNextPage = true;
-    }
+  } else if (pageIndex < pages.length - 1) {
+    pageIndex++;
+    recordedName = null;
+    pageCycle = 1;
+    doNextPage = true;
   }
 
   if (doNextPage == true) {
@@ -611,7 +613,7 @@ function _loadHandlerCapturing() {
 
   if (gTime !== -1) {
     plRecordTime(gTime);
-    Profiler.pause("capturing load handler fired", true);
+    TalosParentProfiler.pause("capturing load handler fired");
     gTime = -1;
     recordedName = null;
     setTimeout(plNextPage, delay);
@@ -657,7 +659,7 @@ function _loadHandler() {
   var end_time = Date.now();
   var time = (end_time - start_time);
 
-  Profiler.pause("Bubbling load handler fired.", true);
+  TalosParentProfiler.pause("Bubbling load handler fired.");
 
   // does this page want to do its own timing?
   // if so, we shouldn't be here
