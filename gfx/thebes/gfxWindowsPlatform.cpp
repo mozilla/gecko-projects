@@ -8,6 +8,7 @@
 
 #include "cairo.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/layers/CompositorBridgeChild.h"
 
 #include "gfxImageSurface.h"
 #include "gfxWindowsSurface.h"
@@ -20,6 +21,7 @@
 #include "mozilla/WindowsVersion.h"
 #include "nsServiceManagerUtils.h"
 #include "nsTArray.h"
+#include "nsThreadUtils.h"
 #include "mozilla/Telemetry.h"
 #include "GeckoProfiler.h"
 
@@ -59,6 +61,7 @@
 
 #include <dwmapi.h>
 #include <d3d11.h>
+#include <d2d1_1.h>
 
 #include "nsIMemoryReporter.h"
 #include <winternl.h>
@@ -69,7 +72,7 @@
 #include "gfxConfig.h"
 #include "VsyncSource.h"
 #include "DriverCrashGuard.h"
-#include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/ContentChild.h"
 #include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/layers/DeviceAttachmentsD3D11.h"
 #include "D3D11Checks.h"
@@ -148,14 +151,13 @@ class GPUAdapterReporter final : public nsIMemoryReporter
     // Callers must Release the DXGIAdapter after use or risk mem-leak
     static bool GetDXGIAdapter(IDXGIAdapter **aDXGIAdapter)
     {
-        ID3D11Device *d3d11Device;
-        IDXGIDevice *dxgiDevice;
+        RefPtr<ID3D11Device> d3d11Device;
+        RefPtr<IDXGIDevice> dxgiDevice;
         bool result = false;
 
         if ((d3d11Device = mozilla::gfx::Factory::GetDirect3D11Device())) {
-            if (d3d11Device->QueryInterface(__uuidof(IDXGIDevice), (void **)&dxgiDevice) == S_OK) {
+            if (d3d11Device->QueryInterface(__uuidof(IDXGIDevice), getter_AddRefs(dxgiDevice)) == S_OK) {
                 result = (dxgiDevice->GetAdapter(aDXGIAdapter) == S_OK);
-                dxgiDevice->Release();
             }
         }
 
@@ -430,7 +432,7 @@ gfxWindowsPlatform::UpdateBackendPrefs()
   uint32_t contentMask = BackendTypeBit(BackendType::CAIRO) |
                          BackendTypeBit(BackendType::SKIA);
   BackendType defaultBackend = BackendType::SKIA;
-  if (gfxConfig::IsEnabled(Feature::DIRECT2D) && Factory::GetD2D1Device()) {
+  if (gfxConfig::IsEnabled(Feature::DIRECT2D) && Factory::HasD2D1Device()) {
     contentMask |= BackendTypeBit(BackendType::DIRECT2D1_1);
     canvasMask |= BackendTypeBit(BackendType::DIRECT2D1_1);
     defaultBackend = BackendType::DIRECT2D1_1;
@@ -456,9 +458,9 @@ gfxWindowsPlatform::UpdateRenderMode()
       CreateOffscreenContentDrawTarget(IntSize(1, 1), SurfaceFormat::B8G8R8A8);
     if (!mScreenReferenceDrawTarget) {
       gfxCriticalNote << "Failed to update reference draw target after device reset"
-                      << ", D3D11 device:" << hexa(Factory::GetDirect3D11Device())
+                      << ", D3D11 device:" << hexa(Factory::GetDirect3D11Device().get())
                       << ", D3D11 status:" << FeatureStatusToString(gfxConfig::GetValue(Feature::D3D11_COMPOSITING))
-                      << ", D2D1 device:" << hexa(Factory::GetD2D1Device())
+                      << ", D2D1 device:" << hexa(Factory::GetD2D1Device().get())
                       << ", D2D1 status:" << FeatureStatusToString(gfxConfig::GetValue(Feature::DIRECT2D))
                       << ", content:" << int(GetDefaultContentBackend())
                       << ", compositor:" << int(GetCompositorBackend());
@@ -894,12 +896,44 @@ gfxWindowsPlatform::SchedulePaintIfDeviceReset()
 
   gfxCriticalNote << "(gfxWindowsPlatform) Detected device reset: " << (int)resetReason;
 
-  // Trigger an ::OnPaint for each window.
-  ::EnumThreadWindows(GetCurrentThreadId(),
-                      InvalidateWindowForDeviceReset,
-                      0);
+  if (XRE_IsParentProcess()) {
+    // Trigger an ::OnPaint for each window.
+    ::EnumThreadWindows(GetCurrentThreadId(),
+                        InvalidateWindowForDeviceReset,
+                        0);
+  } else {
+    NS_DispatchToMainThread(NS_NewRunnableFunction(
+      "gfx::gfxWindowsPlatform::SchedulePaintIfDeviceReset",
+      []() -> void {
+        gfxWindowsPlatform::GetPlatform()->CheckForContentOnlyDeviceReset();
+      }
+    ));
+  }
 
-  gfxCriticalNote << "(gfxWindowsPlatform) Finished device reset.";
+  gfxCriticalNote << "(gfxWindowsPlatform) scheduled device update.";
+}
+
+void
+gfxWindowsPlatform::CheckForContentOnlyDeviceReset()
+{
+  if (!DidRenderingDeviceReset()) {
+    return;
+  }
+
+  bool isContentOnlyTDR;
+  D3D11DeviceStatus status;
+
+  DeviceManagerDx::Get()->ExportDeviceInfo(&status);
+  CompositorBridgeChild::Get()->SendCheckContentOnlyTDR(
+    status.sequenceNumber(), &isContentOnlyTDR);
+
+  // The parent process doesn't know about the reset yet, or the reset is
+  // local to our device.
+  if (isContentOnlyTDR) {
+    gfxCriticalNote << "A content-only TDR is detected.";
+    dom::ContentChild* cc = dom::ContentChild::GetSingleton();
+    cc->RecvReinitRenderingForDeviceReset();
+  }
 }
 
 void

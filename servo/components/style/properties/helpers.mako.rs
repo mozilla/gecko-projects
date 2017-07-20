@@ -129,6 +129,8 @@
 
             % if animation_value_type == "ComputedValue":
                 use properties::animated_properties::Animatable;
+                use values::animated::ToAnimatedZero;
+
                 impl Animatable for T {
                     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64)
                         -> Result<Self, ()> {
@@ -148,6 +150,11 @@
                     fn compute_squared_distance(&self, other: &Self) -> Result<f64, ()> {
                         self.0.compute_squared_distance(&other.0)
                     }
+                }
+
+                impl ToAnimatedZero for T {
+                    #[inline]
+                    fn to_animated_zero(&self) -> Result<Self, ()> { Err(()) }
                 }
             % endif
 
@@ -292,13 +299,13 @@
         #[allow(unused_imports)]
         use properties::{DeclaredValue, LonghandId, LonghandIdSet};
         #[allow(unused_imports)]
-        use properties::{CSSWideKeyword, ComputedValuesInner, PropertyDeclaration};
+        use properties::{CSSWideKeyword, ComputedValues, PropertyDeclaration};
         #[allow(unused_imports)]
         use properties::style_structs;
         #[allow(unused_imports)]
         use selectors::parser::SelectorParseError;
         #[allow(unused_imports)]
-        use stylearc::Arc;
+        use servo_arc::Arc;
         #[allow(unused_imports)]
         use style_traits::{ParseError, StyleParseError};
         #[allow(unused_imports)]
@@ -310,8 +317,8 @@
         ${caller.body()}
         #[allow(unused_variables)]
         pub fn cascade_property(declaration: &PropertyDeclaration,
-                                inherited_style: &ComputedValuesInner,
-                                default_style: &ComputedValuesInner,
+                                inherited_style: &ComputedValues,
+                                default_style: &ComputedValues,
                                 context: &mut computed::Context,
                                 cacheable: &mut bool,
                                 cascade_info: &mut Option<<&mut CascadeInfo>) {

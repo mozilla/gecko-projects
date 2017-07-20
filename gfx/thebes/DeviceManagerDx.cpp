@@ -15,9 +15,11 @@
 #include "mozilla/gfx/GPUParent.h"
 #include "mozilla/gfx/GraphicsMessages.h"
 #include "mozilla/gfx/Logging.h"
+#include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/DeviceAttachmentsD3D11.h"
 #include "mozilla/layers/MLGDeviceD3D11.h"
+#include "mozilla/layers/PaintThread.h"
 #include "nsIGfxInfo.h"
 #include "nsString.h"
 #include <d3d11.h>
@@ -172,11 +174,6 @@ DeviceManagerDx::ImportDeviceInfo(const D3D11DeviceStatus& aDeviceStatus)
 void
 DeviceManagerDx::ExportDeviceInfo(D3D11DeviceStatus* aOut)
 {
-  // Even though the parent process might not own the compositor, we still
-  // populate DeviceManagerDx with device statistics (for simplicity).
-  // That means it still gets queried for compositor information.
-  MOZ_ASSERT(XRE_IsParentProcess() || XRE_GetProcessType() == GeckoProcessType_GPU);
-
   if (mDeviceStatus) {
     *aOut = mDeviceStatus.value();
   }
@@ -320,6 +317,20 @@ DeviceManagerDx::CreateCompositorDeviceHelper(
   return true;
 }
 
+// Note that it's enough for us to just use a counter for a unique ID,
+// even though the counter isn't synchronized between processes. If we
+// start in the GPU process and wind up in the parent process, the
+// whole graphics stack is blown away anyway. But just in case, we
+// make gpu process IDs negative and parent process IDs positive.
+static inline int32_t
+GetNextDeviceCounter()
+{
+  static int32_t sDeviceCounter = 0;
+  return XRE_IsGPUProcess()
+         ? --sDeviceCounter
+         : ++sDeviceCounter;
+}
+
 void
 DeviceManagerDx::CreateCompositorDevice(FeatureState& d3d11)
 {
@@ -377,15 +388,18 @@ DeviceManagerDx::CreateCompositorDevice(FeatureState& d3d11)
     D3D11Checks::WarnOnAdapterMismatch(device);
   }
 
-  int featureLevel = device->GetFeatureLevel();
+  uint32_t featureLevel = device->GetFeatureLevel();
   {
     MutexAutoLock lock(mDeviceLock);
     mCompositorDevice = device;
+
+    int32_t sequenceNumber = GetNextDeviceCounter();
     mDeviceStatus = Some(D3D11DeviceStatus(
       false,
       textureSharingWorks,
       featureLevel,
-      DxgiAdapterDesc::From(desc)));
+      DxgiAdapterDesc::From(desc),
+      sequenceNumber));
   }
   mCompositorDevice->SetExceptionMode(0);
 }
@@ -473,11 +487,14 @@ DeviceManagerDx::CreateWARPCompositorDevice()
   {
     MutexAutoLock lock(mDeviceLock);
     mCompositorDevice = device;
+
+    int32_t sequenceNumber = GetNextDeviceCounter();
     mDeviceStatus = Some(D3D11DeviceStatus(
       true,
       textureSharingWorks,
       featureLevel,
-      nullAdapter));
+      nullAdapter,
+      sequenceNumber));
   }
   mCompositorDevice->SetExceptionMode(0);
 
@@ -701,6 +718,14 @@ DeviceManagerDx::CreateMLGDevice()
 void
 DeviceManagerDx::ResetDevices()
 {
+  // Flush the paint thread before revoking all these singletons. This
+  // should ensure that the paint thread doesn't start mixing and matching
+  // old and new objects together.
+  if (PaintThread::Get()) {
+    CompositorBridgeChild* cbc = CompositorBridgeChild::Get();
+    cbc->FlushAsyncPaints();
+  }
+
   MutexAutoLock lock(mDeviceLock);
 
   mAdapter = nullptr;

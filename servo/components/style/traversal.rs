@@ -227,24 +227,23 @@ pub trait DomTraversal<E: TElement> : Sync {
         }
 
         let flags = shared_context.traversal_flags;
-        let data = root.mutate_data();
-        let should_traverse = if data.as_ref().map_or(true, |d| !d.has_styles()) {
-            !flags.for_animation_only()
-        } else {
-            let mut data = data.unwrap();
-            // Look at whether there has been any attribute or state change, and
-            // invalidate our style, and the one of our siblings and descendants as
-            // needed.
-            data.invalidate_style_if_needed(root, shared_context);
+        let mut data = root.mutate_data();
+        let mut data = data.as_mut().map(|d| &mut **d);
 
-            let parent = root.traversal_parent();
-            let parent_data = match parent {
-                None => None,
-                Some(ref x) => Some(x.borrow_data().unwrap())
-            };
-            let parent_data_borrow = parent_data.as_ref().map(|x| &**x);
-            Self::element_needs_traversal(root, flags, &*data, parent_data_borrow)
+        if let Some(ref mut data) = data {
+            // Invalidate our style, and the one of our siblings and descendants
+            // as needed.
+            data.invalidate_style_if_needed(root, shared_context);
         };
+
+        let parent = root.traversal_parent();
+        let parent_data = parent.as_ref().and_then(|p| p.borrow_data());
+        let should_traverse = Self::element_needs_traversal(
+            root,
+            flags,
+            data.map(|d| &*d),
+            parent_data.as_ref().map(|d| &**d)
+        );
 
         PreTraverseToken {
             traverse: should_traverse,
@@ -267,10 +266,15 @@ pub trait DomTraversal<E: TElement> : Sync {
     fn element_needs_traversal(
         el: E,
         traversal_flags: TraversalFlags,
-        data: &ElementData,
+        data: Option<&ElementData>,
         parent_data: Option<&ElementData>,
     ) -> bool {
-        debug_assert!(data.has_styles(), "Caller should check this");
+        debug!("element_needs_traversal({:?}, {:?}, {:?}, {:?})",
+               el, traversal_flags, data, parent_data);
+        let data = match data {
+            Some(d) if d.has_styles() => d,
+            _ => return !traversal_flags.for_animation_only(),
+        };
 
         // Non-incremental layout visits every node.
         if is_servo_nonincremental_layout() {
@@ -328,8 +332,7 @@ pub trait DomTraversal<E: TElement> : Sync {
         // animation-only restyle hint or recascade.
         if traversal_flags.for_animation_only() {
             return el.has_animation_only_dirty_descendants() ||
-                   data.restyle.hint.has_animation_hint() ||
-                   data.restyle.hint.has_recascade_self();
+                   data.restyle.hint.has_animation_hint_or_recascade();
         }
 
         // If the dirty descendants bit is set, we need to traverse no matter
@@ -341,7 +344,7 @@ pub trait DomTraversal<E: TElement> : Sync {
         // If we have a restyle hint or need to recascade, we need to visit the
         // element.
         //
-        // Note that this is different than checking has_current_styles(),
+        // Note that this is different than checking has_current_styles_for_traversal(),
         // since that can return true even if we have a restyle hint indicating
         // that the element's descendants (but not necessarily the element) need
         // restyling.
@@ -485,7 +488,7 @@ where
             StyleResolverForElement::new(*ancestor, context, rule_inclusion)
                 .resolve_primary_style(
                     style.as_ref().map(|s| &**s),
-                    layout_parent_style.as_ref().map(|s| &***s)
+                    layout_parent_style.as_ref().map(|s| &**s)
                 );
 
         let is_display_contents = primary_style.style.is_display_contents();
@@ -502,7 +505,7 @@ where
     StyleResolverForElement::new(element, context, rule_inclusion)
         .resolve_style(
             style.as_ref().map(|s| &**s),
-            layout_parent_style.as_ref().map(|s| &***s)
+            layout_parent_style.as_ref().map(|s| &**s)
         )
 }
 
@@ -524,10 +527,12 @@ where
 {
     context.thread_local.begin_element(element, data);
     context.thread_local.statistics.elements_traversed += 1;
-    debug_assert!(!element.has_snapshot() || element.handled_snapshot(),
+    debug_assert!(context.shared.traversal_flags.for_animation_only() ||
+                  !element.has_snapshot() || element.handled_snapshot(),
                   "Should've handled snapshots here already");
 
-    let compute_self = !element.has_current_styles(data);
+    let compute_self =
+        !element.has_current_styles_for_traversal(data, context.shared.traversal_flags);
     let mut hint = RestyleHint::empty();
 
     debug!("recalc_style_at: {:?} (compute_self={:?}, \
@@ -580,8 +585,7 @@ where
            propagated_hint,
            data.styles.is_display_none(),
            element.implemented_pseudo_element());
-    debug_assert!(element.has_current_styles(data) ||
-                  context.shared.traversal_flags.for_animation_only(),
+    debug_assert!(element.has_current_styles_for_traversal(data, context.shared.traversal_flags),
                   "Should have computed style or haven't yet valid computed \
                    style in case of animation-only restyle");
 
@@ -771,6 +775,7 @@ where
 {
     trace!("note_children: {:?}", element);
     let flags = context.shared.traversal_flags;
+    let is_initial_style = context.thread_local.is_initial_style();
 
     // Loop over all the traversal children.
     for child_node in element.as_node().traversal_children() {
@@ -785,35 +790,31 @@ where
             },
         };
 
-        let child_data = child.mutate_data();
-        if child_data.as_ref().map_or(true, |d| !d.has_styles()) {
-            if !flags.for_animation_only() {
-                note_child(child_node);
-            }
-            continue;
-        }
-        let mut child_data = child_data.unwrap();
-
+        let mut child_data = child.mutate_data();
+        let mut child_data = child_data.as_mut().map(|d| &mut **d);
         trace!(" > {:?} -> {:?} + {:?}, pseudo: {:?}",
                child,
-               child_data.restyle.hint,
+               child_data.as_ref().map(|d| d.restyle.hint),
                propagated_hint,
                child.implemented_pseudo_element());
 
-        // Propagate the parent restyle hint, that may make us restyle the whole
-        // subtree.
-        if reconstructed_ancestor {
-            child_data.restyle.set_reconstructed_ancestor();
+        if let Some(ref mut child_data) = child_data {
+            // Propagate the parent restyle hint, that may make us restyle the whole
+            // subtree.
+            if reconstructed_ancestor {
+                child_data.restyle.set_reconstructed_ancestor();
+            }
+
+            child_data.restyle.hint.insert(propagated_hint);
+
+            // Handle element snapshots and invalidation of descendants and siblings
+            // as needed.
+            //
+            // NB: This will be a no-op if there's no snapshot.
+            child_data.invalidate_style_if_needed(child, &context.shared);
         }
-        child_data.restyle.hint.insert(propagated_hint);
 
-        // Handle element snapshots and invalidation of descendants and siblings
-        // as needed.
-        //
-        // NB: This will be a no-op if there's no snapshot.
-        child_data.invalidate_style_if_needed(child, &context.shared);
-
-        if D::element_needs_traversal(child, flags, &*child_data, Some(data)) {
+        if D::element_needs_traversal(child, flags, child_data.map(|d| &*d), Some(data)) {
             note_child(child_node);
 
             // Set the dirty descendants bit on the parent as needed, so that we
@@ -822,8 +823,8 @@ where
             // If we are in a restyle for reconstruction, there is no need to
             // perform a post-traversal, so we don't need to set the dirty
             // descendants bit on the parent.
-            if !context.shared.traversal_flags.for_reconstruct() {
-                if context.shared.traversal_flags.for_animation_only() {
+            if !flags.for_reconstruct() && !is_initial_style {
+                if flags.for_animation_only() {
                     unsafe { element.set_animation_only_dirty_descendants(); }
                 } else {
                     unsafe { element.set_dirty_descendants(); }

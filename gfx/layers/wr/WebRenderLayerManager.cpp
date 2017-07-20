@@ -47,7 +47,7 @@ WebRenderLayerManager::AsKnowsCompositor()
   return mWrChild;
 }
 
-void
+bool
 WebRenderLayerManager::Initialize(PCompositorBridgeChild* aCBChild,
                                   wr::PipelineId aLayersId,
                                   TextureFactoryIdentifier* aTextureFactoryIdentifier)
@@ -62,12 +62,21 @@ WebRenderLayerManager::Initialize(PCompositorBridgeChild* aCBChild,
                                                                             size,
                                                                             &textureFactoryIdentifier,
                                                                             &id_namespace);
-  MOZ_ASSERT(bridge);
+  if (!bridge) {
+    // This should only fail if we attempt to access a layer we don't have
+    // permission for, or more likely, the GPU process crashed again during
+    // reinitialization. We can expect to be notified again to reinitialize
+    // (which may or may not be using WebRender).
+    gfxCriticalNote << "Failed to create WebRenderBridgeChild.";
+    return false;
+  }
+
   mWrChild = static_cast<WebRenderBridgeChild*>(bridge);
   WrBridge()->SendCreate(size.ToUnknownSize());
   WrBridge()->IdentifyTextureHost(textureFactoryIdentifier);
   WrBridge()->SetNamespace(id_namespace);
   *aTextureFactoryIdentifier = textureFactoryIdentifier;
+  return true;
 }
 
 void
@@ -86,9 +95,12 @@ WebRenderLayerManager::DoDestroy(bool aIsSync)
   mWidget->CleanupWebRenderWindowOverlay(WrBridge());
 
   LayerManager::Destroy();
-  DiscardImages();
-  DiscardCompositorAnimations();
-  WrBridge()->Destroy(aIsSync);
+
+  if (WrBridge()) {
+    DiscardImages();
+    DiscardCompositorAnimations();
+    WrBridge()->Destroy(aIsSync);
+  }
 
   if (mTransactionIdAllocator) {
     // Make sure to notify the refresh driver just in case it's waiting on a
@@ -299,7 +311,7 @@ WebRenderLayerManager::PushImage(nsDisplayItem* aItem,
   }
 
   wr::ImageRendering filter = wr::ImageRendering::Auto;
-  auto r = aSc.ToRelativeWrRect(aRect);
+  auto r = aSc.ToRelativeLayoutRect(aRect);
   aBuilder.PushImage(r, r, filter, key.value());
 
   return true;
@@ -426,7 +438,7 @@ WebRenderLayerManager::PushItemAsImage(nsDisplayItem* aItem,
 
   MOZ_ASSERT(fallbackData->GetKey());
 
-  WrRect dest = aSc.ToRelativeWrRect(imageRect + offset);
+  wr::LayoutRect dest = aSc.ToRelativeLayoutRect(imageRect + offset);
   aBuilder.PushImage(dest,
                      dest,
                      wr::ImageRendering::Auto,
@@ -470,7 +482,7 @@ WebRenderLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback
   }
   DiscardCompositorAnimations();
 
-  WrSize contentSize { (float)size.width, (float)size.height };
+  wr::LayoutSize contentSize { (float)size.width, (float)size.height };
   wr::DisplayListBuilder builder(WrBridge()->GetPipeline(), contentSize);
 
   if (mEndTransactionWithoutLayers) {
@@ -698,7 +710,9 @@ WebRenderLayerManager::Hold(Layer* aLayer)
 void
 WebRenderLayerManager::SetLayerObserverEpoch(uint64_t aLayerObserverEpoch)
 {
-  WrBridge()->SendSetLayerObserverEpoch(aLayerObserverEpoch);
+  if (WrBridge()->IPCOpen()) {
+    WrBridge()->SendSetLayerObserverEpoch(aLayerObserverEpoch);
+  }
 }
 
 void
@@ -732,6 +746,9 @@ void
 WebRenderLayerManager::ClearLayer(Layer* aLayer)
 {
   aLayer->ClearCachedResources();
+  if (aLayer->GetMaskLayer()) {
+    aLayer->GetMaskLayer()->ClearCachedResources();
+  }
   for (Layer* child = aLayer->GetFirstChild(); child;
        child = child->GetNextSibling()) {
     ClearLayer(child);
@@ -741,12 +758,13 @@ WebRenderLayerManager::ClearLayer(Layer* aLayer)
 void
 WebRenderLayerManager::ClearCachedResources(Layer* aSubtree)
 {
-  WrBridge()->SendClearCachedResources();
+  WrBridge()->BeginClearCachedResources();
   if (aSubtree) {
     ClearLayer(aSubtree);
   } else if (mRoot) {
     ClearLayer(mRoot);
   }
+  WrBridge()->EndClearCachedResources();
 }
 
 void

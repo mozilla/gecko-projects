@@ -412,7 +412,7 @@ AddOrAccumulate(nsSMILValue& aDest, const nsSMILValue& aValueToAdd,
   // hopefully become obsolete before we expand that set.
   return StyleAnimationValue::Add(property,
                                   destWrapper->mGeckoValue,
-                                  valueToAddWrapper->mGeckoValue, aCount);
+                                  *valueToAdd, aCount);
 }
 
 nsresult
@@ -700,14 +700,10 @@ ValueFromStringHelper(nsCSSPropertyID aPropID,
     return result;
   }
 
-  // Get a suitable style context for Servo
-  const ServoComputedValues* currentStyle =
-    aStyleContext->ComputedValues();
-
   // Compute value
   aPresContext->StyleSet()->AsServo()->GetAnimationValues(servoDeclarationBlock,
                                                           aTargetElement,
-                                                          currentStyle,
+                                                          aStyleContext->AsServo(),
                                                           result);
   if (result.IsEmpty()) {
     return result;

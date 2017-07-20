@@ -72,6 +72,7 @@ use script_traits::DocumentActivity;
 use script_traits::UntrustedNodeAddress;
 use selectors::matching::{matches_selector_list, MatchingContext, MatchingMode};
 use selectors::parser::SelectorList;
+use servo_arc::Arc;
 use servo_url::ServoUrl;
 use std::borrow::ToOwned;
 use std::cell::{Cell, UnsafeCell, RefMut};
@@ -83,7 +84,6 @@ use std::ops::Range;
 use style::context::QuirksMode;
 use style::dom::OpaqueNode;
 use style::selector_parser::{SelectorImpl, SelectorParser};
-use style::stylearc::Arc;
 use style::stylesheets::Stylesheet;
 use style::thread_state;
 use uuid::Uuid;
@@ -1422,13 +1422,12 @@ impl Node {
             for descendant in node.traverse_preorder() {
                 descendant.set_owner_doc(document);
             }
-            for descendant in node.traverse_preorder() {
+            for descendant in node.traverse_preorder().filter_map(|d| d.as_custom_element()) {
                 // Step 3.2.
-                if let Some(element) = node.as_custom_element() {
-                    ScriptThread::enqueue_callback_reaction(&*element,
-                        CallbackReaction::Adopted(old_doc.clone(), Root::from_ref(document)));
-                }
-
+                ScriptThread::enqueue_callback_reaction(&*descendant,
+                    CallbackReaction::Adopted(old_doc.clone(), Root::from_ref(document)));
+            }
+            for descendant in node.traverse_preorder() {
                 // Step 3.3.
                 vtable_for(&descendant).adopting_steps(&old_doc);
             }
@@ -1636,9 +1635,17 @@ impl Node {
         for kid in new_nodes {
             // Step 7.1.
             parent.add_child(*kid, child);
-            // Step 7.2: insertion steps.
-            if let Some(element) = kid.as_custom_element() {
-                ScriptThread::enqueue_callback_reaction(&*element, CallbackReaction::Connected);
+            // Step 7.7.
+            for descendant in kid.traverse_preorder().filter_map(Root::downcast::<Element>) {
+                // Step 7.7.2.
+                if descendant.is_connected() {
+                    // Step 7.7.2.1.
+                    if descendant.get_custom_element_definition().is_some() {
+                        ScriptThread::enqueue_callback_reaction(&*descendant, CallbackReaction::Connected);
+                    }
+                    // TODO: Step 7.7.2.2.
+                    // Try to upgrade descendant.
+                }
             }
         }
         if let SuppressObserver::Unsuppressed = suppress_observers {
