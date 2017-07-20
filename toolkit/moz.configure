@@ -516,7 +516,7 @@ set_define('MOZ_PHOTON_ANIMATIONS', photon_animations)
 
 option(env='MOZ_PHOTON_PREFERENCES',
        help='Enable Photon preferences',
-       default=milestone.is_nightly)
+       default=False)
 
 @depends('MOZ_PHOTON_PREFERENCES')
 def photon_preferences(value):
