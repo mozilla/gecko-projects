@@ -795,7 +795,7 @@ or run without that action (ie: --no-{action})"
             return self.buildid
 
         buildid = None
-        if c.get("is_automation"):
+        if c.get("is_automation") or os.environ.get("TASK_ID"):
             if self.buildbot_config['properties'].get('buildid'):
                 self.info("Determining buildid from buildbot properties")
                 buildid = self.buildbot_config['properties']['buildid'].encode(
