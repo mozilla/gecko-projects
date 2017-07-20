@@ -321,8 +321,8 @@ def target_tasks_nightly_win(full_task_graph, parameters):
 def target_tasks_nightly_desktop(full_task_graph, parameters):
     """Select the set of tasks required for a nightly build of linux, mac,
     windows."""
-    return target_tasks_nightly_win(full_task_graph, parameters) +
-        target_tasks_nightly_macosx(full_task_graph, parameters) +
+    return target_tasks_nightly_win(full_task_graph, parameters) + \
+        target_tasks_nightly_macosx(full_task_graph, parameters) + \
         target_tasks_nightly_linux(full_task_graph, parameters)
 
 
