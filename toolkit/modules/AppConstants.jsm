@@ -156,8 +156,6 @@ this.AppConstants = Object.freeze({
   "macosx",
 #elif MOZ_WIDGET_ANDROID
   "android",
-#elif MOZ_WIDGET_GONK
-  "gonk",
 #elif XP_LINUX
   "linux",
 #else
@@ -357,6 +355,13 @@ this.AppConstants = Object.freeze({
 
   MOZ_PHOTON_ANIMATIONS:
 #ifdef MOZ_PHOTON_ANIMATIONS
+    true,
+#else
+    false,
+#endif
+
+  MOZ_PHOTON_PREFERENCES:
+#ifdef MOZ_PHOTON_PREFERENCES
     true,
 #else
     false,

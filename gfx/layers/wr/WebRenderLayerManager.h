@@ -35,7 +35,7 @@ class WebRenderLayerManager final : public LayerManager
 
 public:
   explicit WebRenderLayerManager(nsIWidget* aWidget);
-  void Initialize(PCompositorBridgeChild* aCBChild, wr::PipelineId aLayersId, TextureFactoryIdentifier* aTextureFactoryIdentifier);
+  bool Initialize(PCompositorBridgeChild* aCBChild, wr::PipelineId aLayersId, TextureFactoryIdentifier* aTextureFactoryIdentifier);
 
   virtual void Destroy() override;
 
@@ -214,7 +214,7 @@ private:
 
 private:
   nsIWidget* MOZ_NON_OWNING_REF mWidget;
-  std::vector<wr::ImageKey> mImageKeys;
+  std::vector<wr::ImageKey> mImageKeysToDelete;
   nsTArray<uint64_t> mDiscardedCompositorAnimationsIds;
 
   /* PaintedLayer callbacks; valid at the end of a transaciton,

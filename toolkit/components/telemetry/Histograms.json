@@ -1199,6 +1199,15 @@
     "n_buckets": 50,
     "description": "Percent of GC slice done during idle time"
   },
+  "GC_BUDGET_OVERRUN": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org", "jcoppeard@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 100000,
+    "n_buckets": 100,
+    "description": "How long a GC slice ran over its budget in microseconds"
+  },
   "GEOLOCATION_ACCURACY_EXPONENTIAL": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "default",
@@ -1780,6 +1789,14 @@
     "high": 50000000,
     "n_buckets": 50,
     "description": "PNG image decode speed (Kbytes/sec)"
+  },
+  "IMAGE_REQUEST_DISPATCHED": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com","aosmond@mozilla.com"],
+    "expires_in_version": "62",
+    "kind": "boolean",
+    "description": "Track how many image requests required event dispatching because we were unable to predict the correct scheduler group: true if the request required dispatching. See image/imgRequestProxy.cpp for details.",
+    "bug_numbers": [1359833]
   },
   "CANVAS_2D_USED": {
     "record_in_processes": ["main", "content"],
@@ -6777,14 +6794,6 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "Deleted or to-be-reused innerwindow which has had mutation event listeners."
-  },
-  "FORM_ISINDEX_USED": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["hsivonen@mozilla.com"],
-    "expires_in_version": "56",
-    "kind": "flag",
-    "bug_numbers": [1356181],
-    "description": "Whether there has been an isindex form submission in this session."
   },
   "CHARSET_OVERRIDE_SITUATION": {
     "record_in_processes": ["main", "content"],
@@ -13033,7 +13042,7 @@
     "alert_emails": ["eisaacson@mozilla.com"],
     "bug_numbers": [1308030, 1324868],
     "releaseChannelCollection": "opt-out",
-    "expires_in_version": "56",
+    "expires_in_version": "60",
     "kind": "enumerated",
     "keyed": true,
     "n_values": 4,
@@ -13044,7 +13053,7 @@
     "alert_emails": ["eisaacson@mozilla.com"],
     "bug_numbers": [1308030],
     "releaseChannelCollection": "opt-out",
-    "expires_in_version": "56",
+    "expires_in_version": "60",
     "kind": "linear",
     "high": 300000,
     "n_buckets": 30,

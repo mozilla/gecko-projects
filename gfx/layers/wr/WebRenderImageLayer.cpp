@@ -32,16 +32,23 @@ WebRenderImageLayer::WebRenderImageLayer(WebRenderLayerManager* aLayerManager)
 WebRenderImageLayer::~WebRenderImageLayer()
 {
   MOZ_COUNT_DTOR(WebRenderImageLayer);
+  ClearWrResources();
+}
 
+void
+WebRenderImageLayer::ClearWrResources()
+{
   if (mKey.isSome()) {
     WrManager()->AddImageKeyForDiscard(mKey.value());
+    mKey = Nothing();
   }
-
   if (mExternalImageId.isSome()) {
     WrBridge()->DeallocExternalImageId(mExternalImageId.ref());
+    mExternalImageId = Nothing();
   }
   if (mPipelineId.isSome()) {
     WrBridge()->RemovePipelineIdForAsyncCompositable(mPipelineId.ref());
+    mPipelineId = Nothing();
   }
 }
 
@@ -85,6 +92,7 @@ WebRenderImageLayer::GetAsSourceSurface()
 void
 WebRenderImageLayer::ClearCachedResources()
 {
+  ClearWrResources();
   if (mImageClient) {
     mImageClient->ClearCachedResources();
   }
@@ -159,7 +167,7 @@ WebRenderImageLayer::RenderLayer(wr::DisplayListBuilder& aBuilder,
         PixelCastJustification::MovingDownToChildren);
     DumpLayerInfo("Image Layer async", rect);
 
-    WrRect r = aSc.ToRelativeWrRect(rect);
+    wr::LayoutRect r = aSc.ToRelativeLayoutRect(rect);
     aBuilder.PushIFrame(r, mPipelineId.ref());
 
     gfx::Matrix4x4 scTransform = GetTransform();
@@ -177,7 +185,7 @@ WebRenderImageLayer::RenderLayer(wr::DisplayListBuilder& aBuilder,
     }
     LayerRect scBounds = BoundsForStackingContext();
     wr::ImageRendering filter = wr::ToImageRendering(mSamplingFilter);
-    wr::MixBlendMode mixBlendMode = wr::ToWrMixBlendMode(GetMixBlendMode());
+    wr::MixBlendMode mixBlendMode = wr::ToMixBlendMode(GetMixBlendMode());
 
     WrBridge()->AddWebRenderParentCommand(OpUpdateAsyncImagePipeline(mPipelineId.value(),
                                                                      scBounds,
@@ -223,11 +231,11 @@ WebRenderImageLayer::RenderLayer(wr::DisplayListBuilder& aBuilder,
                   GetLayer(),
                   Stringify(filter).c_str());
   }
-  WrRect r = sc.ToRelativeWrRect(rect);
+  wr::LayoutRect r = sc.ToRelativeLayoutRect(rect);
   aBuilder.PushImage(r, r, filter, mKey.value());
 }
 
-Maybe<WrImageMask>
+Maybe<wr::WrImageMask>
 WebRenderImageLayer::RenderMaskLayer(const StackingContextHelper& aSc,
                                      const gfx::Matrix4x4& aTransform)
 {
@@ -275,10 +283,10 @@ WebRenderImageLayer::RenderMaskLayer(const StackingContextHelper& aSc,
   }
 
   gfx::IntSize size = image->GetSize();
-  WrImageMask imageMask;
+  wr::WrImageMask imageMask;
   imageMask.image = mKey.value();
   Rect maskRect = aTransform.TransformBounds(Rect(0, 0, size.width, size.height));
-  imageMask.rect = aSc.ToRelativeWrRect(ViewAs<LayerPixel>(maskRect));
+  imageMask.rect = aSc.ToRelativeLayoutRect(ViewAs<LayerPixel>(maskRect));
   imageMask.repeat = false;
   return Some(imageMask);
 }

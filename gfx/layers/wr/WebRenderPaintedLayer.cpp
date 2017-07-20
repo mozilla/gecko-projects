@@ -99,11 +99,11 @@ WebRenderPaintedLayer::CreateWebRenderDisplayList(wr::DisplayListBuilder& aBuild
   LayerRect rect = Bounds();
   DumpLayerInfo("PaintedLayer", rect);
 
-  WrImageKey key = GetImageKey();
+  wr::WrImageKey key = GetImageKey();
   WrBridge()->AddWebRenderParentCommand(OpAddExternalImage(mExternalImageId.value(), key));
   WrManager()->AddImageKeyForDiscard(key);
 
-  WrRect r = sc.ToRelativeWrRect(rect);
+  wr::LayoutRect r = sc.ToRelativeLayoutRect(rect);
   aBuilder.PushImage(r, r, wr::ImageRendering::Auto, key);
 }
 
@@ -161,6 +161,30 @@ WebRenderPaintedLayer::RenderLayer(wr::DisplayListBuilder& aBuilder,
   }
 
   CreateWebRenderDisplayList(aBuilder, aSc);
+}
+
+void
+WebRenderPaintedLayer::ClearCachedResources()
+{
+  ClearWrResources();
+  if (mImageClient) {
+    mImageClient->FlushAllImages();
+    mImageClient->ClearCachedResources();
+  }
+  if (mImageContainer) {
+    mImageContainer->ClearAllImages();
+    mImageContainer->ClearCachedResources();
+  }
+  ClearValidRegion();
+}
+
+void
+WebRenderPaintedLayer::ClearWrResources()
+{
+  if (mExternalImageId.isSome()) {
+    WrBridge()->DeallocExternalImageId(mExternalImageId.ref());
+    mExternalImageId = Nothing();
+  }
 }
 
 } // namespace layers
