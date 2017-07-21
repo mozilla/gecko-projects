@@ -693,32 +693,22 @@ add_task(async function test_subprocess_environment() {
 
 
 add_task(async function test_subprocess_environmentAppend() {
-  let environment = {
-    VALUE_ERASED_SOON: "soon empty",
-    UNTOUCHED_VALUE: "untouched",
-  };
-
-  // Our Windows environment can't handle launching python without
-  // PATH variables.
-  if (AppConstants.platform == "win") {
-    Object.assign(environment, {
-      PATH: env.get("PATH"),
-      PATHEXT: env.get("PATHEXT"),
-    });
-  }
+  env.set("VALUE_FROM_BASE_ENV", "untouched");
 
   let proc = await Subprocess.call({
     command: PYTHON,
-    arguments: ["-u", TEST_SCRIPT, "env", "VALUE_ERASED_SOON", "UNTOUCHED_VALUE"],
+    arguments: ["-u", TEST_SCRIPT, "env", "VALUE_FROM_BASE_ENV", "VALUE_APPENDED_ONCE"],
     environmentAppend: true,
-    environment,
+    environment: {
+      VALUE_APPENDED_ONCE: "soon empty",
+    },
   });
 
-  let valueErasedSoon = await read(proc.stdout);
-  let untouchedValue = await read(proc.stdout);
+  let valueFromBaseEnv = await read(proc.stdout);
+  let valueAppendedOnce = await read(proc.stdout);
 
-  equal(valueErasedSoon, "soon empty", "Got expected $VALUE_ERASED_SOON value");
-  equal(untouchedValue, "untouched", "Got expected $UNTOUCHED_VALUE value");
+  equal(valueFromBaseEnv, "untouched", "Got expected $VALUE_FROM_BASE_ENV value");
+  equal(valueAppendedOnce, "soon empty", "Got expected $VALUE_APPENDED_ONCE value");
 
   let {exitCode} = await proc.wait();
 
@@ -726,18 +716,15 @@ add_task(async function test_subprocess_environmentAppend() {
 
   proc = await Subprocess.call({
     command: PYTHON,
-    arguments: ["-u", TEST_SCRIPT, "env", "VALUE_ERASED_SOON", "UNTOUCHED_VALUE"],
+    arguments: ["-u", TEST_SCRIPT, "env", "VALUE_FROM_BASE_ENV", "VALUE_APPENDED_ONCE"],
     environmentAppend: true,
-    environment: {
-      UNTOUCHED_VALUE: "untouched",
-    },
   });
 
-  valueErasedSoon = await read(proc.stdout);
-  untouchedValue = await read(proc.stdout);
+  valueFromBaseEnv = await read(proc.stdout);
+  valueAppendedOnce = await read(proc.stdout);
 
-  equal(valueErasedSoon, "", "Got expected $VALUE_ERASED_SOON value");
-  equal(untouchedValue, "untouched", "Got expected $UNTOUCHED_VALUE value");
+  equal(valueFromBaseEnv, "untouched", "Got expected $VALUE_FROM_BASE_ENV value");
+  equal(valueAppendedOnce, "", "Got expected $VALUE_APPENDED_ONCE value");
 
   ({exitCode} = await proc.wait());
 

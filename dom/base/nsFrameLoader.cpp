@@ -1095,6 +1095,18 @@ ParentWindowIsActive(nsIDocument* aDoc)
   return false;
 }
 
+void
+nsFrameLoader::MaybeShowFrame()
+{
+  nsIFrame* frame = GetPrimaryFrameOfOwningContent();
+  if (frame) {
+    nsSubDocumentFrame* subDocFrame = do_QueryFrame(frame);
+    if (subDocFrame) {
+      subDocFrame->MaybeShowViewer();
+    }
+  }
+}
+
 bool
 nsFrameLoader::Show(int32_t marginWidth, int32_t marginHeight,
                     int32_t scrollbarPrefX, int32_t scrollbarPrefY,
@@ -2726,6 +2738,11 @@ nsFrameLoader::UpdatePositionAndSize(nsSubDocumentFrame *aIFrame)
   if (IsRemoteFrame()) {
     if (mRemoteBrowser) {
       ScreenIntSize size = aIFrame->GetSubdocumentSize();
+      // If we were not able to show remote frame before, we should probably
+      // retry now to send correct showInfo.
+      if (!mRemoteBrowserShown) {
+        ShowRemoteFrame(size, aIFrame);
+      }
       nsIntRect dimensions;
       NS_ENSURE_SUCCESS(GetWindowDimensions(dimensions), NS_ERROR_FAILURE);
       mLazySize = size;

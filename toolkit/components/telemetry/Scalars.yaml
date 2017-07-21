@@ -247,6 +247,20 @@ browser.usage:
     record_in_processes:
       - 'all'
 
+  plugin_instantiated:
+    bug_numbers:
+      - 1381591
+    description: >-
+      The number of plugin instances that were created.
+    expires: never # Jan-2021 but we don't have a version number for that
+    kind: uint
+    notification_emails:
+      - bsmedberg@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+      - 'content'
+
 # This section is for probes used to measure use of the Webextensions storage.sync API.
 storage.sync.api.usage:
   extensions_using:
@@ -721,6 +735,50 @@ gfx.advanced.layers:
     expires: "61"
     notification_emails:
       - gfx-telemetry-alerts@mozilla.com
+    record_in_processes:
+      - 'main'
+
+# The following section contains the form autofill related scalars.
+formautofill.addresses:
+  fill_type_manual:
+    bug_numbers:
+      - 990200
+    description: Count at submission time whether the submitted form was filled manually.
+    expires: never
+    kind: uint
+    notification_emails:
+      - autofill@lists.mozilla.org
+      - jcheng@mozilla.com
+      - chsiang@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+  fill_type_autofill:
+    bug_numbers:
+      - 990200
+    description: Count at submission time whether the submitted form was autofilled.
+    expires: never
+    kind: uint
+    notification_emails:
+      - autofill@lists.mozilla.org
+      - jcheng@mozilla.com
+      - chsiang@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+  fill_type_autofill_update:
+    bug_numbers:
+      - 990200
+    description: >
+      Count at submission time whether the submitted form was autofilled, but
+      the data in form is changed and can not be merged to orginal address profile.
+    expires: never
+    kind: uint
+    notification_emails:
+      - autofill@lists.mozilla.org
+      - jcheng@mozilla.com
+      - chsiang@mozilla.com
+    release_channel_collection: opt-out
     record_in_processes:
       - 'main'
 

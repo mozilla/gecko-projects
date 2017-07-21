@@ -29,11 +29,17 @@ document.getElementById("onboarding-overlay")
         }
       });
       break;
+    case "onboarding-tour-library-button":
+      Mozilla.UITour.showHighlight("library");
+      break;
     case "onboarding-tour-private-browsing-button":
       Mozilla.UITour.showHighlight("privateWindow");
       break;
     case "onboarding-tour-search-button":
       Mozilla.UITour.openSearchPanel(() => {});
+      break;
+    case "onboarding-tour-singlesearch-button":
+      Mozilla.UITour.showMenu("urlbar");
       break;
     case "onboarding-tour-sync-button":
       let emailInput = document.getElementById("onboarding-tour-sync-email-input");

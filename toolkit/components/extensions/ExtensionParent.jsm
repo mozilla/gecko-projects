@@ -34,8 +34,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
                                   "resource://gre/modules/MessageChannel.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NativeApp",
                                   "resource://gre/modules/NativeMessaging.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
-                                  "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
                                   "resource://gre/modules/PrivateBrowsingUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
@@ -367,7 +365,7 @@ class ProxyContextParent extends BaseContext {
   constructor(envType, extension, params, xulBrowser, principal) {
     super(envType, extension);
 
-    this.uri = NetUtil.newURI(params.url);
+    this.uri = Services.io.newURI(params.url);
 
     this.incognito = params.incognito;
 
@@ -1516,7 +1514,7 @@ var ExtensionParent = {
       return gBaseManifestProperties;
     }
 
-    let types = Schemas.schemaJSON.get(BASE_SCHEMA)[0].types;
+    let types = Schemas.schemaJSON.get(BASE_SCHEMA).deserialize({})[0].types;
     let manifest = types.find(type => type.id === "WebExtensionManifest");
     if (!manifest) {
       throw new Error("Unable to find base manifest properties");
