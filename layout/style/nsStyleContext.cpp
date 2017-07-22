@@ -116,7 +116,7 @@ nsStyleContext::FinishConstruction()
 
 #ifdef DEBUG
   if (auto servo = GetAsServo()) {
-    MOZ_ASSERT(servo->ComputedValues());
+    MOZ_ASSERT(servo->ComputedData());
   } else {
     MOZ_ASSERT(RuleNode());
   }
@@ -185,16 +185,23 @@ nsStyleContext::MoveTo(nsStyleContext* aNewParent)
   }
 }
 
-template<class StyleContextLike>
 nsChangeHint
-nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
-                                            uint32_t* aEqualStructs,
-                                            uint32_t* aSamePointerStructs)
+nsStyleContext::CalcStyleDifference(nsStyleContext* aNewContext,
+                                    uint32_t* aEqualStructs,
+                                    uint32_t* aSamePointerStructs,
+                                    uint32_t aRelevantStructs)
 {
-  AUTO_PROFILER_LABEL("nsStyleContext::CalcStyleDifferenceInternal", CSS);
+  AUTO_PROFILER_LABEL("nsStyleContext::CalcStyleDifference", CSS);
 
   static_assert(nsStyleStructID_Length <= 32,
                 "aEqualStructs is not big enough");
+
+  MOZ_ASSERT(aRelevantStructs == kAllResolvedStructs || IsServo(),
+             "aRelevantStructs must be kAllResolvedStructs for Gecko contexts");
+
+  if (aRelevantStructs == kAllResolvedStructs) {
+    aRelevantStructs = mBits & NS_STYLE_INHERIT_MASK;
+  }
 
   *aEqualStructs = 0;
 
@@ -227,8 +234,8 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
     }
   } else {
     if (Servo_ComputedValues_EqualCustomProperties(
-          ComputedValues(),
-          aNewContext->ComputedValues())) {
+          AsServo()->ComputedData(),
+          aNewContext->ComputedData())) {
       *aEqualStructs |= NS_STYLE_INHERIT_BIT(Variables);
     }
   }
@@ -242,23 +249,35 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
   // any change hints for those structs.
   bool checkUnrequestedServoStructs = IsServo();
 
+  // For Gecko structs, we just defer to PeekStyleXXX.  But for Servo structs,
+  // we need to use the aRelevantStructs bitfield passed in to determine
+  // whether to return a struct or not, since this->mBits might not yet
+  // be correct (due to not calling ResolveSameStructsAs on it yet).
+#define PEEK(struct_)                                                         \
+  (IsGecko()                                                                  \
+   ? PeekStyle##struct_()                                                     \
+   : ((aRelevantStructs & NS_STYLE_INHERIT_BIT(struct_))                      \
+      ? AsServo()->ComputedData()->GetStyle##struct_()                      \
+      : nullptr))
+
 #define EXPAND(...) __VA_ARGS__
 #define DO_STRUCT_DIFFERENCE_WITH_ARGS(struct_, extra_args_)                  \
   PR_BEGIN_MACRO                                                              \
-    const nsStyle##struct_* this##struct_ = PeekStyle##struct_();             \
+    const nsStyle##struct_* this##struct_ = PEEK(struct_);                    \
     bool unrequestedStruct;                                                   \
     if (this##struct_) {                                                      \
       unrequestedStruct = false;                                              \
       structsFound |= NS_STYLE_INHERIT_BIT(struct_);                          \
     } else if (checkUnrequestedServoStructs) {                                \
       this##struct_ =                                                         \
-        AsServo()->ComputedValues()->GetStyle##struct_();                     \
+        AsServo()->ComputedData()->GetStyle##struct_();                     \
       unrequestedStruct = true;                                               \
     } else {                                                                  \
       unrequestedStruct = false;                                              \
     }                                                                         \
     if (this##struct_) {                                                      \
-      const nsStyle##struct_* other##struct_ = aNewContext->Style##struct_(); \
+      const nsStyle##struct_* other##struct_ =                                \
+        aNewContext->ThreadsafeStyle##struct_();                              \
       if (this##struct_ == other##struct_) {                                  \
         /* The very same struct, so we know that there will be no */          \
         /* differences.                                           */          \
@@ -295,10 +314,10 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
   DO_STRUCT_DIFFERENCE(Table);
   DO_STRUCT_DIFFERENCE(UIReset);
   DO_STRUCT_DIFFERENCE(Text);
-  DO_STRUCT_DIFFERENCE_WITH_ARGS(List, (, PeekStyleDisplay()));
+  DO_STRUCT_DIFFERENCE_WITH_ARGS(List, (, PEEK(Display)));
   DO_STRUCT_DIFFERENCE(SVGReset);
   DO_STRUCT_DIFFERENCE(SVG);
-  DO_STRUCT_DIFFERENCE_WITH_ARGS(Position, (, PeekStyleVisibility()));
+  DO_STRUCT_DIFFERENCE_WITH_ARGS(Position, (, PEEK(Visibility)));
   DO_STRUCT_DIFFERENCE(Font);
   DO_STRUCT_DIFFERENCE(Margin);
   DO_STRUCT_DIFFERENCE(Padding);
@@ -318,7 +337,7 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
 #ifdef DEBUG
   #define STYLE_STRUCT(name_, callback_)                                      \
     MOZ_ASSERT(!!(structsFound & NS_STYLE_INHERIT_BIT(name_)) ==              \
-               !!PeekStyle##name_(),                                          \
+               (PEEK(name_) != nullptr),                                      \
                "PeekStyleData results must not change in the middle of "      \
                "difference calculation.");
   #include "nsStyleStructList.h"
@@ -337,8 +356,8 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
 
 #define STYLE_STRUCT(name_, callback_)                                        \
   {                                                                           \
-    const nsStyle##name_* data = PeekStyle##name_();                          \
-    if (!data || data == aNewContext->Style##name_()) {                       \
+    const nsStyle##name_* data = PEEK(name_);                                 \
+    if (!data || data == aNewContext->ThreadsafeStyle##name_()) {             \
       *aSamePointerStructs |= NS_STYLE_INHERIT_BIT(name_);                    \
     }                                                                         \
   }
@@ -368,14 +387,6 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
     // Presume a difference.
     hint |= nsChangeHint_RepaintFrame;
   } else if (thisVis && !NS_IsHintSubset(nsChangeHint_RepaintFrame, hint)) {
-    // Bug 1364484: Update comments here and potentially remove the assertion
-    // below once we return a non-null visited context in CalcStyleDifference
-    // using Servo values.  The approach is becoming quite similar to Gecko.
-    // We'll handle visited style differently in servo. Assert against being
-    // in the parallel traversal to avoid static analysis hazards when calling
-    // StyleFoo() below.
-    MOZ_ASSERT(!ServoStyleSet::IsInServoTraversal());
-
     // Both style contexts have a style-if-visited.
     bool change = false;
 
@@ -386,9 +397,11 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
     // not having a style-if-visited), but not the other way around.
 #define STYLE_FIELD(name_) thisVisStruct->name_ != otherVisStruct->name_
 #define STYLE_STRUCT(name_, fields_)                                    \
-    if (!change && PeekStyle##name_()) {                                \
-      const nsStyle##name_* thisVisStruct = thisVis->Style##name_();    \
-      const nsStyle##name_* otherVisStruct = otherVis->Style##name_();  \
+    if (!change && PEEK(name_)) {                                       \
+      const nsStyle##name_* thisVisStruct =                             \
+        thisVis->ThreadsafeStyle##name_();                              \
+      const nsStyle##name_* otherVisStruct =                            \
+        otherVis->ThreadsafeStyle##name_();                             \
       if (MOZ_FOR_EACH_SEPARATED(STYLE_FIELD, (||), (), fields_)) {     \
         change = true;                                                  \
       }                                                                 \
@@ -433,58 +446,6 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
   return hint & ~nsChangeHint_NeutralChange;
 }
 
-nsChangeHint
-nsStyleContext::CalcStyleDifference(nsStyleContext* aNewContext,
-                                    uint32_t* aEqualStructs,
-                                    uint32_t* aSamePointerStructs)
-{
-  return CalcStyleDifferenceInternal(aNewContext,
-                                     aEqualStructs,
-                                     aSamePointerStructs);
-}
-
-class MOZ_STACK_CLASS FakeStyleContext
-{
-public:
-  explicit FakeStyleContext(const ServoComputedValues* aComputedValues)
-    : mComputedValues(aComputedValues) {}
-
-  nsStyleContext* GetStyleIfVisited() {
-    // Bug 1364484: Figure out what to do here for Stylo visited values.  We can
-    // get the visited computed values:
-    // RefPtr<ServoComputedValues> visitedComputedValues =
-    //   Servo_ComputedValues_GetVisitedStyle(mComputedValues).Consume();
-    // But what's the best way to create the nsStyleContext?
-    return nullptr;
-  }
-
-  #define STYLE_STRUCT(name_, checkdata_cb_)                                  \
-  const nsStyle##name_ * Style##name_() {                                     \
-    return mComputedValues->GetStyle##name_();                                \
-  }                                                                           \
-  const nsStyle##name_ * ThreadsafeStyle##name_() {                           \
-    return mComputedValues->GetStyle##name_();                                \
-  }
-  #include "nsStyleStructList.h"
-  #undef STYLE_STRUCT
-
-  const ServoComputedValues* ComputedValues() { return mComputedValues; }
-
-private:
-  const ServoComputedValues* MOZ_NON_OWNING_REF mComputedValues;
-};
-
-nsChangeHint
-nsStyleContext::CalcStyleDifference(const ServoComputedValues* aNewComputedValues,
-                                    uint32_t* aEqualStructs,
-                                    uint32_t* aSamePointerStructs)
-{
-  FakeStyleContext newContext(aNewComputedValues);
-  return CalcStyleDifferenceInternal(&newContext,
-                                     aEqualStructs,
-                                     aSamePointerStructs);
-}
-
 namespace mozilla {
 
 void
@@ -526,7 +487,7 @@ void nsStyleContext::List(FILE* out, int32_t aIndent, bool aListDescendants)
   }
 
   if (IsServo()) {
-    fprintf_stderr(out, "%s{ServoComputedValues}\n", str.get());
+    fprintf_stderr(out, "%s{ServoComputedData}\n", str.get());
   } else if (nsRuleNode* ruleNode = AsGecko()->RuleNode()) {
     fprintf_stderr(out, "%s{\n", str.get());
     str.Truncate();

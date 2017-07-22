@@ -125,8 +125,6 @@ AutoCollectVsyncTelemetry::CollectTelemetry()
   }
 
   Telemetry::Accumulate(Telemetry::CONTENT_JS_KNOWN_TICK_DELAY_MS, duration);
-
-  return;
 }
 
 } // namespace
@@ -375,8 +373,17 @@ SchedulerGroup::Runnable::Run()
   return result;
 }
 
+NS_IMETHODIMP
+SchedulerGroup::Runnable::GetPriority(uint32_t* aPriority)
+{
+  *aPriority = nsIRunnablePriority::PRIORITY_NORMAL;
+  nsCOMPtr<nsIRunnablePriority> runnablePrio = do_QueryInterface(mRunnable);
+  return runnablePrio ? runnablePrio->GetPriority(aPriority) : NS_OK;
+}
+
 NS_IMPL_ISUPPORTS_INHERITED(SchedulerGroup::Runnable,
                             mozilla::Runnable,
+                            nsIRunnablePriority,
                             SchedulerGroup::Runnable)
 
 SchedulerGroup::AutoProcessEvent::AutoProcessEvent()

@@ -39,7 +39,7 @@ MediaSourceDecoder::CreateStateMachine()
 {
   MOZ_ASSERT(NS_IsMainThread());
   mDemuxer = new MediaSourceDemuxer(AbstractMainThread());
-  MediaDecoderReaderInit init(this);
+  MediaFormatReaderInit init(this);
   init.mVideoFrameContainer = GetVideoFrameContainer();
   init.mKnowsCompositor = GetCompositor();
   init.mCrashHelper = GetOwner()->CreateGMPCrashHelper();
@@ -249,9 +249,7 @@ void
 MediaSourceDecoder::GetMozDebugReaderData(nsACString& aString)
 {
   if (mReader && mDemuxer) {
-    // This is definitely a MediaFormatReader. See CreateStateMachine() above.
-    auto reader = static_cast<MediaFormatReader*>(mReader.get());
-    reader->GetMozDebugReaderData(aString);
+    mReader->GetMozDebugReaderData(aString);
     mDemuxer->GetMozDebugReaderData(aString);
   }
 }
@@ -308,12 +306,12 @@ MediaSourceDecoder::CanPlayThrough()
   } else if (duration <= currentPosition) {
     return true;
   }
-  // If we have data up to the mediasource's duration or 30s ahead, we can
+  // If we have data up to the mediasource's duration or 10s ahead, we can
   // assume that we can play without interruption.
   TimeIntervals buffered = GetBuffered();
   buffered.SetFuzz(MediaSourceDemuxer::EOS_FUZZ / 2);
   TimeUnit timeAhead =
-    std::min(duration, currentPosition + TimeUnit::FromSeconds(30));
+    std::min(duration, currentPosition + TimeUnit::FromSeconds(10));
   TimeInterval interval(currentPosition, timeAhead);
   return buffered.ContainsStrict(ClampIntervalToEnd(interval));
 }
