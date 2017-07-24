@@ -212,7 +212,7 @@ public:
   }
 
   inline nsRuleNode* RuleNode();
-  inline const ServoComputedValues* ComputedValues();
+  inline const ServoComputedData* ComputedData();
 
   void AddStyleBit(const uint64_t& aBit) { mBits |= aBit; }
 
@@ -253,6 +253,14 @@ public:
   #include "nsStyleStructList.h"
   #undef STYLE_STRUCT
 
+  // Value that can be passed as CalcStyleDifference's aRelevantStructs
+  // argument to indicate that all structs that are currently resolved on the
+  // old style context should be compared.  This is only relevant for
+  // ServoStyleContexts.
+  enum { kAllResolvedStructs = 0xffffffff };
+  static_assert(kAllResolvedStructs != NS_STYLE_INHERIT_MASK,
+                "uint32_t not big enough for special kAllResolvedStructs value");
+
   /**
    * Compute the style changes needed during restyling when this style
    * context is being replaced by aNewContext.  (This is nonsymmetric since
@@ -266,24 +274,18 @@ public:
    *
    * aEqualStructs must not be null.  Into it will be stored a bitfield
    * representing which structs were compared to be non-equal.
+   *
+   * aRelevantStructs must be kAllResolvedStructs for GeckoStyleContexts.
+   * For ServoStyleContexts, it controls which structs will be compared.
+   * This is needed because in some cases, we can't rely on mBits in the
+   * old style context to accurately reflect which are the relevant
+   * structs to be compared.
    */
   nsChangeHint CalcStyleDifference(nsStyleContext* aNewContext,
                                    uint32_t* aEqualStructs,
-                                   uint32_t* aSamePointerStructs);
-
-  /**
-   * Like the above, but allows comparing ServoComputedValues instead of needing
-   * a full-fledged style context.
-   */
-  nsChangeHint CalcStyleDifference(const ServoComputedValues* aNewComputedValues,
-                                   uint32_t* aEqualStructs,
-                                   uint32_t* aSamePointerStructs);
-
-private:
-  template<class StyleContextLike>
-  nsChangeHint CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
-                                           uint32_t* aEqualStructs,
-                                           uint32_t* aSamePointerStructs);
+                                   uint32_t* aSamePointerStructs,
+                                   uint32_t aRelevantStructs =
+                                     kAllResolvedStructs);
 
 public:
   /**
@@ -312,15 +314,6 @@ public:
    */
   inline void StartBackgroundImageLoads();
 
-  /**
-   * Moves this style context to a new parent.
-   *
-   * This function violates style context tree immutability, and
-   * is a very low-level function and should only be used after verifying
-   * many conditions that make it safe to call.
-   */
-  void MoveTo(nsStyleContext* aNewParent);
-
 #ifdef DEBUG
   void List(FILE* out, int32_t aIndent, bool aListDescendants = true);
   static const char* StructName(nsStyleStructID aSID);
@@ -340,8 +333,6 @@ protected:
   void FinishConstruction();
 
   void SetStyleBits();
-
-  inline const void* StyleStructFromServoComputedValues(nsStyleStructID aSID);
 
   // Helper functions for GetStyle* and PeekStyle*
   #define STYLE_STRUCT_INHERITED(name_, checkdata_cb_)                  \
@@ -387,7 +378,7 @@ protected:
 };
 
 already_AddRefed<mozilla::GeckoStyleContext>
-NS_NewStyleContext(nsStyleContext* aParentContext,
+NS_NewStyleContext(mozilla::GeckoStyleContext* aParentContext,
                    nsIAtom* aPseudoTag,
                    mozilla::CSSPseudoElementType aPseudoType,
                    nsRuleNode* aRuleNode,

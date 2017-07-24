@@ -1753,8 +1753,8 @@ notification[value="translation"] {
 .statuspanel-label {
   margin: 0;
   padding: 2px 4px;
-  background: -moz-dialog;
-  border: 1px none ThreeDShadow;
+  background-color: -moz-dialog;
+  border: 1px none ThreeDLightShadow;
   border-top-style: solid;
   color: -moz-dialogText;
   text-shadow: none;
@@ -1762,9 +1762,8 @@ notification[value="translation"] {
 
 @media (-moz-windows-default-theme) {
   .statuspanel-label {
-    background: linear-gradient(#fff, #ddd);
-    border-color: #ccc;
-    color: #333;
+    background-color: #f9f9fa;
+    color: #444;
   }
 }
 
@@ -1961,11 +1960,18 @@ notification.pluginVulnerable > .notification-inner > .messageCloseButton {
 
 %include ../shared/contextmenu.inc.css
 
-/* Make context menu items larger when opened through touch. */
+/* Make menu items larger when opened through touch. */
+panel[touchmode] .PanelUI-subView .subviewbutton,
 menupopup[touchmode] menu,
 menupopup[touchmode] menuitem {
   padding-top: 12px;
   padding-bottom: 12px;
+}
+
+panel[touchmode] .PanelUI-subView #appMenu-edit-controls > .subviewbutton,
+panel[touchmode] .PanelUI-subView #appMenu-zoom-controls > .subviewbutton-iconic {
+  padding-inline-start: 12px;
+  padding-inline-end: 12px;
 }
 
 #contentAreaContextMenu[touchmode] > #context-navigation > menuitem {

@@ -121,7 +121,6 @@ firefox-ui-functional-local:
     suite: "firefox-ui/functional local"
     treeherder-symbol: tc-Fxfn-l(en-US)
     max-run-time: 5400
-    tier: 1
     docker-image: {"in-tree": "desktop1604-test"}
     mozharness:
         script: firefox_ui_tests/functional.py
@@ -200,6 +199,11 @@ gtest:
                     - remove_executables.py
         extra-options:
             - --gtest-suite=gtest
+    tier:
+        by-test-platform:
+            windows7-32-pgo.*: 3
+            windows10-64-pgo.*: 3
+            default: default
 
 jittest:
     description: "JIT Test run"
@@ -298,6 +302,7 @@ jsreftest:
     tier:
         by-test-platform:
             linux64-qr/.*: 1
+            windows10-64/.*: 3
             default: default
 
 marionette:
@@ -316,6 +321,7 @@ marionette:
     tier:
         by-test-platform:
             android.*: 2
+            windows10.*: 3
             default: default
     chunks:
         by-test-platform:
@@ -1524,6 +1530,29 @@ talos-perf-reftest:
         extra-options:
             - --suite=perf-reftest
 
+talos-perf-reftest-singletons:
+    description: "Talos perf-reftest singletons"
+    suite: talos
+    try-name: perf-reftest-singletons
+    treeherder-symbol: tc-T(ps)
+    virtualization: hardware
+    run-on-projects: ['mozilla-central', 'try', 'date']
+    max-run-time: 3600
+    e10s: true
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                macosx.*:
+                    - talos/mac_config.py
+                windows.*:
+                    - talos/windows_config.py
+                default:
+                    - talos/linux_config.py
+        extra-options:
+            - --suite=perf-reftest-singletons
+
 talos-quantum-pageload:
     description: "Talos quantum-pageload"
     suite: talos
@@ -1550,6 +1579,32 @@ talos-quantum-pageload:
             - --suite=quantum-pageload
             - --add-option
             - --webServer,localhost
+
+talos-quantum-pageload-stylo:
+    description: "Talos Quantum Pageload Stylo"
+    suite: talos
+    try-name: q1s
+    treeherder-symbol: tc-T(q1s)
+    virtualization: hardware
+    run-on-projects:
+        by-test-platform:
+            windows.*: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
+            default: []
+    max-run-time: 3600
+    e10s: true
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                macosx.*:
+                    - talos/mac_config.py
+                windows.*:
+                    - talos/windows_config.py
+                default:
+                    - talos/linux_config.py
+        extra-options:
+            - --suite=quantum-pageload-stylo
 
 talos-svgr:
     description: "Talos svgr"
@@ -1637,6 +1692,24 @@ talos-xperf:
             - --suite=xperf
             - --add-option
             - --webServer,localhost
+
+telemetry-tests-client:
+    description: "Telemetry tests client run"
+    suite: telemetry-tests-client
+    treeherder-symbol: tc-e10s
+    max-run-time: 5400
+    checkout: true
+    e10s: true
+    tier: 3
+    docker-image: {"in-tree": "desktop1604-test"}
+    mozharness:
+        script: telemetry/telemetry_client.py
+        config:
+            by-test-platform:
+                linux.*:
+                    - remove_executables.py
+                windows.*: []
+
 
 web-platform-tests:
     description: "Web platform test run"

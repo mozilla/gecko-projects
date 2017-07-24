@@ -448,6 +448,9 @@ pref("media.suspend-bkgnd-video.enabled", true);
 // Delay, in ms, from time window goes to background to suspending
 // video decoders. Defaults to 10 seconds.
 pref("media.suspend-bkgnd-video.delay-ms", 10000);
+// Resume video decoding when the cursor is hovering on a background tab to
+// reduce the resume latency and improve the user experience.
+pref("media.resume-bkgnd-video-on-tabhover", true);;
 
 #ifdef MOZ_WEBRTC
 pref("media.navigator.enabled", true);
@@ -703,7 +706,11 @@ pref("apz.fling_stop_on_tap_threshold", "0.05");
 pref("apz.fling_stopped_threshold", "0.01");
 pref("apz.frame_delay.enabled", false);
 pref("apz.highlight_checkerboarded_areas", false);
+#if defined(NIGHTLY_BUILD) && !defined(MOZ_WIDGET_ANDROID)
+pref("apz.keyboard.enabled", true);
+#else
 pref("apz.keyboard.enabled", false);
+#endif
 pref("apz.max_velocity_inches_per_ms", "-1.0");
 pref("apz.max_velocity_queue_size", 5);
 pref("apz.min_skate_speed", "1.0");
@@ -3105,6 +3112,26 @@ pref("dom.idle_period.throttled_length", 10000);
 
 // The amount of idle time (milliseconds) reserved for a long idle period
 pref("idle_queue.long_period", 50);
+
+// Control the event prioritization on content main thread
+#ifdef NIGHTLY_BUILD
+pref("prioritized_input_events.enabled", true);
+#else
+pref("prioritized_input_events.enabled", false);
+#endif
+
+// The maximum and minimum time (milliseconds) we reserve for handling input
+// events in each frame.
+pref("prioritized_input_events.duration.max", 8);
+pref("prioritized_input_events.duration.min", 1);
+
+// The default amount of time (milliseconds) required for handling a input
+// event.
+pref("prioritized_input_events.default_duration_per_event", 1);
+
+// The number of processed input events we use to predict the amount of time
+// required to process the following input events.
+pref("prioritized_input_events.count_for_prediction", 9);
 
 // The minimum amount of time (milliseconds) required for an idle
 // period to be scheduled on the main thread. N.B. that

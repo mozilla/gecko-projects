@@ -254,14 +254,6 @@ def handle_keyed_by(config, jobs):
 
 
 @transforms.add
-def disable_simple_package(config, jobs):
-    for job in jobs:
-        if job['attributes']['build_platform'].startswith('win'):
-            job['env'].update({'DISABLE_SIMPLE_PACKAGE': "1"})
-        yield job
-
-
-@transforms.add
 def all_locales_attribute(config, jobs):
     for job in jobs:
         locales_with_changesets = _parse_locales_file(job["locales-file"])
@@ -391,6 +383,8 @@ def make_job_description(config, jobs):
                 'max-run-time': 7200,
                 'chain-of-trust': True,
             }
+            job_description['run']['use-simple-package'] = False
+            job_description['run']['use-magic-mh-args'] = False
         else:
             job_description['worker'] = {
                 'docker-image': {'in-tree': 'desktop-build'},

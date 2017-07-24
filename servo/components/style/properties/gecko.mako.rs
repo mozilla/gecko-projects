@@ -39,7 +39,6 @@ use gecko_bindings::bindings::Gecko_nsStyleFont_CopyLangFrom;
 use gecko_bindings::bindings::Gecko_SetListStyleImageNone;
 use gecko_bindings::bindings::Gecko_SetListStyleImageImageValue;
 use gecko_bindings::bindings::Gecko_SetNullImageValue;
-use gecko_bindings::bindings::ServoComputedValuesBorrowedOrNull;
 use gecko_bindings::bindings::{Gecko_ResetFilters, Gecko_CopyFiltersFrom};
 use gecko_bindings::bindings::RawGeckoPresContextBorrowed;
 use gecko_bindings::structs;
@@ -74,7 +73,7 @@ pub mod style_structs {
 }
 
 /// FIXME(emilio): This is completely duplicated with the other properties code.
-pub type ComputedValuesInner = ::gecko_bindings::structs::ServoComputedValues;
+pub type ComputedValuesInner = ::gecko_bindings::structs::ServoComputedData;
 
 #[derive(Debug)]
 #[repr(C)]
@@ -223,7 +222,8 @@ impl ComputedValuesInner {
     ) -> Arc<ComputedValues> {
         let arc = unsafe {
             let arc: Arc<ComputedValues> = Arc::new(uninitialized());
-            bindings::Gecko_ServoStyleContext_Init(&arc.0 as *const _ as *mut _, parent, pres_context,
+            bindings::Gecko_ServoStyleContext_Init(&arc.0 as *const _ as *mut _,
+                                                   parent, pres_context,
                                                    &self, pseudo_ty, pseudo_tag);
             // We're simulating a move by having C++ do a memcpy and then forgetting
             // it on this end.
@@ -4671,6 +4671,17 @@ clip-path
             // background-image to a url() value, since only properties in reset structs
             // are re-used from the applicable declaration cache, and the Pointing struct
             // is an inherited struct.
+
+            match v.images[i].hotspot {
+                Some((x, y)) => {
+                    self.gecko.mCursorImages[i].mHaveHotspot = true;
+                    self.gecko.mCursorImages[i].mHotspotX = x;
+                    self.gecko.mCursorImages[i].mHotspotY = y;
+                },
+                _ => {
+                    self.gecko.mCursorImages[i].mHaveHotspot = false;
+                }
+            }
         }
     }
 
@@ -4679,6 +4690,71 @@ clip-path
         unsafe {
             Gecko_CopyCursorArrayFrom(&mut self.gecko, &other.gecko);
         }
+    }
+
+    pub fn clone_cursor(&self) -> longhands::cursor::computed_value::T {
+        use properties::longhands::cursor::computed_value::{Keyword, Image};
+        use style_traits::cursor::Cursor;
+        use values::specified::url::SpecifiedUrl;
+
+        let keyword = match self.gecko.mCursor as u32 {
+            structs::NS_STYLE_CURSOR_AUTO => Keyword::Auto,
+            structs::NS_STYLE_CURSOR_NONE => Keyword::Cursor(Cursor::None),
+            structs::NS_STYLE_CURSOR_DEFAULT => Keyword::Cursor(Cursor::Default),
+            structs::NS_STYLE_CURSOR_POINTER => Keyword::Cursor(Cursor::Pointer),
+            structs::NS_STYLE_CURSOR_CONTEXT_MENU => Keyword::Cursor(Cursor::ContextMenu),
+            structs::NS_STYLE_CURSOR_HELP => Keyword::Cursor(Cursor::Help),
+            structs::NS_STYLE_CURSOR_SPINNING => Keyword::Cursor(Cursor::Progress),
+            structs::NS_STYLE_CURSOR_WAIT => Keyword::Cursor(Cursor::Wait),
+            structs::NS_STYLE_CURSOR_CELL => Keyword::Cursor(Cursor::Cell),
+            structs::NS_STYLE_CURSOR_CROSSHAIR => Keyword::Cursor(Cursor::Crosshair),
+            structs::NS_STYLE_CURSOR_TEXT => Keyword::Cursor(Cursor::Text),
+            structs::NS_STYLE_CURSOR_VERTICAL_TEXT => Keyword::Cursor(Cursor::VerticalText),
+            structs::NS_STYLE_CURSOR_ALIAS => Keyword::Cursor(Cursor::Alias),
+            structs::NS_STYLE_CURSOR_COPY => Keyword::Cursor(Cursor::Copy),
+            structs::NS_STYLE_CURSOR_MOVE => Keyword::Cursor(Cursor::Move),
+            structs::NS_STYLE_CURSOR_NO_DROP => Keyword::Cursor(Cursor::NoDrop),
+            structs::NS_STYLE_CURSOR_NOT_ALLOWED => Keyword::Cursor(Cursor::NotAllowed),
+            structs::NS_STYLE_CURSOR_GRAB => Keyword::Cursor(Cursor::Grab),
+            structs::NS_STYLE_CURSOR_GRABBING => Keyword::Cursor(Cursor::Grabbing),
+            structs::NS_STYLE_CURSOR_E_RESIZE => Keyword::Cursor(Cursor::EResize),
+            structs::NS_STYLE_CURSOR_N_RESIZE => Keyword::Cursor(Cursor::NResize),
+            structs::NS_STYLE_CURSOR_NE_RESIZE => Keyword::Cursor(Cursor::NeResize),
+            structs::NS_STYLE_CURSOR_NW_RESIZE => Keyword::Cursor(Cursor::NwResize),
+            structs::NS_STYLE_CURSOR_S_RESIZE => Keyword::Cursor(Cursor::SResize),
+            structs::NS_STYLE_CURSOR_SE_RESIZE => Keyword::Cursor(Cursor::SeResize),
+            structs::NS_STYLE_CURSOR_SW_RESIZE => Keyword::Cursor(Cursor::SwResize),
+            structs::NS_STYLE_CURSOR_W_RESIZE => Keyword::Cursor(Cursor::WResize),
+            structs::NS_STYLE_CURSOR_EW_RESIZE => Keyword::Cursor(Cursor::EwResize),
+            structs::NS_STYLE_CURSOR_NS_RESIZE => Keyword::Cursor(Cursor::NsResize),
+            structs::NS_STYLE_CURSOR_NESW_RESIZE => Keyword::Cursor(Cursor::NeswResize),
+            structs::NS_STYLE_CURSOR_NWSE_RESIZE => Keyword::Cursor(Cursor::NwseResize),
+            structs::NS_STYLE_CURSOR_COL_RESIZE => Keyword::Cursor(Cursor::ColResize),
+            structs::NS_STYLE_CURSOR_ROW_RESIZE => Keyword::Cursor(Cursor::RowResize),
+            structs::NS_STYLE_CURSOR_ALL_SCROLL => Keyword::Cursor(Cursor::AllScroll),
+            structs::NS_STYLE_CURSOR_ZOOM_IN => Keyword::Cursor(Cursor::ZoomIn),
+            structs::NS_STYLE_CURSOR_ZOOM_OUT => Keyword::Cursor(Cursor::ZoomOut),
+            x => panic!("Found unexpected value in style struct for cursor property: {:?}", x),
+        };
+
+        let images = self.gecko.mCursorImages.iter().map(|gecko_cursor_image| {
+            let url = unsafe {
+                let gecko_image_request = gecko_cursor_image.mImage.mRawPtr.as_ref().unwrap();
+                SpecifiedUrl::from_image_request(&gecko_image_request)
+                    .expect("mCursorImages.mImage could not convert to SpecifiedUrl")
+            };
+
+            let hotspot =
+                if gecko_cursor_image.mHaveHotspot {
+                    Some((gecko_cursor_image.mHotspotX, gecko_cursor_image.mHotspotY))
+                } else {
+                    None
+                };
+
+            Image { url, hotspot }
+        }).collect();
+
+        longhands::cursor::computed_value::T { images, keyword }
     }
 
     <%call expr="impl_color('caret_color', 'mCaretColor', need_clone=True)"></%call>
@@ -4893,23 +4969,12 @@ clip-path
     }
 </%self:impl_trait>
 
-<%def name="define_ffi_struct_accessor(style_struct)">
-#[no_mangle]
-#[allow(non_snake_case, unused_variables)]
-pub unsafe extern "C" fn Servo_GetStyle${style_struct.gecko_name}(computed_values:
-        ServoComputedValuesBorrowedOrNull) -> *const ${style_struct.gecko_ffi_name} {
-    computed_values.unwrap().get_${style_struct.name_lower}().get_gecko()
-        as *const ${style_struct.gecko_ffi_name}
-}
-</%def>
-
 % for style_struct in data.style_structs:
 ${declare_style_struct(style_struct)}
 ${impl_style_struct(style_struct)}
 % if not style_struct.name in data.manual_style_structs:
 <%self:raw_impl_trait style_struct="${style_struct}"></%self:raw_impl_trait>
 % endif
-${define_ffi_struct_accessor(style_struct)}
 % endfor
 
 // This is only accessed from the Gecko main thread.

@@ -31,11 +31,11 @@ nsStyleContext::RuleNode()
     return AsGecko()->RuleNode();
 }
 
-const ServoComputedValues*
-nsStyleContext::ComputedValues()
+const ServoComputedData*
+nsStyleContext::ComputedData()
 {
     MOZ_RELEASE_ASSERT(IsServo());
-    return AsServo()->ComputedValues();
+    return AsServo()->ComputedData();
 }
 
 void
@@ -58,7 +58,7 @@ nsStyleContext::Style##name_() {                                \
 const nsStyle##name_ *                                          \
 nsStyleContext::ThreadsafeStyle##name_() {                      \
   if (mozilla::ServoStyleSet::IsInServoTraversal()) {           \
-    return AsServo()->ComputedValues()->GetStyle##name_();      \
+    return AsServo()->ComputedData()->GetStyle##name_();        \
   }                                                             \
   return Style##name_();                                        \
 }                                                               \
@@ -88,7 +88,7 @@ const nsStyle##name_ * nsStyleContext::DoGetStyle##name_() {        \
     AUTO_CHECK_DEPENDENCY(gecko, eStyleStruct_##name_);             \
     const nsStyle##name_ * newData =                                \
       gecko->RuleNode()->                                           \
-        GetStyle##name_<aComputeData>(this->AsGecko(), mBits);      \
+        GetStyle##name_<aComputeData>(gecko, mBits);                \
     /* always cache inherited data on the style context; the rule */\
     /* node set the bit in mBits for us if needed. */               \
     gecko->mCachedInheritedData                                     \
@@ -131,7 +131,7 @@ const nsStyle##name_ * nsStyleContext::DoGetStyle##name_() {        \
   }                                                                 \
                                                                     \
   const nsStyle##name_* data =                                      \
-    servo->ComputedValues()->GetStyle##name_();                     \
+    servo->ComputedData()->GetStyle##name_();                       \
   /* perform any remaining main thread work on the struct */        \
   if (needToCompute) {                                              \
     MOZ_ASSERT(NS_IsMainThread());                                  \
@@ -155,8 +155,8 @@ const nsStyle##name_ * nsStyleContext::DoGetStyle##name_() {                  \
         return cachedData;                                                    \
     }                                                                         \
     /* Have the rulenode deal */                                              \
-    AUTO_CHECK_DEPENDENCY(gecko, eStyleStruct_##name_);                              \
-    return gecko->RuleNode()->GetStyle##name_<aComputeData>(this->AsGecko()); \
+    AUTO_CHECK_DEPENDENCY(gecko, eStyleStruct_##name_);                       \
+    return gecko->RuleNode()->GetStyle##name_<aComputeData>(gecko);           \
   }                                                                           \
   auto servo = AsServo();                                                     \
   const bool needToCompute = !(mBits & NS_STYLE_INHERIT_BIT(name_));          \
@@ -164,7 +164,7 @@ const nsStyle##name_ * nsStyleContext::DoGetStyle##name_() {                  \
     return nullptr;                                                           \
   }                                                                           \
   const nsStyle##name_* data =                                                \
-    servo->ComputedValues()->GetStyle##name_();                               \
+    servo->ComputedData()->GetStyle##name_();                                 \
   /* perform any remaining main thread work on the struct */                  \
   if (needToCompute) {                                                        \
     const_cast<nsStyle##name_*>(data)->FinishStyle(PresContext());            \
@@ -215,21 +215,5 @@ nsStyleContext::StartBackgroundImageLoads()
   // Just get our background struct; that should do the trick
   StyleBackground();
 }
-
-const void*
-nsStyleContext::StyleStructFromServoComputedValues(nsStyleStructID aSID)
-{
-  switch (aSID) {
-#define STYLE_STRUCT(name_, checkdata_cb_)        \
-    case eStyleStruct_##name_:                    \
-      return ComputedValues()->GetStyle##name_();
-#include "nsStyleStructList.h"
-#undef STYLE_STRUCT
-    default:
-      MOZ_ASSERT_UNREACHABLE("unexpected nsStyleStructID value");
-      return nullptr;
-  }
-}
-
 
 #endif // nsStyleContextInlines_h

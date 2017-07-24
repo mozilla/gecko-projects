@@ -17,6 +17,7 @@ toolbar[brighttext] .toolbarbutton-1 {
 %ifdef MOZ_PHOTON_THEME
 #forward-button:-moz-locale-dir(rtl) > .toolbarbutton-icon,
 #reload-button:-moz-locale-dir(rtl) > .toolbarbutton-icon,
+#library-button:-moz-locale-dir(rtl) > .toolbarbutton-icon,
 %endif
 #nav-bar-overflow-button:-moz-locale-dir(rtl) > .toolbarbutton-icon,
 #panic-button:-moz-locale-dir(rtl) > .toolbarbutton-icon {
@@ -37,6 +38,12 @@ toolbar[brighttext] .toolbarbutton-1 {
 
 %ifdef MOZ_PHOTON_THEME
 %ifdef MOZ_PHOTON_ANIMATIONS
+.toolbarbutton-animatable-box > .toolbarbutton-animatable-image {
+  animation-fill-mode: forwards;
+  animation-iteration-count: 1;
+  list-style-image: none;
+}
+
 #stop-reload-button[animate] > #reload-button > .toolbarbutton-icon,
 #stop-reload-button[animate] > #reload-button[displaystop] + #stop-button > .toolbarbutton-icon {
   fill: transparent;
@@ -104,9 +111,6 @@ toolbar[brighttext] .toolbarbutton-1 {
 #reload-button > .toolbarbutton-animatable-box > .toolbarbutton-animatable-image,
 #stop-button > .toolbarbutton-animatable-box > .toolbarbutton-animatable-image {
   height: var(--toolbarbutton-height); /* Height must be equal to height of toolbarbutton padding-box */
-  animation-fill-mode: forwards;
-  animation-iteration-count: 1;
-  list-style-image: none;
 }
 
 #stop-reload-button[animate] > #reload-button > .toolbarbutton-animatable-box > .toolbarbutton-animatable-image {
@@ -349,25 +353,37 @@ toolbar:not([brighttext]) #bookmarks-menu-button@attributeSelectorForToolbar@[st
   }
 }
 
+/* The animation is supposed to show the blue fill color for 520ms, then the
+   fade to the toolbarbutton-fill color for the remaining 210ms. Thus with an
+   animation-duration of 730ms, 71% is the point where we start the fade out. */
+@keyframes overflow-fade {
+  from {
+    fill: #30A3FF;
+  }
+  71% {
+    fill: #30A3FF;
+  }
+  to {
+    fill: inherit;
+  }
+}
+
 #nav-bar-overflow-button > .toolbarbutton-animatable-box {
-  position: fixed;
+  position: absolute;
   overflow: hidden;
-  /* The height of the sprite is 24px, which is 8px taller than
-     the height of the icon. We need to move the sprite up 8px
-     higher to counter for this. */
-  margin-top: -8px;
+  top: calc(50% - 18px); /* Vertically center the 36px tall animatable image */
   /* Since .toolbarbutton-icon uses a different width than the animatable box,
      we need to set a padding relative to the difference in widths. */
   margin-inline-start: calc((16px + 2 * var(--toolbarbutton-inner-padding) - 18px) / 2);
   width: 18px; /* Width of each frame within the SVG sprite */
-  height: 24px; /* Height of each frame within the SVG sprite */
+  height: 36px; /* Height of each frame within the SVG sprite */
 }
 
 #nav-bar-overflow-button > .toolbarbutton-animatable-box > .toolbarbutton-animatable-image {
-  height: 24px; /* Height of each frame within the SVG sprite */
-  animation-fill-mode: forwards;
-  animation-iteration-count: 1;
-  list-style-image: none;
+  /* Height must be equal to height of toolbarbutton padding-box. --toolbarbutton-height
+     is calculated and set during runtime by BrowserUtils.setToolbarButtonHeightProperty()
+     before the animation begins. */
+  height: var(--toolbarbutton-height);
 }
 
 #nav-bar-overflow-button[animate] > .toolbarbutton-animatable-box > .toolbarbutton-animatable-image {
@@ -380,6 +396,12 @@ toolbar:not([brighttext]) #bookmarks-menu-button@attributeSelectorForToolbar@[st
 
 #nav-bar-overflow-button[animate]:-moz-locale-dir(rtl) > .toolbarbutton-animatable-box > .toolbarbutton-animatable-image {
   animation-name: overflow-animation-rtl;
+}
+
+#nav-bar-overflow-button[animate][fade] > .toolbarbutton-animatable-box > .toolbarbutton-animatable-image {
+  animation-name: overflow-fade;
+  animation-timing-function: ease-out;
+  animation-duration: 730ms;
 }
 %endif
 

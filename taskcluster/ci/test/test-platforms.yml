@@ -67,7 +67,6 @@ linux64-devedition/opt:
         - opt-only-tests
         - desktop-screenshot-capture
         - headless
-        - talos
 
 # TODO: use 'pgo' and 'asan' labels here, instead of -pgo/opt
 linux64-pgo/opt:
@@ -87,20 +86,20 @@ linux64-asan/opt:
 # Stylo builds only run a subset of tests for the moment. So give them
 # their own test set.
 linux64-stylo/debug:
-    build-platform: linux64-stylo/debug
+    build-platform: linux64/debug
     test-sets:
         - stylo-tests
 linux64-stylo/opt:
-    build-platform: linux64-stylo/opt
+    build-platform: linux64/opt
     test-sets:
         - stylo-tests
         - talos
 linux64-stylo-sequential/debug:
-    build-platform: linux64-stylo/debug
+    build-platform: linux64/debug
     test-sets:
         - stylo-sequential-tests
 linux64-stylo-sequential/opt:
-    build-platform: linux64-stylo/opt
+    build-platform: linux64/opt
     test-sets:
         - stylo-sequential-tests
         - talos
@@ -171,6 +170,7 @@ windows10-64/debug:
     test-sets:
         - headless
         - windows-tests
+
 windows10-64/opt:
     build-platform: win64/opt
     test-sets:
@@ -244,7 +244,6 @@ macosx64-nightly/opt:
 macosx64-devedition/opt:
     build-platform: macosx64-devedition/opt
     test-sets:
-        - macosx64-tests-talos
         - macosx64-tests
 
 ##

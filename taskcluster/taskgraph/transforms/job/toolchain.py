@@ -14,6 +14,7 @@ from taskgraph.transforms.job import run_job_using
 from taskgraph.transforms.job.common import (
     docker_worker_add_tc_vcs_cache,
     docker_worker_add_gecko_vcs_env_vars,
+    docker_worker_add_public_artifacts,
     support_vcs_checkout,
 )
 from taskgraph.util.hash import hash_paths
@@ -39,6 +40,9 @@ toolchain_run_schema = Schema({
     # Paths/patterns pointing to files that influence the outcome of a
     # toolchain build.
     Optional('resources'): [basestring],
+
+    # Path to the artifact produced by the toolchain job
+    Required('toolchain-artifact'): basestring,
 })
 
 
@@ -51,7 +55,7 @@ def add_optimizations(config, run, taskdesc):
 
     label = taskdesc['label']
     subs = {
-        'name': label.replace('toolchain-', '').split('/')[0],
+        'name': label.replace('%s-' % config.kind, ''),
         'digest': hash_paths(GECKO, files),
     }
 
@@ -77,12 +81,7 @@ def docker_worker_toolchain(config, job, taskdesc):
     worker['artifacts'] = []
     worker['caches'] = []
 
-    worker['artifacts'].append({
-        'name': 'public',
-        'path': '/home/worker/workspace/artifacts/',
-        'type': 'directory',
-    })
-
+    docker_worker_add_public_artifacts(config, job, taskdesc)
     docker_worker_add_tc_vcs_cache(config, job, taskdesc)
     docker_worker_add_gecko_vcs_env_vars(config, job, taskdesc)
     support_vcs_checkout(config, job, taskdesc)
@@ -129,6 +128,9 @@ def docker_worker_toolchain(config, job, taskdesc):
         './workspace/build/src/taskcluster/scripts/misc/{}'.format(
             run['script'])
     ]
+
+    attributes = taskdesc.setdefault('attributes', {})
+    attributes['toolchain-artifact'] = run['toolchain-artifact']
 
     add_optimizations(config, run, taskdesc)
 
@@ -180,5 +182,8 @@ def windows_toolchain(config, job, taskdesc):
         # do something intelligent.
         r'{} -c ./build/src/taskcluster/scripts/misc/{}'.format(bash, run['script'])
     ]
+
+    attributes = taskdesc.setdefault('attributes', {})
+    attributes['toolchain-artifact'] = run['toolchain-artifact']
 
     add_optimizations(config, run, taskdesc)

@@ -493,7 +493,7 @@ Element::GetBindingURL(nsIDocument *aDocument, css::URLValue **aResult)
                                IsHTMLElement(nsGkAtoms::object) ||
                                IsHTMLElement(nsGkAtoms::embed) ||
                                IsHTMLElement(nsGkAtoms::applet));
-  nsCOMPtr<nsIPresShell> shell = aDocument->GetShell();
+  nsIPresShell* shell = aDocument->GetShell();
   if (!shell || GetPrimaryFrame() || !isXULorPluginElement) {
     *aResult = nullptr;
     return true;
@@ -1305,7 +1305,6 @@ Element::SetAttribute(const nsAString& aName,
 
   aError = SetAttr(name->NamespaceID(), name->LocalName(), name->GetPrefix(),
                    aValue, true);
-  return;
 }
 
 void
@@ -2726,8 +2725,6 @@ Element::PreIdMaybeChange(int32_t aNamespaceID, nsIAtom* aName,
     return;
   }
   RemoveFromIdTable();
-
-  return;
 }
 
 void
@@ -2746,8 +2743,6 @@ Element::PostIdMaybeChange(int32_t aNamespaceID, nsIAtom* aName,
   } else {
     ClearHasID();
   }
-
-  return;
 }
 
 EventListenerManager*

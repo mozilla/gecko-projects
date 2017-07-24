@@ -325,6 +325,10 @@ test_description_schema = Schema({
     # the label of the build task generating the materials to test
     'build-label': basestring,
 
+    # the label of the signing task generating the materials to test.
+    # Signed builds are used in xpcshell tests on Windows, for instance.
+    Optional('build-signing-label'): basestring,
+
     # the build's attributes
     'build-attributes': {basestring: object},
 
@@ -341,8 +345,6 @@ test_description_schema = Schema({
     Optional('when'): Any({
         Optional('files-changed'): [basestring],
     }),
-
-    Optional('build-signing-label'): basestring,
 
     Optional('worker-type'): optionally_keyed_by(
         'test-platform',
@@ -743,6 +745,23 @@ def set_test_type(config, tests):
         for test_type in ['mochitest', 'reftest']:
             if test_type in test['suite'] and 'web-platform' not in test['suite']:
                 test.setdefault('tags', {})['test-type'] = test_type
+        yield test
+
+
+@transforms.add
+def enable_stylo(config, tests):
+    """
+    Force Stylo on for all its tests, except Stylo vs. Gecko reftests where the
+    test harness will handle this.
+    """
+    for test in tests:
+        if '-stylo' not in test['test-platform']:
+            yield test
+            continue
+
+        if 'reftest-stylo' not in test['suite']:
+            test['mozharness'].setdefault('extra-options', []).append('--enable-stylo')
+
         yield test
 
 

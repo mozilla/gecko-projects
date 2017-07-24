@@ -209,25 +209,32 @@ Gecko_DestroyAnonymousContentList(nsTArray<nsIContent*>* aAnonContent)
 }
 
 void
-Gecko_ServoStyleContext_Init(ServoStyleContext* aContext,
-                             const ServoStyleContext* aParentContext,
-                             RawGeckoPresContextBorrowed aPresContext, const ServoComputedValues* aValues,
-                             mozilla::CSSPseudoElementType aPseudoType, nsIAtom* aPseudoTag)
+Gecko_ServoStyleContext_Init(
+    ServoStyleContext* aContext,
+    const ServoStyleContext* aParentContext,
+    RawGeckoPresContextBorrowed aPresContext,
+    const ServoComputedData* aValues,
+    mozilla::CSSPseudoElementType aPseudoType,
+    nsIAtom* aPseudoTag)
 {
   // because it is within an Arc it is unsafe for the Rust side to ever
   // carry around a mutable non opaque reference to the context, so we
   // cast it here.
-  ServoStyleContext* parent = const_cast<ServoStyleContext*>(aParentContext);
-  nsPresContext* pres = const_cast<nsPresContext*>(aPresContext);
-  new (KnownNotNull, aContext) ServoStyleContext(parent, pres, aPseudoTag,
-                                                 aPseudoType, ServoComputedValuesForgotten(aValues));
+  auto parent = const_cast<ServoStyleContext*>(aParentContext);
+  auto presContext = const_cast<nsPresContext*>(aPresContext);
+  new (KnownNotNull, aContext) ServoStyleContext(
+      parent, presContext, aPseudoTag, aPseudoType,
+      ServoComputedDataForgotten(aValues));
 }
 
-ServoComputedValues::ServoComputedValues(const ServoComputedValuesForgotten aValue) {
+ServoComputedData::ServoComputedData(
+    const ServoComputedDataForgotten aValue)
+{
   PodAssign(this, aValue.mPtr);
 }
 
-const nsStyleVariables* ServoComputedValues::GetStyleVariables() const
+const nsStyleVariables*
+ServoComputedData::GetStyleVariables() const
 {
   return Servo_GetEmptyVariables();
 }
@@ -392,18 +399,24 @@ Gecko_GetImplementedPseudo(RawGeckoElementBorrowed aElement)
 }
 
 nsChangeHint
-Gecko_CalcStyleDifference(nsStyleContext* aOldStyleContext,
-                          ServoComputedValuesBorrowed aComputedValues,
+Gecko_CalcStyleDifference(ServoStyleContextBorrowed aOldStyle,
+                          ServoStyleContextBorrowed aNewStyle,
+                          uint64_t aOldStyleBits,
                           bool* aAnyStyleChanged)
 {
-  MOZ_ASSERT(aOldStyleContext);
-  MOZ_ASSERT(aComputedValues);
+  MOZ_ASSERT(aOldStyle);
+  MOZ_ASSERT(aNewStyle);
 
-  uint32_t equalStructs, samePointerStructs;
-  nsChangeHint result =
-    aOldStyleContext->CalcStyleDifference(aComputedValues,
-                                          &equalStructs,
-                                          &samePointerStructs);
+  uint32_t relevantStructs = aOldStyleBits & NS_STYLE_INHERIT_MASK;
+
+  uint32_t equalStructs;
+  uint32_t samePointerStructs;  // unused
+  nsChangeHint result = const_cast<ServoStyleContext*>(aOldStyle)->
+    CalcStyleDifference(
+      const_cast<ServoStyleContext*>(aNewStyle),
+      &equalStructs,
+      &samePointerStructs,
+      relevantStructs);
   *aAnyStyleChanged = equalStructs != NS_STYLE_INHERIT_MASK;
   return result;
 }
@@ -635,8 +648,8 @@ Gecko_StyleAnimationsEquals(RawGeckoStyleAnimationListBorrowed aA,
 
 void
 Gecko_UpdateAnimations(RawGeckoElementBorrowed aElement,
-                       ServoStyleContextBorrowedOrNull aOldComputedValues,
-                       ServoStyleContextBorrowedOrNull aComputedValues,
+                       ServoStyleContextBorrowedOrNull aOldComputedData,
+                       ServoStyleContextBorrowedOrNull aComputedData,
                        UpdateAnimationsTasks aTasks)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -657,30 +670,30 @@ Gecko_UpdateAnimations(RawGeckoElementBorrowed aElement,
   if (aTasks & UpdateAnimationsTasks::CSSAnimations) {
     presContext->AnimationManager()->
       UpdateAnimations(const_cast<dom::Element*>(aElement), pseudoType,
-                       aComputedValues);
+                       aComputedData);
   }
 
-  // aComputedValues might be nullptr if the target element is now in a
+  // aComputedData might be nullptr if the target element is now in a
   // display:none subtree. We still call Gecko_UpdateAnimations in this case
   // because we need to stop CSS animations in the display:none subtree.
   // However, we don't need to update transitions since they are stopped by
   // RestyleManager::AnimationsWithDestroyedFrame so we just return early
   // here.
-  if (!aComputedValues) {
+  if (!aComputedData) {
     return;
   }
 
   if (aTasks & UpdateAnimationsTasks::CSSTransitions) {
-    MOZ_ASSERT(aOldComputedValues);
+    MOZ_ASSERT(aOldComputedData);
     presContext->TransitionManager()->
       UpdateTransitions(const_cast<dom::Element*>(aElement), pseudoType,
-                        aOldComputedValues,
-                        aComputedValues);
+                        aOldComputedData,
+                        aComputedData);
   }
 
   if (aTasks & UpdateAnimationsTasks::EffectProperties) {
     presContext->EffectCompositor()->UpdateEffectProperties(
-      aComputedValues, const_cast<dom::Element*>(aElement), pseudoType);
+      aComputedData, const_cast<dom::Element*>(aElement), pseudoType);
   }
 
   if (aTasks & UpdateAnimationsTasks::CascadeResults) {
