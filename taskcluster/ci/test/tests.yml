@@ -1273,8 +1273,7 @@ talos-chrome:
         by-test-platform:
             linux64-stylo-sequential/.*: ['mozilla-central','try']
             linux64-stylo/.*: ['mozilla-central', 'try']
-            windows.*: ['try', 'date']
-            default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+            default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
     max-run-time: 3600
     e10s: true
     mozharness:
@@ -1303,8 +1302,7 @@ talos-dromaeojs:
         by-test-platform:
             linux64-stylo-sequential/.*: ['mozilla-central','try']
             linux64-stylo/.*: ['mozilla-central', 'try']
-            windows.*: ['try', 'date']
-            default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+            default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
     max-run-time: 3600
     e10s: true
     mozharness:
@@ -1333,8 +1331,7 @@ talos-g1:
         by-test-platform:
             linux64-stylo-sequential/.*: ['mozilla-central','try']
             linux64-stylo/.*: ['mozilla-central', 'try']
-            windows.*: ['try', 'date']
-            default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+            default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
     max-run-time: 7200
     e10s: true
     mozharness:
@@ -1364,8 +1361,7 @@ talos-g2:
         by-test-platform:
             linux64-stylo-sequential/.*: ['mozilla-central','try']
             linux64-stylo/.*: ['mozilla-central', 'try']
-            windows.*: ['try', 'date']
-            default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+            default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
     e10s: true
     mozharness:
         script: talos_script.py
@@ -1393,8 +1389,7 @@ talos-g3:
         by-test-platform:
             linux64-stylo-sequential/.*: ['mozilla-central','try']
             linux64-stylo/.*: ['mozilla-central', 'try']
-            windows.*: ['mozilla-beta','mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
-            default: ['mozilla-beta','mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+            default: ['mozilla-beta','mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
     max-run-time: 3600
     e10s: true
     mozharness:
@@ -1423,8 +1418,7 @@ talos-g4:
         by-test-platform:
             linux64-stylo-sequential/.*: ['mozilla-central','try']
             linux64-stylo/.*: ['mozilla-central', 'try']
-            windows.*: ['try', 'date']
-            default: ['mozilla-beta','mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+            default: ['mozilla-beta','mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
     max-run-time: 3600
     e10s: true
     mozharness:
@@ -1453,8 +1447,7 @@ talos-g5:
         by-test-platform:
             linux64-stylo-sequential/.*: ['mozilla-central','try']
             linux64-stylo/.*: ['mozilla-central', 'try']
-            windows.*: ['try', 'date']
-            default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+            default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
     max-run-time: 3600
     e10s: true
     mozharness:
@@ -1484,8 +1477,7 @@ talos-other:
         by-test-platform:
             linux64-stylo-sequential/.*: ['mozilla-central','try']
             linux64-stylo/.*: ['mozilla-central', 'try']
-            windows.*: ['try', 'date']
-            default: ['mozilla-beta','mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+            default: ['mozilla-beta','mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
     max-run-time: 3600
     e10s: true
     mozharness:
@@ -1514,8 +1506,7 @@ talos-perf-reftest:
         by-test-platform:
             linux64-stylo-sequential/.*: ['mozilla-central', 'try']
             linux64-stylo/.*: ['mozilla-central', 'try']
-            windows.*: ['try', 'date']
-            default: ['mozilla-central', 'mozilla-inbound', 'autoland', 'try']
+            default: ['mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
     max-run-time: 3600
     e10s: true
     mozharness:
@@ -1616,7 +1607,6 @@ talos-svgr:
         by-test-platform:
             linux64-stylo-sequential/.*: ['mozilla-central','try']
             linux64-stylo/.*: ['mozilla-central', 'try']
-            windows.*: ['try', 'date']
             default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     max-run-time: 3600
     e10s: true
@@ -1646,7 +1636,6 @@ talos-tp5o:
         by-test-platform:
             linux64-stylo-sequential/.*: ['mozilla-central','try']
             linux64-stylo/.*: ['mozilla-central', 'try']
-            windows.*: ['try', 'date']
             default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     max-run-time: 3600
     e10s: true
