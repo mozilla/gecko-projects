@@ -833,13 +833,12 @@ nsCSSRendering::PaintBorderWithStyleBorder(nsPresContext* aPresContext,
       nsCSSBorderImageRenderer::CreateBorderImageRenderer(aPresContext, aForFrame, aBorderArea,
                                                           aStyleBorder, aDirtyRect, aSkipSides,
                                                           irFlags, &result);
-    if (aStyleBorder.IsBorderImageLoaded()) {
-      if (renderer) {
-        result &= renderer->DrawBorderImage(aPresContext, aRenderingContext,
-                                            aForFrame, aDirtyRect);
-      }
-
-      return result;
+    // renderer was created successfully, which means border image is ready to
+    // be used.
+    if (renderer) {
+      MOZ_ASSERT(result == DrawResult::SUCCESS);
+      return renderer->DrawBorderImage(aPresContext, aRenderingContext,
+                                       aForFrame, aDirtyRect);
     }
   }
 
@@ -2640,11 +2639,6 @@ nsCSSRendering::PaintStyleImageLayerWithSC(const PaintBGParams& aParams,
     DrawBackgroundColor(clipState, &aRenderingCtx, appUnitsPerPixel);
   }
 
-  if (!drawBackgroundImage) {
-    return DrawResult::SUCCESS; // No need to draw layer image, we can early
-                                // return now.
-  }
-
   // Compute the outermost boundary of the area that might be painted.
   // Same coordinate space as aParams.borderArea & aParams.bgClipRect.
   Sides skipSides = aParams.frame->GetSkipSides();
@@ -4293,13 +4287,16 @@ nsContextBoxBlur::Init(const nsRect& aRect, nscoord aSpreadRadius,
 
   // Create the temporary surface for blurring
   dirtyRect = transform.TransformBounds(dirtyRect);
+  bool useHardwareAccel = !(aFlags & DISABLE_HARDWARE_ACCELERATION_BLUR);
   if (aSkipRect) {
     gfxRect skipRect = transform.TransformBounds(*aSkipRect);
     mContext = mAlphaBoxBlur.Init(aDestinationCtx, rect, spreadRadius,
-                                  blurRadius, &dirtyRect, &skipRect);
+                                  blurRadius, &dirtyRect, &skipRect,
+                                  useHardwareAccel);
   } else {
     mContext = mAlphaBoxBlur.Init(aDestinationCtx, rect, spreadRadius,
-                                  blurRadius, &dirtyRect, nullptr);
+                                  blurRadius, &dirtyRect, nullptr,
+                                  useHardwareAccel);
   }
 
   if (mContext) {

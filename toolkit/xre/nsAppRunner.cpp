@@ -4622,15 +4622,6 @@ void XRE_GlibInit()
 }
 #endif
 
-// Separate stub function to let us specifically suppress it in Valgrind
-void
-XRE_CreateStatsObject()
-{
-  // Initialize global variables used by histogram collection
-  // machinery that is used by by Telemetry.  Note: is never de-initialised.
-  Telemetry::CreateStatisticsRecorder();
-}
-
 /*
  * XRE_main - A class based main entry point used by most platforms.
  *            Note that on OSX, aAppData->xreDirectory will point to
@@ -4642,16 +4633,6 @@ XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig)
   ScopedLogging log;
 
   mozilla::LogModule::Init();
-
-  // NB: this must happen after the creation of |ScopedLogging log| since
-  // ScopedLogging::ScopedLogging calls NS_LogInit, and
-  // XRE_CreateStatsObject calls Telemetry::CreateStatisticsRecorder,
-  // and NS_LogInit must be called before Telemetry::CreateStatisticsRecorder.
-  // NS_LogInit must be called before Telemetry::CreateStatisticsRecorder
-  // so as to avoid many log messages of the form
-  //   WARNING: XPCOM objects created/destroyed from static ctor/dtor: [..]
-  // See bug 1279614.
-  XRE_CreateStatsObject();
 
 #if defined(MOZ_SANDBOX) && defined(XP_LINUX) && !defined(ANDROID)
   SandboxInfo::ThreadingCheck();
@@ -5182,11 +5163,16 @@ GetMaxWebProcessCount()
 
   const char* optInPref = "dom.ipc.processCount";
   uint32_t optInPrefValue = Preferences::GetInt(optInPref, 1);
+  const char* useDefaultPerformanceSettings =
+    "browser.preferences.defaultPerformanceSettings.enabled";
+  bool useDefaultPerformanceSettingsValue =
+    Preferences::GetBool(useDefaultPerformanceSettings, true);
 
-  // If the user has set dom.ipc.processCount, respect their decision
-  // regardless of add-ons that might affect their experience or experiment
-  // cohort.
-  if (Preferences::HasUserValue(optInPref)) {
+  // If the user has set dom.ipc.processCount, or if they have opt out of
+  // default performances settings from about:preferences, respect their
+  // decision regardless of add-ons that might affect their experience or
+  // experiment cohort.
+  if (Preferences::HasUserValue(optInPref) || !useDefaultPerformanceSettingsValue) {
     return std::max(1u, optInPrefValue);
   }
 

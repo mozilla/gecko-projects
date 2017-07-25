@@ -444,7 +444,11 @@ pref("media.decoder-doctor.wmf-disabled-is-failure", false);
 pref("media.decoder-doctor.new-issue-endpoint", "https://webcompat.com/issues/new");
 
 // Whether to suspend decoding of videos in background tabs.
+#ifdef RELEASE
+pref("media.suspend-bkgnd-video.enabled", false);
+#else
 pref("media.suspend-bkgnd-video.enabled", true);
+#endif
 // Delay, in ms, from time window goes to background to suspending
 // video decoders. Defaults to 10 seconds.
 pref("media.suspend-bkgnd-video.delay-ms", 10000);
@@ -5348,9 +5352,9 @@ pref("urlclassifier.gethashnoise", 4);
 // Gethash timeout for Safebrowsing.
 pref("urlclassifier.gethash.timeout_ms", 5000);
 // Update server response timeout for Safebrowsing.
-pref("urlclassifier.update.response_timeout_ms", 15000);
+pref("urlclassifier.update.response_timeout_ms", 30000);
 // Download update timeout for Safebrowsing.
-pref("urlclassifier.update.timeout_ms", 60000);
+pref("urlclassifier.update.timeout_ms", 90000);
 
 // Name of the about: page contributed by safebrowsing to handle display of error
 // pages on phishing/malware hits.  (bug 399233)
@@ -5756,6 +5760,12 @@ pref("security.mixed_content.hsts_priming_request_timeout", 2000);
 // Otherwise it will inherit the origin from parent node, this is the legacy
 // behavior of Firefox.
 pref("security.data_uri.unique_opaque_origin", false);
+
+// TODO: Bug 1380959: Block toplevel data: URI navigations
+// If true, all toplevel data: URI navigations will be blocked.
+// Please note that manually entering a data: URI in the
+// URL-Bar will not be blocked when flipping this pref.
+pref("security.data_uri.block_toplevel_data_uri_navigations", false);
 
 // Disable Storage api in release builds.
 #if defined(NIGHTLY_BUILD) && !defined(MOZ_WIDGET_ANDROID)

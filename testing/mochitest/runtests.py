@@ -1341,8 +1341,8 @@ toolbar#nav-bar {
         if pat_file in self.patternFiles:
             return self.patternFiles[pat_file]
         if not os.path.isfile(pat_file):
-            self.log.error("TEST-UNEXPECTED-ERROR | runtests.py | "
-                           "Cannot find failure pattern file " + pat_file)
+            self.log.warning("runtests.py | Cannot find failure pattern file " +
+                             pat_file)
             return None
 
         # Using ":error" to ensure it shows up in the failure summary.
@@ -1757,6 +1757,7 @@ toolbar#nav-bar {
         options.extraPrefs.append(
             "browser.tabs.remote.autostart=%s" %
             ('true' if options.e10s else 'false'))
+
         options.extraPrefs.append(
             "dom.ipc.tabs.nested.enabled=%s" %
             ('true' if options.nested_oop else 'false'))
