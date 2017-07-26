@@ -2673,13 +2673,16 @@ nsLayoutUtils::PostTranslate(Matrix4x4& aTransform, const nsPoint& aOrigin, floa
 // We want to this return true for the scroll frame, but not the
 // scrolled frame (which has the same content).
 bool
-nsLayoutUtils::FrameHasDisplayPort(nsIFrame* aFrame)
+nsLayoutUtils::FrameHasDisplayPort(nsIFrame* aFrame, nsIFrame* aScrolledFrame)
 {
   if (!aFrame->GetContent() || !HasDisplayPort(aFrame->GetContent())) {
     return false;
   }
   nsIScrollableFrame* sf = do_QueryFrame(aFrame);
   if (sf) {
+    if (aScrolledFrame && aScrolledFrame != sf->GetScrolledFrame()) {
+      return false;
+    }
     return true;
   }
   return false;

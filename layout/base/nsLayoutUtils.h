@@ -203,8 +203,10 @@ public:
   /**
    * Check whether the given frame has a displayport. It returns false
    * for scrolled frames and true for the corresponding scroll frame.
+   * Optionally pass the child, and it only returns true if the child is the
+   * scrolled frame for the displayport.
    */
-  static bool FrameHasDisplayPort(nsIFrame* aFrame);
+  static bool FrameHasDisplayPort(nsIFrame* aFrame, nsIFrame* aScrolledFrame = nullptr);
 
   /**
    * Check if the given element has a margins based displayport but is missing a
