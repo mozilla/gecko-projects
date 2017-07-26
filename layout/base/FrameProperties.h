@@ -496,13 +496,14 @@ FrameProperties::DeleteInternal(UntypedDescriptor aProperty,
 
   auto index = mProperties.IndexOf(aProperty, 0, PropertyComparator());
   if (index != nsTArray<PropertyValue>::NoIndex) {
-    mProperties.ElementAt(index).DestroyValueFor(aFrame);
+    PropertyValue pv = mProperties.ElementAt(index);
     if (mInDeleteAll) {
       mProperties.ElementAt(index).mProperty = nullptr;
       mProperties.ElementAt(index).mValue = nullptr;
     } else {
       mProperties.RemoveElementAt(index);
     }
+    pv.DestroyValueFor(aFrame);
   }
 }
 
