@@ -6019,7 +6019,8 @@ CopyItemsWithOpacity(nsDisplayList* aList,
       }
     }
 
-    if (i->GetType() == TYPE_LAYER_EVENT_REGIONS) {
+    if (i->GetType() == TYPE_LAYER_EVENT_REGIONS ||
+        i->GetType() == TYPE_WRAP_LIST) {
       continue;
     }
 
