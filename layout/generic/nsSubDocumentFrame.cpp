@@ -423,6 +423,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     }
 
     aBuilder->EnterPresShell(subdocRootFrame, pointerEventsNone);
+    aBuilder->IncrementPresShellPaintCount(presShell);
   } else {
     visible = aBuilder->GetVisibleRect();
     dirty = aBuilder->GetDirtyRect();
@@ -474,7 +475,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     }
     mPreviousCaret = aBuilder->GetCaretFrame();
   }
-  
+
   nsDisplayList childItems;
 
   {
@@ -486,7 +487,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       // nsDisplayZoom changes the meaning of appunits.
       nestedClipState.Clear();
     }
-        
+
     // Invoke AutoBuildingDisplayList to ensure that the correct dirty rect
     // is used to compute the visible rect if AddCanvasBackgroundColorItem
     // creates a display item.
@@ -575,13 +576,16 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     childItems.AppendToTop(resolutionItem);
     needsOwnLayer = false;
   }
-  if (needsOwnLayer) {
-    // We always want top level content documents to be in their own layer.
-    nsDisplaySubDocument* layerItem = new (aBuilder) nsDisplaySubDocument(
-      aBuilder, subdocRootFrame ? subdocRootFrame : this,
-      &childItems, flags);
-    childItems.AppendToTop(layerItem);
-  }
+
+  // We always want top level content documents to be in their own layer.
+  nsDisplaySubDocument* layerItem = new (aBuilder) nsDisplaySubDocument(
+    aBuilder, subdocRootFrame ? subdocRootFrame : this, this,
+    &childItems, flags);
+
+  childItems.AppendToTop(layerItem);
+
+  // Flatten the subdocument item if it does not need own layer.
+  layerItem->SetShouldFlattenAway(needsOwnLayer == false);
 
   // If we're using containers for root frames, then the earlier call
   // to AddCanvasBackgroundColorItem won't have been able to add an

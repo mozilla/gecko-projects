@@ -53,6 +53,7 @@ class nsDisplayList;
 class nsDisplayTableItem;
 class nsISelection;
 class nsIScrollableFrame;
+class nsSubDocumentFrame;
 class nsDisplayLayerEventRegions;
 class nsDisplayScrollInfoLayer;
 class nsCaret;
@@ -752,6 +753,8 @@ public:
    * Notify the display list builder that we're leaving a presshell.
    */
   void LeavePresShell(nsIFrame* aReferenceFrame, nsDisplayList* aPaintedContents);
+
+  void IncrementPresShellPaintCount(nsIPresShell* aPresShell);
 
   /**
    * Returns true if we're currently building a display list that's
@@ -4900,7 +4903,8 @@ protected:
  */
 class nsDisplaySubDocument : public nsDisplayOwnLayer {
 public:
-  nsDisplaySubDocument(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+  nsDisplaySubDocument(nsDisplayListBuilder* aBuilder,
+                       nsIFrame* aFrame, nsSubDocumentFrame* aSubDocFrame,
                        nsDisplayList* aList, uint32_t aFlags);
 #ifdef NS_BUILD_REFCNT_LOGGING
   virtual ~nsDisplaySubDocument();
@@ -4913,10 +4917,22 @@ public:
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
                            bool* aSnap) const override;
 
+  virtual nsSubDocumentFrame* SubDocumentFrame() { return mSubDocFrame; }
+
   virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
                                  nsRegion* aVisibleRegion) override;
 
   virtual bool ShouldBuildLayerEvenIfInvisible(nsDisplayListBuilder* aBuilder) const override;
+
+  virtual bool ShouldFlattenAway(nsDisplayListBuilder* aBuilder) override
+  {
+    return mShouldFlatten;
+  }
+
+  void SetShouldFlattenAway(bool aShouldFlatten)
+  {
+    mShouldFlatten = aShouldFlatten;
+  }
 
   virtual nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
                                    bool* aSnap) const override;
@@ -4929,6 +4945,8 @@ public:
 protected:
   ViewID mScrollParentId;
   bool mForceDispatchToContentRegion;
+  bool mShouldFlatten;
+  nsSubDocumentFrame* mSubDocFrame;
 };
 
 /**

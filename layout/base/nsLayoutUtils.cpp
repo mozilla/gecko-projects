@@ -3885,6 +3885,41 @@ nsLayoutUtils::MaybeCreateDisplayPortInFirstScrollFrameEncountered(
 }
 
 static void
+VisitSubDocPresShell(nsDisplayListBuilder& aBuilder,
+                     nsDisplaySubDocument* aSubDocItem)
+{
+  MOZ_ASSERT(aSubDocItem);
+
+  nsSubDocumentFrame* subDocFrame = aSubDocItem->SubDocumentFrame();
+  MOZ_ASSERT(subDocFrame);
+
+  nsIPresShell* presShell = subDocFrame->GetSubdocumentPresShellForPainting(0);
+  MOZ_ASSERT(presShell);
+
+  aBuilder.IncrementPresShellPaintCount(presShell);
+}
+
+// TODO: This can probably be merged with something else
+static void
+FindSubDocumentsAndVisitPresShells(nsDisplayListBuilder& aBuilder,
+                                   nsDisplayList& aList)
+{
+  // Find nsDisplaySubDocuments from the list
+  for (nsDisplayItem* i = aList.GetBottom(); i; i = i->GetAbove()) {
+    nsDisplayList* children = i->GetChildren();
+
+    if (children) {
+      FindSubDocumentsAndVisitPresShells(aBuilder, *children);
+    }
+
+    if (i->GetType() == TYPE_SUBDOCUMENT) {
+      nsDisplaySubDocument* subdoc = static_cast<nsDisplaySubDocument*>(i);
+      VisitSubDocPresShell(aBuilder, subdoc);
+    }
+  }
+}
+
+static void
 AddExtraBackgroundItems(nsDisplayListBuilder& aBuilder,
                         nsDisplayList& aList,
                         nsIFrame* aFrame,
@@ -4313,6 +4348,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
             // PreProcessRetainedDisplayList didn't end up changing anything
             // Invariant: display items should have their original state here.
             //printf_stderr("Skipping display list building since nothing needed to be done\n");
+            FindSubDocumentsAndVisitPresShells(builder, list);
           }
 
           // |modifiedDL| can sometimes be empty here. We still perform the
@@ -4380,6 +4416,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     //}
 
     builder.LeavePresShell(aFrame, &list);
+    builder.IncrementPresShellPaintCount(presShell);
 
     if (gfxPrefs::LayersDrawFPS()) {
       if (RefPtr<LayerManager> lm = builder.GetWidgetLayerManager()) {

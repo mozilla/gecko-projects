@@ -1199,6 +1199,15 @@ nsDisplayListBuilder::GetCaret() {
 }
 
 void
+nsDisplayListBuilder::IncrementPresShellPaintCount(nsIPresShell* aPresShell)
+{
+  if (mIsPaintingToWindow) {
+    mReferenceFrame->AddPaintedPresShell(aPresShell);
+    aPresShell->IncrementPaintCount();
+  }
+}
+
+void
 nsDisplayListBuilder::EnterPresShell(nsIFrame* aReferenceFrame,
                                      bool aPointerEventsNoneDoc)
 {
@@ -1217,12 +1226,6 @@ nsDisplayListBuilder::EnterPresShell(nsIFrame* aReferenceFrame,
   if (mPresShellStates.Length() == 1) {
     mFrameToAnimatedGeometryRootMap.Put(aReferenceFrame, mRootAGR);
     mCurrentAGR = mRootAGR;
-  }
-
-  if (mIsPaintingToWindow) {
-    mReferenceFrame->AddPaintedPresShell(state->mPresShell);
-
-    state->mPresShell->IncrementPaintCount();
   }
 
   bool buildCaret = mBuildCaret;
@@ -6573,10 +6576,13 @@ nsDisplayOwnLayer::BuildLayer(nsDisplayListBuilder* aBuilder,
 }
 
 nsDisplaySubDocument::nsDisplaySubDocument(nsDisplayListBuilder* aBuilder,
-                                           nsIFrame* aFrame, nsDisplayList* aList,
-                                           uint32_t aFlags)
+                                           nsIFrame* aFrame,
+                                           nsSubDocumentFrame* aSubDocFrame,
+                                           nsDisplayList* aList, uint32_t aFlags)
     : nsDisplayOwnLayer(aBuilder, aFrame, aList, aBuilder->CurrentActiveScrolledRoot(), aFlags)
     , mScrollParentId(aBuilder->GetCurrentScrollParentId())
+    , mShouldFlatten(false)
+    , mSubDocFrame(aSubDocFrame)
 {
   MOZ_COUNT_CTOR(nsDisplaySubDocument);
   mForceDispatchToContentRegion =
@@ -6729,7 +6735,7 @@ nsDisplaySubDocument::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
 nsDisplayResolution::nsDisplayResolution(nsDisplayListBuilder* aBuilder,
                                          nsIFrame* aFrame, nsDisplayList* aList,
                                          uint32_t aFlags)
-    : nsDisplaySubDocument(aBuilder, aFrame, aList, aFlags) {
+    : nsDisplaySubDocument(aBuilder, aFrame, nullptr, aList, aFlags) {
   MOZ_COUNT_CTOR(nsDisplayResolution);
 }
 
@@ -7075,7 +7081,7 @@ nsDisplayZoom::nsDisplayZoom(nsDisplayListBuilder* aBuilder,
                              nsIFrame* aFrame, nsDisplayList* aList,
                              int32_t aAPD, int32_t aParentAPD,
                              uint32_t aFlags)
-    : nsDisplaySubDocument(aBuilder, aFrame, aList, aFlags)
+    : nsDisplaySubDocument(aBuilder, aFrame, nullptr, aList, aFlags)
     , mAPD(aAPD), mParentAPD(aParentAPD) {
   MOZ_COUNT_CTOR(nsDisplayZoom);
 }
