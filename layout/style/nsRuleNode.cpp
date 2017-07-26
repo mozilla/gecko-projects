@@ -471,10 +471,14 @@ nsRuleNode::ApplyMinFontSize(nsStyleFont* aFont,
 
 static nsSize CalcViewportUnitsScale(nsPresContext* aPresContext)
 {
-  // The caller is making use of viewport units, so notify the pres context
+  // The caller is making use of viewport units, so notify the style set
   // that it will need to rebuild the rule tree if the size of the viewport
   // changes.
-  aPresContext->SetUsesViewportUnits(true);
+  // It is possible for this to be called on a Servo-styled document,from
+  // media query evaluation outside stylesheets.
+  if (nsStyleSet* styleSet = aPresContext->StyleSet()->GetAsGecko()) {
+    styleSet->SetUsesViewportUnits(true);
+  }
 
   // The default (when we have 'overflow: auto' on the root element, or
   // trivially for 'overflow: hidden' since we never have scrollbars in that
@@ -3690,13 +3694,16 @@ nsRuleNode::SetFont(nsPresContext* aPresContext, GeckoStyleContext* aContext,
     "LookAndFeel.h system-font constants out of sync with nsStyleConsts.h");
 
   // Fall back to defaultVariableFont.
-  nsFont systemFont = *defaultVariableFont;
+  Maybe<nsFont> lazySystemFont;
   const nsCSSValue* systemFontValue = aRuleData->ValueForSystemFont();
   if (eCSSUnit_Enumerated == systemFontValue->GetUnit()) {
+    lazySystemFont.emplace(*defaultVariableFont);
     LookAndFeel::FontID fontID =
       (LookAndFeel::FontID)systemFontValue->GetIntValue();
-    ComputeSystemFont(&systemFont, fontID, aPresContext, defaultVariableFont);
+    ComputeSystemFont(lazySystemFont.ptr(), fontID, aPresContext,
+                      defaultVariableFont);
   }
+  const nsFont& systemFont = lazySystemFont.refOr(*defaultVariableFont);
 
   // font-family: font family list, enum, inherit
   const nsCSSValue* familyValue = aRuleData->ValueForFontFamily();
@@ -8654,7 +8661,7 @@ nsRuleNode::ComputePositionData(void* aStartStruct,
   if (MOZ_UNLIKELY(justifyItemsValue.GetUnit() == eCSSUnit_Inherit)) {
     if (MOZ_LIKELY(parentContext)) {
       pos->mJustifyItems =
-        parentPos->ComputedJustifyItems(parentContext->GetParentAllowServo());
+        parentPos->ComputedJustifyItems(parentContext->GetParent());
     } else {
       pos->mJustifyItems = NS_STYLE_JUSTIFY_NORMAL;
     }

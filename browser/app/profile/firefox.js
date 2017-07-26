@@ -1105,7 +1105,8 @@ pref("security.sandbox.content.level", 1);
 // its Windows/Mac counterpart, but on Linux it's an integer which means:
 // 0 -> "no sandbox"
 // 1 -> "content sandbox using seccomp-bpf when available"
-// 2 -> "seccomp-bpf + file broker"
+// 2 -> "seccomp-bpf + write file broker"
+// 3 -> "seccomp-bpf + read/write file brokering"
 // Content sandboxing on Linux is currently in the stage of
 // 'just getting it enabled', which includes a very permissive whitelist. We
 // enable seccomp-bpf on nightly to see if everything is running, or if we need
@@ -1117,8 +1118,9 @@ pref("security.sandbox.content.level", 1);
 //
 // This setting may not be required anymore once we decide to permanently
 // enable the content sandbox.
-pref("security.sandbox.content.level", 2);
+pref("security.sandbox.content.level", 3);
 pref("security.sandbox.content.write_path_whitelist", "");
+pref("security.sandbox.content.read_path_whitelist", "");
 pref("security.sandbox.content.syscall_whitelist", "");
 #endif
 
@@ -1134,7 +1136,7 @@ pref("security.sandbox.content.tempDirSuffix", "");
 #if defined(MOZ_SANDBOX)
 // This pref determines if messages relevant to sandbox violations are
 // logged.
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_MACOSX)
 pref("security.sandbox.logging.enabled", false);
 #else
 pref("security.sandbox.logging.enabled", true);

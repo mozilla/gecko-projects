@@ -28,10 +28,11 @@ HLSDecoder::CreateStateMachine()
   MOZ_ASSERT(resource);
   auto resourceWrapper = static_cast<HLSResource*>(resource)->GetResourceWrapper();
   MOZ_ASSERT(resourceWrapper);
-  MediaFormatReaderInit init(this);
+  MediaFormatReaderInit init;
   init.mVideoFrameContainer = GetVideoFrameContainer();
   init.mKnowsCompositor = GetCompositor();
   init.mCrashHelper = GetOwner()->CreateGMPCrashHelper();
+  init.mFrameStats = mFrameStats;
   mReader =
     new MediaFormatReader(init, new HLSDemuxer(resourceWrapper->GetPlayerId()));
 
@@ -90,6 +91,28 @@ HLSDecoder::Load(MediaResource*)
 {
   MOZ_CRASH("Clone is not supported");
   return NS_ERROR_FAILURE;
+}
+
+nsresult
+HLSDecoder::Play()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  HLS_DEBUG("HLSDecoder", "MediaElement called Play");
+  auto resourceWrapper =
+        static_cast<HLSResource*>(GetResource())->GetResourceWrapper();
+  resourceWrapper->Play();
+  return MediaDecoder::Play();
+}
+
+void
+HLSDecoder::Pause()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  HLS_DEBUG("HLSDecoder", "MediaElement called Pause");
+  auto resourceWrapper =
+      static_cast<HLSResource*>(GetResource())->GetResourceWrapper();
+  resourceWrapper->Pause();
+  return MediaDecoder::Pause();
 }
 
 } // namespace mozilla

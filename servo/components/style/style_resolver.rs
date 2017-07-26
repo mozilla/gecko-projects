@@ -12,7 +12,8 @@ use dom::TElement;
 use log::LogLevel::Trace;
 use matching::{CascadeVisitedMode, MatchMethods};
 use properties::{AnimationRules, CascadeFlags, ComputedValues};
-use properties::{IS_ROOT_ELEMENT, PROHIBIT_DISPLAY_CONTENTS, SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP};
+use properties::{IS_LINK, IS_ROOT_ELEMENT, IS_VISITED_LINK};
+use properties::{PROHIBIT_DISPLAY_CONTENTS, SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP};
 use properties::{VISITED_DEPENDENT_ONLY, cascade};
 use rule_tree::StrongRuleNode;
 use selector_parser::{PseudoElement, SelectorImpl};
@@ -51,17 +52,7 @@ where
 {
     let parent_el = element.inheritance_parent();
     let parent_data = parent_el.as_ref().and_then(|e| e.borrow_data());
-    let parent_style = parent_data.as_ref().map(|d| {
-        // Sometimes Gecko eagerly styles things without processing
-        // pending restyles first. In general we'd like to avoid this,
-        // but there can be good reasons (for example, needing to
-        // construct a frame for some small piece of newly-added
-        // content in order to do something specific with that frame,
-        // but not wanting to flush all of layout).
-        debug_assert!(cfg!(feature = "gecko") ||
-                      parent_el.unwrap().has_current_styles(d));
-        d.styles.primary()
-    });
+    let parent_style = parent_data.as_ref().map(|d| d.styles.primary());
 
     let mut layout_parent_el = parent_el.clone();
     let layout_parent_data;
@@ -473,6 +464,15 @@ where
         if self.element.skip_root_and_item_based_display_fixup() {
             cascade_flags.insert(SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP);
         }
+
+        if pseudo.is_none() && self.element.is_link() {
+            cascade_flags.insert(IS_LINK);
+            if self.element.is_visited_link() &&
+                self.context.shared.visited_styles_enabled {
+                cascade_flags.insert(IS_VISITED_LINK);
+            }
+        }
+
         if cascade_visited.visited_dependent_only() {
             // If this element is a link, we want its visited style to inherit
             // from the regular style of its parent, because only the

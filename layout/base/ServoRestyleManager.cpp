@@ -603,12 +603,9 @@ ServoRestyleManager::ProcessPostTraversal(
   RefPtr<ServoStyleContext> newContext = nullptr;
   if (wasRestyled && oldStyleContext) {
     MOZ_ASSERT(styleFrame || displayContentsNode);
-    RefPtr<ServoStyleContext> currentContext =
+    newContext =
       aRestyleState.StyleSet().ResolveServoStyle(aElement, aRestyleBehavior);
-    MOZ_ASSERT(oldStyleContext->ComputedData() != currentContext->ComputedData());
-
-    newContext = currentContext;
-    newContext->UpdateWithElementState(aElement);
+    MOZ_ASSERT(oldStyleContext->ComputedData() != newContext->ComputedData());
 
     newContext->ResolveSameStructsAs(oldStyleContext);
 
@@ -873,11 +870,8 @@ ServoRestyleManager::DoProcessPendingRestyles(TraversalRestyleBehavior
       DocumentStyleRootIterator iter(doc);
       while (Element* root = iter.GetNextStyleRoot()) {
         ServoRestyleState state(*styleSet, currentChanges);
-        if (!forThrottledAnimationFlush ||
-            root->HasAnimationOnlyDirtyDescendantsForServo()) {
-          anyStyleChanged |=
-            ProcessPostTraversal(root, nullptr, state, aRestyleBehavior);
-        }
+        anyStyleChanged |=
+          ProcessPostTraversal(root, nullptr, state, aRestyleBehavior);
       }
     }
 

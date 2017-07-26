@@ -83,6 +83,7 @@ use style::gecko_bindings::structs::nsCSSValueSharedList;
 use style::gecko_bindings::structs::nsCompatibility;
 use style::gecko_bindings::structs::nsIDocument;
 use style::gecko_bindings::structs::nsStyleTransformMatrix::MatrixTransformOperator;
+use style::gecko_bindings::structs::nsTArray;
 use style::gecko_bindings::structs::nsresult;
 use style::gecko_bindings::sugar::ownership::{FFIArcHelpers, HasFFI, HasArcFFI, HasBoxFFI};
 use style::gecko_bindings::sugar::ownership::{HasSimpleFFI, Strong};
@@ -94,9 +95,10 @@ use style::parallel;
 use style::parser::ParserContext;
 use style::properties::{ComputedValues, Importance};
 use style::properties::{IS_FIELDSET_CONTENT, LonghandIdSet};
-use style::properties::{PropertyDeclaration, PropertyDeclarationBlock, PropertyId};
+use style::properties::{PropertyDeclaration, PropertyDeclarationBlock, PropertyId, ShorthandId};
 use style::properties::{SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP, SourcePropertyDeclaration, StyleBuilder};
 use style::properties::animated_properties::{Animatable, AnimatableLonghand, AnimationValue};
+use style::properties::animated_properties::compare_property_priority;
 use style::properties::parse_one_declaration_into;
 use style::rule_tree::StyleSource;
 use style::selector_parser::PseudoElementCascadeType;
@@ -182,8 +184,13 @@ fn create_shared_context<'a>(global_style_data: &GlobalStyleData,
                              traversal_flags: TraversalFlags,
                              snapshot_map: &'a ServoElementSnapshotTable)
                              -> SharedStyleContext<'a> {
+    let visited_styles_enabled =
+        unsafe { bindings::Gecko_AreVisitedLinksEnabled() } &&
+        !per_doc_data.is_private_browsing_enabled();
+
     SharedStyleContext {
         stylist: &per_doc_data.stylist,
+        visited_styles_enabled: visited_styles_enabled,
         options: global_style_data.options.clone(),
         guards: StylesheetGuards::same(guard),
         timer: Timer::new(),
@@ -268,21 +275,26 @@ pub extern "C" fn Servo_TraverseSubtree(root: RawGeckoElementBorrowed,
         (Root::Normal, Restyle::ForThrottledAnimationFlush)
             => TraversalFlags::empty(),
         (Root::UnstyledChildrenOnly, Restyle::Normal) |
-        (Root::UnstyledChildrenOnly, Restyle::ForNewlyBoundElement) |
-        (Root::UnstyledChildrenOnly, Restyle::ForThrottledAnimationFlush)
+        (Root::UnstyledChildrenOnly, Restyle::ForNewlyBoundElement)
             => UNSTYLED_CHILDREN_ONLY,
         (Root::Normal, Restyle::ForCSSRuleChanges) => FOR_CSS_RULE_CHANGES,
         (Root::Normal, Restyle::ForReconstruct) => FOR_RECONSTRUCT,
         _ => panic!("invalid combination of TraversalRootBehavior and TraversalRestyleBehavior"),
     };
 
-    let needs_animation_only_restyle = element.has_animation_only_dirty_descendants() ||
-                                       element.has_animation_restyle_hints();
-    if needs_animation_only_restyle {
-        traverse_subtree(element,
-                         raw_data,
-                         traversal_flags | ANIMATION_ONLY,
-                         unsafe { &*snapshots });
+    // It makes no sense to do an animation restyle when we're restyling
+    // newly-inserted content.
+    if !traversal_flags.contains(UNSTYLED_CHILDREN_ONLY) {
+        let needs_animation_only_restyle =
+            element.has_animation_only_dirty_descendants() ||
+            element.has_animation_restyle_hints();
+
+        if needs_animation_only_restyle {
+            traverse_subtree(element,
+                             raw_data,
+                             traversal_flags | ANIMATION_ONLY,
+                             unsafe { &*snapshots });
+        }
     }
 
     if restyle_behavior == Restyle::ForThrottledAnimationFlush {
@@ -853,7 +865,8 @@ pub extern "C" fn Servo_StyleSet_AppendStyleSheet(
 #[no_mangle]
 pub extern "C" fn Servo_StyleSet_MediumFeaturesChanged(
     raw_data: RawServoStyleSetBorrowed,
-) -> bool {
+    viewport_changed: bool,
+) -> nsRestyleHint {
     let global_style_data = &*GLOBAL_STYLE_DATA;
     let guard = global_style_data.shared_lock.read();
 
@@ -869,11 +882,19 @@ pub extern "C" fn Servo_StyleSet_MediumFeaturesChanged(
     // less often.
     let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
 
+    let viewport_units_used = data.stylist.device().used_viewport_size();
     data.stylist.device_mut().reset_computed_values();
-    data.stylist.media_features_change_changed_style(
+    let rules_changed = data.stylist.media_features_change_changed_style(
         data.stylesheets.iter(),
         &guard,
-    )
+    );
+    if rules_changed {
+        structs::nsRestyleHint_eRestyle_Subtree
+    } else if viewport_changed && viewport_units_used {
+        structs::nsRestyleHint_eRestyle_ForceDescendants
+    } else {
+        nsRestyleHint(0)
+    }
 }
 
 #[no_mangle]
@@ -1736,6 +1757,9 @@ pub extern "C" fn Servo_ComputedValues_GetStyleBits(values: ServoStyleContextBor
     use style::properties::computed_value_flags::*;
     let flags = values.flags;
     let mut result = 0;
+    if flags.contains(IS_RELEVANT_LINK_VISITED) {
+        result |= structs::NS_STYLE_RELEVANT_LINK_VISITED as u64;
+    }
     if flags.contains(HAS_TEXT_DECORATION_LINES) {
         result |= structs::NS_STYLE_HAS_TEXT_DECORATION_LINES as u64;
     }
@@ -2755,8 +2779,13 @@ pub extern "C" fn Servo_TakeChangeHint(element: RawGeckoElementBorrowed,
 
             let damage = data.restyle.damage;
             if restyle_behavior == structs::TraversalRestyleBehavior::ForThrottledAnimationFlush {
-                debug_assert!(data.restyle.is_restyle() || damage.is_empty(),
-                              "Restyle damage should be empty if the element was not restyled");
+                if !*was_restyled {
+                    // Don't touch elements if the element was not restyled
+                    // in throttled animation flush.
+                    debug!("Skip post traversal for throttled animation flush {:?} restyle={:?}",
+                           element, data.restyle);
+                    return nsChangeHint(0);
+                }
                 // In the case where we call this function for post traversal for
                 // flusing throttled animations (i.e. without normal restyle
                 // traversal), we need to preserve restyle hints for normal restyle
@@ -2804,7 +2833,7 @@ pub extern "C" fn Servo_ResolveStyle(element: RawGeckoElementBorrowed,
         TraversalFlags::empty()
     };
     debug_assert!(element.has_current_styles_for_traversal(&*data, flags),
-                  "Resolving style on element without current styles");
+                  "Resolving style on {:?} without current styles: {:?}", element, data);
     data.styles.primary().clone().into()
 }
 
@@ -2892,6 +2921,7 @@ fn create_context<'a>(
     style: &'a ComputedValues,
     parent_style: Option<&'a ComputedValues>,
     pseudo: Option<&'a PseudoElement>,
+    for_smil_animation: bool,
 ) -> Context<'a> {
     Context {
         is_root_element: false,
@@ -2905,6 +2935,54 @@ fn create_context<'a>(
         cached_system_font: None,
         in_media_query: false,
         quirks_mode: per_doc_data.stylist.quirks_mode(),
+        for_smil_animation,
+    }
+}
+
+struct PropertyAndIndex {
+    property: PropertyId,
+    index: usize,
+}
+
+struct PrioritizedPropertyIter<'a> {
+    properties: &'a nsTArray<PropertyValuePair>,
+    sorted_property_indices: Vec<PropertyAndIndex>,
+    curr: usize,
+}
+
+impl<'a> PrioritizedPropertyIter<'a> {
+    pub fn new(properties: &'a nsTArray<PropertyValuePair>) -> PrioritizedPropertyIter {
+        // If we fail to convert a nsCSSPropertyID into a PropertyId we shouldn't fail outright
+        // but instead by treating that property as the 'all' property we make it sort last.
+        let all = PropertyId::Shorthand(ShorthandId::All);
+
+        let mut sorted_property_indices: Vec<PropertyAndIndex> =
+            properties.iter().enumerate().map(|(index, pair)| {
+                PropertyAndIndex {
+                    property: PropertyId::from_nscsspropertyid(pair.mProperty)
+                              .unwrap_or(all.clone()),
+                    index,
+                }
+            }).collect();
+        sorted_property_indices.sort_by(|a, b| compare_property_priority(&a.property, &b.property));
+
+        PrioritizedPropertyIter {
+            properties,
+            sorted_property_indices,
+            curr: 0,
+        }
+    }
+}
+
+impl<'a> Iterator for PrioritizedPropertyIter<'a> {
+    type Item = &'a PropertyValuePair;
+
+    fn next(&mut self) -> Option<&'a PropertyValuePair> {
+        if self.curr >= self.sorted_property_indices.len() {
+            return None
+        }
+        self.curr += 1;
+        Some(&self.properties[self.sorted_property_indices[self.curr - 1].index])
     }
 }
 
@@ -2927,7 +3005,14 @@ pub extern "C" fn Servo_GetComputedKeyframeValues(keyframes: RawGeckoKeyframeLis
     let parent_style = parent_data.as_ref().map(|d| d.styles.primary()).map(|x| &**x);
 
     let pseudo = style.pseudo();
-    let mut context = create_context(&data, &metrics, &style, parent_style, pseudo.as_ref());
+    let mut context = create_context(
+        &data,
+        &metrics,
+        &style,
+        parent_style,
+        pseudo.as_ref(),
+        /* for_smil_animation = */ false,
+    );
 
     let global_style_data = &*GLOBAL_STYLE_DATA;
     let guard = global_style_data.shared_lock.read();
@@ -2938,9 +3023,8 @@ pub extern "C" fn Servo_GetComputedKeyframeValues(keyframes: RawGeckoKeyframeLis
 
         let mut seen = LonghandIdSet::new();
 
-        let iter = keyframe.mPropertyValues.iter();
         let mut property_index = 0;
-        for property in iter {
+        for property in PrioritizedPropertyIter::new(&keyframe.mPropertyValues) {
             if simulate_compute_values_failure(property) {
                 continue;
             }
@@ -3008,7 +3092,14 @@ pub extern "C" fn Servo_GetAnimationValues(declarations: RawServoDeclarationBloc
     let parent_style = parent_data.as_ref().map(|d| d.styles.primary()).map(|x| &**x);
 
     let pseudo = style.pseudo();
-    let mut context = create_context(&data, &metrics, &style, parent_style, pseudo.as_ref());
+    let mut context = create_context(
+        &data,
+        &metrics,
+        &style,
+        parent_style,
+        pseudo.as_ref(),
+        /* for_smil_animation = */ true
+    );
 
     let default_values = data.default_computed_values();
     let global_style_data = &*GLOBAL_STYLE_DATA;
@@ -3037,7 +3128,14 @@ pub extern "C" fn Servo_AnimationValue_Compute(element: RawGeckoElementBorrowed,
     let parent_style = parent_data.as_ref().map(|d| d.styles.primary()).map(|x| &**x);
 
     let pseudo = style.pseudo();
-    let mut context = create_context(&data, &metrics, style, parent_style, pseudo.as_ref());
+    let mut context = create_context(
+        &data,
+        &metrics,
+        style,
+        parent_style,
+        pseudo.as_ref(),
+        /* for_smil_animation = */ false
+    );
 
     let default_values = data.default_computed_values();
     let global_style_data = &*GLOBAL_STYLE_DATA;

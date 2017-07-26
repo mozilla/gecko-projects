@@ -34,7 +34,7 @@ use style_traits::cursor::Cursor;
 use text::TextRun;
 use text::glyph::ByteIndex;
 use webrender_api::{self, ClipId, ColorF, GradientStop, LocalClip, MixBlendMode, ScrollPolicy};
-use webrender_api::{TransformStyle, WebGLContextId};
+use webrender_api::{ScrollSensitivity, TransformStyle, WebGLContextId};
 
 pub use style::dom::OpaqueNode;
 
@@ -559,7 +559,7 @@ impl fmt::Debug for StackingContext {
 
 #[derive(Clone, Debug, HeapSizeOf, Deserialize, Serialize)]
 pub enum ScrollRootType {
-    ScrollFrame,
+    ScrollFrame(ScrollSensitivity),
     Clip,
 }
 
@@ -1146,7 +1146,8 @@ pub struct LineDisplayItem {
     pub color: ColorF,
 
     /// The line segment style.
-    pub style: border_style::T
+    #[ignore_heap_size_of = "enum type in webrender"]
+    pub style: webrender_api::LineStyle,
 }
 
 /// Paints a box shadow per CSS-BACKGROUNDS.

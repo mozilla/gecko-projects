@@ -1,28 +1,36 @@
 {
   "A11Y_INSTANTIATED_FLAG": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "flag",
-    "description": "has accessibility support been instantiated"
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1382820],
+    "description": "Flag indicating accessibility support has been instantiated.",
+    "alert_emails": ["accessibility@mozilla.com"]
   },
   "A11Y_CONSUMERS": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "default",
     "kind": "enumerated",
     "n_values": 11,
-    "description": "Accessibility client by enum id"
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1382820],
+    "description": "A list of known accessibility clients that inject into Firefox process space (see https://dxr.mozilla.org/mozilla-central/source/accessible/windows/msaa/Compatibility.h).",
+    "alert_emails": ["accessibility@mozilla.com"]
   },
   "A11Y_ISIMPLEDOM_USAGE_FLAG": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "default",
     "kind": "flag",
-    "description": "have the ISimpleDOM* accessibility interfaces been used"
+    "description": "Flag indicating the ISimpleDOM* accessibility interfaces has been used.",
+    "alert_emails": ["accessibility@mozilla.com"]
   },
   "A11Y_IATABLE_USAGE_FLAG": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "default",
     "kind": "flag",
-    "description": "has the IAccessibleTable accessibility interface been used"
+    "description": "Flag indicating the IAccessibleTable accessibility interface has been used.",
+    "alert_emails": ["accessibility@mozilla.com"]
   },
   "ADDON_CONTENT_POLICY_SHIM_BLOCKING_LOADING_MS": {
     "record_in_processes": ["main", "content"],
@@ -2490,6 +2498,15 @@
     "description": "Amount of bytes received when we decide not to race cache with network.",
     "alert_emails": ["necko@mozilla.com", "bsmedberg@mozilla.com"],
     "bug_numbers": [1354405]
+  },
+  "NETWORK_RACE_CACHE_VALIDATION": {
+    "record_in_processes": ["main"],
+    "expires_in_version": "62",
+    "alert_emails": ["necko@mozilla.com"],
+    "bug_numbers": [1377223],
+    "kind": "categorical",
+    "labels": ["NotSent", "CachedContentUsed", "CachedContentNotUsed"],
+    "description": "Stats for validation requests when cache won the race."
   },
   "HTTP_AUTH_DIALOG_STATS_2": {
     "record_in_processes": ["main", "content"],
@@ -8009,7 +8026,7 @@
     "record_in_processes": ["main", "content"],
     "alert_emails": ["fqueze@mozilla.com"],
     "bug_numbers": [1203168],
-    "expires_in_version": "57",
+    "expires_in_version": "60",
     "kind": "enumerated",
     "n_values": 5,
     "releaseChannelCollection": "opt-out",
@@ -13394,15 +13411,6 @@
     "n_buckets": 30,
     "bug_numbers": [1351021],
     "description": "Every time we run an unlabeled runnable, this histogram records the time (in ms) since the last unlabeled runnable ran."
-  },
-  "DOCUMENT_DATA_URI_LOADS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["seceng-telemetry@mozilla.com"],
-    "bug_numbers": [1357386],
-    "expires_in_version": "60",
-    "kind": "enumerated",
-    "n_values": 3,
-    "description": "Whether a toplevel document uses data: URI? (0=data-navigated, 1=data-typed, 2=nodata)"
   },
   "VFC_INVALIDATE_LOCK_WAIT_MS": {
     "record_in_processes": ["main", "content"],

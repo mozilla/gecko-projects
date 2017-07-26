@@ -109,11 +109,7 @@ html|option {
 }
 
 #category-search > .category-icon {
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/icons.svg#searchResults");
-}
-
-#category-application > .category-icon {
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/icons.svg#content");
+  list-style-image: url("chrome://browser/skin/preferences/in-content-new/icons.svg#search");
 }
 
 #category-privacy > .category-icon {
@@ -122,14 +118,6 @@ html|option {
 
 #category-sync > .category-icon {
   list-style-image: url("chrome://browser/skin/preferences/in-content-new/icons.svg#sync");
-}
-
-#category-advanced > .category-icon {
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/icons.svg#advanced");
-}
-
-#category-search-results > .category-icon {
-  list-style-image: url("chrome://browser/skin/preferences/in-content-new/icons.svg#searchResults");
 }
 
 @media (max-width: 800px) {
@@ -291,6 +279,10 @@ description > html|a {
   cursor: pointer;
 }
 
+description > checkbox {
+  vertical-align: middle;
+}
+
 #weavePrefsDeck > vbox > label,
 #weavePrefsDeck > vbox > groupbox,
 #weavePrefsDeck > vbox > description,
@@ -414,16 +406,18 @@ groupbox {
  */
 
 #fxaProfileImage {
-  max-width: 60px;
+  width: 60px;
+  height: 60px;
   border-radius: 50%;
   list-style-image: url(chrome://browser/skin/fxa/default-avatar.svg);
   margin-inline-end: 15px;
-  image-rendering: -moz-crisp-edges;
+  image-rendering: auto;
   border: 1px solid transparent;
 }
 
 #fxaLoginStatus[hasName] #fxaProfileImage {
-  max-width: 80px;
+  width: 80px;
+  height: 80px;
 }
 
 #fxaProfileImage.actionable {
@@ -550,7 +544,8 @@ groupbox {
 
 .fxaFirefoxLogo {
   list-style-image: url(chrome://browser/skin/fxa/logo.png);
-  max-width: 64px;
+  width: 64px;
+  height: 64px;
   margin-inline-end: 14px;
 }
 

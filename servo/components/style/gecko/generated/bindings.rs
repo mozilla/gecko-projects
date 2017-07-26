@@ -747,6 +747,12 @@ extern "C" {
      -> RawServoDeclarationBlockStrongBorrowedOrNull;
 }
 extern "C" {
+    pub fn Gecko_IsPrivateBrowsingEnabled(aDoc: *const nsIDocument) -> bool;
+}
+extern "C" {
+    pub fn Gecko_AreVisitedLinksEnabled() -> bool;
+}
+extern "C" {
     pub fn Gecko_GetAnimationRule(aElementOrPseudo: RawGeckoElementBorrowed,
                                   aCascadeLevel:
                                       EffectCompositor_CascadeLevel,
@@ -1915,8 +1921,9 @@ extern "C" {
     pub fn Servo_StyleSet_RebuildData(set: RawServoStyleSetBorrowed);
 }
 extern "C" {
-    pub fn Servo_StyleSet_MediumFeaturesChanged(set: RawServoStyleSetBorrowed)
-     -> bool;
+    pub fn Servo_StyleSet_MediumFeaturesChanged(set: RawServoStyleSetBorrowed,
+                                                viewport_changed: bool)
+     -> nsRestyleHint;
 }
 extern "C" {
     pub fn Servo_StyleSet_CompatModeChanged(raw_data:

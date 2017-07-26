@@ -26,6 +26,7 @@
 #include "nsIContentInlines.h"
 #include "nsIDOMNode.h"
 #include "nsIDocumentInlines.h"
+#include "nsILoadContext.h"
 #include "nsIFrame.h"
 #include "nsINode.h"
 #include "nsIPresShell.h"
@@ -280,6 +281,22 @@ Gecko_GetNextStyleChild(RawGeckoStyleChildrenIteratorBorrowedMut aIterator)
 {
   MOZ_ASSERT(aIterator);
   return aIterator->GetNextChild();
+}
+
+bool
+Gecko_IsPrivateBrowsingEnabled(const nsIDocument* aDoc)
+{
+  MOZ_ASSERT(aDoc);
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsILoadContext* loadContext = aDoc->GetLoadContext();
+  return loadContext && loadContext->UsePrivateBrowsing();
+}
+
+bool
+Gecko_AreVisitedLinksEnabled()
+{
+  return nsCSSRuleProcessor::VisitedLinksEnabled();
 }
 
 EventStates::ServoType
@@ -663,6 +680,8 @@ Gecko_UpdateAnimations(RawGeckoElementBorrowed aElement,
   if (!presContext || !presContext->IsDynamic()) {
     return;
   }
+
+  nsAutoAnimationMutationBatch mb(aElement->OwnerDoc());
 
   CSSPseudoElementType pseudoType =
     GetPseudoTypeFromElementForAnimation(aElement);

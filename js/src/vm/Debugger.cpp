@@ -2595,21 +2595,23 @@ UpdateExecutionObservabilityOfScriptsInZone(JSContext* cx, Zone* zone,
     //
     // Mark active baseline scripts in the observable set so that they don't
     // get discarded. They will be recompiled.
-    for (JitActivationIterator actIter(cx, zone->group()->ownerContext()); !actIter.done(); ++actIter) {
-        if (actIter->compartment()->zone() != zone)
-            continue;
+    for (const CooperatingContext& target : cx->runtime()->cooperatingContexts()) {
+        for (JitActivationIterator actIter(cx, target); !actIter.done(); ++actIter) {
+            if (actIter->compartment()->zone() != zone)
+                continue;
 
-        for (JitFrameIterator iter(actIter); !iter.done(); ++iter) {
-            switch (iter.type()) {
-              case JitFrame_BaselineJS:
-                MarkBaselineScriptActiveIfObservable(iter.script(), obs);
-                break;
-              case JitFrame_IonJS:
-                MarkBaselineScriptActiveIfObservable(iter.script(), obs);
-                for (InlineFrameIterator inlineIter(cx, &iter); inlineIter.more(); ++inlineIter)
-                    MarkBaselineScriptActiveIfObservable(inlineIter.script(), obs);
-                break;
-              default:;
+            for (JitFrameIterator iter(actIter); !iter.done(); ++iter) {
+                switch (iter.type()) {
+                  case JitFrame_BaselineJS:
+                    MarkBaselineScriptActiveIfObservable(iter.script(), obs);
+                    break;
+                  case JitFrame_IonJS:
+                    MarkBaselineScriptActiveIfObservable(iter.script(), obs);
+                    for (InlineFrameIterator inlineIter(cx, &iter); inlineIter.more(); ++inlineIter)
+                        MarkBaselineScriptActiveIfObservable(inlineIter.script(), obs);
+                    break;
+                  default:;
+                }
             }
         }
     }
@@ -5935,7 +5937,7 @@ class BytecodeRangeWithPosition : private BytecodeRange
          */
         jsbytecode *lastLinePC = nullptr;
         while (!SN_IS_TERMINATOR(sn) && snpc <= frontPC()) {
-            SrcNoteType type = (SrcNoteType) SN_TYPE(sn);
+            SrcNoteType type = SN_TYPE(sn);
             if (type == SRC_COLSPAN) {
                 ptrdiff_t colspan = SN_OFFSET_TO_COLSPAN(GetSrcNoteOffset(sn, 0));
                 MOZ_ASSERT(ptrdiff_t(column) + colspan >= 0);

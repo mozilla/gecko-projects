@@ -2091,10 +2091,7 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
   nsIDocument* document = presShell->GetDocument();
 
   if (gfxPrefs::WebRenderLayersFree() &&
-      layerManager->GetBackendType() == layers::LayersBackend::LAYERS_WR &&
-      // We don't yet support many display items used in chrome, so
-      // layers-free mode is only for content.
-      !presContext->IsChrome()) {
+      layerManager->GetBackendType() == layers::LayersBackend::LAYERS_WR) {
     if (doBeginTransaction) {
       if (aCtx) {
         if (!layerManager->BeginTransactionWithTarget(aCtx)) {
@@ -8580,6 +8577,12 @@ bool nsDisplayMask::TryMerge(nsDisplayItem* aItem)
 {
   if (aItem->GetType() != TYPE_MASK)
     return false;
+
+  // Do not merge items for box-decoration-break:clone elements,
+  // since each box should have its own mask in that case.
+  if (mFrame->StyleBorder()->mBoxDecorationBreak == StyleBoxDecorationBreak::Clone) {
+    return false;
+  }
 
   // items for the same content element should be merged into a single
   // compositing group

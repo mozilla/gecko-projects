@@ -1462,6 +1462,7 @@ DoCompareFallback(JSContext* cx, void* payload, ICCompare_Fallback* stub_, Handl
         bool attached = false;
         if (gen.tryAttachStub()) {
             ICStub* newStub = AttachBaselineCacheIRStub(cx, gen.writerRef(), gen.cacheKind(),
+                                                        BaselineCacheIRStubKind::Regular,
                                                         engine, script, stub, &attached);
             if (newStub)
                  JitSpew(JitSpew_BaselineIC, "  Attached CacheIR stub");
@@ -2068,9 +2069,11 @@ DoGetPropFallback(JSContext* cx, BaselineFrame* frame, ICGetProp_Fallback* stub_
     if (stub->state().canAttachStub()) {
         RootedValue idVal(cx, StringValue(name));
         GetPropIRGenerator gen(cx, script, pc, CacheKind::GetProp, stub->state().mode(),
-                               &isTemporarilyUnoptimizable, val, idVal, val, CanAttachGetter::Yes);
+                               &isTemporarilyUnoptimizable, val, idVal, val,
+                               GetPropertyResultFlags::All);
         if (gen.tryAttachStub()) {
             ICStub* newStub = AttachBaselineCacheIRStub(cx, gen.writerRef(), gen.cacheKind(),
+                                                        BaselineCacheIRStubKind::Monitored,
                                                         ICStubEngine::Baseline, script,
                                                         stub, &attached);
             if (newStub) {
@@ -2138,9 +2141,10 @@ DoGetPropSuperFallback(JSContext* cx, BaselineFrame* frame, ICGetProp_Fallback* 
         RootedValue idVal(cx, StringValue(name));
         GetPropIRGenerator gen(cx, script, pc, CacheKind::GetPropSuper, stub->state().mode(),
                                &isTemporarilyUnoptimizable, val, idVal, receiver,
-                               CanAttachGetter::Yes);
+                               GetPropertyResultFlags::All);
         if (gen.tryAttachStub()) {
             ICStub* newStub = AttachBaselineCacheIRStub(cx, gen.writerRef(), gen.cacheKind(),
+                                                        BaselineCacheIRStubKind::Monitored,
                                                         ICStubEngine::Baseline, script,
                                                         stub, &attached);
             if (newStub) {

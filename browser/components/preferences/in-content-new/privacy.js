@@ -7,8 +7,6 @@
 Components.utils.import("resource://gre/modules/AppConstants.jsm");
 Components.utils.import("resource://gre/modules/PluralForm.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
-                                  "resource://gre/modules/ContextualIdentityService.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
                                   "resource://gre/modules/PluralForm.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "LoginHelper",
@@ -1224,7 +1222,7 @@ var gPrivacyPane = {
         if (!prefStrBundle.getFormattedString) {
           return;
         }
-        actualSizeLabel.value = prefStrBundle.getFormattedString("actualDiskCacheSize", size);
+        actualSizeLabel.textContent = prefStrBundle.getFormattedString("actualDiskCacheSize", size);
       },
 
       QueryInterface: XPCOMUtils.generateQI([
@@ -1233,7 +1231,7 @@ var gPrivacyPane = {
       ])
     };
 
-    actualSizeLabel.value = prefStrBundle.getString("actualDiskCacheSizeCalculated");
+    actualSizeLabel.textContent = prefStrBundle.getString("actualDiskCacheSizeCalculated");
 
     try {
       var cacheService =

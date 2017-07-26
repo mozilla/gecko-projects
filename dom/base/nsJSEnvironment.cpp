@@ -2090,10 +2090,15 @@ CCRunnerFired(TimeStamp aDeadline, void* aData)
         // Our efforts to avoid a CC have failed, so we return to let the
         // timer fire once more to trigger a CC.
 
-        // Clear content unbinder before the first CC slice.
-        Element::ClearContentUnbinder();
-        // And trigger deferred deletion too.
-        nsCycleCollector_doDeferredDeletion();
+        if (!aDeadline.IsNull() && TimeStamp::Now() < aDeadline) {
+          // Clear content unbinder before the first CC slice.
+          Element::ClearContentUnbinder();
+
+          if (TimeStamp::Now() < aDeadline) {
+            // And trigger deferred deletion too.
+            nsCycleCollector_doDeferredDeletion();
+          }
+        }
         return didDoWork;
       }
     } else {
@@ -2598,8 +2603,18 @@ SetMemoryMaxPrefChangedCallback(const char* aPrefName, void* aClosure)
 {
   int32_t pref = Preferences::GetInt(aPrefName, -1);
   // handle overflow and negative pref values
-  uint32_t max = (pref <= 0 || pref >= 0x1000) ? -1 : (uint32_t)pref * 1024 * 1024;
-  SetGCParameter(JSGC_MAX_BYTES, max);
+  CheckedInt<uint32_t> max = CheckedInt<uint32_t>(pref) * 1024 * 1024;
+  SetGCParameter(JSGC_MAX_BYTES, max.isValid() ? max.value() : -1);
+}
+
+static void
+SetMemoryNurseryMaxPrefChangedCallback(const char* aPrefName, void* aClosure)
+{
+  int32_t pref = Preferences::GetInt(aPrefName, -1);
+  // handle overflow and negative pref values
+  CheckedInt<uint32_t> max = CheckedInt<uint32_t>(pref) * 1024;
+  SetGCParameter(JSGC_MAX_NURSERY_BYTES,
+    max.isValid() ? max.value() : JS::DefaultNurseryBytes);
 }
 
 static void
@@ -2792,6 +2807,8 @@ nsJSContext::EnsureStatics()
 
   Preferences::RegisterCallbackAndCall(SetMemoryMaxPrefChangedCallback,
                                        "javascript.options.mem.max");
+  Preferences::RegisterCallbackAndCall(SetMemoryNurseryMaxPrefChangedCallback,
+                                       "javascript.options.mem.nursery.max_kb");
 
   Preferences::RegisterCallbackAndCall(SetMemoryGCModePrefChangedCallback,
                                        "javascript.options.mem.gc_per_zone");

@@ -54,6 +54,9 @@ pub struct Device {
     /// Whether any styles computed in the document relied on the root font-size
     /// by using rem units.
     used_root_font_size: AtomicBool,
+    /// Whether any styles computed in the document relied on the viewport size
+    /// by using vw/vh/vmin/vmax units.
+    used_viewport_size: AtomicBool,
 }
 
 unsafe impl Sync for Device {}
@@ -69,6 +72,7 @@ impl Device {
             viewport_override: None,
             root_font_size: AtomicIsize::new(font_size::get_initial_value().0 as isize), // FIXME(bz): Seems dubious?
             used_root_font_size: AtomicBool::new(false),
+            used_viewport_size: AtomicBool::new(false),
         }
     }
 
@@ -112,6 +116,7 @@ impl Device {
         self.viewport_override = None;
         self.default_values = ComputedValues::default_values(self.pres_context());
         self.used_root_font_size.store(false, Ordering::Relaxed);
+        self.used_viewport_size.store(false, Ordering::Relaxed);
     }
 
     /// Returns whether we ever looked up the root font size of the Device.
@@ -146,6 +151,7 @@ impl Device {
 
     /// Returns the current viewport size in app units.
     pub fn au_viewport_size(&self) -> Size2D<Au> {
+        self.used_viewport_size.store(true, Ordering::Relaxed);
         self.viewport_override.as_ref().map(|v| {
             Size2D::new(Au::from_f32_px(v.size.width),
                         Au::from_f32_px(v.size.height))
@@ -154,6 +160,11 @@ impl Device {
             let area = &self.pres_context().mVisibleArea;
             Size2D::new(Au(area.width), Au(area.height))
         })
+    }
+
+    /// Returns whether we ever looked up the viewport size of the Device.
+    pub fn used_viewport_size(&self) -> bool {
+        self.used_viewport_size.load(Ordering::Relaxed)
     }
 
     /// Returns the device pixel ratio.
@@ -240,11 +251,11 @@ impl Resolution {
     }
 
     fn parse<'i, 't>(input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
-        let (value, unit) = match input.next()? {
-            Token::Dimension { value, unit, .. } => {
+        let (value, unit) = match *input.next()? {
+            Token::Dimension { value, ref unit, .. } => {
                 (value, unit)
             },
-            t => return Err(BasicParseError::UnexpectedToken(t).into()),
+            ref t => return Err(BasicParseError::UnexpectedToken(t.clone()).into()),
         };
 
         if value <= 0. {
@@ -256,7 +267,7 @@ impl Resolution {
             "dppx" => Ok(Resolution::Dppx(value)),
             "dpcm" => Ok(Resolution::Dpcm(value)),
             _ => Err(())
-        }).map_err(|()| StyleParseError::UnexpectedDimension(unit).into())
+        }).map_err(|()| StyleParseError::UnexpectedDimension(unit.clone()).into())
     }
 }
 
@@ -474,47 +485,55 @@ impl Expression {
                          -> Result<Self, ParseError<'i>> {
         input.expect_parenthesis_block()?;
         input.parse_nested_block(|input| {
-            let ident = input.expect_ident()?;
+            // FIXME: remove extra indented block when lifetimes are non-lexical
+            let feature;
+            let range;
+            {
+                let ident = input.expect_ident()?;
 
-            let mut flags = 0;
-            let result = {
-                let mut feature_name = &*ident;
+                let mut flags = 0;
+                let result = {
+                    let mut feature_name = &**ident;
 
-                // TODO(emilio): this is under a pref in Gecko.
-                if starts_with_ignore_ascii_case(feature_name, "-webkit-") {
-                    feature_name = &feature_name[8..];
-                    flags |= nsMediaFeature_RequirementFlags::eHasWebkitPrefix as u8;
-                }
+                    // TODO(emilio): this is under a pref in Gecko.
+                    if starts_with_ignore_ascii_case(feature_name, "-webkit-") {
+                        feature_name = &feature_name[8..];
+                        flags |= nsMediaFeature_RequirementFlags::eHasWebkitPrefix as u8;
+                    }
 
-                let range = if starts_with_ignore_ascii_case(feature_name, "min-") {
-                    feature_name = &feature_name[4..];
-                    nsMediaExpression_Range::eMin
-                } else if starts_with_ignore_ascii_case(feature_name, "max-") {
-                    feature_name = &feature_name[4..];
-                    nsMediaExpression_Range::eMax
-                } else {
-                    nsMediaExpression_Range::eEqual
+                    let range = if starts_with_ignore_ascii_case(feature_name, "min-") {
+                        feature_name = &feature_name[4..];
+                        nsMediaExpression_Range::eMin
+                    } else if starts_with_ignore_ascii_case(feature_name, "max-") {
+                        feature_name = &feature_name[4..];
+                        nsMediaExpression_Range::eMax
+                    } else {
+                        nsMediaExpression_Range::eEqual
+                    };
+
+                    let atom = Atom::from(feature_name);
+                    match find_feature(|f| atom.as_ptr() == unsafe { *f.mName }) {
+                        Some(f) => Ok((f, range)),
+                        None => Err(()),
+                    }
                 };
 
-                let atom = Atom::from(feature_name);
-                match find_feature(|f| atom.as_ptr() == unsafe { *f.mName }) {
-                    Some(f) => Ok((f, range)),
-                    None => Err(()),
+                match result {
+                    Ok((f, r)) => {
+                        feature = f;
+                        range = r;
+                    }
+                    Err(()) => return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into()),
                 }
-            };
 
-            let (feature, range) = match result {
-                Ok((feature, range)) => (feature, range),
-                Err(()) => return Err(SelectorParseError::UnexpectedIdent(ident).into()),
-            };
+                if (feature.mReqFlags & !flags) != 0 {
+                    return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into());
+                }
 
-            if (feature.mReqFlags & !flags) != 0 {
-                return Err(SelectorParseError::UnexpectedIdent(ident).into());
-            }
-
-            if range != nsMediaExpression_Range::eEqual &&
-                feature.mRangeType != nsMediaFeature_RangeType::eMinMaxAllowed {
-                return Err(SelectorParseError::UnexpectedIdent(ident).into());
+                if range != nsMediaExpression_Range::eEqual &&
+                    feature.mRangeType != nsMediaFeature_RangeType::eMinMaxAllowed {
+                    return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into());
+                }
             }
 
             // If there's no colon, this is a media query of the form
@@ -590,7 +609,7 @@ impl Expression {
                     MediaExpressionValue::Enumerated(value)
                 }
                 nsMediaFeature_ValueType::eIdent => {
-                    MediaExpressionValue::Ident(input.expect_ident()?.into_owned())
+                    MediaExpressionValue::Ident(input.expect_ident()?.as_ref().to_owned())
                 }
             };
 
@@ -642,6 +661,7 @@ impl Expression {
             in_media_query: true,
             // TODO: pass the correct value here.
             quirks_mode: quirks_mode,
+            for_smil_animation: false,
         };
 
         let required_value = match self.value {

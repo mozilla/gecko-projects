@@ -1220,11 +1220,12 @@ GCRuntime::finish()
         for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
             for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next())
                 js_delete(comp.get());
+            zone->compartments().clear();
             js_delete(zone.get());
         }
     }
 
-    groups.ref().clear();
+    groups().clear();
 
     FreeChunkPool(rt, fullChunks_.ref());
     FreeChunkPool(rt, availableChunks_.ref());
@@ -2588,6 +2589,7 @@ GCRuntime::updateZonePointersToRelocatedCells(Zone* zone, AutoLockForExclusiveAc
         comp->fixupAfterMovingGC();
 
     zone->externalStringCache().purge();
+    zone->functionToStringCache().purge();
 
     // Iterate through all cells that can contain relocatable pointers to update
     // them. Since updating each cell is independent we try to parallelize this
@@ -3129,6 +3131,18 @@ GCRuntime::maybeGC(Zone* zone)
     }
 }
 
+void
+GCRuntime::triggerFullGCForAtoms(JSContext* cx)
+{
+    MOZ_ASSERT(fullGCForAtomsRequested_);
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
+    MOZ_ASSERT(!JS::CurrentThreadIsHeapCollecting());
+    MOZ_ASSERT(!cx->keepAtoms);
+    MOZ_ASSERT(!rt->hasHelperThreadZones());
+    fullGCForAtomsRequested_ = false;
+    MOZ_RELEASE_ASSERT(triggerGC(JS::gcreason::DELAYED_ATOMS_GC));
+}
+
 // Do all possible decommit immediately from the current thread without
 // releasing the GC lock or allocating any memory.
 void
@@ -3483,6 +3497,25 @@ JS::Zone::sweepUniqueIds(js::FreeOp* fop)
     uniqueIds().sweep();
 }
 
+void
+JSCompartment::destroy(FreeOp* fop)
+{
+    JSRuntime* rt = fop->runtime();
+    if (auto callback = rt->destroyCompartmentCallback)
+        callback(fop, this);
+    if (principals())
+        JS_DropPrincipals(TlsContext.get(), principals());
+    fop->delete_(this);
+    rt->gc.stats().sweptCompartment();
+}
+
+void
+Zone::destroy(FreeOp* fop)
+{
+    fop->delete_(this);
+    fop->runtime()->gc.stats().sweptZone();
+}
+
 /*
  * It's simpler if we preserve the invariant that every zone has at least one
  * compartment. If we know we're deleting the entire zone, then
@@ -3495,8 +3528,9 @@ JS::Zone::sweepUniqueIds(js::FreeOp* fop)
 void
 Zone::sweepCompartments(FreeOp* fop, bool keepAtleastOne, bool destroyingRuntime)
 {
-    JSRuntime* rt = runtimeFromActiveCooperatingThread();
-    JSDestroyCompartmentCallback callback = rt->destroyCompartmentCallback;
+    MOZ_ASSERT(!compartments().empty());
+
+    mozilla::DebugOnly<JSRuntime*> rt = runtimeFromActiveCooperatingThread();
 
     JSCompartment** read = compartments().begin();
     JSCompartment** end = compartments().end();
@@ -3512,12 +3546,7 @@ Zone::sweepCompartments(FreeOp* fop, bool keepAtleastOne, bool destroyingRuntime
          */
         bool dontDelete = read == end && !foundOne && keepAtleastOne;
         if ((!comp->marked && !dontDelete) || destroyingRuntime) {
-            if (callback)
-                callback(fop, comp);
-            if (comp->principals())
-                JS_DropPrincipals(TlsContext.get(), comp->principals());
-            js_delete(comp);
-            rt->gc.stats().sweptCompartment();
+            comp->destroy(fop);
         } else {
             *write++ = comp;
             foundOne = true;
@@ -3530,6 +3559,8 @@ Zone::sweepCompartments(FreeOp* fop, bool keepAtleastOne, bool destroyingRuntime
 void
 GCRuntime::sweepZones(FreeOp* fop, ZoneGroup* group, bool destroyingRuntime)
 {
+    MOZ_ASSERT(!group->zones().empty());
+
     Zone** read = group->zones().begin();
     Zone** end = group->zones().end();
     Zone** write = read;
@@ -3558,8 +3589,7 @@ GCRuntime::sweepZones(FreeOp* fop, ZoneGroup* group, bool destroyingRuntime)
                 zone->sweepCompartments(fop, false, destroyingRuntime);
                 MOZ_ASSERT(zone->compartments().empty());
                 MOZ_ASSERT_IF(arenasEmptyAtShutdown, zone->typeDescrObjects().empty());
-                fop->delete_(zone);
-                stats().sweptZone();
+                zone->destroy(fop);
                 continue;
             }
             zone->sweepCompartments(fop, true, destroyingRuntime);
@@ -3580,8 +3610,8 @@ GCRuntime::sweepZoneGroups(FreeOp* fop, bool destroyingRuntime)
 
     assertBackgroundSweepingFinished();
 
-    ZoneGroup** read = groups.ref().begin();
-    ZoneGroup** end = groups.ref().end();
+    ZoneGroup** read = groups().begin();
+    ZoneGroup** end = groups().end();
     ZoneGroup** write = read;
 
     while (read < end) {
@@ -3595,7 +3625,7 @@ GCRuntime::sweepZoneGroups(FreeOp* fop, bool destroyingRuntime)
             *write++ = group;
         }
     }
-    groups.ref().shrinkTo(write - groups.ref().begin());
+    groups().shrinkTo(write - groups().begin());
 }
 
 #ifdef DEBUG
@@ -3679,6 +3709,7 @@ GCRuntime::purgeRuntime(AutoLockForExclusiveAccess& lock)
     for (GCZonesIter zone(rt); !zone.done(); zone.next()) {
         zone->atomCache().clearAndShrink();
         zone->externalStringCache().purge();
+        zone->functionToStringCache().purge();
     }
 
     for (const CooperatingContext& target : rt->cooperatingContexts()) {
@@ -3838,18 +3869,40 @@ RelazifyFunctions(Zone* zone, AllocKind kind)
 static bool
 ShouldCollectZone(Zone* zone, JS::gcreason::Reason reason)
 {
-    // Normally we collect all scheduled zones.
-    if (reason != JS::gcreason::COMPARTMENT_REVIVED)
-        return zone->isGCScheduled();
-
-    // If we are repeating a GC becuase we noticed dead compartments haven't
+    // If we are repeating a GC because we noticed dead compartments haven't
     // been collected, then only collect zones contianing those compartments.
-    for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
-        if (comp->scheduledForDestruction)
-            return true;
+    if (reason == JS::gcreason::COMPARTMENT_REVIVED) {
+        for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
+            if (comp->scheduledForDestruction)
+                return true;
+        }
+
+        return false;
     }
 
-    return false;
+    // Otherwise we only collect scheduled zones.
+    if (!zone->isGCScheduled())
+        return false;
+
+    // If canCollectAtoms() is false then either an instance of AutoKeepAtoms is
+    // currently on the stack or parsing is currently happening on another
+    // thread. In either case we don't have information about which atoms are
+    // roots, so we must skip collecting atoms.
+    //
+    // Note that only affects the first slice of an incremental GC since root
+    // marking is completed before we return to the mutator.
+    //
+    // Off-thread parsing is inhibited after the start of GC which prevents
+    // races between creating atoms during parsing and sweeping atoms on the
+    // active thread.
+    //
+    // Otherwise, we always schedule a GC in the atoms zone so that atoms which
+    // the other collected zones are using are marked, and we can update the
+    // set of atoms in use by the other collected zones at the end of the GC.
+    if (zone->isAtomsZone())
+        return TlsContext.get()->canCollectAtoms();
+
+    return true;
 }
 
 bool
@@ -3874,10 +3927,9 @@ GCRuntime::prepareZonesForCollection(JS::gcreason::Reason reason, bool* isFullOu
     for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
         /* Set up which zones will be collected. */
         if (ShouldCollectZone(zone, reason)) {
-            if (!zone->isAtomsZone()) {
-                any = true;
-                zone->changeGCState(Zone::NoGC, Zone::Mark);
-            }
+            MOZ_ASSERT(zone->canCollect());
+            any = true;
+            zone->changeGCState(Zone::NoGC, Zone::Mark);
         } else {
             *isFullOut = false;
         }
@@ -3904,30 +3956,10 @@ GCRuntime::prepareZonesForCollection(JS::gcreason::Reason reason, bool* isFullOu
     }
 
     /*
-     * If keepAtoms() is true then either an instance of AutoKeepAtoms is
-     * currently on the stack or parsing is currently happening on another
-     * thread. In either case we don't have information about which atoms are
-     * roots, so we must skip collecting atoms.
-     *
-     * Note that only affects the first slice of an incremental GC since root
-     * marking is completed before we return to the mutator.
-     *
-     * Off-thread parsing is inhibited after the start of GC which prevents
-     * races between creating atoms during parsing and sweeping atoms on the
-     * active thread.
-     *
-     * Otherwise, we always schedule a GC in the atoms zone so that atoms which
-     * the other collected zones are using are marked, and we can update the
-     * set of atoms in use by the other collected zones at the end of the GC.
+     * Check that we do collect the atoms zone if we triggered a GC for that
+     * purpose.
      */
-    if (!TlsContext.get()->keepAtoms || rt->hasHelperThreadZones()) {
-        Zone* atomsZone = rt->atomsCompartment(lock)->zone();
-        if (atomsZone->isGCScheduled()) {
-            MOZ_ASSERT(!atomsZone->isCollecting());
-            atomsZone->changeGCState(Zone::NoGC, Zone::Mark);
-            any = true;
-        }
-    }
+    MOZ_ASSERT_IF(reason == JS::gcreason::DELAYED_ATOMS_GC, atomsZone->isGCMarking());
 
     /* Check that at least one zone is scheduled for collection. */
     return any;
@@ -6184,7 +6216,7 @@ AutoTraceSession::AutoTraceSession(JSRuntime* rt, JS::HeapState heapState)
   : lock(rt),
     runtime(rt),
     prevState(TlsContext.get()->heapState),
-    pseudoFrame(rt, HeapStateToLabel(heapState), ProfileEntry::Category::GC)
+    pseudoFrame(TlsContext.get(), HeapStateToLabel(heapState), ProfileEntry::Category::GC)
 {
     MOZ_ASSERT(prevState == JS::HeapState::Idle);
     MOZ_ASSERT(heapState != JS::HeapState::Idle);
@@ -6661,17 +6693,19 @@ GCRuntime::budgetIncrementalGC(bool nonincrementalByAPI, JS::gcreason::Reason re
     bool reset = false;
     for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
         if (zone->usage.gcBytes() >= zone->threshold.gcTriggerBytes()) {
+            MOZ_ASSERT(zone->isGCScheduled());
             budget.makeUnlimited();
             stats().nonincremental(AbortReason::GCBytesTrigger);
         }
 
-        if (isIncrementalGCInProgress() && zone->isGCScheduled() != zone->wasGCStarted())
-            reset = true;
-
         if (zone->isTooMuchMalloc()) {
+            MOZ_ASSERT(zone->isGCScheduled());
             budget.makeUnlimited();
             stats().nonincremental(AbortReason::MallocBytesTrigger);
         }
+
+        if (isIncrementalGCInProgress() && zone->isGCScheduled() != zone->wasGCStarted())
+            reset = true;
     }
 
     if (reset)
@@ -6692,16 +6726,22 @@ class AutoScheduleZonesForGC
             if (rt->gc.gcMode() == JSGC_MODE_GLOBAL)
                 zone->scheduleGC();
 
-            /* This is a heuristic to avoid resets. */
+            // This is a heuristic to avoid resets.
             if (rt->gc.isIncrementalGCInProgress() && zone->needsIncrementalBarrier())
                 zone->scheduleGC();
 
-            /* This is a heuristic to reduce the total number of collections. */
+            // This is a heuristic to reduce the total number of collections.
             if (zone->usage.gcBytes() >=
                 zone->threshold.allocTrigger(rt->gc.schedulingState.inHighFrequencyGCMode()))
             {
                 zone->scheduleGC();
             }
+
+            // This ensures we collect zones that have reached the malloc limit.
+            // TODO: Start collecting these zones earlier like we do for the GC
+            // bytes trigger above (bug 1384049).
+            if (zone->isTooMuchMalloc())
+                zone->scheduleGC();
         }
     }
 
@@ -7367,7 +7407,7 @@ js::NewCompartment(JSContext* cx, JSPrincipals* principals,
     }
 
     if (groupHolder) {
-        if (!rt->gc.groups.ref().append(group)) {
+        if (!rt->gc.groups().append(group)) {
             ReportOutOfMemory(cx);
             return nullptr;
         }
@@ -7396,6 +7436,10 @@ gc::MergeCompartments(JSCompartment* source, JSCompartment* target)
 
     MOZ_ASSERT(source->creationOptions().addonIdOrNull() ==
                target->creationOptions().addonIdOrNull());
+
+    MOZ_ASSERT(!source->hasBeenEntered());
+    MOZ_ASSERT(source->zone()->compartments().length() == 1);
+    MOZ_ASSERT(source->zone()->group()->zones().length() == 1);
 
     JSContext* cx = source->runtimeFromActiveCooperatingThread()->activeContextFromOwnThread();
 
@@ -7489,6 +7533,32 @@ gc::MergeCompartments(JSCompartment* source, JSCompartment* target)
 
         source->scriptNameMap->clear();
     }
+
+    // The source compartment is now completely empty, and is the only
+    // compartment in its zone, which is the only zone in its group. Delete
+    // compartment, zone and group without waiting for this to be cleaned up by
+    // a full GC.
+
+    Zone* sourceZone = source->zone();
+    ZoneGroup* sourceGroup = sourceZone->group();
+    sourceZone->deleteEmptyCompartment(source);
+    sourceGroup->deleteEmptyZone(sourceZone);
+    cx->runtime()->gc.deleteEmptyZoneGroup(sourceGroup);
+}
+
+void
+GCRuntime::deleteEmptyZoneGroup(ZoneGroup* group)
+{
+    MOZ_ASSERT(group->zones().empty());
+    MOZ_ASSERT(groups().length() > 1);
+    for (auto& i : groups()) {
+        if (i == group) {
+            groups().erase(&i);
+            js_delete(group);
+            return;
+        }
+    }
+    MOZ_CRASH("ZoneGroup not found");
 }
 
 void

@@ -1033,7 +1033,7 @@ nsPIDOMWindow<T>::nsPIDOMWindow(nsPIDOMWindowOuter *aOuterWindow)
   mMarkedCCGeneration(0), mServiceWorkersTestingEnabled(false),
   mLargeAllocStatus(LargeAllocStatus::NONE),
   mHasTriedToCacheTopInnerWindow(false),
-  mNumOfIndexedDBDatabases(0), mCleanedUp(false)
+  mNumOfIndexedDBDatabases(0)
 {
   if (aOuterWindow) {
     mTimeoutManager =
@@ -1620,6 +1620,7 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
     mNetworkUploadObserverEnabled(false),
     mNetworkDownloadObserverEnabled(false),
 #endif
+    mCleanedUp(false),
     mDialogAbuseCount(0),
     mAreDialogsEnabled(true),
 #ifdef DEBUG
@@ -2005,10 +2006,7 @@ nsGlobalWindow::CleanUp()
 
   mMozSelfSupport = nullptr;
 
-  if (mPerformance) {
-    mPerformance->Shutdown();
-    mPerformance = nullptr;
-  }
+  mPerformance = nullptr;
 
 #ifdef MOZ_WEBSPEECH
   mSpeechSynthesis = nullptr;
@@ -4363,10 +4361,9 @@ nsPIDOMWindowInner::CreatePerformanceObjectIfNeeded()
 {
   MOZ_ASSERT(IsInnerWindow());
 
-  if (mPerformance || !mDoc || mCleanedUp) {
+  if (mPerformance || !mDoc) {
     return;
   }
-
   RefPtr<nsDOMNavigationTiming> timing = mDoc->GetNavigationTiming();
   nsCOMPtr<nsITimedChannel> timedChannel(do_QueryInterface(mDoc->GetChannel()));
   bool timingEnabled = false;
@@ -4425,6 +4422,11 @@ nsPIDOMWindowInner::SyncStateFromParentWindow()
 bool
 nsPIDOMWindowInner::IsPlayingAudio()
 {
+  for (uint32_t i = 0; i < mAudioContexts.Length(); i++) {
+    if (mAudioContexts[i]->IsRunning()) {
+      return true;
+    }
+  }
   RefPtr<AudioChannelService> acs = AudioChannelService::Get();
   if (!acs) {
     return false;
@@ -15495,13 +15497,13 @@ nsGlobalWindow::GetPaintWorklet(ErrorResult& aRv)
 }
 
 void
-nsGlobalWindow::GetAppLocalesAsBCP47(nsTArray<nsString>& aLocales)
+nsGlobalWindow::GetRegionalPrefsLocales(nsTArray<nsString>& aLocales)
 {
-  nsTArray<nsCString> appLocales;
-  mozilla::intl::LocaleService::GetInstance()->GetAppLocalesAsBCP47(appLocales);
+  AutoTArray<nsCString, 10> rpLocales;
+  mozilla::intl::LocaleService::GetInstance()->GetRegionalPrefsLocales(rpLocales);
 
-  for (uint32_t i = 0; i < appLocales.Length(); i++) {
-    aLocales.AppendElement(NS_ConvertUTF8toUTF16(appLocales[i]));
+  for (const auto& loc : rpLocales) {
+    aLocales.AppendElement(NS_ConvertUTF8toUTF16(loc));
   }
 }
 

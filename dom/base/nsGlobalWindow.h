@@ -969,7 +969,7 @@ public:
   GetPaintWorklet(mozilla::ErrorResult& aRv);
 
   void
-  GetAppLocalesAsBCP47(nsTArray<nsString>& aLocales);
+  GetRegionalPrefsLocales(nsTArray<nsString>& aLocales);
 
 #ifdef ENABLE_INTL_API
   mozilla::dom::IntlUtils*
@@ -2009,6 +2009,8 @@ protected:
   bool mNetworkUploadObserverEnabled;
   bool mNetworkDownloadObserverEnabled;
 #endif // MOZ_B2G
+
+  bool mCleanedUp;
 
   nsCOMPtr<nsIDOMOfflineResourceList> mApplicationCache;
 

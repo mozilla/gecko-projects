@@ -7,6 +7,7 @@
 #include "jit/IonBuilder.h"
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/SizePrintfMacros.h"
 
 #include "builtin/Eval.h"
@@ -836,10 +837,12 @@ IonBuilder::build()
 
     insertRecompileCheck();
 
-    MOZ_TRY(traverseBytecode());
+    auto clearLastPriorResumePoint = mozilla::MakeScopeExit([&] {
+        // Discard unreferenced & pre-allocated resume points.
+        replaceMaybeFallbackFunctionGetter(nullptr);
+    });
 
-    // Discard unreferenced & pre-allocated resume points.
-    replaceMaybeFallbackFunctionGetter(nullptr);
+    MOZ_TRY(traverseBytecode());
 
     if (script_->hasBaselineScript() &&
         inlinedBytecodeLength_ > script_->baselineScript()->inlinedBytecodeLength())
@@ -998,10 +1001,13 @@ IonBuilder::buildInline(IonBuilder* callerBuilder, MResumePoint* callerResumePoi
     // initialized.
     MOZ_TRY(initEnvironmentChain(callInfo.fun()));
 
+    auto clearLastPriorResumePoint = mozilla::MakeScopeExit([&] {
+        // Discard unreferenced & pre-allocated resume points.
+        replaceMaybeFallbackFunctionGetter(nullptr);
+    });
+
     MOZ_TRY(traverseBytecode());
 
-    // Discard unreferenced & pre-allocated resume points.
-    replaceMaybeFallbackFunctionGetter(nullptr);
 
     MOZ_ASSERT(iterators_.empty(), "Iterators should be added to outer builder");
 
@@ -8539,8 +8545,7 @@ IonBuilder::computeHeapType(const TemporaryTypeSet* objTypes, const jsid id)
     if (objTypes->unknownObject() || objTypes->getObjectCount() == 0)
         return nullptr;
 
-    TemporaryTypeSet empty;
-    TemporaryTypeSet* acc = &empty;
+    TemporaryTypeSet* acc = nullptr;
     LifoAlloc* lifoAlloc = alloc().lifoAlloc();
 
     Vector<HeapTypeSetKey, 4, SystemAllocPolicy> properties;
@@ -8560,7 +8565,14 @@ IonBuilder::computeHeapType(const TemporaryTypeSet* objTypes, const jsid id)
             return nullptr;
 
         properties.infallibleAppend(property);
-        acc = TypeSet::unionSets(acc, currentSet, lifoAlloc);
+
+        if (acc) {
+            acc = TypeSet::unionSets(acc, currentSet, lifoAlloc);
+        } else {
+            TemporaryTypeSet empty;
+            acc = TypeSet::unionSets(&empty, currentSet, lifoAlloc);
+        }
+
         if (!acc)
             return nullptr;
     }

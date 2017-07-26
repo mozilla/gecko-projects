@@ -168,6 +168,11 @@ MessageLoop* MessageLoop::current() {
   return get_tls_ptr().Get();
 }
 
+// static
+void MessageLoop::set_current(MessageLoop* loop) {
+  get_tls_ptr().Set(loop);
+}
+
 static mozilla::Atomic<int32_t> message_loop_id_seq(0);
 
 MessageLoop::MessageLoop(Type type, nsIThread* aThread)
@@ -384,7 +389,7 @@ void MessageLoop::PostTask_Helper(already_AddRefed<nsIRunnable> task, int delay_
 #ifdef MOZ_TASK_TRACER
   nsCOMPtr<nsIRunnable> tracedTask = task;
   if (mozilla::tasktracer::IsStartLogging()) {
-    tracedTask = mozilla::tasktracer::CreateTracedRunnable(Move(task));
+    tracedTask = mozilla::tasktracer::CreateTracedRunnable(tracedTask.forget());
     (static_cast<mozilla::tasktracer::TracedRunnable*>(tracedTask.get()))->DispatchTask();
   }
   PendingTask pending_task(tracedTask.forget(), true);
