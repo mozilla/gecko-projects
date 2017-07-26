@@ -3134,6 +3134,8 @@ ScrollFrameHelper::AppendScrollPartsTo(nsDisplayListBuilder*   aBuilder,
         buildingForChild(aBuilder, scrollParts[i],
                          visible + mOuter->GetOffsetTo(scrollParts[i]),
                          dirty + mOuter->GetOffsetTo(scrollParts[i]), true);
+      nsDisplayListBuilder::AutoCurrentScrollbarInfoSetter
+        infoSetter(aBuilder, scrollTargetId, flags, createLayer);
       // DISPLAY_CHILD_FORCE_STACKING_CONTEXT put everything into
       // partList.PositionedDescendants().
       ::AppendToTop(aBuilder, aLists,
