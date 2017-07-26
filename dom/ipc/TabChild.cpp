@@ -2462,6 +2462,10 @@ TabChild::InternalSetDocShellIsActive(bool aIsActive, bool aPreserveLayers)
   if (aIsActive) {
     MakeVisible();
 
+    if (!docShell) {
+      return;
+    }
+
     // We don't use TabChildBase::GetPresShell() here because that would create
     // a content viewer if one doesn't exist yet. Creating a content viewer can
     // cause JS to run, which we want to avoid. nsIDocShell::GetPresShell
@@ -3513,6 +3517,14 @@ TabChildGlobal::GetDocShell(nsIDocShell** aDocShell)
     return NS_ERROR_NULL_POINTER;
   nsCOMPtr<nsIDocShell> docShell = do_GetInterface(mTabChild->WebNavigation());
   docShell.swap(*aDocShell);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+TabChildGlobal::GetTabEventTarget(nsIEventTarget** aTarget)
+{
+  nsCOMPtr<nsIEventTarget> target = EventTargetFor(TaskCategory::Other);
+  target.forget(aTarget);
   return NS_OK;
 }
 
