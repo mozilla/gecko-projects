@@ -179,6 +179,9 @@ def target_tasks_cedar(full_task_graph, parameters):
         # No ASAN
         if '-asan' in platform:
             return False
+        # No Windows 10 tests
+        if 'windows10' in test_platform:
+            return False
 
         # No valgrind
         if task.attributes.get('unittest_suite', '').startswith('mochitest') and \
