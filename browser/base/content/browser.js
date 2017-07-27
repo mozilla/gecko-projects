@@ -36,7 +36,7 @@ XPCOMUtils.defineLazyPreferenceGetter(this, "gPhotonStructure",
           ReaderParent:false, RecentWindow:false, SafeBrowsing: false,
           SessionStore:false,
           ShortcutUtils:false, SimpleServiceDiscovery:false, SitePermissions:false,
-          Social:false, TabCrashHandler:false, Task:false, TelemetryStopwatch:false,
+          Social:false, TabCrashHandler:false, TelemetryStopwatch:false,
           Translation:false, UITour:false, Utils:false, UpdateUtils:false,
           Weave:false,
           WebNavigationFrames: false, fxAccounts:false, gDevTools:false,
@@ -85,7 +85,6 @@ XPCOMUtils.defineLazyPreferenceGetter(this, "gPhotonStructure",
   ["SitePermissions", "resource:///modules/SitePermissions.jsm"],
   ["Social", "resource:///modules/Social.jsm"],
   ["TabCrashHandler", "resource:///modules/ContentCrashHandlers.jsm"],
-  ["Task", "resource://gre/modules/Task.jsm"],
   ["TelemetryStopwatch", "resource://gre/modules/TelemetryStopwatch.jsm"],
   ["Translation", "resource:///modules/translation/Translation.jsm"],
   ["UITour", "resource:///modules/UITour.jsm"],
@@ -5483,8 +5482,13 @@ function onViewToolbarsPopupShowing(aEvent, aInsertPoint) {
   // this case.
   let movable = toolbarItem && toolbarItem.parentNode &&
                 CustomizableUI.isWidgetRemovable(toolbarItem);
+  let isSpecial = toolbarItem && CustomizableUI.isSpecialWidget(toolbarItem.id);
   if (movable) {
-    moveToPanel.removeAttribute("disabled");
+    if (isSpecial) {
+      moveToPanel.setAttribute("disabled", true);
+    } else {
+      moveToPanel.removeAttribute("disabled");
+    }
     removeFromToolbar.removeAttribute("disabled");
   } else {
     moveToPanel.setAttribute("disabled", true);

@@ -16,6 +16,7 @@
 #include "nsIDocShell.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIMemoryReporter.h"
+#include "nsINamed.h"
 #include "nsINetworkInterceptController.h"
 #include "nsIPermissionManager.h"
 #include "nsIScriptError.h"
@@ -72,7 +73,6 @@
 #include "mozilla/dom/WorkerDebuggerGlobalScopeBinding.h"
 #include "mozilla/dom/WorkerGlobalScopeBinding.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/SizePrintfMacros.h"
 #include "mozilla/ThrottledEventQueue.h"
 #include "mozilla/TimelineConsumers.h"
 #include "mozilla/WorkerTimelineMarker.h"
@@ -1212,7 +1212,8 @@ private:
 };
 
 class TimerRunnable final : public WorkerRunnable,
-                            public nsITimerCallback
+                            public nsITimerCallback,
+                            public nsINamed
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -1248,9 +1249,17 @@ private:
   {
     return Run();
   }
+
+  NS_IMETHOD
+  GetName(nsACString& aName) override
+  {
+    aName.AssignLiteral("TimerRunnable");
+    return NS_OK;
+  }
 };
 
-NS_IMPL_ISUPPORTS_INHERITED(TimerRunnable, WorkerRunnable, nsITimerCallback)
+NS_IMPL_ISUPPORTS_INHERITED(TimerRunnable, WorkerRunnable, nsITimerCallback,
+                            nsINamed)
 
 class DebuggerImmediateRunnable : public WorkerRunnable
 {
@@ -5202,11 +5211,7 @@ nsresult
 WorkerPrivate::DispatchToMainThread(already_AddRefed<nsIRunnable> aRunnable,
                                     uint32_t aFlags)
 {
-  nsCOMPtr<nsIRunnable> runnable = aRunnable;
-  if (nsCOMPtr<nsINamed> named = do_QueryInterface(runnable)) {
-    named->SetName("WorkerRunnable");
-  }
-  return mMainThreadEventTarget->Dispatch(runnable.forget(), aFlags);
+  return mMainThreadEventTarget->Dispatch(Move(aRunnable), aFlags);
 }
 
 nsISerialEventTarget*
@@ -6628,7 +6633,7 @@ WorkerPrivate::RescheduleTimeoutTimer(JSContext* aCx)
     (mTimeouts[0]->mTargetTime - TimeStamp::Now()).ToMilliseconds();
   uint32_t delay = delta > 0 ? std::min(delta, double(UINT32_MAX)) : 0;
 
-  LOG(TimeoutsLog(), ("Worker %p scheduled timer for %d ms, %" PRIuSIZE " pending timeouts\n",
+  LOG(TimeoutsLog(), ("Worker %p scheduled timer for %d ms, %zu pending timeouts\n",
                       this, delay, mTimeouts.Length()));
 
   nsresult rv = mTimer->InitWithCallback(mTimerRunnable, delay, nsITimer::TYPE_ONE_SHOT);

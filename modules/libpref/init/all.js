@@ -1279,7 +1279,11 @@ pref("dom.min_timeout_value", 4);
 pref("dom.min_background_timeout_value", 1000);
 // Timeout clamp in ms for tracking timeouts we clamp
 // Note that this requires the privacy.trackingprotection.annotate_channels pref to be on in order to have any effect.
+#ifdef NIGHTLY_BUILD
+pref("dom.min_tracking_timeout_value", 10000);
+#else
 pref("dom.min_tracking_timeout_value", 4);
+#endif
 // And for background windows
 // Note that this requires the privacy.trackingprotection.annotate_channels pref to be on in order to have any effect.
 pref("dom.min_tracking_background_timeout_value", 10000);
@@ -5237,7 +5241,12 @@ pref("dom.vr.controller_trigger_threshold", "0.1");
 // result in a non-responsive browser in the VR headset.
 pref("dom.vr.navigation.timeout", 5000);
 // Oculus device
+#if defined(HAVE_64BIT_BUILD)
+// We are only enabling WebVR by default on 64-bit builds (Bug 1384459)
 pref("dom.vr.oculus.enabled", true);
+#else
+pref("dom.vr.oculus.enabled", false);
+#endif
 // Minimum number of milliseconds after content has stopped VR presentation
 // before the Oculus session is re-initialized to an invisible / tracking
 // only mode.  If this value is too high, users will need to wait longer
@@ -5257,7 +5266,8 @@ pref("dom.vr.oculus.quit.timeout", 30000);
 // OSVR device
 pref("dom.vr.osvr.enabled", false);
 // OpenVR device
-#ifdef XP_WIN
+#if defined(XP_WIN) && defined(HAVE_64BIT_BUILD)
+// We are only enabling WebVR by default on 64-bit builds (Bug 1384459)
 pref("dom.vr.openvr.enabled", true);
 #else
 // See Bug 1310663 (Linux) and Bug 1310665 (macOS)
