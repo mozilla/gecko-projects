@@ -239,22 +239,26 @@ namespace mozilla {
 struct ActiveScrolledRoot {
   static already_AddRefed<ActiveScrolledRoot>
   CreateASRForFrame(const ActiveScrolledRoot* aParent,
-                    nsIScrollableFrame* aScrollableFrame)
+                    nsIScrollableFrame* aScrollableFrame,
+                    bool aIsRetained)
   {
     nsIFrame* f = do_QueryFrame(aScrollableFrame);
 
     RefPtr<ActiveScrolledRoot> asr;
-    if (f->HasActiveScrolledRoot()) {
+    if (f->HasActiveScrolledRoot() && aIsRetained) {
       asr = f->GetProperty(ActiveScrolledRootCache());
     } else {
-      asr = new ActiveScrolledRoot(aParent, aScrollableFrame);
+      asr = new ActiveScrolledRoot();
 
-      f->SetHasActiveScrolledRoot(true);
-      f->SetProperty(ActiveScrolledRootCache(), asr);
+      if (aIsRetained) {
+        f->SetHasActiveScrolledRoot(true);
+        f->SetProperty(ActiveScrolledRootCache(), asr);
+      }
     }
     asr->mParent = aParent;
     asr->mScrollableFrame = aScrollableFrame;
     asr->mDepth = aParent ? aParent->mDepth + 1 : 1;
+    asr->mRetained = aIsRetained;
 
     return asr.forget();
   }
@@ -287,14 +291,13 @@ struct ActiveScrolledRoot {
   NS_INLINE_DECL_REFCOUNTING(ActiveScrolledRoot)
 
 private:
-  ActiveScrolledRoot(const ActiveScrolledRoot* aParent,
-                     nsIScrollableFrame* aScrollableFrame)
+  ActiveScrolledRoot()
   {
   }
 
   ~ActiveScrolledRoot()
   {
-    if (mScrollableFrame) {
+    if (mScrollableFrame && mRetained) {
       nsIFrame* f = do_QueryFrame(mScrollableFrame);
       f->SetHasActiveScrolledRoot(false);
       f->DeleteProperty(ActiveScrolledRootCache());
@@ -312,6 +315,7 @@ private:
   }
 
   uint32_t mDepth;
+  bool mRetained;
 };
 
 }

@@ -1428,7 +1428,7 @@ ActiveScrolledRoot*
 nsDisplayListBuilder::AllocateActiveScrolledRoot(const ActiveScrolledRoot* aParent,
                                                  nsIScrollableFrame* aScrollableFrame)
 {
-  RefPtr<ActiveScrolledRoot> asr = ActiveScrolledRoot::CreateASRForFrame(aParent, aScrollableFrame);
+  RefPtr<ActiveScrolledRoot> asr = ActiveScrolledRoot::CreateASRForFrame(aParent, aScrollableFrame, IsRetainingDisplayList());
   mActiveScrolledRoots.AppendElement(asr);
   return asr;
 }
