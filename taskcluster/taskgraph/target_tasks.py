@@ -150,7 +150,7 @@ def target_tasks_cedar(full_task_graph, parameters):
         # Early return if platform is None
         if not platform:
             return False
-        if 'linux64' not in platform and 'macosx64' not in platform:
+        if 'linux64' not in platform and 'macosx64' not in platform and 'win' not in platform:
             return False
 
         # No random non-build jobs either. This is being purposely done as a
