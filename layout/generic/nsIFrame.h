@@ -1016,7 +1016,7 @@ public:
     } else {
       mRect = aRect;
     }
-    SchedulePaint();
+    MarkNeedsDisplayItemRebuild();
   }
   /**
    * Set this frame's rect from a logical rect in its own writing direction
@@ -1069,7 +1069,13 @@ public:
     SetRect(nsRect(mRect.TopLeft(), aSize));
   }
 
-  void SetPosition(const nsPoint& aPt) { if (mRect.TopLeft() == aPt) { return; } mRect.MoveTo(aPt); SchedulePaint(); }
+  void SetPosition(const nsPoint& aPt) {
+    if (mRect.TopLeft() == aPt) {
+      return;
+    }
+    mRect.MoveTo(aPt);
+    MarkNeedsDisplayItemRebuild();
+  }
   void SetPosition(mozilla::WritingMode aWritingMode,
                    const mozilla::LogicalPoint& aPt,
                    const nsSize& aContainerSize) {
