@@ -202,6 +202,7 @@ pref("dom.gamepad.non_standard_events.enabled", false);
 pref("dom.gamepad.non_standard_events.enabled", true);
 #endif
 pref("dom.gamepad.extensions.enabled", true);
+pref("dom.gamepad.haptic_feedback.enabled", true);
 
 // If this is true, TextEventDispatcher dispatches keydown and keyup events
 // even during composition (keypress events are never fired during composition
@@ -444,7 +445,7 @@ pref("media.decoder-doctor.wmf-disabled-is-failure", false);
 pref("media.decoder-doctor.new-issue-endpoint", "https://webcompat.com/issues/new");
 
 // Whether to suspend decoding of videos in background tabs.
-#ifdef RELEASE
+#ifdef RELEASE_OR_BETA
 pref("media.suspend-bkgnd-video.enabled", false);
 #else
 pref("media.suspend-bkgnd-video.enabled", true);
@@ -1329,8 +1330,8 @@ pref("dom.forms.datetime.others", false);
 // Enable time picker UI. By default, disabled.
 pref("dom.forms.datetime.timepicker", false);
 
-// Support for new @autocomplete values
-pref("dom.forms.autocomplete.experimental", false);
+// Support @autocomplete values for form autofill feature.
+pref("dom.forms.autocomplete.formautofill", false);
 
 // Enable search in <select> dropdowns (more than 40 options)
 pref("dom.forms.selectSearch", false);
@@ -3122,26 +3123,6 @@ pref("dom.idle_period.throttled_length", 10000);
 // The amount of idle time (milliseconds) reserved for a long idle period
 pref("idle_queue.long_period", 50);
 
-// Control the event prioritization on content main thread
-#ifdef NIGHTLY_BUILD
-pref("prioritized_input_events.enabled", true);
-#else
-pref("prioritized_input_events.enabled", false);
-#endif
-
-// The maximum and minimum time (milliseconds) we reserve for handling input
-// events in each frame.
-pref("prioritized_input_events.duration.max", 8);
-pref("prioritized_input_events.duration.min", 1);
-
-// The default amount of time (milliseconds) required for handling a input
-// event.
-pref("prioritized_input_events.default_duration_per_event", 1);
-
-// The number of processed input events we use to predict the amount of time
-// required to process the following input events.
-pref("prioritized_input_events.count_for_prediction", 9);
-
 // The minimum amount of time (milliseconds) required for an idle
 // period to be scheduled on the main thread. N.B. that
 // layout.idle_period.time_limit adds padding at the end of the idle
@@ -4790,8 +4771,8 @@ pref("layers.bench.enabled", false);
 #if defined(XP_WIN)
 pref("layers.gpu-process.enabled", true);
 pref("media.gpu-process-decoder", true);
-#ifdef NIGHTLY_BUILD
 pref("layers.gpu-process.allow-software", true);
+#ifdef NIGHTLY_BUILD
 pref("layers.gpu-process.max_restarts", 3);
 #endif
 #endif

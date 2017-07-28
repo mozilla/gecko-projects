@@ -1089,11 +1089,7 @@ pref("security.sandbox.gpu.level", 0);
 // This setting is read when the content process is started. On Mac the content
 // process is killed when all windows are closed, so a change will take effect
 // when the 1st window is opened.
-#if defined(NIGHTLY_BUILD)
 pref("security.sandbox.content.level", 3);
-#else
-pref("security.sandbox.content.level", 1);
-#endif
 #endif
 
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
@@ -1514,6 +1510,8 @@ pref("toolkit.telemetry.shutdownPingSender.enabled", true);
 pref("toolkit.telemetry.shutdownPingSender.enabledFirstSession", false);
 // Enables sending the 'new-profile' ping on new profiles.
 pref("toolkit.telemetry.newProfilePing.enabled", true);
+// Enables sending 'update' pings on Firefox updates.
+pref("toolkit.telemetry.updatePing.enabled", true);
 
 // Telemetry experiments settings.
 pref("experiments.enabled", true);

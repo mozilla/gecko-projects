@@ -995,7 +995,8 @@ impl Stylist {
                     CssRule::Keyframes(..) |
                     CssRule::Page(..) |
                     CssRule::Viewport(..) |
-                    CssRule::Document(..) => {
+                    CssRule::Document(..) |
+                    CssRule::FontFeatureValues(..) => {
                         // Not affected by device changes.
                         continue;
                     }
@@ -1203,7 +1204,7 @@ impl Stylist {
                                                   &rule_hash_target,
                                                   applicable_declarations,
                                                   context,
-                                              self.quirks_mode,
+                                                  self.quirks_mode,
                                                   flags_setter,
                                                   CascadeLevel::AuthorNormal);
             } else {

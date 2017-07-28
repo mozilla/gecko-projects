@@ -314,6 +314,8 @@ int32_t gTimeoutCnt                                    = 0;
 
 #define DOM_TOUCH_LISTENER_ADDED "dom-touch-listener-added"
 
+#define MEMORY_PRESSURE_OBSERVER_TOPIC "memory-pressure"
+
 // The interval at which we execute idle callbacks
 static uint32_t gThrottledIdlePeriodLength;
 
@@ -1657,6 +1659,8 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
         // a strong reference.
         os->AddObserver(mObserver, NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
                         false);
+
+        os->AddObserver(mObserver, MEMORY_PRESSURE_OBSERVER_TOPIC, false);
       }
 
       Preferences::AddStrongObserver(mObserver, "intl.accept_languages");
@@ -1962,6 +1966,7 @@ nsGlobalWindow::CleanUp()
     nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
     if (os) {
       os->RemoveObserver(mObserver, NS_IOSERVICE_OFFLINE_STATUS_TOPIC);
+      os->RemoveObserver(mObserver, MEMORY_PRESSURE_OBSERVER_TOPIC);
     }
 
     RefPtr<StorageNotifierService> sns = StorageNotifierService::GetOrCreate();
@@ -12277,6 +12282,13 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
     return NS_OK;
   }
 
+  if (!nsCRT::strcmp(aTopic, MEMORY_PRESSURE_OBSERVER_TOPIC)) {
+    if (mPerformance) {
+      mPerformance->MemoryPressure();
+    }
+    return NS_OK;
+  }
+
   if (!nsCRT::strcmp(aTopic, OBSERVER_TOPIC_IDLE)) {
     mCurrentlyIdle = true;
     if (IsFrozen()) {
@@ -12377,7 +12389,12 @@ nsGlobalWindow::ObserveStorageNotification(StorageEvent* aEvent,
 {
   MOZ_ASSERT(aEvent);
 
-  MOZ_DIAGNOSTIC_ASSERT(IsPrivateBrowsing() == aPrivateBrowsing);
+  // The private browsing check must be done here again because this window
+  // could have changed its state before the notification check and now. This
+  // happens in case this window did have a docShell at that time.
+  if (aPrivateBrowsing != IsPrivateBrowsing()) {
+    return;
+  }
 
   // LocalStorage can only exist on an inner window, and we don't want to
   // generate events on frozen or otherwise-navigated-away from windows.
@@ -13800,6 +13817,13 @@ nsGlobalWindow::AddSizeOfIncludingThis(nsWindowSizes* aWindowSizes) const
       aWindowSizes->mDOMEventListenersCount += elm->ListenerCount();
     }
     ++aWindowSizes->mDOMEventTargetsCount;
+  }
+
+  if (IsInnerWindow() && mPerformance) {
+    aWindowSizes->mDOMPerformanceUserEntries =
+      mPerformance->SizeOfUserEntries(aWindowSizes->mMallocSizeOf);
+    aWindowSizes->mDOMPerformanceResourceEntries =
+      mPerformance->SizeOfResourceEntries(aWindowSizes->mMallocSizeOf);
   }
 }
 

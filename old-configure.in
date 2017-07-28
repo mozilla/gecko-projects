@@ -48,7 +48,7 @@ dnl ========================================================
 MOZJPEG=62
 MOZPNG=10629
 NSPR_VERSION=4
-NSPR_MINVER=4.14
+NSPR_MINVER=4.16
 NSS_VERSION=3
 
 dnl Set the minimum version of toolkit libs used by mozilla
@@ -531,6 +531,13 @@ if test "$GNU_CC"; then
     AC_MSG_CHECKING([for -z text option to ld])
     _SAVE_LDFLAGS=$LDFLAGS
     LDFLAGS="$LDFLAGS -Wl,-z,text"
+    AC_TRY_LINK(,,AC_MSG_RESULT([yes]),
+                  AC_MSG_RESULT([no])
+                  LDFLAGS=$_SAVE_LDFLAGS)
+
+    AC_MSG_CHECKING([for -z relro option to ld])
+    _SAVE_LDFLAGS=$LDFLAGS
+    LDFLAGS="$LDFLAGS -Wl,-z,relro"
     AC_TRY_LINK(,,AC_MSG_RESULT([yes]),
                   AC_MSG_RESULT([no])
                   LDFLAGS=$_SAVE_LDFLAGS)
