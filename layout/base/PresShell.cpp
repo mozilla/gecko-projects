@@ -5321,7 +5321,8 @@ PresShell::AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
 
   if (!addedScrollingBackgroundColor || forceUnscrolledItem) {
     aList.AppendNewToBottom(
-      new (&aBuilder) nsDisplaySolidColor(&aBuilder, aFrame, aBounds, bgcolor, false));
+      new (&aBuilder) nsDisplaySolidColor(&aBuilder, aFrame, aBounds, bgcolor,
+                                          aFlags & ADD_FOR_SUBDOC));
   }
 }
 
