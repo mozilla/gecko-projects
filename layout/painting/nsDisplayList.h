@@ -2965,6 +2965,15 @@ public:
    */
   nsDisplayList* Content() const { return mContent; }
 
+  void DeleteAll(nsDisplayListBuilder* aBuilder) {
+    BorderBackground()->DeleteAll(aBuilder);
+    BlockBorderBackgrounds()->DeleteAll(aBuilder);
+    Floats()->DeleteAll(aBuilder);
+    PositionedDescendants()->DeleteAll(aBuilder);
+    Outlines()->DeleteAll(aBuilder);
+    Content()->DeleteAll(aBuilder);
+  }
+
   nsDisplayListSet(nsDisplayList* aBorderBackground,
                    nsDisplayList* aBlockBorderBackgrounds,
                    nsDisplayList* aFloats,

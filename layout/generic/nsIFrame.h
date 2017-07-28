@@ -624,6 +624,7 @@ public:
     , mBuiltDisplayList(false)
     , mForceDescendIntoIfVisible(false)
     , mMayHaveWillChangeBudget(false)
+    , mBuiltBlendContainer(false)
     , mClass(aID)
     , mMayHaveRoundedCorners(false)
     , mHasImageRequest(false)
@@ -652,6 +653,9 @@ public:
 
   bool MayHaveWillChangeBudget() { return mMayHaveWillChangeBudget; }
   void SetMayHaveWillChangeBudget(bool aHasBudget) { mMayHaveWillChangeBudget = aHasBudget; }
+
+  bool BuiltBlendContainer() { return mBuiltBlendContainer; }
+  void SetBuiltBlendContainer(bool aBuilt) { mBuiltBlendContainer = aBuilt; }
 
   nsPresContext* PresContext() const {
     return StyleContext()->PresContext();
@@ -4022,6 +4026,7 @@ protected:
   bool mBuiltDisplayList : 1;
   bool mForceDescendIntoIfVisible : 1;
   bool mMayHaveWillChangeBudget : 1;
+  bool mBuiltBlendContainer : 1;
 
   /**
    * List of properties attached to the frame.

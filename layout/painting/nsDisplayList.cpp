@@ -1762,7 +1762,7 @@ nsDisplayListBuilder::AdjustWindowDraggingRegion(nsIFrame* aFrame)
   // contents, so for example we'd fail to clip frames that have a clip path
   // applied to them. But the current dirty rect doesn't get reset in that
   // case, so we use it to make this case work.
-  nsRect borderBox = aFrame->GetRectRelativeToSelf().Intersect(mDirtyRect);
+  nsRect borderBox = aFrame->GetRectRelativeToSelf().Intersect(mVisibleRect);
   borderBox += ToReferenceFrame(aFrame);
   const DisplayItemClipChain* clip = ClipState().GetCurrentCombinedClipChain(this);
   borderBox = ApplyAllClipNonRoundedIntersection(clip, borderBox);
