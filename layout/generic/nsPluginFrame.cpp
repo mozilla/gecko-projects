@@ -959,7 +959,7 @@ public:
 #endif
 
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
-                           bool* aSnap) override;
+                           bool* aSnap) const override;
 
   NS_DISPLAY_DECL_NAME("PluginVideo", TYPE_PLUGIN_VIDEO)
 
@@ -1532,7 +1532,7 @@ nsPluginFrame::BuildLayer(nsDisplayListBuilder* aBuilder,
       lm->AddDidCompositeObserver(mDidCompositeObserver.get());
     }
 #ifdef MOZ_WIDGET_ANDROID
-  } else if (aItem->GetType() == nsDisplayItem::TYPE_PLUGIN_VIDEO) {
+  } else if (aItem->GetType() == TYPE_PLUGIN_VIDEO) {
     nsDisplayPluginVideo* videoItem = reinterpret_cast<nsDisplayPluginVideo*>(aItem);
     nsNPAPIPluginInstance::VideoInfo* videoInfo = videoItem->VideoInfo();
 

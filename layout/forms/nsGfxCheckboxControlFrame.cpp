@@ -113,11 +113,10 @@ nsGfxCheckboxControlFrame::AccessibleType()
 
 void
 nsGfxCheckboxControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                            const nsRect&           aDirtyRect,
                                             const nsDisplayListSet& aLists)
 {
-  nsFormControlFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
-
+  nsFormControlFrame::BuildDisplayList(aBuilder, aLists);
+  
   // Get current checked state through content model.
   if ((!IsChecked() && !IsIndeterminate()) || !IsVisibleForPainting(aBuilder))
     return;   // we're not checked or not visible, nothing to paint.
@@ -130,7 +129,7 @@ nsGfxCheckboxControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                      IsIndeterminate()
                      ? PaintIndeterminateMark : PaintCheckMark,
                      "CheckedCheckbox",
-                     nsDisplayItem::TYPE_CHECKED_CHECKBOX));
+                     TYPE_CHECKED_CHECKBOX));
 }
 
 #endif
