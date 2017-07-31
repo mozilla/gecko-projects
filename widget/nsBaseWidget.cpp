@@ -1286,6 +1286,23 @@ nsBaseWidget::CreateCompositorSession(int aWidth,
       gfx::IntSize(aWidth, aHeight),
       &retry);
 
+    if (lm->AsWebRenderLayerManager() && mCompositorSession) {
+      TextureFactoryIdentifier textureFactoryIdentifier;
+      lm->AsWebRenderLayerManager()->Initialize(mCompositorSession->GetCompositorBridgeChild(),
+                                                wr::AsPipelineId(mCompositorSession->RootLayerTreeId()),
+                                                &textureFactoryIdentifier);
+      if (textureFactoryIdentifier.mParentBackend != LayersBackend::LAYERS_WR) {
+        retry = true;
+        DestroyCompositor();
+        // Disable WebRender
+        gfx::gfxConfig::GetFeature(gfx::Feature::WEBRENDER).ForceDisable(
+          gfx::FeatureStatus::Unavailable,
+          "WebRender initialization failed",
+          NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBRENDER_INITIALIZE"));
+        gfx::gfxVars::SetUseWebRender(false);
+      }
+    }
+
     // We need to retry in a loop because the act of failing to create the
     // compositor can change our state (e.g. disable WebRender).
     if (mCompositorSession || !retry) {
@@ -1347,10 +1364,8 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
   }
 
   if (lm->AsWebRenderLayerManager()) {
-    TextureFactoryIdentifier textureFactoryIdentifier;
-    lm->AsWebRenderLayerManager()->Initialize(mCompositorBridgeChild,
-                                              wr::AsPipelineId(mCompositorSession->RootLayerTreeId()),
-                                              &textureFactoryIdentifier);
+    TextureFactoryIdentifier textureFactoryIdentifier = lm->GetTextureFactoryIdentifier();
+    MOZ_ASSERT(textureFactoryIdentifier.mParentBackend == LayersBackend::LAYERS_WR);
     ImageBridgeChild::IdentifyCompositorTextureHost(textureFactoryIdentifier);
     gfx::VRManagerChild::IdentifyTextureHost(textureFactoryIdentifier);
   }
@@ -1797,31 +1812,31 @@ nsBaseWidget::NotifyIME(const IMENotification& aIMENotification)
   switch (aIMENotification.mMessage) {
     case REQUEST_TO_COMMIT_COMPOSITION:
     case REQUEST_TO_CANCEL_COMPOSITION:
-      // Currently, if native IME handler doesn't use TextEventDispatcher,
-      // the request may be notified to mTextEventDispatcher or native IME
-      // directly.  Therefore, if mTextEventDispatcher has a composition,
-      // the request should be handled by the mTextEventDispatcher.
+      // We should send request to IME only when there is a TextEventDispatcher
+      // instance (this means that this widget has dispatched at least one
+      // composition event or keyboard event) and the it has composition.
+      // Otherwise, there is nothing to do.
+      // Note that if current input transaction is for native input events,
+      // TextEventDispatcher::NotifyIME() will call
+      // TextEventDispatcherListener::NotifyIME().
       if (mTextEventDispatcher && mTextEventDispatcher->IsComposing()) {
         return mTextEventDispatcher->NotifyIME(aIMENotification);
       }
-      // Otherwise, it should be handled by native IME.
-      return NotifyIMEInternal(aIMENotification);
+      return NS_OK;
     default: {
       if (aIMENotification.mMessage == NOTIFY_IME_OF_FOCUS) {
         mIMEHasFocus = true;
       }
       EnsureTextEventDispatcher();
-      // If the platform specific widget uses TextEventDispatcher for handling
-      // native IME and keyboard events, IME event handler should be notified
-      // of the notification via TextEventDispatcher.  Otherwise, on the other
-      // platforms which have not used TextEventDispatcher yet, IME event
-      // handler should be notified by the old path (NotifyIMEInternal).
+      // TextEventDispatcher::NotifyIME() will always call
+      // TextEventDispatcherListener::NotifyIME().  I.e., even if current
+      // input transaction is for synthesized events for automated tests,
+      // notifications will be sent to native IME.
       nsresult rv = mTextEventDispatcher->NotifyIME(aIMENotification);
-      nsresult rv2 = NotifyIMEInternal(aIMENotification);
       if (aIMENotification.mMessage == NOTIFY_IME_OF_BLUR) {
         mIMEHasFocus = false;
       }
-      return rv2 == NS_ERROR_NOT_IMPLEMENTED ? rv : rv2;
+      return rv;
     }
   }
 }

@@ -90,15 +90,16 @@ use style::gecko_bindings::structs::nsresult;
 use style::gecko_bindings::sugar::ownership::{FFIArcHelpers, HasFFI, HasArcFFI, HasBoxFFI};
 use style::gecko_bindings::sugar::ownership::{HasSimpleFFI, Strong};
 use style::gecko_bindings::sugar::refptr::RefPtr;
-use style::gecko_properties::{self, style_structs};
+use style::gecko_properties::style_structs;
 use style::invalidation::element::restyle_hints::{self, RestyleHint};
 use style::media_queries::{MediaList, parse_media_query_list};
 use style::parallel;
 use style::parser::{ParserContext, self};
-use style::properties::{ComputedValues, Importance};
-use style::properties::{IS_FIELDSET_CONTENT, LonghandIdSet};
+use style::properties::{CascadeFlags, ComputedValues, Importance};
+use style::properties::{IS_FIELDSET_CONTENT, IS_LINK, IS_VISITED_LINK, LonghandIdSet};
 use style::properties::{PropertyDeclaration, PropertyDeclarationBlock, PropertyId, ShorthandId};
 use style::properties::{SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP, SourcePropertyDeclaration, StyleBuilder};
+use style::properties::PROHIBIT_DISPLAY_CONTENTS;
 use style::properties::animated_properties::{Animatable, AnimatableLonghand, AnimationValue};
 use style::properties::animated_properties::compare_property_priority;
 use style::properties::parse_one_declaration_into;
@@ -158,18 +159,12 @@ pub extern "C" fn Servo_Initialize(dummy_url_data: *mut URLExtraData) {
     parser::assert_parsing_mode_match();
     traversal_flags::assert_traversal_flags_match();
 
-    // Initialize some static data.
-    gecko_properties::initialize();
-
     // Initialize the dummy url data
     unsafe { DUMMY_URL_DATA = dummy_url_data; }
 }
 
 #[no_mangle]
 pub extern "C" fn Servo_Shutdown() {
-    // Clear some static data to avoid shutdown leaks.
-    gecko_properties::shutdown();
-
     // The dummy url will be released after shutdown, so clear the
     // reference to avoid use-after-free.
     unsafe { DUMMY_URL_DATA = ptr::null_mut(); }
@@ -185,13 +180,9 @@ fn create_shared_context<'a>(global_style_data: &GlobalStyleData,
                              traversal_flags: TraversalFlags,
                              snapshot_map: &'a ServoElementSnapshotTable)
                              -> SharedStyleContext<'a> {
-    let visited_styles_enabled =
-        unsafe { bindings::Gecko_AreVisitedLinksEnabled() } &&
-        !per_doc_data.is_private_browsing_enabled();
-
     SharedStyleContext {
         stylist: &per_doc_data.stylist,
-        visited_styles_enabled: visited_styles_enabled,
+        visited_styles_enabled: per_doc_data.visited_styles_enabled(),
         options: global_style_data.options.clone(),
         guards: StylesheetGuards::same(guard),
         timer: Timer::new(),
@@ -1619,7 +1610,10 @@ pub extern "C" fn Servo_HasAuthorSpecifiedRules(element: RawGeckoElementBorrowed
 {
     let element = GeckoElement(element);
 
-    let data = element.borrow_data().unwrap();
+    let data =
+        element.borrow_data()
+        .expect("calling Servo_HasAuthorSpecifiedRules on an unstyled element");
+
     let primary_style = data.styles.primary();
 
     let guard = (*GLOBAL_STYLE_DATA).shared_lock.read();
@@ -1667,9 +1661,27 @@ fn get_pseudo_style(
                     })
                 },
                 _ => {
-                    debug_assert!(inherited_styles.is_none() ||
-                                  ptr::eq(inherited_styles.unwrap(),
-                                          &**styles.primary()));
+                    // Unfortunately, we can't assert that inherited_styles, if
+                    // present, is pointer-equal to styles.primary(), or even
+                    // equal in any meaningful way.  The way it can fail is as
+                    // follows.  Say we append an element with a ::before,
+                    // ::after, or ::first-line to a parent with a ::first-line,
+                    // such that the element ends up on the first line of the
+                    // parent (e.g. it's an inline-block in the case it has a
+                    // ::first-line, or any container in the ::before/::after
+                    // cases).  Then gecko will update its frame's style to
+                    // inherit from the parent's ::first-line.  The next time we
+                    // try to get the ::before/::after/::first-line style for
+                    // the kid, we'll likely pass in the frame's style as
+                    // inherited_styles, but that's not pointer-identical to
+                    // styles.primary(), because it got reparented.
+                    //
+                    // Now in practice this turns out to be OK, because all the
+                    // cases in which there's a mismatch go ahead and reparent
+                    // styles again as needed to make sure the ::first-line
+                    // affects all the things it should affect.  But it makes it
+                    // impossible to assert anything about the two styles
+                    // matching here, unfortunately.
                     styles.pseudos.get(&pseudo).cloned()
                 },
             }
@@ -2907,6 +2919,59 @@ pub extern "C" fn Servo_ResolveStyleLazily(element: RawGeckoElementBorrowed,
 
     let styles = resolve_style(&mut context, element, rule_inclusion);
     finish(&styles).into()
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_ReparentStyle(style_to_reparent: ServoStyleContextBorrowed,
+                                      parent_style: ServoStyleContextBorrowed,
+                                      parent_style_ignoring_first_line: ServoStyleContextBorrowed,
+                                      layout_parent_style: ServoStyleContextBorrowed,
+                                      element: RawGeckoElementBorrowedOrNull,
+                                      raw_data: RawServoStyleSetBorrowed)
+     -> ServoStyleContextStrong
+{
+    let global_style_data = &*GLOBAL_STYLE_DATA;
+    let guard = global_style_data.shared_lock.read();
+    let doc_data = PerDocumentStyleData::from_ffi(raw_data).borrow();
+    let inputs = CascadeInputs::new_from_style(style_to_reparent);
+    let metrics = get_metrics_provider_for_product();
+    let pseudo = style_to_reparent.pseudo();
+    let element = element.map(GeckoElement);
+
+    let mut cascade_flags = CascadeFlags::empty();
+    if style_to_reparent.is_anon_box() {
+        cascade_flags.insert(SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP);
+    }
+    if let Some(element) = element {
+        if element.is_link() {
+            cascade_flags.insert(IS_LINK);
+            if element.is_visited_link() &&
+                doc_data.visited_styles_enabled() {
+                cascade_flags.insert(IS_VISITED_LINK);
+            }
+        };
+
+        if element.is_native_anonymous() {
+            cascade_flags.insert(PROHIBIT_DISPLAY_CONTENTS);
+        }
+    }
+    if let Some(pseudo) = pseudo.as_ref() {
+        cascade_flags.insert(PROHIBIT_DISPLAY_CONTENTS);
+        if pseudo.is_fieldset_content() {
+            cascade_flags.insert(IS_FIELDSET_CONTENT);
+        }
+    }
+
+    doc_data.stylist
+        .compute_style_with_inputs(&inputs,
+                                   pseudo.as_ref(),
+                                   &StylesheetGuards::same(&guard),
+                                   parent_style,
+                                   parent_style_ignoring_first_line,
+                                   layout_parent_style,
+                                   &metrics,
+                                   cascade_flags)
+        .into()
 }
 
 #[cfg(feature = "gecko_debug")]

@@ -162,7 +162,6 @@ HttpChannelChild::HttpChannelChild()
   , mCacheEntryAvailable(false)
   , mAltDataCacheEntryAvailable(false)
   , mCacheFetchCount(0)
-  , mCacheLastFetched(0)
   , mCacheExpirationTime(nsICacheEntry::NO_EXPIRATION_TIME)
   , mSendResumeAt(false)
   , mDeletingChannelSent(false)
@@ -396,7 +395,6 @@ class StartRequestEvent : public NeckoTargetChannelEvent<HttpChannelChild>
                     const bool& aIsFromCache,
                     const bool& aCacheEntryAvailable,
                     const int32_t& aCacheFetchCount,
-                    const uint32_t& aCacheLastFetched,
                     const uint32_t& aCacheExpirationTime,
                     const nsCString& aCachedCharset,
                     const nsCString& aSecurityInfoSerialization,
@@ -413,7 +411,6 @@ class StartRequestEvent : public NeckoTargetChannelEvent<HttpChannelChild>
   , mIsFromCache(aIsFromCache)
   , mCacheEntryAvailable(aCacheEntryAvailable)
   , mCacheFetchCount(aCacheFetchCount)
-  , mCacheLastFetched(aCacheLastFetched)
   , mCacheExpirationTime(aCacheExpirationTime)
   , mCachedCharset(aCachedCharset)
   , mSecurityInfoSerialization(aSecurityInfoSerialization)
@@ -429,8 +426,7 @@ class StartRequestEvent : public NeckoTargetChannelEvent<HttpChannelChild>
     LOG(("StartRequestEvent [this=%p]\n", mChild));
     mChild->OnStartRequest(mChannelStatus, mResponseHead, mUseResponseHead,
                            mRequestHeaders, mIsFromCache, mCacheEntryAvailable,
-                           mCacheFetchCount, mCacheLastFetched,
-                           mCacheExpirationTime, mCachedCharset,
+                           mCacheFetchCount, mCacheExpirationTime, mCachedCharset,
                            mSecurityInfoSerialization, mSelfAddr, mPeerAddr,
                            mCacheKey, mAltDataType, mAltDataLen);
   }
@@ -443,7 +439,6 @@ class StartRequestEvent : public NeckoTargetChannelEvent<HttpChannelChild>
   bool mIsFromCache;
   bool mCacheEntryAvailable;
   int32_t mCacheFetchCount;
-  uint32_t mCacheLastFetched;
   uint32_t mCacheExpirationTime;
   nsCString mCachedCharset;
   nsCString mSecurityInfoSerialization;
@@ -462,7 +457,6 @@ HttpChannelChild::RecvOnStartRequest(const nsresult& channelStatus,
                                      const bool& isFromCache,
                                      const bool& cacheEntryAvailable,
                                      const int32_t& cacheFetchCount,
-                                     const uint32_t& cacheLastFetched,
                                      const uint32_t& cacheExpirationTime,
                                      const nsCString& cachedCharset,
                                      const nsCString& securityInfoSerialization,
@@ -487,7 +481,7 @@ HttpChannelChild::RecvOnStartRequest(const nsresult& channelStatus,
   mEventQ->RunOrEnqueue(new StartRequestEvent(this, channelStatus, responseHead,
                                               useResponseHead, requestHeaders,
                                               isFromCache, cacheEntryAvailable,
-                                              cacheFetchCount, cacheLastFetched,
+                                              cacheFetchCount,
                                               cacheExpirationTime, cachedCharset,
                                               securityInfoSerialization,
                                               selfAddr, peerAddr, cacheKey,
@@ -523,7 +517,6 @@ HttpChannelChild::OnStartRequest(const nsresult& channelStatus,
                                  const bool& isFromCache,
                                  const bool& cacheEntryAvailable,
                                  const int32_t& cacheFetchCount,
-                                 const uint32_t& cacheLastFetched,
                                  const uint32_t& cacheExpirationTime,
                                  const nsCString& cachedCharset,
                                  const nsCString& securityInfoSerialization,
@@ -557,7 +550,6 @@ HttpChannelChild::OnStartRequest(const nsresult& channelStatus,
   mIsFromCache = isFromCache;
   mCacheEntryAvailable = cacheEntryAvailable;
   mCacheFetchCount = cacheFetchCount;
-  mCacheLastFetched = cacheLastFetched;
   mCacheExpirationTime = cacheExpirationTime;
   mCachedCharset = cachedCharset;
   mSelfAddr = selfAddr;
@@ -1769,8 +1761,8 @@ HttpChannelChild::ProcessNotifyTrackingProtectionDisabled()
   MOZ_ASSERT(OnSocketThread());
 
   RefPtr<HttpChannelChild> self = this;
-  nsCOMPtr<nsIEventTarget> mainTarget = GetMainThreadEventTarget();
-  mainTarget->Dispatch(
+  nsCOMPtr<nsIEventTarget> neckoTarget = GetNeckoTarget();
+  neckoTarget->Dispatch(
     NS_NewRunnableFunction(
       "nsChannelClassifier::NotifyTrackingProtectionDisabled",
       [self]() {
@@ -1785,12 +1777,7 @@ HttpChannelChild::ProcessNotifyTrackingResource()
   LOG(("HttpChannelChild::ProcessNotifyTrackingResource [this=%p]\n", this));
   MOZ_ASSERT(OnSocketThread());
 
-  nsCOMPtr<nsIEventTarget> mainTarget = GetMainThreadEventTarget();
-  mainTarget->Dispatch(
-    NewRunnableMethod(
-      "HttpChannelChild::SetIsTrackingResource",
-      this, &HttpChannelChild::SetIsTrackingResource),
-    NS_DISPATCH_NORMAL);
+  SetIsTrackingResource();
 }
 
 void
@@ -1815,8 +1802,8 @@ HttpChannelChild::ProcessSetClassifierMatchedInfo(const nsCString& aList,
   LOG(("HttpChannelChild::ProcessSetClassifierMatchedInfo [this=%p]\n", this));
   MOZ_ASSERT(OnSocketThread());
 
-  nsCOMPtr<nsIEventTarget> mainTarget = GetMainThreadEventTarget();
-  mainTarget->Dispatch(
+  nsCOMPtr<nsIEventTarget> neckoTarget = GetNeckoTarget();
+  neckoTarget->Dispatch(
     NewRunnableMethod<const nsCString, const nsCString, const nsCString>
       ("HttpChannelChild::SetMatchedInfo",
        this, &HttpChannelChild::SetMatchedInfo,
@@ -2776,18 +2763,6 @@ HttpChannelChild::GetCacheTokenFetchCount(int32_t *_retval)
 }
 
 NS_IMETHODIMP
-HttpChannelChild::GetCacheTokenLastFetched(uint32_t *_retval)
-{
-  NS_ENSURE_ARG_POINTER(_retval);
-  if (!mCacheEntryAvailable && !mAltDataCacheEntryAvailable) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  *_retval = mCacheLastFetched;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 HttpChannelChild::GetCacheTokenExpirationTime(uint32_t *_retval)
 {
   NS_ENSURE_ARG_POINTER(_retval);
@@ -3608,6 +3583,19 @@ HttpChannelChild::RecvSetPriority(const int16_t& aPriority)
 {
   mPriority = aPriority;
   return IPC_OK();
+}
+
+void
+HttpChannelChild::ActorDestroy(ActorDestroyReason aWhy)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // OnStartRequest might be dropped if IPDL is destroyed abnormally
+  // and BackgroundChild might have pending IPC messages.
+  // Clean up BackgroundChild at this time to prevent memleak.
+  if (aWhy != Deletion) {
+    CleanupBackgroundChannel();
+  }
 }
 
 } // namespace net

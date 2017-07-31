@@ -5,8 +5,17 @@
 %endif
 @namespace html "http://www.w3.org/1999/xhtml";
 
-#mainPrefPane {
+.main-content {
+  padding-top: 0;
+}
+
+.pane-container {
+  display: block;
   max-width: 800px;
+}
+
+#mainPrefPane {
+  width: 100%;
   padding: 0;
   font: message-box;
   font-size: 1.25rem;
@@ -640,6 +649,18 @@ groupbox {
   text-decoration: none;
 }
 
+.search-container {
+  position: sticky;
+  background-color: var(--in-content-page-background);
+  width: 100%;
+  top: 0;
+  z-index: 1;
+}
+
+#searchInput {
+  margin: 20px 0;
+}
+
 .search-tooltip {
   font-size: 1.25rem;
   position: absolute;
@@ -647,6 +668,7 @@ groupbox {
   background-color: #ffe900;
   border: 1px solid #d7b600;
   -moz-user-select: none;
+  bottom: 35px;
 }
 
 .search-tooltip:hover,

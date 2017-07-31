@@ -1053,11 +1053,7 @@ pref("dom.ipc.plugins.sandbox-level.flash", 0);
 // On windows these levels are:
 // See - security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp
 // SetSecurityLevelForContentProcess() for what the different settings mean.
-#if defined(NIGHTLY_BUILD)
 pref("security.sandbox.content.level", 3);
-#else
-pref("security.sandbox.content.level", 1);
-#endif
 
 // This controls the depth of stack trace that is logged when Windows sandbox
 // logging is turned on.  This is only currently available for the content
@@ -1691,10 +1687,12 @@ pref("browser.crashReports.unsubmittedCheck.chancesUntilSuppress", 4);
 pref("browser.crashReports.unsubmittedCheck.autoSubmit", false);
 
 // Preferences for the form autofill system extension
+// The value of "extensions.formautofill.available" can be "on", "off" and "detect".
+// The "detect" means it's enabled if conditions defined in the extension are met.
 #ifdef NIGHTLY_BUILD
-pref("extensions.formautofill.experimental", true);
+pref("extensions.formautofill.available", "on");
 #else
-pref("extensions.formautofill.experimental", false);
+pref("extensions.formautofill.available", "detect");
 #endif
 pref("extensions.formautofill.addresses.enabled", true);
 pref("extensions.formautofill.firstTimeUse", true);

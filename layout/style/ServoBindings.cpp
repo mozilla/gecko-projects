@@ -54,7 +54,6 @@
 #include "mozilla/GeckoStyleContext.h"
 #include "mozilla/Keyframe.h"
 #include "mozilla/Mutex.h"
-#include "mozilla/Preferences.h"
 #include "mozilla/ServoElementSnapshot.h"
 #include "mozilla/ServoRestyleManager.h"
 #include "mozilla/StyleAnimationValue.h"
@@ -89,8 +88,6 @@ SERVO_ARC_TYPE(StyleContext, ServoStyleContext)
 
 static Mutex* sServoFontMetricsLock = nullptr;
 static RWLock* sServoLangFontPrefsLock = nullptr;
-
-static bool sFramesTimingFunctionEnabled;
 
 static
 const nsFont*
@@ -828,11 +825,6 @@ Gecko_GetPositionInSegment(RawGeckoAnimationPropertySegmentBorrowed aSegment,
   return ComputedTimingFunction::GetPortion(aSegment->mTimingFunction,
                                             positionInSegment,
                                             aBeforeFlag);
-}
-
-bool
-Gecko_IsFramesTimingEnabled() {
-  return sFramesTimingFunctionEnabled;
 }
 
 RawServoAnimationValueBorrowedOrNull
@@ -2299,12 +2291,6 @@ Gecko_CSSValue_InitSharedList(nsCSSValueBorrowedMut aCSSValue,
   }
 }
 
-bool
-Gecko_PropertyId_IsPrefEnabled(nsCSSPropertyID id)
-{
-  return nsCSSProps::IsEnabled(id);
-}
-
 void
 Gecko_CSSValue_Drop(nsCSSValueBorrowedMut aCSSValue)
 {
@@ -2424,9 +2410,6 @@ InitializeServo()
 
   sServoFontMetricsLock = new Mutex("Gecko_GetFontMetrics");
   sServoLangFontPrefsLock = new RWLock("nsPresContext::GetDefaultFont");
-
-  Preferences::AddBoolVarCache(&sFramesTimingFunctionEnabled,
-                               "layout.css.frames-timing.enabled");
 }
 
 void
@@ -2533,12 +2516,6 @@ Gecko_LoadStyleSheet(css::Loader* aLoader,
   RefPtr<ServoStyleSheet> sheet =
     static_cast<ServoStyleSheet*>(aParent->GetFirstChild());
   return sheet.forget().take();
-}
-
-const nsMediaFeature*
-Gecko_GetMediaFeatures()
-{
-  return nsMediaFeatures::features;
 }
 
 nsCSSKeyword
