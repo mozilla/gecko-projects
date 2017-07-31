@@ -7,7 +7,6 @@ build environment.
 
 import argparse
 import os.path
-import re
 import sys
 
 import requests
@@ -61,8 +60,6 @@ def install(filename, target):
     log('Unpacking %s...' % filename)
     subprocess.check_call(['tar', 'xf', filename])
     basename = filename.split('.tar')[0]
-    # Work around bad tarball naming in 1.15+ cargo packages.
-    basename = re.sub(r'cargo-0\.[\d\.]+', 'cargo-nightly', basename)
     log('Installing %s...' % basename)
     install_cmd = [os.path.join(basename, 'install.sh')]
     install_cmd += ['--prefix=' + os.path.abspath(target)]
@@ -209,6 +206,7 @@ mac64 = "x86_64-apple-darwin"
 mac32 = "i686-apple-darwin"
 win64 = "x86_64-pc-windows-msvc"
 win32 = "i686-pc-windows-msvc"
+mingw32 = "i686-pc-windows-gnu"
 
 
 def args():
@@ -237,3 +235,4 @@ if __name__ == '__main__':
     repack(linux64, [linux64, mac64], suffix='mac-cross', **args)
     repack(linux64, [linux64, android, android_x86, android_aarch64],
            suffix='android-cross', **args)
+    repack(linux64, [linux64, win32, mingw32], suffix='mingw32-cross', **args)

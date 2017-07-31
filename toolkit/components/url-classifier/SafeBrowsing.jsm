@@ -10,10 +10,12 @@ const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm");
 
+const PREF_DEBUG_ENABLED = "browser.safebrowsing.debug";
+let loggingEnabled = false;
+
 // Log only if browser.safebrowsing.debug is true
 function log(...stuff) {
-  let logging = Services.prefs.getBoolPref("browser.safebrowsing.debug", false);
-  if (!logging) {
+  if (!loggingEnabled) {
     return;
   }
 
@@ -47,7 +49,8 @@ const tablePreferences = [
   "urlclassifier.flashTable",
   "urlclassifier.flashExceptTable",
   "urlclassifier.flashSubDocTable",
-  "urlclassifier.flashSubDocExceptTable"
+  "urlclassifier.flashSubDocExceptTable",
+  "urlclassifier.flashInfobarTable"
 ];
 
 this.SafeBrowsing = {
@@ -118,6 +121,9 @@ this.SafeBrowsing = {
     for (let i = 0; i < this.flashLists.length; ++i) {
       this.registerTableWithURLs(this.flashLists[i]);
     }
+    for (let i = 0; i < this.flashInfobarLists.length; ++i) {
+      this.registerTableWithURLs(this.flashInfobarLists[i]);
+    }
   },
 
 
@@ -128,6 +134,7 @@ this.SafeBrowsing = {
   blockedEnabled:       false,
   trackingAnnotations:  false,
   flashBlockEnabled:    false,
+  flashInfobarListEnabled: true,
 
   phishingLists:                [],
   malwareLists:                 [],
@@ -136,6 +143,8 @@ this.SafeBrowsing = {
   trackingProtectionLists:      [],
   trackingProtectionWhitelists: [],
   blockedLists:                 [],
+  flashLists:                   [],
+  flashInfobarLists:            [],
 
   updateURL:             null,
   gethashURL:            null,
@@ -183,13 +192,19 @@ this.SafeBrowsing = {
     if (aData.indexOf("lastupdatetime") >= 0 || aData.indexOf("nextupdatetime") >= 0) {
       return;
     }
+
+    if (aData == PREF_DEBUG_ENABLED) {
+      loggingEnabled = Services.prefs.getBoolPref(PREF_DEBUG_ENABLED);
+      return;
+    }
+
     this.readPrefs();
   },
 
   readPrefs: function() {
+    loggingEnabled = Services.prefs.getBoolPref(PREF_DEBUG_ENABLED);
     log("reading prefs");
 
-    this.debug = Services.prefs.getBoolPref("browser.safebrowsing.debug");
     this.phishingEnabled = Services.prefs.getBoolPref("browser.safebrowsing.phishing.enabled");
     this.malwareEnabled = Services.prefs.getBoolPref("browser.safebrowsing.malware.enabled");
     this.trackingEnabled = Services.prefs.getBoolPref("privacy.trackingprotection.enabled") || Services.prefs.getBoolPref("privacy.trackingprotection.pbmode.enabled");
@@ -213,7 +228,8 @@ this.SafeBrowsing = {
      flashTable,
      flashExceptTable,
      flashSubDocTable,
-     flashSubDocExceptTable] = tablePreferences.map(getLists);
+     flashSubDocExceptTable,
+     this.flashInfobarLists] = tablePreferences.map(getLists);
 
     this.flashLists = flashAllowTable.concat(flashAllowExceptTable,
                                              flashTable,
@@ -255,7 +271,7 @@ this.SafeBrowsing = {
       this.providers[providerName] = {};
     }
 
-    if (this.debug) {
+    if (loggingEnabled) {
       let providerStr = "";
       Object.keys(this.providers).forEach(function(provider) {
         if (providerStr === "") {
@@ -306,7 +322,8 @@ this.SafeBrowsing = {
     log("phishingEnabled:", this.phishingEnabled, "malwareEnabled:",
         this.malwareEnabled, "trackingEnabled:", this.trackingEnabled,
         "blockedEnabled:", this.blockedEnabled, "trackingAnnotations",
-        this.trackingAnnotations, "flashBlockEnabled", this.flashBlockEnabled);
+        this.trackingAnnotations, "flashBlockEnabled", this.flashBlockEnabled,
+        "flashInfobarListEnabled:", this.flashInfobarListEnabled);
 
     let listManager = Cc["@mozilla.org/url-classifier/listmanager;1"].
                       getService(Ci.nsIUrlListManager);
@@ -367,6 +384,13 @@ this.SafeBrowsing = {
         listManager.disableUpdate(this.flashLists[i]);
       }
     }
+    for (let i = 0; i < this.flashInfobarLists.length; ++i) {
+      if (this.flashInfobarListEnabled) {
+        listManager.enableUpdate(this.flashInfobarLists[i]);
+      } else {
+        listManager.disableUpdate(this.flashInfobarLists[i]);
+      }
+    }
     listManager.maybeToggleUpdateChecking();
   },
 
@@ -383,13 +407,6 @@ this.SafeBrowsing = {
     ];
     const whitelistURL  = "itisatrap.org/?resource=itisatracker.org";
     const blockedURL    = "itisatrap.org/firefox/blocked.html";
-
-    const flashDenyURL = "flashblock.itisatrap.org/";
-    const flashDenyExceptURL = "except.flashblock.itisatrap.org/";
-    const flashAllowURL = "flashallow.itisatrap.org/";
-    const flashAllowExceptURL = "except.flashallow.itisatrap.org/";
-    const flashSubDocURL = "flashsubdoc.itisatrap.org/";
-    const flashSubDocExceptURL = "except.flashsubdoc.itisatrap.org/";
 
     let update = "n:1000\ni:test-malware-simple\nad:1\n" +
                  "a:1:32:" + malwareURL.length + "\n" +
@@ -412,24 +429,6 @@ this.SafeBrowsing = {
     update += "n:1000\ni:test-block-simple\nad:1\n" +
               "a:1:32:" + blockedURL.length + "\n" +
               blockedURL;
-    update += "n:1000\ni:test-flash-simple\nad:1\n" +
-              "a:1:32:" + flashDenyURL.length + "\n" +
-              flashDenyURL;
-    update += "n:1000\ni:testexcept-flash-simple\nad:1\n" +
-              "a:1:32:" + flashDenyExceptURL.length + "\n" +
-              flashDenyExceptURL;
-    update += "n:1000\ni:test-flashallow-simple\nad:1\n" +
-              "a:1:32:" + flashAllowURL.length + "\n" +
-              flashAllowURL;
-    update += "n:1000\ni:testexcept-flashallow-simple\nad:1\n" +
-              "a:1:32:" + flashAllowExceptURL.length + "\n" +
-              flashAllowExceptURL;
-    update += "n:1000\ni:test-flashsubdoc-simple\nad:1\n" +
-              "a:1:32:" + flashSubDocURL.length + "\n" +
-              flashSubDocURL;
-    update += "n:1000\ni:testexcept-flashsubdoc-simple\nad:1\n" +
-              "a:1:32:" + flashSubDocExceptURL.length + "\n" +
-              flashSubDocExceptURL;
     log("addMozEntries:", update);
 
     let db = Cc["@mozilla.org/url-classifier/dbservice;1"].
@@ -450,7 +449,7 @@ this.SafeBrowsing = {
     };
 
     try {
-      let tables = "test-malware-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,test-block-simple,test-flash-simple,testexcept-flash-simple,test-flashallow-simple,testexcept-flashallow-simple,test-flashsubdoc-simple,testexcept-flashsubdoc-simple";
+      let tables = "test-malware-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,test-block-simple";
       db.beginUpdate(dummyListener, tables, "");
       db.beginStream("", "");
       db.updateStream(update);

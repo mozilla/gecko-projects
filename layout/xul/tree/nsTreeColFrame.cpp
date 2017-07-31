@@ -119,10 +119,10 @@ nsTreeColFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
     nsBoxFrame::BuildDisplayListForChildren(aBuilder, aLists);
     return;
   }
-  
+
   nsDisplayListCollection set;
   nsBoxFrame::BuildDisplayListForChildren(aBuilder, set);
-  
+
   WrapListsInRedirector(aBuilder, set, aLists);
 
   aLists.Content()->AppendNewToTop(new (aBuilder)

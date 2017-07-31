@@ -39,6 +39,7 @@ TEST_HARNESS_BINS = [
     'certutil',
     'crashinject',
     'fileid',
+    'geckodriver',
     'minidumpwriter',
     'pk12util',
     'screenshot',
@@ -150,12 +151,6 @@ ARCHIVE_FILES = {
             'source': buildconfig.topsrcdir,
             'base': 'testing',
             'pattern': 'firefox-ui/**',
-        },
-        {
-            'source': buildconfig.topsrcdir,
-            'base': 'dom/media/test/external',
-            'pattern': '**',
-            'dest': 'external-media-tests',
         },
         {
             'source': buildconfig.topsrcdir,

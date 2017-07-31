@@ -11,7 +11,6 @@
 #include <cstdlib>
 #include <stdio.h>
 #include "prio.h"
-#include "prmem.h"
 #include "nsNPAPIPlugin.h"
 #include "nsNPAPIPluginStreamListener.h"
 #include "nsNPAPIPluginInstance.h"
@@ -54,7 +53,6 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/FakePluginTagInitBinding.h"
 #include "mozilla/LoadInfo.h"
-#include "mozilla/plugins/PluginAsyncSurrogate.h"
 #include "mozilla/plugins/PluginBridge.h"
 #include "mozilla/plugins/PluginTypes.h"
 #include "mozilla/Preferences.h"
@@ -120,7 +118,6 @@ using namespace mozilla;
 using mozilla::TimeStamp;
 using mozilla::plugins::FakePluginTag;
 using mozilla::plugins::PluginTag;
-using mozilla::plugins::PluginAsyncSurrogate;
 using mozilla::dom::FakePluginTagInit;
 using mozilla::dom::FakePluginMimeEntry;
 
@@ -323,7 +320,8 @@ NS_IMPL_ISUPPORTS(nsPluginHost,
                   nsIPluginHost,
                   nsIObserver,
                   nsITimerCallback,
-                  nsISupportsWeakReference)
+                  nsISupportsWeakReference,
+                  nsINamed)
 
 already_AddRefed<nsPluginHost>
 nsPluginHost::GetInst()
@@ -759,7 +757,6 @@ nsPluginHost::InstantiatePluginInstance(const nsACString& aMimeType, nsIURI* aUR
     instanceOwner->Destroy();
     return NS_ERROR_FAILURE;
   }
-  const bool isAsyncInit = (rv == NS_PLUGIN_INIT_PENDING);
 
   RefPtr<nsNPAPIPluginInstance> instance;
   rv = instanceOwner->GetInstance(getter_AddRefs(instance));
@@ -768,8 +765,7 @@ nsPluginHost::InstantiatePluginInstance(const nsACString& aMimeType, nsIURI* aUR
     return rv;
   }
 
-  // Async init plugins will initiate their own widget creation.
-  if (!isAsyncInit && instance) {
+  if (instance) {
     CreateWidget(instanceOwner);
   }
 
@@ -1293,7 +1289,7 @@ nsresult nsPluginHost::EnsurePluginLoaded(nsPluginTag* aPluginTag)
 nsresult
 nsPluginHost::GetPluginForContentProcess(uint32_t aPluginId, nsNPAPIPlugin** aPlugin)
 {
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
+  AUTO_PROFILER_LABEL("nsPluginHost::GetPluginForContentProcess", OTHER);
   MOZ_ASSERT(XRE_IsParentProcess());
 
   // If plugins haven't been scanned yet, do so now
@@ -2370,6 +2366,7 @@ nsPluginHost::SetPluginsInContent(uint32_t aPluginEpoch,
       // Don't add the same plugin again.
       if (nsPluginTag* existing = PluginWithId(tag.id())) {
         UpdateInMemoryPluginInfo(existing);
+        existing->SetBlocklistState(tag.blocklistState());
         continue;
       }
 
@@ -2384,11 +2381,11 @@ nsPluginHost::SetPluginsInContent(uint32_t aPluginEpoch,
                                                nsTArray<nsCString>(tag.extensions()),
                                                tag.isJavaPlugin(),
                                                tag.isFlashPlugin(),
-                                               tag.supportsAsyncInit(),
                                                tag.supportsAsyncRender(),
                                                tag.lastModifiedTime(),
                                                tag.isFromExtension(),
-                                               tag.sandboxLevel());
+                                               tag.sandboxLevel(),
+                                               tag.blocklistState());
       AddPluginTag(pluginTag);
     }
 
@@ -2617,6 +2614,11 @@ nsPluginHost::SendPluginsToContent()
     /// to be more sane and avoid this dance
     nsPluginTag *tag = static_cast<nsPluginTag *>(basetag.get());
 
+    uint32_t blocklistState;
+    if (NS_WARN_IF(NS_FAILED(tag->GetBlocklistState(&blocklistState)))) {
+      return NS_ERROR_FAILURE;
+    }
+
     pluginTags.AppendElement(PluginTag(tag->mId,
                                        tag->Name(),
                                        tag->Description(),
@@ -2625,13 +2627,13 @@ nsPluginHost::SendPluginsToContent()
                                        tag->Extensions(),
                                        tag->mIsJavaPlugin,
                                        tag->mIsFlashPlugin,
-                                       tag->mSupportsAsyncInit,
                                        tag->mSupportsAsyncRender,
                                        tag->FileName(),
                                        tag->Version(),
                                        tag->mLastModifiedTime,
                                        tag->IsFromExtension(),
-                                       tag->mSandboxLevel));
+                                       tag->mSandboxLevel,
+                                       blocklistState));
   }
   nsTArray<dom::ContentParent*> parents;
   dom::ContentParent::GetAll(parents);
@@ -3399,7 +3401,7 @@ nsPluginHost::AddHeadersToChannel(const char *aHeadersData,
 nsresult
 nsPluginHost::StopPluginInstance(nsNPAPIPluginInstance* aInstance)
 {
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
+  AUTO_PROFILER_LABEL("nsPluginHost::StopPluginInstance", OTHER);
   if (PluginDestructionGuard::DelayDestroy(aInstance)) {
     return NS_OK;
   }
@@ -3495,6 +3497,13 @@ NS_IMETHODIMP nsPluginHost::Observe(nsISupports *aSubject,
     while (plugin) {
       plugin->InvalidateBlocklistState();
       plugin = plugin->mNext;
+    }
+    // We update blocklists asynchronously by just sending a new plugin list to
+    // content.
+    if (XRE_IsParentProcess()) {
+      // We'll need to repack our tags and send them to content again.
+      IncrementChromeEpoch();
+      SendPluginsToContent();
     }
   }
 #ifdef MOZ_WIDGET_ANDROID
@@ -3724,6 +3733,13 @@ NS_IMETHODIMP nsPluginHost::Notify(nsITimer* timer)
   }
 
   return NS_ERROR_FAILURE;
+}
+
+NS_IMETHODIMP
+nsPluginHost::GetName(nsACString& aName)
+{
+  aName.AssignLiteral("nsPluginHost");
+  return NS_OK;
 }
 
 #ifdef XP_WIN
@@ -4022,12 +4038,6 @@ PluginDestructionGuard::PluginDestructionGuard(nsNPAPIPluginInstance *aInstance)
   : mInstance(aInstance)
 {
   Init();
-}
-
-PluginDestructionGuard::PluginDestructionGuard(PluginAsyncSurrogate *aSurrogate)
-  : mInstance(static_cast<nsNPAPIPluginInstance*>(aSurrogate->GetNPP()->ndata))
-{
-  InitAsync();
 }
 
 PluginDestructionGuard::PluginDestructionGuard(NPP npp)

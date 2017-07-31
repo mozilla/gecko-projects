@@ -209,6 +209,7 @@ HttpBaseChannel::HttpBaseChannel()
   , mAltDataLength(0)
   , mForceMainDocumentChannel(false)
   , mIsTrackingResource(false)
+  , mLastRedirectFlags(0)
 {
   LOG(("Creating HttpBaseChannel @%p\n", this));
 
@@ -256,6 +257,9 @@ HttpBaseChannel::ReleaseMainThreadOnlyReferences()
   arrayToRelease.AppendElement(mProxyURI.forget());
   arrayToRelease.AppendElement(mPrincipal.forget());
   arrayToRelease.AppendElement(mTopWindowURI.forget());
+  arrayToRelease.AppendElement(mListener.forget());
+  arrayToRelease.AppendElement(mListenerContext.forget());
+  arrayToRelease.AppendElement(mCompressListener.forget());
 
   NS_DispatchToMainThread(new ProxyReleaseRunnable(Move(arrayToRelease)));
 }
@@ -915,7 +919,10 @@ HttpBaseChannel::OnCopyComplete(nsresult aStatus)
   MOZ_ASSERT(XRE_IsParentProcess());
 
   nsCOMPtr<nsIRunnable> runnable = NewRunnableMethod<nsresult>(
-    this, &HttpBaseChannel::EnsureUploadStreamIsCloneableComplete, aStatus);
+    "net::HttpBaseChannel::EnsureUploadStreamIsCloneableComplete",
+    this,
+    &HttpBaseChannel::EnsureUploadStreamIsCloneableComplete,
+    aStatus);
   NS_DispatchToMainThread(runnable.forget());
 }
 
@@ -2208,6 +2215,33 @@ HttpBaseChannel::GetProtocolVersion(nsACString& aProtocolVersion)
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
+HttpBaseChannel::SetTopWindowURIIfUnknown(nsIURI *aTopWindowURI)
+{
+  if (!aTopWindowURI) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  if (mTopWindowURI) {
+    LOG(("HttpChannelBase::SetTopWindowURIIfUnknown [this=%p] "
+         "mTopWindowURI is already set.\n", this));
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsIURI> topWindowURI;
+  Unused << GetTopWindowURI(getter_AddRefs(topWindowURI));
+
+  // Don't modify |mTopWindowURI| if we can get one from GetTopWindowURI().
+  if (topWindowURI) {
+    LOG(("HttpChannelBase::SetTopWindowURIIfUnknown [this=%p] "
+         "Return an error since we got a top window uri.\n", this));
+    return NS_ERROR_FAILURE;
+  }
+
+  mTopWindowURI = aTopWindowURI;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 HttpBaseChannel::GetTopWindowURI(nsIURI **aTopWindowURI)
 {
   nsresult rv = NS_OK;
@@ -2935,7 +2969,26 @@ HttpBaseChannel::ShouldIntercept(nsIURI* aURI)
   nsCOMPtr<nsINetworkInterceptController> controller;
   GetCallback(controller);
   bool shouldIntercept = false;
-  if (controller && !BypassServiceWorker() && mLoadInfo) {
+
+  // We should never intercept internal redirects.  The ServiceWorker code
+  // can trigger interntal redirects as the result of a FetchEvent.  If
+  // we re-intercept then an infinite loop can occur.
+  //
+  // Its also important that we do not set the LOAD_BYPASS_SERVICE_WORKER
+  // flag because an internal redirect occurs.  Its possible that another
+  // interception should occur after the internal redirect.  For example,
+  // if the ServiceWorker chooses not to call respondWith() the channel
+  // will be reset with an internal redirect.  If the request is a navigation
+  // and the network then triggers a redirect its possible the new URL
+  // should be intercepted again.
+  //
+  // Note, HSTS upgrade redirects are often treated the same as internal
+  // redirects.  In this case, however, we intentionally allow interception
+  // of HSTS upgrade redirects.  This matches the expected spec behavior and
+  // does not run the risk of infinite loops as described above.
+  bool internalRedirect = mLastRedirectFlags & nsIChannelEventSink::REDIRECT_INTERNAL;
+
+  if (controller && mLoadInfo && !BypassServiceWorker() && !internalRedirect) {
     nsresult rv = controller->ShouldPrepareForIntercept(aURI ? aURI : mURI.get(),
                                                         nsContentUtils::IsNonSubresourceRequest(this),
                                                         &shouldIntercept);
@@ -2973,6 +3026,70 @@ void HttpBaseChannel::AssertPrivateBrowsingId()
              "PrivateBrowsingId values are not the same between LoadInfo and LoadContext.");
 }
 #endif
+
+already_AddRefed<nsILoadInfo>
+HttpBaseChannel::CloneLoadInfoForRedirect(nsIURI * newURI, uint32_t redirectFlags)
+{
+  // make a copy of the loadinfo, append to the redirectchain
+  // this will be set on the newly created channel for the redirect target.
+  if (!mLoadInfo) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsILoadInfo> newLoadInfo =
+    static_cast<mozilla::LoadInfo*>(mLoadInfo.get())->Clone();
+
+  nsContentPolicyType contentPolicyType = mLoadInfo->GetExternalContentPolicyType();
+  if (contentPolicyType == nsIContentPolicy::TYPE_DOCUMENT ||
+      contentPolicyType == nsIContentPolicy::TYPE_SUBDOCUMENT) {
+    nsCOMPtr<nsIPrincipal> nullPrincipalToInherit = NullPrincipal::Create();
+    newLoadInfo->SetPrincipalToInherit(nullPrincipalToInherit);
+  }
+
+  // re-compute the origin attributes of the loadInfo if it's top-level load.
+  bool isTopLevelDoc =
+    newLoadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_DOCUMENT;
+
+  if (isTopLevelDoc) {
+    nsCOMPtr<nsILoadContext> loadContext;
+    NS_QueryNotificationCallbacks(this, loadContext);
+    OriginAttributes docShellAttrs;
+    if (loadContext) {
+      loadContext->GetOriginAttributes(docShellAttrs);
+    }
+
+    OriginAttributes attrs = newLoadInfo->GetOriginAttributes();
+
+    MOZ_ASSERT(docShellAttrs.mUserContextId == attrs.mUserContextId,
+                "docshell and necko should have the same userContextId attribute.");
+    MOZ_ASSERT(docShellAttrs.mInIsolatedMozBrowser == attrs.mInIsolatedMozBrowser,
+                "docshell and necko should have the same inIsolatedMozBrowser attribute.");
+    MOZ_ASSERT(docShellAttrs.mPrivateBrowsingId == attrs.mPrivateBrowsingId,
+                "docshell and necko should have the same privateBrowsingId attribute.");
+
+    attrs = docShellAttrs;
+    attrs.SetFirstPartyDomain(true, newURI);
+    newLoadInfo->SetOriginAttributes(attrs);
+  }
+
+  // Leave empty, we want a 'clean ground' when creating the new channel.
+  // This will be ensured to be either set by the protocol handler or set
+  // to the redirect target URI properly after the channel creation.
+  newLoadInfo->SetResultPrincipalURI(nullptr);
+
+  bool isInternalRedirect =
+    (redirectFlags & (nsIChannelEventSink::REDIRECT_INTERNAL |
+                      nsIChannelEventSink::REDIRECT_STS_UPGRADE));
+
+  nsCString remoteAddress;
+  Unused << GetRemoteAddress(remoteAddress);
+  nsCOMPtr<nsIRedirectHistoryEntry> entry =
+    new nsRedirectHistoryEntry(GetURIPrincipal(), mReferrer, remoteAddress);
+
+  newLoadInfo->AppendRedirectHistoryEntry(entry, isInternalRedirect);
+
+  return newLoadInfo.forget();
+}
 
 //-----------------------------------------------------------------------------
 // nsHttpChannel::nsITraceableChannel
@@ -3123,9 +3240,32 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
                                          bool          preserveMethod,
                                          uint32_t      redirectFlags)
 {
+  nsresult rv;
+
   LOG(("HttpBaseChannel::SetupReplacementChannel "
      "[this=%p newChannel=%p preserveMethod=%d]",
      this, newChannel, preserveMethod));
+
+  // Ensure the channel's loadInfo's result principal URI so that it's
+  // either non-null or updated to the redirect target URI.
+  // We must do this because in case the loadInfo's result principal URI
+  // is null, it would be taken from OriginalURI of the channel.  But we
+  // overwrite it with the whole redirect chain first URI before opening
+  // the target channel, hence the information would be lost.
+  // If the protocol handler that created the channel wants to use
+  // the originalURI of the channel as the principal URI, this fulfills
+  // that request - newURI is the original URI of the channel.
+  nsCOMPtr<nsILoadInfo> newLoadInfo = newChannel->GetLoadInfo();
+  if (newLoadInfo) {
+    nsCOMPtr<nsIURI> resultPrincipalURI;
+    rv = newLoadInfo->GetResultPrincipalURI(getter_AddRefs(resultPrincipalURI));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (!resultPrincipalURI) {
+      rv = newLoadInfo->SetResultPrincipalURI(newURI);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+  }
 
   uint32_t newLoadFlags = mLoadFlags | LOAD_REPLACE;
   // if the original channel was using SSL and this channel is not using
@@ -3135,7 +3275,7 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
   // since we force set INHIBIT_PERSISTENT_CACHING on all HTTPS channels,
   // we only need to check if the original channel was using SSL.
   bool usingSSL = false;
-  nsresult rv = mURI->SchemeIs("https", &usingSSL);
+  rv = mURI->SchemeIs("https", &usingSSL);
   if (NS_SUCCEEDED(rv) && usingSSL)
     newLoadFlags &= ~INHIBIT_PERSISTENT_CACHING;
 
@@ -3160,70 +3300,18 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
     }
   }
 
-  // make a copy of the loadinfo, append to the redirectchain
-  // and set it on the new channel
-  if (mLoadInfo) {
-    nsCOMPtr<nsILoadInfo> newLoadInfo =
-      static_cast<mozilla::LoadInfo*>(mLoadInfo.get())->Clone();
-
-    nsContentPolicyType contentPolicyType = mLoadInfo->GetExternalContentPolicyType();
-    if (contentPolicyType == nsIContentPolicy::TYPE_DOCUMENT ||
-        contentPolicyType == nsIContentPolicy::TYPE_SUBDOCUMENT) {
-      nsCOMPtr<nsIPrincipal> nullPrincipalToInherit = NullPrincipal::Create();
-      newLoadInfo->SetPrincipalToInherit(nullPrincipalToInherit);
-    }
-
-    // re-compute the origin attributes of the loadInfo if it's top-level load.
-    bool isTopLevelDoc =
-      newLoadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_DOCUMENT;
-
-    if (isTopLevelDoc) {
-      nsCOMPtr<nsILoadContext> loadContext;
-      NS_QueryNotificationCallbacks(this, loadContext);
-      OriginAttributes docShellAttrs;
-      if (loadContext) {
-        loadContext->GetOriginAttributes(docShellAttrs);
-      }
-
-      OriginAttributes attrs = newLoadInfo->GetOriginAttributes();
-
-      MOZ_ASSERT(docShellAttrs.mUserContextId == attrs.mUserContextId,
-                "docshell and necko should have the same userContextId attribute.");
-      MOZ_ASSERT(docShellAttrs.mInIsolatedMozBrowser == attrs.mInIsolatedMozBrowser,
-                "docshell and necko should have the same inIsolatedMozBrowser attribute.");
-      MOZ_ASSERT(docShellAttrs.mPrivateBrowsingId == attrs.mPrivateBrowsingId,
-                 "docshell and necko should have the same privateBrowsingId attribute.");
-
-      attrs = docShellAttrs;
-      attrs.SetFirstPartyDomain(true, newURI);
-      newLoadInfo->SetOriginAttributes(attrs);
-    }
-
-    bool isInternalRedirect =
-      (redirectFlags & (nsIChannelEventSink::REDIRECT_INTERNAL |
-                        nsIChannelEventSink::REDIRECT_STS_UPGRADE));
-    nsCString remoteAddress;
-    Unused << GetRemoteAddress(remoteAddress);
-    nsCOMPtr<nsIRedirectHistoryEntry> entry =
-      new nsRedirectHistoryEntry(GetURIPrincipal(), mReferrer, remoteAddress);
-
-    newLoadInfo->AppendRedirectHistoryEntry(entry, isInternalRedirect);
-    newChannel->SetLoadInfo(newLoadInfo);
-  }
-  else {
-    // the newChannel was created with a dummy loadInfo, we should clear
-    // it in case the original channel does not have a loadInfo
-    newChannel->SetLoadInfo(nullptr);
-  }
-
   nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(newChannel);
   if (!httpChannel)
     return NS_OK; // no other options to set
 
   // Preserve the CORS preflight information.
   nsCOMPtr<nsIHttpChannelInternal> httpInternal = do_QueryInterface(newChannel);
-  if (mRequireCORSPreflight && httpInternal) {
-    httpInternal->SetCorsPreflightParameters(mUnsafeHeaders);
+  if (httpInternal) {
+    httpInternal->SetLastRedirectFlags(redirectFlags);
+
+    if (mRequireCORSPreflight) {
+      httpInternal->SetCorsPreflightParameters(mUnsafeHeaders);
+    }
   }
 
   if (preserveMethod) {
@@ -3317,6 +3405,11 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
 
   // share the request context - see bug 1236650
   rv = httpChannel->SetRequestContextID(mRequestContextID);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+
+  // When on the parent process, the channel can't attempt to get it itself.
+  // When on the child process, it would be waste to query it again.
+  rv = httpChannel->SetTopLevelOuterContentWindowId(mTopLevelOuterContentWindowId);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   // Preserve the loading order
@@ -3750,6 +3843,12 @@ HttpBaseChannel::GetConnectStart(TimeStamp* _retval) {
 }
 
 NS_IMETHODIMP
+HttpBaseChannel::GetSecureConnectionStart(TimeStamp* _retval) {
+  *_retval = mTransactionTimings.secureConnectionStart;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 HttpBaseChannel::GetConnectEnd(TimeStamp* _retval) {
   *_retval = mTransactionTimings.connectEnd;
   return NS_OK;
@@ -3824,6 +3923,7 @@ IMPL_TIMING_ATTR(HandleFetchEventEnd)
 IMPL_TIMING_ATTR(DomainLookupStart)
 IMPL_TIMING_ATTR(DomainLookupEnd)
 IMPL_TIMING_ATTR(ConnectStart)
+IMPL_TIMING_ATTR(SecureConnectionStart)
 IMPL_TIMING_ATTR(ConnectEnd)
 IMPL_TIMING_ATTR(RequestStart)
 IMPL_TIMING_ATTR(ResponseStart)
@@ -4028,6 +4128,21 @@ HttpBaseChannel::GetConnectionInfoHashKey(nsACString& aConnectionInfoHashKey)
     return NS_ERROR_FAILURE;
   }
   aConnectionInfoHashKey.Assign(mConnectionInfo->HashKey());
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetLastRedirectFlags(uint32_t *aValue)
+{
+  NS_ENSURE_ARG(aValue);
+  *aValue = mLastRedirectFlags;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::SetLastRedirectFlags(uint32_t aValue)
+{
+  mLastRedirectFlags = aValue;
   return NS_OK;
 }
 

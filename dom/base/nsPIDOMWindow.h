@@ -29,10 +29,10 @@ class nsICSSDeclaration;
 class nsIDocShell;
 class nsIDocShellLoadInfo;
 class nsIDocument;
-class nsIEventTarget;
 class nsIIdleObserver;
 class nsIPrincipal;
 class nsIScriptTimeoutHandler;
+class nsISerialEventTarget;
 class nsIURI;
 class nsPIDOMWindowInner;
 class nsPIDOMWindowOuter;
@@ -179,11 +179,7 @@ public:
     mIsActive = aActive;
   }
 
-  virtual void SetIsBackground(bool aIsBackground)
-  {
-    MOZ_ASSERT(IsOuterWindow());
-    mIsBackground = aIsBackground;
-  }
+  virtual void SetIsBackground(bool aIsBackground) = 0;
 
   mozilla::dom::EventTarget* GetChromeEventHandler() const
   {
@@ -370,6 +366,24 @@ public:
   }
 
   /**
+   * Call this to indicate that some node (this window, its document,
+   * or content in that document) has a selectionchange event listener.
+   */
+  void SetHasSelectionChangeEventListeners()
+  {
+    mMayHaveSelectionChangeEventListener = true;
+  }
+
+  /**
+   * Call this to check whether some node (this window, its document,
+   * or content in that document) has a selectionchange event listener.
+   */
+  bool HasSelectionChangeEventListeners()
+  {
+    return mMayHaveSelectionChangeEventListener;
+  }
+
+  /**
    * Moves the top-level window into fullscreen mode if aIsFullScreen is true,
    * otherwise exits fullscreen.
    *
@@ -475,7 +489,7 @@ public:
    */
   virtual void DisableDeviceSensor(uint32_t aType) = 0;
 
-#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
+#if defined(MOZ_WIDGET_ANDROID)
   virtual void EnableOrientationChangeListener() = 0;
   virtual void DisableOrientationChangeListener() = 0;
 #endif
@@ -613,7 +627,7 @@ public:
 
   mozilla::dom::DocGroup* GetDocGroup() const;
 
-  virtual nsIEventTarget*
+  virtual nsISerialEventTarget*
   EventTargetFor(mozilla::TaskCategory aCategory) const = 0;
 
 protected:
@@ -671,8 +685,8 @@ protected:
   bool                   mIsInnerWindow;
   bool                   mMayHavePaintEventListener;
   bool                   mMayHaveTouchEventListener;
+  bool                   mMayHaveSelectionChangeEventListener;
   bool                   mMayHaveMouseEnterLeaveEventListener;
-  bool                   mMayHaveMouseMoveEventListener;
   bool                   mMayHavePointerEnterLeaveEventListener;
 
   // Used to detect whether we have called FreeInnerObjects() (e.g. to ensure
@@ -747,9 +761,17 @@ protected:
 
   mozilla::dom::LargeAllocStatus mLargeAllocStatus; // Outer window only
 
-  // When there is any created alive media component, we can consider to resume
-  // the media content in the window.
-  bool mShouldResumeOnFirstActiveMediaComponent;
+  // mTopInnerWindow is only used on inner windows for tab-wise check by timeout
+  // throttling. It could be null.
+  nsCOMPtr<nsPIDOMWindowInner> mTopInnerWindow;
+
+  // The evidence that we have tried to cache mTopInnerWindow only once from
+  // SetNewDocument(). Note: We need this extra flag because mTopInnerWindow
+  // could be null and we don't want it to be set multiple times.
+  bool mHasTriedToCacheTopInnerWindow;
+
+  // The number of active IndexedDB databases. Inner window only.
+  uint32_t mNumOfIndexedDBDatabases;
 };
 
 #define NS_PIDOMWINDOWINNER_IID \
@@ -816,24 +838,6 @@ public:
     }
 
     mMutationBits |= aType;
-  }
-
-  /**
-   * Call this to check whether some node (this window, its document,
-   * or content in that document) has or had a mousemove event listener.
-   */
-  bool HasMouseMoveEventListeners()
-  {
-    return mMayHaveMouseMoveEventListener;
-  }
-
-  /**
-   * Call this to indicate that some node (this window, its document,
-   * or content in that document) has or had a mousemove event listener.
-   */
-  void SetHasMouseMoveEventListeners()
-  {
-    mMayHaveMouseMoveEventListener = true;
   }
 
   /**
@@ -918,6 +922,19 @@ public:
 
   bool IsRunningTimeout();
 
+  // To cache top inner-window if available after constructed for tab-wised
+  // indexedDB counters.
+  void TryToCacheTopInnerWindow();
+
+  // Increase/Decrease the number of active IndexedDB transactions/databases for
+  // the decision making of TabGroup scheduling and timeout-throttling.
+  void UpdateActiveIndexedDBTransactionCount(int32_t aDelta);
+  void UpdateActiveIndexedDBDatabaseCount(int32_t aDelta);
+
+  // Return true if there is any active IndexedDB databases which could block
+  // timeout-throttling.
+  bool HasActiveIndexedDBDatabases();
+
 protected:
   void CreatePerformanceObjectIfNeeded();
 };
@@ -998,7 +1015,6 @@ public:
   float GetAudioVolume() const;
   nsresult SetAudioVolume(float aVolume);
 
-  void NotifyCreatedNewMediaComponent();
   void MaybeActiveMediaComponents();
 
   void SetServiceWorkersTestingEnabled(bool aEnabled);

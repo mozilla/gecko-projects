@@ -12,7 +12,6 @@ Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Preferences.jsm");
-Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/TelemetryController.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
 
@@ -30,6 +29,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "BrowserUITelemetry",
   "resource:///modules/BrowserUITelemetry.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
   "resource://gre/modules/PrivateBrowsingUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ProfileAge",
+  "resource://gre/modules/ProfileAge.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ReaderParent",
   "resource:///modules/ReaderParent.jsm");
 
@@ -167,6 +168,11 @@ this.UITour = {
         return gPhotonStructure ? "appMenu-developer-button" : "developer-button";
       },
     }],
+    ["forget", {
+      allowAdd: true,
+      query: "#panic-button",
+      widgetName: "panic-button",
+    }],
     ["help", {
       query: (aDocument) => {
         let buttonId = gPhotonStructure ? "appMenu-help-button" : "PanelUI-help";
@@ -174,10 +180,12 @@ this.UITour = {
       }
     }],
     ["home",        {query: "#home-button"}],
-    ["forget", {
-      allowAdd: true,
-      query: "#panic-button",
-      widgetName: "panic-button",
+    ["library", {
+     query: (aDocument) => {
+        let buttonId = "appMenu-library-button";
+        return gPhotonStructure ?
+          aDocument.getElementById(buttonId) : null;
+      }
     }],
     ["pocket", {
       allowAdd: true,
@@ -569,6 +577,9 @@ this.UITour = {
           return false;
         }
 
+        if (data.email) {
+          p.append("email", data.email);
+        }
         // We want to replace the current tab.
         browser.loadURI("about:accounts?" + p.toString());
         break;
@@ -643,7 +654,7 @@ this.UITour = {
             searchbar.textbox.popup.addEventListener("popupshown", onPopupShown);
             searchbar.openSuggestionsPanel();
           }
-        }).then(null, Cu.reportError);
+        }).catch(Cu.reportError);
         break;
       }
 
@@ -931,47 +942,45 @@ this.UITour = {
 
   getTarget(aWindow, aTargetName, aSticky = false) {
     log.debug("getTarget:", aTargetName);
-    let deferred = Promise.defer();
     if (typeof aTargetName != "string" || !aTargetName) {
       log.warn("getTarget: Invalid target name specified");
-      deferred.reject("Invalid target name specified");
-      return deferred.promise;
+      return Promise.reject("Invalid target name specified");
     }
 
     let targetObject = this.targets.get(aTargetName);
     if (!targetObject) {
       log.warn("getTarget: The specified target name is not in the allowed set");
-      deferred.reject("The specified target name is not in the allowed set");
-      return deferred.promise;
+      return Promise.reject("The specified target name is not in the allowed set");
     }
 
-    let targetQuery = targetObject.query;
-    aWindow.PanelUI.ensureReady().then(() => {
-      let node;
-      if (typeof targetQuery == "function") {
-        try {
-          node = targetQuery(aWindow.document);
-        } catch (ex) {
-          log.warn("getTarget: Error running target query:", ex);
-          node = null;
+    return new Promise(resolve => {
+      let targetQuery = targetObject.query;
+      aWindow.PanelUI.ensureReady().then(() => {
+        let node;
+        if (typeof targetQuery == "function") {
+          try {
+            node = targetQuery(aWindow.document);
+          } catch (ex) {
+            log.warn("getTarget: Error running target query:", ex);
+            node = null;
+          }
+        } else {
+          node = aWindow.document.querySelector(targetQuery);
         }
-      } else {
-        node = aWindow.document.querySelector(targetQuery);
-      }
 
-      deferred.resolve({
-        addTargetListener: targetObject.addTargetListener,
-        infoPanelOffsetX: targetObject.infoPanelOffsetX,
-        infoPanelOffsetY: targetObject.infoPanelOffsetY,
-        infoPanelPosition: targetObject.infoPanelPosition,
-        node,
-        removeTargetListener: targetObject.removeTargetListener,
-        targetName: aTargetName,
-        widgetName: targetObject.widgetName,
-        allowAdd: targetObject.allowAdd,
-      });
-    }).catch(log.error);
-    return deferred.promise;
+        resolve({
+          addTargetListener: targetObject.addTargetListener,
+          infoPanelOffsetX: targetObject.infoPanelOffsetX,
+          infoPanelOffsetY: targetObject.infoPanelOffsetY,
+          infoPanelPosition: targetObject.infoPanelPosition,
+          node,
+          removeTargetListener: targetObject.removeTargetListener,
+          targetName: aTargetName,
+          widgetName: targetObject.widgetName,
+          allowAdd: targetObject.allowAdd,
+        });
+      }).catch(log.error);
+    });
   },
 
   targetIsInAppMenu(aTarget) {
@@ -996,7 +1005,8 @@ this.UITour = {
    * Called before opening or after closing a highlight or info panel to see if
    * we need to open or close the appMenu to see the annotation's anchor.
    */
-  _setAppMenuStateForAnnotation(aWindow, aAnnotationType, aShouldOpenForHighlight, aCallback = null) {
+  _setAppMenuStateForAnnotation(aWindow, aAnnotationType, aShouldOpenForHighlight, aTarget = null,
+                                aCallback = null) {
     log.debug("_setAppMenuStateForAnnotation:", aAnnotationType);
     log.debug("_setAppMenuStateForAnnotation: Menu is expected to be:", aShouldOpenForHighlight ? "open" : "closed");
 
@@ -1026,7 +1036,16 @@ this.UITour = {
     // Actually show or hide the menu
     if (this.appMenuOpenForAnnotation.size) {
       log.debug("_setAppMenuStateForAnnotation: Opening the menu");
-      this.showMenu(aWindow, "appMenu", aCallback);
+      this.showMenu(aWindow, "appMenu", async () => {
+        // PanelMultiView's like the AppMenu might shuffle the DOM, which might result
+        // in our target being invalidated if it was anonymous content (since the XBL
+        // binding it belonged to got destroyed). We work around this by re-querying for
+        // the node and stuffing it into the old target structure.
+        log.debug("_setAppMenuStateForAnnotation: Refreshing target");
+        let refreshedTarget = await this.getTarget(aWindow, aTarget.targetName);
+        aTarget.node = refreshedTarget.node;
+        aCallback();
+      });
     } else {
       log.debug("_setAppMenuStateForAnnotation: Closing the menu");
       this.hideMenu(aWindow, "appMenu");
@@ -1121,16 +1140,11 @@ this.UITour = {
       /* The "overlap" position anchors from the top-left but we want to centre highlights at their
          minimum size. */
       let highlightWindow = aChromeWindow;
-      let containerStyle = highlightWindow.getComputedStyle(highlighter.parentElement);
-      let paddingTopPx = 0 - parseFloat(containerStyle.paddingTop);
-      let paddingLeftPx = 0 - parseFloat(containerStyle.paddingLeft);
       let highlightStyle = highlightWindow.getComputedStyle(highlighter);
       let highlightHeightWithMin = Math.max(highlightHeight, parseFloat(highlightStyle.minHeight));
       let highlightWidthWithMin = Math.max(highlightWidth, parseFloat(highlightStyle.minWidth));
-      let offsetX = paddingTopPx
-                      - (Math.max(0, highlightWidthWithMin - targetRect.width) / 2);
-      let offsetY = paddingLeftPx
-                      - (Math.max(0, highlightHeightWithMin - targetRect.height) / 2);
+      let offsetX = -(Math.max(0, highlightWidthWithMin - targetRect.width) / 2);
+      let offsetY = -(Math.max(0, highlightHeightWithMin - targetRect.height) / 2);
       this._addAnnotationPanelMutationObserver(highlighter.parentElement);
       highlighter.parentElement.openPopup(highlightAnchor, "overlap", offsetX, offsetY);
     }
@@ -1143,6 +1157,7 @@ this.UITour = {
 
     this._setAppMenuStateForAnnotation(aChromeWindow, "highlight",
                                        this.targetIsInAppMenu(aTarget),
+                                       aTarget,
                                        showHighlightPanel.bind(this));
   },
 
@@ -1272,9 +1287,17 @@ this.UITour = {
       return;
     }
 
+    // We need to bind the anchor argument to the showInfoPanel function call
+    // after _setAppMenuStateForAnnotation has finished, since
+    // _setAppMenuStateForAnnotation might have refreshed the anchor node.
+    let callShowInfoPanel = () => {
+      showInfoPanel.call(this, this._correctAnchor(aAnchor.node));
+    };
+
     this._setAppMenuStateForAnnotation(aChromeWindow, "info",
                                        this.targetIsInAppMenu(aAnchor),
-                                       showInfoPanel.bind(this, this._correctAnchor(aAnchor.node)));
+                                       aAnchor,
+                                       callShowInfoPanel);
   },
 
   isInfoOnTarget(aChromeWindow, aTargetName) {
@@ -1393,6 +1416,23 @@ this.UITour = {
                                     widgetWrapper.anchor,
                                     placement.area);
       }).catch(log.error);
+    } else if (aMenuName == "urlbar") {
+      this.getTarget(aWindow, "urlbar").then(target => {
+        let urlbar = target.node;
+        urlbar.popup.addEventListener("popupshown", evt => {
+          aOpenCallback && aOpenCallback(evt);
+        }, {once: true});
+        urlbar.focus();
+        // To demonstrate the ability of searching, we type "Firefox" in advance
+        // for URLBar's dropdown. To limit the search results on browser-related
+        // items, we use "Firefox" hard-coded rather than l10n brandShortName
+        // entity to avoid unrelated or unpredicted results for, like, Nightly
+        // or translated entites.
+        const SEARCH_STRING = "Firefox";
+        urlbar.value = SEARCH_STRING;
+        urlbar.select();
+        urlbar.controller.startSearch(SEARCH_STRING);
+      }).catch(Cu.reportError);
     }
   },
 
@@ -1476,43 +1516,7 @@ this.UITour = {
   getConfiguration(aMessageManager, aWindow, aConfiguration, aCallbackID) {
     switch (aConfiguration) {
       case "appinfo":
-        let props = ["defaultUpdateChannel", "version"];
-        let appinfo = {};
-        props.forEach(property => appinfo[property] = Services.appinfo[property]);
-
-        // Identifier of the partner repack, as stored in preference "distribution.id"
-        // and included in Firefox and other update pings. Note this is not the same as
-        // Services.appinfo.distributionID (value of MOZ_DISTRIBUTION_ID is set at build time).
-        let distribution =
-          Services.prefs.getDefaultBranch("distribution.").getCharPref("id", "default");
-        appinfo["distribution"] = distribution;
-
-        let isDefaultBrowser = null;
-        try {
-          let shell = aWindow.getShellService();
-          if (shell) {
-            isDefaultBrowser = shell.isDefaultBrowser(false);
-          }
-        } catch (e) {}
-        appinfo["defaultBrowser"] = isDefaultBrowser;
-
-        let canSetDefaultBrowserInBackground = true;
-        if (AppConstants.isPlatformAndVersionAtLeast("win", "6.2") ||
-            AppConstants.isPlatformAndVersionAtLeast("macosx", "10.10")) {
-          canSetDefaultBrowserInBackground = false;
-        } else if (AppConstants.platform == "linux") {
-          // The ShellService may not exist on some versions of Linux.
-          try {
-            aWindow.getShellService();
-          } catch (e) {
-            canSetDefaultBrowserInBackground = null;
-          }
-        }
-
-        appinfo["canSetDefaultBrowserInBackground"] =
-          canSetDefaultBrowserInBackground;
-
-        this.sendPageCallback(aMessageManager, aCallbackID, appinfo);
+        this.getAppInfo(aMessageManager, aWindow, aCallbackID);
         break;
       case "availableTargets":
         this.getAvailableTargets(aMessageManager, aWindow, aCallbackID);
@@ -1567,6 +1571,64 @@ this.UITour = {
         log.error("setConfiguration: Unknown configuration requested: " + aConfiguration);
         break;
     }
+  },
+
+  getAppInfo(aMessageManager, aWindow, aCallbackID) {
+    (async() => {
+      let props = ["defaultUpdateChannel", "version"];
+      let appinfo = {};
+      props.forEach(property => appinfo[property] = Services.appinfo[property]);
+
+      // Identifier of the partner repack, as stored in preference "distribution.id"
+      // and included in Firefox and other update pings. Note this is not the same as
+      // Services.appinfo.distributionID (value of MOZ_DISTRIBUTION_ID is set at build time).
+      let distribution =
+          Services.prefs.getDefaultBranch("distribution.").getCharPref("id", "default");
+      appinfo["distribution"] = distribution;
+
+      let isDefaultBrowser = null;
+      try {
+        let shell = aWindow.getShellService();
+        if (shell) {
+          isDefaultBrowser = shell.isDefaultBrowser(false);
+        }
+      } catch (e) {}
+      appinfo["defaultBrowser"] = isDefaultBrowser;
+
+      let canSetDefaultBrowserInBackground = true;
+      if (AppConstants.isPlatformAndVersionAtLeast("win", "6.2") ||
+          AppConstants.isPlatformAndVersionAtLeast("macosx", "10.10")) {
+        canSetDefaultBrowserInBackground = false;
+      } else if (AppConstants.platform == "linux") {
+        // The ShellService may not exist on some versions of Linux.
+        try {
+          aWindow.getShellService();
+        } catch (e) {
+          canSetDefaultBrowserInBackground = null;
+        }
+      }
+
+      appinfo["canSetDefaultBrowserInBackground"] =
+        canSetDefaultBrowserInBackground;
+
+      // Expose Profile creation and last reset dates in weeks.
+      const ONE_WEEK = 7 * 24 * 60 * 60 * 1000;
+      let profileAge = new ProfileAge(null, null);
+      let createdDate = await profileAge.created;
+      let resetDate = await profileAge.reset;
+      let createdWeeksAgo = Math.floor((Date.now() - createdDate) / ONE_WEEK);
+      let resetWeeksAgo = null;
+      if (resetDate) {
+        resetWeeksAgo = Math.floor((Date.now() - resetDate) / ONE_WEEK);
+      }
+      appinfo["profileCreatedWeeksAgo"] = createdWeeksAgo;
+      appinfo["profileResetWeeksAgo"] = resetWeeksAgo;
+
+      this.sendPageCallback(aMessageManager, aCallbackID, appinfo);
+    })().catch(err => {
+      log.error(err);
+      this.sendPageCallback(aMessageManager, aCallbackID, {});
+    })
   },
 
   getAvailableTargets(aMessageManager, aChromeWindow, aCallbackID) {

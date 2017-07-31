@@ -83,7 +83,7 @@ class SVGBBox {
   typedef mozilla::gfx::Rect Rect;
 
 public:
-  SVGBBox() 
+  SVGBBox()
     : mIsEmpty(true) {}
 
   MOZ_IMPLICIT SVGBBox(const Rect& aRect)
@@ -197,12 +197,6 @@ public:
   static void Init();
 
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(ObjectBoundingBoxProperty, gfxRect)
-
-  /**
-   * Gets the nearest nsSVGInnerSVGFrame or nsSVGOuterSVGFrame frame. aFrame
-   * must be an SVG frame.
-   */
-  static nsIFrame* GetNearestSVGViewport(nsIFrame *aFrame);
 
   /**
    * Returns the frame's post-filter visual overflow rect when passed the

@@ -404,9 +404,10 @@ WebBrowserChrome2Stub::Blur()
 class BrowserDestroyer final : public Runnable
 {
 public:
-  BrowserDestroyer(nsIWebBrowser *aBrowser, nsISupports *aContainer) :
-    mBrowser(aBrowser),
-    mContainer(aContainer)
+  BrowserDestroyer(nsIWebBrowser* aBrowser, nsISupports* aContainer)
+    : mozilla::Runnable("BrowserDestroyer")
+    , mBrowser(aBrowser)
+    , mContainer(aContainer)
   {
   }
 
@@ -730,13 +731,6 @@ nsAppShellService::JustCreateTopWindow(nsIXULWindow *aParent,
   bool center = aChromeMask & nsIWebBrowserChrome::CHROME_CENTER_SCREEN;
 
   widgetInitData.mRTL = LocaleService::GetInstance()->IsAppLocaleRTL();
-
-#ifdef MOZ_WIDGET_GONK
-  // B2G multi-screen support. Screen ID is for differentiating screens of
-  // windows, and due to the hardware limitation, it is platform-specific for
-  // now, which align with the value of display type defined in HWC.
-  widgetInitData.mScreenId = mScreenId;
-#endif
 
   nsresult rv = window->Initialize(parent, center ? aParent : nullptr,
                                    aUrl, aInitialWidth, aInitialHeight,

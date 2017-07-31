@@ -154,33 +154,29 @@ DOMIntersectionObserver::Observe(Element& aTarget)
     return;
   }
   aTarget.RegisterIntersectionObserver(this);
-  mObservationTargets.PutEntry(&aTarget);
+  mObservationTargets.AppendElement(&aTarget);
   Connect();
 }
 
 void
 DOMIntersectionObserver::Unobserve(Element& aTarget)
 {
-  if (mObservationTargets.Count() == 1) {
+  if (mObservationTargets.Length() == 1) {
     Disconnect();
     return;
   }
 
-  mObservationTargets.RemoveEntry(&aTarget);
+  mObservationTargets.RemoveElement(&aTarget);
   aTarget.UnregisterIntersectionObserver(this);
 }
 
 void
 DOMIntersectionObserver::UnlinkTarget(Element& aTarget)
 {
-    if (!mObservationTargets.Contains(&aTarget)) {
-        return;
-    }
-
-    mObservationTargets.RemoveEntry(&aTarget);
-    if (mObservationTargets.Count() == 0) {
-        Disconnect();
-    }
+  mObservationTargets.RemoveElement(&aTarget);
+  if (mObservationTargets.Length() == 0) {
+    Disconnect();
+  }
 }
 
 void
@@ -204,8 +200,8 @@ DOMIntersectionObserver::Disconnect()
   }
 
   mConnected = false;
-  for (auto iter = mObservationTargets.Iter(); !iter.Done(); iter.Next()) {
-    Element* target = iter.Get()->GetKey();
+  for (size_t i = 0; i < mObservationTargets.Length(); ++i) {
+    Element* target = mObservationTargets.ElementAt(i);
     target->UnregisterIntersectionObserver(this);
   }
   mObservationTargets.Clear();
@@ -272,17 +268,21 @@ DOMIntersectionObserver::Update(nsIDocument* aDocument, DOMHighResTimeStamp time
     root = mRoot;
     rootFrame = root->GetPrimaryFrame();
     if (rootFrame) {
+      nsRect rootRectRelativeToRootFrame;
       if (rootFrame->IsScrollFrame()) {
+        // rootRectRelativeToRootFrame should be the content rect of rootFrame, not including the scrollbars.
         nsIScrollableFrame* scrollFrame = do_QueryFrame(rootFrame);
-        rootRect = nsLayoutUtils::TransformFrameRectToAncestor(
-          rootFrame,
-          rootFrame->GetContentRectRelativeToSelf(),
-          scrollFrame->GetScrolledFrame());
+        rootRectRelativeToRootFrame = scrollFrame->GetScrollPortRect();
       } else {
-        rootRect = nsLayoutUtils::GetAllInFlowRectsUnion(rootFrame,
-          nsLayoutUtils::GetContainingBlockForClientRect(rootFrame),
-          nsLayoutUtils::RECTS_ACCOUNT_FOR_TRANSFORMS);
+        // rootRectRelativeToRootFrame should be the border rect of rootFrame.
+        rootRectRelativeToRootFrame = rootFrame->GetRectRelativeToSelf();
       }
+      nsIFrame* containingBlock =
+        nsLayoutUtils::GetContainingBlockForClientRect(rootFrame);
+      rootRect =
+        nsLayoutUtils::TransformFrameRectToAncestor(rootFrame,
+                                                    rootRectRelativeToRootFrame,
+                                                    containingBlock);
     }
   } else {
     nsCOMPtr<nsIPresShell> presShell = aDocument->GetShell();
@@ -325,8 +325,8 @@ DOMIntersectionObserver::Update(nsIDocument* aDocument, DOMHighResTimeStamp time
     rootMargin.Side(side) = nsLayoutUtils::ComputeCBDependentValue(basis, coord);
   }
 
-  for (auto iter = mObservationTargets.Iter(); !iter.Done(); iter.Next()) {
-    Element* target = iter.Get()->GetKey();
+  for (size_t i = 0; i < mObservationTargets.Length(); ++i) {
+    Element* target = mObservationTargets.ElementAt(i);
     nsIFrame* targetFrame = target->GetPrimaryFrame();
     nsRect targetRect;
     Maybe<nsRect> intersectionRect;
@@ -356,7 +356,7 @@ DOMIntersectionObserver::Update(nsIDocument* aDocument, DOMHighResTimeStamp time
         nsLayoutUtils::GetContainingBlockForClientRect(targetFrame),
         nsLayoutUtils::RECTS_ACCOUNT_FOR_TRANSFORMS
       );
-      intersectionRect = Some(targetFrame->GetVisualOverflowRect());
+      intersectionRect = Some(targetFrame->GetRectRelativeToSelf());
 
       nsIFrame* containerFrame = nsLayoutUtils::GetCrossDocParentFrame(targetFrame);
       while (containerFrame && containerFrame != rootFrame) {
@@ -414,8 +414,10 @@ DOMIntersectionObserver::Update(nsIDocument* aDocument, DOMHighResTimeStamp time
       if (intersectionRect.isSome() && !isSameDoc) {
         nsRect rect = intersectionRect.value();
         nsPresContext* presContext = targetFrame->PresContext();
-        nsLayoutUtils::TransformRect(rootFrame,
-          presContext->PresShell()->GetRootScrollFrame(), rect);
+        nsIFrame* rootScrollFrame = presContext->PresShell()->GetRootScrollFrame();
+        if (rootScrollFrame) {
+          nsLayoutUtils::TransformRect(rootFrame, rootScrollFrame, rect);
+        }
         intersectionRect = Some(rect);
       }
     }
@@ -423,7 +425,7 @@ DOMIntersectionObserver::Update(nsIDocument* aDocument, DOMHighResTimeStamp time
     double targetArea = targetRect.width * targetRect.height;
     double intersectionArea = !intersectionRect ?
       0 : intersectionRect->width * intersectionRect->height;
-    
+
     double intersectionRatio;
     if (targetArea > 0.0) {
       intersectionRatio = intersectionArea / targetArea;
@@ -431,15 +433,15 @@ DOMIntersectionObserver::Update(nsIDocument* aDocument, DOMHighResTimeStamp time
       intersectionRatio = intersectionRect.isSome() ? 1.0 : 0.0;
     }
 
-    size_t threshold = -1;
+    int32_t threshold = -1;
     if (intersectionRatio > 0.0) {
       if (intersectionRatio >= 1.0) {
         intersectionRatio = 1.0;
-        threshold = mThresholds.Length();
+        threshold = (int32_t)mThresholds.Length();
       } else {
         for (size_t k = 0; k < mThresholds.Length(); ++k) {
           if (mThresholds[k] <= intersectionRatio) {
-            threshold = k + 1;
+            threshold = (int32_t)k + 1;
           } else {
             break;
           }
@@ -499,7 +501,7 @@ DOMIntersectionObserver::Notify()
   }
   mozilla::dom::Sequence<mozilla::OwningNonNull<DOMIntersectionObserverEntry>> entries;
   if (entries.SetCapacity(mQueuedEntries.Length(), mozilla::fallible)) {
-    for (uint32_t i = 0; i < mQueuedEntries.Length(); ++i) {
+    for (size_t i = 0; i < mQueuedEntries.Length(); ++i) {
       RefPtr<DOMIntersectionObserverEntry> next = mQueuedEntries[i];
       *entries.AppendElement(mozilla::fallible) = next;
     }

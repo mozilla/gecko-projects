@@ -85,7 +85,7 @@ public:
       return false;
     return nsBoxFrame::IsFrameOfType(aFlags);
   }
-  
+
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override;
 #endif
@@ -256,8 +256,8 @@ nsresult
 nsRootBoxFrame::RemoveTooltipSupport(nsIContent* aNode)
 {
   // XXjh yuck, I'll have to implement a way to get at
-  // the tooltip listener for a given node to make 
-  // this work.  Not crucial, we aren't removing 
+  // the tooltip listener for a given node to make
+  // this work.  Not crucial, we aren't removing
   // tooltips from any nodes in the app just yet.
   return NS_ERROR_NOT_IMPLEMENTED;
 }

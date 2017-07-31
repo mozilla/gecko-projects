@@ -18,10 +18,6 @@ lazy_static! {
         // (bug 1176798, bug 1177018, bug 1210465)
         ("apz.content_response_timeout", Pref::new(60000)),
 
-        // Enable the dump function, which sends messages to the system
-        // console
-        ("browser.dom.window.dump.enabled", Pref::new(true)),
-
         // Indicate that the download panel has been shown once so
         // that whichever download test runs first does not show the popup
         // inconsistently
@@ -175,6 +171,9 @@ lazy_static! {
 
         // Make sure the disk cache does not get auto disabled
         ("network.http.bypass-cachelock-threshold", Pref::new(200000)),
+
+        // Do not prompt with long usernames or passwords in URLs
+        ("network.http.phishy-userpass-length", Pref::new(255)),
 
         // Do not prompt for temporary redirects
         ("network.http.prompt-temp-redirect", Pref::new(false)),

@@ -36,11 +36,11 @@ this.ClientEnvironment = {
    * The server request is made lazily and is cached for the entire browser
    * session.
    */
-  async getClientClassification() {
+  getClientClassification() {
     if (!_classifyRequest) {
       _classifyRequest = NormandyApi.classifyClient();
     }
-    return await _classifyRequest;
+    return _classifyRequest;
   },
 
   clearClassifyCache() {
@@ -195,6 +195,10 @@ this.ClientEnvironment = {
       }
 
       return names;
+    });
+
+    XPCOMUtils.defineLazyGetter(environment, "isFirstRun", () => {
+      return Preferences.get("extensions.shield-recipe-client.first_run");
     });
 
     return environment;

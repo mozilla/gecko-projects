@@ -352,7 +352,7 @@ template<class C> struct ProxyArg<LocalRef<C>> : ProxyArg<typename C::Ref> {};
 template<class Impl, class Owner, bool IsStatic,
          bool HasThisArg /* has instance/class local ref in the call */,
          typename... Args>
-class ProxyNativeCall : public AbstractCall
+class ProxyNativeCall
 {
     // "this arg" refers to the Class::LocalRef (for static methods) or
     // Owner::LocalRef (for instance methods) that we optionally (as indicated
@@ -404,9 +404,10 @@ class ProxyNativeCall : public AbstractCall
     Call(const typename Owner::LocalRef& inst,
          mozilla::IndexSequence<Indices...>) const
     {
-        Impl* const impl = NativePtr<Impl>::Get(inst);
-        MOZ_CATCH_JNI_EXCEPTION(inst.Env());
-        (impl->*mNativeCall)(inst, mozilla::Get<Indices>(mArgs)...);
+        if (Impl* const impl = NativePtr<Impl>::Get(inst)) {
+            MOZ_CATCH_JNI_EXCEPTION(inst.Env());
+            (impl->*mNativeCall)(inst, mozilla::Get<Indices>(mArgs)...);
+        }
     }
 
     template<bool Static, bool ThisArg, size_t... Indices>
@@ -414,9 +415,10 @@ class ProxyNativeCall : public AbstractCall
     Call(const typename Owner::LocalRef& inst,
          mozilla::IndexSequence<Indices...>) const
     {
-        Impl* const impl = NativePtr<Impl>::Get(inst);
-        MOZ_CATCH_JNI_EXCEPTION(inst.Env());
-        (impl->*mNativeCall)(mozilla::Get<Indices>(mArgs)...);
+        if (Impl* const impl = NativePtr<Impl>::Get(inst)) {
+            MOZ_CATCH_JNI_EXCEPTION(inst.Env());
+            (impl->*mNativeCall)(mozilla::Get<Indices>(mArgs)...);
+        }
     }
 
     template<size_t... Indices>
@@ -473,7 +475,7 @@ public:
     void SetTarget(NativeCallType call) { mNativeCall = call; }
     template<typename T> void SetTarget(T&&) const { MOZ_CRASH(); }
 
-    void operator()() override
+    void operator()()
     {
         JNIEnv* const env = GetEnvForThread();
         typename ThisArgClass::LocalRef thisArg(env, mThisArg);
@@ -512,10 +514,12 @@ struct Dispatcher
         // For a static method, do not forward the "this arg" (i.e. the class
         // local ref) if the implementation does not request it. This saves us
         // a pair of calls to add/delete global ref.
-        DispatchToGeckoPriorityQueue(MakeUnique<ProxyNativeCall<
-                Impl, typename Traits::Owner, IsStatic, HasThisArg,
-                Args...>>(HasThisArg || !IsStatic ? thisArg : nullptr,
-                          Forward<ProxyArgs>(args)...));
+        auto proxy = ProxyNativeCall<Impl, typename Traits::Owner, IsStatic,
+                                     HasThisArg, Args...>(
+                (HasThisArg || !IsStatic) ? thisArg : nullptr,
+                Forward<ProxyArgs>(args)...);
+        DispatchToGeckoPriorityQueue(
+                NS_NewRunnableFunction("PriorityNativeCall", Move(proxy)));
     }
 
     template<class Traits, bool IsStatic = Traits::isStatic,
@@ -527,10 +531,12 @@ struct Dispatcher
         // For a static method, do not forward the "this arg" (i.e. the class
         // local ref) if the implementation does not request it. This saves us
         // a pair of calls to add/delete global ref.
-        NS_DispatchToMainThread(NS_NewRunnableFunction(ProxyNativeCall<
-                Impl, typename Traits::Owner, IsStatic, HasThisArg,
-                Args...>(HasThisArg || !IsStatic ? thisArg : nullptr,
-                          Forward<ProxyArgs>(args)...)));
+        auto proxy = ProxyNativeCall<Impl, typename Traits::Owner, IsStatic,
+                                     HasThisArg, Args...>(
+                (HasThisArg || !IsStatic) ? thisArg : nullptr,
+                Forward<ProxyArgs>(args)...);
+        NS_DispatchToMainThread(
+                NS_NewRunnableFunction("GeckoNativeCall", Move(proxy)));
     }
 
     template<class Traits, bool IsStatic = false, typename... ProxyArgs>

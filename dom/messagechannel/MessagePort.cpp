@@ -53,7 +53,8 @@ class PostMessageRunnable final : public CancelableRunnable
 
 public:
   PostMessageRunnable(MessagePort* aPort, SharedMessagePortMessage* aData)
-    : mPort(aPort)
+    : CancelableRunnable("dom::PostMessageRunnable")
+    , mPort(aPort)
     , mData(aData)
   {
     MOZ_ASSERT(aPort);
@@ -402,13 +403,13 @@ MessagePort::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
   // Here we want to check if the transerable object list contains
   // this port.
   for (uint32_t i = 0; i < aTransferable.Length(); ++i) {
-    JSObject* object = aTransferable[i];
+    JS::Rooted<JSObject*> object(aCx, aTransferable[i]);
     if (!object) {
       continue;
     }
 
     MessagePort* port = nullptr;
-    nsresult rv = UNWRAP_OBJECT(MessagePort, object, port);
+    nsresult rv = UNWRAP_OBJECT(MessagePort, &object, port);
     if (NS_SUCCEEDED(rv) && port == this) {
       aRv.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
       return;
@@ -561,7 +562,7 @@ MessagePort::Dispatch()
 
   nsCOMPtr<nsIGlobalObject> global = GetOwnerGlobal();
   if (NS_IsMainThread() && global) {
-    MOZ_ALWAYS_SUCCEEDS(global->Dispatch("MessagePortMessage", TaskCategory::Other, do_AddRef(mPostMessageRunnable)));
+    MOZ_ALWAYS_SUCCEEDS(global->Dispatch(TaskCategory::Other, do_AddRef(mPostMessageRunnable)));
     return;
   }
 

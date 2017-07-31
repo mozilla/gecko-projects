@@ -7,9 +7,9 @@
 #ifndef mozilla_dom_WebAuthnManager_h
 #define mozilla_dom_WebAuthnManager_h
 
-#include "nsIIPCBackgroundChildCreateCallback.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/dom/PWebAuthnTransaction.h"
+#include "nsIIPCBackgroundChildCreateCallback.h"
 
 /*
  * Content process manager for the WebAuthn protocol. Created on calls to the
@@ -41,6 +41,13 @@
  *
  */
 
+// Forward decl because of nsHTMLDocument.h's complex dependency on /layout/style
+class nsHTMLDocument {
+public:
+  bool IsRegistrableDomainSuffixOfOrEqualTo(const nsAString& aHostSuffixString,
+                                            const nsACString& aOrigHost);
+};
+
 namespace mozilla {
 namespace dom {
 
@@ -62,8 +69,7 @@ public:
   static WebAuthnManager* Get();
 
   void
-  FinishMakeCredential(nsTArray<uint8_t>& aRegBuffer,
-                       nsTArray<uint8_t>& aSigBuffer);
+  FinishMakeCredential(nsTArray<uint8_t>& aRegBuffer);
 
   void
   FinishGetAssertion(nsTArray<uint8_t>& aCredentialId,
@@ -73,16 +79,12 @@ public:
   Cancel(const nsresult& aError);
 
   already_AddRefed<Promise>
-  MakeCredential(nsPIDOMWindowInner* aParent, JSContext* aCx,
-                 const Account& aAccountInformation,
-                 const Sequence<ScopedCredentialParameters>& aCryptoParameters,
-                 const ArrayBufferViewOrArrayBuffer& aAttestationChallenge,
-                 const ScopedCredentialOptions& aOptions);
+  MakeCredential(nsPIDOMWindowInner* aParent,
+                 const MakeCredentialOptions& aOptions);
 
   already_AddRefed<Promise>
   GetAssertion(nsPIDOMWindowInner* aParent,
-               const ArrayBufferViewOrArrayBuffer& aAssertionChallenge,
-               const AssertionOptions& aOptions);
+               const PublicKeyCredentialRequestOptions& aOptions);
 
   void StartRegister();
   void StartSign();
@@ -97,8 +99,9 @@ private:
 
   void MaybeClearTransaction();
 
-  already_AddRefed<MozPromise<nsresult, nsresult, false>>
-  GetOrCreateBackgroundActor();
+  typedef MozPromise<nsresult, nsresult, false> BackgroundActorPromise;
+
+  RefPtr<BackgroundActorPromise> GetOrCreateBackgroundActor();
 
   // JS Promise representing transaction status.
   RefPtr<Promise> mTransactionPromise;
@@ -118,7 +121,7 @@ private:
   Maybe<WebAuthnTransactionInfo> mInfo;
 
   // Promise for dealing with PBackground Actor creation.
-  MozPromiseHolder<MozPromise<nsresult, nsresult, false>> mPBackgroundCreationPromise;
+  MozPromiseHolder<BackgroundActorPromise> mPBackgroundCreationPromise;
 };
 
 } // namespace dom

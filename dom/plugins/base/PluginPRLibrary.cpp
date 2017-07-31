@@ -57,12 +57,6 @@ PluginPRLibrary::NP_Initialize(NPNetscapeFuncs* bFuncs,
   mNPP_GetSitesWithData = pFuncs->getsiteswithdata;
   return NS_OK;
 }
-#elif defined(MOZ_WIDGET_GONK)
-nsresult
-PluginPRLibrary::NP_Initialize(NPNetscapeFuncs* bFuncs, NPError* error)
-{
-  return NS_OK;
-}
 #elif defined(XP_UNIX) && !defined(XP_MACOSX)
 nsresult
 PluginPRLibrary::NP_Initialize(NPNetscapeFuncs* bFuncs,
@@ -276,7 +270,7 @@ PluginPRLibrary::IsRemoteDrawingCoreAnimation(NPP instance, bool *aDrawing)
 {
   nsNPAPIPluginInstance* inst = (nsNPAPIPluginInstance*)instance->ndata;
   NS_ENSURE_TRUE(inst, NS_ERROR_NULL_POINTER);
-  *aDrawing = false; 
+  *aDrawing = false;
   return NS_OK;
 }
 #endif

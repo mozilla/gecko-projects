@@ -112,6 +112,9 @@ public:
       int32_t offset;
       ok &= NS_SUCCEEDED(info->Offset(&offset));
 
+      int32_t size;
+      ok &= NS_SUCCEEDED(info->Size(&size));
+
       int64_t presentationTimeUs;
       ok &= NS_SUCCEEDED(info->PresentationTimeUs(&presentationTimeUs));
 
@@ -130,7 +133,7 @@ public:
         return;
       }
 
-      if (ok && presentationTimeUs >= 0) {
+      if (ok && (size > 0 || presentationTimeUs >= 0)) {
         RefPtr<layers::Image> img = new SurfaceTextureImage(
           mDecoder->mSurfaceHandle, inputInfo.mImageSize, false /* NOT continuous */,
           gl::OriginPos::BottomLeft);
@@ -552,7 +555,8 @@ RemoteDataDecoder::UpdateInputStatus(int64_t aTimestamp, bool aProcessed)
 {
   if (!mTaskQueue->IsCurrentThreadIn()) {
     mTaskQueue->Dispatch(
-      NewRunnableMethod<int64_t, bool>(this,
+      NewRunnableMethod<int64_t, bool>("RemoteDataDecoder::UpdateInputStatus",
+                                       this,
                                        &RemoteDataDecoder::UpdateInputStatus,
                                        aTimestamp,
                                        aProcessed));
@@ -580,7 +584,8 @@ RemoteDataDecoder::UpdateOutputStatus(MediaData* aSample)
 {
   if (!mTaskQueue->IsCurrentThreadIn()) {
     mTaskQueue->Dispatch(
-      NewRunnableMethod<MediaData*>(this,
+      NewRunnableMethod<MediaData*>("RemoteDataDecoder::UpdateOutputStatus",
+                                    this,
                                     &RemoteDataDecoder::UpdateOutputStatus,
                                     aSample));
     return;
@@ -603,7 +608,8 @@ RemoteDataDecoder::ReturnDecodedData()
   if (!mDecodePromise.IsEmpty()) {
     mDecodePromise.Resolve(mDecodedData, __func__);
     mDecodedData.Clear();
-  } else if (!mDrainPromise.IsEmpty()) {
+  } else if (!mDrainPromise.IsEmpty() &&
+             (!mDecodedData.IsEmpty() || mDrainStatus == DrainStatus::DRAINED)) {
     mDrainPromise.Resolve(mDecodedData, __func__);
     mDecodedData.Clear();
   }
@@ -614,7 +620,8 @@ RemoteDataDecoder::DrainComplete()
 {
   if (!mTaskQueue->IsCurrentThreadIn()) {
     mTaskQueue->Dispatch(
-      NewRunnableMethod(this, &RemoteDataDecoder::DrainComplete));
+      NewRunnableMethod("RemoteDataDecoder::DrainComplete",
+                        this, &RemoteDataDecoder::DrainComplete));
     return;
   }
   AssertOnTaskQueue();
@@ -632,7 +639,8 @@ RemoteDataDecoder::Error(const MediaResult& aError)
 {
   if (!mTaskQueue->IsCurrentThreadIn()) {
     mTaskQueue->Dispatch(
-      NewRunnableMethod<MediaResult>(this, &RemoteDataDecoder::Error, aError));
+      NewRunnableMethod<MediaResult>("RemoteDataDecoder::Error",
+                                     this, &RemoteDataDecoder::Error, aError));
     return;
   }
   AssertOnTaskQueue();

@@ -5,7 +5,7 @@
 //! Configuration options for a single run of the servo application. Created
 //! from command line arguments.
 
-use euclid::size::TypedSize2D;
+use euclid::TypedSize2D;
 use getopts::Options;
 use num_cpus;
 use prefs::{self, PrefValue, PREFS};
@@ -39,8 +39,13 @@ pub struct Opts {
     /// platform default setting.
     pub device_pixels_per_px: Option<f32>,
 
-    /// `None` to disable the time profiler or `Some` with an interval in seconds to enable it and
-    /// cause it to produce output on that interval (`-p`).
+    /// `None` to disable the time profiler or `Some` to enable it with:
+    ///  - an interval in seconds to cause it to produce output on that interval.
+    ///    (`i.e. -p 5`).
+    ///  - a file path to write profiling info to a TSV file upon Servo's termination.
+    ///    (`i.e. -p out.tsv`).
+    ///  - an InfluxDB hostname to store profiling info upon Servo's termination.
+    ///    (`i.e. -p http://localhost:8086`)
     pub time_profiling: Option<OutputOptions>,
 
     /// When the profiler is enabled, this is an optional path to dump a self-contained HTML file
@@ -219,6 +224,9 @@ pub struct Opts {
 
     /// Unminify Javascript.
     pub unminify_js: bool,
+
+    /// Print Progressive Web Metrics to console.
+    pub print_pwm: bool,
 }
 
 fn print_usage(app: &str, opts: &Options) {
@@ -419,8 +427,10 @@ fn print_debug_usage(app: &str) -> ! {
 
 #[derive(Clone, Deserialize, Serialize)]
 pub enum OutputOptions {
+    /// Database connection config (hostname, name, user, pass)
+    DB(ServoUrl, Option<String>, Option<String>, Option<String>),
     FileName(String),
-    Stdout(f64)
+    Stdout(f64),
 }
 
 fn args_fail(msg: &str) -> ! {
@@ -480,7 +490,7 @@ const DEFAULT_USER_AGENT: UserAgent = UserAgent::Desktop;
 pub fn default_opts() -> Opts {
     Opts {
         is_running_problem_test: false,
-        url: Some(ServoUrl::parse("about:blank").unwrap()),
+        url: None,
         tile_size: 512,
         device_pixels_per_px: None,
         time_profiling: None,
@@ -537,6 +547,7 @@ pub fn default_opts() -> Opts {
         signpost: false,
         certificate_path: None,
         unminify_js: false,
+        print_pwm: false,
     }
 }
 
@@ -598,6 +609,10 @@ pub fn from_cmdline_args(args: &[String]) -> ArgumentParsingResult {
                     "config directory following xdg spec on linux platform", "");
     opts.optflag("v", "version", "Display servo version information");
     opts.optflag("", "unminify-js", "Unminify Javascript");
+    opts.optopt("", "profiler-db-user", "Profiler database user", "");
+    opts.optopt("", "profiler-db-pass", "Profiler database password", "");
+    opts.optopt("", "profiler-db-name", "Profiler database name", "");
+    opts.optflag("", "print-pwm", "Print Progressive Web Metrics");
 
     let opt_match = match opts.parse(args) {
         Ok(m) => m,
@@ -631,11 +646,10 @@ pub fn from_cmdline_args(args: &[String]) -> ArgumentParsingResult {
     }
 
     let cwd = env::current_dir().unwrap();
-    let homepage_pref = PREFS.get("shell.homepage");
     let url_opt = if !opt_match.free.is_empty() {
         Some(&opt_match.free[0][..])
     } else {
-        homepage_pref.as_string()
+        None
     };
     let is_running_problem_test =
         url_opt
@@ -645,16 +659,11 @@ pub fn from_cmdline_args(args: &[String]) -> ArgumentParsingResult {
              url.starts_with("http://web-platform.test:8000/_mozilla/mozilla/canvas/") ||
              url.starts_with("http://web-platform.test:8000/_mozilla/css/canvas_over_area.html"));
 
-    let url = match url_opt {
-        Some(url_string) => {
-            parse_url_or_filename(&cwd, url_string)
-                .unwrap_or_else(|()| args_fail("URL parsing failed"))
-        },
-        None => {
-            print_usage(app_name, &opts);
-            args_fail("servo asks that you provide a URL")
-        }
-    };
+    let url_opt = url_opt.and_then(|url_string| parse_url_or_filename(&cwd, url_string)
+                                   .or_else(|error| {
+                                       warn!("URL parsing failed ({:?}).", error);
+                                       Err(error)
+                                   }).ok());
 
     let tile_size: usize = match opt_match.opt_str("s") {
         Some(tile_size_str) => tile_size_str.parse()
@@ -672,7 +681,14 @@ pub fn from_cmdline_args(args: &[String]) -> ArgumentParsingResult {
         match opt_match.opt_str("p") {
             Some(argument) => match argument.parse::<f64>() {
                 Ok(interval) => Some(OutputOptions::Stdout(interval)) ,
-                Err(_) => Some(OutputOptions::FileName(argument)),
+                Err(_) => {
+                    match ServoUrl::parse(&argument) {
+                        Ok(url) => Some(OutputOptions::DB(url, opt_match.opt_str("profiler-db-name"),
+                                                          opt_match.opt_str("profiler-db-user"),
+                                                          opt_match.opt_str("profiler-db-pass"))),
+                        Err(_) => Some(OutputOptions::FileName(argument)),
+                    }
+                }
             },
             None => Some(OutputOptions::Stdout(5.0 as f64)),
         }
@@ -775,7 +791,7 @@ pub fn from_cmdline_args(args: &[String]) -> ArgumentParsingResult {
 
     let opts = Opts {
         is_running_problem_test: is_running_problem_test,
-        url: Some(url),
+        url: url_opt,
         tile_size: tile_size,
         device_pixels_per_px: device_pixels_per_px,
         time_profiling: time_profiling,
@@ -832,6 +848,7 @@ pub fn from_cmdline_args(args: &[String]) -> ArgumentParsingResult {
         signpost: debug_options.signpost,
         certificate_path: opt_match.opt_str("certificate-path"),
         unminify_js: opt_match.opt_present("unminify-js"),
+        print_pwm: opt_match.opt_present("print-pwm"),
     };
 
     set_defaults(opts);

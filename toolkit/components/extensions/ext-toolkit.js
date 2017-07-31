@@ -1,11 +1,29 @@
 "use strict";
 
+// These are defined on "global" which is used for the same scopes as the other
+// ext-*.js files.
+/* exported getCookieStoreIdForTab, getCookieStoreIdForContainer,
+            getContainerForCookieStoreId,
+            isValidCookieStoreId, isContainerCookieStoreId,
+            EventManager, InputEventManager */
+/* global getCookieStoreIdForTab:false, getCookieStoreIdForContainer:false,
+          getContainerForCookieStoreId: false,
+          isValidCookieStoreId:false, isContainerCookieStoreId:false,
+          isDefaultCookieStoreId: false, isPrivateCookieStoreId:false,
+          EventManager: false, InputEventManager: false */
+
 XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
                                   "resource://gre/modules/ContextualIdentityService.jsm");
 
 Cu.import("resource://gre/modules/ExtensionCommon.jsm");
 
-global.SingletonEventManager = ExtensionCommon.SingletonEventManager;
+global.EventManager = ExtensionCommon.EventManager;
+global.InputEventManager = class extends EventManager {
+  constructor(...args) {
+    super(...args);
+    this.inputHandling = true;
+  }
+};
 
 /* globals DEFAULT_STORE, PRIVATE_STORE, CONTAINER_STORE */
 
@@ -77,6 +95,14 @@ extensions.registerModules({
     url: "chrome://extensions/content/ext-backgroundPage.js",
     scopes: ["addon_parent"],
     manifest: ["background"],
+  },
+  browserSettings: {
+    url: "chrome://extensions/content/ext-browserSettings.js",
+    schema: "chrome://extensions/content/schemas/browser_settings.json",
+    scopes: ["addon_parent"],
+    paths: [
+      ["browserSettings"],
+    ],
   },
   contextualIdentities: {
     url: "chrome://extensions/content/ext-contextualIdentities.js",

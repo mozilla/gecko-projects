@@ -39,7 +39,7 @@ AnimationState::UpdateState(bool aAnimationFinished,
                                           DefaultSurfaceFlags(),
                                           PlaybackType::eAnimated));
 
-  return UpdateStateInternal(result, aAnimationFinished, aSize);
+  return UpdateStateInternal(result, aAnimationFinished, aSize, aAllowInvalidation);
 }
 
 const gfx::IntRect
@@ -238,7 +238,7 @@ FrameAnimator::AdvanceFrame(AnimationState& aState,
 {
   NS_ASSERTION(aTime <= TimeStamp::Now(),
                "Given time appears to be in the future");
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::GRAPHICS);
+  AUTO_PROFILER_LABEL("FrameAnimator::AdvanceFrame", GRAPHICS);
 
   RefreshResult ret;
 

@@ -101,7 +101,7 @@ nsButtonBoxFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
 }
 
 nsresult
-nsButtonBoxFrame::HandleEvent(nsPresContext* aPresContext, 
+nsButtonBoxFrame::HandleEvent(nsPresContext* aPresContext,
                               WidgetGUIEvent* aEvent,
                               nsEventStatus* aEventStatus)
 {
@@ -210,12 +210,19 @@ nsButtonBoxFrame::DoMouseClick(WidgetGUIEvent* aEvent, bool aTrustEvent)
   bool isControl = false;
   bool isAlt = false;
   bool isMeta = false;
+  uint16_t inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
+
   if(aEvent) {
     WidgetInputEvent* inputEvent = aEvent->AsInputEvent();
     isShift = inputEvent->IsShift();
     isControl = inputEvent->IsControl();
     isAlt = inputEvent->IsAlt();
     isMeta = inputEvent->IsMeta();
+
+    WidgetMouseEventBase* mouseEvent = aEvent->AsMouseEventBase();
+    if (mouseEvent) {
+      inputSource = mouseEvent->inputSource;
+    }
   }
 
   // Have the content handle the event, propagating it according to normal DOM rules.
@@ -225,6 +232,6 @@ nsButtonBoxFrame::DoMouseClick(WidgetGUIEvent* aEvent, bool aTrustEvent)
                                        aEvent ?
                                          aEvent->IsTrusted() : aTrustEvent,
                                        nullptr, shell,
-                                       isControl, isAlt, isShift, isMeta);
+                                       isControl, isAlt, isShift, isMeta, inputSource);
   }
 }

@@ -31,7 +31,6 @@
 #include "mozilla/plugins/PluginInstanceChild.h"
 #include "mozilla/plugins/StreamNotifyChild.h"
 #include "mozilla/plugins/BrowserStreamChild.h"
-#include "mozilla/plugins/PluginStreamChild.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/Unused.h"
 
@@ -841,15 +840,6 @@ static NPError
 _posturl(NPP aNPP, const char* relativeURL, const char *target, uint32_t len,
          const char *buf, NPBool file);
 
-static NPError
-_newstream(NPP aNPP, NPMIMEType type, const char* window, NPStream** pstream);
-
-static int32_t
-_write(NPP aNPP, NPStream *pstream, int32_t len, void *buffer);
-
-static NPError
-_destroystream(NPP aNPP, NPStream *pstream, NPError reason);
-
 static void
 _status(NPP aNPP, const char *message);
 
@@ -956,7 +946,7 @@ static NPError
 _popupcontextmenu(NPP instance, NPMenu* menu);
 
 static NPBool
-_convertpoint(NPP instance, 
+_convertpoint(NPP instance,
               double sourceX, double sourceY, NPCoordinateSpace sourceSpace,
               double *destX, double *destY, NPCoordinateSpace destSpace);
 
@@ -984,9 +974,9 @@ const NPNetscapeFuncs PluginModuleChild::sBrowserFuncs = {
     mozilla::plugins::child::_geturl,
     mozilla::plugins::child::_posturl,
     mozilla::plugins::child::_requestread,
-    mozilla::plugins::child::_newstream,
-    mozilla::plugins::child::_write,
-    mozilla::plugins::child::_destroystream,
+    nullptr,
+    nullptr,
+    nullptr,
     mozilla::plugins::child::_status,
     mozilla::plugins::child::_useragent,
     mozilla::plugins::child::_memalloc,
@@ -1237,55 +1227,6 @@ _posturl(NPP aNPP,
     return err;
 }
 
-NPError
-_newstream(NPP aNPP,
-           NPMIMEType aMIMEType,
-           const char* aWindow,
-           NPStream** aStream)
-{
-    PLUGIN_LOG_DEBUG_FUNCTION;
-    ENSURE_PLUGIN_THREAD(NPERR_INVALID_PARAM);
-    return InstCast(aNPP)->NPN_NewStream(aMIMEType, aWindow, aStream);
-}
-
-int32_t
-_write(NPP aNPP,
-       NPStream* aStream,
-       int32_t aLength,
-       void* aBuffer)
-{
-    PLUGIN_LOG_DEBUG_FUNCTION;
-    ENSURE_PLUGIN_THREAD(0);
-
-    PluginStreamChild* ps =
-        static_cast<PluginStreamChild*>(static_cast<AStream*>(aStream->ndata));
-    ps->EnsureCorrectInstance(InstCast(aNPP));
-    ps->EnsureCorrectStream(aStream);
-    return ps->NPN_Write(aLength, aBuffer);
-}
-
-NPError
-_destroystream(NPP aNPP,
-               NPStream* aStream,
-               NPError aReason)
-{
-    PLUGIN_LOG_DEBUG_FUNCTION;
-    ENSURE_PLUGIN_THREAD(NPERR_INVALID_PARAM);
-
-    PluginInstanceChild* p = InstCast(aNPP);
-    AStream* s = static_cast<AStream*>(aStream->ndata);
-    if (s->IsBrowserStream()) {
-        BrowserStreamChild* bs = static_cast<BrowserStreamChild*>(s);
-        bs->EnsureCorrectInstance(p);
-        bs->NPN_DestroyStream(aReason);
-    }
-    else {
-        PluginStreamChild* ps = static_cast<PluginStreamChild*>(s);
-        ps->EnsureCorrectInstance(p);
-        PPluginStreamChild::Call__delete__(ps, aReason, false);
-    }
-    return NPERR_NO_ERROR;
-}
 
 void
 _status(NPP aNPP,
@@ -1707,7 +1648,7 @@ _popupcontextmenu(NPP instance, NPMenu* menu)
     AssertPluginThread();
 
 #ifdef MOZ_WIDGET_COCOA
-    double pluginX, pluginY; 
+    double pluginX, pluginY;
     double screenX, screenY;
 
     const NPCocoaEvent* currentEvent = InstCast(instance)->getCurrentEvent();
@@ -1731,8 +1672,8 @@ _popupcontextmenu(NPP instance, NPMenu* menu)
     if ((pluginX < 0.0) || (pluginY < 0.0))
         return NPERR_GENERIC_ERROR;
 
-    NPBool success = _convertpoint(instance, 
-                                  pluginX,  pluginY, NPCoordinateSpacePlugin, 
+    NPBool success = _convertpoint(instance,
+                                  pluginX,  pluginY, NPCoordinateSpacePlugin,
                                  &screenX, &screenY, NPCoordinateSpaceScreen);
 
     if (success) {
@@ -1752,7 +1693,7 @@ _popupcontextmenu(NPP instance, NPMenu* menu)
 }
 
 NPBool
-_convertpoint(NPP instance, 
+_convertpoint(NPP instance,
               double sourceX, double sourceY, NPCoordinateSpace sourceSpace,
               double *destX, double *destY, NPCoordinateSpace destSpace)
 {
@@ -1839,16 +1780,6 @@ mozilla::ipc::IPCResult
 PluginModuleChild::AnswerNP_Initialize(const PluginSettings& aSettings, NPError* rv)
 {
     *rv = DoNP_Initialize(aSettings);
-    return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-PluginModuleChild::RecvAsyncNP_Initialize(const PluginSettings& aSettings)
-{
-    NPError error = DoNP_Initialize(aSettings);
-    if (!SendNP_InitializeResult(error)) {
-        return IPC_FAIL_NO_REASON(this);
-    }
     return IPC_OK();
 }
 
@@ -2386,51 +2317,6 @@ PluginModuleChild::AnswerSyncNPP_New(PPluginInstanceChild* aActor, NPError* rv)
     return IPC_OK();
 }
 
-class AsyncNewResultSender : public ChildAsyncCall
-{
-public:
-    AsyncNewResultSender(PluginInstanceChild* aInstance, NPError aResult)
-        : ChildAsyncCall(aInstance, nullptr, nullptr)
-        , mResult(aResult)
-    {
-    }
-
-    NS_IMETHOD Run() override
-    {
-        RemoveFromAsyncList();
-        DebugOnly<bool> sendOk = mInstance->SendAsyncNPP_NewResult(mResult);
-        MOZ_ASSERT(sendOk);
-        return NS_OK;
-    }
-
-private:
-    NPError  mResult;
-};
-
-static void
-RunAsyncNPP_New(void* aChildInstance)
-{
-    MOZ_ASSERT(aChildInstance);
-    PluginInstanceChild* childInstance =
-        static_cast<PluginInstanceChild*>(aChildInstance);
-    NPError rv = childInstance->DoNPP_New();
-    RefPtr<AsyncNewResultSender> task =
-        new AsyncNewResultSender(childInstance, rv);
-    childInstance->PostChildAsyncCall(task.forget());
-}
-
-mozilla::ipc::IPCResult
-PluginModuleChild::RecvAsyncNPP_New(PPluginInstanceChild* aActor)
-{
-    PLUGIN_LOG_DEBUG_METHOD;
-    PluginInstanceChild* childInstance =
-        reinterpret_cast<PluginInstanceChild*>(aActor);
-    AssertPluginThread();
-    // We don't want to run NPP_New async from within nested calls
-    childInstance->AsyncCall(&RunAsyncNPP_New, childInstance);
-    return IPC_OK();
-}
-
 bool
 PluginModuleChild::DeallocPPluginInstanceChild(PPluginInstanceChild* aActor)
 {
@@ -2517,7 +2403,6 @@ PluginModuleChild::NPN_ReleaseObject(NPObject* aNPObj)
         if (doe)
             doe->mDeleted = true;
     }
-    return;
 }
 
 void
@@ -2738,7 +2623,7 @@ PluginModuleChild::RecvProcessNativeEventsInInterruptCall()
 #ifdef MOZ_WIDGET_COCOA
 void
 PluginModuleChild::ProcessNativeEvents() {
-    CallProcessSomeEvents();    
+    CallProcessSomeEvents();
 }
 #endif
 

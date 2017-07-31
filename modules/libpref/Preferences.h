@@ -72,9 +72,9 @@ public:
   static bool IsServiceAvailable();
 
   /**
-   * Reset loaded user prefs then read them
+   * Initialize user prefs from prefs.js/user.js
    */
-  static nsresult ResetAndReadUserPrefs();
+  static void InitializeUserPrefs();
 
   /**
    * Returns the singleton instance which is addreffed.
@@ -424,23 +424,43 @@ public:
 
   static void DirtyCallback();
 
+  // Explicitly choosing synchronous or asynchronous (if allowed)
+  // preferences file write.  Only for the default file.  The guarantee
+  // for the "blocking" is that when it returns, the file on disk
+  // reflect the current state of preferences.
+  nsresult SavePrefFileBlocking();
+  nsresult SavePrefFileAsynchronous();
+
 protected:
   virtual ~Preferences();
 
   nsresult NotifyServiceObservers(const char *aSubject);
   /**
-   * Reads the default pref file or, if that failed, try to save a new one.
+   * Loads the prefs.js file from the profile, or creates a new one.
    *
-   * @return NS_OK if either action succeeded,
-   *         or the error code related to the read attempt.
+   * @return the prefs file if successful, or nullptr on failure.
    */
-  nsresult UseDefaultPrefFile();
-  nsresult UseUserPrefFile();
-  nsresult ReadAndOwnUserPrefFile(nsIFile *aFile);
-  nsresult ReadAndOwnSharedUserPrefFile(nsIFile *aFile);
-  nsresult SavePrefFileInternal(nsIFile* aFile);
-  nsresult WritePrefFile(nsIFile* aFile);
+  already_AddRefed<nsIFile> ReadSavedPrefs();
+
+  /**
+   * Loads the user.js file from the profile if present.
+   */
+  void ReadUserOverridePrefs();
+
   nsresult MakeBackupPrefFile(nsIFile *aFile);
+
+  // Default pref file save can be blocking or not.
+  enum class SaveMethod {
+    Blocking,
+    Asynchronous
+  };
+
+  // Off main thread is only respected for the default aFile value (nullptr)
+  nsresult SavePrefFileInternal(nsIFile* aFile, SaveMethod aSaveMethod);
+  nsresult WritePrefFile(nsIFile* aFile, SaveMethod aSaveMethod);
+
+  // If this is false, only blocking writes, on main thread are allowed.
+  bool AllowOffMainThreadSave();
 
   /**
    * Helpers for implementing
@@ -469,7 +489,11 @@ protected:
 
 private:
   nsCOMPtr<nsIFile>        mCurrentFile;
-  bool                     mDirty;
+  bool                     mDirty = false;
+  bool                     mProfileShutdown = false;
+  // we wait a bit after prefs are dirty before writing them. In this
+  // period, mDirty and mSavePending will both be true.
+  bool                     mSavePending = false;
 
   static Preferences*      sPreferences;
   static nsIPrefBranch*    sRootBranch;

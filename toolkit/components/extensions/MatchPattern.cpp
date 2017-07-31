@@ -248,9 +248,9 @@ CookieInfo::RawHost() const
  * MatchPattern
  *****************************************************************************/
 
-const char* PERMITTED_SCHEMES[] = {"http", "https", "file", "ftp", "data", nullptr};
+const char* PERMITTED_SCHEMES[] = {"http", "https", "ws", "wss", "file", "ftp", "data", nullptr};
 
-const char* WILDCARD_SCHEMES[] = {"http", "https", nullptr};
+const char* WILDCARD_SCHEMES[] = {"http", "https", "ws", "wss", nullptr};
 
 /* static */ already_AddRefed<MatchPattern>
 MatchPattern::Constructor(dom::GlobalObject& aGlobal,
@@ -295,7 +295,7 @@ MatchPattern::Init(JSContext* aCx, const nsAString& aPattern, bool aIgnorePath, 
   nsCOMPtr<nsIAtom> scheme = NS_AtomizeMainThread(StringHead(aPattern, index));
   if (scheme == nsGkAtoms::_asterisk) {
     mSchemes = AtomSet::Get<WILDCARD_SCHEMES>();
-  } else if (permittedSchemes->Contains(scheme)) {
+  } else if (permittedSchemes->Contains(scheme) || scheme == nsGkAtoms::moz_extension) {
     mSchemes = new AtomSet({scheme});
   } else {
     aRv.Throw(NS_ERROR_INVALID_ARG);

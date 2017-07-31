@@ -67,6 +67,8 @@ pub enum Error {
     Io(std::io::Error),
     /// read_mp4 terminated without detecting a moov box.
     NoMoov,
+    /// Parse error caused by table size is over limitation.
+    TableTooLarge,
 }
 
 impl From<bitreader::BitReaderError> for Error {
@@ -1156,7 +1158,7 @@ fn read_stsc<T: Read>(src: &mut BMFFBox<T>) -> Result<SampleToChunkBox> {
     let mut samples = Vec::new();
     for _ in 0..sample_count {
         let first_chunk = be_u32(src)?;
-        let samples_per_chunk = be_u32(src)?;
+        let samples_per_chunk = be_u32_with_limit(src)?;
         let sample_description_index = be_u32(src)?;
         samples.push(SampleToChunk {
             first_chunk: first_chunk,
@@ -1189,7 +1191,7 @@ fn read_ctts<T: Read>(src: &mut BMFFBox<T>) -> Result<CompositionOffsetBox> {
             // however, some buggy contents have negative value when version == 0.
             // So we always use Version1 here.
             0...1 => {
-                let count = be_u32(src)?;
+                let count = be_u32_with_limit(src)?;
                 let offset = TimeOffsetVersion::Version1(be_i32(src)?);
                 (count, offset)
             },
@@ -1237,7 +1239,7 @@ fn read_stts<T: Read>(src: &mut BMFFBox<T>) -> Result<TimeToSampleBox> {
     let sample_count = be_u32_with_limit(src)?;
     let mut samples = Vec::new();
     for _ in 0..sample_count {
-        let sample_count = be_u32(src)?;
+        let sample_count = be_u32_with_limit(src)?;
         let sample_delta = be_u32(src)?;
         samples.push(Sample {
             sample_count: sample_count,
@@ -1668,7 +1670,10 @@ fn read_video_sample_entry<T: Read>(src: &mut BMFFBox<T>) -> Result<(CodecType, 
         BoxType::VP8SampleEntry => CodecType::VP8,
         BoxType::VP9SampleEntry => CodecType::VP9,
         BoxType::ProtectedVisualSampleEntry => CodecType::EncryptedVideo,
-        _ => CodecType::Unknown,
+        _ => {
+            log!("Unsupported video codec, box {:?} found", name);
+            CodecType::Unknown
+        }
     };
 
     // Skip uninteresting fields.
@@ -1731,20 +1736,23 @@ fn read_video_sample_entry<T: Read>(src: &mut BMFFBox<T>) -> Result<(CodecType, 
                 log!("{:?} (sinf)", sinf);
                 protection_info.push(sinf);
             }
-            _ => skip_box_content(&mut b)?,
+            _ => {
+                log!("Unsupported video codec, box {:?} found", b.head.name);
+                skip_box_content(&mut b)?;
+            }
         }
         check_parser_state!(b.content);
     }
 
-    codec_specific
-        .map(|codec_specific| (codec_type, SampleEntry::Video(VideoSampleEntry {
+    Ok(codec_specific.map_or((CodecType::Unknown, SampleEntry::Unknown),
+        |codec_specific| (codec_type, SampleEntry::Video(VideoSampleEntry {
             data_reference_index: data_reference_index,
             width: width,
             height: height,
             codec_specific: codec_specific,
             protection_info: protection_info,
         })))
-        .ok_or_else(|| Error::InvalidData("malformed video sample entry"))
+    )
 }
 
 fn read_qt_wave_atom<T: Read>(src: &mut BMFFBox<T>) -> Result<ES_Descriptor> {
@@ -1853,13 +1861,16 @@ fn read_audio_sample_entry<T: Read>(src: &mut BMFFBox<T>) -> Result<(CodecType, 
                 codec_type = CodecType::EncryptedAudio;
                 protection_info.push(sinf);
             }
-            _ => skip_box_content(&mut b)?,
+            _ => {
+                log!("Unsupported audio codec, box {:?} found", b.head.name);
+                skip_box_content(&mut b)?;
+            }
         }
         check_parser_state!(b.content);
     }
 
-    codec_specific
-        .map(|codec_specific| (codec_type, SampleEntry::Audio(AudioSampleEntry {
+    Ok(codec_specific.map_or((CodecType::Unknown, SampleEntry::Unknown),
+        |codec_specific| (codec_type, SampleEntry::Audio(AudioSampleEntry {
             data_reference_index: data_reference_index,
             channelcount: channelcount,
             samplesize: samplesize,
@@ -1867,7 +1878,7 @@ fn read_audio_sample_entry<T: Read>(src: &mut BMFFBox<T>) -> Result<(CodecType, 
             codec_specific: codec_specific,
             protection_info: protection_info,
         })))
-        .ok_or_else(|| Error::InvalidData("malformed audio sample entry"))
+    )
 }
 
 /// Parse a stsd box.
@@ -2039,7 +2050,7 @@ fn be_u32<T: ReadBytesExt>(src: &mut T) -> Result<u32> {
 fn be_u32_with_limit<T: ReadBytesExt>(src: &mut T) -> Result<u32> {
     be_u32(src).and_then(|v| {
         if v > TABLE_SIZE_LIMIT {
-            return Err(Error::Unsupported("Over limited value"));
+            return Err(Error::TableTooLarge);
         }
         Ok(v)
     })

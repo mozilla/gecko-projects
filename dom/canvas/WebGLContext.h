@@ -310,6 +310,7 @@ class WebGLContext
     friend class WebGLExtensionCompressedTextureETC1;
     friend class WebGLExtensionCompressedTexturePVRTC;
     friend class WebGLExtensionCompressedTextureS3TC;
+    friend class WebGLExtensionCompressedTextureS3TC_SRGB;
     friend class WebGLExtensionDepthTexture;
     friend class WebGLExtensionDisjointTimerQuery;
     friend class WebGLExtensionDrawBuffers;
@@ -381,7 +382,7 @@ public:
     virtual already_AddRefed<mozilla::gfx::SourceSurface>
     GetSurfaceSnapshot(gfxAlphaType* out_alphaType) override;
 
-    NS_IMETHOD SetIsOpaque(bool) override { return NS_OK; };
+    virtual void SetIsOpaque(bool) override {};
     bool GetIsOpaque() override { return false; }
     NS_IMETHOD SetContextOptions(JSContext* cx,
                                  JS::Handle<JS::Value> options,
@@ -1028,6 +1029,19 @@ private:
     bool ValidateCapabilityEnum(GLenum cap, const char* info);
     realGLboolean* GetStateTrackingSlot(GLenum cap);
 
+    // Allocation debugging variables
+    mutable uint64_t mDataAllocGLCallCount;
+
+    void OnDataAllocCall() const {
+       mDataAllocGLCallCount++;
+    }
+
+    uint64_t GetNumGLDataAllocCalls() const {
+       return mDataAllocGLCallCount;
+    }
+
+    void OnEndOfFrame() const;
+
 // -----------------------------------------------------------------------------
 // Texture funcions (WebGLContextTextures.cpp)
 public:
@@ -1590,8 +1604,6 @@ protected:
     bool InitAndValidateGL(FailureReason* const out_failReason);
 
     bool ValidateBlendEquationEnum(GLenum cap, const char* info);
-    bool ValidateBlendFuncDstEnum(GLenum mode, const char* info);
-    bool ValidateBlendFuncSrcEnum(GLenum mode, const char* info);
     bool ValidateBlendFuncEnumsCompatibility(GLenum sfactor, GLenum dfactor,
                                              const char* info);
     bool ValidateComparisonEnum(GLenum target, const char* info);

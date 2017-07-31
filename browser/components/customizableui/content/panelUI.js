@@ -2,19 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-XPCOMUtils.defineLazyModuleGetter(this, "CustomizableUI",
-                                  "resource:///modules/CustomizableUI.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ScrollbarSampler",
                                   "resource:///modules/ScrollbarSampler.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ShortcutUtils",
-                                  "resource://gre/modules/ShortcutUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
-                                  "resource://gre/modules/AppConstants.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AppMenuNotifications",
                                   "resource://gre/modules/AppMenuNotifications.jsm");
-
-XPCOMUtils.defineLazyPreferenceGetter(this, "gPhotonStructure",
-  "browser.photon.structure.enabled", false);
 
 /**
  * Maintains the state and dispatches events for the main menu panel.
@@ -60,7 +51,33 @@ const PanelUI = {
     Services.obs.addObserver(this, "fullscreen-nav-toolbox");
     Services.obs.addObserver(this, "appMenu-notifications");
 
-    window.addEventListener("fullscreen", this);
+    XPCOMUtils.defineLazyPreferenceGetter(this, "autoHideToolbarInFullScreen",
+      "browser.fullscreen.autohide", false, (pref, previousValue, newValue) => {
+        // On OSX, or with autohide preffed off, MozDOMFullscreen is the only
+        // event we care about, since fullscreen should behave just like non
+        // fullscreen. Otherwise, we don't want to listen to these because
+        // we'd just be spamming ourselves with both of them whenever a user
+        // opened a video.
+        if (newValue) {
+          window.removeEventListener("MozDOMFullscreen:Entered", this);
+          window.removeEventListener("MozDOMFullscreen:Exited", this);
+          window.addEventListener("fullscreen", this);
+        } else {
+          window.addEventListener("MozDOMFullscreen:Entered", this);
+          window.addEventListener("MozDOMFullscreen:Exited", this);
+          window.removeEventListener("fullscreen", this);
+        }
+
+        this._updateNotifications(false);
+      }, autoHidePref => autoHidePref && Services.appinfo.OS !== "Darwin");
+
+    if (this.autoHideToolbarInFullScreen) {
+      window.addEventListener("fullscreen", this);
+    } else {
+      window.addEventListener("MozDOMFullscreen:Entered", this);
+      window.addEventListener("MozDOMFullscreen:Exited", this);
+    }
+
     window.addEventListener("activate", this);
     window.matchMedia("(-moz-overlay-scrollbars)").addListener(this._overlayScrollListenerBoundFn);
     CustomizableUI.addListener(this);
@@ -95,9 +112,11 @@ const PanelUI = {
       this.overflowFixedList.previousSibling.hidden = false;
       CustomizableUI.registerMenuPanel(this.overflowFixedList, CustomizableUI.AREA_FIXED_OVERFLOW_PANEL);
       this.navbar.setAttribute("photon-structure", "true");
+      document.documentElement.setAttribute("photon-structure", "true");
       this.updateOverflowStatus();
     } else {
       this.navbar.removeAttribute("photon-structure");
+      document.documentElement.removeAttribute("photon-structure");
     }
   },
 
@@ -175,6 +194,8 @@ const PanelUI = {
     Services.obs.removeObserver(this, "fullscreen-nav-toolbox");
     Services.obs.removeObserver(this, "appMenu-notifications");
 
+    window.removeEventListener("MozDOMFullscreen:Entered", this);
+    window.removeEventListener("MozDOMFullscreen:Exited", this);
     window.removeEventListener("fullscreen", this);
     window.removeEventListener("activate", this);
     this.menuButton.removeEventListener("mousedown", this);
@@ -243,10 +264,12 @@ const PanelUI = {
         }
 
         let anchor;
+        let domEvent = null;
         if (!aEvent ||
             aEvent.type == "command") {
           anchor = this.menuButton;
         } else {
+          domEvent = aEvent;
           anchor = aEvent.target;
         }
 
@@ -255,7 +278,7 @@ const PanelUI = {
         }, {once: true});
 
         anchor = this._getPanelAnchor(anchor);
-        this.panel.openPopup(anchor);
+        this.panel.openPopup(anchor, { triggerEvent: domEvent });
       }, (reason) => {
         console.error("Error showing the PanelUI menu", reason);
       });
@@ -326,6 +349,8 @@ const PanelUI = {
       case "keypress":
         this.toggle(aEvent);
         break;
+      case "MozDOMFullscreen:Entered":
+      case "MozDOMFullscreen:Exited":
       case "fullscreen":
       case "activate":
         this._updateNotifications();
@@ -414,7 +439,7 @@ const PanelUI = {
       this._updateQuitTooltip();
       this.panel.hidden = false;
       this._isReady = true;
-    })().then(null, Cu.reportError);
+    })().catch(Cu.reportError);
 
     return this._readyPromise;
   },
@@ -443,8 +468,22 @@ const PanelUI = {
    * @param aViewId the ID of the subview to show.
    * @param aAnchor the element that spawned the subview.
    * @param aPlacementArea the CustomizableUI area that aAnchor is in.
+   * @param aEvent the event triggering the view showing.
    */
-  async showSubView(aViewId, aAnchor, aPlacementArea) {
+  async showSubView(aViewId, aAnchor, aPlacementArea, aEvent) {
+
+    let domEvent = null;
+    if (aEvent) {
+      if (aEvent.type == "command" && aEvent.inputSource != null) {
+        // Synthesize a new DOM mouse event to pass on the inputSource.
+        domEvent = document.createEvent("MouseEvent");
+        domEvent.initNSMouseEvent("click", true, true, null, 0, aEvent.screenX, aEvent.screenY,
+                                  0, 0, false, false, false, false, 0, aEvent.target, 0, aEvent.inputSource);
+      } else if (aEvent.mozInputSource != null) {
+        domEvent = aEvent;
+      }
+    }
+
     this._ensureEventListenersAdded();
     let viewNode = document.getElementById(aViewId);
     if (!viewNode) {
@@ -485,12 +524,14 @@ const PanelUI = {
       multiView.setAttribute("nosubviews", "true");
       multiView.setAttribute("viewCacheId", "appMenu-viewCache");
       if (gPhotonStructure) {
+        tempPanel.setAttribute("photon", true);
         multiView.setAttribute("mainViewId", viewNode.id);
         multiView.appendChild(viewNode);
       }
       tempPanel.appendChild(multiView);
-      multiView.setAttribute("mainViewIsSubView", "true");
-      multiView.setMainView(viewNode);
+      if (!gPhotonStructure) {
+        multiView.setMainView(viewNode);
+      }
       viewNode.classList.add("cui-widget-panelview");
 
       let viewShown = false;
@@ -500,8 +541,9 @@ const PanelUI = {
           CustomizableUI.removePanelCloseListeners(tempPanel);
           tempPanel.removeEventListener("popuphidden", panelRemover);
 
-          let evt = new CustomEvent("ViewHiding", {detail: viewNode});
-          viewNode.dispatchEvent(evt);
+          let currentView = multiView.current || viewNode;
+          let evt = new CustomEvent("ViewHiding", {detail: currentView});
+          currentView.dispatchEvent(evt);
         }
         aAnchor.open = false;
 
@@ -549,7 +591,10 @@ const PanelUI = {
         anchor.setAttribute("consumeanchor", aAnchor.id);
       }
 
-      tempPanel.openPopup(anchor, "bottomcenter topright");
+      tempPanel.openPopup(anchor, {
+        position: "bottomcenter topright",
+        triggerEvent: domEvent,
+      });
     }
   },
 
@@ -605,6 +650,12 @@ const PanelUI = {
         (this.panel.state == "open" ||
          document.documentElement.hasAttribute("customizing"))) {
       this._adjustLabelsForAutoHyphens(aNode);
+    }
+  },
+
+  onAreaReset(aArea, aContainer) {
+    if (gPhotonStructure && aContainer == this.overflowFixedList) {
+      this.updateOverflowStatus();
     }
   },
 
@@ -744,10 +795,8 @@ const PanelUI = {
         this._showBannerItem(notifications[0]);
       }
     } else if (doorhangers.length > 0) {
-      let autoHideFullScreen = Services.prefs.getBoolPref("browser.fullscreen.autohide", false) &&
-                               Services.appinfo.OS !== "Darwin";
       // Only show the doorhanger if the window is focused and not fullscreen
-      if ((window.fullScreen && autoHideFullScreen) || Services.focus.activeWindow !== window) {
+      if ((window.fullScreen && this.autoHideToolbarInFullScreen) || Services.focus.activeWindow !== window) {
         this._hidePopup();
         this._showBadge(doorhangers[0]);
         this._showBannerItem(doorhangers[0]);

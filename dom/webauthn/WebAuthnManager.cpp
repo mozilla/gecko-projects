@@ -5,10 +5,14 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "hasht.h"
-#include "nsNetCID.h"
 #include "nsICryptoHash.h"
+#include "nsNetCID.h"
+#include "nsNetUtil.h" // Used by WD-05 compat support (Remove in Bug 1381126)
+#include "nsThreadUtils.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/dom/AuthenticatorAttestationResponse.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/WebAuthnCBORUtil.h"
 #include "mozilla/dom/WebAuthnManager.h"
 #include "mozilla/dom/WebAuthnUtil.h"
 #include "mozilla/dom/PWebAuthnTransaction.h"
@@ -21,6 +25,13 @@ using namespace mozilla::ipc;
 
 namespace mozilla {
 namespace dom {
+
+/***********************************************************************
+ * Protocol Constants
+ **********************************************************************/
+
+const uint8_t FLAG_TUP = 0x01; // Test of User Presence required
+const uint8_t FLAG_AT = 0x40; // Authenticator Data is provided
 
 /***********************************************************************
  * Statics
@@ -39,7 +50,7 @@ NS_IMPL_ISUPPORTS(WebAuthnManager, nsIIPCBackgroundChildCreateCallback);
 
 template<class OOS>
 static nsresult
-GetAlgorithmName(JSContext* aCx, const OOS& aAlgorithm,
+GetAlgorithmName(const OOS& aAlgorithm,
                  /* out */ nsString& aName)
 {
   MOZ_ASSERT(aAlgorithm.IsString()); // TODO: remove assertion when we coerce.
@@ -51,7 +62,10 @@ GetAlgorithmName(JSContext* aCx, const OOS& aAlgorithm,
     // TODO: Coerce to string and extract name. See WebCryptoTask.cpp
   }
 
-  if (!NormalizeToken(aName, aName)) {
+  // Only ES256 is currently supported
+  if (NORMALIZED_EQUALS(aName, JWK_ALG_ECDSA_P_256)) {
+    aName.AssignLiteral(JWK_ALG_ECDSA_P_256);
+  } else {
     return NS_ERROR_DOM_SYNTAX_ERR;
   }
 
@@ -99,10 +113,10 @@ AssembleClientData(const nsAString& aOrigin, const CryptoBuffer& aChallenge,
     return NS_ERROR_FAILURE;
   }
 
-  WebAuthnClientData clientDataObject;
-  clientDataObject.mOrigin.Assign(aOrigin);
-  clientDataObject.mHashAlg.SetAsString().Assign(NS_LITERAL_STRING("S256"));
+  CollectedClientData clientDataObject;
   clientDataObject.mChallenge.Assign(challengeBase64);
+  clientDataObject.mOrigin.Assign(aOrigin);
+  clientDataObject.mHashAlg.Assign(NS_LITERAL_STRING("S256"));
 
   nsAutoString temp;
   if (NS_WARN_IF(!clientDataObject.ToJSON(temp))) {
@@ -115,12 +129,12 @@ AssembleClientData(const nsAString& aOrigin, const CryptoBuffer& aChallenge,
 
 nsresult
 GetOrigin(nsPIDOMWindowInner* aParent,
-          /*out*/ nsAString& aOrigin)
+          /*out*/ nsAString& aOrigin, /*out*/ nsACString& aHost)
 {
   nsCOMPtr<nsIDocument> doc = aParent->GetDoc();
   MOZ_ASSERT(doc);
 
-  nsIPrincipal* principal = doc->NodePrincipal();
+  nsCOMPtr<nsIPrincipal> principal = doc->NodePrincipal();
   nsresult rv = nsContentUtils::GetUTFOrigin(principal, aOrigin);
   if (NS_WARN_IF(NS_FAILED(rv)) ||
       NS_WARN_IF(aOrigin.IsEmpty())) {
@@ -135,6 +149,14 @@ GetOrigin(nsPIDOMWindowInner* aParent,
     return NS_ERROR_DOM_NOT_ALLOWED_ERR;
   }
 
+  nsCOMPtr<nsIURI> originUri;
+  if (NS_FAILED(principal->GetURI(getter_AddRefs(originUri)))) {
+    return NS_ERROR_FAILURE;
+  }
+  if (NS_FAILED(originUri->GetAsciiHost(aHost))) {
+    return NS_ERROR_FAILURE;
+  }
+
   return NS_OK;
 }
 
@@ -144,12 +166,48 @@ RelaxSameOrigin(nsPIDOMWindowInner* aParent,
                 /* out */ nsACString& aRelaxedRpId)
 {
   MOZ_ASSERT(aParent);
+  nsCOMPtr<nsIDocument> doc = aParent->GetDoc();
+  MOZ_ASSERT(doc);
+  nsCOMPtr<nsIPrincipal> principal = doc->NodePrincipal();
+  nsCOMPtr<nsIURI> uri;
+  if (NS_FAILED(principal->GetURI(getter_AddRefs(uri)))) {
+    return NS_ERROR_FAILURE;
+  }
+  nsAutoCString originHost;
+  if (NS_FAILED(uri->GetAsciiHost(originHost))) {
+    return NS_ERROR_FAILURE;
+  }
   nsCOMPtr<nsIDocument> document = aParent->GetDoc();
   if (!document || !document->IsHTMLDocument()) {
     return NS_ERROR_FAILURE;
   }
+  nsHTMLDocument* html = document->AsHTMLDocument();
+  if (NS_WARN_IF(!html)) {
+    return NS_ERROR_FAILURE;
+  }
 
-  // TODO: Bug 1329764: Invoke the Relax Algorithm, once properly defined
+  // WD-05 origin compatibility support - aInputRpId might be a URI/origin,
+  // so catch that (Bug 1380421). Remove in Bug 1381126.
+  nsAutoString inputRpId(aInputRpId);
+  nsCOMPtr<nsIURI> inputUri;
+  if (NS_SUCCEEDED(NS_NewURI(getter_AddRefs(inputUri), aInputRpId))) {
+    // If we parsed the input as a URI, then pull out the host and use it as the
+    // input
+    nsAutoCString uriHost;
+    if (NS_FAILED(inputUri->GetHost(uriHost))) {
+      return NS_ERROR_FAILURE;
+    }
+    CopyUTF8toUTF16(uriHost, inputRpId);
+    MOZ_LOG(gWebAuthnManagerLog, LogLevel::Debug,
+            ("WD-05 Fallback: Parsed input %s URI into host %s",
+             NS_ConvertUTF16toUTF8(aInputRpId).get(), uriHost.get()));
+  }
+  // End WD-05 origin compatibility support (Bug 1380421)
+
+  if (!html->IsRegistrableDomainSuffixOfOrEqualTo(inputRpId, originHost)) {
+    return NS_ERROR_DOM_SECURITY_ERR;
+  }
+
   aRelaxedRpId.Assign(NS_ConvertUTF16toUTF8(aInputRpId));
   return NS_OK;
 }
@@ -181,14 +239,25 @@ WebAuthnManager::~WebAuthnManager()
   MaybeClearTransaction();
 }
 
-already_AddRefed<MozPromise<nsresult, nsresult, false>>
+RefPtr<WebAuthnManager::BackgroundActorPromise>
 WebAuthnManager::GetOrCreateBackgroundActor()
 {
-  bool ok = BackgroundChild::GetOrCreateForCurrentThread(this);
-  if (NS_WARN_IF(!ok)) {
-    ActorFailed();
+  MOZ_ASSERT(NS_IsMainThread());
+
+  PBackgroundChild *actor = BackgroundChild::GetForCurrentThread();
+  RefPtr<WebAuthnManager::BackgroundActorPromise> promise =
+    mPBackgroundCreationPromise.Ensure(__func__);
+
+  if (actor) {
+    ActorCreated(actor);
+  } else {
+    bool ok = BackgroundChild::GetOrCreateForCurrentThread(this);
+    if (NS_WARN_IF(!ok)) {
+      ActorFailed();
+    }
   }
-  return mPBackgroundCreationPromise.Ensure(__func__);
+
+  return promise;
 }
 
 //static
@@ -214,11 +283,8 @@ WebAuthnManager::Get()
 }
 
 already_AddRefed<Promise>
-WebAuthnManager::MakeCredential(nsPIDOMWindowInner* aParent, JSContext* aCx,
-                                const Account& aAccountInformation,
-                                const Sequence<ScopedCredentialParameters>& aCryptoParameters,
-                                const ArrayBufferViewOrArrayBuffer& aChallenge,
-                                const ScopedCredentialOptions& aOptions)
+WebAuthnManager::MakeCredential(nsPIDOMWindowInner* aParent,
+                                const MakeCredentialOptions& aOptions)
 {
   MOZ_ASSERT(aParent);
 
@@ -233,7 +299,8 @@ WebAuthnManager::MakeCredential(nsPIDOMWindowInner* aParent, JSContext* aCx,
   }
 
   nsString origin;
-  rv = GetOrigin(aParent, origin);
+  nsCString rpId;
+  rv = GetOrigin(aParent, origin, rpId);
   if (NS_WARN_IF(rv.Failed())) {
     promise->MaybeReject(rv);
     return promise.forget();
@@ -244,18 +311,13 @@ WebAuthnManager::MakeCredential(nsPIDOMWindowInner* aParent, JSContext* aCx,
   // closest value lying within that range.
 
   double adjustedTimeout = 30.0;
-  if (aOptions.mTimeoutSeconds.WasPassed()) {
-    adjustedTimeout = aOptions.mTimeoutSeconds.Value();
+  if (aOptions.mTimeout.WasPassed()) {
+    adjustedTimeout = aOptions.mTimeout.Value();
     adjustedTimeout = std::max(15.0, adjustedTimeout);
     adjustedTimeout = std::min(120.0, adjustedTimeout);
   }
 
-  nsCString rpId;
-  if (!aOptions.mRpId.WasPassed()) {
-    // If rpId is not specified, then set rpId to callerOrigin, and rpIdHash to
-    // the SHA-256 hash of rpId.
-    rpId.Assign(NS_ConvertUTF16toUTF8(origin));
-  } else {
+  if (aOptions.mRp.mId.WasPassed()) {
     // If rpId is specified, then invoke the procedure used for relaxing the
     // same-origin restriction by setting the document.domain attribute, using
     // rpId as the given value but without changing the current document’s
@@ -264,7 +326,7 @@ WebAuthnManager::MakeCredential(nsPIDOMWindowInner* aParent, JSContext* aCx,
     // Otherwise, reject promise with a DOMException whose name is
     // "SecurityError", and terminate this algorithm.
 
-    if (NS_FAILED(RelaxSameOrigin(aParent, aOptions.mRpId.Value(), rpId))) {
+    if (NS_FAILED(RelaxSameOrigin(aParent, aOptions.mRp.mId.Value(), rpId))) {
       promise->MaybeReject(NS_ERROR_DOM_SECURITY_ERR);
       return promise.forget();
     }
@@ -292,15 +354,15 @@ WebAuthnManager::MakeCredential(nsPIDOMWindowInner* aParent, JSContext* aCx,
 
   // Process each element of cryptoParameters using the following steps, to
   // produce a new sequence normalizedParameters.
-  nsTArray<ScopedCredentialParameters> normalizedParams;
-  for (size_t a = 0; a < aCryptoParameters.Length(); ++a) {
+  nsTArray<PublicKeyCredentialParameters> normalizedParams;
+  for (size_t a = 0; a < aOptions.mParameters.Length(); ++a) {
     // Let current be the currently selected element of
     // cryptoParameters.
 
-    // If current.type does not contain a ScopedCredentialType
+    // If current.type does not contain a PublicKeyCredentialType
     // supported by this implementation, then stop processing current and move
     // on to the next element in cryptoParameters.
-    if (aCryptoParameters[a].mType != ScopedCredentialType::ScopedCred) {
+    if (aOptions.mParameters[a].mType != PublicKeyCredentialType::Public_key) {
       continue;
     }
 
@@ -311,16 +373,16 @@ WebAuthnManager::MakeCredential(nsPIDOMWindowInner* aParent, JSContext* aCx,
     // element in cryptoParameters.
 
     nsString algName;
-    if (NS_FAILED(GetAlgorithmName(aCx, aCryptoParameters[a].mAlgorithm,
+    if (NS_FAILED(GetAlgorithmName(aOptions.mParameters[a].mAlgorithm,
                                    algName))) {
       continue;
     }
 
-    // Add a new object of type ScopedCredentialParameters to
+    // Add a new object of type PublicKeyCredentialParameters to
     // normalizedParameters, with type set to current.type and algorithm set to
     // normalizedAlgorithm.
-    ScopedCredentialParameters normalizedObj;
-    normalizedObj.mType = aCryptoParameters[a].mType;
+    PublicKeyCredentialParameters normalizedObj;
+    normalizedObj.mType = aOptions.mParameters[a].mType;
     normalizedObj.mAlgorithm.SetAsString().Assign(algName);
 
     if (!normalizedParams.AppendElement(normalizedObj, mozilla::fallible)){
@@ -332,7 +394,7 @@ WebAuthnManager::MakeCredential(nsPIDOMWindowInner* aParent, JSContext* aCx,
   // If normalizedAlgorithm is empty and cryptoParameters was not empty, cancel
   // the timer started in step 2, reject promise with a DOMException whose name
   // is "NotSupportedError", and terminate this algorithm.
-  if (normalizedParams.IsEmpty() && !aCryptoParameters.IsEmpty()) {
+  if (normalizedParams.IsEmpty() && !aOptions.mParameters.IsEmpty()) {
     promise->MaybeReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return promise.forget();
   }
@@ -340,19 +402,20 @@ WebAuthnManager::MakeCredential(nsPIDOMWindowInner* aParent, JSContext* aCx,
   // TODO: The following check should not be here. This is checking for
   // parameters specific to the soft key, and should be put in the soft key
   // manager in the parent process. Still need to serialize
-  // ScopedCredentialParameters first.
+  // PublicKeyCredentialParameters first.
 
-  // Check if at least one of the specified combinations of ScopedCredentialType
-  // and cryptographic parameters is supported. If not, return an error code
-  // equivalent to NotSupportedError and terminate the operation.
+  // Check if at least one of the specified combinations of
+  // PublicKeyCredentialParameters and cryptographic parameters is supported. If
+  // not, return an error code equivalent to NotSupportedError and terminate the
+  // operation.
 
   bool isValidCombination = false;
 
   for (size_t a = 0; a < normalizedParams.Length(); ++a) {
-    if (normalizedParams[a].mType == ScopedCredentialType::ScopedCred &&
+    if (normalizedParams[a].mType == PublicKeyCredentialType::Public_key &&
         normalizedParams[a].mAlgorithm.IsString() &&
         normalizedParams[a].mAlgorithm.GetAsString().EqualsLiteral(
-          WEBCRYPTO_NAMED_CURVE_P256)) {
+          JWK_ALG_ECDSA_P_256)) {
       isValidCombination = true;
       break;
     }
@@ -378,13 +441,15 @@ WebAuthnManager::MakeCredential(nsPIDOMWindowInner* aParent, JSContext* aCx,
   // and compute the clientDataJSON and clientDataHash.
 
   CryptoBuffer challenge;
-  if (!challenge.Assign(aChallenge)) {
+  if (!challenge.Assign(aOptions.mChallenge)) {
     promise->MaybeReject(NS_ERROR_DOM_SECURITY_ERR);
     return promise.forget();
   }
 
+  // WD-05 vs. WD-06: In WD-06, the first parameter should be "origin". Fix
+  // this in Bug 1384776
   nsAutoCString clientDataJSON;
-  srv = AssembleClientData(origin, challenge, clientDataJSON);
+  srv = AssembleClientData(NS_ConvertUTF8toUTF16(rpId), challenge, clientDataJSON);
   if (NS_WARN_IF(NS_FAILED(srv))) {
     promise->MaybeReject(NS_ERROR_DOM_SECURITY_ERR);
     return promise.forget();
@@ -406,15 +471,9 @@ WebAuthnManager::MakeCredential(nsPIDOMWindowInner* aParent, JSContext* aCx,
   if (aOptions.mExcludeList.WasPassed()) {
     for (const auto& s: aOptions.mExcludeList.Value()) {
       WebAuthnScopedCredentialDescriptor c;
-      c.type() = static_cast<uint32_t>(s.mType);
       CryptoBuffer cb;
       cb.Assign(s.mId);
       c.id() = cb;
-      if (s.mTransports.WasPassed()) {
-        for (const auto& t: s.mTransports.Value()) {
-          c.transports().AppendElement(static_cast<uint32_t>(t));
-        }
-      }
       excludeList.AppendElement(c);
     }
   }
@@ -428,7 +487,7 @@ WebAuthnManager::MakeCredential(nsPIDOMWindowInner* aParent, JSContext* aCx,
                                excludeList,
                                extensions);
   RefPtr<MozPromise<nsresult, nsresult, false>> p = GetOrCreateBackgroundActor();
-  p->Then(AbstractThread::MainThread(), __func__,
+  p->Then(GetMainThreadSerialEventTarget(), __func__,
           []() {
             WebAuthnManager* mgr = WebAuthnManager::Get();
             if (!mgr) {
@@ -463,8 +522,7 @@ WebAuthnManager::StartSign() {
 
 already_AddRefed<Promise>
 WebAuthnManager::GetAssertion(nsPIDOMWindowInner* aParent,
-                              const ArrayBufferViewOrArrayBuffer& aChallenge,
-                              const AssertionOptions& aOptions)
+                              const PublicKeyCredentialRequestOptions& aOptions)
 {
   MOZ_ASSERT(aParent);
 
@@ -479,7 +537,8 @@ WebAuthnManager::GetAssertion(nsPIDOMWindowInner* aParent,
   }
 
   nsString origin;
-  rv = GetOrigin(aParent, origin);
+  nsCString rpId;
+  rv = GetOrigin(aParent, origin, rpId);
   if (NS_WARN_IF(rv.Failed())) {
     promise->MaybeReject(rv);
     return promise.forget();
@@ -489,19 +548,14 @@ WebAuthnManager::GetAssertion(nsPIDOMWindowInner* aParent,
   // reasonable range as defined by the platform and if not, correct it to the
   // closest value lying within that range.
 
-  double adjustedTimeout = 30.0;
-  if (aOptions.mTimeoutSeconds.WasPassed()) {
-    adjustedTimeout = aOptions.mTimeoutSeconds.Value();
-    adjustedTimeout = std::max(15.0, adjustedTimeout);
-    adjustedTimeout = std::min(120.0, adjustedTimeout);
+  uint32_t adjustedTimeout = 30000;
+  if (aOptions.mTimeout.WasPassed()) {
+    adjustedTimeout = aOptions.mTimeout.Value();
+    adjustedTimeout = std::max(15000u, adjustedTimeout);
+    adjustedTimeout = std::min(120000u, adjustedTimeout);
   }
 
-  nsCString rpId;
-  if (!aOptions.mRpId.WasPassed()) {
-    // If rpId is not specified, then set rpId to callerOrigin, and rpIdHash to
-    // the SHA-256 hash of rpId.
-    rpId.Assign(NS_ConvertUTF16toUTF8(origin));
-  } else {
+  if (aOptions.mRpId.WasPassed()) {
     // If rpId is specified, then invoke the procedure used for relaxing the
     // same-origin restriction by setting the document.domain attribute, using
     // rpId as the given value but without changing the current document’s
@@ -541,13 +595,15 @@ WebAuthnManager::GetAssertion(nsPIDOMWindowInner* aParent,
   // representing this request. Choose a hash algorithm for hashAlg and compute
   // the clientDataJSON and clientDataHash.
   CryptoBuffer challenge;
-  if (!challenge.Assign(aChallenge)) {
+  if (!challenge.Assign(aOptions.mChallenge)) {
     promise->MaybeReject(NS_ERROR_DOM_SECURITY_ERR);
     return promise.forget();
   }
 
   nsAutoCString clientDataJSON;
-  srv = AssembleClientData(origin, challenge, clientDataJSON);
+  // WD-05 vs. WD-06: In WD-06, the first parameter should be "origin". Fix
+  // this in Bug 1384776
+  srv = AssembleClientData(NS_ConvertUTF8toUTF16(rpId), challenge, clientDataJSON);
   if (NS_WARN_IF(NS_FAILED(srv))) {
     promise->MaybeReject(NS_ERROR_DOM_SECURITY_ERR);
     return promise.forget();
@@ -567,23 +623,17 @@ WebAuthnManager::GetAssertion(nsPIDOMWindowInner* aParent,
 
   // Note: we only support U2F-style authentication for now, so we effectively
   // require an AllowList.
-  if (!aOptions.mAllowList.WasPassed()) {
+  if (aOptions.mAllowList.Length() < 1) {
     promise->MaybeReject(NS_ERROR_DOM_NOT_ALLOWED_ERR);
     return promise.forget();
   }
 
   nsTArray<WebAuthnScopedCredentialDescriptor> allowList;
-  for (const auto& s: aOptions.mAllowList.Value()) {
+  for (const auto& s: aOptions.mAllowList) {
     WebAuthnScopedCredentialDescriptor c;
-    c.type() = static_cast<uint32_t>(s.mType);
     CryptoBuffer cb;
     cb.Assign(s.mId);
     c.id() = cb;
-    if (s.mTransports.WasPassed()) {
-      for (const auto& t: s.mTransports.Value()) {
-        c.transports().AppendElement(static_cast<uint32_t>(t));
-      }
-    }
     allowList.AppendElement(c);
   }
 
@@ -597,11 +647,11 @@ WebAuthnManager::GetAssertion(nsPIDOMWindowInner* aParent,
 
   WebAuthnTransactionInfo info(rpIdHash,
                                clientDataHash,
-                               10000,
+                               adjustedTimeout,
                                allowList,
                                extensions);
   RefPtr<MozPromise<nsresult, nsresult, false>> p = GetOrCreateBackgroundActor();
-  p->Then(AbstractThread::MainThread(), __func__,
+  p->Then(GetMainThreadSerialEventTarget(), __func__,
           []() {
             WebAuthnManager* mgr = WebAuthnManager::Get();
             if (!mgr) {
@@ -623,16 +673,26 @@ WebAuthnManager::GetAssertion(nsPIDOMWindowInner* aParent,
 }
 
 void
-WebAuthnManager::FinishMakeCredential(nsTArray<uint8_t>& aRegBuffer,
-                                      nsTArray<uint8_t>& aSigBuffer)
+WebAuthnManager::FinishMakeCredential(nsTArray<uint8_t>& aRegBuffer)
 {
   MOZ_ASSERT(mTransactionPromise);
   MOZ_ASSERT(mInfo.isSome());
 
   CryptoBuffer regData;
   if (NS_WARN_IF(!regData.Assign(aRegBuffer.Elements(), aRegBuffer.Length()))) {
-    mTransactionPromise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
+    Cancel(NS_ERROR_OUT_OF_MEMORY);
     return;
+  }
+
+  mozilla::dom::CryptoBuffer aaguidBuf;
+  if (NS_WARN_IF(!aaguidBuf.SetCapacity(16, mozilla::fallible))) {
+    Cancel(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
+  // TODO: Adjust the AAGUID from all zeroes in Bug 1381575 (if needed)
+  // See https://github.com/w3c/webauthn/issues/506
+  for (int i=0; i<16; i++) {
+    aaguidBuf.AppendElement(0x00, mozilla::fallible);
   }
 
   // Decompose the U2F registration packet
@@ -641,16 +701,19 @@ WebAuthnManager::FinishMakeCredential(nsTArray<uint8_t>& aRegBuffer,
   CryptoBuffer attestationCertBuf;
   CryptoBuffer signatureBuf;
 
+  // Only handles attestation cert chains of length=1.
   nsresult rv = U2FDecomposeRegistrationResponse(regData, pubKeyBuf, keyHandleBuf,
                                                  attestationCertBuf, signatureBuf);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     Cancel(rv);
     return;
   }
+  MOZ_ASSERT(keyHandleBuf.Length() <= 0xFFFF);
 
-  CryptoBuffer signatureData;
-  if (NS_WARN_IF(!signatureData.Assign(aSigBuffer.Elements(), aSigBuffer.Length()))) {
-    Cancel(NS_ERROR_OUT_OF_MEMORY);
+  nsAutoString keyHandleBase64Url;
+  rv = keyHandleBuf.ToJwkBase64(keyHandleBase64Url);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    Cancel(rv);
     return;
   }
 
@@ -668,31 +731,78 @@ WebAuthnManager::FinishMakeCredential(nsTArray<uint8_t>& aRegBuffer,
 
   CryptoBuffer authenticatorDataBuf;
   rv = U2FAssembleAuthenticatorData(authenticatorDataBuf, rpIdHashBuf,
-                                    signatureData);
+                                    signatureBuf);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     Cancel(NS_ERROR_OUT_OF_MEMORY);
     return;
   }
 
-  // Create a new ScopedCredentialInfo object named value and populate its
-  // fields with the values returned from the authenticator as well as the
-  // clientDataJSON computed earlier.
+  // Construct the public key object
+  CryptoBuffer pubKeyObj;
+  rv = CBOREncodePublicKeyObj(pubKeyBuf, pubKeyObj);
+  if (NS_FAILED(rv)) {
+    Cancel(rv);
+    return;
+  }
 
-  RefPtr<ScopedCredential> credential = new ScopedCredential(mCurrentParent);
-  credential->SetType(ScopedCredentialType::ScopedCred);
-  credential->SetId(keyHandleBuf);
+  // Format:
+  // 32 bytes: SHA256 of the RP ID
+  // 1 byte: flags (TUP & AT)
+  // 4 bytes: sign counter
+  // variable: attestation data struct
+  // - 16 bytes: AAGUID
+  // - 2 bytes: Length of Credential ID
+  // - L bytes: Credential ID
+  // - variable: CBOR-format public key
+  // variable: CBOR-format extension auth data (optional, not flagged)
 
-  RefPtr<WebAuthnAttestation> attestation = new WebAuthnAttestation(mCurrentParent);
-  attestation->SetFormat(NS_LITERAL_STRING("u2f"));
-  attestation->SetClientData(clientDataBuf);
-  attestation->SetAuthenticatorData(authenticatorDataBuf);
-  attestation->SetAttestation(regData);
+  mozilla::dom::CryptoBuffer authDataBuf;
+  if (NS_WARN_IF(!authDataBuf.SetCapacity(32 + 1 + 4 + aaguidBuf.Length() + 2 +
+                                          keyHandleBuf.Length() +
+                                          pubKeyObj.Length(),
+                                          mozilla::fallible))) {
+    Cancel(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
 
-  RefPtr<ScopedCredentialInfo> info = new ScopedCredentialInfo(mCurrentParent);
-  info->SetCredential(credential);
-  info->SetAttestation(attestation);
+  authDataBuf.AppendElements(rpIdHashBuf, mozilla::fallible);
+  authDataBuf.AppendElement(FLAG_TUP | FLAG_AT, mozilla::fallible);
+  // During create credential, counter is always 0 for U2F
+  // See https://github.com/w3c/webauthn/issues/507
+  authDataBuf.AppendElement(0x00, mozilla::fallible);
+  authDataBuf.AppendElement(0x00, mozilla::fallible);
+  authDataBuf.AppendElement(0x00, mozilla::fallible);
+  authDataBuf.AppendElement(0x00, mozilla::fallible);
 
-  mTransactionPromise->MaybeResolve(info);
+  authDataBuf.AppendElements(aaguidBuf, mozilla::fallible);
+  authDataBuf.AppendElement((keyHandleBuf.Length() >> 8) & 0xFF, mozilla::fallible);
+  authDataBuf.AppendElement((keyHandleBuf.Length() >> 0) & 0xFF, mozilla::fallible);
+  authDataBuf.AppendElements(keyHandleBuf, mozilla::fallible);
+  authDataBuf.AppendElements(pubKeyObj, mozilla::fallible);
+
+  CryptoBuffer attObj;
+  rv = CBOREncodeAttestationObj(authDataBuf, attestationCertBuf, signatureBuf,
+                                attObj);
+  if (NS_FAILED(rv)) {
+    Cancel(rv);
+    return;
+  }
+
+  // Create a new PublicKeyCredential object and populate its fields with the
+  // values returned from the authenticator as well as the clientDataJSON
+  // computed earlier.
+  RefPtr<AuthenticatorAttestationResponse> attestation =
+      new AuthenticatorAttestationResponse(mCurrentParent);
+  attestation->SetClientDataJSON(clientDataBuf);
+  attestation->SetAttestationObject(attObj);
+
+  RefPtr<PublicKeyCredential> credential = new PublicKeyCredential(mCurrentParent);
+  credential->SetId(keyHandleBase64Url);
+  credential->SetType(NS_LITERAL_STRING("public-key"));
+  credential->SetRawId(keyHandleBuf);
+  credential->SetResponse(attestation);
+
+  mTransactionPromise->MaybeResolve(credential);
   MaybeClearTransaction();
 }
 
@@ -731,36 +841,42 @@ WebAuthnManager::FinishGetAssertion(nsTArray<uint8_t>& aCredentialId,
 
   CryptoBuffer credentialBuf;
   if (!credentialBuf.Assign(aCredentialId)) {
+    Cancel(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
+
+  nsAutoString credentialBase64Url;
+  rv = credentialBuf.ToJwkBase64(credentialBase64Url);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     Cancel(rv);
     return;
   }
 
   // If any authenticator returns success:
 
-  // Create a new WebAuthnAssertion object named value and populate its fields
+  // Create a new PublicKeyCredential object named value and populate its fields
   // with the values returned from the authenticator as well as the
   // clientDataJSON computed earlier.
-
-  RefPtr<ScopedCredential> credential = new ScopedCredential(mCurrentParent);
-  credential->SetType(ScopedCredentialType::ScopedCred);
-  credential->SetId(credentialBuf);
-
-  RefPtr<WebAuthnAssertion> assertion = new WebAuthnAssertion(mCurrentParent);
-  assertion->SetCredential(credential);
-  assertion->SetClientData(clientDataBuf);
+  RefPtr<AuthenticatorAssertionResponse> assertion =
+    new AuthenticatorAssertionResponse(mCurrentParent);
+  assertion->SetClientDataJSON(clientDataBuf);
   assertion->SetAuthenticatorData(authenticatorDataBuf);
   assertion->SetSignature(signatureData);
 
-  mTransactionPromise->MaybeResolve(assertion);
+  RefPtr<PublicKeyCredential> credential =
+    new PublicKeyCredential(mCurrentParent);
+  credential->SetId(credentialBase64Url);
+  credential->SetType(NS_LITERAL_STRING("public-key"));
+  credential->SetRawId(credentialBuf);
+  credential->SetResponse(assertion);
+
+  mTransactionPromise->MaybeResolve(credential);
   MaybeClearTransaction();
 }
 
 void
 WebAuthnManager::Cancel(const nsresult& aError)
 {
-  if (mChild) {
-    mChild->SendRequestCancel();
-  }
   if (mTransactionPromise) {
     mTransactionPromise->MaybeReject(aError);
   }
@@ -770,7 +886,12 @@ WebAuthnManager::Cancel(const nsresult& aError)
 void
 WebAuthnManager::ActorCreated(PBackgroundChild* aActor)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aActor);
+
+  if (mChild) {
+    return;
+  }
 
   RefPtr<WebAuthnTransactionChild> mgr(new WebAuthnTransactionChild());
   PWebAuthnTransactionChild* constructedMgr =

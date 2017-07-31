@@ -13,6 +13,8 @@ macosx64-clang:
     worker:
         docker-image: {in-tree: desktop-build}
         max-run-time: 36000
+        env:
+            TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-clang.manifest"
     run:
         using: toolchain-script
         script: build-clang-macosx.sh
@@ -20,6 +22,11 @@ macosx64-clang:
         resources:
             - 'build/build-clang/**'
             - 'taskcluster/scripts/misc/tooltool-download.sh'
+        toolchain-artifact: public/build/clang.tar.xz
+    toolchains:
+        - linux64-cctools-port
+        - linux64-clang
+        - linux64-gcc
 
 macosx64-clang-tidy:
     description: "Clang-tidy build"
@@ -35,6 +42,8 @@ macosx64-clang-tidy:
     worker:
         docker-image: {in-tree: desktop-build}
         max-run-time: 36000
+        env:
+            TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-clang.manifest"
     run:
         using: toolchain-script
         script: build-clang-tidy-macosx.sh
@@ -43,6 +52,11 @@ macosx64-clang-tidy:
             - 'build/clang-plugin/**'
             - 'build/build-clang/**'
             - 'taskcluster/scripts/misc/tooltool-download.sh'
+        toolchain-artifact: public/build/clang-tidy.tar.xz
+    toolchains:
+        - linux64-cctools-port
+        - linux64-clang
+        - linux64-gcc
 
 macosx64-cctools-port:
     description: "cctools-port toolchain build"
@@ -55,9 +69,15 @@ macosx64-cctools-port:
     worker:
         docker-image: {in-tree: desktop-build}
         max-run-time: 36000
+        env:
+            TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-clang.manifest"
     run:
         using: toolchain-script
         script: build-cctools-port-macosx.sh
         tooltool-downloads: internal
         resources:
             - 'taskcluster/scripts/misc/tooltool-download.sh'
+        toolchain-artifact: public/build/cctools.tar.bz2
+    toolchains:
+        - linux64-cctools-port
+        - linux64-clang

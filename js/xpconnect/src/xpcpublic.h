@@ -260,9 +260,9 @@ public:
 private:
     static const JSStringFinalizer sLiteralFinalizer, sDOMStringFinalizer;
 
-    static void FinalizeLiteral(JS::Zone* zone, const JSStringFinalizer* fin, char16_t* chars);
+    static void FinalizeLiteral(const JSStringFinalizer* fin, char16_t* chars);
 
-    static void FinalizeDOMString(JS::Zone* zone, const JSStringFinalizer* fin, char16_t* chars);
+    static void FinalizeDOMString(const JSStringFinalizer* fin, char16_t* chars);
 
     XPCStringConvert() = delete;
 };
@@ -413,7 +413,7 @@ Throw(JSContext* cx, nsresult rv);
  * Returns the nsISupports native behind a given reflector (either DOM or
  * XPCWN).
  */
-nsISupports*
+already_AddRefed<nsISupports>
 UnwrapReflectorToISupports(JSObject* reflector);
 
 /**

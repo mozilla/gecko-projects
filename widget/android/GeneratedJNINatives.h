@@ -220,11 +220,15 @@ template<class Impl>
 class GeckoThread::Natives : public mozilla::jni::NativeImpl<GeckoThread, Impl>
 {
 public:
-    static const JNINativeMethod methods[6];
+    static const JNINativeMethod methods[7];
 };
 
 template<class Impl>
 const JNINativeMethod GeckoThread::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<GeckoThread::ForceQuit_t>(
+            mozilla::jni::NativeStub<GeckoThread::ForceQuit_t, Impl>
+            ::template Wrap<&Impl::ForceQuit>),
 
     mozilla::jni::MakeNativeMethod<GeckoThread::CreateServices_t>(
             mozilla::jni::NativeStub<GeckoThread::CreateServices_t, Impl>
@@ -503,40 +507,40 @@ const JNINativeMethod CodecProxy::NativeCallbacks::Natives<Impl>::methods[] = {
 };
 
 template<class Impl>
-class GeckoHlsDemuxerWrapper::HlsDemuxerCallbacks::Natives : public mozilla::jni::NativeImpl<HlsDemuxerCallbacks, Impl>
+class GeckoHLSDemuxerWrapper::Callbacks::Natives : public mozilla::jni::NativeImpl<Callbacks, Impl>
 {
 public:
     static const JNINativeMethod methods[2];
 };
 
 template<class Impl>
-const JNINativeMethod GeckoHlsDemuxerWrapper::HlsDemuxerCallbacks::Natives<Impl>::methods[] = {
+const JNINativeMethod GeckoHLSDemuxerWrapper::Callbacks::Natives<Impl>::methods[] = {
 
-    mozilla::jni::MakeNativeMethod<GeckoHlsDemuxerWrapper::HlsDemuxerCallbacks::OnError_t>(
-            mozilla::jni::NativeStub<GeckoHlsDemuxerWrapper::HlsDemuxerCallbacks::OnError_t, Impl>
+    mozilla::jni::MakeNativeMethod<GeckoHLSDemuxerWrapper::Callbacks::OnError_t>(
+            mozilla::jni::NativeStub<GeckoHLSDemuxerWrapper::Callbacks::OnError_t, Impl>
             ::template Wrap<&Impl::OnError>),
 
-    mozilla::jni::MakeNativeMethod<GeckoHlsDemuxerWrapper::HlsDemuxerCallbacks::OnInitialized_t>(
-            mozilla::jni::NativeStub<GeckoHlsDemuxerWrapper::HlsDemuxerCallbacks::OnInitialized_t, Impl>
+    mozilla::jni::MakeNativeMethod<GeckoHLSDemuxerWrapper::Callbacks::OnInitialized_t>(
+            mozilla::jni::NativeStub<GeckoHLSDemuxerWrapper::Callbacks::OnInitialized_t, Impl>
             ::template Wrap<&Impl::OnInitialized>)
 };
 
 template<class Impl>
-class GeckoHlsResourceWrapper::HlsResourceCallbacks::Natives : public mozilla::jni::NativeImpl<HlsResourceCallbacks, Impl>
+class GeckoHLSResourceWrapper::Callbacks::Natives : public mozilla::jni::NativeImpl<Callbacks, Impl>
 {
 public:
     static const JNINativeMethod methods[2];
 };
 
 template<class Impl>
-const JNINativeMethod GeckoHlsResourceWrapper::HlsResourceCallbacks::Natives<Impl>::methods[] = {
+const JNINativeMethod GeckoHLSResourceWrapper::Callbacks::Natives<Impl>::methods[] = {
 
-    mozilla::jni::MakeNativeMethod<GeckoHlsResourceWrapper::HlsResourceCallbacks::OnDataArrived_t>(
-            mozilla::jni::NativeStub<GeckoHlsResourceWrapper::HlsResourceCallbacks::OnDataArrived_t, Impl>
+    mozilla::jni::MakeNativeMethod<GeckoHLSResourceWrapper::Callbacks::OnDataArrived_t>(
+            mozilla::jni::NativeStub<GeckoHLSResourceWrapper::Callbacks::OnDataArrived_t, Impl>
             ::template Wrap<&Impl::OnDataArrived>),
 
-    mozilla::jni::MakeNativeMethod<GeckoHlsResourceWrapper::HlsResourceCallbacks::OnError_t>(
-            mozilla::jni::NativeStub<GeckoHlsResourceWrapper::HlsResourceCallbacks::OnError_t, Impl>
+    mozilla::jni::MakeNativeMethod<GeckoHLSResourceWrapper::Callbacks::OnError_t>(
+            mozilla::jni::NativeStub<GeckoHLSResourceWrapper::Callbacks::OnError_t, Impl>
             ::template Wrap<&Impl::OnError>)
 };
 

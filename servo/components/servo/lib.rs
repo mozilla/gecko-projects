@@ -49,7 +49,7 @@ pub extern crate servo_geometry;
 pub extern crate servo_url;
 pub extern crate style;
 pub extern crate style_traits;
-pub extern crate webrender_traits;
+pub extern crate webrender_api;
 pub extern crate webvr;
 pub extern crate webvr_traits;
 
@@ -68,8 +68,8 @@ fn webdriver(_port: u16, _constellation: Sender<ConstellationMsg>) { }
 
 use bluetooth::BluetoothThreadFactory;
 use bluetooth_traits::BluetoothRequest;
-use compositing::{CompositorProxy, IOCompositor};
-use compositing::compositor_thread::InitialCompositorState;
+use compositing::IOCompositor;
+use compositing::compositor_thread::{self, CompositorProxy, CompositorReceiver, InitialCompositorState};
 use compositing::windowing::WindowEvent;
 use compositing::windowing::WindowMethods;
 use constellation::{Constellation, InitialConstellationState, UnprivilegedPipelineContent};
@@ -97,7 +97,7 @@ use std::borrow::Cow;
 use std::cmp::max;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Sender, channel};
 use webrender::renderer::RendererKind;
 use webvr::{WebVRThread, WebVRCompositorHandler};
 
@@ -122,7 +122,7 @@ pub struct Browser<Window: WindowMethods + 'static> {
 }
 
 impl<Window> Browser<Window> where Window: WindowMethods + 'static {
-    pub fn new(window: Rc<Window>) -> Browser<Window> {
+    pub fn new(window: Rc<Window>, target_url: ServoUrl) -> Browser<Window> {
         // Global configuration options, parsed from the command line.
         let opts = opts::get();
 
@@ -134,7 +134,7 @@ impl<Window> Browser<Window> where Window: WindowMethods + 'static {
         // messages to client may need to pump a platform-specific event loop
         // to deliver the message.
         let (compositor_proxy, compositor_receiver) =
-            window.create_compositor_channel();
+            create_compositor_channel(window.create_event_loop_waker());
         let supports_clipboard = window.supports_clipboard();
         let time_profiler_chan = profile_time::Profiler::create(&opts.time_profiling,
                                                                 opts.time_profiler_trace_path.clone());
@@ -174,10 +174,6 @@ impl<Window> Browser<Window> where Window: WindowMethods + 'static {
                 None
             };
 
-            let framebuffer_size = window.framebuffer_size();
-            let framebuffer_size = webrender_traits::DeviceUintSize::new(framebuffer_size.width,
-                                                                         framebuffer_size.height);
-
             webrender::Renderer::new(window.gl(), webrender::RendererOptions {
                 device_pixel_ratio: device_pixel_ratio,
                 resource_override_path: Some(resource_path),
@@ -191,8 +187,11 @@ impl<Window> Browser<Window> where Window: WindowMethods + 'static {
                 renderer_kind: renderer_kind,
                 enable_subpixel_aa: opts.enable_subpixel_text_antialiasing,
                 ..Default::default()
-            }, framebuffer_size).expect("Unable to initialize webrender!")
+            }).expect("Unable to initialize webrender!")
         };
+
+        let webrender_api = webrender_api_sender.create_api();
+        let webrender_document = webrender_api.add_document(window.framebuffer_size());
 
         // Important that this call is done in a single-threaded fashion, we
         // can't defer it after `create_constellation` has started.
@@ -203,7 +202,7 @@ impl<Window> Browser<Window> where Window: WindowMethods + 'static {
         // as the navigation context.
         let (constellation_chan, sw_senders) = create_constellation(opts.user_agent.clone(),
                                                                     opts.config_dir.clone(),
-                                                                    opts.url.clone(),
+                                                                    target_url,
                                                                     compositor_proxy.clone_compositor_proxy(),
                                                                     time_profiler_chan.clone(),
                                                                     mem_profiler_chan.clone(),
@@ -211,7 +210,8 @@ impl<Window> Browser<Window> where Window: WindowMethods + 'static {
                                                                     devtools_chan,
                                                                     supports_clipboard,
                                                                     &webrender,
-                                                                    webrender_api_sender.clone());
+                                                                    webrender_document,
+                                                                    webrender_api_sender);
 
         // Send the constellation's swmanager sender to service worker manager thread
         script::init_service_workers(sw_senders);
@@ -230,8 +230,9 @@ impl<Window> Browser<Window> where Window: WindowMethods + 'static {
             constellation_chan: constellation_chan.clone(),
             time_profiler_chan: time_profiler_chan,
             mem_profiler_chan: mem_profiler_chan,
-            webrender: webrender,
-            webrender_api_sender: webrender_api_sender,
+            webrender,
+            webrender_document,
+            webrender_api,
         });
 
         Browser {
@@ -244,20 +245,12 @@ impl<Window> Browser<Window> where Window: WindowMethods + 'static {
         self.compositor.handle_events(events)
     }
 
-    pub fn set_webrender_profiler_enabled(&mut self, enabled: bool) {
-        self.compositor.set_webrender_profiler_enabled(enabled);
-    }
-
     pub fn repaint_synchronously(&mut self) {
         self.compositor.repaint_synchronously()
     }
 
     pub fn pinch_zoom_level(&self) -> f32 {
         self.compositor.pinch_zoom_level()
-    }
-
-    pub fn request_title_for_main_frame(&self) {
-        self.compositor.title_for_main_frame()
     }
 
     pub fn setup_logging(&self) {
@@ -273,17 +266,30 @@ impl<Window> Browser<Window> where Window: WindowMethods + 'static {
     }
 }
 
+fn create_compositor_channel(event_loop_waker: Box<compositor_thread::EventLoopWaker>)
+    -> (CompositorProxy, CompositorReceiver) {
+    let (sender, receiver) = channel();
+    (CompositorProxy {
+         sender: sender,
+         event_loop_waker: event_loop_waker,
+        },
+     CompositorReceiver {
+         receiver: receiver
+     })
+}
+
 fn create_constellation(user_agent: Cow<'static, str>,
                         config_dir: Option<PathBuf>,
-                        url: Option<ServoUrl>,
-                        compositor_proxy: Box<CompositorProxy + Send>,
+                        url: ServoUrl,
+                        compositor_proxy: CompositorProxy,
                         time_profiler_chan: time::ProfilerChan,
                         mem_profiler_chan: mem::ProfilerChan,
                         debugger_chan: Option<debugger::Sender>,
                         devtools_chan: Option<Sender<devtools_traits::DevtoolsControlMsg>>,
                         supports_clipboard: bool,
                         webrender: &webrender::Renderer,
-                        webrender_api_sender: webrender_traits::RenderApiSender)
+                        webrender_document: webrender_api::DocumentId,
+                        webrender_api_sender: webrender_api::RenderApiSender)
                         -> (Sender<ConstellationMsg>, SWManagerSenders) {
     let bluetooth_thread: IpcSender<BluetoothRequest> = BluetoothThreadFactory::new();
 
@@ -298,17 +304,18 @@ fn create_constellation(user_agent: Cow<'static, str>,
     let resource_sender = public_resource_threads.sender();
 
     let initial_state = InitialConstellationState {
-        compositor_proxy: compositor_proxy,
-        debugger_chan: debugger_chan,
-        devtools_chan: devtools_chan,
-        bluetooth_thread: bluetooth_thread,
-        font_cache_thread: font_cache_thread,
-        public_resource_threads: public_resource_threads,
-        private_resource_threads: private_resource_threads,
-        time_profiler_chan: time_profiler_chan,
-        mem_profiler_chan: mem_profiler_chan,
-        supports_clipboard: supports_clipboard,
-        webrender_api_sender: webrender_api_sender,
+        compositor_proxy,
+        debugger_chan,
+        devtools_chan,
+        bluetooth_thread,
+        font_cache_thread,
+        public_resource_threads,
+        private_resource_threads,
+        time_profiler_chan,
+        mem_profiler_chan,
+        supports_clipboard,
+        webrender_document,
+        webrender_api_sender,
     };
     let (constellation_chan, from_swmanager_sender) =
         Constellation::<script_layout_interface::message::Msg,
@@ -325,9 +332,7 @@ fn create_constellation(user_agent: Cow<'static, str>,
         constellation_chan.send(ConstellationMsg::SetWebVRThread(webvr_thread)).unwrap();
     }
 
-    if let Some(url) = url {
-        constellation_chan.send(ConstellationMsg::InitLoadUrl(url)).unwrap();
-    };
+    constellation_chan.send(ConstellationMsg::InitLoadUrl(url)).unwrap();
 
     // channels to communicate with Service Worker Manager
     let sw_senders = SWManagerSenders {

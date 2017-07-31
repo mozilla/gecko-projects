@@ -255,6 +255,11 @@ this.BrowserIDManager.prototype = {
     this._log.debug("observed " + topic);
     switch (topic) {
     case fxAccountsCommon.ONLOGIN_NOTIFICATION: {
+      // If our existing Sync state is that we needed to reauth, clear that
+      // state now - it will get reset back if a problem persists.
+      if (Weave.Status.login == LOGIN_FAILED_LOGIN_REJECTED) {
+        Weave.Status.login = LOGIN_SUCCEEDED;
+      }
       // This should only happen if we've been initialized without a current
       // user - otherwise we'd have seen the LOGOUT notification and been
       // thrown away.
@@ -277,9 +282,9 @@ this.BrowserIDManager.prototype = {
         // (which is signaled by `this.whenReadyToAuthenticate.promise` resolving).
         this.whenReadyToAuthenticate.promise.then(() => {
           Services.obs.notifyObservers(null, "weave:service:setup-complete");
-          return new Promise(resolve => { Weave.Utils.nextTick(resolve, null); })
+          return Async.promiseYield();
         }).then(() => {
-          Weave.Service.sync();
+          return Weave.Service.sync();
         }).catch(e => {
           this._log.warn("Failed to trigger setup complete notification", e);
         });
@@ -287,7 +292,7 @@ this.BrowserIDManager.prototype = {
     } break;
 
     case fxAccountsCommon.ONLOGOUT_NOTIFICATION:
-      Weave.Service.startOver();
+      Async.promiseSpinningly(Weave.Service.startOver());
       // startOver will cause this instance to be thrown away, so there's
       // nothing else to do.
       break;
@@ -835,8 +840,7 @@ BrowserIDClusterManager.prototype = {
     let cb = Async.makeSpinningCallback();
     promiseClusterURL().then(function(clusterURL) {
       cb(null, clusterURL);
-    }).then(
-      null, err => {
+    }).catch(err => {
       log.info("Failed to fetch the cluster URL", err);
       // service.js's verifyLogin() method will attempt to fetch a cluster
       // URL when it sees a 401.  If it gets null, it treats it as a "real"

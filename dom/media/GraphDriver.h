@@ -278,7 +278,7 @@ public:
     return MEDIA_GRAPH_TARGET_PERIOD_MS;
   }
 
-  bool OnThread() override { return !mThread || NS_GetCurrentThread() == mThread; }
+  bool OnThread() override { return !mThread || mThread->EventTarget()->IsOnCurrentThread(); }
 
   /* When the graph wakes up to do an iteration, implementations return the
    * range of time that will be processed.  This is called only once per
@@ -536,7 +536,7 @@ private:
   /**
    * True if microphone is being used by this process. This is synchronized by
    * the graph's monitor. */
-  bool mMicrophoneActive;
+  Atomic<bool> mMicrophoneActive;
   /* True if this driver was created from a driver created because of a previous
    * AudioCallbackDriver failure. */
   bool mFromFallback;

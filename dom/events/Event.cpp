@@ -32,6 +32,7 @@
 #include "nsJSEnvironment.h"
 #include "nsLayoutUtils.h"
 #include "nsPIWindowRoot.h"
+#include "nsRFPService.h"
 #include "WorkerPrivate.h"
 
 namespace mozilla {
@@ -82,10 +83,10 @@ Event::ConstructorInit(EventTarget* aOwner,
       A derived class might want to allocate its own type of aEvent
       (derived from WidgetEvent). To do this, it should take care to pass
       a non-nullptr aEvent to this ctor, e.g.:
-      
+
         FooEvent::FooEvent(..., WidgetEvent* aEvent)
           : Event(..., aEvent ? aEvent : new WidgetEvent())
-      
+
       Then, to override the mEventIsInternal assignments done by the
       base ctor, it should do this in its own ctor:
 
@@ -123,7 +124,7 @@ Event::InitPresContextData(nsPresContext* aPresContext)
   }
 }
 
-Event::~Event() 
+Event::~Event()
 {
   NS_ASSERT_OWNINGTHREAD(Event);
 
@@ -665,12 +666,12 @@ PopupAllowedForEvent(const char *eventName)
 
   nsDependentCString events(sPopupAllowedEvents);
 
-  nsAFlatCString::const_iterator start, end;
-  nsAFlatCString::const_iterator startiter(events.BeginReading(start));
+  nsCString::const_iterator start, end;
+  nsCString::const_iterator startiter(events.BeginReading(start));
   events.EndReading(end);
 
   while (startiter != end) {
-    nsAFlatCString::const_iterator enditer(end);
+    nsCString::const_iterator enditer(end);
 
     if (!FindInReadable(nsDependentCString(eventName), startiter, enditer))
       return false;
@@ -1094,7 +1095,7 @@ Event::DefaultPrevented(CallerType aCallerType) const
 }
 
 double
-Event::TimeStamp() const
+Event::TimeStampImpl() const
 {
   if (!sReturnHighResTimeStamp) {
     return static_cast<double>(mEvent->mTime);
@@ -1127,6 +1128,12 @@ Event::TimeStamp() const
   MOZ_ASSERT(workerPrivate);
 
   return workerPrivate->TimeStampToDOMHighRes(mEvent->mTimeStamp);
+}
+
+double
+Event::TimeStamp() const
+{
+  return nsRFPService::ReduceTimePrecisionAsMSecs(TimeStampImpl());
 }
 
 bool
@@ -1328,7 +1335,7 @@ using namespace mozilla::dom;
 already_AddRefed<Event>
 NS_NewDOMEvent(EventTarget* aOwner,
                nsPresContext* aPresContext,
-               WidgetEvent* aEvent) 
+               WidgetEvent* aEvent)
 {
   RefPtr<Event> it = new Event(aOwner, aPresContext, aEvent);
   return it.forget();

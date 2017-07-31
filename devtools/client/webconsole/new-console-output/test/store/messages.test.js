@@ -7,9 +7,11 @@ const {
   getAllMessagesById,
   getAllMessagesTableDataById,
   getAllMessagesUiById,
+  getAllNetworkMessagesUpdateById,
   getAllRepeatById,
   getCurrentGroup,
   getVisibleMessages,
+  getAllMessagesObjectPropertiesById,
 } = require("devtools/client/webconsole/new-console-output/selectors/messages");
 const {
   clonePacket,
@@ -118,6 +120,7 @@ describe("Message reducer:", () => {
     it("clears the messages list in response to MESSAGES_CLEAR action", () => {
       const { dispatch, getState } = setupStore([
         "console.log('foobar', 'test')",
+        "console.log('foobar', 'test')",
         "console.log(undefined)",
         "console.table(['red', 'green', 'blue']);",
         "console.group('bar')",
@@ -133,6 +136,45 @@ describe("Message reducer:", () => {
       expect(getAllMessagesTableDataById(state).size).toBe(0);
       expect(getCurrentGroup(state)).toBe(null);
       expect(getAllRepeatById(state)).toEqual({});
+    });
+
+    it("cleans the repeatsById object when messages are pruned", () => {
+      const { dispatch, getState } = setupStore(
+        [
+          "console.log('foobar', 'test')",
+          "console.log('foobar', 'test')",
+          "console.log(undefined)",
+          "console.log(undefined)",
+        ],
+        null, {
+          logLimit: 2
+        }
+      );
+
+      // Check that we have the expected data.
+      let messages = getAllMessagesById(getState());
+      let repeats = getAllRepeatById(getState());
+      expect(Object.keys(repeats).length).toBe(2);
+      const lastMessageId = messages.last().id;
+
+      // This addition will prune the first message out of the store.
+      let packet = stubPackets.get("console.log('foobar', 'test')");
+      dispatch(actions.messageAdd(packet));
+
+      messages = getAllMessagesById(getState());
+      repeats = getAllRepeatById(getState());
+
+      // There should be only the data for the "undefined" message.
+      expect(Object.keys(repeats)).toEqual([lastMessageId]);
+      expect(Object.keys(repeats).length).toBe(1);
+      expect(repeats[lastMessageId]).toBe(2);
+
+      // This addition will prune the first message out of the store.
+      packet = stubPackets.get("console.log(undefined)");
+      dispatch(actions.messageAdd(packet));
+
+      // repeatById should now be empty.
+      expect(getAllRepeatById(getState())).toEqual({});
     });
 
     it("properly limits number of messages", () => {
@@ -188,8 +230,9 @@ describe("Message reducer:", () => {
 
       expect(messages.count()).toBe(logLimit);
       expect(visibleMessages.length).toBe(logLimit);
-      expect(visibleMessages[0].parameters[0]).toBe(`message-0`);
-      expect(visibleMessages[logLimit - 1].parameters[0]).toBe(`message-${logLimit - 1}`);
+      expect(messages.get(visibleMessages[0]).parameters[0]).toBe(`message-0`);
+      expect(messages.get(visibleMessages[logLimit - 1]).parameters[0])
+        .toBe(`message-${logLimit - 1}`);
 
       // The groups were cleaned up.
       const groups = getAllGroupsById(getState());
@@ -222,7 +265,7 @@ describe("Message reducer:", () => {
       const groups = getAllGroupsById(getState());
       expect(groups.count()).toBe(logLimit);
 
-      expect(visibleMessages[1].parameters[0]).toBe(`message-2-a`);
+      expect(messages.get(visibleMessages[1]).parameters[0]).toBe(`message-2-a`);
       expect(messages.last().parameters[0]).toBe(`message-${logLimit + 1}-b`);
     });
 
@@ -258,8 +301,9 @@ describe("Message reducer:", () => {
 
       const visibleMessages = getVisibleMessages(getState());
       expect(visibleMessages.length).toBe(logLimit);
-      const lastVisibleMessage = visibleMessages[visibleMessages.length - 1];
-      expect(lastVisibleMessage.parameters[0]).toBe(`group-${logLimit + 1}`);
+      const lastVisibleMessageId = visibleMessages[visibleMessages.length - 1];
+      expect(messages.get(lastVisibleMessageId).parameters[0])
+        .toBe(`group-${logLimit + 1}`);
     });
 
     it("does not add null messages to the store", () => {
@@ -370,6 +414,43 @@ describe("Message reducer:", () => {
       expect(messagesUi.size).toBe(0);
     });
 
+    it("cleans the messages UI list when messages are pruned", () => {
+      const { dispatch, getState } = setupStore(
+        ["console.trace()", "console.log(undefined)", "console.trace()"],
+        null, {
+          logLimit: 3
+        }
+      );
+
+      // Check that we have the expected data.
+      let messages = getAllMessagesById(getState());
+      let messagesUi = getAllMessagesUiById(getState());
+      expect(messagesUi.size).toBe(2);
+      expect(messagesUi.first()).toBe(messages.first().id);
+      const lastMessageId = messages.last().id;
+      expect(messagesUi.last()).toBe(lastMessageId);
+
+      // This addition will prune the first message out of the store.
+      let packet = stubPackets.get("console.log(undefined)");
+      dispatch(actions.messageAdd(packet));
+
+      messages = getAllMessagesById(getState());
+      messagesUi = getAllMessagesUiById(getState());
+
+      // There should be only the id of the last console.trace message.
+      expect(messagesUi.size).toBe(1);
+      expect(messagesUi.first()).toBe(lastMessageId);
+
+      // These additions will prune the last console.trace message out of the store.
+      packet = stubPackets.get("console.log('foobar', 'test')");
+      dispatch(actions.messageAdd(packet));
+      packet = stubPackets.get("console.log(undefined)");
+      dispatch(actions.messageAdd(packet));
+
+      // messagesUiById should now be empty.
+      expect(getAllMessagesUiById(getState()).size).toBe(0);
+    });
+
     it("opens console.group messages when they are added", () => {
       const { dispatch, getState } = setupStore([]);
 
@@ -475,6 +556,317 @@ describe("Message reducer:", () => {
 
       groupsById = getAllGroupsById(getState());
       expect(groupsById.size).toBe(0);
+    });
+
+    it("cleans the groupsById property when messages are pruned", () => {
+      const { dispatch, getState } = setupStore(
+        [
+          "console.group('bar')",
+          "console.group()",
+          "console.groupEnd()",
+          "console.groupEnd('bar')",
+          "console.group('bar')",
+          "console.groupEnd('bar')",
+          "console.log('foobar', 'test')",
+        ],
+        null, {
+          logLimit: 3
+        }
+      );
+
+      // Check that we have the expected data.
+      let groupsById = getAllGroupsById(getState());
+      expect(groupsById.size).toBe(3);
+
+      // This addition will prune the first group (and its child group) out of the store.
+      let packet = stubPackets.get("console.log(undefined)");
+      dispatch(actions.messageAdd(packet));
+
+      groupsById = getAllGroupsById(getState());
+
+      // There should be only the id of the last console.trace message.
+      expect(groupsById.size).toBe(1);
+
+      // This additions will prune the last group message out of the store.
+      packet = stubPackets.get("console.log('foobar', 'test')");
+      dispatch(actions.messageAdd(packet));
+
+      // groupsById should now be empty.
+      expect(getAllGroupsById(getState()).size).toBe(0);
+    });
+  });
+
+  describe("networkMessagesUpdateById", () => {
+    it("adds the network update message when network update action is called", () => {
+      const { dispatch, getState } = setupStore([]);
+
+      let packet = clonePacket(stubPackets.get("GET request"));
+      let updatePacket = clonePacket(stubPackets.get("GET request update"));
+
+      packet.actor = "message1";
+      updatePacket.networkInfo.actor = "message1";
+      dispatch(actions.messageAdd(packet));
+      dispatch(actions.networkMessageUpdate(updatePacket.networkInfo));
+
+      let networkUpdates = getAllNetworkMessagesUpdateById(getState());
+      expect(Object.keys(networkUpdates)).toEqual(["message1"]);
+
+      packet = clonePacket(stubPackets.get("GET request"));
+      updatePacket = stubPackets.get("XHR GET request update");
+      packet.actor = "message2";
+      updatePacket.networkInfo.actor = "message2";
+      dispatch(actions.messageAdd(packet));
+      dispatch(actions.networkMessageUpdate(updatePacket.networkInfo));
+
+      networkUpdates = getAllNetworkMessagesUpdateById(getState());
+      expect(Object.keys(networkUpdates)).toEqual(["message1", "message2"]);
+    });
+
+    it("resets networkMessagesUpdateById in response to MESSAGES_CLEAR action", () => {
+      const { dispatch, getState } = setupStore([
+        "XHR GET request"
+      ]);
+
+      const updatePacket = stubPackets.get("XHR GET request update");
+      dispatch(actions.networkMessageUpdate(updatePacket.networkInfo));
+
+      let networkUpdates = getAllNetworkMessagesUpdateById(getState());
+      expect(Object.keys(networkUpdates).length).toBe(1);
+
+      dispatch(actions.messagesClear());
+
+      networkUpdates = getAllNetworkMessagesUpdateById(getState());
+      expect(Object.keys(networkUpdates).length).toBe(0);
+    });
+
+    it("cleans the networkMessagesUpdateById property when messages are pruned", () => {
+      const { dispatch, getState } = setupStore([], null, {
+        logLimit: 3
+      });
+
+      // Add 3 network messages and their updates
+      let packet = clonePacket(stubPackets.get("XHR GET request"));
+      let updatePacket = clonePacket(stubPackets.get("XHR GET request update"));
+      packet.actor = "message1";
+      updatePacket.networkInfo.actor = "message1";
+      dispatch(actions.messageAdd(packet));
+      dispatch(actions.networkMessageUpdate(updatePacket.networkInfo));
+
+      packet.actor = "message2";
+      updatePacket.networkInfo.actor = "message2";
+      dispatch(actions.messageAdd(packet));
+      dispatch(actions.networkMessageUpdate(updatePacket.networkInfo));
+
+      packet.actor = "message3";
+      updatePacket.networkInfo.actor = "message3";
+      dispatch(actions.messageAdd(packet));
+      dispatch(actions.networkMessageUpdate(updatePacket.networkInfo));
+
+      // Check that we have the expected data.
+      let messages = getAllMessagesById(getState());
+      const [
+        firstNetworkMessageId,
+        secondNetworkMessageId,
+        thirdNetworkMessageId
+      ] = [...messages.keys()];
+
+      let networkUpdates = getAllNetworkMessagesUpdateById(getState());
+      expect(Object.keys(networkUpdates)).toEqual([
+        firstNetworkMessageId,
+        secondNetworkMessageId,
+        thirdNetworkMessageId
+      ]);
+
+      // This addition will remove the first network message.
+      packet = stubPackets.get("console.log(undefined)");
+      dispatch(actions.messageAdd(packet));
+
+      networkUpdates = getAllNetworkMessagesUpdateById(getState());
+      expect(Object.keys(networkUpdates)).toEqual([
+        secondNetworkMessageId,
+        thirdNetworkMessageId
+      ]);
+
+      // This addition will remove the second network message.
+      packet = stubPackets.get("console.log('foobar', 'test')");
+      dispatch(actions.messageAdd(packet));
+
+      networkUpdates = getAllNetworkMessagesUpdateById(getState());
+      expect(Object.keys(networkUpdates)).toEqual([
+        thirdNetworkMessageId
+      ]);
+
+      // This addition will remove the last network message.
+      packet = stubPackets.get("console.log(undefined)");
+      dispatch(actions.messageAdd(packet));
+
+      // networkMessageUpdateById should now be empty.
+      networkUpdates = getAllNetworkMessagesUpdateById(getState());
+      expect(Object.keys(networkUpdates)).toEqual([]);
+    });
+  });
+
+  describe("messagesTableDataById", () => {
+    it("resets messagesTableDataById in response to MESSAGES_CLEAR action", () => {
+      const { dispatch, getState } = setupStore([
+        "console.table(['a', 'b', 'c'])"
+      ]);
+
+      let messages = getAllMessagesById(getState());
+      const data = Symbol("tableData");
+      dispatch(actions.messageTableDataReceive(messages.first().id, data));
+      let table = getAllMessagesTableDataById(getState());
+      expect(table.size).toBe(1);
+      expect(table.get(messages.first().id)).toBe(data);
+
+      dispatch(actions.messagesClear());
+
+      expect(getAllMessagesTableDataById(getState()).size).toBe(0);
+    });
+
+    it("cleans the messagesTableDataById property when messages are pruned", () => {
+      const { dispatch, getState } = setupStore([], null, {
+        logLimit: 2
+      });
+
+      // Add 2 table message and their data.
+      dispatch(actions.messageAdd(stubPackets.get("console.table(['a', 'b', 'c'])")));
+      dispatch(actions.messageAdd(
+        stubPackets.get("console.table(['red', 'green', 'blue']);")));
+
+      let messages = getAllMessagesById(getState());
+
+      const tableData1 = Symbol();
+      const tableData2 = Symbol();
+      const [id1, id2] = [...messages.keys()];
+      dispatch(actions.messageTableDataReceive(id1, tableData1));
+      dispatch(actions.messageTableDataReceive(id2, tableData2));
+
+      let table = getAllMessagesTableDataById(getState());
+      expect(table.size).toBe(2);
+
+      // This addition will remove the first table message.
+      dispatch(actions.messageAdd(stubPackets.get("console.log(undefined)")));
+
+      table = getAllMessagesTableDataById(getState());
+      expect(table.size).toBe(1);
+      expect(table.get(id2)).toBe(tableData2);
+
+      // This addition will remove the second table message.
+      dispatch(actions.messageAdd(stubPackets.get("console.log('foobar', 'test')")));
+
+      expect(getAllMessagesTableDataById(getState()).size).toBe(0);
+    });
+  });
+
+  describe("messagesObjectPropertiesById", () => {
+    it(`adds messagesObjectPropertiesById data in response to
+        MESSAGE_OBJECT_PROPERTIES_RECEIVE action`, () => {
+      const { dispatch, getState } = setupStore([]);
+
+      // Add 2 log messages with loaded object properties.
+      dispatch(actions.messageAdd(
+        stubPackets.get("console.log('myarray', ['red', 'green', 'blue'])")));
+      dispatch(actions.messageAdd(stubPackets.get(
+"console.log('myobject', {red: 'redValue', green: 'greenValue', blue: 'blueValue'});")));
+
+      let messages = getAllMessagesById(getState());
+
+      const arrayProperties = Symbol();
+      const arraySubProperties = Symbol();
+      const objectProperties = Symbol();
+      const objectSubProperties = Symbol();
+      const [id1, id2] = [...messages.keys()];
+      dispatch(actions.messageObjectPropertiesReceive(
+        id1, "fakeActor1", arrayProperties));
+      dispatch(actions.messageObjectPropertiesReceive(
+        id1, "fakeActor2", arraySubProperties));
+      dispatch(actions.messageObjectPropertiesReceive(
+        id2, "fakeActor3", objectProperties));
+      dispatch(actions.messageObjectPropertiesReceive(
+        id2, "fakeActor4", objectSubProperties));
+
+      let loadedProperties = getAllMessagesObjectPropertiesById(getState());
+      expect(loadedProperties.size).toBe(2);
+
+      expect(loadedProperties.get(id1)).toEqual({
+        fakeActor1: arrayProperties,
+        fakeActor2: arraySubProperties,
+      });
+
+      expect(loadedProperties.get(id2)).toEqual({
+        fakeActor3: objectProperties,
+        fakeActor4: objectSubProperties,
+      });
+    });
+
+    it("resets messagesObjectPropertiesById in response to MESSAGES_CLEAR action", () => {
+      const { dispatch, getState } = setupStore([
+        "console.log('myarray', ['red', 'green', 'blue'])"
+      ]);
+
+      let messages = getAllMessagesById(getState());
+      const properties = Symbol("properties");
+      const message = messages.first();
+      const {actor} = message.parameters[1];
+
+      dispatch(actions.messageObjectPropertiesReceive(message.id, actor, properties));
+
+      let loadedProperties = getAllMessagesObjectPropertiesById(getState());
+      expect(loadedProperties.size).toBe(1);
+      expect(loadedProperties.get(message.id)).toEqual({
+        [actor]: properties
+      });
+
+      dispatch(actions.messagesClear());
+
+      expect(getAllMessagesObjectPropertiesById(getState()).size).toBe(0);
+    });
+
+    it("cleans messagesObjectPropertiesById when messages are pruned", () => {
+      const { dispatch, getState } = setupStore([], null, {
+        logLimit: 2
+      });
+
+      // Add 2 log messages with loaded object properties.
+      dispatch(actions.messageAdd(
+        stubPackets.get("console.log('myarray', ['red', 'green', 'blue'])")));
+      dispatch(actions.messageAdd(stubPackets.get(
+"console.log('myobject', {red: 'redValue', green: 'greenValue', blue: 'blueValue'});")));
+
+      let messages = getAllMessagesById(getState());
+
+      const arrayProperties = Symbol();
+      const arraySubProperties = Symbol();
+      const objectProperties = Symbol();
+      const objectSubProperties = Symbol();
+      const [id1, id2] = [...messages.keys()];
+      dispatch(actions.messageObjectPropertiesReceive(
+        id1, "fakeActor1", arrayProperties));
+      dispatch(actions.messageObjectPropertiesReceive(
+        id1, "fakeActor2", arraySubProperties));
+      dispatch(actions.messageObjectPropertiesReceive(
+        id2, "fakeActor3", objectProperties));
+      dispatch(actions.messageObjectPropertiesReceive(
+        id2, "fakeActor4", objectSubProperties));
+
+      let loadedProperties = getAllMessagesObjectPropertiesById(getState());
+      expect(loadedProperties.size).toBe(2);
+
+      // This addition will remove the first message.
+      dispatch(actions.messageAdd(stubPackets.get("console.log(undefined)")));
+
+      loadedProperties = getAllMessagesObjectPropertiesById(getState());
+      expect(loadedProperties.size).toBe(1);
+      expect(loadedProperties.get(id2)).toEqual({
+        fakeActor3: objectProperties,
+        fakeActor4: objectSubProperties,
+      });
+
+      // This addition will remove the second table message.
+      dispatch(actions.messageAdd(stubPackets.get("console.log('foobar', 'test')")));
+
+      expect(getAllMessagesObjectPropertiesById(getState()).size).toBe(0);
     });
   });
 });

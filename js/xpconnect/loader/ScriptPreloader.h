@@ -91,6 +91,11 @@ public:
 
     Result<Ok, nsresult> InitCache(const Maybe<ipc::FileDescriptor>& cacheFile, ScriptCacheChild* cacheChild);
 
+    bool Active()
+    {
+      return mCacheInitialized && !mStartupFinished;
+    }
+
 private:
     Result<Ok, nsresult> InitCacheInternal();
 
@@ -355,6 +360,7 @@ private:
     void ForceWriteCacheFile();
     void Cleanup();
 
+    void FinishPendingParses(MonitorAutoLock& aMal);
     void InvalidateCache();
 
     // Opens the cache file for reading.
@@ -366,6 +372,8 @@ private:
     // Prepares scripts for writing to the cache, serializing new scripts to
     // XDR, and calculating their size-based offsets.
     void PrepareCacheWrite();
+
+    void PrepareCacheWriteInternal();
 
     // Returns a file pointer for the cache file with the given name in the
     // current profile.
@@ -379,7 +387,7 @@ private:
     void DecodeNextBatch(size_t chunkSize);
 
     static void OffThreadDecodeCallback(void* token, void* context);
-    void FinishOffThreadDecode();
+    void MaybeFinishOffThreadDecode();
     void DoFinishOffThreadDecode();
 
     size_t ShallowHeapSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf)
@@ -410,6 +418,7 @@ private:
     bool mSaveComplete = false;
     bool mDataPrepared = false;
     bool mCacheInvalidated = false;
+    bool mBlockedOnSyncDispatch = false;
 
     // The list of scripts that we read from the initial startup cache file,
     // but have yet to initiate a decode task for.

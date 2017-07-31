@@ -1,16 +1,16 @@
 const DEFAULT_HW_ACCEL_PREF = Services.prefs.getDefaultBranch(null).getBoolPref("layers.acceleration.disabled");
 const DEFAULT_PROCESS_COUNT = Services.prefs.getDefaultBranch(null).getIntPref("dom.ipc.processCount");
 
-add_task(function*() {
-  yield SpecialPowers.pushPrefEnv({set: [
+add_task(async function() {
+  await SpecialPowers.pushPrefEnv({set: [
     ["layers.acceleration.disabled", DEFAULT_HW_ACCEL_PREF],
     ["dom.ipc.processCount", DEFAULT_PROCESS_COUNT],
     ["browser.preferences.defaultPerformanceSettings.enabled", true],
   ]});
 });
 
-add_task(function*() {
-  let prefs = yield openPreferencesViaOpenPreferencesAPI("paneGeneral", null, {leaveOpen: true});
+add_task(async function() {
+  let prefs = await openPreferencesViaOpenPreferencesAPI("paneGeneral", null, {leaveOpen: true});
   is(prefs.selectedPane, "paneGeneral", "General pane was selected");
 
   let doc = gBrowser.selectedBrowser.contentDocument;
@@ -36,8 +36,15 @@ add_task(function*() {
   is(allowHWAccel.checked, !DEFAULT_HW_ACCEL_PREF, "checkbox should show the invert of the default value");
 
   let contentProcessCount = doc.querySelector("#contentProcessCount");
+  is(contentProcessCount.disabled, false, "process count control should be enabled");
   is(Services.prefs.getIntPref("dom.ipc.processCount"), DEFAULT_PROCESS_COUNT, "default pref value should be default value");
   is(contentProcessCount.selectedItem.value, DEFAULT_PROCESS_COUNT, "selected item should be the default one");
+
+  let contentProcessCountEnabledDescription = doc.querySelector("#contentProcessCountEnabledDescription");
+  is(contentProcessCountEnabledDescription.hidden, false, "process count enabled description should be shown");
+
+  let contentProcessCountDisabledDescription = doc.querySelector("#contentProcessCountDisabledDescription");
+  is(contentProcessCountDisabledDescription.hidden, true, "process count enabled description should be hidden");
 
   allowHWAccel.click();
   allowHWAccelPref = Services.prefs.getBoolPref("layers.acceleration.disabled");
@@ -64,11 +71,11 @@ add_task(function*() {
   is(performanceSettings.hidden, false, "performance settings section should be still shown");
 
   Services.prefs.setBoolPref("browser.preferences.defaultPerformanceSettings.enabled", true);
-  yield BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
-add_task(function*() {
-  let prefs = yield openPreferencesViaOpenPreferencesAPI("paneGeneral", null, {leaveOpen: true});
+add_task(async function() {
+  let prefs = await openPreferencesViaOpenPreferencesAPI("paneGeneral", null, {leaveOpen: true});
   is(prefs.selectedPane, "paneGeneral", "General pane was selected");
 
   let doc = gBrowser.contentDocument;
@@ -89,11 +96,11 @@ add_task(function*() {
   is(performanceSettings.hidden, true, "performance settings section should be still shown");
 
   Services.prefs.setBoolPref("browser.preferences.defaultPerformanceSettings.enabled", true);
-  yield BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
-add_task(function*() {
-  let prefs = yield openPreferencesViaOpenPreferencesAPI("paneGeneral", null, {leaveOpen: true});
+add_task(async function() {
+  let prefs = await openPreferencesViaOpenPreferencesAPI("paneGeneral", null, {leaveOpen: true});
   is(prefs.selectedPane, "paneGeneral", "General pane was selected");
 
   let doc = gBrowser.contentDocument;
@@ -106,13 +113,13 @@ add_task(function*() {
   is(performanceSettings.hidden, false, "performance settings section should be shown");
 
   Services.prefs.setBoolPref("browser.preferences.defaultPerformanceSettings.enabled", true);
-  yield BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
-add_task(function*() {
+add_task(async function() {
   Services.prefs.setIntPref("dom.ipc.processCount", 7);
 
-  let prefs = yield openPreferencesViaOpenPreferencesAPI("paneGeneral", null, {leaveOpen: true});
+  let prefs = await openPreferencesViaOpenPreferencesAPI("paneGeneral", null, {leaveOpen: true});
   is(prefs.selectedPane, "paneGeneral", "General pane was selected");
 
   let doc = gBrowser.contentDocument;
@@ -125,13 +132,13 @@ add_task(function*() {
   is(contentProcessCount.selectedItem.value, 7, "selected item should be 7");
 
   Services.prefs.setBoolPref("browser.preferences.defaultPerformanceSettings.enabled", true);
-  yield BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
-add_task(function*() {
+add_task(async function() {
   Services.prefs.setBoolPref("layers.acceleration.disabled", true);
 
-  let prefs = yield openPreferencesViaOpenPreferencesAPI("paneGeneral", null, {leaveOpen: true});
+  let prefs = await openPreferencesViaOpenPreferencesAPI("paneGeneral", null, {leaveOpen: true});
   is(prefs.selectedPane, "paneGeneral", "General pane was selected");
 
   let doc = gBrowser.contentDocument;
@@ -145,5 +152,5 @@ add_task(function*() {
   ok(!allowHWAccel.checked, "checkbox should not be checked");
 
   Services.prefs.setBoolPref("browser.preferences.defaultPerformanceSettings.enabled", true);
-  yield BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });

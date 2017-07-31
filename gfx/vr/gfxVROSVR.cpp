@@ -6,7 +6,6 @@
 #include <math.h>
 
 #include "prlink.h"
-#include "prmem.h"
 #include "prenv.h"
 #include "gfxPrefs.h"
 #include "nsString.h"
@@ -333,6 +332,18 @@ VRDisplayOSVR::SubmitFrame(TextureSourceD3D11* aSource,
   return false;
 }
 
+#elif defined(XP_MACOSX)
+
+bool
+VRDisplayOSVR::SubmitFrame(MacIOSurface* aMacIOSurface,
+                           const IntSize& aSize,
+                           const gfx::Rect& aLeftEyeRect,
+                           const gfx::Rect& aRightEyeRect)
+{
+  // XXX Add code to submit frame
+  return false;
+}
+
 #endif
 
 void
@@ -515,21 +526,23 @@ VRSystemManagerOSVR::Shutdown()
   osvr_ClientShutdown(m_ctx);
 }
 
-void
+bool
 VRSystemManagerOSVR::GetHMDs(nsTArray<RefPtr<VRDisplayHost>>& aHMDResult)
 {
   // make sure context, interface and display are initialized
   CheckOSVRStatus();
 
   if (!Init()) {
-    return;
+    return false;
   }
 
   mHMDInfo = new VRDisplayOSVR(&m_ctx, &m_iface, &m_display);
 
   if (mHMDInfo) {
     aHMDResult.AppendElement(mHMDInfo);
+    return true;
   }
+  return false;
 }
 
 bool

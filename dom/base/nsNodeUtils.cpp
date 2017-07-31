@@ -301,9 +301,12 @@ nsNodeUtils::LastRelease(nsINode* aNode)
       Element* elem = aNode->AsElement();
       FragmentOrElement::nsDOMSlots* domSlots =
         static_cast<FragmentOrElement::nsDOMSlots*>(slots);
-      for (auto iter = domSlots->mRegisteredIntersectionObservers.Iter(); !iter.Done(); iter.Next()) {
-        DOMIntersectionObserver* observer = iter.Key();
-        observer->UnlinkTarget(*elem);
+      if (domSlots->mExtendedSlots) {
+        for (auto iter = domSlots->mExtendedSlots->mRegisteredIntersectionObservers.Iter();
+             !iter.Done(); iter.Next()) {
+          DOMIntersectionObserver* observer = iter.Key();
+          observer->UnlinkTarget(*elem);
+        }
       }
     }
 
@@ -408,9 +411,7 @@ nsNodeUtils::CloneNodeImpl(nsINode *aNode, bool aDeep, nsINode **aResult)
   *aResult = nullptr;
 
   nsCOMPtr<nsINode> newNode;
-  nsCOMArray<nsINode> nodesWithProperties;
-  nsresult rv = Clone(aNode, aDeep, nullptr, nodesWithProperties,
-                      getter_AddRefs(newNode));
+  nsresult rv = Clone(aNode, aDeep, nullptr, nullptr, getter_AddRefs(newNode));
   NS_ENSURE_SUCCESS(rv, rv);
 
   newNode.forget(aResult);
@@ -422,7 +423,7 @@ nsresult
 nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
                            nsNodeInfoManager *aNewNodeInfoManager,
                            JS::Handle<JSObject*> aReparentScope,
-                           nsCOMArray<nsINode> &aNodesWithProperties,
+                           nsCOMArray<nsINode> *aNodesWithProperties,
                            nsINode *aParent, nsINode **aResult)
 {
   NS_PRECONDITION((!aClone && aNewNodeInfoManager) || !aReparentScope,
@@ -539,14 +540,14 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
           if (elm->MayHaveTouchEventListener()) {
             window->SetHasTouchEventListeners();
           }
-          if (elm->MayHaveMouseMoveEventListener()) {
-            window->SetHasMouseMoveEventListeners();
-          }
           if (elm->MayHaveMouseEnterLeaveEventListener()) {
             window->SetHasMouseEnterLeaveEventListeners();
           }
           if (elm->MayHavePointerEnterLeaveEventListener()) {
             window->SetHasPointerEnterLeaveEventListeners();
+          }
+          if (elm->MayHaveSelectionChangeEventListener()) {
+            window->SetHasSelectionChangeEventListeners();
           }
         }
       }
@@ -653,10 +654,10 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
   }
 #endif
 
-  if (aNode->HasProperties()) {
-    bool ok = aNodesWithProperties.AppendObject(aNode);
+  if (aNodesWithProperties && aNode->HasProperties()) {
+    bool ok = aNodesWithProperties->AppendObject(aNode);
     if (aClone) {
-      ok = ok && aNodesWithProperties.AppendObject(clone);
+      ok = ok && aNodesWithProperties->AppendObject(clone);
     }
 
     NS_ENSURE_TRUE(ok, NS_ERROR_OUT_OF_MEMORY);

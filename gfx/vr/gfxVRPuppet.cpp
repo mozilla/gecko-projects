@@ -313,7 +313,8 @@ VRDisplayPuppet::SubmitFrame(TextureSourceD3D11* aSource,
       D3D11_TEXTURE2D_DESC desc;
       ID3D11Texture2D* texture = aSource->GetD3D11Texture();
       texture->GetDesc(&desc);
-      DXGI_FORMAT format = desc.Format;
+      MOZ_ASSERT(desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM,
+                 "Only support B8G8R8A8_UNORM format.");
       // Map the staging resource
       ID3D11Texture2D* mappedTexture = nullptr;
       D3D11_MAPPED_SUBRESOURCE mapInfo;
@@ -371,7 +372,10 @@ VRDisplayPuppet::SubmitFrame(TextureSourceD3D11* aSource,
       char* srcData = static_cast<char*>(mapInfo.pData);
       VRSubmitFrameResultInfo result;
       result.mFormat = SurfaceFormat::B8G8R8A8;
-      result.mWidth = desc.Width;
+      // If the original texture size is not pow of 2, CopyResource() will add padding,
+      // so the size is adjusted. We have to get the correct size by (mapInfo.RowPitch /
+      // the format size).
+      result.mWidth = mapInfo.RowPitch / 4;
       result.mHeight = desc.Height;
       result.mFrameNum = mDisplayInfo.mFrameId;
       nsCString rawString(Substring((char*)srcData, mapInfo.RowPitch * desc.Height));
@@ -380,7 +384,7 @@ VRDisplayPuppet::SubmitFrame(TextureSourceD3D11* aSource,
         MOZ_ASSERT(false, "Failed to encode base64 images.");
       }
       mContext->Unmap(mappedTexture, 0);
-      // Dispatch the base64 encoded string to the DOM side, and it will be decoded
+      // Dispatch the base64 encoded string to the DOM side. Then, it will be decoded
       // and convert to a PNG image there.
       vm->DispatchSubmitFrameResult(mDisplayInfo.mDisplayID, result);
       break;
@@ -434,6 +438,10 @@ VRDisplayPuppet::SubmitFrame(TextureSourceD3D11* aSource,
       mContext->VSSetShader(mQuadVS, nullptr, 0);
       mContext->PSSetShader(mQuadPS, nullptr, 0);
       ID3D11ShaderResourceView* srView = aSource->GetShaderResourceView();
+      if (!srView) {
+        NS_WARNING("Failed to get SRV for Puppet");
+        return false;
+      }
       mContext->PSSetShaderResources(0 /* 0 == TexSlot::RGB */, 1, &srView);
       // XXX Use Constant from TexSlot in CompositorD3D11.cpp?
 
@@ -457,9 +465,11 @@ VRDisplayPuppet::SubmitFrame(TextureSourceD3D11* aSource,
   // return true to indicate that we have blocked.
   return false;
 }
-#else
+
+#elif defined(XP_MACOSX)
+
 bool
-VRDisplayPuppet::SubmitFrame(TextureSourceOGL* aSource,
+VRDisplayPuppet::SubmitFrame(MacIOSurface* aMacIOSurface,
                              const IntSize& aSize,
                              const gfx::Rect& aLeftEyeRect,
                              const gfx::Rect& aRightEyeRect)
@@ -473,6 +483,7 @@ VRDisplayPuppet::SubmitFrame(TextureSourceOGL* aSource,
 
   return false;
 }
+
 #endif
 
 void
@@ -484,14 +495,13 @@ VRDisplayPuppet::NotifyVSync()
   VRDisplayHost::NotifyVSync();
 }
 
-VRControllerPuppet::VRControllerPuppet(dom::GamepadHand aHand)
-  : VRControllerHost(VRDeviceType::Puppet)
+VRControllerPuppet::VRControllerPuppet(dom::GamepadHand aHand, uint32_t aDisplayID)
+  : VRControllerHost(VRDeviceType::Puppet, aHand, aDisplayID)
   , mButtonPressState(0)
+  , mButtonTouchState(0)
 {
   MOZ_COUNT_CTOR_INHERITED(VRControllerPuppet, VRControllerHost);
   mControllerInfo.mControllerName.AssignLiteral("Puppet Gamepad");
-  mControllerInfo.mMappingType = GamepadMappingType::_empty;
-  mControllerInfo.mHand = aHand;
   mControllerInfo.mNumButtons = kNumPuppetButtonMask;
   mControllerInfo.mNumAxes = kNumPuppetAxis;
   mControllerInfo.mNumHaptics = kNumPuppetHaptcs;
@@ -614,13 +624,14 @@ VRSystemManagerPuppet::Shutdown()
   mPuppetHMD = nullptr;
 }
 
-void
+bool
 VRSystemManagerPuppet::GetHMDs(nsTArray<RefPtr<VRDisplayHost>>& aHMDResult)
 {
   if (mPuppetHMD == nullptr) {
     mPuppetHMD = new VRDisplayPuppet();
   }
   aHMDResult.AppendElement(mPuppetHMD);
+  return true;
 }
 
 bool
@@ -641,10 +652,11 @@ VRSystemManagerPuppet::HandleInput()
   for (uint32_t i = 0; i < mPuppetController.Length(); ++i) {
     controller = mPuppetController[i];
     for (uint32_t j = 0; j < kNumPuppetButtonMask; ++j) {
-      HandleButtonPress(i, j, kPuppetButtonMask[i], controller->GetButtonPressState(),
+      HandleButtonPress(i, j, kPuppetButtonMask[j], controller->GetButtonPressState(),
                         controller->GetButtonTouchState());
     }
     controller->SetButtonPressed(controller->GetButtonPressState());
+    controller->SetButtonTouched(controller->GetButtonTouchState());
 
     for (uint32_t j = 0; j < kNumPuppetAxis; ++j) {
       HandleAxisMove(i, j, controller->GetAxisMoveState(j));
@@ -731,6 +743,11 @@ VRSystemManagerPuppet::GetControllers(nsTArray<RefPtr<VRControllerHost>>& aContr
 void
 VRSystemManagerPuppet::ScanForControllers()
 {
+  // mPuppetHMD is available after VRDisplay is created
+  // at GetHMDs().
+  if (!mPuppetHMD) {
+    return;
+  }
   // We make VRSystemManagerPuppet has two controllers always.
   const uint32_t newControllerCount = 2;
 
@@ -741,7 +758,8 @@ VRSystemManagerPuppet::ScanForControllers()
     for (uint32_t i = 0; i < newControllerCount; ++i) {
       dom::GamepadHand hand = (i % 2) ? dom::GamepadHand::Right :
                                         dom::GamepadHand::Left;
-      RefPtr<VRControllerPuppet> puppetController = new VRControllerPuppet(hand);
+      RefPtr<VRControllerPuppet> puppetController = new VRControllerPuppet(hand,
+                                                      mPuppetHMD->GetDisplayInfo().GetDisplayID());
       mPuppetController.AppendElement(puppetController);
 
       // Not already present, add it.

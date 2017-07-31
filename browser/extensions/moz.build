@@ -6,10 +6,14 @@
 
 DIRS += [
     'aushelper',
+    'clicktoplay-rollout',
     'e10srollout',
+    'followonsearch',
+    'onboarding',
     'pdfjs',
     'pocket',
     'screenshots',
+    'shield-recipe-client',
     'webcompat',
 ]
 
@@ -19,7 +23,11 @@ if not CONFIG['RELEASE_OR_BETA']:
         'flyweb',
         'formautofill',
         'presentation',
-        'shield-recipe-client',
+    ]
+
+# Only include the following system add-ons if building DevEdition or Nightly
+if CONFIG['MOZ_DEV_EDITION'] or CONFIG['NIGHTLY_BUILD']:
+    DIRS += [
         'webcompat-reporter',
     ]
 
@@ -33,5 +41,4 @@ if CONFIG['MOZ_MORTAR']:
 if CONFIG['NIGHTLY_BUILD']:
     DIRS += [
         'activity-stream',
-        'onboarding',
     ]

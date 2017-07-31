@@ -56,6 +56,7 @@
 #include "nsISupportsPrimitives.h"
 #include "nsIXULRuntime.h"
 #include "nsCharSeparatedTokenizer.h"
+#include "nsRFPService.h"
 
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/net/NeckoParent.h"
@@ -195,6 +196,7 @@ nsHttpHandler::nsHttpHandler()
     , mThrottleSuspendFor(3000)
     , mThrottleResumeFor(200)
     , mThrottleResumeIn(400)
+    , mUrgentStartEnabled(true)
     , mRedirectionLimit(10)
     , mPhishyUserPassLength(1)
     , mQoSBits(0x00)
@@ -253,6 +255,7 @@ nsHttpHandler::nsHttpHandler()
     , mUseFastOpen(true)
     , mFastOpenConsecutiveFailureLimit(5)
     , mFastOpenConsecutiveFailureCounter(0)
+    , mActiveTabPriority(true)
     , mProcessId(0)
     , mNextChannelId(1)
 {
@@ -332,6 +335,15 @@ nsHttpHandler::SetFastOpenOSSupport()
     }
 #endif
 
+#ifdef XP_WIN
+  if (mFastOpenSupported) {
+    // We have some problems with lavasoft software and tcp fast open.
+    if (GetModuleHandleW(L"pmls64.dll") || GetModuleHandleW(L"rlls64.dll")) {
+      mFastOpenSupported = false;
+    }
+  }
+#endif
+
     LOG(("nsHttpHandler::SetFastOpenOSSupport %s supported.\n",
          mFastOpenSupported ? "" : "not"));
 }
@@ -388,12 +400,19 @@ nsHttpHandler::Init()
         NS_WARNING("unable to continue without io service");
         return rv;
     }
-    mIOService = new nsMainThreadPtrHolder<nsIIOService>(service);
+    mIOService = new nsMainThreadPtrHolder<nsIIOService>(
+      "nsHttpHandler::mIOService", service);
 
     if (IsNeckoChild())
         NeckoChild::InitNeckoChild();
 
     InitUserAgentComponents();
+
+    // This perference is only used in parent process.
+    if (!IsNeckoChild()) {
+        mActiveTabPriority =
+            Preferences::GetBool(HTTP_PREF("active_tab_priority"), true);
+    }
 
     // monitor some preference changes
     nsCOMPtr<nsIPrefBranch> prefBranch = do_GetService(NS_PREFSERVICE_CONTRACTID);
@@ -436,6 +455,17 @@ nsHttpHandler::Init()
         mAppVersion.AssignLiteral(MOZ_APP_UA_VERSION);
     }
 
+    // Generating the spoofed userAgent for fingerprinting resistance. We will
+    // round the version to the nearest 10. By doing so, the anonymity group will
+    // cover more versions instead of one version.
+    uint32_t spoofedVersion = mAppVersion.ToInteger(&rv);
+    if (NS_SUCCEEDED(rv)) {
+        spoofedVersion = spoofedVersion - (spoofedVersion % 10);
+        mSpoofedUserAgent.Assign(nsPrintfCString(
+            "Mozilla/5.0 (%s; rv:%d.0) Gecko/%s Firefox/%d.0",
+            SPOOFED_OSCPU, spoofedVersion, LEGACY_BUILD_ID, spoofedVersion));
+    }
+
     mSessionStartTime = NowInSeconds();
     mHandlerActive = true;
 
@@ -454,7 +484,7 @@ nsHttpHandler::Init()
 #if defined(ANDROID) || defined(MOZ_MULET)
     mProductSub.AssignLiteral(MOZILLA_UAVERSION);
 #else
-    mProductSub.AssignLiteral("20100101");
+    mProductSub.AssignLiteral(LEGACY_BUILD_ID);
 #endif
 
 #if DEBUG
@@ -493,9 +523,12 @@ nsHttpHandler::Init()
         obsService->AddObserver(this, "browser:purge-session-history", true);
         obsService->AddObserver(this, NS_NETWORK_LINK_TOPIC, true);
         obsService->AddObserver(this, "application-background", true);
-        obsService->AddObserver(this,
-                                "net:current-toplevel-outer-content-windowid",
-                                true);
+
+        if (!IsNeckoChild()) {
+            obsService->AddObserver(this,
+                                    "net:current-toplevel-outer-content-windowid",
+                                    true);
+        }
 
         if (mFastOpenSupported) {
             obsService->AddObserver(this, "captive-portal-login", true);
@@ -686,7 +719,8 @@ nsHttpHandler::GetStreamConverterService(nsIStreamConverterService **result)
             do_GetService(NS_STREAMCONVERTERSERVICE_CONTRACTID, &rv);
         if (NS_FAILED(rv))
             return rv;
-        mStreamConvSvc = new nsMainThreadPtrHolder<nsIStreamConverterService>(service);
+        mStreamConvSvc = new nsMainThreadPtrHolder<nsIStreamConverterService>(
+          "nsHttpHandler::mStreamConvSvc", service);
     }
     *result = mStreamConvSvc;
     NS_ADDREF(*result);
@@ -698,7 +732,8 @@ nsHttpHandler::GetSSService()
 {
     if (!mSSService) {
         nsCOMPtr<nsISiteSecurityService> service = do_GetService(NS_SSSERVICE_CONTRACTID);
-        mSSService = new nsMainThreadPtrHolder<nsISiteSecurityService>(service);
+        mSSService = new nsMainThreadPtrHolder<nsISiteSecurityService>(
+          "nsHttpHandler::mSSService", service);
     }
     return mSSService;
 }
@@ -708,7 +743,8 @@ nsHttpHandler::GetCookieService()
 {
     if (!mCookieService) {
         nsCOMPtr<nsICookieService> service = do_GetService(NS_COOKIESERVICE_CONTRACTID);
-        mCookieService = new nsMainThreadPtrHolder<nsICookieService>(service);
+        mCookieService = new nsMainThreadPtrHolder<nsICookieService>(
+          "nsHttpHandler::mCookieService", service);
     }
     return mCookieService;
 }
@@ -754,14 +790,19 @@ nsHttpHandler::NotifyObservers(nsIHttpChannel *chan, const char *event)
 }
 
 nsresult
-nsHttpHandler::AsyncOnChannelRedirect(nsIChannel* oldChan, nsIChannel* newChan,
-                                 uint32_t flags)
+nsHttpHandler::AsyncOnChannelRedirect(nsIChannel* oldChan,
+                                      nsIChannel* newChan,
+                                      uint32_t flags,
+                                      nsIEventTarget* mainThreadEventTarget)
 {
     // TODO E10S This helper has to be initialized on the other process
     RefPtr<nsAsyncRedirectVerifyHelper> redirectCallbackHelper =
         new nsAsyncRedirectVerifyHelper();
 
-    return redirectCallbackHelper->Init(oldChan, newChan, flags);
+    return redirectCallbackHelper->Init(oldChan,
+                                        newChan,
+                                        flags,
+                                        mainThreadEventTarget);
 }
 
 /* static */ nsresult
@@ -775,9 +816,15 @@ nsHttpHandler::GenerateHostPort(const nsCString& host, int32_t port,
 // nsHttpHandler <private>
 //-----------------------------------------------------------------------------
 
-const nsAFlatCString &
+const nsCString&
 nsHttpHandler::UserAgent()
 {
+    if (nsContentUtils::ShouldResistFingerprinting() &&
+        !mSpoofedUserAgent.IsEmpty()) {
+        LOG(("using spoofed userAgent : %s\n", mSpoofedUserAgent.get()));
+        return mSpoofedUserAgent;
+    }
+
     if (mUserAgentOverride) {
         LOG(("using general.useragent.override : %s\n", mUserAgentOverride.get()));
         return mUserAgentOverride;
@@ -1337,7 +1384,7 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
                                 getter_Copies(sval));
         if (NS_SUCCEEDED(rv)) {
             if (sval.IsEmpty())
-                mDefaultSocketType.Adopt(0);
+                mDefaultSocketType.Adopt(nullptr);
             else {
                 // verify that this socket type is actually valid
                 nsCOMPtr<nsISocketProviderService> sps(
@@ -1554,16 +1601,16 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         }
     }
 
-    if (PREF_CHANGED("network.http.throttle.enable")) {
-        rv = prefs->GetBoolPref("network.http.throttle.enable", &mThrottleEnabled);
+    if (PREF_CHANGED(HTTP_PREF("throttle.enable"))) {
+        rv = prefs->GetBoolPref(HTTP_PREF("throttle.enable"), &mThrottleEnabled);
         if (NS_SUCCEEDED(rv) && mConnMgr) {
             Unused << mConnMgr->UpdateParam(nsHttpConnectionMgr::THROTTLING_ENABLED,
                                             static_cast<int32_t>(mThrottleEnabled));
         }
     }
 
-    if (PREF_CHANGED("network.http.throttle.suspend-for")) {
-        rv = prefs->GetIntPref("network.http.throttle.suspend-for", &val);
+    if (PREF_CHANGED(HTTP_PREF("throttle.suspend-for"))) {
+        rv = prefs->GetIntPref(HTTP_PREF("throttle.suspend-for"), &val);
         mThrottleSuspendFor = (uint32_t)clamped(val, 0, 120000);
         if (NS_SUCCEEDED(rv) && mConnMgr) {
             Unused << mConnMgr->UpdateParam(nsHttpConnectionMgr::THROTTLING_SUSPEND_FOR,
@@ -1571,8 +1618,8 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         }
     }
 
-    if (PREF_CHANGED("network.http.throttle.resume-for")) {
-        rv = prefs->GetIntPref("network.http.throttle.resume-for", &val);
+    if (PREF_CHANGED(HTTP_PREF("throttle.resume-for"))) {
+        rv = prefs->GetIntPref(HTTP_PREF("throttle.resume-for"), &val);
         mThrottleResumeFor = (uint32_t)clamped(val, 0, 120000);
         if (NS_SUCCEEDED(rv) && mConnMgr) {
             Unused << mConnMgr->UpdateParam(nsHttpConnectionMgr::THROTTLING_RESUME_FOR,
@@ -1580,13 +1627,17 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         }
     }
 
-    if (PREF_CHANGED("network.http.throttle.resume-background-in")) {
-        rv = prefs->GetIntPref("network.http.throttle.resume-background-in", &val);
+    if (PREF_CHANGED(HTTP_PREF("throttle.resume-background-in"))) {
+        rv = prefs->GetIntPref(HTTP_PREF("throttle.resume-background-in"), &val);
         mThrottleResumeIn = (uint32_t)clamped(val, 0, 120000);
         if (NS_SUCCEEDED(rv) && mConnMgr) {
             Unused << mConnMgr->UpdateParam(nsHttpConnectionMgr::THROTTLING_RESUME_IN,
                                             mThrottleResumeIn);
         }
+    }
+
+    if (PREF_CHANGED(HTTP_PREF("on_click_priority"))) {
+        Unused << prefs->GetBoolPref(HTTP_PREF("on_click_priority"), &mUrgentStartEnabled);
     }
 
     if (PREF_CHANGED(HTTP_PREF("focused_window_transaction_ratio"))) {
@@ -1899,13 +1950,13 @@ PrepareAcceptLanguages(const char *i_AcceptLanguages, nsACString &o_AcceptLangua
     count_n = 0;
     p2 = q_Accept;
     for (token = nsCRT::strtok(o_Accept, ",", &p);
-         token != (char *) 0;
+         token != nullptr;
          token = nsCRT::strtok(p, ",", &p))
     {
         token = net_FindCharNotInSet(token, HTTP_LWS);
         char* trim;
         trim = net_FindCharInSet(token, ";" HTTP_LWS);
-        if (trim != (char*)0)  // remove "; q=..." if present
+        if (trim != nullptr)  // remove "; q=..." if present
             *trim = '\0';
 
         if (*token != '\0') {
@@ -2287,10 +2338,11 @@ nsHttpHandler::Observe(nsISupports *subject,
     } else if (!strcmp(topic, "browser:purge-session-history")) {
         if (mConnMgr) {
             if (gSocketTransportService) {
-                nsCOMPtr<nsIRunnable> event =
-                    NewRunnableMethod(mConnMgr,
-                                      &nsHttpConnectionMgr::ClearConnectionHistory);
-                gSocketTransportService->Dispatch(event, NS_DISPATCH_NORMAL);
+              nsCOMPtr<nsIRunnable> event = NewRunnableMethod(
+                "net::nsHttpConnectionMgr::ClearConnectionHistory",
+                mConnMgr,
+                &nsHttpConnectionMgr::ClearConnectionHistory);
+              gSocketTransportService->Dispatch(event, NS_DISPATCH_NORMAL);
             }
             mConnMgr->ClearAltServiceMappings();
         }
@@ -2328,19 +2380,12 @@ nsHttpHandler::Observe(nsISupports *subject,
         wrapper->GetData(&windowId);
         MOZ_ASSERT(windowId);
 
-        if (IsNeckoChild()) {
-            if (gNeckoChild) {
-                gNeckoChild->SendNotifyCurrentTopLevelOuterContentWindowId(
-                    windowId);
-            }
-        } else {
-            static uint64_t sCurrentTopLevelOuterContentWindowId = 0;
-            if (sCurrentTopLevelOuterContentWindowId != windowId) {
-                sCurrentTopLevelOuterContentWindowId = windowId;
-                if (mConnMgr) {
-                    mConnMgr->UpdateCurrentTopLevelOuterContentWindowId(
-                        sCurrentTopLevelOuterContentWindowId);
-                }
+        static uint64_t sCurrentTopLevelOuterContentWindowId = 0;
+        if (sCurrentTopLevelOuterContentWindowId != windowId) {
+            sCurrentTopLevelOuterContentWindowId = windowId;
+            if (mConnMgr) {
+                mConnMgr->UpdateCurrentTopLevelOuterContentWindowId(
+                    sCurrentTopLevelOuterContentWindowId);
             }
         }
     } else if (!strcmp(topic, "captive-portal-login") ||
@@ -2412,7 +2457,7 @@ nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
     nsCOMPtr<nsIURI> clone;
     if (NS_SUCCEEDED(sss->IsSecureURI(nsISiteSecurityService::HEADER_HSTS,
                                       aURI, flags, originAttributes,
-                                      nullptr, &isStsHost)) &&
+                                      nullptr, nullptr, &isStsHost)) &&
                                       isStsHost) {
         if (NS_SUCCEEDED(NS_GetSecureUpgradedURI(aURI,
                                                  getter_AddRefs(clone)))) {

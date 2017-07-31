@@ -15,6 +15,7 @@
 #include "nsContentUtils.h"
 #include "nsINode.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsIParserService.h"
 
 using mozilla::DebugOnly;
 
@@ -45,26 +46,27 @@ NodeToParentOffset(nsINode* aNode, int32_t* aOffset)
 //
 static bool
 NodeIsInTraversalRange(nsINode* aNode, bool aIsPreMode,
-                       nsINode* aStartNode, int32_t aStartOffset,
-                       nsINode* aEndNode, int32_t aEndOffset)
+                       nsINode* aStartContainer, int32_t aStartOffset,
+                       nsINode* aEndContainer, int32_t aEndOffset)
 {
-  if (NS_WARN_IF(!aStartNode) || NS_WARN_IF(!aEndNode) || NS_WARN_IF(!aNode)) {
+  if (NS_WARN_IF(!aStartContainer) || NS_WARN_IF(!aEndContainer) ||
+      NS_WARN_IF(!aNode)) {
     return false;
   }
 
   // If a leaf node contains an end point of the traversal range, it is
   // always in the traversal range.
-  if (aNode == aStartNode || aNode == aEndNode) {
+  if (aNode == aStartContainer || aNode == aEndContainer) {
     if (aNode->IsNodeOfType(nsINode::eDATA_NODE)) {
       return true; // text node or something
     }
     if (!aNode->HasChildren()) {
-      MOZ_ASSERT(aNode != aStartNode || !aStartOffset,
-        "aStartNode doesn't have children and not a data node, "
+      MOZ_ASSERT(aNode != aStartContainer || !aStartOffset,
+        "aStartContainer doesn't have children and not a data node, "
         "aStartOffset should be 0");
-      MOZ_ASSERT(aNode != aEndNode || !aEndOffset,
-        "aStartNode doesn't have children and not a data node, "
-        "aStartOffset should be 0");
+      MOZ_ASSERT(aNode != aEndContainer || !aEndOffset,
+        "aEndContainer doesn't have children and not a data node, "
+        "aEndOffset should be 0");
       return true;
     }
   }
@@ -81,9 +83,9 @@ NodeIsInTraversalRange(nsINode* aNode, bool aIsPreMode,
     ++indx;
   }
 
-  return nsContentUtils::ComparePoints(aStartNode, aStartOffset,
+  return nsContentUtils::ComparePoints(aStartContainer, aStartOffset,
                                        parent, indx) <= 0 &&
-         nsContentUtils::ComparePoints(aEndNode, aEndOffset,
+         nsContentUtils::ComparePoints(aEndContainer, aEndOffset,
                                        parent, indx) >= 0;
 }
 
@@ -309,7 +311,7 @@ nsContentIterator::Init(nsIDOMRange* aDOMRange)
   // get the start node and offset
   int32_t startIndx = range->StartOffset();
   NS_WARNING_ASSERTION(startIndx >= 0, "bad startIndx");
-  nsINode* startNode = range->GetStartParent();
+  nsINode* startNode = range->GetStartContainer();
   if (NS_WARN_IF(!startNode)) {
     return NS_ERROR_FAILURE;
   }
@@ -317,7 +319,7 @@ nsContentIterator::Init(nsIDOMRange* aDOMRange)
   // get the end node and offset
   int32_t endIndx = range->EndOffset();
   NS_WARNING_ASSERTION(endIndx >= 0, "bad endIndx");
-  nsINode* endNode = range->GetEndParent();
+  nsINode* endNode = range->GetEndContainer();
   if (NS_WARN_IF(!endNode)) {
     return NS_ERROR_FAILURE;
   }
@@ -370,10 +372,17 @@ nsContentIterator::Init(nsIDOMRange* aDOMRange)
       //      the next sibling?
 
       // Normally we would skip the start node because the start node is outside
-      // of the range in pre mode. However, if startIndx == 0, it means the node
-      // has no children, and the node may be <br> or something. We don't skip
-      // the node in this case in order to address bug 1215798.
-      if (!startIsData && startIndx) {
+      // of the range in pre mode. However, if startIndx == 0, and the node is a
+      // non-container node (e.g. <br>), we don't skip the node in this case in
+      // order to address bug 1215798.
+      bool startIsContainer = true;
+      if (startNode->IsHTMLElement()) {
+        if (nsIParserService* ps = nsContentUtils::GetParserService()) {
+          nsIAtom* name = startNode->NodeInfo()->NameAtom();
+          ps->IsContainer(ps->HTMLAtomTagToId(name), startIsContainer);
+        }
+      }
+      if (!startIsData && (startIsContainer || startIndx)) {
         mFirst = GetNextSibling(startNode);
         NS_WARNING_ASSERTION(mFirst, "GetNextSibling returned null");
 
@@ -426,14 +435,22 @@ nsContentIterator::Init(nsIDOMRange* aDOMRange)
         // Not much else to do here...
         mLast = nullptr;
       } else {
-        // If the end node is an empty element and the end offset is 0,
+        // If the end node is a non-container element and the end offset is 0,
         // the last element should be the previous node (i.e., shouldn't
         // include the end node in the range).
-        if (!endIsData && !endNode->HasChildren() && !endIndx) {
+        bool endIsContainer = true;
+        if (endNode->IsHTMLElement()) {
+          if (nsIParserService* ps = nsContentUtils::GetParserService()) {
+            nsIAtom* name = endNode->NodeInfo()->NameAtom();
+            ps->IsContainer(ps->HTMLAtomTagToId(name), endIsContainer);
+          }
+        }
+        if (!endIsData && !endIsContainer && !endIndx) {
           mLast = PrevNode(endNode);
           NS_WARNING_ASSERTION(mLast, "PrevNode returned null");
-          if (NS_WARN_IF(!NodeIsInTraversalRange(mLast, mPre,
-                                                 startNode, startIndx,
+          if (mLast && mLast != mFirst &&
+              NS_WARN_IF(!NodeIsInTraversalRange(mLast, mPre,
+                                                 mFirst, 0,
                                                  endNode, endIndx))) {
             mLast = nullptr;
           }
@@ -1283,18 +1300,18 @@ nsContentSubtreeIterator::Init(nsIDOMRange* aRange)
 
   // get the start node and offset, convert to nsINode
   mCommonParent = mRange->GetCommonAncestor();
-  nsINode* startParent = mRange->GetStartParent();
+  nsINode* startContainer = mRange->GetStartContainer();
   int32_t startOffset = mRange->StartOffset();
-  nsINode* endParent = mRange->GetEndParent();
+  nsINode* endContainer = mRange->GetEndContainer();
   int32_t endOffset = mRange->EndOffset();
-  MOZ_ASSERT(mCommonParent && startParent && endParent);
+  MOZ_ASSERT(mCommonParent && startContainer && endContainer);
   // Bug 767169
-  MOZ_ASSERT(uint32_t(startOffset) <= startParent->Length() &&
-             uint32_t(endOffset) <= endParent->Length());
+  MOZ_ASSERT(uint32_t(startOffset) <= startContainer->Length() &&
+             uint32_t(endOffset) <= endContainer->Length());
 
   // short circuit when start node == end node
-  if (startParent == endParent) {
-    nsINode* child = startParent->GetFirstChild();
+  if (startContainer == endContainer) {
+    nsINode* child = startContainer->GetFirstChild();
 
     if (!child || startOffset == endOffset) {
       // Text node, empty container, or collapsed
@@ -1304,7 +1321,7 @@ nsContentSubtreeIterator::Init(nsIDOMRange* aRange)
   }
 
   // cache ancestors
-  nsContentUtils::GetAncestorsAndOffsets(endParent->AsDOMNode(), endOffset,
+  nsContentUtils::GetAncestorsAndOffsets(endContainer->AsDOMNode(), endOffset,
                                          &mEndNodes, &mEndOffsets);
 
   nsIContent* firstCandidate = nullptr;
@@ -1314,14 +1331,14 @@ nsContentSubtreeIterator::Init(nsIDOMRange* aRange)
   int32_t offset = mRange->StartOffset();
 
   nsINode* node = nullptr;
-  if (!startParent->GetChildCount()) {
+  if (!startContainer->GetChildCount()) {
     // no children, start at the node itself
-    node = startParent;
+    node = startContainer;
   } else {
-    nsIContent* child = startParent->GetChildAt(offset);
+    nsIContent* child = startContainer->GetChildAt(offset);
     if (!child) {
       // offset after last child
-      node = startParent;
+      node = startContainer;
     } else {
       firstCandidate = child;
     }
@@ -1358,16 +1375,16 @@ nsContentSubtreeIterator::Init(nsIDOMRange* aRange)
 
   // now to find the last node
   offset = mRange->EndOffset();
-  int32_t numChildren = endParent->GetChildCount();
+  int32_t numChildren = endContainer->GetChildCount();
 
   if (offset > numChildren) {
     // Can happen for text nodes
     offset = numChildren;
   }
   if (!offset || !numChildren) {
-    node = endParent;
+    node = endContainer;
   } else {
-    lastCandidate = endParent->GetChildAt(--offset);
+    lastCandidate = endContainer->GetChildAt(--offset);
     NS_ASSERTION(lastCandidate,
                  "tree traversal trouble in nsContentSubtreeIterator::Init");
   }

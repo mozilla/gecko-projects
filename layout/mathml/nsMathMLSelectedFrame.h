@@ -29,7 +29,7 @@ public:
         ReflowOutput& aDesiredSize) override;
 
   virtual mozilla::LogicalSize
-  ComputeSize(nsRenderingContext *aRenderingContext,
+  ComputeSize(gfxContext *aRenderingContext,
               mozilla::WritingMode aWritingMode,
               const mozilla::LogicalSize& aCBSize,
               nscoord aAvailableISize,
@@ -52,12 +52,12 @@ protected:
     mSelectedFrame(nullptr),
     mInvalidMarkup(false) {}
   virtual ~nsMathMLSelectedFrame();
-  
+
   virtual nsIFrame* GetSelectedFrame() = 0;
   nsIFrame*       mSelectedFrame;
 
   bool            mInvalidMarkup;
-  
+
 private:
   void* operator new(size_t, nsIPresShell*) MOZ_MUST_OVERRIDE = delete;
 };

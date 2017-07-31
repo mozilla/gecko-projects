@@ -44,7 +44,7 @@ import java.util.Map;
     private String host;
     private double score;
 
-    public static HighlightCandidate fromCursor(Cursor cursor) {
+    public static HighlightCandidate fromCursor(Cursor cursor) throws InvalidHighlightCandidateException {
         final HighlightCandidate candidate = new HighlightCandidate();
 
         extractHighlight(candidate, cursor);
@@ -63,7 +63,7 @@ import java.util.Map;
     /**
      * Extract and assign features that will be used for ranking.
      */
-    private static void extractFeatures(HighlightCandidate candidate, Cursor cursor) {
+    private static void extractFeatures(HighlightCandidate candidate, Cursor cursor) throws InvalidHighlightCandidateException {
         candidate.features.put(
                 FEATURE_AGE_IN_DAYS,
                 (System.currentTimeMillis() - cursor.getDouble(cursor.getColumnIndexOrThrow(BrowserContract.History.DATE_LAST_VISITED)))
@@ -101,9 +101,12 @@ import java.util.Map;
                 candidate.highlight.getMetadata().hasImageUrl() ? 1d : 0d
         );
 
-        // This value is not really the time at which the bookmark was created by the user (Bug 1335198).
-        // Especially synchronized bookmarks can have a recent value but have been bookmarked a long
-        // time ago. But we are sourcing highlights from the recent visited history - so in order to
+        // Historical note: before Bug 1335198, this value was not really the time at which the
+        // bookmark was created by the user. Especially synchronized bookmarks could have a recent
+        // value but have been bookmarked a long time ago.
+        // Current behaviour: synchronized clients will, over time, converge DATE_CREATED field
+        // to the real creation date, or the earliest one mentioned in the clients constellation.
+        // We are sourcing highlights from the recent visited history - so in order to
         // show up this bookmark need to have been visited recently too.
         final int bookmarkDateColumnIndex = cursor.getColumnIndexOrThrow(BrowserContract.Bookmarks.DATE_CREATED);
         if (cursor.isNull(bookmarkDateColumnIndex)) {
@@ -122,12 +125,20 @@ import java.util.Map;
 
         final Uri uri = Uri.parse(candidate.highlight.getUrl());
 
+        // We don't support opaque URIs (such as mailto:...), or URIs which do not have a valid host.
+        // The latter might simply be URIs with invalid characters in them (such as underscore...).
+        // See Bug 1363521 and Bug 1378967.
+        if (!uri.isHierarchical() || uri.getHost() == null) {
+            throw new InvalidHighlightCandidateException();
+        }
+
         candidate.host = uri.getHost();
 
         candidate.features.put(
                 FEATURE_PATH_LENGTH,
                 (double) uri.getPathSegments().size());
 
+        // Only hierarchical URIs support getQueryParameterNames.
         candidate.features.put(
                 FEATURE_QUERY_LENGTH,
                 (double) uri.getQueryParameterNames().size());
@@ -184,5 +195,9 @@ import java.util.Map;
         }
 
         return filteredFeatures;
+    }
+
+    /* package-private */ static class InvalidHighlightCandidateException extends Exception {
+        private static final long serialVersionUID = 949263104621445850L;
     }
 }

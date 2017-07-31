@@ -18,8 +18,14 @@
 #include "xpcpublic.h"
 #include "mozilla/net/NeckoCommon.h"
 #include "mozilla/Services.h"
+#include "mozilla/Telemetry.h"
+#include "mozilla/TimeStamp.h"
+#include "nsString.h"
+#include "GeckoProfiler.h"
 
 #define NOTIFY_GLOBAL_OBSERVERS
+
+static const uint32_t kMinTelemetryNotifyObserversLatencyMs = 1;
 
 // Log module for nsObserverService logging...
 //
@@ -176,7 +182,10 @@ nsObserverService::Create(nsISupports* aOuter, const nsIID& aIID,
   // The memory reporter can not be immediately registered here because
   // the nsMemoryReporterManager may attempt to get the nsObserverService
   // during initialization, causing a recursive GetService.
-  NS_DispatchToCurrentThread(NewRunnableMethod(os, &nsObserverService::RegisterReporter));
+  NS_DispatchToCurrentThread(
+    NewRunnableMethod("nsObserverService::RegisterReporter",
+                      os,
+                      &nsObserverService::RegisterReporter));
 
   return os->QueryInterface(aIID, aInstancePtr);
 }
@@ -276,6 +285,11 @@ NS_IMETHODIMP nsObserverService::NotifyObservers(nsISupports* aSubject,
     return NS_ERROR_INVALID_ARG;
   }
 
+  mozilla::TimeStamp start = TimeStamp::Now();
+
+  AUTO_PROFILER_LABEL_DYNAMIC("nsObserverService::NotifyObservers", OTHER,
+                              aTopic);
+
   nsObserverList* observerList = mObserverTopicTable.GetEntry(aTopic);
   if (observerList) {
     observerList->NotifyObservers(aSubject, aTopic, aSomeData);
@@ -287,6 +301,13 @@ NS_IMETHODIMP nsObserverService::NotifyObservers(nsISupports* aSubject,
     observerList->NotifyObservers(aSubject, aTopic, aSomeData);
   }
 #endif
+
+  uint32_t latencyMs = round((TimeStamp::Now() - start).ToMilliseconds());
+  if (latencyMs >= kMinTelemetryNotifyObserversLatencyMs) {
+    Telemetry::Accumulate(Telemetry::NOTIFY_OBSERVERS_LATENCY_MS,
+                          nsDependentCString(aTopic),
+                          latencyMs);
+  }
 
   return NS_OK;
 }

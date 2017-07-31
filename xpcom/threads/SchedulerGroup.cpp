@@ -27,7 +27,7 @@ namespace {
 { 0xbf4e36c8, 0x7d04, 0x4ef4, \
   { 0xbb, 0xd8, 0x11, 0x09, 0x0a, 0xdb, 0x4d, 0xf7 } }
 
-class SchedulerEventTarget final : public nsIEventTarget
+class SchedulerEventTarget final : public nsISerialEventTarget
 {
   RefPtr<SchedulerGroup> mDispatcher;
   TaskCategory mCategory;
@@ -125,13 +125,14 @@ AutoCollectVsyncTelemetry::CollectTelemetry()
   }
 
   Telemetry::Accumulate(Telemetry::CONTENT_JS_KNOWN_TICK_DELAY_MS, duration);
-
-  return;
 }
 
 } // namespace
 
-NS_IMPL_ISUPPORTS(SchedulerEventTarget, SchedulerEventTarget, nsIEventTarget)
+NS_IMPL_ISUPPORTS(SchedulerEventTarget,
+                  SchedulerEventTarget,
+                  nsIEventTarget,
+                  nsISerialEventTarget)
 
 NS_IMETHODIMP
 SchedulerEventTarget::DispatchFromScript(nsIRunnable* aRunnable, uint32_t aFlags)
@@ -145,7 +146,7 @@ SchedulerEventTarget::Dispatch(already_AddRefed<nsIRunnable> aRunnable, uint32_t
   if (NS_WARN_IF(aFlags != NS_DISPATCH_NORMAL)) {
     return NS_ERROR_UNEXPECTED;
   }
-  return mDispatcher->Dispatch(nullptr, mCategory, Move(aRunnable));
+  return mDispatcher->Dispatch(mCategory, Move(aRunnable));
 }
 
 NS_IMETHODIMP
@@ -161,21 +162,20 @@ SchedulerEventTarget::IsOnCurrentThread(bool* aIsOnCurrentThread)
   return NS_OK;
 }
 
+NS_IMETHODIMP_(bool)
+SchedulerEventTarget::IsOnCurrentThreadInfallible()
+{
+  return NS_IsMainThread();
+}
+
 /* static */ nsresult
-SchedulerGroup::UnlabeledDispatch(const char* aName,
-                                  TaskCategory aCategory,
+SchedulerGroup::UnlabeledDispatch(TaskCategory aCategory,
                                   already_AddRefed<nsIRunnable>&& aRunnable)
 {
-  nsCOMPtr<nsIRunnable> runnable(aRunnable);
-  if (aName) {
-    if (nsCOMPtr<nsINamed> named = do_QueryInterface(runnable)) {
-      named->SetName(aName);
-    }
-  }
   if (NS_IsMainThread()) {
-    return NS_DispatchToCurrentThread(runnable.forget());
+    return NS_DispatchToCurrentThread(Move(aRunnable));
   } else {
-    return NS_DispatchToMainThread(runnable.forget());
+    return NS_DispatchToMainThread(Move(aRunnable));
   }
 }
 
@@ -212,14 +212,13 @@ SchedulerGroup::SchedulerGroup()
 }
 
 nsresult
-SchedulerGroup::Dispatch(const char* aName,
-                         TaskCategory aCategory,
+SchedulerGroup::Dispatch(TaskCategory aCategory,
                          already_AddRefed<nsIRunnable>&& aRunnable)
 {
-  return LabeledDispatch(aName, aCategory, Move(aRunnable));
+  return LabeledDispatch(aCategory, Move(aRunnable));
 }
 
-nsIEventTarget*
+nsISerialEventTarget*
 SchedulerGroup::EventTargetFor(TaskCategory aCategory) const
 {
   MOZ_ASSERT(aCategory != TaskCategory::Count);
@@ -259,7 +258,7 @@ SchedulerGroup::CreateEventTargets(bool aNeedValidation)
       // The chrome TabGroup dispatches directly to the main thread. This means
       // that we don't have to worry about cyclical references when cleaning up
       // the chrome TabGroup.
-      mEventTargets[i] = do_GetMainThread();
+      mEventTargets[i] = GetMainThreadSerialEventTarget();
     } else {
       mEventTargets[i] = CreateEventTargetFor(category);
     }
@@ -274,12 +273,12 @@ SchedulerGroup::Shutdown(bool aXPCOMShutdown)
   // the ThrottledEventQueue for this TabGroup when no windows belong to it,
   // so it's safe to null out the queue here.
   for (size_t i = 0; i < size_t(TaskCategory::Count); i++) {
-    mEventTargets[i] = aXPCOMShutdown ? nullptr : do_GetMainThread();
+    mEventTargets[i] = aXPCOMShutdown ? nullptr : GetMainThreadSerialEventTarget();
     mAbstractThreads[i] = nullptr;
   }
 }
 
-already_AddRefed<nsIEventTarget>
+already_AddRefed<nsISerialEventTarget>
 SchedulerGroup::CreateEventTargetFor(TaskCategory aCategory)
 {
   RefPtr<SchedulerEventTarget> target =
@@ -298,15 +297,14 @@ SchedulerGroup::FromEventTarget(nsIEventTarget* aEventTarget)
 }
 
 nsresult
-SchedulerGroup::LabeledDispatch(const char* aName,
-                                TaskCategory aCategory,
+SchedulerGroup::LabeledDispatch(TaskCategory aCategory,
                                 already_AddRefed<nsIRunnable>&& aRunnable)
 {
   nsCOMPtr<nsIRunnable> runnable(aRunnable);
   if (XRE_IsContentProcess()) {
     runnable = new Runnable(runnable.forget(), this);
   }
-  return UnlabeledDispatch(aName, aCategory, runnable.forget());
+  return UnlabeledDispatch(aCategory, runnable.forget());
 }
 
 void
@@ -322,25 +320,24 @@ SchedulerGroup::SetValidatingAccess(ValidationType aType)
 
 SchedulerGroup::Runnable::Runnable(already_AddRefed<nsIRunnable>&& aRunnable,
                                    SchedulerGroup* aGroup)
- : mRunnable(Move(aRunnable)),
-   mGroup(aGroup)
+  : mozilla::Runnable("SchedulerGroup::Runnable")
+  , mRunnable(Move(aRunnable))
+  , mGroup(aGroup)
 {
 }
 
 NS_IMETHODIMP
 SchedulerGroup::Runnable::GetName(nsACString& aName)
 {
-  mozilla::Runnable::GetName(aName);
-  if (aName.IsEmpty()) {
-    // Try to get a name from the underlying runnable.
-    nsCOMPtr<nsINamed> named = do_QueryInterface(mRunnable);
-    if (named) {
-      named->GetName(aName);
-    }
-    if (aName.IsEmpty()) {
-      aName.AssignLiteral("anonymous");
-    }
+  // Try to get a name from the underlying runnable.
+  nsCOMPtr<nsINamed> named = do_QueryInterface(mRunnable);
+  if (named) {
+    named->GetName(aName);
   }
+  if (aName.IsEmpty()) {
+    aName.AssignLiteral("anonymous");
+  }
+
   aName.AppendASCII("(labeled)");
   return NS_OK;
 }

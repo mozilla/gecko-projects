@@ -88,8 +88,10 @@ const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-                                  "resource://gre/modules/Promise.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
+                                  "resource://gre/modules/PromiseUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Task",
+                                  "resource://gre/modules/Task.jsm");
 
 const Timer = Components.Constructor("@mozilla.org/timer;1", "nsITimer",
                                      "initWithCallback");
@@ -259,7 +261,7 @@ this.DeferredTask.prototype = {
    * Timer callback used to run the delayed task.
    */
   _timerCallback() {
-    let runningDeferred = Promise.defer();
+    let runningDeferred = PromiseUtils.defer();
 
     // All these state changes must occur at the same time directly inside the
     // timer callback, to prevent race conditions and to ensure that all the
@@ -272,7 +274,7 @@ this.DeferredTask.prototype = {
 
     runningDeferred.resolve((async () => {
       // Execute the provided function asynchronously.
-      await (this._taskFn() || Promise.resolve()).then(null, Cu.reportError);
+      await this._runTask();
 
       // Now that the task has finished, we check the state of the object to
       // determine if we should restart the task again.
@@ -284,13 +286,29 @@ this.DeferredTask.prototype = {
           // property should return false while the task is running, and should
           // remain false after the last execution terminates.
           this._armed = false;
-          await (this._taskFn() || Promise.resolve()).then(null, Cu.reportError);
+          await this._runTask();
         }
       }
 
       // Indicate that the execution of the task has finished.  This happens
       // synchronously with the previous state changes in the function.
       this._runningPromise = null;
-    })().then(null, Cu.reportError));
+    })().catch(Cu.reportError));
+  },
+
+  /**
+   * Executes the associated task and catches exceptions.
+   */
+  async _runTask() {
+    try {
+      let result = this._taskFn();
+      if (Object.prototype.toString.call(result) == "[object Generator]") {
+        await Task.spawn(result); // eslint-disable-line mozilla/no-task
+      } else {
+        await result;
+      }
+    } catch (ex) {
+      Cu.reportError(ex);
+    }
   },
 };

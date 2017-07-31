@@ -23,11 +23,13 @@ const EXPECTED_STATUS = /\[HTTP\/\d\.\d \d+ [A-Za-z ]+ \d+ms\]/;
 describe("NetworkEventMessage component:", () => {
   describe("GET request", () => {
     it("renders as expected", () => {
-      const message = stubPreparedMessages.get("GET request eventTimings");
+      const message = stubPreparedMessages.get("GET request");
+      const update = stubPreparedMessages.get("GET request update");
       const wrapper = render(NetworkEventMessage({
         message,
         serviceContainer,
         timestampsVisible: true,
+        networkMessageUpdate: update,
       }));
       const { timestampString } = require("devtools/client/webconsole/webconsole-l10n");
 
@@ -41,7 +43,7 @@ describe("NetworkEventMessage component:", () => {
     });
 
     it("does not have a timestamp when timestampsVisible prop is falsy", () => {
-      const message = stubPreparedMessages.get("GET request eventTimings");
+      const message = stubPreparedMessages.get("GET request update");
       const wrapper = render(NetworkEventMessage({
         message,
         serviceContainer,
@@ -55,19 +57,30 @@ describe("NetworkEventMessage component:", () => {
       const message = stubPreparedMessages.get("GET request");
 
       const indent = 10;
-      let wrapper = render(NetworkEventMessage({ message, serviceContainer, indent}));
-      expect(wrapper.find(".indent").prop("style").width)
-        .toBe(`${indent * INDENT_WIDTH}px`);
+      let wrapper = render(NetworkEventMessage({
+        message: Object.assign({}, message, {indent}),
+        serviceContainer
+      }));
+      let indentEl = wrapper.find(".indent");
+      expect(indentEl.prop("style").width).toBe(`${indent * INDENT_WIDTH}px`);
+      expect(indentEl.prop("data-indent")).toBe(`${indent}`);
 
       wrapper = render(NetworkEventMessage({ message, serviceContainer }));
-      expect(wrapper.find(".indent").prop("style").width).toBe(`0`);
+      indentEl = wrapper.find(".indent");
+      expect(indentEl.prop("style").width).toBe(`0`);
+      expect(indentEl.prop("data-indent")).toBe(`0`);
     });
   });
 
   describe("XHR GET request", () => {
     it("renders as expected", () => {
-      const message = stubPreparedMessages.get("XHR GET request eventTimings");
-      const wrapper = render(NetworkEventMessage({ message, serviceContainer }));
+      const message = stubPreparedMessages.get("XHR GET request");
+      const update = stubPreparedMessages.get("XHR GET request update");
+      const wrapper = render(NetworkEventMessage({
+        message,
+        serviceContainer,
+        networkMessageUpdate: update,
+      }));
 
       expect(wrapper.find(".message-body .method").text()).toBe("GET");
       expect(wrapper.find(".message-body .xhr").length).toBe(1);
@@ -79,8 +92,13 @@ describe("NetworkEventMessage component:", () => {
 
   describe("XHR POST request", () => {
     it("renders as expected", () => {
-      const message = stubPreparedMessages.get("XHR POST request eventTimings");
-      const wrapper = render(NetworkEventMessage({ message, serviceContainer }));
+      const message = stubPreparedMessages.get("XHR POST request");
+      const update = stubPreparedMessages.get("XHR POST request update");
+      const wrapper = render(NetworkEventMessage({
+        message,
+        serviceContainer,
+        networkMessageUpdate: update,
+      }));
 
       expect(wrapper.find(".message-body .method").text()).toBe("POST");
       expect(wrapper.find(".message-body .xhr").length).toBe(1);

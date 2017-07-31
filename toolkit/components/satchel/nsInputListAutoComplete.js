@@ -4,9 +4,9 @@
 
 const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource://gre/modules/nsFormAutoCompleteResult.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/nsFormAutoCompleteResult.jsm");
 
 function InputListAutoComplete() {}
 
@@ -16,13 +16,19 @@ InputListAutoComplete.prototype = {
 
   autoCompleteSearch(aUntrimmedSearchString, aField) {
     let [values, labels] = this.getListSuggestions(aField);
-    let searchResult = values.length > 0 ? Ci.nsIAutoCompleteResult.RESULT_SUCCESS
-                                         : Ci.nsIAutoCompleteResult.RESULT_NOMATCH;
+    let searchResult = values.length > 0 ?
+      Ci.nsIAutoCompleteResult.RESULT_SUCCESS :
+      Ci.nsIAutoCompleteResult.RESULT_NOMATCH;
     let defaultIndex = values.length > 0 ? 0 : -1;
 
     return new FormAutoCompleteResult(aUntrimmedSearchString,
-                                      searchResult, defaultIndex, "",
-                                      values, labels, [], null);
+                                      searchResult,
+                                      defaultIndex,
+                                      "",
+                                      values,
+                                      labels,
+                                      [],
+                                      null);
   },
 
   getListSuggestions(aField) {
@@ -55,8 +61,7 @@ InputListAutoComplete.prototype = {
     }
 
     return [values, labels];
-
-  }
+  },
 };
 
 var component = [InputListAutoComplete];

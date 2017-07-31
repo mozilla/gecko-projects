@@ -6,7 +6,6 @@
 package org.mozilla.gecko;
 
 import android.app.Activity;
-import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
@@ -15,7 +14,6 @@ import android.support.customtabs.CustomTabsIntent;
 import android.util.Log;
 
 import org.mozilla.gecko.home.HomeConfig;
-import org.mozilla.gecko.switchboard.SwitchBoard;
 import org.mozilla.gecko.webapps.WebAppActivity;
 import org.mozilla.gecko.webapps.WebAppIndexer;
 import org.mozilla.gecko.customtabs.CustomTabsActivity;
@@ -30,8 +28,10 @@ import static org.mozilla.gecko.deeplink.DeepLinkContract.DEEP_LINK_SCHEME;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_BOOKMARK_LIST;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_DEFAULT_BROWSER;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_HISTORY_LIST;
+import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_PREFERENCES_HOME;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_PREFERENCES;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_PREFERENCES_ACCESSIBILITY;
+import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_PREFERENCES_GENERAL;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_PREFERENCES_NOTIFICATIONS;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_PREFERENCES_PRIAVACY;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_PREFERENCES_SEARCH;
@@ -39,6 +39,7 @@ import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_SAVE_AS_PDF;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_SIGN_UP;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.SUMO_DEFAULT_BROWSER;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_FXA_SIGNIN;
+
 import org.mozilla.gecko.deeplink.DeepLinkContract;
 
 /**
@@ -59,6 +60,8 @@ public class LauncherActivity extends Activity {
         if (isDeepLink(safeIntent)) {
             dispatchDeepLink(safeIntent);
 
+        } else if (isShutdownIntent(safeIntent)) {
+            dispatchShutdownIntent();
         // Is this web app?
         } else if (isWebAppIntent(safeIntent)) {
             dispatchWebAppIntent();
@@ -67,7 +70,9 @@ public class LauncherActivity extends Activity {
         } else if (!isViewIntentWithURL(safeIntent)) {
             dispatchNormalIntent();
 
-        } else if (isCustomTabsIntent(safeIntent) && isCustomTabsEnabled(this) ) {
+        // Is this a custom tabs intent, and are custom tabs enabled?
+        } else if (AppConstants.MOZ_ANDROID_CUSTOM_TABS && isCustomTabsIntent(safeIntent)
+                && isCustomTabsEnabled()) {
             dispatchCustomTabsIntent();
 
         // Can we dispatch this VIEW action intent to the tab queue service?
@@ -82,6 +87,13 @@ public class LauncherActivity extends Activity {
         }
 
         finish();
+    }
+
+    private void dispatchShutdownIntent() {
+        Intent intent = new Intent(getIntent());
+        intent.setClassName(getApplicationContext(), AppConstants.MOZ_ANDROID_BROWSER_INTENT_CLASS);
+        intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        startActivity(intent);
     }
 
     /**
@@ -149,10 +161,6 @@ public class LauncherActivity extends Activity {
                 && safeIntent.getDataString() != null;
     }
 
-    private static boolean isCustomTabsEnabled(@NonNull final Context context) {
-        return SwitchBoard.isInExperiment(context, Experiments.CUSTOM_TABS);
-    }
-
     private static boolean isCustomTabsIntent(@NonNull final SafeIntent safeIntent) {
         return isViewIntentWithURL(safeIntent)
                 && safeIntent.hasExtra(CustomTabsIntent.EXTRA_SESSION);
@@ -160,6 +168,14 @@ public class LauncherActivity extends Activity {
 
     private static boolean isWebAppIntent(@NonNull final SafeIntent safeIntent) {
         return GeckoApp.ACTION_WEBAPP.equals(safeIntent.getAction());
+    }
+
+    private boolean isCustomTabsEnabled() {
+        return GeckoSharedPrefs.forApp(this).getBoolean(GeckoPreferences.PREFS_CUSTOM_TABS, false);
+    }
+
+    private static boolean isShutdownIntent(@NonNull final SafeIntent safeIntent) {
+        return GeckoApp.ACTION_SHUTDOWN.equals(safeIntent.getAction());
     }
 
     private boolean isDeepLink(SafeIntent intent) {
@@ -213,6 +229,8 @@ public class LauncherActivity extends Activity {
                 // we might need to redisplay based on a locale change.
                 startActivityForResult(settingsIntent, ACTIVITY_REQUEST_PREFERENCES);
                 break;
+            case LINK_PREFERENCES_GENERAL:
+            case LINK_PREFERENCES_HOME:
             case LINK_PREFERENCES_PRIAVACY:
             case LINK_PREFERENCES_SEARCH:
             case LINK_PREFERENCES_NOTIFICATIONS:
@@ -237,7 +255,7 @@ public class LauncherActivity extends Activity {
         final String accountsToken = intentUri.getQueryParameter(DeepLinkContract.ACCOUNTS_TOKEN_PARAM);
         final String entryPoint = intentUri.getQueryParameter(DeepLinkContract.ACCOUNTS_ENTRYPOINT_PARAM);
 
-        String dispatchUri = AboutPages.ACCOUNTS + "?";
+        String dispatchUri = AboutPages.ACCOUNTS + "?action=signin&";
 
         // If token is missing from the deep-link, we'll still open the accounts page.
         if (accountsToken != null) {

@@ -21,10 +21,11 @@ const ACTION_METHODS = [
   "onFilterBlur",
 ];
 
-add_task(function* testInitUninit() {
+add_task(async function testInitUninit() {
   let store = new SyncedTabsListStore();
   let ViewMock = sinon.stub();
   let view = {render() {}, destroy() {}};
+  let mockWindow = {};
 
   ViewMock.returns(view);
 
@@ -35,7 +36,7 @@ add_task(function* testInitUninit() {
   sinon.stub(store, "getData");
   sinon.stub(store, "focusInput");
 
-  let component = new TabListComponent({window, store, View: ViewMock, SyncedTabs});
+  let component = new TabListComponent({window: mockWindow, store, View: ViewMock, SyncedTabs});
 
   for (let action of ACTION_METHODS) {
     sinon.stub(component, action);
@@ -67,7 +68,7 @@ add_task(function* testInitUninit() {
   Assert.ok(view.destroy.calledOnce, "view is destroyed on uninit");
 });
 
-add_task(function* testActions() {
+add_task(async function testActions() {
   let store = new SyncedTabsListStore();
   let chromeWindowMock = {
     gBrowser: {

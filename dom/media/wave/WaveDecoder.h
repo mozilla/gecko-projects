@@ -6,18 +6,21 @@
 #if !defined(WaveDecoder_h_)
 #define WaveDecoder_h_
 
-#include "MediaDecoder.h"
+#include "ChannelMediaDecoder.h"
 
 namespace mozilla {
 
 class MediaContainerType;
 
-class WaveDecoder : public MediaDecoder
+class WaveDecoder : public ChannelMediaDecoder
 {
 public:
   // MediaDecoder interface.
-  explicit WaveDecoder(MediaDecoderOwner* aOwner) : MediaDecoder(aOwner) {}
-  MediaDecoder* Clone(MediaDecoderOwner* aOwner) override;
+  explicit WaveDecoder(MediaDecoderInit& aInit)
+    : ChannelMediaDecoder(aInit)
+  {
+  }
+  ChannelMediaDecoder* Clone(MediaDecoderInit& aInit) override;
   MediaDecoderStateMachine* CreateStateMachine() override;
 
   // Returns true if the Wave backend is pref'ed on, and we're running on a

@@ -25,9 +25,9 @@ var {
 } = ExtensionUtils;
 
 XPCOMUtils.defineLazyModuleGetter(this, "ExtensionParent",
-				  "resource://gre/modules/ExtensionParent.jsm");
+                                  "resource://gre/modules/ExtensionParent.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
-				  "resource://gre/modules/NetUtil.jsm");
+                                  "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "contentPolicyService",
                                    "@mozilla.org/addons/content-policy;1",
                                    "nsIAddonContentPolicy");
@@ -65,6 +65,48 @@ function readJSON(url) {
       }
     });
   });
+}
+
+function stripDescriptions(json, stripThis = true) {
+  if (Array.isArray(json)) {
+    for (let i = 0; i < json.length; i++) {
+      if (typeof json[i] === "object" && json[i] !== null) {
+        json[i] = stripDescriptions(json[i]);
+      }
+    }
+    return json;
+  }
+
+  let result = {};
+
+  // Objects are handled much more efficiently, both in terms of memory and
+  // CPU, if they have the same shape as other objects that serve the same
+  // purpose. So, normalize the order of properties to increase the chances
+  // that the majority of schema objects wind up in large shape groups.
+  for (let key of Object.keys(json).sort()) {
+    if (stripThis && key === "description" && typeof json[key] === "string") {
+      continue;
+    }
+
+    if (typeof json[key] === "object" && json[key] !== null) {
+      result[key] = stripDescriptions(json[key], key !== "properties");
+    } else {
+      result[key] = json[key];
+    }
+  }
+
+  return result;
+}
+
+async function readJSONAndBlobbify(url) {
+  let json = await readJSON(url);
+
+  // We don't actually use descriptions at runtime, and they make up about a
+  // third of the size of our structured clone data, so strip them before
+  // blobbifying.
+  json = stripDescriptions(json);
+
+  return new StructuredCloneHolder(json);
 }
 
 /**
@@ -811,6 +853,22 @@ class InjectionContext extends Context {
  * format.
  */
 const FORMATS = {
+  hostname(string, context) {
+    let valid = true;
+
+    try {
+      valid = new URL(`http://${string}`).host === string;
+    } catch (e) {
+      valid = false;
+    }
+
+    if (!valid) {
+      throw new Error(`Invalid hostname ${string}`);
+    }
+
+    return string;
+  },
+
   url(string, context) {
     let url = new URL(string).href;
 
@@ -1179,7 +1237,12 @@ class ChoiceType extends Type {
     let n = choices.length - 1;
     choices[n] = `or ${choices[n]}`;
 
-    let message = `Value must either: ${choices.join(", ")}`;
+    let message;
+    if (typeof value === "object") {
+      message = `Value must either: ${choices.join(", ")}`;
+    } else {
+      message = `Value ${JSON.stringify(value)} must either: ${choices.join(", ")}`;
+    }
 
     return context.error(message, null);
   }
@@ -1353,6 +1416,7 @@ class StringType extends Type {
 }
 
 let FunctionEntry;
+let Event;
 let SubModuleType;
 
 class ObjectType extends Type {
@@ -1616,12 +1680,20 @@ SubModuleType = class SubModuleType extends Type {
     let functions = schema.functions.filter(fun => !fun.unsupported)
                           .map(fun => FunctionEntry.parseSchema(fun, path));
 
-    return new this(functions);
+    let events = [];
+
+    if (schema.events) {
+      events = schema.events.filter(event => !event.unsupported)
+                     .map(event => Event.parseSchema(event, path));
+    }
+
+    return new this(functions, events);
   }
 
-  constructor(functions) {
+  constructor(functions, events) {
     super();
     this.functions = functions;
+    this.events = events;
   }
 };
 
@@ -1710,7 +1782,7 @@ class ArrayType extends Type {
   static parseSchema(schema, path, extraProperties = []) {
     this.checkSchemaProperties(schema, path, extraProperties);
 
-    let items = Schemas.parseSchema(schema.items, path);
+    let items = Schemas.parseSchema(schema.items, path, ["onError"]);
 
     return new this(schema, items, schema.minItems || 0, schema.maxItems || Infinity);
   }
@@ -1720,6 +1792,7 @@ class ArrayType extends Type {
     this.itemType = itemType;
     this.minItems = minItems;
     this.maxItems = maxItems;
+    this.onError = schema.items.onError || null;
   }
 
   normalize(value, context) {
@@ -1733,7 +1806,12 @@ class ArrayType extends Type {
     for (let [i, element] of value.entries()) {
       element = context.withPath(String(i), () => this.itemType.normalize(element, context));
       if (element.error) {
-        return element;
+        if (this.onError == "warn") {
+          context.logError(element.error);
+        } else if (this.onError != "ignore") {
+          return element;
+        }
+        continue;
       }
       result.push(element.value);
     }
@@ -1944,6 +2022,11 @@ class SubModuleProperty extends Entry {
       context.injectInto(fun, obj, fun.name, subpath, ns);
     }
 
+    let events = type.events;
+    for (let event of events) {
+      context.injectInto(event, obj, event.name, subpath, ns);
+    }
+
     // TODO: Inject this.properties.
 
     return {
@@ -2055,6 +2138,16 @@ class CallEntry extends Entry {
 // Represents a "function" defined in a schema namespace.
 FunctionEntry = class FunctionEntry extends CallEntry {
   static parseSchema(schema, path) {
+    // When not in DEBUG mode, we just need to know *if* this returns.
+    let returns = !!schema.returns;
+    if (DEBUG && "returns" in schema) {
+      returns = {
+        type: Schemas.parseSchema(schema.returns, path, ["optional", "name"]),
+        optional: schema.returns.optional || false,
+        name: "result",
+      };
+    }
+
     return new this(schema, path, schema.name,
                     Schemas.parseSchema(schema, path,
                       ["name", "unsupported", "returns",
@@ -2062,7 +2155,7 @@ FunctionEntry = class FunctionEntry extends CallEntry {
                        "allowAmbiguousOptionalArguments"]),
                     schema.unsupported || false,
                     schema.allowAmbiguousOptionalArguments || false,
-                    schema.returns || null,
+                    returns,
                     schema.permissions || null);
   }
 
@@ -2074,6 +2167,28 @@ FunctionEntry = class FunctionEntry extends CallEntry {
 
     this.isAsync = type.isAsync;
     this.hasAsyncCallback = type.hasAsyncCallback;
+  }
+
+  checkValue({type, optional, name}, value, context) {
+    if (optional && value == null) {
+      return;
+    }
+    if (type.reference === "ExtensionPanel" || type.reference === "Port") {
+      // TODO: We currently treat objects with functions as SubModuleType,
+      // which is just wrong, and a bigger yak.  Skipping for now.
+      return;
+    }
+    const {error} = type.normalize(value, context);
+    if (error) {
+      this.throwError(context, `Type error for ${name} value (${error})`);
+    }
+  }
+
+  checkCallback(args, context) {
+    const callback = this.parameters[this.parameters.length - 1];
+    for (const [i, param] of callback.type.parameters.entries()) {
+      this.checkValue(param, args[i], context);
+    }
   }
 
   getDescriptor(path, context) {
@@ -2094,7 +2209,21 @@ FunctionEntry = class FunctionEntry extends CallEntry {
           // and lastError values are reported immediately.
           callback = () => {};
         }
-        return apiImpl.callAsyncFunction(actuals, callback);
+        if (DEBUG && this.hasAsyncCallback && callback) {
+          let original = callback;
+          callback = (...args) => {
+            this.checkCallback(args, context);
+            original(...args);
+          };
+        }
+        let result = apiImpl.callAsyncFunction(actuals, callback);
+        if (DEBUG && this.hasAsyncCallback && !callback) {
+          return result.then(result => {
+            this.checkCallback([result], context);
+            return result;
+          });
+        }
+        return result;
       };
     } else if (!this.returns) {
       stub = (...args) => {
@@ -2106,7 +2235,11 @@ FunctionEntry = class FunctionEntry extends CallEntry {
       stub = (...args) => {
         this.checkDeprecated(context);
         let actuals = this.checkParameters(args, context);
-        return apiImpl.callFunction(actuals);
+        let result = apiImpl.callFunction(actuals);
+        if (DEBUG && this.returns) {
+          this.checkValue(this.returns, result, context);
+        }
+        return result;
       };
     }
 
@@ -2121,7 +2254,10 @@ FunctionEntry = class FunctionEntry extends CallEntry {
 };
 
 // Represents an "event" defined in a schema namespace.
-class Event extends CallEntry {
+//
+// TODO(rpl): we should be able to remove the eslint-disable-line that follows
+// once Bug 1369722 has been fixed.
+Event = class Event extends CallEntry { // eslint-disable-line no-native-reassign
   static parseSchema(event, path) {
     let extraParameters = Array.from(event.extraParameters || [], param => ({
       type: Schemas.parseSchema(param, path, ["name", "optional", "default"]),
@@ -2194,7 +2330,7 @@ class Event extends CallEntry {
       },
     };
   }
-}
+};
 
 const TYPES = Object.freeze(Object.assign(Object.create(null), {
   any: AnyType,
@@ -2219,9 +2355,12 @@ class Namespace extends Map {
     super();
 
     this._lazySchemas = [];
+    this.initialized = false;
 
     this.name = name;
     this.path = name ? [...path, name] : [...path];
+
+    this.superNamespace = null;
 
     this.permissions = null;
     this.allowedContexts = [];
@@ -2244,15 +2383,23 @@ class Namespace extends Map {
         this[prop] = schema[prop];
       }
     }
+
+    if (schema.$import) {
+      this.superNamespace = Schemas.getNamespace(schema.$import);
+    }
   }
 
   /**
    * Initializes the keys of this namespace based on the schema objects
    * added via previous `addSchema` calls.
    */
-  init() { // eslint-disable-line complexity
-    if (!this._lazySchemas) {
+  init() {
+    if (this.initialized) {
       return;
+    }
+
+    if (this.superNamespace) {
+      this._lazySchemas.unshift(...this.superNamespace._lazySchemas);
     }
 
     for (let type of Object.keys(LOADERS)) {
@@ -2296,7 +2443,7 @@ class Namespace extends Map {
       }
     }
 
-    this._lazySchemas = null;
+    this.initialized = true;
 
     if (DEBUG) {
       for (let key of this.keys()) {
@@ -2575,9 +2722,21 @@ this.Schemas = {
       value: new Namespace("", []),
     });
 
-    for (let json of this.schemaJSON.values()) {
+    for (let [key, schema] of this.schemaJSON.entries()) {
       try {
-        this.loadSchema(json);
+        if (typeof schema.deserialize === "function") {
+          schema = schema.deserialize(global);
+
+          // If we're in the parent process, we need to keep the
+          // StructuredCloneHolder blob around in order to send to future child
+          // processes. If we're in a child, we have no further use for it, so
+          // just store the deserialized schema data in its place.
+          if (!isParentProcess) {
+            this.schemaJSON.set(key, schema);
+          }
+        }
+
+        this.loadSchema(schema);
       } catch (e) {
         Cu.reportError(e);
       }
@@ -2604,13 +2763,13 @@ this.Schemas = {
     return this._loadCachedSchemasPromise;
   },
 
-  addSchema(url, json) {
-    this.schemaJSON.set(url, json);
+  addSchema(url, schema) {
+    this.schemaJSON.set(url, schema);
 
     let data = Services.ppmm.initialProcessData;
     data["Extension:Schemas"] = this.schemaJSON;
 
-    Services.ppmm.broadcastAsyncMessage("Schema:Add", {url, schema: json});
+    Services.ppmm.broadcastAsyncMessage("Schema:Add", {url, schema});
 
     this.flushSchemas();
   },
@@ -2622,11 +2781,11 @@ this.Schemas = {
 
     let schemaCache = await this.loadCachedSchemas();
 
-    let json = (schemaCache.get(url) ||
-                await StartupCache.schemas.get(url, readJSON));
+    let blob = (schemaCache.get(url) ||
+                await StartupCache.schemas.get(url, readJSONAndBlobbify));
 
     if (!this.schemaJSON.has(url)) {
-      this.addSchema(url, json);
+      this.addSchema(url, blob);
     }
   },
 

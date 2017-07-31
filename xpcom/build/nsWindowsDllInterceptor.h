@@ -99,6 +99,9 @@ public:
   {
     mSuccess = !!VirtualProtectEx(GetCurrentProcess(), mFunc, mSize,
                                   mNewProtect, &mOldProtect);
+    if (!mSuccess) {
+      // printf("VirtualProtectEx failed! %d\n", GetLastError());
+    }
     return mSuccess;
   }
 
@@ -138,7 +141,6 @@ public:
       // Ensure we can write to the code.
       AutoVirtualProtect protect(fn, 2, PAGE_EXECUTE_READWRITE);
       if (!protect.Protect()) {
-        // printf("VirtualProtectEx failed! %d\n", GetLastError());
         continue;
       }
 
@@ -271,7 +273,6 @@ public:
     AutoVirtualProtect protectBefore(fn - 5, 5, PAGE_EXECUTE_READWRITE);
     AutoVirtualProtect protectAfter(fn, 2, PAGE_EXECUTE_READWRITE);
     if (!protectBefore.Protect() || !protectAfter.Protect()) {
-      //printf ("VirtualProtectEx failed! %d\n", GetLastError());
       return false;
     }
 
@@ -395,12 +396,11 @@ public:
 #else
 #error "Unknown processor type"
 #endif
-      byteptr_t origBytes = *((byteptr_t*)p);
+      byteptr_t origBytes = (byteptr_t)DecodePointer(*((byteptr_t*)p));
 
       // ensure we can modify the original code
       AutoVirtualProtect protect(origBytes, nBytes, PAGE_EXECUTE_READWRITE);
       if (!protect.Protect()) {
-        //printf ("VirtualProtectEx failed! %d\n", GetLastError());
         continue;
       }
 
@@ -408,9 +408,15 @@ public:
       // in the trampoline.
       intptr_t dest = (intptr_t)(p + sizeof(void*));
 #if defined(_M_IX86)
+      // Ensure the JMP from CreateTrampoline is where we expect it to be.
+      if (origBytes[0] != 0xE9)
+        continue;
       *((intptr_t*)(origBytes + 1)) =
         dest - (intptr_t)(origBytes + 5); // target displacement
 #elif defined(_M_X64)
+      // Ensure the MOV R11 from CreateTrampoline is where we expect it to be.
+      if (origBytes[0] != 0x49 || origBytes[1] != 0xBB)
+        continue;
       *((intptr_t*)(origBytes + 2)) = dest;
 #else
 #error "Unknown processor type"
@@ -440,7 +446,7 @@ public:
     mHookPage = (byteptr_t)VirtualAllocEx(GetCurrentProcess(), nullptr,
                                           mMaxHooks * kHookSize,
                                           MEM_COMMIT | MEM_RESERVE,
-                                          PAGE_EXECUTE_READWRITE);
+                                          PAGE_EXECUTE_READ);
     if (!mHookPage) {
       mModule = 0;
       return;
@@ -448,19 +454,6 @@ public:
   }
 
   bool Initialized() { return !!mModule; }
-
-  void LockHooks()
-  {
-    if (!mModule) {
-      return;
-    }
-
-    DWORD op;
-    VirtualProtectEx(GetCurrentProcess(), mHookPage, mMaxHooks * kHookSize,
-                     PAGE_EXECUTE_READ, &op);
-
-    mModule = 0;
-  }
 
   bool AddHook(const char* aName, intptr_t aHookDest, void** aOrigFunc)
   {
@@ -736,6 +729,12 @@ protected:
   {
     *aOutTramp = nullptr;
 
+    AutoVirtualProtect protectHookPage(mHookPage, mMaxHooks * kHookSize,
+                                       PAGE_EXECUTE_READWRITE);
+    if (!protectHookPage.Protect()) {
+      return;
+    }
+
     byteptr_t tramp = FindTrampolineSpace();
     if (!tramp) {
       return;
@@ -743,7 +742,7 @@ protected:
 
     // We keep the address of the original function in the first bytes of
     // the trampoline buffer
-    *((void**)tramp) = aOrigFunction;
+    *((void**)tramp) = EncodePointer(aOrigFunction);
     tramp += sizeof(void*);
 
     byteptr_t origBytes = (byteptr_t)aOrigFunction;
@@ -1249,7 +1248,6 @@ protected:
     // ensure we can modify the original code
     AutoVirtualProtect protect(aOrigFunction, nOrigBytes, PAGE_EXECUTE_READWRITE);
     if (!protect.Protect()) {
-      //printf ("VirtualProtectEx failed! %d\n", GetLastError());
       return;
     }
 
@@ -1353,13 +1351,6 @@ public:
 
     // Lazily initialize mDetourPatcher, since it allocates memory and we might
     // not need it.
-  }
-
-  void LockHooks()
-  {
-    if (mDetourPatcher.Initialized()) {
-      mDetourPatcher.LockHooks();
-    }
   }
 
   /**

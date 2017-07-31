@@ -161,12 +161,14 @@ function getCleanedPacket(key, packet) {
     }
 
     if (res.packet) {
-      if (res.packet.totalTime) {
-        // res.packet.totalTime is read-only so we use assign to override it.
-        res.packet = Object.assign({}, existingPacket.packet, {
-          totalTime: existingPacket.packet.totalTime
-        });
-      }
+      let override = {};
+      let keys = ["totalTime", "from", "contentSize", "transferredSize"];
+      keys.forEach(x => {
+        if (res.packet[x] !== undefined) {
+          override[x] = existingPacket.packet[key];
+        }
+      });
+      res.packet = Object.assign({}, res.packet, override);
     }
 
     if (res.networkInfo) {
@@ -191,9 +193,29 @@ function getCleanedPacket(key, packet) {
           existingPacket.networkInfo.request.headersSize;
       }
 
-      if (res.networkInfo.response && res.networkInfo.response.headersSize) {
+      if (
+        res.networkInfo.response
+        && res.networkInfo.response.headersSize !== undefined
+      ) {
         res.networkInfo.response.headersSize =
           existingPacket.networkInfo.response.headersSize;
+      }
+      if (res.networkInfo.response && res.networkInfo.response.bodySize !== undefined) {
+        res.networkInfo.response.bodySize =
+          existingPacket.networkInfo.response.bodySize;
+      }
+      if (
+        res.networkInfo.response
+        && res.networkInfo.response.transferredSize !== undefined
+      ) {
+        res.networkInfo.response.transferredSize =
+          existingPacket.networkInfo.response.transferredSize;
+      }
+    }
+
+    if (res.helperResult) {
+      if (res.helperResult.object) {
+        res.helperResult.object.actor = existingPacket.helperResult.object.actor;
       }
     }
   } else {
@@ -290,6 +312,7 @@ function* generateConsoleApiStubs() {
       [key, code],
       function ([subKey, subCode]) {
         let script = content.document.createElement("script");
+        // eslint-disable-next-line no-unsanitized/property
         script.innerHTML = `function triggerPacket() {${subCode}}`;
         content.document.body.appendChild(script);
         content.wrappedJSObject.triggerPacket();
@@ -333,6 +356,7 @@ function* generateCssMessageStubs() {
       [key, code],
       function ([subKey, subCode]) {
         let style = content.document.createElement("style");
+        // eslint-disable-next-line no-unsanitized/property
         style.innerHTML = subCode;
         content.document.body.appendChild(style);
       }
@@ -394,8 +418,21 @@ function* generateNetworkEventStubs() {
     let onNetworkUpdate = new Promise(resolve => {
       let i = 0;
       ui.jsterm.hud.on("network-message-updated", function onNetworkUpdated(event, res) {
-        let updateKey = `${keys[i++]} ${res.packet.updateType}`;
-        stubs.packets.push(formatPacket(updateKey, res));
+        let updateKey = `${keys[i++]} update`;
+        // We cannot ensure the form of the network update packet, some properties
+        // might be in another order than in the original packet.
+        // Hand-picking only what we need should prevent this.
+        const packet = {
+          networkInfo: {
+            _type: res.networkInfo._type,
+            actor: res.networkInfo.actor,
+            request: res.networkInfo.request,
+            response: res.networkInfo.response,
+            totalTime: res.networkInfo.totalTime,
+          }
+        };
+
+        stubs.packets.push(formatPacket(updateKey, packet));
         stubs.preparedMessages.push(formatNetworkEventStub(updateKey, res));
         if (i === keys.length) {
           ui.jsterm.hud.off("network-message-updated", onNetworkUpdated);
@@ -409,6 +446,7 @@ function* generateNetworkEventStubs() {
       [key, code],
       function ([subKey, subCode]) {
         let script = content.document.createElement("script");
+        // eslint-disable-next-line no-unsanitized/property
         script.innerHTML = `function triggerPacket() {${subCode}}`;
         content.document.body.appendChild(script);
         content.wrappedJSObject.triggerPacket();
@@ -455,6 +493,7 @@ function* generatePageErrorStubs() {
       [key, code],
       function ([subKey, subCode]) {
         let script = content.document.createElement("script");
+        // eslint-disable-next-line no-unsanitized/property
         script.innerHTML = subCode;
         content.document.body.appendChild(script);
         script.remove();

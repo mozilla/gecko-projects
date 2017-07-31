@@ -5,6 +5,9 @@
 /* -*- Mode: indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set sts=2 sw=2 et tw=80: */
 
+// The ext-* files are imported into the same scopes.
+/* import-globals-from ext-toolkit.js */
+
 "use strict";
 
 XPCOMUtils.defineLazyModuleGetter(this, "ProxyScriptContext",
@@ -28,12 +31,8 @@ this.proxy = class extends ExtensionAPI {
     let {extension} = context;
     return {
       proxy: {
-        registerProxyScript: (url) => {
-          // Unload the current proxy script if one is loaded.
-          if (proxyScriptContextMap.has(extension)) {
-            proxyScriptContextMap.get(extension).unload();
-            proxyScriptContextMap.delete(extension);
-          }
+        register(url) {
+          this.unregister();
 
           let proxyScriptContext = new ProxyScriptContext(extension, url);
           if (proxyScriptContext.load()) {
@@ -41,7 +40,19 @@ this.proxy = class extends ExtensionAPI {
           }
         },
 
-        onProxyError: new SingletonEventManager(context, "proxy.onProxyError", fire => {
+        unregister() {
+          // Unload the current proxy script if one is loaded.
+          if (proxyScriptContextMap.has(extension)) {
+            proxyScriptContextMap.get(extension).unload();
+            proxyScriptContextMap.delete(extension);
+          }
+        },
+
+        registerProxyScript(url) {
+          this.register(url);
+        },
+
+        onProxyError: new EventManager(context, "proxy.onProxyError", fire => {
           let listener = (name, error) => {
             fire.async(error);
           };

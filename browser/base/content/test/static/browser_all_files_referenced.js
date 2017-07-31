@@ -32,7 +32,7 @@ var gExceptionPaths = [
 if (AppConstants.platform == "macosx")
   gExceptionPaths.push("resource://gre/res/cursors/");
 
-var whitelist = new Set([
+var whitelist = [
   // browser/extensions/pdfjs/content/PdfStreamConverter.jsm
   {file: "chrome://pdf.js/locale/chrome.properties"},
   {file: "chrome://pdf.js/locale/viewer.properties"},
@@ -84,9 +84,6 @@ var whitelist = new Set([
   {file: "resource://app/modules/NewTabSearchProvider.jsm"},
   {file: "resource://app/modules/NewTabWebChannel.jsm"},
 
-  // Activity Stream currently needs this file in all channels except Nightly
-  {file: "resource://app/modules/PreviewProvider.jsm", skipNightly: true},
-
   // layout/mathml/nsMathMLChar.cpp
   {file: "resource://gre/res/fonts/mathfontSTIXGeneral.properties"},
   {file: "resource://gre/res/fonts/mathfontUnicode.properties"},
@@ -124,23 +121,12 @@ var whitelist = new Set([
   // Bug 1339424 (wontfix?)
   {file: "chrome://browser/locale/taskbar.properties",
    platforms: ["linux", "macosx"]},
-  // Bug 1343824
-  {file: "chrome://browser/skin/customizableui/customize-illustration-rtl@2x.png",
-   platforms: ["linux", "win"]},
-  {file: "chrome://browser/skin/customizableui/customize-illustration@2x.png",
-   platforms: ["linux", "win"]},
-  {file: "chrome://browser/skin/customizableui/info-icon-customizeTip@2x.png",
-   platforms: ["linux", "win"]},
-  {file: "chrome://browser/skin/customizableui/panelarrow-customizeTip@2x.png",
-   platforms: ["linux", "win"]},
   // Bug 1316187
   {file: "chrome://global/content/customizeToolbar.xul"},
   // Bug 1343837
   {file: "chrome://global/content/findUtils.js"},
   // Bug 1343843
   {file: "chrome://global/content/url-classifier/unittests.xul"},
-  // Bug 1343839
-  {file: "chrome://global/locale/headsUpDisplay.properties"},
   // Bug 1348362
   {file: "chrome://global/skin/icons/warning-64.png", platforms: ["linux", "win"]},
   // Bug 1348525
@@ -175,14 +161,35 @@ var whitelist = new Set([
   {file: "resource://gre/modules/ISO8601DateUtils.jsm"},
   // Bug 1337345
   {file: "resource://gre/modules/Manifest.jsm"},
-  // Bug 1351089
-  {file: "resource://gre/modules/PresentationDeviceInfoManager.jsm"},
   // Bug 1351097
   {file: "resource://gre/modules/accessibility/AccessFu.jsm"},
   // Bug 1351637
   {file: "resource://gre/modules/sdk/bootstrap.js"},
 
-].filter(item =>
+];
+
+// Temporary whitelisted while WebPayments in construction
+// See Bug 1381141
+if (AppConstants.NIGHTLY_BUILD && AppConstants.MOZ_BUILD_APP == "browser") {
+  whitelist.push(
+    {file: "chrome://payments/content/paymentRequest.xhtml"}
+  );
+}
+
+if (!AppConstants.MOZ_PHOTON_THEME) {
+  whitelist.push(
+    // Bug 1343824
+    {file: "chrome://browser/skin/customizableui/customize-illustration-rtl@2x.png",
+     platforms: ["linux", "win"]},
+    {file: "chrome://browser/skin/customizableui/customize-illustration@2x.png",
+     platforms: ["linux", "win"]},
+    {file: "chrome://browser/skin/customizableui/info-icon-customizeTip@2x.png",
+     platforms: ["linux", "win"]},
+    {file: "chrome://browser/skin/customizableui/panelarrow-customizeTip@2x.png",
+     platforms: ["linux", "win"]});
+}
+
+whitelist = new Set(whitelist.filter(item =>
   ("isFromDevTools" in item) == isDevtools &&
   (!item.skipNightly || !AppConstants.NIGHTLY_BUILD) &&
   (!item.platforms || item.platforms.includes(AppConstants.platform))

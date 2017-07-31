@@ -6,10 +6,11 @@
 
 #![deny(missing_docs)]
 
-use cssparser::Parser as CssParser;
+use cssparser::{Parser as CssParser, ParserInput};
 use selectors::Element;
 use selectors::parser::SelectorList;
 use std::fmt::Debug;
+use style_traits::ParseError;
 use stylesheets::{Origin, Namespaces};
 
 /// A convenient alias for the type that represents an attribute value used for
@@ -37,7 +38,7 @@ pub use gecko::restyle_damage::GeckoRestyleDamage as RestyleDamage;
 /// A type that represents the previous computed values needed for restyle
 /// damage calculation.
 #[cfg(feature = "servo")]
-pub type PreExistingComputedValues = ::properties::ServoComputedValues;
+pub type PreExistingComputedValues = ::properties::ComputedValues;
 
 /// A type that represents the previous computed values needed for restyle
 /// damage calculation.
@@ -59,13 +60,14 @@ impl<'a> SelectorParser<'a> {
     ///
     /// This is used for some DOM APIs like `querySelector`.
     pub fn parse_author_origin_no_namespace(input: &str)
-                                            -> Result<SelectorList<SelectorImpl>, ()> {
+                                            -> Result<SelectorList<SelectorImpl>, ParseError> {
         let namespaces = Namespaces::default();
         let parser = SelectorParser {
             stylesheet_origin: Origin::Author,
             namespaces: &namespaces,
         };
-        SelectorList::parse(&parser, &mut CssParser::new(input))
+        let mut input = ParserInput::new(input);
+        SelectorList::parse(&parser, &mut CssParser::new(&mut input))
     }
 
     /// Whether we're parsing selectors in a user-agent stylesheet.
@@ -119,7 +121,7 @@ impl SelectorImpl {
     pub fn each_precomputed_pseudo_element<F>(mut fun: F)
         where F: FnMut(PseudoElement),
     {
-        Self::each_pseudo_element(|pseudo| {
+        Self::each_simple_pseudo_element(|pseudo| {
             if pseudo.is_precomputed() {
                 fun(pseudo)
             }

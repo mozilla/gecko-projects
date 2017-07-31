@@ -1,13 +1,16 @@
 "use strict";
 
+// The ext-* files are imported into the same scopes.
+/* import-globals-from ext-toolkit.js */
+
 XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
                                   "resource://gre/modules/ContextualIdentityService.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
-                                  "resource://gre/modules/NetUtil.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+                                  "resource://gre/modules/Services.jsm");
 
 /* globals DEFAULT_STORE, PRIVATE_STORE */
 
-function convert({cookie, isPrivate}) {
+const convertCookie = ({cookie, isPrivate}) => {
   let result = {
     name: cookie.name,
     value: cookie.value,
@@ -32,15 +35,15 @@ function convert({cookie, isPrivate}) {
   }
 
   return result;
-}
+};
 
-function isSubdomain(otherDomain, baseDomain) {
+const isSubdomain = (otherDomain, baseDomain) => {
   return otherDomain == baseDomain || otherDomain.endsWith("." + baseDomain);
-}
+};
 
 // Checks that the given extension has permission to set the given cookie for
 // the given URI.
-function checkSetCookiePermissions(extension, uri, cookie) {
+const checkSetCookiePermissions = (extension, uri, cookie) => {
   // Permission checks:
   //
   //  - If the extension does not have permissions for the specified
@@ -126,9 +129,9 @@ function checkSetCookiePermissions(extension, uri, cookie) {
   // same origin policy enforcement, but no-one implements this.
 
   return true;
-}
+};
 
-function* query(detailsIn, props, context) {
+const query = function* (detailsIn, props, context) {
   // Different callers want to filter on different properties. |props|
   // tells us which ones they're interested in.
   let details = {};
@@ -172,24 +175,22 @@ function* query(detailsIn, props, context) {
   // We can use getCookiesFromHost for faster searching.
   let enumerator;
   let uri;
+  let originAttributes = {
+    userContextId,
+    privateBrowsingId: isPrivate ? 1 : 0,
+  };
   if ("url" in details) {
     try {
-      uri = NetUtil.newURI(details.url).QueryInterface(Ci.nsIURL);
-      Services.cookies.usePrivateMode(isPrivate, () => {
-        enumerator = Services.cookies.getCookiesFromHost(uri.host, {userContextId});
-      });
+      uri = Services.io.newURI(details.url).QueryInterface(Ci.nsIURL);
+      enumerator = Services.cookies.getCookiesFromHost(uri.host, originAttributes);
     } catch (ex) {
       // This often happens for about: URLs
       return;
     }
   } else if ("domain" in details) {
-    Services.cookies.usePrivateMode(isPrivate, () => {
-      enumerator = Services.cookies.getCookiesFromHost(details.domain, {userContextId});
-    });
+    enumerator = Services.cookies.getCookiesFromHost(details.domain, originAttributes);
   } else {
-    Services.cookies.usePrivateMode(isPrivate, () => {
-      enumerator = Services.cookies.enumerator;
-    });
+    enumerator = Services.cookies.getCookiesWithOriginAttributes(JSON.stringify(originAttributes));
   }
 
   // Based on nsCookieService::GetCookieStringInternal
@@ -235,10 +236,6 @@ function* query(detailsIn, props, context) {
       return false;
     }
 
-    if (userContextId != cookie.originAttributes.userContextId) {
-      return false;
-    }
-
     // "Restricts the retrieved cookies to those whose domains match or are subdomains of this one."
     if ("domain" in details && !isSubdomain(cookie.rawHost, details.domain)) {
       return false;
@@ -271,7 +268,7 @@ function* query(detailsIn, props, context) {
       yield {cookie, isPrivate, storeId};
     }
   }
-}
+};
 
 this.cookies = class extends ExtensionAPI {
   getAPI(context) {
@@ -281,7 +278,7 @@ this.cookies = class extends ExtensionAPI {
         get: function(details) {
           // FIXME: We don't sort by length of path and creation time.
           for (let cookie of query(details, ["url", "name", "storeId"], context)) {
-            return Promise.resolve(convert(cookie));
+            return Promise.resolve(convertCookie(cookie));
           }
 
           // Found no match.
@@ -290,13 +287,13 @@ this.cookies = class extends ExtensionAPI {
 
         getAll: function(details) {
           let allowed = ["url", "name", "domain", "path", "secure", "session", "storeId"];
-          let result = Array.from(query(details, allowed, context), convert);
+          let result = Array.from(query(details, allowed, context), convertCookie);
 
           return Promise.resolve(result);
         },
 
         set: function(details) {
-          let uri = NetUtil.newURI(details.url).QueryInterface(Ci.nsIURL);
+          let uri = Services.io.newURI(details.url).QueryInterface(Ci.nsIURL);
 
           let path;
           if (details.path !== null) {
@@ -337,21 +334,22 @@ this.cookies = class extends ExtensionAPI {
             return Promise.reject({message: `Permission denied to set cookie ${JSON.stringify(details)}`});
           }
 
+          let originAttributes = {
+            userContextId,
+            privateBrowsingId: isPrivate ? 1 : 0,
+          };
+
           // The permission check may have modified the domain, so use
           // the new value instead.
-          Services.cookies.usePrivateMode(isPrivate, () => {
-            Services.cookies.add(cookieAttrs.host, path, name, value,
-                                 secure, httpOnly, isSession, expiry, {userContextId});
-          });
+          Services.cookies.add(cookieAttrs.host, path, name, value,
+                               secure, httpOnly, isSession, expiry, originAttributes);
 
           return self.cookies.get(details);
         },
 
         remove: function(details) {
-          for (let {cookie, isPrivate, storeId} of query(details, ["url", "name", "storeId"], context)) {
-            Services.cookies.usePrivateMode(isPrivate, () => {
-              Services.cookies.remove(cookie.host, cookie.name, cookie.path, false, cookie.originAttributes);
-            });
+          for (let {cookie, storeId} of query(details, ["url", "name", "storeId"], context)) {
+            Services.cookies.remove(cookie.host, cookie.name, cookie.path, false, cookie.originAttributes);
 
             // Todo: could there be multiple per subdomain?
             return Promise.resolve({
@@ -380,13 +378,13 @@ this.cookies = class extends ExtensionAPI {
           return Promise.resolve(result);
         },
 
-        onChanged: new SingletonEventManager(context, "cookies.onChanged", fire => {
+        onChanged: new EventManager(context, "cookies.onChanged", fire => {
           let observer = (subject, topic, data) => {
             let notify = (removed, cookie, cause) => {
               cookie.QueryInterface(Ci.nsICookie2);
 
               if (extension.whiteListedHosts.matchesCookie(cookie)) {
-                fire.async({removed, cookie: convert({cookie, isPrivate: topic == "private-cookie-changed"}), cause});
+                fire.async({removed, cookie: convertCookie({cookie, isPrivate: topic == "private-cookie-changed"}), cause});
               }
             };
 

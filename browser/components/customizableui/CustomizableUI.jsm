@@ -45,6 +45,8 @@ const kPrefCustomizationState        = "browser.uiCustomization.state";
 const kPrefCustomizationAutoAdd      = "browser.uiCustomization.autoAdd";
 const kPrefCustomizationDebug        = "browser.uiCustomization.debug";
 const kPrefDrawInTitlebar            = "browser.tabs.drawInTitlebar";
+const kPrefUIDensity                 = "browser.uidensity";
+const kPrefAutoTouchMode             = "browser.touchmode.auto";
 
 const kExpectedWindowURL = "chrome://browser/content/browser.xul";
 
@@ -159,6 +161,8 @@ var gUIStateBeforeReset = {
   uiCustomizationState: null,
   drawInTitlebar: null,
   currentTheme: null,
+  uiDensity: null,
+  autoTouchMode: null,
 };
 
 var gDefaultPanelPlacements = null;
@@ -229,7 +233,7 @@ var CustomizableUIInternal = {
       panelPlacements.push("characterencoding-button");
     }
 
-    if (!AppConstants.RELEASE_OR_BETA) {
+    if (AppConstants.MOZ_DEV_EDITION || AppConstants.NIGHTLY_BUILD) {
       if (Services.prefs.getBoolPref("extensions.webcompat-reporter.enabled")) {
         panelPlacements.push("webcompat-reporter-button");
       }
@@ -246,6 +250,9 @@ var CustomizableUIInternal = {
       "home-button",
     ];
 
+    if (AppConstants.MOZ_PHOTON_THEME) {
+      navbarPlacements.push("sidebar-button");
+    }
     if (AppConstants.MOZ_DEV_EDITION) {
       navbarPlacements.splice(2, 0, "developer-button");
     }
@@ -305,7 +312,17 @@ var CustomizableUIInternal = {
     SearchWidgetTracker.init();
   },
 
+  _updatePanelContextMenuLocation(window) {
+    let panelID = gPhotonStructure ? "widget-overflow" : "PanelUI-popup";
+    let contextMenu = window.document.getElementById("customizationPanelItemContextMenu");
+    window.document.getElementById(panelID).appendChild(contextMenu);
+  },
+
   _updateAreasForPhoton() {
+    for (let [win, ] of gBuildWindows) {
+      this._updatePanelContextMenuLocation(win);
+    }
+
     if (gPhotonStructure) {
       if (gAreas.has(CustomizableUI.AREA_PANEL)) {
         this.unregisterArea(CustomizableUI.AREA_PANEL, true);
@@ -313,6 +330,7 @@ var CustomizableUIInternal = {
       this.registerArea(CustomizableUI.AREA_FIXED_OVERFLOW_PANEL, {
         type: CustomizableUI.TYPE_MENU_PANEL,
         defaultPlacements: [],
+        anchor: "nav-bar-overflow-button",
       }, true);
     } else {
       if (gAreas.has(CustomizableUI.AREA_FIXED_OVERFLOW_PANEL)) {
@@ -502,6 +520,8 @@ var CustomizableUIInternal = {
     }
 
     // PROVIDER_SPECIAL gets treated the same as PROVIDER_XUL.
+    // XXXgijs: this causes bugs in code that depends on widgetWrapper.provider
+    // giving an accurate answer... filed as bug 1379821
     let wrapper = new XULWidgetGroupWrapper(aWidgetId);
     gGroupWrapperCache.set(aWidgetId, wrapper);
     return wrapper;
@@ -765,7 +785,7 @@ var CustomizableUIInternal = {
 
         this.ensureButtonContextMenu(node, aAreaNode);
         if (node.localName == "toolbarbutton") {
-          if (areaIsPanel) {
+          if (areaIsPanel && !gPhotonStructure) {
             node.setAttribute("wrap", "true");
           } else {
             node.removeAttribute("wrap");
@@ -856,15 +876,15 @@ var CustomizableUIInternal = {
     }
   },
 
-  ensureButtonContextMenu(aNode, aAreaNode) {
+  ensureButtonContextMenu(aNode, aAreaNode, forcePanel) {
     const kPanelItemContextMenu = "customizationPanelItemContextMenu";
 
     let currentContextMenu = aNode.getAttribute("context") ||
                              aNode.getAttribute("contextmenu");
-    let place = CustomizableUI.getPlaceForItem(aAreaNode);
-    let contextMenuForPlace = place == "panel" ?
-                                kPanelItemContextMenu :
-                                null;
+    let contextMenuForPlace =
+      (forcePanel || "panel" == CustomizableUI.getPlaceForItem(aAreaNode)) ?
+      kPanelItemContextMenu :
+      null;
     if (contextMenuForPlace && !currentContextMenu) {
       aNode.setAttribute("context", contextMenuForPlace);
     } else if (currentContextMenu == kPanelItemContextMenu &&
@@ -946,12 +966,14 @@ var CustomizableUIInternal = {
     for (let child of aPanelContents.children) {
       if (child.localName != "toolbarbutton") {
         if (child.localName == "toolbaritem") {
-          this.ensureButtonContextMenu(child, aPanelContents);
+          this.ensureButtonContextMenu(child, aPanelContents, true);
         }
         continue;
       }
-      this.ensureButtonContextMenu(child, aPanelContents);
-      child.setAttribute("wrap", "true");
+      this.ensureButtonContextMenu(child, aPanelContents, true);
+      if (!gPhotonStructure) {
+        child.setAttribute("wrap", "true");
+      }
     }
 
     this.registerBuildArea(aArea, aPanelContents);
@@ -1067,6 +1089,7 @@ var CustomizableUIInternal = {
 
       aWindow.addEventListener("unload", this);
       aWindow.addEventListener("command", this, true);
+      this._updatePanelContextMenuLocation(aWindow);
 
       this.notifyListeners("onWindowOpened", aWindow);
     }
@@ -1273,9 +1296,6 @@ var CustomizableUIInternal = {
     let nodeName = "toolbar" + aId.match(/spring|spacer|separator/)[0];
     let node = aDocument.createElementNS(kNSXUL, nodeName);
     node.id = this.ensureSpecialWidgetId(aId);
-    if (nodeName == "toolbarspring") {
-      node.flex = 1;
-    }
     return node;
   },
 
@@ -1502,6 +1522,14 @@ var CustomizableUIInternal = {
   handleWidgetCommand(aWidget, aNode, aEvent) {
     log.debug("handleWidgetCommand");
 
+    if (aWidget.onBeforeCommand) {
+      try {
+        aWidget.onBeforeCommand.call(null, aEvent);
+      } catch (e) {
+        log.error(e);
+      }
+    }
+
     if (aWidget.type == "button") {
       if (aWidget.onCommand) {
         try {
@@ -1523,12 +1551,14 @@ var CustomizableUIInternal = {
       if (areaType != CustomizableUI.TYPE_MENU_PANEL) {
         let wrapper = this.wrapWidget(aWidget.id).forWindow(ownerWindow);
 
-        if (wrapper && !wrapper.overflowed && wrapper.anchor) {
+        let hasMultiView = !!aNode.closest("photonpanelmultiview,panelmultiview");
+        if (wrapper && !hasMultiView && wrapper.anchor) {
           this.hidePanelForNode(aNode);
           anchor = wrapper.anchor;
         }
       }
-      ownerWindow.PanelUI.showSubView(aWidget.viewId, anchor, area);
+
+      ownerWindow.PanelUI.showSubView(aWidget.viewId, anchor, area, aEvent);
     }
   },
 
@@ -1726,9 +1756,13 @@ var CustomizableUIInternal = {
 
     if (closemenu == "single") {
       let panel = this._getPanelForNode(target);
-      let multiview = panel.querySelector("panelmultiview");
+      let multiview = panel.querySelector("photonpanelmultiview,panelmultiview");
       if (multiview.showingSubView) {
-        multiview.showMainView();
+        if (multiview.instance.panelViews) {
+          multiview.goBack();
+        } else {
+          multiview.showMainView();
+        }
         return;
       }
     }
@@ -2390,6 +2424,10 @@ var CustomizableUIInternal = {
     this.wrapWidgetEventHandler("onCreated", widget);
     this.wrapWidgetEventHandler("onDestroyed", widget);
 
+    if (typeof aData.onBeforeCommand == "function") {
+      widget.onBeforeCommand = aData.onBeforeCommand;
+    }
+
     if (widget.type == "button") {
       widget.onCommand = typeof aData.onCommand == "function" ?
                            aData.onCommand :
@@ -2543,6 +2581,8 @@ var CustomizableUIInternal = {
     try {
       gUIStateBeforeReset.drawInTitlebar = Services.prefs.getBoolPref(kPrefDrawInTitlebar);
       gUIStateBeforeReset.uiCustomizationState = Services.prefs.getCharPref(kPrefCustomizationState);
+      gUIStateBeforeReset.uiDensity = Services.prefs.getIntPref(kPrefUIDensity);
+      gUIStateBeforeReset.autoTouchMode = Services.prefs.getBoolPref(kPrefAutoTouchMode);
       gUIStateBeforeReset.currentTheme = LightweightThemeManager.currentTheme;
     } catch (e) { }
 
@@ -2550,6 +2590,8 @@ var CustomizableUIInternal = {
 
     Services.prefs.clearUserPref(kPrefCustomizationState);
     Services.prefs.clearUserPref(kPrefDrawInTitlebar);
+    Services.prefs.clearUserPref(kPrefUIDensity);
+    Services.prefs.clearUserPref(kPrefAutoTouchMode);
     LightweightThemeManager.currentTheme = null;
     log.debug("State reset");
 
@@ -2620,6 +2662,8 @@ var CustomizableUIInternal = {
     let uiCustomizationState = gUIStateBeforeReset.uiCustomizationState;
     let drawInTitlebar = gUIStateBeforeReset.drawInTitlebar;
     let currentTheme = gUIStateBeforeReset.currentTheme;
+    let uiDensity = gUIStateBeforeReset.uiDensity;
+    let autoTouchMode = gUIStateBeforeReset.autoTouchMode;
 
     // Need to clear the previous state before setting the prefs
     // because pref observers may check if there is a previous UI state.
@@ -2627,6 +2671,8 @@ var CustomizableUIInternal = {
 
     Services.prefs.setCharPref(kPrefCustomizationState, uiCustomizationState);
     Services.prefs.setBoolPref(kPrefDrawInTitlebar, drawInTitlebar);
+    Services.prefs.setIntPref(kPrefUIDensity, uiDensity);
+    Services.prefs.setBoolPref(kPrefAutoTouchMode, autoTouchMode);
     LightweightThemeManager.currentTheme = currentTheme;
     this.loadSavedState();
     // If the user just customizes toolbar/titlebar visibility, gSavedState will be null
@@ -2700,18 +2746,18 @@ var CustomizableUIInternal = {
   },
 
   canWidgetMoveToArea(aWidgetId, aArea) {
-    let placement = this.getPlacementOfWidget(aWidgetId);
-    if (placement && placement.area != aArea) {
-      // Special widgets can't move to the menu panel.
-      if (this.isSpecialWidget(aWidgetId) && gAreas.has(aArea) &&
-          gAreas.get(aArea).get("type") == CustomizableUI.TYPE_MENU_PANEL) {
-        return false;
-      }
-      // For everything else, just return whether the widget is removable.
-      return this.isWidgetRemovable(aWidgetId);
+    // Special widgets can't move to the menu panel.
+    if (this.isSpecialWidget(aWidgetId) && gAreas.has(aArea) &&
+        gAreas.get(aArea).get("type") == CustomizableUI.TYPE_MENU_PANEL) {
+      return false;
     }
-
-    return true;
+    let placement = this.getPlacementOfWidget(aWidgetId);
+    // Items in the palette can move, and items can move within their area:
+    if (!placement || placement.area == aArea) {
+      return true;
+    }
+    // For everything else, just return whether the widget is removable.
+    return this.isWidgetRemovable(aWidgetId);
   },
 
   ensureWidgetPlacedInWindow(aWidgetId, aWindow) {
@@ -2799,6 +2845,16 @@ var CustomizableUIInternal = {
           return false;
         }
       }
+    }
+
+    if (Services.prefs.prefHasUserValue(kPrefUIDensity)) {
+      log.debug(kPrefUIDensity + " pref is non-default");
+      return false;
+    }
+
+    if (Services.prefs.prefHasUserValue(kPrefAutoTouchMode)) {
+      log.debug(kPrefAutoTouchMode + " pref is non-default");
+      return false;
     }
 
     if (Services.prefs.prefHasUserValue(kPrefDrawInTitlebar)) {
@@ -3249,6 +3305,12 @@ this.CustomizableUI = {
    *                  passing the document from which it was removed. This is
    *                  useful especially for 'view' type widgets that need to
    *                  cleanup after views that were constructed on the fly.
+   * - onBeforeCommand(aEvt): A function that will be invoked when the user
+   *                          activates the button but before the command
+   *                          is evaluated. Useful if code needs to run to
+   *                          change the button's icon in preparation to the
+   *                          pending command action. Called for both type=button
+   *                          and type=view.
    * - onCommand(aEvt): Only useful for button widgets; a function that will be
    *                    invoked when the user activates the button.
    * - onClick(aEvt): Attached to all widgets; a function that will be invoked
@@ -3532,7 +3594,9 @@ this.CustomizableUI = {
   get canUndoReset() {
     return gUIStateBeforeReset.uiCustomizationState != null ||
            gUIStateBeforeReset.drawInTitlebar != null ||
-           gUIStateBeforeReset.currentTheme != null;
+           gUIStateBeforeReset.currentTheme != null ||
+           gUIStateBeforeReset.autoTouchMode != null ||
+           gUIStateBeforeReset.uiDensity != null;
   },
 
   /**
@@ -3771,6 +3835,15 @@ this.CustomizableUI = {
    */
   isBuiltinToolbar(aToolbarId) {
     return CustomizableUIInternal._builtinToolbars.has(aToolbarId);
+  },
+
+  /**
+   * Create an instance of a spring, spacer or separator.
+   * @param aId       the type of special widget (spring, spacer or separator)
+   * @param aDocument the document in which to create it.
+   */
+  createSpecialWidget(aId, aDocument) {
+    return CustomizableUIInternal.createSpecialWidget(aId, aDocument);
   },
 };
 Object.freeze(this.CustomizableUI);
@@ -4136,7 +4209,9 @@ OverflowableToolbar.prototype = {
         this._disable();
         break;
       case "dragover":
-        this._showWithTimeout();
+        if (this._enabled) {
+          this._showWithTimeout();
+        }
         break;
       case "dragend":
         this._panel.hidePopup();
@@ -4156,18 +4231,26 @@ OverflowableToolbar.prototype = {
     return new Promise(resolve => {
       let doc = this._panel.ownerDocument;
       this._panel.hidden = false;
-      let mainViewId = this._panel.querySelector("panelmultiview").getAttribute("mainViewId");
-      let mainView = doc.getElementById(mainViewId);
-      let contextMenu = doc.getElementById(mainView.getAttribute("context"));
+      let photonView = this._panel.querySelector("photonpanelmultiview");
+      let contextMenu;
+      if (photonView) {
+        let mainViewId = photonView.getAttribute("mainViewId");
+        let mainView = doc.getElementById(mainViewId);
+        contextMenu = doc.getElementById(mainView.getAttribute("context"));
+      } else {
+        contextMenu = doc.getElementById(this._panel.getAttribute("context"));
+      }
       gELS.addSystemEventListener(contextMenu, "command", this, true);
       let anchor = doc.getAnonymousElementByAttribute(this._chevron, "class", "toolbarbutton-icon");
+      // Ensure we update the gEditUIVisible flag when opening the popup, in
+      // case the edit controls are in it.
+      this._panel.addEventListener("popupshowing", () => doc.defaultView.updateEditUIVisibility(), {once: true});
       this._panel.openPopup(anchor || this._chevron);
       this._chevron.open = true;
 
-      let overflowableToolbarInstance = this;
-      this._panel.addEventListener("popupshown", function(aEvent) {
-        this.addEventListener("dragover", overflowableToolbarInstance);
-        this.addEventListener("dragend", overflowableToolbarInstance);
+      this._panel.addEventListener("popupshown", aEvent => {
+        this._panel.addEventListener("dragover", this);
+        this._panel.addEventListener("dragend", this);
         resolve();
       }, {once: true});
     });
@@ -4187,6 +4270,7 @@ OverflowableToolbar.prototype = {
     this._panel.removeEventListener("dragover", this);
     this._panel.removeEventListener("dragend", this);
     let doc = aEvent.target.ownerDocument;
+    doc.defaultView.updateEditUIVisibility();
     let contextMenuId = this._panel.getAttribute("context");
     if (contextMenuId) {
       let contextMenu = doc.getElementById(contextMenuId);
@@ -4212,6 +4296,7 @@ OverflowableToolbar.prototype = {
         this._collapsed.set(child.id, this._target.clientWidth);
         child.setAttribute("overflowedItem", true);
         child.setAttribute("cui-anchorid", this._chevron.id);
+        CustomizableUIInternal.ensureButtonContextMenu(child, this._toolbar, gPhotonStructure);
         CustomizableUIInternal.notifyListeners("onWidgetOverflow", child, this._target);
 
         this._list.insertBefore(child, this._list.firstChild);
@@ -4272,6 +4357,7 @@ OverflowableToolbar.prototype = {
       }
       child.removeAttribute("cui-anchorid");
       child.removeAttribute("overflowedItem");
+      CustomizableUIInternal.ensureButtonContextMenu(child, this._target);
       CustomizableUIInternal.notifyListeners("onWidgetUnderflow", child, this._target);
     }
 
@@ -4351,6 +4437,7 @@ OverflowableToolbar.prototype = {
         this._collapsed.set(aNode.id, minSize);
         aNode.setAttribute("cui-anchorid", this._chevron.id);
         aNode.setAttribute("overflowedItem", true);
+        CustomizableUIInternal.ensureButtonContextMenu(aNode, aContainer, gPhotonStructure);
         CustomizableUIInternal.notifyListeners("onWidgetOverflow", aNode, this._target);
       } else if (!nowInBar) {
         // If it is not overflowed and not in the toolbar, and was not overflowed
@@ -4366,6 +4453,7 @@ OverflowableToolbar.prototype = {
       this._collapsed.delete(aNode.id);
       aNode.removeAttribute("cui-anchorid");
       aNode.removeAttribute("overflowedItem");
+      CustomizableUIInternal.ensureButtonContextMenu(aNode, aContainer);
       CustomizableUIInternal.notifyListeners("onWidgetUnderflow", aNode, this._target);
 
       if (!this._collapsed.size) {

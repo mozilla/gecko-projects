@@ -340,10 +340,12 @@ nsContainerFrame::GetChildLists(nsTArray<ChildList>* aLists) const
     } else if (aProp == OverflowContainersProperty()) {
       MOZ_ASSERT(IsFrameOfType(nsIFrame::eCanContainOverflowContainers),
                  "found unexpected OverflowContainersProperty");
+      Unused << this; // silence clang -Wunused-lambda-capture in opt builds
       L(aValue)->AppendIfNonempty(aLists, kOverflowContainersList);
     } else if (aProp == ExcessOverflowContainersProperty()) {
       MOZ_ASSERT(IsFrameOfType(nsIFrame::eCanContainOverflowContainers),
                  "found unexpected ExcessOverflowContainersProperty");
+      Unused << this; // silence clang -Wunused-lambda-capture in opt builds
       L(aValue)->AppendIfNonempty(aLists, kExcessOverflowContainersList);
     } else if (aProp == BackdropProperty()) {
       L(aValue)->AppendIfNonempty(aLists, kBackdropList);
@@ -397,8 +399,9 @@ nsContainerFrame::PeekOffsetNoAmount(bool aForward, int32_t* aOffset)
 }
 
 nsIFrame::FrameSearchResult
-nsContainerFrame::PeekOffsetCharacter(bool aForward, int32_t* aOffset,
-                                      bool aRespectClusters)
+nsContainerFrame::PeekOffsetCharacter(
+                    bool aForward, int32_t* aOffset,
+                    PeekOffsetCharacterOptions aOptions)
 {
   NS_ASSERTION (aOffset && *aOffset <= 1, "aOffset out of range");
   // Don't allow the caret to stay in an empty (leaf) container frame.
@@ -458,7 +461,7 @@ nsContainerFrame::ReparentFrameView(nsIFrame* aChildFrame,
     // typically be the same distance (height wise) from the
     aOldParentFrame = aOldParentFrame->GetParent();
     aNewParentFrame = aNewParentFrame->GetParent();
-    
+
     // We should never walk all the way to the root frame without finding
     // a view
     NS_ASSERTION(aOldParentFrame && aNewParentFrame, "didn't find view");
@@ -482,7 +485,7 @@ nsContainerFrame::ReparentFrameView(nsIFrame* aChildFrame,
   // found a common ancestor.
   nsView* oldParentView = aOldParentFrame->GetClosestView();
   nsView* newParentView = aNewParentFrame->GetClosestView();
-  
+
   // See if the old parent frame and the new parent frame are in the
   // same view sub-hierarchy. If they are then we don't have to do
   // anything
@@ -517,7 +520,7 @@ nsContainerFrame::ReparentFrameViewList(const nsFrameList& aChildFrameList,
     // typically be the same distance (height wise) from the
     aOldParentFrame = aOldParentFrame->GetParent();
     aNewParentFrame = aNewParentFrame->GetParent();
-    
+
     // We should never walk all the way to the root frame without finding
     // a view
     NS_ASSERTION(aOldParentFrame && aNewParentFrame, "didn't find view");
@@ -542,7 +545,7 @@ nsContainerFrame::ReparentFrameViewList(const nsFrameList& aChildFrameList,
   // found a common ancestor.
   nsView* oldParentView = aOldParentFrame->GetClosestView();
   nsView* newParentView = aNewParentFrame->GetClosestView();
-  
+
   // See if the old parent frame and the new parent frame are in the
   // same view sub-hierarchy. If they are then we don't have to do
   // anything
@@ -585,7 +588,7 @@ void
 nsContainerFrame::SyncWindowProperties(nsPresContext*       aPresContext,
                                        nsIFrame*            aFrame,
                                        nsView*              aView,
-                                       nsRenderingContext*  aRC,
+                                       gfxContext*          aRC,
                                        uint32_t             aFlags)
 {
 #ifdef MOZ_XUL
@@ -724,7 +727,7 @@ static nscoord GetCoord(const nsStyleCoord& aCoord, nscoord aIfNotCoord)
 }
 
 void
-nsContainerFrame::DoInlineIntrinsicISize(nsRenderingContext *aRenderingContext,
+nsContainerFrame::DoInlineIntrinsicISize(gfxContext *aRenderingContext,
                                          InlineIntrinsicISizeData *aData,
                                          nsLayoutUtils::IntrinsicISizeType aType)
 {
@@ -821,7 +824,7 @@ nsContainerFrame::DoInlineIntrinsicISize(nsRenderingContext *aRenderingContext,
 
 /* virtual */
 LogicalSize
-nsContainerFrame::ComputeAutoSize(nsRenderingContext* aRenderingContext,
+nsContainerFrame::ComputeAutoSize(gfxContext*         aRenderingContext,
                                   WritingMode         aWM,
                                   const LogicalSize&  aCBSize,
                                   nscoord             aAvailableISize,

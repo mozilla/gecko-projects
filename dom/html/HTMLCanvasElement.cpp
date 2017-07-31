@@ -108,7 +108,7 @@ public:
   {
     MOZ_ASSERT(NS_IsMainThread());
 
-    PROFILER_LABEL("HTMLCanvasElement", "FrameCapture", js::ProfileEntry::Category::OTHER);
+    AUTO_PROFILER_LABEL("RequestedFrameRefreshObserver::WillRefresh", OTHER);
 
     if (!mOwningElement) {
       return;
@@ -130,7 +130,8 @@ public:
 
     RefPtr<SourceSurface> snapshot;
     {
-      PROFILER_LABEL("HTMLCanvasElement", "GetSnapshot", js::ProfileEntry::Category::OTHER);
+      AUTO_PROFILER_LABEL(
+        "RequestedFrameRefreshObserver::WillRefresh:GetSnapshot", OTHER);
       snapshot = mOwningElement->GetSurfaceSnapshot(nullptr);
       if (!snapshot) {
         return;
@@ -139,7 +140,8 @@ public:
 
     RefPtr<DataSourceSurface> copy;
     {
-      PROFILER_LABEL("HTMLCanvasElement", "CopySnapshot", js::ProfileEntry::Category::OTHER);
+      AUTO_PROFILER_LABEL(
+        "RequestedFrameRefreshObserver::WillRefresh:CopySurface", OTHER);
       copy = CopySurface(snapshot);
       if (!copy) {
         return;
@@ -147,7 +149,8 @@ public:
     }
 
     {
-      PROFILER_LABEL("HTMLCanvasElement", "SetFrame", js::ProfileEntry::Category::OTHER);
+      AUTO_PROFILER_LABEL(
+        "RequestedFrameRefreshObserver::WillRefresh:SetFrame", OTHER);
       mOwningElement->SetFrameCapture(copy.forget(), aTime);
       mOwningElement->MarkContextCleanForFrameCapture();
     }
@@ -241,8 +244,10 @@ HTMLCanvasPrintState::Done()
     if (mCanvas) {
       mCanvas->InvalidateCanvas();
     }
-    RefPtr<nsRunnableMethod<HTMLCanvasPrintState> > doneEvent =
-      NewRunnableMethod(this, &HTMLCanvasPrintState::NotifyDone);
+    RefPtr<nsRunnableMethod<HTMLCanvasPrintState>> doneEvent =
+      NewRunnableMethod("dom::HTMLCanvasPrintState::NotifyDone",
+                        this,
+                        &HTMLCanvasPrintState::NotifyDone);
     if (NS_SUCCEEDED(NS_DispatchToCurrentThread(doneEvent))) {
       mPendingNotify = true;
     }
@@ -461,38 +466,37 @@ NS_IMPL_UINT_ATTR_DEFAULT_VALUE(HTMLCanvasElement, Height, height, DEFAULT_CANVA
 NS_IMPL_BOOL_ATTR(HTMLCanvasElement, MozOpaque, moz_opaque)
 
 nsresult
-HTMLCanvasElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                           nsIAtom* aPrefix, const nsAString& aValue,
-                           bool aNotify)
+HTMLCanvasElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
+                                const nsAttrValue* aValue,
+                                const nsAttrValue* aOldValue, bool aNotify)
 {
-  nsresult rv = nsGenericHTMLElement::SetAttr(aNameSpaceID, aName, aPrefix, aValue,
-                                              aNotify);
-  if (NS_SUCCEEDED(rv) && mCurrentContext &&
-      aNameSpaceID == kNameSpaceID_None &&
-      (aName == nsGkAtoms::width || aName == nsGkAtoms::height || aName == nsGkAtoms::moz_opaque))
-  {
-    ErrorResult dummy;
-    rv = UpdateContext(nullptr, JS::NullHandleValue, dummy);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
+  AfterMaybeChangeAttr(aNamespaceID, aName, aNotify);
 
-  return rv;
+  return nsGenericHTMLElement::AfterSetAttr(aNamespaceID, aName, aValue,
+                                            aOldValue, aNotify);
 }
 
 nsresult
-HTMLCanvasElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                             bool aNotify)
+HTMLCanvasElement::OnAttrSetButNotChanged(int32_t aNamespaceID, nsIAtom* aName,
+                                          const nsAttrValueOrString& aValue,
+                                          bool aNotify)
 {
-  nsresult rv = nsGenericHTMLElement::UnsetAttr(aNameSpaceID, aName, aNotify);
-  if (NS_SUCCEEDED(rv) && mCurrentContext &&
-      aNameSpaceID == kNameSpaceID_None &&
-      (aName == nsGkAtoms::width || aName == nsGkAtoms::height || aName == nsGkAtoms::moz_opaque))
-  {
+  AfterMaybeChangeAttr(aNamespaceID, aName, aNotify);
+
+  return nsGenericHTMLElement::OnAttrSetButNotChanged(aNamespaceID, aName,
+                                                      aValue, aNotify);
+}
+
+void
+HTMLCanvasElement::AfterMaybeChangeAttr(int32_t aNamespaceID, nsIAtom* aName,
+                                        bool aNotify)
+{
+  if (mCurrentContext && aNamespaceID == kNameSpaceID_None &&
+      (aName == nsGkAtoms::width || aName == nsGkAtoms::height ||
+       aName == nsGkAtoms::moz_opaque)) {
     ErrorResult dummy;
-    rv = UpdateContext(nullptr, JS::NullHandleValue, dummy);
-    NS_ENSURE_SUCCESS(rv, rv);
+    UpdateContext(nullptr, JS::NullHandleValue, dummy);
   }
-  return rv;
 }
 
 void
@@ -522,11 +526,11 @@ HTMLCanvasElement::DispatchPrintCallback(nsITimerCallback* aCallback)
   }
   mPrintState = new HTMLCanvasPrintState(this, mCurrentContext, aCallback);
 
-  RefPtr<nsRunnableMethod<HTMLCanvasElement> > renderEvent =
-    NewRunnableMethod(this, &HTMLCanvasElement::CallPrintCallback);
-  return OwnerDoc()->Dispatch("HTMLCanvasElement::CallPrintCallback",
-                              TaskCategory::Other,
-                              renderEvent.forget());
+  RefPtr<nsRunnableMethod<HTMLCanvasElement>> renderEvent =
+    NewRunnableMethod("dom::HTMLCanvasElement::CallPrintCallback",
+                      this,
+                      &HTMLCanvasElement::CallPrintCallback);
+  return OwnerDoc()->Dispatch(TaskCategory::Other, renderEvent.forget());
 }
 
 void
@@ -845,13 +849,15 @@ HTMLCanvasElement::ToBlob(JSContext* aCx,
     // According to spec, blob should return null if either its horizontal
     // dimension or its vertical dimension is zero. See link below.
     // https://html.spec.whatwg.org/multipage/scripting.html#dom-canvas-toblob
-    OwnerDoc()->Dispatch("FireNullBlobEvent",
-                  TaskCategory::Other,
-                  NewRunnableMethod<Blob*, const char*>(
-                          &aCallback,
-                          static_cast<void(BlobCallback::*)(
-                            Blob*, const char*)>(&BlobCallback::Call),
-                          nullptr, nullptr));
+    OwnerDoc()->Dispatch(
+      TaskCategory::Other,
+      NewRunnableMethod<Blob*, const char*>(
+        "dom::HTMLCanvasElement::ToBlob",
+        &aCallback,
+        static_cast<void (BlobCallback::*)(Blob*, const char*)>(
+          &BlobCallback::Call),
+        nullptr,
+        nullptr));
     return;
   }
 
@@ -1354,7 +1360,8 @@ HTMLCanvasElement::OnVisibilityChange()
     {
     public:
       explicit Runnable(AsyncCanvasRenderer* aRenderer)
-        : mRenderer(aRenderer)
+        : mozilla::CancelableRunnable("Runnable")
+        , mRenderer(aRenderer)
       {}
 
       NS_IMETHOD Run() override
@@ -1366,19 +1373,14 @@ HTMLCanvasElement::OnVisibilityChange()
         return NS_OK;
       }
 
-      void Revoke()
-      {
-        mRenderer = nullptr;
-      }
-
     private:
       RefPtr<AsyncCanvasRenderer> mRenderer;
     };
 
     RefPtr<nsIRunnable> runnable = new Runnable(mAsyncCanvasRenderer);
-    nsCOMPtr<nsIThread> activeThread = mAsyncCanvasRenderer->GetActiveThread();
-    if (activeThread) {
-      activeThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
+    nsCOMPtr<nsIEventTarget> activeTarget = mAsyncCanvasRenderer->GetActiveEventTarget();
+    if (activeTarget) {
+      activeTarget->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
     }
     return;
   }
@@ -1396,7 +1398,8 @@ HTMLCanvasElement::OnMemoryPressure()
     {
     public:
       explicit Runnable(AsyncCanvasRenderer* aRenderer)
-        : mRenderer(aRenderer)
+        : mozilla::CancelableRunnable("Runnable")
+        , mRenderer(aRenderer)
       {}
 
       NS_IMETHOD Run() override
@@ -1408,19 +1411,14 @@ HTMLCanvasElement::OnMemoryPressure()
         return NS_OK;
       }
 
-      void Revoke()
-      {
-        mRenderer = nullptr;
-      }
-
     private:
       RefPtr<AsyncCanvasRenderer> mRenderer;
     };
 
     RefPtr<nsIRunnable> runnable = new Runnable(mAsyncCanvasRenderer);
-    nsCOMPtr<nsIThread> activeThread = mAsyncCanvasRenderer->GetActiveThread();
-    if (activeThread) {
-      activeThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
+    nsCOMPtr<nsIEventTarget> activeTarget = mAsyncCanvasRenderer->GetActiveEventTarget();
+    if (activeTarget) {
+      activeTarget->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
     }
     return;
   }

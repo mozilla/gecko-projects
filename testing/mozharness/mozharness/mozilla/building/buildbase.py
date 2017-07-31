@@ -349,10 +349,8 @@ class BuildOptionParser(object):
         'fuzzing-asan-tc': 'builds/releng_sub_%s_configs/%s_fuzzing_asan_tc.py',
         'tsan': 'builds/releng_sub_%s_configs/%s_tsan.py',
         'cross-debug': 'builds/releng_sub_%s_configs/%s_cross_debug.py',
-        'cross-debug-st-an': 'builds/releng_sub_%s_configs/%s_cross_debug_st_an.py',
         'cross-debug-artifact': 'builds/releng_sub_%s_configs/%s_cross_debug_artifact.py',
         'cross-noopt-debug': 'builds/releng_sub_%s_configs/%s_cross_noopt_debug.py',
-        'cross-opt-st-an': 'builds/releng_sub_%s_configs/%s_cross_opt_st_an.py',
         'cross-artifact': 'builds/releng_sub_%s_configs/%s_cross_artifact.py',
         'debug': 'builds/releng_sub_%s_configs/%s_debug.py',
         'asan-and-debug': 'builds/releng_sub_%s_configs/%s_asan_and_debug.py',
@@ -384,6 +382,7 @@ class BuildOptionParser(object):
         'artifact': 'builds/releng_sub_%s_configs/%s_artifact.py',
         'debug-artifact': 'builds/releng_sub_%s_configs/%s_debug_artifact.py',
         'devedition': 'builds/releng_sub_%s_configs/%s_devedition.py',
+        'dmd': 'builds/releng_sub_%s_configs/%s_dmd.py',
     }
     build_pool_cfg_file = 'builds/build_pool_specifics.py'
     branch_cfg_file = 'builds/branch_specifics.py'
@@ -796,23 +795,22 @@ or run without that action (ie: --no-{action})"
             return self.buildid
 
         buildid = None
-        if c.get("is_automation"):
-            if self.buildbot_config['properties'].get('buildid'):
-                self.info("Determining buildid from buildbot properties")
-                buildid = self.buildbot_config['properties']['buildid'].encode(
-                    'ascii', 'replace'
-                )
-            else:
-                # for taskcluster, there are no buildbot properties, and we pass
-                # MOZ_BUILD_DATE into mozharness as an environment variable, only
-                # to have it pass the same value out with the same name.
-                buildid = os.environ.get('MOZ_BUILD_DATE')
+        if c.get("is_automation") and self.buildbot_config['properties'].get('buildid'):
+            self.info("Determining buildid from buildbot properties")
+            buildid = self.buildbot_config['properties']['buildid'].encode(
+                'ascii', 'replace'
+            )
+        else:
+            # for taskcluster, there are no buildbot properties, and we pass
+            # MOZ_BUILD_DATE into mozharness as an environment variable, only
+            # to have it pass the same value out with the same name.
+            buildid = os.environ.get('MOZ_BUILD_DATE')
 
         if not buildid:
             self.info("Creating buildid through current time")
             buildid = generate_build_ID()
 
-        if c.get('is_automation'):
+        if c.get('is_automation') or os.environ.get("TASK_ID"):
             self.set_buildbot_property('buildid',
                                        buildid,
                                        write_to_file=True)
@@ -1133,6 +1131,8 @@ or run without that action (ie: --no-{action})"
             '--retry', '4',
             '--tooltool-manifest',
             tooltool_manifest_path,
+            '--artifact-manifest',
+            os.path.join(dirs['abs_src_dir'], 'toolchains.json'),
             '--tooltool-url',
             c['tooltool_url'],
         ]
@@ -1142,6 +1142,9 @@ or run without that action (ie: --no-{action})"
         cache = c['env'].get('TOOLTOOL_CACHE')
         if cache:
             cmd.extend(['--cache-dir', cache])
+        toolchains = os.environ.get('MOZ_TOOLCHAINS')
+        if toolchains:
+            cmd.extend(toolchains.split())
         self.info(str(cmd))
         self.run_command_m(cmd, cwd=dirs['abs_src_dir'], halt_on_failure=True,
                            env=env)
@@ -1386,6 +1389,7 @@ or run without that action (ie: --no-{action})"
             'project': self.buildbot_config['properties']['branch'],
             'head_rev': revision,
             'pushdate': pushdate,
+            'pushid': pushinfo.pushid,
             'year': pushdate[0:4],
             'month': pushdate[4:6],
             'day': pushdate[6:8],
@@ -1623,6 +1627,8 @@ or run without that action (ie: --no-{action})"
                 os.path.join(dirs['abs_work_dir'], 'buildprops.json'))
 
         if 'MOZILLABUILD' in os.environ:
+            # We found many issues with intermittent build failures when not invoking mach via bash.
+            # See bug 1364651 before considering changing.
             mach = [
                 os.path.join(os.environ['MOZILLABUILD'], 'msys', 'bin', 'bash.exe'),
                 os.path.join(dirs['abs_src_dir'], 'mach')
@@ -1849,6 +1855,38 @@ or run without that action (ie: --no-{action})"
             self.error("'mach build check' did not run successfully. Please "
                        "check log for errors.")
 
+    def _is_configuration_shipped(self):
+        """Determine if the current build configuration is shipped to users.
+
+        This is used to drive alerting so we don't see alerts for build
+        configurations we care less about.
+        """
+        # Ideally this would be driven by a config option. However, our
+        # current inheritance mechanism of using a base config and then
+        # one-off configs for variants isn't conducive to this since derived
+        # configs we need to be reset and we don't like requiring boilerplate
+        # in derived configs.
+
+        # All PGO builds are shipped. This takes care of Linux and Windows.
+        if self.config.get('pgo_build'):
+            return True
+
+        # Debug builds are never shipped.
+        if self.config.get('debug_build'):
+            return False
+
+        # OS X opt builds without a variant are shipped.
+        if self.config.get('platform') == 'macosx64':
+            if not self.config.get('build_variant'):
+                return True
+
+        # Android opt builds without a variant are shipped.
+        if self.config.get('platform') == 'android':
+            if not self.config.get('build_variant'):
+                return True
+
+        return False
+
     def _load_build_resources(self):
         p = self.config.get('build_resources_path') % self.query_abs_dirs()
         if not os.path.exists(p):
@@ -1987,21 +2025,30 @@ or run without that action (ie: --no-{action})"
         if not installer_size and not size_measurements:
             return
 
+        # We want to always collect metrics. But alerts for installer size are
+        # only use for builds with ship. So nix the alerts for builds we don't
+        # ship.
+        def filter_alert(alert):
+            if not self._is_configuration_shipped():
+                alert['shouldAlert'] = False
+
+            return alert
+
         if installer.endswith('.apk'): # Android
-            yield {
+            yield filter_alert({
                 "name": "installer size",
                 "value": installer_size,
                 "alertChangeType": "absolute",
                 "alertThreshold": (200 * 1024),
                 "subtests": size_measurements
-            }
+            })
         else:
-            yield {
+            yield filter_alert({
                 "name": "installer size",
                 "value": installer_size,
                 "alertThreshold": 1.0,
                 "subtests": size_measurements
-            }
+            })
 
     def _generate_build_stats(self):
         """grab build stats following a compile.
@@ -2061,6 +2108,11 @@ or run without that action (ie: --no-{action})"
 
         # Ensure all extra options for this configuration are present.
         for opt in self.config.get('perfherder_extra_options', []):
+            for suite in perfherder_data['suites']:
+                if opt not in suite.get('extraOptions', []):
+                    suite.setdefault('extraOptions', []).append(opt)
+
+        for opt in os.environ.get('PERFHERDER_EXTRA_OPTIONS', '').split():
             for suite in perfherder_data['suites']:
                 if opt not in suite.get('extraOptions', []):
                     suite.setdefault('extraOptions', []).append(opt)

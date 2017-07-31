@@ -139,11 +139,13 @@ Control.prototype = {
   update() {
     this.ctrl.textContent = this._label;
 
+    this.msg.textContent = "";
     if (this._message) {
-      this.msg.innerHTML =
-        `<span class="info-label">${this._messageHeader}:</span> ${this._message}`;
-    } else {
-      this.msg.innerHTML = null;
+      this.msg.appendChild(Object.assign(document.createElement("span"), {
+        className: "info-label",
+        textContent: `${this._messageHeader}: `,
+      }));
+      this.msg.appendChild(document.createTextNode(this._message));
     }
   },
 
@@ -305,7 +307,7 @@ var AboutWebRTC = {
       msg.textContent = getString("cannot_retrieve_log");
       parent.appendChild(msg);
       msg = document.createElement("p");
-      msg.innerHTML = `${data.error.name}: ${data.error.message}`;
+      msg.textContent = `${data.error.name}: ${data.error.message}`;
       parent.appendChild(msg);
       return;
     }
@@ -661,13 +663,16 @@ ICEStats.prototype = {
         stat.state || "",
         stat.priority || "",
         stat.nominated || "",
-        stat.selected || ""
+        stat.selected || "",
+        stat.bytesSent || "",
+        stat.bytesReceived || ""
       ]);
     }
 
     let statsTable = new SimpleTable(
       [getString("local_candidate"), getString("remote_candidate"), getString("ice_state"),
-       getString("priority"), getString("nominated"), getString("selected")],
+       getString("priority"), getString("nominated"), getString("selected"),
+       getString("ice_pair_bytes_sent"), getString("ice_pair_bytes_received")],
       tbody);
 
     let div = document.createElement("div");
@@ -725,7 +730,9 @@ ICEStats.prototype = {
           state: pair.state,
           priority: pair.priority,
           nominated: pair.nominated,
-          selected: pair.selected
+          selected: pair.selected,
+          bytesSent: pair.bytesSent,
+          bytesReceived: pair.bytesReceived
         };
         matched[local.id] = true;
 

@@ -87,7 +87,7 @@ XBLEnumerate(JSContext *cx, JS::Handle<JSObject*> obj)
 
 static const JSClassOps gPrototypeJSClassOps = {
     nullptr, nullptr, nullptr, nullptr,
-    XBLEnumerate, nullptr,
+    XBLEnumerate, nullptr, nullptr,
     nullptr, XBLFinalize,
     nullptr, nullptr, nullptr, nullptr
 };
@@ -215,6 +215,7 @@ nsXBLBinding::InstallAnonymousContent(nsIContent* aAnonParent, nsIContent* aElem
       child->SetFlags(NODE_CHROME_ONLY_ACCESS |
                       NODE_IS_ROOT_OF_CHROME_ONLY_ACCESS);
     }
+    child->SetFlags(NODE_IS_ANONYMOUS_ROOT);
     nsresult rv =
       child->BindToTree(doc, aElement, mBoundElement, allowScripts);
     if (NS_FAILED(rv)) {
@@ -223,8 +224,6 @@ nsXBLBinding::InstallAnonymousContent(nsIContent* aAnonParent, nsIContent* aElem
       child->UnbindFromTree();
       return;
     }
-
-    child->SetFlags(NODE_IS_ANONYMOUS_ROOT);
 
 #ifdef MOZ_XUL
     // To make XUL templates work (and other goodies that happen when
@@ -321,9 +320,8 @@ nsXBLBinding::GenerateAnonymousContent()
     nsIDocument* doc = mBoundElement->OwnerDoc();
 
     nsCOMPtr<nsINode> clonedNode;
-    nsCOMArray<nsINode> nodesWithProperties;
-    nsNodeUtils::Clone(content, true, doc->NodeInfoManager(),
-                       nodesWithProperties, getter_AddRefs(clonedNode));
+    nsNodeUtils::Clone(content, true, doc->NodeInfoManager(), nullptr,
+                       getter_AddRefs(clonedNode));
     mContent = clonedNode->AsElement();
 
     // Search for <xbl:children> elements in the XBL content. In the presence
@@ -871,6 +869,12 @@ nsXBLBinding::WalkRules(nsIStyleRuleProcessor::EnumFunc aFunc, void* aData)
     (*aFunc)(rules, aData);
 }
 
+const ServoStyleSet*
+nsXBLBinding::GetServoStyleSet() const
+{
+  return mPrototypeBinding->GetServoStyleSet();
+}
+
 // Internal helper methods ////////////////////////////////////////////////////////////////
 
 // Get or create a WeakMap object on a given XBL-hosting global.
@@ -983,7 +987,7 @@ GetProtoBindingFromClassObject(JSObject* obj)
 nsresult
 nsXBLBinding::DoInitJSClass(JSContext *cx,
                             JS::Handle<JSObject*> obj,
-                            const nsAFlatString& aClassName,
+                            const nsString& aClassName,
                             nsXBLPrototypeBinding* aProtoBinding,
                             JS::MutableHandle<JSObject*> aClassObject,
                             bool* aNew)

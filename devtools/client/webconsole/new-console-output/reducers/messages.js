@@ -27,16 +27,25 @@ const MessageState = Immutable.Record({
   // Map of the form {messageId : tableData}, which represent the data passed
   // as an argument in console.table calls.
   messagesTableDataById: Immutable.Map(),
+  // Map of the form {messageId : {[actor]: properties}}, where `properties` is
+  // a RDP packet containing the properties of the ${actor} grip.
+  // This map is consumed by the ObjectInspector so we only load properties once,
+  // when needed (when an ObjectInspector node is expanded), and then caches them.
+  messagesObjectPropertiesById: Immutable.Map(),
   // Map of the form {groupMessageId : groupArray},
   // where groupArray is the list of of all the parent groups' ids of the groupMessageId.
   groupsById: Immutable.Map(),
   // Message id of the current group (no corresponding console.groupEnd yet).
   currentGroup: null,
-  // List of removed messages is used to release related (parameters) actors.
+  // Array of removed actors (i.e. actors logged in removed messages) we keep track of
+  // in order to properly release them.
   // This array is not supposed to be consumed by any UI component.
-  removedMessages: [],
+  removedActors: [],
   // Map of the form {messageId : numberOfRepeat}
-  repeatById: {}
+  repeatById: {},
+  // Map of the form {messageId : networkInformation}
+  // `networkInformation` holds request, response, totalTime, ...
+  networkMessagesUpdateById: {},
 });
 
 function messages(state = new MessageState(), action, filtersState, prefsState) {
@@ -44,6 +53,8 @@ function messages(state = new MessageState(), action, filtersState, prefsState) 
     messagesById,
     messagesUiById,
     messagesTableDataById,
+    messagesObjectPropertiesById,
+    networkMessagesUpdateById,
     groupsById,
     currentGroup,
     repeatById,
@@ -84,10 +95,10 @@ function messages(state = new MessageState(), action, filtersState, prefsState) 
       return state.withMutations(function (record) {
         // Add the new message with a reference to the parent group.
         let parentGroups = getParentGroups(currentGroup, groupsById);
-        const addedMessage = newMessage.withMutations(function (message) {
-          message.set("groupId", currentGroup);
-          message.set("indent", parentGroups.length);
-        });
+        newMessage.groupId = currentGroup;
+        newMessage.indent = parentGroups.length;
+
+        const addedMessage = Object.freeze(newMessage);
         record.set(
           "messagesById",
           messagesById.set(newMessage.id, addedMessage)
@@ -119,13 +130,10 @@ function messages(state = new MessageState(), action, filtersState, prefsState) 
 
     case constants.MESSAGES_CLEAR:
       return new MessageState({
-        // Store all removed messages associated with some arguments.
-        // This array is used by `releaseActorsEnhancer` to release
-        // all related backend actors.
-        "removedMessages": [...state.messagesById].reduce((res, [id, msg]) => {
-          if (msg.parameters) {
-            res.push(msg);
-          }
+        // Store all actors from removed messages. This array is used by
+        // `releaseActorsEnhancer` to release all of those backend actors.
+        "removedActors": [...state.messagesById].reduce((res, [id, msg]) => {
+          res.push(...getAllActorsInMessage(msg, state));
           return res;
         }, [])
       });
@@ -188,15 +196,28 @@ function messages(state = new MessageState(), action, filtersState, prefsState) 
     case constants.MESSAGE_TABLE_RECEIVE:
       const {id, data} = action;
       return state.set("messagesTableDataById", messagesTableDataById.set(id, data));
-    case constants.NETWORK_MESSAGE_UPDATE:
-      let updateMessage = action.message;
-      return state.set("messagesById", messagesById.set(
-        updateMessage.id,
-        updateMessage
-      ));
 
-    case constants.REMOVED_MESSAGES_CLEAR:
-      return state.set("removedMessages", []);
+    case constants.MESSAGE_OBJECT_PROPERTIES_RECEIVE:
+      return state.set(
+        "messagesObjectPropertiesById",
+        messagesObjectPropertiesById.set(
+          action.id,
+          Object.assign({
+            [action.actor]: action.properties
+          }, messagesObjectPropertiesById.get(action.id))
+        )
+      );
+
+    case constants.NETWORK_MESSAGE_UPDATE:
+      return state.set(
+        "networkMessagesUpdateById",
+        Object.assign({}, networkMessagesUpdateById, {
+          [action.message.id]: action.message
+        })
+      );
+
+    case constants.REMOVED_ACTORS_CLEAR:
+      return state.set("removedActors", []);
 
     case constants.FILTER_TOGGLE:
     case constants.FILTER_TEXT_SET:
@@ -258,7 +279,7 @@ function limitTopLevelMessageCount(state, record, logLimit) {
   }
 
   const removedMessagesId = [];
-  const removedMessages = [];
+  const removedActors = [];
   let visibleMessages = [...record.visibleMessages];
 
   let cleaningGroup = false;
@@ -286,12 +307,7 @@ function limitTopLevelMessageCount(state, record, logLimit) {
     }
 
     removedMessagesId.push(id);
-
-    // Filter out messages with no arguments. Only actual arguments
-    // can be associated with backend actors.
-    if (message && message.parameters) {
-      removedMessages.push(message);
-    }
+    removedActors.push(...getAllActorsInMessage(message, record));
 
     const index = visibleMessages.indexOf(id);
     if (index > -1) {
@@ -301,8 +317,8 @@ function limitTopLevelMessageCount(state, record, logLimit) {
     return true;
   });
 
-  if (removedMessages.length > 0) {
-    record.set("removedMessages", record.removedMessages.concat(removedMessages));
+  if (removedActors.length > 0) {
+    record.set("removedActors", record.removedActors.concat(removedActors));
   }
 
   if (record.visibleMessages.length > visibleMessages.length) {
@@ -311,12 +327,23 @@ function limitTopLevelMessageCount(state, record, logLimit) {
 
   const isInRemovedId = id => removedMessagesId.includes(id);
   const mapHasRemovedIdKey = map => map.findKey((value, id) => isInRemovedId(id));
+  const objectHasRemovedIdKey = obj => Object.keys(obj).findIndex(isInRemovedId) !== -1;
   const cleanUpCollection = map => removedMessagesId.forEach(id => map.remove(id));
+  const cleanUpList = list => list.filter(id => {
+    return isInRemovedId(id) === false;
+  });
+  const cleanUpObject = object => [...Object.entries(object)]
+    .reduce((res, [id, value]) => {
+      if (!isInRemovedId(id)) {
+        res[id] = value;
+      }
+      return res;
+    }, {});
 
   record.set("messagesById", record.messagesById.withMutations(cleanUpCollection));
 
   if (record.messagesUiById.find(isInRemovedId)) {
-    record.set("messagesUiById", record.messagesUiById.withMutations(cleanUpCollection));
+    record.set("messagesUiById", cleanUpList(record.messagesUiById));
   }
   if (mapHasRemovedIdKey(record.messagesTableDataById)) {
     record.set("messagesTableDataById",
@@ -325,19 +352,50 @@ function limitTopLevelMessageCount(state, record, logLimit) {
   if (mapHasRemovedIdKey(record.groupsById)) {
     record.set("groupsById", record.groupsById.withMutations(cleanUpCollection));
   }
+  if (mapHasRemovedIdKey(record.messagesObjectPropertiesById)) {
+    record.set("messagesObjectPropertiesById",
+      record.messagesObjectPropertiesById.withMutations(cleanUpCollection));
+  }
+  if (objectHasRemovedIdKey(record.repeatById)) {
+    record.set("repeatById", cleanUpObject(record.repeatById));
+  }
 
-  if (Object.keys(record.repeatById).includes(removedMessagesId)) {
-    record.set("repeatById",
-      [...Object.entries(record.repeatById)].reduce((res, [id, repeat]) => {
-        if (!isInRemovedId(id)) {
-          res[id] = repeat;
-        }
-        return res;
-      }, {})
-    );
+  if (objectHasRemovedIdKey(record.networkMessagesUpdateById)) {
+    record.set("networkMessagesUpdateById",
+      cleanUpObject(record.networkMessagesUpdateById));
   }
 
   return record;
+}
+
+/**
+ * Get an array of all the actors logged in a specific message.
+ * This could be directly the actors representing the arguments of a console.log call
+ * as well as all the properties that where expanded using the object inspector.
+ *
+ * @param {Message} message: The message to get actors from.
+ * @param {Record} state: The redux state.
+ * @return {Array} An array containing all the actors logged in a message.
+ */
+function getAllActorsInMessage(message, state) {
+  // Messages without argument cannot be associated with backend actors.
+  if (!message || !Array.isArray(message.parameters) || message.parameters.length === 0) {
+    return [];
+  }
+
+  const actors = [...message.parameters.reduce((res, parameter) => {
+    if (parameter.actor) {
+      res.push(parameter.actor);
+    }
+    return res;
+  }, [])];
+
+  const loadedProperties = state.messagesObjectPropertiesById.get(message.id);
+  if (loadedProperties) {
+    actors.push(...Object.keys(loadedProperties));
+  }
+
+  return actors;
 }
 
 /**

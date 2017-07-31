@@ -10,6 +10,7 @@ ${helpers.predefined_type("line-height",
                           "LineHeight",
                           "computed::LineHeight::normal()",
                           animation_value_type="ComputedValue",
+                          flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
                           spec="https://drafts.csswg.org/css2/visudet.html#propdef-line-height")}
 
 // CSS Text Module Level 3
@@ -18,18 +19,21 @@ ${helpers.predefined_type("line-height",
 ${helpers.single_keyword("text-transform",
                          "none capitalize uppercase lowercase",
                          extra_gecko_values="full-width",
-                         animation_value_type="none",
+                         animation_value_type="discrete",
+                         flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
                          spec="https://drafts.csswg.org/css-text/#propdef-text-transform")}
 
 ${helpers.single_keyword("hyphens", "manual none auto",
                          gecko_enum_prefix="StyleHyphens",
-                         products="gecko", animation_value_type="none", extra_prefixes="moz",
+                         gecko_inexhaustive=True,
+                         products="gecko", animation_value_type="discrete", extra_prefixes="moz",
                          spec="https://drafts.csswg.org/css-text/#propdef-hyphens")}
 
 // TODO: Support <percentage>
 ${helpers.single_keyword("-moz-text-size-adjust", "auto none",
                          gecko_constant_prefix="NS_STYLE_TEXT_SIZE_ADJUST",
-                         products="gecko", animation_value_type="none",
+                         gecko_ffi_name="mTextSizeAdjust",
+                         products="gecko", animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-size-adjust/#adjustment-control",
                          alias="-webkit-text-size-adjust")}
 
@@ -45,7 +49,7 @@ ${helpers.predefined_type("text-indent",
 ${helpers.single_keyword("overflow-wrap",
                          "normal break-word",
                          gecko_constant_prefix="NS_STYLE_OVERFLOWWRAP",
-                         animation_value_type="none",
+                         animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-text/#propdef-overflow-wrap",
                          alias="word-wrap")}
 
@@ -53,7 +57,7 @@ ${helpers.single_keyword("overflow-wrap",
 ${helpers.single_keyword("word-break",
                          "normal break-all keep-all",
                          gecko_constant_prefix="NS_STYLE_WORDBREAK",
-                         animation_value_type="none",
+                         animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-text/#propdef-word-break")}
 
 // TODO(pcwalton): Support `text-justify: distribute`.
@@ -62,7 +66,9 @@ ${helpers.single_keyword("word-break",
                                   extra_gecko_values="inter-character"
                                   extra_specified="${'distribute' if product == 'gecko' else ''}"
                                   gecko_enum_prefix="StyleTextJustify"
-                                  animation_value_type="none"
+                                  gecko_inexhaustive="True"
+                                  animation_value_type="discrete"
+                                  flags="APPLIES_TO_PLACEHOLDER",
                                   spec="https://drafts.csswg.org/css-text/#propdef-text-justify">
     no_viewport_percentage!(SpecifiedValue);
 
@@ -101,11 +107,12 @@ ${helpers.single_keyword("text-align-last",
                          "auto start end left right center justify",
                          products="gecko",
                          gecko_constant_prefix="NS_STYLE_TEXT_ALIGN",
-                         animation_value_type="none",
+                         animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-text/#propdef-text-align-last")}
 
 // TODO make this a shorthand and implement text-align-last/text-align-all
-<%helpers:longhand name="text-align" animation_value_type="none" need_clone="True"
+<%helpers:longhand name="text-align" animation_value_type="discrete"
+                   flags="APPLIES_TO_PLACEHOLDER"
                    spec="https://drafts.csswg.org/css-text/#propdef-text-align">
     no_viewport_percentage!(SpecifiedValue);
     pub mod computed_value {
@@ -176,7 +183,8 @@ ${helpers.single_keyword("text-align-last",
             MatchParent,
             MozCenterOrInherit,
         }
-        pub fn parse(_context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+        pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
+                             -> Result<SpecifiedValue, ParseError<'i>> {
             // MozCenterOrInherit cannot be parsed, only set directly on th elements
             if let Ok(key) = input.try(computed_value::T::parse) {
                 Ok(SpecifiedValue::Keyword(key))
@@ -222,8 +230,8 @@ ${helpers.single_keyword("text-align-last",
                         if context.is_root_element {
                             return get_initial_value();
                         }
-                        let parent = context.inherited_style().get_inheritedtext().clone_text_align();
-                        let ltr = context.inherited_style().writing_mode.is_bidi_ltr();
+                        let parent = context.builder.get_parent_inheritedtext().clone_text_align();
+                        let ltr = context.builder.inherited_writing_mode().is_bidi_ltr();
                         match (parent, ltr) {
                             (computed_value::T::start, true) => computed_value::T::left,
                             (computed_value::T::start, false) => computed_value::T::right,
@@ -233,7 +241,7 @@ ${helpers.single_keyword("text-align-last",
                         }
                     }
                     SpecifiedValue::MozCenterOrInherit => {
-                        let parent = context.inherited_style().get_inheritedtext().clone_text_align();
+                        let parent = context.builder.get_parent_inheritedtext().clone_text_align();
                         if parent == computed_value::T::start {
                             computed_value::T::center
                         } else {
@@ -252,7 +260,8 @@ ${helpers.single_keyword("text-align-last",
         use values::computed::ComputedValueAsSpecified;
         impl ComputedValueAsSpecified for SpecifiedValue {}
         pub use self::computed_value::T as SpecifiedValue;
-        pub fn parse(_context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+        pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
+                             -> Result<SpecifiedValue, ParseError<'i>> {
             computed_value::T::parse(input)
         }
     % endif
@@ -262,12 +271,14 @@ ${helpers.predefined_type("letter-spacing",
                           "LetterSpacing",
                           "computed::LetterSpacing::normal()",
                           animation_value_type="ComputedValue",
+                          flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
                           spec="https://drafts.csswg.org/css-text/#propdef-letter-spacing")}
 
 ${helpers.predefined_type("word-spacing",
                           "WordSpacing",
                           "computed::WordSpacing::normal()",
                           animation_value_type="ComputedValue",
+                          flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
                           spec="https://drafts.csswg.org/css-text/#propdef-word-spacing")}
 
 <%helpers:longhand name="-servo-text-decorations-in-effect"
@@ -329,7 +340,7 @@ ${helpers.predefined_type("word-spacing",
                 overline: None,
                 line_through: None,
             },
-            _ => context.inherited_style().get_inheritedtext().clone__servo_text_decorations_in_effect()
+            _ => context.builder.get_parent_inheritedtext().clone__servo_text_decorations_in_effect()
         };
 
         result.underline = maybe(context.style().get_text().has_underline()
@@ -345,13 +356,13 @@ ${helpers.predefined_type("word-spacing",
     #[inline]
     pub fn derive_from_text_decoration(context: &mut Context) {
         let derived = derive(context);
-        context.mutate_style().mutate_inheritedtext().set__servo_text_decorations_in_effect(derived);
+        context.builder.set__servo_text_decorations_in_effect(derived);
     }
 
     #[inline]
     pub fn derive_from_display(context: &mut Context) {
         let derived = derive(context);
-        context.mutate_style().mutate_inheritedtext().set__servo_text_decorations_in_effect(derived);
+        context.builder.set__servo_text_decorations_in_effect(derived);
     }
 </%helpers:longhand>
 
@@ -360,7 +371,11 @@ ${helpers.predefined_type("word-spacing",
                                   extra_gecko_values="-moz-pre-space"
                                   gecko_enum_prefix="StyleWhiteSpace"
                                   needs_conversion="True"
-                                  animation_value_type="none"
+                                  gecko_inexhaustive="True"
+                                  animation_value_type="discrete"
+                                  // Only allowed for UA sheets, which set it
+                                  // !important.
+                                  flags="APPLIES_TO_PLACEHOLDER"
                                   spec="https://drafts.csswg.org/css-text/#propdef-white-space">
     use values::computed::ComputedValueAsSpecified;
     impl ComputedValueAsSpecified for SpecifiedValue {}
@@ -401,152 +416,19 @@ ${helpers.predefined_type("word-spacing",
     % endif
 </%helpers:single_keyword_computed>
 
-<%helpers:longhand name="text-shadow"
-                   animation_value_type="IntermediateTextShadowList",
-                   ignored_when_colors_disabled="True",
-                   spec="https://drafts.csswg.org/css-text-decor/#propdef-text-shadow">
-    use cssparser;
-    use std::fmt;
-    use style_traits::ToCss;
-    use values::specified::Shadow;
+${helpers.predefined_type(
+    "text-shadow",
+    "SimpleShadow",
+    None,
+    vector=True,
+    animation_value_type="AnimatedTextShadowList",
+    ignored_when_colors_disabled=True,
+    flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
+    spec="https://drafts.csswg.org/css-text-decor-3/#text-shadow-property",
+)}
 
-    #[derive(Clone, Debug, HasViewportPercentage, PartialEq)]
-    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-    pub struct SpecifiedValue(Vec<SpecifiedTextShadow>);
-
-    #[derive(Clone, Debug, HasViewportPercentage, PartialEq)]
-    #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-    pub struct SpecifiedTextShadow {
-        pub offset_x: specified::Length,
-        pub offset_y: specified::Length,
-        pub blur_radius: specified::Length,
-        pub color: Option<specified::CSSColor>,
-    }
-
-    impl From<Shadow> for SpecifiedTextShadow {
-        fn from(shadow: Shadow) -> SpecifiedTextShadow {
-            SpecifiedTextShadow {
-                offset_x: shadow.offset_x,
-                offset_y: shadow.offset_y,
-                blur_radius: shadow.blur_radius,
-                color: shadow.color,
-            }
-        }
-    }
-
-    pub mod computed_value {
-        use app_units::Au;
-        use cssparser::Color;
-        use smallvec::SmallVec;
-
-        #[derive(Clone, PartialEq, Debug)]
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-        pub struct T(pub SmallVec<[TextShadow; 1]>);
-
-        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-        #[derive(Clone, PartialEq, Debug, ToCss)]
-        pub struct TextShadow {
-            pub offset_x: Au,
-            pub offset_y: Au,
-            pub blur_radius: Au,
-            pub color: Color,
-        }
-    }
-
-    impl ToCss for computed_value::T {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            let mut iter = self.0.iter();
-            match iter.next() {
-                Some(shadow) => shadow.to_css(dest)?,
-                None => return dest.write_str("none"),
-            }
-            for shadow in iter {
-                dest.write_str(", ")?;
-                shadow.to_css(dest)?;
-            }
-            Ok(())
-        }
-    }
-
-    impl ToCss for SpecifiedValue {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            let mut iter = self.0.iter();
-            match iter.next() {
-                Some(shadow) => shadow.to_css(dest)?,
-                None => return dest.write_str("none"),
-            }
-            for shadow in iter {
-                dest.write_str(", ")?;
-                shadow.to_css(dest)?;
-            }
-            Ok(())
-        }
-    }
-
-    impl ToCss for SpecifiedTextShadow {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            self.offset_x.to_css(dest)?;
-            dest.write_str(" ")?;
-            self.offset_y.to_css(dest)?;
-            dest.write_str(" ")?;
-            self.blur_radius.to_css(dest)?;
-
-            if let Some(ref color) = self.color {
-                dest.write_str(" ")?;
-                color.to_css(dest)?;
-            }
-            Ok(())
-        }
-    }
-
-    #[inline]
-    pub fn get_initial_value() -> computed_value::T {
-        use smallvec::SmallVec;
-        computed_value::T(SmallVec::new())
-    }
-
-    pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue,()> {
-        if input.try(|input| input.expect_ident_matching("none")).is_ok() {
-            Ok(SpecifiedValue(Vec::new()))
-        } else {
-            input.parse_comma_separated(|i| {
-                Ok(SpecifiedTextShadow::from(Shadow::parse(context, i, true)?))
-            }).map(SpecifiedValue)
-        }
-    }
-
-    impl ToComputedValue for SpecifiedValue {
-        type ComputedValue = computed_value::T;
-
-        fn to_computed_value(&self, context: &Context) -> computed_value::T {
-            computed_value::T(self.0.iter().map(|value| {
-                computed_value::TextShadow {
-                    offset_x: value.offset_x.to_computed_value(context),
-                    offset_y: value.offset_y.to_computed_value(context),
-                    blur_radius: value.blur_radius.to_computed_value(context),
-                    color: value.color
-                                .as_ref()
-                                .map(|color| color.to_computed_value(context))
-                                .unwrap_or(cssparser::Color::CurrentColor),
-                }
-            }).collect())
-        }
-
-        fn from_computed_value(computed: &computed_value::T) -> Self {
-            SpecifiedValue(computed.0.iter().map(|value| {
-                SpecifiedTextShadow {
-                    offset_x: ToComputedValue::from_computed_value(&value.offset_x),
-                    offset_y: ToComputedValue::from_computed_value(&value.offset_y),
-                    blur_radius: ToComputedValue::from_computed_value(&value.blur_radius),
-                    color: Some(ToComputedValue::from_computed_value(&value.color)),
-                }
-            }).collect())
-        }
-    }
-</%helpers:longhand>
-
-<%helpers:longhand name="text-emphasis-style" products="gecko" need_clone="True" boxed="True"
-                   animation_value_type="none"
+<%helpers:longhand name="text-emphasis-style" products="gecko" boxed="True"
+                   animation_value_type="discrete"
                    spec="https://drafts.csswg.org/css-text-decor/#propdef-text-emphasis-style">
     use computed_values::writing_mode::T as writing_mode;
     use std::fmt;
@@ -556,8 +438,8 @@ ${helpers.predefined_type("word-spacing",
     no_viewport_percentage!(SpecifiedValue);
 
     pub mod computed_value {
-        #[derive(Debug, Clone, PartialEq)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+        #[derive(Clone, Debug, PartialEq, ToCss)]
         pub enum T {
             Keyword(KeywordValue),
             None,
@@ -572,31 +454,12 @@ ${helpers.predefined_type("word-spacing",
         }
     }
 
-    #[derive(Debug, Clone, PartialEq)]
     #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+    #[derive(Clone, Debug, PartialEq, ToCss)]
     pub enum SpecifiedValue {
         Keyword(KeywordValue),
         None,
         String(String),
-    }
-
-    impl ToCss for computed_value::T {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            match *self {
-                computed_value::T::Keyword(ref keyword) => keyword.to_css(dest),
-                computed_value::T::None => dest.write_str("none"),
-                computed_value::T::String(ref string) => write!(dest, "\"{}\"", string),
-            }
-        }
-    }
-    impl ToCss for SpecifiedValue {
-        fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-            match *self {
-                SpecifiedValue::Keyword(ref keyword) => keyword.to_css(dest),
-                SpecifiedValue::None => dest.write_str("none"),
-                SpecifiedValue::String(ref string) => write!(dest, "\"{}\"", string),
-            }
-        }
     }
 
     #[derive(Debug, Clone, PartialEq)]
@@ -611,16 +474,16 @@ ${helpers.predefined_type("word-spacing",
         fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
             if let Some(fill) = self.fill() {
                 if fill {
-                    try!(dest.write_str("filled"));
+                    dest.write_str("filled")?;
                 } else {
-                    try!(dest.write_str("open"));
+                    dest.write_str("open")?;
                 }
             }
             if let Some(shape) = self.shape() {
                 if self.fill().is_some() {
-                    try!(dest.write_str(" "));
+                    dest.write_str(" ")?;
                 }
-                try!(shape.to_css(dest));
+                shape.to_css(dest)?;
             }
             Ok(())
         }
@@ -628,11 +491,11 @@ ${helpers.predefined_type("word-spacing",
     impl ToCss for computed_value::KeywordValue {
         fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
             if self.fill {
-                try!(dest.write_str("filled"));
+                dest.write_str("filled")?;
             } else {
-                try!(dest.write_str("open"));
+                dest.write_str("open")?;
             }
-            try!(dest.write_str(" "));
+            dest.write_str(" ")?;
             self.shape.to_css(dest)
         }
     }
@@ -721,14 +584,15 @@ ${helpers.predefined_type("word-spacing",
         }
     }
 
-    pub fn parse(_context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+    pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
+                         -> Result<SpecifiedValue, ParseError<'i>> {
         if input.try(|input| input.expect_ident_matching("none")).is_ok() {
             return Ok(SpecifiedValue::None);
         }
 
-        if let Ok(s) = input.try(|input| input.expect_string()) {
+        if let Ok(s) = input.try(|i| i.expect_string().map(|s| s.as_ref().to_owned())) {
             // Handle <string>
-            return Ok(SpecifiedValue::String(s.into_owned()));
+            return Ok(SpecifiedValue::String(s));
         }
 
         // Handle a pair of keywords
@@ -747,13 +611,13 @@ ${helpers.predefined_type("word-spacing",
             (Some(fill), Ok(shape)) => KeywordValue::FillAndShape(fill,shape),
             (Some(fill), Err(_)) => KeywordValue::Fill(fill),
             (None, Ok(shape)) => KeywordValue::Shape(shape),
-            _ => return Err(()),
+            _ => return Err(StyleParseError::UnspecifiedError.into()),
         };
         Ok(SpecifiedValue::Keyword(keyword_value))
     }
 </%helpers:longhand>
 
-<%helpers:longhand name="text-emphasis-position" animation_value_type="none" products="gecko"
+<%helpers:longhand name="text-emphasis-position" animation_value_type="discrete" products="gecko"
                    spec="https://drafts.csswg.org/css-text-decor/#propdef-text-emphasis-position">
     use values::computed::ComputedValueAsSpecified;
     use style_traits::ToCss;
@@ -780,13 +644,14 @@ ${helpers.predefined_type("word-spacing",
         SpecifiedValue(HorizontalWritingModeValue::Over, VerticalWritingModeValue::Right)
     }
 
-    pub fn parse(_context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
+    pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
+                         -> Result<SpecifiedValue, ParseError<'i>> {
        if let Ok(horizontal) = input.try(|input| HorizontalWritingModeValue::parse(input)) {
-            let vertical = try!(VerticalWritingModeValue::parse(input));
+            let vertical = VerticalWritingModeValue::parse(input)?;
             Ok(SpecifiedValue(horizontal, vertical))
         } else {
-            let vertical = try!(VerticalWritingModeValue::parse(input));
-            let horizontal = try!(HorizontalWritingModeValue::parse(input));
+            let vertical = VerticalWritingModeValue::parse(input)?;
+            let horizontal = HorizontalWritingModeValue::parse(input)?;
             Ok(SpecifiedValue(horizontal, vertical))
         }
     }
@@ -811,15 +676,40 @@ ${helpers.predefined_type("word-spacing",
                 SpecifiedValue(horiz, vert)
             }
         }
+
+        impl From<u8> for SpecifiedValue {
+            fn from(bits: u8) -> SpecifiedValue {
+                SpecifiedValue::from_gecko_keyword(bits as u32)
+            }
+        }
+
+        impl From<SpecifiedValue> for u8 {
+            fn from(v: SpecifiedValue) -> u8 {
+                use gecko_bindings::structs;
+
+                let mut result = match v.0 {
+                    HorizontalWritingModeValue::Over => structs::NS_STYLE_TEXT_EMPHASIS_POSITION_OVER,
+                    HorizontalWritingModeValue::Under => structs::NS_STYLE_TEXT_EMPHASIS_POSITION_UNDER,
+                };
+                match v.1 {
+                    VerticalWritingModeValue::Right => {
+                        result |= structs::NS_STYLE_TEXT_EMPHASIS_POSITION_RIGHT;
+                    }
+                    VerticalWritingModeValue::Left => {
+                        result |= structs::NS_STYLE_TEXT_EMPHASIS_POSITION_LEFT;
+                    }
+                };
+                result as u8
+            }
+        }
     % endif
 </%helpers:longhand>
 
-${helpers.predefined_type("text-emphasis-color", "CSSColor",
-                          "::cssparser::Color::CurrentColor",
-                          initial_specified_value="specified::CSSColor::currentcolor()",
+${helpers.predefined_type("text-emphasis-color", "Color",
+                          "computed_value::T::currentcolor()",
+                          initial_specified_value="specified::Color::currentcolor()",
                           products="gecko", animation_value_type="IntermediateColor",
-                          complex_color=True, need_clone=True,
-                          ignored_when_colors_disabled=True,
+                          need_clone=True, ignored_when_colors_disabled=True,
                           spec="https://drafts.csswg.org/css-text-decor/#propdef-text-emphasis-color")}
 
 
@@ -827,27 +717,27 @@ ${helpers.predefined_type(
     "-moz-tab-size", "LengthOrNumber",
     "::values::Either::Second(8.0)",
     "parse_non_negative",
-    products="gecko", animation_value_type="none",
+    products="gecko", animation_value_type="ComputedValue",
     spec="https://drafts.csswg.org/css-text-3/#tab-size-property")}
 
 
 // CSS Compatibility
 // https://compat.spec.whatwg.org
 ${helpers.predefined_type(
-    "-webkit-text-fill-color", "CSSColor",
-    "CSSParserColor::CurrentColor",
+    "-webkit-text-fill-color", "Color",
+    "computed_value::T::currentcolor()",
     products="gecko", animation_value_type="IntermediateColor",
-    complex_color=True, need_clone=True,
-    ignored_when_colors_disabled=True,
+    need_clone=True, ignored_when_colors_disabled=True,
+    flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
     spec="https://compat.spec.whatwg.org/#the-webkit-text-fill-color")}
 
 ${helpers.predefined_type(
-    "-webkit-text-stroke-color", "CSSColor",
-    "CSSParserColor::CurrentColor",
-    initial_specified_value="specified::CSSColor::currentcolor()",
+    "-webkit-text-stroke-color", "Color",
+    "computed_value::T::currentcolor()",
+    initial_specified_value="specified::Color::currentcolor()",
     products="gecko", animation_value_type="IntermediateColor",
-    complex_color=True, need_clone=True,
-    ignored_when_colors_disabled=True,
+    need_clone=True, ignored_when_colors_disabled=True,
+    flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
     spec="https://compat.spec.whatwg.org/#the-webkit-text-stroke-color")}
 
 ${helpers.predefined_type("-webkit-text-stroke-width",
@@ -856,6 +746,7 @@ ${helpers.predefined_type("-webkit-text-stroke-width",
                           initial_specified_value="specified::BorderSideWidth::Length(specified::Length::zero())",
                           computed_type="::app_units::Au",
                           products="gecko",
+                          flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
                           spec="https://compat.spec.whatwg.org/#the-webkit-text-stroke-width",
                           animation_value_type="none")}
 

@@ -2,6 +2,9 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
+// The ext-* files are imported into the same scopes.
+/* import-globals-from ext-toolkit.js */
+
 XPCOMUtils.defineLazyGetter(this, "strBundle", function() {
   const stringSvc = Cc["@mozilla.org/intl/stringbundle;1"].getService(Ci.nsIStringBundleService);
   return stringSvc.createBundle("chrome://global/locale/extensions.properties");
@@ -23,14 +26,14 @@ var {
   ExtensionError,
 } = ExtensionUtils;
 
-function _(key, ...args) {
+const _ = (key, ...args) => {
   if (args.length) {
     return strBundle.formatStringFromName(key, args, args.length);
   }
   return strBundle.GetStringFromName(key);
-}
+};
 
-function installType(addon) {
+const installType = addon => {
   if (addon.temporarilyInstalled) {
     return "development";
   } else if (addon.foreignInstall) {
@@ -39,9 +42,9 @@ function installType(addon) {
     return "other";
   }
   return "normal";
-}
+};
 
-function getExtensionInfoForAddon(extension, addon) {
+const getExtensionInfoForAddon = (extension, addon) => {
   let extInfo = {
     id: addon.id,
     name: addon.name,
@@ -82,11 +85,11 @@ function getExtensionInfoForAddon(extension, addon) {
     extInfo.updateUrl = addon.updateURL;
   }
   return extInfo;
-}
+};
 
 const listenerMap = new WeakMap();
 // Some management APIs are intentionally limited.
-const allowedTypes = ["theme"];
+const allowedTypes = ["theme", "extension"];
 
 class AddonListener {
   constructor() {
@@ -103,29 +106,33 @@ class AddonListener {
     return getExtensionInfoForAddon(ext, addon);
   }
 
+  checkAllowed(addon) {
+    return !addon.isSystem && allowedTypes.includes(addon.type);
+  }
+
   onEnabled(addon) {
-    if (!allowedTypes.includes(addon.type)) {
+    if (!this.checkAllowed(addon)) {
       return;
     }
     this.emit("onEnabled", this.getExtensionInfo(addon));
   }
 
   onDisabled(addon) {
-    if (!allowedTypes.includes(addon.type)) {
+    if (!this.checkAllowed(addon)) {
       return;
     }
     this.emit("onDisabled", this.getExtensionInfo(addon));
   }
 
   onInstalled(addon) {
-    if (!allowedTypes.includes(addon.type)) {
+    if (!this.checkAllowed(addon)) {
       return;
     }
     this.emit("onInstalled", this.getExtensionInfo(addon));
   }
 
   onUninstalled(addon) {
-    if (!allowedTypes.includes(addon.type)) {
+    if (!this.checkAllowed(addon)) {
       return;
     }
     this.emit("onUninstalled", this.getExtensionInfo(addon));
@@ -134,7 +141,7 @@ class AddonListener {
 
 let addonListener;
 
-function getListener(extension, context) {
+const getManagementListener = (extension, context) => {
   if (!listenerMap.has(extension)) {
     if (!addonListener) {
       addonListener = new AddonListener();
@@ -151,16 +158,23 @@ function getListener(extension, context) {
     });
   }
   return addonListener;
-}
+};
 
 this.management = class extends ExtensionAPI {
   getAPI(context) {
     let {extension} = context;
     return {
       management: {
+        async get(id) {
+          let addon = await AddonManager.getAddonByID(id);
+          if (!addon.isSystem) {
+            return getExtensionInfoForAddon(extension, addon);
+          }
+        },
+
         async getAll() {
           let addons = await AddonManager.getAddonsByTypes(allowedTypes);
-          return addons.map(addon => {
+          return addons.filter(addon => !addon.isSystem).map(addon => {
             // If the extension is enabled get it and use it for more data.
             let ext = addon.isWebExtension && GlobalManager.extensionMap.get(addon.id);
             return getExtensionInfoForAddon(ext, addon);
@@ -201,53 +215,56 @@ this.management = class extends ExtensionAPI {
           if (!addon) {
             throw new ExtensionError(`No such addon ${id}`);
           }
-          if (!allowedTypes.includes(addon.type)) {
+          if (addon.type !== "theme") {
             throw new ExtensionError("setEnabled applies only to theme addons");
+          }
+          if (addon.isSystem) {
+            throw new ExtensionError("setEnabled cannot be used with a system addon");
           }
           addon.userDisabled = !enabled;
         },
 
-        onDisabled: new SingletonEventManager(context, "management.onDisabled", fire => {
+        onDisabled: new EventManager(context, "management.onDisabled", fire => {
           let listener = (event, data) => {
             fire.async(data);
           };
 
-          getListener(extension, context).on("onDisabled", listener);
+          getManagementListener(extension, context).on("onDisabled", listener);
           return () => {
-            getListener(extension, context).off("onDisabled", listener);
+            getManagementListener(extension, context).off("onDisabled", listener);
           };
         }).api(),
 
-        onEnabled: new SingletonEventManager(context, "management.onEnabled", fire => {
+        onEnabled: new EventManager(context, "management.onEnabled", fire => {
           let listener = (event, data) => {
             fire.async(data);
           };
 
-          getListener(extension, context).on("onEnabled", listener);
+          getManagementListener(extension, context).on("onEnabled", listener);
           return () => {
-            getListener(extension, context).off("onEnabled", listener);
+            getManagementListener(extension, context).off("onEnabled", listener);
           };
         }).api(),
 
-        onInstalled: new SingletonEventManager(context, "management.onInstalled", fire => {
+        onInstalled: new EventManager(context, "management.onInstalled", fire => {
           let listener = (event, data) => {
             fire.async(data);
           };
 
-          getListener(extension, context).on("onInstalled", listener);
+          getManagementListener(extension, context).on("onInstalled", listener);
           return () => {
-            getListener(extension, context).off("onInstalled", listener);
+            getManagementListener(extension, context).off("onInstalled", listener);
           };
         }).api(),
 
-        onUninstalled: new SingletonEventManager(context, "management.onUninstalled", fire => {
+        onUninstalled: new EventManager(context, "management.onUninstalled", fire => {
           let listener = (event, data) => {
             fire.async(data);
           };
 
-          getListener(extension, context).on("onUninstalled", listener);
+          getManagementListener(extension, context).on("onUninstalled", listener);
           return () => {
-            getListener(extension, context).off("onUninstalled", listener);
+            getManagementListener(extension, context).off("onUninstalled", listener);
           };
         }).api(),
 

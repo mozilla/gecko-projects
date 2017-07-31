@@ -10,7 +10,6 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/PathHelpers.h"
 #include "nsPresContext.h"
-#include "nsRenderingContext.h"
 #include "nsWhitespaceTokenizer.h"
 
 #include "nsDisplayList.h"
@@ -196,7 +195,7 @@ NS_IMETHODIMP
 nsMathMLmencloseFrame::TransmitAutomaticData()
 {
   if (IsToDraw(NOTATION_RADICAL)) {
-    // The TeXBook (Ch 17. p.141) says that \sqrt is cramped 
+    // The TeXBook (Ch 17. p.141) says that \sqrt is cramped
     UpdatePresentationDataFromChildAt(0, -1,
                                       NS_MATHML_COMPRESSED,
                                       NS_MATHML_COMPRESSED);
@@ -422,14 +421,14 @@ nsMathMLmencloseFrame::PlaceInternal(DrawTarget*          aDrawTarget,
 
   mBoundingMetrics.ascent = bmBase.ascent;
   mBoundingMetrics.descent = bmBase.descent;
-    
+
   if (IsToDraw(NOTATION_ROUNDEDBOX) ||
       IsToDraw(NOTATION_TOP) ||
       IsToDraw(NOTATION_LEFT) ||
       IsToDraw(NOTATION_RIGHT) ||
       IsToDraw(NOTATION_CIRCLE))
     mBoundingMetrics.ascent += padding;
-  
+
   if (IsToDraw(NOTATION_ROUNDEDBOX) ||
       IsToDraw(NOTATION_LEFT) ||
       IsToDraw(NOTATION_RIGHT) ||
@@ -488,7 +487,7 @@ nsMathMLmencloseFrame::PlaceInternal(DrawTarget*          aDrawTarget,
   if (IsToDraw(NOTATION_LONGDIV)) {
     if (aWidthOnly) {
         nscoord longdiv_width = mMathMLChar[mLongDivCharIndex].
-          GetMaxWidth(PresContext(), aDrawTarget, fontSizeInflation);
+          GetMaxWidth(this, aDrawTarget, fontSizeInflation);
 
         // Update horizontal parameters
         dx_left = std::max(dx_left, longdiv_width);
@@ -500,7 +499,7 @@ nsMathMLmencloseFrame::PlaceInternal(DrawTarget*          aDrawTarget,
       contSize.descent = bmBase.ascent + bmBase.descent + psi;
 
       // height(longdiv) should be >= height(base) + psi + mRuleThickness
-      mMathMLChar[mLongDivCharIndex].Stretch(PresContext(), aDrawTarget,
+      mMathMLChar[mLongDivCharIndex].Stretch(this, aDrawTarget,
                                              fontSizeInflation,
                                              NS_STRETCH_DIRECTION_VERTICAL,
                                              contSize, bmLongdivChar,
@@ -527,11 +526,11 @@ nsMathMLmencloseFrame::PlaceInternal(DrawTarget*          aDrawTarget,
   // radical notation:
   if (IsToDraw(NOTATION_RADICAL)) {
     nscoord *dx_leading = StyleVisibility()->mDirection ? &dx_right : &dx_left;
-    
+
     if (aWidthOnly) {
       nscoord radical_width = mMathMLChar[mRadicalCharIndex].
-        GetMaxWidth(PresContext(), aDrawTarget, fontSizeInflation);
-      
+        GetMaxWidth(this, aDrawTarget, fontSizeInflation);
+
       // Update horizontal parameters
       *dx_leading = std::max(*dx_leading, radical_width);
     } else {
@@ -542,7 +541,7 @@ nsMathMLmencloseFrame::PlaceInternal(DrawTarget*          aDrawTarget,
       contSize.descent = bmBase.ascent + bmBase.descent + psi;
 
       // height(radical) should be >= height(base) + psi + mRadicalRuleThickness
-      mMathMLChar[mRadicalCharIndex].Stretch(PresContext(), aDrawTarget,
+      mMathMLChar[mRadicalCharIndex].Stretch(this, aDrawTarget,
                                              fontSizeInflation,
                                              NS_STRETCH_DIRECTION_VERTICAL,
                                              contSize, bmRadicalChar,
@@ -582,7 +581,7 @@ nsMathMLmencloseFrame::PlaceInternal(DrawTarget*          aDrawTarget,
   mBoundingMetrics.leftBearing = std::min(0, dx_left + bmBase.leftBearing);
   mBoundingMetrics.rightBearing =
     std::max(mBoundingMetrics.width, dx_left + bmBase.rightBearing);
-  
+
   aDesiredSize.Width() = mBoundingMetrics.width;
 
   aDesiredSize.SetBlockStartAscent(std::max(mBoundingMetrics.ascent,
@@ -595,14 +594,14 @@ nsMathMLmencloseFrame::PlaceInternal(DrawTarget*          aDrawTarget,
     nscoord desiredSizeAscent = aDesiredSize.BlockStartAscent();
     nscoord desiredSizeDescent = aDesiredSize.Height() -
                                  aDesiredSize.BlockStartAscent();
-    
+
     if (IsToDraw(NOTATION_LONGDIV)) {
       desiredSizeAscent = std::max(desiredSizeAscent,
                                  longdivAscent + leading);
       desiredSizeDescent = std::max(desiredSizeDescent,
                                   longdivDescent + mRuleThickness);
     }
-    
+
     if (IsToDraw(NOTATION_RADICAL)) {
       desiredSizeAscent = std::max(desiredSizeAscent,
                                  radicalAscent + leading);
@@ -613,7 +612,7 @@ nsMathMLmencloseFrame::PlaceInternal(DrawTarget*          aDrawTarget,
     aDesiredSize.SetBlockStartAscent(desiredSizeAscent);
     aDesiredSize.Height() = desiredSizeAscent + desiredSizeDescent;
   }
-    
+
   if (IsToDraw(NOTATION_CIRCLE) ||
       IsToDraw(NOTATION_ROUNDEDBOX) ||
       (IsToDraw(NOTATION_TOP) && IsToDraw(NOTATION_BOTTOM))) {
@@ -637,7 +636,7 @@ nsMathMLmencloseFrame::PlaceInternal(DrawTarget*          aDrawTarget,
       IsToDraw(NOTATION_CIRCLE) ||
       IsToDraw(NOTATION_ROUNDEDBOX))
     mBoundingMetrics.ascent = aDesiredSize.BlockStartAscent();
-  
+
   if (IsToDraw(NOTATION_BOTTOM) ||
       IsToDraw(NOTATION_RIGHT) ||
       IsToDraw(NOTATION_LEFT) ||
@@ -653,9 +652,9 @@ nsMathMLmencloseFrame::PlaceInternal(DrawTarget*          aDrawTarget,
   // move up from the bottom by the angled line height
   if (IsToDraw(NOTATION_PHASORANGLE))
     mBoundingMetrics.ascent = std::max(mBoundingMetrics.ascent, 2 * kPhasorangleWidth * mRuleThickness - mBoundingMetrics.descent);
-  
+
   aDesiredSize.mBoundingMetrics = mBoundingMetrics;
-  
+
   mReference.x = 0;
   mReference.y = aDesiredSize.BlockStartAscent();
 
@@ -738,7 +737,7 @@ nsMathMLmencloseFrame::GetAdditionalStyleContext(int32_t aIndex) const
 }
 
 void
-nsMathMLmencloseFrame::SetAdditionalStyleContext(int32_t          aIndex, 
+nsMathMLmencloseFrame::SetAdditionalStyleContext(int32_t          aIndex,
                                                  nsStyleContext*  aStyleContext)
 {
   int32_t len = mMathMLChar.Length();
@@ -752,7 +751,7 @@ public:
   nsDisplayNotation(nsDisplayListBuilder* aBuilder,
                     nsIFrame* aFrame, const nsRect& aRect,
                     nscoord aThickness, nsMencloseNotation aType)
-    : nsDisplayItem(aBuilder, aFrame), mRect(aRect), 
+    : nsDisplayItem(aBuilder, aFrame), mRect(aRect),
       mThickness(aThickness), mType(aType) {
     MOZ_COUNT_CTOR(nsDisplayNotation);
   }
@@ -767,7 +766,7 @@ public:
   }
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx) override;
+                     gfxContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("MathMLMencloseNotation", TYPE_MATHML_MENCLOSE_NOTATION)
 
 private:
@@ -777,7 +776,7 @@ private:
 };
 
 void nsDisplayNotation::Paint(nsDisplayListBuilder* aBuilder,
-                              nsRenderingContext* aCtx)
+                              gfxContext* aCtx)
 {
   DrawTarget& aDrawTarget = *aCtx->GetDrawTarget();
   nsPresContext* presContext = mFrame->PresContext();

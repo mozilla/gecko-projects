@@ -25,21 +25,27 @@ def parse(lintdir):
 
 
 def test_parse_valid_linter(parse):
-    lintobj = parse('string.lint.py')
+    lintobj = parse('string.yml')
+    assert isinstance(lintobj, list)
+    assert len(lintobj) == 1
+
+    lintobj = lintobj[0]
     assert isinstance(lintobj, dict)
     assert 'name' in lintobj
     assert 'description' in lintobj
     assert 'type' in lintobj
     assert 'payload' in lintobj
+    assert 'extensions' in lintobj
+    assert set(lintobj['extensions']) == set(['js', 'jsm'])
 
 
 @pytest.mark.parametrize('linter', [
-    'invalid_type.lint.py',
-    'invalid_extension.lnt',
-    'invalid_include.lint.py',
-    'invalid_exclude.lint.py',
-    'missing_attrs.lint.py',
-    'missing_definition.lint.py',
+    'invalid_type.yml',
+    'invalid_extension.ym',
+    'invalid_include.yml',
+    'invalid_exclude.yml',
+    'missing_attrs.yml',
+    'missing_definition.yml',
 ])
 def test_parse_invalid_linter(parse, linter):
     with pytest.raises(LinterParseError):

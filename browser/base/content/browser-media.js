@@ -124,6 +124,7 @@ var gEMEHandler = {
     // Do a little dance to get rich content into the notification:
     let fragment = document.createDocumentFragment();
     let descriptionContainer = document.createElement("description");
+    // eslint-disable-next-line no-unsanitized/property
     descriptionContainer.innerHTML = message;
     while (descriptionContainer.childNodes.length) {
       fragment.appendChild(descriptionContainer.childNodes[0]);
@@ -167,7 +168,13 @@ var gEMEHandler = {
     let mainAction = {
       label: gNavigatorBundle.getString(btnLabelId),
       accessKey: gNavigatorBundle.getString(btnAccessKeyId),
-      callback() { openPreferences("panePrivacy", {origin: "browserMedia"}); },
+      callback() {
+        if (Services.prefs.getBoolPref("browser.preferences.useOldOrganization")) {
+          openPreferences("paneContent", {origin: "browserMedia"});
+        } else {
+          openPreferences("general-drm", {origin: "browserMedia"});
+        }
+      },
       dismiss: true
     };
     let options = {

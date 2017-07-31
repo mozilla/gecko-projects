@@ -8,12 +8,15 @@
 #include "nsImageFrame.h"
 
 #include "gfx2DGlue.h"
+#include "gfxContext.h"
 #include "gfxUtils.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/Encoding.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Helpers.h"
 #include "mozilla/gfx/PathHelpers.h"
+#include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Unused.h"
 
@@ -23,7 +26,6 @@
 #include "nsString.h"
 #include "nsPrintfCString.h"
 #include "nsPresContext.h"
-#include "nsRenderingContext.h"
 #include "nsIPresShell.h"
 #include "nsGkAtoms.h"
 #include "nsIDocument.h"
@@ -176,17 +178,18 @@ nsImageFrame::AccessibleType()
 void
 nsImageFrame::DisconnectMap()
 {
-  if (mImageMap) {
-    mImageMap->Destroy();
-    mImageMap = nullptr;
+  if (!mImageMap) {
+    return;
+  }
+
+  mImageMap->Destroy();
+  mImageMap = nullptr;
 
 #ifdef ACCESSIBILITY
-  nsAccessibilityService* accService = GetAccService();
-  if (accService) {
+  if (nsAccessibilityService* accService = GetAccService()) {
     accService->RecreateAccessible(PresContext()->PresShell(), mContent);
   }
 #endif
-  }
 }
 
 void
@@ -210,7 +213,7 @@ nsImageFrame::DestroyFrom(nsIFrame* aDestructRoot)
       // deregister with our refresh driver.
       imageLoader->FrameDestroyed(this);
 
-      imageLoader->RemoveObserver(mListener);
+      imageLoader->RemoveNativeObserver(mListener);
     }
 
     reinterpret_cast<nsImageListener*>(mListener.get())->SetFrame(nullptr);
@@ -267,7 +270,7 @@ nsImageFrame::Init(nsIContent*       aContent,
     MOZ_CRASH("Why do we have an nsImageFrame here at all?");
   }
 
-  imageLoader->AddObserver(mListener);
+  imageLoader->AddNativeObserver(mListener);
 
   nsPresContext *aPresContext = PresContext();
 
@@ -639,6 +642,18 @@ void
 nsImageFrame::InvalidateSelf(const nsIntRect* aLayerInvalidRect,
                              const nsRect* aFrameInvalidRect)
 {
+  if (HasProperty(nsIFrame::WebRenderUserDataProperty())) {
+    nsIFrame::WebRenderUserDataTable* userDataTable =
+      GetProperty(nsIFrame::WebRenderUserDataProperty());
+    RefPtr<WebRenderUserData> data;
+    userDataTable->Get(TYPE_IMAGE, getter_AddRefs(data));
+    if (data && data->AsFallbackData()) {
+      data->AsFallbackData()->SetInvalid(true);
+    }
+    SchedulePaint();
+    return;
+  }
+
   InvalidateLayer(TYPE_IMAGE,
                   aLayerInvalidRect,
                   aFrameInvalidRect);
@@ -837,7 +852,7 @@ nsImageFrame::EnsureIntrinsicSizeAndRatio()
 
 /* virtual */
 LogicalSize
-nsImageFrame::ComputeSize(nsRenderingContext *aRenderingContext,
+nsImageFrame::ComputeSize(gfxContext *aRenderingContext,
                           WritingMode aWM,
                           const LogicalSize& aCBSize,
                           nscoord aAvailableISize,
@@ -922,7 +937,7 @@ nsImageFrame::GetContinuationOffset() const
 }
 
 /* virtual */ nscoord
-nsImageFrame::GetMinISize(nsRenderingContext *aRenderingContext)
+nsImageFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   // XXX The caller doesn't account for constraints of the height,
   // min-height, and max-height properties.
@@ -934,7 +949,7 @@ nsImageFrame::GetMinISize(nsRenderingContext *aRenderingContext)
 }
 
 /* virtual */ nscoord
-nsImageFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
+nsImageFrame::GetPrefISize(gfxContext *aRenderingContext)
 {
   // XXX The caller doesn't account for constraints of the height,
   // min-height, and max-height properties.
@@ -1104,7 +1119,7 @@ nsImageFrame::MeasureString(const char16_t*     aString,
                             int32_t              aLength,
                             nscoord              aMaxWidth,
                             uint32_t&            aMaxFit,
-                            nsRenderingContext& aContext,
+                            gfxContext& aContext,
                             nsFontMetrics& aFontMetrics)
 {
   nscoord totalWidth = 0;
@@ -1165,13 +1180,12 @@ nsImageFrame::MeasureString(const char16_t*     aString,
 // between words if a word would extend past the edge of the rectangle
 void
 nsImageFrame::DisplayAltText(nsPresContext*      aPresContext,
-                             nsRenderingContext& aRenderingContext,
+                             gfxContext&          aRenderingContext,
                              const nsString&      aAltText,
                              const nsRect&        aRect)
 {
   // Set font and color
-  aRenderingContext.ThebesContext()->
-    SetColor(Color::FromABGR(StyleColor()->mColor));
+  aRenderingContext.SetColor(Color::FromABGR(StyleColor()->mColor));
   RefPtr<nsFontMetrics> fm =
     nsLayoutUtils::GetInflatedFontMetricsForFrame(this);
 
@@ -1322,7 +1336,7 @@ public:
   }
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx) override
+                     gfxContext* aCtx) override
   {
     // Always sync decode, because these icons are UI, and since they're not
     // discardable we'll pay the price of sync decoding at most once.
@@ -1342,7 +1356,7 @@ public:
 };
 
 DrawResult
-nsImageFrame::DisplayAltFeedback(nsRenderingContext& aRenderingContext,
+nsImageFrame::DisplayAltFeedback(gfxContext& aRenderingContext,
                                  const nsRect& aDirtyRect,
                                  nsPoint aPt,
                                  uint32_t aFlags)
@@ -1395,12 +1409,11 @@ nsImageFrame::DisplayAltFeedback(nsRenderingContext& aRenderingContext,
   }
 
   DrawTarget* drawTarget = aRenderingContext.GetDrawTarget();
-  gfxContext* gfx = aRenderingContext.ThebesContext();
 
   // Clip so we don't render outside the inner rect
-  gfx->Save();
-  gfx->Clip(NSRectToSnappedRect(inner, PresContext()->AppUnitsPerDevPixel(),
-                                *drawTarget));
+  aRenderingContext.Save();
+  aRenderingContext.Clip(
+    NSRectToSnappedRect(inner, PresContext()->AppUnitsPerDevPixel(), *drawTarget));
 
   DrawResult result = DrawResult::NOT_READY;
 
@@ -1437,7 +1450,7 @@ nsImageFrame::DisplayAltFeedback(nsRenderingContext& aRenderingContext,
       MOZ_ASSERT(imgCon, "Load complete, but no image container?");
       nsRect dest(flushRight ? inner.XMost() - size : inner.x,
                   inner.y, size, size);
-      result = nsLayoutUtils::DrawSingleImage(*gfx, PresContext(), imgCon,
+      result = nsLayoutUtils::DrawSingleImage(aRenderingContext, PresContext(), imgCon,
         nsLayoutUtils::GetSamplingFilterForFrame(this), dest, aDirtyRect,
         /* no SVGImageContext */ Nothing(), aFlags);
     }
@@ -1493,7 +1506,7 @@ nsImageFrame::DisplayAltFeedback(nsRenderingContext& aRenderingContext,
     }
   }
 
-  aRenderingContext.ThebesContext()->Restore();
+  aRenderingContext.Restore();
 
   return result;
 }
@@ -1517,7 +1530,7 @@ static void PaintDebugImageMap(nsIFrame* aFrame, DrawTarget* aDrawTarget,
 
 void
 nsDisplayImage::Paint(nsDisplayListBuilder* aBuilder,
-                      nsRenderingContext* aCtx)
+                      gfxContext* aCtx)
 {
   uint32_t flags = imgIContainer::FLAG_NONE;
   if (aBuilder->ShouldSyncDecodeImages()) {
@@ -1631,11 +1644,8 @@ nsDisplayImage::GetLayerState(nsDisplayListBuilder* aBuilder,
     }
   }
 
-  uint32_t flags = aBuilder->ShouldSyncDecodeImages()
-                 ? imgIContainer::FLAG_SYNC_DECODE
-                 : imgIContainer::FLAG_NONE;
 
-  if (!mImage->IsImageContainerAvailable(aManager, flags)) {
+  if (!CanOptimizeToImageLayer(aManager, aBuilder)) {
     return LAYER_NONE;
   }
 
@@ -1689,8 +1699,38 @@ nsDisplayImage::BuildLayer(nsDisplayListBuilder* aBuilder,
   return layer.forget();
 }
 
+bool
+nsDisplayImage::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                        const StackingContextHelper& aSc,
+                                        nsTArray<WebRenderParentCommand>& aParentCommands,
+                                        WebRenderLayerManager* aManager,
+                                        nsDisplayListBuilder* aDisplayListBuilder)
+{
+  if (!CanOptimizeToImageLayer(aManager, aDisplayListBuilder)) {
+    return false;
+  }
+
+  uint32_t flags = imgIContainer::FLAG_ASYNC_NOTIFY;
+  if (aDisplayListBuilder->ShouldSyncDecodeImages()) {
+    flags |= imgIContainer::FLAG_SYNC_DECODE;
+  }
+
+  RefPtr<ImageContainer> container =
+    mImage->GetImageContainer(aManager, flags);
+  if (!container) {
+    return false;
+  }
+
+
+  const int32_t factor = mFrame->PresContext()->AppUnitsPerDevPixel();
+  const LayoutDeviceRect destRect(
+    LayoutDeviceIntRect::FromAppUnits(GetDestRect(), factor));
+  const LayerRect dest = ViewAs<LayerPixel>(destRect, PixelCastJustification::WebRenderHasUnitResolution);
+  return aManager->PushImage(this, container, aBuilder, aSc, dest);
+}
+
 DrawResult
-nsImageFrame::PaintImage(nsRenderingContext& aRenderingContext, nsPoint aPt,
+nsImageFrame::PaintImage(gfxContext& aRenderingContext, nsPoint aPt,
                          const nsRect& aDirtyRect, imgIContainer* aImage,
                          uint32_t aFlags)
 {
@@ -1723,13 +1763,12 @@ nsImageFrame::PaintImage(nsRenderingContext& aRenderingContext, nsPoint aPt,
   SVGImageContext::MaybeStoreContextPaint(svgContext, this, aImage);
 
   DrawResult result =
-    nsLayoutUtils::DrawSingleImage(*aRenderingContext.ThebesContext(),
+    nsLayoutUtils::DrawSingleImage(aRenderingContext,
       PresContext(), aImage,
       nsLayoutUtils::GetSamplingFilterForFrame(this), dest, aDirtyRect,
       svgContext, flags, &anchorPoint);
 
-  nsImageMap* map = GetImageMap();
-  if (map) {
+  if (nsImageMap* map = GetImageMap()) {
     gfxPoint devPixelOffset =
       nsLayoutUtils::PointToGfxPoint(dest.TopLeft(),
                                      PresContext()->AppUnitsPerDevPixel());
@@ -1868,7 +1907,7 @@ nsImageFrame::ShouldDisplaySelection()
             int32_t thisOffset = parentContent->IndexOf(mContent);
             nsCOMPtr<nsIDOMNode> parentNode = do_QueryInterface(parentContent);
             nsCOMPtr<nsIDOMNode> rangeNode;
-            int32_t rangeOffset;
+            uint32_t rangeOffset;
             nsCOMPtr<nsIDOMRange> range;
             selection->GetRangeAt(0,getter_AddRefs(range));
             if (range)
@@ -1876,12 +1915,16 @@ nsImageFrame::ShouldDisplaySelection()
               range->GetStartContainer(getter_AddRefs(rangeNode));
               range->GetStartOffset(&rangeOffset);
 
-              if (parentNode && rangeNode && (rangeNode == parentNode) && rangeOffset == thisOffset)
-              {
+              if (parentNode && rangeNode && rangeNode == parentNode &&
+                  static_cast<int32_t>(rangeOffset) == thisOffset) {
                 range->GetEndContainer(getter_AddRefs(rangeNode));
                 range->GetEndOffset(&rangeOffset);
-                if ((rangeNode == parentNode) && (rangeOffset == (thisOffset +1))) //+1 since that would mean this whole content is selected only
-                  return false; //do not allow nsFrame do draw any further selection
+                // +1 since that would mean this whole content is selected only
+                if (rangeNode == parentNode &&
+                    static_cast<int32_t>(rangeOffset) == thisOffset + 1) {
+                  // Do not allow nsFrame do draw any further selection
+                  return false;
+                }
               }
             }
           }
@@ -1897,8 +1940,7 @@ nsImageMap*
 nsImageFrame::GetImageMap()
 {
   if (!mImageMap) {
-    nsIContent* map = GetMapElement();
-    if (map) {
+    if (nsIContent* map = GetMapElement()) {
       mImageMap = new nsImageMap();
       mImageMap->Init(this, map);
     }
@@ -1986,9 +2028,7 @@ nsImageFrame::GetContentForEvent(WidgetEvent* aEvent,
     return NS_OK;
   }
 
-  nsImageMap* map = GetImageMap();
-
-  if (nullptr != map) {
+  if (nsImageMap* map = GetImageMap()) {
     nsIntPoint p;
     TranslateEventCoords(
       nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, this), p);
@@ -2017,7 +2057,7 @@ nsImageFrame::HandleEvent(nsPresContext* aPresContext,
       aEvent->mMessage == eMouseMove) {
     nsImageMap* map = GetImageMap();
     bool isServerMap = IsServerImageMap();
-    if ((nullptr != map) || isServerMap) {
+    if (map || isServerMap) {
       nsIntPoint p;
       TranslateEventCoords(
         nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, this), p);
@@ -2074,8 +2114,7 @@ nsresult
 nsImageFrame::GetCursor(const nsPoint& aPoint,
                         nsIFrame::Cursor& aCursor)
 {
-  nsImageMap* map = GetImageMap();
-  if (nullptr != map) {
+  if (nsImageMap* map = GetImageMap()) {
     nsIntPoint p;
     TranslateEventCoords(aPoint, p);
     nsCOMPtr<nsIContent> area = map->GetArea(p.x, p.y);
@@ -2252,7 +2291,7 @@ nsImageFrame::GetDocumentCharacterSet(nsACString& aCharset) const
   if (mContent) {
     NS_ASSERTION(mContent->GetComposedDoc(),
                  "Frame still alive after content removed from document!");
-    aCharset = mContent->GetComposedDoc()->GetDocumentCharacterSet();
+    mContent->GetComposedDoc()->GetDocumentCharacterSet()->Name(aCharset);
   }
 }
 
@@ -2461,7 +2500,7 @@ IsInAutoWidthTableCellForQuirk(nsIFrame *aFrame)
 }
 
 /* virtual */ void
-nsImageFrame::AddInlineMinISize(nsRenderingContext* aRenderingContext,
+nsImageFrame::AddInlineMinISize(gfxContext* aRenderingContext,
                                 nsIFrame::InlineMinISizeData* aData)
 {
   nscoord isize = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,

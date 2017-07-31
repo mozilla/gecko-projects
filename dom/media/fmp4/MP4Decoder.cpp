@@ -25,18 +25,19 @@
 
 namespace mozilla {
 
-MP4Decoder::MP4Decoder(MediaDecoderOwner* aOwner)
-  : MediaDecoder(aOwner)
+MP4Decoder::MP4Decoder(MediaDecoderInit& aInit)
+  : ChannelMediaDecoder(aInit)
 {
 }
 
 MediaDecoderStateMachine* MP4Decoder::CreateStateMachine()
 {
-  mReader =
-    new MediaFormatReader(this,
-                          new MP4Demuxer(GetResource()),
-                          GetVideoFrameContainer());
-
+  MediaFormatReaderInit init;
+  init.mVideoFrameContainer = GetVideoFrameContainer();
+  init.mKnowsCompositor = GetCompositor();
+  init.mCrashHelper = GetOwner()->CreateGMPCrashHelper();
+  init.mFrameStats = mFrameStats;
+  mReader = new MediaFormatReader(init, new MP4Demuxer(mResource));
   return new MediaDecoderStateMachine(this, mReader);
 }
 

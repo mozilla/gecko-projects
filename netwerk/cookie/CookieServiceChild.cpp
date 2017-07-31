@@ -238,10 +238,16 @@ CookieServiceChild::SetCookieStringFromHttp(nsIURI     *aHostURI,
                                             nsIPrompt  *aPrompt,
                                             const char *aCookieString,
                                             const char *aServerTime,
-                                            nsIChannel *aChannel) 
+                                            nsIChannel *aChannel)
 {
   return SetCookieStringInternal(aHostURI, aChannel, aCookieString,
                                  aServerTime, true);
+}
+
+NS_IMETHODIMP
+CookieServiceChild::RunInTransaction(nsICookieTransactionCallback* aCallback)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 } // namespace net

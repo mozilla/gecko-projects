@@ -95,7 +95,7 @@ function setImageTooltip(tooltip, doc, imageUrl, options) {
                 min-height: 1px;">
       <img class="${imageClass}"
            style="height: ${imgHeight}px; max-height: 100%;"
-           src="${imageUrl}"/>
+           src="${encodeURI(imageUrl)}"/>
     </div>`;
 
   if (!hideDimensionLabel) {
@@ -106,6 +106,7 @@ function setImageTooltip(tooltip, doc, imageUrl, options) {
         <span class="theme-comment devtools-tooltip-caption">${label}</span>
       </div>`;
   }
+  // eslint-disable-next-line no-unsanitized/property
   div.innerHTML = html;
 
   // Calculate tooltip dimensions

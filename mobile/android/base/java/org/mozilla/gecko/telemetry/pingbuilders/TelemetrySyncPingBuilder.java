@@ -11,6 +11,7 @@ import android.os.Parcelable;
 import android.support.annotation.NonNull;
 
 import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
 import org.mozilla.gecko.sync.ExtendedJSONObject;
 import org.mozilla.gecko.sync.telemetry.TelemetryContract;
 import org.mozilla.gecko.sync.telemetry.TelemetryStageCollector;
@@ -26,8 +27,6 @@ import java.util.HashMap;
  * somewhere in {@link org.mozilla.gecko.sync.telemetry.TelemetryCollector} and friends.
  */
 public class TelemetrySyncPingBuilder extends TelemetryLocalPingBuilder {
-    private static final int DATA_FORMAT_VERSION = 1;
-
     public TelemetrySyncPingBuilder setStages(@NonNull final Serializable data) {
         HashMap<String, TelemetryStageCollector> stages = castSyncData(data);
 
@@ -110,7 +109,7 @@ public class TelemetrySyncPingBuilder extends TelemetryLocalPingBuilder {
         return this;
     }
 
-    public TelemetrySyncPingBuilder setDevices(ArrayList<Parcelable> devices) {
+    public TelemetrySyncPingBuilder setDevices(@NonNull ArrayList<Parcelable> devices) {
         final JSONArray devicesJSON = new JSONArray();
 
         for (Parcelable device : devices) {
@@ -131,7 +130,7 @@ public class TelemetrySyncPingBuilder extends TelemetryLocalPingBuilder {
     }
 
     public TelemetrySyncPingBuilder setError(@NonNull Serializable error) {
-        payload.put("failureReason", castErrorObject(error));
+        payload.put("failureReason", new ExtendedJSONObject((JSONObject) error));
         return this;
     }
 
@@ -142,7 +141,7 @@ public class TelemetrySyncPingBuilder extends TelemetryLocalPingBuilder {
 
     @Override
     public TelemetryLocalPing build() {
-        payload.put("version", DATA_FORMAT_VERSION);
+        payload.put("when", System.currentTimeMillis());
         return new TelemetryLocalPing(payload, docID);
     }
 
@@ -158,9 +157,5 @@ public class TelemetrySyncPingBuilder extends TelemetryLocalPingBuilder {
     @SuppressWarnings("unchecked")
     private static HashMap<String, TelemetryStageCollector> castSyncData(final Serializable data) {
         return (HashMap<String, TelemetryStageCollector>) data;
-    }
-
-    private static ExtendedJSONObject castErrorObject(final Serializable error) {
-        return (ExtendedJSONObject) error;
     }
 }

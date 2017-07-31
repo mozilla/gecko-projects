@@ -8,12 +8,15 @@
 #define MOZ_EMBEDDED_LIBPNG
 
 /* Limit image dimensions (bug #251381, #591822, #967656, and #1283961) */
+#define PNG_USER_LIMITS_SUPPORTED
 #ifndef MOZ_PNG_MAX_WIDTH
 #  define MOZ_PNG_MAX_WIDTH 0x7fffffffL /* Unlimited */
 #endif
 #ifndef MOZ_PNG_MAX_HEIGHT
 #  define MOZ_PNG_MAX_HEIGHT 0x7fffffffL /* Unlimited */
 #endif
+/* but allow nsPNGDecoder to override the limits (bug #1368407) */
+#define PNG_SET_USER_LIMITS_SUPPORTED
 
 #define PNG_API_RULE 0
 #define PNG_COST_SHIFT 3
@@ -98,19 +101,6 @@
 #define PNG_READ_STRIP_16_TO_8_SUPPORTED
 #define PNG_READ_USER_TRANSFORM_SUPPORTED
 #define PNG_SEQUENTIAL_READ_SUPPORTED
-#endif
-
-/* necessary for boot animation code (Gonk) */
-#ifdef MOZ_WIDGET_GONK
-#define PNG_bKGD_SUPPORTED
-#define PNG_UNKNOWN_CHUNKS_SUPPORTED
-#define PNG_SET_UNKNOWN_CHUNKS_SUPPORTED
-#define PNG_HANDLE_AS_UNKNOWN_SUPPORTED
-#define PNG_EASY_ACCESS_SUPPORTED
-#define PNG_READ_bKGD_SUPPORTED
-#define PNG_READ_BGR_SUPPORTED
-#define PNG_READ_GRAY_TO_RGB_SUPPORTED
-#define PNG_READ_STRIP_ALPHA_SUPPORTED
 #endif
 
 #define PNG_WRITE_SUPPORTED

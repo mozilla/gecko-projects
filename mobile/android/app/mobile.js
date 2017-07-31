@@ -122,7 +122,7 @@ pref("network.predictor.max-db-size", 2097152); // bytes
 pref("network.predictor.preserve", 50); // percentage of predictor data to keep when cleaning up
 
 // Use JS mDNS as a fallback
-pref("network.mdns.use_js_fallback", true);
+pref("network.mdns.use_js_fallback", false);
 
 /* history max results display */
 pref("browser.display.history.maxresults", 100);
@@ -631,6 +631,13 @@ pref("media.mediadrm-widevinecdm.visible", true);
 pref("media.eme.enabled", true);
 #endif
 
+#ifdef NIGHTLY_BUILD
+pref("media.hls.enabled", true);
+#endif
+
+// Whether to suspend decoding of videos in background tabs.
+pref("media.suspend-bkgnd-video.enabled", true);
+
 // optimize images memory usage
 pref("image.downscale-during-decode.enabled", true);
 
@@ -912,6 +919,7 @@ pref("dom.presentation.receiver.enabled", true); // enable 1-UA mode
 
 pref("dom.audiochannel.audioCompeting", true);
 pref("dom.audiochannel.mediaControl", true);
+pref("media.block-autoplay-until-in-foreground", false);
 
 // Space separated list of URLS that are allowed to send objects (instead of
 // only strings) through webchannels. This list is duplicated in browser/app/profile/firefox.js

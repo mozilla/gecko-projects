@@ -11,7 +11,6 @@ var Cr = Components.results;
 
 Cu.import("resource://gre/modules/AddonManager.jsm");
 Cu.import("resource://gre/modules/AppConstants.jsm");
-Cu.import("resource://gre/modules/AsyncPrefs.jsm");
 Cu.import("resource://gre/modules/DelayedInit.jsm");
 Cu.import("resource://gre/modules/Messaging.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -388,11 +387,15 @@ var BrowserApp = {
 
     Services.androidBridge.browserApp = this;
 
-    GlobalEventDispatcher.registerListener(this, [
+    WindowEventDispatcher.registerListener(this, [
+      "Session:Restore",
       "Tab:Load",
       "Tab:Selected",
       "Tab:Closed",
       "Tab:Move",
+    ]);
+
+    GlobalEventDispatcher.registerListener(this, [
       "Browser:LoadManifest",
       "Browser:Quit",
       "Fonts:Reload",
@@ -1850,6 +1853,10 @@ var BrowserApp = {
         break;
       }
 
+      case "Session:Restore":
+        GlobalEventDispatcher.dispatch("Session:Restore", data);
+        break;
+
       case "Session:Stop":
         browser.stop();
         break;
@@ -1874,8 +1881,7 @@ var BrowserApp = {
           isPrivate: (data.isPrivate === true),
           pinned: (data.pinned === true),
           delayLoad: (delayLoad === true),
-          desktopMode: (data.desktopMode === true),
-          tabType: ("tabType" in data) ? data.tabType : "BROWSING"
+          desktopMode: (data.desktopMode === true)
         };
 
         params.userRequested = url;
@@ -3343,7 +3349,7 @@ function nsBrowserAccess() {
 nsBrowserAccess.prototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIBrowserDOMWindow]),
 
-  _getBrowser: function _getBrowser(aURI, aOpener, aWhere, aFlags) {
+  _getBrowser: function _getBrowser(aURI, aOpener, aWhere, aFlags, aTriggeringPrincipal) {
     let isExternal = !!(aFlags & Ci.nsIBrowserDOMWindow.OPEN_EXTERNAL);
     if (isExternal && aURI && aURI.schemeIs("chrome"))
       return null;
@@ -3393,13 +3399,6 @@ nsBrowserAccess.prototype = {
                   aWhere == Ci.nsIBrowserDOMWindow.OPEN_SWITCHTAB);
     let isPrivate = false;
 
-    if (aOpener != null) {
-      let parent = BrowserApp.getTabForWindow(aOpener.top);
-      if (parent != null) {
-        newTab = newTab && parent.tabType != "CUSTOMTAB";
-      }
-    }
-
     if (newTab) {
       let parentId = -1;
       if (!isExternal && aOpener) {
@@ -3419,7 +3418,8 @@ nsBrowserAccess.prototype = {
                                                                       opener: openerWindow,
                                                                       selected: true,
                                                                       isPrivate: isPrivate,
-                                                                      pinned: pinned });
+                                                                      pinned: pinned,
+                                                                      triggeringPrincipal: aTriggeringPrincipal});
 
       return tab.browser;
     }
@@ -3427,14 +3427,18 @@ nsBrowserAccess.prototype = {
     // OPEN_CURRENTWINDOW and illegal values
     let browser = BrowserApp.selectedBrowser;
     if (aURI && browser) {
-      browser.loadURIWithFlags(aURI.spec, loadflags, referrer, null, null);
+      browser.loadURIWithFlags(aURI.spec, {
+        flags: loadflags,
+        referrerURI: referrer,
+        triggeringPrincipal: aTriggeringPrincipal,
+      });
     }
 
     return browser;
   },
 
-  openURI: function browser_openURI(aURI, aOpener, aWhere, aFlags) {
-    let browser = this._getBrowser(aURI, aOpener, aWhere, aFlags);
+  openURI: function browser_openURI(aURI, aOpener, aWhere, aFlags, aTriggeringPrincipal) {
+    let browser = this._getBrowser(aURI, aOpener, aWhere, aFlags, aTriggeringPrincipal);
     return browser ? browser.contentWindow : null;
   },
 
@@ -3446,7 +3450,7 @@ nsBrowserAccess.prototype = {
     //
     // We also ignore aName if it is set, as it is currently only used on the
     // e10s codepath.
-    let browser = this._getBrowser(aURI, null, aWhere, aFlags);
+    let browser = this._getBrowser(aURI, null, aWhere, aFlags, null);
     if (browser)
       return browser.QueryInterface(Ci.nsIFrameLoaderOwner);
     return null;
@@ -3574,9 +3578,6 @@ Tab.prototype = {
     // Java and new tabs from Gecko.
     let stub = false;
 
-    // The authoritative list of possible tab types is the TabType enum in Tab.java.
-    this.type = "tabType" in aParams ? aParams.tabType : "BROWSING";
-
     if (!aParams.zombifying) {
       if ("tabID" in aParams) {
         this.id = aParams.tabID;
@@ -3599,7 +3600,6 @@ Tab.prototype = {
       let message = {
         type: "Tab:Added",
         tabID: this.id,
-        tabType: this.type,
         uri: truncate(uri, MAX_URI_LENGTH),
         parentId: this.parentId,
         tabIndex: ("tabIndex" in aParams) ? aParams.tabIndex : -1,
@@ -3662,8 +3662,7 @@ Tab.prototype = {
       desktopMode: this.desktopMode,
       isPrivate: isPrivate,
       tabId: this.id,
-      parentId: this.parentId,
-      type: this.type
+      parentId: this.parentId
     };
 
     if (aParams.delayLoad) {
@@ -4184,7 +4183,7 @@ Tab.prototype = {
           this.sendOpenSearchMessage(target);
         } else if (list.indexOf("[manifest]") != -1 &&
                    aEvent.type == "DOMLinkAdded" &&
-                   Services.prefs.getBoolPref("manifest.install.enabled", false)) {
+                   SharedPreferences.forApp().getBoolPref("android.not_a_preference.pwa")){
           jsonMessage = this.makeManifestMessage(target);
         }
         if (!jsonMessage)
@@ -4578,6 +4577,14 @@ Tab.prototype = {
 
   OnHistoryReplaceEntry: function(index) {
     Services.obs.notifyObservers(this.browser, "Content:HistoryChange");
+  },
+
+  OnLengthChanged: function(aCount) {
+    // Ignore, the method is implemented so that XPConnect doesn't throw!
+  },
+
+  OnIndexChanged: function(aIndex) {
+    // Ignore, the method is implemented so that XPConnect doesn't throw!
   },
 
   UpdateMediaPlaybackRelatedObserver: function(active) {
@@ -6836,7 +6843,7 @@ var Distribution = {
       } catch (e) {
         Cu.reportError("Distribution: Could not parse JSON: " + e);
       }
-    }).then(null, function onError(reason) {
+    }).catch(function onError(reason) {
       if (!(reason instanceof OS.File.Error && reason.becauseNoSuchFile)) {
         Cu.reportError("Distribution: Could not read from " + aFile.leafName + " file");
       }

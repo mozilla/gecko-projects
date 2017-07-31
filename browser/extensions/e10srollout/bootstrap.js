@@ -10,6 +10,7 @@ Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/UpdateUtils.jsm");
 Cu.import("resource://gre/modules/AppConstants.jsm");
+Cu.import("resource://gre/modules/TelemetryEnvironment.jsm");
 
 // The amount of people to be part of e10s
 const TEST_THRESHOLD = {
@@ -22,9 +23,19 @@ const TEST_THRESHOLD = {
 // content processes to use and whether to allow addons for the experiment.
 const MULTI_EXPERIMENT = {
   "beta": { buckets: { 1: .5, 4: 1, }, // 1 process: 50%, 4 processes: 50%
-            addons: true },
-  "release": { buckets: { 1: .2, 4: 1 }, // 1 process: 20%, 4 processes: 80%
-               addons: false },
+
+            // When on the "beta" channel, getAddonsDisqualifyForMulti
+            // will return true if any addon installed is not a web extension.
+            // Therefore, this returns true if and only if all addons
+            // installed are web extensions or if no addons are installed
+            // at all.
+            addonsDisableExperiment(prefix) { return getAddonsDisqualifyForMulti(); } },
+
+  "release": { buckets: { 1: .5, 4: 1 }, // 1 process: 50%, 4 processes: 50%
+
+               // See above for an explanation of this: we only allow users
+               // with no extensions or users with WebExtensions.
+               addonsDisableExperiment(prefix) { return getAddonsDisqualifyForMulti(); } }
 };
 
 const ADDON_ROLLOUT_POLICY = {
@@ -62,6 +73,7 @@ const PREF_E10S_ADDON_BLOCKLIST = "extensions.e10s.rollout.blocklist";
 const PREF_E10S_HAS_NONEXEMPT_ADDON = "extensions.e10s.rollout.hasAddon";
 const PREF_E10S_MULTI_OPTOUT   = "dom.ipc.multiOptOut";
 const PREF_E10S_PROCESSCOUNT   = "dom.ipc.processCount";
+const PREF_USE_DEFAULT_PERF_SETTINGS = "browser.preferences.defaultPerformanceSettings.enabled";
 const PREF_E10S_MULTI_ADDON_BLOCKS = "extensions.e10sMultiBlocksEnabling";
 const PREF_E10S_MULTI_BLOCKED_BY_ADDONS = "extensions.e10sMultiBlockedByAddons";
 
@@ -173,7 +185,7 @@ function defineCohort() {
   //   the default number of content processes (1 on beta) but still in the
   //   test cohort.
   if (!(updateChannel in MULTI_EXPERIMENT) ||
-      (!MULTI_EXPERIMENT[updateChannel].addons && cohortPrefix) ||
+      MULTI_EXPERIMENT[updateChannel].addonsDisableExperiment(cohortPrefix) ||
       !eligibleForMulti ||
       userOptedIn.multi ||
       disqualified) {
@@ -197,7 +209,9 @@ function defineCohort() {
   for (let sampleName of Object.getOwnPropertyNames(buckets)) {
     if (multiUserSample < buckets[sampleName]) {
       setCohort(`${cohortPrefix}multiBucket${sampleName}`);
-      Preferences.set(PREF_E10S_PROCESSCOUNT + ".web", sampleName);
+
+      // NB: Coerce sampleName to an integer because this is an integer pref.
+      Preferences.set(PREF_E10S_PROCESSCOUNT + ".web", +sampleName);
       break;
     }
   }
@@ -232,6 +246,9 @@ function getUserSample(multi) {
 
 function setCohort(cohortName) {
   Preferences.set(PREF_COHORT_NAME, cohortName);
+  if (cohortName != "unsupportedChannel") {
+    TelemetryEnvironment.setExperimentActive("e10sCohort", cohortName);
+  }
   try {
     if (Ci.nsICrashReporter) {
       Services.appinfo.QueryInterface(Ci.nsICrashReporter).annotateCrashReport("E10SCohort", cohortName);
@@ -242,7 +259,8 @@ function setCohort(cohortName) {
 function optedIn() {
   let e10s = Preferences.get(PREF_E10S_OPTED_IN, false) ||
              Preferences.get(PREF_E10S_FORCE_ENABLED, false);
-  let multi = Preferences.isSet(PREF_E10S_PROCESSCOUNT);
+  let multi = Preferences.isSet(PREF_E10S_PROCESSCOUNT) ||
+             !Preferences.get(PREF_USE_DEFAULT_PERF_SETTINGS, true);
   return { e10s, multi };
 }
 

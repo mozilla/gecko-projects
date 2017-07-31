@@ -168,13 +168,8 @@
             "type": "array",
             "default": [],
             "items": {
-              "choices": [
-                { "$ref": "Permission" },
-                {
-                  "type": "string",
-                  "deprecated": "Unknown permission ${value}"
-                }
-              ]
+              "$ref": "Permission",
+              "onError": "warn"
             },
             "optional": true
           },
@@ -222,6 +217,25 @@
         "additionalProperties": { "$ref": "UnrecognizedProperty" }
       },
       {
+        "id": "ThemeIcons",
+        "type": "object",
+        "properties": {
+          "light": {
+            "$ref": "ExtensionURL",
+            "description": "A light icon to use for dark themes"
+          },
+          "dark": {
+            "$ref": "ExtensionURL",
+            "description": "The dark icon to use for light themes"
+          },
+          "size": {
+            "type": "integer",
+            "description": "The size of the icons"
+          }
+        },
+        "additionalProperties": { "$ref": "UnrecognizedProperty" }
+      },
+      {
         "id": "OptionalPermission",
         "choices": [
           {
@@ -245,7 +259,8 @@
             "type": "string",
             "enum": [
               "alarms",
-              "storage"
+              "storage",
+              "unlimitedStorage"
             ]
           }
         ]
@@ -309,7 +324,25 @@
           },
           {
             "type": "string",
-            "pattern": "^(https?|file|ftp|\\*)://(\\*|\\*\\.[^*/]+|[^*/]+)/.*$"
+            "pattern": "^(https?|wss?|file|ftp|\\*)://(\\*|\\*\\.[^*/]+|[^*/]+)/.*$"
+          },
+          {
+            "type": "string",
+            "pattern": "^file:///.*$"
+          }
+        ]
+      },
+      {
+        "id": "MatchPatternInternal",
+        "description": "Same as MatchPattern above, but includes moz-extension protocol",
+        "choices": [
+          {
+            "type": "string",
+            "enum": ["<all_urls>"]
+          },
+          {
+            "type": "string",
+            "pattern": "^(https?|wss?|file|ftp|moz-extension|\\*)://(\\*|\\*\\.[^*/]+|[^*/]+)/.*$"
           },
           {
             "type": "string",

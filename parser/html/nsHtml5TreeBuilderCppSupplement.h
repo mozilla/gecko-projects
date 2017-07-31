@@ -588,26 +588,6 @@ nsHtml5TreeBuilder::appendCharacters(nsIContentHandle* aParent, char16_t* aBuffe
 }
 
 void
-nsHtml5TreeBuilder::appendIsindexPrompt(nsIContentHandle* aParent)
-{
-  NS_PRECONDITION(aParent, "Null parent");
-
-  if (mBuilder) {
-    nsresult rv = nsHtml5TreeOperation::AppendIsindexPrompt(
-      static_cast<nsIContent*>(aParent),
-      mBuilder);
-    if (NS_FAILED(rv)) {
-      MarkAsBrokenAndRequestSuspension(rv);
-    }
-    return;
-  }
-
-  nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
-  NS_ASSERTION(treeOp, "Tree op allocation failed.");
-  treeOp->Init(eTreeOpAppendIsindexPrompt, aParent);
-}
-
-void
 nsHtml5TreeBuilder::appendComment(nsIContentHandle* aParent, char16_t* aBuffer, int32_t aStart, int32_t aLength)
 {
   NS_PRECONDITION(aBuffer, "Null buffer");
@@ -944,7 +924,6 @@ nsHtml5TreeBuilder::elementPopped(int32_t aNamespace, nsIAtom* aName, nsIContent
     // See comments in nsHtml5SpeculativeLoad.h about <picture> preloading
     mSpeculativeLoadQueue.AppendElement()->InitEndPicture();
   }
-  return;
 }
 
 void
@@ -1078,17 +1057,19 @@ nsHtml5TreeBuilder::FlushLoads()
 }
 
 void
-nsHtml5TreeBuilder::SetDocumentCharset(nsACString& aCharset, 
+nsHtml5TreeBuilder::SetDocumentCharset(NotNull<const Encoding*> aEncoding, 
                                        int32_t aCharsetSource)
 {
   if (mBuilder) {
-    mBuilder->SetDocumentCharsetAndSource(aCharset, aCharsetSource);
+    mBuilder->SetDocumentCharsetAndSource(aEncoding, aCharsetSource);
   } else if (mSpeculativeLoadStage) {
+    nsAutoCString charset;
+    aEncoding->Name(charset);
     mSpeculativeLoadQueue.AppendElement()->InitSetDocumentCharset(
-      aCharset, aCharsetSource);
+      charset, aCharsetSource);
   } else {
     mOpQueue.AppendElement()->Init(
-      eTreeOpSetDocumentCharset, aCharset, aCharsetSource);
+      eTreeOpSetDocumentCharset, aEncoding, aCharsetSource);
   }
 }
 
@@ -1103,7 +1084,7 @@ nsHtml5TreeBuilder::StreamEnded()
 }
 
 void
-nsHtml5TreeBuilder::NeedsCharsetSwitchTo(const nsACString& aCharset,
+nsHtml5TreeBuilder::NeedsCharsetSwitchTo(NotNull<const Encoding*> aEncoding,
                                          int32_t aCharsetSource,
                                          int32_t aLineNumber)
 {
@@ -1114,7 +1095,7 @@ nsHtml5TreeBuilder::NeedsCharsetSwitchTo(const nsACString& aCharset,
   nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
   NS_ASSERTION(treeOp, "Tree op allocation failed.");
   treeOp->Init(eTreeOpNeedsCharsetSwitchTo,
-               aCharset,
+               aEncoding,
                aCharsetSource,
                aLineNumber);
 }

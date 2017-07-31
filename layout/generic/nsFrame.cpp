@@ -42,10 +42,11 @@
 #include "nsFrameManager.h"
 #include "nsLayoutUtils.h"
 #include "LayoutLogging.h"
+#include "mozilla/GeckoStyleContext.h"
 #include "mozilla/GeckoRestyleManager.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/RestyleManagerInlines.h"
-
+#include "nsInlineFrame.h"
 #include "nsIDOMNode.h"
 #include "nsISelection.h"
 #include "nsISelectionPrivate.h"
@@ -82,7 +83,6 @@
 #include "SVGTextFrame.h"
 
 #include "gfxContext.h"
-#include "nsRenderingContext.h"
 #include "nsAbsoluteContainingBlock.h"
 #include "StickyScrollContainer.h"
 #include "nsFontInflationData.h"
@@ -775,7 +775,7 @@ nsFrame::DestroyFrom(nsIFrame* aDestructRoot)
       GeckoRestyleManager::ReframingStyleContexts* rsc =
         presContext->RestyleManager()->AsGecko()->GetReframingStyleContexts();
       if (rsc) {
-        rsc->Put(mContent, mStyleContext);
+        rsc->Put(mContent, mStyleContext->AsGecko());
       }
     }
   }
@@ -867,32 +867,35 @@ AddAndRemoveImageAssociations(nsFrame* aFrame,
 
   if (aOldLayers) {
     NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT(i, (*aOldLayers)) {
+      const nsStyleImage& oldImage = aOldLayers->mLayers[i].mImage;
+      if (oldImage.GetType() != eStyleImageType_Image ||
+          !oldImage.IsResolved()) {
+        continue;
+      }
+
       // If there is an image in oldBG that's not in newBG, drop it.
       if (i >= aNewLayers->mImageCount ||
-          !aOldLayers->mLayers[i].mImage.ImageDataEquals(
-            aNewLayers->mLayers[i].mImage)) {
-        const nsStyleImage& oldImage = aOldLayers->mLayers[i].mImage;
-        if (oldImage.GetType() != eStyleImageType_Image) {
-          continue;
-        }
+          !oldImage.ImageDataEquals(aNewLayers->mLayers[i].mImage)) {
 
-        if (imgRequestProxy* req = oldImage.GetImageData()) {
-          imageLoader->DisassociateRequestFromFrame(req, aFrame);
+        if (aFrame->HasImageRequest()) {
+          if (imgRequestProxy* req = oldImage.GetImageData()) {
+            imageLoader->DisassociateRequestFromFrame(req, aFrame);
+          }
         }
       }
     }
   }
 
   NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT(i, (*aNewLayers)) {
+    const nsStyleImage& newImage = aNewLayers->mLayers[i].mImage;
+    if (newImage.GetType() != eStyleImageType_Image ||
+        !newImage.IsResolved()) {
+      continue;
+    }
+
     // If there is an image in newBG that's not in oldBG, add it.
     if (!aOldLayers || i >= aOldLayers->mImageCount ||
-        !aNewLayers->mLayers[i].mImage.ImageDataEquals(
-          aOldLayers->mLayers[i].mImage)) {
-      const nsStyleImage& newImage = aNewLayers->mLayers[i].mImage;
-      if (newImage.GetType() != eStyleImageType_Image) {
-        continue;
-      }
-
+        !newImage.ImageDataEquals(aOldLayers->mLayers[i].mImage)) {
       if (imgRequestProxy* req = newImage.GetImageData()) {
         imageLoader->AssociateRequestToFrame(req, aFrame);
       }
@@ -1011,7 +1014,7 @@ nsFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
   // they won't have the correct size for the border either.
   if (oldBorderImage != newBorderImage) {
     // stop and restart the image loading/notification
-    if (oldBorderImage) {
+    if (oldBorderImage && HasImageRequest()) {
       imageLoader->DisassociateRequestFromFrame(oldBorderImage, this);
     }
     if (newBorderImage) {
@@ -1433,7 +1436,8 @@ nsIFrame::Combines3DTransformWithAncestors(const nsStyleDisplay* aStyleDisplay,
                                            EffectSet* aEffectSet) const
 {
   MOZ_ASSERT(aStyleDisplay == StyleDisplay());
-  if (!GetParent() || !GetParent()->Extend3DContext(aEffectSet)) {
+  nsIFrame* parent = GetFlattenedTreeParentPrimaryFrame();
+  if (!parent || !parent->Extend3DContext()) {
     return false;
   }
   return IsTransformed(aStyleDisplay,aEffectSet) ||
@@ -1997,14 +2001,14 @@ public:
 #endif
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx) override;
+                     gfxContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("SelectionOverlay", TYPE_SELECTION_OVERLAY)
 private:
   int16_t mSelectionValue;
 };
 
 void nsDisplaySelectionOverlay::Paint(nsDisplayListBuilder* aBuilder,
-                                      nsRenderingContext* aCtx)
+                                      gfxContext* aCtx)
 {
   DrawTarget& aDrawTarget = *aCtx->GetDrawTarget();
 
@@ -2361,9 +2365,9 @@ FrameParticipatesIn3DContext(nsIFrame* aAncestor, nsIFrame* aDescendant) {
   MOZ_ASSERT(aAncestor != aDescendant);
   MOZ_ASSERT(aAncestor->Extend3DContext());
   nsIFrame* frame;
-  for (frame = nsLayoutUtils::GetCrossDocParentFrame(aDescendant);
+  for (frame = aDescendant->GetFlattenedTreeParentPrimaryFrame();
        frame && aAncestor != frame;
-       frame = nsLayoutUtils::GetCrossDocParentFrame(frame)) {
+       frame = frame->GetFlattenedTreeParentPrimaryFrame()) {
     if (!frame->Extend3DContext()) {
       return false;
     }
@@ -3232,7 +3236,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
 
   // Child is composited if it's transformed, partially transparent, or has
   // SVG effects or a blend mode..
-  EffectSet* effectSet = EffectSet::GetEffectSet(this);
+  EffectSet* effectSet = EffectSet::GetEffectSet(child);
   const nsStyleDisplay* disp = child->StyleDisplay();
   const nsStyleEffects* effects = child->StyleEffects();
   const nsStylePosition* pos = child->StylePosition();
@@ -4856,7 +4860,7 @@ nsFrame::MarkIntrinsicISizesDirty()
 }
 
 /* virtual */ nscoord
-nsFrame::GetMinISize(nsRenderingContext *aRenderingContext)
+nsFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   nscoord result = 0;
   DISPLAY_MIN_WIDTH(this, result);
@@ -4864,7 +4868,7 @@ nsFrame::GetMinISize(nsRenderingContext *aRenderingContext)
 }
 
 /* virtual */ nscoord
-nsFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
+nsFrame::GetPrefISize(gfxContext *aRenderingContext)
 {
   nscoord result = 0;
   DISPLAY_PREF_WIDTH(this, result);
@@ -4872,7 +4876,7 @@ nsFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
 }
 
 /* virtual */ void
-nsFrame::AddInlineMinISize(nsRenderingContext* aRenderingContext,
+nsFrame::AddInlineMinISize(gfxContext* aRenderingContext,
                            nsIFrame::InlineMinISizeData* aData)
 {
   nscoord isize = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
@@ -4881,7 +4885,7 @@ nsFrame::AddInlineMinISize(nsRenderingContext* aRenderingContext,
 }
 
 /* virtual */ void
-nsFrame::AddInlinePrefISize(nsRenderingContext* aRenderingContext,
+nsFrame::AddInlinePrefISize(gfxContext* aRenderingContext,
                             nsIFrame::InlinePrefISizeData* aData)
 {
   nscoord isize = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
@@ -5180,7 +5184,7 @@ nsFrame::GetIntrinsicRatio()
 
 /* virtual */
 LogicalSize
-nsFrame::ComputeSize(nsRenderingContext* aRenderingContext,
+nsFrame::ComputeSize(gfxContext*         aRenderingContext,
                      WritingMode         aWM,
                      const LogicalSize&  aCBSize,
                      nscoord             aAvailableISize,
@@ -5441,7 +5445,7 @@ nsFrame::ComputeSize(nsRenderingContext* aRenderingContext,
 }
 
 LogicalSize
-nsFrame::ComputeSizeWithIntrinsicDimensions(nsRenderingContext*  aRenderingContext,
+nsFrame::ComputeSizeWithIntrinsicDimensions(gfxContext*          aRenderingContext,
                                             WritingMode          aWM,
                                             const IntrinsicSize& aIntrinsicSize,
                                             nsSize               aIntrinsicRatio,
@@ -5891,7 +5895,7 @@ nsFrame::ComputeSimpleTightBounds(DrawTarget* aDrawTarget) const
 }
 
 /* virtual */ nsresult
-nsIFrame::GetPrefWidthTightBounds(nsRenderingContext* aContext,
+nsIFrame::GetPrefWidthTightBounds(gfxContext* aContext,
                                   nscoord* aX,
                                   nscoord* aXMost)
 {
@@ -5900,7 +5904,7 @@ nsIFrame::GetPrefWidthTightBounds(nsRenderingContext* aContext,
 
 /* virtual */
 LogicalSize
-nsFrame::ComputeAutoSize(nsRenderingContext*         aRenderingContext,
+nsFrame::ComputeAutoSize(gfxContext*                 aRenderingContext,
                          WritingMode                 aWM,
                          const mozilla::LogicalSize& aCBSize,
                          nscoord                     aAvailableISize,
@@ -5922,7 +5926,7 @@ nsFrame::ComputeAutoSize(nsRenderingContext*         aRenderingContext,
 }
 
 nscoord
-nsFrame::ShrinkWidthToFit(nsRenderingContext* aRenderingContext,
+nsFrame::ShrinkWidthToFit(gfxContext*         aRenderingContext,
                           nscoord             aISizeInCB,
                           ComputeSizeFlags    aFlags)
 {
@@ -5947,7 +5951,7 @@ nsFrame::ShrinkWidthToFit(nsRenderingContext* aRenderingContext,
 }
 
 nscoord
-nsIFrame::ComputeISizeValue(nsRenderingContext* aRenderingContext,
+nsIFrame::ComputeISizeValue(gfxContext*         aRenderingContext,
                             nscoord             aContainingBlockISize,
                             nscoord             aContentEdgeToBoxSizing,
                             nscoord             aBoxSizingToMarginEdge,
@@ -6411,6 +6415,16 @@ nsIFrame::GetNearestWidget(nsPoint& aOffset) const
     GetClosestView(&offsetToView)->GetNearestWidget(&offsetToWidget);
   aOffset = offsetToView + offsetToWidget;
   return widget;
+}
+
+nsIFrame*
+nsIFrame::GetFlattenedTreeParentPrimaryFrame() const
+{
+  if (!GetContent()) {
+    return nullptr;
+  }
+  nsIContent* parent = GetContent()->GetFlattenedTreeParent();
+  return parent ? parent->GetPrimaryFrame() : nullptr;
 }
 
 Matrix4x4
@@ -7320,10 +7334,10 @@ nsIFrame::ListGeneric(nsACString& aTo, const char* aPrefix, uint32_t aFlags) con
     aTo += nsPrintfCString(" perspective");
   }
   if (Extend3DContext()) {
-    aTo += nsPrintfCString(" preserves-3d-children");
+    aTo += nsPrintfCString(" extend-3d");
   }
   if (Combines3DTransformWithAncestors()) {
-    aTo += nsPrintfCString(" preserves-3d");
+    aTo += nsPrintfCString(" combines-3d-transform-with-ancestors");
   }
   if (mContent) {
     aTo += nsPrintfCString(" [content=%p]", static_cast<void*>(mContent));
@@ -7336,7 +7350,7 @@ nsIFrame::ListGeneric(nsACString& aTo, const char* aPrefix, uint32_t aFlags) con
       pseudoTag->ToString(atomString);
       aTo += nsPrintfCString("%s", NS_LossyConvertUTF16toASCII(atomString).get());
     }
-    if (mStyleContext->StyleSource().IsGeckoRuleNodeOrNull()) {
+    if (mStyleContext->IsGecko()) {
       if (!mStyleContext->GetParent() ||
           (GetParent() && GetParent()->StyleContext() != mStyleContext->GetParent())) {
         aTo += nsPrintfCString("^%p", mStyleContext->GetParent());
@@ -8163,11 +8177,14 @@ nsIFrame::PeekOffset(nsPeekOffsetStruct* aPos)
         bool movingInFrameDirection =
           IsMovingInFrameDirection(current, aPos->mDirection, aPos->mVisual);
 
-        if (eatingNonRenderableWS)
+        if (eatingNonRenderableWS) {
           peekSearchState = current->PeekOffsetNoAmount(movingInFrameDirection, &offset);
-        else
-          peekSearchState = current->PeekOffsetCharacter(movingInFrameDirection, &offset,
-                                              aPos->mAmount == eSelectCluster);
+        } else {
+          PeekOffsetCharacterOptions options;
+          options.mRespectClusters = aPos->mAmount == eSelectCluster;
+          peekSearchState = current->PeekOffsetCharacter(movingInFrameDirection,
+                                                         &offset, options);
+        }
 
         movedOverNonSelectableText |= (peekSearchState == CONTINUE_UNSELECTABLE);
 
@@ -8501,7 +8518,7 @@ nsFrame::PeekOffsetNoAmount(bool aForward, int32_t* aOffset)
 
 nsIFrame::FrameSearchResult
 nsFrame::PeekOffsetCharacter(bool aForward, int32_t* aOffset,
-                             bool aRespectClusters)
+                             PeekOffsetCharacterOptions aOptions)
 {
   NS_ASSERTION (aOffset && *aOffset <= 1, "aOffset out of range");
   int32_t startOffset = *aOffset;
@@ -9277,7 +9294,7 @@ nsIFrame::RecomputePerspectiveChildrenOverflow(const nsIFrame* aStartFrame,
         continue; // frame does not maintain overflow rects
       }
       if (child->HasPerspective(aEffectSet)) {
-        nsOverflowAreas* overflow = 
+        nsOverflowAreas* overflow =
           child->GetProperty(nsIFrame::InitialOverflowProperty());
         nsRect bounds(nsPoint(0, 0), child->GetSize());
         if (overflow) {
@@ -9793,7 +9810,7 @@ nsFrame::RefreshSizeCache(nsBoxLayoutState& aState)
   //    line height. This can be done with the line iterator.
 
   // if we do have a rendering context
-  nsRenderingContext* rendContext = aState.GetRenderingContext();
+  gfxContext* rendContext = aState.GetRenderingContext();
   if (rendContext) {
     nsPresContext* presContext = aState.PresContext();
 
@@ -10008,7 +10025,7 @@ nsFrame::DoXULLayout(nsBoxLayoutState& aState)
 {
   nsRect ourRect(mRect);
 
-  nsRenderingContext* rendContext = aState.GetRenderingContext();
+  gfxContext* rendContext = aState.GetRenderingContext();
   nsPresContext* presContext = aState.PresContext();
   WritingMode ourWM = GetWritingMode();
   const WritingMode outerWM = aState.OuterReflowInput() ?
@@ -10089,7 +10106,7 @@ void
 nsFrame::BoxReflow(nsBoxLayoutState&        aState,
                    nsPresContext*           aPresContext,
                    ReflowOutput&     aDesiredSize,
-                   nsRenderingContext*     aRenderingContext,
+                   gfxContext*              aRenderingContext,
                    nscoord                  aX,
                    nscoord                  aY,
                    nscoord                  aWidth,
@@ -10339,14 +10356,13 @@ nsFrame::BoxMetrics() const
 }
 
 void
-nsFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
-                                   ServoStyleSet& aStyleSet,
-                                   nsStyleChangeList& aChangeList,
-                                   nsChangeHint aHintForThisFrame)
+nsIFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
+                                    ServoRestyleState& aRestyleState)
 {
   MOZ_ASSERT(aChildFrame->GetParent() == this,
              "This should only be used for children!");
-  MOZ_ASSERT(aChildFrame->GetContent() == GetContent(),
+  MOZ_ASSERT(!GetContent() || !aChildFrame->GetContent() ||
+             aChildFrame->GetContent() == GetContent(),
              "What content node is it a frame for?");
   MOZ_ASSERT(!aChildFrame->GetPrevContinuation(),
              "Only first continuations should end up here");
@@ -10359,28 +10375,47 @@ nsFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
              "Why did the caller bother calling us?");
 
   // Anon boxes inherit from their parent; that's us.
-  RefPtr<nsStyleContext> newContext =
-    aStyleSet.ResolveInheritingAnonymousBoxStyle(pseudo, StyleContext());
+  RefPtr<ServoStyleContext> newContext =
+    aRestyleState.StyleSet().ResolveInheritingAnonymousBoxStyle(pseudo,
+                                                                StyleContext()->AsServo());
 
   nsChangeHint childHint =
-    UpdateStyleOfOwnedChildFrame(aChildFrame, newContext, aChangeList);
+    UpdateStyleOfOwnedChildFrame(aChildFrame, newContext, aRestyleState);
 
   // Now that we've updated the style on aChildFrame, check whether it itself
   // has anon boxes to deal with.
-  aChildFrame->UpdateStyleOfOwnedAnonBoxes(aStyleSet, aChangeList, childHint);
+  ServoRestyleState childrenState(
+      *aChildFrame, aRestyleState, childHint, ServoRestyleState::Type::InFlow);
+  aChildFrame->UpdateStyleOfOwnedAnonBoxes(childrenState);
+
+  // Assuming anon boxes don't have ::backdrop associated with them... if that
+  // ever changes, we'd need to handle that here, like we do in
+  // ServoRestyleManager::ProcessPostTraversal
+
+  // We do need to handle block pseudo-elements here, though.  Especially list
+  // bullets.
+  if (aChildFrame->IsFrameOfType(nsIFrame::eBlockFrame)) {
+    auto block = static_cast<nsBlockFrame*>(aChildFrame);
+    block->UpdatePseudoElementStyles(childrenState);
+  }
 }
 
-nsChangeHint
-nsIFrame::UpdateStyleOfOwnedChildFrame(nsIFrame* aChildFrame,
-                                       nsStyleContext* aNewStyleContext,
-                                       nsStyleChangeList& aChangeList)
+/* static */ nsChangeHint
+nsIFrame::UpdateStyleOfOwnedChildFrame(
+  nsIFrame* aChildFrame,
+  nsStyleContext* aNewStyleContext,
+  ServoRestyleState& aRestyleState,
+  const Maybe<nsStyleContext*>& aContinuationStyleContext)
 {
+  MOZ_ASSERT(!aChildFrame->GetAdditionalStyleContext(0),
+             "We don't handle additional style contexts here");
+
   // Figure out whether we have an actual change.  It's important that we do
   // this, for several reasons:
   //
   // 1) Even if all the child's changes are due to properties it inherits from
   //    us, it's possible that no one ever asked us for those style structs and
-  //    hence changes to them aren't reflected in aHintForThisFrame at all.
+  //    hence changes to them aren't reflected in the changes handled at all.
   //
   // 2) Content can change stylesheets that change the styles of pseudos, and
   //    extensions can add/remove stylesheets that change the styles of
@@ -10390,17 +10425,40 @@ nsIFrame::UpdateStyleOfOwnedChildFrame(nsIFrame* aChildFrame,
     aNewStyleContext,
     &equalStructs,
     &samePointerStructs);
+
+  // CalcStyleDifference will handle caching structs on the new style context,
+  // but only if we're not on a style worker thread.
+  MOZ_ASSERT(!ServoStyleSet::IsInServoTraversal(),
+             "if we can get in here from style worker threads, then we need "
+             "a ResolveSameStructsAs call to ensure structs are cached on "
+             "aNewStyleContext");
+
+  // If aChildFrame is out of flow, then aRestyleState's "changes handled by the
+  // parent" doesn't apply to it, because it may have some other parent in the
+  // frame tree.
+  if (!aChildFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW)) {
+    childHint = NS_RemoveSubsumedHints(
+      childHint, aRestyleState.ChangesHandledFor(*aChildFrame));
+  }
   if (childHint) {
     if (childHint & nsChangeHint_ReconstructFrame) {
       // If we generate a reconstruct here, remove any non-reconstruct hints we
       // may have already generated for this content.
-      aChangeList.PopChangesForContent(aChildFrame->GetContent());
+      aRestyleState.ChangeList().PopChangesForContent(
+        aChildFrame->GetContent());
     }
-    aChangeList.AppendChange(aChildFrame, aChildFrame->GetContent(), childHint);
+    aRestyleState.ChangeList().AppendChange(
+      aChildFrame, aChildFrame->GetContent(), childHint);
   }
 
-  for (nsIFrame* kid = aChildFrame; kid; kid = kid->GetNextContinuation()) {
-    kid->SetStyleContext(aNewStyleContext);
+  aChildFrame->SetStyleContext(aNewStyleContext);
+  nsStyleContext* continuationStyle =
+    aContinuationStyleContext ? *aContinuationStyleContext : aNewStyleContext;
+  for (nsIFrame* kid = aChildFrame->GetNextContinuation();
+       kid;
+       kid = kid->GetNextContinuation()) {
+    MOZ_ASSERT(!kid->GetAdditionalStyleContext(0));
+    kid->SetStyleContext(continuationStyle);
   }
 
   return childHint;
@@ -10640,14 +10698,146 @@ nsIFrame::IsScrolledOutOfView()
   return IsFrameScrolledOutOfView(this);
 }
 
-/* virtual */
+gfx::Matrix
+nsIFrame::ComputeWidgetTransform()
+{
+  const nsStyleUIReset* uiReset = StyleUIReset();
+  if (!uiReset->mSpecifiedWindowTransform) {
+    return gfx::Matrix();
+  }
+
+  nsStyleTransformMatrix::TransformReferenceBox refBox;
+  refBox.Init(GetSize());
+
+  nsPresContext* presContext = PresContext();
+  int32_t appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
+  RuleNodeCacheConditions dummy;
+  bool dummyBool;
+  gfx::Matrix4x4 matrix =
+    nsStyleTransformMatrix::ReadTransforms(uiReset->mSpecifiedWindowTransform->mHead,
+                                           StyleContext(),
+                                           presContext,
+                                           dummy,
+                                           refBox,
+                                           float(appUnitsPerDevPixel),
+                                           &dummyBool);
+
+  // Apply the -moz-window-transform-origin translation to the matrix.
+  Point transformOrigin =
+    nsStyleTransformMatrix::Convert2DPosition(uiReset->mWindowTransformOrigin,
+                                              refBox, appUnitsPerDevPixel);
+  matrix.ChangeBasis(Point3D(transformOrigin.x, transformOrigin.y, 0));
+
+  gfx::Matrix result2d;
+  if (!matrix.CanDraw2D(&result2d)) {
+    // FIXME: It would be preferable to reject non-2D transforms at parse time.
+    NS_WARNING("-moz-window-transform does not describe a 2D transform, "
+               "but only 2d transforms are supported");
+    return gfx::Matrix();
+  }
+
+  return result2d;
+}
+
+static already_AddRefed<nsIWidget>
+GetWindowWidget(nsPresContext* aPresContext)
+{
+  // We want to obtain the widget for the window. We can't use any of these
+  // methods: nsPresContext::GetRootWidget, nsPresContext::GetNearestWidget,
+  // nsIFrame::GetNearestWidget because those deal with child widgets and
+  // there is no parent widget connection between child widgets and the
+  // window widget that contains them.
+  nsCOMPtr<nsISupports> container = aPresContext->Document()->GetContainer();
+  nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(container);
+  if (!baseWindow) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIWidget> mainWidget;
+  baseWindow->GetMainWidget(getter_AddRefs(mainWidget));
+  return mainWidget.forget();
+}
+
 void
-nsIFrame::DoUpdateStyleOfOwnedAnonBoxes(ServoStyleSet& aStyleSet,
-                                      nsStyleChangeList& aChangeList,
-                                      nsChangeHint aHintForThisFrame)
+nsIFrame::UpdateWidgetProperties()
+{
+  nsPresContext* presContext = PresContext();
+  if (presContext->IsRoot() || !presContext->IsChrome()) {
+    // Don't do anything for documents that aren't the root chrome document.
+    return;
+  }
+  nsIFrame* rootFrame =
+    presContext->FrameConstructor()->GetRootElementStyleFrame();
+  if (this != rootFrame) {
+    // Only the window's root style frame is relevant for widget properties.
+    return;
+  }
+  if (nsCOMPtr<nsIWidget> widget = GetWindowWidget(presContext)) {
+    widget->SetWindowOpacity(StyleUIReset()->mWindowOpacity);
+    widget->SetWindowTransform(ComputeWidgetTransform());
+  }
+}
+
+void
+nsIFrame::DoUpdateStyleOfOwnedAnonBoxes(ServoRestyleState& aRestyleState)
+{
+  // As a special case, we check for {ib}-split block frames here, rather
+  // than have an nsInlineFrame::AppendDirectlyOwnedAnonBoxes implementation
+  // that returns them.
+  //
+  // (If we did handle them in AppendDirectlyOwnedAnonBoxes, we would have to
+  // return *all* of the in-flow {ib}-split block frames, not just the first
+  // one.  For restyling, we really just need the first in flow, and the other
+  // user of the AppendOwnedAnonBoxes API, AllChildIterator, doesn't need to
+  // know about them at all, since these block frames never create NAC.  So we
+  // avoid any unncessary hashtable lookups for the {ib}-split frames by calling
+  // UpdateStyleOfOwnedAnonBoxesForIBSplit directly here.)
+  if (IsInlineFrame()) {
+    if ((GetStateBits() & NS_FRAME_PART_OF_IBSPLIT)) {
+      static_cast<nsInlineFrame*>(this)->UpdateStyleOfOwnedAnonBoxesForIBSplit(
+        aRestyleState);
+    }
+    return;
+  }
+
+  AutoTArray<OwnedAnonBox,4> frames;
+  AppendDirectlyOwnedAnonBoxes(frames);
+  for (OwnedAnonBox& box : frames) {
+    if (box.mUpdateStyleFn) {
+      box.mUpdateStyleFn(this, box.mAnonBoxFrame, aRestyleState);
+    } else {
+      UpdateStyleOfChildAnonBox(box.mAnonBoxFrame, aRestyleState);
+    }
+  }
+}
+
+/* virtual */ void
+nsIFrame::AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult)
 {
   MOZ_ASSERT(!(GetStateBits() & NS_FRAME_OWNS_ANON_BOXES));
   MOZ_ASSERT(false, "Why did this get called?");
+}
+
+void
+nsIFrame::DoAppendOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult)
+{
+  size_t i = aResult.Length();
+  AppendDirectlyOwnedAnonBoxes(aResult);
+
+  // After appending the directly owned anonymous boxes of this frame to
+  // aResult above, we need to check each of them to see if they own
+  // any anonymous boxes themselves.  Note that we keep progressing
+  // through aResult, looking for additional entries in aResult from these
+  // subsequent AppendDirectlyOwnedAnonBoxes calls.  (Thus we can't
+  // use a ranged for loop here.)
+
+  while (i < aResult.Length()) {
+    nsIFrame* f = aResult[i].mAnonBoxFrame;
+    if (f->GetStateBits() & NS_FRAME_OWNS_ANON_BOXES) {
+      f->AppendDirectlyOwnedAnonBoxes(aResult);
+    }
+    ++i;
+  }
 }
 
 nsIFrame::CaretPosition::CaretPosition()
@@ -10913,8 +11103,9 @@ DR_init_constraints_cookie::~DR_init_constraints_cookie()
 
 DR_init_offsets_cookie::DR_init_offsets_cookie(
                      nsIFrame*                aFrame,
-                     SizeComputationInput*        aState,
+                     SizeComputationInput*    aState,
                      const LogicalSize&       aPercentBasis,
+                     WritingMode              aCBWritingMode,
                      const nsMargin*          aMargin,
                      const nsMargin*          aPadding)
   : mFrame(aFrame)
@@ -10922,8 +11113,9 @@ DR_init_offsets_cookie::DR_init_offsets_cookie(
 {
   MOZ_COUNT_CTOR(DR_init_offsets_cookie);
   mValue = SizeComputationInput::DisplayInitOffsetsEnter(mFrame, mState,
-                                                     aPercentBasis,
-                                                     aMargin, aPadding);
+                                                         aPercentBasis,
+                                                         aCBWritingMode,
+                                                         aMargin, aPadding);
 }
 
 DR_init_offsets_cookie::~DR_init_offsets_cookie()
@@ -11873,6 +12065,7 @@ ReflowInput::DisplayInitConstraintsExit(nsIFrame* aFrame,
 SizeComputationInput::DisplayInitOffsetsEnter(nsIFrame* aFrame,
                                           SizeComputationInput* aState,
                                           const LogicalSize& aPercentBasis,
+                                          WritingMode aCBWritingMode,
                                           const nsMargin* aBorder,
                                           const nsMargin* aPadding)
 {
@@ -11889,9 +12082,10 @@ SizeComputationInput::DisplayInitOffsetsEnter(nsIFrame* aFrame,
 
     char horizPctBasisStr[16];
     char vertPctBasisStr[16];
-    WritingMode wm = aState->GetWritingMode();
-    DR_state->PrettyUC(aPercentBasis.ISize(wm), horizPctBasisStr, 16);
-    DR_state->PrettyUC(aPercentBasis.BSize(wm), vertPctBasisStr, 16);
+    DR_state->PrettyUC(aPercentBasis.ISize(aCBWritingMode),
+                       horizPctBasisStr, 16);
+    DR_state->PrettyUC(aPercentBasis.BSize(aCBWritingMode),
+                       vertPctBasisStr, 16);
     printf("InitOffsets pct_basis=%s,%s", horizPctBasisStr, vertPctBasisStr);
 
     DR_state->PrintMargin("b", aBorder);

@@ -3,18 +3,19 @@ const gHttpTestRoot = gTestRoot.replace("chrome://mochitests/content/",
                                         "http://127.0.0.1:8888/");
 
 add_task(async function() {
+  await SpecialPowers.pushPrefEnv({ set: [
+    ["plugins.click_to_play", true],
+    ["extensions.blocklist.suppressUI", true],
+    ["plugins.show_infobar", true],
+  ]});
   registerCleanupFunction(function() {
     clearAllPluginPermissions();
     setTestPluginEnabledState(Ci.nsIPluginTag.STATE_ENABLED, "Test Plug-in");
     setTestPluginEnabledState(Ci.nsIPluginTag.STATE_ENABLED, "Second Test Plug-in");
-    Services.prefs.clearUserPref("plugins.click_to_play");
-    Services.prefs.clearUserPref("extensions.blocklist.suppressUI");
     gBrowser.removeCurrentTab();
     window.focus();
   });
 
-  Services.prefs.setBoolPref("plugins.click_to_play", true);
-  Services.prefs.setBoolPref("extensions.blocklist.suppressUI", true);
   setTestPluginEnabledState(Ci.nsIPluginTag.STATE_CLICKTOPLAY, "Test Plug-in");
   setTestPluginEnabledState(Ci.nsIPluginTag.STATE_CLICKTOPLAY, "Second Test Plug-in");
 });
@@ -72,8 +73,4 @@ add_task(async function() {
   await promiseTabLoadEvent(gBrowser.selectedTab, gHttpTestRoot + "plugin_small_2.html");
   let notification = await waitForNotificationBar("plugin-hidden", gBrowser.selectedBrowser);
   ok(notification, "There should be a notification shown for the new page.");
-  // Ensure that the notification is showing information about
-  // the x-second-test plugin.
-  let label = notification.label;
-  ok(label.includes("Second Test"), "Should mention the second plugin");
 });

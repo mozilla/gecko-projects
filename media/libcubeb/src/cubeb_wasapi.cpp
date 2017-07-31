@@ -483,27 +483,21 @@ get_rate(cubeb_stream * stm)
 }
 
 uint32_t
-hns_to_ms(REFERENCE_TIME hns)
+hns_to_frames(uint32_t rate, REFERENCE_TIME hns)
 {
-  return static_cast<uint32_t>(hns / 10000);
+  return std::ceil(hns / 10000000.0 * rate);
 }
 
 uint32_t
 hns_to_frames(cubeb_stream * stm, REFERENCE_TIME hns)
 {
-  return hns_to_ms(hns * get_rate(stm)) / 1000;
-}
-
-uint32_t
-hns_to_frames(uint32_t rate, REFERENCE_TIME hns)
-{
-  return hns_to_ms(hns * rate) / 1000;
+  return hns_to_frames(get_rate(stm), hns);
 }
 
 REFERENCE_TIME
 frames_to_hns(cubeb_stream * stm, uint32_t frames)
 {
-   return frames * 1000 / get_rate(stm);
+  return std::ceil(frames * 10000000.0 / get_rate(stm));
 }
 
 /* This returns the size of a frame in the stream, before the eventual upmix
@@ -1769,7 +1763,8 @@ wasapi_stream_init(cubeb * context, cubeb_stream ** stream,
     stm->output_stream_params = *output_stream_params;
     stm->output_device = utf8_to_wstr(reinterpret_cast<char const *>(output_device));
     // Make sure the layout matches the channel count.
-    XASSERT(stm->output_stream_params.channels == CUBEB_CHANNEL_LAYOUT_MAPS[stm->output_stream_params.layout].channels);
+    XASSERT(stm->output_stream_params.layout == CUBEB_LAYOUT_UNDEFINED ||
+            stm->output_stream_params.channels == CUBEB_CHANNEL_LAYOUT_MAPS[stm->output_stream_params.layout].channels);
   }
 
   switch (output_stream_params ? output_stream_params->format : input_stream_params->format) {
@@ -2010,6 +2005,17 @@ int wasapi_stream_stop(cubeb_stream * stm)
     return CUBEB_ERROR;
   }
 
+  return CUBEB_OK;
+}
+
+int wasapi_stream_reset_default_device(cubeb_stream * stm)
+{
+  XASSERT(stm && stm->reconfigure_event);
+  BOOL ok = SetEvent(stm->reconfigure_event);
+  if (!ok) {
+    LOG("SetEvent on reconfigure_event failed: %lx", GetLastError());
+    return CUBEB_ERROR;
+  }
   return CUBEB_OK;
 }
 
@@ -2337,6 +2343,7 @@ cubeb_ops const wasapi_ops = {
   /*.stream_destroy =*/ wasapi_stream_destroy,
   /*.stream_start =*/ wasapi_stream_start,
   /*.stream_stop =*/ wasapi_stream_stop,
+  /*.stream_reset_default_device =*/ wasapi_stream_reset_default_device,
   /*.stream_get_position =*/ wasapi_stream_get_position,
   /*.stream_get_latency =*/ wasapi_stream_get_latency,
   /*.stream_set_volume =*/ wasapi_stream_set_volume,

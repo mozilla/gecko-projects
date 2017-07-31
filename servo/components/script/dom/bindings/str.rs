@@ -4,12 +4,14 @@
 
 //! The `ByteString` struct.
 
+use cssparser::CowRcStr;
 use html5ever::{LocalName, Namespace};
 use servo_atoms::Atom;
 use std::ascii::AsciiExt;
 use std::borrow::{Borrow, Cow, ToOwned};
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::marker::PhantomData;
 use std::ops;
 use std::ops::{Deref, DerefMut};
 use std::str;
@@ -113,63 +115,6 @@ pub fn is_token(s: &[u8]) -> bool {
     })
 }
 
-/// Returns whether the language is matched, as defined by
-/// [RFC 4647](https://tools.ietf.org/html/rfc4647#section-3.3.2).
-pub fn extended_filtering(tag: &str, range: &str) -> bool {
-    let lang_ranges: Vec<&str> = range.split(',').collect();
-
-    lang_ranges.iter().any(|&lang_range| {
-        // step 1
-        let range_subtags: Vec<&str> = lang_range.split('\x2d').collect();
-        let tag_subtags: Vec<&str> = tag.split('\x2d').collect();
-
-        let mut range_iter = range_subtags.iter();
-        let mut tag_iter = tag_subtags.iter();
-
-        // step 2
-        // Note: [Level-4 spec](https://drafts.csswg.org/selectors/#lang-pseudo) check for wild card
-        if let (Some(range_subtag), Some(tag_subtag)) = (range_iter.next(), tag_iter.next()) {
-            if !(range_subtag.eq_ignore_ascii_case(tag_subtag) || range_subtag.eq_ignore_ascii_case("*")) {
-                return false;
-            }
-        }
-
-        let mut current_tag_subtag = tag_iter.next();
-
-        // step 3
-        for range_subtag in range_iter {
-            // step 3a
-            if range_subtag.eq_ignore_ascii_case("*") {
-                continue;
-            }
-            match current_tag_subtag.clone() {
-                Some(tag_subtag) => {
-                    // step 3c
-                    if range_subtag.eq_ignore_ascii_case(tag_subtag) {
-                        current_tag_subtag = tag_iter.next();
-                        continue;
-                    } else {
-                        // step 3d
-                        if tag_subtag.len() == 1 {
-                            return false;
-                        } else {
-                            // else step 3e - continue with loop
-                            current_tag_subtag = tag_iter.next();
-                            if current_tag_subtag.is_none() {
-                                return false;
-                            }
-                        }
-                    }
-                },
-                // step 3b
-                None => { return false; }
-            }
-        }
-        // step 4
-        true
-    })
-}
-
 
 /// A DOMString.
 ///
@@ -208,19 +153,17 @@ pub fn extended_filtering(tag: &str, range: &str) -> bool {
 /// This type is currently `!Send`, in order to help with an independent
 /// experiment to store `JSString`s rather than Rust `String`s.
 #[derive(Clone, Debug, Eq, Hash, HeapSizeOf, Ord, PartialEq, PartialOrd)]
-pub struct DOMString(String);
-
-impl !Send for DOMString {}
+pub struct DOMString(String, PhantomData<*const ()>);
 
 impl DOMString {
     /// Creates a new `DOMString`.
     pub fn new() -> DOMString {
-        DOMString(String::new())
+        DOMString(String::new(), PhantomData)
     }
 
     /// Creates a new `DOMString` from a `String`.
     pub fn from_string(s: String) -> DOMString {
-        DOMString(s)
+        DOMString(s, PhantomData)
     }
 
     /// Appends a given string slice onto the end of this String.
@@ -253,7 +196,7 @@ impl Borrow<str> for DOMString {
 
 impl Default for DOMString {
     fn default() -> Self {
-        DOMString(String::new())
+        DOMString(String::new(), PhantomData)
     }
 }
 
@@ -300,7 +243,7 @@ impl<'a> PartialEq<&'a str> for DOMString {
 
 impl From<String> for DOMString {
     fn from(contents: String) -> DOMString {
-        DOMString(contents)
+        DOMString(contents, PhantomData)
     }
 }
 
@@ -351,6 +294,12 @@ impl Into<Vec<u8>> for DOMString {
 
 impl<'a> Into<Cow<'a, str>> for DOMString {
     fn into(self) -> Cow<'a, str> {
+        self.0.into()
+    }
+}
+
+impl<'a> Into<CowRcStr<'a>> for DOMString {
+    fn into(self) -> CowRcStr<'a> {
         self.0.into()
     }
 }

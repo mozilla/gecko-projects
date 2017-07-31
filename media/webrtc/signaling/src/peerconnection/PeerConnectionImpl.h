@@ -509,25 +509,13 @@ public:
     delete[] tmp;
   }
 
-  NS_IMETHODIMP GetLocalDescription(char** aSDP);
+  NS_IMETHODIMP GetLocalDescription(nsAString& aSDP);
+  NS_IMETHODIMP GetCurrentLocalDescription(nsAString& aSDP);
+  NS_IMETHODIMP GetPendingLocalDescription(nsAString& aSDP);
 
-  void GetLocalDescription(nsAString& aSDP)
-  {
-    char *tmp;
-    GetLocalDescription(&tmp);
-    aSDP.AssignASCII(tmp);
-    delete[] tmp;
-  }
-
-  NS_IMETHODIMP GetRemoteDescription(char** aSDP);
-
-  void GetRemoteDescription(nsAString& aSDP)
-  {
-    char *tmp;
-    GetRemoteDescription(&tmp);
-    aSDP.AssignASCII(tmp);
-    delete[] tmp;
-  }
+  NS_IMETHODIMP GetRemoteDescription(nsAString& aSDP);
+  NS_IMETHODIMP GetCurrentRemoteDescription(nsAString& aSDP);
+  NS_IMETHODIMP GetPendingRemoteDescription(nsAString& aSDP);
 
   NS_IMETHODIMP SignalingState(mozilla::dom::PCImplSignalingState* aState);
 
@@ -647,7 +635,7 @@ private:
   nsresult ConfigureJsepSessionCodecs();
 
   NS_IMETHODIMP EnsureDataConnection(uint16_t aLocalPort, uint16_t aNumstreams,
-                                     uint32_t aMaxMessageSize);
+                                     uint32_t aMaxMessageSize, bool aMMSSet);
 
   nsresult CloseInt();
   nsresult CheckApiState(bool assert_ice_ready) const;
@@ -681,6 +669,7 @@ private:
       uint16_t* localport,
       uint16_t* remoteport,
       uint32_t* maxmessagesize,
+      bool*     mmsset,
       uint16_t* level) const;
 
   static void DeferredAddTrackToJsepSession(const std::string& pcHandle,
@@ -738,7 +727,7 @@ private:
 
   nsCOMPtr<nsPIDOMWindowInner> mWindow;
 
-  // The SDP sent in from JS - here for debugging.
+  // The SDP sent in from JS
   std::string mLocalRequestedSDP;
   std::string mRemoteRequestedSDP;
 
@@ -788,12 +777,6 @@ private:
   // Start time of call used for Telemetry
   mozilla::TimeStamp mStartTime;
 
-  // Temporary: used to prevent multiple audio streams or multiple video streams
-  // in a single PC. This is tied up in the IETF discussion around proper
-  // representation of multiple streams in SDP, and strongly related to
-  // Bug 840728.
-  int mNumAudioStreams;
-  int mNumVideoStreams;
   bool mHaveConfiguredCodecs;
 
   bool mHaveDataStream;

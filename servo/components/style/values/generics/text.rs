@@ -8,12 +8,30 @@ use app_units::Au;
 use cssparser::Parser;
 use parser::ParserContext;
 use properties::animated_properties::Animatable;
-use std::fmt;
-use style_traits::ToCss;
+use style_traits::ParseError;
+use values::animated::ToAnimatedZero;
 
-/// A generic spacing value for the `letter-spacing` and `word-spacing` properties.alloc
+/// A generic value for the `initial-letter` property.
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq, ToComputedValue)]
+#[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq, ToComputedValue, ToCss)]
+pub enum InitialLetter<Number, Integer> {
+    /// `normal`
+    Normal,
+    /// `<number> <integer>?`
+    Specified(Number, Option<Integer>),
+}
+
+impl<N, I> InitialLetter<N, I> {
+    /// Returns `normal`.
+    #[inline]
+    pub fn normal() -> Self {
+        InitialLetter::Normal
+    }
+}
+
+/// A generic spacing value for the `letter-spacing` and `word-spacing` properties.
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq, ToComputedValue, ToCss)]
 pub enum Spacing<Value> {
     /// `normal`
     Normal,
@@ -30,12 +48,12 @@ impl<Value> Spacing<Value> {
 
     /// Parses.
     #[inline]
-    pub fn parse_with<F>(
+    pub fn parse_with<'i, 't, F>(
         context: &ParserContext,
-        input: &mut Parser,
+        input: &mut Parser<'i, 't>,
         parse: F)
-        -> Result<Self, ()>
-        where F: FnOnce(&ParserContext, &mut Parser) -> Result<Value, ()>
+        -> Result<Self, ParseError<'i>>
+        where F: FnOnce(&ParserContext, &mut Parser<'i, 't>) -> Result<Value, ParseError<'i>>
     {
         if input.try(|i| i.expect_ident_matching("normal")).is_ok() {
             return Ok(Spacing::Normal);
@@ -76,22 +94,17 @@ impl<Value> Animatable for Spacing<Value>
     }
 }
 
-impl<Value> ToCss for Spacing<Value>
-    where Value: ToCss,
+impl<V> ToAnimatedZero for Spacing<V>
+where
+    V: From<Au>,
 {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result
-        where W: fmt::Write
-    {
-        match *self {
-            Spacing::Normal => dest.write_str("normal"),
-            Spacing::Value(ref value) => value.to_css(dest),
-        }
-    }
+    #[inline]
+    fn to_animated_zero(&self) -> Result<Self, ()> { Err(()) }
 }
 
 /// A generic value for the `line-height` property.
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq)]
+#[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq, ToCss)]
 pub enum LineHeight<Number, LengthOrPercentage> {
     /// `normal`
     Normal,
@@ -109,21 +122,5 @@ impl<N, L> LineHeight<N, L> {
     #[inline]
     pub fn normal() -> Self {
         LineHeight::Normal
-    }
-}
-
-impl<N, L> ToCss for LineHeight<N, L>
-    where N: ToCss, L: ToCss,
-{
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result
-        where W: fmt::Write,
-    {
-        match *self {
-            LineHeight::Normal => dest.write_str("normal"),
-            #[cfg(feature = "gecko")]
-            LineHeight::MozBlockHeight => dest.write_str("-moz-block-height"),
-            LineHeight::Number(ref number) => number.to_css(dest),
-            LineHeight::Length(ref value) => value.to_css(dest),
-        }
     }
 }

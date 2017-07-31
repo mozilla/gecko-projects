@@ -11,6 +11,7 @@
 #include <d2d1_1.h>
 #include "PathD2D.h"
 #include "HelpersD2D.h"
+#include "mozilla/StaticPtr.h"
 
 #include <vector>
 #include <sstream>
@@ -36,6 +37,8 @@ public:
   virtual DrawTargetType GetType() const override { return DrawTargetType::HARDWARE_RASTER; }
   virtual BackendType GetBackendType() const override { return BackendType::DIRECT2D1_1; }
   virtual already_AddRefed<SourceSurface> Snapshot() override;
+  virtual already_AddRefed<SourceSurface> IntoLuminanceSource(LuminanceType aLuminanceType,
+                                                              float aOpacity) override;
   virtual IntSize GetSize() override { return mSize; }
 
   virtual void Flush() override;
@@ -151,9 +154,8 @@ public:
     return GetImageForSurface(aSurface, mat, aExtendMode, nullptr);
   }
 
-  static ID2D1Factory1 *factory();
+  static RefPtr<ID2D1Factory1> factory();
   static void CleanupD2D();
-  static IDWriteFactory *GetDWriteFactory();
 
   operator std::string() const {
     std::stringstream stream;
@@ -291,10 +293,13 @@ private:
   // we can avoid the subsequent hang. (See bug 1293586)
   bool mDidComplexBlendWithListInList;
 
-  static ID2D1Factory1 *mFactory;
-  static IDWriteFactory *mDWriteFactory;
+  static StaticRefPtr<ID2D1Factory1> mFactory;
   // This value is uesed to verify if the DrawTarget is created by a stale device.
   uint32_t mDeviceSeq;
+
+  // List of effects we use
+  bool EnsureLuminanceEffect();
+  RefPtr<ID2D1Effect> mLuminanceEffect;
 };
 
 }

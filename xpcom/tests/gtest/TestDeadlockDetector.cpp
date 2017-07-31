@@ -12,6 +12,7 @@
 #include "nsMemory.h"
 
 #include "mozilla/CondVar.h"
+#include "mozilla/RecursiveMutex.h"
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/Mutex.h"
 
@@ -136,6 +137,8 @@ TEST_F(TESTNAME(DeadlockDetectorTest), TESTNAME(Sanity2DeathTest))
     ASSERT_DEATH_IF_SUPPORTED(Sanity2_Child(), regex);
 }
 
+#if 0
+// Temporarily disabled, see bug 1370644.
 int
 Sanity3_Child()
 {
@@ -173,6 +176,7 @@ TEST_F(TESTNAME(DeadlockDetectorTest), TESTNAME(Sanity3DeathTest))
 
     ASSERT_DEATH_IF_SUPPORTED(Sanity3_Child(), regex);
 }
+#endif
 
 int
 Sanity4_Child()
@@ -199,6 +203,31 @@ TEST_F(TESTNAME(DeadlockDetectorTest), TESTNAME(Sanity4DeathTest))
     ASSERT_DEATH_IF_SUPPORTED(Sanity4_Child(), regex);
 }
 
+int
+Sanity5_Child()
+{
+    DisableCrashReporter();
+
+    mozilla::RecursiveMutex m1("dd.sanity4.m1");
+    MUTEX m2("dd.sanity4.m2");
+    m1.Lock();
+    m2.Lock();
+    m1.Lock();
+    return 0;
+}
+
+TEST_F(TESTNAME(DeadlockDetectorTest), TESTNAME(Sanity5DeathTest))
+{
+    const char* const regex =
+        "Re-entering RecursiveMutex after acquiring other resources.*"
+        "###!!! ERROR: Potential deadlock detected.*"
+        "=== Cyclical dependency starts at.*--- RecursiveMutex : dd.sanity4.m1.*"
+        "--- Next dependency:.*--- Mutex : dd.sanity4.m2.*"
+        "=== Cycle completed at.*--- RecursiveMutex : dd.sanity4.m1.*"
+        "###!!! ASSERTION: Potential deadlock detected.*";
+    ASSERT_DEATH_IF_SUPPORTED(Sanity5_Child(), regex);
+}
+
 //-----------------------------------------------------------------------------
 // Multithreaded tests
 
@@ -219,6 +248,8 @@ struct ThreadState
   int id;
 };
 
+#if 0
+// Temporarily disabled, see bug 1370644.
 static void
 TwoThreads_thread(void* arg)
 {
@@ -277,6 +308,7 @@ TEST_F(TESTNAME(DeadlockDetectorTest), TESTNAME(TwoThreadsDeathTest))
 
     ASSERT_DEATH_IF_SUPPORTED(TwoThreads_Child(), regex);
 }
+#endif
 
 static void
 ContentionNoDeadlock_thread(void* arg)

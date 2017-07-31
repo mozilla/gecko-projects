@@ -30,13 +30,13 @@ public:
    */
 
   nsTString_CharT()
-    : substring_type()
+    : substring_type(ClassFlags::NULL_TERMINATED)
   {
   }
 
   explicit
   nsTString_CharT(const char_type* aData, size_type aLength = size_type(-1))
-    : substring_type()
+    : substring_type(ClassFlags::NULL_TERMINATED)
   {
     Assign(aData, aLength);
   }
@@ -44,27 +44,27 @@ public:
 #if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
   explicit
   nsTString_CharT(char16ptr_t aStr, size_type aLength = size_type(-1))
-    : substring_type()
+    : substring_type(ClassFlags::NULL_TERMINATED)
   {
     Assign(static_cast<const char16_t*>(aStr), aLength);
   }
 #endif
 
   nsTString_CharT(const self_type& aStr)
-    : substring_type()
+    : substring_type(ClassFlags::NULL_TERMINATED)
   {
     Assign(aStr);
   }
 
   MOZ_IMPLICIT nsTString_CharT(const substring_tuple_type& aTuple)
-    : substring_type()
+    : substring_type(ClassFlags::NULL_TERMINATED)
   {
     Assign(aTuple);
   }
 
   explicit
   nsTString_CharT(const substring_type& aReadable)
-    : substring_type()
+    : substring_type(ClassFlags::NULL_TERMINATED)
   {
     Assign(aReadable);
   }
@@ -157,7 +157,7 @@ public:
                int32_t aOffset = 0, int32_t aCount = -1) const;
 
 #ifdef CharT_is_PRUnichar
-  int32_t Find(const nsAFlatString& aString, int32_t aOffset = 0,
+  int32_t Find(const nsString& aString, int32_t aOffset = 0,
                int32_t aCount = -1) const;
   int32_t Find(const char16_t* aString, int32_t aOffset = 0,
                int32_t aCount = -1) const;
@@ -189,7 +189,7 @@ public:
                 int32_t aOffset = -1, int32_t aCount = -1) const;
 
 #ifdef CharT_is_PRUnichar
-  int32_t RFind(const nsAFlatString& aString, int32_t aOffset = -1,
+  int32_t RFind(const nsString& aString, int32_t aOffset = -1,
                 int32_t aCount = -1) const;
   int32_t RFind(const char16_t* aString, int32_t aOffset = -1,
                 int32_t aCount = -1) const;
@@ -430,15 +430,6 @@ public:
   void CompressWhitespace(bool aEliminateLeading = true,
                           bool aEliminateTrailing = true);
 
-
-  /**
-   * assign/append/insert with _LOSSY_ conversion
-   */
-
-  void AssignWithConversion(const nsTAString_IncompatibleCharT& aString);
-  void AssignWithConversion(const incompatible_char_type* aData,
-                            int32_t aLength = -1);
-
 #endif // !MOZ_STRING_WITH_OBSOLETE_API
 
   /**
@@ -464,8 +455,10 @@ public:
 protected:
 
   // allow subclasses to initialize fields directly
-  nsTString_CharT(char_type* aData, size_type aLength, uint32_t aFlags)
-    : substring_type(aData, aLength, aFlags)
+  nsTString_CharT(char_type* aData, size_type aLength, DataFlags aDataFlags,
+                  ClassFlags aClassFlags)
+    : substring_type(aData, aLength, aDataFlags,
+                     aClassFlags | ClassFlags::NULL_TERMINATED)
   {
   }
 
@@ -500,7 +493,8 @@ public:
 
   nsTFixedString_CharT(char_type* aData, size_type aStorageSize)
     : string_type(aData, uint32_t(char_traits::length(aData)),
-                  F_TERMINATED | F_FIXED | F_CLASS_FIXED)
+                  DataFlags::TERMINATED | DataFlags::FIXED,
+                  ClassFlags::FIXED)
     , mFixedCapacity(aStorageSize - 1)
     , mFixedBuf(aData)
   {
@@ -508,7 +502,8 @@ public:
 
   nsTFixedString_CharT(char_type* aData, size_type aStorageSize,
                        size_type aLength)
-    : string_type(aData, aLength, F_TERMINATED | F_FIXED | F_CLASS_FIXED)
+    : string_type(aData, aLength, DataFlags::TERMINATED | DataFlags::FIXED,
+                  ClassFlags::FIXED)
     , mFixedCapacity(aStorageSize - 1)
     , mFixedBuf(aData)
   {
@@ -714,13 +709,15 @@ public:
 public:
 
   nsTXPIDLString_CharT()
-    : string_type(char_traits::sEmptyBuffer, 0, F_TERMINATED | F_VOIDED)
+    : string_type(char_traits::sEmptyBuffer, 0,
+                  DataFlags::TERMINATED | DataFlags::VOIDED, ClassFlags(0))
   {
   }
 
   // copy-constructor required to avoid default
   nsTXPIDLString_CharT(const self_type& aStr)
-    : string_type(char_traits::sEmptyBuffer, 0, F_TERMINATED | F_VOIDED)
+    : string_type(char_traits::sEmptyBuffer, 0,
+                  DataFlags::TERMINATED | DataFlags::VOIDED, ClassFlags(0))
   {
     Assign(aStr);
   }
@@ -732,7 +729,7 @@ public:
   const char_type* get() const
 #endif
   {
-    return (mFlags & F_VOIDED) ? nullptr : mData;
+    return (mDataFlags & DataFlags::VOIDED) ? nullptr : mData;
   }
 
   // this case operator is the reason why this class cannot just be a

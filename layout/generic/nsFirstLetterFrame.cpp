@@ -76,12 +76,12 @@ nsFirstLetterFrame::SetInitialChildList(ChildListID  aListID,
 {
   MOZ_ASSERT(aListID == kPrincipalList, "Principal child list is the only "
              "list that nsFirstLetterFrame should set via this function");
-  RestyleManager* restyleManager = PresContext()->RestyleManager();
-
-  for (nsFrameList::Enumerator e(aChildList); !e.AtEnd(); e.Next()) {
-    NS_ASSERTION(e.get()->GetParent() == this, "Unexpected parent");
-    restyleManager->ReparentStyleContext(e.get());
-    nsLayoutUtils::MarkDescendantsDirty(e.get());
+  for (nsIFrame* f : aChildList) {
+    MOZ_ASSERT(f->GetParent() == this, "Unexpected parent");
+    MOZ_ASSERT(f->IsTextFrame(), "We should not have kids that are containers!");
+    MOZ_ASSERT_IF(f->StyleContext()->IsGecko(),
+                  f->StyleContext()->AsGecko()->GetParent() == StyleContext());
+    nsLayoutUtils::MarkDescendantsDirty(f); // Drops cached textruns
   }
 
   mFrames.SetFrames(aChildList);
@@ -104,7 +104,7 @@ nsFirstLetterFrame::GetChildFrameContainingOffset(int32_t inContentOffset,
 // Needed for non-floating first-letter frames and for the continuations
 // following the first-letter that we also use nsFirstLetterFrame for.
 /* virtual */ void
-nsFirstLetterFrame::AddInlineMinISize(nsRenderingContext *aRenderingContext,
+nsFirstLetterFrame::AddInlineMinISize(gfxContext *aRenderingContext,
                                       nsIFrame::InlineMinISizeData *aData)
 {
   DoInlineIntrinsicISize(aRenderingContext, aData, nsLayoutUtils::MIN_ISIZE);
@@ -113,7 +113,7 @@ nsFirstLetterFrame::AddInlineMinISize(nsRenderingContext *aRenderingContext,
 // Needed for non-floating first-letter frames and for the continuations
 // following the first-letter that we also use nsFirstLetterFrame for.
 /* virtual */ void
-nsFirstLetterFrame::AddInlinePrefISize(nsRenderingContext *aRenderingContext,
+nsFirstLetterFrame::AddInlinePrefISize(gfxContext *aRenderingContext,
                                        nsIFrame::InlinePrefISizeData *aData)
 {
   DoInlineIntrinsicISize(aRenderingContext, aData, nsLayoutUtils::PREF_ISIZE);
@@ -122,21 +122,21 @@ nsFirstLetterFrame::AddInlinePrefISize(nsRenderingContext *aRenderingContext,
 
 // Needed for floating first-letter frames.
 /* virtual */ nscoord
-nsFirstLetterFrame::GetMinISize(nsRenderingContext *aRenderingContext)
+nsFirstLetterFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   return nsLayoutUtils::MinISizeFromInline(this, aRenderingContext);
 }
 
 // Needed for floating first-letter frames.
 /* virtual */ nscoord
-nsFirstLetterFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
+nsFirstLetterFrame::GetPrefISize(gfxContext *aRenderingContext)
 {
   return nsLayoutUtils::PrefISizeFromInline(this, aRenderingContext);
 }
 
 /* virtual */
 LogicalSize
-nsFirstLetterFrame::ComputeSize(nsRenderingContext *aRenderingContext,
+nsFirstLetterFrame::ComputeSize(gfxContext *aRenderingContext,
                                 WritingMode aWM,
                                 const LogicalSize& aCBSize,
                                 nscoord aAvailableISize,

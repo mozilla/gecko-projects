@@ -40,6 +40,7 @@ class nsISSLStatus;
 
 namespace mozilla { namespace net {
 
+class nsChannelClassifier;
 class Http2PushedStream;
 
 class HttpChannelSecurityWarningReporter
@@ -177,6 +178,7 @@ public:
     NS_IMETHOD GetDomainLookupStart(mozilla::TimeStamp *aDomainLookupStart) override;
     NS_IMETHOD GetDomainLookupEnd(mozilla::TimeStamp *aDomainLookupEnd) override;
     NS_IMETHOD GetConnectStart(mozilla::TimeStamp *aConnectStart) override;
+    NS_IMETHOD GetSecureConnectionStart(mozilla::TimeStamp *aSecureConnectionStart) override;
     NS_IMETHOD GetConnectEnd(mozilla::TimeStamp *aConnectEnd) override;
     NS_IMETHOD GetRequestStart(mozilla::TimeStamp *aRequestStart) override;
     NS_IMETHOD GetResponseStart(mozilla::TimeStamp *aResponseStart) override;
@@ -478,7 +480,7 @@ private:
     int64_t ComputeTelemetryBucketNumber(int64_t difftime_ms);
 
     // Report telemetry and stats to about:networking
-    void ReportRcwnStats(nsIRequest* firstResponseRequest);
+    void ReportRcwnStats(bool isFromNet);
 
     // Create a aggregate set of the current notification callbacks
     // and ensure the transaction is updated to use it.
@@ -506,6 +508,8 @@ private:
 
     void SetDoNotTrack();
 
+    already_AddRefed<nsChannelClassifier> GetOrCreateChannelClassifier();
+
 private:
     // this section is for main-thread-only object
     // all the references need to be proxy released on main thread.
@@ -515,6 +519,13 @@ private:
     nsCOMPtr<nsIURI> mRedirectURI;
     nsCOMPtr<nsIChannel> mRedirectChannel;
     nsCOMPtr<nsIChannel> mPreflightChannel;
+
+    // nsChannelClassifier checks this channel's URI against
+    // the URI classifier service.
+    // nsChannelClassifier will be invoked twice in InitLocalBlockList() and
+    // BeginConnectActual(), so save the nsChannelClassifier here to keep the
+    // state of whether tracking protection is enabled or not.
+    RefPtr<nsChannelClassifier> mChannelClassifier;
 
     // Proxy release all members above on main thread.
     void ReleaseMainThreadOnlyReferences();
@@ -698,9 +709,15 @@ private:
     // Will be true if the onCacheEntryAvailable callback is not called by the
     // time we send the network request
     Atomic<bool> mRaceCacheWithNetwork;
+    uint32_t mRaceDelay;
+    bool mCacheAsyncOpenCalled;
 
 protected:
     virtual void DoNotifyListenerCleanup() override;
+
+    // Override ReleaseListeners() because mChannelClassifier only exists
+    // in nsHttpChannel and it will be released in ReleaseListeners().
+    virtual void ReleaseListeners() override;
 
 private: // cache telemetry
     bool mDidReval;

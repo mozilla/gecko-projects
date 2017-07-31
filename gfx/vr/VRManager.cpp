@@ -17,9 +17,9 @@
 #include "gfxVR.h"
 #if defined(XP_WIN)
 #include "gfxVROculus.h"
-#include "gfxVROpenVR.h"
 #endif
-#if defined(XP_WIN) || defined(XP_MACOSX) || defined(XP_LINUX)
+#if defined(XP_WIN) || defined(XP_MACOSX) || (defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID))
+#include "gfxVROpenVR.h"
 #include "gfxVROSVR.h"
 #endif
 #include "gfxVRPuppet.h"
@@ -75,14 +75,15 @@ VRManager::VRManager()
   if (mgr) {
     mManagers.AppendElement(mgr);
   }
-  // OpenVR is cross platform compatible, but supported only on Windows for now
+#endif
+
+#if defined(XP_WIN) || defined(XP_MACOSX) || (defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID))
+  // OpenVR is cross platform compatible
   mgr = VRSystemManagerOpenVR::Create();
   if (mgr) {
     mManagers.AppendElement(mgr);
   }
-#endif
 
-#if defined(XP_WIN) || defined(XP_MACOSX) || defined(XP_LINUX)
   // OSVR is cross platform compatible
   mgr = VRSystemManagerOSVR::Create();
   if (mgr) {
@@ -263,20 +264,26 @@ VRManager::RefreshVRDisplays(bool aMustDispatch)
    *       in the future.
    */
   for (uint32_t i = 0; i < mManagers.Length() && displays.Length() == 0; ++i) {
-    mManagers[i]->GetHMDs(displays);
+    if (mManagers[i]->GetHMDs(displays)) {
+      // GetHMDs returns true to indicate that no further enumeration from
+      // other managers should be performed.  This prevents erraneous
+      // redundant enumeration of the same HMD by multiple managers.
+      break;
+    }
   }
 
   bool displayInfoChanged = false;
+  bool displaySetChanged = false;
 
   if (displays.Length() != mVRDisplays.Count()) {
     // Catch cases where a VR display has been removed
-    displayInfoChanged = true;
+    displaySetChanged = true;
   }
 
   for (const auto& display: displays) {
     if (!GetDisplay(display->GetDisplayInfo().GetDisplayID())) {
       // This is a new display
-      displayInfoChanged = true;
+      displaySetChanged = true;
       break;
     }
 
@@ -287,14 +294,15 @@ VRManager::RefreshVRDisplays(bool aMustDispatch)
     }
   }
 
-  if (displayInfoChanged) {
+  // Rebuild the HashMap if there are additions or removals
+  if (displaySetChanged) {
     mVRDisplays.Clear();
     for (const auto& display: displays) {
       mVRDisplays.Put(display->GetDisplayInfo().GetDisplayID(), display);
     }
   }
 
-  if (displayInfoChanged || aMustDispatch) {
+  if (displayInfoChanged || displaySetChanged || aMustDispatch) {
     DispatchVRDisplayInfoUpdate();
   }
 }
@@ -437,9 +445,10 @@ VRManager::CreateVRTestSystem()
 
 template<class T>
 void
-VRManager::NotifyGamepadChange(const T& aInfo)
+VRManager::NotifyGamepadChange(uint32_t aIndex, const T& aInfo)
 {
-  dom::GamepadChangeEvent e(aInfo);
+  dom::GamepadChangeEventBody body(aInfo);
+  dom::GamepadChangeEvent e(aIndex, dom::GamepadServiceType::VR, body);
 
   for (auto iter = mVRManagerParents.Iter(); !iter.Done(); iter.Next()) {
     Unused << iter.Get()->GetKey()->SendGamepadUpdate(e);

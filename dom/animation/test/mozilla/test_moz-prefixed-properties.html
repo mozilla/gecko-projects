@@ -14,23 +14,37 @@
 
 const testcases = [
   {
+    property: "-moz-border-bottom-colors",
+  },
+  {
+    property: "-moz-border-left-colors",
+  },
+  {
+    property: "-moz-border-right-colors",
+  },
+  {
+    property: "-moz-border-top-colors",
+  },
+  {
     property: "-moz-box-align"
   },
   {
     property: "-moz-box-direction"
   },
   {
+    property: "-moz-box-ordinal-group"
+  },
+  {
     property: "-moz-box-orient",
-    expectedValueMap: {
-      "block-axis": "vertical",
-      "inline-axis": "horizontal",
-    }
   },
   {
     property: "-moz-box-pack"
   },
   {
     property: "-moz-float-edge"
+  },
+  {
+    property: "-moz-force-broken-image-icon"
   },
   {
     property: "-moz-orient"
@@ -40,6 +54,12 @@ const testcases = [
     pref: "layout.css.osx-font-smoothing.enabled"
   },
   {
+    property: "-moz-stack-sizing"
+  },
+  {
+    property: "-moz-text-size-adjust"
+  },
+  {
     property: "-moz-user-focus"
   },
   {
@@ -47,6 +67,9 @@ const testcases = [
   },
   {
     property: "-moz-user-modify"
+  },
+  {
+    property: "-moz-user-select"
   },
   {
     property: "-moz-window-dragging"
@@ -72,9 +95,7 @@ testcases.forEach(testcase => {
         target.animate({ [property.domProp]: [value, "inherit"] },
                        { duration: 1000, delay: -500 } );
 
-      const expectedValue =
-        testcase.expectedValueMap && testcase.expectedValueMap[value]
-        ? testcase.expectedValueMap[value] : value;
+      const expectedValue = getComputedStyle(container)[property.domProp];
       assert_equals(getComputedStyle(target)[property.domProp], expectedValue,
                     `Computed style shoud be "${ expectedValue }"`);
     }, `Test inherit value for "${ testcase.property }" `

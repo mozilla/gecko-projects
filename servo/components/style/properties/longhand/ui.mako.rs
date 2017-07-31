@@ -17,12 +17,15 @@ ${helpers.single_keyword("ime-mode", "auto normal active disabled inactive",
                          spec="https://drafts.csswg.org/css-ui/#input-method-editor")}
 
 ${helpers.single_keyword("-moz-user-select", "auto text none all element elements" +
-                            " toggle tri-state -moz-all -moz-none -moz-text",
+                            " toggle tri-state -moz-all -moz-text",
                          products="gecko",
                          alias="-webkit-user-select",
                          gecko_ffi_name="mUserSelect",
                          gecko_enum_prefix="StyleUserSelect",
-                         animation_value_type="none",
+                         gecko_inexhaustive=True,
+                         gecko_strip_moz_prefix=False,
+                         aliases="-moz-none=none",
+                         animation_value_type="discrete",
                          spec="https://drafts.csswg.org/css-ui-4/#propdef-user-select")}
 
 ${helpers.single_keyword("-moz-window-dragging", "default drag no-drag", products="gecko",
@@ -42,7 +45,7 @@ ${helpers.single_keyword("-moz-window-shadow", "none default menu tooltip sheet"
 
 <%helpers:longhand name="-moz-force-broken-image-icon"
                    products="gecko"
-                   animation_value_type="none"
+                   animation_value_type="discrete"
                    spec="None (Nonstandard Firefox-only property)">
     use std::fmt;
     use style_traits::ToCss;
@@ -76,11 +79,27 @@ ${helpers.single_keyword("-moz-window-shadow", "none default menu tooltip sheet"
 
     impl ComputedValueAsSpecified for SpecifiedValue {}
 
-    pub fn parse(_context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue, ()> {
-        match try!(input.expect_integer()) {
+    pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
+                         -> Result<SpecifiedValue, ParseError<'i>> {
+        match input.expect_integer()? {
             0 => Ok(computed_value::T(false)),
             1 => Ok(computed_value::T(true)),
-            _ => Err(()),
+            _ => Err(StyleParseError::UnspecifiedError.into()),
+        }
+    }
+
+    impl From<u8> for SpecifiedValue {
+        fn from(bits: u8) -> SpecifiedValue {
+            SpecifiedValue(bits == 1)
+        }
+    }
+
+    impl From<SpecifiedValue> for u8 {
+        fn from(v: SpecifiedValue) -> u8 {
+            match v.0 {
+                true => 1u8,
+                false => 0u8,
+            }
         }
     }
 </%helpers:longhand>

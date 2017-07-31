@@ -27,6 +27,7 @@ function checkExternalFunction(entry)
         /memchr/,
         "strlen",
         /Servo_DeclarationBlock_GetCssText/,
+        /nsIFrame::AppendOwnedAnonBoxes/,
         // Assume that atomic accesses are threadsafe.
         /^__atomic_fetch_/,
         /^__atomic_load_/,
@@ -182,6 +183,7 @@ function treatAsSafeArgument(entry, varName, csuName)
         ["Gecko_EnsureTArrayCapacity", "aArray", null],
         ["Gecko_ClearPODTArray", "aArray", null],
         ["Gecko_SetStyleGridTemplateArrayLengths", "aValue", null],
+        ["Gecko_SetGridTemplateLineNamesLength", "aValue", null],
         ["Gecko_ResizeTArrayForStrings", "aArray", null],
         ["Gecko_ClearAndResizeStyleContents", "aContent", null],
         [/Gecko_ClearAndResizeCounter/, "aContent", null],
@@ -193,6 +195,7 @@ function treatAsSafeArgument(entry, varName, csuName)
         ["Gecko_GetOrCreateKeyframeAtStart", "aKeyframes", null],
         ["Gecko_GetOrCreateInitialKeyframe", "aKeyframes", null],
         ["Gecko_GetOrCreateFinalKeyframe", "aKeyframes", null],
+        ["Gecko_AppendPropertyValuePair", "aProperties", null],
         ["Gecko_SetStyleCoordCalcValue", null, null],
         ["Gecko_StyleClipPath_SetURLValue", "aClip", null],
         ["Gecko_nsStyleFilter_SetURLValue", "aEffects", null],
@@ -217,6 +220,11 @@ function treatAsSafeArgument(entry, varName, csuName)
         ["Gecko_AddPropertyToSet", "aPropertySet", null],
         ["Gecko_CalcStyleDifference", "aAnyStyleChanged", null],
         ["Gecko_nsStyleSVG_CopyContextProperties", "aDst", null],
+        ["Gecko_nsStyleFont_PrefillDefaultForGeneric", "aFont", null],
+        ["Gecko_nsStyleSVG_SetContextPropertiesLength", "aSvg", null],
+        ["Gecko_ClearAlternateValues", "aFont", null],
+        ["Gecko_AppendAlternateValues", "aFont", null],
+        ["Gecko_CopyAlternateValuesFrom", "aDest", null],
     ];
     for (var [entryMatch, varMatch, csuMatch] of whitelist) {
         assert(entryMatch || varMatch || csuMatch);
@@ -243,7 +251,7 @@ function checkFieldWrite(entry, location, fields)
             return;
         if (/nsCOMPtr<.*?>.mRawPtr/.test(field))
             return;
-}
+    }
 
     var str = "";
     for (var field of fields)
@@ -320,6 +328,14 @@ function ignoreCallEdge(entry, callee)
         return true;
     }
 
+    // AllChildrenIterator asks AppendOwnedAnonBoxes to append into an nsTArray
+    // local variable.
+    if (/nsIFrame::AppendOwnedAnonBoxes/.test(callee) &&
+        /AllChildrenIterator::AppendNativeAnonymousChildren/.test(name))
+    {
+        return true;
+    }
+
     // Runnables are created and named on one thread, then dispatched
     // (possibly to another). Writes on the origin thread are ok.
     if (/::SetName/.test(callee) &&
@@ -331,8 +347,8 @@ function ignoreCallEdge(entry, callee)
     // We manually lock here
     if (name == "Gecko_nsFont_InitSystem" ||
         name == "Gecko_GetFontMetrics" ||
-        name == "Gecko_nsStyleFont_FixupNoneGeneric" ||
-        name == "Gecko_nsStyleFont_FixupMinFontSize")
+        name == "Gecko_nsStyleFont_FixupMinFontSize" ||
+        /ThreadSafeGetDefaultFontHelper/.test(name))
     {
         return true;
     }
@@ -356,7 +372,7 @@ function ignoreContents(entry)
         /mozalloc_handle_oom/,
         /^NS_Log/, /log_print/, /LazyLogModule::operator/,
         /SprintfLiteral/, "PR_smprintf", "PR_smprintf_free",
-        /NS_DispatchToMainThread/, /NS_ReleaseOnMainThread/,
+        /NS_DispatchToMainThread/, /NS_ReleaseOnMainThreadSystemGroup/,
         /NS_NewRunnableFunction/, /NS_Atomize/,
         /nsCSSValue::BufferFromString/,
         /NS_strdup/,
@@ -390,15 +406,19 @@ function ignoreContents(entry)
         /CSSValueSerializeCalcOps::Append/,
         "Gecko_CSSValue_SetFunction",
         "Gecko_CSSValue_SetArray",
+        "Gecko_CSSValue_InitSharedList",
         "Gecko_EnsureMozBorderColors",
         "Gecko_ClearMozBorderColors",
         "Gecko_AppendMozBorderColors",
         "Gecko_CopyMozBorderColors",
         "Gecko_SetNullImageValue",
 
+        // The analysis thinks we'll write to mBits in the DoGetStyleFoo<false>
+        // call.  Maybe the template parameter confuses it?
+        /nsStyleContext::PeekStyle/,
+
         // Needs main thread assertions or other fixes.
         /UndisplayedMap::GetEntryFor/,
-        /nsStyleContext::CalcStyleDifferenceInternal/,
         /EffectCompositor::GetServoAnimationRule/,
         /LookAndFeel::GetColor/,
         "Gecko_CopyStyleContentsFrom",

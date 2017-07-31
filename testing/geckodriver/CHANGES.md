@@ -2,13 +2,52 @@
 
 All notable changes to this program is documented in this file.
 
-## 0.16.1 (2016-04-26)
+## Unreleased
+
+### Changed
+- `/moz/addon/install` command accepts an `addon` parameter, in lieu of `path`, containing an add-on as a base64 string.
+
+## 0.18.0 (2017-07-10)
+
+### Changed
+- [`RectResponse`](https://docs.rs/webdriver/0.27.0/webdriver/response/struct.RectResponse.html) permits returning floats for `width` and `height` fields
+- New type [`CookieResponse`](https://docs.rs/webdriver/0.27.0/webdriver/response/struct.CookieResponse.html) for the [`GetNamedCookie` command](https://docs.rs/webdriver/0.27.0/webdriver/command/enum.WebDriverCommand.html#variant.GetNamedCookie) returns a single cookie, as opposed to an array of a single cookie
+- To pick up a prepared profile from the filesystem, it is now possible to pass `["-profile", "/path/to/profile"]` in the `args` array on `moz:firefoxOptions`
+- geckodriver now recommends Firefox 53 and greater
+- Version information (`--version`) contains the hash from from the commit used to build geckodriver
+- geckodriver version logged on startup
+- [webdriver crate](https://crates.io/crates/webdriver) upgraded to version 0.27.0
+- [mozrunner crate](https://crates.io/crates/mozrunner) upgraded to version 0.4.1
+
+### Fixed
+- The [`SetTimeouts`](https://docs.rs/webdriver/0.27.0/webdriver/command/enum.WebDriverCommand.html#variant.SetTimeouts) command maps to the Marionette `setTimeouts` command, which makes geckodriver compatible with Firefox 56 and greater
+- Linux x86 (i686-unknown-linux-musl) builds are fixed
+
+## 0.17.0 (2017-06-09)
+
+### Added
+- Added endpoints:
+  - POST `/session/{session id}/window/fullscreen` to invoke the window manager-specific `full screen` operation
+  - POST `/session/{session id}/moz/addon/install` to install an extension [Gecko only]
+  - POST `/session/{session id}/moz/addon/uninstall` to uninstall an extension [Gecko only]
+
+### Changed
+- Increasing the length of the `network.http.phishy-userpass-length` preference will cause Firefox to not prompt when navigating to a website with a username or password in the URL
+- Library dependencies upgraded to mozrunner 0.4 and mozprofile 0.3 to allow overriding of preferences via capabilities if those have been already set in the profile
+- Library dependencies upgraded to mozversion 0.1.2 to only use the normalized path of the Firefox binary for version checks but not to actually start the browser, which broke several components in Firefox on Windows
+
+### Fixed
+- The SetWindowRect command now returns the WindowRect when it is done
+- Use ASCII versions of array symbols to properly display them in the Windows command prompt
+- Use [`SessionNotCreated`](https://docs.rs/webdriver/0.25.0/webdriver/error/enum.ErrorStatus.html#variant.SessionNotCreated) error instead of [`UnknownError`](https://docs.rs/webdriver/0.25.0/webdriver/error/enum.ErrorStatus.html#variant.UnknownError) if there is no current session
+
+## 0.16.1 (2017-04-26)
 
 ### Fixed
 - Read Firefox version number from stdout when failing to look for the application .ini file (fixes [Selenium #3884](https://github.com/SeleniumHQ/selenium/issues/3884))
 - Session is now ended when closing the last Firefox window (fixes [#613](https://github.com/mozilla/geckodriver/issues/613))
 
-## 0.16.0 (2016-04-21)
+## 0.16.0 (2017-04-21)
 
 Note that geckodriver v0.16.0 is only compatible with Selenium 3.4 and greater.
 
@@ -27,7 +66,7 @@ Note that geckodriver v0.16.0 is only compatible with Selenium 3.4 and greater.
   - POST `/session/{session id}/alert_text`
   - POST `/session/{session id}/accept_alert`
   - POST `/session/{session id}/dismiss_alert`
-  - GET `/session/{session id}/window_handle` 
+  - GET `/session/{session id}/window_handle`
   - DELETE `/session/{session id}/window_handle`
   - POST `/session/{session id}/execute_async`
   - POST `/session/{session id}/execute`

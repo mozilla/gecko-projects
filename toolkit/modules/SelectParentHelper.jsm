@@ -32,7 +32,7 @@ this.SelectParentHelper = {
            selectTextShadow) {
     // Clear the current contents of the popup
     menulist.menupopup.textContent = "";
-    let stylesheet = menulist.querySelector("#ContentSelectDropdownScopedStylesheet");
+    let stylesheet = menulist.querySelector("#ContentSelectDropdownStylesheet");
     if (stylesheet) {
       stylesheet.remove();
     }
@@ -41,8 +41,7 @@ this.SelectParentHelper = {
     let sheet;
     if (customStylingEnabled) {
       stylesheet = doc.createElementNS("http://www.w3.org/1999/xhtml", "style");
-      stylesheet.setAttribute("id", "ContentSelectDropdownScopedStylesheet");
-      stylesheet.scoped = true;
+      stylesheet.setAttribute("id", "ContentSelectDropdownStylesheet");
       stylesheet.hidden = true;
       stylesheet = menulist.appendChild(stylesheet);
       sheet = stylesheet.sheet;
@@ -75,7 +74,7 @@ this.SelectParentHelper = {
     }
 
     if (ruleBody) {
-      sheet.insertRule(`menupopup {
+      sheet.insertRule(`#ContentSelectDropdown > menupopup {
         ${ruleBody}
       }`, 0);
       menulist.menupopup.setAttribute("customoptionstyling", "true");
@@ -117,11 +116,15 @@ this.SelectParentHelper = {
 
     menupopup.classList.toggle("isOpenedViaTouch", isOpenedViaTouch);
 
-    let constraintRect = browser.getBoundingClientRect();
-    constraintRect = new win.DOMRect(constraintRect.left + win.mozInnerScreenX,
-                                     constraintRect.top + win.mozInnerScreenY,
-                                     constraintRect.width, constraintRect.height);
-    menupopup.setConstraintRect(constraintRect);
+    if (browser.getAttribute("selectmenuconstrained") != "false") {
+      let constraintRect = browser.getBoundingClientRect();
+      constraintRect = new win.DOMRect(constraintRect.left + win.mozInnerScreenX,
+                                       constraintRect.top + win.mozInnerScreenY,
+                                       constraintRect.width, constraintRect.height);
+      menupopup.setConstraintRect(constraintRect);
+    } else {
+      menupopup.setConstraintRect(new win.DOMRect(0, 0, 0, 0));
+    }
     menupopup.openPopupAtScreenRect(AppConstants.platform == "macosx" ? "selection" : "after_start", rect.left, rect.top, rect.width, rect.height, false, false);
   },
 
@@ -297,7 +300,7 @@ function populateChildren(menulist, options, selectedIndex, zoom,
     }
 
     if (ruleBody) {
-      sheet.insertRule(`menupopup > :nth-child(${nthChildIndex}):not([_moz-menuactive="true"]) {
+      sheet.insertRule(`#ContentSelectDropdown > menupopup > :nth-child(${nthChildIndex}):not([_moz-menuactive="true"]) {
         ${ruleBody}
       }`, 0);
 
@@ -305,7 +308,7 @@ function populateChildren(menulist, options, selectedIndex, zoom,
         // Need to explicitly disable the possibly inherited
         // text-shadow rule when _moz-menuactive=true since
         // _moz-menuactive=true disables custom option styling.
-        sheet.insertRule(`menupopup > :nth-child(${nthChildIndex})[_moz-menuactive="true"] {
+        sheet.insertRule(`#ContentSelectDropdown > menupopup > :nth-child(${nthChildIndex})[_moz-menuactive="true"] {
           text-shadow: none;
         }`, 0);
       }

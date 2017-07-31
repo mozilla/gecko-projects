@@ -479,19 +479,22 @@ function prompt(aBrowser, aRequest) {
         let activeCamera;
         let activeMic;
 
-        for (let device of videoDevices) {
-          let set = webrtcUI.activePerms.get(aBrowser.outerWindowID);
-          if (set && set.has(aRequest.windowID + device.mediaSource + device.id)) {
-            activeCamera = device;
-            break;
+        // Always prompt for screen sharing
+        if (!sharingScreen) {
+          for (let device of videoDevices) {
+            let set = webrtcUI.activePerms.get(aBrowser.outerWindowID);
+            if (set && set.has(aRequest.windowID + device.mediaSource + device.id)) {
+              activeCamera = device;
+              break;
+            }
           }
-        }
 
-        for (let device of audioDevices) {
-          let set = webrtcUI.activePerms.get(aBrowser.outerWindowID);
-          if (set && set.has(aRequest.windowID + device.mediaSource + device.id)) {
-            activeMic = device;
-            break;
+          for (let device of audioDevices) {
+            let set = webrtcUI.activePerms.get(aBrowser.outerWindowID);
+            if (set && set.has(aRequest.windowID + device.mediaSource + device.id)) {
+              activeMic = device;
+              break;
+            }
           }
         }
 
@@ -636,6 +639,7 @@ function prompt(aBrowser, aRequest) {
               string = bundle.getFormattedString("getUserMedia.shareFirefoxWarning.message",
                                                  [brand, learnMore]);
             }
+            // eslint-disable-next-line no-unsanitized/property
             warning.innerHTML = string;
           }
 
@@ -1063,10 +1067,15 @@ function updateIndicators(data, target) {
   }
 
   if (webrtcUI.showGlobalIndicator) {
-    if (!gIndicatorWindow)
+    if (!gIndicatorWindow) {
       gIndicatorWindow = getGlobalIndicator();
-    else
-      gIndicatorWindow.updateIndicatorState();
+    } else {
+      try {
+        gIndicatorWindow.updateIndicatorState();
+      } catch (err) {
+        Cu.reportError(`error in gIndicatorWindow.updateIndicatorState(): ${err.message}`);
+      }
+    }
   } else if (gIndicatorWindow) {
     gIndicatorWindow.close();
     gIndicatorWindow = null;

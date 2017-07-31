@@ -184,7 +184,7 @@ nsHTMLCanvasFrame::GetCanvasSize()
 }
 
 /* virtual */ nscoord
-nsHTMLCanvasFrame::GetMinISize(nsRenderingContext *aRenderingContext)
+nsHTMLCanvasFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   // XXX The caller doesn't account for constraints of the height,
   // min-height, and max-height properties.
@@ -196,7 +196,7 @@ nsHTMLCanvasFrame::GetMinISize(nsRenderingContext *aRenderingContext)
 }
 
 /* virtual */ nscoord
-nsHTMLCanvasFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
+nsHTMLCanvasFrame::GetPrefISize(gfxContext *aRenderingContext)
 {
   // XXX The caller doesn't account for constraints of the height,
   // min-height, and max-height properties.
@@ -221,7 +221,7 @@ nsHTMLCanvasFrame::GetIntrinsicRatio()
 
 /* virtual */
 LogicalSize
-nsHTMLCanvasFrame::ComputeSize(nsRenderingContext *aRenderingContext,
+nsHTMLCanvasFrame::ComputeSize(gfxContext *aRenderingContext,
                                WritingMode aWM,
                                const LogicalSize& aCBSize,
                                nscoord aAvailableISize,
@@ -415,15 +415,12 @@ nsHTMLCanvasFrame::GetContinuationOffset(nscoord* aWidth) const
 }
 
 void
-nsHTMLCanvasFrame::DoUpdateStyleOfOwnedAnonBoxes(ServoStyleSet& aStyleSet,
-                                                 nsStyleChangeList& aChangeList,
-                                                 nsChangeHint aHintForThisFrame)
+nsHTMLCanvasFrame::AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult)
 {
   MOZ_ASSERT(mFrames.FirstChild(), "Must have our canvas content anon box");
   MOZ_ASSERT(!mFrames.FirstChild()->GetNextSibling(),
              "Must only have our canvas content anon box");
-  UpdateStyleOfChildAnonBox(mFrames.FirstChild(),
-                            aStyleSet, aChangeList, aHintForThisFrame);
+  aResult.AppendElement(OwnedAnonBox(mFrames.FirstChild()));
 }
 
 #ifdef ACCESSIBILITY

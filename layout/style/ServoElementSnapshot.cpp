@@ -16,12 +16,15 @@ ServoElementSnapshot::ServoElementSnapshot(const Element* aElement)
   , mContains(Flags(0))
   , mIsTableBorderNonzero(false)
   , mIsMozBrowserFrame(false)
+  , mClassAttributeChanged(false)
+  , mIdAttributeChanged(false)
+  , mOtherAttributeChanged(false)
 {
   MOZ_COUNT_CTOR(ServoElementSnapshot);
   mIsHTMLElementInHTMLDocument =
     aElement->IsHTMLElement() && aElement->IsInHTMLDocument();
-  mIsInChromeDocument =
-    nsContentUtils::IsChromeDoc(aElement->OwnerDoc());
+  mIsInChromeDocument = nsContentUtils::IsChromeDoc(aElement->OwnerDoc());
+  mSupportsLangAttr = aElement->SupportsLangAttr();
 }
 
 ServoElementSnapshot::~ServoElementSnapshot()
@@ -30,9 +33,23 @@ ServoElementSnapshot::~ServoElementSnapshot()
 }
 
 void
-ServoElementSnapshot::AddAttrs(Element* aElement)
+ServoElementSnapshot::AddAttrs(Element* aElement,
+                               int32_t aNameSpaceID,
+                               nsIAtom* aAttribute)
 {
   MOZ_ASSERT(aElement);
+
+  if (aNameSpaceID == kNameSpaceID_None) {
+    if (aAttribute == nsGkAtoms::_class) {
+      mClassAttributeChanged = true;
+    } else if (aAttribute == nsGkAtoms::id) {
+      mIdAttributeChanged = true;
+    } else {
+      mOtherAttributeChanged = true;
+    }
+  } else {
+    mOtherAttributeChanged = true;
+  }
 
   if (HasAttrs()) {
     return;
@@ -50,7 +67,8 @@ ServoElementSnapshot::AddAttrs(Element* aElement)
   if (aElement->HasID()) {
     mContains |= Flags::Id;
   }
-  if (aElement->MayHaveClass()) {
+  if (const nsAttrValue* classValue = aElement->GetClasses()) {
+    mClass = *classValue;
     mContains |= Flags::MaybeClass;
   }
 }

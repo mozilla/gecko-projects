@@ -6,9 +6,15 @@
 
 use app_units::Au;
 use properties::animated_properties::Animatable;
-use values::CSSFloat;
+use values::{CSSInteger, CSSFloat};
+use values::animated::ToAnimatedZero;
 use values::computed::length::{Length, LengthOrPercentage};
-use values::generics::text::{LineHeight as GenericLineHeight, Spacing};
+use values::generics::text::InitialLetter as GenericInitialLetter;
+use values::generics::text::LineHeight as GenericLineHeight;
+use values::generics::text::Spacing;
+
+/// A computed value for the `initial-letter` property.
+pub type InitialLetter = GenericInitialLetter<CSSFloat, CSSInteger>;
 
 /// A computed value for the `letter-spacing` property.
 pub type LetterSpacing = Spacing<Length>;
@@ -55,4 +61,9 @@ impl Animatable for LineHeight {
             _ => Err(()),
         }
     }
+}
+
+impl ToAnimatedZero for LineHeight {
+    #[inline]
+    fn to_animated_zero(&self) -> Result<Self, ()> { Err(()) }
 }

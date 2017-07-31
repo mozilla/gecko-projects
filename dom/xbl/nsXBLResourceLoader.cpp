@@ -81,24 +81,28 @@ nsXBLResourceLoader::~nsXBLResourceLoader()
   delete mResourceList;
 }
 
-void
-nsXBLResourceLoader::LoadResources(bool* aResult)
+bool
+nsXBLResourceLoader::LoadResources(nsIContent* aBoundElement)
 {
   mInLoadResourcesFunc = true;
 
   if (mLoadingResources) {
-    *aResult = (mPendingSheets == 0);
     mInLoadResourcesFunc = false;
-    return;
+    return mPendingSheets == 0;
   }
 
   mLoadingResources = true;
-  *aResult = true;
 
   // Declare our loaders.
   nsCOMPtr<nsIDocument> doc = mBinding->XBLDocumentInfo()->GetDocument();
+  mBoundDocument = aBoundElement->OwnerDoc();
 
   mozilla::css::Loader* cssLoader = doc->CSSLoader();
+  MOZ_ASSERT(cssLoader->GetDocument() &&
+             cssLoader->GetDocument()->GetStyleBackendType()
+               == mBoundDocument->GetStyleBackendType(),
+             "The style backends of the loader and bound document are mismatched!");
+
   nsIURI *docURL = doc->GetDocumentURI();
   nsIPrincipal* docPrincipal = doc->NodePrincipal();
 
@@ -109,7 +113,7 @@ nsXBLResourceLoader::LoadResources(bool* aResult)
       continue;
 
     if (NS_FAILED(NS_NewURI(getter_AddRefs(url), curr->mSrc,
-                            doc->GetDocumentCharacterSet().get(), docURL)))
+                            doc->GetDocumentCharacterSet(), docURL)))
       continue;
 
     if (curr->mType == nsGkAtoms::image) {
@@ -154,12 +158,13 @@ nsXBLResourceLoader::LoadResources(bool* aResult)
     }
   }
 
-  *aResult = (mPendingSheets == 0);
   mInLoadResourcesFunc = false;
 
   // Destroy our resource list.
   delete mResourceList;
   mResourceList = nullptr;
+
+  return mPendingSheets == 0;
 }
 
 // nsICSSLoaderObserver
@@ -182,6 +187,9 @@ nsXBLResourceLoader::StyleSheetLoaded(StyleSheet* aSheet,
     // All stylesheets are loaded.
     if (aSheet->IsGecko()) {
       mResources->GatherRuleProcessor();
+    } else {
+      mResources->ComputeServoStyleSet(
+        mBoundDocument->GetShell()->GetPresContext());
     }
 
     // XXX Check for mPendingScripts when scripts also come online.
@@ -260,6 +268,18 @@ nsXBLResourceLoader::NotifyBoundElements()
             }
 
             if (!sc) {
+              if (ServoStyleSet* servoSet = shell->StyleSet()->GetAsServo()) {
+                // Ensure the element has servo data so that
+                // nsChangeHint_ReconstructFrame posted by
+                // PostRecreateFramesFor() is recognized.
+                //
+                // Also check MayTraverseFrom to handle programatic XBL consumers.
+                // See bug 1370793.
+                Element* element = content->AsElement();
+                if (servoSet->MayTraverseFrom(element)) {
+                  servoSet->StyleNewlyBoundElement(element);
+                }
+              }
               shell->PostRecreateFramesFor(content->AsElement());
             }
           }

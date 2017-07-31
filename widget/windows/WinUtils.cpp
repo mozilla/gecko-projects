@@ -549,27 +549,31 @@ WinUtils::Log(const char *fmt, ...)
 }
 
 // static
-double
-WinUtils::SystemScaleFactor()
+float
+WinUtils::SystemDPI()
 {
   // The result of GetDeviceCaps won't change dynamically, as it predates
   // per-monitor DPI and support for on-the-fly resolution changes.
   // Therefore, we only need to look it up once.
-  static double systemScale = 0;
-  if (systemScale == 0) {
+  static float dpi = 0;
+  if (dpi <= 0) {
     HDC screenDC = GetDC(nullptr);
-    systemScale = GetDeviceCaps(screenDC, LOGPIXELSY) / 96.0;
+    dpi = GetDeviceCaps(screenDC, LOGPIXELSY);
     ReleaseDC(nullptr, screenDC);
-
-    if (systemScale == 0) {
-      // Bug 1012487 - This can occur when the Screen DC is used off the
-      // main thread on windows. For now just assume a 100% DPI for this
-      // drawing call.
-      // XXX - fixme!
-      return 1.0;
-    }
   }
-  return systemScale;
+
+  // Bug 1012487 - dpi can be 0 when the Screen DC is used off the
+  // main thread on windows. For now just assume a 100% DPI for this
+  // drawing call.
+  // XXX - fixme!
+  return dpi > 0 ? dpi : 96;
+}
+
+// static
+double
+WinUtils::SystemScaleFactor()
+{
+  return SystemDPI() / 96.0;
 }
 
 #if WINVER < 0x603
@@ -622,17 +626,25 @@ WinUtils::IsPerMonitorDPIAware()
 }
 
 /* static */
-double
-WinUtils::LogToPhysFactor(HMONITOR aMonitor)
+float
+WinUtils::MonitorDPI(HMONITOR aMonitor)
 {
   if (IsPerMonitorDPIAware()) {
     UINT dpiX, dpiY = 96;
     sGetDpiForMonitor(aMonitor ? aMonitor : GetPrimaryMonitor(),
                       MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
-    return dpiY / 96.0;
+    return dpiY;
   }
 
-  return SystemScaleFactor();
+  // We're not per-monitor aware, use system DPI instead.
+  return SystemDPI();
+}
+
+/* static */
+double
+WinUtils::LogToPhysFactor(HMONITOR aMonitor)
+{
+  return MonitorDPI(aMonitor) / 96.0;
 }
 
 /* static */
@@ -680,6 +692,18 @@ void
 WinUtils::SetAPCPending()
 {
   sAPCPending = true;
+}
+
+/* static */
+a11y::Accessible*
+WinUtils::GetRootAccessibleForHWND(HWND aHwnd)
+{
+  nsWindow* window = GetNSWindowPtr(aHwnd);
+  if (!window) {
+    return nullptr;
+  }
+
+  return window->GetAccessible();
 }
 #endif // ACCESSIBILITY
 
@@ -1461,20 +1485,24 @@ AsyncDeleteAllFaviconsFromDisk::
   // We can't call FaviconHelper::GetICOCacheSecondsTimeout() on non-main
   // threads, as it reads a pref, so cache its value here.
   mIcoNoDeleteSeconds = FaviconHelper::GetICOCacheSecondsTimeout() + 600;
+
+  // Prepare the profile directory cache on the main thread, to ensure we wont
+  // do this on non-main threads.
+  Unused << NS_GetSpecialDirectory("ProfLDS",
+    getter_AddRefs(mJumpListCacheDir));
 }
 
 NS_IMETHODIMP AsyncDeleteAllFaviconsFromDisk::Run()
 {
+  if (!mJumpListCacheDir) {
+    return NS_ERROR_FAILURE;
+  }
   // Construct the path of our jump list cache
-  nsCOMPtr<nsIFile> jumpListCacheDir;
-  nsresult rv = NS_GetSpecialDirectory("ProfLDS", 
-    getter_AddRefs(jumpListCacheDir));
-  NS_ENSURE_SUCCESS(rv, rv);
-  rv = jumpListCacheDir->AppendNative(
+  nsresult rv = mJumpListCacheDir->AppendNative(
       nsDependentCString(FaviconHelper::kJumpListCacheDir));
   NS_ENSURE_SUCCESS(rv, rv);
   nsCOMPtr<nsISimpleEnumerator> entries;
-  rv = jumpListCacheDir->GetDirectoryEntries(getter_AddRefs(entries));
+  rv = mJumpListCacheDir->GetDirectoryEntries(getter_AddRefs(entries));
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Loop through each directory entry and remove all ICO files found
@@ -1805,111 +1833,66 @@ WinUtils::GetMaxTouchPoints()
   return 0;
 }
 
-#pragma pack(push, 1)
-typedef struct REPARSE_DATA_BUFFER {
-  ULONG  ReparseTag;
-  USHORT ReparseDataLength;
-  USHORT Reserved;
-  union {
-    struct {
-      USHORT SubstituteNameOffset;
-      USHORT SubstituteNameLength;
-      USHORT PrintNameOffset;
-      USHORT PrintNameLength;
-      ULONG  Flags;
-      WCHAR  PathBuffer[1];
-    } SymbolicLinkReparseBuffer;
-    struct {
-      USHORT SubstituteNameOffset;
-      USHORT SubstituteNameLength;
-      USHORT PrintNameOffset;
-      USHORT PrintNameLength;
-      WCHAR  PathBuffer[1];
-    } MountPointReparseBuffer;
-    struct {
-      UCHAR DataBuffer[1];
-    } GenericReparseBuffer;
-  };
-} REPARSE_DATA_BUFFER, *PREPARSE_DATA_BUFFER;
-#pragma pack(pop)
+/* static */
+bool
+WinUtils::ResolveJunctionPointsAndSymLinks(std::wstring& aPath)
+{
+  wchar_t path[MAX_PATH] = { 0 };
+
+  nsAutoHandle handle(
+    ::CreateFileW(aPath.c_str(),
+                  0,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                  nullptr,
+                  OPEN_EXISTING,
+                  FILE_FLAG_BACKUP_SEMANTICS,
+                  nullptr));
+
+  if (handle == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+
+  DWORD pathLen = GetFinalPathNameByHandleW(
+    handle, path, MAX_PATH, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  if (pathLen == 0 || pathLen >= MAX_PATH) {
+    return false;
+  }
+  aPath = path;
+
+  // GetFinalPathNameByHandle sticks a '\\?\' in front of the path,
+  // but that confuses some APIs so strip it off. It will also put
+  // '\\?\UNC\' in front of network paths, we convert that to '\\'.
+  if (aPath.compare(0, 7, L"\\\\?\\UNC") == 0) {
+    aPath.erase(2, 6);
+  } else if (aPath.compare(0, 4, L"\\\\?\\") == 0) {
+    aPath.erase(0, 4);
+  }
+
+  return true;
+}
 
 /* static */
 bool
-WinUtils::ResolveMovedUsersFolder(std::wstring& aPath)
+WinUtils::ResolveJunctionPointsAndSymLinks(nsIFile* aPath)
 {
-  wchar_t* usersPath;
-  if (FAILED(SHGetKnownFolderPath(FOLDERID_UserProfiles, 0, nullptr,
-                                  &usersPath))) {
+  MOZ_ASSERT(aPath);
+
+  nsAutoString filePath;
+  nsresult rv = aPath->GetPath(filePath);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return false;
   }
 
-  // Ensure usersPath gets freed properly.
-  UniquePtr<wchar_t, CoTaskMemFreePolicy> autoFreePath(usersPath);
-
-  // Is aPath in Users folder?
-  size_t usersLen = wcslen(usersPath);
-  if (_wcsnicmp(aPath.c_str(), usersPath, usersLen) != 0 ||
-      aPath[usersLen] != L'\\') {
-    return true;
-  }
-
-  DWORD attributes = ::GetFileAttributesW(usersPath);
-  if (attributes == INVALID_FILE_ATTRIBUTES) {
+  std::wstring resolvedPath(filePath.get());
+  if (!ResolveJunctionPointsAndSymLinks(resolvedPath)) {
     return false;
   }
 
-  // Junction points are implemented as reparse points, is the Users folder one?
-  if (!(attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
-    return true;
-  }
-
-  // Get the reparse point data.
-  nsAutoHandle usersHandle(
-    ::CreateFileW(usersPath, 0,
-                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                  nullptr, OPEN_EXISTING,
-                  FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
-                  nullptr));
-
-  char maxReparseBuf[MAXIMUM_REPARSE_DATA_BUFFER_SIZE] = {0};
-  REPARSE_DATA_BUFFER* reparseBuf = (REPARSE_DATA_BUFFER*)maxReparseBuf;
-  DWORD bytesReturned = 0;
-  if (!::DeviceIoControl(usersHandle, FSCTL_GET_REPARSE_POINT, nullptr, 0,
-                         reparseBuf, MAXIMUM_REPARSE_DATA_BUFFER_SIZE,
-                         &bytesReturned, nullptr)) {
+  rv = aPath->InitWithPath(nsDependentString(resolvedPath.c_str()));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return false;
   }
 
-  // Check to see if the reparse point is a junction point.
-  if (reparseBuf->ReparseTag != IO_REPARSE_TAG_MOUNT_POINT) {
-    return true;
-  }
-
-  // The offset and length are in bytes. Length doesn't include null.
-  wchar_t* substituteName = reparseBuf->MountPointReparseBuffer.PathBuffer +
-    reparseBuf->MountPointReparseBuffer.SubstituteNameOffset / sizeof(wchar_t);
-  std::wstring::size_type substituteLen =
-    reparseBuf->MountPointReparseBuffer.SubstituteNameLength / sizeof(wchar_t);
-
-  // If the substitute path starts with the NT namespace then remove it.
-  if (wcsncmp(substituteName, kNTPrefix, kNTPrefixLen) == 0) {
-    substituteName += kNTPrefixLen;
-    substituteLen -= kNTPrefixLen;
-  }
-
-  // Check that what remains looks like a drive letter path.
-  if (substituteName[1] != L':' || substituteName[2] != L'\\') {
-    return false;
-  }
-
-  // The documentation for SHGetKnownFolderPath says that it doesn't return a
-  // trailing backslash. The REPARSE_DATA_BUFFER path doesn't seem to have one
-  // either, but the documentation doesn't mention it, so let's make sure.
-  if (substituteName[substituteLen - 1] == L'\\') {
-    --substituteLen;
-  }
-
-  aPath.replace(0, usersLen, substituteName, substituteLen);
   return true;
 }
 

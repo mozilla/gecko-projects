@@ -11,6 +11,10 @@
 #include "SandboxInfo.h"
 #include "SandboxInternal.h"
 #include "SandboxLogging.h"
+#ifdef MOZ_GMP_SANDBOX
+#include "SandboxOpenedFiles.h"
+#endif
+#include "mozilla/PodOperations.h"
 #include "mozilla/UniquePtr.h"
 
 #include <errno.h>
@@ -23,6 +27,7 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/utsname.h>
 #include <time.h>
 #include <unistd.h>
 #include <vector>
@@ -87,15 +92,14 @@ protected:
   }
 
 private:
-#if defined(ANDROID) && ANDROID_VERSION < 16
   // Bug 1093893: Translate tkill to tgkill for pthread_kill; fixed in
   // bionic commit 10c8ce59a (in JB and up; API level 16 = Android 4.1).
+  // Bug 1376653: musl also needs this, and security-wise it's harmless.
   static intptr_t TKillCompatTrap(const sandbox::arch_seccomp_data& aArgs,
                                   void *aux)
   {
     return syscall(__NR_tgkill, getpid(), aArgs.args[0], aArgs.args[1]);
   }
-#endif
 
   static intptr_t SetNoNewPrivsTrap(ArgsRef& aArgs, void* aux) {
     if (gSetSandboxFilter == nullptr) {
@@ -108,7 +112,7 @@ private:
   }
 
 public:
-  virtual ResultExpr InvalidSyscall() const override {
+  ResultExpr InvalidSyscall() const override {
     return Trap(BlockedSyscallTrap, nullptr);
   }
 
@@ -120,25 +124,19 @@ public:
     // don't support seccomp-bpf on those archs yet.
     Arg<int> flags(0);
 
-    // The glibc source hasn't changed the thread creation clone flags
-    // since 2004, so this *should* be safe to hard-code.  Bionic's
-    // value has changed a few times, and has converged on the same one
-    // as glibc; allow any of them.
-    static const int flags_common = CLONE_VM | CLONE_FS | CLONE_FILES |
-      CLONE_SIGHAND | CLONE_THREAD | CLONE_SYSVSEM;
-    static const int flags_modern = flags_common | CLONE_SETTLS |
+    // The exact flags used can vary.  CLONE_DETACHED is used by musl
+    // and by old versions of Android (<= JB 4.2), but it's been
+    // ignored by the kernel since the beginning of the Git history.
+    //
+    // If we ever need to support Android <= KK 4.4 again, SETTLS
+    // and the *TID flags will need to be made optional.
+    static const int flags_required = CLONE_VM | CLONE_FS | CLONE_FILES |
+      CLONE_SIGHAND | CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS |
       CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID;
+    static const int flags_optional = CLONE_DETACHED;
 
-    // Can't use CASES here because its decltype magic infers const
-    // int instead of regular int and bizarre voluminous errors issue
-    // forth from the depths of the standard library implementation.
-    return Switch(flags)
-#ifdef ANDROID
-      .Case(flags_common | CLONE_DETACHED, Allow()) // <= JB 4.2
-      .Case(flags_common, Allow()) // JB 4.3 or KK 4.4
-#endif
-      .Case(flags_modern, Allow()) // Android L or glibc
-      .Default(failPolicy);
+    return If((flags & ~flags_optional) == flags_required, Allow())
+      .Else(failPolicy);
   }
 
   virtual ResultExpr PrctlPolicy() const {
@@ -155,7 +153,7 @@ public:
       .Default(InvalidSyscall());
   }
 
-  virtual Maybe<ResultExpr> EvaluateSocketCall(int aCall) const override {
+  Maybe<ResultExpr> EvaluateSocketCall(int aCall) const override {
     switch (aCall) {
     case SYS_RECVMSG:
     case SYS_SENDMSG:
@@ -165,7 +163,7 @@ public:
     }
   }
 
-  virtual ResultExpr EvaluateSyscall(int sysno) const override {
+  ResultExpr EvaluateSyscall(int sysno) const override {
     switch (sysno) {
       // Timekeeping
     case __NR_clock_gettime: {
@@ -196,6 +194,8 @@ public:
       return Allow();
 
       // Asynchronous I/O
+    case __NR_epoll_create1:
+    case __NR_epoll_create:
     case __NR_epoll_wait:
     case __NR_epoll_pwait:
     case __NR_epoll_ctl:
@@ -240,11 +240,9 @@ public:
         .Else(InvalidSyscall());
     }
 
-#if defined(ANDROID) && ANDROID_VERSION < 16
       // Polyfill with tgkill; see above.
     case __NR_tkill:
       return Trap(TKillCompatTrap, nullptr);
-#endif
 
       // Yield
     case __NR_sched_yield:
@@ -518,13 +516,13 @@ public:
                                 const std::vector<int>& aSyscallWhitelist)
     : mBroker(aBroker),
       mSyscallWhitelist(aSyscallWhitelist) {}
-  virtual ~ContentSandboxPolicy() { }
-  virtual ResultExpr PrctlPolicy() const override {
+  ~ContentSandboxPolicy() override = default;
+  ResultExpr PrctlPolicy() const override {
     // Ideally this should be restricted to a whitelist, but content
     // uses enough things that it's not trivial to determine it.
     return Allow();
   }
-  virtual Maybe<ResultExpr> EvaluateSocketCall(int aCall) const override {
+  Maybe<ResultExpr> EvaluateSocketCall(int aCall) const override {
     switch(aCall) {
     case SYS_RECVFROM:
     case SYS_SENDTO:
@@ -555,7 +553,6 @@ public:
     case SYS_SEND:
     case SYS_SOCKET: // DANGEROUS
     case SYS_CONNECT: // DANGEROUS
-    case SYS_ACCEPT4: // Used by a11y; see bug 1361238
     case SYS_GETSOCKOPT:
     case SYS_SETSOCKOPT:
     case SYS_GETSOCKNAME:
@@ -569,7 +566,7 @@ public:
   }
 
 #ifdef DESKTOP
-  virtual Maybe<ResultExpr> EvaluateIpcCall(int aCall) const override {
+  Maybe<ResultExpr> EvaluateIpcCall(int aCall) const override {
     switch(aCall) {
       // These are a problem: SysV shared memory follows the Unix
       // "same uid policy" and can't be restricted/brokered like file
@@ -590,7 +587,7 @@ public:
   }
 #endif
 
-  virtual ResultExpr EvaluateSyscall(int sysno) const override {
+  ResultExpr EvaluateSyscall(int sysno) const override {
     // Straight allow for anything that got overriden via prefs
     if (std::find(mSyscallWhitelist.begin(), mSyscallWhitelist.end(), sysno)
         != mSyscallWhitelist.end()) {
@@ -892,7 +889,7 @@ class GMPSandboxPolicy : public SandboxPolicyCommon {
   static intptr_t OpenTrap(const sandbox::arch_seccomp_data& aArgs,
                            void* aux)
   {
-    auto plugin = static_cast<SandboxOpenedFile*>(aux);
+    const auto files = static_cast<const SandboxOpenedFiles*>(aux);
     const char* path;
     int flags;
 
@@ -913,20 +910,15 @@ class GMPSandboxPolicy : public SandboxPolicyCommon {
       MOZ_CRASH("unexpected syscall number");
     }
 
-    if (strcmp(path, plugin->mPath) != 0) {
-      SANDBOX_LOG_ERROR("attempt to open file %s (flags=0%o) which is not the"
-                        " media plugin %s", path, flags, plugin->mPath);
-      return -EPERM;
-    }
     if ((flags & O_ACCMODE) != O_RDONLY) {
       SANDBOX_LOG_ERROR("non-read-only open of file %s attempted (flags=0%o)",
                         path, flags);
-      return -EPERM;
+      return -EROFS;
     }
-    int fd = plugin->mFd.exchange(-1);
+    int fd = files->GetDesc(path);
     if (fd < 0) {
-      SANDBOX_LOG_ERROR("multiple opens of media plugin file unimplemented");
-      return -ENOSYS;
+      // SandboxOpenedFile::GetDesc already logged about this, if appropriate.
+      return -ENOENT;
     }
     return fd;
   }
@@ -948,24 +940,50 @@ class GMPSandboxPolicy : public SandboxPolicyCommon {
     return BlockedSyscallTrap(aArgs, nullptr);
   }
 
-  SandboxOpenedFile* mPlugin;
-public:
-  explicit GMPSandboxPolicy(SandboxOpenedFile* aPlugin)
-  : mPlugin(aPlugin)
+  static intptr_t UnameTrap(const sandbox::arch_seccomp_data& aArgs,
+                            void* aux)
   {
-    MOZ_ASSERT(aPlugin->mPath[0] == '/', "plugin path should be absolute");
+    const auto buf = reinterpret_cast<struct utsname*>(aArgs.args[0]);
+    PodZero(buf);
+    // The real uname() increases fingerprinting risk for no benefit.
+    // This is close enough.
+    strcpy(buf->sysname, "Linux");
+    strcpy(buf->version, "3");
+    return 0;
+  };
+
+  static intptr_t FcntlTrap(const sandbox::arch_seccomp_data& aArgs,
+                            void* aux)
+  {
+    const auto cmd = static_cast<int>(aArgs.args[1]);
+    switch (cmd) {
+      // This process can't exec, so the actual close-on-exec flag
+      // doesn't matter; have it always read as true and ignore writes.
+    case F_GETFD:
+      return O_CLOEXEC;
+    case F_SETFD:
+      return 0;
+    default:
+      return -ENOSYS;
+    }
   }
 
-  virtual ~GMPSandboxPolicy() { }
+  const SandboxOpenedFiles* mFiles;
+public:
+  explicit GMPSandboxPolicy(const SandboxOpenedFiles* aFiles)
+  : mFiles(aFiles)
+  { }
 
-  virtual ResultExpr EvaluateSyscall(int sysno) const override {
+  ~GMPSandboxPolicy() override = default;
+
+  ResultExpr EvaluateSyscall(int sysno) const override {
     switch (sysno) {
       // Simulate opening the plugin file.
 #ifdef __NR_open
     case __NR_open:
 #endif
     case __NR_openat:
-      return Trap(OpenTrap, mPlugin);
+      return Trap(OpenTrap, mFiles);
 
       // ipc::Shmem
     case __NR_mprotect:
@@ -998,6 +1016,15 @@ public:
     case __NR_times:
       return Allow();
 
+    // Bug 1372428
+    case __NR_uname:
+      return Trap(UnameTrap, nullptr);
+    CASES_FOR_fcntl:
+      return Trap(FcntlTrap, nullptr);
+
+    case __NR_dup:
+      return Allow();
+
     default:
       return SandboxPolicyCommon::EvaluateSyscall(sysno);
     }
@@ -1005,11 +1032,11 @@ public:
 };
 
 UniquePtr<sandbox::bpf_dsl::Policy>
-GetMediaSandboxPolicy(SandboxOpenedFile* aPlugin)
+GetMediaSandboxPolicy(const SandboxOpenedFiles* aFiles)
 {
-  return UniquePtr<sandbox::bpf_dsl::Policy>(new GMPSandboxPolicy(aPlugin));
+  return UniquePtr<sandbox::bpf_dsl::Policy>(new GMPSandboxPolicy(aFiles));
 }
 
 #endif // MOZ_GMP_SANDBOX
 
-}
+} // namespace mozilla

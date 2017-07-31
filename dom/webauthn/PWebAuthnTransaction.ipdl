@@ -20,11 +20,7 @@ namespace mozilla {
 namespace dom {
 
 struct WebAuthnScopedCredentialDescriptor {
-  // Converted from mozilla::dom::ScopedCredentialType enum
-  uint32_t type;
   uint8_t[] id;
-  // Converted from mozilla::dom::WebAuthnTransport enum
-  uint32_t[] transports;
 };
 
 struct WebAuthnExtension {
@@ -47,7 +43,7 @@ async protocol PWebAuthnTransaction {
     async RequestSign(WebAuthnTransactionInfo aTransactionInfo);
     async RequestCancel();
   child:
-    async ConfirmRegister(uint8_t[] RegBuffer, uint8_t[] SigBuffer);
+    async ConfirmRegister(uint8_t[] RegBuffer);
     async ConfirmSign(uint8_t[] CredentialID, uint8_t[] ReplyBuffer);
     async Cancel(nsresult Error);
 };

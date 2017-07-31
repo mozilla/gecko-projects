@@ -165,6 +165,7 @@ import android.widget.ListView;
 import android.widget.ViewFlipper;
 import org.mozilla.gecko.switchboard.AsyncConfigLoader;
 import org.mozilla.gecko.switchboard.SwitchBoard;
+import org.mozilla.gecko.widget.SplashScreen;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -179,9 +180,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
-
-import static org.mozilla.gecko.Tab.TabType;
-import static org.mozilla.gecko.Tabs.INVALID_TAB_ID;
 
 public class BrowserApp extends GeckoApp
                         implements ActionModePresenter,
@@ -242,6 +240,9 @@ public class BrowserApp extends GeckoApp
     private FirstrunAnimationContainer mFirstrunAnimationContainer;
     private HomeScreen mHomeScreen;
     private TabsPanel mTabsPanel;
+
+    private boolean showSplashScreen = false;
+    private SplashScreen splashScreen;
     /**
      * Container for the home screen implementation. This will be populated with any valid
      * home screen implementation (currently that is just the HomePager, but that will be extended
@@ -442,11 +443,6 @@ public class BrowserApp extends GeckoApp
         super.onTabChanged(tab, msg, data);
     }
 
-    @Override
-    protected boolean saveAsLastSelectedTab(Tab tab) {
-        return tab.getType() == TabType.BROWSING;
-    }
-
     private void updateEditingModeForTab(final Tab selectedTab) {
         // (bug 1086983 comment 11) Because the tab may be selected from the gecko thread and we're
         // running this code on the UI thread, the selected tab argument may not still refer to the
@@ -613,6 +609,7 @@ public class BrowserApp extends GeckoApp
     public void onCreate(Bundle savedInstanceState) {
         final Context appContext = getApplicationContext();
 
+        showSplashScreen = true;
         GeckoLoader.loadMozGlue(appContext);
         if (!HardwareUtils.isSupportedSystem() || !GeckoLoader.neonCompatible()) {
             // This build does not support the Android version of the device; Exit early.
@@ -622,6 +619,8 @@ public class BrowserApp extends GeckoApp
 
         final SafeIntent intent = new SafeIntent(getIntent());
         final boolean isInAutomation = IntentUtils.getIsInAutomationFromEnvironment(intent);
+
+        GeckoProfile.setIntentArgs(intent.getStringExtra("args"));
 
         if (!isInAutomation && AppConstants.MOZ_ANDROID_DOWNLOAD_CONTENT_SERVICE) {
             // Kick off download of app content as early as possible so that in the best case it's
@@ -1181,38 +1180,6 @@ public class BrowserApp extends GeckoApp
 
         for (BrowserAppDelegate delegate : delegates) {
             delegate.onResume(this);
-        }
-    }
-
-    @Override
-    protected void restoreLastSelectedTab() {
-        if (mLastSelectedTabId < 0) {
-            // Normally, session restore will select the correct tab when starting up, however this
-            // is linked to Gecko powering up. If we're not the first activity to launch, the
-            // previously running activity might have already overwritten this by selecting a tab of
-            // its own.
-            // Therefore we check whether the session file parser has left a note for us with the
-            // correct tab to be initially selected on *BrowserApp* startup.
-            SharedPreferences prefs = getSharedPreferencesForProfile();
-            mLastSelectedTabId = prefs.getInt(STARTUP_SELECTED_TAB, INVALID_TAB_ID);
-            mLastSessionUUID = prefs.getString(STARTUP_SESSION_UUID, null);
-
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.remove(STARTUP_SELECTED_TAB);
-            editor.remove(STARTUP_SESSION_UUID);
-            editor.apply();
-        }
-
-        final Tabs tabs = Tabs.getInstance();
-        final Tab tabToSelect = tabs.getTab(mLastSelectedTabId);
-
-        if (tabToSelect != null && GeckoApplication.getSessionUUID().equals(mLastSessionUUID) &&
-                tabToSelect.getType() == TabType.BROWSING) {
-            tabs.selectTab(mLastSelectedTabId);
-        } else {
-            if (!tabs.selectLastTab(TabType.BROWSING)) {
-                tabs.loadUrl(Tabs.getHomepageForStartupTab(this), Tabs.LOADURL_NEW_TAB);
-            }
         }
     }
 
@@ -2425,9 +2392,9 @@ public class BrowserApp extends GeckoApp
         final Tab tab;
 
         if (AboutPages.isAboutReader(url)) {
-            tab = tabs.getFirstReaderTabForUrl(url, selectedTab.isPrivate(), selectedTab.getType());
+            tab = tabs.getFirstReaderTabForUrl(url, selectedTab.isPrivate());
         } else {
-            tab = tabs.getFirstTabForUrl(url, selectedTab.isPrivate(), selectedTab.getType());
+            tab = tabs.getFirstTabForUrl(url, selectedTab.isPrivate());
         }
 
         if (tab == null) {
@@ -2527,6 +2494,9 @@ public class BrowserApp extends GeckoApp
             } else if (!TextUtils.isEmpty(tabURL)) {
                 url = tabURL;
                 telemetryMsg = "urlbar-url";
+                if (splashScreen != null) {
+                    splashScreen.setVisibility(View.GONE);
+                }
             }
         }
 
@@ -2772,7 +2742,23 @@ public class BrowserApp extends GeckoApp
             if (mDynamicToolbar.isEnabled()) {
                 mDynamicToolbar.setVisible(true, VisibilityTransition.ANIMATE);
             }
+            showSplashScreen = false;
         } else {
+            // The tab going to load is not about page. It's a web page.
+            // If showSplashScreen is true, it means the app is first launched. We want to show the SlashScreen
+            // But if GeckoThread.isRunning, the will be 0 sec for web rendering.
+            // In that case, we don't want to show the SlashScreen/
+            if (showSplashScreen && !GeckoThread.isRunning()) {
+
+                final ViewGroup main = (ViewGroup) findViewById(R.id.main_layout);
+                final View splashLayout = LayoutInflater.from(this).inflate(R.layout.splash_screen, main);
+                splashScreen = (SplashScreen) splashLayout.findViewById(R.id.splash_root);
+
+                showSplashScreen = false;
+            } else if (splashScreen != null) {
+                // Below line will be run when LOCATION_CHANGE. Which means the page load is almost completed.
+                splashScreen.hide();
+            }
             hideHomePager();
         }
     }
@@ -3466,6 +3452,10 @@ public class BrowserApp extends GeckoApp
     }
 
     @Override
+    public void onContextMenu(GeckoView view, int screenX, int screenY,
+                              String uri, String elementSrc) {}
+
+    @Override
     public boolean onPrepareOptionsMenu(Menu aMenu) {
         if (aMenu == null)
             return false;
@@ -3686,8 +3676,17 @@ public class BrowserApp extends GeckoApp
             MenuUtils.safeSetVisible(aMenu, R.id.new_guest_session, false);
         }
 
+        if (SwitchBoard.isInExperiment(this, Experiments.TOP_ADDONS_MENU)) {
+            MenuUtils.safeSetVisible(aMenu, R.id.addons_top_level, true);
+            MenuUtils.safeSetVisible(aMenu, R.id.addons, false);
+        } else {
+            MenuUtils.safeSetVisible(aMenu, R.id.addons_top_level, false);
+            MenuUtils.safeSetVisible(aMenu, R.id.addons, true);
+        }
+
         if (!Restrictions.isAllowed(this, Restrictable.INSTALL_EXTENSION)) {
             MenuUtils.safeSetVisible(aMenu, R.id.addons, false);
+            MenuUtils.safeSetVisible(aMenu, R.id.addons_top_level, false);
         }
 
         // Hide panel menu items if the panels themselves are hidden.
@@ -3724,6 +3723,7 @@ public class BrowserApp extends GeckoApp
             // Mask private browsing
             extras = "new_tab";
         }
+
         Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.MENU, extras);
 
         mBrowserToolbar.cancelEdit();
@@ -3833,7 +3833,7 @@ public class BrowserApp extends GeckoApp
             return true;
         }
 
-        if (itemId == R.id.addons) {
+        if (itemId == R.id.addons || itemId == R.id.addons_top_level) {
             Tabs.getInstance().loadUrlInTab(AboutPages.ADDONS);
             return true;
         }

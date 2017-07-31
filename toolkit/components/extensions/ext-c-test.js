@@ -1,5 +1,8 @@
 "use strict";
 
+// The ext-c-* files are imported into the same scopes.
+/* import-globals-from ext-c-toolkit.js */
+
 /**
  * Checks whether the given error matches the given expectations.
  *
@@ -18,7 +21,7 @@
  * @returns {boolean}
  *        True if the error matches the expected error.
  */
-function errorMatches(error, expectedError, context) {
+const errorMatches = (error, expectedError, context) => {
   if (expectedError === null) {
     return true;
   }
@@ -43,7 +46,7 @@ function errorMatches(error, expectedError, context) {
   }
 
   return false;
-}
+};
 
 /**
  * Calls .toSource() on the given value, but handles null, undefined,
@@ -52,7 +55,7 @@ function errorMatches(error, expectedError, context) {
  * @param {*} value
  * @returns {string}
  */
-function toSource(value) {
+const toSource = value => {
   if (value === null) {
     return "null";
   }
@@ -68,7 +71,7 @@ function toSource(value) {
   } catch (e) {
     return "<unknown>";
   }
-}
+};
 
 this.test = class extends ExtensionAPI {
   getAPI(context) {
@@ -165,7 +168,7 @@ this.test = class extends ExtensionAPI {
           }
         },
 
-        onMessage: new SingletonEventManager(context, "test.onMessage", fire => {
+        onMessage: new EventManager(context, "test.onMessage", fire => {
           let handler = (event, ...args) => {
             fire.async(...args);
           };

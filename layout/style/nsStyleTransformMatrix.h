@@ -10,8 +10,11 @@
 #ifndef nsStyleTransformMatrix_h_
 #define nsStyleTransformMatrix_h_
 
+#include "gfxPoint.h"
+#include "mozilla/gfx/Matrix.h"
 #include "mozilla/EnumeratedArray.h"
 #include "nsCSSValue.h"
+#include "nsSize.h"
 
 #include <limits>
 
@@ -28,6 +31,11 @@ class RuleNodeCacheConditions;
  * A helper to generate gfxMatrixes from css transform functions.
  */
 namespace nsStyleTransformMatrix {
+  // The operator passed to Servo backend.
+  enum class MatrixTransformOperator: uint8_t {
+    Interpolate,
+    Accumulate
+  };
 
   // Function for applying perspective() transform function. We treat
   // any value smaller than epsilon as perspective(infinity), which
@@ -199,6 +207,14 @@ namespace nsStyleTransformMatrix {
                                          TransformReferenceBox& aBounds,
                                          float aAppUnitsPerMatrixUnit,
                                          bool* aContains3dTransform);
+
+  /**
+   * Given two nsStyleCoord values, compute the 2d position with respect to the
+   * given TransformReferenceBox that these values describe, in device pixels.
+   */
+  mozilla::gfx::Point Convert2DPosition(nsStyleCoord const (&aValue)[2],
+                                        TransformReferenceBox& aRefBox,
+                                        int32_t aAppUnitsPerDevPixel);
 
   // Shear type for decomposition.
   enum class ShearType {

@@ -11,7 +11,6 @@
 #endif
 
 #include "mozilla/Logging.h"
-#include "prmem.h"
 #include "nscore.h"
 #include "prenv.h"
 
@@ -167,7 +166,7 @@ nsNPAPIPluginInstance::~nsNPAPIPluginInstance()
 #endif
 
   if (mMIMEType) {
-    PR_Free((void *)mMIMEType);
+    free(mMIMEType);
     mMIMEType = nullptr;
   }
 
@@ -225,7 +224,7 @@ nsNPAPIPluginInstance::StopTime()
 
 nsresult nsNPAPIPluginInstance::Initialize(nsNPAPIPlugin *aPlugin, nsPluginInstanceOwner* aOwner, const nsACString& aMIMEType)
 {
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
+  AUTO_PROFILER_LABEL("nsNPAPIPlugin::Initialize", OTHER);
   PLUGIN_LOG(PLUGIN_LOG_NORMAL, ("nsNPAPIPluginInstance::Initialize this=%p\n",this));
 
   NS_ENSURE_ARG_POINTER(aPlugin);
@@ -513,14 +512,6 @@ nsresult nsNPAPIPluginInstance::SetWindow(NPWindow* window)
 }
 
 nsresult
-nsNPAPIPluginInstance::NewStreamFromPlugin(const char* type, const char* target,
-                                           nsIOutputStream* *result)
-{
-  nsPluginStreamToFile* stream = new nsPluginStreamToFile(target, mOwner);
-  return stream->QueryInterface(kIOutputStreamIID, (void**)result);
-}
-
-nsresult
 nsNPAPIPluginInstance::NewStreamListener(const char* aURL, void* notifyData,
                                          nsNPAPIPluginStreamListener** listener)
 {
@@ -590,7 +581,7 @@ nsresult nsNPAPIPluginInstance::HandleEvent(void* event, int16_t* result,
   if (RUNNING != mRunning)
     return NS_OK;
 
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
+  AUTO_PROFILER_LABEL("nsNPAPIPluginInstance::HandleEvent", OTHER);
 
   if (!event)
     return NS_ERROR_FAILURE;
@@ -887,7 +878,8 @@ java::GeckoSurface::LocalRef nsNPAPIPluginInstance::CreateSurface()
     return nullptr;
   }
 
-  nsCOMPtr<nsIRunnable> frameCallback = NewRunnableMethod(this, &nsNPAPIPluginInstance::OnSurfaceTextureFrameAvailable);
+  nsCOMPtr<nsIRunnable> frameCallback = NewRunnableMethod("nsNPAPIPluginInstance::OnSurfaceTextureFrameAvailable",
+                                                          this, &nsNPAPIPluginInstance::OnSurfaceTextureFrameAvailable);
 
   java::SurfaceTextureListener::LocalRef listener = java::SurfaceTextureListener::New();
 
@@ -1447,7 +1439,11 @@ nsNPAPIPluginInstance::ScheduleTimer(uint32_t interval, NPBool repeat, void (*ti
     return 0;
   }
   const short timerType = (repeat ? (short)nsITimer::TYPE_REPEATING_SLACK : (short)nsITimer::TYPE_ONE_SHOT);
-  xpcomTimer->InitWithFuncCallback(PluginTimerCallback, newTimer, interval, timerType);
+  xpcomTimer->InitWithNamedFuncCallback(PluginTimerCallback,
+                                        newTimer,
+                                        interval,
+                                        timerType,
+                                        "nsNPAPIPluginInstance::ScheduleTimer");
   newTimer->timer = xpcomTimer;
 
   // save callback function

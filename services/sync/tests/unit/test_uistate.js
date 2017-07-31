@@ -3,30 +3,31 @@
 
 "use strict";
 
-// ================================================
-// Load mocking/stubbing library, sinon
-// docs: http://sinonjs.org/docs/
-/* global sinon */
-Cu.import("resource://gre/modules/Timer.jsm");
-let window = {
-  document: {},
-  location: {},
-  setTimeout,
-  setInterval,
-  clearTimeout,
-  clearInterval,
-};
-let self = window;
-let loader = Cc["@mozilla.org/moz/jssubscript-loader;1"].getService(Ci.mozIJSSubScriptLoader);
-loader.loadSubScript("resource://testing-common/sinon-1.16.1.js");
-// ================================================
-
 Cu.import("resource://services-sync/UIState.jsm");
 
 const UIStateInternal = UIState._internal;
 
-add_task(async function test_isReady() {
+add_task(async function test_isReady_unconfigured() {
   UIState.reset();
+
+  let refreshState = sinon.spy(UIStateInternal, "refreshState");
+
+  // On the first call, returns false
+  // Does not trigger a refresh of the state since services.sync.username is undefined
+  ok(!UIState.isReady());
+  ok(!refreshState.called);
+  refreshState.reset();
+
+  // On subsequent calls, only return true
+  ok(UIState.isReady());
+  ok(!refreshState.called);
+
+  refreshState.restore();
+});
+
+add_task(async function test_isReady_signedin() {
+  UIState.reset();
+  Services.prefs.setCharPref("services.sync.username", "foo");
 
   let refreshState = sinon.spy(UIStateInternal, "refreshState");
 
@@ -52,13 +53,38 @@ add_task(async function test_refreshState_signedin() {
 
   UIStateInternal.fxAccounts = {
     getSignedInUser: () => Promise.resolve({ verified: true, email: "foo@bar.com" }),
-    getSignedInUserProfile: () => Promise.resolve({ displayName: "Foo Bar", avatar: "https://foo/bar" })
+    getSignedInUserProfile: () => Promise.resolve({ displayName: "Foo Bar", avatar: "https://foo/bar", email: "foo@bar.com" })
   }
 
   let state = await UIState.refresh();
 
   equal(state.status, UIState.STATUS_SIGNED_IN);
   equal(state.email, "foo@bar.com");
+  equal(state.displayName, "Foo Bar");
+  equal(state.avatarURL, "https://foo/bar");
+  equal(state.lastSync, now);
+  equal(state.syncing, false);
+
+  UIStateInternal.fxAccounts = fxAccountsOrig;
+});
+
+add_task(async function test_refreshState_preferProfileEmail() {
+  UIState.reset();
+  const fxAccountsOrig = UIStateInternal.fxAccounts;
+
+  const now = new Date().toString();
+  Services.prefs.setCharPref("services.sync.lastSync", now);
+  UIStateInternal.syncing = false;
+
+  UIStateInternal.fxAccounts = {
+    getSignedInUser: () => Promise.resolve({ verified: true, email: "foo@bar.com" }),
+    getSignedInUserProfile: () => Promise.resolve({ displayName: "Foo Bar", avatar: "https://foo/bar", email: "bar@foo.com" })
+  }
+
+  let state = await UIState.refresh();
+
+  equal(state.status, UIState.STATUS_SIGNED_IN);
+  equal(state.email, "bar@foo.com");
   equal(state.displayName, "Foo Bar");
   equal(state.avatarURL, "https://foo/bar");
   equal(state.lastSync, now);

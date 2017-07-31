@@ -143,25 +143,6 @@ do_QueryWrappedNative(nsIXPConnectWrappedNative *wrapper, JSObject *obj,
                                    aError);
 }
 
-inline
-nsQueryInterface
-do_QueryWrapper(JSContext *cx, JSObject *obj)
-{
-  nsISupports *native =
-    nsDOMClassInfo::XPConnect()->GetNativeOfWrapper(cx, obj);
-  return nsQueryInterface(native);
-}
-
-inline
-nsQueryInterfaceWithError
-do_QueryWrapper(JSContext *cx, JSObject *obj, nsresult* error)
-{
-  nsISupports *native =
-    nsDOMClassInfo::XPConnect()->GetNativeOfWrapper(cx, obj);
-  return nsQueryInterfaceWithError(native, error);
-}
-
-
 typedef nsDOMClassInfo nsDOMGenericSH;
 
 // Makes sure that the wrapper is preserved if new properties are added.
@@ -254,26 +235,6 @@ public:
   static nsIClassInfo *doCreate(nsDOMClassInfoData* aData)
   {
     return new nsDOMConstructorSH(aData);
-  }
-};
-
-class nsNonDOMObjectSH : public nsDOMGenericSH
-{
-protected:
-  explicit nsNonDOMObjectSH(nsDOMClassInfoData* aData) : nsDOMGenericSH(aData)
-  {
-  }
-
-  virtual ~nsNonDOMObjectSH()
-  {
-  }
-
-public:
-  NS_IMETHOD GetFlags(uint32_t *aFlags) override;
-
-  static nsIClassInfo *doCreate(nsDOMClassInfoData* aData)
-  {
-    return new nsNonDOMObjectSH(aData);
   }
 };
 

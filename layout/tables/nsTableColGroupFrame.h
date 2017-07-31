@@ -67,7 +67,7 @@ public:
     * @param aType - the reason why this colgroup is needed
     */
   void SetColType(nsTableColGroupType aType);
-  
+
   /** Real in this context are colgroups that come from an element
     * with table-column-group display or wrap around columns that
     * come from an element with table-column display. Colgroups
@@ -152,7 +152,7 @@ public:
     * colframe cache.
     */
   int32_t GetStartColumnIndex();
-  
+
   /** set the position of the first column in this colgroup in the table
     * colframe cache.
     */
@@ -196,7 +196,7 @@ public:
   {
     return nsContainerFrame::IsFrameOfType(aFlags & ~(nsIFrame::eTablePart));
   }
-  
+
   virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0) override;
   virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0) override;
   virtual void InvalidateFrameForRemoval() override { InvalidateFrameSubtree(); }

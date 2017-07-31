@@ -6,45 +6,56 @@
 
 use Atom;
 use context::QuirksMode;
-use euclid::size::Size2D;
+use euclid::Size2D;
 use font_metrics::FontMetricsProvider;
 use media_queries::Device;
 #[cfg(feature = "gecko")]
 use properties;
 use properties::{ComputedValues, StyleBuilder};
 use std::f32;
-use std::f32::consts::PI;
+use std::f64;
+use std::f64::consts::PI;
 use std::fmt;
 use style_traits::ToCss;
 use super::{CSSFloat, CSSInteger, RGBA};
 use super::generics::grid::{TrackBreadth as GenericTrackBreadth, TrackSize as GenericTrackSize};
+use super::generics::grid::GridTemplateComponent as GenericGridTemplateComponent;
 use super::generics::grid::TrackList as GenericTrackList;
 use super::specified;
 
 pub use app_units::Au;
-pub use cssparser::Color as CSSColor;
+pub use properties::animated_properties::TransitionProperty;
 pub use self::background::BackgroundSize;
 pub use self::border::{BorderImageSlice, BorderImageWidth, BorderImageSideWidth};
 pub use self::border::{BorderRadius, BorderCornerRadius};
-pub use self::image::{Gradient, GradientItem, ImageLayer, LineDirection, Image, ImageRect};
+pub use self::color::{Color, RGBAColor};
+pub use self::effects::{BoxShadow, Filter, SimpleShadow};
+pub use self::flex::FlexBasis;
+pub use self::image::{Gradient, GradientItem, Image, ImageLayer, LineDirection, MozImageRect};
+#[cfg(feature = "gecko")]
+pub use self::gecko::ScrollSnapPoint;
 pub use self::rect::LengthOrNumberRect;
 pub use super::{Auto, Either, None_};
 #[cfg(feature = "gecko")]
 pub use super::specified::{AlignItems, AlignJustifyContent, AlignJustifySelf, JustifyItems};
-pub use super::specified::{BorderStyle, Percentage, UrlOrNone};
+pub use super::specified::{BorderStyle, UrlOrNone};
 pub use super::generics::grid::GridLine;
 pub use super::specified::url::SpecifiedUrl;
-pub use self::length::{CalcLengthOrPercentage, Length, LengthOrNumber, LengthOrPercentage, LengthOrPercentageOrAuto};
-pub use self::length::{LengthOrPercentageOrAutoOrContent, LengthOrPercentageOrNone, LengthOrNone};
-pub use self::length::{MaxLength, MozLength};
+pub use self::length::{CalcLengthOrPercentage, Length, LengthOrNone, LengthOrNumber, LengthOrPercentage};
+pub use self::length::{LengthOrPercentageOrAuto, LengthOrPercentageOrNone, MaxLength, MozLength, Percentage};
 pub use self::position::Position;
-pub use self::text::{LetterSpacing, LineHeight, WordSpacing};
+pub use self::text::{InitialLetter, LetterSpacing, LineHeight, WordSpacing};
 pub use self::transform::{TimingFunction, TransformOrigin};
 
 pub mod background;
 pub mod basic_shape;
 pub mod border;
+pub mod color;
+pub mod effects;
+pub mod flex;
 pub mod image;
+#[cfg(feature = "gecko")]
+pub mod gecko;
 pub mod length;
 pub mod position;
 pub mod rect;
@@ -57,22 +68,10 @@ pub struct Context<'a> {
     /// Whether the current element is the root element.
     pub is_root_element: bool,
 
-    /// The Device holds the viewport and other external state.
-    pub device: &'a Device,
-
-    /// The style we're inheriting from.
-    pub inherited_style: &'a ComputedValues,
-
-    /// The style of the layout parent node. This will almost always be
-    /// `inherited_style`, except when `display: contents` is at play, in which
-    /// case it's the style of the last ancestor with a `display` value that
-    /// isn't `contents`.
-    pub layout_parent_style: &'a ComputedValues,
-
     /// Values accessed through this need to be in the properties "computed
     /// early": color, text-decoration, font-size, display, position, float,
     /// border-*-style, outline-style, font-family, writing-mode...
-    pub style: StyleBuilder<'a>,
+    pub builder: StyleBuilder<'a>,
 
     /// A cached computed system font value, for use by gecko.
     ///
@@ -96,22 +95,39 @@ pub struct Context<'a> {
 
     /// The quirks mode of this context.
     pub quirks_mode: QuirksMode,
+
+    /// Whether this computation is being done for a SMIL animation.
+    ///
+    /// This is used to allow certain properties to generate out-of-range
+    /// values, which SMIL allows.
+    pub for_smil_animation: bool,
 }
 
 impl<'a> Context<'a> {
     /// Whether the current element is the root element.
-    pub fn is_root_element(&self) -> bool { self.is_root_element }
+    pub fn is_root_element(&self) -> bool {
+        self.is_root_element
+    }
+
+    /// The current device.
+    pub fn device(&self) -> &Device {
+        self.builder.device
+    }
+
     /// The current viewport size.
-    pub fn viewport_size(&self) -> Size2D<Au> { self.device.au_viewport_size() }
-    /// The style we're inheriting from.
-    pub fn inherited_style(&self) -> &ComputedValues { &self.inherited_style }
-    /// The current style. Note that only "eager" properties should be accessed
-    /// from here, see the comment in the member.
-    pub fn style(&self) -> &StyleBuilder { &self.style }
-    /// A mutable reference to the current style.
-    pub fn mutate_style(&mut self) -> &mut StyleBuilder<'a> { &mut self.style }
-    /// Get a mutable reference to the current style as well as the device
-    pub fn mutate_style_with_device(&mut self) -> (&mut StyleBuilder<'a>, &Device) { (&mut self.style, &self.device) }
+    pub fn viewport_size(&self) -> Size2D<Au> {
+        self.builder.device.au_viewport_size()
+    }
+
+    /// The default computed style we're getting our reset style from.
+    pub fn default_style(&self) -> &ComputedValues {
+        self.builder.default_style()
+    }
+
+    /// The current style.
+    pub fn style(&self) -> &StyleBuilder {
+        &self.builder
+    }
 }
 
 /// An iterator over a slice of computed values
@@ -241,6 +257,22 @@ impl<T> ToComputedValue for Vec<T>
     }
 }
 
+impl<T> ToComputedValue for Box<[T]>
+    where T: ToComputedValue
+{
+    type ComputedValue = Box<[<T as ToComputedValue>::ComputedValue]>;
+
+    #[inline]
+    fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
+        self.iter().map(|item| item.to_computed_value(context)).collect::<Vec<_>>().into_boxed_slice()
+    }
+
+    #[inline]
+    fn from_computed_value(computed: &Self::ComputedValue) -> Self {
+        computed.iter().map(T::from_computed_value).collect::<Vec<_>>().into_boxed_slice()
+    }
+}
+
 /// A marker trait to represent that the specified value is also the computed
 /// value.
 pub trait ComputedValueAsSpecified {}
@@ -287,17 +319,27 @@ impl Angle {
     /// Return the amount of radians this angle represents.
     #[inline]
     pub fn radians(&self) -> CSSFloat {
-        const RAD_PER_DEG: CSSFloat = PI / 180.0;
-        const RAD_PER_GRAD: CSSFloat = PI / 200.0;
-        const RAD_PER_TURN: CSSFloat = PI * 2.0;
+        self.radians64().min(f32::MAX as f64).max(f32::MIN as f64) as f32
+    }
+
+    /// Return the amount of radians this angle represents as a 64-bit float.
+    /// Gecko stores angles as singles, but does this computation using doubles.
+    /// See nsCSSValue::GetAngleValueInRadians.
+    /// This is significant enough to mess up rounding to the nearest
+    /// quarter-turn for 225 degrees, for example.
+    #[inline]
+    pub fn radians64(&self) -> f64 {
+        const RAD_PER_DEG: f64 = PI / 180.0;
+        const RAD_PER_GRAD: f64 = PI / 200.0;
+        const RAD_PER_TURN: f64 = PI * 2.0;
 
         let radians = match *self {
-            Angle::Degree(val) => val * RAD_PER_DEG,
-            Angle::Gradian(val) => val * RAD_PER_GRAD,
-            Angle::Turn(val) => val * RAD_PER_TURN,
-            Angle::Radian(val) => val,
+            Angle::Degree(val) => val as f64 * RAD_PER_DEG,
+            Angle::Gradian(val) => val as f64 * RAD_PER_GRAD,
+            Angle::Turn(val) => val as f64 * RAD_PER_TURN,
+            Angle::Radian(val) => val as f64,
         };
-        radians.min(f32::MAX).max(f32::MIN)
+        radians.min(f64::MAX).max(f64::MIN)
     }
 
     /// Returns an angle that represents a rotation of zero radians.
@@ -354,86 +396,6 @@ impl ToCss for Time {
     }
 }
 
-impl ToComputedValue for specified::Color {
-    type ComputedValue = RGBA;
-
-    #[cfg(not(feature = "gecko"))]
-    fn to_computed_value(&self, context: &Context) -> RGBA {
-        match *self {
-            specified::Color::RGBA(rgba) => rgba,
-            specified::Color::CurrentColor => context.inherited_style.get_color().clone_color(),
-        }
-    }
-
-    #[cfg(feature = "gecko")]
-    fn to_computed_value(&self, context: &Context) -> RGBA {
-        use gecko::values::convert_nscolor_to_rgba as to_rgba;
-        // It's safe to access the nsPresContext immutably during style computation.
-        let pres_context = unsafe { &*context.device.pres_context };
-        match *self {
-            specified::Color::RGBA(rgba) => rgba,
-            specified::Color::System(system) => to_rgba(system.to_computed_value(context)),
-            specified::Color::CurrentColor => context.inherited_style.get_color().clone_color(),
-            specified::Color::MozDefaultColor => to_rgba(pres_context.mDefaultColor),
-            specified::Color::MozDefaultBackgroundColor => to_rgba(pres_context.mBackgroundColor),
-            specified::Color::MozHyperlinktext => to_rgba(pres_context.mLinkColor),
-            specified::Color::MozActiveHyperlinktext => to_rgba(pres_context.mActiveLinkColor),
-            specified::Color::MozVisitedHyperlinktext => to_rgba(pres_context.mVisitedLinkColor),
-            specified::Color::InheritFromBodyQuirk => {
-                use dom::TElement;
-                use gecko::wrapper::GeckoElement;
-                use gecko_bindings::bindings::Gecko_GetBody;
-                let body = unsafe {
-                    Gecko_GetBody(pres_context)
-                };
-                if let Some(body) = body {
-                    let wrap = GeckoElement(body);
-                    let borrow = wrap.borrow_data();
-                    borrow.as_ref().unwrap()
-                          .styles().primary.values()
-                          .get_color()
-                          .clone_color()
-                } else {
-                    to_rgba(pres_context.mDefaultColor)
-                }
-            },
-        }
-    }
-
-    fn from_computed_value(computed: &RGBA) -> Self {
-        specified::Color::RGBA(*computed)
-    }
-}
-
-impl ToComputedValue for specified::CSSColor {
-    type ComputedValue = CSSColor;
-
-    #[cfg(not(feature = "gecko"))]
-    #[inline]
-    fn to_computed_value(&self, _context: &Context) -> CSSColor {
-        self.parsed
-    }
-
-    #[cfg(feature = "gecko")]
-    #[inline]
-    fn to_computed_value(&self, context: &Context) -> CSSColor {
-        match self.parsed {
-            specified::Color::RGBA(rgba) => CSSColor::RGBA(rgba),
-            specified::Color::CurrentColor => CSSColor::CurrentColor,
-            // Resolve non-standard -moz keywords to RGBA:
-            non_standard => CSSColor::RGBA(non_standard.to_computed_value(context)),
-        }
-    }
-
-    #[inline]
-    fn from_computed_value(computed: &CSSColor) -> Self {
-        (match *computed {
-            CSSColor::RGBA(rgba) => specified::Color::RGBA(rgba),
-            CSSColor::CurrentColor => specified::Color::CurrentColor,
-        }).into()
-    }
-}
-
 #[cfg(feature = "gecko")]
 impl ToComputedValue for specified::JustifyItems {
     type ComputedValue = JustifyItems;
@@ -444,7 +406,7 @@ impl ToComputedValue for specified::JustifyItems {
         // If the inherited value of `justify-items` includes the `legacy` keyword, `auto` computes
         // to the inherited value.
         if self.0 == align::ALIGN_AUTO {
-            let inherited = context.inherited_style.get_position().clone_justify_items();
+            let inherited = context.builder.get_parent_position().clone_justify_items();
             if inherited.0.contains(align::ALIGN_LEGACY) {
                 return inherited
             }
@@ -465,18 +427,6 @@ impl ComputedValueAsSpecified for specified::AlignJustifyContent {}
 #[cfg(feature = "gecko")]
 impl ComputedValueAsSpecified for specified::AlignJustifySelf {}
 impl ComputedValueAsSpecified for specified::BorderStyle {}
-
-#[derive(Debug, PartialEq, Clone, Copy)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[allow(missing_docs)]
-pub struct Shadow {
-    pub offset_x: Au,
-    pub offset_y: Au,
-    pub blur_radius: Au,
-    pub spread_radius: Au,
-    pub color: CSSColor,
-    pub inset: bool,
-}
 
 /// A `<number>` value.
 pub type Number = CSSFloat;
@@ -533,9 +483,9 @@ impl IntegerOrAuto {
 }
 
 /// Computed SVG Paint value
-pub type SVGPaint = ::values::generics::SVGPaint<CSSColor>;
+pub type SVGPaint = ::values::generics::SVGPaint<RGBA>;
 /// Computed SVG Paint Kind value
-pub type SVGPaintKind = ::values::generics::SVGPaintKind<CSSColor>;
+pub type SVGPaintKind = ::values::generics::SVGPaintKind<RGBA>;
 
 impl Default for SVGPaint {
     fn default() -> Self {
@@ -551,7 +501,7 @@ impl SVGPaint {
     pub fn black() -> Self {
         let rgba = RGBA::from_floats(0., 0., 0., 1.);
         SVGPaint {
-            kind: ::values::generics::SVGPaintKind::Color(CSSColor::RGBA(rgba)),
+            kind: ::values::generics::SVGPaintKind::Color(rgba),
             fallback: None,
         }
     }
@@ -573,32 +523,32 @@ pub struct ClipRect {
 
 impl ToCss for ClipRect {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        try!(dest.write_str("rect("));
+        dest.write_str("rect(")?;
         if let Some(top) = self.top {
-            try!(top.to_css(dest));
-            try!(dest.write_str(", "));
+            top.to_css(dest)?;
+            dest.write_str(", ")?;
         } else {
-            try!(dest.write_str("auto, "));
+            dest.write_str("auto, ")?;
         }
 
         if let Some(right) = self.right {
-            try!(right.to_css(dest));
-            try!(dest.write_str(", "));
+            right.to_css(dest)?;
+            dest.write_str(", ")?;
         } else {
-            try!(dest.write_str("auto, "));
+            dest.write_str("auto, ")?;
         }
 
         if let Some(bottom) = self.bottom {
-            try!(bottom.to_css(dest));
-            try!(dest.write_str(", "));
+            bottom.to_css(dest)?;
+            dest.write_str(", ")?;
         } else {
-            try!(dest.write_str("auto, "));
+            dest.write_str("auto, ")?;
         }
 
         if let Some(left) = self.left {
-            try!(left.to_css(dest));
+            left.to_css(dest)?;
         } else {
-            try!(dest.write_str("auto"));
+            dest.write_str("auto")?;
         }
         dest.write_str(")")
     }
@@ -615,10 +565,10 @@ pub type TrackSize = GenericTrackSize<LengthOrPercentage>;
 
 /// The computed value of a grid `<track-list>`
 /// (could also be `<auto-track-list>` or `<explicit-track-list>`)
-pub type TrackList = GenericTrackList<TrackSize>;
+pub type TrackList = GenericTrackList<LengthOrPercentage>;
 
-/// `<track-list> | none`
-pub type TrackListOrNone = Either<TrackList, None_>;
+/// `<grid-template-rows> | <grid-template-columns>`
+pub type GridTemplateComponent = GenericGridTemplateComponent<LengthOrPercentage>;
 
 impl ClipRectOrAuto {
     /// Return an auto (default for clip-rect and image-region) value
@@ -636,4 +586,4 @@ impl ClipRectOrAuto {
 }
 
 /// <color> | auto
-pub type ColorOrAuto = Either<CSSColor, Auto>;
+pub type ColorOrAuto = Either<Color, Auto>;

@@ -8,6 +8,7 @@
 #include "mozilla/EventStates.h"
 #include "mozilla/TouchEvents.h"
 
+#include "gfxContext.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentList.h"
 #include "nsContentUtils.h"
@@ -22,7 +23,6 @@
 #include "mozilla/dom/HTMLInputElement.h"
 #include "nsPresContext.h"
 #include "nsNodeInfoManager.h"
-#include "nsRenderingContext.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
@@ -189,7 +189,7 @@ public:
                                  nsRegion *aInvalidRegion) const override;
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
                            bool* aSnap) const override;
-  virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) override;
+  virtual void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("RangeFocusRing", TYPE_RANGE_FOCUS_RING)
 };
 
@@ -235,7 +235,7 @@ nsDisplayRangeFocusRing::GetBounds(nsDisplayListBuilder* aBuilder,
 
 void
 nsDisplayRangeFocusRing::Paint(nsDisplayListBuilder* aBuilder,
-                               nsRenderingContext* aCtx)
+                               gfxContext* aCtx)
 {
   bool unused;
   nsStyleContext* styleContext =
@@ -768,7 +768,7 @@ nsRangeFrame::AttributeChanged(int32_t  aNameSpaceID,
 }
 
 LogicalSize
-nsRangeFrame::ComputeAutoSize(nsRenderingContext* aRenderingContext,
+nsRangeFrame::ComputeAutoSize(gfxContext*         aRenderingContext,
                               WritingMode         aWM,
                               const LogicalSize&  aCBSize,
                               nscoord             aAvailableISize,
@@ -803,7 +803,7 @@ nsRangeFrame::ComputeAutoSize(nsRenderingContext* aRenderingContext,
 }
 
 nscoord
-nsRangeFrame::GetMinISize(nsRenderingContext *aRenderingContext)
+nsRangeFrame::GetMinISize(gfxContext *aRenderingContext)
 {
   // nsFrame::ComputeSize calls GetMinimumWidgetSize to prevent us from being
   // given too small a size when we're natively themed. If we aren't native
@@ -812,7 +812,7 @@ nsRangeFrame::GetMinISize(nsRenderingContext *aRenderingContext)
 }
 
 nscoord
-nsRangeFrame::GetPrefISize(nsRenderingContext *aRenderingContext)
+nsRangeFrame::GetPrefISize(gfxContext *aRenderingContext)
 {
   bool isInline = IsInlineOriented();
 

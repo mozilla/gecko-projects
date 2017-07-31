@@ -39,7 +39,6 @@ if [ -z "$NO_NDK" ]; then
     ac_add_options --with-android-gnu-compiler-version=4.9
 fi
 
-ac_add_options --with-system-zlib
 ac_add_options --enable-update-channel=${MOZ_UPDATE_CHANNEL}
 
 ac_add_options --with-mozilla-api-keyfile=/builds/mozilla-fennec-geoloc-api.key
@@ -84,7 +83,6 @@ export SOCORRO_SYMBOL_UPLOAD_TOKEN_FILE=/builds/crash-stats-api.token
 export MOZ_PACKAGE_JSSHELL=1
 
 # Use ccache
-. "$topsrcdir/build/mozconfig.cache"
 
 HOST_CC="$topsrcdir/gcc/bin/gcc"
 HOST_CXX="$topsrcdir/gcc/bin/g++"

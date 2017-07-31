@@ -17,8 +17,6 @@ config = {
     'stage_platform': 'linux64-fuzzing-asan',
     'publish_nightly_en_US_routes': False,
     'build_type': 'asan',
-    'tooltool_manifest_src': "browser/config/tooltool-manifests/linux64/\
-asan.manifest",
     'platform_supports_post_upload_to_latest': False,
     'enable_signing': False,
     'enable_talos_sendchange': False,
@@ -37,6 +35,7 @@ asan.manifest",
         'CCACHE_COMPRESS': '1',
         'CCACHE_UMASK': '002',
         'LC_ALL': 'C',
+        'ASAN_OPTIONS': 'detect_leaks=0',
         ## 64 bit specific
         'PATH': '/tools/buildbot/bin:/usr/local/bin:/usr/lib64/ccache:/bin:\
 /usr/bin:/usr/local/sbin:/usr/sbin:/sbin:/tools/git/bin:/tools/python27/bin:\

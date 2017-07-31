@@ -50,8 +50,6 @@ const PREF_APP_UPDATE_STAGING_ENABLED      = "app.update.staging.enabled";
 const PREF_APP_UPDATE_URL                  = "app.update.url";
 const PREF_APP_UPDATE_URL_DETAILS          = "app.update.url.details";
 
-const PREFBRANCH_APP_UPDATE_NEVER = "app.update.never.";
-
 const URI_BRAND_PROPERTIES      = "chrome://branding/locale/brand.properties";
 const URI_UPDATE_HISTORY_DIALOG = "chrome://mozapps/content/update/history.xul";
 const URI_UPDATE_NS             = "http://www.mozilla.org/2005/app-update";
@@ -1156,8 +1154,6 @@ UpdatePatch.prototype = {
     if (this.finalURL) {
       patch.setAttribute("finalURL", this.finalURL);
     }
-    patch.setAttribute("hashFunction", this.hashFunction);
-    patch.setAttribute("hashValue", this.hashValue);
     patch.setAttribute("size", this.size);
     if (this.selected) {
       patch.setAttribute("selected", this.selected);
@@ -1257,8 +1253,6 @@ function Update(update) {
   this._properties = {};
   this._patches = [];
   this.isCompleteUpdate = false;
-  this.showPrompt = false;
-  this.showNeverForVersion = false;
   this.unsupported = false;
   this.channel = "default";
   this.promptWaitTime = getPref("getIntPref", PREF_APP_UPDATE_PROMPTWAITTIME, 43200);
@@ -1312,12 +1306,6 @@ function Update(update) {
       }
     } else if (attr.name == "isCompleteUpdate") {
       this.isCompleteUpdate = attr.value == "true";
-    } else if (attr.name == "isSecurityUpdate") {
-      this.isSecurityUpdate = attr.value == "true";
-    } else if (attr.name == "showNeverForVersion") {
-      this.showNeverForVersion = attr.value == "true";
-    } else if (attr.name == "showPrompt") {
-      this.showPrompt = attr.value == "true";
     } else if (attr.name == "promptWaitTime") {
       if (!isNaN(attr.value)) {
         this.promptWaitTime = parseInt(attr.value);
@@ -1457,8 +1445,6 @@ Update.prototype = {
     update.setAttribute("isCompleteUpdate", this.isCompleteUpdate);
     update.setAttribute("name", this.name);
     update.setAttribute("serviceURL", this.serviceURL);
-    update.setAttribute("showNeverForVersion", this.showNeverForVersion);
-    update.setAttribute("showPrompt", this.showPrompt);
     update.setAttribute("promptWaitTime", this.promptWaitTime);
     update.setAttribute("backgroundInterval", this.backgroundInterval);
     update.setAttribute("type", this.type);
@@ -2045,31 +2031,30 @@ UpdateService.prototype = {
     }
 
     let validUpdateURL = true;
-    try {
-      this.backgroundChecker.getUpdateURL(false);
-    } catch (e) {
+    this.backgroundChecker.getUpdateURL(false).catch(e => {
       validUpdateURL = false;
-    }
-    // The following checks are done here so they can be differentiated from
-    // foreground checks.
-    if (!UpdateUtils.OSVersion) {
-      AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_NO_OS_VERSION);
-    } else if (!UpdateUtils.ABI) {
-      AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_NO_OS_ABI);
-    } else if (!validUpdateURL) {
-      AUSTLMY.pingCheckCode(this._pingSuffix,
-                            AUSTLMY.CHK_INVALID_DEFAULT_URL);
-    } else if (!getPref("getBoolPref", PREF_APP_UPDATE_ENABLED, true)) {
-      AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_PREF_DISABLED);
-    } else if (!hasUpdateMutex()) {
-      AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_NO_MUTEX);
-    } else if (!gCanCheckForUpdates) {
-      AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_UNABLE_TO_CHECK);
-    } else if (!this.backgroundChecker._enabled) {
-      AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_DISABLED_FOR_SESSION);
-    }
+    }).then(() => {
+      // The following checks are done here so they can be differentiated from
+      // foreground checks.
+      if (!UpdateUtils.OSVersion) {
+        AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_NO_OS_VERSION);
+      } else if (!UpdateUtils.ABI) {
+        AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_NO_OS_ABI);
+      } else if (!validUpdateURL) {
+        AUSTLMY.pingCheckCode(this._pingSuffix,
+                              AUSTLMY.CHK_INVALID_DEFAULT_URL);
+      } else if (!getPref("getBoolPref", PREF_APP_UPDATE_ENABLED, true)) {
+        AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_PREF_DISABLED);
+      } else if (!hasUpdateMutex()) {
+        AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_NO_MUTEX);
+      } else if (!gCanCheckForUpdates) {
+        AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_UNABLE_TO_CHECK);
+      } else if (!this.backgroundChecker._enabled) {
+        AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_DISABLED_FOR_SESSION);
+      }
 
-    this.backgroundChecker.checkForUpdates(this, false);
+      this.backgroundChecker.checkForUpdates(this, false);
+    });
   },
 
   /**
@@ -2107,18 +2092,6 @@ UpdateService.prototype = {
             "update's application version is less than the current " +
             "application version");
         lastCheckCode = AUSTLMY.CHK_UPDATE_PREVIOUS_VERSION;
-        return;
-      }
-
-      // Skip the update if the user responded with "never" to this update's
-      // application version and the update specifies showNeverForVersion
-      // (see bug 350636).
-      let neverPrefName = PREFBRANCH_APP_UPDATE_NEVER + aUpdate.appVersion;
-      if (aUpdate.showNeverForVersion &&
-          getPref("getBoolPref", neverPrefName, false)) {
-        LOG("UpdateService:selectUpdate - skipping update because the " +
-            "preference " + neverPrefName + " is true");
-        lastCheckCode = AUSTLMY.CHK_UPDATE_NEVER_PREF;
         return;
       }
 
@@ -2271,7 +2244,6 @@ UpdateService.prototype = {
      * Notes:
      * a) if the app.update.auto preference is false then automatic download and
      *    install is disabled and the user will be notified.
-     * b) if the update has a showPrompt attribute the user will be notified.
      *
      * If the update when it is first read does not have an appVersion attribute
      * the following deprecated behavior will occur:
@@ -2279,17 +2251,6 @@ UpdateService.prototype = {
      * Major         Notify
      * Minor         Auto Install
      */
-    if (update.showPrompt) {
-      LOG("UpdateService:_selectAndInstallUpdate - prompting because the " +
-          "update snippet specified showPrompt. Notifying observers. " +
-          "topic: update-available, status: showPrompt");
-      AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_SHOWPROMPT_SNIPPET);
-
-      Services.obs.notifyObservers(update, "update-available", "show-prompt");
-      this._showPrompt(update);
-      return;
-    }
-
     if (!getPref("getBoolPref", PREF_APP_UPDATE_AUTO, true)) {
       LOG("UpdateService:_selectAndInstallUpdate - prompting because silent " +
           "install is disabled. Notifying observers. topic: update-available, " +
@@ -2856,7 +2817,7 @@ Checker.prototype = {
    * The URL of the update service XML file to connect to that contains details
    * about available updates.
    */
-  getUpdateURL: function UC_getUpdateURL(force) {
+  getUpdateURL: async function UC_getUpdateURL(force) {
     this._forced = force;
 
     let url = Services.prefs.getDefaultBranch(null).
@@ -2867,7 +2828,7 @@ Checker.prototype = {
       return null;
     }
 
-    url = UpdateUtils.formatUpdateURL(url);
+    url = await UpdateUtils.formatUpdateURL(url);
 
     if (force) {
       url += (url.indexOf("?") != -1 ? "&" : "?") + "force=1";
@@ -2882,40 +2843,47 @@ Checker.prototype = {
    */
   checkForUpdates: function UC_checkForUpdates(listener, force) {
     LOG("Checker: checkForUpdates, force: " + force);
-    if (!listener)
+    if (!listener) {
       throw Cr.NS_ERROR_NULL_POINTER;
+    }
 
-    var url = this.getUpdateURL(force);
-    if (!url || (!this.enabled && !force))
+    if (!this.enabled && !force) {
       return;
+    }
 
-    this._request = new XMLHttpRequest();
-    this._request.open("GET", url, true);
-    this._request.channel.notificationCallbacks = new gCertUtils.BadCertHandler(false);
-    // Prevent the request from reading from the cache.
-    this._request.channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE;
-    // Prevent the request from writing to the cache.
-    this._request.channel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
-    // Disable cutting edge features, like TLS 1.3, where middleboxes might brick us
-    this._request.channel.QueryInterface(Ci.nsIHttpChannelInternal).beConservative = true;
+    this.getUpdateURL(force).then(url => {
+      if (!url) {
+        return;
+      }
 
-    this._request.overrideMimeType("text/xml");
-    // The Cache-Control header is only interpreted by proxies and the
-    // final destination. It does not help if a resource is already
-    // cached locally.
-    this._request.setRequestHeader("Cache-Control", "no-cache");
-    // HTTP/1.0 servers might not implement Cache-Control and
-    // might only implement Pragma: no-cache
-    this._request.setRequestHeader("Pragma", "no-cache");
+      this._request = new XMLHttpRequest();
+      this._request.open("GET", url, true);
+      this._request.channel.notificationCallbacks = new gCertUtils.BadCertHandler(false);
+      // Prevent the request from reading from the cache.
+      this._request.channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE;
+      // Prevent the request from writing to the cache.
+      this._request.channel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
+      // Disable cutting edge features, like TLS 1.3, where middleboxes might brick us
+      this._request.channel.QueryInterface(Ci.nsIHttpChannelInternal).beConservative = true;
 
-    var self = this;
-    this._request.addEventListener("error", function(event) { self.onError(event); });
-    this._request.addEventListener("load", function(event) { self.onLoad(event); });
+      this._request.overrideMimeType("text/xml");
+      // The Cache-Control header is only interpreted by proxies and the
+      // final destination. It does not help if a resource is already
+      // cached locally.
+      this._request.setRequestHeader("Cache-Control", "no-cache");
+      // HTTP/1.0 servers might not implement Cache-Control and
+      // might only implement Pragma: no-cache
+      this._request.setRequestHeader("Pragma", "no-cache");
 
-    LOG("Checker:checkForUpdates - sending request to: " + url);
-    this._request.send(null);
+      var self = this;
+      this._request.addEventListener("error", function(event) { self.onError(event); });
+      this._request.addEventListener("load", function(event) { self.onLoad(event); });
 
-    this._callback = listener;
+      LOG("Checker:checkForUpdates - sending request to: " + url);
+      this._request.send(null);
+
+      this._callback = listener;
+    });
   },
 
   /**
@@ -2951,7 +2919,7 @@ Checker.prototype = {
         LOG("Checker:_updates get - invalid <update/>, ignoring...");
         continue;
       }
-      update.serviceURL = this.getUpdateURL(this._forced);
+      update.serviceURL = this._request.responseURL;
       update.channel = UpdateUtils.UpdateChannel;
       updates.push(update);
     }
@@ -3166,49 +3134,7 @@ Downloader.prototype = {
     }
 
     LOG("Downloader:_verifyDownload downloaded size == expected size.");
-
-    // The hash check is not necessary when mar signatures are used to verify
-    // the downloaded mar file.
-    if (AppConstants.MOZ_VERIFY_MAR_SIGNATURE) {
-      return true;
-    }
-
-    let fileStream = Cc["@mozilla.org/network/file-input-stream;1"].
-                     createInstance(Ci.nsIFileInputStream);
-    fileStream.init(destination, FileUtils.MODE_RDONLY, FileUtils.PERMS_FILE, 0);
-
-    let digest;
-    try {
-      let hash = Cc["@mozilla.org/security/hash;1"].
-                 createInstance(Ci.nsICryptoHash);
-      var hashFunction = Ci.nsICryptoHash[this._patch.hashFunction.toUpperCase()];
-      if (hashFunction == undefined) {
-        throw Cr.NS_ERROR_UNEXPECTED;
-      }
-      hash.init(hashFunction);
-      hash.updateFromStream(fileStream, -1);
-      // NOTE: For now, we assume that the format of _patch.hashValue is hex
-      // encoded binary (such as what is typically output by programs like
-      // sha1sum).  In the future, this may change to base64 depending on how
-      // we choose to compute these hashes.
-      digest = binaryToHex(hash.finish(false));
-    } catch (e) {
-      LOG("Downloader:_verifyDownload - failed to compute hash of the " +
-          "downloaded update archive");
-      digest = "";
-    }
-
-    fileStream.close();
-
-    if (digest == this._patch.hashValue.toLowerCase()) {
-      LOG("Downloader:_verifyDownload hashes match.");
-      return true;
-    }
-
-    LOG("Downloader:_verifyDownload hashes do not match. ");
-    AUSTLMY.pingDownloadCode(this.isCompleteUpdate,
-                             AUSTLMY.DWNLD_ERR_VERIFY_NO_HASH_MATCH);
-    return false;
+    return true;
   },
 
   /**
@@ -3440,9 +3366,6 @@ Downloader.prototype = {
     if (progress > this._patch.size) {
       LOG("Downloader:onProgress - progress: " + progress +
           " is higher than patch size: " + this._patch.size);
-      // It's important that we use a different code than
-      // NS_ERROR_CORRUPTED_CONTENT so that tests can verify the difference
-      // between a hash error and a wrong download error.
       AUSTLMY.pingDownloadCode(this.isCompleteUpdate,
                                AUSTLMY.DWNLD_ERR_PATCH_SIZE_LARGER);
       this.cancel(Cr.NS_ERROR_UNEXPECTED);
@@ -3452,9 +3375,6 @@ Downloader.prototype = {
     if (maxProgress != this._patch.size) {
       LOG("Downloader:onProgress - maxProgress: " + maxProgress +
           " is not equal to expected patch size: " + this._patch.size);
-      // It's important that we use a different code than
-      // NS_ERROR_CORRUPTED_CONTENT so that tests can verify the difference
-      // between a hash error and a wrong download error.
       AUSTLMY.pingDownloadCode(this.isCompleteUpdate,
                                AUSTLMY.DWNLD_ERR_PATCH_SIZE_NOT_EQUAL);
       this.cancel(Cr.NS_ERROR_UNEXPECTED);
@@ -3879,7 +3799,6 @@ UpdatePrompt.prototype = {
    */
   showUpdateElevationRequired: function UP_showUpdateElevationRequired() {
     if (getPref("getBoolPref", PREF_APP_UPDATE_SILENT, false) ||
-        getPref("getBoolPref", PREF_APP_UPDATE_DOORHANGER, false) ||
         this._getAltUpdateWindow()) {
       return;
     }

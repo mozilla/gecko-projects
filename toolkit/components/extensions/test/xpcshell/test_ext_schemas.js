@@ -76,7 +76,7 @@ let json = [
            name: "sub_foo",
            type: "function",
            parameters: [],
-           returns: "integer",
+           returns: {type: "integer"},
          },
        ],
      },
@@ -213,6 +213,7 @@ let json = [
            name: "arg",
            type: "object",
            properties: {
+             hostname: {type: "string", "format": "hostname", "optional": true},
              url: {type: "string", "format": "url", "optional": true},
              relativeUrl: {type: "string", "format": "relativeUrl", "optional": true},
              strictRelativeUrl: {type: "string", "format": "strictRelativeUrl", "optional": true},
@@ -403,6 +404,9 @@ class TallyingAPIImplementation extends SchemaAPIInterface {
 
   callFunction(args) {
     tally("call", this.namespace, this.name, args);
+    if (this.name === "sub_foo") {
+      return 13;
+    }
   }
 
   callFunctionNoReturn(args) {
@@ -622,17 +626,32 @@ add_task(async function() {
                 /String "DEADcow" must match \/\^\[0-9a-f\]\+\$\/i/,
                 "should throw for non-match");
 
+  root.testing.format({hostname: "foo"});
+  verify("call", "testing", "format", [{hostname: "foo",
+                                        relativeUrl: null,
+                                        strictRelativeUrl: null,
+                                        url: null}]);
+  tallied = null;
+
+  for (let invalid of ["", " ", "http://foo", "foo/bar", "foo.com/", "foo?"]) {
+    Assert.throws(() => root.testing.format({hostname: invalid}),
+                  /Invalid hostname/,
+                  "should throw for invalid hostname");
+  }
+
   root.testing.format({url: "http://foo/bar",
                        relativeUrl: "http://foo/bar"});
-  verify("call", "testing", "format", [{url: "http://foo/bar",
+  verify("call", "testing", "format", [{hostname: null,
                                         relativeUrl: "http://foo/bar",
-                                        strictRelativeUrl: null}]);
+                                        strictRelativeUrl: null,
+                                        url: "http://foo/bar"}]);
   tallied = null;
 
   root.testing.format({relativeUrl: "foo.html", strictRelativeUrl: "foo.html"});
-  verify("call", "testing", "format", [{url: null,
+  verify("call", "testing", "format", [{hostname: null,
                                         relativeUrl: `${wrapper.url}foo.html`,
-                                        strictRelativeUrl: `${wrapper.url}foo.html`}]);
+                                        strictRelativeUrl: `${wrapper.url}foo.html`,
+                                        url: null}]);
   tallied = null;
 
   for (let format of ["url", "relativeUrl"]) {
@@ -685,30 +704,30 @@ add_task(async function() {
   });
 
   root.testing.deep({foo: {bar: [{baz: {required: 12, optional: "42"}}]}});
-  verify("call", "testing", "deep", [{foo: {bar: [{baz: {required: 12, optional: "42"}}]}}]);
+  verify("call", "testing", "deep", [{foo: {bar: [{baz: {optional: "42", required: 12}}]}}]);
   tallied = null;
 
   Assert.throws(() => root.testing.deep({foo: {bar: [{baz: {optional: "42"}}]}}),
                 /Type error for parameter arg \(Error processing foo\.bar\.0\.baz: Property "required" is required\) for testing\.deep/,
                 "should throw with the correct object path");
 
-  Assert.throws(() => root.testing.deep({foo: {bar: [{baz: {required: 12, optional: 42}}]}}),
+  Assert.throws(() => root.testing.deep({foo: {bar: [{baz: {optional: 42, required: 12}}]}}),
                 /Type error for parameter arg \(Error processing foo\.bar\.0\.baz\.optional: Expected string instead of 42\) for testing\.deep/,
                 "should throw with the correct object path");
 
 
   talliedErrors.length = 0;
 
-  root.testing.errors({warn: "0123", ignore: "0123", default: "0123"});
-  verify("call", "testing", "errors", [{warn: "0123", ignore: "0123", default: "0123"}]);
+  root.testing.errors({default: "0123", ignore: "0123", warn: "0123"});
+  verify("call", "testing", "errors", [{default: "0123", ignore: "0123", warn: "0123"}]);
   checkErrors([]);
 
-  root.testing.errors({warn: "0123", ignore: "x123", default: "0123"});
-  verify("call", "testing", "errors", [{warn: "0123", ignore: null, default: "0123"}]);
+  root.testing.errors({default: "0123", ignore: "x123", warn: "0123"});
+  verify("call", "testing", "errors", [{default: "0123", ignore: null,  warn: "0123"}]);
   checkErrors([]);
 
-  root.testing.errors({warn: "x123", ignore: "0123", default: "0123"});
-  verify("call", "testing", "errors", [{warn: null, ignore: "0123", default: "0123"}]);
+  root.testing.errors({default: "0123", ignore: "0123", warn: "x123"});
+  verify("call", "testing", "errors", [{default: "0123", ignore: "0123", warn: null}]);
   checkErrors([
     'String "x123" must match /^\\d+$/',
   ]);
@@ -767,7 +786,7 @@ add_task(async function() {
 
 
   root.testing.localize({foo: "__MSG_foo__", bar: "__MSG_foo__", url: "__MSG_http://example.com/__"});
-  verify("call", "testing", "localize", [{foo: "FOO", bar: "__MSG_foo__", url: "http://example.com/"}]);
+  verify("call", "testing", "localize", [{bar: "__MSG_foo__", foo: "FOO", url: "http://example.com/"}]);
   tallied = null;
 
 
@@ -1091,7 +1110,7 @@ add_task(async function testChoices() {
   talliedErrors.length = 0;
 
   Assert.throws(() => root.choices.meh("frog"),
-                /Value must either: be one of \["foo", "bar", "baz"\], match the pattern \/florg\.\*meh\/, or be an integer value/);
+                /Value "frog" must either: be one of \["foo", "bar", "baz"\], match the pattern \/florg\.\*meh\/, or be an integer value/);
 
   Assert.throws(() => root.choices.meh(4),
                 /be a string value, or be at least 12/);
@@ -1222,6 +1241,7 @@ let nestedNamespaceJson = [
         "events": [
           {
             "name": "onEvent",
+            "type": "function",
           },
         ],
         "properties": {
@@ -1286,17 +1306,105 @@ add_task(async function testNestedNamespace() {
      "Got the expected instance of the CustomType defined in the schema");
   ok(instanceOfCustomType.functionOnCustomType,
      "Got the expected method in the CustomType instance");
+  ok(instanceOfCustomType.onEvent &&
+     instanceOfCustomType.onEvent.addListener &&
+     typeof instanceOfCustomType.onEvent.addListener == "function",
+     "Got the expected event defined in the CustomType instance");
 
-  // TODO: test support events and properties in a SubModuleType defined in the schema,
+  instanceOfCustomType.functionOnCustomType("param_value");
+  verify("call", "nested.namespace.instanceOfCustomType",
+         "functionOnCustomType", ["param_value"]);
+
+  let fakeListener = () => {};
+  instanceOfCustomType.onEvent.addListener(fakeListener);
+  verify("addListener", "nested.namespace.instanceOfCustomType",
+         "onEvent", [fakeListener, []]);
+  instanceOfCustomType.onEvent.removeListener(fakeListener);
+  verify("removeListener", "nested.namespace.instanceOfCustomType",
+         "onEvent", [fakeListener]);
+
+  // TODO: test support properties in a SubModuleType defined in the schema,
   // once implemented, e.g.:
-  //
-  // ok(instanceOfCustomType.url,
-  //    "Got the expected property defined in the CustomType instance)
-  //
-  // ok(instanceOfCustomType.onEvent &&
-  //    instanceOfCustomType.onEvent.addListener &&
-  //    typeof instanceOfCustomType.onEvent.addListener == "function",
-  //    "Got the expected event defined in the CustomType instance");
+  // ok("url" in instanceOfCustomType,
+  //   "Got the expected property defined in the CustomType instance");
+});
+
+let $importJson = [
+  {
+    namespace: "from_the",
+    $import: "future",
+  },
+  {
+    namespace: "future",
+    properties: {
+      PROP1: {value: "original value"},
+      PROP2: {value: "second original"},
+    },
+    types: [
+      {
+        id: "Colour",
+        type: "string",
+        enum: ["red", "white", "blue"],
+      },
+    ],
+    functions: [
+      {
+        name: "dye",
+        type: "function",
+        parameters: [
+          {name: "arg", $ref: "Colour"},
+        ],
+      },
+    ],
+  },
+  {
+    namespace: "embrace",
+    $import: "future",
+    properties: {
+      PROP2: {value: "overridden value"},
+    },
+    types: [
+      {
+        id: "Colour",
+        type: "string",
+        enum: ["blue", "orange"],
+      },
+    ],
+  },
+];
+
+add_task(async function test_$import() {
+  let url = "data:," + JSON.stringify($importJson);
+  await Schemas.load(url);
+
+  let root = {};
+  tallied = null;
+  Schemas.inject(root, wrapper);
+  equal(tallied, null);
+
+  equal(root.from_the.PROP1, "original value", "imported property");
+  equal(root.from_the.PROP2, "second original", "second imported property");
+  equal(root.from_the.Colour.RED, "red", "imported enum type");
+  equal(typeof root.from_the.dye, "function", "imported function");
+
+  root.from_the.dye("white");
+  verify("call", "from_the", "dye", ["white"]);
+
+  Assert.throws(() => root.from_the.dye("orange"),
+                /Invalid enumeration value/,
+                "original imported argument type Colour doesn't include 'orange'");
+
+  equal(root.embrace.PROP1, "original value", "imported property");
+  equal(root.embrace.PROP2, "overridden value", "overridden property");
+  equal(root.embrace.Colour.ORANGE, "orange", "overridden enum type");
+  equal(typeof root.embrace.dye, "function", "imported function");
+
+  root.embrace.dye("orange");
+  verify("call", "embrace", "dye", ["orange"]);
+
+  Assert.throws(() => root.embrace.dye("white"),
+                /Invalid enumeration value/,
+                "overridden argument type Colour doesn't include 'white'");
 });
 
 add_task(async function testLocalAPIImplementation() {
@@ -1395,6 +1503,7 @@ let defaultsJson = [
        ],
        returns: {
          type: "object",
+         additionalProperties: true,
        },
      },
    ]},
@@ -1430,4 +1539,81 @@ add_task(async function testDefaults() {
   deepEqual(root.defaultsJson.defaultFoo(), {prop1: 1, newProp: 1});
   deepEqual(root.defaultsJson.defaultFoo({prop1: 2}), {prop1: 2, newProp: 1});
   deepEqual(root.defaultsJson.defaultFoo(), {prop1: 1, newProp: 1});
+});
+
+let returnsJson = [{
+  namespace: "returns",
+  types: [
+    {
+      id: "Widget",
+      type: "object",
+      properties: {
+        size: {type: "integer"},
+        colour: {type: "string", optional: true},
+      },
+    },
+  ],
+  functions: [
+    {
+      name: "complete",
+      type: "function",
+      returns: {$ref: "Widget"},
+      parameters: [],
+    },
+    {
+      name: "optional",
+      type: "function",
+      returns: {$ref: "Widget"},
+      parameters: [],
+    },
+    {
+      name: "invalid",
+      type: "function",
+      returns: {$ref: "Widget"},
+      parameters: [],
+    },
+  ],
+}];
+
+add_task(async function testReturns() {
+  const url = "data:," + JSON.stringify(returnsJson);
+  await Schemas.load(url);
+
+  const apiObject = {
+    complete() {
+      return {size: 3, colour: "orange"};
+    },
+    optional() {
+      return {size: 4};
+    },
+    invalid() {
+      return {};
+    },
+  };
+
+  const localWrapper = {
+    cloneScope: global,
+    shouldInject(ns) {
+      return true;
+    },
+    getImplementation(ns, name) {
+      return new LocalAPIImplementation(apiObject, name, null);
+    },
+  };
+
+  const root = {};
+  Schemas.inject(root, localWrapper);
+
+  deepEqual(root.returns.complete(), {size: 3, colour: "orange"});
+  deepEqual(root.returns.optional(), {size: 4},
+            "Missing optional properties is allowed");
+
+  if (AppConstants.DEBUG) {
+    Assert.throws(() => root.returns.invalid(),
+                  `Type error for result value (Property "size" is required)`,
+                  "Should throw for invalid result in DEBUG builds");
+  } else {
+    deepEqual(root.returns.invalid(), {},
+              "Doesn't throw for invalid result value in release builds");
+  }
 });

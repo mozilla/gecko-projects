@@ -1383,6 +1383,20 @@ var DebuggerServer = {
   },
 
   /**
+   * Called when DevTools are unloaded to remove the contend process server script for the
+   * list of scripts loaded for each new content process. Will also remove message
+   * listeners from already loaded scripts.
+   */
+  removeContentServerScript() {
+    Services.ppmm.removeDelayedProcessScript(CONTENT_PROCESS_DBG_SERVER_SCRIPT);
+    try {
+      Services.ppmm.broadcastAsyncMessage("debug:close-content-server");
+    } catch (e) {
+      // Nothing to do
+    }
+  },
+
+  /**
    * Searches all active connections for an actor matching an ID.
    *
    * ⚠ TO BE USED ONLY FROM SERVER CODE OR TESTING ONLY! ⚠`
@@ -1662,7 +1676,7 @@ DebuggerServerConnection.prototype = {
         response.from = from;
       }
       this.transport.send(response);
-    }).then(null, (e) => {
+    }).catch((e) => {
       let errorPacket = this._unknownError(
         "error occurred while processing '" + type, e);
       errorPacket.from = from;

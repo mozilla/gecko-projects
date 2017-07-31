@@ -66,12 +66,6 @@ nsView::~nsView()
 {
   MOZ_COUNT_DTOR(nsView);
 
-  bool printRelated = mViewManager && mViewManager->GetPrintRelated();
-
-  if (mViewManager && (mViewManager->GetRootView() == this)) {
-    MOZ_RELEASE_ASSERT(!GetFirstChild());
-  }
-
   while (GetFirstChild())
   {
     nsView* child = GetFirstChild();
@@ -123,18 +117,17 @@ nsView::~nsView()
   DestroyWidget();
 
   delete mDirtyRegion;
-
-  if (MOZ_UNLIKELY(mFrame)) {
-    gfxCriticalNoteOnce << "~nsView mFrame printRelated " << (printRelated ? "true" : "false");
-  }
-  MOZ_RELEASE_ASSERT(!mFrame);
 }
 
 class DestroyWidgetRunnable : public Runnable {
 public:
   NS_DECL_NSIRUNNABLE
 
-  explicit DestroyWidgetRunnable(nsIWidget* aWidget) : mWidget(aWidget) {}
+  explicit DestroyWidgetRunnable(nsIWidget* aWidget)
+    : mozilla::Runnable("DestroyWidgetRunnable")
+    , mWidget(aWidget)
+  {
+  }
 
 private:
   nsCOMPtr<nsIWidget> mWidget;
@@ -476,8 +469,6 @@ void nsView::InsertChild(nsView *aChild, nsView *aSibling)
     {
       aChild->SetNextSibling(mFirstChild);
       mFirstChild = aChild;
-      MOZ_RELEASE_ASSERT(!mFirstChild || mFrame ||
-        mFirstChild->GetViewManager() != GetViewManager());
     }
     aChild->SetParent(this);
 

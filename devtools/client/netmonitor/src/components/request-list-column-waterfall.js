@@ -21,7 +21,7 @@ const UPDATED_WATERFALL_PROPS = [
   "totalTime",
 ];
 // List of properties of the timing info we want to create boxes for
-const TIMING_KEYS = ["blocked", "dns", "connect", "send", "wait", "receive"];
+const TIMING_KEYS = ["blocked", "dns", "connect", "ssl", "send", "wait", "receive"];
 
 const RequestListColumnWaterfall = createClass({
   displayName: "RequestListColumnWaterfall",
@@ -29,6 +29,7 @@ const RequestListColumnWaterfall = createClass({
   propTypes: {
     firstRequestStartedMillis: PropTypes.number.isRequired,
     item: PropTypes.object.isRequired,
+    onWaterfallMouseDown: PropTypes.func.isRequired,
   },
 
   shouldComponentUpdate(nextProps) {
@@ -37,7 +38,7 @@ const RequestListColumnWaterfall = createClass({
   },
 
   render() {
-    let { firstRequestStartedMillis, item } = this.props;
+    let { firstRequestStartedMillis, item, onWaterfallMouseDown } = this.props;
     const { boxes, tooltip } = timingBoxes(item);
 
     return (
@@ -47,6 +48,7 @@ const RequestListColumnWaterfall = createClass({
           style: {
             paddingInlineStart: `${item.startedMillis - firstRequestStartedMillis}px`,
           },
+          onMouseDown: onWaterfallMouseDown,
         },
           boxes,
         )

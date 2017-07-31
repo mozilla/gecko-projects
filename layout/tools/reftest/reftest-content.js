@@ -41,7 +41,6 @@ var gTimeoutHook = null;
 var gFailureTimeout = null;
 var gFailureReason;
 var gAssertionCount = 0;
-var gTestCount = 0;
 
 var gDebug;
 var gVerbose = false;
@@ -143,11 +142,7 @@ function StartTestURI(type, uri, timeout)
     // The GC is only able to clean up compartments after the CC runs. Since
     // the JS ref tests disable the normal browser chrome and do not otherwise
     // create substatial DOM garbage, the CC tends not to run enough normally.
-    ++gTestCount;
-    if (gTestCount % 1000 == 0) {
-        CU.forceGC();
-        CU.forceCC();
-    }
+    windowUtils().runNextCollectorTimer();
 
     // Reset gExplicitPendingPaintCount in case there was a timeout or
     // the count is out of sync for some other reason
@@ -182,10 +177,15 @@ function resetZoom() {
 
 function doPrintMode(contentRootElement) {
     // use getAttribute because className works differently in HTML and SVG
-    return contentRootElement &&
-           contentRootElement.hasAttribute('class') &&
-           contentRootElement.getAttribute('class').split(/\s+/)
-                             .indexOf("reftest-print") != -1;
+    if (contentRootElement &&
+        contentRootElement.hasAttribute('class')) {
+        var classList = contentRootElement.getAttribute('class').split(/\s+/);
+        if (classList.indexOf("reftest-print") != -1) {
+            SendException("reftest-print is obsolete, use reftest-paged instead");
+            return;
+        }
+        return classList.indexOf("reftest-paged") != -1;
+    }
 }
 
 function setupPrintMode() {
@@ -711,9 +711,17 @@ function OnDocumentLoad(event)
         // Ignore load events for subframes.
         return;
 
-    if (gClearingForAssertionCheck &&
-        currentDoc.location.href == BLANK_URL_FOR_CLEARING) {
-        DoAssertionCheck();
+    if (gClearingForAssertionCheck) {
+        if (currentDoc.location.href == BLANK_URL_FOR_CLEARING) {
+            DoAssertionCheck();
+            return;
+        }
+
+        // It's likely the previous test document reloads itself and causes the
+        // attempt of loading blank page fails. In this case we should retry
+        // loading the blank page.
+        LogInfo("Retry loading a blank page");
+        LoadURI(BLANK_URL_FOR_CLEARING);
         return;
     }
 
@@ -869,6 +877,7 @@ function RecordResult()
     clearTimeout(gFailureTimeout);
     gFailureReason = null;
     gFailureTimeout = null;
+    gCurrentURL = null;
 
     if (gCurrentTestType == TYPE_SCRIPT) {
         var error = '';

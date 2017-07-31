@@ -23,6 +23,7 @@ class nsIAtom;
 class nsIDocument;
 
 namespace mozilla {
+class ServoStyleSet;
 namespace dom {
 
 class ShadowRoot;
@@ -129,8 +130,10 @@ public:
 
   void WalkRules(nsIStyleRuleProcessor::EnumFunc aFunc, void* aData);
 
+  const mozilla::ServoStyleSet* GetServoStyleSet() const;
+
   static nsresult DoInitJSClass(JSContext *cx, JS::Handle<JSObject*> obj,
-                                const nsAFlatString& aClassName,
+                                const nsString& aClassName,
                                 nsXBLPrototypeBinding* aProtoBinding,
                                 JS::MutableHandle<JSObject*> aClassObject,
                                 bool* aNew);

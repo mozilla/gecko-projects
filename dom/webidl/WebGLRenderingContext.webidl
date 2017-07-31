@@ -482,7 +482,6 @@ interface WebGLRenderingContextBase {
     const GLenum RGB5_A1                        = 0x8057;
     const GLenum RGB565                         = 0x8D62;
     const GLenum DEPTH_COMPONENT16              = 0x81A5;
-    const GLenum STENCIL_INDEX                  = 0x1901;
     const GLenum STENCIL_INDEX8                 = 0x8D48;
     const GLenum DEPTH_STENCIL                  = 0x84F9;
 
@@ -817,6 +816,15 @@ interface WEBGL_compressed_texture_s3tc
     const GLenum COMPRESSED_RGBA_S3TC_DXT1_EXT = 0x83F1;
     const GLenum COMPRESSED_RGBA_S3TC_DXT3_EXT = 0x83F2;
     const GLenum COMPRESSED_RGBA_S3TC_DXT5_EXT = 0x83F3;
+};
+
+[NoInterfaceObject]
+interface WEBGL_compressed_texture_s3tc_srgb {
+    /* Compressed Texture Formats */
+    const GLenum COMPRESSED_SRGB_S3TC_DXT1_EXT        = 0x8C4C;
+    const GLenum COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT  = 0x8C4D;
+    const GLenum COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT  = 0x8C4E;
+    const GLenum COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT  = 0x8C4F;
 };
 
 [NoInterfaceObject]

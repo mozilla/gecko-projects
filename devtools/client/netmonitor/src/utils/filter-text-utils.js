@@ -103,6 +103,11 @@ function processFlagFilter(type, value) {
 }
 
 function isFlagFilterMatch(item, { type, value, negative }) {
+  // Ensures when filter token is exactly a flag ie. "remote-ip:", all values are shown
+  if (value.length < 1) {
+    return true;
+  }
+
   let match = true;
   let { responseCookies = { cookies: [] } } = item;
   responseCookies = responseCookies.cookies || responseCookies;
@@ -185,7 +190,7 @@ function isFlagFilterMatch(item, { type, value, negative }) {
         let host = item.urlDetails.host;
         let i = responseCookies.findIndex(c => {
           let domain = c.hasOwnProperty("domain") ? c.domain : host;
-          return domain === value;
+          return domain.includes(value);
         });
         match = i > -1;
       } else {
@@ -193,10 +198,12 @@ function isFlagFilterMatch(item, { type, value, negative }) {
       }
       break;
     case "set-cookie-name":
-      match = responseCookies.findIndex(c => c.name.toLowerCase() === value) > -1;
+      match = responseCookies.findIndex(c =>
+        c.name.toLowerCase().includes(value)) > -1;
       break;
     case "set-cookie-value":
-      match = responseCookies.findIndex(c => c.value.toLowerCase() === value) > -1;
+      match = responseCookies.findIndex(c =>
+        c.value.toLowerCase().includes(value)) > -1;
       break;
   }
   if (negative) {

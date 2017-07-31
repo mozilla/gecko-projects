@@ -130,7 +130,11 @@ private:
 class GlyphMetricsUpdater : public Runnable {
 public:
   NS_DECL_NSIRUNNABLE
-  explicit GlyphMetricsUpdater(SVGTextFrame* aFrame) : mFrame(aFrame) { }
+  explicit GlyphMetricsUpdater(SVGTextFrame* aFrame)
+    : Runnable("GlyphMetricsUpdater")
+    , mFrame(aFrame)
+  {
+  }
   static void Run(SVGTextFrame* aFrame);
   void Revoke() { mFrame = nullptr; }
 private:
@@ -255,7 +259,7 @@ public:
 
   // nsSVGContainerFrame methods:
   virtual gfxMatrix GetCanvasTM() override;
-  
+
   // SVG DOM text methods:
   uint32_t GetNumberOfChars(nsIContent* aContent);
   float GetComputedTextLength(nsIContent* aContent);
@@ -344,15 +348,6 @@ public:
                                        nsIFrame* aChildFrame);
 
   /**
-   * Takes a rectangle, aRect, in the <text> element's user space, and
-   * returns a rectangle in aChildFrame's frame user space that
-   * covers intersections of aRect with each rendered run for text frames
-   * within aChildFrame.
-   */
-  gfxRect TransformFrameRectToTextChild(const gfxRect& aRect,
-                                        nsIFrame* aChildFrame);
-
-  /**
    * Takes an app unit rectangle in the coordinate space of a given descendant
    * frame of this frame, and returns a rectangle in the <text> element's user
    * space that covers all parts of rendered runs that intersect with the
@@ -361,12 +356,8 @@ public:
   gfxRect TransformFrameRectFromTextChild(const nsRect& aRect,
                                           nsIFrame* aChildFrame);
 
-  /**
-   * Update the style of our ::-moz-svg-text anonymous box.
-   */
-  void DoUpdateStyleOfOwnedAnonBoxes(mozilla::ServoStyleSet& aStyleSet,
-                                     nsStyleChangeList& aChangeList,
-                                     nsChangeHint aHintForThisFrame) override;
+  // Return our ::-moz-svg-text anonymous box.
+  void AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult) override;
 
 private:
   /**

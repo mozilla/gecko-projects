@@ -25,7 +25,7 @@ config = {
         'virtualenv': [
             sys.executable,
             os.path.join(
-                os.getcwd(), 'build', 'src', 'python', 'virtualenv', 'virtualenv.py'
+                os.getcwd(), 'build', 'src', 'third_party', 'python', 'virtualenv', 'virtualenv.py'
             )
         ],
     },
@@ -66,9 +66,8 @@ config = {
     },
     "check_test_env": {
         'MINIDUMP_STACKWALK': '%(abs_tools_dir)s\\breakpad\\win64\\minidump_stackwalk.exe',
-        'MINIDUMP_SAVE_PATH': '%(base_work_dir)s\\minidumps',
+        'MINIDUMP_SAVE_PATH': os.path.join(os.getcwd(), 'public', 'build'),
     },
     'src_mozconfig': 'browser\\config\\mozconfigs\\win64\\nightly-asan',
-    'tooltool_manifest_src': 'browser\\config\\tooltool-manifests\\win64\\clang.manifest',
     #########################################################################
 }

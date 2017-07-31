@@ -12,7 +12,6 @@
 #include "base/task.h"                  // for CancelableTask, etc
 #include "gfxPrefs.h"                   // for gfxPrefs
 #include "InputBlockState.h"            // for TouchBlockState
-#include "mozilla/SizePrintfMacros.h"   // for PRIuSIZE
 #include "nsDebug.h"                    // for NS_WARNING
 #include "nsMathUtils.h"                // for NS_hypot
 
@@ -95,7 +94,7 @@ GestureEventListener::~GestureEventListener()
 
 nsEventStatus GestureEventListener::HandleInputEvent(const MultiTouchInput& aEvent)
 {
-  GEL_LOG("Receiving event type %d with %" PRIuSIZE " touches in state %d\n", aEvent.mType, aEvent.mTouches.Length(), mState);
+  GEL_LOG("Receiving event type %d with %zu touches in state %d\n", aEvent.mType, aEvent.mTouches.Length(), mState);
 
   nsEventStatus rv = nsEventStatus_eIgnore;
 
@@ -145,9 +144,6 @@ nsEventStatus GestureEventListener::HandleInputEvent(const MultiTouchInput& aEve
   case MultiTouchInput::MULTITOUCH_CANCEL:
     mTouches.Clear();
     rv = HandleInputTouchCancel();
-    break;
-  case MultiTouchInput::MULTITOUCH_SENTINEL:
-    MOZ_ASSERT_UNREACHABLE("Invalid MultTouchInput.");
     break;
   }
 
@@ -288,6 +284,13 @@ nsEventStatus GestureEventListener::HandleInputTouchMove()
       CancelLongTapTimeoutTask();
       CancelMaxTapTimeoutTask();
       mSingleTapSent = Nothing();
+      if (!gfxPrefs::APZOneTouchPinchEnabled()) {
+        // If the one-touch-pinch feature is disabled, bail out of the double-
+        // tap gesture instead.
+        SetState(GESTURE_NONE);
+        break;
+      }
+
       SetState(GESTURE_ONE_TOUCH_PINCH);
 
       ParentLayerCoord currentSpan = 1.0f;
@@ -595,8 +598,10 @@ void GestureEventListener::CancelLongTapTimeoutTask()
 
 void GestureEventListener::CreateLongTapTimeoutTask()
 {
-  RefPtr<CancelableRunnable> task =
-    NewCancelableRunnableMethod(this, &GestureEventListener::HandleInputTimeoutLongTap);
+  RefPtr<CancelableRunnable> task = NewCancelableRunnableMethod(
+    "layers::GestureEventListener::HandleInputTimeoutLongTap",
+    this,
+    &GestureEventListener::HandleInputTimeoutLongTap);
 
   mLongTapTimeoutTask = task;
   mAsyncPanZoomController->PostDelayedTask(
@@ -623,10 +628,11 @@ void GestureEventListener::CreateMaxTapTimeoutTask()
 
   TouchBlockState* block = mAsyncPanZoomController->GetInputQueue()->GetCurrentTouchBlock();
   MOZ_ASSERT(block);
-  RefPtr<CancelableRunnable> task =
-    NewCancelableRunnableMethod<bool>(this,
-                                      &GestureEventListener::HandleInputTimeoutMaxTap,
-                                      block->IsDuringFastFling());
+  RefPtr<CancelableRunnable> task = NewCancelableRunnableMethod<bool>(
+    "layers::GestureEventListener::HandleInputTimeoutMaxTap",
+    this,
+    &GestureEventListener::HandleInputTimeoutMaxTap,
+    block->IsDuringFastFling());
 
   mMaxTapTimeoutTask = task;
   mAsyncPanZoomController->PostDelayedTask(

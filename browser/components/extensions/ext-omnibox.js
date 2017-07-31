@@ -2,6 +2,9 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
+// The ext-* files are imported into the same scopes.
+/* import-globals-from ../../../toolkit/components/extensions/ext-toolkit.js */
+
 XPCOMUtils.defineLazyModuleGetter(this, "ExtensionSearchHandler",
                                   "resource://gre/modules/ExtensionSearchHandler.jsm");
 
@@ -37,7 +40,7 @@ this.omnibox = class extends ExtensionAPI {
           }
         },
 
-        onInputStarted: new SingletonEventManager(context, "omnibox.onInputStarted", fire => {
+        onInputStarted: new EventManager(context, "omnibox.onInputStarted", fire => {
           let listener = (eventName) => {
             fire.sync();
           };
@@ -47,7 +50,7 @@ this.omnibox = class extends ExtensionAPI {
           };
         }).api(),
 
-        onInputCancelled: new SingletonEventManager(context, "omnibox.onInputCancelled", fire => {
+        onInputCancelled: new EventManager(context, "omnibox.onInputCancelled", fire => {
           let listener = (eventName) => {
             fire.sync();
           };
@@ -57,7 +60,7 @@ this.omnibox = class extends ExtensionAPI {
           };
         }).api(),
 
-        onInputEntered: new SingletonEventManager(context, "omnibox.onInputEntered", fire => {
+        onInputEntered: new EventManager(context, "omnibox.onInputEntered", fire => {
           let listener = (eventName, text, disposition) => {
             fire.sync(text, disposition);
           };
@@ -66,9 +69,8 @@ this.omnibox = class extends ExtensionAPI {
             extension.off(ExtensionSearchHandler.MSG_INPUT_ENTERED, listener);
           };
         }).api(),
-      },
 
-      omnibox_internal: {
+        // Internal APIs.
         addSuggestions: (id, suggestions) => {
           try {
             ExtensionSearchHandler.addSuggestions(this.keyword, id, suggestions);
@@ -78,7 +80,7 @@ this.omnibox = class extends ExtensionAPI {
           }
         },
 
-        onInputChanged: new SingletonEventManager(context, "omnibox_internal.onInputChanged", fire => {
+        onInputChanged: new EventManager(context, "omnibox.onInputChanged", fire => {
           let listener = (eventName, text, id) => {
             fire.sync(text, id);
           };

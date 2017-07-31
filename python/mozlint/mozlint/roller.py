@@ -15,36 +15,30 @@ from Queue import Empty
 from .errors import LintersNotConfigured
 from .parser import Parser
 from .types import supported_types
-from .vcs import VCSFiles
+from .vcs import VCSHelper
 
 
 def _run_linters(queue, paths, **lintargs):
-    parse = Parser()
     results = defaultdict(list)
     failed = []
 
     while True:
         try:
             # The astute reader may wonder what is preventing the worker from
-            # grabbing the next linter from the queue after a SIGINT. Because
-            # this is a Manager.Queue(), it is itself in a child process which
-            # also received SIGINT. By the time the worker gets back here, the
-            # Queue is dead and IOError is raised.
-            linter_path = queue.get(False)
+            # grabbing the next linter config from the queue after a SIGINT.
+            # Because this is a Manager.Queue(), it is itself in a child process
+            # which also received SIGINT. By the time the worker gets back here,
+            # the Queue is dead and IOError is raised.
+            config = queue.get(False)
         except (Empty, IOError):
             return results, failed
 
-        # Ideally we would pass the entire LINTER definition as an argument
-        # to the worker instead of re-parsing it. But passing a function from
-        # a dynamically created module (with imp) does not seem to be possible
-        # with multiprocessing on Windows.
-        linter = parse(linter_path)
-        func = supported_types[linter['type']]
-        res = func(paths, linter, **lintargs) or []
+        func = supported_types[config['type']]
+        res = func(paths, config, **lintargs) or []
 
         if not isinstance(res, (list, tuple)):
             if res:
-                failed.append(linter['name'])
+                failed.append(config['name'])
             continue
 
         for r in res:
@@ -74,7 +68,7 @@ class LintRoller(object):
 
     def __init__(self, root=None, **lintargs):
         self.parse = Parser()
-        self.vcs = VCSFiles()
+        self.vcs = VCSHelper.create()
 
         self.linters = []
         self.lintargs = lintargs
@@ -92,43 +86,51 @@ class LintRoller(object):
             paths = (paths,)
 
         for path in paths:
-            self.linters.append(self.parse(path))
+            self.linters.extend(self.parse(path))
 
-    def roll(self, paths=None, rev=None, outgoing=None, workdir=None, num_procs=None):
+    def roll(self, paths=None, outgoing=None, workdir=None, num_procs=None):
         """Run all of the registered linters against the specified file paths.
 
         :param paths: An iterable of files and/or directories to lint.
-        :param rev: Lint all files touched by the specified revision.
         :param outgoing: Lint files touched by commits that are not on the remote repository.
         :param workdir: Lint all files touched in the working directory.
         :param num_procs: The number of processes to use. Default: cpu count
         :return: A dictionary with file names as the key, and a list of
                  :class:`~result.ResultContainer`s as the value.
         """
-        paths = paths or []
+        # Need to use a set in case vcs operations specify the same file
+        # more than once.
+        paths = paths or set()
         if isinstance(paths, basestring):
-            paths = [paths]
+            paths = set([paths])
+        elif isinstance(paths, (list, tuple)):
+            paths = set(paths)
 
         if not self.linters:
             raise LintersNotConfigured
 
         # Calculate files from VCS
-        if rev:
-            paths.extend(self.vcs.by_rev(rev))
         if workdir:
-            paths.extend(self.vcs.by_workdir())
+            paths.update(self.vcs.by_workdir(workdir))
         if outgoing:
-            paths.extend(self.vcs.outgoing(outgoing))
+            paths.update(self.vcs.by_outgoing(outgoing))
+
+        if not paths and (workdir or outgoing):
+            print("warning: no files linted")
+            return {}
 
         paths = paths or ['.']
+
+        # This will convert paths back to a list, but that's ok since
+        # we're done adding to it.
         paths = map(os.path.abspath, paths)
 
         # Set up multiprocessing
         m = Manager()
         queue = m.Queue()
 
-        for linter in self.linters:
-            queue.put(linter['path'])
+        for config in self.linters:
+            queue.put(config)
 
         num_procs = num_procs or cpu_count()
         num_procs = min(num_procs, len(self.linters))

@@ -21,7 +21,6 @@
 #include "nsIDocumentObserver.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMEventListener.h"
-#include "nsIEditor.h"
 #include "nsIEditorMailSupport.h"
 #include "nsIEditorStyleSheets.h"
 #include "nsIEditorUtils.h"
@@ -39,6 +38,7 @@
 class nsDocumentFragment;
 class nsITransferable;
 class nsIClipboard;
+class nsIDOMMouseEvent;
 class nsILinkHandler;
 class nsTableWrapperFrame;
 class nsIDOMRange;
@@ -134,6 +134,8 @@ public:
                                             bool aSuppressTransaction) override;
   using EditorBase::RemoveAttributeOrEquivalent;
   using EditorBase::SetAttributeOrEquivalent;
+
+  nsresult MouseMove(nsIDOMMouseEvent* aMouseEvent);
 
   // nsStubMutationObserver overrides
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTAPPENDED
@@ -646,9 +648,9 @@ protected:
                          dom::DocumentFragment** aFragment, bool aTrustedInput);
   void CreateListOfNodesToPaste(dom::DocumentFragment& aFragment,
                                 nsTArray<OwningNonNull<nsINode>>& outNodeList,
-                                nsINode* aStartNode,
+                                nsINode* aStartContainer,
                                 int32_t aStartOffset,
-                                nsINode* aEndNode,
+                                nsINode* aEndContainer,
                                 int32_t aEndOffset);
   nsresult CreateTagStack(nsTArray<nsString>& aTagStack,
                           nsIDOMNode* aNode);
@@ -672,7 +674,7 @@ protected:
   /**
    * Small utility routine to test if a break node is visible to user.
    */
-  bool IsVisBreak(nsINode* aNode);
+  bool IsVisibleBRElement(nsINode* aNode);
 
   /**
    * Utility routine to possibly adjust the insertion position when
@@ -856,10 +858,8 @@ protected:
                                   nsIDOMEventListener* aListener,
                                   bool aUseCapture,
                                   Element* aElement,
-                                  nsIContent* aParentContent,
                                   nsIPresShell* aShell);
   void DeleteRefToAnonymousNode(nsIContent* aContent,
-                                nsIContent* aParentContent,
                                 nsIPresShell* aShell);
 
   nsresult ShowResizersInner(nsIDOMElement *aResizedElement);

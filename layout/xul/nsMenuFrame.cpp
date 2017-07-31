@@ -68,10 +68,13 @@ const int32_t kBlinkDelay = 67; // milliseconds
 class nsMenuActivateEvent : public Runnable
 {
 public:
-  nsMenuActivateEvent(nsIContent *aMenu,
+  nsMenuActivateEvent(nsIContent* aMenu,
                       nsPresContext* aPresContext,
                       bool aIsActivate)
-    : mMenu(aMenu), mPresContext(aPresContext), mIsActivate(aIsActivate)
+    : mozilla::Runnable("nsMenuActivateEvent")
+    , mMenu(aMenu)
+    , mPresContext(aPresContext)
+    , mIsActivate(aIsActivate)
   {
   }
 
@@ -114,7 +117,9 @@ class nsMenuAttributeChangedEvent : public Runnable
 {
 public:
   nsMenuAttributeChangedEvent(nsIFrame* aFrame, nsIAtom* aAttr)
-  : mFrame(aFrame), mAttr(aAttr)
+    : mozilla::Runnable("nsMenuAttributeChangedEvent")
+    , mFrame(aFrame)
+    , mAttr(aAttr)
   {
   }
 
@@ -325,7 +330,7 @@ nsMenuFrame::DestroyFrom(nsIFrame* aDestructRoot)
 
   StopBlinking();
 
-  // Null out the pointer to this frame in the mediator wrapper so that it 
+  // Null out the pointer to this frame in the mediator wrapper so that it
   // doesn't try to interact with a deallocated frame.
   mTimerMediator->ClearFrame();
 
@@ -357,10 +362,10 @@ nsMenuFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
     nsBoxFrame::BuildDisplayListForChildren(aBuilder, aLists);
     return;
   }
-    
+
   nsDisplayListCollection set;
   nsBoxFrame::BuildDisplayListForChildren(aBuilder, set);
-  
+
   WrapListsInRedirector(aBuilder, set, aLists);
 }
 
@@ -529,7 +534,7 @@ nsMenuFrame::HandleEvent(nsPresContext* aPresContext,
       mOpenTimer->InitWithCallback(mTimerMediator, menuDelay, nsITimer::TYPE_ONE_SHOT);
     }
   }
-  
+
   return NS_OK;
 }
 
@@ -601,8 +606,7 @@ nsMenuFrame::PopupClosed(bool aDeselectMenu)
         nsCOMPtr<nsIRunnable> event =
           new nsMenuActivateEvent(current->GetContent(),
                                   PresContext(), true);
-        mContent->OwnerDoc()->Dispatch("nsMenuActivateEvent",
-                                       TaskCategory::Other,
+        mContent->OwnerDoc()->Dispatch(TaskCategory::Other,
                                        event.forget());
       }
     }
@@ -652,8 +656,7 @@ nsMenuFrame::SelectMenu(bool aActivateFlag)
 
     nsCOMPtr<nsIRunnable> event =
       new nsMenuActivateEvent(mContent, PresContext(), aActivateFlag);
-    mContent->OwnerDoc()->Dispatch("nsMenuActivateEvent",
-                                   TaskCategory::Other,
+    mContent->OwnerDoc()->Dispatch(TaskCategory::Other,
                                    event.forget());
   }
 
@@ -925,7 +928,7 @@ nsMenuFrame::Notify(nsITimer* aTimer)
   return NS_OK;
 }
 
-bool 
+bool
 nsMenuFrame::IsDisabled()
 {
   return mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::disabled,
@@ -964,7 +967,7 @@ nsMenuFrame::UpdateMenuSpecialState()
 {
   bool newChecked =
     mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::checked,
-                          nsGkAtoms::_true, eCaseMatters); 
+                          nsGkAtoms::_true, eCaseMatters);
   if (newChecked == mChecked) {
     /* checked state didn't change */
 
@@ -973,7 +976,7 @@ nsMenuFrame::UpdateMenuSpecialState()
 
     if (!mChecked || mGroupName.IsEmpty())
       return;                   // no interesting change
-  } else { 
+  } else {
     mChecked = newChecked;
     if (mType != eMenuType_Radio || !mChecked)
       /*
@@ -1022,10 +1025,10 @@ nsMenuFrame::UpdateMenuSpecialState()
     if (sib == firstMenuItem) {
       break;
     }
-  } 
+  }
 }
 
-void 
+void
 nsMenuFrame::BuildAcceleratorText(bool aNotify)
 {
   nsAutoString accelText;
@@ -1099,7 +1102,8 @@ nsMenuFrame::BuildAcceleratorText(bool aNotify)
 
         if (NS_SUCCEEDED(rv) && bundle) {
           nsXPIDLString keyName;
-          rv = bundle->GetStringFromName(keyCode.get(), getter_Copies(keyName));
+          rv = bundle->GetStringFromName(NS_ConvertUTF16toUTF8(keyCode).get(),
+                                         getter_Copies(keyName));
           if (keyName)
             accelString = keyName;
         }
@@ -1113,7 +1117,7 @@ nsMenuFrame::BuildAcceleratorText(bool aNotify)
 
   nsAutoString modifiers;
   keyElement->GetAttr(kNameSpaceID_None, nsGkAtoms::modifiers, modifiers);
-  
+
   char* str = ToNewCString(modifiers);
   char* newStr;
   char* token = nsCRT::strtok(str, ", \t", &newStr);
@@ -1133,17 +1137,17 @@ nsMenuFrame::BuildAcceleratorText(bool aNotify)
   nsContentUtils::GetModifierSeparatorText(modifierSeparator);
 
   while (token) {
-      
+
     if (PL_strcmp(token, "shift") == 0)
       accelText += shiftText;
-    else if (PL_strcmp(token, "alt") == 0) 
-      accelText += altText; 
-    else if (PL_strcmp(token, "meta") == 0) 
-      accelText += metaText; 
+    else if (PL_strcmp(token, "alt") == 0)
+      accelText += altText;
+    else if (PL_strcmp(token, "meta") == 0)
+      accelText += metaText;
     else if (PL_strcmp(token, "os") == 0)
-      accelText += osText; 
-    else if (PL_strcmp(token, "control") == 0) 
-      accelText += controlText; 
+      accelText += osText;
+    else if (PL_strcmp(token, "control") == 0)
+      accelText += controlText;
     else if (PL_strcmp(token, "accel") == 0) {
       switch (WidgetInputEvent::AccelModifier()) {
         case MODIFIER_META:
@@ -1164,7 +1168,7 @@ nsMenuFrame::BuildAcceleratorText(bool aNotify)
           break;
       }
     }
-    
+
     accelText += modifierSeparator;
 
     token = nsCRT::strtok(newStr, ", \t", &newStr);
@@ -1361,7 +1365,7 @@ nsMenuFrame::AppendFrames(ChildListID     aListID,
   if (aFrameList.IsEmpty())
     return;
 
-  nsBoxFrame::AppendFrames(aListID, aFrameList); 
+  nsBoxFrame::AppendFrames(aListID, aFrameList);
 }
 
 bool
@@ -1524,15 +1528,4 @@ nsMenuTimerMediator::GetName(nsACString& aName)
 {
   aName.AssignLiteral("nsMenuTimerMediator");
   return NS_OK;
-}
-
-/**
- * Set the name to this timer callback.
- * @param aName the name to set
- */
-NS_IMETHODIMP
-nsMenuTimerMediator::SetName(const char* aName)
-{
-  // We don't need to change the name for nsMenuTimerMediator.
-  return NS_ERROR_NOT_IMPLEMENTED;
 }

@@ -1,10 +1,17 @@
 "use strict";
 
+// The ext-* files are imported into the same scopes.
+/* import-globals-from ext-toolkit.js */
+
+// This file expectes tabTracker to be defined in the global scope (e.g.
+// by ext-utils.js).
+/* global tabTracker */
+
 XPCOMUtils.defineLazyModuleGetter(this, "WebRequest",
                                   "resource://gre/modules/WebRequest.jsm");
 
 // EventManager-like class specifically for WebRequest. Inherits from
-// SingletonEventManager. Takes care of converting |details| parameter
+// EventManager. Takes care of converting |details| parameter
 // when invoking listeners.
 function WebRequestEventManager(context, eventName) {
   let name = `webRequest.${eventName}`;
@@ -111,10 +118,10 @@ function WebRequestEventManager(context, eventName) {
     };
   };
 
-  return SingletonEventManager.call(this, context, name, register);
+  return EventManager.call(this, context, name, register);
 }
 
-WebRequestEventManager.prototype = Object.create(SingletonEventManager.prototype);
+WebRequestEventManager.prototype = Object.create(EventManager.prototype);
 
 this.webRequest = class extends ExtensionAPI {
   getAPI(context) {

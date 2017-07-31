@@ -33,8 +33,6 @@ class TestSafeBrowsingInitialDownload(PuppeteerMixin, MarionetteTestCase):
 
     prefs_provider_update_time = {
         # Force an immediate download of the safebrowsing files
-        'browser.safebrowsing.provider.google4.nextupdatetime': 1,
-        'browser.safebrowsing.provider.google.nextupdatetime': 1,
         'browser.safebrowsing.provider.mozilla.nextupdatetime': 1,
     }
 
@@ -67,6 +65,18 @@ class TestSafeBrowsingInitialDownload(PuppeteerMixin, MarionetteTestCase):
     def setUp(self):
         super(TestSafeBrowsingInitialDownload, self).setUp()
 
+        self.safebrowsing_v2_files = self.get_safebrowsing_files(False)
+        if any(f.startswith('goog') for f in self.safebrowsing_v2_files):
+            self.prefs_provider_update_time.update({
+                'browser.safebrowsing.provider.google.nextupdatetime': 1,
+            })
+
+        self.safebrowsing_v4_files = self.get_safebrowsing_files(True)
+        if any(f.startswith('goog') for f in self.safebrowsing_v4_files):
+            self.prefs_provider_update_time.update({
+                'browser.safebrowsing.provider.google4.nextupdatetime': 1,
+            })
+
         # Force the preferences for the new profile
         enforce_prefs = self.prefs_safebrowsing
         enforce_prefs.update(self.prefs_provider_update_time)
@@ -74,8 +84,6 @@ class TestSafeBrowsingInitialDownload(PuppeteerMixin, MarionetteTestCase):
 
         self.safebrowsing_path = os.path.join(self.marionette.instance.profile.profile,
                                               'safebrowsing')
-        self.safebrowsing_v2_files = self.get_safebrowsing_files(False)
-        self.safebrowsing_v4_files = self.get_safebrowsing_files(True)
 
     def tearDown(self):
         try:
@@ -90,7 +98,7 @@ class TestSafeBrowsingInitialDownload(PuppeteerMixin, MarionetteTestCase):
                           self.prefs_provider_update_time.keys(), True)
 
         try:
-            Wait(self.marionette, timeout=60).until(
+            Wait(self.marionette, timeout=170).until(
                 check_downloaded, message='Not all safebrowsing files have been downloaded')
         finally:
             files_on_disk_toplevel = os.listdir(self.safebrowsing_path)

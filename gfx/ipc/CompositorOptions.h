@@ -32,6 +32,7 @@ public:
   CompositorOptions()
     : mUseAPZ(false)
     , mUseWebRender(false)
+    , mUseAdvancedLayers(false)
   {
   }
 
@@ -39,13 +40,19 @@ public:
                              bool aUseWebRender)
     : mUseAPZ(aUseAPZ)
     , mUseWebRender(aUseWebRender)
+    , mUseAdvancedLayers(false)
   {
   }
 
   bool UseAPZ() const { return mUseAPZ; }
   bool UseWebRender() const { return mUseWebRender; }
+  bool UseAdvancedLayers() const { return mUseAdvancedLayers; }
 
-  bool operator==(const CompositorOptions& aOther) {
+  void SetUseAdvancedLayers(bool aUseAdvancedLayers) {
+    mUseAdvancedLayers = aUseAdvancedLayers;
+  }
+
+  bool operator==(const CompositorOptions& aOther) const {
     return mUseAPZ == aOther.mUseAPZ &&
            mUseWebRender == aOther.mUseWebRender;
   }
@@ -55,6 +62,7 @@ public:
 private:
   bool mUseAPZ;
   bool mUseWebRender;
+  bool mUseAdvancedLayers;
 
   // Make sure to add new fields to the ParamTraits implementation
 };

@@ -50,9 +50,9 @@ var gMainPane = {
     let defaultPerformancePref =
       document.getElementById("browser.preferences.defaultPerformanceSettings.enabled");
     defaultPerformancePref.addEventListener("change", () => {
-      this.updatePerformanceSettingsBox();
+      this.updatePerformanceSettingsBox({duringChangeEvent: true});
     });
-    this.updatePerformanceSettingsBox();
+    this.updatePerformanceSettingsBox({duringChangeEvent: false});
 
     let performanceSettingsLink = document.getElementById("performanceSettingsLearnMore");
     let performanceSettingsUrl = Services.urlFormatter.formatURLPref("app.support.baseURL") + "performance";
@@ -141,6 +141,21 @@ var gMainPane = {
     Components.classes["@mozilla.org/observer-service;1"]
               .getService(Components.interfaces.nsIObserverService)
               .notifyObservers(window, "main-pane-loaded");
+  },
+
+  isE10SEnabled() {
+    let e10sEnabled;
+    try {
+      let e10sStatus = Components.classes["@mozilla.org/supports-PRUint64;1"]
+                         .createInstance(Ci.nsISupportsPRUint64);
+      let appinfo = Services.appinfo.QueryInterface(Ci.nsIObserver);
+      appinfo.observe(e10sStatus, "getE10SBlocked", "");
+      e10sEnabled = e10sStatus.data < 2;
+    } catch (e) {
+      e10sEnabled = false;
+    }
+
+    return e10sEnabled;
   },
 
   enableE10SChange() {
@@ -410,30 +425,56 @@ var gMainPane = {
     }
   },
 
-  updatePerformanceSettingsBox() {
+  updatePerformanceSettingsBox({duringChangeEvent}) {
     let defaultPerformancePref =
       document.getElementById("browser.preferences.defaultPerformanceSettings.enabled");
     let performanceSettings = document.getElementById("performanceSettings");
+    let processCountPref = document.getElementById("dom.ipc.processCount");
     if (defaultPerformancePref.value) {
-      let processCountPref = document.getElementById("dom.ipc.processCount");
       let accelerationPref = document.getElementById("layers.acceleration.disabled");
+      // Unset the value so process count will be decided by e10s rollout.
       processCountPref.value = processCountPref.defaultValue;
       accelerationPref.value = accelerationPref.defaultValue;
       performanceSettings.hidden = true;
     } else {
+      let e10sRolloutProcessCountPref =
+        document.getElementById("dom.ipc.processCount.web");
+      // Take the e10s rollout value as the default value (if it exists),
+      // but don't overwrite the user set value.
+      if (duringChangeEvent &&
+          e10sRolloutProcessCountPref.value &&
+          processCountPref.value == processCountPref.defaultValue) {
+        processCountPref.value = e10sRolloutProcessCountPref.value;
+      }
       performanceSettings.hidden = false;
     }
   },
 
   buildContentProcessCountMenuList() {
-    let processCountPref = document.getElementById("dom.ipc.processCount");
-    let bundlePreferences = document.getElementById("bundlePreferences");
-    let label = bundlePreferences.getFormattedString("defaultContentProcessCount",
-      [processCountPref.defaultValue]);
-    let contentProcessCount =
-      document.querySelector(`#contentProcessCount > menupopup >
-                              menuitem[value="${processCountPref.defaultValue}"]`);
-    contentProcessCount.label = label;
+    if (gMainPane.isE10SEnabled()) {
+      let processCountPref = document.getElementById("dom.ipc.processCount");
+      let e10sRolloutProcessCountPref =
+        document.getElementById("dom.ipc.processCount.web");
+      let defaultProcessCount =
+        e10sRolloutProcessCountPref.value || processCountPref.defaultValue;
+      let bundlePreferences = document.getElementById("bundlePreferences");
+      let label = bundlePreferences.getFormattedString("defaultContentProcessCount",
+        [defaultProcessCount]);
+      let contentProcessCount =
+        document.querySelector(`#contentProcessCount > menupopup >
+                                menuitem[value="${defaultProcessCount}"]`);
+      contentProcessCount.label = label;
+
+      document.getElementById("limitContentProcess").disabled = false;
+      document.getElementById("contentProcessCount").disabled = false;
+      document.getElementById("contentProcessCountEnabledDescription").hidden = false;
+      document.getElementById("contentProcessCountDisabledDescription").hidden = true;
+    } else {
+      document.getElementById("limitContentProcess").disabled = true;
+      document.getElementById("contentProcessCount").disabled = true;
+      document.getElementById("contentProcessCountEnabledDescription").hidden = true;
+      document.getElementById("contentProcessCountDisabledDescription").hidden = false;
+    }
   },
 
   // DOWNLOADS
@@ -626,12 +667,12 @@ var gMainPane = {
    *          the Downloads folder if aIndex == 1,
    *          the folder stored in browser.download.dir
    */
-  async _indexToFolder(aIndex) {
+  _indexToFolder(aIndex) {
     switch (aIndex) {
       case 0:
-        return await this._getDownloadsFolder("Desktop");
+        return this._getDownloadsFolder("Desktop");
       case 1:
-        return await this._getDownloadsFolder("Downloads");
+        return this._getDownloadsFolder("Downloads");
     }
     var currentDirPref = document.getElementById("browser.download.dir");
     return currentDirPref.value;

@@ -11,16 +11,14 @@ nsTAdoptingString_CharT::operator=(const self_type& str)
   // the nature of this class...
   self_type* mutable_str = const_cast<self_type*>(&str);
 
-  if (str.mFlags & F_OWNED) {
+  if (str.mDataFlags & DataFlags::OWNED) {
     // We want to do what Adopt() does, but without actually incrementing
     // the Adopt count.  Note that we can be a little more straightforward
     // about this than Adopt() is, because we know that str.mData is
     // non-null.  Should we be able to assert that str is not void here?
     NS_ASSERTION(str.mData, "String with null mData?");
     Finalize();
-    mData = str.mData;
-    mLength = str.mLength;
-    SetDataFlags(F_TERMINATED | F_OWNED);
+    SetData(str.mData, str.mLength, DataFlags::TERMINATED | DataFlags::OWNED);
 
     // Make str forget the buffer we just took ownership of.
     new (mutable_str) self_type();
@@ -39,9 +37,7 @@ nsTString_CharT::Rebind(const char_type* data, size_type length)
   // If we currently own a buffer, release it.
   Finalize();
 
-  mData = const_cast<char_type*>(data);
-  mLength = length;
-  SetDataFlags(F_TERMINATED);
+  SetData(const_cast<char_type*>(data), length, DataFlags::TERMINATED);
   AssertValidDependentString();
 }
 

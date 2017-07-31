@@ -12,6 +12,7 @@ const {
 } = require("devtools/client/shared/vendor/react");
 const I = require("devtools/client/shared/vendor/immutable");
 const { propertiesEqual } = require("../utils/request-utils");
+const { RESPONSE_HEADERS } = require("../constants");
 
 // Components
 const RequestListColumnCause = createFactory(require("./request-list-column-cause"));
@@ -25,6 +26,7 @@ const RequestListColumnLatency = createFactory(require("./request-list-column-la
 const RequestListColumnMethod = createFactory(require("./request-list-column-method"));
 const RequestListColumnProtocol = createFactory(require("./request-list-column-protocol"));
 const RequestListColumnRemoteIP = createFactory(require("./request-list-column-remote-ip"));
+const RequestListColumnResponseHeader = createFactory(require("./request-list-column-response-header"));
 const RequestListColumnResponseTime = createFactory(require("./request-list-column-response-time"));
 const RequestListColumnScheme = createFactory(require("./request-list-column-scheme"));
 const RequestListColumnSetCookies = createFactory(require("./request-list-column-set-cookies"));
@@ -87,6 +89,7 @@ const RequestListItem = createClass({
     onMouseDown: PropTypes.func.isRequired,
     onSecurityIconMouseDown: PropTypes.func.isRequired,
     onThumbnailMouseDown: PropTypes.func.isRequired,
+    onWaterfallMouseDown: PropTypes.func.isRequired,
     waterfallWidth: PropTypes.number,
   },
 
@@ -124,6 +127,7 @@ const RequestListItem = createClass({
       onCauseBadgeMouseDown,
       onSecurityIconMouseDown,
       onThumbnailMouseDown,
+      onWaterfallMouseDown,
     } = this.props;
 
     let classList = ["request-list-item", index % 2 ? "odd" : "even"];
@@ -161,8 +165,12 @@ const RequestListItem = createClass({
           RequestListColumnResponseTime({ item, firstRequestStartedMillis }),
         columns.get("duration") && RequestListColumnDuration({ item }),
         columns.get("latency") && RequestListColumnLatency({ item }),
+        ...RESPONSE_HEADERS.filter(header => columns.get(header)).map(
+          header => RequestListColumnResponseHeader({ item, header }),
+        ),
         columns.get("waterfall") &&
-          RequestListColumnWaterfall({ item, firstRequestStartedMillis }),
+          RequestListColumnWaterfall({ item, firstRequestStartedMillis,
+                                       onWaterfallMouseDown }),
       )
     );
   }

@@ -12,7 +12,6 @@ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://gre/modules/Preferences.jsm");
@@ -165,14 +164,30 @@ function addonInstallForURL(url, hash) {
 // Returns a promise that is resolved with an Array<Addon> of the installed
 // experiment addons.
 function installedExperimentAddons() {
-  return AddonManager.getAddonsByTypes(["experiment"]).then(addons => {
+  return AddonManager.getActiveAddons(["experiment"]).then(addons => {
     return addons.filter(a => !a.appDisabled);
   });
 }
 
 // Takes an Array<Addon> and returns a promise that is resolved when the
 // addons are uninstalled.
-function uninstallAddons(addons) {
+async function uninstallAddons(addons) {
+  if (!AddonManagerPrivate.isDBLoaded()) {
+    await new Promise(resolve => {
+      Services.obs.addObserver({
+        observe(subject, topic, data) {
+          Services.obs.removeObserver(this, "xpi-database-loaded");
+          resolve();
+        },
+      }, "xpi-database-loaded");
+    });
+
+    // This function was called during startup so the addons that were
+    // passed in were partial addon objects.  Now that the full addons
+    // database is loaded, get proper Addon objects.
+    addons = await AddonManager.getAddonsByIDs(addons.map(a => a.id));
+  }
+
   let ids = new Set(addons.map(addon => addon.id));
   return new Promise(resolve => {
 
@@ -192,10 +207,6 @@ function uninstallAddons(addons) {
     AddonManager.addAddonListener(listener);
 
     for (let addon of addons) {
-      // Disabling the add-on before uninstalling is necessary to cause tests to
-      // pass. This might be indicative of a bug in XPIProvider.
-      // TODO follow up in bug 992396.
-      addon.userDisabled = true;
       addon.uninstall();
     }
 
@@ -1750,115 +1761,113 @@ Experiments.ExperimentEntry.prototype = {
    *
    * @return Promise<> Resolved when the operation is complete.
    */
-  async start() {
+  start() {
     this._log.trace("start() for " + this.id);
 
     this._enabled = true;
-    return await this.reconcileAddonState();
+    return this.reconcileAddonState();
   },
 
   // Async install of the addon for this experiment, part of the start task above.
   async _installAddon() {
-    let deferred = Promise.defer();
-
     let hash = this._policy.ignoreHashes ? null : this._manifestData.xpiHash;
 
     let install = await addonInstallForURL(this._manifestData.xpiURL, hash);
     gActiveInstallURLs.add(install.sourceURI.spec);
 
-    let failureHandler = (failureInstall, handler) => {
-      let message = "AddonInstall " + handler + " for " + this.id + ", state=" +
-                   (failureInstall.state || "?") + ", error=" + failureInstall.error;
-      this._log.error("_installAddon() - " + message);
-      this._failedStart = true;
-      gActiveInstallURLs.delete(failureInstall.sourceURI.spec);
-
-      TelemetryLog.log(TELEMETRY_LOG.ACTIVATION_KEY,
-                      [TELEMETRY_LOG.ACTIVATION.INSTALL_FAILURE, this.id]);
-
-      deferred.reject(new Error(message));
-    };
-
-    let listener = {
-      _expectedID: null,
-
-      onDownloadEnded: downloadEndedInstall => {
-        this._log.trace("_installAddon() - onDownloadEnded for " + this.id);
-
-        if (downloadEndedInstall.existingAddon) {
-          this._log.warn("_installAddon() - onDownloadEnded, addon already installed");
-        }
-
-        if (downloadEndedInstall.addon.type !== "experiment") {
-          this._log.error("_installAddon() - onDownloadEnded, wrong addon type");
-          downloadEndedInstall.cancel();
-        }
-      },
-
-      onInstallStarted: installStartedInstall => {
-        this._log.trace("_installAddon() - onInstallStarted for " + this.id);
-
-        if (installStartedInstall.existingAddon) {
-          this._log.warn("_installAddon() - onInstallStarted, addon already installed");
-        }
-
-        if (installStartedInstall.addon.type !== "experiment") {
-          this._log.error("_installAddon() - onInstallStarted, wrong addon type");
-          return false;
-        }
-        return undefined;
-      },
-
-      onInstallEnded: installEndedInstall => {
-        this._log.trace("_installAddon() - install ended for " + this.id);
-        gActiveInstallURLs.delete(installEndedInstall.sourceURI.spec);
-
-        this._lastChangedDate = this._policy.now();
-        this._startDate = this._policy.now();
-        this._enabled = true;
+    return new Promise((resolve, reject) => {
+      let failureHandler = (failureInstall, handler) => {
+        let message = "AddonInstall " + handler + " for " + this.id + ", state=" +
+                     (failureInstall.state || "?") + ", error=" + failureInstall.error;
+        this._log.error("_installAddon() - " + message);
+        this._failedStart = true;
+        gActiveInstallURLs.delete(failureInstall.sourceURI.spec);
 
         TelemetryLog.log(TELEMETRY_LOG.ACTIVATION_KEY,
-                       [TELEMETRY_LOG.ACTIVATION.ACTIVATED, this.id]);
+                        [TELEMETRY_LOG.ACTIVATION.INSTALL_FAILURE, this.id]);
 
-        let addon = installEndedInstall.addon;
-        this._name = addon.name;
-        this._addonId = addon.id;
-        this._description = addon.description || "";
-        this._homepageURL = addon.homepageURL || "";
+        reject(new Error(message));
+      };
 
-        // Experiment add-ons default to userDisabled=true. Enable if needed.
-        if (addon.userDisabled) {
-          this._log.trace("Add-on is disabled. Enabling.");
-          listener._expectedID = addon.id;
-          AddonManager.addAddonListener(listener);
-          addon.userDisabled = false;
-        } else {
-          this._log.trace("Add-on is enabled. start() completed.");
-          deferred.resolve();
-        }
-      },
+      let listener = {
+        _expectedID: null,
 
-      onEnabled: addon => {
-        this._log.info("onEnabled() for " + addon.id);
+        onDownloadEnded: downloadEndedInstall => {
+          this._log.trace("_installAddon() - onDownloadEnded for " + this.id);
 
-        if (addon.id != listener._expectedID) {
-          return;
-        }
+          if (downloadEndedInstall.existingAddon) {
+            this._log.warn("_installAddon() - onDownloadEnded, addon already installed");
+          }
 
-        AddonManager.removeAddonListener(listener);
-        deferred.resolve();
-      },
-    };
+          if (downloadEndedInstall.addon.type !== "experiment") {
+            this._log.error("_installAddon() - onDownloadEnded, wrong addon type");
+            downloadEndedInstall.cancel();
+          }
+        },
 
-    ["onDownloadCancelled", "onDownloadFailed", "onInstallCancelled", "onInstallFailed"]
-      .forEach(what => {
-        listener[what] = eventInstall => failureHandler(eventInstall, what)
-      });
+        onInstallStarted: installStartedInstall => {
+          this._log.trace("_installAddon() - onInstallStarted for " + this.id);
 
-    install.addListener(listener);
-    install.install();
+          if (installStartedInstall.existingAddon) {
+            this._log.warn("_installAddon() - onInstallStarted, addon already installed");
+          }
 
-    return await deferred.promise;
+          if (installStartedInstall.addon.type !== "experiment") {
+            this._log.error("_installAddon() - onInstallStarted, wrong addon type");
+            return false;
+          }
+          return undefined;
+        },
+
+        onInstallEnded: installEndedInstall => {
+          this._log.trace("_installAddon() - install ended for " + this.id);
+          gActiveInstallURLs.delete(installEndedInstall.sourceURI.spec);
+
+          this._lastChangedDate = this._policy.now();
+          this._startDate = this._policy.now();
+          this._enabled = true;
+
+          TelemetryLog.log(TELEMETRY_LOG.ACTIVATION_KEY,
+                         [TELEMETRY_LOG.ACTIVATION.ACTIVATED, this.id]);
+
+          let addon = installEndedInstall.addon;
+          this._name = addon.name;
+          this._addonId = addon.id;
+          this._description = addon.description || "";
+          this._homepageURL = addon.homepageURL || "";
+
+          // Experiment add-ons default to userDisabled=true. Enable if needed.
+          if (addon.userDisabled) {
+            this._log.trace("Add-on is disabled. Enabling.");
+            listener._expectedID = addon.id;
+            AddonManager.addAddonListener(listener);
+            addon.userDisabled = false;
+          } else {
+            this._log.trace("Add-on is enabled. start() completed.");
+            resolve();
+          }
+        },
+
+        onEnabled: addon => {
+          this._log.info("onEnabled() for " + addon.id);
+
+          if (addon.id != listener._expectedID) {
+            return;
+          }
+
+          AddonManager.removeAddonListener(listener);
+          resolve();
+        },
+      };
+
+      ["onDownloadCancelled", "onDownloadFailed", "onInstallCancelled", "onInstallFailed"]
+        .forEach(what => {
+          listener[what] = eventInstall => failureHandler(eventInstall, what)
+        });
+
+      install.addListener(listener);
+      install.install();
+    });
   },
 
   /**

@@ -55,7 +55,7 @@ job-template:
          by-build-platform:
             linux64-l10n: linux64/opt
             linux-l10n: linux32/opt
-            macosx64: osx-10-7/opt
+            macosx64: osx-cross/opt
             android-api-15-l10n: android-4-0-armv7-api15/opt
    mozharness:
       config:
@@ -105,9 +105,9 @@ job-template:
    when:
       files-changed:
          - browser/locales/all-locales
-         - python/compare-locales/**
          - testing/mozharness/configs/single_locale/**
          - testing/mozharness/mozharness/mozilla/l10n/locales.py
          - testing/mozharness/scripts/desktop_l10n.py
+         - third_party/python/compare-locales/**
          - toolkit/locales/**
          - toolkit/mozapps/installer/**

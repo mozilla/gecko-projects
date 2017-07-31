@@ -279,7 +279,8 @@ public:
   }
 
   nsSimplePluginEvent(nsIDocument* aTarget, const nsAString& aEvent)
-    : mTarget(aTarget)
+    : mozilla::Runnable("nsSimplePluginEvent")
+    , mTarget(aTarget)
     , mDocument(aTarget)
     , mEvent(aEvent)
   {
@@ -289,7 +290,8 @@ public:
   nsSimplePluginEvent(nsIContent* aTarget,
                       nsIDocument* aDocument,
                       const nsAString& aEvent)
-    : mTarget(aTarget)
+    : mozilla::Runnable("nsSimplePluginEvent")
+    , mTarget(aTarget)
     , mDocument(aDocument)
     , mEvent(aEvent)
   {
@@ -1021,8 +1023,7 @@ NS_IMETHODIMP
 nsObjectLoadingContent::OnStartRequest(nsIRequest *aRequest,
                                        nsISupports *aContext)
 {
-  PROFILER_LABEL("nsObjectLoadingContent", "OnStartRequest",
-    js::ProfileEntry::Category::NETWORK);
+  AUTO_PROFILER_LABEL("nsObjectLoadingContent::OnStartRequest", NETWORK);
 
   LOG(("OBJLC [%p]: Channel OnStartRequest", this));
 
@@ -1100,8 +1101,7 @@ nsObjectLoadingContent::OnStopRequest(nsIRequest *aRequest,
                                       nsISupports *aContext,
                                       nsresult aStatusCode)
 {
-  PROFILER_LABEL("nsObjectLoadingContent", "OnStopRequest",
-    js::ProfileEntry::Category::NETWORK);
+  AUTO_PROFILER_LABEL("nsObjectLoadingContent::OnStopRequest", NETWORK);
 
   // Handle object not loading error because source was a tracking URL.
   // We make a note of this object node by including it in a dedicated
@@ -1562,8 +1562,7 @@ nsObjectLoadingContent::CheckLoadPolicy(int16_t *aContentPolicy)
                                           mContentType,
                                           nullptr, //extra
                                           aContentPolicy,
-                                          nsContentUtils::GetContentPolicy(),
-                                          nsContentUtils::GetSecurityManager());
+                                          nsContentUtils::GetContentPolicy());
   NS_ENSURE_SUCCESS(rv, false);
   if (NS_CP_REJECTED(*aContentPolicy)) {
     LOG(("OBJLC [%p]: Content policy denied load of %s",
@@ -1616,8 +1615,7 @@ nsObjectLoadingContent::CheckProcessPolicy(int16_t *aContentPolicy)
                                  mContentType,
                                  nullptr, //extra
                                  aContentPolicy,
-                                 nsContentUtils::GetContentPolicy(),
-                                 nsContentUtils::GetSecurityManager());
+                                 nsContentUtils::GetContentPolicy());
   NS_ENSURE_SUCCESS(rv, false);
 
   if (NS_CP_REJECTED(*aContentPolicy)) {
@@ -3119,8 +3117,11 @@ nsObjectLoadingContent::LoadFallback(FallbackType aType, bool aNotify) {
        aType == eFallbackBlocklisted ||
        aType == eFallbackAlternate))
   {
-    for (nsIContent* child = thisContent->GetFirstChild(); child;
-         child = child->GetNextNode(thisContent)) {
+    for (nsIContent* child = thisContent->GetFirstChild(); child; ) {
+      // When we advance to our next child, we don't want to traverse subtrees
+      // under descendant <object> and <embed> elements; those will handle
+      // those subtrees themselves if they end up falling back.
+      bool skipChildDescendants = false;
       if (aType != eFallbackAlternate &&
           !child->IsHTMLElement(nsGkAtoms::param) &&
           nsStyleUtil::IsSignificantChild(child, true, false)) {
@@ -3130,9 +3131,17 @@ nsObjectLoadingContent::LoadFallback(FallbackType aType, bool aNotify) {
         if (child->IsHTMLElement(nsGkAtoms::embed)) {
           HTMLSharedObjectElement* embed = static_cast<HTMLSharedObjectElement*>(child);
           embed->StartObjectLoad(true, true);
+          skipChildDescendants = true;
         } else if (auto object = HTMLObjectElement::FromContent(child)) {
           object->StartObjectLoad(true, true);
+          skipChildDescendants = true;
         }
+      }
+
+      if (skipChildDescendants) {
+        child = child->GetNextNonChildNode(thisContent);
+      } else {
+        child = child->GetNextNode(thisContent);
       }
     }
   }
@@ -3195,7 +3204,7 @@ nsObjectLoadingContent::DoStopPlugin(nsPluginInstanceOwner* aInstanceOwner)
 NS_IMETHODIMP
 nsObjectLoadingContent::StopPluginInstance()
 {
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
+  AUTO_PROFILER_LABEL("nsObjectLoadingContent::StopPluginInstance", OTHER);
   // Clear any pending events
   mPendingInstantiateEvent = nullptr;
   mPendingCheckPluginStopEvent = nullptr;
@@ -3345,7 +3354,7 @@ static void initializeObjectLoadingContentPrefs()
 bool
 nsObjectLoadingContent::ShouldBlockContent()
 {
- 
+
   if (!sPrefsInitialized) {
     initializeObjectLoadingContentPrefs();
   }
@@ -3902,6 +3911,7 @@ nsObjectLoadingContent::MayResolve(jsid aId)
 void
 nsObjectLoadingContent::GetOwnPropertyNames(JSContext* aCx,
                                             JS::AutoIdVector& /* unused */,
+                                            bool /* unused */,
                                             ErrorResult& aRv)
 {
   // Just like DoResolve, just make sure we're instantiated.  That will do

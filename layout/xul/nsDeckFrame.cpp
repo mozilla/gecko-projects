@@ -110,6 +110,13 @@ nsDeckFrame::IndexChanged()
                                   currentBox, GetSelectedBox());
   }
 #endif
+
+  // Force any popups that might be anchored on elements within hidden
+  // box to update.
+  nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
+  if (pm && currentBox) {
+    pm->UpdatePopupPositions(currentBox->PresContext()->RefreshDriver());
+  }
 }
 
 int32_t
@@ -131,10 +138,10 @@ nsDeckFrame::GetSelectedIndex()
   return index;
 }
 
-nsIFrame* 
+nsIFrame*
 nsDeckFrame::GetSelectedBox()
 {
-  return (mIndex >= 0) ? mFrames.FrameAt(mIndex) : nullptr; 
+  return (mIndex >= 0) ? mFrames.FrameAt(mIndex) : nullptr;
 }
 
 void
@@ -144,7 +151,7 @@ nsDeckFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // if a tab is hidden all its children are too.
   if (!StyleVisibility()->mVisible)
     return;
-    
+
   nsBoxFrame::BuildDisplayList(aBuilder, aLists);
 }
 
@@ -206,10 +213,10 @@ nsDeckFrame::DoXULLayout(nsBoxLayoutState& aState)
   nsIFrame* box = nsBox::GetChildXULBox(this);
 
   nscoord count = 0;
-  while (box) 
+  while (box)
   {
     // make collapsed children not show up
-    if (count != mIndex) 
+    if (count != mIndex)
       HideBox(box);
 
     box = GetNextXULBox(box);

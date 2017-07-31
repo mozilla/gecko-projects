@@ -23,11 +23,13 @@
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/StorageEvent.h"
 #include "mozilla/dom/StorageEventBinding.h"
+#include "mozilla/dom/StorageNotifierService.h"
+#include "mozilla/dom/StorageUtils.h"
 #include "mozilla/dom/Timeout.h"
 #include "mozilla/dom/TimeoutHandler.h"
 #include "mozilla/dom/TimeoutManager.h"
 #include "mozilla/IntegerPrintfMacros.h"
-#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
+#if defined(MOZ_WIDGET_ANDROID)
 #include "mozilla/dom/WindowOrientationObserver.h"
 #endif
 #include "nsDOMOfflineResourceList.h"
@@ -104,7 +106,6 @@
 #include "nsIDocShell.h"
 #include "nsIDocCharset.h"
 #include "nsIDocument.h"
-#include "nsIDocumentInlines.h"
 #include "Crypto.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMElement.h"
@@ -313,6 +314,8 @@ int32_t gTimeoutCnt                                    = 0;
 
 #define DOM_TOUCH_LISTENER_ADDED "dom-touch-listener-added"
 
+#define MEMORY_PRESSURE_OBSERVER_TOPIC "memory-pressure"
+
 // The interval at which we execute idle callbacks
 static uint32_t gThrottledIdlePeriodLength;
 
@@ -465,8 +468,9 @@ static NS_DEFINE_CID(kXULControllersCID, NS_XULCONTROLLERS_CID);
  * An indirect observer object that means we don't have to implement nsIObserver
  * on nsGlobalWindow, where any script could see it.
  */
-class nsGlobalWindowObserver final : public nsIObserver,
-                                     public nsIInterfaceRequestor
+class nsGlobalWindowObserver final : public nsIObserver
+                                   , public nsIInterfaceRequestor
+                                   , public StorageNotificationObserver
 {
 public:
   explicit nsGlobalWindowObserver(nsGlobalWindow* aWindow) : mWindow(aWindow) {}
@@ -484,6 +488,35 @@ public:
       return mWindow->QueryInterface(aIID, aResult);
     }
     return NS_NOINTERFACE;
+  }
+
+  void
+  ObserveStorageNotification(StorageEvent* aEvent,
+                             const char16_t* aStorageType,
+                             bool aPrivateBrowsing) override
+  {
+    if (mWindow) {
+      mWindow->ObserveStorageNotification(aEvent, aStorageType,
+                                          aPrivateBrowsing);
+    }
+  }
+
+  nsIPrincipal*
+  GetPrincipal() const override
+  {
+    return mWindow ? mWindow->GetPrincipal() : nullptr;
+  }
+
+  bool
+  IsPrivateBrowsing() const override
+  {
+    return mWindow ? mWindow->IsPrivateBrowsing() : false;
+  }
+
+  nsIEventTarget*
+  GetEventTarget() const override
+  {
+    return mWindow ? mWindow->EventTargetFor(TaskCategory::Other) : nullptr;
   }
 
 private:
@@ -548,7 +581,7 @@ public:
   nsresult Call() override;
 
 private:
-  ~IdleRequestExecutorTimeoutHandler() {}
+  ~IdleRequestExecutorTimeoutHandler() override {}
   RefPtr<IdleRequestExecutor> mExecutor;
 };
 
@@ -613,7 +646,7 @@ private:
 
   void DelayedDispatch(uint32_t aDelay);
 
-  ~IdleRequestExecutor() {}
+  ~IdleRequestExecutor() override {}
 
   bool mDispatched;
   TimeStamp mDeadline;
@@ -660,12 +693,6 @@ IdleRequestExecutor::GetName(nsACString& aName)
 {
     aName.AssignASCII("IdleRequestExecutor");
     return NS_OK;
-}
-
-NS_IMETHODIMP
-IdleRequestExecutor::SetName(const char* aName)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
@@ -898,7 +925,7 @@ public:
   }
 
 private:
-  ~IdleRequestTimeoutHandler() {}
+  ~IdleRequestTimeoutHandler() override {}
 
   RefPtr<IdleRequest> mIdleRequest;
   nsCOMPtr<nsPIDOMWindowInner> mWindow;
@@ -999,8 +1026,8 @@ nsPIDOMWindow<T>::nsPIDOMWindow(nsPIDOMWindowOuter *aOuterWindow)
   mMutationBits(0), mIsDocumentLoaded(false),
   mIsHandlingResizeEvent(false), mIsInnerWindow(aOuterWindow != nullptr),
   mMayHavePaintEventListener(false), mMayHaveTouchEventListener(false),
+  mMayHaveSelectionChangeEventListener(false),
   mMayHaveMouseEnterLeaveEventListener(false),
-  mMayHaveMouseMoveEventListener(false),
   mMayHavePointerEnterLeaveEventListener(false),
   mInnerObjectsFreed(false),
   mIsModalContentWindow(false),
@@ -1014,7 +1041,8 @@ nsPIDOMWindow<T>::nsPIDOMWindow(nsPIDOMWindowOuter *aOuterWindow)
   mWindowID(NextWindowID()), mHasNotifiedGlobalCreated(false),
   mMarkedCCGeneration(0), mServiceWorkersTestingEnabled(false),
   mLargeAllocStatus(LargeAllocStatus::NONE),
-  mShouldResumeOnFirstActiveMediaComponent(false)
+  mHasTriedToCacheTopInnerWindow(false),
+  mNumOfIndexedDBDatabases(0)
 {
   if (aOuterWindow) {
     mTimeoutManager =
@@ -1087,8 +1115,7 @@ public:
                               bool* isOrdinary,
                               JS::MutableHandle<JSObject*> protop) const override;
 
-  bool enumerate(JSContext *cx, JS::Handle<JSObject*> proxy,
-                 JS::MutableHandle<JSObject*> vp) const override;
+  JSObject* enumerate(JSContext *cx, JS::Handle<JSObject*> proxy) const override;
   bool preventExtensions(JSContext* cx,
                          JS::Handle<JSObject*> proxy,
                          JS::ObjectOpResult& result) const override;
@@ -1400,18 +1427,29 @@ bool
 nsOuterWindowProxy::getOwnEnumerablePropertyKeys(JSContext *cx, JS::Handle<JSObject*> proxy,
                                                  JS::AutoIdVector &props) const
 {
-  // BaseProxyHandler::keys seems to do what we want here: call
-  // ownPropertyKeys and then filter out the non-enumerable properties.
-  return js::BaseProxyHandler::getOwnEnumerablePropertyKeys(cx, proxy, props);
+  // Like ownPropertyKeys, our indexed stuff followed by our "normal" enumerable
+  // own property names.
+  //
+  // Note that this does not match current spec per
+  // https://github.com/whatwg/html/issues/2753 but as that issue says I believe
+  // the spec is wrong.
+  if (!AppendIndexedPropertyNames(cx, proxy, props)) {
+    return false;
+  }
+
+  JS::AutoIdVector innerProps(cx);
+  if (!js::Wrapper::getOwnEnumerablePropertyKeys(cx, proxy, innerProps)) {
+    return false;
+  }
+  return js::AppendUnique(cx, props, innerProps);
 }
 
-bool
-nsOuterWindowProxy::enumerate(JSContext *cx, JS::Handle<JSObject*> proxy,
-                              JS::MutableHandle<JSObject*> objp) const
+JSObject*
+nsOuterWindowProxy::enumerate(JSContext *cx, JS::Handle<JSObject*> proxy) const
 {
   // BaseProxyHandler::enumerate seems to do what we want here: fall
   // back on the property names returned from js::GetPropertyKeys()
-  return js::BaseProxyHandler::enumerate(cx, proxy, objp);
+  return js::BaseProxyHandler::enumerate(cx, proxy);
 }
 
 bool
@@ -1622,13 +1660,17 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
         os->AddObserver(mObserver, NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
                         false);
 
-        // Watch for dom-storage2-changed and dom-private-storage2-changed so we
-        // can fire storage events. Use a strong reference.
-        os->AddObserver(mObserver, "dom-storage2-changed", false);
-        os->AddObserver(mObserver, "dom-private-storage2-changed", false);
+        os->AddObserver(mObserver, MEMORY_PRESSURE_OBSERVER_TOPIC, false);
       }
 
       Preferences::AddStrongObserver(mObserver, "intl.accept_languages");
+
+      // Watch for storage notifications so we can fire storage events.
+      RefPtr<StorageNotifierService> sns =
+        StorageNotifierService::GetOrCreate();
+      if (sns) {
+        sns->Register(mObserver);
+      }
     }
   } else {
     // |this| is an outer window. Outer windows start out frozen and
@@ -1924,8 +1966,12 @@ nsGlobalWindow::CleanUp()
     nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
     if (os) {
       os->RemoveObserver(mObserver, NS_IOSERVICE_OFFLINE_STATUS_TOPIC);
-      os->RemoveObserver(mObserver, "dom-storage2-changed");
-      os->RemoveObserver(mObserver, "dom-private-storage2-changed");
+      os->RemoveObserver(mObserver, MEMORY_PRESSURE_OBSERVER_TOPIC);
+    }
+
+    RefPtr<StorageNotifierService> sns = StorageNotifierService::GetOrCreate();
+    if (sns) {
+     sns->Unregister(mObserver);
     }
 
 #ifdef MOZ_B2G
@@ -1978,7 +2024,7 @@ nsGlobalWindow::CleanUp()
   mSpeechSynthesis = nullptr;
 #endif
 
-#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
+#if defined(MOZ_WIDGET_ANDROID)
   mOrientationChangeObserver = nullptr;
 #endif
 
@@ -2070,23 +2116,6 @@ nsGlobalWindow::FreeInnerObjects()
 {
   NS_ASSERTION(IsInnerWindow(), "Don't free inner objects on an outer window");
 
-  if (mDoc && !nsContentUtils::IsSystemPrincipal(mDoc->NodePrincipal())) {
-    EventTarget* win = this;
-    EventTarget* html = mDoc->GetHtmlElement();
-    EventTarget* body = mDoc->GetBodyElement();
-
-    bool mouseAware = AsInner()->HasMouseMoveEventListeners();
-    bool keyboardAware = win->MayHaveAPZAwareKeyEventListener() ||
-                         mDoc->MayHaveAPZAwareKeyEventListener() ||
-                         (html && html->MayHaveAPZAwareKeyEventListener()) ||
-                         (body && body->MayHaveAPZAwareKeyEventListener());
-
-    Telemetry::Accumulate(Telemetry::APZ_AWARE_MOUSEMOVE_LISTENERS,
-                          mouseAware ? 1 : 0);
-    Telemetry::Accumulate(Telemetry::APZ_AWARE_KEY_LISTENERS,
-                          keyboardAware ? 1 : 0);
-  }
-
   // Make sure that this is called before we null out the document and
   // other members that the window destroyed observers could
   // re-create.
@@ -2133,7 +2162,7 @@ nsGlobalWindow::FreeInnerObjects()
     mScreen = nullptr;
   }
 
-#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
+#if defined(MOZ_WIDGET_ANDROID)
   mOrientationChangeObserver = nullptr;
 #endif
 
@@ -2303,6 +2332,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindow)
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOuterWindow)
 
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTopInnerWindow)
+
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mListenerManager)
 
   if (tmp->mTimeoutManager) {
@@ -2392,6 +2423,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindow)
     tmp->mListenerManager->Disconnect();
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mListenerManager)
   }
+
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mTopInnerWindow)
 
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mLocation)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mHistory)
@@ -3041,8 +3074,8 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
      happens, setting status isn't a big requirement, so don't. (Doesn't happen
      under normal circumstances, but bug 49615 describes a case.) */
 
-  nsContentUtils::AddScriptRunner(
-    NewRunnableMethod(this, &nsGlobalWindow::ClearStatus));
+  nsContentUtils::AddScriptRunner(NewRunnableMethod(
+    "nsGlobalWindow::ClearStatus", this, &nsGlobalWindow::ClearStatus));
 
   // Sometimes, WouldReuseInnerWindow() returns true even if there's no inner
   // window (see bug 776497). Be safe.
@@ -3191,6 +3224,8 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
     }
 
     mInnerWindow = newInnerWindow->AsInner();
+    MOZ_ASSERT(mInnerWindow);
+    mInnerWindow->TryToCacheTopInnerWindow();
 
     if (!GetWrapperPreserveColor()) {
       JS::Rooted<JSObject*> outer(cx,
@@ -3352,7 +3387,8 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
   // up with the outer. See bug 969156.
   if (createdInnerWindow) {
     nsContentUtils::AddScriptRunner(
-      NewRunnableMethod(newInnerWindow,
+      NewRunnableMethod("nsGlobalWindow::FireOnNewGlobalObject",
+                        newInnerWindow,
                         &nsGlobalWindow::FireOnNewGlobalObject));
   }
 
@@ -3366,7 +3402,9 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
         nsContentUtils::IsSystemPrincipal(mDoc->NodePrincipal())) {
       newInnerWindow->mHasNotifiedGlobalCreated = true;
       nsContentUtils::AddScriptRunner(
-        NewRunnableMethod(this, &nsGlobalWindow::DispatchDOMWindowCreated));
+        NewRunnableMethod("nsGlobalWindow::DispatchDOMWindowCreated",
+                          this,
+                          &nsGlobalWindow::DispatchDOMWindowCreated));
     }
   }
 
@@ -3534,7 +3572,7 @@ nsGlobalWindow::SetDocShell(nsIDocShell* aDocShell)
 
   bool docShellActive;
   mDocShell->GetIsActive(&docShellActive);
-  mIsBackground = !docShellActive;
+  SetIsBackgroundInternal(!docShellActive);
 }
 
 void
@@ -3947,7 +3985,7 @@ nsGlobalWindow::PostHandleEvent(EventChainPostVisitor& aVisitor)
     // will receive a vrdisplayactive event to indicate that it should
     // immediately begin vr presentation. This should occur when navigating
     // forwards, navigating backwards, and on page reload.
-    for (auto display : mVRDisplays) {
+    for (const auto& display : mVRDisplays) {
       if (display->IsPresenting()) {
         // Save this VR display ID to trigger vrdisplayactivate event
         // after the next load event.
@@ -4396,6 +4434,11 @@ nsPIDOMWindowInner::SyncStateFromParentWindow()
 bool
 nsPIDOMWindowInner::IsPlayingAudio()
 {
+  for (uint32_t i = 0; i < mAudioContexts.Length(); i++) {
+    if (mAudioContexts[i]->IsRunning()) {
+      return true;
+    }
+  }
   RefPtr<AudioChannelService> acs = AudioChannelService::Get();
   if (!acs) {
     return false;
@@ -4428,17 +4471,64 @@ nsPIDOMWindowInner::IsRunningTimeout()
 }
 
 void
-nsPIDOMWindowOuter::NotifyCreatedNewMediaComponent()
+nsPIDOMWindowInner::TryToCacheTopInnerWindow()
 {
-  // We would only active media component when there is any alive one.
-  mShouldResumeOnFirstActiveMediaComponent = true;
+  if (mHasTriedToCacheTopInnerWindow) {
+    return;
+  }
 
-  // If the document is already on the foreground but the suspend state is still
-  // suspend-block, that means the media component was created after calling
-  // MaybeActiveMediaComponents, so the window's suspend state doesn't be
-  // changed yet. Therefore, we need to call it again, because the state is only
-  // changed after there exists alive media within the window.
-  MaybeActiveMediaComponents();
+  MOZ_ASSERT(!mInnerObjectsFreed);
+
+  mHasTriedToCacheTopInnerWindow = true;
+
+  nsGlobalWindow* window = nsGlobalWindow::Cast(AsInner());
+
+  MOZ_ASSERT(window);
+
+  if (nsCOMPtr<nsPIDOMWindowOuter> topOutter = window->GetScriptableTop()) {
+    mTopInnerWindow = topOutter->GetCurrentInnerWindow();
+  }
+}
+
+void
+nsPIDOMWindowInner::UpdateActiveIndexedDBTransactionCount(int32_t aDelta)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (aDelta == 0) {
+    return;
+  }
+
+  TabGroup()->IndexedDBTransactionCounter() += aDelta;
+}
+
+void
+nsPIDOMWindowInner::UpdateActiveIndexedDBDatabaseCount(int32_t aDelta)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (aDelta == 0) {
+    return;
+  }
+
+  // We count databases but not transactions because only active databases
+  // could block throttling.
+  uint32_t& counter = mTopInnerWindow ?
+    mTopInnerWindow->mNumOfIndexedDBDatabases : mNumOfIndexedDBDatabases;
+
+  counter+= aDelta;
+
+  TabGroup()->IndexedDBDatabaseCounter() += aDelta;
+}
+
+bool
+nsPIDOMWindowInner::HasActiveIndexedDBDatabases()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  return mTopInnerWindow ?
+    mTopInnerWindow->mNumOfIndexedDBDatabases > 0 :
+    mNumOfIndexedDBDatabases > 0;
 }
 
 void
@@ -4448,21 +4538,7 @@ nsPIDOMWindowOuter::MaybeActiveMediaComponents()
     return mOuterWindow->MaybeActiveMediaComponents();
   }
 
-  // Resume the media when the tab was blocked and the tab already has
-  // alive media components.
-  if (!mShouldResumeOnFirstActiveMediaComponent ||
-      mMediaSuspend != nsISuspendedTypes::SUSPENDED_BLOCK) {
-    return;
-  }
-
-  nsCOMPtr<nsPIDOMWindowInner> inner = GetCurrentInnerWindow();
-  if (!inner) {
-    return;
-  }
-
-  // If the document is not visible, don't need to resume it.
-  nsCOMPtr<nsIDocument> doc = inner->GetExtantDoc();
-  if (!doc || doc->Hidden()) {
+  if (mMediaSuspend != nsISuspendedTypes::SUSPENDED_BLOCK) {
     return;
   }
 
@@ -4833,7 +4909,6 @@ nsGlobalWindow::GetContentOuter(JSContext* aCx,
   }
 
   aRetval.set(nullptr);
-  return;
 }
 
 void
@@ -5115,9 +5190,10 @@ nsGlobalWindow::MayResolve(jsid aId)
     return true;
   }
 
-  if (aId == XPCJSRuntime::Get()->GetStringID(XPCJSContext::IDX_CONTROLLERS)) {
-    // We only resolve .controllers in release builds and on non-chrome windows,
-    // but let's not worry about any of that stuff.
+  if (aId == XPCJSRuntime::Get()->GetStringID(XPCJSContext::IDX_CONTROLLERS) ||
+      aId == XPCJSRuntime::Get()->GetStringID(XPCJSContext::IDX_CONTROLLERS_CLASS)) {
+    // We only resolve .controllers/.Controllers in release builds and on non-chrome
+    // windows, but let's not worry about any of that stuff.
     return true;
   }
 
@@ -5139,8 +5215,22 @@ nsGlobalWindow::MayResolve(jsid aId)
 
 void
 nsGlobalWindow::GetOwnPropertyNames(JSContext* aCx, JS::AutoIdVector& aNames,
-                                    ErrorResult& aRv)
+                                    bool aEnumerableOnly, ErrorResult& aRv)
 {
+  if (aEnumerableOnly) {
+    // The names we would return from here get defined on the window via one of
+    // two codepaths.  The ones coming from the WebIDLGlobalNameHash will end up
+    // in the DefineConstructor function in BindingUtils, which always defines
+    // things as non-enumerable.  The ones coming from the script namespace
+    // manager get defined by nsDOMClassInfo::PostCreatePrototype calling
+    // ResolvePrototype and using the resulting descriptot to define the
+    // property.  ResolvePrototype always passes 0 to the FillPropertyDescriptor
+    // for the property attributes, so all those are non-enumerable as well.
+    //
+    // So in the aEnumerableOnly case we have nothing to do.
+    return;
+  }
+
   MOZ_ASSERT(IsInnerWindow());
   // "Components" is marked as enumerable but only resolved on demand :-/.
   //aNames.AppendElement(NS_LITERAL_STRING("Components"));
@@ -6862,10 +6952,13 @@ class FullscreenTransitionTask : public Runnable
 {
 public:
   FullscreenTransitionTask(const FullscreenTransitionDuration& aDuration,
-                           nsGlobalWindow* aWindow, bool aFullscreen,
-                           nsIWidget* aWidget, nsIScreen* aScreen,
+                           nsGlobalWindow* aWindow,
+                           bool aFullscreen,
+                           nsIWidget* aWidget,
+                           nsIScreen* aScreen,
                            nsISupports* aTransitionData)
-    : mWindow(aWindow)
+    : mozilla::Runnable("FullscreenTransitionTask")
+    , mWindow(aWindow)
     , mWidget(aWidget)
     , mScreen(aScreen)
     , mTransitionData(aTransitionData)
@@ -6963,12 +7056,12 @@ FullscreenTransitionTask::Run()
     return NS_OK;
   }
   if (stage == eBeforeToggle) {
-    PROFILER_MARKER("Fullscreen transition start");
+    profiler_add_marker("Fullscreen transition start");
     mWidget->PerformFullscreenTransition(nsIWidget::eBeforeFullscreenToggle,
                                          mDuration.mFadeIn, mTransitionData,
                                          this);
   } else if (stage == eToggleFullscreen) {
-    PROFILER_MARKER("Fullscreen toggle start");
+    profiler_add_marker("Fullscreen toggle start");
     mFullscreenChangeStartTime = TimeStamp::Now();
     if (MOZ_UNLIKELY(mWindow->mFullScreen != mFullscreen)) {
       // This could happen in theory if several fullscreen requests in
@@ -7012,7 +7105,7 @@ FullscreenTransitionTask::Run()
                                          mDuration.mFadeOut, mTransitionData,
                                          this);
   } else if (stage == eEnd) {
-    PROFILER_MARKER("Fullscreen transition end");
+    profiler_add_marker("Fullscreen transition end");
   }
   return NS_OK;
 }
@@ -7033,7 +7126,7 @@ FullscreenTransitionTask::Observer::Observe(nsISupports* aSubject,
       // The paint notification arrives first. Cancel the timer.
       mTask->mTimer->Cancel();
       shouldContinue = true;
-      PROFILER_MARKER("Fullscreen toggle end");
+      profiler_add_marker("Fullscreen toggle end");
     }
   } else {
 #ifdef DEBUG
@@ -7044,7 +7137,7 @@ FullscreenTransitionTask::Observer::Observe(nsISupports* aSubject,
                "Should only trigger this with the timer the task created");
 #endif
     shouldContinue = true;
-    PROFILER_MARKER("Fullscreen toggle timeout");
+    profiler_add_marker("Fullscreen toggle timeout");
   }
   if (shouldContinue) {
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -8816,7 +8909,7 @@ nsGlobalWindow::FireAbuseEvents(const nsAString &aPopupURL,
   // use the base URI to build what would have been the popup's URI
   nsCOMPtr<nsIIOService> ios(do_GetService(NS_IOSERVICE_CONTRACTID));
   if (ios)
-    ios->NewURI(NS_ConvertUTF16toUTF8(aPopupURL), 0, baseURL,
+    ios->NewURI(NS_ConvertUTF16toUTF8(aPopupURL), nullptr, baseURL,
                 getter_AddRefs(popupURI));
 
   // fire an event chock full of informative URIs
@@ -9161,7 +9254,7 @@ nsGlobalWindow::PostMessageMozOuter(JSContext* aCx, JS::Handle<JS::Value> aMessa
     return;
   }
 
-  aError = Dispatch("PostMessageEvent", TaskCategory::Other, event.forget());
+  aError = Dispatch(TaskCategory::Other, event.forget());
 }
 
 void
@@ -9201,8 +9294,9 @@ class nsCloseEvent : public Runnable {
   RefPtr<nsGlobalWindow> mWindow;
   bool mIndirect;
 
-  nsCloseEvent(nsGlobalWindow *aWindow, bool aIndirect)
-    : mWindow(aWindow)
+  nsCloseEvent(nsGlobalWindow* aWindow, bool aIndirect)
+    : mozilla::Runnable("nsCloseEvent")
+    , mWindow(aWindow)
     , mIndirect(aIndirect)
   {}
 
@@ -9212,7 +9306,7 @@ public:
   PostCloseEvent(nsGlobalWindow* aWindow, bool aIndirect) {
     nsCOMPtr<nsIRunnable> ev = new nsCloseEvent(aWindow, aIndirect);
     nsresult rv =
-      aWindow->Dispatch("nsCloseEvent", TaskCategory::Other, ev.forget());
+      aWindow->Dispatch(TaskCategory::Other, ev.forget());
     if (NS_SUCCEEDED(rv))
       aWindow->MaybeForgiveSpamCount();
     return rv;
@@ -9628,68 +9722,105 @@ struct BrowserCompartmentMatcher : public js::CompartmentFilter {
 };
 
 
-class WindowDestroyedEvent : public Runnable
+class WindowDestroyedEvent final : public Runnable
 {
 public:
-  WindowDestroyedEvent(nsIDOMWindow* aWindow, uint64_t aID,
-                       const char* aTopic) :
-    mID(aID), mTopic(aTopic)
+  WindowDestroyedEvent(nsIDOMWindow* aWindow, uint64_t aID, const char* aTopic)
+    : mozilla::Runnable("WindowDestroyedEvent")
+    , mID(aID)
+    , mPhase(Phase::Destroying)
+    , mTopic(aTopic)
   {
     mWindow = do_GetWeakReference(aWindow);
   }
 
+  enum class Phase
+  {
+    Destroying,
+    Nuking
+  };
+
   NS_IMETHOD Run() override
   {
-    PROFILER_LABEL("WindowDestroyedEvent", "Run",
-                   js::ProfileEntry::Category::OTHER);
+    AUTO_PROFILER_LABEL("WindowDestroyedEvent::Run", OTHER);
 
     nsCOMPtr<nsIObserverService> observerService =
       services::GetObserverService();
-    if (observerService) {
-      nsCOMPtr<nsISupportsPRUint64> wrapper =
-        do_CreateInstance(NS_SUPPORTS_PRUINT64_CONTRACTID);
-      if (wrapper) {
-        wrapper->SetData(mID);
-        observerService->NotifyObservers(wrapper, mTopic.get(), nullptr);
-      }
+    if (!observerService) {
+      return NS_OK;
     }
 
-    bool skipNukeCrossCompartment = false;
+    nsCOMPtr<nsISupportsPRUint64> wrapper =
+      do_CreateInstance(NS_SUPPORTS_PRUINT64_CONTRACTID);
+    if (wrapper) {
+      wrapper->SetData(mID);
+      observerService->NotifyObservers(wrapper, mTopic.get(), nullptr);
+    }
+
+    switch (mPhase) {
+      case Phase::Destroying:
+      {
+        bool skipNukeCrossCompartment = false;
 #ifndef DEBUG
-    nsCOMPtr<nsIAppStartup> appStartup =
-      do_GetService(NS_APPSTARTUP_CONTRACTID);
+        nsCOMPtr<nsIAppStartup> appStartup =
+          do_GetService(NS_APPSTARTUP_CONTRACTID);
 
-    if (appStartup) {
-      appStartup->GetShuttingDown(&skipNukeCrossCompartment);
-    }
+        if (appStartup) {
+          appStartup->GetShuttingDown(&skipNukeCrossCompartment);
+        }
 #endif
 
-    nsCOMPtr<nsISupports> window = do_QueryReferent(mWindow);
-    if (!skipNukeCrossCompartment && window) {
-      nsGlobalWindow* win = nsGlobalWindow::FromSupports(window);
-      nsGlobalWindow* currentInner = win->IsInnerWindow() ? win : win->GetCurrentInnerWindowInternal();
-      NS_ENSURE_TRUE(currentInner, NS_OK);
+        if (!skipNukeCrossCompartment) {
+          // The compartment nuking phase might be too expensive, so do that
+          // part off of idle dispatch.
 
-      AutoSafeJSContext cx;
-      JS::Rooted<JSObject*> obj(cx, currentInner->FastGetGlobalJSObject());
-      if (obj && !js::IsSystemCompartment(js::GetObjectCompartment(obj))) {
-        JSCompartment* cpt = js::GetObjectCompartment(obj);
-        nsCOMPtr<nsIPrincipal> pc = nsJSPrincipals::get(JS_GetCompartmentPrincipals(cpt));
+          // For the compartment nuking phase, we dispatch either an
+          // inner-window-nuked or an outer-window-nuked notification.
+          // This will allow tests to wait for compartment nuking to happen.
+          if (mTopic.EqualsLiteral("inner-window-destroyed")) {
+            mTopic.AssignLiteral("inner-window-nuked");
+          } else if (mTopic.EqualsLiteral("outer-window-destroyed")) {
+            mTopic.AssignLiteral("outer-window-nuked");
+          }
+          mPhase = Phase::Nuking;
 
-        nsAutoString addonId;
-        if (NS_SUCCEEDED(pc->GetAddonId(addonId)) && !addonId.IsEmpty()) {
-          // We want to nuke all references to the add-on compartment.
-          xpc::NukeAllWrappersForCompartment(cx, cpt,
-                                             win->IsInnerWindow() ? js::DontNukeWindowReferences
-                                                                  : js::NukeWindowReferences);
-        } else {
-          // We only want to nuke wrappers for the chrome->content case
-          js::NukeCrossCompartmentWrappers(cx, BrowserCompartmentMatcher(), cpt,
-                                           win->IsInnerWindow() ? js::DontNukeWindowReferences
-                                                                : js::NukeWindowReferences,
-                                           js::NukeIncomingReferences);
+          nsCOMPtr<nsIRunnable> copy(this);
+          NS_IdleDispatchToCurrentThread(copy.forget(), 1000);
         }
       }
+      break;
+
+      case Phase::Nuking:
+      {
+        nsCOMPtr<nsISupports> window = do_QueryReferent(mWindow);
+        if (window) {
+          nsGlobalWindow* win = nsGlobalWindow::FromSupports(window);
+          nsGlobalWindow* currentInner = win->IsInnerWindow() ? win : win->GetCurrentInnerWindowInternal();
+          NS_ENSURE_TRUE(currentInner, NS_OK);
+
+          AutoSafeJSContext cx;
+          JS::Rooted<JSObject*> obj(cx, currentInner->FastGetGlobalJSObject());
+          if (obj && !js::IsSystemCompartment(js::GetObjectCompartment(obj))) {
+            JSCompartment* cpt = js::GetObjectCompartment(obj);
+            nsCOMPtr<nsIPrincipal> pc = nsJSPrincipals::get(JS_GetCompartmentPrincipals(cpt));
+
+            nsAutoString addonId;
+            if (NS_SUCCEEDED(pc->GetAddonId(addonId)) && !addonId.IsEmpty()) {
+              // We want to nuke all references to the add-on compartment.
+              xpc::NukeAllWrappersForCompartment(cx, cpt,
+                                                 win->IsInnerWindow() ? js::DontNukeWindowReferences
+                                                                      : js::NukeWindowReferences);
+            } else {
+              // We only want to nuke wrappers for the chrome->content case
+              js::NukeCrossCompartmentWrappers(cx, BrowserCompartmentMatcher(), cpt,
+                                               win->IsInnerWindow() ? js::DontNukeWindowReferences
+                                                                    : js::NukeWindowReferences,
+                                               js::NukeIncomingReferences);
+            }
+          }
+        }
+      }
+      break;
     }
 
     return NS_OK;
@@ -9697,6 +9828,7 @@ public:
 
 private:
   uint64_t mID;
+  Phase mPhase;
   nsCString mTopic;
   nsWeakPtr mWindow;
 };
@@ -9705,8 +9837,7 @@ void
 nsGlobalWindow::NotifyWindowIDDestroyed(const char* aTopic)
 {
   nsCOMPtr<nsIRunnable> runnable = new WindowDestroyedEvent(this, mWindowID, aTopic);
-  nsresult rv =
-    Dispatch("WindowDestroyedEvent", TaskCategory::Other, runnable.forget());
+  nsresult rv = Dispatch(TaskCategory::Other, runnable.forget());
   if (NS_SUCCEEDED(rv)) {
     mNotifiedIDDestroyed = true;
   }
@@ -10072,8 +10203,12 @@ nsGlobalWindow::ShowModalDialog(JSContext* aCx, const nsAString& aUrl,
 
   JS::Rooted<JS::Value> result(aCx);
   if (retVal) {
+    JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
+    if (!global) {
+      global = FastGetGlobalJSObject();
+    }
     aError = nsContentUtils::XPConnect()->VariantToJS(aCx,
-                                                      FastGetGlobalJSObject(),
+                                                      global,
                                                       retVal, aRetval);
   } else {
     aRetval.setNull();
@@ -10086,7 +10221,12 @@ public:
   ChildCommandDispatcher(nsGlobalWindow* aWindow,
                          nsITabChild* aTabChild,
                          const nsAString& aAction)
-  : mWindow(aWindow), mTabChild(aTabChild), mAction(aAction) {}
+    : mozilla::Runnable("ChildCommandDispatcher")
+    , mWindow(aWindow)
+    , mTabChild(aTabChild)
+    , mAction(aAction)
+  {
+  }
 
   NS_IMETHOD Run() override
   {
@@ -10115,7 +10255,11 @@ class CommandDispatcher : public Runnable
 public:
   CommandDispatcher(nsIDOMXULCommandDispatcher* aDispatcher,
                     const nsAString& aAction)
-  : mDispatcher(aDispatcher), mAction(aAction) {}
+    : mozilla::Runnable("CommandDispatcher")
+    , mDispatcher(aDispatcher)
+    , mAction(aAction)
+  {
+  }
 
   NS_IMETHOD Run() override
   {
@@ -10605,25 +10749,36 @@ void nsGlobalWindow::SetIsBackground(bool aIsBackground)
 {
   MOZ_ASSERT(IsOuterWindow());
 
-  bool resetTimers = (!aIsBackground && AsOuter()->IsBackground());
-  nsPIDOMWindow::SetIsBackground(aIsBackground);
+  bool changed = aIsBackground != AsOuter()->IsBackground();
+  SetIsBackgroundInternal(aIsBackground);
 
   nsGlobalWindow* inner = GetCurrentInnerWindowInternal();
 
+  if (inner && changed) {
+    inner->mTimeoutManager->UpdateBackgroundState();
+  }
+
   if (aIsBackground) {
-    MOZ_ASSERT(!resetTimers);
     // Notify gamepadManager we are at the background window,
     // we need to stop vibrate.
     if (inner) {
       inner->StopGamepadHaptics();
     }
     return;
-  } else if (inner) {
-    if (resetTimers) {
-      inner->mTimeoutManager->ResetTimersForThrottleReduction();
-    }
+  }
+
+  if (inner) {
     inner->SyncGamepadState();
   }
+}
+
+void
+nsGlobalWindow::SetIsBackgroundInternal(bool aIsBackground)
+{
+  if (mIsBackground != aIsBackground) {
+    TabGroup()->WindowChangedBackgroundStatus(aIsBackground);
+  }
+  mIsBackground = aIsBackground;
 }
 
 void nsGlobalWindow::MaybeUpdateTouchState()
@@ -10898,10 +11053,11 @@ nsGlobalWindow::PageHidden()
 class HashchangeCallback : public Runnable
 {
 public:
-  HashchangeCallback(const nsAString &aOldURL,
-                     const nsAString &aNewURL,
+  HashchangeCallback(const nsAString& aOldURL,
+                     const nsAString& aNewURL,
                      nsGlobalWindow* aWindow)
-    : mWindow(aWindow)
+    : mozilla::Runnable("HashchangeCallback")
+    , mWindow(aWindow)
   {
     MOZ_ASSERT(mWindow);
     MOZ_ASSERT(mWindow->IsInnerWindow());
@@ -10949,7 +11105,7 @@ nsGlobalWindow::DispatchAsyncHashchange(nsIURI *aOldURI, nsIURI *aNewURI)
 
   nsCOMPtr<nsIRunnable> callback =
     new HashchangeCallback(oldWideSpec, newWideSpec, this);
-  return Dispatch("HashchangeCallback", TaskCategory::Other, callback.forget());
+  return Dispatch(TaskCategory::Other, callback.forget());
 }
 
 nsresult
@@ -11514,8 +11670,11 @@ public:
                              uint32_t aTimeInS,
                              bool aCallOnidle,
                              nsGlobalWindow* aIdleWindow)
-    : mIdleObserver(aIdleObserver), mTimeInS(aTimeInS), mIdleWindow(aIdleWindow),
-      mCallOnidle(aCallOnidle)
+    : mozilla::Runnable("NotifyIdleObserverRunnable")
+    , mIdleObserver(aIdleObserver)
+    , mTimeInS(aTimeInS)
+    , mIdleWindow(aIdleWindow)
+    , mCallOnidle(aCallOnidle)
   { }
 
   NS_IMETHOD Run() override
@@ -11546,8 +11705,7 @@ nsGlobalWindow::NotifyIdleObserver(IdleObserverHolder* aIdleObserverHolder,
     new NotifyIdleObserverRunnable(aIdleObserverHolder->mIdleObserver,
                                    aIdleObserverHolder->mTimeInS,
                                    aCallOnidle, this);
-  if (NS_FAILED(Dispatch("NotifyIdleObserverRunnable", TaskCategory::Other,
-                         caller.forget()))) {
+  if (NS_FAILED(Dispatch(TaskCategory::Other, caller.forget()))) {
     NS_WARNING("Failed to dispatch thread for idle observer notification.");
   }
 }
@@ -11623,10 +11781,12 @@ nsGlobalWindow::ScheduleNextIdleObserverCallback()
   }
 
   mIdleTimer->Cancel();
-  rv = mIdleTimer->InitWithFuncCallback(IdleObserverTimerCallback,
-                                        this,
-                                        callbackTimeMS,
-                                        nsITimer::TYPE_ONE_SHOT);
+  rv = mIdleTimer->InitWithNamedFuncCallback(
+    IdleObserverTimerCallback,
+    this,
+    callbackTimeMS,
+    nsITimer::TYPE_ONE_SHOT,
+    "nsGlobalWindow::ScheduleNextIdleObserverCallback");
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
@@ -11668,10 +11828,12 @@ nsGlobalWindow::ScheduleActiveTimerCallback()
   mIdleTimer->Cancel();
 
   uint32_t fuzzFactorInMS = GetFuzzTimeMS();
-  nsresult rv = mIdleTimer->InitWithFuncCallback(IdleActiveTimerCallback,
-                                                 this,
-                                                 fuzzFactorInMS,
-                                                 nsITimer::TYPE_ONE_SHOT);
+  nsresult rv = mIdleTimer->InitWithNamedFuncCallback(
+    IdleActiveTimerCallback,
+    this,
+    fuzzFactorInMS,
+    nsITimer::TYPE_ONE_SHOT,
+    "nsGlobalWindow::ScheduleActiveTimerCallback");
   NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
 }
@@ -11909,15 +12071,14 @@ nsGlobalWindow::ShowSlowScriptDialog()
   if (showDebugButton)
     buttonFlags += nsIPrompt::BUTTON_TITLE_IS_STRING * nsIPrompt::BUTTON_POS_2;
 
-  // Null out the operation callback while we're re-entering JS here.
-  bool old = JS_DisableInterruptCallback(cx);
-
-  // Open the dialog.
-  rv = prompt->ConfirmEx(title, msg, buttonFlags, waitButton, stopButton,
-                         debugButton, neverShowDlg, &neverShowDlgChk,
-                         &buttonPressed);
-
-  JS_ResetInterruptCallback(cx, old);
+  {
+    // Null out the operation callback while we're re-entering JS here.
+    AutoDisableJSInterruptCallback disabler(cx);
+    // Open the dialog.
+    rv = prompt->ConfirmEx(title, msg, buttonFlags, waitButton, stopButton,
+                          debugButton, neverShowDlg, &neverShowDlgChk,
+                          &buttonPressed);
+  }
 
   if (NS_SUCCEEDED(rv) && (buttonPressed == 0)) {
     return neverShowDlgChk ? AlwaysContinueSlowScript : ContinueSlowScript;
@@ -12121,6 +12282,13 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
     return NS_OK;
   }
 
+  if (!nsCRT::strcmp(aTopic, MEMORY_PRESSURE_OBSERVER_TOPIC)) {
+    if (mPerformance) {
+      mPerformance->MemoryPressure();
+    }
+    return NS_OK;
+  }
+
   if (!nsCRT::strcmp(aTopic, OBSERVER_TOPIC_IDLE)) {
     mCurrentlyIdle = true;
     if (IsFrozen()) {
@@ -12142,131 +12310,6 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
       MOZ_ASSERT(IsInnerWindow());
       ScheduleActiveTimerCallback();
     }
-    return NS_OK;
-  }
-
-  // We need these for our private-browsing check below; so save them off.
-  // (And we can't do the private-browsing enforcement check as part of our
-  // outer conditional because otherwise we'll trigger an NS_WARNING if control
-  // flow reaches the bottom of this method.)
-  bool isNonPrivateLocalStorageChange =
-    !nsCRT::strcmp(aTopic, "dom-storage2-changed");
-  bool isPrivateLocalStorageChange =
-    !nsCRT::strcmp(aTopic, "dom-private-storage2-changed");
-  if (isNonPrivateLocalStorageChange || isPrivateLocalStorageChange) {
-    // Enforce that the source storage area's private browsing state matches
-    // this window's state.  These flag checks and their maintenance independent
-    // from the principal's OriginAttributes matter because chrome docshells
-    // that are part of private browsing windows can be private browsing without
-    // having their OriginAttributes set (because they have the system
-    // principal).
-    bool isPrivateBrowsing = IsPrivateBrowsing();
-    if ((isNonPrivateLocalStorageChange && isPrivateBrowsing) ||
-        (isPrivateLocalStorageChange && !isPrivateBrowsing)) {
-      return NS_OK;
-    }
-
-    // We require that aData be either u"SessionStorage" or u"localStorage".
-    // Assert under debug, but ignore the bogus event under non-debug.
-    MOZ_ASSERT(aData);
-    if (!aData) {
-      return NS_ERROR_INVALID_ARG;
-    }
-
-    // LocalStorage can only exist on an inner window, and we don't want to
-    // generate events on frozen or otherwise-navigated-away from windows.
-    // (Actually, this code used to try and buffer events for frozen windows,
-    // but it never worked, so we've removed it.  See bug 1285898.)
-    if (!IsInnerWindow() || !AsInner()->IsCurrentInnerWindow() || IsFrozen()) {
-      return NS_OK;
-    }
-
-    nsIPrincipal *principal = GetPrincipal();
-    if (!principal) {
-      return NS_OK;
-    }
-
-    RefPtr<StorageEvent> event = static_cast<StorageEvent*>(aSubject);
-    if (!event) {
-      return NS_ERROR_FAILURE;
-    }
-
-    bool fireMozStorageChanged = false;
-    nsAutoString eventType;
-    eventType.AssignLiteral("storage");
-
-    if (!NS_strcmp(aData, u"sessionStorage")) {
-      nsCOMPtr<nsIDOMStorage> changingStorage = event->GetStorageArea();
-      MOZ_ASSERT(changingStorage);
-
-      bool check = false;
-
-      nsCOMPtr<nsIDOMStorageManager> storageManager = do_QueryInterface(GetDocShell());
-      if (storageManager) {
-        nsresult rv = storageManager->CheckStorage(principal, changingStorage,
-                                                   &check);
-        if (NS_FAILED(rv)) {
-          return rv;
-        }
-      }
-
-      if (!check) {
-        // This storage event is not coming from our storage or is coming
-        // from a different docshell, i.e. it is a clone, ignore this event.
-        return NS_OK;
-      }
-
-      MOZ_LOG(gDOMLeakPRLog, LogLevel::Debug,
-              ("nsGlobalWindow %p with sessionStorage %p passing event from %p",
-               this, mSessionStorage.get(), changingStorage.get()));
-
-      fireMozStorageChanged = mSessionStorage == changingStorage;
-      if (fireMozStorageChanged) {
-        eventType.AssignLiteral("MozSessionStorageChanged");
-      }
-    }
-
-    else {
-      MOZ_ASSERT(!NS_strcmp(aData, u"localStorage"));
-      nsIPrincipal* storagePrincipal = event->GetPrincipal();
-      if (!storagePrincipal) {
-        return NS_OK;
-      }
-
-      bool equals = false;
-      nsresult rv = storagePrincipal->Equals(principal, &equals);
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      if (!equals) {
-        return NS_OK;
-      }
-
-      fireMozStorageChanged = mLocalStorage == event->GetStorageArea();
-
-      if (fireMozStorageChanged) {
-        eventType.AssignLiteral("MozLocalStorageChanged");
-      }
-    }
-
-    // Clone the storage event included in the observer notification. We want
-    // to dispatch clones rather than the original event.
-    ErrorResult error;
-    RefPtr<StorageEvent> clonedEvent =
-      CloneStorageEvent(eventType, event, error);
-    if (error.Failed()) {
-      return error.StealNSResult();
-    }
-
-    clonedEvent->SetTrusted(true);
-
-    if (fireMozStorageChanged) {
-      WidgetEvent* internalEvent = clonedEvent->WidgetEventPtr();
-      internalEvent->mFlags.mOnlyChromeDispatch = true;
-    }
-
-    bool defaultActionEnabled;
-    DispatchEvent(clonedEvent, &defaultActionEnabled);
-
     return NS_OK;
   }
 
@@ -12337,6 +12380,101 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
 
   NS_WARNING("unrecognized topic in nsGlobalWindow::Observe");
   return NS_ERROR_FAILURE;
+}
+
+void
+nsGlobalWindow::ObserveStorageNotification(StorageEvent* aEvent,
+                                           const char16_t* aStorageType,
+                                           bool aPrivateBrowsing)
+{
+  MOZ_ASSERT(aEvent);
+
+  // The private browsing check must be done here again because this window
+  // could have changed its state before the notification check and now. This
+  // happens in case this window did have a docShell at that time.
+  if (aPrivateBrowsing != IsPrivateBrowsing()) {
+    return;
+  }
+
+  // LocalStorage can only exist on an inner window, and we don't want to
+  // generate events on frozen or otherwise-navigated-away from windows.
+  // (Actually, this code used to try and buffer events for frozen windows,
+  // but it never worked, so we've removed it.  See bug 1285898.)
+  if (!IsInnerWindow() || !AsInner()->IsCurrentInnerWindow() || IsFrozen()) {
+    return;
+  }
+
+  nsIPrincipal *principal = GetPrincipal();
+  if (!principal) {
+    return;
+  }
+
+  bool fireMozStorageChanged = false;
+  nsAutoString eventType;
+  eventType.AssignLiteral("storage");
+
+  if (!NS_strcmp(aStorageType, u"sessionStorage")) {
+    nsCOMPtr<nsIDOMStorage> changingStorage = aEvent->GetStorageArea();
+    MOZ_ASSERT(changingStorage);
+
+    bool check = false;
+
+    nsCOMPtr<nsIDOMStorageManager> storageManager = do_QueryInterface(GetDocShell());
+    if (storageManager) {
+      nsresult rv = storageManager->CheckStorage(principal, changingStorage,
+                                                 &check);
+      if (NS_FAILED(rv)) {
+        return;
+      }
+    }
+
+    if (!check) {
+      // This storage event is not coming from our storage or is coming
+      // from a different docshell, i.e. it is a clone, ignore this event.
+      return;
+    }
+
+    MOZ_LOG(gDOMLeakPRLog, LogLevel::Debug,
+            ("nsGlobalWindow %p with sessionStorage %p passing event from %p",
+             this, mSessionStorage.get(), changingStorage.get()));
+
+    fireMozStorageChanged = mSessionStorage == changingStorage;
+    if (fireMozStorageChanged) {
+      eventType.AssignLiteral("MozSessionStorageChanged");
+    }
+  }
+
+  else {
+    MOZ_ASSERT(!NS_strcmp(aStorageType, u"localStorage"));
+
+    MOZ_DIAGNOSTIC_ASSERT(StorageUtils::PrincipalsEqual(aEvent->GetPrincipal(),
+                                                        principal));
+
+    fireMozStorageChanged = mLocalStorage == aEvent->GetStorageArea();
+
+    if (fireMozStorageChanged) {
+      eventType.AssignLiteral("MozLocalStorageChanged");
+    }
+  }
+
+  // Clone the storage event included in the observer notification. We want
+  // to dispatch clones rather than the original event.
+  IgnoredErrorResult error;
+  RefPtr<StorageEvent> clonedEvent =
+    CloneStorageEvent(eventType, aEvent, error);
+  if (error.Failed()) {
+    return;
+  }
+
+  clonedEvent->SetTrusted(true);
+
+  if (fireMozStorageChanged) {
+    WidgetEvent* internalEvent = clonedEvent->WidgetEventPtr();
+    internalEvent->mFlags.mOnlyChromeDispatch = true;
+  }
+
+  bool defaultActionEnabled;
+  DispatchEvent(clonedEvent, &defaultActionEnabled);
 }
 
 already_AddRefed<StorageEvent>
@@ -12760,9 +12898,9 @@ public:
   ~AutoUnblockScriptClosing()
   {
     void (nsGlobalWindow::*run)() = &nsGlobalWindow::UnblockScriptedClosing;
-    nsCOMPtr<nsIRunnable> caller = NewRunnableMethod(mWin, run);
-    mWin->Dispatch("nsGlobalWindow::UnblockScriptedClosing",
-                   TaskCategory::Other, caller.forget());
+    nsCOMPtr<nsIRunnable> caller = NewRunnableMethod(
+      "AutoUnblockScriptClosing::~AutoUnblockScriptClosing", mWin, run);
+    mWin->Dispatch(TaskCategory::Other, caller.forget());
   }
 };
 
@@ -13337,14 +13475,14 @@ nsGlobalWindow::SecurityCheckURL(const char *aURL)
   // used to actually kick off the load in nsWindowWatcher.cpp.
   nsCOMPtr<nsIDocument> doc = sourceWindow->GetDoc();
   nsIURI* baseURI = nullptr;
-  nsAutoCString charset(NS_LITERAL_CSTRING("UTF-8")); // default to utf-8
+  auto encoding = UTF_8_ENCODING; // default to utf-8
   if (doc) {
     baseURI = doc->GetDocBaseURI();
-    charset = doc->GetDocumentCharacterSet();
+    encoding = doc->GetDocumentCharacterSet();
   }
   nsCOMPtr<nsIURI> uri;
   nsresult rv = NS_NewURI(getter_AddRefs(uri), nsDependentCString(aURL),
-                          charset.get(), baseURI);
+                          encoding, baseURI);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -13509,7 +13647,7 @@ nsGlobalWindow::DisableDeviceSensor(uint32_t aType)
   }
 }
 
-#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
+#if defined(MOZ_WIDGET_ANDROID)
 void
 nsGlobalWindow::EnableOrientationChangeListener()
 {
@@ -13617,7 +13755,7 @@ nsGlobalWindow::IsVRContentDetected() const
 bool
 nsGlobalWindow::IsVRContentPresenting() const
 {
-  for (auto display : mVRDisplays) {
+  for (const auto& display : mVRDisplays) {
     if (display->IsAnyPresenting(gfx::kVRGroupAll)) {
       return true;
     }
@@ -13640,13 +13778,13 @@ nsGlobalWindow::DisableTimeChangeNotifications()
 void
 nsGlobalWindow::AddSizeOfIncludingThis(nsWindowSizes* aWindowSizes) const
 {
-  aWindowSizes->mDOMOtherSize += aWindowSizes->mMallocSizeOf(this);
+  aWindowSizes->mDOMOtherSize += aWindowSizes->mState.mMallocSizeOf(this);
 
   if (IsInnerWindow()) {
     EventListenerManager* elm = GetExistingListenerManager();
     if (elm) {
       aWindowSizes->mDOMOtherSize +=
-        elm->SizeOfIncludingThis(aWindowSizes->mMallocSizeOf);
+        elm->SizeOfIncludingThis(aWindowSizes->mState.mMallocSizeOf);
       aWindowSizes->mDOMEventListenersCount +=
         elm->ListenerCount();
     }
@@ -13663,22 +13801,31 @@ nsGlobalWindow::AddSizeOfIncludingThis(nsWindowSizes* aWindowSizes) const
 
   if (mNavigator) {
     aWindowSizes->mDOMOtherSize +=
-      mNavigator->SizeOfIncludingThis(aWindowSizes->mMallocSizeOf);
+      mNavigator->SizeOfIncludingThis(aWindowSizes->mState.mMallocSizeOf);
   }
 
   aWindowSizes->mDOMEventTargetsSize +=
-    mEventTargetObjects.ShallowSizeOfExcludingThis(aWindowSizes->mMallocSizeOf);
+    mEventTargetObjects.ShallowSizeOfExcludingThis(
+      aWindowSizes->mState.mMallocSizeOf);
 
   for (auto iter = mEventTargetObjects.ConstIter(); !iter.Done(); iter.Next()) {
     DOMEventTargetHelper* et = iter.Get()->GetKey();
     if (nsCOMPtr<nsISizeOfEventTarget> iSizeOf = do_QueryObject(et)) {
       aWindowSizes->mDOMEventTargetsSize +=
-        iSizeOf->SizeOfEventTargetIncludingThis(aWindowSizes->mMallocSizeOf);
+        iSizeOf->SizeOfEventTargetIncludingThis(
+          aWindowSizes->mState.mMallocSizeOf);
     }
     if (EventListenerManager* elm = et->GetExistingListenerManager()) {
       aWindowSizes->mDOMEventListenersCount += elm->ListenerCount();
     }
     ++aWindowSizes->mDOMEventTargetsCount;
+  }
+
+  if (IsInnerWindow() && mPerformance) {
+    aWindowSizes->mDOMPerformanceUserEntries =
+      mPerformance->SizeOfUserEntries(aWindowSizes->mState.mMallocSizeOf);
+    aWindowSizes->mDOMPerformanceResourceEntries =
+      mPerformance->SizeOfResourceEntries(aWindowSizes->mState.mMallocSizeOf);
   }
 }
 
@@ -13716,6 +13863,13 @@ nsGlobalWindow::GetGamepads(nsTArray<RefPtr<Gamepad> >& aGamepads)
 {
   MOZ_ASSERT(IsInnerWindow());
   aGamepads.Clear();
+
+  // navigator.getGamepads() always returns an empty array when
+  // privacy.resistFingerprinting is true.
+  if (nsContentUtils::ShouldResistFingerprinting()) {
+    return;
+  }
+
   // mGamepads.Count() may not be sufficient, but it's not harmful.
   aGamepads.SetCapacity(mGamepads.Count());
   for (auto iter = mGamepads.Iter(); !iter.Done(); iter.Next()) {
@@ -13816,7 +13970,7 @@ nsGlobalWindow::DispatchVRDisplayActivate(uint32_t aDisplayID,
 {
   // Search for the display identified with aDisplayID and fire the
   // event if found.
-  for (auto display : mVRDisplays) {
+  for (const auto& display : mVRDisplays) {
     if (display->DisplayId() == aDisplayID) {
       if (aReason != VRDisplayEventReason::Navigation &&
           display->IsAnyPresenting(gfx::kVRGroupContent)) {
@@ -13860,7 +14014,7 @@ nsGlobalWindow::DispatchVRDisplayDeactivate(uint32_t aDisplayID,
 {
   // Search for the display identified with aDisplayID and fire the
   // event if found.
-  for (auto display : mVRDisplays) {
+  for (const auto& display : mVRDisplays) {
     if (display->DisplayId() == aDisplayID && display->IsPresenting()) {
       // We only want to trigger this event to content that is presenting to
       // the display already.
@@ -13890,7 +14044,7 @@ nsGlobalWindow::DispatchVRDisplayConnect(uint32_t aDisplayID)
 {
   // Search for the display identified with aDisplayID and fire the
   // event if found.
-  for (auto display : mVRDisplays) {
+  for (const auto& display : mVRDisplays) {
     if (display->DisplayId() == aDisplayID) {
       // Fire event even if not presenting to the display.
       VRDisplayEventInit init;
@@ -13918,7 +14072,7 @@ nsGlobalWindow::DispatchVRDisplayDisconnect(uint32_t aDisplayID)
 {
   // Search for the display identified with aDisplayID and fire the
   // event if found.
-  for (auto display : mVRDisplays) {
+  for (const auto& display : mVRDisplays) {
     if (display->DisplayId() == aDisplayID) {
       // Fire event even if not presenting to the display.
       VRDisplayEventInit init;
@@ -13946,7 +14100,7 @@ nsGlobalWindow::DispatchVRDisplayPresentChange(uint32_t aDisplayID)
 {
   // Search for the display identified with aDisplayID and fire the
   // event if found.
-  for (auto display : mVRDisplays) {
+  for (const auto& display : mVRDisplays) {
     if (display->DisplayId() == aDisplayID) {
       // Fire event even if not presenting to the display.
       VRDisplayEventInit init;
@@ -13954,7 +14108,6 @@ nsGlobalWindow::DispatchVRDisplayPresentChange(uint32_t aDisplayID)
       init.mCancelable = false;
       init.mDisplay = display;
       // VRDisplayEvent.reason is not set for vrdisplaypresentchange
-
       RefPtr<VRDisplayEvent> event =
         VRDisplayEvent::Constructor(this,
                                     NS_LITERAL_STRING("vrdisplaypresentchange"),
@@ -14043,6 +14196,15 @@ nsGlobalWindow::WindowState()
   }
 
   return nsIDOMChromeWindow::STATE_NORMAL;
+}
+
+bool
+nsGlobalWindow::IsFullyOccluded()
+{
+  MOZ_ASSERT(IsInnerWindow());
+
+  nsCOMPtr<nsIWidget> widget = GetMainWidget();
+  return widget && widget->IsFullyOccluded();
 }
 
 NS_IMETHODIMP
@@ -14449,18 +14611,15 @@ nsGlobalWindow::GetGroupMessageManager(const nsAString& aGroup,
 
   nsGlobalChromeWindow* myself = static_cast<nsGlobalChromeWindow*>(this);
   nsCOMPtr<nsIMessageBroadcaster> messageManager =
-    myself->mGroupMessageManagers.Get(aGroup);
+    myself->mGroupMessageManagers.LookupForAdd(aGroup).OrInsert(
+      [this, &aError] () {
+        nsFrameMessageManager* parent =
+          static_cast<nsFrameMessageManager*>(GetMessageManager(aError));
 
-  if (!messageManager) {
-    nsFrameMessageManager* parent =
-      static_cast<nsFrameMessageManager*>(GetMessageManager(aError));
-
-    messageManager = new nsFrameMessageManager(nullptr,
-                                               parent,
-                                               MM_CHROME | MM_BROADCASTER);
-    myself->mGroupMessageManagers.Put(aGroup, messageManager);
-  }
-
+        return new nsFrameMessageManager(nullptr,
+                                         parent,
+                                         MM_CHROME | MM_BROADCASTER);
+      });
   return messageManager;
 }
 
@@ -14650,7 +14809,7 @@ nsGlobalWindow::IsModalContentWindow(JSContext* aCx, JSObject* aGlobal)
   return xpc::WindowOrNull(aGlobal)->IsModalContentWindow();
 }
 
-#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
+#if defined(MOZ_WIDGET_ANDROID)
 int16_t
 nsGlobalWindow::Orientation(CallerType aCallerType) const
 {
@@ -15253,18 +15412,17 @@ nsPIDOMWindow<T>::GetDocGroup() const
 }
 
 nsresult
-nsGlobalWindow::Dispatch(const char* aName,
-                         TaskCategory aCategory,
+nsGlobalWindow::Dispatch(TaskCategory aCategory,
                          already_AddRefed<nsIRunnable>&& aRunnable)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   if (GetDocGroup()) {
-    return GetDocGroup()->Dispatch(aName, aCategory, Move(aRunnable));
+    return GetDocGroup()->Dispatch(aCategory, Move(aRunnable));
   }
-  return DispatcherTrait::Dispatch(aName, aCategory, Move(aRunnable));
+  return DispatcherTrait::Dispatch(aCategory, Move(aRunnable));
 }
 
-nsIEventTarget*
+nsISerialEventTarget*
 nsGlobalWindow::EventTargetFor(TaskCategory aCategory) const
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
@@ -15350,13 +15508,13 @@ nsGlobalWindow::GetPaintWorklet(ErrorResult& aRv)
 }
 
 void
-nsGlobalWindow::GetAppLocalesAsBCP47(nsTArray<nsString>& aLocales)
+nsGlobalWindow::GetRegionalPrefsLocales(nsTArray<nsString>& aLocales)
 {
-  nsTArray<nsCString> appLocales;
-  mozilla::intl::LocaleService::GetInstance()->GetAppLocalesAsBCP47(appLocales);
+  AutoTArray<nsCString, 10> rpLocales;
+  mozilla::intl::LocaleService::GetInstance()->GetRegionalPrefsLocales(rpLocales);
 
-  for (uint32_t i = 0; i < appLocales.Length(); i++) {
-    aLocales.AppendElement(NS_ConvertUTF8toUTF16(appLocales[i]));
+  for (const auto& loc : rpLocales) {
+    aLocales.AppendElement(NS_ConvertUTF8toUTF16(loc));
   }
 }
 

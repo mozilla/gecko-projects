@@ -590,7 +590,7 @@ NotificationController::ProcessMutationEvents()
 void
 NotificationController::WillRefresh(mozilla::TimeStamp aTime)
 {
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::OTHER);
+  AUTO_PROFILER_LABEL("NotificationController::WillRefresh", OTHER);
 
   // If the document accessible that notification collector was created for is
   // now shut down, don't process notifications anymore.
@@ -656,8 +656,10 @@ NotificationController::WillRefresh(mozilla::TimeStamp aTime)
       continue;
     }
 
+  #ifdef A11Y_LOG
     nsIContent* containerElm = containerNode->IsElement() ?
       containerNode->AsElement() : nullptr;
+  #endif
 
     nsIFrame::RenderedText text = textFrame->GetRenderedText(0,
         UINT32_MAX, nsIFrame::TextOffsetType::OFFSETS_IN_CONTENT_TEXT,

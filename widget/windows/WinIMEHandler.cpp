@@ -179,7 +179,7 @@ IMEHandler::ProcessMessage(nsWindow* aWindow, UINT aMessage,
     }
     // IME isn't implemented with IMM, IMMHandler shouldn't handle any
     // messages.
-    if (!TSFTextStore::IsIMM_IMEActive()) {
+    if (!IsIMMActive()) {
       return false;
     }
   }
@@ -398,8 +398,9 @@ IMEHandler::OnDestroyWindow(nsWindow* aWindow)
   // here because TabParent already lost the reference to the nsWindow when
   // it receives from the remote process.
   if (sFocusedWindow == aWindow) {
-    NS_ASSERTION(aWindow->GetInputContext().IsOriginContentProcess(),
-      "input context of focused widget should be set from a remote process");
+    MOZ_ASSERT(aWindow->GetInputContext().IsOriginContentProcess(),
+      "input context of focused widget should've been set by a remote process "
+      "if IME focus isn't cleared before destroying the widget");
     NotifyIME(aWindow, IMENotification(NOTIFY_IME_OF_BLUR));
   }
 
@@ -421,7 +422,7 @@ bool
 IMEHandler::NeedsToAssociateIMC()
 {
   if (sAssociateIMCOnlyWhenIMM_IMEActive) {
-    return TSFTextStore::IsIMM_IMEActive();
+    return IsIMMActive();
   }
 
   // Even if IMC should be associated with focused widget with non-IMM-IME,
@@ -556,6 +557,11 @@ IMEHandler::CurrentKeyboardLayoutHasIME()
 void
 IMEHandler::OnKeyboardLayoutChanged()
 {
+  // Be aware, this method won't be called until TSFStaticSink starts to
+  // observe active TIP change.  If you need to be notified of this, you
+  // need to create TSFStaticSink::Observe() or something and call it
+  // TSFStaticSink::EnsureInitActiveTIPKeyboard() forcibly.
+
   if (!sIsIMMEnabled || !IsTSFAvailable()) {
     return;
   }

@@ -3,16 +3,18 @@
  */
 
 /* exported getTempFile, loadFormAutofillContent, runHeuristicsTest, sinon,
- *          initProfileStorage
+ *          initProfileStorage, getSyncChangeCounter, objectMatches
  */
 
 "use strict";
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+var {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/ObjectUtils.jsm");
+Cu.import("resource://gre/modules/FormLikeFactory.jsm");
 Cu.import("resource://testing-common/MockDocument.jsm");
 Cu.import("resource://testing-common/TestUtils.jsm");
 
@@ -23,11 +25,25 @@ XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
 
 do_get_profile();
 
-// Setup the environment for sinon.
+// ================================================
+// Load mocking/stubbing library, sinon
+// docs: http://sinonjs.org/releases/v2.3.2/
 Cu.import("resource://gre/modules/Timer.jsm");
-let self = {}; // eslint-disable-line no-unused-vars
-var sinon;
-Services.scriptloader.loadSubScript("resource://testing-common/sinon-1.16.1.js");
+var {Loader} = Cu.import("resource://gre/modules/commonjs/toolkit/loader.js", {});
+var loader = new Loader.Loader({
+  paths: {
+    "": "resource://testing-common/",
+  },
+  globals: {
+    setTimeout,
+    setInterval,
+    clearTimeout,
+    clearInterval,
+  },
+});
+var require = Loader.Require(loader, {id: ""});
+var sinon = require("sinon-2.3.2");
+// ================================================
 
 // Load our bootstrap extension manifest so we can access our chrome/resource URIs.
 const EXTENSION_ID = "formautofill@mozilla.org";
@@ -102,12 +118,11 @@ async function initProfileStorage(fileName, records) {
 }
 
 function runHeuristicsTest(patterns, fixturePathPrefix) {
-  Cu.import("resource://gre/modules/FormLikeFactory.jsm");
   Cu.import("resource://formautofill/FormAutofillHeuristics.jsm");
   Cu.import("resource://formautofill/FormAutofillUtils.jsm");
 
   patterns.forEach(testPattern => {
-    add_task(function* () {
+    add_task(async function() {
       do_print("Starting test fixture: " + testPattern.fixturePath);
       let file = do_get_file(fixturePathPrefix + testPattern.fixturePath);
       let doc = MockDocument.createTestDocumentFromFile("http://localhost:8080/test/", file);
@@ -137,15 +152,63 @@ function runHeuristicsTest(patterns, fixturePathPrefix) {
   });
 }
 
+/**
+ * Returns the Sync change counter for a profile storage record. Synced records
+ * store additional metadata for tracking changes and resolving merge conflicts.
+ * Deleting a synced record replaces the record with a tombstone.
+ *
+ * @param   {AutofillRecords} records
+ *          The `AutofillRecords` instance to query.
+ * @param   {string} guid
+ *          The GUID of the record or tombstone.
+ * @returns {number}
+ *          The change counter, or -1 if the record doesn't exist or hasn't
+ *          been synced yet.
+ */
+function getSyncChangeCounter(records, guid) {
+  let record = records._findByGUID(guid, {includeDeleted: true});
+  if (!record) {
+    return -1;
+  }
+  let sync = records._getSyncMetaData(record);
+  if (!sync) {
+    return -1;
+  }
+  return sync.changeCounter;
+}
+
+/**
+ * Performs a partial deep equality check to determine if an object contains
+ * the given fields.
+ *
+ * @param   {Object} object
+ *          The object to check. Unlike `ObjectUtils.deepEqual`, properties in
+ *          `object` that are not in `fields` will be ignored.
+ * @param   {Object} fields
+ *          The fields to match.
+ * @returns {boolean}
+ *          Does `object` contain `fields` with matching values?
+ */
+function objectMatches(object, fields) {
+  let actual = {};
+  for (let key in fields) {
+    if (!object.hasOwnProperty(key)) {
+      return false;
+    }
+    actual[key] = object[key];
+  }
+  return ObjectUtils.deepEqual(actual, fields);
+}
+
 add_task(async function head_initialize() {
-  Services.prefs.setBoolPref("extensions.formautofill.experimental", true);
+  Services.prefs.setStringPref("extensions.formautofill.available", "on");
   Services.prefs.setBoolPref("extensions.formautofill.heuristics.enabled", true);
-  Services.prefs.setBoolPref("dom.forms.autocomplete.experimental", true);
+  Services.prefs.setBoolPref("dom.forms.autocomplete.formautofill", true);
 
   // Clean up after every test.
   do_register_cleanup(function head_cleanup() {
-    Services.prefs.clearUserPref("extensions.formautofill.experimental");
+    Services.prefs.clearUserPref("extensions.formautofill.available");
     Services.prefs.clearUserPref("extensions.formautofill.heuristics.enabled");
-    Services.prefs.clearUserPref("dom.forms.autocomplete.experimental");
+    Services.prefs.clearUserPref("dom.forms.autocomplete.formautofill");
   });
 });

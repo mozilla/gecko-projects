@@ -392,6 +392,12 @@
      {}
     ]
    ],
+   "focus/Selection_addRange_in_iframe.html": [
+    [
+     "/_mozilla/focus/Selection_addRange_in_iframe.html",
+     {}
+    ]
+   ],
    "focus/Selection_addRange_into_iframe.html": [
     [
      "/_mozilla/focus/Selection_addRange_into_iframe.html",
@@ -869,6 +875,10 @@
    "e733930483c74e73210c5a127db1d04f82c966cf",
    "testharness"
   ],
+  "focus/Selection_addRange_in_iframe.html": [
+   "941327d56ba3fb7a358c8fd61e7c2598906c9992",
+   "testharness"
+  ],
   "focus/Selection_addRange_into_iframe.html": [
    "65143dd5377acc88b180460a46dd4bbb79cbf68e",
    "testharness"
@@ -878,7 +888,7 @@
    "support"
   ],
   "focus/Selection_collapse.html": [
-   "15f83b9e158ff63fd3428c4d681ce4777b74198c",
+   "7367e997760a15f19b46545f371659c3093e28ae",
    "testharness"
   ],
   "focus/Selection_collapseToEnd.html": [

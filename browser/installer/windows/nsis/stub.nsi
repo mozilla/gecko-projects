@@ -819,7 +819,9 @@ Function createInstall
   ; Resize the Dialog to fill the entire window
   System::Call 'user32::MoveWindow(i$Dialog,i0,i0,i $8,i $9,i0)'
 
-  ${NSD_CreateLabelCenter} 25% ${NOW_INSTALLING_TOP_DU} 50% 47u "$(STUB_INSTALLING_LABEL)"
+  ; The header string may need more than half the width of the window, but it's
+  ; currently not close to needing multiple lines in any localization.
+  ${NSD_CreateLabelCenter} 0% ${NOW_INSTALLING_TOP_DU} 100% 47u "$(STUB_INSTALLING_LABEL)"
   Pop $0
   SendMessage $0 ${WM_SETFONT} $FontInstalling 0
   SetCtlColors $0 ${INSTALL_BLURB_TEXT_COLOR} transparent
@@ -831,9 +833,19 @@ Function createInstall
 
   StrCpy $CurrentBlurbIdx "0"
 
-  nsDialogs::CreateControl STATIC ${DEFAULT_STYLES}|${SS_NOTIFY}|${SS_RIGHT} \
-    ${WS_EX_TRANSPARENT} -433u ${INSTALL_FOOTER_TOP_DU} 400u 20u \
-    "$(STUB_BLURB_FOOTER)"
+  ; In some locales, the footer message may be too long to fit on one line.
+  ; Figure out how much height it needs and give it that much.
+  ${GetTextWidthHeight} "$(STUB_BLURB_FOOTER2)" $FontFooter \
+    ${INSTALL_FOOTER_WIDTH_DU} $R1 $R2
+  !ifdef ${AB_CD}_rtl
+    nsDialogs::CreateControl STATIC ${DEFAULT_STYLES}|${SS_NOTIFY} \
+      ${WS_EX_TRANSPARENT} 30u ${INSTALL_FOOTER_TOP_DU} ${INSTALL_FOOTER_WIDTH_DU} "$R2u" \
+      "$(STUB_BLURB_FOOTER2)"
+  !else
+    nsDialogs::CreateControl STATIC ${DEFAULT_STYLES}|${SS_NOTIFY}|${SS_RIGHT} \
+      ${WS_EX_TRANSPARENT} 175u ${INSTALL_FOOTER_TOP_DU} ${INSTALL_FOOTER_WIDTH_DU} "$R2u" \
+      "$(STUB_BLURB_FOOTER2)"
+  !endif
   Pop $0
   SendMessage $0 ${WM_SETFONT} $FontFooter 0
   SetCtlColors $0 ${INSTALL_BLURB_TEXT_COLOR} transparent

@@ -58,7 +58,8 @@ class TimerObserverRunnable : public Runnable
 {
 public:
   explicit TimerObserverRunnable(nsIObserver* aObserver)
-    : mObserver(aObserver)
+    : mozilla::Runnable("TimerObserverRunnable")
+    , mObserver(aObserver)
   {
   }
 
@@ -147,7 +148,8 @@ public:
   NS_IMETHOD GetName(nsACString& aName) override;
 
   nsTimerEvent()
-    : mTimer()
+    : mozilla::CancelableRunnable("nsTimerEvent")
+    , mTimer()
     , mGeneration(0)
   {
     // Note: We override operator new for this class, and the override is
@@ -599,7 +601,9 @@ TimerThread::FindNextFireTimeForCurrentThread(TimeStamp aDefault, uint32_t aSear
 
 #ifdef DEBUG
   TimeStamp firstTimeStamp;
+  Entry* initialFirstEntry = nullptr;
   if (!mTimers.IsEmpty()) {
+    initialFirstEntry = mTimers[0].get();
     firstTimeStamp = mTimers[0]->Timeout();
   }
 #endif
@@ -643,7 +647,19 @@ TimerThread::FindNextFireTimeForCurrentThread(TimeStamp aDefault, uint32_t aSear
     std::push_heap(mTimers.begin(), end, Entry::UniquePtrLessThan);
   }
 
+#ifdef DEBUG
+  if (!mTimers.IsEmpty()) {
+    if (firstTimeStamp != mTimers[0]->Timeout()) {
+      TimeStamp now = TimeStamp::Now();
+      printf_stderr("firstTimeStamp %f, mTimers[0]->Timeout() %f, "
+                    "initialFirstTimer %p, current first %p\n",
+                    (firstTimeStamp - now).ToMilliseconds(),
+                    (mTimers[0]->Timeout() - now).ToMilliseconds(),
+                    initialFirstEntry, mTimers[0].get());
+    }
+  }
   MOZ_ASSERT_IF(!mTimers.IsEmpty(), firstTimeStamp == mTimers[0]->Timeout());
+#endif
 
   return timeStamp;
 }

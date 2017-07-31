@@ -15,8 +15,10 @@ Cu.import("resource://gre/modules/TelemetryUtils.jsm", this);
 Cu.import("resource://gre/modules/Services.jsm", this);
 Cu.import("resource://gre/modules/Preferences.jsm", this);
 Cu.import("resource://gre/modules/osfile.jsm", this);
+Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
 
-const PREF_TELEMETRY_SERVER = "toolkit.telemetry.server";
+XPCOMUtils.defineLazyModuleGetter(this, "TelemetryHealthPing",
+  "resource://gre/modules/TelemetryHealthPing.jsm");
 
 const MS_IN_A_MINUTE = 60 * 1000;
 
@@ -80,7 +82,8 @@ add_task(async function test_setup() {
   do_get_profile(true);
   // Make sure we don't generate unexpected pings due to pref changes.
   await setEmptyPrefWatchlist();
-  Services.prefs.setBoolPref(PREF_TELEMETRY_ENABLED, true);
+  Services.prefs.setBoolPref(TelemetryUtils.Preferences.TelemetryEnabled, true);
+  Preferences.set(TelemetryUtils.Preferences.HealthPingEnabled, true);
 });
 
 // Test the ping sending logic.
@@ -138,7 +141,7 @@ add_task(async function test_sendPendingPings() {
   // Now enable sending to the ping server.
   now = fakeNow(futureDate(now, MS_IN_A_MINUTE));
   PingServer.start();
-  Preferences.set(PREF_TELEMETRY_SERVER, "http://localhost:" + PingServer.port);
+  Preferences.set(TelemetryUtils.Preferences.Server, "http://localhost:" + PingServer.port);
 
   let timerPromise = waitForTimer();
   await TelemetryController.testReset();
@@ -325,13 +328,10 @@ add_task(async function test_discardBigPings() {
   // Generate a 2MB string and create an oversized payload.
   const OVERSIZED_PAYLOAD = {"data": generateRandomString(2 * 1024 * 1024)};
 
-  // Reset the histograms.
-  Telemetry.getHistogramById("TELEMETRY_PING_SIZE_EXCEEDED_SEND").clear();
-  Telemetry.getHistogramById("TELEMETRY_DISCARDED_SEND_PINGS_SIZE_MB").clear();
-
   // Submit a ping of a normal size and check that we don't count it in the histogram.
   await TelemetryController.submitExternalPing(TEST_PING_TYPE, { test: "test" });
   await TelemetrySend.testWaitOnOutgoingPings();
+  await PingServer.promiseNextPing();
 
   Assert.equal(histSizeExceeded.snapshot().sum, 0, "Telemetry must report no oversized ping submitted.");
   Assert.equal(histDiscardedSize.snapshot().sum, 0, "Telemetry must report no oversized pings.");
@@ -341,15 +341,21 @@ add_task(async function test_discardBigPings() {
   Assert.equal(histogramValueCount(histSendTimeFail.snapshot()), 0, "Should not have recorded send failure time.");
 
   // Submit an oversized ping and check that it gets discarded.
+  TelemetryHealthPing.testReset();
   await TelemetryController.submitExternalPing(TEST_PING_TYPE, OVERSIZED_PAYLOAD);
-  await TelemetrySend.testWaitOnOutgoingPings();
+  let ping = await PingServer.promiseNextPing();
 
   Assert.equal(histSizeExceeded.snapshot().sum, 1, "Telemetry must report 1 oversized ping submitted.");
   Assert.equal(histDiscardedSize.snapshot().counts[2], 1, "Telemetry must report a 2MB, oversized, ping submitted.");
-  Assert.deepEqual(histSuccess.snapshot().counts, [0, 1, 0], "Should have recorded sending success.");
-  Assert.equal(histogramValueCount(histSendTimeSuccess.snapshot()), 1, "Should have recorded send success time.");
+  Assert.deepEqual(histSuccess.snapshot().counts, [0, 2, 0], "Should have recorded sending success.");
+  Assert.equal(histogramValueCount(histSendTimeSuccess.snapshot()), 2, "Should have recorded send success time.");
   Assert.greater(histSendTimeSuccess.snapshot().sum, 0, "Should have recorded send success time.");
   Assert.equal(histogramValueCount(histSendTimeFail.snapshot()), 0, "Should not have recorded send failure time.");
+
+  Assert.equal(ping.type, TelemetryHealthPing.HEALTH_PING_TYPE, "Should have received a health ping.");
+  Assert.deepEqual(ping.payload[TelemetryHealthPing.FailureType.DISCARDED_FOR_SIZE],
+    {[TEST_PING_TYPE]: 1}, "Should have recorded correct type of oversized ping.");
+  Assert.deepEqual(ping.payload["os"], TelemetryHealthPing.OsInfo, "Should have correct os info.")
 });
 
 add_task(async function test_evictedOnServerErrors() {
@@ -430,7 +436,6 @@ add_task(async function test_persistCurrentPingsOnShutdown() {
 
 add_task(async function test_sendCheckOverride() {
   const TEST_PING_TYPE = "test-sendCheckOverride";
-  const PREF_OVERRIDE_OFFICIAL_CHECK = "toolkit.telemetry.send.overrideOfficialCheck";
 
   // Clear any pending pings.
   await TelemetryController.testShutdown();
@@ -438,7 +443,7 @@ add_task(async function test_sendCheckOverride() {
 
   // Enable the ping server.
   PingServer.start();
-  Preferences.set(PREF_TELEMETRY_SERVER, "http://localhost:" + PingServer.port);
+  Preferences.set(TelemetryUtils.Preferences.Server, "http://localhost:" + PingServer.port);
 
   // Start Telemetry and disable the test-mode so pings don't get
   // sent unless we enable the override.
@@ -455,7 +460,7 @@ add_task(async function test_sendCheckOverride() {
   }
 
   // Enable the override and try to send again.
-  Preferences.set(PREF_OVERRIDE_OFFICIAL_CHECK, true);
+  Preferences.set(TelemetryUtils.Preferences.OverrideOfficialCheck, true);
   PingServer.resetPingHandler();
   await TelemetrySend.reset();
   await TelemetryController.submitExternalPing(TEST_PING_TYPE, { test: "test" });
@@ -466,7 +471,7 @@ add_task(async function test_sendCheckOverride() {
 
   // Restore the test mode and disable the override.
   TelemetrySend.setTestModeEnabled(true);
-  Preferences.reset(PREF_OVERRIDE_OFFICIAL_CHECK);
+  Preferences.reset(TelemetryUtils.Preferences.OverrideOfficialCheck);
 });
 
 add_task(async function test_measurePingsSize() {

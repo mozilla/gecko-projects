@@ -184,7 +184,7 @@ xpc::ErrorBase::Init(JSErrorBase* aReport)
     if (!aReport->filename)
         mFileName.SetIsVoid(true);
     else
-        mFileName.AssignWithConversion(aReport->filename);
+        CopyASCIItoUTF16(aReport->filename, mFileName);
 
     mLineNumber = aReport->lineno;
     mColumn = aReport->column;
@@ -766,7 +766,7 @@ nsXPConnect::GetWrappedNativeOfJSObject(JSContext * aJSContext,
     return NS_OK;
 }
 
-nsISupports*
+already_AddRefed<nsISupports>
 xpc::UnwrapReflectorToISupports(JSObject* reflector)
 {
     // Unwrap security wrappers, if allowed.
@@ -779,20 +779,16 @@ xpc::UnwrapReflectorToISupports(JSObject* reflector)
         XPCWrappedNative* wn = XPCWrappedNative::Get(reflector);
         if (!wn)
             return nullptr;
-        return wn->Native();
+        nsCOMPtr<nsISupports> native = wn->Native();
+        return native.forget();
     }
 
-    // Try DOM objects.
+    // Try DOM objects.  This QI without taking a ref first is safe, because
+    // this if non-null our thing will definitely be a DOM object, and we know
+    // their QI to nsISupports doesn't do anything weird.
     nsCOMPtr<nsISupports> canonical =
         do_QueryInterface(mozilla::dom::UnwrapDOMObjectToISupports(reflector));
-    return canonical;
-}
-
-NS_IMETHODIMP_(nsISupports*)
-nsXPConnect::GetNativeOfWrapper(JSContext* aJSContext,
-                                JSObject* aJSObj)
-{
-    return UnwrapReflectorToISupports(aJSObj);
+    return canonical.forget();
 }
 
 NS_IMETHODIMP
@@ -837,15 +833,6 @@ nsXPConnect::GetCurrentJSStack(nsIStackFrame * *aCurrentJSStack)
     nsCOMPtr<nsIStackFrame> currentStack = dom::GetCurrentJSStack();
     currentStack.forget(aCurrentJSStack);
 
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsXPConnect::GetCurrentNativeCallContext(nsAXPCNativeCallContext * *aCurrentNativeCallContext)
-{
-    MOZ_ASSERT(aCurrentNativeCallContext, "bad param");
-
-    *aCurrentNativeCallContext = XPCJSContext::Get()->GetCallContext();
     return NS_OK;
 }
 

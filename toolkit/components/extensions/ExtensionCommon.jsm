@@ -18,8 +18,6 @@ this.EXPORTED_SYMBOLS = ["ExtensionCommon"];
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Locale",
-                                  "resource://gre/modules/Locale.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
                                   "resource://gre/modules/MessageChannel.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
@@ -1010,7 +1008,7 @@ class SchemaAPIManager extends EventEmitter {
 
     module.loaded = true;
 
-    return this._initModule(module, this.global[name]);
+    return this.global[name];
   }
   /**
    * aSynchronously loads an API module, if not already loaded, and
@@ -1037,7 +1035,7 @@ class SchemaAPIManager extends EventEmitter {
 
       module.loaded = true;
 
-      return this._initModule(module, this.global[name]);
+      return this.global[name];
     });
 
     return module.asyncLoaded;
@@ -1076,13 +1074,6 @@ class SchemaAPIManager extends EventEmitter {
     return true;
   }
 
-  _initModule(info, cls) {
-    cls.namespaceName = cls.namespaceName;
-    cls.scopes = new Set(info.scopes);
-
-    return cls;
-  }
-
   _checkLoadModule(module, name) {
     if (!module) {
       throw new Error(`Module '${name}' does not exist`);
@@ -1108,7 +1099,7 @@ class SchemaAPIManager extends EventEmitter {
       sandboxName: `Namespace of ext-*.js scripts for ${this.processType}`,
     });
 
-    Object.assign(global, {global, Cc, Ci, Cu, Cr, XPCOMUtils, ChromeWorker, ExtensionCommon, MatchPattern, MatchPatternSet, extensions: this});
+    Object.assign(global, {global, Cc, Ci, Cu, Cr, XPCOMUtils, ChromeWorker, ExtensionCommon, MatchPattern, MatchPatternSet, StructuredCloneHolder, extensions: this});
 
     Cu.import("resource://gre/modules/AppConstants.jsm", global);
     Cu.import("resource://gre/modules/ExtensionAPI.jsm", global);
@@ -1249,8 +1240,7 @@ LocaleData.prototype = {
     if (message == "@@ui_locale") {
       return this.uiLocale;
     } else if (message.startsWith("@@bidi_")) {
-      let registry = Cc["@mozilla.org/chrome/chrome-registry;1"].getService(Ci.nsIXULChromeRegistry);
-      let rtl = registry.isLocaleRTL("global");
+      let rtl = Services.locale.isAppLocaleRTL;
 
       if (message == "@@bidi_dir") {
         return rtl ? "rtl" : "ltr";
@@ -1355,7 +1345,7 @@ LocaleData.prototype = {
   get uiLocale() {
     // Return the browser locale, but convert it to a Chrome-style
     // locale code.
-    return Locale.getLocale().replace(/-/g, "_");
+    return Services.locale.getAppLocaleAsBCP47().replace(/-/g, "_");
   },
 };
 
@@ -1366,7 +1356,7 @@ defineLazyGetter(LocaleData.prototype, "availableLocales", function() {
 
 // This is a generic class for managing event listeners. Example usage:
 //
-// new SingletonEventManager(context, "api.subAPI", fire => {
+// new EventManager(context, "api.subAPI", fire => {
 //   let listener = (...) => {
 //     // Fire any listeners registered with addListener.
 //     fire.async(arg1, arg2);
@@ -1385,14 +1375,15 @@ defineLazyGetter(LocaleData.prototype, "availableLocales", function() {
 // content process). |name| is for debugging. |register| is a function
 // to register the listener. |register| should return an
 // unregister function that will unregister the listener.
-function SingletonEventManager(context, name, register) {
+function EventManager(context, name, register) {
   this.context = context;
   this.name = name;
   this.register = register;
   this.unregister = new Map();
+  this.inputHandling = false;
 }
 
-SingletonEventManager.prototype = {
+EventManager.prototype = {
   addListener(callback, ...args) {
     if (this.unregister.has(callback)) {
       return;
@@ -1479,6 +1470,7 @@ SingletonEventManager.prototype = {
       addListener: (...args) => this.addListener(...args),
       removeListener: (...args) => this.removeListener(...args),
       hasListener: (...args) => this.hasListener(...args),
+      setUserInput: this.inputHandling,
       [Schemas.REVOKE]: () => this.revoke(),
     };
   },
@@ -1515,12 +1507,12 @@ const stylesheetMap = new DefaultMap(url => {
 ExtensionCommon = {
   BaseContext,
   CanOfAPIs,
+  EventManager,
   LocalAPIImplementation,
   LocaleData,
   NoCloneSpreadArgs,
   SchemaAPIInterface,
   SchemaAPIManager,
-  SingletonEventManager,
   SpreadArgs,
   ignoreEvent,
   stylesheetMap,

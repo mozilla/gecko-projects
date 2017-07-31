@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use cssparser::Parser;
+use cssparser::{Parser, ParserInput};
 use dom::bindings::codegen::Bindings::CSSKeyframesRuleBinding;
 use dom::bindings::codegen::Bindings::CSSKeyframesRuleBinding::CSSKeyframesRuleMethods;
 use dom::bindings::error::ErrorResult;
@@ -16,8 +16,8 @@ use dom::cssrulelist::{CSSRuleList, RulesSource};
 use dom::cssstylesheet::CSSStyleSheet;
 use dom::window::Window;
 use dom_struct::dom_struct;
+use servo_arc::Arc;
 use style::shared_lock::{Locked, ToCssWithGuard};
-use style::stylearc::Arc;
 use style::stylesheets::keyframes_rule::{KeyframesRule, Keyframe, KeyframeSelector};
 use style::values::KeyframesName;
 
@@ -58,7 +58,8 @@ impl CSSKeyframesRule {
 
     /// Given a keyframe selector, finds the index of the first corresponding rule if any
     fn find_rule(&self, selector: &str) -> Option<usize> {
-        let mut input = Parser::new(selector);
+        let mut input = ParserInput::new(selector);
+        let mut input = Parser::new(&mut input);
         if let Ok(sel) = KeyframeSelector::parse(&mut input) {
             let guard = self.cssrule.shared_lock().read();
             // This finds the *last* element matching a selector
@@ -81,7 +82,13 @@ impl CSSKeyframesRuleMethods for CSSKeyframesRule {
 
     // https://drafts.csswg.org/css-animations/#dom-csskeyframesrule-appendrule
     fn AppendRule(&self, rule: DOMString) {
-        let rule = Keyframe::parse(&rule, self.cssrule.parent_stylesheet().style_stylesheet());
+        let style_stylesheet = self.cssrule.parent_stylesheet().style_stylesheet();
+        let rule = Keyframe::parse(
+            &rule,
+            &style_stylesheet.contents,
+            &style_stylesheet.shared_lock
+        );
+
         if let Ok(rule) = rule {
             let mut guard = self.cssrule.shared_lock().write();
             self.keyframesrule.write_with(&mut guard).keyframes.push(rule);
@@ -114,7 +121,7 @@ impl CSSKeyframesRuleMethods for CSSKeyframesRule {
         // Spec deviation: https://github.com/w3c/csswg-drafts/issues/801
         // Setting this property to a CSS-wide keyword or `none` does not throw,
         // it stores a value that serializes as a quoted string.
-        let name = KeyframesName::from_ident(value.into());
+        let name = KeyframesName::from_ident(&value);
         let mut guard = self.cssrule.shared_lock().write();
         self.keyframesrule.write_with(&mut guard).name = name;
         Ok(())

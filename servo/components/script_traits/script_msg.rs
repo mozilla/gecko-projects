@@ -14,8 +14,7 @@ use WorkerGlobalScopeInit;
 use WorkerScriptLoadOrigin;
 use canvas_traits::CanvasMsg;
 use devtools_traits::{ScriptToDevtoolsControlMsg, WorkerId};
-use euclid::point::Point2D;
-use euclid::size::{Size2D, TypedSize2D};
+use euclid::{Point2D, Size2D, TypedSize2D};
 use ipc_channel::ipc::IpcSender;
 use msg::constellation_msg::{BrowsingContextId, TopLevelBrowsingContextId, FrameType, PipelineId, TraversalDirection};
 use msg::constellation_msg::{Key, KeyModifiers, KeyState};
@@ -28,7 +27,7 @@ use servo_url::ServoUrl;
 use style_traits::CSSPixel;
 use style_traits::cursor::Cursor;
 use style_traits::viewport::ViewportConstraints;
-use webrender_traits::ClipId;
+use webrender_api::ClipId;
 
 /// Messages from the layout to the constellation.
 #[derive(Deserialize, Serialize)]
@@ -104,9 +103,8 @@ pub enum ScriptMsg {
     LoadUrl(PipelineId, LoadData, bool),
     /// Post a message to the currently active window of a given browsing context.
     PostMessage(BrowsingContextId, Option<ImmutableOrigin>, Vec<u8>),
-    /// Dispatch a mozbrowser event to the parent of this pipeline.
-    /// The first PipelineId is for the parent, the second is for the originating pipeline.
-    MozBrowserEvent(PipelineId, PipelineId, MozBrowserEvent),
+    /// Dispatch a mozbrowser event to the parent of a mozbrowser iframe.
+    MozBrowserEvent(PipelineId, TopLevelBrowsingContextId, MozBrowserEvent),
     /// HTMLIFrameElement Forward or Back traversal.
     TraverseHistory(TopLevelBrowsingContextId, TraversalDirection),
     /// Gets the length of the joint session history from the constellation.

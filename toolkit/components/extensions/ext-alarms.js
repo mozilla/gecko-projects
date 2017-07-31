@@ -1,5 +1,8 @@
 "use strict";
 
+// The ext-* files are imported into the same scopes.
+/* import-globals-from ext-toolkit.js */
+
 // WeakMap[Extension -> Map[name -> Alarm]]
 let alarmsMap = new WeakMap();
 
@@ -133,7 +136,7 @@ this.alarms = class extends ExtensionAPI {
           return Promise.resolve(cleared);
         },
 
-        onAlarm: new SingletonEventManager(context, "alarms.onAlarm", fire => {
+        onAlarm: new EventManager(context, "alarms.onAlarm", fire => {
           let callback = alarm => {
             fire.sync(alarm.data);
           };

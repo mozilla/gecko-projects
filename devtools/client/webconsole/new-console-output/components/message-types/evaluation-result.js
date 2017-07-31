@@ -17,29 +17,29 @@ const GripMessageBody = require("devtools/client/webconsole/new-console-output/c
 EvaluationResult.displayName = "EvaluationResult";
 
 EvaluationResult.propTypes = {
+  dispatch: PropTypes.func.isRequired,
   message: PropTypes.object.isRequired,
-  indent: PropTypes.number.isRequired,
   timestampsVisible: PropTypes.bool.isRequired,
   serviceContainer: PropTypes.object,
-};
-
-EvaluationResult.defaultProps = {
-  indent: 0,
+  loadedObjectProperties: PropTypes.object,
 };
 
 function EvaluationResult(props) {
   const {
+    dispatch,
     message,
     serviceContainer,
-    indent,
     timestampsVisible,
+    loadedObjectProperties,
   } = props;
 
   const {
     source,
     type,
+    helperType,
     level,
     id: messageId,
+    indent,
     exceptionDocURL,
     frame,
     timeStamp,
@@ -59,10 +59,15 @@ function EvaluationResult(props) {
     }
   } else {
     messageBody = GripMessageBody({
+      dispatch,
+      messageId,
       grip: parameters,
       serviceContainer,
       useQuotes: true,
       escapeWhitespace: false,
+      loadedObjectProperties,
+      type,
+      helperType,
     });
   }
 

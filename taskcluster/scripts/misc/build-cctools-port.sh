@@ -4,7 +4,7 @@ set -x -e -v
 # This script is for building cctools (Apple's binutils) for Linux using
 # cctools-port (https://github.com/tpoechtrager/cctools-port).
 WORKSPACE=$HOME/workspace
-UPLOAD_DIR=$WORKSPACE/artifacts
+UPLOAD_DIR=$HOME/artifacts
 
 # Repository info
 : CROSSTOOL_PORT_REPOSITORY    ${CROSSTOOL_PORT_REPOSITORY:=https://github.com/tpoechtrager/cctools-port}
@@ -26,7 +26,6 @@ echo "Building from commit hash `git rev-parse $CROSSTOOL_PORT_REV`..."
 
 # Fetch clang from tooltool
 cd $WORKSPACE/build/src
-TOOLTOOL_MANIFEST=browser/config/tooltool-manifests/linux64/clang.manifest
 . taskcluster/scripts/misc/tooltool-download.sh
 
 # Configure crosstools-port

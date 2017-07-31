@@ -64,6 +64,7 @@ public:
   void DPEnd(wr::DisplayListBuilder &aBuilder, const gfx::IntSize& aSize,
              bool aIsSync, uint64_t aTransactionId,
              const WebRenderScrollData& aScrollData);
+  void ProcessWebRenderParentCommands();
 
   CompositorBridgeChild* GetCompositorBridgeChild();
 
@@ -84,7 +85,7 @@ public:
    * Clean this up, finishing with SendShutDown() which will cause __delete__
    * to be sent from the parent side.
    */
-  void Destroy();
+  void Destroy(bool aIsSync);
   bool IPCOpen() const { return mIPCOpen && !mDestroyed; }
   bool IsDestroyed() const { return mDestroyed; }
 
@@ -95,6 +96,11 @@ public:
     mIdNamespace = aIdNamespace;
   }
 
+  wr::WrImageKey GetNextImageKey()
+  {
+    return wr::WrImageKey{ wr::WrIdNamespace { GetNamespace() }, GetNextResourceId() };
+  }
+
   void PushGlyphs(wr::DisplayListBuilder& aBuilder, const nsTArray<GlyphArray>& aGlyphs,
                   gfx::ScaledFont* aFont, const StackingContextHelper& aSc,
                   const LayerRect& aBounds, const LayerRect& aClip);
@@ -103,6 +109,9 @@ public:
 
   void RemoveExpiredFontKeys();
   void ClearReadLocks();
+
+  void BeginClearCachedResources();
+  void EndClearCachedResources();
 
 private:
   friend class CompositorBridgeChild;
@@ -135,6 +144,8 @@ private:
 
   void ActorDestroy(ActorDestroyReason why) override;
 
+  virtual mozilla::ipc::IPCResult RecvWrUpdated(const uint32_t& aNewIdNameSpace) override;
+
   void AddIPDLReference() {
     MOZ_ASSERT(mIPCOpen == false);
     mIPCOpen = true;
@@ -154,6 +165,7 @@ private:
   nsTArray<nsTArray<ReadLockInit>> mReadLocks;
   uint64_t mReadLockSequenceNumber;
   bool mIsInTransaction;
+  bool mIsInClearCachedResources;
   uint32_t mIdNamespace;
   uint32_t mResourceId;
   wr::PipelineId mPipelineId;

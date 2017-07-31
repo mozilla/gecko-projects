@@ -2,6 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// The rejection "The fetching process for the media resource was aborted by the
+// user agent at the user's request." is left unhandled in some cases. This bug
+// should be fixed, but for the moment this file is whitelisted.
+//
+// NOTE: Whitelisting a class of rejections should be limited. Normally you
+//       should use "expectUncaughtRejection" to flag individual failures.
+Cu.import("resource://testing-common/PromiseTestUtils.jsm", this);
+PromiseTestUtils.whitelistRejectionsGlobally(/aborted by the user agent/);
+
 const permissionError = "error: NotAllowedError: The request is not allowed " +
     "by the user agent or the platform in the current context.";
 
@@ -82,6 +91,23 @@ var gTests = [
 
     await indicator;
     await checkSharingUI({screen: "Screen"});
+
+    // we always show prompt for screen sharing.
+    promise = promisePopupNotificationShown("webRTC-shareDevices");
+    await promiseRequestDevice(false, true, null, "screen");
+    await promise;
+    await expectObserverCalled("getUserMedia:request");
+
+    is(PopupNotifications.getNotification("webRTC-shareDevices").anchorID,
+       "webRTC-shareScreen-notification-icon", "anchored to device icon");
+    checkDeviceSelectors(false, false, true);
+
+    await promiseMessage(permissionError, () => {
+      PopupNotifications.panel.firstChild.button.click();
+    });
+
+    await expectObserverCalled("getUserMedia:response:deny");
+    SitePermissions.remove(null, "screen", gBrowser.selectedBrowser);
     await closeStream();
   }
 },

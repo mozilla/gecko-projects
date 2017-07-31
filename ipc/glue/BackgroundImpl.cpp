@@ -333,7 +333,7 @@ class ChildImpl final : public BackgroundChildImpl
   static bool sShutdownHasStarted;
 
 #if defined(DEBUG) || !defined(RELEASE_OR_BETA)
-  nsIThread* mBoundThread;
+  nsISerialEventTarget* mBoundEventTarget;
 #endif
 
 #ifdef DEBUG
@@ -350,7 +350,7 @@ public:
   void
   AssertIsOnBoundThread()
   {
-    THREADSAFETY_ASSERT(mBoundThread);
+    THREADSAFETY_ASSERT(mBoundEventTarget);
 
 #ifdef RELEASE_OR_BETA
     DebugOnly<bool> current;
@@ -358,7 +358,7 @@ public:
     bool current;
 #endif
     THREADSAFETY_ASSERT(
-      NS_SUCCEEDED(mBoundThread->IsOnCurrentThread(&current)));
+      NS_SUCCEEDED(mBoundEventTarget->IsOnCurrentThread(&current)));
     THREADSAFETY_ASSERT(current);
   }
 
@@ -370,7 +370,7 @@ public:
 
   ChildImpl()
 #if defined(DEBUG) || !defined(RELEASE_OR_BETA)
-  : mBoundThread(nullptr)
+  : mBoundEventTarget(nullptr)
 #endif
 #ifdef DEBUG
   , mActorDestroyed(false)
@@ -428,7 +428,8 @@ private:
           threadLocalInfo->mActor.forget(&actor);
 
           MOZ_ALWAYS_SUCCEEDS(
-            NS_DispatchToMainThread(NewNonOwningRunnableMethod(actor, &ChildImpl::Release)));
+            NS_DispatchToMainThread(NewNonOwningRunnableMethod("ChildImpl::Release",
+                                                               actor, &ChildImpl::Release)));
         }
       }
       delete threadLocalInfo;
@@ -447,13 +448,13 @@ private:
   void
   SetBoundThread()
   {
-    THREADSAFETY_ASSERT(!mBoundThread);
+    THREADSAFETY_ASSERT(!mBoundEventTarget);
 
 #if defined(DEBUG) || !defined(RELEASE_OR_BETA)
-    mBoundThread = NS_GetCurrentThread();
+    mBoundEventTarget = GetCurrentThreadSerialEventTarget();
 #endif
 
-    THREADSAFETY_ASSERT(mBoundThread);
+    THREADSAFETY_ASSERT(mBoundEventTarget);
   }
 
   // Only called by IPDL.
@@ -954,7 +955,8 @@ ParentImpl::GetContentParent(PBackgroundParent* aBackgroundActor)
     // will run before the reference we hand out can be released, and the
     // ContentParent can't die as long as the existing reference is maintained.
     MOZ_ALWAYS_SUCCEEDS(
-      NS_DispatchToMainThread(NewNonOwningRunnableMethod(actor->mContent, &ContentParent::AddRef)));
+      NS_DispatchToMainThread(NewNonOwningRunnableMethod("ContentParent::AddRef",
+                                                         actor->mContent, &ContentParent::AddRef)));
   }
 
   return already_AddRefed<ContentParent>(actor->mContent.get());
@@ -1182,10 +1184,11 @@ ParentImpl::ShutdownBackgroundThread()
       TimerCallbackClosure closure(thread, liveActors);
 
       MOZ_ALWAYS_SUCCEEDS(
-        shutdownTimer->InitWithFuncCallback(&ShutdownTimerCallback,
-                                            &closure,
-                                            kShutdownTimerDelayMS,
-                                            nsITimer::TYPE_ONE_SHOT));
+        shutdownTimer->InitWithNamedFuncCallback(&ShutdownTimerCallback,
+                                                 &closure,
+                                                 kShutdownTimerDelayMS,
+                                                 nsITimer::TYPE_ONE_SHOT,
+                                                 "ParentImpl::ShutdownTimerCallback"));
 
       SpinEventLoopUntil([&]() { return !sLiveActorCount; });
 
@@ -1233,7 +1236,8 @@ ParentImpl::Destroy()
   AssertIsInMainProcess();
 
   MOZ_ALWAYS_SUCCEEDS(
-    NS_DispatchToMainThread(NewNonOwningRunnableMethod(this, &ParentImpl::MainThreadActorDestroy)));
+    NS_DispatchToMainThread(NewNonOwningRunnableMethod("ParentImpl::MainThreadActorDestroy",
+                                                       this, &ParentImpl::MainThreadActorDestroy)));
 }
 
 void
@@ -1279,7 +1283,8 @@ ParentImpl::ActorDestroy(ActorDestroyReason aWhy)
   // long enough to be cleared in this call stack.
 
   MOZ_ALWAYS_SUCCEEDS(
-    NS_DispatchToCurrentThread(NewNonOwningRunnableMethod(this, &ParentImpl::Destroy)));
+    NS_DispatchToCurrentThread(NewNonOwningRunnableMethod("ParentImpl::Destroy",
+                                                          this, &ParentImpl::Destroy)));
 }
 
 NS_IMPL_ISUPPORTS(ParentImpl::ShutdownObserver, nsIObserver)

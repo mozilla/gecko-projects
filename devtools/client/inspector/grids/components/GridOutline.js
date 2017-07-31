@@ -7,15 +7,19 @@
 const { addons, createClass, DOM: dom, PropTypes } =
   require("devtools/client/shared/vendor/react");
 
+const Services = require("Services");
 const Types = require("../types");
 const { getStr } = require("../utils/l10n");
 
 // The delay prior to executing the grid cell highlighting.
 const GRID_HIGHLIGHTING_DEBOUNCE = 50;
 
-// Minimum height/width a grid cell can be
-const MIN_CELL_HEIGHT = 5;
-const MIN_CELL_WIDTH = 5;
+// Prefs for the max number of rows/cols a grid container can have for
+// the outline to display.
+const GRID_OUTLINE_MAX_ROWS_PREF =
+  Services.prefs.getIntPref("devtools.gridinspector.gridOutlineMaxRows");
+const GRID_OUTLINE_MAX_COLUMNS_PREF =
+  Services.prefs.getIntPref("devtools.gridinspector.gridOutlineMaxColumns");
 
 // Move SVG grid to the right 100 units, so that it is not flushed against the edge of
 // layout border
@@ -57,8 +61,18 @@ module.exports = createClass({
     let { width, height } = selectedGrid
                             ? this.getTotalWidthAndHeight(selectedGrid)
                             : { width: 0, height: 0 };
+    let showOutline;
 
-    this.setState({ height, width, selectedGrid, showOutline: true });
+    if (selectedGrid) {
+      const { cols, rows } = selectedGrid.gridFragments[0];
+
+      // Show the grid outline if both the rows/columns are less than or equal
+      // to their max prefs.
+      showOutline = (cols.lines.length <= GRID_OUTLINE_MAX_COLUMNS_PREF) &&
+                    (rows.lines.length <= GRID_OUTLINE_MAX_ROWS_PREF);
+    }
+
+    this.setState({ height, width, selectedGrid, showOutline });
   },
 
   /**
@@ -129,7 +143,7 @@ module.exports = createClass({
     return height;
   },
 
-  highlightCell(e) {
+  onHighlightCell({ target, type }) {
     // Debounce the highlighting of cells.
     // This way we don't end up sending many requests to the server for highlighting when
     // cells get hovered in a rapid succession We only send a request if the user settles
@@ -139,12 +153,12 @@ module.exports = createClass({
     }
 
     this.highlightTimeout = setTimeout(() => {
-      this.doHighlightCell(e);
+      this.doHighlightCell(target, type === "mouseleave");
       this.highlightTimeout = null;
     }, GRID_HIGHLIGHTING_DEBOUNCE);
   },
 
-  doHighlightCell({ target }) {
+  doHighlightCell(target, hide) {
     const {
       grids,
       onShowGridAreaHighlight,
@@ -156,6 +170,13 @@ module.exports = createClass({
     const color = target.closest(".grid-cell-group").dataset.gridLineColor;
     const rowNumber = target.dataset.gridRow;
     const columnNumber = target.dataset.gridColumn;
+
+    onShowGridAreaHighlight(grids[id].nodeFront, null, color);
+    onShowGridCellHighlight(grids[id].nodeFront, color);
+
+    if (hide) {
+      return;
+    }
 
     if (name) {
       onShowGridAreaHighlight(grids[id].nodeFront, name, color);
@@ -212,14 +233,6 @@ module.exports = createClass({
 
       for (let columnNumber = 1; columnNumber <= numberOfColumns; columnNumber++) {
         width = GRID_CELL_SCALE_FACTOR * (cols.tracks[columnNumber - 1].breadth / 100);
-
-        // If a grid cell is less than the minimum pixels in width or height,
-        // do not render the outline at all.
-        if (width < MIN_CELL_WIDTH || height < MIN_CELL_HEIGHT) {
-          this.setState({ showOutline: false });
-
-          return [];
-        }
 
         const gridAreaName = this.getGridAreaName(columnNumber, rowNumber, areas);
         const gridCell = this.renderGridCell(id, gridFragmentIndex, x, y,
@@ -280,8 +293,8 @@ module.exports = createClass({
         width,
         height,
         fill: "none",
-        onMouseOver: this.onMouseOverCell,
-        onMouseOut: this.onMouseLeaveCell,
+        onMouseEnter: this.onHighlightCell,
+        onMouseLeave: this.onHighlightCell,
       }
     );
   },
@@ -291,6 +304,7 @@ module.exports = createClass({
 
     return dom.g(
       {
+        id: "grid-cell-group",
         "className": "grid-cell-group",
         "data-grid-line-color": color,
         "style": { color }
@@ -312,24 +326,6 @@ module.exports = createClass({
     );
   },
 
-  onMouseLeaveCell({ target }) {
-    const {
-      grids,
-      onShowGridAreaHighlight,
-      onShowGridCellHighlight,
-    } = this.props;
-    const id = target.dataset.gridId;
-    const color = target.closest(".grid-cell-group").dataset.gridLineColor;
-
-    onShowGridAreaHighlight(grids[id].nodeFront, null, color);
-    onShowGridCellHighlight(grids[id].nodeFront, color);
-  },
-
-  onMouseOverCell(event) {
-    event.persist();
-    this.highlightCell(event);
-  },
-
   renderOutline() {
     const {
       height,
@@ -341,6 +337,7 @@ module.exports = createClass({
     return showOutline ?
       dom.svg(
         {
+          id: "grid-outline",
           width: "100%",
           height: this.getHeight(),
           viewBox: `${TRANSLATE_X} ${TRANSLATE_Y} ${width} ${height}`,
@@ -357,7 +354,8 @@ module.exports = createClass({
     return selectedGrid ?
       dom.div(
         {
-          className: "grid-outline",
+          id: "grid-outline-container",
+          className: "grid-outline-container",
         },
         this.renderOutline()
       )

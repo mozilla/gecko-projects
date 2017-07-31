@@ -59,9 +59,9 @@ if (typeof Mozilla == "undefined") {
 
     function listener(event) {
       if (typeof event.detail != "object")
-	return;
+        return;
       if (event.detail.callbackID != id)
-	return;
+        return;
 
       document.removeEventListener("mozUITourResponse", listener);
       callback(event.detail.data);
@@ -107,9 +107,10 @@ if (typeof Mozilla == "undefined") {
    * <li>controlCenter-trackingBlock
    * <li>customize
    * <li>devtools
+   * <li>forget
    * <li>help
    * <li>home
-   * <li>forget
+   * <li>library
    * <li>pocket
    * <li>privateWindow
    * <li>quit
@@ -265,12 +266,12 @@ if (typeof Mozilla == "undefined") {
     var buttonData = [];
     if (Array.isArray(buttons)) {
       for (var i = 0; i < buttons.length; i++) {
-	buttonData.push({
-	  label: buttons[i].label,
-	  icon: buttons[i].icon,
-	  style: buttons[i].style,
-	  callbackID: _waitForCallback(buttons[i].callback)
-	});
+        buttonData.push({
+          label: buttons[i].label,
+          icon: buttons[i].icon,
+          style: buttons[i].style,
+          callbackID: _waitForCallback(buttons[i].callback)
+        });
       }
     }
 
@@ -370,8 +371,8 @@ if (typeof Mozilla == "undefined") {
       themes.push(theme);
 
       _sendEvent("previewTheme", {
-	theme: JSON.stringify(theme),
-	state: true
+        theme: JSON.stringify(theme),
+        state: true
       });
 
       callback(theme);
@@ -480,6 +481,13 @@ if (typeof Mozilla == "undefined") {
    * @property {String} distribution - Contains the distributionId property. This value will be
    *                                   "default" in most cases but can differ for repack or
    *                                   funnelcake builds. Since Fx48
+   * @property {Number} profileCreatedWeeksAgo - The number of weeks since the profile was created,
+   *                                             starting from 0 for profiles dating less than
+   *                                             seven days old. Since Fx56.
+   * @property {Number} profileResetWeeksAgo - The number of weeks since the profile was last reset,
+   *                                           starting from 0 for profiles reset less than seven
+   *                                           days ago. If the profile has never been reset it
+   *                                           returns null. Since Fx56.
    * @property {String} version - Version string e.g. "48.0a2"
    * @since 35
    */
@@ -555,6 +563,8 @@ if (typeof Mozilla == "undefined") {
    * is a string, begins with "utm_" and contains only only alphanumeric
    * characters, dashes or underscores. The values may be any string and will
    * automatically be encoded.
+   * @param {String} email - A string containing the default email account
+   * for the URL opened by the browser.
    * @since 31, 47 for `extraURLCampaignParams`
    * @example
    * // Will open about:accounts?action=signup&entrypoint=uitour
@@ -566,10 +576,15 @@ if (typeof Mozilla == "undefined") {
    *   'utm_foo': 'bar',
    *   'utm_bar': 'baz'
    * });
+   * @example
+   * // Will open:
+   * // about:accounts?action=signup&entrypoint=uitour&email=foo%40bar.com
+   * Mozilla.UITour.showFirefoxAccounts(null, "foo@bar.com");
    */
-  Mozilla.UITour.showFirefoxAccounts = function(extraURLCampaignParams) {
+  Mozilla.UITour.showFirefoxAccounts = function(extraURLCampaignParams, email) {
     _sendEvent("showFirefoxAccounts", {
       extraURLCampaignParams: JSON.stringify(extraURLCampaignParams),
+      email
     });
   };
 

@@ -4,16 +4,19 @@
 
 use {OpaqueStyleAndLayoutData, TrustedNodeAddress, PendingImage};
 use app_units::Au;
-use euclid::point::Point2D;
-use euclid::rect::Rect;
+use euclid::{Point2D, Rect};
 use gfx_traits::Epoch;
 use ipc_channel::ipc::{IpcReceiver, IpcSender};
+use metrics::PaintTimeMetrics;
 use msg::constellation_msg::PipelineId;
 use net_traits::image_cache::ImageCache;
 use profile_traits::mem::ReportsChan;
 use rpc::LayoutRPC;
 use script_traits::{ConstellationControlMsg, LayoutControlMsg, LayoutMsg as ConstellationMsg};
 use script_traits::{ScrollState, UntrustedNodeAddress, WindowSizeData};
+use script_traits::Painter;
+use servo_arc::Arc as ServoArc;
+use servo_atoms::Atom;
 use servo_url::ServoUrl;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
@@ -25,7 +28,7 @@ use style::stylesheets::Stylesheet;
 /// Asynchronous messages that script can send to layout.
 pub enum Msg {
     /// Adds the given stylesheet to the document.
-    AddStylesheet(::style::stylearc::Arc<Stylesheet>),
+    AddStylesheet(ServoArc<Stylesheet>),
 
     /// Change the quirks mode.
     SetQuirksMode(QuirksMode),
@@ -84,6 +87,12 @@ pub enum Msg {
     /// Tells layout about a single new scrolling offset from the script. The rest will
     /// remain untouched and layout won't forward this back to script.
     UpdateScrollStateFromScript(ScrollState),
+
+    /// Tells layout that script has added some paint worklet modules.
+    RegisterPaint(Atom, Vec<Atom>, Arc<Painter>),
+
+    /// Send to layout the precise time when the navigation started.
+    SetNavigationStart(f64),
 }
 
 
@@ -129,7 +138,7 @@ pub struct ScriptReflow {
     /// The document node.
     pub document: TrustedNodeAddress,
     /// The document's list of stylesheets.
-    pub document_stylesheets: Vec<::style::stylearc::Arc<Stylesheet>>,
+    pub document_stylesheets: Vec<ServoArc<Stylesheet>>,
     /// Whether the document's stylesheets have changed since the last script reflow.
     pub stylesheets_changed: bool,
     /// The current window size.
@@ -153,4 +162,5 @@ pub struct NewLayoutThreadInfo {
     pub image_cache: Arc<ImageCache>,
     pub content_process_shutdown_chan: Option<IpcSender<()>>,
     pub layout_threads: usize,
+    pub paint_time_metrics: PaintTimeMetrics,
 }

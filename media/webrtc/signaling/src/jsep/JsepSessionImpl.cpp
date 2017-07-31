@@ -2,10 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "logging.h"
-
-#include "webrtc/config.h"
 #include "signaling/src/jsep/JsepSessionImpl.h"
+
 #include <string>
 #include <set>
 #include <bitset>
@@ -15,9 +13,12 @@
 #include "nss.h"
 #include "pk11pub.h"
 #include "nsDebug.h"
+#include "logging.h"
 
-#include <mozilla/Move.h>
-#include <mozilla/UniquePtr.h>
+#include "mozilla/Move.h"
+#include "mozilla/UniquePtr.h"
+
+#include "webrtc/config.h"
 
 #include "signaling/src/jsep/JsepTrack.h"
 #include "signaling/src/jsep/JsepTrack.h"
@@ -427,13 +428,10 @@ JsepSessionImpl::SetupOfferMSections(const JsepOfferOptions& options, Sdp* sdp)
 
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (!(options.mDontOfferDataChannel.isSome() &&
-        *options.mDontOfferDataChannel)) {
-    rv = SetupOfferMSectionsByType(
-        SdpMediaSection::kApplication, Maybe<size_t>(), sdp);
+  rv = SetupOfferMSectionsByType(
+      SdpMediaSection::kApplication, Maybe<size_t>(), sdp);
 
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
+  NS_ENSURE_SUCCESS(rv, rv);
 
   if (!sdp->GetMediaSectionCount()) {
     JSEP_SET_ERROR("Cannot create an offer with no local tracks, "
@@ -771,10 +769,10 @@ JsepSessionImpl::CreateOffer(const JsepOfferOptions& options,
 }
 
 std::string
-JsepSessionImpl::GetLocalDescription() const
+JsepSessionImpl::GetLocalDescription(JsepDescriptionPendingOrCurrent type) const
 {
   std::ostringstream os;
-  mozilla::Sdp* sdp = GetParsedLocalDescription();
+  mozilla::Sdp* sdp = GetParsedLocalDescription(type);
   if (sdp) {
     sdp->Serialize(os);
   }
@@ -782,10 +780,10 @@ JsepSessionImpl::GetLocalDescription() const
 }
 
 std::string
-JsepSessionImpl::GetRemoteDescription() const
+JsepSessionImpl::GetRemoteDescription(JsepDescriptionPendingOrCurrent type) const
 {
   std::ostringstream os;
-  mozilla::Sdp* sdp =  GetParsedRemoteDescription();
+  mozilla::Sdp* sdp =  GetParsedRemoteDescription(type);
   if (sdp) {
     sdp->Serialize(os);
   }
@@ -2369,7 +2367,9 @@ JsepSessionImpl::SetupDefaultCodecs()
       "webrtc-datachannel",
       WEBRTC_DATACHANNEL_STREAMS_DEFAULT,
       WEBRTC_DATACHANNEL_PORT_DEFAULT,
-      WEBRTC_DATACHANELL_MAX_MESSAGE_SIZE_DEFAULT
+      // TODO: Bug 979417 needs to change this to
+      // WEBRTC_DATACHANELL_MAX_MESSAGE_SIZE_DEFAULT
+      0
       ));
 
   // Update the redundant encodings for the RED codec with the supported
@@ -2407,7 +2407,7 @@ JsepSessionImpl::AddRemoteIceCandidate(const std::string& candidate,
 {
   mLastError.clear();
 
-  mozilla::Sdp* sdp = GetParsedRemoteDescription();
+  mozilla::Sdp* sdp = GetParsedRemoteDescription(kJsepDescriptionPendingOrCurrent);
 
   if (!sdp) {
     JSEP_SET_ERROR("Cannot add ICE candidate in state " << GetStateStr(mState));
@@ -2425,7 +2425,7 @@ JsepSessionImpl::AddLocalIceCandidate(const std::string& candidate,
 {
   mLastError.clear();
 
-  mozilla::Sdp* sdp = GetParsedLocalDescription();
+  mozilla::Sdp* sdp = GetParsedLocalDescription(kJsepDescriptionPendingOrCurrent);
 
   if (!sdp) {
     JSEP_SET_ERROR("Cannot add ICE candidate in state " << GetStateStr(mState));
@@ -2468,7 +2468,7 @@ JsepSessionImpl::UpdateDefaultCandidate(
 {
   mLastError.clear();
 
-  mozilla::Sdp* sdp = GetParsedLocalDescription();
+  mozilla::Sdp* sdp = GetParsedLocalDescription(kJsepDescriptionPendingOrCurrent);
 
   if (!sdp) {
     JSEP_SET_ERROR("Cannot add ICE candidate in state " << GetStateStr(mState));
@@ -2515,7 +2515,7 @@ JsepSessionImpl::EndOfLocalCandidates(uint16_t level)
 {
   mLastError.clear();
 
-  mozilla::Sdp* sdp = GetParsedLocalDescription();
+  mozilla::Sdp* sdp = GetParsedLocalDescription(kJsepDescriptionPendingOrCurrent);
 
   if (!sdp) {
     JSEP_SET_ERROR("Cannot mark end of local ICE candidates in state "
@@ -2591,18 +2591,24 @@ JsepSessionImpl::EnableOfferMsection(SdpMediaSection* msection)
 }
 
 mozilla::Sdp*
-JsepSessionImpl::GetParsedLocalDescription() const
+JsepSessionImpl::GetParsedLocalDescription(JsepDescriptionPendingOrCurrent type) const
 {
-  if (mPendingLocalDescription) {
+  if (type == kJsepDescriptionPending) {
+    return mPendingLocalDescription.get();
+  } else if (mPendingLocalDescription &&
+             type == kJsepDescriptionPendingOrCurrent) {
     return mPendingLocalDescription.get();
   }
   return mCurrentLocalDescription.get();
 }
 
 mozilla::Sdp*
-JsepSessionImpl::GetParsedRemoteDescription() const
+JsepSessionImpl::GetParsedRemoteDescription(JsepDescriptionPendingOrCurrent type) const
 {
-  if (mPendingRemoteDescription) {
+  if (type == kJsepDescriptionPending) {
+    return mPendingRemoteDescription.get();
+  } else if (mPendingRemoteDescription &&
+             type == kJsepDescriptionPendingOrCurrent) {
     return mPendingRemoteDescription.get();
   }
   return mCurrentRemoteDescription.get();

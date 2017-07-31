@@ -111,7 +111,6 @@ public:
   bool CreateDXVA2Decoder(const VideoInfo& aVideoInfo,
                           nsACString& aFailureReason) override;
 
-  uint32_t GetVendorId() const override { return mVendorId; }
 private:
   bool CanCreateDecoder(const DXVA2_VideoDesc& aDesc,
                         const float aFramerate) const;
@@ -129,7 +128,6 @@ private:
   GUID mDecoderGUID;
   UINT32 mResetToken = 0;
   bool mFirstFrame = true;
-  uint32_t mVendorId = 0;
 };
 
 void GetDXVA2ExtendedFormatFromMFMediaType(IMFMediaType *pType,
@@ -396,8 +394,7 @@ D3D9DXVA2Manager::Init(layers::KnowsCompositor* aKnowsCompositor,
     return hr;
   }
 
-  mVendorId = adapter.VendorId;
-  if (mVendorId == 0x1022 && !gfxPrefs::PDMWMFSkipBlacklist()) {
+  if (adapter.VendorId == 0x1022 && !gfxPrefs::PDMWMFSkipBlacklist()) {
     for (const auto& model : sAMDPreUVD4) {
       if (adapter.DeviceId == model) {
         mIsAMDPreUVD4 = true;
@@ -628,7 +625,6 @@ public:
   bool CreateDXVA2Decoder(const VideoInfo& aVideoInfo,
                           nsACString& aFailureReason) override;
 
-  uint32_t GetVendorId() const override { return mVendorId; }
 private:
   HRESULT CreateFormatConverter();
 
@@ -652,7 +648,6 @@ private:
   uint32_t mWidth = 0;
   uint32_t mHeight = 0;
   UINT mDeviceManagerToken = 0;
-  uint32_t mVendorId = 0;
 };
 
 bool
@@ -759,6 +754,11 @@ D3D11DXVA2Manager::InitInternal(layers::KnowsCompositor* aKnowsCompositor,
     }
   }
 
+  RefPtr<ID3D10Multithread> mt;
+  hr = mDevice->QueryInterface((ID3D10Multithread**)getter_AddRefs(mt));
+  NS_ENSURE_TRUE(SUCCEEDED(hr) && mt, hr);
+  mt->SetMultithreadProtected(TRUE);
+
   mDevice->GetImmediateContext(getter_AddRefs(mContext));
 
   hr = wmf::MFCreateDXGIDeviceManager(&mDeviceManagerToken,
@@ -857,8 +857,7 @@ D3D11DXVA2Manager::InitInternal(layers::KnowsCompositor* aKnowsCompositor,
     return hr;
   }
 
-  mVendorId = adapterDesc.VendorId;
-  if (mVendorId == 0x1022 && !gfxPrefs::PDMWMFSkipBlacklist()) {
+  if (adapterDesc.VendorId == 0x1022 && !gfxPrefs::PDMWMFSkipBlacklist()) {
     for (const auto& model : sAMDPreUVD4) {
       if (adapterDesc.DeviceId == model) {
         mIsAMDPreUVD4 = true;
@@ -955,7 +954,10 @@ D3D11DXVA2Manager::CopyToImage(IMFSample* aVideoSample,
       hr = mTransform->Output(&sample);
     }
   }
-  if (!mutex && mDevice != DeviceManagerDx::Get()->GetCompositorDevice()) {
+
+  if (!mutex && mDevice != DeviceManagerDx::Get()->GetCompositorDevice() && mSyncObject) {
+    // It appears some race-condition may allow us to arrive here even when mSyncObject
+    // is null. It's better to avoid that crash.
     client->SyncWithObject(mSyncObject);
     mSyncObject->FinalizeFrame();
   }
@@ -979,7 +981,8 @@ D3D11DXVA2Manager::CopyToBGRATexture(ID3D11Texture2D *aInTexture,
 
   CD3D11_TEXTURE2D_DESC desc;
   aInTexture->GetDesc(&desc);
-  ConfigureForSize(desc.Width, desc.Height);
+  hr = ConfigureForSize(desc.Width, desc.Height);
+  NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
   RefPtr<IDXGIKeyedMutex> mutex;
   inTexture->QueryInterface((IDXGIKeyedMutex**)getter_AddRefs(mutex));
@@ -1092,7 +1095,7 @@ D3D11DXVA2Manager::ConfigureForSize(uint32_t aWidth, uint32_t aHeight)
   hr = outputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
-  hr = outputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12);
+  hr = outputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_ARGB32);
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
   gfx::IntSize size(mWidth, mHeight);

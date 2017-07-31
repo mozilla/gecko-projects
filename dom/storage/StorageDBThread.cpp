@@ -188,7 +188,7 @@ StorageDBThread::Shutdown()
 void
 StorageDBThread::SyncPreload(LocalStorageCacheBridge* aCache, bool aForceSync)
 {
-  PROFILER_LABEL_FUNC(js::ProfileEntry::Category::STORAGE);
+  AUTO_PROFILER_LABEL("StorageDBThread::SyncPreload", STORAGE);
   if (!aForceSync && aCache->LoadedCount()) {
     // Preload already started for this cache, just wait for it to finish.
     // LoadWait will exit after LoadDone on the cache has been called.
@@ -343,7 +343,7 @@ StorageDBThread::SetDefaultPriority()
 void
 StorageDBThread::ThreadFunc(void* aArg)
 {
-  AutoProfilerRegister registerThread("localStorage DB");
+  AutoProfilerRegisterThread registerThread("localStorage DB");
   NS_SetCurrentThreadName("localStorage DB");
   mozilla::IOInterposer::RegisterCurrentThread();
 
@@ -427,7 +427,7 @@ StorageDBThread::ThreadFunc()
 NS_IMPL_ISUPPORTS(StorageDBThread::ThreadObserver, nsIThreadObserver)
 
 NS_IMETHODIMP
-StorageDBThread::ThreadObserver::OnDispatchedEvent(nsIThreadInternal* aThread)
+StorageDBThread::ThreadObserver::OnDispatchedEvent()
 {
   MonitorAutoLock lock(mMonitor);
   mHasPendingEvents = true;
@@ -723,8 +723,10 @@ StorageDBThread::NotifyFlushCompletion()
 {
 #ifdef DOM_STORAGE_TESTS
   if (!NS_IsMainThread()) {
-    RefPtr<nsRunnableMethod<StorageDBThread, void, false> > event =
-      NewNonOwningRunnableMethod(this, &StorageDBThread::NotifyFlushCompletion);
+    RefPtr<nsRunnableMethod<StorageDBThread, void, false>> event =
+      NewNonOwningRunnableMethod("dom::StorageDBThread::NotifyFlushCompletion",
+                                 this,
+                                 &StorageDBThread::NotifyFlushCompletion);
     NS_DispatchToMainThread(event);
     return;
   }

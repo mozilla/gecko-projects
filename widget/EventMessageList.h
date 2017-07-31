@@ -122,6 +122,8 @@ NS_EVENT_MESSAGE(eFormReset)
 NS_EVENT_MESSAGE(eFormChange)
 NS_EVENT_MESSAGE(eFormSelect)
 NS_EVENT_MESSAGE(eFormInvalid)
+NS_EVENT_MESSAGE(eFormCheckboxStateChange)
+NS_EVENT_MESSAGE(eFormRadioStateChange)
 
 //Need separate focus/blur notifications for non-native widgets
 NS_EVENT_MESSAGE(eFocus)
@@ -196,6 +198,14 @@ NS_EVENT_MESSAGE(eCompositionCommitAsIs)
 // After that, eCompositionEnd will be dispatched automatically.
 // Its mRanges should be nullptr.
 NS_EVENT_MESSAGE(eCompositionCommit)
+// eCompositionCommitRequestHandled is NOT used with any Widget*Event.
+// This is used only by PBrowser.OnEventNeedingAckHandled().  If active IME
+// commits composition synchronously, TabParent returns the commit string
+// to the remote process synchronously.  Then, TabChild dispatches
+// eCompositionCommit in the remote process.  Finally, this message is sent
+// to TabParent.  (If IME commits composition asynchronously, this message is
+// not used.)
+NS_EVENT_MESSAGE(eCompositionCommitRequestHandled)
 
 // Following events are defined for deprecated DOM events which are using
 // InternalUIEvent class.
@@ -375,7 +385,7 @@ NS_EVENT_MESSAGE(eDeviceMotion)
 NS_EVENT_MESSAGE(eDeviceProximity)
 NS_EVENT_MESSAGE(eUserProximity)
 NS_EVENT_MESSAGE(eDeviceLight)
-#if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
+#if defined(MOZ_WIDGET_ANDROID)
 NS_EVENT_MESSAGE(eOrientationChange)
 #endif
 
@@ -444,6 +454,9 @@ NS_EVENT_MESSAGE(eEditorInput)
 // selection events
 NS_EVENT_MESSAGE(eSelectStart)
 NS_EVENT_MESSAGE(eSelectionChange)
+
+// visibility change
+NS_EVENT_MESSAGE(eVisibilityChange)
 
 // Details element events.
 NS_EVENT_MESSAGE(eToggle)

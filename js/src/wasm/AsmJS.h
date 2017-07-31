@@ -28,8 +28,8 @@ namespace frontend {
 class ParseContext;
 class ParseNode;
 
-template <template <typename CharT> class ParseHandler, typename CharT> class Parser;
-template <typename CharT> class FullParseHandler;
+template <class ParseHandler, typename CharT> class Parser;
+class FullParseHandler;
 
 }
 
@@ -80,7 +80,7 @@ extern JSString*
 AsmJSFunctionToString(JSContext* cx, HandleFunction fun);
 
 extern JSString*
-AsmJSModuleToString(JSContext* cx, HandleFunction fun, bool addParenToLambda);
+AsmJSModuleToString(JSContext* cx, HandleFunction fun, bool isToSource);
 
 // asm.js heap:
 

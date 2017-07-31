@@ -11,9 +11,15 @@ from mozbuild.base import MozbuildObject
 from mozbuild.backend.base import PartialBackend, HybridBackend
 from mozbuild.backend.recursivemake import RecursiveMakeBackend
 from mozbuild.shellutil import quote as shell_quote
+from mozbuild.util import OrderedDefaultDict
+
+from mozpack.files import (
+    FileFinder,
+)
 
 from .common import CommonBackend
 from ..frontend.data import (
+    ChromeManifestEntry,
     ContextDerived,
     Defines,
     FinalTargetFiles,
@@ -124,6 +130,15 @@ class TupOnly(CommonBackend, PartialBackend):
 
         self._backend_files = {}
         self._cmd = MozbuildObject.from_environment()
+        self._manifest_entries = OrderedDefaultDict(set)
+        self._compile_env_gen_files = (
+            '*.c',
+            '*.cpp',
+            '*.h',
+            '*.inc',
+            '*.py',
+            '*.rs',
+        )
 
         # This is a 'group' dependency - All rules that list this as an output
         # will be built before any rules that list this as an input.
@@ -167,9 +182,13 @@ class TupOnly(CommonBackend, PartialBackend):
                 'buildid.h',
                 'source-repo.h',
             )
-            if any(f in skip_files for f in obj.outputs):
-                # Let the RecursiveMake backend handle these.
-                return False
+
+            if self.environment.is_artifact_build:
+                skip_files = skip_files + self._compile_env_gen_files
+
+            for f in obj.outputs:
+                if any(mozpath.match(f, p) for p in skip_files):
+                    return False
 
             if 'application.ini.h' in obj.outputs:
                 # application.ini.h is a special case since we need to process
@@ -179,6 +198,14 @@ class TupOnly(CommonBackend, PartialBackend):
                 backend_file.delayed_generated_files.append(obj)
             else:
                 self._process_generated_file(backend_file, obj)
+        elif (isinstance(obj, ChromeManifestEntry) and
+              obj.install_target.startswith('dist/bin')):
+            top_level = mozpath.join(obj.install_target, 'chrome.manifest')
+            if obj.path != top_level:
+                entry = 'manifest %s' % mozpath.relpath(obj.path,
+                                                        obj.install_target)
+                self._manifest_entries[top_level].add(entry)
+            self._manifest_entries[obj.path].add(str(obj.entry))
         elif isinstance(obj, Defines):
             self._process_defines(backend_file, obj)
         elif isinstance(obj, HostDefines):
@@ -195,6 +222,13 @@ class TupOnly(CommonBackend, PartialBackend):
     def consume_finished(self):
         CommonBackend.consume_finished(self)
 
+        # The approach here is similar to fastermake.py, but we
+        # simply write out the resulting files here.
+        for target, entries in self._manifest_entries.iteritems():
+            with self._write_file(mozpath.join(self.environment.topobjdir,
+                                               target)) as fh:
+                fh.write(''.join('%s\n' % e for e in sorted(entries)))
+
         for objdir, backend_file in sorted(self._backend_files.items()):
             for obj in backend_file.delayed_generated_files:
                 self._process_generated_file(backend_file, obj)
@@ -202,11 +236,8 @@ class TupOnly(CommonBackend, PartialBackend):
                 pass
 
         with self._write_file(mozpath.join(self.environment.topobjdir, 'Tuprules.tup')) as fh:
-            acdefines = [name for name in self.environment.defines
-                if not name in self.environment.non_global_defines]
-            acdefines_flags = ' '.join(['-D%s=%s' % (name,
-                shell_quote(self.environment.defines[name]))
-                for name in sorted(acdefines)])
+            acdefines_flags = ' '.join(['-D%s=%s' % (name, shell_quote(value))
+                for (name, value) in sorted(self.environment.acdefines.iteritems())])
             # TODO: AB_CD only exists in Makefiles at the moment.
             acdefines_flags += ' -DAB_CD=en-US'
 
@@ -288,6 +319,11 @@ class TupOnly(CommonBackend, PartialBackend):
             if not path:
                 raise Exception("Cannot install to " + target)
 
+        if target.startswith('_tests'):
+            # TODO: TEST_HARNESS_FILES present a few challenges for the tup
+            # backend (bug 1372381).
+            return
+
         for path, files in obj.files.walk():
             backend_file = self._get_backend_file(mozpath.join(target, path))
             for f in files:
@@ -303,13 +339,35 @@ class TupOnly(CommonBackend, PartialBackend):
                             # skip this for now.
                             pass
                         else:
-                            # TODO: This is needed for tests
-                            pass
+                            def _prefix(s):
+                                for p in mozpath.split(s):
+                                    if '*' not in p:
+                                        yield p + '/'
+                            prefix = ''.join(_prefix(f.full_path))
+                            self.backend_input_files.add(prefix)
+                            finder = FileFinder(prefix)
+                            for p, _ in finder.find(f.full_path[len(prefix):]):
+                                backend_file.symlink_rule(mozpath.join(prefix, p),
+                                                          output=mozpath.join(f.target_basename, p),
+                                                          output_group=self._installed_files)
                     else:
                         backend_file.symlink_rule(f.full_path, output=f.target_basename, output_group=self._installed_files)
                 else:
-                    # TODO: Support installing generated files
-                    pass
+                    if (self.environment.is_artifact_build and
+                        any(mozpath.match(f.target_basename, p) for p in self._compile_env_gen_files)):
+                        # If we have an artifact build we never would have generated this file,
+                        # so do not attempt to install it.
+                        continue
+
+                    # We're not generating files in these directories yet, so
+                    # don't attempt to install files generated from them.
+                    if f.context.relobjdir not in ('layout/style/test',
+                                                   'toolkit/library'):
+                        output = mozpath.join('$(MOZ_OBJ_ROOT)', target, path,
+                                              f.target_basename)
+                        gen_backend_file = self._get_backend_file(f.context.relobjdir)
+                        gen_backend_file.symlink_rule(f.full_path, output=output,
+                                                      output_group=self._installed_files)
 
     def _process_final_target_pp_files(self, obj, backend_file):
         for i, (path, files) in enumerate(obj.files.walk()):
@@ -318,6 +376,9 @@ class TupOnly(CommonBackend, PartialBackend):
                                  destdir=mozpath.join(self.environment.topobjdir, obj.install_target, path))
 
     def _handle_idl_manager(self, manager):
+        if self.environment.is_artifact_build:
+            return
+
         dist_idl_backend_file = self._get_backend_file('dist/idl')
         for idl in manager.idls.values():
             dist_idl_backend_file.symlink_rule(idl['source'], output_group=self._installed_files)
@@ -353,6 +414,13 @@ class TupOnly(CommonBackend, PartialBackend):
                 cmd=cmd,
                 outputs=outputs,
             )
+
+        for manifest, entries in manager.interface_manifests.items():
+            for xpt in entries:
+                self._manifest_entries[manifest].add('interfaces %s' % xpt)
+
+        for m in manager.chrome_manifests:
+            self._manifest_entries[m].add('manifest components/interfaces.manifest')
 
     def _preprocess(self, backend_file, input_file, destdir=None):
         # .css files use '%' as the preprocessor marker, which must be scaped as

@@ -8,11 +8,13 @@
 #include "Key.h"
 
 #include <algorithm>
+#include <stdint.h> // for UINT32_MAX, uintptr_t
 #include "IndexedDatabaseManager.h"
 #include "js/Date.h"
 #include "js/Value.h"
 #include "jsfriendapi.h"
 #include "mozilla/Casting.h"
+#include "mozilla/CheckedInt.h"
 #include "mozilla/EndianUtils.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozIStorageStatement.h"
@@ -45,14 +47,14 @@ namespace indexedDB {
  When encoding floats, 64bit IEEE 754 are almost sortable, except that
  positive sort lower than negative, and negative sort descending. So we use
  the following encoding:
- 
+
  value < 0 ?
    (-to64bitInt(value)) :
    (to64bitInt(value) | 0x8000000000000000)
 
 
  When encoding strings, we use variable-size encoding per the following table
- 
+
  Chars 0         - 7E           are encoded as 0xxxxxxx with 1 added
  Chars 7F        - (3FFF+7F)    are encoded as 10xxxxxx xxxxxxxx with 7F subtracted
  Chars (3FFF+80) - FFFF         are encoded as 11xxxxxx xxxxxxxx xx000000
@@ -101,7 +103,7 @@ namespace indexedDB {
 
  As a final optimization we do a post-encoding step which drops all 0s at the
  end of the encoded buffer.
- 
+
  "foo"         // 0x30 s s s
  1             // 0x10 bf f0
  ["a", "b"]    // 0x80 s 0 0x30 s
@@ -196,7 +198,10 @@ Key::ToLocaleBasedKey(Key& aTarget, const nsCString& aLocale) const
 
       nsDependentString str;
       DecodeString(it, end, str);
-      aTarget.EncodeLocaleString(str, typeOffset, aLocale);
+      nsresult rv = aTarget.EncodeLocaleString(str, typeOffset, aLocale);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
     }
   }
   aTarget.TrimBuffer();
@@ -221,8 +226,7 @@ Key::EncodeJSValInternal(JSContext* aCx, JS::Handle<JS::Value> aVal,
       IDB_REPORT_INTERNAL_ERR();
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
-    EncodeString(str, aTypeOffset);
-    return NS_OK;
+    return EncodeString(str, aTypeOffset);
   }
 
   if (aVal.isNumber()) {
@@ -299,13 +303,11 @@ Key::EncodeJSValInternal(JSContext* aCx, JS::Handle<JS::Value> aVal,
     }
 
     if (JS_IsArrayBufferObject(obj)) {
-      EncodeBinary(obj, /* aIsViewObject */ false, aTypeOffset);
-      return NS_OK;
+      return EncodeBinary(obj, /* aIsViewObject */ false, aTypeOffset);
     }
 
     if (JS_IsArrayBufferViewObject(obj)) {
-      EncodeBinary(obj, /* aIsViewObject */ true, aTypeOffset);
-      return NS_OK;
+      return EncodeBinary(obj, /* aIsViewObject */ true, aTypeOffset);
     }
   }
 
@@ -415,44 +417,64 @@ Key::EncodeJSVal(JSContext* aCx,
   return EncodeJSValInternal(aCx, aVal, aTypeOffset, 0);
 }
 
-void
+nsresult
 Key::EncodeString(const nsAString& aString, uint8_t aTypeOffset)
 {
   const char16_t* start = aString.BeginReading();
   const char16_t* end = aString.EndReading();
-  EncodeString(start, end, aTypeOffset);
+  return EncodeString(start, end, aTypeOffset);
 }
 
 template <typename T>
-void
+nsresult
 Key::EncodeString(const T* aStart, const T* aEnd, uint8_t aTypeOffset)
 {
-  EncodeAsString(aStart, aEnd, eString + aTypeOffset);
+  return EncodeAsString(aStart, aEnd, eString + aTypeOffset);
 }
 
 template <typename T>
-void
+nsresult
 Key::EncodeAsString(const T* aStart, const T* aEnd, uint8_t aType)
 {
   // First measure how long the encoded string will be.
+  if (NS_WARN_IF(aStart > aEnd || UINT32_MAX - 2 < uintptr_t(aEnd - aStart))) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
 
   // The +2 is for initial 3 and trailing 0. We'll compensate for multi-byte
   // chars below.
-  uint32_t size = (aEnd - aStart) + 2;
-  
+  uint32_t checkedSize = aEnd - aStart;
+  CheckedUint32 size = checkedSize;
+  size += 2;
+
+  MOZ_ASSERT(size.isValid());
+
   const T* start = aStart;
   const T* end = aEnd;
   for (const T* iter = start; iter < end; ++iter) {
     if (*iter > ONE_BYTE_LIMIT) {
       size += char16_t(*iter) > TWO_BYTE_LIMIT ? 2 : 1;
+      if (!size.isValid()) {
+        IDB_REPORT_INTERNAL_ERR();
+        return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+      }
     }
   }
 
   // Allocate memory for the new size
   uint32_t oldLen = mBuffer.Length();
+  size += oldLen;
+
+  if (!size.isValid()) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
+  }
+
   char* buffer;
-  if (!mBuffer.GetMutableData(&buffer, oldLen + size)) {
-    return;
+  if (!mBuffer.GetMutableData(&buffer, size.value())) {
+    IDB_REPORT_INTERNAL_ERR();
+    return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
   buffer += oldLen;
 
@@ -479,8 +501,10 @@ Key::EncodeAsString(const T* aStart, const T* aEnd, uint8_t aType)
 
   // Write end marker
   *(buffer++) = eTerminator;
-  
+
   NS_ASSERTION(buffer == mBuffer.EndReading(), "Wrote wrong number of bytes");
+
+  return NS_OK;
 }
 
 #ifdef ENABLE_INTL_API
@@ -517,10 +541,9 @@ Key::EncodeLocaleString(const nsDependentString& aString, uint8_t aTypeOffset,
     return NS_ERROR_FAILURE;
   }
 
-  EncodeString(keyBuffer.Elements(),
-               keyBuffer.Elements()+sortKeyLength,
-               aTypeOffset);
-  return NS_OK;
+  return EncodeString(keyBuffer.Elements(),
+                      keyBuffer.Elements()+sortKeyLength,
+                      aTypeOffset);
 }
 #endif
 
@@ -545,14 +568,14 @@ Key::DecodeString(const unsigned char*& aPos, const unsigned char* aEnd,
 
   // First measure how big the decoded string will be.
   uint32_t size = 0;
-  const unsigned char* iter; 
+  const unsigned char* iter;
   for (iter = buffer; iter < aEnd && *iter != eTerminator; ++iter) {
     if (*iter & 0x80) {
       iter += (*iter & 0x40) ? 2 : 1;
     }
     ++size;
   }
-  
+
   // Set end so that we don't have to check for null termination in the loop
   // below
   if (iter < aEnd) {
@@ -585,13 +608,13 @@ Key::DecodeString(const unsigned char*& aPos, const unsigned char* aEnd,
       }
       *out = (char16_t)c;
     }
-    
+
     ++out;
   }
-  
+
   NS_ASSERTION(!size || out == aString.EndReading(),
                "Should have written the whole string");
-  
+
   aPos = iter + 1;
 }
 
@@ -640,7 +663,7 @@ Key::DecodeNumber(const unsigned char*& aPos, const unsigned char* aEnd)
   return BitwiseCast<double>(bits);
 }
 
-void
+nsresult
 Key::EncodeBinary(JSObject* aObject, bool aIsViewObject, uint8_t aTypeOffset)
 {
   uint8_t* bufferData;
@@ -653,7 +676,7 @@ Key::EncodeBinary(JSObject* aObject, bool aIsViewObject, uint8_t aTypeOffset)
     js::GetArrayBufferLengthAndData(aObject, &bufferLength, &unused, &bufferData);
   }
 
-  EncodeAsString(bufferData, bufferData + bufferLength, eBinary + aTypeOffset);
+  return EncodeAsString(bufferData, bufferData + bufferLength, eBinary + aTypeOffset);
 }
 
 // static

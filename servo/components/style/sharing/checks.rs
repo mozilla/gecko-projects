@@ -10,21 +10,8 @@ use Atom;
 use bloom::StyleBloom;
 use context::{SelectorFlagsMap, SharedStyleContext};
 use dom::TElement;
-use element_state::*;
-use selectors::matching::StyleRelations;
+use servo_arc::Arc;
 use sharing::{StyleSharingCandidate, StyleSharingTarget};
-use stylearc::Arc;
-
-/// Determines, based on the results of selector matching, whether it's worth to
-/// try to share style with this element, that is, to try to insert the element
-/// in the chache.
-#[inline]
-pub fn relations_are_shareable(relations: &StyleRelations) -> bool {
-    use selectors::matching::*;
-    // If we start sharing things that are AFFECTED_BY_PSEUDO_ELEMENTS, we need
-    // to track revalidation selectors on a per-pseudo-element basis.
-    !relations.intersects(AFFECTED_BY_PSEUDO_ELEMENTS)
-}
 
 /// Whether, given two elements, they have pointer-equal computed values.
 ///
@@ -40,8 +27,8 @@ pub fn same_computed_values<E>(first: Option<E>, second: Option<E>) -> bool
         _ => return false,
     };
 
-    let eq = Arc::ptr_eq(a.borrow_data().unwrap().styles().primary.values(),
-                         b.borrow_data().unwrap().styles().primary.values());
+    let eq = Arc::ptr_eq(a.borrow_data().unwrap().styles.primary(),
+                         b.borrow_data().unwrap().styles.primary());
     eq
 }
 
@@ -55,7 +42,7 @@ pub fn have_same_style_attribute<E>(
     match (target.style_attribute(), candidate.style_attribute()) {
         (None, None) => true,
         (Some(_), None) | (None, Some(_)) => false,
-        (Some(a), Some(b)) => Arc::ptr_eq(a, b)
+        (Some(a), Some(b)) => &*a as *const _ == &*b as *const _
     }
 }
 
@@ -78,20 +65,6 @@ pub fn have_same_class<E>(target: &mut StyleSharingTarget<E>,
     where E: TElement,
 {
     target.class_list() == candidate.class_list()
-}
-
-/// Compare element and candidate state, but ignore visitedness.  Styles don't
-/// actually changed based on visitedness (since both possibilities are computed
-/// up front), so it's safe to share styles if visitedness differs.
-pub fn have_same_state_ignoring_visitedness<E>(element: E,
-                                               candidate: &StyleSharingCandidate<E>)
-                                               -> bool
-    where E: TElement,
-{
-    let state_mask = !IN_VISITED_OR_UNVISITED_STATE;
-    let state = element.get_state() & state_mask;
-    let candidate_state = candidate.element.get_state() & state_mask;
-    state == candidate_state
 }
 
 /// Whether a given element and a candidate match the same set of "revalidation"

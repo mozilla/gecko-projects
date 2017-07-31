@@ -17,6 +17,8 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "AsyncShutdown",
+                                  "resource://gre/modules/AsyncShutdown.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Extension",
                                   "resource://gre/modules/Extension.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ExtensionChild",
@@ -109,12 +111,15 @@ class EmbeddedExtension {
    *   An object with the following properties:
    * @param {string} containerAddonParams.id
    *   The Add-on id of the Legacy Extension which will contain the embedded webextension.
+   * @param {string} containerAddonParams.version
+   *   The add-on version.
    * @param {nsIURI} containerAddonParams.resourceURI
    *   The nsIURI of the Legacy Extension container add-on.
    */
-  constructor({id, resourceURI}) {
+  constructor({id, resourceURI, version}) {
     this.addonId = id;
     this.resourceURI = resourceURI;
+    this.version = version;
 
     // Setup status flag.
     this.started = false;
@@ -139,7 +144,10 @@ class EmbeddedExtension {
       this.extension = new Extension({
         id: this.addonId,
         resourceURI: embeddedExtensionURI,
+        version: this.version,
       });
+
+      this.extension.isEmbedded = true;
 
       // This callback is register to the "startup" event, emitted by the Extension instance
       // after the extension manifest.json has been loaded without any errors, but before
@@ -199,9 +207,15 @@ class EmbeddedExtension {
 
     // If there is a pending startup,  wait to be completed and then shutdown.
     if (this.startupPromise) {
-      return this.startupPromise.then(() => {
-        this.extension.shutdown();
+      let promise = this.startupPromise.then(() => {
+        return this.extension.shutdown();
       });
+
+      AsyncShutdown.profileChangeTeardown.addBlocker(
+        `Legacy Extension Shutdown: ${this.addonId}`,
+        promise.catch(() => {}));
+
+      return promise;
     }
 
     // Run shutdown now if the embedded webextension has been correctly started
@@ -227,11 +241,11 @@ EmbeddedExtensionManager = {
     }
   },
 
-  getEmbeddedExtensionFor({id, resourceURI}) {
+  getEmbeddedExtensionFor({id, resourceURI, version}) {
     let embeddedExtension = this.embeddedExtensionsByAddonId.get(id);
 
     if (!embeddedExtension) {
-      embeddedExtension = new EmbeddedExtension({id, resourceURI});
+      embeddedExtension = new EmbeddedExtension({id, resourceURI, version});
       // Keep track of the embedded extension instance.
       this.embeddedExtensionsByAddonId.set(id, embeddedExtension);
     }

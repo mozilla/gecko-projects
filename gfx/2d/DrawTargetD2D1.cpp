@@ -15,6 +15,10 @@
 #include "FilterNodeD2D1.h"
 #include "ExtendInputEffectD2D1.h"
 #include "Tools.h"
+#include "nsAppRunner.h"
+#include "MainThreadUtils.h"
+
+#include "mozilla/Mutex.h"
 
 using namespace std;
 
@@ -31,10 +35,9 @@ namespace gfx {
 
 uint64_t DrawTargetD2D1::mVRAMUsageDT;
 uint64_t DrawTargetD2D1::mVRAMUsageSS;
-IDWriteFactory *DrawTargetD2D1::mDWriteFactory;
-ID2D1Factory1* DrawTargetD2D1::mFactory = nullptr;
+StaticRefPtr<ID2D1Factory1> DrawTargetD2D1::mFactory;
 
-ID2D1Factory1 *D2DFactory1()
+RefPtr<ID2D1Factory1> D2DFactory()
 {
   return DrawTargetD2D1::factory();
 }
@@ -97,6 +100,46 @@ DrawTargetD2D1::Snapshot()
 
   RefPtr<SourceSurface> snapshot(mSnapshot);
   return snapshot.forget();
+}
+
+bool
+DrawTargetD2D1::EnsureLuminanceEffect()
+{
+  if (mLuminanceEffect.get()) {
+    return true;
+  }
+
+  HRESULT hr = mDC->CreateEffect(CLSID_D2D1LuminanceToAlpha,
+                                 getter_AddRefs(mLuminanceEffect));
+  if (FAILED(hr)) {
+    gfxCriticalError() << "Failed to create luminance effect. Code: " << hexa(hr);
+    return false;
+  }
+
+  return true;
+}
+
+already_AddRefed<SourceSurface>
+DrawTargetD2D1::IntoLuminanceSource(LuminanceType aLuminanceType, float aOpacity)
+{
+  if ((aLuminanceType != LuminanceType::LUMINANCE) ||
+      // See bug 1372577, some race condition where we get invalid
+      // results with D2D in the parent process. Fallback in that case.
+      XRE_IsParentProcess()) {
+    return DrawTarget::IntoLuminanceSource(aLuminanceType, aOpacity);
+  }
+
+  // Create the luminance effect
+  if (!EnsureLuminanceEffect()) {
+    return DrawTarget::IntoLuminanceSource(aLuminanceType, aOpacity);
+  }
+
+  mLuminanceEffect->SetInput(0, mBitmap);
+
+  RefPtr<ID2D1Image> luminanceOutput;
+  mLuminanceEffect->GetOutput(getter_AddRefs(luminanceOutput));
+
+ return MakeAndAddRef<SourceSurfaceD2D1>(luminanceOutput, mDC, SurfaceFormat::A8, mSize);
 }
 
 // Command lists are kept around by device contexts until EndDraw is called,
@@ -348,20 +391,48 @@ DrawTargetD2D1::MaskSurface(const Pattern &aSource,
 
   PrepareForDrawing(aOptions.mCompositionOp, aSource);
 
+  IntSize size = IntSize::Truncate(aMask->GetSize().width, aMask->GetSize().height);
+  Rect dest = Rect(aOffset.x, aOffset.y, Float(size.width), Float(size.height));
+
+  HRESULT hr = image->QueryInterface((ID2D1Bitmap**)getter_AddRefs(bitmap));
+  if (!bitmap || FAILED(hr)) {
+    // D2D says if we have an actual ID2D1Image and not a bitmap underlying the object,
+    // we can't query for a bitmap. Instead, Push/PopLayer
+    gfxWarning() << "FillOpacityMask only works with Bitmap source surfaces. Falling back to push/pop layer";
+
+    RefPtr<ID2D1Brush> source = CreateBrushForPattern(aSource, aOptions.mAlpha);
+    RefPtr<ID2D1ImageBrush> maskBrush;
+    hr = mDC->CreateImageBrush(image,
+                               D2D1::ImageBrushProperties(D2D1::RectF(0, 0, size.width, size.height)),
+                               D2D1::BrushProperties(1.0f, D2D1::IdentityMatrix()),
+                               getter_AddRefs(maskBrush));
+    MOZ_ASSERT(SUCCEEDED(hr));
+
+    mDC->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), nullptr,
+                                          D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                                          D2D1::IdentityMatrix(),
+                                          1.0f, maskBrush, D2D1_LAYER_OPTIONS1_NONE),
+                  nullptr);
+
+    mDC->FillRectangle(D2DRect(dest), source);
+    mDC->PopLayer();
+
+    FinalizeDrawing(aOptions.mCompositionOp, aSource);
+    return;
+  } else {
+    // If this is a data source surface, we might have created a partial bitmap
+    // for this surface and only uploaded part of the mask. In that case,
+    // we have to fixup our sizes here.
+    size.width = bitmap->GetSize().width;
+    size.height = bitmap->GetSize().height;
+    dest.width = size.width;
+    dest.height = size.height;
+  }
+
   // FillOpacityMask only works if the antialias mode is MODE_ALIASED
   mDC->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
 
-  image->QueryInterface((ID2D1Bitmap**)getter_AddRefs(bitmap));
-  if (!bitmap) {
-    gfxWarning() << "FillOpacityMask only works with Bitmap source surfaces.";
-    return;
-  }
-
-  IntSize size = IntSize::Truncate(bitmap->GetSize().width, bitmap->GetSize().height);
-
   Rect maskRect = Rect(0.f, 0.f, Float(size.width), Float(size.height));
-
-  Rect dest = Rect(aOffset.x, aOffset.y, Float(size.width), Float(size.height));
   RefPtr<ID2D1Brush> brush = CreateBrushForPattern(aSource, aOptions.mAlpha);
   mDC->FillOpacityMask(bitmap, brush, D2D1_OPACITY_MASK_CONTENT_GRAPHICS, D2DRect(dest), D2DRect(maskRect));
 
@@ -539,7 +610,7 @@ DrawTargetD2D1::FillGlyphs(ScaledFont *aFont,
                            const GlyphBuffer &aBuffer,
                            const Pattern &aPattern,
                            const DrawOptions &aOptions,
-                           const GlyphRenderingOptions *aRenderingOptions)
+                           const GlyphRenderingOptions*)
 {
   if (aFont->GetType() != FontType::DWRITE) {
     gfxDebug() << *this << ": Ignoring drawing call for incompatible font.";
@@ -548,16 +619,7 @@ DrawTargetD2D1::FillGlyphs(ScaledFont *aFont,
 
   ScaledFontDWrite *font = static_cast<ScaledFontDWrite*>(aFont);
 
-  IDWriteRenderingParams *params = nullptr;
-  if (aRenderingOptions) {
-    if (aRenderingOptions->GetType() != FontType::DWRITE) {
-      gfxDebug() << *this << ": Ignoring incompatible GlyphRenderingOptions.";
-      // This should never happen.
-      MOZ_ASSERT(false);
-    } else {
-      params = static_cast<const GlyphRenderingOptionsDWrite*>(aRenderingOptions)->mParams;
-    }
-  }
+  IDWriteRenderingParams *params = font->mParams;
 
   AntialiasMode aaMode = font->GetDefaultAAMode();
 
@@ -976,7 +1038,8 @@ DrawTargetD2D1::CreateGradientStops(GradientStop *rawStops, uint32_t aNumStops, 
     return nullptr;
   }
 
-  return MakeAndAddRef<GradientStopsD2D>(stopCollection, Factory::GetDirect3D11Device());
+  RefPtr<ID3D11Device> device = Factory::GetDirect3D11Device();
+  return MakeAndAddRef<GradientStopsD2D>(stopCollection, device);
 }
 
 already_AddRefed<FilterNode>
@@ -1008,12 +1071,10 @@ DrawTargetD2D1::Init(ID3D11Texture2D* aTexture, SurfaceFormat aFormat)
 {
   HRESULT hr;
 
-  ID2D1Device* device = Factory::GetD2D1Device();
+  RefPtr<ID2D1Device> device = Factory::GetD2D1Device(&mDeviceSeq);
   if (!device) {
     gfxCriticalNote << "[D2D1.1] Failed to obtain a device for DrawTargetD2D1::Init(ID3D11Texture2D*, SurfaceFormat).";
     return false;
-  } else {
-    mDeviceSeq = Factory::GetD2D1DeviceSeq();
   }
 
   hr = device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_ENABLE_MULTITHREADED_OPTIMIZATIONS, getter_AddRefs(mDC));
@@ -1075,12 +1136,10 @@ DrawTargetD2D1::Init(const IntSize &aSize, SurfaceFormat aFormat)
 {
   HRESULT hr;
 
-  ID2D1Device* device = Factory::GetD2D1Device();
+  RefPtr<ID2D1Device> device = Factory::GetD2D1Device(&mDeviceSeq);
   if (!device) {
     gfxCriticalNote << "[D2D1.1] Failed to obtain a device for DrawTargetD2D1::Init(IntSize, SurfaceFormat).";
     return false;
-  } else {
-    mDeviceSeq = Factory::GetD2D1DeviceSeq();
   }
 
   hr = device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_ENABLE_MULTITHREADED_OPTIMIZATIONS, getter_AddRefs(mDC));
@@ -1140,12 +1199,17 @@ DrawTargetD2D1::GetByteSize() const
   return mSize.width * mSize.height * BytesPerPixel(mFormat);
 }
 
-ID2D1Factory1*
+RefPtr<ID2D1Factory1>
 DrawTargetD2D1::factory()
 {
-  if (mFactory) {
+  StaticMutexAutoLock lock(Factory::mDeviceLock);
+
+  if (mFactory || !NS_IsMainThread()) {
     return mFactory;
   }
+
+  // We don't allow initializing the factory off the main thread.
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
   RefPtr<ID2D1Factory> factory;
   D2D1CreateFactoryFunc createD2DFactory;
@@ -1176,10 +1240,13 @@ DrawTargetD2D1::factory()
     return nullptr;
   }
 
-  hr = factory->QueryInterface((ID2D1Factory1**)&mFactory);
-  if (FAILED(hr) || !mFactory) {
+  RefPtr<ID2D1Factory1> factory1;
+  hr = factory->QueryInterface(__uuidof(ID2D1Factory1), getter_AddRefs(factory1));
+  if (FAILED(hr) || !factory1) {
     return nullptr;
   }
+
+  mFactory = factory1;
 
   ExtendInputEffectD2D1::Register(mFactory);
   RadialGradientEffectD2D1::Register(mFactory);
@@ -1187,40 +1254,15 @@ DrawTargetD2D1::factory()
   return mFactory;
 }
 
-IDWriteFactory*
-DrawTargetD2D1::GetDWriteFactory()
-{
-  if (mDWriteFactory) {
-    return mDWriteFactory;
-  }
-
-  decltype(DWriteCreateFactory)* createDWriteFactory;
-  HMODULE dwriteModule = LoadLibraryW(L"dwrite.dll");
-  createDWriteFactory = (decltype(DWriteCreateFactory)*)
-    GetProcAddress(dwriteModule, "DWriteCreateFactory");
-
-  if (!createDWriteFactory) {
-    gfxWarning() << "Failed to locate DWriteCreateFactory function.";
-    return nullptr;
-  }
-
-  HRESULT hr = createDWriteFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
-                                   reinterpret_cast<IUnknown**>(&mDWriteFactory));
-
-  if (FAILED(hr)) {
-    gfxWarning() << "Failed to create DWrite Factory.";
-  }
-
-  return mDWriteFactory;
-}
-
 void
 DrawTargetD2D1::CleanupD2D()
 {
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
+  Factory::mDeviceLock.AssertCurrentThreadOwns();
+
   if (mFactory) {
     RadialGradientEffectD2D1::Unregister(mFactory);
     ExtendInputEffectD2D1::Unregister(mFactory);
-    mFactory->Release();
     mFactory = nullptr;
   }
 }
@@ -1871,7 +1913,6 @@ DrawTargetD2D1::GetImageForSurface(SourceSurface *aSurface, Matrix &aSourceTrans
                                    bool aUserSpace)
 {
   RefPtr<ID2D1Image> image;
-
   switch (aSurface->GetType()) {
   case SurfaceType::D2D1_1_IMAGE:
     {
@@ -1964,7 +2005,8 @@ DrawTargetD2D1::PushD2DLayer(ID2D1DeviceContext *aDC, ID2D1Geometry *aGeometry, 
 
 bool
 DrawTargetD2D1::IsDeviceContextValid() {
-  return (mDeviceSeq == Factory::GetD2D1DeviceSeq()) && Factory::GetD2D1Device();
+  uint32_t seqNo;
+  return Factory::GetD2D1Device(&seqNo) && seqNo == mDeviceSeq;
 }
 
 }

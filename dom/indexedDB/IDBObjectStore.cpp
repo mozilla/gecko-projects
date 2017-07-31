@@ -211,8 +211,11 @@ StructuredCloneWriteCallback(JSContext* aCx,
     return JS_WriteBytes(aWriter, &value, sizeof(value));
   }
 
+  // UNWRAP_OBJECT calls might mutate this.
+  JS::Rooted<JSObject*> obj(aCx, aObj);
+
   IDBMutableFile* mutableFile;
-  if (NS_SUCCEEDED(UNWRAP_OBJECT(IDBMutableFile, aObj, mutableFile))) {
+  if (NS_SUCCEEDED(UNWRAP_OBJECT(IDBMutableFile, &obj, mutableFile))) {
     if (cloneWriteInfo->mDatabase->IsFileHandleDisabled()) {
       return false;
     }
@@ -281,7 +284,7 @@ StructuredCloneWriteCallback(JSContext* aCx,
 
   {
     Blob* blob = nullptr;
-    if (NS_SUCCEEDED(UNWRAP_OBJECT(Blob, aObj, blob))) {
+    if (NS_SUCCEEDED(UNWRAP_OBJECT(Blob, &obj, blob))) {
       ErrorResult rv;
       uint64_t size = blob->GetSize(rv);
       MOZ_ASSERT(!rv.Failed());
@@ -346,24 +349,19 @@ StructuredCloneWriteCallback(JSContext* aCx,
     RefPtr<JS::WasmModule> module = JS::GetWasmModule(aObj);
     MOZ_ASSERT(module);
 
-    size_t bytecodeSize;
-    size_t compiledSize;
-    module->serializedSize(&bytecodeSize, &compiledSize);
-
+    size_t bytecodeSize = module->bytecodeSerializedSize();
     UniquePtr<uint8_t[]> bytecode(new uint8_t[bytecodeSize]);
     MOZ_ASSERT(bytecode);
-
-    UniquePtr<uint8_t[]> compiled(new uint8_t[compiledSize]);
-    MOZ_ASSERT(compiled);
-
-    module->serialize(bytecode.get(),
-                      bytecodeSize,
-                      compiled.get(),
-                      compiledSize);
+    module->bytecodeSerialize(bytecode.get(), bytecodeSize);
 
     RefPtr<BlobImpl> blobImpl =
       new MemoryBlobImpl(bytecode.release(), bytecodeSize, EmptyString());
     RefPtr<Blob> bytecodeBlob = Blob::Create(nullptr, blobImpl);
+
+    size_t compiledSize = module->compiledSerializedSize();
+    UniquePtr<uint8_t[]> compiled(new uint8_t[compiledSize]);
+    MOZ_ASSERT(compiled);
+    module->compiledSerialize(compiled.get(), compiledSize);
 
     blobImpl =
       new MemoryBlobImpl(compiled.release(), compiledSize, EmptyString());

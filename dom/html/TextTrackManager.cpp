@@ -12,7 +12,6 @@
 #include "mozilla/dom/TextTrackCue.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/ClearOnShutdown.h"
-#include "mozilla/SizePrintfMacros.h"
 #include "mozilla/Telemetry.h"
 #include "nsComponentManagerUtils.h"
 #include "nsGlobalWindow.h"
@@ -170,8 +169,10 @@ TextTrackManager::AddTextTrack(TextTrackKind aKind, const nsAString& aLabel,
   ReportTelemetryForTrack(track);
 
   if (aTextTrackSource == TextTrackSource::Track) {
-    RefPtr<nsIRunnable> task =
-      NewRunnableMethod(this, &TextTrackManager::HonorUserPreferencesForTrackSelection);
+    RefPtr<nsIRunnable> task = NewRunnableMethod(
+      "dom::TextTrackManager::HonorUserPreferencesForTrackSelection",
+      this,
+      &TextTrackManager::HonorUserPreferencesForTrackSelection);
     nsContentUtils::RunInStableState(task.forget());
   }
 
@@ -190,8 +191,10 @@ TextTrackManager::AddTextTrack(TextTrack* aTextTrack)
   ReportTelemetryForTrack(aTextTrack);
 
   if (aTextTrack->GetTextTrackSource() == TextTrackSource::Track) {
-    RefPtr<nsIRunnable> task =
-      NewRunnableMethod(this, &TextTrackManager::HonorUserPreferencesForTrackSelection);
+    RefPtr<nsIRunnable> task = NewRunnableMethod(
+      "dom::TextTrackManager::HonorUserPreferencesForTrackSelection",
+      this,
+      &TextTrackManager::HonorUserPreferencesForTrackSelection);
     nsContentUtils::RunInStableState(task.forget());
   }
 }
@@ -281,7 +284,7 @@ TextTrackManager::UpdateCueDisplay()
 
   if (showingCues.Length() > 0) {
     WEBVTT_LOG("UpdateCueDisplay ProcessCues");
-    WEBVTT_LOGV("UpdateCueDisplay showingCues.Length() %" PRIuSIZE, showingCues.Length());
+    WEBVTT_LOGV("UpdateCueDisplay showingCues.Length() %zu", showingCues.Length());
     RefPtr<nsVariantCC> jsCues = new nsVariantCC();
 
     jsCues->SetAsArray(nsIDataType::VTYPE_INTERFACE,
@@ -483,12 +486,15 @@ class SimpleTextTrackEvent : public Runnable
 {
 public:
   friend class CompareSimpleTextTrackEvents;
-  SimpleTextTrackEvent(const nsAString& aEventName, double aTime,
-                       TextTrack* aTrack, TextTrackCue* aCue)
-  : mName(aEventName),
-    mTime(aTime),
-    mTrack(aTrack),
-    mCue(aCue)
+  SimpleTextTrackEvent(const nsAString& aEventName,
+                       double aTime,
+                       TextTrack* aTrack,
+                       TextTrackCue* aCue)
+    : Runnable("dom::SimpleTextTrackEvent")
+    , mName(aEventName)
+    , mTime(aTime)
+    , mTrack(aTrack)
+    , mCue(aCue)
   {}
 
   NS_IMETHOD Run() {
@@ -531,20 +537,60 @@ public:
 
   bool LessThan(SimpleTextTrackEvent* aOne, SimpleTextTrackEvent* aTwo) const
   {
+    // TimeMarchesOn step 13.1.
     if (aOne->mTime < aTwo->mTime) {
       return true;
     } else if (aOne->mTime > aTwo->mTime) {
       return false;
     }
 
-    int32_t positionOne = TrackChildPosition(aOne);
-    int32_t positionTwo = TrackChildPosition(aTwo);
-    if (positionOne < positionTwo) {
-      return true;
-    } else if (positionOne > positionTwo) {
-      return false;
+    // TimeMarchesOn step 13.2 text track cue order.
+    // TextTrack position in TextTrackList
+    TextTrack* t1 = aOne->mTrack;
+    TextTrack* t2 = aTwo->mTrack;
+    MOZ_ASSERT(t1, "CompareSimpleTextTrackEvents t1 is null");
+    MOZ_ASSERT(t2, "CompareSimpleTextTrackEvents t2 is null");
+    if (t1 != t2) {
+      TextTrackList* tList= t1->GetTextTrackList();
+      MOZ_ASSERT(tList, "CompareSimpleTextTrackEvents tList is null");
+      nsTArray<RefPtr<TextTrack>>& textTracks = tList->GetTextTrackArray();
+      auto index1 = textTracks.IndexOf(t1);
+      auto index2 = textTracks.IndexOf(t2);
+      if (index1 < index2) {
+        return true;
+      } else if (index1 > index2) {
+        return false;
+      }
     }
 
+    MOZ_ASSERT(t1 == t2, "CompareSimpleTextTrackEvents t1 != t2");
+    // c1 and c2 are both belongs to t1.
+    TextTrackCue* c1 = aOne->mCue;
+    TextTrackCue* c2 = aTwo->mCue;
+    if (c1 != c2) {
+      if (c1->StartTime() < c2->StartTime()) {
+        return true;
+      } else if (c1->StartTime() > c2->StartTime()) {
+        return false;
+      }
+      if (c1->EndTime() < c2->EndTime()) {
+        return true;
+      } else if (c1->EndTime() > c2->EndTime()) {
+        return false;
+      }
+
+      TextTrackCueList* cueList = t1->GetCues();
+      nsTArray<RefPtr<TextTrackCue>>& cues = cueList->GetCuesArray();
+      auto index1 = cues.IndexOf(c1);
+      auto index2 = cues.IndexOf(c2);
+      if (index1 < index2) {
+        return true;
+      } else if (index1 > index2) {
+        return false;
+      }
+    }
+
+    // TimeMarchesOn step 13.3.
     if (aOne->mName.EqualsLiteral("enter") ||
         aTwo->mName.EqualsLiteral("exit")) {
       return true;
@@ -584,8 +630,10 @@ TextTrackManager::DispatchUpdateCueDisplay()
     nsPIDOMWindowInner* win = mMediaElement->OwnerDoc()->GetInnerWindow();
     if (win) {
       nsGlobalWindow::Cast(win)->Dispatch(
-        "TextTrackManager::UpdateCueDisplay", TaskCategory::Other,
-        NewRunnableMethod(this, &TextTrackManager::UpdateCueDisplay));
+        TaskCategory::Other,
+        NewRunnableMethod("dom::TextTrackManager::UpdateCueDisplay",
+                          this,
+                          &TextTrackManager::UpdateCueDisplay));
       mUpdateCueDisplayDispatched = true;
     }
   }
@@ -604,8 +652,10 @@ TextTrackManager::DispatchTimeMarchesOn()
     nsPIDOMWindowInner* win = mMediaElement->OwnerDoc()->GetInnerWindow();
     if (win) {
       nsGlobalWindow::Cast(win)->Dispatch(
-        "TextTrackManager::TimeMarchesOn", TaskCategory::Other,
-        NewRunnableMethod(this, &TextTrackManager::TimeMarchesOn));
+        TaskCategory::Other,
+        NewRunnableMethod("dom::TextTrackManager::TimeMarchesOn",
+                          this,
+                          &TextTrackManager::TimeMarchesOn));
       mTimeMarchesOnDispatched = true;
     }
   }

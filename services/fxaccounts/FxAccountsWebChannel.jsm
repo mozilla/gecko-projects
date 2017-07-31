@@ -24,6 +24,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "fxAccounts",
                                   "resource://gre/modules/FxAccounts.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FxAccountsStorageManagerCanStoreField",
                                   "resource://gre/modules/FxAccountsStorage.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
+                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Weave",
                                   "resource://services-sync/main.js");
 
@@ -37,6 +39,11 @@ const COMMAND_CHANGE_PASSWORD      = "fxaccounts:change_password";
 const COMMAND_FXA_STATUS           = "fxaccounts:fxa_status";
 
 const PREF_LAST_FXA_USER           = "identity.fxaccounts.lastSignedInUserHash";
+
+// These engines were added years after Sync had been introduced, they need
+// special handling since they are system add-ons and are un-available on
+// older versions of Firefox.
+const EXTRA_ENGINES = ["addresses", "creditcards"];
 
 /**
  * A helper function that extracts the message and stack from an error object.
@@ -256,6 +263,7 @@ this.FxAccountsWebChannelHelpers = function(options) {
   options = options || {};
 
   this._fxAccounts = options.fxAccounts || fxAccounts;
+  this._privateBrowsingUtils = options.privateBrowsingUtils || PrivateBrowsingUtils;
 };
 
 this.FxAccountsWebChannelHelpers.prototype = {
@@ -279,6 +287,17 @@ this.FxAccountsWebChannelHelpers.prototype = {
     // We don't act on customizeSync anymore, it used to open a dialog inside
     // the browser to selecte the engines to sync but we do it on the web now.
     delete accountData.customizeSync;
+
+    if (accountData.offeredSyncEngines) {
+      EXTRA_ENGINES.forEach(engine => {
+        if (accountData.offeredSyncEngines.includes(engine) &&
+            !accountData.declinedSyncEngines.includes(engine)) {
+          // These extra engines are disabled by default.
+          Services.prefs.setBoolPref(`services.sync.engine.${engine}`, true);
+        }
+      });
+      delete accountData.offeredSyncEngines;
+    }
 
     if (accountData.declinedSyncEngines) {
       let declinedSyncEngines = accountData.declinedSyncEngines;
@@ -327,15 +346,12 @@ this.FxAccountsWebChannelHelpers.prototype = {
    * Check if `sendingContext` is in private browsing mode.
    */
   isPrivateBrowsingMode(sendingContext) {
-    if (!sendingContext ||
-        !sendingContext.browser ||
-        !sendingContext.browser.docShell ||
-        sendingContext.browser.docShell.usePrivateBrowsing === undefined) {
+    if (!sendingContext) {
       log.error("Unable to check for private browsing mode, assuming true");
       return true;
     }
 
-    const isPrivateBrowsing = sendingContext.browser.docShell.usePrivateBrowsing;
+    const isPrivateBrowsing = this._privateBrowsingUtils.isBrowserPrivate(sendingContext.browser);
     log.debug("is private browsing", isPrivateBrowsing);
     return isPrivateBrowsing;
   },
@@ -384,8 +400,21 @@ this.FxAccountsWebChannelHelpers.prototype = {
     }
 
     return {
-      signedInUser
+      signedInUser,
+      capabilities: {
+        engines: this._getAvailableExtraEngines()
+      }
     };
+  },
+
+  _getAvailableExtraEngines() {
+    return EXTRA_ENGINES.filter(engineName => {
+      try {
+        return Services.prefs.getBoolPref(`services.sync.engine.${engineName}.available`);
+      } catch (e) {
+        return false;
+      }
+    });
   },
 
   changePassword(credentials) {

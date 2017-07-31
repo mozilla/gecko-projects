@@ -24,8 +24,10 @@ function DatePicker(context) {
      *           {Number} year [optional]
      *           {Number} month [optional]
      *           {Number} date [optional]
-     *           {String} min
-     *           {String} max
+     *           {Number} min
+     *           {Number} max
+     *           {Number} step
+     *           {Number} stepBase
      *           {Number} firstDayOfWeek
      *           {Array<Number>} weekends
      *           {Array<String>} monthStrings
@@ -44,10 +46,10 @@ function DatePicker(context) {
      * Set initial date picker states.
      */
     _setDefaultState() {
-      const { year, month, day, min, max, firstDayOfWeek, weekends,
+      const { year, month, day, min, max, step, stepBase, firstDayOfWeek, weekends,
               monthStrings, weekdayStrings, locale, dir } = this.props;
       const dateKeeper = new DateKeeper({
-        year, month, day, min, max, firstDayOfWeek, weekends,
+        year, month, day, min, max, step, stepBase, firstDayOfWeek, weekends,
         calViewSize: CAL_VIEW_SIZE
       });
 
@@ -285,8 +287,11 @@ function DatePicker(context) {
    */
   function MonthYear(options, context) {
     const spinnerSize = 5;
-    const yearFormat = new Intl.DateTimeFormat(options.locale, { year: "numeric" }).format;
-    const dateFormat = new Intl.DateTimeFormat(options.locale, { year: "numeric", month: "long" }).format;
+    const yearFormat = new Intl.DateTimeFormat(options.locale, { year: "numeric",
+                                                                 timeZone: "UTC" }).format;
+    const dateFormat = new Intl.DateTimeFormat(options.locale, { year: "numeric",
+                                                                 month: "long",
+                                                                 timeZone: "UTC" }).format;
     const spinnerOrder =
       options.datetimeOrders.indexOf("month") < options.datetimeOrders.indexOf("year") ?
       "order-month-year" : "order-year-month";
@@ -312,7 +317,7 @@ function DatePicker(context) {
           this.state.isYearSet = true;
           options.setYear(year);
         },
-        getDisplayString: year => yearFormat(new Date(new Date(0).setFullYear(year))),
+        getDisplayString: year => yearFormat(new Date(new Date(0).setUTCFullYear(year))),
         viewportSize: spinnerSize
       }, context.monthYearView)
     };

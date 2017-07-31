@@ -172,11 +172,19 @@ window.inlineSelectionCss = `
 
 .hover-highlight {
   animation: fade-in 125ms forwards cubic-bezier(0.07, 0.95, 0, 1);
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.2);
   border-radius: 1px;
   pointer-events: none;
   position: absolute;
   z-index: 10000000000; }
+  .hover-highlight:before {
+    border: 2px dashed rgba(255, 255, 255, 0.4);
+    bottom: 0;
+    content: '';
+    left: 0;
+    position: absolute;
+    right: 0;
+    top: 0; }
 
 .mover-target.direction-topLeft {
   cursor: nwse-resize;
@@ -320,19 +328,26 @@ window.inlineSelectionCss = `
   background-position: center center;
   background-repeat: no-repeat;
   background-size: 18px 18px;
+  border: 1px solid #dedede;
   margin: 5px;
   width: 40px; }
 
 .highlight-button-save {
+  background-image: url("MOZ_EXTENSION/icons/cloud.svg");
+  background-position: 8px center;
+  background-repeat: no-repeat;
+  background-size: 20px 18px;
   font-size: 18px;
   margin: 5px;
-  min-width: 80px; }
+  min-width: 80px;
+  padding-left: 34px; }
 
 .highlight-button-download {
   background-image: url("MOZ_EXTENSION/icons/download.svg");
   background-position: center center;
   background-repeat: no-repeat;
   background-size: 18px 18px;
+  border: 1px solid #dedede;
   display: block;
   margin: 5px;
   width: 40px; }
@@ -414,7 +429,7 @@ window.inlineSelectionCss = `
   display: flex;
   flex-direction: row-reverse;
   background: #f5f5f5;
-  border-radius: 1px;
+  border-radius: 2px;
   box-sizing: border-box;
   height: 80px;
   padding: 8px;

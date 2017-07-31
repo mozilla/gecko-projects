@@ -363,7 +363,7 @@ imgFrame::InitWithDrawable(gfxDrawable* aDrawable,
   // Draw using the drawable the caller provided.
   RefPtr<gfxContext> ctx = gfxContext::CreateOrNull(target);
   MOZ_ASSERT(ctx);  // Already checked the draw target above.
-  gfxUtils::DrawPixelSnapped(ctx, aDrawable, mFrameRect.Size(),
+  gfxUtils::DrawPixelSnapped(ctx, aDrawable, SizeDouble(mFrameRect.Size()),
                              ImageRegion::Create(ThebesRect(mFrameRect)),
                              mFormat, aSamplingFilter, aImageFlags);
 
@@ -398,7 +398,7 @@ imgFrame::Optimize(DrawTarget* aTarget)
 {
   MOZ_ASSERT(NS_IsMainThread());
   mMonitor.AssertCurrentThreadOwns();
-  
+
   if (mLockCount > 0 || !mOptimizable) {
     // Don't optimize right now.
     return NS_OK;
@@ -529,8 +529,7 @@ bool imgFrame::Draw(gfxContext* aContext, const ImageRegion& aRegion,
                     SamplingFilter aSamplingFilter, uint32_t aImageFlags,
                     float aOpacity)
 {
-  PROFILER_LABEL("imgFrame", "Draw",
-    js::ProfileEntry::Category::GRAPHICS);
+  AUTO_PROFILER_LABEL("imgFrame::Draw", GRAPHICS);
 
   MOZ_ASSERT(NS_IsMainThread());
   NS_ASSERTION(!aRegion.Rect().IsEmpty(), "Drawing empty region!");

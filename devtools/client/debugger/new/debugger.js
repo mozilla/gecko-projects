@@ -63,29 +63,31 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
-	var React = __webpack_require__(2);
-	var ReactDOM = __webpack_require__(31);
+	var _react = __webpack_require__(2);
+
+	var _react2 = _interopRequireDefault(_react);
+
+	var _reactDom = __webpack_require__(31);
+
+	var _reactDom2 = _interopRequireDefault(_reactDom);
+
+	var _devtoolsLaunchpad = __webpack_require__(131);
+
+	var _devtoolsConfig = __webpack_require__(828);
+
+	var _client = __webpack_require__(888);
+
+	var _bootstrap = __webpack_require__(897);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
 	//
 	// if (process.env.NODE_ENV !== "production") {
 	//   const Perf = require("react-addons-perf");
 	//   window.Perf = Perf;
 	// }
 
-	var _require = __webpack_require__(131),
-	    bootstrap = _require.bootstrap,
-	    L10N = _require.L10N,
-	    unmountRoot = _require.unmountRoot;
-
-	var _require2 = __webpack_require__(828),
-	    isFirefoxPanel = _require2.isFirefoxPanel;
-
-	var _require3 = __webpack_require__(888),
-	    onConnect = _require3.onConnect;
-
-	var _require4 = __webpack_require__(897),
-	    teardownWorkers = _require4.teardownWorkers;
-
-	if (isFirefoxPanel()) {
+	if ((0, _devtoolsConfig.isFirefoxPanel)()) {
 	  module.exports = {
 	    bootstrap: (_ref) => {
 	      var threadClient = _ref.threadClient,
@@ -93,7 +95,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	          debuggerClient = _ref.debuggerClient,
 	          sourceMaps = _ref.sourceMaps;
 
-	      return onConnect({
+	      return (0, _client.onConnect)({
 	        tab: { clientType: "firefox" },
 	        tabConnection: {
 	          tabTarget,
@@ -105,17 +107,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	      });
 	    },
 	    destroy: () => {
-	      unmountRoot(ReactDOM);
-	      teardownWorkers();
+	      (0, _devtoolsLaunchpad.unmountRoot)(_reactDom2.default);
+	      (0, _bootstrap.teardownWorkers)();
 	    }
 	  };
 	} else {
-	  window.L10N = L10N;
+	  window.L10N = _devtoolsLaunchpad.L10N;
 	  // $FlowIgnore:
 	  window.L10N.setBundle(__webpack_require__(960));
 
-	  bootstrap(React, ReactDOM).then(connection => {
-	    onConnect(connection, {
+	  (0, _devtoolsLaunchpad.bootstrap)(_react2.default, _reactDom2.default).then(connection => {
+	    (0, _client.onConnect)(connection, {
 	      sourceMaps: __webpack_require__(898)
 	    });
 	  });
@@ -3269,7 +3271,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var getTabs = (() => {
 	  var _ref4 = _asyncToGenerator(function* (actions) {
-	    var firefoxTabs = yield firefox.getTabs();
+	    var firefoxTabs = yield firefox.connectClient();
 	    var chromeTabs = yield chrome.connectClient();
 	    var nodeTabs = yield chrome.connectNodeClient();
 
@@ -3307,6 +3309,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	    setInterval(_asyncToGenerator(function* () {
 	      return yield getTabs(actions);
 	    }), 3000);
+
+	    return undefined;
 	  });
 
 	  return function bootstrap(_x3, _x4) {
@@ -3315,6 +3319,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	})();
 
 	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	/* global window, document, DebuggerConfig */
 
@@ -3338,11 +3346,11 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var L10N = __webpack_require__(185);
 
-	var _require6 = __webpack_require__(966),
+	var _require6 = __webpack_require__(1130),
 	    showMenu = _require6.showMenu,
 	    buildMenu = _require6.buildMenu;
 
-	setConfig(({"environment":"firefox-panel","logging":false,"clientLogging":false,"firefox":{"mcPath":"./firefox"},"workers":{"parserURL":"resource://devtools/client/debugger/new/parser-worker.js","prettyPrintURL":"resource://devtools/client/debugger/new/pretty-print-worker.js"},"features":{"blackbox":{"enabled":true},"chromeScopes":{"enabled":false},"eventListeners":{"enabled":false},"codeCoverage":{"enabled":false},"searchNav":{"enabled":true},"collapseFrame":{"enabled":true}}}));
+	setConfig(({"environment":"firefox-panel","logging":false,"clientLogging":false,"firefox":{"mcPath":"./firefox"},"workers":{"parserURL":"resource://devtools/client/debugger/new/parser-worker.js","prettyPrintURL":"resource://devtools/client/debugger/new/pretty-print-worker.js","searchURL":"resource://devtools/client/debugger/new/search-worker.js"},"features":{"blackbox":{"enabled":true},"chromeScopes":{"enabled":false},"eventListeners":{"enabled":false},"codeCoverage":{"enabled":false},"codeFolding":{"enabled":false},"searchNav":{"enabled":true},"collapseFrame":{"enabled":true}}}));
 
 	// Set various flags before requiring app code.
 	if (getValue("logging.client")) {
@@ -3522,6 +3530,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	/**
 	 * A middleware which acts like a service, because it is stateful
 	 * and "long-running" in the background. It provides the ability
@@ -3590,6 +3602,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	/**
 	 * A middleware that logs all actions coming through the system
@@ -3721,6 +3737,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	/**
 	 * Returns a deferred object, with a resolve and reject property.
@@ -3974,6 +3994,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var assert = __webpack_require__(141);
 
 	function reportException(who, exception) {
@@ -3997,6 +4021,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	function assert(condition, message) {
 	  if (!condition) {
 	    throw new Error(`Assertion failure: ${message}`);
@@ -4010,6 +4038,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	/**
 	 * A middleware that allows thunks (functions) to be dispatched. If
@@ -4037,6 +4069,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	var tabs = __webpack_require__(144);
 	var config = __webpack_require__(148);
@@ -9149,6 +9185,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var Immutable = __webpack_require__(146);
 
 	// When our app state is fully types, we should be able to get rid of
@@ -9230,6 +9270,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var React = __webpack_require__(2);
 	var PropTypes = React.PropTypes;
 
@@ -9252,14 +9296,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	var LandingPage = React.createFactory(__webpack_require__(167));
 
 	var LaunchpadApp = React.createClass({
+	  displayName: "LaunchpadApp",
+
 	  propTypes: {
 	    tabs: ImPropTypes.map.isRequired,
 	    filterString: PropTypes.string,
 	    actions: PropTypes.object,
 	    config: PropTypes.object
 	  },
-
-	  displayName: "LaunchpadApp",
 
 	  render() {
 	    var _props = this.props,
@@ -10272,6 +10316,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var _require = __webpack_require__(161),
 	    score = _require.score;
 
@@ -11225,6 +11273,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var React = __webpack_require__(2);
 
 	__webpack_require__(168);
@@ -11249,6 +11301,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 	var LandingPage = React.createClass({
+	  displayName: "LandingPage",
+
 	  propTypes: {
 	    tabs: ImPropTypes.map.isRequired,
 	    supportsFirefox: React.PropTypes.bool.isRequired,
@@ -11260,8 +11314,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	    config: React.PropTypes.object.isRequired,
 	    setValue: React.PropTypes.func.isRequired
 	  },
-
-	  displayName: "LandingPage",
 
 	  getInitialState() {
 	    return {
@@ -11436,6 +11488,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var React = __webpack_require__(2);
 
 	__webpack_require__(173);
@@ -11449,13 +11505,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 	var Tabs = React.createClass({
+	  displayName: "Tabs",
+
 	  propTypes: {
 	    targets: React.PropTypes.object.isRequired,
 	    paramName: React.PropTypes.string.isRequired,
 	    onTabClick: React.PropTypes.func.isRequired
 	  },
-
-	  displayName: "Tabs",
 
 	  onTabClick(tab, paramName) {
 	    this.props.onTabClick(getTabURL(tab, paramName));
@@ -11563,6 +11619,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var React = __webpack_require__(2);
 
 	__webpack_require__(177);
@@ -11571,6 +11631,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	var classnames = __webpack_require__(175);
 
 	var Sidebar = React.createClass({
+	  displayName: "Sidebar",
 
 	  propTypes: {
 	    supportsFirefox: React.PropTypes.bool.isRequired,
@@ -11579,8 +11640,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	    selectedPane: React.PropTypes.string.isRequired,
 	    onSideBarItemClick: React.PropTypes.func.isRequired
 	  },
-
-	  displayName: "Sidebar",
 
 	  render() {
 	    var connections = [];
@@ -11629,20 +11688,24 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var React = __webpack_require__(2);
 	var dom = React.DOM;
 
-	var _require = __webpack_require__(966),
+	var _require = __webpack_require__(1130),
 	    showMenu = _require.showMenu,
 	    buildMenu = _require.buildMenu;
 
 	var Settings = React.createClass({
+	  displayName: "Settings",
+
 	  propTypes: {
 	    config: React.PropTypes.object.isRequired,
 	    setValue: React.PropTypes.func.isRequired
 	  },
-
-	  displayName: "Settings",
 
 	  onConfigContextMenu(event, key) {
 	    event.preventDefault();
@@ -11750,6 +11813,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var tabs = __webpack_require__(182);
 	var config = __webpack_require__(183);
 
@@ -11854,6 +11921,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var _require = __webpack_require__(828),
 	    _setConfig = _require.setConfig;
 
@@ -11937,6 +12008,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var _require = __webpack_require__(828),
 	    isDevelopment = _require.isDevelopment,
 	    isTesting = _require.isTesting;
@@ -11958,6 +12033,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	"use strict";
 
 	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	var _require = __webpack_require__(975),
 	    sprintf = _require.sprintf;
@@ -12025,6 +12104,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	var classnames = __webpack_require__(175);
 	__webpack_require__(187);
@@ -12137,6 +12220,12 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.waitUntilService = waitUntilService;
+
+
 	/**
 	 * A middleware which acts like a service, because it is stateful
 	 * and "long-running" in the background. It provides the ability
@@ -12198,7 +12287,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	    return result;
 	  };
 	}
-	exports.waitUntilService = waitUntilService;
 
 /***/ },
 /* 191 */
@@ -13254,7 +13342,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 /***/ },
 /* 223 */
-/***/ function(module, exports) {
+/***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
 
@@ -13262,8 +13350,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	  value: true
 	});
 	exports.default = assert;
+
+	var _devtoolsConfig = __webpack_require__(828);
+
 	function assert(condition, message) {
-	  if (!condition) {
+	  if ((0, _devtoolsConfig.isDevelopment)() && !condition) {
 	    throw new Error(`Assertion failure: ${message}`);
 	  }
 	}
@@ -13273,6 +13364,12 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports) {
 
 	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.thunk = thunk;
+
 
 	/**
 	 * A middleware that allows thunks (functions) to be dispatched. If
@@ -13294,8 +13391,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  };
 	}
 
-	exports.thunk = thunk;
-
 /***/ },
 /* 225 */,
 /* 226 */
@@ -13303,10 +13398,12 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	// @flow
 
-	var { PrefsHelper } = __webpack_require__(830);
-	const { Services: { pref } } = __webpack_require__(830);
 	const { isDevelopment } = __webpack_require__(828);
-	const prefsSchemaVersion = "1.0.0";
+	const { Services, PrefsHelper } = __webpack_require__(830);
+
+	const prefsSchemaVersion = "1.0.2";
+
+	const pref = Services.pref;
 
 	if (isDevelopment()) {
 	  pref("devtools.debugger.client-source-maps-enabled", true);
@@ -13319,12 +13416,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	  pref("devtools.debugger.tabs", "[]");
 	  pref("devtools.debugger.ui.framework-grouping-on", true);
 	  pref("devtools.debugger.pending-selected-location", "{}");
-	  pref("devtools.debugger.pending-breakpoints", "[]");
+	  pref("devtools.debugger.pending-breakpoints", "{}");
 	  pref("devtools.debugger.expressions", "[]");
-	  pref("devtools.debugger.file-search-case-sensitive", true);
+	  pref("devtools.debugger.file-search-case-sensitive", false);
 	  pref("devtools.debugger.file-search-whole-word", false);
 	  pref("devtools.debugger.file-search-regex-match", false);
-	  pref("devtools.debugger.prefs-schema-version", "1.0.0");
+	  pref("devtools.debugger.prefs-schema-version", "1.0.1");
 	}
 
 	const prefs = new PrefsHelper("devtools", {
@@ -13348,7 +13445,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	if (prefs.debuggerPrefsSchemaVersion !== prefsSchemaVersion) {
 	  // clear pending Breakpoints
-	  prefs.pendingBreakpoints = [];
+	  prefs.pendingBreakpoints = {};
 	  prefs.debuggerPrefsSchemaVersion = prefsSchemaVersion;
 	}
 
@@ -13381,6 +13478,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _breakpoints2 = _interopRequireDefault(_breakpoints);
 
+	var _pendingBreakpoints = __webpack_require__(1133);
+
+	var _pendingBreakpoints2 = _interopRequireDefault(_pendingBreakpoints);
+
 	var _asyncRequests = __webpack_require__(238);
 
 	var _asyncRequests2 = _interopRequireDefault(_asyncRequests);
@@ -13403,19 +13504,22 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	exports.default = {
 	  expressions: _expressions2.default,
 	  eventListeners: _eventListeners2.default,
 	  sources: _sources2.default,
 	  breakpoints: _breakpoints2.default,
+	  pendingBreakpoints: _pendingBreakpoints2.default,
 	  asyncRequests: _asyncRequests2.default,
 	  pause: _pause2.default,
 	  ui: _ui2.default,
 	  ast: _ast2.default,
 	  coverage: _coverage2.default
-	}; /* This Source Code Form is subject to the terms of the Mozilla Public
-	    * License, v. 2.0. If a copy of the MPL was not distributed with this
-	    * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+	};
 
 /***/ },
 /* 228 */
@@ -13636,13 +13740,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	Object.defineProperty(exports, "__esModule", {
 	  value: true
 	});
-	exports.getSelectedSourceText = exports.getSelectedSource = exports.getSelectedLocation = exports.getSourcesForTabs = exports.getSourceTabs = exports.getSources = exports.State = undefined;
+	exports.getSelectedSourceText = exports.getSelectedSource = exports.getSelectedLocation = exports.getSourcesForTabs = exports.getSearchTabs = exports.getSourceTabs = exports.getSources = undefined;
+	exports.initialState = initialState;
 	exports.removeSourceFromTabList = removeSourceFromTabList;
 	exports.removeSourcesFromTabList = removeSourcesFromTabList;
 	exports.getNewSelectedSourceId = getNewSelectedSourceId;
 	exports.getSource = getSource;
 	exports.getSourceByURL = getSourceByURL;
-	exports.getSourceText = getSourceText;
 	exports.getPendingSelectedLocation = getPendingSelectedLocation;
 	exports.getPrettySource = getPrettySource;
 	exports.getSourceInSources = getSourceInSources;
@@ -13665,13 +13769,15 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
-	var State = exports.State = (0, _makeRecord2.default)({
-	  sources: I.Map(),
-	  selectedLocation: undefined,
-	  pendingSelectedLocation: _prefs.prefs.pendingSelectedLocation,
-	  sourcesText: I.Map(),
-	  tabs: I.List(restoreTabs())
-	});
+	function initialState() {
+	  return (0, _makeRecord2.default)({
+	    sources: I.Map(),
+	    selectedLocation: undefined,
+	    pendingSelectedLocation: _prefs.prefs.pendingSelectedLocation,
+	    sourcesText: I.Map(),
+	    tabs: I.List(restoreTabs())
+	  })();
+	}
 	/* This Source Code Form is subject to the terms of the Mozilla Public
 	 * License, v. 2.0. If a copy of the MPL was not distributed with this
 	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13682,7 +13788,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 
 	function update() {
-	  var state = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : State();
+	  var state = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : initialState();
 	  var action = arguments[1];
 
 	  var location = null;
@@ -13714,13 +13820,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	      };
 
 	      _prefs.prefs.pendingSelectedLocation = location;
-
 	      return state.set("selectedLocation", {
 	        sourceId: action.source.id,
 	        line: action.line
-	      }).set("pendingSelectedLocation", location).merge({
-	        tabs: updateTabList({ sources: state }, action.source.url, action.tabIndex)
-	      });
+	      }).set("pendingSelectedLocation", location);
 
 	    case "CLEAR_SELECTED_SOURCE":
 	      location = { url: "" };
@@ -13736,6 +13839,16 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	      _prefs.prefs.pendingSelectedLocation = location;
 	      return state.set("pendingSelectedLocation", location);
+
+	    case "ADD_TAB":
+	      return state.merge({
+	        tabs: updateTabList({ sources: state }, action.source.url)
+	      });
+
+	    case "MOVE_TAB":
+	      return state.merge({
+	        tabs: updateTabList({ sources: state }, action.url, action.tabIndex)
+	      });
 
 	    case "CLOSE_TAB":
 	      _prefs.prefs.tabs = action.tabs;
@@ -13760,8 +13873,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	    case "NAVIGATE":
 	      var source = getSelectedSource({ sources: state });
 	      var _url = source && source.get("url");
-	      _prefs.prefs.pendingSelectedLocation = { url: _url };
-	      return State().set("pendingSelectedLocation", { url: _url });
+
+	      if (!_url) {
+	        return initialState();
+	      }
+
+	      return initialState().set("pendingSelectedLocation", { url: _url });
 	  }
 
 	  return state;
@@ -13769,17 +13886,18 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function getTextPropsFromAction(action) {
 	  var source = action.source;
-	  var sourceText = action.value;
+	  var value = action.value;
+
 
 	  if (action.status === "start") {
-	    return { loading: true };
+	    return { id: source.id, loading: true };
 	  } else if (action.status === "error") {
-	    return { error: action.error, loading: false };
+	    return { id: source.id, error: action.error, loading: false };
 	  }
 	  return {
-	    text: sourceText.text,
+	    text: value.text,
 	    id: source.id,
-	    contentType: sourceText.contentType,
+	    contentType: value.contentType,
 	    loading: false
 	  };
 	}
@@ -13789,10 +13907,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	// "start" and "error" states but we don't type it like that. We need
 	// to rethink how we type async actions.
 	function setSourceTextProps(state, action) {
-	  var source = action.source;
 	  var text = getTextPropsFromAction(action);
-	  var updatedState = state.setIn(["sourcesText", source.id], I.Map(text));
-	  return updateSource(updatedState, text);
+	  return updateSource(state, text);
 	}
 
 	function updateSource(state, source) {
@@ -13912,12 +14028,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return getSourceByUrlInSources(state.sources.sources, url);
 	}
 
-	function getSourceText(state, id) {
-	  if (id) {
-	    return state.sources.sourcesText.get(id);
-	  }
-	}
-
 	function getPendingSelectedLocation(state) {
 	  return state.sources.pendingSelectedLocation;
 	}
@@ -13932,6 +14042,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 	function getSourceByUrlInSources(sources, url) {
+	  if (!url) {
+	    return null;
+	  }
+
 	  return sources.find(source => source.get("url") === url);
 	}
 
@@ -13944,6 +14058,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	var getTabs = (0, _reselect.createSelector)(getSourcesState, sources => sources.tabs);
 
 	var getSourceTabs = exports.getSourceTabs = (0, _reselect.createSelector)(getTabs, getSources, (tabs, sources) => tabs.filter(tab => getSourceByUrlInSources(sources, tab)));
+
+	var getSearchTabs = exports.getSearchTabs = (0, _reselect.createSelector)(getTabs, getSources, (tabs, sources) => tabs.filter(tab => !getSourceByUrlInSources(sources, tab)));
 
 	var getSourcesForTabs = exports.getSourcesForTabs = (0, _reselect.createSelector)(getSourceTabs, getSources, (tabs, sources) => {
 	  return tabs.map(tab => getSourceByUrlInSources(sources, tab)).filter(source => source);
@@ -13975,11 +14091,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	Object.defineProperty(exports, "__esModule", {
 	  value: true
 	});
-	exports.getMode = exports.getFilenameFromURL = exports.getFilename = exports.getRawSourceURL = exports.getPrettySourceURL = exports.isPretty = exports.isJavaScript = undefined;
+	exports.getMode = exports.getSourcePath = exports.getFilenameFromURL = exports.getFilename = exports.getRawSourceURL = exports.getPrettySourceURL = exports.isPretty = exports.isJavaScript = undefined;
 
 	var _utils = __webpack_require__(234);
 
 	var _path = __webpack_require__(235);
+
+	var _url = __webpack_require__(334);
 
 	/**
 	 * Trims the query part or reference identifier of a url string, if necessary.
@@ -13987,13 +14105,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @memberof utils/source
 	 * @static
 	 */
-
-
-	/**
-	 * Utils for working with Source URLs
-	 * @module utils/source
-	 */
-
 	function trimUrlQuery(url) {
 	  var length = url.length;
 	  var q1 = url.indexOf("?");
@@ -14014,6 +14125,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @memberof utils/source
 	 * @static
 	 */
+
+
+	/**
+	 * Utils for working with Source URLs
+	 * @module utils/source
+	 */
+
 	function isJavaScript(url) {
 	  var contentType = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : "";
 
@@ -14084,8 +14202,22 @@ return /******/ (function(modules) { // webpackBootstrap
 	  "text/x-elm": "elm",
 	  "text/x-clojure": "clojure",
 	  "text/wasm": { name: "text" },
-	  html: { name: "htmlmixed" }
+	  "text/html": { name: "htmlmixed" }
 	};
+
+	function getSourcePath(source) {
+	  if (!source.url) {
+	    return "";
+	  }
+
+	  var _parseURL = (0, _url.parse)(source.url),
+	      path = _parseURL.path,
+	      href = _parseURL.href;
+	  // for URLs like "about:home" the path is null so we pass the full href
+
+
+	  return path || href;
+	}
 
 	/**
 	 *
@@ -14096,17 +14228,31 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @static
 	 */
 
-	function getMode(sourceText) {
-	  var contentType = sourceText.contentType,
-	      text = sourceText.text;
+	function getMode(source) {
+	  var contentType = source.contentType,
+	      text = source.text;
+
+
+	  if (!text) {
+	    return { name: "text" };
+	  }
+
+	  // Use HTML mode for files in which the first non whitespace
+	  // character is `<` regardless of extension.
+	  var isHTMLLike = text.match(/^\s*</);
+	  if (!contentType) {
+	    if (isHTMLLike) {
+	      return { name: "htmlmixed" };
+	    }
+	    return { name: "text" };
+	  }
 
 	  // //  or /*  */
-
 	  if (text.match(/^\s*(\/\/ @flow|\/\* @flow \*\/)/)) {
 	    return contentTypeModeMap["text/typescript"];
 	  }
 
-	  if (/script|elm|jsx|clojure|wasm/.test(contentType)) {
+	  if (/script|elm|jsx|clojure|wasm|html/.test(contentType)) {
 	    if (contentType in contentTypeModeMap) {
 	      return contentTypeModeMap[contentType];
 	    }
@@ -14114,9 +14260,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    return contentTypeModeMap["text/javascript"];
 	  }
 
-	  // Use HTML mode for files in which the first non whitespace
-	  // character is `<` regardless of extension.
-	  if (text.match(/^\s*</)) {
+	  if (isHTMLLike) {
 	    return { name: "htmlmixed" };
 	  }
 
@@ -14129,6 +14273,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	exports.getRawSourceURL = getRawSourceURL;
 	exports.getFilename = getFilename;
 	exports.getFilenameFromURL = getFilenameFromURL;
+	exports.getSourcePath = getSourcePath;
 	exports.getMode = getMode;
 
 /***/ },
@@ -14269,29 +14414,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	Object.defineProperty(exports, "__esModule", {
 	  value: true
 	});
-
-	var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
-	/* This Source Code Form is subject to the terms of the Mozilla Public
-	 * License, v. 2.0. If a copy of the MPL was not distributed with this
-	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-	/**
-	 * Breakpoints reducer
-	 * @module reducers/breakpoints
-	 */
-
 	exports.initialState = initialState;
-	exports.makePendingBreakpoint = makePendingBreakpoint;
-	exports.getBreakpoint = getBreakpoint;
 	exports.getBreakpoints = getBreakpoints;
-	exports.getBreakpointsForSource = getBreakpointsForSource;
+	exports.getBreakpoint = getBreakpoint;
 	exports.getBreakpointsDisabled = getBreakpointsDisabled;
 	exports.getBreakpointsLoading = getBreakpointsLoading;
-	exports.getPendingBreakpoints = getPendingBreakpoints;
-
-	var _fromJS = __webpack_require__(237);
-
-	var _fromJS2 = _interopRequireDefault(_fromJS);
+	exports.getBreakpointsForSource = getBreakpointsForSource;
 
 	var _immutable = __webpack_require__(146);
 
@@ -14301,18 +14429,26 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _makeRecord2 = _interopRequireDefault(_makeRecord);
 
-	var _prefs = __webpack_require__(226);
+	var _devtoolsSourceMap = __webpack_require__(898);
 
-	var _breakpoint = __webpack_require__(1057);
+	var _breakpoint2 = __webpack_require__(1057);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 	function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
-	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+	/**
+	 * Breakpoints reducer
+	 * @module reducers/breakpoints
+	 */
 
 	function initialState() {
 	  return (0, _makeRecord2.default)({
 	    breakpoints: I.Map(),
-	    pendingBreakpoints: restorePendingBreakpoints(),
 	    breakpointsDisabled: false
 	  })();
 	}
@@ -14324,52 +14460,32 @@ return /******/ (function(modules) { // webpackBootstrap
 	  switch (action.type) {
 	    case "ADD_BREAKPOINT":
 	      {
-	        var newState = addBreakpoint(state, action);
-	        setPendingBreakpoints(newState);
-	        return newState;
+	        return addBreakpoint(state, action);
 	      }
 
 	    case "SYNC_BREAKPOINT":
 	      {
-	        var _newState = syncBreakpoint(state, action);
-	        setPendingBreakpoints(_newState);
-	        return _newState;
+	        return addBreakpoint(state, action);
 	      }
 
 	    case "ENABLE_BREAKPOINT":
 	      {
-	        var _newState2 = enableBreakpoint(state, action);
-	        setPendingBreakpoints(_newState2);
-	        return _newState2;
-	      }
-
-	    case "REMOVE_BREAKPOINT":
-	      {
-	        var _newState3 = removeBreakpoint(state, action);
-	        setPendingBreakpoints(_newState3);
-	        return _newState3;
+	        return addBreakpoint(state, action);
 	      }
 
 	    case "DISABLE_BREAKPOINT":
 	      {
-	        var _newState4 = disableBreakpoint(state, action);
-	        setPendingBreakpoints(_newState4);
-	        return _newState4;
-	      }
-
-	    case "TOGGLE_BREAKPOINTS":
-	      {
-	        if (action.status === "start") {
-	          return state.set("breakpointsDisabled", action.shouldDisableBreakpoints);
-	        }
-	        break;
+	        return updateBreakpoint(state, action);
 	      }
 
 	    case "SET_BREAKPOINT_CONDITION":
 	      {
-	        var _newState5 = setCondition(state, action);
-	        setPendingBreakpoints(_newState5);
-	        return _newState5;
+	        return updateBreakpoint(state, action);
+	      }
+
+	    case "REMOVE_BREAKPOINT":
+	      {
+	        return removeBreakpoint(state, action);
 	      }
 	  }
 
@@ -14377,257 +14493,65 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 	function addBreakpoint(state, action) {
-	  var id = (0, _breakpoint.makeLocationId)(action.breakpoint.location);
 	  if (action.status === "start") {
-	    var updatedState = state.setIn(["breakpoints", id], _extends({}, action.breakpoint, {
-	      loading: true,
-	      condition: (0, _breakpoint.firstString)(action.condition, action.breakpoint.condition)
-	    })).set("breakpointsDisabled", false);
+	    var breakpoint = action.breakpoint;
 
-	    return updatedState;
+	    var locationId = (0, _breakpoint2.makeLocationId)(breakpoint.location);
+	    return state.setIn(["breakpoints", locationId], breakpoint);
 	  }
 
+	  // when the action completes, we can commit the breakpoint
 	  if (action.status === "done") {
 	    var _action$value = action.value,
-	        breakpointId = _action$value.id,
-	        actualLocation = _action$value.actualLocation,
-	        generatedLocation = _action$value.generatedLocation;
+	        _breakpoint = _action$value.breakpoint,
+	        previousLocation = _action$value.previousLocation;
 
-	    var location = action.breakpoint.location;
+	    var _locationId = (0, _breakpoint2.makeLocationId)(_breakpoint.location);
 
-	    // If the breakpoint moved, update the map
-	    if ((0, _breakpoint.locationMoved)(location, actualLocation)) {
-	      state = slideBreakpoint(state, action);
-	      location = actualLocation;
+	    if (previousLocation) {
+	      return state.deleteIn(["breakpoints", (0, _breakpoint2.makeLocationId)(previousLocation)]).setIn(["breakpoints", _locationId], _breakpoint);
 	    }
 
-	    var locationId = (0, _breakpoint.makeLocationId)(location);
-	    var bp = state.breakpoints.get(locationId) || action.breakpoint;
-	    var updatedBreakpoint = _extends({}, bp, {
-	      id: breakpointId,
-	      loading: false,
-	      generatedLocation,
-	      text: ""
-	    });
-	    var _updatedState = state.setIn(["breakpoints", locationId], updatedBreakpoint);
-
-	    return updatePendingBreakpoint(_updatedState, updatedBreakpoint);
+	    return state.setIn(["breakpoints", _locationId], _breakpoint);
 	  }
 
+	  // Remove the optimistic update
 	  if (action.status === "error") {
-	    // Remove the optimistic update
-	    return state.deleteIn(["breakpoints", id]);
+	    var _locationId2 = (0, _breakpoint2.makeLocationId)(action.breakpoint.location);
+	    return state.deleteIn(["breakpoints", _locationId2]);
 	  }
+
+	  return state;
 	}
 
-	function syncBreakpoint(state, action) {
-	  if (action.status === "start") {
-	    // add a breakpoint, so we always have something to work with
-	    return optimisticlyAddBreakpoint(state, action.breakpoint);
-	  }
-	  if (action.status === "done") {
-	    // when the action completes, we can commit the breakpoint
-	    var breakpoint = action.breakpoint,
-	        _action$value2 = action.value,
-	        actualLocation = _action$value2.actualLocation,
-	        generatedLocation = _action$value2.generatedLocation;
+	function updateBreakpoint(state, action) {
+	  var breakpoint = action.breakpoint;
 
-	    var sameLocation = !(0, _breakpoint.locationMoved)(breakpoint.location, actualLocation);
-
-	    // if the breakpoint is the same as the optimistic breakpoint, we can commit
-	    // to the optimistic value.
-	    if (sameLocation) {
-	      return commitBreakpoint(state, breakpoint, action.value);
-	    }
-
-	    // if the breakpoint is not the same, we will use the actual location sent
-	    // by the server, and correct the breakpoint with that new information.
-	    // Correcting a breakpoint deletes both the pending breakpoint and the
-	    // optimistic breakpoint. Correcting will commit the corrected value
-	    var overrides = { location: actualLocation, generatedLocation };
-	    var updatedState = correctBreakpoint(state, breakpoint, overrides);
-	    var id = (0, _breakpoint.makeLocationId)(actualLocation);
-
-	    // once the corrected breakpoint is added and commited, we can update the
-	    // pending breakpoints with that information.
-	    var correctedBreakpoint = updatedState.breakpoints.get(id);
-	    return updatePendingBreakpoint(updatedState, correctedBreakpoint);
-	  }
-
-	  if (action.status === "error") {
-	    // Remove the optimistic update and pending breakpoint
-	    return deleteBreakpoint(state, action.breakpoint.location);
-	  }
-	}
-
-	function enableBreakpoint(state, action) {
-	  if (action.status != "done") {
-	    return state;
-	  }
-
-	  var id = (0, _breakpoint.makeLocationId)(action.breakpoint.location);
-	  var bp = state.breakpoints.get(id);
-	  var updatedBreakpoint = _extends({}, bp, {
-	    id: action.value.id,
-	    loading: false,
-	    disabled: false
-	  });
-	  var updatedState = state.setIn(["breakpoints", id], updatedBreakpoint);
-	  return updatePendingBreakpoint(updatedState, updatedBreakpoint);
-	}
-
-	function disableBreakpoint(state, action) {
-	  if (action.status != "done") {
-	    return state;
-	  }
-	  var id = (0, _breakpoint.makeLocationId)(action.breakpoint.location);
-	  var bp = state.breakpoints.get(id);
-	  var breakpoint = _extends({}, bp, {
-	    loading: false,
-	    disabled: true
-	  });
-	  var updatedState = state.setIn(["breakpoints", id], breakpoint);
-	  return updatePendingBreakpoint(updatedState, breakpoint);
-	}
-
-	function deleteBreakpoint(state, location) {
-	  var id = (0, _breakpoint.makeLocationId)(location);
-	  var pendingId = (0, _breakpoint.makePendingLocationId)(location);
-
-	  return state.deleteIn(["breakpoints", id]).deleteIn(["pendingBreakpoints", pendingId]);
+	  var locationId = (0, _breakpoint2.makeLocationId)(breakpoint.location);
+	  return state.setIn(["breakpoints", locationId], breakpoint);
 	}
 
 	function removeBreakpoint(state, action) {
-	  if (action.status != "done") {
-	    return state;
-	  }
-
-	  var updatedState = deleteBreakpoint(state, action.breakpoint.location);
-
-	  return updatedState.set("breakpointsDisabled", (0, _breakpoint.allBreakpointsDisabled)(updatedState));
-	}
-
-	function setCondition(state, action) {
-	  var id = (0, _breakpoint.makeLocationId)(action.breakpoint.location);
-
-	  if (action.status === "start") {
-	    var bp = state.breakpoints.get(id);
-	    return state.setIn(["breakpoints", id], _extends({}, bp, {
-	      loading: true,
-	      condition: action.condition
-	    }));
-	  }
-
-	  if (action.status === "done") {
-	    var _bp = state.breakpoints.get(id);
-	    var updatedBreakpoint = _extends({}, _bp, {
-	      id: action.value.id,
-	      loading: false
-	    });
-	    var updatedState = state.setIn(["breakpoints", id], updatedBreakpoint);
-
-	    return updatePendingBreakpoint(updatedState, updatedBreakpoint);
-	  }
-
-	  if (action.status === "error") {
-	    return state.deleteIn(["breakpoints", id]);
-	  }
-	}
-
-	// Syncing Methods
-	function optimisticlyAddBreakpoint(state, breakpoint) {
-	  var id = (0, _breakpoint.makeLocationId)(breakpoint.location);
-	  var updateOpts = {
-	    loading: true
-	  };
-
-	  return state.setIn(["breakpoints", id], _extends({}, breakpoint, updateOpts));
-	}
-
-	function commitBreakpoint(state, breakpoint) {
-	  var overrides = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
-
-	  // A commited breakpoint is no longer loading, and acts like a normal
-	  // breakpoint
-	  var location = overrides.location || breakpoint.location;
-	  var id = (0, _breakpoint.makeLocationId)(location);
-	  var updatedOpts = _extends({}, overrides, { loading: false });
-	  var updatedBreakpoint = _extends({}, breakpoint, updatedOpts);
-
-	  return state.setIn(["breakpoints", id], updatedBreakpoint);
-	}
-
-	function correctBreakpoint(state, breakpoint, overrides) {
-	  var intermState = deleteBreakpoint(state, breakpoint.location);
-	  var newLocationId = (0, _breakpoint.makeLocationId)(overrides.location);
-	  var newProperties = _extends({ id: newLocationId }, overrides);
-
-	  return commitBreakpoint(intermState, breakpoint, newProperties);
-	}
-
-	// TODO: remove this in favor of the correct/commit breakpoint pattern
-	function slideBreakpoint(state, action) {
-	  var _action$value3 = action.value,
-	      actualLocation = _action$value3.actualLocation,
-	      id = _action$value3.id;
 	  var breakpoint = action.breakpoint;
 
-	  var currentBp = state.breakpoints.get(id) || (0, _fromJS2.default)(breakpoint);
-
-	  var locationId = (0, _breakpoint.makeLocationId)(breakpoint.location);
-	  var movedLocationId = (0, _breakpoint.makeLocationId)(actualLocation);
-	  var updatedState = state.deleteIn(["breakpoints", locationId]);
-
-	  return updatedState.setIn(["breakpoints", movedLocationId], _extends({}, currentBp, {
-	    location: actualLocation
-	  }));
-	}
-
-	function makePendingBreakpoint(bp) {
-	  var _bp$location = bp.location,
-	      sourceUrl = _bp$location.sourceUrl,
-	      line = _bp$location.line,
-	      column = _bp$location.column,
-	      condition = bp.condition,
-	      disabled = bp.disabled,
-	      generatedLocation = bp.generatedLocation;
-
-
-	  var location = { sourceUrl, line, column };
-	  return { condition, disabled, generatedLocation, location };
-	}
-
-	function setPendingBreakpoints(state) {
-	  _prefs.prefs.pendingBreakpoints = state.pendingBreakpoints;
-	}
-
-	function updatePendingBreakpoint(state, breakpoint) {
-	  var id = (0, _breakpoint.makePendingLocationId)(breakpoint.location);
-	  return state.setIn(["pendingBreakpoints", id], makePendingBreakpoint(breakpoint));
-	}
-
-	function restorePendingBreakpoints() {
-	  return I.Map(_prefs.prefs.pendingBreakpoints);
+	  var id = (0, _breakpoint2.makeLocationId)(breakpoint.location);
+	  return state.deleteIn(["breakpoints", id]);
 	}
 
 	// Selectors
-
-	function getBreakpoint(state, location) {
-	  return state.breakpoints.breakpoints.get((0, _breakpoint.makeLocationId)(location));
-	}
+	// TODO: these functions should be moved out of the reducer
 
 	function getBreakpoints(state) {
 	  return state.breakpoints.breakpoints;
 	}
 
-	function getBreakpointsForSource(state, sourceId) {
-	  return state.breakpoints.breakpoints.filter(bp => {
-	    return bp.location.sourceId === sourceId;
-	  });
+	function getBreakpoint(state, location) {
+	  var breakpoints = getBreakpoints(state);
+	  return breakpoints.get((0, _breakpoint2.makeLocationId)(location));
 	}
 
 	function getBreakpointsDisabled(state) {
-	  return state.breakpoints.get("breakpointsDisabled");
+	  return state.breakpoints.breakpoints.every(x => x.disabled);
 	}
 
 	function getBreakpointsLoading(state) {
@@ -14637,8 +14561,18 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return breakpoints.size > 0 && isLoading;
 	}
 
-	function getPendingBreakpoints(state) {
-	  return state.breakpoints.pendingBreakpoints;
+	function getBreakpointsForSource(state, sourceId) {
+	  if (!sourceId) {
+	    return I.Map();
+	  }
+
+	  var isGeneratedSource = (0, _devtoolsSourceMap.isGeneratedId)(sourceId);
+	  var breakpoints = getBreakpoints(state);
+
+	  return breakpoints.filter(bp => {
+	    var location = isGeneratedSource ? bp.generatedLocation || bp.location : bp.location;
+	    return location.sourceId === sourceId;
+	  });
 	}
 
 	exports.default = update;
@@ -14818,6 +14752,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	exports.getShouldPauseOnExceptions = getShouldPauseOnExceptions;
 	exports.getShouldIgnoreCaughtExceptions = getShouldIgnoreCaughtExceptions;
 	exports.getFrames = getFrames;
+	exports.getFrameScopes = getFrameScopes;
 	exports.getDebuggeeUrl = getDebuggeeUrl;
 	exports.getChromeScopes = getChromeScopes;
 
@@ -14830,6 +14765,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  isWaitingOnBreak: false,
 	  frames: undefined,
 	  selectedFrameId: undefined,
+	  frameScopes: {},
 	  loadedObjects: {},
 	  shouldPauseOnExceptions: _prefs.prefs.pauseOnExceptions,
 	  shouldIgnoreCaughtExceptions: _prefs.prefs.ignoreCaughtExceptions,
@@ -14843,12 +14779,15 @@ return /******/ (function(modules) { // webpackBootstrap
 	  switch (action.type) {
 	    case "PAUSED":
 	      {
-	        var _selectedFrameId = action.selectedFrameId,
+	        var _selectedFrameId2 = action.selectedFrameId,
 	            _frames = action.frames,
+	            _scopes = action.scopes,
 	            _loadedObjects = action.loadedObjects,
 	            pauseInfo = action.pauseInfo;
 
 	        pauseInfo.isInterrupted = pauseInfo.why.type === "interrupted";
+
+	        var _frameScopes = { [_selectedFrameId2]: _scopes };
 
 	        // turn this into an object keyed by object id
 	        var objectMap = {};
@@ -14859,8 +14798,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	        return Object.assign({}, state, {
 	          isWaitingOnBreak: false,
 	          pause: pauseInfo,
-	          selectedFrameId: _selectedFrameId,
+	          selectedFrameId: _selectedFrameId2,
 	          frames: _frames,
+	          frameScopes: _frameScopes,
 	          loadedObjects: objectMap
 	        });
 	      }
@@ -14889,7 +14829,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	      return Object.assign({}, state, { isWaitingOnBreak: true });
 
 	    case "SELECT_FRAME":
-	      return Object.assign({}, state, { selectedFrameId: action.frame.id });
+	      var frame = action.frame,
+	          scopes = action.scopes;
+
+	      var _selectedFrameId = frame.id;
+	      return _extends({}, state, {
+	        frameScopes: _extends({}, state.frameScopes, { [_selectedFrameId]: scopes }),
+	        selectedFrameId: _selectedFrameId
+	      });
 
 	    case "LOAD_OBJECT_PROPERTIES":
 	      if (action.status === "start") {
@@ -14917,7 +14864,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      }
 	      break;
 
-	    case "NAVIGATE":
+	    case "CONNECT":
 	      return Object.assign({}, State(), { debuggeeUrl: action.url });
 
 	    case "PAUSE_ON_EXCEPTIONS":
@@ -14978,6 +14925,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return state.pause.frames;
 	}
 
+	function getFrameScopes(state, frameId) {
+	  return state.pause.frameScopes[frameId];
+	}
+
 	var getSelectedFrameId = (0, _reselect.createSelector)(getPauseState, pauseWrapper => {
 	  return pauseWrapper.selectedFrameId;
 	});
@@ -15010,9 +14961,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	Object.defineProperty(exports, "__esModule", {
 	  value: true
 	});
-	exports.getSymbolSearchState = exports.getFileSearchState = exports.getProjectSearchState = exports.State = undefined;
+	exports.State = undefined;
+	exports.getActiveSearchState = getActiveSearchState;
 	exports.getFileSearchQueryState = getFileSearchQueryState;
 	exports.getFileSearchModifierState = getFileSearchModifierState;
+	exports.getSearchResults = getSearchResults;
 	exports.getFrameworkGroupingState = getFrameworkGroupingState;
 	exports.getSymbolSearchType = getSymbolSearchType;
 	exports.getShownSource = getShownSource;
@@ -15033,16 +14986,20 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 
 	var State = exports.State = (0, _makeRecord2.default)({
-	  fileSearchOn: false,
+	  activeSearch: null,
 	  fileSearchQuery: "",
 	  fileSearchModifiers: (0, _makeRecord2.default)({
 	    caseSensitive: _prefs.prefs.fileSearchCaseSensitive,
 	    wholeWord: _prefs.prefs.fileSearchWholeWord,
 	    regexMatch: _prefs.prefs.fileSearchRegexMatch
 	  })(),
-	  projectSearchOn: false,
-	  symbolSearchOn: false,
 	  symbolSearchType: "functions",
+	  searchResults: {
+	    matches: [],
+	    matchIndex: -1,
+	    index: -1,
+	    count: 0
+	  },
 	  shownSource: "",
 	  startPanelCollapsed: _prefs.prefs.startPanelCollapsed,
 	  endPanelCollapsed: _prefs.prefs.endPanelCollapsed,
@@ -15055,9 +15012,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var action = arguments[1];
 
 	  switch (action.type) {
-	    case "TOGGLE_PROJECT_SEARCH":
+	    case "TOGGLE_ACTIVE_SEARCH":
 	      {
-	        return state.set("projectSearchOn", action.value);
+	        return state.set("activeSearch", action.value);
 	      }
 
 	    case "TOGGLE_FRAMEWORK_GROUPING":
@@ -15066,19 +15023,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	        return state.set("frameworkGroupingOn", action.value);
 	      }
 
-	    case "TOGGLE_FILE_SEARCH":
-	      {
-	        return state.set("fileSearchOn", action.value);
-	      }
-
-	    case "TOGGLE_SYMBOL_SEARCH":
-	      {
-	        return state.set("symbolSearchOn", action.value);
-	      }
-
 	    case "UPDATE_FILE_SEARCH_QUERY":
 	      {
 	        return state.set("fileSearchQuery", action.query);
+	      }
+
+	    case "UPDATE_SEARCH_RESULTS":
+	      {
+	        return state.set("searchResults", action.results);
 	      }
 
 	    case "TOGGLE_FILE_SEARCH_MODIFIER":
@@ -15147,9 +15099,8 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	// NOTE: we'd like to have the app state fully typed
 	// https://github.com/devtools-html/debugger.html/blob/master/src/reducers/sources.js#L179-L185
-
-	function getSearchState(field, state) {
-	  return state.ui.get(field);
+	function getActiveSearchState(state) {
+	  return state.ui.get("activeSearch");
 	}
 
 	function getFileSearchQueryState(state) {
@@ -15160,6 +15111,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return state.ui.get("fileSearchModifiers");
 	}
 
+	function getSearchResults(state) {
+	  return state.ui.get("searchResults");
+	}
+
 	function getFrameworkGroupingState(state) {
 	  return state.ui.get("frameworkGroupingOn");
 	}
@@ -15167,10 +15122,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	function getSymbolSearchType(state) {
 	  return state.ui.get("symbolSearchType");
 	}
-
-	var getProjectSearchState = exports.getProjectSearchState = getSearchState.bind(null, "projectSearchOn");
-	var getFileSearchState = exports.getFileSearchState = getSearchState.bind(null, "fileSearchOn");
-	var getSymbolSearchState = exports.getSymbolSearchState = getSearchState.bind(null, "symbolSearchOn");
 
 	function getShownSource(state) {
 	  return state.ui.get("shownSource");
@@ -15279,6 +15230,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var breakpoints = _interopRequireWildcard(_breakpoints);
 
+	var _pendingBreakpoints = __webpack_require__(1133);
+
+	var pendingBreakpoints = _interopRequireWildcard(_pendingBreakpoints);
+
 	var _eventListeners = __webpack_require__(231);
 
 	var eventListeners = _interopRequireWildcard(_eventListeners);
@@ -15295,73 +15250,27 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var coverage = _interopRequireWildcard(_coverage);
 
+	var _breakpointAtLocation = __webpack_require__(1134);
+
+	var _breakpointAtLocation2 = _interopRequireDefault(_breakpointAtLocation);
+
+	var _linesInScope = __webpack_require__(1124);
+
+	var _linesInScope2 = _interopRequireDefault(_linesInScope);
+
+	var _visibleBreakpoints = __webpack_require__(1135);
+
+	var _visibleBreakpoints2 = _interopRequireDefault(_visibleBreakpoints);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
 	function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
 	/**
 	 * @param object - location
 	 */
 
-	module.exports = {
-	  getSource: sources.getSource,
-	  getNewSelectedSourceId: sources.getNewSelectedSourceId,
-	  removeSourceFromTabList: sources.removeSourceFromTabList,
-	  removeSourcesFromTabList: sources.removeSourcesFromTabList,
-	  getSourceByURL: sources.getSourceByURL,
-	  getSourceInSources: sources.getSourceInSources,
-	  getSources: sources.getSources,
-	  getSourceText: sources.getSourceText,
-	  getSourceTabs: sources.getSourceTabs,
-	  getSourcesForTabs: sources.getSourcesForTabs,
-	  getSelectedSource: sources.getSelectedSource,
-	  getSelectedSourceText: sources.getSelectedSourceText,
-	  getSelectedLocation: sources.getSelectedLocation,
-	  getPendingSelectedLocation: sources.getPendingSelectedLocation,
-	  getPrettySource: sources.getPrettySource,
-
-	  getBreakpoint: breakpoints.getBreakpoint,
-	  getBreakpoints: breakpoints.getBreakpoints,
-	  getPendingBreakpoints: breakpoints.getPendingBreakpoints,
-	  getBreakpointsForSource: breakpoints.getBreakpointsForSource,
-	  getBreakpointsDisabled: breakpoints.getBreakpointsDisabled,
-	  getBreakpointsLoading: breakpoints.getBreakpointsLoading,
-
-	  getPause: pause.getPause,
-	  getChromeScopes: pause.getChromeScopes,
-	  getLoadedObjects: pause.getLoadedObjects,
-	  getLoadedObject: pause.getLoadedObject,
-	  getObjectProperties: pause.getObjectProperties,
-	  getIsWaitingOnBreak: pause.getIsWaitingOnBreak,
-	  getShouldPauseOnExceptions: pause.getShouldPauseOnExceptions,
-	  getShouldIgnoreCaughtExceptions: pause.getShouldIgnoreCaughtExceptions,
-	  getFrames: pause.getFrames,
-	  getSelectedFrame: pause.getSelectedFrame,
-	  getDebuggeeUrl: pause.getDebuggeeUrl,
-
-	  getHitCountForSource: coverage.getHitCountForSource,
-	  getCoverageEnabled: coverage.getCoverageEnabled,
-
-	  getEventListeners: eventListeners.getEventListeners,
-
-	  getProjectSearchState: ui.getProjectSearchState,
-	  getFileSearchState: ui.getFileSearchState,
-	  getFileSearchQueryState: ui.getFileSearchQueryState,
-	  getFileSearchModifierState: ui.getFileSearchModifierState,
-	  getFrameworkGroupingState: ui.getFrameworkGroupingState,
-	  getSymbolSearchState: ui.getSymbolSearchState,
-	  getSymbolSearchType: ui.getSymbolSearchType,
-	  getShownSource: ui.getShownSource,
-	  getPaneCollapse: ui.getPaneCollapse,
-
-	  getExpressions: expressions.getExpressions,
-	  getVisibleExpressions: expressions.getVisibleExpressions,
-	  getExpression: expressions.getExpression,
-	  getHighlightedLineRange: ui.getHighlightedLineRange,
-
-	  getSymbols: ast.getSymbols,
-	  hasSymbols: ast.hasSymbols,
-	  getOutOfScopeLocations: ast.getOutOfScopeLocations,
-	  getSelection: ast.getSelection
-	};
+	module.exports = Object.assign({}, expressions, sources, pause, breakpoints, pendingBreakpoints, eventListeners, ui, ast, coverage, { getBreakpointAtLocation: _breakpointAtLocation2.default, getInScopeLines: _linesInScope2.default, getVisibleBreakpoints: _visibleBreakpoints2.default });
 
 /***/ },
 /* 243 */
@@ -15385,6 +15294,8 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _selectors = __webpack_require__(242);
 
+	var _ui = __webpack_require__(1128);
+
 	var _devtoolsModules = __webpack_require__(830);
 
 	__webpack_require__(323);
@@ -15399,13 +15310,13 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _devtoolsSplitter2 = _interopRequireDefault(_devtoolsSplitter);
 
-	var _ProjectSearch2 = __webpack_require__(1060);
+	var _ProjectSearch2 = __webpack_require__(1139);
 
 	var _ProjectSearch3 = _interopRequireDefault(_ProjectSearch2);
 
-	var _Sources2 = __webpack_require__(388);
+	var _PrimaryPanes2 = __webpack_require__(1142);
 
-	var _Sources3 = _interopRequireDefault(_Sources2);
+	var _PrimaryPanes3 = _interopRequireDefault(_PrimaryPanes2);
 
 	var _Editor2 = __webpack_require__(426);
 
@@ -15423,6 +15334,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _Tabs2 = _interopRequireDefault(_Tabs);
 
+	var _SymbolModal2 = __webpack_require__(1170);
+
+	var _SymbolModal3 = _interopRequireDefault(_SymbolModal2);
+
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 	var shortcuts = new _devtoolsModules.KeyShortcuts({ window });
@@ -15433,7 +15348,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var ProjectSearch = (0, _react.createFactory)(_ProjectSearch3.default);
 
-	var Sources = (0, _react.createFactory)(_Sources3.default);
+	var PrimaryPanes = (0, _react.createFactory)(_PrimaryPanes3.default);
 
 	var Editor = (0, _react.createFactory)(_Editor3.default);
 
@@ -15442,6 +15357,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	var WelcomeBox = (0, _react.createFactory)(_WelcomeBox3.default);
 
 	var EditorTabs = (0, _react.createFactory)(_Tabs2.default);
+
+	var SymbolModal = (0, _react.createFactory)(_SymbolModal3.default);
 
 	class App extends _react.Component {
 
@@ -15472,7 +15389,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  onLayoutChange() {
-	    this.setState({ horizontal: verticalLayoutBreakpoint.matches });
+	    if ((0, _ui.isVisible)()) {
+	      this.setState({ horizontal: verticalLayoutBreakpoint.matches });
+	    }
 	  }
 
 	  renderEditorPane() {
@@ -15502,14 +15421,14 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	    var overflowX = endPanelCollapsed ? "hidden" : "auto";
 
-	    return _react.DOM.div({ className: "debugger" }, SplitBox({
+	    return SplitBox({
 	      style: { width: "100vw" },
 	      initialSize: "250px",
 	      minSize: 10,
 	      maxSize: "50%",
 	      splitterSize: 1,
 	      onResizeEnd: size => this.setState({ startPanelSize: size }),
-	      startPanel: Sources({ horizontal }),
+	      startPanel: PrimaryPanes({ horizontal }),
 	      startPanelCollapsed,
 	      endPanel: SplitBox({
 	        style: { overflowX },
@@ -15524,7 +15443,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        endPanelCollapsed,
 	        vert: horizontal
 	      })
-	    }));
+	    });
 	  }
 
 	  renderVerticalLayout() {
@@ -15534,7 +15453,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var horizontal = this.state.horizontal;
 
 
-	    return _react.DOM.div({ className: "debugger" }, SplitBox({
+	    return SplitBox({
 	      style: { width: "100vw" },
 	      initialSize: "300px",
 	      minSize: 30,
@@ -15548,16 +15467,21 @@ return /******/ (function(modules) { // webpackBootstrap
 	        maxSize: "40%",
 	        splitterSize: 1,
 	        startPanelCollapsed,
-	        startPanel: Sources({ horizontal }),
+	        startPanel: PrimaryPanes({ horizontal }),
 	        endPanel: this.renderEditorPane()
 	      }),
 	      endPanel: SecondaryPanes({ horizontal }),
 	      endPanelCollapsed
-	    }));
+	    });
 	  }
 
 	  render() {
-	    return this.state.horizontal ? this.renderHorizontalLayout() : this.renderVerticalLayout();
+	    var _props4 = this.props,
+	        selectSource = _props4.selectSource,
+	        selectedSource = _props4.selectedSource;
+
+
+	    return _react.DOM.div({ className: "debugger" }, this.state.horizontal ? this.renderHorizontalLayout() : this.renderVerticalLayout(), SymbolModal({ selectSource, selectedSource }));
 	  }
 	}
 
@@ -15634,114 +15558,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = []; var _n = true; var _d = false; var _e = undefined; try { for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"]) _i["return"](); } finally { if (_d) throw _e; } } return _arr; } return function (arr, i) { if (Array.isArray(arr)) { return arr; } else if (Symbol.iterator in Object(arr)) { return sliceIterator(arr, i); } else { throw new TypeError("Invalid attempt to destructure non-iterable instance"); } }; }();
 
 	var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
-
-	var _getGeneratedLocation = (() => {
-	  var _ref = _asyncToGenerator(function* (source, sourceMaps, location) {
-	    if (!sourceMaps.isOriginalId(location.sourceId)) {
-	      return location;
-	    }
-
-	    return yield sourceMaps.getGeneratedLocation(location, source.toJS());
-	  });
-
-	  return function _getGeneratedLocation(_x2, _x3, _x4) {
-	    return _ref.apply(this, arguments);
-	  };
-	})();
-
-	var syncClientBreakpoint = (() => {
-	  var _ref2 = _asyncToGenerator(function* (sourceId, client, sourceMaps, pendingBreakpoint) {
-	    var generatedSourceId = sourceMaps.isOriginalId(sourceId) ? (0, _devtoolsSourceMap.originalToGeneratedId)(sourceId) : sourceId;
-
-	    // this is the generatedLocation of the pending breakpoint, with
-	    // the source id updated to reflect the new connection
-	    var oldGeneratedLocation = _extends({}, pendingBreakpoint.generatedLocation, {
-	      sourceId: generatedSourceId
-	    });
-
-	    // early return if breakpoint is disabled with overrides to update
-	    // the id as expected, without talking to server
-	    if (pendingBreakpoint.disabled) {
-	      return {
-	        id: generatedSourceId,
-	        actualLocation: _extends({}, pendingBreakpoint.location, { id: sourceId }),
-	        oldGeneratedLocation
-	      };
-	    }
-
-	    // If we are not disabled, set the breakpoint on the server and get
-	    // that info so we can set it on our breakpoints.
-	    var clientBreakpoint = yield client.setBreakpoint(oldGeneratedLocation, pendingBreakpoint.condition, sourceMaps.isOriginalId(sourceId));
-
-	    // Original location is the location in the src file
-	    var clientOriginalLocation = yield sourceMaps.getOriginalLocation(clientBreakpoint.actualLocation);
-
-	    // make sure that we are re-adding the same type of breakpoint. Column
-	    // or line
-	    var actualLocation = (0, _breakpoint.equalizeLocationColumn)(clientOriginalLocation, pendingBreakpoint.location);
-
-	    // the generatedLocation might have slid, so now we can adjust it
-	    var generatedLocation = clientBreakpoint.actualLocation;
-
-	    var id = clientBreakpoint.id,
-	        hitCount = clientBreakpoint.hitCount;
-
-	    return { id, actualLocation, hitCount, generatedLocation };
-	  });
-
-	  return function syncClientBreakpoint(_x5, _x6, _x7, _x8) {
-	    return _ref2.apply(this, arguments);
-	  };
-	})();
-
-	var addClientBreakpoint = (() => {
-	  var _ref3 = _asyncToGenerator(function* (state, client, sourceMaps, breakpoint) {
-	    var location = breakpoint.location;
-	    var source = (0, _selectors.getSource)(state, location.sourceId);
-	    var generatedLocation = yield _getGeneratedLocation(source, sourceMaps, location);
-
-	    var clientBreakpoint = yield client.setBreakpoint(generatedLocation, breakpoint.condition, sourceMaps.isOriginalId(breakpoint.location.sourceId));
-
-	    var actualLocation = yield sourceMaps.getOriginalLocation(clientBreakpoint.actualLocation);
-
-	    var id = clientBreakpoint.id,
-	        hitCount = clientBreakpoint.hitCount;
-
-	    return { id, actualLocation, hitCount, generatedLocation };
-	  });
-
-	  return function addClientBreakpoint(_x9, _x10, _x11, _x12) {
-	    return _ref3.apply(this, arguments);
-	  };
-	})();
-
-	/**
-	 * Enabling a breakpoint
-	 * will reuse the existing breakpoint information that is stored.
-	 *
-	 * @memberof actions/breakpoints
-	 * @static
-	 * @param {Location} $1.location Location  value
-	 */
-
-
-	exports.enableBreakpoint = enableBreakpoint;
-	exports.syncBreakpoint = syncBreakpoint;
-	exports.addBreakpoint = addBreakpoint;
-	exports.disableBreakpoint = disableBreakpoint;
-	exports.removeBreakpoint = removeBreakpoint;
-	exports.toggleAllBreakpoints = toggleAllBreakpoints;
-	exports.setBreakpointCondition = setBreakpointCondition;
-
-	var _promise = __webpack_require__(193);
-
-	var _selectors = __webpack_require__(242);
-
-	var _devtoolsSourceMap = __webpack_require__(898);
-
-	var _breakpoint = __webpack_require__(1057);
-
-	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 	/* This Source Code Form is subject to the terms of the Mozilla Public
 	 * License, v. 2.0. If a copy of the MPL was not distributed with this
 	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15751,46 +15567,34 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @module actions/breakpoints
 	 */
 
-	function _breakpointExists(state, location) {
-	  var currentBp = (0, _selectors.getBreakpoint)(state, location);
-	  return currentBp && !currentBp.disabled;
-	}
+	// this will need to be changed so that addCLientBreakpoint is removed
 
-	function _createBreakpoint(location) {
-	  var overrides = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-	  var condition = overrides.condition,
-	      disabled = overrides.disabled,
-	      generatedLocation = overrides.generatedLocation;
 
-	  var properties = {
-	    condition: condition || null,
-	    disabled: disabled || false,
-	    generatedLocation,
-	    location
-	  };
+	exports.syncBreakpoint = syncBreakpoint;
+	exports.addBreakpoint = addBreakpoint;
+	exports.removeBreakpoint = removeBreakpoint;
+	exports.enableBreakpoint = enableBreakpoint;
+	exports.disableBreakpoint = disableBreakpoint;
+	exports.toggleAllBreakpoints = toggleAllBreakpoints;
+	exports.setBreakpointCondition = setBreakpointCondition;
+	exports.toggleBreakpoint = toggleBreakpoint;
+	exports.toggleDisabledBreakpoint = toggleDisabledBreakpoint;
 
-	  return properties;
-	}
+	var _promise = __webpack_require__(193);
 
-	function enableBreakpoint(location) {
-	  return (_ref4) => {
-	    var dispatch = _ref4.dispatch,
-	        getState = _ref4.getState,
-	        client = _ref4.client,
-	        sourceMaps = _ref4.sourceMaps;
+	var _selectors = __webpack_require__(242);
 
-	    var breakpoint = (0, _selectors.getBreakpoint)(getState(), location);
-	    if (!breakpoint) {
-	      throw new Error("attempted to enable a breakpoint that does not exist");
-	    }
+	var _breakpoint = __webpack_require__(1057);
 
-	    return dispatch({
-	      type: "ENABLE_BREAKPOINT",
-	      breakpoint,
-	      [_promise.PROMISE]: addClientBreakpoint(getState(), client, sourceMaps, breakpoint)
-	    });
-	  };
-	}
+	var _addBreakpoint = __webpack_require__(1136);
+
+	var _addBreakpoint2 = _interopRequireDefault(_addBreakpoint);
+
+	var _syncBreakpoint = __webpack_require__(1137);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
 	/**
 	 * Syncing a breakpoint add breakpoint information that is stored, and
@@ -15802,20 +15606,20 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @param {PendingBreakpoint} $1.location PendingBreakpoint  value
 	 */
 	function syncBreakpoint(sourceId, pendingBreakpoint) {
-	  return (_ref5) => {
-	    var dispatch = _ref5.dispatch,
-	        getState = _ref5.getState,
-	        client = _ref5.client,
-	        sourceMaps = _ref5.sourceMaps;
+	  return (_ref) => {
+	    var dispatch = _ref.dispatch,
+	        getState = _ref.getState,
+	        client = _ref.client,
+	        sourceMaps = _ref.sourceMaps;
 	    var _pendingBreakpoint$lo = pendingBreakpoint.location,
 	        line = _pendingBreakpoint$lo.line,
 	        sourceUrl = _pendingBreakpoint$lo.sourceUrl,
 	        column = _pendingBreakpoint$lo.column;
 
 	    var location = { sourceId, sourceUrl, line, column };
-	    var breakpoint = _createBreakpoint(location, pendingBreakpoint);
+	    var breakpoint = (0, _breakpoint.createBreakpoint)(location, pendingBreakpoint);
 
-	    var syncPromise = syncClientBreakpoint(sourceId, client, sourceMaps, pendingBreakpoint);
+	    var syncPromise = (0, _syncBreakpoint.syncClientBreakpoint)(sourceId, client, sourceMaps, pendingBreakpoint);
 
 	    return dispatch({
 	      type: "SYNC_BREAKPOINT",
@@ -15833,60 +15637,18 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @param {String} $1.condition Conditional breakpoint condition value
 	 * @param {Boolean} $1.disabled Disable value for breakpoint value
 	 */
-	function addBreakpoint(location) {
-	  var _ref6 = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
-	      condition = _ref6.condition;
 
-	  return (_ref7) => {
-	    var dispatch = _ref7.dispatch,
-	        getState = _ref7.getState,
-	        client = _ref7.client,
-	        sourceMaps = _ref7.sourceMaps;
+	function addBreakpoint(location, condition) {
+	  var breakpoint = (0, _breakpoint.createBreakpoint)(location, { condition });
+	  return (_ref2) => {
+	    var dispatch = _ref2.dispatch,
+	        getState = _ref2.getState,
+	        sourceMaps = _ref2.sourceMaps,
+	        client = _ref2.client;
 
-	    if (_breakpointExists(getState(), location)) {
-	      return Promise.resolve();
-	    }
-
-	    var breakpoint = _createBreakpoint(location, { condition });
-	    return dispatch({
-	      type: "ADD_BREAKPOINT",
-	      breakpoint,
-	      condition: condition,
-	      [_promise.PROMISE]: addClientBreakpoint(getState(), client, sourceMaps, breakpoint)
-	    });
-	  };
-	}
-
-	/**
-	 * Disable a single breakpoint
-	 *
-	 * @memberof actions/breakpoints
-	 * @static
-	 */
-	function disableBreakpoint(location) {
-	  return (_ref8) => {
-	    var dispatch = _ref8.dispatch,
-	        getState = _ref8.getState,
-	        client = _ref8.client;
-
-	    var bp = (0, _selectors.getBreakpoint)(getState(), location);
-	    if (!bp) {
-	      throw new Error("attempt to disable a breakpoint that does not exist");
-	    }
-	    if (bp.loading) {
-	      // TODO(jwl): make this wait until the breakpoint is saved if it
-	      // is still loading
-	      throw new Error("attempt to disable unsaved breakpoint");
-	    }
-
-	    var action = {
-	      type: "DISABLE_BREAKPOINT",
-	      breakpoint: bp,
-	      disabled: true,
-	      [_promise.PROMISE]: client.removeBreakpoint(bp.id)
-	    };
-
-	    return dispatch(action);
+	    var action = { type: "ADD_BREAKPOINT", breakpoint };
+	    var promise = (0, _addBreakpoint2.default)(getState, client, sourceMaps, action);
+	    return dispatch(_extends({}, action, { [_promise.PROMISE]: promise }));
 	  };
 	}
 
@@ -15897,37 +15659,115 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @static
 	 */
 	function removeBreakpoint(location) {
-	  return (_ref9) => {
-	    var dispatch = _ref9.dispatch,
-	        getState = _ref9.getState,
-	        client = _ref9.client;
+	  return (_ref3) => {
+	    var dispatch = _ref3.dispatch,
+	        getState = _ref3.getState,
+	        client = _ref3.client;
 
 	    var bp = (0, _selectors.getBreakpoint)(getState(), location);
 	    if (!bp) {
 	      throw new Error("attempt to remove breakpoint that does not exist");
 	    }
+
 	    if (bp.loading) {
 	      // TODO(jwl): make this wait until the breakpoint is saved if it
 	      // is still loading
 	      throw new Error("attempt to remove unsaved breakpoint");
 	    }
 
-	    var action = {
-	      type: "REMOVE_BREAKPOINT",
-	      breakpoint: bp
-	    };
-
 	    // If the breakpoint is already disabled, we don't need to communicate
 	    // with the server. We just need to dispatch an action
 	    // simulating a successful server request
 	    if (bp.disabled) {
-	      return dispatch(Object.assign({}, action, { status: "done" }));
+	      return dispatch({
+	        type: "REMOVE_BREAKPOINT",
+	        breakpoint: bp,
+	        status: "done"
+	      });
 	    }
 
-	    return dispatch(Object.assign({}, action, {
-	      [_promise.PROMISE]: client.removeBreakpoint(bp.id)
-	    }));
+	    return dispatch({
+	      type: "REMOVE_BREAKPOINT",
+	      breakpoint: bp,
+	      [_promise.PROMISE]: client.removeBreakpoint(bp)
+	    });
 	  };
+	}
+
+	/**
+	 * Enabling a breakpoint
+	 * will reuse the existing breakpoint information that is stored.
+	 *
+	 * @memberof actions/breakpoints
+	 * @static
+	 * @param {Location} $1.location Location  value
+	 */
+	function enableBreakpoint(location) {
+	  return (() => {
+	    var _ref4 = _asyncToGenerator(function* (_ref5) {
+	      var dispatch = _ref5.dispatch,
+	          getState = _ref5.getState,
+	          client = _ref5.client,
+	          sourceMaps = _ref5.sourceMaps;
+
+	      var breakpoint = (0, _selectors.getBreakpoint)(getState(), location);
+	      if (!breakpoint) {
+	        throw new Error("attempted to enable a breakpoint that does not exist");
+	      }
+
+	      var action = { type: "ENABLE_BREAKPOINT", breakpoint };
+	      var promise = (0, _addBreakpoint2.default)(getState, client, sourceMaps, action);
+	      return dispatch({
+	        type: "ENABLE_BREAKPOINT",
+	        breakpoint,
+	        [_promise.PROMISE]: promise
+	      });
+	    });
+
+	    return function (_x) {
+	      return _ref4.apply(this, arguments);
+	    };
+	  })();
+	}
+
+	/**
+	 * Disable a single breakpoint
+	 *
+	 * @memberof actions/breakpoints
+	 * @static
+	 */
+	function disableBreakpoint(location) {
+	  return (() => {
+	    var _ref6 = _asyncToGenerator(function* (_ref7) {
+	      var dispatch = _ref7.dispatch,
+	          getState = _ref7.getState,
+	          client = _ref7.client;
+
+	      var bp = (0, _selectors.getBreakpoint)(getState(), location);
+
+	      if (!bp) {
+	        throw new Error("attempt to disable a breakpoint that does not exist");
+	      }
+
+	      if (bp.loading) {
+	        // TODO(jwl): make this wait until the breakpoint is saved if it
+	        // is still loading
+	        throw new Error("attempt to disable unsaved breakpoint");
+	      }
+
+	      yield client.removeBreakpoint(bp);
+	      var newBreakpoint = _extends({}, bp, { disabled: true });
+
+	      return dispatch({
+	        type: "DISABLE_BREAKPOINT",
+	        breakpoint: newBreakpoint
+	      });
+	    });
+
+	    return function (_x2) {
+	      return _ref6.apply(this, arguments);
+	    };
+	  })();
 	}
 
 	/**
@@ -15937,29 +15777,29 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @static
 	 */
 	function toggleAllBreakpoints(shouldDisableBreakpoints) {
-	  return (_ref10) => {
-	    var dispatch = _ref10.dispatch,
-	        getState = _ref10.getState;
+	  return (() => {
+	    var _ref8 = _asyncToGenerator(function* (_ref9) {
+	      var dispatch = _ref9.dispatch,
+	          getState = _ref9.getState;
 
-	    var breakpoints = (0, _selectors.getBreakpoints)(getState());
-	    return dispatch({
-	      type: "TOGGLE_BREAKPOINTS",
-	      shouldDisableBreakpoints,
-	      [_promise.PROMISE]: _asyncToGenerator(function* () {
-	        for (var _ref12 of breakpoints) {
-	          var _ref13 = _slicedToArray(_ref12, 2);
+	      var breakpoints = (0, _selectors.getBreakpoints)(getState());
+	      for (var _ref10 of breakpoints) {
+	        var _ref11 = _slicedToArray(_ref10, 2);
 
-	          var breakpoint = _ref13[1];
+	        var breakpoint = _ref11[1];
 
-	          if (shouldDisableBreakpoints) {
-	            yield dispatch(disableBreakpoint(breakpoint.location));
-	          } else {
-	            yield dispatch(enableBreakpoint(breakpoint.location));
-	          }
+	        if (shouldDisableBreakpoints) {
+	          yield dispatch(disableBreakpoint(breakpoint.location));
+	        } else {
+	          yield dispatch(enableBreakpoint(breakpoint.location));
 	        }
-	      })()
+	      }
 	    });
-	  };
+
+	    return function (_x3) {
+	      return _ref8.apply(this, arguments);
+	    };
+	  })();
 	}
 
 	/**
@@ -15975,32 +15815,98 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @param {Boolean} $1.disabled Disable value for breakpoint value
 	 */
 	function setBreakpointCondition(location) {
-	  var _ref14 = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
-	      condition = _ref14.condition;
+	  var _ref12 = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
+	      condition = _ref12.condition;
 
+	  return (() => {
+	    var _ref13 = _asyncToGenerator(function* (_ref14) {
+	      var dispatch = _ref14.dispatch,
+	          getState = _ref14.getState,
+	          client = _ref14.client,
+	          sourceMaps = _ref14.sourceMaps;
+
+	      var bp = (0, _selectors.getBreakpoint)(getState(), location);
+	      if (!bp) {
+	        return dispatch(addBreakpoint(location, condition));
+	      }
+
+	      if (bp.loading) {
+	        // TODO(jwl): when this function is called, make sure the action
+	        // creator waits for the breakpoint to exist
+	        throw new Error("breakpoint must be saved");
+	      }
+
+	      yield client.setBreakpointCondition(bp.id, location, condition, sourceMaps.isOriginalId(bp.location.sourceId));
+
+	      var newBreakpoint = _extends({}, bp, { condition });
+
+	      (0, _breakpoint.assertBreakpoint)(newBreakpoint);
+
+	      return dispatch({
+	        type: "SET_BREAKPOINT_CONDITION",
+	        breakpoint: newBreakpoint
+	      });
+	    });
+
+	    return function (_x5) {
+	      return _ref13.apply(this, arguments);
+	    };
+	  })();
+	}
+
+	function toggleBreakpoint(line, column) {
 	  return (_ref15) => {
 	    var dispatch = _ref15.dispatch,
 	        getState = _ref15.getState,
 	        client = _ref15.client,
 	        sourceMaps = _ref15.sourceMaps;
 
-	    var bp = (0, _selectors.getBreakpoint)(getState(), location);
+	    var selectedSource = (0, _selectors.getSelectedSource)(getState());
+	    var bp = (0, _selectors.getBreakpointAtLocation)(getState(), { line, column });
+
+	    if (bp && bp.loading) {
+	      return;
+	    }
+
+	    if (bp) {
+	      // NOTE: it's possible the breakpoint has slid to a column
+	      return dispatch(removeBreakpoint({
+	        sourceId: bp.location.sourceId,
+	        sourceUrl: bp.location.sourceUrl,
+	        line: bp.location.line,
+	        column: column || bp.location.column
+	      }));
+	    }
+
+	    return dispatch(addBreakpoint({
+	      sourceId: selectedSource.get("id"),
+	      sourceUrl: selectedSource.get("url"),
+	      line: line,
+	      column: column
+	    }));
+	  };
+	}
+
+	function toggleDisabledBreakpoint(line, column) {
+	  return (_ref16) => {
+	    var dispatch = _ref16.dispatch,
+	        getState = _ref16.getState,
+	        client = _ref16.client,
+	        sourceMaps = _ref16.sourceMaps;
+
+	    var bp = (0, _selectors.getBreakpointAtLocation)(getState(), { line, column });
+	    if (bp && bp.loading) {
+	      return;
+	    }
+
 	    if (!bp) {
-	      return dispatch(addBreakpoint(location, { condition }));
+	      throw new Error("attempt to disable breakpoint that does not exist");
 	    }
 
-	    if (bp.loading) {
-	      // TODO(jwl): when this function is called, make sure the action
-	      // creator waits for the breakpoint to exist
-	      throw new Error("breakpoint must be saved");
+	    if (!bp.disabled) {
+	      return dispatch(disableBreakpoint(bp.location));
 	    }
-
-	    return dispatch({
-	      type: "SET_BREAKPOINT_CONDITION",
-	      breakpoint: bp,
-	      condition: condition,
-	      [_promise.PROMISE]: client.setBreakpointCondition(bp.id, location, condition, sourceMaps.isOriginalId(bp.location.sourceId))
-	    });
+	    return dispatch(enableBreakpoint(bp.location));
 	  };
 	}
 
@@ -16720,16 +16626,11 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var checkPendingBreakpoint = (() => {
 	  var _ref = _asyncToGenerator(function* (state, dispatch, pendingBreakpoint, source) {
-	    var _pendingBreakpoint$lo = pendingBreakpoint.location,
-	        line = _pendingBreakpoint$lo.line,
-	        sourceUrl = _pendingBreakpoint$lo.sourceUrl,
-	        column = _pendingBreakpoint$lo.column;
+	    var sourceUrl = pendingBreakpoint.location.sourceUrl;
 
 	    var sameSource = sourceUrl && sourceUrl === source.url;
-	    var location = { sourceId: source.id, sourceUrl, line, column };
-	    var bp = (0, _selectors.getBreakpoint)(state, location);
 
-	    if (sameSource && !bp) {
+	    if (sameSource) {
 	      yield dispatch((0, _breakpoints.syncBreakpoint)(source.id, pendingBreakpoint));
 	    }
 	  });
@@ -16769,11 +16670,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	exports.selectSourceURL = selectSourceURL;
 	exports.selectSource = selectSource;
 	exports.jumpToMappedLocation = jumpToMappedLocation;
+	exports.addTab = addTab;
+	exports.moveTab = moveTab;
 	exports.closeTab = closeTab;
 	exports.closeTabs = closeTabs;
 	exports.togglePrettyPrint = togglePrettyPrint;
 	exports.toggleBlackBox = toggleBlackBox;
 	exports.loadSourceText = loadSourceText;
+	exports.loadAllSources = loadAllSources;
 	exports.getTextForSources = getTextForSources;
 
 	var _defer = __webpack_require__(194);
@@ -16820,7 +16724,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	function checkSelectedSource(state, dispatch, source) {
 	  var pendingLocation = (0, _selectors.getPendingSelectedLocation)(state);
 
-	  if (pendingLocation && pendingLocation.url === source.url) {
+	  if (pendingLocation && !!source.url && pendingLocation.url === source.url) {
 	    dispatch(selectSource(source.id, { line: pendingLocation.line }));
 	  }
 	}
@@ -16957,13 +16861,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }
 
 	    var source = (0, _selectors.getSource)(getState(), id);
-
 	    if (!source) {
 	      // If there is no source we deselect the current selected source
 	      return dispatch({ type: "CLEAR_SELECTED_SOURCE" });
 	    }
 
-	    dispatch({ type: "TOGGLE_PROJECT_SEARCH", value: false });
+	    dispatch({ type: "TOGGLE_ACTIVE_SEARCH", value: null });
+
+	    dispatch(addTab(source.toJS(), 0));
 
 	    return dispatch({
 	      type: "SELECT_SOURCE",
@@ -17009,6 +16914,22 @@ return /******/ (function(modules) { // webpackBootstrap
 	      return _ref12.apply(this, arguments);
 	    };
 	  })();
+	}
+
+	function addTab(source, tabIndex) {
+	  return {
+	    type: "ADD_TAB",
+	    source,
+	    tabIndex
+	  };
+	}
+
+	function moveTab(url, tabIndex) {
+	  return {
+	    type: "MOVE_TAB",
+	    url,
+	    tabIndex
+	  };
 	}
 
 	/**
@@ -17075,12 +16996,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	        sourceMaps = _ref16.sourceMaps;
 
 	    var source = (0, _selectors.getSource)(getState(), sourceId).toJS();
-	    var sourceText = (0, _selectors.getSourceText)(getState(), sourceId);
-	    if (sourceText) {
-	      sourceText = sourceText.toJS();
-	    }
 
-	    if (sourceText && sourceText.loading) {
+	    if (source && source.loading) {
 	      return {};
 	    }
 
@@ -17097,7 +17014,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	      [_promise.PROMISE]: _asyncToGenerator(function* () {
 	        var _ref18 = yield (0, _prettyPrint.prettyPrint)({
 	          source,
-	          sourceText,
 	          url
 	        }),
 	            code = _ref18.code,
@@ -17155,10 +17071,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	          sourceMaps = _ref22.sourceMaps;
 
 	      // Fetch the source text only once.
-	      var textInfo = (0, _selectors.getSourceText)(getState(), source.id);
-	      if (textInfo) {
-	        // It's already loaded or is loading
-	        return Promise.resolve(textInfo);
+	      if (source.text) {
+	        return Promise.resolve(source);
 	      }
 
 	      yield dispatch({
@@ -17171,22 +17085,47 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	          var response = yield client.sourceContents(source.id);
 
-	          var sourceText = {
+	          return {
 	            id: source.id,
 	            text: response.source,
 	            contentType: response.contentType || "text/javascript"
 	          };
-
-	          return sourceText;
 	        })()
 	      });
 
 	      // get the symbols for the source as well
-	      return dispatch((0, _ast.setSymbols)(source));
+	      return dispatch((0, _ast.setSymbols)(source.id));
 	    });
 
 	    return function (_x15) {
 	      return _ref21.apply(this, arguments);
+	    };
+	  })();
+	}
+
+	/**
+	  Load the text for all the avaliable sources
+	 * @memberof actions/sources
+	 * @static
+	 */
+	function loadAllSources() {
+	  return (() => {
+	    var _ref24 = _asyncToGenerator(function* (_ref25) {
+	      var dispatch = _ref25.dispatch,
+	          getState = _ref25.getState;
+
+	      var sources = (0, _selectors.getSources)(getState());
+	      for (var _ref26 of sources) {
+	        var _ref27 = _slicedToArray(_ref26, 2);
+
+	        var source = _ref27[1];
+
+	        yield dispatch(loadSourceText(source.toJS()));
+	      }
+	    });
+
+	    return function (_x16) {
+	      return _ref24.apply(this, arguments);
 	    };
 	  })();
 	}
@@ -17206,9 +17145,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	 *         A promise that is resolved after source texts have been fetched.
 	 */
 	function getTextForSources(actors) {
-	  return (_ref24) => {
-	    var dispatch = _ref24.dispatch,
-	        getState = _ref24.getState;
+	  return (_ref28) => {
+	    var dispatch = _ref28.dispatch,
+	        getState = _ref28.getState;
 
 	    var deferred = (0, _defer2.default)();
 	    var pending = new Set(actors);
@@ -17223,9 +17162,9 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	    var _loop = function (actor) {
 	      var source = (0, _selectors.getSource)(getState(), actor);
-	      dispatch(loadSourceText(source)).then((_ref33) => {
-	        var text = _ref33.text,
-	            contentType = _ref33.contentType;
+	      dispatch(loadSourceText(source)).then((_ref35) => {
+	        var text = _ref35.text,
+	            contentType = _ref35.contentType;
 
 	        onFetch([source, text, contentType]);
 	      }, err => {
@@ -17246,11 +17185,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }
 
 	    /* Called if fetching a source finishes successfully. */
-	    function onFetch(_ref25) {
-	      var _ref26 = _slicedToArray(_ref25, 3),
-	          aSource = _ref26[0],
-	          aText = _ref26[1],
-	          aContentType = _ref26[2];
+	    function onFetch(_ref29) {
+	      var _ref30 = _slicedToArray(_ref29, 3),
+	          aSource = _ref30[0],
+	          aText = _ref30[1],
+	          aContentType = _ref30[2];
 
 	      // If fetching the source has previously timed out, discard it this time.
 	      if (!pending.has(aSource.actor)) {
@@ -17262,12 +17201,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }
 
 	    /* Called if fetching a source failed because of an error. */
-	    function onError(_ref27) {
-	      var _ref28 = _slicedToArray(_ref27, 2),
-	          aSource = _ref28[0],
-	          aError = _ref28[1];
-
-	      pending.delete(aSource.actor);
+	    function onError(source, error) {
+	      pending.delete(source.actor);
 	      maybeFinish();
 	    }
 
@@ -17278,12 +17213,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	      if (pending.size == 0) {
 	        // Sort the fetched sources alphabetically by their url.
 	        if (deferred) {
-	          deferred.resolve(fetched.sort((_ref29, _ref30) => {
-	            var _ref32 = _slicedToArray(_ref29, 1),
-	                aFirst = _ref32[0];
+	          deferred.resolve(fetched.sort((_ref31, _ref32) => {
+	            var _ref34 = _slicedToArray(_ref31, 1),
+	                aFirst = _ref34[0];
 
-	            var _ref31 = _slicedToArray(_ref30, 1),
-	                aSecond = _ref31[0];
+	            var _ref33 = _slicedToArray(_ref32, 1),
+	                aSecond = _ref33[0];
 
 	            return aFirst > aSecond ? -1 : 1;
 	          }));
@@ -17307,7 +17242,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	exports.updateFrameLocations = updateFrameLocations;
 	exports.getPauseReason = getPauseReason;
 
-	var get = __webpack_require__(67);
+	var _get = __webpack_require__(67);
+
+	var _get2 = _interopRequireDefault(_get);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
 	function updateFrameLocations(frames, sourceMaps) {
 	  if (!frames || frames.length == 0) {
 	    return Promise.resolve(frames);
@@ -17349,7 +17289,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    return null;
 	  }
 
-	  var reasonType = get(pauseInfo, "why.type", null);
+	  var reasonType = (0, _get2.default)(pauseInfo, "why.type", null);
 	  if (!reasons[reasonType]) {
 	    console.log("Please file an issue: reasonType=", reasonType);
 	  }
@@ -17369,10 +17309,6 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _devtoolsSourceMap = __webpack_require__(898);
 
-	var _buildQuery = __webpack_require__(258);
-
-	var _buildQuery2 = _interopRequireDefault(_buildQuery);
-
 	var _sourceDocuments = __webpack_require__(260);
 
 	var sourceDocumentUtils = _interopRequireWildcard(_sourceDocuments);
@@ -17388,8 +17324,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _devtoolsSourceEditor = __webpack_require__(994);
 
 	function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
-
-	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 	var getDocument = sourceDocumentUtils.getDocument;
 	var findNext = sourceSearchUtils.findNext,
@@ -17420,20 +17354,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  return shouldShowPrettyPrint(selectedSource);
-	}
-
-	function isTextForSource(sourceText) {
-	  return !sourceText.get("loading") && !sourceText.get("error");
-	}
-
-	function breakpointAtLocation(breakpoints, _ref) {
-	  var line = _ref.line,
-	      _ref$column = _ref.column,
-	      column = _ref$column === undefined ? undefined : _ref$column;
-
-	  return breakpoints.find(bp => {
-	    return bp.location.line === line + 1 && bp.location.column === column;
-	  });
 	}
 
 	function traverseResults(e, ctx, query, dir, modifiers) {
@@ -17476,114 +17396,39 @@ return /******/ (function(modules) { // webpackBootstrap
 	  });
 	}
 
-	function updateDocument(editor, selectedSource, sourceText) {
-	  if (selectedSource) {
-	    var sourceId = selectedSource.get("id");
-	    var doc = getDocument(sourceId) || editor.createDocument();
-	    editor.replaceDocument(doc);
-	  } else if (sourceText) {
-	    this.setText(sourceText.get("text"));
+	function updateDocument(editor, selectedSource) {
+	  if (!selectedSource) {
+	    return;
 	  }
+	  var sourceId = selectedSource.get("id");
+	  var doc = getDocument(sourceId) || editor.createDocument();
+	  editor.replaceDocument(doc);
+	}
+
+	function markText(editor, className, location) {
+	  var start = location.start,
+	      end = location.end;
+
+
+	  return editor.codeMirror.markText({ ch: start.column, line: start.line - 1 }, { ch: end.column, line: end.line - 1 }, { className });
+	}
+
+	function lineAtHeight(editor, event) {
+	  return editor.codeMirror.lineAtHeight(event.clientY) + 1;
 	}
 
 	module.exports = Object.assign({}, expressionUtils, sourceDocumentUtils, sourceSearchUtils, _devtoolsSourceEditor.SourceEditorUtils, {
 	  createEditor,
 	  shouldShowPrettyPrint,
 	  shouldShowFooter,
-	  buildQuery: _buildQuery2.default,
-	  isTextForSource,
-	  breakpointAtLocation,
 	  traverseResults,
-	  updateDocument
+	  updateDocument,
+	  markText,
+	  lineAtHeight
 	});
 
 /***/ },
-/* 258 */
-/***/ function(module, exports, __webpack_require__) {
-
-	"use strict";
-
-	Object.defineProperty(exports, "__esModule", {
-	  value: true
-	});
-	exports.default = buildQuery;
-
-	var _escapeRegExp = __webpack_require__(259);
-
-	var _escapeRegExp2 = _interopRequireDefault(_escapeRegExp);
-
-	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-	/**
-	 * Ignore doing outline matches for less than 3 whitespaces
-	 *
-	 * @memberof utils/source-search
-	 * @static
-	 */
-	function ignoreWhiteSpace(str) {
-	  return (/^\s{0,2}$/.test(str) ? "(?!\\s*.*)" : str
-	  );
-	}
-
-
-	function wholeMatch(query, wholeWord) {
-	  if (query == "" || !wholeWord) {
-	    return query;
-	  }
-
-	  return `\\b${query}\\b`;
-	}
-
-	function buildFlags(caseSensitive, isGlobal) {
-	  if (caseSensitive && isGlobal) {
-	    return "g";
-	  }
-
-	  if (!caseSensitive && isGlobal) {
-	    return "gi";
-	  }
-
-	  if (!caseSensitive && !isGlobal) {
-	    return "i";
-	  }
-
-	  return;
-	}
-
-	function buildQuery(originalQuery, modifiers, _ref) {
-	  var _ref$isGlobal = _ref.isGlobal,
-	      isGlobal = _ref$isGlobal === undefined ? false : _ref$isGlobal,
-	      _ref$ignoreSpaces = _ref.ignoreSpaces,
-	      ignoreSpaces = _ref$ignoreSpaces === undefined ? false : _ref$ignoreSpaces;
-	  var caseSensitive = modifiers.caseSensitive,
-	      regexMatch = modifiers.regexMatch,
-	      wholeWord = modifiers.wholeWord;
-
-
-	  if (originalQuery == "") {
-	    return new RegExp(originalQuery);
-	  }
-
-	  var query = originalQuery;
-	  if (ignoreSpaces) {
-	    query = ignoreWhiteSpace(query);
-	  }
-
-	  if (!regexMatch) {
-	    query = (0, _escapeRegExp2.default)(query);
-	  }
-
-	  query = wholeMatch(query, wholeWord);
-	  var flags = buildFlags(caseSensitive, isGlobal);
-
-	  if (flags) {
-	    return new RegExp(query, flags);
-	  }
-
-	  return new RegExp(query);
-	}
-
-/***/ },
+/* 258 */,
 /* 259 */
 /***/ function(module, exports, __webpack_require__) {
 
@@ -17623,13 +17468,17 @@ return /******/ (function(modules) { // webpackBootstrap
 
 /***/ },
 /* 260 */
-/***/ function(module, exports) {
+/***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
 
 	Object.defineProperty(exports, "__esModule", {
 	  value: true
 	});
+	exports.showSourceText = exports.clearDocuments = exports.removeDocument = exports.setDocument = exports.getDocument = undefined;
+
+	var _source = __webpack_require__(233);
+
 	var sourceDocs = {};
 
 	function getDocument(key) {
@@ -17648,10 +17497,38 @@ return /******/ (function(modules) { // webpackBootstrap
 	  sourceDocs = {};
 	}
 
+	/**
+	 * Handle getting the source document or creating a new
+	 * document with the correct mode and text.
+	 */
+	function showSourceText(editor, source) {
+	  if (!source) {
+	    return;
+	  }
+
+	  var doc = getDocument(source.id);
+	  if (editor.codeMirror.doc === doc) {
+	    return;
+	  }
+
+	  if (doc) {
+	    editor.replaceDocument(doc);
+	    return doc;
+	  }
+
+	  doc = editor.createDocument();
+	  setDocument(source.id, doc);
+	  editor.replaceDocument(doc);
+
+	  editor.setText(source.text);
+	  editor.setMode((0, _source.getMode)(source));
+	}
+
 	exports.getDocument = getDocument;
 	exports.setDocument = setDocument;
 	exports.removeDocument = removeDocument;
 	exports.clearDocuments = clearDocuments;
+	exports.showSourceText = showSourceText;
 
 /***/ },
 /* 261 */
@@ -17662,9 +17539,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	Object.defineProperty(exports, "__esModule", {
 	  value: true
 	});
-	exports.getMatchIndex = exports.removeOverlay = exports.findPrev = exports.findNext = exports.find = exports.countMatches = exports.clearIndex = exports.buildQuery = undefined;
+	exports.getMatchIndex = exports.removeOverlay = exports.findPrev = exports.findNext = exports.find = exports.buildQuery = undefined;
 
-	var _buildQuery = __webpack_require__(258);
+	var _buildQuery = __webpack_require__(1138);
 
 	var _buildQuery2 = _interopRequireDefault(_buildQuery);
 
@@ -17689,7 +17566,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  this.posFrom = this.posTo = this.query = null;
 	  this.overlay = null;
 	  this.results = [];
-	  this.matchIndex = -1;
 	}
 
 	/**
@@ -17808,27 +17684,26 @@ return /******/ (function(modules) { // webpackBootstrap
 	function doSearch(ctx, rev, query, keepSelection, modifiers) {
 	  var cm = ctx.cm;
 
-	  var matchIndex = -1;
+	  if (!cm) {
+	    return;
+	  }
+	  var defaultIndex = { line: -1, ch: -1 };
 
-	  cm.operation(function () {
+	  return cm.operation(function () {
 	    if (!query || isWhitespace(query)) {
 	      return;
 	    }
 
 	    var state = getSearchState(cm, query, modifiers);
-	    var newQuery = state.query != query;
+	    var isNewQuery = state.query !== query;
 	    state.query = query;
 
 	    updateOverlay(cm, state, query, modifiers);
 	    updateCursor(cm, state, keepSelection);
-	    searchNext(ctx, rev, query, newQuery, modifiers);
+	    var searchLocation = searchNext(ctx, rev, query, isNewQuery, modifiers);
 
-	    // NOTE: We would like to find the correct match index based on where the
-	    // match is in the document.
-	    state.matchIndex = matchIndex;
+	    return searchLocation ? searchLocation.from : defaultIndex;
 	  });
-
-	  return matchIndex;
 	}
 
 	function getCursorPos(newQuery, rev, state) {
@@ -17909,7 +17784,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var state = getSearchState(cm, query, modifiers);
 
 	  state.results = [];
-	  state.matchIndex = -1;
 
 	  if (!state.query) {
 	    return;
@@ -17949,22 +17823,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return doSearch(ctx, true, query, keepSelection, modifiers);
 	}
 
-	function clearIndex(ctx, query, modifiers) {
-	  var state = getSearchState(ctx.cm, query, modifiers);
-	  state.matchIndex = -1;
-	}
-
-	function countMatches(query, text, modifiers) {
-	  var regexQuery = (0, _buildQuery2.default)(query, modifiers, {
-	    isGlobal: true
-	  });
-	  var match = text.match(regexQuery);
-	  return match ? match.length : 0;
-	}
-
 	exports.buildQuery = _buildQuery2.default;
-	exports.clearIndex = clearIndex;
-	exports.countMatches = countMatches;
 	exports.find = find;
 	exports.findNext = findNext;
 	exports.findPrev = findPrev;
@@ -19662,12 +19521,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var dispatch = _ref.dispatch,
 	        client = _ref.client;
 
-	    // dispatch(evaluateExpressions(null));
-
-	    return dispatch({
+	    dispatch({
 	      type: "RESUME",
 	      value: undefined
 	    });
+
+	    dispatch((0, _expressions.evaluateExpressions)(null));
 	  };
 	}
 
@@ -19689,13 +19548,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	          why = pauseInfo.why,
 	          loadedObjects = pauseInfo.loadedObjects;
 
+
 	      frames = yield (0, _pause.updateFrameLocations)(frames, sourceMaps);
 	      var frame = frames[0];
+
+	      var scopes = yield client.getFrameScopes(frame);
 
 	      dispatch({
 	        type: "PAUSED",
 	        pauseInfo: { why, frame, frames },
 	        frames: frames,
+	        scopes,
 	        selectedFrameId: frame.id,
 	        loadedObjects: loadedObjects || []
 	      });
@@ -19849,16 +19712,27 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @static
 	 */
 	function selectFrame(frame) {
-	  return (_ref12) => {
-	    var dispatch = _ref12.dispatch;
+	  return (() => {
+	    var _ref12 = _asyncToGenerator(function* (_ref13) {
+	      var dispatch = _ref13.dispatch,
+	          client = _ref13.client;
 
-	    dispatch((0, _expressions.evaluateExpressions)(frame.id));
-	    dispatch((0, _sources.selectSource)(frame.location.sourceId, { line: frame.location.line }));
-	    dispatch({
-	      type: "SELECT_FRAME",
-	      frame
+	      dispatch((0, _expressions.evaluateExpressions)(frame.id));
+	      dispatch((0, _sources.selectSource)(frame.location.sourceId, { line: frame.location.line }));
+
+	      var scopes = yield client.getFrameScopes(frame);
+
+	      dispatch({
+	        type: "SELECT_FRAME",
+	        frame,
+	        scopes
+	      });
 	    });
-	  };
+
+	    return function (_x2) {
+	      return _ref12.apply(this, arguments);
+	    };
+	  })();
 	}
 
 	/**
@@ -19866,10 +19740,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @static
 	 */
 	function loadObjectProperties(object) {
-	  return (_ref13) => {
-	    var dispatch = _ref13.dispatch,
-	        client = _ref13.client,
-	        getState = _ref13.getState;
+	  return (_ref14) => {
+	    var dispatch = _ref14.dispatch,
+	        client = _ref14.client,
+	        getState = _ref14.getState;
 
 	    var objectId = object.actor || object.objectId;
 
@@ -19895,6 +19769,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	  value: true
 	});
 	exports.willNavigate = willNavigate;
+	exports.navigate = navigate;
+	exports.connect = connect;
 	exports.navigated = navigated;
 
 	var _editor = __webpack_require__(257);
@@ -19904,6 +19780,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _utils = __webpack_require__(234);
 
 	var _sources2 = __webpack_require__(254);
+
+	var _parser = __webpack_require__(827);
 
 	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
@@ -19926,17 +19804,29 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	      yield sourceMaps.clearSourceMaps();
 	      (0, _editor.clearDocuments)();
+	      (0, _parser.clearSymbols)();
 
-	      dispatch({
-	        type: "NAVIGATE",
-	        url: event.url
-	      });
+	      dispatch(navigate(event.url));
 	    });
 
 	    return function (_x) {
 	      return _ref.apply(this, arguments);
 	    };
 	  })();
+	}
+
+	function navigate(url) {
+	  return {
+	    type: "NAVIGATE",
+	    url
+	  };
+	}
+
+	function connect(url) {
+	  return {
+	    type: "CONNECT",
+	    url
+	  };
 	}
 
 	/**
@@ -19972,12 +19862,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	Object.defineProperty(exports, "__esModule", {
 	  value: true
 	});
-	exports.toggleProjectSearch = toggleProjectSearch;
-	exports.toggleFileSearch = toggleFileSearch;
-	exports.toggleSymbolSearch = toggleSymbolSearch;
+	exports.closeActiveSearch = closeActiveSearch;
+	exports.setActiveSearch = setActiveSearch;
 	exports.toggleFrameworkGrouping = toggleFrameworkGrouping;
 	exports.setSelectedSymbolType = setSelectedSymbolType;
 	exports.setFileSearchQuery = setFileSearchQuery;
+	exports.updateSearchResults = updateSearchResults;
 	exports.toggleFileSearchModifier = toggleFileSearchModifier;
 	exports.showSource = showSource;
 	exports.togglePaneCollapse = togglePaneCollapse;
@@ -19986,65 +19876,33 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _selectors = __webpack_require__(242);
 
-	function toggleProjectSearch(toggleValue) {
+	function closeActiveSearch() {
+	  return {
+	    type: "TOGGLE_ACTIVE_SEARCH",
+	    value: null
+	  };
+	}
+	function setActiveSearch(activeSearch) {
 	  return (_ref) => {
 	    var dispatch = _ref.dispatch,
 	        getState = _ref.getState;
 
-	    var projectSearchState = (0, _selectors.getProjectSearchState)(getState());
-	    if (toggleValue === undefined) {
-	      return dispatch({
-	        type: "TOGGLE_PROJECT_SEARCH",
-	        value: !projectSearchState
-	      });
-	    }
-
-	    if (projectSearchState == toggleValue) {
+	    var activeSearchState = (0, _selectors.getActiveSearchState)(getState());
+	    if (activeSearchState === activeSearch) {
 	      return;
 	    }
 
 	    dispatch({
-	      type: "TOGGLE_PROJECT_SEARCH",
-	      value: toggleValue
-	    });
-	  };
-	}
-
-	function toggleFileSearch(toggleValue) {
-	  return (_ref2) => {
-	    var dispatch = _ref2.dispatch,
-	        getState = _ref2.getState;
-
-	    if (toggleValue != null) {
-	      dispatch({
-	        type: "TOGGLE_FILE_SEARCH",
-	        value: toggleValue
-	      });
-	    } else {
-	      dispatch({
-	        type: "TOGGLE_FILE_SEARCH",
-	        value: !(0, _selectors.getFileSearchState)(getState())
-	      });
-	    }
-	  };
-	}
-
-	function toggleSymbolSearch(toggleValue) {
-	  return (_ref3) => {
-	    var dispatch = _ref3.dispatch,
-	        getState = _ref3.getState;
-
-	    dispatch({
-	      type: "TOGGLE_SYMBOL_SEARCH",
-	      value: toggleValue
+	      type: "TOGGLE_ACTIVE_SEARCH",
+	      value: activeSearch
 	    });
 	  };
 	}
 
 	function toggleFrameworkGrouping(toggleValue) {
-	  return (_ref4) => {
-	    var dispatch = _ref4.dispatch,
-	        getState = _ref4.getState;
+	  return (_ref2) => {
+	    var dispatch = _ref2.dispatch,
+	        getState = _ref2.getState;
 
 	    dispatch({
 	      type: "TOGGLE_FRAMEWORK_GROUPING",
@@ -20054,9 +19912,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 	function setSelectedSymbolType(symbolType) {
-	  return (_ref5) => {
-	    var dispatch = _ref5.dispatch,
-	        getState = _ref5.getState;
+	  return (_ref3) => {
+	    var dispatch = _ref3.dispatch,
+	        getState = _ref3.getState;
 
 	    dispatch({
 	      type: "SET_SYMBOL_SEARCH_TYPE",
@@ -20072,14 +19930,21 @@ return /******/ (function(modules) { // webpackBootstrap
 	  };
 	}
 
+	function updateSearchResults(results) {
+	  return {
+	    type: "UPDATE_SEARCH_RESULTS",
+	    results
+	  };
+	}
+
 	function toggleFileSearchModifier(modifier) {
 	  return { type: "TOGGLE_FILE_SEARCH_MODIFIER", modifier };
 	}
 
 	function showSource(sourceId) {
-	  return (_ref6) => {
-	    var dispatch = _ref6.dispatch,
-	        getState = _ref6.getState;
+	  return (_ref4) => {
+	    var dispatch = _ref4.dispatch,
+	        getState = _ref4.getState;
 
 	    var source = (0, _selectors.getSource)(getState(), sourceId);
 	    dispatch({
@@ -21937,6 +21802,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	  folder: __webpack_require__(355),
 	  globe: __webpack_require__(356),
 	  jquery: __webpack_require__(999),
+	  underscore: __webpack_require__(1117),
+	  lodash: __webpack_require__(1118),
+	  ember: __webpack_require__(1119),
+	  vuejs: __webpack_require__(1174),
 	  "magnifying-glass": __webpack_require__(357),
 	  "arrow-up": __webpack_require__(919),
 	  "arrow-down": __webpack_require__(920),
@@ -22419,7 +22288,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	      onBlur,
 	      placeholder,
 	      value: query,
-	      spellCheck: false
+	      spellCheck: false,
+	      ref: "input"
 	    }), _react.DOM.div({ className: "summary" }, query != "" ? summaryMsg : ""), this.renderNav(), (0, _Close2.default)({
 	      handleClick: handleClose,
 	      buttonClass: size
@@ -22543,7 +22413,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	exports.default = ResultList;
 	ResultList.defaultProps = {
-	  size: ""
+	  size: "small"
 	};
 
 /***/ },
@@ -22561,139 +22431,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 /***/ },
 /* 387 */,
-/* 388 */
-/***/ function(module, exports, __webpack_require__) {
-
-	"use strict";
-
-	Object.defineProperty(exports, "__esModule", {
-	  value: true
-	});
-
-	var _react = __webpack_require__(2);
-
-	var _reactImmutableProptypes = __webpack_require__(150);
-
-	var _reactImmutableProptypes2 = _interopRequireDefault(_reactImmutableProptypes);
-
-	var _redux = __webpack_require__(3);
-
-	var _reactRedux = __webpack_require__(151);
-
-	var _text = __webpack_require__(389);
-
-	var _actions = __webpack_require__(244);
-
-	var _actions2 = _interopRequireDefault(_actions);
-
-	var _selectors = __webpack_require__(242);
-
-	var _devtoolsConfig = __webpack_require__(828);
-
-	__webpack_require__(424);
-
-	var _classnames = __webpack_require__(175);
-
-	var _classnames2 = _interopRequireDefault(_classnames);
-
-	var _Outline2 = __webpack_require__(921);
-
-	var _Outline3 = _interopRequireDefault(_Outline2);
-
-	var _SourcesTree2 = __webpack_require__(390);
-
-	var _SourcesTree3 = _interopRequireDefault(_SourcesTree2);
-
-	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-	var Outline = (0, _react.createFactory)(_Outline3.default);
-
-	var SourcesTree = (0, _react.createFactory)(_SourcesTree3.default);
-
-	class Sources extends _react.Component {
-
-	  constructor(props) {
-	    super(props);
-	    this.state = { selectedPane: "sources" };
-
-	    this.renderShortcut = this.renderShortcut.bind(this);
-	    this.showPane = this.showPane.bind(this);
-	    this.renderFooter = this.renderFooter.bind(this);
-	  }
-
-	  showPane(selectedPane) {
-	    this.setState({ selectedPane });
-	  }
-
-	  renderOutlineTabs() {
-	    if (!(0, _devtoolsConfig.isEnabled)("outline")) {
-	      return;
-	    }
-
-	    return [_react.DOM.div({
-	      className: (0, _classnames2.default)("tab", {
-	        active: this.state.selectedPane === "sources"
-	      }),
-	      onClick: () => this.showPane("sources"),
-	      key: "sources-tab"
-	    }, "Sources View"), _react.DOM.div({
-	      className: (0, _classnames2.default)("tab", {
-	        active: this.state.selectedPane === "outline"
-	      }),
-	      onClick: () => this.showPane("outline"),
-	      key: "outline-tab"
-	    }, "Outline View")];
-	  }
-
-	  renderFooter() {
-	    return _react.DOM.div({
-	      className: "source-footer"
-	    }, this.renderOutlineTabs());
-	  }
-
-	  renderShortcut() {
-	    if (this.props.horizontal) {
-	      return _react.DOM.span({
-	        className: "sources-header-info",
-	        dir: "ltr",
-	        onClick: () => this.props.toggleProjectSearch()
-	      }, L10N.getFormatStr("sources.search", (0, _text.formatKeyShortcut)(L10N.getStr("sources.search.key2"))));
-	    }
-	  }
-
-	  renderHeader() {
-	    return _react.DOM.div({ className: "sources-header" }, this.renderShortcut());
-	  }
-
-	  render() {
-	    var selectedPane = this.state.selectedPane;
-	    var _props = this.props,
-	        sources = _props.sources,
-	        selectSource = _props.selectSource;
-
-
-	    return _react.DOM.div({ className: "sources-panel" }, this.renderHeader(), SourcesTree({
-	      sources,
-	      selectSource,
-	      isHidden: selectedPane === "outline"
-	    }), Outline({ selectSource, isHidden: selectedPane === "sources" }), this.renderFooter());
-	  }
-	}
-
-	Sources.propTypes = {
-	  sources: _reactImmutableProptypes2.default.map.isRequired,
-	  selectSource: _react.PropTypes.func.isRequired,
-	  horizontal: _react.PropTypes.bool.isRequired,
-	  toggleProjectSearch: _react.PropTypes.func.isRequired
-	};
-
-	Sources.displayName = "Sources";
-
-	exports.default = (0, _reactRedux.connect)(state => ({
-	  sources: (0, _selectors.getSources)(state)
-	}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Sources);
-
-/***/ },
+/* 388 */,
 /* 389 */
 /***/ function(module, exports, __webpack_require__) {
 
@@ -22738,292 +22476,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	exports.formatKeyShortcut = formatKeyShortcut;
 
 /***/ },
-/* 390 */
-/***/ function(module, exports, __webpack_require__) {
-
-	"use strict";
-
-	Object.defineProperty(exports, "__esModule", {
-	  value: true
-	});
-
-	var _redux = __webpack_require__(3);
-
-	var _reactRedux = __webpack_require__(151);
-
-	var _react = __webpack_require__(2);
-
-	var _classnames = __webpack_require__(175);
-
-	var _classnames2 = _interopRequireDefault(_classnames);
-
-	var _reactImmutableProptypes = __webpack_require__(150);
-
-	var _reactImmutableProptypes2 = _interopRequireDefault(_reactImmutableProptypes);
-
-	var _immutable = __webpack_require__(146);
-
-	var _selectors = __webpack_require__(242);
-
-	var _sourcesTree = __webpack_require__(391);
-
-	var _ManagedTree2 = __webpack_require__(419);
-
-	var _ManagedTree3 = _interopRequireDefault(_ManagedTree2);
-
-	var _actions = __webpack_require__(244);
-
-	var _actions2 = _interopRequireDefault(_actions);
-
-	var _Svg = __webpack_require__(344);
-
-	var _Svg2 = _interopRequireDefault(_Svg);
-
-	var _devtoolsLaunchpad = __webpack_require__(131);
-
-	var _clipboard = __webpack_require__(423);
-
-	var _utils = __webpack_require__(234);
-
-	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-	var ManagedTree = (0, _react.createFactory)(_ManagedTree3.default);
-
-	class SourcesTree extends _react.Component {
-
-	  constructor(props) {
-	    super(props);
-	    this.state = (0, _sourcesTree.createTree)(this.props.sources, this.props.debuggeeUrl);
-
-	    this.focusItem = this.focusItem.bind(this);
-	    this.selectItem = this.selectItem.bind(this);
-	    this.getIcon = this.getIcon.bind(this);
-	    this.onContextMenu = this.onContextMenu.bind(this);
-	    this.renderItem = this.renderItem.bind(this);
-
-	    this.queueUpdate = (0, _utils.throttle)(function () {
-	      if (!this.mounted) {
-	        return;
-	      }
-
-	      this.forceUpdate();
-	    }, 50);
-	  }
-
-	  componentDidMount() {
-	    this.mounted = true;
-	  }
-
-	  componentWillUnMount() {
-	    this.mounted = false;
-	  }
-
-	  shouldComponentUpdate() {
-	    this.queueUpdate();
-	    return false;
-	  }
-
-	  componentWillReceiveProps(nextProps) {
-	    var selectedSource = this.props.selectedSource;
-
-	    if (nextProps.shownSource && nextProps.shownSource != this.props.shownSource) {
-	      var _listItems = (0, _sourcesTree.getDirectories)(nextProps.shownSource, this.state.sourceTree);
-
-	      if (_listItems && _listItems[0]) {
-	        this.selectItem(_listItems[0]);
-	      }
-
-	      return this.setState({ listItems: _listItems });
-	    }
-
-	    if (nextProps.selectedSource && nextProps.selectedSource != selectedSource) {
-	      var _highlightItems = (0, _sourcesTree.getDirectories)(nextProps.selectedSource.get("url"), this.state.sourceTree);
-
-	      return this.setState({ highlightItems: _highlightItems });
-	    }
-
-	    if (nextProps.sources === this.props.sources) {
-	      return;
-	    }
-
-	    if (nextProps.sources.size === 0) {
-	      this.setState((0, _sourcesTree.createTree)(nextProps.sources, this.props.debuggeeUrl));
-	      return;
-	    }
-
-	    var next = (0, _immutable.Set)(nextProps.sources.valueSeq());
-	    var prev = (0, _immutable.Set)(this.props.sources.valueSeq());
-	    var newSet = next.subtract(prev);
-
-	    var uncollapsedTree = this.state.uncollapsedTree;
-	    for (var source of newSet) {
-	      (0, _sourcesTree.addToTree)(uncollapsedTree, source, this.props.debuggeeUrl);
-	    }
-
-	    // TODO: recreating the tree every time messes with the expanded
-	    // state of ManagedTree, because it depends on item instances
-	    // being the same. The result is that if a source is added at a
-	    // later time, all expanded state is lost.
-	    var sourceTree = newSet.size > 0 ? (0, _sourcesTree.collapseTree)(uncollapsedTree) : this.state.sourceTree;
-
-	    this.setState({
-	      uncollapsedTree,
-	      sourceTree,
-	      parentMap: (0, _sourcesTree.createParentMap)(sourceTree)
-	    });
-	  }
-
-	  focusItem(item) {
-	    this.setState({ focusedItem: item });
-	  }
-
-	  selectItem(item) {
-	    if (!(0, _sourcesTree.nodeHasChildren)(item)) {
-	      this.props.selectSource(item.contents.get("id"));
-	    }
-	  }
-
-	  getIcon(item, depth) {
-	    if (depth === 0) {
-	      return (0, _Svg2.default)("domain");
-	    }
-
-	    if (!(0, _sourcesTree.nodeHasChildren)(item)) {
-	      return (0, _Svg2.default)("file");
-	    }
-
-	    return (0, _Svg2.default)("folder");
-	  }
-
-	  onContextMenu(event, item) {
-	    var copySourceUrlLabel = L10N.getStr("copySourceUrl");
-	    var copySourceUrlKey = L10N.getStr("copySourceUrl.accesskey");
-
-	    event.stopPropagation();
-	    event.preventDefault();
-
-	    var menuOptions = [];
-
-	    if (!(0, _sourcesTree.isDirectory)(item)) {
-	      var source = item.contents.get("url");
-	      var copySourceUrl = {
-	        id: "node-menu-copy-source",
-	        label: copySourceUrlLabel,
-	        accesskey: copySourceUrlKey,
-	        disabled: false,
-	        click: () => (0, _clipboard.copyToTheClipboard)(source)
-	      };
-
-	      menuOptions.push(copySourceUrl);
-	    }
-
-	    (0, _devtoolsLaunchpad.showMenu)(event, menuOptions);
-	  }
-
-	  renderItem(item, depth, focused, _, expanded, _ref) {
-	    var setExpanded = _ref.setExpanded;
-
-	    var arrow = (0, _Svg2.default)("arrow", {
-	      className: (0, _classnames2.default)({
-	        expanded: expanded,
-	        hidden: !(0, _sourcesTree.nodeHasChildren)(item)
-	      }),
-	      onClick: e => {
-	        e.stopPropagation();
-	        setExpanded(item, !expanded);
-	      }
-	    });
-
-	    var icon = this.getIcon(item, depth);
-	    var paddingDir = "paddingRight";
-	    if (document.body && document.body.parentElement) {
-	      paddingDir = document.body.parentElement.dir == "ltr" ? "paddingLeft" : "paddingRight";
-	    }
-
-	    return _react.DOM.div({
-	      className: (0, _classnames2.default)("node", { focused }),
-	      style: { [paddingDir]: `${depth * 15}px` },
-	      key: item.path,
-	      onClick: () => {
-	        this.selectItem(item);
-	        setExpanded(item, !expanded);
-	      },
-	      onContextMenu: e => this.onContextMenu(e, item)
-	    }, _react.DOM.div(null, arrow, icon, item.name));
-	  }
-
-	  render() {
-	    var isHidden = this.props.isHidden;
-	    var _state = this.state,
-	        focusedItem = _state.focusedItem,
-	        sourceTree = _state.sourceTree,
-	        parentMap = _state.parentMap,
-	        listItems = _state.listItems,
-	        highlightItems = _state.highlightItems;
-
-
-	    var isEmpty = sourceTree.contents.length === 0;
-
-	    var tree = ManagedTree({
-	      key: isEmpty ? "empty" : "full",
-	      getParent: item => {
-	        return parentMap.get(item);
-	      },
-	      getChildren: item => {
-	        if ((0, _sourcesTree.nodeHasChildren)(item)) {
-	          return item.contents;
-	        }
-	        return [];
-	      },
-	      getRoots: () => sourceTree.contents,
-	      getKey: (item, i) => item.path,
-	      itemHeight: 19,
-	      autoExpandDepth: 1,
-	      autoExpandAll: false,
-	      onFocus: this.focusItem,
-	      listItems,
-	      highlightItems,
-	      renderItem: this.renderItem
-	    });
-
-	    var noSourcesMessage = _react.DOM.div({
-	      className: "no-sources-message"
-	    }, L10N.getStr("sources.noSourcesAvailable"));
-
-	    if (isEmpty) {
-	      return noSourcesMessage;
-	    }
-	    return _react.DOM.div({
-	      className: (0, _classnames2.default)("sources-list", { hidden: isHidden }),
-	      onKeyDown: e => {
-	        if (e.keyCode === 13 && focusedItem) {
-	          this.selectItem(focusedItem);
-	        }
-	      }
-	    }, tree);
-	  }
-	}
-
-	SourcesTree.propTypes = {
-	  isHidden: _react.PropTypes.bool,
-	  sources: _reactImmutableProptypes2.default.map.isRequired,
-	  selectSource: _react.PropTypes.func.isRequired,
-	  shownSource: _react.PropTypes.string,
-	  selectedSource: _reactImmutableProptypes2.default.map,
-	  debuggeeUrl: _react.PropTypes.string.isRequired
-	};
-
-	SourcesTree.displayName = "SourcesTree";
-
-	exports.default = (0, _reactRedux.connect)(state => {
-	  return {
-	    shownSource: (0, _selectors.getShownSource)(state),
-	    selectedSource: (0, _selectors.getSelectedSource)(state),
-	    debuggeeUrl: (0, _selectors.getDebuggeeUrl)(state)
-	  };
-	}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(SourcesTree);
-
-/***/ },
+/* 390 */,
 /* 391 */
 /***/ function(module, exports, __webpack_require__) {
 
@@ -23032,13 +22485,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	Object.defineProperty(exports, "__esModule", {
 	  value: true
 	});
-	exports.isExactUrlMatch = exports.getURL = exports.getDirectories = exports.createTree = exports.collapseTree = exports.addToTree = exports.isDirectory = exports.createParentMap = exports.nodeHasChildren = exports.createNode = undefined;
+	exports.formatTree = exports.isExactUrlMatch = exports.getURL = exports.getDirectories = exports.createTree = exports.collapseTree = exports.addToTree = exports.isDirectory = exports.createParentMap = exports.nodeHasChildren = exports.createNode = undefined;
 
 	var _url = __webpack_require__(334);
-
-	var _DevToolsUtils = __webpack_require__(222);
-
-	var _DevToolsUtils2 = _interopRequireDefault(_DevToolsUtils);
 
 	var _source = __webpack_require__(233);
 
@@ -23047,11 +22496,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _merge2 = _interopRequireDefault(_merge);
 
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-	/**
-	 * Utils for Sources Tree Component
-	 * @module utils/sources-tree
-	 */
 
 	var IGNORED_URLS = ["debugger eval code", "XStringBundle"];
 
@@ -23069,6 +22513,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @static
 	 */
 
+
+	/**
+	 * Utils for Sources Tree Component
+	 * @module utils/sources-tree
+	 */
 
 	/**
 	 * @memberof utils/sources-tree
@@ -23228,7 +22677,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var path = "";
 	  var subtree = tree;
 
-	  for (var i = 0; i < parts.length; i++) {
+	  var _loop = function (i) {
 	    var part = parts[i];
 	    var isLastPart = i === parts.length - 1;
 
@@ -23238,15 +22687,22 @@ return /******/ (function(modules) { // webpackBootstrap
 	    //
 	    // TODO: Be smarter about this, which we'll probably do when we
 	    // are smarter about folders and collapsing empty ones.
-	    (0, _DevToolsUtils2.default)(nodeHasChildren(subtree), `${subtree.name} should have children`);
+
+	    if (!nodeHasChildren(subtree)) {
+	      return {
+	        v: void 0
+	      };
+	    }
+
 	    var children = subtree.contents;
 
 	    var index = determineFileSortOrder(children, part, isLastPart, i === 0 ? debuggeeUrl : "");
 
-	    if (index >= 0 && children[index].name === part) {
+	    var child = children.find(c => c.name === part);
+	    if (child) {
 	      // A node with the same name already exists, simply traverse
 	      // into it.
-	      subtree = children[index];
+	      subtree = child;
 	    } else {
 	      // No node with this name exists, so insert a new one in the
 	      // place that is alphabetically sorted.
@@ -23258,14 +22714,20 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	    // Keep track of the children so we can tag each node with them.
 	    path = `${path}/${part}`;
+	  };
+
+	  for (var i = 0; i < parts.length; i++) {
+	    var _ret = _loop(i);
+
+	    if (typeof _ret === "object") return _ret.v;
 	  }
 
 	  // Overwrite the contents of the final node to store the source
 	  // there.
-	  if (isDir) {
-	    subtree.contents.unshift(createNode("(index)", source.get("url"), source));
-	  } else {
+	  if (!isDir) {
 	    subtree.contents = source;
+	  } else if (!subtree.contents.find(c => c.name === "(index)")) {
+	    subtree.contents.unshift(createNode("(index)", source.get("url"), source));
 	  }
 	}
 
@@ -23378,8 +22840,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var returnTarget = null;
 	  function _traverse(subtree) {
 	    if (nodeHasChildren(subtree)) {
-	      for (var child of subtree.contents) {
-	        _traverse(child);
+	      for (var _child of subtree.contents) {
+	        _traverse(_child);
 	      }
 	    } else if (!returnTarget && subtree.path.replace(/http(s)?:\//, "") == sourceUrl) {
 	      returnTarget = subtree;
@@ -23413,6 +22875,29 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 	}
 
+	function formatTree(tree) {
+	  var depth = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 0;
+	  var str = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : "";
+
+	  var whitespace = new Array(depth * 2).join(" ");
+
+	  if (!tree.contents) {
+	    return str;
+	  }
+
+	  if (tree.contents.length > 0) {
+	    str += `${whitespace} - ${tree.name} path=${tree.path} \n`;
+	    tree.contents.forEach(t => {
+	      str = formatTree(t, depth + 1, str);
+	    });
+	  } else if (tree.contents.toJS) {
+	    var id = tree.contents.get("id");
+	    str += `${whitespace} - ${tree.name} path=${tree.path} source_id=${id} \n`;
+	  }
+
+	  return str;
+	}
+
 	exports.createNode = createNode;
 	exports.nodeHasChildren = nodeHasChildren;
 	exports.createParentMap = createParentMap;
@@ -23423,6 +22908,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	exports.getDirectories = getDirectories;
 	exports.getURL = getURL;
 	exports.isExactUrlMatch = isExactUrlMatch;
+	exports.formatTree = formatTree;
 
 /***/ },
 /* 392 */
@@ -24508,8 +23994,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        }]));
 	      }
 	    });
-
-	    return Tree(props);
+	    return _react.DOM.div({ className: "managed-tree" }, Tree(props));
 	  }
 	}
 
@@ -24554,12 +24039,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	exports.copyToTheClipboard = copyToTheClipboard;
 
 /***/ },
-/* 424 */
-/***/ function(module, exports) {
-
-	// removed by extract-text-webpack-plugin
-
-/***/ },
+/* 424 */,
 /* 425 */,
 /* 426 */
 /***/ function(module, exports, __webpack_require__) {
@@ -24584,19 +24064,15 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _reactRedux = __webpack_require__(151);
 
-	var _reselect = __webpack_require__(993);
-
 	var _classnames = __webpack_require__(175);
 
 	var _classnames2 = _interopRequireDefault(_classnames);
 
+	var _devtoolsConfig = __webpack_require__(828);
+
 	var _debounce = __webpack_require__(651);
 
 	var _debounce2 = _interopRequireDefault(_debounce);
-
-	var _devtoolsConfig = __webpack_require__(828);
-
-	var _source = __webpack_require__(233);
 
 	var _GutterMenu = __webpack_require__(655);
 
@@ -24610,17 +24086,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _devtoolsLaunchpad = __webpack_require__(131);
 
-	var _range = __webpack_require__(1026);
-
-	var _range2 = _interopRequireDefault(_range);
-
-	var _flatMap = __webpack_require__(1067);
-
-	var _flatMap2 = _interopRequireDefault(_flatMap);
-
 	var _selectors = __webpack_require__(242);
-
-	var _breakpoint = __webpack_require__(1057);
 
 	var _actions = __webpack_require__(244);
 
@@ -24642,17 +24108,17 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _Preview3 = _interopRequireDefault(_Preview2);
 
-	var _Breakpoint2 = __webpack_require__(714);
+	var _Breakpoints2 = __webpack_require__(1158);
 
-	var _Breakpoint3 = _interopRequireDefault(_Breakpoint2);
-
-	var _ColumnBreakpoint2 = __webpack_require__(1011);
-
-	var _ColumnBreakpoint3 = _interopRequireDefault(_ColumnBreakpoint2);
+	var _Breakpoints3 = _interopRequireDefault(_Breakpoints2);
 
 	var _HitMarker2 = __webpack_require__(715);
 
 	var _HitMarker3 = _interopRequireDefault(_HitMarker2);
+
+	var _CallSites2 = __webpack_require__(1159);
+
+	var _CallSites3 = _interopRequireDefault(_CallSites2);
 
 	var _editor = __webpack_require__(257);
 
@@ -24664,8 +24130,6 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
-
 	var Footer = (0, _react.createFactory)(_Footer3.default);
 
 	var SearchBar = (0, _react.createFactory)(_SearchBar3.default);
@@ -24674,11 +24138,11 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var Preview = (0, _react.createFactory)(_Preview3.default);
 
-	var Breakpoint = (0, _react.createFactory)(_Breakpoint3.default);
-
-	var ColumnBreakpoint = (0, _react.createFactory)(_ColumnBreakpoint3.default);
+	var Breakpoints = (0, _react.createFactory)(_Breakpoints3.default);
 
 	var HitMarker = (0, _react.createFactory)(_HitMarker3.default);
+
+	var CallSites = (0, _react.createFactory)(_CallSites3.default);
 
 	var cssVars = {
 	  searchbarHeight: "var(--editor-searchbar-height)",
@@ -24686,23 +24150,19 @@ return /******/ (function(modules) { // webpackBootstrap
 	  footerHeight: "var(--editor-footer-height)"
 	};
 
+	var debugExpression = void 0;
 	class Editor extends _react.PureComponent {
 
 	  constructor() {
 	    super();
 
 	    this.cbPanel = null;
-	    this.editor = null;
 	    this.pendingJumpLine = null;
 	    this.lastJumpLine = null;
 
 	    this.state = {
-	      searchResults: {
-	        index: -1,
-	        count: 0
-	      },
 	      highlightedLineRange: null,
-	      selectedToken: null
+	      editor: null
 	    };
 
 	    var self = this;
@@ -24713,42 +24173,42 @@ return /******/ (function(modules) { // webpackBootstrap
 	    self.onScroll = this.onScroll.bind(this);
 	    self.onSearchAgain = this.onSearchAgain.bind(this);
 	    self.onToggleBreakpoint = this.onToggleBreakpoint.bind(this);
-	    self.previewSelectedToken = (0, _debounce2.default)(this.previewSelectedToken.bind(this), 100);
-	    self.toggleBreakpoint = this.toggleBreakpoint.bind(this);
-	    // eslint-disable-next-line max-len
-	    self.toggleBreakpointDisabledStatus = this.toggleBreakpointDisabledStatus.bind(this);
+	    self.onMouseOver = (0, _debounce2.default)(this.onMouseOver, 40);
 	    self.toggleConditionalPanel = this.toggleConditionalPanel.bind(this);
-	    self.updateSearchResults = this.updateSearchResults.bind(this);
 	  }
 
 	  componentWillReceiveProps(nextProps) {
 	    // This lifecycle method is responsible for updating the editor
 	    // text.
-	    var sourceText = nextProps.sourceText,
+	    var selectedSource = nextProps.selectedSource,
 	        selectedLocation = nextProps.selectedLocation;
 
-	    this.clearDebugLine(this.props.selectedFrame);
 
 	    if (nextProps.startPanelSize !== this.props.startPanelSize || nextProps.endPanelSize !== this.props.endPanelSize) {
-	      this.editor.codeMirror.setSize();
+	      this.state.editor.codeMirror.setSize();
 	    }
 
-	    if (!sourceText) {
-	      if (this.props.sourceText) {
+	    if (!selectedSource) {
+	      if (this.props.selectedSource) {
 	        this.showMessage("");
 	      }
-	    } else if (!(0, _editor.isTextForSource)(sourceText)) {
-	      this.showMessage(sourceText.get("error") || L10N.getStr("loadingText"));
-	    } else if (this.props.sourceText !== sourceText) {
-	      this.showSourceText(sourceText, selectedLocation);
+	    } else if (selectedSource.get("loading")) {
+	      this.showMessage(L10N.getStr("loadingText"));
+	    } else if (selectedSource.get("error")) {
+	      this.showMessage(selectedSource.get("error"));
+	    } else if (this.props.selectedSource !== selectedSource) {
+	      (0, _editor.showSourceText)(this.state.editor, selectedSource.toJS());
 	    }
 
-	    if (this.props.outOfScopeLocations !== nextProps.outOfScopeLocations) {
-	      (0, _editor.clearLineClass)(this.editor.codeMirror, "out-of-scope");
-	    }
+	    if (this.state.editor && this.props.linesInScope !== nextProps.linesInScope) {
+	      this.state.editor.codeMirror.operation(() => {
+	        (0, _editor.clearLineClass)(this.state.editor.codeMirror, "in-scope");
+	      });
 
-	    this.setDebugLine(nextProps.selectedFrame, selectedLocation);
-	    (0, _editor.resizeBreakpointGutter)(this.editor.codeMirror);
+	      this.clearDebugLine(this.props.selectedFrame);
+	      this.setDebugLine(nextProps.selectedFrame, selectedLocation);
+	      (0, _editor.resizeBreakpointGutter)(this.state.editor.codeMirror);
+	    }
 	  }
 
 	  setupEditor() {
@@ -24775,7 +24235,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	    codeMirrorWrapper.tabIndex = 0;
 	    codeMirrorWrapper.addEventListener("keydown", e => this.onKeyDown(e));
 	    codeMirrorWrapper.addEventListener("mouseover", e => this.onMouseOver(e));
-	    codeMirrorWrapper.addEventListener("click", e => this.onTokenClick(e));
 
 	    var toggleFoldMarkerVisibility = e => {
 	      if (node instanceof HTMLElement) {
@@ -24799,16 +24258,17 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	    codeMirror.on("scroll", this.onScroll);
 
+	    this.setState({ editor });
 	    return editor;
 	  }
 
 	  componentDidMount() {
 	    this.cbPanel = null;
-	    this.editor = this.setupEditor();
+	    var editor = this.setupEditor();
 
 	    var _props = this.props,
 	        selectedSource = _props.selectedSource,
-	        sourceText = _props.sourceText;
+	        selectedLocation = _props.selectedLocation;
 	    var shortcuts = this.context.shortcuts;
 
 
@@ -24821,12 +24281,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	    shortcuts.on(searchAgainPrevKey, this.onSearchAgain);
 	    shortcuts.on(searchAgainKey, this.onSearchAgain);
 
-	    (0, _editor.updateDocument)(this.editor, selectedSource, sourceText);
+	    if (selectedLocation && !!selectedLocation.line) {
+	      this.pendingJumpLine = selectedLocation.line;
+	    }
+
+	    (0, _editor.updateDocument)(editor, selectedSource);
 	  }
 
 	  componentWillUnmount() {
-	    this.editor.destroy();
-	    this.editor = null;
+	    this.state.editor.destroy();
+	    this.setState({ editor: null });
 
 	    var searchAgainKey = L10N.getStr("sourceSearch.search.again.key2");
 	    var searchAgainPrevKey = L10N.getStr("sourceSearch.search.againPrev.key2");
@@ -24841,7 +24305,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	    // This is in `componentDidUpdate` so helper functions can expect
 	    // `this.props` to be the current props. This lifecycle method is
 	    // responsible for updating the editor annotations.
-	    var selectedLocation = this.props.selectedLocation;
+	    var _props2 = this.props,
+	        selectedLocation = _props2.selectedLocation,
+	        selectedSource = _props2.selectedSource;
 
 	    // If the location is different and a new line is requested,
 	    // update the pending jump line. Note that if jumping to a line in
@@ -24859,26 +24325,26 @@ return /******/ (function(modules) { // webpackBootstrap
 	    // Only update and jump around in real source texts. This will
 	    // keep the jump state around until the real source text is
 	    // loaded.
-	    if (this.props.sourceText && (0, _editor.isTextForSource)(this.props.sourceText)) {
+	    if (selectedSource && selectedSource.has("text")) {
 	      this.highlightLine();
 	    }
 	  }
 
 	  onToggleBreakpoint(key, e) {
 	    e.preventDefault();
-	    var codeMirror = this.editor.codeMirror;
+	    var codeMirror = this.state.editor.codeMirror;
 
 	    var line = (0, _editor.getCursorLine)(codeMirror);
 
 	    if (e.shiftKey) {
-	      this.toggleConditionalPanel(line);
+	      this.toggleConditionalPanel(line + 1);
 	    } else {
-	      this.toggleBreakpoint(line);
+	      this.props.toggleBreakpoint(line + 1);
 	    }
 	  }
 
 	  onKeyDown(e) {
-	    var codeMirror = this.editor.codeMirror;
+	    var codeMirror = this.state.editor.codeMirror;
 	    var key = e.key,
 	        target = e.target;
 
@@ -24903,11 +24369,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	   * is a multiselection.
 	   */
 	  onEscape(key, e) {
-	    if (!this.editor) {
+	    if (!this.state.editor) {
 	      return;
 	    }
 
-	    var codeMirror = this.editor.codeMirror;
+	    var codeMirror = this.state.editor.codeMirror;
 
 	    if (codeMirror.listSelections().length > 1) {
 	      codeMirror.execCommand("singleSelection");
@@ -24919,36 +24385,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this.clearPreviewSelection();
 	  }
 
-	  onMouseOver(e) {
-	    var target = e.target;
-
-	    if (!this.inSelectedFrameSource() || !target.parentElement.closest(".CodeMirror-line") || target.parentElement.closest(".out-of-scope")) {
-	      return;
-	    }
-	    this.previewSelectedToken(e);
-	  }
-
-	  onTokenClick(e) {
-	    var target = e.target;
-
-	    if (!(0, _devtoolsConfig.isEnabled)("columnBreakpoints") || !e.altKey || !target.parentElement.closest(".CodeMirror-line")) {
-	      return;
-	    }
-
-	    var _getTokenLocation = (0, _editor.getTokenLocation)(this.editor.codeMirror, target),
-	        line = _getTokenLocation.line,
-	        column = _getTokenLocation.column;
-
-	    this.toggleBreakpoint(line - 1, column - 1);
-	  }
-
 	  onSearchAgain(_, e) {
-	    var _props2 = this.props,
-	        query = _props2.query,
-	        searchModifiers = _props2.searchModifiers;
-	    var codeMirror = this.editor.editor.codeMirror;
+	    var _props3 = this.props,
+	        query = _props3.query,
+	        searchModifiers = _props3.searchModifiers;
+	    var codeMirror = this.state.editor.editor.codeMirror;
 
-	    var ctx = { ed: this.editor, cm: codeMirror };
+	    var ctx = { ed: this.state.editor, cm: codeMirror };
 
 	    var direction = e.shiftKey ? "prev" : "next";
 	    (0, _editor.traverseResults)(e, ctx, query, direction, searchModifiers.toJS());
@@ -24956,41 +24399,24 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  clearPreviewSelection() {
 	    this.props.clearSelection();
-	    return this.setState({ selectedToken: null });
 	  }
 
-	  previewSelectedToken(e) {
-	    var _this = this;
+	  inSelectedFrameSource() {
+	    var _props4 = this.props,
+	        selectedLocation = _props4.selectedLocation,
+	        selectedFrame = _props4.selectedFrame;
 
-	    return _asyncToGenerator(function* () {
-	      var _props3 = _this.props,
-	          selectedFrame = _props3.selectedFrame,
-	          selectedSource = _props3.selectedSource,
-	          sourceText = _props3.sourceText,
-	          setSelection = _props3.setSelection,
-	          selection = _props3.selection;
-
-	      var token = e.target;
-	      var tokenText = token.innerText.trim();
-
-	      if (selection && selection.updating || !selectedFrame || !sourceText || !selectedSource || tokenText === "" || tokenText.match(/\s/) || selectedFrame.location.sourceId !== selectedSource.get("id")) {
-	        return;
-	      }
-
-	      var location = (0, _editor.getTokenLocation)(_this.editor.codeMirror, token);
-	      setSelection(tokenText, location);
-	      _this.setState({ selectedToken: token });
-	    })();
+	    return selectedFrame && selectedLocation && selectedFrame.location.sourceId == selectedLocation.sourceId;
 	  }
 
 	  openMenu(event, codeMirror) {
-	    var _props4 = this.props,
-	        selectedSource = _props4.selectedSource,
-	        selectedLocation = _props4.selectedLocation,
-	        showSource = _props4.showSource,
-	        jumpToMappedLocation = _props4.jumpToMappedLocation,
-	        addExpression = _props4.addExpression,
-	        toggleBlackBox = _props4.toggleBlackBox;
+	    var _props5 = this.props,
+	        selectedSource = _props5.selectedSource,
+	        selectedLocation = _props5.selectedLocation,
+	        showSource = _props5.showSource,
+	        jumpToMappedLocation = _props5.jumpToMappedLocation,
+	        addExpression = _props5.addExpression,
+	        toggleBlackBox = _props5.toggleBlackBox;
 
 
 	    return (0, _EditorMenu2.default)({
@@ -25006,34 +24432,32 @@ return /******/ (function(modules) { // webpackBootstrap
 	    });
 	  }
 
-	  updateSearchResults(_ref) {
-	    var count = _ref.count,
-	        _ref$index = _ref.index,
-	        index = _ref$index === undefined ? -1 : _ref$index;
-
-	    this.setState({ searchResults: { count, index } });
-	  }
-
 	  onGutterClick(cm, line, gutter, ev) {
-	    var selectedSource = this.props.selectedSource;
+	    var _props6 = this.props,
+	        selectedSource = _props6.selectedSource,
+	        toggleBreakpoint = _props6.toggleBreakpoint;
 
 	    // ignore right clicks in the gutter
 
-	    if (ev.which === 3 || selectedSource && selectedSource.get("isBlackBoxed")) {
+	    if (ev.ctrlKey && ev.button === 0 || ev.which === 3 || selectedSource && selectedSource.get("isBlackBoxed")) {
 	      return;
 	    }
 
 	    if (this.isCbPanelOpen()) {
-	      return this.closeConditionalPanel(line);
+	      return this.closeConditionalPanel();
 	    }
 
 	    if (gutter !== "CodeMirror-foldgutter") {
-	      this.toggleBreakpoint(line);
+	      toggleBreakpoint(line + 1);
 	    }
 	  }
 
 	  onGutterContextMenu(event) {
-	    var selectedSource = this.props.selectedSource;
+	    var _props7 = this.props,
+	        selectedSource = _props7.selectedSource,
+	        breakpoints = _props7.breakpoints,
+	        toggleBreakpoint = _props7.toggleBreakpoint,
+	        toggleDisabledBreakpoint = _props7.toggleDisabledBreakpoint;
 
 
 	    if (selectedSource && selectedSource.get("isBlackBoxed")) {
@@ -25041,18 +24465,28 @@ return /******/ (function(modules) { // webpackBootstrap
 	      return;
 	    }
 
-	    var line = this.editor.codeMirror.lineAtHeight(event.clientY);
-	    var bp = (0, _editor.breakpointAtLocation)(this.props.breakpoints, { line });
+	    var line = (0, _editor.lineAtHeight)(this.state.editor, event);
+	    var breakpoint = breakpoints.find(bp => bp.location.line === line);
+
 	    (0, _GutterMenu2.default)({
 	      event,
 	      line,
-	      bp,
-	      toggleBreakpoint: this.toggleBreakpoint,
+	      breakpoint,
+	      toggleBreakpoint,
+	      toggleDisabledBreakpoint,
+
 	      showConditionalPanel: this.toggleConditionalPanel,
-	      toggleBreakpointDisabledStatus: this.toggleBreakpointDisabledStatus,
 	      isCbPanelOpen: this.isCbPanelOpen(),
 	      closeConditionalPanel: this.closeConditionalPanel
 	    });
+	  }
+
+	  onMouseOver(e) {
+	    var target = e.target;
+
+	    if (this.inSelectedFrameSource()) {
+	      (0, _editor.updateSelection)(target, this.state.editor, this.props);
+	    }
 	  }
 
 	  toggleConditionalPanel(line) {
@@ -25060,29 +24494,25 @@ return /******/ (function(modules) { // webpackBootstrap
 	      return this.closeConditionalPanel();
 	    }
 
-	    var _props5 = this.props,
-	        selectedLocation = _props5.selectedLocation,
-	        setBreakpointCondition = _props5.setBreakpointCondition,
-	        breakpoints = _props5.breakpoints;
+	    var _props8 = this.props,
+	        selectedLocation = _props8.selectedLocation,
+	        setBreakpointCondition = _props8.setBreakpointCondition,
+	        breakpoints = _props8.breakpoints;
 
 	    var sourceId = selectedLocation ? selectedLocation.sourceId : "";
 
-	    var bp = (0, _editor.breakpointAtLocation)(breakpoints, { line });
-	    var location = { sourceId, line: line + 1 };
-	    var condition = bp ? bp.condition : "";
-
-	    var setBreakpoint = value => setBreakpointCondition(location, {
-	      condition: value,
-	      getTextForLine: l => (0, _editor.getTextForLine)(this.editor.codeMirror, l)
-	    });
+	    var breakpoint = breakpoints.find(bp => bp.location.line === line);
+	    var location = { sourceId, line };
+	    var condition = breakpoint ? breakpoint.condition : "";
 
 	    var panel = (0, _ConditionalPanel.renderConditionalPanel)({
 	      condition,
-	      setBreakpoint,
+	      setBreakpoint: value => setBreakpointCondition(location, { condition: value }),
 	      closePanel: this.closeConditionalPanel
 	    });
 
-	    this.cbPanel = this.editor.codeMirror.addLineWidget(line, panel, {
+	    var editorLine = line - 1;
+	    this.cbPanel = this.state.editor.codeMirror.addLineWidget(editorLine, panel, {
 	      coverGutter: true,
 	      noHScroll: false
 	    });
@@ -25098,84 +24528,30 @@ return /******/ (function(modules) { // webpackBootstrap
 	    return !!this.cbPanel;
 	  }
 
-	  toggleBreakpoint(line) {
-	    var column = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : undefined;
-	    var _props6 = this.props,
-	        selectedSource = _props6.selectedSource,
-	        selectedLocation = _props6.selectedLocation,
-	        breakpoints = _props6.breakpoints,
-	        addBreakpoint = _props6.addBreakpoint,
-	        removeBreakpoint = _props6.removeBreakpoint;
-
-	    var bp = (0, _editor.breakpointAtLocation)(breakpoints, { line, column });
-
-	    if (bp && bp.loading || !selectedLocation || !selectedSource) {
-	      return;
-	    }
-
-	    var sourceId = selectedLocation.sourceId;
-
-
-	    if (bp) {
-	      removeBreakpoint({
-	        sourceId: sourceId,
-	        line: line + 1,
-	        column: column
-	      });
-	    } else {
-	      addBreakpoint({
-	        sourceId: sourceId,
-	        sourceUrl: selectedSource.get("url"),
-	        line: line + 1,
-	        column: column
-	      },
-	      // Pass in a function to get line text because the breakpoint
-	      // may slide and it needs to compute the value at the new
-	      // line.
-	      { getTextForLine: l => (0, _editor.getTextForLine)(this.editor.codeMirror, l) });
-	    }
-	  }
-
-	  toggleBreakpointDisabledStatus(line) {
-	    var bp = (0, _editor.breakpointAtLocation)(this.props.breakpoints, { line });
-	    var selectedLocation = this.props.selectedLocation;
-
-
-	    if (bp && bp.loading || !selectedLocation) {
-	      return;
-	    }
-
-	    var sourceId = selectedLocation.sourceId;
-
-
-	    if (!bp) {
-	      throw new Error("attempt to disable breakpoint that does not exist");
-	    }
-
-	    if (!bp.disabled) {
-	      this.props.disableBreakpoint({
-	        sourceId: sourceId,
-	        line: line + 1
-	      });
-	    } else {
-	      this.props.enableBreakpoint({
-	        sourceId: sourceId,
-	        line: line + 1
-	      });
-	    }
-	  }
-
 	  clearDebugLine(selectedFrame) {
-	    if (selectedFrame) {
+	    if (this.state.editor && selectedFrame) {
 	      var line = selectedFrame.location.line;
-	      this.editor.codeMirror.removeLineClass(line - 1, "line", "new-debug-line");
+
+	      if (debugExpression) {
+	        debugExpression.clear();
+	      }
+
+	      this.state.editor.codeMirror.removeLineClass(line - 1, "line", "new-debug-line");
 	    }
 	  }
 
 	  setDebugLine(selectedFrame, selectedLocation) {
-	    if (selectedFrame && selectedLocation && selectedFrame.location.sourceId === selectedLocation.sourceId) {
-	      var line = selectedFrame.location.line;
-	      this.editor.codeMirror.addLineClass(line - 1, "line", "new-debug-line");
+	    if (this.state.editor && selectedFrame && selectedLocation && selectedFrame.location.sourceId === selectedLocation.sourceId) {
+	      var _selectedFrame$locati = selectedFrame.location,
+	          line = _selectedFrame$locati.line,
+	          column = _selectedFrame$locati.column;
+
+	      this.state.editor.codeMirror.addLineClass(line - 1, "line", "new-debug-line");
+
+	      debugExpression = (0, _editor.markText)(this.state.editor, "debug-expression", {
+	        start: { line, column },
+	        end: { line, column: null }
+	      });
 	    }
 	  }
 
@@ -25191,119 +24567,28 @@ return /******/ (function(modules) { // webpackBootstrap
 	    // happening ever again (in case CodeMirror re-applies the
 	    // class, etc).
 	    if (this.lastJumpLine) {
-	      (0, _editor.clearLineClass)(this.editor.codeMirror, "highlight-line");
+	      (0, _editor.clearLineClass)(this.state.editor.codeMirror, "highlight-line");
 	    }
 
 	    var line = this.pendingJumpLine;
-	    this.editor.alignLine(line);
+	    this.state.editor.alignLine(line);
 
 	    // We only want to do the flashing animation if it's not a debug
 	    // line, which has it's own styling.
 	    // Also, if it the first time the debugger is being loaded, we don't want
 	    // to flash the previously saved selected line.
 	    if (this.lastJumpLine && (!this.props.selectedFrame || this.props.selectedFrame.location.line !== line)) {
-	      this.editor.codeMirror.addLineClass(line - 1, "line", "highlight-line");
+	      this.state.editor.codeMirror.addLineClass(line - 1, "line", "highlight-line");
 	    }
 
 	    this.lastJumpLine = line;
 	    this.pendingJumpLine = null;
 	  }
 
-	  setText(text) {
-	    if (!text || !this.editor) {
-	      return;
-	    }
-
-	    this.editor.setText(text);
-	  }
-
 	  showMessage(msg) {
-	    this.editor.replaceDocument(this.editor.createDocument());
-	    this.setText(msg);
-	    this.editor.setMode({ name: "text" });
-	  }
-
-	  /**
-	   * Handle getting the source document or creating a new
-	   * document with the correct mode and text.
-	   *
-	   */
-	  showSourceText(sourceText, selectedLocation) {
-	    if (!selectedLocation) {
-	      return;
-	    }
-
-	    var doc = (0, _editor.getDocument)(selectedLocation.sourceId);
-	    if (doc) {
-	      this.editor.replaceDocument(doc);
-	      return doc;
-	    }
-
-	    doc = this.editor.createDocument();
-	    (0, _editor.setDocument)(selectedLocation.sourceId, doc);
-	    this.editor.replaceDocument(doc);
-
-	    this.setText(sourceText.get("text"));
-	    this.editor.setMode((0, _source.getMode)(sourceText.toJS()));
-	  }
-
-	  renderHighlightLines() {
-	    var highlightedLineRange = this.props.highlightedLineRange;
-
-
-	    if (!highlightedLineRange) {
-	      return;
-	    }
-
-	    return HighlightLines({
-	      editor: this.editor,
-	      highlightedLineRange
-	    });
-	  }
-
-	  renderBreakpoints() {
-	    var _props7 = this.props,
-	        breakpoints = _props7.breakpoints,
-	        sourceText = _props7.sourceText,
-	        selectedSource = _props7.selectedSource;
-
-	    var isLoading = sourceText && sourceText.get("loading");
-
-	    if (isLoading || !breakpoints || selectedSource && selectedSource.get("isBlackBoxed")) {
-	      return;
-	    }
-
-	    var breakpointMarkers = breakpoints.valueSeq().filter(b => (0, _devtoolsConfig.isEnabled)("columnBreakpoints") ? !b.location.column : true).map(bp => Breakpoint({
-	      key: (0, _breakpoint.makeLocationId)(bp.location),
-	      breakpoint: bp,
-	      editor: this.editor && this.editor.codeMirror
-	    }));
-
-	    var columnBreakpointBookmarks = breakpoints.valueSeq().filter(b => (0, _devtoolsConfig.isEnabled)("columnBreakpoints") ? b.location.column : false).map(bp => ColumnBreakpoint({
-	      key: (0, _breakpoint.makeLocationId)(bp.location),
-	      breakpoint: bp,
-	      editor: this.editor && this.editor.codeMirror
-	    }));
-
-	    return breakpointMarkers.concat(columnBreakpointBookmarks);
-	  }
-
-	  renderHitCounts() {
-	    var _props8 = this.props,
-	        hitCount = _props8.hitCount,
-	        sourceText = _props8.sourceText;
-
-	    var isLoading = sourceText && sourceText.get("loading");
-
-	    if (isLoading || !hitCount || !this.editor) {
-	      return;
-	    }
-
-	    return hitCount.filter(marker => marker.get("count") > 0).map(marker => HitMarker({
-	      key: marker.get("line"),
-	      hitData: marker.toJS(),
-	      editor: this.editor.codeMirror
-	    }));
+	    this.state.editor.replaceDocument(this.state.editor.createDocument());
+	    this.state.editor.setText(msg);
+	    this.state.editor.setMode({ name: "text" });
 	  }
 
 	  getInlineEditorStyles() {
@@ -25329,99 +24614,160 @@ return /******/ (function(modules) { // webpackBootstrap
 	    };
 	  }
 
-	  renderPreview() {
-	    var selectedToken = this.state.selectedToken;
+	  renderHighlightLines() {
+	    var highlightedLineRange = this.props.highlightedLineRange;
+
+
+	    if (!highlightedLineRange || !this.state.editor) {
+	      return;
+	    }
+
+	    return HighlightLines({
+	      editor: this.state.editor,
+	      highlightedLineRange
+	    });
+	  }
+
+	  renderHitCounts() {
 	    var _props10 = this.props,
-	        sourceText = _props10.sourceText,
-	        selection = _props10.selection;
+	        hitCount = _props10.hitCount,
+	        selectedSource = _props10.selectedSource;
 
 
-	    if (!this.editor || !sourceText) {
+	    if (!selectedSource || selectedSource.get("loading") || !hitCount || !this.state.editor) {
+	      return;
+	    }
+
+	    return hitCount.filter(marker => marker.get("count") > 0).map(marker => HitMarker({
+	      key: marker.get("line"),
+	      hitData: marker.toJS(),
+	      editor: this.state.editor.codeMirror
+	    }));
+	  }
+
+	  renderPreview() {
+	    var _props11 = this.props,
+	        selectedSource = _props11.selectedSource,
+	        selection = _props11.selection;
+
+	    if (!this.state.editor || !selectedSource) {
 	      return null;
 	    }
 
-	    if (!selection || !selectedToken) {
+	    if (!selection || selection.updating) {
 	      return;
 	    }
 
 	    var result = selection.result,
-	        expression = selection.expression;
+	        expression = selection.expression,
+	        location = selection.location,
+	        cursorPos = selection.cursorPos;
 
 	    var value = result;
-	    if (typeof value == "undefined" || value.type == "undefined" || value.optimizedOut) {
+	    if (typeof value == "undefined" || value.optimizedOut) {
 	      return;
 	    }
 
 	    return Preview({
 	      value,
+	      editor: this.state.editor,
+	      location: location,
 	      expression: expression,
-	      popoverTarget: selectedToken,
+	      popoverPos: cursorPos,
 	      onClose: () => this.clearPreviewSelection()
 	    });
 	  }
 
-	  inSelectedFrameSource() {
-	    var _props11 = this.props,
-	        selectedLocation = _props11.selectedLocation,
-	        selectedFrame = _props11.selectedFrame;
+	  renderInScopeLines() {
+	    var linesInScope = this.props.linesInScope;
 
-	    return selectedFrame && selectedLocation && selectedFrame.location.sourceId == selectedLocation.sourceId;
-	  }
-
-	  renderOutOfScopedLocations() {
-	    var outOfScopeLocations = this.props.outOfScopeLocations;
-
-
-	    if (!this.inSelectedFrameSource() || !outOfScopeLocations || !this.editor) {
+	    if (!this.state.editor || !(0, _devtoolsConfig.isEnabled)("highlightScopeLines") || !linesInScope || !this.inSelectedFrameSource()) {
 	      return;
 	    }
 
-	    (0, _flatMap2.default)(outOfScopeLocations, location => (0, _range2.default)(location.start.line, location.end.line)).forEach(line => {
-	      this.editor.codeMirror.addLineClass(line - 1, "line", "out-of-scope");
+	    this.state.editor.codeMirror.operation(() => {
+	      linesInScope.forEach(line => {
+	        this.state.editor.codeMirror.addLineClass(line - 1, "line", "in-scope");
+	      });
 	    });
 	  }
 
-	  render() {
+	  renderCallSites() {
+	    var editor = this.state.editor;
+
+	    if (!editor || !(0, _devtoolsConfig.isEnabled)("columnBreakpoints")) {
+	      return null;
+	    }
+	    return CallSites({ editor });
+	  }
+
+	  renderSearchBar() {
 	    var _props12 = this.props,
-	        sourceText = _props12.sourceText,
 	        selectSource = _props12.selectSource,
 	        selectedSource = _props12.selectedSource,
 	        highlightLineRange = _props12.highlightLineRange,
-	        clearHighlightLineRange = _props12.clearHighlightLineRange,
-	        coverageOn = _props12.coverageOn,
-	        horizontal = _props12.horizontal;
-	    var searchResults = this.state.searchResults;
+	        clearHighlightLineRange = _props12.clearHighlightLineRange;
 
 
-	    return _react.DOM.div({
-	      className: (0, _classnames2.default)("editor-wrapper", { "coverage-on": coverageOn })
-	    }, SearchBar({
-	      editor: this.editor,
+	    if (!this.state.editor) {
+	      return null;
+	    }
+
+	    return SearchBar({
+	      editor: this.state.editor,
 	      selectSource,
 	      selectedSource,
 	      highlightLineRange,
-	      clearHighlightLineRange,
-	      sourceText,
-	      searchResults,
-	      updateSearchResults: this.updateSearchResults
-	    }), _react.DOM.div({
+	      clearHighlightLineRange
+	    });
+	  }
+
+	  renderFooter() {
+	    var horizontal = this.props.horizontal;
+
+
+	    if (!this.state.editor) {
+	      return null;
+	    }
+	    return Footer({ editor: this.state.editor, horizontal });
+	  }
+
+	  renderBreakpoints() {
+	    if (!this.state.editor) {
+	      return null;
+	    }
+
+	    return Breakpoints({ editor: this.state.editor });
+	  }
+
+	  render() {
+	    var _props13 = this.props,
+	        coverageOn = _props13.coverageOn,
+	        pauseData = _props13.pauseData;
+
+
+	    return _react.DOM.div({
+	      className: (0, _classnames2.default)("editor-wrapper", {
+	        "coverage-on": coverageOn,
+	        paused: !!pauseData && (0, _devtoolsConfig.isEnabled)("highlightScopeLines")
+	      })
+	    }, this.renderSearchBar(), _react.DOM.div({
 	      className: "editor-mount devtools-monospace",
 	      style: this.getInlineEditorStyles()
-	    }), this.renderOutOfScopedLocations(), this.renderHighlightLines(), this.renderBreakpoints(), this.renderHitCounts(), Footer({ editor: this.editor, horizontal }), this.renderPreview());
+	    }), this.renderHighlightLines(), this.renderInScopeLines(), this.renderHitCounts(), this.renderFooter(), this.renderPreview(), this.renderCallSites(), this.renderBreakpoints());
 	  }
 	}
 
 	Editor.displayName = "Editor";
 
 	Editor.propTypes = {
-	  breakpoints: _reactImmutableProptypes2.default.map.isRequired,
+	  breakpoints: _reactImmutableProptypes2.default.map,
 	  hitCount: _react.PropTypes.object,
 	  selectedLocation: _react.PropTypes.object,
 	  selectedSource: _reactImmutableProptypes2.default.map,
 	  highlightLineRange: _react.PropTypes.func,
 	  clearHighlightLineRange: _react.PropTypes.func,
 	  highlightedLineRange: _react.PropTypes.object,
-	  sourceText: _reactImmutableProptypes2.default.map,
 	  searchOn: _react.PropTypes.bool,
 	  addBreakpoint: _react.PropTypes.func.isRequired,
 	  disableBreakpoint: _react.PropTypes.func.isRequired,
@@ -25435,7 +24781,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  coverageOn: _react.PropTypes.bool,
 	  pauseData: _react.PropTypes.object,
 	  selectedFrame: _react.PropTypes.object,
-	  getExpression: _react.PropTypes.func.isRequired,
 	  addExpression: _react.PropTypes.func.isRequired,
 	  horizontal: _react.PropTypes.bool,
 	  query: _react.PropTypes.string.isRequired,
@@ -25448,15 +24793,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	  startPanelSize: _react.PropTypes.number,
 	  endPanelSize: _react.PropTypes.number,
 	  clearSelection: _react.PropTypes.func.isRequired,
-	  outOfScopeLocations: _react.PropTypes.array
+	  linesInScope: _react.PropTypes.array,
+	  toggleBreakpoint: _react.PropTypes.func.isRequired,
+	  toggleDisabledBreakpoint: _react.PropTypes.func.isRequired
 	};
 
 	Editor.contextTypes = {
 	  shortcuts: _react.PropTypes.object
 	};
-
-	var expressionsSel = state => state.expressions.expressions;
-	var getExpressionSel = (0, _reselect.createSelector)(expressionsSel, expressions => input => expressions.find(exp => exp.input == input));
 
 	exports.default = (0, _reactRedux.connect)(state => {
 	  var selectedLocation = (0, _selectors.getSelectedLocation)(state);
@@ -25467,18 +24811,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	    selectedLocation,
 	    selectedSource,
 	    highlightedLineRange: (0, _selectors.getHighlightedLineRange)(state),
-	    searchOn: (0, _selectors.getFileSearchState)(state),
-	    sourceText: (0, _selectors.getSourceText)(state, sourceId),
+	    searchOn: (0, _selectors.getActiveSearchState)(state) === "file",
 	    loadedObjects: (0, _selectors.getLoadedObjects)(state),
-	    breakpoints: (0, _selectors.getBreakpointsForSource)(state, sourceId || ""),
+	    breakpoints: (0, _selectors.getVisibleBreakpoints)(state),
 	    hitCount: (0, _selectors.getHitCountForSource)(state, sourceId),
 	    selectedFrame: (0, _selectors.getSelectedFrame)(state),
-	    getExpression: getExpressionSel(state),
 	    pauseData: (0, _selectors.getPause)(state),
 	    coverageOn: (0, _selectors.getCoverageEnabled)(state),
 	    query: (0, _selectors.getFileSearchQueryState)(state),
 	    searchModifiers: (0, _selectors.getFileSearchModifierState)(state),
-	    outOfScopeLocations: (0, _selectors.getOutOfScopeLocations)(state),
+	    linesInScope: (0, _selectors.getInScopeLines)(state),
 	    selection: (0, _selectors.getSelection)(state)
 	  };
 	}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Editor);
@@ -25753,8 +25095,6 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _redux = __webpack_require__(3);
 
-	var _fuzzaldrinPlus = __webpack_require__(161);
-
 	var _Svg = __webpack_require__(344);
 
 	var _Svg2 = _interopRequireDefault(_Svg);
@@ -25766,6 +25106,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _selectors = __webpack_require__(242);
 
 	var _editor = __webpack_require__(257);
+
+	var _search = __webpack_require__(1115);
 
 	var _resultList = __webpack_require__(343);
 
@@ -25783,38 +25125,22 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _SearchInput3 = _interopRequireDefault(_SearchInput2);
 
-	var _ResultList2 = __webpack_require__(383);
-
-	var _ResultList3 = _interopRequireDefault(_ResultList2);
-
 	__webpack_require__(653);
 
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
+	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
 	var SearchInput = (0, _react.createFactory)(_SearchInput3.default);
-
-	var ResultList = (0, _react.createFactory)(_ResultList3.default);
-
-	function formatSymbol(symbol) {
-	  return {
-	    id: `${symbol.name}:${symbol.location.start.line}`,
-	    title: symbol.name,
-	    subtitle: `:${symbol.location.start.line}`,
-	    value: symbol.name,
-	    location: symbol.location
-	  };
-	}
 
 	function getShortcuts() {
 	  var searchAgainKey = L10N.getStr("sourceSearch.search.again.key2");
 	  var searchAgainPrevKey = L10N.getStr("sourceSearch.search.againPrev.key2");
-	  var fnSearchKey = L10N.getStr("symbolSearch.search.key2");
 	  var searchKey = L10N.getStr("sourceSearch.search.key2");
 
 	  return {
 	    shiftSearchAgainShortcut: searchAgainPrevKey,
 	    searchAgainShortcut: searchAgainKey,
-	    symbolSearchShortcut: fnSearchKey,
 	    searchShortcut: searchKey
 	  };
 	}
@@ -25824,7 +25150,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  constructor(props) {
 	    super(props);
 	    this.state = {
-	      symbolSearchResults: [],
 	      selectedResultIndex: 0,
 	      count: 0,
 	      index: -1
@@ -25835,27 +25160,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	    self.clearSearch = this.clearSearch.bind(this);
 	    self.closeSearch = this.closeSearch.bind(this);
 	    self.toggleSearch = this.toggleSearch.bind(this);
-	    self.toggleSymbolSearch = this.toggleSymbolSearch.bind(this);
 	    self.setSearchValue = this.setSearchValue.bind(this);
 	    self.selectSearchInput = this.selectSearchInput.bind(this);
 	    self.searchInput = this.searchInput.bind(this);
-	    self.updateSymbolSearchResults = this.updateSymbolSearchResults.bind(this);
 	    self.doSearch = this.doSearch.bind(this);
 	    self.searchContents = this.searchContents.bind(this);
-	    self.traverseSymbolResults = this.traverseSymbolResults.bind(this);
-	    self.traverseCodeResults = this.traverseCodeResults.bind(this);
 	    self.traverseResults = this.traverseResults.bind(this);
-	    self.selectResultItem = this.selectResultItem.bind(this);
-	    self.onSelectResultItem = this.onSelectResultItem.bind(this);
 	    self.onChange = this.onChange.bind(this);
 	    self.onKeyUp = this.onKeyUp.bind(this);
-	    self.onKeyDown = this.onKeyDown.bind(this);
 	    self.buildSummaryMsg = this.buildSummaryMsg.bind(this);
-	    self.buildPlaceHolder = this.buildPlaceHolder.bind(this);
 	    self.renderSearchModifiers = this.renderSearchModifiers.bind(this);
-	    self.renderSearchTypeToggle = this.renderSearchTypeToggle.bind(this);
-	    self.renderBottomBar = this.renderBottomBar.bind(this);
-	    self.renderResults = this.renderResults.bind(this);
 	  }
 
 	  componentWillUnmount() {
@@ -25864,14 +25178,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var _getShortcuts = getShortcuts(),
 	        searchShortcut = _getShortcuts.searchShortcut,
 	        searchAgainShortcut = _getShortcuts.searchAgainShortcut,
-	        shiftSearchAgainShortcut = _getShortcuts.shiftSearchAgainShortcut,
-	        symbolSearchShortcut = _getShortcuts.symbolSearchShortcut;
+	        shiftSearchAgainShortcut = _getShortcuts.shiftSearchAgainShortcut;
 
 	    shortcuts.off(searchShortcut);
 	    shortcuts.off("Escape");
 	    shortcuts.off(searchAgainShortcut);
 	    shortcuts.off(shiftSearchAgainShortcut);
-	    shortcuts.off(symbolSearchShortcut);
 	  }
 
 	  componentDidMount() {
@@ -25885,8 +25197,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var _getShortcuts2 = getShortcuts(),
 	        searchShortcut = _getShortcuts2.searchShortcut,
 	        searchAgainShortcut = _getShortcuts2.searchAgainShortcut,
-	        shiftSearchAgainShortcut = _getShortcuts2.shiftSearchAgainShortcut,
-	        symbolSearchShortcut = _getShortcuts2.symbolSearchShortcut;
+	        shiftSearchAgainShortcut = _getShortcuts2.shiftSearchAgainShortcut;
 
 	    shortcuts.on(searchShortcut, (_, e) => this.toggleSearch(e));
 	    shortcuts.on("Escape", (_, e) => this.onEscape(e));
@@ -25894,11 +25205,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	    shortcuts.on(shiftSearchAgainShortcut, (_, e) => this.traverseResults(e, true));
 
 	    shortcuts.on(searchAgainShortcut, (_, e) => this.traverseResults(e, false));
-
-	    shortcuts.on(symbolSearchShortcut, (_, e) => this.toggleSymbolSearch(e, {
-	      toggle: false,
-	      searchType: "functions"
-	    }));
 	  }
 
 	  componentDidUpdate(prevProps, prevState) {
@@ -25906,9 +25212,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        selectedSource = _props.selectedSource,
 	        query = _props.query,
 	        modifiers = _props.modifiers,
-	        searchOn = _props.searchOn,
-	        symbolSearchOn = _props.symbolSearchOn,
-	        selectedSymbolType = _props.selectedSymbolType;
+	        searchOn = _props.searchOn;
 
 	    var searchInput = this.searchInput();
 
@@ -25927,10 +25231,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var changedFiles = selectedSource != prevProps.selectedSource && hasLoaded;
 	    var modifiersUpdated = modifiers && !modifiers.equals(prevProps.modifiers);
 
-	    var isOpen = searchOn || symbolSearchOn;
-	    var changedSearchType = selectedSymbolType != prevProps.selectedSymbolType || symbolSearchOn != prevProps.symbolSearchOn;
-
-	    if (isOpen && (doneLoading || changedFiles || modifiersUpdated || changedSearchType)) {
+	    if (searchOn && (doneLoading || changedFiles || modifiersUpdated)) {
 	      this.doSearch(query);
 	    }
 	  }
@@ -25952,14 +25253,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  closeSearch(e) {
-	    var editor = this.props.editor;
+	    var _props3 = this.props,
+	        editor = _props3.editor,
+	        setFileSearchQuery = _props3.setFileSearchQuery,
+	        searchOn = _props3.searchOn;
 
 
-	    if (this.props.searchOn && editor) {
+	    if (editor && searchOn) {
+	      setFileSearchQuery("");
 	      this.clearSearch();
-	      this.props.toggleFileSearch(false);
-	      this.props.toggleSymbolSearch(false);
-	      this.props.setSelectedSymbolType("functions");
+	      this.props.setActiveSearch();
 	      this.props.clearHighlightLineRange();
 	      e.stopPropagation();
 	      e.preventDefault();
@@ -25973,13 +25276,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 
 	    if (!this.props.searchOn) {
-	      this.props.toggleFileSearch();
-	    }
-
-	    if (this.props.symbolSearchOn) {
-	      this.clearSearch();
-	      this.props.toggleSymbolSearch(false);
-	      this.props.setSelectedSymbolType("functions");
+	      this.props.setActiveSearch("file");
 	    }
 
 	    if (this.props.searchOn && editor) {
@@ -25989,43 +25286,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	        this.doSearch(selection);
 	      }
 	      this.selectSearchInput();
-	    }
-	  }
-
-	  toggleSymbolSearch(e) {
-	    var _ref = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
-	        toggle = _ref.toggle,
-	        searchType = _ref.searchType;
-
-	    var selectedSource = this.props.selectedSource;
-
-
-	    if (e) {
-	      e.preventDefault();
-	      e.stopPropagation();
-	    }
-
-	    if (!selectedSource) {
-	      return;
-	    }
-
-	    if (!this.props.searchOn) {
-	      this.props.toggleFileSearch();
-	    }
-
-	    if (this.props.symbolSearchOn) {
-	      if (toggle) {
-	        this.props.toggleSymbolSearch(false);
-	      } else {
-	        this.props.setSelectedSymbolType(searchType);
-	      }
-	      return;
-	    }
-
-	    if (this.props.selectedSource) {
-	      this.clearSearch();
-	      this.props.toggleSymbolSearch(true);
-	      this.props.setSelectedSymbolType(searchType);
 	    }
 	  }
 
@@ -26042,6 +25302,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var searchInput = this.searchInput();
 	    if (searchInput) {
 	      searchInput.setSelectionRange(0, searchInput.value.length);
+	      searchInput.focus();
 	    }
 	  }
 
@@ -26056,31 +25317,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	    return null;
 	  }
 
-	  updateSymbolSearchResults(query) {
-	    var _props3 = this.props,
-	        selectedSource = _props3.selectedSource,
-	        updateSearchResults = _props3.updateSearchResults,
-	        selectedSymbolType = _props3.selectedSymbolType,
-	        symbols = _props3.symbols;
-
-
-	    if (query == "" || !selectedSource) {
-	      return;
-	    }
-
-	    var symbolSearchResults = (0, _fuzzaldrinPlus.filter)(symbols[selectedSymbolType], query, {
-	      key: "value"
-	    });
-
-	    updateSearchResults({ count: symbolSearchResults.length });
-	    return this.setState({ symbolSearchResults });
-	  }
-
 	  doSearch(query) {
 	    var _props4 = this.props,
 	        selectedSource = _props4.selectedSource,
-	        setFileSearchQuery = _props4.setFileSearchQuery,
-	        ed = _props4.editor;
+	        setFileSearchQuery = _props4.setFileSearchQuery;
 
 	    if (!selectedSource || !selectedSource.get("text")) {
 	      return;
@@ -26088,68 +25328,49 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	    setFileSearchQuery(query);
 
-	    if (this.props.symbolSearchOn) {
-	      return this.updateSymbolSearchResults(query);
-	    } else if (ed) {
-	      this.searchContents(query);
-	    }
+	    this.searchContents(query);
 	  }
 
-	  searchContents(query) {
-	    var _props5 = this.props,
-	        selectedSource = _props5.selectedSource,
-	        modifiers = _props5.modifiers,
-	        ed = _props5.editor,
-	        index = _props5.searchResults.index;
-
-
-	    if (!ed || !selectedSource || !selectedSource.get("text") || !modifiers) {
-	      return;
-	    }
-
-	    var ctx = { ed, cm: ed.codeMirror };
-
-	    var newCount = (0, _editor.countMatches)(query, selectedSource.get("text"), modifiers.toJS());
-
-	    if (index == -1) {
-	      (0, _editor.clearIndex)(ctx, query, modifiers.toJS());
-	    }
-
-	    var newIndex = (0, _editor.find)(ctx, query, true, modifiers.toJS());
+	  updateSearchResults(characterIndex, line, matches) {
+	    var matchIndex = matches.findIndex(elm => elm.line === line && elm.ch === characterIndex);
 	    this.props.updateSearchResults({
-	      count: newCount,
-	      index: newIndex
+	      matches,
+	      matchIndex,
+	      count: matches.length,
+	      index: characterIndex
 	    });
 	  }
 
-	  traverseSymbolResults(rev) {
-	    var _state = this.state,
-	        symbolSearchResults = _state.symbolSearchResults,
-	        selectedResultIndex = _state.selectedResultIndex;
+	  searchContents(query) {
+	    var _this = this;
 
-	    var searchResults = symbolSearchResults;
-	    var resultCount = searchResults.length;
+	    return _asyncToGenerator(function* () {
+	      var _props5 = _this.props,
+	          selectedSource = _props5.selectedSource,
+	          modifiers = _props5.modifiers,
+	          ed = _props5.editor;
 
-	    if (rev) {
-	      var nextResultIndex = Math.max(0, selectedResultIndex - 1);
 
-	      if (selectedResultIndex === 0) {
-	        nextResultIndex = resultCount - 1;
+	      if (!query || !ed || !selectedSource || !selectedSource.get("text") || !modifiers) {
+	        return;
 	      }
-	      this.setState({ selectedResultIndex: nextResultIndex });
-	      this.onSelectResultItem(searchResults[nextResultIndex]);
-	    } else {
-	      var _nextResultIndex = Math.min(resultCount - 1, selectedResultIndex + 1);
 
-	      if (selectedResultIndex === resultCount - 1) {
-	        _nextResultIndex = 0;
-	      }
-	      this.setState({ selectedResultIndex: _nextResultIndex });
-	      this.onSelectResultItem(searchResults[_nextResultIndex]);
-	    }
+	      var ctx = { ed, cm: ed.codeMirror };
+
+	      var _modifiers = modifiers.toJS();
+	      var matches = yield (0, _search.getMatches)(query, selectedSource.get("text"), _modifiers);
+
+	      var _find = (0, _editor.find)(ctx, query, true, _modifiers),
+	          ch = _find.ch,
+	          line = _find.line;
+
+	      _this.updateSearchResults(ch, line, matches);
+	    })();
 	  }
 
-	  traverseCodeResults(rev) {
+	  traverseResults(e, rev) {
+	    e.stopPropagation();
+	    e.preventDefault();
 	    var ed = this.props.editor;
 
 	    if (!ed) {
@@ -26161,82 +25382,25 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var _props6 = this.props,
 	        query = _props6.query,
 	        modifiers = _props6.modifiers,
-	        updateSearchResults = _props6.updateSearchResults,
-	        _props6$searchResults = _props6.searchResults,
-	        count = _props6$searchResults.count,
-	        index = _props6$searchResults.index;
+	        matches = _props6.searchResults.matches;
 
 
 	    if (query === "") {
-	      this.props.toggleFileSearch(true);
-	    }
-
-	    if (index == -1 && modifiers) {
-	      (0, _editor.clearIndex)(ctx, query, modifiers.toJS());
+	      this.props.setActiveSearch("file");
 	    }
 
 	    if (modifiers) {
-	      var findFnc = rev ? _editor.findPrev : _editor.findNext;
-	      var newIndex = findFnc(ctx, query, true, modifiers.toJS());
-	      updateSearchResults({
-	        index: newIndex,
-	        count
-	      });
+	      var matchedLocations = matches || [];
+
+	      var _ref = rev ? (0, _editor.findPrev)(ctx, query, true, modifiers.toJS()) : (0, _editor.findNext)(ctx, query, true, modifiers.toJS()),
+	          ch = _ref.ch,
+	          line = _ref.line;
+
+	      this.updateSearchResults(ch, line, matchedLocations);
 	    }
-	  }
-
-	  traverseResults(e, rev) {
-	    e.stopPropagation();
-	    e.preventDefault();
-
-	    var symbolSearchOn = this.props.symbolSearchOn;
-
-
-	    if (symbolSearchOn) {
-	      return this.traverseSymbolResults(rev);
-	    }
-
-	    this.traverseCodeResults(rev);
 	  }
 
 	  // Handlers
-	  selectResultItem(e, item) {
-	    var _props7 = this.props,
-	        selectSource = _props7.selectSource,
-	        selectedSource = _props7.selectedSource;
-
-
-	    if (selectedSource) {
-	      selectSource(selectedSource.get("id"), {
-	        line: item.location.start.line
-	      });
-
-	      this.closeSearch(e);
-	    }
-	  }
-
-	  onSelectResultItem(item) {
-	    var _props8 = this.props,
-	        selectSource = _props8.selectSource,
-	        selectedSource = _props8.selectedSource,
-	        selectedSymbolType = _props8.selectedSymbolType,
-	        highlightLineRange = _props8.highlightLineRange;
-
-
-	    if (selectedSource && selectedSymbolType !== "functions") {
-	      selectSource(selectedSource.get("id"), {
-	        line: item.location.start.line
-	      });
-	    }
-
-	    if (selectedSource && selectedSymbolType === "functions") {
-	      highlightLineRange({
-	        start: item.location.start.line,
-	        end: item.location.end.line,
-	        sourceId: selectedSource.get("id")
-	      });
-	    }
-	  }
 
 	  onChange(e) {
 	    return this.doSearch(e.target.value);
@@ -26250,50 +25414,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this.traverseResults(e, e.shiftKey);
 	    e.preventDefault();
 	  }
-
-	  onKeyDown(e) {
-	    var symbolSearchOn = this.props.symbolSearchOn;
-	    var symbolSearchResults = this.state.symbolSearchResults;
-
-	    if (!symbolSearchOn || this.props.query == "") {
-	      return;
-	    }
-
-	    var searchResults = symbolSearchResults;
-
-	    if (e.key === "ArrowUp") {
-	      this.traverseSymbolResults(true);
-	      e.preventDefault();
-	    } else if (e.key === "ArrowDown") {
-	      this.traverseSymbolResults(false);
-	      e.preventDefault();
-	    } else if (e.key === "Enter") {
-	      if (searchResults.length) {
-	        this.selectResultItem(e, searchResults[this.state.selectedResultIndex]);
-	      }
-	      this.closeSearch(e);
-	      e.preventDefault();
-	    } else if (e.key === "Tab") {
-	      this.closeSearch(e);
-	      e.preventDefault();
-	    }
-	  }
-
 	  // Renderers
 	  buildSummaryMsg() {
-	    if (this.props.symbolSearchOn) {
-	      if (this.state.symbolSearchResults.length > 1) {
-	        return L10N.getFormatStr("editor.searchResults", this.state.selectedResultIndex + 1, this.state.symbolSearchResults.length);
-	      } else if (this.state.symbolSearchResults.length === 1) {
-	        return L10N.getFormatStr("editor.singleResult");
-	      }
-	    }
-
-	    var _props9 = this.props,
-	        _props9$searchResults = _props9.searchResults,
-	        count = _props9$searchResults.count,
-	        index = _props9$searchResults.index,
-	        query = _props9.query;
+	    var _props7 = this.props,
+	        _props7$searchResults = _props7.searchResults,
+	        matchIndex = _props7$searchResults.matchIndex,
+	        count = _props7$searchResults.count,
+	        index = _props7$searchResults.index,
+	        query = _props7.query;
 
 
 	    if (query.trim() == "") {
@@ -26308,39 +25436,21 @@ return /******/ (function(modules) { // webpackBootstrap
 	      return L10N.getFormatStr("sourceSearch.resultsSummary1", count);
 	    }
 
-	    return L10N.getFormatStr("editor.searchResults", index + 1, count);
-	  }
-
-	  buildPlaceHolder() {
-	    var _props10 = this.props,
-	        symbolSearchOn = _props10.symbolSearchOn,
-	        selectedSymbolType = _props10.selectedSymbolType;
-
-	    if (symbolSearchOn) {
-	      // prettier-ignore
-	      return L10N.getFormatStr(`symbolSearch.search.${selectedSymbolType}Placeholder`);
-	    }
-
-	    return L10N.getStr("sourceSearch.search.placeholder");
+	    return L10N.getFormatStr("editor.searchResults", matchIndex + 1, count);
 	  }
 
 	  renderSearchModifiers() {
-	    var _props11 = this.props,
-	        modifiers = _props11.modifiers,
-	        toggleFileSearchModifier = _props11.toggleFileSearchModifier,
-	        symbolSearchOn = _props11.symbolSearchOn;
+	    var _props8 = this.props,
+	        modifiers = _props8.modifiers,
+	        toggleFileSearchModifier = _props8.toggleFileSearchModifier;
 
-
-	    if (symbolSearchOn) {
-	      return null;
-	    }
 
 	    function searchModBtn(modVal, className, svgName, tooltip) {
 	      return _react.DOM.button({
 	        className: (0, _classnames2.default)(className, {
-	          active: !symbolSearchOn && modifiers && modifiers.get(modVal)
+	          active: modifiers && modifiers.get(modVal)
 	        }),
-	        onClick: () => !symbolSearchOn ? toggleFileSearchModifier(modVal) : null,
+	        onClick: () => toggleFileSearchModifier(modVal),
 	        title: tooltip
 	      }, (0, _Svg2.default)(svgName));
 	    }
@@ -26348,60 +25458,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	    return _react.DOM.div({ className: "search-modifiers" }, searchModBtn("regexMatch", "regex-match-btn", "regex-match", L10N.getStr("symbolSearch.searchModifier.regex")), searchModBtn("caseSensitive", "case-sensitive-btn", "case-match", L10N.getStr("symbolSearch.searchModifier.caseSensitive")), searchModBtn("wholeWord", "whole-word-btn", "whole-word-match", L10N.getStr("symbolSearch.searchModifier.wholeWord")));
 	  }
 
-	  renderSearchTypeToggle() {
-	    var toggleSymbolSearch = this.toggleSymbolSearch;
-	    var _props12 = this.props,
-	        symbolSearchOn = _props12.symbolSearchOn,
-	        selectedSymbolType = _props12.selectedSymbolType;
-
-
-	    function searchTypeBtn(searchType) {
-	      return _react.DOM.button({
-	        className: (0, _classnames2.default)("search-type-btn", {
-	          active: symbolSearchOn && selectedSymbolType == searchType
-	        }),
-	        onClick: e => {
-	          if (selectedSymbolType == searchType) {
-	            toggleSymbolSearch(e, { toggle: true, searchType });
-	            return;
-	          }
-	          toggleSymbolSearch(e, { toggle: false, searchType });
-	        }
-	      }, searchType);
-	    }
-
-	    return _react.DOM.section({ className: "search-type-toggles" }, _react.DOM.h1({ className: "search-toggle-title" }, L10N.getStr("editor.searchTypeToggleTitle")), searchTypeBtn("functions"), searchTypeBtn("variables"));
-	  }
-
-	  renderBottomBar() {
-	    return _react.DOM.div({ className: "search-bottom-bar" }, this.renderSearchTypeToggle(), this.renderSearchModifiers());
-	  }
-
-	  renderResults() {
-	    var _state2 = this.state,
-	        symbolSearchResults = _state2.symbolSearchResults,
-	        selectedResultIndex = _state2.selectedResultIndex;
-	    var _props13 = this.props,
-	        query = _props13.query,
-	        symbolSearchOn = _props13.symbolSearchOn;
-
-	    if (query == "" || !symbolSearchOn || !symbolSearchResults.length) {
-	      return;
-	    }
-
-	    return ResultList({
-	      items: symbolSearchResults,
-	      selected: selectedResultIndex,
-	      selectItem: this.selectResultItem,
-	      ref: "resultList"
-	    });
-	  }
-
 	  render() {
-	    var _props14 = this.props,
-	        count = _props14.searchResults.count,
-	        query = _props14.query,
-	        searchOn = _props14.searchOn;
+	    var _props9 = this.props,
+	        count = _props9.searchResults.count,
+	        query = _props9.query,
+	        searchOn = _props9.searchOn;
 
 
 	    if (!searchOn) {
@@ -26411,15 +25472,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	    return _react.DOM.div({ className: "search-bar" }, SearchInput({
 	      query,
 	      count,
-	      placeholder: this.buildPlaceHolder(),
+	      placeholder: L10N.getStr("sourceSearch.search.placeholder"),
 	      summaryMsg: this.buildSummaryMsg(),
 	      onChange: this.onChange,
 	      onKeyUp: this.onKeyUp,
-	      onKeyDown: this.onKeyDown,
 	      handleNext: e => this.traverseResults(e, false),
 	      handlePrev: e => this.traverseResults(e, true),
 	      handleClose: this.closeSearch
-	    }), this.renderResults(), this.renderBottomBar());
+	    }), _react.DOM.div({ className: "search-bottom-bar" }, this.renderSearchModifiers()));
 	  }
 	}
 
@@ -26428,30 +25488,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	  shortcuts: _react.PropTypes.object
 	};
 
-	function _getFormattedSymbols(state) {
-	  var source = (0, _selectors.getSelectedSource)(state);
-	  if (!source) {
-	    return { variables: [], functions: [] };
-	  }
-
-	  var _getSymbols = (0, _selectors.getSymbols)(state, source.toJS()),
-	      variables = _getSymbols.variables,
-	      functions = _getSymbols.functions;
-
-	  return {
-	    variables: variables.map(formatSymbol),
-	    functions: functions.map(formatSymbol)
-	  };
-	}
-
 	exports.default = (0, _reactRedux.connect)(state => {
 	  return {
-	    searchOn: (0, _selectors.getFileSearchState)(state),
+	    searchOn: (0, _selectors.getActiveSearchState)(state) === "file",
 	    query: (0, _selectors.getFileSearchQueryState)(state),
 	    modifiers: (0, _selectors.getFileSearchModifierState)(state),
-	    symbolSearchOn: (0, _selectors.getSymbolSearchState)(state),
-	    symbols: _getFormattedSymbols(state),
-	    selectedSymbolType: (0, _selectors.getSymbolSearchType)(state)
+	    searchResults: (0, _selectors.getSearchResults)(state)
 	  };
 	}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(SearchBar);
 
@@ -26583,15 +25625,287 @@ return /******/ (function(modules) { // webpackBootstrap
 /* 558 */,
 /* 559 */,
 /* 560 */,
-/* 561 */,
-/* 562 */,
-/* 563 */,
-/* 564 */,
-/* 565 */,
-/* 566 */,
-/* 567 */,
-/* 568 */,
-/* 569 */,
+/* 561 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var baseUniq = __webpack_require__(562);
+
+	/**
+	 * Creates a duplicate-free version of an array, using
+	 * [`SameValueZero`](http://ecma-international.org/ecma-262/7.0/#sec-samevaluezero)
+	 * for equality comparisons, in which only the first occurrence of each element
+	 * is kept. The order of result values is determined by the order they occur
+	 * in the array.
+	 *
+	 * @static
+	 * @memberOf _
+	 * @since 0.1.0
+	 * @category Array
+	 * @param {Array} array The array to inspect.
+	 * @returns {Array} Returns the new duplicate free array.
+	 * @example
+	 *
+	 * _.uniq([2, 1, 2]);
+	 * // => [2, 1]
+	 */
+	function uniq(array) {
+	  return (array && array.length) ? baseUniq(array) : [];
+	}
+
+	module.exports = uniq;
+
+
+/***/ },
+/* 562 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var SetCache = __webpack_require__(276),
+	    arrayIncludes = __webpack_require__(563),
+	    arrayIncludesWith = __webpack_require__(567),
+	    cacheHas = __webpack_require__(280),
+	    createSet = __webpack_require__(568),
+	    setToArray = __webpack_require__(283);
+
+	/** Used as the size to enable large array optimizations. */
+	var LARGE_ARRAY_SIZE = 200;
+
+	/**
+	 * The base implementation of `_.uniqBy` without support for iteratee shorthands.
+	 *
+	 * @private
+	 * @param {Array} array The array to inspect.
+	 * @param {Function} [iteratee] The iteratee invoked per element.
+	 * @param {Function} [comparator] The comparator invoked per element.
+	 * @returns {Array} Returns the new duplicate free array.
+	 */
+	function baseUniq(array, iteratee, comparator) {
+	  var index = -1,
+	      includes = arrayIncludes,
+	      length = array.length,
+	      isCommon = true,
+	      result = [],
+	      seen = result;
+
+	  if (comparator) {
+	    isCommon = false;
+	    includes = arrayIncludesWith;
+	  }
+	  else if (length >= LARGE_ARRAY_SIZE) {
+	    var set = iteratee ? null : createSet(array);
+	    if (set) {
+	      return setToArray(set);
+	    }
+	    isCommon = false;
+	    includes = cacheHas;
+	    seen = new SetCache;
+	  }
+	  else {
+	    seen = iteratee ? [] : result;
+	  }
+	  outer:
+	  while (++index < length) {
+	    var value = array[index],
+	        computed = iteratee ? iteratee(value) : value;
+
+	    value = (comparator || value !== 0) ? value : 0;
+	    if (isCommon && computed === computed) {
+	      var seenIndex = seen.length;
+	      while (seenIndex--) {
+	        if (seen[seenIndex] === computed) {
+	          continue outer;
+	        }
+	      }
+	      if (iteratee) {
+	        seen.push(computed);
+	      }
+	      result.push(value);
+	    }
+	    else if (!includes(seen, computed, comparator)) {
+	      if (seen !== result) {
+	        seen.push(computed);
+	      }
+	      result.push(value);
+	    }
+	  }
+	  return result;
+	}
+
+	module.exports = baseUniq;
+
+
+/***/ },
+/* 563 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var baseIndexOf = __webpack_require__(564);
+
+	/**
+	 * A specialized version of `_.includes` for arrays without support for
+	 * specifying an index to search from.
+	 *
+	 * @private
+	 * @param {Array} [array] The array to inspect.
+	 * @param {*} target The value to search for.
+	 * @returns {boolean} Returns `true` if `target` is found, else `false`.
+	 */
+	function arrayIncludes(array, value) {
+	  var length = array == null ? 0 : array.length;
+	  return !!length && baseIndexOf(array, value, 0) > -1;
+	}
+
+	module.exports = arrayIncludes;
+
+
+/***/ },
+/* 564 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var baseFindIndex = __webpack_require__(263),
+	    baseIsNaN = __webpack_require__(565),
+	    strictIndexOf = __webpack_require__(566);
+
+	/**
+	 * The base implementation of `_.indexOf` without `fromIndex` bounds checks.
+	 *
+	 * @private
+	 * @param {Array} array The array to inspect.
+	 * @param {*} value The value to search for.
+	 * @param {number} fromIndex The index to search from.
+	 * @returns {number} Returns the index of the matched value, else `-1`.
+	 */
+	function baseIndexOf(array, value, fromIndex) {
+	  return value === value
+	    ? strictIndexOf(array, value, fromIndex)
+	    : baseFindIndex(array, baseIsNaN, fromIndex);
+	}
+
+	module.exports = baseIndexOf;
+
+
+/***/ },
+/* 565 */
+/***/ function(module, exports) {
+
+	/**
+	 * The base implementation of `_.isNaN` without support for number objects.
+	 *
+	 * @private
+	 * @param {*} value The value to check.
+	 * @returns {boolean} Returns `true` if `value` is `NaN`, else `false`.
+	 */
+	function baseIsNaN(value) {
+	  return value !== value;
+	}
+
+	module.exports = baseIsNaN;
+
+
+/***/ },
+/* 566 */
+/***/ function(module, exports) {
+
+	/**
+	 * A specialized version of `_.indexOf` which performs strict equality
+	 * comparisons of values, i.e. `===`.
+	 *
+	 * @private
+	 * @param {Array} array The array to inspect.
+	 * @param {*} value The value to search for.
+	 * @param {number} fromIndex The index to search from.
+	 * @returns {number} Returns the index of the matched value, else `-1`.
+	 */
+	function strictIndexOf(array, value, fromIndex) {
+	  var index = fromIndex - 1,
+	      length = array.length;
+
+	  while (++index < length) {
+	    if (array[index] === value) {
+	      return index;
+	    }
+	  }
+	  return -1;
+	}
+
+	module.exports = strictIndexOf;
+
+
+/***/ },
+/* 567 */
+/***/ function(module, exports) {
+
+	/**
+	 * This function is like `arrayIncludes` except that it accepts a comparator.
+	 *
+	 * @private
+	 * @param {Array} [array] The array to inspect.
+	 * @param {*} target The value to search for.
+	 * @param {Function} comparator The comparator invoked per element.
+	 * @returns {boolean} Returns `true` if `target` is found, else `false`.
+	 */
+	function arrayIncludesWith(array, value, comparator) {
+	  var index = -1,
+	      length = array == null ? 0 : array.length;
+
+	  while (++index < length) {
+	    if (comparator(value, array[index])) {
+	      return true;
+	    }
+	  }
+	  return false;
+	}
+
+	module.exports = arrayIncludesWith;
+
+
+/***/ },
+/* 568 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var Set = __webpack_require__(201),
+	    noop = __webpack_require__(569),
+	    setToArray = __webpack_require__(283);
+
+	/** Used as references for various `Number` constants. */
+	var INFINITY = 1 / 0;
+
+	/**
+	 * Creates a set object of `values`.
+	 *
+	 * @private
+	 * @param {Array} values The values to add to the set.
+	 * @returns {Object} Returns the new set.
+	 */
+	var createSet = !(Set && (1 / setToArray(new Set([,-0]))[1]) == INFINITY) ? noop : function(values) {
+	  return new Set(values);
+	};
+
+	module.exports = createSet;
+
+
+/***/ },
+/* 569 */
+/***/ function(module, exports) {
+
+	/**
+	 * This method returns `undefined`.
+	 *
+	 * @static
+	 * @memberOf _
+	 * @since 2.3.0
+	 * @category Util
+	 * @example
+	 *
+	 * _.times(2, _.noop);
+	 * // => [undefined, undefined]
+	 */
+	function noop() {
+	  // No operation performed.
+	}
+
+	module.exports = noop;
+
+
+/***/ },
 /* 570 */,
 /* 571 */,
 /* 572 */,
@@ -26951,47 +26265,44 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _devtoolsLaunchpad = __webpack_require__(131);
 
 	function GutterMenu(_ref) {
-	  var bp = _ref.bp,
+	  var breakpoint = _ref.breakpoint,
 	      line = _ref.line,
 	      event = _ref.event,
 	      toggleBreakpoint = _ref.toggleBreakpoint,
 	      showConditionalPanel = _ref.showConditionalPanel,
-	      toggleBreakpointDisabledStatus = _ref.toggleBreakpointDisabledStatus,
+	      toggleDisabledBreakpoint = _ref.toggleDisabledBreakpoint,
 	      isCbPanelOpen = _ref.isCbPanelOpen,
 	      closeConditionalPanel = _ref.closeConditionalPanel;
 
 	  event.stopPropagation();
 	  event.preventDefault();
-	  var breakpoint = {
-	    id: "node-menu-add-breakpoint",
-	    label: L10N.getStr("editor.addBreakpoint")
-	  },
-	      conditional = {
-	    id: "node-menu-add-conditional-breakpoint",
-	    label: L10N.getStr("editor.addConditionalBreakpoint")
-	  },
-	      disabled = void 0;
-	  if (bp) {
-	    breakpoint = {
+
+	  var gutterItems = {
+	    addBreakpoint: {
+	      id: "node-menu-add-breakpoint",
+	      label: L10N.getStr("editor.addBreakpoint")
+	    },
+	    addConditional: {
+	      id: "node-menu-add-conditional-breakpoint",
+	      label: L10N.getStr("editor.addConditionalBreakpoint")
+	    },
+	    removeBreakpoint: {
 	      id: "node-menu-remove-breakpoint",
 	      label: L10N.getStr("editor.removeBreakpoint")
-	    };
-	    conditional = {
+	    },
+	    editConditional: {
 	      id: "node-menu-edit-conditional-breakpoint",
 	      label: L10N.getStr("editor.editBreakpoint")
-	    };
-	    if (bp.disabled) {
-	      disabled = {
-	        id: "node-menu-enable-breakpoint",
-	        label: L10N.getStr("editor.enableBreakpoint")
-	      };
-	    } else {
-	      disabled = {
-	        id: "node-menu-disable-breakpoint",
-	        label: L10N.getStr("editor.disableBreakpoint")
-	      };
+	    },
+	    enableBreakpoint: {
+	      id: "node-menu-enable-breakpoint",
+	      label: L10N.getStr("editor.enableBreakpoint")
+	    },
+	    disableBreakpoint: {
+	      id: "node-menu-disable-breakpoint",
+	      label: L10N.getStr("editor.disableBreakpoint")
 	    }
-	  }
+	  };
 
 	  var toggleBreakpointItem = Object.assign({
 	    accesskey: "B",
@@ -27002,22 +26313,22 @@ return /******/ (function(modules) { // webpackBootstrap
 	        closeConditionalPanel();
 	      }
 	    }
-	  }, breakpoint);
+	  }, breakpoint ? gutterItems.removeBreakpoint : gutterItems.addBreakpoint);
 
 	  var conditionalBreakpoint = Object.assign({
 	    accesskey: "C",
 	    disabled: false,
 	    click: () => showConditionalPanel(line)
-	  }, conditional);
+	  }, breakpoint && breakpoint.condition ? gutterItems.editConditional : gutterItems.addConditional);
 
 	  var items = [toggleBreakpointItem, conditionalBreakpoint];
 
-	  if (bp) {
+	  if (breakpoint) {
 	    var disableBreakpoint = Object.assign({
 	      accesskey: "D",
 	      disabled: false,
-	      click: () => toggleBreakpointDisabledStatus(line)
-	    }, disabled);
+	      click: () => toggleDisabledBreakpoint(line)
+	    }, breakpoint.disabled ? gutterItems.enableBreakpoint : gutterItems.disableBreakpoint);
 	    items.push(disableBreakpoint);
 	  }
 
@@ -27190,6 +26501,8 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _objectInspector = __webpack_require__(658);
 
+	var _editor = __webpack_require__(257);
+
 	var _Rep = __webpack_require__(697);
 
 	var _Rep2 = _interopRequireDefault(_Rep);
@@ -27211,10 +26524,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	        loadObjectProperties = _props.loadObjectProperties,
 	        loadedObjects = _props.loadedObjects,
 	        value = _props.value,
-	        popoverTarget = _props.popoverTarget;
+	        editor = _props.editor,
+	        location = _props.location;
 
 
-	    popoverTarget.classList.add("selected-token");
+	    this.marker = (0, _editor.markText)(editor, "selection", location);
 
 	    if (!value || !value.type == "object") {
 	      return;
@@ -27226,9 +26540,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  componentWillUnmount() {
-	    var popoverTarget = this.props.popoverTarget;
-
-	    popoverTarget.classList.remove("selected-token");
+	    if (this.marker) {
+	      this.marker.clear();
+	    }
 	  }
 
 	  getChildren(root, getObjectProperties) {
@@ -27311,14 +26625,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }
 
 	    if (value.type === "object") {
-	      return _react.DOM.div({}, this.renderObjectPreview(expression, root), this.renderAddToExpressionBar(expression, value));
+	      return _react.DOM.div({}, this.renderObjectPreview(expression, root), this.renderAddToExpressionBar(expression));
 	    }
 
 	    return this.renderSimplePreview(value);
 	  }
 
 	  getPreviewType(value) {
-	    if (typeof value == "boolean" || value.class === "Function") {
+	    if (typeof value == "boolean" || value.type == "null" || value.type == "undefined" || value.class === "Function") {
 	      return "tooltip";
 	    }
 
@@ -27327,7 +26641,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  render() {
 	    var _props3 = this.props,
-	        popoverTarget = _props3.popoverTarget,
+	        popoverPos = _props3.popoverPos,
 	        onClose = _props3.onClose,
 	        value = _props3.value,
 	        expression = _props3.expression;
@@ -27336,7 +26650,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var type = this.getPreviewType(value);
 
 	    return Popover({
-	      target: popoverTarget,
+	      targetPosition: popoverPos,
 	      onMouseLeave: onClose,
 	      type
 	    }, this.renderPreview(expression, value));
@@ -27663,12 +26977,7 @@ return /******/ (function(modules) { // webpackBootstrap
 /* 685 */,
 /* 686 */,
 /* 687 */,
-/* 688 */
-/***/ function(module, exports) {
-
-	module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M8,3L12,3L12,7L14,7L14,8L12,8L12,12L8,12L8,14L7,14L7,12L3,12L3,8L1,8L1,7L3,7L3,3L7,3L7,1L8,1L8,3ZM10,10L10,5L5,5L5,10L10,10Z\"></path></svg>"
-
-/***/ },
+/* 688 */,
 /* 689 */,
 /* 690 */,
 /* 691 */,
@@ -27980,7 +27289,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var editor = document.querySelector(".editor-wrapper");
 	    var editorRect = editor.getBoundingClientRect();
 
-	    var targetRect = this.props.target.getBoundingClientRect();
+	    var targetRect = this.props.targetPosition;
 
 	    var popoverLeft = this.calculateLeft(targetRect, editorRect, popoverRect);
 	    var orientation = this.calculateVerticalOrientation(targetRect, editorRect, popoverRect);
@@ -27994,7 +27303,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  getTooltipCoords() {
 	    var tooltip = _reactDom2.default.findDOMNode(this);
 	    var tooltipRect = tooltip.getBoundingClientRect();
-	    var targetRect = this.props.target.getBoundingClientRect();
+	    var targetRect = this.props.targetPosition;
 
 	    var editor = document.querySelector(".editor-wrapper");
 	    var editorRect = editor.getBoundingClientRect();
@@ -28017,9 +27326,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var arrowOrientation = orientation === "up" ? "down" : "up";
 
 	    var arrowProp = arrowOrientation === "up" ? "top" : "bottom";
-	    var arrowPropValue = arrowOrientation === "up" ? -8 : 6;
+	    var arrowPropValue = arrowOrientation === "up" ? -7 : 5;
 
-	    return new BracketArrow({
+	    return BracketArrow({
 	      orientation: arrowOrientation,
 	      left,
 	      [arrowProp]: arrowPropValue
@@ -28072,6 +27381,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	Popover.propTypes = {
 	  target: _react.PropTypes.object,
+	  targetPosition: _react.PropTypes.object,
 	  children: _react.PropTypes.object,
 	  onMouseLeave: _react.PropTypes.func,
 	  type: _react.PropTypes.string
@@ -28519,10 +27829,11 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _Svg2 = _interopRequireDefault(_Svg);
 
+	var _editor = __webpack_require__(257);
+
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 	var breakpointSvg = document.createElement("div");
-
 	_reactDom2.default.render((0, _Svg2.default)("breakpoint"), breakpointSvg);
 
 	function makeMarker(isDisabled) {
@@ -28543,42 +27854,80 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  addBreakpoint() {
-	    var bp = this.props.breakpoint;
-	    var line = bp.location.line - 1;
+	    var _props = this.props,
+	        breakpoint = _props.breakpoint,
+	        editor = _props.editor,
+	        selectedSource = _props.selectedSource;
 
-	    this.props.editor.setGutterMarker(line, "breakpoints", makeMarker(bp.disabled));
-	    this.props.editor.addLineClass(line, "line", "new-breakpoint");
-	    if (bp.condition) {
-	      this.props.editor.addLineClass(line, "line", "has-condition");
-	    } else {
-	      this.props.editor.removeLineClass(line, "line", "has-condition");
-	    }
-	  }
-	  shouldComponentUpdate(nextProps) {
-	    return this.props.editor !== nextProps.editor || this.props.breakpoint.disabled !== nextProps.breakpoint.disabled || this.props.breakpoint.condition !== nextProps.breakpoint.condition;
-	  }
-	  componentDidMount() {
-	    if (!this.props.editor) {
+	    // NOTE: we need to wait for the breakpoint to be loaded
+	    // to get the generated location
+
+	    if (!selectedSource || breakpoint.loading) {
 	      return;
 	    }
 
+	    var line = breakpoint.location.line - 1;
+	    (0, _editor.showSourceText)(editor, selectedSource.toJS());
+
+	    editor.codeMirror.setGutterMarker(line, "breakpoints", makeMarker(breakpoint.disabled));
+
+	    editor.codeMirror.addLineClass(line, "line", "new-breakpoint");
+	    if (breakpoint.condition) {
+	      editor.codeMirror.addLineClass(line, "line", "has-condition");
+	    } else {
+	      editor.codeMirror.removeLineClass(line, "line", "has-condition");
+	    }
+	  }
+
+	  shouldComponentUpdate(nextProps) {
+	    var _props2 = this.props,
+	        editor = _props2.editor,
+	        breakpoint = _props2.breakpoint,
+	        selectedSource = _props2.selectedSource;
+
+	    return editor !== nextProps.editor || breakpoint.disabled !== nextProps.breakpoint.disabled || breakpoint.condition !== nextProps.breakpoint.condition || breakpoint.loading !== nextProps.breakpoint.loading || selectedSource !== nextProps.selectedSource;
+	  }
+
+	  componentDidMount() {
 	    this.addBreakpoint();
 	  }
+
 	  componentDidUpdate() {
 	    this.addBreakpoint();
 	  }
+
 	  componentWillUnmount() {
-	    if (!this.props.editor) {
+	    var _props3 = this.props,
+	        editor = _props3.editor,
+	        breakpoint = _props3.breakpoint,
+	        selectedSource = _props3.selectedSource;
+
+
+	    if (!selectedSource) {
 	      return;
 	    }
 
-	    var bp = this.props.breakpoint;
-	    var line = bp.location.line - 1;
+	    if (breakpoint.loading) {
+	      return;
+	    }
 
-	    this.props.editor.setGutterMarker(line, "breakpoints", null);
-	    this.props.editor.removeLineClass(line, "line", "new-breakpoint");
-	    this.props.editor.removeLineClass(line, "line", "has-condition");
+	    var line = breakpoint.location.line - 1;
+	    var doc = (0, _editor.getDocument)(selectedSource.get("id"));
+	    if (!doc) {
+	      return;
+	    }
+
+	    // NOTE: when we upgrade codemirror we can use `doc.setGutterMarker`
+	    if (doc.setGutterMarker) {
+	      doc.setGutterMarker(line, "breakpoints", null);
+	    } else {
+	      editor.codeMirror.setGutterMarker(line, "breakpoints", null);
+	    }
+
+	    doc.removeLineClass(line, "line", "new-breakpoint");
+	    doc.removeLineClass(line, "line", "has-condition");
 	  }
+
 	  render() {
 	    return null;
 	  }
@@ -28625,10 +27974,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  componentDidMount() {
-	    if (!this.props.editor) {
-	      return;
-	    }
-
 	    this.addMarker();
 	  }
 
@@ -28637,10 +27982,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  componentWillUnmount() {
-	    if (!this.props.editor) {
-	      return;
-	    }
-
 	    var hitData = this.props.hitData;
 	    var line = hitData.line - 1;
 
@@ -28698,10 +28039,6 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _prefs = __webpack_require__(226);
 
-	var _WhyPaused2 = __webpack_require__(722);
-
-	var _WhyPaused3 = _interopRequireDefault(_WhyPaused2);
-
 	var _Breakpoints2 = __webpack_require__(725);
 
 	var _Breakpoints3 = _interopRequireDefault(_Breakpoints2);
@@ -28744,8 +28081,6 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
 
-	var WhyPaused = (0, _react.createFactory)(_WhyPaused3.default);
-
 	var Breakpoints = (0, _react.createFactory)(_Breakpoints3.default);
 
 	var Expressions = (0, _react.createFactory)(_Expressions3.default);
@@ -28787,7 +28122,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	      "aria-label": breakpointsDisabled ? L10N.getStr("breakpoints.enable") : L10N.getStr("breakpoints.disable"),
 	      className: boxClassName,
 	      disabled: breakpointsLoading,
-	      onClick: () => toggleAllBreakpoints(!breakpointsDisabled),
+	      onChange: e => {
+	        e.stopPropagation();
+	        toggleAllBreakpoints(!breakpointsDisabled);
+	      },
+	      onClick: e => e.stopPropagation(),
 	      checked: !breakpointsDisabled && !isIndeterminate,
 	      ref: input => {
 	        if (input) {
@@ -28899,9 +28238,8 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  render() {
 	    return _react.DOM.div({
-	      className: "secondary-panes",
-	      style: { overflowX: "hidden" }
-	    }, CommandBar(), WhyPaused(), this.props.horizontal ? this.renderHorizontalLayout() : this.renderVerticalLayout());
+	      className: "secondary-panes secondary-panes--sticky-commandbar"
+	    }, CommandBar(), this.props.horizontal ? this.renderHorizontalLayout() : this.renderVerticalLayout());
 	  }
 	}
 
@@ -29066,7 +28404,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  renderExpressionEditInput(expression) {
-	    return _react.DOM.span({ className: "expression-input-container" }, _react.DOM.input({
+	    return _react.DOM.span({ className: "expression-input-container", key: expression.input }, _react.DOM.input({
 	      type: "text",
 	      className: "input-expression",
 	      onKeyPress: e => this.inputKeyPress(e, expression),
@@ -29111,16 +28449,18 @@ return /******/ (function(modules) { // webpackBootstrap
 	      contents: { value }
 	    };
 
-	    return _react.DOM.div({
+	    return _react.DOM.li({
 	      className: "expression-container",
 	      key: `${path}/${input}`
-	    }, ObjectInspector({
+	    }, _react.DOM.div({ className: "expression-content" }, ObjectInspector({
 	      roots: [root],
 	      getObjectProperties: id => loadedObjects[id],
 	      autoExpandDepth: 0,
 	      onDoubleClick: (item, options) => this.editExpression(expression, options),
 	      loadObjectProperties
-	    }), CloseButton({ handleClick: e => this.deleteExpression(e, expression) }));
+	    }), _react.DOM.div({ className: "expression-container__close-btn" }, CloseButton({
+	      handleClick: e => this.deleteExpression(e, expression)
+	    }))));
 	  }
 
 	  componentDidUpdate() {
@@ -29144,7 +28484,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      e.target.value = "";
 	      this.props.addExpression(value);
 	    };
-	    return _react.DOM.span({ className: "expression-input-container" }, _react.DOM.input({
+	    return _react.DOM.li({ className: "expression-input-container" }, _react.DOM.input({
 	      type: "text",
 	      className: "input-expression",
 	      placeholder: L10N.getStr("expressions.placeholder"),
@@ -29158,7 +28498,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  render() {
 	    var expressions = this.props.expressions;
 
-	    return _react.DOM.span({ className: "pane expressions-list" }, expressions.map(this.renderExpression), this.renderNewExpressionInput());
+	    return _react.DOM.ul({ className: "pane expressions-list" }, expressions.map(this.renderExpression), this.renderNewExpressionInput());
 	  }
 	}
 
@@ -29178,99 +28518,8 @@ return /******/ (function(modules) { // webpackBootstrap
 
 /***/ },
 /* 721 */,
-/* 722 */
-/***/ function(module, exports, __webpack_require__) {
-
-	"use strict";
-
-	Object.defineProperty(exports, "__esModule", {
-	  value: true
-	});
-
-	var _react = __webpack_require__(2);
-
-	var _redux = __webpack_require__(3);
-
-	var _reactRedux = __webpack_require__(151);
-
-	var _actions = __webpack_require__(244);
-
-	var _actions2 = _interopRequireDefault(_actions);
-
-	var _selectors = __webpack_require__(242);
-
-	var _isString = __webpack_require__(602);
-
-	var _isString2 = _interopRequireDefault(_isString);
-
-	var _pause = __webpack_require__(255);
-
-	__webpack_require__(723);
-
-	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-	var get = __webpack_require__(67);
-
-	function renderExceptionSummary(exception) {
-	  if ((0, _isString2.default)(exception)) {
-	    return exception;
-	  }
-
-	  var message = get(exception, "preview.message");
-	  var name = get(exception, "preview.name");
-
-	  return `${name}: ${message}`;
-	}
-
-	class WhyPaused extends _react.Component {
-	  renderMessage(pauseInfo) {
-	    if (!pauseInfo) {
-	      return null;
-	    }
-
-	    var message = get(pauseInfo, "why.message");
-	    if (message) {
-	      return _react.DOM.div({ className: "message" }, message);
-	    }
-
-	    var exception = get(pauseInfo, "why.exception");
-	    if (exception) {
-	      return _react.DOM.div({ className: "message" }, renderExceptionSummary(exception));
-	    }
-
-	    return null;
-	  }
-
-	  render() {
-	    var pauseInfo = this.props.pauseInfo;
-
-	    var reason = (0, _pause.getPauseReason)(pauseInfo);
-
-	    if (!reason) {
-	      return null;
-	    }
-
-	    return _react.DOM.div({ className: "pane why-paused" }, _react.DOM.div(null, L10N.getStr(reason)), this.renderMessage(pauseInfo));
-	  }
-	}
-
-	WhyPaused.displayName = "WhyPaused";
-
-	WhyPaused.propTypes = {
-	  pauseInfo: _react.PropTypes.object
-	};
-
-	exports.default = (0, _reactRedux.connect)(state => ({
-	  pauseInfo: (0, _selectors.getPause)(state)
-	}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(WhyPaused);
-
-/***/ },
-/* 723 */
-/***/ function(module, exports) {
-
-	// removed by extract-text-webpack-plugin
-
-/***/ },
+/* 722 */,
+/* 723 */,
 /* 724 */,
 /* 725 */
 /***/ function(module, exports, __webpack_require__) {
@@ -29288,6 +28537,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _reselect = __webpack_require__(993);
 
 	var _redux = __webpack_require__(3);
+
+	var _devtoolsConfig = __webpack_require__(828);
 
 	var _reactImmutableProptypes = __webpack_require__(150);
 
@@ -29307,7 +28558,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _utils = __webpack_require__(234);
 
-	var _path = __webpack_require__(235);
+	var _source = __webpack_require__(233);
 
 	var _Close = __webpack_require__(378);
 
@@ -29315,10 +28566,11 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	__webpack_require__(726);
 
+	var _get = __webpack_require__(67);
+
+	var _get2 = _interopRequireDefault(_get);
+
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-	var get = __webpack_require__(67);
-
 
 	function isCurrentlyPausedAtBreakpoint(pause, breakpoint) {
 	  if (!pause || pause.isInterrupted) {
@@ -29326,15 +28578,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  var bpId = (0, _breakpoint.makeLocationId)(breakpoint.location);
-	  var pausedId = (0, _breakpoint.makeLocationId)(get(pause, "frame.location"));
+	  var pausedId = (0, _breakpoint.makeLocationId)((0, _get2.default)(pause, "frame.location"));
 	  return bpId === pausedId;
 	}
 
+
 	function renderSourceLocation(source, line, column) {
-	  var url = source.get("url") ? (0, _path.basename)(source.get("url")) : null;
-	  var bpLocation = line + (column ? `:${column}` : "");
-	  // const line = url !== "" ? `: ${line}` : "";
-	  return url ? _react.DOM.div({ className: "location" }, `${(0, _utils.endTruncateStr)(url, 30)}: ${bpLocation}`) : null;
+	  var filename = source ? (0, _source.getFilename)(source.toJS()) : null;
+	  var columnVal = (0, _devtoolsConfig.isEnabled)("columnBreakpoints") && column ? `:${column}` : "";
+	  var bpLocation = `${line}${columnVal}`;
+
+	  return filename ? _react.DOM.div({ className: "location" }, `${(0, _utils.endTruncateStr)(filename, 30)}: ${bpLocation}`) : null;
 	}
 
 	class Breakpoints extends _react.PureComponent {
@@ -29723,7 +28977,8 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  constructor(props) {
 	    var pauseInfo = props.pauseInfo,
-	        selectedFrame = props.selectedFrame;
+	        selectedFrame = props.selectedFrame,
+	        frameScopes = props.frameScopes;
 
 	    for (var _len = arguments.length, args = Array(_len > 1 ? _len - 1 : 0), _key = 1; _key < _len; _key++) {
 	      args[_key - 1] = arguments[_key];
@@ -29732,7 +28987,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    super(props, ...args);
 
 	    this.state = {
-	      scopes: (0, _scopes.getScopes)(pauseInfo, selectedFrame)
+	      scopes: (0, _scopes.getScopes)(pauseInfo, selectedFrame, frameScopes)
 	    };
 	  }
 
@@ -29746,7 +29001,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	    if (pauseInfoChanged || selectedFrameChange) {
 	      this.setState({
-	        scopes: (0, _scopes.getScopes)(nextProps.pauseInfo, nextProps.selectedFrame)
+	        scopes: (0, _scopes.getScopes)(nextProps.pauseInfo, nextProps.selectedFrame, nextProps.frameScopes)
 	      });
 	    }
 	  }
@@ -29776,16 +29031,22 @@ return /******/ (function(modules) { // webpackBootstrap
 	  pauseInfo: _react.PropTypes.object,
 	  loadedObjects: _react.PropTypes.object,
 	  loadObjectProperties: _react.PropTypes.func,
-	  selectedFrame: _react.PropTypes.object
+	  selectedFrame: _react.PropTypes.object,
+	  frameScopes: _react.PropTypes.object
 	};
 
 	Scopes.displayName = "Scopes";
 
-	exports.default = (0, _reactRedux.connect)(state => ({
-	  pauseInfo: (0, _selectors.getPause)(state),
-	  selectedFrame: (0, _selectors.getSelectedFrame)(state),
-	  loadedObjects: (0, _selectors.getLoadedObjects)(state)
-	}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Scopes);
+	exports.default = (0, _reactRedux.connect)(state => {
+	  var selectedFrame = (0, _selectors.getSelectedFrame)(state);
+	  var frameScopes = selectedFrame ? (0, _selectors.getFrameScopes)(state, selectedFrame.id) : null;
+	  return {
+	    selectedFrame,
+	    pauseInfo: (0, _selectors.getPause)(state),
+	    frameScopes: frameScopes,
+	    loadedObjects: (0, _selectors.getLoadedObjects)(state)
+	  };
+	}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Scopes);
 
 /***/ },
 /* 732 */
@@ -29798,17 +29059,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	});
 	exports.getSpecialVariables = getSpecialVariables;
 	exports.getScopes = getScopes;
-	exports.getVisibleVariablesFromScope = getVisibleVariablesFromScope;
 
 	var _toPairs = __webpack_require__(195);
 
 	var _toPairs2 = _interopRequireDefault(_toPairs);
 
+	var _get = __webpack_require__(67);
+
+	var _get2 = _interopRequireDefault(_get);
+
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
-
-	var get = __webpack_require__(67);
 
 	// Create the tree nodes representing all the variables and arguments
 	// for the bindings from a scope.
@@ -29824,9 +29084,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 	function getSpecialVariables(pauseInfo, path) {
-	  var thrown = get(pauseInfo, "why.frameFinished.throw", undefined);
+	  var thrown = (0, _get2.default)(pauseInfo, "why.frameFinished.throw", undefined);
 
-	  var returned = get(pauseInfo, "why.frameFinished.return", undefined);
+	  var returned = (0, _get2.default)(pauseInfo, "why.frameFinished.return", undefined);
 
 	  var vars = [];
 
@@ -29866,12 +29126,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	  };
 	}
 
-	function getScopes(pauseInfo, selectedFrame) {
+	function getScopes(pauseInfo, selectedFrame, selectedScope) {
 	  if (!pauseInfo || !selectedFrame) {
 	    return null;
 	  }
 
-	  var selectedScope = selectedFrame.scope;
+	  // NOTE: it's possible that we're inspecting an old server
+	  // that does not support getting frame scopes directly
+	  selectedScope = selectedScope || selectedFrame.scope;
 
 	  if (!selectedScope) {
 	    return null;
@@ -29880,7 +29142,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var scopes = [];
 
 	  var scope = selectedScope;
-	  var pausedScopeActor = get(pauseInfo, "frame.scope.actor");
+	  var pausedScopeActor = (0, _get2.default)(pauseInfo, "frame.scope.actor");
 	  var scopeIndex = 1;
 
 	  do {
@@ -29938,31 +29200,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  } while (scope = scope.parent); // eslint-disable-line no-cond-assign
 
 	  return scopes;
-	}
-
-	/**
-	 * Returns variables that are visible from this scope.
-	 * TODO: returns global variables as well
-	 */
-	function getVisibleVariablesFromScope(pauseInfo, selectedFrame) {
-	  var _ref;
-
-	  var result = new Map();
-
-	  var scopes = getScopes(pauseInfo, selectedFrame);
-	  if (!scopes) {
-	    return result;
-	  }
-
-	  // reverse so that the local variables shadow global variables
-	  var scopeContents = scopes.reverse().map(scope => scope.contents);
-	  scopeContents = (_ref = []).concat.apply(_ref, _toConsumableArray(scopeContents));
-
-	  scopeContents.forEach(content => {
-	    result.set(content.name || null, content);
-	  });
-
-	  return result;
 	}
 
 /***/ },
@@ -30193,8 +29430,6 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _react = __webpack_require__(2);
 
-	var _reactDom = __webpack_require__(31);
-
 	var _reactRedux = __webpack_require__(151);
 
 	var _redux = __webpack_require__(3);
@@ -30267,21 +29502,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return (0, _text.formatKeyShortcut)(key);
 	}
 
-	function handlePressAnimation(button) {
-	  if (!button) {
-	    return;
-	  }
-
-	  button.style.opacity = "0";
-	  button.style.transform = "scale(1.3)";
-	  setTimeout(() => {
-	    if (button) {
-	      button.style.opacity = "1";
-	      button.style.transform = "none";
-	    }
-	  }, 200);
-	}
-
 	function debugBtn(onClick, type, className, tooltip) {
 	  var disabled = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : false;
 
@@ -30323,10 +29543,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	    e.stopPropagation();
 
 	    this.props[action]();
-	    var node = (0, _reactDom.findDOMNode)(this);
-	    if (node instanceof HTMLElement) {
-	      handlePressAnimation(node.querySelector(`.${action}`));
-	    }
 	  }
 
 	  renderStepButtons() {
@@ -30488,6 +29704,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+
 	var _react = __webpack_require__(2);
 
 	var _reactRedux = __webpack_require__(151);
@@ -30499,6 +29719,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	var I = _interopRequireWildcard(_immutable);
 
 	var _selectors = __webpack_require__(242);
+
+	var _ui = __webpack_require__(1128);
 
 	var _source = __webpack_require__(233);
 
@@ -30562,12 +29784,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	    return Math.min.apply(Math, _toConsumableArray(topOffsets));
 	  }
 
-	  var tabTopOffset = getTopOffset();
-	  return sourceTabs.filter((tab, index) => {
+	  function hasTopOffset(el) {
 	    // adding 10px helps account for cases where the tab might be offset by
 	    // styling such as selected tabs which don't have a border.
-	    var el = sourceTabEls[index];
-	    return el && el.getBoundingClientRect().top > tabTopOffset + 10;
+	    var tabTopOffset = getTopOffset();
+	    return el.getBoundingClientRect().top > tabTopOffset + 10;
+	  }
+
+	  return sourceTabs.filter((tab, index) => {
+	    var element = sourceTabEls[index];
+	    return element && hasTopOffset(element);
 	  });
 	}
 
@@ -30601,7 +29827,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this.toggleSourcesDropdown = this.toggleSourcesDropdown.bind(this);
 	    this.renderDropdownSource = this.renderDropdownSource.bind(this);
 	    this.renderTabs = this.renderTabs.bind(this);
-	    this.renderTab = this.renderTab.bind(this);
+	    this.renderSourceTab = this.renderSourceTab.bind(this);
+	    this.renderSearchTab = this.renderSearchTab.bind(this);
 	    this.renderNewButton = this.renderNewButton.bind(this);
 	    this.renderDropDown = this.renderDropdown.bind(this);
 	    this.renderStartPanelToggleButton = this.renderStartPanelToggleButton.bind(this);
@@ -30713,7 +29940,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    };
 
 	    var copySourceUrl = {
-	      id: "node-menu-close-tabs-to-right",
+	      id: "node-menu-copy-source-url",
 	      label: copyLinkLabel,
 	      accesskey: copyLinkKey,
 	      disabled: false,
@@ -30752,13 +29979,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var _props2 = this.props,
 	        selectedSource = _props2.selectedSource,
 	        sourceTabs = _props2.sourceTabs,
-	        selectSource = _props2.selectSource;
+	        moveTab = _props2.moveTab;
 
 	    var sourceTabEls = this.refs.sourceTabs.children;
 	    var hiddenSourceTabs = getHiddenTabs(sourceTabs, sourceTabEls);
 
-	    if (hiddenSourceTabs.indexOf(selectedSource) !== -1) {
-	      return selectSource(selectedSource.get("id"), { tabIndex: 0 });
+	    if ((0, _ui.isVisible)() && hiddenSourceTabs.indexOf(selectedSource) !== -1) {
+	      return moveTab(selectedSource.get("url"), 0);
 	    }
 
 	    this.setState({ hiddenSourceTabs });
@@ -30771,7 +29998,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  renderDropdownSource(source) {
-	    var selectSource = this.props.selectSource;
+	    var moveTab = this.props.moveTab;
 
 	    var filename = (0, _source.getFilename)(source.toJS());
 
@@ -30780,28 +30007,69 @@ return /******/ (function(modules) { // webpackBootstrap
 	      onClick: () => {
 	        // const tabIndex = getLastVisibleTabIndex(sourceTabs, sourceTabEls);
 	        var tabIndex = 0;
-	        selectSource(source.get("id"), { tabIndex });
+	        moveTab(source.get("url"), tabIndex);
 	      }
 	    }, filename);
 	  }
 
 	  renderTabs() {
 	    var sourceTabs = this.props.sourceTabs;
+
 	    if (!sourceTabs) {
 	      return;
 	    }
 
-	    return _react.DOM.div({ className: "source-tabs", ref: "sourceTabs" }, sourceTabs.map(this.renderTab));
+	    return _react.DOM.div({ className: "source-tabs", ref: "sourceTabs" }, sourceTabs.map(this.renderSourceTab));
 	  }
 
-	  renderTab(source) {
+	  isProjectSearchEnabled() {
+	    return this.props.activeSearch === "project";
+	  }
+
+	  isSourceSearchEnabled() {
+	    return this.props.activeSearch === "source";
+	  }
+
+	  renderSearchTab(source) {
 	    var _props3 = this.props,
-	        selectedSource = _props3.selectedSource,
-	        selectSource = _props3.selectSource,
-	        closeTab = _props3.closeTab;
+	        closeTab = _props3.closeTab,
+	        closeActiveSearch = _props3.closeActiveSearch,
+	        setActiveSearch = _props3.setActiveSearch;
+
+
+	    function tabName(tab) {
+	      return `${tab} search results`;
+	    }
+
+	    function onClickClose(ev) {
+	      ev.stopPropagation();
+	      closeActiveSearch();
+	      closeTab(source);
+	    }
+	    return _react.DOM.div({
+	      className: (0, _classnames2.default)("source-tab", {
+	        active: this.isProjectSearchEnabled() || this.isSourceSearchEnabled(),
+	        pretty: false
+	      }),
+	      key: source,
+	      onClick: () => setActiveSearch(source),
+	      onContextMenu: e => this.onTabContextMenu(e, source),
+	      title: tabName(source)
+	    }, _react.DOM.div({ className: "filename" }, tabName(source)), (0, _Close2.default)({
+	      handleClick: onClickClose,
+	      tooltip: L10N.getStr("sourceTabs.closeTabButtonTooltip")
+	    }));
+	  }
+
+	  renderSourceTab(source) {
+	    var _props4 = this.props,
+	        selectedSource = _props4.selectedSource,
+	        selectSource = _props4.selectSource,
+	        closeTab = _props4.closeTab,
+	        closeActiveSearch = _props4.closeActiveSearch;
 
 	    var filename = (0, _source.getFilename)(source.toJS());
-	    var active = selectedSource && source.get("id") == selectedSource.get("id");
+	    var active = selectedSource && source.get("id") == selectedSource.get("id") && !this.isProjectSearchEnabled() && !this.isSourceSearchEnabled();
 	    var isPrettyCode = (0, _source.isPretty)(source.toJS());
 	    var sourceAnnotation = this.getSourceAnnotation(source);
 
@@ -30816,7 +30084,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	        pretty: isPrettyCode
 	      }),
 	      key: source.get("id"),
-	      onClick: () => selectSource(source.get("id")),
+	      onClick: () => {
+	        closeActiveSearch();
+	        return selectSource(source.get("id"));
+	      },
 	      onContextMenu: e => this.onTabContextMenu(e, source.get("id")),
 	      title: (0, _source.getFilename)(source.toJS())
 	    }, sourceAnnotation, _react.DOM.div({ className: "filename" }, filename), (0, _Close2.default)({
@@ -30829,7 +30100,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var newTabTooltip = L10N.getFormatStr("sourceTabs.newTabButtonTooltip", (0, _text.formatKeyShortcut)(L10N.getStr("sources.search.key2")));
 	    return _react.DOM.div({
 	      className: "new-tab-btn",
-	      onClick: () => this.props.toggleProjectSearch(),
+	      onClick: () => {
+	        if (this.props.searchOn) {
+	          return this.props.closeActiveSearch();
+	        }
+	        this.props.setActiveSearch("source");
+	      },
 	      title: newTabTooltip
 	    }, (0, _Svg2.default)("plus"));
 	  }
@@ -30884,11 +30160,13 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	SourceTabs.displayName = "SourceTabs";
 
-	module.exports = (0, _reactRedux.connect)(state => {
+	exports.default = (0, _reactRedux.connect)(state => {
 	  return {
 	    selectedSource: (0, _selectors.getSelectedSource)(state),
+	    searchTabs: (0, _selectors.getSearchTabs)(state),
 	    sourceTabs: (0, _selectors.getSourcesForTabs)(state),
-	    searchOn: (0, _selectors.getProjectSearchState)(state)
+	    activeSearch: (0, _selectors.getActiveSearchState)(state),
+	    searchOn: (0, _selectors.getActiveSearchState)(state) === "source"
 	  };
 	}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(SourceTabs);
 
@@ -31070,26 +30348,25 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.clearSymbols = exports.getOutOfScopeLocations = exports.getVariablesInScope = exports.getSymbols = exports.getClosestExpression = exports.stopParserWorker = exports.startParserWorker = undefined;
+
 	var _devtoolsUtils = __webpack_require__(900);
 
 	var WorkerDispatcher = _devtoolsUtils.workerUtils.WorkerDispatcher;
 
 
 	var dispatcher = new WorkerDispatcher();
+	var startParserWorker = exports.startParserWorker = dispatcher.start.bind(dispatcher);
+	var stopParserWorker = exports.stopParserWorker = dispatcher.stop.bind(dispatcher);
 
-	var getClosestExpression = dispatcher.task("getClosestExpression");
-	var getSymbols = dispatcher.task("getSymbols");
-	var getVariablesInScope = dispatcher.task("getVariablesInScope");
-	var getOutOfScopeLocations = dispatcher.task("getOutOfScopeLocations");
-
-	module.exports = {
-	  getSymbols,
-	  getVariablesInScope,
-	  getOutOfScopeLocations,
-	  getClosestExpression,
-	  startParserWorker: dispatcher.start.bind(dispatcher),
-	  stopParserWorker: dispatcher.stop.bind(dispatcher)
-	};
+	var getClosestExpression = exports.getClosestExpression = dispatcher.task("getClosestExpression");
+	var getSymbols = exports.getSymbols = dispatcher.task("getSymbols");
+	var getVariablesInScope = exports.getVariablesInScope = dispatcher.task("getVariablesInScope");
+	var getOutOfScopeLocations = exports.getOutOfScopeLocations = dispatcher.task("getOutOfScopeLocations");
+	var clearSymbols = exports.clearSymbols = dispatcher.task("clearSymbols");
 
 /***/ },
 /* 828 */
@@ -31203,6 +30480,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	var Menu = __webpack_require__(967);
 	var MenuItem = __webpack_require__(970);
@@ -31803,14 +31084,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var tabs = yield client.connectClient();
 
 	    if (!tabs) {
-	      return;
+	      return undefined;
 	    }
 
 	    var tab = tabs.find(function (t) {
 	      return t.id.indexOf(connTarget.param) !== -1;
 	    });
 	    if (!tab) {
-	      return;
+	      return undefined;
 	    }
 
 	    var tabConnection = yield client.connectTab(tab.tab);
@@ -31826,6 +31107,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	})();
 
 	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	var firefox = __webpack_require__(886);
 	var chrome = __webpack_require__(887);
@@ -31890,7 +31175,9 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	    var tabTarget = yield lookupTabTarget(tab);
 
-	    var _ref3 = yield tabTarget.activeTab.attachThread({}),
+	    var _ref3 = yield tabTarget.activeTab.attachThread({
+	      ignoreFrameEnvironment: true
+	    }),
 	        _ref4 = _slicedToArray(_ref3, 2),
 	        threadClient = _ref4[1];
 
@@ -31906,7 +31193,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	var getTabs = (() => {
 	  var _ref5 = _asyncToGenerator(function* () {
 	    if (!debuggerClient || !debuggerClient.mainRoot) {
-	      return;
+	      return undefined;
 	    }
 
 	    var response = yield debuggerClient.listTabs();
@@ -31919,6 +31206,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	})();
 
 	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	var _require = __webpack_require__(976),
 	    DebuggerClient = _require.DebuggerClient,
@@ -31948,7 +31239,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  });
 	}
 
-	function initPage() {}
+	function initPage(options) {}
 
 	module.exports = {
 	  connectClient,
@@ -32002,7 +31293,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        host: getValue("node.host")
 	      });
 	    } catch (e) {
-	      return;
+	      return undefined;
 	    }
 
 	    return createTabs(tabs, {
@@ -32045,6 +31336,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	})();
 
 	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	var CDP = __webpack_require__(126);
 
@@ -32119,6 +31414,11 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.onConnect = undefined;
+
 	var onConnect = (() => {
 	  var _ref = _asyncToGenerator(function* (connection, services) {
 	    // NOTE: the landing page does not connect to a JS process
@@ -32129,12 +31429,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var client = getClient(connection);
 	    var commands = client.clientCommands;
 
-	    var _bootstrapStore = bootstrapStore(commands, services),
+	    var _bootstrapStore = (0, _bootstrap.bootstrapStore)(commands, services),
 	        store = _bootstrapStore.store,
 	        actions = _bootstrapStore.actions,
 	        selectors = _bootstrapStore.selectors;
 
-	    bootstrapWorkers();
+	    (0, _bootstrap.bootstrapWorkers)();
 	    yield client.onConnect(connection, actions);
 	    yield loadFromPrefs(actions);
 
@@ -32144,11 +31444,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	        actions,
 	        selectors,
 	        client: client.clientCommands,
+	        prefs: _prefs.prefs,
 	        connection
 	      };
 	    };
 
-	    if (!isFirefoxPanel()) {
+	    if (!(0, _devtoolsConfig.isFirefoxPanel)()) {
 	      console.group("Developement Notes");
 	      var baseUrl = "https://devtools-html.github.io/debugger.html";
 	      var localDevelopmentUrl = `${baseUrl}/docs/local-development.html`;
@@ -32157,7 +31458,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      console.groupEnd();
 	    }
 
-	    bootstrapApp(connection, { store, actions });
+	    (0, _bootstrap.bootstrapApp)(connection, { store, actions });
 
 	    return { store, actions, selectors, client: commands };
 	  });
@@ -32167,25 +31468,27 @@ return /******/ (function(modules) { // webpackBootstrap
 	  };
 	})();
 
+	var _firefox = __webpack_require__(889);
+
+	var firefox = _interopRequireWildcard(_firefox);
+
+	var _chrome = __webpack_require__(893);
+
+	var chrome = _interopRequireWildcard(_chrome);
+
+	var _prefs = __webpack_require__(226);
+
+	var _devtoolsConfig = __webpack_require__(828);
+
+	var _bootstrap = __webpack_require__(897);
+
+	function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
+
 	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
-	var firefox = __webpack_require__(889);
-	var chrome = __webpack_require__(893);
-
-	var _require = __webpack_require__(226),
-	    prefs = _require.prefs;
-
-	var _require2 = __webpack_require__(828),
-	    isFirefoxPanel = _require2.isFirefoxPanel;
-
-	var _require3 = __webpack_require__(897),
-	    bootstrapApp = _require3.bootstrapApp,
-	    bootstrapStore = _require3.bootstrapStore,
-	    bootstrapWorkers = _require3.bootstrapWorkers;
-
 	function loadFromPrefs(actions) {
-	  var pauseOnExceptions = prefs.pauseOnExceptions,
-	      ignoreCaughtExceptions = prefs.ignoreCaughtExceptions;
+	  var pauseOnExceptions = _prefs.prefs.pauseOnExceptions,
+	      ignoreCaughtExceptions = _prefs.prefs.ignoreCaughtExceptions;
 
 	  if (pauseOnExceptions || ignoreCaughtExceptions) {
 	    return actions.pauseOnExceptions(pauseOnExceptions, ignoreCaughtExceptions);
@@ -32198,7 +31501,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return clientType == "firefox" ? firefox : chrome;
 	}
 
-	module.exports = { onConnect };
+	exports.onConnect = onConnect;
 
 /***/ },
 /* 889 */
@@ -32209,6 +31512,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	Object.defineProperty(exports, "__esModule", {
 	  value: true
 	});
+	exports.clientEvents = exports.clientCommands = exports.onConnect = undefined;
 
 	var onConnect = exports.onConnect = (() => {
 	  var _ref = _asyncToGenerator(function* (connection, actions) {
@@ -32222,10 +31526,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	      return;
 	    }
 
-	    setupCommands({ threadClient, tabTarget, debuggerClient });
+	    (0, _commands.setupCommands)({ threadClient, tabTarget, debuggerClient });
 
 	    if (actions) {
-	      setupEvents({ threadClient, actions });
+	      (0, _events.setupEvents)({ threadClient, actions });
 	    }
 
 	    tabTarget.on("will-navigate", actions.willNavigate);
@@ -32239,14 +31543,15 @@ return /******/ (function(modules) { // webpackBootstrap
 	    // the debugger (if it's paused already, or if loading the page from
 	    // bfcache) so explicity fire `newSource` events for all returned
 	    // sources.
-	    var sources = yield clientCommands.fetchSources();
+	    var sources = yield _commands.clientCommands.fetchSources();
+	    actions.connect(tabTarget.url);
 	    yield actions.newSources(sources);
 
 	    // If the threadClient is already paused, make sure to show a
 	    // paused state.
 	    var pausedPacket = threadClient.getLastPausePacket();
 	    if (pausedPacket) {
-	      clientEvents.paused("paused", pausedPacket);
+	      _events.clientEvents.paused("paused", pausedPacket);
 	    }
 	  });
 
@@ -32255,18 +31560,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	  };
 	})();
 
+	var _commands = __webpack_require__(890);
+
+	var _events = __webpack_require__(892);
+
 	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
-	var _require = __webpack_require__(890),
-	    setupCommands = _require.setupCommands,
-	    clientCommands = _require.clientCommands;
-
-	var _require2 = __webpack_require__(892),
-	    setupEvents = _require2.setupEvents,
-	    clientEvents = _require2.clientEvents;
-
-	exports.clientCommands = clientCommands;
-	exports.clientEvents = clientEvents;
+	exports.clientCommands = _commands.clientCommands;
+	exports.clientEvents = _events.clientEvents;
 
 /***/ },
 /* 890 */
@@ -32274,8 +31575,29 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.clientCommands = exports.setupCommands = undefined;
+
+	var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = []; var _n = true; var _d = false; var _e = undefined; try { for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"]) _i["return"](); } finally { if (_d) throw _e; } } return _arr; } return function (arr, i) { if (Array.isArray(arr)) { return arr; } else if (Symbol.iterator in Object(arr)) { return sliceIterator(arr, i); } else { throw new TypeError("Invalid attempt to destructure non-iterable instance"); } }; }();
+
+	var getFrameScopes = (() => {
+	  var _ref4 = _asyncToGenerator(function* (frame) {
+	    if (frame.scope) {
+	      return frame.scope;
+	    }
+
+	    return threadClient.getEnvironment(frame.id);
+	  });
+
+	  return function getFrameScopes(_x) {
+	    return _ref4.apply(this, arguments);
+	  };
+	})();
+
 	var blackBox = (() => {
-	  var _ref2 = _asyncToGenerator(function* (sourceId, isBlackBoxed) {
+	  var _ref5 = _asyncToGenerator(function* (sourceId, isBlackBoxed) {
 	    var sourceClient = threadClient.source({ actor: sourceId });
 	    if (isBlackBoxed) {
 	      yield sourceClient.unblackBox();
@@ -32286,28 +31608,29 @@ return /******/ (function(modules) { // webpackBootstrap
 	    return { isBlackBoxed: !isBlackBoxed };
 	  });
 
-	  return function blackBox(_x, _x2) {
-	    return _ref2.apply(this, arguments);
+	  return function blackBox(_x2, _x3) {
+	    return _ref5.apply(this, arguments);
 	  };
 	})();
 
 	var fetchSources = (() => {
-	  var _ref3 = _asyncToGenerator(function* () {
-	    var _ref4 = yield threadClient.getSources(),
-	        sources = _ref4.sources;
+	  var _ref6 = _asyncToGenerator(function* () {
+	    var _ref7 = yield threadClient.getSources(),
+	        sources = _ref7.sources;
 
-	    return sources.map(createSource);
+	    return sources.map(_create.createSource);
 	  });
 
 	  return function fetchSources() {
-	    return _ref3.apply(this, arguments);
+	    return _ref6.apply(this, arguments);
 	  };
 	})();
 
-	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+	var _breakpoint = __webpack_require__(1057);
 
-	var _require = __webpack_require__(891),
-	    createSource = _require.createSource;
+	var _create = __webpack_require__(891);
+
+	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
 	var bpClients = void 0;
 	var threadClient = void 0;
@@ -32354,6 +31677,32 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return sourceClient.source();
 	}
 
+	function getBreakpointByLocation(location) {
+	  var id = (0, _breakpoint.makeLocationId)(location);
+	  var bpClient = bpClients[id];
+
+	  if (bpClient) {
+	    var _bpClient$location = bpClient.location,
+	        actor = _bpClient$location.actor,
+	        url = _bpClient$location.url,
+	        line = _bpClient$location.line,
+	        column = _bpClient$location.column,
+	        condition = _bpClient$location.condition;
+
+	    return {
+	      id: bpClient.actor,
+	      condition,
+	      actualLocation: {
+	        line,
+	        column,
+	        sourceId: actor,
+	        sourceUrl: url
+	      }
+	    };
+	  }
+	  return null;
+	}
+
 	function setBreakpoint(location, condition, noSliding) {
 	  var sourceClient = threadClient.source({ actor: location.sourceId });
 
@@ -32362,35 +31711,31 @@ return /******/ (function(modules) { // webpackBootstrap
 	    column: location.column,
 	    condition,
 	    noSliding
-	  }).then(res => onNewBreakpoint(location, res));
+	  }).then((_ref) => {
+	    var _ref2 = _slicedToArray(_ref, 2),
+	        actualLocation = _ref2[0].actualLocation,
+	        bpClient = _ref2[1];
+
+	    actualLocation = (0, _create.createBreakpointLocation)(location, actualLocation);
+	    var id = (0, _breakpoint.makeLocationId)(actualLocation);
+	    bpClients[id] = bpClient;
+	    bpClient.location.line = actualLocation.line;
+	    bpClient.location.column = actualLocation.column;
+	    bpClient.location.url = actualLocation.sourceUrl || "";
+
+	    return { id, actualLocation };
+	  });
 	}
 
-	function onNewBreakpoint(location, res) {
-	  var bpClient = res[1];
-	  var actualLocation = res[0].actualLocation;
-
-	  bpClients[bpClient.actor] = bpClient;
-
-	  // Firefox only returns `actualLocation` if it actually changed,
-	  // but we want it always to exist. Format `actualLocation` if it
-	  // exists, otherwise use `location`.
-	  actualLocation = actualLocation ? {
-	    sourceId: actualLocation.source.actor,
-	    sourceUrl: location.sourceUrl,
-	    line: actualLocation.line,
-	    column: actualLocation.column
-	  } : location;
-
-	  return {
-	    id: bpClient.actor,
-	    actualLocation
-	  };
-	}
-
-	function removeBreakpoint(breakpointId) {
+	function removeBreakpoint(breakpoint) {
 	  try {
-	    var bpClient = bpClients[breakpointId];
-	    delete bpClients[breakpointId];
+	    var id = (0, _breakpoint.makeLocationId)(breakpoint.generatedLocation);
+	    var bpClient = bpClients[id];
+	    if (!bpClient) {
+	      console.warn("No breakpoint to delete on server");
+	      return;
+	    }
+	    delete bpClients[id];
 	    return bpClient.remove();
 	  } catch (_error) {
 	    console.warn("No breakpoint to delete on server");
@@ -32401,13 +31746,20 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var bpClient = bpClients[breakpointId];
 	  delete bpClients[breakpointId];
 
-	  return bpClient.setCondition(threadClient, condition, noSliding).then(_bpClient => onNewBreakpoint(location, [{}, _bpClient]));
+	  return bpClient.setCondition(threadClient, condition, noSliding).then(_bpClient => {
+	    bpClients[breakpointId] = _bpClient;
+	    return { id: breakpointId };
+	  });
 	}
 
-	function evaluate(script, _ref) {
-	  var frameId = _ref.frameId;
+	function evaluate(script, _ref3) {
+	  var frameId = _ref3.frameId;
 
 	  var params = frameId ? { frameActor: frameId } : {};
+	  if (!tabTarget || !tabTarget.activeConsole) {
+	    return Promise.resolve();
+	  }
+
 	  return new Promise(resolve => {
 	    tabTarget.activeConsole.evaluateJS(script, result => resolve(result), params);
 	  });
@@ -32492,6 +31844,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  stepOver,
 	  breakOnNext,
 	  sourceContents,
+	  getBreakpointByLocation,
 	  setBreakpoint,
 	  removeBreakpoint,
 	  setBreakpointCondition,
@@ -32500,22 +31853,29 @@ return /******/ (function(modules) { // webpackBootstrap
 	  navigate,
 	  reload,
 	  getProperties,
+	  getFrameScopes,
 	  pauseOnExceptions,
 	  prettyPrint,
 	  disablePrettyPrint,
 	  fetchSources
 	};
 
-	module.exports = {
-	  setupCommands,
-	  clientCommands
-	};
+	exports.setupCommands = setupCommands;
+	exports.clientCommands = clientCommands;
 
 /***/ },
 /* 891 */
 /***/ function(module, exports) {
 
 	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.createFrame = createFrame;
+	exports.createSource = createSource;
+	exports.createPause = createPause;
+	exports.createBreakpointLocation = createBreakpointLocation;
 
 	// This module converts Firefox specific types to the generic types
 
@@ -32561,17 +31921,33 @@ return /******/ (function(modules) { // webpackBootstrap
 	  });
 	}
 
-	module.exports = {
-	  createFrame,
-	  createSource,
-	  createPause
-	};
+	// Firefox only returns `actualLocation` if it actually changed,
+	// but we want it always to exist. Format `actualLocation` if it
+	// exists, otherwise use `location`.
+
+	function createBreakpointLocation(location, actualLocation) {
+	  if (!actualLocation) {
+	    return location;
+	  }
+
+	  return {
+	    sourceId: actualLocation.source.actor,
+	    sourceUrl: actualLocation.source.url,
+	    line: actualLocation.line,
+	    column: actualLocation.column
+	  };
+	}
 
 /***/ },
 /* 892 */
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.clientEvents = exports.setupEvents = undefined;
 
 	var paused = (() => {
 	  var _ref = _asyncToGenerator(function* (_, packet) {
@@ -32588,7 +31964,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var response = yield threadClient.getFrames(0, CALL_STACK_PAGE_SIZE);
 
 	    if (why.type != "alreadyPaused") {
-	      var pause = createPause(packet, response);
+	      var pause = (0, _create.createPause)(packet, response);
 	      actions.paused(pause);
 	    }
 	  });
@@ -32598,14 +31974,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	  };
 	})();
 
+	var _create = __webpack_require__(891);
+
+	var _devtoolsConfig = __webpack_require__(828);
+
 	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
-
-	var _require = __webpack_require__(891),
-	    createPause = _require.createPause,
-	    createSource = _require.createSource;
-
-	var _require2 = __webpack_require__(828),
-	    isEnabled = _require2.isEnabled;
 
 	var CALL_STACK_PAGE_SIZE = 1000;
 
@@ -32630,9 +32003,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	function newSource(_, _ref2) {
 	  var source = _ref2.source;
 
-	  actions.newSource(createSource(source));
+	  actions.newSource((0, _create.createSource)(source));
 
-	  if (isEnabled("eventListeners")) {
+	  if ((0, _devtoolsConfig.isEnabled)("eventListeners")) {
 	    actions.fetchEventListeners();
 	  }
 	}
@@ -32643,10 +32016,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	  newSource
 	};
 
-	module.exports = {
-	  setupEvents,
-	  clientEvents
-	};
+	exports.setupEvents = setupEvents;
+	exports.clientEvents = clientEvents;
 
 /***/ },
 /* 893 */
@@ -32657,6 +32028,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	Object.defineProperty(exports, "__esModule", {
 	  value: true
 	});
+	exports.clientEvents = exports.clientCommands = exports.onConnect = undefined;
 
 	var onConnect = exports.onConnect = (() => {
 	  var _ref = _asyncToGenerator(function* (connection, actions) {
@@ -32672,18 +32044,18 @@ return /******/ (function(modules) { // webpackBootstrap
 	    Debugger.setAsyncCallStackDepth({ maxDepth: 0 });
 
 	    if (type == "chrome") {
-	      Page.frameNavigated(pageEvents.frameNavigated);
-	      Page.frameStartedLoading(pageEvents.frameStartedLoading);
-	      Page.frameStoppedLoading(pageEvents.frameStoppedLoading);
+	      Page.frameNavigated(_events.pageEvents.frameNavigated);
+	      Page.frameStartedLoading(_events.pageEvents.frameStartedLoading);
+	      Page.frameStoppedLoading(_events.pageEvents.frameStoppedLoading);
 	    }
 
-	    Debugger.scriptParsed(clientEvents.scriptParsed);
-	    Debugger.scriptFailedToParse(clientEvents.scriptFailedToParse);
-	    Debugger.paused(clientEvents.paused);
-	    Debugger.resumed(clientEvents.resumed);
+	    Debugger.scriptParsed(_events.clientEvents.scriptParsed);
+	    Debugger.scriptFailedToParse(_events.clientEvents.scriptFailedToParse);
+	    Debugger.paused(_events.clientEvents.paused);
+	    Debugger.resumed(_events.clientEvents.resumed);
 
-	    setupCommands({ Debugger, Runtime, Page });
-	    setupEvents({ actions, Page, type, Runtime });
+	    (0, _commands.setupCommands)({ Debugger, Runtime, Page });
+	    (0, _events.setupEvents)({ actions, Page, type, Runtime });
 	  });
 
 	  return function onConnect(_x, _x2) {
@@ -32691,19 +32063,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	  };
 	})();
 
+	var _commands = __webpack_require__(894);
+
+	var _events = __webpack_require__(896);
+
 	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
-	var _require = __webpack_require__(894),
-	    setupCommands = _require.setupCommands,
-	    clientCommands = _require.clientCommands;
-
-	var _require2 = __webpack_require__(896),
-	    setupEvents = _require2.setupEvents,
-	    clientEvents = _require2.clientEvents,
-	    pageEvents = _require2.pageEvents;
-
-	exports.clientCommands = clientCommands;
-	exports.clientEvents = clientEvents;
+	exports.clientCommands = _commands.clientCommands;
+	exports.clientEvents = _events.clientEvents;
 
 /***/ },
 /* 894 */
@@ -32711,16 +32078,21 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.clientCommands = exports.setupCommands = undefined;
+
 	var setBreakpoint = (() => {
 	  var _ref3 = _asyncToGenerator(function* (location, condition) {
 	    var _ref4 = yield debuggerAgent.setBreakpoint({
-	      location: toServerLocation(location),
+	      location: (0, _create.toServerLocation)(location),
 	      columnNumber: location.column
 	    }),
 	        breakpointId = _ref4.breakpointId,
 	        serverLocation = _ref4.serverLocation;
 
-	    var actualLocation = fromServerLocation(serverLocation) || location;
+	    var actualLocation = (0, _create.fromServerLocation)(serverLocation) || location;
 
 	    return {
 	      id: breakpointId,
@@ -32740,7 +32112,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }),
 	        result = _ref6.result;
 
-	    var loadedObjects = result.map(createLoadedObject);
+	    var loadedObjects = result.map(_create.createLoadedObject);
 
 	    return { loadedObjects };
 	  });
@@ -32750,12 +32122,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  };
 	})();
 
-	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+	var _create = __webpack_require__(895);
 
-	var _require = __webpack_require__(895),
-	    toServerLocation = _require.toServerLocation,
-	    fromServerLocation = _require.fromServerLocation,
-	    createLoadedObject = _require.createLoadedObject;
+	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
 	var debuggerAgent = void 0;
 	var runtimeAgent = void 0;
@@ -32842,10 +32211,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	  getProperties
 	};
 
-	module.exports = {
-	  setupCommands,
-	  clientCommands
-	};
+	exports.setupCommands = setupCommands;
+	exports.clientCommands = clientCommands;
 
 /***/ },
 /* 895 */
@@ -32853,12 +32220,20 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.fromServerLocation = fromServerLocation;
+	exports.toServerLocation = toServerLocation;
+	exports.createFrame = createFrame;
+	exports.createLoadedObject = createLoadedObject;
 	function fromServerLocation(serverLocation) {
 	  if (serverLocation) {
 	    return {
 	      sourceId: serverLocation.scriptId,
 	      line: serverLocation.lineNumber + 1,
-	      column: serverLocation.columnNumber
+	      column: serverLocation.columnNumber,
+	      sourceUrl: ""
 	    };
 	  }
 	}
@@ -32892,18 +32267,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	  };
 	}
 
-	module.exports = {
-	  fromServerLocation,
-	  toServerLocation,
-	  createFrame,
-	  createLoadedObject
-	};
-
 /***/ },
 /* 896 */
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.clientEvents = exports.pageEvents = exports.setupEvents = undefined;
 
 	var paused = (() => {
 	  var _ref2 = _asyncToGenerator(function* (_ref3) {
@@ -32913,7 +32286,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        hitBreakpoints = _ref3.hitBreakpoints,
 	        asyncStackTrace = _ref3.asyncStackTrace;
 
-	    var frames = callFrames.map(createFrame);
+	    var frames = callFrames.map(_create.createFrame);
 	    var frame = frames[0];
 	    var why = Object.assign({}, {
 	      type: reason
@@ -32926,7 +32299,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }),
 	        result = _ref4.result;
 
-	    var loadedObjects = result.map(createLoadedObject);
+	    var loadedObjects = result.map(_create.createLoadedObject);
 
 	    if (clientType == "chrome") {
 	      pageAgent.configureOverlay({ message: "Paused in debugger.html" });
@@ -32940,11 +32313,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  };
 	})();
 
-	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+	var _create = __webpack_require__(895);
 
-	var _require = __webpack_require__(895),
-	    createFrame = _require.createFrame,
-	    createLoadedObject = _require.createLoadedObject;
+	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
 	var actions = void 0;
 	var pageAgent = void 0;
@@ -33034,11 +32405,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  frameStoppedLoading
 	};
 
-	module.exports = {
-	  setupEvents,
-	  pageEvents,
-	  clientEvents
-	};
+	exports.setupEvents = setupEvents;
+	exports.pageEvents = pageEvents;
+	exports.clientEvents = clientEvents;
 
 /***/ },
 /* 897 */
@@ -33070,6 +32439,8 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _devtoolsSourceMap = __webpack_require__(898);
 
+	var _search = __webpack_require__(1115);
+
 	var _prettyPrint = __webpack_require__(903);
 
 	var _parser = __webpack_require__(827);
@@ -33090,6 +32461,8 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _App2 = _interopRequireDefault(_App);
 
+	var _prefs = __webpack_require__(226);
+
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 	function bootstrapStore(client, services) {
@@ -33102,6 +32475,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	  });
 
 	  var store = createStore((0, _redux.combineReducers)(_reducers2.default));
+	  store.subscribe(() => updatePrefs(store.getState()));
+
 	  var actions = (0, _redux.bindActionCreators)(__webpack_require__(244).default, store.dispatch);
 
 	  return { store, actions, selectors: _selectors2.default };
@@ -33130,6 +32505,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 	  (0, _prettyPrint.startPrettyPrintWorker)((0, _devtoolsConfig.getValue)("workers.prettyPrintURL"));
 	  (0, _parser.startParserWorker)((0, _devtoolsConfig.getValue)("workers.parserURL"));
+	  (0, _search.startSearchWorker)((0, _devtoolsConfig.getValue)("workers.searchURL"));
 	}
 
 	function teardownWorkers() {
@@ -33139,11 +32515,24 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 	  (0, _prettyPrint.stopPrettyPrintWorker)();
 	  (0, _parser.stopParserWorker)();
+	  (0, _search.stopSearchWorker)();
+	}
+
+	function updatePrefs(state) {
+	  var pendingBreakpoints = _selectors2.default.getPendingBreakpoints(state);
+
+	  if (_prefs.prefs.pendingBreakpoints !== pendingBreakpoints) {
+	    _prefs.prefs.pendingBreakpoints = pendingBreakpoints;
+	  }
 	}
 
 /***/ },
 /* 898 */
 /***/ function(module, exports, __webpack_require__) {
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	const {
 	  originalToGeneratedId,
@@ -33183,6 +32572,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ },
 /* 899 */
 /***/ function(module, exports, __webpack_require__) {
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	const md5 = __webpack_require__(248);
 
@@ -33260,6 +32653,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /* 900 */
 /***/ function(module, exports, __webpack_require__) {
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	const networkRequest = __webpack_require__(901);
 	const workerUtils = __webpack_require__(902);
 
@@ -33272,6 +32669,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /* 901 */
 /***/ function(module, exports) {
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	function networkRequest(url, opts) {
 	  return new Promise((resolve, reject) => {
 	    const req = new XMLHttpRequest();
@@ -33281,7 +32682,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        if (req.status === 200) {
 	          resolve({ content: req.responseText });
 	        } else {
-	          resolve(req.statusText);
+	          reject(req.statusText);
 	        }
 	      }
 	    });
@@ -33311,7 +32712,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	function WorkerDispatcher() {
 	  this.msgId = 1;
 	  this.worker = null;
-	}
+	} /* This Source Code Form is subject to the terms of the Mozilla Public
+	   * License, v. 2.0. If a copy of the MPL was not distributed with this
+	   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	WorkerDispatcher.prototype = {
 	  start(url) {
@@ -33378,13 +32781,17 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
-	var prettyPrint = (() => {
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.prettyPrint = exports.stopPrettyPrintWorker = exports.startPrettyPrintWorker = undefined;
+
+	var prettyPrint = exports.prettyPrint = (() => {
 	  var _ref = _asyncToGenerator(function* (_ref2) {
 	    var source = _ref2.source,
-	        sourceText = _ref2.sourceText,
 	        url = _ref2.url;
 
-	    var contentType = sourceText ? sourceText.contentType : "";
+	    var contentType = source.contentType;
 	    var indent = 2;
 
 	    (0, _assert2.default)((0, _source.isJavaScript)(source.url, contentType), "Can't prettify non-javascript files.");
@@ -33392,7 +32799,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    return yield _prettyPrint({
 	      url,
 	      indent,
-	      source: sourceText ? sourceText.text : undefined
+	      source: source.text
 	    });
 	  });
 
@@ -33417,17 +32824,13 @@ return /******/ (function(modules) { // webpackBootstrap
 
 
 	var dispatcher = new WorkerDispatcher();
+	var startPrettyPrintWorker = exports.startPrettyPrintWorker = dispatcher.start.bind(dispatcher);
+	var stopPrettyPrintWorker = exports.stopPrettyPrintWorker = dispatcher.stop.bind(dispatcher);
 	var _prettyPrint = dispatcher.task("prettyPrint");
-
-	module.exports = {
-	  prettyPrint,
-	  startPrettyPrintWorker: dispatcher.start.bind(dispatcher),
-	  stopPrettyPrintWorker: dispatcher.stop.bind(dispatcher)
-	};
 
 /***/ },
 /* 904 */
-/***/ function(module, exports) {
+/***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
 
@@ -33435,21 +32838,66 @@ return /******/ (function(modules) { // webpackBootstrap
 	  value: true
 	});
 	exports.getTokenLocation = getTokenLocation;
-	function getTokenLocation(codeMirror, tokenEl) {
-	  var lineOffset = 1;
+	exports.updateSelection = updateSelection;
 
+	var _isEqual = __webpack_require__(1127);
+
+	var _isEqual2 = _interopRequireDefault(_isEqual);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	function getTokenLocation(codeMirror, tokenEl) {
 	  var _tokenEl$getBoundingC = tokenEl.getBoundingClientRect(),
 	      left = _tokenEl$getBoundingC.left,
-	      top = _tokenEl$getBoundingC.top;
+	      top = _tokenEl$getBoundingC.top,
+	      width = _tokenEl$getBoundingC.width,
+	      height = _tokenEl$getBoundingC.height;
 
-	  var _codeMirror$coordsCha = codeMirror.coordsChar({ left, top }),
+	  var _codeMirror$coordsCha = codeMirror.coordsChar({
+	    left: left + width / 2,
+	    top: top + height / 2
+	  }),
 	      line = _codeMirror$coordsCha.line,
 	      ch = _codeMirror$coordsCha.ch;
 
 	  return {
-	    line: line + lineOffset,
+	    line: line + 1,
 	    column: ch
 	  };
+	}
+
+	function updateSelection(target, editor, _ref) {
+	  var linesInScope = _ref.linesInScope,
+	      selection = _ref.selection,
+	      setSelection = _ref.setSelection,
+	      clearSelection = _ref.clearSelection;
+
+	  var location = getTokenLocation(editor.codeMirror, target);
+	  var tokenText = target.innerText ? target.innerText.trim() : "";
+	  var cursorPos = target.getBoundingClientRect();
+
+	  if (selection) {
+	    // We are mousing over the same token as before
+	    if ((0, _isEqual2.default)(selection.tokenPos, location)) {
+	      return;
+	    }
+
+	    // We are mousing over a new token that is not in the selection
+	    if (!target.classList.contains("debug-expression")) {
+	      clearSelection();
+	    }
+	  }
+
+	  var invalidToken = tokenText === "" || tokenText.match(/[(){},.;\s]/);
+	  var invalidTarget = target.parentElement && !target.parentElement.closest(".CodeMirror-line") || cursorPos.top == 0;
+	  var isUpdating = selection && selection.updating;
+	  var inScope = linesInScope && linesInScope.includes(location.line);
+
+	  if (invalidTarget || !inScope || isUpdating || invalidToken) {
+	    return;
+	  }
+
+	  setSelection(tokenText, location, cursorPos);
 	}
 
 /***/ },
@@ -33805,113 +33253,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	module.exports = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1792 1792\"><path d=\"M1395 736q0 13-10 23l-466 466q-10 10-23 10t-23-10l-466-466q-10-10-10-23t10-23l50-50q10-10 23-10t23 10l393 393 393-393q10-10 23-10t23 10l50 50q10 10 10 23z\" fill=\"#696969\"></path></svg>"
 
 /***/ },
-/* 921 */
-/***/ function(module, exports, __webpack_require__) {
-
-	"use strict";
-
-	Object.defineProperty(exports, "__esModule", {
-	  value: true
-	});
-
-	var _react = __webpack_require__(2);
-
-	var _redux = __webpack_require__(3);
-
-	var _reactRedux = __webpack_require__(151);
-
-	var _classnames = __webpack_require__(175);
-
-	var _classnames2 = _interopRequireDefault(_classnames);
-
-	var _actions = __webpack_require__(244);
-
-	var _actions2 = _interopRequireDefault(_actions);
-
-	var _selectors = __webpack_require__(242);
-
-	var _devtoolsConfig = __webpack_require__(828);
-
-	__webpack_require__(922);
-
-	var _previewFunction = __webpack_require__(701);
-
-	var _previewFunction2 = _interopRequireDefault(_previewFunction);
-
-	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-	class Outline extends _react.Component {
-
-	  constructor(props) {
-	    super(props);
-	    this.state = {};
-	  }
-
-	  selectItem(location) {
-	    var _props = this.props,
-	        selectedSource = _props.selectedSource,
-	        selectSource = _props.selectSource;
-
-	    if (!selectedSource) {
-	      return;
-	    }
-	    var selectedSourceId = selectedSource.get("id");
-	    var startLine = location.start.line;
-	    selectSource(selectedSourceId, { line: startLine });
-	  }
-
-	  renderFunction(func) {
-	    var name = func.name,
-	        location = func.location;
-
-
-	    return _react.DOM.li({
-	      key: `${name}:${location.start.line}:${location.start.column}`,
-	      className: "outline-list__element",
-	      onClick: () => this.selectItem(location)
-	    }, (0, _previewFunction2.default)({ name }));
-	  }
-
-	  renderFunctions() {
-	    var symbols = this.props.symbols;
-
-
-	    return symbols.functions.filter(func => func.name != "anonymous").map(func => this.renderFunction(func));
-	  }
-
-	  render() {
-	    var isHidden = this.props.isHidden;
-
-	    if (!(0, _devtoolsConfig.isEnabled)("outline")) {
-	      return null;
-	    }
-
-	    return _react.DOM.div({ className: (0, _classnames2.default)("outline", { hidden: isHidden }) }, _react.DOM.ul({ className: "outline-list" }, this.renderFunctions()));
-	  }
-	}
-
-	Outline.displayName = "Outline";
-
-	exports.default = (0, _reactRedux.connect)(state => {
-	  var selectedSource = (0, _selectors.getSelectedSource)(state);
-	  return {
-	    symbols: (0, _selectors.getSymbols)(state, selectedSource && selectedSource.toJS()),
-	    selectedSource
-	  };
-	}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Outline);
-
-/***/ },
-/* 922 */
-/***/ function(module, exports) {
-
-	// removed by extract-text-webpack-plugin
-
-/***/ },
+/* 921 */,
+/* 922 */,
 /* 923 */,
 /* 924 */
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	var _require = __webpack_require__(925),
 	    MODE = _require.MODE;
@@ -33920,11 +33272,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	    REPS = _require2.REPS,
 	    getRep = _require2.getRep;
 
+	var ObjectInspector = __webpack_require__(1154);
+
 	var _require3 = __webpack_require__(927),
-	    createFactories = _require3.createFactories,
 	    parseURLEncodedText = _require3.parseURLEncodedText,
 	    parseURLParams = _require3.parseURLParams,
-	    getSelectableInInspectorGrips = _require3.getSelectableInInspectorGrips,
 	    maybeEscapePropertyName = _require3.maybeEscapePropertyName,
 	    getGripPreviewItems = _require3.getGripPreviewItems;
 
@@ -33932,12 +33284,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	  REPS,
 	  getRep,
 	  MODE,
-	  createFactories,
 	  maybeEscapePropertyName,
 	  parseURLEncodedText,
 	  parseURLParams,
-	  getSelectableInInspectorGrips,
-	  getGripPreviewItems
+	  getGripPreviewItems,
+	  ObjectInspector
 	};
 
 /***/ },
@@ -33945,6 +33296,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	module.exports = {
 	  MODE: {
@@ -33959,6 +33314,12 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+	__webpack_require__(1149);
 
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip;
@@ -34012,7 +33373,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var object = props.object,
 	      defaultRep = props.defaultRep;
 
-	  var rep = getRep(object, defaultRep);
+	  var rep = getRep(object, defaultRep, props.noGrip);
 	  return rep(props);
 	};
 
@@ -34028,14 +33389,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	 *
 	 * @param defaultObject {React.Component} The default template
 	 * that should be used to render given object if none is found.
+	 *
+	 * @param noGrip {Boolean} If true, will only check reps not made for remote objects.
 	 */
 	function getRep(object) {
 	  var defaultRep = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : Obj;
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
 
 	  var type = typeof object;
 	  if (type == "object" && object instanceof String) {
 	    type = "string";
-	  } else if (object && type == "object" && object.type) {
+	  } else if (object && type == "object" && object.type && noGrip !== true) {
 	    type = object.type;
 	  }
 
@@ -34049,7 +33413,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      // supportsObject could return weight (not only true/false
 	      // but a number), which would allow to priorities templates and
 	      // support better extensibility.
-	      if (rep.supportsObject(object, type)) {
+	      if (rep.supportsObject(object, type, noGrip)) {
 	        return rep.rep;
 	      }
 	    } catch (err) {
@@ -34105,24 +33469,12 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// Dependencies
 	var React = __webpack_require__(2);
-
-	// Utils
-	var nodeConstants = __webpack_require__(928);
-
-	/**
-	 * Create React factories for given arguments.
-	 * Example:
-	 *   const { Rep } = createFactories(require("./rep"));
-	 */
-	function createFactories(args) {
-	  var result = {};
-	  for (var p in args) {
-	    result[p] = React.createFactory(args[p]);
-	  }
-	  return result;
-	}
 
 	/**
 	 * Returns true if the given object is a grip (see RDP protocol)
@@ -34382,44 +33734,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 	/**
-	 * Get an array of all the items from the grip in parameter (including the grip itself)
-	 * which can be selected in the inspector.
-	 *
-	 * @param {Object} Grip
-	 * @return {Array} Flat array of the grips which can be selected in the inspector
-	 */
-	function getSelectableInInspectorGrips(grip) {
-	  var grips = new Set(getFlattenedGrips([grip]));
-	  return [].concat(_toConsumableArray(grips)).filter(isGripSelectableInInspector);
-	}
-
-	/**
-	 * Indicate if a Grip can be selected in the inspector,
-	 * i.e. if it represents a node element.
-	 *
-	 * @param {Object} Grip
-	 * @return {Boolean}
-	 */
-	function isGripSelectableInInspector(grip) {
-	  return grip && typeof grip === "object" && grip.preview && [nodeConstants.TEXT_NODE, nodeConstants.ELEMENT_NODE].includes(grip.preview.nodeType);
-	}
-
-	/**
-	 * Get a flat array of all the grips and their preview items.
-	 *
-	 * @param {Array} Grips
-	 * @return {Array} Flat array of the grips and their preview items
-	 */
-	function getFlattenedGrips(grips) {
-	  return grips.reduce((res, grip) => {
-	    var previewItems = getGripPreviewItems(grip);
-	    var flatPreviewItems = previewItems.length > 0 ? getFlattenedGrips(previewItems) : [];
-
-	    return [].concat(_toConsumableArray(res), [grip], _toConsumableArray(flatPreviewItems));
-	  }, []);
-	}
-
-	/**
 	 * Get preview items from a Grip.
 	 *
 	 * @param {Object} Grip from which we want the preview items
@@ -34481,42 +33795,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return [];
 	}
 
-	/**
-	 * Returns a new element wrapped with a component, props.objectLink if it exists,
-	 * or a span if there are multiple children, or directly the child if only one is passed.
-	 *
-	 * @param {Object} props A Rep "props" object that may contain `objectLink`
-	 *                 and `object` properties.
-	 * @param {Object} config Object to pass as props to the `objectLink` component.
-	 * @param {...Element} children Elements to be wrapped with the `objectLink` component.
-	 * @return {Element} Element, wrapped or not, depending if `objectLink`
-	 *                   was supplied in props.
-	 */
-	function safeObjectLink(props, config) {
-	  var _React$DOM;
-
-	  var objectLink = props.objectLink,
-	      object = props.object;
-
-	  for (var _len = arguments.length, children = Array(_len > 2 ? _len - 2 : 0), _key = 2; _key < _len; _key++) {
-	    children[_key - 2] = arguments[_key];
-	  }
-
-	  if (objectLink) {
-	    return objectLink.apply(undefined, [Object.assign({
-	      object
-	    }, config)].concat(children));
-	  }
-
-	  if ((!config || Object.keys(config).length === 0) && children.length === 1) {
-	    return children[0];
-	  }
-
-	  return (_React$DOM = React.DOM).span.apply(_React$DOM, [config].concat(children));
-	}
-
 	module.exports = {
-	  createFactories,
 	  isGrip,
 	  cropString,
 	  rawCropString,
@@ -34528,9 +33807,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  parseURLEncodedText,
 	  getFileName,
 	  getURLDisplayString,
-	  getSelectableInInspectorGrips,
 	  maybeEscapePropertyName,
-	  safeObjectLink,
 	  getGripPreviewItems
 	};
 
@@ -34539,6 +33816,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	module.exports = {
 	  ELEMENT_NODE: 1,
@@ -34569,6 +33850,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// Dependencies
 	var React = __webpack_require__(2);
 
@@ -34589,11 +33874,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	};
 
 	function supportsObject(object, type) {
-	  if (object && object.type && object.type == "undefined") {
-	    return true;
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true) {
+	    return false;
 	  }
 
-	  return type == "undefined";
+	  return object && object.type && object.type == "undefined" || type == "undefined";
 	}
 
 	// Exports from this module
@@ -34608,6 +33895,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	// Dependencies
 	var React = __webpack_require__(2);
@@ -34629,6 +33920,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 	function supportsObject(object, type) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true) {
+	    return false;
+	  }
+
 	  if (object && object.type && object.type == "null") {
 	    return true;
 	  }
@@ -34648,6 +33945,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	// Dependencies
 	var React = __webpack_require__(2);
@@ -34722,6 +34023,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// Dependencies
 	var React = __webpack_require__(2);
 
@@ -34762,7 +34067,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	      length = object.length;
 
 
-	  var config = { className: "objectBox objectBox-string" };
+	  var config = {
+	    "data-link-actor-id": object.actor,
+	    className: "objectBox objectBox-string"
+	  };
+
 	  if (style) {
 	    config.style = style;
 	  }
@@ -34777,7 +34086,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 	function supportsObject(object, type) {
-	  if (!isGrip(object)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(object)) {
 	    return false;
 	  }
 	  return object.type === "longString";
@@ -34794,6 +34105,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	// Dependencies
 	var React = __webpack_require__(2);
@@ -34845,11 +34160,14 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// Dependencies
 	var React = __webpack_require__(2);
 
 	var _require = __webpack_require__(927),
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	var Caption = __webpack_require__(935);
@@ -34870,7 +34188,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 	ArrayRep.propTypes = {
 	  mode: ModePropType,
-	  objectLink: React.PropTypes.func,
 	  object: React.PropTypes.array.isRequired
 	};
 
@@ -34891,18 +34208,15 @@ return /******/ (function(modules) { // webpackBootstrap
 	    items = [DOM.span({ className: "length" }, isEmpty ? "" : object.length)];
 	    brackets = needSpace(false);
 	  } else {
-	    var max = mode === MODE.SHORT ? 3 : 10;
-	    items = arrayIterator(props, object, max);
+	    items = arrayIterator(props, object, maxLengthMap.get(mode));
 	    brackets = needSpace(items.length > 0);
 	  }
 
 	  return DOM.span.apply(DOM, [{
-	    className: "objectBox objectBox-array" }, safeObjectLink(props, {
-	    className: "arrayLeftBracket",
-	    object: object
-	  }, brackets.left)].concat(_toConsumableArray(items), [safeObjectLink(props, {
-	    className: "arrayRightBracket",
-	    object: object
+	    className: "objectBox objectBox-array" }, DOM.span({
+	    className: "arrayLeftBracket"
+	  }, brackets.left)].concat(_toConsumableArray(items), [DOM.span({
+	    className: "arrayRightBracket"
 	  }, brackets.right), DOM.span({
 	    className: "arrayProperties",
 	    role: "group" })]));
@@ -34935,9 +34249,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  if (array.length > max) {
 	    items.push(Caption({
-	      object: safeObjectLink(props, {
-	        object: props.object
-	      }, array.length - max + " more…")
+	      object: DOM.span({}, "more…")
 	    }));
 	  }
 
@@ -34968,10 +34280,15 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return Array.isArray(object) || Object.prototype.toString.call(object) === "[object Arguments]";
 	}
 
+	var maxLengthMap = new Map();
+	maxLengthMap.set(MODE.SHORT, 3);
+	maxLengthMap.set(MODE.LONG, 10);
+
 	// Exports from this module
 	module.exports = {
 	  rep: wrapRender(ArrayRep),
-	  supportsObject
+	  supportsObject,
+	  maxLengthMap
 	};
 
 /***/ },
@@ -34979,6 +34296,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	// Dependencies
 	var React = __webpack_require__(2);
@@ -35012,11 +34333,14 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// Dependencies
 	var React = __webpack_require__(2);
 
 	var _require = __webpack_require__(927),
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	var Caption = __webpack_require__(935);
@@ -35037,7 +34361,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  object: React.PropTypes.object.isRequired,
 	  // @TODO Change this to Object.values once it's supported in Node's version of V8
 	  mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-	  objectLink: React.PropTypes.func,
 	  title: React.PropTypes.string
 	};
 
@@ -35049,16 +34372,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	    return span({ className: "objectBox objectBox-object" }, getTitle(props, object));
 	  }
 
-	  return span.apply(undefined, [{ className: "objectBox objectBox-object" }, getTitle(props, object), safeObjectLink(props, {
+	  return span.apply(undefined, [{ className: "objectBox objectBox-object" }, getTitle(props, object), span({
 	    className: "objectLeftBrace"
-	  }, " { ")].concat(_toConsumableArray(propsArray), [safeObjectLink(props, {
+	  }, " { ")].concat(_toConsumableArray(propsArray), [span({
 	    className: "objectRightBrace"
 	  }, " }")]));
 	}
 
 	function getTitle(props, object) {
 	  var title = props.title || object.class || "Object";
-	  return safeObjectLink(props, { className: "objectTitle" }, title);
+	  return span({ className: "objectTitle" }, title);
 	}
 
 	function safePropIterator(props, object, max) {
@@ -35093,25 +34416,39 @@ return /******/ (function(modules) { // webpackBootstrap
 	    interestingObject = Object.assign({}, interestingObject, getFilteredObject(object, max - Object.keys(interestingObject).length, (type, value) => !isInterestingProp(type, value)));
 	  }
 
-	  var truncated = Object.keys(object).length > max;
-	  var propsArray = getPropsArray(interestingObject, truncated);
-	  if (truncated) {
+	  var propsArray = getPropsArray(interestingObject);
+	  if (Object.keys(object).length > max) {
 	    propsArray.push(Caption({
-	      object: safeObjectLink(props, {}, Object.keys(object).length - max + " more…")
+	      object: span({}, "more…")
 	    }));
 	  }
 
-	  return propsArray;
+	  return unfoldProps(propsArray);
+	}
+
+	function unfoldProps(items) {
+	  return items.reduce((res, item, index) => {
+	    if (Array.isArray(item)) {
+	      res = res.concat(item);
+	    } else {
+	      res.push(item);
+	    }
+
+	    // Interleave commas between elements
+	    if (index !== items.length - 1) {
+	      res.push(", ");
+	    }
+	    return res;
+	  }, []);
 	}
 
 	/**
 	 * Get an array of components representing the properties of the object
 	 *
 	 * @param {Object} object
-	 * @param {Boolean} truncated true if the object is truncated.
 	 * @return {Array} Array of PropRep.
 	 */
-	function getPropsArray(object, truncated) {
+	function getPropsArray(object) {
 	  var propsArray = [];
 
 	  if (!object) {
@@ -35125,8 +34462,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    mode,
 	    name,
 	    object: object[name],
-	    equal: ": ",
-	    delim: i !== objectKeys.length - 1 || truncated ? ", " : null
+	    equal: ": "
 	  }));
 	}
 
@@ -35181,6 +34517,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// Dependencies
 	var React = __webpack_require__(2);
 
@@ -35206,11 +34546,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	  name: React.PropTypes.oneOfType([React.PropTypes.string, React.PropTypes.object]).isRequired,
 	  // Equal character rendered between property name and value.
 	  equal: React.PropTypes.string,
-	  // Delimiter character used to separate individual properties.
-	  delim: React.PropTypes.string,
 	  // @TODO Change this to Object.values once it's supported in Node's version of V8
 	  mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-	  objectLink: React.PropTypes.func,
 	  onDOMNodeMouseOver: React.PropTypes.func,
 	  onDOMNodeMouseOut: React.PropTypes.func,
 	  onInspectIconClick: React.PropTypes.func,
@@ -35220,6 +34557,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	  suppressQuotes: React.PropTypes.bool
 	};
 
+	/**
+	 * Function that given a name, a delimiter and an object returns an array
+	 * of React elements representing an object property (e.g. `name: value`)
+	 *
+	 * @param {Object} props
+	 * @return {Array} Array of React elements.
+	 */
 	function PropRep(props) {
 	  var Grip = __webpack_require__(938);
 
@@ -35229,7 +34573,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var name = props.name,
 	      mode = props.mode,
 	      equal = props.equal,
-	      delim = props.delim,
 	      suppressQuotes = props.suppressQuotes;
 
 
@@ -35249,16 +34592,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }));
 	  }
 
-	  var delimElement = void 0;
-	  if (delim) {
-	    delimElement = span({
-	      "className": "objectComma"
-	    }, delim);
-	  }
-
-	  return span({}, key, span({
+	  return [key, span({
 	    "className": "objectEqual"
-	  }, equal), Rep(Object.assign({}, props)), delimElement);
+	  }, equal), Rep(Object.assign({}, props))];
 	}
 
 	// Exports from this module
@@ -35272,13 +34608,16 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// ReactJS
 	var React = __webpack_require__(2);
 	// Dependencies
 
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	var Caption = __webpack_require__(935);
@@ -35303,34 +34642,45 @@ return /******/ (function(modules) { // webpackBootstrap
 	  mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
 	  isInterestingProp: React.PropTypes.func,
 	  title: React.PropTypes.string,
-	  objectLink: React.PropTypes.func,
 	  onDOMNodeMouseOver: React.PropTypes.func,
 	  onDOMNodeMouseOut: React.PropTypes.func,
-	  onInspectIconClick: React.PropTypes.func
+	  onInspectIconClick: React.PropTypes.func,
+	  noGrip: React.PropTypes.bool
 	};
 
 	function GripRep(props) {
-	  var object = props.object;
-	  var propsArray = safePropIterator(props, object, props.mode === MODE.LONG ? 10 : 3);
+	  var _props$mode = props.mode,
+	      mode = _props$mode === undefined ? MODE.SHORT : _props$mode,
+	      object = props.object;
 
-	  if (props.mode === MODE.TINY) {
-	    return span({ className: "objectBox objectBox-object" }, getTitle(props, object));
+
+	  var config = {
+	    "data-link-actor-id": object.actor,
+	    className: "objectBox objectBox-object"
+	  };
+
+	  if (mode === MODE.TINY) {
+	    return span(config, getTitle(props, object));
 	  }
 
-	  return span.apply(undefined, [{ className: "objectBox objectBox-object" }, getTitle(props, object), safeObjectLink(props, {
+	  var propsArray = safePropIterator(props, object, maxLengthMap.get(mode));
+
+	  return span.apply(undefined, [config, getTitle(props, object), span({
 	    className: "objectLeftBrace"
-	  }, " { ")].concat(_toConsumableArray(propsArray), [safeObjectLink(props, {
+	  }, " { ")].concat(_toConsumableArray(propsArray), [span({
 	    className: "objectRightBrace"
 	  }, " }")]));
 	}
 
 	function getTitle(props, object) {
 	  var title = props.title || object.class || "Object";
-	  return safeObjectLink(props, {}, title);
+	  return span({
+	    className: "objectTitle"
+	  }, title);
 	}
 
 	function safePropIterator(props, object, max) {
-	  max = typeof max === "undefined" ? 3 : max;
+	  max = typeof max === "undefined" ? maxLengthMap.get(MODE.SHORT) : max;
 	  try {
 	    return propIterator(props, object, max);
 	  } catch (err) {
@@ -35372,21 +34722,36 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }));
 	  }
 
-	  var truncate = Object.keys(properties).length > max;
 	  // The server synthesizes some property names for a Proxy, like
 	  // <target> and <handler>; we don't want to quote these because,
 	  // as synthetic properties, they appear more natural when
 	  // unquoted.
 	  var suppressQuotes = object.class === "Proxy";
-	  var propsArray = getProps(props, properties, indexes, truncate, suppressQuotes);
-	  if (truncate) {
+	  var propsArray = getProps(props, properties, indexes, suppressQuotes);
+	  if (Object.keys(properties).length > max || propertiesLength > max) {
 	    // There are some undisplayed props. Then display "more...".
 	    propsArray.push(Caption({
-	      object: safeObjectLink(props, {}, `${propertiesLength - max} more…`)
+	      object: span({}, "more…")
 	    }));
 	  }
 
-	  return propsArray;
+	  return unfoldProps(propsArray);
+	}
+
+	function unfoldProps(items) {
+	  return items.reduce((res, item, index) => {
+	    if (Array.isArray(item)) {
+	      res = res.concat(item);
+	    } else {
+	      res.push(item);
+	    }
+
+	    // Interleave commas between elements
+	    if (index !== items.length - 1) {
+	      res.push(", ");
+	    }
+	    return res;
+	  }, []);
 	}
 
 	/**
@@ -35395,12 +34760,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @param {Object} componentProps Grip Component props.
 	 * @param {Object} properties Properties of the object the Grip describes.
 	 * @param {Array} indexes Indexes of properties.
-	 * @param {Boolean} truncate true if the grip will be truncated.
 	 * @param {Boolean} suppressQuotes true if we should suppress quotes
 	 *                  on property names.
 	 * @return {Array} Props.
 	 */
-	function getProps(componentProps, properties, indexes, truncate, suppressQuotes) {
+	function getProps(componentProps, properties, indexes, suppressQuotes) {
 	  // Make indexes ordered by ascending.
 	  indexes.sort(function (a, b) {
 	    return a - b;
@@ -35416,11 +34780,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	      name,
 	      object: value,
 	      equal: ": ",
-	      delim: i !== indexes.length - 1 || truncate ? ", " : null,
 	      defaultRep: Grip,
-	      // Do not propagate title and objectLink to properties reps
 	      title: null,
-	      objectLink: null,
 	      suppressQuotes
 	    }));
 	  });
@@ -35482,16 +34843,23 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	// Registration
 	function supportsObject(object, type) {
-	  if (!isGrip(object)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(object)) {
 	    return false;
 	  }
 	  return object.preview && object.preview.ownProperties;
 	}
 
+	var maxLengthMap = new Map();
+	maxLengthMap.set(MODE.SHORT, 3);
+	maxLengthMap.set(MODE.LONG, 10);
+
 	// Grip is used in propIterator and has to be defined here.
 	var Grip = {
 	  rep: wrapRender(GripRep),
-	  supportsObject
+	  supportsObject,
+	  maxLengthMap
 	};
 
 	// Exports from this module
@@ -35502,6 +34870,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	// Dependencies
 	var React = __webpack_require__(2);
@@ -35546,6 +34918,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// Dependencies
 	var React = __webpack_require__(2);
 
@@ -35566,7 +34942,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	};
 
 	function InfinityRep(props) {
-	  return span({ className: "objectBox objectBox-number" }, props.object.type);
+	  var object = props.object;
+
+
+	  return span({ className: "objectBox objectBox-number" }, object.type);
 	}
 
 	function supportsObject(object, type) {
@@ -35584,6 +34963,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	// Dependencies
 	var React = __webpack_require__(2);
@@ -35620,6 +35003,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// ReactJS
 	var React = __webpack_require__(2);
 
@@ -35627,7 +35014,6 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	var _require2 = __webpack_require__(931),
@@ -35643,8 +35029,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 
 	Attribute.propTypes = {
-	  object: React.PropTypes.object.isRequired,
-	  objectLink: React.PropTypes.func
+	  object: React.PropTypes.object.isRequired
 	};
 
 	function Attribute(props) {
@@ -35652,7 +35037,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  var value = object.preview.value;
 
-	  return safeObjectLink(props, { className: "objectLink-Attr" }, span({ className: "attrTitle" }, getTitle(object)), span({ className: "attrEqual" }, "="), StringRep({ object: value }));
+	  return span({
+	    "data-link-actor-id": object.actor,
+	    className: "objectLink-Attr"
+	  }, span({ className: "attrTitle" }, getTitle(object)), span({ className: "attrEqual" }, "="), StringRep({ object: value }));
 	}
 
 	function getTitle(grip) {
@@ -35661,7 +35049,9 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	// Registration
 	function supportsObject(grip, type) {
-	  if (!isGrip(grip)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(grip)) {
 	    return false;
 	  }
 
@@ -35679,6 +35069,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// ReactJS
 	var React = __webpack_require__(2);
 
@@ -35686,7 +35080,6 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	// Shortcuts
@@ -35699,15 +35092,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 
 	DateTime.propTypes = {
-	  object: React.PropTypes.object.isRequired,
-	  objectLink: React.PropTypes.func
+	  object: React.PropTypes.object.isRequired
 	};
 
 	function DateTime(props) {
 	  var grip = props.object;
 	  var date = void 0;
 	  try {
-	    date = span({ className: "objectBox" }, getTitle(props, grip), span({ className: "Date" }, new Date(grip.preview.timestamp).toISOString()));
+	    date = span({
+	      "data-link-actor-id": grip.actor,
+	      className: "objectBox"
+	    }, getTitle(grip), span({ className: "Date" }, new Date(grip.preview.timestamp).toISOString()));
 	  } catch (e) {
 	    date = span({ className: "objectBox" }, "Invalid Date");
 	  }
@@ -35715,13 +35110,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return date;
 	}
 
-	function getTitle(props, grip) {
-	  return safeObjectLink(props, {}, grip.class + " ");
+	function getTitle(grip) {
+	  return span({
+	    className: "objectTitle"
+	  }, grip.class + " ");
 	}
 
 	// Registration
 	function supportsObject(grip, type) {
-	  if (!isGrip(grip)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(grip)) {
 	    return false;
 	  }
 
@@ -35740,6 +35139,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// ReactJS
 	var React = __webpack_require__(2);
 
@@ -35748,7 +35151,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
 	    getURLDisplayString = _require.getURLDisplayString,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	// Shortcuts
@@ -35761,14 +35163,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 
 	Document.propTypes = {
-	  object: React.PropTypes.object.isRequired,
-	  objectLink: React.PropTypes.func
+	  object: React.PropTypes.object.isRequired
 	};
 
 	function Document(props) {
 	  var grip = props.object;
 
-	  return span({ className: "objectBox objectBox-object" }, getTitle(props, grip), span({ className: "objectPropValue" }, getLocation(grip)));
+	  return span({
+	    "data-link-actor-id": grip.actor,
+	    className: "objectBox objectBox-object"
+	  }, getTitle(grip), span({ className: "objectPropValue" }, getLocation(grip)));
 	}
 
 	function getLocation(grip) {
@@ -35776,13 +35180,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return location ? getURLDisplayString(location) : "";
 	}
 
-	function getTitle(props, grip) {
-	  return safeObjectLink(props, {}, grip.class + " ");
+	function getTitle(grip) {
+	  return span({
+	    className: "objectTitle"
+	  }, grip.class + " ");
 	}
 
 	// Registration
 	function supportsObject(object, type) {
-	  if (!isGrip(object)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(object)) {
 	    return false;
 	  }
 
@@ -35800,6 +35208,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	// ReactJS
 	var React = __webpack_require__(2);
@@ -35823,7 +35235,6 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	Event.propTypes = {
 	  object: React.PropTypes.object.isRequired,
-	  objectLink: React.PropTypes.func,
 	  // @TODO Change this to Object.values once it's supported in Node's version of V8
 	  mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
 	  onDOMNodeMouseOver: React.PropTypes.func,
@@ -35890,7 +35301,9 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	// Registration
 	function supportsObject(grip, type) {
-	  if (!isGrip(grip)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(grip)) {
 	    return false;
 	  }
 
@@ -35909,6 +35322,12 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// ReactJS
 	var React = __webpack_require__(2);
 
@@ -35917,7 +35336,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
 	    cropString = _require.cropString,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	// Shortcuts
@@ -35931,17 +35349,19 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	FunctionRep.propTypes = {
 	  object: React.PropTypes.object.isRequired,
-	  objectLink: React.PropTypes.func
+	  parameterNames: React.PropTypes.array
 	};
 
 	function FunctionRep(props) {
 	  var grip = props.object;
 
-	  return (
+	  return span.apply(undefined, [{
+	    "data-link-actor-id": grip.actor,
+	    className: "objectBox objectBox-function",
 	    // Set dir="ltr" to prevent function parentheses from
 	    // appearing in the wrong direction
-	    span({ dir: "ltr", className: "objectBox objectBox-function" }, getTitle(props, grip), summarizeFunction(grip))
-	  );
+	    dir: "ltr"
+	  }, getTitle(props, grip), summarizeFunction(grip), "("].concat(_toConsumableArray(renderParams(props)), [")"]));
 	}
 
 	function getTitle(props, grip) {
@@ -35953,17 +35373,35 @@ return /******/ (function(modules) { // webpackBootstrap
 	    title = "async " + title;
 	  }
 
-	  return safeObjectLink(props, {}, title);
+	  return span({
+	    className: "objectTitle"
+	  }, title);
 	}
 
 	function summarizeFunction(grip) {
 	  var name = grip.userDisplayName || grip.displayName || grip.name || "";
-	  return cropString(name + "()", 100);
+	  return cropString(name, 100);
+	}
+
+	function renderParams(props) {
+	  var _props$parameterNames = props.parameterNames,
+	      parameterNames = _props$parameterNames === undefined ? [] : _props$parameterNames;
+
+
+	  return parameterNames.filter(param => param).reduce((res, param, index, arr) => {
+	    res.push(span({ className: "param" }, param));
+	    if (index < arr.length - 1) {
+	      res.push(span({ className: "delimiter" }, ", "));
+	    }
+	    return res;
+	  }, []);
 	}
 
 	// Registration
 	function supportsObject(grip, type) {
-	  if (!isGrip(grip)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(grip)) {
 	    return type == "function";
 	  }
 
@@ -35985,13 +35423,16 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// ReactJS
 	var React = __webpack_require__(2);
 	// Dependencies
 
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	var PropRep = __webpack_require__(937);
@@ -36011,7 +35452,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  object: React.PropTypes.object.isRequired,
 	  // @TODO Change this to Object.values once it's supported in Node's version of V8
 	  mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-	  objectLink: React.PropTypes.func,
 	  onDOMNodeMouseOver: React.PropTypes.func,
 	  onDOMNodeMouseOut: React.PropTypes.func,
 	  onInspectIconClick: React.PropTypes.func
@@ -36022,28 +35462,34 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var promiseState = object.promiseState;
 
 
+	  var config = {
+	    "data-link-actor-id": object.actor,
+	    className: "objectBox objectBox-object"
+	  };
+
 	  if (props.mode === MODE.TINY) {
 	    var _require3 = __webpack_require__(926),
 	        Rep = _require3.Rep;
 
-	    return span({ className: "objectBox objectBox-object" }, getTitle(props, object), safeObjectLink(props, {
+	    return span(config, getTitle(object), span({
 	      className: "objectLeftBrace"
-	    }, " { "), Rep({ object: promiseState.state }), safeObjectLink(props, {
+	    }, " { "), Rep({ object: promiseState.state }), span({
 	      className: "objectRightBrace"
 	    }, " }"));
 	  }
 
 	  var propsArray = getProps(props, promiseState);
-	  return span.apply(undefined, [{ className: "objectBox objectBox-object" }, getTitle(props, object), safeObjectLink(props, {
+	  return span.apply(undefined, [config, getTitle(object), span({
 	    className: "objectLeftBrace"
-	  }, " { ")].concat(_toConsumableArray(propsArray), [safeObjectLink(props, {
+	  }, " { ")].concat(_toConsumableArray(propsArray), [span({
 	    className: "objectRightBrace"
 	  }, " }")]));
 	}
 
-	function getTitle(props, object) {
-	  var title = object.class;
-	  return safeObjectLink(props, {}, title);
+	function getTitle(object) {
+	  return span({
+	    className: "objectTitle"
+	  }, object.class);
 	}
 
 	function getProps(props, promiseState) {
@@ -36052,22 +35498,30 @@ return /******/ (function(modules) { // webpackBootstrap
 	    keys.push("value");
 	  }
 
-	  return keys.map((key, i) => {
+	  return keys.reduce((res, key, i) => {
 	    var object = promiseState[key];
-	    return PropRep(Object.assign({}, props, {
+	    res = res.concat(PropRep(Object.assign({}, props, {
 	      mode: MODE.TINY,
 	      name: `<${key}>`,
 	      object,
 	      equal: ": ",
-	      delim: i < keys.length - 1 ? ", " : null,
 	      suppressQuotes: true
-	    }));
-	  });
+	    })));
+
+	    // Interleave commas between elements
+	    if (i !== keys.length - 1) {
+	      res.push(", ");
+	    }
+
+	    return res;
+	  }, []);
 	}
 
 	// Registration
 	function supportsObject(object, type) {
-	  if (!isGrip(object)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(object)) {
 	    return false;
 	  }
 	  return type === "Promise";
@@ -36085,6 +35539,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// ReactJS
 	var React = __webpack_require__(2);
 
@@ -36092,7 +35550,6 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	/**
@@ -36101,15 +35558,15 @@ return /******/ (function(modules) { // webpackBootstrap
 
 
 	RegExp.propTypes = {
-	  object: React.PropTypes.object.isRequired,
-	  objectLink: React.PropTypes.func
+	  object: React.PropTypes.object.isRequired
 	};
 
 	function RegExp(props) {
 	  var object = props.object;
 
 
-	  return safeObjectLink(props, {
+	  return React.DOM.span({
+	    "data-link-actor-id": object.actor,
 	    className: "objectBox objectBox-regexp regexpSource"
 	  }, getSource(object));
 	}
@@ -36120,7 +35577,9 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	// Registration
 	function supportsObject(object, type) {
-	  if (!isGrip(object)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(object)) {
 	    return false;
 	  }
 
@@ -36139,6 +35598,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// ReactJS
 	var React = __webpack_require__(2);
 
@@ -36147,7 +35610,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
 	    getURLDisplayString = _require.getURLDisplayString,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	// Shortcuts
@@ -36160,19 +35622,21 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 
 	StyleSheet.propTypes = {
-	  object: React.PropTypes.object.isRequired,
-	  objectLink: React.PropTypes.func
+	  object: React.PropTypes.object.isRequired
 	};
 
 	function StyleSheet(props) {
 	  var grip = props.object;
 
-	  return span({ className: "objectBox objectBox-object" }, getTitle(props, grip), span({ className: "objectPropValue" }, getLocation(grip)));
+	  return span({
+	    "data-link-actor-id": grip.actor,
+	    className: "objectBox objectBox-object"
+	  }, getTitle(grip), span({ className: "objectPropValue" }, getLocation(grip)));
 	}
 
-	function getTitle(props, grip) {
+	function getTitle(grip) {
 	  var title = "StyleSheet ";
-	  return safeObjectLink(props, { className: "objectBox" }, title);
+	  return span({ className: "objectBoxTitle" }, title);
 	}
 
 	function getLocation(grip) {
@@ -36183,7 +35647,9 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	// Registration
 	function supportsObject(object, type) {
-	  if (!isGrip(object)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(object)) {
 	    return false;
 	  }
 
@@ -36202,6 +35668,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	// Dependencies
 	var React = __webpack_require__(2);
@@ -36242,12 +35712,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	    textContent = cropString(textContent, 50);
 	  }
 
-	  return span({ className: "objectBox theme-comment" }, `<!-- ${textContent} -->`);
+	  return span({
+	    className: "objectBox theme-comment",
+	    "data-link-actor-id": object.actor
+	  }, `<!-- ${textContent} -->`);
 	}
 
 	// Registration
 	function supportsObject(object, type) {
-	  if (!isGrip(object)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(object)) {
 	    return false;
 	  }
 	  return object.preview && object.preview.nodeType === nodeConstants.COMMENT_NODE;
@@ -36267,6 +35742,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// ReactJS
 	var React = __webpack_require__(2);
 
@@ -36274,14 +35753,13 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	var _require2 = __webpack_require__(925),
 	    MODE = _require2.MODE;
 
 	var nodeConstants = __webpack_require__(928);
-	var Svg = __webpack_require__(952);
+	var Svg = __webpack_require__(1151);
 
 	// Shortcuts
 	var span = React.DOM.span;
@@ -36296,8 +35774,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
 	  onDOMNodeMouseOver: React.PropTypes.func,
 	  onDOMNodeMouseOut: React.PropTypes.func,
-	  onInspectIconClick: React.PropTypes.func,
-	  objectLink: React.PropTypes.func
+	  onInspectIconClick: React.PropTypes.func
 	};
 
 	function ElementNode(props) {
@@ -36311,7 +35788,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  var isInTree = object.preview && object.preview.isConnected === true;
 
-	  var baseConfig = { className: "objectBox objectBox-node" };
+	  var baseConfig = {
+	    "data-link-actor-id": object.actor,
+	    className: "objectBox objectBox-node"
+	  };
 	  var inspectIcon = void 0;
 	  if (isInTree) {
 	    if (onDOMNodeMouseOver) {
@@ -36337,7 +35817,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }
 	  }
 
-	  return span(baseConfig, safeObjectLink.apply(undefined, [props, {}].concat(_toConsumableArray(elements))), inspectIcon);
+	  return span.apply(undefined, [baseConfig].concat(_toConsumableArray(elements), [inspectIcon]));
 	}
 
 	function getElements(grip, mode) {
@@ -36359,18 +35839,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	    }
 	    return elements;
 	  }
-	  var attributeElements = Object.keys(attributes).sort(function getIdAndClassFirst(a1, a2) {
-	    if ([a1, a2].includes("id")) {
-	      return 3 * (a1 === "id" ? -1 : 1);
-	    }
-	    if ([a1, a2].includes("class")) {
-	      return 2 * (a1 === "class" ? -1 : 1);
-	    }
-
-	    // `id` and `class` excepted,
-	    // we want to keep the same order that in `attributes`.
-	    return 0;
-	  }).reduce((arr, name, i, keys) => {
+	  var attributeKeys = Object.keys(attributes);
+	  if (attributeKeys.includes("class")) {
+	    attributeKeys.splice(attributeKeys.indexOf("class"), 1);
+	    attributeKeys.unshift("class");
+	  }
+	  if (attributeKeys.includes("id")) {
+	    attributeKeys.splice(attributeKeys.indexOf("id"), 1);
+	    attributeKeys.unshift("id");
+	  }
+	  var attributeElements = attributeKeys.reduce((arr, name, i, keys) => {
 	    var value = attributes[name];
 	    var attribute = span({}, span({ className: "attr-name theme-fg-color2" }, `${name}`), `="`, span({ className: "attr-value theme-fg-color6" }, `${value}`), `"`);
 
@@ -36382,7 +35860,9 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	// Registration
 	function supportsObject(object, type) {
-	  if (!isGrip(object)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(object)) {
 	    return false;
 	  }
 	  return object.preview && object.preview.nodeType === nodeConstants.ELEMENT_NODE;
@@ -36395,39 +35875,15 @@ return /******/ (function(modules) { // webpackBootstrap
 	};
 
 /***/ },
-/* 952 */
-/***/ function(module, exports, __webpack_require__) {
-
-	"use strict";
-
-	var React = __webpack_require__(2);
-	var InlineSVG = __webpack_require__(346);
-
-	var svg = {
-	  "open-inspector": __webpack_require__(688)
-	};
-
-	module.exports = function (name, props) {
-	  // eslint-disable-line
-	  if (!svg[name]) {
-	    throw new Error("Unknown SVG: " + name);
-	  }
-	  var className = name;
-	  if (props && props.className) {
-	    className = `${name} ${props.className}`;
-	  }
-	  if (name === "subSettings") {
-	    className = "";
-	  }
-	  props = Object.assign({}, props, { className, src: svg[name] });
-	  return React.createElement(InlineSVG, props);
-	};
-
-/***/ },
+/* 952 */,
 /* 953 */
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	// ReactJS
 	var React = __webpack_require__(2);
@@ -36437,13 +35893,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
 	    cropString = _require.cropString,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	var _require2 = __webpack_require__(925),
 	    MODE = _require2.MODE;
 
-	var Svg = __webpack_require__(952);
+	var Svg = __webpack_require__(1151);
 
 	// Shortcuts
 	var DOM = React.DOM;
@@ -36455,7 +35910,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  object: React.PropTypes.object.isRequired,
 	  // @TODO Change this to Object.values once it's supported in Node's version of V8
 	  mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-	  objectLink: React.PropTypes.func,
 	  onDOMNodeMouseOver: React.PropTypes.func,
 	  onDOMNodeMouseOut: React.PropTypes.func,
 	  onInspectIconClick: React.PropTypes.func
@@ -36470,7 +35924,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	      onInspectIconClick = props.onInspectIconClick;
 
 
-	  var baseConfig = { className: "objectBox objectBox-textNode" };
+	  var baseConfig = {
+	    "data-link-actor-id": grip.actor,
+	    className: "objectBox objectBox-textNode"
+	  };
 	  var inspectIcon = void 0;
 	  var isInTree = grip.preview && grip.preview.isConnected === true;
 
@@ -36499,24 +35956,26 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  if (mode === MODE.TINY) {
-	    return DOM.span(baseConfig, getTitle(props, grip), inspectIcon);
+	    return DOM.span(baseConfig, getTitle(grip), inspectIcon);
 	  }
 
-	  return DOM.span(baseConfig, getTitle(props, grip), DOM.span({ className: "nodeValue" }, " ", `"${getTextContent(grip)}"`), inspectIcon);
+	  return DOM.span(baseConfig, getTitle(grip), DOM.span({ className: "nodeValue" }, " ", `"${getTextContent(grip)}"`), inspectIcon);
 	}
 
 	function getTextContent(grip) {
 	  return cropString(grip.preview.textContent);
 	}
 
-	function getTitle(props, grip) {
+	function getTitle(grip) {
 	  var title = "#text";
-	  return safeObjectLink(props, {}, title);
+	  return DOM.span({}, title);
 	}
 
 	// Registration
 	function supportsObject(grip, type) {
-	  if (!isGrip(grip)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(grip)) {
 	    return false;
 	  }
 
@@ -36535,28 +35994,34 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// ReactJS
 	var React = __webpack_require__(2);
 	// Utils
 
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	var _require2 = __webpack_require__(925),
 	    MODE = _require2.MODE;
 
+	// Shortcuts
+
+
+	var span = React.DOM.span;
+
 	/**
 	 * Renders Error objects.
 	 */
 
-
 	ErrorRep.propTypes = {
 	  object: React.PropTypes.object.isRequired,
 	  // @TODO Change this to Object.values once it's supported in Node's version of V8
-	  mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-	  objectLink: React.PropTypes.func
+	  mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key]))
 	};
 
 	function ErrorRep(props) {
@@ -36575,12 +36040,17 @@ return /******/ (function(modules) { // webpackBootstrap
 	    content = `${content}\nStack trace:\n${preview.stack}`;
 	  }
 
-	  return safeObjectLink(props, { className: "objectBox-stackTrace" }, content);
+	  return span({
+	    "data-link-actor-id": object.actor,
+	    className: "objectBox-stackTrace"
+	  }, content);
 	}
 
 	// Registration
 	function supportsObject(object, type) {
-	  if (!isGrip(object)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(object)) {
 	    return false;
 	  }
 	  return object.preview && type === "Error";
@@ -36598,6 +36068,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// ReactJS
 	var React = __webpack_require__(2);
 
@@ -36606,7 +36080,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
 	    getURLDisplayString = _require.getURLDisplayString,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	var _require2 = __webpack_require__(925),
@@ -36624,8 +36097,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	WindowRep.propTypes = {
 	  // @TODO Change this to Object.values once it's supported in Node's version of V8
 	  mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-	  object: React.PropTypes.object.isRequired,
-	  objectLink: React.PropTypes.func
+	  object: React.PropTypes.object.isRequired
 	};
 
 	function WindowRep(props) {
@@ -36633,16 +36105,21 @@ return /******/ (function(modules) { // webpackBootstrap
 	      object = props.object;
 
 
+	  var config = {
+	    "data-link-actor-id": object.actor,
+	    className: "objectBox objectBox-Window"
+	  };
+
 	  if (mode === MODE.TINY) {
-	    return span({ className: "objectBox objectBox-Window" }, getTitle(props, object));
+	    return span(config, getTitle(object));
 	  }
 
-	  return span({ className: "objectBox objectBox-Window" }, getTitle(props, object), " ", span({ className: "objectPropValue" }, getLocation(object)));
+	  return span(config, getTitle(object), " ", span({ className: "objectPropValue" }, getLocation(object)));
 	}
 
-	function getTitle(props, object) {
+	function getTitle(object) {
 	  var title = object.displayClass || object.class || "Window";
-	  return safeObjectLink(props, { className: "objectBox" }, title);
+	  return span({ className: "objectBoxTitle" }, title);
 	}
 
 	function getLocation(object) {
@@ -36651,7 +36128,9 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	// Registration
 	function supportsObject(object, type) {
-	  if (!isGrip(object)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(object)) {
 	    return false;
 	  }
 
@@ -36669,6 +36148,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	// ReactJS
 	var React = __webpack_require__(2);
@@ -36689,22 +36172,15 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 
 	ObjectWithText.propTypes = {
-	  object: React.PropTypes.object.isRequired,
-	  objectLink: React.PropTypes.func
+	  object: React.PropTypes.object.isRequired
 	};
 
 	function ObjectWithText(props) {
 	  var grip = props.object;
-	  return span({ className: "objectBox objectBox-" + getType(grip) }, getTitle(props, grip), span({ className: "objectPropValue" }, getDescription(grip)));
-	}
-
-	function getTitle(props, grip) {
-	  if (props.objectLink) {
-	    return span({ className: "objectBox" }, props.objectLink({
-	      object: grip
-	    }, getType(grip) + " "));
-	  }
-	  return "";
+	  return span({
+	    "data-link-actor-id": grip.actor,
+	    className: "objectBox objectBox-" + getType(grip)
+	  }, span({ className: "objectPropValue" }, getDescription(grip)));
 	}
 
 	function getType(grip) {
@@ -36717,7 +36193,9 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	// Registration
 	function supportsObject(grip, type) {
-	  if (!isGrip(grip)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(grip)) {
 	    return false;
 	  }
 
@@ -36736,6 +36214,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// ReactJS
 	var React = __webpack_require__(2);
 
@@ -36744,7 +36226,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
 	    getURLDisplayString = _require.getURLDisplayString,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	// Shortcuts
@@ -36757,17 +36238,19 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 
 	ObjectWithURL.propTypes = {
-	  object: React.PropTypes.object.isRequired,
-	  objectLink: React.PropTypes.func
+	  object: React.PropTypes.object.isRequired
 	};
 
 	function ObjectWithURL(props) {
 	  var grip = props.object;
-	  return span({ className: "objectBox objectBox-" + getType(grip) }, getTitle(props, grip), span({ className: "objectPropValue" }, getDescription(grip)));
+	  return span({
+	    "data-link-actor-id": grip.actor,
+	    className: "objectBox objectBox-" + getType(grip)
+	  }, getTitle(grip), span({ className: "objectPropValue" }, getDescription(grip)));
 	}
 
-	function getTitle(props, grip) {
-	  return safeObjectLink(props, { className: "objectBox" }, getType(grip) + " ");
+	function getTitle(grip) {
+	  return span({ className: "objectTitle" }, getType(grip) + " ");
 	}
 
 	function getType(grip) {
@@ -36780,7 +36263,9 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	// Registration
 	function supportsObject(grip, type) {
-	  if (!isGrip(grip)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(grip)) {
 	    return false;
 	  }
 
@@ -36801,12 +36286,15 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// Dependencies
 	var React = __webpack_require__(2);
 
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	var Caption = __webpack_require__(935);
@@ -36829,7 +36317,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  // @TODO Change this to Object.values once it's supported in Node's version of V8
 	  mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
 	  provider: React.PropTypes.object,
-	  objectLink: React.PropTypes.func,
 	  onDOMNodeMouseOver: React.PropTypes.func,
 	  onDOMNodeMouseOut: React.PropTypes.func,
 	  onInspectIconClick: React.PropTypes.func
@@ -36850,10 +36337,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	  if (mode === MODE.TINY) {
 	    var objectLength = getLength(object);
 	    var isEmpty = objectLength === 0;
-	    items = [span({ className: "length" }, isEmpty ? "" : objectLength)];
+	    items = [span({
+	      className: "length"
+	    }, isEmpty ? "" : objectLength)];
 	    brackets = needSpace(false);
 	  } else {
-	    var max = mode === MODE.SHORT ? 3 : 10;
+	    var max = maxLengthMap.get(mode);
 	    items = arrayIterator(props, object, max);
 	    brackets = needSpace(items.length > 0);
 	  }
@@ -36861,41 +36350,23 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var title = getTitle(props, object);
 
 	  return span.apply(undefined, [{
-	    className: "objectBox objectBox-array" }, title, safeObjectLink(props, {
+	    "data-link-actor-id": object.actor,
+	    className: "objectBox objectBox-array" }, title, span({
 	    className: "arrayLeftBracket"
-	  }, brackets.left)].concat(_toConsumableArray(items), [safeObjectLink(props, {
+	  }, brackets.left)].concat(_toConsumableArray(interleaveCommas(items)), [span({
 	    className: "arrayRightBracket"
 	  }, brackets.right), span({
 	    className: "arrayProperties",
 	    role: "group" })]));
 	}
 
-	/**
-	 * Renders array item. Individual values are separated by
-	 * a delimiter (a comma by default).
-	 */
-	GripArrayItem.propTypes = {
-	  delim: React.PropTypes.string,
-	  object: React.PropTypes.oneOfType([React.PropTypes.object, React.PropTypes.number, React.PropTypes.string]).isRequired,
-	  objectLink: React.PropTypes.func,
-	  // @TODO Change this to Object.values once it's supported in Node's version of V8
-	  mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-	  provider: React.PropTypes.object,
-	  onDOMNodeMouseOver: React.PropTypes.func,
-	  onDOMNodeMouseOut: React.PropTypes.func,
-	  onInspectIconClick: React.PropTypes.func
-	};
-
-	function GripArrayItem(props) {
-	  var _require3 = __webpack_require__(926),
-	      Rep = _require3.Rep;
-
-	  var delim = props.delim;
-
-
-	  return span({}, Rep(Object.assign({}, props, {
-	    mode: MODE.TINY
-	  })), delim);
+	function interleaveCommas(items) {
+	  return items.reduce((res, item, index) => {
+	    if (index !== items.length - 1) {
+	      return res.concat(item, ", ");
+	    }
+	    return res.concat(item);
+	  }, []);
 	}
 
 	function getLength(grip) {
@@ -36906,13 +36377,15 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return grip.preview.length || grip.preview.childNodesLength || 0;
 	}
 
-	function getTitle(props, object, context) {
+	function getTitle(props, object) {
 	  if (props.mode === MODE.TINY) {
 	    return "";
 	  }
 
 	  var title = props.title || object.class || "Array";
-	  return safeObjectLink(props, {}, title + " ");
+	  return span({
+	    className: "objectTitle"
+	  }, title + " ");
 	}
 
 	function getPreviewItems(grip) {
@@ -36924,6 +36397,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 	function arrayIterator(props, grip, max) {
+	  var _require3 = __webpack_require__(926),
+	      Rep = _require3.Rep;
+
 	  var items = [];
 	  var gripLength = getLength(grip);
 
@@ -36936,56 +36412,85 @@ return /******/ (function(modules) { // webpackBootstrap
 	    return items;
 	  }
 
-	  var delim = void 0;
-	  // number of grip preview items is limited to 10, but we may have more
-	  // items in grip-array.
-	  var delimMax = gripLength > previewItems.length ? previewItems.length : previewItems.length - 1;
 	  var provider = props.provider;
 
-	  for (var i = 0; i < previewItems.length && i < max; i++) {
+	  var emptySlots = 0;
+	  var foldedEmptySlots = 0;
+	  items = previewItems.reduce((res, itemGrip) => {
+	    if (res.length >= max) {
+	      return res;
+	    }
+
+	    var object = void 0;
 	    try {
-	      var itemGrip = previewItems[i];
-	      var value = provider ? provider.getValue(itemGrip) : itemGrip;
+	      if (!provider && itemGrip === null) {
+	        emptySlots++;
+	        return res;
+	      }
 
-	      delim = i == delimMax ? "" : ", ";
-
-	      items.push(GripArrayItem(Object.assign({}, props, {
-	        object: value,
-	        delim: delim,
-	        // Do not propagate title to array items reps
-	        title: undefined
-	      })));
+	      object = provider ? provider.getValue(itemGrip) : itemGrip;
 	    } catch (exc) {
-	      items.push(GripArrayItem(Object.assign({}, props, {
-	        object: exc,
-	        delim: delim,
+	      object = exc;
+	    }
+
+	    if (emptySlots > 0) {
+	      res.push(getEmptySlotsElement(emptySlots));
+	      foldedEmptySlots = foldedEmptySlots + emptySlots - 1;
+	      emptySlots = 0;
+	    }
+
+	    if (res.length < max) {
+	      res.push(Rep(Object.assign({}, props, {
+	        object,
+	        mode: MODE.TINY,
 	        // Do not propagate title to array items reps
 	        title: undefined
 	      })));
 	    }
+
+	    return res;
+	  }, []);
+
+	  // Handle trailing empty slots if there are some.
+	  if (items.length < max && emptySlots > 0) {
+	    items.push(getEmptySlotsElement(emptySlots));
+	    foldedEmptySlots = foldedEmptySlots + emptySlots - 1;
 	  }
-	  if (previewItems.length > max || gripLength > previewItems.length) {
-	    var leftItemNum = gripLength - max > 0 ? gripLength - max : gripLength - previewItems.length;
+
+	  var itemsShown = items.length + foldedEmptySlots;
+	  if (gripLength > itemsShown) {
 	    items.push(Caption({
-	      object: safeObjectLink(props, {}, leftItemNum + " more…")
+	      object: span({}, "more…")
 	    }));
 	  }
 
 	  return items;
 	}
 
+	function getEmptySlotsElement(number) {
+	  // TODO: Use l10N - See https://github.com/devtools-html/reps/issues/141
+	  return `<${number} empty slot${number > 1 ? "s" : ""}>`;
+	}
+
 	function supportsObject(grip, type) {
-	  if (!isGrip(grip)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(grip)) {
 	    return false;
 	  }
 
 	  return grip.preview && (grip.preview.kind == "ArrayLike" || type === "DocumentFragment");
 	}
 
+	var maxLengthMap = new Map();
+	maxLengthMap.set(MODE.SHORT, 3);
+	maxLengthMap.set(MODE.LONG, 10);
+
 	// Exports from this module
 	module.exports = {
 	  rep: wrapRender(GripArray),
-	  supportsObject
+	  supportsObject,
+	  maxLengthMap
 	};
 
 /***/ },
@@ -36996,12 +36501,17 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = []; var _n = true; var _d = false; var _e = undefined; try { for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"]) _i["return"](); } finally { if (_d) throw _e; } } return _arr; } return function (arr, i) { if (Array.isArray(arr)) { return arr; } else if (Symbol.iterator in Object(arr)) { return sliceIterator(arr, i); } else { throw new TypeError("Invalid attempt to destructure non-iterable instance"); } }; }();
 
+	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	// Dependencies
 	var React = __webpack_require__(2);
 
 	var _require = __webpack_require__(927),
 	    isGrip = _require.isGrip,
-	    safeObjectLink = _require.safeObjectLink,
 	    wrapRender = _require.wrapRender;
 
 	var Caption = __webpack_require__(935);
@@ -37023,7 +36533,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  object: React.PropTypes.object,
 	  // @TODO Change this to Object.values once it's supported in Node's version of V8
 	  mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-	  objectLink: React.PropTypes.func,
 	  isInterestingEntry: React.PropTypes.func,
 	  onDOMNodeMouseOver: React.PropTypes.func,
 	  onDOMNodeMouseOut: React.PropTypes.func,
@@ -37032,23 +36541,33 @@ return /******/ (function(modules) { // webpackBootstrap
 	};
 
 	function GripMap(props) {
-	  var object = props.object;
-	  var propsArray = safeEntriesIterator(props, object, props.mode === MODE.LONG ? 10 : 3);
+	  var mode = props.mode,
+	      object = props.object;
 
-	  if (props.mode === MODE.TINY) {
-	    return span({ className: "objectBox objectBox-object" }, getTitle(props, object));
+
+	  var config = {
+	    "data-link-actor-id": object.actor,
+	    className: "objectBox objectBox-object"
+	  };
+
+	  if (mode === MODE.TINY) {
+	    return span(config, getTitle(props, object));
 	  }
 
-	  return span({ className: "objectBox objectBox-object" }, getTitle(props, object), safeObjectLink(props, {
+	  var propsArray = safeEntriesIterator(props, object, maxLengthMap.get(mode));
+
+	  return span.apply(undefined, [config, getTitle(props, object), span({
 	    className: "objectLeftBrace"
-	  }, " { "), propsArray, safeObjectLink(props, {
+	  }, " { ")].concat(_toConsumableArray(propsArray), [span({
 	    className: "objectRightBrace"
-	  }, " }"));
+	  }, " }")]));
 	}
 
 	function getTitle(props, object) {
 	  var title = props.title || (object && object.class ? object.class : "Map");
-	  return safeObjectLink(props, {}, title);
+	  return span({
+	    className: "objectTitle"
+	  }, title);
 	}
 
 	function safeEntriesIterator(props, object, max) {
@@ -37082,11 +36601,27 @@ return /******/ (function(modules) { // webpackBootstrap
 	    // There are some undisplayed entries. Then display "more…".
 	    entries.push(Caption({
 	      key: "more",
-	      object: safeObjectLink(props, {}, `${mapEntries.length - max} more…`)
+	      object: span({}, "more…")
 	    }));
 	  }
 
-	  return entries;
+	  return unfoldEntries(entries);
+	}
+
+	function unfoldEntries(items) {
+	  return items.reduce((res, item, index) => {
+	    if (Array.isArray(item)) {
+	      res = res.concat(item);
+	    } else {
+	      res.push(item);
+	    }
+
+	    // Interleave commas between elements
+	    if (index !== items.length - 1) {
+	      res.push(", ");
+	    }
+	    return res;
+	  }, []);
 	}
 
 	/**
@@ -37098,8 +36633,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @return {Array} Array of PropRep.
 	 */
 	function getEntries(props, entries, indexes) {
-	  var objectLink = props.objectLink,
-	      onDOMNodeMouseOver = props.onDOMNodeMouseOver,
+	  var onDOMNodeMouseOver = props.onDOMNodeMouseOver,
 	      onDOMNodeMouseOut = props.onDOMNodeMouseOut,
 	      onInspectIconClick = props.onInspectIconClick;
 
@@ -37117,15 +36651,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var value = entryValue.value !== undefined ? entryValue.value : entryValue;
 
 	    return PropRep({
-	      // key,
 	      name: key,
 	      equal: ": ",
 	      object: value,
-	      // Do not add a trailing comma on the last entry
-	      // if there won't be a "more..." item.
-	      delim: i < indexes.length - 1 || indexes.length < entries.length ? ", " : null,
 	      mode: MODE.TINY,
-	      objectLink,
 	      onDOMNodeMouseOver,
 	      onDOMNodeMouseOut,
 	      onInspectIconClick
@@ -37163,23 +36692,30 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 	function supportsObject(grip, type) {
-	  if (!isGrip(grip)) {
+	  var noGrip = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+	  if (noGrip === true || !isGrip(grip)) {
 	    return false;
 	  }
 	  return grip.preview && grip.preview.kind == "MapLike";
 	}
 
+	var maxLengthMap = new Map();
+	maxLengthMap.set(MODE.SHORT, 3);
+	maxLengthMap.set(MODE.LONG, 10);
+
 	// Exports from this module
 	module.exports = {
 	  rep: wrapRender(GripMap),
-	  supportsObject
+	  supportsObject,
+	  maxLengthMap
 	};
 
 /***/ },
 /* 960 */
 /***/ function(module, exports) {
 
-	module.exports = "# This Source Code Form is subject to the terms of the Mozilla Public\n# License, v. 2.0. If a copy of the MPL was not distributed with this\n# file, You can obtain one at http://mozilla.org/MPL/2.0/.\n\n# LOCALIZATION NOTE These strings are used inside the Debugger\n# which is available from the Web Developer sub-menu -> 'Debugger'.\n# The correct localization of this file might be to keep it in\n# English, or another language commonly spoken among web developers.\n# You want to make that choice consistent across the developer tools.\n# A good criteria is the language in which you'd find the best\n# documentation on web development on the web.\n\n# LOCALIZATION NOTE (collapsePanes): This is the tooltip for the button\n# that collapses the left and right panes in the debugger UI.\ncollapsePanes=Collapse panes\n\n# LOCALIZATION NOTE (copySourceUrl): This is the text that appears in the\n# context menu to copy the source URL of file open.\ncopySourceUrl=Copy Source Url\n\n# LOCALIZATION NOTE (copySourceUrl.accesskey): Access key to copy the source URL of a file from\n# the context menu.\ncopySourceUrl.accesskey=u\n\n# LOCALIZATION NOTE (copyStackTrace): This is the text that appears in the\n# context menu to copy the stack trace methods, file names and row number.\ncopyStackTrace=Copy Stack Trace\n\n# LOCALIZATION NOTE (copyStackTrace.accesskey): Access key to copy the stack trace data from\n# the context menu.\ncopyStackTrace.accesskey=c\n\n# LOCALIZATION NOTE (expandPanes): This is the tooltip for the button\n# that expands the left and right panes in the debugger UI.\nexpandPanes=Expand panes\n\n# LOCALIZATION NOTE (pauseButtonTooltip): The tooltip that is displayed for the pause\n# button when the debugger is in a running state.\npauseButtonTooltip=Pause %S\n\n# LOCALIZATION NOTE (pausePendingButtonTooltip): The tooltip that is displayed for\n# the pause button after it's been clicked but before the next JavaScript to run.\npausePendingButtonTooltip=Waiting for next execution\n\n# LOCALIZATION NOTE (resumeButtonTooltip): The label that is displayed on the pause\n# button when the debugger is in a paused state.\nresumeButtonTooltip=Resume %S\n\n# LOCALIZATION NOTE (stepOverTooltip): The label that is displayed on the\n# button that steps over a function call.\nstepOverTooltip=Step Over %S\n\n# LOCALIZATION NOTE (stepInTooltip): The label that is displayed on the\n# button that steps into a function call.\nstepInTooltip=Step In %S\n\n# LOCALIZATION NOTE (stepOutTooltip): The label that is displayed on the\n# button that steps out of a function call.\nstepOutTooltip=Step Out %S\n\n# LOCALIZATION NOTE (noWorkersText): The text to display in the workers list\n# when there are no workers.\nnoWorkersText=This page has no workers.\n\n# LOCALIZATION NOTE (noSourcesText): The text to display in the sources list\n# when there are no sources.\nnoSourcesText=This page has no sources.\n\n# LOCALIZATION NOTE (noEventListenersText): The text to display in the events tab\n# when there are no events.\nnoEventListenersText=No event listeners to display\n\n# LOCALIZATION NOTE (eventListenersHeader): The text to display in the events\n# header.\neventListenersHeader=Event Listeners\n\n# LOCALIZATION NOTE (noStackFramesText): The text to display in the call stack tab\n# when there are no stack frames.\nnoStackFramesText=No stack frames to display\n\n# LOCALIZATION NOTE (eventCheckboxTooltip): The tooltip text to display when\n# the user hovers over the checkbox used to toggle an event breakpoint.\neventCheckboxTooltip=Toggle breaking on this event\n\n# LOCALIZATION NOTE (eventOnSelector): The text to display in the events tab\n# for every event item, between the event type and event selector.\neventOnSelector=on\n\n# LOCALIZATION NOTE (eventInSource): The text to display in the events tab\n# for every event item, between the event selector and listener's owner source.\neventInSource=in\n\n# LOCALIZATION NOTE (eventNodes): The text to display in the events tab when\n# an event is listened on more than one target node.\neventNodes=%S nodes\n\n# LOCALIZATION NOTE (eventNative): The text to display in the events tab when\n# a listener is added from plugins, thus getting translated to native code.\neventNative=[native code]\n\n# LOCALIZATION NOTE (*Events): The text to display in the events tab for\n# each group of sub-level event entries.\nanimationEvents=Animation\naudioEvents=Audio\nbatteryEvents=Battery\nclipboardEvents=Clipboard\ncompositionEvents=Composition\ndeviceEvents=Device\ndisplayEvents=Display\ndragAndDropEvents=Drag and Drop\ngamepadEvents=Gamepad\nindexedDBEvents=IndexedDB\ninteractionEvents=Interaction\nkeyboardEvents=Keyboard\nmediaEvents=HTML5 Media\nmouseEvents=Mouse\nmutationEvents=Mutation\nnavigationEvents=Navigation\npointerLockEvents=Pointer Lock\nsensorEvents=Sensor\nstorageEvents=Storage\ntimeEvents=Time\ntouchEvents=Touch\notherEvents=Other\n\n# LOCALIZATION NOTE (blackboxCheckboxTooltip2): The tooltip text to display when\n# the user hovers over the checkbox used to toggle blackboxing its associated\n# source.\nblackboxCheckboxTooltip2=Toggle blackboxing\n\n# LOCALIZATION NOTE (sources.search.key2): Key shortcut to open the search for\n# searching all the source files the debugger has seen.\nsources.search.key2=CmdOrCtrl+P\n\n# LOCALIZATION NOTE (sources.search.alt.key): A second key shortcut to open the\n# search for searching all the source files the debugger has seen.\nsources.search.alt.key=CmdOrCtrl+O\n\n# LOCALIZATION NOTE (sources.noSourcesAvailable): Text shown when the debugger\n# does not have any sources.\nsources.noSourcesAvailable=This page has no sources\n\n# LOCALIZATION NOTE (sourcesPane.showSourcesTooltip): The tooltip shown when\n# the user will navigate to the source tree view.\nsourcesPane.showSourcesTooltip=Show sources\n\n# LOCALIZATION NOTE (sourcesPane.showOutlineTooltip): The tooltip shown when\n# the user will navigate to the source outline view.\nsourcesPane.showOutlineTooltip=Show outline\n\n# LOCALIZATION NOTE (sourceSearch.search.key2): Key shortcut to open the search\n# for searching within a the currently opened files in the editor\nsourceSearch.search.key2=CmdOrCtrl+F\n\n# LOCALIZATION NOTE (sourceSearch.search.placeholder): placeholder text in\n# the source search input bar\nsourceSearch.search.placeholder=Search in file…\n\n# LOCALIZATION NOTE (sourceSearch.search.again.key2): Key shortcut to highlight\n# the next occurrence of the last search triggered from a source search\nsourceSearch.search.again.key2=CmdOrCtrl+G\n\n# LOCALIZATION NOTE (sourceSearch.search.againPrev.key2): Key shortcut to highlight\n# the previous occurrence of the last search triggered from a source search\nsourceSearch.search.againPrev.key2=CmdOrCtrl+Shift+G\n\n# LOCALIZATION NOTE (sourceSearch.resultsSummary1): Shows a summary of\n# the number of matches for autocomplete\nsourceSearch.resultsSummary1=%d results\n\n# LOCALIZATION NOTE (noMatchingStringsText): The text to display in the\n# global search results when there are no matching strings after filtering.\nnoMatchingStringsText=No matches found\n\n# LOCALIZATION NOTE (emptySearchText): This is the text that appears in the\n# filter text box when it is empty and the scripts container is selected.\nemptySearchText=Search scripts (%S)\n\n# LOCALIZATION NOTE (emptyVariablesFilterText): This is the text that\n# appears in the filter text box for the variables view container.\nemptyVariablesFilterText=Filter variables\n\n# LOCALIZATION NOTE (emptyPropertiesFilterText): This is the text that\n# appears in the filter text box for the editor's variables view bubble.\nemptyPropertiesFilterText=Filter properties\n\n# LOCALIZATION NOTE (searchPanelFilter): This is the text that appears in the\n# filter panel popup for the filter scripts operation.\nsearchPanelFilter=Filter scripts (%S)\n\n# LOCALIZATION NOTE (searchPanelGlobal): This is the text that appears in the\n# filter panel popup for the global search operation.\nsearchPanelGlobal=Search in all files (%S)\n\n# LOCALIZATION NOTE (searchPanelFunction): This is the text that appears in the\n# filter panel popup for the function search operation.\nsearchPanelFunction=Search for function definition (%S)\n\n# LOCALIZATION NOTE (searchPanelToken): This is the text that appears in the\n# filter panel popup for the token search operation.\nsearchPanelToken=Find in this file (%S)\n\n# LOCALIZATION NOTE (searchPanelGoToLine): This is the text that appears in the\n# filter panel popup for the line search operation.\nsearchPanelGoToLine=Go to line (%S)\n\n# LOCALIZATION NOTE (searchPanelVariable): This is the text that appears in the\n# filter panel popup for the variables search operation.\nsearchPanelVariable=Filter variables (%S)\n\n# LOCALIZATION NOTE (breakpointMenuItem): The text for all the elements that\n# are displayed in the breakpoints menu item popup.\nbreakpointMenuItem.setConditional=Configure conditional breakpoint\nbreakpointMenuItem.enableSelf=Enable breakpoint\nbreakpointMenuItem.disableSelf=Disable breakpoint\nbreakpointMenuItem.deleteSelf=Remove breakpoint\nbreakpointMenuItem.enableOthers=Enable others\nbreakpointMenuItem.disableOthers=Disable others\nbreakpointMenuItem.deleteOthers=Remove others\nbreakpointMenuItem.enableAll=Enable all breakpoints\nbreakpointMenuItem.disableAll=Disable all breakpoints\nbreakpointMenuItem.deleteAll=Remove all breakpoints\n\n# LOCALIZATION NOTE (breakpoints.header): Breakpoints right sidebar pane header.\nbreakpoints.header=Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.none): The text that appears when there are\n# no breakpoints present\nbreakpoints.none=No Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.enable): The text that may appear as a tooltip\n# when hovering over the 'disable breakpoints' switch button in right sidebar\nbreakpoints.enable=Enable Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.disable): The text that may appear as a tooltip\n# when hovering over the 'disable breakpoints' switch button in right sidebar\nbreakpoints.disable=Disable Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.removeBreakpointTooltip): The tooltip that is displayed\n# for remove breakpoint button in right sidebar\nbreakpoints.removeBreakpointTooltip=Remove Breakpoint\n\n# LOCALIZATION NOTE (callStack.header): Call Stack right sidebar pane header.\ncallStack.header=Call Stack\n\n# LOCALIZATION NOTE (callStack.notPaused): Call Stack right sidebar pane\n# message when not paused.\ncallStack.notPaused=Not Paused\n\n# LOCALIZATION NOTE (callStack.collapse): Call Stack right sidebar pane\n# message to hide some of the frames that are shown.\ncallStack.collapse=Collapse Rows\n\n# LOCALIZATION NOTE (callStack.expand): Call Stack right sidebar pane\n# message to show more of the frames.\ncallStack.expand=Expand Rows\n\n# LOCALIZATION NOTE (editor.searchResults): Editor Search bar message\n# for the summarizing the selected search result. e.g. 5 of 10 results.\neditor.searchResults=%d of %d results\n\n# LOCALIZATION NOTE (sourceSearch.singleResult): Copy shown when there is one result.\neditor.singleResult=1 result\n\n# LOCALIZATION NOTE (editor.noResults): Editor Search bar message\n# for when no results found.\neditor.noResults=no results\n\n# LOCALIZATION NOTE (editor.searchResults.nextResult): Editor Search bar\n# tooltip for traversing to the Next Result\neditor.searchResults.nextResult=Next Result\n\n# LOCALIZATION NOTE (editor.searchResults.prevResult): Editor Search bar\n# tooltip for traversing to the Previous Result\neditor.searchResults.prevResult=Previous Result\n\n# LOCALIZATION NOTE (editor.searchTypeToggleTitle): Search bar title for\n# toggling search type buttons(function search, variable search)\neditor.searchTypeToggleTitle=Search for:\n\n# LOCALIZATION NOTE (editor.addBreakpoint): Editor gutter context menu item\n# for adding a breakpoint on a line.\neditor.addBreakpoint=Add Breakpoint\n\n# LOCALIZATION NOTE (editor.disableBreakpoint): Editor gutter context menu item\n# for disabling a breakpoint on a line.\neditor.disableBreakpoint=Disable Breakpoint\n\n# LOCALIZATION NOTE (editor.enableBreakpoint): Editor gutter context menu item\n# for enabling a breakpoint on a line.\neditor.enableBreakpoint=Enable Breakpoint\n\n# LOCALIZATION NOTE (editor.removeBreakpoint): Editor gutter context menu item\n# for removing a breakpoint on a line.\neditor.removeBreakpoint=Remove Breakpoint\n\n# LOCALIZATION NOTE (editor.editBreakpoint): Editor gutter context menu item\n# for setting a breakpoint condition on a line.\neditor.editBreakpoint=Edit Breakpoint\n\n# LOCALIZATION NOTE (editor.addConditionalBreakpoint): Editor gutter context\n# menu item for adding a breakpoint condition on a line.\neditor.addConditionalBreakpoint=Add Conditional Breakpoint\n\n# LOCALIZATION NOTE (editor.conditionalPanel.placeholder): Placeholder text for\n# input element inside ConditionalPanel component\neditor.conditionalPanel.placeholder=This breakpoint will pause when the expression is true\n\n# LOCALIZATION NOTE (editor.conditionalPanel.placeholder): Tooltip text for\n# close button inside ConditionalPanel component\neditor.conditionalPanel.close=Cancel edit breakpoint and close\n\n# LOCALIZATION NOTE (editor.jumpToMappedLocation1): Context menu item\n# for navigating to a source mapped location\neditor.jumpToMappedLocation1=Jump to %S location\n\n# LOCALIZATION NOTE (framework.disableGrouping): This is the text that appears in the\n# context menu to disable framework grouping.\nframework.disableGrouping=Disable Framework Grouping\n\n# LOCALIZATION NOTE (framework.disableGrouping.accesskey): Access key to toggle\n# framework grouping from the context menu.\nframework.disableGrouping.accesskey=u\n\n# LOCALIZATION NOTE (framework.enableGrouping): This is the text that appears in the\n# context menu to enable framework grouping.\nframework.enableGrouping=Enable Framework Grouping\n\n# LOCALIZATION NOTE (framework.enableGrouping.accesskey): Access key to toggle\n# framework grouping from the context menu.\nframework.enableGrouping.accesskey=u\n\n# LOCALIZATION NOTE (generated): Source Map term for a server source location\ngenerated=generated\n\n# LOCALIZATION NOTE (original): Source Map term for a debugger UI source location\noriginal=original\n\n# LOCALIZATION NOTE (expressions.placeholder): Placeholder text for expression\n# input element\nexpressions.placeholder=Add Watch Expression\n\n# LOCALIZATION NOTE (sourceTabs.closeTab): Editor source tab context menu item\n# for closing the selected tab below the mouse.\nsourceTabs.closeTab=Close tab\n\n# LOCALIZATION NOTE (sourceTabs.closeTab.accesskey): Access key to close the currently select\n# source tab from the editor context menu item.\nsourceTabs.closeTab.accesskey=c\n\n# LOCALIZATION NOTE (sourceTabs.closeOtherTabs): Editor source tab context menu item\n# for closing the other tabs.\nsourceTabs.closeOtherTabs=Close others\n\n# LOCALIZATION NOTE (sourceTabs.closeOtherTabs.accesskey): Access key to close other source tabs\n# from the editor context menu.\nsourceTabs.closeOtherTabs.accesskey=o\n\n# LOCALIZATION NOTE (sourceTabs.closeTabsToEnd): Editor source tab context menu item\n# for closing the tabs to the end (the right for LTR languages) of the selected tab.\nsourceTabs.closeTabsToEnd=Close tabs to the right\n\n# LOCALIZATION NOTE (sourceTabs.closeTabsToEnd.accesskey): Access key to close source tabs\n# after the selected tab from the editor context menu.\nsourceTabs.closeTabsToEnd.accesskey=e\n\n# LOCALIZATION NOTE (sourceTabs.closeAllTabs): Editor source tab context menu item\n# for closing all tabs.\nsourceTabs.closeAllTabs=Close all tabs\n\n# LOCALIZATION NOTE (sourceTabs.closeAllTabs.accesskey): Access key to close all tabs from the\n# editor context menu.\nsourceTabs.closeAllTabs.accesskey=a\n\n# LOCALIZATION NOTE (sourceTabs.revealInTree): Editor source tab context menu item\n# for revealing source in tree.\nsourceTabs.revealInTree=Reveal in Tree\n\n# LOCALIZATION NOTE (sourceTabs.revealInTree.accesskey): Access key to reveal a source in the\n# tree from the context menu.\nsourceTabs.revealInTree.accesskey=r\n\n# LOCALIZATION NOTE (sourceTabs.copyLink): Editor source tab context menu item\n# for copying a link address.\nsourceTabs.copyLink=Copy Link Address\n\n# LOCALIZATION NOTE (sourceTabs.copyLink.accesskey): Access key to copy a link addresss from the\n# editor context menu.\nsourceTabs.copyLink.accesskey=l\n\n# LOCALIZATION NOTE (sourceTabs.prettyPrint): Editor source tab context menu item\n# for pretty printing the source.\nsourceTabs.prettyPrint=Pretty Print Source\n\n# LOCALIZATION NOTE (sourceTabs.prettyPrint.accesskey): Access key to pretty print a source from\n# the editor context menu.\nsourceTabs.prettyPrint.accesskey=p\n\n# LOCALIZATION NOTE (sourceFooter.blackbox): Tooltip text associated\n# with the blackbox button\nsourceFooter.blackbox=Blackbox Source\n\n# LOCALIZATION NOTE (sourceFooter.unblackbox): Tooltip text associated\n# with the blackbox button\nsourceFooter.unblackbox=Unblackbox Source\n\n# LOCALIZATION NOTE (sourceFooter.unblackbox.accesskey): Access key to blackbox\n# an associated source\nsourceFooter.unblackbox.accesskey=b\n\n# LOCALIZATION NOTE (sourceFooter.blackbox.accesskey): Access key to blackbox\n# an associated source\nsourceFooter.blackbox.accesskey=b\n\n# LOCALIZATION NOTE (sourceFooter.blackboxed): Text associated\n# with a blackboxed source\nsourceFooter.blackboxed=Blackboxed Source\n\n# LOCALIZATION NOTE (sourceTabs.closeTabButtonTooltip): The tooltip that is displayed\n# for close tab button in source tabs.\nsourceTabs.closeTabButtonTooltip=Close tab\n\n# LOCALIZATION NOTE (sourceTabs.newTabButtonTooltip): The tooltip that is displayed for\n# new tab button in source tabs.\nsourceTabs.newTabButtonTooltip=Search for sources (%S)\n\n# LOCALIZATION NOTE (scopes.header): Scopes right sidebar pane header.\nscopes.header=Scopes\n\n# LOCALIZATION NOTE (scopes.notAvailable): Scopes right sidebar pane message\n# for when the debugger is paused, but there isn't pause data.\nscopes.notAvailable=Scopes Unavailable\n\n# LOCALIZATION NOTE (scopes.notPaused): Scopes right sidebar pane message\n# for when the debugger is not paused.\nscopes.notPaused=Not Paused\n\n# LOCALIZATION NOTE (scopes.block): Refers to a block of code in\n# the scopes pane when the debugger is paused.\nscopes.block=Block\n\n# LOCALIZATION NOTE (sources.header): Sources left sidebar header\nsources.header=Sources\n\n# LOCALIZATION NOTE (sources.search): Sources left sidebar prompt\n# e.g. Cmd+P to search. On a mac, we use the command unicode character.\n# On windows, it's ctrl.\nsources.search=%S to search\n\n# LOCALIZATION NOTE (watchExpressions.header): Watch Expressions right sidebar\n# pane header.\nwatchExpressions.header=Watch Expressions\n\n# LOCALIZATION NOTE (watchExpressions.refreshButton): Watch Expressions header\n# button for refreshing the expressions.\nwatchExpressions.refreshButton=Refresh\n\n# LOCALIZATION NOTE (welcome.search): The center pane welcome panel's\n# search prompt. e.g. cmd+p to search for files. On windows, it's ctrl, on\n# a mac we use the unicode character.\nwelcome.search=%S to search for sources\n\n# LOCALIZATION NOTE (sourceSearch.search): The center pane Source Search\n# prompt for searching for files.\nsourceSearch.search=Search Sources…\n\n# LOCALIZATION NOTE (sourceSearch.noResults): The center pane Source Search\n# message when the query did not match any of the sources.\nsourceSearch.noResults=No files matching %S found\n\n# LOCALIZATION NOTE (ignoreExceptions): The pause on exceptions button tooltip\n# when the debugger will not pause on exceptions.\nignoreExceptions=Ignore exceptions. Click to pause on uncaught exceptions\n\n# LOCALIZATION NOTE (pauseOnUncaughtExceptions): The pause on exceptions button\n# tooltip when the debugger will pause on uncaught exceptions.\npauseOnUncaughtExceptions=Pause on uncaught exceptions. Click to pause on all exceptions\n\n# LOCALIZATION NOTE (pauseOnExceptions): The pause on exceptions button tooltip\n# when the debugger will pause on all exceptions.\npauseOnExceptions=Pause on all exceptions. Click to ignore exceptions\n\n# LOCALIZATION NOTE (loadingText): The text that is displayed in the script\n# editor when the loading process has started but there is no file to display\n# yet.\nloadingText=Loading\\u2026\n\n# LOCALIZATION NOTE (errorLoadingText2): The text that is displayed in the debugger\n# viewer when there is an error loading a file\nerrorLoadingText2=Error loading this URL: %S\n\n# LOCALIZATION NOTE (addWatchExpressionText): The text that is displayed in the\n# watch expressions list to add a new item.\naddWatchExpressionText=Add watch expression\n\n# LOCALIZATION NOTE (addWatchExpressionButton): The button that is displayed in the\n# variables view popup.\naddWatchExpressionButton=Watch\n\n# LOCALIZATION NOTE (emptyVariablesText): The text that is displayed in the\n# variables pane when there are no variables to display.\nemptyVariablesText=No variables to display\n\n# LOCALIZATION NOTE (scopeLabel): The text that is displayed in the variables\n# pane as a header for each variable scope (e.g. \"Global scope, \"With scope\",\n# etc.).\nscopeLabel=%S scope\n\n# LOCALIZATION NOTE (watchExpressionsScopeLabel): The name of the watch\n# expressions scope. This text is displayed in the variables pane as a header for\n# the watch expressions scope.\nwatchExpressionsScopeLabel=Watch expressions\n\n# LOCALIZATION NOTE (globalScopeLabel): The name of the global scope. This text\n# is added to scopeLabel and displayed in the variables pane as a header for\n# the global scope.\nglobalScopeLabel=Global\n\n# LOCALIZATION NOTE (variablesViewErrorStacktrace): This is the text that is\n# shown before the stack trace in an error.\nvariablesViewErrorStacktrace=Stack trace:\n\n# LOCALIZATION NOTE (variablesViewMoreObjects): the text that is displayed\n# when you have an object preview that does not show all of the elements. At the end of the list\n# you see \"N more...\" in the web console output.\n# This is a semi-colon list of plural forms.\n# See: http://developer.mozilla.org/en/docs/Localization_and_Plurals\n# #1 number of remaining items in the object\n# example: 3 more…\nvariablesViewMoreObjects=#1 more…;#1 more…\n\n# LOCALIZATION NOTE (variablesEditableNameTooltip): The text that is displayed\n# in the variables list on an item with an editable name.\nvariablesEditableNameTooltip=Double click to edit\n\n# LOCALIZATION NOTE (variablesEditableValueTooltip): The text that is displayed\n# in the variables list on an item with an editable value.\nvariablesEditableValueTooltip=Click to change value\n\n# LOCALIZATION NOTE (variablesCloseButtonTooltip): The text that is displayed\n# in the variables list on an item which can be removed.\nvariablesCloseButtonTooltip=Click to remove\n\n# LOCALIZATION NOTE (variablesEditButtonTooltip): The text that is displayed\n# in the variables list on a getter or setter which can be edited.\nvariablesEditButtonTooltip=Click to set value\n\n# LOCALIZATION NOTE (variablesEditableValueTooltip): The text that is displayed\n# in a tooltip on the \"open in inspector\" button in the the variables list for a\n# DOMNode item.\nvariablesDomNodeValueTooltip=Click to select the node in the inspector\n\n# LOCALIZATION NOTE (configurable|...|Tooltip): The text that is displayed\n# in the variables list on certain variables or properties as tooltips.\n# Expanations of what these represent can be found at the following links:\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/defineProperty\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isExtensible\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isFrozen\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isSealed\n# It's probably best to keep these in English.\nconfigurableTooltip=configurable\nenumerableTooltip=enumerable\nwritableTooltip=writable\nfrozenTooltip=frozen\nsealedTooltip=sealed\nextensibleTooltip=extensible\noverriddenTooltip=overridden\nWebIDLTooltip=WebIDL\n\n# LOCALIZATION NOTE (variablesSeparatorLabel): The text that is displayed\n# in the variables list as a separator between the name and value.\nvariablesSeparatorLabel=:\n\n# LOCALIZATION NOTE (watchExpressionsSeparatorLabel2): The text that is displayed\n# in the watch expressions list as a separator between the code and evaluation.\nwatchExpressionsSeparatorLabel2=\\u0020→\n\n# LOCALIZATION NOTE (functionSearchSeparatorLabel): The text that is displayed\n# in the functions search panel as a separator between function's inferred name\n# and its real name (if available).\nfunctionSearchSeparatorLabel=←\n\n# LOCALIZATION NOTE(symbolSearch.search.functionsPlaceholder): The placeholder\n# text displayed when the user searches for functions in a file\nsymbolSearch.search.functionsPlaceholder=Search functions…\n\n# LOCALIZATION NOTE(symbolSearch.search.variablesPlaceholder): The placeholder\n# text displayed when the user searches for variables in a file\nsymbolSearch.search.variablesPlaceholder=Search variables…\n\n# LOCALIZATION NOTE(symbolSearch.search.key2): The Key Shortcut for\n# searching for a function or variable\nsymbolSearch.search.key2=CmdOrCtrl+Shift+O\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.regex): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.regex=Regex\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.caseSensitive): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.caseSensitive=Case sensitive\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.wholeWord): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.wholeWord=Whole word\n\n# LOCALIZATION NOTE (resumptionOrderPanelTitle): This is the text that appears\n# as a description in the notification panel popup, when multiple debuggers are\n# open in separate tabs and the user tries to resume them in the wrong order.\n# The substitution parameter is the URL of the last paused window that must be\n# resumed first.\nresumptionOrderPanelTitle=There are one or more paused debuggers. Please resume the most-recently paused debugger first at: %S\n\nvariablesViewOptimizedOut=(optimized away)\nvariablesViewUninitialized=(uninitialized)\nvariablesViewMissingArgs=(unavailable)\n\nanonymousSourcesLabel=Anonymous Sources\n\nexperimental=This is an experimental feature\n\n# LOCALIZATION NOTE (whyPaused.debuggerStatement): The text that is displayed\n# in a info block explaining how the debugger is currently paused due to a `debugger`\n# statement in the code\nwhyPaused.debuggerStatement=Paused on debugger statement\n\n# LOCALIZATION NOTE (whyPaused.breakpoint): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a breakpoint\nwhyPaused.breakpoint=Paused on breakpoint\n\n# LOCALIZATION NOTE (whyPaused.exception): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an exception\nwhyPaused.exception=Paused on exception\n\n# LOCALIZATION NOTE (whyPaused.resumeLimit): The text that is displayed\n# in a info block explaining how the debugger is currently paused while stepping\n# in or out of the stack\nwhyPaused.resumeLimit=Paused while stepping\n\n# LOCALIZATION NOTE (whyPaused.pauseOnDOMEvents): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# dom event\nwhyPaused.pauseOnDOMEvents=Paused on event listener\n\n# LOCALIZATION NOTE (whyPaused.breakpointConditionThrown): The text that is displayed\n# in an info block when evaluating a conditional breakpoint throws an error\nwhyPaused.breakpointConditionThrown=Error with conditional breakpoint\n\n# LOCALIZATION NOTE (whyPaused.xhr): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an\n# xml http request\nwhyPaused.xhr=Paused on XMLHttpRequest\n\n# LOCALIZATION NOTE (whyPaused.promiseRejection): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# promise rejection\nwhyPaused.promiseRejection=Paused on promise rejection\n\n# LOCALIZATION NOTE (whyPaused.assert): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an\n# assert\nwhyPaused.assert=Paused on assertion\n\n# LOCALIZATION NOTE (whyPaused.debugCommand): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# debugger statement\nwhyPaused.debugCommand=Paused on debugged function\n\n# LOCALIZATION NOTE (whyPaused.other): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an event\n# listener breakpoint set\nwhyPaused.other=Debugger paused\n\n# LOCALIZATION NOTE (ctrl): The text that is used for documenting\n# keyboard shortcuts that use the control key\nctrl=Ctrl\n"
+	module.exports = "# This Source Code Form is subject to the terms of the Mozilla Public\n# License, v. 2.0. If a copy of the MPL was not distributed with this\n# file, You can obtain one at http://mozilla.org/MPL/2.0/.\n\n# LOCALIZATION NOTE These strings are used inside the Debugger\n# which is available from the Web Developer sub-menu -> 'Debugger'.\n# The correct localization of this file might be to keep it in\n# English, or another language commonly spoken among web developers.\n# You want to make that choice consistent across the developer tools.\n# A good criteria is the language in which you'd find the best\n# documentation on web development on the web.\n\n# LOCALIZATION NOTE (collapsePanes): This is the tooltip for the button\n# that collapses the left and right panes in the debugger UI.\ncollapsePanes=Collapse panes\n\n# LOCALIZATION NOTE (copySourceUrl): This is the text that appears in the\n# context menu to copy the source URL of file open.\ncopySourceUrl=Copy Source Url\n\n# LOCALIZATION NOTE (copySourceUrl.accesskey): Access key to copy the source URL of a file from\n# the context menu.\ncopySourceUrl.accesskey=u\n\n# LOCALIZATION NOTE (copyStackTrace): This is the text that appears in the\n# context menu to copy the stack trace methods, file names and row number.\ncopyStackTrace=Copy Stack Trace\n\n# LOCALIZATION NOTE (copyStackTrace.accesskey): Access key to copy the stack trace data from\n# the context menu.\ncopyStackTrace.accesskey=c\n\n# LOCALIZATION NOTE (expandPanes): This is the tooltip for the button\n# that expands the left and right panes in the debugger UI.\nexpandPanes=Expand panes\n\n# LOCALIZATION NOTE (pauseButtonTooltip): The tooltip that is displayed for the pause\n# button when the debugger is in a running state.\npauseButtonTooltip=Pause %S\n\n# LOCALIZATION NOTE (pausePendingButtonTooltip): The tooltip that is displayed for\n# the pause button after it's been clicked but before the next JavaScript to run.\npausePendingButtonTooltip=Waiting for next execution\n\n# LOCALIZATION NOTE (resumeButtonTooltip): The label that is displayed on the pause\n# button when the debugger is in a paused state.\nresumeButtonTooltip=Resume %S\n\n# LOCALIZATION NOTE (stepOverTooltip): The label that is displayed on the\n# button that steps over a function call.\nstepOverTooltip=Step Over %S\n\n# LOCALIZATION NOTE (stepInTooltip): The label that is displayed on the\n# button that steps into a function call.\nstepInTooltip=Step In %S\n\n# LOCALIZATION NOTE (stepOutTooltip): The label that is displayed on the\n# button that steps out of a function call.\nstepOutTooltip=Step Out %S\n\n# LOCALIZATION NOTE (noWorkersText): The text to display in the workers list\n# when there are no workers.\nnoWorkersText=This page has no workers.\n\n# LOCALIZATION NOTE (noSourcesText): The text to display in the sources list\n# when there are no sources.\nnoSourcesText=This page has no sources.\n\n# LOCALIZATION NOTE (noEventListenersText): The text to display in the events tab\n# when there are no events.\nnoEventListenersText=No event listeners to display\n\n# LOCALIZATION NOTE (eventListenersHeader): The text to display in the events\n# header.\neventListenersHeader=Event Listeners\n\n# LOCALIZATION NOTE (noStackFramesText): The text to display in the call stack tab\n# when there are no stack frames.\nnoStackFramesText=No stack frames to display\n\n# LOCALIZATION NOTE (eventCheckboxTooltip): The tooltip text to display when\n# the user hovers over the checkbox used to toggle an event breakpoint.\neventCheckboxTooltip=Toggle breaking on this event\n\n# LOCALIZATION NOTE (eventOnSelector): The text to display in the events tab\n# for every event item, between the event type and event selector.\neventOnSelector=on\n\n# LOCALIZATION NOTE (eventInSource): The text to display in the events tab\n# for every event item, between the event selector and listener's owner source.\neventInSource=in\n\n# LOCALIZATION NOTE (eventNodes): The text to display in the events tab when\n# an event is listened on more than one target node.\neventNodes=%S nodes\n\n# LOCALIZATION NOTE (eventNative): The text to display in the events tab when\n# a listener is added from plugins, thus getting translated to native code.\neventNative=[native code]\n\n# LOCALIZATION NOTE (*Events): The text to display in the events tab for\n# each group of sub-level event entries.\nanimationEvents=Animation\naudioEvents=Audio\nbatteryEvents=Battery\nclipboardEvents=Clipboard\ncompositionEvents=Composition\ndeviceEvents=Device\ndisplayEvents=Display\ndragAndDropEvents=Drag and Drop\ngamepadEvents=Gamepad\nindexedDBEvents=IndexedDB\ninteractionEvents=Interaction\nkeyboardEvents=Keyboard\nmediaEvents=HTML5 Media\nmouseEvents=Mouse\nmutationEvents=Mutation\nnavigationEvents=Navigation\npointerLockEvents=Pointer Lock\nsensorEvents=Sensor\nstorageEvents=Storage\ntimeEvents=Time\ntouchEvents=Touch\notherEvents=Other\n\n# LOCALIZATION NOTE (blackboxCheckboxTooltip2): The tooltip text to display when\n# the user hovers over the checkbox used to toggle blackboxing its associated\n# source.\nblackboxCheckboxTooltip2=Toggle blackboxing\n\n# LOCALIZATION NOTE (sources.search.key2): Key shortcut to open the search for\n# searching all the source files the debugger has seen.\nsources.search.key2=CmdOrCtrl+P\n\n# LOCALIZATION NOTE (sources.search.alt.key): A second key shortcut to open the\n# search for searching all the source files the debugger has seen.\nsources.search.alt.key=CmdOrCtrl+O\n\n# LOCALIZATION NOTE (projectTextSearch.key): A key shortcut to open the\n# full project text search for searching all the files the debugger has seen.\nprojectTextSearch.key=CmdOrCtrl+Shift+F\n\n# LOCALIZATION NOTE (sources.noSourcesAvailable): Text shown when the debugger\n# does not have any sources.\nsources.noSourcesAvailable=This page has no sources\n\n# LOCALIZATION NOTE (sourcesPane.showSourcesTooltip): The tooltip shown when\n# the user will navigate to the source tree view.\nsourcesPane.showSourcesTooltip=Show sources\n\n# LOCALIZATION NOTE (sourcesPane.showOutlineTooltip): The tooltip shown when\n# the user will navigate to the source outline view.\nsourcesPane.showOutlineTooltip=Show outline\n\n# LOCALIZATION NOTE (sourceSearch.search.key2): Key shortcut to open the search\n# for searching within a the currently opened files in the editor\nsourceSearch.search.key2=CmdOrCtrl+F\n\n# LOCALIZATION NOTE (sourceSearch.search.placeholder): placeholder text in\n# the source search input bar\nsourceSearch.search.placeholder=Search in file…\n\n# LOCALIZATION NOTE (sourceSearch.search.again.key2): Key shortcut to highlight\n# the next occurrence of the last search triggered from a source search\nsourceSearch.search.again.key2=CmdOrCtrl+G\n\n# LOCALIZATION NOTE (sourceSearch.search.againPrev.key2): Key shortcut to highlight\n# the previous occurrence of the last search triggered from a source search\nsourceSearch.search.againPrev.key2=CmdOrCtrl+Shift+G\n\n# LOCALIZATION NOTE (sourceSearch.resultsSummary1): Shows a summary of\n# the number of matches for autocomplete\nsourceSearch.resultsSummary1=%d results\n\n# LOCALIZATION NOTE (noMatchingStringsText): The text to display in the\n# global search results when there are no matching strings after filtering.\nnoMatchingStringsText=No matches found\n\n# LOCALIZATION NOTE (emptySearchText): This is the text that appears in the\n# filter text box when it is empty and the scripts container is selected.\nemptySearchText=Search scripts (%S)\n\n# LOCALIZATION NOTE (emptyVariablesFilterText): This is the text that\n# appears in the filter text box for the variables view container.\nemptyVariablesFilterText=Filter variables\n\n# LOCALIZATION NOTE (emptyPropertiesFilterText): This is the text that\n# appears in the filter text box for the editor's variables view bubble.\nemptyPropertiesFilterText=Filter properties\n\n# LOCALIZATION NOTE (searchPanelFilter): This is the text that appears in the\n# filter panel popup for the filter scripts operation.\nsearchPanelFilter=Filter scripts (%S)\n\n# LOCALIZATION NOTE (searchPanelGlobal): This is the text that appears in the\n# filter panel popup for the global search operation.\nsearchPanelGlobal=Search in all files (%S)\n\n# LOCALIZATION NOTE (searchPanelFunction): This is the text that appears in the\n# filter panel popup for the function search operation.\nsearchPanelFunction=Search for function definition (%S)\n\n# LOCALIZATION NOTE (searchPanelToken): This is the text that appears in the\n# filter panel popup for the token search operation.\nsearchPanelToken=Find in this file (%S)\n\n# LOCALIZATION NOTE (searchPanelGoToLine): This is the text that appears in the\n# filter panel popup for the line search operation.\nsearchPanelGoToLine=Go to line (%S)\n\n# LOCALIZATION NOTE (searchPanelVariable): This is the text that appears in the\n# filter panel popup for the variables search operation.\nsearchPanelVariable=Filter variables (%S)\n\n# LOCALIZATION NOTE (breakpointMenuItem): The text for all the elements that\n# are displayed in the breakpoints menu item popup.\nbreakpointMenuItem.setConditional=Configure conditional breakpoint\nbreakpointMenuItem.enableSelf=Enable breakpoint\nbreakpointMenuItem.disableSelf=Disable breakpoint\nbreakpointMenuItem.deleteSelf=Remove breakpoint\nbreakpointMenuItem.enableOthers=Enable others\nbreakpointMenuItem.disableOthers=Disable others\nbreakpointMenuItem.deleteOthers=Remove others\nbreakpointMenuItem.enableAll=Enable all breakpoints\nbreakpointMenuItem.disableAll=Disable all breakpoints\nbreakpointMenuItem.deleteAll=Remove all breakpoints\n\n# LOCALIZATION NOTE (breakpoints.header): Breakpoints right sidebar pane header.\nbreakpoints.header=Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.none): The text that appears when there are\n# no breakpoints present\nbreakpoints.none=No Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.enable): The text that may appear as a tooltip\n# when hovering over the 'disable breakpoints' switch button in right sidebar\nbreakpoints.enable=Enable Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.disable): The text that may appear as a tooltip\n# when hovering over the 'disable breakpoints' switch button in right sidebar\nbreakpoints.disable=Disable Breakpoints\n\n# LOCALIZATION NOTE (breakpoints.removeBreakpointTooltip): The tooltip that is displayed\n# for remove breakpoint button in right sidebar\nbreakpoints.removeBreakpointTooltip=Remove Breakpoint\n\n# LOCALIZATION NOTE (callStack.header): Call Stack right sidebar pane header.\ncallStack.header=Call Stack\n\n# LOCALIZATION NOTE (callStack.notPaused): Call Stack right sidebar pane\n# message when not paused.\ncallStack.notPaused=Not Paused\n\n# LOCALIZATION NOTE (callStack.collapse): Call Stack right sidebar pane\n# message to hide some of the frames that are shown.\ncallStack.collapse=Collapse Rows\n\n# LOCALIZATION NOTE (callStack.expand): Call Stack right sidebar pane\n# message to show more of the frames.\ncallStack.expand=Expand Rows\n\n# LOCALIZATION NOTE (editor.searchResults): Editor Search bar message\n# for the summarizing the selected search result. e.g. 5 of 10 results.\neditor.searchResults=%d of %d results\n\n# LOCALIZATION NOTE (sourceSearch.singleResult): Copy shown when there is one result.\neditor.singleResult=1 result\n\n# LOCALIZATION NOTE (editor.noResults): Editor Search bar message\n# for when no results found.\neditor.noResults=no results\n\n# LOCALIZATION NOTE (editor.searchResults.nextResult): Editor Search bar\n# tooltip for traversing to the Next Result\neditor.searchResults.nextResult=Next Result\n\n# LOCALIZATION NOTE (editor.searchResults.prevResult): Editor Search bar\n# tooltip for traversing to the Previous Result\neditor.searchResults.prevResult=Previous Result\n\n# LOCALIZATION NOTE (editor.searchTypeToggleTitle): Search bar title for\n# toggling search type buttons(function search, variable search)\neditor.searchTypeToggleTitle=Search for:\n\n# LOCALIZATION NOTE (editor.addBreakpoint): Editor gutter context menu item\n# for adding a breakpoint on a line.\neditor.addBreakpoint=Add Breakpoint\n\n# LOCALIZATION NOTE (editor.disableBreakpoint): Editor gutter context menu item\n# for disabling a breakpoint on a line.\neditor.disableBreakpoint=Disable Breakpoint\n\n# LOCALIZATION NOTE (editor.enableBreakpoint): Editor gutter context menu item\n# for enabling a breakpoint on a line.\neditor.enableBreakpoint=Enable Breakpoint\n\n# LOCALIZATION NOTE (editor.removeBreakpoint): Editor gutter context menu item\n# for removing a breakpoint on a line.\neditor.removeBreakpoint=Remove Breakpoint\n\n# LOCALIZATION NOTE (editor.editBreakpoint): Editor gutter context menu item\n# for setting a breakpoint condition on a line.\neditor.editBreakpoint=Edit Breakpoint\n\n# LOCALIZATION NOTE (editor.addConditionalBreakpoint): Editor gutter context\n# menu item for adding a breakpoint condition on a line.\neditor.addConditionalBreakpoint=Add Conditional Breakpoint\n\n# LOCALIZATION NOTE (editor.conditionalPanel.placeholder): Placeholder text for\n# input element inside ConditionalPanel component\neditor.conditionalPanel.placeholder=This breakpoint will pause when the expression is true\n\n# LOCALIZATION NOTE (editor.conditionalPanel.placeholder): Tooltip text for\n# close button inside ConditionalPanel component\neditor.conditionalPanel.close=Cancel edit breakpoint and close\n\n# LOCALIZATION NOTE (editor.jumpToMappedLocation1): Context menu item\n# for navigating to a source mapped location\neditor.jumpToMappedLocation1=Jump to %S location\n\n# LOCALIZATION NOTE (framework.disableGrouping): This is the text that appears in the\n# context menu to disable framework grouping.\nframework.disableGrouping=Disable Framework Grouping\n\n# LOCALIZATION NOTE (framework.disableGrouping.accesskey): Access key to toggle\n# framework grouping from the context menu.\nframework.disableGrouping.accesskey=u\n\n# LOCALIZATION NOTE (framework.enableGrouping): This is the text that appears in the\n# context menu to enable framework grouping.\nframework.enableGrouping=Enable Framework Grouping\n\n# LOCALIZATION NOTE (framework.enableGrouping.accesskey): Access key to toggle\n# framework grouping from the context menu.\nframework.enableGrouping.accesskey=u\n\n# LOCALIZATION NOTE (generated): Source Map term for a server source location\ngenerated=generated\n\n# LOCALIZATION NOTE (original): Source Map term for a debugger UI source location\noriginal=original\n\n# LOCALIZATION NOTE (expressions.placeholder): Placeholder text for expression\n# input element\nexpressions.placeholder=Add Watch Expression\n\n# LOCALIZATION NOTE (sourceTabs.closeTab): Editor source tab context menu item\n# for closing the selected tab below the mouse.\nsourceTabs.closeTab=Close tab\n\n# LOCALIZATION NOTE (sourceTabs.closeTab.accesskey): Access key to close the currently select\n# source tab from the editor context menu item.\nsourceTabs.closeTab.accesskey=c\n\n# LOCALIZATION NOTE (sourceTabs.closeOtherTabs): Editor source tab context menu item\n# for closing the other tabs.\nsourceTabs.closeOtherTabs=Close others\n\n# LOCALIZATION NOTE (sourceTabs.closeOtherTabs.accesskey): Access key to close other source tabs\n# from the editor context menu.\nsourceTabs.closeOtherTabs.accesskey=o\n\n# LOCALIZATION NOTE (sourceTabs.closeTabsToEnd): Editor source tab context menu item\n# for closing the tabs to the end (the right for LTR languages) of the selected tab.\nsourceTabs.closeTabsToEnd=Close tabs to the right\n\n# LOCALIZATION NOTE (sourceTabs.closeTabsToEnd.accesskey): Access key to close source tabs\n# after the selected tab from the editor context menu.\nsourceTabs.closeTabsToEnd.accesskey=e\n\n# LOCALIZATION NOTE (sourceTabs.closeAllTabs): Editor source tab context menu item\n# for closing all tabs.\nsourceTabs.closeAllTabs=Close all tabs\n\n# LOCALIZATION NOTE (sourceTabs.closeAllTabs.accesskey): Access key to close all tabs from the\n# editor context menu.\nsourceTabs.closeAllTabs.accesskey=a\n\n# LOCALIZATION NOTE (sourceTabs.revealInTree): Editor source tab context menu item\n# for revealing source in tree.\nsourceTabs.revealInTree=Reveal in Tree\n\n# LOCALIZATION NOTE (sourceTabs.revealInTree.accesskey): Access key to reveal a source in the\n# tree from the context menu.\nsourceTabs.revealInTree.accesskey=r\n\n# LOCALIZATION NOTE (sourceTabs.copyLink): Editor source tab context menu item\n# for copying a link address.\nsourceTabs.copyLink=Copy Link Address\n\n# LOCALIZATION NOTE (sourceTabs.copyLink.accesskey): Access key to copy a link addresss from the\n# editor context menu.\nsourceTabs.copyLink.accesskey=l\n\n# LOCALIZATION NOTE (sourceTabs.prettyPrint): Editor source tab context menu item\n# for pretty printing the source.\nsourceTabs.prettyPrint=Pretty Print Source\n\n# LOCALIZATION NOTE (sourceTabs.prettyPrint.accesskey): Access key to pretty print a source from\n# the editor context menu.\nsourceTabs.prettyPrint.accesskey=p\n\n# LOCALIZATION NOTE (sourceFooter.blackbox): Tooltip text associated\n# with the blackbox button\nsourceFooter.blackbox=Blackbox Source\n\n# LOCALIZATION NOTE (sourceFooter.unblackbox): Tooltip text associated\n# with the blackbox button\nsourceFooter.unblackbox=Unblackbox Source\n\n# LOCALIZATION NOTE (sourceFooter.unblackbox.accesskey): Access key to blackbox\n# an associated source\nsourceFooter.unblackbox.accesskey=b\n\n# LOCALIZATION NOTE (sourceFooter.blackbox.accesskey): Access key to blackbox\n# an associated source\nsourceFooter.blackbox.accesskey=b\n\n# LOCALIZATION NOTE (sourceFooter.blackboxed): Text associated\n# with a blackboxed source\nsourceFooter.blackboxed=Blackboxed Source\n\n# LOCALIZATION NOTE (sourceTabs.closeTabButtonTooltip): The tooltip that is displayed\n# for close tab button in source tabs.\nsourceTabs.closeTabButtonTooltip=Close tab\n\n# LOCALIZATION NOTE (sourceTabs.newTabButtonTooltip): The tooltip that is displayed for\n# new tab button in source tabs.\nsourceTabs.newTabButtonTooltip=Search for sources (%S)\n\n# LOCALIZATION NOTE (scopes.header): Scopes right sidebar pane header.\nscopes.header=Scopes\n\n# LOCALIZATION NOTE (scopes.notAvailable): Scopes right sidebar pane message\n# for when the debugger is paused, but there isn't pause data.\nscopes.notAvailable=Scopes Unavailable\n\n# LOCALIZATION NOTE (scopes.notPaused): Scopes right sidebar pane message\n# for when the debugger is not paused.\nscopes.notPaused=Not Paused\n\n# LOCALIZATION NOTE (scopes.block): Refers to a block of code in\n# the scopes pane when the debugger is paused.\nscopes.block=Block\n\n# LOCALIZATION NOTE (sources.header): Sources left sidebar header\nsources.header=Sources\n\n# LOCALIZATION NOTE (sources.search): Sources left sidebar prompt\n# e.g. Cmd+P to search. On a mac, we use the command unicode character.\n# On windows, it's ctrl.\nsources.search=%S to search\n\n# LOCALIZATION NOTE (watchExpressions.header): Watch Expressions right sidebar\n# pane header.\nwatchExpressions.header=Watch Expressions\n\n# LOCALIZATION NOTE (watchExpressions.refreshButton): Watch Expressions header\n# button for refreshing the expressions.\nwatchExpressions.refreshButton=Refresh\n\n# LOCALIZATION NOTE (welcome.search): The center pane welcome panel's\n# search prompt. e.g. cmd+p to search for files. On windows, it's ctrl, on\n# a mac we use the unicode character.\nwelcome.search=%S to search for sources\n\n# LOCALIZATION NOTE (sourceSearch.search): The center pane Source Search\n# prompt for searching for files.\nsourceSearch.search=Search Sources…\n\n# LOCALIZATION NOTE (sourceSearch.noResults): The center pane Source Search\n# message when the query did not match any of the sources.\nsourceSearch.noResults=No files matching %S found\n\n# LOCALIZATION NOTE (ignoreExceptions): The pause on exceptions button tooltip\n# when the debugger will not pause on exceptions.\nignoreExceptions=Ignore exceptions. Click to pause on uncaught exceptions\n\n# LOCALIZATION NOTE (pauseOnUncaughtExceptions): The pause on exceptions button\n# tooltip when the debugger will pause on uncaught exceptions.\npauseOnUncaughtExceptions=Pause on uncaught exceptions. Click to pause on all exceptions\n\n# LOCALIZATION NOTE (pauseOnExceptions): The pause on exceptions button tooltip\n# when the debugger will pause on all exceptions.\npauseOnExceptions=Pause on all exceptions. Click to ignore exceptions\n\n# LOCALIZATION NOTE (loadingText): The text that is displayed in the script\n# editor when the loading process has started but there is no file to display\n# yet.\nloadingText=Loading\\u2026\n\n# LOCALIZATION NOTE (errorLoadingText2): The text that is displayed in the debugger\n# viewer when there is an error loading a file\nerrorLoadingText2=Error loading this URL: %S\n\n# LOCALIZATION NOTE (addWatchExpressionText): The text that is displayed in the\n# watch expressions list to add a new item.\naddWatchExpressionText=Add watch expression\n\n# LOCALIZATION NOTE (addWatchExpressionButton): The button that is displayed in the\n# variables view popup.\naddWatchExpressionButton=Watch\n\n# LOCALIZATION NOTE (emptyVariablesText): The text that is displayed in the\n# variables pane when there are no variables to display.\nemptyVariablesText=No variables to display\n\n# LOCALIZATION NOTE (scopeLabel): The text that is displayed in the variables\n# pane as a header for each variable scope (e.g. \"Global scope, \"With scope\",\n# etc.).\nscopeLabel=%S scope\n\n# LOCALIZATION NOTE (watchExpressionsScopeLabel): The name of the watch\n# expressions scope. This text is displayed in the variables pane as a header for\n# the watch expressions scope.\nwatchExpressionsScopeLabel=Watch expressions\n\n# LOCALIZATION NOTE (globalScopeLabel): The name of the global scope. This text\n# is added to scopeLabel and displayed in the variables pane as a header for\n# the global scope.\nglobalScopeLabel=Global\n\n# LOCALIZATION NOTE (variablesViewErrorStacktrace): This is the text that is\n# shown before the stack trace in an error.\nvariablesViewErrorStacktrace=Stack trace:\n\n# LOCALIZATION NOTE (variablesViewMoreObjects): the text that is displayed\n# when you have an object preview that does not show all of the elements. At the end of the list\n# you see \"N more...\" in the web console output.\n# This is a semi-colon list of plural forms.\n# See: http://developer.mozilla.org/en/docs/Localization_and_Plurals\n# #1 number of remaining items in the object\n# example: 3 more…\nvariablesViewMoreObjects=#1 more…;#1 more…\n\n# LOCALIZATION NOTE (variablesEditableNameTooltip): The text that is displayed\n# in the variables list on an item with an editable name.\nvariablesEditableNameTooltip=Double click to edit\n\n# LOCALIZATION NOTE (variablesEditableValueTooltip): The text that is displayed\n# in the variables list on an item with an editable value.\nvariablesEditableValueTooltip=Click to change value\n\n# LOCALIZATION NOTE (variablesCloseButtonTooltip): The text that is displayed\n# in the variables list on an item which can be removed.\nvariablesCloseButtonTooltip=Click to remove\n\n# LOCALIZATION NOTE (variablesEditButtonTooltip): The text that is displayed\n# in the variables list on a getter or setter which can be edited.\nvariablesEditButtonTooltip=Click to set value\n\n# LOCALIZATION NOTE (variablesEditableValueTooltip): The text that is displayed\n# in a tooltip on the \"open in inspector\" button in the the variables list for a\n# DOMNode item.\nvariablesDomNodeValueTooltip=Click to select the node in the inspector\n\n# LOCALIZATION NOTE (configurable|...|Tooltip): The text that is displayed\n# in the variables list on certain variables or properties as tooltips.\n# Expanations of what these represent can be found at the following links:\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/defineProperty\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isExtensible\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isFrozen\n# https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object/isSealed\n# It's probably best to keep these in English.\nconfigurableTooltip=configurable\nenumerableTooltip=enumerable\nwritableTooltip=writable\nfrozenTooltip=frozen\nsealedTooltip=sealed\nextensibleTooltip=extensible\noverriddenTooltip=overridden\nWebIDLTooltip=WebIDL\n\n# LOCALIZATION NOTE (variablesSeparatorLabel): The text that is displayed\n# in the variables list as a separator between the name and value.\nvariablesSeparatorLabel=:\n\n# LOCALIZATION NOTE (watchExpressionsSeparatorLabel2): The text that is displayed\n# in the watch expressions list as a separator between the code and evaluation.\nwatchExpressionsSeparatorLabel2=\\u0020→\n\n# LOCALIZATION NOTE (functionSearchSeparatorLabel): The text that is displayed\n# in the functions search panel as a separator between function's inferred name\n# and its real name (if available).\nfunctionSearchSeparatorLabel=←\n\n# LOCALIZATION NOTE(symbolSearch.search.functionsPlaceholder): The placeholder\n# text displayed when the user searches for functions in a file\nsymbolSearch.search.functionsPlaceholder=Search functions…\n\n# LOCALIZATION NOTE(symbolSearch.search.variablesPlaceholder): The placeholder\n# text displayed when the user searches for variables in a file\nsymbolSearch.search.variablesPlaceholder=Search variables…\n\n# LOCALIZATION NOTE(symbolSearch.search.key2): The Key Shortcut for\n# searching for a function or variable\nsymbolSearch.search.key2=CmdOrCtrl+Shift+O\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.regex): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.regex=Regex\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.caseSensitive): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.caseSensitive=Case sensitive\n\n# LOCALIZATION NOTE(symbolSearch.searchModifier.wholeWord): A search option\n# when searching text in a file\nsymbolSearch.searchModifier.wholeWord=Whole word\n\n# LOCALIZATION NOTE (resumptionOrderPanelTitle): This is the text that appears\n# as a description in the notification panel popup, when multiple debuggers are\n# open in separate tabs and the user tries to resume them in the wrong order.\n# The substitution parameter is the URL of the last paused window that must be\n# resumed first.\nresumptionOrderPanelTitle=There are one or more paused debuggers. Please resume the most-recently paused debugger first at: %S\n\nvariablesViewOptimizedOut=(optimized away)\nvariablesViewUninitialized=(uninitialized)\nvariablesViewMissingArgs=(unavailable)\n\nanonymousSourcesLabel=Anonymous Sources\n\nexperimental=This is an experimental feature\n\n# LOCALIZATION NOTE (whyPaused.debuggerStatement): The text that is displayed\n# in a info block explaining how the debugger is currently paused due to a `debugger`\n# statement in the code\nwhyPaused.debuggerStatement=Paused on debugger statement\n\n# LOCALIZATION NOTE (whyPaused.breakpoint): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a breakpoint\nwhyPaused.breakpoint=Paused on breakpoint\n\n# LOCALIZATION NOTE (whyPaused.exception): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an exception\nwhyPaused.exception=Paused on exception\n\n# LOCALIZATION NOTE (whyPaused.resumeLimit): The text that is displayed\n# in a info block explaining how the debugger is currently paused while stepping\n# in or out of the stack\nwhyPaused.resumeLimit=Paused while stepping\n\n# LOCALIZATION NOTE (whyPaused.pauseOnDOMEvents): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# dom event\nwhyPaused.pauseOnDOMEvents=Paused on event listener\n\n# LOCALIZATION NOTE (whyPaused.breakpointConditionThrown): The text that is displayed\n# in an info block when evaluating a conditional breakpoint throws an error\nwhyPaused.breakpointConditionThrown=Error with conditional breakpoint\n\n# LOCALIZATION NOTE (whyPaused.xhr): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an\n# xml http request\nwhyPaused.xhr=Paused on XMLHttpRequest\n\n# LOCALIZATION NOTE (whyPaused.promiseRejection): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# promise rejection\nwhyPaused.promiseRejection=Paused on promise rejection\n\n# LOCALIZATION NOTE (whyPaused.assert): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an\n# assert\nwhyPaused.assert=Paused on assertion\n\n# LOCALIZATION NOTE (whyPaused.debugCommand): The text that is displayed\n# in a info block explaining how the debugger is currently paused on a\n# debugger statement\nwhyPaused.debugCommand=Paused on debugged function\n\n# LOCALIZATION NOTE (whyPaused.other): The text that is displayed\n# in a info block explaining how the debugger is currently paused on an event\n# listener breakpoint set\nwhyPaused.other=Debugger paused\n\n# LOCALIZATION NOTE (ctrl): The text that is used for documenting\n# keyboard shortcuts that use the control key\nctrl=Ctrl\n"
 
 /***/ },
 /* 961 */,
@@ -37511,158 +37047,21 @@ return /******/ (function(modules) { // webpackBootstrap
 
 
 /***/ },
-/* 966 */
-/***/ function(module, exports, __webpack_require__) {
-
-	"use strict";
-
-	var _require = __webpack_require__(830),
-	    Menu = _require.Menu,
-	    MenuItem = _require.MenuItem;
-
-	var _require2 = __webpack_require__(828),
-	    isFirefoxPanel = _require2.isFirefoxPanel;
-
-	if (!isFirefoxPanel()) {
-	  __webpack_require__(973);
-	}
-
-	function createPopup(doc) {
-	  var popup = doc.createElement("menupopup");
-	  popup.className = "landing-popup";
-	  if (popup.openPopupAtScreen) {
-	    return popup;
-	  }
-
-	  function preventDefault(e) {
-	    e.preventDefault();
-	    e.returnValue = false;
-	  }
-
-	  var mask = document.querySelector("#contextmenu-mask");
-	  if (!mask) {
-	    mask = doc.createElement("div");
-	    mask.id = "contextmenu-mask";
-	    document.body.appendChild(mask);
-	  }
-
-	  mask.onclick = () => popup.hidePopup();
-
-	  popup.openPopupAtScreen = function (clientX, clientY) {
-	    this.style.setProperty("left", `${clientX}px`);
-	    this.style.setProperty("top", `${clientY}px`);
-	    mask = document.querySelector("#contextmenu-mask");
-	    window.onwheel = preventDefault;
-	    mask.classList.add("show");
-	    this.dispatchEvent(new Event("popupshown"));
-	    this.popupshown;
-	  };
-
-	  popup.hidePopup = function () {
-	    this.remove();
-	    mask = document.querySelector("#contextmenu-mask");
-	    mask.classList.remove("show");
-	    window.onwheel = null;
-	  };
-
-	  return popup;
-	}
-
-	if (!isFirefoxPanel()) {
-	  Menu.prototype.createPopup = createPopup;
-	}
-
-	function onShown(menu, popup) {
-	  popup.childNodes.forEach((menuItemNode, i) => {
-	    var item = menu.items[i];
-
-	    if (!item.disabled && item.visible) {
-	      menuItemNode.onclick = () => {
-	        item.click();
-	        popup.hidePopup();
-	      };
-
-	      showSubMenu(item.submenu, menuItemNode, popup);
-	    }
-	  });
-	}
-
-	function showMenu(evt, items) {
-	  if (items.length === 0) {
-	    return;
-	  }
-
-	  var menu = new Menu();
-	  items.filter(item => item.visible === undefined || item.visible === true).forEach(item => {
-	    var menuItem = new MenuItem(item);
-	    menuItem.submenu = createSubMenu(item.submenu);
-	    menu.append(menuItem);
-	  });
-
-	  if (isFirefoxPanel()) {
-	    menu.popup(evt.screenX, evt.screenY, { doc: window.parent.document });
-	    return;
-	  }
-
-	  menu.on("open", (_, popup) => onShown(menu, popup));
-	  menu.popup(evt.clientX, evt.clientY, { doc: document });
-	}
-
-	function createSubMenu(subItems) {
-	  if (subItems) {
-	    var subMenu = new Menu();
-	    subItems.forEach(subItem => {
-	      subMenu.append(new MenuItem(subItem));
-	    });
-	    return subMenu;
-	  }
-	  return null;
-	}
-
-	function showSubMenu(subMenu, menuItemNode, popup) {
-	  if (subMenu) {
-	    var subMenuNode = menuItemNode.querySelector("menupopup");
-
-	    var _popup$getBoundingCli = popup.getBoundingClientRect(),
-	        left = _popup$getBoundingCli.left,
-	        top = _popup$getBoundingCli.top,
-	        width = _popup$getBoundingCli.width;
-
-	    subMenuNode.style.setProperty("left", `${left + width}px`);
-	    subMenuNode.style.setProperty("top", `${top}px`);
-
-	    var subMenuItemNodes = menuItemNode.querySelector("menupopup:not(.landing-popup)").childNodes;
-	    subMenuItemNodes.forEach((subMenuItemNode, j) => {
-	      var subMenuItem = subMenu.items.filter(item => item.visible === undefined || item.visible === true)[j];
-	      if (!subMenuItem.disabled && subMenuItem.visible) {
-	        subMenuItemNode.onclick = () => {
-	          subMenuItem.click();
-	          popup.hidePopup();
-	        };
-	      }
-	    });
-	  }
-	}
-
-	function buildMenu(items) {
-	  return items.map(itm => {
-	    var hide = typeof itm.hidden === "function" ? itm.hidden() : itm.hidden;
-	    return hide ? null : itm.item;
-	  }).filter(itm => itm !== null);
-	}
-
-	module.exports = {
-	  showMenu,
-	  buildMenu
-	};
-
-/***/ },
+/* 966 */,
 /* 967 */
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var EventEmitter = __webpack_require__(968);
+
+	function inToolbox() {
+	  return window.parent.document.documentURI == "about:devtools-toolbox";
+	}
 
 	/**
 	 * A partial implementation of the Menu API provided by electron:
@@ -37777,7 +37176,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	      var menuitem = doc.createElement("menuitem");
 	      menuitem.setAttribute("label", item.label);
-	      menuitem.textContent = item.label;
+	      if (!inToolbox()) {
+	        menuitem.textContent = item.label;
+	      }
+
 	      var menu = doc.createElement("menu");
 	      menu.appendChild(menuitem);
 	      menu.appendChild(menupopup);
@@ -37797,7 +37199,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	    } else {
 	      var _menuitem = doc.createElement("menuitem");
 	      _menuitem.setAttribute("label", item.label);
-	      _menuitem.textContent = item.label;
+
+	      if (!inToolbox()) {
+	        _menuitem.textContent = item.label;
+	      }
+
 	      _menuitem.addEventListener("command", () => item.click());
 
 	      if (item.type === "checkbox") {
@@ -37843,6 +37249,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	var EventEmitter = function EventEmitter() {};
 	module.exports = EventEmitter;
@@ -37986,6 +37396,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	/*
 	 * A sham for https://dxr.mozilla.org/mozilla-central/source/toolkit/modules/Promise.jsm
 	 */
@@ -38017,6 +37431,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	/**
 	 * A partial implementation of the MenuItem API provided by electron:
@@ -38283,6 +37701,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = []; var _n = true; var _d = false; var _e = undefined; try { for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"]) _i["return"](); } finally { if (_d) throw _e; } } return _arr; } return function (arr, i) { if (Array.isArray(arr)) { return arr; } else if (Symbol.iterator in Object(arr)) { return sliceIterator(arr, i); } else { throw new TypeError("Invalid attempt to destructure non-iterable instance"); } }; }();
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var _require = __webpack_require__(29),
 	    appinfo = _require.appinfo;
 
@@ -38530,12 +37952,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	exports.KeyShortcuts = KeyShortcuts;
 
 /***/ },
-/* 973 */
-/***/ function(module, exports) {
-
-	// removed by extract-text-webpack-plugin
-
-/***/ },
+/* 973 */,
 /* 974 */,
 /* 975 */
 /***/ function(module, exports, __webpack_require__) {
@@ -38802,6 +38219,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var _require = __webpack_require__(977),
 	    DebuggerClient = _require.DebuggerClient;
 
@@ -38827,6 +38248,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	"use strict";
 
 	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	var _require = __webpack_require__(978),
 	    Ci = _require.Ci,
@@ -40913,6 +40338,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	    telemetry: "FRAMES"
 	  }),
 
+	  getEnvironment: function (frameId) {
+	    return this.request({ to: frameId, type: "getEnvironment" });
+	  },
+
 	  /**
 	   * An array of cached frames. Clients can observe the framesadded and
 	   * framescleared event to keep up to date on changes to this cache,
@@ -41050,6 +40479,37 @@ return /******/ (function(modules) { // webpackBootstrap
 	   */
 	  threadLongString: function (aGrip) {
 	    return this._longString(aGrip, "_threadGrips");
+	  },
+
+	  /**
+	   * Get or create an ArrayBuffer client, checking the grip client cache if it
+	   * already exists.
+	   *
+	   * @param aGrip Object
+	   *        The ArrayBuffer grip returned by the protocol.
+	   * @param aGripCacheName String
+	   *        The property name of the grip client cache to check for existing
+	   *        clients in.
+	   */
+	  _arrayBuffer: function (aGrip, aGripCacheName) {
+	    if (aGrip.actor in this[aGripCacheName]) {
+	      return this[aGripCacheName][aGrip.actor];
+	    }
+
+	    var client = new ArrayBufferClient(this.client, aGrip);
+	    this[aGripCacheName][aGrip.actor] = client;
+	    return client;
+	  },
+
+	  /**
+	   * Return an instance of ArrayBufferClient for the given ArrayBuffer grip that
+	   * is scoped to the thread lifetime.
+	   *
+	   * @param aGrip Object
+	   *        The ArrayBuffer grip returned by the protocol.
+	   */
+	  threadArrayBuffer: function (aGrip) {
+	    return this._arrayBuffer(aGrip, "_threadGrips");
 	  },
 
 	  /**
@@ -41576,6 +41036,44 @@ return /******/ (function(modules) { // webpackBootstrap
 	};
 
 	/**
+	 * A ArrayBufferClient provides a way to access ArrayBuffer from the
+	 * debugger server.
+	 *
+	 * @param aClient DebuggerClient
+	 *        The debugger client parent.
+	 * @param aGrip Object
+	 *        A pause-lifetime ArrayBuffer grip returned by the protocol.
+	 */
+	function ArrayBufferClient(aClient, aGrip) {
+	  this._grip = aGrip;
+	  this._client = aClient;
+	  this.request = this._client.request;
+	}
+	exports.ArrayBufferClient = ArrayBufferClient;
+
+	ArrayBufferClient.prototype = {
+	  get actor() {
+	    return this._grip.actor;
+	  },
+	  get length() {
+	    return this._grip.length;
+	  },
+	  get _transport() {
+	    return this._client._transport;
+	  },
+
+	  valid: true,
+
+	  slice: DebuggerClient.requester({
+	    type: "slice",
+	    start: args(0),
+	    count: args(1)
+	  }, {
+	    telemetry: "SLICE"
+	  })
+	};
+
+	/**
 	 * A LongStringClient provides a way to access "very long" strings from the
 	 * debugger server.
 	 *
@@ -41793,6 +41291,29 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	    var contentType = aResponse.contentType,
 	        source = aResponse.source;
+
+
+	    if (source.type === 'arrayBuffer') {
+	      var arrayBuffer = this._activeThread.threadArrayBuffer(source);
+	      return arrayBuffer.slice(0, arrayBuffer.length).then(function (resp) {
+	        if (resp.error) {
+	          aCallback(resp);
+	          return resp;
+	        }
+	        // Keeping str as a string, ArrayBuffer/Uint8Array will not survive
+	        // immutable operations.
+	        var str = atob(resp.encoded);
+	        var newResponse = {
+	          source: {
+	            "binary": str,
+	            toString: "[wasm]"
+	          },
+	          contentType: contentType
+	        };
+	        aCallback(newResponse);
+	        return newResponse;
+	      });
+	    }
 
 	    var longString = this._activeThread.threadLongString(source);
 	    return longString.substring(0, longString.length).then(function (aResponse) {
@@ -42062,6 +41583,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	'use strict';
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	/*
 	 * A sham for https://developer.mozilla.org/en-US/Add-ons/SDK/Low-Level_APIs/chrome
 	 */
@@ -42141,6 +41666,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	"use strict";
 
 	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	/* General utilities used throughout devtools. */
 	var _require = __webpack_require__(978),
@@ -42713,6 +42242,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	var p = typeof window != "undefined" ? window.Promise : Promise;
 	p.defer = function defer() {
 	  var resolve, reject;
@@ -42735,6 +42268,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	module.exports = { AppConstants: {} };
 
 /***/ },
@@ -42742,6 +42279,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	/* WEBPACK VAR INJECTION */(function(module) {"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	module.metadata = {
 	  "stability": "unstable"
@@ -42989,6 +42530,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	var _require = __webpack_require__(978),
 	    Cc = _require.Cc,
@@ -43801,6 +43346,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	var DevToolsUtils = __webpack_require__(979);
 	var dumpn = DevToolsUtils.dumpn,
@@ -44788,6 +44337,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	"use strict";
 
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 	/**
 	 * Packets contain read / write functionality for the different packet types
 	 * supported by the debugging protocol, so that a transport can focus on
@@ -45540,6 +45093,10 @@ return /******/ (function(modules) { // webpackBootstrap
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 	var promise = __webpack_require__(980);
 	var EventEmitter = __webpack_require__(985);
@@ -47089,103 +46646,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 /***/ },
 /* 1010 */,
-/* 1011 */
-/***/ function(module, exports, __webpack_require__) {
-
-	"use strict";
-
-	Object.defineProperty(exports, "__esModule", {
-	  value: true
-	});
-
-	var _react = __webpack_require__(2);
-
-	var _devtoolsConfig = __webpack_require__(828);
-
-	var _reactDom = __webpack_require__(31);
-
-	var _reactDom2 = _interopRequireDefault(_reactDom);
-
-	var _Svg = __webpack_require__(344);
-
-	var _Svg2 = _interopRequireDefault(_Svg);
-
-	var _classnames = __webpack_require__(175);
-
-	var _classnames2 = _interopRequireDefault(_classnames);
-
-	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-	var breakpointSvg = document.createElement("span");
-
-	_reactDom2.default.render((0, _Svg2.default)("column-breakpoint"), breakpointSvg);
-
-	function makeBookmark(isDisabled) {
-	  var bp = breakpointSvg.cloneNode(true);
-	  bp.className = (0, _classnames2.default)("editor column-breakpoint", {
-	    "breakpoint-disabled": isDisabled
-	  });
-
-	  return bp;
-	}
-
-	class ColumnBreakpoint extends _react.Component {
-
-	  constructor() {
-	    super();
-
-	    this.bookmark = undefined;
-	    var self = this;
-	    self.addBreakpoint = this.addBreakpoint.bind(this);
-	  }
-
-	  addBreakpoint() {
-	    if (!(0, _devtoolsConfig.isEnabled)("columnBreakpoints")) {
-	      return;
-	    }
-
-	    var bp = this.props.breakpoint;
-	    var line = bp.location.line - 1;
-	    var column = bp.location.column;
-	    var editor = this.props.editor;
-
-	    var widget = makeBookmark(bp.disabled);
-	    var bookmark = editor.setBookmark({ line, ch: column }, { widget });
-	    this.bookmark = bookmark;
-	  }
-	  shouldComponentUpdate(nextProps) {
-	    return this.props.editor !== nextProps.editor || this.props.breakpoint.disabled !== nextProps.breakpoint.disabled || this.props.breakpoint.condition !== nextProps.breakpoint.condition;
-	  }
-	  componentDidMount() {
-	    if (!this.props.editor) {
-	      return;
-	    }
-
-	    this.addBreakpoint();
-	  }
-	  componentDidUpdate() {
-	    if (this.bookmark) {
-	      this.bookmark.clear();
-	    }
-	    this.addBreakpoint();
-	  }
-	  componentWillUnmount() {
-	    if (!this.props.editor || !this.bookmark) {
-	      return;
-	    }
-
-	    this.bookmark.clear();
-	  }
-	  render() {
-	    return null;
-	  }
-	}
-
-	ColumnBreakpoint.displayName = "ColumnBreakpoint";
-
-	exports.default = ColumnBreakpoint;
-
-/***/ },
+/* 1011 */,
 /* 1012 */
 /***/ function(module, exports, __webpack_require__) {
 
@@ -47216,6 +46677,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _Group3 = _interopRequireDefault(_Group2);
 
+	var _WhyPaused = __webpack_require__(1120);
+
+	var _WhyPaused2 = _interopRequireDefault(_WhyPaused);
+
 	var _actions = __webpack_require__(244);
 
 	var _actions2 = _interopRequireDefault(_actions);
@@ -47237,16 +46702,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	var NUM_FRAMES_SHOWN = 7;
 
 	class Frames extends _react.Component {
-
-	  collapseFrames(frames) {
-	    var frameworkGroupingOn = this.props.frameworkGroupingOn;
-
-	    if (!frameworkGroupingOn) {
-	      return frames;
-	    }
-
-	    return (0, _frame.collapseFrames)(frames);
-	  }
 
 	  constructor() {
 	    super(...arguments);
@@ -47274,6 +46729,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this.setState({
 	      showAllFrames: !this.state.showAllFrames
 	    });
+	  }
+
+	  collapseFrames(frames) {
+	    var frameworkGroupingOn = this.props.frameworkGroupingOn;
+
+	    if (!frameworkGroupingOn) {
+	      return frames;
+	    }
+
+	    return (0, _frame.collapseFrames)(frames);
 	  }
 
 	  truncateFrames(frames) {
@@ -47332,7 +46797,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  renderToggleButton(frames) {
 	    var buttonMessage = this.state.showAllFrames ? L10N.getStr("callStack.collapse") : L10N.getStr("callStack.expand");
 
-	    frames = (0, _frame.collapseFrames)(frames);
+	    frames = this.collapseFrames(frames);
 	    if (frames.length <= NUM_FRAMES_SHOWN) {
 	      return null;
 	    }
@@ -47341,14 +46806,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  render() {
-	    var frames = this.props.frames;
+	    var _props4 = this.props,
+	        frames = _props4.frames,
+	        pause = _props4.pause;
 
 
 	    if (!frames) {
 	      return _react.DOM.div({ className: "pane frames" }, _react.DOM.div({ className: "pane-info empty" }, L10N.getStr("callStack.notPaused")));
 	    }
 
-	    return _react.DOM.div({ className: "pane frames" }, this.renderFrames(frames), this.renderToggleButton(frames));
+	    return _react.DOM.div({ className: "pane frames" }, this.renderFrames(frames), (0, _WhyPaused2.default)({ pause }), this.renderToggleButton(frames));
 	  }
 	}
 
@@ -47358,7 +46825,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	  toggleFrameworkGrouping: _react.PropTypes.func.isRequired,
 	  selectedFrame: _react.PropTypes.object,
 	  selectFrame: _react.PropTypes.func.isRequired,
-	  toggleBlackBox: _react.PropTypes.func
+	  toggleBlackBox: _react.PropTypes.func,
+	  pause: _react.PropTypes.object
 	};
 
 	Frames.displayName = "Frames";
@@ -47388,7 +46856,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	exports.default = (0, _reactRedux.connect)(state => ({
 	  frames: getAndProcessFramesSelector(state),
 	  frameworkGroupingOn: (0, _selectors.getFrameworkGroupingState)(state),
-	  selectedFrame: (0, _selectors.getSelectedFrame)(state)
+	  selectedFrame: (0, _selectors.getSelectedFrame)(state),
+	  pause: (0, _selectors.getPause)(state)
 	}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Frames);
 
 /***/ },
@@ -47577,6 +47046,30 @@ return /******/ (function(modules) { // webpackBootstrap
 	  );
 	}
 
+	function isUnderscore(frame) {
+	  return getFrameUrl(frame).match(/underscore/i);
+	}
+
+	function isLodash(frame) {
+	  return getFrameUrl(frame).match(/lodash/i);
+	}
+
+	function isEmber(frame) {
+	  return getFrameUrl(frame).match(/ember/i);
+	}
+
+	function isVueJS(frame) {
+	  return getFrameUrl(frame).match(/vue\.js/i);
+	}
+
+	function isRxJs(frame) {
+	  return getFrameUrl(frame).match(/rxjs/i);
+	}
+
+	function isAngular(frame) {
+	  return getFrameUrl(frame).match(/angular/i);
+	}
+
 	function getLibraryFromUrl(frame) {
 	  // @TODO each of these fns calls getFrameUrl, just call it once
 	  // (assuming there's not more complex logic to identify a lib)
@@ -47612,6 +47105,30 @@ return /******/ (function(modules) { // webpackBootstrap
 	  if (isExtJs(frame)) {
 	    return "ExtJS";
 	  }
+
+	  if (isUnderscore(frame)) {
+	    return "Underscore";
+	  }
+
+	  if (isLodash(frame)) {
+	    return "Lodash";
+	  }
+
+	  if (isEmber(frame)) {
+	    return "Ember";
+	  }
+
+	  if (isVueJS(frame)) {
+	    return "VueJS";
+	  }
+
+	  if (isRxJs(frame)) {
+	    return "RxJS";
+	  }
+
+	  if (isAngular(frame)) {
+	    return "Angular";
+	  }
 	}
 
 	var displayNameMap = {
@@ -47624,7 +47141,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	  },
 	  React: {
 	    // eslint-disable-next-line max-len
-	    "ReactCompositeComponent._renderValidatedComponentWithoutOwnerOrContext/renderedElement<": "Render"
+	    "ReactCompositeComponent._renderValidatedComponentWithoutOwnerOrContext/renderedElement<": "Render",
+	    _renderValidatedComponentWithoutOwnerOrContext: "Render"
+	  },
+	  VueJS: {
+	    "renderMixin/Vue.prototype._render": "Render"
 	  },
 	  Webpack: {
 	    // eslint-disable-next-line camelcase
@@ -47932,10 +47453,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  componentDidMount() {
-	    if (!this.props.editor) {
-	      return;
-	    }
-
 	    this.highlightLineRange();
 	  }
 
@@ -47955,25 +47472,20 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var _props = this.props,
 	        highlightedLineRange = _props.highlightedLineRange,
 	        editor = _props.editor;
-
-
-	    if (!editor) {
-	      return;
-	    }
-
 	    var codeMirror = editor.codeMirror;
 
 
-	    if ((0, _isEmpty2.default)(highlightedLineRange) || !editor || !codeMirror) {
+	    if ((0, _isEmpty2.default)(highlightedLineRange) || !codeMirror) {
 	      return;
 	    }
 
 	    var start = highlightedLineRange.start,
 	        end = highlightedLineRange.end;
 
-
-	    (0, _range2.default)(start - 1, end).forEach(line => {
-	      codeMirror.removeLineClass(line, "line", "highlight-lines");
+	    codeMirror.operation(() => {
+	      (0, _range2.default)(start - 1, end).forEach(line => {
+	        codeMirror.removeLineClass(line, "line", "highlight-lines");
+	      });
 	    });
 	  }
 
@@ -47981,12 +47493,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var _props2 = this.props,
 	        highlightedLineRange = _props2.highlightedLineRange,
 	        editor = _props2.editor;
-
-
-	    if (!editor) {
-	      return;
-	    }
-
 	    var codeMirror = editor.codeMirror;
 
 
@@ -47998,10 +47504,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	        end = highlightedLineRange.end;
 
 
-	    editor.alignLine(start);
+	    codeMirror.operation(() => {
+	      editor.alignLine(start);
 
-	    (0, _range2.default)(start - 1, end).forEach(line => {
-	      codeMirror.addLineClass(line, "line", "highlight-lines");
+	      (0, _range2.default)(start - 1, end).forEach(line => {
+	        codeMirror.addLineClass(line, "line", "highlight-lines");
+	      });
 	    });
 	  }
 
@@ -48157,7 +47665,12 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-	var BracketArrow = (orientation, left, top, bottom) => {
+	var BracketArrow = (_ref) => {
+	  var orientation = _ref.orientation,
+	      left = _ref.left,
+	      top = _ref.top,
+	      bottom = _ref.bottom;
+
 	  return _react.DOM.div({
 	    className: (0, _classnames2.default)("bracket-arrow", orientation || "up"),
 	    style: { left, top, bottom }
@@ -48746,22 +48259,54 @@ return /******/ (function(modules) { // webpackBootstrap
 /* 1055 */,
 /* 1056 */,
 /* 1057 */
-/***/ function(module, exports) {
+/***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
 
 	Object.defineProperty(exports, "__esModule", {
 	  value: true
 	});
+	exports.getGeneratedLocation = undefined;
 
-	var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+	var getGeneratedLocation = exports.getGeneratedLocation = (() => {
+	  var _ref2 = _asyncToGenerator(function* (source, sourceMaps, location) {
+	    if (!sourceMaps.isOriginalId(location.sourceId)) {
+	      return location;
+	    }
+
+	    return yield sourceMaps.getGeneratedLocation(location, source.toJS());
+	  });
+
+	  return function getGeneratedLocation(_x2, _x3, _x4) {
+	    return _ref2.apply(this, arguments);
+	  };
+	})();
 
 	exports.firstString = firstString;
 	exports.locationMoved = locationMoved;
 	exports.makeLocationId = makeLocationId;
 	exports.makePendingLocationId = makePendingLocationId;
-	exports.allBreakpointsDisabled = allBreakpointsDisabled;
-	exports.equalizeLocationColumn = equalizeLocationColumn;
+	exports.assertBreakpoint = assertBreakpoint;
+	exports.assertPendingBreakpoint = assertPendingBreakpoint;
+	exports.assertLocation = assertLocation;
+	exports.assertPendingLocation = assertPendingLocation;
+	exports.breakpointAtLocation = breakpointAtLocation;
+	exports.breakpointExists = breakpointExists;
+	exports.createBreakpoint = createBreakpoint;
+	exports.createPendingBreakpoint = createPendingBreakpoint;
+
+	var _devtoolsConfig = __webpack_require__(828);
+
+	var _selectors = __webpack_require__(242);
+
+	var _assert = __webpack_require__(223);
+
+	var _assert2 = _interopRequireDefault(_assert);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
 	// Return the first argument that is a string, or null if nothing is a
 	// string.
 	function firstString() {
@@ -48778,7 +48323,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 	function locationMoved(location, newLocation) {
-	  return location.line !== newLocation.line || location.column != null && location.column !== newLocation.column;
+	  return location.line !== newLocation.line || location.column !== newLocation.column;
 	}
 
 	function makeLocationId(location) {
@@ -48791,25 +48336,109 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 	function makePendingLocationId(location) {
+	  assertPendingLocation(location);
 	  var sourceUrl = location.sourceUrl,
 	      line = location.line,
 	      column = location.column;
 
 	  var sourceUrlString = sourceUrl || "";
 	  var columnString = column || "";
+
 	  return `${sourceUrlString}:${line}:${columnString}`;
 	}
 
-	function allBreakpointsDisabled(state) {
-	  return state.breakpoints.every(x => x.disabled);
+	function assertBreakpoint(breakpoint) {
+	  assertLocation(breakpoint.location);
+	  assertLocation(breakpoint.generatedLocation);
+	}
+
+	function assertPendingBreakpoint(pendingBreakpoint) {
+	  assertPendingLocation(pendingBreakpoint.location);
+	  assertPendingLocation(pendingBreakpoint.generatedLocation);
+	}
+
+	function assertLocation(location) {
+	  assertPendingLocation(location);
+	  var sourceId = location.sourceId;
+
+	  (0, _assert2.default)(!!sourceId, "location must have a source id");
+	}
+
+	function assertPendingLocation(location) {
+	  (0, _assert2.default)(!!location, "location must exist");
+
+	  var sourceUrl = location.sourceUrl;
+
+	  // sourceUrl is null when the source does not have a url
+
+	  (0, _assert2.default)(sourceUrl !== undefined, "location must have a source url");
+	  (0, _assert2.default)(location.hasOwnProperty("line"), "location must have a line");
+	  (0, _assert2.default)(location.hasOwnProperty("column") != null, "location must have a column");
 	}
 
 	// syncing
-	function equalizeLocationColumn(location, hasColumn) {
-	  if (hasColumn) {
-	    return location;
-	  }
-	  return _extends({}, location, { column: undefined });
+	function breakpointAtLocation(breakpoints, _ref) {
+	  var line = _ref.line,
+	      column = _ref.column;
+
+	  return breakpoints.find(breakpoint => {
+	    var sameLine = breakpoint.location.line === line + 1;
+	    if (!sameLine) {
+	      return false;
+	    }
+
+	    // NOTE: when column breakpoints are disabled we want to find
+	    // the first breakpoint
+	    if (!(0, _devtoolsConfig.isEnabled)("columnBreakpoints")) {
+	      return true;
+	    }
+
+	    return breakpoint.location.column === column;
+	  });
+	}
+
+	function breakpointExists(state, location) {
+	  var currentBp = (0, _selectors.getBreakpoint)(state, location);
+	  return currentBp && !currentBp.disabled;
+	}
+
+	function createBreakpoint(location) {
+	  var overrides = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+	  var condition = overrides.condition,
+	      disabled = overrides.disabled,
+	      generatedLocation = overrides.generatedLocation;
+
+	  var properties = {
+	    condition: condition || null,
+	    disabled: disabled || false,
+	    generatedLocation: generatedLocation || location,
+	    location
+	  };
+
+	  return properties;
+	}
+
+	function createPendingLocation(location) {
+	  var sourceUrl = location.sourceUrl,
+	      line = location.line,
+	      column = location.column;
+
+	  return { sourceUrl: sourceUrl, line, column };
+	}
+
+	function createPendingBreakpoint(bp) {
+	  var pendingLocation = createPendingLocation(bp.location);
+	  var pendingGeneratedLocation = createPendingLocation(bp.generatedLocation);
+
+	  assertPendingLocation(pendingLocation);
+	  assertPendingLocation(pendingLocation);
+
+	  return {
+	    condition: bp.condition,
+	    disabled: bp.disabled,
+	    location: pendingLocation,
+	    generatedLocation: pendingGeneratedLocation
+	  };
 	}
 
 /***/ },
@@ -48886,16 +48515,25 @@ return /******/ (function(modules) { // webpackBootstrap
 	        }
 
 	        var _action$value = action.value,
-	            expression = _action$value.expression,
-	            location = _action$value.location,
-	            result = _action$value.result;
+	            _expression = _action$value.expression,
+	            _location = _action$value.location,
+	            _result = _action$value.result,
+	            _tokenPos = _action$value.tokenPos,
+	            _cursorPos = _action$value.cursorPos;
 
 	        return state.set("selection", {
 	          updating: false,
-	          expression,
-	          location,
-	          result
+	          expression: _expression,
+	          location: _location,
+	          result: _result,
+	          tokenPos: _tokenPos,
+	          cursorPos: _cursorPos
 	        });
+	      }
+
+	    case "RESUMED":
+	      {
+	        return state.set("outOfScopeLocations", null);
 	      }
 
 	    default:
@@ -48955,28 +48593,29 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _parser = __webpack_require__(827);
 
-	var _parser2 = _interopRequireDefault(_parser);
+	var parser = _interopRequireWildcard(_parser);
 
-	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+	function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
 	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
 
-	function setSymbols(source) {
+	function setSymbols(sourceId) {
 	  return (() => {
 	    var _ref = _asyncToGenerator(function* (_ref2) {
 	      var dispatch = _ref2.dispatch,
 	          getState = _ref2.getState;
 
-	      if ((0, _selectors.hasSymbols)(getState(), source)) {
+	      var sourceRecord = (0, _selectors.getSource)(getState(), sourceId);
+	      if (!sourceRecord) {
 	        return;
 	      }
 
-	      var sourceText = (0, _selectors.getSourceText)(getState(), source.id);
-	      if (!sourceText) {
+	      var source = sourceRecord.toJS();
+	      if (!source.text || (0, _selectors.hasSymbols)(getState(), source)) {
 	        return;
 	      }
 
-	      var symbols = yield _parser2.default.getSymbols(sourceText.toJS());
+	      var symbols = yield parser.getSymbols(source);
 
 	      dispatch({
 	        type: "SET_SYMBOLS",
@@ -48998,16 +48637,20 @@ return /******/ (function(modules) { // webpackBootstrap
 	          getState = _ref4.getState;
 
 	      var location = (0, _selectors.getSelectedLocation)(getState());
-	      var sourceText = (0, _selectors.getSourceText)(getState(), location.sourceId);
+	      if (!location) {
+	        return;
+	      }
 
-	      if (!location.line || !sourceText) {
+	      var source = (0, _selectors.getSource)(getState(), location.sourceId);
+
+	      if (!location.line || !source) {
 	        return dispatch({
 	          type: "OUT_OF_SCOPE_LOCATIONS",
 	          locations: null
 	        });
 	      }
 
-	      var locations = yield _parser2.default.getOutOfScopeLocations(sourceText.toJS(), location);
+	      var locations = yield parser.getOutOfScopeLocations(source.toJS(), location);
 
 	      return dispatch({
 	        type: "OUT_OF_SCOPE_LOCATIONS",
@@ -49038,7 +48681,24 @@ return /******/ (function(modules) { // webpackBootstrap
 	  };
 	}
 
-	function setSelection(token, position) {
+	function findBestMatch(symbols, tokenPos, token) {
+	  var memberExpressions = symbols.memberExpressions,
+	      identifiers = symbols.identifiers;
+	  var line = tokenPos.line,
+	      column = tokenPos.column;
+
+	  return identifiers.concat(memberExpressions).reduce((found, expression) => {
+	    var overlaps = expression.location.start.line == line && expression.location.start.column <= column && expression.location.end.column >= column;
+
+	    if (overlaps) {
+	      return expression;
+	    }
+
+	    return found;
+	  }, {});
+	}
+
+	function setSelection(token, tokenPos, cursorPos) {
 	  return (() => {
 	    var _ref6 = _asyncToGenerator(function* (_ref7) {
 	      var dispatch = _ref7.dispatch,
@@ -49050,35 +48710,42 @@ return /******/ (function(modules) { // webpackBootstrap
 	        return;
 	      }
 
-	      var sourceText = (0, _selectors.getSelectedSourceText)(getState());
-	      var selectedFrame = (0, _selectors.getSelectedFrame)(getState());
-
 	      yield dispatch({
 	        type: "SET_SELECTION",
 	        [_promise.PROMISE]: _asyncToGenerator(function* () {
-	          var closestExpression = yield _parser2.default.getClosestExpression(sourceText.toJS(), token, position);
+	          var source = (0, _selectors.getSelectedSource)(getState());
+	          var _symbols = yield parser.getSymbols(source.toJS());
 
-	          if (!closestExpression) {
+	          var found = findBestMatch(_symbols, tokenPos, token);
+	          if (!found) {
 	            return;
 	          }
 
-	          var expression = closestExpression.expression,
-	              location = closestExpression.location;
+	          var expression = found.expression,
+	              location = found.location;
 
 
 	          if (!expression) {
 	            return;
 	          }
 
+	          var selectedFrame = (0, _selectors.getSelectedFrame)(getState());
+
 	          var _ref9 = yield client.evaluate(expression, {
 	            frameId: selectedFrame.id
 	          }),
 	              result = _ref9.result;
 
+	          if (!result) {
+	            return;
+	          }
+
 	          return {
 	            expression,
 	            result,
-	            location
+	            location,
+	            tokenPos,
+	            cursorPos
 	          };
 	        })()
 	      });
@@ -49091,240 +48758,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 
 /***/ },
-/* 1060 */
-/***/ function(module, exports, __webpack_require__) {
-
-	"use strict";
-
-	Object.defineProperty(exports, "__esModule", {
-	  value: true
-	});
-
-	var _react = __webpack_require__(2);
-
-	var _reactRedux = __webpack_require__(151);
-
-	var _redux = __webpack_require__(3);
-
-	var _actions = __webpack_require__(244);
-
-	var _actions2 = _interopRequireDefault(_actions);
-
-	var _selectors = __webpack_require__(242);
-
-	var _utils = __webpack_require__(234);
-
-	var _url = __webpack_require__(334);
-
-	var _source = __webpack_require__(233);
-
-	var _devtoolsConfig = __webpack_require__(828);
-
-	var _projectSearch = __webpack_require__(1061);
-
-	__webpack_require__(1062);
-
-	var _Autocomplete2 = __webpack_require__(342);
-
-	var _Autocomplete3 = _interopRequireDefault(_Autocomplete2);
-
-	var _TextSearch2 = __webpack_require__(1064);
-
-	var _TextSearch3 = _interopRequireDefault(_TextSearch2);
-
-	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-	var Autocomplete = (0, _react.createFactory)(_Autocomplete3.default);
-
-	var TextSearch = (0, _react.createFactory)(_TextSearch3.default);
-
-	function getSourcePath(source) {
-	  if (!source.url) {
-	    return "";
-	  }
-
-	  var _parseURL = (0, _url.parse)(source.url),
-	      path = _parseURL.path,
-	      href = _parseURL.href;
-	  // for URLs like "about:home" the path is null so we pass the full href
-
-
-	  return path || href;
-	}
-
-	function searchResults(sources, query) {
-	  if ((0, _devtoolsConfig.isEnabled)("projectTextSearch")) {
-	    return projectSearchResults(sources, query);
-	  }
-
-	  return fileSearchResults(sources);
-	}
-
-	function fileSearchResults(sourceMap) {
-	  return sourceMap.valueSeq().toJS().filter(source => !(0, _source.isPretty)(source)).map(source => ({
-	    value: getSourcePath(source),
-	    title: getSourcePath(source).split("/").pop(),
-	    subtitle: (0, _utils.endTruncateStr)(getSourcePath(source), 100),
-	    id: source.id
-	  }));
-	}
-
-	function projectSearchResults(sources, query) {
-	  return sources.valueSeq().toJS().map(source => (0, _projectSearch.searchSource)(source, query).map(result => ({
-	    value: result.match,
-	    title: result.text,
-	    subtitle: (0, _utils.endTruncateStr)(getSourcePath(source), 100),
-	    id: `${result.text}/${result.line}/${result.column}`
-	  })));
-	}
-
-	class ProjectSearch extends _react.Component {
-
-	  constructor(props) {
-	    super(props);
-
-	    this.state = {
-	      inputValue: ""
-	    };
-
-	    this.toggle = this.toggle.bind(this);
-	    this.onEscape = this.onEscape.bind(this);
-	    this.close = this.close.bind(this);
-	  }
-
-	  componentWillUnmount() {
-	    var shortcuts = this.context.shortcuts;
-	    var searchKeys = [L10N.getStr("sources.search.key2"), L10N.getStr("sources.search.key2")];
-	    searchKeys.forEach(key => shortcuts.off(key, this.toggle));
-	    shortcuts.off("Escape", this.onEscape);
-	  }
-
-	  componentDidMount() {
-	    var shortcuts = this.context.shortcuts;
-	    var searchKeys = [L10N.getStr("sources.search.key2"), L10N.getStr("sources.search.alt.key")];
-	    searchKeys.forEach(key => shortcuts.on(key, this.toggle));
-	    shortcuts.on("Escape", this.onEscape);
-	  }
-
-	  toggle(key, e) {
-	    e.preventDefault();
-	    this.props.toggleProjectSearch();
-	  }
-
-	  onEscape(shortcut, e) {
-	    if (this.props.searchOn) {
-	      e.preventDefault();
-	      this.close();
-	    }
-	  }
-
-	  close() {
-	    this.setState({ inputValue: "" });
-	    this.props.toggleProjectSearch(false);
-	  }
-
-	  renderFileSearch() {
-	    return Autocomplete({
-	      selectItem: (e, result) => {
-	        this.props.selectSource(result.id);
-	        this.close();
-	      },
-	      close: this.close,
-	      items: searchResults(this.props.sources, this.state.inputValue),
-	      inputValue: this.state.inputValue,
-	      placeholder: L10N.getStr("sourceSearch.search"),
-	      size: "big"
-	    });
-	  }
-
-	  renderTextSearch() {
-	    var sources = this.props.sources;
-
-
-	    return TextSearch({
-	      sources
-	    });
-	  }
-
-	  render() {
-	    var searchOn = this.props.searchOn;
-
-	    if (!searchOn) {
-	      return null;
-	    }
-
-	    return _react.DOM.div({ className: "search-container" }, (0, _devtoolsConfig.isEnabled)("projectTextSearch") ? this.renderTextSearch() : this.renderFileSearch());
-	  }
-	}
-
-	ProjectSearch.propTypes = {
-	  sources: _react.PropTypes.object.isRequired,
-	  selectSource: _react.PropTypes.func.isRequired,
-	  toggleProjectSearch: _react.PropTypes.func.isRequired,
-	  searchOn: _react.PropTypes.bool
-	};
-
-	ProjectSearch.contextTypes = {
-	  shortcuts: _react.PropTypes.object
-	};
-
-	ProjectSearch.displayName = "ProjectSearch";
-
-	exports.default = (0, _reactRedux.connect)(state => ({
-	  sources: (0, _selectors.getSources)(state),
-	  searchOn: (0, _selectors.getProjectSearchState)(state)
-	}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(ProjectSearch);
-
-/***/ },
-/* 1061 */
-/***/ function(module, exports) {
-
-	"use strict";
-
-	Object.defineProperty(exports, "__esModule", {
-	  value: true
-	});
-	exports.searchSource = searchSource;
-
-	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
-
-	function searchSource(source, queryText) {
-	  var _ref;
-
-	  var text = source.text,
-	      id = source.id,
-	      url = source.url,
-	      loading = source.loading;
-
-	  if (loading || !text || queryText == "") {
-	    return [];
-	  }
-
-	  var lines = text.split("\n");
-	  var result = undefined;
-	  var query = new RegExp(queryText, "g");
-
-	  var matches = lines.map((_text, line) => {
-	    var indices = [];
-
-	    while (result = query.exec(_text)) {
-	      indices.push({
-	        line: line + 1,
-	        column: result.index,
-	        match: result[0],
-	        text: result.input,
-	        id,
-	        url
-	      });
-	    }
-	    return indices;
-	  }).filter(_matches => _matches.length > 0);
-
-	  matches = (_ref = []).concat.apply(_ref, _toConsumableArray(matches));
-	  return matches;
-	}
-
-/***/ },
+/* 1060 */,
+/* 1061 */,
 /* 1062 */
 /***/ function(module, exports) {
 
@@ -49347,6 +48782,10 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _classnames2 = _interopRequireDefault(_classnames);
 
+	var _escapeRegExp = __webpack_require__(259);
+
+	var _escapeRegExp2 = _interopRequireDefault(_escapeRegExp);
+
 	var _Svg = __webpack_require__(344);
 
 	var _Svg2 = _interopRequireDefault(_Svg);
@@ -49355,38 +48794,127 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _ManagedTree3 = _interopRequireDefault(_ManagedTree2);
 
+	var _SearchInput2 = __webpack_require__(377);
+
+	var _SearchInput3 = _interopRequireDefault(_SearchInput2);
+
+	var _projectSearch = __webpack_require__(1140);
+
+	var _projectSearch2 = _interopRequireDefault(_projectSearch);
+
 	__webpack_require__(1065);
 
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
+	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
 	var ManagedTree = (0, _react.createFactory)(_ManagedTree3.default);
+
+	var SearchInput = (0, _react.createFactory)(_SearchInput3.default);
 
 	class TextSearch extends _react.Component {
 	  constructor(props) {
 	    super(props);
+	    this.state = {
+	      results: [],
+	      inputValue: "",
+	      selectedIndex: 0,
+	      focused: false
+	    };
+
+	    this.inputOnChange = this.inputOnChange.bind(this);
+	    this.onKeyDown = this.onKeyDown.bind(this);
+	    this.close = this.close.bind(this);
 	  }
 
-	  renderFile(file, expanded) {
+	  close() {
+	    this.setState({ inputValue: "", results: [], selectedIndex: 0 });
+	    this.props.closeActiveSearch();
+	  }
+
+	  onKeyDown(e) {
+	    var _this = this;
+
+	    return _asyncToGenerator(function* () {
+	      if (e.key !== "Enter") {
+	        return;
+	      }
+	      var inputValue = _this.state.inputValue;
+	      var sources = _this.props.sources;
+	      var results = yield (0, _projectSearch2.default)(inputValue, sources);
+
+	      _this.setState({
+	        results,
+	        inputValue,
+	        selectedIndex: 0
+	      });
+	    })();
+	  }
+
+	  inputOnChange(e) {
+	    var inputValue = e.target.value;
+	    this.setState({ inputValue });
+	  }
+
+	  renderFile(file, focused, expanded, setExpanded) {
+	    if (file.matches.length === 0) {
+	      return null;
+	    }
 	    return _react.DOM.div({
-	      className: "file-result"
+	      className: (0, _classnames2.default)("file-result", { focused }),
+	      key: file.filepath,
+	      onClick: e => setExpanded(file, !expanded)
 	    }, (0, _Svg2.default)("arrow", {
 	      className: (0, _classnames2.default)({
 	        expanded
 	      })
-	    }), file.filepath);
+	    }), _react.DOM.span({ className: "file-path" }, file.filepath), _react.DOM.span({ className: "matches-summary", key: `m-${file.filepath}` }, ` (${file.matches.length} match${file.matches.length > 1 ? "es" : ""})`));
 	  }
 
-	  renderLine(match) {
-	    return _react.DOM.div({ className: "result" }, _react.DOM.span({
-	      className: "line-number"
-	    }, match.line), _react.DOM.span({ className: "line-match" }, match.value));
+	  renderMatch(match, focused) {
+	    return _react.DOM.div({
+	      className: (0, _classnames2.default)("result", { focused }),
+	      key: `${match.line}/${match.column}`,
+	      onClick: () => console.log(`clicked ${match}`)
+	    }, _react.DOM.span({
+	      className: "line-number",
+	      key: `${match.line}`
+	    }, match.line), this.renderMatchValue(match.value));
+	  }
+
+	  renderMatchValue(value) {
+	    var inputValue = this.state.inputValue;
+
+	    var match = void 0;
+	    var len = inputValue.length;
+	    var matchIndexes = [];
+	    var matches = [];
+	    var re = new RegExp((0, _escapeRegExp2.default)(inputValue), "g");
+	    while ((match = re.exec(value)) !== null) {
+	      matchIndexes.push(match.index);
+	    }
+
+	    matchIndexes.forEach((matchIndex, index) => {
+	      if (matchIndex > 0 && index === 0) {
+	        matches.push(_react.DOM.span({ className: "line-match" }, value.slice(0, matchIndex)));
+	      }
+	      if (matchIndex > matchIndexes[index - 1] + len) {
+	        matches.push(_react.DOM.span({ className: "line-match" }, value.slice(matchIndexes[index - 1] + len, matchIndex)));
+	      }
+	      matches.push(_react.DOM.span({ className: "query-match", key: index }, value.substr(matchIndex, len)));
+	      if (index === matchIndexes.length - 1) {
+	        matches.push(_react.DOM.span({
+	          className: "line-match"
+	        }, value.slice(matchIndex + len, value.length)));
+	      }
+	    });
+
+	    return _react.DOM.span.apply(_react.DOM, [{ className: "line-value" }].concat(matches));
 	  }
 
 	  renderResults() {
-	    var results = this.props.results;
-
 	    return ManagedTree({
-	      getRoots: () => results,
+	      getRoots: () => this.state.results,
 	      getChildren: file => {
 	        return file.matches || [];
 	      },
@@ -49394,19 +48922,53 @@ return /******/ (function(modules) { // webpackBootstrap
 	      autoExpand: 1,
 	      autoExpandDepth: 1,
 	      getParent: item => null,
-	      getKey: item => item.filepath || `${item.value}/${item.line}`,
-	      renderItem: (item, depth, focused, _, expanded) => item.filepath ? this.renderFile(item, expanded) : this.renderLine(item)
+	      getKey: item => item.filepath || `${item.value}/${item.line}/${item.column}`,
+	      renderItem: (item, depth, focused, _, expanded, _ref) => {
+	        var setExpanded = _ref.setExpanded;
+	        return item.filepath ? this.renderFile(item, focused, expanded, setExpanded) : this.renderMatch(item, focused);
+	      }
+	    });
+	  }
+
+	  resultCount() {
+	    var results = this.state.results;
+
+	    return results.reduce((count, file) => count + (file.matches ? file.matches.length : 0), 0);
+	  }
+
+	  renderInput() {
+	    var resultCount = this.resultCount();
+	    var summaryMsg = L10N.getFormatStr("sourceSearch.resultsSummary1", resultCount);
+
+	    return SearchInput({
+	      query: this.state.inputValue,
+	      count: resultCount,
+	      placeholder: "Search Project",
+	      size: "big",
+	      summaryMsg,
+	      onChange: e => this.inputOnChange(e),
+	      onFocus: () => this.setState({ focused: true }),
+	      onBlur: () => this.setState({ focused: false }),
+	      onKeyDown: e => this.onKeyDown(e),
+	      handleClose: this.close
 	    });
 	  }
 
 	  render() {
 	    return _react.DOM.div({
 	      className: "project-text-search"
-	    }, this.renderResults());
+	    }, this.renderInput(), this.renderResults());
 	  }
 	}
 
 	exports.default = TextSearch;
+	TextSearch.propTypes = {
+	  addTab: _react.PropTypes.func,
+	  sources: _react.PropTypes.object,
+	  query: _react.PropTypes.string,
+	  closeActiveSearch: _react.PropTypes.func
+	};
+
 	TextSearch.displayName = "TextSearch";
 
 /***/ },
@@ -49595,6 +49157,3606 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	module.exports = createBaseEach;
 
+
+/***/ },
+/* 1072 */,
+/* 1073 */,
+/* 1074 */,
+/* 1075 */,
+/* 1076 */,
+/* 1077 */,
+/* 1078 */,
+/* 1079 */,
+/* 1080 */,
+/* 1081 */,
+/* 1082 */,
+/* 1083 */,
+/* 1084 */,
+/* 1085 */,
+/* 1086 */,
+/* 1087 */,
+/* 1088 */,
+/* 1089 */,
+/* 1090 */,
+/* 1091 */,
+/* 1092 */,
+/* 1093 */,
+/* 1094 */,
+/* 1095 */,
+/* 1096 */,
+/* 1097 */,
+/* 1098 */,
+/* 1099 */,
+/* 1100 */,
+/* 1101 */,
+/* 1102 */,
+/* 1103 */,
+/* 1104 */,
+/* 1105 */,
+/* 1106 */,
+/* 1107 */,
+/* 1108 */,
+/* 1109 */,
+/* 1110 */,
+/* 1111 */,
+/* 1112 */,
+/* 1113 */,
+/* 1114 */,
+/* 1115 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.searchSources = exports.getMatches = exports.stopSearchWorker = exports.startSearchWorker = undefined;
+
+	var _devtoolsUtils = __webpack_require__(900);
+
+	var WorkerDispatcher = _devtoolsUtils.workerUtils.WorkerDispatcher;
+
+
+	var dispatcher = new WorkerDispatcher();
+	var startSearchWorker = exports.startSearchWorker = dispatcher.start.bind(dispatcher);
+	var stopSearchWorker = exports.stopSearchWorker = dispatcher.stop.bind(dispatcher);
+
+	var getMatches = exports.getMatches = dispatcher.task("getMatches");
+	var searchSources = exports.searchSources = dispatcher.task("searchSources");
+
+/***/ },
+/* 1116 */,
+/* 1117 */
+/***/ function(module, exports) {
+
+	module.exports = "<svg version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 32 32\"><rect fill=\"#002f42\" width=\"16\" x=\"0\" y=\"28\" height=\"4\"></rect><rect fill=\"#0072b1\" width=\"16\" x=\"16\" y=\"28\" height=\"4\"></rect></svg>"
+
+/***/ },
+/* 1118 */
+/***/ function(module, exports) {
+
+	module.exports = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 2500 2500\"><path d=\"M70 188.5h220v1460h870v180H70v-1640zm1776 396c-225-3-450 140-520 357-100 250-54 564 142 755 190 158 476 170 690 58 147-78 240-233 260-396 26-170 13-356-70-510-98-164-290-270-480-263l-22-3zm20 174c165 0 313 126 340 288 50 183 20 407-130 536-140 114-365 98-480-43-140-150-140-380-68-560 50-130 183-223 323-220h18z\" fill=\"#000000\"></path><path d=\"M70 2061.5h2360v250H70v-250z\" fill=\"#3492ff\"></path></svg>"
+
+/***/ },
+/* 1119 */
+/***/ function(module, exports) {
+
+	module.exports = "<svg viewBox=\"0 0 94 37\" xmlns=\"http://www.w3.org/2000/svg\"><g fill=\"none\" fill-rule=\"evenodd\"><path d=\"M65.21 27.865s-.43-1.546 1.17-4.52c1.6-2.974 2.85-1.348 2.85-1.348s1.364 1.507-.196 3.767-3.823 2.1-3.823 2.1zm-12.288 2.14c-1.833 4.877-6.28 2.895-6.28 2.895s-.507-1.744.936-6.62c1.443-4.878 4.837-2.975 4.837-2.975s2.34 1.824.507 6.7zM49.607 9.588s2.77-7.334 3.432-3.766c.663 3.57-5.813 14.195-5.813 14.195.078-2.38 2.38-10.428 2.38-10.428zM10.01 27.865c.118-4.718 3.16-6.78 4.214-5.75 1.054 1.032.664 3.252-1.326 4.64-1.99 1.387-2.887 1.11-2.887 1.11zm83.912-.783c-.156-1.586-1.56-.996-1.56-.996S90.1 27.868 88.11 27.67c-1.99-.2-1.366-4.72-1.366-4.72s.43-4.143-.74-4.49c-1.17-.348-2.615 1.08-2.615 1.08s-1.795 2.02-2.653 4.598l-.234.08s.273-4.52-.04-5.55c-.234-.517-2.38-.477-2.73.435-.35.912-2.068 7.255-2.185 9.912 0 0-3.355 2.894-6.28 3.37-2.926.475-3.628-1.388-3.628-1.388s7.958-2.26 7.685-8.722c-.273-6.463-6.417-4.074-7.113-3.542-.673.513-4.264 2.715-5.31 8.81-.037.21-.1 1.115-.1 1.115s-3.08 2.1-4.798 2.656c0 0 4.798-8.207-1.053-11.934-2.652-1.625-4.758 1.784-4.758 1.784s7.92-8.96 6.163-16.533c-.836-3.605-2.61-3.992-4.238-3.41-2.47.993-3.408 2.46-3.408 2.46s-3.2 4.718-3.94 11.736c-.742 7.017-1.834 15.502-1.834 15.502s-1.522 1.506-2.926 1.586c-1.404.08-.78-4.243-.78-4.243s1.092-6.58 1.014-7.69c-.078-1.11-.156-1.705-1.443-2.102-1.287-.396-2.69 1.27-2.69 1.27s-3.707 5.708-4.02 6.58l-.194.357-.195-.237s2.615-7.77.118-7.89c-2.497-.12-4.135 2.775-4.135 2.775s-2.848 4.837-2.965 5.392l-.195-.238s1.17-5.63.936-7.017c-.235-1.388-1.522-1.11-1.522-1.11s-1.638-.2-2.068.872c-.43 1.07-1.99 8.167-2.184 10.427 0 0-4.096 2.973-6.788 3.012-2.692.04-2.42-1.735-2.42-1.735s9.87-3.434 7.18-10.214c-1.21-1.744-2.614-2.292-4.604-2.252-1.99.04-4.46 1.273-6.058 4.92-.763 1.742-1.042 3.392-1.198 4.642 0 0-1.728.358-2.664-.435-.936-.793-1.418 0-1.418 0S.11 29.67 1.71 30.304c1.598.634 4.095.93 4.095.93h-.002c.23 1.11.897 2.996 2.844 4.5 2.926 2.26 8.543-.208 8.543-.208l2.3-1.313s.08 2.146 1.756 2.46c1.678.313 2.38-.005 5.306-7.22 1.716-3.688 1.833-3.49 1.833-3.49l.195-.04s-1.326 7.057-.82 8.96c.508 1.903 2.732 1.704 2.732 1.704s1.21.238 2.184-3.25C33.65 29.846 35.524 26 35.524 26h.234s-.82 7.217.43 9.517c1.247 2.3 4.485.773 4.485.773s2.263-1.16 2.614-1.517c0 0 2.686 2.323 6.473 1.902 8.468-1.693 11.48-3.98 11.48-3.98s1.454 3.745 5.96 4.092c5.15.396 7.958-2.895 7.958-2.895s-.04 2.14 1.756 2.894c1.794.753 3.003-3.48 3.003-3.48l3.004-8.415h.274s.156 5.473 3.12 6.345c2.966.872 6.828-2.042 6.828-2.042s.936-.525.78-2.11z\" fill=\"#E34C32\"></path></g></svg>"
+
+/***/ },
+/* 1120 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.default = renderWhyPaused;
+
+	var _react = __webpack_require__(2);
+
+	var _isString = __webpack_require__(602);
+
+	var _isString2 = _interopRequireDefault(_isString);
+
+	var _get = __webpack_require__(67);
+
+	var _get2 = _interopRequireDefault(_get);
+
+	var _pause = __webpack_require__(255);
+
+	__webpack_require__(1121);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	function renderExceptionSummary(exception) {
+	  if ((0, _isString2.default)(exception)) {
+	    return exception;
+	  }
+
+	  var message = (0, _get2.default)(exception, "preview.message");
+	  var name = (0, _get2.default)(exception, "preview.name");
+
+	  return `${name}: ${message}`;
+	}
+
+
+	function renderMessage(pauseInfo) {
+	  if (!pauseInfo) {
+	    return null;
+	  }
+
+	  var message = (0, _get2.default)(pauseInfo, "why.message");
+	  if (message) {
+	    return _react.DOM.div({ className: "message" }, message);
+	  }
+
+	  var exception = (0, _get2.default)(pauseInfo, "why.exception");
+	  if (exception) {
+	    return _react.DOM.div({ className: "message warning" }, renderExceptionSummary(exception));
+	  }
+
+	  return null;
+	}
+
+	function renderWhyPaused(_ref) {
+	  var pause = _ref.pause;
+
+	  var reason = (0, _pause.getPauseReason)(pause);
+
+	  if (!reason) {
+	    return null;
+	  }
+
+	  return _react.DOM.div({ className: "pane why-paused" }, _react.DOM.div(null, L10N.getStr(reason)), renderMessage(pause));
+	}
+
+/***/ },
+/* 1121 */
+/***/ function(module, exports) {
+
+	// removed by extract-text-webpack-plugin
+
+/***/ },
+/* 1122 */,
+/* 1123 */,
+/* 1124 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.default = getInScopeLines;
+
+	var _ast = __webpack_require__(1058);
+
+	var _sources = __webpack_require__(232);
+
+	var _range = __webpack_require__(1026);
+
+	var _range2 = _interopRequireDefault(_range);
+
+	var _flatMap = __webpack_require__(1067);
+
+	var _flatMap2 = _interopRequireDefault(_flatMap);
+
+	var _uniq = __webpack_require__(561);
+
+	var _uniq2 = _interopRequireDefault(_uniq);
+
+	var _without = __webpack_require__(1125);
+
+	var _without2 = _interopRequireDefault(_without);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
+
+	function getOutOfScopeLines(outOfScopeLocations) {
+	  if (!outOfScopeLocations) {
+	    return null;
+	  }
+
+	  return (0, _uniq2.default)((0, _flatMap2.default)(outOfScopeLocations, location => (0, _range2.default)(location.start.line, location.end.line)));
+	}
+
+	function getInScopeLines(state) {
+	  var source = (0, _sources.getSelectedSource)(state);
+	  var outOfScopeLocations = (0, _ast.getOutOfScopeLocations)(state);
+
+	  if (!source || !source.get("text")) {
+	    return;
+	  }
+
+	  var linesOutOfScope = getOutOfScopeLines(outOfScopeLocations, source.toJS());
+
+	  var sourceNumLines = source.get("text").split("\n").length;
+	  var sourceLines = (0, _range2.default)(1, sourceNumLines + 1);
+
+	  if (!linesOutOfScope) {
+	    return sourceLines;
+	  }
+
+	  return _without2.default.apply(undefined, [sourceLines].concat(_toConsumableArray(linesOutOfScope)));
+	}
+
+/***/ },
+/* 1125 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var baseDifference = __webpack_require__(1126),
+	    baseRest = __webpack_require__(411),
+	    isArrayLikeObject = __webpack_require__(404);
+
+	/**
+	 * Creates an array excluding all given values using
+	 * [`SameValueZero`](http://ecma-international.org/ecma-262/7.0/#sec-samevaluezero)
+	 * for equality comparisons.
+	 *
+	 * **Note:** Unlike `_.pull`, this method returns a new array.
+	 *
+	 * @static
+	 * @memberOf _
+	 * @since 0.1.0
+	 * @category Array
+	 * @param {Array} array The array to inspect.
+	 * @param {...*} [values] The values to exclude.
+	 * @returns {Array} Returns the new array of filtered values.
+	 * @see _.difference, _.xor
+	 * @example
+	 *
+	 * _.without([2, 1, 2, 3], 1, 2);
+	 * // => [3]
+	 */
+	var without = baseRest(function(array, values) {
+	  return isArrayLikeObject(array)
+	    ? baseDifference(array, values)
+	    : [];
+	});
+
+	module.exports = without;
+
+
+/***/ },
+/* 1126 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var SetCache = __webpack_require__(276),
+	    arrayIncludes = __webpack_require__(563),
+	    arrayIncludesWith = __webpack_require__(567),
+	    arrayMap = __webpack_require__(110),
+	    baseUnary = __webpack_require__(215),
+	    cacheHas = __webpack_require__(280);
+
+	/** Used as the size to enable large array optimizations. */
+	var LARGE_ARRAY_SIZE = 200;
+
+	/**
+	 * The base implementation of methods like `_.difference` without support
+	 * for excluding multiple arrays or iteratee shorthands.
+	 *
+	 * @private
+	 * @param {Array} array The array to inspect.
+	 * @param {Array} values The values to exclude.
+	 * @param {Function} [iteratee] The iteratee invoked per element.
+	 * @param {Function} [comparator] The comparator invoked per element.
+	 * @returns {Array} Returns the new array of filtered values.
+	 */
+	function baseDifference(array, values, iteratee, comparator) {
+	  var index = -1,
+	      includes = arrayIncludes,
+	      isCommon = true,
+	      length = array.length,
+	      result = [],
+	      valuesLength = values.length;
+
+	  if (!length) {
+	    return result;
+	  }
+	  if (iteratee) {
+	    values = arrayMap(values, baseUnary(iteratee));
+	  }
+	  if (comparator) {
+	    includes = arrayIncludesWith;
+	    isCommon = false;
+	  }
+	  else if (values.length >= LARGE_ARRAY_SIZE) {
+	    includes = cacheHas;
+	    isCommon = false;
+	    values = new SetCache(values);
+	  }
+	  outer:
+	  while (++index < length) {
+	    var value = array[index],
+	        computed = iteratee == null ? value : iteratee(value);
+
+	    value = (comparator || value !== 0) ? value : 0;
+	    if (isCommon && computed === computed) {
+	      var valuesIndex = valuesLength;
+	      while (valuesIndex--) {
+	        if (values[valuesIndex] === computed) {
+	          continue outer;
+	        }
+	      }
+	      result.push(value);
+	    }
+	    else if (!includes(values, computed, comparator)) {
+	      result.push(value);
+	    }
+	  }
+	  return result;
+	}
+
+	module.exports = baseDifference;
+
+
+/***/ },
+/* 1127 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var baseIsEqual = __webpack_require__(273);
+
+	/**
+	 * Performs a deep comparison between two values to determine if they are
+	 * equivalent.
+	 *
+	 * **Note:** This method supports comparing arrays, array buffers, booleans,
+	 * date objects, error objects, maps, numbers, `Object` objects, regexes,
+	 * sets, strings, symbols, and typed arrays. `Object` objects are compared
+	 * by their own, not inherited, enumerable properties. Functions and DOM
+	 * nodes are compared by strict equality, i.e. `===`.
+	 *
+	 * @static
+	 * @memberOf _
+	 * @since 0.1.0
+	 * @category Lang
+	 * @param {*} value The value to compare.
+	 * @param {*} other The other value to compare.
+	 * @returns {boolean} Returns `true` if the values are equivalent, else `false`.
+	 * @example
+	 *
+	 * var object = { 'a': 1 };
+	 * var other = { 'a': 1 };
+	 *
+	 * _.isEqual(object, other);
+	 * // => true
+	 *
+	 * object === other;
+	 * // => false
+	 */
+	function isEqual(value, other) {
+	  return baseIsEqual(value, other);
+	}
+
+	module.exports = isEqual;
+
+
+/***/ },
+/* 1128 */
+/***/ function(module, exports) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.isVisible = isVisible;
+	/* Checks to see if the root element is available and
+	 * if the element is visible. We check the width of the element
+	 * because it is more reliable than either checking a focus state or
+	 * the visibleState or hidden property.
+	 */
+	function isVisible() {
+	  var el = document.querySelector("#mount");
+	  return el && el.getBoundingClientRect().width;
+	}
+
+/***/ },
+/* 1129 */,
+/* 1130 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+	var _require = __webpack_require__(830),
+	    Menu = _require.Menu,
+	    MenuItem = _require.MenuItem;
+
+	function inToolbox() {
+	  return window.parent.document.documentURI == "about:devtools-toolbox";
+	}
+
+	if (!inToolbox()) {
+	  __webpack_require__(1131);
+	}
+
+	function createPopup(doc) {
+	  var popup = doc.createElement("menupopup");
+	  popup.className = "landing-popup";
+	  if (popup.openPopupAtScreen) {
+	    return popup;
+	  }
+
+	  function preventDefault(e) {
+	    e.preventDefault();
+	    e.returnValue = false;
+	  }
+
+	  var mask = document.querySelector("#contextmenu-mask");
+	  if (!mask) {
+	    mask = doc.createElement("div");
+	    mask.id = "contextmenu-mask";
+	    document.body.appendChild(mask);
+	  }
+
+	  mask.onclick = () => popup.hidePopup();
+
+	  popup.openPopupAtScreen = function (clientX, clientY) {
+	    this.style.setProperty("left", `${clientX}px`);
+	    this.style.setProperty("top", `${clientY}px`);
+	    mask = document.querySelector("#contextmenu-mask");
+	    window.onwheel = preventDefault;
+	    mask.classList.add("show");
+	    this.dispatchEvent(new Event("popupshown"));
+	    this.popupshown;
+	  };
+
+	  popup.hidePopup = function () {
+	    this.remove();
+	    mask = document.querySelector("#contextmenu-mask");
+	    mask.classList.remove("show");
+	    window.onwheel = null;
+	  };
+
+	  return popup;
+	}
+
+	if (!inToolbox()) {
+	  Menu.prototype.createPopup = createPopup;
+	}
+
+	function onShown(menu, popup) {
+	  popup.childNodes.forEach((menuItemNode, i) => {
+	    var item = menu.items[i];
+
+	    if (!item.disabled && item.visible) {
+	      menuItemNode.onclick = () => {
+	        item.click();
+	        popup.hidePopup();
+	      };
+
+	      showSubMenu(item.submenu, menuItemNode, popup);
+	    }
+	  });
+	}
+
+	function showMenu(evt, items) {
+	  if (items.length === 0) {
+	    return;
+	  }
+
+	  var menu = new Menu();
+	  items.filter(item => item.visible === undefined || item.visible === true).forEach(item => {
+	    var menuItem = new MenuItem(item);
+	    menuItem.submenu = createSubMenu(item.submenu);
+	    menu.append(menuItem);
+	  });
+
+	  if (inToolbox()) {
+	    menu.popup(evt.screenX, evt.screenY, { doc: window.parent.document });
+	    return;
+	  }
+
+	  menu.on("open", (_, popup) => onShown(menu, popup));
+	  menu.popup(evt.clientX, evt.clientY, { doc: document });
+	}
+
+	function createSubMenu(subItems) {
+	  if (subItems) {
+	    var subMenu = new Menu();
+	    subItems.forEach(subItem => {
+	      subMenu.append(new MenuItem(subItem));
+	    });
+	    return subMenu;
+	  }
+	  return null;
+	}
+
+	function showSubMenu(subMenu, menuItemNode, popup) {
+	  if (subMenu) {
+	    var subMenuNode = menuItemNode.querySelector("menupopup");
+
+	    var _menuItemNode$getBoun = menuItemNode.getBoundingClientRect(),
+	        top = _menuItemNode$getBoun.top;
+
+	    var _popup$getBoundingCli = popup.getBoundingClientRect(),
+	        left = _popup$getBoundingCli.left,
+	        width = _popup$getBoundingCli.width;
+
+	    subMenuNode.style.setProperty("left", `${left + width}px`);
+	    subMenuNode.style.setProperty("top", `${top}px`);
+
+	    var subMenuItemNodes = menuItemNode.querySelector("menupopup:not(.landing-popup)").childNodes;
+	    subMenuItemNodes.forEach((subMenuItemNode, j) => {
+	      var subMenuItem = subMenu.items.filter(item => item.visible === undefined || item.visible === true)[j];
+	      if (!subMenuItem.disabled && subMenuItem.visible) {
+	        subMenuItemNode.onclick = () => {
+	          subMenuItem.click();
+	          popup.hidePopup();
+	        };
+	      }
+	    });
+	  }
+	}
+
+	function buildMenu(items) {
+	  return items.map(itm => {
+	    var hide = typeof itm.hidden === "function" ? itm.hidden() : itm.hidden;
+	    return hide ? null : itm.item;
+	  }).filter(itm => itm !== null);
+	}
+
+	module.exports = {
+	  showMenu,
+	  buildMenu
+	};
+
+/***/ },
+/* 1131 */
+/***/ function(module, exports) {
+
+	// removed by extract-text-webpack-plugin
+
+/***/ },
+/* 1132 */,
+/* 1133 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.initialState = initialState;
+	exports.getPendingBreakpoints = getPendingBreakpoints;
+
+	var _immutable = __webpack_require__(146);
+
+	var I = _interopRequireWildcard(_immutable);
+
+	var _makeRecord = __webpack_require__(230);
+
+	var _makeRecord2 = _interopRequireDefault(_makeRecord);
+
+	var _breakpoint = __webpack_require__(1057);
+
+	var _prefs = __webpack_require__(226);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+	/**
+	 * Breakpoints reducer
+	 * @module reducers/breakpoints
+	 */
+
+	function initialState() {
+	  return (0, _makeRecord2.default)({
+	    pendingBreakpoints: restorePendingBreakpoints()
+	  })();
+	}
+
+	function update() {
+	  var state = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : initialState();
+	  var action = arguments[1];
+
+	  switch (action.type) {
+	    case "ADD_BREAKPOINT":
+	      {
+	        return addBreakpoint(state, action);
+	      }
+
+	    case "SYNC_BREAKPOINT":
+	      {
+	        return addBreakpoint(state, action);
+	      }
+
+	    case "ENABLE_BREAKPOINT":
+	      {
+	        return addBreakpoint(state, action);
+	      }
+
+	    case "DISABLE_BREAKPOINT":
+	      {
+	        return updateBreakpoint(state, action);
+	      }
+
+	    case "SET_BREAKPOINT_CONDITION":
+	      {
+	        return updateBreakpoint(state, action);
+	      }
+
+	    case "REMOVE_BREAKPOINT":
+	      {
+	        return removeBreakpoint(state, action);
+	      }
+	  }
+
+	  return state;
+	}
+
+	function addBreakpoint(state, action) {
+	  if (action.status !== "done") {
+	    return state;
+	  }
+
+	  // when the action completes, we can commit the breakpoint
+	  var breakpoint = action.value.breakpoint;
+
+	  var locationId = (0, _breakpoint.makePendingLocationId)(breakpoint.location);
+	  var pendingBreakpoint = (0, _breakpoint.createPendingBreakpoint)(breakpoint);
+
+	  return state.setIn(["pendingBreakpoints", locationId], pendingBreakpoint);
+	}
+
+	function updateBreakpoint(state, action) {
+	  var breakpoint = action.breakpoint;
+
+	  var locationId = (0, _breakpoint.makePendingLocationId)(breakpoint.location);
+	  var pendingBreakpoint = (0, _breakpoint.createPendingBreakpoint)(breakpoint);
+
+	  return state.setIn(["pendingBreakpoints", locationId], pendingBreakpoint);
+	}
+
+	function removeBreakpoint(state, action) {
+	  var breakpoint = action.breakpoint;
+
+	  var locationId = (0, _breakpoint.makePendingLocationId)(breakpoint.location);
+
+	  return state.deleteIn(["pendingBreakpoints", locationId]);
+	}
+
+	// Selectors
+	// TODO: these functions should be moved out of the reducer
+
+	function getPendingBreakpoints(state) {
+	  return state.pendingBreakpoints.pendingBreakpoints;
+	}
+
+	function restorePendingBreakpoints() {
+	  return I.Map(_prefs.prefs.pendingBreakpoints);
+	}
+
+	exports.default = update;
+
+/***/ },
+/* 1134 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.default = getBreakpointAtLocation;
+
+	var _sources = __webpack_require__(232);
+
+	var _breakpoints = __webpack_require__(236);
+
+	var _devtoolsSourceMap = __webpack_require__(898);
+
+	function isGenerated(selectedSource) {
+	  var sourceId = selectedSource.get("id");
+	  return (0, _devtoolsSourceMap.isGeneratedId)(sourceId);
+	}
+
+	function getColumn(column, selectedSource) {
+	  if (column) {
+	    return column;
+	  }
+
+	  return isGenerated(selectedSource) ? undefined : 0;
+	}
+
+	function getLocation(bp, selectedSource) {
+	  return isGenerated(selectedSource) ? bp.generatedLocation || bp.location : bp.location;
+	}
+
+	function getBreakpointsForSource(state, selectedSource) {
+	  var breakpoints = (0, _breakpoints.getBreakpoints)(state);
+
+	  return breakpoints.filter(bp => {
+	    var location = getLocation(bp, selectedSource);
+	    return location.sourceId === selectedSource.get("id");
+	  });
+	}
+
+	function findBreakpointAtLocation(breakpoints, selectedSource, _ref) {
+	  var line = _ref.line,
+	      column = _ref.column;
+
+	  return breakpoints.find(breakpoint => {
+	    var location = getLocation(breakpoint, selectedSource);
+	    var sameLine = location.line === line;
+	    if (!sameLine) {
+	      return false;
+	    }
+
+	    if (column === undefined) {
+	      return true;
+	    }
+
+	    return location.column === getColumn(column, selectedSource);
+	  });
+	}
+
+	/*
+	 * Finds a breakpoint at a location (line, column) of the
+	 * selected source.
+	 *
+	 * This is useful for finding a breakpoint when the
+	 * user clicks in the gutter or on a token.
+	 */
+	function getBreakpointAtLocation(state, location) {
+	  var selectedSource = (0, _sources.getSelectedSource)(state);
+	  var breakpoints = getBreakpointsForSource(state, selectedSource);
+
+	  return findBreakpointAtLocation(breakpoints, selectedSource, location);
+	}
+
+/***/ },
+/* 1135 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.default = getVisibleBreakpoints;
+
+	var _breakpoints = __webpack_require__(236);
+
+	var _sources = __webpack_require__(232);
+
+	var _devtoolsSourceMap = __webpack_require__(898);
+
+	function getLocation(breakpoint, isGeneratedSource) {
+	  return isGeneratedSource ? breakpoint.generatedLocation || breakpoint.location : breakpoint.location;
+	}
+
+	function formatBreakpoint(breakpoint, selectedSource) {
+	  var condition = breakpoint.condition,
+	      loading = breakpoint.loading,
+	      disabled = breakpoint.disabled;
+
+	  var sourceId = selectedSource.get("id");
+	  var isGeneratedSource = (0, _devtoolsSourceMap.isGeneratedId)(sourceId);
+
+	  return {
+	    location: getLocation(breakpoint, isGeneratedSource),
+	    condition,
+	    loading,
+	    disabled
+	  };
+	}
+
+	function isVisible(breakpoint, selectedSource) {
+	  var sourceId = selectedSource.get("id");
+	  var isGeneratedSource = (0, _devtoolsSourceMap.isGeneratedId)(sourceId);
+
+	  var location = getLocation(breakpoint, isGeneratedSource);
+	  return location.sourceId === sourceId;
+	}
+	/*
+	 * Finds the breakpoints, which appear in the selected source.
+	 *
+	 * This
+	 */
+	function getVisibleBreakpoints(state) {
+	  var selectedSource = (0, _sources.getSelectedSource)(state);
+	  if (!selectedSource) {
+	    return null;
+	  }
+
+	  return (0, _breakpoints.getBreakpoints)(state).filter(bp => isVisible(bp, selectedSource)).map(bp => formatBreakpoint(bp, selectedSource));
+	}
+
+/***/ },
+/* 1136 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+
+	var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+	var _getGeneratedLocation = (() => {
+	  var _ref = _asyncToGenerator(function* (state, source, sourceMaps, location) {
+	    var generatedLocation = yield (0, _breakpoint.getGeneratedLocation)(source, sourceMaps, location);
+
+	    var generatedSource = (0, _selectors.getSource)(state, generatedLocation.sourceId);
+	    var sourceUrl = generatedSource.get("url");
+	    return _extends({}, generatedLocation, { sourceUrl });
+	  });
+
+	  return function _getGeneratedLocation(_x, _x2, _x3, _x4) {
+	    return _ref.apply(this, arguments);
+	  };
+	})();
+
+	var _breakpoint = __webpack_require__(1057);
+
+	var _selectors = __webpack_require__(242);
+
+	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
+	exports.default = (() => {
+	  var _ref2 = _asyncToGenerator(function* (getState, client, sourceMaps, _ref3) {
+	    var breakpoint = _ref3.breakpoint;
+
+	    var state = getState();
+
+	    var source = (0, _selectors.getSource)(state, breakpoint.location.sourceId);
+	    var location = _extends({}, breakpoint.location, { sourceUrl: source.get("url") });
+	    var generatedLocation = yield _getGeneratedLocation(state, source, sourceMaps, location);
+
+	    (0, _breakpoint.assertLocation)(location);
+	    (0, _breakpoint.assertLocation)(generatedLocation);
+
+	    if ((0, _breakpoint.breakpointExists)(state, location)) {
+	      var _newBreakpoint = _extends({}, breakpoint, { location, generatedLocation });
+	      (0, _breakpoint.assertBreakpoint)(_newBreakpoint);
+	      return { breakpoint: _newBreakpoint };
+	    }
+
+	    var _ref4 = yield client.setBreakpoint(generatedLocation, breakpoint.condition, sourceMaps.isOriginalId(location.sourceId)),
+	        id = _ref4.id,
+	        hitCount = _ref4.hitCount,
+	        actualLocation = _ref4.actualLocation;
+
+	    var newGeneratedLocation = actualLocation || generatedLocation;
+	    var newLocation = yield sourceMaps.getOriginalLocation(newGeneratedLocation);
+
+	    var newBreakpoint = {
+	      id,
+	      disabled: false,
+	      loading: false,
+	      condition: breakpoint.condition,
+	      location: newLocation,
+	      hitCount,
+	      generatedLocation: newGeneratedLocation
+	    };
+
+	    (0, _breakpoint.assertBreakpoint)(newBreakpoint);
+
+	    var previousLocation = (0, _breakpoint.locationMoved)(location, newLocation) ? location : null;
+
+	    return {
+	      breakpoint: newBreakpoint,
+	      previousLocation
+	    };
+	  });
+
+	  function addBreakpoint(_x5, _x6, _x7, _x8) {
+	    return _ref2.apply(this, arguments);
+	  }
+
+	  return addBreakpoint;
+	})();
+
+/***/ },
+/* 1137 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.syncClientBreakpoint = undefined;
+
+	var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+	// we have three forms of syncing: disabled syncing, existing server syncing
+	// and adding a new breakpoint
+	var syncClientBreakpoint = exports.syncClientBreakpoint = (() => {
+	  var _ref = _asyncToGenerator(function* (sourceId, client, sourceMaps, pendingBreakpoint) {
+	    var generatedSourceId = sourceMaps.isOriginalId(sourceId) ? (0, _devtoolsSourceMap.originalToGeneratedId)(sourceId) : sourceId;
+
+	    // this is the generatedLocation of the pending breakpoint, with
+	    // the source id updated to reflect the new connection
+	    var generatedLocation = _extends({}, pendingBreakpoint.generatedLocation, {
+	      sourceId: generatedSourceId
+	    });
+
+	    var location = _extends({}, pendingBreakpoint.location, {
+	      sourceId: generatedSourceId
+	    });
+
+	    (0, _breakpoint3.assertPendingBreakpoint)(pendingBreakpoint);
+
+	    /** ******* CASE 1: Disabled ***********/
+	    // early return if breakpoint is disabled, send overrides to update
+	    // the id as expected
+	    if (pendingBreakpoint.disabled) {
+	      var _newLocation = yield sourceMaps.getOriginalLocation(generatedLocation);
+
+	      var _breakpoint = _extends({}, pendingBreakpoint, {
+	        id: (0, _breakpoint3.makeLocationId)(_newLocation),
+	        generatedLocation,
+	        location: _newLocation
+	      });
+
+	      var previousLocation = (0, _breakpoint3.locationMoved)(location, _newLocation) ? location : null;
+
+	      (0, _breakpoint3.assertBreakpoint)(_breakpoint);
+	      return { breakpoint: _breakpoint, previousLocation };
+	    }
+
+	    /** ******* CASE 2: Merge Server Breakpoint ***********/
+	    // early return if breakpoint exists on the server, send overrides
+	    // to update the id as expected
+	    var existingClient = client.getBreakpointByLocation(generatedLocation);
+
+	    if (existingClient) {
+	      var _newGeneratedLocation = existingClient.actualLocation;
+	      var _newLocation2 = yield sourceMaps.getOriginalLocation(_newGeneratedLocation);
+
+	      var _breakpoint2 = _extends({}, pendingBreakpoint, {
+	        id: (0, _breakpoint3.makeLocationId)(_newLocation2),
+	        generatedLocation: _newGeneratedLocation,
+	        location: _newLocation2
+	      });
+
+	      (0, _breakpoint3.assertBreakpoint)(_breakpoint2);
+	      return { breakpoint: _breakpoint2, previousLocation: location };
+	    }
+
+	    /** ******* CASE 3: Add New Breakpoint ***********/
+	    // If we are not disabled, set the breakpoint on the server and get
+	    // that info so we can set it on our breakpoints.
+	    var clientBreakpoint = yield client.setBreakpoint(generatedLocation, pendingBreakpoint.condition, sourceMaps.isOriginalId(sourceId));
+
+	    var newGeneratedLocation = clientBreakpoint.actualLocation;
+	    var newLocation = yield sourceMaps.getOriginalLocation(newGeneratedLocation);
+
+	    var breakpoint = _extends({}, pendingBreakpoint, {
+	      id: (0, _breakpoint3.makeLocationId)(newGeneratedLocation),
+	      generatedLocation: newGeneratedLocation,
+	      location: newLocation
+	    });
+
+	    (0, _breakpoint3.assertBreakpoint)(breakpoint);
+	    return { breakpoint, previousLocation: location };
+	  });
+
+	  return function syncClientBreakpoint(_x, _x2, _x3, _x4) {
+	    return _ref.apply(this, arguments);
+	  };
+	})();
+
+	var _breakpoint3 = __webpack_require__(1057);
+
+	var _devtoolsSourceMap = __webpack_require__(898);
+
+	function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
+/***/ },
+/* 1138 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.default = buildQuery;
+
+	var _escapeRegExp = __webpack_require__(259);
+
+	var _escapeRegExp2 = _interopRequireDefault(_escapeRegExp);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	/**
+	 * Ignore doing outline matches for less than 3 whitespaces
+	 *
+	 * @memberof utils/source-search
+	 * @static
+	 */
+	function ignoreWhiteSpace(str) {
+	  return (/^\s{0,2}$/.test(str) ? "(?!\\s*.*)" : str
+	  );
+	}
+
+
+	function wholeMatch(query, wholeWord) {
+	  if (query == "" || !wholeWord) {
+	    return query;
+	  }
+
+	  return `\\b${query}\\b`;
+	}
+
+	function buildFlags(caseSensitive, isGlobal) {
+	  if (caseSensitive && isGlobal) {
+	    return "g";
+	  }
+
+	  if (!caseSensitive && isGlobal) {
+	    return "gi";
+	  }
+
+	  if (!caseSensitive && !isGlobal) {
+	    return "i";
+	  }
+
+	  return;
+	}
+
+	function buildQuery(originalQuery, modifiers, _ref) {
+	  var _ref$isGlobal = _ref.isGlobal,
+	      isGlobal = _ref$isGlobal === undefined ? false : _ref$isGlobal,
+	      _ref$ignoreSpaces = _ref.ignoreSpaces,
+	      ignoreSpaces = _ref$ignoreSpaces === undefined ? false : _ref$ignoreSpaces;
+	  var caseSensitive = modifiers.caseSensitive,
+	      regexMatch = modifiers.regexMatch,
+	      wholeWord = modifiers.wholeWord;
+
+
+	  if (originalQuery == "") {
+	    return new RegExp(originalQuery);
+	  }
+
+	  var query = originalQuery;
+	  if (ignoreSpaces) {
+	    query = ignoreWhiteSpace(query);
+	  }
+
+	  if (!regexMatch) {
+	    query = (0, _escapeRegExp2.default)(query);
+	  }
+
+	  query = wholeMatch(query, wholeWord);
+	  var flags = buildFlags(caseSensitive, isGlobal);
+
+	  if (flags) {
+	    return new RegExp(query, flags);
+	  }
+
+	  return new RegExp(query);
+	}
+
+/***/ },
+/* 1139 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+
+	var _react = __webpack_require__(2);
+
+	var _reactRedux = __webpack_require__(151);
+
+	var _redux = __webpack_require__(3);
+
+	var _actions = __webpack_require__(244);
+
+	var _actions2 = _interopRequireDefault(_actions);
+
+	var _devtoolsConfig = __webpack_require__(828);
+
+	var _selectors = __webpack_require__(242);
+
+	__webpack_require__(1062);
+
+	var _TextSearch2 = __webpack_require__(1064);
+
+	var _TextSearch3 = _interopRequireDefault(_TextSearch2);
+
+	var _SourceSearch2 = __webpack_require__(1141);
+
+	var _SourceSearch3 = _interopRequireDefault(_SourceSearch2);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	var TextSearch = (0, _react.createFactory)(_TextSearch3.default);
+
+	var SourceSearch = (0, _react.createFactory)(_SourceSearch3.default);
+
+	class ProjectSearch extends _react.Component {
+
+	  constructor(props) {
+	    super(props);
+
+	    this.toggleSourceSearch = this.toggleSourceSearch.bind(this);
+	    this.toggleProjectTextSearch = this.toggleProjectTextSearch.bind(this);
+	  }
+
+	  componentDidMount() {
+	    var shortcuts = this.context.shortcuts;
+
+	    shortcuts.on(L10N.getStr("projectTextSearch.key"), this.toggleProjectTextSearch);
+
+	    var searchKeys = [L10N.getStr("sources.search.key2"), L10N.getStr("sources.search.alt.key")];
+	    searchKeys.forEach(key => shortcuts.on(key, this.toggleSourceSearch));
+	  }
+
+	  componentWillUnmount() {
+	    var shortcuts = this.context.shortcuts;
+	    shortcuts.off(L10N.getStr("projectTextSearch.key"), this.toggleProjectTextSearch);
+
+	    var searchKeys = [L10N.getStr("sources.search.key2"), L10N.getStr("sources.search.alt.key")];
+	    searchKeys.forEach(key => shortcuts.off(key, this.toggleSourceSearch));
+	    shortcuts.off("Escape", this.onEscape);
+	  }
+
+	  toggleProjectTextSearch(key, e) {
+	    var _props = this.props,
+	        closeActiveSearch = _props.closeActiveSearch,
+	        addTab = _props.addTab,
+	        closeTab = _props.closeTab,
+	        setActiveSearch = _props.setActiveSearch;
+
+	    e.preventDefault();
+
+	    if (!(0, _devtoolsConfig.isEnabled)("projectTextSearch")) {
+	      return;
+	    }
+
+	    if (this.isProjectSearchEnabled()) {
+	      closeTab();
+	      return closeActiveSearch();
+	    }
+
+	    addTab({
+	      id: "project",
+	      isBlackBoxed: false,
+	      isPrettyPrinted: false,
+	      sourceMapURL: null,
+	      url: "project"
+	    }, 0);
+
+	    return setActiveSearch("project");
+	  }
+
+	  toggleSourceSearch(key, e) {
+	    var _props2 = this.props,
+	        closeActiveSearch = _props2.closeActiveSearch,
+	        addTab = _props2.addTab,
+	        closeTab = _props2.closeTab,
+	        setActiveSearch = _props2.setActiveSearch;
+
+	    e.preventDefault();
+
+	    if (this.isSourceSearchEnabled()) {
+	      closeTab();
+	      return closeActiveSearch();
+	    }
+
+	    addTab({
+	      id: "source",
+	      isBlackBoxed: false,
+	      isPrettyPrinted: false,
+	      sourceMapURL: null,
+	      url: "source"
+	    }, 0);
+	    return setActiveSearch("source");
+	  }
+
+	  isProjectSearchEnabled() {
+	    return this.props.activeSearch === "project";
+	  }
+
+	  isSourceSearchEnabled() {
+	    return this.props.activeSearch === "source";
+	  }
+
+	  renderSourceSearch() {
+	    var _props3 = this.props,
+	        sources = _props3.sources,
+	        selectSource = _props3.selectSource,
+	        closeActiveSearch = _props3.closeActiveSearch;
+
+	    return SourceSearch({ sources, selectSource, closeActiveSearch });
+	  }
+
+	  renderTextSearch() {
+	    var _props4 = this.props,
+	        sources = _props4.sources,
+	        closeActiveSearch = _props4.closeActiveSearch;
+
+	    return TextSearch({ sources, closeActiveSearch });
+	  }
+
+	  render() {
+	    if (!(this.isProjectSearchEnabled() || this.isSourceSearchEnabled())) {
+	      return null;
+	    }
+
+	    return _react.DOM.div({ className: "search-container" }, this.isProjectSearchEnabled() ? this.renderTextSearch() : this.renderSourceSearch());
+	  }
+	}
+
+	ProjectSearch.propTypes = {
+	  sources: _react.PropTypes.object.isRequired,
+	  setActiveSearch: _react.PropTypes.func.isRequired,
+	  closeActiveSearch: _react.PropTypes.func.isRequired,
+	  activeSearch: _react.PropTypes.string,
+	  selectSource: _react.PropTypes.func.isRequired,
+	  addTab: _react.PropTypes.func,
+	  closeTab: _react.PropTypes.func
+	};
+
+	ProjectSearch.contextTypes = {
+	  shortcuts: _react.PropTypes.object
+	};
+
+	ProjectSearch.displayName = "ProjectSearch";
+
+	exports.default = (0, _reactRedux.connect)(state => ({
+	  sources: (0, _selectors.getSources)(state),
+	  activeSearch: (0, _selectors.getActiveSearchState)(state)
+	}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(ProjectSearch);
+
+/***/ },
+/* 1140 */
+/***/ function(module, exports) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+	exports.searchSource = searchSource;
+	exports.default = searchSources;
+
+	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
+
+	// Maybe reuse file search's functions?
+	function searchSource(source, queryText) {
+	  var _ref;
+
+	  var text = source.text,
+	      loading = source.loading;
+
+	  if (loading || !text || queryText == "") {
+	    return [];
+	  }
+
+	  var lines = text.split("\n");
+	  var result = undefined;
+	  var query = new RegExp(queryText, "g");
+
+	  var matches = lines.map((_text, line) => {
+	    var indices = [];
+
+	    while (result = query.exec(_text)) {
+	      indices.push({
+	        line: line + 1,
+	        column: result.index,
+	        match: result[0],
+	        value: _text,
+	        text: result.input
+	      });
+	    }
+	    return indices;
+	  }).filter(_matches => _matches.length > 0);
+
+	  matches = (_ref = []).concat.apply(_ref, _toConsumableArray(matches));
+	  return matches;
+	}
+
+	function searchSources(query, sources) {
+	  var validSources = sources.valueSeq().filter(s => s.has("text")).toJS();
+	  return validSources.map(source => ({
+	    source,
+	    filepath: source.url,
+	    matches: searchSource(source, query)
+	  }));
+	}
+
+/***/ },
+/* 1141 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+
+	var _react = __webpack_require__(2);
+
+	var _source = __webpack_require__(233);
+
+	var _utils = __webpack_require__(234);
+
+	var _Autocomplete2 = __webpack_require__(342);
+
+	var _Autocomplete3 = _interopRequireDefault(_Autocomplete2);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	var Autocomplete = (0, _react.createFactory)(_Autocomplete3.default);
+
+	class SourceSearch extends _react.Component {
+
+	  constructor(props) {
+	    super(props);
+
+	    this.close = this.close.bind(this);
+
+	    this.state = {
+	      inputValue: ""
+	    };
+	  }
+
+	  componentWillUnmount() {
+	    var shortcuts = this.context.shortcuts;
+	    shortcuts.off("Escape", this.onEscape);
+	  }
+
+	  componentDidMount() {
+	    var shortcuts = this.context.shortcuts;
+	    shortcuts.on("Escape", this.onEscape);
+	  }
+
+	  onEscape(shortcut, e) {
+	    if (this.isProjectSearchEnabled()) {
+	      e.preventDefault();
+	      this.close();
+	    }
+	  }
+
+	  searchResults(sourceMap) {
+	    return sourceMap.valueSeq().toJS().filter(source => !(0, _source.isPretty)(source)).map(source => ({
+	      value: (0, _source.getSourcePath)(source),
+	      title: (0, _source.getSourcePath)(source).split("/").pop(),
+	      subtitle: (0, _utils.endTruncateStr)((0, _source.getSourcePath)(source), 100),
+	      id: source.id
+	    }));
+	  }
+
+	  close() {
+	    this.setState({ inputValue: "" });
+	    this.props.closeActiveSearch();
+	  }
+
+	  render() {
+	    var sources = this.props.sources;
+
+	    return Autocomplete({
+	      selectItem: (e, result) => {
+	        this.props.selectSource(result.id);
+	        this.close();
+	      },
+	      close: this.close,
+	      items: this.searchResults(sources),
+	      inputValue: this.state.inputValue,
+	      placeholder: L10N.getStr("sourceSearch.search"),
+	      size: "big"
+	    });
+	  }
+	}
+
+	exports.default = SourceSearch;
+	SourceSearch.contextTypes = {
+	  shortcuts: _react.PropTypes.object
+	};
+
+	SourceSearch.displayName = "SourceSearch";
+
+/***/ },
+/* 1142 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+
+	var _react = __webpack_require__(2);
+
+	var _redux = __webpack_require__(3);
+
+	var _reactRedux = __webpack_require__(151);
+
+	var _text = __webpack_require__(389);
+
+	var _actions = __webpack_require__(244);
+
+	var _actions2 = _interopRequireDefault(_actions);
+
+	var _selectors = __webpack_require__(242);
+
+	var _devtoolsConfig = __webpack_require__(828);
+
+	__webpack_require__(1143);
+
+	var _classnames = __webpack_require__(175);
+
+	var _classnames2 = _interopRequireDefault(_classnames);
+
+	var _Outline2 = __webpack_require__(1145);
+
+	var _Outline3 = _interopRequireDefault(_Outline2);
+
+	var _SourcesTree2 = __webpack_require__(1148);
+
+	var _SourcesTree3 = _interopRequireDefault(_SourcesTree2);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	var Outline = (0, _react.createFactory)(_Outline3.default);
+
+	var SourcesTree = (0, _react.createFactory)(_SourcesTree3.default);
+
+	class PrimaryPanes extends _react.Component {
+
+	  constructor(props) {
+	    super(props);
+	    this.state = { selectedPane: "sources" };
+
+	    this.renderShortcut = this.renderShortcut.bind(this);
+	    this.showPane = this.showPane.bind(this);
+	    this.renderFooter = this.renderFooter.bind(this);
+	  }
+
+	  showPane(selectedPane) {
+	    this.setState({ selectedPane });
+	  }
+
+	  renderOutlineTabs() {
+	    if (!(0, _devtoolsConfig.isEnabled)("outline")) {
+	      return;
+	    }
+
+	    return [_react.DOM.div({
+	      className: (0, _classnames2.default)("tab", {
+	        active: this.state.selectedPane === "sources"
+	      }),
+	      onClick: () => this.showPane("sources"),
+	      key: "sources-tab"
+	    }, "Sources View"), _react.DOM.div({
+	      className: (0, _classnames2.default)("tab", {
+	        active: this.state.selectedPane === "outline"
+	      }),
+	      onClick: () => this.showPane("outline"),
+	      key: "outline-tab"
+	    }, "Outline View")];
+	  }
+
+	  renderFooter() {
+	    return _react.DOM.div({
+	      className: "source-footer"
+	    }, this.renderOutlineTabs());
+	  }
+
+	  renderShortcut() {
+	    if (this.props.horizontal) {
+	      return _react.DOM.span({
+	        className: "sources-header-info",
+	        dir: "ltr",
+	        onClick: () => {
+	          if (this.props.sourceSearchOn) {
+	            return this.props.closeActiveSearch();
+	          }
+	          this.props.setActiveSearch("source");
+	        }
+	      }, L10N.getFormatStr("sources.search", (0, _text.formatKeyShortcut)(L10N.getStr("sources.search.key2"))));
+	    }
+	  }
+
+	  renderHeader() {
+	    return _react.DOM.div({ className: "sources-header" }, this.renderShortcut());
+	  }
+
+	  render() {
+	    var selectedPane = this.state.selectedPane;
+	    var _props = this.props,
+	        sources = _props.sources,
+	        selectSource = _props.selectSource;
+
+
+	    return _react.DOM.div({ className: "sources-panel" }, this.renderHeader(), SourcesTree({
+	      sources,
+	      selectSource,
+	      isHidden: selectedPane === "outline"
+	    }), Outline({ selectSource, isHidden: selectedPane === "sources" }), this.renderFooter());
+	  }
+	}
+
+	PrimaryPanes.displayName = "PrimaryPanes";
+
+	exports.default = (0, _reactRedux.connect)(state => ({
+	  sources: (0, _selectors.getSources)(state),
+	  sourceSearchOn: (0, _selectors.getActiveSearchState)(state) === "source"
+	}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(PrimaryPanes);
+
+/***/ },
+/* 1143 */
+/***/ function(module, exports) {
+
+	// removed by extract-text-webpack-plugin
+
+/***/ },
+/* 1144 */,
+/* 1145 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+
+	var _react = __webpack_require__(2);
+
+	var _redux = __webpack_require__(3);
+
+	var _reactRedux = __webpack_require__(151);
+
+	var _classnames = __webpack_require__(175);
+
+	var _classnames2 = _interopRequireDefault(_classnames);
+
+	var _actions = __webpack_require__(244);
+
+	var _actions2 = _interopRequireDefault(_actions);
+
+	var _selectors = __webpack_require__(242);
+
+	var _devtoolsConfig = __webpack_require__(828);
+
+	__webpack_require__(1146);
+
+	var _previewFunction = __webpack_require__(701);
+
+	var _previewFunction2 = _interopRequireDefault(_previewFunction);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	class Outline extends _react.Component {
+
+	  constructor(props) {
+	    super(props);
+	    this.state = {};
+	  }
+
+	  selectItem(location) {
+	    var _props = this.props,
+	        selectedSource = _props.selectedSource,
+	        selectSource = _props.selectSource;
+
+	    if (!selectedSource) {
+	      return;
+	    }
+	    var selectedSourceId = selectedSource.get("id");
+	    var startLine = location.start.line;
+	    selectSource(selectedSourceId, { line: startLine });
+	  }
+
+	  renderFunction(func) {
+	    var name = func.name,
+	        location = func.location;
+
+
+	    return _react.DOM.li({
+	      key: `${name}:${location.start.line}:${location.start.column}`,
+	      className: "outline-list__element",
+	      onClick: () => this.selectItem(location)
+	    }, (0, _previewFunction2.default)({ name }));
+	  }
+
+	  renderFunctions() {
+	    var symbols = this.props.symbols;
+
+
+	    return symbols.functions.filter(func => func.name != "anonymous").map(func => this.renderFunction(func));
+	  }
+
+	  render() {
+	    var isHidden = this.props.isHidden;
+
+	    if (!(0, _devtoolsConfig.isEnabled)("outline")) {
+	      return null;
+	    }
+
+	    return _react.DOM.div({ className: (0, _classnames2.default)("outline", { hidden: isHidden }) }, _react.DOM.ul({ className: "outline-list" }, this.renderFunctions()));
+	  }
+	}
+
+	Outline.displayName = "Outline";
+
+	exports.default = (0, _reactRedux.connect)(state => {
+	  var selectedSource = (0, _selectors.getSelectedSource)(state);
+	  return {
+	    symbols: (0, _selectors.getSymbols)(state, selectedSource && selectedSource.toJS()),
+	    selectedSource
+	  };
+	}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Outline);
+
+/***/ },
+/* 1146 */
+/***/ function(module, exports) {
+
+	// removed by extract-text-webpack-plugin
+
+/***/ },
+/* 1147 */,
+/* 1148 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+
+	var _redux = __webpack_require__(3);
+
+	var _reactRedux = __webpack_require__(151);
+
+	var _react = __webpack_require__(2);
+
+	var _classnames = __webpack_require__(175);
+
+	var _classnames2 = _interopRequireDefault(_classnames);
+
+	var _reactImmutableProptypes = __webpack_require__(150);
+
+	var _reactImmutableProptypes2 = _interopRequireDefault(_reactImmutableProptypes);
+
+	var _immutable = __webpack_require__(146);
+
+	var _selectors = __webpack_require__(242);
+
+	var _sourcesTree = __webpack_require__(391);
+
+	var _ManagedTree2 = __webpack_require__(419);
+
+	var _ManagedTree3 = _interopRequireDefault(_ManagedTree2);
+
+	var _actions = __webpack_require__(244);
+
+	var _actions2 = _interopRequireDefault(_actions);
+
+	var _Svg = __webpack_require__(344);
+
+	var _Svg2 = _interopRequireDefault(_Svg);
+
+	var _devtoolsLaunchpad = __webpack_require__(131);
+
+	var _clipboard = __webpack_require__(423);
+
+	var _utils = __webpack_require__(234);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	var ManagedTree = (0, _react.createFactory)(_ManagedTree3.default);
+
+	class SourcesTree extends _react.Component {
+
+	  constructor(props) {
+	    super(props);
+	    this.state = (0, _sourcesTree.createTree)(this.props.sources, this.props.debuggeeUrl);
+
+	    this.focusItem = this.focusItem.bind(this);
+	    this.selectItem = this.selectItem.bind(this);
+	    this.getIcon = this.getIcon.bind(this);
+	    this.onContextMenu = this.onContextMenu.bind(this);
+	    this.renderItem = this.renderItem.bind(this);
+
+	    this.queueUpdate = (0, _utils.throttle)(function () {
+	      if (!this.mounted) {
+	        return;
+	      }
+
+	      this.forceUpdate();
+	    }, 50);
+	  }
+
+	  componentDidMount() {
+	    this.mounted = true;
+	  }
+
+	  componentWillUnMount() {
+	    this.mounted = false;
+	  }
+
+	  shouldComponentUpdate() {
+	    this.queueUpdate();
+	    return false;
+	  }
+
+	  componentWillReceiveProps(nextProps) {
+	    if (this.props.debuggeeUrl != nextProps.debuggeeUrl) {
+	      // Recreate tree because the sort order changed
+	      this.setState((0, _sourcesTree.createTree)(this.props.sources, nextProps.debuggeeUrl));
+	      return;
+	    }
+	    var selectedSource = this.props.selectedSource;
+
+	    if (nextProps.shownSource && nextProps.shownSource != this.props.shownSource) {
+	      var _listItems = (0, _sourcesTree.getDirectories)(nextProps.shownSource, this.state.sourceTree);
+
+	      if (_listItems && _listItems[0]) {
+	        this.selectItem(_listItems[0]);
+	      }
+
+	      return this.setState({ listItems: _listItems });
+	    }
+
+	    if (nextProps.selectedSource && nextProps.selectedSource != selectedSource) {
+	      var _highlightItems = (0, _sourcesTree.getDirectories)(nextProps.selectedSource.get("url"), this.state.sourceTree);
+
+	      return this.setState({ highlightItems: _highlightItems });
+	    }
+
+	    if (nextProps.sources === this.props.sources) {
+	      return;
+	    }
+
+	    if (nextProps.sources.size === 0) {
+	      // remove all sources
+	      this.setState((0, _sourcesTree.createTree)(nextProps.sources, this.props.debuggeeUrl));
+	      return;
+	    }
+
+	    // TODO: do not run this every time a source is clicked,
+	    // only when a new source is added
+	    var next = (0, _immutable.Set)(nextProps.sources.valueSeq());
+	    var prev = (0, _immutable.Set)(this.props.sources.valueSeq());
+	    var newSet = next.subtract(prev);
+
+	    var uncollapsedTree = this.state.uncollapsedTree;
+	    for (var source of newSet) {
+	      (0, _sourcesTree.addToTree)(uncollapsedTree, source, this.props.debuggeeUrl);
+	    }
+
+	    // TODO: recreating the tree every time messes with the expanded
+	    // state of ManagedTree, because it depends on item instances
+	    // being the same. The result is that if a source is added at a
+	    // later time, all expanded state is lost.
+	    var sourceTree = newSet.size > 0 ? (0, _sourcesTree.collapseTree)(uncollapsedTree) : this.state.sourceTree;
+
+	    this.setState({
+	      uncollapsedTree,
+	      sourceTree,
+	      parentMap: (0, _sourcesTree.createParentMap)(sourceTree)
+	    });
+	  }
+
+	  focusItem(item) {
+	    this.setState({ focusedItem: item });
+	  }
+
+	  selectItem(item) {
+	    if (!(0, _sourcesTree.nodeHasChildren)(item)) {
+	      this.props.selectSource(item.contents.get("id"));
+	    }
+	  }
+
+	  getIcon(item, depth) {
+	    if (depth === 0) {
+	      return (0, _Svg2.default)("domain");
+	    }
+
+	    if (!(0, _sourcesTree.nodeHasChildren)(item)) {
+	      return (0, _Svg2.default)("file");
+	    }
+
+	    return (0, _Svg2.default)("folder");
+	  }
+
+	  onContextMenu(event, item) {
+	    var copySourceUrlLabel = L10N.getStr("copySourceUrl");
+	    var copySourceUrlKey = L10N.getStr("copySourceUrl.accesskey");
+
+	    event.stopPropagation();
+	    event.preventDefault();
+
+	    var menuOptions = [];
+
+	    if (!(0, _sourcesTree.isDirectory)(item)) {
+	      var source = item.contents.get("url");
+	      var copySourceUrl = {
+	        id: "node-menu-copy-source",
+	        label: copySourceUrlLabel,
+	        accesskey: copySourceUrlKey,
+	        disabled: false,
+	        click: () => (0, _clipboard.copyToTheClipboard)(source)
+	      };
+
+	      menuOptions.push(copySourceUrl);
+	    }
+
+	    (0, _devtoolsLaunchpad.showMenu)(event, menuOptions);
+	  }
+
+	  renderItem(item, depth, focused, _, expanded, _ref) {
+	    var setExpanded = _ref.setExpanded;
+
+	    var arrow = (0, _Svg2.default)("arrow", {
+	      className: (0, _classnames2.default)({
+	        expanded: expanded,
+	        hidden: !(0, _sourcesTree.nodeHasChildren)(item)
+	      }),
+	      onClick: e => {
+	        e.stopPropagation();
+	        setExpanded(item, !expanded);
+	      }
+	    });
+
+	    var icon = this.getIcon(item, depth);
+	    var paddingDir = "paddingRight";
+	    if (document.body && document.body.parentElement) {
+	      paddingDir = document.body.parentElement.dir == "ltr" ? "paddingLeft" : "paddingRight";
+	    }
+
+	    return _react.DOM.div({
+	      className: (0, _classnames2.default)("node", { focused }),
+	      style: { [paddingDir]: `${depth * 15}px` },
+	      key: item.path,
+	      onClick: () => {
+	        this.selectItem(item);
+	        setExpanded(item, !expanded);
+	      },
+	      onContextMenu: e => this.onContextMenu(e, item)
+	    }, _react.DOM.div(null, arrow, icon, item.name));
+	  }
+
+	  render() {
+	    var isHidden = this.props.isHidden;
+	    var _state = this.state,
+	        focusedItem = _state.focusedItem,
+	        sourceTree = _state.sourceTree,
+	        parentMap = _state.parentMap,
+	        listItems = _state.listItems,
+	        highlightItems = _state.highlightItems;
+
+
+	    var isEmpty = sourceTree.contents.length === 0;
+
+	    var tree = ManagedTree({
+	      key: isEmpty ? "empty" : "full",
+	      getParent: item => {
+	        return parentMap.get(item);
+	      },
+	      getChildren: item => {
+	        if ((0, _sourcesTree.nodeHasChildren)(item)) {
+	          return item.contents;
+	        }
+	        return [];
+	      },
+	      getRoots: () => sourceTree.contents,
+	      getKey: (item, i) => item.path,
+	      itemHeight: 21,
+	      autoExpandDepth: 1,
+	      autoExpandAll: false,
+	      onFocus: this.focusItem,
+	      listItems,
+	      highlightItems,
+	      renderItem: this.renderItem
+	    });
+
+	    var noSourcesMessage = _react.DOM.div({
+	      className: "no-sources-message"
+	    }, L10N.getStr("sources.noSourcesAvailable"));
+
+	    if (isEmpty) {
+	      return noSourcesMessage;
+	    }
+	    return _react.DOM.div({
+	      className: (0, _classnames2.default)("sources-list", { hidden: isHidden }),
+	      onKeyDown: e => {
+	        if (e.keyCode === 13 && focusedItem) {
+	          this.selectItem(focusedItem);
+	        }
+	      }
+	    }, tree);
+	  }
+	}
+
+	SourcesTree.propTypes = {
+	  isHidden: _react.PropTypes.bool,
+	  sources: _reactImmutableProptypes2.default.map.isRequired,
+	  selectSource: _react.PropTypes.func.isRequired,
+	  shownSource: _react.PropTypes.string,
+	  selectedSource: _reactImmutableProptypes2.default.map,
+	  debuggeeUrl: _react.PropTypes.string.isRequired
+	};
+
+	SourcesTree.displayName = "SourcesTree";
+
+	exports.default = (0, _reactRedux.connect)(state => {
+	  return {
+	    shownSource: (0, _selectors.getShownSource)(state),
+	    selectedSource: (0, _selectors.getSelectedSource)(state),
+	    debuggeeUrl: (0, _selectors.getDebuggeeUrl)(state)
+	  };
+	}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(SourcesTree);
+
+/***/ },
+/* 1149 */
+/***/ function(module, exports) {
+
+	// removed by extract-text-webpack-plugin
+
+/***/ },
+/* 1150 */,
+/* 1151 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+	var React = __webpack_require__(2);
+	var InlineSVG = __webpack_require__(346);
+
+	var svg = {
+	  "arrow": __webpack_require__(1152),
+	  "open-inspector": __webpack_require__(1153)
+	};
+
+	Svg.propTypes = {
+	  className: React.PropTypes.string
+	};
+
+	function Svg(name, props) {
+	  if (!svg[name]) {
+	    throw new Error("Unknown SVG: " + name);
+	  }
+	  var className = name;
+	  if (props && props.className) {
+	    className = `${name} ${props.className}`;
+	  }
+	  if (name === "subSettings") {
+	    className = "";
+	  }
+	  props = Object.assign({}, props, { className, src: svg[name] });
+	  return React.createElement(InlineSVG, props);
+	}
+
+	module.exports = Svg;
+
+/***/ },
+/* 1152 */
+/***/ function(module, exports) {
+
+	module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M8 13.4c-.5 0-.9-.2-1.2-.6L.4 5.2C0 4.7-.1 4.3.2 3.7S1 3 1.6 3h12.8c.6 0 1.2.1 1.4.7.3.6.2 1.1-.2 1.6l-6.4 7.6c-.3.4-.7.5-1.2.5z\"></path></svg>"
+
+/***/ },
+/* 1153 */
+/***/ function(module, exports) {
+
+	module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M8,3L12,3L12,7L14,7L14,8L12,8L12,12L8,12L8,14L7,14L7,12L3,12L3,8L1,8L1,7L3,7L3,3L7,3L7,1L8,1L8,3ZM10,10L10,5L5,5L5,10L10,10Z\"></path></svg>"
+
+/***/ },
+/* 1154 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+	var _require = __webpack_require__(2),
+	    Component = _require.Component,
+	    createFactory = _require.createFactory,
+	    dom = _require.DOM,
+	    PropTypes = _require.PropTypes;
+
+	var Tree = createFactory(__webpack_require__(1007).Tree);
+	__webpack_require__(1155);
+
+	var classnames = __webpack_require__(175);
+	var Svg = __webpack_require__(1151);
+
+	var _require2 = __webpack_require__(926),
+	    Rep = _require2.REPS.Rep;
+
+	var _require3 = __webpack_require__(925),
+	    MODE = _require3.MODE;
+
+	var _require4 = __webpack_require__(1157),
+	    getChildren = _require4.getChildren,
+	    getValue = _require4.getValue,
+	    isDefault = _require4.isDefault,
+	    nodeHasProperties = _require4.nodeHasProperties,
+	    nodeIsMissingArguments = _require4.nodeIsMissingArguments,
+	    nodeIsOptimizedOut = _require4.nodeIsOptimizedOut,
+	    nodeIsPrimitive = _require4.nodeIsPrimitive;
+
+	// This implements a component that renders an interactive inspector
+	// for looking at JavaScript objects. It expects descriptions of
+	// objects from the protocol, and will dynamically fetch child
+	// properties as objects are expanded.
+	//
+	// If you want to inspect a single object, pass the name and the
+	// protocol descriptor of it:
+	//
+	//  ObjectInspector({
+	//    name: "foo",
+	//    desc: { writable: true, ..., { value: { actor: "1", ... }}},
+	//    ...
+	//  })
+	//
+	// If you want multiple top-level objects (like scopes), you can pass
+	// an array of manually constructed nodes as `roots`:
+	//
+	//  ObjectInspector({
+	//    roots: [{ name: ... }, ...],
+	//    ...
+	//  });
+
+	// There are 3 types of nodes: a simple node with a children array, an
+	// object that has properties that should be children when they are
+	// fetched, and a primitive value that should be displayed with no
+	// children.
+
+	class ObjectInspector extends Component {
+	  constructor() {
+	    super();
+
+	    this.actors = {};
+	    this.state = {
+	      expandedKeys: new Set(),
+	      focusedItem: null
+	    };
+
+	    var self = this;
+
+	    self.getChildren = this.getChildren.bind(this);
+	    self.renderTreeItem = this.renderTreeItem.bind(this);
+	    self.setExpanded = this.setExpanded.bind(this);
+	    self.focusItem = this.focusItem.bind(this);
+	    self.getRoots = this.getRoots.bind(this);
+	  }
+
+	  isDefaultProperty(item) {
+	    var roots = this.props.roots;
+	    return isDefault(item, roots);
+	  }
+
+	  getParent(item) {
+	    return null;
+	  }
+
+	  getChildren(item) {
+	    var getObjectProperties = this.props.getObjectProperties;
+	    var actors = this.actors;
+
+
+	    return getChildren({
+	      getObjectProperties,
+	      actors,
+	      item
+	    });
+	  }
+
+	  getRoots() {
+	    return this.props.roots;
+	  }
+
+	  getKey(item) {
+	    return item.path;
+	  }
+
+	  setExpanded(item, expand) {
+	    var expandedKeys = this.state.expandedKeys;
+
+	    var key = this.getKey(item);
+
+	    if (expand === true) {
+	      expandedKeys.add(key);
+	    } else {
+	      expandedKeys.delete(key);
+	    }
+
+	    this.setState({ expandedKeys });
+
+	    if (expand === true) {
+	      var _props = this.props,
+	          _getObjectProperties = _props.getObjectProperties,
+	          _loadObjectProperties = _props.loadObjectProperties;
+
+
+	      var _value = getValue(item);
+	      if (nodeHasProperties(item) && _value && !_getObjectProperties(_value.actor)) {
+	        _loadObjectProperties(_value);
+	      }
+	    }
+	  }
+
+	  focusItem(item) {
+	    if (!this.props.disabledFocus && this.state.focusedItem !== item) {
+	      this.setState({
+	        focusedItem: item
+	      });
+
+	      if (this.props.onFocus) {
+	        this.props.onFocus(item);
+	      }
+	    }
+	  }
+
+	  renderTreeItem(item, depth, focused, arrow, expanded) {
+	    var objectValue = void 0;
+	    var label = item.name;
+	    var itemValue = getValue(item);
+
+	    var unavailable = nodeIsPrimitive(item) && itemValue && itemValue.hasOwnProperty && itemValue.hasOwnProperty("unavailable");
+
+	    if (nodeIsOptimizedOut(item)) {
+	      objectValue = dom.span({ className: "unavailable" }, "(optimized away)");
+	    } else if (nodeIsMissingArguments(item) || unavailable) {
+	      objectValue = dom.span({ className: "unavailable" }, "(unavailable)");
+	    } else if (nodeHasProperties(item) || nodeIsPrimitive(item)) {
+	      var _mode = void 0;
+	      if (depth === 0) {
+	        _mode = this.props.mode;
+	      } else {
+	        _mode = this.props.mode === MODE.LONG ? MODE.SHORT : MODE.TINY;
+	      }
+
+	      objectValue = this.renderGrip(item, this.props, _mode);
+	    }
+
+	    var SINGLE_INDENT_WIDTH = 15;
+	    var indentWidth = (depth + (nodeIsPrimitive(item) ? 1 : 0)) * SINGLE_INDENT_WIDTH;
+
+	    var _props2 = this.props,
+	        onDoubleClick = _props2.onDoubleClick,
+	        onLabelClick = _props2.onLabelClick;
+
+
+	    return dom.div({
+	      className: classnames("node object-node", {
+	        focused,
+	        "default-property": this.isDefaultProperty(item)
+	      }),
+	      style: {
+	        marginLeft: indentWidth
+	      },
+	      onClick: e => {
+	        e.stopPropagation();
+	        this.setExpanded(item, !expanded);
+	      },
+	      onDoubleClick: onDoubleClick ? e => {
+	        e.stopPropagation();
+	        onDoubleClick(item, {
+	          depth,
+	          focused,
+	          expanded
+	        });
+	      } : null
+	    }, nodeIsPrimitive(item) === false ? Svg("arrow", {
+	      className: classnames({
+	        expanded: expanded
+	      })
+	    }) : null, label ? dom.span({
+	      className: "object-label",
+	      onClick: onLabelClick ? event => {
+	        event.stopPropagation();
+	        onLabelClick(item, {
+	          depth,
+	          focused,
+	          expanded,
+	          setExpanded: this.setExpanded
+	        });
+	      } : null
+	    }, label) : null, label && objectValue ? dom.span({ className: "object-delimiter" }, " : ") : null, objectValue);
+	  }
+
+	  renderGrip(item, props) {
+	    var mode = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : MODE.TINY;
+
+	    var object = getValue(item);
+	    return Rep(Object.assign({}, props, {
+	      object,
+	      mode
+	    }));
+	  }
+
+	  render() {
+	    var _props3 = this.props,
+	        _props3$autoExpandDep = _props3.autoExpandDepth,
+	        autoExpandDepth = _props3$autoExpandDep === undefined ? 1 : _props3$autoExpandDep,
+	        _props3$autoExpandAll = _props3.autoExpandAll,
+	        autoExpandAll = _props3$autoExpandAll === undefined ? true : _props3$autoExpandAll,
+	        disabledFocus = _props3.disabledFocus,
+	        _props3$itemHeight = _props3.itemHeight,
+	        itemHeight = _props3$itemHeight === undefined ? 20 : _props3$itemHeight,
+	        _props3$disableWrap = _props3.disableWrap,
+	        disableWrap = _props3$disableWrap === undefined ? false : _props3$disableWrap;
+	    var _state = this.state,
+	        expandedKeys = _state.expandedKeys,
+	        focusedItem = _state.focusedItem;
+
+
+	    var roots = this.getRoots();
+	    if (roots.length === 1 && nodeIsPrimitive(roots[0])) {
+	      return this.renderGrip(roots[0], this.props, this.props.mode);
+	    }
+
+	    return Tree({
+	      className: disableWrap ? "nowrap" : "",
+	      autoExpandAll,
+	      autoExpandDepth,
+	      disabledFocus,
+	      itemHeight,
+
+	      isExpanded: item => expandedKeys.has(this.getKey(item)),
+	      focused: focusedItem,
+
+	      getRoots: this.getRoots,
+	      getParent: this.getParent,
+	      getChildren: this.getChildren,
+	      getKey: this.getKey,
+
+	      onExpand: item => this.setExpanded(item, true),
+	      onCollapse: item => this.setExpanded(item, false),
+	      onFocus: this.focusItem,
+
+	      renderItem: this.renderTreeItem
+	    });
+	  }
+	}
+
+	ObjectInspector.displayName = "ObjectInspector";
+
+	ObjectInspector.propTypes = {
+	  autoExpandAll: PropTypes.bool,
+	  autoExpandDepth: PropTypes.number,
+	  disabledFocus: PropTypes.bool,
+	  disableWrap: PropTypes.bool,
+	  roots: PropTypes.array,
+	  getObjectProperties: PropTypes.func.isRequired,
+	  loadObjectProperties: PropTypes.func.isRequired,
+	  itemHeight: PropTypes.number,
+	  mode: PropTypes.oneOf(Object.values(MODE)),
+	  onFocus: PropTypes.func,
+	  onDoubleClick: PropTypes.func,
+	  onLabelClick: PropTypes.func
+	};
+
+	module.exports = ObjectInspector;
+
+/***/ },
+/* 1155 */
+/***/ function(module, exports) {
+
+	// removed by extract-text-webpack-plugin
+
+/***/ },
+/* 1156 */,
+/* 1157 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
+
+	/* This Source Code Form is subject to the terms of the Mozilla Public
+	 * License, v. 2.0. If a copy of the MPL was not distributed with this
+	 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+	var get = __webpack_require__(67);
+
+	var _require = __webpack_require__(927),
+	    maybeEscapePropertyName = _require.maybeEscapePropertyName;
+
+	var WINDOW_PROPERTIES = {};
+
+	if (typeof window === "object") {
+	  WINDOW_PROPERTIES = Object.getOwnPropertyNames(window);
+	}
+
+	function getValue(item) {
+	  return get(item, "contents.value", undefined);
+	}
+
+	function isBucket(item) {
+	  return item.path && item.path.match(/bucket(\d+)$/);
+	}
+
+	function nodeHasChildren(item) {
+	  return Array.isArray(item.contents) || isBucket(item);
+	}
+
+	function nodeIsObject(item) {
+	  var value = getValue(item);
+	  return value && value.type === "object";
+	}
+
+	function nodeIsArray(value) {
+	  return value && value.class === "Array";
+	}
+
+	function nodeIsFunction(item) {
+	  var value = getValue(item);
+	  return value && value.class === "Function";
+	}
+
+	function nodeIsOptimizedOut(item) {
+	  var value = getValue(item);
+	  return !nodeHasChildren(item) && value && value.optimizedOut;
+	}
+
+	function nodeIsMissingArguments(item) {
+	  var value = getValue(item);
+	  return !nodeHasChildren(item) && value && value.missingArguments;
+	}
+
+	function nodeHasProperties(item) {
+	  return !nodeHasChildren(item) && nodeIsObject(item);
+	}
+
+	function nodeIsPrimitive(item) {
+	  return !nodeHasChildren(item) && !nodeHasProperties(item);
+	}
+
+	function isPromise(item) {
+	  var value = getValue(item);
+	  return value.class == "Promise";
+	}
+
+	function getPromiseProperties(item) {
+	  var _getValue = getValue(item),
+	      _getValue$promiseStat = _getValue.promiseState,
+	      reason = _getValue$promiseStat.reason,
+	      value = _getValue$promiseStat.value,
+	      state = _getValue$promiseStat.state;
+
+	  var properties = [];
+
+	  if (state) {
+	    properties.push(createNode("<state>", `${item.path}/state`, { value: state }));
+	  }
+
+	  if (reason) {
+	    properties.push(createNode("<reason>", `${item.path}/reason`, { value: reason }));
+	  }
+
+	  if (value) {
+	    properties.push(createNode("<value>", `${item.path}/value`, { value: value }));
+	  }
+
+	  return properties;
+	}
+
+	function isDefault(item, roots) {
+	  if (roots && roots.length === 1) {
+	    var value = getValue(roots[0]);
+	    return value.class === "Window";
+	  }
+	  return WINDOW_PROPERTIES.includes(item.name);
+	}
+
+	function sortProperties(properties) {
+	  return properties.sort((a, b) => {
+	    // Sort numbers in ascending order and sort strings lexicographically
+	    var aInt = parseInt(a, 10);
+	    var bInt = parseInt(b, 10);
+
+	    if (isNaN(aInt) || isNaN(bInt)) {
+	      return a > b ? 1 : -1;
+	    }
+
+	    return aInt - bInt;
+	  });
+	}
+
+	function makeNumericalBuckets(props, bucketSize, parentPath, ownProperties) {
+	  var numProperties = props.length;
+	  var numBuckets = Math.ceil(numProperties / bucketSize);
+	  var buckets = [];
+
+	  var _loop = function (i) {
+	    var bucketKey = `bucket${i}`;
+	    var minKey = (i - 1) * bucketSize;
+	    var maxKey = Math.min(i * bucketSize - 1, numProperties);
+	    var bucketName = `[${minKey}..${maxKey}]`;
+	    var bucketProperties = props.slice(minKey, maxKey);
+
+	    var bucketNodes = bucketProperties.map(name => createNode(name, `${parentPath}/${bucketKey}/${name}`, ownProperties[name]));
+
+	    buckets.push(createNode(bucketName, `${parentPath}/${bucketKey}`, bucketNodes));
+	  };
+
+	  for (var i = 1; i <= numBuckets; i++) {
+	    _loop(i);
+	  }
+	  return buckets;
+	}
+
+	function makeDefaultPropsBucket(props, parentPath, ownProperties) {
+	  var userProps = props.filter(name => !isDefault({ name }));
+	  var defaultProps = props.filter(name => isDefault({ name }));
+
+	  var nodes = makeNodesForOwnProps(userProps, parentPath, ownProperties);
+
+	  if (defaultProps.length > 0) {
+	    var defaultNodes = defaultProps.map((name, index) => createNode(maybeEscapePropertyName(name), `${parentPath}/bucket${index}/${name}`, ownProperties[name]));
+	    nodes.push(createNode("[default properties]", `${parentPath}/##-default`, defaultNodes));
+	  }
+	  return nodes;
+	}
+
+	function makeNodesForOwnProps(properties, parentPath, ownProperties) {
+	  return properties.map(name => createNode(maybeEscapePropertyName(name), `${parentPath}/${name}`, ownProperties[name]));
+	}
+
+	/*
+	 * Ignore non-concrete values like getters and setters
+	 * for now by making sure we have a value.
+	*/
+	function makeNodesForProperties(objProps, parent) {
+	  var _ref = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {},
+	      _ref$bucketSize = _ref.bucketSize,
+	      bucketSize = _ref$bucketSize === undefined ? 100 : _ref$bucketSize;
+
+	  var ownProperties = objProps.ownProperties,
+	      prototype = objProps.prototype,
+	      ownSymbols = objProps.ownSymbols;
+
+	  var parentPath = parent.path;
+	  var parentValue = getValue(parent);
+	  var properties = sortProperties(Object.keys(ownProperties)).filter(name => ownProperties[name].hasOwnProperty("value"));
+
+	  var numProperties = properties.length;
+
+	  var nodes = [];
+	  if (nodeIsArray(prototype) && numProperties > bucketSize) {
+	    nodes = makeNumericalBuckets(properties, bucketSize, parentPath, ownProperties);
+	  } else if (parentValue.class == "Window") {
+	    nodes = makeDefaultPropsBucket(properties, parentPath, ownProperties);
+	  } else {
+	    nodes = makeNodesForOwnProps(properties, parentPath, ownProperties);
+	  }
+
+	  for (var index in ownSymbols) {
+	    nodes.push(createNode(ownSymbols[index].name, `${parentPath}/##symbol-${index}`, ownSymbols[index].descriptor));
+	  }
+
+	  if (isPromise(parent)) {
+	    var _nodes;
+
+	    (_nodes = nodes).push.apply(_nodes, _toConsumableArray(getPromiseProperties(parent)));
+	  }
+
+	  // Add the prototype if it exists and is not null
+	  if (prototype && prototype.type !== "null") {
+	    nodes.push(createNode("__proto__", `${parentPath}/__proto__`, { value: prototype }));
+	  }
+
+	  return nodes;
+	}
+
+	function createNode(name, path, contents) {
+	  if (contents === undefined) {
+	    return null;
+	  }
+	  // The path is important to uniquely identify the item in the entire
+	  // tree. This helps debugging & optimizes React's rendering of large
+	  // lists. The path will be separated by property name,
+	  // i.e. `{ foo: { bar: { baz: 5 }}}` will have a path of `foo/bar/baz`
+	  // for the inner object.
+	  return { name, path, contents };
+	}
+
+	function getChildren(_ref2) {
+	  var getObjectProperties = _ref2.getObjectProperties,
+	      actors = _ref2.actors,
+	      item = _ref2.item;
+
+	  var obj = item.contents;
+
+	  // Nodes can either have children already, or be an object with
+	  // properties that we need to go and fetch.
+	  if (nodeHasChildren(item)) {
+	    return item.contents;
+	  }
+
+	  if (!nodeHasProperties(item)) {
+	    return [];
+	  }
+
+	  var actor = obj.value.actor;
+
+	  // Because we are dynamically creating the tree as the user
+	  // expands it (not precalculated tree structure), we cache child
+	  // arrays. This not only helps performance, but is necessary
+	  // because the expanded state depends on instances of nodes
+	  // being the same across renders. If we didn't do this, each
+	  // node would be a new instance every render.
+	  var key = item.path;
+	  if (actors && actors[key]) {
+	    return actors[key];
+	  }
+
+	  if (isBucket(item)) {
+	    return item.contents.children;
+	  }
+
+	  var loadedProps = getObjectProperties(actor);
+
+	  var _ref3 = loadedProps || {},
+	      ownProperties = _ref3.ownProperties,
+	      prototype = _ref3.prototype;
+
+	  if (!ownProperties && !prototype) {
+	    return [];
+	  }
+
+	  var children = makeNodesForProperties(loadedProps, item);
+	  actors[key] = children;
+	  return children;
+	}
+
+	module.exports = {
+	  createNode,
+	  getChildren,
+	  getPromiseProperties,
+	  getValue,
+	  isDefault,
+	  isPromise,
+	  makeNodesForProperties,
+	  nodeHasChildren,
+	  nodeHasProperties,
+	  nodeIsFunction,
+	  nodeIsMissingArguments,
+	  nodeIsObject,
+	  nodeIsOptimizedOut,
+	  nodeIsPrimitive,
+	  sortProperties
+	};
+
+/***/ },
+/* 1158 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+
+	var _reactRedux = __webpack_require__(151);
+
+	var _redux = __webpack_require__(3);
+
+	var _react = __webpack_require__(2);
+
+	var _Breakpoint2 = __webpack_require__(714);
+
+	var _Breakpoint3 = _interopRequireDefault(_Breakpoint2);
+
+	var _actions = __webpack_require__(244);
+
+	var _actions2 = _interopRequireDefault(_actions);
+
+	var _selectors = __webpack_require__(242);
+
+	var _visibleBreakpoints = __webpack_require__(1135);
+
+	var _visibleBreakpoints2 = _interopRequireDefault(_visibleBreakpoints);
+
+	var _breakpoint = __webpack_require__(1057);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	var Breakpoint = (0, _react.createFactory)(_Breakpoint3.default);
+
+	class Breakpoints extends _react.Component {
+
+	  shouldComponentUpdate(nextProps) {
+	    if (nextProps.selectedSource && nextProps.selectedSource.get("loading")) {
+	      return false;
+	    }
+
+	    return true;
+	  }
+
+	  render() {
+	    var _props = this.props,
+	        breakpoints = _props.breakpoints,
+	        selectedSource = _props.selectedSource,
+	        editor = _props.editor;
+
+
+	    if (!selectedSource || !breakpoints || selectedSource.get("isBlackBoxed")) {
+	      return null;
+	    }
+
+	    return _react.DOM.div({}, breakpoints.valueSeq().map(bp => Breakpoint({
+	      key: (0, _breakpoint.makeLocationId)(bp.location),
+	      breakpoint: bp,
+	      selectedSource,
+	      editor: editor
+	    })));
+	  }
+	}
+
+	Breakpoints.displayName = "Breakpoints";
+
+	exports.default = (0, _reactRedux.connect)(state => ({
+	  breakpoints: (0, _visibleBreakpoints2.default)(state),
+	  selectedSource: (0, _selectors.getSelectedSource)(state)
+	}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Breakpoints);
+
+/***/ },
+/* 1159 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+
+	var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+	var _react = __webpack_require__(2);
+
+	var _reactRedux = __webpack_require__(151);
+
+	var _redux = __webpack_require__(3);
+
+	var _devtoolsConfig = __webpack_require__(828);
+
+	var _range = __webpack_require__(1026);
+
+	var _range2 = _interopRequireDefault(_range);
+
+	var _keyBy = __webpack_require__(1160);
+
+	var _keyBy2 = _interopRequireDefault(_keyBy);
+
+	var _find = __webpack_require__(1164);
+
+	var _find2 = _interopRequireDefault(_find);
+
+	var _isEqualWith = __webpack_require__(1166);
+
+	var _isEqualWith2 = _interopRequireDefault(_isEqualWith);
+
+	var _CallSite2 = __webpack_require__(1167);
+
+	var _CallSite3 = _interopRequireDefault(_CallSite2);
+
+	var _selectors = __webpack_require__(242);
+
+	var _editor = __webpack_require__(257);
+
+	var _actions = __webpack_require__(244);
+
+	var _actions2 = _interopRequireDefault(_actions);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	var CallSite = (0, _react.createFactory)(_CallSite3.default);
+
+	function getCallSiteAtLocation(callSites, location) {
+	  return (0, _find2.default)(callSites, callSite => (0, _isEqualWith2.default)(callSite.location, location, (cloc, loc) => {
+	    return loc.line === cloc.start.line && loc.column >= cloc.start.column && loc.column <= cloc.end.column;
+	  }));
+	}
+
+	class CallSites extends _react.Component {
+
+	  constructor(props) {
+	    super(props);
+	    this.onKeyDown = this.onKeyDown.bind(this);
+	    this.onKeyUp = this.onKeyUp.bind(this);
+
+	    this.state = {
+	      showCallSites: false
+	    };
+	  }
+
+	  componentDidMount() {
+	    var editor = this.props.editor;
+
+	    var codeMirrorWrapper = editor.codeMirror.getWrapperElement();
+
+	    codeMirrorWrapper.addEventListener("click", e => this.onTokenClick(e));
+	    document.body.addEventListener("keydown", this.onKeyDown);
+	    document.body.addEventListener("keyup", this.onKeyUp);
+	  }
+
+	  componentDidUnMount() {
+	    var editor = this.props.editor;
+
+	    var codeMirrorWrapper = editor.codeMirror.getWrapperElement();
+
+	    codeMirrorWrapper.addEventListener("click", e => this.onTokenClick(e));
+	    document.body.removeEventListener("keydown", e => this.onKeyDown);
+	    document.body.removeEventListener("keyup", this.onKeyUp);
+	  }
+
+	  onKeyUp(e) {
+	    if (e.key === "Alt") {
+	      e.preventDefault();
+	      this.setState({ showCallSites: false });
+	    }
+	  }
+
+	  onKeyDown(e) {
+	    if (e.key === "Alt") {
+	      e.preventDefault();
+	      this.setState({ showCallSites: true });
+	    }
+	  }
+
+	  onTokenClick(e) {
+	    var target = e.target;
+	    var editor = this.props.editor;
+
+
+	    if (!(0, _devtoolsConfig.isEnabled)("columnBreakpoints") || !e.altKey || !target.classList.contains("call-site") && !target.classList.contains("call-site-bp")) {
+	      return;
+	    }
+
+	    var _getTokenLocation = (0, _editor.getTokenLocation)(editor.codeMirror, target),
+	        line = _getTokenLocation.line,
+	        column = _getTokenLocation.column;
+
+	    this.toggleBreakpoint(line + 1, column - 2);
+	  }
+
+	  toggleBreakpoint(line) {
+	    var column = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : undefined;
+	    var _props = this.props,
+	        selectedSource = _props.selectedSource,
+	        selectedLocation = _props.selectedLocation,
+	        addBreakpoint = _props.addBreakpoint,
+	        removeBreakpoint = _props.removeBreakpoint,
+	        callSites = _props.callSites;
+
+
+	    var callSite = getCallSiteAtLocation(callSites, { line, column });
+
+	    if (!callSite) {
+	      return;
+	    }
+
+	    var bp = callSite.breakpoint;
+
+	    if (bp && bp.loading || !selectedLocation || !selectedSource) {
+	      return;
+	    }
+
+	    var sourceId = selectedLocation.sourceId;
+
+
+	    if (bp) {
+	      // NOTE: it's possible the breakpoint has slid to a column
+	      column = column || bp.location.column;
+	      removeBreakpoint({
+	        sourceId: sourceId,
+	        line: line,
+	        column
+	      });
+	    } else {
+	      addBreakpoint({
+	        sourceId: sourceId,
+	        sourceUrl: selectedSource.get("url"),
+	        line: line,
+	        column: column
+	      });
+	    }
+	  }
+
+	  render() {
+	    var _props2 = this.props,
+	        editor = _props2.editor,
+	        callSites = _props2.callSites;
+	    var showCallSites = this.state.showCallSites;
+
+	    var sites = void 0;
+	    if (!callSites) {
+	      return null;
+	    }
+
+	    editor.codeMirror.operation(() => {
+	      sites = _react.DOM.div({}, callSites.map((callSite, index) => {
+	        return CallSite({
+	          key: index,
+	          callSite,
+	          editor,
+	          breakpoint: callSite.breakpoint,
+	          showCallSite: showCallSites
+	        });
+	      }));
+	    });
+	    return sites;
+	  }
+	}
+
+	CallSites.displayName = "CallSites";
+	function getCallSites(symbols, breakpoints) {
+	  if (!symbols || !symbols.callExpressions) {
+	    return;
+	  }
+
+	  var callSites = symbols.callExpressions;
+
+	  // NOTE: we create a breakpoint map keyed on location
+	  // to speed up the lookups. Hopefully we'll fix the
+	  // inconsistency with column offsets so that we can expect
+	  // a breakpoint to be added at the beginning of a call expression.
+	  var bpLocationMap = (0, _keyBy2.default)(breakpoints.valueSeq().toJS(), (_ref) => {
+	    var location = _ref.location;
+	    return locationKey(location);
+	  });
+
+	  function locationKey(_ref2) {
+	    var line = _ref2.line,
+	        column = _ref2.column;
+
+	    return `${line}/${column}`;
+	  }
+
+	  function findBreakpoint(callSite) {
+	    var _callSite$location = callSite.location,
+	        start = _callSite$location.start,
+	        end = _callSite$location.end;
+
+
+	    var breakpointId = (0, _range2.default)(start.column - 1, end.column).map(column => locationKey({ line: start.line, column })).find(key => bpLocationMap[key]);
+
+	    if (breakpointId) {
+	      return bpLocationMap[breakpointId];
+	    }
+	  }
+
+	  return callSites.filter((_ref3) => {
+	    var location = _ref3.location;
+	    return location.start.line === location.end.line;
+	  }).map(callSite => _extends({}, callSite, { breakpoint: findBreakpoint(callSite) }));
+	}
+
+	exports.default = (0, _reactRedux.connect)(state => {
+	  var selectedLocation = (0, _selectors.getSelectedLocation)(state);
+	  var selectedSource = (0, _selectors.getSelectedSource)(state);
+	  var sourceId = selectedLocation && selectedLocation.sourceId;
+	  var source = selectedSource && selectedSource.toJS();
+
+	  var symbols = (0, _selectors.getSymbols)(state, source);
+	  var breakpoints = (0, _selectors.getBreakpointsForSource)(state, sourceId);
+
+	  return {
+	    selectedLocation,
+	    selectedSource,
+	    callSites: getCallSites(symbols, breakpoints),
+	    breakpoints: breakpoints
+	  };
+	}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(CallSites);
+
+/***/ },
+/* 1160 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var baseAssignValue = __webpack_require__(115),
+	    createAggregator = __webpack_require__(1161);
+
+	/**
+	 * Creates an object composed of keys generated from the results of running
+	 * each element of `collection` thru `iteratee`. The corresponding value of
+	 * each key is the last element responsible for generating the key. The
+	 * iteratee is invoked with one argument: (value).
+	 *
+	 * @static
+	 * @memberOf _
+	 * @since 4.0.0
+	 * @category Collection
+	 * @param {Array|Object} collection The collection to iterate over.
+	 * @param {Function} [iteratee=_.identity] The iteratee to transform keys.
+	 * @returns {Object} Returns the composed aggregate object.
+	 * @example
+	 *
+	 * var array = [
+	 *   { 'dir': 'left', 'code': 97 },
+	 *   { 'dir': 'right', 'code': 100 }
+	 * ];
+	 *
+	 * _.keyBy(array, function(o) {
+	 *   return String.fromCharCode(o.code);
+	 * });
+	 * // => { 'a': { 'dir': 'left', 'code': 97 }, 'd': { 'dir': 'right', 'code': 100 } }
+	 *
+	 * _.keyBy(array, 'dir');
+	 * // => { 'left': { 'dir': 'left', 'code': 97 }, 'right': { 'dir': 'right', 'code': 100 } }
+	 */
+	var keyBy = createAggregator(function(result, value, key) {
+	  baseAssignValue(result, key, value);
+	});
+
+	module.exports = keyBy;
+
+
+/***/ },
+/* 1161 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var arrayAggregator = __webpack_require__(1162),
+	    baseAggregator = __webpack_require__(1163),
+	    baseIteratee = __webpack_require__(264),
+	    isArray = __webpack_require__(70);
+
+	/**
+	 * Creates a function like `_.groupBy`.
+	 *
+	 * @private
+	 * @param {Function} setter The function to set accumulator values.
+	 * @param {Function} [initializer] The accumulator object initializer.
+	 * @returns {Function} Returns the new aggregator function.
+	 */
+	function createAggregator(setter, initializer) {
+	  return function(collection, iteratee) {
+	    var func = isArray(collection) ? arrayAggregator : baseAggregator,
+	        accumulator = initializer ? initializer() : {};
+
+	    return func(collection, setter, baseIteratee(iteratee, 2), accumulator);
+	  };
+	}
+
+	module.exports = createAggregator;
+
+
+/***/ },
+/* 1162 */
+/***/ function(module, exports) {
+
+	/**
+	 * A specialized version of `baseAggregator` for arrays.
+	 *
+	 * @private
+	 * @param {Array} [array] The array to iterate over.
+	 * @param {Function} setter The function to set `accumulator` values.
+	 * @param {Function} iteratee The iteratee to transform keys.
+	 * @param {Object} accumulator The initial aggregated object.
+	 * @returns {Function} Returns `accumulator`.
+	 */
+	function arrayAggregator(array, setter, iteratee, accumulator) {
+	  var index = -1,
+	      length = array == null ? 0 : array.length;
+
+	  while (++index < length) {
+	    var value = array[index];
+	    setter(accumulator, value, iteratee(value), array);
+	  }
+	  return accumulator;
+	}
+
+	module.exports = arrayAggregator;
+
+
+/***/ },
+/* 1163 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var baseEach = __webpack_require__(1070);
+
+	/**
+	 * Aggregates elements of `collection` on `accumulator` with keys transformed
+	 * by `iteratee` and values set by `setter`.
+	 *
+	 * @private
+	 * @param {Array|Object} collection The collection to iterate over.
+	 * @param {Function} setter The function to set `accumulator` values.
+	 * @param {Function} iteratee The iteratee to transform keys.
+	 * @param {Object} accumulator The initial aggregated object.
+	 * @returns {Function} Returns `accumulator`.
+	 */
+	function baseAggregator(collection, setter, iteratee, accumulator) {
+	  baseEach(collection, function(value, key, collection) {
+	    setter(accumulator, value, iteratee(value), collection);
+	  });
+	  return accumulator;
+	}
+
+	module.exports = baseAggregator;
+
+
+/***/ },
+/* 1164 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var createFind = __webpack_require__(1165),
+	    findIndex = __webpack_require__(262);
+
+	/**
+	 * Iterates over elements of `collection`, returning the first element
+	 * `predicate` returns truthy for. The predicate is invoked with three
+	 * arguments: (value, index|key, collection).
+	 *
+	 * @static
+	 * @memberOf _
+	 * @since 0.1.0
+	 * @category Collection
+	 * @param {Array|Object} collection The collection to inspect.
+	 * @param {Function} [predicate=_.identity] The function invoked per iteration.
+	 * @param {number} [fromIndex=0] The index to search from.
+	 * @returns {*} Returns the matched element, else `undefined`.
+	 * @example
+	 *
+	 * var users = [
+	 *   { 'user': 'barney',  'age': 36, 'active': true },
+	 *   { 'user': 'fred',    'age': 40, 'active': false },
+	 *   { 'user': 'pebbles', 'age': 1,  'active': true }
+	 * ];
+	 *
+	 * _.find(users, function(o) { return o.age < 40; });
+	 * // => object for 'barney'
+	 *
+	 * // The `_.matches` iteratee shorthand.
+	 * _.find(users, { 'age': 1, 'active': true });
+	 * // => object for 'pebbles'
+	 *
+	 * // The `_.matchesProperty` iteratee shorthand.
+	 * _.find(users, ['active', false]);
+	 * // => object for 'fred'
+	 *
+	 * // The `_.property` iteratee shorthand.
+	 * _.find(users, 'active');
+	 * // => object for 'barney'
+	 */
+	var find = createFind(findIndex);
+
+	module.exports = find;
+
+
+/***/ },
+/* 1165 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var baseIteratee = __webpack_require__(264),
+	    isArrayLike = __webpack_require__(220),
+	    keys = __webpack_require__(205);
+
+	/**
+	 * Creates a `_.find` or `_.findLast` function.
+	 *
+	 * @private
+	 * @param {Function} findIndexFunc The function to find the collection index.
+	 * @returns {Function} Returns the new find function.
+	 */
+	function createFind(findIndexFunc) {
+	  return function(collection, predicate, fromIndex) {
+	    var iterable = Object(collection);
+	    if (!isArrayLike(collection)) {
+	      var iteratee = baseIteratee(predicate, 3);
+	      collection = keys(collection);
+	      predicate = function(key) { return iteratee(iterable[key], key, iterable); };
+	    }
+	    var index = findIndexFunc(collection, predicate, fromIndex);
+	    return index > -1 ? iterable[iteratee ? collection[index] : index] : undefined;
+	  };
+	}
+
+	module.exports = createFind;
+
+
+/***/ },
+/* 1166 */
+/***/ function(module, exports, __webpack_require__) {
+
+	var baseIsEqual = __webpack_require__(273);
+
+	/**
+	 * This method is like `_.isEqual` except that it accepts `customizer` which
+	 * is invoked to compare values. If `customizer` returns `undefined`, comparisons
+	 * are handled by the method instead. The `customizer` is invoked with up to
+	 * six arguments: (objValue, othValue [, index|key, object, other, stack]).
+	 *
+	 * @static
+	 * @memberOf _
+	 * @since 4.0.0
+	 * @category Lang
+	 * @param {*} value The value to compare.
+	 * @param {*} other The other value to compare.
+	 * @param {Function} [customizer] The function to customize comparisons.
+	 * @returns {boolean} Returns `true` if the values are equivalent, else `false`.
+	 * @example
+	 *
+	 * function isGreeting(value) {
+	 *   return /^h(?:i|ello)$/.test(value);
+	 * }
+	 *
+	 * function customizer(objValue, othValue) {
+	 *   if (isGreeting(objValue) && isGreeting(othValue)) {
+	 *     return true;
+	 *   }
+	 * }
+	 *
+	 * var array = ['hello', 'goodbye'];
+	 * var other = ['hi', 'goodbye'];
+	 *
+	 * _.isEqualWith(array, other, customizer);
+	 * // => true
+	 */
+	function isEqualWith(value, other, customizer) {
+	  customizer = typeof customizer == 'function' ? customizer : undefined;
+	  var result = customizer ? customizer(value, other) : undefined;
+	  return result === undefined ? baseIsEqual(value, other, undefined, customizer) : !!result;
+	}
+
+	module.exports = isEqualWith;
+
+
+/***/ },
+/* 1167 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+
+	var _react = __webpack_require__(2);
+
+	var _editor = __webpack_require__(257);
+
+	__webpack_require__(1168);
+
+	class CallSite extends _react.Component {
+
+	  constructor() {
+	    super();
+
+	    this.marker = undefined;
+	    var self = this;
+	    self.addCallSite = this.addCallSite.bind(this);
+	    self.clearCallSite = this.clearCallSite.bind(this);
+	  }
+
+	  addCallSite(nextProps) {
+	    var _ref = nextProps || this.props,
+	        editor = _ref.editor,
+	        callSite = _ref.callSite,
+	        breakpoint = _ref.breakpoint;
+
+	    var className = !breakpoint ? "call-site" : "call-site-bp";
+	    this.marker = (0, _editor.markText)(editor, className, callSite.location);
+	  }
+
+	  clearCallSite() {
+	    if (this.marker) {
+	      this.marker.clear();
+	      this.marker = null;
+	    }
+	  }
+
+	  shouldComponentUpdate(nextProps) {
+	    return this.props.editor !== nextProps.editor;
+	  }
+
+	  componentDidMount() {
+	    var _props = this.props,
+	        breakpoint = _props.breakpoint,
+	        showCallSite = _props.showCallSite;
+
+
+	    if (!breakpoint && !showCallSite) {
+	      return;
+	    }
+
+	    this.addCallSite();
+	  }
+
+	  componentWillReceiveProps(nextProps) {
+	    var _props2 = this.props,
+	        breakpoint = _props2.breakpoint,
+	        showCallSite = _props2.showCallSite;
+
+
+	    if (nextProps.breakpoint !== breakpoint) {
+	      if (this.marker) {
+	        this.marker.clear();
+	      }
+	      this.addCallSite(nextProps);
+	    }
+
+	    if (nextProps.showCallSite !== showCallSite) {
+	      if (nextProps.showCallSite) {
+	        if (!this.marker) {
+	          this.addCallSite();
+	        }
+	      } else if (!nextProps.breakpoint) {
+	        this.clearCallSite();
+	      }
+	    }
+	  }
+
+	  componentWillUnmount() {
+	    if (!this.marker) {
+	      return;
+	    }
+	    this.marker.clear();
+	  }
+
+	  render() {
+	    return null;
+	  }
+	}
+
+	exports.default = CallSite;
+	CallSite.displayName = "CallSite";
+
+/***/ },
+/* 1168 */
+/***/ function(module, exports) {
+
+	// removed by extract-text-webpack-plugin
+
+/***/ },
+/* 1169 */,
+/* 1170 */
+/***/ function(module, exports, __webpack_require__) {
+
+	"use strict";
+
+	Object.defineProperty(exports, "__esModule", {
+	  value: true
+	});
+
+	var _react = __webpack_require__(2);
+
+	var _reactRedux = __webpack_require__(151);
+
+	var _redux = __webpack_require__(3);
+
+	var _fuzzaldrinPlus = __webpack_require__(161);
+
+	var _selectors = __webpack_require__(242);
+
+	var _actions = __webpack_require__(244);
+
+	var _actions2 = _interopRequireDefault(_actions);
+
+	var _resultList = __webpack_require__(343);
+
+	var _SearchInput2 = __webpack_require__(377);
+
+	var _SearchInput3 = _interopRequireDefault(_SearchInput2);
+
+	var _ResultList2 = __webpack_require__(383);
+
+	var _ResultList3 = _interopRequireDefault(_ResultList2);
+
+	__webpack_require__(1171);
+
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+	var SearchInput = (0, _react.createFactory)(_SearchInput3.default);
+
+	var ResultList = (0, _react.createFactory)(_ResultList3.default);
+
+	function formatSymbol(symbol) {
+	  return {
+	    id: `${symbol.name}:${symbol.location.start.line}`,
+	    title: symbol.name,
+	    subtitle: `:${symbol.location.start.line}`,
+	    value: symbol.name,
+	    location: symbol.location
+	  };
+	}
+
+	class SymbolModal extends _react.Component {
+
+	  constructor(props) {
+	    super(props);
+	    this.state = { results: null, query: "", resultsIndex: 0 };
+
+	    var self = this;
+	    self.onClick = this.onClick.bind(this);
+	    self.closeModal = this.closeModal.bind(this);
+	    self.onChange = this.onChange.bind(this);
+	    self.onKeyUp = this.onKeyUp.bind(this);
+	    self.updateResults = this.updateResults.bind(this);
+	    self.traverseResults = this.traverseResults.bind(this);
+	    self.renderResults = this.renderResults.bind(this);
+	    self.buildSummaryMsg = this.buildSummaryMsg.bind(this);
+	    self.buildPlaceHolder = this.buildPlaceHolder.bind(this);
+	    self.selectResultItem = this.selectResultItem.bind(this);
+	    self.openSymbolModal = this.openSymbolModal.bind(this);
+	  }
+
+	  componentWillUnmount() {
+	    var shortcuts = this.context.shortcuts;
+	    shortcuts.off("Escape");
+	    shortcuts.off(L10N.getStr("symbolSearch.search.key2"));
+	  }
+
+	  componentDidMount() {
+	    var shortcuts = this.context.shortcuts;
+	    shortcuts.on("Escape", this.closeModal);
+	    shortcuts.on(L10N.getStr("symbolSearch.search.key2"), this.openSymbolModal);
+
+	    this.updateResults(this.state.query);
+	  }
+
+	  componentDidUpdate(prevProps, prevState) {
+	    if (this.refs.resultList && this.refs.resultList.refs) {
+	      (0, _resultList.scrollList)(this.refs.resultList.refs, this.state.resultsIndex);
+	    }
+
+	    if (this.refs.searchInput && this.refs.searchInput.refs.input) {
+	      this.refs.searchInput.refs.input.focus();
+	    }
+
+	    if (!prevProps.enabled && this.props.enabled) {
+	      this.updateResults(this.state.query);
+	    }
+	  }
+
+	  openSymbolModal(_, e) {
+	    e.preventDefault();
+	    e.stopPropagation();
+	    this.props.setActiveSearch("symbol");
+	  }
+
+	  onClick(e) {
+	    e.stopPropagation();
+	  }
+
+	  onChange(e) {
+	    var selectedSource = this.props.selectedSource;
+
+	    if (!selectedSource || !selectedSource.get("text")) {
+	      return;
+	    }
+
+	    this.setState({ query: e.target.value });
+	    return this.updateResults(e.target.value);
+	  }
+
+	  closeModal() {
+	    this.props.closeActiveSearch();
+	    this.props.clearHighlightLineRange();
+	    this.setState({ query: "" });
+	  }
+
+	  selectResultItem(e, item) {
+	    var _props = this.props,
+	        selectSource = _props.selectSource,
+	        selectedSource = _props.selectedSource;
+
+
+	    if (!selectedSource || !item) {
+	      return;
+	    }
+
+	    selectSource(selectedSource.get("id"), {
+	      line: item.location.start.line
+	    });
+
+	    this.closeModal();
+	  }
+
+	  updateResults(query) {
+	    var _props2 = this.props,
+	        symbolType = _props2.symbolType,
+	        symbols = _props2.symbols;
+
+
+	    var symbolSearchResults = symbols[symbolType];
+
+	    if (query == "") {
+	      this.setState({ results: symbolSearchResults });
+	      return;
+	    }
+
+	    symbolSearchResults = (0, _fuzzaldrinPlus.filter)(symbolSearchResults, query, {
+	      key: "value"
+	    });
+
+	    this.setState({ results: symbolSearchResults });
+	  }
+
+	  traverseResults(direction) {
+	    var _state = this.state,
+	        resultsIndex = _state.resultsIndex,
+	        results = _state.results;
+
+	    var resultCount = this.resultsCount();
+	    var index = resultsIndex + direction;
+	    var nextIndex = (index + resultCount) % resultCount;
+
+	    this.setState({ resultsIndex: nextIndex });
+
+	    if (results) {
+	      this.onSelectResultItem(results[nextIndex]);
+	    }
+	  }
+
+	  onSelectResultItem(item) {
+	    var _props3 = this.props,
+	        selectSource = _props3.selectSource,
+	        selectedSource = _props3.selectedSource,
+	        symbolType = _props3.symbolType,
+	        highlightLineRange = _props3.highlightLineRange;
+
+
+	    if (selectedSource && symbolType !== "functions") {
+	      selectSource(selectedSource.get("id"), {
+	        line: item.location.start.line
+	      });
+	    }
+
+	    if (selectedSource && symbolType === "functions") {
+	      highlightLineRange({
+	        start: item.location.start.line,
+	        end: item.location.end.line,
+	        sourceId: selectedSource.get("id")
+	      });
+	    }
+	  }
+
+	  onKeyUp(e) {
+	    e.preventDefault();
+	    var enabled = this.props.enabled;
+	    var _state2 = this.state,
+	        results = _state2.results,
+	        resultsIndex = _state2.resultsIndex;
+
+
+	    if (!enabled || !results) {
+	      return;
+	    }
+
+	    if (e.key === "ArrowUp") {
+	      this.traverseResults(-1);
+	    } else if (e.key === "ArrowDown") {
+	      this.traverseResults(1);
+	    } else if (e.key === "Enter") {
+	      this.selectResultItem(e, results[resultsIndex]);
+	      this.closeModal();
+	    } else if (e.key === "Tab") {
+	      this.closeModal();
+	    }
+	  }
+
+	  renderResults() {
+	    var _state3 = this.state,
+	        resultsIndex = _state3.resultsIndex,
+	        results = _state3.results;
+	    var enabled = this.props.enabled;
+
+	    if (!enabled || !results) {
+	      return;
+	    }
+
+	    return ResultList({
+	      items: results,
+	      selected: resultsIndex,
+	      selectItem: this.selectResultItem,
+	      ref: "resultList"
+	    });
+	  }
+
+	  renderInput() {
+	    var query = this.state.query;
+
+
+	    return SearchInput({
+	      query,
+	      count: this.resultsCount(),
+	      placeholder: this.buildPlaceHolder(),
+	      summaryMsg: this.buildSummaryMsg(),
+	      onChange: this.onChange,
+	      onKeyUp: this.onKeyUp,
+	      handleNext: () => this.traverseResults(1),
+	      handlePrev: () => this.traverseResults(-1),
+	      handleClose: this.closeModal,
+	      ref: "searchInput"
+	    });
+	  }
+
+	  buildSummaryMsg() {
+	    var resultsIndex = this.state.resultsIndex;
+
+	    var count = this.resultsCount();
+
+	    if (count > 1) {
+	      return L10N.getFormatStr("editor.searchResults", resultsIndex + 1, count);
+	    } else if (count === 1) {
+	      return L10N.getFormatStr("editor.singleResult");
+	    }
+	  }
+
+	  resultsCount() {
+	    return this.state.results ? this.state.results.length : 0;
+	  }
+
+	  buildPlaceHolder() {
+	    var symbolType = this.props.symbolType;
+
+	    return L10N.getFormatStr(`symbolSearch.search.${symbolType}Placeholder`);
+	  }
+
+	  render() {
+	    var enabled = this.props.enabled;
+
+	    if (!enabled) {
+	      return _react.DOM.div();
+	    }
+	    return _react.DOM.div({ className: "symbol-modal-wrapper", onClick: this.closeModal }, _react.DOM.div({ className: "symbol-modal", onClick: this.onClick }, _react.DOM.div({ className: "input-wrapper" }, this.renderInput()), this.renderResults()));
+	  }
+	}
+
+	SymbolModal.displayName = "SymbolModal";
+	SymbolModal.contextTypes = {
+	  shortcuts: _react.PropTypes.object
+	};
+
+	function _getFormattedSymbols(state, source) {
+	  if (!source) {
+	    return { variables: [], functions: [] };
+	  }
+
+	  var _getSymbols = (0, _selectors.getSymbols)(state, source.toJS()),
+	      variables = _getSymbols.variables,
+	      functions = _getSymbols.functions;
+
+	  return {
+	    variables: variables.map(formatSymbol),
+	    functions: functions.map(formatSymbol)
+	  };
+	}
+
+	exports.default = (0, _reactRedux.connect)(state => {
+	  var source = (0, _selectors.getSelectedSource)(state);
+	  return {
+	    enabled: (0, _selectors.getActiveSearchState)(state) === "symbol",
+	    symbolType: (0, _selectors.getSymbolSearchType)(state),
+	    symbols: _getFormattedSymbols(state, source)
+	  };
+	}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(SymbolModal);
+
+/***/ },
+/* 1171 */
+/***/ function(module, exports) {
+
+	// removed by extract-text-webpack-plugin
+
+/***/ },
+/* 1172 */,
+/* 1173 */,
+/* 1174 */
+/***/ function(module, exports) {
+
+	module.exports = "<svg xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:cc=\"http://creativecommons.org/ns#\" xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" xmlns:svg=\"http://www.w3.org/2000/svg\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 400 400\" xml:space=\"preserve\" id=\"svg2\" version=\"1.1\"><metadata id=\"metadata8\"><rdf:RDF><cc:Work rdf:about><dc:format>image/svg+xml</dc:format><dc:type rdf:resource=\"http://purl.org/dc/dcmitype/StillImage\"></dc></cc:Work></rdf:RDF></metadata><defs id=\"defs6\"></defs><g transform=\"matrix(1.3333333,0,0,-1.3333333,0,400)\" id=\"g10\"><g transform=\"translate(178.0626,235.0086)\" id=\"g12\"><path id=\"path14\" style=\"fill:#41b883;fill-opacity:1;fill-rule:nonzero;stroke:none\" d=\"M 0,0 -22.669,-39.264 -45.338,0 h -75.491 L -22.669,-170.017 75.491,0 Z\"></path></g><g transform=\"translate(178.0626,235.0086)\" id=\"g16\"><path id=\"path18\" style=\"fill:#34495e;fill-opacity:1;fill-rule:nonzero;stroke:none\" d=\"M 0,0 -22.669,-39.264 -45.338,0 H -81.565 L -22.669,-102.01 36.227,0 Z\"></path></g></g></svg>"
 
 /***/ }
 /******/ ])

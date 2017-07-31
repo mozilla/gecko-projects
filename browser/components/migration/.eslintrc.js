@@ -1,14 +1,9 @@
 "use strict";
 
 module.exports = {
-  "globals": {
-    "Iterator": true
-  },
-
   "rules": {
     "block-scoped-var": "error",
     "comma-dangle": "off",
-    "comma-style": ["error", "last"],
     "complexity": ["error", {"max": 21}],
     "dot-notation": "error",
     "indent": ["error", 2, {"SwitchCase": 1, "ArrayExpression": "first", "ObjectExpression": "first"}],
@@ -21,7 +16,6 @@ module.exports = {
     "no-sequences": "error",
     "no-shadow": "error",
     "no-throw-literal": "error",
-    "no-unneeded-ternary": "error",
     "no-unused-vars": ["error", { "varsIgnorePattern": "^C[ciur]$" }],
     "padded-blocks": ["error", "never"],
     "semi": ["error", "always", {"omitLastInOneLineBlock": true }],

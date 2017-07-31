@@ -9,7 +9,6 @@
 use app_units::Au;
 use block::{BlockFlow, ISizeAndMarginsComputer};
 use context::LayoutContext;
-use cssparser::{Color, RGBA};
 use display_list_builder::{BlockFlowDisplayListBuilding, BorderPaintingMode, DisplayListBuildState};
 use euclid::Point2D;
 use flow::{self, EarlyAbsolutePositionInfo, Flow, FlowClass, ImmutableFlowUtils, OpaqueFlow};
@@ -24,9 +23,9 @@ use std::fmt;
 use std::iter::{Enumerate, IntoIterator, Peekable};
 use style::computed_values::{border_collapse, border_spacing, border_top_style};
 use style::logical_geometry::{LogicalSize, PhysicalSide, WritingMode};
-use style::properties::ServoComputedValues;
+use style::properties::ComputedValues;
 use style::servo::restyle_damage::{REFLOW, REFLOW_OUT_OF_FLOW};
-use style::values::computed::LengthOrPercentageOrAuto;
+use style::values::computed::{Color, LengthOrPercentageOrAuto};
 use table::{ColumnComputedInlineSize, ColumnIntrinsicInlineSize, InternalTable, VecExt};
 use table_cell::{CollapsedBordersForCell, TableCellFlow};
 
@@ -311,7 +310,7 @@ impl Flow for TableRowFlow {
                         LengthOrPercentageOrAuto::Auto |
                         LengthOrPercentageOrAuto::Calc(_) |
                         LengthOrPercentageOrAuto::Length(_) => 0.0,
-                        LengthOrPercentageOrAuto::Percentage(percentage) => percentage,
+                        LengthOrPercentageOrAuto::Percentage(percentage) => percentage.0,
                     },
                     preferred: child_base.intrinsic_inline_sizes.preferred_inline_size,
                     constrained: match child_specified_inline_size {
@@ -482,7 +481,7 @@ impl Flow for TableRowFlow {
         self.block_flow.collect_stacking_contexts(state);
     }
 
-    fn repair_style(&mut self, new_style: &::StyleArc<ServoComputedValues>) {
+    fn repair_style(&mut self, new_style: &::ServoArc<ComputedValues>) {
         self.block_flow.repair_style(new_style)
     }
 
@@ -606,14 +605,14 @@ impl CollapsedBorder {
         CollapsedBorder {
             style: border_top_style::T::none,
             width: Au(0),
-            color: Color::RGBA(RGBA::transparent()),
+            color: Color::transparent(),
             provenance: CollapsedBorderProvenance::FromTable,
         }
     }
 
     /// Creates a collapsed border from the block-start border described in the given CSS style
     /// object.
-    fn top(css_style: &ServoComputedValues, provenance: CollapsedBorderProvenance)
+    fn top(css_style: &ComputedValues, provenance: CollapsedBorderProvenance)
            -> CollapsedBorder {
         CollapsedBorder {
             style: css_style.get_border().border_top_style,
@@ -625,7 +624,7 @@ impl CollapsedBorder {
 
     /// Creates a collapsed border style from the right border described in the given CSS style
     /// object.
-    fn right(css_style: &ServoComputedValues, provenance: CollapsedBorderProvenance)
+    fn right(css_style: &ComputedValues, provenance: CollapsedBorderProvenance)
              -> CollapsedBorder {
         CollapsedBorder {
             style: css_style.get_border().border_right_style,
@@ -637,7 +636,7 @@ impl CollapsedBorder {
 
     /// Creates a collapsed border style from the bottom border described in the given CSS style
     /// object.
-    fn bottom(css_style: &ServoComputedValues, provenance: CollapsedBorderProvenance)
+    fn bottom(css_style: &ComputedValues, provenance: CollapsedBorderProvenance)
               -> CollapsedBorder {
         CollapsedBorder {
             style: css_style.get_border().border_bottom_style,
@@ -649,7 +648,7 @@ impl CollapsedBorder {
 
     /// Creates a collapsed border style from the left border described in the given CSS style
     /// object.
-    fn left(css_style: &ServoComputedValues, provenance: CollapsedBorderProvenance)
+    fn left(css_style: &ComputedValues, provenance: CollapsedBorderProvenance)
             -> CollapsedBorder {
         CollapsedBorder {
             style: css_style.get_border().border_left_style,
@@ -661,7 +660,7 @@ impl CollapsedBorder {
 
     /// Creates a collapsed border style from the given physical side.
     fn from_side(side: PhysicalSide,
-                 css_style: &ServoComputedValues,
+                 css_style: &ComputedValues,
                  provenance: CollapsedBorderProvenance)
                  -> CollapsedBorder {
         match side {
@@ -674,7 +673,7 @@ impl CollapsedBorder {
 
     /// Creates a collapsed border style from the inline-start border described in the given CSS
     /// style object.
-    pub fn inline_start(css_style: &ServoComputedValues, provenance: CollapsedBorderProvenance)
+    pub fn inline_start(css_style: &ComputedValues, provenance: CollapsedBorderProvenance)
                         -> CollapsedBorder {
         CollapsedBorder::from_side(css_style.writing_mode.inline_start_physical_side(),
                                    css_style,
@@ -683,7 +682,7 @@ impl CollapsedBorder {
 
     /// Creates a collapsed border style from the inline-start border described in the given CSS
     /// style object.
-    pub fn inline_end(css_style: &ServoComputedValues, provenance: CollapsedBorderProvenance)
+    pub fn inline_end(css_style: &ComputedValues, provenance: CollapsedBorderProvenance)
                       -> CollapsedBorder {
         CollapsedBorder::from_side(css_style.writing_mode.inline_end_physical_side(),
                                    css_style,
@@ -692,7 +691,7 @@ impl CollapsedBorder {
 
     /// Creates a collapsed border style from the block-start border described in the given CSS
     /// style object.
-    pub fn block_start(css_style: &ServoComputedValues, provenance: CollapsedBorderProvenance)
+    pub fn block_start(css_style: &ComputedValues, provenance: CollapsedBorderProvenance)
                        -> CollapsedBorder {
         CollapsedBorder::from_side(css_style.writing_mode.block_start_physical_side(),
                                    css_style,
@@ -701,7 +700,7 @@ impl CollapsedBorder {
 
     /// Creates a collapsed border style from the block-end border described in the given CSS style
     /// object.
-    pub fn block_end(css_style: &ServoComputedValues, provenance: CollapsedBorderProvenance)
+    pub fn block_end(css_style: &ComputedValues, provenance: CollapsedBorderProvenance)
                      -> CollapsedBorder {
         CollapsedBorder::from_side(css_style.writing_mode.block_end_physical_side(),
                                    css_style,
@@ -910,7 +909,7 @@ pub struct BorderCollapseInfoForChildTableCell<'a> {
 /// table row. This is done eagerly here so that at least the inline inside border collapse
 /// computations can be parallelized across all the rows of the table.
 fn perform_inline_direction_border_collapse_for_row(
-        row_style: &ServoComputedValues,
+        row_style: &ComputedValues,
         children_count: usize,
         child_index: usize,
         child_table_cell: &mut TableCellFlow,

@@ -2,7 +2,12 @@
 
 Cu.import("resource://gre/modules/ExtensionCommon.jsm");
 
-global.SingletonEventManager = ExtensionCommon.SingletonEventManager;
+// These are defined on "global" which is used for the same scopes as the other
+// ext-c-*.js files.
+/* exported EventManager */
+/* global EventManager: false */
+
+global.EventManager = ExtensionCommon.EventManager;
 
 global.initializeBackgroundPage = (contentWindow) => {
   // Override the `alert()` method inside background windows;
@@ -34,6 +39,13 @@ extensions.registerModules({
     paths: [
       ["extension", "getBackgroundPage"],
       ["runtime", "getBackgroundPage"],
+    ],
+  },
+  downloads: {
+    url: "chrome://extensions/content/ext-c-downloads.js",
+    scopes: ["addon_child"],
+    paths: [
+      ["downloads"],
     ],
   },
   extension: {

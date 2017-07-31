@@ -2,8 +2,11 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
+// The ext-* files are imported into the same scopes.
+/* import-globals-from ../../../toolkit/components/extensions/ext-toolkit.js */
+
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.importGlobalProperties(["fetch", "TextEncoder"]);
+Cu.importGlobalProperties(["fetch", "TextEncoder", "TextDecoder"]);
 
 XPCOMUtils.defineLazyModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ParseSymbols", "resource:///modules/ParseSymbols.jsm");
@@ -19,8 +22,8 @@ var {
   ExtensionError,
 } = ExtensionUtils;
 
-function parseSym(data) {
-  const worker = new ChromeWorker("resource://app/modules/ParseSymbols-worker.js");
+const parseSym = data => {
+  const worker = new ChromeWorker("resource://app/modules/ParseBreakpadSymbols-worker.js");
   const promise = new Promise((resolve, reject) => {
     worker.onmessage = (e) => {
       if (e.data.error) {
@@ -32,99 +35,69 @@ function parseSym(data) {
   });
   worker.postMessage(data);
   return promise;
-}
+};
 
 class NMParser {
   constructor() {
-    this._addrToSymMap = new Map();
-    this._approximateLength = 0;
+    this._worker = new ChromeWorker("resource://app/modules/ParseNMSymbols-worker.js");
   }
 
-  consume(data) {
-    const lineRegex = /.*\n?/g;
-    const buffer = this._currentLine + data;
-
-    let match;
-    while ((match = lineRegex.exec(buffer))) {
-      let [line] = match;
-      if (line[line.length - 1] === "\n") {
-        this._processLine(line);
-      } else {
-        this._currentLine = line;
-        break;
-      }
-    }
+  consume(buffer) {
+    this._worker.postMessage({buffer}, [buffer]);
   }
 
   finish() {
-    this._processLine(this._currentLine);
-    return {syms: this._addrToSymMap, approximateLength: this._approximateLength};
-  }
-
-  _processLine(line) {
-    // Example lines:
-    // 00000000028c9888 t GrFragmentProcessor::MulOutputByInputUnpremulColor(sk_sp<GrFragmentProcessor>)::PremulFragmentProcessor::onCreateGLSLInstance() const::GLFP::~GLFP()
-    // 00000000028c9874 t GrFragmentProcessor::MulOutputByInputUnpremulColor(sk_sp<GrFragmentProcessor>)::PremulFragmentProcessor::onCreateGLSLInstance() const::GLFP::~GLFP()
-    // 00000000028c9874 t GrFragmentProcessor::MulOutputByInputUnpremulColor(sk_sp<GrFragmentProcessor>)::PremulFragmentProcessor::onCreateGLSLInstance() const::GLFP::~GLFP()
-    // 0000000003a33730 r mozilla::OggDemuxer::~OggDemuxer()::{lambda()#1}::operator()() const::__func__
-    // 0000000003a33930 r mozilla::VPXDecoder::Drain()::{lambda()#1}::operator()() const::__func__
-    //
-    // Some lines have the form
-    // <address> ' ' <letter> ' ' <symbol>
-    // and some have the form
-    // <address> ' ' <symbol>
-    // The letter has a meaning, but we ignore it.
-
-    const regex = /([^ ]+) (?:. )?(.*)/;
-    let match = regex.exec(line);
-    if (match) {
-      const [, address, symbol] = match;
-      this._addrToSymMap.set(parseInt(address, 16), symbol);
-      this._approximateLength += symbol.length;
-    }
+    const promise = new Promise((resolve, reject) => {
+      this._worker.onmessage = (e) => {
+        if (e.data.error) {
+          reject(e.data.error);
+        } else {
+          resolve(e.data.result);
+        }
+      };
+    });
+    this._worker.postMessage({
+      finish: true,
+      isDarwin: Services.appinfo.OS === "Darwin",
+    });
+    return promise;
   }
 }
 
 class CppFiltParser {
-  constructor(length) {
-    this._index = 0;
-    this._results = new Array(length);
+  constructor() {
+    this._worker = new ChromeWorker("resource://app/modules/ParseCppFiltSymbols-worker.js");
   }
 
-  consume(data) {
-    const lineRegex = /.*\n?/g;
-    const buffer = this._currentLine + data;
-
-    let match;
-    while ((match = lineRegex.exec(buffer))) {
-      let [line] = match;
-      if (line[line.length - 1] === "\n") {
-        this._processLine(line);
-      } else {
-        this._currentLine = line;
-        break;
-      }
-    }
+  consume(buffer) {
+    this._worker.postMessage({buffer}, [buffer]);
   }
 
   finish() {
-    this._processLine(this._currentLine);
-    return this._results;
-  }
-
-  _processLine(line) {
-    this._results[this._index++] = line.trimRight();
+    const promise = new Promise((resolve, reject) => {
+      this._worker.onmessage = (e) => {
+        if (e.data.error) {
+          reject(e.data.error);
+        } else {
+          resolve(e.data.result);
+        }
+      };
+    });
+    this._worker.postMessage({
+      finish: true,
+    });
+    return promise;
   }
 }
 
-async function readAllData(pipe, processData) {
+const readAllData = async function(pipe, processData) {
   let data;
-  while ((data = await pipe.readString())) {
+  while ((data = await pipe.read()) && data.byteLength) {
     processData(data);
   }
-}
+};
 
-async function spawnProcess(name, cmdArgs, processData, stdin = null) {
+const spawnProcess = async function(name, cmdArgs, processData, stdin = null) {
   const opts = {
     command: await Subprocess.pathSearch(name),
     arguments: cmdArgs,
@@ -138,9 +111,9 @@ async function spawnProcess(name, cmdArgs, processData, stdin = null) {
   }
 
   await readAllData(proc.stdout, processData);
-}
+};
 
-async function getSymbolsFromNM(path, arch) {
+const getSymbolsFromNM = async function(path, arch) {
   const parser = new NMParser();
 
   const args = [path];
@@ -154,36 +127,32 @@ async function getSymbolsFromNM(path, arch) {
 
   await spawnProcess("nm", args, data => parser.consume(data));
   await spawnProcess("nm", ["-D", ...args], data => parser.consume(data));
-  let {syms, approximateLength} = parser.finish();
-
-  if (Services.appinfo.OS === "Darwin") {
-    const keys = Array.from(syms.keys());
-    const values = keys.map(k => syms.get(k));
-    const demangler = new CppFiltParser(keys.length);
-    await spawnProcess("c++filt", [], data => demangler.consume(data), values.join("\n"));
-    const newSymbols = demangler.finish();
-    approximateLength = 0;
-    for (let [i, symbol] of newSymbols.entries()) {
-      approximateLength += symbol.length;
-      syms.set(keys[i], symbol);
-    }
+  let result = await parser.finish();
+  if (Services.appinfo.OS !== "Darwin") {
+    return result;
   }
 
-  return ParseSymbols.convertSymsMapToExpectedSymFormat(syms, approximateLength);
-}
+  const [addresses, symbolsJoinedBuffer] = result;
+  const decoder = new TextDecoder();
+  const symbolsJoined = decoder.decode(symbolsJoinedBuffer);
+  const demangler = new CppFiltParser(addresses.length);
+  await spawnProcess("c++filt", [], data => demangler.consume(data), symbolsJoined);
+  const [newIndex, newBuffer] = await demangler.finish();
+  return [addresses, newIndex, newBuffer];
+};
 
-function pathComponentsForSymbolFile(debugName, breakpadId) {
+const pathComponentsForSymbolFile = (debugName, breakpadId) => {
   const symName = debugName.replace(/(\.pdb)?$/, ".sym");
   return [debugName, breakpadId, symName];
-}
+};
 
-function urlForSymFile(debugName, breakpadId) {
+const urlForSymFile = (debugName, breakpadId) => {
   const profilerSymbolsURL = Services.prefs.getCharPref(PREF_SYMBOLS_URL,
                                                         "http://symbols.mozilla.org/");
   return profilerSymbolsURL + pathComponentsForSymbolFile(debugName, breakpadId).join("/");
-}
+};
 
-function getContainingObjdirDist(path) {
+const getContainingObjdirDist = path => {
   let curPath = path;
   let curPathBasename = OS.Path.basename(curPath);
   while (curPathBasename) {
@@ -198,9 +167,9 @@ function getContainingObjdirDist(path) {
     curPathBasename = OS.Path.basename(curPath);
   }
   return null;
-}
+};
 
-function filePathForSymFileInObjDir(binaryPath, debugName, breakpadId) {
+const filePathForSymFileInObjDir = (binaryPath, debugName, breakpadId) => {
   // `mach buildsymbols` generates symbol files located
   // at /path/to/objdir/dist/crashreporter-symbols/.
   const objDirDist = getContainingObjdirDist(binaryPath);
@@ -210,15 +179,15 @@ function filePathForSymFileInObjDir(binaryPath, debugName, breakpadId) {
   return OS.Path.join(objDirDist,
                       "crashreporter-symbols",
                       ...pathComponentsForSymbolFile(debugName, breakpadId));
-}
+};
 
 const symbolCache = new Map();
 
-function primeSymbolStore(libs) {
+const primeSymbolStore = libs => {
   for (const {debugName, breakpadId, path, arch} of libs) {
     symbolCache.set(urlForSymFile(debugName, breakpadId), {path, arch});
   }
-}
+};
 
 const isRunningObserver = {
   _observers: new Set(),
@@ -371,7 +340,7 @@ this.geckoProfiler = class extends ExtensionAPI {
           throw new Error(`Ran out of options to get symbols from library ${debugName} ${breakpadId}.`);
         },
 
-        onRunning: new SingletonEventManager(context, "geckoProfiler.onRunning", fire => {
+        onRunning: new EventManager(context, "geckoProfiler.onRunning", fire => {
           isRunningObserver.addObserver(fire.async);
           return () => {
             isRunningObserver.removeObserver(fire.async);

@@ -86,7 +86,7 @@ nsMathMLSelectedFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
 /* virtual */
 LogicalSize
-nsMathMLSelectedFrame::ComputeSize(nsRenderingContext *aRenderingContext,
+nsMathMLSelectedFrame::ComputeSize(gfxContext *aRenderingContext,
                                    WritingMode aWM,
                                    const LogicalSize& aCBSize,
                                    nscoord aAvailableISize,

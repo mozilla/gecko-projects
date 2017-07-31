@@ -11,9 +11,7 @@ path = "lib.rs"
 
 [dependencies]
 bitflags = "0.7"
-cssparser = "0.13.3"
 heapsize = "0.4"
 heapsize_derive = "0.1"
-serde = "0.9"
-serde_derive = "0.9"
-webrender_traits = {git = "https://github.com/servo/webrender", features = ["ipc"]}
+serde = "1.0"
+webrender_api = {git = "https://github.com/servo/webrender", features = ["ipc"]}

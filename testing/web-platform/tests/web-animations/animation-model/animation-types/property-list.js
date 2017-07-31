@@ -471,8 +471,7 @@ var gCSSProperties = {
   },
   'fill-opacity': {
     // https://svgwg.org/svg2-draft/painting.html#FillOpacityProperty
-    types: [
-    ]
+    types: [ 'opacity' ]
   },
   'fill-rule': {
     // https://svgwg.org/svg2-draft/painting.html#FillRuleProperty
@@ -517,8 +516,7 @@ var gCSSProperties = {
   },
   'flood-opacity': {
     // https://drafts.fxtf.org/filters/#propdef-flood-opacity
-    types: [
-    ]
+    types: [ 'opacity' ]
   },
   'font-size': {
     // https://drafts.csswg.org/css-fonts-3/#propdef-font-size
@@ -1224,8 +1222,7 @@ var gCSSProperties = {
   },
   'stop-opacity': {
     // https://svgwg.org/svg2-draft/pservers.html#StopOpacityProperty
-    types: [
-    ]
+    types: [ 'opacity' ]
   },
   'stroke': {
     // https://svgwg.org/svg2-draft/painting.html#StrokeProperty
@@ -1234,7 +1231,10 @@ var gCSSProperties = {
   },
   'stroke-dasharray': {
     // https://svgwg.org/svg2-draft/painting.html#StrokeDasharrayProperty
-    types: [ 'dasharray' ]
+    types: [
+      'dasharray',
+      { type: 'discrete', options: [ [ 'none', '10, 20' ] ] }
+    ]
   },
   'stroke-dashoffset': {
     // https://svgwg.org/svg2-draft/painting.html#StrokeDashoffsetProperty

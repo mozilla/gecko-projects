@@ -11,7 +11,6 @@
 #include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
-#include "mozilla/SizePrintfMacros.h"
 #include "mozilla/Unused.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIObserverService.h"
@@ -834,8 +833,10 @@ MulticastDNSDeviceProvider::OnRegistrationFailed(nsIDNSServiceInfo* aServiceInfo
   mRegisterRequest = nullptr;
 
   if (aErrorCode == nsIDNSRegistrationListener::ERROR_SERVICE_NOT_RUNNING) {
-    return NS_DispatchToMainThread(
-             NewRunnableMethod(this, &MulticastDNSDeviceProvider::RegisterMDNSService));
+    return NS_DispatchToMainThread(NewRunnableMethod(
+      "dom::presentation::MulticastDNSDeviceProvider::RegisterMDNSService",
+      this,
+      &MulticastDNSDeviceProvider::RegisterMDNSService));
   }
 
   return NS_OK;

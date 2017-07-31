@@ -20,35 +20,35 @@ ${helpers.single_keyword("vector-effect", "none non-scaling-stroke",
 // Section 13 - Gradients and Patterns
 
 ${helpers.predefined_type(
-    "stop-color", "CSSColor",
-    "CSSParserColor::RGBA(RGBA::new(0, 0, 0, 255))",
+    "stop-color", "RGBAColor",
+    "RGBA::new(0, 0, 0, 255)",
     products="gecko",
-    animation_value_type="none",
+    animation_value_type="IntermediateRGBA",
     spec="https://www.w3.org/TR/SVGTiny12/painting.html#StopColorProperty")}
 
 ${helpers.predefined_type("stop-opacity", "Opacity", "1.0",
                           products="gecko",
-                          animation_value_type="none",
+                          animation_value_type="ComputedValue",
                           spec="https://www.w3.org/TR/SVGTiny12/painting.html#propdef-stop-opacity")}
 
 // Section 15 - Filter Effects
 
 ${helpers.predefined_type(
-    "flood-color", "CSSColor",
-    "CSSParserColor::RGBA(RGBA::new(0, 0, 0, 255))",
+    "flood-color", "RGBAColor",
+    "RGBA::new(0, 0, 0, 255)",
     products="gecko",
-    animation_value_type="none",
+    animation_value_type="IntermediateRGBA",
     spec="https://www.w3.org/TR/SVG/filters.html#FloodColorProperty")}
 
 ${helpers.predefined_type("flood-opacity", "Opacity",
-                          "1.0", products="gecko", animation_value_type="none",
+                          "1.0", products="gecko", animation_value_type="ComputedValue",
                           spec="https://www.w3.org/TR/SVG/filters.html#FloodOpacityProperty")}
 
 ${helpers.predefined_type(
-    "lighting-color", "CSSColor",
-    "CSSParserColor::RGBA(RGBA::new(255, 255, 255, 255))",
+    "lighting-color", "RGBAColor",
+    "RGBA::new(255, 255, 255, 255)",
     products="gecko",
-    animation_value_type="none",
+    animation_value_type="IntermediateRGBA",
     spec="https://www.w3.org/TR/SVG/filters.html#LightingColorProperty")}
 
 // CSS Masking Module Level 1
@@ -70,7 +70,7 @@ ${helpers.single_keyword("mask-mode",
                          animation_value_type="discrete",
                          spec="https://drafts.fxtf.org/css-masking/#propdef-mask-mode")}
 
-<%helpers:vector_longhand name="mask-repeat" products="gecko" animation_value_type="none" extra_prefixes="webkit"
+<%helpers:vector_longhand name="mask-repeat" products="gecko" animation_value_type="discrete" extra_prefixes="webkit"
                           spec="https://drafts.fxtf.org/css-masking/#propdef-mask-repeat">
     pub use properties::longhands::background_repeat::single_value::parse;
     pub use properties::longhands::background_repeat::single_value::SpecifiedValue;
@@ -89,12 +89,17 @@ ${helpers.single_keyword("mask-mode",
 </%helpers:vector_longhand>
 
 % for (axis, direction) in [("x", "Horizontal"), ("y", "Vertical")]:
-    ${helpers.predefined_type("mask-position-" + axis, "position::" + direction + "Position",
-                              products="gecko", extra_prefixes="webkit",
-                              initial_value="computed::LengthOrPercentage::zero()",
-                              initial_specified_value="specified::PositionComponent::Center",
-                              spec="https://drafts.fxtf.org/css-masking/#propdef-mask-position",
-                              animation_value_type="ComputedValue", vector=True, delegate_animate=True)}
+    ${helpers.predefined_type(
+        "mask-position-" + axis,
+        "position::" + direction + "Position",
+        products="gecko",
+        extra_prefixes="webkit",
+        initial_value="computed::LengthOrPercentage::zero()",
+        initial_specified_value="specified::PositionComponent::Center",
+        spec="https://drafts.fxtf.org/css-masking/#propdef-mask-position",
+        animation_value_type="ComputedValue",
+        vector=True,
+    )}
 % endfor
 
 ${helpers.single_keyword("mask-clip",
@@ -129,7 +134,8 @@ ${helpers.single_keyword("mask-origin",
         background_size::get_initial_value()
     }
 
-    pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<SpecifiedValue,()> {
+    pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                         -> Result<SpecifiedValue,ParseError<'i>> {
         background_size::parse(context, input)
     }
 </%helpers:longhand>
@@ -149,6 +155,6 @@ ${helpers.predefined_type("mask-image", "ImageLayer",
     vector=True,
     products="gecko",
     extra_prefixes="webkit",
-    animation_value_type="none",
+    animation_value_type="discrete",
     flags="CREATES_STACKING_CONTEXT",
     has_uncacheable_values="True" if product == "gecko" else "False")}

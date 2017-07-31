@@ -94,6 +94,8 @@ TEST(MediaMIMETypes, MediaCodecs)
   EXPECT_TRUE(empty.AsString().EqualsLiteral(""));
   EXPECT_FALSE(empty.Contains(NS_LITERAL_STRING("")));
   EXPECT_FALSE(empty.Contains(NS_LITERAL_STRING("c1")));
+  EXPECT_FALSE(empty.ContainsPrefix(NS_LITERAL_STRING("")));
+  EXPECT_FALSE(empty.ContainsPrefix(NS_LITERAL_STRING("c1")));
   int iterations = 0;
   for (const auto& codec : empty.Range()) {
     ++iterations;
@@ -106,6 +108,9 @@ TEST(MediaMIMETypes, MediaCodecs)
   EXPECT_TRUE(space.AsString().EqualsLiteral(" "));
   EXPECT_TRUE(space.Contains(NS_LITERAL_STRING("")));
   EXPECT_FALSE(space.Contains(NS_LITERAL_STRING("c1")));
+  EXPECT_TRUE(space.ContainsPrefix(NS_LITERAL_STRING("")));
+  EXPECT_FALSE(space.ContainsPrefix(NS_LITERAL_STRING("c")));
+  EXPECT_FALSE(space.ContainsPrefix(NS_LITERAL_STRING("c1")));
   iterations = 0;
   for (const auto& codec : space.Range()) {
     ++iterations;
@@ -118,6 +123,11 @@ TEST(MediaMIMETypes, MediaCodecs)
   EXPECT_TRUE(one.AsString().EqualsLiteral(" c1 "));
   EXPECT_FALSE(one.Contains(NS_LITERAL_STRING("")));
   EXPECT_TRUE(one.Contains(NS_LITERAL_STRING("c1")));
+  EXPECT_TRUE(one.ContainsPrefix(NS_LITERAL_STRING("")));
+  EXPECT_TRUE(one.ContainsPrefix(NS_LITERAL_STRING("c")));
+  EXPECT_TRUE(one.ContainsPrefix(NS_LITERAL_STRING("c1")));
+  EXPECT_FALSE(one.ContainsPrefix(NS_LITERAL_STRING("c1x")));
+  EXPECT_FALSE(one.ContainsPrefix(NS_LITERAL_STRING("c1 ")));
   iterations = 0;
   for (const auto& codec : one.Range()) {
     ++iterations;
@@ -131,6 +141,13 @@ TEST(MediaMIMETypes, MediaCodecs)
   EXPECT_FALSE(two.Contains(NS_LITERAL_STRING("")));
   EXPECT_TRUE(two.Contains(NS_LITERAL_STRING("c1")));
   EXPECT_TRUE(two.Contains(NS_LITERAL_STRING("c2")));
+  EXPECT_TRUE(two.ContainsPrefix(NS_LITERAL_STRING("")));
+  EXPECT_TRUE(two.ContainsPrefix(NS_LITERAL_STRING("c")));
+  EXPECT_FALSE(two.ContainsPrefix(NS_LITERAL_STRING("1")));
+  EXPECT_TRUE(two.ContainsPrefix(NS_LITERAL_STRING("c1")));
+  EXPECT_TRUE(two.ContainsPrefix(NS_LITERAL_STRING("c2")));
+  EXPECT_FALSE(two.ContainsPrefix(NS_LITERAL_STRING("c1x")));
+  EXPECT_FALSE(two.ContainsPrefix(NS_LITERAL_STRING("c2x")));
   iterations = 0;
   for (const auto& codec : two.Range()) {
     ++iterations;
@@ -184,7 +201,9 @@ TEST(MediaMIMETypes, MediaExtendedMIMEType)
     { "video/mp4; codecs=0", "video/mp4",     false, false, true,  true,  true  },
     { "VIDEO/MP4",           "video/mp4",     false, false, true,  true,  false },
     { "audio/mp4",           "audio/mp4",     false, true,  false, false, false },
-    { "application/x",       "application/x", true, false,  false, false, false }
+    { "video/webm",          "video/webm",    false, false, true,  false, false },
+    { "audio/webm",          "audio/webm",    false, true,  false, false, false },
+    { "application/x",       "application/x", true,  false, false, false, false }
   };
 
   for (const auto& test : tests) {
@@ -227,6 +246,11 @@ TEST(MediaMIMETypes, MediaExtendedMIMEType)
   EXPECT_TRUE(type->Codecs() == "a,b");
   EXPECT_TRUE(type->Codecs().Contains(NS_LITERAL_STRING("a")));
   EXPECT_TRUE(type->Codecs().Contains(NS_LITERAL_STRING("b")));
+  EXPECT_TRUE(type->Codecs().ContainsPrefix(NS_LITERAL_STRING("a")));
+  EXPECT_TRUE(type->Codecs().ContainsPrefix(NS_LITERAL_STRING("b")));
+  EXPECT_FALSE(type->Codecs().ContainsPrefix(NS_LITERAL_STRING("ab")));
+  EXPECT_FALSE(type->Codecs().ContainsPrefix(NS_LITERAL_STRING("ba")));
+  EXPECT_FALSE(type->Codecs().ContainsPrefix(NS_LITERAL_STRING("a,b")));
   EXPECT_TRUE(!!type->GetWidth());
   EXPECT_EQ(1024, *type->GetWidth());
   EXPECT_TRUE(!!type->GetHeight());

@@ -22,40 +22,42 @@ NetworkEventMessage.propTypes = {
   serviceContainer: PropTypes.shape({
     openNetworkPanel: PropTypes.func.isRequired,
   }),
-  indent: PropTypes.number.isRequired,
   timestampsVisible: PropTypes.bool.isRequired,
-};
-
-NetworkEventMessage.defaultProps = {
-  indent: 0,
+  networkMessageUpdate: PropTypes.object.isRequired,
 };
 
 function NetworkEventMessage({
-  indent,
   message = {},
   serviceContainer,
   timestampsVisible,
+  networkMessageUpdate = {},
 }) {
   const {
     actor,
+    indent,
     source,
     type,
     level,
     request,
-    response: {
-      httpVersion,
-      status,
-      statusText,
-    },
     isXHR,
     timeStamp,
-    totalTime,
   } = message;
+
+  const {
+    response = {},
+    totalTime,
+  } = networkMessageUpdate;
+
+  const {
+    httpVersion,
+    status,
+    statusText,
+  } = response;
 
   const topLevelClasses = [ "cm-s-mozilla" ];
   let statusInfo;
 
-  if (httpVersion && status && statusText && totalTime !== undefined) {
+  if (httpVersion && status && statusText !== undefined && totalTime !== undefined) {
     statusInfo = `[${httpVersion} ${status} ${statusText} ${totalTime}ms]`;
   }
 

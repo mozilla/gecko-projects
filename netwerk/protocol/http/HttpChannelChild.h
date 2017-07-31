@@ -9,8 +9,10 @@
 #define mozilla_net_HttpChannelChild_h
 
 #include "mozilla/Mutex.h"
+#include "mozilla/Telemetry.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/net/HttpBaseChannel.h"
+#include "mozilla/net/NeckoTargetHolder.h"
 #include "mozilla/net/PHttpChannelChild.h"
 #include "mozilla/net/ChannelEventQueue.h"
 
@@ -32,6 +34,8 @@
 #include "nsIDivertableChannel.h"
 #include "nsIThreadRetargetableRequest.h"
 #include "mozilla/net/DNS.h"
+
+using mozilla::Telemetry::LABELS_HTTP_CHILD_OMT_STATS;
 
 class nsIEventTarget;
 class nsInputStreamPump;
@@ -55,6 +59,7 @@ class HttpChannelChild final : public PHttpChannelChild
                              , public nsIHttpChannelChild
                              , public nsIDivertableChannel
                              , public nsIThreadRetargetableRequest
+                             , public NeckoTargetHolder
 {
   virtual ~HttpChannelChild();
 public:
@@ -118,7 +123,7 @@ public:
   // Callback while background channel is ready.
   void OnBackgroundChildReady(HttpBackgroundChannelChild* aBgChild);
   // Callback while background channel is destroyed.
-  void OnBackgroundChildDestroyed();
+  void OnBackgroundChildDestroyed(HttpBackgroundChannelChild* aBgChild);
 
 protected:
   mozilla::ipc::IPCResult RecvOnStartRequest(const nsresult& channelStatus,
@@ -128,7 +133,6 @@ protected:
                                              const bool& isFromCache,
                                              const bool& cacheEntryAvailable,
                                              const int32_t& cacheFetchCount,
-                                             const uint32_t& cacheLastFetched,
                                              const uint32_t& cacheExpirationTime,
                                              const nsCString& cachedCharset,
                                              const nsCString& securityInfoSerialization,
@@ -160,6 +164,8 @@ protected:
 
   mozilla::ipc::IPCResult RecvSetPriority(const int16_t& aPriority) override;
 
+  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+
   MOZ_MUST_USE bool
   GetAssociatedContentSecurity(nsIAssociatedContentSecurity** res = nullptr);
   virtual void DoNotifyListenerCleanup() override;
@@ -169,6 +175,9 @@ protected:
   nsresult
   AsyncCall(void (HttpChannelChild::*funcPtr)(),
             nsRunnableMethod<HttpChannelChild> **retval = nullptr) override;
+
+  // Get event target for processing network events.
+  already_AddRefed<nsIEventTarget> GetNeckoTarget() override;
 
 private:
   // this section is for main-thread-only object
@@ -203,9 +212,6 @@ private:
   // with the channel. Should be called when a new channel is being set up,
   // before the constructor message is sent to the parent.
   void SetEventTarget();
-
-  // Get event target for processing network events.
-  already_AddRefed<nsIEventTarget> GetNeckoTarget();
 
   // Get event target for ODA.
   already_AddRefed<nsIEventTarget> GetODATarget();
@@ -272,7 +278,6 @@ private:
   bool mCacheEntryAvailable;
   bool mAltDataCacheEntryAvailable;
   int32_t      mCacheFetchCount;
-  uint32_t     mCacheLastFetched;
   uint32_t     mCacheExpirationTime;
   nsCString    mCachedCharset;
 
@@ -292,13 +297,13 @@ private:
   // this queue keeps OnDataAvailable data until OnStartRequest is finally
   // called.
   nsTArray<UniquePtr<ChannelEvent>> mUnknownDecoderEventQ;
-  bool mUnknownDecoderInvolved;
+  Atomic<bool, ReleaseAcquire> mUnknownDecoderInvolved;
 
   // Once set, OnData and possibly OnStop will be diverted to the parent.
-  bool mDivertingToParent;
+  Atomic<bool, ReleaseAcquire> mDivertingToParent;
   // Once set, no OnStart/OnData/OnStop callbacks should be received from the
   // parent channel, nor dequeued from the ChannelEventQueue.
-  bool mFlushedForDiversion;
+  Atomic<bool, ReleaseAcquire> mFlushedForDiversion;
   // Set if SendSuspend is called. Determines if SendResume is needed when
   // diverting callbacks to parent.
   bool mSuspendSent;
@@ -330,7 +335,14 @@ private:
   // is synthesized.
   bool mSuspendParentAfterSynthesizeResponse;
 
+  // Used to ensure atomicity of mBgChild and mBgInitFailCallback
+  Mutex mBgChildMutex;
+
+  // Associated HTTP background channel
   RefPtr<HttpBackgroundChannelChild> mBgChild;
+
+  // Error handling procedure if failed to establish PBackground IPC
+  nsCOMPtr<nsIRunnable> mBgInitFailCallback;
 
   // Remove the association with background channel after OnStopRequest
   // or AsyncAbort.
@@ -344,8 +356,6 @@ private:
   // Used to call OverrideWithSynthesizedResponse in FinishInterceptedRedirect
   RefPtr<OverrideRunnable> mOverrideRunnable;
 
-  // EventTarget for labeling networking events.
-  nsCOMPtr<nsIEventTarget> mNeckoTarget;
   // Target thread for delivering ODA.
   nsCOMPtr<nsIEventTarget> mODATarget;
   // Used to ensure atomicity of mNeckoTarget / mODATarget;
@@ -366,7 +376,6 @@ private:
                       const bool& isFromCache,
                       const bool& cacheEntryAvailable,
                       const int32_t& cacheFetchCount,
-                      const uint32_t& cacheLastFetched,
                       const uint32_t& cacheExpirationTime,
                       const nsCString& cachedCharset,
                       const nsCString& securityInfoSerialization,
@@ -412,6 +421,13 @@ private:
   // Override the default security info pointer during a non-IPC redirection.
   void OverrideSecurityInfoForNonIPCRedirect(nsISupports* securityInfo);
 
+  // Collect telemetry for the successful rate of OMT.
+  void CollectOMTTelemetry();
+
+  // The result of RetargetDeliveryTo for this channel.
+  // |notRequested| represents OMT is not requested by the channel owner.
+  LABELS_HTTP_CHILD_OMT_STATS mOMTResult = LABELS_HTTP_CHILD_OMT_STATS::notRequested;
+
   friend class AssociateApplicationCacheEvent;
   friend class StartRequestEvent;
   friend class StopRequestEvent;
@@ -430,6 +446,7 @@ private:
   friend class InterceptStreamListener;
   friend class InterceptedChannelContent;
   friend class HttpBackgroundChannelChild;
+  friend class NeckoTargetChannelEvent<HttpChannelChild>;
 };
 
 // A stream listener interposed between the nsInputStreamPump used for intercepted channels

@@ -19,7 +19,9 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://formautofill/FormAutofillUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "ProfileAutoCompleteResult",
+XPCOMUtils.defineLazyModuleGetter(this, "AddressResult",
+                                  "resource://formautofill/ProfileAutoCompleteResult.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "CreditCardResult",
                                   "resource://formautofill/ProfileAutoCompleteResult.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FormAutofillHandler",
                                   "resource://formautofill/FormAutofillHandler.jsm");
@@ -28,8 +30,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "FormLikeFactory",
 
 const formFillController = Cc["@mozilla.org/satchel/form-fill-controller;1"]
                              .getService(Ci.nsIFormFillController);
-
-const AUTOFILL_FIELDS_THRESHOLD = 3;
 
 // Register/unregister a constructor as a factory.
 function AutocompleteFactory() {}
@@ -107,18 +107,34 @@ AutofillProfileAutoCompleteSearch.prototype = {
       return;
     }
 
-    this._getAddresses({info, searchString}).then((addresses) => {
+    let collectionName = FormAutofillUtils.isAddressField(info.fieldName) ?
+      "addresses" : "creditCards";
+
+    this._getRecords({collectionName, info, searchString}).then((records) => {
       if (this.forceStop) {
         return;
       }
+      // Sort addresses by timeLastUsed for showing the lastest used address at top.
+      records.sort((a, b) => b.timeLastUsed - a.timeLastUsed);
+
+      let handler = FormAutofillContent.getFormHandler(focusedInput);
+      let adaptedRecords = handler.getAdaptedProfiles(records);
 
       let allFieldNames = FormAutofillContent.getAllFieldNames(focusedInput);
-      let result = new ProfileAutoCompleteResult(searchString,
-                                                 info.fieldName,
-                                                 allFieldNames,
-                                                 addresses,
-                                                 {});
-
+      let result = null;
+      if (collectionName == "addresses") {
+        result = new AddressResult(searchString,
+                                   info.fieldName,
+                                   allFieldNames,
+                                   adaptedRecords,
+                                   {});
+      } else {
+        result = new CreditCardResult(searchString,
+                                      info.fieldName,
+                                      allFieldNames,
+                                      adaptedRecords,
+                                      {});
+      }
       listener.onSearchResult(this, result);
       ProfileAutocomplete.setProfileAutoCompleteResult(result);
     });
@@ -133,27 +149,29 @@ AutofillProfileAutoCompleteSearch.prototype = {
   },
 
   /**
-   * Get the address data from parent process for AutoComplete result.
+   * Get the records from parent process for AutoComplete result.
    *
    * @private
    * @param  {Object} data
    *         Parameters for querying the corresponding result.
+   * @param  {string} data.collectionName
+   *         The name used to specify which collection to retrieve records.
    * @param  {string} data.searchString
-   *         The typed string for filtering out the matched address.
+   *         The typed string for filtering out the matched records.
    * @param  {string} data.info
    *         The input autocomplete property's information.
    * @returns {Promise}
    *          Promise that resolves when addresses returned from parent process.
    */
-  _getAddresses(data) {
-    this.log.debug("_getAddresses with data:", data);
+  _getRecords(data) {
+    this.log.debug("_getRecords with data:", data);
     return new Promise((resolve) => {
-      Services.cpmm.addMessageListener("FormAutofill:Addresses", function getResult(result) {
-        Services.cpmm.removeMessageListener("FormAutofill:Addresses", getResult);
+      Services.cpmm.addMessageListener("FormAutofill:Records", function getResult(result) {
+        Services.cpmm.removeMessageListener("FormAutofill:Records", getResult);
         resolve(result.data);
       });
 
-      Services.cpmm.sendAsyncMessage("FormAutofill:GetAddresses", data);
+      Services.cpmm.sendAsyncMessage("FormAutofill:GetRecords", data);
     });
   },
 };
@@ -194,6 +212,10 @@ let ProfileAutocomplete = {
     this._lastAutoCompleteResult = null;
 
     Services.obs.removeObserver(this, "autocomplete-will-enter-text");
+  },
+
+  getProfileAutoCompleteResult() {
+    return this._lastAutoCompleteResult;
   },
 
   setProfileAutoCompleteResult(result) {
@@ -324,9 +346,11 @@ var FormAutofillContent = {
    * Send the profile to parent for doorhanger and storage saving/updating.
    *
    * @param {Object} profile Submitted form's address/creditcard guid and record.
+   * @param {Object} domWin Current content window.
    */
-  _onFormSubmit(profile) {
-    Services.cpmm.sendAsyncMessage("FormAutofill:OnFormSubmit", profile);
+  _onFormSubmit(profile, domWin) {
+    let mm = this._messageManagerFromWindow(domWin);
+    mm.sendAsyncMessage("FormAutofill:OnFormSubmit", profile);
   },
 
   /**
@@ -354,7 +378,7 @@ var FormAutofillContent = {
     }
 
     let pendingAddress = handler.createProfile();
-    if (Object.keys(pendingAddress).length < AUTOFILL_FIELDS_THRESHOLD) {
+    if (Object.keys(pendingAddress).length < FormAutofillUtils.AUTOFILL_FIELDS_THRESHOLD) {
       this.log.debug(`Not saving since there are only ${Object.keys(pendingAddress).length} usable fields`);
       return true;
     }
@@ -365,7 +389,7 @@ var FormAutofillContent = {
         record: pendingAddress,
       },
       // creditCard: {}
-    });
+    }, domWin);
 
     return true;
   },
@@ -434,58 +458,54 @@ var FormAutofillContent = {
   },
 
   getAllFieldNames(element) {
-    let formDetails = this.getFormDetails(element);
-    return formDetails.map(record => record.fieldName);
+    let formHandler = this.getFormHandler(element);
+    return formHandler ? formHandler.allFieldNames : null;
   },
 
-  identifyAutofillFields(doc) {
-    this.log.debug("identifyAutofillFields:", "" + doc.location);
+  identifyAutofillFields(element) {
+    this.log.debug("identifyAutofillFields:", "" + element.ownerDocument.location);
 
     if (!this.savedFieldNames) {
       this.log.debug("identifyAutofillFields: savedFieldNames are not known yet");
       Services.cpmm.sendAsyncMessage("FormAutofill:InitStorage");
     }
 
-    let forms = [];
-
-    // Collects root forms from inputs.
-    for (let field of FormAutofillUtils.autofillFieldSelector(doc)) {
-      if (!FormAutofillUtils.isFieldEligibleForAutofill(field)) {
-        continue;
-      }
-
-      // For now skip consider fields in forms we've already seen before even
-      // if the specific field wasn't seen before. Ideally whether the field is
-      // already in the handler's form details would be considered.
-      if (this.getFormHandler(field)) {
-        continue;
-      }
-
-      let formLike = FormLikeFactory.createFromField(field);
-      if (!forms.some(form => form.rootElement === formLike.rootElement)) {
-        forms.push(formLike);
-      }
+    if (!FormAutofillUtils.isFieldEligibleForAutofill(element)) {
+      this.log.debug("Not an eligible field.");
+      return;
     }
 
-    this.log.debug("Found", forms.length, "forms");
+    let formHandler = this.getFormHandler(element);
+    if (!formHandler) {
+      let formLike = FormLikeFactory.createFromField(element);
+      formHandler = new FormAutofillHandler(formLike);
+    } else if (!formHandler.isFormChangedSinceLastCollection) {
+      this.log.debug("No control is removed or inserted since last collection.");
+      return;
+    }
 
-    // Collects the fields that can be autofilled from each form and marks them
-    // as autofill fields if the amount is above the threshold.
-    forms.forEach(form => {
-      let formHandler = new FormAutofillHandler(form);
-      formHandler.collectFormFields();
-      if (formHandler.fieldDetails.length < AUTOFILL_FIELDS_THRESHOLD) {
-        this.log.debug("Ignoring form since it has only", formHandler.fieldDetails.length,
-                       "field(s)");
-        return;
-      }
+    formHandler.collectFormFields();
 
-      this._formsDetails.set(form.rootElement, formHandler);
-      this.log.debug("Adding form handler to _formsDetails:", formHandler);
-      formHandler.fieldDetails.forEach(detail =>
-        this._markAsAutofillField(detail.elementWeakRef.get())
+    this._formsDetails.set(formHandler.form.rootElement, formHandler);
+    this.log.debug("Adding form handler to _formsDetails:", formHandler);
+
+    if (formHandler.isValidAddressForm) {
+      formHandler.addressFieldDetails.forEach(
+        detail => this._markAsAutofillField(detail.elementWeakRef.get())
       );
-    });
+    } else {
+      this.log.debug("Ignoring address related fields since it has only",
+                     formHandler.addressFieldDetails.length,
+                     "field(s)");
+    }
+
+    if (formHandler.isValidCreditCardForm) {
+      formHandler.creditCardFieldDetails.forEach(
+        detail => this._markAsAutofillField(detail.elementWeakRef.get())
+      );
+    } else {
+      this.log.debug("Ignoring credit card related fields since it's without credit card number field");
+    }
   },
 
   _markAsAutofillField(field) {
@@ -499,12 +519,58 @@ var FormAutofillContent = {
   },
 
   _previewProfile(doc) {
-    let selectedIndex = ProfileAutocomplete._getSelectedIndex(doc.ownerGlobal);
+    let docWin = doc.ownerGlobal;
+    let selectedIndex = ProfileAutocomplete._getSelectedIndex(docWin);
+    let lastAutoCompleteResult = ProfileAutocomplete.getProfileAutoCompleteResult();
+    let focusedInput = formFillController.focusedInput;
+    let mm = this._messageManagerFromWindow(docWin);
 
-    if (selectedIndex === -1) {
+    if (selectedIndex === -1 ||
+        !focusedInput ||
+        !lastAutoCompleteResult ||
+        lastAutoCompleteResult.getStyleAt(selectedIndex) != "autofill-profile") {
+      mm.sendAsyncMessage("FormAutofill:UpdateWarningMessage", {});
+
       ProfileAutocomplete._clearProfilePreview();
     } else {
+      let focusedInputDetails = this.getInputDetails(focusedInput);
+      let profile = JSON.parse(lastAutoCompleteResult.getCommentAt(selectedIndex));
+      let allFieldNames = FormAutofillContent.getAllFieldNames(focusedInput);
+      let profileFields = allFieldNames.filter(fieldName => !!profile[fieldName]);
+
+      let focusedCategory = FormAutofillUtils.getCategoryFromFieldName(focusedInputDetails.fieldName);
+      let categories = FormAutofillUtils.getCategoriesFromFieldNames(profileFields);
+      mm.sendAsyncMessage("FormAutofill:UpdateWarningMessage", {
+        focusedCategory,
+        categories,
+      });
+
       ProfileAutocomplete._previewSelectedProfile(selectedIndex);
+    }
+  },
+
+  _messageManagerFromWindow(win) {
+    return win.QueryInterface(Ci.nsIInterfaceRequestor)
+              .getInterface(Ci.nsIWebNavigation)
+              .QueryInterface(Ci.nsIDocShell)
+              .QueryInterface(Ci.nsIInterfaceRequestor)
+              .getInterface(Ci.nsIContentFrameMessageManager);
+  },
+
+  _onKeyDown(e) {
+    let lastAutoCompleteResult = ProfileAutocomplete.getProfileAutoCompleteResult();
+    let focusedInput = formFillController.focusedInput;
+
+    if (e.keyCode != Ci.nsIDOMKeyEvent.DOM_VK_RETURN || !lastAutoCompleteResult || !focusedInput) {
+      return;
+    }
+
+    let selectedIndex = ProfileAutocomplete._getSelectedIndex(e.target.ownerGlobal);
+    let selectedRowStyle = lastAutoCompleteResult.getStyleAt(selectedIndex);
+    if (selectedRowStyle == "autofill-footer") {
+      focusedInput.addEventListener("DOMAutoComplete", () => {
+        Services.cpmm.sendAsyncMessage("FormAutofill:OpenPreferences");
+      }, {once: true});
     }
   },
 };
