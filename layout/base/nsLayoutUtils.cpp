@@ -4043,6 +4043,27 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
   return true;
 }
 
+void MarkModifiedCallback(nsIFrame* aFrame,
+                          DisplayItemData* aItem)
+{
+  if (!aFrame->IsFrameModified() && aItem->GetGeometry() &&
+      aItem->GetGeometry()->InvalidateForSyncDecodeImages()) {
+    aFrame->MarkNeedsDisplayItemRebuild();
+  }
+}
+
+void MarkFramesWithItemsAndImagesModified(nsDisplayList* aList)
+{
+  for (nsDisplayItem* i = aList->GetBottom(); i != nullptr; i = i->GetAbove()) {
+    if (!i->Frame()->IsFrameModified()) {
+      FrameLayerBuilder::IterateRetainedDataFor(i->Frame(), MarkModifiedCallback);
+    }
+    if (i->GetChildren()) {
+      MarkFramesWithItemsAndImagesModified(i->GetChildren());
+    }
+  }
+}
+
 nsresult
 nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
                           const nsRegion& aDirtyRegion, nscolor aBackstop,
@@ -4209,6 +4230,12 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
 
     PaintTelemetry::AutoRecord record(PaintTelemetry::Metric::DisplayList);
     TimeStamp dlStart = TimeStamp::Now();
+
+    if (retainedBuilder && builder.ShouldSyncDecodeImages()) {
+      MarkFramesWithItemsAndImagesModified(&list);
+      // Re-get the modified frames list, it might have changed.
+      modifiedFrames = aFrame->GetProperty(nsIFrame::ModifiedFrameList());
+    }
 
     builder.EnterPresShell(aFrame);
     {
