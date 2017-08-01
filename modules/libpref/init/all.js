@@ -4768,7 +4768,7 @@ pref("network.tcp.keepalive.retry_interval", 1); // seconds
 pref("network.tcp.keepalive.probe_count", 4);
 #endif
 
-pref("network.tcp.tcp_fastopen_enable", true);
+pref("network.tcp.tcp_fastopen_enable", false);
 pref("network.tcp.tcp_fastopen_consecutive_failure_limit", 5);
 
 // Whether to disable acceleration for all widgets.
@@ -5414,7 +5414,7 @@ pref("browser.safebrowsing.provider.mozilla.nextupdatetime", "1");
 pref("browser.safebrowsing.provider.mozilla.lists.base.name", "mozstdName");
 pref("browser.safebrowsing.provider.mozilla.lists.base.description", "mozstdDesc");
 pref("browser.safebrowsing.provider.mozilla.lists.content.name", "mozfullName");
-pref("browser.safebrowsing.provider.mozilla.lists.content.description", "mozfullDesc");
+pref("browser.safebrowsing.provider.mozilla.lists.content.description", "mozfullDesc2");
 
 pref("urlclassifier.flashAllowTable", "allow-flashallow-digest256");
 pref("urlclassifier.flashAllowExceptTable", "except-flashallow-digest256");
@@ -5738,12 +5738,11 @@ pref("layout.css.servo.enabled", false);
 // HSTS Priming
 // If a request is mixed-content, send an HSTS priming request to attempt to
 // see if it is available over HTTPS.
-#ifdef RELEASE
 // Don't change the order of evaluation of mixed-content and HSTS upgrades in
-// order to be most compatible with current standards
+// order to be most compatible with current standards in Release
 pref("security.mixed_content.send_hsts_priming", false);
 pref("security.mixed_content.use_hsts", false);
-#else
+#ifdef EARLY_BETA_OR_EARLIER
 // Change the order of evaluation so HSTS upgrades happen before
 // mixed-content blocking
 pref("security.mixed_content.send_hsts_priming", true);
