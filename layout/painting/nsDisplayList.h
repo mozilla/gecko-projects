@@ -1885,7 +1885,7 @@ public:
     mVisibleRect = mState.mVisibleRect;
     mClipChain = mState.mClipChain;
     mClip = mState.mClip;
-    mDisableSubpixelAA = mState.mDisableSubpixelAA;
+    mDisableSubpixelAA = false;
   }
 
   void SetFrameDeleted()
@@ -2590,7 +2590,6 @@ protected:
     nsRect mVisibleRect;
     RefPtr<const DisplayItemClipChain> mClipChain;
     const DisplayItemClip* mClip;
-    bool mDisableSubpixelAA;
   } mState;
 };
 
