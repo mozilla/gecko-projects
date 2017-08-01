@@ -2696,6 +2696,13 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
           aBuilder->SetLayerEventRegions(eventRegions);
         }
 
+        // If this is the root frame, then the previous call to
+        // MarkAbsoluteFramesForDisplayList might have stored some fixed
+        // background data. Clear that now.
+        if (!GetParent()) {
+          aBuilder->ClearFixedBackgroundDisplayData();
+        }
+
         MarkAbsoluteFramesForDisplayList(aBuilder);
         BuildDisplayList(aBuilder, set);
       }
