@@ -4055,7 +4055,7 @@ void MarkModifiedCallback(nsIFrame* aFrame,
 void MarkFramesWithItemsAndImagesModified(nsDisplayList* aList)
 {
   for (nsDisplayItem* i = aList->GetBottom(); i != nullptr; i = i->GetAbove()) {
-    if (!i->Frame()->IsFrameModified()) {
+    if (!i->HasDeletedFrame() && i->CanBeReused() && !i->Frame()->IsFrameModified()) {
       FrameLayerBuilder::IterateRetainedDataFor(i->Frame(), MarkModifiedCallback);
     }
     if (i->GetChildren()) {
