@@ -1283,7 +1283,8 @@ public:
   virtual void AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
                                              nsDisplayList& aList,
                                              nsIFrame* aFrame,
-                                             const nsRect& aBounds) = 0;
+                                             const nsRect& aBounds,
+                                             uint32_t aFlags = 0) = 0;
 
   /**
    * Computes the backstop color for the view: transparent if in a transparent

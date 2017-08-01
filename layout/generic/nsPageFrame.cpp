@@ -579,8 +579,10 @@ nsPageFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // can monkey with the contents if necessary.
     nsRect backgroundRect =
       nsRect(aBuilder->ToReferenceFrame(child), child->GetSize());
+
+    uint32_t flags = nsIPresShell::ADD_FOR_SUBDOC;
     PresContext()->GetPresShell()->AddCanvasBackgroundColorItem(
-      *aBuilder, content, child, backgroundRect, NS_RGBA(0,0,0,0));
+      *aBuilder, content, child, backgroundRect, NS_RGBA(0,0,0,0), flags);
   }
 
   content.AppendNewToTop(new (aBuilder) nsDisplayTransform(aBuilder, child,

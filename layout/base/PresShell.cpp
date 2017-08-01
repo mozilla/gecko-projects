@@ -5234,10 +5234,12 @@ void
 PresShell::AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
                                          nsDisplayList&        aList,
                                          nsIFrame*             aFrame,
-                                         const nsRect&         aBounds)
+                                         const nsRect&         aBounds,
+                                         uint32_t              aFlags)
 {
   aList.AppendNewToBottom(new (&aBuilder)
-    nsDisplaySolidColor(&aBuilder, aFrame, aBounds, NS_RGB(115, 115, 115), false));
+    nsDisplaySolidColor(&aBuilder, aFrame, aBounds, NS_RGB(115, 115, 115),
+                        aFlags & ADD_FOR_SUBDOC));
 }
 
 static bool
