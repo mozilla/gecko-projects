@@ -2918,7 +2918,7 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
         !aBuilder->IsForPaintingSelectionBG()) {
       nsDisplayTransform *transformItem =
         new (aBuilder) nsDisplayTransform(aBuilder, this,
-                                          &resultList, aBuilder->GetVisibleRect(), 0,
+                                          &resultList, visibleRect, 0,
                                           allowAsyncAnimation);
       resultList.AppendNewToTop(transformItem);
     }
