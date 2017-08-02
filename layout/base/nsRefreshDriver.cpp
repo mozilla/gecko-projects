@@ -227,6 +227,8 @@ public:
 
     aNewTimer->mLastFireEpoch = mLastFireEpoch;
     aNewTimer->mLastFireTime = mLastFireTime;
+
+    StopTimer();
   }
 
   virtual TimeDuration GetTimerRate() = 0;
@@ -253,13 +255,6 @@ public:
     idleEnd = idleEnd - TimeDuration::FromMilliseconds(
       nsLayoutUtils::IdlePeriodDeadlineLimit());
     return idleEnd < aDefault ? idleEnd : aDefault;
-  }
-
-  Maybe<TimeStamp> GetNextTickHint()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    TimeStamp nextTick = MostRecentRefresh() + GetTimerRate();
-    return nextTick < TimeStamp::Now() ? Nothing() : Some(nextTick);
   }
 
 protected:
@@ -372,7 +367,7 @@ public:
     mTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
   }
 
-  ~SimpleTimerBasedRefreshDriverTimer() override
+  virtual ~SimpleTimerBasedRefreshDriverTimer() override
   {
     StopTimer();
   }
@@ -2142,8 +2137,7 @@ nsRefreshDriver::Thaw()
         "nsRefreshDriver::DoRefresh", this, &nsRefreshDriver::DoRefresh);
       nsPresContext* pc = GetPresContext();
       if (pc) {
-        pc->Document()->Dispatch("nsRefreshDriver::DoRefresh",
-                                 TaskCategory::Other,
+        pc->Document()->Dispatch(TaskCategory::Other,
                                  event.forget());
         EnsureTimerStarted();
       } else {
@@ -2408,17 +2402,6 @@ nsRefreshDriver::GetIdleDeadlineHint(TimeStamp aDefault)
   // busy but tasks resulting from a tick on sThrottledRateTimer
   // counts as being idle.
   return sRegularRateTimer->GetIdleDeadlineHint(aDefault);
-}
-
-/* static */ Maybe<TimeStamp>
-nsRefreshDriver::GetNextTickHint()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (!sRegularRateTimer) {
-    return Nothing();
-  }
-  return sRegularRateTimer->GetNextTickHint();
 }
 
 void

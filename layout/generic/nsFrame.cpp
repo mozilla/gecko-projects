@@ -848,14 +848,15 @@ AddAndRemoveImageAssociations(nsFrame* aFrame,
 
   if (aOldLayers) {
     NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT(i, (*aOldLayers)) {
+      const nsStyleImage& oldImage = aOldLayers->mLayers[i].mImage;
+      if (oldImage.GetType() != eStyleImageType_Image ||
+          !oldImage.IsResolved()) {
+        continue;
+      }
+
       // If there is an image in oldBG that's not in newBG, drop it.
       if (i >= aNewLayers->mImageCount ||
-          !aOldLayers->mLayers[i].mImage.ImageDataEquals(
-            aNewLayers->mLayers[i].mImage)) {
-        const nsStyleImage& oldImage = aOldLayers->mLayers[i].mImage;
-        if (oldImage.GetType() != eStyleImageType_Image) {
-          continue;
-        }
+          !oldImage.ImageDataEquals(aNewLayers->mLayers[i].mImage)) {
 
         if (aFrame->HasImageRequest()) {
           if (imgRequestProxy* req = oldImage.GetImageData()) {
@@ -867,15 +868,15 @@ AddAndRemoveImageAssociations(nsFrame* aFrame,
   }
 
   NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT(i, (*aNewLayers)) {
+    const nsStyleImage& newImage = aNewLayers->mLayers[i].mImage;
+    if (newImage.GetType() != eStyleImageType_Image ||
+        !newImage.IsResolved()) {
+      continue;
+    }
+
     // If there is an image in newBG that's not in oldBG, add it.
     if (!aOldLayers || i >= aOldLayers->mImageCount ||
-        !aNewLayers->mLayers[i].mImage.ImageDataEquals(
-          aOldLayers->mLayers[i].mImage)) {
-      const nsStyleImage& newImage = aNewLayers->mLayers[i].mImage;
-      if (newImage.GetType() != eStyleImageType_Image) {
-        continue;
-      }
-
+        !newImage.ImageDataEquals(aOldLayers->mLayers[i].mImage)) {
       if (imgRequestProxy* req = newImage.GetImageData()) {
         imageLoader->AssociateRequestToFrame(req, aFrame);
       }
@@ -7200,14 +7201,14 @@ nsIFrame::ListGeneric(nsACString& aTo, const char* aPrefix, uint32_t aFlags) con
       pseudoTag->ToString(atomString);
       aTo += nsPrintfCString("%s", NS_LossyConvertUTF16toASCII(atomString).get());
     }
-    if (mStyleContext->IsGecko()) {
-      if (!mStyleContext->GetParent() ||
-          (GetParent() && GetParent()->StyleContext() != mStyleContext->GetParent())) {
-        aTo += nsPrintfCString("^%p", mStyleContext->GetParent());
-        if (mStyleContext->GetParent()) {
-          aTo += nsPrintfCString("^%p", mStyleContext->GetParent()->GetParent());
-          if (mStyleContext->GetParent()->GetParent()) {
-            aTo += nsPrintfCString("^%p", mStyleContext->GetParent()->GetParent()->GetParent());
+    if (auto* geckoContext = mStyleContext->GetAsGecko()) {
+      if (!geckoContext->GetParent() ||
+          (GetParent() && GetParent()->StyleContext() != geckoContext->GetParent())) {
+        aTo += nsPrintfCString("^%p", geckoContext->GetParent());
+        if (geckoContext->GetParent()) {
+          aTo += nsPrintfCString("^%p", geckoContext->GetParent()->GetParent());
+          if (geckoContext->GetParent()->GetParent()) {
+            aTo += nsPrintfCString("^%p", geckoContext->GetParent()->GetParent()->GetParent());
           }
         }
       }

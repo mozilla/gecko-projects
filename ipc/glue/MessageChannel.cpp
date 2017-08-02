@@ -13,7 +13,6 @@
 #include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Move.h"
-#include "mozilla/SizePrintfMacros.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
@@ -1977,20 +1976,8 @@ MessageChannel::MessageTask::Clear()
 NS_IMETHODIMP
 MessageChannel::MessageTask::GetPriority(uint32_t* aPriority)
 {
-  switch (mMessage.priority()) {
-  case Message::NORMAL_PRIORITY:
-    *aPriority = PRIORITY_NORMAL;
-    break;
-  case Message::INPUT_PRIORITY:
-    *aPriority = PRIORITY_INPUT;
-    break;
-  case Message::HIGH_PRIORITY:
-    *aPriority = PRIORITY_HIGH;
-    break;
-  default:
-    MOZ_ASSERT(false);
-    break;
-  }
+  *aPriority = mMessage.priority() == Message::HIGH_PRIORITY ?
+               PRIORITY_HIGH : PRIORITY_NORMAL;
   return NS_OK;
 }
 
@@ -2753,11 +2740,11 @@ MessageChannel::DebugAbort(const char* file, int line, const char* cond,
                   reply ? "(reply)" : "");
     // technically we need the mutex for this, but we're dying anyway
     DumpInterruptStack("  ");
-    printf_stderr("  remote Interrupt stack guess: %" PRIuSIZE "\n",
+    printf_stderr("  remote Interrupt stack guess: %zu\n",
                   mRemoteStackDepthGuess);
-    printf_stderr("  deferred stack size: %" PRIuSIZE "\n",
+    printf_stderr("  deferred stack size: %zu\n",
                   mDeferred.size());
-    printf_stderr("  out-of-turn Interrupt replies stack size: %" PRIuSIZE "\n",
+    printf_stderr("  out-of-turn Interrupt replies stack size: %zu\n",
                   mOutOfTurnReplies.size());
 
     MessageQueue pending = Move(mPending);

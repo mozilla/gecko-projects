@@ -19,6 +19,7 @@ use rule_tree::{CascadeLevel, StrongRuleNode};
 use selector_parser::{PseudoElement, RestyleDamage};
 use selectors::matching::ElementSelectorFlags;
 use servo_arc::{Arc, ArcBorrow};
+use traversal_flags;
 
 /// Represents the result of comparing an element's old and new style.
 pub struct StyleDifference {
@@ -172,7 +173,7 @@ trait PrivateMatchMethods: TElement {
             // running or not.
             // TODO: We should check which @keyframes changed/added/deleted
             // and update only animations corresponding to those @keyframes.
-            (context.shared.traversal_flags.for_css_rule_changes() &&
+            (context.shared.traversal_flags.contains(traversal_flags::ForCSSRuleChanges) &&
              has_new_animation_style) ||
             !old_box_style.animations_equals(&new_box_style) ||
              (old_display_style == display::T::none &&
@@ -301,8 +302,8 @@ trait PrivateMatchMethods: TElement {
                              new_values: &Arc<ComputedValues>,
                              pseudo: Option<&PseudoElement>)
                              -> ChildCascadeRequirement {
-        // Don't accumulate damage if we're in a restyle for reconstruction.
-        if shared_context.traversal_flags.for_reconstruct() {
+        // Don't accumulate damage if we're in a forgetful traversal.
+        if shared_context.traversal_flags.contains(traversal_flags::Forgetful) {
             return ChildCascadeRequirement::MustCascadeChildren;
         }
 
@@ -323,15 +324,19 @@ trait PrivateMatchMethods: TElement {
             restyle.damage |= difference.damage;
         }
 
+        // We need to cascade the children in order to ensure the correct
+        // propagation of computed value flags.
+        //
+        // FIXME(emilio): If we start optimizing changes to reset-only
+        // properties that aren't explicitly inherited, we'd need to add a flag
+        // to handle justify-items: auto correctly when there's a legacy
+        // justify-items.
+        if old_values.flags != new_values.flags {
+            return ChildCascadeRequirement::MustCascadeChildren;
+        }
+
         match difference.change {
-            StyleChange::Unchanged => {
-                // We need to cascade the children in order to ensure the
-                // correct propagation of computed value flags.
-                if old_values.flags != new_values.flags {
-                    return ChildCascadeRequirement::MustCascadeChildren;
-                }
-                ChildCascadeRequirement::CanSkipCascade
-            },
+            StyleChange::Unchanged => ChildCascadeRequirement::CanSkipCascade,
             StyleChange::Changed => ChildCascadeRequirement::MustCascadeChildren,
         }
     }
@@ -498,8 +503,8 @@ pub trait MatchMethods : TElement {
             }
         }
 
-        // Don't accumulate damage if we're in a restyle for reconstruction.
-        if context.shared.traversal_flags.for_reconstruct() {
+        // Don't accumulate damage if we're in a forgetful traversal.
+        if context.shared.traversal_flags.contains(traversal_flags::Forgetful) {
             return ChildCascadeRequirement::MustCascadeChildren;
         }
 
@@ -521,18 +526,13 @@ pub trait MatchMethods : TElement {
         );
 
         if data.styles.pseudos.is_empty() && old_styles.pseudos.is_empty() {
-            return cascade_requirement;
-        }
-
-        // If it matched a different number of pseudos, reconstruct.
-        if data.styles.pseudos.is_empty() != old_styles.pseudos.is_empty() {
-            data.restyle.damage |= RestyleDamage::reconstruct();
+            // This is the common case; no need to examine pseudos here.
             return cascade_requirement;
         }
 
         let pseudo_styles =
-            old_styles.pseudos.as_array().unwrap().iter().zip(
-            data.styles.pseudos.as_array().unwrap().iter());
+            old_styles.pseudos.as_array().iter().zip(
+            data.styles.pseudos.as_array().iter());
 
         for (i, (old, new)) in pseudo_styles.enumerate() {
             match (old, new) {
@@ -547,8 +547,21 @@ pub trait MatchMethods : TElement {
                 }
                 (&None, &None) => {},
                 _ => {
-                    data.restyle.damage |= RestyleDamage::reconstruct();
-                    return cascade_requirement;
+                    // It's possible that we're switching from not having
+                    // ::before/::after at all to having styles for them but not
+                    // actually having a useful pseudo-element.  Check for that
+                    // case.
+                    let pseudo = PseudoElement::from_eager_index(i);
+                    let new_pseudo_should_exist =
+                        new.as_ref().map_or(false,
+                                            |s| pseudo.should_exist(s));
+                    let old_pseudo_should_exist =
+                        old.as_ref().map_or(false,
+                                            |s| pseudo.should_exist(s));
+                    if new_pseudo_should_exist != old_pseudo_should_exist {
+                        data.restyle.damage |= RestyleDamage::reconstruct();
+                        return cascade_requirement;
+                    }
                 }
             }
         }
@@ -647,14 +660,12 @@ pub trait MatchMethods : TElement {
             CascadeVisitedMode::Unvisited,
             cascade_inputs,
         );
-        if !context.shared.traversal_flags.for_animation_only() {
-            result |= self.replace_rules_internal(
-                replacements,
-                context,
-                CascadeVisitedMode::Visited,
-                cascade_inputs
-            );
-        }
+        result |= self.replace_rules_internal(
+            replacements,
+            context,
+            CascadeVisitedMode::Visited,
+            cascade_inputs
+        );
         result
     }
 
@@ -791,6 +802,9 @@ pub trait MatchMethods : TElement {
         }
 
         if pseudo.map_or(false, |p| p.is_before_or_after()) {
+            // FIXME(bz) This duplicates some of the logic in
+            // PseudoElement::should_exist, but it's not clear how best to share
+            // that logic without redoing the "get the display" work.
             let old_style_generates_no_pseudo =
                 old_style_is_display_none ||
                 old_values.ineffective_content_property();
@@ -817,7 +831,7 @@ pub trait MatchMethods : TElement {
             return StyleDifference::new(RestyleDamage::empty(), StyleChange::Unchanged)
         }
 
-        if pseudo.map_or(false, |p| p.is_first_letter()) {
+        if pseudo.map_or(false, |p| p.is_first_letter() || p.is_first_line()) {
             // No one cares about this pseudo, and we've checked above that
             // we're not switching from a "cares" to a "doesn't care" state
             // or vice versa.

@@ -32,6 +32,7 @@
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
+#include "mozilla/layers/WebRenderScrollData.h"
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "ClientLayerManager.h"
 #include "FrameLayerBuilder.h"
@@ -395,7 +396,23 @@ nsDisplayRemote::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuild
   visible += mozilla::layout::GetContentRectLayerOffset(mFrame, aDisplayListBuilder);
 
   aBuilder.PushIFrame(aSc.ToRelativeLayoutRect(visible),
-      mozilla::wr::AsPipelineId(mRemoteFrame->GetLayersId()));
+      mozilla::wr::AsPipelineId(GetRemoteLayersId()));
 
   return true;
+}
+
+bool
+nsDisplayRemote::UpdateScrollData(mozilla::layers::WebRenderScrollData* aData,
+                                  mozilla::layers::WebRenderLayerScrollData* aLayerData)
+{
+  if (aLayerData) {
+    aLayerData->SetReferentId(GetRemoteLayersId());
+  }
+  return true;
+}
+
+uint64_t
+nsDisplayRemote::GetRemoteLayersId() const
+{
+  return mRemoteFrame->GetLayersId();
 }

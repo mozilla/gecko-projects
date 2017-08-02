@@ -130,6 +130,11 @@ DeviceManagerDx::CreateCompositorDevices()
   FeatureState& d3d11 = gfxConfig::GetFeature(Feature::D3D11_COMPOSITING);
   MOZ_ASSERT(d3d11.IsEnabled());
 
+  if (int32_t sleepSec = gfxPrefs::Direct3D11SleepOnCreateDevice()) {
+    printf_stderr("Attach to PID: %d\n", GetCurrentProcessId());
+    Sleep(sleepSec * 1000);
+  }
+
   if (!LoadD3D11()) {
     return false;
   }
@@ -438,6 +443,17 @@ DeviceManagerDx::CreateDevice(IDXGIAdapter* aAdapter,
       RefPtr<ID3D11InfoQueue> infoQueue;
       if (!SUCCEEDED(debug->QueryInterface(__uuidof(ID3D11InfoQueue), getter_AddRefs(infoQueue))))
         break;
+
+      D3D11_INFO_QUEUE_FILTER filter;
+      PodZero(&filter);
+
+      // Disable warnings caused by Advanced Layers that are known and not problematic.
+      D3D11_MESSAGE_ID blockIDs[] = {
+        D3D11_MESSAGE_ID_DEVICE_DRAW_CONSTANT_BUFFER_TOO_SMALL
+      };
+      filter.DenyList.NumIDs = MOZ_ARRAY_LENGTH(blockIDs);
+      filter.DenyList.pIDList = blockIDs;
+      infoQueue->PushStorageFilter(&filter);
 
       infoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_CORRUPTION, true);
       infoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_ERROR, true);

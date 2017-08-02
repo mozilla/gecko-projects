@@ -133,7 +133,6 @@ protected:
                                              const bool& isFromCache,
                                              const bool& cacheEntryAvailable,
                                              const int32_t& cacheFetchCount,
-                                             const uint32_t& cacheLastFetched,
                                              const uint32_t& cacheExpirationTime,
                                              const nsCString& cachedCharset,
                                              const nsCString& securityInfoSerialization,
@@ -165,6 +164,8 @@ protected:
 
   mozilla::ipc::IPCResult RecvSetPriority(const int16_t& aPriority) override;
 
+  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+
   MOZ_MUST_USE bool
   GetAssociatedContentSecurity(nsIAssociatedContentSecurity** res = nullptr);
   virtual void DoNotifyListenerCleanup() override;
@@ -177,6 +178,9 @@ protected:
 
   // Get event target for processing network events.
   already_AddRefed<nsIEventTarget> GetNeckoTarget() override;
+
+  virtual mozilla::ipc::IPCResult RecvLogBlockedCORSRequest(const nsString& aMessage) override;
+  NS_IMETHOD LogBlockedCORSRequest(const nsAString & aMessage) override;
 
 private:
   // this section is for main-thread-only object
@@ -277,7 +281,6 @@ private:
   bool mCacheEntryAvailable;
   bool mAltDataCacheEntryAvailable;
   int32_t      mCacheFetchCount;
-  uint32_t     mCacheLastFetched;
   uint32_t     mCacheExpirationTime;
   nsCString    mCachedCharset;
 
@@ -376,7 +379,6 @@ private:
                       const bool& isFromCache,
                       const bool& cacheEntryAvailable,
                       const int32_t& cacheFetchCount,
-                      const uint32_t& cacheLastFetched,
                       const uint32_t& cacheExpirationTime,
                       const nsCString& cachedCharset,
                       const nsCString& securityInfoSerialization,

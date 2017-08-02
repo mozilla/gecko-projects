@@ -516,15 +516,14 @@ nsPresContext::GetDocumentColorPreferences()
     mBackgroundColor = LookAndFeel::GetColorUsingStandins(
         LookAndFeel::eColorID_window, NS_RGB(0xff, 0xff, 0xff));
   } else if (usePrefColors) {
-    nsAdoptingString colorStr =
-      Preferences::GetString("browser.display.foreground_color");
-
+    nsAutoString colorStr;
+    Preferences::GetString("browser.display.foreground_color", colorStr);
     if (!colorStr.IsEmpty()) {
       mDefaultColor = MakeColorPref(colorStr);
     }
 
-    colorStr = Preferences::GetString("browser.display.background_color");
-
+    colorStr.Truncate();
+    Preferences::GetString("browser.display.background_color", colorStr);
     if (!colorStr.IsEmpty()) {
       mBackgroundColor = MakeColorPref(colorStr);
     }
@@ -583,20 +582,20 @@ nsPresContext::GetUserPreferences()
   mUnderlineLinks =
     Preferences::GetBool("browser.underline_anchors", mUnderlineLinks);
 
-  nsAdoptingString colorStr = Preferences::GetString("browser.anchor_color");
-
+  nsAutoString colorStr;
+  Preferences::GetString("browser.anchor_color", colorStr);
   if (!colorStr.IsEmpty()) {
     mLinkColor = MakeColorPref(colorStr);
   }
 
-  colorStr = Preferences::GetString("browser.active_color");
-
+  colorStr.Truncate();
+  Preferences::GetString("browser.active_color", colorStr);
   if (!colorStr.IsEmpty()) {
     mActiveLinkColor = MakeColorPref(colorStr);
   }
 
-  colorStr = Preferences::GetString("browser.visited_color");
-
+  colorStr.Truncate();
+  Preferences::GetString("browser.visited_color", colorStr);
   if (!colorStr.IsEmpty()) {
     mVisitedLinkColor = MakeColorPref(colorStr);
   }
@@ -607,14 +606,14 @@ nsPresContext::GetUserPreferences()
   mFocusTextColor = mDefaultColor;
   mFocusBackgroundColor = mBackgroundColor;
 
-  colorStr = Preferences::GetString("browser.display.focus_text_color");
-
+  colorStr.Truncate();
+  Preferences::GetString("browser.display.focus_text_color", colorStr);
   if (!colorStr.IsEmpty()) {
     mFocusTextColor = MakeColorPref(colorStr);
   }
 
-  colorStr = Preferences::GetString("browser.display.focus_background_color");
-
+  colorStr.Truncate();
+  Preferences::GetString("browser.display.focus_background_color", colorStr);
   if (!colorStr.IsEmpty()) {
     mFocusBackgroundColor = MakeColorPref(colorStr);
   }
@@ -642,8 +641,8 @@ nsPresContext::GetUserPreferences()
   StaticPresData::Get()->ResetCachedFontPrefs();
 
   // * image animation
-  const nsAdoptingCString& animatePref =
-    Preferences::GetCString("image.animation_mode");
+  nsAutoCString animatePref;
+  Preferences::GetCString("image.animation_mode", animatePref);
   if (animatePref.EqualsLiteral("normal"))
     mImageAnimationModePref = imgIContainer::kNormalAnimMode;
   else if (animatePref.EqualsLiteral("none"))
@@ -1122,8 +1121,7 @@ nsPresContext::Observe(nsISupports* aSubject,
     auto encoding = Encoding::ForName(NS_LossyConvertUTF16toASCII(aData));
     RefPtr<CharSetChangingRunnable> runnable =
       new CharSetChangingRunnable(this, encoding);
-    return Document()->Dispatch("CharSetChangingRunnable",
-                                TaskCategory::Other,
+    return Document()->Dispatch(TaskCategory::Other,
                                 runnable.forget());
   }
 
@@ -1813,8 +1811,7 @@ nsPresContext::ThemeChanged()
       NewRunnableMethod("nsPresContext::ThemeChangedInternal",
                         this,
                         &nsPresContext::ThemeChangedInternal);
-    nsresult rv = Document()->Dispatch("nsPresContext::ThemeChangedInternal",
-                                       TaskCategory::Other,
+    nsresult rv = Document()->Dispatch(TaskCategory::Other,
                                        ev.forget());
     if (NS_SUCCEEDED(rv)) {
       mPendingThemeChanged = true;
@@ -1878,8 +1875,7 @@ nsPresContext::SysColorChanged()
       NewRunnableMethod("nsPresContext::SysColorChangedInternal",
                         this,
                         &nsPresContext::SysColorChangedInternal);
-    nsresult rv = Document()->Dispatch("nsPresContext::SysColorChangedInternal",
-                                       TaskCategory::Other,
+    nsresult rv = Document()->Dispatch(TaskCategory::Other,
                                        ev.forget());
     if (NS_SUCCEEDED(rv)) {
       mPendingSysColorChanged = true;
@@ -1919,9 +1915,7 @@ nsPresContext::UIResolutionChanged()
                         this,
                         &nsPresContext::UIResolutionChangedInternal);
     nsresult rv =
-      Document()->Dispatch("nsPresContext::UIResolutionChangedInternal",
-                           TaskCategory::Other,
-                           ev.forget());
+      Document()->Dispatch(TaskCategory::Other, ev.forget());
     if (NS_SUCCEEDED(rv)) {
       mPendingUIResolutionChanged = true;
     }
@@ -2166,9 +2160,7 @@ nsPresContext::PostMediaFeatureValuesChangedEvent()
       NewRunnableMethod("nsPresContext::HandleMediaFeatureValuesChangedEvent",
                         this, &nsPresContext::HandleMediaFeatureValuesChangedEvent);
     nsresult rv =
-      Document()->Dispatch("nsPresContext::HandleMediaFeatureValuesChangedEvent",
-                           TaskCategory::Other,
-                           ev.forget());
+      Document()->Dispatch(TaskCategory::Other, ev.forget());
     if (NS_SUCCEEDED(rv)) {
       mPendingMediaFeatureValuesChanged = true;
       mShell->SetNeedStyleFlush();
@@ -2269,9 +2261,9 @@ bool
 nsPresContext::HasAuthorSpecifiedRules(const nsIFrame* aFrame,
                                        uint32_t aRuleTypeMask) const
 {
-  if (mShell->StyleSet()->IsGecko()) {
+  if (auto* geckoStyleContext = aFrame->StyleContext()->GetAsGecko()) {
     return
-      nsRuleNode::HasAuthorSpecifiedRules(aFrame->StyleContext(),
+      nsRuleNode::HasAuthorSpecifiedRules(geckoStyleContext,
                                           aRuleTypeMask,
                                           UseDocumentColors());
   }
@@ -2391,9 +2383,7 @@ nsPresContext::RebuildCounterStyles()
       NewRunnableMethod("nsPresContext::HandleRebuildCounterStyles",
                         this, &nsPresContext::HandleRebuildCounterStyles);
     nsresult rv =
-      Document()->Dispatch("nsPresContext::HandleRebuildCounterStyles",
-                           TaskCategory::Other,
-                           ev.forget());
+      Document()->Dispatch(TaskCategory::Other, ev.forget());
     if (NS_SUCCEEDED(rv)) {
       mPostedFlushCounterStyles = true;
     }
@@ -3440,8 +3430,7 @@ nsRootPresContext::AddWillPaintObserver(nsIRunnable* aRunnable)
 {
   if (!mWillPaintFallbackEvent.IsPending()) {
     mWillPaintFallbackEvent = new RunWillPaintObservers(this);
-    Document()->Dispatch("RunWillPaintObservers",
-                         TaskCategory::Other,
+    Document()->Dispatch(TaskCategory::Other,
                          do_AddRef(mWillPaintFallbackEvent.get()));
   }
   mWillPaintObservers.AppendElement(aRunnable);

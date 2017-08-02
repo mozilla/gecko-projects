@@ -28,6 +28,7 @@ type WrEpoch = Epoch;
 /// cbindgen:field-names=[mHandle]
 /// cbindgen:derive-lt=true
 /// cbindgen:derive-lte=true
+/// cbindgen:derive-neq=true
 type WrIdNamespace = IdNamespace;
 
 /// cbindgen:field-names=[mNamespace, mHandle]
@@ -566,6 +567,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         blob_image_renderer: Some(Box::new(Moz2dImageRenderer::new(workers.clone()))),
         workers: Some(workers.clone()),
         cache_expiry_frames: 60, // see https://github.com/servo/webrender/pull/1294#issuecomment-304318800
+        enable_render_on_scroll: false,
         ..Default::default()
     };
 
@@ -644,22 +646,6 @@ pub extern "C" fn wr_api_add_external_image(api: &mut RenderApi,
 }
 
 #[no_mangle]
-pub extern "C" fn wr_api_add_external_image_buffer(api: &mut RenderApi,
-                                                   image_key: WrImageKey,
-                                                   descriptor: &WrImageDescriptor,
-                                                   external_image_id: WrExternalImageId) {
-    assert!(unsafe { is_in_compositor_thread() });
-    api.add_image(image_key,
-                  descriptor.into(),
-                  ImageData::External(ExternalImageData {
-                                          id: external_image_id.into(),
-                                          channel_index: 0,
-                                          image_type: ExternalImageType::ExternalBuffer,
-                                      }),
-                  None);
-}
-
-#[no_mangle]
 pub extern "C" fn wr_api_update_image(api: &mut RenderApi,
                                       key: WrImageKey,
                                       descriptor: &WrImageDescriptor,
@@ -668,6 +654,43 @@ pub extern "C" fn wr_api_update_image(api: &mut RenderApi,
     let copied_bytes = bytes.as_slice().to_owned();
 
     api.update_image(key, descriptor.into(), ImageData::new(copied_bytes), None);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_api_update_external_image(
+    api: &mut RenderApi,
+    key: WrImageKey,
+    descriptor: &WrImageDescriptor,
+    external_image_id: WrExternalImageId,
+    image_type: WrExternalImageBufferType,
+    channel_index: u8
+) {
+    assert!(unsafe { is_in_compositor_thread() });
+
+    let data = ImageData::External(
+        ExternalImageData {
+            id: external_image_id.into(),
+            channel_index,
+            image_type,
+        }
+    );
+
+    api.update_image(key, descriptor.into(), data, None);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_api_update_blob_image(api: &mut RenderApi,
+                                           image_key: WrImageKey,
+                                           descriptor: &WrImageDescriptor,
+                                           bytes: ByteSlice) {
+    assert!(unsafe { is_in_compositor_thread() });
+    let copied_bytes = bytes.as_slice().to_owned();
+    api.update_image(
+        image_key,
+        descriptor.into(),
+        ImageData::new_blob_image(copied_bytes),
+        None
+    );
 }
 
 #[no_mangle]
@@ -920,7 +943,7 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
     let c_filters = make_slice(filters, filter_count);
     let mut filters : Vec<FilterOp> = c_filters.iter().map(|c_filter| {
         match c_filter.filter_type {
-            WrFilterOpType::Blur => FilterOp::Blur(Au::from_f32_px(c_filter.argument)),
+            WrFilterOpType::Blur => FilterOp::Blur(c_filter.argument),
             WrFilterOpType::Brightness => FilterOp::Brightness(c_filter.argument),
             WrFilterOpType::Contrast => FilterOp::Contrast(c_filter.argument),
             WrFilterOpType::Grayscale => FilterOp::Grayscale(c_filter.argument),
@@ -1012,7 +1035,9 @@ pub extern "C" fn wr_dp_push_scroll_layer(state: &mut WrState,
         let content_rect: LayoutRect = content_rect.into();
         let clip_rect: LayoutRect = clip_rect.into();
 
-        state.frame_builder.dl_builder.define_scroll_frame(Some(clip_id), content_rect, clip_rect, vec![], None);
+        state.frame_builder.dl_builder.define_scroll_frame(
+            Some(clip_id), content_rect, clip_rect, vec![], None,
+            ScrollSensitivity::Script);
         state.frame_builder.scroll_clips_defined.insert(clip_id);
     }
     state.frame_builder.dl_builder.push_clip_id(clip_id);

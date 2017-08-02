@@ -127,9 +127,10 @@ UNITTEST_PLATFORM_PRETTY_NAMES = {
     # '10.6': [..TODO..],
     # '10.8': [..TODO..],
     # 'Android 2.3 API9': [..TODO..],
-    # 'Windows 7':  [..TODO..],
-    # 'Windows 7 VM': [..TODO..],
-    # 'Windows 8':  [..TODO..],
+    'Windows 7':  ['windows7-32'],
+    'Windows 7 VM':  ['windows7-32-vm'],
+    'Windows 8':  ['windows8-64'],
+    'Windows 10':  ['windows10-64'],
     # 'Windows XP': [..TODO..],
     # 'win32': [..TODO..],
     # 'win64': [..TODO..],
@@ -557,6 +558,7 @@ class TryOptionSyntax(object):
             return set(['try', 'all']) & set(attr('run_on_projects', []))
 
         def match_test(try_spec, attr_name):
+            run_by_default = True
             if attr('build_type') not in self.build_types:
                 return False
             if self.platforms is not None:
@@ -564,22 +566,25 @@ class TryOptionSyntax(object):
                     return False
             else:
                 if not check_run_on_projects():
-                    return False
+                    run_by_default = False
             if try_spec is None:
-                return True
+                return run_by_default
             # TODO: optimize this search a bit
             for test in try_spec:
                 if attr(attr_name) == test['test']:
                     break
             else:
                 return False
-            if 'platforms' in test:
-                platform = attr('test_platform', '').split('/')[0]
-                if platform not in test['platforms']:
-                    return False
             if 'only_chunks' in test and attr('test_chunk') not in test['only_chunks']:
                 return False
-            return True
+            if 'platforms' in test:
+                platform = attr('test_platform', '').split('/')[0]
+                # Platforms can be forced by syntax like "-u xpcshell[Windows 8]"
+                return platform in test['platforms']
+            elif run_by_default:
+                return check_run_on_projects()
+            else:
+                return False
 
         job_try_name = attr('job_try_name')
         if job_try_name:

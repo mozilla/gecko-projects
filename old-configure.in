@@ -46,9 +46,9 @@ _SUBDIR_CONFIG_ARGS="$ac_configure_args"
 dnl Set the version number of the libs included with mozilla
 dnl ========================================================
 MOZJPEG=62
-MOZPNG=10629
+MOZPNG=10631
 NSPR_VERSION=4
-NSPR_MINVER=4.14
+NSPR_MINVER=4.16
 NSS_VERSION=3
 
 dnl Set the minimum version of toolkit libs used by mozilla
@@ -531,6 +531,13 @@ if test "$GNU_CC"; then
     AC_MSG_CHECKING([for -z text option to ld])
     _SAVE_LDFLAGS=$LDFLAGS
     LDFLAGS="$LDFLAGS -Wl,-z,text"
+    AC_TRY_LINK(,,AC_MSG_RESULT([yes]),
+                  AC_MSG_RESULT([no])
+                  LDFLAGS=$_SAVE_LDFLAGS)
+
+    AC_MSG_CHECKING([for -z relro option to ld])
+    _SAVE_LDFLAGS=$LDFLAGS
+    LDFLAGS="$LDFLAGS -Wl,-z,relro"
     AC_TRY_LINK(,,AC_MSG_RESULT([yes]),
                   AC_MSG_RESULT([no])
                   LDFLAGS=$_SAVE_LDFLAGS)
@@ -3112,17 +3119,6 @@ if test -n "$MOZ_CRASHREPORTER"; then
   fi
 fi
 
-MOZ_ARG_WITH_STRING(crashreporter-enable-percent,
-[  --with-crashreporter-enable-percent=NN
-                          Enable sending crash reports by default on NN% of users. (default=100)],
-[ val=`echo $withval | sed 's/[^0-9]//g'`
-    MOZ_CRASHREPORTER_ENABLE_PERCENT="$val"])
-
-if test -z "$MOZ_CRASHREPORTER_ENABLE_PERCENT"; then
-   MOZ_CRASHREPORTER_ENABLE_PERCENT=100
-fi
-AC_DEFINE_UNQUOTED(MOZ_CRASHREPORTER_ENABLE_PERCENT, $MOZ_CRASHREPORTER_ENABLE_PERCENT)
-
 dnl ========================================================
 dnl = libjpeg-turbo configuration
 dnl ========================================================
@@ -3980,47 +3976,6 @@ if test "$USE_ELF_HACK" = 1; then
         ;;
     esac
 fi
-
-if test -n "$COMPILE_ENVIRONMENT" -a -n "$USE_ELF_HACK"; then
-    dnl PT_GNU_RELRO segment makes the dynamic linker set a read-only flag on
-    dnl memory addresses it maps to. The result is that by the time elfhack
-    dnl kicks in, it is not possible to apply relocations because of that,
-    dnl thus elfhack effectively skips relocations inside the PT_GNU_RELRO
-    dnl segment. It makes elfhack mostly useless, so considering the problems
-    dnl we have we PT_GNU_RELRO (e.g. bug 664366), and until elfhack can deal
-    dnl with PT_GNU_RELRO segments, it's just simpler to disable elfhack when
-    dnl the linker creates PT_GNU_RELRO segments. However, when we do want
-    dnl elfhack enabled, disable PT_GNU_RELRO instead.
-    AC_CACHE_CHECK([whether linker creates PT_GNU_RELRO segments],
-        LINK_WITH_PT_GNU_RELRO,
-        [echo "int main() {return 0;}" > conftest.${ac_ext}
-         if AC_TRY_COMMAND(${CC-cc} -o conftest${ac_exeext} $LDFLAGS conftest.${ac_ext} $LIBS 1>&2) &&
-            test -s conftest${ac_exeext}; then
-            if ${TOOLCHAIN_PREFIX}readelf -l conftest${ac_exeext} | grep GNU_RELRO > /dev/null; then
-                LINK_WITH_PT_GNU_RELRO=yes
-            else
-                LINK_WITH_PT_GNU_RELRO=no
-            fi
-         else
-             dnl We really don't expect to get here, but just in case
-             AC_ERROR([couldn't compile a simple C file])
-         fi
-         rm -rf conftest*])
-    if test "$LINK_WITH_PT_GNU_RELRO" = yes; then
-        if test "$USE_ELF_HACK" = F; then
-            AC_MSG_CHECKING([for -z norelro option to ld])
-            _SAVE_LDFLAGS=$LDFLAGS
-            LDFLAGS="$LDFLAGS -Wl,-z,norelro"
-            AC_TRY_LINK(,,AC_MSG_RESULT([yes])
-                        [NSPR_LDFLAGS="$NSPR_LDFLAGS -Wl,-z,norelro"],
-                        AC_ERROR([--enable-elf-hack is not compatible with a linker creating a PT_GNU_RELRO segment and that doesn't support the "-z norelro" option.]))
-            USE_ELF_HACK=1
-        else
-            AC_MSG_WARN([Disabling elfhack])
-            USE_ELF_HACK=
-        fi
-    fi
-fi # COMPILE_ENVIRONMENT and others.
 
 dnl ========================================================
 dnl = libstdc++ compatibility hacks

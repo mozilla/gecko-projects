@@ -70,6 +70,12 @@ ClientPaintedLayer::CanRecordLayer(ReadbackProcessor* aReadback)
     return false;
   }
 
+  // Component alpha layers aren't supported yet since we have to
+  // hold onto both the front/back buffer of a texture client.
+  if (GetSurfaceMode() == SurfaceMode::SURFACE_COMPONENT_ALPHA) {
+    return false;
+  }
+
   return GetAncestorMaskLayerCount() == 0;
 }
 
@@ -185,7 +191,7 @@ ClientPaintedLayer::PaintThebes(nsTArray<ReadbackProcessor::Update>* aReadbackUp
 bool
 ClientPaintedLayer::PaintOffMainThread()
 {
-  mContentClient->BeginPaint();
+  mContentClient->BeginAsyncPaint();
 
   uint32_t flags = GetPaintFlags();
 
@@ -204,16 +210,14 @@ ClientPaintedLayer::PaintOffMainThread()
       continue;
     }
 
-    RefPtr<DrawTarget> refDT =
-      Factory::CreateDrawTarget(gfxPlatform::GetPlatform()->GetDefaultContentBackend(),
-                                target->GetSize(), target->GetFormat());
-
     // We don't clear the rect here like WRPaintedBlobLayers do
     // because ContentClient already clears the surface for us during BeginPaint.
-    RefPtr<DrawTargetCapture> captureDT = refDT->CreateCaptureDT(target->GetSize());
+    RefPtr<DrawTargetCapture> captureDT =
+      Factory::CreateCaptureDrawTarget(target->GetBackendType(),
+                                       target->GetSize(),
+                                       target->GetFormat());
     captureDT->SetTransform(target->GetTransform());
 
-    SetAntialiasingFlags(this, refDT);
     SetAntialiasingFlags(this, captureDT);
     SetAntialiasingFlags(this, target);
 

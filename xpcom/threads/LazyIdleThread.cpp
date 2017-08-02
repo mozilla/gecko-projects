@@ -378,7 +378,8 @@ NS_IMPL_QUERY_INTERFACE(LazyIdleThread, nsIThread,
                         nsISerialEventTarget,
                         nsITimerCallback,
                         nsIThreadObserver,
-                        nsIObserver)
+                        nsIObserver,
+                        nsINamed)
 
 NS_IMETHODIMP
 LazyIdleThread::DispatchFromScript(nsIRunnable* aEvent, uint32_t aFlags)
@@ -513,18 +514,6 @@ LazyIdleThread::IdleDispatch(already_AddRefed<nsIRunnable> aEvent)
 }
 
 NS_IMETHODIMP
-LazyIdleThread::EnableEventPrioritization()
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-LazyIdleThread::IsEventPrioritizationEnabled(bool* aResult)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
 LazyIdleThread::RegisterIdlePeriod(already_AddRefed<nsIIdlePeriod> aIdlePeriod)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -564,7 +553,14 @@ LazyIdleThread::Notify(nsITimer* aTimer)
 }
 
 NS_IMETHODIMP
-LazyIdleThread::OnDispatchedEvent(nsIThreadInternal* /*aThread */)
+LazyIdleThread::GetName(nsACString& aName)
+{
+  aName.AssignLiteral("LazyIdleThread");
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+LazyIdleThread::OnDispatchedEvent()
 {
   MOZ_ASSERT(mOwningEventTarget->IsOnCurrentThread());
   return NS_OK;

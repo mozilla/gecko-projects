@@ -5,10 +5,12 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 DIRS += [
+    'activity-stream',
     'aushelper',
     'clicktoplay-rollout',
     'e10srollout',
     'followonsearch',
+    'onboarding',
     'pdfjs',
     'pocket',
     'screenshots',
@@ -34,11 +36,4 @@ if CONFIG['MOZ_DEV_EDITION'] or CONFIG['NIGHTLY_BUILD']:
 if CONFIG['MOZ_MORTAR']:
     DIRS += [
         'mortar',
-    ]
-
-# Nightly-only system add-ons
-if CONFIG['NIGHTLY_BUILD']:
-    DIRS += [
-        'activity-stream',
-        'onboarding',
     ]

@@ -57,12 +57,15 @@ public:
   static const size_t kMaxFrameKeyLength = 512;
 
   void StreamSamplesToJSON(SpliceableJSONWriter& aWriter, int aThreadId,
-                           double aSinceTime, JSContext* cx,
+                           double aSinceTime, double* aOutFirstSampleTime,
+                           JSContext* cx,
                            UniqueStacks& aUniqueStacks) const;
   void StreamMarkersToJSON(SpliceableJSONWriter& aWriter, int aThreadId,
                            const mozilla::TimeStamp& aProcessStartTime,
                            double aSinceTime,
                            UniqueStacks& aUniqueStacks) const;
+  void StreamPausedRangesToJSON(SpliceableJSONWriter& aWriter,
+                                double aSinceTime) const;
 
   // Find (via |aLS|) the most recent sample for the thread denoted by
   // |aThreadId| and clone it, patching in |aProcessStartTime| as appropriate.

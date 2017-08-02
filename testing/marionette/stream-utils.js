@@ -4,16 +4,20 @@
 
 "use strict";
 
-const {Constructor: CC, classes: Cc, interfaces: Ci, utils: Cu, results: Cr} =
-    Components;
+const {
+  Constructor: CC,
+  classes: Cc,
+  interfaces: Ci,
+  utils: Cu,
+  results: Cr,
+} = Components;
 
 Cu.import("resource://gre/modules/EventEmitter.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
 const IOUtil = Cc["@mozilla.org/io-util;1"].getService(Ci.nsIIOUtil);
-const ScriptableInputStream =
-  CC("@mozilla.org/scriptableinputstream;1",
-     "nsIScriptableInputStream", "init");
+const ScriptableInputStream = CC("@mozilla.org/scriptableinputstream;1",
+    "nsIScriptableInputStream", "init");
 
 this.EXPORTED_SYMBOLS = ["StreamUtils"];
 
@@ -59,6 +63,7 @@ function copyStream(input, output, length) {
   return copier.copy();
 }
 
+/** @class */
 function StreamCopier(input, output, length) {
   EventEmitter.decorate(this);
   this._id = StreamCopier._nextId++;
@@ -196,14 +201,11 @@ StreamCopier.prototype = {
 };
 
 /**
- * Read from a stream, one byte at a time, up to the next |delimiter|
- * character, but stopping if we've read |count| without finding it.
- * Reading also terminates early if there are less than |count| bytes
- * available on the stream.  In that case, we only read as many bytes as
- * the stream currently has to offer.
- *
- * TODO: This implementation could be removed if bug 984651 is fixed,
- * which provides a native version of the same idea.
+ * Read from a stream, one byte at a time, up to the next
+ * <var>delimiter</var> character, but stopping if we've read |count|
+ * without finding it.  Reading also terminates early if there are less
+ * than <var>count</var> bytes available on the stream.  In that case,
+ * we only read as many bytes as the stream currently has to offer.
  *
  * @param {nsIInputStream} stream
  *     Input stream to read from.
@@ -216,6 +218,8 @@ StreamCopier.prototype = {
  *     Collected data.  If the delimiter was found, this string will
  *     end with it.
  */
+// TODO: This implementation could be removed if bug 984651 is fixed,
+// which provides a native version of the same idea.
 function delimitedRead(stream, delimiter, count) {
   let scriptableStream;
   if (stream instanceof Ci.nsIScriptableInputStream) {

@@ -11,7 +11,6 @@
 #include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
-#include "mozilla/SizePrintfMacros.h"
 #include "mozilla/Unused.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIObserverService.h"
@@ -161,7 +160,8 @@ MulticastDNSDeviceProvider::Init()
   mDiscoverable = Preferences::GetBool(PREF_PRESENTATION_DISCOVERABLE);
   mDiscoverableEncrypted = Preferences::GetBool(PREF_PRESENTATION_DISCOVERABLE_ENCRYPTED);
   mServerRetryMs = Preferences::GetUint(PREF_PRESENTATION_DISCOVERABLE_RETRY_MS);
-  mServiceName = Preferences::GetCString(PREF_PRESENTATION_DEVICE_NAME);
+  mServiceName.Truncate();
+  Preferences::GetCString(PREF_PRESENTATION_DEVICE_NAME, mServiceName);
 
 #ifdef MOZ_WIDGET_ANDROID
   // FIXME: Bug 1185806 - Provide a common device name setting.
@@ -1099,7 +1099,8 @@ MulticastDNSDeviceProvider::Observe(nsISupports* aSubject,
     } else if (data.EqualsLiteral(PREF_PRESENTATION_DISCOVERABLE)) {
       OnDiscoverableChanged(Preferences::GetBool(PREF_PRESENTATION_DISCOVERABLE));
     } else if (data.EqualsLiteral(PREF_PRESENTATION_DEVICE_NAME)) {
-      nsAdoptingCString newServiceName = Preferences::GetCString(PREF_PRESENTATION_DEVICE_NAME);
+      nsAutoCString newServiceName;
+      Preferences::GetCString(PREF_PRESENTATION_DEVICE_NAME, newServiceName);
       if (!mServiceName.Equals(newServiceName)) {
         OnServiceNameChanged(newServiceName);
       }

@@ -163,21 +163,19 @@ Statistics::lookupChildPhase(PhaseKind phaseKind) const
 
     MOZ_ASSERT(phaseKind < PhaseKind::LIMIT);
 
-    // Most phases only correspond to a single expanded phase so check for that
-    // first.
-    Phase phase = phaseKinds[phaseKind].firstPhase;
-    if (phases[phase].nextInPhase == Phase::NONE) {
-        MOZ_ASSERT(phases[phase].parent == currentPhase());
-        return phase;
+    // Search all expanded phases that correspond to the required
+    // phase to find the one whose parent is the current expanded phase.
+    Phase phase;
+    for (phase = phaseKinds[phaseKind].firstPhase;
+         phase != Phase::NONE;
+         phase = phases[phase].nextInPhase)
+    {
+        if (phases[phase].parent == currentPhase())
+            break;
     }
 
-    // Otherwise search all expanded phases that correspond to the required
-    // phase to find the one whose parent is the current expanded phase.
-    Phase parent = currentPhase();
-    while (phases[phase].parent != parent) {
-        phase = phases[phase].nextInPhase;
-        MOZ_ASSERT(phase != Phase::NONE);
-    }
+    MOZ_RELEASE_ASSERT(phase != Phase::NONE,
+                       "Requested child phase not found under current phase");
 
     return phase;
 }
@@ -464,6 +462,13 @@ Statistics::formatDetailedSliceDescription(unsigned i, const SliceData& slice) c
     return DuplicateString(buffer);
 }
 
+static bool
+IncludePhase(TimeDuration duration)
+{
+    // Don't include durations that will print as "0.000ms".
+    return duration.ToMilliseconds() >= 0.001;
+}
+
 UniqueChars
 Statistics::formatDetailedPhaseTimes(const PhaseTimeTable& phaseTimes) const
 {
@@ -475,15 +480,15 @@ Statistics::formatDetailedPhaseTimes(const PhaseTimeTable& phaseTimes) const
         uint8_t level = phases[phase].depth;
         TimeDuration ownTime = phaseTimes[phase];
         TimeDuration childTime = SumChildTimes(phase, phaseTimes);
-        if (!ownTime.IsZero()) {
-            SprintfLiteral(buffer, "      %*s: %.3fms\n",
-                           level * 2, phases[phase].name, t(ownTime));
+        if (IncludePhase(ownTime)) {
+            SprintfLiteral(buffer, "      %*s%s: %.3fms\n",
+                           level * 2, "", phases[phase].name, t(ownTime));
             if (!fragments.append(DuplicateString(buffer)))
                 return UniqueChars(nullptr);
 
             if (childTime && (ownTime - childTime) > MaxUnaccountedChildTime) {
-                SprintfLiteral(buffer, "      %*s: %.3fms\n",
-                               (level + 1) * 2, "Other", t(ownTime - childTime));
+                SprintfLiteral(buffer, "      %*s%s: %.3fms\n",
+                               (level + 1) * 2, "", "Other", t(ownTime - childTime));
                 if (!fragments.append(DuplicateString(buffer)))
                     return UniqueChars(nullptr);
             }
@@ -1300,12 +1305,8 @@ Statistics::maybePrintProfileHeaders()
     static int printedHeader = 0;
     if ((printedHeader++ % 200) == 0) {
         printProfileHeader();
-        for (ZoneGroupsIter group(runtime); !group.done(); group.next()) {
-            if (group->nursery().enableProfiling()) {
-                Nursery::printProfileHeader();
-                break;
-            }
-        }
+        if (runtime->gc.nursery().enableProfiling())
+            Nursery::printProfileHeader();
     }
 }
 
@@ -1315,7 +1316,8 @@ Statistics::printProfileHeader()
     if (!enableProfiling_)
         return;
 
-    fprintf(stderr, "MajorGC:               Reason States      ");
+    fprintf(stderr, "MajorGC:               Reason States SRN  ");
+    fprintf(stderr, " %6s", "budget");
     fprintf(stderr, " %6s", "total");
 #define PRINT_PROFILE_HEADER(name, text, phase)                               \
     fprintf(stderr, " %6s", text);
@@ -1339,8 +1341,21 @@ Statistics::printSliceProfile()
 
     maybePrintProfileHeaders();
 
-    fprintf(stderr, "MajorGC: %20s %1d -> %1d      ",
-            ExplainReason(slice.reason), int(slice.initialState), int(slice.finalState));
+    bool shrinking = gckind == GC_SHRINK;
+    bool reset = slice.resetReason != AbortReason::None;
+    bool nonIncremental = nonincrementalReason_ != AbortReason::None;
+
+    fprintf(stderr, "MajorGC: %20s %1d -> %1d %1s%1s%1s  ",
+            ExplainReason(slice.reason),
+            int(slice.initialState), int(slice.finalState),
+            shrinking ? "S" : "",
+            reset ? "R" : "",
+            nonIncremental ? "N" : "");
+
+    if (!nonIncremental && !slice.budget.isUnlimited() && slice.budget.isTimeBudget())
+        fprintf(stderr, " %6" PRIi64, static_cast<int64_t>(slice.budget.timeBudget.budget));
+    else
+        fprintf(stderr, "       ");
 
     ProfileDurations times;
     times[ProfileKey::Total] = slice.duration();
@@ -1359,7 +1374,7 @@ void
 Statistics::printTotalProfileTimes()
 {
     if (enableProfiling_) {
-        fprintf(stderr, "MajorGC TOTALS: %7" PRIu64 " slices:           ", sliceCount_);
+        fprintf(stderr, "MajorGC TOTALS: %7" PRIu64 " slices:                  ", sliceCount_);
         printProfileTimes(totalTimes_);
     }
 }

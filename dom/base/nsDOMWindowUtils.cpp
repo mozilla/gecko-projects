@@ -75,6 +75,7 @@
 #include "Layers.h"
 #include "gfxPrefs.h"
 
+#include "mozilla/dom/AudioDeviceInfo.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/IDBFactoryBinding.h"
@@ -173,30 +174,6 @@ private:
   nsWeakPtr mWindowRef;
   nsSize mSize;
 };
-
-namespace {
-
-class NativeInputRunnable final : public PrioritizableRunnable
-{
-  explicit NativeInputRunnable(already_AddRefed<nsIRunnable>&& aEvent);
-  ~NativeInputRunnable() {}
-public:
-  static already_AddRefed<nsIRunnable> Create(already_AddRefed<nsIRunnable>&& aEvent);
-};
-
-NativeInputRunnable::NativeInputRunnable(already_AddRefed<nsIRunnable>&& aEvent)
-  : PrioritizableRunnable(Move(aEvent), nsIRunnablePriority::PRIORITY_INPUT)
-{
-}
-
-/* static */ already_AddRefed<nsIRunnable>
-NativeInputRunnable::Create(already_AddRefed<nsIRunnable>&& aEvent)
-{
-  nsCOMPtr<nsIRunnable> event(new NativeInputRunnable(Move(aEvent)));
-  return event.forget();
-}
-
-} // unnamed namespace
 
 LinkedList<OldWindowSize> OldWindowSize::sList;
 
@@ -1143,7 +1120,7 @@ nsDOMWindowUtils::SendNativeKeyEvent(int32_t aNativeKeyboardLayout,
   if (!widget)
     return NS_ERROR_FAILURE;
 
-  NS_DispatchToMainThread(NativeInputRunnable::Create(
+  NS_DispatchToMainThread(
     NewRunnableMethod<int32_t,
                       int32_t,
                       uint32_t,
@@ -1157,7 +1134,7 @@ nsDOMWindowUtils::SendNativeKeyEvent(int32_t aNativeKeyboardLayout,
                                     aModifiers,
                                     aCharacters,
                                     aUnmodifiedCharacters,
-                                    aObserver)));
+                                    aObserver));
   return NS_OK;
 }
 
@@ -1174,7 +1151,7 @@ nsDOMWindowUtils::SendNativeMouseEvent(int32_t aScreenX,
   if (!widget)
     return NS_ERROR_FAILURE;
 
-  NS_DispatchToMainThread(NativeInputRunnable::Create(
+  NS_DispatchToMainThread(
     NewRunnableMethod<LayoutDeviceIntPoint, int32_t, int32_t, nsIObserver*>(
       "nsIWidget::SynthesizeNativeMouseEvent",
       widget,
@@ -1182,7 +1159,7 @@ nsDOMWindowUtils::SendNativeMouseEvent(int32_t aScreenX,
       LayoutDeviceIntPoint(aScreenX, aScreenY),
       aNativeMessage,
       aModifierFlags,
-      aObserver)));
+      aObserver));
   return NS_OK;
 }
 
@@ -1197,13 +1174,12 @@ nsDOMWindowUtils::SendNativeMouseMove(int32_t aScreenX,
   if (!widget)
     return NS_ERROR_FAILURE;
 
-  NS_DispatchToMainThread(NativeInputRunnable::Create(
-    NewRunnableMethod<LayoutDeviceIntPoint, nsIObserver*>(
-      "nsIWidget::SynthesizeNativeMouseMove",
-      widget,
-      &nsIWidget::SynthesizeNativeMouseMove,
-      LayoutDeviceIntPoint(aScreenX, aScreenY),
-      aObserver)));
+  NS_DispatchToMainThread(NewRunnableMethod<LayoutDeviceIntPoint, nsIObserver*>(
+    "nsIWidget::SynthesizeNativeMouseMove",
+    widget,
+    &nsIWidget::SynthesizeNativeMouseMove,
+    LayoutDeviceIntPoint(aScreenX, aScreenY),
+    aObserver));
   return NS_OK;
 }
 
@@ -1225,26 +1201,25 @@ nsDOMWindowUtils::SendNativeMouseScrollEvent(int32_t aScreenX,
     return NS_ERROR_FAILURE;
   }
 
-  NS_DispatchToMainThread(NativeInputRunnable::Create(
-    NewRunnableMethod<mozilla::LayoutDeviceIntPoint,
-                      uint32_t,
-                      double,
-                      double,
-                      double,
-                      uint32_t,
-                      uint32_t,
-                      nsIObserver*>(
-      "nsIWidget::SynthesizeNativeMouseScrollEvent",
-      widget,
-      &nsIWidget::SynthesizeNativeMouseScrollEvent,
-      LayoutDeviceIntPoint(aScreenX, aScreenY),
-      aNativeMessage,
-      aDeltaX,
-      aDeltaY,
-      aDeltaZ,
-      aModifierFlags,
-      aAdditionalFlags,
-      aObserver)));
+  NS_DispatchToMainThread(NewRunnableMethod<mozilla::LayoutDeviceIntPoint,
+                                            uint32_t,
+                                            double,
+                                            double,
+                                            double,
+                                            uint32_t,
+                                            uint32_t,
+                                            nsIObserver*>(
+    "nsIWidget::SynthesizeNativeMouseScrollEvent",
+    widget,
+    &nsIWidget::SynthesizeNativeMouseScrollEvent,
+    LayoutDeviceIntPoint(aScreenX, aScreenY),
+    aNativeMessage,
+    aDeltaX,
+    aDeltaY,
+    aDeltaZ,
+    aModifierFlags,
+    aAdditionalFlags,
+    aObserver));
   return NS_OK;
 }
 
@@ -1266,7 +1241,7 @@ nsDOMWindowUtils::SendNativeTouchPoint(uint32_t aPointerId,
     return NS_ERROR_INVALID_ARG;
   }
 
-  NS_DispatchToMainThread(NativeInputRunnable::Create(
+  NS_DispatchToMainThread(
     NewRunnableMethod<uint32_t,
                       nsIWidget::TouchPointerState,
                       LayoutDeviceIntPoint,
@@ -1280,7 +1255,7 @@ nsDOMWindowUtils::SendNativeTouchPoint(uint32_t aPointerId,
                                     LayoutDeviceIntPoint(aScreenX, aScreenY),
                                     aPressure,
                                     aOrientation,
-                                    aObserver)));
+                                    aObserver));
   return NS_OK;
 }
 
@@ -1295,14 +1270,14 @@ nsDOMWindowUtils::SendNativeTouchTap(int32_t aScreenX,
     return NS_ERROR_FAILURE;
   }
 
-  NS_DispatchToMainThread(NativeInputRunnable::Create(
+  NS_DispatchToMainThread(
     NewRunnableMethod<LayoutDeviceIntPoint, bool, nsIObserver*>(
       "nsIWidget::SynthesizeNativeTouchTap",
       widget,
       &nsIWidget::SynthesizeNativeTouchTap,
       LayoutDeviceIntPoint(aScreenX, aScreenY),
       aLongTap,
-      aObserver)));
+      aObserver));
   return NS_OK;
 }
 
@@ -1324,11 +1299,11 @@ nsDOMWindowUtils::ClearNativeTouchSequence(nsIObserver* aObserver)
     return NS_ERROR_FAILURE;
   }
 
-  NS_DispatchToMainThread(NativeInputRunnable::Create(
+  NS_DispatchToMainThread(
     NewRunnableMethod<nsIObserver*>("nsIWidget::ClearNativeTouchSequence",
                                     widget,
                                     &nsIWidget::ClearNativeTouchSequence,
-                                    aObserver)));
+                                    aObserver));
   return NS_OK;
 }
 
@@ -1847,6 +1822,39 @@ nsDOMWindowUtils::GetBoundsWithoutFlushing(nsIDOMElement *aElement,
   }
 
   rect.forget(aResult);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::NeedsFlush(int32_t aFlushType, bool* aResult)
+{
+  MOZ_ASSERT(aResult);
+
+  nsCOMPtr<nsIDocument> doc = GetDocument();
+  NS_ENSURE_STATE(doc);
+
+  nsIPresShell* presShell = doc->GetShell();
+  NS_ENSURE_STATE(presShell);
+
+  FlushType flushType;
+  switch (aFlushType) {
+  case FLUSH_STYLE:
+    flushType = FlushType::Style;
+    break;
+
+  case FLUSH_LAYOUT:
+    flushType = FlushType::Layout;
+    break;
+
+  case FLUSH_DISPLAY:
+    flushType = FlushType::Display;
+    break;
+
+  default:
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  *aResult = presShell->NeedFlush(flushType);
   return NS_OK;
 }
 
@@ -2473,6 +2481,53 @@ NS_IMETHODIMP
 nsDOMWindowUtils::GetCurrentAudioBackend(nsAString& aBackend)
 {
   CubebUtils::GetCurrentBackend(aBackend);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetCurrentMaxAudioChannels(uint32_t* aChannels)
+{
+  *aChannels = CubebUtils::MaxNumberOfChannels();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetCurrentPreferredChannelLayout(nsAString& aLayout)
+{
+  CubebUtils::GetPreferredChannelLayout(aLayout);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetCurrentPreferredSampleRate(uint32_t* aRate)
+{
+  *aRate = CubebUtils::PreferredSampleRate();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::AudioDevices(uint16_t aSide, nsIArray** aDevices)
+{
+  NS_ENSURE_ARG_POINTER(aDevices);
+  NS_ENSURE_ARG((aSide == AUDIO_INPUT) || (aSide == AUDIO_OUTPUT));
+  *aDevices = nullptr;
+
+  nsresult rv = NS_OK;
+  nsCOMPtr<nsIMutableArray> devices =
+    do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsTArray<RefPtr<AudioDeviceInfo>> collection;
+  CubebUtils::GetDeviceCollection(collection,
+                                  aSide == AUDIO_INPUT
+                                    ? CubebUtils::Side::Input
+                                    : CubebUtils::Side::Output);
+  for (auto device: collection) {
+    devices->AppendElement(device, false);
+  }
+
+  devices.forget(aDevices);
+
   return NS_OK;
 }
 

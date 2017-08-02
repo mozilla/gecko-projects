@@ -23,7 +23,7 @@ WebRenderBridgeChild::WebRenderBridgeChild(const wr::PipelineId& aPipelineId)
   : mReadLockSequenceNumber(0)
   , mIsInTransaction(false)
   , mIsInClearCachedResources(false)
-  , mIdNamespace(0)
+  , mIdNamespace{0}
   , mResourceId(0)
   , mPipelineId(aPipelineId)
   , mIPCOpen(false)
@@ -112,12 +112,17 @@ WebRenderBridgeChild::DPEnd(wr::DisplayListBuilder &aBuilder,
   aBuilder.Finalize(contentSize, dl);
   ByteBuffer dlData(Move(dl.dl));
 
+  TimeStamp fwdTime;
+#if defined(ENABLE_FRAME_LATENCY_LOG)
+  fwdTime = TimeStamp::Now();
+#endif
+
   if (aIsSync) {
     this->SendDPSyncEnd(aSize, mParentCommands, mDestroyedActors, GetFwdTransactionId(), aTransactionId,
-                        contentSize, dlData, dl.dl_desc, aScrollData, mIdNamespace);
+                        contentSize, dlData, dl.dl_desc, aScrollData, mIdNamespace, fwdTime);
   } else {
     this->SendDPEnd(aSize, mParentCommands, mDestroyedActors, GetFwdTransactionId(), aTransactionId,
-                    contentSize, dlData, dl.dl_desc, aScrollData, mIdNamespace);
+                    contentSize, dlData, dl.dl_desc, aScrollData, mIdNamespace, fwdTime);
   }
 
   mParentCommands.Clear();
@@ -207,7 +212,7 @@ WebRenderBridgeChild::PushGlyphs(wr::DisplayListBuilder& aBuilder, const nsTArra
   MOZ_ASSERT(!aGlyphs.IsEmpty());
 
   wr::WrFontKey key = GetFontKeyForScaledFont(aFont);
-  MOZ_ASSERT(key.mNamespace && key.mHandle);
+  MOZ_ASSERT(key.mNamespace.mHandle && key.mHandle);
 
   for (size_t i = 0; i < aGlyphs.Length(); i++) {
     GlyphArray glyph_array = aGlyphs[i];
@@ -244,7 +249,7 @@ WebRenderBridgeChild::GetFontKeyForScaledFont(gfx::ScaledFont* aScaledFont)
   RefPtr<gfx::UnscaledFont> unscaled = aScaledFont->GetUnscaledFont();
   MOZ_ASSERT(unscaled);
 
-  wr::FontKey key = {0, 0};
+  wr::FontKey key = { wr::IdNamespace { 0 }, 0};
   if (mFontKeys.Get(unscaled, &key)) {
     return key;
   }
@@ -447,11 +452,11 @@ WebRenderBridgeChild::InForwarderThread()
 }
 
 mozilla::ipc::IPCResult
-WebRenderBridgeChild::RecvWrUpdated(const uint32_t& aNewIdNameSpace)
+WebRenderBridgeChild::RecvWrUpdated(const wr::IdNamespace& aNewIdNamespace)
 {
   // Update mIdNamespace to identify obsolete keys and messages by WebRenderBridgeParent.
   // Since usage of invalid keys could cause crash in webrender.
-  mIdNamespace = aNewIdNameSpace;
+  mIdNamespace = aNewIdNamespace;
   // Remove all FontKeys since they are removed by WebRenderBridgeParent
   for (auto iter = mFontKeys.Iter(); !iter.Done(); iter.Next()) {
     SendDeleteFont(iter.Data());

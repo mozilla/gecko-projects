@@ -36,6 +36,7 @@
 #include "js/Realm.h"
 #include "js/RefCounted.h"
 #include "js/RootingAPI.h"
+#include "js/Stream.h"
 #include "js/TracingAPI.h"
 #include "js/UniquePtr.h"
 #include "js/Utility.h"
@@ -1218,6 +1219,16 @@ class JS_PUBLIC_API(ContextOptions) {
         return *this;
     }
 
+    bool streams() const { return streams_; }
+    ContextOptions& setStreams(bool flag) {
+        streams_ = flag;
+        return *this;
+    }
+    ContextOptions& toggleStreams() {
+        streams_ = !streams_;
+        return *this;
+    }
+
     bool wasmAlwaysBaseline() const { return wasmAlwaysBaseline_; }
     ContextOptions& setWasmAlwaysBaseline(bool flag) {
         wasmAlwaysBaseline_ = flag;
@@ -1328,6 +1339,7 @@ class JS_PUBLIC_API(ContextOptions) {
     bool strictMode_ : 1;
     bool extraWarnings_ : 1;
     bool forEachStatement_: 1;
+    bool streams_: 1;
 #ifdef FUZZING
     bool fuzzing_ : 1;
 #endif
@@ -4593,6 +4605,9 @@ JS_ResetInterruptCallback(JSContext* cx, bool enable);
 extern JS_PUBLIC_API(void)
 JS_RequestInterruptCallback(JSContext* cx);
 
+extern JS_PUBLIC_API(void)
+JS_RequestInterruptCallbackCanWait(JSContext* cx);
+
 namespace JS {
 
 /**
@@ -6389,17 +6404,30 @@ SetBuildIdOp(JSContext* cx, BuildIdOp buildIdOp);
 /**
  * The WasmModule interface allows the embedding to hold a reference to the
  * underying C++ implementation of a JS WebAssembly.Module object for purposes
- * of (de)serialization off the object's JSRuntime's thread.
+ * of efficient postMessage() of WebAssembly.Module and (de)serialization off
+ * the object's JSRuntime's thread for IndexedDB.
+ *
+ * For postMessage() sharing:
+ *
+ * - GetWasmModule() is called when making a structured clone of payload
+ * containing a WebAssembly.Module object. The structured clone buffer holds a
+ * refcount of the JS::WasmModule until createObject() is called in the target
+ * agent's JSContext. The new WebAssembly.Module object continues to hold the
+ * JS::WasmModule and thus the final reference of a JS::WasmModule may be
+ * dropped from any thread and so the virtual destructor (and all internal
+ * methods of the C++ module) must be thread-safe.
+ *
+ * For (de)serialization:
  *
  * - Serialization starts when WebAssembly.Module is passed to the
  * structured-clone algorithm. JS::GetWasmModule is called on the JSRuntime
  * thread that initiated the structured clone to get the JS::WasmModule.
- * This interface is then taken to a background thread where serializedSize()
- * and serialize() are called to write the object to two files: a bytecode file
- * that always allows successful deserialization and a compiled-code file keyed
- * on cpu- and build-id that may become invalid if either of these change between
- * serialization and deserialization. After serialization, the reference is
- * dropped from the background thread.
+ * This interface is then taken to a background thread where the bytecode and
+ * compiled code are written into separate files: a bytecode file that always
+ * allows successful deserialization and a compiled-code file keyed on cpu- and
+ * build-id that may become invalid if either of these change between
+ * serialization and deserialization. After serialization, a reference is
+ * dropped from a separate thread so the virtual destructor must be thread-safe.
  *
  * - Deserialization starts when the structured clone algorithm encounters a
  * serialized WebAssembly.Module. On a background thread, the compiled-code file
@@ -6416,9 +6444,11 @@ struct WasmModule : js::AtomicRefCounted<WasmModule>
 {
     virtual ~WasmModule() {}
 
-    virtual void serializedSize(size_t* maybeBytecodeSize, size_t* maybeCompiledSize) const = 0;
-    virtual void serialize(uint8_t* maybeBytecodeBegin, size_t maybeBytecodeSize,
-                           uint8_t* maybeCompiledBegin, size_t maybeCompiledSize) const = 0;
+    virtual size_t bytecodeSerializedSize() const = 0;
+    virtual void bytecodeSerialize(uint8_t* bytecodeBegin, size_t bytecodeSize) const = 0;
+
+    virtual size_t compiledSerializedSize() const = 0;
+    virtual void compiledSerialize(uint8_t* compiledBegin, size_t compiledSize) const = 0;
 
     virtual JSObject* createObject(JSContext* cx) = 0;
 };

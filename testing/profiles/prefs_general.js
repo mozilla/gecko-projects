@@ -7,7 +7,7 @@ user_pref("browser.firstrun.show.uidiscovery", false);
 user_pref("browser.startup.page", 0); // use about:blank, not browser.startup.homepage
 user_pref("browser.search.suggest.timeout", 10000); // use a 10s suggestion timeout in tests
 user_pref("browser.ui.layout.tablet", 0); // force tablet UI off
-user_pref("browser.urlbar.speculativeConnection.enabled", false);
+user_pref("browser.urlbar.speculativeConnect.enabled", false);
 user_pref("dom.allow_scripts_to_close_windows", true);
 user_pref("dom.disable_open_during_load", false);
 user_pref("dom.experimental_forms", true); // on for testing
@@ -251,9 +251,15 @@ user_pref("browser.contentHandlers.types.5.uri", "http://test1.example.org/rss?u
 
 // We want to collect telemetry, but we don't want to send in the results.
 user_pref("toolkit.telemetry.server", "https://%(server)s/telemetry-dummy/");
-// Don't new-profile' ping on new profiles during tests, otherwise the testing framework
+// Don't send 'new-profile' ping on new profiles during tests, otherwise the testing framework
 // might wait on the pingsender to finish and slow down tests.
 user_pref("toolkit.telemetry.newProfilePing.enabled", false);
+// Don't send the 'shutdown' ping using the pingsender on the first session using
+// the 'pingsender' process. Valgrind marks the process as leaky (e.g. see bug 1364068
+// for the 'new-profile' ping) but does not provide enough information
+// to suppress the leak. Running locally does not reproduce the issue,
+// so disable this until we rewrite the pingsender in Rust (bug 1339035).
+user_pref("toolkit.telemetry.shutdownPingSender.enabledFirstSession", false);
 
 // A couple of preferences with default values to test that telemetry preference
 // watching is working.
@@ -298,6 +304,7 @@ user_pref("browser.aboutHomeSnippets.updateUrl", "nonexistent://test");
 // Use an empty list of sites to avoid fetching
 user_pref("browser.newtabpage.activity-stream.default.sites", "");
 user_pref("browser.newtabpage.activity-stream.telemetry", false);
+user_pref("browser.newtabpage.activity-stream.feeds.section.topstories", false);
 
 // Don't fetch directory tiles data from real servers
 user_pref("browser.newtabpage.directory.source", 'data:application/json,{"testing":1}');
@@ -314,7 +321,7 @@ user_pref("browser.search.countryCode", "US");
 user_pref("browser.search.geoSpecificDefaults", false);
 
 // Make sure Shield doesn't hit the network.
-user_pref("extensions.shield-recipe-client.api_url", "https://example.com/selfsupport-dummy/");
+user_pref("extensions.shield-recipe-client.api_url", "");
 
 user_pref("media.eme.enabled", true);
 
@@ -372,7 +379,7 @@ user_pref("media.openUnsupportedTypeWithExternalApp", false);
 user_pref("signon.rememberSignons", false);
 
 // Enable form autofill feature testing.
-user_pref("extensions.formautofill.experimental", true);
+user_pref("extensions.formautofill.available", "on");
 
 // Disable all recommended Marionette preferences for Gecko tests.
 // The prefs recommended by Marionette are typically geared towards

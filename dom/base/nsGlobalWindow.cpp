@@ -24,6 +24,7 @@
 #include "mozilla/dom/StorageEvent.h"
 #include "mozilla/dom/StorageEventBinding.h"
 #include "mozilla/dom/StorageNotifierService.h"
+#include "mozilla/dom/StorageUtils.h"
 #include "mozilla/dom/Timeout.h"
 #include "mozilla/dom/TimeoutHandler.h"
 #include "mozilla/dom/TimeoutManager.h"
@@ -313,6 +314,8 @@ int32_t gTimeoutCnt                                    = 0;
 
 #define DOM_TOUCH_LISTENER_ADDED "dom-touch-listener-added"
 
+#define MEMORY_PRESSURE_OBSERVER_TOPIC "memory-pressure"
+
 // The interval at which we execute idle callbacks
 static uint32_t gThrottledIdlePeriodLength;
 
@@ -498,7 +501,19 @@ public:
     }
   }
 
-  virtual nsIEventTarget*
+  nsIPrincipal*
+  GetPrincipal() const override
+  {
+    return mWindow ? mWindow->GetPrincipal() : nullptr;
+  }
+
+  bool
+  IsPrivateBrowsing() const override
+  {
+    return mWindow ? mWindow->IsPrivateBrowsing() : false;
+  }
+
+  nsIEventTarget*
   GetEventTarget() const override
   {
     return mWindow ? mWindow->EventTargetFor(TaskCategory::Other) : nullptr;
@@ -678,12 +693,6 @@ IdleRequestExecutor::GetName(nsACString& aName)
 {
     aName.AssignASCII("IdleRequestExecutor");
     return NS_OK;
-}
-
-NS_IMETHODIMP
-IdleRequestExecutor::SetName(const char* aName)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
@@ -1650,6 +1659,8 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
         // a strong reference.
         os->AddObserver(mObserver, NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
                         false);
+
+        os->AddObserver(mObserver, MEMORY_PRESSURE_OBSERVER_TOPIC, false);
       }
 
       Preferences::AddStrongObserver(mObserver, "intl.accept_languages");
@@ -1694,12 +1705,11 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
   }
 
   if (gDumpFile == nullptr) {
-    const nsAdoptingCString& fname =
-      Preferences::GetCString("browser.dom.window.dump.file");
+    nsAutoCString fname;
+    Preferences::GetCString("browser.dom.window.dump.file", fname);
     if (!fname.IsEmpty()) {
-      // if this fails to open, Dump() knows to just go to stdout
-      // on null.
-      gDumpFile = fopen(fname, "wb+");
+      // If this fails to open, Dump() knows to just go to stdout on null.
+      gDumpFile = fopen(fname.get(), "wb+");
     } else {
       gDumpFile = stdout;
     }
@@ -1955,6 +1965,7 @@ nsGlobalWindow::CleanUp()
     nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
     if (os) {
       os->RemoveObserver(mObserver, NS_IOSERVICE_OFFLINE_STATUS_TOPIC);
+      os->RemoveObserver(mObserver, MEMORY_PRESSURE_OBSERVER_TOPIC);
     }
 
     RefPtr<StorageNotifierService> sns = StorageNotifierService::GetOrCreate();
@@ -6929,7 +6940,8 @@ GetFullscreenTransitionDuration(bool aEnterFullscreen,
   const char* pref = aEnterFullscreen ?
     "full-screen-api.transition-duration.enter" :
     "full-screen-api.transition-duration.leave";
-  nsAdoptingCString prefValue = Preferences::GetCString(pref);
+  nsAutoCString prefValue;
+  Preferences::GetCString(pref, prefValue);
   if (!prefValue.IsEmpty()) {
     sscanf(prefValue.get(), "%hu%hu",
            &aDuration->mFadeIn, &aDuration->mFadeOut);
@@ -7802,9 +7814,10 @@ nsGlobalWindow::PromptOuter(const nsAString& aMessage,
     return;
   }
 
-  nsAdoptingString outValue(inoutValue);
+  nsString outValue;
+  outValue.Adopt(inoutValue);
 
-  if (ok && outValue) {
+  if (ok && inoutValue) {
     aReturn.Assign(outValue);
   }
 }
@@ -8034,8 +8047,8 @@ nsGlobalWindow::HomeOuter(nsIPrincipal& aSubjectPrincipal, ErrorResult& aError)
     return;
   }
 
-  nsAdoptingString homeURL =
-    Preferences::GetLocalizedString(PREF_BROWSER_STARTUP_HOMEPAGE);
+  nsAutoString homeURL;
+  Preferences::GetLocalizedString(PREF_BROWSER_STARTUP_HOMEPAGE, homeURL);
 
   if (homeURL.IsEmpty()) {
     // if all else fails, use this
@@ -9242,7 +9255,7 @@ nsGlobalWindow::PostMessageMozOuter(JSContext* aCx, JS::Handle<JS::Value> aMessa
     return;
   }
 
-  aError = Dispatch("PostMessageEvent", TaskCategory::Other, event.forget());
+  aError = Dispatch(TaskCategory::Other, event.forget());
 }
 
 void
@@ -9294,7 +9307,7 @@ public:
   PostCloseEvent(nsGlobalWindow* aWindow, bool aIndirect) {
     nsCOMPtr<nsIRunnable> ev = new nsCloseEvent(aWindow, aIndirect);
     nsresult rv =
-      aWindow->Dispatch("nsCloseEvent", TaskCategory::Other, ev.forget());
+      aWindow->Dispatch(TaskCategory::Other, ev.forget());
     if (NS_SUCCEEDED(rv))
       aWindow->MaybeForgiveSpamCount();
     return rv;
@@ -9825,8 +9838,7 @@ void
 nsGlobalWindow::NotifyWindowIDDestroyed(const char* aTopic)
 {
   nsCOMPtr<nsIRunnable> runnable = new WindowDestroyedEvent(this, mWindowID, aTopic);
-  nsresult rv =
-    Dispatch("WindowDestroyedEvent", TaskCategory::Other, runnable.forget());
+  nsresult rv = Dispatch(TaskCategory::Other, runnable.forget());
   if (NS_SUCCEEDED(rv)) {
     mNotifiedIDDestroyed = true;
   }
@@ -11094,7 +11106,7 @@ nsGlobalWindow::DispatchAsyncHashchange(nsIURI *aOldURI, nsIURI *aNewURI)
 
   nsCOMPtr<nsIRunnable> callback =
     new HashchangeCallback(oldWideSpec, newWideSpec, this);
-  return Dispatch("HashchangeCallback", TaskCategory::Other, callback.forget());
+  return Dispatch(TaskCategory::Other, callback.forget());
 }
 
 nsresult
@@ -11694,8 +11706,7 @@ nsGlobalWindow::NotifyIdleObserver(IdleObserverHolder* aIdleObserverHolder,
     new NotifyIdleObserverRunnable(aIdleObserverHolder->mIdleObserver,
                                    aIdleObserverHolder->mTimeInS,
                                    aCallOnidle, this);
-  if (NS_FAILED(Dispatch("NotifyIdleObserverRunnable", TaskCategory::Other,
-                         caller.forget()))) {
+  if (NS_FAILED(Dispatch(TaskCategory::Other, caller.forget()))) {
     NS_WARNING("Failed to dispatch thread for idle observer notification.");
   }
 }
@@ -12272,6 +12283,13 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
     return NS_OK;
   }
 
+  if (!nsCRT::strcmp(aTopic, MEMORY_PRESSURE_OBSERVER_TOPIC)) {
+    if (mPerformance) {
+      mPerformance->MemoryPressure();
+    }
+    return NS_OK;
+  }
+
   if (!nsCRT::strcmp(aTopic, OBSERVER_TOPIC_IDLE)) {
     mCurrentlyIdle = true;
     if (IsFrozen()) {
@@ -12372,14 +12390,10 @@ nsGlobalWindow::ObserveStorageNotification(StorageEvent* aEvent,
 {
   MOZ_ASSERT(aEvent);
 
-  // Enforce that the source storage area's private browsing state matches
-  // this window's state.  These flag checks and their maintenance independent
-  // from the principal's OriginAttributes matter because chrome docshells
-  // that are part of private browsing windows can be private browsing without
-  // having their OriginAttributes set (because they have the system
-  // principal).
-  bool isPrivateBrowsing = IsPrivateBrowsing();
-  if (isPrivateBrowsing != aPrivateBrowsing) {
+  // The private browsing check must be done here again because this window
+  // could have changed its state before the notification check and now. This
+  // happens in case this window did have a docShell at that time.
+  if (aPrivateBrowsing != IsPrivateBrowsing()) {
     return;
   }
 
@@ -12433,18 +12447,9 @@ nsGlobalWindow::ObserveStorageNotification(StorageEvent* aEvent,
 
   else {
     MOZ_ASSERT(!NS_strcmp(aStorageType, u"localStorage"));
-    nsIPrincipal* storagePrincipal = aEvent->GetPrincipal();
-    if (!storagePrincipal) {
-      return;
-    }
 
-    bool equals = false;
-    nsresult rv = storagePrincipal->Equals(principal, &equals);
-    NS_ENSURE_SUCCESS_VOID(rv);
-
-    if (!equals) {
-      return;
-    }
+    MOZ_DIAGNOSTIC_ASSERT(StorageUtils::PrincipalsEqual(aEvent->GetPrincipal(),
+                                                        principal));
 
     fireMozStorageChanged = mLocalStorage == aEvent->GetStorageArea();
 
@@ -12896,8 +12901,7 @@ public:
     void (nsGlobalWindow::*run)() = &nsGlobalWindow::UnblockScriptedClosing;
     nsCOMPtr<nsIRunnable> caller = NewRunnableMethod(
       "AutoUnblockScriptClosing::~AutoUnblockScriptClosing", mWin, run);
-    mWin->Dispatch("nsGlobalWindow::UnblockScriptedClosing",
-                   TaskCategory::Other, caller.forget());
+    mWin->Dispatch(TaskCategory::Other, caller.forget());
   }
 };
 
@@ -13775,13 +13779,13 @@ nsGlobalWindow::DisableTimeChangeNotifications()
 void
 nsGlobalWindow::AddSizeOfIncludingThis(nsWindowSizes* aWindowSizes) const
 {
-  aWindowSizes->mDOMOtherSize += aWindowSizes->mMallocSizeOf(this);
+  aWindowSizes->mDOMOtherSize += aWindowSizes->mState.mMallocSizeOf(this);
 
   if (IsInnerWindow()) {
     EventListenerManager* elm = GetExistingListenerManager();
     if (elm) {
       aWindowSizes->mDOMOtherSize +=
-        elm->SizeOfIncludingThis(aWindowSizes->mMallocSizeOf);
+        elm->SizeOfIncludingThis(aWindowSizes->mState.mMallocSizeOf);
       aWindowSizes->mDOMEventListenersCount +=
         elm->ListenerCount();
     }
@@ -13798,22 +13802,31 @@ nsGlobalWindow::AddSizeOfIncludingThis(nsWindowSizes* aWindowSizes) const
 
   if (mNavigator) {
     aWindowSizes->mDOMOtherSize +=
-      mNavigator->SizeOfIncludingThis(aWindowSizes->mMallocSizeOf);
+      mNavigator->SizeOfIncludingThis(aWindowSizes->mState.mMallocSizeOf);
   }
 
   aWindowSizes->mDOMEventTargetsSize +=
-    mEventTargetObjects.ShallowSizeOfExcludingThis(aWindowSizes->mMallocSizeOf);
+    mEventTargetObjects.ShallowSizeOfExcludingThis(
+      aWindowSizes->mState.mMallocSizeOf);
 
   for (auto iter = mEventTargetObjects.ConstIter(); !iter.Done(); iter.Next()) {
     DOMEventTargetHelper* et = iter.Get()->GetKey();
     if (nsCOMPtr<nsISizeOfEventTarget> iSizeOf = do_QueryObject(et)) {
       aWindowSizes->mDOMEventTargetsSize +=
-        iSizeOf->SizeOfEventTargetIncludingThis(aWindowSizes->mMallocSizeOf);
+        iSizeOf->SizeOfEventTargetIncludingThis(
+          aWindowSizes->mState.mMallocSizeOf);
     }
     if (EventListenerManager* elm = et->GetExistingListenerManager()) {
       aWindowSizes->mDOMEventListenersCount += elm->ListenerCount();
     }
     ++aWindowSizes->mDOMEventTargetsCount;
+  }
+
+  if (IsInnerWindow() && mPerformance) {
+    aWindowSizes->mDOMPerformanceUserEntries =
+      mPerformance->SizeOfUserEntries(aWindowSizes->mState.mMallocSizeOf);
+    aWindowSizes->mDOMPerformanceResourceEntries =
+      mPerformance->SizeOfResourceEntries(aWindowSizes->mState.mMallocSizeOf);
   }
 }
 
@@ -15400,15 +15413,14 @@ nsPIDOMWindow<T>::GetDocGroup() const
 }
 
 nsresult
-nsGlobalWindow::Dispatch(const char* aName,
-                         TaskCategory aCategory,
+nsGlobalWindow::Dispatch(TaskCategory aCategory,
                          already_AddRefed<nsIRunnable>&& aRunnable)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   if (GetDocGroup()) {
-    return GetDocGroup()->Dispatch(aName, aCategory, Move(aRunnable));
+    return GetDocGroup()->Dispatch(aCategory, Move(aRunnable));
   }
-  return DispatcherTrait::Dispatch(aName, aCategory, Move(aRunnable));
+  return DispatcherTrait::Dispatch(aCategory, Move(aRunnable));
 }
 
 nsISerialEventTarget*

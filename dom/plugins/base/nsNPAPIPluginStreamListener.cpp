@@ -36,7 +36,7 @@ nsNPAPIStreamWrapper::~nsNPAPIStreamWrapper()
 
 // nsNPAPIPluginStreamListener Methods
 NS_IMPL_ISUPPORTS(nsNPAPIPluginStreamListener,
-                  nsITimerCallback, nsIHTTPHeaderListener)
+                  nsITimerCallback, nsIHTTPHeaderListener, nsINamed)
 
 nsNPAPIPluginStreamListener::nsNPAPIPluginStreamListener(nsNPAPIPluginInstance* inst,
                                                          void* notifyData,
@@ -774,6 +774,13 @@ nsNPAPIPluginStreamListener::Notify(nsITimer *aTimer)
 }
 
 NS_IMETHODIMP
+nsNPAPIPluginStreamListener::GetName(nsACString& aName)
+{
+  aName.AssignLiteral("nsNPAPIPluginStreamListener");
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsNPAPIPluginStreamListener::StatusLine(const char* line)
 {
   mResponseHeaders.Append(line);
@@ -834,7 +841,6 @@ nsNPAPIPluginStreamListener::HandleRedirectNotification(nsIChannel *oldChannel, 
           NS_TRY_SAFE_CALL_VOID((*pluginFunctions->urlredirectnotify)(npp, spec.get(), static_cast<int32_t>(status), mNPStreamWrapper->mNPStream.notifyData), mInst,
                                 NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
 #else
-          MAIN_THREAD_JNI_REF_GUARD;
           (*pluginFunctions->urlredirectnotify)(npp, spec.get(), static_cast<int32_t>(status), mNPStreamWrapper->mNPStream.notifyData);
 #endif
           return true;

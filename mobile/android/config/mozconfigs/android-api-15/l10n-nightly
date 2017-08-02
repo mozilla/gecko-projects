@@ -1,13 +1,17 @@
+NO_NDK=1
+
 . "$topsrcdir/mobile/android/config/mozconfigs/common"
 
 # L10n
 ac_add_options --with-l10n-base=../../l10n-central
 
+. "$topsrcdir/build/mozconfig.no-compile"
+
 # Global options
 ac_add_options --disable-tests
 
 # Android
-ac_add_options --with-android-min-sdk=15
+ac_add_options --with-android-min-sdk=16
 ac_add_options --target=arm-linux-androideabi
 
 ac_add_options --enable-updater
@@ -26,6 +30,7 @@ mk_add_options AUTOCLOBBER=
 # Disable Keyfile Loading (and checks) since l10n doesn't need these keys
 # This overrides the settings in the common android mozconfig
 ac_add_options --without-mozilla-api-keyfile
+ac_add_options --without-google-api-keyfile
 ac_add_options --without-adjust-sdk-keyfile
 ac_add_options --without-leanplum-sdk-keyfile
 # Similarly explicitly disable install tracking for l10n, we'll inherit from en-US

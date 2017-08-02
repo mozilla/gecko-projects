@@ -416,7 +416,7 @@ HashCompleterRequest.prototype = {
     // with onStopRequest since we implement nsIStreamListener on the
     // channel.
     if (this._channel && this._channel.isPending()) {
-      log("cancelling request to " + this.gethashUrl + "\n");
+      log("cancelling request to " + this.gethashUrl + " (timeout)\n");
       Services.telemetry.getKeyedHistogramById("URLCLASSIFIER_COMPLETE_TIMEOUT2").
         add(this.telemetryProvider, 1);
       this._channel.cancel(Cr.NS_BINDING_ABORTED);
@@ -428,16 +428,16 @@ HashCompleterRequest.prototype = {
     let loadFlags = Ci.nsIChannel.INHIBIT_CACHING |
                     Ci.nsIChannel.LOAD_BYPASS_CACHE;
 
-    let actualGethashUrl = this.gethashUrl;
+    this.actualGethashUrl = this.gethashUrl;
     if (this.isV4) {
       // As per spec, we add the request payload to the gethash url.
-      actualGethashUrl += "&$req=" + this.buildRequestV4();
+      this.actualGethashUrl += "&$req=" + this.buildRequestV4();
     }
 
-    log("actualGethashUrl: " + actualGethashUrl);
+    log("actualGethashUrl: " + this.actualGethashUrl);
 
     let channel = NetUtil.newChannel({
-      uri: actualGethashUrl,
+      uri: this.actualGethashUrl,
       loadUsingSystemPrincipal: true
     });
     channel.loadFlags = loadFlags;
@@ -765,6 +765,11 @@ HashCompleterRequest.prototype = {
 
     Services.telemetry.getKeyedHistogramById("URLCLASSIFIER_COMPLETE_REMOTE_STATUS2").
       add(this.telemetryProvider, httpStatusToBucket(httpStatus));
+    if (httpStatus == 400) {
+      dump("Safe Browsing server returned a 400 during completion: request= " +
+           this.actualGethashUrl + "\n");
+    }
+
     Services.telemetry.getKeyedHistogramById("URLCLASSIFIER_COMPLETE_TIMEOUT2").
       add(this.telemetryProvider, 0);
 

@@ -21,6 +21,7 @@
 #include "gc/StoreBuffer.h"
 #include "gc/Tracer.h"
 #include "js/GCAnnotations.h"
+#include "js/UniquePtr.h"
 
 namespace js {
 
@@ -46,11 +47,17 @@ enum IncrementalProgress
     Finished
 };
 
-enum SweepActionList
+// Interface to a sweep action.
+//
+// Note that we don't need perfect forwarding for args here because the
+// types are not deduced but come ultimately from the type of a function pointer
+// passed to SweepFunc.
+template <typename... Args>
+struct SweepAction
 {
-    PerSweepGroupActionList,
-    PerZoneActionList,
-    SweepActionListCount
+    virtual ~SweepAction() {}
+    virtual IncrementalProgress run(Args... args) = 0;
+    virtual void assertFinished() const = 0;
 };
 
 class ChunkPool
@@ -214,7 +221,7 @@ class GCSchedulingTunables
         gcMaxNurseryBytes_(0),
         gcZoneAllocThresholdBase_(30 * 1024 * 1024),
         zoneAllocThresholdFactor_(0.9),
-        zoneAllocThresholdFactorAvoidInterrupt_(0.95),
+        zoneAllocThresholdFactorAvoidInterrupt_(0.9),
         zoneAllocDelayBytes_(1024 * 1024),
         dynamicHeapGrowthEnabled_(false),
         highFrequencyThresholdUsec_(1000 * 1000),
@@ -797,7 +804,7 @@ class GCRuntime
 
     bool isShrinkingGC() const { return invocationKind == GC_SHRINK; }
 
-    static bool initializeSweepActions();
+    bool initSweepActions();
 
     void setGrayRootsTracer(JSTraceDataOp traceOp, void* data);
     MOZ_MUST_USE bool addBlackRootsTracer(JSTraceDataOp traceOp, void* data);
@@ -843,11 +850,6 @@ class GCRuntime
     void setFullCompartmentChecks(bool enable);
 
     JS::Zone* getCurrentSweepGroup() { return currentSweepGroup; }
-    void setFoundBlackGrayEdges(TenuredCell& target) {
-        AutoEnterOOMUnsafeRegion oomUnsafe;
-        if (!foundBlackGrayEdges.ref().append(&target))
-            oomUnsafe.crash("OOM|small: failed to insert into foundBlackGrayEdges");
-    }
 
     uint64_t gcNumber() const { return number; }
 
@@ -1035,19 +1037,19 @@ class GCRuntime
     void endSweepingSweepGroup();
     IncrementalProgress performSweepActions(SliceBudget& sliceBudget,
                                             AutoLockForExclusiveAccess& lock);
-    static IncrementalProgress sweepTypeInformation(GCRuntime* gc, FreeOp* fop, Zone* zone,
-                                                    SliceBudget& budget, AllocKind kind);
-    static IncrementalProgress mergeSweptObjectArenas(GCRuntime* gc, FreeOp* fop, Zone* zone,
-                                                      SliceBudget& budget, AllocKind kind);
-    static IncrementalProgress sweepAtomsTable(GCRuntime* gc, SliceBudget& budget);
+    static IncrementalProgress sweepTypeInformation(GCRuntime* gc, FreeOp* fop, SliceBudget& budget,
+                                                    Zone* zone);
+    static IncrementalProgress mergeSweptObjectArenas(GCRuntime* gc, FreeOp* fop, SliceBudget& budget,
+                                                      Zone* zone);
+    static IncrementalProgress sweepAtomsTable(GCRuntime* gc, FreeOp* fop, SliceBudget& budget);
     void startSweepingAtomsTable();
     IncrementalProgress sweepAtomsTable(SliceBudget& budget);
-    static IncrementalProgress sweepWeakCaches(GCRuntime* gc, SliceBudget& budget);
+    static IncrementalProgress sweepWeakCaches(GCRuntime* gc, FreeOp* fop, SliceBudget& budget);
     IncrementalProgress sweepWeakCaches(SliceBudget& budget);
-    static IncrementalProgress finalizeAllocKind(GCRuntime* gc, FreeOp* fop, Zone* zone,
-                                                 SliceBudget& budget, AllocKind kind);
-    static IncrementalProgress sweepShapeTree(GCRuntime* gc, FreeOp* fop, Zone* zone,
-                                              SliceBudget& budget, AllocKind kind);
+    static IncrementalProgress finalizeAllocKind(GCRuntime* gc, FreeOp* fop, SliceBudget& budget,
+                                                 Zone* zone, AllocKind kind);
+    static IncrementalProgress sweepShapeTree(GCRuntime* gc, FreeOp* fop, SliceBudget& budget,
+                                              Zone* zone);
     void endSweepPhase(bool lastGC, AutoLockForExclusiveAccess& lock);
     bool allCCVisibleZonesWereCollected() const;
     void sweepZones(FreeOp* fop, ZoneGroup* group, bool lastGC);
@@ -1245,9 +1247,6 @@ class GCRuntime
     /* Whether observed type information is being released in the current GC. */
     ActiveThreadData<bool> releaseObservedTypes;
 
-    /* Whether any black->gray edges were found during marking. */
-    ActiveThreadData<BlackGrayEdgeVector> foundBlackGrayEdges;
-
     /* Singly linked list of zones to be swept in the background. */
     ActiveThreadOrGCTaskData<ZoneList> backgroundSweepZones;
 
@@ -1267,10 +1266,8 @@ class GCRuntime
 
     ActiveThreadData<JS::Zone*> sweepGroups;
     ActiveThreadOrGCTaskData<JS::Zone*> currentSweepGroup;
-    ActiveThreadData<SweepActionList> sweepActionList;
-    ActiveThreadData<size_t> sweepPhaseIndex;
+    ActiveThreadData<UniquePtr<SweepAction<GCRuntime*, FreeOp*, SliceBudget&>>> sweepActions;
     ActiveThreadOrGCTaskData<JS::Zone*> sweepZone;
-    ActiveThreadData<size_t> sweepActionIndex;
     ActiveThreadData<mozilla::Maybe<AtomSet::Enum>> maybeAtomsToSweep;
     ActiveThreadOrGCTaskData<JS::detail::WeakCacheBase*> sweepCache;
     ActiveThreadData<bool> abortSweepAfterCurrentGroup;

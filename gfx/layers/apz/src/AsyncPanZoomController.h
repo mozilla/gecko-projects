@@ -289,6 +289,16 @@ public:
   void HandleTouchVelocity(uint32_t aTimesampMs, float aSpeedY);
 
   /**
+   * Start autoscrolling this APZC, anchored at the provided location.
+   */
+  void StartAutoscroll(const ScreenPoint& aAnchorLocation);
+
+  /**
+   * Stop autoscrolling this APZC.
+   */
+  void StopAutoscroll();
+
+  /**
    * Populates the provided object (if non-null) with the scrollable guid of this apzc.
    */
   void GetGuid(ScrollableLayerGuid* aGuidOut) const;
@@ -532,9 +542,17 @@ protected:
   nsEventStatus OnCancelTap(const TapGestureInput& aEvent);
 
   /**
-   * Scrolls the viewport by an X,Y offset.
+   * Scroll the scroll frame by an X,Y offset.
+   * The resulting scroll offset is not clamped to the scrollable rect;
+   * the caller must ensure it stays within range.
    */
   void ScrollBy(const CSSPoint& aOffset);
+
+  /**
+   * Scroll the scroll frame by an X,Y offset, clamping the resulting
+   * scroll offset to the scrollable rect.
+   */
+  void ScrollByAndClamp(const CSSPoint& aOffset);
 
   /**
    * Scales the viewport by an amount (note that it multiplies this scale in to
@@ -850,11 +868,14 @@ private:
    * |GetCurrentAsyncTransform(eForCompositing)| and similar functions reflect
    * the async scroll offset and zoom stored in |mFrameMetrics|.
    *
+   * Returns true if the newly sampled value is different from the previously
+   * sampled value.
+   *
    * (This is only relevant when |gfxPrefs::APZFrameDelayEnabled() == true|.
    * Otherwise, GetCurrentAsyncTransform() always reflects what's stored in
    * |mFrameMetrics| immediately, without any delay.)
    */
-  void SampleCompositedAsyncTransform();
+  bool SampleCompositedAsyncTransform();
 
   /*
    * Helper functions to query the async scroll offset and zoom either
@@ -888,7 +909,8 @@ protected:
     SMOOTH_SCROLL,            /* Smooth scrolling to destination. Used by
                                  CSSOM-View smooth scroll-behavior */
     WHEEL_SCROLL,             /* Smooth scrolling to a destination for a wheel event. */
-    KEYBOARD_SCROLL           /* Smooth scrolling to a destination for a keyboard event. */
+    KEYBOARD_SCROLL,          /* Smooth scrolling to a destination for a keyboard event. */
+    AUTOSCROLL                /* Autoscroll animation. */
   };
 
   // This is in theory protected by |mMonitor|; that is, it should be held whenever
@@ -982,6 +1004,7 @@ public:
 
 private:
   friend class AndroidFlingAnimation;
+  friend class AutoscrollAnimation;
   friend class GenericFlingAnimation;
   friend class OverscrollAnimation;
   friend class SmoothScrollAnimation;
@@ -1213,6 +1236,14 @@ private:
    */
 public:
   /**
+   * Gets whether this APZC has performed async key scrolling.
+   */
+  bool TestHasAsyncKeyScrolled() const
+  {
+    return mTestHasAsyncKeyScrolled;
+  }
+
+  /**
    * Set an extra offset for testing async scrolling.
    */
   void SetTestAsyncScrollOffset(const CSSPoint& aPoint)
@@ -1249,8 +1280,9 @@ private:
   LayerToParentLayerScale mTestAsyncZoom;
   // Flag to track whether or not the APZ transform is not used. This
   // flag is recomputed for every composition frame.
-  bool mAsyncTransformAppliedToContent;
-
+  bool mAsyncTransformAppliedToContent : 1;
+  // Flag to track whether or not this APZC has ever async key scrolled.
+  bool mTestHasAsyncKeyScrolled : 1;
 
   /* ===================================================================
    * The functions and members in this section are used for checkerboard

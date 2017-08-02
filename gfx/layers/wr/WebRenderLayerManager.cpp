@@ -57,7 +57,7 @@ WebRenderLayerManager::Initialize(PCompositorBridgeChild* aCBChild,
 
   LayoutDeviceIntSize size = mWidget->GetClientSize();
   TextureFactoryIdentifier textureFactoryIdentifier;
-  uint32_t id_namespace;
+  wr::IdNamespace id_namespace;
   PWebRenderBridgeChild* bridge = aCBChild->SendPWebRenderBridgeConstructor(aLayersId,
                                                                             size,
                                                                             &textureFactoryIdentifier,
@@ -237,45 +237,50 @@ WebRenderLayerManager::CreateWebRenderCommandsFromDisplayList(nsDisplayList* aDi
 
     savedItems.AppendToTop(item);
 
+    bool forceNewLayerData = false;
+    size_t layerCountBeforeRecursing = mLayerScrollData.size();
     if (apzEnabled) {
+      // For some types of display items we want to force a new
+      // WebRenderLayerScrollData object, to ensure we preserve the APZ-relevant
+      // data that is in the display item.
+      forceNewLayerData = item->UpdateScrollData(nullptr, nullptr);
+
+      // Anytime the ASR changes we also want to force a new layer data because
+      // the stack of scroll metadata is going to be different for this
+      // display item than previously, so we can't squash the display items
+      // into the same "layer".
       const ActiveScrolledRoot* asr = item->GetActiveScrolledRoot();
-      // The ASR check here is just an optimization to avoid doing any unnecessary
-      // work in a common case, where adjacent items in the display list have
-      // the same ASR.
-      if (asr && asr != lastAsr) {
+      if (asr != lastAsr) {
         lastAsr = asr;
-        FrameMetrics::ViewID id = nsLayoutUtils::ViewIDForASR(asr);
-        if (mScrollMetadata.find(id) == mScrollMetadata.end()) {
-          // We pass null here for the display item clip because we don't need
-          // the clip to be in the ScrollMetadata here; we will push the clip
-          // information into the WR display list directly.
-          Maybe<ScrollMetadata> metadata = asr->mScrollableFrame->ComputeScrollMetadata(
-              nullptr, item->ReferenceFrame(),
-              ContainerLayerParameters(), nullptr);
-          MOZ_ASSERT(metadata);
-          mScrollMetadata[id] = *metadata;
-        }
+        forceNewLayerData = true;
       }
-      if (itemType == nsDisplayItem::TYPE_SCROLL_INFO_LAYER) {
-        // we should only really get one scroll info layer per scroll id, so
-        // it's not worth trying to get the ViewID and checking to see if we
-        // already have it in mScrollMetadata before doing the work of computing
-        // the metadata.
-        nsDisplayScrollInfoLayer* info = static_cast<nsDisplayScrollInfoLayer*>(item);
-        UniquePtr<ScrollMetadata> metadata = info->ComputeScrollMetadata(
-            nullptr, ContainerLayerParameters());
-        MOZ_ASSERT(metadata);
-        MOZ_ASSERT(metadata->GetMetrics().IsScrollInfoLayer());
-        FrameMetrics::ViewID id = metadata->GetMetrics().GetScrollId();
-        if (mScrollMetadata.find(id) == mScrollMetadata.end()) {
-          mScrollMetadata[id] = *metadata;
-        }
+
+      // If we're going to create a new layer data for this item, stash the
+      // ASR so that if we recurse into a sublist they will know where to stop
+      // walking up their ASR chain when building scroll metadata.
+      if (forceNewLayerData) {
+        mAsrStack.push_back(asr);
       }
     }
 
+    // Note: this call to CreateWebRenderCommands can recurse back into
+    // this function if the |item| is a wrapper for a sublist.
     if (!item->CreateWebRenderCommands(aBuilder, aSc, mParentCommands, this,
                                        aDisplayListBuilder)) {
       PushItemAsImage(item, aBuilder, aSc, aDisplayListBuilder);
+    }
+
+    if (apzEnabled && forceNewLayerData) {
+      // Pop the thing we pushed before the recursion, so the topmost item on
+      // the stack is enclosing display item's ASR (or the stack is empty)
+      mAsrStack.pop_back();
+      const ActiveScrolledRoot* stopAtAsr =
+          mAsrStack.empty() ? nullptr : mAsrStack.back();
+
+      int32_t descendants = mLayerScrollData.size() - layerCountBeforeRecursing;
+
+      mLayerScrollData.emplace_back();
+      mLayerScrollData.back().Initialize(mScrollData, item, descendants, stopAtAsr);
     }
   }
   aDisplayList->AppendToTop(&savedItems);
@@ -366,7 +371,13 @@ PaintItemByDrawTarget(nsDisplayItem* aItem,
   aDT->ClearRect(aImageRect.ToUnknownRect());
   RefPtr<gfxContext> context = gfxContext::CreateOrNull(aDT, aOffset.ToUnknownPoint());
   MOZ_ASSERT(context);
-  aItem->Paint(aDisplayListBuilder, context);
+
+  if (aItem->GetType() == nsDisplayItem::TYPE_MASK) {
+    context->SetMatrix(gfxMatrix::Translation(-aOffset.x, -aOffset.y));
+    static_cast<nsDisplayMask*>(aItem)->PaintMask(aDisplayListBuilder, context);
+  } else {
+    aItem->Paint(aDisplayListBuilder, context);
+  }
 
   if (gfxPrefs::WebRenderHighlightPaintedLayers()) {
     aDT->SetTransform(Matrix());
@@ -381,11 +392,12 @@ PaintItemByDrawTarget(nsDisplayItem* aItem,
   }
 }
 
-bool
-WebRenderLayerManager::PushItemAsImage(nsDisplayItem* aItem,
-                                       wr::DisplayListBuilder& aBuilder,
-                                       const StackingContextHelper& aSc,
-                                       nsDisplayListBuilder* aDisplayListBuilder)
+already_AddRefed<WebRenderFallbackData>
+WebRenderLayerManager::GenerateFallbackData(nsDisplayItem* aItem,
+                                            wr::DisplayListBuilder& aBuilder,
+                                            nsDisplayListBuilder* aDisplayListBuilder,
+                                            LayerRect& aImageRect,
+                                            LayerPoint& aOffset)
 {
   RefPtr<WebRenderFallbackData> fallbackData = CreateOrRecycleWebRenderUserData<WebRenderFallbackData>(aItem);
 
@@ -404,14 +416,13 @@ WebRenderLayerManager::PushItemAsImage(nsDisplayItem* aItem,
       PixelCastJustification::WebRenderHasUnitResolution);
 
   LayerIntSize imageSize = RoundedToInt(bounds.Size());
-  LayerRect imageRect;
-  imageRect.SizeTo(LayerSize(imageSize));
+  aImageRect = LayerRect(LayerPoint(0, 0), LayerSize(imageSize));
   if (imageSize.width == 0 || imageSize.height == 0) {
-    return true;
+    return nullptr;
   }
 
   nsPoint shift = clippedBounds.TopLeft() - itemBounds.TopLeft();
-  LayerPoint offset = ViewAs<LayerPixel>(
+  aOffset = ViewAs<LayerPixel>(
       LayoutDevicePoint::FromAppUnits(aItem->ToReferenceFrame() + shift, appUnitsPerDevPixel),
       PixelCastJustification::WebRenderHasUnitResolution);
 
@@ -437,13 +448,16 @@ WebRenderLayerManager::PushItemAsImage(nsDisplayItem* aItem,
     }
   }
 
-  if (!geometry || !invalidRegion.IsEmpty()) {
+  gfx::SurfaceFormat format = aItem->GetType() == nsDisplayItem::TYPE_MASK ?
+                                                    gfx::SurfaceFormat::A8 : gfx::SurfaceFormat::B8G8R8A8;
+  if (!geometry || !invalidRegion.IsEmpty() || fallbackData->IsInvalid()) {
     if (gfxPrefs::WebRenderBlobImages()) {
       RefPtr<gfx::DrawEventRecorderMemory> recorder = MakeAndAddRef<gfx::DrawEventRecorderMemory>();
+      // TODO: should use 'format' to replace gfx::SurfaceFormat::B8G8R8X8. Currently blob image doesn't support A8 format.
       RefPtr<gfx::DrawTarget> dummyDt =
         gfx::Factory::CreateDrawTarget(gfx::BackendType::SKIA, gfx::IntSize(1, 1), gfx::SurfaceFormat::B8G8R8X8);
       RefPtr<gfx::DrawTarget> dt = gfx::Factory::CreateRecordingDrawTarget(recorder, dummyDt, imageSize.ToUnknownSize());
-      PaintItemByDrawTarget(aItem, dt, imageRect, offset, aDisplayListBuilder);
+      PaintItemByDrawTarget(aItem, dt, aImageRect, aOffset, aDisplayListBuilder);
       recorder->Finish();
 
       wr::ByteBuffer bytes(recorder->mOutputStream.mLength, (uint8_t*)recorder->mOutputStream.mData);
@@ -456,13 +470,13 @@ WebRenderLayerManager::PushItemAsImage(nsDisplayItem* aItem,
       RefPtr<ImageContainer> imageContainer = LayerManager::CreateImageContainer();
 
       {
-        UpdateImageHelper helper(imageContainer, imageClient, imageSize.ToUnknownSize());
+        UpdateImageHelper helper(imageContainer, imageClient, imageSize.ToUnknownSize(), format);
         {
           RefPtr<gfx::DrawTarget> dt = helper.GetDrawTarget();
-          PaintItemByDrawTarget(aItem, dt, imageRect, offset, aDisplayListBuilder);
+          PaintItemByDrawTarget(aItem, dt, aImageRect, aOffset, aDisplayListBuilder);
         }
         if (!helper.UpdateImage()) {
-          return false;
+          return nullptr;
         }
       }
 
@@ -470,11 +484,12 @@ WebRenderLayerManager::PushItemAsImage(nsDisplayItem* aItem,
       // If not force update, fallbackData may reuse the original key because it
       // doesn't know UpdateImageHelper already updated the image container.
       if (!fallbackData->UpdateImageKey(imageContainer, true)) {
-        return false;
+        return nullptr;
       }
     }
 
     geometry = aItem->AllocateGeometry(aDisplayListBuilder);
+    fallbackData->SetInvalid(false);
   }
 
   // Update current bounds to fallback data
@@ -482,6 +497,45 @@ WebRenderLayerManager::PushItemAsImage(nsDisplayItem* aItem,
   fallbackData->SetBounds(clippedBounds);
 
   MOZ_ASSERT(fallbackData->GetKey());
+
+  return fallbackData.forget();
+}
+
+Maybe<wr::WrImageMask>
+WebRenderLayerManager::BuildWrMaskImage(nsDisplayItem* aItem,
+                                        wr::DisplayListBuilder& aBuilder,
+                                        const StackingContextHelper& aSc,
+                                        nsDisplayListBuilder* aDisplayListBuilder,
+                                        const LayerRect& aBounds)
+{
+  LayerRect imageRect;
+  LayerPoint offset;
+  RefPtr<WebRenderFallbackData> fallbackData = GenerateFallbackData(aItem, aBuilder, aDisplayListBuilder,
+                                                                    imageRect, offset);
+  if (!fallbackData) {
+    return Nothing();
+  }
+
+  wr::WrImageMask imageMask;
+  imageMask.image = fallbackData->GetKey().value();
+  imageMask.rect = aSc.ToRelativeLayoutRect(aBounds);
+  imageMask.repeat = false;
+  return Some(imageMask);
+}
+
+bool
+WebRenderLayerManager::PushItemAsImage(nsDisplayItem* aItem,
+                                       wr::DisplayListBuilder& aBuilder,
+                                       const StackingContextHelper& aSc,
+                                       nsDisplayListBuilder* aDisplayListBuilder)
+{
+  LayerRect imageRect;
+  LayerPoint offset;
+  RefPtr<WebRenderFallbackData> fallbackData = GenerateFallbackData(aItem, aBuilder, aDisplayListBuilder,
+                                                                    imageRect, offset);
+  if (!fallbackData) {
+    return false;
+  }
 
   wr::LayoutRect dest = aSc.ToRelativeLayoutRect(imageRect + offset);
   aBuilder.PushImage(dest,
@@ -537,20 +591,38 @@ WebRenderLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback
     if (aDisplayList && aDisplayListBuilder) {
       StackingContextHelper sc;
       mParentCommands.Clear();
-      mScrollMetadata.clear();
+      mScrollData = WebRenderScrollData();
+      MOZ_ASSERT(mLayerScrollData.empty());
 
       CreateWebRenderCommandsFromDisplayList(aDisplayList, aDisplayListBuilder, sc, builder);
 
       builder.Finalize(contentSize, mBuiltDisplayList);
+
+      // Make a "root" layer data that has everything else as descendants
+      mLayerScrollData.emplace_back();
+      mLayerScrollData.back().InitializeRoot(mLayerScrollData.size() - 1);
+      // Append the WebRenderLayerScrollData items into WebRenderScrollData
+      // in reverse order, from topmost to bottommost. This is in keeping with
+      // the semantics of WebRenderScrollData.
+      for (auto i = mLayerScrollData.crbegin(); i != mLayerScrollData.crend(); i++) {
+        mScrollData.AddLayerData(*i);
+      }
+      mLayerScrollData.clear();
     }
 
     builder.PushBuiltDisplayList(mBuiltDisplayList);
     WrBridge()->AddWebRenderParentCommands(mParentCommands);
   } else {
+    mScrollData = WebRenderScrollData();
+
     mRoot->StartPendingAnimations(mAnimationReadyTime);
     StackingContextHelper sc;
 
     WebRenderLayer::ToWebRenderLayer(mRoot)->RenderLayer(builder, sc);
+
+    // Need to do this after RenderLayer because the compositor animation IDs
+    // get populated during RenderLayer and we need those.
+    PopulateScrollData(mScrollData, mRoot.get());
   }
 
   mWidget->AddWindowOverlayWebRenderCommands(WrBridge(), builder);
@@ -565,19 +637,15 @@ WebRenderLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback
     return false;
   }
 
-  WebRenderScrollData scrollData;
   if (AsyncPanZoomEnabled()) {
-    scrollData.SetFocusTarget(mFocusTarget);
+    mScrollData.SetFocusTarget(mFocusTarget);
     mFocusTarget = FocusTarget();
 
     if (mIsFirstPaint) {
-      scrollData.SetIsFirstPaint();
+      mScrollData.SetIsFirstPaint();
       mIsFirstPaint = false;
     }
-    scrollData.SetPaintSequenceNumber(mPaintSequenceNumber);
-    if (mRoot) {
-      PopulateScrollData(scrollData, mRoot.get());
-    }
+    mScrollData.SetPaintSequenceNumber(mPaintSequenceNumber);
   }
 
   bool sync = mTarget != nullptr;
@@ -586,7 +654,7 @@ WebRenderLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback
   {
     AutoProfilerTracing
       tracing("Paint", sync ? "ForwardDPTransactionSync":"ForwardDPTransaction");
-    WrBridge()->DPEnd(builder, size.ToUnknownSize(), sync, mLatestTransactionId, scrollData);
+    WrBridge()->DPEnd(builder, size.ToUnknownSize(), sync, mLatestTransactionId, mScrollData);
   }
 
   MakeSnapshotIfRequired(size);

@@ -232,6 +232,12 @@ HttpChannelParent::CleanupBackgroundChannel()
     return;
   }
 
+  // The nsHttpChannel may have a reference to this parent, release it
+  // to avoid circular references.
+  if (mChannel) {
+    mChannel->SetWarningReporter(nullptr);
+  }
+
   if (!mPromise.IsEmpty()) {
     mRequest.DisconnectIfExists();
     mPromise.Reject(NS_ERROR_FAILURE, __func__);
@@ -804,6 +810,8 @@ HttpChannelParent::ConnectChannel(const uint32_t& registrarId, const bool& shoul
     Delete();
     return true;
   }
+
+  mChannel->SetWarningReporter(this);
 
   nsCOMPtr<nsINetworkInterceptController> controller;
   NS_QueryNotificationCallbacks(channel, controller);
@@ -1417,8 +1425,6 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
   chan->IsFromCache(&isFromCache);
   int32_t fetchCount = 0;
   chan->GetCacheTokenFetchCount(&fetchCount);
-  uint32_t lastFetchedTime = 0;
-  chan->GetCacheTokenLastFetched(&lastFetchedTime);
   uint32_t expirationTime = nsICacheEntry::NO_EXPIRATION_TIME;
   chan->GetCacheTokenExpirationTime(&expirationTime);
   nsCString cachedCharset;
@@ -1489,7 +1495,7 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
                           requestHead->Headers(),
                           isFromCache,
                           mCacheEntry ? true : false,
-                          fetchCount, lastFetchedTime, expirationTime,
+                          fetchCount, expirationTime,
                           cachedCharset, secInfoSerialization,
                           chan->GetSelfAddr(), chan->GetPeerAddr(),
                           redirectCount,
@@ -1545,6 +1551,8 @@ HttpChannelParent::OnStopRequest(nsIRequest *aRequest,
 
   mChannel->GetCacheReadStart(&timing.cacheReadStart);
   mChannel->GetCacheReadEnd(&timing.cacheReadEnd);
+
+  mChannel->SetWarningReporter(nullptr);
 
   // Either IPC channel is closed or background channel
   // is ready to send OnStopRequest.
@@ -2227,6 +2235,16 @@ HttpChannelParent::DoSendSetPriority(int16_t aValue)
   if (!mIPCClosed) {
     Unused << SendSetPriority(aValue);
   }
+}
+
+nsresult
+HttpChannelParent::LogBlockedCORSRequest(const nsAString& aMessage)
+{
+  if (mIPCClosed ||
+      NS_WARN_IF(!SendLogBlockedCORSRequest(nsString(aMessage)))) {
+    return NS_ERROR_UNEXPECTED;
+  }
+  return NS_OK;
 }
 
 } // namespace net

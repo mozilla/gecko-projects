@@ -67,6 +67,7 @@
 #include "mozilla/EventStates.h"
 #include "mozilla/InternalMutationEvent.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/SizeOfState.h"
 #include "mozilla/TextEditor.h"
 #include "mozilla/TextEvents.h"
 #include "nsNodeUtils.h"
@@ -488,11 +489,10 @@ Element::GetBindingURL(nsIDocument *aDocument, css::URLValue **aResult)
   // If we have a frame the frame has already loaded the binding.  And
   // otherwise, don't do anything else here unless we're dealing with
   // XUL or an HTML element that may have a plugin-related overlay
-  // (i.e. object, embed, or applet).
+  // (i.e. object or embed).
   bool isXULorPluginElement = (IsXULElement() ||
                                IsHTMLElement(nsGkAtoms::object) ||
-                               IsHTMLElement(nsGkAtoms::embed) ||
-                               IsHTMLElement(nsGkAtoms::applet));
+                               IsHTMLElement(nsGkAtoms::embed));
   nsIPresShell* shell = aDocument->GetShell();
   if (!shell || GetPrimaryFrame() || !isXULorPluginElement) {
     *aResult = nullptr;
@@ -4137,3 +4137,14 @@ Element::SetCustomElementData(CustomElementData* aData)
   MOZ_ASSERT(!slots->mCustomElementData, "Custom element data may not be changed once set.");
   slots->mCustomElementData = aData;
 }
+
+size_t
+Element::SizeOfExcludingThis(SizeOfState& aState) const
+{
+  size_t n = FragmentOrElement::SizeOfExcludingThis(aState);
+
+  // XXX: measure mServoData.
+
+  return n;
+}
+

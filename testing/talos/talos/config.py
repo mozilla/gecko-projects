@@ -99,6 +99,7 @@ DEFAULTS = dict(
         'take_over_this_computer': True,
         'browser.newtabpage.activity-stream.default.sites': '',
         'browser.newtabpage.activity-stream.telemetry': False,
+        'browser.newtabpage.activity-stream.feeds.section.topstories': False,
         'browser.newtabpage.directory.source':
             '${webserver}/directoryLinks.json',
         'browser.newtabpage.introShown': True,
@@ -438,6 +439,7 @@ def get_browser_config(config):
                 'error_filename': None,
                 'no_upload_results': False,
                 'stylo': False,
+                'stylothreads': 0,
                 }
     browser_config = dict(title=config['title'])
     browser_config.update(dict([(i, config[i]) for i in required]))

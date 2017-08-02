@@ -20,6 +20,9 @@
 #include "nsTArrayForwardDeclare.h"
 
 namespace mozilla {
+
+struct ActiveScrolledRoot;
+
 namespace layers {
 
 class Layer;
@@ -41,10 +44,17 @@ public:
   void Initialize(WebRenderScrollData& aOwner,
                   Layer* aLayer,
                   int32_t aDescendantCount);
+  void InitializeRoot(int32_t aDescendantCount);
+  void Initialize(WebRenderScrollData& aOwner,
+                  nsDisplayItem* aItem,
+                  int32_t aDescendantCount,
+                  const ActiveScrolledRoot* aStopAtAsr);
 
   int32_t GetDescendantCount() const;
   size_t GetScrollMetadataCount() const;
 
+  void AppendScrollMetadata(WebRenderScrollData& aOwner,
+                            const ScrollMetadata& aData);
   // Return the ScrollMetadata object that used to be on the original Layer
   // at the given index. Since we deduplicate the ScrollMetadata objects into
   // the array in the owning WebRenderScrollData object, we need to be passed
@@ -57,13 +67,23 @@ public:
   bool GetTransformIsPerspective() const { return mTransformIsPerspective; }
   EventRegions GetEventRegions() const { return mEventRegions; }
   const LayerIntRegion& GetVisibleRegion() const { return mVisibleRegion; }
+  void SetReferentId(uint64_t aReferentId) { mReferentId = Some(aReferentId); }
   Maybe<uint64_t> GetReferentId() const { return mReferentId; }
   EventRegionsOverride GetEventRegionsOverride() const { return mEventRegionsOverride; }
+
+  void SetScrollThumbData(const ScrollThumbData& aData) { mScrollThumbData = aData; }
   const ScrollThumbData& GetScrollThumbData() const { return mScrollThumbData; }
+  void SetScrollbarAnimationId(const uint64_t& aId) { mScrollbarAnimationId = aId; }
   const uint64_t& GetScrollbarAnimationId() const { return mScrollbarAnimationId; }
+  void SetScrollbarTargetContainerId(FrameMetrics::ViewID aId) { mScrollbarTargetContainerId = aId; }
   FrameMetrics::ViewID GetScrollbarTargetContainerId() const { return mScrollbarTargetContainerId; }
+  void SetIsScrollbarContainer() { mIsScrollbarContainer = true; }
   bool IsScrollbarContainer() const { return mIsScrollbarContainer; }
+
+  void SetFixedPositionScrollContainerId(FrameMetrics::ViewID aId) { mFixedPosScrollContainerId = aId; }
   FrameMetrics::ViewID GetFixedPositionScrollContainerId() const { return mFixedPosScrollContainerId; }
+
+  void Dump(const WebRenderScrollData& aOwner) const;
 
   friend struct IPC::ParamTraits<WebRenderLayerScrollData>;
 
@@ -112,6 +132,9 @@ public:
   // Add a new empty WebRenderLayerScrollData and return the index that can be
   // used to look it up via GetLayerData.
   size_t AddNewLayerData();
+  // Add the provided WebRenderLayerScrollData and return the index that can
+  // be used to look it up via GetLayerData.
+  size_t AddLayerData(const WebRenderLayerScrollData& aData);
 
   size_t GetLayerCount() const;
 
@@ -131,6 +154,8 @@ public:
   uint32_t GetPaintSequenceNumber() const;
 
   friend struct IPC::ParamTraits<WebRenderScrollData>;
+
+  void Dump() const;
 
 private:
   // Internal data structure used to maintain uniqueness of mScrollMetadatas.

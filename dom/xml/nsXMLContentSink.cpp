@@ -538,8 +538,7 @@ nsXMLContentSink::CloseElement(nsIContent* aContent)
         nodeInfo->NameAtom() == nsGkAtoms::textarea ||
         nodeInfo->NameAtom() == nsGkAtoms::video ||
         nodeInfo->NameAtom() == nsGkAtoms::audio ||
-        nodeInfo->NameAtom() == nsGkAtoms::object ||
-        nodeInfo->NameAtom() == nsGkAtoms::applet))
+        nodeInfo->NameAtom() == nsGkAtoms::object))
       || nodeInfo->NameAtom() == nsGkAtoms::title
       ) {
     aContent->DoneAddingChildren(HaveNotifiedForCurrentContent());
@@ -1098,8 +1097,7 @@ nsXMLContentSink::HandleEndElement(const char16_t *aName,
   if (content->IsSVGElement(nsGkAtoms::svg)) {
     FlushTags();
     nsCOMPtr<nsIRunnable> event = new nsHtml5SVGLoadDispatcher(content);
-    if (NS_FAILED(content->OwnerDoc()->Dispatch("nsHtml5SVGLoadDispatcher",
-                                                TaskCategory::Other,
+    if (NS_FAILED(content->OwnerDoc()->Dispatch(TaskCategory::Other,
                                                 event.forget()))) {
       NS_WARNING("failed to dispatch svg load dispatcher");
     }
@@ -1561,8 +1559,7 @@ nsXMLContentSink::IsMonolithicContainer(mozilla::dom::NodeInfo* aNodeInfo)
   return ((aNodeInfo->NamespaceID() == kNameSpaceID_XHTML &&
           (aNodeInfo->NameAtom() == nsGkAtoms::tr ||
            aNodeInfo->NameAtom() == nsGkAtoms::select ||
-           aNodeInfo->NameAtom() == nsGkAtoms::object ||
-           aNodeInfo->NameAtom() == nsGkAtoms::applet)) ||
+           aNodeInfo->NameAtom() == nsGkAtoms::object)) ||
           (aNodeInfo->NamespaceID() == kNameSpaceID_MathML &&
           (aNodeInfo->NameAtom() == nsGkAtoms::math))
           );

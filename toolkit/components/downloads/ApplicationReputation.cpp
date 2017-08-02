@@ -33,7 +33,6 @@
 #include "mozilla/LoadContext.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
-#include "mozilla/SizePrintfMacros.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/intl/LocaleService.h"
@@ -336,12 +335,12 @@ PendingDBLookup::LookupSpecInternal(const nsACString& aSpec)
 
   nsAutoCString tables;
   nsAutoCString allowlist;
-  Preferences::GetCString(PREF_DOWNLOAD_ALLOW_TABLE, &allowlist);
+  Preferences::GetCString(PREF_DOWNLOAD_ALLOW_TABLE, allowlist);
   if (!allowlist.IsEmpty()) {
     tables.Append(allowlist);
   }
   nsAutoCString blocklist;
-  Preferences::GetCString(PREF_DOWNLOAD_BLOCK_TABLE, &blocklist);
+  Preferences::GetCString(PREF_DOWNLOAD_BLOCK_TABLE, blocklist);
   if (!mAllowlistOnly && !blocklist.IsEmpty()) {
     tables.Append(',');
     tables.Append(blocklist);
@@ -357,7 +356,7 @@ PendingDBLookup::HandleEvent(const nsACString& tables)
   // 2) PendingLookup::LookupNext if the URL does not match the blocklist.
   // Blocklisting trumps allowlisting.
   nsAutoCString blockList;
-  Preferences::GetCString(PREF_DOWNLOAD_BLOCK_TABLE, &blockList);
+  Preferences::GetCString(PREF_DOWNLOAD_BLOCK_TABLE, blockList);
   if (!mAllowlistOnly && FindInReadable(blockList, tables)) {
     mPendingLookup->mBlocklistCount++;
     Accumulate(mozilla::Telemetry::APPLICATION_REPUTATION_LOCAL, BLOCK_LIST);
@@ -367,7 +366,7 @@ PendingDBLookup::HandleEvent(const nsACString& tables)
   }
 
   nsAutoCString allowList;
-  Preferences::GetCString(PREF_DOWNLOAD_ALLOW_TABLE, &allowList);
+  Preferences::GetCString(PREF_DOWNLOAD_ALLOW_TABLE, allowList);
   if (FindInReadable(allowList, tables)) {
     mPendingLookup->mAllowlistCount++;
     Accumulate(mozilla::Telemetry::APPLICATION_REPUTATION_LOCAL, ALLOW_LIST);
@@ -1256,8 +1255,8 @@ PendingLookup::SendRemoteQueryInternal()
     return NS_ERROR_NOT_AVAILABLE;
   }
   // If the remote lookup URL is empty or absent, bail.
-  nsCString serviceUrl;
-  NS_ENSURE_SUCCESS(Preferences::GetCString(PREF_SB_APP_REP_URL, &serviceUrl),
+  nsAutoCString serviceUrl;
+  NS_ENSURE_SUCCESS(Preferences::GetCString(PREF_SB_APP_REP_URL, serviceUrl),
                     NS_ERROR_NOT_AVAILABLE);
   if (serviceUrl.IsEmpty()) {
     LOG(("Remote lookup URL is empty [this = %p]", this));
@@ -1269,7 +1268,7 @@ PendingLookup::SendRemoteQueryInternal()
   {
     nsAutoCString table;
     NS_ENSURE_SUCCESS(Preferences::GetCString(PREF_DOWNLOAD_BLOCK_TABLE,
-                                              &table),
+                                              table),
                       NS_ERROR_NOT_AVAILABLE);
     if (table.IsEmpty()) {
       LOG(("Blocklist is empty [this = %p]", this));
@@ -1279,7 +1278,7 @@ PendingLookup::SendRemoteQueryInternal()
   {
     nsAutoCString table;
     NS_ENSURE_SUCCESS(Preferences::GetCString(PREF_DOWNLOAD_ALLOW_TABLE,
-                                              &table),
+                                              table),
                       NS_ERROR_NOT_AVAILABLE);
     if (table.IsEmpty()) {
       LOG(("Allowlist is empty [this = %p]", this));
@@ -1337,7 +1336,7 @@ PendingLookup::SendRemoteQueryInternal()
   if (!mRequest.SerializeToString(&serialized)) {
     return NS_ERROR_UNEXPECTED;
   }
-  LOG(("Serialized protocol buffer [this = %p]: (length=%" PRIuSIZE ") %s", this,
+  LOG(("Serialized protocol buffer [this = %p]: (length=%zu) %s", this,
        serialized.length(), serialized.c_str()));
 
   // Set the input stream to the serialized protocol buffer

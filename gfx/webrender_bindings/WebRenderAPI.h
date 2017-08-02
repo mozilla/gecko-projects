@@ -87,11 +87,21 @@ public:
                         const ImageDescriptor& aDescriptor,
                         ExternalImageId aExtID,
                         WrExternalImageBufferType aBufferType,
-                        uint8_t aChannelIndex);
+                        uint8_t aChannelIndex = 0);
 
   void UpdateImageBuffer(wr::ImageKey aKey,
                          const ImageDescriptor& aDescriptor,
                          Range<uint8_t> aBytes);
+
+  void UpdateBlobImage(wr::ImageKey aKey,
+                       const ImageDescriptor& aDescriptor,
+                       Range<uint8_t> aBytes);
+
+  void UpdateExternalImage(ImageKey aKey,
+                           const ImageDescriptor& aDescriptor,
+                           ExternalImageId aExtID,
+                           wr::WrExternalImageBufferType aBufferType,
+                           uint8_t aChannelIndex = 0);
 
   void DeleteImage(wr::ImageKey aKey);
 
@@ -100,6 +110,8 @@ public:
   void DeleteFont(wr::FontKey aKey);
 
   void SetProfilerEnabled(bool aEnabled);
+
+  void SetFrameStartTime(const TimeStamp& aTime);
 
   void RunOnRenderThread(UniquePtr<RendererEvent> aEvent);
   void Readback(gfx::IntSize aSize, uint8_t *aBuffer, uint32_t aBufferSize);

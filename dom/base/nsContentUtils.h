@@ -55,6 +55,7 @@ class imgIRequest;
 class imgLoader;
 class imgRequestProxy;
 class nsAutoScriptBlockerSuppressNodeRemoved;
+class nsCacheableFuncStringHTMLCollection;
 class nsHtml5StringParser;
 class nsIChannel;
 class nsIConsoleService;
@@ -382,14 +383,28 @@ public:
    *
    * Returns null if the nodes are disconnected.
    */
-  static nsINode* GetCommonAncestor(nsINode* aNode1, nsINode* aNode2);
+  static nsINode* GetCommonAncestor(nsINode* aNode1, nsINode* aNode2)
+  {
+    if (aNode1 == aNode2) {
+      return aNode1;
+    }
+
+    return GetCommonAncestorHelper(aNode1, aNode2);
+  }
 
   /**
    * Returns the common flattened tree ancestor, if any, for two given content
    * nodes.
    */
   static nsIContent* GetCommonFlattenedTreeAncestor(nsIContent* aContent1,
-                                                    nsIContent* aContent2);
+                                                    nsIContent* aContent2)
+  {
+    if (aContent1 == aContent2) {
+      return aContent1;
+    }
+
+    return GetCommonFlattenedTreeAncestorHelper(aContent1, aContent2);
+  }
 
   /**
    * Returns true if aNode1 is before aNode2 in the same connected
@@ -2083,10 +2098,11 @@ public:
   {
     NS_PRECONDITION(aRootNode, "Must have root node");
 
-    return NS_GetFuncStringHTMLCollection(aRootNode, MatchClassNames,
-                                          DestroyClassNameArray,
-                                          AllocClassMatchingInfo,
-                                          aClasses);
+    return GetFuncStringContentList<nsCacheableFuncStringHTMLCollection>(aRootNode,
+                                                                         MatchClassNames,
+                                                                         DestroyClassNameArray,
+                                                                         AllocClassMatchingInfo,
+                                                                         aClasses);
   }
 
   /**
@@ -3179,6 +3195,10 @@ private:
   static StorageAccess InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
                                                           nsPIDOMWindowInner* aWindow);
 
+  static nsINode* GetCommonAncestorHelper(nsINode* aNode1, nsINode* aNode2);
+  static nsIContent* GetCommonFlattenedTreeAncestorHelper(nsIContent* aContent1,
+                                                          nsIContent* aContent2);
+
   static nsIXPConnect *sXPConnect;
 
   static nsIScriptSecurityManager *sSecurityManager;
@@ -3231,7 +3251,7 @@ private:
   static bool sIsResourceTimingEnabled;
   static bool sIsUserTimingLoggingEnabled;
   static bool sIsFrameTimingPrefEnabled;
-  static bool sIsExperimentalAutocompleteEnabled;
+  static bool sIsFormAutofillAutocompleteEnabled;
   static bool sIsWebComponentsEnabled;
   static bool sIsCustomElementsEnabled;
   static bool sSendPerformanceTimingNotifications;

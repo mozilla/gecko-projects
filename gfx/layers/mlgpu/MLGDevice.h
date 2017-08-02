@@ -424,6 +424,18 @@ public:
     return mMaxConstantBufferBindSize;
   }
 
+  // Helper function for unbinding textures since SetPSTexture is overloaded.
+  void UnsetPSTexture(uint32_t aSlot) {
+    TextureSource* nullTexture = nullptr;
+    SetPSTexture(aSlot, nullTexture);
+  }
+
+  // Debugging helper function for dumping an MLGTexture to a file.
+  void WriteAsPNG(MLGTexture* aTexture, const char* aPath);
+
+  // Debugging helper function for copying a texture for later dumping to a file.
+  RefPtr<MLGTexture> CopyAndCreateReadbackTexture(MLGTexture* aTexture);
+
 protected:
   virtual ~MLGDevice();
 

@@ -63,6 +63,7 @@ private:
   TimeStamp mLastShouldQuit;
   // The timestamp of the last ending presentation
   TimeStamp mLastPresentationEnd;
+  TimeStamp mPresentationStart;
 
   ~VROculusSession();
   void Uninitialize(bool aUnloadLib);
@@ -202,6 +203,9 @@ private:
   void HandleHandTriggerPress(uint32_t aControllerIdx, uint32_t aButton, float aValue);
   void HandleTouchEvent(uint32_t aControllerIdx, uint32_t aButton,
                         uint64_t aTouchMask, uint64_t aTouched);
+  void GetControllerPoseState(uint32_t aHandIdx, dom::GamepadPoseState& aPoseState,
+                              bool aForceUpdate = false);
+
   RefPtr<impl::VRDisplayOculus> mDisplay;
   nsTArray<RefPtr<impl::VRControllerOculus>> mOculusController;
   RefPtr<impl::VROculusSession> mSession;

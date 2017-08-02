@@ -57,7 +57,7 @@
 #include "mozilla/layers/PLayerTransactionParent.h"
 #include "mozilla/layers/RemoteContentController.h"
 #include "mozilla/layers/WebRenderBridgeParent.h"
-#include "mozilla/layers/WebRenderCompositableHolder.h"
+#include "mozilla/layers/AsyncImagePipelineManager.h"
 #include "mozilla/layout/RenderFrameParent.h"
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "mozilla/media/MediaSystemResourceService.h" // for MediaSystemResourceService
@@ -1656,7 +1656,7 @@ CompositorBridgeParent::RecvAdoptChild(const uint64_t& child)
     if (mWrBridge && sIndirectLayerTrees[child].mWrBridge) {
       sIndirectLayerTrees[child].mWrBridge->UpdateWebRender(mWrBridge->CompositorScheduler(),
                                                             mWrBridge->GetWebRenderAPI(),
-                                                            mWrBridge->CompositableHolder(),
+                                                            mWrBridge->AsyncImageManager(),
                                                             GetAnimationStorage());
       // Pretend we composited, since parent CompositorBridgeParent was replaced.
       CrossProcessCompositorBridgeParent* cpcp = sIndirectLayerTrees[child].mCrossProcessParent;
@@ -1678,7 +1678,7 @@ PWebRenderBridgeParent*
 CompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipelineId,
                                                     const LayoutDeviceIntSize& aSize,
                                                     TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                                                    uint32_t* aIdNamespace)
+                                                    wr::IdNamespace* aIdNamespace)
 {
 #ifndef MOZ_BUILD_WEBRENDER
   // Extra guard since this in the parent process and we don't want a malicious
@@ -1695,13 +1695,18 @@ CompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipel
   RefPtr<widget::CompositorWidget> widget = mWidget;
   RefPtr<wr::WebRenderAPI> api = wr::WebRenderAPI::Create(
     gfxPrefs::WebRenderProfilerEnabled(), this, Move(widget), aSize);
-  RefPtr<WebRenderCompositableHolder> holder =
-    new WebRenderCompositableHolder(WebRenderBridgeParent::AllocIdNameSpace());
-  MOZ_ASSERT(api); // TODO have a fallback
+  RefPtr<AsyncImagePipelineManager> asyncMgr =
+    new AsyncImagePipelineManager(WebRenderBridgeParent::AllocIdNameSpace());
+  if (!api) {
+    mWrBridge = WebRenderBridgeParent::CreateDestroyed();
+    *aIdNamespace = mWrBridge->GetIdNamespace();
+    *aTextureFactoryIdentifier = TextureFactoryIdentifier(LayersBackend::LAYERS_NONE);
+    return mWrBridge;
+  }
   api->SetRootPipeline(aPipelineId);
   RefPtr<CompositorAnimationStorage> animStorage = GetAnimationStorage();
-  mWrBridge = new WebRenderBridgeParent(this, aPipelineId, mWidget, nullptr, Move(api), Move(holder), Move(animStorage));
-  *aIdNamespace = mWrBridge->GetIdNameSpace();
+  mWrBridge = new WebRenderBridgeParent(this, aPipelineId, mWidget, nullptr, Move(api), Move(asyncMgr), Move(animStorage));
+  *aIdNamespace = mWrBridge->GetIdNamespace();
 
   mCompositorScheduler = mWrBridge->CompositorScheduler();
   MOZ_ASSERT(mCompositorScheduler);
@@ -1950,14 +1955,14 @@ CompositorBridgeParent::NotifyDidCompositeToPipeline(const wr::PipelineId& aPipe
   if (!mWrBridge) {
     return;
   }
-  mWrBridge->CompositableHolder()->Update(aPipelineId, aEpoch);
+  mWrBridge->AsyncImageManager()->Update(aPipelineId, aEpoch);
 
   if (mPaused) {
     return;
   }
 
   if (mWrBridge->PipelineId() == aPipelineId) {
-    uint64_t transactionId = mWrBridge->FlushTransactionIdsForEpoch(aEpoch);
+    uint64_t transactionId = mWrBridge->FlushTransactionIdsForEpoch(aEpoch, aCompositeEnd);
     Unused << SendDidComposite(0, transactionId, aCompositeStart, aCompositeEnd);
 
     nsTArray<ImageCompositeNotificationInfo> notifications;
@@ -1974,7 +1979,7 @@ CompositorBridgeParent::NotifyDidCompositeToPipeline(const wr::PipelineId& aPipe
         lts->mWrBridge &&
         lts->mWrBridge->PipelineId() == aPipelineId) {
       CrossProcessCompositorBridgeParent* cpcp = lts->mCrossProcessParent;
-      uint64_t transactionId = lts->mWrBridge->FlushTransactionIdsForEpoch(aEpoch);
+      uint64_t transactionId = lts->mWrBridge->FlushTransactionIdsForEpoch(aEpoch, aCompositeEnd);
       Unused << cpcp->SendDidComposite(aLayersId, transactionId, aCompositeStart, aCompositeEnd);
     }
   });

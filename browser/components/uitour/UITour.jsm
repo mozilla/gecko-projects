@@ -11,7 +11,6 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/TelemetryController.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
 
@@ -1140,16 +1139,11 @@ this.UITour = {
       /* The "overlap" position anchors from the top-left but we want to centre highlights at their
          minimum size. */
       let highlightWindow = aChromeWindow;
-      let containerStyle = highlightWindow.getComputedStyle(highlighter.parentElement);
-      let paddingTopPx = 0 - parseFloat(containerStyle.paddingTop);
-      let paddingLeftPx = 0 - parseFloat(containerStyle.paddingLeft);
       let highlightStyle = highlightWindow.getComputedStyle(highlighter);
       let highlightHeightWithMin = Math.max(highlightHeight, parseFloat(highlightStyle.minHeight));
       let highlightWidthWithMin = Math.max(highlightWidth, parseFloat(highlightStyle.minWidth));
-      let offsetX = paddingTopPx
-                      - (Math.max(0, highlightWidthWithMin - targetRect.width) / 2);
-      let offsetY = paddingLeftPx
-                      - (Math.max(0, highlightHeightWithMin - targetRect.height) / 2);
+      let offsetX = -(Math.max(0, highlightWidthWithMin - targetRect.width) / 2);
+      let offsetY = -(Math.max(0, highlightHeightWithMin - targetRect.height) / 2);
       this._addAnnotationPanelMutationObserver(highlighter.parentElement);
       highlighter.parentElement.openPopup(highlightAnchor, "overlap", offsetX, offsetY);
     }
@@ -1546,9 +1540,9 @@ this.UITour = {
       case "sync":
         this.sendPageCallback(aMessageManager, aCallbackID, {
           setup: Services.prefs.prefHasUserValue("services.sync.username"),
-          desktopDevices: Preferences.get("services.sync.clients.devices.desktop", 0),
-          mobileDevices: Preferences.get("services.sync.clients.devices.mobile", 0),
-          totalDevices: Preferences.get("services.sync.numClients", 0),
+          desktopDevices: Services.prefs.getIntPref("services.sync.clients.devices.desktop", 0),
+          mobileDevices: Services.prefs.getIntPref("services.sync.clients.devices.mobile", 0),
+          totalDevices: Services.prefs.getIntPref("services.sync.numClients", 0),
         });
         break;
       case "canReset":

@@ -152,7 +152,7 @@ GetDeviceModelId() {
         deviceModelId = NS_LossyConvertUTF16toASCII(androidDevice);
     }
     nsAutoCString deviceString;
-    rv = Preferences::GetCString(UA_PREF("device_string"), &deviceString);
+    rv = Preferences::GetCString(UA_PREF("device_string"), deviceString);
     if (NS_SUCCEEDED(rv)) {
         deviceString.Trim(" ", true, true);
         deviceString.ReplaceSubstring(NS_LITERAL_CSTRING("%DEVICEID%"), deviceModelId);
@@ -523,9 +523,12 @@ nsHttpHandler::Init()
         obsService->AddObserver(this, "browser:purge-session-history", true);
         obsService->AddObserver(this, NS_NETWORK_LINK_TOPIC, true);
         obsService->AddObserver(this, "application-background", true);
-        obsService->AddObserver(this,
-                                "net:current-toplevel-outer-content-windowid",
-                                true);
+
+        if (!IsNeckoChild()) {
+            obsService->AddObserver(this,
+                                    "net:current-toplevel-outer-content-windowid",
+                                    true);
+        }
 
         if (mFastOpenSupported) {
             obsService->AddObserver(this, "captive-portal-login", true);
@@ -987,8 +990,8 @@ nsHttpHandler::InitUserAgentComponents()
     {
         // Add the `Mobile` or `Tablet` or `TV` token when running in the b2g
         // desktop simulator via preference.
-        nsCString deviceType;
-        nsresult rv = Preferences::GetCString("devtools.useragent.device_type", &deviceType);
+        nsAutoCString deviceType;
+        nsresult rv = Preferences::GetCString("devtools.useragent.device_type", deviceType);
         if (NS_SUCCEEDED(rv)) {
             mCompatDevice.Assign(deviceType);
         } else {
@@ -2000,8 +2003,8 @@ nsHttpHandler::SetAcceptLanguages()
 {
     mAcceptLanguagesIsDirty = false;
 
-    const nsAdoptingCString& acceptLanguages =
-        Preferences::GetLocalizedCString(INTL_ACCEPT_LANGUAGES);
+    nsAutoCString acceptLanguages;
+    Preferences::GetLocalizedCString(INTL_ACCEPT_LANGUAGES, acceptLanguages);
 
     nsAutoCString buf;
     nsresult rv = PrepareAcceptLanguages(acceptLanguages.get(), buf);
@@ -2377,19 +2380,12 @@ nsHttpHandler::Observe(nsISupports *subject,
         wrapper->GetData(&windowId);
         MOZ_ASSERT(windowId);
 
-        if (IsNeckoChild()) {
-            if (gNeckoChild) {
-                gNeckoChild->SendNotifyCurrentTopLevelOuterContentWindowId(
-                    windowId);
-            }
-        } else {
-            static uint64_t sCurrentTopLevelOuterContentWindowId = 0;
-            if (sCurrentTopLevelOuterContentWindowId != windowId) {
-                sCurrentTopLevelOuterContentWindowId = windowId;
-                if (mConnMgr) {
-                    mConnMgr->UpdateCurrentTopLevelOuterContentWindowId(
-                        sCurrentTopLevelOuterContentWindowId);
-                }
+        static uint64_t sCurrentTopLevelOuterContentWindowId = 0;
+        if (sCurrentTopLevelOuterContentWindowId != windowId) {
+            sCurrentTopLevelOuterContentWindowId = windowId;
+            if (mConnMgr) {
+                mConnMgr->UpdateCurrentTopLevelOuterContentWindowId(
+                    sCurrentTopLevelOuterContentWindowId);
             }
         }
     } else if (!strcmp(topic, "captive-portal-login") ||

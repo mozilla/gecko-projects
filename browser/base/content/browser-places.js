@@ -1509,10 +1509,14 @@ var BookmarkingUI = {
     };
 
     let updatePlacesContextMenu = (shouldHidePrefUI = false) => {
-      let prefEnabled = !shouldHidePrefUI && Services.prefs.getBoolPref(this.RECENTLY_BOOKMARKED_PREF);
       let showItem = document.getElementById("placesContext_showRecentlyBookmarked");
+      // On Mac the menuitem doesn't exist when we're in the Library window context.
+      if (!showItem) {
+        return;
+      }
       let hideItem = document.getElementById("placesContext_hideRecentlyBookmarked");
       let separator = document.getElementById("placesContext_recentlyBookmarkedSeparator");
+      let prefEnabled = !shouldHidePrefUI && Services.prefs.getBoolPref(this.RECENTLY_BOOKMARKED_PREF);
       showItem.hidden = shouldHidePrefUI || prefEnabled;
       hideItem.hidden = shouldHidePrefUI || !prefEnabled;
       separator.hidden = shouldHidePrefUI;
@@ -1806,7 +1810,9 @@ var BookmarkingUI = {
         this.button.setAttribute("label", this._starButtonOverflowedStarredLabel);
       }
     } else {
-      this.star.removeAttribute("animate");
+      if (AppConstants.MOZ_PHOTON_ANIMATIONS) {
+        this.star.removeAttribute("animate");
+      }
       this.broadcaster.removeAttribute("starred");
       this.broadcaster.setAttribute("buttontooltiptext", this._unstarredTooltip);
       this.broadcaster.setAttribute("tooltiptext", this._unstarredTooltip);

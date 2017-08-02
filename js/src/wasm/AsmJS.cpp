@@ -4762,8 +4762,8 @@ static bool
 CheckSignatureAgainstExisting(ModuleValidator& m, ParseNode* usepn, const Sig& sig, const Sig& existing)
 {
     if (sig.args().length() != existing.args().length()) {
-        return m.failf(usepn, "incompatible number of arguments (%" PRIuSIZE
-                       " here vs. %" PRIuSIZE " before)",
+        return m.failf(usepn, "incompatible number of arguments (%zu"
+                       " here vs. %zu before)",
                        sig.args().length(), existing.args().length());
     }
 
@@ -8494,9 +8494,10 @@ StoreAsmJSModuleInCache(AsmJSParser& parser, Module& module, JSContext* cx)
     if (!moduleChars.init(parser))
         return JS::AsmJSCache_InternalError;
 
-    size_t bytecodeSize, compiledSize;
-    module.serializedSize(&bytecodeSize, &compiledSize);
+    size_t bytecodeSize = module.bytecodeSerializedSize();
     MOZ_RELEASE_ASSERT(bytecodeSize == 0);
+
+    size_t compiledSize = module.compiledSerializedSize();
     MOZ_RELEASE_ASSERT(compiledSize <= UINT32_MAX);
 
     size_t serializedSize = sizeof(uint32_t) +
@@ -8524,7 +8525,7 @@ StoreAsmJSModuleInCache(AsmJSParser& parser, Module& module, JSContext* cx)
     // afterwards.)
     cursor = WriteScalar<uint32_t>(cursor, compiledSize);
 
-    module.serialize(/* bytecodeBegin = */ nullptr, /* bytecodeSize = */ 0, cursor, compiledSize);
+    module.compiledSerialize(cursor, compiledSize);
     cursor += compiledSize;
 
     cursor = moduleChars.serialize(cursor);
@@ -8664,7 +8665,7 @@ EstablishPreconditions(JSContext* cx, AsmJSParser& parser)
         return Warn(parser, JSMSG_USE_ASM_TYPE_FAIL, "Disabled by arrow function context");
 
     // Class constructors are also methods
-    if (parser.pc->isMethod())
+    if (parser.pc->isMethod() || parser.pc->isGetterOrSetter())
         return Warn(parser, JSMSG_USE_ASM_TYPE_FAIL, "Disabled by class constructor or method context");
 
     return true;

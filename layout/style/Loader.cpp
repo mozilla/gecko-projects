@@ -419,7 +419,7 @@ SheetLoadData::Run()
 }
 
 NS_IMETHODIMP
-SheetLoadData::OnDispatchedEvent(nsIThreadInternal* aThread)
+SheetLoadData::OnDispatchedEvent()
 {
   return NS_OK;
 }
@@ -2476,14 +2476,11 @@ Loader::PostLoadEvent(nsIURI* aURI,
   nsresult rv;
   RefPtr<SheetLoadData> runnable(evt);
   if (mDocument) {
-    rv = mDocument->Dispatch("SheetLoadData", TaskCategory::Other,
-                             runnable.forget());
+    rv = mDocument->Dispatch(TaskCategory::Other, runnable.forget());
   } else if (mDocGroup) {
-    rv = mDocGroup->Dispatch("SheetLoadData", TaskCategory::Other,
-                             runnable.forget());
+    rv = mDocGroup->Dispatch(TaskCategory::Other, runnable.forget());
   } else {
-    rv = SystemGroup::Dispatch("SheetLoadData", TaskCategory::Other,
-                               runnable.forget());
+    rv = SystemGroup::Dispatch(TaskCategory::Other, runnable.forget());
   }
 
   if (NS_FAILED(rv)) {

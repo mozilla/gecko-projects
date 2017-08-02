@@ -21,7 +21,6 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/ServoUtils.h"
-#include "mozilla/SizePrintfMacros.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/Telemetry.h"
 #include "nsAutoPtr.h"
@@ -1522,8 +1521,7 @@ FontFaceSet::DispatchCheckLoadingFinishedAfterDelay()
     NewRunnableMethod("dom::FontFaceSet::CheckLoadingFinishedAfterDelay",
                       this,
                       &FontFaceSet::CheckLoadingFinishedAfterDelay);
-  mDocument->Dispatch("FontFaceSet::CheckLoadingFinishedAfterDelay",
-                      TaskCategory::Other, checkTask.forget());
+  mDocument->Dispatch(TaskCategory::Other, checkTask.forget());
 }
 
 void

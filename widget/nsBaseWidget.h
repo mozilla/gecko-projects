@@ -366,6 +366,11 @@ public:
 
   virtual void StartAsyncScrollbarDrag(const AsyncDragMetrics& aDragMetrics) override;
 
+  virtual void StartAsyncAutoscroll(const ScreenPoint& aAnchorLocation,
+                                    const ScrollableLayerGuid& aGuid) override;
+
+  virtual void StopAsyncAutoscroll(const ScrollableLayerGuid& aGuid) override;
+
   /**
    * Use this when GetLayerManager() returns a BasicLayerManager
    * (nsBaseWidget::GetLayerManager() does). This sets up the widget's
@@ -520,9 +525,6 @@ protected:
     mozilla::widget::AutoObserverNotifier notifier(aObserver, "touchpoint");
     return NS_ERROR_UNEXPECTED;
   }
-
-  virtual nsresult NotifyIMEInternal(const IMENotification& aIMENotification)
-  { return NS_ERROR_NOT_IMPLEMENTED; }
 
   /**
    * GetPseudoIMEContext() returns pseudo IME context when TextEventDispatcher

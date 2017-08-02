@@ -438,14 +438,14 @@ WebRenderAPI::AddExternalImage(ImageKey key,
 }
 
 void
-WebRenderAPI::AddExternalImageBuffer(ImageKey key,
+WebRenderAPI::AddExternalImageBuffer(ImageKey aKey,
                                      const ImageDescriptor& aDescriptor,
                                      ExternalImageId aHandle)
 {
-  wr_api_add_external_image_buffer(mRenderApi,
-                                   key,
-                                   &aDescriptor,
-                                   aHandle);
+  auto channelIndex = 0;
+  AddExternalImage(aKey, aDescriptor, aHandle,
+                   wr::WrExternalImageBufferType::ExternalBuffer,
+                   channelIndex);
 }
 
 void
@@ -457,6 +457,32 @@ WebRenderAPI::UpdateImageBuffer(ImageKey aKey,
                       aKey,
                       &aDescriptor,
                       RangeToByteSlice(aBytes));
+}
+
+void
+WebRenderAPI::UpdateBlobImage(ImageKey aKey,
+                              const ImageDescriptor& aDescriptor,
+                              Range<uint8_t> aBytes)
+{
+  wr_api_update_blob_image(mRenderApi,
+                           aKey,
+                           &aDescriptor,
+                           RangeToByteSlice(aBytes));
+}
+
+void
+WebRenderAPI::UpdateExternalImage(ImageKey aKey,
+                                  const ImageDescriptor& aDescriptor,
+                                  ExternalImageId aExtID,
+                                  wr::WrExternalImageBufferType aBufferType,
+                                  uint8_t aChannelIndex)
+{
+  wr_api_update_external_image(mRenderApi,
+                               aKey,
+                               &aDescriptor,
+                               aExtID,
+                               aBufferType,
+                               aChannelIndex);
 }
 
 void
@@ -507,6 +533,39 @@ void
 WebRenderAPI::SetProfilerEnabled(bool aEnabled)
 {
   auto event = MakeUnique<EnableProfiler>(aEnabled);
+  RunOnRenderThread(Move(event));
+}
+
+class FrameStartTime : public RendererEvent
+{
+public:
+  explicit FrameStartTime(const TimeStamp& aTime)
+    : mTime(aTime)
+  {
+    MOZ_COUNT_CTOR(FrameStartTime);
+  }
+
+  ~FrameStartTime()
+  {
+    MOZ_COUNT_DTOR(FrameStartTime);
+  }
+
+  virtual void Run(RenderThread& aRenderThread, WindowId aWindowId) override
+  {
+    auto renderer = aRenderThread.GetRenderer(aWindowId);
+    if (renderer) {
+      renderer->SetFrameStartTime(mTime);
+    }
+  }
+
+private:
+  TimeStamp mTime;
+};
+
+void
+WebRenderAPI::SetFrameStartTime(const TimeStamp& aTime)
+{
+  auto event = MakeUnique<FrameStartTime>(aTime);
   RunOnRenderThread(Move(event));
 }
 

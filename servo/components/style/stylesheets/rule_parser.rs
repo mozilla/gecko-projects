@@ -5,6 +5,7 @@
 //! Parsing of the stylesheet contents.
 
 use {Namespace, Prefix};
+use computed_values::font_family::FamilyName;
 use counter_style::{parse_counter_style_body, parse_counter_style_name};
 use cssparser::{AtRuleParser, AtRuleType, Parser, QualifiedRuleParser, RuleListParser};
 use cssparser::{CowRcStr, SourceLocation, BasicParseError};
@@ -21,9 +22,10 @@ use shared_lock::{Locked, SharedRwLock};
 use str::starts_with_ignore_ascii_case;
 use style_traits::{StyleParseError, ParseError};
 use stylesheets::{CssRule, CssRules, CssRuleType, Origin, StylesheetLoader};
-use stylesheets::{DocumentRule, KeyframesRule, MediaRule, NamespaceRule, PageRule};
-use stylesheets::{StyleRule, SupportsRule, ViewportRule};
+use stylesheets::{DocumentRule, FontFeatureValuesRule, KeyframesRule, MediaRule};
+use stylesheets::{NamespaceRule, PageRule, StyleRule, SupportsRule, ViewportRule};
 use stylesheets::document_rule::DocumentCondition;
+use stylesheets::font_feature_values_rule::parse_family_name_list;
 use stylesheets::keyframes_rule::parse_keyframe_list;
 use stylesheets::stylesheet::Namespaces;
 use stylesheets::supports_rule::SupportsCondition;
@@ -45,6 +47,10 @@ pub struct TopLevelRuleParser<'a> {
     pub context: ParserContext<'a>,
     /// The current state of the parser.
     pub state: State,
+    /// Whether we have tried to parse was invalid due to being in the wrong
+    /// place (e.g. an @import rule was found while in the `Body` state). Reset
+    /// to `false` when `take_had_hierarchy_error` is called.
+    pub had_hierarchy_error: bool,
     /// The namespace map we use for parsing. Needs to start as `Some()`, and
     /// will be taken out after parsing namespace rules, and that reference will
     /// be moved to `ParserContext`.
@@ -69,6 +75,16 @@ impl<'b> TopLevelRuleParser<'b> {
     pub fn state(&self) -> State {
         self.state
     }
+
+    /// Returns whether we previously tried to parse a rule that was invalid
+    /// due to being in the wrong place (e.g. an @import rule was found after
+    /// a regular style rule).  The state of this flag is reset when this
+    /// function is called.
+    pub fn take_had_hierarchy_error(&mut self) -> bool {
+        let had_hierarchy_error = self.had_hierarchy_error;
+        self.had_hierarchy_error = false;
+        had_hierarchy_error
+    }
 }
 
 /// The current state of the parser.
@@ -82,9 +98,6 @@ pub enum State {
     Namespaces = 3,
     /// We're parsing the main body of the stylesheet.
     Body = 4,
-    /// We've found an invalid state (as, a namespace rule after style rules),
-    /// and the rest of the stylesheet should be ignored.
-    Invalid = 5,
 }
 
 #[derive(Clone, Debug)]
@@ -101,6 +114,8 @@ pub enum VendorPrefix {
 pub enum AtRulePrelude {
     /// A @font-face rule prelude.
     FontFace(SourceLocation),
+    /// A @font-feature-values rule prelude, with its FamilyName list.
+    FontFeatureValues(Vec<FamilyName>, SourceLocation),
     /// A @counter-style rule prelude, with its counter style name.
     CounterStyle(CustomIdent),
     /// A @media rule prelude, with its media queries.
@@ -149,8 +164,8 @@ impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
         match_ignore_ascii_case! { &*name,
             "import" => {
                 if self.state > State::Imports {
-                    self.state = State::Invalid;
                     // "@import must be before any rule but @charset"
+                    self.had_hierarchy_error = true;
                     return Err(StyleParseError::UnexpectedImportRule.into())
                 }
 
@@ -176,8 +191,8 @@ impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
             },
             "namespace" => {
                 if self.state > State::Namespaces {
-                    self.state = State::Invalid;
                     // "@namespace must be before any rule but @charset and @import"
+                    self.had_hierarchy_error = true;
                     return Err(StyleParseError::UnexpectedNamespaceRule.into())
                 }
                 self.state = State::Namespaces;
@@ -217,13 +232,11 @@ impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
             },
             // @charset is removed by rust-cssparser if it’s the first rule in the stylesheet
             // anything left is invalid.
-            "charset" => return Err(StyleParseError::UnexpectedCharsetRule.into()),
+            "charset" => {
+                self.had_hierarchy_error = true;
+                return Err(StyleParseError::UnexpectedCharsetRule.into())
+            }
             _ => {}
-        }
-        // Don't allow starting with an invalid state
-        if self.state > State::Body {
-            self.state = State::Invalid;
-            return Err(StyleParseError::UnspecifiedError.into());
         }
         self.state = State::Body;
 
@@ -345,6 +358,14 @@ impl<'a, 'b, 'i> AtRuleParser<'i> for NestedRuleParser<'a, 'b> {
             "font-face" => {
                 Ok(AtRuleType::WithBlock(AtRulePrelude::FontFace(location)))
             },
+            "font-feature-values" => {
+                if !cfg!(feature = "gecko") && !cfg!(feature = "testing") {
+                    // Support for this rule is not fully implemented in Servo yet.
+                    return Err(StyleParseError::UnsupportedAtRule(name.clone()).into())
+                }
+                let family_names = parse_family_name_list(self.context, input)?;
+                Ok(AtRuleType::WithBlock(AtRulePrelude::FontFeatureValues(family_names, location)))
+            },
             "counter-style" => {
                 if !cfg!(feature = "gecko") {
                     // Support for this rule is not fully implemented in Servo yet.
@@ -412,6 +433,11 @@ impl<'a, 'b, 'i> AtRuleParser<'i> for NestedRuleParser<'a, 'b> {
                 let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFace));
                 Ok(CssRule::FontFace(Arc::new(self.shared_lock.wrap(
                    parse_font_face_block(&context, input, location).into()))))
+            }
+            AtRulePrelude::FontFeatureValues(family_names, location) => {
+                let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFeatureValues));
+                Ok(CssRule::FontFeatureValues(Arc::new(self.shared_lock.wrap(
+                    FontFeatureValuesRule::parse(&context, input, family_names, location)))))
             }
             AtRulePrelude::CounterStyle(name) => {
                 let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::CounterStyle));

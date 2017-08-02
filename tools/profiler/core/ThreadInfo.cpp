@@ -22,6 +22,7 @@
 ThreadInfo::ThreadInfo(const char* aName, int aThreadId, bool aIsMainThread,
                        void* aStackTop)
   : mName(strdup(aName))
+  , mRegisterTime(TimeStamp::Now())
   , mThreadId(aThreadId)
   , mIsMainThread(aIsMainThread)
   , mRacyInfo(mozilla::WrapNotNull(new RacyThreadInfo()))
@@ -69,7 +70,7 @@ ThreadInfo::StopProfiling()
   mIsBeingProfiled = false;
 }
 
-void
+double
 ThreadInfo::StreamJSON(const ProfileBuffer& aBuffer,
                        SpliceableJSONWriter& aWriter,
                        const TimeStamp& aProcessStartTime, double aSinceTime)
@@ -79,13 +80,21 @@ ThreadInfo::StreamJSON(const ProfileBuffer& aBuffer,
     mUniqueStacks.emplace(mContext);
   }
 
+  double firstSampleTime = 0.0;
+
   aWriter.Start(SpliceableJSONWriter::SingleLineStyle);
   {
     StreamSamplesAndMarkers(Name(), ThreadId(), aBuffer, aWriter,
-                            aProcessStartTime, aSinceTime, mContext,
+                            aProcessStartTime,
+                            mRegisterTime, mUnregisterTime,
+                            aSinceTime, &firstSampleTime,
+                            mContext,
                             mSavedStreamedSamples.get(),
-                            mSavedStreamedMarkers.get(), *mUniqueStacks);
+                            mFirstSavedStreamedSampleTime,
+                            mSavedStreamedMarkers.get(),
+                            *mUniqueStacks);
     mSavedStreamedSamples.reset();
+    mFirstSavedStreamedSampleTime = 0.0;
     mSavedStreamedMarkers.reset();
 
     aWriter.StartObjectProperty("stackTable");
@@ -132,6 +141,8 @@ ThreadInfo::StreamJSON(const ProfileBuffer& aBuffer,
   aWriter.End();
 
   mUniqueStacks.reset();
+
+  return firstSampleTime;
 }
 
 void
@@ -140,9 +151,13 @@ StreamSamplesAndMarkers(const char* aName,
                         const ProfileBuffer& aBuffer,
                         SpliceableJSONWriter& aWriter,
                         const TimeStamp& aProcessStartTime,
+                        const TimeStamp& aRegisterTime,
+                        const TimeStamp& aUnregisterTime,
                         double aSinceTime,
+                        double* aOutFirstSampleTime,
                         JSContext* aContext,
                         char* aSavedStreamedSamples,
+                        double aFirstSavedStreamedSampleTime,
                         char* aSavedStreamedMarkers,
                         UniqueStacks& aUniqueStacks)
 {
@@ -152,6 +167,20 @@ StreamSamplesAndMarkers(const char* aName,
   aWriter.StringProperty("name", aName);
   aWriter.IntProperty("tid", static_cast<int64_t>(aThreadId));
   aWriter.IntProperty("pid", static_cast<int64_t>(getpid()));
+
+  if (aRegisterTime) {
+    aWriter.DoubleProperty("registerTime",
+      (aRegisterTime - aProcessStartTime).ToMilliseconds());
+  } else {
+    aWriter.NullProperty("registerTime");
+  }
+
+  if (aUnregisterTime) {
+    aWriter.DoubleProperty("unregisterTime",
+      (aUnregisterTime - aProcessStartTime).ToMilliseconds());
+  } else {
+    aWriter.NullProperty("unregisterTime");
+  }
 
   aWriter.StartObjectProperty("samples");
   {
@@ -173,8 +202,12 @@ StreamSamplesAndMarkers(const char* aName,
         MOZ_ASSERT(aSinceTime == 0);
         aWriter.Splice(aSavedStreamedSamples);
       }
-      aBuffer.StreamSamplesToJSON(aWriter, aThreadId, aSinceTime, aContext,
+      aBuffer.StreamSamplesToJSON(aWriter, aThreadId, aSinceTime,
+                                  aOutFirstSampleTime, aContext,
                                   aUniqueStacks);
+      if (aSavedStreamedSamples) {
+        *aOutFirstSampleTime = aFirstSavedStreamedSampleTime;
+      }
     }
     aWriter.EndArray();
   }
@@ -225,6 +258,7 @@ ThreadInfo::FlushSamplesAndMarkers(const TimeStamp& aProcessStartTime,
     b.StartBareList();
     {
       aBuffer.StreamSamplesToJSON(b, mThreadId, /* aSinceTime = */ 0,
+                                  &mFirstSavedStreamedSampleTime,
                                   mContext, *mUniqueStacks);
     }
     b.EndBareList();

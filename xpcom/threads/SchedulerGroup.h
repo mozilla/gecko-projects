@@ -81,7 +81,7 @@ public:
     MOZ_ASSERT(IsSafeToRun());
   }
 
-  class Runnable final : public mozilla::Runnable, public nsIRunnablePriority
+  class Runnable final : public mozilla::Runnable
   {
   public:
     Runnable(already_AddRefed<nsIRunnable>&& aRunnable,
@@ -95,7 +95,6 @@ public:
 
     NS_DECL_ISUPPORTS_INHERITED
     NS_DECL_NSIRUNNABLE
-    NS_DECL_NSIRUNNABLEPRIORITY
 
     NS_DECLARE_STATIC_IID_ACCESSOR(NS_SCHEDULERGROUPRUNNABLE_IID);
 
@@ -109,8 +108,7 @@ public:
 
   bool* GetValidAccessPtr() { return &mAccessValid; }
 
-  virtual nsresult Dispatch(const char* aName,
-                            TaskCategory aCategory,
+  virtual nsresult Dispatch(TaskCategory aCategory,
                             already_AddRefed<nsIRunnable>&& aRunnable);
 
   virtual nsISerialEventTarget* EventTargetFor(TaskCategory aCategory) const;
@@ -123,8 +121,7 @@ public:
   // requested type.
   virtual dom::TabGroup* AsTabGroup() { return nullptr; }
 
-  static nsresult UnlabeledDispatch(const char* aName,
-                                    TaskCategory aCategory,
+  static nsresult UnlabeledDispatch(TaskCategory aCategory,
                                     already_AddRefed<nsIRunnable>&& aRunnable);
 
   static void MarkVsyncReceived();
@@ -144,8 +141,7 @@ protected:
   // function returns |dispatcher|.
   static SchedulerGroup* FromEventTarget(nsIEventTarget* aEventTarget);
 
-  nsresult LabeledDispatch(const char* aName,
-                           TaskCategory aCategory,
+  nsresult LabeledDispatch(TaskCategory aCategory,
                            already_AddRefed<nsIRunnable>&& aRunnable);
 
   void CreateEventTargets(bool aNeedValidation);

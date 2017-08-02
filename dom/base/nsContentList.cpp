@@ -152,6 +152,67 @@ nsSimpleContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto
   return NodeListBinding::Wrap(cx, this, aGivenProto);
 }
 
+NS_IMPL_CYCLE_COLLECTION_INHERITED(nsEmptyContentList, nsBaseContentList, mRoot)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsEmptyContentList)
+NS_INTERFACE_MAP_END_INHERITING(nsBaseContentList)
+
+
+NS_IMPL_ADDREF_INHERITED(nsEmptyContentList, nsBaseContentList)
+NS_IMPL_RELEASE_INHERITED(nsEmptyContentList, nsBaseContentList)
+
+JSObject*
+nsEmptyContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
+{
+  return NodeListBinding::Wrap(cx, this, aGivenProto);
+}
+
+NS_IMETHODIMP
+nsEmptyContentList::GetLength(uint32_t* aLength)
+{
+  *aLength = 0;
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsEmptyContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
+{
+  *aReturn = nullptr;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsEmptyContentList::NamedItem(const nsAString& aName, nsIDOMNode** aReturn)
+{
+  *aReturn = nullptr;
+  return NS_OK;
+}
+
+mozilla::dom::Element*
+nsEmptyContentList::GetElementAt(uint32_t index)
+{
+  return nullptr;
+}
+
+mozilla::dom::Element*
+nsEmptyContentList::GetFirstNamedElement(const nsAString& aName, bool& aFound)
+{
+  aFound = false;
+  return nullptr;
+}
+
+void
+nsEmptyContentList::GetSupportedNames(nsTArray<nsString>& aNames)
+{
+}
+
+nsIContent*
+nsEmptyContentList::Item(uint32_t aIndex)
+{
+  return nullptr;
+}
+
 // Hashtable for storing nsContentLists
 static PLDHashTable* gContentListHashTable;
 
@@ -249,7 +310,7 @@ NS_GetContentList(nsINode* aRootNode,
 
 #ifdef DEBUG
 const nsCacheableFuncStringContentList::ContentListType
-  nsCacheableFuncStringNodeList::sType = nsCacheableFuncStringContentList::eNodeList;
+  nsCachableElementsByNameNodeList::sType = nsCacheableFuncStringContentList::eNodeList;
 const nsCacheableFuncStringContentList::ContentListType
   nsCacheableFuncStringHTMLCollection::sType = nsCacheableFuncStringContentList::eHTMLCollection;
 #endif
@@ -338,33 +399,21 @@ GetFuncStringContentList(nsINode* aRootNode,
   return list.forget();
 }
 
+// Explicit instantiations to avoid link errors
+template
 already_AddRefed<nsContentList>
-NS_GetFuncStringNodeList(nsINode* aRootNode,
-                         nsContentListMatchFunc aFunc,
-                         nsContentListDestroyFunc aDestroyFunc,
-                         nsFuncStringContentListDataAllocator aDataAllocator,
-                         const nsAString& aString)
-{
-  return GetFuncStringContentList<nsCacheableFuncStringNodeList>(aRootNode,
-                                                                 aFunc,
-                                                                 aDestroyFunc,
-                                                                 aDataAllocator,
-                                                                 aString);
-}
-
+GetFuncStringContentList<nsCachableElementsByNameNodeList>(nsINode* aRootNode,
+                                                           nsContentListMatchFunc aFunc,
+                                                           nsContentListDestroyFunc aDestroyFunc,
+                                                           nsFuncStringContentListDataAllocator aDataAllocator,
+                                                           const nsAString& aString);
+template
 already_AddRefed<nsContentList>
-NS_GetFuncStringHTMLCollection(nsINode* aRootNode,
-                               nsContentListMatchFunc aFunc,
-                               nsContentListDestroyFunc aDestroyFunc,
-                               nsFuncStringContentListDataAllocator aDataAllocator,
-                               const nsAString& aString)
-{
-  return GetFuncStringContentList<nsCacheableFuncStringHTMLCollection>(aRootNode,
-                                                                       aFunc,
-                                                                       aDestroyFunc,
-                                                                       aDataAllocator,
-                                                                       aString);
-}
+GetFuncStringContentList<nsCacheableFuncStringHTMLCollection>(nsINode* aRootNode,
+                                                              nsContentListMatchFunc aFunc,
+                                                              nsContentListDestroyFunc aDestroyFunc,
+                                                              nsFuncStringContentListDataAllocator aDataAllocator,
+                                                              const nsAString& aString);
 
 //-----------------------------------------------------
 // nsContentList implementation
@@ -1076,12 +1125,31 @@ nsContentList::AssertInSync()
 #endif
 
 //-----------------------------------------------------
-// nsCacheableFuncStringNodeList
+// nsCachableElementsByNameNodeList
 
 JSObject*
-nsCacheableFuncStringNodeList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
+nsCachableElementsByNameNodeList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
   return NodeListBinding::Wrap(cx, this, aGivenProto);
+}
+
+void
+nsCachableElementsByNameNodeList::AttributeChanged(nsIDocument* aDocument,
+                                                   Element* aElement,
+                                                   int32_t aNameSpaceID,
+                                                   nsIAtom* aAttribute,
+                                                   int32_t aModType,
+                                                   const nsAttrValue* aOldValue)
+{
+  // No need to rebuild the list if the changed attribute is not the name
+  // attribute.
+  if (aAttribute != nsGkAtoms::name) {
+    return;
+  }
+
+  nsCacheableFuncStringContentList::AttributeChanged(aDocument, aElement,
+                                                     aNameSpaceID, aAttribute,
+                                                     aModType, aOldValue);
 }
 
 //-----------------------------------------------------

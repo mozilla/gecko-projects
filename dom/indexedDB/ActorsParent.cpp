@@ -29,7 +29,6 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
-#include "mozilla/SizePrintfMacros.h"
 #include "mozilla/SnappyCompressOutputStream.h"
 #include "mozilla/SnappyUncompressInputStream.h"
 #include "mozilla/StaticPtr.h"
@@ -4421,7 +4420,7 @@ struct StorageOpenTraits<nsIFile*>
     nsString path;
     MOZ_ALWAYS_SUCCEEDS(aFile->GetPath(path));
 
-    aPath.AssignWithConversion(path);
+    LossyCopyUTF16toASCII(path, aPath);
   }
 #endif
 };
@@ -9884,15 +9883,13 @@ CheckWasmModule(FileHelper* aFileHelper,
     return NS_ERROR_FAILURE;
   }
 
-  size_t compiledSize;
-  module->serializedSize(nullptr, &compiledSize);
-
+  size_t compiledSize = module->compiledSerializedSize();
   UniquePtr<uint8_t[]> compiled(new (fallible) uint8_t[compiledSize]);
   if (NS_WARN_IF(!compiled)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  module->serialize(nullptr, 0, compiled.get(), compiledSize);
+  module->compiledSerialize(compiled.get(), compiledSize);
 
   nsCOMPtr<nsIInputStream> inputStream;
   rv = NS_NewByteInputStream(getter_AddRefs(inputStream),
@@ -22204,7 +22201,7 @@ OpenDatabaseOp::UpdateLocaleAwareIndex(mozIStorageConnection* aConnection,
   }
 
   nsString locale;
-  locale.AssignWithConversion(aLocale);
+  CopyASCIItoUTF16(aLocale, locale);
   rv = metaStmt->BindStringByName(NS_LITERAL_CSTRING("locale"), locale);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -29274,7 +29271,7 @@ PermissionRequestHelper::ActorDestroy(ActorDestroyReason aWhy)
 NS_IMPL_ISUPPORTS(DEBUGThreadSlower, nsIThreadObserver)
 
 NS_IMETHODIMP
-DEBUGThreadSlower::OnDispatchedEvent(nsIThreadInternal* /* aThread */)
+DEBUGThreadSlower::OnDispatchedEvent()
 {
   MOZ_CRASH("Should never be called!");
 }

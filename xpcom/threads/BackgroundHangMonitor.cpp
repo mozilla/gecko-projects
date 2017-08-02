@@ -634,8 +634,7 @@ BackgroundHangThread::ReportHang(PRIntervalTime aHangTime)
     // is not shut down until way too late, so we cannot do that. Instead, we
     // just detect that the dispatch failed and manually unleak the leaked
     // nsIRunnable in that situation.
-    nsresult rv = SystemGroup::Dispatch("NotifyBHRHangObservers",
-                                        TaskCategory::Other,
+    nsresult rv = SystemGroup::Dispatch(TaskCategory::Other,
                                         do_AddRef(runnable.get()));
     if (NS_FAILED(rv)) {
       // NOTE: We go through `get()` here in order to avoid the
@@ -746,10 +745,13 @@ BackgroundHangMonitor::IsDisabled() {
 
 bool
 BackgroundHangMonitor::DisableOnBeta() {
-  nsAdoptingCString clientID = Preferences::GetCString("toolkit.telemetry.cachedClientID");
+  nsAutoCString clientID;
+  nsresult rv =
+    Preferences::GetCString("toolkit.telemetry.cachedClientID", clientID);
   bool telemetryEnabled = Preferences::GetBool("toolkit.telemetry.enabled");
 
-  if (!telemetryEnabled || !clientID || BackgroundHangMonitor::ShouldDisableOnBeta(clientID)) {
+  if (!telemetryEnabled || NS_FAILED(rv) ||
+      BackgroundHangMonitor::ShouldDisableOnBeta(clientID)) {
     if (XRE_IsParentProcess()) {
       BackgroundHangMonitor::Shutdown();
     } else {

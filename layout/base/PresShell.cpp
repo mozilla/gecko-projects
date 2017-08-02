@@ -1164,12 +1164,6 @@ PresShell::Destroy()
 {
   // Do not add code before this line please!
   if (mHaveShutDown) {
-    // If we never got a root frame the root view could exist now still.
-    // In that case assert that it has no children and no frame.
-    MOZ_RELEASE_ASSERT(!mViewManager || !mViewManager->GetRootView() ||
-      (!mViewManager->GetRootView()->GetFrame() &&
-       !mViewManager->GetRootView()->GetFirstChild()));
-    MOZ_RELEASE_ASSERT(!mFrameConstructor || !mFrameConstructor->GetRootFrame());
     return;
   }
 
@@ -2028,8 +2022,7 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight, nscoord a
     } else {
       RefPtr<nsRunnableMethod<PresShell>> event = NewRunnableMethod(
         "PresShell::FireResizeEvent", this, &PresShell::FireResizeEvent);
-      nsresult rv = mDocument->Dispatch("PresShell::FireResizeEvent",
-                                        TaskCategory::Other,
+      nsresult rv = mDocument->Dispatch(TaskCategory::Other,
                                         do_AddRef(event));
       if (NS_SUCCEEDED(rv)) {
         mResizeEvent = Move(event);
@@ -6226,9 +6219,7 @@ PresShell::ScheduleApproximateFrameVisibilityUpdateNow()
                       this,
                       &PresShell::UpdateApproximateFrameVisibility);
   nsresult rv =
-    mDocument->Dispatch("PresShell::UpdateApproximateFrameVisibility",
-                        TaskCategory::Other,
-                        do_AddRef(event));
+    mDocument->Dispatch(TaskCategory::Other, do_AddRef(event));
 
   if (NS_SUCCEEDED(rv)) {
     mUpdateApproximateFrameVisibilityEvent = Move(event);

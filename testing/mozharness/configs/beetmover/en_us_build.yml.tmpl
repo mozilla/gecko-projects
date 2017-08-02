@@ -35,10 +35,10 @@ mapping:
       artifact: {{ artifact_base_url }}/target_info.txt
       s3_key: {{ s3_prefix }}win32_info.txt
     mar_tools_mar:
-      artifact: {{ artifact_base_url }}/mar.exe
+      artifact: {{ artifact_base_url }}/host/bin/mar.exe
       s3_key: {{ s3_prefix }}mar-tools/win32/mar.exe
     mar_tools_mbdiff:
-      artifact: {{ artifact_base_url }}/mbsdiff.exe
+      artifact: {{ artifact_base_url }}/host/bin/mbsdiff.exe
       s3_key: {{ s3_prefix }}mar-tools/win32/mbsdiff.exe
   {% endif %}
 
@@ -47,10 +47,10 @@ mapping:
       artifact: {{ artifact_base_url }}/target_info.txt
       s3_key: {{ s3_prefix }}win64_info.txt
     mar_tools_mar:
-      artifact: {{ artifact_base_url }}/mar.exe
+      artifact: {{ artifact_base_url }}/host/bin/mar.exe
       s3_key: {{ s3_prefix }}mar-tools/win64/mar.exe
     mar_tools_mbdiff:
-      artifact: {{ artifact_base_url }}/mbsdiff.exe
+      artifact: {{ artifact_base_url }}/host/bin/mbsdiff.exe
       s3_key: {{ s3_prefix }}mar-tools/win64/mbsdiff.exe
   {% endif %}
 
@@ -82,12 +82,6 @@ mapping:
     buildid_info:
       artifact: {{ artifact_base_url }}/target_info.txt
       s3_key: {{ s3_prefix }}macosx64_info.txt
-    mar_tools_mar:
-      artifact: {{ artifact_base_url }}/mar
-      s3_key: {{ s3_prefix }}mar-tools/macosx64/mar
-    mar_tools_mbdiff:
-      artifact: {{ artifact_base_url }}/mbsdiff
-      s3_key: {{ s3_prefix }}mar-tools/macosx64/mbsdiff
   {% endif %}
 
 {% endfor %}

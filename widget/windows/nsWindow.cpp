@@ -5210,6 +5210,11 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
 
     case WM_SETTINGCHANGE:
     {
+      if (wParam == SPI_SETKEYBOARDDELAY) {
+        // CaretBlinkTime is cached in nsLookAndFeel
+        NotifyThemeChanged();
+        break;
+      }
       if (lParam) {
         auto lParamString = reinterpret_cast<const wchar_t*>(lParam);
         if (!wcscmp(lParamString, L"ImmersiveColorSet")) {
@@ -8127,8 +8132,8 @@ nsWindow::GetMainWindowClass()
 {
   static const wchar_t* sMainWindowClass = nullptr;
   if (!sMainWindowClass) {
-    nsAdoptingString className =
-      Preferences::GetString("ui.window_class_override");
+    nsAutoString className;
+    Preferences::GetString("ui.window_class_override", className);
     if (!className.IsEmpty()) {
       sMainWindowClass = wcsdup(className.get());
     } else {

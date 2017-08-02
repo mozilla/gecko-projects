@@ -200,10 +200,10 @@ function promiseNewSearchEngine(basename) {
   });
 }
 
-let gPageActionPanel = document.getElementById("page-action-panel");
+let gPageActionPanel = document.getElementById("pageActionPanel");
 
 function promisePageActionPanelOpen() {
-  let button = document.getElementById("urlbar-page-action-button");
+  let button = document.getElementById("pageActionButton");
   let shownPromise = promisePageActionPanelShown();
   EventUtils.synthesizeMouseAtCenter(button, {});
   return shownPromise;
@@ -234,4 +234,15 @@ function promisePageActionViewShown() {
       }, 5000);
     }, { once: true });
   });
+}
+
+function promiseSpeculativeConnection(httpserver) {
+  return BrowserTestUtils.waitForCondition(() => {
+    if (httpserver) {
+      is(httpserver.connectionNumber, 1,
+         `${httpserver.connectionNumber} speculative connection has been setup.`)
+      return httpserver.connectionNumber == 1;
+    }
+    return false;
+  }, "Waiting for connection setup");
 }

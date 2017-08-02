@@ -20,6 +20,7 @@
 #include "nsWeakReference.h"
 #include "MainThreadUtils.h"
 #include "nsTArray.h"
+#include "nsINamed.h"
 #include "nsTObserverArray.h"
 #include "nsITimer.h"
 #include "nsPluginTags.h"
@@ -75,7 +76,8 @@ public:
 class nsPluginHost final : public nsIPluginHost,
                            public nsIObserver,
                            public nsITimerCallback,
-                           public nsSupportsWeakReference
+                           public nsSupportsWeakReference,
+                           public nsINamed
 {
   friend class nsPluginTag;
   friend class nsFakePluginTag;
@@ -90,6 +92,7 @@ public:
   NS_DECL_NSIPLUGINHOST
   NS_DECL_NSIOBSERVER
   NS_DECL_NSITIMERCALLBACK
+  NS_DECL_NSINAMED
 
   nsresult LoadPlugins();
   nsresult UnloadPlugins();
@@ -203,10 +206,7 @@ public:
     // Needed to whitelist for async init support
     eSpecialType_Test,
     // Informs some decisions about OOP and quirks
-    eSpecialType_Flash,
-    // Binds to the <applet> tag, has various special
-    // rules around opening channels, codebase, ...
-    eSpecialType_Java
+    eSpecialType_Flash
   };
   static SpecialType GetSpecialType(const nsACString & aMIMEType);
 

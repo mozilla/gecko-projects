@@ -39,7 +39,7 @@ class Compositor;
 class CompositorAnimationStorage;
 class CompositorBridgeParentBase;
 class CompositorVsyncScheduler;
-class WebRenderCompositableHolder;
+class AsyncImagePipelineManager;
 class WebRenderImageHost;
 
 class WebRenderBridgeParent final : public PWebRenderBridgeParent
@@ -52,15 +52,15 @@ public:
                         widget::CompositorWidget* aWidget,
                         CompositorVsyncScheduler* aScheduler,
                         RefPtr<wr::WebRenderAPI>&& aApi,
-                        RefPtr<WebRenderCompositableHolder>&& aHolder,
+                        RefPtr<AsyncImagePipelineManager>&& aImageMgr,
                         RefPtr<CompositorAnimationStorage>&& aAnimStorage);
 
-  static WebRenderBridgeParent* CeateDestroyed();
+  static WebRenderBridgeParent* CreateDestroyed();
 
   wr::PipelineId PipelineId() { return mPipelineId; }
   wr::WebRenderAPI* GetWebRenderAPI() { return mApi; }
   wr::Epoch WrEpoch() { return wr::NewEpoch(mWrEpoch); }
-  WebRenderCompositableHolder* CompositableHolder() { return mCompositableHolder; }
+  AsyncImagePipelineManager* AsyncImageManager() { return mAsyncImageManager; }
   CompositorVsyncScheduler* CompositorScheduler() { return mCompositorScheduler.get(); }
 
   mozilla::ipc::IPCResult RecvNewCompositable(const CompositableHandle& aHandle,
@@ -102,7 +102,8 @@ public:
                                     const wr::ByteBuffer& dl,
                                     const wr::BuiltDisplayListDescriptor& dlDesc,
                                     const WebRenderScrollData& aScrollData,
-                                    const uint32_t& aIdNameSpace) override;
+                                    const wr::IdNamespace& aIdNamespace,
+                                    const TimeStamp& aFwdTime) override;
   mozilla::ipc::IPCResult RecvDPSyncEnd(const gfx::IntSize& aSize,
                                         InfallibleTArray<WebRenderParentCommand>&& aCommands,
                                         InfallibleTArray<OpDestroy>&& aToDestroy,
@@ -112,7 +113,8 @@ public:
                                         const wr::ByteBuffer& dl,
                                         const wr::BuiltDisplayListDescriptor& dlDesc,
                                         const WebRenderScrollData& aScrollData,
-                                        const uint32_t& aIdNameSpace) override;
+                                        const wr::IdNamespace& aIdNamespace,
+                                        const TimeStamp& aFwdTime) override;
   mozilla::ipc::IPCResult RecvParentCommands(nsTArray<WebRenderParentCommand>&& commands) override;
   mozilla::ipc::IPCResult RecvDPGetSnapshot(PTextureParent* aTexture) override;
 
@@ -167,35 +169,25 @@ public:
   void SendPendingAsyncMessages() override;
   void SetAboutToSendAsyncMessages() override;
 
-  void HoldPendingTransactionId(uint32_t aWrEpoch, uint64_t aTransactionId);
+  void HoldPendingTransactionId(uint32_t aWrEpoch, uint64_t aTransactionId, const TimeStamp& aFwdTime);
   uint64_t LastPendingTransactionId();
   uint64_t FlushPendingTransactionIds();
-  uint64_t FlushTransactionIdsForEpoch(const wr::Epoch& aEpoch);
+  uint64_t FlushTransactionIdsForEpoch(const wr::Epoch& aEpoch, const TimeStamp& aEndTime);
 
   TextureFactoryIdentifier GetTextureFactoryIdentifier();
 
-  void AppendImageCompositeNotification(const ImageCompositeNotificationInfo& aNotification)
-  {
-    MOZ_ASSERT(mWidget);
-    mImageCompositeNotifications.AppendElement(aNotification);
-  }
+  void ExtractImageCompositeNotifications(nsTArray<ImageCompositeNotificationInfo>* aNotifications);
 
-  void ExtractImageCompositeNotifications(nsTArray<ImageCompositeNotificationInfo>* aNotifications)
+  wr::IdNamespace GetIdNamespace()
   {
-    MOZ_ASSERT(mWidget);
-    aNotifications->AppendElements(Move(mImageCompositeNotifications));
-  }
-
-  uint32_t GetIdNameSpace()
-  {
-    return mIdNameSpace;
+    return mIdNamespace;
   }
 
   void UpdateAPZ();
   const WebRenderScrollData& GetScrollData() const;
 
-  static uint32_t AllocIdNameSpace() {
-    return ++sIdNameSpace;
+  static wr::IdNamespace AllocIdNameSpace() {
+    return wr::IdNamespace { ++sIdNameSpace };
   }
 
   void FlushRendering(bool aIsSync);
@@ -204,7 +196,7 @@ public:
 
   void UpdateWebRender(CompositorVsyncScheduler* aScheduler,
                        wr::WebRenderAPI* aApi,
-                       WebRenderCompositableHolder* aHolder,
+                       AsyncImagePipelineManager* aImageMgr,
                        CompositorAnimationStorage* aAnimStorage);
 
 private:
@@ -220,7 +212,7 @@ private:
                                 const wr::LayoutSize& aContentSize,
                                 const wr::ByteBuffer& dl,
                                 const wr::BuiltDisplayListDescriptor& dlDesc,
-                                const uint32_t& aIdNameSpace);
+                                const wr::IdNamespace& aIdNamespace);
   void ClearResources();
   uint64_t GetChildLayerObserverEpoch() const { return mChildLayerObserverEpoch; }
   bool ShouldParentObserveEpoch();
@@ -233,7 +225,8 @@ private:
                    const wr::ByteBuffer& dl,
                    const wr::BuiltDisplayListDescriptor& dlDesc,
                    const WebRenderScrollData& aScrollData,
-                   const uint32_t& aIdNameSpace);
+                   const wr::IdNamespace& aIdNamespace,
+                   const TimeStamp& aFwdTime);
   mozilla::ipc::IPCResult HandleShutdown();
 
   void AdvanceAnimations();
@@ -256,19 +249,21 @@ private:
 
 private:
   struct PendingTransactionId {
-    PendingTransactionId(wr::Epoch aEpoch, uint64_t aId)
+    PendingTransactionId(wr::Epoch aEpoch, uint64_t aId, const TimeStamp& aFwdTime)
       : mEpoch(aEpoch)
       , mId(aId)
+      , mFwdTime(aFwdTime)
     {}
     wr::Epoch mEpoch;
     uint64_t mId;
+    TimeStamp mFwdTime;
   };
 
   CompositorBridgeParentBase* MOZ_NON_OWNING_REF mCompositorBridge;
   wr::PipelineId mPipelineId;
   RefPtr<widget::CompositorWidget> mWidget;
   RefPtr<wr::WebRenderAPI> mApi;
-  RefPtr<WebRenderCompositableHolder> mCompositableHolder;
+  RefPtr<AsyncImagePipelineManager> mAsyncImageManager;
   RefPtr<CompositorVsyncScheduler> mCompositorScheduler;
   RefPtr<CompositorAnimationStorage> mAnimStorage;
   std::vector<wr::ImageKey> mKeysToDelete;
@@ -281,7 +276,6 @@ private:
   std::unordered_set<uint64_t> mActiveAnimations;
   nsDataHashtable<nsUint64HashKey, RefPtr<WebRenderImageHost>> mAsyncCompositables;
   nsDataHashtable<nsUint64HashKey, RefPtr<WebRenderImageHost>> mExternalImageIds;
-  nsTArray<ImageCompositeNotificationInfo> mImageCompositeNotifications;
 
   TimeStamp mPreviousFrameTimeStamp;
   // These fields keep track of the latest layer observer epoch values in the child and the
@@ -293,7 +287,7 @@ private:
 
   std::queue<PendingTransactionId> mPendingTransactionIds;
   uint32_t mWrEpoch;
-  uint32_t mIdNameSpace;
+  wr::IdNamespace mIdNamespace;
 
   bool mPaused;
   bool mDestroyed;

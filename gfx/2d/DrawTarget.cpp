@@ -175,19 +175,6 @@ ComputeLinearRGBLuminanceMask(const uint8_t *aSourceData,
   }
 }
 
-already_AddRefed<DrawTargetCapture>
-DrawTarget::CreateCaptureDT(const IntSize& aSize)
-{
-  RefPtr<DrawTargetCaptureImpl> dt = new DrawTargetCaptureImpl();
-
-  if (!dt->Init(aSize, this)) {
-    gfxWarning() << "Failed to initialize Capture DrawTarget!";
-    return nullptr;
-  }
-
-  return dt.forget();
-}
-
 void
 DrawTarget::DrawCapturedDT(DrawTargetCapture *aCaptureDT,
                            const Matrix& aTransform)
@@ -231,9 +218,17 @@ already_AddRefed<SourceSurface>
 DrawTarget::IntoLuminanceSource(LuminanceType aMaskType, float aOpacity)
 {
   RefPtr<SourceSurface> surface = Snapshot();
+  if (!surface) {
+    return nullptr;
+  }
+
   IntSize size = surface->GetSize();
 
   RefPtr<DataSourceSurface> maskSurface = surface->GetDataSurface();
+  if (!maskSurface) {
+    return nullptr;
+  }
+
   DataSourceSurface::MappedSurface map;
   if (!maskSurface->Map(DataSourceSurface::MapType::READ, &map)) {
     return nullptr;

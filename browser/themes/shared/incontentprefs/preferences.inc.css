@@ -5,8 +5,17 @@
 %endif
 @namespace html "http://www.w3.org/1999/xhtml";
 
-#mainPrefPane {
+.main-content {
+  padding-top: 0;
+}
+
+.pane-container {
+  display: block;
   max-width: 800px;
+}
+
+#mainPrefPane {
+  width: 100%;
   padding: 0;
   font: message-box;
   font-size: 1.25rem;
@@ -550,6 +559,7 @@ groupbox {
 }
 
 .fxaMobilePromo {
+  line-height: 28px;
   margin-bottom: 20px;
   margin-top: 25px;
 }
@@ -565,21 +575,18 @@ groupbox {
 }
 
 .androidLink {
-  background-image: url("chrome://browser/skin/fxa/android.png");
+  list-style-image: url("chrome://browser/skin/fxa/android.png");
 }
 
 .iOSLink {
-  background-image: url("chrome://browser/skin/fxa/ios.png");
+  list-style-image: url("chrome://browser/skin/fxa/ios.png");
 }
 
 .androidLink,
 .iOSLink {
-  margin: 0 0 0 2px;
-  padding-left: 28px;
-  padding-top: 6px;
+  vertical-align: bottom;
+  padding: 0 5px;
   height: 28px;
-  background-repeat: no-repeat;
-  background-size: 24px 28px;
 }
 
 #tosPP-small {
@@ -589,10 +596,10 @@ groupbox {
 
 @media (min-resolution: 1.1dppx) {
   .androidLink {
-    background-image: url("chrome://browser/skin/fxa/android@2x.png");
+    list-style-image: url("chrome://browser/skin/fxa/android@2x.png");
   }
   .iOSLink {
-    background-image: url("chrome://browser/skin/fxa/ios@2x.png");
+    list-style-image: url("chrome://browser/skin/fxa/ios@2x.png");
   }
   .fxaFirefoxLogo {
     list-style-image: url(chrome://browser/skin/fxa/logo@2x.png);
@@ -642,6 +649,18 @@ groupbox {
   text-decoration: none;
 }
 
+.search-container {
+  position: sticky;
+  background-color: var(--in-content-page-background);
+  width: 100%;
+  top: 0;
+  z-index: 1;
+}
+
+#searchInput {
+  margin: 20px 0;
+}
+
 .search-tooltip {
   font-size: 1.25rem;
   position: absolute;
@@ -649,6 +668,7 @@ groupbox {
   background-color: #ffe900;
   border: 1px solid #d7b600;
   -moz-user-select: none;
+  bottom: 35px;
 }
 
 .search-tooltip:hover,
@@ -680,17 +700,18 @@ groupbox {
 
 menulist[indicator=true] > menupopup menuitem:not([image]) > .menu-iconic-left {
   display: -moz-box;
-  width: 8px;
   min-width: auto; /* Override the min-width defined in menu.css */
-  height: 10px;
   margin-inline-end: 6px;
+}
+
+menulist[indicator=true] > menupopup menuitem:not([image]) > .menu-iconic-left > .menu-iconic-icon {
+  width: 8px;
+  height: 10px;
+  margin: 0;
 }
 
 menulist[indicator=true] > menupopup menuitem[indicator=true]:not([image]) > .menu-iconic-left > .menu-iconic-icon {
   list-style-image: url(chrome://browser/skin/preferences/in-content-new/search-arrow-indicator.svg);
-  width: 8px;
-  height: 10px;
-  margin: 0;
 }
 
 menulist[indicator=true] > menupopup menuitem[indicator=true]:not([image]) > .menu-iconic-left > .menu-iconic-icon:-moz-locale-dir(rtl) {

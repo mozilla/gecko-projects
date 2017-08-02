@@ -132,6 +132,7 @@ load 1223688-1.html
 load 1223694-1.html
 load 1226400-1.html
 load 1227501-1.html
+load 1228789-1.html
 load 1230408-1.html
 load 1233135-1.html
 load 1233135-2.html
@@ -180,6 +181,7 @@ load 1381420-1.html
 load 1381682.html
 load 1382672.html
 load 1382710.html
+pref(dom.animations-api.core.enabled,true) load 1383493-1.html
 load 1383001.html
 load 1383001-2.html
 load 1383319.html
@@ -192,3 +194,5 @@ load font-face-truncated-src.html
 load large_border_image_width.html
 load link-transition-before.html
 load long-url-list-stack-overflow.html
+load 1383981.html
+load 1383981-2.html

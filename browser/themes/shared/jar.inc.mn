@@ -23,8 +23,6 @@
   skin/classic/browser/addons/addon-install-restart.svg        (../shared/addons/addon-install-restart.svg)
   skin/classic/browser/addons/addon-install-warning.svg        (../shared/addons/addon-install-warning.svg)
 * skin/classic/browser/addons/addon-install-anchor.svg         (../shared/addons/addon-install-anchor.svg)
-* skin/classic/browser/controlcenter/arrow-subview.svg         (../shared/controlcenter/arrow-subview.svg)
-* skin/classic/browser/controlcenter/arrow-subview-back.svg    (../shared/controlcenter/arrow-subview-back.svg)
 * skin/classic/browser/controlcenter/conn-not-secure.svg       (../shared/controlcenter/conn-not-secure.svg)
 * skin/classic/browser/controlcenter/connection.svg            (../shared/controlcenter/connection.svg)
 * skin/classic/browser/controlcenter/mcb-disabled.svg          (../shared/controlcenter/mcb-disabled.svg)
@@ -77,7 +75,9 @@
   skin/classic/browser/identity-icon-notice-hover.svg          (../shared/identity-block/identity-icon-notice-hover.svg)
 #endif
   skin/classic/browser/info.svg                                (../shared/info.svg)
+#ifndef MOZ_PHOTON_THEME
 * skin/classic/browser/menuPanel.svg                           (../shared/menuPanel.svg)
+#endif
 * skin/classic/browser/menuPanel-small.svg                     (../shared/menuPanel-small.svg)
   skin/classic/browser/notification-icons.svg                  (../shared/notification-icons.svg)
   skin/classic/browser/tracking-protection-16.svg              (../shared/identity-block/tracking-protection-16.svg)
@@ -122,7 +122,9 @@
 #endif
   skin/classic/browser/back-12.svg                    (../shared/icons/back-12.svg)
   skin/classic/browser/bookmark.svg                   (../shared/icons/bookmark.svg)
+#ifdef MOZ_PHOTON_ANIMATIONS
   skin/classic/browser/bookmark-animation.svg         (../shared/icons/bookmark-animation.svg)
+#endif
   skin/classic/browser/bookmark-hollow.svg            (../shared/icons/bookmark-hollow.svg)
 #ifndef MOZ_PHOTON_THEME
   skin/classic/browser/bookmarksMenu.svg              (../shared/icons/bookmarksMenu.svg)
@@ -162,7 +164,9 @@
   skin/classic/browser/history.svg                    (../shared/icons/history.svg)
   skin/classic/browser/home.svg                       (../shared/icons/home.svg)
   skin/classic/browser/library.svg                    (../shared/icons/library.svg)
+#ifdef MOZ_PHOTON_ANIMATIONS
   skin/classic/browser/library-bookmark-animation.svg (../shared/icons/library-bookmark-animation.svg)
+#endif
 #ifdef MOZ_PHOTON_THEME
   skin/classic/browser/link.svg                       (../shared/icons/link.svg)
 #endif
@@ -249,6 +253,13 @@
   skin/classic/browser/panic-panel/icons@2x.png                (../shared/panic-panel/icons@2x.png)
   skin/classic/browser/places/bookmarks-notification-finish.png (../shared/places/bookmarks-notification-finish.png)
   skin/classic/browser/places/bookmarks-notification-finish@2x.png (../shared/places/bookmarks-notification-finish@2x.png)
+  skin/classic/browser/places/bookmarksMenu.svg                (../shared/places/bookmarksMenu.svg)
+  skin/classic/browser/places/bookmarksToolbar.svg             (../shared/places/bookmarksToolbar.svg)
+  skin/classic/browser/places/folder.svg                       (../shared/places/folder.svg)
+  skin/classic/browser/places/folder-live.svg                  (../shared/places/folder-live.svg)
+  skin/classic/browser/places/folder-smart.svg                 (../shared/places/folder-smart.svg)
+  skin/classic/browser/places/history.svg                      (../shared/places/history.svg)
+  skin/classic/browser/places/unfiledBookmarks.svg             (../shared/places/unfiledBookmarks.svg)
   skin/classic/browser/privatebrowsing/aboutPrivateBrowsing.css (../shared/privatebrowsing/aboutPrivateBrowsing.css)
   skin/classic/browser/privatebrowsing/favicon.svg             (../shared/privatebrowsing/favicon.svg)
   skin/classic/browser/privatebrowsing/private-browsing.svg    (../shared/privatebrowsing/private-browsing.svg)

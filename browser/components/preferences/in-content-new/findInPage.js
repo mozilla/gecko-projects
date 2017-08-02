@@ -19,23 +19,11 @@ var gSearchResultsPane = {
     this.searchInput.hidden = !Services.prefs.getBoolPref("browser.preferences.search");
     if (!this.searchInput.hidden) {
       this.searchInput.addEventListener("command", this);
-      window.addEventListener("load", () => {
+      window.addEventListener("DOMContentLoaded", () => {
         this.searchInput.focus();
-        this.initializeCategories();
       });
-
-      // Throttling the resize event to reduce the callback frequency
-      let callbackId;
-      window.addEventListener("resize", () => {
-        if (!callbackId) {
-          callbackId = window.requestAnimationFrame(() => {
-            this.listSearchTooltips.forEach((anchorNode) => {
-              this.calculateTooltipPosition(anchorNode);
-            });
-            callbackId = null;
-          });
-        }
-      });
+      // Initialize other panes in an idle callback.
+      window.requestIdleCallback(() => this.initializeCategories());
     }
     let strings = this.strings;
     this.searchInput.placeholder = AppConstants.platform == "win" ?
@@ -44,9 +32,9 @@ var gSearchResultsPane = {
   },
 
   handleEvent(event) {
-    if (event.type === "command") {
-      this.searchFunction(event);
-    }
+    // Ensure categories are initialized if idle callback didn't run sooo enough.
+    this.initializeCategories();
+    this.searchFunction(event);
   },
 
   /**
@@ -225,6 +213,11 @@ var gSearchResultsPane = {
     this.removeAllSearchTooltips();
     this.removeAllSearchMenuitemIndicators();
 
+    // Clear telemetry request if user types very frequently.
+    if (this.telemetryTimer) {
+      clearTimeout(this.telemetryTimer);
+    }
+
     let srHeader = document.getElementById("header-searchResults");
 
     if (this.query) {
@@ -274,6 +267,13 @@ var gSearchResultsPane = {
       } else {
         // Creating tooltips for all the instances found
         this.listSearchTooltips.forEach((anchorNode) => this.createSearchTooltip(anchorNode, this.query));
+
+        // Implant search telemetry probe after user stops typing for a while
+        if (this.query.length >= 2) {
+          this.telemetryTimer = setTimeout(() => {
+            Services.telemetry.keyedScalarAdd("preferences.search_query", this.query, 1);
+          }, 1000);
+        }
       }
     } else {
       document.getElementById("sorry-message").textContent = "";
@@ -426,18 +426,8 @@ var gSearchResultsPane = {
     // In order to get the up-to-date position of each of the nodes that we're
     // putting tooltips on, we have to flush layout intentionally, and that
     // this is the result of a XUL limitation (bug 1363730).
-    let anchorRect = anchorNode.getBoundingClientRect();
     let tooltipRect = searchTooltip.getBoundingClientRect();
-    let parentRect = anchorNode.parentElement.getBoundingClientRect();
-
-    let offSetLeft = (anchorRect.width / 2) - (tooltipRect.width / 2);
-    let relativeOffset = anchorRect.left - parentRect.left;
-    offSetLeft += relativeOffset > 0 ? relativeOffset : 0;
-    // 20.5 is reserved for tooltip position
-    let offSetTop = anchorRect.top - parentRect.top - 20.5;
-
-    searchTooltip.style.setProperty("left", `${offSetLeft}px`);
-    searchTooltip.style.setProperty("top", `${offSetTop}px`);
+    searchTooltip.style.setProperty("left", `calc(50% - ${(tooltipRect.width / 2)}px)`);
   },
 
   /**

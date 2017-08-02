@@ -6,6 +6,8 @@
 #ifndef GFX_WEBRENDERLAYERMANAGER_H
 #define GFX_WEBRENDERLAYERMANAGER_H
 
+#include <vector>
+
 #include "gfxPrefs.h"
 #include "Layers.h"
 #include "mozilla/MozPromise.h"
@@ -13,6 +15,7 @@
 #include "mozilla/layers/FocusTarget.h"
 #include "mozilla/layers/StackingContextHelper.h"
 #include "mozilla/layers/TransactionIdAllocator.h"
+#include "mozilla/layers/WebRenderScrollData.h"
 #include "mozilla/layers/WebRenderUserData.h"
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "mozilla/webrender/WebRenderTypes.h"
@@ -21,6 +24,9 @@
 class nsIWidget;
 
 namespace mozilla {
+
+struct ActiveScrolledRoot;
+
 namespace layers {
 
 class CompositorBridgeChild;
@@ -64,6 +70,16 @@ public:
                  mozilla::wr::DisplayListBuilder& aBuilder,
                  const StackingContextHelper& aSc,
                  const LayerRect& aRect);
+  already_AddRefed<WebRenderFallbackData> GenerateFallbackData(nsDisplayItem* aItem,
+                                                               wr::DisplayListBuilder& aBuilder,
+                                                               nsDisplayListBuilder* aDisplayListBuilder,
+                                                               LayerRect& aImageRect,
+                                                               LayerPoint& aOffset);
+  Maybe<wr::WrImageMask> BuildWrMaskImage(nsDisplayItem* aItem,
+                                          wr::DisplayListBuilder& aBuilder,
+                                          const StackingContextHelper& aSc,
+                                          nsDisplayListBuilder* aDisplayListBuilder,
+                                          const LayerRect& aBounds);
   bool PushItemAsImage(nsDisplayItem* aItem,
                        wr::DisplayListBuilder& aBuilder,
                        const StackingContextHelper& aSc,
@@ -236,9 +252,17 @@ private:
   wr::BuiltDisplayList mBuiltDisplayList;
   nsTArray<WebRenderParentCommand> mParentCommands;
 
-  // We need this for building scroll data for the compositor in
-  // layers-free mode
-  std::unordered_map<FrameMetrics::ViewID, ScrollMetadata> mScrollMetadata;
+  // This holds the scroll data that we need to send to the compositor for
+  // APZ to do it's job
+  WebRenderScrollData mScrollData;
+  // We use this as a temporary data structure while building the mScrollData
+  // inside a layers-free transaction.
+  std::vector<WebRenderLayerScrollData> mLayerScrollData;
+  // We use this as a temporary data structure to track the current display
+  // item's ASR as we recurse in CreateWebRenderCommandsFromDisplayList. We
+  // need this so that WebRenderLayerScrollData items that deeper in the
+  // tree don't duplicate scroll metadata that their ancestors already have.
+  std::vector<const ActiveScrolledRoot*> mAsrStack;
 
   // Layers that have been mutated. If we have an empty transaction
   // then a display item layer will no longer be valid

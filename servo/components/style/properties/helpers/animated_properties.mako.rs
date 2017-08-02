@@ -605,8 +605,8 @@ impl AnimationValue {
                                 CSSWideKeyword::Unset |
                             % endif
                             CSSWideKeyword::Inherit => {
-                                let inherit_struct = context.inherited_style()
-                                                            .get_${prop.style_struct.name_lower}();
+                                let inherit_struct = context.builder
+                                                            .get_parent_${prop.style_struct.name_lower}();
                                 inherit_struct.clone_${prop.ident}()
                             },
                         };
@@ -924,6 +924,13 @@ impl Animatable for Angle {
                     .map(Angle::from_radians)
             }
         }
+    }
+
+    #[inline]
+    fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
+        // Use the formula for calculating the distance between angles defined in SVG:
+        // https://www.w3.org/TR/SVG/animate.html#complexDistances
+        Ok((self.radians64() - other.radians64()).abs())
     }
 }
 
@@ -1731,7 +1738,7 @@ fn add_weighted_transform_lists(from_list: &[TransformOperation],
     TransformList(Some(result))
 }
 
-/// https://drafts.csswg.org/css-transforms/#Rotate3dDefined
+/// https://www.w3.org/TR/css-transforms-1/#Rotate3dDefined
 fn rotate_to_matrix(x: f32, y: f32, z: f32, a: Angle) -> ComputedMatrix {
     let half_rad = a.radians() / 2.0;
     let sc = (half_rad).sin() * (half_rad).cos();
@@ -1739,17 +1746,17 @@ fn rotate_to_matrix(x: f32, y: f32, z: f32, a: Angle) -> ComputedMatrix {
 
     ComputedMatrix {
         m11: 1.0 - 2.0 * (y * y + z * z) * sq,
-        m12: 2.0 * (x * y * sq - z * sc),
-        m13: 2.0 * (x * z * sq + y * sc),
+        m12: 2.0 * (x * y * sq + z * sc),
+        m13: 2.0 * (x * z * sq - y * sc),
         m14: 0.0,
 
-        m21: 2.0 * (x * y * sq + z * sc),
+        m21: 2.0 * (x * y * sq - z * sc),
         m22: 1.0 - 2.0 * (x * x + z * z) * sq,
-        m23: 2.0 * (y * z * sq - x * sc),
+        m23: 2.0 * (y * z * sq + x * sc),
         m24: 0.0,
 
-        m31: 2.0 * (x * z * sq - y * sc),
-        m32: 2.0 * (y * z * sq + x * sc),
+        m31: 2.0 * (x * z * sq + y * sc),
+        m32: 2.0 * (y * z * sq - x * sc),
         m33: 1.0 - 2.0 * (x * x + y * y) * sq,
         m34: 0.0,
 
@@ -2274,7 +2281,7 @@ impl Animatable for MatrixDecomposed3D {
         use std::f64;
 
         debug_assert!((self_portion + other_portion - 1.0f64).abs() <= f64::EPSILON ||
-                      other_portion == 1.0f64,
+                      other_portion == 1.0f64 || other_portion == 0.0f64,
                       "add_weighted should only be used for interpolating or accumulating transforms");
 
         let mut sum = *self;
@@ -2390,19 +2397,19 @@ impl From<MatrixDecomposed3D> for ComputedMatrix {
         let mut temp = ComputedMatrix::identity();
         if decomposed.skew.2 != 0.0 {
             temp.m32 = decomposed.skew.2;
-            matrix = multiply(matrix, temp);
+            matrix = multiply(temp, matrix);
         }
 
         if decomposed.skew.1 != 0.0 {
             temp.m32 = 0.0;
             temp.m31 = decomposed.skew.1;
-            matrix = multiply(matrix, temp);
+            matrix = multiply(temp, matrix);
         }
 
         if decomposed.skew.0 != 0.0 {
             temp.m31 = 0.0;
             temp.m21 = decomposed.skew.0;
-            matrix = multiply(matrix, temp);
+            matrix = multiply(temp, matrix);
         }
 
         // Apply scale
@@ -3172,37 +3179,21 @@ impl Animatable for AnimatedFilterList {
 
     #[inline]
     fn compute_squared_distance(&self, other: &Self) -> Result<f64, ()> {
+        use itertools::{EitherOrBoth, Itertools};
+
         let mut square_distance: f64 = 0.0;
-        let mut from_iter = self.0.iter();
-        let mut to_iter = other.0.iter();
-
-        let mut from = from_iter.next();
-        let mut to = to_iter.next();
-        while from.is_some() || to.is_some() {
-            let current_square_distance: f64 ;
-            if from.is_none() {
-                let none = try!(add_weighted_filter_function(to, to, 0.0, 0.0));
-                current_square_distance =
-                    compute_filter_square_distance(&none, &(to.unwrap())).unwrap();
-
-                to = to_iter.next();
-            } else if to.is_none() {
-                let none = try!(add_weighted_filter_function(from, from, 0.0, 0.0));
-                current_square_distance =
-                    compute_filter_square_distance(&none, &(from.unwrap())).unwrap();
-
-                from = from_iter.next();
-            } else {
-                current_square_distance =
-                    compute_filter_square_distance(&(from.unwrap()),
-                                                   &(to.unwrap())).unwrap();
-
-                from = from_iter.next();
-                to = to_iter.next();
-            }
-            square_distance += current_square_distance;
+        for it in self.0.iter().zip_longest(other.0.iter()) {
+            square_distance += match it {
+                EitherOrBoth::Both(from, to) => {
+                    compute_filter_square_distance(&from, &to)?
+                },
+                EitherOrBoth::Left(list) | EitherOrBoth::Right(list)=> {
+                    let none = add_weighted_filter_function(Some(list), Some(list), 0.0, 0.0)?;
+                    compute_filter_square_distance(&none, &list)?
+                },
+            };
         }
-        Ok(square_distance.sqrt())
+        Ok(square_distance)
     }
 }
 

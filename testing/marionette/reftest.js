@@ -37,10 +37,16 @@ const STATUS = {
 
 /**
  * Implements an fast runner for web-platform-tests format reftests
- * c.f. http://web-platform-tests.org/writing-tests/reftests.html
+ * c.f. http://web-platform-tests.org/writing-tests/reftests.html.
+ *
+ * @namespace
  */
-let reftest = {};
+this.reftest = {};
 
+/**
+ * @memberof reftest
+ * @class Runner
+ */
 reftest.Runner = class {
   constructor(driver) {
     this.driver = driver;
@@ -94,10 +100,11 @@ reftest.Runner = class {
   *openWindow() {
     let reftestWin;
     yield new Promise(resolve => {
-      reftestWin = this.parentWindow.openDialog("chrome://marionette/content/reftest.xul",
-                                                "reftest",
-                                                "chrome,dialog,height=600,width=600,all",
-                                                () => resolve());
+      reftestWin = this.parentWindow.openDialog(
+          "chrome://marionette/content/reftest.xul",
+          "reftest",
+          "chrome,dialog,height=600,width=600,all",
+          () => resolve());
     });
 
     let browser = reftestWin.document.createElementNS(XUL_NS, "xul:browser");

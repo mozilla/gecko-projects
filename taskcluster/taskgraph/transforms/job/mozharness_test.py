@@ -37,11 +37,13 @@ BUILDER_NAME_PREFIX = {
     'windows10-64-nightly': 'Windows 10 64-bit',
     'windows10-64-pgo': 'Windows 10 64-bit',
     'windows10-64-asan': 'Windows 10 64-bit',
+    'windows10-64-stylo': 'Windows 10 64-bit',
     'windows7-32': 'Windows 7 32-bit',
     ('windows7-32', 'virtual-with-gpu'): 'Windows 7 VM-GFX 32-bit',
     'windows7-32-nightly': 'Windows 7 32-bit',
     'windows7-32-devedition': 'Windows 7 32-bit DevEdition',
     'windows7-32-pgo': 'Windows 7 32-bit',
+    'windows7-32-stylo': 'Windows 7 32-bit',
     'windows8-64': 'Windows 8 64-bit',
     'windows8-64-nightly': 'Windows 8 64-bit',
     'windows8-64-devedition': 'Windows 8 64-bit DevEdition',
@@ -316,6 +318,9 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
                 if isinstance(c, basestring) and c.startswith('--test-suite'):
                     mh_command[i] += suffix
 
+    if config.params['project'] == 'try':
+        env['TRY_COMMIT_MSG'] = config.params['message']
+
     worker['mounts'] = [{
         'directory': '.',
         'content': {
@@ -518,3 +523,8 @@ def mozharness_test_buildbot_bridge(config, job, taskdesc):
             'installer_path': mozharness['build-artifact-name'],
         }
     })
+
+    if mozharness['requires-signed-builds']:
+        upstream_task = '<build-signing>'
+        installer_url = get_artifact_url(upstream_task, mozharness['build-artifact-name'])
+        worker['properties']['signed_installer_url'] = {'task-reference': installer_url}

@@ -21,6 +21,7 @@
 #include "nsWeakReference.h"
 #include "TCPFastOpen.h"
 
+#include "nsINamed.h"
 #include "nsIObserver.h"
 #include "nsITimer.h"
 
@@ -336,11 +337,7 @@ private:
 
         // Remove the empty pendingQ in |mPendingTransactionTable|.
         void RemoveEmptyPendingQ();
-        enum {
-          CONN_ENTRY_NOT_REMOVED,
-          CONN_ENTRY_CLEAR_CONNECTION_HISTORY,
-          CONN_ENTRY_REMOVED_SHUTDOWN,
-        }  mHowItWasRemoved;
+
     private:
         ~nsConnectionEntry();
     };
@@ -358,6 +355,7 @@ private:
                                    public nsITransportEventSink,
                                    public nsIInterfaceRequestor,
                                    public nsITimerCallback,
+                                   public nsINamed,
                                    public nsSupportsWeakReference,
                                    public TCPFastOpen
     {
@@ -370,6 +368,7 @@ private:
         NS_DECL_NSITRANSPORTEVENTSINK
         NS_DECL_NSIINTERFACEREQUESTOR
         NS_DECL_NSITIMERCALLBACK
+        NS_DECL_NSINAMED
 
         nsHalfOpenSocket(nsConnectionEntry *ent,
                          nsAHttpTransaction *trans,
@@ -465,12 +464,6 @@ private:
 
         bool                           mFastOpenInProgress;
         RefPtr<nsHttpConnection>       mConnectionNegotiatingFastOpen;
-
-    private:
-        // nsHttpConnectionMgr is friend class so that we can access them for
-        // diagnostic asserts. The this asserts are removed the following line
-        // needs to be removed.
-        friend class nsHttpConnectionMgr;
 
         RefPtr<nsConnectionEntry>      mEnt;
         nsCOMPtr<nsITimer>             mSynTimer;
@@ -748,8 +741,6 @@ private:
     nsTArray<RefPtr<PendingTransactionInfo>>*
     GetTransactionPendingQHelper(nsConnectionEntry *ent, nsAHttpTransaction *trans);
 
-    // This is only a diagnostic check end it will e removed soon.
-    void CheckConnEntryMustBeInmCT(nsHttpConnectionInfo *ci);
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsHttpConnectionMgr::nsHalfOpenSocket, NS_HALFOPENSOCKET_IID)

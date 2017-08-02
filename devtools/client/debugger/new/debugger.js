@@ -13401,7 +13401,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	const { isDevelopment } = __webpack_require__(828);
 	const { Services, PrefsHelper } = __webpack_require__(830);
 
-	const prefsSchemaVersion = "1.0.1";
+	const prefsSchemaVersion = "1.0.2";
 
 	const pref = Services.pref;
 
@@ -19521,12 +19521,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var dispatch = _ref.dispatch,
 	        client = _ref.client;
 
-	    // dispatch(evaluateExpressions(null));
-
-	    return dispatch({
+	    dispatch({
 	      type: "RESUME",
 	      value: undefined
 	    });
+
+	    dispatch((0, _expressions.evaluateExpressions)(null));
 	  };
 	}
 
@@ -22485,13 +22485,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	Object.defineProperty(exports, "__esModule", {
 	  value: true
 	});
-	exports.isExactUrlMatch = exports.getURL = exports.getDirectories = exports.createTree = exports.collapseTree = exports.addToTree = exports.isDirectory = exports.createParentMap = exports.nodeHasChildren = exports.createNode = undefined;
+	exports.formatTree = exports.isExactUrlMatch = exports.getURL = exports.getDirectories = exports.createTree = exports.collapseTree = exports.addToTree = exports.isDirectory = exports.createParentMap = exports.nodeHasChildren = exports.createNode = undefined;
 
 	var _url = __webpack_require__(334);
-
-	var _DevToolsUtils = __webpack_require__(222);
-
-	var _DevToolsUtils2 = _interopRequireDefault(_DevToolsUtils);
 
 	var _source = __webpack_require__(233);
 
@@ -22500,11 +22496,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _merge2 = _interopRequireDefault(_merge);
 
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-	/**
-	 * Utils for Sources Tree Component
-	 * @module utils/sources-tree
-	 */
 
 	var IGNORED_URLS = ["debugger eval code", "XStringBundle"];
 
@@ -22522,6 +22513,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @static
 	 */
 
+
+	/**
+	 * Utils for Sources Tree Component
+	 * @module utils/sources-tree
+	 */
 
 	/**
 	 * @memberof utils/sources-tree
@@ -22691,7 +22687,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	    //
 	    // TODO: Be smarter about this, which we'll probably do when we
 	    // are smarter about folders and collapsing empty ones.
-	    (0, _DevToolsUtils2.default)(nodeHasChildren(subtree), `${subtree.name} should have children`);
+
+	    if (!nodeHasChildren(subtree)) {
+	      return {
+	        v: void 0
+	      };
+	    }
+
 	    var children = subtree.contents;
 
 	    var index = determineFileSortOrder(children, part, isLastPart, i === 0 ? debuggeeUrl : "");
@@ -22715,7 +22717,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  };
 
 	  for (var i = 0; i < parts.length; i++) {
-	    _loop(i);
+	    var _ret = _loop(i);
+
+	    if (typeof _ret === "object") return _ret.v;
 	  }
 
 	  // Overwrite the contents of the final node to store the source
@@ -22871,6 +22875,29 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 	}
 
+	function formatTree(tree) {
+	  var depth = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 0;
+	  var str = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : "";
+
+	  var whitespace = new Array(depth * 2).join(" ");
+
+	  if (!tree.contents) {
+	    return str;
+	  }
+
+	  if (tree.contents.length > 0) {
+	    str += `${whitespace} - ${tree.name} path=${tree.path} \n`;
+	    tree.contents.forEach(t => {
+	      str = formatTree(t, depth + 1, str);
+	    });
+	  } else if (tree.contents.toJS) {
+	    var id = tree.contents.get("id");
+	    str += `${whitespace} - ${tree.name} path=${tree.path} source_id=${id} \n`;
+	  }
+
+	  return str;
+	}
+
 	exports.createNode = createNode;
 	exports.nodeHasChildren = nodeHasChildren;
 	exports.createParentMap = createParentMap;
@@ -22881,6 +22908,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	exports.getDirectories = getDirectories;
 	exports.getURL = getURL;
 	exports.isExactUrlMatch = isExactUrlMatch;
+	exports.formatTree = formatTree;
 
 /***/ },
 /* 392 */
@@ -24238,7 +24266,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this.cbPanel = null;
 	    var editor = this.setupEditor();
 
-	    var selectedSource = this.props.selectedSource;
+	    var _props = this.props,
+	        selectedSource = _props.selectedSource,
+	        selectedLocation = _props.selectedLocation;
 	    var shortcuts = this.context.shortcuts;
 
 
@@ -24250,6 +24280,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	    shortcuts.on("Esc", this.onEscape);
 	    shortcuts.on(searchAgainPrevKey, this.onSearchAgain);
 	    shortcuts.on(searchAgainKey, this.onSearchAgain);
+
+	    if (selectedLocation && !!selectedLocation.line) {
+	      this.pendingJumpLine = selectedLocation.line;
+	    }
 
 	    (0, _editor.updateDocument)(editor, selectedSource);
 	  }
@@ -24271,9 +24305,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	    // This is in `componentDidUpdate` so helper functions can expect
 	    // `this.props` to be the current props. This lifecycle method is
 	    // responsible for updating the editor annotations.
-	    var _props = this.props,
-	        selectedLocation = _props.selectedLocation,
-	        selectedSource = _props.selectedSource;
+	    var _props2 = this.props,
+	        selectedLocation = _props2.selectedLocation,
+	        selectedSource = _props2.selectedSource;
 
 	    // If the location is different and a new line is requested,
 	    // update the pending jump line. Note that if jumping to a line in
@@ -24352,9 +24386,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  onSearchAgain(_, e) {
-	    var _props2 = this.props,
-	        query = _props2.query,
-	        searchModifiers = _props2.searchModifiers;
+	    var _props3 = this.props,
+	        query = _props3.query,
+	        searchModifiers = _props3.searchModifiers;
 	    var codeMirror = this.state.editor.editor.codeMirror;
 
 	    var ctx = { ed: this.state.editor, cm: codeMirror };
@@ -24368,21 +24402,21 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  inSelectedFrameSource() {
-	    var _props3 = this.props,
-	        selectedLocation = _props3.selectedLocation,
-	        selectedFrame = _props3.selectedFrame;
+	    var _props4 = this.props,
+	        selectedLocation = _props4.selectedLocation,
+	        selectedFrame = _props4.selectedFrame;
 
 	    return selectedFrame && selectedLocation && selectedFrame.location.sourceId == selectedLocation.sourceId;
 	  }
 
 	  openMenu(event, codeMirror) {
-	    var _props4 = this.props,
-	        selectedSource = _props4.selectedSource,
-	        selectedLocation = _props4.selectedLocation,
-	        showSource = _props4.showSource,
-	        jumpToMappedLocation = _props4.jumpToMappedLocation,
-	        addExpression = _props4.addExpression,
-	        toggleBlackBox = _props4.toggleBlackBox;
+	    var _props5 = this.props,
+	        selectedSource = _props5.selectedSource,
+	        selectedLocation = _props5.selectedLocation,
+	        showSource = _props5.showSource,
+	        jumpToMappedLocation = _props5.jumpToMappedLocation,
+	        addExpression = _props5.addExpression,
+	        toggleBlackBox = _props5.toggleBlackBox;
 
 
 	    return (0, _EditorMenu2.default)({
@@ -24399,9 +24433,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  onGutterClick(cm, line, gutter, ev) {
-	    var _props5 = this.props,
-	        selectedSource = _props5.selectedSource,
-	        toggleBreakpoint = _props5.toggleBreakpoint;
+	    var _props6 = this.props,
+	        selectedSource = _props6.selectedSource,
+	        toggleBreakpoint = _props6.toggleBreakpoint;
 
 	    // ignore right clicks in the gutter
 
@@ -24419,11 +24453,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  onGutterContextMenu(event) {
-	    var _props6 = this.props,
-	        selectedSource = _props6.selectedSource,
-	        breakpoints = _props6.breakpoints,
-	        toggleBreakpoint = _props6.toggleBreakpoint,
-	        toggleDisabledBreakpoint = _props6.toggleDisabledBreakpoint;
+	    var _props7 = this.props,
+	        selectedSource = _props7.selectedSource,
+	        breakpoints = _props7.breakpoints,
+	        toggleBreakpoint = _props7.toggleBreakpoint,
+	        toggleDisabledBreakpoint = _props7.toggleDisabledBreakpoint;
 
 
 	    if (selectedSource && selectedSource.get("isBlackBoxed")) {
@@ -24460,10 +24494,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	      return this.closeConditionalPanel();
 	    }
 
-	    var _props7 = this.props,
-	        selectedLocation = _props7.selectedLocation,
-	        setBreakpointCondition = _props7.setBreakpointCondition,
-	        breakpoints = _props7.breakpoints;
+	    var _props8 = this.props,
+	        selectedLocation = _props8.selectedLocation,
+	        setBreakpointCondition = _props8.setBreakpointCondition,
+	        breakpoints = _props8.breakpoints;
 
 	    var sourceId = selectedLocation ? selectedLocation.sourceId : "";
 
@@ -24477,7 +24511,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	      closePanel: this.closeConditionalPanel
 	    });
 
-	    this.cbPanel = this.state.editor.codeMirror.addLineWidget(line, panel, {
+	    var editorLine = line - 1;
+	    this.cbPanel = this.state.editor.codeMirror.addLineWidget(editorLine, panel, {
 	      coverGutter: true,
 	      noHScroll: false
 	    });
@@ -24495,9 +24530,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  clearDebugLine(selectedFrame) {
 	    if (this.state.editor && selectedFrame) {
-	      var _selectedFrame$locati = selectedFrame.location,
-	          sourceId = _selectedFrame$locati.sourceId,
-	          line = _selectedFrame$locati.line;
+	      var line = selectedFrame.location.line;
 
 	      if (debugExpression) {
 	        debugExpression.clear();
@@ -24509,9 +24542,9 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  setDebugLine(selectedFrame, selectedLocation) {
 	    if (this.state.editor && selectedFrame && selectedLocation && selectedFrame.location.sourceId === selectedLocation.sourceId) {
-	      var _selectedFrame$locati2 = selectedFrame.location,
-	          line = _selectedFrame$locati2.line,
-	          column = _selectedFrame$locati2.column;
+	      var _selectedFrame$locati = selectedFrame.location,
+	          line = _selectedFrame$locati.line,
+	          column = _selectedFrame$locati.column;
 
 	      this.state.editor.codeMirror.addLineClass(line - 1, "line", "new-debug-line");
 
@@ -24559,10 +24592,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  getInlineEditorStyles() {
-	    var _props8 = this.props,
-	        selectedSource = _props8.selectedSource,
-	        horizontal = _props8.horizontal,
-	        searchOn = _props8.searchOn;
+	    var _props9 = this.props,
+	        selectedSource = _props9.selectedSource,
+	        horizontal = _props9.horizontal,
+	        searchOn = _props9.searchOn;
 
 
 	    var subtractions = [];
@@ -24585,7 +24618,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    var highlightedLineRange = this.props.highlightedLineRange;
 
 
-	    if (!highlightedLineRange) {
+	    if (!highlightedLineRange || !this.state.editor) {
 	      return;
 	    }
 
@@ -24596,9 +24629,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  renderHitCounts() {
-	    var _props9 = this.props,
-	        hitCount = _props9.hitCount,
-	        selectedSource = _props9.selectedSource;
+	    var _props10 = this.props,
+	        hitCount = _props10.hitCount,
+	        selectedSource = _props10.selectedSource;
 
 
 	    if (!selectedSource || selectedSource.get("loading") || !hitCount || !this.state.editor) {
@@ -24613,9 +24646,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  renderPreview() {
-	    var _props10 = this.props,
-	        selectedSource = _props10.selectedSource,
-	        selection = _props10.selection;
+	    var _props11 = this.props,
+	        selectedSource = _props11.selectedSource,
+	        selection = _props11.selection;
 
 	    if (!this.state.editor || !selectedSource) {
 	      return null;
@@ -24669,11 +24702,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  renderSearchBar() {
-	    var _props11 = this.props,
-	        selectSource = _props11.selectSource,
-	        selectedSource = _props11.selectedSource,
-	        highlightLineRange = _props11.highlightLineRange,
-	        clearHighlightLineRange = _props11.clearHighlightLineRange;
+	    var _props12 = this.props,
+	        selectSource = _props12.selectSource,
+	        selectedSource = _props12.selectedSource,
+	        highlightLineRange = _props12.highlightLineRange,
+	        clearHighlightLineRange = _props12.clearHighlightLineRange;
 
 
 	    if (!this.state.editor) {
@@ -24708,9 +24741,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  render() {
-	    var _props12 = this.props,
-	        coverageOn = _props12.coverageOn,
-	        pauseData = _props12.pauseData;
+	    var _props13 = this.props,
+	        coverageOn = _props13.coverageOn,
+	        pauseData = _props13.pauseData;
 
 
 	    return _react.DOM.div({
@@ -25318,7 +25351,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	          ed = _props5.editor;
 
 
-	      if (!ed || !selectedSource || !selectedSource.get("text") || !modifiers) {
+	      if (!query || !ed || !selectedSource || !selectedSource.get("text") || !modifiers) {
 	        return;
 	      }
 
@@ -28089,10 +28122,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	      "aria-label": breakpointsDisabled ? L10N.getStr("breakpoints.enable") : L10N.getStr("breakpoints.disable"),
 	      className: boxClassName,
 	      disabled: breakpointsLoading,
-	      onClick: e => {
+	      onChange: e => {
 	        e.stopPropagation();
 	        toggleAllBreakpoints(!breakpointsDisabled);
 	      },
+	      onClick: e => e.stopPropagation(),
 	      checked: !breakpointsDisabled && !isIndeterminate,
 	      ref: input => {
 	        if (input) {
@@ -28204,7 +28238,7 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  render() {
 	    return _react.DOM.div({
-	      className: "secondary-panes"
+	      className: "secondary-panes secondary-panes--sticky-commandbar"
 	    }, CommandBar(), this.props.horizontal ? this.renderHorizontalLayout() : this.renderVerticalLayout());
 	  }
 	}
@@ -28415,16 +28449,18 @@ return /******/ (function(modules) { // webpackBootstrap
 	      contents: { value }
 	    };
 
-	    return _react.DOM.div({
+	    return _react.DOM.li({
 	      className: "expression-container",
 	      key: `${path}/${input}`
-	    }, ObjectInspector({
+	    }, _react.DOM.div({ className: "expression-content" }, ObjectInspector({
 	      roots: [root],
 	      getObjectProperties: id => loadedObjects[id],
 	      autoExpandDepth: 0,
 	      onDoubleClick: (item, options) => this.editExpression(expression, options),
 	      loadObjectProperties
-	    }), CloseButton({ handleClick: e => this.deleteExpression(e, expression) }));
+	    }), _react.DOM.div({ className: "expression-container__close-btn" }, CloseButton({
+	      handleClick: e => this.deleteExpression(e, expression)
+	    }))));
 	  }
 
 	  componentDidUpdate() {
@@ -28448,7 +28484,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      e.target.value = "";
 	      this.props.addExpression(value);
 	    };
-	    return _react.DOM.span({ className: "expression-input-container" }, _react.DOM.input({
+	    return _react.DOM.li({ className: "expression-input-container" }, _react.DOM.input({
 	      type: "text",
 	      className: "input-expression",
 	      placeholder: L10N.getStr("expressions.placeholder"),
@@ -28462,7 +28498,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  render() {
 	    var expressions = this.props.expressions;
 
-	    return _react.DOM.span({ className: "pane expressions-list" }, expressions.map(this.renderExpression), this.renderNewExpressionInput());
+	    return _react.DOM.ul({ className: "pane expressions-list" }, expressions.map(this.renderExpression), this.renderNewExpressionInput());
 	  }
 	}
 
@@ -45958,8 +45994,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  var gutters = editor.display.gutters;
 	  var lineNumbers = gutters.querySelector(".CodeMirror-linenumbers");
 	  var breakpoints = gutters.querySelector(".breakpoints");
-	  var width = lineNumbers.clientWidth;
-	  breakpoints.style.width = `${width}px`;
+	  breakpoints.style.width = `${lineNumbers.clientWidth}px`;
 	}
 
 	module.exports = {
@@ -46668,16 +46703,6 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	class Frames extends _react.Component {
 
-	  collapseFrames(frames) {
-	    var frameworkGroupingOn = this.props.frameworkGroupingOn;
-
-	    if (!frameworkGroupingOn) {
-	      return frames;
-	    }
-
-	    return (0, _frame.collapseFrames)(frames);
-	  }
-
 	  constructor() {
 	    super(...arguments);
 
@@ -46704,6 +46729,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this.setState({
 	      showAllFrames: !this.state.showAllFrames
 	    });
+	  }
+
+	  collapseFrames(frames) {
+	    var frameworkGroupingOn = this.props.frameworkGroupingOn;
+
+	    if (!frameworkGroupingOn) {
+	      return frames;
+	    }
+
+	    return (0, _frame.collapseFrames)(frames);
 	  }
 
 	  truncateFrames(frames) {
@@ -46762,7 +46797,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  renderToggleButton(frames) {
 	    var buttonMessage = this.state.showAllFrames ? L10N.getStr("callStack.collapse") : L10N.getStr("callStack.expand");
 
-	    frames = (0, _frame.collapseFrames)(frames);
+	    frames = this.collapseFrames(frames);
 	    if (frames.length <= NUM_FRAMES_SHOWN) {
 	      return null;
 	    }
@@ -51720,8 +51755,6 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	var _react = __webpack_require__(2);
 
-	var _devtoolsConfig = __webpack_require__(828);
-
 	var _Breakpoint2 = __webpack_require__(714);
 
 	var _Breakpoint3 = _interopRequireDefault(_Breakpoint2);
@@ -51763,7 +51796,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      return null;
 	    }
 
-	    return _react.DOM.div({}, breakpoints.valueSeq().filter(b => (0, _devtoolsConfig.isEnabled)("columnBreakpoints") ? !b.location.column : true).map(bp => Breakpoint({
+	    return _react.DOM.div({}, breakpoints.valueSeq().map(bp => Breakpoint({
 	      key: (0, _breakpoint.makeLocationId)(bp.location),
 	      breakpoint: bp,
 	      selectedSource,

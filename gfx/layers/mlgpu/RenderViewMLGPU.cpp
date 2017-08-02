@@ -12,6 +12,8 @@
 #include "MLGDevice.h"
 #include "RenderPassMLGPU.h"
 #include "ShaderDefinitionsMLGPU.h"
+#include "Units.h"
+#include "UnitTransforms.h"
 #include "UtilityMLGPU.h"
 
 namespace mozilla {
@@ -356,6 +358,7 @@ RenderViewMLGPU::Prepare()
     memcpy(vsConstants.projection, &projection._11, 64);
     vsConstants.targetOffset = Point(mTargetOffset);
     vsConstants.sortIndexOffset = PrepareDepthBuffer();
+    vsConstants.debugFrameNumber = mBuilder->GetManager()->GetDebugFrameNumber();
 
     SharedConstantBuffer* shared = mDevice->GetSharedVSBuffer();
     if (!shared->Allocate(&mWorldConstants, vsConstants)) {
@@ -383,6 +386,9 @@ RenderViewMLGPU::ExecuteRendering()
     return;
   }
 
+  // Note: we unbind slot 0 (which is where the render target could have been
+  // bound on a previous frame). Otherwise we trigger D3D11_DEVICE_PSSETSHADERRESOURCES_HAZARD.
+  mDevice->UnsetPSTexture(0);
   mDevice->SetRenderTarget(mTarget);
   mDevice->SetViewport(IntRect(IntPoint(0, 0), mTarget->GetSize()));
   mDevice->SetScissorRect(Some(mInvalidBounds));

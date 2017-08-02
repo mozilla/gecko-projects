@@ -463,6 +463,7 @@ BookmarksEngine.prototype = {
         throw ex;
       }
       this._log.warn("Error while building GUID map, skipping all other incoming items", ex);
+      // eslint-disable-next-line no-throw-literal
       throw {code: Engine.prototype.eEngineAbortApplyIncoming,
              cause: ex};
     }
@@ -522,7 +523,7 @@ BookmarksEngine.prototype = {
 
   async _syncFinish() {
     await SyncEngine.prototype._syncFinish.call(this);
-    this._tracker._ensureMobileQuery();
+    await PlacesSyncUtils.bookmarks.ensureMobileQuery();
   },
 
   async _syncCleanup() {
@@ -677,7 +678,8 @@ BookmarksStore.prototype = {
     // Figure out the local id of the parent GUID if available
     let parentGUID = record.parentid;
     if (!parentGUID) {
-      throw "Record " + record.id + " has invalid parentid: " + parentGUID;
+      throw new Error(
+          `Record ${record.id} has invalid parentid: ${parentGUID}`);
     }
     this._log.debug("Remote parent is " + parentGUID);
 
@@ -1019,52 +1021,6 @@ BookmarksTracker.prototype = {
 
     this._log.trace("onItemRemoved: " + itemId);
     this._upScore();
-  },
-
-  _ensureMobileQuery: function _ensureMobileQuery() {
-    Services.prefs.setBoolPref("browser.bookmarks.showMobileBookmarks", true);
-    let find = val =>
-      PlacesUtils.annotations.getItemsWithAnnotation(ORGANIZERQUERY_ANNO, {}).filter(
-        id => PlacesUtils.annotations.getItemAnnotation(id, ORGANIZERQUERY_ANNO) == val
-      );
-
-    // Don't continue if the Library isn't ready
-    let all = find(ALLBOOKMARKS_ANNO);
-    if (all.length == 0)
-      return;
-
-    let mobile = find(MOBILE_ANNO);
-    let queryURI = Utils.makeURI("place:folder=" + PlacesUtils.mobileFolderId);
-    let title = PlacesBundle.GetStringFromName("MobileBookmarksFolderTitle");
-
-    // Don't add OR remove the mobile bookmarks if there's nothing.
-    if (PlacesUtils.bookmarks.getIdForItemAt(PlacesUtils.mobileFolderId, 0) == -1) {
-      if (mobile.length != 0)
-        PlacesUtils.bookmarks.removeItem(mobile[0], SOURCE_SYNC);
-    } else if (mobile.length == 0) {
-      // Add the mobile bookmarks query if it doesn't exist
-      let query = PlacesUtils.bookmarks.insertBookmark(all[0], queryURI, -1, title, /* guid */ null, SOURCE_SYNC);
-      PlacesUtils.annotations.setItemAnnotation(query, ORGANIZERQUERY_ANNO, MOBILE_ANNO, 0,
-                                  PlacesUtils.annotations.EXPIRE_NEVER, SOURCE_SYNC);
-      PlacesUtils.annotations.setItemAnnotation(query, PlacesUtils.EXCLUDE_FROM_BACKUP_ANNO, 1, 0,
-                                  PlacesUtils.annotations.EXPIRE_NEVER, SOURCE_SYNC);
-    } else {
-      // Make sure the existing query URL and title are correct
-      if (!PlacesUtils.bookmarks.getBookmarkURI(mobile[0]).equals(queryURI)) {
-        PlacesUtils.bookmarks.changeBookmarkURI(mobile[0], queryURI,
-                                                SOURCE_SYNC);
-      }
-      let queryTitle = PlacesUtils.bookmarks.getItemTitle(mobile[0]);
-      if (queryTitle != title) {
-        PlacesUtils.bookmarks.setItemTitle(mobile[0], title, SOURCE_SYNC);
-      }
-      let rootTitle =
-        PlacesUtils.bookmarks.getItemTitle(PlacesUtils.mobileFolderId);
-      if (rootTitle != title) {
-        PlacesUtils.bookmarks.setItemTitle(PlacesUtils.mobileFolderId, title,
-                                           SOURCE_SYNC);
-      }
-    }
   },
 
   // This method is oddly structured, but the idea is to return as quickly as

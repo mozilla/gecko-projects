@@ -465,9 +465,11 @@ VRDisplayPuppet::SubmitFrame(TextureSourceD3D11* aSource,
   // return true to indicate that we have blocked.
   return false;
 }
-#else
+
+#elif defined(XP_MACOSX)
+
 bool
-VRDisplayPuppet::SubmitFrame(TextureSourceOGL* aSource,
+VRDisplayPuppet::SubmitFrame(MacIOSurface* aMacIOSurface,
                              const IntSize& aSize,
                              const gfx::Rect& aLeftEyeRect,
                              const gfx::Rect& aRightEyeRect)
@@ -481,6 +483,7 @@ VRDisplayPuppet::SubmitFrame(TextureSourceOGL* aSource,
 
   return false;
 }
+
 #endif
 
 void
@@ -495,6 +498,7 @@ VRDisplayPuppet::NotifyVSync()
 VRControllerPuppet::VRControllerPuppet(dom::GamepadHand aHand, uint32_t aDisplayID)
   : VRControllerHost(VRDeviceType::Puppet, aHand, aDisplayID)
   , mButtonPressState(0)
+  , mButtonTouchState(0)
 {
   MOZ_COUNT_CTOR_INHERITED(VRControllerPuppet, VRControllerHost);
   mControllerInfo.mControllerName.AssignLiteral("Puppet Gamepad");
@@ -648,10 +652,11 @@ VRSystemManagerPuppet::HandleInput()
   for (uint32_t i = 0; i < mPuppetController.Length(); ++i) {
     controller = mPuppetController[i];
     for (uint32_t j = 0; j < kNumPuppetButtonMask; ++j) {
-      HandleButtonPress(i, j, kPuppetButtonMask[i], controller->GetButtonPressState(),
+      HandleButtonPress(i, j, kPuppetButtonMask[j], controller->GetButtonPressState(),
                         controller->GetButtonTouchState());
     }
     controller->SetButtonPressed(controller->GetButtonPressState());
+    controller->SetButtonTouched(controller->GetButtonTouchState());
 
     for (uint32_t j = 0; j < kNumPuppetAxis; ++j) {
       HandleAxisMove(i, j, controller->GetAxisMoveState(j));

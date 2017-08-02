@@ -44,6 +44,7 @@ jobs:
           treeherder-symbol: Nd-Win
           target-tasks-method: nightly_win
       run-on-projects:
+          - mozilla-central
           - date
       when: [] # never (hook only)
 

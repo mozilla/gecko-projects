@@ -51,6 +51,8 @@ const PACKET_LENGTH_MAX = Math.pow(2, 40);
 
 /**
  * A generic Packet processing object (extended by two subtypes below).
+ *
+ * @class
  */
 function Packet(transport) {
   this._transport = transport;
@@ -307,7 +309,7 @@ BulkPacket.prototype.write = function(stream) {
   // Write the header, or whatever's left of it to write.
   if (this._outgoingHeader.length) {
     let written = stream.write(this._outgoingHeader,
-                               this._outgoingHeader.length);
+        this._outgoingHeader.length);
     this._outgoingHeader = this._outgoingHeader.slice(written);
     return;
   }

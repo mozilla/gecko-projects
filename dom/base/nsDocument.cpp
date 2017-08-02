@@ -2764,8 +2764,9 @@ nsDocument::InitCSP(nsIChannel* aChannel)
   // Note that when the content signing becomes a standard, we might have
   // to restrict this enforcement to "remote content" only.
   if (applySignedContentCSP) {
-    nsAdoptingString signedContentCSP =
-      Preferences::GetString("security.signed_content.CSP.default");
+    nsAutoString signedContentCSP;
+    Preferences::GetString("security.signed_content.CSP.default",
+                           signedContentCSP);
     csp->AppendPolicy(signedContentCSP, false, false);
   }
 
@@ -3050,15 +3051,14 @@ nsIDocument::GetDocGroup() const
 }
 
 nsresult
-nsIDocument::Dispatch(const char* aName,
-                      TaskCategory aCategory,
+nsIDocument::Dispatch(TaskCategory aCategory,
                       already_AddRefed<nsIRunnable>&& aRunnable)
 {
   // Note that this method may be called off the main thread.
   if (mDocGroup) {
-    return mDocGroup->Dispatch(aName, aCategory, Move(aRunnable));
+    return mDocGroup->Dispatch(aCategory, Move(aRunnable));
   }
-  return DispatcherTrait::Dispatch(aName, aCategory, Move(aRunnable));
+  return DispatcherTrait::Dispatch(aCategory, Move(aRunnable));
 }
 
 nsISerialEventTarget*
@@ -4459,8 +4459,7 @@ nsDocument::SetStyleSheetApplicableState(StyleSheet* aSheet,
                         &nsDocument::NotifyStyleSheetApplicableStateChanged);
     mSSApplicableStateNotificationPending =
       NS_SUCCEEDED(
-        Dispatch("nsDocument::NotifyStyleSheetApplicableStateChanged",
-                 TaskCategory::Other, notification.forget()));
+        Dispatch(TaskCategory::Other, notification.forget()));
   }
 }
 
@@ -5407,7 +5406,7 @@ nsDocument::UnblockDOMContentLoaded()
       NewRunnableMethod("nsDocument::DispatchContentLoadedEvents",
                         this,
                         &nsDocument::DispatchContentLoadedEvents);
-    Dispatch("nsDocument::DispatchContentLoadedEvents", TaskCategory::Other, ev.forget());
+    Dispatch(TaskCategory::Other, ev.forget());
   } else {
     DispatchContentLoadedEvents();
   }
@@ -7047,8 +7046,7 @@ nsDocument::NotifyPossibleTitleChange(bool aBoundTitleElement)
     NewNonOwningRunnableMethod("nsDocument::DoNotifyPossibleTitleChange",
                                this,
                                &nsDocument::DoNotifyPossibleTitleChange);
-  nsresult rv = Dispatch("nsDocument::DoNotifyPossibleTitleChange",
-                         TaskCategory::Other, do_AddRef(event));
+  nsresult rv = Dispatch(TaskCategory::Other, do_AddRef(event));
   if (NS_SUCCEEDED(rv)) {
     mPendingTitleChangeEvent = Move(event);
   }
@@ -8894,7 +8892,7 @@ nsDocument::PostUnblockOnloadEvent()
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   nsCOMPtr<nsIRunnable> evt = new nsUnblockOnloadEvent(this);
   nsresult rv =
-    Dispatch("nsUnblockOnloadEvent", TaskCategory::Other, evt.forget());
+    Dispatch(TaskCategory::Other, evt.forget());
   if (NS_SUCCEEDED(rv)) {
     // Stabilize block count so we don't post more events while this one is up
     ++mOnloadBlockCount;
@@ -9805,7 +9803,7 @@ nsDocument::UnsuppressEventHandlingAndFireEvents(bool aFireEvents)
   if (aFireEvents) {
     MOZ_RELEASE_ASSERT(NS_IsMainThread());
     nsCOMPtr<nsIRunnable> ded = new nsDelayedEventDispatcher(documents);
-    Dispatch("nsDelayedEventDispatcher", TaskCategory::Other, ded.forget());
+    Dispatch(TaskCategory::Other, ded.forget());
   } else {
     FireOrClearDelayedEvents(documents, false);
   }
@@ -10958,7 +10956,7 @@ nsIDocument::AsyncExitFullscreen(nsIDocument* aDoc)
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   nsCOMPtr<nsIRunnable> exit = new nsCallExitFullscreen(aDoc);
   if (aDoc) {
-    aDoc->Dispatch("nsCallExitFullscreen", TaskCategory::Other, exit.forget());
+    aDoc->Dispatch(TaskCategory::Other, exit.forget());
   } else {
     NS_DispatchToCurrentThread(exit.forget());
   }
@@ -11239,7 +11237,7 @@ nsDocument::AsyncRequestFullScreen(UniquePtr<FullscreenRequest>&& aRequest)
   // Request full-screen asynchronously.
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   nsCOMPtr<nsIRunnable> event = new nsCallRequestFullScreen(Move(aRequest));
-  Dispatch("nsCallRequestFullScreen", TaskCategory::Other, event.forget());
+  Dispatch(TaskCategory::Other, event.forget());
 }
 
 void
@@ -12116,7 +12114,7 @@ nsDocument::RequestPointerLock(Element* aElement, CallerType aCallerType)
                                  aCallerType == CallerType::System;
   nsCOMPtr<nsIRunnable> request =
     new PointerLockRequest(aElement, userInputOrSystemCaller);
-  Dispatch("PointerLockRequest", TaskCategory::Other, request.forget());
+  Dispatch(TaskCategory::Other, request.forget());
 }
 
 bool
@@ -12301,7 +12299,7 @@ nsDocument::PostVisibilityUpdateEvent()
     NewRunnableMethod("nsDocument::UpdateVisibilityState",
                       this,
                       &nsDocument::UpdateVisibilityState);
-  Dispatch("nsDocument::UpdateVisibilityState", TaskCategory::Other, event.forget());
+  Dispatch(TaskCategory::Other, event.forget());
 }
 
 void
@@ -12334,10 +12332,10 @@ nsDocument::GetVisibilityState(nsAString& aState)
 nsIDocument::DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
 {
   aWindowSizes->mDOMOtherSize +=
-    nsINode::SizeOfExcludingThis(aWindowSizes->mMallocSizeOf);
+    nsINode::SizeOfExcludingThis(aWindowSizes->mState);
 
   if (mPresShell) {
-    mPresShell->AddSizeOfIncludingThis(aWindowSizes->mMallocSizeOf,
+    mPresShell->AddSizeOfIncludingThis(aWindowSizes->mState.mMallocSizeOf,
                                        &aWindowSizes->mArenaStats,
                                        &aWindowSizes->mLayoutPresShellSize,
                                        &aWindowSizes->mLayoutStyleSetsSize,
@@ -12347,11 +12345,12 @@ nsIDocument::DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
   }
 
   aWindowSizes->mPropertyTablesSize +=
-    mPropertyTable.SizeOfExcludingThis(aWindowSizes->mMallocSizeOf);
+    mPropertyTable.SizeOfExcludingThis(aWindowSizes->mState.mMallocSizeOf);
   for (uint32_t i = 0, count = mExtraPropertyTables.Length();
        i < count; ++i) {
     aWindowSizes->mPropertyTablesSize +=
-      mExtraPropertyTables[i]->SizeOfIncludingThis(aWindowSizes->mMallocSizeOf);
+      mExtraPropertyTables[i]->SizeOfIncludingThis(
+        aWindowSizes->mState.mMallocSizeOf);
   }
 
   if (EventListenerManager* elm = GetExistingListenerManager()) {
@@ -12366,7 +12365,7 @@ nsIDocument::DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
 void
 nsIDocument::DocAddSizeOfIncludingThis(nsWindowSizes* aWindowSizes) const
 {
-  aWindowSizes->mDOMOtherSize += aWindowSizes->mMallocSizeOf(this);
+  aWindowSizes->mDOMOtherSize += aWindowSizes->mState.mMallocSizeOf(this);
   DocAddSizeOfExcludingThis(aWindowSizes);
 }
 
@@ -12387,7 +12386,7 @@ SizeOfOwnedSheetArrayExcludingThis(const nsTArray<RefPtr<StyleSheet>>& aSheets,
 }
 
 size_t
-nsDocument::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
+nsDocument::SizeOfExcludingThis(SizeOfState& aState) const
 {
   // This SizeOfExcludingThis() overrides the one from nsINode.  But
   // nsDocuments can only appear at the top of the DOM tree, and we use the
@@ -12405,7 +12404,7 @@ nsDocument::DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
        node;
        node = node->GetNextNode(this))
   {
-    size_t nodeSize = node->SizeOfIncludingThis(aWindowSizes->mMallocSizeOf);
+    size_t nodeSize = node->SizeOfIncludingThis(aWindowSizes->mState);
     size_t* p;
 
     switch (node->NodeType()) {
@@ -12435,33 +12434,34 @@ nsDocument::DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
 
   aWindowSizes->mStyleSheetsSize +=
     SizeOfOwnedSheetArrayExcludingThis(mStyleSheets,
-                                       aWindowSizes->mMallocSizeOf);
+                                       aWindowSizes->mState.mMallocSizeOf);
   // Note that we do not own the sheets pointed to by mOnDemandBuiltInUASheets
   // (the nsLayoutStyleSheetCache singleton does).
   aWindowSizes->mStyleSheetsSize +=
     mOnDemandBuiltInUASheets.ShallowSizeOfExcludingThis(
-        aWindowSizes->mMallocSizeOf);
+      aWindowSizes->mState.mMallocSizeOf);
   for (auto& sheetArray : mAdditionalSheets) {
     aWindowSizes->mStyleSheetsSize +=
       SizeOfOwnedSheetArrayExcludingThis(sheetArray,
-                                         aWindowSizes->mMallocSizeOf);
+                                         aWindowSizes->mState.mMallocSizeOf);
   }
   // Lumping in the loader with the style-sheets size is not ideal,
   // but most of the things in there are in fact stylesheets, so it
   // doesn't seem worthwhile to separate it out.
   aWindowSizes->mStyleSheetsSize +=
-    CSSLoader()->SizeOfIncludingThis(aWindowSizes->mMallocSizeOf);
+    CSSLoader()->SizeOfIncludingThis(aWindowSizes->mState.mMallocSizeOf);
+
+  aWindowSizes->mDOMOtherSize += mAttrStyleSheet
+                               ? mAttrStyleSheet->DOMSizeOfIncludingThis(
+                                   aWindowSizes->mState.mMallocSizeOf)
+                               : 0;
 
   aWindowSizes->mDOMOtherSize +=
-    mAttrStyleSheet ?
-    mAttrStyleSheet->DOMSizeOfIncludingThis(aWindowSizes->mMallocSizeOf) :
-    0;
+    mStyledLinks.ShallowSizeOfExcludingThis(
+      aWindowSizes->mState.mMallocSizeOf);
 
   aWindowSizes->mDOMOtherSize +=
-    mStyledLinks.ShallowSizeOfExcludingThis(aWindowSizes->mMallocSizeOf);
-
-  aWindowSizes->mDOMOtherSize +=
-    mIdentifierMap.SizeOfExcludingThis(aWindowSizes->mMallocSizeOf);
+    mIdentifierMap.SizeOfExcludingThis(aWindowSizes->mState.mMallocSizeOf);
 
   // Measurement of the following members may be added later if DMD finds it
   // is worthwhile:
@@ -12848,8 +12848,7 @@ nsDocument::ScheduleIntersectionObserverNotification()
     NewRunnableMethod("nsDocument::NotifyIntersectionObservers",
                       this,
                       &nsDocument::NotifyIntersectionObservers);
-  Dispatch("nsDocument::IntersectionObserverNotification", TaskCategory::Other,
-           notification.forget());
+  Dispatch(TaskCategory::Other, notification.forget());
 }
 
 void
@@ -13140,8 +13139,7 @@ nsIDocument::RebuildUserFontSet()
       NewRunnableMethod("nsIDocument::HandleRebuildUserFontSet",
                         this,
                         &nsIDocument::HandleRebuildUserFontSet);
-    if (NS_SUCCEEDED(Dispatch("nsIDocument::HandleRebuildUserFontSet",
-                              TaskCategory::Other, ev.forget()))) {
+    if (NS_SUCCEEDED(Dispatch(TaskCategory::Other, ev.forget()))) {
       mPostedFlushUserFontSet = true;
     }
   }
@@ -13294,24 +13292,24 @@ nsDocument::PrincipalFlashClassification()
                 denyTables, denyExceptionsTables,
                 subDocDenyTables, subDocDenyExceptionsTables,
                 tables;
-  Preferences::GetCString("urlclassifier.flashAllowTable", &allowTables);
+  Preferences::GetCString("urlclassifier.flashAllowTable", allowTables);
   MaybeAddTableToTableList(allowTables, tables);
   Preferences::GetCString("urlclassifier.flashAllowExceptTable",
-                          &allowExceptionsTables);
+                          allowExceptionsTables);
   MaybeAddTableToTableList(allowExceptionsTables, tables);
-  Preferences::GetCString("urlclassifier.flashTable", &denyTables);
+  Preferences::GetCString("urlclassifier.flashTable", denyTables);
   MaybeAddTableToTableList(denyTables, tables);
   Preferences::GetCString("urlclassifier.flashExceptTable",
-                          &denyExceptionsTables);
+                          denyExceptionsTables);
   MaybeAddTableToTableList(denyExceptionsTables, tables);
 
   bool isThirdPartyDoc = IsThirdParty();
   if (isThirdPartyDoc) {
     Preferences::GetCString("urlclassifier.flashSubDocTable",
-                            &subDocDenyTables);
+                            subDocDenyTables);
     MaybeAddTableToTableList(subDocDenyTables, tables);
     Preferences::GetCString("urlclassifier.flashSubDocExceptTable",
-                            &subDocDenyExceptionsTables);
+                            subDocDenyExceptionsTables);
     MaybeAddTableToTableList(subDocDenyExceptionsTables, tables);
   }
 

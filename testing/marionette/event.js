@@ -38,6 +38,9 @@ function getDOMWindowUtils(win) {
       .getInterface(Ci.nsIDOMWindowUtils);
 }
 
+/** @namespace */
+this.event = {};
+
 event.MouseEvents = {
   click: 0,
   dblclick: 1,
@@ -628,7 +631,7 @@ function emulateToActivateModifiers_(TIP, keyEvent, win = window) {
       {key: "ScrollLock", attr: "scrollLockKey"},
       {key: "SymbolLock", attr: "symbolLockKey"},
     ],
-  }
+  };
 
   for (let i = 0; i < modifiers.normal.length; i++) {
     if (!keyEvent[modifiers.normal[i].attr]) {
@@ -639,7 +642,7 @@ function emulateToActivateModifiers_(TIP, keyEvent, win = window) {
     }
     let event = new KeyboardEvent("", {key: modifiers.normal[i].key});
     TIP.keydown(event,
-      TIP.KEY_NON_PRINTABLE_KEY | TIP.KEY_DONT_DISPATCH_MODIFIER_KEY_EVENT);
+        TIP.KEY_NON_PRINTABLE_KEY | TIP.KEY_DONT_DISPATCH_MODIFIER_KEY_EVENT);
     modifiers.normal[i].activated = true;
   }
 
@@ -652,9 +655,9 @@ function emulateToActivateModifiers_(TIP, keyEvent, win = window) {
     }
     let event = new KeyboardEvent("", {key: modifiers.lockable[j].key});
     TIP.keydown(event,
-      TIP.KEY_NON_PRINTABLE_KEY | TIP.KEY_DONT_DISPATCH_MODIFIER_KEY_EVENT);
+        TIP.KEY_NON_PRINTABLE_KEY | TIP.KEY_DONT_DISPATCH_MODIFIER_KEY_EVENT);
     TIP.keyup(event,
-      TIP.KEY_NON_PRINTABLE_KEY | TIP.KEY_DONT_DISPATCH_MODIFIER_KEY_EVENT);
+        TIP.KEY_NON_PRINTABLE_KEY | TIP.KEY_DONT_DISPATCH_MODIFIER_KEY_EVENT);
     modifiers.lockable[j].activated = true;
   }
 
@@ -672,7 +675,7 @@ function emulateToInactivateModifiers_(TIP, modifiers, win = window) {
     }
     let event = new KeyboardEvent("", {key: modifiers.normal[i].key});
     TIP.keyup(event,
-      TIP.KEY_NON_PRINTABLE_KEY | TIP.KEY_DONT_DISPATCH_MODIFIER_KEY_EVENT);
+        TIP.KEY_NON_PRINTABLE_KEY | TIP.KEY_DONT_DISPATCH_MODIFIER_KEY_EVENT);
   }
   for (let j = 0; j < modifiers.lockable.length; j++) {
     if (!modifiers.lockable[j].activated) {
@@ -683,9 +686,9 @@ function emulateToInactivateModifiers_(TIP, modifiers, win = window) {
     }
     let event = new KeyboardEvent("", {key: modifiers.lockable[j].key});
     TIP.keydown(event,
-      TIP.KEY_NON_PRINTABLE_KEY | TIP.KEY_DONT_DISPATCH_MODIFIER_KEY_EVENT);
+        TIP.KEY_NON_PRINTABLE_KEY | TIP.KEY_DONT_DISPATCH_MODIFIER_KEY_EVENT);
     TIP.keyup(event,
-      TIP.KEY_NON_PRINTABLE_KEY | TIP.KEY_DONT_DISPATCH_MODIFIER_KEY_EVENT);
+        TIP.KEY_NON_PRINTABLE_KEY | TIP.KEY_DONT_DISPATCH_MODIFIER_KEY_EVENT);
   }
 }
 
@@ -1293,7 +1296,7 @@ event.sendKeyUp = function(keyToSend, modifiers, window = undefined) {
  *
  * @param {string} keyToSend
  *     Code point or normalized key value
- * @param {?} modifiers
+ * @param {Object.<string, boolean>} modifiers
  *     Object with properties used in KeyboardEvent (shiftkey, repeat, ...)
  *     as well as, the event |type| such as keydown. All properties
  *     are optional.
