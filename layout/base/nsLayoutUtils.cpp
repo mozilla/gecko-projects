@@ -4081,8 +4081,21 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
 void MarkModifiedCallback(nsIFrame* aFrame,
                           DisplayItemData* aItem)
 {
-  if (!aFrame->IsFrameModified() && aItem->GetGeometry() &&
+  if (aFrame->IsFrameModified()) {
+    return;
+  }
+  if (aItem->GetGeometry() &&
       aItem->GetGeometry()->InvalidateForSyncDecodeImages()) {
+    aFrame->MarkNeedsDisplayItemRebuild();
+  }
+
+  // Manually check for plugin items. These change behaviour when we're sync
+  // decoding (send events to reftests), but don't usually have geometry as
+  // we only store geometry for items within PaintedLayers.
+  DisplayItemType type = GetDisplayItemTypeFromKey(aItem->GetDisplayItemKey());
+  if (type == TYPE_PLUGIN ||
+      type == TYPE_PLUGIN_READBACK ||
+      type == TYPE_PLUGIN_VIDEO) {
     aFrame->MarkNeedsDisplayItemRebuild();
   }
 }
