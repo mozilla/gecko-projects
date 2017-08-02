@@ -3724,15 +3724,43 @@ void MergeLayerEventRegions(nsDisplayItem* aOldItem,
   }
 }
 
-void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
-                       nsDisplayList* aNewList,
-                       nsDisplayList* aOldList,
-                       nsDisplayList* aOutList,
-                       uint32_t& aTotalDisplayItems,
-                       uint32_t& aReusedDisplayItems)
+static void
+IncrementSubDocPresShellPaintCount(nsDisplayListBuilder* aBuilder,
+                                   nsDisplayItem* aItem)
+{
+  MOZ_ASSERT(aItem->GetType() == TYPE_SUBDOCUMENT);
+
+  nsSubDocumentFrame* subDocFrame =
+    static_cast<nsDisplaySubDocument*>(aItem)->SubDocumentFrame();
+  MOZ_ASSERT(subDocFrame);
+
+  nsIPresShell* presShell = subDocFrame->GetSubdocumentPresShellForPainting(0);
+  MOZ_ASSERT(presShell);
+
+  aBuilder->IncrementPresShellPaintCount(presShell);
+}
+
+static void
+MergeDisplayLists(nsDisplayListBuilder* aBuilder,
+                  nsDisplayList* aNewList,
+                  nsDisplayList* aOldList,
+                  nsDisplayList* aOutList,
+                  uint32_t& aTotalDisplayItems,
+                  uint32_t& aReusedDisplayItems)
 {
   nsDisplayList merged;
   nsDisplayItem* old;
+
+  const auto ReuseItem = [&](nsDisplayItem* aItem) {
+    merged.AppendToTop(aItem);
+    aTotalDisplayItems++;
+    aReusedDisplayItems++;
+    aItem->SetReused(true);
+
+    if (aItem->GetType() == TYPE_SUBDOCUMENT) {
+      IncrementSubDocPresShellPaintCount(aBuilder, aItem);
+    }
+  };
 
   nsDataHashtable<DisplayItemHashEntry, nsDisplayItem*> oldListLookup(aOldList->Count());
 
@@ -3765,7 +3793,9 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
 
         if (oldItem->GetChildren()) {
           MOZ_ASSERT(i->GetChildren());
-          MergeDisplayLists(aBuilder, i->GetChildren(), oldItem->GetChildren(), oldItem->GetChildren(), aTotalDisplayItems, aReusedDisplayItems);
+          MergeDisplayLists(aBuilder, i->GetChildren(),
+                            oldItem->GetChildren(), oldItem->GetChildren(),
+                            aTotalDisplayItems, aReusedDisplayItems);
         }
         if (oldItem->GetType() == TYPE_LAYER_EVENT_REGIONS) {
           MergeLayerEventRegions(oldItem, i, true);
@@ -3774,10 +3804,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
       } else {
         while ((old = aOldList->RemoveBottom()) && !IsSameItem(i, old)) {
           if (!IsAnyAncestorModified(old->Frame())) {
-            merged.AppendToTop(old);
-            aTotalDisplayItems++;
-            aReusedDisplayItems++;
-            old->SetReused(true);
+            ReuseItem(old);
           } else {
             // TODO: Is it going to be safe to call the dtor on a display item that belongs
             // to a deleted frame? Can we ensure that it is? Or do we need to make sure we
@@ -3819,10 +3846,7 @@ void MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   // Reuse the remaining items from the old display list.
   while ((old = aOldList->RemoveBottom())) {
     if (!IsAnyAncestorModified(old->Frame())) {
-      merged.AppendToTop(old);
-      old->SetReused(true);
-      aTotalDisplayItems++;
-      aReusedDisplayItems++;
+      ReuseItem(old);
 
       if (old->GetChildren()) {
         // We are calling MergeDisplayLists() to ensure that the display items
@@ -3882,41 +3906,6 @@ nsLayoutUtils::MaybeCreateDisplayPortInFirstScrollFrameEncountered(
   }
 
   return false;
-}
-
-static void
-VisitSubDocPresShell(nsDisplayListBuilder& aBuilder,
-                     nsDisplaySubDocument* aSubDocItem)
-{
-  MOZ_ASSERT(aSubDocItem);
-
-  nsSubDocumentFrame* subDocFrame = aSubDocItem->SubDocumentFrame();
-  MOZ_ASSERT(subDocFrame);
-
-  nsIPresShell* presShell = subDocFrame->GetSubdocumentPresShellForPainting(0);
-  MOZ_ASSERT(presShell);
-
-  aBuilder.IncrementPresShellPaintCount(presShell);
-}
-
-// TODO: This can probably be merged with something else
-static void
-FindSubDocumentsAndVisitPresShells(nsDisplayListBuilder& aBuilder,
-                                   nsDisplayList& aList)
-{
-  // Find nsDisplaySubDocuments from the list
-  for (nsDisplayItem* i = aList.GetBottom(); i; i = i->GetAbove()) {
-    nsDisplayList* children = i->GetChildren();
-
-    if (children) {
-      FindSubDocumentsAndVisitPresShells(aBuilder, *children);
-    }
-
-    if (i->GetType() == TYPE_SUBDOCUMENT) {
-      nsDisplaySubDocument* subdoc = static_cast<nsDisplaySubDocument*>(i);
-      VisitSubDocPresShell(aBuilder, subdoc);
-    }
-  }
 }
 
 static void
@@ -4361,7 +4350,6 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
             // PreProcessRetainedDisplayList didn't end up changing anything
             // Invariant: display items should have their original state here.
             //printf_stderr("Skipping display list building since nothing needed to be done\n");
-            FindSubDocumentsAndVisitPresShells(builder, list);
           }
 
           // |modifiedDL| can sometimes be empty here. We still perform the
