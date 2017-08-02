@@ -841,16 +841,14 @@ nsSimplePageSequenceFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
     nsIFrame* child = PrincipalChildList().FirstChild();
     nsRect visible = aBuilder->GetVisibleRect();
-    nsRect dirty = aBuilder->GetDirtyRect();
     visible.ScaleInverseRoundOut(PresContext()->GetPrintPreviewScale());
-    dirty.ScaleInverseRoundOut(PresContext()->GetPrintPreviewScale());
 
     while (child) {
-      if (child->GetVisualOverflowRectRelativeToParent().Intersects(dirty)) {
+      if (child->GetVisualOverflowRectRelativeToParent().Intersects(visible)) {
         nsDisplayListBuilder::AutoBuildingDisplayList
           buildingForChild(aBuilder, child,
                            visible - child->GetPosition(),
-                           dirty - child->GetPosition(),
+                           visible - child->GetPosition(),
                            aBuilder->IsAtRootOfPseudoStackingContext());
         child->BuildDisplayListForStackingContext(aBuilder, &content);
         aBuilder->ResetMarkedFramesForDisplayList();
