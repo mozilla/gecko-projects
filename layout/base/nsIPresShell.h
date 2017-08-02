@@ -1261,11 +1261,13 @@ public:
    * APPEND_UNSCROLLED_ONLY only attempts to add the unscrolled item, so that we
    * can add it manually after LayoutUseContainersForRootFrame has built the
    * scrolling ContainerLayer.
+   * APPEND_REUSABLE_ITEMS marks the added background items reusable.
    */
   enum {
     FORCE_DRAW = 0x01,
     ADD_FOR_SUBDOC = 0x02,
     APPEND_UNSCROLLED_ONLY = 0x04,
+    APPEND_REUSABLE_ITEMS = 0x08
   };
   virtual void AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
                                             nsDisplayList& aList,

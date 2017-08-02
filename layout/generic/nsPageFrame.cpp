@@ -580,7 +580,7 @@ nsPageFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     nsRect backgroundRect =
       nsRect(aBuilder->ToReferenceFrame(child), child->GetSize());
 
-    uint32_t flags = nsIPresShell::ADD_FOR_SUBDOC;
+    uint32_t flags = nsIPresShell::APPEND_REUSABLE_ITEMS;
     PresContext()->GetPresShell()->AddCanvasBackgroundColorItem(
       *aBuilder, content, child, backgroundRect, NS_RGBA(0,0,0,0), flags);
   }
