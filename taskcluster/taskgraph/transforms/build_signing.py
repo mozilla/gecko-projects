@@ -55,40 +55,29 @@ def _generate_upstream_artifacts(build_platform, is_nightly=False):
                 'public/build/target.apk',
                 'public/build/en-US/target.apk'
             ],
-            'format': 'jar',
+            'formats': ['jar'],
         }]
-    # XXX: Mac and Windows don't sign mars because internal aren't signed at
-    # this stage of the release
+    # XXX: Mars aren't signed here (on any platform) because internals will be
+    # signed at after this stage of the release
     elif 'macosx' in build_platform:
         artifacts_specificities = [{
             'artifacts': ['public/build/target.dmg'],
-            'format': 'macapp',
+            'formats': ['macapp', 'widevine'],
         }]
-    elif 'win64' in build_platform:
+    elif 'win' in build_platform:
         artifacts_specificities = [{
             'artifacts': [
                 'public/build/target.zip',
                 'public/build/setup.exe'
             ],
-            'format': 'sha2signcode',
+            'formats': ['sha2signcode', 'widevine'],
         }]
-    elif 'win32' in build_platform:
-        artifacts_specificities = [{
-            'artifacts': [
-                'public/build/target.zip',
-                'public/build/setup.exe',
-                ],
-            'format': 'sha2signcode',
-        }]
-        if is_nightly:
+        if 'win32' in build_platform and is_nightly:
             artifacts_specificities[0]['artifacts'] += ['public/build/setup-stub.exe']
     elif 'linux' in build_platform:
         artifacts_specificities = [{
             'artifacts': ['public/build/target.tar.bz2'],
-            'format': 'gpg',
-        }, {
-            'artifacts': ['public/build/update/target.complete.mar'],
-            'format': 'mar_sha384',
+            'formats': ['gpg', 'widevine'],
         }]
     else:
         raise Exception("Platform not implemented for signing")
@@ -97,5 +86,5 @@ def _generate_upstream_artifacts(build_platform, is_nightly=False):
         'taskId': {'task-reference': '<build>'},
         'taskType': 'build',
         'paths': specificity['artifacts'],
-        'formats': [specificity['format']],
+        'formats': specificity['formats'],
     } for specificity in artifacts_specificities]
