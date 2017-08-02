@@ -20,6 +20,7 @@
 #include "nsAttrValueInlines.h"
 #include "nsIDocShell.h"
 #include "nsIContentViewer.h"
+#include "nsCanvasFrame.h"
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
 #include "nsIDocument.h"
@@ -387,6 +388,20 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   int32_t parentAPD = PresContext()->AppUnitsPerDevPixel();
   int32_t subdocAPD = presContext->AppUnitsPerDevPixel();
 
+  nsIScrollableFrame* sf = presShell->GetRootScrollFrameAsScrollable();
+  if (sf) {
+    // We are forcing a rebuild of nsDisplayCanvasBackgroundColor to make sure
+    // that the canvas background color will be set correctly, and that only one
+    // unscrollable item will be created.
+    // This is done to avoid, for example, a case where only scrollbar frames
+    // are invalidated - we would skip creating nsDisplayCanvasBackgroundColor
+    // and possibly end up with an extra nsDisplaySolidColor item.
+    nsCanvasFrame* canvasFrame = do_QueryFrame(sf->GetScrolledFrame());
+    if (canvasFrame) {
+      aBuilder->MarkFrameForDisplayIfVisible(canvasFrame);
+    }
+  }
+
   nsRect visible;
   nsRect dirty;
   bool haveDisplayPort = false;
@@ -434,7 +449,6 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     clipState.ClipContainingBlockDescendantsToContentBox(aBuilder, this);
   }
 
-  nsIScrollableFrame *sf = presShell->GetRootScrollFrameAsScrollable();
   bool constructResolutionItem = subdocRootFrame &&
     (presShell->GetResolution() != 1.0);
   bool constructZoomItem = subdocRootFrame && parentAPD != subdocAPD;
