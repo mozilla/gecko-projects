@@ -2907,6 +2907,11 @@ public:
     mForceTransparentSurface = true;
   }
 
+  void RestoreState() {
+    mIsOpaque = false;
+    mForceTransparentSurface = false;
+  }
+
 private:
   // This class is only used on stack, so we don't have to worry about leaking
   // it.  Don't let us be heap-allocated!

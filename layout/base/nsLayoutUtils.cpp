@@ -3588,6 +3588,7 @@ void PreProcessRetainedDisplayList(nsDisplayListBuilder* aBuilder,
     saved.AppendToTop(i);
   }
   aList->AppendToTop(&saved);
+  aList->RestoreState();
 }
 
 bool IsSameItem(nsDisplayItem* aFirst, nsDisplayItem* aSecond)
