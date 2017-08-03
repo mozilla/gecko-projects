@@ -818,8 +818,8 @@ HTMLInputElement::IsPopupBlocked() const
     return true;
   }
 
-  // Check if page is allowed to open the popup
-  if (win->GetPopupControlState() <= openControlled) {
+  // Check if page can open a popup without abuse regardless of allowed events
+  if (win->GetPopupControlState() <= openBlocked) {
     return false;
   }
 
@@ -3000,6 +3000,14 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue,
 {
   NS_PRECONDITION(GetValueMode() != VALUE_MODE_FILENAME,
                   "Don't call SetValueInternal for file inputs");
+
+  // We want to remember if the SetValueInternal() call is being made for a XUL
+  // element.  We do that by looking at the parent node here, and if that node
+  // is a XUL node, we consider our control a XUL control.
+  nsIContent* parent = GetParent();
+  if (parent && parent->IsXULElement()) {
+    aFlags |= nsTextEditorState::eSetValue_ForXUL;
+  }
 
   switch (GetValueMode()) {
     case VALUE_MODE_VALUE:
@@ -6402,18 +6410,30 @@ HTMLInputElement::SubmitNamesValues(HTMLFormSubmission* aFormSubmission)
 NS_IMETHODIMP
 HTMLInputElement::SaveState()
 {
-  RefPtr<HTMLInputElementState> inputState;
+  nsPresState* state = nullptr;
   switch (GetValueMode()) {
     case VALUE_MODE_DEFAULT_ON:
       if (mCheckedChanged) {
-        inputState = new HTMLInputElementState();
+        state = GetPrimaryPresState();
+        if (!state) {
+          return NS_OK;
+        }
+
+        RefPtr<HTMLInputElementState> inputState = new HTMLInputElementState();
         inputState->SetChecked(mChecked);
+        state->SetStateProperty(inputState);
       }
       break;
     case VALUE_MODE_FILENAME:
       if (!mFileData->mFilesOrDirectories.IsEmpty()) {
-        inputState = new HTMLInputElementState();
+        state = GetPrimaryPresState();
+        if (!state) {
+          return NS_OK;
+        }
+
+        RefPtr<HTMLInputElementState> inputState = new HTMLInputElementState();
         inputState->SetFilesOrDirectories(mFileData->mFilesOrDirectories);
+        state->SetStateProperty(inputState);
       }
       break;
     case VALUE_MODE_VALUE:
@@ -6426,7 +6446,12 @@ HTMLInputElement::SaveState()
         break;
       }
 
-      inputState = new HTMLInputElementState();
+      state = GetPrimaryPresState();
+      if (!state) {
+        return NS_OK;
+      }
+
+      RefPtr<HTMLInputElementState> inputState = new HTMLInputElementState();
       nsAutoString value;
       GetValue(value, CallerType::System);
 
@@ -6443,18 +6468,14 @@ HTMLInputElement::SaveState()
       }
 
       inputState->SetValue(value);
+      state->SetStateProperty(inputState);
       break;
   }
 
-  if (inputState) {
-    nsPresState* state = GetPrimaryPresState();
-    if (state) {
-      state->SetStateProperty(inputState);
-    }
-  }
-
   if (mDisabledChanged) {
-    nsPresState* state = GetPrimaryPresState();
+    if (!state) {
+      state = GetPrimaryPresState();
+    }
     if (state) {
       // We do not want to save the real disabled state but the disabled
       // attribute.

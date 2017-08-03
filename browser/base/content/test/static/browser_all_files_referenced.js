@@ -23,6 +23,9 @@ var gExceptionPaths = [
   // https://github.com/mozilla/normandy/issues/577
   "resource://shield-recipe-client/test/",
 
+  // https://github.com/mozilla/activity-stream/issues/3053
+  "resource://activity-stream/data/content/tippytop/images/",
+
   // browser/extensions/pdfjs/content/build/pdf.js#1999
   "resource://pdf.js/web/images/",
 ];
@@ -114,6 +117,9 @@ var whitelist = [
 
   // browser/extensions/pdfjs/content/web/viewer.js#7450
   {file: "resource://pdf.js/web/debugger.js"},
+
+  // Needed by Normandy
+  {file: "resource://gre/modules/IndexedDB.jsm"},
 
   // Starting from here, files in the whitelist are bugs that need fixing.
   // Bug 1339420
@@ -522,7 +528,7 @@ add_task(async function checkAllTheFiles() {
   // so that all chrome paths can be recorded.
   let manifestPromises = [];
   uris = uris.filter(uri => {
-    let path = uri.path;
+    let path = uri.pathQueryRef;
     if (path.endsWith(".manifest")) {
       manifestPromises.push(parseManifest(uri));
       return false;
@@ -539,7 +545,7 @@ add_task(async function checkAllTheFiles() {
   let allPromises = [];
 
   for (let uri of uris) {
-    let path = uri.path;
+    let path = uri.pathQueryRef;
     if (path.endsWith(".css"))
       allPromises.push(parseCSSFile(uri));
     else if (kCodeExtensions.some(ext => path.endsWith(ext)))

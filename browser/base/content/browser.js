@@ -4097,8 +4097,10 @@ function FillHistoryMenu(aParent) {
       item.setAttribute("historyindex", j - index);
 
       if (j != index) {
-        item.setAttribute("image",
-                          PlacesUtils.urlWithSizeRef(window, "page-icon:" + uri, 16));
+        // Use list-style-image rather than the image attribute in order to
+        // allow CSS to override this.
+        item.style.listStyleImage =
+          "url(" + PlacesUtils.urlWithSizeRef(window, "page-icon:" + uri, 16) + ")";
       }
 
       if (j < index) {
@@ -4497,7 +4499,7 @@ var XULBrowserWindow = {
     LinkTargetDisplay.update();
   },
 
-  showTooltip(x, y, tooltip, direction) {
+  showTooltip(x, y, tooltip, direction, browser) {
     if (Cc["@mozilla.org/widget/dragservice;1"].getService(Ci.nsIDragService).
         getCurrentSession()) {
       return;
@@ -4509,8 +4511,7 @@ var XULBrowserWindow = {
     elt.label = tooltip;
     elt.style.direction = direction;
 
-    let anchor = gBrowser.selectedBrowser;
-    elt.openPopupAtScreen(anchor.boxObject.screenX + x, anchor.boxObject.screenY + y, false, null);
+    elt.openPopupAtScreen(browser.boxObject.screenX + x, browser.boxObject.screenY + y, false, null);
   },
 
   hideTooltip() {
@@ -5046,8 +5047,9 @@ var CombinedStopReload = {
   },
 
   switchToStop(aRequest, aWebProgress) {
-    if (!this._initialized || !this._shouldSwitch(aRequest))
+    if (!this._initialized || !this._shouldSwitch(aRequest, aWebProgress)) {
       return;
+    }
 
     let shouldAnimate = AppConstants.MOZ_PHOTON_ANIMATIONS &&
                         aRequest instanceof Ci.nsIRequest &&
@@ -5066,9 +5068,10 @@ var CombinedStopReload = {
   },
 
   switchToReload(aRequest, aWebProgress) {
-    if (!this._initialized || !this._shouldSwitch(aRequest) ||
-        !this.reload.hasAttribute("displaystop"))
+    if (!this._initialized || !this._shouldSwitch(aRequest, aWebProgress) ||
+        !this.reload.hasAttribute("displaystop")) {
       return;
+    }
 
     let shouldAnimate = AppConstants.MOZ_PHOTON_ANIMATIONS &&
                         aRequest instanceof Ci.nsIRequest &&
@@ -5106,15 +5109,15 @@ var CombinedStopReload = {
     }, 650, this);
   },
 
-  _shouldSwitch(aRequest) {
-    if (!aRequest ||
-        !aRequest.originalURI ||
-        aRequest.originalURI.spec.startsWith("about:reader"))
-      return true;
-
-    if (aRequest.originalURI.schemeIs("chrome") ||
-        aRequest.originalURI.schemeIs("about"))
+  _shouldSwitch(aRequest, aWebProgress) {
+    if (aRequest &&
+        aRequest.originalURI &&
+        (aRequest.originalURI.schemeIs("chrome") ||
+         (aRequest.originalURI.schemeIs("about") &&
+          aWebProgress.isTopLevel &&
+          !aRequest.originalURI.spec.startsWith("about:reader")))) {
       return false;
+    }
 
     return true;
   },
@@ -5562,7 +5565,6 @@ var TabletModeUpdater = {
     }
     if (wasInTabletMode != isInTabletMode) {
       gUIDensity.update();
-      TabsInTitlebar.updateAppearance(true);
     }
   },
 };
@@ -5659,6 +5661,8 @@ var gUIDensity = {
       doc.removeAttribute("uidensity");
       break;
     }
+
+    TabsInTitlebar.updateAppearance(true);
   },
 };
 
@@ -6575,7 +6579,7 @@ var IndexedDBPromptHelper = {
     }
 
     // Get the host name if available or the file path otherwise.
-    var host = browser.currentURI.asciiHost || browser.currentURI.path;
+    var host = browser.currentURI.asciiHost || browser.currentURI.pathQueryRef;
 
     var message;
     var responseTopic;
@@ -7696,7 +7700,7 @@ var gIdentityHandler = {
     }
 
     let whitelist = /^(?:accounts|addons|cache|config|crashes|customizing|downloads|healthreport|home|license|newaddon|permissions|preferences|privatebrowsing|rights|searchreset|sessionrestore|support|welcomeback)(?:[?#]|$)/i;
-    this._isSecureInternalUI = uri.schemeIs("about") && whitelist.test(uri.path);
+    this._isSecureInternalUI = uri.schemeIs("about") && whitelist.test(uri.pathQueryRef);
 
     this._isExtensionPage = uri.schemeIs("moz-extension");
 
@@ -7710,7 +7714,7 @@ var gIdentityHandler = {
       if (resolvedURI.schemeIs("jar")) {
         // Given a URI "jar:<jar-file-uri>!/<jar-entry>"
         // create a new URI using <jar-file-uri>!/<jar-entry>
-        resolvedURI = NetUtil.newURI(resolvedURI.path);
+        resolvedURI = NetUtil.newURI(resolvedURI.pathQueryRef);
       }
       // Check the URI again after resolving.
       this._isURILoadedFromFile = resolvedURI.schemeIs("file");

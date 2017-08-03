@@ -47,8 +47,6 @@ XPCOMUtils.defineLazyPreferenceGetter(this, "processCount", "dom.ipc.processCoun
 
 XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
                                   "resource://gre/modules/AddonManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
-                                  "resource://gre/modules/AppConstants.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AsyncShutdown",
                                   "resource://gre/modules/AsyncShutdown.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ExtensionAPIs",
@@ -69,14 +67,10 @@ XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "OS",
                                   "resource://gre/modules/osfile.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
-                                  "resource://gre/modules/Preferences.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "require",
-                                  "resource://devtools/shared/Loader.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
                                   "resource://gre/modules/Schemas.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "setTimeout",
+                                  "resource://gre/modules/Timer.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
                                   "resource://gre/modules/TelemetryStopwatch.jsm");
 
@@ -114,6 +108,8 @@ XPCOMUtils.defineLazyGetter(this, "console", ExtensionUtils.getConsole);
 
 XPCOMUtils.defineLazyGetter(this, "LocaleData", () => ExtensionCommon.LocaleData);
 
+// The maximum time to wait for extension shutdown blockers to complete.
+const SHUTDOWN_BLOCKER_MAX_MS = 1000;
 
 // The list of properties that themes are allowed to contain.
 XPCOMUtils.defineLazyGetter(this, "allowedThemeProperties", () => {
@@ -196,7 +192,7 @@ const COMMENT_REGEXP = new RegExp(String.raw`
 // returns the UUID for a given add-on ID.
 var UUIDMap = {
   _read() {
-    let pref = Preferences.get(UUID_MAP_PREF, "{}");
+    let pref = Services.prefs.getStringPref(UUID_MAP_PREF, "{}");
     try {
       return JSON.parse(pref);
     } catch (e) {
@@ -206,7 +202,7 @@ var UUIDMap = {
   },
 
   _write(map) {
-    Preferences.set(UUID_MAP_PREF, JSON.stringify(map));
+    Services.prefs.setStringPref(UUID_MAP_PREF, JSON.stringify(map));
   },
 
   get(id, create = true) {
@@ -577,7 +573,7 @@ this.ExtensionData = class {
     let whitelist = [];
     for (let perm of this.manifest.permissions) {
       if (perm === "geckoProfiler") {
-        const acceptedExtensions = Preferences.get("extensions.geckoProfiler.acceptedExtensionIds");
+        const acceptedExtensions = Services.prefs.getStringPref("extensions.geckoProfiler.acceptedExtensionIds", "");
         if (!acceptedExtensions.split(",").includes(this.id)) {
           this.manifestError("Only whitelisted extensions are allowed to access the geckoProfiler.");
           continue;
@@ -1087,9 +1083,6 @@ this.Extension = class extends ExtensionData {
   startup() {
     this.startupPromise = this._startup();
 
-    this._startupComplete = this.startupPromise.catch(() => {});
-    OS.File.shutdown.addBlocker("Extension startup", this._startupComplete);
-
     return this.startupPromise;
   }
 
@@ -1209,9 +1202,16 @@ this.Extension = class extends ExtensionData {
   async shutdown(reason) {
     let promise = this._shutdown(reason);
 
+    let blocker = () => {
+      return Promise.race([
+        promise,
+        new Promise(resolve => setTimeout(resolve, SHUTDOWN_BLOCKER_MAX_MS)),
+      ]);
+    };
+
     AsyncShutdown.profileChangeTeardown.addBlocker(
       `Extension Shutdown: ${this.id} (${this.manifest && this.name})`,
-      promise.catch(() => {}));
+      blocker);
 
     // If we already have a shutdown promise for this extension, wait
     // for it to complete before replacing it with a new one. This can
@@ -1223,6 +1223,7 @@ this.Extension = class extends ExtensionData {
 
     let cleanup = () => {
       shutdownPromises.delete(this.id);
+      AsyncShutdown.profileChangeTeardown.removeBlocker(blocker);
     };
     shutdownPromises.set(this.id, promise.then(cleanup, cleanup));
 
