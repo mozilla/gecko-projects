@@ -1958,6 +1958,9 @@ public:
    * XXX check nsOptionEventGrabberWrapper/nsXULEventRedirectorWrapper
    */
   virtual uint32_t GetPerFrameKey() const { return uint32_t(GetType()); }
+
+  uint8_t GetFlags() { return GetDisplayItemFlagsForType(GetType()); }
+
   /**
    * This is called after we've constructed a display list for event handling.
    * When this is called, we've already ensured that aRect intersects the

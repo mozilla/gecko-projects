@@ -190,13 +190,12 @@ PrintDisplayItemTo(nsDisplayListBuilder* aBuilder, nsDisplayItem* aItem,
     aStream << "</a>";
   }
 #endif
-  uint32_t key = aItem->GetPerFrameKey();
-  Layer* layer = mozilla::FrameLayerBuilder::GetDebugOldLayerFor(f, key);
-  if (layer) {
+  DisplayItemData* data = mozilla::FrameLayerBuilder::GetOldDataFor(aItem);
+  if (data->GetLayer()) {
     if (aDumpHtml) {
-      aStream << nsPrintfCString(" <a href=\"#%p\">layer=%p</a>", layer, layer);
+      aStream << nsPrintfCString(" <a href=\"#%p\">layer=%p</a>", data->GetLayer(), data->GetLayer());
     } else {
-      aStream << nsPrintfCString(" layer=0x%p", layer);
+      aStream << nsPrintfCString(" layer=0x%p", data->GetLayer());
     }
   }
 #ifdef MOZ_DUMP_PAINTING

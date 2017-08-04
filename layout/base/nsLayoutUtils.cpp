@@ -4068,33 +4068,25 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
   return true;
 }
 
-void MarkModifiedCallback(nsIFrame* aFrame,
-                          DisplayItemData* aItem)
-{
-  if (aFrame->IsFrameModified()) {
-    return;
-  }
-  if (aItem->GetGeometry() &&
-      aItem->GetGeometry()->InvalidateForSyncDecodeImages()) {
-    aFrame->MarkNeedsDisplayItemRebuild();
-  }
-
-  // Manually check for plugin items. These change behaviour when we're sync
-  // decoding (send events to reftests), but don't usually have geometry as
-  // we only store geometry for items within PaintedLayers.
-  DisplayItemType type = GetDisplayItemTypeFromKey(aItem->GetDisplayItemKey());
-  if (type == TYPE_PLUGIN ||
-      type == TYPE_PLUGIN_READBACK ||
-      type == TYPE_PLUGIN_VIDEO) {
-    aFrame->MarkNeedsDisplayItemRebuild();
-  }
-}
-
 void MarkFramesWithItemsAndImagesModified(nsDisplayList* aList)
 {
   for (nsDisplayItem* i = aList->GetBottom(); i != nullptr; i = i->GetAbove()) {
     if (!i->HasDeletedFrame() && i->CanBeReused() && !i->Frame()->IsFrameModified()) {
-      FrameLayerBuilder::IterateRetainedDataFor(i->Frame(), MarkModifiedCallback);
+      // If we have existing cached geometry for this item, then check that for
+      // whether we need to invalidate for a sync decode. If we don't, then
+      // use the item's flags.
+      DisplayItemData* data = FrameLayerBuilder::GetOldDataFor(i);
+      bool invalidate = false;
+      if (data &&
+          data->GetGeometry()) {
+        invalidate = data->GetGeometry()->InvalidateForSyncDecodeImages();
+      } else if (!(i->GetFlags() & TYPE_RENDERS_NO_IMAGES)) {
+        invalidate = true;
+      }
+
+      if (invalidate) {
+        i->Frame()->MarkNeedsDisplayItemRebuild();
+      }
     }
     if (i->GetChildren()) {
       MarkFramesWithItemsAndImagesModified(i->GetChildren());

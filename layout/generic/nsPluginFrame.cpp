@@ -924,6 +924,11 @@ public:
   {
     return LAYER_ACTIVE;
   }
+
+  virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override
+  {
+    return new nsDisplayPluginGeometry(this, aBuilder);
+  }
 };
 
 static nsRect
@@ -975,6 +980,11 @@ public:
                                    const ContainerLayerParameters& aParameters) override
   {
     return LAYER_ACTIVE;
+  }
+
+  virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override
+  {
+    return new nsDisplayPluginGeometry(this, aBuilder);
   }
 
   nsNPAPIPluginInstance::VideoInfo* VideoInfo() { return mVideoInfo; }

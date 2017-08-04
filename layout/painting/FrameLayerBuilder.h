@@ -67,6 +67,8 @@ public:
   void Invalidate() { mIsInvalid = true; }
   void ClearAnimationCompositorState();
 
+  layers::Layer* GetLayer() const { return mLayer; }
+
   static DisplayItemData* AssertDisplayItemData(DisplayItemData* aData);
 
   void* operator new(size_t sz, nsPresContext* aPresContext)
@@ -501,8 +503,6 @@ public:
 
   void ClearCachedGeometry(nsDisplayItem* aItem);
 
-  static Layer* GetDebugOldLayerFor(nsIFrame* aFrame, uint32_t aDisplayItemKey);
-
   /**
    * Return the layer that all display items of aFrame were assigned to in the
    * last paint, or nullptr if there was no single layer assigned to all of the
@@ -598,6 +598,8 @@ public:
    * that renders many display items.
    */
   DisplayItemData* GetOldLayerForFrame(nsIFrame* aFrame, uint32_t aDisplayItemKey);
+
+  static DisplayItemData* GetOldDataFor(nsDisplayItem* aItem);
 
   /**
    * Stores DisplayItemData associated with aFrame, stores the data in
