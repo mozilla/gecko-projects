@@ -191,7 +191,7 @@ PrintDisplayItemTo(nsDisplayListBuilder* aBuilder, nsDisplayItem* aItem,
   }
 #endif
   DisplayItemData* data = mozilla::FrameLayerBuilder::GetOldDataFor(aItem);
-  if (data->GetLayer()) {
+  if (data && data->GetLayer()) {
     if (aDumpHtml) {
       aStream << nsPrintfCString(" <a href=\"#%p\">layer=%p</a>", data->GetLayer(), data->GetLayer());
     } else {
