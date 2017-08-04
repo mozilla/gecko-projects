@@ -196,7 +196,9 @@ def _generate_task_env(build_platform, build_task_ref, signing_task_ref, locale=
     if build_platform.startswith('linux') or build_platform.startswith('macosx'):
         tarball_extension = 'bz2' if build_platform.startswith('linux') else 'gz'
         return {
-            'SIGNED_INPUT': {'task-reference': '{}target.tar.{}'.format(signed_prefix, tarball_extension)},
+            'SIGNED_INPUT': {'task-reference': '{}target.tar.{}'.format(
+                signed_prefix, tarball_extension
+            )},
             'UNSIGNED_MAR': {'task-reference': '{}mar'.format(mar_prefix)},
         }
     elif build_platform.startswith('win'):
