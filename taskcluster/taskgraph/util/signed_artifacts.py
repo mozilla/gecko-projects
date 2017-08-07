@@ -9,7 +9,6 @@ Defines artifacts to sign before repackage.
 def generate_specifications_of_artifacts_to_sign(
     build_platform, is_nightly=False, keep_locale_template=True
 ):
-
     if 'android' in build_platform:
         artifacts_specificications = [{
             'artifacts': [
@@ -17,7 +16,6 @@ def generate_specifications_of_artifacts_to_sign(
             ],
             'formats': ['jar'],
         }]
-
     # XXX: Mars aren't signed here (on any platform) because internals will be
     # signed at after this stage of the release
     elif 'macosx' in build_platform:
@@ -55,8 +53,9 @@ def generate_specifications_of_artifacts_to_sign(
 
 def _strip_locale_template(artifacts_without_locales):
     for spec in artifacts_without_locales:
-        for artifact in spec['artifacts']:
-            artifact.format(locale='')
-            artifact.replace('//', '/')
+        for index, artifact in enumerate(spec['artifacts']):
+            stipped_artifact = artifact.format(locale='')
+            stipped_artifact = stipped_artifact.replace('//', '/')
+            spec['artifacts'][index] = stipped_artifact
 
     return artifacts_without_locales
