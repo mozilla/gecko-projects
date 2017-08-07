@@ -8,6 +8,8 @@ Transform the signing task into an actual task description.
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.signed_artifacts import generate_specifications_of_artifacts_to_sign
+
 
 transforms = TransformSequence()
 
@@ -38,57 +40,33 @@ def make_signing_description(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']
 
-        job['upstream-artifacts'] = _generate_upstream_artifacts(
-            dep_job.attributes.get('build_platform'),
-            dep_job.attributes.get('nightly')
-        )
         label = dep_job.label.replace("build-", "signing-")
         job['label'] = label
 
         yield job
 
 
-def _generate_upstream_artifacts(build_platform, is_nightly=False):
-    if 'android' in build_platform:
-        artifacts_specificities = [{
-            'artifacts': [
-                'public/build/target.apk',
-                'public/build/en-US/target.apk'
-            ],
-            'formats': ['jar'],
-        }]
-    # XXX: Mars aren't signed here (on any platform) because internals will be
-    # signed at after this stage of the release
-    elif 'macosx' in build_platform:
-        artifacts_specificities = [{
-            'artifacts': ['public/build/target.dmg'],
-            'formats': ['macapp', 'widevine'],
-        }]
-    elif 'win' in build_platform:
-        artifacts_specificities = [{
-            'artifacts': [
-                'public/build/setup.exe',
-            ],
-            'formats': ['sha2signcode'],
-        }, {
-            'artifacts': [
-                'public/build/target.zip',
-            ],
-            'formats': ['sha2signcode', 'widevine'],
-        }]
-        if 'win32' in build_platform and is_nightly:
-            artifacts_specificities[0]['artifacts'] += ['public/build/setup-stub.exe']
-    elif 'linux' in build_platform:
-        artifacts_specificities = [{
-            'artifacts': ['public/build/target.tar.bz2'],
-            'formats': ['gpg', 'widevine'],
-        }]
-    else:
-        raise Exception("Platform not implemented for signing")
+@transforms.add
+def define_upstream_artifacts(config, jobs):
+    for job in jobs:
+        dep_job = job['dependent-task']
+        build_platform = dep_job.attributes.get('build_platform')
 
-    return [{
-        'taskId': {'task-reference': '<build>'},
-        'taskType': 'build',
-        'paths': specificity['artifacts'],
-        'formats': specificity['formats'],
-    } for specificity in artifacts_specificities]
+        artifacts_specificications = generate_specifications_of_artifacts_to_sign(
+            build_platform,
+            dep_job.attributes.get('nightly'),
+            keep_locale_template=False
+        )
+
+        if 'android' in build_platform:
+            # We're in the job that creates both multilocale and en-US APKs
+            artifacts_specificications[0]['artifacts'].append('public/build/en-US/target.apk')
+
+        job['upstream-artifacts'] = [{
+            'taskId': {'task-reference': '<build>'},
+            'taskType': 'build',
+            'paths': spec['artifacts'],
+            'formats': spec['formats'],
+        } for spec in artifacts_specificications]
+
+        yield job
