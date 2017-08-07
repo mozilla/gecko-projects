@@ -3569,7 +3569,8 @@ public:
                               const nsStyleBackground* aBackgroundStyle,
                               LayerizeFixed aLayerizeFixed);
 
-  explicit nsDisplayBackgroundImage(const InitData& aInitData);
+  explicit nsDisplayBackgroundImage(const InitData& aInitData,
+                                    nsIFrame* aFrameForBounds = nullptr);
   virtual ~nsDisplayBackgroundImage();
 
   // This will create and append new items for all the layers of the
@@ -3665,7 +3666,8 @@ protected:
 
   bool CanBuildWebRenderDisplayItems(LayerManager* aManager);
   bool TryOptimizeToImageLayer(LayerManager* aManager, nsDisplayListBuilder* aBuilder);
-  nsRect GetBoundsInternal(nsDisplayListBuilder* aBuilder);
+  nsRect GetBoundsInternal(nsDisplayListBuilder* aBuilder,
+                           nsIFrame* aFrameForBounds = nullptr);
 
   void PaintInternal(nsDisplayListBuilder* aBuilder, gfxContext* aCtx,
                      const nsRect& aBounds, nsRect* aClipRect);

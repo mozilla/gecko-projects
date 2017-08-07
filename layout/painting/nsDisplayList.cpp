@@ -3161,7 +3161,8 @@ nsDisplayBackgroundImage::GetInitData(nsDisplayListBuilder* aBuilder,
   };
 }
 
-nsDisplayBackgroundImage::nsDisplayBackgroundImage(const InitData& aInitData)
+nsDisplayBackgroundImage::nsDisplayBackgroundImage(const InitData& aInitData,
+                                                   nsIFrame* aFrameForBounds)
   : nsDisplayImageContainer(aInitData.builder, aInitData.frame)
   , mBackgroundStyle(aInitData.backgroundStyle)
   , mImage(aInitData.image)
@@ -3175,7 +3176,7 @@ nsDisplayBackgroundImage::nsDisplayBackgroundImage(const InitData& aInitData)
 {
   MOZ_COUNT_CTOR(nsDisplayBackgroundImage);
 
-  mBounds = GetBoundsInternal(aInitData.builder);
+  mBounds = GetBoundsInternal(aInitData.builder, aFrameForBounds);
   if (mShouldFixToViewport) {
     mAnimatedGeometryRoot = aInitData.builder->FindAnimatedGeometryRootFor(this);
 
@@ -3961,27 +3962,33 @@ nsDisplayBackgroundImage::GetBounds(nsDisplayListBuilder* aBuilder,
 }
 
 nsRect
-nsDisplayBackgroundImage::GetBoundsInternal(nsDisplayListBuilder* aBuilder) {
-  nsPresContext* presContext = mFrame->PresContext();
+nsDisplayBackgroundImage::GetBoundsInternal(nsDisplayListBuilder* aBuilder,
+                                            nsIFrame* aFrameForBounds)
+{
+  // This allows nsDisplayTableBackgroundImage to change the frame used for
+  // bounds calculation.
+  nsIFrame* frame = aFrameForBounds ? aFrameForBounds : mFrame;
+
+  nsPresContext* presContext = frame->PresContext();
 
   if (!mBackgroundStyle) {
     return nsRect();
   }
 
   nsRect clipRect = mBackgroundRect;
-  if (mFrame->IsCanvasFrame()) {
-    nsCanvasFrame* frame = static_cast<nsCanvasFrame*>(mFrame);
-    clipRect = frame->CanvasArea() + ToReferenceFrame();
+  if (frame->IsCanvasFrame()) {
+    nsCanvasFrame* canvasFrame = static_cast<nsCanvasFrame*>(frame);
+    clipRect = canvasFrame->CanvasArea() + ToReferenceFrame();
   }
   const nsStyleImageLayers::Layer& layer = mBackgroundStyle->mImage.mLayers[mLayer];
-  return nsCSSRendering::GetBackgroundLayerRect(presContext, mFrame,
+  return nsCSSRendering::GetBackgroundLayerRect(presContext, frame,
                                                 mBackgroundRect, clipRect, layer,
                                                 aBuilder->GetBackgroundPaintFlags());
 }
 
 nsDisplayTableBackgroundImage::nsDisplayTableBackgroundImage(const InitData& aData,
                                                              nsIFrame* aCellFrame)
-  : nsDisplayBackgroundImage(aData)
+  : nsDisplayBackgroundImage(aData, aCellFrame)
   , mStyleFrame(aCellFrame)
   , mTableType(GetTableTypeFromFrame(mStyleFrame))
 {
