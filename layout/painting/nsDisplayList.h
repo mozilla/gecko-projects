@@ -2591,7 +2591,6 @@ protected:
   // True if this frame has been painted.
   bool      mPainted;
 #endif
-  bool      mHasSavedState;
   mozilla::Maybe<bool> mBackfaceHidden;
 
   struct {

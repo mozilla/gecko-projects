@@ -2746,7 +2746,6 @@ nsDisplayItem::nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
 #ifdef MOZ_DUMP_PAINTING
   , mPainted(false)
 #endif
-  , mHasSavedState(false)
 {
   mFrame->RealDisplayItemData().AppendElement(this);
   mReferenceFrame = aBuilder->FindReferenceFrameFor(aFrame, &mToReferenceFrame);
