@@ -951,11 +951,17 @@ void
 nsDisplayListBuilder::BeginFrame()
 {
   nsCSSRendering::BeginFrameTreesLocked();
+  mCurrentAGR = mRootAGR;
+  mFrameToAnimatedGeometryRootMap.Put(mReferenceFrame, mRootAGR);
 }
 
 void
 nsDisplayListBuilder::EndFrame()
 {
+  mFrameToAnimatedGeometryRootMap.Clear();
+  mActiveScrolledRoots.Clear();
+  FreeClipChains();
+
   nsCSSRendering::EndFrameTreesLocked();
 }
 
@@ -1223,11 +1229,6 @@ nsDisplayListBuilder::EnterPresShell(nsIFrame* aReferenceFrame,
 
   state->mPresShell->UpdateCanvasBackground();
 
-  if (mPresShellStates.Length() == 1) {
-    mFrameToAnimatedGeometryRootMap.Put(aReferenceFrame, mRootAGR);
-    mCurrentAGR = mRootAGR;
-  }
-
   bool buildCaret = mBuildCaret;
   if (mIgnoreSuppression || !state->mPresShell->IsPaintingSuppressed()) {
     state->mIsBackgroundOnly = false;
@@ -1311,12 +1312,7 @@ nsDisplayListBuilder::LeavePresShell(nsIFrame* aReferenceFrame, nsDisplayList* a
     }
     mIsInChromePresContext = pc->IsChrome();
   } else {
-    mFrameToAnimatedGeometryRootMap.Clear();
     mCurrentAGR = mRootAGR;
-
-    mActiveScrolledRoots.Clear();
-
-    FreeClipChains();
   }
 }
 
