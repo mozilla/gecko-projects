@@ -10,14 +10,13 @@ INTEGRATION_PROJECTS = {
     'autoland',
 }
 
-TRUNK_PROJECTS = INTEGRATION_PROJECTS | {'mozilla-central', 'date'}
+TRUNK_PROJECTS = INTEGRATION_PROJECTS | {'mozilla-central', }
 
 RELEASE_PROJECTS = {
     'mozilla-central',
     'mozilla-aurora',
     'mozilla-beta',
     'mozilla-release',
-    'date',
 }
 
 _OPTIONAL_ATTRIBUTES = ('nightly', 'signed', 'l10n_chunk')
