@@ -16,6 +16,8 @@ from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
 import logging
+import re
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,21 +65,15 @@ _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N = [
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
-    'macosx64-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
-        "host/bin/mar",
-        "host/bin/mbsdiff",
+    r'^(linux(|64)|macosx64)-nightly$': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
+        'host/bin/mar',
+        'host/bin/mbsdiff',
     ],
-    'macosx64-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
-    'win64-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
+    r'^win(32|64)-nightly$': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
         "host/bin/mar.exe",
         "host/bin/mbsdiff.exe",
     ],
-    'win64-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
-    'win32-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
-        "host/bin/mar.exe",
-        "host/bin/mbsdiff.exe",
-    ],
-    'win32-nightly-l10n': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
+    r'^(linux(|64)|macosx64|win(32|64))-nightly-l10n$': _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
 }
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
@@ -85,10 +81,8 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_SIGNED_PATHS = {
-    'win64-nightly': ['target.zip'],
-    'win64-nightly-l10n': ['target.zip'],
-    'win32-nightly': ['target.zip'],
-    'win32-nightly-l10n': ['target.zip'],
+    r'^linux(|64)-nightly(|-l10n)$': ['target.tar.bz2', 'target.tar.bz2.asc'],
+    r'^win(32|64)-nightly(|-l10n)$': ['target.zip'],
 }
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
@@ -96,29 +90,31 @@ UPSTREAM_ARTIFACT_SIGNED_PATHS = {
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_REPACKAGE_PATHS = {
-    'macosx64-nightly': ['target.dmg'],
-    'macosx64-nightly-l10n': ['target.dmg'],
+    r'^macosx64-nightly(|-l10n)$': ['target.dmg'],
 }
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
 # need to be transfered to S3, please be aware you also need to follow-up
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_SIGNED_REPACKAGE_PATHS = {
-    'macosx64-nightly': ['target.complete.mar'],
-    'macosx64-nightly-l10n': ['target.complete.mar'],
-    'win64-nightly': ['target.complete.mar', 'target.installer.exe'],
-    'win64-nightly-l10n': ['target.complete.mar', 'target.installer.exe'],
-    'win32-nightly': [
-        'target.complete.mar',
-        'target.installer.exe',
-        'target.stub-installer.exe'
-    ],
-    'win32-nightly-l10n': [
+    r'^(linux(|64)|macosx64)-nightly(|-l10n)$': ['target.complete.mar'],
+    r'^win64-nightly(|-l10n)$': ['target.complete.mar', 'target.installer.exe'],
+    r'^win32-nightly(|-l10n)$': [
         'target.complete.mar',
         'target.installer.exe',
         'target.stub-installer.exe'
     ],
 }
+
+# Compile every regex once and for all
+for dict_ in (
+    UPSTREAM_ARTIFACT_UNSIGNED_PATHS, UPSTREAM_ARTIFACT_SIGNED_PATHS,
+    UPSTREAM_ARTIFACT_REPACKAGE_PATHS, UPSTREAM_ARTIFACT_SIGNED_REPACKAGE_PATHS,
+):
+    for uncompiled_regex, value in dict_.iteritems():
+        compiled_regex = re.compile(uncompiled_regex)
+        del dict_[uncompiled_regex]
+        dict_[compiled_regex] = value
 
 # Voluptuous uses marker objects as dictionary *keys*, but they are not
 # comparable, so we cast all of the keys back to regular strings
@@ -263,14 +259,15 @@ def generate_upstream_artifacts(build_task_ref, build_signing_task_ref,
     ]
 
     for ref, tasktype, mapping in zip(task_refs, tasktypes, mapping):
-        if platform in mapping:
-            upstream_artifacts.append({
-                "taskId": {"task-reference": ref},
-                "taskType": tasktype,
-                "paths": ["{}/{}".format(artifact_prefix, p)
-                          for p in mapping[platform]],
-                "locale": locale or "en-US",
-            })
+        for platform_regex, paths in mapping.iteritems():
+            if platform_regex.match(platform) is not None:
+                upstream_artifacts.append({
+                    "taskId": {"task-reference": ref},
+                    "taskType": tasktype,
+                    "paths": ["{}/{}".format(artifact_prefix, path) for path in paths],
+                    "locale": locale or "en-US",
+                })
+                break
 
     return upstream_artifacts
 
