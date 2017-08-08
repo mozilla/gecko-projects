@@ -6,12 +6,12 @@
   <script type="application/javascript" src="/tests/SimpleTest/EventUtils.js"></script>
 
 <script>
+SimpleTest.waitForExplicitFinish();
+
 SpecialPowers.setBoolPref("security.data_uri.unique_opaque_origin", true);
 SimpleTest.registerCleanupFunction(() => {
   SpecialPowers.clearUserPref("security.data_uri.unique_opaque_origin");
 });
-
-SimpleTest.waitForExplicitFinish();
 
 function imgListener(img) {
   return new Promise((resolve, reject) => {
@@ -88,7 +88,60 @@ function runTests()
     is(document.fonts.size, 1, "should load data:font");
   });
 
-  Promise.all([p1, p2, p3]).then(() => {
+  var obj_doc = document.getElementById("obj_doc");
+  obj_doc.data="data:text/html,%3Cbody%3E%3Cbutton%3EChild%3C/button%3E%3C/body%3E"
+  let p4 = new Promise((resolve, reject) => {
+    obj_doc.onload = function() {
+      ok(SpecialPowers.wrap(obj_doc).contentDocument.nodePrincipal.isNullPrincipal,
+         "obj_doc.document should have NullPrincipal.");
+      resolve();
+    }
+  });
+
+  var obj_svg = document.getElementById("obj_svg");
+  obj_svg.data='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewbox="0 0 200 200"><circle cx="100" cy="100" r="100" fill="green" fill-opacity="0.8"/></svg>'
+  let p5 = new Promise((resolve, reject) => {
+    obj_svg.onload = function() {
+      ok(SpecialPowers.wrap(obj_svg).contentDocument.nodePrincipal.isNullPrincipal,
+         "obj_svg.contentDocument should have NullPrincipal.");
+      ok(SpecialPowers.wrap(obj_svg).getSVGDocument().nodePrincipal.isNullPrincipal,
+         "obj_svg.getSVGDocument() should have NullPrincipal.");
+      resolve();
+    }
+  });
+
+  // Test if data:stylesheet is considered same origin.
+  let p6 = new Promise((resolve, reject) => {
+    // 1. Dynamically include a css by inserting a <link> tag.
+    let link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = "data:text/css,.green-text{color:rgb(0, 255, 0)}";
+    link.onload = function() {
+      let dataStyleSheet;
+      for (let i = 0; i < document.styleSheets.length; i++) {
+        let sheet = document.styleSheets[i];
+        if (sheet.href === link.href) {
+          dataStyleSheet = sheet;
+          break;
+        }
+      }
+      ok(dataStyleSheet, "Should have found data:stylesheet");
+
+      // 2. Try to access the rule. If data:stylesheet is not considered
+      // same origin, an exception will be thrown.
+      try {
+        let rule = dataStyleSheet.cssRules;
+        ok(true, "data:stylesheet is considered same origin.");
+      } catch (ex) {
+        ok(false, "data:stylesheet is NOT considered same origin: " + ex);
+      }
+
+      resolve();
+    };
+    document.head.appendChild(link);
+  });
+
+  Promise.all([p1, p2, p3, p4, p5, p6]).then(() => {
     SimpleTest.finish();
   }).catch((e) => {
     ok(false, "throwing " + e);
@@ -97,16 +150,16 @@ function runTests()
 }
 </script>
 
-<link rel="stylesheet" href="data:text/css,.green-text{color:rgb(0, 255, 0)}"
-      onload="ok(true, 'data:text/css should be same origin.');"
-      onerror="ok(false, 'data:text/css should be same origin');">
-
 <body onload="runTests()">
 <img style="width: 100px; height: 100px;"
      src="data:image/png,%89PNG%0D%0A%1A%0A%00%00%00%0DIHDR%00%00%00%18%00%00%00%18%02%03%00%00%00%9D%19%D5k%00%00%00%04gAMA%00%00%B1%8F%0B%FCa%05%00%00%00%0CPLTE%FF%FF%FF%FF%FF%FF%F7%DC%13%00%00%00%03%80%01X%00%00%00%01tRNS%08N%3DPT%00%00%00%01bKGD%00%88%05%1DH%00%00%00%09pHYs%00%00%0B%11%00%00%0B%11%01%7Fd_%91%00%00%00%07tIME%07%D2%05%0C%14%0C%0D%D8%3F%1FQ%00%00%00%5CIDATx%9C%7D%8E%CB%09%C0%20%10D%07r%B7%20%2F%E9wV0%15h%EA%D9%12D4%BB%C1x%CC%5C%1E%0C%CC%07%C0%9C0%9Dd7()%C0A%D3%8D%E0%B8%10%1DiCHM%D0%AC%D2d%C3M%F1%B4%E7%FF%10%0BY%AC%25%93%CD%CBF%B5%B2%C0%3Alh%CD%AE%13%DF%A5%F7%E0%03byW%09A%B4%F3%E2%00%00%00%00IEND%AEB%60%82"
      id="img">
 <iframe id="iframe"></iframe>
 <iframe id="iframe1" ></iframe>
-<canvas id="canvas" class="output" width="100" height="50">
+<canvas id="canvas" class="output" width="100" height="50"></canvas>
+
+<object id="obj_doc"></object>
+<object id="obj_svg"></object>
+
 </body>
 </html>

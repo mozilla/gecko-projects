@@ -14,7 +14,6 @@ module.exports = {
     }],
     curly: ["error", "all"],
     "dot-location": ["error", "property"],
-    "dot-notation": "error",
     "generator-star-spacing": ["error", "after"],
     indent: ["error", 2, {
       SwitchCase: 1,
@@ -41,7 +40,6 @@ module.exports = {
     "no-multiple-empty-lines": ["error", {
       max: 2,
     }],
-    "no-new-wrappers": "error",
     "no-proto": "error",
     "no-throw-literal": "error",
     "no-unused-expressions": "error",

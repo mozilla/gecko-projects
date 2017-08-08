@@ -9,18 +9,55 @@ use {Atom, LocalName};
 use applicable_declarations::ApplicableDeclarationBlock;
 use context::QuirksMode;
 use dom::TElement;
-use fnv::FnvHashMap;
 use pdqsort::sort_by;
+use precomputed_hash::PrecomputedHash;
 use rule_tree::CascadeLevel;
 use selector_parser::SelectorImpl;
 use selectors::matching::{matches_selector, MatchingContext, ElementSelectorFlags};
 use selectors::parser::{Component, Combinator, SelectorIter};
 use selectors::parser::LocalName as LocalNameSelector;
-use smallvec::VecLike;
-use std::collections::HashMap;
+use smallvec::{SmallVec, VecLike};
+use std::collections::{HashMap, HashSet};
 use std::collections::hash_map;
-use std::hash::Hash;
+use std::hash::{BuildHasherDefault, Hash, Hasher};
 use stylist::Rule;
+
+/// A hasher implementation that doesn't hash anything, because it expects its
+/// input to be a suitable u32 hash.
+pub struct PrecomputedHasher {
+    hash: Option<u32>,
+}
+
+impl Default for PrecomputedHasher {
+    fn default() -> Self {
+        Self { hash: None }
+    }
+}
+
+/// A simple alias for a hashmap using PrecomputedHasher.
+pub type PrecomputedHashMap<K, V> = HashMap<K, V, BuildHasherDefault<PrecomputedHasher>>;
+
+/// A simple alias for a hashset using PrecomputedHasher.
+pub type PrecomputedHashSet<K> = HashSet<K, BuildHasherDefault<PrecomputedHasher>>;
+
+impl Hasher for PrecomputedHasher {
+    #[inline]
+    fn write(&mut self, _: &[u8]) {
+        unreachable!("Called into PrecomputedHasher with something that isn't \
+                     a u32")
+    }
+
+    #[inline]
+    fn write_u32(&mut self, i: u32) {
+        debug_assert!(self.hash.is_none());
+        self.hash = Some(i);
+    }
+
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.hash.expect("PrecomputedHasher wasn't fed?") as u64
+    }
+}
 
 /// A trait to abstract over a given selector map entry.
 pub trait SelectorMapEntry : Sized + Clone {
@@ -49,16 +86,21 @@ pub trait SelectorMapEntry : Sized + Clone {
 /// element name, etc. will contain the Selectors that actually match that
 /// element.
 ///
+/// We use a 1-entry SmallVec to avoid a separate heap allocation in the case
+/// where we only have one entry, which is quite common. See measurements in:
+/// * https://bugzilla.mozilla.org/show_bug.cgi?id=1363789#c5
+/// * https://bugzilla.mozilla.org/show_bug.cgi?id=681755
+///
 /// TODO: Tune the initial capacity of the HashMap
 #[derive(Debug)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct SelectorMap<T> {
     /// A hash from an ID to rules which contain that ID selector.
-    pub id_hash: MaybeCaseInsensitiveHashMap<Atom, Vec<T>>,
+    pub id_hash: MaybeCaseInsensitiveHashMap<Atom, SmallVec<[T; 1]>>,
     /// A hash from a class name to rules which contain that class selector.
-    pub class_hash: MaybeCaseInsensitiveHashMap<Atom, Vec<T>>,
+    pub class_hash: MaybeCaseInsensitiveHashMap<Atom, SmallVec<[T; 1]>>,
     /// A hash from local name to rules which contain that local name selector.
-    pub local_name_hash: FnvHashMap<LocalName, Vec<T>>,
+    pub local_name_hash: PrecomputedHashMap<LocalName, SmallVec<[T; 1]>>,
     /// Rules that don't have ID, class, or element selectors.
     pub other: Vec<T>,
     /// The number of entries in this map.
@@ -159,29 +201,6 @@ impl SelectorMap<Rule> {
                     |block| (block.specificity, block.source_order()));
     }
 
-    /// Append to `rule_list` all universal Rules (rules with selector `*|*`) in
-    /// `self` sorted by specificity and source order.
-    pub fn get_universal_rules(&self,
-                               cascade_level: CascadeLevel)
-                               -> Vec<ApplicableDeclarationBlock> {
-        debug_assert!(!cascade_level.is_important());
-        if self.is_empty() {
-            return vec![];
-        }
-
-        let mut rules_list = vec![];
-        for rule in self.other.iter() {
-            if rule.selector.is_universal() {
-                rules_list.push(rule.to_applicable_declaration_block(cascade_level))
-            }
-        }
-
-        sort_by_key(&mut rules_list,
-                    |block| (block.specificity, block.source_order()));
-
-        rules_list
-    }
-
     /// Adds rules in `rules` that match `element` to the `matching_rules` list.
     fn get_matching_rules<E, V, F>(element: &E,
                                    rules: &[Rule],
@@ -213,12 +232,12 @@ impl<T: SelectorMapEntry> SelectorMap<T> {
         self.count += 1;
 
         if let Some(id_name) = get_id_name(entry.selector()) {
-            self.id_hash.entry(id_name, quirks_mode).or_insert_with(Vec::new).push(entry);
+            self.id_hash.entry(id_name, quirks_mode).or_insert_with(SmallVec::new).push(entry);
             return;
         }
 
         if let Some(class_name) = get_class_name(entry.selector()) {
-            self.class_hash.entry(class_name, quirks_mode).or_insert_with(Vec::new).push(entry);
+            self.class_hash.entry(class_name, quirks_mode).or_insert_with(SmallVec::new).push(entry);
             return;
         }
 
@@ -361,10 +380,12 @@ impl<T: SelectorMapEntry> SelectorMap<T> {
 ///
 /// The first non-None value returned from |f| is returned.
 #[inline(always)]
-fn find_from_left<F, R>(mut iter: SelectorIter<SelectorImpl>,
-                         mut f: F)
-                         -> Option<R>
-    where F: FnMut(&Component<SelectorImpl>) -> Option<R>,
+fn find_from_left<F, R>(
+    mut iter: SelectorIter<SelectorImpl>,
+    mut f: F
+) -> Option<R>
+where
+    F: FnMut(&Component<SelectorImpl>) -> Option<R>,
 {
     for ss in &mut iter {
         if let Some(r) = f(ss) {
@@ -390,8 +411,6 @@ fn find_from_left<F, R>(mut iter: SelectorIter<SelectorImpl>,
 pub fn get_id_name(iter: SelectorIter<SelectorImpl>)
                    -> Option<Atom> {
     find_from_left(iter, |ss| {
-        // TODO(pradeep): Implement case-sensitivity based on the
-        // document type and quirks mode.
         if let Component::ID(ref id) = *ss {
             return Some(id.clone());
         }
@@ -404,8 +423,6 @@ pub fn get_id_name(iter: SelectorIter<SelectorImpl>)
 pub fn get_class_name(iter: SelectorIter<SelectorImpl>)
                       -> Option<Atom> {
     find_from_left(iter, |ss| {
-        // TODO(pradeep): Implement case-sensitivity based on the
-        // document type and quirks mode.
         if let Component::Class(ref class) = *ss {
             return Some(class.clone());
         }
@@ -429,21 +446,23 @@ pub fn get_local_name(iter: SelectorIter<SelectorImpl>)
 }
 
 #[inline]
-fn find_push<Str: Eq + Hash, V>(map: &mut FnvHashMap<Str, Vec<V>>,
-                                key: Str,
-                                value: V) {
-    map.entry(key).or_insert_with(Vec::new).push(value)
+fn find_push<Str: Eq + Hash, V, VL>(map: &mut PrecomputedHashMap<Str, VL>,
+                                    key: Str,
+                                    value: V)
+    where VL: VecLike<V> + Default
+{
+    map.entry(key).or_insert_with(VL::default).push(value)
 }
 
-/// Wrapper for FnvHashMap that does ASCII-case-insensitive lookup in quirks mode.
+/// Wrapper for PrecomputedHashMap that does ASCII-case-insensitive lookup in quirks mode.
 #[derive(Debug)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-pub struct MaybeCaseInsensitiveHashMap<K: Hash + Eq, V>(FnvHashMap<K, V>);
+pub struct MaybeCaseInsensitiveHashMap<K: PrecomputedHash + Hash + Eq, V>(PrecomputedHashMap<K, V>);
 
 impl<V> MaybeCaseInsensitiveHashMap<Atom, V> {
     /// Empty map
     pub fn new() -> Self {
-        MaybeCaseInsensitiveHashMap(FnvHashMap::default())
+        MaybeCaseInsensitiveHashMap(PrecomputedHashMap::default())
     }
 
     /// HashMap::entry

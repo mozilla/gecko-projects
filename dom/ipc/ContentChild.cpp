@@ -61,6 +61,7 @@
 #include "mozilla/layout/RenderFrameChild.h"
 #include "mozilla/loader/ScriptCacheActors.h"
 #include "mozilla/net/NeckoChild.h"
+#include "mozilla/net/CookieServiceChild.h"
 #include "mozilla/net/CaptivePortalService.h"
 #include "mozilla/plugins/PluginInstanceParent.h"
 #include "mozilla/plugins/PluginModuleParent.h"
@@ -170,6 +171,7 @@
 #include <process.h>
 #define getpid _getpid
 #include "mozilla/widget/AudioSession.h"
+#include "mozilla/audio/AudioNotificationReceiver.h"
 #endif
 
 #ifdef MOZ_X11
@@ -447,7 +449,7 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
     return NS_OK;
   }
 
-  nsXPIDLString msg;
+  nsString msg;
   nsresult rv = aMessage->GetMessageMoz(getter_Copies(msg));
   NS_ENSURE_SUCCESS(rv, rv);
   mChild->SendConsoleMessage(msg);
@@ -489,7 +491,6 @@ ContentChild::ContentChild()
  , mMainChromeTid(0)
  , mMsaaID(0)
 #endif
- , mCanOverrideProcessName(true)
  , mIsAlive(true)
  , mShuttingDown(false)
 {
@@ -625,18 +626,14 @@ ContentChild::Init(MessageLoop* aIOLoop,
   mID = aChildID;
   mIsForBrowser = aIsForBrowser;
 
-  SetProcessName(NS_LITERAL_STRING("Web Content"), true);
+  SetProcessName(NS_LITERAL_STRING("Web Content"));
 
   return true;
 }
 
 void
-ContentChild::SetProcessName(const nsAString& aName, bool aDontOverride)
+ContentChild::SetProcessName(const nsAString& aName)
 {
-  if (!mCanOverrideProcessName) {
-    return;
-  }
-
   char* name;
   if ((name = PR_GetEnv("MOZ_DEBUG_APP_PROCESS")) &&
     aName.EqualsASCII(name)) {
@@ -655,10 +652,6 @@ ContentChild::SetProcessName(const nsAString& aName, bool aDontOverride)
 
   mProcessName = aName;
   mozilla::ipc::SetThisProcessName(NS_LossyConvertUTF16toASCII(aName).get());
-
-  if (aDontOverride) {
-    mCanOverrideProcessName = false;
-  }
 }
 
 NS_IMETHODIMP
@@ -1334,6 +1327,15 @@ ContentChild::RecvReinitRendering(Endpoint<PCompositorManagerChild>&& aComposito
 }
 
 mozilla::ipc::IPCResult
+ContentChild::RecvAudioDefaultDeviceChange()
+{
+#ifdef XP_WIN
+  audio::AudioNotificationReceiver::NotifyDefaultDeviceChanged();
+#endif
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
 ContentChild::RecvReinitRenderingForDeviceReset()
 {
   gfxPlatform::GetPlatform()->CompositorUpdated();
@@ -1935,6 +1937,16 @@ mozilla::ipc::IPCResult
 ContentChild::RecvPTestShellConstructor(PTestShellChild* actor)
 {
   return IPC_OK();
+}
+
+void
+ContentChild::UpdateCookieStatus(nsIChannel   *aChannel)
+{
+  RefPtr<CookieServiceChild> csChild =
+    CookieServiceChild::GetSingleton();
+  NS_ASSERTION(csChild, "Couldn't get CookieServiceChild");
+
+  csChild->TrackCookieLoad(aChannel);
 }
 
 PScriptCacheChild*
@@ -2607,6 +2619,17 @@ ContentChild::RecvRemoteType(const nsString& aRemoteType)
   MOZ_ASSERT(DOMStringIsNull(mRemoteType));
 
   mRemoteType.Assign(aRemoteType);
+
+  // For non-default ("web") types, update the process name so about:memory's
+  // process names are more obvious.
+  if (aRemoteType.EqualsLiteral(FILE_REMOTE_TYPE)) {
+    SetProcessName(NS_LITERAL_STRING("file:// Content"));
+  } else if (aRemoteType.EqualsLiteral(EXTENSION_REMOTE_TYPE)) {
+    SetProcessName(NS_LITERAL_STRING("WebExtensions"));
+  } else if (aRemoteType.EqualsLiteral(LARGE_ALLOCATION_REMOTE_TYPE)) {
+    SetProcessName(NS_LITERAL_STRING("Large Allocation Web Content"));
+  }
+
   return IPC_OK();
 }
 

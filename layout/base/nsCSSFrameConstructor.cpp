@@ -1837,7 +1837,7 @@ nsCSSFrameConstructor::CreateGeneratedContent(nsFrameConstructorState& aState,
           return content.forget();
         }
 
-        nsXPIDLString temp;
+        nsAutoString temp;
         nsContentUtils::GetLocalizedString(nsContentUtils::eFORMS_PROPERTIES,
                                            "Submit", temp);
         return CreateGenConTextNode(aState, temp, nullptr, nullptr);
@@ -1983,8 +1983,12 @@ nsCSSFrameConstructor::CreateGeneratedContentItem(nsFrameConstructorState& aStat
   if (servoStyle) {
     if (hasServoAnimations) {
       // If animations are involved, we avoid the SetExplicitStyle optimization
-      // above.
+      // above. We need to grab style with animations from the pseudo element
+      // and replace old one.
       mPresShell->StyleSet()->AsServo()->StyleNewSubtree(container);
+      pseudoStyleContext =
+        styleSet->AsServo()->ResolveServoStyle(container,
+                                               ServoTraversalFlags::Empty);
     } else if (createdChildElement) {
       // If we created any children elements, Servo needs to traverse them, but
       // the root is already set up.
@@ -9129,9 +9133,9 @@ nsCSSFrameConstructor::WillDestroyFrameTree()
 // XXXbz I'd really like this method to go away. Once we have inline-block and
 // I can just use that for sized broken images, that can happen, maybe.
 void
-nsCSSFrameConstructor::GetAlternateTextFor(nsIContent*    aContent,
-                                           nsIAtom*       aTag,
-                                           nsXPIDLString& aAltText)
+nsCSSFrameConstructor::GetAlternateTextFor(nsIContent* aContent,
+                                           nsIAtom* aTag,
+                                           nsAString& aAltText)
 {
   // The "alt" attribute specifies alternate text that is rendered
   // when the image can not be displayed.

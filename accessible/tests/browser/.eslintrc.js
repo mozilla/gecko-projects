@@ -18,7 +18,7 @@ module.exports = {
     "curly": ["error", "multi-line"],
     "default-case": "off",
     "dot-location": ["error", "property"],
-    "dot-notation": "error",
+
     "eqeqeq": "off",
     "func-names": "off",
     "func-style": "off",
@@ -87,7 +87,6 @@ module.exports = {
     "wrap-iife": "off",
     "wrap-regex": "off",
     "yoda": "error",
-
     "guard-for-in": "off",
     "newline-after-var": "off",
     "no-alert": "off",
@@ -105,7 +104,6 @@ module.exports = {
     "no-new": "off",
     "no-new-func": "off",
     "no-new-object": "off",
-    "no-new-wrappers": "off",
     "no-obj-calls": "off",
     "no-octal-escape": "off",
     "no-undef-init": "error",

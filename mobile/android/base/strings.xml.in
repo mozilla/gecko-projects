@@ -250,9 +250,6 @@
   <string name="pref_pwa">&pref_pwa;</string>
   <string name="pref_pwa_summary">&pref_pwa_summary;</string>
 
-  <string name="pref_activity_stream">&pref_activity_stream;</string>
-  <string name="pref_activity_stream_summary">&pref_activity_stream_summary;</string>
-
   <string name="pref_char_encoding">&pref_char_encoding;</string>
   <string name="pref_char_encoding_on">&pref_char_encoding_on;</string>
   <string name="pref_char_encoding_off">&pref_char_encoding_off;</string>
@@ -643,4 +640,9 @@
 
   <string name="activity_stream_welcome_title">&activity_stream_welcome_title;</string>
   <string name="activity_stream_welcome_content">&activity_stream_welcome_content1;</string>
+
+  <string name="private_tab_panel_title">&private_tab_panel_title;</string>
+  <string name="private_tab_panel_description">&private_tab_panel_description;</string>
+  <string name="private_tab_panel_description2">&private_tab_panel_description2;</string>
+  <string name="private_tab_learn_more">&private_tab_learn_more;</string>
 </resources>

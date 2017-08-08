@@ -15,6 +15,8 @@ class nsIStreamListener;
 
 namespace mozilla {
 
+class BaseMediaResource;
+
 class ChannelMediaDecoder : public MediaDecoder
 {
   // Used to register with MediaResource to receive notifications which will
@@ -35,7 +37,6 @@ class ChannelMediaDecoder : public MediaDecoder
   private:
     /* MediaResourceCallback functions */
     MediaDecoderOwner* GetMediaOwner() const override;
-    void SetInfinite(bool aInfinite) override;
     void NotifyNetworkError() override;
     void NotifyDataArrived() override;
     void NotifyDataEnded(nsresult aStatus) override;
@@ -53,24 +54,85 @@ class ChannelMediaDecoder : public MediaDecoder
   };
 
 protected:
+  void OnPlaybackEvent(MediaEventType aEvent) override;
+  void DurationChanged() override;
+  void DownloadProgressed() override;
   RefPtr<ResourceCallback> mResourceCallback;
+  RefPtr<BaseMediaResource> mResource;
 
 public:
   explicit ChannelMediaDecoder(MediaDecoderInit& aInit);
 
+  MediaDecoderStateMachine* CreateStateMachine() override;
+
+  MediaResource* GetResource() const override final;
+
   void Shutdown() override;
 
-  // Create a new decoder of the same type as this one.
-  // Subclasses must implement this.
-  virtual ChannelMediaDecoder* Clone(MediaDecoderInit& aInit) = 0;
+  bool CanClone();
 
-  virtual nsresult Load(nsIChannel* aChannel,
-                        bool aIsPrivateBrowsing,
-                        nsIStreamListener** aStreamListener);
-  virtual nsresult Load(MediaResource* aOriginal);
+  // Create a new decoder of the same type as this one.
+  already_AddRefed<ChannelMediaDecoder> Clone(MediaDecoderInit& aInit);
+
+  nsresult Load(nsIChannel* aChannel,
+                bool aIsPrivateBrowsing,
+                nsIStreamListener** aStreamListener);
+
+  void SetLoadInBackground(bool aLoadInBackground) override;
+  void Suspend() override;
+  void Resume() override;
 
 private:
+  virtual ChannelMediaDecoder* CloneImpl(MediaDecoderInit& aInit) = 0;
   nsresult OpenResource(nsIStreamListener** aStreamListener);
+  nsresult Load(BaseMediaResource* aOriginal);
+
+  // Called by MediaResource when the download has ended.
+  // Called on the main thread only. aStatus is the result from OnStopRequest.
+  void NotifyDownloadEnded(nsresult aStatus);
+
+  // Called by the MediaResource to keep track of the number of bytes read
+  // from the resource. Called on the main by an event runner dispatched
+  // by the MediaResource read functions.
+  void NotifyBytesConsumed(int64_t aBytes, int64_t aOffset);
+
+  void SeekingChanged();
+
+  bool CanPlayThroughImpl() override final;
+
+  // The actual playback rate computation.
+  void ComputePlaybackRate();
+
+  // Something has changed that could affect the computed playback rate,
+  // so recompute it.
+  void UpdatePlaybackRate();
+
+  // Return statistics. This is used for progress events and other things.
+  // This can be called from any thread. It's only a snapshot of the
+  // current state, since other threads might be changing the state
+  // at any time.
+  MediaStatistics GetStatistics();
+
+  bool ShouldThrottleDownload();
+
+  WatchManager<ChannelMediaDecoder> mWatchManager;
+
+  // True when seeking or otherwise moving the play position around in
+  // such a manner that progress event data is inaccurate. This is set
+  // during seek and duration operations to prevent the progress indicator
+  // from jumping around. Read/Write on the main thread only.
+  bool mIgnoreProgressData = false;
+
+  // Data needed to estimate playback data rate. The timeline used for
+  // this estimate is "decode time" (where the "current time" is the
+  // time of the last decoded video frame).
+  MediaChannelStatistics mPlaybackStatistics;
+
+  // Estimate of the current playback rate (bytes/second).
+  double mPlaybackBytesPerSecond = 0;
+
+  // True if mPlaybackBytesPerSecond is a reliable estimate.
+  bool mPlaybackRateReliable = true;
 };
 
 } // namespace mozilla

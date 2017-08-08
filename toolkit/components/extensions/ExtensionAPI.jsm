@@ -15,15 +15,17 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "ConsoleAPI",
                                   "resource://gre/modules/Console.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
-                                  "resource://gre/modules/EventEmitter.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
                                   "resource://gre/modules/Schemas.jsm");
 
+Cu.import("resource://gre/modules/ExtensionUtils.jsm");
+
 const global = this;
 
-class ExtensionAPI {
+class ExtensionAPI extends ExtensionUtils.EventEmitter {
   constructor(extension) {
+    super();
+
     this.extension = extension;
 
     extension.once("shutdown", () => {

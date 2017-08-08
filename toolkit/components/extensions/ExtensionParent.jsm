@@ -18,8 +18,6 @@ this.EXPORTED_SYMBOLS = ["ExtensionParent"];
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
-                                  "resource://gre/modules/AddonManager.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
                                   "resource://gre/modules/AppConstants.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "DeferredSave",
@@ -28,8 +26,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "E10SUtils",
                                   "resource:///modules/E10SUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
                                   "resource://gre/modules/FileUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "IndexedDB",
-                                  "resource://gre/modules/IndexedDB.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
                                   "resource://gre/modules/MessageChannel.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NativeApp",
@@ -68,6 +64,7 @@ var {
 } = ExtensionUtils;
 
 const BASE_SCHEMA = "chrome://extensions/content/schemas/manifest.json";
+const CATEGORY_EXTENSION_MODULES = "webextension-modules";
 const CATEGORY_EXTENSION_SCHEMAS = "webextension-schemas";
 const CATEGORY_EXTENSION_SCRIPTS = "webextension-scripts";
 
@@ -78,6 +75,7 @@ schemaURLs.add("chrome://extensions/content/schemas/experiments.json");
 let GlobalManager;
 let ParentAPIManager;
 let ProxyMessenger;
+let StartupCache;
 
 // This object loads the ext-*.js scripts that define the extension API.
 let apiManager = new class extends SchemaAPIManager {
@@ -97,18 +95,31 @@ let apiManager = new class extends SchemaAPIManager {
     });
   }
 
+  getModuleJSONURLs() {
+    return Array.from(XPCOMUtils.enumerateCategoryEntries(CATEGORY_EXTENSION_MODULES),
+                      ([name, url]) => url);
+  }
+
   // Loads all the ext-*.js scripts currently registered.
   lazyInit() {
     if (this.initialized) {
       return this.initialized;
     }
 
-    let scripts = [];
+    let modulesPromise = StartupCache.other.get(
+      ["parentModules"],
+      () => this.loadModuleJSON(this.getModuleJSONURLs()));
+
+    let scriptURLs = [];
     for (let [/* name */, value] of XPCOMUtils.enumerateCategoryEntries(CATEGORY_EXTENSION_SCRIPTS)) {
-      scripts.push(value);
+      scriptURLs.push(value);
     }
 
-    let promise = Promise.all(scripts.map(url => ChromeUtils.compileScript(url))).then(scripts => {
+    let promise = (async () => {
+      let scripts = await Promise.all(scriptURLs.map(url => ChromeUtils.compileScript(url)));
+
+      this.initModuleData(await modulesPromise);
+
       for (let script of scripts) {
         script.executeInGlobal(this.global);
       }
@@ -128,7 +139,7 @@ let apiManager = new class extends SchemaAPIManager {
         }
         return Promise.all(promises);
       });
-    });
+    })();
 
     /* eslint-disable mozilla/balanced-listeners */
     Services.mm.addMessageListener("Extension:GetTabAndWindowId", this);
@@ -1365,10 +1376,10 @@ let IconDetails = {
   },
 };
 
-let StartupCache = {
+StartupCache = {
   DB_NAME: "ExtensionStartupCache",
 
-  STORE_NAMES: Object.freeze(["locales", "manifests", "permissions", "schemas"]),
+  STORE_NAMES: Object.freeze(["general", "locales", "manifests", "other", "permissions", "schemas"]),
 
   get file() {
     return FileUtils.getFile("ProfLD", ["startupCache", "webext.sc.lz4"]);
@@ -1417,6 +1428,7 @@ let StartupCache = {
 
   clearAddonData(id) {
     return Promise.all([
+      this.general.delete(id),
       this.locales.delete(id),
       this.manifests.delete(id),
       this.permissions.delete(id),
@@ -1431,6 +1443,15 @@ let StartupCache = {
       this._data = new Map();
       this._dataPromise = Promise.resolve(this._data);
     }
+  },
+
+  get(extension, path, createFunc) {
+    return this.general.get([extension.id, extension.version, ...path],
+                            createFunc);
+  },
+
+  delete(extension, path) {
+    return this.general.delete([extension.id, extension.version, ...path]);
   },
 };
 

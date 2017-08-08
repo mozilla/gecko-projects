@@ -164,9 +164,10 @@ var BookmarkPropertiesPanel = {
         this._defaultInsertionPoint = dialogInfo.defaultInsertionPoint;
       } else {
         this._defaultInsertionPoint =
-          new InsertionPoint(PlacesUtils.bookmarksMenuFolderId,
-                             PlacesUtils.bookmarks.DEFAULT_INDEX,
-                             Ci.nsITreeView.DROP_ON);
+          new InsertionPoint({
+            parentId: PlacesUtils.bookmarksMenuFolderId,
+            parentGuid: PlacesUtils.bookmarks.menuGuid
+          });
       }
 
       switch (dialogInfo.type) {
@@ -493,11 +494,12 @@ var BookmarkPropertiesPanel = {
    * The container-identifier and insertion-index are returned separately in
    * the form of [containerIdentifier, insertionIndex]
    */
-  _getInsertionPointDetails: function BPP__getInsertionPointDetails() {
-    var containerId = this._defaultInsertionPoint.itemId;
-    var indexInContainer = this._defaultInsertionPoint.index;
-
-    return [containerId, indexInContainer];
+  async _getInsertionPointDetails() {
+    return [
+      this._defaultInsertionPoint.itemId,
+      await this._defaultInsertionPoint.getIndex(),
+      this._defaultInsertionPoint.guid,
+    ]
   },
 
   /**
@@ -550,16 +552,10 @@ var BookmarkPropertiesPanel = {
   _getTransactionsForURIList: function BPP__getTransactionsForURIList() {
     var transactions = [];
     for (let uri of this._URIs) {
-      // uri should be an object in the form { uri, title }. Though add-ons
-      // could still use the legacy form, where it's an nsIURI.
-      // TODO: Remove This from v57 on.
-      let [_uri, _title] = uri instanceof Ci.nsIURI ?
-        [uri, this._getURITitleFromHistory(uri)] : [uri.uri, uri.title];
-
       let createTxn =
-        new PlacesCreateBookmarkTransaction(_uri, -1,
+        new PlacesCreateBookmarkTransaction(uri.uri, -1,
                                             PlacesUtils.bookmarks.DEFAULT_INDEX,
-                                            _title);
+                                            uri.title);
       transactions.push(createTxn);
     }
     return transactions;
@@ -585,7 +581,7 @@ var BookmarkPropertiesPanel = {
   },
 
   async _createNewItem() {
-    let [container, index] = this._getInsertionPointDetails();
+    let [container, index] = await this._getInsertionPointDetails();
     let txn;
     switch (this._itemType) {
       case BOOKMARK_FOLDER:
@@ -632,8 +628,7 @@ var BookmarkPropertiesPanel = {
     if (!PlacesUIUtils.useAsyncTransactions)
       return this._createNewItem();
 
-    let [containerId, index] = this._getInsertionPointDetails();
-    let parentGuid = await PlacesUtils.promiseItemGuid(containerId);
+    let [containerId, index, parentGuid] = await this._getInsertionPointDetails();
     let annotations = [];
     if (this._description) {
       annotations.push({ name: PlacesUIUtils.DESCRIPTION_ANNO,
@@ -664,14 +659,11 @@ var BookmarkPropertiesPanel = {
 
       itemGuid = await PlacesTransactions.NewLivemark(info).transact();
     } else if (this._itemType == BOOKMARK_FOLDER) {
+      // NewFolder requires a url rather than uri.
+      info.children = this._URIs.map(item => {
+        return { url: item.uri, title: item.title };
+      });
       itemGuid = await PlacesTransactions.NewFolder(info).transact();
-      // URIs is an array of objects in the form { uri, title }.  It is still
-      // named URIs because for backwards compatibility it could also be an
-      // array of nsIURIs. TODO: Fix the property names from v57.
-      for (let { uri: url, title } of this._URIs) {
-        await PlacesTransactions.NewBookmark({ parentGuid: itemGuid, url, title })
-                                .transact();
-      }
     } else {
       throw new Error(`unexpected value for _itemType:  ${this._itemType}`);
     }

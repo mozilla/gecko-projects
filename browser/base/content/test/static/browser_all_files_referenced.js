@@ -23,6 +23,9 @@ var gExceptionPaths = [
   // https://github.com/mozilla/normandy/issues/577
   "resource://shield-recipe-client/test/",
 
+  // https://github.com/mozilla/activity-stream/issues/3053
+  "resource://activity-stream/data/content/tippytop/images/",
+
   // browser/extensions/pdfjs/content/build/pdf.js#1999
   "resource://pdf.js/web/images/",
 ];
@@ -115,6 +118,9 @@ var whitelist = [
   // browser/extensions/pdfjs/content/web/viewer.js#7450
   {file: "resource://pdf.js/web/debugger.js"},
 
+  // Needed by Normandy
+  {file: "resource://gre/modules/IndexedDB.jsm"},
+
   // Starting from here, files in the whitelist are bugs that need fixing.
   // Bug 1339420
   {file: "chrome://branding/content/icon128.png"},
@@ -168,27 +174,6 @@ var whitelist = [
 
 ];
 
-// Temporary whitelisted while WebPayments in construction
-// See Bug 1381141
-if (AppConstants.NIGHTLY_BUILD && AppConstants.MOZ_BUILD_APP == "browser") {
-  whitelist.push(
-    {file: "chrome://payments/content/paymentRequest.xhtml"}
-  );
-}
-
-if (!AppConstants.MOZ_PHOTON_THEME) {
-  whitelist.push(
-    // Bug 1343824
-    {file: "chrome://browser/skin/customizableui/customize-illustration-rtl@2x.png",
-     platforms: ["linux", "win"]},
-    {file: "chrome://browser/skin/customizableui/customize-illustration@2x.png",
-     platforms: ["linux", "win"]},
-    {file: "chrome://browser/skin/customizableui/info-icon-customizeTip@2x.png",
-     platforms: ["linux", "win"]},
-    {file: "chrome://browser/skin/customizableui/panelarrow-customizeTip@2x.png",
-     platforms: ["linux", "win"]});
-}
-
 whitelist = new Set(whitelist.filter(item =>
   ("isFromDevTools" in item) == isDevtools &&
   (!item.skipNightly || !AppConstants.NIGHTLY_BUILD) &&
@@ -234,15 +219,11 @@ if (!isDevtools) {
     whitelist.add("resource://services-sync/engines/" + module);
   }
 
-  // intl/unicharutil/nsEntityConverter.h
-  for (let name of ["html40Latin1", "html40Symbols", "html40Special", "mathml20"]) {
-    whitelist.add("resource://gre/res/entityTables/" + name + ".properties");
-  }
 }
 
 const gInterestingCategories = new Set([
-  "agent-style-sheets", "addon-provider-module", "webextension-scripts",
-  "webextension-schemas", "webextension-scripts-addon",
+  "agent-style-sheets", "addon-provider-module", "webextension-modules",
+  "webextension-scripts", "webextension-schemas", "webextension-scripts-addon",
   "webextension-scripts-content", "webextension-scripts-devtools"
 ]);
 
@@ -509,20 +490,20 @@ add_task(async function checkAllTheFiles() {
   findChromeUrlsFromArray(uint16, "chrome://");
   findChromeUrlsFromArray(uint16, "resource://");
 
-  const kCodeExtensions = [".xul", ".xml", ".xsl", ".js", ".jsm", ".html", ".xhtml"];
+  const kCodeExtensions = [".xul", ".xml", ".xsl", ".js", ".jsm", ".json", ".html", ".xhtml"];
 
   let appDir = Services.dirsvc.get("GreD", Ci.nsIFile);
   // This asynchronously produces a list of URLs (sadly, mostly sync on our
   // test infrastructure because it runs against jarfiles there, and
   // our zipreader APIs are all sync)
-  let uris = await generateURIsFromDirTree(appDir, [".css", ".manifest", ".json", ".jpg", ".png", ".gif", ".svg",  ".dtd", ".properties"].concat(kCodeExtensions));
+  let uris = await generateURIsFromDirTree(appDir, [".css", ".manifest", ".jpg", ".png", ".gif", ".svg",  ".dtd", ".properties"].concat(kCodeExtensions));
 
   // Parse and remove all manifests from the list.
   // NOTE that this must be done before filtering out devtools paths
   // so that all chrome paths can be recorded.
   let manifestPromises = [];
   uris = uris.filter(uri => {
-    let path = uri.path;
+    let path = uri.pathQueryRef;
     if (path.endsWith(".manifest")) {
       manifestPromises.push(parseManifest(uri));
       return false;
@@ -539,7 +520,7 @@ add_task(async function checkAllTheFiles() {
   let allPromises = [];
 
   for (let uri of uris) {
-    let path = uri.path;
+    let path = uri.pathQueryRef;
     if (path.endsWith(".css"))
       allPromises.push(parseCSSFile(uri));
     else if (kCodeExtensions.some(ext => path.endsWith(ext)))

@@ -11,7 +11,6 @@ use parser::{Parse, ParserContext};
 use std::fmt;
 use style_traits::{Comma, OneOrMoreSeparated, ParseError, StyleParseError, ToCss};
 use super::CustomIdent;
-use values::specified::url::SpecifiedUrl;
 
 pub mod background;
 pub mod basic_shape;
@@ -24,6 +23,7 @@ pub mod grid;
 pub mod image;
 pub mod position;
 pub mod rect;
+pub mod svg;
 pub mod text;
 pub mod transform;
 
@@ -48,6 +48,19 @@ impl SymbolsType {
             SymbolsType::Alphabetic => structs::NS_STYLE_COUNTER_SYSTEM_ALPHABETIC as u8,
             SymbolsType::Symbolic => structs::NS_STYLE_COUNTER_SYSTEM_SYMBOLIC as u8,
             SymbolsType::Fixed => structs::NS_STYLE_COUNTER_SYSTEM_FIXED as u8,
+        }
+    }
+
+    /// Convert Gecko value to symbol type.
+    pub fn from_gecko_keyword(gecko_value: u32) -> SymbolsType {
+        use gecko_bindings::structs;
+        match gecko_value {
+            structs::NS_STYLE_COUNTER_SYSTEM_CYCLIC => SymbolsType::Cyclic,
+            structs::NS_STYLE_COUNTER_SYSTEM_NUMERIC => SymbolsType::Numeric,
+            structs::NS_STYLE_COUNTER_SYSTEM_ALPHABETIC => SymbolsType::Alphabetic,
+            structs::NS_STYLE_COUNTER_SYSTEM_SYMBOLIC => SymbolsType::Symbolic,
+            structs::NS_STYLE_COUNTER_SYSTEM_FIXED => SymbolsType::Fixed,
+            x => panic!("Unexpected value for symbol type {}", x)
         }
     }
 }
@@ -253,89 +266,12 @@ impl ToCss for FontSettingTagFloat {
     }
 }
 
+/// A wrapper of Non-negative values.
+#[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq, PartialOrd, ToComputedValue, ToCss)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf, Deserialize, Serialize))]
+pub struct NonNegative<T>(pub T);
 
-/// An SVG paint value
-///
-/// https://www.w3.org/TR/SVG2/painting.html#SpecifyingPaint
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, PartialEq, ToAnimatedValue, ToComputedValue, ToCss)]
-pub struct SVGPaint<ColorType> {
-    /// The paint source
-    pub kind: SVGPaintKind<ColorType>,
-    /// The fallback color
-    pub fallback: Option<ColorType>,
-}
-
-/// An SVG paint value without the fallback
-///
-/// Whereas the spec only allows PaintServer
-/// to have a fallback, Gecko lets the context
-/// properties have a fallback as well.
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, PartialEq, ToAnimatedValue, ToComputedValue, ToCss)]
-pub enum SVGPaintKind<ColorType> {
-    /// `none`
-    None,
-    /// `<color>`
-    Color(ColorType),
-    /// `url(...)`
-    PaintServer(SpecifiedUrl),
-    /// `context-fill`
-    ContextFill,
-    /// `context-stroke`
-    ContextStroke,
-}
-
-impl<ColorType> SVGPaintKind<ColorType> {
-    /// Parse a keyword value only
-    fn parse_ident<'i, 't>(input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
-        try_match_ident_ignore_ascii_case! { input.expect_ident()?,
-            "none" => Ok(SVGPaintKind::None),
-            "context-fill" => Ok(SVGPaintKind::ContextFill),
-            "context-stroke" => Ok(SVGPaintKind::ContextStroke),
-        }
-    }
-}
-
-/// Parse SVGPaint's fallback.
-/// fallback is keyword(none) or Color.
-/// https://svgwg.org/svg2-draft/painting.html#SpecifyingPaint
-fn parse_fallback<'i, 't, ColorType: Parse>(context: &ParserContext,
-                                            input: &mut Parser<'i, 't>)
-                                            -> Option<ColorType> {
-    if input.try(|i| i.expect_ident_matching("none")).is_ok() {
-        None
-    } else {
-        input.try(|i| ColorType::parse(context, i)).ok()
-    }
-}
-
-impl<ColorType: Parse> Parse for SVGPaint<ColorType> {
-    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
-        if let Ok(url) = input.try(|i| SpecifiedUrl::parse(context, i)) {
-            Ok(SVGPaint {
-                kind: SVGPaintKind::PaintServer(url),
-                fallback: parse_fallback(context, input),
-            })
-        } else if let Ok(kind) = input.try(SVGPaintKind::parse_ident) {
-            if let SVGPaintKind::None = kind {
-                Ok(SVGPaint {
-                    kind: kind,
-                    fallback: None,
-                })
-            } else {
-                Ok(SVGPaint {
-                    kind: kind,
-                    fallback: parse_fallback(context, input),
-                })
-            }
-        } else if let Ok(color) = input.try(|i| ColorType::parse(context, i)) {
-            Ok(SVGPaint {
-                kind: SVGPaintKind::Color(color),
-                fallback: None,
-            })
-        } else {
-            Err(StyleParseError::UnspecifiedError.into())
-        }
-    }
-}
+/// A wrapper of greater-than-or-equal-to-one values.
+#[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq, PartialOrd, ToComputedValue, ToCss)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf, Deserialize, Serialize))]
+pub struct GreaterThanOrEqualToOne<T>(pub T);

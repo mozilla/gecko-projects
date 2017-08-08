@@ -16,8 +16,11 @@ use euclid::{Point2D, Size2D};
 #[cfg(feature = "gecko")] use gecko_string_cache::Atom;
 use properties::{CSSWideKeyword, PropertyDeclaration};
 use properties::longhands;
+use properties::longhands::background_size::computed_value::T as BackgroundSizeList;
+use properties::longhands::border_spacing::computed_value::T as BorderSpacing;
 use properties::longhands::font_weight::computed_value::T as FontWeight;
 use properties::longhands::font_stretch::computed_value::T as FontStretch;
+use properties::longhands::line_height::computed_value::T as LineHeight;
 use properties::longhands::transform::computed_value::ComputedMatrix;
 use properties::longhands::transform::computed_value::ComputedOperation as TransformOperation;
 use properties::longhands::transform::computed_value::T as TransformList;
@@ -43,10 +46,14 @@ use values::computed::{Angle, LengthOrPercentageOrAuto, LengthOrPercentageOrNone
 use values::computed::{BorderCornerRadius, ClipRect};
 use values::computed::{CalcLengthOrPercentage, Color, Context, ComputedValueAsSpecified};
 use values::computed::{LengthOrPercentage, MaxLength, MozLength, Percentage, ToComputedValue};
-use values::generics::{SVGPaint, SVGPaintKind};
+use values::computed::{NonNegativeAu, NonNegativeNumber, PositiveIntegerOrAuto};
+use values::computed::length::{NonNegativeLengthOrAuto, NonNegativeLengthOrNormal};
+use values::computed::length::NonNegativeLengthOrPercentage;
+use values::generics::{GreaterThanOrEqualToOne, NonNegative};
 use values::generics::border::BorderCornerRadius as GenericBorderCornerRadius;
 use values::generics::effects::Filter;
 use values::generics::position as generic_position;
+use values::generics::svg::{SVGLength, SVGOpacity, SVGPaint, SVGPaintKind, SVGStrokeDashArray};
 
 /// A trait used to implement various procedures used during animation.
 pub trait Animatable: Sized {
@@ -777,6 +784,7 @@ impl ToAnimatedZero for AnimationValue {
 
 impl RepeatableListAnimatable for LengthOrPercentage {}
 impl RepeatableListAnimatable for Either<f32, LengthOrPercentage> {}
+impl RepeatableListAnimatable for Either<NonNegativeNumber, NonNegativeLengthOrPercentage> {}
 
 macro_rules! repeated_vec_impl {
     ($($ty:ty),*) => {
@@ -1364,7 +1372,14 @@ impl Animatable for MozLength {
 
 impl ToAnimatedZero for MozLength {
     #[inline]
-    fn to_animated_zero(&self) -> Result<Self, ()> { Err(()) }
+    fn to_animated_zero(&self) -> Result<Self, ()> {
+        match *self {
+            MozLength::LengthOrPercentageOrAuto(ref length) => {
+                Ok(MozLength::LengthOrPercentageOrAuto(length.to_animated_zero()?))
+            },
+            _ => Err(())
+        }
+    }
 }
 
 /// https://drafts.csswg.org/css-transitions/#animtype-lpcalc
@@ -1406,7 +1421,7 @@ impl Animatable for FontWeight {
         let b = other.0 as f64;
         const NORMAL: f64 = 400.;
         let weight = (a - NORMAL) * self_portion + (b - NORMAL) * other_portion + NORMAL;
-        let weight = (weight.min(100.).max(900.) / 100.).round() * 100.;
+        let weight = (weight.max(100.).min(900.) / 100.).round() * 100.;
         Ok(FontWeight(weight as u16))
     }
 
@@ -3038,6 +3053,123 @@ impl ToAnimatedZero for IntermediateSVGPaintKind {
     }
 }
 
+impl<LengthType> Animatable for SVGLength<LengthType>
+        where LengthType: Animatable + Clone
+{
+    #[inline]
+    fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
+        match (self, other) {
+            (&SVGLength::Length(ref this), &SVGLength::Length(ref other)) => {
+                this.add_weighted(&other, self_portion, other_portion).map(SVGLength::Length)
+            }
+            _ => {
+                Ok(if self_portion > other_portion { self.clone() } else { other.clone() })
+            }
+        }
+    }
+
+    #[inline]
+    fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
+        match (self, other) {
+            (&SVGLength::Length(ref this), &SVGLength::Length(ref other)) => {
+                this.compute_distance(other)
+            }
+            _ => Err(())
+        }
+    }
+}
+
+impl<LengthType> ToAnimatedZero for SVGLength<LengthType> where LengthType : ToAnimatedZero {
+    #[inline]
+    fn to_animated_zero(&self) -> Result<Self, ()> {
+        match self {
+            &SVGLength::Length(ref length) => length.to_animated_zero().map(SVGLength::Length),
+            &SVGLength::ContextValue => Ok(SVGLength::ContextValue),
+        }
+    }
+}
+
+impl<LengthType> Animatable for SVGStrokeDashArray<LengthType>
+    where LengthType : RepeatableListAnimatable + Clone
+{
+    #[inline]
+    fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
+        match (self, other) {
+            (&SVGStrokeDashArray::Values(ref this), &SVGStrokeDashArray::Values(ref other))=> {
+                this.add_weighted(other, self_portion, other_portion)
+                    .map(SVGStrokeDashArray::Values)
+            }
+            _ => {
+                Ok(if self_portion > other_portion { self.clone() } else { other.clone() })
+            }
+        }
+    }
+
+    #[inline]
+    fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
+        match (self, other) {
+            (&SVGStrokeDashArray::Values(ref this), &SVGStrokeDashArray::Values(ref other)) => {
+                this.compute_distance(other)
+            }
+            _ => Err(())
+        }
+    }
+}
+
+impl<LengthType> ToAnimatedZero for SVGStrokeDashArray<LengthType>
+    where LengthType : ToAnimatedZero + Clone
+{
+    #[inline]
+    fn to_animated_zero(&self) -> Result<Self, ()> {
+        match self {
+            &SVGStrokeDashArray::Values(ref values) => {
+                values.iter().map(ToAnimatedZero::to_animated_zero)
+                      .collect::<Result<Vec<_>, ()>>().map(SVGStrokeDashArray::Values)
+            }
+            &SVGStrokeDashArray::ContextValue => Ok(SVGStrokeDashArray::ContextValue),
+        }
+    }
+}
+
+impl<OpacityType> Animatable for SVGOpacity<OpacityType>
+    where OpacityType: Animatable + Clone
+{
+    #[inline]
+    fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
+        match (self, other) {
+            (&SVGOpacity::Opacity(ref this), &SVGOpacity::Opacity(ref other)) => {
+                this.add_weighted(other, self_portion, other_portion).map(SVGOpacity::Opacity)
+            }
+            _ => {
+                Ok(if self_portion > other_portion { self.clone() } else { other.clone() })
+            }
+        }
+    }
+
+    #[inline]
+    fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
+        match (self, other) {
+            (&SVGOpacity::Opacity(ref this), &SVGOpacity::Opacity(ref other)) => {
+                this.compute_distance(other)
+            }
+            _ => Err(())
+        }
+    }
+}
+
+impl<OpacityType> ToAnimatedZero for SVGOpacity<OpacityType>
+    where OpacityType: ToAnimatedZero + Clone
+{
+    #[inline]
+    fn to_animated_zero(&self) -> Result<Self, ()> {
+        match self {
+            &SVGOpacity::Opacity(ref opacity) =>
+                opacity.to_animated_zero().map(SVGOpacity::Opacity),
+            other => Ok(other.clone()),
+        }
+    }
+}
+
 <%
     FILTER_FUNCTIONS = [ 'Blur', 'Brightness', 'Contrast', 'Grayscale',
                          'HueRotate', 'Invert', 'Opacity', 'Saturate',
@@ -3067,7 +3199,7 @@ fn add_weighted_filter_function_impl(from: &AnimatedFilter,
                     &to_value,
                     self_portion,
                     other_portion,
-                    &0.0,
+                    &NonNegative::<CSSFloat>(0.0),
                 )?))
             },
         % endfor
@@ -3078,7 +3210,7 @@ fn add_weighted_filter_function_impl(from: &AnimatedFilter,
                     &to_value,
                     self_portion,
                     other_portion,
-                    &1.0,
+                    &NonNegative::<CSSFloat>(1.0),
                 )?))
                 },
         % endfor
@@ -3247,5 +3379,51 @@ sorted_shorthands = [(p, position) for position, p in enumerate(sorted_shorthand
         % for property, position in sorted_shorthands:
             ShorthandId::${property.camel_case} => ${position},
         % endfor
+    }
+}
+
+impl<T> Animatable for NonNegative<T>
+    where T: Animatable + Clone
+{
+    #[inline]
+    fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
+        self.0.add_weighted(&other.0, self_portion, other_portion).map(NonNegative::<T>)
+    }
+
+    #[inline]
+    fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
+        self.0.compute_distance(&other.0)
+    }
+}
+
+impl<T> ToAnimatedZero for NonNegative<T>
+    where T: ToAnimatedZero
+{
+    #[inline]
+    fn to_animated_zero(&self) -> Result<Self, ()> {
+        self.0.to_animated_zero().map(NonNegative::<T>)
+    }
+}
+
+impl<T> Animatable for GreaterThanOrEqualToOne<T>
+    where T: Animatable + Clone
+{
+    #[inline]
+    fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
+        self.0.add_weighted(&other.0, self_portion, other_portion).map(GreaterThanOrEqualToOne::<T>)
+    }
+
+    #[inline]
+    fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
+        self.0.compute_distance(&other.0)
+    }
+}
+
+impl<T> ToAnimatedZero for GreaterThanOrEqualToOne<T>
+    where T: ToAnimatedZero
+{
+    #[inline]
+    fn to_animated_zero(&self) -> Result<Self, ()> {
+        self.0.to_animated_zero().map(GreaterThanOrEqualToOne::<T>)
     }
 }

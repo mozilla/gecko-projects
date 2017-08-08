@@ -5,27 +5,28 @@ var gContentAPI;
 var gContentWindow;
 
 var hasPocket = Services.prefs.getBoolPref("extensions.pocket.enabled");
-var isPhoton = Services.prefs.getBoolPref("browser.photon.structure.enabled");
-var hasQuit = !isPhoton ||
-              AppConstants.platform != "macosx";
-var hasLibrary = isPhoton || false;
+var hasQuit = AppConstants.platform != "macosx";
 
 requestLongerTimeout(2);
-add_task(setup_UITourTest);
 
-add_UITour_task(async function test_availableTargets() {
-  let data = await getConfigurationPromise("availableTargets");
-  ok_targets(data, [
+function getExpectedTargets() {
+  return [
     "accountStatus",
     "addons",
     "appMenu",
     "backForward",
     "bookmarks",
+    "bookmark-star-button",
     "customize",
     "devtools",
     "help",
     "home",
-      ...(hasLibrary ? ["library"] : []),
+    "library",
+    "pageActionButton",
+    "pageAction-panel-bookmark",
+    "pageAction-panel-copyURL",
+    "pageAction-panel-emailLink",
+    "pageAction-panel-sendToDevice",
       ...(hasPocket ? ["pocket"] : []),
     "privateWindow",
       ...(hasQuit ? ["quit"] : []),
@@ -34,7 +35,15 @@ add_UITour_task(async function test_availableTargets() {
     "searchIcon",
     "trackingProtection",
     "urlbar",
-  ]);
+  ];
+}
+
+add_task(setup_UITourTest);
+
+add_UITour_task(async function test_availableTargets() {
+  let data = await getConfigurationPromise("availableTargets");
+  let expecteds = getExpectedTargets();
+  ok_targets(data, expecteds);
 
   ok(UITour.availableTargetsCache.has(window),
      "Targets should now be cached");
@@ -45,25 +54,9 @@ add_UITour_task(async function test_availableTargets_changeWidgets() {
   ok(!UITour.availableTargetsCache.has(window),
      "Targets should be evicted from cache after widget change");
   let data = await getConfigurationPromise("availableTargets");
-  ok_targets(data, [
-    "accountStatus",
-    "addons",
-    "appMenu",
-    "backForward",
-    "customize",
-    "help",
-    "devtools",
-    "home",
-      ...(hasLibrary ? ["library"] : []),
-      ...(hasPocket ? ["pocket"] : []),
-    "privateWindow",
-      ...(hasQuit ? ["quit"] : []),
-    "readerMode-urlBar",
-    "search",
-    "searchIcon",
-    "trackingProtection",
-    "urlbar",
-  ]);
+  let expecteds = getExpectedTargets();
+  expecteds = expecteds.filter(target => target != "bookmarks");
+  ok_targets(data, expecteds);
 
   ok(UITour.availableTargetsCache.has(window),
      "Targets should now be cached again");
@@ -77,25 +70,10 @@ add_UITour_task(async function test_availableTargets_exceptionFromGetTarget() {
   // Make sure the callback still fires with the other available targets.
   CustomizableUI.removeWidgetFromArea("search-container");
   let data = await getConfigurationPromise("availableTargets");
+  let expecteds = getExpectedTargets();
   // Default minus "search" and "searchIcon"
-  ok_targets(data, [
-    "accountStatus",
-    "addons",
-    "appMenu",
-    "backForward",
-    "bookmarks",
-    "customize",
-    "devtools",
-    "help",
-    "home",
-      ...(hasLibrary ? ["library"] : []),
-      ...(hasPocket ? ["pocket"] : []),
-    "privateWindow",
-      ...(hasQuit ? ["quit"] : []),
-    "readerMode-urlBar",
-    "trackingProtection",
-    "urlbar",
-  ]);
+  expecteds = expecteds.filter(target => target != "search" && target != "searchIcon");
+  ok_targets(data, expecteds);
 
   CustomizableUI.reset();
 });

@@ -10,13 +10,13 @@
 
 <%namespace name="helpers" file="/helpers.mako.rs" />
 
+#[cfg(feature = "servo")] use app_units::Au;
 use servo_arc::{Arc, UniqueArc};
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::{fmt, mem, ops};
 #[cfg(feature = "gecko")] use std::ptr;
 
-use app_units::Au;
 #[cfg(feature = "servo")] use cssparser::RGBA;
 use cssparser::{Parser, TokenSerializationType, serialize_identifier};
 use cssparser::ParserInput;
@@ -30,7 +30,7 @@ use font_metrics::FontMetricsProvider;
 #[cfg(feature = "servo")] use logical_geometry::{LogicalMargin, PhysicalSide};
 use logical_geometry::WritingMode;
 use media_queries::Device;
-use parser::{Parse, ParserContext};
+use parser::ParserContext;
 use properties::animated_properties::AnimatableLonghand;
 #[cfg(feature = "gecko")] use properties::longhands::system_font::SystemFont;
 use selector_parser::PseudoElement;
@@ -43,6 +43,7 @@ use stylesheets::{CssRuleType, MallocSizeOf, MallocSizeOfFn, Origin, UrlExtraDat
 #[cfg(feature = "servo")] use values::Either;
 use values::generics::text::LineHeight;
 use values::computed;
+use values::computed::NonNegativeAu;
 use cascade_info::CascadeInfo;
 use rule_tree::{CascadeLevel, StrongRuleNode};
 use self::computed_value_flags::ComputedValueFlags;
@@ -421,12 +422,11 @@ impl CSSWideKeyword {
     }
 }
 
-impl Parse for CSSWideKeyword {
-    fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
-        let ident = input.expect_ident()?.clone();
-        input.expect_exhausted()?;
-        CSSWideKeyword::from_ident(&ident)
-            .ok_or(SelectorParseError::UnexpectedIdent(ident).into())
+impl CSSWideKeyword {
+    fn parse(input: &mut Parser) -> Result<Self, ()> {
+        let ident = input.expect_ident().map_err(|_| ())?.clone();
+        input.expect_exhausted().map_err(|_| ())?;
+        CSSWideKeyword::from_ident(&ident).ok_or(())
     }
 }
 
@@ -608,6 +608,7 @@ impl LonghandId {
             LonghandId::AnimationName |
             LonghandId::TransitionProperty |
             LonghandId::XLang |
+            LonghandId::XTextZoom |
             LonghandId::MozScriptLevel |
             LonghandId::MozMinFontSizeRatio |
             % endif
@@ -1485,9 +1486,9 @@ impl PropertyDeclaration {
         id.check_allowed_in(rule_type, context.stylesheet_origin)?;
         match id {
             PropertyId::Custom(name) => {
-                let value = match input.try(|i| CSSWideKeyword::parse(context, i)) {
+                let value = match input.try(|i| CSSWideKeyword::parse(i)) {
                     Ok(keyword) => DeclaredValueOwned::CSSWideKeyword(keyword),
-                    Err(_) => match ::custom_properties::SpecifiedValue::parse(context, input) {
+                    Err(()) => match ::custom_properties::SpecifiedValue::parse(context, input) {
                         Ok(value) => DeclaredValueOwned::Value(value),
                         Err(e) => return Err(PropertyDeclarationParseError::InvalidValue(name.to_string().into(),
                         ValueParseError::from_parse_error(e))),
@@ -1497,9 +1498,9 @@ impl PropertyDeclaration {
                 Ok(())
             }
             PropertyId::Longhand(id) => {
-                input.try(|i| CSSWideKeyword::parse(context, i)).map(|keyword| {
+                input.try(|i| CSSWideKeyword::parse(i)).map(|keyword| {
                     PropertyDeclaration::CSSWideKeyword(id, keyword)
-                }).or_else(|_| {
+                }).or_else(|()| {
                     input.look_for_var_functions();
                     let start = input.position();
                     input.parse_entirely(|input| id.parse_value(context, input))
@@ -1528,7 +1529,7 @@ impl PropertyDeclaration {
                 })
             }
             PropertyId::Shorthand(id) => {
-                if let Ok(keyword) = input.try(|i| CSSWideKeyword::parse(context, i)) {
+                if let Ok(keyword) = input.try(|i| CSSWideKeyword::parse(i)) {
                     if id == ShorthandId::All {
                         declarations.all_shorthand = AllShorthand::CSSWideKeyword(keyword)
                     } else {
@@ -1646,12 +1647,12 @@ pub use gecko_properties::style_structs;
 /// The module where all the style structs are defined.
 #[cfg(feature = "servo")]
 pub mod style_structs {
-    use app_units::Au;
     use fnv::FnvHasher;
     use super::longhands;
     use std::hash::{Hash, Hasher};
     use logical_geometry::WritingMode;
     use media_queries::Device;
+    use values::computed::NonNegativeAu;
 
     % for style_struct in data.active_style_structs():
         % if style_struct.name == "Font":
@@ -1751,7 +1752,7 @@ pub mod style_structs {
                     /// Whether the border-${side} property has nonzero width.
                     #[allow(non_snake_case)]
                     pub fn border_${side}_has_nonzero_width(&self) -> bool {
-                        self.border_${side}_width != ::app_units::Au(0)
+                        self.border_${side}_width != NonNegativeAu::zero()
                     }
                 % endfor
             % elif style_struct.name == "Font":
@@ -1769,7 +1770,8 @@ pub mod style_structs {
 
                 /// (Servo does not handle MathML, so this just calls copy_font_size_from)
                 pub fn inherit_font_size_from(&mut self, parent: &Self,
-                                              _: Option<Au>, _: &Device) -> bool {
+                                              _: Option<NonNegativeAu>,
+                                              _: &Device) -> bool {
                     self.copy_font_size_from(parent);
                     false
                 }
@@ -1777,19 +1779,19 @@ pub mod style_structs {
                 pub fn apply_font_size(&mut self,
                                        v: longhands::font_size::computed_value::T,
                                        _: &Self,
-                                       _: &Device) -> Option<Au> {
+                                       _: &Device) -> Option<NonNegativeAu> {
                     self.set_font_size(v);
                     None
                 }
                 /// (Servo does not handle MathML, so this does nothing)
-                pub fn apply_unconstrained_font_size(&mut self, _: Au) {
+                pub fn apply_unconstrained_font_size(&mut self, _: NonNegativeAu) {
                 }
 
             % elif style_struct.name == "Outline":
                 /// Whether the outline-width property is non-zero.
                 #[inline]
                 pub fn outline_has_nonzero_width(&self) -> bool {
-                    self.outline_width != ::app_units::Au(0)
+                    self.outline_width != NonNegativeAu::zero()
                 }
             % elif style_struct.name == "Text":
                 /// Whether the text decoration has an underline.
@@ -2189,10 +2191,10 @@ impl ComputedValuesInner {
     pub fn logical_padding(&self) -> LogicalMargin<computed::LengthOrPercentage> {
         let padding_style = self.get_padding();
         LogicalMargin::from_physical(self.writing_mode, SideOffsets2D::new(
-            padding_style.padding_top,
-            padding_style.padding_right,
-            padding_style.padding_bottom,
-            padding_style.padding_left,
+            padding_style.padding_top.0,
+            padding_style.padding_right.0,
+            padding_style.padding_bottom.0,
+            padding_style.padding_left.0,
         ))
     }
 
@@ -2201,10 +2203,10 @@ impl ComputedValuesInner {
     pub fn border_width_for_writing_mode(&self, writing_mode: WritingMode) -> LogicalMargin<Au> {
         let border_style = self.get_border();
         LogicalMargin::from_physical(writing_mode, SideOffsets2D::new(
-            border_style.border_top_width,
-            border_style.border_right_width,
-            border_style.border_bottom_width,
-            border_style.border_left_width,
+            border_style.border_top_width.0,
+            border_style.border_right_width.0,
+            border_style.border_bottom_width.0,
+            border_style.border_left_width.0,
         ))
     }
 
@@ -2496,14 +2498,15 @@ pub struct StyleBuilder<'a> {
     /// a subtree.
     parent_style: Option<<&'a ComputedValues>,
 
-    /// The pseudo-element this style will represent.
-    pseudo: Option<<&'a PseudoElement>,
-
     /// The rule node representing the ordered list of rules matched for this
     /// node.
     rules: Option<StrongRuleNode>,
 
     custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
+
+    /// The pseudo-element this style will represent.
+    pseudo: Option<<&'a PseudoElement>,
+
     /// The writing mode flags.
     ///
     /// TODO(emilio): Make private.
@@ -2698,6 +2701,11 @@ impl<'a> StyleBuilder<'a> {
     /// Returns whether we have a visited style.
     pub fn has_visited_style(&self) -> bool {
         self.visited_style.is_some()
+    }
+
+    /// Returns whether we're a pseudo-elements style.
+    pub fn is_pseudo_element(&self) -> bool {
+        self.pseudo.map_or(false, |p| !p.is_anon_box())
     }
 
     /// Returns the style we're getting reset properties from.
@@ -3207,6 +3215,23 @@ where
             let mut _skip_font_family = false;
 
             % if product == "gecko":
+
+                // <svg:text> is not affected by text zoom, and it uses a preshint to
+                // disable it. We fix up the struct when this happens by unzooming
+                // its contained font values, which will have been zoomed in the parent
+                if seen.contains(LonghandId::XTextZoom) {
+                    let zoom = context.builder.get_font().gecko().mAllowZoom;
+                    let parent_zoom = context.style().get_parent_font().gecko().mAllowZoom;
+                    if  zoom != parent_zoom {
+                        debug_assert!(!zoom,
+                                      "We only ever disable text zoom (in svg:text), never enable it");
+                        // can't borrow both device and font, use the take/put machinery
+                        let mut font = context.builder.take_font();
+                        font.unzoom_fonts(context.device());
+                        context.builder.put_font(font);
+                    }
+                }
+
                 // Whenever a single generic value is specified, gecko will do a bunch of
                 // recalculation walking up the rule tree, including handling the font-size stuff.
                 // It basically repopulates the font struct with the default font for a given
@@ -3336,7 +3361,7 @@ pub fn adjust_border_width(style: &mut StyleBuilder) {
         // Like calling to_computed_value, which wouldn't type check.
         if style.get_border().clone_border_${side}_style().none_or_hidden() &&
            style.get_border().border_${side}_has_nonzero_width() {
-            style.set_border_${side}_width(Au(0));
+            style.set_border_${side}_width(NonNegativeAu::zero());
         }
     % endfor
 }
@@ -3360,7 +3385,7 @@ pub fn modify_border_style_for_inline_sides(style: &mut Arc<ComputedValues>,
                 PhysicalSide::Top =>    (border.border_top_width,    border.border_top_style),
                 PhysicalSide::Bottom => (border.border_bottom_width, border.border_bottom_style),
             };
-            if current_style == (Au(0), BorderStyle::none) {
+            if current_style == (NonNegativeAu::zero(), BorderStyle::none) {
                 return;
             }
         }
@@ -3368,19 +3393,19 @@ pub fn modify_border_style_for_inline_sides(style: &mut Arc<ComputedValues>,
         let border = Arc::make_mut(&mut style.border);
         match side {
             PhysicalSide::Left => {
-                border.border_left_width = Au(0);
+                border.border_left_width = NonNegativeAu::zero();
                 border.border_left_style = BorderStyle::none;
             }
             PhysicalSide::Right => {
-                border.border_right_width = Au(0);
+                border.border_right_width = NonNegativeAu::zero();
                 border.border_right_style = BorderStyle::none;
             }
             PhysicalSide::Bottom => {
-                border.border_bottom_width = Au(0);
+                border.border_bottom_width = NonNegativeAu::zero();
                 border.border_bottom_style = BorderStyle::none;
             }
             PhysicalSide::Top => {
-                border.border_top_width = Au(0);
+                border.border_top_width = NonNegativeAu::zero();
                 border.border_top_style = BorderStyle::none;
             }
         }
@@ -3419,49 +3444,13 @@ macro_rules! css_properties_accessors {
     }
 }
 
-
+#[macro_export]
 macro_rules! longhand_properties_idents {
     ($macro_name: ident) => {
         $macro_name! {
             % for property in data.longhands:
-                ${property.ident}
+                { ${property.ident}, ${"true" if property.boxed else "false"} }
             % endfor
         }
-    }
-}
-
-/// Testing function to check the size of all SpecifiedValues.
-#[cfg(feature = "testing")]
-pub fn test_size_of_specified_values() {
-    use std::mem::size_of;
-    let threshold = 24;
-
-    let mut longhands = vec![];
-    % for property in data.longhands:
-        longhands.push(("${property.name}",
-                       size_of::<longhands::${property.ident}::SpecifiedValue>(),
-                       ${"true" if property.boxed else "false"}));
-    % endfor
-
-    let mut failing_messages = vec![];
-
-    for specified_value in longhands {
-        if specified_value.1 > threshold && !specified_value.2 {
-            failing_messages.push(
-                format!("Your changes have increased the size of {} SpecifiedValue to {}. The threshold is \
-                        currently {}. SpecifiedValues affect size of PropertyDeclaration enum and \
-                        increasing the size may negative affect style system performance. Please consider \
-                        using `boxed=\"True\"` in this longhand.",
-                        specified_value.0, specified_value.1, threshold));
-        } else if specified_value.1 <= threshold && specified_value.2 {
-            failing_messages.push(
-                format!("Your changes have decreased the size of {} SpecifiedValue to {}. Good work! \
-                        The threshold is currently {}. Please consider removing `boxed=\"True\"` from this longhand.",
-                        specified_value.0, specified_value.1, threshold));
-        }
-    }
-
-    if !failing_messages.is_empty() {
-        panic!("{}", failing_messages.join("\n\n"));
     }
 }

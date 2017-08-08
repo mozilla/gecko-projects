@@ -132,6 +132,7 @@ HTMLEditor::HTMLEditor()
       Preferences::GetBool("editor.use_div_for_default_newlines", true)
       ? ParagraphSeparator::div : ParagraphSeparator::br)
 {
+  mIsHTMLEditorClass = true;
 }
 
 HTMLEditor::~HTMLEditor()
@@ -173,6 +174,8 @@ HTMLEditor::~HTMLEditor()
   }
 
   RemoveEventListeners();
+
+  HideAnonymousEditingUIs();
 }
 
 void
@@ -657,6 +660,10 @@ HTMLEditor::HandleKeyPressEvent(WidgetKeyboardEvent* aKeyboardEvent)
       nsresult rv = NS_OK;
       if (HTMLEditUtils::IsTableElement(blockParent)) {
         rv = TabInTable(aKeyboardEvent->IsShift(), &handled);
+        // TabInTable might cause reframe
+        if (Destroyed()) {
+          return NS_OK;
+        }
         if (handled) {
           ScrollSelectionIntoView(false);
         }
@@ -1020,7 +1027,7 @@ HTMLEditor::TypedText(const nsAString& aString,
   return TextEditor::TypedText(aString, aAction);
 }
 
-NS_IMETHODIMP
+nsresult
 HTMLEditor::TabInTable(bool inIsShift,
                        bool* outHandled)
 {
@@ -4266,8 +4273,7 @@ HTMLEditor::IsVisTextNode(nsIContent* aNode,
 
   uint32_t length = aNode->TextLength();
   if (aSafeToAskFrames) {
-    nsCOMPtr<nsISelectionController> selectionController =
-      GetSelectionController();
+    nsISelectionController* selectionController = GetSelectionController();
     if (NS_WARN_IF(!selectionController)) {
       return NS_ERROR_FAILURE;
     }
@@ -4789,7 +4795,7 @@ HTMLEditor::CopyLastEditableChildStyles(nsIDOMNode* aPreviousBlock,
 }
 
 nsresult
-HTMLEditor::GetElementOrigin(nsIDOMElement* aElement,
+HTMLEditor::GetElementOrigin(Element& aElement,
                              int32_t& aX,
                              int32_t& aY)
 {
@@ -4802,8 +4808,7 @@ HTMLEditor::GetElementOrigin(nsIDOMElement* aElement,
   nsCOMPtr<nsIPresShell> ps = GetPresShell();
   NS_ENSURE_TRUE(ps, NS_ERROR_NOT_INITIALIZED);
 
-  nsCOMPtr<nsIContent> content = do_QueryInterface(aElement);
-  nsIFrame *frame = content->GetPrimaryFrame();
+  nsIFrame* frame = aElement.GetPrimaryFrame();
   NS_ENSURE_TRUE(frame, NS_OK);
 
   nsIFrame *container = ps->GetAbsoluteContainingBlock(frame);
@@ -5282,21 +5287,6 @@ HTMLEditor::GetInputEventTargetContent()
 {
   nsCOMPtr<nsIContent> target = GetActiveEditingHost();
   return target.forget();
-}
-
-bool
-HTMLEditor::IsEditable(nsINode* aNode)
-{
-  if (!TextEditor::IsEditable(aNode)) {
-    return false;
-  }
-  if (aNode->IsElement()) {
-    // If we're dealing with an element, then ask it whether it's editable.
-    return aNode->IsEditable();
-  }
-  // We might be dealing with a text node for example, which we always consider
-  // to be editable.
-  return true;
 }
 
 Element*

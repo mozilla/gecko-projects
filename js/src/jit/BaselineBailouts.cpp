@@ -410,6 +410,7 @@ struct BaselineStackBuilder
                              BaselineStubFrameLayout::reverseOffsetOfSavedFramePtr();
         return virtualPointerAtStackOffset(priorOffset + extraOffset);
 #elif defined(JS_CODEGEN_NONE)
+        (void) priorOffset;
         MOZ_CRASH();
 #else
 #  error "Bad architecture!"
@@ -1091,7 +1092,7 @@ InitFromBailout(JSContext* cx, HandleScript caller, jsbytecode* callerPC,
                 enterMonitorChain = true;
         }
 
-        uint32_t numUses = js::StackUses(script, pc);
+        uint32_t numUses = js::StackUses(pc);
 
         if (resumeAfter && !enterMonitorChain)
             pc = GetNextPc(pc);

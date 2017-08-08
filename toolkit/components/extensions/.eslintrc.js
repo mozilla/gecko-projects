@@ -120,9 +120,6 @@ module.exports = {
     // Enforce dots on the next line with property name.
     "dot-location": ["error", "property"],
 
-    // Encourage the use of dot notation whenever possible.
-    "dot-notation": "error",
-
     // Allow using == instead of ===, in the interest of landing something since
     // the devtools codebase is split on convention here.
     "eqeqeq": "off",
@@ -304,8 +301,5 @@ module.exports = {
 
     // Disallow labels that share a name with a variable
     "no-label-var": "error",
-
-    // Disallow creating new instances of String, Number, and Boolean
-    "no-new-wrappers": "error",
   },
 };

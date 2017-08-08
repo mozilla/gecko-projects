@@ -248,11 +248,7 @@ pref("browser.stopReloadAnimation.enabled", true);
 pref("browser.uidensity", 0);
 // Whether Firefox will automatically override the uidensity to "touch"
 // while the user is in a touch environment (such as Windows tablet mode).
-#ifdef MOZ_PHOTON_THEME
 pref("browser.touchmode.auto", true);
-#else
-pref("browser.touchmode.auto", false);
-#endif
 
 // At startup, check if we're the default browser and prompt user if not.
 pref("browser.shell.checkDefaultBrowser", true);
@@ -448,12 +444,6 @@ pref("browser.link.open_newwindow.restriction", 2);
 pref("browser.link.open_newwindow.disabled_in_fullscreen", true);
 #else
 pref("browser.link.open_newwindow.disabled_in_fullscreen", false);
-#endif
-
-#ifdef NIGHTLY_BUILD
-pref("browser.photon.structure.enabled", true);
-#else
-pref("browser.photon.structure.enabled", false);
 #endif
 
 // Tabbed browser
@@ -1695,6 +1685,7 @@ pref("extensions.formautofill.available", "on");
 pref("extensions.formautofill.available", "detect");
 #endif
 pref("extensions.formautofill.addresses.enabled", true);
+pref("extensions.formautofill.creditCards.enabled", true);
 pref("extensions.formautofill.firstTimeUse", true);
 pref("extensions.formautofill.heuristics.enabled", true);
 pref("extensions.formautofill.loglevel", "Warn");
@@ -1703,7 +1694,7 @@ pref("extensions.formautofill.loglevel", "Warn");
 pref("browser.sessionstore.restore_tabs_lazily", true);
 
 // Enable safebrowsing v4 tables (suffixed by "-proto") update.
-pref("urlclassifier.malwareTable", "goog-malware-proto,goog-unwanted-proto,test-malware-simple,test-unwanted-simple");
+pref("urlclassifier.malwareTable", "goog-malware-proto,goog-unwanted-proto,test-malware-simple,test-unwanted-simple,test-harmful-simple");
 pref("urlclassifier.phishTable", "goog-phish-proto,test-phish-simple");
 
 pref("browser.suppress_first_window_animation", true);
@@ -1723,13 +1714,5 @@ pref("browser.onboarding.notification.max-prompt-count-per-tour", 8);
 pref("browser.onboarding.newtour", "private,addons,customize,search,default,sync");
 pref("browser.onboarding.updatetour", "");
 
-// Preferences for the Screenshots feature:
-// Temporarily disable Screenshots in Beta & Release, so that we can gradually
-// roll out the feature using SHIELD pref flipping.
-#ifdef NIGHTLY_BUILD
-pref("extensions.screenshots.system-disabled", false);
-#else
-pref("extensions.screenshots.system-disabled", true);
-#endif
-// Permanent pref that allows individual users to disable Screenshots.
+// Preference that allows individual users to disable Screenshots.
 pref("extensions.screenshots.disabled", false);

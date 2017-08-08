@@ -181,9 +181,6 @@ class IonBuilder
     // added to |current| in this case.
     MDefinition* ensureDefiniteType(MDefinition* def, MIRType definiteType);
 
-    // Creates a MDefinition based on the given def improved with type as TypeSet.
-    MDefinition* ensureDefiniteTypeSet(MDefinition* def, TemporaryTypeSet* types);
-
     void maybeMarkEmpty(MDefinition* ins);
 
     JSObject* getSingletonPrototype(JSFunction* target);
@@ -666,6 +663,7 @@ class IonBuilder
     InliningResult inlineStrFromCharCode(CallInfo& callInfo);
     InliningResult inlineStrFromCodePoint(CallInfo& callInfo);
     InliningResult inlineStrCharAt(CallInfo& callInfo);
+    InliningResult inlineStringConvertCase(CallInfo& callInfo, MStringConvertCase::Mode mode);
 
     // String intrinsics.
     InliningResult inlineStringReplaceString(CallInfo& callInfo);
@@ -1125,6 +1123,8 @@ class IonBuilder
 
     MGetPropertyCache* maybeFallbackFunctionGetter_;
 
+    bool needsPostBarrier(MDefinition* value);
+
     // Used in tracking outcomes of optimization strategies for devtools.
     void startTrackingOptimizations();
 
@@ -1348,8 +1348,6 @@ class CallInfo
             getArg(i)->setImplicitlyUsedUnchecked();
     }
 };
-
-bool NeedsPostBarrier(MDefinition* value);
 
 } // namespace jit
 } // namespace js

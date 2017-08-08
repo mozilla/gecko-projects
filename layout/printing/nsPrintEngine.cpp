@@ -1026,7 +1026,7 @@ nsPrintEngine::CheckForPrinters(nsIPrintSettings* aPrintSettings)
   NS_ENSURE_ARG_POINTER(aPrintSettings);
 
   // See if aPrintSettings already has a printer
-  nsXPIDLString printerName;
+  nsString printerName;
   nsresult rv = aPrintSettings->GetPrinterName(getter_Copies(printerName));
   if (NS_SUCCEEDED(rv) && !printerName.IsEmpty()) {
     return NS_OK;
@@ -1508,7 +1508,7 @@ nsPrintEngine::GetDisplayTitleAndURL(const UniquePtr<nsPrintObject>& aPO,
       if (aDefType == eDocTitleDefURLDoc) {
         if (!aURLStr.IsEmpty()) {
           aTitle = aURLStr;
-        } else if (mPrt->mBrandName) {
+        } else if (!mPrt->mBrandName.IsEmpty()) {
           aTitle = mPrt->mBrandName;
         }
       }

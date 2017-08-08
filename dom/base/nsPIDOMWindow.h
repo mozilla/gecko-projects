@@ -65,6 +65,7 @@ enum class CallerType : uint32_t;
 enum PopupControlState {
   openAllowed = 0,  // open that window without worries
   openControlled,   // it's a popup, but allow it
+  openBlocked,      // it's a popup, but not from an allowed event
   openAbused,       // it's a popup. disallow it, but allow domain override.
   openOverridden    // disallow window open
 };
@@ -329,11 +330,6 @@ public:
   // Outer windows only.
   virtual bool CanClose() = 0;
   virtual void ForceClose() = 0;
-
-  bool IsModalContentWindow() const
-  {
-    return mIsModalContentWindow;
-  }
 
   /**
    * Call this to indicate that some node (this window, its document,
@@ -694,10 +690,6 @@ protected:
   // This member is only used by inner windows.
   bool                   mInnerObjectsFreed;
 
-
-  // This variable is used on both inner and outer windows (and they
-  // should match).
-  bool                   mIsModalContentWindow;
 
   // Tracks activation state that's used for :-moz-window-inactive.
   // Only used on outer windows.

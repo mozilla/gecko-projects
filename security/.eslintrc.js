@@ -17,9 +17,6 @@ module.exports = {
     // Require default case in switch statements.
     "default-case": "error",
 
-    // Require `foo.bar` dot notation instead of `foo["bar"]` notation.
-    "dot-notation": "error",
-
     // Require function* name()
     "generator-star-spacing": ["error", {"before": false, "after": true}],
 
@@ -51,10 +48,6 @@ module.exports = {
 
     // No reassigning native JS objects or read only globals.
     "no-global-assign": "error",
-
-    // Disallow primitive wrapper instances like `new Boolean(false)`, which
-    // seem like they should act like primitives but don't.
-    "no-new-wrappers": "error",
 
     // Disallow use of assignment in return statement.
     "no-return-assign": ["error", "always"],

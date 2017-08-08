@@ -39,6 +39,9 @@
 #define NO_REMOTE_TYPE ""
 
 // These must match the similar ones in E10SUtils.jsm.
+// Process names as reported by about:memory are defined in
+// ContentChild:RecvRemoteType.  Add your value there too or it will be called
+// "Web Content".
 #define DEFAULT_REMOTE_TYPE "web"
 #define FILE_REMOTE_TYPE "file"
 #define EXTENSION_REMOTE_TYPE "extension"
@@ -139,14 +142,6 @@ public:
 
   /** Shut down the content-process machinery. */
   static void ShutDown();
-
-  /**
-   * Ensure that all subprocesses are terminated and their OS
-   * resources have been reaped.  This is synchronous and can be
-   * very expensive in general.  It also bypasses the normal
-   * shutdown process.
-   */
-  static void JoinAllSubprocesses();
 
   static uint32_t GetPoolSize(const nsAString& aContentProcessType);
 
@@ -353,6 +348,8 @@ public:
   void ReportChildAlreadyBlocked();
 
   bool RequestRunToCompletion();
+
+  void UpdateCookieStatus(nsIChannel *aChannel);
 
   bool IsAvailable() const
   {
@@ -670,9 +667,6 @@ private:
   static nsTArray<ContentParent*>* sPrivateContent;
   static nsDataHashtable<nsUint32HashKey, ContentParent*> *sJSPluginContentParents;
   static StaticAutoPtr<LinkedList<ContentParent> > sContentParents;
-
-  static void JoinProcessesIOThread(const nsTArray<ContentParent*>* aProcesses,
-                                    Monitor* aMonitor, bool* aDone);
 
   static hal::ProcessPriority GetInitialProcessPriority(Element* aFrameElement);
 

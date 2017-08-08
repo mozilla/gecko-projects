@@ -33,8 +33,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "ProfileAge",
 XPCOMUtils.defineLazyModuleGetter(this, "ReaderParent",
   "resource:///modules/ReaderParent.jsm");
 
-XPCOMUtils.defineLazyPreferenceGetter(this, "gPhotonStructure", "browser.photon.structure.enabled");
-
 // See LOG_LEVELS in Console.jsm. Common examples: "All", "Info", "Warn", & "Error".
 const PREF_LOG_LEVEL      = "browser.uitour.loglevel";
 const PREF_SEENPAGEIDS    = "browser.uitour.seenPageIDs";
@@ -86,7 +84,8 @@ this.UITour = {
   pageIDSourceBrowsers: new WeakMap(),
   /* Map from browser chrome windows to a Set of <browser>s in which a tour is open (both visible and hidden) */
   tourBrowsersByWindow: new WeakMap(),
-  appMenuOpenForAnnotation: new Set(),
+  // Menus opened by api users explictly through `Mozilla.UITour.showMenu` call
+  noautohideMenus: new Set(),
   availableTargetsCache: new WeakMap(),
   clearAvailableTargetsCache() {
     this.availableTargetsCache = new WeakMap();
@@ -98,31 +97,23 @@ this.UITour = {
   targets: new Map([
     ["accountStatus", {
       query: (aDocument) => {
-        let prefix = gPhotonStructure ? "appMenu" : "PanelUI"
         // If the user is logged in, use the avatar element.
-        let fxAFooter = aDocument.getElementById(prefix + "-fxa-container");
+        let fxAFooter = aDocument.getElementById("appMenu-fxa-container");
         if (fxAFooter.getAttribute("fxastatus")) {
-          return aDocument.getElementById(prefix + "-fxa-avatar");
+          return aDocument.getElementById("appMenu-fxa-avatar");
         }
 
         // Otherwise use the sync setup icon.
-        let statusButton = aDocument.getElementById(prefix + "-fxa-label");
+        let statusButton = aDocument.getElementById("appMenu-fxa-label");
         return aDocument.getAnonymousElementByAttribute(statusButton,
                                                         "class",
                                                         "toolbarbutton-icon");
       },
-      // This is a fake widgetName starting with the "PanelUI-"/"appMenu-" prefix so we know
+      // This is a fake widgetName starting with the "appMenu-" prefix so we know
       // to automatically open the appMenu when annotating this target.
-      get widgetName() {
-        return gPhotonStructure ? "appMenu-fxa-label" : "PanelUI-fxa-label";
-      },
+      widgetName: "appMenu-fxa-label",
     }],
-    ["addons", {
-      query(aDocument) {
-        let buttonId = gPhotonStructure ? "appMenu-addons-button" : "add-ons-button";
-        return aDocument.getElementById(buttonId);
-      }
-    }],
+    ["addons",      {query: "#appMenu-addons-button"}],
     ["appMenu",     {
       addTargetListener: (aDocument, aCallback) => {
         let panelPopup = aDocument.defaultView.PanelUI.panel;
@@ -142,69 +133,28 @@ this.UITour = {
     ["controlCenter-trackingUnblock", controlCenterTrackingToggleTarget(true)],
     ["controlCenter-trackingBlock", controlCenterTrackingToggleTarget(false)],
     ["customize",   {
-      query: (aDocument) => {
-        if (gPhotonStructure) {
-          return aDocument.getElementById("appMenu-customize-button");
-        }
-        let customizeButton = aDocument.getElementById("PanelUI-customize");
-        return aDocument.getAnonymousElementByAttribute(customizeButton,
-                                                        "class",
-                                                        "toolbarbutton-icon");
-      },
-      get widgetName() {
-        return gPhotonStructure ? "appMenu-customize-button" : "PanelUI-customize";
-      },
+      query: "#appMenu-customize-button",
+      widgetName: "appMenu-customize-button",
     }],
-    ["devtools", {
-      query(aDocument) {
-        let button = aDocument.getElementById("developer-button");
-        if (button || !gPhotonStructure) {
-          return button;
-        }
-        return aDocument.getElementById("appMenu-developer-button");
-      },
-      get widgetName() {
-        return gPhotonStructure ? "appMenu-developer-button" : "developer-button";
-      },
+    ["devtools",    {
+      query: "#appMenu-developer-button",
+      widgetName: "appMenu-developer-button",
     }],
     ["forget", {
       allowAdd: true,
       query: "#panic-button",
       widgetName: "panic-button",
     }],
-    ["help", {
-      query: (aDocument) => {
-        let buttonId = gPhotonStructure ? "appMenu-help-button" : "PanelUI-help";
-        return aDocument.getElementById(buttonId);
-      }
-    }],
+    ["help",        {query: "#appMenu-help-button"}],
     ["home",        {query: "#home-button"}],
-    ["library", {
-     query: (aDocument) => {
-        let buttonId = "appMenu-library-button";
-        return gPhotonStructure ?
-          aDocument.getElementById(buttonId) : null;
-      }
-    }],
+    ["library",     {query: "#appMenu-library-button"}],
     ["pocket", {
       allowAdd: true,
       query: "#pocket-button",
       widgetName: "pocket-button",
     }],
-    ["privateWindow", {
-      query(aDocument) {
-        let buttonId = gPhotonStructure ? "appMenu-private-window-button"
-                                        : "privatebrowsing-button";
-        return aDocument.getElementById(buttonId);
-      }
-    }],
-    ["quit", {
-      query(aDocument) {
-        let buttonId = gPhotonStructure ? "appMenu-quit-button"
-                                        : "PanelUI-quit";
-        return aDocument.getElementById(buttonId);
-      }
-    }],
+    ["privateWindow", {query: "#appMenu-private-window-button"}],
+    ["quit",        {query: "#appMenu-quit-button"}],
     ["readerMode-urlBar", {query: "#reader-mode-button"}],
     ["search",      {
       infoPanelOffsetX: 18,
@@ -255,6 +205,24 @@ this.UITour = {
       query: "#urlbar",
       widgetName: "urlbar-container",
     }],
+    ["pageActionButton", {
+      query: "#pageActionButton"
+    }],
+    ["pageAction-panel-bookmark", {
+      query: "#pageAction-panel-bookmark"
+    }],
+    ["pageAction-panel-copyURL", {
+      query: "#pageAction-panel-copyURL"
+    }],
+    ["pageAction-panel-emailLink", {
+      query: "#pageAction-panel-emailLink"
+    }],
+    ["pageAction-panel-sendToDevice", {
+      query: "#pageAction-panel-sendToDevice"
+    }],
+    ["bookmark-star-button", {
+      query: "#star-button"
+    }]
   ]),
 
   init() {
@@ -505,6 +473,7 @@ this.UITour = {
       }
 
       case "showMenu": {
+        this.noautohideMenus.add(data.name);
         this.showMenu(window, data.name, () => {
           if (typeof data.showCallbackID == "string")
             this.sendPageCallback(messageManager, data.showCallbackID);
@@ -513,6 +482,7 @@ this.UITour = {
       }
 
       case "hideMenu": {
+        this.noautohideMenus.delete(data.name);
         this.hideMenu(window, data.name);
         break;
       }
@@ -843,7 +813,7 @@ this.UITour = {
   /**
    * Tear down a tour from a tab e.g. upon switching/closing tabs.
    */
-  teardownTourForBrowser(aWindow, aBrowser, aTourPageClosing = false) {
+  async teardownTourForBrowser(aWindow, aBrowser, aTourPageClosing = false) {
     log.debug("teardownTourForBrowser: aBrowser = ", aBrowser, aTourPageClosing);
 
     if (this.pageIDSourceBrowsers.has(aBrowser)) {
@@ -858,18 +828,49 @@ this.UITour = {
 
     this.hideHighlight(aWindow);
     this.hideInfo(aWindow);
-    // Ensure the menu panel is hidden before calling recreatePopup so popup events occur.
-    this.hideMenu(aWindow, "appMenu");
-    this.hideMenu(aWindow, "controlCenter");
 
-    // Clean up panel listeners after calling hideMenu above.
-    aWindow.PanelUI.panel.removeEventListener("popuphiding", this.hideAppMenuAnnotations);
-    aWindow.PanelUI.panel.removeEventListener("ViewShowing", this.hideAppMenuAnnotations);
-    aWindow.PanelUI.panel.removeEventListener("popuphidden", this.onPanelHidden);
-    let controlCenterPanel = aWindow.gIdentityHandler._identityPopup;
-    controlCenterPanel.removeEventListener("popuphidden", this.onPanelHidden);
-    controlCenterPanel.removeEventListener("popuphiding", this.hideControlCenterAnnotations);
+    let panels = [
+      {
+        name: "appMenu",
+        node: aWindow.PanelUI.panel,
+        events: [
+          [ "popuphidden", this.onPanelHidden ],
+          [ "popuphiding", this.hideAppMenuAnnotations ],
+          [ "ViewShowing", this.hideAppMenuAnnotations ]
+        ]
+      },
+      {
+        name: "pageActionPanel",
+        node: aWindow.BrowserPageActions.panelNode,
+        events: [
+          [ "popuphidden", this.onPanelHidden ],
+          [ "popuphiding", this.hidePageActionPanelAnnotations ],
+          [ "ViewShowing", this.hidePageActionPanelAnnotations ]
+        ]
+      },
+      {
+        name: "controlCenter",
+        node: aWindow.gIdentityHandler._identityPopup,
+        events: [
+          [ "popuphidden", this.onPanelHidden ],
+          [ "popuphiding", this.hideControlCenterAnnotations ]
+        ]
+      },
+    ];
+    for (let panel of panels) {
+      // Ensure the menu panel is hidden and clean up panel listeners after calling hideMenu.
+      if (panel.node.state != "closed") {
+        await new Promise(resolve => {
+          panel.node.addEventListener("popuphidden", resolve, { once: true });
+          this.hideMenu(aWindow, panel.name);
+        });
+      }
+      for (let [ name, listener ] of panel.events) {
+        panel.node.removeEventListener(name, listener);
+      }
+    }
 
+    this.noautohideMenus.clear();
     this.resetTheme();
 
     // If there are no more tour tabs left in the window, teardown the tour for the whole window.
@@ -983,75 +984,102 @@ this.UITour = {
   },
 
   targetIsInAppMenu(aTarget) {
-    let placement = CustomizableUI.getPlacementOfWidget(aTarget.widgetName || aTarget.node.id);
-    if (placement && placement.area == CustomizableUI.AREA_PANEL) {
-      return true;
-    }
-
     let targetElement = aTarget.node;
     // Use the widget for filtering if it exists since the target may be the icon inside.
     if (aTarget.widgetName) {
       targetElement = aTarget.node.ownerDocument.getElementById(aTarget.widgetName);
     }
 
-    // Handle the non-customizable buttons at the bottom of the menu which aren't proper widgets.
-    let prefix = gPhotonStructure ? "appMenu-" : "PanelUI-";
-    return targetElement.id.startsWith(prefix)
-             && targetElement.id != "PanelUI-button";
+    return targetElement.id.startsWith("appMenu-");
+  },
+
+  targetIsInPageActionPanel(aTarget) {
+    return aTarget.node.id.startsWith("pageAction-panel-");
   },
 
   /**
-   * Called before opening or after closing a highlight or info panel to see if
-   * we need to open or close the appMenu to see the annotation's anchor.
+   * Called before opening or after closing a highlight or an info tooltip to see if
+   * we need to open or close the menu to see the annotation's anchor.
+   *
+   * @param {ChromeWindow} aWindow the chrome window
+   * @param {bool} aShouldOpen true means we should open the menu, otherwise false
+   * @param {String} aMenuName "appMenu" or "pageActionPanel"
    */
-  _setAppMenuStateForAnnotation(aWindow, aAnnotationType, aShouldOpenForHighlight, aTarget = null,
-                                aCallback = null) {
-    log.debug("_setAppMenuStateForAnnotation:", aAnnotationType);
-    log.debug("_setAppMenuStateForAnnotation: Menu is expected to be:", aShouldOpenForHighlight ? "open" : "closed");
+  _setMenuStateForAnnotation(aWindow, aShouldOpen, aMenuName) {
+    log.debug("_setMenuStateForAnnotation: Menu is ", aMenuName);
+    log.debug("_setMenuStateForAnnotation: Menu is expected to be:", aShouldOpen ? "open" : "closed");
+    let menu = aMenuName == "appMenu" ? aWindow.PanelUI.panel : aWindow.BrowserPageActions.panelNode;
 
     // If the panel is in the desired state, we're done.
-    let panelIsOpen = aWindow.PanelUI.panel.state != "closed";
-    if (aShouldOpenForHighlight == panelIsOpen) {
-      log.debug("_setAppMenuStateForAnnotation: Panel already in expected state");
-      if (aCallback)
-        aCallback();
-      return;
-    }
-
-    // Don't close the menu if it wasn't opened by us (e.g. via showmenu instead).
-    if (!aShouldOpenForHighlight && !this.appMenuOpenForAnnotation.has(aAnnotationType)) {
-      log.debug("_setAppMenuStateForAnnotation: Menu not opened by us, not closing");
-      if (aCallback)
-        aCallback();
-      return;
-    }
-
-    if (aShouldOpenForHighlight) {
-      this.appMenuOpenForAnnotation.add(aAnnotationType);
-    } else {
-      this.appMenuOpenForAnnotation.delete(aAnnotationType);
+    let panelIsOpen = menu.state != "closed";
+    if (aShouldOpen == panelIsOpen) {
+      log.debug("_setMenuStateForAnnotation: Menu already in expected state");
+      return Promise.resolve();
     }
 
     // Actually show or hide the menu
-    if (this.appMenuOpenForAnnotation.size) {
-      log.debug("_setAppMenuStateForAnnotation: Opening the menu");
-      this.showMenu(aWindow, "appMenu", async () => {
-        // PanelMultiView's like the AppMenu might shuffle the DOM, which might result
-        // in our target being invalidated if it was anonymous content (since the XBL
-        // binding it belonged to got destroyed). We work around this by re-querying for
-        // the node and stuffing it into the old target structure.
-        log.debug("_setAppMenuStateForAnnotation: Refreshing target");
-        let refreshedTarget = await this.getTarget(aWindow, aTarget.targetName);
-        aTarget.node = refreshedTarget.node;
-        aCallback();
+    let promise = null;
+    if (aShouldOpen) {
+      log.debug("_setMenuStateForAnnotation: Opening the menu");
+      promise = new Promise(resolve => {
+        this.showMenu(aWindow, aMenuName, resolve);
       });
-    } else {
-      log.debug("_setAppMenuStateForAnnotation: Closing the menu");
-      this.hideMenu(aWindow, "appMenu");
-      if (aCallback)
-        aCallback();
+    } else if (!this.noautohideMenus.has(aMenuName)) {
+      // If the menu was opened explictly by api user through `Mozilla.UITour.showMenu`,
+      // it should be closed explictly by api user through `Mozilla.UITour.hideMenu`.
+      // So we shouldn't get to here to close it for the highlight/info annotation.
+      log.debug("_setMenuStateForAnnotation: Closing the menu");
+      promise = new Promise(resolve => {
+        menu.addEventListener("popuphidden", resolve, { once: true });
+        this.hideMenu(aWindow, aMenuName);
+      });
+    }
+    return promise;
+  },
+
+  /**
+   * Ensure the target's visibility and the open/close states of menus for the target.
+   *
+   * @param {ChromeWindow} aChromeWindow The chrome window
+   * @param {Object} aTarget The target on which we show highlight or show info.
+   */
+  async _ensureTarget(aChromeWindow, aTarget) {
+    let shouldOpenAppMenu = false;
+    let shouldOpenPageActionPanel = false;
+    if (this.targetIsInAppMenu(aTarget)) {
+      shouldOpenAppMenu = true;
+    } else if (this.targetIsInPageActionPanel(aTarget)) {
+      shouldOpenPageActionPanel = true;
+      // Ensure the panel visibility so as to ensure the visibility of
+      // the target element inside the panel otherwise
+      // we would be rejected in the below `isElementVisible` checking.
+      aChromeWindow.BrowserPageActions.panelNode.hidden = false;
     }
 
+    // Prevent showing a panel at an undefined position.
+    if (!this.isElementVisible(aTarget.node)) {
+      return Promise.reject(`_ensureTarget: Reject the ${aTarget.name} target since it isn't visible.`);
+    }
+
+    let menuToOpen = null;
+    let menuClosePromises = [];
+    if (shouldOpenAppMenu) {
+      menuToOpen = "appMenu";
+      menuClosePromises.push(this._setMenuStateForAnnotation(aChromeWindow, false, "pageActionPanel"));
+    } else if (shouldOpenPageActionPanel) {
+      menuToOpen = "pageActionPanel";
+      menuClosePromises.push(this._setMenuStateForAnnotation(aChromeWindow, false, "appMenu"));
+    } else {
+      menuClosePromises.push(this._setMenuStateForAnnotation(aChromeWindow, false, "appMenu"));
+      menuClosePromises.push(this._setMenuStateForAnnotation(aChromeWindow, false, "pageActionPanel"));
+    }
+
+    let promise = Promise.all(menuClosePromises);
+    await promise;
+    if (menuToOpen) {
+      promise = this._setMenuStateForAnnotation(aChromeWindow, true, menuToOpen);
+    }
+    return promise;
   },
 
   previewTheme(aTheme) {
@@ -1070,19 +1098,22 @@ this.UITour = {
    * obscured because it may be inside an overflow menu. This function should figure
    * that out and offer the overflow chevron as an alternative.
    *
-   * @param {Node} aAnchor The element that's supposed to be the anchor
+   * @param {ChromeWindow} aChromeWindow The chrome window
+   * @param {Object} aTarget The target object whose node is supposed to be the anchor
    * @type {Node}
    */
-  _correctAnchor(aAnchor) {
+  async _correctAnchor(aChromeWindow, aTarget) {
+    // PanelMultiView's like the AppMenu might shuffle the DOM, which might result
+    // in our anchor being invalidated if it was anonymous content (since the XBL
+    // binding it belonged to got destroyed). We work around this by re-querying for
+    // the node and stuffing it into the old anchor structure.
+    let refreshedTarget = await this.getTarget(aChromeWindow, aTarget.targetName);
+    let node = aTarget.node = refreshedTarget.node;
     // If the target is in the overflow panel, just return the overflow button.
-    if (aAnchor.getAttribute("overflowedItem")) {
-      let doc = aAnchor.ownerDocument;
-      let placement = CustomizableUI.getPlacementOfWidget(aAnchor.id);
-      let areaNode = doc.getElementById(placement.area);
-      return areaNode.overflowable._chevron;
+    if (node.closest("#widget-overflow-scroller")) {
+      return CustomizableUI.getWidget(node.id).forWindow(aChromeWindow).anchor;
     }
-
-    return aAnchor;
+    return node;
   },
 
   /**
@@ -1093,8 +1124,8 @@ this.UITour = {
    * @param aEffect    (optional) The effect to use from UITour.highlightEffects or "none".
    * @see UITour.highlightEffects
    */
-  showHighlight(aChromeWindow, aTarget, aEffect = "none") {
-    function showHighlightPanel() {
+  async showHighlight(aChromeWindow, aTarget, aEffect = "none") {
+    let showHighlightPanel = (aAnchorEl) => {
       let highlighter = aChromeWindow.document.getElementById("UITourHighlight");
 
       let effect = aEffect;
@@ -1112,7 +1143,7 @@ this.UITour = {
       highlighter.parentElement.setAttribute("targetName", aTarget.targetName);
       highlighter.parentElement.hidden = false;
 
-      let highlightAnchor = this._correctAnchor(aTarget.node);
+      let highlightAnchor = aAnchorEl;
       let targetRect = highlightAnchor.getBoundingClientRect();
       let highlightHeight = targetRect.height;
       let highlightWidth = targetRect.width;
@@ -1146,18 +1177,15 @@ this.UITour = {
       let offsetY = -(Math.max(0, highlightHeightWithMin - targetRect.height) / 2);
       this._addAnnotationPanelMutationObserver(highlighter.parentElement);
       highlighter.parentElement.openPopup(highlightAnchor, "overlap", offsetX, offsetY);
-    }
+    };
 
-    // Prevent showing a panel at an undefined position.
-    if (!this.isElementVisible(aTarget.node)) {
-      log.warn("showHighlight: Not showing a highlight since the target isn't visible", aTarget);
-      return;
+    try {
+      await this._ensureTarget(aChromeWindow, aTarget);
+      let anchorEl = await this._correctAnchor(aChromeWindow, aTarget);
+      showHighlightPanel(anchorEl);
+    } catch (e) {
+      log.warn(e);
     }
-
-    this._setAppMenuStateForAnnotation(aChromeWindow, "highlight",
-                                       this.targetIsInAppMenu(aTarget),
-                                       aTarget,
-                                       showHighlightPanel.bind(this));
   },
 
   hideHighlight(aWindow) {
@@ -1165,8 +1193,8 @@ this.UITour = {
     this._removeAnnotationPanelMutationObserver(highlighter.parentElement);
     highlighter.parentElement.hidePopup();
     highlighter.removeAttribute("active");
-
-    this._setAppMenuStateForAnnotation(aWindow, "highlight", false);
+    this._setMenuStateForAnnotation(aWindow, false, "appMenu");
+    this._setMenuStateForAnnotation(aWindow, false, "pageActionPanel");
   },
 
   /**
@@ -1182,9 +1210,9 @@ this.UITour = {
    * @param {String}   [aOptions.closeButtonCallback]
    * @param {String}   [aOptions.targetCallback]
    */
-  showInfo(aChromeWindow, aAnchor, aTitle = "", aDescription = "",
+  async showInfo(aChromeWindow, aAnchor, aTitle = "", aDescription = "",
            aIconURL = "", aButtons = [], aOptions = {}) {
-    function showInfoPanel(aAnchorEl) {
+    let showInfoPanel = (aAnchorEl) => {
       aAnchorEl.focus();
 
       let document = aChromeWindow.document;
@@ -1278,25 +1306,15 @@ this.UITour = {
           tooltip.openPopup(aAnchorEl, alignment);
         }, {once: true});
       }
-    }
-
-    // Prevent showing a panel at an undefined position.
-    if (!this.isElementVisible(aAnchor.node)) {
-      log.warn("showInfo: Not showing since the target isn't visible", aAnchor);
-      return;
-    }
-
-    // We need to bind the anchor argument to the showInfoPanel function call
-    // after _setAppMenuStateForAnnotation has finished, since
-    // _setAppMenuStateForAnnotation might have refreshed the anchor node.
-    let callShowInfoPanel = () => {
-      showInfoPanel.call(this, this._correctAnchor(aAnchor.node));
     };
 
-    this._setAppMenuStateForAnnotation(aChromeWindow, "info",
-                                       this.targetIsInAppMenu(aAnchor),
-                                       aAnchor,
-                                       callShowInfoPanel);
+    try {
+      await this._ensureTarget(aChromeWindow, aAnchor);
+      let anchorEl = await this._correctAnchor(aChromeWindow, aAnchor);
+      showInfoPanel(anchorEl);
+    } catch (e) {
+      log.warn(e);
+    }
   },
 
   isInfoOnTarget(aChromeWindow, aTargetName) {
@@ -1307,11 +1325,11 @@ this.UITour = {
 
   hideInfo(aWindow) {
     let document = aWindow.document;
-
     let tooltip = document.getElementById("UITourTooltip");
     this._removeAnnotationPanelMutationObserver(tooltip);
     tooltip.hidePopup();
-    this._setAppMenuStateForAnnotation(aWindow, "info", false);
+    this._setMenuStateForAnnotation(aWindow, false, "appMenu");
+    this._setMenuStateForAnnotation(aWindow, false, "pageActionPanel");
 
     let tooltipButtons = document.getElementById("UITourTooltipButtons");
     while (tooltipButtons.firstChild)
@@ -1327,27 +1345,36 @@ this.UITour = {
         return;
       }
       if (aOpenCallback)
-        aMenuBtn.addEventListener("popupshown", onPopupShown);
+        aMenuBtn.addEventListener("popupshown", aOpenCallback, { once: true });
       aMenuBtn.boxObject.openMenu(true);
     }
-    function onPopupShown(event) {
-      this.removeEventListener("popupshown", onPopupShown);
-      aOpenCallback(event);
-    }
 
-    if (aMenuName == "appMenu") {
-      aWindow.PanelUI.panel.setAttribute("noautohide", "true");
+    if (aMenuName == "appMenu" || aMenuName == "pageActionPanel") {
+      let menu = {
+        onPanelHidden: this.onPanelHidden
+      };
+      if (aMenuName == "appMenu") {
+        menu.node = aWindow.PanelUI.panel;
+        menu.hideMenuAnnotations = this.hideAppMenuAnnotations;
+        menu.show = () => aWindow.PanelUI.show();
+      } else {
+        menu.node = aWindow.BrowserPageActions.panelNode;
+        menu.hideMenuAnnotations = this.hidePageActionPanelAnnotations;
+        menu.show = () => aWindow.BrowserPageActions.showPanel();
+      }
+
+      menu.node.setAttribute("noautohide", "true");
       // If the popup is already opened, don't recreate the widget as it may cause a flicker.
-      if (aWindow.PanelUI.panel.state != "open") {
-        this.recreatePopup(aWindow.PanelUI.panel);
+      if (menu.node.state != "open") {
+        this.recreatePopup(menu.node);
       }
-      aWindow.PanelUI.panel.addEventListener("popuphiding", this.hideAppMenuAnnotations);
-      aWindow.PanelUI.panel.addEventListener("ViewShowing", this.hideAppMenuAnnotations);
-      aWindow.PanelUI.panel.addEventListener("popuphidden", this.onPanelHidden);
       if (aOpenCallback) {
-        aWindow.PanelUI.panel.addEventListener("popupshown", onPopupShown);
+        menu.node.addEventListener("popupshown", aOpenCallback, { once: true });
       }
-      aWindow.PanelUI.show();
+      menu.node.addEventListener("popuphidden", menu.onPanelHidden);
+      menu.node.addEventListener("popuphiding", menu.hideMenuAnnotations);
+      menu.node.addEventListener("ViewShowing", menu.hideMenuAnnotations);
+      menu.show();
     } else if (aMenuName == "bookmarks") {
       let menuBtn = aWindow.document.getElementById("bookmarks-menu-button");
       openMenuButton(menuBtn);
@@ -1359,7 +1386,7 @@ this.UITour = {
       popup.addEventListener("popuphiding", this.hideControlCenterAnnotations);
       popup.addEventListener("popuphidden", this.onPanelHidden);
 
-      popup.setAttribute("noautohide", true);
+      popup.setAttribute("noautohide", "true");
       this.clearAvailableTargetsCache();
 
       if (popup.state == "open") {
@@ -1373,7 +1400,7 @@ this.UITour = {
 
       // Open the control center
       if (aOpenCallback) {
-        popup.addEventListener("popupshown", onPopupShown);
+        popup.addEventListener("popupshown", aOpenCallback, { once: true });
       }
       aWindow.document.getElementById("identity-box").click();
     } else if (aMenuName == "pocket") {
@@ -1418,9 +1445,9 @@ this.UITour = {
     } else if (aMenuName == "urlbar") {
       this.getTarget(aWindow, "urlbar").then(target => {
         let urlbar = target.node;
-        urlbar.popup.addEventListener("popupshown", evt => {
-          aOpenCallback && aOpenCallback(evt);
-        }, {once: true});
+        if (aOpenCallback) {
+          urlbar.popup.addEventListener("popupshown", aOpenCallback, { once: true });
+        }
         urlbar.focus();
         // To demonstrate the ability of searching, we type "Firefox" in advance
         // for URLBar's dropdown. To limit the search results on browser-related
@@ -1450,6 +1477,10 @@ this.UITour = {
     } else if (aMenuName == "controlCenter") {
       let panel = aWindow.gIdentityHandler._identityPopup;
       panel.hidePopup();
+    } else if (aMenuName == "urlbar") {
+      aWindow.gURLBar.closePopup();
+    } else if (aMenuName == "pageActionPanel") {
+      aWindow.BrowserPageActions.panelNode.hidePopup();
     }
   },
 
@@ -1457,7 +1488,7 @@ this.UITour = {
     aWindow.openLinkIn("about:newtab", "current", {targetBrowser: aBrowser});
   },
 
-  hideAnnotationsForPanel(aEvent, aTargetPositionCallback) {
+  _hideAnnotationsForPanel(aEvent, aTargetPositionCallback) {
     let win = aEvent.target.ownerGlobal;
     let annotationElements = new Map([
       // [annotationElement (panel), method to hide the annotation]
@@ -1479,15 +1510,18 @@ this.UITour = {
         }).catch(log.error);
       }
     });
-    UITour.appMenuOpenForAnnotation.clear();
   },
 
   hideAppMenuAnnotations(aEvent) {
-    UITour.hideAnnotationsForPanel(aEvent, UITour.targetIsInAppMenu);
+    UITour._hideAnnotationsForPanel(aEvent, UITour.targetIsInAppMenu);
+  },
+
+  hidePageActionPanelAnnotations(aEvent) {
+    UITour._hideAnnotationsForPanel(aEvent, UITour.targetIsInPageActionPanel);
   },
 
   hideControlCenterAnnotations(aEvent) {
-    UITour.hideAnnotationsForPanel(aEvent, (aTarget) => {
+    UITour._hideAnnotationsForPanel(aEvent, (aTarget) => {
       return aTarget.targetName.startsWith("controlCenter-");
     });
   },
@@ -1583,7 +1617,7 @@ this.UITour = {
       // Services.appinfo.distributionID (value of MOZ_DISTRIBUTION_ID is set at build time).
       let distribution =
           Services.prefs.getDefaultBranch("distribution.").getCharPref("id", "default");
-      appinfo["distribution"] = distribution;
+      appinfo.distribution = distribution;
 
       let isDefaultBrowser = null;
       try {
@@ -1592,7 +1626,7 @@ this.UITour = {
           isDefaultBrowser = shell.isDefaultBrowser(false);
         }
       } catch (e) {}
-      appinfo["defaultBrowser"] = isDefaultBrowser;
+      appinfo.defaultBrowser = isDefaultBrowser;
 
       let canSetDefaultBrowserInBackground = true;
       if (AppConstants.isPlatformAndVersionAtLeast("win", "6.2") ||
@@ -1607,7 +1641,7 @@ this.UITour = {
         }
       }
 
-      appinfo["canSetDefaultBrowserInBackground"] =
+      appinfo.canSetDefaultBrowserInBackground =
         canSetDefaultBrowserInBackground;
 
       // Expose Profile creation and last reset dates in weeks.
@@ -1620,8 +1654,8 @@ this.UITour = {
       if (resetDate) {
         resetWeeksAgo = Math.floor((Date.now() - resetDate) / ONE_WEEK);
       }
-      appinfo["profileCreatedWeeksAgo"] = createdWeeksAgo;
-      appinfo["profileResetWeeksAgo"] = resetWeeksAgo;
+      appinfo.profileCreatedWeeksAgo = createdWeeksAgo;
+      appinfo.profileResetWeeksAgo = resetWeeksAgo;
 
       this.sendPageCallback(aMessageManager, aCallbackID, appinfo);
     })().catch(err => {

@@ -18,6 +18,7 @@ use style_traits::{ToCss, ParseError, StyleParseError};
 use style_traits::values::specified::AllowedNumericType;
 use super::{Auto, CSSFloat, CSSInteger, Either, None_};
 use super::computed::{self, Context, ToComputedValue};
+use super::generics::{GreaterThanOrEqualToOne, NonNegative};
 use super::generics::grid::{TrackBreadth as GenericTrackBreadth, TrackSize as GenericTrackSize};
 use super::generics::grid::TrackList as GenericTrackList;
 use values::computed::ComputedValueAsSpecified;
@@ -41,8 +42,10 @@ pub use self::length::{FontRelativeLength, Length, LengthOrNone, LengthOrNumber}
 pub use self::length::{LengthOrPercentage, LengthOrPercentageOrAuto};
 pub use self::length::{LengthOrPercentageOrNone, MaxLength, MozLength};
 pub use self::length::{NoCalcLength, Percentage, ViewportPercentageLength};
+pub use self::length::NonNegativeLengthOrPercentage;
 pub use self::rect::LengthOrNumberRect;
 pub use self::position::{Position, PositionComponent};
+pub use self::svg::{SVGLength, SVGOpacity, SVGPaint, SVGPaintKind, SVGStrokeDashArray, SVGWidth};
 pub use self::text::{InitialLetter, LetterSpacing, LineHeight, WordSpacing};
 pub use self::transform::{TimingFunction, TransformOrigin};
 pub use super::generics::grid::GridLine;
@@ -64,6 +67,7 @@ pub mod image;
 pub mod length;
 pub mod position;
 pub mod rect;
+pub mod svg;
 pub mod text;
 pub mod transform;
 
@@ -309,11 +313,22 @@ impl BorderStyle {
     }
 }
 
+/// Time unit.
+#[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq, Eq)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+pub enum TimeUnit {
+    /// `s`
+    Second,
+    /// `ms`
+    Millisecond,
+}
+
 /// A time in seconds according to CSS-VALUES § 6.2.
-#[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct Time {
     seconds: CSSFloat,
+    unit: TimeUnit,
     was_calc: bool,
 }
 
@@ -322,6 +337,7 @@ impl Time {
     pub fn from_seconds(seconds: CSSFloat) -> Self {
         Time {
             seconds: seconds,
+            unit: TimeUnit::Second,
             was_calc: false,
         }
     }
@@ -343,14 +359,15 @@ impl Time {
         from_calc: bool)
         -> Result<Time, ()>
     {
-        let seconds = match_ignore_ascii_case! { unit,
-            "s" => value,
-            "ms" => value / 1000.0,
+        let (seconds, unit) = match_ignore_ascii_case! { unit,
+            "s" => (value, TimeUnit::Second),
+            "ms" => (value / 1000.0, TimeUnit::Millisecond),
             _ => return Err(())
         };
 
         Ok(Time {
             seconds: seconds,
+            unit: unit,
             was_calc: from_calc,
         })
     }
@@ -359,6 +376,7 @@ impl Time {
     pub fn from_calc(seconds: CSSFloat) -> Self {
         Time {
             seconds: seconds,
+            unit: TimeUnit::Second,
             was_calc: true,
         }
     }
@@ -407,6 +425,7 @@ impl ToComputedValue for Time {
     fn from_computed_value(computed: &Self::ComputedValue) -> Self {
         Time {
             seconds: computed.seconds(),
+            unit: TimeUnit::Second,
             was_calc: false,
         }
     }
@@ -423,7 +442,16 @@ impl ToCss for Time {
         if self.was_calc {
             dest.write_str("calc(")?;
         }
-        write!(dest, "{}s", self.seconds)?;
+        match self.unit {
+            TimeUnit::Second => {
+                self.seconds.to_css(dest)?;
+                dest.write_str("s")?;
+            }
+            TimeUnit::Millisecond => {
+                (self.seconds * 1000.).to_css(dest)?;
+                dest.write_str("ms")?;
+            }
+        }
         if self.was_calc {
             dest.write_str(")")?;
         }
@@ -504,6 +532,33 @@ impl ToCss for Number {
             dest.write_str(")")?;
         }
         Ok(())
+    }
+}
+
+/// A Number which is >= 0.0.
+pub type NonNegativeNumber = NonNegative<Number>;
+
+impl Parse for NonNegativeNumber {
+    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
+        parse_number_with_clamping_mode(context, input, AllowedNumericType::NonNegative)
+            .map(NonNegative::<Number>)
+    }
+}
+
+impl NonNegativeNumber {
+    /// Returns a new non-negative number with the value `val`.
+    pub fn new(val: CSSFloat) -> Self {
+        NonNegative::<Number>(Number::new(val.max(0.)))
+    }
+}
+
+/// A Number which is >= 1.0.
+pub type GreaterThanOrEqualToOneNumber = GreaterThanOrEqualToOne<Number>;
+
+impl Parse for GreaterThanOrEqualToOneNumber {
+    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
+        parse_number_with_clamping_mode(context, input, AllowedNumericType::AtLeastOne)
+            .map(GreaterThanOrEqualToOne::<Number>)
     }
 }
 
@@ -687,6 +742,19 @@ impl IntegerOrAuto {
     }
 }
 
+/// A wrapper of Integer, with value >= 1.
+pub type PositiveInteger = GreaterThanOrEqualToOne<Integer>;
+
+impl Parse for PositiveInteger {
+    #[inline]
+    fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
+        Integer::parse_positive(context, input).map(GreaterThanOrEqualToOne::<Integer>)
+    }
+}
+
+/// PositiveInteger | auto
+pub type PositiveIntegerOrAuto = Either<PositiveInteger, Auto>;
+
 #[allow(missing_docs)]
 pub type UrlOrNone = Either<SpecifiedUrl, None_>;
 
@@ -703,30 +771,11 @@ pub type TrackList = GenericTrackList<LengthOrPercentage>;
 /// `<grid-template-rows> | <grid-template-columns>`
 pub type GridTemplateComponent = GenericGridTemplateComponent<LengthOrPercentage>;
 
-no_viewport_percentage!(SVGPaint);
-
-/// Specified SVG Paint value
-pub type SVGPaint = ::values::generics::SVGPaint<RGBAColor>;
-
-/// Specified SVG Paint Kind value
-pub type SVGPaintKind = ::values::generics::SVGPaintKind<RGBAColor>;
-
 /// <length> | <percentage> | <number>
 pub type LengthOrPercentageOrNumber = Either<Number, LengthOrPercentage>;
 
-impl LengthOrPercentageOrNumber {
-    /// parse a <length-percentage> | <number> enforcing that the contents aren't negative
-    pub fn parse_non_negative<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
-                                      -> Result<Self, ParseError<'i>> {
-        // NB: Parse numbers before Lengths so we are consistent about how to
-        // recognize and serialize "0".
-        if let Ok(num) = input.try(|i| Number::parse_non_negative(context, i)) {
-            return Ok(Either::First(num))
-        }
-
-        LengthOrPercentage::parse_non_negative(context, input).map(Either::Second)
-    }
-}
+/// NonNegativeLengthOrPercentage | NonNegativeNumber
+pub type NonNegativeLengthOrPercentageOrNumber = Either<NonNegativeNumber, NonNegativeLengthOrPercentage>;
 
 #[derive(Clone, Debug, HasViewportPercentage, PartialEq)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]

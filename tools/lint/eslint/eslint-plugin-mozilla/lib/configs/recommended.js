@@ -103,6 +103,9 @@ module.exports = {
     // very frequently.
     // "curly": ["error", "multi-line"],
 
+    // Encourage the use of dot notation whenever possible.
+    "dot-notation": "error",
+
     // Always require a trailing EOL
     "eol-last": "error",
 
@@ -251,6 +254,9 @@ module.exports = {
 
     // Use {} instead of new Object()
     "no-new-object": "error",
+
+    // Dissallow use of new wrappers
+    "no-new-wrappers": "error",
 
     // No Math() or JSON()
     "no-obj-calls": "error",

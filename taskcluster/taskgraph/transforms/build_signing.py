@@ -36,17 +36,6 @@ def add_signed_routes(config, jobs):
 
 
 @transforms.add
-def make_signing_description(config, jobs):
-    for job in jobs:
-        dep_job = job['dependent-task']
-
-        label = dep_job.label.replace("build-", "signing-")
-        job['label'] = label
-
-        yield job
-
-
-@transforms.add
 def define_upstream_artifacts(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']

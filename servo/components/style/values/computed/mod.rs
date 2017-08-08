@@ -17,7 +17,8 @@ use std::f64;
 use std::f64::consts::PI;
 use std::fmt;
 use style_traits::ToCss;
-use super::{CSSFloat, CSSInteger, RGBA};
+use super::{CSSFloat, CSSInteger};
+use super::generics::{GreaterThanOrEqualToOne, NonNegative};
 use super::generics::grid::{TrackBreadth as GenericTrackBreadth, TrackSize as GenericTrackSize};
 use super::generics::grid::GridTemplateComponent as GenericGridTemplateComponent;
 use super::generics::grid::TrackList as GenericTrackList;
@@ -43,7 +44,9 @@ pub use super::generics::grid::GridLine;
 pub use super::specified::url::SpecifiedUrl;
 pub use self::length::{CalcLengthOrPercentage, Length, LengthOrNone, LengthOrNumber, LengthOrPercentage};
 pub use self::length::{LengthOrPercentageOrAuto, LengthOrPercentageOrNone, MaxLength, MozLength, Percentage};
+pub use self::length::NonNegativeLengthOrPercentage;
 pub use self::position::Position;
+pub use self::svg::{SVGLength, SVGOpacity, SVGPaint, SVGPaintKind, SVGStrokeDashArray, SVGWidth};
 pub use self::text::{InitialLetter, LetterSpacing, LineHeight, WordSpacing};
 pub use self::transform::{TimingFunction, TransformOrigin};
 
@@ -61,6 +64,7 @@ pub mod gecko;
 pub mod length;
 pub mod position;
 pub mod rect;
+pub mod svg;
 pub mod text;
 pub mod transform;
 
@@ -129,6 +133,26 @@ impl<'a> Context<'a> {
     /// The current style.
     pub fn style(&self) -> &StyleBuilder {
         &self.builder
+    }
+
+
+    /// Apply text-zoom if enabled
+    #[cfg(feature = "gecko")]
+    pub fn maybe_zoom_text(&self, size: NonNegativeAu) -> NonNegativeAu {
+        // We disable zoom for <svg:text> by unsetting the
+        // -x-text-zoom property, which leads to a false value
+        // in mAllowZoom
+        if self.style().get_font().gecko.mAllowZoom {
+            self.device().zoom_text(size.0).into()
+        } else {
+            size
+        }
+    }
+
+    /// (Servo doesn't do text-zoom)
+    #[cfg(feature = "servo")]
+    pub fn maybe_zoom_text(&self, size: NonNegativeAu) -> NonNegativeAu {
+        size
     }
 }
 
@@ -403,6 +427,40 @@ impl ComputedValueAsSpecified for specified::BorderStyle {}
 /// A `<number>` value.
 pub type Number = CSSFloat;
 
+/// A wrapper of Number, but the value >= 0.
+pub type NonNegativeNumber = NonNegative<CSSFloat>;
+
+impl From<CSSFloat> for NonNegativeNumber {
+    #[inline]
+    fn from(number: CSSFloat) -> NonNegativeNumber {
+        NonNegative::<CSSFloat>(number)
+    }
+}
+
+impl From<NonNegativeNumber> for CSSFloat {
+    #[inline]
+    fn from(number: NonNegativeNumber) -> CSSFloat {
+        number.0
+    }
+}
+
+/// A wrapper of Number, but the value >= 1.
+pub type GreaterThanOrEqualToOneNumber = GreaterThanOrEqualToOne<CSSFloat>;
+
+impl From<CSSFloat> for GreaterThanOrEqualToOneNumber {
+    #[inline]
+    fn from(number: CSSFloat) -> GreaterThanOrEqualToOneNumber {
+        GreaterThanOrEqualToOne::<CSSFloat>(number)
+    }
+}
+
+impl From<GreaterThanOrEqualToOneNumber> for CSSFloat {
+    #[inline]
+    fn from(number: GreaterThanOrEqualToOneNumber) -> CSSFloat {
+        number.0
+    }
+}
+
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[derive(Clone, Copy, Debug, PartialEq, ToCss)]
@@ -454,33 +512,24 @@ impl IntegerOrAuto {
     }
 }
 
-/// Computed SVG Paint value
-pub type SVGPaint = ::values::generics::SVGPaint<RGBA>;
-/// Computed SVG Paint Kind value
-pub type SVGPaintKind = ::values::generics::SVGPaintKind<RGBA>;
+/// A wrapper of Integer, but only accept a value >= 1.
+pub type PositiveInteger = GreaterThanOrEqualToOne<CSSInteger>;
 
-impl Default for SVGPaint {
-    fn default() -> Self {
-        SVGPaint {
-            kind: ::values::generics::SVGPaintKind::None,
-            fallback: None,
-        }
+impl From<CSSInteger> for PositiveInteger {
+    #[inline]
+    fn from(int: CSSInteger) -> PositiveInteger {
+        GreaterThanOrEqualToOne::<CSSInteger>(int)
     }
 }
 
-impl SVGPaint {
-    /// Opaque black color
-    pub fn black() -> Self {
-        let rgba = RGBA::from_floats(0., 0., 0., 1.);
-        SVGPaint {
-            kind: ::values::generics::SVGPaintKind::Color(rgba),
-            fallback: None,
-        }
-    }
-}
+/// PositiveInteger | auto
+pub type PositiveIntegerOrAuto = Either<PositiveInteger, Auto>;
 
 /// <length> | <percentage> | <number>
 pub type LengthOrPercentageOrNumber = Either<Number, LengthOrPercentage>;
+
+/// NonNegativeLengthOrPercentage | NonNegativeNumber
+pub type NonNegativeLengthOrPercentageOrNumber = Either<NonNegativeNumber, NonNegativeLengthOrPercentage>;
 
 #[derive(Clone, PartialEq, Eq, Copy, Debug)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
@@ -559,3 +608,40 @@ impl ClipRectOrAuto {
 
 /// <color> | auto
 pub type ColorOrAuto = Either<Color, Auto>;
+
+/// A wrapper of Au, but the value >= 0.
+pub type NonNegativeAu = NonNegative<Au>;
+
+impl NonNegativeAu {
+    /// Return a zero value.
+    #[inline]
+    pub fn zero() -> Self {
+        NonNegative::<Au>(Au(0))
+    }
+
+    /// Return a NonNegativeAu from pixel.
+    #[inline]
+    pub fn from_px(px: i32) -> Self {
+        NonNegative::<Au>(Au::from_px(::std::cmp::max(px, 0)))
+    }
+
+    /// Get the inner value of |NonNegativeAu.0|.
+    #[inline]
+    pub fn value(self) -> i32 {
+        (self.0).0
+    }
+
+    /// Scale this NonNegativeAu.
+    #[inline]
+    pub fn scale_by(self, factor: f32) -> Self {
+        // scale this by zero if factor is negative.
+        NonNegative::<Au>(self.0.scale_by(factor.max(0.)))
+    }
+}
+
+impl From<Au> for NonNegativeAu {
+    #[inline]
+    fn from(au: Au) -> NonNegativeAu {
+        NonNegative::<Au>(au)
+    }
+}

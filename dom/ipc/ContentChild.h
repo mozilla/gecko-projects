@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_ContentChild_h
 #define mozilla_dom_ContentChild_h
 
+#include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/ContentBridgeParent.h"
 #include "mozilla/dom/nsIContentChild.h"
@@ -119,7 +120,7 @@ public:
     return mAppInfo;
   }
 
-  void SetProcessName(const nsAString& aName, bool aDontOverride = false);
+  void SetProcessName(const nsAString& aName);
 
   void GetProcessName(nsAString& aName) const;
 
@@ -143,6 +144,8 @@ public:
   bool IsShuttingDown() const;
 
   static void AppendProcessId(nsACString& aName);
+
+  static void UpdateCookieStatus(nsIChannel *aChannel);
 
   mozilla::ipc::IPCResult
   RecvInitContentBridgeChild(Endpoint<PContentBridgeChild>&& aEndpoint) override;
@@ -174,6 +177,8 @@ public:
     Endpoint<PVRManagerChild>&& aVRBridge,
     Endpoint<PVideoDecoderManagerChild>&& aVideoManager,
     nsTArray<uint32_t>&& namespaces) override;
+
+  virtual mozilla::ipc::IPCResult RecvAudioDefaultDeviceChange() override;
 
   mozilla::ipc::IPCResult RecvReinitRenderingForDeviceReset() override;
 
@@ -726,7 +731,6 @@ private:
 
   bool mIsForBrowser;
   nsString mRemoteType = NullString();
-  bool mCanOverrideProcessName;
   bool mIsAlive;
   nsString mProcessName;
 
@@ -755,7 +759,7 @@ private:
 
   nsClassHashtable<nsUint64HashKey, AnonymousTemporaryFileCallback> mPendingAnonymousTemporaryFiles;
 
-  bool mShuttingDown;
+  mozilla::Atomic<bool> mShuttingDown;
 
   DISALLOW_EVIL_CONSTRUCTORS(ContentChild);
 };

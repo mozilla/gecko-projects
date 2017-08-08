@@ -3,7 +3,9 @@
 // The ext-* files are imported into the same scopes.
 /* import-globals-from ext-toolkit.js */
 
-XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
+const ToolkitModules = {};
+
+XPCOMUtils.defineLazyModuleGetter(ToolkitModules, "EventEmitter",
                                   "resource://gre/modules/EventEmitter.jsm");
 
 var {
@@ -62,11 +64,16 @@ Notification.prototype = {
       return;
     }
 
-    if (topic === "alertclickcallback") {
-      emitAndDelete("clicked");
-    }
-    if (topic === "alertfinished") {
-      emitAndDelete("closed");
+    switch (topic) {
+      case "alertclickcallback":
+        emitAndDelete("clicked");
+        break;
+      case "alertfinished":
+        emitAndDelete("closed");
+        break;
+      case "alertshow":
+        notifications.emit("shown", data);
+        break;
     }
   },
 };
@@ -93,7 +100,7 @@ this.notifications = class extends ExtensionAPI {
     let {extension} = context;
 
     let map = new Map();
-    EventEmitter.decorate(map);
+    ToolkitModules.EventEmitter.decorate(map);
     notificationsMap.set(extension, map);
 
     return {
@@ -153,6 +160,17 @@ this.notifications = class extends ExtensionAPI {
           notificationsMap.get(extension).on("clicked", listener);
           return () => {
             notificationsMap.get(extension).off("clicked", listener);
+          };
+        }).api(),
+
+        onShown: new EventManager(context, "notifications.onShown", fire => {
+          let listener = (event, notificationId) => {
+            fire.async(notificationId, true);
+          };
+
+          notificationsMap.get(extension).on("shown", listener);
+          return () => {
+            notificationsMap.get(extension).off("shown", listener);
           };
         }).api(),
 

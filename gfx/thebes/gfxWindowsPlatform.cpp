@@ -554,34 +554,6 @@ gfxWindowsPlatform::CreateOffscreenSurface(const IntSize& aSize,
     return surf.forget();
 }
 
-already_AddRefed<ScaledFont>
-gfxWindowsPlatform::GetScaledFontForFont(DrawTarget* aTarget, gfxFont *aFont)
-{
-    if (aFont->GetType() == gfxFont::FONT_TYPE_DWRITE) {
-        return aFont->GetScaledFont(aTarget);
-    }
-
-    NS_ASSERTION(aFont->GetType() == gfxFont::FONT_TYPE_GDI,
-        "Fonts on windows should be GDI or DWrite!");
-
-    NativeFont nativeFont;
-    nativeFont.mType = NativeFontType::GDI_FONT_FACE;
-    LOGFONT lf;
-    GetObject(static_cast<gfxGDIFont*>(aFont)->GetHFONT(), sizeof(LOGFONT), &lf);
-    nativeFont.mFont = &lf;
-
-    if (aTarget->GetBackendType() == BackendType::CAIRO) {
-      return Factory::CreateScaledFontWithCairo(nativeFont,
-                                                aFont->GetUnscaledFont(),
-                                                aFont->GetAdjustedSize(),
-                                                aFont->GetCairoScaledFont());
-    }
-
-    return Factory::CreateScaledFontForNativeFont(nativeFont,
-                                                  aFont->GetUnscaledFont(),
-                                                  aFont->GetAdjustedSize());
-}
-
 static const char kFontAparajita[] = "Aparajita";
 static const char kFontArabicTypesetting[] = "Arabic Typesetting";
 static const char kFontArial[] = "Arial";
@@ -1334,6 +1306,8 @@ gfxWindowsPlatform::InitializeD3D11Config()
     return;
   }
 
+  d3d11.EnableByDefault();
+
   if (!IsWin8OrLater() &&
       !DeviceManagerDx::Get()->CheckRemotePresentSupport()) {
     nsCOMPtr<nsIGfxInfo> gfxInfo;
@@ -1352,8 +1326,6 @@ gfxWindowsPlatform::InitializeD3D11Config()
 #endif
     }
   }
-
-  d3d11.EnableByDefault();
 
   nsCString message;
   nsCString failureId;

@@ -8,8 +8,10 @@
 #define MOZILLA_LAYERS_PAINTTHREAD_H
 
 #include "base/platform_thread.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/layers/TextureClient.h"
 #include "nsThreadUtils.h"
 
 namespace mozilla {
@@ -19,6 +21,41 @@ class DrawTargetCapture;
 };
 
 namespace layers {
+
+// Holds the key parts from a RotatedBuffer::PaintState
+// required to draw the captured paint state
+class CapturedPaintState {
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CapturedPaintState)
+public:
+  CapturedPaintState(nsIntRegion& aRegionToDraw,
+                     gfx::DrawTarget* aTarget,
+                     gfx::DrawTarget* aTargetOnWhite,
+                     const gfx::Matrix& aTargetTransform,
+                     SurfaceMode aSurfaceMode,
+                     gfxContentType aContentType)
+  : mRegionToDraw(aRegionToDraw)
+  , mTarget(aTarget)
+  , mTargetOnWhite(aTargetOnWhite)
+  , mTargetTransform(aTargetTransform)
+  , mSurfaceMode(aSurfaceMode)
+  , mContentType(aContentType)
+  {}
+
+  nsIntRegion mRegionToDraw;
+  RefPtr<TextureClient> mTextureClient;
+  RefPtr<TextureClient> mTextureClientOnWhite;
+  RefPtr<gfx::DrawTargetCapture> mCapture;
+  RefPtr<gfx::DrawTarget> mTarget;
+  RefPtr<gfx::DrawTarget> mTargetOnWhite;
+  gfx::Matrix mTargetTransform;
+  SurfaceMode mSurfaceMode;
+  gfxContentType mContentType;
+
+protected:
+  virtual ~CapturedPaintState() {}
+};
+
+typedef bool (*PrepDrawTargetForPaintingCallback)(CapturedPaintState* aPaintState);
 
 class CompositorBridgeChild;
 
@@ -30,8 +67,8 @@ public:
   static void Start();
   static void Shutdown();
   static PaintThread* Get();
-  void PaintContents(gfx::DrawTargetCapture* aCapture,
-                     gfx::DrawTarget* aTarget);
+  void PaintContents(CapturedPaintState* aState,
+                     PrepDrawTargetForPaintingCallback aCallback);
 
   // Sync Runnables need threads to be ref counted,
   // But this thread lives through the whole process.
@@ -48,8 +85,8 @@ private:
   void ShutdownOnPaintThread();
   void InitOnPaintThread();
   void PaintContentsAsync(CompositorBridgeChild* aBridge,
-                          gfx::DrawTargetCapture* aCapture,
-                          gfx::DrawTarget* aTarget);
+                          CapturedPaintState* aState,
+                          PrepDrawTargetForPaintingCallback aCallback);
 
   static StaticAutoPtr<PaintThread> sSingleton;
   static StaticRefPtr<nsIThread> sThread;
