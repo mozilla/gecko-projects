@@ -6,8 +6,14 @@ NO_NDK=1
 
 . "$topsrcdir/mobile/android/config/mozconfigs/common"
 
-. "$topsrcdir/mobile/android/config/mozconfigs/android-api-15-gradle/nightly"
+# Global options
+ac_add_options --enable-debug
+ac_add_options --enable-marionette
+
+. "$topsrcdir/mobile/android/config/mozconfigs/android-api-16/nightly"
 
 . "$topsrcdir/build/mozconfig.artifact"
+
+ac_add_options --enable-artifact-build-symbols
 
 . "$topsrcdir/mobile/android/config/mozconfigs/common.override"
