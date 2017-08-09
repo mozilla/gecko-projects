@@ -696,6 +696,9 @@ function BuildConditionSandbox(aURL) {
     sandbox.advancedLayers =
       gWindowUtils.usingAdvancedLayers == true;
 
+    sandbox.retainedDisplayList =
+      prefs.getBoolPref("layout.display-list.retain");
+
     // Shortcuts for widget toolkits.
     sandbox.Android = xr.OS == "Android";
     sandbox.cocoaWidget = xr.widgetToolkit == "cocoa";
