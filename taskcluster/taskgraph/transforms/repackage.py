@@ -148,10 +148,15 @@ def make_job_description(config, jobs):
         if build_platform.startswith('win'):
             worker_type = 'aws-provisioner-v1/gecko-%s-b-win2012' % level
             run['use-magic-mh-args'] = False
-        elif build_platform.startswith('macosx'):
-            worker_type = 'aws-provisioner-v1/gecko-%s-b-macosx64' % level
-        elif build_platform.startswith('linux'):
-            worker_type = 'aws-provisioner-v1/gecko-%s-b-linux' % level
+        else:
+            if build_platform.startswith('macosx'):
+                worker_type = 'aws-provisioner-v1/gecko-%s-b-macosx64' % level
+            elif build_platform.startswith('linux'):
+                worker_type = 'aws-provisioner-v1/gecko-%s-b-linux' % level
+            else:
+                raise NotImplementedError(
+                    'Unsupported build_platform: "{}"'.format(build_platform)
+                )
 
             run['tooltool-downloads'] = 'internal'
             worker['docker-image'] = {"in-tree": "desktop-build"},
