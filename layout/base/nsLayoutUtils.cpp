@@ -26,6 +26,7 @@
 #include "nsFontMetrics.h"
 #include "nsPresContext.h"
 #include "nsIContent.h"
+#include "nsIDocument.h"
 #include "nsIDOMHTMLDocument.h"
 #include "nsIDOMHTMLElement.h"
 #include "nsFrameList.h"
@@ -3956,13 +3957,66 @@ AddExtraBackgroundItems(nsDisplayListBuilder& aBuilder,
   }
 }
 
-bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
-                          std::vector<WeakFrame>& aModifiedFrames,
-                          nsIFrame* aDisplayRootFrame,
-                          const nsRect& aRootDirtyRect,
-                          nsRect* aOutDirty,
-                          AnimatedGeometryRoot** aOutModifiedAGR,
-                          nsTArray<nsIFrame*>* aOutFramesWithProps)
+static void
+AddModifiedFramesFromRootFrame(std::vector<WeakFrame>& aFrames,
+                               nsIFrame* aRootFrame)
+{
+  MOZ_ASSERT(aRootFrame);
+
+  std::vector<WeakFrame>* frames =
+    aRootFrame->GetProperty(nsIFrame::ModifiedFrameList());
+
+  if (frames) {
+    aFrames.insert(aFrames.end(), frames->begin(), frames->end());
+    frames->clear();
+  }
+}
+
+static bool
+SubDocEnumCb(nsIDocument* aDocument, void* aData)
+{
+  MOZ_ASSERT(aDocument);
+  MOZ_ASSERT(aData);
+
+  std::vector<WeakFrame>* modifiedFrames =
+    static_cast<std::vector<WeakFrame>*>(aData);
+
+  nsIPresShell* presShell = aDocument->GetShell();
+  nsIFrame* rootFrame = presShell ? presShell->GetRootFrame() : nullptr;
+
+  if (rootFrame) {
+    AddModifiedFramesFromRootFrame(*modifiedFrames, rootFrame);
+  }
+
+  aDocument->EnumerateSubDocuments(SubDocEnumCb, aData);
+  return true;
+}
+
+static std::vector<WeakFrame>
+GetModifiedFrames(nsIFrame* aDisplayRootFrame)
+{
+  MOZ_ASSERT(aDisplayRootFrame);
+
+  std::vector<WeakFrame> modifiedFrames;
+  AddModifiedFramesFromRootFrame(modifiedFrames, aDisplayRootFrame);
+
+  nsIDocument *rootdoc = aDisplayRootFrame->PresContext()->Document();
+
+  if (rootdoc) {
+    rootdoc->EnumerateSubDocuments(SubDocEnumCb, &modifiedFrames);
+  }
+
+  return modifiedFrames;
+}
+
+static bool
+ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
+                     std::vector<WeakFrame>& aModifiedFrames,
+                     nsIFrame* aDisplayRootFrame,
+                     const nsRect& aRootDirtyRect,
+                     nsRect* aOutDirty,
+                     AnimatedGeometryRoot** aOutModifiedAGR,
+                     nsTArray<nsIFrame*>* aOutFramesWithProps)
 {
   for (nsIFrame* f : aModifiedFrames) {
     if (!f) {
@@ -3994,6 +4048,7 @@ bool ComputeRebuildRegion(nsDisplayListBuilder& aBuilder,
                                                              nullptr, nullptr,
                                                              /* aStopAtStackingContextAndDisplayPort = */ true,
                                                              &currentFrame);
+      MOZ_ASSERT(currentFrame);
 
       if (nsLayoutUtils::FrameHasDisplayPort(currentFrame)) {
         nsIScrollableFrame* sf = do_QueryFrame(currentFrame);
@@ -4140,7 +4195,6 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
   nsDisplayListBuilder* builderPtr = nullptr;
   nsDisplayList* listPtr = nullptr;
   RetainedDisplayListBuilder* retainedBuilder = nullptr;
-  std::vector<WeakFrame>* modifiedFrames = nullptr;
 
   const bool buildCaret = !(aFlags & PaintFrameFlags::PAINT_HIDE_CARET);
   const bool retainDisplayList = gfxPrefs::LayoutRetainDisplayList();
@@ -4159,7 +4213,6 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     MOZ_ASSERT(retainedBuilder);
     builderPtr = &retainedBuilder->mBuilder;
     listPtr = &retainedBuilder->mList;
-    modifiedFrames = aFrame->GetProperty(nsIFrame::ModifiedFrameList());
   } else {
     builderPtr = new nsDisplayListBuilder(aFrame, aBuilderMode, buildCaret);
     listPtr = new nsDisplayList();
@@ -4270,9 +4323,11 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
 
     if (retainedBuilder && builder.ShouldSyncDecodeImages()) {
       MarkFramesWithItemsAndImagesModified(&list);
-      // Re-get the modified frames list, it might have changed.
-      modifiedFrames = aFrame->GetProperty(nsIFrame::ModifiedFrameList());
     }
+
+    std::vector<WeakFrame> modifiedFrames = GetModifiedFrames(aFrame);
+    const bool paintedPreviously =
+      aFrame->HasProperty(nsIFrame::ModifiedFrameList());
 
     builder.EnterPresShell(aFrame);
     {
@@ -4308,8 +4363,9 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
       bool merged = false;
       uint32_t totalDisplayItems = 0;
       uint32_t reusedDisplayItems = 0;
-      if (retainedBuilder && modifiedFrames) {
-        //printf("Attempting merge build with %lu modified frames\n", modifiedFrames->size());
+
+      if (retainedBuilder && paintedPreviously) {
+        // printf("Attempting merge build with %lu modified frames\n", modifiedFrames.size());
 
         if (retainedBuilder->mPreviousCaret != builder.GetCaretFrame()) {
           if (retainedBuilder->mPreviousCaret) {
@@ -4327,7 +4383,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
         AnimatedGeometryRoot* modifiedAGR = nullptr;
         nsTArray<nsIFrame*> framesWithProps;
         if (!list.IsEmpty() &&
-            ComputeRebuildRegion(builder, *modifiedFrames, aFrame, dirtyRect,
+            ComputeRebuildRegion(builder, modifiedFrames, aFrame, dirtyRect,
                                  &modifiedDirty, &modifiedAGR, &framesWithProps)) {
           modifiedDirty.IntersectRect(modifiedDirty, dirtyRect);
 
@@ -4349,7 +4405,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
             // TODO: We can also skip layer building and painting if
             // PreProcessRetainedDisplayList didn't end up changing anything
             // Invariant: display items should have their original state here.
-            //printf_stderr("Skipping display list building since nothing needed to be done\n");
+            // printf_stderr("Skipping display list building since nothing needed to be done\n");
           }
 
           // |modifiedDL| can sometimes be empty here. We still perform the
@@ -4368,12 +4424,12 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
 
         // TODO: Do we mark frames as modified during displaylist building? If
         // we do this isn't gonna work.
-        for (nsIFrame* f : *modifiedFrames) {
+        for (nsIFrame* f : modifiedFrames) {
           if (f) {
             f->SetFrameIsModified(false);
           }
         }
-        modifiedFrames->clear();
+        modifiedFrames.clear();
 
         for (nsIFrame* f: framesWithProps) {
           f->SetHasOverrideDirtyRegion(false);
@@ -4400,7 +4456,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
         aFrame->BuildDisplayListForStackingContext(&builder, &list);
       }
 
-      //printf("nsLayoutUtils::PaintFrame - recycled %d/%d (%.2f%%) display items\n", reusedDisplayItems, totalDisplayItems, reusedDisplayItems * 100 / float(totalDisplayItems));
+      // printf("nsLayoutUtils::PaintFrame - recycled %d/%d (%.2f%%) display items\n", reusedDisplayItems, totalDisplayItems, reusedDisplayItems * 100 / float(totalDisplayItems));
     }
 
     builder.SetIsBuilding(false);
@@ -4411,10 +4467,10 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
     // them here.
     AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
 
-    //if (XRE_IsContentProcess()) {
-    //  printf_stderr("Painting --- Full list:\n");
-    //  nsFrame::PrintDisplayList(&builder, list);
-    //}
+    // if (XRE_IsContentProcess()) {
+    //   printf_stderr("Painting --- Full list:\n");
+    //   nsFrame::PrintDisplayList(&builder, list);
+    // }
 
     builder.LeavePresShell(aFrame, &list);
     builder.IncrementPresShellPaintCount(presShell);
@@ -7896,6 +7952,26 @@ nsLayoutUtils::GetDisplayRootFrame(nsIFrame* aFrame)
     nsIFrame* parent = GetCrossDocParentFrame(f);
     if (!parent)
       return f;
+    f = parent;
+  }
+}
+
+/* static */ nsIFrame*
+nsLayoutUtils::GetViewportFrame(nsIFrame* aFrame)
+{
+  nsIFrame* f = aFrame;
+
+  for (;;) {
+    MOZ_ASSERT(f);
+    if (f->Type() == LayoutFrameType::Viewport) {
+      return f;
+    }
+
+    nsIFrame* parent = GetCrossDocParentFrame(f);
+    if (!parent) {
+      return f;
+    }
+
     f = parent;
   }
 }
