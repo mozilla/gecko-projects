@@ -31,9 +31,7 @@ job-template:
          android-api-15-nightly: mobile/locales/l10n-changesets.json
    chunks:
       by-build-platform:
-         macosx64-nightly: 8
-         win.*: 10
-         default: 6
+         default: 15
    run-on-projects: ['release', 'date']
    ignore-locales:
       by-build-platform:
