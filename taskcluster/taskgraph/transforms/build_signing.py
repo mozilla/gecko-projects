@@ -41,7 +41,7 @@ def define_upstream_artifacts(config, jobs):
         dep_job = job['dependent-task']
         build_platform = dep_job.attributes.get('build_platform')
 
-        artifacts_specificications = generate_specifications_of_artifacts_to_sign(
+        artifacts_specifications = generate_specifications_of_artifacts_to_sign(
             build_platform,
             dep_job.attributes.get('nightly'),
             keep_locale_template=False
@@ -49,13 +49,13 @@ def define_upstream_artifacts(config, jobs):
 
         if 'android' in build_platform:
             # We're in the job that creates both multilocale and en-US APKs
-            artifacts_specificications[0]['artifacts'].append('public/build/en-US/target.apk')
+            artifacts_specifications[0]['artifacts'].append('public/build/en-US/target.apk')
 
         job['upstream-artifacts'] = [{
             'taskId': {'task-reference': '<build>'},
             'taskType': 'build',
             'paths': spec['artifacts'],
             'formats': spec['formats'],
-        } for spec in artifacts_specificications]
+        } for spec in artifacts_specifications]
 
         yield job

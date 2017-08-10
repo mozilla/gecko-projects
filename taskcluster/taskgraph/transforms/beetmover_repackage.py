@@ -106,7 +106,7 @@ UPSTREAM_ARTIFACT_SIGNED_REPACKAGE_PATHS = {
     ],
 }
 
-# Compile every regex once and for all
+# Compile every regex once at import time
 for dict_ in (
     UPSTREAM_ARTIFACT_UNSIGNED_PATHS, UPSTREAM_ARTIFACT_SIGNED_PATHS,
     UPSTREAM_ARTIFACT_REPACKAGE_PATHS, UPSTREAM_ARTIFACT_SIGNED_REPACKAGE_PATHS,
@@ -267,17 +267,35 @@ def generate_upstream_artifacts(build_task_ref, build_signing_task_ref,
     ]
 
     for ref, tasktype, mapping in zip(task_refs, tasktypes, mapping):
+        plarform_was_previously_matched_by_regex = None
         for platform_regex, paths in mapping.iteritems():
             if platform_regex.match(platform) is not None:
+                _check_platform_matched_only_one_regex(
+                    tasktype, platform, plarform_was_previously_matched_by_regex, platform_regex
+                )
+
                 upstream_artifacts.append({
                     "taskId": {"task-reference": ref},
                     "taskType": tasktype,
                     "paths": ["{}/{}".format(artifact_prefix, path) for path in paths],
                     "locale": locale or "en-US",
                 })
-                break
+                plarform_was_previously_matched_by_regex = platform_regex
 
     return upstream_artifacts
+
+
+def _check_platform_matched_only_one_regex(
+    task_type, platform, plarform_was_previously_matched_by_regex, platform_regex
+):
+    if plarform_was_previously_matched_by_regex is not None:
+        raise Exception('In task type "{task_type}", platform "{platform}" matches at \
+least 2 regular expressions. First matched: "{first_matched}". Second matched: \
+"{second_matched}"'.format(
+            task_type=task_type, platform=platform,
+            first_matched=plarform_was_previously_matched_by_regex.pattern,
+            second_matched=platform_regex.pattern
+        ))
 
 
 def is_valid_beetmover_job(job):
