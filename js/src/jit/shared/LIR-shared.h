@@ -4111,6 +4111,26 @@ class LFromCodePoint : public LInstructionHelper<1, 1, 2>
     }
 };
 
+// Calls the ToLowerCase or ToUpperCase case conversion function.
+class LStringConvertCase : public LCallInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(StringConvertCase)
+
+    explicit LStringConvertCase(const LAllocation& string)
+    {
+        setOperand(0, string);
+    }
+
+    const MStringConvertCase* mir() const {
+        return mir_->toStringConvertCase();
+    }
+
+    const LAllocation* string() {
+        return this->getOperand(0);
+    }
+};
+
 // Calculates sincos(x) and returns two values (sin/cos).
 class LSinCos : public LCallInstructionHelper<2, 1, 2>
 {
@@ -4529,6 +4549,19 @@ class LValueToString : public LInstructionHelper<1, BOX_PIECES, 1>
     const LDefinition* tempToUnbox() {
         return getTemp(0);
     }
+};
+
+// Convert a value to an object.
+class LValueToObject : public LInstructionHelper<1, BOX_PIECES, 0>
+{
+  public:
+    LIR_HEADER(ValueToObject)
+
+    explicit LValueToObject(const LBoxAllocation& input) {
+        setBoxOperand(Input, input);
+    }
+
+    static const size_t Input = 0;
 };
 
 // Convert a value to an object or null pointer.
@@ -6146,24 +6179,33 @@ class LArraySlice : public LCallInstructionHelper<1, 3, 2>
     }
 };
 
-class LArrayJoin : public LCallInstructionHelper<1, 2, 0>
+class LArrayJoin : public LCallInstructionHelper<1, 2, 1>
 {
   public:
     LIR_HEADER(ArrayJoin)
 
-    LArrayJoin(const LAllocation& array, const LAllocation& sep) {
+    LArrayJoin(const LAllocation& array, const LAllocation& sep,
+               const LDefinition& temp)
+    {
         setOperand(0, array);
         setOperand(1, sep);
+        setTemp(0, temp);
     }
 
     const MArrayJoin* mir() const {
         return mir_->toArrayJoin();
+    }
+    const LDefinition* output() {
+        return getDef(0);
     }
     const LAllocation* array() {
         return getOperand(0);
     }
     const LAllocation* separator() {
         return getOperand(1);
+    }
+    const LDefinition* temp() {
+        return getTemp(0);
     }
 };
 
@@ -8097,6 +8139,22 @@ class LHasClass : public LInstructionHelper<1, 1, 0>
     }
 };
 
+class LObjectClassToString : public LCallInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(ObjectClassToString);
+
+    explicit LObjectClassToString(const LAllocation& lhs) {
+        setOperand(0, lhs);
+    }
+    const LAllocation* object() {
+        return getOperand(0);
+    }
+    MObjectClassToString* mir() const {
+        return mir_->toObjectClassToString();
+    }
+};
+
 template<size_t Defs, size_t Ops>
 class LWasmSelectBase : public LInstructionHelper<Defs, Ops, 0>
 {
@@ -9332,6 +9390,21 @@ class LIsPackedArray : public LInstructionHelper<1, 1, 1>
     }
     const LDefinition* temp() {
         return getTemp(0);
+    }
+};
+
+class LGetPrototypeOf : public LInstructionHelper<BOX_PIECES, 1, 0>
+{
+  public:
+    LIR_HEADER(GetPrototypeOf)
+
+    explicit LGetPrototypeOf(const LAllocation& target)
+    {
+        setOperand(0, target);
+    }
+
+    const LAllocation* target() {
+        return getOperand(0);
     }
 };
 

@@ -225,6 +225,7 @@ var pktUI = (function() {
             onShow() {
                 var saveLinkMessageId = "saveLink";
                 _lastAddSucceeded = false;
+                getPanelFrame().setAttribute("itemAdded", "false");
 
                 // Send error message for invalid url
                 if (!isValidURL) {
@@ -257,6 +258,7 @@ var pktUI = (function() {
                         };
                         pktUIMessaging.sendMessageToPanel(panelId, saveLinkMessageId, successResponse);
                         _lastAddSucceeded = true;
+                        getPanelFrame().setAttribute("itemAdded", "true");
                     },
                     error(error, request) {
                         // If user is not authorized show singup page
@@ -487,6 +489,7 @@ var pktUI = (function() {
                     var successResponse = {status: "success"};
                     pktUIMessaging.sendResponseMessageToPanel(panelId, _deleteItemMessageId, successResponse);
                     _lastAddSucceeded = false;
+                    getPanelFrame().setAttribute("itemAdded", "false");
                 },
                 error(error, response) {
                     pktUIMessaging.sendErrorResponseMessageToPanel(panelId, _deleteItemMessageId, error);
@@ -567,7 +570,17 @@ var pktUI = (function() {
         return panel;
     }
 
+    var photonPageActionPanelFrame;
+
+    function setPhotonPageActionPanelFrame(frame) {
+        photonPageActionPanelFrame = frame;
+    }
+
     function getPanelFrame() {
+        if (photonPageActionPanelFrame) {
+            return photonPageActionPanelFrame;
+        }
+
         var frame = document.getElementById("pocket-panel-iframe");
         if (!frame) {
             var frameParent = document.getElementById("PanelUI-pocketView").firstChild;
@@ -580,6 +593,10 @@ var pktUI = (function() {
     }
 
     function getSubview() {
+        if (photonPageActionPanelFrame) {
+            return null;
+        }
+
         var view = document.getElementById("PanelUI-pocketView");
         if (view && view.getAttribute("current") == "true" && !view.getAttribute("mainview"))
             return view;
@@ -587,6 +604,10 @@ var pktUI = (function() {
     }
 
     function isInOverflowMenu() {
+        if (photonPageActionPanelFrame) {
+            return false;
+        }
+
         var subview = getSubview();
         return !!subview;
     }
@@ -607,6 +628,7 @@ var pktUI = (function() {
      * Public functions
      */
     return {
+        setPhotonPageActionPanelFrame,
         getPanelFrame,
 
         openTabWithUrl,

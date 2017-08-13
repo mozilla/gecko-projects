@@ -12,7 +12,7 @@ use cssparser::{CowRcStr, SourceLocation, BasicParseError};
 use error_reporting::ContextualParseError;
 use font_face::parse_font_face_block;
 use media_queries::{parse_media_query_list, MediaList};
-use parser::{Parse, ParserContext, log_css_error};
+use parser::{Parse, ParserContext};
 use properties::parse_property_declaration_list;
 use selector_parser::{SelectorImpl, SelectorParser};
 use selectors::SelectorList;
@@ -318,10 +318,8 @@ impl<'a, 'b> NestedRuleParser<'a, 'b> {
             match result {
                 Ok(rule) => rules.push(rule),
                 Err(err) => {
-                    let pos = err.span.start;
-                    let error = ContextualParseError::UnsupportedRule(
-                        iter.input.slice(err.span), err.error);
-                    log_css_error(iter.input, pos, error, self.context);
+                    let error = ContextualParseError::UnsupportedRule(err.slice, err.error);
+                    self.context.log_css_error(err.location, error);
                 }
             }
         }
@@ -359,7 +357,7 @@ impl<'a, 'b, 'i> AtRuleParser<'i> for NestedRuleParser<'a, 'b> {
                 Ok(AtRuleType::WithBlock(AtRulePrelude::FontFace(location)))
             },
             "font-feature-values" => {
-                if !cfg!(feature = "gecko") && !cfg!(feature = "testing") {
+                if !cfg!(feature = "gecko") {
                     // Support for this rule is not fully implemented in Servo yet.
                     return Err(StyleParseError::UnsupportedAtRule(name.clone()).into())
                 }
@@ -507,6 +505,7 @@ impl<'a, 'b, 'i> QualifiedRuleParser<'i> for NestedRuleParser<'a, 'b> {
         let selector_parser = SelectorParser {
             stylesheet_origin: self.stylesheet_origin,
             namespaces: self.context.namespaces.unwrap(),
+            url_data: Some(self.context.url_data),
         };
 
         let location = get_location_with_offset(input.current_source_location(),

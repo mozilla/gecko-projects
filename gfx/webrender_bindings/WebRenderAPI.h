@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include "mozilla/AlreadyAddRefed.h"
+#include "mozilla/layers/SyncObject.h"
 #include "mozilla/Range.h"
 #include "mozilla/webrender/webrender_ffi.h"
 #include "mozilla/webrender/WebRenderTypes.h"
@@ -45,6 +46,8 @@ public:
                                                layers::CompositorBridgeParentBase* aBridge,
                                                RefPtr<widget::CompositorWidget>&& aWidget,
                                                LayoutDeviceIntSize aSize);
+
+  already_AddRefed<WebRenderAPI> Clone();
 
   wr::WindowId GetId() const { return mId; }
 
@@ -120,25 +123,29 @@ public:
   bool Resume();
 
   wr::WrIdNamespace GetNamespace();
-  GLint GetMaxTextureSize() const { return mMaxTextureSize; }
+  uint32_t GetMaxTextureSize() const { return mMaxTextureSize; }
   bool GetUseANGLE() const { return mUseANGLE; }
+  layers::SyncHandle GetSyncHandle() const { return mSyncHandle; }
 
 protected:
-  WebRenderAPI(wr::RenderApi* aRawApi, wr::WindowId aId, GLint aMaxTextureSize, bool aUseANGLE)
-    : mRenderApi(aRawApi)
+  WebRenderAPI(wr::DocumentHandle* aHandle, wr::WindowId aId, uint32_t aMaxTextureSize, bool aUseANGLE, layers::SyncHandle aSyncHandle)
+    : mDocHandle(aHandle)
     , mId(aId)
     , mMaxTextureSize(aMaxTextureSize)
     , mUseANGLE(aUseANGLE)
+    , mSyncHandle(aSyncHandle)
   {}
 
   ~WebRenderAPI();
   // Should be used only for shutdown handling
   void WaitFlushed();
 
-  wr::RenderApi* mRenderApi;
+  wr::DocumentHandle* mDocHandle;
   wr::WindowId mId;
-  GLint mMaxTextureSize;
+  uint32_t mMaxTextureSize;
   bool mUseANGLE;
+  layers::SyncHandle mSyncHandle;
+  RefPtr<wr::WebRenderAPI> mRootApi;
 
   friend class DisplayListBuilder;
   friend class layers::WebRenderBridgeParent;
@@ -170,8 +177,10 @@ public:
                            const nsTArray<wr::WrFilterOp>& aFilters);
   void PopStackingContext();
 
-  void PushClip(const wr::LayoutRect& aClipRect,
-                const wr::WrImageMask* aMask);
+  wr::WrClipId DefineClip(const wr::LayoutRect& aClipRect,
+                          const nsTArray<wr::WrComplexClipRegion>* aComplex = nullptr,
+                          const wr::WrImageMask* aMask = nullptr);
+  void PushClip(const wr::WrClipId& aClipId);
   void PopClip();
 
   void PushBuiltDisplayList(wr::BuiltDisplayList &dl);

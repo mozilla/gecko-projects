@@ -28,8 +28,8 @@ use webdriver::command::{WebDriverCommand, WebDriverMessage, Parameters,
 use webdriver::command::WebDriverCommand::{
     NewSession, DeleteSession, Status, Get, GetCurrentUrl,
     GoBack, GoForward, Refresh, GetTitle, GetPageSource, GetWindowHandle,
-    GetWindowHandles, CloseWindow, SetWindowRect,
-    GetWindowRect, MaximizeWindow, FullscreenWindow, SwitchToWindow, SwitchToFrame,
+    GetWindowHandles, CloseWindow, SetWindowRect, GetWindowRect,
+    MinimizeWindow, MaximizeWindow, FullscreenWindow, SwitchToWindow, SwitchToFrame,
     SwitchToParentFrame, FindElement, FindElements,
     FindElementElement, FindElementElements, GetActiveElement,
     IsDisplayed, IsSelected, GetElementAttribute, GetElementProperty, GetCSSValue,
@@ -45,9 +45,9 @@ use webdriver::command::{
     GetNamedCookieParameters, AddCookieParameters, TimeoutsParameters,
     ActionsParameters, TakeScreenshotParameters};
 use webdriver::response::{CloseWindowResponse, Cookie, CookieResponse, CookiesResponse,
-                          NewSessionResponse, RectResponse, TimeoutsResponse, ValueResponse,
-                          WebDriverResponse};
-use webdriver::common::{Date, ELEMENT_KEY, FrameId, Nullable, WebElement};
+                          ElementRectResponse, NewSessionResponse, TimeoutsResponse,
+                          ValueResponse, WebDriverResponse, WindowRectResponse};
+use webdriver::common::{Date, ELEMENT_KEY, FrameId, Nullable, WebElement, WindowState};
 use webdriver::error::{ErrorStatus, WebDriverError, WebDriverResult};
 use webdriver::server::{WebDriverHandler, Session};
 use webdriver::httpapi::{WebDriverExtensionRoute};
@@ -488,13 +488,10 @@ impl MarionetteHandler {
 
         prefs.insert_slice(&extra_prefs[..]);
 
-        // fallbacks can be removed when Firefox 54 becomes stable
         if let Some(ref level) = self.current_log_level {
             prefs.insert("marionette.log.level", Pref::new(level.to_string()));
-            prefs.insert("marionette.logging", Pref::new(level.to_string()));  // fallback
         };
         prefs.insert("marionette.port", Pref::new(port as i64));
-        prefs.insert("marionette.defaultPrefs.port", Pref::new(port as i64));  // fallback
 
         prefs.write().map_err(|_| WebDriverError::new(ErrorStatus::UnknownError,
                                                       "Unable to write Firefox profile"))
@@ -760,9 +757,10 @@ impl MarionetteSession {
                     ErrorStatus::UnknownError,
                     "Failed to interpret width as float");
 
-                WebDriverResponse::ElementRect(RectResponse::new(x, y, width, height))
+                let rect = ElementRectResponse { x, y, width, height };
+                WebDriverResponse::ElementRect(rect)
             },
-            FullscreenWindow | MaximizeWindow | GetWindowRect |
+            FullscreenWindow | MinimizeWindow | MaximizeWindow | GetWindowRect |
             SetWindowRect(_) => {
                 let width = try_opt!(
                     try_opt!(resp.result.find("width"),
@@ -792,7 +790,13 @@ impl MarionetteSession {
                     ErrorStatus::UnknownError,
                     "Failed to interpret y as float");
 
-                WebDriverResponse::WindowRect(RectResponse::new(x, y, width, height))
+                let state = match resp.result.find("state") {
+                    Some(json) => WindowState::from_json(json)?,
+                    None => WindowState::Normal,
+                };
+
+                let rect = WindowRectResponse { x, y, width, height, state };
+                WebDriverResponse::WindowRect(rect)
             },
             GetCookies => {
                 let cookies = try!(self.process_cookies(&resp.result));
@@ -1039,6 +1043,7 @@ impl MarionetteCommand {
             SetTimeouts(ref x) => (Some("setTimeouts"), Some(x.to_marionette())),
             SetWindowRect(ref x) => (Some("setWindowRect"), Some(x.to_marionette())),
             GetWindowRect => (Some("getWindowRect"), None),
+            MinimizeWindow => (Some("WebDriver:MinimizeWindow"), None),
             MaximizeWindow => (Some("maximizeWindow"), None),
             FullscreenWindow => (Some("fullscreenWindow"), None),
             SwitchToWindow(ref x) => (Some("switchToWindow"), Some(x.to_marionette())),

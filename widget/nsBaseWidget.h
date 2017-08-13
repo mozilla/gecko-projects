@@ -214,6 +214,7 @@ public:
   void            CreateCompositorVsyncDispatcher();
   virtual void            CreateCompositor();
   virtual void            CreateCompositor(int aWidth, int aHeight);
+  virtual void            SetCompositorWidgetDelegate(CompositorWidgetDelegate* delegate) {}
   virtual void            PrepareWindowEffects() override {}
   virtual void            UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometries) override {}
   virtual void            SetModal(bool aModal) override {}
@@ -365,6 +366,11 @@ public:
   virtual void SetSizeConstraints(const SizeConstraints& aConstraints) override;
 
   virtual void StartAsyncScrollbarDrag(const AsyncDragMetrics& aDragMetrics) override;
+
+  virtual void StartAsyncAutoscroll(const ScreenPoint& aAnchorLocation,
+                                    const ScrollableLayerGuid& aGuid) override;
+
+  virtual void StopAsyncAutoscroll(const ScrollableLayerGuid& aGuid) override;
 
   /**
    * Use this when GetLayerManager() returns a BasicLayerManager
@@ -684,8 +690,6 @@ protected:
   nsPopupType       mPopupType;
   SizeConstraints   mSizeConstraints;
   bool              mHasRemoteContent;
-
-  CompositorWidgetDelegate* mCompositorWidgetDelegate;
 
   bool              mUpdateCursor;
   bool              mUseAttachedEvents;

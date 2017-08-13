@@ -132,8 +132,6 @@ enum JSShellExitCode {
     EXITCODE_TIMEOUT            = 6
 };
 
-static const size_t gStackChunkSize = 8192;
-
 /*
  * Note: This limit should match the stack limit set by the browser in
  *       js/xpconnect/src/XPCJSContext.cpp
@@ -994,7 +992,7 @@ Version(JSContext* cx, unsigned argc, Value* vp)
                                       "version");
             return false;
         }
-        JS_SetVersionForCompartment(js::GetContextCompartment(cx), JSVersion(v));
+        SetVersionForCurrentRealm(cx, JSVersion(v));
         args.rval().setInt32(origVersion);
     }
     return true;
@@ -6207,8 +6205,8 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "         source map URL to the code (although the code may provide one itself,\n"
 "         via a //#sourceMappingURL comment).\n"
 "      sourceIsLazy: if present and true, indicates that, after compilation, \n"
-          "script source should not be cached by the JS engine and should be \n"
-          "lazily loaded from the embedding as-needed.\n"
+"          script source should not be cached by the JS engine and should be \n"
+"          lazily loaded from the embedding as-needed.\n"
 "      loadBytecode: if true, and if the source is a CacheEntryObject,\n"
 "         the bytecode would be loaded and decoded from the cache entry instead\n"
 "         of being parsed, then it would be executed as usual.\n"

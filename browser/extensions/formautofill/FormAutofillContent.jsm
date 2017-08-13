@@ -90,12 +90,24 @@ AutofillProfileAutoCompleteSearch.prototype = {
    */
   startSearch(searchString, searchParam, previousResult, listener) {
     this.log.debug("startSearch: for", searchString, "with input", formFillController.focusedInput);
-    let focusedInput = formFillController.focusedInput;
-    this.forceStop = false;
-    let info = FormAutofillContent.getInputDetails(focusedInput);
 
-    if (!FormAutofillContent.savedFieldNames.has(info.fieldName) ||
-        FormAutofillContent.getFormHandler(focusedInput).filledProfileGUID) {
+    this.forceStop = false;
+
+    let savedFieldNames = FormAutofillContent.savedFieldNames;
+
+    let focusedInput = formFillController.focusedInput;
+    let info = FormAutofillContent.getInputDetails(focusedInput);
+    let isAddressField = FormAutofillUtils.isAddressField(info.fieldName);
+    let handler = FormAutofillContent.getFormHandler(focusedInput);
+    let allFieldNames = handler.allFieldNames;
+    let filledRecordGUID = isAddressField ? handler.address.filledRecordGUID : handler.creditCards.filledRecordGUID;
+
+    // Fallback to form-history if ...
+    //   - no profile can fill the currently-focused input.
+    //   - the current form has already been populated.
+    //   - (address only) less than 3 inputs are covered by all saved fields in the storage.
+    if (!savedFieldNames.has(info.fieldName) || filledRecordGUID || (isAddressField &&
+        allFieldNames.filter(field => savedFieldNames.has(field)).length < FormAutofillUtils.AUTOFILL_FIELDS_THRESHOLD)) {
       let formHistory = Cc["@mozilla.org/autocomplete/search;1?name=form-history"]
                           .createInstance(Ci.nsIAutoCompleteSearch);
       formHistory.startSearch(searchString, searchParam, previousResult, {
@@ -107,8 +119,7 @@ AutofillProfileAutoCompleteSearch.prototype = {
       return;
     }
 
-    let collectionName = FormAutofillUtils.isAddressField(info.fieldName) ?
-      "addresses" : "creditCards";
+    let collectionName = isAddressField ? "addresses" : "creditCards";
 
     this._getRecords({collectionName, info, searchString}).then((records) => {
       if (this.forceStop) {
@@ -117,12 +128,9 @@ AutofillProfileAutoCompleteSearch.prototype = {
       // Sort addresses by timeLastUsed for showing the lastest used address at top.
       records.sort((a, b) => b.timeLastUsed - a.timeLastUsed);
 
-      let handler = FormAutofillContent.getFormHandler(focusedInput);
       let adaptedRecords = handler.getAdaptedProfiles(records);
-
-      let allFieldNames = FormAutofillContent.getAllFieldNames(focusedInput);
       let result = null;
-      if (collectionName == "addresses") {
+      if (isAddressField) {
         result = new AddressResult(searchString,
                                    info.fieldName,
                                    allFieldNames,
@@ -377,20 +385,12 @@ var FormAutofillContent = {
       return true;
     }
 
-    let pendingAddress = handler.createProfile();
-    if (Object.keys(pendingAddress).length < FormAutofillUtils.AUTOFILL_FIELDS_THRESHOLD) {
-      this.log.debug(`Not saving since there are only ${Object.keys(pendingAddress).length} usable fields`);
+    let records = handler.createRecords();
+    if (!Object.keys(records).length) {
       return true;
     }
 
-    this._onFormSubmit({
-      address: {
-        guid: handler.filledProfileGUID,
-        record: pendingAddress,
-      },
-      // creditCard: {}
-    }, domWin);
-
+    this._onFormSubmit(records, domWin);
     return true;
   },
 
@@ -484,28 +484,14 @@ var FormAutofillContent = {
       return;
     }
 
-    formHandler.collectFormFields();
+    let validDetails = formHandler.collectFormFields();
 
     this._formsDetails.set(formHandler.form.rootElement, formHandler);
     this.log.debug("Adding form handler to _formsDetails:", formHandler);
 
-    if (formHandler.isValidAddressForm) {
-      formHandler.addressFieldDetails.forEach(
-        detail => this._markAsAutofillField(detail.elementWeakRef.get())
-      );
-    } else {
-      this.log.debug("Ignoring address related fields since it has only",
-                     formHandler.addressFieldDetails.length,
-                     "field(s)");
-    }
-
-    if (formHandler.isValidCreditCardForm) {
-      formHandler.creditCardFieldDetails.forEach(
-        detail => this._markAsAutofillField(detail.elementWeakRef.get())
-      );
-    } else {
-      this.log.debug("Ignoring credit card related fields since it's without credit card number field");
-    }
+    validDetails.forEach(detail =>
+      this._markAsAutofillField(detail.elementWeakRef.get())
+    );
   },
 
   _markAsAutofillField(field) {

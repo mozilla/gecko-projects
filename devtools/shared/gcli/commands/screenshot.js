@@ -166,7 +166,7 @@ exports.items = [
             let mainWindow = context.environment.chromeWindow;
             mainWindow.openUILinkIn(imageSummary.href, "tab");
           } else if (imageSummary.filename) {
-            const file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
+            const file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
             file.initWithPath(imageSummary.filename);
             file.reveal();
           }
@@ -383,12 +383,11 @@ function saveToClipboard(context, reply) {
     const imgTools = Cc["@mozilla.org/image/tools;1"]
                         .getService(Ci.imgITools);
 
-    const container = {};
-    imgTools.decodeImageData(input, channel.contentType, container);
+    const container = imgTools.decodeImage(input, channel.contentType);
 
     const wrapped = Cc["@mozilla.org/supports-interface-pointer;1"]
                       .createInstance(Ci.nsISupportsInterfacePointer);
-    wrapped.data = container.value;
+    wrapped.data = container;
 
     const trans = Cc["@mozilla.org/widget/transferable;1"]
                     .createInstance(Ci.nsITransferable);

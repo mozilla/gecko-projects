@@ -197,12 +197,6 @@ struct EventNameMapping
 typedef bool (*CallOnRemoteChildFunction) (mozilla::dom::TabParent* aTabParent,
                                            void* aArg);
 
-namespace mozilla {
-// 16 seems to be the maximum number of manual NAC nodes that editor
-// creates for a given element.
-typedef AutoTArray<mozilla::dom::Element*,16> ManualNAC;
-}
-
 class nsContentUtils
 {
   friend class nsAutoScriptBlockerSuppressNodeRemoved;
@@ -282,6 +276,7 @@ public:
   // This function can be called both in the main thread and worker threads.
   static bool ShouldResistFingerprinting();
   static bool ShouldResistFingerprinting(nsIDocShell* aDocShell);
+  static bool ShouldResistFingerprinting(nsIDocument* aDoc);
 
   // A helper function to calculate the rounded window size for fingerprinting
   // resistance. The rounded size is based on the chrome UI size and available
@@ -383,14 +378,28 @@ public:
    *
    * Returns null if the nodes are disconnected.
    */
-  static nsINode* GetCommonAncestor(nsINode* aNode1, nsINode* aNode2);
+  static nsINode* GetCommonAncestor(nsINode* aNode1, nsINode* aNode2)
+  {
+    if (aNode1 == aNode2) {
+      return aNode1;
+    }
+
+    return GetCommonAncestorHelper(aNode1, aNode2);
+  }
 
   /**
    * Returns the common flattened tree ancestor, if any, for two given content
    * nodes.
    */
   static nsIContent* GetCommonFlattenedTreeAncestor(nsIContent* aContent1,
-                                                    nsIContent* aContent2);
+                                                    nsIContent* aContent2)
+  {
+    if (aContent1 == aContent2) {
+      return aContent1;
+    }
+
+    return GetCommonFlattenedTreeAncestorHelper(aContent1, aContent2);
+  }
 
   /**
    * Returns true if aNode1 is before aNode2 in the same connected
@@ -1032,7 +1041,7 @@ public:
    */
   static nsresult GetLocalizedString(PropertiesFile aFile,
                                      const char* aKey,
-                                     nsXPIDLString& aResult);
+                                     nsAString& aResult);
 
   /**
    * A helper function that parses a sandbox attribute (of an <iframe> or a CSP
@@ -1069,6 +1078,11 @@ public:
 
   static bool PrefetchPreloadEnabled(nsIDocShell* aDocShell);
 
+  static void
+  ExtractErrorValues(JSContext* aCx, JS::Handle<JS::Value> aValue,
+                     nsACString& aSourceSpecOut, uint32_t *aLineOut,
+                     uint32_t *aColumnOut, nsString& aMessageOut);
+
   /**
    * Fill (with the parameters given) the localized string named |aKey| in
    * properties file |aFile|.
@@ -1078,14 +1092,14 @@ private:
                                         const char* aKey,
                                         const char16_t** aParams,
                                         uint32_t aParamsLength,
-                                        nsXPIDLString& aResult);
+                                        nsAString& aResult);
 
 public:
   template<uint32_t N>
   static nsresult FormatLocalizedString(PropertiesFile aFile,
                                         const char* aKey,
                                         const char16_t* (&aParams)[N],
-                                        nsXPIDLString& aResult)
+                                        nsAString& aResult)
   {
     return FormatLocalizedString(aFile, aKey, aParams, N, aResult);
   }
@@ -1099,7 +1113,7 @@ public:
   static nsresult FormatLocalizedString(PropertiesFile aFile,
                                         const char* aKey,
                                         const nsTArray<nsString>& aParamArray,
-                                        nsXPIDLString& aResult);
+                                        nsAString& aResult);
 
   /**
    * Returns true if aDocument is a chrome document
@@ -2856,6 +2870,8 @@ public:
 
   static bool PushEnabled(JSContext* aCx, JSObject* aObj);
 
+  static bool StreamsEnabled(JSContext* aCx, JSObject* aObj);
+
   static bool IsNonSubresourceRequest(nsIChannel* aChannel);
 
   static uint32_t CookiesBehavior()
@@ -3108,6 +3124,7 @@ private:
   static bool InitializeEventTable();
 
   static nsresult EnsureStringBundle(PropertiesFile aFile);
+  static void AsyncPrecreateStringBundles();
 
   static bool CanCallerAccess(nsIPrincipal* aSubjectPrincipal,
                                 nsIPrincipal* aPrincipal);
@@ -3180,6 +3197,10 @@ private:
    */
   static StorageAccess InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
                                                           nsPIDOMWindowInner* aWindow);
+
+  static nsINode* GetCommonAncestorHelper(nsINode* aNode1, nsINode* aNode2);
+  static nsIContent* GetCommonFlattenedTreeAncestorHelper(nsIContent* aContent1,
+                                                          nsIContent* aContent2);
 
   static nsIXPConnect *sXPConnect;
 

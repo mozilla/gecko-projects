@@ -7,6 +7,7 @@
 #include "CubebUtils.h"
 
 #include "MediaInfo.h"
+#include "mozilla/AbstractThread.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
@@ -162,13 +163,13 @@ namespace CubebUtils {
 void PrefChanged(const char* aPref, void* aClosure)
 {
   if (strcmp(aPref, PREF_VOLUME_SCALE) == 0) {
-    nsAdoptingString value = Preferences::GetString(aPref);
+    nsAutoCString value;
+    Preferences::GetCString(aPref, value);
     StaticMutexAutoLock lock(sMutex);
     if (value.IsEmpty()) {
       sVolumeScale = 1.0;
     } else {
-      NS_ConvertUTF16toUTF8 utf8(value);
-      sVolumeScale = std::max<double>(0, PR_strtod(utf8.get(), nullptr));
+      sVolumeScale = std::max<double>(0, PR_strtod(value.get(), nullptr));
     }
   } else if (strcmp(aPref, PREF_CUBEB_LATENCY_PLAYBACK) == 0) {
     // Arbitrary default stream latency of 100ms.  The higher this
@@ -188,28 +189,28 @@ void PrefChanged(const char* aPref, void* aClosure)
     // experiment.
     sCubebMSGLatencyInFrames = std::min<uint32_t>(std::max<uint32_t>(value, 128), 1e6);
   } else if (strcmp(aPref, PREF_CUBEB_LOGGING_LEVEL) == 0) {
-    nsAdoptingString value = Preferences::GetString(aPref);
-    NS_ConvertUTF16toUTF8 utf8(value);
+    nsAutoCString value;
+    Preferences::GetCString(aPref, value);
     LogModule* cubebLog = LogModule::Get("cubeb");
-    if (strcmp(utf8.get(), "verbose") == 0) {
+    if (value.EqualsLiteral("verbose")) {
       cubeb_set_log_callback(CUBEB_LOG_VERBOSE, CubebLogCallback);
       cubebLog->SetLevel(LogLevel::Verbose);
-    } else if (strcmp(utf8.get(), "normal") == 0) {
+    } else if (value.EqualsLiteral("normal")) {
       cubeb_set_log_callback(CUBEB_LOG_NORMAL, CubebLogCallback);
       cubebLog->SetLevel(LogLevel::Error);
-    } else if (utf8.IsEmpty()) {
+    } else if (value.IsEmpty()) {
       cubeb_set_log_callback(CUBEB_LOG_DISABLED, nullptr);
       cubebLog->SetLevel(LogLevel::Disabled);
     }
   } else if (strcmp(aPref, PREF_CUBEB_BACKEND) == 0) {
-    nsAdoptingString value = Preferences::GetString(aPref);
+    nsAutoCString value;
+    Preferences::GetCString(aPref, value);
     if (value.IsEmpty()) {
       sCubebBackendName = nullptr;
     } else {
-      NS_LossyConvertUTF16toASCII ascii(value);
-      sCubebBackendName = new char[ascii.Length() + 1];
-      PodCopy(sCubebBackendName.get(), ascii.get(), ascii.Length());
-      sCubebBackendName[ascii.Length()] = 0;
+      sCubebBackendName = new char[value.Length() + 1];
+      PodCopy(sCubebBackendName.get(), value.get(), value.Length());
+      sCubebBackendName[value.Length()] = 0;
     }
   }
 }
@@ -307,7 +308,7 @@ void InitBrandName()
   if (sBrandName) {
     return;
   }
-  nsXPIDLString brandName;
+  nsAutoString brandName;
   nsCOMPtr<nsIStringBundleService> stringBundleService =
     mozilla::services::GetStringBundleService();
   if (stringBundleService) {
@@ -315,8 +316,7 @@ void InitBrandName()
     nsresult rv = stringBundleService->CreateBundle(kBrandBundleURL,
                                            getter_AddRefs(brandBundle));
     if (NS_SUCCEEDED(rv)) {
-      rv = brandBundle->GetStringFromName("brandShortName",
-                                          getter_Copies(brandName));
+      rv = brandBundle->GetStringFromName("brandShortName", brandName);
       NS_WARNING_ASSERTION(
         NS_SUCCEEDED(rv), "Could not get the program name for a cubeb stream.");
     }
@@ -491,33 +491,6 @@ cubeb_channel_layout ConvertChannelMapToCubebLayout(uint32_t aChannelMap)
   }
 }
 
-#if defined(__ANDROID__) && defined(MOZ_B2G)
-cubeb_stream_type ConvertChannelToCubebType(dom::AudioChannel aChannel)
-{
-  switch(aChannel) {
-    case dom::AudioChannel::Normal:
-      /* FALLTHROUGH */
-    case dom::AudioChannel::Content:
-      return CUBEB_STREAM_TYPE_MUSIC;
-    case dom::AudioChannel::Notification:
-      return CUBEB_STREAM_TYPE_NOTIFICATION;
-    case dom::AudioChannel::Alarm:
-      return CUBEB_STREAM_TYPE_ALARM;
-    case dom::AudioChannel::Telephony:
-      return CUBEB_STREAM_TYPE_VOICE_CALL;
-    case dom::AudioChannel::Ringer:
-      return CUBEB_STREAM_TYPE_RING;
-    case dom::AudioChannel::System:
-      return CUBEB_STREAM_TYPE_SYSTEM;
-    case dom::AudioChannel::Publicnotification:
-      return CUBEB_STREAM_TYPE_SYSTEM_ENFORCED;
-    default:
-      NS_ERROR("The value of AudioChannel is invalid");
-      return CUBEB_STREAM_TYPE_MAX;
-  }
-}
-#endif
-
 void GetCurrentBackend(nsAString& aBackend)
 {
   cubeb* cubebContext = GetCubebContext();
@@ -610,9 +583,9 @@ void GetDeviceCollection(nsTArray<RefPtr<AudioDeviceInfo>>& aDeviceInfos,
       for (unsigned int i = 0; i < collection.count; ++i) {
         auto device = collection.device[i];
         RefPtr<AudioDeviceInfo> info =
-          new AudioDeviceInfo(NS_ConvertASCIItoUTF16(device.friendly_name),
-                              NS_ConvertASCIItoUTF16(device.group_id),
-                              NS_ConvertASCIItoUTF16(device.vendor_name),
+          new AudioDeviceInfo(NS_ConvertUTF8toUTF16(device.friendly_name),
+                              NS_ConvertUTF8toUTF16(device.group_id),
+                              NS_ConvertUTF8toUTF16(device.vendor_name),
                               ConvertCubebType(device.type),
                               ConvertCubebState(device.state),
                               ConvertCubebPreferred(device.preferred),

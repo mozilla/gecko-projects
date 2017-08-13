@@ -1324,8 +1324,8 @@ AppNameOverrideChanged(const char* /* aPrefName */, void* /* aClosure */)
 {
   AssertIsOnMainThread();
 
-  const nsAdoptingString& override =
-    mozilla::Preferences::GetString("general.appname.override");
+  nsAutoString override;
+  Preferences::GetString("general.appname.override", override);
 
   RuntimeService* runtime = RuntimeService::GetService();
   if (runtime) {
@@ -1338,8 +1338,8 @@ AppVersionOverrideChanged(const char* /* aPrefName */, void* /* aClosure */)
 {
   AssertIsOnMainThread();
 
-  const nsAdoptingString& override =
-    mozilla::Preferences::GetString("general.appversion.override");
+  nsAutoString override;
+  Preferences::GetString("general.appversion.override", override);
 
   RuntimeService* runtime = RuntimeService::GetService();
   if (runtime) {
@@ -1352,8 +1352,8 @@ PlatformOverrideChanged(const char* /* aPrefName */, void* /* aClosure */)
 {
   AssertIsOnMainThread();
 
-  const nsAdoptingString& override =
-    mozilla::Preferences::GetString("general.platform.override");
+  nsAutoString override;
+  Preferences::GetString("general.platform.override", override);
 
   RuntimeService* runtime = RuntimeService::GetService();
   if (runtime) {
@@ -2849,10 +2849,10 @@ WorkerThreadPrimaryRunnable::Run()
 
   profiler_register_thread(threadName.get(), &stackBaseGuess);
 
-  // Note: SynchronouslyCreateForCurrentThread() must be called prior to
+  // Note: GetOrCreateForCurrentThread() must be called prior to
   //       mWorkerPrivate->SetThread() in order to avoid accidentally consuming
   //       worker messages here.
-  if (NS_WARN_IF(!BackgroundChild::SynchronouslyCreateForCurrentThread())) {
+  if (NS_WARN_IF(!BackgroundChild::GetOrCreateForCurrentThread())) {
     // XXX need to fire an error at parent.
     // Failed in creating BackgroundChild: probably in shutdown. Continue to run
     // without BackgroundChild created.

@@ -11,6 +11,7 @@
 #include "GLTextureImage.h"             // for TextureImage
 #include "ImageTypes.h"                 // for StereoMode
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
+#include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"         // for override
 #include "mozilla/DebugOnly.h"
 #include "mozilla/RefPtr.h"             // for RefPtr, RefCounted
@@ -66,6 +67,7 @@ class TextureClientPool;
 #endif
 class TextureForwarder;
 class KeepAlive;
+class SyncObjectClient;
 
 /**
  * TextureClient is the abstraction that allows us to share data between the
@@ -91,36 +93,6 @@ enum TextureAllocationFlags {
   // The texture is going to be updated using UpdateFromSurface and needs to support
   // that call.
   ALLOC_UPDATE_FROM_SURFACE = 1 << 7,
-};
-
-#ifdef XP_WIN
-typedef void* SyncHandle;
-#else
-typedef uintptr_t SyncHandle;
-#endif // XP_WIN
-
-class SyncObject : public RefCounted<SyncObject>
-{
-public:
-  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SyncObject)
-  virtual ~SyncObject() { }
-
-  static already_AddRefed<SyncObject> CreateSyncObject(SyncHandle aHandle
-#ifdef XP_WIN
-                                                       , ID3D11Device* aDevice = nullptr
-#endif
-                                                       );
-
-  enum class SyncType {
-    D3D11,
-  };
-
-  virtual SyncType GetSyncType() = 0;
-  virtual void FinalizeFrame() = 0;
-  virtual bool IsSyncObjectValid() = 0;
-
-protected:
-  SyncObject() { }
 };
 
 /**
@@ -305,7 +277,7 @@ public:
 
   virtual bool ReadBack(TextureReadbackSink* aReadbackSink) { return false; }
 
-  virtual void SyncWithObject(SyncObject* aFence) {};
+  virtual void SyncWithObject(SyncObjectClient* aSyncObject) {};
 
   virtual TextureFlags GetTextureFlags() const { return TextureFlags::NO_FLAGS; }
 
@@ -614,7 +586,7 @@ public:
     mReadbackSink = aReadbackSink;
   }
 
-  void SyncWithObject(SyncObject* aFence) { mData->SyncWithObject(aFence); }
+  void SyncWithObject(SyncObjectClient* aSyncObject) { mData->SyncWithObject(aSyncObject); }
 
   LayersIPCChannel* GetAllocator() { return mAllocator; }
 
@@ -658,6 +630,15 @@ public:
   void ReadUnlock();
 
   bool SerializeReadLock(ReadLockDescriptor& aDescriptor);
+
+  // Mark that the TextureClient will be used by the paint thread, and should not
+  // free its underlying texture data. This must only be called from the main
+  // thread.
+  void AddPaintThreadRef();
+
+  // Mark that the TextureClient is no longer in use by the PaintThread. This
+  // must only be called from the PaintThread.
+  void DropPaintThreadRef();
 
 private:
   static void TextureClientRecycleCallback(TextureClient* aClient, void* aClosure);
@@ -747,6 +728,9 @@ protected:
 
   // Serial id of TextureClient. It is unique in current process.
   const uint64_t mSerial;
+
+  // When non-zero, texture data must not be freed.
+  mozilla::Atomic<uintptr_t> mPaintThreadRefs;
 
   // External image id. It is unique if it is allocated.
   // The id is allocated in TextureClient::InitIPDLActor().

@@ -7,7 +7,6 @@
 
 #include "ShimInterfaceInfo.h"
 
-#include "nsIBrowserBoxObject.h"
 #include "nsIContainerBoxObject.h"
 #include "nsIDOMAnimationEvent.h"
 #include "nsIDOMAttr.h"
@@ -47,7 +46,6 @@
 #include "nsIDOMGeoPositionError.h"
 #include "nsIDOMHistory.h"
 #include "nsIDOMHTMLAnchorElement.h"
-#include "nsIDOMHTMLAppletElement.h"
 #include "nsIDOMHTMLAreaElement.h"
 #include "nsIDOMHTMLBaseElement.h"
 #include "nsIDOMHTMLBodyElement.h"
@@ -57,7 +55,6 @@
 #include "nsIDOMHTMLDirectoryElement.h"
 #include "nsIDOMHTMLDocument.h"
 #include "nsIDOMHTMLElement.h"
-#include "nsIDOMHTMLEmbedElement.h"
 #include "nsIDOMHTMLFieldSetElement.h"
 #include "nsIDOMHTMLFormElement.h"
 #include "nsIDOMHTMLFrameElement.h"
@@ -175,7 +172,6 @@
 #include "mozilla/dom/FormDataBinding.h"
 #include "mozilla/dom/HistoryBinding.h"
 #include "mozilla/dom/HTMLAnchorElementBinding.h"
-#include "mozilla/dom/HTMLAppletElementBinding.h"
 #include "mozilla/dom/HTMLAreaElementBinding.h"
 #include "mozilla/dom/HTMLBaseElementBinding.h"
 #include "mozilla/dom/HTMLBodyElementBinding.h"
@@ -185,7 +181,6 @@
 #include "mozilla/dom/HTMLDirectoryElementBinding.h"
 #include "mozilla/dom/HTMLDocumentBinding.h"
 #include "mozilla/dom/HTMLElementBinding.h"
-#include "mozilla/dom/HTMLEmbedElementBinding.h"
 #include "mozilla/dom/HTMLFieldSetElementBinding.h"
 #include "mozilla/dom/HTMLFormElementBinding.h"
 #include "mozilla/dom/HTMLFrameElementBinding.h"
@@ -325,7 +320,6 @@ const ComponentsInterfaceShimEntry kComponentsInterfaceShimMap[] =
   DEFINE_SHIM(AnimationEvent),
   DEFINE_SHIM(Attr),
   DEFINE_SHIM(BeforeUnloadEvent),
-  DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsIBrowserBoxObject, ContainerBoxObject),
   DEFINE_SHIM(CanvasRenderingContext2D),
   DEFINE_SHIM(CDATASection),
   DEFINE_SHIM(CharacterData),
@@ -362,7 +356,6 @@ const ComponentsInterfaceShimEntry kComponentsInterfaceShimMap[] =
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsIDOMGeoPositionError, PositionError),
   DEFINE_SHIM(History),
   DEFINE_SHIM(HTMLAnchorElement),
-  DEFINE_SHIM(HTMLAppletElement),
   DEFINE_SHIM(HTMLAreaElement),
   DEFINE_SHIM(HTMLBaseElement),
   DEFINE_SHIM(HTMLBodyElement),
@@ -372,7 +365,6 @@ const ComponentsInterfaceShimEntry kComponentsInterfaceShimMap[] =
   DEFINE_SHIM(HTMLDirectoryElement),
   DEFINE_SHIM(HTMLDocument),
   DEFINE_SHIM(HTMLElement),
-  DEFINE_SHIM(HTMLEmbedElement),
   DEFINE_SHIM(HTMLFieldSetElement),
   DEFINE_SHIM(HTMLFormElement),
   DEFINE_SHIM(HTMLFrameElement),

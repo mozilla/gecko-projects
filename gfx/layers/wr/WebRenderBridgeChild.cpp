@@ -23,7 +23,7 @@ WebRenderBridgeChild::WebRenderBridgeChild(const wr::PipelineId& aPipelineId)
   : mReadLockSequenceNumber(0)
   , mIsInTransaction(false)
   , mIsInClearCachedResources(false)
-  , mIdNamespace(0)
+  , mIdNamespace{0}
   , mResourceId(0)
   , mPipelineId(aPipelineId)
   , mIPCOpen(false)
@@ -102,7 +102,8 @@ WebRenderBridgeChild::DPEnd(wr::DisplayListBuilder &aBuilder,
                             const gfx::IntSize& aSize,
                             bool aIsSync,
                             uint64_t aTransactionId,
-                            const WebRenderScrollData& aScrollData)
+                            const WebRenderScrollData& aScrollData,
+                            const mozilla::TimeStamp& aTxnStartTime)
 {
   MOZ_ASSERT(!mDestroyed);
   MOZ_ASSERT(mIsInTransaction);
@@ -119,10 +120,10 @@ WebRenderBridgeChild::DPEnd(wr::DisplayListBuilder &aBuilder,
 
   if (aIsSync) {
     this->SendDPSyncEnd(aSize, mParentCommands, mDestroyedActors, GetFwdTransactionId(), aTransactionId,
-                        contentSize, dlData, dl.dl_desc, aScrollData, mIdNamespace,fwdTime);
+                        contentSize, dlData, dl.dl_desc, aScrollData, mIdNamespace, aTxnStartTime, fwdTime);
   } else {
     this->SendDPEnd(aSize, mParentCommands, mDestroyedActors, GetFwdTransactionId(), aTransactionId,
-                    contentSize, dlData, dl.dl_desc, aScrollData, mIdNamespace, fwdTime);
+                    contentSize, dlData, dl.dl_desc, aScrollData, mIdNamespace, aTxnStartTime, fwdTime);
   }
 
   mParentCommands.Clear();
@@ -144,13 +145,20 @@ void
 WebRenderBridgeChild::AddPipelineIdForAsyncCompositable(const wr::PipelineId& aPipelineId,
                                                         const CompositableHandle& aHandle)
 {
-  SendAddPipelineIdForAsyncCompositable(aPipelineId, aHandle);
+  SendAddPipelineIdForCompositable(aPipelineId, aHandle, true);
 }
 
 void
-WebRenderBridgeChild::RemovePipelineIdForAsyncCompositable(const wr::PipelineId& aPipelineId)
+WebRenderBridgeChild::AddPipelineIdForCompositable(const wr::PipelineId& aPipelineId,
+                                                   const CompositableHandle& aHandle)
 {
-  SendRemovePipelineIdForAsyncCompositable(aPipelineId);
+  SendAddPipelineIdForCompositable(aPipelineId, aHandle, false);
+}
+
+void
+WebRenderBridgeChild::RemovePipelineIdForCompositable(const wr::PipelineId& aPipelineId)
+{
+  SendRemovePipelineIdForCompositable(aPipelineId);
 }
 
 wr::ExternalImageId
@@ -260,7 +268,7 @@ WebRenderBridgeChild::GetFontKeyForScaledFont(gfx::ScaledFont* aScaledFont)
     return key;
   }
 
-  key.mNamespace.mHandle = GetNamespace();
+  key.mNamespace = GetNamespace();
   key.mHandle = GetNextResourceId();
 
   SendAddRawFont(key, data.mFontBuffer, data.mFontIndex);
@@ -452,11 +460,11 @@ WebRenderBridgeChild::InForwarderThread()
 }
 
 mozilla::ipc::IPCResult
-WebRenderBridgeChild::RecvWrUpdated(const uint32_t& aNewIdNameSpace)
+WebRenderBridgeChild::RecvWrUpdated(const wr::IdNamespace& aNewIdNamespace)
 {
   // Update mIdNamespace to identify obsolete keys and messages by WebRenderBridgeParent.
   // Since usage of invalid keys could cause crash in webrender.
-  mIdNamespace = aNewIdNameSpace;
+  mIdNamespace = aNewIdNamespace;
   // Remove all FontKeys since they are removed by WebRenderBridgeParent
   for (auto iter = mFontKeys.Iter(); !iter.Done(); iter.Next()) {
     SendDeleteFont(iter.Data());

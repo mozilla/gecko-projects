@@ -27,6 +27,7 @@ fn standard_routes<U:WebDriverExtensionRoute>() -> Vec<(Method, &'static str, Ro
                 (Post, "/session/{sessionId}/window/position", Route::SetWindowPosition),
                 (Get, "/session/{sessionId}/window/rect", Route::GetWindowRect),
                 (Post, "/session/{sessionId}/window/rect", Route::SetWindowRect),
+                (Post, "/session/{sessionId}/window/minimize", Route::MinimizeWindow),
                 (Post, "/session/{sessionId}/window/maximize", Route::MaximizeWindow),
                 (Post, "/session/{sessionId}/window/fullscreen", Route::FullscreenWindow),
                 (Post, "/session/{sessionId}/window", Route::SwitchToWindow),
@@ -70,7 +71,7 @@ fn standard_routes<U:WebDriverExtensionRoute>() -> Vec<(Method, &'static str, Ro
                 (Get, "/status", Route::Status),]
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Route<U:WebDriverExtensionRoute> {
     NewSession,
     DeleteSession,
@@ -90,6 +91,7 @@ pub enum Route<U:WebDriverExtensionRoute> {
     SetWindowPosition,  // deprecated
     GetWindowRect,
     SetWindowRect,
+    MinimizeWindow,
     MaximizeWindow,
     FullscreenWindow,
     SwitchToWindow,
@@ -140,7 +142,7 @@ pub trait WebDriverExtensionRoute : Clone + Send + PartialEq {
     fn command(&self, &Captures, &Json) -> WebDriverResult<WebDriverCommand<Self::Command>>;
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct VoidWebDriverExtensionRoute;
 
 impl WebDriverExtensionRoute for VoidWebDriverExtensionRoute {
@@ -151,7 +153,7 @@ impl WebDriverExtensionRoute for VoidWebDriverExtensionRoute {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct RequestMatcher<U: WebDriverExtensionRoute> {
     method: Method,
     path_regexp: Regex,
@@ -195,6 +197,7 @@ impl <U: WebDriverExtensionRoute> RequestMatcher<U> {
     }
 }
 
+#[derive(Debug)]
 pub struct WebDriverHttpApi<U: WebDriverExtensionRoute> {
     routes: Vec<(Method, RequestMatcher<U>)>,
 }

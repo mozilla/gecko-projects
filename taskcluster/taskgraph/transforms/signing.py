@@ -10,7 +10,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import validate_schema, Schema
-from taskgraph.util.scriptworker import get_signing_cert_scope, get_devedition_signing_cert_scope
+from taskgraph.util.scriptworker import get_signing_cert_scope_per_platform
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
@@ -75,6 +75,7 @@ def validate(config, jobs):
 def make_task_description(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']
+        attributes = dep_job.attributes
 
         signing_format_scopes = []
         formats = set([])
@@ -99,7 +100,15 @@ def make_task_description(config, jobs):
         treeherder.setdefault('tier', 1)
         treeherder.setdefault('kind', 'build')
 
-        label = job.get('label', "{}-signing".format(dep_job.label))
+        label = job['label']
+        description = (
+            "Initial Signing for locale '{locale}' for build '"
+            "{build_platform}/{build_type}'".format(
+                locale=attributes.get('locale', 'en-US'),
+                build_platform=attributes.get('build_platform'),
+                build_type=attributes.get('build_type')
+            )
+        )
 
         attributes = copy_attributes_from_dependent_job(dep_job)
         attributes['signed'] = True
@@ -108,21 +117,13 @@ def make_task_description(config, jobs):
             # Used for l10n attribute passthrough
             attributes['chunk_locales'] = dep_job.attributes.get('chunk_locales')
 
-        # This code wasn't originally written with the possibility of using different
-        # signing cert scopes for different platforms on the same branch. This isn't
-        # ideal, but it's what we currently have to make this possible.
-        if dep_job.attributes.get('build_platform') in set(
-          ['linux64-devedition-nightly', 'linux-devedition-nightly']):
-            signing_cert_scope = get_devedition_signing_cert_scope(config)
-        elif is_nightly:
-            signing_cert_scope = get_signing_cert_scope(config)
-        else:
-            signing_cert_scope = 'project:releng:signing:cert:dep-signing'
+        signing_cert_scope = get_signing_cert_scope_per_platform(
+            dep_job.attributes.get('build_platform'), is_nightly, config
+        )
 
         task = {
             'label': label,
-            'description': "{} Signing".format(
-                dep_job.task["metadata"]["description"]),
+            'description': description,
             'worker-type': _generate_worker_type(signing_cert_scope),
             'worker': {'implementation': 'scriptworker-signing',
                        'upstream-artifacts': job['upstream-artifacts'],

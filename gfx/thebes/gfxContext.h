@@ -384,11 +384,6 @@ public:
     gfxRect GetClipExtents();
 
     /**
-     * Whether the current clip is not a simple rectangle.
-     */
-    bool HasComplexClip() const;
-
-    /**
      * Returns true if the given rectangle is fully contained in the current clip.
      * This is conservative; it may return false even when the given rectangle is
      * fully contained by the current clip.
@@ -478,6 +473,9 @@ private:
       , aaMode(mozilla::gfx::AntialiasMode::SUBPIXEL)
       , patternTransformChanged(false)
       , mBlendOpacity(0.0f)
+#ifdef DEBUG
+      , mContentChanged(false)
+#endif
     {}
 
     mozilla::gfx::CompositionOp op;
@@ -509,6 +507,8 @@ private:
     Matrix mBlendMaskTransform;
 #ifdef DEBUG
     bool mWasPushedForBlendBack;
+    // Whether the content of this AzureState changed after construction.
+    bool mContentChanged;
 #endif
   };
 

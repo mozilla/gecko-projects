@@ -231,11 +231,11 @@ struct MOZ_STACK_CLASS ScrollReflowInput {
   bool mShowVScrollbar;
 
   ScrollReflowInput(nsIScrollableFrame* aFrame,
-                    const ReflowInput& aState) :
-    mReflowInput(aState),
+                    const ReflowInput& aReflowInput) :
+    mReflowInput(aReflowInput),
     // mBoxState is just used for scrollbars so we don't need to
     // worry about the reflow depth here
-    mBoxState(aState.mFrame->PresContext(), aState.mRenderingContext, 0),
+    mBoxState(aReflowInput.mFrame->PresContext(), aReflowInput.mRenderingContext, 0),
     mStyles(aFrame->GetScrollbarStyles()) {
   }
 };
@@ -2353,7 +2353,8 @@ ScrollFrameHelper::ScrollToWithOrigin(nsPoint aScrollPosition,
         }
       } else {
         // A previous smooth MSD scroll is still in progress, so we just need to
-        // update its destination.
+        // update its range and destination.
+        mAsyncSmoothMSDScroll->SetRange(GetScrollRangeForClamping());
         mAsyncSmoothMSDScroll->SetDestination(mDestination);
       }
 
@@ -2969,7 +2970,7 @@ MaxZIndexInListOfItemsContainedInFrame(nsDisplayList* aList, nsIFrame* aFrame)
     nsIFrame* itemFrame = item->Frame();
     // Perspective items return the scroll frame as their Frame(), so consider
     // their TransformFrame() instead.
-    if (item->GetType() == TYPE_PERSPECTIVE) {
+    if (item->GetType() == DisplayItemType::TYPE_PERSPECTIVE) {
       itemFrame = static_cast<nsDisplayPerspective*>(item)->TransformFrame();
     }
     if (nsLayoutUtils::IsProperAncestorFrame(aFrame, itemFrame)) {
@@ -3230,7 +3231,7 @@ ClipItemsExceptCaret(nsDisplayList* aList,
       continue;
     }
 
-    if (i->GetType() != TYPE_CARET) {
+    if (i->GetType() != DisplayItemType::TYPE_CARET) {
       const DisplayItemClipChain* clip = i->GetClipChain();
       const DisplayItemClipChain* intersection = nullptr;
       if (aCache.Get(clip, &intersection)) {

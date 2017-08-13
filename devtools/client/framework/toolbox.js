@@ -20,7 +20,7 @@ var defer = require("devtools/shared/defer");
 var Services = require("Services");
 var {Task} = require("devtools/shared/task");
 var {gDevTools} = require("devtools/client/framework/devtools");
-var EventEmitter = require("devtools/shared/event-emitter");
+var EventEmitter = require("devtools/shared/old-event-emitter");
 var Telemetry = require("devtools/client/shared/telemetry");
 var { attachThread, detachThread } = require("./attach-thread");
 var Menu = require("devtools/client/framework/menu");
@@ -63,7 +63,7 @@ loader.lazyRequireGetter(this, "ToolboxButtons",
 loader.lazyRequireGetter(this, "SourceMapURLService",
   "devtools/client/framework/source-map-url-service", true);
 loader.lazyRequireGetter(this, "HUDService",
-  "devtools/client/webconsole/hudservice");
+  "devtools/client/webconsole/hudservice", true);
 loader.lazyRequireGetter(this, "viewSource",
   "devtools/client/shared/view-source");
 
@@ -544,8 +544,50 @@ Toolbox.prototype = {
       return this._sourceMapService;
     }
     // Uses browser loader to access the `Worker` global.
-    this._sourceMapService =
-      this.browserRequire("devtools/client/shared/source-map/index");
+    let service = this.browserRequire("devtools/client/shared/source-map/index");
+
+    // Provide a wrapper for the service that reports errors more nicely.
+    this._sourceMapService = new Proxy(service, {
+      get: (target, name) => {
+        switch (name) {
+          case "getOriginalURLs":
+            return (urlInfo) => {
+              return target.getOriginalURLs(urlInfo)
+                .catch(text => {
+                  let message = L10N.getFormatStr("toolbox.sourceMapFailure",
+                                                  text, urlInfo.url,
+                                                  urlInfo.sourceMapURL);
+                  this.target.logErrorInPage(message, "source map");
+                  // It's ok to swallow errors here, because a null
+                  // result just means that no source map was found.
+                  return null;
+                });
+            };
+
+          case "getOriginalSourceText":
+            return (originalSource) => {
+              return target.getOriginalSourceText(originalSource)
+                .catch(text => {
+                  let message = L10N.getFormatStr("toolbox.sourceMapSourceFailure",
+                                                  text, originalSource.url);
+                  this.target.logErrorInPage(message, "source map");
+                  // Also replace the result with the error text.
+                  // Note that this result has to have the same form
+                  // as whatever the upstream getOriginalSourceText
+                  // returns.
+                  return {
+                    text: message,
+                    contentType: "text/plain",
+                  };
+                });
+            };
+
+          default:
+            return target[name];
+        }
+      },
+    });
+
     this._sourceMapService.startSourceMapWorker(SOURCE_MAP_WORKER);
     return this._sourceMapService;
   },

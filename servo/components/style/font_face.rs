@@ -16,7 +16,7 @@ use cssparser::{SourceLocation, CowRcStr};
 use error_reporting::ContextualParseError;
 #[cfg(feature = "gecko")] use gecko_bindings::structs::CSSFontFaceDescriptors;
 #[cfg(feature = "gecko")] use cssparser::UnicodeRange;
-use parser::{ParserContext, log_css_error, Parse};
+use parser::{ParserContext, Parse};
 #[cfg(feature = "gecko")]
 use properties::longhands::font_language_override;
 use selectors::parser::SelectorParseError;
@@ -119,10 +119,8 @@ pub fn parse_font_face_block(context: &ParserContext, input: &mut Parser, locati
         let mut iter = DeclarationListParser::new(input, parser);
         while let Some(declaration) = iter.next() {
             if let Err(err) = declaration {
-                let pos = err.span.start;
-                let error = ContextualParseError::UnsupportedFontFaceDescriptor(
-                    iter.input.slice(err.span), err.error);
-                log_css_error(iter.input, pos, error, context);
+                let error = ContextualParseError::UnsupportedFontFaceDescriptor(err.slice, err.error);
+                context.log_css_error(err.location, error)
             }
         }
     }
@@ -210,6 +208,16 @@ impl Parse for Source {
     }
 }
 
+macro_rules! is_descriptor_enabled {
+    ("font-display") => {
+        unsafe {
+            use gecko_bindings::structs::mozilla;
+            mozilla::StylePrefs_sFontDisplayEnabled
+        }
+    };
+    ($name: tt) => { true }
+}
+
 macro_rules! font_face_descriptors_common {
     (
         $( #[$doc: meta] $name: tt $ident: ident / $gecko_ident: ident: $ty: ty, )*
@@ -275,7 +283,7 @@ macro_rules! font_face_descriptors_common {
                               -> Result<(), ParseError<'i>> {
                 match_ignore_ascii_case! { &*name,
                     $(
-                        $name => {
+                        $name if is_descriptor_enabled!($name) => {
                             // DeclarationParser also calls parse_entirely
                             // so we’d normally not need to,
                             // but in this case we do because we set the value as a side effect

@@ -9,6 +9,7 @@
 #include <sys/types.h>                  // for int32_t
 #include <algorithm>                    // for max, min
 #include "AsyncPanZoomController.h"     // for AsyncPanZoomController, etc
+#include "AutoscrollAnimation.h"        // for AutoscrollAnimation
 #include "Axis.h"                       // for AxisX, AxisY, Axis, etc
 #include "CheckerboardEvent.h"          // for CheckerboardEvent
 #include "Compositor.h"                 // for Compositor
@@ -133,6 +134,10 @@ typedef GenericFlingAnimation FlingAnimation;
  * If set to true, scroll can be handed off from one APZC to another within
  * a single input block. If set to false, a single input block can only
  * scroll one APZC.
+ *
+ * \li\b apz.autoscroll.enabled
+ * If set to true, autoscrolling is driven by APZ rather than the content
+ * process main thread.
  *
  * \li\b apz.axis_lock.mode
  * The preferred axis locking style. See AxisLockMode for possible values.
@@ -279,6 +284,16 @@ typedef GenericFlingAnimation FlingAnimation;
  * with |AsyncTransformConsumer::eForCompositing|. Rather, the transform will
  * reflect the value of the async scroll offset and async zoom at the last time
  * SampleCompositedAsyncTransform() was called.
+ *
+ * \li\b apz.keyboard.enabled
+ * Determines whether scrolling with the keyboard will be allowed to be handled
+ * by APZ.
+ *
+ * \li\b apz.keyboard.passive-listeners
+ * When enabled, APZ will interpret the passive event listener flag to mean
+ * that the event listener won't change the focused element or selection of
+ * the page. With this, web content can use passive key listeners and not have
+ * keyboard APZ disabled.
  *
  * \li\b apz.max_velocity_inches_per_ms
  * Maximum velocity.  Velocity will be capped at this value if a faster fling
@@ -582,10 +597,9 @@ public:
       // offset to end up being a bit off from the destination, we can get
       // artefacts like "scroll to the next snap point in this direction"
       // scrolling to the snap point we're already supposed to be at.
-      aFrameMetrics.SetScrollOffset(
-          aFrameMetrics.CalculateScrollRange().ClampPoint(
-              CSSPoint::FromAppUnits(nsPoint(mXAxisModel.GetDestination(),
-                                             mYAxisModel.GetDestination()))));
+      aFrameMetrics.ClampAndSetScrollOffset(
+          CSSPoint::FromAppUnits(nsPoint(mXAxisModel.GetDestination(),
+                                         mYAxisModel.GetDestination())));
       return false;
     }
 
@@ -1071,6 +1085,27 @@ void AsyncPanZoomController::HandleTouchVelocity(uint32_t aTimesampMs, float aSp
   mY.HandleTouchVelocity(aTimesampMs, aSpeedY);
 }
 
+void AsyncPanZoomController::StartAutoscroll(const ScreenPoint& aPoint)
+{
+  // Cancel any existing animation.
+  CancelAnimation();
+
+  SetState(AUTOSCROLL);
+  StartAnimation(new AutoscrollAnimation(*this, aPoint));
+
+  // Notify content that we are handlng the autoscroll.
+  if (RefPtr<GeckoContentController> controller = GetGeckoContentController()) {
+    controller->NotifyAutoscrollHandledByAPZ(mFrameMetrics.GetScrollId());
+  }
+}
+
+void AsyncPanZoomController::StopAutoscroll()
+{
+  if (mState == AUTOSCROLL) {
+    CancelAnimation(TriggeredExternally);
+  }
+}
+
 nsEventStatus AsyncPanZoomController::OnTouchStart(const MultiTouchInput& aEvent) {
   APZC_LOG("%p got a touch-start in state %d\n", this, mState);
   mPanDirRestricted = false;
@@ -1084,6 +1119,7 @@ nsEventStatus AsyncPanZoomController::OnTouchStart(const MultiTouchInput& aEvent
     case WHEEL_SCROLL:
     case KEYBOARD_SCROLL:
     case PAN_MOMENTUM:
+    case AUTOSCROLL:
       MOZ_ASSERT(GetCurrentTouchBlock());
       GetCurrentTouchBlock()->GetOverscrollHandoffChain()->CancelAnimations(ExcludeOverscroll);
       MOZ_FALLTHROUGH;
@@ -1160,6 +1196,7 @@ nsEventStatus AsyncPanZoomController::OnTouchMove(const MultiTouchInput& aEvent)
     case WHEEL_SCROLL:
     case KEYBOARD_SCROLL:
     case OVERSCROLL_ANIMATION:
+    case AUTOSCROLL:
       // Should not receive a touch-move in the OVERSCROLL_ANIMATION state
       // as touch blocks that begin in an overscrolled state cancel the
       // animation. The same is true for wheel scroll animations.
@@ -1241,6 +1278,7 @@ nsEventStatus AsyncPanZoomController::OnTouchEnd(const MultiTouchInput& aEvent) 
   case WHEEL_SCROLL:
   case KEYBOARD_SCROLL:
   case OVERSCROLL_ANIMATION:
+  case AUTOSCROLL:
     // Should not receive a touch-end in the OVERSCROLL_ANIMATION state
     // as touch blocks that begin in an overscrolled state cancel the
     // animation. The same is true for WHEEL_SCROLL.
@@ -1709,20 +1747,45 @@ AsyncPanZoomController::OnKeyboard(const KeyboardInput& aEvent)
 
   // Calculate the destination for this keyboard scroll action
   CSSPoint destination = GetKeyboardDestination(aEvent.mAction);
-  nsIScrollableFrame::ScrollUnit scrollUnit = KeyboardScrollAction::GetScrollUnit(aEvent.mAction.mType);
+  bool scrollSnapped = MaybeAdjustDestinationForScrollSnapping(aEvent, destination);
+
+  // If smooth scrolling is disabled, then scroll immediately to the destination
+  if (!gfxPrefs::SmoothScrollEnabled()) {
+    CancelAnimation();
+
+    // CallDispatchScroll interprets the start and end points as the start and
+    // end of a touch scroll so they need to be reversed.
+    ParentLayerPoint startPoint = destination * mFrameMetrics.GetZoom();
+    ParentLayerPoint endPoint = mFrameMetrics.GetScrollOffset() * mFrameMetrics.GetZoom();
+    ParentLayerPoint delta = endPoint - startPoint;
+
+    ScreenPoint distance = ToScreenCoordinates(
+        ParentLayerPoint(fabs(delta.x), fabs(delta.y)), startPoint);
+
+    OverscrollHandoffState handoffState(
+        *mInputQueue->GetCurrentKeyboardBlock()->GetOverscrollHandoffChain(),
+        distance,
+        ScrollSource::Keyboard);
+
+    CallDispatchScroll(startPoint, endPoint, handoffState);
+
+    SetState(NOTHING);
+
+    return nsEventStatus_eConsumeDoDefault;
+  }
 
   // The lock must be held across the entire update operation, so the
   // compositor doesn't end the animation before we get a chance to
   // update it.
   ReentrantMonitorAutoEnter lock(mMonitor);
 
-  if (Maybe<CSSPoint> snapPoint = FindSnapPointNear(destination, scrollUnit)) {
+  if (scrollSnapped) {
     // If we're scroll snapping, use a smooth scroll animation to get
     // the desired physics. Note that SmoothScrollTo() will re-use an
     // existing smooth scroll animation if there is one.
-    APZC_LOG("%p keyboard scrolling to snap point %s\n", this, Stringify(*snapPoint).c_str());
-    SmoothScrollTo(*snapPoint);
-    return nsEventStatus_eConsumeNoDefault;
+    APZC_LOG("%p keyboard scrolling to snap point %s\n", this, Stringify(destination).c_str());
+    SmoothScrollTo(destination);
+    return nsEventStatus_eConsumeDoDefault;
   }
 
   // Use a keyboard scroll animation to scroll, reusing an existing one if it exists
@@ -1747,7 +1810,7 @@ AsyncPanZoomController::OnKeyboard(const KeyboardInput& aEvent)
                                CSSPixel::ToAppUnits(destination),
                                nsSize(velocity.x, velocity.y));
 
-  return nsEventStatus_eConsumeNoDefault;
+  return nsEventStatus_eConsumeDoDefault;
 }
 
 CSSPoint
@@ -2850,6 +2913,10 @@ void AsyncPanZoomController::CancelAnimation(CancelAnimationFlags aFlags) {
     return;
   }
 
+  if (mAnimation) {
+    mAnimation->Cancel(aFlags);
+  }
+
   SetState(NOTHING);
   mAnimation = nullptr;
   // Since there is no animation in progress now the axes should
@@ -2915,6 +2982,10 @@ void AsyncPanZoomController::AdjustScrollForSurfaceShift(const ScreenPoint& aShi
 
 void AsyncPanZoomController::ScrollBy(const CSSPoint& aOffset) {
   mFrameMetrics.ScrollBy(aOffset);
+}
+
+void AsyncPanZoomController::ScrollByAndClamp(const CSSPoint& aOffset) {
+  mFrameMetrics.ClampAndSetScrollOffset(mFrameMetrics.GetScrollOffset() + aOffset);
 }
 
 void AsyncPanZoomController::ScaleWithFocus(float aScale,
@@ -3789,9 +3860,7 @@ void AsyncPanZoomController::NotifyLayersUpdated(const ScrollMetadata& aScrollMe
       // Even if we didn't accept a new scroll offset from content, the
       // scrollable rect may have changed in a way that makes our local
       // scroll offset out of bounds, so re-clamp it.
-      mFrameMetrics.SetScrollOffset(
-          mFrameMetrics.CalculateScrollRange().ClampPoint(
-              mFrameMetrics.GetScrollOffset()));
+      mFrameMetrics.ClampAndSetScrollOffset(mFrameMetrics.GetScrollOffset());
     }
   }
 
@@ -4315,6 +4384,21 @@ bool AsyncPanZoomController::MaybeAdjustDeltaForScrollSnapping(
   if (Maybe<CSSPoint> snapPoint = FindSnapPointNear(destination, unit)) {
     aDelta = (*snapPoint - aStartPosition) * zoom;
     aStartPosition = *snapPoint;
+    return true;
+  }
+  return false;
+}
+
+bool AsyncPanZoomController::MaybeAdjustDestinationForScrollSnapping(
+    const KeyboardInput& aEvent,
+    CSSPoint& aDestination)
+{
+  ReentrantMonitorAutoEnter lock(mMonitor);
+  nsIScrollableFrame::ScrollUnit unit =
+      KeyboardScrollAction::GetScrollUnit(aEvent.mAction.mType);
+
+  if (Maybe<CSSPoint> snapPoint = FindSnapPointNear(aDestination, unit)) {
+    aDestination = *snapPoint;
     return true;
   }
   return false;

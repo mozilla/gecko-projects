@@ -334,7 +334,7 @@ void InvalidateImagesCallback(nsIFrame* aFrame,
 
   if (nsLayoutUtils::InvalidationDebuggingIsEnabled()) {
     printf_stderr("Invalidating display item(type=%d) based on frame %p \
-      because it might contain an invalidated image\n", type, aFrame);
+      because it might contain an invalidated image\n", static_cast<uint32_t>(type), aFrame);
   }
   aItem->Invalidate();
   aFrame->SchedulePaint();

@@ -35,6 +35,7 @@ class BaseNavigationTestCase(WindowManagerMixin, MarionetteTestCase):
         self.test_page_frameset = self.marionette.absolute_url("frameset.html")
         self.test_page_insecure = self.fixtures.where_is("test.html", on="https")
         self.test_page_not_remote = "about:robots"
+        self.test_page_push_state = self.marionette.absolute_url("navigation_pushstate.html")
         self.test_page_remote = self.marionette.absolute_url("test.html")
         self.test_page_slow_resource = self.marionette.absolute_url("slow_resource.html")
 
@@ -212,6 +213,39 @@ class TestNavigate(BaseNavigationTestCase):
         self.marionette.find_element(By.ID, "foo")
         self.marionette.navigate(test_page.lower())
         self.marionette.find_element(By.ID, "foo")
+
+    def test_navigate_history_pushstate(self):
+        target_page = self.marionette.absolute_url("navigation_pushstate_target.html")
+
+        self.marionette.navigate(self.test_page_push_state)
+        self.marionette.find_element(By.ID, "forward").click()
+
+        # By using pushState() the URL is updated but the target page is not loaded
+        # and as such the element is not displayed
+        self.assertEqual(self.marionette.get_url(), target_page)
+        with self.assertRaises(errors.NoSuchElementException):
+            self.marionette.find_element(By.ID, "target")
+
+        self.marionette.go_back()
+        self.assertEqual(self.marionette.get_url(), self.test_page_push_state)
+
+        # The target page still gets not loaded
+        self.marionette.go_forward()
+        self.assertEqual(self.marionette.get_url(), target_page)
+        with self.assertRaises(errors.NoSuchElementException):
+            self.marionette.find_element(By.ID, "target")
+
+        # Navigating to a different page, and returning to the injected
+        # page, it will be loaded.
+        self.marionette.navigate(self.test_page_remote)
+        self.assertEqual(self.marionette.get_url(), self.test_page_remote)
+
+        self.marionette.go_back()
+        self.assertEqual(self.marionette.get_url(), target_page)
+        self.marionette.find_element(By.ID, "target")
+
+        self.marionette.go_back()
+        self.assertEqual(self.marionette.get_url(), self.test_page_push_state)
 
     @skip_if_mobile("Test file is only located on host machine")
     def test_navigate_file_url(self):
@@ -579,6 +613,26 @@ class TestRefresh(BaseNavigationTestCase):
         self.marionette.refresh()
         self.assertEqual(image, self.marionette.get_url())
 
+    def test_history_pushstate(self):
+        target_page = self.marionette.absolute_url("navigation_pushstate_target.html")
+
+        self.marionette.navigate(self.test_page_push_state)
+        self.marionette.find_element(By.ID, "forward").click()
+
+        # By using pushState() the URL is updated but the target page is not loaded
+        # and as such the element is not displayed
+        self.assertEqual(self.marionette.get_url(), target_page)
+        with self.assertRaises(errors.NoSuchElementException):
+            self.marionette.find_element(By.ID, "target")
+
+        # Refreshing the target page will trigger a full page load.
+        self.marionette.refresh()
+        self.assertEqual(self.marionette.get_url(), target_page)
+        self.marionette.find_element(By.ID, "target")
+
+        self.marionette.go_back()
+        self.assertEqual(self.marionette.get_url(), self.test_page_push_state)
+
     def test_timeout_error(self):
         slow_page = self.marionette.absolute_url("slow?delay=3")
 
@@ -609,8 +663,7 @@ class TestTLSNavigation(MarionetteTestCase):
         self.test_page_insecure = self.fixtures.where_is("test.html", on="https")
 
         self.marionette.delete_session()
-        self.capabilities = self.marionette.start_session(
-            {"requiredCapabilities": self.insecure_tls})
+        self.capabilities = self.marionette.start_session(self.insecure_tls)
 
     def tearDown(self):
         try:
@@ -623,8 +676,7 @@ class TestTLSNavigation(MarionetteTestCase):
     @contextlib.contextmanager
     def safe_session(self):
         try:
-            self.capabilities = self.marionette.start_session(
-                {"requiredCapabilities": self.secure_tls})
+            self.capabilities = self.marionette.start_session(self.secure_tls)
             self.assertFalse(self.capabilities["acceptInsecureCerts"])
             yield self.marionette
         finally:
@@ -633,8 +685,7 @@ class TestTLSNavigation(MarionetteTestCase):
     @contextlib.contextmanager
     def unsafe_session(self):
         try:
-            self.capabilities = self.marionette.start_session(
-                {"requiredCapabilities": self.insecure_tls})
+            self.capabilities = self.marionette.start_session(self.insecure_tls)
             self.assertTrue(self.capabilities["acceptInsecureCerts"])
             yield self.marionette
         finally:
@@ -679,7 +730,7 @@ class TestPageLoadStrategy(BaseNavigationTestCase):
 
     def test_none(self):
         self.marionette.delete_session()
-        self.marionette.start_session({"desiredCapabilities": {"pageLoadStrategy": "none"}})
+        self.marionette.start_session({"pageLoadStrategy": "none"})
 
         # With a strategy of "none" there should be no wait for the page load, and the
         # current load state is unknown. So only test that the command executes successfully.
@@ -688,7 +739,7 @@ class TestPageLoadStrategy(BaseNavigationTestCase):
     @skip_if_mobile("Disabling due to message passing slowness on Android.")
     def test_eager(self):
         self.marionette.delete_session()
-        self.marionette.start_session({"desiredCapabilities": {"pageLoadStrategy": "eager"}})
+        self.marionette.start_session({"pageLoadStrategy": "eager"})
 
         self.marionette.navigate(self.test_page_slow_resource)
         self.assertEqual("interactive", self.ready_state)
@@ -697,7 +748,7 @@ class TestPageLoadStrategy(BaseNavigationTestCase):
 
     def test_normal(self):
         self.marionette.delete_session()
-        self.marionette.start_session({"desiredCapabilities": {"pageLoadStrategy": "normal"}})
+        self.marionette.start_session({"pageLoadStrategy": "normal"})
 
         self.marionette.navigate(self.test_page_slow_resource)
         self.assertEqual(self.test_page_slow_resource, self.marionette.get_url())
@@ -708,7 +759,7 @@ class TestPageLoadStrategy(BaseNavigationTestCase):
     def test_strategy_after_remoteness_change(self):
         """Bug 1378191 - Reset of capabilities after listener reload"""
         self.marionette.delete_session()
-        self.marionette.start_session({"desiredCapabilities": {"pageLoadStrategy": "eager"}})
+        self.marionette.start_session({"pageLoadStrategy": "eager"})
 
         # Trigger a remoteness change which will reload the listener script
         self.assertTrue(self.is_remote_tab, "Initial tab doesn't have remoteness flag set")

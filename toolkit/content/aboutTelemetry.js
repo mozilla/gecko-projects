@@ -170,7 +170,7 @@ function removeAllChildNodes(node) {
  * Pad a number to two digits with leading "0".
  */
 function padToTwoDigits(n) {
-  return new String(n).padStart(2, "0");
+  return String(n).padStart(2, "0");
 }
 
 /**
@@ -397,7 +397,10 @@ var PingPicker = {
     // This can happen on new profiles or if the ping archive is disabled.
     let archivedPingList = await TelemetryArchive.promiseArchivedPingList();
     let sourceArchived = document.getElementById("ping-source-archive");
-    sourceArchived.disabled = (archivedPingList.length == 0);
+    let sourceArchivedContainer = document.getElementById("ping-source-archive-container");
+    let archivedDisabled = (archivedPingList.length == 0);
+    sourceArchived.disabled = archivedDisabled;
+    sourceArchivedContainer.classList.toggle("disabled", archivedDisabled);
 
     if (currentChanged) {
       if (this.viewCurrentPingData) {
@@ -991,14 +994,20 @@ var StackRenderer = {
   }
 };
 
-var RawPayload = {
+var RawPayloadData = {
   /**
-   * Renders the raw payload
+   * Renders the raw pyaload.
    */
   render(aPing) {
-    setHasData("raw-ping-data-section", true);
-    let pre = document.getElementById("raw-ping-data");
-    pre.textContent = JSON.stringify(aPing, null, 2);
+    setHasData("raw-payload-section", true);
+    let pre = document.getElementById("raw-payload-data");
+    pre.textContent = JSON.stringify(aPing.payload, null, 2);
+  },
+
+  attachObservers() {
+    document.getElementById("payload-json-viewer").addEventListener("click", (e) => {
+      openJsonInFirefoxJsonViewer(JSON.stringify(gPingData.payload, null, 2));
+    });
   }
 };
 
@@ -1862,7 +1871,7 @@ function adjustSearchState() {
   let selectedSection = document.querySelector("section.active").id;
   let blacklist = [
     "home-section",
-    "raw-ping-data-section"
+    "raw-payload-section"
   ];
   // TODO: Implement global search for the Home section
   let search = document.getElementById("search");
@@ -1890,13 +1899,18 @@ function changeUrlPath(selectedSection, subSection) {
  * Change the section displayed
  */
 function show(selected) {
+  let selectedValue = selected.getAttribute("value");
+  if (selectedValue === "raw-json-viewer") {
+    openJsonInFirefoxJsonViewer(JSON.stringify(gPingData, null, 2));
+    return;
+  }
+
   let current_button = document.querySelector(".category.selected");
   current_button.classList.remove("selected");
   selected.classList.add("selected");
   // Hack because subsection text appear selected. See Bug 1375114.
   document.getSelection().empty();
 
-  let selectedValue = selected.getAttribute("value");
   let current_section = document.querySelector("section.active");
   let selected_section = document.getElementById(selectedValue);
   if (current_section == selected_section)
@@ -1940,6 +1954,7 @@ function showSubSection(selected) {
 function setupListeners() {
   Settings.attachObservers();
   PingPicker.attachObservers();
+  RawPayloadData.attachObservers();
 
   let menu = document.getElementById("categories");
   menu.addEventListener("click", (e) => {
@@ -2044,6 +2059,10 @@ function urlStateRestore() {
   }
 }
 
+function openJsonInFirefoxJsonViewer(json) {
+  window.open("data:application/json;base64," + btoa(json));
+}
+
 function onLoad() {
   window.removeEventListener("load", onLoad);
 
@@ -2093,7 +2112,8 @@ var HistogramSection = {
 
     if (hgramsProcess === "parent") {
       histograms = aPayload.histograms;
-    } else if ("processes" in aPayload && hgramsProcess in aPayload.processes) {
+    } else if ("processes" in aPayload && hgramsProcess in aPayload.processes &&
+               "histograms" in aPayload.processes[hgramsProcess]) {
       histograms = aPayload.processes[hgramsProcess].histograms;
     }
 
@@ -2126,7 +2146,8 @@ var KeyedHistogramSection = {
     let keyedHgramsProcess = keyedHgramsOption.getAttribute("value");
     if (keyedHgramsProcess === "parent") {
       keyedHistograms = aPayload.keyedHistograms;
-    } else if ("processes" in aPayload && keyedHgramsProcess in aPayload.processes) {
+    } else if ("processes" in aPayload && keyedHgramsProcess in aPayload.processes &&
+               "keyedHistograms" in aPayload.processes[keyedHgramsProcess]) {
       keyedHistograms = aPayload.processes[keyedHgramsProcess].keyedHistograms;
     }
 
@@ -2189,7 +2210,7 @@ var SimpleMeasurements = {
   sortStartupMilestones(aSimpleMeasurements) {
     const telemetryTimestamps = TelemetryTimestamps.get();
     let startupEvents = Services.startup.getStartupInfo();
-    delete startupEvents["process"];
+    delete startupEvents.process;
 
     function keyIsMilestone(k) {
       return (k in startupEvents) || (k in telemetryTimestamps);
@@ -2287,25 +2308,27 @@ function renderPayloadList(ping) {
 function togglePingSections(isMainPing) {
   // We always show the sections that are "common" to all pings.
   let commonSections = new Set(["heading",
-                                "home",
+                                "home-section",
                                 "general-data-section",
                                 "environment-data-section",
-                                "raw-ping-data-section"]);
+                                "raw-json-viewer"]);
 
   let elements = document.querySelectorAll(".category");
   for (let section of elements) {
     if (commonSections.has(section.getAttribute("value"))) {
       continue;
     }
-    section.classList.toggle("has-data", isMainPing);
+    // Only show the raw payload for non main ping.
+    if (section.getAttribute("value") == "raw-payload-section") {
+      section.classList.toggle("has-data", !isMainPing);
+    } else {
+      section.classList.toggle("has-data", isMainPing);
+    }
   }
 }
 
 function displayPingData(ping, updatePayloadList = false) {
   gPingData = ping;
-  // Render raw ping data.
-  RawPayload.render(ping);
-
   try {
     PingPicker.render();
     displayRichPingData(ping, updatePayloadList);
@@ -2328,6 +2351,8 @@ function displayRichPingData(ping, updatePayloadList) {
 
   // Show environment data.
   EnvironmentData.render(ping);
+
+  RawPayloadData.render(ping);
 
   // We only have special rendering code for the payloads from "main" pings.
   // For any other pings we just render the raw JSON payload.

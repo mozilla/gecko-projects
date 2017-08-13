@@ -11,31 +11,24 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/AppConstants.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PanelWideWidgetTracker",
-  "resource:///modules/PanelWideWidgetTracker.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "SearchWidgetTracker",
-  "resource:///modules/SearchWidgetTracker.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "CustomizableWidgets",
-  "resource:///modules/CustomizableWidgets.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "DeferredTask",
-  "resource://gre/modules/DeferredTask.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-  "resource://gre/modules/PrivateBrowsingUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetters(this, {
+  PanelWideWidgetTracker: "resource:///modules/PanelWideWidgetTracker.jsm",
+  SearchWidgetTracker: "resource:///modules/SearchWidgetTracker.jsm",
+  CustomizableWidgets: "resource:///modules/CustomizableWidgets.jsm",
+  DeferredTask: "resource://gre/modules/DeferredTask.jsm",
+  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
+  ShortcutUtils: "resource://gre/modules/ShortcutUtils.jsm",
+  LightweightThemeManager: "resource://gre/modules/LightweightThemeManager.jsm",
+});
+
 XPCOMUtils.defineLazyGetter(this, "gWidgetsBundle", function() {
   const kUrl = "chrome://browser/locale/customizableui/customizableWidgets.properties";
   return Services.strings.createBundle(kUrl);
 });
-XPCOMUtils.defineLazyModuleGetter(this, "ShortcutUtils",
-  "resource://gre/modules/ShortcutUtils.jsm");
+
 XPCOMUtils.defineLazyServiceGetter(this, "gELS",
   "@mozilla.org/eventlistenerservice;1", "nsIEventListenerService");
-XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
-                                  "resource://gre/modules/LightweightThemeManager.jsm");
-XPCOMUtils.defineLazyPreferenceGetter(this, "gPhotonStructure", "browser.photon.structure.enabled", false,
-  (pref, oldValue, newValue) => {
-    CustomizableUIInternal._updateAreasForPhoton();
-    CustomizableUIInternal.notifyListeners("onPhotonChanged");
-  });
 
 const kNSXUL = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
@@ -64,7 +57,7 @@ const kSubviewEvents = [
  * The current version. We can use this to auto-add new default widgets as necessary.
  * (would be const but isn't because of testing purposes)
  */
-var kVersion = 6;
+var kVersion = 10;
 
 /**
  * Buttons removed from built-ins by version they were removed. kVersion must be
@@ -188,80 +181,35 @@ var CustomizableUIInternal = {
     this._introduceNewBuiltinWidgets();
     this._markObsoleteBuiltinButtonsSeen();
 
-    /**
-     * Please be advised that adding items to the panel by default could
-     * cause CART talos test regressions. This might happen when the
-     * number of items in the panel causes the area to become "scrollable"
-     * during the last phases of the transition. See bug 1230671 for an
-     * example of this. Be sure that what you're adding really needs to go
-     * into the panel by default, and if it does, consider swapping
-     * something out for it.
-     */
-    let panelPlacements = [
-      "edit-controls",
-      "zoom-controls",
-      "new-window-button",
-      "privatebrowsing-button",
-      "save-page-button",
-      "print-button",
-      "history-panelmenu",
-      "fullscreen-button",
-      "find-button",
-      "preferences-button",
-      "add-ons-button",
-      "sync-button",
-    ];
-
-    if (!AppConstants.MOZ_DEV_EDITION) {
-      panelPlacements.splice(-1, 0, "developer-button");
-    }
-
-    if (AppConstants.E10S_TESTING_ONLY) {
-      if (gPalette.has("e10s-button")) {
-        let newWindowIndex = panelPlacements.indexOf("new-window-button");
-        if (newWindowIndex > -1) {
-          panelPlacements.splice(newWindowIndex + 1, 0, "e10s-button");
-        }
-      }
-    }
-
-    let showCharacterEncoding = Services.prefs.getComplexValue(
-      "browser.menu.showCharacterEncoding",
-      Ci.nsIPrefLocalizedString
-    ).data;
-    if (showCharacterEncoding == "true") {
-      panelPlacements.push("characterencoding-button");
-    }
-
-    if (AppConstants.MOZ_DEV_EDITION || AppConstants.NIGHTLY_BUILD) {
-      if (Services.prefs.getBoolPref("extensions.webcompat-reporter.enabled")) {
-        panelPlacements.push("webcompat-reporter-button");
-      }
-    }
-
-    gDefaultPanelPlacements = panelPlacements;
-    this._updateAreasForPhoton();
+    this.registerArea(CustomizableUI.AREA_FIXED_OVERFLOW_PANEL, {
+      type: CustomizableUI.TYPE_MENU_PANEL,
+      defaultPlacements: [],
+      anchor: "nav-bar-overflow-button",
+    }, true);
 
     let navbarPlacements = [
+      "back-button",
+      "forward-button",
+      "stop-reload-button",
+      "home-button",
+      "spring",
       "urlbar-container",
       "search-container",
-      "bookmarks-menu-button",
+      "spring",
       "downloads-button",
-      "home-button",
+      "library-button",
+      "sidebar-button",
     ];
 
-    if (AppConstants.MOZ_PHOTON_THEME) {
-      navbarPlacements.push("sidebar-button");
-    }
     if (AppConstants.MOZ_DEV_EDITION) {
       navbarPlacements.splice(2, 0, "developer-button");
     }
 
     // Place this last, when createWidget is called for pocket, it will
     // append to the toolbar.
-    if (Services.prefs.getPrefType("extensions.pocket.enabled") != Services.prefs.PREF_INVALID &&
-        Services.prefs.getBoolPref("extensions.pocket.enabled")) {
-        navbarPlacements.push("pocket-button");
+    if (Services.prefs.getBoolPref("extensions.pocket.enabled", false) &&
+        Services.prefs.getBoolPref("extensions.pocket.disablePageAction", false)) {
+      navbarPlacements.push("pocket-button");
     }
 
     this.registerArea(CustomizableUI.AREA_NAVBAR, {
@@ -302,53 +250,7 @@ var CustomizableUIInternal = {
       defaultCollapsed: true,
     }, true);
 
-    this.registerArea(CustomizableUI.AREA_ADDONBAR, {
-      type: CustomizableUI.TYPE_TOOLBAR,
-      legacy: true,
-      defaultPlacements: ["addonbar-closebutton", "status-bar"],
-      defaultCollapsed: false,
-    }, true);
-
     SearchWidgetTracker.init();
-  },
-
-  _updatePanelContextMenuLocation(window) {
-    let panelID = gPhotonStructure ? "widget-overflow" : "PanelUI-popup";
-    let contextMenu = window.document.getElementById("customizationPanelItemContextMenu");
-    window.document.getElementById(panelID).appendChild(contextMenu);
-  },
-
-  _updateAreasForPhoton() {
-    for (let [win, ] of gBuildWindows) {
-      this._updatePanelContextMenuLocation(win);
-    }
-
-    if (gPhotonStructure) {
-      if (gAreas.has(CustomizableUI.AREA_PANEL)) {
-        this.unregisterArea(CustomizableUI.AREA_PANEL, true);
-      }
-      this.registerArea(CustomizableUI.AREA_FIXED_OVERFLOW_PANEL, {
-        type: CustomizableUI.TYPE_MENU_PANEL,
-        defaultPlacements: [],
-        anchor: "nav-bar-overflow-button",
-      }, true);
-    } else {
-      if (gAreas.has(CustomizableUI.AREA_FIXED_OVERFLOW_PANEL)) {
-        this.unregisterArea(CustomizableUI.AREA_FIXED_OVERFLOW_PANEL, true);
-      }
-      // In tests we destroy some widgets. Those should be removed from the
-      // default placements when re-registering the panel.
-      let placementsToUse = Array.from(gDefaultPanelPlacements);
-      if (!gPalette.has("e10s-button") && placementsToUse.includes("e10s-button")) {
-        placementsToUse.splice(placementsToUse.indexOf("e10s-button"), 1);
-      }
-      this.registerArea(CustomizableUI.AREA_PANEL, {
-        anchor: "PanelUI-menu-button",
-        type: CustomizableUI.TYPE_MENU_PANEL,
-        defaultPlacements: placementsToUse,
-      }, true);
-      PanelWideWidgetTracker.init();
-    }
   },
 
   get _builtinToolbars() {
@@ -356,7 +258,6 @@ var CustomizableUIInternal = {
       CustomizableUI.AREA_NAVBAR,
       CustomizableUI.AREA_BOOKMARKS,
       CustomizableUI.AREA_TABSTRIP,
-      CustomizableUI.AREA_ADDONBAR,
     ]);
     if (AppConstants.platform != "macosx") {
       toolbars.add(CustomizableUI.AREA_MENUBAR);
@@ -423,6 +324,104 @@ var CustomizableUIInternal = {
 
     if (currentVersion < 4) {
       CustomizableUI.removeWidgetFromArea("loop-button-throttled");
+    }
+
+    if (currentVersion < 7 && gSavedState && gSavedState.placements &&
+        gSavedState.placements[CustomizableUI.AREA_NAVBAR]) {
+      let placements = gSavedState.placements[CustomizableUI.AREA_NAVBAR];
+      let newPlacements = ["back-button", "forward-button", "stop-reload-button", "home-button"];
+      for (let button of placements) {
+        if (!newPlacements.includes(button)) {
+          newPlacements.push(button);
+        }
+      }
+
+      if (!newPlacements.includes("sidebar-button")) {
+        newPlacements.push("sidebar-button");
+      }
+
+      gSavedState.placements[CustomizableUI.AREA_NAVBAR] = newPlacements;
+    }
+
+    if (currentVersion < 8 && gSavedState.placements &&
+        gSavedState.placements["PanelUI-contents"]) {
+      let savedPanelPlacements = gSavedState.placements["PanelUI-contents"];
+      delete gSavedState.placements["PanelUI-contents"];
+      let defaultPlacements = [
+        "edit-controls",
+        "zoom-controls",
+        "new-window-button",
+        "privatebrowsing-button",
+        "save-page-button",
+        "print-button",
+        "history-panelmenu",
+        "fullscreen-button",
+        "find-button",
+        "preferences-button",
+        "add-ons-button",
+        "sync-button",
+        "e10s-button",
+      ];
+
+      if (!AppConstants.MOZ_DEV_EDITION) {
+        defaultPlacements.splice(-1, 0, "developer-button");
+      }
+
+      let showCharacterEncoding = Services.prefs.getComplexValue(
+        "browser.menu.showCharacterEncoding",
+        Ci.nsIPrefLocalizedString
+      ).data;
+      if (showCharacterEncoding == "true") {
+        defaultPlacements.push("characterencoding-button");
+      }
+
+      savedPanelPlacements = savedPanelPlacements.filter(id => defaultPlacements.includes(id));
+      if (savedPanelPlacements.length) {
+        gSavedState.placements[this.AREA_FIXED_OVERFLOW_PANEL] = savedPanelPlacements;
+      }
+    }
+
+    if (currentVersion < 9 && gSavedState.placements && gSavedState.placements["nav-bar"]) {
+      let placements = gSavedState.placements["nav-bar"];
+      if (placements.includes("urlbar-container")) {
+        let urlbarIndex = placements.indexOf("urlbar-container");
+        let secondSpringIndex = urlbarIndex + 1;
+        // Insert if there isn't already a spring before the urlbar
+        if (urlbarIndex == 0 || !placements[urlbarIndex - 1].startsWith(kSpecialWidgetPfx + "spring")) {
+          placements.splice(urlbarIndex, 0, "spring");
+          // The url bar is now 1 index later, so increment the insertion point for
+          // the second spring.
+          secondSpringIndex++;
+        }
+        // If the search container is present, insert after the search container
+        // instead of after the url bar
+        let searchContainerIndex = placements.indexOf("search-container");
+        if (searchContainerIndex != -1) {
+          secondSpringIndex = searchContainerIndex + 1;
+        }
+        if (secondSpringIndex == placements.length ||
+            !placements[secondSpringIndex].startsWith(kSpecialWidgetPfx + "spring")) {
+          placements.splice(secondSpringIndex, 0, "spring");
+        }
+      }
+
+      // Finally, replace the bookmarks menu button with the library one if present
+      if (placements.includes("bookmarks-menu-button")) {
+        let bmbIndex = placements.indexOf("bookmarks-menu-button");
+        placements.splice(bmbIndex, 1);
+        let downloadButtonIndex = placements.indexOf("downloads-button");
+        let libraryIndex = downloadButtonIndex == -1 ? bmbIndex : (downloadButtonIndex + 1);
+        placements.splice(libraryIndex, 0, "library-button");
+      }
+    }
+
+    if (currentVersion < 10 && gSavedState && gSavedState.placements) {
+      for (let placements of Object.values(gSavedState.placements)) {
+        if (placements.includes("webcompat-reporter-button")) {
+          placements.splice(placements.indexOf("webcompat-reporter-button"), 1);
+          break;
+        }
+      }
     }
   },
 
@@ -555,7 +554,7 @@ var CustomizableUIInternal = {
     if (props.get("type") == CustomizableUI.TYPE_TOOLBAR) {
       // Check aProperties instead of props because this check is only interested
       // in the passed arguments, not the state of a potentially pre-existing area.
-      if (!aInternalCaller && aProperties["defaultCollapsed"]) {
+      if (!aInternalCaller && aProperties.defaultCollapsed) {
         throw new Error("defaultCollapsed is only allowed for default toolbars.")
       }
       if (!props.has("defaultCollapsed")) {
@@ -748,7 +747,8 @@ var CustomizableUIInternal = {
           currentNode = currentNode.nextSibling;
         }
 
-        if (currentNode && currentNode.id == id) {
+        if (currentNode &&
+            (currentNode.id == id || this.matchingSpecials(id, currentNode.id))) {
           currentNode = currentNode.nextSibling;
           continue;
         }
@@ -784,13 +784,6 @@ var CustomizableUIInternal = {
         }
 
         this.ensureButtonContextMenu(node, aAreaNode);
-        if (node.localName == "toolbarbutton") {
-          if (areaIsPanel && !gPhotonStructure) {
-            node.setAttribute("wrap", "true");
-          } else {
-            node.removeAttribute("wrap");
-          }
-        }
 
         // This needs updating in case we're resetting / undoing a reset.
         if (widget) {
@@ -971,9 +964,6 @@ var CustomizableUIInternal = {
         continue;
       }
       this.ensureButtonContextMenu(child, aPanelContents, true);
-      if (!gPhotonStructure) {
-        child.setAttribute("wrap", "true");
-      }
     }
 
     this.registerBuildArea(aArea, aPanelContents);
@@ -1025,7 +1015,6 @@ var CustomizableUIInternal = {
       this.removeLocationAttributes(widgetNode);
       // We also need to remove the panel context menu if it's there:
       this.ensureButtonContextMenu(widgetNode);
-      widgetNode.removeAttribute("wrap");
       if (gPalette.has(aWidgetId) || this.isSpecialWidget(aWidgetId)) {
         container.removeChild(widgetNode);
       } else {
@@ -1089,7 +1078,6 @@ var CustomizableUIInternal = {
 
       aWindow.addEventListener("unload", this);
       aWindow.addEventListener("command", this, true);
-      this._updatePanelContextMenuLocation(aWindow);
 
       this.notifyListeners("onWindowOpened", aWindow);
     }
@@ -1198,9 +1186,6 @@ var CustomizableUIInternal = {
     let areaId = aAreaNode.id;
     if (isNew) {
       this.ensureButtonContextMenu(widgetNode, aAreaNode);
-      if (widgetNode.localName == "toolbarbutton" && areaId == CustomizableUI.AREA_PANEL) {
-        widgetNode.setAttribute("wrap", "true");
-      }
     }
 
     let [insertionContainer, nextNode] = this.findInsertionPoints(widgetNode, aAreaNode);
@@ -1280,6 +1265,12 @@ var CustomizableUIInternal = {
             aId.startsWith("separator") ||
             aId.startsWith("spring") ||
             aId.startsWith("spacer"));
+  },
+
+  matchingSpecials(aId1, aId2) {
+    return this.isSpecialWidget(aId1) &&
+           this.isSpecialWidget(aId2) &&
+           aId1.match(/spring|spacer|separator/)[0] == aId2.match(/spring|spacer|separator/)[0];
   },
 
   ensureSpecialWidgetId(aId) {
@@ -1434,15 +1425,7 @@ var CustomizableUIInternal = {
           // PanelUI relies on the .PanelUI-subView class to be able to show only
           // one sub-view at a time.
           viewNode.classList.add("PanelUI-subView");
-
-          for (let eventName of kSubviewEvents) {
-            let handler = "on" + eventName;
-            if (typeof aWidget[handler] == "function") {
-              viewNode.addEventListener(eventName, aWidget[handler]);
-            }
-          }
-
-          log.debug("Widget " + aWidget.id + " showing and hiding event handlers set.");
+          this.ensureSubviewListeners(viewNode);
         } else {
           log.error("Could not find the view node with id: " + aWidget.viewId +
                     ", for widget: " + aWidget.id + ".");
@@ -1456,6 +1439,25 @@ var CustomizableUIInternal = {
 
     aWidget.instances.set(aDocument, node);
     return node;
+  },
+
+  ensureSubviewListeners(viewNode) {
+    if (viewNode._addedEventListeners) {
+      return;
+    }
+    let viewId = viewNode.id;
+    let widget = [...gPalette.values()].find(w => w.viewId == viewId);
+    if (!widget) {
+      return;
+    }
+    for (let eventName of kSubviewEvents) {
+      let handler = "on" + eventName;
+      if (typeof widget[handler] == "function") {
+        viewNode.addEventListener(eventName, widget[handler]);
+      }
+    }
+    viewNode._addedEventListeners = true;
+    log.debug("Widget " + widget.id + " showing and hiding event handlers set.");
   },
 
   getLocalizedProperty(aWidget, aProp, aFormatArgs, aDef) {
@@ -1480,6 +1482,9 @@ var CustomizableUIInternal = {
     } else {
       name = aWidget.id + "." + aProp;
       def = aDef || "";
+    }
+    if (aWidget.localized === false) {
+      return def;
     }
     try {
       if (Array.isArray(aFormatArgs) && aFormatArgs.length) {
@@ -2215,7 +2220,6 @@ var CustomizableUIInternal = {
       let addToDefaultPlacements = false;
       let area = gAreas.get(widget.defaultArea);
       if (!CustomizableUI.isBuiltinToolbar(widget.defaultArea) &&
-          widget.defaultArea != CustomizableUI.AREA_PANEL &&
           widget.defaultArea != CustomizableUI.AREA_FIXED_OVERFLOW_PANEL) {
         addToDefaultPlacements = true;
       }
@@ -2354,6 +2358,7 @@ var CustomizableUIInternal = {
       source: aSource || CustomizableUI.SOURCE_EXTERNAL,
       instances: new Map(),
       currentArea: null,
+      localized: true,
       removable: true,
       overflows: true,
       defaultArea: null,
@@ -2389,7 +2394,8 @@ var CustomizableUIInternal = {
       }
     }
 
-    const kOptBoolProps = ["removable", "showInPrivateBrowsing", "overflows", "tabSpecific"];
+    const kOptBoolProps = ["removable", "showInPrivateBrowsing", "overflows", "tabSpecific",
+                           "localized"];
     for (let prop of kOptBoolProps) {
       if (typeof aData[prop] == "boolean") {
         widget[prop] = aData[prop];
@@ -2839,7 +2845,8 @@ var CustomizableUIInternal = {
       }
 
       for (let i = 0; i < currentPlacements.length; ++i) {
-        if (currentPlacements[i] != defaultPlacements[i]) {
+        if (currentPlacements[i] != defaultPlacements[i] &&
+            !this.matchingSpecials(currentPlacements[i], defaultPlacements[i])) {
           log.debug("Found " + currentPlacements[i] + " in " + areaId + " where " +
                     defaultPlacements[i] + " was expected!");
           return false;
@@ -2887,6 +2894,7 @@ Object.freeze(CustomizableUIInternal);
 this.CustomizableUI = {
   /**
    * Constant reference to the ID of the menu panel.
+   * DEPRECATED.
    */
   AREA_PANEL: "PanelUI-contents",
   /**
@@ -2905,12 +2913,6 @@ this.CustomizableUI = {
    * Constant reference to the ID of the bookmarks toolbar.
    */
   AREA_BOOKMARKS: "PersonalToolbar",
-  /**
-   * Constant reference to the ID of the addon-bar toolbar shim.
-   * Do not use, this will be removed as soon as reasonably possible.
-   * @deprecated
-   */
-  AREA_ADDONBAR: "addon-bar",
   /**
    * Constant reference to the ID of the non-dymanic (fixed) list in the overflow panel.
    */
@@ -3331,6 +3333,9 @@ this.CustomizableUI = {
    *                  invoked when a user hides your view.
    * - tooltiptext:   string to use for the tooltip of the widget
    * - label:         string to use for the label of the widget
+   * - localized:     If true, or undefined, attempt to retrieve the
+   *                  widget's string properties from the customizable
+   *                  widgets string bundle.
    * - removable:     whether the widget is removable (optional, default: true)
    *                  NB: if you specify false here, you must provide a
    *                  defaultArea, too.
@@ -3494,6 +3499,17 @@ this.CustomizableUI = {
       CustomizableUIInternal.wrapWidget,
       CustomizableUIInternal
     );
+  },
+
+  /**
+   * Ensure the customizable widget that matches up with this view node
+   * will get the right subview showing/shown/hiding/hidden events when
+   * they fire.
+   * @param aViewNode the view node to add listeners to if they haven't
+   *                  been added already.
+   */
+  ensureSubviewListeners(aViewNode) {
+    return CustomizableUIInternal.ensureSubviewListeners(aViewNode);
   },
   /**
    * Obtain an array of all the area IDs known to CustomizableUI.
@@ -3819,7 +3835,7 @@ this.CustomizableUI = {
     while (node && !place) {
       if (node.localName == "toolbar")
         place = "toolbar";
-      else if (node.id == CustomizableUI.AREA_PANEL || node.id == CustomizableUI.AREA_FIXED_OVERFLOW_PANEL)
+      else if (node.id == CustomizableUI.AREA_FIXED_OVERFLOW_PANEL)
         place = "panel";
       else if (node.id == "customization-palette")
         place = "palette";
@@ -4296,7 +4312,7 @@ OverflowableToolbar.prototype = {
         this._collapsed.set(child.id, this._target.clientWidth);
         child.setAttribute("overflowedItem", true);
         child.setAttribute("cui-anchorid", this._chevron.id);
-        CustomizableUIInternal.ensureButtonContextMenu(child, this._toolbar, gPhotonStructure);
+        CustomizableUIInternal.ensureButtonContextMenu(child, this._toolbar, true);
         CustomizableUIInternal.notifyListeners("onWidgetOverflow", child, this._target);
 
         this._list.insertBefore(child, this._list.firstChild);
@@ -4437,7 +4453,7 @@ OverflowableToolbar.prototype = {
         this._collapsed.set(aNode.id, minSize);
         aNode.setAttribute("cui-anchorid", this._chevron.id);
         aNode.setAttribute("overflowedItem", true);
-        CustomizableUIInternal.ensureButtonContextMenu(aNode, aContainer, gPhotonStructure);
+        CustomizableUIInternal.ensureButtonContextMenu(aNode, aContainer, true);
         CustomizableUIInternal.notifyListeners("onWidgetOverflow", aNode, this._target);
       } else if (!nowInBar) {
         // If it is not overflowed and not in the toolbar, and was not overflowed

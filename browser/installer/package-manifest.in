@@ -239,7 +239,6 @@
 @RESPATH@/components/editor.xpt
 @RESPATH@/components/extensions.xpt
 @RESPATH@/components/exthandler.xpt
-@RESPATH@/components/exthelper.xpt
 @RESPATH@/components/fastfind.xpt
 @RESPATH@/components/feeds.xpt
 #ifdef MOZ_GTK
@@ -262,9 +261,6 @@
 @RESPATH@/components/layout_xul_tree.xpt
 @RESPATH@/components/layout_xul.xpt
 @RESPATH@/components/locale.xpt
-#ifdef MOZ_GECKO_PROFILER
-@RESPATH@/components/memory_profiler.xpt
-#endif
 @RESPATH@/browser/components/migration.xpt
 @RESPATH@/components/mimetype.xpt
 @RESPATH@/components/mozfind.xpt
@@ -400,8 +396,9 @@
 @RESPATH@/components/nsSearchService.js
 @RESPATH@/components/nsSearchSuggestions.js
 @RESPATH@/components/nsSidebar.js
-#if defined(NIGHTLY_BUILD) && defined(MOZ_BUILD_APP_IS_BROWSER)
+#ifdef NIGHTLY_BUILD
 @RESPATH@/components/payments.manifest
+@RESPATH@/components/paymentUIService.js
 #endif
 @RESPATH@/components/passwordmgr.manifest
 @RESPATH@/components/nsLoginInfo.js
@@ -635,6 +632,7 @@
 ; [DevTools Shim Files]
 @RESPATH@/browser/chrome/devtools-shim@JAREXT@
 @RESPATH@/browser/chrome/devtools-shim.manifest
+@RESPATH@/browser/@PREF_DIR@/devtools-startup-prefs.js
 
 ; DevTools
 @RESPATH@/browser/chrome/devtools@JAREXT@
@@ -710,7 +708,6 @@
 @RESPATH@/res/dtd/*
 @RESPATH@/res/html/*
 @RESPATH@/res/language.properties
-@RESPATH@/res/entityTables/*
 #ifdef XP_MACOSX
 @RESPATH@/res/MainMenu.nib/
 #endif

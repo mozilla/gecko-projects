@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+%filter substitution
+%define toolbarShadowColor hsla(209,67%,12%,0.35)
 %define glassActiveBorderColor rgb(37, 44, 51)
 %define glassInactiveBorderColor rgb(102, 102, 102)
 
@@ -22,16 +24,6 @@
   .menu-iconic-accel {
     color: graytext;
   }
-%ifndef MOZ_PHOTON_THEME
-  @media (-moz-os-version: windows-win7) {
-    #navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):not(:-moz-lwtheme),
-    #browser-bottombox:not(:-moz-lwtheme),
-    .browserContainer > findbar,
-    .tab-background-middle[selected=true]:not(:-moz-lwtheme) {
-      background-color: @customToolbarColor@;
-    }
-  }
-%endif
 }
 
 @media (-moz-windows-compositor) {
@@ -54,7 +46,6 @@
           background-color: hsl(0, 0%, 78%);
         }
 
-%ifdef MOZ_PHOTON_THEME
         @media (-moz-windows-accent-color-in-titlebar: 0) {
           :root[tabsintitlebar]:not(:-moz-lwtheme) {
             background-color: hsl(235,33%,19%);
@@ -68,7 +59,6 @@
             --titlebar-text-color: -moz-win-accentcolortext;
           }
         }
-%endif
 
         :root[tabsintitlebar] .tab-label:-moz-window-inactive {
           /* Calculated to match the opacity change of Windows Explorer
@@ -93,11 +83,7 @@
         margin: 0 !important;
         padding: 10px 17px;
         -moz-context-properties: stroke;
-%ifdef MOZ_PHOTON_THEME
         stroke: var(--titlebar-text-color);
-%else
-        stroke: black;
-%endif
       }
 
       :root[sizemode=maximized] .titlebar-button {
@@ -189,33 +175,24 @@
       }
 
       @media (-moz-windows-default-theme) {
-%ifdef MOZ_PHOTON_THEME
-        .titlebar-button:hover {
-          background-color: hsla(0,0%,100%,.12);
+        #main-menubar > menu {
+          -moz-appearance: none;
         }
-        .titlebar-button:hover:active {
+
+        #main-menubar > menu[_moz-menuactive="true"],
+        .titlebar-button:hover {
           background-color: hsla(0,0%,100%,.22);
         }
+        .titlebar-button:hover:active {
+          background-color: hsla(0,0%,100%,.32);
+        }
+        #main-menubar > menu[_moz-menuactive="true"]:-moz-lwtheme-darktext,
         .titlebar-button:-moz-lwtheme-darktext:hover {
           background-color: hsla(0,0%,0%,.12);
         }
         .titlebar-button:-moz-lwtheme-darktext:hover:active {
           background-color: hsla(0,0%,0%,.22);
         }
-%else
-        .titlebar-button:hover {
-          background-color: hsla(0,0%,0%,.12);
-        }
-        .titlebar-button:hover:active {
-          background-color: hsla(0,0%,0%,.22);
-        }
-        .titlebar-button:-moz-lwtheme-brighttext:hover {
-          background-color: hsla(0,0%,100%,.12);
-        }
-        .titlebar-button:-moz-lwtheme-brighttext:hover:active {
-          background-color: hsla(0,0%,100%,.22);
-        }
-%endif
 
         .titlebar-button:not(:hover) > .toolbarbutton-icon:-moz-window-inactive {
           opacity: 0.5;
@@ -349,12 +326,6 @@
     }
   }
 
-%ifndef MOZ_PHOTON_THEME
-  #main-window[sizemode=normal] #TabsToolbar {
-    padding-left: 1px;
-    padding-right: 1px;
-  }
-%endif
   #appcontent:not(:-moz-lwtheme) {
     background-color: -moz-dialog;
   }

@@ -27,7 +27,7 @@ function manifestVideo() {
 // name "mochi.test".
 let serverUrl = SpecialPowers.Services.prefs.getCharPref("media.hls.server.url");
 var gHLSTests = [
-  { name: serverUrl + "/bipbop_4x3_variant.m3u8", type:"audio/x-mpegurl", duration:19.95334 }
+  { name: serverUrl + "/bipbop_4x3_variant.m3u8", type:"audio/x-mpegurl", duration:20.000 }
 ];
 
 // These are small test files, good for just seeing if something loads. We
@@ -468,7 +468,7 @@ function fileUriToSrc(path, mustExist) {
   const Cr = SpecialPowers.Cr;
   var dirSvc = Cc["@mozilla.org/file/directory_service;1"].
                getService(Ci.nsIProperties);
-  var f = dirSvc.get("CurWorkD", Ci.nsILocalFile);
+  var f = dirSvc.get("CurWorkD", Ci.nsIFile);
   var split = path.split("/");
   for(var i = 0; i < split.length; ++i) {
     f.append(split[i]);
@@ -1694,7 +1694,8 @@ function MediaTestManager() {
       this.finished(token);
     };
     // Default timeout to 180s for each test.
-    this.timers[token] = setTimeout(onTimeout, 180000);
+    // Call SimpleTest._originalSetTimeout() to bypass the flaky timeout checker.
+    this.timers[token] = SimpleTest._originalSetTimeout.call(window, onTimeout, 180000);
 
     is(this.numTestsRunning, this.tokens.length,
        "[started " + token + " t=" + elapsedTime(this.startTime) + "] Length of array should match number of running tests");

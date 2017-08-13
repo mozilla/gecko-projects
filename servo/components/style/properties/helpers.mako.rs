@@ -76,8 +76,10 @@
     We assume that the default/initial value is an empty vector for these.
     `initial_value` need not be defined for these.
 </%doc>
-<%def name="vector_longhand(name, animation_value_type=None, allow_empty=False, separator='Comma', **kwargs)">
-    <%call expr="longhand(name, animation_value_type=animation_value_type, vector=True, **kwargs)">
+<%def name="vector_longhand(name, animation_value_type=None, allow_empty=False, separator='Comma',
+                            need_animatable=False, **kwargs)">
+    <%call expr="longhand(name, animation_value_type=animation_value_type, vector=True,
+                          need_animatable=need_animatable, **kwargs)">
         #[allow(unused_imports)]
         use smallvec::SmallVec;
         use std::fmt;
@@ -127,7 +129,7 @@
                 % endif
             );
 
-            % if animation_value_type == "ComputedValue":
+            % if need_animatable or animation_value_type == "ComputedValue":
                 use properties::animated_properties::Animatable;
                 use values::animated::ToAnimatedZero;
 
@@ -917,6 +919,15 @@
             </%def>
         </%self:logical_setter_helper>
     }
+
+    /// Copy the appropriate physical property from another struct for ${name}
+    /// given a writing mode.
+    pub fn reset_${to_rust_ident(name)}(&mut self,
+                                        other: &Self,
+                                        wm: WritingMode) {
+        self.copy_${to_rust_ident(name)}_from(other, wm)
+    }
+
     % if need_clone:
         /// Get the computed value for the appropriate physical property for
         /// ${name} given a writing mode.

@@ -5,14 +5,14 @@
 <!ENTITY window.title                 "Exceptions">
 <!ENTITY window.width                 "45em">
 
-<!ENTITY treehead.sitename.label      "Site">
+<!ENTITY treehead.sitename2.label     "Website">
 <!ENTITY treehead.status.label        "Status">
-<!ENTITY removepermission.label       "Remove Site">
-<!ENTITY removepermission.accesskey   "R">
-<!ENTITY removeallpermissions.label   "Remove All Sites">
-<!ENTITY removeallpermissions.accesskey "e">
-<!ENTITY address.label                "Address of website:">
-<!ENTITY address.accesskey            "d">
+<!ENTITY removepermission2.label      "Remove Website">
+<!ENTITY removepermission2.accesskey  "R">
+<!ENTITY removeallpermissions2.label  "Remove All Websites">
+<!ENTITY removeallpermissions2.accesskey "e">
+<!ENTITY address2.label               "Address of website">
+<!ENTITY address2.accesskey           "d">
 <!ENTITY block.label                  "Block">
 <!ENTITY block.accesskey              "B">
 <!ENTITY session.label                "Allow for Session">
@@ -26,3 +26,4 @@
 <!ENTITY button.ok.label              "Save Changes">
 <!ENTITY button.ok.accesskey          "S">
 
+<!ENTITY searchbox.placeholder        "Search Website">

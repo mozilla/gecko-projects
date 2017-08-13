@@ -9,13 +9,10 @@ name = "style_tests"
 path = "lib.rs"
 doctest = false
 
-[features]
-testing = ["style/testing"]
-
 [dependencies]
 byteorder = "1.0"
 app_units = "0.5"
-cssparser = "0.18"
+cssparser = "0.19"
 euclid = "0.15"
 html5ever = "0.18"
 parking_lot = "0.4"

@@ -42,6 +42,7 @@ import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuInflater;
 import org.mozilla.gecko.mozglue.SafeIntent;
 import org.mozilla.gecko.prompts.PromptService;
+import org.mozilla.gecko.util.ActivityUtils;
 import org.mozilla.gecko.util.Clipboard;
 import org.mozilla.gecko.util.ColorUtil;
 import org.mozilla.gecko.util.GeckoBundle;
@@ -76,7 +77,7 @@ public class CustomTabsActivity extends AppCompatActivity
     private boolean mCanStop = false;
     private String mCurrentUrl;
     private String mCurrentTitle;
-    private boolean mIsSecure = false;
+    private SecurityInformation mSecurityInformation = null;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -423,7 +424,7 @@ public class CustomTabsActivity extends AppCompatActivity
      * Update the state of the action bar
      */
     private void updateActionBar() {
-        actionBarPresenter.update(mCurrentTitle, mCurrentUrl, mIsSecure);
+        actionBarPresenter.update(mCurrentTitle, mCurrentUrl, mSecurityInformation);
     }
 
     /**
@@ -548,7 +549,7 @@ public class CustomTabsActivity extends AppCompatActivity
 
     @Override
     public void onSecurityChange(GeckoView view, SecurityInformation securityInfo) {
-        mIsSecure = securityInfo.isSecure;
+        mSecurityInformation = securityInfo;
         updateActionBar();
     }
 
@@ -560,7 +561,14 @@ public class CustomTabsActivity extends AppCompatActivity
     }
 
     @Override
-    public void onFullScreen(GeckoView view, boolean fullScreen) {}
+    public void onFullScreen(GeckoView view, boolean fullScreen) {
+        ActivityUtils.setFullScreen(this, fullScreen);
+        if (fullScreen) {
+            getSupportActionBar().hide();
+        } else {
+            getSupportActionBar().show();
+        }
+    }
 
     @Override
     public void onContextMenu(GeckoView view, int screenX, int screenY,

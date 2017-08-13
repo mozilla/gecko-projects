@@ -44,7 +44,7 @@ toolkit.jar:
 * skin/classic/global/tree.css
 * skin/classic/global/viewbuttons.css
   skin/classic/global/wizard.css
-  skin/classic/global/alerts/alert.css                               (alerts/alert.css)
+* skin/classic/global/alerts/alert.css                               (alerts/alert.css)
   skin/classic/global/arrow/arrow-dn-dis.gif                         (arrow/arrow-dn-dis.gif)
   skin/classic/global/arrow/arrow-dn-dis.png                         (arrow/arrow-dn-dis.png)
   skin/classic/global/arrow/arrow-dn-sharp.gif                       (arrow/arrow-dn-sharp.gif)
@@ -75,12 +75,6 @@ toolkit.jar:
   skin/classic/global/icons/autoscroll.png                           (icons/autoscroll.png)
   skin/classic/global/icons/blacklist_favicon.png                    (icons/blacklist_favicon.png)
   skin/classic/global/icons/blacklist_64.png                         (icons/blacklist_64.png)
-  skin/classic/global/icons/chevron.png                              (icons/chevron.png)
-  skin/classic/global/icons/chevron-inverted.png                     (icons/chevron-inverted.png)
-  skin/classic/global/icons/chevron@2x.png                           (icons/chevron@2x.png)
-  skin/classic/global/icons/chevron-inverted@2x.png                  (icons/chevron-inverted@2x.png)
-  skin/classic/global/icons/close.png                                (icons/close.png)
-  skin/classic/global/icons/close@2x.png                             (icons/close@2x.png)
   skin/classic/global/icons/glyph-dropdown.png                       (icons/glyph-dropdown.png)
   skin/classic/global/icons/glyph-dropdown@2x.png                    (icons/glyph-dropdown@2x.png)
   skin/classic/global/icons/menulist-dropmarker.png                  (icons/menulist-dropmarker.png)

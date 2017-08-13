@@ -14,13 +14,12 @@ use style::context::QuirksMode;
 use style::media_queries::{Device, MediaType};
 use style::properties::{PropertyDeclarationBlock, PropertyDeclaration};
 use style::properties::{longhands, Importance};
-use style::rule_tree::CascadeLevel;
 use style::selector_map::{self, SelectorMap};
 use style::selector_parser::{SelectorImpl, SelectorParser};
 use style::shared_lock::SharedRwLock;
 use style::stylesheets::StyleRule;
 use style::stylist::{Stylist, Rule};
-use style::stylist::needs_revalidation;
+use style::stylist::needs_revalidation_for_testing;
 use style::thread_state;
 
 /// Helper method to get some Rules from selector strings.
@@ -83,13 +82,12 @@ fn test_revalidation_selectors() {
         "div > span",
 
         // ID selectors.
-        "#foo1", // FIXME(bz) This one should not be a revalidation
-                // selector once we fix
-                // https://bugzilla.mozilla.org/show_bug.cgi?id=1369611
+        "#foo1",
         "#foo2::before",
         "#foo3 > span",
-        "#foo1 > span", // FIXME(bz) This one should not be a
-                        // revalidation selector either.
+        "#foo1 > span", // FIXME(bz): This one should not be a
+                        // revalidation selector, since #foo1 should be in the
+                        // rule hash.
 
         // Attribute selectors.
         "div[foo]",
@@ -126,13 +124,11 @@ fn test_revalidation_selectors() {
         // Selectors in the ancestor chain (needed for cousin sharing).
         "p:first-child span",
     ]).into_iter()
-      .filter(|s| needs_revalidation(&s))
+      .filter(|s| needs_revalidation_for_testing(&s))
       .collect::<Vec<_>>();
 
     let reference = parse_selectors(&[
         // ID selectors.
-        "#foo1",
-        "#foo2::before",
         "#foo3 > span",
         "#foo1 > span",
 
@@ -225,31 +221,23 @@ fn test_insert() {
     assert!(selector_map.class_hash.get(&Atom::from("foo"), QuirksMode::NoQuirks).is_none());
 }
 
-#[test]
-fn test_get_universal_rules() {
-    thread_state::initialize(thread_state::LAYOUT);
-    let (map, _shared_lock) = get_mock_map(&["*|*", "#foo > *|*", "*|* > *|*", ".klass", "#id"]);
-
-    let decls = map.get_universal_rules(CascadeLevel::UserNormal);
-
-    assert_eq!(decls.len(), 1, "{:?}", decls);
-}
-
 fn mock_stylist() -> Stylist {
-    let device = Device::new(MediaType::Screen, TypedSize2D::new(0f32, 0f32), ScaleFactor::new(1.0));
+    let device = Device::new(MediaType::screen(), TypedSize2D::new(0f32, 0f32), ScaleFactor::new(1.0));
     Stylist::new(device, QuirksMode::NoQuirks)
 }
 
 #[test]
 fn test_stylist_device_accessors() {
+    thread_state::initialize(thread_state::LAYOUT);
     let stylist = mock_stylist();
-    assert_eq!(stylist.device().media_type(), MediaType::Screen);
+    assert_eq!(stylist.device().media_type(), MediaType::screen());
     let mut stylist_mut = mock_stylist();
-    assert_eq!(stylist_mut.device_mut().media_type(), MediaType::Screen);
+    assert_eq!(stylist_mut.device_mut().media_type(), MediaType::screen());
 }
 
 #[test]
 fn test_stylist_rule_tree_accessors() {
+    thread_state::initialize(thread_state::LAYOUT);
     let stylist = mock_stylist();
     stylist.rule_tree();
     stylist.rule_tree().root();

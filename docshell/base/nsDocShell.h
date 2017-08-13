@@ -64,6 +64,7 @@
 
 namespace mozilla {
 class Encoding;
+class HTMLEditor;
 enum class TaskCategory;
 namespace dom {
 class EventTarget;
@@ -257,6 +258,8 @@ public:
 
   friend class OnLinkClickEvent;
 
+  static bool SandboxFlagsImplyCookies(const uint32_t &aSandboxFlags);
+
   // We need dummy OnLocationChange in some cases to update the UI without
   // updating security info.
   void FireDummyOnLocationChange()
@@ -281,6 +284,9 @@ public:
   bool InFrameSwap();
 
   const Encoding* GetForcedCharset() { return mForcedCharset; }
+
+  mozilla::HTMLEditor* GetHTMLEditorInternal();
+  nsresult SetHTMLEditorInternal(mozilla::HTMLEditor* aHTMLEditor);
 
 private:
   bool CanSetOriginAttributes();
@@ -906,7 +912,7 @@ protected:
 
   // Offset in the parent's child list.
   // -1 if the docshell is added dynamically to the parent shell.
-  uint32_t mChildOffset;
+  int32_t mChildOffset;
   uint32_t mBusyFlags;
   uint32_t mAppType;
   uint32_t mLoadType;

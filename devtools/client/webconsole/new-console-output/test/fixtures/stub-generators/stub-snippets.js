@@ -22,18 +22,27 @@ const consoleApiCommands = [
   "console.log('myregex', /a.b.c/)",
   "console.table(['red', 'green', 'blue']);",
   "console.log('myobject', {red: 'redValue', green: 'greenValue', blue: 'blueValue'});",
+  "console.debug('debug message');",
+  "console.info('info message');",
+  "console.error('error message');",
 ];
 
 let consoleApi = new Map(consoleApiCommands.map(
   cmd => [cmd, {keys: [cmd], code: cmd}]));
 
-consoleApi.set("console.map('mymap')", {
-  keys: ["console.map('mymap')"],
+consoleApi.set("console.log('mymap')", {
+  keys: ["console.log('mymap')"],
   code: `
 var map = new Map();
 map.set("key1", "value1");
 map.set("key2", "value2");
 console.log('mymap', map);
+`});
+
+consoleApi.set("console.log('myset')", {
+  keys: ["console.log('myset')"],
+  code: `
+console.log('myset', new Set(["a", "b"]));
 `});
 
 consoleApi.set("console.trace()", {

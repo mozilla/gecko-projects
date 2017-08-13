@@ -64,8 +64,9 @@ const startupPhases = {
       "nsSearchService.js",
     ]),
     modules: new Set([
-      "chrome://webcompat-reporter/content/TabListener.jsm",
       "chrome://webcompat-reporter/content/WebCompatReporter.jsm",
+      "chrome://webcompat/content/data/ua_overrides.jsm",
+      "chrome://webcompat/content/lib/ua_overrider.jsm",
       "resource:///modules/AboutNewTab.jsm",
       "resource:///modules/BrowserUITelemetry.jsm",
       "resource:///modules/BrowserUsageTelemetry.jsm",
@@ -74,6 +75,7 @@ const startupPhases = {
       "resource://gre/modules/NewTabUtils.jsm",
       "resource://gre/modules/PageThumbs.jsm",
       "resource://gre/modules/Promise.jsm", // imported by devtools during _delayedStartup
+      "resource://gre/modules/Preferences.jsm",
     ]),
     services: new Set([
       "@mozilla.org/browser/search-service;1",

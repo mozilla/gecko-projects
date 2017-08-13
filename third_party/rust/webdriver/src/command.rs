@@ -9,7 +9,7 @@ use rustc_serialize::json::{ToJson, Json};
 use std::collections::BTreeMap;
 use std::default::Default;
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum WebDriverCommand<T: WebDriverExtensionCommand> {
     NewSession(NewSessionParameters),
     DeleteSession,
@@ -25,6 +25,7 @@ pub enum WebDriverCommand<T: WebDriverExtensionCommand> {
     CloseWindow,
     GetWindowRect,
     SetWindowRect(WindowRectParameters),
+    MinimizeWindow,
     MaximizeWindow,
     FullscreenWindow,
     SwitchToWindow(SwitchToWindowParameters),
@@ -73,7 +74,7 @@ pub trait WebDriverExtensionCommand : Clone + Send + PartialEq {
     fn parameters_json(&self) -> Option<Json>;
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct VoidWebDriverExtensionCommand;
 
 impl WebDriverExtensionCommand for VoidWebDriverExtensionCommand {
@@ -82,7 +83,7 @@ impl WebDriverExtensionCommand for VoidWebDriverExtensionCommand {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct WebDriverMessage <U: WebDriverExtensionRoute=VoidWebDriverExtensionRoute> {
     pub session_id: Option<String>,
     pub command: WebDriverCommand<U::Command>,
@@ -135,6 +136,7 @@ impl<U: WebDriverExtensionRoute> WebDriverMessage<U> {
                 let parameters: WindowRectParameters = Parameters::from_json(&body_data)?;
                 WebDriverCommand::SetWindowRect(parameters)
             },
+            Route::MinimizeWindow => WebDriverCommand::MinimizeWindow,
             Route::MaximizeWindow => WebDriverCommand::MaximizeWindow,
             Route::FullscreenWindow => WebDriverCommand::FullscreenWindow,
             Route::SwitchToWindow => {
@@ -401,6 +403,7 @@ impl <U:WebDriverExtensionRoute> ToJson for WebDriverMessage<U> {
             WebDriverCommand::IsDisplayed(_) |
             WebDriverCommand::IsEnabled(_) |
             WebDriverCommand::IsSelected(_) |
+            WebDriverCommand::MinimizeWindow |
             WebDriverCommand::MaximizeWindow |
             WebDriverCommand::FullscreenWindow |
             WebDriverCommand::NewSession(_) |
@@ -487,7 +490,7 @@ impl CapabilitiesMatching for NewSessionParameters {
 }
 
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct GetParameters {
     pub url: String
 }
@@ -516,7 +519,7 @@ impl ToJson for GetParameters {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct TimeoutsParameters {
     pub script: Option<u64>,
     pub page_load: Option<u64>,
@@ -655,7 +658,7 @@ impl ToJson for WindowRectParameters {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct SwitchToWindowParameters {
     pub handle: String
 }
@@ -684,7 +687,7 @@ impl ToJson for SwitchToWindowParameters {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct LocatorParameters {
     pub using: LocatorStrategy,
     pub value: String
@@ -723,7 +726,7 @@ impl ToJson for LocatorParameters {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct SwitchToFrameParameters {
     pub id: FrameId
 }
@@ -751,7 +754,7 @@ impl ToJson for SwitchToFrameParameters {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct SendKeysParameters {
     pub text: String
 }
@@ -781,7 +784,7 @@ impl ToJson for SendKeysParameters {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct JavascriptCommandParameters {
     pub script: String,
     pub args: Nullable<Vec<Json>>
@@ -829,7 +832,7 @@ impl ToJson for JavascriptCommandParameters {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct GetNamedCookieParameters {
     pub name: Nullable<String>,
 }
@@ -860,7 +863,7 @@ impl ToJson for GetNamedCookieParameters {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct AddCookieParameters {
     pub name: String,
     pub value: String,
@@ -975,7 +978,7 @@ impl ToJson for AddCookieParameters {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct TakeScreenshotParameters {
     pub element: Nullable<WebElement>
 }
@@ -1008,7 +1011,7 @@ impl ToJson for TakeScreenshotParameters {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct ActionsParameters {
     pub actions: Vec<ActionSequence>
 }
@@ -1044,7 +1047,7 @@ impl ToJson for ActionsParameters {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct ActionSequence {
     pub id: Nullable<String>,
     pub actions: ActionsType
@@ -1110,7 +1113,7 @@ impl ToJson for ActionSequence {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum ActionsType {
     Null(Vec<NullActionItem>),
     Key(Vec<KeyActionItem>),
@@ -1159,7 +1162,7 @@ impl Parameters for ActionsType {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum PointerType {
     Mouse,
     Pen,
@@ -1200,7 +1203,7 @@ impl Default for PointerType {
     }
 }
 
-#[derive(Default, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct PointerActionParameters {
     pub pointer_type: PointerType
 }
@@ -1229,7 +1232,7 @@ impl ToJson for PointerActionParameters {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum NullActionItem {
     General(GeneralAction)
 }
@@ -1262,7 +1265,7 @@ impl ToJson for NullActionItem {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum KeyActionItem {
     General(GeneralAction),
     Key(KeyAction)
@@ -1297,7 +1300,7 @@ impl ToJson for KeyActionItem {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum PointerActionItem {
     General(GeneralAction),
     Pointer(PointerAction)
@@ -1331,7 +1334,7 @@ impl ToJson for PointerActionItem {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum GeneralAction {
     Pause(PauseAction)
 }
@@ -1354,7 +1357,7 @@ impl ToJson for GeneralAction {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct PauseAction {
     pub duration: u64
 }
@@ -1381,7 +1384,7 @@ impl ToJson for PauseAction {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum KeyAction {
     Up(KeyUpAction),
     Down(KeyDownAction)
@@ -1424,7 +1427,7 @@ fn validate_key_value(value_str: &str) -> WebDriverResult<char> {
     Ok(value)
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct KeyUpAction {
     pub value: char
 }
@@ -1456,7 +1459,7 @@ impl ToJson for KeyUpAction {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct KeyDownAction {
     pub value: char
 }
@@ -1487,7 +1490,7 @@ impl ToJson for KeyDownAction {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum PointerOrigin {
     Viewport,
     Pointer,
@@ -1528,7 +1531,7 @@ impl Default for PointerOrigin {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum PointerAction {
     Up(PointerUpAction),
     Down(PointerDownAction),
@@ -1566,7 +1569,7 @@ impl ToJson for PointerAction {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct PointerUpAction {
     pub button: u64,
 }
@@ -1596,7 +1599,7 @@ impl ToJson for PointerUpAction {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct PointerDownAction {
     pub button: u64,
 }
@@ -1626,7 +1629,7 @@ impl ToJson for PointerDownAction {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct PointerMoveAction {
     pub duration: Nullable<u64>,
     pub origin: PointerOrigin,

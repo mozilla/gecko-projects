@@ -11,10 +11,10 @@ namespace mozilla {
 
 /* static */ const LayerAnimationInfo::Record LayerAnimationInfo::sRecords[] =
   { { eCSSProperty_transform,
-      TYPE_TRANSFORM,
+      DisplayItemType::TYPE_TRANSFORM,
       nsChangeHint_UpdateTransformLayer },
     { eCSSProperty_opacity,
-      TYPE_OPACITY,
+      DisplayItemType::TYPE_OPACITY,
       nsChangeHint_UpdateOpacityLayer } };
 
 #ifdef DEBUG

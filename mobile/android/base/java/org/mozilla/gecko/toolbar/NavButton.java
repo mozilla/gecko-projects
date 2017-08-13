@@ -4,17 +4,16 @@
 
 package org.mozilla.gecko.toolbar;
 
+import android.content.res.TypedArray;
 import android.support.v4.content.ContextCompat;
 import org.mozilla.gecko.R;
 
 import android.content.Context;
-import android.content.res.Resources;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.StateListDrawable;
-import android.support.v4.graphics.drawable.DrawableCompat;
 import android.util.AttributeSet;
 
 abstract class NavButton extends ShapedButton {
@@ -28,10 +27,14 @@ abstract class NavButton extends ShapedButton {
     public NavButton(Context context, AttributeSet attrs) {
         super(context, attrs);
 
-        final Resources res = getResources();
-        mBorderColor = ContextCompat.getColor(context, R.color.disabled_grey);
-        mBorderColorPrivate = ContextCompat.getColor(context, R.color.toolbar_icon_grey);
-        mBorderWidth = res.getDimension(R.dimen.nav_button_border_width);
+        final TypedArray a = context.obtainStyledAttributes(attrs, R.styleable.NavButton);
+        mBorderColor = a.getColor(R.styleable.NavButton_borderColor,
+                                  ContextCompat.getColor(context, R.color.disabled_grey));
+        mBorderColorPrivate = a.getColor(R.styleable.NavButton_borderColorPrivate,
+                                         ContextCompat.getColor(context, R.color.toolbar_icon_grey));
+        a.recycle();
+
+        mBorderWidth = getResources().getDimension(R.dimen.nav_button_border_width);
 
         // Paint to draw the border.
         mBorderPaint = new Paint();
@@ -55,6 +58,9 @@ abstract class NavButton extends ShapedButton {
     public void draw(Canvas canvas) {
         super.draw(canvas);
 
+        final double alpha = 255 * (isEnabled() ? 1 : 0.05);
+        mBorderPaint.setAlpha((int) alpha);
+
         // Draw the border on top.
         canvas.drawPath(mBorderPath, mBorderPaint);
     }
@@ -69,11 +75,11 @@ abstract class NavButton extends ShapedButton {
         }
 
         final StateListDrawable stateList = new StateListDrawable();
-        stateList.addState(PRIVATE_PRESSED_STATE_SET, getColorDrawable(R.color.placeholder_active_grey));
-        stateList.addState(PRESSED_ENABLED_STATE_SET, getColorDrawable(R.color.toolbar_grey_pressed));
-        stateList.addState(PRIVATE_FOCUSED_STATE_SET, getColorDrawable(R.color.text_and_tabs_tray_grey));
-        stateList.addState(FOCUSED_STATE_SET, getColorDrawable(R.color.tablet_highlight_focused));
-        stateList.addState(PRIVATE_STATE_SET, getColorDrawable(R.color.tabs_tray_grey_pressed));
+        stateList.addState(PRIVATE_PRESSED_STATE_SET, getColorDrawable(R.color.nav_button_bg_color_private_pressed));
+        stateList.addState(PRESSED_ENABLED_STATE_SET, getColorDrawable(R.color.nav_button_bg_color_pressed));
+        stateList.addState(PRIVATE_FOCUSED_STATE_SET, getColorDrawable(R.color.nav_button_bg_color_private_focused));
+        stateList.addState(FOCUSED_STATE_SET, getColorDrawable(R.color.nav_button_bg_color_focused));
+        stateList.addState(PRIVATE_STATE_SET, getColorDrawable(R.color.nav_button_bg_color_private));
         stateList.addState(EMPTY_STATE_SET, drawable);
 
         setBackgroundDrawable(stateList);

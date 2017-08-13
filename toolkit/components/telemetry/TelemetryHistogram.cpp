@@ -240,7 +240,7 @@ namespace {
 
 // Factory function for histogram instances.
 Histogram*
-internal_CreateHistogramInstance(const HistogramInfo& info);
+internal_CreateHistogramInstance(const HistogramInfo& info, int bucketsOffset);
 
 bool
 internal_IsHistogramEnumId(HistogramID aID)
@@ -265,7 +265,8 @@ internal_GetHistogramById(HistogramID histogramId, ProcessID processId, SessionT
   }
 
   const HistogramInfo& info = gHistogramInfos[histogramId];
-  h = internal_CreateHistogramInstance(info);
+  const int bucketsOffset = gExponentialBucketLowerBoundIndex[histogramId];
+  h = internal_CreateHistogramInstance(info, bucketsOffset);
   MOZ_ASSERT(h);
   gHistogramStorage[histogramId][uint32_t(processId)][uint32_t(sessionType)] = h;
   return h;
@@ -335,9 +336,7 @@ internal_CanRecordExtended() {
 bool
 internal_IsEmpty(const Histogram *h)
 {
-  Histogram::SampleSet ss;
-  h->SnapshotSample(&ss);
-  return ss.counts(0) == 0 && ss.sum() == 0;
+  return h->is_empty();
 }
 
 bool
@@ -458,7 +457,7 @@ internal_CheckHistogramArguments(const HistogramInfo& info)
 }
 
 Histogram*
-internal_CreateHistogramInstance(const HistogramInfo& passedInfo)
+internal_CreateHistogramInstance(const HistogramInfo& passedInfo, int bucketsOffset)
 {
   if (NS_FAILED(internal_CheckHistogramArguments(passedInfo))) {
     MOZ_ASSERT(false, "Failed histogram argument checks.");
@@ -485,7 +484,8 @@ internal_CreateHistogramInstance(const HistogramInfo& passedInfo)
   Histogram* h = nullptr;
   switch (info.histogramType) {
   case nsITelemetry::HISTOGRAM_EXPONENTIAL:
-    h = Histogram::FactoryGet(info.min, info.max, info.bucketCount, flags);
+    h = Histogram::FactoryGet(info.min, info.max, info.bucketCount, flags,
+                              &gExponentialBucketLowerBounds[bucketsOffset]);
     break;
   case nsITelemetry::HISTOGRAM_LINEAR:
   case nsITelemetry::HISTOGRAM_CATEGORICAL:
@@ -681,7 +681,8 @@ KeyedHistogram::GetHistogram(const nsCString& key, Histogram** histogram,
     return NS_OK;
   }
 
-  Histogram* h = internal_CreateHistogramInstance(mHistogramInfo);
+  int bucketsOffset = gExponentialBucketLowerBoundIndex[mId];
+  Histogram* h = internal_CreateHistogramInstance(mHistogramInfo, bucketsOffset);
   if (!h) {
     return NS_ERROR_FAILURE;
   }

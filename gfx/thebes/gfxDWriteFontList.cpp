@@ -991,9 +991,11 @@ gfxDWriteFontList::InitFontListForPlatform()
         }
     }
 
-    nsAdoptingCString classicFamilies =
-        Preferences::GetCString("gfx.font_rendering.cleartype_params.force_gdi_classic_for_families");
-    if (classicFamilies) {
+    nsAutoCString classicFamilies;
+    nsresult rv = Preferences::GetCString(
+      "gfx.font_rendering.cleartype_params.force_gdi_classic_for_families",
+      classicFamilies);
+    if (NS_SUCCEEDED(rv)) {
         nsCCharSeparatedTokenizer tokenizer(classicFamilies, ',');
         while (tokenizer.hasMoreTokens()) {
             NS_ConvertUTF8toUTF16 name(tokenizer.nextToken());
@@ -1264,6 +1266,7 @@ gfxDWriteFontList::GetStandardFamilyName(const nsAString& aFontName,
 bool
 gfxDWriteFontList::FindAndAddFamilies(const nsAString& aFamily,
                                       nsTArray<gfxFontFamily*>* aOutput,
+                                      bool aDeferOtherFamilyNamesLoading,
                                       gfxFontStyle* aStyle,
                                       gfxFloat aDevToCssSize)
 {
@@ -1280,7 +1283,10 @@ gfxDWriteFontList::FindAndAddFamilies(const nsAString& aFamily,
         return false;
     }
 
-    return gfxPlatformFontList::FindAndAddFamilies(aFamily, aOutput, aStyle,
+    return gfxPlatformFontList::FindAndAddFamilies(aFamily,
+                                                   aOutput,
+                                                   aDeferOtherFamilyNamesLoading,
+                                                   aStyle,
                                                    aDevToCssSize);
 }
 

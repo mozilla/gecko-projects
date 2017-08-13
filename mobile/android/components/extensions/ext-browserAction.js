@@ -2,8 +2,8 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
-                                  "resource://devtools/shared/event-emitter.js");
+// The ext-* files are imported into the same scopes.
+/* import-globals-from ext-utils.js */
 
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
@@ -38,15 +38,6 @@ class BrowserAction {
   }
 
   /**
-   * Retrieves the name for the active tab. Used for testing only.
-   * @returns {string} the name used for the active tab.
-   */
-  get activeName() {
-    let tab = tabTracker.activeTab;
-    return this.tabContext.get(tab.id).name || this.defaults.name;
-  }
-
-  /**
    * Required by the BrowserActions module. This event will get
    * called whenever the browser action is clicked on.
    */
@@ -56,19 +47,19 @@ class BrowserAction {
 
   /**
    * Updates the browser action whenever a tab is selected.
-   * @param {Object} tab The tab to update.
+   * @param {string} tabId The tab id to update.
    */
-  onTabSelected(tab) {
-    let name = this.tabContext.get(tab.id).name || this.defaults.name;
+  onTabSelected(tabId) {
+    let name = this.tabContext.get(tabId).name || this.defaults.name;
     BrowserActions.update(this.uuid, {name});
   }
 
   /**
    * Removes the tab from the property map now that it is closed.
-   * @param {Object} tab The tab which closed.
+   * @param {string} tabId The tab id of the closed tab.
    */
-  onTabClosed(tab) {
-    this.tabContext.clear(tab.id);
+  onTabClosed(tabId) {
+    this.tabContext.clear(tabId);
   }
 
   /**
@@ -93,7 +84,7 @@ class BrowserAction {
       }
     }
 
-    if (tab && tab.selected) {
+    if (!tab || tab.selected) {
       BrowserActions.update(this.uuid, {[prop]: value});
     }
   }
@@ -145,6 +136,13 @@ this.browserAction = class extends ExtensionAPI {
     const {extension} = context;
     const {tabManager} = extension;
 
+    function getTab(tabId) {
+      if (tabId !== null) {
+        return tabTracker.getTab(tabId);
+      }
+      return null;
+    }
+
     return {
       browserAction: {
         onClicked: new EventManager(context, "browserAction.onClicked", fire => {
@@ -159,13 +157,13 @@ this.browserAction = class extends ExtensionAPI {
 
         setTitle: function(details) {
           let {tabId, title} = details;
-          let tab = tabId ? tabTracker.getTab(tabId) : null;
+          let tab = getTab(tabId);
           browserActionMap.get(extension).setProperty(tab, "name", title);
         },
 
         getTitle: function(details) {
           let {tabId} = details;
-          let tab = tabId ? tabTracker.getTab(tabId) : null;
+          let tab = getTab(tabId);
           let title = browserActionMap.get(extension).getProperty(tab, "name");
           return Promise.resolve(title);
         },

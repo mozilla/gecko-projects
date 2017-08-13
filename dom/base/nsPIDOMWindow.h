@@ -65,6 +65,7 @@ enum class CallerType : uint32_t;
 enum PopupControlState {
   openAllowed = 0,  // open that window without worries
   openControlled,   // it's a popup, but allow it
+  openBlocked,      // it's a popup, but not from an allowed event
   openAbused,       // it's a popup. disallow it, but allow domain override.
   openOverridden    // disallow window open
 };
@@ -330,11 +331,6 @@ public:
   virtual bool CanClose() = 0;
   virtual void ForceClose() = 0;
 
-  bool IsModalContentWindow() const
-  {
-    return mIsModalContentWindow;
-  }
-
   /**
    * Call this to indicate that some node (this window, its document,
    * or content in that document) has a paint event listener.
@@ -496,24 +492,6 @@ public:
 
   virtual void EnableTimeChangeNotifications() = 0;
   virtual void DisableTimeChangeNotifications() = 0;
-
-#ifdef MOZ_B2G
-  /**
-   * Tell the window that it should start to listen to the network event of the
-   * given aType.
-   *
-   * Inner windows only.
-   */
-  virtual void EnableNetworkEvent(mozilla::EventMessage aEventMessage) = 0;
-
-  /**
-   * Tell the window that it should stop to listen to the network event of the
-   * given aType.
-   *
-   * Inner windows only.
-   */
-  virtual void DisableNetworkEvent(mozilla::EventMessage aEventMessage) = 0;
-#endif // MOZ_B2G
 
   /**
    * Tell this window that there is an observer for gamepad input
@@ -694,10 +672,6 @@ protected:
   // This member is only used by inner windows.
   bool                   mInnerObjectsFreed;
 
-
-  // This variable is used on both inner and outer windows (and they
-  // should match).
-  bool                   mIsModalContentWindow;
 
   // Tracks activation state that's used for :-moz-window-inactive.
   // Only used on outer windows.

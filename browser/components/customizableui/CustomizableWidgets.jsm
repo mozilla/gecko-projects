@@ -11,24 +11,18 @@ Cu.import("resource:///modules/CustomizableUI.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/AppConstants.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "BrowserUITelemetry",
-  "resource:///modules/BrowserUITelemetry.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
-  "resource://gre/modules/PlacesUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesUIUtils",
-  "resource:///modules/PlacesUIUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "RecentlyClosedTabsAndWindowsMenuUtils",
-  "resource:///modules/sessionstore/RecentlyClosedTabsAndWindowsMenuUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ShortcutUtils",
-  "resource://gre/modules/ShortcutUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "CharsetMenu",
-  "resource://gre/modules/CharsetMenu.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-  "resource://gre/modules/PrivateBrowsingUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "SyncedTabs",
-  "resource://services-sync/SyncedTabs.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
-  "resource://gre/modules/ContextualIdentityService.jsm");
+
+XPCOMUtils.defineLazyModuleGetters(this, {
+  BrowserUITelemetry: "resource:///modules/BrowserUITelemetry.jsm",
+  PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
+  PlacesUIUtils: "resource:///modules/PlacesUIUtils.jsm",
+  RecentlyClosedTabsAndWindowsMenuUtils: "resource:///modules/sessionstore/RecentlyClosedTabsAndWindowsMenuUtils.jsm",
+  ShortcutUtils: "resource://gre/modules/ShortcutUtils.jsm",
+  CharsetMenu: "resource://gre/modules/CharsetMenu.jsm",
+  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
+  SyncedTabs: "resource://services-sync/SyncedTabs.jsm",
+  ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
+});
 
 XPCOMUtils.defineLazyGetter(this, "CharsetBundle", function() {
   const kCharsetBundle = "chrome://global/locale/charsetMenu.properties";
@@ -79,20 +73,6 @@ function setAttributes(aNode, aAttrs) {
       }
       aNode.setAttribute(name, value);
     }
-  }
-}
-
-function updateCombinedWidgetStyle(aNode, aArea, aModifyCloseMenu) {
-  let inPanel = (aArea == CustomizableUI.AREA_PANEL);
-  let cls = inPanel ? "panel-combined-button" : "toolbarbutton-1 toolbarbutton-combined";
-  let attrs = {class: cls};
-  if (aModifyCloseMenu) {
-    attrs.closemenu = inPanel ? "none" : null;
-  }
-  for (let i = 0, l = aNode.childNodes.length; i < l; ++i) {
-    if (aNode.childNodes[i].localName == "separator")
-      continue;
-    setAttributes(aNode.childNodes[i], attrs);
   }
 }
 
@@ -189,115 +169,7 @@ const CustomizableWidgets = [
           throw new Error(`Unsupported event for '${this.id}'`);
       }
     },
-    onViewShowing(aEvent) {
-      // Populate our list of history
-      const kMaxResults = 15;
-      let doc = aEvent.target.ownerDocument;
-      let win = doc.defaultView;
-
-      if (AppConstants.MOZ_PHOTON_THEME && win.gPhotonStructure) {
-        // For the Photon panelview we're going to do something different!
-        this.onPhotonViewShowing(aEvent);
-        return;
-      }
-
-      let options = PlacesUtils.history.getNewQueryOptions();
-      options.excludeQueries = true;
-      options.queryType = options.QUERY_TYPE_HISTORY;
-      options.sortingMode = options.SORT_BY_DATE_DESCENDING;
-      options.maxResults = kMaxResults;
-      let query = PlacesUtils.history.getNewQuery();
-
-      let items = doc.getElementById("PanelUI-historyItems");
-      // Clear previous history items.
-      while (items.firstChild) {
-        items.firstChild.remove();
-      }
-
-      // Get all statically placed buttons to supply them with keyboard shortcuts.
-      let staticButtons = items.parentNode.getElementsByTagNameNS(kNSXUL, "toolbarbutton");
-      for (let i = 0, l = staticButtons.length; i < l; ++i)
-        CustomizableUI.addShortcut(staticButtons[i]);
-
-      aEvent.detail.addBlocker(new Promise((resolve, reject) => {
-        PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase)
-                           .asyncExecuteLegacyQueries([query], 1, options, {
-          handleResult(aResultSet) {
-            let onItemCommand = function(aItemCommandEvent) {
-              // Only handle the click event for middle clicks, we're using the command
-              // event otherwise.
-              if (aItemCommandEvent.type == "click" &&
-                  aItemCommandEvent.button != 1) {
-                return;
-              }
-              let item = aItemCommandEvent.target;
-              win.openUILink(item.getAttribute("targetURI"), aItemCommandEvent);
-              CustomizableUI.hidePanelForNode(item);
-            };
-            let fragment = doc.createDocumentFragment();
-            let row;
-            while ((row = aResultSet.getNextRow())) {
-              let uri = row.getResultByIndex(1);
-              let title = row.getResultByIndex(2);
-
-              let item = doc.createElementNS(kNSXUL, "toolbarbutton");
-              item.setAttribute("label", title || uri);
-              item.setAttribute("targetURI", uri);
-              item.setAttribute("class", "subviewbutton");
-              item.addEventListener("command", onItemCommand);
-              item.addEventListener("click", onItemCommand);
-              item.setAttribute("image", "page-icon:" + uri);
-              fragment.appendChild(item);
-            }
-            items.appendChild(fragment);
-          },
-          handleError(aError) {
-            log.debug("History view tried to show but had an error: " + aError);
-            reject();
-          },
-          handleCompletion(aReason) {
-            log.debug("History view is being shown!");
-            resolve();
-          },
-        });
-      }));
-
-      let recentlyClosedTabs = doc.getElementById("PanelUI-recentlyClosedTabs");
-      while (recentlyClosedTabs.firstChild) {
-        recentlyClosedTabs.firstChild.remove();
-      }
-
-      let recentlyClosedWindows = doc.getElementById("PanelUI-recentlyClosedWindows");
-      while (recentlyClosedWindows.firstChild) {
-        recentlyClosedWindows.firstChild.remove();
-      }
-
-      let utils = RecentlyClosedTabsAndWindowsMenuUtils;
-      let tabsFragment = utils.getTabsFragment(doc.defaultView, "toolbarbutton", true,
-                                               "menuRestoreAllTabsSubview.label");
-      let separator = doc.getElementById("PanelUI-recentlyClosedTabs-separator");
-      let elementCount = tabsFragment.childElementCount;
-      separator.hidden = !elementCount;
-      while (--elementCount >= 0) {
-        let element = tabsFragment.children[elementCount];
-        CustomizableUI.addShortcut(element);
-        element.classList.add("subviewbutton", "cui-withicon");
-      }
-      recentlyClosedTabs.appendChild(tabsFragment);
-
-      let windowsFragment = utils.getWindowsFragment(doc.defaultView, "toolbarbutton", true,
-                                                     "menuRestoreAllWindowsSubview.label");
-      separator = doc.getElementById("PanelUI-recentlyClosedWindows-separator");
-      elementCount = windowsFragment.childElementCount;
-      separator.hidden = !elementCount;
-      while (--elementCount >= 0) {
-        let element = windowsFragment.children[elementCount];
-        CustomizableUI.addShortcut(element);
-        element.classList.add("subviewbutton", "cui-withicon");
-      }
-      recentlyClosedWindows.appendChild(windowsFragment);
-    },
-    onPhotonViewShowing(event) {
+    onViewShowing(event) {
       if (this._panelMenuView)
         return;
 
@@ -309,6 +181,7 @@ const CustomizableWidgets = [
       let query = "place:queryType=" + Ci.nsINavHistoryQueryOptions.QUERY_TYPE_HISTORY +
         "&sort=" + Ci.nsINavHistoryQueryOptions.SORT_BY_DATE_DESCENDING +
         "&maxResults=42&excludeQueries=1";
+
       this._panelMenuView = new window.PlacesPanelview(document.getElementById("appMenu_historyMenu"),
         panelview, query);
       // When either of these sub-subviews show, populate them with recently closed
@@ -319,24 +192,7 @@ const CustomizableWidgets = [
       // sure to stop listening to PlacesDatabase updates.
       panelview.panelMultiView.addEventListener("PanelMultiViewHidden", this);
     },
-    onCreated(aNode) {
-      // Skip this for the Photon panelview.
-      let doc = aNode.ownerDocument;
-      if (AppConstants.MOZ_PHOTON_THEME && doc.defaultView.gPhotonStructure)
-        return;
-
-      // Middle clicking recently closed items won't close the panel - cope:
-      let onRecentlyClosedClick = function(aEvent) {
-        if (aEvent.button == 1) {
-          CustomizableUI.hidePanelForNode(this);
-        }
-      };
-      let recentlyClosedTabs = doc.getElementById("PanelUI-recentlyClosedTabs");
-      let recentlyClosedWindows = doc.getElementById("PanelUI-recentlyClosedWindows");
-      recentlyClosedTabs.addEventListener("click", onRecentlyClosedClick);
-      recentlyClosedWindows.addEventListener("click", onRecentlyClosedClick);
-    },
-    onViewHiding(aEvent) {
+    onViewHiding(event) {
       log.debug("History view is being hidden!");
     },
     onPanelMultiViewHidden(event) {
@@ -768,19 +624,25 @@ const CustomizableWidgets = [
         id: "zoom-out-button",
         command: "cmd_fullZoomReduce",
         label: true,
+        closemenu: "none",
         tooltiptext: "tooltiptext2",
         shortcutId: "key_fullZoomReduce",
+        "class": "toolbarbutton-1 toolbarbutton-combined",
       }, {
         id: "zoom-reset-button",
         command: "cmd_fullZoomReset",
+        closemenu: "none",
         tooltiptext: "tooltiptext2",
         shortcutId: "key_fullZoomReset",
+        "class": "toolbarbutton-1 toolbarbutton-combined",
       }, {
         id: "zoom-in-button",
         command: "cmd_fullZoomEnlarge",
+        closemenu: "none",
         label: true,
         tooltiptext: "tooltiptext2",
         shortcutId: "key_fullZoomEnlarge",
+        "class": "toolbarbutton-1 toolbarbutton-combined",
       }];
 
       let node = aDocument.createElementNS(kNSXUL, "toolbaritem");
@@ -800,72 +662,6 @@ const CustomizableWidgets = [
         setAttributes(btnNode, aButton);
         node.appendChild(btnNode);
       });
-
-      updateCombinedWidgetStyle(node, this.currentArea, true);
-
-      let listener = {
-        onWidgetAdded: (aWidgetId, aArea, aPosition) => {
-          if (aWidgetId != this.id)
-            return;
-
-          updateCombinedWidgetStyle(node, aArea, true);
-        },
-
-        onWidgetRemoved: (aWidgetId, aPrevArea) => {
-          if (aWidgetId != this.id)
-            return;
-
-          // When a widget is demoted to the palette ('removed'), it's visual
-          // style should change.
-          updateCombinedWidgetStyle(node, null, true);
-        },
-
-        onWidgetReset: aWidgetNode => {
-          if (aWidgetNode != node)
-            return;
-          updateCombinedWidgetStyle(node, this.currentArea, true);
-        },
-
-        onWidgetUndoMove: aWidgetNode => {
-          if (aWidgetNode != node)
-            return;
-          updateCombinedWidgetStyle(node, this.currentArea, true);
-        },
-
-        onWidgetMoved: (aWidgetId, aArea) => {
-          if (aWidgetId != this.id)
-            return;
-          updateCombinedWidgetStyle(node, aArea, true);
-        },
-
-        onWidgetInstanceRemoved: (aWidgetId, aDoc) => {
-          if (aWidgetId != this.id || aDoc != aDocument)
-            return;
-
-          CustomizableUI.removeListener(listener);
-        },
-
-        onWidgetDrag: (aWidgetId, aArea) => {
-          if (aWidgetId != this.id)
-            return;
-          aArea = aArea || this.currentArea;
-          updateCombinedWidgetStyle(node, aArea, true);
-        },
-
-        // Hack. This can go away when the old menu panel goes away (post photon).
-        // We need it right now for the case where we re-register the old-style
-        // main menu panel if photon is disabled at runtime, and we automatically
-        // put the widgets in there, so they get the right style in the panel.
-        onAreaNodeRegistered: (aArea, aContainer) => {
-          if (aContainer.ownerDocument == node.ownerDocument &&
-              aArea == this.currentArea &&
-              aArea == CustomizableUI.AREA_PANEL) {
-            updateCombinedWidgetStyle(node, aArea, true);
-          }
-        },
-      };
-      CustomizableUI.addListener(listener);
-
       return node;
     }
   }, {
@@ -880,18 +676,21 @@ const CustomizableWidgets = [
         label: true,
         tooltiptext: "tooltiptext2",
         shortcutId: "key_cut",
+        "class": "toolbarbutton-1 toolbarbutton-combined",
       }, {
         id: "copy-button",
         command: "cmd_copy",
         label: true,
         tooltiptext: "tooltiptext2",
         shortcutId: "key_copy",
+        "class": "toolbarbutton-1 toolbarbutton-combined",
       }, {
         id: "paste-button",
         command: "cmd_paste",
         label: true,
         tooltiptext: "tooltiptext2",
         shortcutId: "key_paste",
+        "class": "toolbarbutton-1 toolbarbutton-combined",
       }];
 
       let node = aDocument.createElementNS(kNSXUL, "toolbaritem");
@@ -912,66 +711,12 @@ const CustomizableWidgets = [
         node.appendChild(btnNode);
       });
 
-      updateCombinedWidgetStyle(node, this.currentArea);
-
       let listener = {
-        onWidgetAdded: (aWidgetId, aArea, aPosition) => {
-          if (aWidgetId != this.id)
-            return;
-          updateCombinedWidgetStyle(node, aArea);
-        },
-
-        onWidgetRemoved: (aWidgetId, aPrevArea) => {
-          if (aWidgetId != this.id)
-            return;
-          // When a widget is demoted to the palette ('removed'), it's visual
-          // style should change.
-          updateCombinedWidgetStyle(node);
-        },
-
-        onWidgetReset: aWidgetNode => {
-          if (aWidgetNode != node)
-            return;
-          updateCombinedWidgetStyle(node, this.currentArea);
-        },
-
-        onWidgetUndoMove: aWidgetNode => {
-          if (aWidgetNode != node)
-            return;
-          updateCombinedWidgetStyle(node, this.currentArea);
-        },
-
-        onWidgetMoved: (aWidgetId, aArea) => {
-          if (aWidgetId != this.id)
-            return;
-          updateCombinedWidgetStyle(node, aArea);
-        },
-
         onWidgetInstanceRemoved: (aWidgetId, aDoc) => {
           if (aWidgetId != this.id || aDoc != aDocument)
             return;
           CustomizableUI.removeListener(listener);
         },
-
-        onWidgetDrag: (aWidgetId, aArea) => {
-          if (aWidgetId != this.id)
-            return;
-          aArea = aArea || this.currentArea;
-          updateCombinedWidgetStyle(node, aArea);
-        },
-
-        // Hack. This can go away when the old menu panel goes away (post photon).
-        // We need it right now for the case where we re-register the old-style
-        // main menu panel if photon is disabled at runtime, and we automatically
-        // put the widgets in there, so they get the right style in the panel.
-        onAreaNodeRegistered: (aArea, aContainer) => {
-          if (aContainer.ownerDocument == node.ownerDocument &&
-              aArea == this.currentArea &&
-              aArea == CustomizableUI.AREA_PANEL) {
-            updateCombinedWidgetStyle(node, aArea);
-          }
-        },
-
         onWidgetOverflow(aWidgetNode) {
           if (aWidgetNode == node) {
             node.ownerGlobal.updateEditUIVisibility();
@@ -1095,6 +840,9 @@ const CustomizableWidgets = [
       }
     },
     onViewShowing(aEvent) {
+      if (!this._inited) {
+        this.onInit();
+      }
       let document = aEvent.target.ownerDocument;
 
       let autoDetectLabelId = "PanelUI-characterEncodingView-autodetect-label";
@@ -1152,10 +900,7 @@ const CustomizableWidgets = [
 
       let getPanel = () => {
         let {PanelUI} = document.ownerGlobal;
-        if (PanelUI.overflowContents) {
-          return document.getElementById("widget-overflow");
-        }
-        return PanelUI.panel;
+        return PanelUI.overflowPanel;
       }
 
       if (CustomizableUI.getAreaType(this.currentArea) == CustomizableUI.TYPE_MENU_PANEL) {
@@ -1190,6 +935,7 @@ const CustomizableWidgets = [
       this.onInit();
     },
     onInit() {
+      this._inited = true;
       if (!this.charsetInfo) {
         this.charsetInfo = CharsetMenu.getData();
       }

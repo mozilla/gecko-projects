@@ -35,8 +35,6 @@
 #include "mozilla/dom/MemoryReportRequest.h"
 #include "mozilla/dom/ProcessGlobal.h"
 #include "mozilla/dom/PushNotifier.h"
-#include "mozilla/dom/LocalStorage.h"
-#include "mozilla/dom/StorageIPC.h"
 #include "mozilla/dom/TabGroup.h"
 #include "mozilla/dom/workers/ServiceWorkerManager.h"
 #include "mozilla/dom/nsIContentChild.h"
@@ -61,6 +59,7 @@
 #include "mozilla/layout/RenderFrameChild.h"
 #include "mozilla/loader/ScriptCacheActors.h"
 #include "mozilla/net/NeckoChild.h"
+#include "mozilla/net/CookieServiceChild.h"
 #include "mozilla/net/CaptivePortalService.h"
 #include "mozilla/plugins/PluginInstanceParent.h"
 #include "mozilla/plugins/PluginModuleParent.h"
@@ -73,6 +72,10 @@
 #include "imgLoader.h"
 #include "GMPServiceChild.h"
 #include "NullPrincipal.h"
+
+#if !defined(XP_WIN)
+#include "mozilla/Omnijar.h"
+#endif
 
 #ifdef MOZ_GECKO_PROFILER
 #include "ChildProfilerController.h"
@@ -170,7 +173,16 @@
 #include <process.h>
 #define getpid _getpid
 #include "mozilla/widget/AudioSession.h"
+#include "mozilla/audio/AudioNotificationReceiver.h"
 #endif
+
+#if defined(XP_MACOSX)
+#include <CoreServices/CoreServices.h>
+// Info.plist key associated with the developer repo path
+#define MAC_DEV_REPO_KEY "MozillaDeveloperRepoPath"
+// Info.plist key associated with the developer repo object directory
+#define MAC_DEV_OBJ_KEY "MozillaDeveloperObjPath"
+#endif /* XP_MACOSX */
 
 #ifdef MOZ_X11
 #include "mozilla/X11Util.h"
@@ -447,7 +459,7 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
     return NS_OK;
   }
 
-  nsXPIDLString msg;
+  nsString msg;
   nsresult rv = aMessage->GetMessageMoz(getter_Copies(msg));
   NS_ENSURE_SUCCESS(rv, rv);
   mChild->SendConsoleMessage(msg);
@@ -489,7 +501,6 @@ ContentChild::ContentChild()
  , mMainChromeTid(0)
  , mMsaaID(0)
 #endif
- , mCanOverrideProcessName(true)
  , mIsAlive(true)
  , mShuttingDown(false)
 {
@@ -625,18 +636,14 @@ ContentChild::Init(MessageLoop* aIOLoop,
   mID = aChildID;
   mIsForBrowser = aIsForBrowser;
 
-  SetProcessName(NS_LITERAL_STRING("Web Content"), true);
+  SetProcessName(NS_LITERAL_STRING("Web Content"));
 
   return true;
 }
 
 void
-ContentChild::SetProcessName(const nsAString& aName, bool aDontOverride)
+ContentChild::SetProcessName(const nsAString& aName)
 {
-  if (!mCanOverrideProcessName) {
-    return;
-  }
-
   char* name;
   if ((name = PR_GetEnv("MOZ_DEBUG_APP_PROCESS")) &&
     aName.EqualsASCII(name)) {
@@ -655,10 +662,6 @@ ContentChild::SetProcessName(const nsAString& aName, bool aDontOverride)
 
   mProcessName = aName;
   mozilla::ipc::SetThisProcessName(NS_LossyConvertUTF16toASCII(aName).get());
-
-  if (aDontOverride) {
-    mCanOverrideProcessName = false;
-  }
 }
 
 NS_IMETHODIMP
@@ -1334,6 +1337,15 @@ ContentChild::RecvReinitRendering(Endpoint<PCompositorManagerChild>&& aComposito
 }
 
 mozilla::ipc::IPCResult
+ContentChild::RecvAudioDefaultDeviceChange()
+{
+#ifdef XP_WIN
+  audio::AudioNotificationReceiver::NotifyDefaultDeviceChanged();
+#endif
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
 ContentChild::RecvReinitRenderingForDeviceReset()
 {
   gfxPlatform::GetPlatform()->CompositorUpdated();
@@ -1452,12 +1464,26 @@ GetDirectoryPath(const char *aPath) {
 }
 #endif // DEBUG
 
+extern "C" {
+void CGSSetDenyWindowServerConnections(bool);
+void CGSShutdownServerConnections();
+};
+
 static bool
 StartMacOSContentSandbox()
 {
   int sandboxLevel = GetEffectiveContentSandboxLevel();
   if (sandboxLevel < 1) {
     return false;
+  }
+
+  if (!XRE_UseNativeEventProcessing()) {
+    // If we've opened a connection to the window server, shut it down now. Forbid
+    // future connections as well. We do this for sandboxing, but it also ensures
+    // that the Activity Monitor will not label the content process as "Not
+    // responding" because it's not running a native event loop. See bug 1384336.
+    CGSSetDenyWindowServerConnections(true);
+    CGSShutdownServerConnections();
   }
 
   nsAutoCString appPath, appBinaryPath, appDir;
@@ -1511,13 +1537,15 @@ StartMacOSContentSandbox()
   // These paths are used to whitelist certain directories used by the testing
   // system. They should not be considered a public API, and are only intended
   // for use in automation.
-  nsAdoptingCString testingReadPath1 =
-    Preferences::GetCString("security.sandbox.content.mac.testing_read_path1");
+  nsAutoCString testingReadPath1;
+  Preferences::GetCString("security.sandbox.content.mac.testing_read_path1",
+                          testingReadPath1);
   if (!testingReadPath1.IsEmpty()) {
     info.testingReadPath1.assign(testingReadPath1.get());
   }
-  nsAdoptingCString testingReadPath2 =
-    Preferences::GetCString("security.sandbox.content.mac.testing_read_path2");
+  nsAutoCString testingReadPath2;
+  Preferences::GetCString("security.sandbox.content.mac.testing_read_path2",
+                          testingReadPath2);
   if (!testingReadPath2.IsEmpty()) {
     info.testingReadPath2.assign(testingReadPath2.get());
   }
@@ -1605,11 +1633,12 @@ ContentChild::RecvSetProcessSandbox(const MaybeFileDesc& aBroker)
     }
     // Allow user overrides of seccomp-bpf syscall filtering
     std::vector<int> syscallWhitelist;
-    nsAdoptingCString extraSyscalls =
-      Preferences::GetCString("security.sandbox.content.syscall_whitelist");
-    if (extraSyscalls) {
+    nsAutoCString extraSyscalls;
+    nsresult rv =
+      Preferences::GetCString("security.sandbox.content.syscall_whitelist",
+                              extraSyscalls);
+    if (NS_SUCCEEDED(rv)) {
       for (const nsACString& callNrString : extraSyscalls.Split(',')) {
-        nsresult rv;
         int callNr = PromiseFlatCString(callNrString).ToInteger(&rv);
         if (NS_SUCCEEDED(rv)) {
           syscallWhitelist.push_back(callNr);
@@ -1934,6 +1963,16 @@ ContentChild::RecvPTestShellConstructor(PTestShellChild* actor)
   return IPC_OK();
 }
 
+void
+ContentChild::UpdateCookieStatus(nsIChannel   *aChannel)
+{
+  RefPtr<CookieServiceChild> csChild =
+    CookieServiceChild::GetSingleton();
+  NS_ASSERTION(csChild, "Couldn't get CookieServiceChild");
+
+  csChild->TrackCookieLoad(aChannel);
+}
+
 PScriptCacheChild*
 ContentChild::AllocPScriptCacheChild(const FileDescOrError& cacheFile, const bool& wantCacheData)
 {
@@ -2088,21 +2127,6 @@ bool
 ContentChild::DeallocPMediaChild(media::PMediaChild *aActor)
 {
   return media::DeallocPMediaChild(aActor);
-}
-
-PStorageChild*
-ContentChild::AllocPStorageChild()
-{
-  MOZ_CRASH("We should never be manually allocating PStorageChild actors");
-  return nullptr;
-}
-
-bool
-ContentChild::DeallocPStorageChild(PStorageChild* aActor)
-{
-  StorageDBChild* child = static_cast<StorageDBChild*>(aActor);
-  child->ReleaseIPDLReference();
-  return true;
 }
 
 PSpeechSynthesisChild*
@@ -2302,7 +2326,7 @@ ContentChild::ProcessingError(Result aCode, const char* aReason)
       MOZ_CRASH("not reached");
   }
 
-#if defined(MOZ_CRASHREPORTER) && !defined(MOZ_B2G)
+#if defined(MOZ_CRASHREPORTER)
   nsDependentCString reason(aReason);
   CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("ipc_channel_error"), reason);
 #endif
@@ -2384,6 +2408,8 @@ ContentChild::RecvNotifyAlertsObserver(const nsCString& aType, const nsString& a
   return IPC_OK();
 }
 
+// NOTE: This method is being run in the SystemGroup, and thus cannot directly
+// touch pages. See GetSpecificMessageEventTarget.
 mozilla::ipc::IPCResult
 ContentChild::RecvNotifyVisited(const URIParams& aURI)
 {
@@ -2604,6 +2630,17 @@ ContentChild::RecvRemoteType(const nsString& aRemoteType)
   MOZ_ASSERT(DOMStringIsNull(mRemoteType));
 
   mRemoteType.Assign(aRemoteType);
+
+  // For non-default ("web") types, update the process name so about:memory's
+  // process names are more obvious.
+  if (aRemoteType.EqualsLiteral(FILE_REMOTE_TYPE)) {
+    SetProcessName(NS_LITERAL_STRING("file:// Content"));
+  } else if (aRemoteType.EqualsLiteral(EXTENSION_REMOTE_TYPE)) {
+    SetProcessName(NS_LITERAL_STRING("WebExtensions"));
+  } else if (aRemoteType.EqualsLiteral(LARGE_ALLOCATION_REMOTE_TYPE)) {
+    SetProcessName(NS_LITERAL_STRING("Large Allocation Web Content"));
+  }
+
   return IPC_OK();
 }
 
@@ -3221,19 +3258,6 @@ ContentChild::RecvBlobURLUnregistration(const nsCString& aURI)
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult
-ContentChild::RecvDispatchLocalStorageChange(const nsString& aDocumentURI,
-                                             const nsString& aKey,
-                                             const nsString& aOldValue,
-                                             const nsString& aNewValue,
-                                             const IPC::Principal& aPrincipal,
-                                             const bool& aIsPrivate)
-{
-  LocalStorage::DispatchStorageEvent(aDocumentURI, aKey, aOldValue, aNewValue,
-                                     aPrincipal, aIsPrivate, nullptr, true);
-  return IPC_OK();
-}
-
 #if defined(XP_WIN) && defined(ACCESSIBILITY)
 bool
 ContentChild::SendGetA11yContentId()
@@ -3545,7 +3569,8 @@ already_AddRefed<nsIEventTarget>
 ContentChild::GetSpecificMessageEventTarget(const Message& aMsg)
 {
   if (aMsg.type() == PJavaScript::Msg_DropTemporaryStrongReferences__ID
-      || aMsg.type() == PJavaScript::Msg_DropObject__ID) {
+      || aMsg.type() == PJavaScript::Msg_DropObject__ID
+      || aMsg.type() == PContent::Msg_NotifyVisited__ID) {
     return do_AddRef(SystemGroup::EventTargetFor(TaskCategory::Other));
   }
 
@@ -3553,4 +3578,125 @@ ContentChild::GetSpecificMessageEventTarget(const Message& aMsg)
 }
 
 } // namespace dom
+
+#if !defined(XP_WIN)
+bool IsDevelopmentBuild()
+{
+  nsCOMPtr<nsIFile> path = mozilla::Omnijar::GetPath(mozilla::Omnijar::GRE);
+  // If the path doesn't exist, we're a dev build.
+  return path == nullptr;
+}
+#endif /* !XP_WIN */
+
+#if defined(XP_MACOSX)
+/*
+ * Helper function to read a string value for a given key from the .app's
+ * Info.plist.
+ */
+static nsresult
+GetStringValueFromBundlePlist(const nsAString& aKey, nsAutoCString& aValue)
+{
+  CFBundleRef mainBundle = CFBundleGetMainBundle();
+  if (mainBundle == nullptr) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // Read this app's bundle Info.plist as a dictionary
+  CFDictionaryRef bundleInfoDict = CFBundleGetInfoDictionary(mainBundle);
+  if (bundleInfoDict == nullptr) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsAutoCString keyAutoCString = NS_ConvertUTF16toUTF8(aKey);
+  CFStringRef key = CFStringCreateWithCString(kCFAllocatorDefault,
+                                              keyAutoCString.get(),
+                                              kCFStringEncodingUTF8);
+  if (key == nullptr) {
+    return NS_ERROR_FAILURE;
+  }
+
+  CFStringRef value = (CFStringRef)CFDictionaryGetValue(bundleInfoDict, key);
+  CFRelease(key);
+  if (value == nullptr) {
+    return NS_ERROR_FAILURE;
+  }
+
+  CFIndex valueLength = CFStringGetLength(value);
+  if (valueLength == 0) {
+    return NS_ERROR_FAILURE;
+  }
+
+  const char* valueCString = CFStringGetCStringPtr(value,
+                                                   kCFStringEncodingUTF8);
+  if (valueCString) {
+    aValue.Assign(valueCString);
+    return NS_OK;
+  }
+
+  CFIndex maxLength =
+    CFStringGetMaximumSizeForEncoding(valueLength, kCFStringEncodingUTF8) + 1;
+  char* valueBuffer = static_cast<char*>(moz_xmalloc(maxLength));
+  if (!valueBuffer) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  if (!CFStringGetCString(value, valueBuffer, maxLength,
+                          kCFStringEncodingUTF8)) {
+    free(valueBuffer);
+    return NS_ERROR_FAILURE;
+  }
+
+  aValue.Assign(valueBuffer);
+  free(valueBuffer);
+  return NS_OK;
+}
+
+/*
+ * Helper function for reading a path string from the .app's Info.plist
+ * and returning a directory object for that path with symlinks resolved.
+ */
+static nsresult
+GetDirFromBundlePlist(const nsAString& aKey, nsIFile **aDir)
+{
+  nsresult rv;
+
+  nsAutoCString dirPath;
+  rv = GetStringValueFromBundlePlist(aKey, dirPath);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsIFile> dir;
+  rv = NS_NewLocalFile(NS_ConvertUTF8toUTF16(dirPath),
+                       false,
+                       getter_AddRefs(dir));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = dir->Normalize();
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  bool isDirectory = false;
+  rv = dir->IsDirectory(&isDirectory);
+  NS_ENSURE_SUCCESS(rv, rv);
+  if (!isDirectory) {
+    return NS_ERROR_FILE_NOT_DIRECTORY;
+  }
+
+  dir.swap(*aDir);
+  return NS_OK;
+}
+
+nsresult
+GetRepoDir(nsIFile **aRepoDir)
+{
+  MOZ_ASSERT(IsDevelopmentBuild());
+  return GetDirFromBundlePlist(NS_LITERAL_STRING(MAC_DEV_REPO_KEY), aRepoDir);
+}
+
+nsresult
+GetObjDir(nsIFile **aObjDir)
+{
+  MOZ_ASSERT(IsDevelopmentBuild());
+  return GetDirFromBundlePlist(NS_LITERAL_STRING(MAC_DEV_OBJ_KEY), aObjDir);
+}
+#endif /* XP_MACOSX */
+
 } // namespace mozilla

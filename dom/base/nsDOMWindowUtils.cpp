@@ -1829,6 +1829,39 @@ nsDOMWindowUtils::GetBoundsWithoutFlushing(nsIDOMElement *aElement,
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::NeedsFlush(int32_t aFlushType, bool* aResult)
+{
+  MOZ_ASSERT(aResult);
+
+  nsCOMPtr<nsIDocument> doc = GetDocument();
+  NS_ENSURE_STATE(doc);
+
+  nsIPresShell* presShell = doc->GetShell();
+  NS_ENSURE_STATE(presShell);
+
+  FlushType flushType;
+  switch (aFlushType) {
+  case FLUSH_STYLE:
+    flushType = FlushType::Style;
+    break;
+
+  case FLUSH_LAYOUT:
+    flushType = FlushType::Layout;
+    break;
+
+  case FLUSH_DISPLAY:
+    flushType = FlushType::Display;
+    break;
+
+  default:
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  *aResult = presShell->NeedFlush(flushType);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::GetRootBounds(nsIDOMClientRect** aResult)
 {
   nsIDocument* doc = GetDocument();
@@ -3057,23 +3090,6 @@ nsDOMWindowUtils::GetDisplayDPI(float *aDPI)
   return NS_OK;
 }
 
-
-NS_IMETHODIMP
-nsDOMWindowUtils::GetOuterWindowWithId(uint64_t aWindowID,
-                                       nsIDOMWindow** aWindow)
-{
-  // XXX This method is deprecated.  See bug 865664.
-  nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                  NS_LITERAL_CSTRING("DOM"),
-                                  nsContentUtils::GetDocumentFromCaller(),
-                                  nsContentUtils::eDOM_PROPERTIES,
-                                  "GetWindowWithOuterIdWarning");
-
-  *aWindow = nsGlobalWindow::GetOuterWindowWithId(aWindowID);
-  NS_IF_ADDREF(*aWindow);
-  return NS_OK;
-}
-
 NS_IMETHODIMP
 nsDOMWindowUtils::GetContainerElement(nsIDOMElement** aResult)
 {
@@ -3951,8 +3967,7 @@ nsDOMWindowUtils::GetOMTAStyle(nsIDOMElement* aElement,
   if (frame && nsLayoutUtils::AreAsyncAnimationsEnabled()) {
     if (aProperty.EqualsLiteral("opacity")) {
       Layer* layer =
-        FrameLayerBuilder::GetDedicatedLayer(frame,
-                                             TYPE_OPACITY);
+        FrameLayerBuilder::GetDedicatedLayer(frame, DisplayItemType::TYPE_OPACITY);
       if (layer) {
         float value = 0;
         bool hadAnimatedOpacity = false;
@@ -3976,8 +3991,7 @@ nsDOMWindowUtils::GetOMTAStyle(nsIDOMElement* aElement,
       }
     } else if (aProperty.EqualsLiteral("transform")) {
       Layer* layer =
-        FrameLayerBuilder::GetDedicatedLayer(frame,
-                                             TYPE_TRANSFORM);
+        FrameLayerBuilder::GetDedicatedLayer(frame, DisplayItemType::TYPE_TRANSFORM);
       if (layer) {
         MaybeTransform transform;
         ShadowLayerForwarder* forwarder = layer->Manager()->AsShadowForwarder();

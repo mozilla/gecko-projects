@@ -2022,32 +2022,6 @@ CollapseRangeAfterDelete(nsRange* aRange)
   return aRange->Collapse(false);
 }
 
-/**
- * Split a data node into two parts.
- *
- * @param aStartContainer     The original node we are trying to split.
- * @param aStartOffset        The offset at which to split.
- * @param aEndContainer       The second node.
- * @param aCloneAfterOriginal Set false if the original node should be the
- *                            latter one after split.
- */
-static nsresult SplitDataNode(nsIDOMCharacterData* aStartContainer,
-                              uint32_t aStartOffset,
-                              nsIDOMCharacterData** aEndContainer,
-                              bool aCloneAfterOriginal = true)
-{
-  nsresult rv;
-  nsCOMPtr<nsINode> node = do_QueryInterface(aStartContainer);
-  NS_ENSURE_STATE(node && node->IsNodeOfType(nsINode::eDATA_NODE));
-  nsGenericDOMDataNode* dataNode = static_cast<nsGenericDOMDataNode*>(node.get());
-
-  nsCOMPtr<nsIContent> newData;
-  rv = dataNode->SplitData(aStartOffset, getter_AddRefs(newData),
-                           aCloneAfterOriginal);
-  NS_ENSURE_SUCCESS(rv, rv);
-  return CallQueryInterface(newData, aEndContainer);
-}
-
 NS_IMETHODIMP
 PrependChild(nsINode* aContainer, nsINode* aChild)
 {
@@ -2159,9 +2133,7 @@ nsRange::CutContents(DocumentFragment** aFragment)
     return rv;
   }
 
-  // We delete backwards to avoid iterator problems!
-
-  iter.Last();
+  iter.First();
 
   bool handled = false;
 
@@ -2174,10 +2146,17 @@ nsRange::CutContents(DocumentFragment** aFragment)
     nsCOMPtr<nsINode> nodeToResult;
     nsCOMPtr<nsINode> node = iter.GetCurrentNode();
 
-    // Before we delete anything, advance the iterator to the
-    // next subtree.
+    // Before we delete anything, advance the iterator to the next node that's
+    // not a descendant of this one.  XXX It's a bit silly to iterate through
+    // the descendants only to throw them out, we should use an iterator that
+    // skips the descendants to begin with.
 
-    iter.Prev();
+    iter.Next();
+    nsCOMPtr<nsINode> nextNode = iter.GetCurrentNode();
+    while (nextNode && nsContentUtils::ContentIsDescendantOf(nextNode, node)) {
+      iter.Next();
+      nextNode = iter.GetCurrentNode();
+    }
 
     handled = false;
 
@@ -2231,13 +2210,22 @@ nsRange::CutContents(DocumentFragment** aFragment)
           NS_ENSURE_SUCCESS(rv, rv);
 
           if (dataLength >= startOffset) {
+            if (retval) {
+              nsAutoString cutValue;
+              rv = charData->SubstringData(startOffset, dataLength, cutValue);
+              NS_ENSURE_SUCCESS(rv, rv);
+              nsCOMPtr<nsIDOMNode> clone;
+              rv = charData->CloneNode(false, 1, getter_AddRefs(clone));
+              NS_ENSURE_SUCCESS(rv, rv);
+              clone->SetNodeValue(cutValue);
+              nodeToResult = do_QueryInterface(clone);
+            }
+
             nsMutationGuard guard;
-            nsCOMPtr<nsIDOMCharacterData> cutNode;
-            rv = SplitDataNode(charData, startOffset, getter_AddRefs(cutNode));
+            rv = charData->DeleteData(startOffset, dataLength);
             NS_ENSURE_SUCCESS(rv, rv);
-            NS_ENSURE_STATE(!guard.Mutated(1) ||
+            NS_ENSURE_STATE(!guard.Mutated(0) ||
                             ValidateCurrentNode(this, iter));
-            nodeToResult = do_QueryInterface(cutNode);
           }
 
           handled = true;
@@ -2246,17 +2234,22 @@ nsRange::CutContents(DocumentFragment** aFragment)
       else if (node == endContainer)
       {
         // Delete or extract everything before endOffset.
+        if (retval) {
+          nsAutoString cutValue;
+          rv = charData->SubstringData(0, endOffset, cutValue);
+          NS_ENSURE_SUCCESS(rv, rv);
+          nsCOMPtr<nsIDOMNode> clone;
+          rv = charData->CloneNode(false, 1, getter_AddRefs(clone));
+          NS_ENSURE_SUCCESS(rv, rv);
+          clone->SetNodeValue(cutValue);
+          nodeToResult = do_QueryInterface(clone);
+        }
+
         nsMutationGuard guard;
-        nsCOMPtr<nsIDOMCharacterData> cutNode;
-        /* The Range spec clearly states clones get cut and original nodes
-           remain behind, so use false as the last parameter.
-        */
-        rv = SplitDataNode(charData, endOffset, getter_AddRefs(cutNode),
-                           false);
+        rv = charData->DeleteData(0, endOffset);
         NS_ENSURE_SUCCESS(rv, rv);
-        NS_ENSURE_STATE(!guard.Mutated(1) ||
+        NS_ENSURE_STATE(!guard.Mutated(0) ||
                         ValidateCurrentNode(this, iter));
-        nodeToResult = do_QueryInterface(cutNode);
         handled = true;
       }
     }
@@ -2289,12 +2282,11 @@ nsRange::CutContents(DocumentFragment** aFragment)
       nsCOMPtr<nsINode> oldCommonAncestor = commonAncestor;
       if (!iter.IsDone()) {
         // Setup the parameters for the next iteration of the loop.
-        nsCOMPtr<nsINode> prevNode = iter.GetCurrentNode();
-        NS_ENSURE_STATE(prevNode);
+        NS_ENSURE_STATE(nextNode);
 
-        // Get node's and prevNode's common parent. Do this before moving
+        // Get node's and nextNode's common parent. Do this before moving
         // nodes from original DOM to result fragment.
-        commonAncestor = nsContentUtils::GetCommonAncestor(node, prevNode);
+        commonAncestor = nsContentUtils::GetCommonAncestor(node, nextNode);
         NS_ENSURE_STATE(commonAncestor);
 
         nsCOMPtr<nsINode> parentCounterNode = node;
@@ -2313,18 +2305,26 @@ nsRange::CutContents(DocumentFragment** aFragment)
                                getter_AddRefs(farthestAncestor));
       NS_ENSURE_SUCCESS(rv, rv);
 
+      ErrorResult res;
       if (farthestAncestor)
       {
         nsCOMPtr<nsINode> n = do_QueryInterface(commonCloneAncestor);
-        rv = PrependChild(n, farthestAncestor);
-        NS_ENSURE_SUCCESS(rv, rv);
+        n->AppendChild(*farthestAncestor, res);
+        if (NS_WARN_IF(res.Failed())) {
+          return res.StealNSResult();
+        }
       }
 
       nsMutationGuard guard;
       nsCOMPtr<nsINode> parent = nodeToResult->GetParentNode();
-      rv = closestAncestor ? PrependChild(closestAncestor, nodeToResult)
-                           : PrependChild(commonCloneAncestor, nodeToResult);
-      NS_ENSURE_SUCCESS(rv, rv);
+      if (closestAncestor) {
+        closestAncestor->AppendChild(*nodeToResult, res);
+      } else {
+        commonCloneAncestor->AppendChild(*nodeToResult, res);
+      }
+      if (NS_WARN_IF(res.Failed())) {
+        return res.StealNSResult();
+      }
       NS_ENSURE_STATE(!guard.Mutated(parent ? 2 : 1) ||
                       ValidateCurrentNode(this, iter));
     } else if (nodeToResult) {

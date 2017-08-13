@@ -19,7 +19,7 @@ XPCOMUtils.defineLazyGetter(this, "Telemetry", function () {
   return require("devtools/client/shared/telemetry");
 });
 XPCOMUtils.defineLazyGetter(this, "EventEmitter", function () {
-  return require("devtools/shared/event-emitter");
+  return require("devtools/shared/old-event-emitter");
 });
 const promise = require("promise");
 const Services = require("Services");
@@ -207,6 +207,12 @@ BrowserToolboxProcess.prototype = {
    */
   _migrateProfileDir() {
     let oldDebuggingProfileDir = Services.dirsvc.get("ProfLD", Ci.nsIFile);
+    let newDebuggingProfileDir = Services.dirsvc.get("ProfD", Ci.nsIFile);
+    if (oldDebuggingProfileDir.path == newDebuggingProfileDir.path) {
+      // It's possible for these locations to be the same, such as running from
+      // a custom profile directory specified via CLI.
+      return;
+    }
     oldDebuggingProfileDir.append(CHROME_DEBUGGER_PROFILE_NAME);
     if (!oldDebuggingProfileDir.exists()) {
       return;
@@ -214,7 +220,6 @@ BrowserToolboxProcess.prototype = {
     dumpn(`Old debugging profile exists: ${oldDebuggingProfileDir.path}`);
     try {
       // Remove the directory from the target location, if it exists
-      let newDebuggingProfileDir = Services.dirsvc.get("ProfD", Ci.nsIFile);
       newDebuggingProfileDir.append(CHROME_DEBUGGER_PROFILE_NAME);
       if (newDebuggingProfileDir.exists()) {
         dumpn(`Removing folder at destination: ${newDebuggingProfileDir.path}`);

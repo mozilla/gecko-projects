@@ -27,11 +27,10 @@ ${helpers.single_keyword("list-style-position", "outside inside", animation_valu
         arabic-indic bengali cambodian cjk-decimal devanagari gujarati gurmukhi kannada khmer lao
         malayalam mongolian myanmar oriya persian telugu thai tibetan cjk-earthly-branch
         cjk-heavenly-stem lower-greek hiragana hiragana-iroha katakana katakana-iroha""",
-        needs_conversion="True",
-        animation_value_type="none",
+        animation_value_type="discrete",
         spec="https://drafts.csswg.org/css-lists/#propdef-list-style-type")}
 % else:
-    <%helpers:longhand name="list-style-type" animation_value_type="none" boxed="True"
+    <%helpers:longhand name="list-style-type" animation_value_type="discrete" boxed="True"
                        spec="https://drafts.csswg.org/css-lists/#propdef-list-style-type">
         use values::CustomIdent;
         use values::computed::ComputedValueAsSpecified;

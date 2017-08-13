@@ -18,11 +18,7 @@
   color: var(--lwt-text-color) !important;
 }
 
-%ifndef MOZ_PHOTON_THEME
-:root:-moz-lwtheme:not([customization-lwtheme]) {
-%else
 :root:-moz-lwtheme {
-%endif
   background-color: var(--lwt-accent-color) !important;
   background-image: var(--lwt-header-image), var(--lwt-additional-images) !important;
   background-position: var(--lwt-background-alignment) !important;
@@ -71,28 +67,6 @@ toolbar[customizable="true"] {
 
 #toolbar-menubar[autohide="true"] {
   -moz-binding: url("chrome://browser/content/customizableui/toolbar.xml#toolbar-menubar-autohide");
-}
-
-#addon-bar {
-  -moz-binding: url("chrome://browser/content/customizableui/toolbar.xml#addonbar-delegating");
-  visibility: visible;
-  margin: 0;
-  height: 0 !important;
-  overflow: hidden;
-  padding: 0;
-  border: 0 none;
-}
-
-#addonbar-closebutton {
-  visibility: visible;
-  height: 0 !important;
-}
-
-#status-bar {
-  height: 0 !important;
-  -moz-binding: none;
-  padding: 0;
-  margin: 0;
 }
 
 panelmultiview {
@@ -154,7 +128,7 @@ tabbrowser {
 
 .tabbrowser-tab:not([pinned]) {
   -moz-box-flex: 100;
-  max-width: 210px;
+  max-width: 225px;
   min-width: 100px;
   width: 0;
   transition: min-width 100ms ease-out,
@@ -226,7 +200,7 @@ toolbar[customizing] > .overflow-button {
 }
 
 window:not([chromehidden~="toolbar"]) #nav-bar[nonemptyoverflow] > .overflow-button,
-#nav-bar[customizing][photon-structure] > .overflow-button {
+#nav-bar[customizing] > .overflow-button {
   display: -moz-box;
 }
 
@@ -690,14 +664,9 @@ html|input.urlbar-input[textoverflow]:not([focused]) {
 }
 
 #urlbar[pageproxystate="invalid"] > #urlbar-icons > .urlbar-icon,
-%ifdef MOZ_PHOTON_THEME
+#urlbar[pageproxystate="invalid"] > #urlbar-icons > .urlbar-icon-wrapper > .urlbar-icon,
 .urlbar-go-button[pageproxystate="valid"],
 .urlbar-go-button:not([parentfocused="true"]),
-%else
-#urlbar[pageproxystate="invalid"][focused="true"] > #urlbar-go-button ~ toolbarbutton,
-#urlbar[pageproxystate="valid"] > #urlbar-go-button,
-#urlbar:not([focused="true"]) > #urlbar-go-button,
-%endif
 #urlbar[pageproxystate="invalid"] > #identity-box > #blocked-permissions-container,
 #urlbar[pageproxystate="invalid"] > #identity-box > #notification-popup-box,
 #urlbar[pageproxystate="invalid"] > #identity-box > #identity-icon-labels {
@@ -765,7 +734,7 @@ html|input.urlbar-input[textoverflow]:not([focused]) {
 toolbarpaletteitem[place=toolbar][id^=wrapper-customizableui-special-spring],
 toolbarspring {
   -moz-box-flex: 1;
-  min-width: 40px;
+  min-width: 0;
 }
 
 #nav-bar toolbarpaletteitem[id^=wrapper-customizableui-special-spring],
@@ -1143,100 +1112,60 @@ toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > #downloads-
    lot faster. In fact, Gecko no longer triggers shadow shape recomputations
    for repaints.
    These properties are not implemented on other platforms. */
-#BMB_bookmarksPopup {
-  -moz-window-transform: scale(.4);
+#BMB_bookmarksPopup:not([animate="false"]) {
   -moz-window-opacity: 0;
+  -moz-window-transform: translateY(-70px);
   transition-property: -moz-window-transform, -moz-window-opacity;
-  transition-duration: 0.15s;
-  transition-timing-function: ease-out;
+  transition-duration: 0.18s, 0.18s;
+  transition-timing-function:
+    var(--animation-easing-function), ease-out;
 }
 
-#BMB_bookmarksPopup[animate="open"] {
-  -moz-window-transform: none;
+#BMB_bookmarksPopup[side="bottom"]:not([animate="false"]) {
+  -moz-window-transform: translateY(70px);
+}
+
+#BMB_bookmarksPopup[side][animate="open"] {
   -moz-window-opacity: 1.0;
+  transition-duration: 0.18s, 0.18s;
+  -moz-window-transform: none;
+  transition-timing-function:
+    var(--animation-easing-function), ease-in-out;
 }
 
 #BMB_bookmarksPopup[animate="cancel"] {
   -moz-window-transform: none;
-}
-
-#BMB_bookmarksPopup[arrowposition="after_start"]:-moz-locale-dir(ltr),
-#BMB_bookmarksPopup[arrowposition="after_end"]:-moz-locale-dir(rtl) {
-  -moz-window-transform-origin: 20px top;
-}
-
-#BMB_bookmarksPopup[arrowposition="after_end"]:-moz-locale-dir(ltr),
-#BMB_bookmarksPopup[arrowposition="after_start"]:-moz-locale-dir(rtl) {
-  -moz-window-transform-origin: calc(100% - 20px) top;
-}
-
-#BMB_bookmarksPopup[arrowposition="before_start"]:-moz-locale-dir(ltr),
-#BMB_bookmarksPopup[arrowposition="before_end"]:-moz-locale-dir(rtl) {
-  -moz-window-transform-origin: 20px bottom;
-}
-
-#BMB_bookmarksPopup[arrowposition="before_end"]:-moz-locale-dir(ltr),
-#BMB_bookmarksPopup[arrowposition="before_start"]:-moz-locale-dir(rtl) {
-  -moz-window-transform-origin: calc(100% - 20px) bottom;
 }
 
 %elifndef MOZ_WIDGET_GTK
 
-#BMB_bookmarksPopup {
-  transform: scale(.4);
+#BMB_bookmarksPopup:not([animate="false"]) {
   opacity: 0;
+  transform: translateY(-70px);
   transition-property: transform, opacity;
-  transition-duration: 0.15s;
-  transition-timing-function: ease-out;
+  transition-duration: 0.18s, 0.18s;
+  transition-timing-function:
+    var(--animation-easing-function), ease-out;
 }
 
-#BMB_bookmarksPopup[animate="open"] {
-  transform: none;
+#BMB_bookmarksPopup[side="bottom"]:not([animate="false"]) {
+  transform: translateY(70px);
+}
+
+#BMB_bookmarksPopup[side][animate="open"] {
   opacity: 1.0;
+  transition-duration: 0.18s, 0.18s;
+  transform: none;
+  transition-timing-function:
+    var(--animation-easing-function), ease-in-out;
 }
 
 #BMB_bookmarksPopup[animate="cancel"] {
   transform: none;
 }
-
-#BMB_bookmarksPopup[arrowposition="after_start"]:-moz-locale-dir(ltr),
-#BMB_bookmarksPopup[arrowposition="after_end"]:-moz-locale-dir(rtl) {
-  transform-origin: 20px top;
-}
-
-#BMB_bookmarksPopup[arrowposition="after_end"]:-moz-locale-dir(ltr),
-#BMB_bookmarksPopup[arrowposition="after_start"]:-moz-locale-dir(rtl) {
-  transform-origin: calc(100% - 20px) top;
-}
-
-#BMB_bookmarksPopup[arrowposition="before_start"]:-moz-locale-dir(ltr),
-#BMB_bookmarksPopup[arrowposition="before_end"]:-moz-locale-dir(rtl) {
-  transform-origin: 20px bottom;
-}
-
-#BMB_bookmarksPopup[arrowposition="before_end"]:-moz-locale-dir(ltr),
-#BMB_bookmarksPopup[arrowposition="before_start"]:-moz-locale-dir(rtl) {
-  transform-origin: calc(100% - 20px) bottom;
-}
 %endif
 
 /* Customize mode */
-%ifndef MOZ_PHOTON_THEME
-#navigator-toolbox,
-#browser-bottombox,
-#content-deck {
-  transition-property: margin-left, margin-right;
-  transition-duration: 200ms;
-  transition-timing-function: linear;
-}
-
-#tab-view-deck[fastcustomizeanimation] #navigator-toolbox,
-#tab-view-deck[fastcustomizeanimation] #content-deck {
-  transition-duration: 1ms;
-  transition-timing-function: linear;
-}
-%endif
-
 #PanelUI-contents > .panel-customization-placeholder > .panel-customization-placeholder-child {
   list-style-image: none;
 }
@@ -1253,24 +1182,22 @@ toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > #downloads-
 
 #customization-container {
   -moz-box-orient: horizontal;
-}
-
-#customization-container[photon] {
-  display: flex;
   flex-direction: column;
 }
 
-#customization-container[photon] > #customization-content-container {
+#customization-container:not([hidden]) {
+  /* In a separate rule to avoid 'display:flex' causing the node to be
+   * displayed while the container is still hidden. */
+  display: flex;
+}
+
+#customization-content-container {
   display: flex;
   flex-grow: 1; /* Grow so there isn't empty space below the footer */
   min-height: 0; /* Allow this to shrink so the footer doesn't get pushed out. */
 }
 
-#customization-container[photon] > #customization-content-container > #customization-palette-container {
-  flex-grow: 1;
-}
-
-#customization-container[photon] #customization-panelHolder {
+#customization-panelHolder {
   padding-top: 10px;
   padding-bottom: 10px;
 }
@@ -1283,25 +1210,15 @@ toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > #downloads-
   overflow-x: hidden;
 }
 
-#customization-container:not([photon]) #customization-panelHolder {
-  overflow-y: hidden;
-}
-
-#customization-container[photon] #customization-panel-container {
-  display: flex;
-  flex-direction: column;
-  flex: none;
-}
-
-#customization-container[photon] #customization-panelWrapper,
-#customization-container[photon] #customization-panelWrapper > .panel-arrowcontent,
-#customization-container[photon] #customization-panelHolder {
+#customization-panelWrapper,
+#customization-panelWrapper > .panel-arrowcontent,
+#customization-panelHolder {
   flex-direction: column;
   display: flex;
   min-height: 0;
 }
 
-#customization-container[photon] #customization-panelWrapper {
+#customization-panelWrapper {
   flex: 1 1 auto;
   height: 0; /* Don't let my contents affect ancestors' content-based sizing */
   align-items: end; /* align to the end on the cross-axis (affects arrow) */
@@ -1312,28 +1229,11 @@ toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > #downloads-
   -moz-box-flex: 1;
 }
 
-#customization-container:not([photon]) #customization-panelWrapper > .panel-arrowcontent {
-  overflow: hidden;
-}
-
-#customization-panelHolder > #PanelUI-mainView {
-  display: flex;
-  flex-direction: column;
-  /* Hack alert - by manually setting the preferred height to 0, we convince
-     #PanelUI-mainView to shrink when the window gets smaller in customization
-     mode. Not sure why that is - might have to do with our intermingling of
-     XUL flex, and CSS3 Flexbox. */
-  height: 0;
-}
-
-#customization-panelHolder > #PanelUI-mainView > #PanelUI-contents-scroller {
-  display: flex;
-  flex: auto;
-  flex-direction: column;
-}
-
 #customization-panel-container {
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  flex: none;
 }
 
 toolbarpaletteitem[dragover] {
@@ -1344,6 +1244,7 @@ toolbarpaletteitem[dragover] {
 #customization-palette-container {
   display: flex;
   flex-direction: column;
+  flex-grow: 1;
 }
 
 #customization-palette:not([hidden]) {
@@ -1369,22 +1270,14 @@ toolbarpaletteitem[dragover] {
 }
 
 toolbarpaletteitem[place="palette"] {
-  width: 10em;
-  /* icon (32) + margin (2 * 4) + button padding/border (2 * 4) + label margin (~2) + label
-   * line-height (1.5em): */
-  height: calc(50px + 1.5em);
-  margin-bottom: 5px;
-  overflow: hidden;
-  display: inline-block;
-}
-
-#main-window[photon-structure] toolbarpaletteitem[place="palette"] {
   -moz-binding: url("chrome://global/content/bindings/toolbar.xml#toolbarpaletteitem-palette-wrapping-label");
   width: 7em;
   /* icon (16) + margin (9 + 12) + 3 lines of text: */
   height: calc(39px + 3em);
+  margin-bottom: 5px;
   margin-inline-end: 24px;
   overflow: visible;
+  display: inline-block;
   vertical-align: top;
 }
 
@@ -1396,12 +1289,6 @@ toolbarpaletteitem[place="palette"][hidden] {
   -moz-box-pack: center;
   width: 7em;
   max-width: 7em;
-}
-
-#main-window:not([photon-structure]) #customization-palette .toolbarpaletteitem-box {
-  -moz-box-flex: 1;
-  width: 10em;
-  max-width: 10em;
 }
 
 #main-window[customizing=true] .addon-banner-item,
@@ -1494,8 +1381,9 @@ toolbarpaletteitem[place="palette"][hidden] {
   -moz-window-shadow: none;
 }
 
-/* Page action menu */
-#page-action-sendToDeviceView-body:not([state="notready"]) > #page-action-sync-not-ready-button {
+/* Page action panel */
+#pageAction-panel-sendToDevice-subview-body:not([state="notready"]) > #pageAction-panel-sendToDevice-notReady,
+#pageAction-urlbar-sendToDevice-subview-body:not([state="notready"]) > #pageAction-urlbar-sendToDevice-notReady {
   display: none;
 }
 

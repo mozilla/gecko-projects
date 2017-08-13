@@ -15,21 +15,24 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 this.EXPORTED_SYMBOLS = ["ExtensionCommon"];
 
+Cu.importGlobalProperties(["fetch"]);
+
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
-                                  "resource://gre/modules/MessageChannel.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
-                                  "resource://gre/modules/Preferences.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
-                                  "resource://gre/modules/Schemas.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  ConsoleAPI: "resource://gre/modules/Console.jsm",
+  MessageChannel: "resource://gre/modules/MessageChannel.jsm",
+  Preferences: "resource://gre/modules/Preferences.jsm",
+  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
+  Schemas: "resource://gre/modules/Schemas.jsm",
+});
 
 XPCOMUtils.defineLazyServiceGetter(this, "styleSheetService",
                                    "@mozilla.org/content/style-sheet-service;1",
                                    "nsIStyleSheetService");
+
+const global = this;
 
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 
@@ -81,6 +84,98 @@ class NoCloneSpreadArgs {
     return this.unwrappedValues[Symbol.iterator]();
   }
 }
+
+class ExtensionAPI extends ExtensionUtils.EventEmitter {
+  constructor(extension) {
+    super();
+
+    this.extension = extension;
+
+    extension.once("shutdown", () => {
+      if (this.onShutdown) {
+        this.onShutdown(extension.shutdownReason);
+      }
+      this.extension = null;
+    });
+  }
+
+  destroy() {
+  }
+
+  onManifestEntry(entry) {
+  }
+
+  getAPI(context) {
+    throw new Error("Not Implemented");
+  }
+}
+
+var ExtensionAPIs = {
+  apis: new Map(),
+
+  load(apiName) {
+    let api = this.apis.get(apiName);
+
+    if (api.loadPromise) {
+      return api.loadPromise;
+    }
+
+    let {script, schema} = api;
+
+    let addonId = `${apiName}@experiments.addons.mozilla.org`;
+    api.sandbox = Cu.Sandbox(global, {
+      wantXrays: false,
+      sandboxName: script,
+      addonId,
+      metadata: {addonID: addonId},
+    });
+
+    api.sandbox.ExtensionAPI = ExtensionAPI;
+
+    // Create a console getter which lazily provide a ConsoleAPI instance.
+    XPCOMUtils.defineLazyGetter(api.sandbox, "console", () => {
+      return new ConsoleAPI({prefix: addonId});
+    });
+
+    Services.scriptloader.loadSubScript(script, api.sandbox, "UTF-8");
+
+    api.loadPromise = Schemas.load(schema).then(() => {
+      let API = Cu.evalInSandbox("API", api.sandbox);
+      API.prototype.namespace = apiName;
+      return API;
+    });
+
+    return api.loadPromise;
+  },
+
+  unload(apiName) {
+    let api = this.apis.get(apiName);
+
+    let {schema} = api;
+
+    Schemas.unload(schema);
+    Cu.nukeSandbox(api.sandbox);
+
+    api.sandbox = null;
+    api.loadPromise = null;
+  },
+
+  register(namespace, schema, script) {
+    if (this.apis.has(namespace)) {
+      throw new Error(`API namespace already exists: ${namespace}`);
+    }
+
+    this.apis.set(namespace, {schema, script});
+  },
+
+  unregister(namespace) {
+    if (!this.apis.has(namespace)) {
+      throw new Error(`API namespace does not exist: ${namespace}`);
+    }
+
+    this.apis.delete(namespace);
+  },
+};
 
 class BaseContext {
   constructor(envType, extension) {
@@ -450,10 +545,12 @@ class SchemaAPIInterface {
    * @param {Array} args The parameters for the function.
    * @param {function(*)} [callback] The callback to be called when the function
    *     completes.
+   * @param {boolean} [requireUserInput=false] If true, the function should
+   *                  fail if the browser is not currently handling user input.
    * @returns {Promise|undefined} Must be void if `callback` is set, and a
    *     promise otherwise. The promise is resolved when the function completes.
    */
-  callAsyncFunction(args, callback) {
+  callAsyncFunction(args, callback, requireUserInput = false) {
     throw new Error("Not implemented");
   }
 
@@ -559,9 +656,16 @@ class LocalAPIImplementation extends SchemaAPIInterface {
     this.pathObj[this.name](...args);
   }
 
-  callAsyncFunction(args, callback) {
+  callAsyncFunction(args, callback, requireUserInput) {
     let promise;
     try {
+      if (requireUserInput) {
+        let winUtils = this.context.contentWindow
+                           .getInterface(Ci.nsIDOMWindowUtils);
+        if (!winUtils.isHandlingUserInput) {
+          throw new ExtensionError(`${this.name} may only be called from a user input handler`);
+        }
+      }
       promise = this.pathObj[this.name](...args) || Promise.resolve();
     } catch (e) {
       promise = Promise.reject(e);
@@ -607,6 +711,26 @@ function deepCopy(dest, source) {
       Object.defineProperty(dest, prop, desc);
     }
   }
+}
+
+function getChild(map, key) {
+  let child = map.children.get(key);
+  if (!child) {
+    child = {
+      modules: new Set(),
+      children: new Map(),
+    };
+
+    map.children.set(key, child);
+  }
+  return child;
+}
+
+function getPath(map, path) {
+  for (let key of path) {
+    map = getChild(map, key);
+  }
+  return map;
 }
 
 /**
@@ -703,7 +827,7 @@ class CanOfAPIs {
       if (!obj) {
         return;
       }
-      modules = modules.get(key);
+      modules = getChild(modules, key);
 
       for (let name of modules.modules) {
         if (!this.apis.has(name)) {
@@ -739,7 +863,7 @@ class CanOfAPIs {
       if (!obj) {
         return;
       }
-      modules = modules.get(key);
+      modules = getChild(modules, key);
 
       for (let name of modules.modules) {
         if (!this.apis.has(name)) {
@@ -756,18 +880,6 @@ class CanOfAPIs {
 
     this.apiPaths.set(path, obj);
     return obj;
-  }
-}
-
-class DeepMap extends DefaultMap {
-  constructor() {
-    super(() => new DeepMap());
-
-    this.modules = new Set();
-  }
-
-  getPath(path) {
-    return path.reduce((map, key) => map.get(key), this);
   }
 }
 
@@ -823,15 +935,52 @@ class SchemaAPIManager extends EventEmitter {
     this.global = this._createExtGlobal();
 
     this.modules = new Map();
-    this.modulePaths = new DeepMap();
+    this.modulePaths = {children: new Map(), modules: new Set()};
     this.manifestKeys = new Map();
     this.eventModules = new DefaultMap(() => new Set());
+
+    this._modulesJSONLoaded = false;
 
     this.schemaURLs = new Set();
 
     this.apis = new DefaultWeakMap(() => new Map());
 
     this._scriptScopes = [];
+  }
+
+  async loadModuleJSON(urls) {
+    function fetchJSON(url) {
+      return fetch(url).then(resp => resp.json());
+    }
+
+    for (let json of await Promise.all(urls.map(fetchJSON))) {
+      this.registerModules(json);
+    }
+
+    this._modulesJSONLoaded = true;
+
+    return new StructuredCloneHolder({
+      modules: this.modules,
+      modulePaths: this.modulePaths,
+      manifestKeys: this.manifestKeys,
+      eventModules: this.eventModules,
+      schemaURLs: this.schemaURLs,
+    });
+  }
+
+  initModuleData(moduleData) {
+    if (!this._modulesJSONLoaded) {
+      let data = moduleData.deserialize({});
+
+      this.modules = data.modules;
+      this.modulePaths = data.modulePaths;
+      this.manifestKeys = data.manifestKeys;
+      this.eventModules = new DefaultMap(() => new Set(),
+                                         data.eventModules);
+      this.schemaURLs = data.schemaURLs;
+    }
+
+    this._modulesJSONLoaded = true;
   }
 
   /**
@@ -869,7 +1018,7 @@ class SchemaAPIManager extends EventEmitter {
       }
 
       for (let path of details.paths || []) {
-        this.modulePaths.getPath(path).modules.add(name);
+        getPath(this.modulePaths, path).modules.add(name);
       }
     }
   }
@@ -1099,19 +1248,17 @@ class SchemaAPIManager extends EventEmitter {
       sandboxName: `Namespace of ext-*.js scripts for ${this.processType}`,
     });
 
-    Object.assign(global, {global, Cc, Ci, Cu, Cr, XPCOMUtils, ChromeWorker, ExtensionCommon, MatchPattern, MatchPatternSet, StructuredCloneHolder, extensions: this});
+    Object.assign(global, {global, Cc, Ci, Cu, Cr, XPCOMUtils, ChromeWorker, ExtensionAPI, ExtensionCommon, MatchPattern, MatchPatternSet, StructuredCloneHolder, extensions: this});
 
     Cu.import("resource://gre/modules/AppConstants.jsm", global);
-    Cu.import("resource://gre/modules/ExtensionAPI.jsm", global);
 
     XPCOMUtils.defineLazyGetter(global, "console", getConsole);
 
-    XPCOMUtils.defineLazyModuleGetter(global, "ExtensionUtils",
-                                      "resource://gre/modules/ExtensionUtils.jsm");
-    XPCOMUtils.defineLazyModuleGetter(global, "XPCOMUtils",
-                                      "resource://gre/modules/XPCOMUtils.jsm");
-    XPCOMUtils.defineLazyModuleGetter(global, "require",
-                                      "resource://devtools/shared/Loader.jsm");
+    XPCOMUtils.defineLazyModuleGetters(global, {
+      ExtensionUtils: "resource://gre/modules/ExtensionUtils.jsm",
+      XPCOMUtils: "resource://gre/modules/XPCOMUtils.jsm",
+      require: "resource://devtools/shared/Loader.jsm",
+    });
 
     return global;
   }
@@ -1508,6 +1655,8 @@ ExtensionCommon = {
   BaseContext,
   CanOfAPIs,
   EventManager,
+  ExtensionAPI,
+  ExtensionAPIs,
   LocalAPIImplementation,
   LocaleData,
   NoCloneSpreadArgs,

@@ -153,7 +153,7 @@ nsMathMLmfracFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   /////////////
   // paint the numerator and denominator
   nsMathMLContainerFrame::BuildDisplayList(aBuilder, aLists);
-  
+
   /////////////
   // paint the fraction line
   if (mIsBevelled) {

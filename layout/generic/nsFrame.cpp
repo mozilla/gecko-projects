@@ -847,8 +847,30 @@ nsFrame::GetOffsets(int32_t &aStart, int32_t &aEnd) const
   return NS_OK;
 }
 
-static
-void
+static void
+CompareLayers(const nsStyleImageLayers* aFirstLayers,
+              const nsStyleImageLayers* aSecondLayers,
+              const std::function<void(imgRequestProxy* aReq)>& aCallback)
+{
+  NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT(i, (*aFirstLayers)) {
+    const nsStyleImage& image = aFirstLayers->mLayers[i].mImage;
+    if (image.GetType() != eStyleImageType_Image || !image.IsResolved()) {
+      continue;
+    }
+
+    // aCallback is called when the style image in aFirstLayers is thought to
+    // be different with the corresponded one in aSecondLayers
+    if (!aSecondLayers || i >= aSecondLayers->mImageCount ||
+        (!aSecondLayers->mLayers[i].mImage.IsResolved() ||
+         !image.ImageDataEquals(aSecondLayers->mLayers[i].mImage))) {
+      if (imgRequestProxy* req = image.GetImageData()) {
+        aCallback(req);
+      }
+    }
+  }
+}
+
+static void
 AddAndRemoveImageAssociations(nsFrame* aFrame,
                               const nsStyleImageLayers* aOldLayers,
                               const nsStyleImageLayers* aNewLayers)
@@ -864,43 +886,17 @@ AddAndRemoveImageAssociations(nsFrame* aFrame,
   // to clear those notifiers unless we have to.  (They'll be reset
   // when we paint, although we could miss a notification in that
   // interval.)
-
   if (aOldLayers) {
-    NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT(i, (*aOldLayers)) {
-      const nsStyleImage& oldImage = aOldLayers->mLayers[i].mImage;
-      if (oldImage.GetType() != eStyleImageType_Image ||
-          !oldImage.IsResolved()) {
-        continue;
-      }
-
-      // If there is an image in oldBG that's not in newBG, drop it.
-      if (i >= aNewLayers->mImageCount ||
-          !oldImage.ImageDataEquals(aNewLayers->mLayers[i].mImage)) {
-
-        if (aFrame->HasImageRequest()) {
-          if (imgRequestProxy* req = oldImage.GetImageData()) {
-            imageLoader->DisassociateRequestFromFrame(req, aFrame);
-          }
-        }
-      }
-    }
+    CompareLayers(aOldLayers, aNewLayers,
+      [&imageLoader, aFrame](imgRequestProxy* aReq)
+      { imageLoader->DisassociateRequestFromFrame(aReq, aFrame); }
+    );
   }
 
-  NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT(i, (*aNewLayers)) {
-    const nsStyleImage& newImage = aNewLayers->mLayers[i].mImage;
-    if (newImage.GetType() != eStyleImageType_Image ||
-        !newImage.IsResolved()) {
-      continue;
-    }
-
-    // If there is an image in newBG that's not in oldBG, add it.
-    if (!aOldLayers || i >= aOldLayers->mImageCount ||
-        !newImage.ImageDataEquals(aOldLayers->mLayers[i].mImage)) {
-      if (imgRequestProxy* req = newImage.GetImageData()) {
-        imageLoader->AssociateRequestToFrame(req, aFrame);
-      }
-    }
-  }
+  CompareLayers(aNewLayers, aOldLayers,
+    [&imageLoader, aFrame](imgRequestProxy* aReq)
+    { imageLoader->AssociateRequestToFrame(aReq, aFrame); }
+  );
 }
 
 void
@@ -2292,14 +2288,14 @@ DisplayDebugBorders(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
   if (nsFrame::GetShowFrameBorders() && !aFrame->GetRect().IsEmpty()) {
     aLists.Outlines()->AppendNewToTop(new (aBuilder)
         nsDisplayGeneric(aBuilder, aFrame, PaintDebugBorder, "DebugBorder",
-                         TYPE_DEBUG_BORDER));
+                         DisplayItemType::TYPE_DEBUG_BORDER));
   }
   // Draw a border around the current event target
   if (nsFrame::GetShowEventTargetFrameBorder() &&
       aFrame->PresContext()->PresShell()->GetDrawEventTargetFrame() == aFrame) {
     aLists.Outlines()->AppendNewToTop(new (aBuilder)
         nsDisplayGeneric(aBuilder, aFrame, PaintEventTargetBorder, "EventTargetBorder",
-                         TYPE_EVENT_TARGET_BORDER));
+                         DisplayItemType::TYPE_EVENT_TARGET_BORDER));
   }
 }
 #endif
@@ -2380,9 +2376,9 @@ static bool
 ItemParticipatesIn3DContext(nsIFrame* aAncestor, nsDisplayItem* aItem)
 {
   nsIFrame* transformFrame;
-  if (aItem->GetType() == TYPE_TRANSFORM) {
+  if (aItem->GetType() == DisplayItemType::TYPE_TRANSFORM) {
     transformFrame = aItem->Frame();
-  } else if (aItem->GetType() == TYPE_PERSPECTIVE) {
+  } else if (aItem->GetType() == DisplayItemType::TYPE_PERSPECTIVE) {
     transformFrame = static_cast<nsDisplayPerspective*>(aItem)->TransformFrame();
   } else {
     return false;
@@ -2708,7 +2704,6 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
       }
     }
 
-
     if (eventRegions) {
       // If the event regions item ended up empty, throw it away rather than
       // adding it to the display list.
@@ -3015,7 +3010,7 @@ WrapInWrapList(nsDisplayListBuilder* aBuilder,
   // makes the perspective frame create one (so we have an atomic entry for z-index
   // sorting).
   nsIFrame *itemFrame = item->Frame();
-  if (item->GetType() == TYPE_PERSPECTIVE) {
+  if (item->GetType() == DisplayItemType::TYPE_PERSPECTIVE) {
     itemFrame = static_cast<nsDisplayPerspective*>(item)->TransformFrame();
   }
 
@@ -6767,7 +6762,7 @@ bool
 nsIFrame::TryUpdateTransformOnly(Layer** aLayerResult)
 {
   Layer* layer = FrameLayerBuilder::GetDedicatedLayer(
-    this, TYPE_TRANSFORM);
+    this, DisplayItemType::TYPE_TRANSFORM);
   if (!layer || !layer->HasUserData(LayerIsPrerenderedDataKey())) {
     // If this layer isn't prerendered or we clip composites to our OS
     // window, then we can't correctly optimize to an empty
@@ -6838,12 +6833,12 @@ nsIFrame::SchedulePaint(PaintType aType, bool aFrameChanged)
 }
 
 Layer*
-nsIFrame::InvalidateLayer(uint32_t aDisplayItemKey,
+nsIFrame::InvalidateLayer(DisplayItemType aDisplayItemKey,
                           const nsIntRect* aDamageRect,
                           const nsRect* aFrameDamageRect,
                           uint32_t aFlags /* = 0 */)
 {
-  NS_ASSERTION(aDisplayItemKey > 0, "Need a key");
+  NS_ASSERTION(aDisplayItemKey > DisplayItemType::TYPE_ZERO, "Need a key");
 
   Layer* layer = FrameLayerBuilder::GetDedicatedLayer(this, aDisplayItemKey);
 
@@ -6868,16 +6863,16 @@ nsIFrame::InvalidateLayer(uint32_t aDisplayItemKey,
     // screen because sometimes we don't have any retainned data
     // for remote type displayitem and thus Repaint event is not
     // triggered. So, always invalidate here as well.
-    uint32_t displayItemKey = aDisplayItemKey;
-    if (aDisplayItemKey == TYPE_PLUGIN ||
-        aDisplayItemKey == TYPE_REMOTE) {
-      displayItemKey = 0;
+    DisplayItemType displayItemKey = aDisplayItemKey;
+    if (aDisplayItemKey == DisplayItemType::TYPE_PLUGIN ||
+        aDisplayItemKey == DisplayItemType::TYPE_REMOTE) {
+      displayItemKey = DisplayItemType::TYPE_ZERO;
     }
 
     if (aFrameDamageRect) {
-      InvalidateFrameWithRect(*aFrameDamageRect, displayItemKey);
+      InvalidateFrameWithRect(*aFrameDamageRect, static_cast<uint32_t>(displayItemKey));
     } else {
-      InvalidateFrame(displayItemKey);
+      InvalidateFrame(static_cast<uint32_t>(displayItemKey));
     }
 
     return nullptr;
@@ -7357,14 +7352,14 @@ nsIFrame::ListGeneric(nsACString& aTo, const char* aPrefix, uint32_t aFlags) con
       pseudoTag->ToString(atomString);
       aTo += nsPrintfCString("%s", NS_LossyConvertUTF16toASCII(atomString).get());
     }
-    if (mStyleContext->IsGecko()) {
-      if (!mStyleContext->GetParent() ||
-          (GetParent() && GetParent()->StyleContext() != mStyleContext->GetParent())) {
-        aTo += nsPrintfCString("^%p", mStyleContext->GetParent());
-        if (mStyleContext->GetParent()) {
-          aTo += nsPrintfCString("^%p", mStyleContext->GetParent()->GetParent());
-          if (mStyleContext->GetParent()->GetParent()) {
-            aTo += nsPrintfCString("^%p", mStyleContext->GetParent()->GetParent()->GetParent());
+    if (auto* geckoContext = mStyleContext->GetAsGecko()) {
+      if (!geckoContext->GetParent() ||
+          (GetParent() && GetParent()->StyleContext() != geckoContext->GetParent())) {
+        aTo += nsPrintfCString("^%p", geckoContext->GetParent());
+        if (geckoContext->GetParent()) {
+          aTo += nsPrintfCString("^%p", geckoContext->GetParent()->GetParent());
+          if (geckoContext->GetParent()->GetParent()) {
+            aTo += nsPrintfCString("^%p", geckoContext->GetParent()->GetParent()->GetParent());
           }
         }
       }
@@ -10366,7 +10361,14 @@ void
 nsIFrame::UpdateStyleOfChildAnonBox(nsIFrame* aChildFrame,
                                     ServoRestyleState& aRestyleState)
 {
-  MOZ_ASSERT(aChildFrame->GetParent() == this,
+  MOZ_ASSERT(aChildFrame->GetParent() == this ||
+             (aChildFrame->IsTableFrame() &&
+              aChildFrame->GetParent()->GetParent() == this) ||
+             (aChildFrame->GetParent()->IsLineFrame() &&
+              aChildFrame->GetParent()->GetParent() == this) ||
+             (aChildFrame->IsTableFrame() &&
+              aChildFrame->GetParent()->GetParent()->IsLineFrame() &&
+              aChildFrame->GetParent()->GetParent()->GetParent() == this),
              "This should only be used for children!");
   MOZ_ASSERT(!GetContent() || !aChildFrame->GetContent() ||
              aChildFrame->GetContent() == GetContent(),
@@ -10525,6 +10527,12 @@ nsIFrame::RemoveInPopupStateBitFromDescendants(nsIFrame* aFrame)
 void
 nsIFrame::SetParent(nsContainerFrame* aParent)
 {
+  // If our parent is a wrapper anon box, our new parent should be too.  We
+  // _can_ change parent if our parent is a wrapper anon box, because some
+  // wrapper anon boxes can have continuations.
+  MOZ_ASSERT_IF(ParentIsWrapperAnonBox(),
+                aParent->StyleContext()->IsInheritingAnonBox());
+
   // Note that the current mParent may already be destroyed at this point.
   mParent = aParent;
   if (::IsXULBoxWrapped(this)) {

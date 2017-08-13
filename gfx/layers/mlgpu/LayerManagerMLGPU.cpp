@@ -44,7 +44,8 @@ LayerManagerMLGPU::LayerManagerMLGPU(widget::CompositorWidget* aWidget)
  : mWidget(aWidget),
    mDrawDiagnostics(false),
    mUsingInvalidation(false),
-   mCurrentFrame(nullptr)
+   mCurrentFrame(nullptr),
+   mDebugFrameNumber(0)
 {
   if (!aWidget) {
     return;
@@ -266,6 +267,9 @@ LayerManagerMLGPU::EndTransaction(const TimeStamp& aTimeStamp, EndTransactionFla
   // Don't draw the diagnostic overlay if we want to snapshot the output.
   mDrawDiagnostics = gfxPrefs::LayersDrawFPS() && !mTarget;
   mUsingInvalidation = gfxPrefs::AdvancedLayersUseInvalidation();
+  mDebugFrameNumber++;
+
+  AL_LOG("--- Compositing frame %d ---\n", mDebugFrameNumber);
 
   // Compute transforms - and the changed area, if enabled.
   mRoot->ComputeEffectiveTransforms(Matrix4x4());
@@ -459,7 +463,9 @@ LayerManagerMLGPU::ComputeInvalidRegion()
 
   nsIntRegion changed;
   if (mClonedLayerTreeProperties) {
-    changed = mClonedLayerTreeProperties->ComputeDifferences(mRoot, nullptr);
+    if (!mClonedLayerTreeProperties->ComputeDifferences(mRoot, changed, nullptr)) {
+      changed = mRenderBounds;
+    }
   } else {
     changed = mRenderBounds;
   }

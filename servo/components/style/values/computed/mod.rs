@@ -12,12 +12,17 @@ use media_queries::Device;
 #[cfg(feature = "gecko")]
 use properties;
 use properties::{ComputedValues, StyleBuilder};
+#[cfg(feature = "servo")]
+use servo_url::ServoUrl;
 use std::f32;
 use std::f64;
 use std::f64::consts::PI;
 use std::fmt;
+#[cfg(feature = "servo")]
+use std::sync::Arc;
 use style_traits::ToCss;
-use super::{CSSFloat, CSSInteger, RGBA};
+use super::{CSSFloat, CSSInteger};
+use super::generics::{GreaterThanOrEqualToOne, NonNegative};
 use super::generics::grid::{TrackBreadth as GenericTrackBreadth, TrackSize as GenericTrackSize};
 use super::generics::grid::GridTemplateComponent as GenericGridTemplateComponent;
 use super::generics::grid::TrackList as GenericTrackList;
@@ -25,6 +30,8 @@ use super::specified;
 
 pub use app_units::Au;
 pub use properties::animated_properties::TransitionProperty;
+#[cfg(feature = "gecko")]
+pub use self::align::{AlignItems, AlignJustifyContent, AlignJustifySelf, JustifyItems};
 pub use self::background::BackgroundSize;
 pub use self::border::{BorderImageSlice, BorderImageWidth, BorderImageSideWidth};
 pub use self::border::{BorderRadius, BorderCornerRadius};
@@ -36,17 +43,18 @@ pub use self::image::{Gradient, GradientItem, Image, ImageLayer, LineDirection, 
 pub use self::gecko::ScrollSnapPoint;
 pub use self::rect::LengthOrNumberRect;
 pub use super::{Auto, Either, None_};
-#[cfg(feature = "gecko")]
-pub use super::specified::{AlignItems, AlignJustifyContent, AlignJustifySelf, JustifyItems};
-pub use super::specified::{BorderStyle, UrlOrNone};
+pub use super::specified::BorderStyle;
 pub use super::generics::grid::GridLine;
-pub use super::specified::url::SpecifiedUrl;
 pub use self::length::{CalcLengthOrPercentage, Length, LengthOrNone, LengthOrNumber, LengthOrPercentage};
-pub use self::length::{LengthOrPercentageOrAuto, LengthOrPercentageOrNone, MaxLength, MozLength, Percentage};
+pub use self::length::{LengthOrPercentageOrAuto, LengthOrPercentageOrNone, MaxLength, MozLength};
+pub use self::length::NonNegativeLengthOrPercentage;
 pub use self::position::Position;
+pub use self::svg::{SVGLength, SVGOpacity, SVGPaint, SVGPaintKind, SVGStrokeDashArray, SVGWidth};
 pub use self::text::{InitialLetter, LetterSpacing, LineHeight, WordSpacing};
 pub use self::transform::{TimingFunction, TransformOrigin};
 
+#[cfg(feature = "gecko")]
+pub mod align;
 pub mod background;
 pub mod basic_shape;
 pub mod border;
@@ -59,6 +67,7 @@ pub mod gecko;
 pub mod length;
 pub mod position;
 pub mod rect;
+pub mod svg;
 pub mod text;
 pub mod transform;
 
@@ -127,6 +136,25 @@ impl<'a> Context<'a> {
     /// The current style.
     pub fn style(&self) -> &StyleBuilder {
         &self.builder
+    }
+
+    /// Apply text-zoom if enabled.
+    #[cfg(feature = "gecko")]
+    pub fn maybe_zoom_text(&self, size: NonNegativeAu) -> NonNegativeAu {
+        // We disable zoom for <svg:text> by unsetting the
+        // -x-text-zoom property, which leads to a false value
+        // in mAllowZoom
+        if self.style().get_font().gecko.mAllowZoom {
+            self.device().zoom_text(size.0).into()
+        } else {
+            size
+        }
+    }
+
+    /// (Servo doesn't do text-zoom)
+    #[cfg(feature = "servo")]
+    pub fn maybe_zoom_text(&self, size: NonNegativeAu) -> NonNegativeAu {
+        size
     }
 }
 
@@ -396,40 +424,44 @@ impl ToCss for Time {
     }
 }
 
-#[cfg(feature = "gecko")]
-impl ToComputedValue for specified::JustifyItems {
-    type ComputedValue = JustifyItems;
-
-    // https://drafts.csswg.org/css-align/#valdef-justify-items-auto
-    fn to_computed_value(&self, context: &Context) -> JustifyItems {
-        use values::specified::align;
-        // If the inherited value of `justify-items` includes the `legacy` keyword, `auto` computes
-        // to the inherited value.
-        if self.0 == align::ALIGN_AUTO {
-            let inherited = context.builder.get_parent_position().clone_justify_items();
-            if inherited.0.contains(align::ALIGN_LEGACY) {
-                return inherited
-            }
-        }
-        return *self
-    }
-
-    #[inline]
-    fn from_computed_value(computed: &JustifyItems) -> Self {
-        *computed
-    }
-}
-
-#[cfg(feature = "gecko")]
-impl ComputedValueAsSpecified for specified::AlignItems {}
-#[cfg(feature = "gecko")]
-impl ComputedValueAsSpecified for specified::AlignJustifyContent {}
-#[cfg(feature = "gecko")]
-impl ComputedValueAsSpecified for specified::AlignJustifySelf {}
 impl ComputedValueAsSpecified for specified::BorderStyle {}
 
 /// A `<number>` value.
 pub type Number = CSSFloat;
+
+/// A wrapper of Number, but the value >= 0.
+pub type NonNegativeNumber = NonNegative<CSSFloat>;
+
+impl From<CSSFloat> for NonNegativeNumber {
+    #[inline]
+    fn from(number: CSSFloat) -> NonNegativeNumber {
+        NonNegative::<CSSFloat>(number)
+    }
+}
+
+impl From<NonNegativeNumber> for CSSFloat {
+    #[inline]
+    fn from(number: NonNegativeNumber) -> CSSFloat {
+        number.0
+    }
+}
+
+/// A wrapper of Number, but the value >= 1.
+pub type GreaterThanOrEqualToOneNumber = GreaterThanOrEqualToOne<CSSFloat>;
+
+impl From<CSSFloat> for GreaterThanOrEqualToOneNumber {
+    #[inline]
+    fn from(number: CSSFloat) -> GreaterThanOrEqualToOneNumber {
+        GreaterThanOrEqualToOne::<CSSFloat>(number)
+    }
+}
+
+impl From<GreaterThanOrEqualToOneNumber> for CSSFloat {
+    #[inline]
+    fn from(number: GreaterThanOrEqualToOneNumber) -> CSSFloat {
+        number.0
+    }
+}
 
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
@@ -482,33 +514,24 @@ impl IntegerOrAuto {
     }
 }
 
-/// Computed SVG Paint value
-pub type SVGPaint = ::values::generics::SVGPaint<RGBA>;
-/// Computed SVG Paint Kind value
-pub type SVGPaintKind = ::values::generics::SVGPaintKind<RGBA>;
+/// A wrapper of Integer, but only accept a value >= 1.
+pub type PositiveInteger = GreaterThanOrEqualToOne<CSSInteger>;
 
-impl Default for SVGPaint {
-    fn default() -> Self {
-        SVGPaint {
-            kind: ::values::generics::SVGPaintKind::None,
-            fallback: None,
-        }
+impl From<CSSInteger> for PositiveInteger {
+    #[inline]
+    fn from(int: CSSInteger) -> PositiveInteger {
+        GreaterThanOrEqualToOne::<CSSInteger>(int)
     }
 }
 
-impl SVGPaint {
-    /// Opaque black color
-    pub fn black() -> Self {
-        let rgba = RGBA::from_floats(0., 0., 0., 1.);
-        SVGPaint {
-            kind: ::values::generics::SVGPaintKind::Color(rgba),
-            fallback: None,
-        }
-    }
-}
+/// PositiveInteger | auto
+pub type PositiveIntegerOrAuto = Either<PositiveInteger, Auto>;
 
 /// <length> | <percentage> | <number>
 pub type LengthOrPercentageOrNumber = Either<Number, LengthOrPercentage>;
+
+/// NonNegativeLengthOrPercentage | NonNegativeNumber
+pub type NonNegativeLengthOrPercentageOrNumber = Either<NonNegativeNumber, NonNegativeLengthOrPercentage>;
 
 #[derive(Clone, PartialEq, Eq, Copy, Debug)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
@@ -587,3 +610,121 @@ impl ClipRectOrAuto {
 
 /// <color> | auto
 pub type ColorOrAuto = Either<Color, Auto>;
+
+/// A wrapper of Au, but the value >= 0.
+pub type NonNegativeAu = NonNegative<Au>;
+
+impl NonNegativeAu {
+    /// Return a zero value.
+    #[inline]
+    pub fn zero() -> Self {
+        NonNegative::<Au>(Au(0))
+    }
+
+    /// Return a NonNegativeAu from pixel.
+    #[inline]
+    pub fn from_px(px: i32) -> Self {
+        NonNegative::<Au>(Au::from_px(::std::cmp::max(px, 0)))
+    }
+
+    /// Get the inner value of |NonNegativeAu.0|.
+    #[inline]
+    pub fn value(self) -> i32 {
+        (self.0).0
+    }
+
+    /// Scale this NonNegativeAu.
+    #[inline]
+    pub fn scale_by(self, factor: f32) -> Self {
+        // scale this by zero if factor is negative.
+        NonNegative::<Au>(self.0.scale_by(factor.max(0.)))
+    }
+}
+
+impl From<Au> for NonNegativeAu {
+    #[inline]
+    fn from(au: Au) -> NonNegativeAu {
+        NonNegative::<Au>(au)
+    }
+}
+
+/// A computed `<percentage>` value.
+#[derive(Clone, Copy, Debug, Default, PartialEq, HasViewportPercentage)]
+#[cfg_attr(feature = "servo", derive(Deserialize, HeapSizeOf, Serialize))]
+pub struct Percentage(pub CSSFloat);
+
+impl Percentage {
+    /// 0%
+    #[inline]
+    pub fn zero() -> Self {
+        Percentage(0.)
+    }
+
+    /// 100%
+    #[inline]
+    pub fn hundred() -> Self {
+        Percentage(1.)
+    }
+}
+
+impl ToCss for Percentage {
+    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+        write!(dest, "{}%", self.0 * 100.)
+    }
+}
+
+impl ToComputedValue for specified::Percentage {
+    type ComputedValue = Percentage;
+
+    #[inline]
+    fn to_computed_value(&self, _: &Context) -> Percentage {
+        Percentage(self.get())
+    }
+
+    #[inline]
+    fn from_computed_value(computed: &Percentage) -> Self {
+        specified::Percentage::new(computed.0)
+    }
+}
+
+/// The computed value of a CSS `url()`, resolved relative to the stylesheet URL.
+#[cfg(feature = "servo")]
+#[derive(Clone, Debug, HeapSizeOf, Serialize, Deserialize, PartialEq)]
+pub enum ComputedUrl {
+    /// The `url()` was invalid or it wasn't specified by the user.
+    Invalid(Arc<String>),
+    /// The resolved `url()` relative to the stylesheet URL.
+    Valid(ServoUrl),
+}
+
+/// TODO: Properly build ComputedUrl for gecko
+#[cfg(feature = "gecko")]
+pub type ComputedUrl = specified::url::SpecifiedUrl;
+
+#[cfg(feature = "servo")]
+impl ComputedUrl {
+    /// Returns the resolved url if it was valid.
+    pub fn url(&self) -> Option<&ServoUrl> {
+        match *self {
+            ComputedUrl::Valid(ref url) => Some(url),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "servo")]
+impl ToCss for ComputedUrl {
+    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+        let string = match *self {
+            ComputedUrl::Valid(ref url) => url.as_str(),
+            ComputedUrl::Invalid(ref invalid_string) => invalid_string,
+        };
+
+        dest.write_str("url(")?;
+        string.to_css(dest)?;
+        dest.write_str(")")
+    }
+}
+
+/// <url> | <none>
+pub type UrlOrNone = Either<ComputedUrl, None_>;

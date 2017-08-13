@@ -379,8 +379,7 @@ already_AddRefed<DOMMediaStream>
 PeerConnectionImpl::MakeMediaStream()
 {
   MediaStreamGraph* graph =
-    MediaStreamGraph::GetInstance(MediaStreamGraph::AUDIO_THREAD_DRIVER,
-                                  AudioChannel::Normal, GetWindow());
+    MediaStreamGraph::GetInstance(MediaStreamGraph::AUDIO_THREAD_DRIVER, GetWindow());
 
   RefPtr<DOMMediaStream> stream =
     DOMMediaStream::CreateSourceStreamAsInput(GetWindow(), graph);
@@ -499,7 +498,7 @@ PeerConnectionConfiguration::AddIceServer(const RTCIceServer &aServer)
       uint32_t hostPos;
       int32_t hostLen;
       nsAutoCString path;
-      rv = url->GetPath(path);
+      rv = url->GetPathQueryRef(path);
       NS_ENSURE_SUCCESS(rv, rv);
 
       // Tolerate query-string + parse 'transport=[udp|tcp]' by hand.
@@ -1081,6 +1080,10 @@ PeerConnectionImpl::ConfigureJsepSessionCodecs() {
 // Data channels won't work without a window, so in order for the C++ unit
 // tests to work (it doesn't have a window available) we ifdef the following
 // two implementations.
+//
+// Note: 'media.peerconnection.sctp.force_ppid_fragmentation' and
+//       'media.peerconnection.sctp.force_maximum_message_size' change behaviour triggered by
+//       these parameters.
 NS_IMETHODIMP
 PeerConnectionImpl::EnsureDataConnection(uint16_t aLocalPort,
                                          uint16_t aNumstreams,
@@ -1091,9 +1094,7 @@ PeerConnectionImpl::EnsureDataConnection(uint16_t aLocalPort,
 
   if (mDataConnection) {
     CSFLogDebug(logTag,"%s DataConnection already connected",__FUNCTION__);
-    // Ignore the request to connect when already connected.  This entire
-    // implementation is temporary.  Ignore aNumstreams as it's merely advisory
-    // and we increase the number of streams dynamically as needed.
+    mDataConnection->SetMaxMessageSize(aMMSSet, aMaxMessageSize);
     return NS_OK;
   }
 
@@ -1101,7 +1102,7 @@ PeerConnectionImpl::EnsureDataConnection(uint16_t aLocalPort,
       ? mWindow->EventTargetFor(TaskCategory::Other)
       : nullptr;
   mDataConnection = new DataChannelConnection(this, target);
-  if (!mDataConnection->Init(aLocalPort, aNumstreams, true)) {
+  if (!mDataConnection->Init(aLocalPort, aNumstreams, aMMSSet, aMaxMessageSize)) {
     CSFLogError(logTag,"%s DataConnection Init Failed",__FUNCTION__);
     return NS_ERROR_FAILURE;
   }
@@ -1320,7 +1321,7 @@ PeerConnectionImpl::CreateDataChannel(const nsAString& aLabel,
 
   nsresult rv = EnsureDataConnection(WEBRTC_DATACHANNEL_PORT_DEFAULT,
                                      WEBRTC_DATACHANNEL_STREAMS_DEFAULT,
-                                     WEBRTC_DATACHANELL_MAX_MESSAGE_SIZE_DEFAULT,
+                                     WEBRTC_DATACHANNEL_MAX_MESSAGE_SIZE_REMOTE_DEFAULT,
                                      false);
   if (NS_FAILED(rv)) {
     return rv;

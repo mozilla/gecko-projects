@@ -45,6 +45,11 @@ web-platform-tests:
     - web-platform-tests-reftests
     - web-platform-tests-wdspec
 
+web-platform-tests-headless:
+    - web-platform-tests-headless
+    - web-platform-tests-reftests-headless
+    - web-platform-tests-wdspec-headless
+
 opt-only-tests:
     - mochitest-valgrind
 
@@ -65,6 +70,12 @@ talos:
 awsy:
     - awsy
 
+awsy-stylo:
+    - awsy-stylo
+
+awsy-stylo-sequential:
+    - awsy-stylo-sequential
+
 ##
 # Limited test sets for specific platforms
 
@@ -73,15 +84,20 @@ stylo-tests:
     - crashtest
     - reftest
     - reftest-stylo
-    - mochitest-style
-    - mochitest-chrome-style
     - web-platform-tests
     - web-platform-tests-reftests
+    - mochitest
+    - mochitest-browser-screenshots
+    - mochitest-chrome
+    - mochitest-clipboard
+    - mochitest-gpu
+    - mochitest-media
+    - mochitest-webgl
 
 stylo-sequential-tests:
     - crashtest
     - reftest-stylo
-    - mochitest-style
+    - mochitest
 
 qr-tests:
     - cppunit
@@ -94,7 +110,6 @@ qr-tests:
     - mochitest-media
     - mochitest-webgl
     - reftest
-    - reftest-no-accel
     - xpcshell
 
 jsdcov-code-coverage-tests:
@@ -143,8 +158,9 @@ windows-talos:
     - talos-svgr
     - talos-tp5o
     - talos-xperf
-    - talos-quantum-pageload
-    - talos-quantum-pageload-stylo
+    - talos-tp6
+    - talos-tp6-stylo
+    - talos-tp6-stylo-threads
 
 macosx64-tests:
     - cppunit
@@ -244,8 +260,6 @@ android-x86-tests:
     - xpcshell
 
 windows8-tests:
-    - crashtest
-    - mochitest
     - mochitest-browser-chrome
     - mochitest-devtools-chrome
     - mochitest-media
@@ -255,4 +269,6 @@ windows8-tests:
     - mochitest-webgl
     - mochitest-clipboard
     - mochitest-chrome
-    - xpcshell
+
+devtools-tests:
+    - mochitest-devtools-chrome

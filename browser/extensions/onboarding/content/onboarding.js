@@ -7,8 +7,8 @@
 "use strict";
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Preferences.jsm");
 
 const ONBOARDING_CSS_URL = "resource://onboarding/onboarding.css";
 const ABOUT_HOME_URL = "about:home";
@@ -162,8 +162,8 @@ var onboardingTourset = {
     },
     getPage(win, bundle) {
       let div = win.document.createElement("div");
-      let defaultBrowserButtonId = win.matchMedia("(-moz-os-version: windows-win7)").matches ?
-        "onboarding.tour-default-browser.win7.button" : "onboarding.tour-default-browser.button";
+      let setFromBackGround = bundle.formatStringFromName("onboarding.tour-default-browser.win7.button", [BRAND_SHORT_NAME], 1);
+      let setFromPanel = bundle.GetStringFromName("onboarding.tour-default-browser.button");
       let isDefaultMessage = bundle.GetStringFromName("onboarding.tour-default-browser.is-default.message");
       let isDefault2ndMessage = bundle.formatStringFromName("onboarding.tour-default-browser.is-default.2nd-message", [BRAND_SHORT_NAME], 1);
       // eslint-disable-next-line no-unsanitized/property
@@ -176,10 +176,15 @@ var onboardingTourset = {
           <img src="resource://onboarding/img/figure_default.svg" role="presentation"/>
         </section>
         <aside class="onboarding-tour-button-container">
-          <button id="onboarding-tour-default-browser-button" class="onboarding-tour-action-button" data-l10n-id="${defaultBrowserButtonId}"></button>
+          <button id="onboarding-tour-default-browser-button" class="onboarding-tour-action-button"
+            data-bg="${setFromBackGround}" data-panel="${setFromPanel}"></button>
           <div id="onboarding-tour-is-default-browser-msg" class="onboarding-hidden">${isDefaultMessage}<br/>${isDefault2ndMessage}</div>
         </aside>
       `;
+
+      div.addEventListener("beforeshow", () => {
+        win.document.dispatchEvent(new Event("Agent:CanSetDefaultBrowserInBackground"));
+      });
       return div;
     },
   },
@@ -194,8 +199,11 @@ var onboardingTourset = {
       };
     },
     getPage(win, bundle) {
+      const STATE_LOGOUT = "logged-out";
+      const STATE_LOGIN = "logged-in";
       let div = win.document.createElement("div");
       div.classList.add("onboarding-no-button");
+      div.dataset.loginState = STATE_LOGOUT;
       // The email validation pattern used in the form comes from IETF rfc5321,
       // which is identical to server-side checker of Firefox Account. See
       // discussion in https://bugzilla.mozilla.org/show_bug.cgi?id=1378770#c6
@@ -203,11 +211,13 @@ var onboardingTourset = {
       let emailRegex = "^[\\w.!#$%&’*+\\/=?^`{|}~-]{1,64}@[a-z\\d](?:[a-z\\d-]{0,253}[a-z\\d])?(?:\\.[a-z\\d](?:[a-z\\d-]{0,253}[a-z\\d])?)+$";
       div.innerHTML = `
         <section class="onboarding-tour-description">
-          <h1 data-l10n-id="onboarding.tour-sync.title2"></h1>
-          <p data-l10n-id="onboarding.tour-sync.description2"></p>
+          <h1 data-l10n-id="onboarding.tour-sync.title2" class="show-on-logged-out"></h1>
+          <p data-l10n-id="onboarding.tour-sync.description2" class="show-on-logged-out"></p>
+          <h1 data-l10n-id="onboarding.tour-sync.logged-in.title" class="show-on-logged-in"></h1>
+          <p data-l10n-id="onboarding.tour-sync.logged-in.description" class="show-on-logged-in"></p>
         </section>
         <section class="onboarding-tour-content">
-          <form>
+          <form class="show-on-logged-out">
             <h3 data-l10n-id="onboarding.tour-sync.form.title"></h3>
             <p data-l10n-id="onboarding.tour-sync.form.description"></p>
             <input id="onboarding-tour-sync-email-input" type="email" required="true"></input><br />
@@ -220,6 +230,16 @@ var onboardingTourset = {
       emailInput.placeholder =
         bundle.GetStringFromName("onboarding.tour-sync.email-input.placeholder");
       emailInput.pattern = emailRegex;
+
+      div.addEventListener("beforeshow", () => {
+        function loginStatusListener(msg) {
+          removeMessageListener("Onboarding:ResponseLoginStatus", loginStatusListener);
+          div.dataset.loginState = msg.data.isLoggedIn ? STATE_LOGIN : STATE_LOGOUT;
+        }
+        sendMessageToChrome("get-login-status");
+        addMessageListener("Onboarding:ResponseLoginStatus", loginStatusListener);
+      });
+
       return div;
     },
   },
@@ -306,6 +326,15 @@ var onboardingTourset = {
 };
 
 /**
+ * @param {String} action the action to ask the chrome to do
+ * @param {Array} params the parameters for the action
+ */
+function sendMessageToChrome(action, params) {
+  sendAsyncMessage("Onboarding:OnContentMessage", {
+    action, params
+  });
+}
+/**
  * The script won't be initialized if we turned off onboarding by
  * setting "browser.onboarding.enabled" to false.
  */
@@ -365,13 +394,14 @@ class Onboarding {
     this._tourItems = [];
     this._tourPages = [];
 
+    let { body } = this._window.document;
     this._overlayIcon = this._renderOverlayButton();
     this._overlayIcon.addEventListener("click", this);
-    this._window.document.body.appendChild(this._overlayIcon);
+    body.insertBefore(this._overlayIcon, body.firstChild);
 
     this._overlay = this._renderOverlay();
     this._overlay.addEventListener("click", this);
-    this._window.document.body.appendChild(this._overlay);
+    body.appendChild(this._overlay);
 
     this._loadJS(TOUR_AGENT_JS_URI);
 
@@ -421,27 +451,17 @@ class Onboarding {
       });
     });
     for (let [name, callback] of this._prefsObserved) {
-      Preferences.observe(name, callback);
+      Services.prefs.addObserver(name, callback);
     }
   }
 
   _clearPrefObserver() {
     if (this._prefsObserved) {
       for (let [name, callback] of this._prefsObserved) {
-        Preferences.ignore(name, callback);
+        Services.prefs.removeObserver(name, callback);
       }
       this._prefsObserved = null;
     }
-  }
-
-  /**
-   * @param {String} action the action to ask the chrome to do
-   * @param {Array} params the parameters for the action
-   */
-  sendMessageToChrome(action, params) {
-    sendAsyncMessage("Onboarding:OnContentMessage", {
-      action, params
-    });
   }
 
   handleEvent(evt) {
@@ -525,7 +545,12 @@ class Onboarding {
   gotoPage(tourId) {
     let targetPageId = `${tourId}-page`;
     for (let page of this._tourPages) {
-      page.style.display = page.id != targetPageId ? "none" : "";
+      if (page.id === targetPageId) {
+        page.style.display = "";
+        page.dispatchEvent(new this._window.CustomEvent("beforeshow"));
+      } else {
+        page.style.display = "none";
+      }
     }
     for (let li of this._tourItems) {
       if (li.id == tourId) {
@@ -537,7 +562,7 @@ class Onboarding {
   }
 
   isTourCompleted(tourId) {
-    return Preferences.get(`browser.onboarding.tour.${tourId}.completed`, false);
+    return Services.prefs.getBoolPref(`browser.onboarding.tour.${tourId}.completed`, false);
   }
 
   setToursCompleted(tourIds) {
@@ -551,7 +576,7 @@ class Onboarding {
       }
     });
     if (params.length > 0) {
-      this.sendMessageToChrome("set-prefs", params);
+      sendMessageToChrome("set-prefs", params);
     }
   }
 
@@ -564,12 +589,12 @@ class Onboarding {
   }
 
   _muteNotificationOnFirstSession() {
-    if (Preferences.isSet("browser.onboarding.notification.tour-ids-queue")) {
+    if (Services.prefs.prefHasUserValue("browser.onboarding.notification.tour-ids-queue")) {
       // There is a queue. We had prompted before, this must not be the 1st session.
       return false;
     }
 
-    let muteDuration = Preferences.get("browser.onboarding.notification.mute-duration-on-first-session-ms");
+    let muteDuration = Services.prefs.getIntPref("browser.onboarding.notification.mute-duration-on-first-session-ms");
     if (muteDuration == 0) {
       // Don't mute when this is set to 0 on purpose.
       return false;
@@ -577,9 +602,9 @@ class Onboarding {
 
     // Reuse the `last-time-of-changing-tour-sec` to save the time that
     // we try to prompt on the 1st session.
-    let lastTime = 1000 * Preferences.get("browser.onboarding.notification.last-time-of-changing-tour-sec", 0);
+    let lastTime = 1000 * Services.prefs.getIntPref("browser.onboarding.notification.last-time-of-changing-tour-sec", 0);
     if (lastTime <= 0) {
-      this.sendMessageToChrome("set-prefs", [{
+      sendMessageToChrome("set-prefs", [{
         name: "browser.onboarding.notification.last-time-of-changing-tour-sec",
         value: Math.floor(Date.now() / 1000)
       }]);
@@ -589,14 +614,14 @@ class Onboarding {
   }
 
   _isTimeForNextTourNotification() {
-    let promptCount = Preferences.get("browser.onboarding.notification.prompt-count", 0);
-    let maxCount = Preferences.get("browser.onboarding.notification.max-prompt-count-per-tour");
+    let promptCount = Services.prefs.getIntPref("browser.onboarding.notification.prompt-count", 0);
+    let maxCount = Services.prefs.getIntPref("browser.onboarding.notification.max-prompt-count-per-tour");
     if (promptCount >= maxCount) {
       return true;
     }
 
-    let lastTime = 1000 * Preferences.get("browser.onboarding.notification.last-time-of-changing-tour-sec", 0);
-    let maxTime = Preferences.get("browser.onboarding.notification.max-life-time-per-tour-ms");
+    let lastTime = 1000 * Services.prefs.getIntPref("browser.onboarding.notification.last-time-of-changing-tour-sec", 0);
+    let maxTime = Services.prefs.getIntPref("browser.onboarding.notification.max-life-time-per-tour-ms");
     if (lastTime && Date.now() - lastTime >= maxTime) {
       return true;
     }
@@ -619,13 +644,13 @@ class Onboarding {
       name: "browser.onboarding.notification.prompt-count",
       value: 0
     });
-    this.sendMessageToChrome("set-prefs", params);
+    sendMessageToChrome("set-prefs", params);
   }
 
   _getNotificationQueue() {
     let queue = "";
-    if (Preferences.isSet("browser.onboarding.notification.tour-ids-queue")) {
-      queue = Preferences.get("browser.onboarding.notification.tour-ids-queue");
+    if (Services.prefs.prefHasUserValue("browser.onboarding.notification.tour-ids-queue")) {
+      queue = Services.prefs.getStringPref("browser.onboarding.notification.tour-ids-queue");
     } else {
       // For each tour, it only gets 2 chances to prompt with notification
       // (each chance includes 8 impressions or 5-days max life time)
@@ -636,7 +661,7 @@ class Onboarding {
       // until the queue is empty.
       let ids = this._tours.map(tour => tour.id).join(",");
       queue = `${ids},${ids}`;
-      this.sendMessageToChrome("set-prefs", [{
+      sendMessageToChrome("set-prefs", [{
         name: "browser.onboarding.notification.tour-ids-queue",
         value: queue
       }]);
@@ -645,7 +670,7 @@ class Onboarding {
   }
 
   showNotification() {
-    if (Preferences.get("browser.onboarding.notification.finished", false)) {
+    if (Services.prefs.getBoolPref("browser.onboarding.notification.finished", false)) {
       return;
     }
 
@@ -665,7 +690,7 @@ class Onboarding {
     }
 
     if (queue.length == 0) {
-      this.sendMessageToChrome("set-prefs", [
+      sendMessageToChrome("set-prefs", [
         {
           name: "browser.onboarding.notification.finished",
           value: true
@@ -710,13 +735,13 @@ class Onboarding {
         value: queue.join(",")
       });
     } else {
-      let promptCount = Preferences.get(PROMPT_COUNT_PREF, 0);
+      let promptCount = Services.prefs.getIntPref(PROMPT_COUNT_PREF, 0);
       params.push({
         name: PROMPT_COUNT_PREF,
         value: promptCount + 1
       });
     }
-    this.sendMessageToChrome("set-prefs", params);
+    sendMessageToChrome("set-prefs", params);
   }
 
   hideNotification() {
@@ -726,17 +751,19 @@ class Onboarding {
   }
 
   _renderNotificationBar() {
-    let div = this._window.document.createElement("div");
-    div.id = "onboarding-notification-bar";
+    let footer = this._window.document.createElement("footer");
+    footer.id = "onboarding-notification-bar";
+    footer.setAttribute("aria-live", "polite");
+    footer.setAttribute("aria-labelledby", "onboarding-notification-icon")
     // We use `innerHTML` for more friendly reading.
     // The security should be fine because this is not from an external input.
-    div.innerHTML = `
-      <div id="onboarding-notification-icon"></div>
-      <section id="onboarding-notification-message-section">
-        <div id="onboarding-notification-tour-icon"></div>
-        <div id="onboarding-notification-body">
-          <h6 id="onboarding-notification-tour-title"></h6>
-          <span id="onboarding-notification-tour-message"></span>
+    footer.innerHTML = `
+      <div id="onboarding-notification-icon" role="presentation"></div>
+      <section id="onboarding-notification-message-section" role="presentation">
+        <div id="onboarding-notification-tour-icon" role="presentation"></div>
+        <div id="onboarding-notification-body" role="presentation">
+          <h1 id="onboarding-notification-tour-title"></h1>
+          <p id="onboarding-notification-tour-message"></p>
         </div>
         <button id="onboarding-notification-action-btn"></button>
       </section>
@@ -746,17 +773,20 @@ class Onboarding {
       this._tourType === "new" ? "onboarding.notification-icon-tool-tip" :
                                  "onboarding.notification-icon-tooltip-updated",
       [BRAND_SHORT_NAME], 1);
-    div.querySelector("#onboarding-notification-icon").setAttribute("data-tooltip", toolTip);
 
-    let closeBtn = div.querySelector("#onboarding-notification-close-btn");
+    let icon = footer.querySelector("#onboarding-notification-icon");
+    icon.setAttribute("aria-label", toolTip);
+    icon.setAttribute("role", "presentation");
+
+    let closeBtn = footer.querySelector("#onboarding-notification-close-btn");
     closeBtn.setAttribute("title",
       this._bundle.GetStringFromName("onboarding.notification-close-button-tooltip"));
-    return div;
+    return footer;
   }
 
   hide() {
     this.setToursCompleted(this._tours.map(tour => tour.id));
-    this.sendMessageToChrome("set-prefs", [
+    sendMessageToChrome("set-prefs", [
       {
         name: "browser.onboarding.hidden",
         value: true
@@ -775,7 +805,6 @@ class Onboarding {
     // The security should be fine because this is not from an external input.
     div.innerHTML = `
       <div id="onboarding-overlay-dialog">
-        <button id="onboarding-overlay-close-btn" class="onboarding-close-btn"></button>
         <header id="onboarding-header"></header>
         <nav>
           <ul id="onboarding-tour-list"></ul>
@@ -783,6 +812,7 @@ class Onboarding {
         <footer id="onboarding-footer">
           <input type="checkbox" id="onboarding-tour-hidden-checkbox" /><label for="onboarding-tour-hidden-checkbox"></label>
         </footer>
+        <button id="onboarding-overlay-close-btn" class="onboarding-close-btn"></button>
       </div>
     `;
 
@@ -803,8 +833,11 @@ class Onboarding {
     let tooltip = this._bundle.formatStringFromName(tooltipStringId, [BRAND_SHORT_NAME], 1);
     button.setAttribute("aria-label", tooltip);
     button.id = "onboarding-overlay-button";
+    button.setAttribute("aria-haspopup", true);
+    button.setAttribute("aria-controls", "onboarding-overlay-dialog");
     let img = this._window.document.createElement("img");
     img.id = "onboarding-overlay-button-icon";
+    img.setAttribute("role", "presentation");
     img.src = "resource://onboarding/img/overlay-icon.svg";
     button.appendChild(img);
     return button;

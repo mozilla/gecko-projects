@@ -251,11 +251,12 @@ nsChromeRegistryChrome::OverrideLocalePackage(const nsACString& aPackage,
                                               nsACString& aOverride)
 {
   const nsACString& pref = NS_LITERAL_CSTRING(PACKAGE_OVERRIDE_BRANCH) + aPackage;
-  nsAdoptingCString override = mozilla::Preferences::GetCString(PromiseFlatCString(pref).get());
-  if (override) {
+  nsAutoCString override;
+  nsresult rv =
+    mozilla::Preferences::GetCString(PromiseFlatCString(pref).get(), override);
+  if (NS_SUCCEEDED(rv)) {
     aOverride = override;
-  }
-  else {
+  } else {
     aOverride = aPackage;
   }
   return NS_OK;
@@ -328,7 +329,6 @@ SerializeURI(nsIURI* aURI,
     return;
 
   aURI->GetSpec(aSerializedURI.spec);
-  aURI->GetOriginCharset(aSerializedURI.charset);
 }
 
 void
@@ -858,8 +858,8 @@ nsChromeRegistryChrome::ManifestOverride(ManifestProcessingContext& cx, int line
     }
     if (chromeSkinOnly) {
       nsAutoCString chromePath, resolvedPath;
-      chromeuri->GetPath(chromePath);
-      resolveduri->GetPath(resolvedPath);
+      chromeuri->GetPathQueryRef(chromePath);
+      resolveduri->GetPathQueryRef(resolvedPath);
       chromeSkinOnly = StringBeginsWith(chromePath, NS_LITERAL_CSTRING("/skin/")) &&
                        StringBeginsWith(resolvedPath, NS_LITERAL_CSTRING("/skin/"));
     }

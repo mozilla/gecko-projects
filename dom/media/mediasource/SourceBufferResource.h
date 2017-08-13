@@ -39,19 +39,12 @@ class SourceBufferResource final : public MediaResource
 {
 public:
   SourceBufferResource();
-  nsresult Close() override;
-  void Suspend(bool aCloseImmediately) override { UNIMPLEMENTED(); }
-  void Resume() override { UNIMPLEMENTED(); }
+  nsresult Close();
   already_AddRefed<nsIPrincipal> GetCurrentPrincipal() override
   {
     UNIMPLEMENTED();
     return nullptr;
   }
-  void SetReadMode(MediaCacheStream::ReadMode aMode) override
-  {
-    UNIMPLEMENTED();
-  }
-  void SetPlaybackRate(uint32_t aBytesPerSecond) override { UNIMPLEMENTED(); }
   nsresult ReadAt(int64_t aOffset,
                   char* aBuffer,
                   uint32_t aCount,
@@ -61,12 +54,6 @@ public:
   int64_t Tell() override { return mOffset; }
   void Pin() override { UNIMPLEMENTED(); }
   void Unpin() override { UNIMPLEMENTED(); }
-  double GetDownloadRate(bool* aIsReliable) override
-  {
-    UNIMPLEMENTED();
-    *aIsReliable = false;
-    return 0;
-  }
   int64_t GetLength() override { return mInputBuffer.GetLength(); }
   int64_t GetNextCachedData(int64_t aOffset) override
   {
@@ -108,11 +95,6 @@ public:
   {
     UNIMPLEMENTED();
     return true;
-  }
-  nsresult Open(nsIStreamListener** aStreamListener) override
-  {
-    UNIMPLEMENTED();
-    return NS_ERROR_FAILURE;
   }
 
   nsresult GetCachedRanges(MediaByteRangeSet& aRanges) override

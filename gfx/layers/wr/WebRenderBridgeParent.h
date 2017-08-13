@@ -102,7 +102,8 @@ public:
                                     const wr::ByteBuffer& dl,
                                     const wr::BuiltDisplayListDescriptor& dlDesc,
                                     const WebRenderScrollData& aScrollData,
-                                    const uint32_t& aIdNameSpace,
+                                    const wr::IdNamespace& aIdNamespace,
+                                    const TimeStamp& aTxnStartTime,
                                     const TimeStamp& aFwdTime) override;
   mozilla::ipc::IPCResult RecvDPSyncEnd(const gfx::IntSize& aSize,
                                         InfallibleTArray<WebRenderParentCommand>&& aCommands,
@@ -113,14 +114,16 @@ public:
                                         const wr::ByteBuffer& dl,
                                         const wr::BuiltDisplayListDescriptor& dlDesc,
                                         const WebRenderScrollData& aScrollData,
-                                        const uint32_t& aIdNameSpace,
+                                        const wr::IdNamespace& aIdNamespace,
+                                        const TimeStamp& aTxnStartTime,
                                         const TimeStamp& aFwdTime) override;
   mozilla::ipc::IPCResult RecvParentCommands(nsTArray<WebRenderParentCommand>&& commands) override;
   mozilla::ipc::IPCResult RecvDPGetSnapshot(PTextureParent* aTexture) override;
 
-  mozilla::ipc::IPCResult RecvAddPipelineIdForAsyncCompositable(const wr::PipelineId& aPipelineIds,
-                                                                const CompositableHandle& aHandle) override;
-  mozilla::ipc::IPCResult RecvRemovePipelineIdForAsyncCompositable(const wr::PipelineId& aPipelineId) override;
+  mozilla::ipc::IPCResult RecvAddPipelineIdForCompositable(const wr::PipelineId& aPipelineIds,
+                                                           const CompositableHandle& aHandle,
+                                                           const bool& aAsync) override;
+  mozilla::ipc::IPCResult RecvRemovePipelineIdForCompositable(const wr::PipelineId& aPipelineId) override;
 
   mozilla::ipc::IPCResult RecvAddExternalImageIdForCompositable(const ExternalImageId& aImageId,
                                                                 const CompositableHandle& aHandle) override;
@@ -169,36 +172,22 @@ public:
   void SendPendingAsyncMessages() override;
   void SetAboutToSendAsyncMessages() override;
 
-  void HoldPendingTransactionId(uint32_t aWrEpoch, uint64_t aTransactionId, const TimeStamp& aFwdTime);
+  void HoldPendingTransactionId(uint32_t aWrEpoch, uint64_t aTransactionId, const TimeStamp& aTxnStartTime, const TimeStamp& aFwdTime);
   uint64_t LastPendingTransactionId();
   uint64_t FlushPendingTransactionIds();
   uint64_t FlushTransactionIdsForEpoch(const wr::Epoch& aEpoch, const TimeStamp& aEndTime);
 
   TextureFactoryIdentifier GetTextureFactoryIdentifier();
 
-  void AppendImageCompositeNotification(const ImageCompositeNotificationInfo& aNotification)
-  {
-    MOZ_ASSERT(mWidget);
-    mImageCompositeNotifications.AppendElement(aNotification);
-  }
+  void ExtractImageCompositeNotifications(nsTArray<ImageCompositeNotificationInfo>* aNotifications);
 
-  void ExtractImageCompositeNotifications(nsTArray<ImageCompositeNotificationInfo>* aNotifications)
+  wr::IdNamespace GetIdNamespace()
   {
-    MOZ_ASSERT(mWidget);
-    aNotifications->AppendElements(Move(mImageCompositeNotifications));
-  }
-
-  uint32_t GetIdNameSpace()
-  {
-    return mIdNameSpace;
+    return mIdNamespace;
   }
 
   void UpdateAPZ();
   const WebRenderScrollData& GetScrollData() const;
-
-  static uint32_t AllocIdNameSpace() {
-    return ++sIdNameSpace;
-  }
 
   void FlushRendering(bool aIsSync);
 
@@ -222,7 +211,7 @@ private:
                                 const wr::LayoutSize& aContentSize,
                                 const wr::ByteBuffer& dl,
                                 const wr::BuiltDisplayListDescriptor& dlDesc,
-                                const uint32_t& aIdNameSpace);
+                                const wr::IdNamespace& aIdNamespace);
   void ClearResources();
   uint64_t GetChildLayerObserverEpoch() const { return mChildLayerObserverEpoch; }
   bool ShouldParentObserveEpoch();
@@ -235,7 +224,8 @@ private:
                    const wr::ByteBuffer& dl,
                    const wr::BuiltDisplayListDescriptor& dlDesc,
                    const WebRenderScrollData& aScrollData,
-                   const uint32_t& aIdNameSpace,
+                   const wr::IdNamespace& aIdNamespace,
+                   const TimeStamp& aTxnStartTime,
                    const TimeStamp& aFwdTime);
   mozilla::ipc::IPCResult HandleShutdown();
 
@@ -259,13 +249,15 @@ private:
 
 private:
   struct PendingTransactionId {
-    PendingTransactionId(wr::Epoch aEpoch, uint64_t aId, const TimeStamp& aFwdTime)
+    PendingTransactionId(wr::Epoch aEpoch, uint64_t aId, const TimeStamp& aTxnStartTime, const TimeStamp& aFwdTime)
       : mEpoch(aEpoch)
       , mId(aId)
+      , mTxnStartTime(aTxnStartTime)
       , mFwdTime(aFwdTime)
     {}
     wr::Epoch mEpoch;
     uint64_t mId;
+    TimeStamp mTxnStartTime;
     TimeStamp mFwdTime;
   };
 
@@ -286,7 +278,6 @@ private:
   std::unordered_set<uint64_t> mActiveAnimations;
   nsDataHashtable<nsUint64HashKey, RefPtr<WebRenderImageHost>> mAsyncCompositables;
   nsDataHashtable<nsUint64HashKey, RefPtr<WebRenderImageHost>> mExternalImageIds;
-  nsTArray<ImageCompositeNotificationInfo> mImageCompositeNotifications;
 
   TimeStamp mPreviousFrameTimeStamp;
   // These fields keep track of the latest layer observer epoch values in the child and the
@@ -298,7 +289,7 @@ private:
 
   std::queue<PendingTransactionId> mPendingTransactionIds;
   uint32_t mWrEpoch;
-  uint32_t mIdNameSpace;
+  wr::IdNamespace mIdNamespace;
 
   bool mPaused;
   bool mDestroyed;
@@ -306,8 +297,6 @@ private:
 
   // Can only be accessed on the compositor thread.
   WebRenderScrollData mScrollData;
-
-  static uint32_t sIdNameSpace;
 };
 
 } // namespace layers

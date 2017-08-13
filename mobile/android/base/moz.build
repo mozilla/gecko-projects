@@ -16,6 +16,9 @@ with Files('*Manifest*'):
 with Files('adjust-sdk-sandbox.token'):
     BUG_COMPONENT = ('Firefox for Android', 'Build Config & IDE Support')
 
+with Files('pocket-api-sandbox.token'):
+    BUG_COMPONENT = ('Firefox for Android', 'Build Config & IDE Support')
+
 with Files('android-services.mozbuild'):
     BUG_COMPONENT = ('Android Background Services', 'Android Sync')
 
@@ -499,7 +502,6 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'ActionModeCompatView.java',
     'ActivityHandlerHelper.java',
     'activitystream/ActivityStream.java',
-    'activitystream/ActivityStreamPreference.java',
     'activitystream/ActivityStreamTelemetry.java',
     'activitystream/homepanel/ActivityStreamHomeFragment.java',
     'activitystream/homepanel/ActivityStreamHomeScreen.java',
@@ -524,7 +526,9 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'activitystream/homepanel/topsites/TopSitesPage.java',
     'activitystream/homepanel/topsites/TopSitesPageAdapter.java',
     'activitystream/homepanel/topsites/TopSitesPagerAdapter.java',
+    'activitystream/homepanel/topstories/PocketStoriesLoader.java',
     'activitystream/ranking/HighlightCandidate.java',
+    'activitystream/ranking/HighlightCandidateCursorIndices.java',
     'activitystream/ranking/HighlightsRanking.java',
     'activitystream/ranking/RankingUtils.java',
     'activitystream/Utils.java',
@@ -550,6 +554,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'CustomEditText.java',
     'customtabs/ActionBarPresenter.java',
     'customtabs/CustomTabsActivity.java',
+    'customtabs/CustomTabsSecurityPopup.java',
     'customtabs/GeckoCustomTabsService.java',
     'customtabs/IntentUtil.java',
     'DataReportingNotification.java',
@@ -601,7 +606,6 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'distribution/ReferrerReceiver.java',
     'dlc/BaseAction.java',
     'dlc/catalog/DownloadContent.java',
-    'dlc/catalog/DownloadContentBootstrap.java',
     'dlc/catalog/DownloadContentBuilder.java',
     'dlc/catalog/DownloadContentCatalog.java',
     'dlc/DownloadAction.java',
@@ -923,10 +927,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'toolbar/BrowserToolbar.java',
     'toolbar/BrowserToolbarPhone.java',
     'toolbar/BrowserToolbarPhoneBase.java',
-    'toolbar/BrowserToolbarTablet.java',
-    'toolbar/BrowserToolbarTabletBase.java',
     'toolbar/CanvasDelegate.java',
-    'toolbar/ForwardButton.java',
     'toolbar/NavButton.java',
     'toolbar/PageActionLayout.java',
     'toolbar/PhoneTabsButton.java',
@@ -934,7 +935,6 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'toolbar/ShapedButton.java',
     'toolbar/ShapedButtonFrameLayout.java',
     'toolbar/SiteIdentityPopup.java',
-    'toolbar/ToolbarDisplayLayout.java',
     'toolbar/ToolbarEditLayout.java',
     'toolbar/ToolbarEditText.java',
     'toolbar/ToolbarPrefs.java',
@@ -950,6 +950,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'util/TouchTargetUtil.java',
     'util/URIUtils.java',
     'util/ViewUtil.java',
+    'util/WindowUtil.java',
     'webapps/WebAppActivity.java',
     'webapps/WebAppIndexer.java',
     'webapps/WebApps.java',
@@ -1009,19 +1010,17 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'widget/themed/ThemedTextView.java',
     'widget/themed/ThemedView.java',
 ]]
-if CONFIG['MOZ_ANDROID_PHOTON']:
-    gbjar.sources += ['../app/src/photon/java/org/mozilla/gecko/' + x for x in [
-        'home/SearchEngineRow.java',
-        'home/SuggestionItem.java',
-        'skin/SkinConfig.java',
-        'toolbar/TabCounter.java',
-    ]]
-else:
-    gbjar.sources += ['../app/src/australis/java/org/mozilla/gecko/' + x for x in [
-        'home/SearchEngineRow.java',
-        'skin/SkinConfig.java',
-        'toolbar/TabCounter.java',
-    ]]
+# The following sources are Photon specific, Eventually they should be merged into base.
+gbjar.sources += ['../app/src/photon/java/org/mozilla/gecko/' + x for x in [
+    'home/SearchEngineRow.java',
+    'home/SuggestionItem.java',
+    'toolbar/BrowserToolbarTablet.java',
+    'toolbar/BrowserToolbarTabletBase.java',
+    'toolbar/ForwardButton.java',
+    'toolbar/TabCounter.java',
+    'toolbar/ToolbarDisplayLayout.java',
+    'toolbar/ToolbarRoundButton.java',
+]]
 
 android_package_dir = CONFIG['ANDROID_PACKAGE_NAME'].replace('.', '/')
 gbjar.generated_sources = [] # Keep it this way.
@@ -1385,14 +1384,9 @@ ANDROID_RES_DIRS += [
     '/' + CONFIG['MOZ_BRANDING_DIRECTORY'] + '/res',
 ]
 
-if CONFIG['MOZ_ANDROID_PHOTON']:
-    ANDROID_RES_DIRS += [
-        '/mobile/android/app/src/photon/res',
-    ]
-else:
-    ANDROID_RES_DIRS += [
-        '/mobile/android/app/src/australis/res',
-    ]
+ANDROID_RES_DIRS += [
+    '/mobile/android/app/src/photon/res',
+]
 
 ANDROID_RES_DIRS += [
     '/mobile/android/app/src/main/res',

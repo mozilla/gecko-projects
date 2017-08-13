@@ -12,8 +12,11 @@ use matching::{ChildCascadeRequirement, MatchMethods};
 use sharing::StyleSharingTarget;
 use smallvec::SmallVec;
 use style_resolver::StyleResolverForElement;
+#[cfg(feature = "servo")] use style_traits::ToCss;
 use stylist::RuleInclusion;
 use traversal_flags::{TraversalFlags, self};
+#[cfg(feature = "servo")] use values::Either;
+#[cfg(feature = "servo")] use values::generics::image::Image;
 
 /// A per-traversal-level chunk of data. This is sent down by the traversal, and
 /// currently only holds the dom depth for the bloom filter.
@@ -28,23 +31,12 @@ pub struct PerLevelTraversalData {
     pub current_dom_depth: usize,
 }
 
-/// This structure exists to enforce that callers invoke pre_traverse, and also
-/// to pass information from the pre-traversal into the primary traversal.
-pub struct PreTraverseToken {
-    traverse: bool,
-    unstyled_children_only: bool,
-}
-
+/// We use this structure, rather than just returning a boolean from pre_traverse,
+/// to enfore that callers process root invalidations before starting the traversal.
+pub struct PreTraverseToken(bool);
 impl PreTraverseToken {
     /// Whether we should traverse children.
-    pub fn should_traverse(&self) -> bool {
-        self.traverse
-    }
-
-    /// Whether we should traverse only unstyled children.
-    pub fn traverse_unstyled_children_only(&self) -> bool {
-        self.unstyled_children_only
-    }
+    pub fn should_traverse(&self) -> bool { self.0 }
 }
 
 /// The kind of traversals we could perform.
@@ -154,33 +146,20 @@ pub trait DomTraversal<E: TElement> : Sync {
         }
     }
 
-    /// Must be invoked before traversing the root element to determine whether
-    /// a traversal is needed. Returns a token that allows the caller to prove
-    /// that the call happened.
-    ///
-    /// The traversal_flags is used in Gecko.
-    ///
-    /// If traversal_flag::UNSTYLED_CHILDREN_ONLY is specified, style newly-
-    /// appended children without restyling the parent.
-    ///
-    /// If traversal_flag::ANIMATION_ONLY is specified, style only elements for
-    /// animations.
+    /// Style invalidations happen when traversing from a parent to its children.
+    /// However, this mechanism can't handle style invalidations on the root. As
+    /// such, we have a pre-traversal step to handle that part and determine whether
+    /// a full traversal is needed.
     fn pre_traverse(
         root: E,
         shared_context: &SharedStyleContext,
         traversal_flags: TraversalFlags
     ) -> PreTraverseToken {
-        if traversal_flags.contains(traversal_flags::UnstyledChildrenOnly) {
-            if root.borrow_data().map_or(true, |d| d.has_styles() && d.styles.is_display_none()) {
-                return PreTraverseToken {
-                    traverse: false,
-                    unstyled_children_only: false,
-                };
-            }
-            return PreTraverseToken {
-                traverse: true,
-                unstyled_children_only: true,
-            };
+        // If this is an unstyled-only traversal, the caller has already verified
+        // that there's something to traverse, and we don't need to do any
+        // invalidation since we're not doing any restyling.
+        if traversal_flags.contains(traversal_flags::UnstyledOnly) {
+            return PreTraverseToken(true)
         }
 
         let flags = shared_context.traversal_flags;
@@ -202,10 +181,7 @@ pub trait DomTraversal<E: TElement> : Sync {
             parent_data.as_ref().map(|d| &**d)
         );
 
-        PreTraverseToken {
-            traverse: should_traverse,
-            unstyled_children_only: false,
-        }
+        PreTraverseToken(should_traverse)
     }
 
     /// Returns true if traversal should visit a text node. The style system
@@ -228,15 +204,31 @@ pub trait DomTraversal<E: TElement> : Sync {
     ) -> bool {
         debug!("element_needs_traversal({:?}, {:?}, {:?}, {:?})",
                el, traversal_flags, data, parent_data);
-        let data = match data {
-            Some(d) if d.has_styles() => d,
-            _ => return !traversal_flags.for_animation_only(),
-        };
+
+        if traversal_flags.contains(traversal_flags::UnstyledOnly) {
+            return data.map_or(true, |d| !d.has_styles()) || el.has_dirty_descendants();
+        }
+
+
+        // In case of animation-only traversal we need to traverse the element
+        // if the element has animation only dirty descendants bit,
+        // animation-only restyle hint or recascade.
+        if traversal_flags.for_animation_only() {
+            return data.map_or(false, |d| d.has_styles()) &&
+                   (el.has_animation_only_dirty_descendants() ||
+                    data.as_ref().unwrap().restyle.hint.has_animation_hint_or_recascade());
+        }
 
         // Non-incremental layout visits every node.
         if is_servo_nonincremental_layout() {
             return true;
         }
+
+        // Unwrap the data.
+        let data = match data {
+            Some(d) if d.has_styles() => d,
+            _ => return true,
+        };
 
         // If the element is native-anonymous and an ancestor frame will be
         // reconstructed, the child and all its descendants will be destroyed.
@@ -278,14 +270,6 @@ pub trait DomTraversal<E: TElement> : Sync {
                     return false;
                 }
             }
-        }
-
-        // In case of animation-only traversal we need to traverse the element
-        // if the element has animation only dirty descendants bit,
-        // animation-only restyle hint or recascade.
-        if traversal_flags.for_animation_only() {
-            return el.has_animation_only_dirty_descendants() ||
-                   data.restyle.hint.has_animation_hint_or_recascade();
         }
 
         // If the dirty descendants bit is set, we need to traverse no matter
@@ -388,6 +372,7 @@ pub fn resolve_style<E>(
     context: &mut StyleContext<E>,
     element: E,
     rule_inclusion: RuleInclusion,
+    ignore_existing_style: bool,
 ) -> ElementStyles
 where
     E: TElement,
@@ -395,6 +380,7 @@ where
     use style_resolver::StyleResolverForElement;
 
     debug_assert!(rule_inclusion == RuleInclusion::DefaultOnly ||
+                  ignore_existing_style ||
                   element.borrow_data().map_or(true, |d| !d.has_styles()),
                   "Why are we here?");
     let mut ancestors_requiring_style_resolution = SmallVec::<[E; 16]>::new();
@@ -405,7 +391,7 @@ where
     let mut style = None;
     let mut ancestor = element.traversal_parent();
     while let Some(current) = ancestor {
-        if rule_inclusion == RuleInclusion::All {
+        if rule_inclusion == RuleInclusion::All && !ignore_existing_style {
             if let Some(data) = current.borrow_data() {
                 if let Some(ancestor_style) = data.styles.get_primary() {
                     style = Some(ancestor_style.clone());
@@ -479,14 +465,15 @@ where
     D: DomTraversal<E>,
     F: FnMut(E::ConcreteNode),
 {
+    use traversal_flags::*;
+    let flags = context.shared.traversal_flags;
     context.thread_local.begin_element(element, data);
     context.thread_local.statistics.elements_traversed += 1;
-    debug_assert!(context.shared.traversal_flags.for_animation_only() ||
+    debug_assert!(flags.intersects(AnimationOnly | UnstyledOnly) ||
                   !element.has_snapshot() || element.handled_snapshot(),
                   "Should've handled snapshots here already");
 
-    let compute_self =
-        !element.has_current_styles_for_traversal(data, context.shared.traversal_flags);
+    let compute_self = !element.has_current_styles_for_traversal(data, flags);
     let mut hint = RestyleHint::empty();
 
     debug!("recalc_style_at: {:?} (compute_self={:?}, \
@@ -518,16 +505,28 @@ where
                    element);
             clear_descendant_data(element)
         }
+
+        // Inform any paint worklets of changed style, to speculatively
+        // evaluate the worklet code. In the case that the size hasn't changed,
+        // this will result in increased concurrency between script and layout.
+        notify_paint_worklet(context, data);
+    } else {
+        debug_assert!(data.has_styles());
+        data.restyle.set_traversed_without_styling();
     }
 
     // Now that matching and cascading is done, clear the bits corresponding to
-    // those operations and compute the propagated restyle hint.
-    let mut propagated_hint = {
-        debug_assert!(context.shared.traversal_flags.for_animation_only() ||
+    // those operations and compute the propagated restyle hint (unless we're
+    // not processing invalidations, in which case don't need to propagate it
+    // and must avoid clearing it).
+    let mut propagated_hint = if flags.contains(UnstyledOnly) {
+        RestyleHint::empty()
+    } else {
+        debug_assert!(flags.for_animation_only() ||
                       !data.restyle.hint.has_animation_hint(),
                       "animation restyle hint should be handled during \
                        animation-only restyles");
-        data.restyle.hint.propagate(&context.shared.traversal_flags)
+        data.restyle.hint.propagate(&flags)
     };
 
     // FIXME(bholley): Need to handle explicitly-inherited reset properties
@@ -539,20 +538,16 @@ where
            propagated_hint,
            data.styles.is_display_none(),
            element.implemented_pseudo_element());
-    debug_assert!(element.has_current_styles_for_traversal(data, context.shared.traversal_flags),
+    debug_assert!(element.has_current_styles_for_traversal(data, flags),
                   "Should have computed style or haven't yet valid computed \
                    style in case of animation-only restyle");
 
-    let flags = context.shared.traversal_flags;
     let has_dirty_descendants_for_this_restyle =
         if flags.for_animation_only() {
             element.has_animation_only_dirty_descendants()
         } else {
             element.has_dirty_descendants()
         };
-    if flags.for_animation_only() {
-        unsafe { element.unset_animation_only_dirty_descendants(); }
-    }
 
     // Before examining each child individually, try to prove that our children
     // don't need style processing. They need processing if any of the following
@@ -592,31 +587,33 @@ where
     // If we are in a forgetful traversal, drop the existing restyle
     // data here, since we won't need to perform a post-traversal to pick up
     // any change hints.
-    if flags.contains(traversal_flags::Forgetful) {
-        data.clear_restyle_state();
+    if flags.contains(Forgetful) {
+        data.clear_restyle_flags_and_damage();
     }
 
-    // There are two cases when we want to clear the dity descendants bit here
-    // after styling this element. The first case is when we were explicitly
-    // asked to clear the bit by the caller.
-    //
-    // The second case is when this element is the root of a display:none
-    // subtree, even if the style didn't change (since, if the style did change,
-    // we'd have already cleared it above).
-    //
-    // This keeps the tree in a valid state without requiring the DOM to check
-    // display:none on the parent when inserting new children (which can be
-    // moderately expensive). Instead, DOM implementations can unconditionally
-    // set the dirty descendants bit on any styled parent, and let the traversal
-    // sort it out.
-    if flags.contains(traversal_flags::ClearDirtyDescendants) ||
-       data.styles.is_display_none() {
-        unsafe { element.unset_dirty_descendants(); }
-    }
-
-    // Similarly, check if we're supposed to clear the animation bit.
-    if flags.contains(traversal_flags::ClearAnimationOnlyDirtyDescendants) {
-        unsafe { element.unset_animation_only_dirty_descendants(); }
+    // Optionally clear the descendants bit for the traversal type we're in.
+    if flags.for_animation_only() {
+        if flags.contains(ClearAnimationOnlyDirtyDescendants) {
+            unsafe { element.unset_animation_only_dirty_descendants(); }
+        }
+    } else {
+        // There are two cases when we want to clear the dity descendants bit here
+        // after styling this element. The first case is when we were explicitly
+        // asked to clear the bit by the caller.
+        //
+        // The second case is when this element is the root of a display:none
+        // subtree, even if the style didn't change (since, if the style did change,
+        // we'd have already cleared it above).
+        //
+        // This keeps the tree in a valid state without requiring the DOM to check
+        // display:none on the parent when inserting new children (which can be
+        // moderately expensive). Instead, DOM implementations can unconditionally
+        // set the dirty descendants bit on any styled parent, and let the traversal
+        // sort it out.
+        if flags.contains(ClearDirtyDescendants) ||
+           data.styles.is_display_none() {
+            unsafe { element.unset_dirty_descendants(); }
+        }
     }
 
     context.thread_local.end_element(element);
@@ -713,6 +710,46 @@ where
         new_styles,
         important_rules_changed
     )
+}
+
+#[cfg(feature = "servo")]
+fn notify_paint_worklet<E>(context: &StyleContext<E>, data: &ElementData)
+where
+    E: TElement,
+{
+    // We speculatively evaluate any paint worklets during styling.
+    // This allows us to run paint worklets in parallel with style and layout.
+    // Note that this is wasted effort if the size of the node has
+    // changed, but in may cases it won't have.
+    if let Some(ref values) = data.styles.primary {
+        for image in &values.get_background().background_image.0 {
+            let (name, arguments) = match *image {
+                Either::Second(Image::PaintWorklet(ref worklet)) => (&worklet.name, &worklet.arguments),
+                _ => continue,
+            };
+            let painter = match context.shared.registered_speculative_painters.get(name) {
+                Some(painter) => painter,
+                None => continue,
+            };
+            let properties = painter.properties().iter()
+                .filter_map(|(name, id)| id.as_shorthand().err().map(|id| (name, id)))
+                .map(|(name, id)| (name.clone(), values.computed_value_to_string(id)))
+                .collect();
+            let arguments = arguments.iter()
+                .map(|argument| argument.to_css_string())
+                .collect();
+            debug!("Notifying paint worklet {}.", painter.name());
+            painter.speculatively_draw_a_paint_image(properties, arguments);
+        }
+    }
+}
+
+#[cfg(feature = "gecko")]
+fn notify_paint_worklet<E>(_context: &StyleContext<E>, _data: &ElementData)
+where
+    E: TElement,
+{
+    // The CSS paint API is Servo-only at the moment
 }
 
 fn note_children<E, D, F>(

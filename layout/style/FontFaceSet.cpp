@@ -1378,8 +1378,14 @@ FontFaceSet::CheckFontLoad(const gfxFontFaceSrc* aFontFaceSrc,
 // might also be the original principal which enables user stylesheets
 // to load font files via @font-face rules.
 bool
-FontFaceSet::IsFontLoadAllowed(nsIURI* aFontLocation, nsIPrincipal* aPrincipal)
+FontFaceSet::IsFontLoadAllowed(nsIURI* aFontLocation,
+                               nsIPrincipal* aPrincipal,
+                               nsTArray<nsCOMPtr<nsIRunnable>>* aViolations)
 {
+  if (aViolations) {
+    mDocument->StartBufferingCSPViolations();
+  }
+
   int16_t shouldLoad = nsIContentPolicy::ACCEPT;
   nsresult rv = NS_CheckContentLoadPolicy(nsIContentPolicy::TYPE_FONT,
                                           aFontLocation,
@@ -1390,7 +1396,28 @@ FontFaceSet::IsFontLoadAllowed(nsIURI* aFontLocation, nsIPrincipal* aPrincipal)
                                           &shouldLoad,
                                           nsContentUtils::GetContentPolicy());
 
+  if (aViolations) {
+    mDocument->StopBufferingCSPViolations(*aViolations);
+  }
+
   return NS_SUCCEEDED(rv) && NS_CP_ACCEPTED(shouldLoad);
+}
+
+void
+FontFaceSet::DispatchFontLoadViolations(
+    nsTArray<nsCOMPtr<nsIRunnable>>& aViolations)
+{
+  if (XRE_IsContentProcess()) {
+    nsCOMPtr<nsIEventTarget> eventTarget =
+      mDocument->EventTargetFor(TaskCategory::Other);
+    for (nsIRunnable* runnable : aViolations) {
+      eventTarget->Dispatch(do_AddRef(runnable), NS_DISPATCH_NORMAL);
+    }
+  } else {
+    for (nsIRunnable* runnable : aViolations) {
+      NS_DispatchToMainThread(do_AddRef(runnable));
+    }
+  }
 }
 
 nsresult
@@ -1437,7 +1464,7 @@ FontFaceSet::SyncLoadFontData(gfxUserFontEntry* aFontToLoad,
   aBufferLength = static_cast<uint32_t>(bufferLength64);
 
   // read all the decoded data
-  aBuffer = static_cast<uint8_t*> (moz_xmalloc(sizeof(uint8_t) * aBufferLength));
+  aBuffer = static_cast<uint8_t*>(malloc(sizeof(uint8_t) * aBufferLength));
   if (!aBuffer) {
     aBufferLength = 0;
     return NS_ERROR_OUT_OF_MEMORY;
@@ -1840,11 +1867,24 @@ FontFaceSet::UserFontSet::GetStandardFontLoadPrincipal()
 }
 
 /* virtual */ bool
-FontFaceSet::UserFontSet::IsFontLoadAllowed(nsIURI* aFontLocation,
-                                            nsIPrincipal* aPrincipal)
+FontFaceSet::UserFontSet::IsFontLoadAllowed(
+    nsIURI* aFontLocation,
+    nsIPrincipal* aPrincipal,
+    nsTArray<nsCOMPtr<nsIRunnable>>* aViolations)
 {
   return mFontFaceSet &&
-         mFontFaceSet->IsFontLoadAllowed(aFontLocation, aPrincipal);
+         mFontFaceSet->IsFontLoadAllowed(aFontLocation,
+                                         aPrincipal,
+                                         aViolations);
+}
+
+/* virtual */ void
+FontFaceSet::UserFontSet::DispatchFontLoadViolations(
+    nsTArray<nsCOMPtr<nsIRunnable>>& aViolations)
+{
+  if (mFontFaceSet) {
+    mFontFaceSet->DispatchFontLoadViolations(aViolations);
+  }
 }
 
 /* virtual */ nsresult

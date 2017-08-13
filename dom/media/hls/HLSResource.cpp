@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "HLSDecoder.h"
 #include "HLSResource.h"
 #include "HLSUtils.h"
 
@@ -42,10 +43,10 @@ HLSResourceCallbacksSupport::OnError(int aErrorCode)
   }
 }
 
-HLSResource::HLSResource(MediaResourceCallback* aCallback,
+HLSResource::HLSResource(HLSDecoder* aDecoder,
                          nsIChannel* aChannel,
                          nsIURI* aURI)
-  : mCallback(aCallback)
+  : mDecoder(aDecoder)
   , mChannel(aChannel)
   , mURI(aURI)
 {
@@ -64,22 +65,25 @@ HLSResource::HLSResource(MediaResourceCallback* aCallback,
 void
 HLSResource::onDataAvailable()
 {
-  MOZ_ASSERT(mCallback);
   HLS_DEBUG("HLSResource", "onDataAvailable");
-  mCallback->NotifyDataArrived();
+  if (mDecoder) {
+    mDecoder->NotifyDataArrived();
+  }
 }
 
 void
 HLSResource::onError(int aErrorCode)
 {
-  MOZ_ASSERT(mCallback);
   HLS_DEBUG("HLSResource", "onError(%d)", aErrorCode);
   // Since HLS source should be from the Internet, we treat all resource errors
   // from GeckoHlsPlayer as network errors.
-  mCallback->NotifyNetworkError();
+  if (mDecoder) {
+    mDecoder->NetworkError();
+  }
 }
 
-void HLSResource::Suspend(bool aCloseImmediately)
+void
+HLSResource::Suspend()
 {
   MOZ_ASSERT(NS_IsMainThread(), "Don't call on non-main thread");
   HLS_DEBUG("HLSResource", "Should suspend the resource fetching.");
@@ -100,13 +104,13 @@ HLSResource::~HLSResource()
     mCallbackSupport->Detach();
     mCallbackSupport = nullptr;
   }
-  if (mJavaCallbacks) {
-    HLSResourceCallbacksSupport::DisposeNative(mJavaCallbacks);
-    mJavaCallbacks = nullptr;
-  }
   if (mHLSResourceWrapper) {
     mHLSResourceWrapper->Destroy();
     mHLSResourceWrapper = nullptr;
+  }
+  if (mJavaCallbacks) {
+      HLSResourceCallbacksSupport::DisposeNative(mJavaCallbacks);
+      mJavaCallbacks = nullptr;
   }
 }
 

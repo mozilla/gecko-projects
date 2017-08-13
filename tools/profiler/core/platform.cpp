@@ -195,12 +195,12 @@ private:
 
   ~CorePS()
   {
-    while (mLiveThreads.size() > 0) {
+    while (!mLiveThreads.empty()) {
       delete mLiveThreads.back();
       mLiveThreads.pop_back();
     }
 
-    while (mDeadThreads.size() > 0) {
+    while (!mDeadThreads.empty()) {
       delete mDeadThreads.back();
       mDeadThreads.pop_back();
     }
@@ -720,46 +720,52 @@ AddPseudoEntry(uint32_t aFeatures, NotNull<RacyThreadInfo*> aRacyInfo,
   MOZ_ASSERT(entry.kind() == js::ProfileEntry::Kind::CPP_NORMAL ||
              entry.kind() == js::ProfileEntry::Kind::JS_NORMAL);
 
+  const char* label = entry.label();
   const char* dynamicString = entry.dynamicString();
+  bool isChromeJSEntry = false;
   int lineno = -1;
 
-  // XXX: it's unclear why the computation of lineno should depend on
-  // |dynamicString|. Perhaps it shouldn't?
+  if (entry.isJs()) {
+    // There are two kinds of JS frames that get pushed onto the PseudoStack.
+    //
+    // - label = "", dynamic string = <something>
+    // - label = "js::RunScript", dynamic string = nullptr
+    //
+    // The line number is only interesting for the first case.
+    if (label[0] == '\0') {
+      MOZ_ASSERT(dynamicString);
 
-  if (dynamicString) {
-    bool isChromeJSEntry = false;
-    if (entry.isJs()) {
       // We call entry.script() repeatedly -- rather than storing the result in
       // a local variable in order -- to avoid rooting hazards.
       if (entry.script()) {
         isChromeJSEntry = IsChromeJSScript(entry.script());
-        if (!entry.pc()) {
+        if (entry.pc()) {
+          lineno = JS_PCToLineNumber(entry.script(), entry.pc());
+        } else {
           // The JIT only allows the top-most entry to have a nullptr pc.
           MOZ_ASSERT(&entry == &aRacyInfo->entries[aRacyInfo->stackSize() - 1]);
-        } else {
-          lineno = JS_PCToLineNumber(entry.script(), entry.pc());
         }
       }
+
     } else {
-      lineno = entry.line();
+      MOZ_ASSERT(strcmp(label, "js::RunScript") == 0 && !dynamicString);
     }
 
+  } else {
+    MOZ_ASSERT(entry.isCpp());
+    lineno = entry.line();
+  }
+
+  if (dynamicString) {
     // Adjust the dynamic string as necessary.
     if (ProfilerFeature::HasPrivacy(aFeatures) && !isChromeJSEntry) {
       dynamicString = "(private)";
     } else if (strlen(dynamicString) >= ProfileBuffer::kMaxFrameKeyLength) {
       dynamicString = "(too long)";
     }
-
-  } else {
-    // XXX: Bug 1010578. Don't assume a CPP entry and try to get the line for
-    // js entries as well.
-    if (entry.isCpp()) {
-      lineno = entry.line();
-    }
   }
 
-  aCollector.CollectCodeLocation(entry.label(), dynamicString, lineno,
+  aCollector.CollectCodeLocation(label, dynamicString, lineno,
                                  Some(entry.category()));
 }
 
@@ -1001,7 +1007,7 @@ MergeStacks(uint32_t aFeatures, bool aIsSynchronous,
 }
 
 #if defined(GP_OS_windows)
-static uintptr_t GetThreadHandle(PlatformData* aData);
+static HANDLE GetThreadHandle(PlatformData* aData);
 #endif
 
 #if defined(USE_FRAME_POINTER_STACK_WALK) || defined(USE_MOZ_STACK_WALK)
@@ -1024,9 +1030,9 @@ DoNativeBacktrace(PSLockRef aLock, const ThreadInfo& aThreadInfo,
   //          cannot rely on ActivePS.
 
   // Start with the current function. We use 0 as the frame number here because
-  // the FramePointerStackWalk() and MozStackWalk() calls below will use 1..N.
-  // This is a bit weird but it doesn't matter because StackWalkCallback()
-  // doesn't use the frame number argument.
+  // the FramePointerStackWalk() and MozStackWalkThread() calls below will use
+  // 1..N. This is a bit weird but it doesn't matter because
+  // StackWalkCallback() doesn't use the frame number argument.
   StackWalkCallback(/* frameNum */ 0, aRegs.mPC, aRegs.mSP, &aNativeStack);
 
   uint32_t maxFrames = uint32_t(MAX_NATIVE_FRAMES - aNativeStack.mCount);
@@ -1039,10 +1045,10 @@ DoNativeBacktrace(PSLockRef aLock, const ThreadInfo& aThreadInfo,
                           stackEnd);
   }
 #elif defined(USE_MOZ_STACK_WALK)
-  uintptr_t thread = GetThreadHandle(aThreadInfo.GetPlatformData());
+  HANDLE thread = GetThreadHandle(aThreadInfo.GetPlatformData());
   MOZ_ASSERT(thread);
-  MozStackWalk(StackWalkCallback, /* skipFrames */ 0, maxFrames, &aNativeStack,
-               thread, /* platformData */ nullptr);
+  MozStackWalkThread(StackWalkCallback, /* skipFrames */ 0, maxFrames,
+                     &aNativeStack, thread, /* context */ nullptr);
 #else
 # error "bad configuration"
 #endif
@@ -1332,8 +1338,9 @@ DoPeriodicSample(PSLockRef aLock, ThreadInfo& aThreadInfo,
 
   ThreadResponsiveness* resp = aThreadInfo.GetThreadResponsiveness();
   if (resp && resp->HasData()) {
-    TimeDuration delta = resp->GetUnresponsiveDuration(aNow);
-    buffer.AddEntry(ProfileBufferEntry::Responsiveness(delta.ToMilliseconds()));
+    double delta = resp->GetUnresponsiveDuration(
+      (aNow - CorePS::ProcessStartTime()).ToMilliseconds());
+    buffer.AddEntry(ProfileBufferEntry::Responsiveness(delta));
   }
 
   if (aRSSMemory != 0) {
@@ -1442,11 +1449,12 @@ StreamTaskTracer(PSLockRef aLock, SpliceableJSONWriter& aWriter)
 }
 
 static void
-StreamMetaJSCustomObject(PSLockRef aLock, SpliceableJSONWriter& aWriter)
+StreamMetaJSCustomObject(PSLockRef aLock, SpliceableJSONWriter& aWriter,
+                         const TimeStamp& aShutdownTime)
 {
   MOZ_RELEASE_ASSERT(CorePS::Exists() && ActivePS::Exists(aLock));
 
-  aWriter.IntProperty("version", 7);
+  aWriter.IntProperty("version", 8);
 
   // The "startTime" field holds the number of milliseconds since midnight
   // January 1, 1970 GMT. This grotty code computes (Now - (Now -
@@ -1454,6 +1462,15 @@ StreamMetaJSCustomObject(PSLockRef aLock, SpliceableJSONWriter& aWriter)
   TimeDuration delta = TimeStamp::Now() - CorePS::ProcessStartTime();
   aWriter.DoubleProperty(
     "startTime", static_cast<double>(PR_Now()/1000.0 - delta.ToMilliseconds()));
+
+  // Write the shutdownTime field. Unlike startTime, shutdownTime is not an
+  // absolute time stamp: It's relative to startTime. This is consistent with
+  // all other (non-"startTime") times anywhere in the profile JSON.
+  if (aShutdownTime) {
+    aWriter.DoubleProperty("shutdownTime", profiler_time());
+  } else {
+    aWriter.NullProperty("shutdownTime");
+  }
 
   if (!NS_IsMainThread()) {
     // Leave the rest of the properties out if we're not on the main thread.
@@ -1586,11 +1603,16 @@ BuildJavaThreadJSObject(SpliceableJSONWriter& aWriter)
 static TimeStamp
 locked_profiler_stream_json_for_this_process(PSLockRef aLock,
                                              SpliceableJSONWriter& aWriter,
-                                             double aSinceTime)
+                                             double aSinceTime,
+                                             bool aIsShuttingDown)
 {
   LOG("locked_profiler_stream_json_for_this_process");
 
   MOZ_RELEASE_ASSERT(CorePS::Exists() && ActivePS::Exists(aLock));
+
+  double collectionStart = profiler_time();
+
+  ProfileBuffer& buffer = ActivePS::Buffer(aLock);
 
   // Put shared library info
   aWriter.StartArrayProperty("libs");
@@ -1600,7 +1622,8 @@ locked_profiler_stream_json_for_this_process(PSLockRef aLock,
   // Put meta data
   aWriter.StartObjectProperty("meta");
   {
-    StreamMetaJSCustomObject(aLock, aWriter);
+    StreamMetaJSCustomObject(aLock, aWriter,
+                             aIsShuttingDown ? TimeStamp::Now() : TimeStamp());
   }
   aWriter.EndObject();
 
@@ -1623,7 +1646,7 @@ locked_profiler_stream_json_for_this_process(PSLockRef aLock,
         continue;
       }
       double thisThreadFirstSampleTime =
-        info->StreamJSON(ActivePS::Buffer(aLock), aWriter,
+        info->StreamJSON(buffer, aWriter,
                          CorePS::ProcessStartTime(), aSinceTime);
       firstSampleTime = std::min(thisThreadFirstSampleTime, firstSampleTime);
     }
@@ -1633,8 +1656,8 @@ locked_profiler_stream_json_for_this_process(PSLockRef aLock,
       ThreadInfo* info = deadThreads.at(i);
       MOZ_ASSERT(info->IsBeingProfiled());
       double thisThreadFirstSampleTime =
-        info->StreamJSON(ActivePS::Buffer(aLock), aWriter,
-                        CorePS::ProcessStartTime(), aSinceTime);
+        info->StreamJSON(buffer, aWriter,
+                         CorePS::ProcessStartTime(), aSinceTime);
       firstSampleTime = std::min(thisThreadFirstSampleTime, firstSampleTime);
     }
 
@@ -1654,6 +1677,23 @@ locked_profiler_stream_json_for_this_process(PSLockRef aLock,
   }
   aWriter.EndArray();
 
+  aWriter.StartArrayProperty("pausedRanges",
+                             SpliceableJSONWriter::SingleLineStyle);
+  {
+    buffer.StreamPausedRangesToJSON(aWriter, aSinceTime);
+  }
+  aWriter.EndArray();
+
+  double collectionEnd = profiler_time();
+
+  // Record timestamps for the collection into the buffer, so that consumers
+  // know why we didn't collect any samples for its duration.
+  // We put these entries into the buffer after we've collected the profile,
+  // so they'll be visible for the *next* profile collection (if they haven't
+  // been overwritten due to buffer wraparound by then).
+  buffer.AddEntry(ProfileBufferEntry::CollectionStart(collectionStart));
+  buffer.AddEntry(ProfileBufferEntry::CollectionEnd(collectionEnd));
+
   if (firstSampleTime != INFINITY) {
     return CorePS::ProcessStartTime() +
            TimeDuration::FromMilliseconds(firstSampleTime);
@@ -1665,6 +1705,7 @@ locked_profiler_stream_json_for_this_process(PSLockRef aLock,
 bool
 profiler_stream_json_for_this_process(SpliceableJSONWriter& aWriter,
                                       double aSinceTime,
+                                      bool aIsShuttingDown,
                                       TimeStamp* aOutFirstSampleTime)
 {
   LOG("profiler_stream_json_for_this_process");
@@ -1678,7 +1719,8 @@ profiler_stream_json_for_this_process(SpliceableJSONWriter& aWriter,
   }
 
   TimeStamp firstSampleTime =
-    locked_profiler_stream_json_for_this_process(lock, aWriter, aSinceTime);
+    locked_profiler_stream_json_for_this_process(lock, aWriter, aSinceTime,
+                                                 aIsShuttingDown);
 
   if (aOutFirstSampleTime) {
     *aOutFirstSampleTime = firstSampleTime;
@@ -2349,7 +2391,8 @@ profiler_init(void* aStackTop)
 }
 
 static void
-locked_profiler_save_profile_to_file(PSLockRef aLock, const char* aFilename);
+locked_profiler_save_profile_to_file(PSLockRef aLock, const char* aFilename,
+                                     bool aIsShuttingDown);
 
 static SamplerThread*
 locked_profiler_stop(PSLockRef aLock);
@@ -2372,7 +2415,8 @@ profiler_shutdown()
     if (ActivePS::Exists(lock)) {
       const char* filename = getenv("MOZ_PROFILER_SHUTDOWN");
       if (filename) {
-        locked_profiler_save_profile_to_file(lock, filename);
+        locked_profiler_save_profile_to_file(lock, filename,
+                                             /* aIsShuttingDown */ true);
       }
 
       samplerThread = locked_profiler_stop(lock);
@@ -2399,7 +2443,7 @@ profiler_shutdown()
 }
 
 UniquePtr<char[]>
-profiler_get_profile(double aSinceTime)
+profiler_get_profile(double aSinceTime, bool aIsShuttingDown)
 {
   LOG("profiler_get_profile");
 
@@ -2408,7 +2452,8 @@ profiler_get_profile(double aSinceTime)
   SpliceableChunkedJSONWriter b;
   b.Start(SpliceableJSONWriter::SingleLineStyle);
   {
-    if (!profiler_stream_json_for_this_process(b, aSinceTime)) {
+    if (!profiler_stream_json_for_this_process(b, aSinceTime,
+                                               aIsShuttingDown)) {
       return nullptr;
     }
 
@@ -2509,7 +2554,8 @@ AutoSetProfilerEnvVarsForChildProcess::~AutoSetProfilerEnvVarsForChildProcess()
 }
 
 static void
-locked_profiler_save_profile_to_file(PSLockRef aLock, const char* aFilename)
+locked_profiler_save_profile_to_file(PSLockRef aLock, const char* aFilename,
+                                     bool aIsShuttingDown = false)
 {
   LOG("locked_profiler_save_profile_to_file(%s)", aFilename);
 
@@ -2521,7 +2567,8 @@ locked_profiler_save_profile_to_file(PSLockRef aLock, const char* aFilename)
     SpliceableJSONWriter w(MakeUnique<OStreamJSONWriteFunc>(stream));
     w.Start(SpliceableJSONWriter::SingleLineStyle);
     {
-      locked_profiler_stream_json_for_this_process(aLock, w, /* sinceTime */ 0);
+      locked_profiler_stream_json_for_this_process(aLock, w, /* sinceTime */ 0,
+                                                   aIsShuttingDown);
 
       // Don't include profiles from other processes because this is a
       // synchronous function.
@@ -2799,7 +2846,7 @@ locked_profiler_stop(PSLockRef aLock)
 
   // This is where we destroy the ThreadInfos for all dead threads.
   CorePS::ThreadVector& deadThreads = CorePS::DeadThreads(aLock);
-  while (deadThreads.size() > 0) {
+  while (!deadThreads.empty()) {
     delete deadThreads.back();
     deadThreads.pop_back();
   }
@@ -2880,6 +2927,7 @@ profiler_pause()
     }
 
     ActivePS::SetIsPaused(lock, true);
+    ActivePS::Buffer(lock).AddEntry(ProfileBufferEntry::Pause(profiler_time()));
   }
 
   // gPSMutex must be unlocked when we notify, to avoid potential deadlocks.
@@ -2901,6 +2949,7 @@ profiler_resume()
       return;
     }
 
+    ActivePS::Buffer(lock).AddEntry(ProfileBufferEntry::Resume(profiler_time()));
     ActivePS::SetIsPaused(lock, false);
   }
 
@@ -2962,6 +3011,7 @@ profiler_unregister_thread()
   if (info) {
     DEBUG_LOG("profiler_unregister_thread: %s", info->Name());
     if (ActivePS::Exists(lock) && info->IsBeingProfiled()) {
+      info->NotifyUnregistered();
       CorePS::DeadThreads(lock).push_back(info);
     } else {
       delete info;

@@ -113,12 +113,16 @@ UNITTEST_ALIASES = {
 # unittest platforms can be specified by substring of the "pretty name", which
 # is basically the old Buildbot builder name.  This dict has {pretty name,
 # [test_platforms]} translations, This includes only the most commonly-used
-# substrings.  This is intended only for backward-compatibility.  New test
-# platforms should have their `test_platform` spelled out fully in try syntax.
+# substrings.  It is OK to add new test platforms to various shorthands here;
+# if you add a new Linux64 test platform for instance, people will expect that
+# their previous methods of requesting "all linux64 tests" will include this
+# new platform, and they shouldn't have to explicitly spell out the new platform
+# every time for such cases.
+#
 # Note that the test platforms here are only the prefix up to the `/`.
 UNITTEST_PLATFORM_PRETTY_NAMES = {
-    'Ubuntu': ['linux32', 'linux64', 'linux64-asan'],
-    'x64': ['linux64', 'linux64-asan'],
+    'Ubuntu': ['linux32', 'linux64', 'linux64-asan', 'linux64-stylo', 'linux64-stylo-sequential'],
+    'x64': ['linux64', 'linux64-asan', 'linux64-stylo', 'linux64-stylo-sequential'],
     'Android 4.3': ['android-4.3-arm7-api-15'],
     '10.10': ['macosx64'],
     # other commonly-used substrings for platforms not yet supported with
@@ -591,8 +595,8 @@ class TryOptionSyntax(object):
             # Beware the subtle distinction between [] and None for self.jobs and self.platforms.
             # They will be [] if there was no try syntax, and None if try syntax was detected but
             # they remained unspecified.
-            if self.jobs and job_try_name not in self.jobs:
-                return False
+            if self.jobs:
+                return job_try_name in self.jobs
             elif not self.jobs and 'build' in task.dependencies:
                 # We exclude tasks with build dependencies from the default set of jobs because
                 # they will schedule their builds even if they end up optimized away. This means
@@ -603,7 +607,7 @@ class TryOptionSyntax(object):
                 if self.platforms is None or attr('build_platform') in self.platforms:
                     return True
                 return False
-            return True
+            return check_run_on_projects()
         elif attr('kind') == 'test':
             return match_test(self.unittests, 'unittest_try_name') \
                  or match_test(self.talos, 'talos_try_name')

@@ -20,6 +20,7 @@
 #include "gfx2DGlue.h"
 #include "gfxPrefs.h"
 #include "gfxWindowsPlatform.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/AbstractThread.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -32,6 +33,7 @@
 #include "nsPrintfCString.h"
 #include "nsThreadUtils.h"
 #include "nsWindowsHelpers.h"
+#include "WMFDecoderModule.h"
 #include <algorithm>
 #include <psapi.h>
 #include <winsdkver.h>
@@ -63,7 +65,9 @@ const GUID MFVideoFormat_VP90 =
 };
 #endif
 
-const CLSID CLSID_WebmMfVpxDec =
+// Note: CLSID_WebmMfVpxDec needs to be extern for the CanCreateWMFDecoder
+// template in WMFDecoderModule.cpp to work.
+extern const GUID CLSID_WebmMfVpxDec =
 {
   0xe3aaf548,
   0xc9a4,
@@ -449,7 +453,10 @@ WMFVideoMFTManager::InitializeDXVA()
   }
   MOZ_ASSERT(!mDXVA2Manager);
   LayersBackend backend = GetCompositorBackendType(mKnowsCompositor);
-  if (backend != LayersBackend::LAYERS_D3D11) {
+  bool useANGLE =
+      mKnowsCompositor ? mKnowsCompositor->GetCompositorUseANGLE() : false;
+  bool wrWithANGLE = (backend == LayersBackend::LAYERS_WR) && useANGLE;
+  if (backend != LayersBackend::LAYERS_D3D11 && !wrWithANGLE) {
     mDXVAFailureReason.AssignLiteral("Unsupported layers backend");
     return false;
   }
@@ -934,7 +941,7 @@ WMFVideoMFTManager::CreateD3DVideoFrame(IMFSample* aSample,
   return S_OK;
 }
 
-// Blocks until decoded sample is produced by the deoder.
+// Blocks until decoded sample is produced by the decoder.
 HRESULT
 WMFVideoMFTManager::Output(int64_t aStreamOffset,
                            RefPtr<MediaData>& aOutData)

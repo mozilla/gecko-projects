@@ -208,6 +208,20 @@ APZCTreeManagerChild::StartScrollbarDrag(
 }
 
 void
+APZCTreeManagerChild::StartAutoscroll(
+    const ScrollableLayerGuid& aGuid,
+    const ScreenPoint& aAnchorLocation)
+{
+  SendStartAutoscroll(aGuid, aAnchorLocation);
+}
+
+void
+APZCTreeManagerChild::StopAutoscroll(const ScrollableLayerGuid& aGuid)
+{
+  SendStopAutoscroll(aGuid);
+}
+
+void
 APZCTreeManagerChild::SetLongTapEnabled(bool aTapGestureEnabled)
 {
   SendSetLongTapEnabled(aTapGestureEnabled);
@@ -277,6 +291,18 @@ APZCTreeManagerChild::RecvNotifyPinchGesture(const PinchGestureType& aType,
       mCompositorSession->GetWidget()) {
     APZCCallbackHelper::NotifyPinchGesture(aType, aSpanChange, aModifiers, mCompositorSession->GetWidget());
   }
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+APZCTreeManagerChild::RecvCancelAutoscroll(const FrameMetrics::ViewID& aScrollId)
+{
+  // This will only get sent from the GPU process to the parent process, so
+  // this function should never get called in the content process.
+  MOZ_ASSERT(XRE_IsParentProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+
+  APZCCallbackHelper::CancelAutoscroll(aScrollId);
   return IPC_OK();
 }
 

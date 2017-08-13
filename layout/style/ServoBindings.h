@@ -50,6 +50,7 @@ namespace mozilla {
   };
   enum class UpdateAnimationsTasks : uint8_t;
   struct LangGroupFontPrefs;
+  class SeenPtrs;
   class ServoStyleContext;
   class ServoStyleSheet;
   class ServoElementSnapshotTable;
@@ -264,13 +265,12 @@ double Gecko_GetPositionInSegment(
   RawGeckoAnimationPropertySegmentBorrowed aSegment,
   double aProgress,
   mozilla::ComputedTimingFunction::BeforeFlag aBeforeFlag);
-bool Gecko_IsFramesTimingEnabled();
 // Get servo's AnimationValue for |aProperty| from the cached base style
 // |aBaseStyles|.
 // |aBaseStyles| is nsRefPtrHashtable<nsUint32HashKey, RawServoAnimationValue>.
-// We use void* to avoid exposing nsRefPtrHashtable in FFI.
+// We use RawServoAnimationValueTableBorrowed to avoid exposing nsRefPtrHashtable in FFI.
 RawServoAnimationValueBorrowedOrNull Gecko_AnimationGetBaseStyle(
-  void* aBaseStyles,
+  RawServoAnimationValueTableBorrowed aBaseStyles,
   nsCSSPropertyID aProperty);
 void Gecko_StyleTransition_SetUnsupportedProperty(
   mozilla::StyleTransition* aTransition,
@@ -331,6 +331,15 @@ void Gecko_SetCounterStyleToString(mozilla::CounterStylePtr* ptr,
                                    const nsACString* symbol);
 void Gecko_CopyCounterStyle(mozilla::CounterStylePtr* dst,
                             const mozilla::CounterStylePtr* src);
+bool Gecko_CounterStyle_IsNone(const mozilla::CounterStylePtr* ptr);
+bool Gecko_CounterStyle_IsName(const mozilla::CounterStylePtr* ptr);
+void Gecko_CounterStyle_GetName(const mozilla::CounterStylePtr* ptr,
+                                nsAString* result);
+const nsTArray<nsString>& Gecko_CounterStyle_GetSymbols(const mozilla::CounterStylePtr* ptr);
+uint8_t Gecko_CounterStyle_GetSystem(const mozilla::CounterStylePtr* ptr);
+bool Gecko_CounterStyle_IsSingleString(const mozilla::CounterStylePtr* ptr);
+void Gecko_CounterStyle_GetSingleString(const mozilla::CounterStylePtr* ptr,
+                                        nsAString* result);
 
 // background-image style.
 void Gecko_SetNullImageValue(nsStyleImage* image);
@@ -377,7 +386,8 @@ nsStyleContentData::CounterFunction* Gecko_SetCounterFunction(
 uint32_t Gecko_GetNodeFlags(RawGeckoNodeBorrowed node);
 void Gecko_SetNodeFlags(RawGeckoNodeBorrowed node, uint32_t flags);
 void Gecko_UnsetNodeFlags(RawGeckoNodeBorrowed node, uint32_t flags);
-void Gecko_SetOwnerDocumentNeedsStyleFlush(RawGeckoElementBorrowed element);
+void Gecko_NoteDirtyElement(RawGeckoElementBorrowed element);
+void Gecko_NoteAnimationOnlyDirtyElement(RawGeckoElementBorrowed element);
 
 // Incremental restyle.
 // Also, we might want a ComputedValues to ComputedValues API for animations?
@@ -398,6 +408,10 @@ Gecko_GetElementSnapshot(const mozilla::ServoElementSnapshotTable* table,
 
 void Gecko_DropElementSnapshot(ServoElementSnapshotOwned snapshot);
 
+// Have we seen this pointer before?
+bool
+Gecko_HaveSeenPtr(mozilla::SeenPtrs* table, const void* ptr);
+
 // `array` must be an nsTArray
 // If changing this signature, please update the
 // friend function declaration in nsTArray.h
@@ -411,13 +425,13 @@ void Gecko_ClearPODTArray(void* array, size_t elem_size, size_t elem_align);
 
 void Gecko_ResizeTArrayForStrings(nsTArray<nsString>* array, uint32_t length);
 
-void Gecko_SetStyleGridTemplateArrayLengths(nsStyleGridTemplate* grid_template,
-                                            uint32_t track_sizes);
+void Gecko_SetStyleGridTemplate(mozilla::UniquePtr<nsStyleGridTemplate>* grid_template,
+                                nsStyleGridTemplate* value);
 
-void Gecko_SetGridTemplateLineNamesLength(nsStyleGridTemplate* grid_template,
-                                          uint32_t track_sizes);
+nsStyleGridTemplate* Gecko_CreateStyleGridTemplate(uint32_t track_sizes,
+                                                   uint32_t name_size);
 
-void Gecko_CopyStyleGridTemplateValues(nsStyleGridTemplate* grid_template,
+void Gecko_CopyStyleGridTemplateValues(mozilla::UniquePtr<nsStyleGridTemplate>* grid_template,
                                        const nsStyleGridTemplate* other);
 
 mozilla::css::GridTemplateAreasValue* Gecko_NewGridTemplateAreasValue(uint32_t areas,
@@ -651,8 +665,6 @@ int32_t Gecko_RegisterNamespace(nsIAtom* ns);
 #include "nsStyleStructList.h"
 #undef STYLE_STRUCT
 
-void Gecko_Construct_nsStyleVariables(nsStyleVariables* ptr);
-
 void Gecko_RegisterProfilerThread(const char* name);
 void Gecko_UnregisterProfilerThread();
 
@@ -681,12 +693,14 @@ void Gecko_ReportUnexpectedCSSError(mozilla::css::ErrorReporter* reporter,
                                     const char* message,
                                     const char* param,
                                     uint32_t paramLen,
+                                    const char* prefix,
+                                    const char* prefixParam,
+                                    uint32_t prefixParamLen,
+                                    const char* suffix,
                                     const char* source,
                                     uint32_t sourceLen,
                                     uint32_t lineNumber,
-                                    uint32_t colNumber,
-                                    nsIURI* aURI,
-                                    const char* followup);
+                                    uint32_t colNumber);
 
 } // extern "C"
 

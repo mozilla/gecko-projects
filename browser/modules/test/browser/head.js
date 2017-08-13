@@ -99,8 +99,8 @@ function checkKeyedHistogram(h, key, expectedValue) {
  */
 function getParentProcessScalars(aChannel, aKeyed = false, aClear = false) {
   const scalars = aKeyed ?
-    Services.telemetry.snapshotKeyedScalars(aChannel, aClear)["parent"] :
-    Services.telemetry.snapshotScalars(aChannel, aClear)["parent"];
+    Services.telemetry.snapshotKeyedScalars(aChannel, aClear).parent :
+    Services.telemetry.snapshotScalars(aChannel, aClear).parent;
   return scalars || {};
 }
 
@@ -228,3 +228,14 @@ function getPopupNotificationNode() {
   return popupNotifications[0];
 }
 
+
+/**
+ * Disable non-release page actions (that are tested elsewhere).
+ *
+ * @return void
+ */
+async function disableNonReleaseActions() {
+  if (AppConstants.MOZ_DEV_EDITION || AppConstants.NIGHTLY_BUILD) {
+    await SpecialPowers.pushPrefEnv({set: [["extensions.webcompat-reporter.enabled", false]]});
+  }
+}

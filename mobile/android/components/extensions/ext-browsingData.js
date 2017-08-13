@@ -4,6 +4,8 @@
 
 Cu.import("resource://gre/modules/Task.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "Sanitizer",
+                                  "resource://gre/modules/Sanitizer.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "SharedPreferences",
@@ -22,7 +24,7 @@ let clearCookies = async function(options) {
 
   if (options.since) {
     // Convert it to microseconds
-    let since =  options.since*1000;
+    let since =  options.since * 1000;
     // Iterate through the cookies and delete any created after our cutoff.
     let cookiesEnum = cookieMgr.enumerator;
     while (cookiesEnum.hasMoreElements()) {
@@ -64,7 +66,7 @@ this.browsingData = class extends ExtensionAPI {
           for (let item of PREF_LIST) {
             // The property formData needs a different case than the
             // formdata preference.
-            switch(item){
+            switch (item) {
               case "formdata":
                 name = "formData";
                 break;
@@ -88,6 +90,9 @@ this.browsingData = class extends ExtensionAPI {
         },
         removeCookies(options) {
           return clearCookies(options);
+        },
+        removeCache(options) {
+          return Sanitizer.clearItem("cache");
         },
       },
     };

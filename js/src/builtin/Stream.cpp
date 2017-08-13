@@ -3502,7 +3502,8 @@ ReadableByteStreamControllerPullSteps(JSContext* cx, HandleNativeObject controll
 
             size_t bytesWritten;
             {
-                JS::AutoSuppressGCAnalysis noGC(cx);
+                JS::AutoSuppressGCAnalysis suppressGC(cx);
+                JS::AutoCheckCannotGC noGC;
                 bool dummy;
                 void* buffer = JS_GetArrayBufferViewData(view, &dummy, noGC);
                 auto cb = cx->runtime()->readableStreamWriteIntoReadRequestCallback;
@@ -4244,7 +4245,8 @@ ReadableByteStreamControllerFillPullIntoDescriptorFromQueue(JSContext* cx,
 
         size_t bytesWritten;
         {
-            JS::AutoSuppressGCAnalysis noGC(cx);
+            JS::AutoSuppressGCAnalysis suppressGC(cx);
+            JS::AutoCheckCannotGC noGC;
             bool dummy;
             uint8_t* buffer = JS_GetArrayBufferData(targetBuffer, &dummy, noGC);
             buffer += bytesFilled;
@@ -5400,7 +5402,8 @@ ReadableStream::updateDataAvailableFromSource(JSContext* cx, Handle<ReadableStre
 
         size_t bytesWritten;
         {
-            JS::AutoSuppressGCAnalysis noGC(cx);
+            JS::AutoSuppressGCAnalysis suppressGC(cx);
+            JS::AutoCheckCannotGC noGC;
             bool dummy;
             void* buffer = JS_GetArrayBufferViewData(transferredView, &dummy, noGC);
             auto cb = cx->runtime()->readableStreamWriteIntoReadRequestCallback;
@@ -5490,4 +5493,12 @@ ReadableStream::getReader(JSContext* cx, Handle<ReadableStream*> stream,
     if (mode == JS::ReadableStreamReaderMode::Default)
         return CreateReadableStreamDefaultReader(cx, stream);
     return CreateReadableStreamBYOBReader(cx, stream);
+}
+
+JS_FRIEND_API(JSObject*)
+js::UnwrapReadableStream(JSObject* obj)
+{
+    if (JSObject* unwrapped = CheckedUnwrap(obj))
+        return unwrapped->is<ReadableStream>() ? unwrapped : nullptr;
+    return nullptr;
 }

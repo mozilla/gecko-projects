@@ -2108,6 +2108,10 @@ DocAccessible::DoARIAOwnsRelocation(Accessible* aOwner)
                     "candidate", child, nullptr);
 #endif
 
+    if (owned->IndexOf(child) < idx) {
+      continue; // ignore second entry of same ID
+    }
+
     // Same child on same position, no change.
     if (child->Parent() == aOwner) {
       int32_t indexInParent = child->IndexInParent();
@@ -2138,12 +2142,13 @@ DocAccessible::DoARIAOwnsRelocation(Accessible* aOwner)
 
     MOZ_ASSERT(owned->SafeElementAt(idx) != child, "Already in place!");
 
-    if (owned->IndexOf(child) < idx) {
-      continue; // ignore second entry of same ID
-    }
-
     // A new child is found, check for loops.
     if (child->Parent() != aOwner) {
+      // Child is aria-owned by another container, skip.
+      if (child->IsRelocated()) {
+        continue;
+      }
+
       Accessible* parent = aOwner;
       while (parent && parent != child && !parent->IsDoc()) {
         parent = parent->Parent();
@@ -2155,8 +2160,10 @@ DocAccessible::DoARIAOwnsRelocation(Accessible* aOwner)
     }
 
     if (MoveChild(child, aOwner, insertIdx)) {
+      nsTArray<RefPtr<Accessible> >* relocated = mARIAOwnsHash.LookupOrAdd(aOwner);
+      MOZ_ASSERT(relocated == owned);
       child->SetRelocated(true);
-      owned->InsertElementAt(idx, child);
+      relocated->InsertElementAt(idx, child);
       idx++;
     }
   }
@@ -2174,7 +2181,6 @@ DocAccessible::PutChildrenBack(nsTArray<RefPtr<Accessible> >* aChildren,
 {
   MOZ_ASSERT(aStartIdx <= aChildren->Length(), "Wrong removal index");
 
-  nsTArray<RefPtr<Accessible> > containers;
   for (auto idx = aStartIdx; idx < aChildren->Length(); idx++) {
     Accessible* child = aChildren->ElementAt(idx);
     if (!child->IsInDocument()) {
@@ -2196,11 +2202,12 @@ DocAccessible::PutChildrenBack(nsTArray<RefPtr<Accessible> >* aChildren,
     // Unset relocated flag to find an insertion point for the child.
     child->SetRelocated(false);
 
+    nsIContent* content = child->GetContent();
     int32_t idxInParent = -1;
-    Accessible* origContainer = GetContainerAccessible(child->GetContent());
+    Accessible* origContainer = AccessibleOrTrueContainer(content->GetParentNode());
     if (origContainer) {
       TreeWalker walker(origContainer);
-      if (walker.Seek(child->GetContent())) {
+      if (walker.Seek(content)) {
         Accessible* prevChild = walker.Prev();
         if (prevChild) {
           idxInParent = prevChild->IndexInParent() + 1;
@@ -2222,7 +2229,8 @@ DocAccessible::PutChildrenBack(nsTArray<RefPtr<Accessible> >* aChildren,
     //    after load: $("list").setAttribute("aria-owns", "a b");
     //    later:      $("list").setAttribute("aria-owns", "");
     if (origContainer != owner || child->IndexInParent() != idxInParent) {
-      MoveChild(child, origContainer, idxInParent);
+      DebugOnly<bool> moved = MoveChild(child, origContainer, idxInParent);
+      MOZ_ASSERT(moved, "Failed to put child back.");
     } else {
       MOZ_ASSERT(!child->PrevSibling() || !child->PrevSibling()->IsRelocated(),
                  "No relocated child should appear before this one");
@@ -2244,6 +2252,10 @@ DocAccessible::MoveChild(Accessible* aChild, Accessible* aNewParent,
              "Wrong insertion point for a moving child");
 
   Accessible* curParent = aChild->Parent();
+
+  if (!aNewParent->IsAcceptableChild(aChild->GetContent())) {
+    return false;
+  }
 
 #ifdef A11Y_LOG
   logging::TreeInfo("move child", 0,
@@ -2274,10 +2286,6 @@ DocAccessible::MoveChild(Accessible* aChild, Accessible* aNewParent,
                       logging::eVerbose, curParent);
 #endif
     return true;
-  }
-
-  if (!aNewParent->IsAcceptableChild(aChild->GetContent())) {
-    return false;
   }
 
   MOZ_ASSERT(aIdxInParent <= static_cast<int32_t>(aNewParent->ChildCount()),

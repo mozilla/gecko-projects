@@ -221,7 +221,7 @@ class GCSchedulingTunables
         gcMaxNurseryBytes_(0),
         gcZoneAllocThresholdBase_(30 * 1024 * 1024),
         zoneAllocThresholdFactor_(0.9),
-        zoneAllocThresholdFactorAvoidInterrupt_(0.95),
+        zoneAllocThresholdFactorAvoidInterrupt_(0.9),
         zoneAllocDelayBytes_(1024 * 1024),
         dynamicHeapGrowthEnabled_(false),
         highFrequencyThresholdUsec_(1000 * 1000),
@@ -1122,8 +1122,6 @@ class GCRuntime
     /* GC scheduling state and parameters. */
     GCSchedulingTunables tunables;
     GCSchedulingState schedulingState;
-
-    MemProfiler mMemProfiler;
 
     // State used for managing atom mark bitmaps in each zone. Protected by the
     // exclusive access lock.

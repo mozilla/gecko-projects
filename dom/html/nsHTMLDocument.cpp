@@ -808,9 +808,9 @@ nsHTMLDocument::StartDocumentLoad(const char* aCommand,
     rv = bundleService->CreateBundle("chrome://global/locale/browser.properties",
                                      getter_AddRefs(bundle));
     NS_ASSERTION(NS_SUCCEEDED(rv) && bundle, "chrome://global/locale/browser.properties could not be loaded");
-    nsXPIDLString title;
+    nsAutoString title;
     if (bundle) {
-      bundle->GetStringFromName("plainText.wordWrap", getter_Copies(title));
+      bundle->GetStringFromName("plainText.wordWrap", title);
     }
     SetSelectedStyleSheetSet(title);
   }
@@ -1187,7 +1187,7 @@ nsIHTMLCollection*
 nsHTMLDocument::Applets()
 {
   if (!mApplets) {
-    mApplets = new nsContentList(this, kNameSpaceID_XHTML, nsGkAtoms::applet, nsGkAtoms::applet);
+    mApplets = new nsEmptyContentList(this);
   }
   return mApplets;
 }
@@ -1698,6 +1698,11 @@ nsHTMLDocument::Open(JSContext* cx,
       templateContentsOwner->mWillReparent = true;
     }
 #endif
+
+    // Set our ready state to uninitialized before setting the new document so
+    // that window creation listeners don't use the document in its intermediate
+    // state prior to reset.
+    SetReadyStateInternal(READYSTATE_UNINITIALIZED);
 
     // Per spec, we pass false here so that a new Window is created.
     rv = window->SetNewDocument(this, nullptr,
@@ -2438,6 +2443,9 @@ nsHTMLDocument::CreateAndAddWyciwygChannel(void)
     nsLoadFlags loadFlags = 0;
     channel->GetLoadFlags(&loadFlags);
     loadFlags |= nsIChannel::LOAD_DOCUMENT_URI;
+    if (nsDocShell::SandboxFlagsImplyCookies(mSandboxFlags)) {
+      loadFlags |= nsIRequest::LOAD_DOCUMENT_NEEDS_COOKIE;
+    }
     channel->SetLoadFlags(loadFlags);
 
     channel->SetOriginalURI(wcwgURI);
@@ -3723,7 +3731,7 @@ nsHTMLDocument::RemovedFromDocShell()
 }
 
 /* virtual */ void
-nsHTMLDocument::DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
+nsHTMLDocument::DocAddSizeOfExcludingThis(nsWindowSizes& aWindowSizes) const
 {
   nsDocument::DocAddSizeOfExcludingThis(aWindowSizes);
 

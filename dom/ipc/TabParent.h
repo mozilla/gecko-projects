@@ -10,7 +10,6 @@
 #include "js/TypeDecls.h"
 #include "LiveResizeListener.h"
 #include "mozilla/ContentCache.h"
-#include "mozilla/dom/AudioChannelBinding.h"
 #include "mozilla/dom/ipc/IdType.h"
 #include "mozilla/dom/PBrowserParent.h"
 #include "mozilla/dom/PContent.h"
@@ -250,6 +249,7 @@ public:
                                                       const nsString& aType,
                                                       const nsString& aInputmode,
                                                       const nsString& aActionHint,
+                                                      const bool& aInPrivateBrowsing,
                                                       const int32_t& aCause,
                                                       const int32_t& aFocusChange) override;
 

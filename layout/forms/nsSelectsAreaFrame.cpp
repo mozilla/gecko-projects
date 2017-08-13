@@ -137,7 +137,7 @@ nsSelectsAreaFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
   nsDisplayListCollection set;
   BuildDisplayListInternal(aBuilder, set);
-  
+
   nsOptionEventGrabberWrapper wrapper;
   wrapper.WrapLists(aBuilder, this, set, aLists);
 }

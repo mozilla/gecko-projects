@@ -23,14 +23,15 @@ using layers::Stringify;
 class NewRenderer : public RendererEvent
 {
 public:
-  NewRenderer(wr::RenderApi** aApi, layers::CompositorBridgeParentBase* aBridge,
-              GLint* aMaxTextureSize,
+  NewRenderer(wr::DocumentHandle** aDocHandle, layers::CompositorBridgeParentBase* aBridge,
+              uint32_t* aMaxTextureSize,
               bool* aUseANGLE,
               RefPtr<widget::CompositorWidget>&& aWidget,
               layers::SynchronousTask* aTask,
               bool aEnableProfiler,
-              LayoutDeviceIntSize aSize)
-    : mRenderApi(aApi)
+              LayoutDeviceIntSize aSize,
+              layers::SyncHandle* aHandle)
+    : mDocHandle(aDocHandle)
     , mMaxTextureSize(aMaxTextureSize)
     , mUseANGLE(aUseANGLE)
     , mBridge(aBridge)
@@ -38,6 +39,7 @@ public:
     , mTask(aTask)
     , mEnableProfiler(aEnableProfiler)
     , mSize(aSize)
+    , mSyncHandle(aHandle)
   {
     MOZ_COUNT_CTOR(NewRenderer);
   }
@@ -67,13 +69,13 @@ public:
       return;
     }
 
-    gl->fGetIntegerv(LOCAL_GL_MAX_TEXTURE_SIZE, mMaxTextureSize);
     *mUseANGLE = gl->IsANGLE();
 
     wr::Renderer* wrRenderer = nullptr;
     if (!wr_window_new(aWindowId, mSize.width, mSize.height, gl.get(),
                        aRenderThread.ThreadPool().Raw(),
-                       this->mEnableProfiler, mRenderApi, &wrRenderer)) {
+                       this->mEnableProfiler, mDocHandle, &wrRenderer,
+                       mMaxTextureSize)) {
       // wr_window_new puts a message into gfxCriticalNote if it returns false
       return;
     }
@@ -91,18 +93,26 @@ public:
       wr_renderer_set_external_image_handler(wrRenderer, &handler);
     }
 
+    if (renderer) {
+      layers::SyncObjectHost* syncObj = renderer->GetSyncObject();
+      if (syncObj) {
+        *mSyncHandle = syncObj->GetSyncHandle();
+      }
+    }
+
     aRenderThread.AddRenderer(aWindowId, Move(renderer));
   }
 
 private:
-  wr::RenderApi** mRenderApi;
-  GLint* mMaxTextureSize;
+  wr::DocumentHandle** mDocHandle;
+  uint32_t* mMaxTextureSize;
   bool* mUseANGLE;
   layers::CompositorBridgeParentBase* mBridge;
   RefPtr<widget::CompositorWidget> mCompositorWidget;
   layers::SynchronousTask* mTask;
   bool mEnableProfiler;
   LayoutDeviceIntSize mSize;
+  layers::SyncHandle* mSyncHandle;
 };
 
 class RemoveRenderer : public RendererEvent
@@ -143,40 +153,55 @@ WebRenderAPI::Create(bool aEnableProfiler,
   static uint64_t sNextId = 1;
   auto id = NewWindowId(sNextId++);
 
-  wr::RenderApi* renderApi = nullptr;
-  GLint maxTextureSize = 0;
+  wr::DocumentHandle* docHandle = nullptr;
+  uint32_t maxTextureSize = 0;
   bool useANGLE = false;
+  layers::SyncHandle syncHandle = 0;
 
-  // Dispatch a synchronous task because the RenderApi object needs to be created
+  // Dispatch a synchronous task because the DocumentHandle object needs to be created
   // on the render thread. If need be we could delay waiting on this task until
-  // the next time we need to access the RenderApi object.
+  // the next time we need to access the DocumentHandle object.
   layers::SynchronousTask task("Create Renderer");
-  auto event = MakeUnique<NewRenderer>(&renderApi, aBridge, &maxTextureSize, &useANGLE,
-                                       Move(aWidget), &task, aEnableProfiler, aSize);
+  auto event = MakeUnique<NewRenderer>(&docHandle, aBridge, &maxTextureSize, &useANGLE,
+                                       Move(aWidget), &task, aEnableProfiler, aSize,
+                                       &syncHandle);
   RenderThread::Get()->RunEvent(id, Move(event));
 
   task.Wait();
 
-  if (!renderApi) {
+  if (!docHandle) {
     return nullptr;
   }
 
-  return RefPtr<WebRenderAPI>(new WebRenderAPI(renderApi, id, maxTextureSize, useANGLE)).forget();
+  return RefPtr<WebRenderAPI>(new WebRenderAPI(docHandle, id, maxTextureSize, useANGLE, syncHandle)).forget();
+}
+
+already_AddRefed<WebRenderAPI>
+WebRenderAPI::Clone()
+{
+  wr::DocumentHandle* docHandle = nullptr;
+  wr_api_clone(mDocHandle, &docHandle);
+
+  RefPtr<WebRenderAPI> renderApi = new WebRenderAPI(docHandle, mId, mMaxTextureSize, mUseANGLE, mSyncHandle);
+  renderApi->mRootApi = this; // Hold root api
+  return renderApi.forget();
 }
 
 wr::WrIdNamespace
 WebRenderAPI::GetNamespace() {
-  return wr_api_get_namespace(mRenderApi);
+  return wr_api_get_namespace(mDocHandle);
 }
 
 WebRenderAPI::~WebRenderAPI()
 {
-  layers::SynchronousTask task("Destroy WebRenderAPI");
-  auto event = MakeUnique<RemoveRenderer>(&task);
-  RunOnRenderThread(Move(event));
-  task.Wait();
+  if (!mRootApi) {
+    layers::SynchronousTask task("Destroy WebRenderAPI");
+    auto event = MakeUnique<RemoveRenderer>(&task);
+    RunOnRenderThread(Move(event));
+    task.Wait();
+  }
 
-  wr_api_delete(mRenderApi);
+  wr_api_delete(mDocHandle);
 }
 
 void
@@ -184,20 +209,20 @@ WebRenderAPI::UpdateScrollPosition(const wr::WrPipelineId& aPipelineId,
                                    const layers::FrameMetrics::ViewID& aScrollId,
                                    const wr::LayoutPoint& aScrollPosition)
 {
-  wr_scroll_layer_with_id(mRenderApi, aPipelineId, aScrollId, aScrollPosition);
+  wr_scroll_layer_with_id(mDocHandle, aPipelineId, aScrollId, aScrollPosition);
 }
 
 void
 WebRenderAPI::GenerateFrame()
 {
-  wr_api_generate_frame(mRenderApi);
+  wr_api_generate_frame(mDocHandle);
 }
 
 void
 WebRenderAPI::GenerateFrame(const nsTArray<wr::WrOpacityProperty>& aOpacityArray,
                             const nsTArray<wr::WrTransformProperty>& aTransformArray)
 {
-  wr_api_generate_frame_with_properties(mRenderApi,
+  wr_api_generate_frame_with_properties(mDocHandle,
                                         aOpacityArray.IsEmpty() ?
                                           nullptr : aOpacityArray.Elements(),
                                         aOpacityArray.Length(),
@@ -216,7 +241,7 @@ WebRenderAPI::SetRootDisplayList(gfx::Color aBgColor,
                                  uint8_t *dl_data,
                                  size_t dl_size)
 {
-    wr_api_set_root_display_list(mRenderApi,
+    wr_api_set_root_display_list(mDocHandle,
                                  ToColorF(aBgColor),
                                  aEpoch,
                                  aViewportSize.width, aViewportSize.height,
@@ -231,13 +256,13 @@ void
 WebRenderAPI::ClearRootDisplayList(Epoch aEpoch,
                                    wr::WrPipelineId pipeline_id)
 {
-  wr_api_clear_root_display_list(mRenderApi, aEpoch, pipeline_id);
+  wr_api_clear_root_display_list(mDocHandle, aEpoch, pipeline_id);
 }
 
 void
 WebRenderAPI::SetWindowParameters(LayoutDeviceIntSize size)
 {
-  wr_api_set_window_parameters(mRenderApi, size.width, size.height);
+  wr_api_set_window_parameters(mDocHandle, size.width, size.height);
 }
 
 void
@@ -399,14 +424,14 @@ WebRenderAPI::WaitFlushed()
 void
 WebRenderAPI::SetRootPipeline(PipelineId aPipeline)
 {
-  wr_api_set_root_pipeline(mRenderApi, aPipeline);
+  wr_api_set_root_pipeline(mDocHandle, aPipeline);
 }
 
 void
 WebRenderAPI::AddImage(ImageKey key, const ImageDescriptor& aDescriptor,
                        Range<uint8_t> aBytes)
 {
-  wr_api_add_image(mRenderApi,
+  wr_api_add_image(mDocHandle,
                    key,
                    &aDescriptor,
                    RangeToByteSlice(aBytes));
@@ -416,7 +441,7 @@ void
 WebRenderAPI::AddBlobImage(ImageKey key, const ImageDescriptor& aDescriptor,
                            Range<uint8_t> aBytes)
 {
-  wr_api_add_blob_image(mRenderApi,
+  wr_api_add_blob_image(mDocHandle,
                         key,
                         &aDescriptor,
                         RangeToByteSlice(aBytes));
@@ -429,7 +454,7 @@ WebRenderAPI::AddExternalImage(ImageKey key,
                                wr::WrExternalImageBufferType aBufferType,
                                uint8_t aChannelIndex)
 {
-  wr_api_add_external_image(mRenderApi,
+  wr_api_add_external_image(mDocHandle,
                             key,
                             &aDescriptor,
                             aExtID,
@@ -453,7 +478,7 @@ WebRenderAPI::UpdateImageBuffer(ImageKey aKey,
                                 const ImageDescriptor& aDescriptor,
                                 Range<uint8_t> aBytes)
 {
-  wr_api_update_image(mRenderApi,
+  wr_api_update_image(mDocHandle,
                       aKey,
                       &aDescriptor,
                       RangeToByteSlice(aBytes));
@@ -464,7 +489,7 @@ WebRenderAPI::UpdateBlobImage(ImageKey aKey,
                               const ImageDescriptor& aDescriptor,
                               Range<uint8_t> aBytes)
 {
-  wr_api_update_blob_image(mRenderApi,
+  wr_api_update_blob_image(mDocHandle,
                            aKey,
                            &aDescriptor,
                            RangeToByteSlice(aBytes));
@@ -477,7 +502,7 @@ WebRenderAPI::UpdateExternalImage(ImageKey aKey,
                                   wr::WrExternalImageBufferType aBufferType,
                                   uint8_t aChannelIndex)
 {
-  wr_api_update_external_image(mRenderApi,
+  wr_api_update_external_image(mDocHandle,
                                aKey,
                                &aDescriptor,
                                aExtID,
@@ -488,19 +513,19 @@ WebRenderAPI::UpdateExternalImage(ImageKey aKey,
 void
 WebRenderAPI::DeleteImage(ImageKey aKey)
 {
-  wr_api_delete_image(mRenderApi, aKey);
+  wr_api_delete_image(mDocHandle, aKey);
 }
 
 void
 WebRenderAPI::AddRawFont(wr::FontKey aKey, Range<uint8_t> aBytes, uint32_t aIndex)
 {
-  wr_api_add_raw_font(mRenderApi, aKey, &aBytes[0], aBytes.length(), aIndex);
+  wr_api_add_raw_font(mDocHandle, aKey, &aBytes[0], aBytes.length(), aIndex);
 }
 
 void
 WebRenderAPI::DeleteFont(wr::FontKey aKey)
 {
-  wr_api_delete_font(mRenderApi, aKey);
+  wr_api_delete_font(mDocHandle, aKey);
 }
 
 class EnableProfiler : public RendererEvent
@@ -573,7 +598,7 @@ void
 WebRenderAPI::RunOnRenderThread(UniquePtr<RendererEvent> aEvent)
 {
   auto event = reinterpret_cast<uintptr_t>(aEvent.release());
-  wr_api_send_external_event(mRenderApi, event);
+  wr_api_send_external_event(mDocHandle, event);
 }
 
 DisplayListBuilder::DisplayListBuilder(PipelineId aId,
@@ -639,15 +664,28 @@ DisplayListBuilder::PopStackingContext()
   wr_dp_pop_stacking_context(mWrState);
 }
 
-void
-DisplayListBuilder::PushClip(const wr::LayoutRect& aClipRect,
-                             const wr::WrImageMask* aMask)
+wr::WrClipId
+DisplayListBuilder::DefineClip(const wr::LayoutRect& aClipRect,
+                               const nsTArray<wr::WrComplexClipRegion>* aComplex,
+                               const wr::WrImageMask* aMask)
 {
-  uint64_t clip_id = wr_dp_push_clip(mWrState, aClipRect, nullptr, 0, aMask);
-  WRDL_LOG("PushClip id=%" PRIu64 " r=%s m=%p b=%s\n", clip_id,
+  uint64_t clip_id = wr_dp_define_clip(mWrState, aClipRect,
+      aComplex ? aComplex->Elements() : nullptr,
+      aComplex ? aComplex->Length() : 0,
+      aMask);
+  WRDL_LOG("DefineClip id=%" PRIu64 " r=%s m=%p b=%s complex=%d\n", clip_id,
       Stringify(aClipRect).c_str(), aMask,
-      aMask ? Stringify(aMask->rect).c_str() : "none");
-  mClipIdStack.push_back(wr::WrClipId { clip_id });
+      aMask ? Stringify(aMask->rect).c_str() : "none",
+      aComplex ? aComplex->Length() : 0);
+  return wr::WrClipId { clip_id };
+}
+
+void
+DisplayListBuilder::PushClip(const wr::WrClipId& aClipId)
+{
+  wr_dp_push_clip(mWrState, aClipId.id);
+  WRDL_LOG("PushClip id=%" PRIu64 "\n", aClipId.id);
+  mClipIdStack.push_back(aClipId);
 }
 
 void

@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-%ifdef MOZ_PHOTON_THEME
 %ifdef CAN_DRAW_IN_TITLEBAR
 /* Add space for dragging the window */
 %ifdef MOZ_WIDGET_COCOA
@@ -17,26 +16,20 @@
 }
 %endif
 
-%ifdef MOZ_PHOTON_THEME
-:root {
-  --toolbar-background-color: -moz-dialog;
-  --toolbar-foreground-color: -moz-dialogtext;
-}
-/* Colour to use for toolbars and customize mode */
-%if defined(XP_WIN) || defined(XP_MACOSX)
-%ifdef XP_WIN
-@media (-moz-windows-default-theme) {
-%endif
-:root {
-  --toolbar-background-color: #f9f9fa;
-  --toolbar-foreground-color: #0c0c0d;
-}
-%ifdef XP_WIN
-}
-%endif
-%endif
-%endif
+/* Bookmark toolbar */
 
+#navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):not(#nav-bar) {
+  overflow: -moz-hidden-unscrollable;
+  max-height: 4em;
+  transition: min-height 170ms ease-out, max-height 170ms ease-out;
+  padding: 0 4px 1px;
+}
+
+#navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):not(#nav-bar)[collapsed=true] {
+  min-height: 0.1px;
+  max-height: 0;
+  transition: min-height 170ms ease-out, max-height 170ms ease-out, visibility 170ms linear;
+}
 
 /* Go button */
 .urlbar-go-button {
@@ -75,4 +68,3 @@
     -moz-image-region: rect(56px, 84px, 84px, 56px);
   }
 }
-%endif

@@ -116,7 +116,7 @@ nsGfxCheckboxControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                             const nsDisplayListSet& aLists)
 {
   nsFormControlFrame::BuildDisplayList(aBuilder, aLists);
-  
+
   // Get current checked state through content model.
   if ((!IsChecked() && !IsIndeterminate()) || !IsVisibleForPainting(aBuilder))
     return;   // we're not checked or not visible, nothing to paint.
@@ -129,7 +129,7 @@ nsGfxCheckboxControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                      IsIndeterminate()
                      ? PaintIndeterminateMark : PaintCheckMark,
                      "CheckedCheckbox",
-                     TYPE_CHECKED_CHECKBOX));
+                     DisplayItemType::TYPE_CHECKED_CHECKBOX));
 }
 
 #endif

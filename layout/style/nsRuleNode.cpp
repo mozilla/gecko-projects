@@ -629,7 +629,8 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
           aFontSize = styleFont->mFont.size;
         }
         rootFontSize = aFontSize;
-      } else if (aStyleContext && !aStyleContext->GetParent()) {
+      // FIXME(emilio, bug 1384656): We can reach this from servo right now...
+      } else if (aStyleContext && !aStyleContext->AsGecko()->GetParent()) {
         // This is the root element (XXX we don't really know this, but
         // nsRuleNode::SetFont makes the same assumption!), so we should
         // use StyleFont on this context to get the root element's
@@ -642,7 +643,7 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
         // NOTE: We should not call ResolveStyleFor() against the root element
         // to obtain the root style here because it may lead to reentrant call
         // of nsStyleSet::GetContext().
-        nsStyleContext* rootStyle = aStyleContext;
+        GeckoStyleContext* rootStyle = aStyleContext->AsGecko();
         while (rootStyle->GetParent()) {
           rootStyle = rootStyle->GetParent();
         }
@@ -1110,7 +1111,7 @@ SetPairCoords(const nsCSSValue& aValue,
 }
 
 static bool SetColor(const nsCSSValue& aValue, const nscolor aParentColor,
-                       nsPresContext* aPresContext, nsStyleContext *aContext,
+                       nsPresContext* aPresContext, nsStyleContext* aContext,
                        nscolor& aResult, RuleNodeCacheConditions& aConditions)
 {
   bool    result = false;
@@ -3487,19 +3488,11 @@ nsRuleNode::SetFontSize(nsPresContext* aPresContext,
              NS_STYLE_FONT_SIZE_SMALLER == value) {
       aConditions.SetUncacheable();
 
-      // Un-zoom so we use the tables correctly.  We'll then rezoom due
-      // to the |zoom = true| above.
-      // Note that relative units here use the parent's size unadjusted
-      // for scriptlevel changes. A scriptlevel change between us and the parent
-      // is simply ignored.
-      nscoord parentSize = aParentSize;
-      if (aParentFont->mAllowZoom) {
-        parentSize = nsStyleFont::UnZoomText(aPresContext, parentSize);
-      }
-
       float factor = (NS_STYLE_FONT_SIZE_LARGER == value) ? 1.2f : (1.0f / 1.2f);
 
-      *aSize = parentSize * factor;
+      *aSize = NSToCoordFloorClamped(aParentSize * factor);
+
+      sizeIsZoomedAccordingToParent = true;
 
     } else {
       NS_NOTREACHED("unexpected value");
@@ -8324,8 +8317,8 @@ AppendGridLineNames(const nsCSSValue& aValue,
 
 static void
 SetGridTrackList(const nsCSSValue& aValue,
-                 nsStyleGridTemplate& aResult,
-                 const nsStyleGridTemplate& aParentValue,
+                 UniquePtr<nsStyleGridTemplate>& aResult,
+                 const nsStyleGridTemplate* aParentValue,
                  GeckoStyleContext* aStyleContext,
                  nsPresContext* aPresContext,
                  RuleNodeCacheConditions& aConditions)
@@ -8337,51 +8330,42 @@ SetGridTrackList(const nsCSSValue& aValue,
 
   case eCSSUnit_Inherit:
     aConditions.SetUncacheable();
-    aResult = aParentValue;
+    if (aParentValue) {
+      aResult = MakeUnique<nsStyleGridTemplate>(*aParentValue);
+    } else {
+      aResult = nullptr;
+    }
     break;
 
   case eCSSUnit_Initial:
   case eCSSUnit_Unset:
   case eCSSUnit_None:
-    aResult.mIsSubgrid = false;
-    aResult.mLineNameLists.Clear();
-    aResult.mMinTrackSizingFunctions.Clear();
-    aResult.mMaxTrackSizingFunctions.Clear();
-    aResult.mRepeatAutoLineNameListBefore.Clear();
-    aResult.mRepeatAutoLineNameListAfter.Clear();
-    aResult.mRepeatAutoIndex = -1;
-    aResult.mIsAutoFill = false;
+    aResult = nullptr;
     break;
 
   default:
-    aResult.mLineNameLists.Clear();
-    aResult.mMinTrackSizingFunctions.Clear();
-    aResult.mMaxTrackSizingFunctions.Clear();
-    aResult.mRepeatAutoLineNameListBefore.Clear();
-    aResult.mRepeatAutoLineNameListAfter.Clear();
-    aResult.mRepeatAutoIndex = -1;
-    aResult.mIsAutoFill = false;
+    aResult = MakeUnique<nsStyleGridTemplate>();
     const nsCSSValueList* item = aValue.GetListValue();
     if (item->mValue.GetUnit() == eCSSUnit_Enumerated &&
         item->mValue.GetIntValue() == NS_STYLE_GRID_TEMPLATE_SUBGRID) {
       // subgrid <line-name-list>?
-      aResult.mIsSubgrid = true;
+      aResult->mIsSubgrid = true;
       item = item->mNext;
       for (int32_t i = 0; item && i < nsStyleGridLine::kMaxLine; ++i) {
         if (item->mValue.GetUnit() == eCSSUnit_Pair) {
           // This is a 'auto-fill' <name-repeat> expression.
           const nsCSSValuePair& pair = item->mValue.GetPairValue();
-          MOZ_ASSERT(aResult.mRepeatAutoIndex == -1,
+          MOZ_ASSERT(aResult->mRepeatAutoIndex == -1,
                      "can only have one <name-repeat> with auto-fill");
-          aResult.mRepeatAutoIndex = i;
-          aResult.mIsAutoFill = true;
+          aResult->mRepeatAutoIndex = i;
+          aResult->mIsAutoFill = true;
           MOZ_ASSERT(pair.mXValue.GetIntValue() == NS_STYLE_GRID_REPEAT_AUTO_FILL,
                      "unexpected repeat() enum value for subgrid");
           const nsCSSValueList* list = pair.mYValue.GetListValue();
-          AppendGridLineNames(list->mValue, aResult.mRepeatAutoLineNameListBefore);
+          AppendGridLineNames(list->mValue, aResult->mRepeatAutoLineNameListBefore);
         } else {
           AppendGridLineNames(item->mValue,
-                              *aResult.mLineNameLists.AppendElement());
+                              *aResult->mLineNameLists.AppendElement());
         }
         item = item->mNext;
       }
@@ -8390,10 +8374,10 @@ SetGridTrackList(const nsCSSValue& aValue,
       // The list is expected to have odd number of items, at least 3
       // starting with a <line-names> (sub list of identifiers),
       // and alternating between that and <track-size>.
-      aResult.mIsSubgrid = false;
+      aResult->mIsSubgrid = false;
       for (int32_t line = 1;  ; ++line) {
         AppendGridLineNames(item->mValue,
-                            *aResult.mLineNameLists.AppendElement());
+                            *aResult->mLineNameLists.AppendElement());
         item = item->mNext;
 
         if (!item || line == nsStyleGridLine::kMaxLine) {
@@ -8403,31 +8387,31 @@ SetGridTrackList(const nsCSSValue& aValue,
         if (item->mValue.GetUnit() == eCSSUnit_Pair) {
           // This is a 'auto-fill' / 'auto-fit' <auto-repeat> expression.
           const nsCSSValuePair& pair = item->mValue.GetPairValue();
-          MOZ_ASSERT(aResult.mRepeatAutoIndex == -1,
+          MOZ_ASSERT(aResult->mRepeatAutoIndex == -1,
                      "can only have one <auto-repeat>");
-          aResult.mRepeatAutoIndex = line - 1;
+          aResult->mRepeatAutoIndex = line - 1;
           switch (pair.mXValue.GetIntValue()) {
             case NS_STYLE_GRID_REPEAT_AUTO_FILL:
-              aResult.mIsAutoFill = true;
+              aResult->mIsAutoFill = true;
               break;
             case NS_STYLE_GRID_REPEAT_AUTO_FIT:
-              aResult.mIsAutoFill = false;
+              aResult->mIsAutoFill = false;
               break;
             default:
               MOZ_ASSERT_UNREACHABLE("unexpected repeat() enum value");
           }
           const nsCSSValueList* list = pair.mYValue.GetListValue();
-          AppendGridLineNames(list->mValue, aResult.mRepeatAutoLineNameListBefore);
+          AppendGridLineNames(list->mValue, aResult->mRepeatAutoLineNameListBefore);
           list = list->mNext;
-          nsStyleCoord& min = *aResult.mMinTrackSizingFunctions.AppendElement();
-          nsStyleCoord& max = *aResult.mMaxTrackSizingFunctions.AppendElement();
+          nsStyleCoord& min = *aResult->mMinTrackSizingFunctions.AppendElement();
+          nsStyleCoord& max = *aResult->mMaxTrackSizingFunctions.AppendElement();
           SetGridTrackSize(list->mValue, min, max,
                            aStyleContext, aPresContext, aConditions);
           list = list->mNext;
-          AppendGridLineNames(list->mValue, aResult.mRepeatAutoLineNameListAfter);
+          AppendGridLineNames(list->mValue, aResult->mRepeatAutoLineNameListAfter);
         } else {
-          nsStyleCoord& min = *aResult.mMinTrackSizingFunctions.AppendElement();
-          nsStyleCoord& max = *aResult.mMaxTrackSizingFunctions.AppendElement();
+          nsStyleCoord& min = *aResult->mMinTrackSizingFunctions.AppendElement();
+          nsStyleCoord& max = *aResult->mMaxTrackSizingFunctions.AppendElement();
           SetGridTrackSize(item->mValue, min, max,
                            aStyleContext, aPresContext, aConditions);
         }
@@ -8435,11 +8419,11 @@ SetGridTrackList(const nsCSSValue& aValue,
         item = item->mNext;
         MOZ_ASSERT(item, "Expected a eCSSUnit_List of odd length");
       }
-      MOZ_ASSERT(!aResult.mMinTrackSizingFunctions.IsEmpty() &&
-                 aResult.mMinTrackSizingFunctions.Length() ==
-                 aResult.mMaxTrackSizingFunctions.Length() &&
-                 aResult.mMinTrackSizingFunctions.Length() + 1 ==
-                 aResult.mLineNameLists.Length(),
+      MOZ_ASSERT(!aResult->mMinTrackSizingFunctions.IsEmpty() &&
+                 aResult->mMinTrackSizingFunctions.Length() ==
+                 aResult->mMaxTrackSizingFunctions.Length() &&
+                 aResult->mMinTrackSizingFunctions.Length() + 1 ==
+                 aResult->mLineNameLists.Length(),
                  "Inconstistent array lengths for nsStyleGridTemplate");
     }
   }
@@ -8659,20 +8643,27 @@ nsRuleNode::ComputePositionData(void* aStartStruct,
   // justify-items: enum, inherit, initial
   const auto& justifyItemsValue = *aRuleData->ValueForJustifyItems();
   if (MOZ_UNLIKELY(justifyItemsValue.GetUnit() == eCSSUnit_Inherit)) {
-    if (MOZ_LIKELY(parentContext)) {
-      pos->mJustifyItems =
-        parentPos->ComputedJustifyItems(parentContext->GetParent());
-    } else {
-      pos->mJustifyItems = NS_STYLE_JUSTIFY_NORMAL;
-    }
+    pos->mSpecifiedJustifyItems =
+      MOZ_LIKELY(parentContext)
+        ? parentPos->mJustifyItems
+        : NS_STYLE_JUSTIFY_NORMAL;
     conditions.SetUncacheable();
   } else {
     SetValue(justifyItemsValue,
-             pos->mJustifyItems, conditions,
+             pos->mSpecifiedJustifyItems, conditions,
              SETVAL_ENUMERATED | SETVAL_UNSET_INITIAL,
-             parentPos->mJustifyItems, // unused, we handle 'inherit' above
+             parentPos->mSpecifiedJustifyItems, // unused, we handle 'inherit' above
              NS_STYLE_JUSTIFY_AUTO);
   }
+
+  // NOTE(emilio): Even though "auto" technically depends on the parent style
+  // context, most of the time it'll resolve to "normal".  So, we
+  // optimistically assume here that it does resolve to "normal", and we
+  // handle the other cases in ApplyStyleFixups. This way, position structs
+  // can be cached in the default/common case.
+  pos->mJustifyItems =
+    pos->mSpecifiedJustifyItems == NS_STYLE_JUSTIFY_AUTO
+      ? NS_STYLE_JUSTIFY_NORMAL : pos->mSpecifiedJustifyItems;
 
   // justify-self: enum, inherit, initial
   SetValue(*aRuleData->ValueForJustifySelf(),
@@ -8783,12 +8774,14 @@ nsRuleNode::ComputePositionData(void* aStartStruct,
 
   // grid-template-columns
   SetGridTrackList(*aRuleData->ValueForGridTemplateColumns(),
-                   pos->mGridTemplateColumns, parentPos->mGridTemplateColumns,
+                   pos->mGridTemplateColumns,
+                   parentPos->mGridTemplateColumns.get(),
                    aContext, mPresContext, conditions);
 
   // grid-template-rows
   SetGridTrackList(*aRuleData->ValueForGridTemplateRows(),
-                   pos->mGridTemplateRows, parentPos->mGridTemplateRows,
+                   pos->mGridTemplateRows,
+                   parentPos->mGridTemplateRows.get(),
                    aContext, mPresContext, conditions);
 
   // grid-tempate-areas
@@ -10501,18 +10494,11 @@ nsRuleNode::GetDiscretelyAnimatedCSSValue(nsCSSPropertyID aProperty,
 }
 
 /* static */ bool
-nsRuleNode::HasAuthorSpecifiedRules(nsStyleContext* aStyleContext,
+nsRuleNode::HasAuthorSpecifiedRules(GeckoStyleContext* aStyleContext,
                                     uint32_t ruleTypeMask,
                                     bool aAuthorColorsAllowed)
 {
-#ifdef MOZ_STYLO
-  if (aStyleContext->IsServo()) {
-    NS_WARNING("stylo: nsRuleNode::HasAuthorSpecifiedRules not implemented");
-    return true;
-  }
-#endif
-
-  RefPtr<GeckoStyleContext> styleContext = aStyleContext->AsGecko();
+  RefPtr<GeckoStyleContext> styleContext = aStyleContext;
 
   uint32_t inheritBits = 0;
   if (ruleTypeMask & NS_AUTHOR_SPECIFIED_BACKGROUND)

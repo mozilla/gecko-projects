@@ -395,15 +395,6 @@ nsComputedDOMStyle::GetPropertyValue(const nsAString& aPropertyName,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsComputedDOMStyle::GetAuthoredPropertyValue(const nsAString& aPropertyName,
-                                             nsAString& aReturn)
-{
-  // Authored style doesn't make sense to return from computed DOM style,
-  // so just return whatever GetPropertyValue() returns.
-  return GetPropertyValue(aPropertyName, aReturn);
-}
-
 /* static */
 already_AddRefed<nsStyleContext>
 nsComputedDOMStyle::GetStyleContext(Element* aElement,
@@ -568,8 +559,8 @@ MustReresolveStyle(const nsStyleContext* aContext)
       return true;
     }
 
-    return aContext->GetParent() &&
-           aContext->GetParent()->HasPseudoElementData();
+    return aContext->AsGecko()->GetParent() &&
+           aContext->AsGecko()->GetParent()->HasPseudoElementData();
   }
 
   return false;
@@ -596,6 +587,15 @@ nsComputedDOMStyle::DoGetStyleContextNoFlush(Element* aElement,
     if (!presShell)
       return nullptr;
   }
+
+  // We do this check to avoid having to add too much special casing of
+  // Servo functions we call to explicitly ignore any element data in
+  // the tree. (See comment in ServoStyleSet::ResolveStyleLazily.)
+  MOZ_RELEASE_ASSERT((aStyleType == eAll && aAnimationFlag == eWithAnimation) ||
+                     !aElement->OwnerDoc()->GetBFCacheEntry(),
+                     "nsComputedDOMStyle doesn't support getting styles without "
+                     "document rules or without animation for documents in the "
+                     "bfcache");
 
   auto pseudoType = CSSPseudoElementType::NotPseudo;
   if (aPseudo) {
@@ -666,7 +666,7 @@ nsComputedDOMStyle::DoGetStyleContextNoFlush(Element* aElement,
                                ? StyleRuleInclusion::DefaultOnly
                                : StyleRuleInclusion::All;
     RefPtr<ServoStyleContext> result =
-       servoSet->ResolveTransientStyle(aElement, pseudoType, aPseudo, rules);
+       servoSet->ResolveStyleLazily(aElement, pseudoType, aPseudo, rules);
     if (aAnimationFlag == eWithAnimation) {
       return result.forget();
     }
@@ -895,7 +895,7 @@ nsComputedDOMStyle::UpdateCurrentStyleSources(bool aNeedsLayoutFlush)
       // with a pseudo-element that contains elements.  (We also allow
       // the element to be NAC, just in case some chrome JS calls
       // getComputedStyle on a NAC-implemented pseudo.)
-      nsStyleContext* topWithPseudoElementData = mStyleContext;
+      GeckoStyleContext* topWithPseudoElementData = mStyleContext->AsGecko();
       while (topWithPseudoElementData->GetParent()->HasPseudoElementData()) {
         topWithPseudoElementData = topWithPseudoElementData->GetParent();
       }
@@ -3108,7 +3108,8 @@ nsComputedDOMStyle::DoGetGridTemplateColumns()
     info = gridFrame->GetComputedTemplateColumns();
   }
 
-  return GetGridTemplateColumnsRows(StylePosition()->mGridTemplateColumns, info);
+  return GetGridTemplateColumnsRows(
+    StylePosition()->GridTemplateColumns(), info);
 }
 
 already_AddRefed<CSSValue>
@@ -3124,7 +3125,7 @@ nsComputedDOMStyle::DoGetGridTemplateRows()
     info = gridFrame->GetComputedTemplateRows();
   }
 
-  return GetGridTemplateColumnsRows(StylePosition()->mGridTemplateRows, info);
+  return GetGridTemplateColumnsRows(StylePosition()->GridTemplateRows(), info);
 }
 
 already_AddRefed<CSSValue>
@@ -4695,8 +4696,7 @@ nsComputedDOMStyle::DoGetJustifyItems()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
   nsAutoString str;
-  auto justify =
-    StylePosition()->ComputedJustifyItems(mStyleContext->GetParentAllowServo());
+  auto justify = StylePosition()->mJustifyItems;
   nsCSSValue::AppendAlignJustifyValueToString(justify, str);
   val->SetString(str);
   return val.forget();

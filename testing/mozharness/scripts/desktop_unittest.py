@@ -709,7 +709,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                     env['MOZ_NODE_PATH'] = self.nodejs_path
                 env['MOZ_UPLOAD_DIR'] = self.query_abs_dirs()['abs_blob_upload_dir']
                 env['MINIDUMP_SAVE_PATH'] = self.query_abs_dirs()['abs_blob_upload_dir']
-                env['RUST_BACKTRACE'] = '1'
+                env['RUST_BACKTRACE'] = 'full'
                 if not os.path.isdir(env['MOZ_UPLOAD_DIR']):
                     self.mkdir_p(env['MOZ_UPLOAD_DIR'])
 
@@ -717,6 +717,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                     env['MOZ_LAYERS_ALLOW_SOFTWARE_GL'] = '1'
                 if self.config['enable_webrender']:
                     env['MOZ_WEBRENDER'] = '1'
+                    env['MOZ_ACCELERATED'] = '1'
 
                 if self.config['single_stylo_traversal']:
                     env['STYLO_THREADS'] = '1'

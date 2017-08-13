@@ -709,9 +709,15 @@ var snapshotFormatters = {
   accessibility: function accessibility(data) {
     $("a11y-activated").textContent = data.isActive;
     $("a11y-force-disabled").textContent = data.forceDisabled || 0;
+
     let a11yHandlerUsed = $("a11y-handler-used");
     if (a11yHandlerUsed) {
       a11yHandlerUsed.textContent = data.handlerUsed;
+    }
+
+    let a11yInstantiator = $("a11y-instantiator");
+    if (a11yInstantiator) {
+      a11yInstantiator.textContent = data.instantiator;
     }
   },
 
@@ -756,7 +762,7 @@ var snapshotFormatters = {
     for (let key in data) {
       // Simplify the display a little in the common case.
       if (key === "hasPrivilegedUserNamespaces" &&
-          data[key] === data["hasUserNamespaces"]) {
+          data[key] === data.hasUserNamespaces) {
         continue;
       }
       if (key === "syscallLog") {
@@ -1130,7 +1136,7 @@ function openProfileDirectory() {
 
   // Show the profile directory.
   let nsLocalFile = Components.Constructor("@mozilla.org/file/local;1",
-                                           "nsILocalFile", "initWithPath");
+                                           "nsIFile", "initWithPath");
   new nsLocalFile(profileDir).reveal();
 }
 

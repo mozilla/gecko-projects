@@ -16,8 +16,6 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "ConsoleAPI",
                                   "resource://gre/modules/Console.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
-                                  "resource://gre/modules/MessageChannel.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "OS",
                                   "resource://gre/modules/osfile.jsm");
 
@@ -39,8 +37,8 @@ function getUniqueId() {
   return `${nextId++}-${uniqueProcessID}`;
 }
 
-async function promiseFileContents(file) {
-  let res = await OS.File.read(file.path);
+async function promiseFileContents(path) {
+  let res = await OS.File.read(path);
   return res.buffer;
 }
 

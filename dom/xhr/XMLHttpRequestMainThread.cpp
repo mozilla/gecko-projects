@@ -381,7 +381,6 @@ XMLHttpRequestMainThread::IsCertainlyAliveForCC() const
 // QueryInterface implementation for XMLHttpRequestMainThread
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(XMLHttpRequestMainThread)
   NS_INTERFACE_MAP_ENTRY(nsIXMLHttpRequest)
-  NS_INTERFACE_MAP_ENTRY(nsIJSXMLHttpRequest)
   NS_INTERFACE_MAP_ENTRY(nsIRequestObserver)
   NS_INTERFACE_MAP_ENTRY(nsIStreamListener)
   NS_INTERFACE_MAP_ENTRY(nsIChannelEventSink)
@@ -1457,7 +1456,8 @@ XMLHttpRequestMainThread::DispatchOrStoreEvent(DOMEventTargetHelper* aTarget,
     return;
   }
 
-  aTarget->DispatchDOMEvent(nullptr, aEvent, nullptr, nullptr);
+  bool dummy;
+  aTarget->DispatchEvent(aEvent, &dummy);
 }
 
 void
@@ -1477,8 +1477,8 @@ XMLHttpRequestMainThread::ResumeEventDispatching()
   pendingEvents.SwapElements(mPendingEvents);
 
   for (uint32_t i = 0; i < pendingEvents.Length(); ++i) {
-    pendingEvents[i].mTarget->
-      DispatchDOMEvent(nullptr, pendingEvents[i].mEvent, nullptr, nullptr);
+    bool dummy;
+    pendingEvents[i].mTarget->DispatchEvent(pendingEvents[i].mEvent, &dummy);
   }
 }
 
@@ -2900,7 +2900,7 @@ XMLHttpRequestMainThread::Send(nsIVariant* aVariant)
     nsresult rv = aVariant->GetAsJSVal(&realVal);
     if (NS_SUCCEEDED(rv) && !realVal.isPrimitive()) {
       JS::Rooted<JSObject*> obj(rootingCx, realVal.toObjectOrNull());
-      RootedTypedArray<ArrayBuffer> buf(rootingCx);
+      RootedSpiderMonkeyInterface<ArrayBuffer> buf(rootingCx);
       if (buf.Init(obj)) {
         BodyExtractor<const ArrayBuffer> body(&buf);
         return SendInternal(&body);

@@ -45,40 +45,22 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "processCount", "dom.ipc.processCount.extension");
 
-XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
-                                  "resource://gre/modules/AddonManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
-                                  "resource://gre/modules/AppConstants.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AsyncShutdown",
-                                  "resource://gre/modules/AsyncShutdown.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionAPIs",
-                                  "resource://gre/modules/ExtensionAPI.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionCommon",
-                                  "resource://gre/modules/ExtensionCommon.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionPermissions",
-                                  "resource://gre/modules/ExtensionPermissions.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionStorage",
-                                  "resource://gre/modules/ExtensionStorage.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionTestCommon",
-                                  "resource://testing-common/ExtensionTestCommon.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Log",
-                                  "resource://gre/modules/Log.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
-                                  "resource://gre/modules/MessageChannel.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
-                                  "resource://gre/modules/NetUtil.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "OS",
-                                  "resource://gre/modules/osfile.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
-                                  "resource://gre/modules/Preferences.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "require",
-                                  "resource://devtools/shared/Loader.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
-                                  "resource://gre/modules/Schemas.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
-                                  "resource://gre/modules/TelemetryStopwatch.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  AddonManager: "resource://gre/modules/AddonManager.jsm",
+  AddonManagerPrivate: "resource://gre/modules/AddonManager.jsm",
+  AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
+  ExtensionCommon: "resource://gre/modules/ExtensionCommon.jsm",
+  ExtensionPermissions: "resource://gre/modules/ExtensionPermissions.jsm",
+  ExtensionStorage: "resource://gre/modules/ExtensionStorage.jsm",
+  ExtensionTestCommon: "resource://testing-common/ExtensionTestCommon.jsm",
+  Log: "resource://gre/modules/Log.jsm",
+  MessageChannel: "resource://gre/modules/MessageChannel.jsm",
+  NetUtil: "resource://gre/modules/NetUtil.jsm",
+  OS: "resource://gre/modules/osfile.jsm",
+  Schemas: "resource://gre/modules/Schemas.jsm",
+  setTimeout: "resource://gre/modules/Timer.jsm",
+  TelemetryStopwatch: "resource://gre/modules/TelemetryStopwatch.jsm",
+});
 
 XPCOMUtils.defineLazyGetter(
   this, "processScript",
@@ -88,12 +70,10 @@ XPCOMUtils.defineLazyGetter(
 Cu.import("resource://gre/modules/ExtensionParent.jsm");
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 
-XPCOMUtils.defineLazyServiceGetter(this, "aomStartup",
-                                   "@mozilla.org/addons/addon-manager-startup;1",
-                                   "amIAddonManagerStartup");
-XPCOMUtils.defineLazyServiceGetter(this, "uuidGen",
-                                   "@mozilla.org/uuid-generator;1",
-                                   "nsIUUIDGenerator");
+XPCOMUtils.defineLazyServiceGetters(this, {
+  aomStartup: ["@mozilla.org/addons/addon-manager-startup;1", "amIAddonManagerStartup"],
+  uuidGen: ["@mozilla.org/uuid-generator;1", "nsIUUIDGenerator"],
+});
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "useRemoteWebExtensions",
                                       "extensions.webextensions.remote", false);
@@ -114,6 +94,8 @@ XPCOMUtils.defineLazyGetter(this, "console", ExtensionUtils.getConsole);
 
 XPCOMUtils.defineLazyGetter(this, "LocaleData", () => ExtensionCommon.LocaleData);
 
+// The maximum time to wait for extension shutdown blockers to complete.
+const SHUTDOWN_BLOCKER_MAX_MS = 1000;
 
 // The list of properties that themes are allowed to contain.
 XPCOMUtils.defineLazyGetter(this, "allowedThemeProperties", () => {
@@ -196,7 +178,7 @@ const COMMENT_REGEXP = new RegExp(String.raw`
 // returns the UUID for a given add-on ID.
 var UUIDMap = {
   _read() {
-    let pref = Preferences.get(UUID_MAP_PREF, "{}");
+    let pref = Services.prefs.getStringPref(UUID_MAP_PREF, "{}");
     try {
       return JSON.parse(pref);
     } catch (e) {
@@ -206,7 +188,7 @@ var UUIDMap = {
   },
 
   _write(map) {
-    Preferences.set(UUID_MAP_PREF, JSON.stringify(map));
+    Services.prefs.setStringPref(UUID_MAP_PREF, JSON.stringify(map));
   },
 
   get(id, create = true) {
@@ -577,7 +559,7 @@ this.ExtensionData = class {
     let whitelist = [];
     for (let perm of this.manifest.permissions) {
       if (perm === "geckoProfiler") {
-        const acceptedExtensions = Preferences.get("extensions.geckoProfiler.acceptedExtensionIds");
+        const acceptedExtensions = Services.prefs.getStringPref("extensions.geckoProfiler.acceptedExtensionIds", "");
         if (!acceptedExtensions.split(",").includes(this.id)) {
           this.manifestError("Only whitelisted extensions are allowed to access the geckoProfiler.");
           continue;
@@ -754,6 +736,36 @@ const PROXIED_EVENTS = new Set(["test-harness-message", "add-permissions", "remo
 
 const shutdownPromises = new Map();
 
+class BootstrapScope {
+  install(data, reason) {}
+  uninstall(data, reason) {}
+
+  startup(data, reason) {
+    this.extension = new Extension(data, this.BOOTSTRAP_REASON_TO_STRING_MAP[reason]);
+    return this.extension.startup();
+  }
+
+  shutdown(data, reason) {
+    this.extension.shutdown(this.BOOTSTRAP_REASON_TO_STRING_MAP[reason]);
+    this.extension = null;
+  }
+}
+
+XPCOMUtils.defineLazyGetter(BootstrapScope.prototype, "BOOTSTRAP_REASON_TO_STRING_MAP", () => {
+  const {BOOTSTRAP_REASONS} = AddonManagerPrivate;
+
+  return Object.freeze({
+    [BOOTSTRAP_REASONS.APP_STARTUP]: "APP_STARTUP",
+    [BOOTSTRAP_REASONS.APP_SHUTDOWN]: "APP_SHUTDOWN",
+    [BOOTSTRAP_REASONS.ADDON_ENABLE]: "ADDON_ENABLE",
+    [BOOTSTRAP_REASONS.ADDON_DISABLE]: "ADDON_DISABLE",
+    [BOOTSTRAP_REASONS.ADDON_INSTALL]: "ADDON_INSTALL",
+    [BOOTSTRAP_REASONS.ADDON_UNINSTALL]: "ADDON_UNINSTALL",
+    [BOOTSTRAP_REASONS.ADDON_UPGRADE]: "ADDON_UPGRADE",
+    [BOOTSTRAP_REASONS.ADDON_DOWNGRADE]: "ADDON_DOWNGRADE",
+  });
+});
+
 // We create one instance of this class per extension. |addonData|
 // comes directly from bootstrap.js when initializing.
 this.Extension = class extends ExtensionData {
@@ -842,6 +854,10 @@ this.Extension = class extends ExtensionData {
       this.policy.allowedOrigins = this.whiteListedHosts;
     });
     /* eslint-enable mozilla/balanced-listeners */
+  }
+
+  static getBootstrapScope(id, file) {
+    return new BootstrapScope();
   }
 
   get groupFrameLoader() {
@@ -939,7 +955,7 @@ this.Extension = class extends ExtensionData {
 
       // Load Experiments APIs that this extension depends on.
       return Promise.all(
-        Array.from(this.apiNames, api => ExtensionAPIs.load(api))
+        Array.from(this.apiNames, api => ExtensionCommon.ExtensionAPIs.load(api))
       ).then(apis => {
         for (let API of apis) {
           this.apis.push(new API(this));
@@ -1087,9 +1103,6 @@ this.Extension = class extends ExtensionData {
   startup() {
     this.startupPromise = this._startup();
 
-    this._startupComplete = this.startupPromise.catch(() => {});
-    OS.File.shutdown.addBlocker("Extension startup", this._startupComplete);
-
     return this.startupPromise;
   }
 
@@ -1209,9 +1222,16 @@ this.Extension = class extends ExtensionData {
   async shutdown(reason) {
     let promise = this._shutdown(reason);
 
+    let blocker = () => {
+      return Promise.race([
+        promise,
+        new Promise(resolve => setTimeout(resolve, SHUTDOWN_BLOCKER_MAX_MS)),
+      ]);
+    };
+
     AsyncShutdown.profileChangeTeardown.addBlocker(
       `Extension Shutdown: ${this.id} (${this.manifest && this.name})`,
-      promise.catch(() => {}));
+      blocker);
 
     // If we already have a shutdown promise for this extension, wait
     // for it to complete before replacing it with a new one. This can
@@ -1223,6 +1243,7 @@ this.Extension = class extends ExtensionData {
 
     let cleanup = () => {
       shutdownPromises.delete(this.id);
+      AsyncShutdown.profileChangeTeardown.removeBlocker(blocker);
     };
     shutdownPromises.set(this.id, promise.then(cleanup, cleanup));
 

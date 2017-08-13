@@ -259,7 +259,7 @@ interface nsIDOMWindowUtils : nsISupports {
    */
   attribute boolean isFirstPaint;
 
-  void getPresShellId(out uint32_t aPresShellId);
+  uint32_t getPresShellId();
 
   /**
    * Following modifiers are for sent*Event() except sendNative*Event().
@@ -531,8 +531,6 @@ interface nsIDOMWindowUtils : nsISupports {
    * @param aOptions           Set following flags.
    */
   const unsigned long WHEEL_EVENT_CAUSED_BY_NO_LINE_OR_PAGE_DELTA_DEVICE = 0x0001;
-  // @deprecated Use WHEEL_EVENT_CAUSED_BY_NO_LINE_OR_PAGE_DELTA_DEVICE.
-  const unsigned long WHEEL_EVENT_CAUSED_BY_PIXEL_ONLY_DEVICE            = 0x0001;
   const unsigned long WHEEL_EVENT_CAUSED_BY_MOMENTUM                     = 0x0002;
   const unsigned long WHEEL_EVENT_CUSTOMIZED_BY_USER_PREFS               = 0x0004;
   // If any of the following flags is specified this method will throw an
@@ -994,6 +992,15 @@ interface nsIDOMWindowUtils : nsISupports {
    * Returns the given element's bounds without flushing pending layout changes.
    */
   nsIDOMClientRect getBoundsWithoutFlushing(in nsIDOMElement aElement);
+
+  const long FLUSH_STYLE = 0;
+  const long FLUSH_LAYOUT = 1;
+  const long FLUSH_DISPLAY = 2;
+
+  /**
+   * Returns true if a flush of the given type is needed.
+   */
+  bool needsFlush(in long aFlushtype);
 
   /**
    * Returns the bounds of the window's currently loaded document. This will
@@ -1479,12 +1486,6 @@ interface nsIDOMWindowUtils : nsISupports {
    * The DPI of the display
    */
   readonly attribute float displayDPI;
-
-  /**
-   * Return the outer window with the given ID, if any.  Can return null.
-   * @deprecated Use nsIWindowMediator.getOuterWindowWithId.  See bug 865664.
-   */
-  nsIDOMWindow getOuterWindowWithId(in unsigned long long aOuterWindowID);
 
   /**
    * Return this window's frame element.

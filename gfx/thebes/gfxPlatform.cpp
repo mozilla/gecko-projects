@@ -570,9 +570,9 @@ void RecordingPrefChanged(const char *aPrefName, void *aClosure)
 {
   if (Preferences::GetBool("gfx.2d.recording", false)) {
     nsAutoCString fileName;
-    nsAdoptingString prefFileName = Preferences::GetString("gfx.2d.recordingfile");
-
-    if (prefFileName) {
+    nsAutoString prefFileName;
+    nsresult rv = Preferences::GetString("gfx.2d.recordingfile", prefFileName);
+    if (NS_SUCCEEDED(rv)) {
       fileName.Append(NS_ConvertUTF16toUTF8(prefFileName));
     } else {
       nsCOMPtr<nsIFile> tmpFile;
@@ -645,8 +645,12 @@ gfxPlatform::Init()
         gfxVars::SetPDMWMFDisableD3D11Dlls(nsCString());
         gfxVars::SetPDMWMFDisableD3D9Dlls(nsCString());
       } else {
-        gfxVars::SetPDMWMFDisableD3D11Dlls(Preferences::GetCString("media.wmf.disable-d3d11-for-dlls"));
-        gfxVars::SetPDMWMFDisableD3D9Dlls(Preferences::GetCString("media.wmf.disable-d3d9-for-dlls"));
+        nsAutoCString d3d11;
+        Preferences::GetCString("media.wmf.disable-d3d11-for-dlls", d3d11);
+        gfxVars::SetPDMWMFDisableD3D11Dlls(d3d11);
+        nsAutoCString d3d9;
+        Preferences::GetCString("media.wmf.disable-d3d9-for-dlls", d3d9);
+        gfxVars::SetPDMWMFDisableD3D9Dlls(d3d9);
       }
 
       nsCOMPtr<nsIFile> file;
@@ -1272,17 +1276,6 @@ gfxPlatform::GetWrappedDataSourceSurface(gfxASurface* aSurface)
   return result.forget();
 }
 
-already_AddRefed<ScaledFont>
-gfxPlatform::GetScaledFontForFont(DrawTarget* aTarget, gfxFont *aFont)
-{
-  NativeFont nativeFont;
-  nativeFont.mType = NativeFontType::CAIRO_FONT_FACE;
-  nativeFont.mFont = aFont->GetCairoScaledFont();
-  return Factory::CreateScaledFontForNativeFont(nativeFont,
-                                                aFont->GetUnscaledFont(),
-                                                aFont->GetAdjustedSize());
-}
-
 void
 gfxPlatform::ComputeTileSize()
 {
@@ -1825,8 +1818,8 @@ gfxPlatform::GetContentBackendPref(uint32_t &aBackendBitmask)
 gfxPlatform::GetBackendPref(const char* aBackendPrefName, uint32_t &aBackendBitmask)
 {
     nsTArray<nsCString> backendList;
-    nsCString prefString;
-    if (NS_SUCCEEDED(Preferences::GetCString(aBackendPrefName, &prefString))) {
+    nsAutoCString prefString;
+    if (NS_SUCCEEDED(Preferences::GetCString(aBackendPrefName, prefString))) {
         ParseString(prefString, ',', backendList);
     }
 
@@ -1942,9 +1935,10 @@ gfxPlatform::GetPlatformCMSOutputProfile(void *&mem, size_t &size)
 void
 gfxPlatform::GetCMSOutputProfileData(void *&mem, size_t &size)
 {
-    nsAdoptingCString fname = Preferences::GetCString("gfx.color_management.display_profile");
+    nsAutoCString fname;
+    Preferences::GetCString("gfx.color_management.display_profile", fname);
     if (!fname.IsEmpty()) {
-        qcms_data_from_path(fname, &mem, &size);
+        qcms_data_from_path(fname.get(), &mem, &size);
     }
     else {
         gfxPlatform::GetPlatform()->GetPlatformCMSOutputProfile(mem, size);
@@ -2357,6 +2351,13 @@ gfxPlatform::InitGPUProcessPrefs()
     gpuProc.UserForceEnable("User force-enabled via pref");
   }
 
+  if (IsHeadless()) {
+    gpuProc.ForceDisable(
+      FeatureStatus::Blocked,
+      "Headless mode is enabled",
+      NS_LITERAL_CSTRING("FEATURE_FAILURE_HEADLESS_MODE"));
+    return;
+  }
   if (InSafeMode()) {
     gpuProc.ForceDisable(
       FeatureStatus::Blocked,
@@ -2403,10 +2404,14 @@ gfxPlatform::InitCompositorAccelerationPrefs()
     feature.UserForceEnable("Force-enabled by pref");
   }
 
-  // Safe mode trumps everything.
+  // Safe and headless modes override everything.
   if (InSafeMode()) {
     feature.ForceDisable(FeatureStatus::Blocked, "Acceleration blocked by safe-mode",
                          NS_LITERAL_CSTRING("FEATURE_FAILURE_COMP_SAFEMODE"));
+  }
+  if (IsHeadless()) {
+    feature.ForceDisable(FeatureStatus::Blocked, "Acceleration blocked by headless mode",
+                         NS_LITERAL_CSTRING("FEATURE_FAILURE_COMP_HEADLESSMODE"));
   }
 }
 
@@ -2440,6 +2445,14 @@ gfxPlatform::InitWebRenderConfig()
     if (env && *env == '1') {
       featureWebRender.UserEnable("Enabled by envvar");
     }
+  }
+
+  // HW_COMPOSITING being disabled implies interfacing with the GPU might break
+  if (!gfxConfig::IsEnabled(Feature::HW_COMPOSITING)) {
+    featureWebRender.ForceDisable(
+      FeatureStatus::Unavailable,
+      "Hardware compositing is disabled",
+      NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBRENDER_NEED_HWCOMP"));
   }
 
   // WebRender relies on the GPU process when on Windows
@@ -2561,17 +2574,6 @@ gfxPlatform::DisableBufferRotation()
   MutexAutoLock autoLock(*gGfxPlatformPrefsLock);
 
   sBufferRotationCheckPref = false;
-}
-
-already_AddRefed<ScaledFont>
-gfxPlatform::GetScaledFontForFontWithCairoSkia(DrawTarget* aTarget, gfxFont* aFont)
-{
-    NativeFont nativeFont;
-    nativeFont.mType = NativeFontType::CAIRO_FONT_FACE;
-    nativeFont.mFont = aFont->GetCairoScaledFont();
-    return Factory::CreateScaledFontForNativeFont(nativeFont,
-                                                  aFont->GetUnscaledFont(),
-                                                  aFont->GetAdjustedSize());
 }
 
 /* static */ bool

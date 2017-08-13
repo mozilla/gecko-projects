@@ -15,13 +15,24 @@ use servo_arc::Arc;
 use shared_lock::StylesheetGuards;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
+#[cfg(feature = "gecko")]
+use stylesheets::{MallocSizeOfWithRepeats, SizeOfState};
 
 bitflags! {
     flags RestyleFlags: u8 {
         /// Whether the styles changed for this restyle.
         const WAS_RESTYLED = 1 << 0,
+        /// Whether the last traversal of this element did not do
+        /// any style computation. This is not true during the initial
+        /// styling pass, nor is it true when we restyle (in which case
+        /// WAS_RESTYLED is set).
+        ///
+        /// This bit always corresponds to the last time the element was
+        /// traversed, so each traversal simply updates it with the appropriate
+        /// value.
+        const TRAVERSED_WITHOUT_STYLING = 1 << 1,
         /// Whether we reframed/reconstructed any ancestor or self.
-        const ANCESTOR_WAS_RECONSTRUCTED = 1 << 1,
+        const ANCESTOR_WAS_RECONSTRUCTED = 1 << 2,
     }
 }
 
@@ -58,14 +69,23 @@ impl RestyleData {
     }
 
     /// Clear all the restyle state associated with this element.
-    fn clear(&mut self) {
-        *self = Self::new();
+    ///
+    /// FIXME(bholley): The only caller of this should probably just assert that
+    /// the hint is empty and call clear_flags_and_damage().
+    fn clear_restyle_state(&mut self) {
+        self.clear_restyle_flags_and_damage();
+        self.hint = RestyleHint::empty();
     }
 
     /// Clear restyle flags and damage.
-    fn clear_flags_and_damage(&mut self) {
+    ///
+    /// Note that we don't touch the TRAVERSED_WITHOUT_STYLING bit, which gets
+    /// set to the correct value on each traversal. There's no reason anyone
+    /// needs to clear it, and clearing it accidentally mid-traversal could
+    /// cause incorrect style sharing behavior.
+    fn clear_restyle_flags_and_damage(&mut self) {
         self.damage = RestyleDamage::empty();
-        self.flags = RestyleFlags::empty();
+        self.flags = self.flags & TRAVERSED_WITHOUT_STYLING;
     }
 
     /// Returns whether this element or any ancestor is going to be
@@ -96,12 +116,23 @@ impl RestyleData {
     /// to do a post-traversal.
     pub fn set_restyled(&mut self) {
         self.flags.insert(WAS_RESTYLED);
+        self.flags.remove(TRAVERSED_WITHOUT_STYLING);
     }
 
-    /// Mark this element as restyled, which is useful to know whether we need
-    /// to do a post-traversal.
+    /// Returns true if this element was restyled.
     pub fn is_restyle(&self) -> bool {
         self.flags.contains(WAS_RESTYLED)
+    }
+
+    /// Mark that we traversed this element without computing any style for it.
+    pub fn set_traversed_without_styling(&mut self) {
+        self.flags.insert(TRAVERSED_WITHOUT_STYLING);
+    }
+
+    /// Returns whether the element was traversed without computing any style for
+    /// it.
+    pub fn traversed_without_styling(&self) -> bool {
+        self.flags.contains(TRAVERSED_WITHOUT_STYLING)
     }
 
     /// Returns whether this element has been part of a restyle.
@@ -239,6 +270,20 @@ impl fmt::Debug for ElementStyles {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "ElementStyles {{ primary: {:?}, pseudos: {:?} }}",
                self.primary.as_ref().map(|x| &x.rules), self.pseudos)
+    }
+}
+
+#[cfg(feature = "gecko")]
+impl MallocSizeOfWithRepeats for ElementStyles {
+    fn malloc_size_of_children(&self, state: &mut SizeOfState) -> usize {
+        let mut n = 0;
+        if let Some(ref primary) = self.primary {
+            n += primary.malloc_size_of_children(state)
+        };
+
+        // We may measure more fields in the future if DMD says it's worth it.
+
+        n
     }
 }
 
@@ -384,11 +429,22 @@ impl ElementData {
 
     /// Drops any restyle state from the element.
     pub fn clear_restyle_state(&mut self) {
-        self.restyle.clear();
+        self.restyle.clear_restyle_state();
     }
 
     /// Drops restyle flags and damage from the element.
     pub fn clear_restyle_flags_and_damage(&mut self) {
-        self.restyle.clear_flags_and_damage();
+        self.restyle.clear_restyle_flags_and_damage();
+    }
+}
+
+#[cfg(feature = "gecko")]
+impl MallocSizeOfWithRepeats for ElementData {
+    fn malloc_size_of_children(&self, state: &mut SizeOfState) -> usize {
+        let n = self.styles.malloc_size_of_children(state);
+
+        // We may measure more fields in the future if DMD says it's worth it.
+
+        n
     }
 }

@@ -218,8 +218,11 @@ PlacesViewBase.prototype = {
     if (PlacesControllerDragHelper.disallowInsertion(container))
       return null;
 
-    return new InsertionPoint(PlacesUtils.getConcreteItemId(container),
-                              index, orientation, tagName);
+    return new InsertionPoint({
+      parentId: PlacesUtils.getConcreteItemId(container),
+      parentGuid: PlacesUtils.getConcreteItemGuid(container),
+      index, orientation, tagName
+    });
   },
 
   buildContextMenu: function PVB_buildContextMenu(aPopup) {
@@ -1422,8 +1425,12 @@ PlacesToolbar.prototype = {
                        : (aEvent.clientX < eltRect.left + threshold)) {
           // Drop before this folder.
           dropPoint.ip =
-            new InsertionPoint(PlacesUtils.getConcreteItemId(this._resultNode),
-                               eltIndex, Ci.nsITreeView.DROP_BEFORE);
+            new InsertionPoint({
+              parentId: PlacesUtils.getConcreteItemId(this._resultNode),
+              parentGuid: PlacesUtils.getConcreteItemGuid(this._resultNode),
+              index: eltIndex,
+              orientation: Ci.nsITreeView.DROP_BEFORE
+            });
           dropPoint.beforeIndex = eltIndex;
         } else if (this.isRTL ? (aEvent.clientX > eltRect.left + threshold)
                             : (aEvent.clientX < eltRect.right - threshold)) {
@@ -1431,9 +1438,11 @@ PlacesToolbar.prototype = {
           let tagName = PlacesUtils.nodeIsTagQuery(elt._placesNode) ?
                         elt._placesNode.title : null;
           dropPoint.ip =
-            new InsertionPoint(PlacesUtils.getConcreteItemId(elt._placesNode),
-                               -1, Ci.nsITreeView.DROP_ON,
-                               tagName);
+            new InsertionPoint({
+              parentId: PlacesUtils.getConcreteItemId(elt._placesNode),
+              parentGuid: PlacesUtils.getConcreteItemGuid(elt._placesNode),
+              tagName
+            });
           dropPoint.beforeIndex = eltIndex;
           dropPoint.folderElt = elt;
         } else {
@@ -1443,8 +1452,12 @@ PlacesToolbar.prototype = {
             -1 : eltIndex + 1;
 
           dropPoint.ip =
-            new InsertionPoint(PlacesUtils.getConcreteItemId(this._resultNode),
-                               beforeIndex, Ci.nsITreeView.DROP_BEFORE);
+            new InsertionPoint({
+              parentId: PlacesUtils.getConcreteItemId(this._resultNode),
+              parentGuid: PlacesUtils.getConcreteItemGuid(this._resultNode),
+              index: beforeIndex,
+              orientation: Ci.nsITreeView.DROP_BEFORE
+            });
           dropPoint.beforeIndex = beforeIndex;
         }
       } else {
@@ -1455,8 +1468,12 @@ PlacesToolbar.prototype = {
                        : (aEvent.clientX < eltRect.left + threshold)) {
           // Drop before this bookmark.
           dropPoint.ip =
-            new InsertionPoint(PlacesUtils.getConcreteItemId(this._resultNode),
-                               eltIndex, Ci.nsITreeView.DROP_BEFORE);
+            new InsertionPoint({
+              parentId: PlacesUtils.getConcreteItemId(this._resultNode),
+              parentGuid: PlacesUtils.getConcreteItemGuid(this._resultNode),
+              index: eltIndex,
+              orientation: Ci.nsITreeView.DROP_BEFORE
+            });
           dropPoint.beforeIndex = eltIndex;
         } else {
           // Drop after this bookmark.
@@ -1464,8 +1481,12 @@ PlacesToolbar.prototype = {
             eltIndex == this._rootElt.childNodes.length - 1 ?
             -1 : eltIndex + 1;
           dropPoint.ip =
-            new InsertionPoint(PlacesUtils.getConcreteItemId(this._resultNode),
-                               beforeIndex, Ci.nsITreeView.DROP_BEFORE);
+            new InsertionPoint({
+              parentId: PlacesUtils.getConcreteItemId(this._resultNode),
+              parentGuid: PlacesUtils.getConcreteItemGuid(this._resultNode),
+              index: beforeIndex,
+              orientation: Ci.nsITreeView.DROP_BEFORE
+            });
           dropPoint.beforeIndex = beforeIndex;
         }
       }
@@ -1473,8 +1494,11 @@ PlacesToolbar.prototype = {
       // We are most likely dragging on the empty area of the
       // toolbar, we should drop after the last node.
       dropPoint.ip =
-        new InsertionPoint(PlacesUtils.getConcreteItemId(this._resultNode),
-                           -1, Ci.nsITreeView.DROP_BEFORE);
+        new InsertionPoint({
+          parentId: PlacesUtils.getConcreteItemId(this._resultNode),
+          parentGuid: PlacesUtils.getConcreteItemGuid(this._resultNode),
+          orientation: Ci.nsITreeView.DROP_BEFORE
+        });
       dropPoint.beforeIndex = -1;
     }
 
@@ -1980,7 +2004,7 @@ PlacesPanelMenuView.prototype = {
   }
 };
 
-var PlacesPanelview = class extends PlacesViewBase {
+this.PlacesPanelview = class extends PlacesViewBase {
   constructor(container, panelview, place, options = {}) {
     options.rootElt = container;
     options.viewElt = panelview;
@@ -1988,7 +2012,7 @@ var PlacesPanelview = class extends PlacesViewBase {
     this._viewElt._placesView = this;
     // We're simulating a popup show, because a panelview may only be shown when
     // its containing popup is already shown.
-    this._onPopupShowing({ originalTarget: this._viewElt });
+    this._onPopupShowing({ originalTarget: this._rootElt });
     this._addEventListeners(window, ["unload"]);
     this._rootElt.setAttribute("context", "placesContext");
   }
@@ -1996,8 +2020,7 @@ var PlacesPanelview = class extends PlacesViewBase {
   get events() {
     if (this._events)
       return this._events;
-    return this._events = ["command", "destructed", "dragend", "dragstart",
-      "ViewHiding", "ViewShowing", "ViewShown"];
+    return this._events = ["click", "command", "dragend", "dragstart", "ViewHiding", "ViewShown"];
   }
 
   get panel() {
@@ -2010,11 +2033,13 @@ var PlacesPanelview = class extends PlacesViewBase {
 
   handleEvent(event) {
     switch (event.type) {
+      case "click":
+        // For left and middle clicks, fall through to the command handler.
+        if (event.button >= 2) {
+          break;
+        }
       case "command":
         this._onCommand(event);
-        break;
-      case "destructed":
-        this._onDestructed(event);
         break;
       case "dragend":
         this._onDragEnd(event);
@@ -2028,9 +2053,6 @@ var PlacesPanelview = class extends PlacesViewBase {
       case "ViewHiding":
         this._onPopupHidden(event);
         break;
-      case "ViewShowing":
-        this._onPopupShowing(event);
-        break;
       case "ViewShown":
         this._onViewShown(event);
         break;
@@ -2043,13 +2065,7 @@ var PlacesPanelview = class extends PlacesViewBase {
       return;
 
     PlacesUIUtils.openNodeWithEvent(button._placesNode, event);
-  }
-
-  _onDestructed(event) {
-    // The panelmultiview is ephemeral, so let's keep an eye out when the root
-    // element is showing again.
-    this._removeEventListeners(event.target, this.events);
-    this._addEventListeners(this._viewElt, ["ViewShowing"]);
+    this.panelMultiView.closest("panel").hidePopup();
   }
 
   _onDragEnd() {
@@ -2071,7 +2087,6 @@ var PlacesPanelview = class extends PlacesViewBase {
 
   uninit(event) {
     this._removeEventListeners(this.panelMultiView, this.events);
-    this._removeEventListeners(this._viewElt, ["ViewShowing"]);
     this._removeEventListeners(window, ["unload"]);
     super.uninit(event);
   }
@@ -2153,11 +2168,9 @@ var PlacesPanelview = class extends PlacesViewBase {
   }
 
   _onPopupShowing(event) {
-    // If the event came from the root element, this is a sign that the panelmultiview
-    // was just instantiated (see `_onDestructed` above) or this is the first time
+    // If the event came from the root element, this is the first time
     // we ever get here.
-    if (event.originalTarget == this._viewElt) {
-      this._removeEventListeners(this._viewElt, ["ViewShowing"]);
+    if (event.originalTarget == this._rootElt) {
       // Start listening for events from all panels inside the panelmultiview.
       this._addEventListeners(this.panelMultiView, this.events);
     }

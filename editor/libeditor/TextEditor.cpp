@@ -78,18 +78,6 @@ TextEditor::TextEditor()
   GetDefaultEditorPrefs(mNewlineHandling, mCaretStyle);
 }
 
-HTMLEditor*
-TextEditor::AsHTMLEditor()
-{
-  return nullptr;
-}
-
-const HTMLEditor*
-TextEditor::AsHTMLEditor() const
-{
-  return nullptr;
-}
-
 TextEditor::~TextEditor()
 {
   // Remove event listeners. Note that if we had an HTML editor,
@@ -728,8 +716,8 @@ TextEditor::InsertLineBreak()
     nsCOMPtr<nsIDocument> doc = GetDocument();
     NS_ENSURE_TRUE(doc, NS_ERROR_NOT_INITIALIZED);
 
-    // don't spaz my selection in subtransactions
-    AutoTransactionsConserveSelection dontSpazMySelection(this);
+    // don't change my selection in subtransactions
+    AutoTransactionsConserveSelection dontChangeMySelection(this);
 
     // insert a linefeed character
     rv = InsertTextImpl(NS_LITERAL_STRING("\n"), address_of(selNode),

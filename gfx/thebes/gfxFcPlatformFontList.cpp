@@ -55,6 +55,20 @@ using namespace mozilla::unicode;
                                    gfxPlatform::GetLog(eGfxLog_cmapdata), \
                                    LogLevel::Debug)
 
+template <>
+class nsAutoRefTraits<FcFontSet> : public nsPointerRefTraits<FcFontSet>
+{
+public:
+    static void Release(FcFontSet *ptr) { FcFontSetDestroy(ptr); }
+};
+
+template <>
+class nsAutoRefTraits<FcObjectSet> : public nsPointerRefTraits<FcObjectSet>
+{
+public:
+    static void Release(FcObjectSet *ptr) { FcObjectSetDestroy(ptr); }
+};
+
 static const FcChar8*
 ToFcChar8Ptr(const char* aStr)
 {
@@ -1100,11 +1114,13 @@ SizeDistance(gfxFontconfigFontEntry* aEntry,
 void
 gfxFontconfigFontFamily::FindAllFontsForStyle(const gfxFontStyle& aFontStyle,
                                               nsTArray<gfxFontEntry*>& aFontEntryList,
-                                              bool& aNeedsSyntheticBold)
+                                              bool& aNeedsSyntheticBold,
+                                              bool aIgnoreSizeTolerance)
 {
     gfxFontFamily::FindAllFontsForStyle(aFontStyle,
                                         aFontEntryList,
-                                        aNeedsSyntheticBold);
+                                        aNeedsSyntheticBold,
+                                        aIgnoreSizeTolerance);
 
     if (!mHasNonScalableFaces) {
         return;
@@ -1113,7 +1129,7 @@ gfxFontconfigFontFamily::FindAllFontsForStyle(const gfxFontStyle& aFontStyle,
     // Iterate over the the available fonts while compacting any groups
     // of unscalable fonts with matching styles into a single entry
     // corresponding to the closest available size. If the closest
-    // available size is rejected for being outside tolernace, then the
+    // available size is rejected for being outside tolerance, then the
     // entire group will be skipped.
     size_t skipped = 0;
     gfxFontconfigFontEntry* bestEntry = nullptr;
@@ -1121,7 +1137,8 @@ gfxFontconfigFontFamily::FindAllFontsForStyle(const gfxFontStyle& aFontStyle,
     for (size_t i = 0; i < aFontEntryList.Length(); i++) {
         gfxFontconfigFontEntry* entry =
             static_cast<gfxFontconfigFontEntry*>(aFontEntryList[i]);
-        double dist = SizeDistance(entry, aFontStyle, mForceScalable);
+        double dist = SizeDistance(entry, aFontStyle,
+                                   mForceScalable || aIgnoreSizeTolerance);
         // If the entry is scalable or has a style that does not match
         // the group of unscalable fonts, then start a new group.
         if (dist < 0.0 ||
@@ -1178,14 +1195,30 @@ gfxFontconfigFont::gfxFontconfigFont(const RefPtr<UnscaledFontFontconfig>& aUnsc
                                      gfxFloat aAdjustedSize,
                                      gfxFontEntry *aFontEntry,
                                      const gfxFontStyle *aFontStyle,
-                                     bool aNeedsBold) :
-    gfxFontconfigFontBase(aUnscaledFont, aScaledFont, aPattern, aFontEntry, aFontStyle)
+                                     bool aNeedsBold)
+    : gfxFT2FontBase(aUnscaledFont, aScaledFont, aFontEntry, aFontStyle)
+    , mPattern(aPattern)
 {
     mAdjustedSize = aAdjustedSize;
 }
 
 gfxFontconfigFont::~gfxFontconfigFont()
 {
+}
+
+already_AddRefed<ScaledFont>
+gfxFontconfigFont::GetScaledFont(mozilla::gfx::DrawTarget *aTarget)
+{
+    if (!mAzureScaledFont) {
+        mAzureScaledFont =
+            Factory::CreateScaledFontForFontconfigFont(GetCairoScaledFont(),
+                                                       GetPattern(),
+                                                       GetUnscaledFont(),
+                                                       GetAdjustedSize());
+    }
+
+    RefPtr<ScaledFont> scaledFont(mAzureScaledFont);
+    return scaledFont.forget();
 }
 
 gfxFcPlatformFontList::gfxFcPlatformFontList()
@@ -1483,6 +1516,7 @@ gfxFcPlatformFontList::MakePlatformFont(const nsAString& aFontName,
 bool
 gfxFcPlatformFontList::FindAndAddFamilies(const nsAString& aFamily,
                                           nsTArray<gfxFontFamily*>* aOutput,
+                                          bool aDeferOtherFamilyNamesLoading,
                                           gfxFontStyle* aStyle,
                                           gfxFloat aDevToCssSize)
 {
@@ -1565,7 +1599,9 @@ gfxFcPlatformFontList::FindAndAddFamilies(const nsAString& aFamily,
             FcStrCmp(substName, sentinelFirstFamily) == 0) {
             break;
         }
-        gfxPlatformFontList::FindAndAddFamilies(subst, &cachedFamilies);
+        gfxPlatformFontList::FindAndAddFamilies(subst,
+                                                &cachedFamilies,
+                                                aDeferOtherFamilyNamesLoading);
     }
 
     // Cache the resulting list, so we don't have to do this again.
@@ -1698,17 +1734,21 @@ gfxFcPlatformFontList::AddGenericFonts(mozilla::FontFamilyType aGenericType,
     if ((!mAlwaysUseFontconfigGenerics && aLanguage) ||
         aLanguage == nsGkAtoms::x_math) {
         nsIAtom* langGroup = GetLangGroup(aLanguage);
-        nsAdoptingString fontlistValue =
-            Preferences::GetString(NamePref(generic, langGroup).get());
+        nsAutoString fontlistValue;
+        Preferences::GetString(NamePref(generic, langGroup).get(),
+                               fontlistValue);
+        nsresult rv;
         if (fontlistValue.IsEmpty()) {
             // The font name list may have two or more family names as comma
             // separated list.  In such case, not matching with generic font
             // name is fine because if the list prefers specific font, we
             // should try to use the pref with complicated path.
-            fontlistValue =
-                 Preferences::GetString(NameListPref(generic, langGroup).get());
+            rv = Preferences::GetString(NameListPref(generic, langGroup).get(),
+                                        fontlistValue);
+        } else {
+            rv = NS_OK;
         }
-        if (fontlistValue) {
+        if (NS_SUCCEEDED(rv)) {
             if (!fontlistValue.EqualsLiteral("serif") &&
                 !fontlistValue.EqualsLiteral("sans-serif") &&
                 !fontlistValue.EqualsLiteral("monospace")) {
@@ -1759,7 +1799,7 @@ gfxFcPlatformFontList::GetFTLibrary()
         gfxPlatformFontList* pfl = gfxPlatformFontList::PlatformFontList();
         gfxFontFamily* family = pfl->GetDefaultFont(&style);
         NS_ASSERTION(family, "couldn't find a default font family");
-        gfxFontEntry* fe = family->FindFontForStyle(style, needsBold);
+        gfxFontEntry* fe = family->FindFontForStyle(style, needsBold, true);
         if (!fe) {
             return nullptr;
         }
@@ -1843,7 +1883,8 @@ gfxFcPlatformFontList::FindGenericFamilies(const nsAString& aGeneric,
             NS_ConvertUTF8toUTF16 mappedGenericName(ToCharPtr(mappedGeneric));
             AutoTArray<gfxFontFamily*,1> genericFamilies;
             if (gfxPlatformFontList::FindAndAddFamilies(mappedGenericName,
-                                                        &genericFamilies)) {
+                                                        &genericFamilies,
+                                                        true)) {
                 MOZ_ASSERT(genericFamilies.Length() == 1,
                            "expected a single family");
                 if (!prefFonts->Contains(genericFamilies[0])) {
@@ -1898,15 +1939,15 @@ gfxFcPlatformFontList::PrefFontListsUseOnlyGenerics()
             nsCCharSeparatedTokenizer tokenizer(prefName, '.');
             const nsDependentCSubstring& generic = tokenizer.nextToken();
             const nsDependentCSubstring& langGroup = tokenizer.nextToken();
-            nsAdoptingCString fontPrefValue = Preferences::GetCString(names[i]);
+            nsAutoCString fontPrefValue;
+            Preferences::GetCString(names[i], fontPrefValue);
             if (fontPrefValue.IsEmpty()) {
                 // The font name list may have two or more family names as comma
                 // separated list.  In such case, not matching with generic font
                 // name is fine because if the list prefers specific font, this
                 // should return false.
-                fontPrefValue =
-                    Preferences::GetCString(NameListPref(generic,
-                                                         langGroup).get());
+                Preferences::GetCString(NameListPref(generic, langGroup).get(),
+                                        fontPrefValue);
             }
 
             if (!langGroup.EqualsLiteral("x-math") &&

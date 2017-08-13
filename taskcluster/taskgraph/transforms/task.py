@@ -57,7 +57,9 @@ task_description_schema = Schema({
     Optional('routes'): [basestring],
 
     # custom scopes for this task; any scopes required for the worker will be
-    # added automatically
+    # added automatically. The following parameters will be substituted in each
+    # scope:
+    #  {level} -- the scm level of this push
     Optional('scopes'): [basestring],
 
     # Tags
@@ -446,6 +448,8 @@ GROUP_NAMES = {
     'tc-tt-c': 'Telemetry client marionette tests',
     'tc-tt-c-e10s': 'Telemetry client marionette tests with e10s',
     'tc-SY-e10s': 'Are we slim yet tests by TaskCluster with e10s',
+    'tc-SY-stylo-e10s': 'Are we slim yet tests by TaskCluster with e10s, stylo',
+    'tc-SY-stylo-seq-e10s': 'Are we slim yet tests by TaskCluster with e10s, stylo sequential',
     'tc-VP': 'VideoPuppeteer tests executed by TaskCluster',
     'tc-W': 'Web platform tests executed by TaskCluster',
     'tc-W-e10s': 'Web platform tests executed by TaskCluster with e10s',
@@ -948,11 +952,12 @@ def add_index_routes(config, tasks):
 @transforms.add
 def build_task(config, tasks):
     for task in tasks:
-        worker_type = task['worker-type'].format(level=str(config.params['level']))
+        level = str(config.params['level'])
+        worker_type = task['worker-type'].format(level=level)
         provisioner_id, worker_type = worker_type.split('/', 1)
 
         routes = task.get('routes', [])
-        scopes = task.get('scopes', [])
+        scopes = [s.format(level=level) for s in task.get('scopes', [])]
 
         # set up extra
         extra = task.get('extra', {})

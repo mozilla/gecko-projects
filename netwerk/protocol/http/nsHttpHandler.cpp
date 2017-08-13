@@ -152,7 +152,7 @@ GetDeviceModelId() {
         deviceModelId = NS_LossyConvertUTF16toASCII(androidDevice);
     }
     nsAutoCString deviceString;
-    rv = Preferences::GetCString(UA_PREF("device_string"), &deviceString);
+    rv = Preferences::GetCString(UA_PREF("device_string"), deviceString);
     if (NS_SUCCEEDED(rv)) {
         deviceString.Trim(" ", true, true);
         deviceString.ReplaceSubstring(NS_LITERAL_CSTRING("%DEVICEID%"), deviceModelId);
@@ -196,6 +196,7 @@ nsHttpHandler::nsHttpHandler()
     , mThrottleSuspendFor(3000)
     , mThrottleResumeFor(200)
     , mThrottleResumeIn(400)
+    , mThrottleTimeWindow(3000)
     , mUrgentStartEnabled(true)
     , mRedirectionLimit(10)
     , mPhishyUserPassLength(1)
@@ -248,7 +249,6 @@ nsHttpHandler::nsHttpHandler()
     , mTCPKeepaliveLongLivedEnabled(false)
     , mTCPKeepaliveLongLivedIdleTimeS(600)
     , mEnforceH1Framing(FRAMECHECK_BARELY)
-    , mKeepEmptyResponseHeadersAsEmtpyString(false)
     , mDefaultHpackBuffer(4096)
     , mMaxHttpResponseHeaderSize(393216)
     , mFocusedWindowTransactionRatio(0.9f)
@@ -455,9 +455,10 @@ nsHttpHandler::Init()
         mAppVersion.AssignLiteral(MOZ_APP_UA_VERSION);
     }
 
-    // Generating the spoofed userAgent for fingerprinting resistance. We will
-    // round the version to the nearest 10. By doing so, the anonymity group will
-    // cover more versions instead of one version.
+    // Generating the spoofed userAgent for fingerprinting resistance.
+    // The browser version will be rounded down to a multiple of 10.
+    // By doing so, the anonymity group will cover more versions instead of one
+    // version.
     uint32_t spoofedVersion = mAppVersion.ToInteger(&rv);
     if (NS_SUCCEEDED(rv)) {
         spoofedVersion = spoofedVersion - (spoofedVersion % 10);
@@ -590,7 +591,8 @@ nsHttpHandler::InitConnectionMgr()
                         mThrottleEnabled,
                         mThrottleSuspendFor,
                         mThrottleResumeFor,
-                        mThrottleResumeIn);
+                        mThrottleResumeIn,
+                        mThrottleTimeWindow);
     return rv;
 }
 
@@ -990,8 +992,8 @@ nsHttpHandler::InitUserAgentComponents()
     {
         // Add the `Mobile` or `Tablet` or `TV` token when running in the b2g
         // desktop simulator via preference.
-        nsCString deviceType;
-        nsresult rv = Preferences::GetCString("devtools.useragent.device_type", &deviceType);
+        nsAutoCString deviceType;
+        nsresult rv = Preferences::GetCString("devtools.useragent.device_type", deviceType);
         if (NS_SUCCEEDED(rv)) {
             mCompatDevice.Assign(deviceType);
         } else {
@@ -1636,6 +1638,15 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         }
     }
 
+    if (PREF_CHANGED(HTTP_PREF("throttle.time-window"))) {
+      rv = prefs->GetIntPref(HTTP_PREF("throttle.time-window"), &val);
+      mThrottleTimeWindow = (uint32_t)clamped(val, 0, 120000);
+      if (NS_SUCCEEDED(rv) && mConnMgr) {
+        Unused << mConnMgr->UpdateParam(nsHttpConnectionMgr::THROTTLING_TIME_WINDOW,
+                                        mThrottleTimeWindow);
+      }
+    }
+
     if (PREF_CHANGED(HTTP_PREF("on_click_priority"))) {
         Unused << prefs->GetBoolPref(HTTP_PREF("on_click_priority"), &mUrgentStartEnabled);
     }
@@ -1837,14 +1848,6 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         }
     }
 
-    if (PREF_CHANGED(HTTP_PREF("keep_empty_response_headers_as_empty_string"))) {
-        rv = prefs->GetBoolPref(HTTP_PREF("keep_empty_response_headers_as_empty_string"),
-                                &cVar);
-        if (NS_SUCCEEDED(rv)) {
-            mKeepEmptyResponseHeadersAsEmtpyString = cVar;
-        }
-    }
-
     if (PREF_CHANGED(HTTP_PREF("spdy.hpack-default-buffer"))) {
         rv = prefs->GetIntPref(HTTP_PREF("spdy.default-hpack-buffer"), &val);
         if (NS_SUCCEEDED(rv)) {
@@ -2003,8 +2006,8 @@ nsHttpHandler::SetAcceptLanguages()
 {
     mAcceptLanguagesIsDirty = false;
 
-    const nsAdoptingCString& acceptLanguages =
-        Preferences::GetLocalizedCString(INTL_ACCEPT_LANGUAGES);
+    nsAutoCString acceptLanguages;
+    Preferences::GetLocalizedCString(INTL_ACCEPT_LANGUAGES, acceptLanguages);
 
     nsAutoCString buf;
     nsresult rv = PrepareAcceptLanguages(acceptLanguages.get(), buf);

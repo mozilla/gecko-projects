@@ -16,7 +16,6 @@ Cu.import("resource://gre/modules/Services.jsm", this);
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
 Cu.import("resource://gre/modules/PromiseUtils.jsm", this);
 Cu.import("resource://gre/modules/DeferredTask.jsm", this);
-Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
 Cu.import("resource://gre/modules/TelemetryUtils.jsm", this);
 Cu.import("resource://gre/modules/AppConstants.jsm");
@@ -30,12 +29,12 @@ const PREF_BRANCH_LOG = "toolkit.telemetry.log.";
 
 // Whether the FHR/Telemetry unification features are enabled.
 // Changing this pref requires a restart.
-const IS_UNIFIED_TELEMETRY = Preferences.get(TelemetryUtils.Preferences.Unified, false);
+const IS_UNIFIED_TELEMETRY = Services.prefs.getBoolPref(TelemetryUtils.Preferences.Unified, false);
 
 const PING_FORMAT_VERSION = 4;
 
 // Delay before intializing telemetry (ms)
-const TELEMETRY_DELAY = Preferences.get("toolkit.telemetry.initDelay", 60) * 1000;
+const TELEMETRY_DELAY = Services.prefs.getIntPref("toolkit.telemetry.initDelay", 60) * 1000;
 // Delay before initializing telemetry if we're testing (ms)
 const TELEMETRY_TEST_DELAY = 1;
 
@@ -51,35 +50,25 @@ const PING_TYPE_DELETION = "deletion";
 const REASON_GATHER_PAYLOAD = "gather-payload";
 const REASON_GATHER_SUBSESSION_PAYLOAD = "gather-subsession-payload";
 
-XPCOMUtils.defineLazyModuleGetter(this, "ClientID",
-                                  "resource://gre/modules/ClientID.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "Telemetry",
                                    "@mozilla.org/base/telemetry;1",
                                    "nsITelemetry");
-XPCOMUtils.defineLazyModuleGetter(this, "AsyncShutdown",
-                                  "resource://gre/modules/AsyncShutdown.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStorage",
-                                  "resource://gre/modules/TelemetryStorage.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ThirdPartyCookieProbe",
-                                  "resource://gre/modules/ThirdPartyCookieProbe.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryEnvironment",
-                                  "resource://gre/modules/TelemetryEnvironment.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "UpdateUtils",
-                                  "resource://gre/modules/UpdateUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryArchive",
-                                  "resource://gre/modules/TelemetryArchive.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetrySession",
-                                  "resource://gre/modules/TelemetrySession.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetrySend",
-                                  "resource://gre/modules/TelemetrySend.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryReportingPolicy",
-                                  "resource://gre/modules/TelemetryReportingPolicy.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryModules",
-                                  "resource://gre/modules/TelemetryModules.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "UpdatePing",
-                                  "resource://gre/modules/UpdatePing.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryHealthPing",
-                                  "resource://gre/modules/TelemetryHealthPing.jsm");
+
+XPCOMUtils.defineLazyModuleGetters(this, {
+  ClientID: "resource://gre/modules/ClientID.jsm",
+  AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
+  TelemetryStorage: "resource://gre/modules/TelemetryStorage.jsm",
+  ThirdPartyCookieProbe: "resource://gre/modules/ThirdPartyCookieProbe.jsm",
+  TelemetryEnvironment: "resource://gre/modules/TelemetryEnvironment.jsm",
+  UpdateUtils: "resource://gre/modules/UpdateUtils.jsm",
+  TelemetryArchive: "resource://gre/modules/TelemetryArchive.jsm",
+  TelemetrySession: "resource://gre/modules/TelemetrySession.jsm",
+  TelemetrySend: "resource://gre/modules/TelemetrySend.jsm",
+  TelemetryReportingPolicy: "resource://gre/modules/TelemetryReportingPolicy.jsm",
+  TelemetryModules: "resource://gre/modules/TelemetryModules.jsm",
+  UpdatePing: "resource://gre/modules/UpdatePing.jsm",
+  TelemetryHealthPing: "resource://gre/modules/TelemetryHealthPing.jsm",
+});
 
 /**
  * Setup Telemetry logging. This function also gets called when loggin related
@@ -95,14 +84,14 @@ function configureLogging() {
     let consoleAppender = new Log.ConsoleAppender(new Log.BasicFormatter());
     gLogger.addAppender(consoleAppender);
 
-    Preferences.observe(PREF_BRANCH_LOG, configureLogging);
+    Services.prefs.addObserver(PREF_BRANCH_LOG, configureLogging);
   }
 
   // Make sure the logger keeps up with the logging level preference.
-  gLogger.level = Log.Level[Preferences.get(TelemetryUtils.Preferences.LogLevel, "Warn")];
+  gLogger.level = Log.Level[Services.prefs.getStringPref(TelemetryUtils.Preferences.LogLevel, "Warn")];
 
   // If enabled in the preferences, add a dump appender.
-  let logDumping = Preferences.get(TelemetryUtils.Preferences.LogDump, false);
+  let logDumping = Services.prefs.getBoolPref(TelemetryUtils.Preferences.LogDump, false);
   if (logDumping != !!gLogAppenderDump) {
     if (logDumping) {
       gLogAppenderDump = new Log.DumpAppender(new Log.BasicFormatter());
@@ -721,7 +710,7 @@ var Impl = {
         // Perform TelemetrySession delayed init.
         await TelemetrySession.delayedInit();
 
-        if (Preferences.get(TelemetryUtils.Preferences.NewProfilePingEnabled, false) &&
+        if (Services.prefs.getBoolPref(TelemetryUtils.Preferences.NewProfilePingEnabled, false) &&
             !TelemetrySession.newProfilePingSent) {
           // Kick off the scheduling of the new-profile ping.
           this.scheduleNewProfilePing();
@@ -780,7 +769,7 @@ var Impl = {
 
     this._shuttingDown = true;
 
-    Preferences.ignore(PREF_BRANCH_LOG, configureLogging);
+    Services.prefs.removeObserver(PREF_BRANCH_LOG, configureLogging);
     this._detachObservers();
 
     // Now do an orderly shutdown.
@@ -866,6 +855,10 @@ var Impl = {
     case "app-startup":
       // app-startup is only registered for content processes.
       return this.setupContentTelemetry();
+    case "nsPref:changed":
+      if (aData == TelemetryUtils.Preferences.FhrUploadEnabled) {
+        return this._onUploadPrefChange();
+      }
     }
     return undefined;
   },
@@ -890,7 +883,7 @@ var Impl = {
    * the preferences panel), this triggers sending the deletion ping.
    */
   _onUploadPrefChange() {
-    const uploadEnabled = Preferences.get(TelemetryUtils.Preferences.FhrUploadEnabled, false);
+    const uploadEnabled = Services.prefs.getBoolPref(TelemetryUtils.Preferences.FhrUploadEnabled, false);
     if (uploadEnabled) {
       // There's nothing we should do if we are enabling upload.
       return;
@@ -916,10 +909,12 @@ var Impl = {
       "TelemetryController: removing pending pings after data upload was disabled", p);
   },
 
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupportsWeakReference]),
+
   _attachObservers() {
     if (IS_UNIFIED_TELEMETRY) {
       // Watch the FHR upload setting to trigger deletion pings.
-      Preferences.observe(TelemetryUtils.Preferences.FhrUploadEnabled, this._onUploadPrefChange, this);
+      Services.prefs.addObserver(TelemetryUtils.Preferences.FhrUploadEnabled, this, true);
     }
   },
 
@@ -928,7 +923,7 @@ var Impl = {
    */
   _detachObservers() {
     if (IS_UNIFIED_TELEMETRY) {
-      Preferences.ignore(TelemetryUtils.Preferences.FhrUploadEnabled, this._onUploadPrefChange, this);
+      Services.prefs.removeObserver(TelemetryUtils.Preferences.FhrUploadEnabled, this);
     }
   },
 
@@ -990,7 +985,7 @@ var Impl = {
     this._log.trace("scheduleNewProfilePing");
 
     const sendDelay =
-      Preferences.get(TelemetryUtils.Preferences.NewProfilePingDelay, NEWPROFILE_PING_DEFAULT_DELAY);
+      Services.prefs.getIntPref(TelemetryUtils.Preferences.NewProfilePingDelay, NEWPROFILE_PING_DEFAULT_DELAY);
 
     this._delayedNewPingTask = new DeferredTask(async () => {
       try {

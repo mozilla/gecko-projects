@@ -14,13 +14,23 @@ Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://gre/modules/Services.jsm", this);
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
 Cu.import("resource://gre/modules/DeferredTask.jsm", this);
-Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
 Cu.import("resource://gre/modules/TelemetryUtils.jsm", this);
 Cu.import("resource://gre/modules/AppConstants.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetrySend",
-                                  "resource://gre/modules/TelemetrySend.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  TelemetrySend: "resource://gre/modules/TelemetrySend.jsm",
+  AddonManagerPrivate: "resource://gre/modules/AddonManager.jsm",
+  AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
+  TelemetryController: "resource://gre/modules/TelemetryController.jsm",
+  TelemetryStorage: "resource://gre/modules/TelemetryStorage.jsm",
+  TelemetryLog: "resource://gre/modules/TelemetryLog.jsm",
+  ThirdPartyCookieProbe: "resource://gre/modules/ThirdPartyCookieProbe.jsm",
+  UITelemetry: "resource://gre/modules/UITelemetry.jsm",
+  GCTelemetry: "resource://gre/modules/GCTelemetry.jsm",
+  TelemetryEnvironment: "resource://gre/modules/TelemetryEnvironment.jsm",
+  TelemetryReportingPolicy: "resource://gre/modules/TelemetryReportingPolicy.jsm",
+});
 
 const Utils = TelemetryUtils;
 
@@ -43,7 +53,7 @@ const REASON_SHUTDOWN = "shutdown";
 const ENVIRONMENT_CHANGE_LISTENER = "TelemetrySession::onEnvironmentChange";
 
 const MS_IN_ONE_HOUR  = 60 * 60 * 1000;
-const MIN_SUBSESSION_LENGTH_MS = Preferences.get("toolkit.telemetry.minSubsessionLength", 5 * 60) * 1000;
+const MIN_SUBSESSION_LENGTH_MS = Services.prefs.getIntPref("toolkit.telemetry.minSubsessionLength", 5 * 60) * 1000;
 
 const LOGGER_NAME = "Toolkit.Telemetry";
 const LOGGER_PREFIX = "TelemetrySession" + (Utils.isContentProcess ? "#content::" : "::");
@@ -59,7 +69,7 @@ const ABORTED_SESSION_FILE_NAME = "aborted-session-ping";
 
 // Whether the FHR/Telemetry unification features are enabled.
 // Changing this pref requires a restart.
-const IS_UNIFIED_TELEMETRY = Preferences.get(TelemetryUtils.Preferences.Unified, false);
+const IS_UNIFIED_TELEMETRY = Services.prefs.getBoolPref(TelemetryUtils.Preferences.Unified, false);
 
 // Maximum number of content payloads that we are willing to store.
 const MAX_NUM_CONTENT_PAYLOADS = 10;
@@ -67,13 +77,13 @@ const MAX_NUM_CONTENT_PAYLOADS = 10;
 // Do not gather data more than once a minute (ms)
 const TELEMETRY_INTERVAL = 60 * 1000;
 // Delay before intializing telemetry (ms)
-const TELEMETRY_DELAY = Preferences.get("toolkit.telemetry.initDelay", 60) * 1000;
+const TELEMETRY_DELAY = Services.prefs.getIntPref("toolkit.telemetry.initDelay", 60) * 1000;
 // Delay before initializing telemetry if we're testing (ms)
 const TELEMETRY_TEST_DELAY = 1;
 // Execute a scheduler tick every 5 minutes.
-const SCHEDULER_TICK_INTERVAL_MS = Preferences.get("toolkit.telemetry.scheduler.tickInterval", 5 * 60) * 1000;
+const SCHEDULER_TICK_INTERVAL_MS = Services.prefs.getIntPref("toolkit.telemetry.scheduler.tickInterval", 5 * 60) * 1000;
 // When user is idle, execute a scheduler tick every 60 minutes.
-const SCHEDULER_TICK_IDLE_INTERVAL_MS = Preferences.get("toolkit.telemetry.scheduler.idleTickInterval", 60 * 60) * 1000;
+const SCHEDULER_TICK_IDLE_INTERVAL_MS = Services.prefs.getIntPref("toolkit.telemetry.scheduler.idleTickInterval", 60 * 60) * 1000;
 
 // The tolerance we have when checking if it's midnight (15 minutes).
 const SCHEDULER_MIDNIGHT_TOLERANCE_MS = 15 * 60 * 1000;
@@ -85,7 +95,7 @@ const SCHEDULER_TICK_MAX_IDLE_DELAY_MS = 60 * 1000;
 // Seconds of idle time before pinging.
 // On idle-daily a gather-telemetry notification is fired, during it probes can
 // start asynchronous tasks to gather data.
-const IDLE_TIMEOUT_SECONDS = Preferences.get("toolkit.telemetry.idleTimeout", 5 * 60);
+const IDLE_TIMEOUT_SECONDS = Services.prefs.getIntPref("toolkit.telemetry.idleTimeout", 5 * 60);
 
 // The frequency at which we persist session data to the disk to prevent data loss
 // in case of aborted sessions (currently 5 minutes).
@@ -100,45 +110,14 @@ var gLastMemoryPoll = null;
 
 var gWasDebuggerAttached = false;
 
-XPCOMUtils.defineLazyServiceGetter(this, "Telemetry",
-                                   "@mozilla.org/base/telemetry;1",
-                                   "nsITelemetry");
-XPCOMUtils.defineLazyServiceGetter(this, "idleService",
-                                   "@mozilla.org/widget/idleservice;1",
-                                   "nsIIdleService");
-XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
-                                   "@mozilla.org/childprocessmessagemanager;1",
-                                   "nsIMessageSender");
-XPCOMUtils.defineLazyServiceGetter(this, "cpml",
-                                   "@mozilla.org/childprocessmessagemanager;1",
-                                   "nsIMessageListenerManager");
-XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
-                                   "@mozilla.org/parentprocessmessagemanager;1",
-                                   "nsIMessageBroadcaster");
-XPCOMUtils.defineLazyServiceGetter(this, "ppml",
-                                   "@mozilla.org/parentprocessmessagemanager;1",
-                                   "nsIMessageListenerManager");
-
-XPCOMUtils.defineLazyModuleGetter(this, "AddonManagerPrivate",
-                                  "resource://gre/modules/AddonManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AsyncShutdown",
-                                  "resource://gre/modules/AsyncShutdown.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryController",
-                                  "resource://gre/modules/TelemetryController.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStorage",
-                                  "resource://gre/modules/TelemetryStorage.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryLog",
-                                  "resource://gre/modules/TelemetryLog.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ThirdPartyCookieProbe",
-                                  "resource://gre/modules/ThirdPartyCookieProbe.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "UITelemetry",
-                                  "resource://gre/modules/UITelemetry.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "GCTelemetry",
-                                  "resource://gre/modules/GCTelemetry.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryEnvironment",
-                                  "resource://gre/modules/TelemetryEnvironment.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryReportingPolicy",
-                                  "resource://gre/modules/TelemetryReportingPolicy.jsm");
+XPCOMUtils.defineLazyServiceGetters(this, {
+  Telemetry: ["@mozilla.org/base/telemetry;1", "nsITelemetry"],
+  idleService: ["@mozilla.org/widget/idleservice;1", "nsIIdleService"],
+  cpmm: ["@mozilla.org/childprocessmessagemanager;1", "nsIMessageSender"],
+  cpml: ["@mozilla.org/childprocessmessagemanager;1", "nsIMessageListenerManager"],
+  ppmm: ["@mozilla.org/parentprocessmessagemanager;1", "nsIMessageBroadcaster"],
+  ppml: ["@mozilla.org/parentprocessmessagemanager;1", "nsIMessageListenerManager"],
+});
 
 function generateUUID() {
   let str = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator).generateUUID().toString();
@@ -1009,8 +988,8 @@ var Impl = {
       return [];
     }
 
-    let snapshot = Telemetry.snapshotBuiltinEvents(this.getDatasetType(),
-                                                   clearSubsession);
+    let snapshot = Telemetry.snapshotEvents(this.getDatasetType(),
+                                            clearSubsession);
 
     // Don't return the test events outside of test environments.
     if (!this._testing) {
@@ -1295,48 +1274,47 @@ var Impl = {
     }
 
     // Additional payload for chrome process.
-    let histograms = protect(() => this.getHistograms(isSubsession, clearSubsession), {});
-    let keyedHistograms = protect(() => this.getKeyedHistograms(isSubsession, clearSubsession), {});
-    let scalars = protect(() => this.getScalars(isSubsession, clearSubsession), {});
-    let keyedScalars = protect(() => this.getScalars(isSubsession, clearSubsession, true), {});
-    let events = protect(() => this.getEvents(isSubsession, clearSubsession))
-
-    payloadObj.histograms = histograms.parent || {};
-    payloadObj.keyedHistograms = keyedHistograms.parent || {};
-    payloadObj.processes = {
-      parent: {
-        scalars: scalars["parent"] || {},
-        keyedScalars: keyedScalars["parent"] || {},
-        events: events["parent"] || [],
-      },
-      content: {
-        scalars: scalars["content"],
-        keyedScalars: keyedScalars["content"],
-        histograms: histograms["content"],
-        keyedHistograms: keyedHistograms["content"],
-        events: events["content"] || [],
-      },
-      extension: {
-        scalars: scalars["extension"],
-        keyedScalars: keyedScalars["extension"],
-        histograms: histograms["extension"],
-        keyedHistograms: keyedHistograms["extension"],
-        events: events["extension"] || [],
-      },
+    let measurements = {
+      histograms: protect(() => this.getHistograms(isSubsession, clearSubsession), {}),
+      keyedHistograms: protect(() => this.getKeyedHistograms(isSubsession, clearSubsession), {}),
+      scalars: protect(() => this.getScalars(isSubsession, clearSubsession), {}),
+      keyedScalars: protect(() => this.getScalars(isSubsession, clearSubsession, true), {}),
+      events: protect(() => this.getEvents(isSubsession, clearSubsession)),
     };
 
+    let measurementsContainGPU = Object
+      .keys(measurements)
+      .some(key => "gpu" in measurements[key]);
+
+    payloadObj.processes = {};
+    let processTypes = ["parent", "content", "extension", "dynamic"];
     // Only include the GPU process if we've accumulated data for it.
-    if ("gpu" in histograms ||
-        "gpu" in keyedHistograms ||
-        "gpu" in scalars ||
-        "gpu" in keyedScalars) {
-      payloadObj.processes.gpu = {
-        scalars: scalars["gpu"],
-        keyedScalars: keyedScalars["gpu"],
-        histograms: histograms["gpu"],
-        keyedHistograms: keyedHistograms["gpu"],
-        events: events["gpu"] || [],
-      };
+    if (measurementsContainGPU) {
+      processTypes.push("gpu");
+    }
+
+    // Collect per-process measurements.
+    for (const processType of processTypes) {
+      let processPayload = {};
+
+      for (const key in measurements) {
+        let payloadLoc = processPayload;
+        // Parent histograms are added to the top-level payload object instead of the process payload.
+        if (processType == "parent" && (key == "histograms" || key == "keyedHistograms")) {
+          payloadLoc = payloadObj;
+        }
+        // Dynamic processes only collect events.
+        if (processType == "dynamic" && key != "events") {
+          continue;
+        }
+
+        // Process measurements can be empty, set a default value.
+        let defaultValue = key == "events" ? [] : {};
+        payloadLoc[key] = measurements[key][processType] || defaultValue;
+      }
+
+      // Add process measurements to payload.
+      payloadObj.processes[processType] = processPayload;
     }
 
     payloadObj.info = info;
@@ -1507,12 +1485,12 @@ var Impl = {
 
     // Record old value and update build ID preference if this is the first
     // run with a new build ID.
-    let previousBuildId = Preferences.get(TelemetryUtils.Preferences.PreviousBuildID, null);
+    let previousBuildId = Services.prefs.getStringPref(TelemetryUtils.Preferences.PreviousBuildID, null);
     let thisBuildID = Services.appinfo.appBuildID;
     // If there is no previousBuildId preference, we send null to the server.
     if (previousBuildId != thisBuildID) {
       this._previousBuildId = previousBuildId;
-      Preferences.set(TelemetryUtils.Preferences.PreviousBuildID, thisBuildID);
+      Services.prefs.setStringPref(TelemetryUtils.Preferences.PreviousBuildID, thisBuildID);
     }
 
     this.attachEarlyObservers();
@@ -1801,9 +1779,9 @@ var Impl = {
       // Only send the shutdown ping using the pingsender from the second
       // browsing session on, to mitigate issues with "bot" profiles (see bug 1354482).
       const sendOnThisSession =
-        Preferences.get(Utils.Preferences.ShutdownPingSenderFirstSession, false) ||
+        Services.prefs.getBoolPref(Utils.Preferences.ShutdownPingSenderFirstSession, false) ||
         !TelemetryReportingPolicy.isFirstRun();
-      let sendWithPingsender = Preferences.get(TelemetryUtils.Preferences.ShutdownPingSender, false) &&
+      let sendWithPingsender = Services.prefs.getBoolPref(TelemetryUtils.Preferences.ShutdownPingSender, false) &&
                                sendOnThisSession;
 
       let options = {

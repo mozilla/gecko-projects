@@ -71,7 +71,7 @@ extern crate ordered_float;
 extern crate owning_ref;
 extern crate parking_lot;
 extern crate pdqsort;
-#[cfg(feature = "gecko")] extern crate precomputed_hash;
+extern crate precomputed_hash;
 extern crate rayon;
 extern crate selectors;
 #[cfg(feature = "servo")] #[macro_use] extern crate serde;
@@ -92,7 +92,7 @@ extern crate unicode_segmentation;
 #[macro_use]
 mod macros;
 
-pub mod animation;
+#[cfg(feature = "servo")] pub mod animation;
 pub mod applicable_declarations;
 #[allow(missing_docs)] // TODO.
 #[cfg(feature = "servo")] pub mod attr;
@@ -171,7 +171,7 @@ pub mod gecko_properties {
 }
 
 macro_rules! reexport_computed_values {
-    ( $( $name: ident )+ ) => {
+    ( $( { $name: ident, $boxed: expr } )+ ) => {
         /// Types for [computed values][computed].
         ///
         /// [computed]: https://drafts.csswg.org/css-cascade/#computed

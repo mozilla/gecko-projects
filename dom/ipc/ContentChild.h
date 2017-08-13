@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_ContentChild_h
 #define mozilla_dom_ContentChild_h
 
+#include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/ContentBridgeParent.h"
 #include "mozilla/dom/nsIContentChild.h"
@@ -39,6 +40,23 @@ class ChildProfilerController;
 
 using mozilla::loader::PScriptCacheChild;
 
+#if !defined(XP_WIN)
+// Returns whether or not the currently running build is an unpackaged
+// developer build. This check is implemented by looking for omni.ja in the
+// the obj/dist dir. We use this routine to detect when the build dir will
+// use symlinks to the repo and object dir. On Windows, dev builds don't
+// use symlinks.
+bool IsDevelopmentBuild();
+#endif /* !XP_WIN */
+
+#if defined(XP_MACOSX)
+// Return the repo directory and the repo object directory respectively. These
+// should only be used on Mac developer builds to determine the path to the
+// repo or object directory.
+nsresult GetRepoDir(nsIFile **aRepoDir);
+nsresult GetObjDir(nsIFile **aObjDir);
+#endif /* XP_MACOSX */
+
 namespace ipc {
 class OptionalURIParams;
 class URIParams;
@@ -48,7 +66,6 @@ namespace dom {
 
 class AlertObserver;
 class ConsoleListener;
-class PStorageChild;
 class ClonedMessageData;
 class TabChild;
 class GetFilesHelperChild;
@@ -119,7 +136,7 @@ public:
     return mAppInfo;
   }
 
-  void SetProcessName(const nsAString& aName, bool aDontOverride = false);
+  void SetProcessName(const nsAString& aName);
 
   void GetProcessName(nsAString& aName) const;
 
@@ -143,6 +160,8 @@ public:
   bool IsShuttingDown() const;
 
   static void AppendProcessId(nsACString& aName);
+
+  static void UpdateCookieStatus(nsIChannel *aChannel);
 
   mozilla::ipc::IPCResult
   RecvInitContentBridgeChild(Endpoint<PContentBridgeChild>&& aEndpoint) override;
@@ -174,6 +193,8 @@ public:
     Endpoint<PVRManagerChild>&& aVRBridge,
     Endpoint<PVideoDecoderManagerChild>&& aVideoManager,
     nsTArray<uint32_t>&& namespaces) override;
+
+  virtual mozilla::ipc::IPCResult RecvAudioDefaultDeviceChange() override;
 
   mozilla::ipc::IPCResult RecvReinitRenderingForDeviceReset() override;
 
@@ -295,10 +316,6 @@ public:
 
   virtual bool DeallocPMediaChild(PMediaChild* aActor) override;
 
-  virtual PStorageChild* AllocPStorageChild() override;
-
-  virtual bool DeallocPStorageChild(PStorageChild* aActor) override;
-
   virtual PPresentationChild* AllocPPresentationChild() override;
 
   virtual bool DeallocPPresentationChild(PPresentationChild* aActor) override;
@@ -408,14 +425,6 @@ public:
 
   virtual mozilla::ipc::IPCResult
   RecvInitBlobURLs(nsTArray<BlobURLRegistrationData>&& aRegistations) override;
-
-  virtual mozilla::ipc::IPCResult
-  RecvDispatchLocalStorageChange(const nsString& aDocumentURI,
-                                 const nsString& aKey,
-                                 const nsString& aOldValue,
-                                 const nsString& aNewValue,
-                                 const IPC::Principal& aPrincipal,
-                                 const bool& aIsPrivate) override;
 
   virtual mozilla::ipc::IPCResult RecvLastPrivateDocShellDestroyed() override;
 
@@ -726,7 +735,6 @@ private:
 
   bool mIsForBrowser;
   nsString mRemoteType = NullString();
-  bool mCanOverrideProcessName;
   bool mIsAlive;
   nsString mProcessName;
 
@@ -755,7 +763,7 @@ private:
 
   nsClassHashtable<nsUint64HashKey, AnonymousTemporaryFileCallback> mPendingAnonymousTemporaryFiles;
 
-  bool mShuttingDown;
+  mozilla::Atomic<bool> mShuttingDown;
 
   DISALLOW_EVIL_CONSTRUCTORS(ContentChild);
 };

@@ -109,6 +109,8 @@ public class GeckoThread extends Thread {
     private static final ClassLoader clsLoader = GeckoThread.class.getClassLoader();
     @WrapForJNI
     private static MessageQueue msgQueue;
+    @WrapForJNI
+    private static int uiThreadId;
 
     private boolean mInitialized;
     private String[] mArgs;
@@ -135,6 +137,7 @@ public class GeckoThread extends Thread {
                                       final String extraArgs, final boolean debugging,
                                       final int crashFd, final int ipcFd) {
         ThreadUtils.assertOnUiThread();
+        uiThreadId = android.os.Process.myTid();
 
         if (mInitialized) {
             return false;
@@ -259,15 +262,8 @@ public class GeckoThread extends Thread {
             res.updateConfiguration(config, null);
         }
 
-        String[] pluginDirs = null;
-        try {
-            pluginDirs = GeckoAppShell.getPluginDirectories();
-        } catch (Exception e) {
-            Log.w(LOGTAG, "Caught exception getting plugin dirs.", e);
-        }
-
         final String resourcePath = context.getPackageResourcePath();
-        GeckoLoader.setupGeckoEnvironment(context, pluginDirs, context.getFilesDir().getPath());
+        GeckoLoader.setupGeckoEnvironment(context, context.getFilesDir().getPath());
 
         try {
             loadGeckoLibs(context, resourcePath);
@@ -367,14 +363,6 @@ public class GeckoThread extends Thread {
         Looper.myQueue().addIdleHandler(idleHandler);
 
         initGeckoEnvironment();
-
-        // This can only happen after the call to initGeckoEnvironment
-        // above, because otherwise the JNI code hasn't been loaded yet.
-        ThreadUtils.postToUiThread(new Runnable() {
-            @Override public void run() {
-                registerUiThread();
-            }
-        });
 
         // Wait until initialization before calling Gecko entry point.
         synchronized (this) {
@@ -539,9 +527,6 @@ public class GeckoThread extends Thread {
                                  String.class, category, String.class, data);
         }
     }
-
-    // Implemented in mozglue/android/APKOpen.cpp.
-    /* package */ static native void registerUiThread();
 
     @WrapForJNI(calledFrom = "ui")
     /* package */ static native long runUiThreadCallback();

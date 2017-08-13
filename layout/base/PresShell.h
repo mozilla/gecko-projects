@@ -59,6 +59,7 @@ namespace mozilla {
 
 namespace dom {
 class Element;
+class Selection;
 }  // namespace dom
 
 class EventDispatchingCallback;
@@ -105,6 +106,7 @@ public:
 
   NS_IMETHOD GetSelection(RawSelectionType aRawSelectionType,
                           nsISelection** aSelection) override;
+  dom::Selection* GetDOMSelection(RawSelectionType aRawSelectionType) override;
   virtual mozilla::dom::Selection*
     GetCurrentSelection(SelectionType aSelectionType) override;
   virtual already_AddRefed<nsISelectionController>
@@ -375,13 +377,8 @@ public:
 
   virtual void LoadComplete() override;
 
-  void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                              nsArenaMemoryStats* aArenaObjectsSize,
-                              size_t* aPresShellSize,
-                              size_t* aStyleSetsSize,
-                              size_t* aTextRunsSize,
-                              size_t* aPresContextSize,
-                              size_t* aFramePropertiesSize) override;
+  virtual void AddSizeOfIncludingThis(nsWindowSizes& aWindowSizes)
+    const override;
   size_t SizeOfTextRuns(mozilla::MallocSizeOf aMallocSizeOf) const;
 
   // This data is stored as a content property (nsGkAtoms::scrolling) on

@@ -280,13 +280,13 @@ DisplayItemData::~DisplayItemData()
 void
 DisplayItemData::ClearAnimationCompositorState()
 {
-  if (mDisplayItemKey != TYPE_TRANSFORM &&
-      mDisplayItemKey != TYPE_OPACITY) {
+  if (mDisplayItemKey != static_cast<uint32_t>(DisplayItemType::TYPE_TRANSFORM) &&
+      mDisplayItemKey != static_cast<uint32_t>(DisplayItemType::TYPE_OPACITY)) {
     return;
   }
 
   for (nsIFrame* frame : mFrameList) {
-    nsCSSPropertyID prop = mDisplayItemKey == TYPE_TRANSFORM ?
+    nsCSSPropertyID prop = mDisplayItemKey == static_cast<uint32_t>(DisplayItemType::TYPE_TRANSFORM) ?
       eCSSProperty_transform : eCSSProperty_opacity;
     EffectCompositor::ClearIsRunningOnCompositor(frame, prop);
   }
@@ -348,14 +348,14 @@ public:
       case LAYER_SVG_EFFECTS:
         layerState = "LAYER_SVG_EFFECTS"; break;
       }
-      uint32_t mask = (1 << nsDisplayItem::TYPE_BITS) - 1;
+      uint32_t mask = (1 << TYPE_BITS) - 1;
 
       nsAutoCString str;
       str += prefix;
       str += nsPrintfCString("Frame %p ", data->mFrameList[0]);
       str += nsDisplayItem::DisplayItemTypeName(static_cast<nsDisplayItem::Type>(data->mDisplayItemKey & mask));
-      if ((data->mDisplayItemKey >> nsDisplayItem::TYPE_BITS)) {
-        str += nsPrintfCString("(%i)", data->mDisplayItemKey >> nsDisplayItem::TYPE_BITS);
+      if ((data->mDisplayItemKey >> TYPE_BITS)) {
+        str += nsPrintfCString("(%i)", data->mDisplayItemKey >> TYPE_BITS);
       }
       str += nsPrintfCString(", %s, Layer %p", layerState, data->mLayer.get());
       if (data->mOptLayer) {
@@ -1696,20 +1696,20 @@ public:
       return mDrawTarget;
     }
 
-    if (mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC ||
-        mLayerManager->GetBackendType() == LayersBackend::LAYERS_WR) {
+    if (mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC) {
       mDrawTarget = mLayerManager->CreateOptimalMaskDrawTarget(mSize);
       return mDrawTarget;
     }
 
-    MOZ_ASSERT(mLayerManager->GetBackendType() == LayersBackend::LAYERS_CLIENT);
+    MOZ_ASSERT(mLayerManager->GetBackendType() == LayersBackend::LAYERS_CLIENT ||
+               mLayerManager->GetBackendType() == LayersBackend::LAYERS_WR);
 
-    ShadowLayerForwarder* fwd = mLayerManager->AsShadowForwarder();
-    if (!fwd) {
+    KnowsCompositor* knowsCompositor = mLayerManager->AsKnowsCompositor();
+    if (!knowsCompositor) {
       return nullptr;
     }
     mTextureClient =
-      TextureClient::CreateForDrawing(fwd,
+      TextureClient::CreateForDrawing(knowsCompositor,
                                       SurfaceFormat::A8,
                                       mSize,
                                       BackendSelector::Content,
@@ -1744,8 +1744,7 @@ public:
 private:
   already_AddRefed<Image> CreateImage()
   {
-    if ((mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC ||
-         mLayerManager->GetBackendType() == LayersBackend::LAYERS_WR) &&
+    if (mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC &&
         mDrawTarget) {
       RefPtr<SourceSurface> surface = mDrawTarget->Snapshot();
       RefPtr<SourceSurfaceImage> image = new SourceSurfaceImage(mSize, surface);
@@ -1755,7 +1754,8 @@ private:
       return image.forget();
     }
 
-    if (mLayerManager->GetBackendType() == LayersBackend::LAYERS_CLIENT &&
+    if ((mLayerManager->GetBackendType() == LayersBackend::LAYERS_CLIENT ||
+         mLayerManager->GetBackendType() == LayersBackend::LAYERS_WR) &&
         mTextureClient &&
         mDrawTarget) {
       RefPtr<TextureWrapperImage> image =
@@ -2094,7 +2094,7 @@ FrameLayerBuilder::IterateRetainedDataFor(nsIFrame* aFrame, DisplayItemDataCallb
 
   for (uint32_t i = 0; i < array.Length(); i++) {
     DisplayItemData* data = DisplayItemData::AssertDisplayItemData(array.ElementAt(i));
-    if (data->mDisplayItemKey != TYPE_ZERO) {
+    if (data->mDisplayItemKey != 0) {
       aCallback(aFrame, data);
     }
   }
@@ -2508,7 +2508,7 @@ AppUnitsPerDevPixel(nsDisplayItem* aItem)
   // But zoom display items report their bounds etc using the parent document's
   // APD because zoom items act as a conversion layer between the two different
   // APDs.
-  if (aItem->GetType() == TYPE_ZOOM) {
+  if (aItem->GetType() == DisplayItemType::TYPE_ZOOM) {
     return static_cast<nsDisplayZoom*>(aItem)->GetParentAppUnitsPerDevPixel();
   }
   return aItem->Frame()->PresContext()->AppUnitsPerDevPixel();
@@ -3175,7 +3175,7 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
   }
 
   for (auto& item : data->mAssignedDisplayItems) {
-    MOZ_ASSERT(item.mItem->GetType() != TYPE_LAYER_EVENT_REGIONS);
+    MOZ_ASSERT(item.mItem->GetType() != DisplayItemType::TYPE_LAYER_EVENT_REGIONS);
 
     InvalidateForLayerChange(item.mItem, data->mLayer);
     mLayerBuilder->AddPaintedDisplayItem(data, item.mItem, item.mClip,
@@ -3725,12 +3725,12 @@ PaintInactiveLayer(nsDisplayListBuilder* aBuilder,
   basic->BeginTransaction();
   basic->SetTarget(context);
 
-  if (aItem->GetType() == TYPE_MASK) {
+  if (aItem->GetType() == DisplayItemType::TYPE_MASK) {
     static_cast<nsDisplayMask*>(aItem)->PaintAsLayer(aBuilder, aCtx, basic);
     if (basic->InTransaction()) {
       basic->AbortTransaction();
     }
-  } else if (aItem->GetType() == TYPE_FILTER){
+  } else if (aItem->GetType() == DisplayItemType::TYPE_FILTER){
     static_cast<nsDisplayFilter*>(aItem)->PaintAsLayer(aBuilder, aCtx, basic);
     if (basic->InTransaction()) {
       basic->AbortTransaction();
@@ -3993,7 +3993,7 @@ MergeItems(nsDisplayListBuilder* aBuilder,
 static bool
 IsScrollThumbLayer(nsDisplayItem* aItem)
 {
-  return aItem->GetType() == TYPE_OWN_LAYER &&
+  return aItem->GetType() == DisplayItemType::TYPE_OWN_LAYER &&
          static_cast<nsDisplayOwnLayer*>(aItem)->IsScrollThumbLayer();
 }
 
@@ -4054,7 +4054,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
 
     // If the item is a event regions item, but is empty (has no regions in it)
     // then we should just throw it out
-    if (itemType == TYPE_LAYER_EVENT_REGIONS) {
+    if (itemType == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
       mLayerBuilder->StoreDataForFrame(item, nullptr, LAYER_NONE);
       nsDisplayLayerEventRegions* eventRegions =
         static_cast<nsDisplayLayerEventRegions*>(item);
@@ -4094,7 +4094,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
       continue;
     }
 
-    MOZ_ASSERT(item->GetType() != TYPE_WRAP_LIST);
+    MOZ_ASSERT(item->GetType() != DisplayItemType::TYPE_WRAP_LIST);
 
     NS_ASSERTION(mAppUnitsPerDevPixel == AppUnitsPerDevPixel(item),
       "items in a container layer should all have the same app units per dev pixel");
@@ -4104,8 +4104,8 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
     }
 
     if (mParameters.mForEventsAndPluginsOnly && !item->GetChildren() &&
-        (itemType != TYPE_LAYER_EVENT_REGIONS &&
-         itemType != TYPE_PLUGIN)) {
+        (itemType != DisplayItemType::TYPE_LAYER_EVENT_REGIONS &&
+         itemType != DisplayItemType::TYPE_PLUGIN)) {
       mLayerBuilder->StoreDataForFrame(item, nullptr, LAYER_NONE);
       continue;
     }
@@ -4133,7 +4133,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
         itemASR = item->GetActiveScrolledRoot();
         const DisplayItemClipChain* itemClipChain = item->GetClipChain();
         if (itemClipChain && itemClipChain->mASR == itemASR &&
-            itemType != TYPE_STICKY_POSITION) {
+            itemType != DisplayItemType::TYPE_STICKY_POSITION) {
           layerClipChain = itemClipChain->mParent;
         } else {
           layerClipChain = itemClipChain;
@@ -4154,20 +4154,20 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
 
     bool snap;
     nsRect itemContent = item->GetBounds(mBuilder, &snap);
-    if (itemType == TYPE_LAYER_EVENT_REGIONS) {
+    if (itemType == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
       nsDisplayLayerEventRegions* eventRegions =
         static_cast<nsDisplayLayerEventRegions*>(item);
       itemContent = eventRegions->GetHitRegionBounds(mBuilder, &snap);
     }
     nsIntRect itemDrawRect = ScaleToOutsidePixels(itemContent, snap);
-    bool prerenderedTransform = itemType == TYPE_TRANSFORM &&
+    bool prerenderedTransform = itemType == DisplayItemType::TYPE_TRANSFORM &&
         static_cast<nsDisplayTransform*>(item)->MayBeAnimated(mBuilder);
     ParentLayerIntRect clipRect;
     const DisplayItemClip& itemClip = item->GetClip();
     if (itemClip.HasClip()) {
       itemContent.IntersectRect(itemContent, itemClip.GetClipRect());
       clipRect = ViewAs<ParentLayerPixel>(ScaleToNearestPixels(itemClip.GetClipRect()));
-      if (!prerenderedTransform) {
+      if (!prerenderedTransform && !IsScrollThumbLayer(item)) {
         itemDrawRect.IntersectRect(itemDrawRect, clipRect.ToUnknownRect());
       }
       clipRect.MoveBy(ViewAs<ParentLayerPixel>(mParameters.mOffset));
@@ -4175,7 +4175,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
 #ifdef DEBUG
     nsRect bounds = itemContent;
     bool dummy;
-    if (itemType == TYPE_LAYER_EVENT_REGIONS) {
+    if (itemType == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
       bounds = item->GetBounds(mBuilder, &dummy);
       if (itemClip.HasClip()) {
         bounds.IntersectRect(bounds, itemClip.GetClipRect());
@@ -4239,7 +4239,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
 
       // 3D-transformed layers don't necessarily draw in the order in which
       // they're added to their parent container layer.
-      bool mayDrawOutOfOrder = itemType == TYPE_TRANSFORM &&
+      bool mayDrawOutOfOrder = itemType == DisplayItemType::TYPE_TRANSFORM &&
         (item->Frame()->Combines3DTransformWithAncestors() ||
          item->Frame()->Extend3DContext());
 
@@ -4264,7 +4264,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
 
       bool hasScrolledClip = layerClipChain && layerClipChain->mClip.HasClip() &&
         (!ActiveScrolledRoot::IsAncestor(layerClipChain->mASR, itemASR) ||
-         itemType == TYPE_STICKY_POSITION);
+         itemType == DisplayItemType::TYPE_STICKY_POSITION);
 
       if (hasScrolledClip) {
         // If the clip is scrolled, reserve just the area of the clip for
@@ -4327,11 +4327,11 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
       params.mCompositorASR = params.mScrollMetadataASR != mContainerScrollMetadataASR
                                 ? params.mScrollMetadataASR
                                 : mContainerCompositorASR;
-      if (itemType == TYPE_FIXED_POSITION) {
+      if (itemType == DisplayItemType::TYPE_FIXED_POSITION) {
         params.mCompositorASR = itemASR;
       }
 
-      if (itemType == TYPE_PERSPECTIVE) {
+      if (itemType == DisplayItemType::TYPE_PERSPECTIVE) {
         // Perspective items have a single child item, an nsDisplayTransform.
         // If the perspective item is scrolled, but the perspective-inducing
         // frame is outside the scroll frame (indicated by item->Frame()
@@ -4414,14 +4414,14 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
         ownLayer->SetScrolledClip(Some(scrolledLayerClip));
       }
 
-      if (item->GetType() == TYPE_MASK) {
+      if (item->GetType() == DisplayItemType::TYPE_MASK) {
         MOZ_ASSERT(itemClip.GetRoundedRectCount() == 0);
 
         nsDisplayMask* maskItem = static_cast<nsDisplayMask*>(item);
         SetupMaskLayerForCSSMask(ownLayer, maskItem);
 
         if (i->GetAbove() &&
-            i->GetAbove()->GetType() == TYPE_SCROLL_INFO_LAYER) {
+            i->GetAbove()->GetType() == DisplayItemType::TYPE_SCROLL_INFO_LAYER) {
           // Since we do build a layer for mask, there is no need for this
           // scroll info layer anymore.
           i = i->GetAbove();
@@ -4450,7 +4450,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
       newLayerEntry->mScrollMetadataASR = scrollMetadataASR;
       newLayerEntry->mClipChain = layerClipChain;
       newLayerEntry->mLayerState = layerState;
-      if (itemType == TYPE_FIXED_POSITION) {
+      if (itemType == DisplayItemType::TYPE_FIXED_POSITION) {
         newLayerEntry->mIsFixedToRootScrollFrame =
           item->Frame()->StyleDisplay()->mPosition == NS_STYLE_POSITION_FIXED &&
           nsLayoutUtils::IsReallyFixedPos(item->Frame());
@@ -4458,7 +4458,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
 
       // Don't attempt to flatten compnent alpha layers that are within
       // a forced active layer, or an active transform;
-      if (itemType == TYPE_TRANSFORM ||
+      if (itemType == DisplayItemType::TYPE_TRANSFORM ||
           layerState == LAYER_ACTIVE_FORCE) {
         newLayerEntry->mPropagateComponentAlphaFlattening = false;
       }
@@ -4472,13 +4472,13 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
       // nsDisplayTransform::BuildLayer must set layerContentsVisibleRect.
       // We rely on this to ensure 3D transforms compute a reasonable
       // layer visible region.
-      NS_ASSERTION(itemType != TYPE_TRANSFORM ||
+      NS_ASSERTION(itemType != DisplayItemType::TYPE_TRANSFORM ||
                    layerContentsVisibleRect.width >= 0,
                    "Transform items must set layerContentsVisibleRect!");
       if (mLayerBuilder->IsBuildingRetainedLayers()) {
         newLayerEntry->mLayerContentsVisibleRect = layerContentsVisibleRect;
-        if (itemType == TYPE_PERSPECTIVE ||
-            (itemType == TYPE_TRANSFORM &&
+        if (itemType == DisplayItemType::TYPE_PERSPECTIVE ||
+            (itemType == DisplayItemType::TYPE_TRANSFORM &&
              (item->Frame()->Extend3DContext() ||
               item->Frame()->Combines3DTransformWithAncestors() ||
               item->Frame()->HasPerspective()))) {
@@ -4496,7 +4496,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
           &newLayerEntry->mOpaqueForAnimatedGeometryRootParent);
       } else {
         bool useChildrenVisible =
-          itemType == TYPE_TRANSFORM &&
+          itemType == DisplayItemType::TYPE_TRANSFORM &&
           (item->Frame()->IsPreserve3DLeaf() ||
            item->Frame()->HasPerspective());
         const nsIntRegion &visible = useChildrenVisible ?
@@ -4507,14 +4507,14 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
             layerContentsVisibleRect.width >= 0 ? &layerContentsVisibleRect : nullptr,
             useChildrenVisible);
       }
-      if (itemType == TYPE_SCROLL_INFO_LAYER) {
+      if (itemType == DisplayItemType::TYPE_SCROLL_INFO_LAYER) {
         nsDisplayScrollInfoLayer* scrollItem = static_cast<nsDisplayScrollInfoLayer*>(item);
         newLayerEntry->mOpaqueForAnimatedGeometryRootParent = false;
         newLayerEntry->mBaseScrollMetadata =
             scrollItem->ComputeScrollMetadata(ownLayer, mParameters);
-      } else if ((itemType == TYPE_SUBDOCUMENT ||
-                  itemType == TYPE_ZOOM ||
-                  itemType == TYPE_RESOLUTION) &&
+      } else if ((itemType == DisplayItemType::TYPE_SUBDOCUMENT ||
+                  itemType == DisplayItemType::TYPE_ZOOM ||
+                  itemType == DisplayItemType::TYPE_RESOLUTION) &&
                  gfxPrefs::LayoutUseContainersForRootFrames())
       {
         newLayerEntry->mBaseScrollMetadata =
@@ -4538,7 +4538,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList,
                                      aTopLeft, backfaceHidden);
         });
 
-      if (itemType == TYPE_LAYER_EVENT_REGIONS) {
+      if (itemType == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
         nsDisplayLayerEventRegions* eventRegions =
             static_cast<nsDisplayLayerEventRegions*>(item);
         paintedLayerData->AccumulateEventRegions(this, eventRegions);
@@ -4824,7 +4824,11 @@ FrameLayerBuilder::AddPaintedDisplayItem(PaintedLayerData* aLayerData,
       props->MoveBy(-offset);
       // Effective transforms are needed by ComputeDifferences().
       tmpLayer->ComputeEffectiveTransforms(Matrix4x4());
-      nsIntRegion invalid = props->ComputeDifferences(tmpLayer, nullptr);
+      nsIntRegion invalid;
+      if (!props->ComputeDifferences(tmpLayer, invalid, nullptr)) {
+        nsRect visible = aItem->Frame()->GetVisualOverflowRect();
+        invalid = visible.ToOutsidePixels(paintedData->mAppUnitsPerDevPixel);
+      }
       if (aLayerState == LAYER_SVG_EFFECTS) {
         invalid = nsSVGIntegrationUtils::AdjustInvalidAreaForSVGEffects(aItem->Frame(),
                                                                         aItem->ToReferenceFrame(),
@@ -5531,7 +5535,7 @@ ChooseScaleAndSetTransform(FrameLayerBuilder* aLayerBuilder,
     // If the container's transform is animated off main thread, fix a suitable scale size
     // for animation
     if (aContainerItem &&
-        aContainerItem->GetType() == TYPE_TRANSFORM &&
+        aContainerItem->GetType() == DisplayItemType::TYPE_TRANSFORM &&
         EffectCompositor::HasAnimationsForCompositor(
           aContainerFrame, eCSSProperty_transform)) {
       nsSize displaySize = ComputeDesiredDisplaySizeForAnimation(aContainerFrame);
@@ -5548,42 +5552,28 @@ ChooseScaleAndSetTransform(FrameLayerBuilder* aLayerBuilder,
     } else {
       // Scale factors are normalized to a power of 2 to reduce the number of resolution changes
       scale = RoundToFloatPrecision(ThebesMatrix(transform2d).ScaleFactors(true));
-      // For frames with a changing transform that's not just a translation,
-      // round scale factors up to nearest power-of-2 boundary so that we don't
-      // keep having to redraw the content as it scales up and down. Rounding up to nearest
+      // For frames with a changing scale transform round scale factors up to
+      // nearest power-of-2 boundary so that we don't keep having to redraw
+      // the content as it scales up and down. Rounding up to nearest
       // power-of-2 boundary ensures we never scale up, only down --- avoiding
       // jaggies. It also ensures we never scale down by more than a factor of 2,
       // avoiding bad downscaling quality.
       Matrix frameTransform;
-      if (ActiveLayerTracker::IsStyleAnimated(aDisplayListBuilder, aContainerFrame, eCSSProperty_transform) &&
-          aTransform &&
-          (!aTransform->Is2D(&frameTransform) || frameTransform.HasNonTranslationOrFlip())) {
-        // Don't clamp the scale factor when the new desired scale factor matches the old one
-        // or it was previously unscaled.
-        bool clamp = true;
-        Matrix oldFrameTransform2d;
-        if (aLayer->GetBaseTransform().Is2D(&oldFrameTransform2d)) {
-          gfxSize oldScale = RoundToFloatPrecision(ThebesMatrix(oldFrameTransform2d).ScaleFactors(true));
-          if (oldScale == scale || oldScale == gfxSize(1.0, 1.0)) {
-            clamp = false;
-          }
-        }
-        if (clamp) {
-          scale.width = gfxUtils::ClampToScaleFactor(scale.width);
-          scale.height = gfxUtils::ClampToScaleFactor(scale.height);
+      if (ActiveLayerTracker::IsScaleSubjectToAnimation(aContainerFrame)) {
+        scale.width = gfxUtils::ClampToScaleFactor(scale.width);
+        scale.height = gfxUtils::ClampToScaleFactor(scale.height);
 
-          // Limit animated scale factors to not grow excessively beyond the display size.
-          nsSize maxScale(4, 4);
-          if (!aVisibleRect.IsEmpty()) {
-            nsSize displaySize = ComputeDesiredDisplaySizeForAnimation(aContainerFrame);
-            maxScale = Max(maxScale, displaySize / aVisibleRect.Size());
-          }
-          if (scale.width > maxScale.width) {
-            scale.width = gfxUtils::ClampToScaleFactor(maxScale.width, true);
-          }
-          if (scale.height > maxScale.height) {
-            scale.height = gfxUtils::ClampToScaleFactor(maxScale.height, true);
-          }
+        // Limit animated scale factors to not grow excessively beyond the display size.
+        nsSize maxScale(4, 4);
+        if (!aVisibleRect.IsEmpty()) {
+          nsSize displaySize = ComputeDesiredDisplaySizeForAnimation(aContainerFrame);
+          maxScale = Max(maxScale, displaySize / aVisibleRect.Size());
+        }
+        if (scale.width > maxScale.width) {
+          scale.width = gfxUtils::ClampToScaleFactor(maxScale.width, true);
+        }
+        if (scale.height > maxScale.height) {
+          scale.height = gfxUtils::ClampToScaleFactor(maxScale.height, true);
         }
       } else {
         // XXX Do we need to move nearly-integer values to integers here?
@@ -5645,7 +5635,7 @@ FrameLayerBuilder::BuildContainerLayerFor(nsDisplayListBuilder* aBuilder,
                                           uint32_t aFlags)
 {
   uint32_t containerDisplayItemKey =
-    aContainerItem ? aContainerItem->GetPerFrameKey() : TYPE_ZERO;
+    aContainerItem ? aContainerItem->GetPerFrameKey() : 0;
   NS_ASSERTION(aContainerFrame, "Container display items here should have a frame");
   NS_ASSERTION(!aContainerItem ||
                aContainerItem->Frame() == aContainerFrame,
@@ -5899,7 +5889,7 @@ FrameLayerBuilder::InvalidateAllLayersForFrame(nsIFrame *aFrame)
 
 /* static */
 Layer*
-FrameLayerBuilder::GetDedicatedLayer(nsIFrame* aFrame, uint32_t aDisplayItemKey)
+FrameLayerBuilder::GetDedicatedLayer(nsIFrame* aFrame, DisplayItemType aDisplayItemKey)
 {
   //TODO: This isn't completely correct, since a frame could exist as a layer
   // in the normal widget manager, and as a different layer (or no layer)
@@ -5912,7 +5902,7 @@ FrameLayerBuilder::GetDedicatedLayer(nsIFrame* aFrame, uint32_t aDisplayItemKey)
     if (!element->mParent->mLayerManager->IsWidgetLayerManager()) {
       continue;
     }
-    if (element->mDisplayItemKey == aDisplayItemKey) {
+    if (GetDisplayItemTypeFromKey(element->mDisplayItemKey) == aDisplayItemKey) {
       if (element->mOptLayer) {
         return element->mOptLayer;
       }
@@ -6531,7 +6521,7 @@ ContainerState::CreateMaskLayer(Layer *aLayer,
                                             mContainerFrame->PresContext()));
     newKey->mRoundedClipRects[i].ScaleAndTranslate(imageTransform);
   }
-  newKey->mForwarder = mManager->AsShadowForwarder();
+  newKey->mKnowsCompositor = mManager->AsKnowsCompositor();
 
   const MaskLayerImageCache::MaskLayerImageKey* lookupKey = newKey;
 

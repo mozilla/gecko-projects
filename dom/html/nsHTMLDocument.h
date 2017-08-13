@@ -160,7 +160,7 @@ public:
     return nsDocument::GetElementById(aElementId);
   }
 
-  virtual void DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const override;
+  virtual void DocAddSizeOfExcludingThis(nsWindowSizes& aWindowSizes) const override;
   // DocAddSizeOfIncludingThis is inherited from nsIDocument.
 
   virtual bool WillIgnoreCharsetOverride() override;
@@ -309,7 +309,7 @@ protected:
   void *GenerateParserKey(void);
 
   RefPtr<nsContentList> mImages;
-  RefPtr<nsContentList> mApplets;
+  RefPtr<nsEmptyContentList> mApplets;
   RefPtr<nsContentList> mEmbeds;
   RefPtr<nsContentList> mLinks;
   RefPtr<nsContentList> mAnchors;

@@ -130,6 +130,8 @@ private:
                                    IUnknown** aOutInterface) override;
   HRESULT CreateInterceptor(REFIID aIid, IUnknown* aOuter, IUnknown** aOutput);
 
+  static DWORD GetMarshalFlags(DWORD aDestContext, DWORD aMarshalFlags);
+
 private:
   InterceptorTargetPtr<IUnknown>  mTarget;
   RefPtr<IInterceptorSink>  mEventSink;
@@ -150,7 +152,7 @@ CreateInterceptor(STAUniquePtr<InterfaceT> aTargetInterface,
     return E_INVALIDARG;
   }
 
-  REFIID iidTarget = __uuidof(aTargetInterface);
+  REFIID iidTarget = __uuidof(InterfaceT);
 
   STAUniquePtr<IUnknown> targetUnknown(aTargetInterface.release());
   return Interceptor::Create(Move(targetUnknown), aEventSink, iidTarget,

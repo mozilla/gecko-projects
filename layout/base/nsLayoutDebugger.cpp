@@ -199,13 +199,13 @@ PrintDisplayItemTo(nsDisplayListBuilder* aBuilder, nsDisplayItem* aItem,
     }
   }
 #ifdef MOZ_DUMP_PAINTING
-  if (aItem->GetType() == TYPE_MASK) {
+  if (aItem->GetType() == DisplayItemType::TYPE_MASK) {
     nsCString str;
     (static_cast<nsDisplayMask*>(aItem))->PrintEffects(str);
     aStream << str.get();
   }
 
-  if (aItem->GetType() == TYPE_FILTER) {
+  if (aItem->GetType() == DisplayItemType::TYPE_FILTER) {
     nsCString str;
     (static_cast<nsDisplayFilter*>(aItem))->PrintEffects(str);
     aStream << str.get();

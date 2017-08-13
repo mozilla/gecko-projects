@@ -489,11 +489,10 @@ Element::GetBindingURL(nsIDocument *aDocument, css::URLValue **aResult)
   // If we have a frame the frame has already loaded the binding.  And
   // otherwise, don't do anything else here unless we're dealing with
   // XUL or an HTML element that may have a plugin-related overlay
-  // (i.e. object, embed, or applet).
+  // (i.e. object or embed).
   bool isXULorPluginElement = (IsXULElement() ||
                                IsHTMLElement(nsGkAtoms::object) ||
-                               IsHTMLElement(nsGkAtoms::embed) ||
-                               IsHTMLElement(nsGkAtoms::applet));
+                               IsHTMLElement(nsGkAtoms::embed));
   nsIPresShell* shell = aDocument->GetShell();
   if (!shell || GetPrimaryFrame() || !isXULorPluginElement) {
     *aResult = nullptr;
@@ -4124,8 +4123,11 @@ Element::UpdateIntersectionObservation(DOMIntersectionObserver* aObserver, int32
 
 void
 Element::ClearServoData() {
+  MOZ_ASSERT(IsStyledByServo());
 #ifdef MOZ_STYLO
   Servo_Element_ClearData(this);
+  UnsetFlags(ELEMENT_HAS_DIRTY_DESCENDANTS_FOR_SERVO |
+             ELEMENT_HAS_ANIMATION_ONLY_DIRTY_DESCENDANTS_FOR_SERVO);
 #else
   MOZ_CRASH("Accessing servo node data in non-stylo build");
 #endif
@@ -4139,13 +4141,98 @@ Element::SetCustomElementData(CustomElementData* aData)
   slots->mCustomElementData = aData;
 }
 
+MOZ_DEFINE_MALLOC_SIZE_OF(ServoElementMallocSizeOf)
+
 size_t
 Element::SizeOfExcludingThis(SizeOfState& aState) const
 {
   size_t n = FragmentOrElement::SizeOfExcludingThis(aState);
 
-  // XXX: measure mServoData.
-
+  // Measure mServoData. We use ServoElementMallocSizeOf rather than
+  // |aState.mMallocSizeOf| to distinguish in DMD's output the memory
+  // measured within Servo code.
+  if (mServoData.Get()) {
+    n += Servo_Element_SizeOfExcludingThis(ServoElementMallocSizeOf,
+                                           &aState.mSeenPtrs, this);
+  }
   return n;
 }
 
+struct DirtyDescendantsBit {
+  static bool HasBit(const Element* aElement)
+  {
+    return aElement->HasDirtyDescendantsForServo();
+  }
+  static void SetBit(Element* aElement)
+  {
+    aElement->SetHasDirtyDescendantsForServo();
+  }
+};
+
+struct AnimationOnlyDirtyDescendantsBit {
+  static bool HasBit(const Element* aElement)
+  {
+    return aElement->HasAnimationOnlyDirtyDescendantsForServo();
+  }
+  static void SetBit(Element* aElement)
+  {
+    aElement->SetHasAnimationOnlyDirtyDescendantsForServo();
+  }
+};
+
+#ifdef DEBUG
+template<typename Traits>
+bool
+BitIsPropagated(const Element* aElement)
+{
+  const Element* curr = aElement;
+  while (curr) {
+    if (!Traits::HasBit(curr)) {
+      return false;
+    }
+    nsINode* parentNode = curr->GetParentNode();
+    curr = curr->GetFlattenedTreeParentElementForStyle();
+    MOZ_ASSERT_IF(!curr,
+                  parentNode == aElement->OwnerDoc() ||
+                  parentNode == parentNode->OwnerDoc()->GetRootElement());
+  }
+  return true;
+}
+#endif
+
+template<typename Traits>
+void
+NoteDirtyContent(nsIContent* aContent)
+{
+  MOZ_ASSERT(aContent->IsInComposedDoc());
+  nsIDocument* doc = aContent->GetComposedDoc();
+  nsIPresShell* shell = doc->GetShell();
+  NS_ENSURE_TRUE_VOID(shell);
+  shell->EnsureStyleFlush();
+
+  Element* parent = aContent->GetFlattenedTreeParentElementForStyle();
+  if (!parent || !parent->HasServoData()) {
+    // The bits only apply to styled elements.
+    return;
+  }
+
+  Element* curr = parent;
+  while (curr && !Traits::HasBit(curr)) {
+    Traits::SetBit(curr);
+    curr = curr->GetFlattenedTreeParentElementForStyle();
+  }
+
+  MOZ_ASSERT(BitIsPropagated<Traits>(parent));
+}
+
+void
+nsIContent::NoteDirtyForServo()
+{
+  NoteDirtyContent<DirtyDescendantsBit>(this);
+}
+
+void
+nsIContent::NoteAnimationOnlyDirtyForServo()
+{
+  NoteDirtyContent<AnimationOnlyDirtyDescendantsBit>(this);
+}

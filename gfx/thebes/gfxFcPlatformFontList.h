@@ -11,6 +11,7 @@
 #include "gfxFT2FontBase.h"
 #include "gfxPlatformFontList.h"
 #include "mozilla/mozalloc.h"
+#include "nsAutoRef.h"
 #include "nsClassHashtable.h"
 
 #include <fontconfig/fontconfig.h>
@@ -20,13 +21,12 @@
 #include <cairo.h>
 #include <cairo-ft.h>
 
-#include "gfxFontconfigUtils.h" // xxx - only for nsAutoRefTraits<FcPattern>, etc.
-
 template <>
-class nsAutoRefTraits<FcObjectSet> : public nsPointerRefTraits<FcObjectSet>
+class nsAutoRefTraits<FcPattern> : public nsPointerRefTraits<FcPattern>
 {
 public:
-    static void Release(FcObjectSet *ptr) { FcObjectSetDestroy(ptr); }
+    static void Release(FcPattern *ptr) { FcPatternDestroy(ptr); }
+    static void AddRef(FcPattern *ptr) { FcPatternReference(ptr); }
 };
 
 template <>
@@ -196,7 +196,8 @@ public:
     void
     FindAllFontsForStyle(const gfxFontStyle& aFontStyle,
                          nsTArray<gfxFontEntry*>& aFontEntryList,
-                         bool& aNeedsSyntheticBold) override;
+                         bool& aNeedsSyntheticBold,
+                         bool aIgnoreSizeTolerance) override;
 
 protected:
     virtual ~gfxFontconfigFontFamily();
@@ -208,7 +209,7 @@ protected:
     bool      mForceScalable;
 };
 
-class gfxFontconfigFont : public gfxFontconfigFontBase {
+class gfxFontconfigFont : public gfxFT2FontBase {
 public:
     gfxFontconfigFont(const RefPtr<mozilla::gfx::UnscaledFontFontconfig> &aUnscaledFont,
                       cairo_scaled_font_t *aScaledFont,
@@ -218,8 +219,16 @@ public:
                       const gfxFontStyle *aFontStyle,
                       bool aNeedsBold);
 
-protected:
+    virtual FontType GetType() const override { return FONT_TYPE_FONTCONFIG; }
+    virtual FcPattern *GetPattern() const { return mPattern; }
+
+    virtual already_AddRefed<mozilla::gfx::ScaledFont>
+    GetScaledFont(DrawTarget *aTarget) override;
+
+private:
     virtual ~gfxFontconfigFont();
+
+    nsCountedRef<FcPattern> mPattern;
 };
 
 class gfxFcPlatformFontList : public gfxPlatformFontList {
@@ -251,6 +260,7 @@ public:
 
     bool FindAndAddFamilies(const nsAString& aFamily,
                             nsTArray<gfxFontFamily*>* aOutput,
+                            bool aDeferOtherFamilyNamesLoading,
                             gfxFontStyle* aStyle = nullptr,
                             gfxFloat aDevToCssSize = 1.0) override;
 

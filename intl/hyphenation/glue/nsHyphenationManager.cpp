@@ -210,7 +210,7 @@ nsHyphenationManager::LoadPatternListFromOmnijar(Omnijar::Type aType)
       continue;
     }
     nsCString locale;
-    rv = uri->GetPath(locale);
+    rv = uri->GetPathQueryRef(locale);
     if (NS_FAILED(rv)) {
       continue;
     }
@@ -305,8 +305,9 @@ nsHyphenationManager::LoadAliases()
                                              &prefCount, &prefNames);
   if (NS_SUCCEEDED(rv) && prefCount > 0) {
     for (uint32_t i = 0; i < prefCount; ++i) {
-      nsAdoptingCString value = Preferences::GetCString(prefNames[i]);
-      if (value) {
+      nsAutoCString value;
+      rv = Preferences::GetCString(prefNames[i], value);
+      if (NS_SUCCEEDED(rv)) {
         nsAutoCString alias(prefNames[i]);
         alias.Cut(0, sizeof(kIntlHyphenationAliasPrefix) - 1);
         ToLowerCase(alias);

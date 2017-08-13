@@ -14,6 +14,7 @@
 <?xml-stylesheet href="chrome://browser/skin/preferences/applications.css"?>
 <?xml-stylesheet href="chrome://browser/skin/preferences/in-content-new/search.css"?>
 <?xml-stylesheet href="chrome://browser/skin/preferences/in-content-new/containers.css"?>
+<?xml-stylesheet href="chrome://browser/skin/preferences/in-content-new/privacy.css"?>
 
 <!DOCTYPE page [
 <!ENTITY % brandDTD SYSTEM "chrome://branding/locale/brand.dtd">
@@ -95,7 +96,7 @@
 #endif
 
   <html:link rel="shortcut icon"
-              href="chrome://browser/skin/preferences/in-content-new/favicon.ico"/>
+              href="chrome://browser/skin/settings.svg"/>
 
   <script type="application/javascript"
           src="chrome://browser/content/utilityOverlay.js"/>

@@ -44,7 +44,7 @@ nsViewSourceChannel::Init(nsIURI* uri)
     mOriginalURI = uri;
 
     nsAutoCString path;
-    nsresult rv = uri->GetPath(path);
+    nsresult rv = uri->GetPathQueryRef(path);
     if (NS_FAILED(rv))
       return rv;
 
@@ -1043,4 +1043,14 @@ void
 nsViewSourceChannel::SetCorsPreflightParameters(const nsTArray<nsCString>& aUnsafeHeaders)
 {
   mHttpChannelInternal->SetCorsPreflightParameters(aUnsafeHeaders);
+}
+
+NS_IMETHODIMP
+nsViewSourceChannel::LogBlockedCORSRequest(const nsAString& aMessage)
+{
+  if (!mHttpChannel) {
+    NS_WARNING("nsViewSourceChannel::LogBlockedCORSRequest mHttpChannel is null");
+    return NS_ERROR_UNEXPECTED;
+  }
+  return mHttpChannel->LogBlockedCORSRequest(aMessage);
 }

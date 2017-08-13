@@ -42,8 +42,6 @@ def make_signing_description(config, jobs):
             dep_job.attributes.get('build_platform'),
             dep_job.attributes.get('nightly')
         )
-        label = dep_job.label.replace("build-", "signing-")
-        job['label'] = label
 
         yield job
 
@@ -88,7 +86,7 @@ def _generate_upstream_artifacts(build_platform, is_nightly=False):
             'format': 'gpg',
         }, {
             'artifacts': ['public/build/update/target.complete.mar'],
-            'format': 'mar',
+            'format': 'mar_sha384',
         }]
     else:
         raise Exception("Platform not implemented for signing")

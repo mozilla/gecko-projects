@@ -178,6 +178,11 @@ WebConsoleConnectionProxy.prototype = {
   _attachConsole: function () {
     let listeners = ["PageError", "ConsoleAPI", "NetworkActivity",
                      "FileActivity"];
+    // Enable the forwarding of console messages to the parent process
+    // when we open the Browser Console or Toolbox.
+    if (this.target.chrome && !this.target.isAddon) {
+      listeners.push("ContentProcessMessages");
+    }
     this.client.attachConsole(this._consoleActor, listeners,
                               this._onAttachConsole);
   },
@@ -267,9 +272,9 @@ WebConsoleConnectionProxy.prototype = {
       this.dispatchMessagesAdd(messages);
     } else {
       this.webConsoleFrame.displayCachedMessages(messages);
-      if (!this._hasNativeConsoleAPI) {
-        this.webConsoleFrame.logWarningAboutReplacedAPI();
-      }
+    }
+    if (!this._hasNativeConsoleAPI) {
+      this.webConsoleFrame.logWarningAboutReplacedAPI();
     }
 
     this.connected = true;

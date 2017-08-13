@@ -8,7 +8,6 @@
 
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLSharedElement.h"
-#include "mozilla/dom/HTMLSharedObjectElement.h"
 #include "mozilla/dom/TabParent.h"
 #include "nsComponentManagerUtils.h"
 #include "nsContentUtils.h"
@@ -21,12 +20,10 @@
 #include "nsIDOMComment.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMHTMLAnchorElement.h"
-#include "nsIDOMHTMLAppletElement.h"
 #include "nsIDOMHTMLAreaElement.h"
 #include "nsIDOMHTMLBaseElement.h"
 #include "nsIDOMHTMLCollection.h"
 #include "nsIDOMHTMLDocument.h"
-#include "nsIDOMHTMLEmbedElement.h"
 #include "nsIDOMHTMLFrameElement.h"
 #include "nsIDOMHTMLIFrameElement.h"
 #include "nsIDOMHTMLImageElement.h"
@@ -531,50 +528,13 @@ ResourceReader::OnWalkDOMNode(nsIDOMNode* aNode)
         return OnWalkAttribute(aNode, "href", "http://www.w3.org/1999/xlink");
     }
 
-    nsCOMPtr<nsIDOMHTMLEmbedElement> nodeAsEmbed = do_QueryInterface(aNode);
-    if (nodeAsEmbed) {
+    if (content->IsHTMLElement(nsGkAtoms::embed)) {
         return OnWalkAttribute(aNode, "src");
     }
 
     nsCOMPtr<nsIDOMHTMLObjectElement> nodeAsObject = do_QueryInterface(aNode);
     if (nodeAsObject) {
         return OnWalkAttribute(aNode, "data");
-    }
-
-    nsCOMPtr<nsIDOMHTMLAppletElement> nodeAsApplet = do_QueryInterface(aNode);
-    if (nodeAsApplet) {
-        // For an applet, relative URIs are resolved relative to the
-        // codebase (which is resolved relative to the base URI).
-        nsCOMPtr<nsIURI> oldBase = mCurrentBaseURI;
-        nsAutoString codebase;
-        rv = nodeAsApplet->GetCodeBase(codebase);
-        NS_ENSURE_SUCCESS(rv, rv);
-        if (!codebase.IsEmpty()) {
-            nsCOMPtr<nsIURI> baseURI;
-            rv = NS_NewURI(getter_AddRefs(baseURI), codebase,
-                           mParent->GetCharacterSet(), mCurrentBaseURI);
-            NS_ENSURE_SUCCESS(rv, rv);
-            if (baseURI) {
-                mCurrentBaseURI = baseURI;
-                // Must restore this before returning (or ENSURE'ing).
-            }
-        }
-
-        // We only store 'code' locally if there is no 'archive',
-        // otherwise we assume the archive file(s) contains it (bug 430283).
-        nsAutoCString archiveAttr;
-        rv = ExtractAttribute(aNode, "archive", "", archiveAttr);
-        if (NS_SUCCEEDED(rv)) {
-            if (!archiveAttr.IsEmpty()) {
-                rv = OnWalkURI(archiveAttr);
-            } else {
-                rv = OnWalkAttribute(aNode, "core");
-            }
-        }
-
-        // restore the base URI we really want to have
-        mCurrentBaseURI = oldBase;
-        return rv;
     }
 
     nsCOMPtr<nsIDOMHTMLLinkElement> nodeAsLink = do_QueryInterface(aNode);
@@ -1098,8 +1058,7 @@ PersistNodeFixup::FixupNode(nsIDOMNode *aNodeIn,
         return rv;
     }
 
-        nsCOMPtr<nsIDOMHTMLEmbedElement> nodeAsEmbed = do_QueryInterface(aNodeIn);
-    if (nodeAsEmbed) {
+    if (content->IsHTMLElement(nsGkAtoms::embed)) {
         rv = GetNodeToFixup(aNodeIn, aNodeOut);
         if (NS_SUCCEEDED(rv) && *aNodeOut) {
             FixupAttribute(*aNodeOut, "src");
@@ -1112,38 +1071,6 @@ PersistNodeFixup::FixupNode(nsIDOMNode *aNodeIn,
         rv = GetNodeToFixup(aNodeIn, aNodeOut);
         if (NS_SUCCEEDED(rv) && *aNodeOut) {
             FixupAttribute(*aNodeOut, "data");
-        }
-        return rv;
-    }
-
-    nsCOMPtr<nsIDOMHTMLAppletElement> nodeAsApplet = do_QueryInterface(aNodeIn);
-    if (nodeAsApplet) {
-        rv = GetNodeToFixup(aNodeIn, aNodeOut);
-        if (NS_SUCCEEDED(rv) && *aNodeOut) {
-            nsCOMPtr<nsIDOMHTMLAppletElement> newApplet =
-                do_QueryInterface(*aNodeOut);
-            // For an applet, relative URIs are resolved relative to the
-            // codebase (which is resolved relative to the base URI).
-            nsCOMPtr<nsIURI> oldBase = mCurrentBaseURI;
-            nsAutoString codebase;
-            nodeAsApplet->GetCodeBase(codebase);
-            if (!codebase.IsEmpty()) {
-                nsCOMPtr<nsIURI> baseURI;
-                NS_NewURI(getter_AddRefs(baseURI), codebase,
-                          mParent->GetCharacterSet(), mCurrentBaseURI);
-                if (baseURI) {
-                    mCurrentBaseURI = baseURI;
-                }
-            }
-            // Unset the codebase too, since we'll correctly relativize the
-            // code and archive paths.
-            IgnoredErrorResult ignored;
-            static_cast<dom::HTMLSharedObjectElement*>(newApplet.get())->
-              RemoveAttribute(NS_LITERAL_STRING("codebase"), ignored);
-            FixupAttribute(*aNodeOut, "code");
-            FixupAttribute(*aNodeOut, "archive");
-            // restore the base URI we really want to have
-            mCurrentBaseURI = oldBase;
         }
         return rv;
     }
@@ -1333,12 +1260,6 @@ ConvertEncoderFlags(uint32_t aEncoderFlags)
         encoderFlags |= nsIDocumentEncoder::OutputAbsoluteLinks;
     if (aEncoderFlags & nsIWebBrowserPersist::ENCODE_FLAGS_ENCODE_BASIC_ENTITIES)
         encoderFlags |= nsIDocumentEncoder::OutputEncodeBasicEntities;
-    if (aEncoderFlags & nsIWebBrowserPersist::ENCODE_FLAGS_ENCODE_LATIN1_ENTITIES)
-        encoderFlags |= nsIDocumentEncoder::OutputEncodeLatin1Entities;
-    if (aEncoderFlags & nsIWebBrowserPersist::ENCODE_FLAGS_ENCODE_HTML_ENTITIES)
-        encoderFlags |= nsIDocumentEncoder::OutputEncodeHTMLEntities;
-    if (aEncoderFlags & nsIWebBrowserPersist::ENCODE_FLAGS_ENCODE_W3C_ENTITIES)
-        encoderFlags |= nsIDocumentEncoder::OutputEncodeW3CEntities;
     if (aEncoderFlags & nsIWebBrowserPersist::ENCODE_FLAGS_CR_LINEBREAKS)
         encoderFlags |= nsIDocumentEncoder::OutputCRLineBreak;
     if (aEncoderFlags & nsIWebBrowserPersist::ENCODE_FLAGS_LF_LINEBREAKS)

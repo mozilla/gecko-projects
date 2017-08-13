@@ -194,7 +194,7 @@ PWebRenderBridgeParent*
 CrossProcessCompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipelineId,
                                                                 const LayoutDeviceIntSize& aSize,
                                                                 TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                                                                uint32_t *aIdNamespace)
+                                                                wr::IdNamespace *aIdNamespace)
 {
 #ifndef MOZ_BUILD_WEBRENDER
   // Extra guard since this in the parent process and we don't want a malicious
@@ -218,22 +218,23 @@ CrossProcessCompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::Pipeli
     // This was observed during Tab move between different windows.
     NS_WARNING("Created child without a matching parent?");
     parent = WebRenderBridgeParent::CreateDestroyed();
-    *aIdNamespace = parent->GetIdNameSpace();
+    parent->AddRef(); // IPDL reference
+    *aIdNamespace = parent->GetIdNamespace();
     *aTextureFactoryIdentifier = TextureFactoryIdentifier(LayersBackend::LAYERS_NONE);
     return parent;
   }
   WebRenderBridgeParent* root = sIndirectLayerTrees[cbp->RootLayerTreeId()].mWrBridge.get();
 
-  RefPtr<wr::WebRenderAPI> api = root->GetWebRenderAPI();
+  RefPtr<wr::WebRenderAPI> api = root->GetWebRenderAPI()->Clone();
   RefPtr<AsyncImagePipelineManager> holder = root->AsyncImageManager();
   RefPtr<CompositorAnimationStorage> animStorage = cbp->GetAnimationStorage();
   parent = new WebRenderBridgeParent(this, aPipelineId, nullptr, root->CompositorScheduler(), Move(api), Move(holder), Move(animStorage));
-
   parent->AddRef(); // IPDL reference
+
   sIndirectLayerTrees[layersId].mCrossProcessParent = this;
   sIndirectLayerTrees[layersId].mWrBridge = parent;
   *aTextureFactoryIdentifier = parent->GetTextureFactoryIdentifier();
-  *aIdNamespace = parent->GetIdNameSpace();
+  *aIdNamespace = parent->GetIdNamespace();
 
   return parent;
 }
@@ -353,7 +354,7 @@ CrossProcessCompositorBridgeParent::ShadowLayersUpdated(
     Unused << state->mParent->SendObserveLayerUpdate(id, aLayerTree->GetChildEpoch(), true);
   }
 
-  aLayerTree->SetPendingTransactionId(aInfo.id());
+  aLayerTree->SetPendingTransactionId(aInfo.id(), aInfo.transactionStart(), aInfo.fwdTime());
 }
 
 void
@@ -374,10 +375,9 @@ CrossProcessCompositorBridgeParent::DidCompositeLocked(
 {
   sIndirectLayerTreesLock->AssertCurrentThreadOwns();
   if (LayerTransactionParent *layerTree = sIndirectLayerTrees[aId].mLayerTree) {
-    uint64_t transactionId = layerTree->GetPendingTransactionId();
+    uint64_t transactionId = layerTree->FlushTransactionId(aCompositeEnd);
     if (transactionId) {
       Unused << SendDidComposite(aId, transactionId, aCompositeStart, aCompositeEnd);
-      layerTree->SetPendingTransactionId(0);
     }
   } else if (WebRenderBridgeParent* wrbridge = sIndirectLayerTrees[aId].mWrBridge) {
     uint64_t transactionId = wrbridge->FlushPendingTransactionIds();

@@ -93,7 +93,7 @@ private:
     : mRefCnt(1)
   {
     mLength = aString.Length();
-    mIsStatic = false;
+    SetKind(AtomKind::DynamicAtom);
     RefPtr<nsStringBuffer> buf = nsStringBuffer::FromString(aString);
     if (buf) {
       mString = static_cast<char16_t*>(buf->Data());
@@ -128,8 +128,16 @@ private:
   ~DynamicAtom();
 
 public:
-  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIATOM
+  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) final;
+  typedef mozilla::TrueType HasThreadSafeRefCnt;
+
+  MozExternalRefCountType DoAddRef();
+  MozExternalRefCountType DoRelease();
+
+protected:
+  ThreadSafeAutoRefCnt mRefCnt;
+  NS_DECL_OWNINGTHREAD
 };
 
 #if defined(NS_BUILD_REFCNT_LOGGING)
@@ -171,7 +179,7 @@ public:
   StaticAtom(nsStringBuffer* aStringBuffer, uint32_t aLength, uint32_t aHash)
   {
     mLength = aLength;
-    mIsStatic = true;
+    SetKind(AtomKind::StaticAtom);
     mString = static_cast<char16_t*>(aStringBuffer->Data());
 
 #if defined(NS_BUILD_REFCNT_LOGGING)
@@ -199,23 +207,11 @@ public:
   // StaticAtom* pointer (in AtomTableClearEntry()), not an nsIAtom* pointer.
   ~StaticAtom() {}
 
-  NS_DECL_ISUPPORTS
+  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) final;
   NS_DECL_NSIATOM
 };
 
-NS_IMPL_QUERY_INTERFACE(StaticAtom, nsIAtom)
-
-NS_IMETHODIMP_(MozExternalRefCountType)
-StaticAtom::AddRef()
-{
-  return 2;
-}
-
-NS_IMETHODIMP_(MozExternalRefCountType)
-StaticAtom::Release()
-{
-  return 1;
-}
+NS_IMPL_QUERY_INTERFACE(StaticAtom, nsIAtom);
 
 NS_IMETHODIMP
 DynamicAtom::ScriptableToString(nsAString& aBuf)
@@ -275,6 +271,30 @@ StaticAtom::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf)
   // Don't measure the string buffer pointed to by the StaticAtom because it's
   // in static memory.
   return n;
+}
+
+//----------------------------------------------------------------------
+
+NS_IMETHODIMP_(MozExternalRefCountType)
+nsIAtom::AddRef()
+{
+  MOZ_ASSERT(!IsHTML5Atom(), "Attempt to AddRef an nsHtml5Atom");
+  if (!IsDynamicAtom()) {
+    MOZ_ASSERT(IsStaticAtom());
+    return 2;
+  }
+  return static_cast<DynamicAtom*>(this)->DoAddRef();
+}
+
+NS_IMETHODIMP_(MozExternalRefCountType)
+nsIAtom::Release()
+{
+  MOZ_ASSERT(!IsHTML5Atom(), "Attempt to Release an nsHtml5Atom");
+  if (!IsDynamicAtom()) {
+    MOZ_ASSERT(IsStaticAtom());
+    return 1;
+  }
+  return static_cast<DynamicAtom*>(this)->DoRelease();
 }
 
 //----------------------------------------------------------------------
@@ -463,33 +483,32 @@ DynamicAtom::GCAtomTableLocked(const MutexAutoLock& aProofOfLock,
     NS_ASSERTION(nonZeroRefcountAtomsCount == 0, msg.get());
   }
 
-  // During the course of this function, the atom table is locked. This means
-  // that, barring refcounting bugs in consumers, an atom can never go from
-  // refcount == 0 to refcount != 0 during a GC. However, an atom _can_ go from
-  // refcount != 0 to refcount == 0 if a Release() occurs in parallel with GC.
-  // This means that we cannot assert that gUnusedAtomCount == removedCount, and
-  // thus that there are no unused atoms at the end of a GC. We can and do,
-  // however, assert this after the last GC at shutdown.
-  if (aKind == GCKind::RegularOperation) {
-    MOZ_ASSERT(removedCount <= gUnusedAtomCount);
-  } else {
-    // Complain if somebody adds new GCKind enums.
-    MOZ_ASSERT(aKind == GCKind::Shutdown);
-    // Our unused atom count should be accurate.
-    MOZ_ASSERT(removedCount == gUnusedAtomCount);
-  }
+  // We would like to assert that gUnusedAtomCount matches the number of atoms
+  // we found in the table which we removed. During the course of this function,
+  // the atom table is locked, but this lock is not acquired for AddRef() and
+  // Release() calls. This means we might see a gUnusedAtomCount value in
+  // between, say, AddRef() incrementing mRefCnt and it decrementing
+  // gUnusedAtomCount. So, we don't bother asserting that there are no unused
+  // atoms at the end of a regular GC. But we can (and do) assert thist just
+  // after the last GC at shutdown.
+  //
+  // Note that, barring refcounting bugs, an atom can only go from a zero
+  // refcount to a non-zero refcount while the atom table lock is held, so
+  // so we won't try to resurrect a zero refcount atom while trying to delete
+  // it.
+
+  MOZ_ASSERT_IF(aKind == GCKind::Shutdown, removedCount == gUnusedAtomCount);
 
   gUnusedAtomCount -= removedCount;
 }
 
 NS_IMPL_QUERY_INTERFACE(DynamicAtom, nsIAtom)
 
-NS_IMETHODIMP_(MozExternalRefCountType)
-DynamicAtom::AddRef(void)
+MozExternalRefCountType
+DynamicAtom::DoAddRef()
 {
   nsrefcnt count = ++mRefCnt;
   if (count == 1) {
-    MOZ_ASSERT(gUnusedAtomCount > 0);
     gUnusedAtomCount--;
   }
   return count;
@@ -503,8 +522,8 @@ static const uint32_t kAtomGCThreshold = 20;
 static const uint32_t kAtomGCThreshold = 10000;
 #endif
 
-NS_IMETHODIMP_(MozExternalRefCountType)
-DynamicAtom::Release(void)
+MozExternalRefCountType
+DynamicAtom::DoRelease()
 {
   MOZ_ASSERT(mRefCnt > 0);
   nsrefcnt count = --mRefCnt;

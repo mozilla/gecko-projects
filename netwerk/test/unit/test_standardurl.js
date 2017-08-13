@@ -17,7 +17,7 @@ function symmetricEquality(expect, a, b)
     /* We don't check port in the loop, because it can be defaulted in
        some cases. */
     ["spec", "prePath", "scheme", "userPass", "username", "password",
-     "hostPort", "host", "path", "filePath", "query",
+     "hostPort", "host", "pathQueryRef", "filePath", "query",
      "ref", "directory", "fileName", "fileBaseName", "fileExtension"]
       .map(function(prop) {
 	dump("Testing '"+ prop + "'\n");
@@ -57,8 +57,8 @@ add_test(function test_setEmptyPath()
   {
     symmetricEquality(false, target, provided);
 
-    provided.path = "";
-    target.path = "";
+    provided.pathQueryRef = "";
+    target.pathQueryRef = "";
 
     do_check_eq(provided.spec, target.spec);
     symmetricEquality(true, target, provided);
@@ -252,6 +252,17 @@ add_test(function test_escapeBrackets()
   run_next_test();
 });
 
+add_test(function test_escapeQuote()
+{
+  var url = stringToURL("http://example.com/#'");
+  do_check_eq(url.spec, "http://example.com/#'");
+  do_check_eq(url.ref, "'");
+  url.ref = "test'test";
+  do_check_eq(url.spec, "http://example.com/#test'test");
+  do_check_eq(url.ref, "test'test");
+  run_next_test();
+});
+
 add_test(function test_apostropheEncoding()
 {
   // For now, single quote is escaped everywhere _except_ the path.
@@ -293,7 +304,7 @@ add_test(function test_hugeStringThrows()
 
   let hugeString = new Array(maxLen + 1).fill("a").join("");
   let properties = ["spec", "scheme", "userPass", "username",
-                    "password", "hostPort", "host", "path", "ref",
+                    "password", "hostPort", "host", "pathQueryRef", "ref",
                     "query", "fileName", "filePath", "fileBaseName", "fileExtension"];
   for (let prop of properties) {
     Assert.throws(() => url[prop] = hugeString,
@@ -331,7 +342,7 @@ add_test(function test_backslashReplacement()
   url = stringToURL("http:\\\\test.com\\example.org/path\\to/file");
   do_check_eq(url.spec, "http://test.com/example.org/path/to/file");
   do_check_eq(url.host, "test.com");
-  do_check_eq(url.path, "/example.org/path/to/file");
+  do_check_eq(url.pathQueryRef, "/example.org/path/to/file");
 
   run_next_test();
 });
@@ -520,6 +531,15 @@ add_test(function test_idna_host() {
   equal(url.asciiHostPort, "xn--lt-uia.example.org:8080");
   equal(url.asciiSpec, "http://user:password@xn--lt-uia.example.org:8080/path?query#etc");
 
+  url.ref = ""; // SetRef calls InvalidateCache()
+  equal(url.spec, "http://user:password@ält.example.org:8080/path?query");
+  equal(url.displaySpec, "http://user:password@ält.example.org:8080/path?query");
+  equal(url.asciiSpec, "http://user:password@xn--lt-uia.example.org:8080/path?query");
+
+  url = stringToURL("http://user:password@www.ält.com:8080/path?query#etc");
+  url.ref = "";
+  equal(url.spec, "http://user:password@www.ält.com:8080/path?query");
+
   // We also check that the default behaviour changes once we filp the pref
   gPrefs.setBoolPref("network.standard-url.punycode-host", true);
 
@@ -538,6 +558,15 @@ add_test(function test_idna_host() {
   equal(url.asciiHost, "xn--lt-uia.example.org");
   equal(url.asciiHostPort, "xn--lt-uia.example.org:8080");
   equal(url.asciiSpec, "http://user:password@xn--lt-uia.example.org:8080/path?query#etc");
+
+  url.ref = ""; // SetRef calls InvalidateCache()
+  equal(url.spec, "http://user:password@xn--lt-uia.example.org:8080/path?query");
+  equal(url.displaySpec, "http://user:password@ält.example.org:8080/path?query");
+  equal(url.asciiSpec, "http://user:password@xn--lt-uia.example.org:8080/path?query");
+
+  url = stringToURL("http://user:password@www.ält.com:8080/path?query#etc");
+  url.ref = "";
+  equal(url.spec, "http://user:password@www.xn--lt-uia.com:8080/path?query");
 
   run_next_test();
 });

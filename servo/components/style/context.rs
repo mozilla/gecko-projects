@@ -5,7 +5,7 @@
 //! The context within which style is calculated.
 
 #[cfg(feature = "servo")] use animation::Animation;
-use animation::PropertyAnimation;
+#[cfg(feature = "servo")] use animation::PropertyAnimation;
 use app_units::Au;
 use bloom::StyleBloom;
 use cache::LRUCache;
@@ -18,10 +18,12 @@ use font_metrics::FontMetricsProvider;
 #[cfg(feature = "gecko")] use gecko_bindings::structs;
 #[cfg(feature = "servo")] use parking_lot::RwLock;
 use properties::ComputedValues;
+#[cfg(feature = "servo")] use properties::PropertyId;
 use rule_tree::StrongRuleNode;
 use selector_parser::{EAGER_PSEUDO_COUNT, SnapshotMap};
 use selectors::matching::ElementSelectorFlags;
 use servo_arc::Arc;
+#[cfg(feature = "servo")] use servo_atoms::Atom;
 use shared_lock::StylesheetGuards;
 use sharing::StyleSharingCandidateCache;
 use std::fmt;
@@ -30,6 +32,7 @@ use std::ops;
 #[cfg(feature = "servo")] use std::sync::mpsc::Sender;
 use style_traits::CSSPixel;
 use style_traits::DevicePixel;
+#[cfg(feature = "servo")] use style_traits::SpeculativePainter;
 use stylist::Stylist;
 use thread_state;
 use time;
@@ -150,6 +153,10 @@ pub struct SharedStyleContext<'a> {
     /// The list of animations that have expired since the last style recalculation.
     #[cfg(feature = "servo")]
     pub expired_animations: Arc<RwLock<FnvHashMap<OpaqueNode, Vec<Animation>>>>,
+
+    /// Paint worklets
+    #[cfg(feature = "servo")]
+    pub registered_speculative_painters: &'a RegisteredSpeculativePainters,
 
     /// Data needed to create the thread-local style context from the shared one.
     #[cfg(feature = "servo")]
@@ -286,6 +293,7 @@ pub struct CurrentElementInfo {
     is_initial_style: bool,
     /// A Vec of possibly expired animations. Used only by Servo.
     #[allow(dead_code)]
+    #[cfg(feature = "servo")]
     pub possibly_expired_animations: Vec<PropertyAnimation>,
 }
 
@@ -380,16 +388,16 @@ impl TraversalStatistics {
               D: DomTraversal<E>,
     {
         let threshold = traversal.shared_context().options.style_statistics_threshold;
+        let stylist = traversal.shared_context().stylist;
 
         self.is_parallel = Some(traversal.is_parallel());
         self.is_large = Some(self.elements_traversed as usize >= threshold);
         self.traversal_time_ms = (time::precise_time_s() - start) * 1000.0;
-        self.selectors = traversal.shared_context().stylist.num_selectors() as u32;
-        self.revalidation_selectors = traversal.shared_context().stylist.num_revalidation_selectors() as u32;
-        self.dependency_selectors =
-            traversal.shared_context().stylist.invalidation_map().len() as u32;
-        self.declarations = traversal.shared_context().stylist.num_declarations() as u32;
-        self.stylist_rebuilds = traversal.shared_context().stylist.num_rebuilds() as u32;
+        self.selectors = stylist.num_selectors() as u32;
+        self.revalidation_selectors = stylist.num_revalidation_selectors() as u32;
+        self.dependency_selectors = stylist.num_invalidations() as u32;
+        self.declarations = stylist.num_declarations() as u32;
+        self.stylist_rebuilds = stylist.num_rebuilds() as u32;
     }
 
     /// Returns whether this traversal is 'large' in order to avoid console spam
@@ -402,7 +410,7 @@ impl TraversalStatistics {
 #[cfg(feature = "gecko")]
 bitflags! {
     /// Represents which tasks are performed in a SequentialTask of
-    /// UpdateAnimations.
+    /// UpdateAnimations which is a result of normal restyle.
     pub flags UpdateAnimationsTasks: u8 {
         /// Update CSS Animations.
         const CSS_ANIMATIONS = structs::UpdateAnimationsTasks_CSSAnimations,
@@ -412,6 +420,18 @@ bitflags! {
         const EFFECT_PROPERTIES = structs::UpdateAnimationsTasks_EffectProperties,
         /// Update animation cacade results for animations running on the compositor.
         const CASCADE_RESULTS = structs::UpdateAnimationsTasks_CascadeResults,
+    }
+}
+
+#[cfg(feature = "gecko")]
+bitflags! {
+    /// Represents which tasks are performed in a SequentialTask as a result of
+    /// animation-only restyle.
+    pub flags PostAnimationTasks: u8 {
+        /// Display property was changed from none in animation-only restyle so
+        /// that we need to resolve styles for descendants in a subsequent
+        /// normal restyle.
+        const DISPLAY_CHANGED_FROM_NONE_FOR_SMIL = 0x01,
     }
 }
 
@@ -436,6 +456,17 @@ pub enum SequentialTask<E: TElement> {
         /// The tasks which are performed in this SequentialTask.
         tasks: UpdateAnimationsTasks
     },
+
+    /// Performs one of a number of possible tasks as a result of animation-only restyle.
+    /// Currently we do only process for resolving descendant elements that were display:none
+    /// subtree for SMIL animation.
+    #[cfg(feature = "gecko")]
+    PostAnimation {
+        /// The target element.
+        el: SendElement<E>,
+        /// The tasks which are performed in this SequentialTask.
+        tasks: PostAnimationTasks
+    },
 }
 
 impl<E: TElement> SequentialTask<E> {
@@ -448,6 +479,10 @@ impl<E: TElement> SequentialTask<E> {
             #[cfg(feature = "gecko")]
             UpdateAnimations { el, before_change_style, tasks } => {
                 unsafe { el.update_animations(before_change_style, tasks) };
+            }
+            #[cfg(feature = "gecko")]
+            PostAnimation { el, tasks } => {
+                unsafe { el.process_post_animation(tasks) };
             }
         }
     }
@@ -462,6 +497,17 @@ impl<E: TElement> SequentialTask<E> {
         UpdateAnimations {
             el: unsafe { SendElement::new(el) },
             before_change_style: before_change_style,
+            tasks: tasks,
+        }
+    }
+
+    /// Creates a task to do post-process for a given element as a result of
+    /// animation-only restyle.
+    #[cfg(feature = "gecko")]
+    pub fn process_post_animation(el: E, tasks: PostAnimationTasks) -> Self {
+        use self::SequentialTask::*;
+        PostAnimation {
+            el: unsafe { SendElement::new(el) },
             tasks: tasks,
         }
     }
@@ -623,6 +669,17 @@ impl<E: TElement> ThreadLocalStyleContext<E> {
         }
     }
 
+    #[cfg(feature = "gecko")]
+    /// Notes when the style system starts traversing an element.
+    pub fn begin_element(&mut self, element: E, data: &ElementData) {
+        debug_assert!(self.current_element_info.is_none());
+        self.current_element_info = Some(CurrentElementInfo {
+            element: element.as_node().opaque(),
+            is_initial_style: !data.has_styles(),
+        });
+    }
+
+    #[cfg(feature = "servo")]
     /// Notes when the style system starts traversing an element.
     pub fn begin_element(&mut self, element: E, data: &ElementData) {
         debug_assert!(self.current_element_info.is_none());
@@ -676,4 +733,20 @@ pub enum ReflowGoal {
     ForDisplay,
     /// We're reflowing in order to satisfy a script query. No display list will be created.
     ForScriptQuery,
+}
+
+/// A registered painter
+#[cfg(feature = "servo")]
+pub trait RegisteredSpeculativePainter: SpeculativePainter {
+    /// The name it was registered with
+    fn name(&self) -> Atom;
+    /// The properties it was registered with
+    fn properties(&self) -> &FnvHashMap<Atom, PropertyId>;
+}
+
+/// A set of registered painters
+#[cfg(feature = "servo")]
+pub trait RegisteredSpeculativePainters: Sync {
+    /// Look up a speculative painter
+    fn get(&self, name: &Atom) -> Option<&RegisteredSpeculativePainter>;
 }

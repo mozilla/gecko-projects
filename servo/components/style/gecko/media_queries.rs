@@ -18,6 +18,7 @@ use gecko_bindings::structs::{nsCSSKeyword, nsCSSProps_KTableEntry, nsCSSValue, 
 use gecko_bindings::structs::{nsMediaExpression_Range, nsMediaFeature};
 use gecko_bindings::structs::{nsMediaFeature_ValueType, nsMediaFeature_RangeType, nsMediaFeature_RequirementFlags};
 use gecko_bindings::structs::{nsPresContext, RawGeckoPresContextOwned};
+use gecko_bindings::structs::nsIAtom;
 use media_queries::MediaType;
 use parser::ParserContext;
 use properties::{ComputedValues, StyleBuilder};
@@ -31,7 +32,7 @@ use string_cache::Atom;
 use style_traits::{CSSPixel, DevicePixel};
 use style_traits::{ToCss, ParseError, StyleParseError};
 use style_traits::viewport::ViewportConstraints;
-use values::{CSSFloat, specified};
+use values::{CSSFloat, specified, CustomIdent};
 use values::computed::{self, ToComputedValue};
 
 /// The `Device` in Gecko wraps a pres context, has a default values computed,
@@ -42,7 +43,6 @@ pub struct Device {
     /// here is fine.
     pres_context: RawGeckoPresContextOwned,
     default_values: Arc<ComputedValues>,
-    viewport_override: Option<ViewportConstraints>,
     /// The font size of the root element
     /// This is set when computing the style of the root
     /// element, and used for rem units in other elements.
@@ -70,8 +70,8 @@ impl Device {
         Device {
             pres_context: pres_context,
             default_values: ComputedValues::default_values(unsafe { &*pres_context }),
-            viewport_override: None,
-            root_font_size: AtomicIsize::new(font_size::get_initial_value().0 as isize), // FIXME(bz): Seems dubious?
+            // FIXME(bz): Seems dubious?
+            root_font_size: AtomicIsize::new(font_size::get_initial_value().value() as isize),
             used_root_font_size: AtomicBool::new(false),
             used_viewport_size: AtomicBool::new(false),
         }
@@ -79,9 +79,11 @@ impl Device {
 
     /// Tells the device that a new viewport rule has been found, and stores the
     /// relevant viewport constraints.
-    pub fn account_for_viewport_rule(&mut self,
-                                     constraints: &ViewportConstraints) {
-        self.viewport_override = Some(constraints.clone());
+    pub fn account_for_viewport_rule(
+        &mut self,
+        _constraints: &ViewportConstraints
+    ) {
+        unreachable!("Gecko doesn't support @viewport");
     }
 
     /// Returns the default computed values as a reference, in order to match
@@ -113,9 +115,12 @@ impl Device {
 
     /// Recreates the default computed values.
     pub fn reset_computed_values(&mut self) {
-        // NB: A following stylesheet flush will populate this if appropriate.
-        self.viewport_override = None;
         self.default_values = ComputedValues::default_values(self.pres_context());
+    }
+
+    /// Rebuild all the cached data.
+    pub fn rebuild_cached_data(&mut self) {
+        self.reset_computed_values();
         self.used_root_font_size.store(false, Ordering::Relaxed);
         self.used_viewport_size.store(false, Ordering::Relaxed);
     }
@@ -130,37 +135,33 @@ impl Device {
     /// This includes the viewport override from `@viewport` rules, and also the
     /// default computed values.
     pub fn reset(&mut self) {
-        // NB: A following stylesheet flush will populate this if appropriate.
-        self.viewport_override = None;
         self.reset_computed_values();
     }
 
     /// Returns the current media type of the device.
     pub fn media_type(&self) -> MediaType {
         unsafe {
-            // FIXME(emilio): Gecko allows emulating random media with
-            // mIsEmulatingMedia / mMediaEmulated . Refactor both sides so that
-            // is supported (probably just making MediaType an Atom).
-            if self.pres_context().mMedium == atom!("screen").as_ptr() {
-                MediaType::Screen
+            // Gecko allows emulating random media with mIsEmulatingMedia and
+            // mMediaEmulated.
+            let context = self.pres_context();
+            let medium_to_use = if context.mIsEmulatingMedia() != 0 {
+                context.mMediaEmulated.raw::<nsIAtom>()
             } else {
-                debug_assert!(self.pres_context().mMedium == atom!("print").as_ptr());
-                MediaType::Print
-            }
+                context.mMedium
+            };
+
+            MediaType(CustomIdent(Atom::from(medium_to_use)))
         }
     }
 
     /// Returns the current viewport size in app units.
     pub fn au_viewport_size(&self) -> Size2D<Au> {
         self.used_viewport_size.store(true, Ordering::Relaxed);
-        self.viewport_override.as_ref().map(|v| {
-            Size2D::new(Au::from_f32_px(v.size.width),
-                        Au::from_f32_px(v.size.height))
-        }).unwrap_or_else(|| unsafe {
+        unsafe {
             // TODO(emilio): Need to take into account scrollbars.
             let area = &self.pres_context().mVisibleArea;
             Size2D::new(Au(area.width), Au(area.height))
-        })
+        }
     }
 
     /// Returns whether we ever looked up the viewport size of the Device.
@@ -185,6 +186,15 @@ impl Device {
     /// Returns the default background color.
     pub fn default_background_color(&self) -> RGBA {
         convert_nscolor_to_rgba(self.pres_context().mBackgroundColor)
+    }
+
+    /// Applies text zoom to a font-size or line-height value (see nsStyleFont::ZoomText).
+    pub fn zoom_text(&self, size: Au) -> Au {
+        size.scale_by(self.pres_context().mEffectiveTextZoom)
+    }
+    /// Un-apply text zoom (see nsStyleFont::UnzoomText).
+    pub fn unzoom_text(&self, size: Au) -> Au {
+        size.scale_by(1. / self.pres_context().mEffectiveTextZoom)
     }
 }
 
@@ -490,10 +500,13 @@ impl Expression {
                 let result = {
                     let mut feature_name = &**ident;
 
-                    // TODO(emilio): this is under a pref in Gecko.
-                    if starts_with_ignore_ascii_case(feature_name, "-webkit-") {
+                    if unsafe { structs::StylePrefs_sWebkitPrefixedAliasesEnabled } &&
+                       starts_with_ignore_ascii_case(feature_name, "-webkit-") {
                         feature_name = &feature_name[8..];
                         flags |= nsMediaFeature_RequirementFlags::eHasWebkitPrefix as u8;
+                        if unsafe { structs::StylePrefs_sWebkitDevicePixelRatioEnabled } {
+                            flags |= nsMediaFeature_RequirementFlags::eWebkitDevicePixelRatioPrefEnabled as u8;
+                        }
                     }
 
                     let range = if starts_with_ignore_ascii_case(feature_name, "min-") {

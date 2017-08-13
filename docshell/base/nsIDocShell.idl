@@ -16,6 +16,7 @@ class nsPresContext;
 class nsIPresShell;
 namespace mozilla {
 class Encoding;
+class HTMLEditor;
 }
 %}
 
@@ -549,9 +550,10 @@ interface nsIDocShell : nsIDocShellTreeItem
   readonly attribute nsIChannel currentDocumentChannel;
 
   /**
-   * Set the offset of this child in its container.
+   * The original offset of this child in its container. This property is -1 for
+   * dynamically added docShells.
    */
-  [noscript] void setChildOffset(in unsigned long offset);
+  [noscript] attribute long childOffset;
 
   /**
    * Find out whether the docshell is currently in the middle of a page
@@ -1153,4 +1155,13 @@ interface nsIDocShell : nsIDocShellTreeItem
   * Fire a dummy location change event asynchronously.
   */
   [noscript] void dispatchLocationChangeEvent();
+
+%{C++
+  /**
+   * These methods call nsDocShell::GetHTMLEditorInternal() and
+   * nsDocShell::SetHTMLEditorInternal() with static_cast.
+   */
+  mozilla::HTMLEditor* GetHTMLEditor();
+  nsresult SetHTMLEditor(mozilla::HTMLEditor* aHTMLEditor);
+%}
 };

@@ -38,7 +38,7 @@ pub type ImageLayer = Either<None_, Image>;
 
 /// Specified values for an image according to CSS-IMAGES.
 /// https://drafts.csswg.org/css-images/#image-values
-pub type Image = GenericImage<Gradient, MozImageRect>;
+pub type Image = GenericImage<Gradient, MozImageRect, SpecifiedUrl>;
 
 /// Specified values for a CSS gradient.
 /// https://drafts.csswg.org/css-images/#gradients
@@ -125,7 +125,7 @@ pub type ColorStop = GenericColorStop<RGBAColor, LengthOrPercentage>;
 
 /// Specified values for `moz-image-rect`
 /// -moz-image-rect(<uri>, top, right, bottom, left);
-pub type MozImageRect = GenericMozImageRect<NumberOrPercentage>;
+pub type MozImageRect = GenericMozImageRect<NumberOrPercentage, SpecifiedUrl>;
 
 impl Parse for Image {
     #[cfg_attr(not(feature = "gecko"), allow(unused_mut))]
@@ -686,14 +686,14 @@ impl LineDirection {
         input.try(|i| {
             let to_ident = i.try(|i| i.expect_ident_matching("to"));
             match *compat_mode {
-                /// `to` keyword is mandatory in modern syntax.
+                // `to` keyword is mandatory in modern syntax.
                 CompatMode::Modern => to_ident?,
                 // Fall back to Modern compatibility mode in case there is a `to` keyword.
                 // According to Gecko, `-moz-linear-gradient(to ...)` should serialize like
                 // `linear-gradient(to ...)`.
                 CompatMode::Moz if to_ident.is_ok() => *compat_mode = CompatMode::Modern,
-                /// There is no `to` keyword in webkit prefixed syntax. If it's consumed,
-                /// parsing should throw an error.
+                // There is no `to` keyword in webkit prefixed syntax. If it's consumed,
+                // parsing should throw an error.
                 CompatMode::WebKit if to_ident.is_ok() => {
                     return Err(SelectorParseError::UnexpectedIdent("to".into()).into())
                 },

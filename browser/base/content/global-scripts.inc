@@ -13,6 +13,7 @@
 <script type="application/javascript" src="chrome://browser/content/browser-compacttheme.js"/>
 <script type="application/javascript" src="chrome://browser/content/browser-feeds.js"/>
 <script type="application/javascript" src="chrome://browser/content/browser-media.js"/>
+<script type="application/javascript" src="chrome://browser/content/browser-pageActions.js"/>
 <script type="application/javascript" src="chrome://browser/content/browser-places.js"/>
 <script type="application/javascript" src="chrome://browser/content/browser-plugins.js"/>
 <script type="application/javascript" src="chrome://browser/content/browser-sidebar.js"/>
@@ -21,4 +22,8 @@
 
 #ifdef MOZ_DATA_REPORTING
 <script type="application/javascript" src="chrome://browser/content/browser-data-submission-info-bar.js"/>
+#endif
+
+#ifndef MOZILLA_OFFICIAL
+<script type="application/javascript" src="chrome://browser/content/browser-development-helpers.js"/>
 #endif

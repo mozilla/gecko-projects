@@ -45,6 +45,7 @@ GripMessageBody.propTypes = {
   useQuotes: PropTypes.bool,
   escapeWhitespace: PropTypes.bool,
   loadedObjectProperties: PropTypes.object,
+  loadedObjectEntries: PropTypes.object,
   type: PropTypes.string,
   helperType: PropTypes.string,
 };
@@ -64,6 +65,7 @@ function GripMessageBody(props) {
     escapeWhitespace,
     mode = MODE.LONG,
     loadedObjectProperties,
+    loadedObjectEntries,
   } = props;
 
   let styleObject;
@@ -96,7 +98,7 @@ function GripMessageBody(props) {
     // Let's remove the property below when problem are fixed in OI.
     disabledFocus: true,
     roots: [{
-      path: grip.actor || JSON.stringify(grip),
+      path: (grip && grip.actor) || JSON.stringify(grip),
       contents: {
         value: grip
       }
@@ -106,9 +108,15 @@ function GripMessageBody(props) {
       const client = new ObjectClient(serviceContainer.hudProxyClient, object);
       dispatch(actions.messageObjectPropertiesLoad(messageId, client, object));
     },
+    getObjectEntries: actor => loadedObjectEntries && loadedObjectEntries[actor],
+    loadObjectEntries: object => {
+      const client = new ObjectClient(serviceContainer.hudProxyClient, object);
+      dispatch(actions.messageObjectEntriesLoad(messageId, client, object));
+    },
+    openLink: serviceContainer.openLink,
   };
 
-  if (typeof grip === "string" || grip.type === "longString") {
+  if (typeof grip === "string" || (grip && grip.type === "longString")) {
     Object.assign(objectInspectorProps, {
       useQuotes,
       escapeWhitespace,

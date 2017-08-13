@@ -316,8 +316,8 @@ this.DownloadIntegration = {
       case 3: // Cloud Storage
         try {
           directoryPath = await CloudStorage.getDownloadFolder();
-        } catch(ex) {
-          // Either the preference isn't set or the directory cannot be created.
+        } catch(ex) {}
+        if (!directoryPath) {
           directoryPath = await this.getSystemDownloadsDirectory();
         }
         break;
@@ -665,7 +665,7 @@ this.DownloadIntegration = {
 
     // If our previous attempts failed, try sending it through
     // the system's external "file:" URL handler.
-    gExternalProtocolService.loadUrl(NetUtil.newURI(file));
+    gExternalProtocolService.loadURI(NetUtil.newURI(file));
   },
 
   /**
@@ -730,7 +730,7 @@ this.DownloadIntegration = {
 
     // If launch also fails (probably because it's not implemented), let
     // the OS handler try to open the parent.
-    gExternalProtocolService.loadUrl(NetUtil.newURI(parent));
+    gExternalProtocolService.loadURI(NetUtil.newURI(parent));
   },
 
   /**

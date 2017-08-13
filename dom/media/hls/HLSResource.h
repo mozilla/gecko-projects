@@ -10,6 +10,7 @@
 #include "GeneratedJNINatives.h"
 #include "GeneratedJNIWrappers.h"
 #include "HLSUtils.h"
+#include "MediaResource.h"
 #include "nsContentUtils.h"
 
 #define UNIMPLEMENTED() HLS_DEBUG("HLSResource", "UNIMPLEMENTED FUNCTION")
@@ -18,6 +19,7 @@ using namespace mozilla::java;
 
 namespace mozilla {
 
+class HLSDecoder;
 class HLSResource;
 
 class HLSResourceCallbacksSupport
@@ -42,21 +44,15 @@ private:
 class HLSResource final : public MediaResource
 {
 public:
-  HLSResource(MediaResourceCallback* aCallback,
-              nsIChannel* aChannel,
-              nsIURI* aURI);
+  HLSResource(HLSDecoder* aDecoder, nsIChannel* aChannel, nsIURI* aURI);
   ~HLSResource();
-  nsresult Close() override { return NS_OK; }
-  void Suspend(bool aCloseImmediately) override;
-  void Resume() override;
-  void SetReadMode(MediaCacheStream::ReadMode aMode) override { UNIMPLEMENTED(); }
-  void SetPlaybackRate(uint32_t aBytesPerSecond) override  { UNIMPLEMENTED(); }
+  void Suspend();
+  void Resume();
   nsresult ReadAt(int64_t aOffset, char* aBuffer, uint32_t aCount, uint32_t* aBytes) override { UNIMPLEMENTED(); return NS_ERROR_FAILURE; }
   bool ShouldCacheReads() override { UNIMPLEMENTED(); return false; }
   int64_t Tell() override { UNIMPLEMENTED(); return -1; }
   void Pin() override { UNIMPLEMENTED(); }
   void Unpin() override { UNIMPLEMENTED(); }
-  double GetDownloadRate(bool* aIsReliable) override { UNIMPLEMENTED(); *aIsReliable = false; return 0; }
   int64_t GetLength() override { UNIMPLEMENTED(); return -1; }
   int64_t GetNextCachedData(int64_t aOffset) override { UNIMPLEMENTED(); return -1; }
   int64_t GetCachedDataEnd(int64_t aOffset) override { UNIMPLEMENTED(); return -1; }
@@ -64,7 +60,6 @@ public:
   bool IsSuspendedByCache() override { UNIMPLEMENTED(); return false; }
   bool IsSuspended() override { UNIMPLEMENTED(); return false; }
   nsresult ReadFromCache(char* aBuffer, int64_t aOffset, uint32_t aCount) override { UNIMPLEMENTED(); return NS_ERROR_FAILURE; }
-  nsresult Open(nsIStreamListener** aStreamListener) override { UNIMPLEMENTED(); return NS_OK; }
 
   already_AddRefed<nsIPrincipal> GetCurrentPrincipal() override
   {
@@ -100,6 +95,8 @@ public:
     return mHLSResourceWrapper;
   }
 
+  void Detach() { mDecoder = nullptr; }
+
 private:
   friend class HLSResourceCallbacksSupport;
 
@@ -117,7 +114,7 @@ private:
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
-  RefPtr<MediaResourceCallback> mCallback;
+  HLSDecoder* mDecoder;
   nsCOMPtr<nsIChannel> mChannel;
   nsCOMPtr<nsIURI> mURI;
   java::GeckoHLSResourceWrapper::GlobalRef mHLSResourceWrapper;

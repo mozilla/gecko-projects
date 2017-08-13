@@ -395,7 +395,6 @@ WEBIDL_FILES = [
     'Attr.webidl',
     'AudioBuffer.webidl',
     'AudioBufferSourceNode.webidl',
-    'AudioChannel.webidl',
     'AudioContext.webidl',
     'AudioDestinationNode.webidl',
     'AudioListener.webidl',
@@ -554,7 +553,6 @@ WEBIDL_FILES = [
     'History.webidl',
     'HTMLAllCollection.webidl',
     'HTMLAnchorElement.webidl',
-    'HTMLAppletElement.webidl',
     'HTMLAreaElement.webidl',
     'HTMLAudioElement.webidl',
     'HTMLBaseElement.webidl',
@@ -699,7 +697,6 @@ WEBIDL_FILES = [
     'MimeTypeArray.webidl',
     'MouseEvent.webidl',
     'MouseScrollEvent.webidl',
-    'MozPowerManager.webidl',
     'MozSelfSupport.webidl',
     'MozTimeManager.webidl',
     'MozWakeLock.webidl',
@@ -1131,14 +1128,6 @@ if CONFIG['MOZ_BUILD_APP'] in ['browser', 'xulrunner'] or CONFIG['MOZ_SUITE']:
 if CONFIG['MOZ_BUILD_APP'] in ['browser', 'mobile/android', 'xulrunner']:
     WEBIDL_FILES += [
         'External.webidl',
-    ]
-
-if CONFIG['MOZ_B2G']:
-    WEBIDL_FILES += [
-        'MozApplicationEvent.webidl'
-    ]
-    GENERATED_EVENTS_WEBIDL_FILES += [
-        'MozApplicationEvent.webidl'
     ]
 
 if CONFIG['ACCESSIBILITY']:

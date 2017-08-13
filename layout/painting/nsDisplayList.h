@@ -39,6 +39,7 @@
 #include "nsCSSRenderingBorders.h"
 #include "nsAutoLayoutPhase.h"
 #include "nsPresArena.h"
+#include "nsDisplayItemTypes.h"
 
 #include <stdint.h>
 #include "nsTHashtable.h"
@@ -68,6 +69,8 @@ class StackingContextHelper;
 class WebRenderCommand;
 class WebRenderParentCommand;
 class WebRenderDisplayItemLayer;
+class WebRenderScrollData;
+class WebRenderLayerScrollData;
 } // namespace layers
 namespace wr {
 class DisplayListBuilder;
@@ -129,9 +132,6 @@ typedef mozilla::EnumSet<mozilla::gfx::CompositionOp> BlendModeSet;
     return aBuilder->Allocate(aSize, DisplayItemType::e); \
   }
 
-
-// Contains all the type integers for each display list item type
-#include "nsDisplayItemTypes.h"
 
 /**
  * Represents a frame that is considered to have (or will have) "animated geometry"
@@ -2266,28 +2266,47 @@ public:
   }
 
   /**
-    * Function to create the WebRenderCommands without
-    * Layer. For layers mode, aManager->IsLayersFreeTransaction()
-    * should be false to prevent doing GetLayerState again. For
-    * layers-free mode, we should check if the layer state is
-    * active first and have an early return if the layer state is
-    * not active.
-    *
-    * @return true if successfully creating webrender commands.
-    */
-   virtual bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
-                                        const StackingContextHelper& aSc,
-                                        nsTArray<WebRenderParentCommand>& aParentCommands,
-                                        mozilla::layers::WebRenderLayerManager* aManager,
-                                        nsDisplayListBuilder* aDisplayListBuilder) { return false; }
+   * Function to create the WebRenderCommands without
+   * Layer. For layers mode, aManager->IsLayersFreeTransaction()
+   * should be false to prevent doing GetLayerState again. For
+   * layers-free mode, we should check if the layer state is
+   * active first and have an early return if the layer state is
+   * not active.
+   *
+   * @return true if successfully creating webrender commands.
+   */
+  virtual bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                       const StackingContextHelper& aSc,
+                                       nsTArray<WebRenderParentCommand>& aParentCommands,
+                                       mozilla::layers::WebRenderLayerManager* aManager,
+                                       nsDisplayListBuilder* aDisplayListBuilder) { return false; }
+
+  /**
+   * Updates the provided aLayerData with any APZ-relevant scroll data
+   * that is specific to this display item. This is stuff that would normally
+   * be put on the layer during BuildLayer, but this is only called in
+   * layers-free webrender mode, where we don't have layers.
+   *
+   * This function returns true if and only if it has APZ-relevant scroll data
+   * to provide. Note that the arguments passed in may be nullptr, in which case
+   * the function should still return true if and only if it has APZ-relevant
+   * scroll data, but obviously in this case it can't actually put the
+   * data onto aLayerData, because there isn't one.
+   *
+   * This function assumes that aData and aLayerData will either both be null,
+   * or will both be non-null. The caller is responsible for enforcing this.
+   */
+  virtual bool UpdateScrollData(mozilla::layers::WebRenderScrollData* aData,
+                                mozilla::layers::WebRenderLayerScrollData* aLayerData)
+  { return false; }
 
   /**
    * Builds a DisplayItemLayer and sets the display item to this.
    */
-   already_AddRefed<Layer>
-   BuildDisplayItemLayer(nsDisplayListBuilder* aBuilder,
-                         LayerManager* aManager,
-                         const ContainerLayerParameters& aContainerParameters);
+  already_AddRefed<Layer>
+  BuildDisplayItemLayer(nsDisplayListBuilder* aBuilder,
+                        LayerManager* aManager,
+                        const ContainerLayerParameters& aContainerParameters);
 
   /**
    * On entry, aVisibleRegion contains the region (relative to ReferenceFrame())
@@ -2770,7 +2789,10 @@ public:
    */
   template<typename Item, typename Comparator>
   void Sort(const Comparator& aComparator) {
-    nsTArray<Item> items;
+    // Some casual local browsing testing suggests that a local preallocated
+    // array of 20 items should be able to avoid a lot of dynamic allocations
+    // here.
+    AutoTArray<Item, 20> items;
 
     while (nsDisplayItem* item = RemoveBottom()) {
       items.AppendElement(Item(item));
@@ -2883,9 +2905,14 @@ public:
    * If there is an item in this list which is not bounded with respect to
    * aASR (i.e. which does not have "finite bounds" with respect to aASR),
    * then this method trigger an assertion failure.
+   * The optional aVisibleRect out argument can be set to non-null if the
+   * caller is also interested to know the visible rect.  This can be used
+   * to get the visible rect efficiently without traversing the display list
+   * twice.
    */
   nsRect GetClippedBoundsWithRespectToASR(nsDisplayListBuilder* aBuilder,
-                                          const ActiveScrolledRoot* aASR) const;
+                                          const ActiveScrolledRoot* aASR,
+                                          nsRect* aVisibleRect = nullptr) const;
 
   /**
    * Find the topmost display item that returns a non-null frame, and return
@@ -3177,7 +3204,7 @@ public:
   virtual void Destroy(nsDisplayListBuilder* aBuilder) override
   {
     this->~nsDisplayGeneric();
-    aBuilder->Destroy(TYPE_GENERIC, this);
+    aBuilder->Destroy(DisplayItemType::TYPE_GENERIC, this);
   }
 
 protected:
@@ -4456,8 +4483,9 @@ public:
    */
   virtual void UpdateBounds(nsDisplayListBuilder* aBuilder) override
   {
+    nsRect visibleRect;
     mBounds =
-      mListPtr->GetClippedBoundsWithRespectToASR(aBuilder, mActiveScrolledRoot);
+      mListPtr->GetClippedBoundsWithRespectToASR(aBuilder, mActiveScrolledRoot, &visibleRect);
     // The display list may contain content that's visible outside the visible
     // rect (i.e. the current dirty rect) passed in when the item was created.
     // This happens when the dirty rect has been restricted to the visual
@@ -4465,7 +4493,7 @@ public:
     // rects in nsDisplayListBuilder::MarkOutOfFlowFrameForDisplay), but that
     // frame contains placeholders for out-of-flows that aren't descendants of
     // the frame.
-    mVisibleRect.UnionRect(mBaseVisibleRect, mListPtr->GetVisibleRect());
+    mVisibleRect.UnionRect(mBaseVisibleRect, visibleRect);
     mState.mVisibleRect = mVisibleRect;
   }
   virtual void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
@@ -4724,13 +4752,17 @@ public:
   {
     // We don't need to compute an invalidation region since we have LayerTreeInvalidation
   }
-  virtual uint32_t GetPerFrameKey() const override
-  {
+  virtual uint32_t GetPerFrameKey() const override {
     return (mIndex << TYPE_BITS) | nsDisplayItem::GetPerFrameKey();
   }
   virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
                                    LayerManager* aManager,
                                    const ContainerLayerParameters& aParameters) override;
+  bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                               const StackingContextHelper& aSc,
+                               nsTArray<WebRenderParentCommand>& aParentCommands,
+                               mozilla::layers::WebRenderLayerManager* aManager,
+                               nsDisplayListBuilder* aDisplayListBuilder) override;
   virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
                                  nsRegion* aVisibleRegion) override;
 
@@ -4793,6 +4825,11 @@ public:
     virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
                                      LayerManager* aManager,
                                      const ContainerLayerParameters& aParameters) override;
+    bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                 const StackingContextHelper& aSc,
+                                 nsTArray<WebRenderParentCommand>& aParentCommands,
+                                 mozilla::layers::WebRenderLayerManager* aManager,
+                                 nsDisplayListBuilder* aDisplayListBuilder) override;
 
     virtual bool CanMerge(const nsDisplayItem* aItem) const override
     {
@@ -4805,11 +4842,8 @@ public:
     {
       return false;
     }
-
-    virtual uint32_t GetPerFrameKey() const override
-    {
-      return (mIsForBackground ? 1 << TYPE_BITS : 0) |
-        nsDisplayItem::GetPerFrameKey();
+    virtual uint32_t GetPerFrameKey() const override {
+      return (mIsForBackground ? 1 << TYPE_BITS : 0) | nsDisplayItem::GetPerFrameKey();
     }
     NS_DISPLAY_DECL_NAME("BlendContainer", TYPE_BLEND_CONTAINER)
 
@@ -4878,6 +4912,13 @@ public:
   virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
                                              LayerManager* aManager,
                                              const ContainerLayerParameters& aContainerParameters) override;
+  virtual bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                       const StackingContextHelper& aSc,
+                                       nsTArray<WebRenderParentCommand>& aParentCommands,
+                                       mozilla::layers::WebRenderLayerManager* aManager,
+                                       nsDisplayListBuilder* aDisplayListBuilder) override;
+  virtual bool UpdateScrollData(mozilla::layers::WebRenderScrollData* aData,
+                                mozilla::layers::WebRenderLayerScrollData* aLayerData) override;
   virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
                                    LayerManager* aManager,
                                    const ContainerLayerParameters& aParameters) override;
@@ -4903,6 +4944,7 @@ protected:
   // and can be ignored.
   ScrollThumbData mThumbData;
   bool mForceActive;
+  uint64_t mWrAnimationId;
 };
 
 /**
@@ -5074,14 +5116,16 @@ public:
     return mIsFixedBackground;
   }
 
-  virtual uint32_t GetPerFrameKey() const override
-  {
+  virtual uint32_t GetPerFrameKey() const override {
     return (mIndex << TYPE_BITS) | nsDisplayItem::GetPerFrameKey();
   }
 
   AnimatedGeometryRoot* AnimatedGeometryRootForScrollMetadata() const override {
     return mAnimatedGeometryRootForScrollMetadata;
   }
+
+  virtual bool UpdateScrollData(mozilla::layers::WebRenderScrollData* aData,
+                                mozilla::layers::WebRenderLayerScrollData* aLayerData) override;
 
 protected:
   // For background-attachment:fixed
@@ -5163,6 +5207,9 @@ public:
 
   mozilla::UniquePtr<ScrollMetadata> ComputeScrollMetadata(Layer* aLayer,
                                                            const ContainerLayerParameters& aContainerParameters);
+
+  virtual bool UpdateScrollData(mozilla::layers::WebRenderScrollData* aData,
+                                mozilla::layers::WebRenderLayerScrollData* aLayerData) override;
 
 protected:
   nsIFrame* mScrollFrame;
@@ -5339,6 +5386,12 @@ public:
   {
     return mDestRects;
   }
+
+  virtual bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                       const StackingContextHelper& aSc,
+                                       nsTArray<WebRenderParentCommand>& aParentCommands,
+                                       mozilla::layers::WebRenderLayerManager* aManager,
+                                       nsDisplayListBuilder* aDisplayListBuilder) override;
 private:
   // According to mask property and the capability of aManager, determine
   // whether paint mask onto a dedicate mask layer.
@@ -5411,6 +5464,16 @@ public:
   void PaintAsLayer(nsDisplayListBuilder* aBuilder,
                     gfxContext* aCtx,
                     LayerManager* aManager);
+
+  virtual bool CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                       const StackingContextHelper& aSc,
+                                       nsTArray<WebRenderParentCommand>& aParentCommands,
+                                       mozilla::layers::WebRenderLayerManager* aManager,
+                                       nsDisplayListBuilder* aDisplayListBuilder) override;
+
+private:
+  // relative to mFrame
+  nsRect mEffectsBounds;
 };
 
 /* A display item that applies a transformation to all of its descendant
@@ -5557,8 +5620,7 @@ public:
     return false;
   }
 
-  virtual uint32_t GetPerFrameKey() const override
-  {
+  virtual uint32_t GetPerFrameKey() const override {
     return (mIndex << TYPE_BITS) | nsDisplayItem::GetPerFrameKey();
   }
 
@@ -5841,8 +5903,7 @@ public:
                        nsIFrame* aPerspectiveFrame,
                        nsDisplayList* aList);
 
-  virtual uint32_t GetPerFrameKey() const override
-  {
+  virtual uint32_t GetPerFrameKey() const override {
     return (mIndex << TYPE_BITS) | nsDisplayItem::GetPerFrameKey();
   }
 

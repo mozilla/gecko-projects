@@ -1531,13 +1531,11 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
     // Note: we check here for non-default "justify-items", though technically
     // that'd only affect rendering if some child has "justify-self:auto".
     // (It's safe to assume that's likely, since it's the default value that
-    // a child would have.) We also pass in nullptr for the parent style context
-    // because an accurate parameter is slower and only necessary to detect a
-    // narrow edge case with the "legacy" keyword.
+    // a child would have.)
     const nsStylePosition* stylePosition = reflowInput->mStylePosition;
     if (!IsStyleNormalOrAuto(stylePosition->mJustifyContent) ||
         !IsStyleNormalOrAuto(stylePosition->mAlignContent) ||
-        !IsStyleNormalOrAuto(stylePosition->ComputedJustifyItems(nullptr))) {
+        !IsStyleNormalOrAuto(stylePosition->mJustifyItems)) {
       Telemetry::Accumulate(Telemetry::BOX_ALIGN_PROPS_IN_BLOCKS_FLAG, true);
     } else {
       // If not already flagged by the parent, now check justify-self of the
@@ -7229,7 +7227,7 @@ nsBlockFrame::ReflowBullet(nsIFrame* aBulletFrame,
                            ReflowOutput& aMetrics,
                            nscoord aLineTop)
 {
-  const ReflowInput &rs = aState.mReflowInput;
+  const ReflowInput &ri = aState.mReflowInput;
 
   // Reflow the bullet now
   WritingMode bulletWM = aBulletFrame->GetWritingMode();
@@ -7241,7 +7239,7 @@ nsBlockFrame::ReflowBullet(nsIFrame* aBulletFrame,
   // Get the reason right.
   // XXXwaterson Should this look just like the logic in
   // nsBlockReflowContext::ReflowBlock and nsLineLayout::ReflowFrame?
-  ReflowInput reflowInput(aState.mPresContext, rs,
+  ReflowInput reflowInput(aState.mPresContext, ri,
                                 aBulletFrame, availSize);
   nsReflowStatus  status;
   aBulletFrame->Reflow(aState.mPresContext, aMetrics, reflowInput, status);
@@ -7270,13 +7268,13 @@ nsBlockFrame::ReflowBullet(nsIFrame* aBulletFrame,
   // IStart from floatAvailSpace gives us the content/float start edge
   // in the current writing mode. Then we subtract out the start
   // border/padding and the bullet's width and margin to offset the position.
-  WritingMode wm = rs.GetWritingMode();
+  WritingMode wm = ri.GetWritingMode();
   // Get the bullet's margin, converted to our writing mode so that we can
   // combine it with other logical values here.
   LogicalMargin bulletMargin =
     reflowInput.ComputedLogicalMargin().ConvertTo(wm, bulletWM);
   nscoord iStart = floatAvailSpace.IStart(wm) -
-                   rs.ComputedLogicalBorderPadding().IStart(wm) -
+                   ri.ComputedLogicalBorderPadding().IStart(wm) -
                    bulletMargin.IEnd(wm) -
                    aMetrics.ISize(wm);
 

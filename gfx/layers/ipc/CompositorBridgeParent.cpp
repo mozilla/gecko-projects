@@ -463,6 +463,9 @@ CompositorBridgeParent::StopAndClearResources()
     });
     mWrBridge->Destroy();
     mWrBridge = nullptr;
+    mAsyncImageManager->Destroy();
+    // WebRenderAPI should be already destructed
+    mAsyncImageManager = nullptr;
   }
 
   if (mCompositor) {
@@ -537,7 +540,7 @@ CompositorBridgeParent::RecvWaitOnTransactionProcessed()
 mozilla::ipc::IPCResult
 CompositorBridgeParent::RecvFlushRendering()
 {
-  if (gfxVars::UseWebRender()) {
+  if (mOptions.UseWebRender()) {
     mWrBridge->FlushRendering(/* aIsSync */ true);
     return IPC_OK();
   }
@@ -552,7 +555,7 @@ CompositorBridgeParent::RecvFlushRendering()
 mozilla::ipc::IPCResult
 CompositorBridgeParent::RecvFlushRenderingAsync()
 {
-  if (gfxVars::UseWebRender()) {
+  if (mOptions.UseWebRender()) {
     mWrBridge->FlushRendering(/* aIsSync */ false);
     return IPC_OK();
   }
@@ -706,7 +709,7 @@ CompositorBridgeParent::PauseComposition()
   if (!mPaused) {
     mPaused = true;
 
-    if (!gfxVars::UseWebRender()) {
+    if (!mOptions.UseWebRender()) {
       mCompositor->Pause();
     } else {
       mWrBridge->Pause();
@@ -727,7 +730,7 @@ CompositorBridgeParent::ResumeComposition()
 
   MonitorAutoLock lock(mResumeCompositionMonitor);
 
-  bool resumed = gfxVars::UseWebRender() ? mWrBridge->Resume() : mCompositor->Resume();
+  bool resumed = mOptions.UseWebRender() ? mWrBridge->Resume() : mCompositor->Resume();
   if (!resumed) {
 #ifdef MOZ_WIDGET_ANDROID
     // We can't get a surface. This could be because the activity changed between
@@ -1254,6 +1257,8 @@ CompositorBridgeParent::ShadowLayersUpdated(LayerTransactionParent* aLayerTree,
   // Otherwise, it should be continually increasing.
   MOZ_ASSERT(aInfo.id() == 1 || aInfo.id() > mPendingTransaction);
   mPendingTransaction = aInfo.id();
+  mTxnStartTime = aInfo.transactionStart();
+  mFwdTime = aInfo.fwdTime();
 
   if (root) {
     SetShadowProperties(root);
@@ -1654,8 +1659,9 @@ CompositorBridgeParent::RecvAdoptChild(const uint64_t& child)
       ScheduleComposition();
     }
     if (mWrBridge && sIndirectLayerTrees[child].mWrBridge) {
+      RefPtr<wr::WebRenderAPI> api = mWrBridge->GetWebRenderAPI()->Clone();
       sIndirectLayerTrees[child].mWrBridge->UpdateWebRender(mWrBridge->CompositorScheduler(),
-                                                            mWrBridge->GetWebRenderAPI(),
+                                                            api,
                                                             mWrBridge->AsyncImageManager(),
                                                             GetAnimationStorage());
       // Pretend we composited, since parent CompositorBridgeParent was replaced.
@@ -1678,7 +1684,7 @@ PWebRenderBridgeParent*
 CompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipelineId,
                                                     const LayoutDeviceIntSize& aSize,
                                                     TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                                                    uint32_t* aIdNamespace)
+                                                    wr::IdNamespace* aIdNamespace)
 {
 #ifndef MOZ_BUILD_WEBRENDER
   // Extra guard since this in the parent process and we don't want a malicious
@@ -1695,23 +1701,23 @@ CompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipel
   RefPtr<widget::CompositorWidget> widget = mWidget;
   RefPtr<wr::WebRenderAPI> api = wr::WebRenderAPI::Create(
     gfxPrefs::WebRenderProfilerEnabled(), this, Move(widget), aSize);
-  RefPtr<AsyncImagePipelineManager> asyncMgr =
-    new AsyncImagePipelineManager(WebRenderBridgeParent::AllocIdNameSpace());
   if (!api) {
     mWrBridge = WebRenderBridgeParent::CreateDestroyed();
-    *aIdNamespace = mWrBridge->GetIdNameSpace();
+    mWrBridge.get()->AddRef(); // IPDL reference
+    *aIdNamespace = mWrBridge->GetIdNamespace();
     *aTextureFactoryIdentifier = TextureFactoryIdentifier(LayersBackend::LAYERS_NONE);
     return mWrBridge;
   }
-  MOZ_ASSERT(api); // TODO have a fallback
+  mAsyncImageManager = new AsyncImagePipelineManager(api->Clone());
+  RefPtr<AsyncImagePipelineManager> asyncMgr = mAsyncImageManager;
   api->SetRootPipeline(aPipelineId);
   RefPtr<CompositorAnimationStorage> animStorage = GetAnimationStorage();
   mWrBridge = new WebRenderBridgeParent(this, aPipelineId, mWidget, nullptr, Move(api), Move(asyncMgr), Move(animStorage));
-  *aIdNamespace = mWrBridge->GetIdNameSpace();
+  mWrBridge.get()->AddRef(); // IPDL reference
 
+  *aIdNamespace = mWrBridge->GetIdNamespace();
   mCompositorScheduler = mWrBridge->CompositorScheduler();
   MOZ_ASSERT(mCompositorScheduler);
-  mWrBridge.get()->AddRef(); // IPDL reference
   MonitorAutoLock lock(*sIndirectLayerTreesLock);
   MOZ_ASSERT(sIndirectLayerTrees[mRootLayerTreeID].mWrBridge == nullptr);
   sIndirectLayerTrees[mRootLayerTreeID].mWrBridge = mWrBridge;
@@ -1946,6 +1952,20 @@ CompositorBridgeParent::DidComposite(TimeStamp& aCompositeStart,
     NotifyDidComposite(mWrBridge->FlushPendingTransactionIds(), aCompositeStart, aCompositeEnd);
   } else {
     NotifyDidComposite(mPendingTransaction, aCompositeStart, aCompositeEnd);
+#if defined(ENABLE_FRAME_LATENCY_LOG)
+    if (mPendingTransaction) {
+      if (mTxnStartTime) {
+        uint32_t latencyMs = round((aCompositeEnd - mTxnStartTime).ToMilliseconds());
+        printf_stderr("From transaction start to end of generate frame latencyMs %d this %p\n", latencyMs, this);
+      }
+      if (mFwdTime) {
+        uint32_t latencyMs = round((aCompositeEnd - mFwdTime).ToMilliseconds());
+        printf_stderr("From forwarding transaction to end of generate frame latencyMs %d this %p\n", latencyMs, this);
+      }
+    }
+    mTxnStartTime = TimeStamp();
+    mFwdTime = TimeStamp();
+#endif
     mPendingTransaction = 0;
   }
 }
@@ -1953,10 +1973,10 @@ CompositorBridgeParent::DidComposite(TimeStamp& aCompositeStart,
 void
 CompositorBridgeParent::NotifyDidCompositeToPipeline(const wr::PipelineId& aPipelineId, const wr::Epoch& aEpoch, TimeStamp& aCompositeStart, TimeStamp& aCompositeEnd)
 {
-  if (!mWrBridge) {
+  if (!mWrBridge || !mAsyncImageManager) {
     return;
   }
-  mWrBridge->AsyncImageManager()->Update(aPipelineId, aEpoch);
+  mAsyncImageManager->Update(aPipelineId, aEpoch);
 
   if (mPaused) {
     return;

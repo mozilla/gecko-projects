@@ -95,7 +95,7 @@ use dom_struct::dom_struct;
 use encoding::EncodingRef;
 use encoding::all::UTF_8;
 use euclid::{Point2D, Vector2D};
-use html5ever::{LocalName, QualName};
+use html5ever::{LocalName, Namespace, QualName};
 use hyper::header::{Header, SetCookie};
 use hyper_serde::Serde;
 use ipc_channel::ipc::{self, IpcSender};
@@ -2001,10 +2001,16 @@ impl Document {
 
     /// https://html.spec.whatwg.org/multipage/#look-up-a-custom-element-definition
     pub fn lookup_custom_element_definition(&self,
-                                            local_name: LocalName,
-                                            is: Option<LocalName>)
+                                            namespace: &Namespace,
+                                            local_name: &LocalName,
+                                            is: Option<&LocalName>)
                                             -> Option<Rc<CustomElementDefinition>> {
         if !PREFS.get("dom.customelements.enabled").as_boolean().unwrap_or(false) {
+            return None;
+        }
+
+        // Step 1
+        if *namespace != ns!(html) {
             return None;
         }
 
@@ -3875,8 +3881,7 @@ fn update_with_current_time_ms(marker: &Cell<u64>) {
 
 /// https://w3c.github.io/webappsec-referrer-policy/#determine-policy-for-token
 pub fn determine_policy_for_token(token: &str) -> Option<ReferrerPolicy> {
-    let lower = token.to_lowercase();
-    return match lower.as_ref() {
+    match_ignore_ascii_case! { token,
         "never" | "no-referrer" => Some(ReferrerPolicy::NoReferrer),
         "default" | "no-referrer-when-downgrade" => Some(ReferrerPolicy::NoReferrerWhenDowngrade),
         "origin" => Some(ReferrerPolicy::Origin),

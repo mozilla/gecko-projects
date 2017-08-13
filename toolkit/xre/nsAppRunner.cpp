@@ -979,6 +979,19 @@ nsXULAppInfo::GetAccessibleHandlerUsed(bool* aResult)
 }
 
 NS_IMETHODIMP
+nsXULAppInfo::GetAccessibilityInstantiator(nsAString &aInstantiator)
+{
+#if defined(ACCESSIBILITY) && defined(XP_WIN)
+  if (!a11y::GetInstantiator(aInstantiator)) {
+    aInstantiator = NS_LITERAL_STRING("");
+  }
+#else
+  aInstantiator = NS_LITERAL_STRING("");
+#endif
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsXULAppInfo::GetIs64Bit(bool* aResult)
 {
 #ifdef HAVE_64BIT_BUILD
@@ -1957,23 +1970,21 @@ ProfileLockedDialog(nsIFile* aProfileDir, nsIFile* aProfileLocalDir,
     NS_ConvertUTF8toUTF16 appName(gAppData->name);
     const char16_t* params[] = {appName.get(), appName.get()};
 
-    nsXPIDLString killMessage;
+    nsAutoString killMessage;
 #ifndef XP_MACOSX
-    sb->FormatStringFromName(aUnlocker ? "restartMessageUnlocker"
-                                       : "restartMessageNoUnlocker",
-                             params, 2, getter_Copies(killMessage));
+    rv = sb->FormatStringFromName(aUnlocker ? "restartMessageUnlocker"
+                                            : "restartMessageNoUnlocker",
+                                  params, 2, killMessage);
 #else
-    sb->FormatStringFromName(aUnlocker ? "restartMessageUnlockerMac"
-                                       : "restartMessageNoUnlockerMac",
-                             params, 2, getter_Copies(killMessage));
+    rv = sb->FormatStringFromName(aUnlocker ? "restartMessageUnlockerMac"
+                                            : "restartMessageNoUnlockerMac",
+                                  params, 2, killMessage);
 #endif
+    NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
 
-    nsXPIDLString killTitle;
-    sb->FormatStringFromName("restartTitle",
-                             params, 1, getter_Copies(killTitle));
-
-    if (!killMessage || !killTitle)
-      return NS_ERROR_FAILURE;
+    nsAutoString killTitle;
+    rv = sb->FormatStringFromName("restartTitle", params, 1, killTitle);
+    NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
 
     if (gfxPlatform::IsHeadless()) {
       // TODO: make a way to turn off all dialogs when headless.
@@ -1998,8 +2009,8 @@ ProfileLockedDialog(nsIFile* aProfileDir, nsIFile* aProfileLocalDir,
          nsIPromptService::BUTTON_POS_1);
 
       bool checkState = false;
-      rv = ps->ConfirmEx(nullptr, killTitle, killMessage, flags,
-                         killTitle, nullptr, nullptr, nullptr,
+      rv = ps->ConfirmEx(nullptr, killTitle.get(), killMessage.get(), flags,
+                         killTitle.get(), nullptr, nullptr, nullptr,
                          &checkState, &button);
       NS_ENSURE_SUCCESS_LOG(rv, rv);
 #endif
@@ -2022,7 +2033,7 @@ ProfileLockedDialog(nsIFile* aProfileDir, nsIFile* aProfileLocalDir,
                                   nullptr, aResult);
       }
 #else
-      rv = ps->Alert(nullptr, killTitle, killMessage);
+      rv = ps->Alert(nullptr, killTitle.get(), killMessage.get());
       NS_ENSURE_SUCCESS_LOG(rv, rv);
 #endif
     }
@@ -2055,23 +2066,19 @@ ProfileMissingDialog(nsINativeAppSupport* aNative)
     NS_ConvertUTF8toUTF16 appName(gAppData->name);
     const char16_t* params[] = {appName.get(), appName.get()};
 
-    nsXPIDLString missingMessage;
-
     // profileMissing
-    sb->FormatStringFromName("profileMissing",
-                             params, 2, getter_Copies(missingMessage));
+    nsAutoString missingMessage;
+    rv = sb->FormatStringFromName("profileMissing", params, 2, missingMessage);
+    NS_ENSURE_SUCCESS(rv, NS_ERROR_ABORT);
 
-    nsXPIDLString missingTitle;
-    sb->FormatStringFromName("profileMissingTitle",
-                             params, 1, getter_Copies(missingTitle));
+    nsAutoString missingTitle;
+    rv = sb->FormatStringFromName("profileMissingTitle", params, 1, missingTitle);
+    NS_ENSURE_SUCCESS(rv, NS_ERROR_ABORT);
 
-    if (missingMessage && missingTitle) {
-      nsCOMPtr<nsIPromptService> ps
-        (do_GetService(NS_PROMPTSERVICE_CONTRACTID));
-      NS_ENSURE_TRUE(ps, NS_ERROR_FAILURE);
+    nsCOMPtr<nsIPromptService> ps(do_GetService(NS_PROMPTSERVICE_CONTRACTID));
+    NS_ENSURE_TRUE(ps, NS_ERROR_FAILURE);
 
-      ps->Alert(nullptr, missingTitle, missingMessage);
-    }
+    ps->Alert(nullptr, missingTitle.get(), missingMessage.get());
 
     return NS_ERROR_ABORT;
   }
@@ -3717,6 +3724,27 @@ AnnotateLSBRelease(void*)
 
 #endif
 
+#ifdef XP_WIN
+static void ReadAheadDll(const wchar_t* dllName) {
+  wchar_t dllPath[MAX_PATH];
+  if (ConstructSystem32Path(dllName, dllPath, MAX_PATH)) {
+    ReadAheadLib(dllPath);
+  }
+}
+
+static void PR_CALLBACK ReadAheadDlls_ThreadStart(void *) {
+  // Load DataExchange.dll and twinapi.appcore.dll for nsWindow::EnableDragDrop
+  ReadAheadDll(L"DataExchange.dll");
+  ReadAheadDll(L"twinapi.appcore.dll");
+
+  // Load twinapi.dll for WindowsUIUtils::UpdateTabletModeState
+  ReadAheadDll(L"twinapi.dll");
+
+  // Load explorerframe.dll for WinTaskbar::Initialize
+  ReadAheadDll(L"ExplorerFrame.dll");
+}
+#endif
+
 namespace mozilla {
   ShutdownChecksMode gShutdownChecks = SCM_NOTHING;
 } // namespace mozilla
@@ -4344,6 +4372,16 @@ XREMain::XRE_mainRun()
   nsCOMPtr<nsIAppStartup> appStartup
     (do_GetService(NS_APPSTARTUP_CONTRACTID));
   NS_ENSURE_TRUE(appStartup, NS_ERROR_FAILURE);
+
+
+#ifdef XP_WIN
+  if (!PR_GetEnv("XRE_NO_DLL_READAHEAD"))
+  {
+    PR_CreateThread(PR_USER_THREAD, ReadAheadDlls_ThreadStart, 0,
+                    PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD,
+                    PR_UNJOINABLE_THREAD, 0);
+  }
+#endif
 
   if (gDoMigration) {
     nsCOMPtr<nsIFile> file;
@@ -4986,6 +5024,24 @@ bool
 XRE_IsContentProcess()
 {
   return XRE_GetProcessType() == GeckoProcessType_Content;
+}
+
+bool
+XRE_UseNativeEventProcessing()
+{
+  if (XRE_IsContentProcess()) {
+    static bool sInited = false;
+    static bool sUseNativeEventProcessing = false;
+    if (!sInited) {
+      Preferences::AddBoolVarCache(&sUseNativeEventProcessing,
+                                   "dom.ipc.useNativeEventProcessing.content");
+      sInited = true;
+    }
+
+    return sUseNativeEventProcessing;
+  }
+
+  return true;
 }
 
 // If you add anything to this enum, please update about:support to reflect it

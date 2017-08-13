@@ -182,7 +182,7 @@ nsTableWrapperFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
   nsDisplayListCollection set;
   BuildDisplayListForInnerTable(aBuilder, set);
-  
+
   nsDisplayListSet captionSet(set, set.BlockBorderBackgrounds());
   BuildDisplayListForChild(aBuilder, mCaptionFrames.FirstChild(), captionSet);
 

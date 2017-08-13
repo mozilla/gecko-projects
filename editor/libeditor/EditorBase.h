@@ -7,11 +7,13 @@
 #define mozilla_EditorBase_h
 
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc.
+#include "mozilla/Maybe.h"              // for Maybe
 #include "mozilla/OwningNonNull.h"      // for OwningNonNull
+#include "mozilla/PresShell.h"          // for PresShell
 #include "mozilla/SelectionState.h"     // for RangeUpdater, etc.
 #include "mozilla/StyleSheet.h"         // for StyleSheet
-#include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"            // for WeakPtr
+#include "mozilla/dom/Selection.h"
 #include "mozilla/dom/Text.h"
 #include "nsCOMPtr.h"                   // for already_AddRefed, nsCOMPtr
 #include "nsCycleCollectionParticipant.h"
@@ -119,7 +121,6 @@ class InsertTextTransaction;
 class JoinNodeTransaction;
 class PlaceholderTransaction;
 class RemoveStyleSheetTransaction;
-class SetTextTransaction;
 class SplitNodeTransaction;
 class TextComposition;
 class TextEditor;
@@ -129,7 +130,6 @@ namespace dom {
 class DataTransfer;
 class Element;
 class EventTarget;
-class Selection;
 class Text;
 } // namespace dom
 
@@ -236,11 +236,6 @@ public:
    */
   EditorBase();
 
-  virtual TextEditor* AsTextEditor() = 0;
-  virtual const TextEditor* AsTextEditor() const = 0;
-  virtual HTMLEditor* AsHTMLEditor() = 0;
-  virtual const HTMLEditor* AsHTMLEditor() const = 0;
-
 protected:
   /**
    * The default destructor. This should suffice. Should this be pure virtual
@@ -252,11 +247,26 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(EditorBase, nsIEditor)
 
-  bool IsInitialized() const { return !!mDocumentWeak; }
+  bool IsInitialized() const { return !!mDocument; }
   already_AddRefed<nsIDOMDocument> GetDOMDocument();
   already_AddRefed<nsIDocument> GetDocument();
   already_AddRefed<nsIPresShell> GetPresShell();
   already_AddRefed<nsIWidget> GetWidget();
+  nsISelectionController* GetSelectionController() const
+  {
+    if (mSelectionController) {
+      return mSelectionController;
+    }
+    if (!mDocument) {
+      return nullptr;
+    }
+    nsIPresShell* presShell = mDocument->GetShell();
+    if (!presShell) {
+      return nullptr;
+    }
+    nsISelectionController* sc = static_cast<PresShell*>(presShell);
+    return sc;
+  }
   enum NotificationForEditorObservers
   {
     eNotifyEditorObserversOfEnd,
@@ -279,7 +289,8 @@ public:
                                       Text& aTextNode, int32_t aOffset,
                                       bool aSuppressIME = false);
 
-  nsresult SetTextImpl(const nsAString& aString,
+  nsresult SetTextImpl(Selection& aSelection,
+                       const nsAString& aString,
                        Text& aTextNode);
 
   NS_IMETHOD DeleteSelectionImpl(EDirection aAction,
@@ -432,9 +443,6 @@ protected:
     CreateTxnForInsertText(const nsAString& aStringToInsert, Text& aTextNode,
                            int32_t aOffset);
 
-  already_AddRefed<SetTextTransaction>
-    CreateTxnForSetText(const nsAString& aString, Text& aTextNode);
-
   /**
    * Never returns null.
    */
@@ -494,6 +502,10 @@ protected:
    * Called after a transaction is redone successfully.
    */
   void DoAfterRedoTransaction();
+
+  // Note that aSelection is optional and can be nullptr.
+  nsresult DoTransaction(Selection* aSelection,
+                         nsITransaction* aTxn);
 
   enum TDocumentListenerNotification
   {
@@ -565,7 +577,6 @@ protected:
    */
   bool EnsureComposition(WidgetCompositionEvent* aCompositionEvent);
 
-  already_AddRefed<nsISelectionController> GetSelectionController();
   nsresult GetSelection(SelectionType aSelectionType,
                         nsISelection** aSelection);
 
@@ -747,12 +758,46 @@ public:
    * returns true if aNode is an editable node.
    */
   bool IsEditable(nsIDOMNode* aNode);
-  virtual bool IsEditable(nsINode* aNode);
+  bool IsEditable(nsINode* aNode)
+  {
+    NS_ENSURE_TRUE(aNode, false);
+
+    if (!aNode->IsNodeOfType(nsINode::eCONTENT) || IsMozEditorBogusNode(aNode) ||
+        !IsModifiableNode(aNode)) {
+      return false;
+    }
+
+    switch (aNode->NodeType()) {
+      case nsIDOMNode::ELEMENT_NODE:
+        // In HTML editors, if we're dealing with an element, then ask it
+        // whether it's editable.
+        return mIsHTMLEditorClass ? aNode->IsEditable() : true;
+      case nsIDOMNode::TEXT_NODE:
+        // Text nodes are considered to be editable by both typed of editors.
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Returns true if selection is in an editable element and both the range
+   * start and the range end are editable.  E.g., even if the selection range
+   * includes non-editable elements, returns true when one of common ancestors
+   * of the range start and the range end is editable.  Otherwise, false.
+   */
+  bool IsSelectionEditable();
 
   /**
    * Returns true if aNode is a MozEditorBogus node.
    */
-  bool IsMozEditorBogusNode(nsINode* aNode);
+  bool IsMozEditorBogusNode(nsINode* aNode)
+  {
+    return aNode && aNode->IsElement() &&
+           aNode->AsElement()->AttrValueIs(kNameSpaceID_None,
+               kMOZEditorBogusNodeAttrAtom, kMOZEditorBogusNodeValue,
+               eCaseMatters);
+  }
 
   /**
    * Counts number of editable child nodes.
@@ -818,7 +863,15 @@ public:
   static void DumpNode(nsIDOMNode* aNode, int32_t indent = 0);
 #endif
   Selection* GetSelection(SelectionType aSelectionType =
-                                          SelectionType::eNormal);
+                                          SelectionType::eNormal)
+  {
+    nsISelectionController* sc = GetSelectionController();
+    if (!sc) {
+      return nullptr;
+    }
+    Selection* selection = sc->GetDOMSelection(ToRawSelectionType(aSelectionType));
+    return selection;
+  }
 
   /**
    * Helpers to add a node to the selection.
@@ -978,7 +1031,7 @@ public:
 
   bool HasIndependentSelection() const
   {
-    return !!mSelectionControllerWeak;
+    return !!mSelectionController;
   }
 
   bool IsModifiable() const
@@ -999,6 +1052,11 @@ public:
   bool IsSuppressingDispatchingInputEvent() const
   {
     return !mDispatchInputEvent;
+  }
+
+  bool Destroyed() const
+  {
+    return mDidPreDestroy;
   }
 
   /**
@@ -1098,12 +1156,8 @@ public:
   void HideCaret(bool aHide);
 
 private:
-  // Weak reference to the nsISelectionController.
-  // Use GetSelectionController() to retrieve actual pointer.
-  CachedWeakPtr<nsISelectionController> mSelectionControllerWeak;
-  // Weak reference to the nsIDocument.
-  // Use GetDocument() to retrieve actual pointer.
-  CachedWeakPtr<nsIDocument> mDocumentWeak;
+  nsCOMPtr<nsISelectionController> mSelectionController;
+  nsCOMPtr<nsIDocument> mDocument;
 
 protected:
   enum Tristate
@@ -1126,12 +1180,12 @@ protected:
   // The form field as an event receiver.
   nsCOMPtr<dom::EventTarget> mEventTarget;
   nsCOMPtr<nsIDOMEventListener> mEventListener;
-  // Weak reference to placeholder for begin/end batch purposes.
-  WeakPtr<PlaceholderTransaction> mPlaceholderTransactionWeak;
+  // Strong reference to placeholder for begin/end batch purposes.
+  RefPtr<PlaceholderTransaction> mPlaceholderTransaction;
   // Name of placeholder transaction.
   nsIAtom* mPlaceholderName;
   // Saved selection state for placeholder transaction batching.
-  mozilla::UniquePtr<SelectionState> mSelState;
+  mozilla::Maybe<SelectionState> mSelState;
   // IME composition this is not null between compositionstart and
   // compositionend.
   RefPtr<TextComposition> mComposition;
@@ -1192,14 +1246,29 @@ protected:
   bool mHidingCaret;
   // Whether spellchecker dictionary is initialized after focused.
   bool mSpellCheckerDictionaryUpdated;
+  // Whether we are an HTML editor class.
+  bool mIsHTMLEditorClass;
 
   friend bool NSCanUnload(nsISupports* serviceMgr);
   friend class AutoRules;
   friend class AutoSelectionRestorer;
   friend class AutoTransactionsConserveSelection;
   friend class RangeUpdater;
+  friend class nsIEditor;
 };
 
 } // namespace mozilla
+
+mozilla::EditorBase*
+nsIEditor::AsEditorBase()
+{
+  return static_cast<mozilla::EditorBase*>(this);
+}
+
+const mozilla::EditorBase*
+nsIEditor::AsEditorBase() const
+{
+  return static_cast<const mozilla::EditorBase*>(this);
+}
 
 #endif // #ifndef mozilla_EditorBase_h

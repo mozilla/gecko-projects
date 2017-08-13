@@ -60,7 +60,8 @@ public:
         THROTTLING_ENABLED,
         THROTTLING_SUSPEND_FOR,
         THROTTLING_RESUME_FOR,
-        THROTTLING_RESUME_IN
+        THROTTLING_RESUME_IN,
+        THROTTLING_TIME_WINDOW
     };
 
     //-------------------------------------------------------------------------
@@ -77,7 +78,8 @@ public:
                                bool throttleEnabled,
                                uint32_t throttleSuspendFor,
                                uint32_t throttleResumeFor,
-                               uint32_t throttleResumeIn);
+                               uint32_t throttleResumeIn,
+                               uint32_t throttleTimeWindow);
     MOZ_MUST_USE nsresult Shutdown();
 
     //-------------------------------------------------------------------------
@@ -217,15 +219,22 @@ public:
     nsresult UpdateCurrentTopLevelOuterContentWindowId(uint64_t aWindowId);
 
     // tracks and untracks active transactions according their throttle status
-    void AddActiveTransaction(nsHttpTransaction* aTrans, bool aThrottled);
-    void RemoveActiveTransaction(nsHttpTransaction* aTrans, bool aThrottled);
-    void MoveActiveTransaction(nsHttpTransaction* aTrans, bool aThrottled);
+    void AddActiveTransaction(nsHttpTransaction* aTrans);
+    void RemoveActiveTransaction(nsHttpTransaction* aTrans,
+                                 Maybe<bool> const& aOverride = Nothing());
+    void UpdateActiveTransaction(nsHttpTransaction* aTrans);
 
     // called by nsHttpTransaction::WriteSegments.  decides whether the transaction
     // should stop reading data based on: the throttling ticker status, overall
     // status of all active transactions regarding active tab and respective
     // throttling state.
-    bool ShouldStopReading(nsHttpTransaction* aTrans, bool aThrottled);
+    bool ShouldStopReading(nsHttpTransaction* aTrans);
+
+    // prolongs the throttling time window to now + the window preferred size
+    // called when:
+    // - any transaction is activated
+    // - or when a currently unthrottled transaction for the active window receives data
+    void TouchThrottlingTimeWindow(bool aEnsureTicker = true);
 
     // return true iff the connection has pending transactions for the active tab.
     // it's mainly used to disallow throttling (stop reading) of a response
@@ -337,11 +346,7 @@ private:
 
         // Remove the empty pendingQ in |mPendingTransactionTable|.
         void RemoveEmptyPendingQ();
-        enum {
-          CONN_ENTRY_NOT_REMOVED,
-          CONN_ENTRY_CLEAR_CONNECTION_HISTORY,
-          CONN_ENTRY_REMOVED_SHUTDOWN,
-        }  mHowItWasRemoved;
+
     private:
         ~nsConnectionEntry();
     };
@@ -469,12 +474,6 @@ private:
         bool                           mFastOpenInProgress;
         RefPtr<nsHttpConnection>       mConnectionNegotiatingFastOpen;
 
-    private:
-        // nsHttpConnectionMgr is friend class so that we can access them for
-        // diagnostic asserts. The this asserts are removed the following line
-        // needs to be removed.
-        friend class nsHttpConnectionMgr;
-
         RefPtr<nsConnectionEntry>      mEnt;
         nsCOMPtr<nsITimer>             mSynTimer;
         nsCOMPtr<nsISocketTransport>   mBackupTransport;
@@ -529,6 +528,7 @@ private:
     uint32_t mThrottleSuspendFor;
     uint32_t mThrottleResumeFor;
     uint32_t mThrottleResumeIn;
+    TimeDuration mThrottleTimeWindow;
     Atomic<bool, mozilla::Relaxed> mIsShuttingDown;
 
     //-------------------------------------------------------------------------
@@ -699,6 +699,12 @@ private:
     // Called on a pref change
     void SetThrottlingEnabled(bool aEnable);
 
+    // we only want to throttle for a limited amount of time after a new
+    // active transaction is added so that we don't block downloads on comet,
+    // socket and any kind of longstanding requests that don't need bandwidth.
+    // these methods track this time.
+    bool InThrottlingTimeWindow();
+
     // Two hashtalbes keeping track of active transactions regarding window id and throttling.
     // Used by the throttling algorithm to obtain number of transactions for the active tab
     // and for inactive tabs according their throttle status.
@@ -707,6 +713,8 @@ private:
 
     // Whether we are inside the "stop reading" interval, altered by the throttle ticker
     bool mThrottlingInhibitsReading;
+
+    TimeStamp mThrottlingWindowEndsAt;
 
     // ticker for the 'stop reading'/'resume reading' signal
     nsCOMPtr<nsITimer> mThrottleTicker;
@@ -751,8 +759,6 @@ private:
     nsTArray<RefPtr<PendingTransactionInfo>>*
     GetTransactionPendingQHelper(nsConnectionEntry *ent, nsAHttpTransaction *trans);
 
-    // This is only a diagnostic check end it will e removed soon.
-    void CheckConnEntryMustBeInmCT(nsConnectionEntry *ent);
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsHttpConnectionMgr::nsHalfOpenSocket, NS_HALFOPENSOCKET_IID)

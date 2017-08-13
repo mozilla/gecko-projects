@@ -97,6 +97,7 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+using namespace mozilla::gfx;
 using namespace mozilla::layers;
 
 uint8_t gNotifySubDocInvalidationData;
@@ -516,15 +517,14 @@ nsPresContext::GetDocumentColorPreferences()
     mBackgroundColor = LookAndFeel::GetColorUsingStandins(
         LookAndFeel::eColorID_window, NS_RGB(0xff, 0xff, 0xff));
   } else if (usePrefColors) {
-    nsAdoptingString colorStr =
-      Preferences::GetString("browser.display.foreground_color");
-
+    nsAutoString colorStr;
+    Preferences::GetString("browser.display.foreground_color", colorStr);
     if (!colorStr.IsEmpty()) {
       mDefaultColor = MakeColorPref(colorStr);
     }
 
-    colorStr = Preferences::GetString("browser.display.background_color");
-
+    colorStr.Truncate();
+    Preferences::GetString("browser.display.background_color", colorStr);
     if (!colorStr.IsEmpty()) {
       mBackgroundColor = MakeColorPref(colorStr);
     }
@@ -583,20 +583,20 @@ nsPresContext::GetUserPreferences()
   mUnderlineLinks =
     Preferences::GetBool("browser.underline_anchors", mUnderlineLinks);
 
-  nsAdoptingString colorStr = Preferences::GetString("browser.anchor_color");
-
+  nsAutoString colorStr;
+  Preferences::GetString("browser.anchor_color", colorStr);
   if (!colorStr.IsEmpty()) {
     mLinkColor = MakeColorPref(colorStr);
   }
 
-  colorStr = Preferences::GetString("browser.active_color");
-
+  colorStr.Truncate();
+  Preferences::GetString("browser.active_color", colorStr);
   if (!colorStr.IsEmpty()) {
     mActiveLinkColor = MakeColorPref(colorStr);
   }
 
-  colorStr = Preferences::GetString("browser.visited_color");
-
+  colorStr.Truncate();
+  Preferences::GetString("browser.visited_color", colorStr);
   if (!colorStr.IsEmpty()) {
     mVisitedLinkColor = MakeColorPref(colorStr);
   }
@@ -607,14 +607,14 @@ nsPresContext::GetUserPreferences()
   mFocusTextColor = mDefaultColor;
   mFocusBackgroundColor = mBackgroundColor;
 
-  colorStr = Preferences::GetString("browser.display.focus_text_color");
-
+  colorStr.Truncate();
+  Preferences::GetString("browser.display.focus_text_color", colorStr);
   if (!colorStr.IsEmpty()) {
     mFocusTextColor = MakeColorPref(colorStr);
   }
 
-  colorStr = Preferences::GetString("browser.display.focus_background_color");
-
+  colorStr.Truncate();
+  Preferences::GetString("browser.display.focus_background_color", colorStr);
   if (!colorStr.IsEmpty()) {
     mFocusBackgroundColor = MakeColorPref(colorStr);
   }
@@ -642,8 +642,8 @@ nsPresContext::GetUserPreferences()
   StaticPresData::Get()->ResetCachedFontPrefs();
 
   // * image animation
-  const nsAdoptingCString& animatePref =
-    Preferences::GetCString("image.animation_mode");
+  nsAutoCString animatePref;
+  Preferences::GetCString("image.animation_mode", animatePref);
   if (animatePref.EqualsLiteral("normal"))
     mImageAnimationModePref = imgIContainer::kNormalAnimMode;
   else if (animatePref.EqualsLiteral("none"))
@@ -1850,16 +1850,7 @@ nsPresContext::ThemeChangedInternal()
     image::SurfaceCacheUtils::DiscardAll();
   }
 
-  // This will force the system metrics to be generated the next time they're used
-  nsCSSRuleProcessor::FreeSystemMetrics();
-
-  // Changes to system metrics can change media queries on them, or
-  // :-moz-system-metric selectors (which requires eRestyle_Subtree).
-  // Changes in theme can change system colors (whose changes are
-  // properly reflected in computed style data), system fonts (whose
-  // changes are not), and -moz-appearance (whose changes likewise are
-  // not), so we need to reflow.
-  MediaFeatureValuesChanged(eRestyle_Subtree, NS_STYLE_HINT_REFLOW);
+  RefreshSystemMetrics();
 
   // Recursively notify all remote leaf descendants that the
   // system theme has changed.
@@ -1896,7 +1887,7 @@ nsPresContext::SysColorChangedInternal()
   }
 
   // Invalidate cached '-moz-windows-accent-color-applies' media query:
-  nsCSSRuleProcessor::FreeSystemMetrics();
+  RefreshSystemMetrics();
 
   // Reset default background and foreground colors for the document since
   // they may be using system colors
@@ -1905,6 +1896,21 @@ nsPresContext::SysColorChangedInternal()
   // The system color values are computed to colors in the style data,
   // so normal style data comparison is sufficient here.
   RebuildAllStyleData(nsChangeHint(0), nsRestyleHint(0));
+}
+
+void
+nsPresContext::RefreshSystemMetrics()
+{
+  // This will force the system metrics to be generated the next time they're used
+  nsCSSRuleProcessor::FreeSystemMetrics();
+
+  // Changes to system metrics can change media queries on them, or
+  // :-moz-system-metric selectors (which requires eRestyle_Subtree).
+  // Changes in theme can change system colors (whose changes are
+  // properly reflected in computed style data), system fonts (whose
+  // changes are not), and -moz-appearance (whose changes likewise are
+  // not), so we need to reflow.
+  MediaFeatureValuesChanged(eRestyle_Subtree, NS_STYLE_HINT_REFLOW);
 }
 
 void
@@ -2262,9 +2268,9 @@ bool
 nsPresContext::HasAuthorSpecifiedRules(const nsIFrame* aFrame,
                                        uint32_t aRuleTypeMask) const
 {
-  if (mShell->StyleSet()->IsGecko()) {
+  if (auto* geckoStyleContext = aFrame->StyleContext()->GetAsGecko()) {
     return
-      nsRuleNode::HasAuthorSpecifiedRules(aFrame->StyleContext(),
+      nsRuleNode::HasAuthorSpecifiedRules(geckoStyleContext,
                                           aRuleTypeMask,
                                           UseDocumentColors());
   }
@@ -2272,10 +2278,14 @@ nsPresContext::HasAuthorSpecifiedRules(const nsIFrame* aFrame,
 
   MOZ_ASSERT(elem->GetPseudoElementType() ==
              aFrame->StyleContext()->GetPseudoType());
-  MOZ_ASSERT(elem->HasServoData());
-  return Servo_HasAuthorSpecifiedRules(elem,
-                                       aRuleTypeMask,
-                                       UseDocumentColors());
+  if (elem->HasServoData()) {
+    return Servo_HasAuthorSpecifiedRules(elem,
+                                         aRuleTypeMask,
+                                         UseDocumentColors());
+  } else {
+    // Probably shouldn't happen, but does. See bug 1387953
+    return false;
+  }
 }
 
 gfxUserFontSet*
@@ -2604,7 +2614,7 @@ nsPresContext::NotifyInvalidation(uint64_t aTransactionId, const nsRect& aRect)
 
 /* static */ void
 nsPresContext::NotifySubDocInvalidation(ContainerLayer* aContainer,
-                                        const nsIntRegion& aRegion)
+                                        const nsIntRegion* aRegion)
 {
   ContainerLayerPresContext *data =
     static_cast<ContainerLayerPresContext*>(
@@ -2613,15 +2623,23 @@ nsPresContext::NotifySubDocInvalidation(ContainerLayer* aContainer,
     return;
   }
 
-  nsIntPoint topLeft = aContainer->GetVisibleRegion().ToUnknownRegion().GetBounds().TopLeft();
+  uint64_t transactionId = aContainer->Manager()->GetLastTransactionId();
+  IntRect visibleBounds = aContainer->GetVisibleRegion().GetBounds().ToUnknownRect();
 
-  for (auto iter = aRegion.RectIter(); !iter.Done(); iter.Next()) {
+  if (!aRegion) {
+    IntRect rect(IntPoint(0, 0), visibleBounds.Size());
+    data->mPresContext->NotifyInvalidation(transactionId, rect);
+    return;
+  }
+
+  nsIntPoint topLeft = visibleBounds.TopLeft();
+  for (auto iter = aRegion->RectIter(); !iter.Done(); iter.Next()) {
     nsIntRect rect(iter.Get());
     //PresContext coordinate space is relative to the start of our visible
     // region. Is this really true? This feels like the wrong way to get the right
     // answer.
     rect.MoveBy(-topLeft);
-    data->mPresContext->NotifyInvalidation(aContainer->Manager()->GetLastTransactionId(), rect);
+    data->mPresContext->NotifyInvalidation(transactionId, rect);
   }
 }
 

@@ -6,6 +6,7 @@
 
 #include "amIAddonManager.h"
 #include "nsWindowMemoryReporter.h"
+#include "nsWindowSizes.h"
 #include "nsGlobalWindow.h"
 #include "nsIDocument.h"
 #include "nsIDOMWindowCollection.h"
@@ -34,8 +35,7 @@ const int32_t kTimeBetweenChecks = 45; /* seconds */
 nsWindowMemoryReporter::nsWindowMemoryReporter()
   : mLastCheckForGhostWindows(TimeStamp::NowLoRes()),
     mCycleCollectorIsRunning(false),
-    mCheckTimerWaitingForCCEnd(false),
-    mGhostWindowCount(0)
+    mCheckTimerWaitingForCCEnd(false)
 {
 }
 
@@ -54,13 +54,13 @@ AddNonJSSizeOfWindowAndItsDescendents(nsGlobalWindow* aWindow,
   // Measure the window.
   SizeOfState state(moz_malloc_size_of);
   nsWindowSizes windowSizes(state);
-  aWindow->AddSizeOfIncludingThis(&windowSizes);
+  aWindow->AddSizeOfIncludingThis(windowSizes);
 
   // Measure the inner window, if there is one.
   nsGlobalWindow* inner = aWindow->IsOuterWindow() ? aWindow->GetCurrentInnerWindowInternal()
                                                    : nullptr;
   if (inner) {
-    inner->AddSizeOfIncludingThis(&windowSizes);
+    inner->AddSizeOfIncludingThis(windowSizes);
   }
 
   windowSizes.addToTabSizes(aSizes);
@@ -120,7 +120,8 @@ nsWindowMemoryReporter::Init()
                     /* weakRef = */ true);
   }
 
-  RegisterGhostWindowsDistinguishedAmount(GhostWindowsDistinguishedAmount);
+  RegisterStrongMemoryReporter(new GhostWindowsReporter());
+  RegisterGhostWindowsDistinguishedAmount(GhostWindowsReporter::DistinguishedAmount);
 }
 
 /* static */ nsWindowMemoryReporter*
@@ -313,7 +314,7 @@ CollectWindowReports(nsGlobalWindow *aWindow,
   // this window.
   SizeOfState state(WindowsMallocSizeOf);
   nsWindowSizes windowSizes(state);
-  aWindow->AddSizeOfIncludingThis(&windowSizes);
+  aWindow->AddSizeOfIncludingThis(windowSizes);
 
   REPORT_SIZE("/dom/element-nodes", windowSizes.mDOMElementNodesSize,
               "Memory used by the element nodes in a window's DOM.");
@@ -368,25 +369,25 @@ CollectWindowReports(nsGlobalWindow *aWindow,
               "within a window.");
   aWindowTotalSizes->mLayoutPresShellSize += windowSizes.mLayoutPresShellSize;
 
-  REPORT_SIZE("/layout/line-boxes", windowSizes.mArenaStats.mLineBoxes,
+  REPORT_SIZE("/layout/line-boxes", windowSizes.mArenaSizes.mLineBoxes,
               "Memory used by line boxes within a window.");
-  aWindowTotalSizes->mArenaStats.mLineBoxes
-    += windowSizes.mArenaStats.mLineBoxes;
+  aWindowTotalSizes->mArenaSizes.mLineBoxes
+    += windowSizes.mArenaSizes.mLineBoxes;
 
-  REPORT_SIZE("/layout/rule-nodes", windowSizes.mArenaStats.mRuleNodes,
+  REPORT_SIZE("/layout/rule-nodes", windowSizes.mArenaSizes.mRuleNodes,
               "Memory used by CSS rule nodes within a window.");
-  aWindowTotalSizes->mArenaStats.mRuleNodes
-    += windowSizes.mArenaStats.mRuleNodes;
+  aWindowTotalSizes->mArenaSizes.mRuleNodes
+    += windowSizes.mArenaSizes.mRuleNodes;
 
-  REPORT_SIZE("/layout/style-contexts", windowSizes.mArenaStats.mStyleContexts,
+  REPORT_SIZE("/layout/style-contexts", windowSizes.mArenaSizes.mStyleContexts,
               "Memory used by style contexts within a window.");
-  aWindowTotalSizes->mArenaStats.mStyleContexts
-    += windowSizes.mArenaStats.mStyleContexts;
+  aWindowTotalSizes->mArenaSizes.mStyleContexts
+    += windowSizes.mArenaSizes.mStyleContexts;
 
-  REPORT_SIZE("/layout/style-structs", windowSizes.mArenaStats.mStyleStructs,
+  REPORT_SIZE("/layout/style-structs", windowSizes.mArenaSizes.mStyleStructs,
               "Memory used by style structs within a window.");
-  aWindowTotalSizes->mArenaStats.mStyleStructs
-    += windowSizes.mArenaStats.mStyleStructs;
+  aWindowTotalSizes->mArenaSizes.mStyleStructs
+    += windowSizes.mArenaSizes.mStyleStructs;
 
   REPORT_SIZE("/layout/style-sets", windowSizes.mLayoutStyleSetsSize,
               "Memory used by style sets within a window.");
@@ -431,7 +432,7 @@ CollectWindowReports(nsGlobalWindow *aWindow,
 #define FRAME_ID(classname, ...)                                        \
   {                                                                     \
     size_t frameSize                                                    \
-      = windowSizes.mArenaStats.FRAME_ID_STAT_FIELD(classname);         \
+      = windowSizes.mArenaSizes.NS_ARENA_SIZES_FIELD(classname);        \
     if (frameSize < FRAME_SUNDRIES_THRESHOLD) {                         \
       frameSundriesSize += frameSize;                                   \
     } else {                                                            \
@@ -439,7 +440,7 @@ CollectWindowReports(nsGlobalWindow *aWindow,
                   "Memory used by frames of "                           \
                   "type " #classname " within a window.");              \
     }                                                                   \
-    aWindowTotalSizes->mArenaStats.FRAME_ID_STAT_FIELD(classname)       \
+    aWindowTotalSizes->mArenaSizes.NS_ARENA_SIZES_FIELD(classname)      \
       += frameSize;                                                     \
   }
 #define ABSTRACT_FRAME_ID(...)
@@ -506,17 +507,6 @@ nsWindowMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
       aData);
   }
 
-  MOZ_COLLECT_REPORT(
-    "ghost-windows", KIND_OTHER, UNITS_COUNT, ghostWindows.Count(),
-"The number of ghost windows present (the number of nodes underneath "
-"explicit/window-objects/top(none)/ghost, modulo race conditions).  A ghost "
-"window is not shown in any tab, does not share a domain with any non-detached "
-"windows, and has met these criteria for at least "
-"memory.ghost_window_timeout_seconds, or has survived a round of "
-"about:memory's minimize memory usage button.\n\n"
-"Ghost windows can happen legitimately, but they are often indicative of "
-"leaks in the browser or add-ons.");
-
   WindowPaths windowPaths;
   WindowPaths topWindowPaths;
 
@@ -574,19 +564,19 @@ nsWindowMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
          "This is the sum of all windows' 'layout/arenas' numbers.");
 
   REPORT("window-objects/layout/line-boxes",
-         windowTotalSizes.mArenaStats.mLineBoxes,
+         windowTotalSizes.mArenaSizes.mLineBoxes,
          "This is the sum of all windows' 'layout/line-boxes' numbers.");
 
   REPORT("window-objects/layout/rule-nodes",
-         windowTotalSizes.mArenaStats.mRuleNodes,
+         windowTotalSizes.mArenaSizes.mRuleNodes,
          "This is the sum of all windows' 'layout/rule-nodes' numbers.");
 
   REPORT("window-objects/layout/style-contexts",
-         windowTotalSizes.mArenaStats.mStyleContexts,
+         windowTotalSizes.mArenaSizes.mStyleContexts,
          "This is the sum of all windows' 'layout/style-contexts' numbers.");
 
   REPORT("window-objects/layout/style-structs",
-         windowTotalSizes.mArenaStats.mStyleStructs,
+         windowTotalSizes.mArenaSizes.mStyleStructs,
          "This is the sum of all windows' 'layout/style-structs' numbers.");
 
   REPORT("window-objects/layout/style-sets", windowTotalSizes.mLayoutStyleSetsSize,
@@ -602,8 +592,8 @@ nsWindowMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
          "This is the sum of all windows' 'layout/frame-properties' numbers.");
 
   size_t frameTotal = 0;
-#define FRAME_ID(classname, ...)                \
-  frameTotal += windowTotalSizes.mArenaStats.FRAME_ID_STAT_FIELD(classname);
+#define FRAME_ID(classname, ...) \
+  frameTotal += windowTotalSizes.mArenaSizes.NS_ARENA_SIZES_FIELD(classname);
 #define ABSTRACT_FRAME_ID(...)
 #include "nsFrameIdList.h"
 #undef FRAME_ID
@@ -761,7 +751,6 @@ nsWindowMemoryReporter::CheckForGhostWindows(
   KillCheckTimer();
 
   nsTHashtable<nsCStringHashKey> nonDetachedWindowDomains;
-  nsDataHashtable<nsISupportsHashKey, nsCString> domainMap;
 
   // Populate nonDetachedWindowDomains.
   for (auto iter = windowsById->Iter(); !iter.Done(); iter.Next()) {
@@ -776,13 +765,8 @@ nsWindowMemoryReporter::CheckForGhostWindows(
     nsCOMPtr<nsIURI> uri = GetWindowURI(window);
     nsAutoCString domain;
     if (uri) {
-      domain = domainMap.LookupForAdd(uri).OrInsert([&]() {
-        nsCString d;
-        tldService->GetBaseDomain(uri, 0, d);
-        return d;
-      });
+      tldService->GetBaseDomain(uri, 0, domain);
     }
-
     nonDetachedWindowDomains.PutEntry(domain);
   }
 
@@ -790,7 +774,6 @@ nsWindowMemoryReporter::CheckForGhostWindows(
   // if it's not null.
   uint32_t ghostTimeout = GetGhostTimeout();
   TimeStamp now = mLastCheckForGhostWindows;
-  mGhostWindowCount = 0;
   for (auto iter = mDetachedWindows.Iter(); !iter.Done(); iter.Next()) {
     nsWeakPtr weakKey = do_QueryInterface(iter.Key());
     nsCOMPtr<mozIDOMWindow> iwindow = do_QueryReferent(weakKey);
@@ -841,7 +824,6 @@ nsWindowMemoryReporter::CheckForGhostWindows(
       } else if ((now - timeStamp).ToSeconds() > ghostTimeout) {
         // This definitely is a ghost window, so add it to aOutGhostIDs, if
         // that is not null.
-        mGhostWindowCount++;
         if (aOutGhostIDs && window) {
           aOutGhostIDs->PutEntry(window->WindowID());
         }
@@ -850,10 +832,15 @@ nsWindowMemoryReporter::CheckForGhostWindows(
   }
 }
 
+NS_IMPL_ISUPPORTS(nsWindowMemoryReporter::GhostWindowsReporter,
+                  nsIMemoryReporter)
+
 /* static */ int64_t
-nsWindowMemoryReporter::GhostWindowsDistinguishedAmount()
+nsWindowMemoryReporter::GhostWindowsReporter::DistinguishedAmount()
 {
-  return sWindowReporter->mGhostWindowCount;
+  nsTHashtable<nsUint64HashKey> ghostWindows;
+  sWindowReporter->CheckForGhostWindows(&ghostWindows);
+  return ghostWindows.Count();
 }
 
 void

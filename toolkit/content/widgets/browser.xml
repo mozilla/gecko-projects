@@ -1091,6 +1091,24 @@
                 return false;
               }
               this.startScroll(data.scrolldir, data.screenX, data.screenY);
+              if (this.isRemoteBrowser && data.scrollId != null &&
+                  this.mPrefs.getBoolPref("apz.autoscroll.enabled", false)) {
+                let { tabParent } = this.frameLoader;
+                if (tabParent) {
+                  // If APZ is handling the autoscroll, it may decide to cancel
+                  // it of its own accord, so register an observer to allow it
+                  // to notify us of that.
+                  var os = Components.classes["@mozilla.org/observer-service;1"]
+                                     .getService(Components.interfaces.nsIObserverService);
+                  os.addObserver(this, "apz:cancel-autoscroll", true);
+
+                  tabParent.startApzAutoscroll(data.screenX, data.screenY,
+                                               data.scrollId, data.presShellId);
+                }
+                // Save the IDs for later
+                this._autoScrollScrollId = data.scrollId;
+                this._autoScrollPresShellId = data.presShellId;
+              }
               return true;
             }
             case "Autoscroll:Cancel":
@@ -1158,10 +1176,19 @@
         <parameter name="aState"/>
         <body>
           <![CDATA[
-            if (aTopic != "browser:purge-session-history")
-              return;
+            if (aTopic == "browser:purge-session-history") {
+              this.purgeSessionHistory();
+            } else if (aTopic == "apz:cancel-autoscroll") {
+              if (aState == this._autoScrollScrollId) {
+                this._autoScrollPopup.hidePopup();
 
-            this.purgeSessionHistory();
+                // Set this._autoScrollScrollId to null, so in stopScroll() we
+                // don't call stopApzAutoscroll() (since it's APZ that
+                // initiated the stopping).
+                this._autoScrollScrollId = null;
+                this._autoScrollPresShellId = null;
+              }
+            }
           ]]>
         </body>
       </method>
@@ -1190,6 +1217,9 @@
       <field name="_startY">null</field>
       <field name="_autoScrollPopup">null</field>
       <field name="_autoScrollNeedsCleanup">false</field>
+      <!-- These IDs identify the scroll frame being autoscrolled. -->
+      <field name="_autoScrollScrollId">null</field>
+      <field name="_autoScrollPresShellId">null</field>
 
       <method name="stopScroll">
         <body>
@@ -1205,6 +1235,24 @@
               window.removeEventListener("keypress", this, true);
               window.removeEventListener("keyup", this, true);
               this.messageManager.sendAsyncMessage("Autoscroll:Stop");
+
+              var os = Components.classes["@mozilla.org/observer-service;1"]
+                                 .getService(Components.interfaces.nsIObserverService);
+              try {
+                os.removeObserver(this, "apz:cancel-autoscroll");
+              } catch (ex) {
+                // It's not clear why this sometimes throws an exception
+              }
+
+              if (this.isRemoteBrowser && this._autoScrollScrollId != null) {
+                let { tabParent } = this.frameLoader;
+                if (tabParent) {
+                  tabParent.stopApzAutoscroll(this._autoScrollScrollId,
+                                              this._autoScrollPresShellId);
+                }
+                this._autoScrollScrollId = null;
+                this._autoScrollPresShellId = null;
+              }
             }
          ]]>
        </body>
@@ -1648,17 +1696,7 @@
         }
 
         if (links.length) {
-          // Bug 1368481: mozSourceNode is null if the drag event originated
-          // in an external application - needs better fallback!
-          let triggeringPrincipal;
-          let sourceNode = event.dataTransfer.mozSourceNode;
-          if (sourceNode) {
-            triggeringPrincipal = sourceNode.nodePrincipal;
-          } else {
-            var secMan = Components.classes["@mozilla.org/scriptsecuritymanager;1"].
-              getService(Components.interfaces.nsIScriptSecurityManager);
-            triggeringPrincipal = secMan.getSystemPrincipal();
-          }
+          let triggeringPrincipal = linkHandler.getTriggeringPrincipal(event);
           this.droppedLinkHandler(event, links, triggeringPrincipal);
         }
       ]]>

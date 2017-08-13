@@ -142,13 +142,8 @@ async function runTestWithIcons(icons) {
   ];
   // We add these at the beginning because adding them at the end can end up
   // putting them in the overflow panel, where they aren't displayed the same way.
-  if (AppConstants.MOZ_PHOTON_THEME) {
-    ICON_INFO.unshift(["bookmark_star", "#star-button"]);
-    ICON_INFO.unshift(["bookmark_menu", "#bookmarks-menu-button", "bookmarks-menu-button"]);
-  } else {
-    ICON_INFO.unshift(["bookmark_star", "#bookmarks-menu-button", "bookmarks-menu-button"]);
-    ICON_INFO.unshift(["bookmark_menu", "#bookmarks-menu-button > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon"]);
-  }
+  ICON_INFO.unshift(["bookmark_star", "#star-button"]);
+  ICON_INFO.unshift(["bookmark_menu", "#bookmarks-menu-button", "bookmarks-menu-button"]);
 
   window.maximize();
 
@@ -169,20 +164,6 @@ async function runTestWithIcons(icons) {
   await extension.startup();
 
   checkButtons(icons, ICON_INFO, "toolbar");
-
-  if (!gPhotonStructure) {
-    for (let button of ICON_INFO) {
-      if (button[2]) {
-        CustomizableUI.addWidgetToArea(button[2], CustomizableUI.AREA_PANEL);
-      }
-    }
-
-    await PanelUI.show();
-
-    checkButtons(icons, ICON_INFO, "panel");
-
-    await PanelUI.hide();
-  }
 
   await extension.unload();
 

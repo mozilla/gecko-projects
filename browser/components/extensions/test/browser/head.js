@@ -34,6 +34,7 @@ PromiseTestUtils.whitelistRejectionsGlobally(/Receiving end does not exist/);
 
 const {AppConstants} = Cu.import("resource://gre/modules/AppConstants.jsm", {});
 const {CustomizableUI} = Cu.import("resource:///modules/CustomizableUI.jsm", {});
+const {Preferences} = Cu.import("resource://gre/modules/Preferences.jsm", {});
 
 // We run tests under two different configurations, from browser.ini and
 // browser-remote.ini. When running from browser-remote.ini, the tests are
@@ -213,8 +214,7 @@ var awaitExtensionPanel = async function(extension, win = window, awaitLoad = tr
 };
 
 function getCustomizableUIPanelID() {
-  return gPhotonStructure ? CustomizableUI.AREA_FIXED_OVERFLOW_PANEL
-                          : CustomizableUI.AREA_PANEL;
+  return CustomizableUI.AREA_FIXED_OVERFLOW_PANEL;
 }
 
 function getBrowserActionWidget(extension) {
@@ -227,7 +227,7 @@ function getBrowserActionPopup(extension, win = window) {
   if (group.areaType == CustomizableUI.TYPE_TOOLBAR) {
     return win.document.getElementById("customizationui-widget-panel");
   }
-  return gPhotonStructure ? win.PanelUI.overflowPanel : win.PanelUI.panel;
+  return win.PanelUI.overflowPanel;
 }
 
 var showBrowserAction = async function(extension, win = window) {
@@ -237,14 +237,7 @@ var showBrowserAction = async function(extension, win = window) {
   if (group.areaType == CustomizableUI.TYPE_TOOLBAR) {
     ok(!widget.overflowed, "Expect widget not to be overflowed");
   } else if (group.areaType == CustomizableUI.TYPE_MENU_PANEL) {
-    // Show the right panel. After Photon is turned on permanently, this
-    // can be re-simplified. This is unfortunately easier than getting
-    // and using the panel (area) ID out of CustomizableUI for the widget.
-    if (gPhotonStructure) {
-      await win.document.getElementById("nav-bar").overflowable.show();
-    } else {
-      await win.PanelUI.show();
-    }
+    await win.document.getElementById("nav-bar").overflowable.show();
   }
 };
 

@@ -37,6 +37,13 @@ public:
   void AddChild(GeckoStyleContext* aChild);
   void RemoveChild(GeckoStyleContext* aChild);
 
+  GeckoStyleContext* GetParent() const { return mParent; }
+
+  bool IsLinkContext() const {
+    return GetStyleIfVisited() &&
+           GetStyleIfVisited()->GetParent() == GetParent();
+  }
+
   /**
    * Moves this style context to a new parent.
    *
@@ -238,6 +245,8 @@ private:
   // Helper for ClearCachedInheritedStyleDataOnDescendants.
   void DoClearCachedInheritedStyleDataOnDescendants(uint32_t aStructs);
   void Destroy();
+  void SetStyleBits();
+  void FinishConstruction();
 
   // Children are kept in two circularly-linked lists.  The list anchor
   // is not part of the list (null for empty), and we point to the first
@@ -250,6 +259,8 @@ private:
   GeckoStyleContext* mPrevSibling;
   GeckoStyleContext* mNextSibling;
   RefPtr<nsRuleNode> mRuleNode;
+
+  RefPtr<GeckoStyleContext> mParent;
 
   // Style to be used instead for the R, G, and B components of color,
   // background-color, and border-*-color if the nearest ancestor link
@@ -277,7 +288,6 @@ public:
     {
       mStyleContext->mComputingStruct = mOuterSID;
     }
-
   };
 
 private:

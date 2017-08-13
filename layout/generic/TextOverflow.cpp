@@ -211,8 +211,7 @@ public:
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      gfxContext* aCtx) override;
 
-  virtual uint32_t GetPerFrameKey() const override
-  {
+  virtual uint32_t GetPerFrameKey() const override {
     return (mIndex << TYPE_BITS) | nsDisplayItem::GetPerFrameKey();
   }
   void PaintTextToContext(gfxContext* aCtx,
@@ -732,7 +731,7 @@ TextOverflow::PruneDisplayListContents(nsDisplayListBuilder* aBuilder,
   while ((item = aList->RemoveBottom())) {
     nsIFrame* itemFrame = item->Frame();
     if (IsFrameDescendantOfAny(itemFrame, aFramesToHide, mBlock)) {
-      item->Destroy(aBuilder);
+      item->Destroy(mBuilder);
       continue;
     }
 

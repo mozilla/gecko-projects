@@ -9,7 +9,6 @@ with Files('**'):
 
 EXTRA_JS_MODULES += [
     'Extension.jsm',
-    'ExtensionAPI.jsm',
     'ExtensionChild.jsm',
     'ExtensionChildDevToolsUtils.jsm',
     'ExtensionCommon.jsm',
@@ -21,7 +20,6 @@ EXTRA_JS_MODULES += [
     'ExtensionSettingsStore.jsm',
     'ExtensionStorage.jsm',
     'ExtensionStorageSync.jsm',
-    'ExtensionTabs.jsm',
     'ExtensionUtils.jsm',
     'LegacyExtensionsUtils.jsm',
     'MessageChannel.jsm',

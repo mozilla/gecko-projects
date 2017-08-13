@@ -10,7 +10,6 @@
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsThreadUtils.h"
-#include "mozilla/dom/AudioChannelBinding.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/TimeStamp.h"
@@ -191,8 +190,7 @@ public:
   // channels (1 for mono, 2 for stereo, etc), aChannelMap is the indicator for
   // channel layout(mono, stereo, 5.1 or 7.1 ) and aRate is the sample rate
   // (22050Hz, 44100Hz, etc).
-  nsresult Init(uint32_t aNumChannels, uint32_t aChannelMap, uint32_t aRate,
-                const dom::AudioChannel aAudioStreamChannel);
+  nsresult Init(uint32_t aNumChannels, uint32_t aChannelMap, uint32_t aRate);
 
   // Closes the stream. All future use of the stream is an error.
   void Shutdown();
@@ -211,6 +209,9 @@ public:
 
   // Resume audio playback.
   void Resume();
+
+  // Reset stream to default device.
+  void ResetDefaultDevice();
 
   // Return the position in microseconds of the audio frame being played by
   // the audio hardware, compensated for playback rate change. Thread-safe.

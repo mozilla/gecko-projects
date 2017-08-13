@@ -10,12 +10,12 @@
  * It's useful to be able to dynamically check the type of certain items.
  * Every subclass of nsDisplayItem must have a new type added here for the purposes
  * of easy comparison and matching of items in different display lists.
- *
- * This is #included inside nsDisplayItem.
  */
 
+#ifndef NSDISPLAYITEMTYPES_H_
+#define NSDISPLAYITEMTYPES_H_
 
-enum DisplayItemType {
+enum class DisplayItemType {
   TYPE_ZERO = 0, /** Spacer so that the first item starts at 1 */
 
 #define DECLARE_DISPLAY_ITEM_TYPE(name,flags) TYPE_##name,
@@ -47,14 +47,14 @@ inline const char* DisplayItemTypeName(DisplayItemType aType)
 
 inline uint8_t GetDisplayItemFlagsForType(DisplayItemType aType)
 {
-  static const uint8_t flags[DisplayItemType::TYPE_MAX] = {
+  static const uint8_t flags[static_cast<uint32_t>(DisplayItemType::TYPE_MAX)] = {
     0
 #define DECLARE_DISPLAY_ITEM_TYPE(name,flags) ,flags
 #include "nsDisplayItemTypesList.h"
 #undef DECLARE_DISPLAY_ITEM_TYPE
   };
 
-  return flags[aType];
+  return flags[static_cast<uint32_t>(aType)];
 }
 
 inline DisplayItemType GetDisplayItemTypeFromKey(uint32_t aDisplayItemKey)
@@ -64,3 +64,5 @@ inline DisplayItemType GetDisplayItemTypeFromKey(uint32_t aDisplayItemKey)
   NS_ASSERTION(type > DisplayItemType::TYPE_ZERO && type < DisplayItemType::TYPE_MAX, "Invalid display item type!");
   return type;
 }
+
+#endif /*NSDISPLAYITEMTYPES_H_*/

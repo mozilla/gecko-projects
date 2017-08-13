@@ -352,7 +352,8 @@ nsProfiler::GetProfileDataAsArrayBuffer(double aSinceTime, JSContext* aCx,
 
 NS_IMETHODIMP
 nsProfiler::DumpProfileToFileAsync(const nsACString& aFilename,
-                                   double aSinceTime)
+                                   double aSinceTime, JSContext* aCx,
+                                   nsISupports** aPromise)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -360,11 +361,28 @@ nsProfiler::DumpProfileToFileAsync(const nsACString& aFilename,
     return NS_ERROR_FAILURE;
   }
 
+  if (NS_WARN_IF(!aCx)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsIGlobalObject* globalObject =
+    xpc::NativeGlobal(JS::CurrentGlobalOrNull(aCx));
+
+  if (NS_WARN_IF(!globalObject)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  ErrorResult result;
+  RefPtr<Promise> promise = Promise::Create(globalObject, result);
+  if (NS_WARN_IF(result.Failed())) {
+    return result.StealNSResult();
+  }
+
   nsCString filename(aFilename);
 
   StartGathering(aSinceTime)->Then(
     GetMainThreadSerialEventTarget(), __func__,
-    [filename](const nsCString& aResult) {
+    [filename, promise](const nsCString& aResult) {
       nsCOMPtr<nsIFile> file = do_CreateInstance(NS_LOCAL_FILE_CONTRACTID);
       nsresult rv = file->InitWithNativePath(filename);
       if (NS_FAILED(rv)) {
@@ -376,9 +394,14 @@ nsProfiler::DumpProfileToFileAsync(const nsACString& aFilename,
       uint32_t sz;
       of->Write(aResult.get(), aResult.Length(), &sz);
       of->Close();
-    },
-    [](nsresult aRv) { });
 
+      promise->MaybeResolveWithUndefined();
+    },
+    [promise](nsresult aRv) {
+      promise->MaybeReject(aRv);
+    });
+
+  promise.forget(aPromise);
   return NS_OK;
 }
 
@@ -570,6 +593,7 @@ nsProfiler::StartGathering(double aSinceTime)
   // Start building up the JSON result and grab the profile from this process.
   mWriter->Start(SpliceableJSONWriter::SingleLineStyle);
   if (!profiler_stream_json_for_this_process(*mWriter, aSinceTime,
+                                             /* aIsShuttingDown */ true,
                                              &thisProcessFirstSampleTime)) {
     // The profiler is inactive. This either means that it was inactive even
     // at the time that ProfileGatherer::Start() was called, or that it was

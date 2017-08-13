@@ -22,6 +22,38 @@ StaticAutoPtr<PaintThread> PaintThread::sSingleton;
 StaticRefPtr<nsIThread> PaintThread::sThread;
 PlatformThreadId PaintThread::sThreadId;
 
+// RAII make sure we clean up and restore our draw targets
+// when we paint async.
+struct MOZ_STACK_CLASS AutoCapturedPaintSetup
+{
+  AutoCapturedPaintSetup(CapturedPaintState* aState, CompositorBridgeChild* aBridge)
+  : mState(aState)
+  , mTarget(aState->mTarget)
+  , mRestorePermitsSubpixelAA(mTarget->GetPermitSubpixelAA())
+  , mOldTransform(mTarget->GetTransform())
+  , mBridge(aBridge)
+  {
+    mTarget->SetTransform(aState->mCapture->GetTransform());
+    mTarget->SetPermitSubpixelAA(aState->mCapture->GetPermitSubpixelAA());
+  }
+
+  ~AutoCapturedPaintSetup()
+  {
+    mTarget->SetTransform(mOldTransform);
+    mTarget->SetPermitSubpixelAA(mRestorePermitsSubpixelAA);
+
+    if (mBridge) {
+      mBridge->NotifyFinishedAsyncPaint(mState);
+    }
+  }
+
+  RefPtr<CapturedPaintState> mState;
+  RefPtr<DrawTarget> mTarget;
+  bool mRestorePermitsSubpixelAA;
+  Matrix mOldTransform;
+  RefPtr<CompositorBridgeChild> mBridge;
+};
+
 void
 PaintThread::Release()
 {
@@ -112,24 +144,76 @@ PaintThread::IsOnPaintThread()
 
 void
 PaintThread::PaintContentsAsync(CompositorBridgeChild* aBridge,
-                                gfx::DrawTargetCapture* aCapture,
-                                gfx::DrawTarget* aTarget)
+                                CapturedPaintState* aState,
+                                PrepDrawTargetForPaintingCallback aCallback)
 {
   MOZ_ASSERT(IsOnPaintThread());
+  MOZ_ASSERT(aState);
+
+  DrawTarget* target = aState->mTarget;
+  DrawTargetCapture* capture = aState->mCapture;
+
+  AutoCapturedPaintSetup setup(aState, aBridge);
+
+  if (!aCallback(aState)) {
+    return;
+  }
 
   // Draw all the things into the actual dest target.
-  aTarget->DrawCapturedDT(aCapture, Matrix());
-
-  if (aBridge) {
-    aBridge->NotifyFinishedAsyncPaint();
+  target->DrawCapturedDT(capture, Matrix());
+  if (!mDrawTargetsToFlush.Contains(target)) {
+    mDrawTargetsToFlush.AppendElement(target);
   }
 }
 
 void
-PaintThread::PaintContents(DrawTargetCapture* aCapture,
-                           DrawTarget* aTarget)
+PaintThread::FinishedLayerBatch()
 {
   MOZ_ASSERT(NS_IsMainThread());
+  RefPtr<CompositorBridgeChild> cbc;
+  if (!gfxPrefs::LayersOMTPForceSync()) {
+    cbc = CompositorBridgeChild::Get();
+  }
+
+  RefPtr<PaintThread> self = this;
+  RefPtr<Runnable> task = NS_NewRunnableFunction("PaintThread::EndAsyncPainting",
+  [self, cbc]() -> void
+  {
+    self->EndAsyncPainting(cbc);
+  });
+
+  if (cbc) {
+    sThread->Dispatch(task.forget());
+  } else {
+    SyncRunnable::DispatchToThread(sThread, task);
+  }
+}
+
+void
+PaintThread::EndAsyncPainting(CompositorBridgeChild* aBridge)
+{
+  MOZ_ASSERT(IsOnPaintThread());
+  // Textureclient forces a flush once we "end paint", so
+  // users of this texture expect all the drawing to be complete.
+  // Force a flush now.
+  for (size_t i = 0; i < mDrawTargetsToFlush.Length(); i++) {
+    mDrawTargetsToFlush[i]->Flush();
+  }
+
+  mDrawTargetsToFlush.Clear();
+
+  if (aBridge) {
+    aBridge->NotifyFinishedAsyncPaintLayer();
+  }
+}
+
+
+void
+PaintThread::PaintContents(CapturedPaintState* aState,
+                           PrepDrawTargetForPaintingCallback aCallback)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aState);
 
   // If painting asynchronously, we need to acquire the compositor bridge which
   // owns the underlying MessageChannel. Otherwise we leave it null and use
@@ -137,16 +221,18 @@ PaintThread::PaintContents(DrawTargetCapture* aCapture,
   RefPtr<CompositorBridgeChild> cbc;
   if (!gfxPrefs::LayersOMTPForceSync()) {
     cbc = CompositorBridgeChild::Get();
-    cbc->NotifyBeginAsyncPaint();
+    cbc->NotifyBeginAsyncPaint(aState);
   }
-  RefPtr<DrawTargetCapture> capture(aCapture);
-  RefPtr<DrawTarget> target(aTarget);
+  RefPtr<CapturedPaintState> state(aState);
+  RefPtr<DrawTargetCapture> capture(aState->mCapture);
 
   RefPtr<PaintThread> self = this;
   RefPtr<Runnable> task = NS_NewRunnableFunction("PaintThread::PaintContents",
-    [self, cbc, capture, target]() -> void
+    [self, cbc, capture, state, aCallback]() -> void
   {
-    self->PaintContentsAsync(cbc, capture, target);
+    self->PaintContentsAsync(cbc,
+                             state,
+                             aCallback);
   });
 
   if (cbc) {

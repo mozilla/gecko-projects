@@ -46,6 +46,7 @@ extern crate servo_config;
 extern crate servo_geometry;
 extern crate servo_url;
 extern crate style;
+extern crate style_traits;
 extern crate webrender_api;
 
 mod dom_wrapper;
@@ -53,7 +54,7 @@ mod dom_wrapper;
 use app_units::Au;
 use dom_wrapper::{ServoLayoutElement, ServoLayoutDocument, ServoLayoutNode};
 use dom_wrapper::drop_style_and_layout_data;
-use euclid::{Point2D, Rect, Size2D, ScaleFactor};
+use euclid::{Point2D, Rect, Size2D, ScaleFactor, TypedSize2D};
 use fnv::FnvHashMap;
 use gfx::display_list::{OpaqueNode, WebRenderImageInfo};
 use gfx::font;
@@ -67,9 +68,10 @@ use layout::animation;
 use layout::construct::ConstructionResult;
 use layout::context::LayoutContext;
 use layout::context::RegisteredPainter;
+use layout::context::RegisteredPainters;
 use layout::context::heap_size_of_persistent_local_context;
 use layout::display_list_builder::ToGfxColor;
-use layout::flow::{self, Flow, ImmutableFlowUtils, MutableFlowUtils, MutableOwnedFlowUtils};
+use layout::flow::{self, Flow, ImmutableFlowUtils, MutableOwnedFlowUtils};
 use layout::flow_ref::FlowRef;
 use layout::incremental::{LayoutDamageComputation, REFLOW_ENTIRE_DOCUMENT, RelayoutMode};
 use layout::layout_debug;
@@ -80,7 +82,7 @@ use layout::query::{process_margin_style_query, process_node_overflow_request, p
 use layout::query::{process_node_geometry_request, process_node_scroll_area_request};
 use layout::query::{process_node_scroll_root_id_request, process_offset_parent_query};
 use layout::sequential;
-use layout::traversal::{ComputeAbsolutePositions, RecalcStyleAndConstructFlows};
+use layout::traversal::{ComputeStackingRelativePositions, PreorderFlowTraversal, RecalcStyleAndConstructFlows};
 use layout::webrender_helpers::WebRenderDisplayListConverter;
 use layout::wrapper::LayoutNodeLayoutData;
 use layout_traits::LayoutThreadFactory;
@@ -99,6 +101,8 @@ use script_layout_interface::rpc::TextIndexResponse;
 use script_layout_interface::wrapper_traits::LayoutNode;
 use script_traits::{ConstellationControlMsg, LayoutControlMsg, LayoutMsg as ConstellationMsg};
 use script_traits::{ScrollState, UntrustedNodeAddress};
+use script_traits::DrawAPaintImageResult;
+use script_traits::Painter;
 use selectors::Element;
 use servo_arc::Arc as ServoArc;
 use servo_atoms::Atom;
@@ -110,7 +114,6 @@ use servo_url::ServoUrl;
 use std::borrow::ToOwned;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::mem as std_mem;
 use std::ops::{Deref, DerefMut};
 use std::process;
@@ -122,6 +125,8 @@ use std::thread;
 use style::animation::Animation;
 use style::context::{QuirksMode, ReflowGoal, SharedStyleContext};
 use style::context::{StyleSystemOptions, ThreadLocalStyleContextCreationInfo};
+use style::context::RegisteredSpeculativePainter;
+use style::context::RegisteredSpeculativePainters;
 use style::dom::{ShowSubtree, ShowSubtreeDataAndPrimaryValues, TElement, TNode};
 use style::error_reporting::{NullReporter, RustLogReporter};
 use style::invalidation::element::restyle_hints::RestyleHint;
@@ -137,6 +142,9 @@ use style::thread_state;
 use style::timer::Timer;
 use style::traversal::{DomTraversal, TraversalDriver};
 use style::traversal_flags::TraversalFlags;
+use style_traits::CSSPixel;
+use style_traits::DevicePixel;
+use style_traits::SpeculativePainter;
 
 /// Information needed by the layout thread.
 pub struct LayoutThread {
@@ -235,9 +243,9 @@ pub struct LayoutThread {
 
     webrender_image_cache: Arc<RwLock<FnvHashMap<(ServoUrl, UsePlaceholder),
                                                  WebRenderImageInfo>>>,
-    /// The executor for paint worklets.
-    /// Will be None if the script thread hasn't added any paint worklet modules.
-    registered_painters: Arc<RwLock<FnvHashMap<Atom, RegisteredPainter>>>,
+
+    /// The executors for paint worklets.
+    registered_painters: RegisteredPaintersImpl,
 
     /// Webrender interface.
     webrender_api: webrender_api::RenderApi,
@@ -472,7 +480,7 @@ impl LayoutThread {
         // The device pixel ratio is incorrect (it does not have the hidpi value),
         // but it will be set correctly when the initial reflow takes place.
         let device = Device::new(
-            MediaType::Screen,
+            MediaType::screen(),
             opts::get().initial_window_size.to_f32() * ScaleFactor::new(1.0),
             ScaleFactor::new(opts::get().device_pixels_per_px.unwrap_or(1.0)));
 
@@ -520,7 +528,7 @@ impl LayoutThread {
             constellation_chan: constellation_chan.clone(),
             time_profiler_chan: time_profiler_chan,
             mem_profiler_chan: mem_profiler_chan,
-            registered_painters: Arc::new(RwLock::new(FnvHashMap::default())),
+            registered_painters: RegisteredPaintersImpl(FnvHashMap::default()),
             image_cache: image_cache.clone(),
             font_cache_thread: font_cache_thread,
             first_reflow: Cell::new(true),
@@ -605,6 +613,7 @@ impl LayoutThread {
                 visited_styles_enabled: false,
                 running_animations: self.running_animations.clone(),
                 expired_animations: self.expired_animations.clone(),
+                registered_speculative_painters: &self.registered_painters,
                 local_context_creation_data: Mutex::new(thread_local_style_context_creation_data),
                 timer: self.timer.clone(),
                 quirks_mode: self.quirks_mode.unwrap(),
@@ -616,7 +625,7 @@ impl LayoutThread {
             webrender_image_cache: self.webrender_image_cache.clone(),
             pending_images: if script_initiated_layout { Some(Mutex::new(vec![])) } else { None },
             newly_transitioning_nodes: if script_initiated_layout { Some(Mutex::new(vec![])) } else { None },
-            registered_painters: self.registered_painters.clone(),
+            registered_painters: &self.registered_painters,
         }
     }
 
@@ -738,13 +747,12 @@ impl LayoutThread {
                     .filter_map(|name| PropertyId::parse(&*name).ok().map(|id| (name.clone(), id)))
                     .filter(|&(_, ref id)| id.as_shorthand().is_err())
                     .collect();
-                let registered_painter = RegisteredPainter {
+                let registered_painter = RegisteredPainterImpl {
                     name: name.clone(),
                     properties: properties,
                     painter: painter,
                 };
-                self.registered_painters.write()
-                    .insert(name, registered_painter);
+                self.registered_painters.0.insert(name, registered_painter);
             },
             Msg::PrepareToExit(response_chan) => {
                 self.prepare_to_exit(response_chan);
@@ -920,7 +928,7 @@ impl LayoutThread {
     fn solve_constraints(layout_root: &mut Flow,
                          layout_context: &LayoutContext) {
         let _scope = layout_debug_scope!("solve_constraints");
-        sequential::traverse_flow_tree_preorder(layout_root, layout_context, RelayoutMode::Incremental);
+        sequential::reflow(layout_root, layout_context, RelayoutMode::Incremental);
     }
 
     /// Performs layout constraint solving in parallel.
@@ -937,11 +945,11 @@ impl LayoutThread {
 
         // NOTE: this currently computes borders, so any pruning should separate that
         // operation out.
-        parallel::traverse_flow_tree_preorder(layout_root,
-                                              profiler_metadata,
-                                              time_profiler_chan,
-                                              layout_context,
-                                              traversal);
+        parallel::reflow(layout_root,
+                         profiler_metadata,
+                         time_profiler_chan,
+                         layout_context,
+                         traversal);
     }
 
     /// Computes the stacking-relative positions of all flows and, if the painting is dirty and the
@@ -965,11 +973,8 @@ impl LayoutThread {
 
             flow::mut_base(layout_root).clip = data.page_clip_rect;
 
-            if flow::base(layout_root).restyle_damage.contains(REPOSITION) {
-                layout_root.traverse_preorder(&ComputeAbsolutePositions {
-                    layout_context: layout_context
-                });
-            }
+            let traversal = ComputeStackingRelativePositions { layout_context: layout_context };
+            traversal.traverse(layout_root);
 
             if flow::base(layout_root).restyle_damage.contains(REPAINT) ||
                     rw_data.display_list.is_none() {
@@ -1058,7 +1063,8 @@ impl LayoutThread {
                 Some(get_root_flow_background_color(layout_root)),
                 viewport_size,
                 builder.finalize(),
-                true);
+                true,
+                webrender_api::ResourceUpdates::new());
             self.webrender_api.generate_frame(self.webrender_document, None);
         });
     }
@@ -1149,7 +1155,7 @@ impl LayoutThread {
         let document_shared_lock = document.style_shared_lock();
         self.document_shared_lock = Some(document_shared_lock.clone());
         let author_guard = document_shared_lock.read();
-        let device = Device::new(MediaType::Screen, initial_viewport, device_pixel_ratio);
+        let device = Device::new(MediaType::screen(), initial_viewport, device_pixel_ratio);
         self.stylist.set_device(device, &author_guard, &data.document_stylesheets);
 
         self.viewport_size =
@@ -1200,9 +1206,7 @@ impl LayoutThread {
             author: &author_guard,
             ua_or_user: &ua_or_user_guard,
         };
-        let mut extra_data = ExtraStyleData {
-            marker: PhantomData,
-        };
+        let mut extra_data = ExtraStyleData;
         let needs_dirtying = self.stylist.update(
             StylesheetIterator(data.document_stylesheets.iter()),
             &guards,
@@ -1789,4 +1793,53 @@ lazy_static! {
             }
         }
     };
+}
+
+struct RegisteredPainterImpl {
+    painter: Box<Painter>,
+    name: Atom,
+    properties: FnvHashMap<Atom, PropertyId>,
+}
+
+impl SpeculativePainter for RegisteredPainterImpl {
+    fn speculatively_draw_a_paint_image(&self, properties: Vec<(Atom, String)>, arguments: Vec<String>) {
+        self.painter.speculatively_draw_a_paint_image(properties, arguments);
+    }
+}
+
+impl RegisteredSpeculativePainter for RegisteredPainterImpl {
+    fn properties(&self) -> &FnvHashMap<Atom, PropertyId> {
+        &self.properties
+    }
+    fn name(&self) -> Atom {
+        self.name.clone()
+    }
+}
+
+impl Painter for RegisteredPainterImpl {
+    fn draw_a_paint_image(&self,
+                          size: TypedSize2D<f32, CSSPixel>,
+                          device_pixel_ratio: ScaleFactor<f32, CSSPixel, DevicePixel>,
+                          properties: Vec<(Atom, String)>,
+                          arguments: Vec<String>)
+                          -> DrawAPaintImageResult
+    {
+        self.painter.draw_a_paint_image(size, device_pixel_ratio, properties, arguments)
+    }
+}
+
+impl RegisteredPainter for RegisteredPainterImpl {}
+
+struct RegisteredPaintersImpl(FnvHashMap<Atom, RegisteredPainterImpl>);
+
+impl RegisteredSpeculativePainters for RegisteredPaintersImpl  {
+    fn get(&self, name: &Atom) -> Option<&RegisteredSpeculativePainter> {
+        self.0.get(&name).map(|painter| painter as &RegisteredSpeculativePainter)
+    }
+}
+
+impl RegisteredPainters for RegisteredPaintersImpl {
+    fn get(&self, name: &Atom) -> Option<&RegisteredPainter> {
+        self.0.get(&name).map(|painter| painter as &RegisteredPainter)
+    }
 }

@@ -36,12 +36,13 @@ GeckoStyleContext::GeckoStyleContext(GeckoStyleContext* aParent,
                                      CSSPseudoElementType aPseudoType,
                                      already_AddRefed<nsRuleNode> aRuleNode,
                                      bool aSkipParentDisplayBasedStyleFixup)
-  : nsStyleContext(aParent, aPseudoTag, aPseudoType)
+  : nsStyleContext(aPseudoTag, aPseudoType)
   , mCachedResetData(nullptr)
   , mRefCnt(0)
   , mChild(nullptr)
   , mEmptyChild(nullptr)
   , mRuleNode(Move(aRuleNode))
+  , mParent(aParent)
 #ifdef DEBUG
   , mComputingStruct(nsStyleStructID_None)
 #endif
@@ -397,6 +398,7 @@ GeckoStyleContext::GetUniqueStyleData(const nsStyleStructID& aSID)
 
   UNIQUE_CASE(Font)
   UNIQUE_CASE(Display)
+  UNIQUE_CASE(Position)
   UNIQUE_CASE(Text)
   UNIQUE_CASE(TextReset)
   UNIQUE_CASE(Visibility)
@@ -631,13 +633,20 @@ ShouldSuppressLineBreak(const nsStyleContext* aContext,
 }
 
 void
-nsStyleContext::SetStyleBits()
+GeckoStyleContext::FinishConstruction()
 {
-  // Here we set up various style bits for both the Gecko and Servo paths.
-  // _Only_ change the bits here.  For fixups of the computed values, you can
-  // add to ApplyStyleFixups in Gecko and StyleAdjuster as part of Servo's
-  // cascade.
+  MOZ_ASSERT(RuleNode());
 
+  if (mParent) {
+    mParent->AddChild(this);
+  }
+
+  SetStyleBits();
+}
+
+void
+GeckoStyleContext::SetStyleBits()
+{
   if ((mParent && mParent->HasPseudoElementData()) || IsPseudoElement()) {
     AddStyleBit(NS_STYLE_HAS_PSEUDO_ELEMENT_DATA);
   }
@@ -775,7 +784,7 @@ GeckoStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
   if (mPseudoTag == nsCSSPseudoElements::firstLetter) {
     const nsStyleTextReset* textReset = StyleTextReset();
     if (textReset->mInitialLetterSize != 0.0f) {
-      nsStyleContext* containerSC = mParent;
+      GeckoStyleContext* containerSC = GetParent();
       const nsStyleDisplay* containerDisp = containerSC->StyleDisplay();
       while (containerDisp->mDisplay == mozilla::StyleDisplay::Contents) {
         if (!containerSC->GetParent()) {
@@ -865,6 +874,23 @@ GeckoStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
     }
   }
 
+  // Fixup the "justify-items: auto" value based on our parent style here if
+  // needed.
+  //
+  // Note that this only pulls a unique struct in the case the parent has the
+  // "legacy" modifier (which is not the default), and the computed value would
+  // change as a result.
+  //
+  // We check the parent first just to avoid unconditionally pulling the
+  // nsStylePosition struct on every style context.
+  if (mParent &&
+      mParent->StylePosition()->mJustifyItems & NS_STYLE_JUSTIFY_LEGACY &&
+      StylePosition()->mSpecifiedJustifyItems == NS_STYLE_JUSTIFY_AUTO &&
+      StylePosition()->mJustifyItems != mParent->StylePosition()->mJustifyItems) {
+    nsStylePosition* uniquePosition = GET_UNIQUE_STYLE_DATA(Position);
+    uniquePosition->mJustifyItems = mParent->StylePosition()->mJustifyItems;
+  }
+
   // CSS2.1 section 9.2.4 specifies fixups for the 'display' property of
   // the root element.  We can't implement them in nsRuleNode because we
   // don't want to store all display structs that aren't 'block',
@@ -920,7 +946,7 @@ GeckoStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
     // a flex/grid container ancestor, then this node is a flex/grid item, since
     // its parent *in the frame tree* will be the flex/grid container. So we treat
     // it like a flex/grid item here.)
-    nsStyleContext* containerContext = mParent;
+    GeckoStyleContext* containerContext = GetParent();
     const nsStyleDisplay* containerDisp = containerContext->StyleDisplay();
     while (containerDisp->mDisplay == mozilla::StyleDisplay::Contents) {
       if (!containerContext->GetParent()) {

@@ -64,6 +64,10 @@ public:
 
   void NotifyAsyncScrollbarDragRejected(const FrameMetrics::ViewID& aScrollId) override;
 
+  void NotifyAutoscrollHandledByAPZ(const FrameMetrics::ViewID& aScrollId) override;
+
+  void CancelAutoscroll(const ScrollableLayerGuid& aGuid) override;
+
   void PostDelayedTask(already_AddRefed<Runnable> aRunnable, int aDelayMs) override;
 
   bool IsRepaintThread() override;

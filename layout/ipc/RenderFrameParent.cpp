@@ -32,6 +32,7 @@
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
+#include "mozilla/layers/WebRenderScrollData.h"
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "ClientLayerManager.h"
 #include "FrameLayerBuilder.h"
@@ -277,7 +278,7 @@ RenderFrameParent::TriggerRepaint()
     return;
   }
 
-  docFrame->InvalidateLayer(TYPE_REMOTE);
+  docFrame->InvalidateLayer(DisplayItemType::TYPE_REMOTE);
 }
 
 void
@@ -396,6 +397,16 @@ nsDisplayRemote::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuild
   aBuilder.PushIFrame(aSc.ToRelativeLayoutRect(visible),
       mozilla::wr::AsPipelineId(GetRemoteLayersId()));
 
+  return true;
+}
+
+bool
+nsDisplayRemote::UpdateScrollData(mozilla::layers::WebRenderScrollData* aData,
+                                  mozilla::layers::WebRenderLayerScrollData* aLayerData)
+{
+  if (aLayerData) {
+    aLayerData->SetReferentId(GetRemoteLayersId());
+  }
   return true;
 }
 

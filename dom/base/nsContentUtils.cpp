@@ -41,6 +41,8 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/CustomElementRegistry.h"
 #include "mozilla/dom/DocumentFragment.h"
+#include "mozilla/dom/DOMException.h"
+#include "mozilla/dom/DOMExceptionBinding.h"
 #include "mozilla/dom/DOMTypes.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/FileSystemSecurity.h"
@@ -66,6 +68,7 @@
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/InternalMutationEvent.h"
 #include "mozilla/Likely.h"
+#include "mozilla/ManualNAC.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/Selection.h"
@@ -791,6 +794,8 @@ nsContentUtils::Init()
   }
   uuidGenerator.forget(&sUUIDGenerator);
 
+  AsyncPrecreateStringBundles();
+
   RefPtr<UserInteractionObserver> uio = new UserInteractionObserver();
   uio->Init();
   uio.forget(&sUserInteractionObserver);
@@ -863,20 +868,20 @@ nsContentUtils::InitializeModifierStrings()
   }
 
   NS_ASSERTION(NS_SUCCEEDED(rv) && bundle, "chrome://global/locale/platformKeys.properties could not be loaded");
-  nsXPIDLString shiftModifier;
-  nsXPIDLString metaModifier;
-  nsXPIDLString osModifier;
-  nsXPIDLString altModifier;
-  nsXPIDLString controlModifier;
-  nsXPIDLString modifierSeparator;
+  nsAutoString shiftModifier;
+  nsAutoString metaModifier;
+  nsAutoString osModifier;
+  nsAutoString altModifier;
+  nsAutoString controlModifier;
+  nsAutoString modifierSeparator;
   if (bundle) {
     //macs use symbols for each modifier key, so fetch each from the bundle, which also covers i18n
-    bundle->GetStringFromName("VK_SHIFT", getter_Copies(shiftModifier));
-    bundle->GetStringFromName("VK_META", getter_Copies(metaModifier));
-    bundle->GetStringFromName("VK_WIN", getter_Copies(osModifier));
-    bundle->GetStringFromName("VK_ALT", getter_Copies(altModifier));
-    bundle->GetStringFromName("VK_CONTROL", getter_Copies(controlModifier));
-    bundle->GetStringFromName("MODIFIER_SEPARATOR", getter_Copies(modifierSeparator));
+    bundle->GetStringFromName("VK_SHIFT", shiftModifier);
+    bundle->GetStringFromName("VK_META", metaModifier);
+    bundle->GetStringFromName("VK_WIN", osModifier);
+    bundle->GetStringFromName("VK_ALT", altModifier);
+    bundle->GetStringFromName("VK_CONTROL", controlModifier);
+    bundle->GetStringFromName("MODIFIER_SEPARATOR", modifierSeparator);
   }
   //if any of these don't exist, we get  an empty string
   sShiftText = new nsString(shiftModifier);
@@ -2402,7 +2407,16 @@ nsContentUtils::ShouldResistFingerprinting(nsIDocShell* aDocShell)
   if (!aDocShell) {
     return false;
   }
-  bool isChrome = nsContentUtils::IsChromeDoc(aDocShell->GetDocument());
+  return ShouldResistFingerprinting(aDocShell->GetDocument());
+}
+
+/* static */
+bool
+nsContentUtils::ShouldResistFingerprinting(nsIDocument* aDoc) {
+  if (!aDoc) {
+    return false;
+  }
+  bool isChrome = nsContentUtils::IsChromeDoc(aDoc);
   return !isChrome && ShouldResistFingerprinting();
 }
 
@@ -2706,9 +2720,7 @@ GetCommonAncestorInternal(Node* aNode1,
                           Node* aNode2,
                           GetParentFunc aGetParentFunc)
 {
-  if (aNode1 == aNode2) {
-    return aNode1;
-  }
+  MOZ_ASSERT(aNode1 != aNode2);
 
   // Build the chain of parents
   AutoTArray<Node*, 30> parents1, parents2;
@@ -2740,7 +2752,7 @@ GetCommonAncestorInternal(Node* aNode1,
 
 /* static */
 nsINode*
-nsContentUtils::GetCommonAncestor(nsINode* aNode1, nsINode* aNode2)
+nsContentUtils::GetCommonAncestorHelper(nsINode* aNode1, nsINode* aNode2)
 {
   return GetCommonAncestorInternal(aNode1, aNode2, [](nsINode* aNode) {
     return aNode->GetParentNode();
@@ -2749,8 +2761,8 @@ nsContentUtils::GetCommonAncestor(nsINode* aNode1, nsINode* aNode2)
 
 /* static */
 nsIContent*
-nsContentUtils::GetCommonFlattenedTreeAncestor(nsIContent* aContent1,
-                                               nsIContent* aContent2)
+nsContentUtils::GetCommonFlattenedTreeAncestorHelper(nsIContent* aContent1,
+                                                     nsIContent* aContent2)
 {
   return GetCommonAncestorInternal(aContent1, aContent2, [](nsIContent* aContent) {
     return aContent->GetFlattenedTreeParent();
@@ -3956,15 +3968,31 @@ nsContentUtils::EnsureStringBundle(PropertiesFile aFile)
 }
 
 /* static */
+void
+nsContentUtils::AsyncPrecreateStringBundles()
+{
+  for (uint32_t bundleIndex = 0; bundleIndex < PropertiesFile_COUNT; ++bundleIndex) {
+    nsresult rv = NS_IdleDispatchToCurrentThread(
+      NS_NewRunnableFunction("AsyncPrecreateStringBundles",
+                             [bundleIndex]() {
+                               PropertiesFile file = static_cast<PropertiesFile>(bundleIndex);
+                               EnsureStringBundle(file);
+                               nsIStringBundle *bundle = sStringBundles[file];
+                               bundle->AsyncPreload();
+                             }));
+    Unused << NS_WARN_IF(NS_FAILED(rv));
+  }
+}
+
+/* static */
 nsresult nsContentUtils::GetLocalizedString(PropertiesFile aFile,
                                             const char* aKey,
-                                            nsXPIDLString& aResult)
+                                            nsAString& aResult)
 {
   nsresult rv = EnsureStringBundle(aFile);
   NS_ENSURE_SUCCESS(rv, rv);
   nsIStringBundle *bundle = sStringBundles[aFile];
-
-  return bundle->GetStringFromName(aKey, getter_Copies(aResult));
+  return bundle->GetStringFromName(aKey, aResult);
 }
 
 /* static */
@@ -3972,19 +4000,17 @@ nsresult nsContentUtils::FormatLocalizedString(PropertiesFile aFile,
                                                const char* aKey,
                                                const char16_t **aParams,
                                                uint32_t aParamsLength,
-                                               nsXPIDLString& aResult)
+                                               nsAString& aResult)
 {
   nsresult rv = EnsureStringBundle(aFile);
   NS_ENSURE_SUCCESS(rv, rv);
   nsIStringBundle *bundle = sStringBundles[aFile];
 
   if (!aParams || !aParamsLength) {
-    return bundle->GetStringFromName(aKey, getter_Copies(aResult));
+    return bundle->GetStringFromName(aKey, aResult);
   }
 
-  return bundle->FormatStringFromName(aKey,
-                                      aParams, aParamsLength,
-                                      getter_Copies(aResult));
+  return bundle->FormatStringFromName(aKey, aParams, aParamsLength, aResult);
 }
 
 /* static */
@@ -3992,7 +4018,7 @@ nsresult nsContentUtils::FormatLocalizedString(
                                           PropertiesFile aFile,
                                           const char* aKey,
                                           const nsTArray<nsString>& aParamArray,
-                                          nsXPIDLString& aResult)
+                                          nsAString& aResult)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -4045,7 +4071,7 @@ nsContentUtils::ReportToConsole(uint32_t aErrorFlags,
                "parameters and 0.");
 
   nsresult rv;
-  nsXPIDLString errorText;
+  nsAutoString errorText;
   if (aParams) {
     rv = FormatLocalizedString(aFile, aMessageName, aParams, aParamsLength,
                                errorText);
@@ -4109,20 +4135,26 @@ nsContentUtils::ReportToConsoleByWindowID(const nsAString& aErrorText,
       nsJSUtils::GetCallingLocation(cx, spec, &aLineNumber, &aColumnNumber);
     }
   }
-  if (spec.IsEmpty() && aURI) {
-    spec = aURI->GetSpecOrDefault();
-  }
 
   nsCOMPtr<nsIScriptError> errorObject =
       do_CreateInstance(NS_SCRIPTERROR_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = errorObject->InitWithWindowID(aErrorText,
-                                     NS_ConvertUTF8toUTF16(spec), // file name
-                                     aSourceLine,
-                                     aLineNumber, aColumnNumber,
-                                     aErrorFlags, aCategory,
-                                     aInnerWindowID);
+  if (!spec.IsEmpty()) {
+    rv = errorObject->InitWithWindowID(aErrorText,
+                                       NS_ConvertUTF8toUTF16(spec), // file name
+                                       aSourceLine,
+                                       aLineNumber, aColumnNumber,
+                                       aErrorFlags, aCategory,
+                                       aInnerWindowID);
+  } else {
+    rv = errorObject->InitWithSourceURI(aErrorText,
+                                        aURI,
+                                        aSourceLine,
+                                        aLineNumber, aColumnNumber,
+                                        aErrorFlags, aCategory,
+                                        aInnerWindowID);
+  }
   NS_ENSURE_SUCCESS(rv, rv);
 
   return sConsoleService->LogMessage(errorObject);
@@ -4523,10 +4555,10 @@ nsContentUtils::DispatchChromeEvent(nsIDocument *aDoc,
   if (!piTarget)
     return NS_ERROR_INVALID_ARG;
 
-  nsEventStatus status = nsEventStatus_eIgnore;
-  rv = piTarget->DispatchDOMEvent(nullptr, event, nullptr, &status);
+  bool defaultActionEnabled;
+  rv = piTarget->DispatchEvent(event, &defaultActionEnabled);
   if (aDefaultAction) {
-    *aDefaultAction = (status != nsEventStatus_eConsumeNoDefault);
+    *aDefaultAction = defaultActionEnabled;
   }
   return rv;
 }
@@ -5577,7 +5609,8 @@ nsContentUtils::GetLocalizedEllipsis()
 {
   static char16_t sBuf[4] = { 0, 0, 0, 0 };
   if (!sBuf[0]) {
-    nsAdoptingString tmp = Preferences::GetLocalizedString("intl.ellipsis");
+    nsAutoString tmp;
+    Preferences::GetLocalizedString("intl.ellipsis", tmp);
     uint32_t len = std::min(uint32_t(tmp.Length()),
                           uint32_t(ArrayLength(sBuf) - 1));
     CopyUnicodeTo(tmp, 0, sBuf, len);
@@ -6511,7 +6544,7 @@ nsContentUtils::GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin)
 
       if (isBlobURL) {
         nsAutoCString path;
-        rv = aURI->GetPath(path);
+        rv = aURI->GetPathQueryRef(path);
         NS_ENSURE_SUCCESS(rv, rv);
 
         nsCOMPtr<nsIURI> uri;
@@ -9011,6 +9044,25 @@ nsContentUtils::PushEnabled(JSContext* aCx, JSObject* aObj)
 
 // static
 bool
+nsContentUtils::StreamsEnabled(JSContext* aCx, JSObject* aObj)
+{
+  if (NS_IsMainThread()) {
+    return Preferences::GetBool("dom.streams.enabled", false);
+  }
+
+  using namespace workers;
+
+  // Otherwise, check the pref via the WorkerPrivate
+  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
+  if (!workerPrivate) {
+    return false;
+  }
+
+  return workerPrivate->StreamsEnabled();
+}
+
+// static
+bool
 nsContentUtils::IsNonSubresourceRequest(nsIChannel* aChannel)
 {
   nsLoadFlags loadFlags = 0;
@@ -10349,7 +10401,7 @@ nsContentUtils::AppendNativeAnonymousChildren(
     }
 
     // Get manually created NAC (editor resize handles, etc.).
-    if (auto nac = static_cast<ManualNAC*>(
+    if (auto nac = static_cast<ManualNACArray*>(
           aContent->GetProperty(nsGkAtoms::manualNACProperty))) {
       aKids.AppendElements(*nac);
     }
@@ -10709,3 +10761,73 @@ nsContentUtils::IsOverridingWindowName(const nsAString& aName)
     !aName.LowerCaseEqualsLiteral("_parent") &&
     !aName.LowerCaseEqualsLiteral("_self");
 }
+
+/* static */ void
+nsContentUtils::ExtractErrorValues(JSContext* aCx,
+                                   JS::Handle<JS::Value> aValue,
+                                   nsACString& aSourceSpecOut,
+                                   uint32_t* aLineOut,
+                                   uint32_t* aColumnOut,
+                                   nsString& aMessageOut)
+{
+  MOZ_ASSERT(aLineOut);
+  MOZ_ASSERT(aColumnOut);
+
+  if (aValue.isObject()) {
+    JS::Rooted<JSObject*> obj(aCx, &aValue.toObject());
+    RefPtr<dom::DOMException> domException;
+
+    // Try to process as an Error object.  Use the file/line/column values
+    // from the Error as they will be more specific to the root cause of
+    // the problem.
+    JSErrorReport* err = obj ? JS_ErrorFromException(aCx, obj) : nullptr;
+    if (err) {
+      // Use xpc to extract the error message only.  We don't actually send
+      // this report anywhere.
+      RefPtr<xpc::ErrorReport> report = new xpc::ErrorReport();
+      report->Init(err,
+                   "<unknown>", // toString result
+                   false,       // chrome
+                   0);          // window ID
+
+      if (!report->mFileName.IsEmpty()) {
+        CopyUTF16toUTF8(report->mFileName, aSourceSpecOut);
+        *aLineOut = report->mLineNumber;
+        *aColumnOut = report->mColumn;
+      }
+      aMessageOut.Assign(report->mErrorMsg);
+    }
+
+    // Next, try to unwrap the rejection value as a DOMException.
+    else if(NS_SUCCEEDED(UNWRAP_OBJECT(DOMException, obj, domException))) {
+
+      nsAutoString filename;
+      domException->GetFilename(aCx, filename);
+      if (!filename.IsEmpty()) {
+        CopyUTF16toUTF8(filename, aSourceSpecOut);
+        *aLineOut = domException->LineNumber(aCx);
+        *aColumnOut = domException->ColumnNumber();
+      }
+
+      domException->GetName(aMessageOut);
+      aMessageOut.AppendLiteral(": ");
+
+      nsAutoString message;
+      domException->GetMessageMoz(message);
+      aMessageOut.Append(message);
+    }
+  }
+
+  // If we could not unwrap a specific error type, then perform default safe
+  // string conversions on primitives.  Objects will result in "[Object]"
+  // unfortunately.
+  if (aMessageOut.IsEmpty()) {
+    nsAutoJSString jsString;
+    if (jsString.init(aCx, aValue)) {
+      aMessageOut = jsString;
+    } else {
+      JS_ClearPendingException(aCx);
+    }
+  }
+}
+

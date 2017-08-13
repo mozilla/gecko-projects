@@ -54,7 +54,7 @@ use style::context::SharedStyleContext;
 use style::logical_geometry::{LogicalRect, LogicalSize, WritingMode};
 use style::properties::ComputedValues;
 use style::selector_parser::RestyleDamage;
-use style::servo::restyle_damage::{RECONSTRUCT_FLOW, REFLOW, REFLOW_OUT_OF_FLOW, REPAINT, REPOSITION};
+use style::servo::restyle_damage::{RECONSTRUCT_FLOW, REFLOW, REFLOW_OUT_OF_FLOW, REPAINT};
 use style::values::computed::LengthOrPercentageOrAuto;
 use table::TableFlow;
 use table_caption::TableCaptionFlow;
@@ -63,7 +63,7 @@ use table_colgroup::TableColGroupFlow;
 use table_row::TableRowFlow;
 use table_rowgroup::TableRowGroupFlow;
 use table_wrapper::TableWrapperFlow;
-use webrender_api::ClipId;
+use webrender_api::ClipAndScrollInfo;
 
 /// Virtual methods that make up a float context.
 ///
@@ -339,10 +339,10 @@ pub trait Flow: fmt::Debug + Sync + Send + 'static {
         mut_base(self).overflow = overflow
     }
 
-    /// Phase 4 of reflow: computes absolute positions.
-    fn compute_absolute_position(&mut self, _: &LayoutContext) {
+    /// Phase 4 of reflow: Compute the stacking-relative position (origin of the content box,
+    /// in coordinates relative to the nearest ancestor stacking context).
+    fn compute_stacking_relative_position(&mut self, _: &LayoutContext) {
         // The default implementation is a no-op.
-        mut_base(self).restyle_damage.remove(REPOSITION)
     }
 
     /// Phase 5 of reflow: builds display lists.
@@ -431,12 +431,12 @@ pub trait Flow: fmt::Debug + Sync + Send + 'static {
     /// children of this flow.
     fn print_extra_flow_children(&self, _: &mut PrintTree) { }
 
-    fn scroll_root_id(&self, pipeline_id: PipelineId) -> ClipId {
-        match base(self).scroll_root_id {
-            Some(id) => id,
+    fn clip_and_scroll_info(&self, pipeline_id: PipelineId) -> ClipAndScrollInfo {
+        match base(self).clip_and_scroll_info {
+            Some(info) => info,
             None => {
-                warn!("Tried to access scroll root id on Flow before assignment");
-                pipeline_id.root_scroll_node()
+                debug_assert!(false, "Tried to access scroll root id on Flow before assignment");
+                pipeline_id.root_clip_and_scroll_info()
             }
         }
     }
@@ -534,31 +534,6 @@ pub trait ImmutableFlowUtils {
 }
 
 pub trait MutableFlowUtils {
-    // Traversals
-
-    /// Traverses the tree in preorder.
-    fn traverse_preorder<T: PreorderFlowTraversal>(self, traversal: &T);
-
-    /// Traverses the tree in postorder.
-    fn traverse_postorder<T: PostorderFlowTraversal>(self, traversal: &T);
-
-    /// Traverse the Absolute flow tree in preorder.
-    ///
-    /// Traverse all your direct absolute descendants, who will then traverse
-    /// their direct absolute descendants.
-    ///
-    /// Return true if the traversal is to continue or false to stop.
-    fn traverse_preorder_absolute_flows<T>(&mut self, traversal: &mut T)
-                                           where T: PreorderFlowTraversal;
-
-    /// Traverse the Absolute flow tree in postorder.
-    ///
-    /// Return true if the traversal is to continue or false to stop.
-    fn traverse_postorder_absolute_flows<T>(&mut self, traversal: &mut T)
-                                            where T: PostorderFlowTraversal;
-
-    // Mutators
-
     /// Calls `repair_style` and `bubble_inline_sizes`. You should use this method instead of
     /// calling them individually, since there is no reason not to perform both operations.
     fn repair_style_and_bubble_inline_sizes(self, style: &::ServoArc<ComputedValues>);
@@ -608,42 +583,6 @@ impl FlowClass {
             _ => false,
         }
     }
-}
-
-/// A top-down traversal.
-pub trait PreorderFlowTraversal {
-    /// The operation to perform. Return true to continue or false to stop.
-    fn process(&self, flow: &mut Flow);
-
-    /// Returns true if this node must be processed in-order. If this returns false,
-    /// we skip the operation for this node, but continue processing the descendants.
-    /// This is called *after* parent nodes are visited.
-    fn should_process(&self, _flow: &mut Flow) -> bool {
-        true
-    }
-}
-
-/// A bottom-up traversal, with a optional in-order pass.
-pub trait PostorderFlowTraversal {
-    /// The operation to perform. Return true to continue or false to stop.
-    fn process(&self, flow: &mut Flow);
-
-    /// Returns false if this node must be processed in-order. If this returns false, we skip the
-    /// operation for this node, but continue processing the ancestors. This is called *after*
-    /// child nodes are visited.
-    fn should_process(&self, _flow: &mut Flow) -> bool {
-        true
-    }
-}
-
-/// An in-order (sequential only) traversal.
-pub trait InorderFlowTraversal {
-    /// The operation to perform. Returns the level of the tree we're at.
-    fn process(&mut self, flow: &mut Flow, level: u32);
-
-    /// Returns true if this node should be processed and false if neither this node nor its
-    /// descendants should be processed.
-    fn should_process(&mut self, flow: &mut Flow) -> bool;
 }
 
 bitflags! {
@@ -969,7 +908,7 @@ pub struct BaseFlow {
     /// list construction.
     pub stacking_context_id: StackingContextId,
 
-    pub scroll_root_id: Option<ClipId>,
+    pub clip_and_scroll_info: Option<ClipAndScrollInfo>,
 }
 
 impl fmt::Debug for BaseFlow {
@@ -1111,7 +1050,7 @@ impl BaseFlow {
             writing_mode: writing_mode,
             thread_id: 0,
             stacking_context_id: StackingContextId::root(),
-            scroll_root_id: None,
+            clip_and_scroll_info: None,
         }
     }
 
@@ -1356,63 +1295,12 @@ impl<'a> ImmutableFlowUtils for &'a Flow {
 }
 
 impl<'a> MutableFlowUtils for &'a mut Flow {
-    /// Traverses the tree in preorder.
-    fn traverse_preorder<T: PreorderFlowTraversal>(self, traversal: &T) {
-        if traversal.should_process(self) {
-            traversal.process(self);
-        }
-
-        for kid in child_iter_mut(self) {
-            kid.traverse_preorder(traversal);
-        }
-    }
-
-    /// Traverses the tree in postorder.
-    fn traverse_postorder<T: PostorderFlowTraversal>(self, traversal: &T) {
-        for kid in child_iter_mut(self) {
-            kid.traverse_postorder(traversal);
-        }
-
-        if traversal.should_process(self) {
-            traversal.process(self)
-        }
-    }
-
-
     /// Calls `repair_style` and `bubble_inline_sizes`. You should use this method instead of
     /// calling them individually, since there is no reason not to perform both operations.
     fn repair_style_and_bubble_inline_sizes(self, style: &::ServoArc<ComputedValues>) {
         self.repair_style(style);
         mut_base(self).update_flags_if_needed(style);
         self.bubble_inline_sizes();
-    }
-
-    /// Traverse the Absolute flow tree in preorder.
-    ///
-    /// Traverse all your direct absolute descendants, who will then traverse
-    /// their direct absolute descendants.
-    ///
-    /// Return true if the traversal is to continue or false to stop.
-    fn traverse_preorder_absolute_flows<T>(&mut self, traversal: &mut T)
-                                           where T: PreorderFlowTraversal {
-        traversal.process(*self);
-
-        let descendant_offset_iter = mut_base(*self).abs_descendants.iter();
-        for ref mut descendant_link in descendant_offset_iter {
-            descendant_link.traverse_preorder_absolute_flows(traversal)
-        }
-    }
-
-    /// Traverse the Absolute flow tree in postorder.
-    ///
-    /// Return true if the traversal is to continue or false to stop.
-    fn traverse_postorder_absolute_flows<T>(&mut self, traversal: &mut T)
-                                            where T: PostorderFlowTraversal {
-        for mut descendant_link in mut_base(*self).abs_descendants.iter() {
-            descendant_link.traverse_postorder_absolute_flows(traversal);
-        }
-
-        traversal.process(*self)
     }
 }
 

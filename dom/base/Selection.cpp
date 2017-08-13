@@ -132,48 +132,6 @@ ToChar(SelectionType aSelectionType)
   }
 }
 
-static bool
-IsValidSelectionType(RawSelectionType aRawSelectionType)
-{
-  switch (static_cast<SelectionType>(aRawSelectionType)) {
-    case SelectionType::eNone:
-    case SelectionType::eNormal:
-    case SelectionType::eSpellCheck:
-    case SelectionType::eIMERawClause:
-    case SelectionType::eIMESelectedRawClause:
-    case SelectionType::eIMEConvertedClause:
-    case SelectionType::eIMESelectedClause:
-    case SelectionType::eAccessibility:
-    case SelectionType::eFind:
-    case SelectionType::eURLSecondary:
-    case SelectionType::eURLStrikeout:
-      return true;
-    default:
-      return false;
-  }
-}
-
-SelectionType
-ToSelectionType(RawSelectionType aRawSelectionType)
-{
-  if (!IsValidSelectionType(aRawSelectionType)) {
-    return SelectionType::eInvalid;
-  }
-  return static_cast<SelectionType>(aRawSelectionType);
-}
-
-RawSelectionType
-ToRawSelectionType(SelectionType aSelectionType)
-{
-  return static_cast<RawSelectionType>(aSelectionType);
-}
-
-bool operator &(SelectionType aSelectionType,
-                RawSelectionType aRawSelectionTypes)
-{
-  return (ToRawSelectionType(aSelectionType) & aRawSelectionTypes) != 0;
-}
-
 } // namespace mozilla
 
 //#define DEBUG_SELECTION // uncomment for printf describing every collapse and extend.
@@ -647,14 +605,24 @@ Selection::GetTableCellLocationFromRange(nsRange* aRange,
   if (!content)
     return NS_ERROR_FAILURE;
 
-  nsIContent *child = content->GetChildAt(aRange->StartOffset());
+  nsCOMPtr<nsIContent> child = content->GetChildAt(aRange->StartOffset());
   if (!child)
     return NS_ERROR_FAILURE;
 
+  // GetCellLayout depends on current frame, we need flush frame to get
+  // nsITableCellLayout
+  nsCOMPtr<nsIPresShell> presShell = mFrameSelection->GetShell();
+  if (presShell) {
+    presShell->FlushPendingNotifications(FlushType::Frames);
+
+    // Since calling FlushPendingNotifications, so check whether disconnected.
+    if (!mFrameSelection || !mFrameSelection->GetShell()) {
+      return NS_ERROR_FAILURE;
+    }
+  }
+
   //Note: This is a non-ref-counted pointer to the frame
   nsITableCellLayout *cellLayout = mFrameSelection->GetCellLayout(child);
-  if (NS_FAILED(result))
-    return result;
   if (!cellLayout)
     return NS_ERROR_FAILURE;
 
@@ -2318,6 +2286,9 @@ Selection::AddRangeInternal(nsRange& aRange, nsIDocument* aDocument,
     return;
   }
 
+  // AddTableCellRange might flush frame.
+  RefPtr<Selection> kungFuDeathGrip(this);
+
   // This inserts a table cell range in proper document order
   // and returns NS_OK if range doesn't contain just one table cell
   bool didAddRange;
@@ -2730,6 +2701,18 @@ Selection::GetRangeCount(int32_t* aRangeCount)
   *aRangeCount = (int32_t)RangeCount();
 
   return NS_OK;
+}
+
+void
+Selection::GetType(nsAString& aOutType) const
+{
+  if (!RangeCount()) {
+    aOutType.AssignLiteral("None");
+  } else if (IsCollapsed()) {
+    aOutType.AssignLiteral("Caret");
+  } else {
+    aOutType.AssignLiteral("Range");
+  }
 }
 
 NS_IMETHODIMP

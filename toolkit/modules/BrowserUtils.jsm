@@ -16,6 +16,48 @@ XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
 
 Cu.importGlobalProperties(["URL"]);
 
+let reflowObservers = new WeakMap();
+
+function ReflowObserver(doc) {
+  this._doc = doc;
+
+  doc.docShell.addWeakReflowObserver(this);
+  reflowObservers.set(this._doc, this);
+
+  this.callbacks = [];
+}
+
+ReflowObserver.prototype = {
+  QueryInterface: XPCOMUtils.generateQI(["nsIReflowObserver", "nsISupportsWeakReference"]),
+
+  _onReflow() {
+    reflowObservers.delete(this._doc);
+    this._doc.docShell.removeWeakReflowObserver(this);
+
+    for (let callback of this.callbacks) {
+      try {
+        callback();
+      } catch (e) {
+        Cu.reportError(e);
+      }
+    }
+  },
+
+  reflow() {
+    this._onReflow();
+  },
+
+  reflowInterruptible() {
+    this._onReflow();
+  },
+};
+
+const FLUSH_TYPES = {
+  "style": Ci.nsIDOMWindowUtils.FLUSH_STYLE,
+  "layout": Ci.nsIDOMWindowUtils.FLUSH_LAYOUT,
+  "display": Ci.nsIDOMWindowUtils.FLUSH_DISPLAY,
+};
+
 this.BrowserUtils = {
 
   /**
@@ -142,7 +184,7 @@ this.BrowserUtils = {
   },
 
   makeURIFromCPOW(aCPOWURI) {
-    return Services.io.newURI(aCPOWURI.spec, aCPOWURI.originCharset);
+    return Services.io.newURI(aCPOWURI.spec);
   },
 
   /**
@@ -374,13 +416,8 @@ this.BrowserUtils = {
    * the font-size.
    *
    * @param element An element within the toolbar whose height is desired.
-   * @param options An object with the following properties:
-              {
-                forceLayoutFlushIfNeeded:
-                  Set to true if a sync layout flush is acceptable.
-              }
    */
-  setToolbarButtonHeightProperty(element, options) {
+  async setToolbarButtonHeightProperty(element) {
     let window = element.ownerGlobal;
     let dwu = window.getInterface(Ci.nsIDOMWindowUtils);
     let toolbarItem = element;
@@ -394,8 +431,11 @@ this.BrowserUtils = {
       return;
     }
     let bounds = dwu.getBoundsWithoutFlushing(toolbarItem);
-    if (!bounds.height && options.forceLayoutFlushIfNeeded) {
-      bounds = toolbarItem.getBoundingClientRect();
+    if (!bounds.height) {
+      let document = element.ownerDocument;
+      await BrowserUtils.promiseLayoutFlushed(document, "layout", () => {
+        bounds = dwu.getBoundsWithoutFlushing(toolbarItem);
+      });
     }
     if (bounds.height) {
       toolbarItem.style.setProperty("--toolbarbutton-height", bounds.height + "px");
@@ -625,5 +665,64 @@ this.BrowserUtils = {
                                 .replace(/%S/g, param);
     }
     return [url, postData];
+  },
+
+  /**
+   * Calls the given function when the given document has just reflowed,
+   * and returns a promise which resolves to its return value after it
+   * has been called.
+   *
+   * The function *must not trigger any reflows*, or make any changes
+   * which would require a layout flush.
+   *
+   * @param {Document} doc
+   * @param {function} callback
+   * @returns {Promise}
+   */
+  promiseReflowed(doc, callback) {
+    let observer = reflowObservers.get(doc);
+    if (!observer) {
+      observer = new ReflowObserver(doc);
+      reflowObservers.set(doc, observer);
+    }
+
+    return new Promise((resolve, reject) => {
+      observer.callbacks.push(() => {
+        try {
+          resolve(callback());
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+  },
+
+  /**
+   * Calls the given function as soon as a layout flush of the given
+   * type is not necessary, and returns a promise which resolves to the
+   * callback's return value after it executes.
+   *
+   * The function *must not trigger any reflows*, or make any changes
+   * which would require a layout flush.
+   *
+   * @param {Document} doc
+   * @param {string} flushType
+   *        The flush type required. Must be one of:
+   *
+   *          - "style"
+   *          - "layout"
+   *          - "display"
+   * @param {function} callback
+   * @returns {Promise}
+   */
+  async promiseLayoutFlushed(doc, flushType, callback) {
+    let utils = doc.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
+                   .getInterface(Ci.nsIDOMWindowUtils);
+
+    if (!utils.needsFlush(FLUSH_TYPES[flushType])) {
+      return callback();
+    }
+
+    return this.promiseReflowed(doc, callback);
   },
 };

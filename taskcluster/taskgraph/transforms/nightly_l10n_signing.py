@@ -64,7 +64,7 @@ def make_signing_description(config, jobs):
                     'format': 'gpg',
                 }, {
                     'artifacts': ['public/build/{locale}/target.complete.mar'],
-                    'format': 'mar',
+                    'format': 'mar_sha384',
                 }
             ]
         else:
@@ -85,9 +85,6 @@ def make_signing_description(config, jobs):
             })
 
         job['upstream-artifacts'] = upstream_artifacts
-
-        label = dep_job.label.replace("nightly-l10n-", "signing-l10n-")
-        job['label'] = label
 
         # add the chunk number to the TH symbol
         symbol = 'Ns{}'.format(dep_job.attributes.get('l10n_chunk'))

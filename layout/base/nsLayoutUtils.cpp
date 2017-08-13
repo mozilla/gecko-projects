@@ -2130,13 +2130,20 @@ nsLayoutUtils::SetFixedPositionLayerData(Layer* aLayer,
     }
   }
 
+  ViewID id = ScrollIdForRootScrollFrame(aPresContext);
+  aLayer->SetFixedPositionData(id, anchor, sides);
+}
+
+FrameMetrics::ViewID
+nsLayoutUtils::ScrollIdForRootScrollFrame(nsPresContext* aPresContext)
+{
   ViewID id = FrameMetrics::NULL_SCROLL_ID;
   if (nsIFrame* rootScrollFrame = aPresContext->PresShell()->GetRootScrollFrame()) {
     if (nsIContent* content = rootScrollFrame->GetContent()) {
       id = FindOrCreateIDFor(content);
     }
   }
-  aLayer->SetFixedPositionData(id, anchor, sides);
+  return id;
 }
 
 bool
@@ -3729,7 +3736,7 @@ static void
 IncrementSubDocPresShellPaintCount(nsDisplayListBuilder* aBuilder,
                                    nsDisplayItem* aItem)
 {
-  MOZ_ASSERT(aItem->GetType() == TYPE_SUBDOCUMENT);
+  MOZ_ASSERT(aItem->GetType() == DisplayItemType::TYPE_SUBDOCUMENT);
 
   nsSubDocumentFrame* subDocFrame =
     static_cast<nsDisplaySubDocument*>(aItem)->SubDocumentFrame();
@@ -3758,7 +3765,7 @@ MergeDisplayLists(nsDisplayListBuilder* aBuilder,
     aReusedDisplayItems++;
     aItem->SetReused(true);
 
-    if (aItem->GetType() == TYPE_SUBDOCUMENT) {
+    if (aItem->GetType() == DisplayItemType::TYPE_SUBDOCUMENT) {
       IncrementSubDocPresShellPaintCount(aBuilder, aItem);
     }
   };
@@ -3798,7 +3805,7 @@ MergeDisplayLists(nsDisplayListBuilder* aBuilder,
                             oldItem->GetChildren(), oldItem->GetChildren(),
                             aTotalDisplayItems, aReusedDisplayItems);
         }
-        if (oldItem->GetType() == TYPE_LAYER_EVENT_REGIONS) {
+        if (oldItem->GetType() == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
           MergeLayerEventRegions(oldItem, i, true);
         }
         i->Destroy(aBuilder);
@@ -3827,7 +3834,7 @@ MergeDisplayLists(nsDisplayListBuilder* aBuilder,
                               aTotalDisplayItems, aReusedDisplayItems);
             old->UpdateBounds(aBuilder);
           }
-          if (old->GetType() == TYPE_LAYER_EVENT_REGIONS) {
+          if (old->GetType() == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
             MergeLayerEventRegions(old, i, false);
           }
         }
@@ -3861,7 +3868,7 @@ MergeDisplayLists(nsDisplayListBuilder* aBuilder,
                           aTotalDisplayItems, aReusedDisplayItems);
         old->UpdateBounds(aBuilder);
       }
-      if (old->GetType() == TYPE_LAYER_EVENT_REGIONS) {
+      if (old->GetType() == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
         MergeLayerEventRegions(old, nullptr, false);
       }
     } else {
@@ -4560,7 +4567,9 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
 
     std::stringstream lsStream;
     nsFrame::PrintDisplayList(&builder, list, lsStream);
-    layerManager->GetRoot()->SetDisplayListLog(lsStream.str().c_str());
+    if (layerManager->GetRoot()) {
+      layerManager->GetRoot()->SetDisplayListLog(lsStream.str().c_str());
+    }
   }
 
 #ifdef MOZ_DUMP_PAINTING
@@ -10070,8 +10079,9 @@ static void UpdateDisplayPortMarginsForPendingMetrics(FrameMetrics& aMetrics) {
 /* static */ void
 nsLayoutUtils::UpdateDisplayPortMarginsFromPendingMessages()
 {
-  if (mozilla::dom::ContentChild::GetSingleton() &&
-      mozilla::dom::ContentChild::GetSingleton()->GetIPCChannel()) {
+  if (XRE_IsContentProcess() &&
+      mozilla::layers::CompositorBridgeChild::Get() &&
+      mozilla::layers::CompositorBridgeChild::Get()->GetIPCChannel()) {
     CompositorBridgeChild::Get()->GetIPCChannel()->PeekMessages(
       [](const IPC::Message& aMsg) -> bool {
         if (aMsg.type() == mozilla::layers::PAPZ::Msg_RequestContentRepaint__ID) {

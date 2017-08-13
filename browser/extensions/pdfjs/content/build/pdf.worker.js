@@ -101,11 +101,11 @@ return /******/ (function(modules) { // webpackBootstrap
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.unreachable = exports.warn = exports.utf8StringToString = exports.stringToUTF8String = exports.stringToPDFString = exports.stringToBytes = exports.string32 = exports.shadow = exports.setVerbosityLevel = exports.ReadableStream = exports.removeNullCharacters = exports.readUint32 = exports.readUint16 = exports.readInt8 = exports.log2 = exports.loadJpegStream = exports.isEvalSupported = exports.isLittleEndian = exports.createValidAbsoluteUrl = exports.isSameOrigin = exports.isNodeJS = exports.isSpace = exports.isString = exports.isNum = exports.isInt = exports.isEmptyObj = exports.isBool = exports.isArrayBuffer = exports.isArray = exports.info = exports.globalScope = exports.getVerbosityLevel = exports.getLookupTableFactory = exports.deprecated = exports.createObjectURL = exports.createPromiseCapability = exports.createBlob = exports.bytesToString = exports.assert = exports.arraysToBytes = exports.arrayByteLength = exports.FormatError = exports.XRefParseException = exports.Util = exports.UnknownErrorException = exports.UnexpectedResponseException = exports.TextRenderingMode = exports.StreamType = exports.StatTimer = exports.PasswordResponses = exports.PasswordException = exports.PageViewport = exports.NotImplementedException = exports.NativeImageDecoding = exports.MissingPDFException = exports.MissingDataException = exports.MessageHandler = exports.InvalidPDFException = exports.CMapCompressionType = exports.ImageKind = exports.FontType = exports.AnnotationType = exports.AnnotationFlag = exports.AnnotationFieldFlag = exports.AnnotationBorderStyleType = exports.UNSUPPORTED_FEATURES = exports.VERBOSITY_LEVELS = exports.OPS = exports.IDENTITY_MATRIX = exports.FONT_IDENTITY_MATRIX = undefined;
+exports.unreachable = exports.warn = exports.utf8StringToString = exports.stringToUTF8String = exports.stringToPDFString = exports.stringToBytes = exports.string32 = exports.shadow = exports.setVerbosityLevel = exports.ReadableStream = exports.removeNullCharacters = exports.readUint32 = exports.readUint16 = exports.readInt8 = exports.log2 = exports.loadJpegStream = exports.isEvalSupported = exports.isLittleEndian = exports.createValidAbsoluteUrl = exports.isSameOrigin = exports.isNodeJS = exports.isSpace = exports.isString = exports.isNum = exports.isInt = exports.isEmptyObj = exports.isBool = exports.isArrayBuffer = exports.isArray = exports.info = exports.globalScope = exports.getVerbosityLevel = exports.getLookupTableFactory = exports.deprecated = exports.createObjectURL = exports.createPromiseCapability = exports.createBlob = exports.bytesToString = exports.assert = exports.arraysToBytes = exports.arrayByteLength = exports.FormatError = exports.XRefParseException = exports.Util = exports.UnknownErrorException = exports.UnexpectedResponseException = exports.TextRenderingMode = exports.StreamType = exports.StatTimer = exports.PasswordResponses = exports.PasswordException = exports.PageViewport = exports.NotImplementedException = exports.NativeImageDecoding = exports.MissingPDFException = exports.MissingDataException = exports.MessageHandler = exports.InvalidPDFException = exports.AbortException = exports.CMapCompressionType = exports.ImageKind = exports.FontType = exports.AnnotationType = exports.AnnotationFlag = exports.AnnotationFieldFlag = exports.AnnotationBorderStyleType = exports.UNSUPPORTED_FEATURES = exports.VERBOSITY_LEVELS = exports.OPS = exports.IDENTITY_MATRIX = exports.FONT_IDENTITY_MATRIX = undefined;
 
 __w_pdfjs_require__(36);
 
-var _streamsLib = __w_pdfjs_require__(18);
+var _streams_polyfill = __w_pdfjs_require__(37);
 
 var globalScope = typeof window !== 'undefined' && window.Math === Math ? window : typeof global !== 'undefined' && global.Math === Math ? global : typeof self !== 'undefined' && self.Math === Math ? self : undefined;
 var FONT_IDENTITY_MATRIX = [0.001, 0, 0, 0.001, 0, 0];
@@ -511,6 +511,15 @@ let FormatError = function FormatErrorClosure() {
   FormatError.prototype.name = 'FormatError';
   FormatError.constructor = FormatError;
   return FormatError;
+}();
+let AbortException = function AbortExceptionClosure() {
+  function AbortException(msg) {
+    this.name = 'AbortException';
+    this.message = msg;
+  }
+  AbortException.prototype = new Error();
+  AbortException.constructor = AbortException;
+  return AbortException;
 }();
 var NullCharactersRegExp = /\x00/g;
 function removeNullCharacters(str) {
@@ -1005,6 +1014,8 @@ function wrapReason(reason) {
     return reason;
   }
   switch (reason.name) {
+    case 'AbortException':
+      return new AbortException(reason.message);
     case 'MissingPDFException':
       return new MissingPDFException(reason.message);
     case 'UnexpectedResponseException':
@@ -1047,7 +1058,7 @@ function MessageHandler(sourceName, targetName, comObj) {
         let callback = callbacksCapabilities[callbackId];
         delete callbacksCapabilities[callbackId];
         if ('error' in data) {
-          callback.reject(data.error);
+          callback.reject(wrapReason(data.error));
         } else {
           callback.resolve(data.data);
         }
@@ -1131,7 +1142,7 @@ MessageHandler.prototype = {
     let streamId = this.streamId++;
     let sourceName = this.sourceName;
     let targetName = this.targetName;
-    return new _streamsLib.ReadableStream({
+    return new _streams_polyfill.ReadableStream({
       start: controller => {
         let startCapability = createPromiseCapability();
         this.streamControllers[streamId] = {
@@ -1387,6 +1398,7 @@ exports.AnnotationType = AnnotationType;
 exports.FontType = FontType;
 exports.ImageKind = ImageKind;
 exports.CMapCompressionType = CMapCompressionType;
+exports.AbortException = AbortException;
 exports.InvalidPDFException = InvalidPDFException;
 exports.MessageHandler = MessageHandler;
 exports.MissingDataException = MissingDataException;
@@ -1435,7 +1447,7 @@ exports.readInt8 = readInt8;
 exports.readUint16 = readUint16;
 exports.readUint32 = readUint32;
 exports.removeNullCharacters = removeNullCharacters;
-exports.ReadableStream = _streamsLib.ReadableStream;
+exports.ReadableStream = _streams_polyfill.ReadableStream;
 exports.setVerbosityLevel = setVerbosityLevel;
 exports.shadow = shadow;
 exports.string32 = string32;
@@ -4176,11 +4188,7 @@ var CalRGBCS = function CalRGBCSClosure() {
     dest[destOffset + 2] = Math.round(sB * 255);
   }
   CalRGBCS.prototype = {
-    getRgb: function CalRGBCS_getRgb(src, srcOffset) {
-      var rgb = new Uint8Array(3);
-      this.getRgbItem(src, srcOffset, rgb, 0);
-      return rgb;
-    },
+    getRgb: ColorSpace.prototype.getRgb,
     getRgbItem: function CalRGBCS_getRgbItem(src, srcOffset, dest, destOffset) {
       convertToRgb(this, src, srcOffset, dest, destOffset, 1);
     },
@@ -13415,7 +13423,14 @@ var CFFParser = function CFFParserClosure() {
       }
       cff.charset = charset;
       cff.encoding = encoding;
-      var charStringsAndSeacs = this.parseCharStrings(charStringIndex, topDict.privateDict.subrsIndex, globalSubrIndex.obj, cff.fdSelect, cff.fdArray);
+      var charStringsAndSeacs = this.parseCharStrings({
+        charStrings: charStringIndex,
+        localSubrIndex: topDict.privateDict.subrsIndex,
+        globalSubrIndex: globalSubrIndex.obj,
+        fdSelect: cff.fdSelect,
+        fdArray: cff.fdArray,
+        privateDict: topDict.privateDict
+      });
       cff.charStrings = charStringsAndSeacs.charStrings;
       cff.seacs = charStringsAndSeacs.seacs;
       cff.widths = charStringsAndSeacs.widths;
@@ -13710,7 +13725,7 @@ var CFFParser = function CFFParserClosure() {
       state.stackSize = stackSize;
       return true;
     },
-    parseCharStrings: function CFFParser_parseCharStrings(charStrings, localSubrIndex, globalSubrIndex, fdSelect, fdArray) {
+    parseCharStrings({ charStrings, localSubrIndex, globalSubrIndex, fdSelect, fdArray, privateDict }) {
       var seacs = [];
       var widths = [];
       var count = charStrings.count;
@@ -13728,6 +13743,7 @@ var CFFParser = function CFFParserClosure() {
         };
         var valid = true;
         var localSubrToUse = null;
+        var privateDictToUse = privateDict;
         if (fdSelect && fdArray.length) {
           var fdIndex = fdSelect.getFDIndex(i);
           if (fdIndex === -1) {
@@ -13739,7 +13755,8 @@ var CFFParser = function CFFParserClosure() {
             valid = false;
           }
           if (valid) {
-            localSubrToUse = fdArray[fdIndex].privateDict.subrsIndex;
+            privateDictToUse = fdArray[fdIndex].privateDict;
+            localSubrToUse = privateDictToUse.subrsIndex;
           }
         } else if (localSubrIndex) {
           localSubrToUse = localSubrIndex;
@@ -13748,7 +13765,11 @@ var CFFParser = function CFFParserClosure() {
           valid = this.parseCharString(state, charstring, localSubrToUse, globalSubrIndex);
         }
         if (state.width !== null) {
-          widths[i] = state.width;
+          const nominalWidth = privateDictToUse.getByName('nominalWidthX');
+          widths[i] = nominalWidth + state.width;
+        } else {
+          const defaultWidth = privateDictToUse.getByName('defaultWidthX');
+          widths[i] = defaultWidth;
         }
         if (state.seac !== null) {
           seacs[i] = state.seac;
@@ -17299,9 +17320,6 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
           var fn = operation.fn;
           switch (fn | 0) {
             case _util.OPS.paintXObject:
-              if (args[0].code) {
-                break;
-              }
               var name = args[0].name;
               if (!name) {
                 (0, _util.warn)('XObject must be referred to by name.');
@@ -17883,9 +17901,6 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
               break;
             case _util.OPS.paintXObject:
               flushTextContentItem();
-              if (args[0].code) {
-                break;
-              }
               if (!xobjs) {
                 xobjs = resources.get('XObject') || _primitives.Dict.empty;
               }
@@ -17976,6 +17991,9 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
         enqueueChunk();
         resolve();
       }).catch(reason => {
+        if (reason instanceof _util.AbortException) {
+          return;
+        }
         if (this.options.ignoreErrors) {
           (0, _util.warn)('getTextContent - ignoring errors during task: ' + task.name);
           flushTextContentItem();
@@ -18516,7 +18534,7 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
         capHeight: descriptor.get('CapHeight'),
         flags: descriptor.get('Flags'),
         italicAngle: descriptor.get('ItalicAngle'),
-        coded: false
+        isType3Font: false
       };
       var cMapPromise;
       if (composite) {
@@ -30447,7 +30465,7 @@ var OpenTypeFileBuilder = function OpenTypeFileBuilderClosure() {
 var ProblematicCharRanges = new Int32Array([0x0000, 0x0020, 0x007F, 0x00A1, 0x00AD, 0x00AE, 0x0600, 0x0780, 0x08A0, 0x10A0, 0x1780, 0x1800, 0x1C00, 0x1C50, 0x2000, 0x2010, 0x2011, 0x2012, 0x2028, 0x2030, 0x205F, 0x2070, 0x25CC, 0x25CD, 0x3000, 0x3001, 0x3164, 0x3165, 0xAA60, 0xAA80, 0xFFF0, 0x10000]);
 var Font = function FontClosure() {
   function Font(name, file, properties) {
-    var charCode, glyphName, unicode;
+    var charCode;
     this.name = name;
     this.loadedName = properties.loadedName;
     this.isType3Font = properties.isType3Font;
@@ -30460,6 +30478,7 @@ var Font = function FontClosure() {
     var type = properties.type;
     var subtype = properties.subtype;
     this.type = type;
+    this.subtype = subtype;
     this.fallbackName = this.isMonospace ? 'monospace' : this.isSerifFont ? 'serif' : 'sans-serif';
     this.differences = properties.differences;
     this.widths = properties.widths;
@@ -30471,6 +30490,7 @@ var Font = function FontClosure() {
     this.descent = properties.descent / PDF_GLYPH_SPACE_UNITS;
     this.fontMatrix = properties.fontMatrix;
     this.bbox = properties.bbox;
+    this.defaultEncoding = properties.defaultEncoding;
     this.toUnicode = properties.toUnicode;
     this.toFontChar = [];
     if (properties.type === 'Type3') {
@@ -30486,66 +30506,11 @@ var Font = function FontClosure() {
       this.vmetrics = properties.vmetrics;
       this.defaultVMetrics = properties.defaultVMetrics;
     }
-    var glyphsUnicodeMap;
     if (!file || file.isEmpty) {
       if (file) {
         (0, _util.warn)('Font file is empty in "' + name + '" (' + this.loadedName + ')');
       }
-      this.missingFile = true;
-      var fontName = name.replace(/[,_]/g, '-');
-      var stdFontMap = (0, _standard_fonts.getStdFontMap)(),
-          nonStdFontMap = (0, _standard_fonts.getNonStdFontMap)();
-      var isStandardFont = !!stdFontMap[fontName] || !!(nonStdFontMap[fontName] && stdFontMap[nonStdFontMap[fontName]]);
-      fontName = stdFontMap[fontName] || nonStdFontMap[fontName] || fontName;
-      this.bold = fontName.search(/bold/gi) !== -1;
-      this.italic = fontName.search(/oblique/gi) !== -1 || fontName.search(/italic/gi) !== -1;
-      this.black = name.search(/Black/g) !== -1;
-      this.remeasure = Object.keys(this.widths).length > 0;
-      if (isStandardFont && type === 'CIDFontType2' && properties.cidEncoding.indexOf('Identity-') === 0) {
-        var GlyphMapForStandardFonts = (0, _standard_fonts.getGlyphMapForStandardFonts)();
-        var map = [];
-        for (charCode in GlyphMapForStandardFonts) {
-          map[+charCode] = GlyphMapForStandardFonts[charCode];
-        }
-        if (/Arial-?Black/i.test(name)) {
-          var SupplementalGlyphMapForArialBlack = (0, _standard_fonts.getSupplementalGlyphMapForArialBlack)();
-          for (charCode in SupplementalGlyphMapForArialBlack) {
-            map[+charCode] = SupplementalGlyphMapForArialBlack[charCode];
-          }
-        }
-        var isIdentityUnicode = this.toUnicode instanceof IdentityToUnicodeMap;
-        if (!isIdentityUnicode) {
-          this.toUnicode.forEach(function (charCode, unicodeCharCode) {
-            map[+charCode] = unicodeCharCode;
-          });
-        }
-        this.toFontChar = map;
-        this.toUnicode = new ToUnicodeMap(map);
-      } else if (/Symbol/i.test(fontName)) {
-        this.toFontChar = buildToFontChar(_encodings.SymbolSetEncoding, (0, _glyphlist.getGlyphsUnicode)(), properties.differences);
-      } else if (/Dingbats/i.test(fontName)) {
-        if (/Wingdings/i.test(name)) {
-          (0, _util.warn)('Non-embedded Wingdings font, falling back to ZapfDingbats.');
-        }
-        this.toFontChar = buildToFontChar(_encodings.ZapfDingbatsEncoding, (0, _glyphlist.getDingbatsGlyphsUnicode)(), properties.differences);
-      } else if (isStandardFont) {
-        this.toFontChar = buildToFontChar(properties.defaultEncoding, (0, _glyphlist.getGlyphsUnicode)(), properties.differences);
-      } else {
-        glyphsUnicodeMap = (0, _glyphlist.getGlyphsUnicode)();
-        this.toUnicode.forEach((charCode, unicodeCharCode) => {
-          if (!this.composite) {
-            glyphName = properties.differences[charCode] || properties.defaultEncoding[charCode];
-            unicode = (0, _unicode.getUnicodeForGlyph)(glyphName, glyphsUnicodeMap);
-            if (unicode !== -1) {
-              unicodeCharCode = unicode;
-            }
-          }
-          this.toFontChar[charCode] = unicodeCharCode;
-        });
-      }
-      this.loadedName = fontName.split('-')[0];
-      this.loading = false;
-      this.fontType = getFontType(type, subtype);
+      this.fallbackToSystemFont();
       return;
     }
     if (subtype === 'Type1C') {
@@ -30574,29 +30539,38 @@ var Font = function FontClosure() {
     if (subtype === 'OpenType' && type !== 'OpenType') {
       type = 'OpenType';
     }
-    var data;
-    switch (type) {
-      case 'MMType1':
-        (0, _util.info)('MMType1 font (' + name + '), falling back to Type1.');
-      case 'Type1':
-      case 'CIDFontType0':
-        this.mimetype = 'font/opentype';
-        var cff = subtype === 'Type1C' || subtype === 'CIDFontType0C' ? new CFFFont(file, properties) : new Type1Font(name, file, properties);
-        adjustWidths(properties);
-        data = this.convert(name, cff, properties);
-        break;
-      case 'OpenType':
-      case 'TrueType':
-      case 'CIDFontType2':
-        this.mimetype = 'font/opentype';
-        data = this.checkAndRepair(name, file, properties);
-        if (this.isOpenType) {
+    try {
+      var data;
+      switch (type) {
+        case 'MMType1':
+          (0, _util.info)('MMType1 font (' + name + '), falling back to Type1.');
+        case 'Type1':
+        case 'CIDFontType0':
+          this.mimetype = 'font/opentype';
+          var cff = subtype === 'Type1C' || subtype === 'CIDFontType0C' ? new CFFFont(file, properties) : new Type1Font(name, file, properties);
           adjustWidths(properties);
-          type = 'OpenType';
-        }
-        break;
-      default:
-        throw new _util.FormatError(`Font ${type} is not supported`);
+          data = this.convert(name, cff, properties);
+          break;
+        case 'OpenType':
+        case 'TrueType':
+        case 'CIDFontType2':
+          this.mimetype = 'font/opentype';
+          data = this.checkAndRepair(name, file, properties);
+          if (this.isOpenType) {
+            adjustWidths(properties);
+            type = 'OpenType';
+          }
+          break;
+        default:
+          throw new _util.FormatError(`Font ${type} is not supported`);
+      }
+    } catch (e) {
+      if (!(e instanceof _util.FormatError)) {
+        throw e;
+      }
+      (0, _util.warn)(e);
+      this.fallbackToSystemFont();
+      return;
     }
     this.data = data;
     this.fontType = getFontType(type, subtype);
@@ -30690,6 +30664,9 @@ var Font = function FontClosure() {
     for (var originalCharCode in charCodeToGlyphId) {
       originalCharCode |= 0;
       var glyphId = charCodeToGlyphId[originalCharCode];
+      if (missingGlyphs[glyphId]) {
+        continue;
+      }
       var fontCharCode = originalCharCode;
       var hasUnicodeValue = false;
       if (!isIdentityUnicode && toUnicode.has(originalCharCode)) {
@@ -30699,14 +30676,18 @@ var Font = function FontClosure() {
           fontCharCode = unicode.charCodeAt(0);
         }
       }
-      if (!missingGlyphs[glyphId] && (usedFontCharCodes[fontCharCode] !== undefined || isProblematicUnicodeLocation(fontCharCode) || isSymbolic && !hasUnicodeValue) && nextAvailableFontCharCode <= PRIVATE_USE_OFFSET_END) {
+      if (usedFontCharCodes[fontCharCode] !== undefined || isProblematicUnicodeLocation(fontCharCode) || isSymbolic && !hasUnicodeValue) {
         do {
+          if (nextAvailableFontCharCode > PRIVATE_USE_OFFSET_END) {
+            (0, _util.warn)('Ran out of space in font private use area.');
+            break;
+          }
           fontCharCode = nextAvailableFontCharCode++;
           if (SKIP_PRIVATE_USE_RANGE_F000_TO_F01F && fontCharCode === 0xF000) {
             fontCharCode = 0xF020;
             nextAvailableFontCharCode = fontCharCode + 1;
           }
-        } while (usedFontCharCodes[fontCharCode] !== undefined && nextAvailableFontCharCode <= PRIVATE_USE_OFFSET_END);
+        } while (usedFontCharCodes[fontCharCode] !== undefined);
       }
       newMap[fontCharCode] = glyphId;
       toFontChar[originalCharCode] = fontCharCode;
@@ -30727,6 +30708,12 @@ var Font = function FontClosure() {
       codes.push({
         fontCharCode: charCode | 0,
         glyphId: glyphs[charCode]
+      });
+    }
+    if (codes.length === 0) {
+      codes.push({
+        fontCharCode: 0,
+        glyphId: 0
       });
     }
     codes.sort(function fontGetRangesSort(a, b) {
@@ -30963,6 +30950,67 @@ var Font = function FontClosure() {
       }
       return data;
     },
+    fallbackToSystemFont: function Font_fallbackToSystemFont() {
+      this.missingFile = true;
+      var charCode, unicode;
+      var name = this.name;
+      var type = this.type;
+      var subtype = this.subtype;
+      var fontName = name.replace(/[,_]/g, '-');
+      var stdFontMap = (0, _standard_fonts.getStdFontMap)(),
+          nonStdFontMap = (0, _standard_fonts.getNonStdFontMap)();
+      var isStandardFont = !!stdFontMap[fontName] || !!(nonStdFontMap[fontName] && stdFontMap[nonStdFontMap[fontName]]);
+      fontName = stdFontMap[fontName] || nonStdFontMap[fontName] || fontName;
+      this.bold = fontName.search(/bold/gi) !== -1;
+      this.italic = fontName.search(/oblique/gi) !== -1 || fontName.search(/italic/gi) !== -1;
+      this.black = name.search(/Black/g) !== -1;
+      this.remeasure = Object.keys(this.widths).length > 0;
+      if (isStandardFont && type === 'CIDFontType2' && this.cidEncoding.indexOf('Identity-') === 0) {
+        var GlyphMapForStandardFonts = (0, _standard_fonts.getGlyphMapForStandardFonts)();
+        var map = [];
+        for (charCode in GlyphMapForStandardFonts) {
+          map[+charCode] = GlyphMapForStandardFonts[charCode];
+        }
+        if (/Arial-?Black/i.test(name)) {
+          var SupplementalGlyphMapForArialBlack = (0, _standard_fonts.getSupplementalGlyphMapForArialBlack)();
+          for (charCode in SupplementalGlyphMapForArialBlack) {
+            map[+charCode] = SupplementalGlyphMapForArialBlack[charCode];
+          }
+        }
+        var isIdentityUnicode = this.toUnicode instanceof IdentityToUnicodeMap;
+        if (!isIdentityUnicode) {
+          this.toUnicode.forEach(function (charCode, unicodeCharCode) {
+            map[+charCode] = unicodeCharCode;
+          });
+        }
+        this.toFontChar = map;
+        this.toUnicode = new ToUnicodeMap(map);
+      } else if (/Symbol/i.test(fontName)) {
+        this.toFontChar = buildToFontChar(_encodings.SymbolSetEncoding, (0, _glyphlist.getGlyphsUnicode)(), this.differences);
+      } else if (/Dingbats/i.test(fontName)) {
+        if (/Wingdings/i.test(name)) {
+          (0, _util.warn)('Non-embedded Wingdings font, falling back to ZapfDingbats.');
+        }
+        this.toFontChar = buildToFontChar(_encodings.ZapfDingbatsEncoding, (0, _glyphlist.getDingbatsGlyphsUnicode)(), this.differences);
+      } else if (isStandardFont) {
+        this.toFontChar = buildToFontChar(this.defaultEncoding, (0, _glyphlist.getGlyphsUnicode)(), this.differences);
+      } else {
+        var glyphsUnicodeMap = (0, _glyphlist.getGlyphsUnicode)();
+        this.toUnicode.forEach((charCode, unicodeCharCode) => {
+          if (!this.composite) {
+            var glyphName = this.differences[charCode] || this.defaultEncoding[charCode];
+            unicode = (0, _unicode.getUnicodeForGlyph)(glyphName, glyphsUnicodeMap);
+            if (unicode !== -1) {
+              unicodeCharCode = unicode;
+            }
+          }
+          this.toFontChar[charCode] = unicodeCharCode;
+        });
+      }
+      this.loadedName = fontName.split('-')[0];
+      this.loading = false;
+      this.fontType = getFontType(type, subtype);
+    },
     checkAndRepair: function Font_checkAndRepair(name, font, properties) {
       function readTableEntry(file) {
         var tag = (0, _util.bytesToString)(file.getBytes(4));
@@ -31017,6 +31065,9 @@ var Font = function FontClosure() {
           var encodingId = font.getUint16();
           var offset = font.getInt32() >>> 0;
           var useTable = false;
+          if (potentialTable && potentialTable.platformId === platformId && potentialTable.encodingId === encodingId) {
+            continue;
+          }
           if (platformId === 0 && encodingId === 0) {
             useTable = true;
           } else if (platformId === 1 && encodingId === 0) {
@@ -31262,7 +31313,7 @@ var Font = function FontClosure() {
             data[50] = 0;
             data[51] = 1;
           } else {
-            (0, _util.warn)('Could not fix indexToLocFormat: ' + indexToLocFormat);
+            throw new _util.FormatError('Could not fix indexToLocFormat: ' + indexToLocFormat);
           }
         }
       }
@@ -31302,7 +31353,6 @@ var Font = function FontClosure() {
         var startOffset = itemDecode(locaData, 0);
         var writeOffset = 0;
         var missingGlyphData = Object.create(null);
-        missingGlyphData[0] = true;
         itemEncode(locaData, 0, writeOffset);
         var i, j;
         var locaCount = dupFirstEntry ? numGlyphs - 1 : numGlyphs;
@@ -31863,11 +31913,9 @@ var Font = function FontClosure() {
               if (cmapMappings[i].charCode !== unicodeOrCharCode) {
                 continue;
               }
-              if (hasGlyph(cmapMappings[i].glyphId)) {
-                charCodeToGlyphId[charCode] = cmapMappings[i].glyphId;
-                found = true;
-                break;
-              }
+              charCodeToGlyphId[charCode] = cmapMappings[i].glyphId;
+              found = true;
+              break;
             }
             if (!found && properties.glyphNames) {
               var glyphId = properties.glyphNames.indexOf(glyphName);
@@ -31878,9 +31926,6 @@ var Font = function FontClosure() {
                 charCodeToGlyphId[charCode] = glyphId;
                 found = true;
               }
-            }
-            if (!found) {
-              charCodeToGlyphId[charCode] = 0;
             }
           }
         } else if (cmapPlatformId === 0 && cmapEncodingId === 0) {
@@ -39838,8 +39883,8 @@ exports.Type1Parser = Type1Parser;
 "use strict";
 
 
-var pdfjsVersion = '1.8.581';
-var pdfjsBuild = '343b4dc2';
+var pdfjsVersion = '1.8.618';
+var pdfjsBuild = '21cc2c02';
 var pdfjsCoreWorker = __w_pdfjs_require__(17);
 exports.WorkerMessageHandler = pdfjsCoreWorker.WorkerMessageHandler;
 
@@ -39851,6 +39896,30 @@ exports.WorkerMessageHandler = pdfjsCoreWorker.WorkerMessageHandler;
 
 
 ;
+
+/***/ }),
+/* 37 */
+/***/ (function(module, exports, __w_pdfjs_require__) {
+
+"use strict";
+
+
+let isReadableStreamSupported = false;
+if (typeof ReadableStream !== 'undefined') {
+  try {
+    new ReadableStream({
+      start(controller) {
+        controller.close();
+      }
+    });
+    isReadableStreamSupported = true;
+  } catch (e) {}
+}
+if (isReadableStreamSupported) {
+  exports.ReadableStream = ReadableStream;
+} else {
+  exports.ReadableStream = __w_pdfjs_require__(18).ReadableStream;
+}
 
 /***/ })
 /******/ ]);

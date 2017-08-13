@@ -56,11 +56,6 @@ public:
 
   TextEditor();
 
-  virtual TextEditor* AsTextEditor() override { return this; }
-  virtual const TextEditor* AsTextEditor() const override { return this; }
-  virtual HTMLEditor* AsHTMLEditor() override;
-  virtual const HTMLEditor* AsHTMLEditor() const override;
-
   // nsIPlaintextEditor methods
   NS_DECL_NSIPLAINTEXTEDITOR
 
@@ -248,5 +243,17 @@ protected:
 };
 
 } // namespace mozilla
+
+mozilla::TextEditor*
+nsIEditor::AsTextEditor()
+{
+  return static_cast<mozilla::TextEditor*>(this);
+}
+
+const mozilla::TextEditor*
+nsIEditor::AsTextEditor() const
+{
+  return static_cast<const mozilla::TextEditor*>(this);
+}
 
 #endif // #ifndef mozilla_TextEditor_h

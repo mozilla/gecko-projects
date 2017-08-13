@@ -15,6 +15,7 @@ sys.path.insert(0, SCRIPT_DIR)
 from argparse import Namespace
 from collections import defaultdict
 from contextlib import closing
+import copy
 import ctypes
 import glob
 import json
@@ -40,7 +41,7 @@ import zipfile
 import bisection
 
 from ctypes.util import find_library
-from datetime import datetime
+from datetime import datetime, timedelta
 from manifestparser import TestManifest
 from manifestparser.filters import (
     chunk_by_dir,
@@ -834,6 +835,7 @@ class MochitestDesktop(object):
         self.websocketProcessBridge = None
         self.sslTunnel = None
         self.tests_by_manifest = defaultdict(list)
+        self.prefs_by_manifest = defaultdict(set)
         self._active_tests = None
         self._locations = None
 
@@ -969,7 +971,7 @@ class MochitestDesktop(object):
                 self.urlOpts.append("runUntilFailure=1")
             if options.repeat:
                 self.urlOpts.append("repeat=%d" % options.repeat)
-            if len(options.test_paths) == 1 and options.repeat > 0 and os.path.isfile(
+            if len(options.test_paths) == 1 and os.path.isfile(
                 os.path.join(
                     self.oldcwd,
                     os.path.dirname(__file__),
@@ -1059,7 +1061,7 @@ class MochitestDesktop(object):
         testURL = "/".join([testHost, self.TEST_PATH])
 
         if len(options.test_paths) == 1:
-            if options.repeat > 0 and os.path.isfile(
+            if os.path.isfile(
                 os.path.join(
                     self.oldcwd,
                     os.path.dirname(__file__),
@@ -1482,8 +1484,14 @@ toolbar#nav-bar {
 
             manifest_relpath = os.path.relpath(test['manifest'], manifest_root)
             self.tests_by_manifest[manifest_relpath].append(tp)
+            self.prefs_by_manifest[manifest_relpath].add(test.get('prefs'))
 
-            testob = {'path': tp}
+            if 'prefs' in test and not options.runByManifest:
+                self.log.error("parsing {}: runByManifest mode must be enabled to "
+                               "set the `prefs` key".format(manifest_relpath))
+                sys.exit(1)
+
+            testob = {'path': tp, 'manifest': manifest_relpath}
             if 'disabled' in test:
                 testob['disabled'] = test['disabled']
             if 'expected' in test:
@@ -1497,6 +1505,17 @@ toolbar#nav-bar {
                 if patterns:
                     testob['expected'] = patterns
             paths.append(testob)
+
+        # The 'prefs' key needs to be set in the DEFAULT section, unfortunately
+        # we can't tell what comes from DEFAULT or not. So to validate this, we
+        # stash all prefs from tests in the same manifest into a set. If the
+        # length of the set > 1, then we know 'prefs' didn't come from DEFAULT.
+        pref_not_default = [m for m, p in self.prefs_by_manifest.iteritems() if len(p) > 1]
+        if pref_not_default:
+            self.log.error("The 'prefs' key must be set in the DEFAULT section of a "
+                           "manifest. Fix the following manifests: {}".format(
+                            '\n'.join(pref_not_default)))
+            sys.exit(1)
 
         def path_sort(ob1, ob2):
             path1 = ob1['path'].split('/')
@@ -1794,11 +1813,11 @@ toolbar#nav-bar {
                 sandbox_whitelist_paths.append(options.topsrcdir)
         except AttributeError:
             pass
-        if platform.system() == "Linux":
-            # Trailing slashes are needed to indicate directories on Linux
-            for idx, path in enumerate(sandbox_whitelist_paths):
-                if not path.endswith("/"):
-                    sandbox_whitelist_paths[idx] = path + "/"
+        if (platform.system() == "Linux" or
+            platform.system() in ("Windows", "Microsoft")):
+            # Trailing slashes are needed to indicate directories on Linux and Windows
+            sandbox_whitelist_paths = map(lambda p: os.path.join(p, ""),
+                                          sandbox_whitelist_paths)
 
         # interpolate preferences
         interpolation = {
@@ -2252,21 +2271,6 @@ toolbar#nav-bar {
                 norm_paths.append(p)
         return norm_paths
 
-    def getTestsToRun(self, options):
-        """
-          This method makes a list of tests that are to be run. Required mainly for --bisect-chunk.
-        """
-        tests = self.getActiveTests(options)
-        self.logPreamble(tests)
-
-        testsToRun = []
-        for test in tests:
-            if 'disabled' in test:
-                continue
-            testsToRun.append(test['path'])
-
-        return testsToRun
-
     def runMochitests(self, options, testsToRun):
         "This is a base method for calling other methods in this class for --bisect-chunk."
         # Making an instance of bisect class for --bisect-chunk option.
@@ -2319,6 +2323,111 @@ toolbar#nav-bar {
                 httpsTests.append(test)
         return {'http': httpTests, 'https': httpsTests}
 
+    def verifyTests(self, options):
+        """
+        Support --verify mode: Run test(s) many times in a variety of
+        configurations/environments in an effort to find intermittent
+        failures.
+        """
+
+        # Number of times to repeat test(s) when running with --repeat
+        VERIFY_REPEAT = 20
+        # Number of times to repeat test(s) when running test in
+        VERIFY_REPEAT_SINGLE_BROWSER = 10
+
+        def step1():
+            stepOptions = copy.deepcopy(options)
+            stepOptions.repeat = VERIFY_REPEAT
+            stepOptions.keep_open = False
+            result = self.runTests(stepOptions)
+            self.message_logger.finish()
+            return result
+
+        def step2():
+            stepOptions = copy.deepcopy(options)
+            stepOptions.repeat = 0
+            stepOptions.keep_open = False
+            for i in xrange(VERIFY_REPEAT_SINGLE_BROWSER):
+                result = self.runTests(stepOptions)
+                self.message_logger.finish()
+                if result != 0:
+                    break
+            return result
+
+        def step3():
+            stepOptions = copy.deepcopy(options)
+            stepOptions.repeat = VERIFY_REPEAT
+            stepOptions.keep_open = False
+            stepOptions.environment.append("MOZ_CHAOSMODE=")
+            result = self.runTests(stepOptions)
+            self.message_logger.finish()
+            return result
+
+        def step4():
+            stepOptions = copy.deepcopy(options)
+            stepOptions.repeat = 0
+            stepOptions.keep_open = False
+            stepOptions.environment.append("MOZ_CHAOSMODE=")
+            for i in xrange(VERIFY_REPEAT_SINGLE_BROWSER):
+                result = self.runTests(stepOptions)
+                self.message_logger.finish()
+                if result != 0:
+                    break
+            return result
+
+        steps = [
+            ("1. Run each test %d times in one browser." % VERIFY_REPEAT,
+             step1),
+            ("2. Run each test %d times in a new browser each time." %
+             VERIFY_REPEAT_SINGLE_BROWSER,
+             step2),
+            ("3. Run each test %d times in one browser, in chaos mode." %
+             VERIFY_REPEAT,
+             step3),
+            ("4. Run each test %d times in a new browser each time, "
+             "in chaos mode." % VERIFY_REPEAT_SINGLE_BROWSER,
+             step4),
+        ]
+
+        stepResults = {}
+        for (descr, step) in steps:
+            stepResults[descr] = "not run / incomplete"
+
+        startTime = datetime.now()
+        maxTime = timedelta(seconds=options.verify_max_time)
+        finalResult = "PASSED"
+        for (descr, step) in steps:
+            if (datetime.now() - startTime) > maxTime:
+                self.log.info("::: Test verification is taking too long: Giving up!")
+                self.log.info("::: So far, all checks passed, but not all checks were run.")
+                break
+            self.log.info(':::')
+            self.log.info('::: Running test verification step "%s"...' % descr)
+            self.log.info(':::')
+            result = step()
+            if result != 0:
+                stepResults[descr] = "FAIL"
+                finalResult = "FAILED!"
+                break
+            stepResults[descr] = "Pass"
+
+        self.logPreamble([])
+
+        self.log.info(':::')
+        self.log.info('::: Test verification summary for:')
+        self.log.info(':::')
+        tests = self.getActiveTests(options)
+        for test in tests:
+            self.log.info('::: '+test['path'])
+        self.log.info(':::')
+        for descr in sorted(stepResults.keys()):
+            self.log.info('::: %s : %s' % (descr, stepResults[descr]))
+        self.log.info(':::')
+        self.log.info('::: Test verification %s' % finalResult)
+        self.log.info(':::')
+
+        return result
+
     def runTests(self, options):
         """ Prepare, configure, run tests and cleanup """
 
@@ -2341,25 +2450,34 @@ toolbar#nav-bar {
         if options.cleanupCrashes:
             mozcrash.cleanup_pending_crash_reports()
 
-        # Until we have all green, this only runs on bc*/dt*/mochitest-chrome
-        # jobs, not jetpack*, a11yr (for perf reasons), or plain
+        tests = self.getActiveTests(options)
+        self.logPreamble(tests)
+        tests = [t for t in tests if 'disabled' not in t]
 
-        testsToRun = self.getTestsToRun(options)
-        if not options.runByDir:
-            return self.runMochitests(options, testsToRun)
+        # Until we have all green, this does not run on jetpack*, or a11y (for perf reasons)
+        if not options.runByManifest:
+            return self.runMochitests(options, [t['path'] for t in tests])
 
-        # code for --run-by-dir
-        dirs = self.getDirectories(options)
-
+        # code for --run-by-manifest
+        manifests = set(t['manifest'] for t in tests)
         result = 1  # default value, if no tests are run.
-        for d in dirs:
-            print("dir: %s" % d)
-            tests_in_dir = [t for t in testsToRun if os.path.dirname(t) == d]
+        origPrefs = options.extraPrefs[:]
+        for m in sorted(manifests):
+            self.log.info("Running manifest: {}".format(m))
 
-            # If we are using --run-by-dir, we should not use the profile path (if) provided
+            prefs = list(self.prefs_by_manifest[m])[0]
+            options.extraPrefs = origPrefs[:]
+            if prefs:
+                prefs = prefs.strip().split()
+                self.log.info("The following extra prefs will be set:\n  {}".format(
+                    '\n  '.join(prefs)))
+                options.extraPrefs.extend(prefs)
+
+            # If we are using --run-by-manifest, we should not use the profile path (if) provided
             # by the user, since we need to create a new directory for each run. We would face
             # problems if we use the directory provided by the user.
-            result = self.runMochitests(options, tests_in_dir)
+            tests_in_manifest = [t['path'] for t in tests if t['manifest'] == m]
+            result = self.runMochitests(options, tests_in_manifest)
 
             # Dump the logging buffer
             self.message_logger.dump_buffered()
@@ -2391,7 +2509,7 @@ toolbar#nav-bar {
     def doTests(self, options, testsToFilter=None):
         # A call to initializeLooping method is required in case of --run-by-dir or --bisect-chunk
         # since we need to initialize variables for each loop.
-        if options.bisectChunk or options.runByDir:
+        if options.bisectChunk or options.runByManifest:
             self.initializeLooping(options)
 
         # get debugger info, a dict of:
@@ -2781,22 +2899,6 @@ toolbar#nav-bar {
                 self.shutdownLeaks.log(message)
             return message
 
-    def getDirectories(self, options):
-        """
-            Make the list of directories by parsing manifests
-        """
-        tests = self.getActiveTests(options)
-        dirlist = []
-        for test in tests:
-            if 'disabled' in test:
-                continue
-
-            rootdir = '/'.join(test['path'].split('/')[:-1])
-            if rootdir not in dirlist:
-                dirlist.append(rootdir)
-
-        return dirlist
-
 
 def run_test_harness(parser, options):
     parser.validate(options)
@@ -2807,12 +2909,14 @@ def run_test_harness(parser, options):
 
     runner = MochitestDesktop(options.flavor, logger_options, quiet=options.quiet)
 
-    options.runByDir = False
-
+    options.runByManifest = False
     if options.flavor in ('plain', 'browser', 'chrome'):
-        options.runByDir = True
+        options.runByManifest = True
 
-    result = runner.runTests(options)
+    if options.verify:
+        result = runner.verifyTests(options)
+    else:
+        result = runner.runTests(options)
 
     if runner.mozLogs:
         with zipfile.ZipFile("{}/mozLogs.zip".format(runner.browserEnv["MOZ_UPLOAD_DIR"]),

@@ -13,7 +13,7 @@ const { batchActions } = require("devtools/client/shared/redux/middleware/deboun
 const { createContextMenu } = require("devtools/client/webconsole/new-console-output/utils/context-menu");
 const { configureStore } = require("devtools/client/webconsole/new-console-output/store");
 
-const EventEmitter = require("devtools/shared/event-emitter");
+const EventEmitter = require("devtools/shared/old-event-emitter");
 const ConsoleOutput = React.createFactory(require("devtools/client/webconsole/new-console-output/components/console-output"));
 const FilterBar = React.createFactory(require("devtools/client/webconsole/new-console-output/components/filter-bar"));
 
@@ -46,15 +46,20 @@ NewConsoleOutputWrapper.prototype = {
         return;
       }
 
-      // Do not focus if something is selected
-      let selection = this.document.defaultView.getSelection();
-      if (selection && !selection.isCollapsed) {
+      // Do not focus if a link was clicked
+      let target = event.originalTarget || event.target;
+      if (target.closest("a")) {
         return;
       }
 
-      // Do not focus if a link was clicked
-      if (event.target.nodeName.toLowerCase() === "a" ||
-          event.target.parentNode.nodeName.toLowerCase() === "a") {
+      // Do not focus if something other than the output region was clicked
+      if (!target.closest(".webconsole-output")) {
+        return;
+      }
+
+      // Do not focus if something is selected
+      let selection = this.document.defaultView.getSelection();
+      if (selection && !selection.isCollapsed) {
         return;
       }
 

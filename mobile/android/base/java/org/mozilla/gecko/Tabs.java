@@ -21,13 +21,10 @@ import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.distribution.PartnerBrowserCustomizationsClient;
 import org.mozilla.gecko.gfx.LayerView;
-import org.mozilla.gecko.mma.MmaDelegate;
 import org.mozilla.gecko.mozglue.SafeIntent;
 import org.mozilla.gecko.notifications.WhatsNewReceiver;
 import org.mozilla.gecko.preferences.GeckoPreferences;
-import org.mozilla.gecko.promotion.AddToHomeScreenPromotion;
 import org.mozilla.gecko.reader.ReaderModeUtils;
-import org.mozilla.gecko.skin.SkinConfig;
 import org.mozilla.gecko.util.BundleEventListener;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoBundle;
@@ -50,8 +47,6 @@ import android.support.annotation.UiThread;
 import android.support.v4.content.ContextCompat;
 import android.text.TextUtils;
 import android.util.Log;
-
-import static org.mozilla.gecko.mma.MmaDelegate.NEW_TAB;
 
 
 public class Tabs implements BundleEventListener {
@@ -1052,16 +1047,11 @@ public class Tabs implements BundleEventListener {
      * the user's homepage.
      */
     public Tab addTab() {
-        MmaDelegate.track(NEW_TAB);
         return loadUrl(getHomepageForNewTab(mAppContext), Tabs.LOADURL_NEW_TAB);
     }
 
     public Tab addPrivateTab() {
-        if (SkinConfig.isPhoton()) {
-            return loadUrl(getHomepageForNewTab(mAppContext), Tabs.LOADURL_NEW_TAB | Tabs.LOADURL_PRIVATE);
-        } else {
-            return loadUrl(AboutPages.PRIVATEBROWSING, Tabs.LOADURL_NEW_TAB | Tabs.LOADURL_PRIVATE);
-        }
+        return loadUrl(getHomepageForNewTab(mAppContext), Tabs.LOADURL_NEW_TAB | Tabs.LOADURL_PRIVATE);
     }
 
     /**

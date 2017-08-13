@@ -21,6 +21,7 @@
 #include "mozilla/net/HttpChannelChild.h"
 
 #include "AltDataOutputStreamChild.h"
+#include "CookieServiceChild.h"
 #include "HttpBackgroundChannelChild.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsPrimitives.h"
@@ -54,6 +55,7 @@
 #include "nsSocketTransportService2.h"
 #include "nsStreamUtils.h"
 #include "nsThreadUtils.h"
+#include "nsCORSListenerProxy.h"
 
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
@@ -196,6 +198,12 @@ HttpChannelChild::HttpChannelChild()
     sSecurityPrefChecked = true;
   }
 #endif
+
+  // Ensure that the cookie service is initialized before the first
+  // IPC HTTP channel is created.
+  // We require that the parent cookie service actor exists while
+  // processing HTTP responses.
+  CookieServiceChild::GetSingleton();
 }
 
 HttpChannelChild::~HttpChannelChild()
@@ -216,6 +224,14 @@ HttpChannelChild::ReleaseMainThreadOnlyReferences()
 
   nsTArray<nsCOMPtr<nsISupports>> arrayToRelease;
   arrayToRelease.AppendElement(mCacheKey.forget());
+  arrayToRelease.AppendElement(mRedirectChannelChild.forget());
+
+  // To solve multiple inheritence of nsISupports in InterceptStreamListener
+  already_AddRefed<nsIStreamListener> listener = mInterceptListener.forget();
+  arrayToRelease.AppendElement(listener.take());
+
+  arrayToRelease.AppendElement(mInterceptedRedirectListener.forget());
+  arrayToRelease.AppendElement(mInterceptedRedirectContext.forget());
 
   NS_DispatchToMainThread(new ProxyReleaseRunnable(Move(arrayToRelease)));
 }
@@ -1145,6 +1161,7 @@ HttpChannelChild::DoOnStopRequest(nsIRequest* aRequest, nsresult aChannelStatus,
       aChannelStatus == NS_ERROR_MALWARE_URI ||
       aChannelStatus == NS_ERROR_UNWANTED_URI ||
       aChannelStatus == NS_ERROR_BLOCKED_URI ||
+      aChannelStatus == NS_ERROR_HARMFUL_URI ||
       aChannelStatus == NS_ERROR_PHISHING_URI) {
     nsCString list, provider, prefix;
 
@@ -3596,6 +3613,23 @@ HttpChannelChild::ActorDestroy(ActorDestroyReason aWhy)
   if (aWhy != Deletion) {
     CleanupBackgroundChannel();
   }
+}
+
+mozilla::ipc::IPCResult
+HttpChannelChild::RecvLogBlockedCORSRequest(const nsString& aMessage)
+{
+  Unused << LogBlockedCORSRequest(aMessage);
+  return IPC_OK();
+}
+
+NS_IMETHODIMP
+HttpChannelChild::LogBlockedCORSRequest(const nsAString & aMessage)
+{
+  if (mLoadInfo) {
+    uint64_t innerWindowID = mLoadInfo->GetInnerWindowID();
+    nsCORSListenerProxy::LogBlockedCORSRequest(innerWindowID, aMessage);
+  }
+  return NS_OK;
 }
 
 } // namespace net

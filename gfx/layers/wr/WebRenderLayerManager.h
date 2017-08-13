@@ -24,6 +24,9 @@
 class nsIWidget;
 
 namespace mozilla {
+
+struct ActiveScrolledRoot;
+
 namespace layers {
 
 class CompositorBridgeChild;
@@ -67,6 +70,16 @@ public:
                  mozilla::wr::DisplayListBuilder& aBuilder,
                  const StackingContextHelper& aSc,
                  const LayerRect& aRect);
+  already_AddRefed<WebRenderFallbackData> GenerateFallbackData(nsDisplayItem* aItem,
+                                                               wr::DisplayListBuilder& aBuilder,
+                                                               nsDisplayListBuilder* aDisplayListBuilder,
+                                                               LayerRect& aImageRect,
+                                                               LayerPoint& aOffset);
+  Maybe<wr::WrImageMask> BuildWrMaskImage(nsDisplayItem* aItem,
+                                          wr::DisplayListBuilder& aBuilder,
+                                          const StackingContextHelper& aSc,
+                                          nsDisplayListBuilder* aDisplayListBuilder,
+                                          const LayerRect& aBounds);
   bool PushItemAsImage(nsDisplayItem* aItem,
                        wr::DisplayListBuilder& aBuilder,
                        const StackingContextHelper& aSc,
@@ -177,10 +190,13 @@ public:
   // means we need some other place to cached the data between transaction.
   // We store the data in frame's property.
   template<class T> already_AddRefed<T>
-  CreateOrRecycleWebRenderUserData(nsDisplayItem* aItem)
+  CreateOrRecycleWebRenderUserData(nsDisplayItem* aItem, bool* aOutIsRecycled = nullptr)
   {
     MOZ_ASSERT(aItem);
     nsIFrame* frame = aItem->Frame();
+    if (aOutIsRecycled) {
+      *aOutIsRecycled = true;
+    }
 
     if (!frame->HasProperty(nsIFrame::WebRenderUserDataProperty())) {
       frame->AddProperty(nsIFrame::WebRenderUserDataProperty(),
@@ -192,10 +208,16 @@ public:
     RefPtr<WebRenderUserData>& data = userDataTable->GetOrInsert(aItem->GetPerFrameKey());
     if (!data || (data->GetType() != T::Type())) {
       data = new T(this);
+      if (aOutIsRecycled) {
+        *aOutIsRecycled = false;
+      }
     }
 
     MOZ_ASSERT(data);
     MOZ_ASSERT(data->GetType() == T::Type());
+    if (T::Type() == WebRenderUserData::UserDataType::eCanvas) {
+      mLastCanvasDatas.PutEntry(data->AsCanvasData());
+    }
     RefPtr<T> res = static_cast<T*>(data.get());
     return res.forget();
   }
@@ -245,6 +267,26 @@ private:
   // We use this as a temporary data structure while building the mScrollData
   // inside a layers-free transaction.
   std::vector<WebRenderLayerScrollData> mLayerScrollData;
+  // We use this as a temporary data structure to track the current display
+  // item's ASR as we recurse in CreateWebRenderCommandsFromDisplayList. We
+  // need this so that WebRenderLayerScrollData items that deeper in the
+  // tree don't duplicate scroll metadata that their ancestors already have.
+  std::vector<const ActiveScrolledRoot*> mAsrStack;
+
+public:
+  // Note: two DisplayItemClipChain* A and B might actually be "equal" (as per
+  // DisplayItemClipChain::Equal(A, B)) even though they are not the same pointer
+  // (A != B). In this hopefully-rare case, they will get separate entries
+  // in this map when in fact we could collapse them. However, to collapse
+  // them involves writing a custom hash function for the pointer type such that
+  // A and B hash to the same things whenever DisplayItemClipChain::Equal(A, B)
+  // is true, and that will incur a performance penalty for all the hashmap
+  // operations, so is probably not worth it. With the current code we might
+  // end up creating multiple clips in WR that are effectively identical but
+  // have separate clip ids. Hopefully this won't happen very often.
+  typedef std::unordered_map<const DisplayItemClipChain*, wr::WrClipId> ClipIdMap;
+private:
+  ClipIdMap mClipIdCache;
 
   // Layers that have been mutated. If we have an empty transaction
   // then a display item layer will no longer be valid
@@ -272,6 +314,10 @@ private:
   uint32_t mPaintSequenceNumber;
   // See equivalent field in ClientLayerManager
   APZTestData mApzTestData;
+
+  typedef nsTHashtable<nsRefPtrHashKey<WebRenderCanvasData>> CanvasDataSet;
+  // Store of WebRenderCanvasData objects for use in empty transactions
+  CanvasDataSet mLastCanvasDatas;
 };
 
 } // namespace layers

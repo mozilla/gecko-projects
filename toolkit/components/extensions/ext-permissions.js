@@ -2,8 +2,6 @@
 
 XPCOMUtils.defineLazyModuleGetter(this, "ExtensionPermissions",
                                   "resource://gre/modules/ExtensionPermissions.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
-                                  "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
 
@@ -18,7 +16,7 @@ this.permissions = class extends ExtensionAPI {
   getAPI(context) {
     return {
       permissions: {
-        async request_parent(perms) {
+        async request(perms) {
           let {permissions, origins} = perms;
 
           let manifestPermissions = context.extension.manifest.optional_permissions;

@@ -69,9 +69,6 @@ public:
   }
   nsIPresShell* Arena();
 
-  void AddChild(nsStyleContext* aChild);
-  void RemoveChild(nsStyleContext* aChild);
-
   inline void AddRef();
   inline void Release();
 
@@ -91,23 +88,32 @@ public:
 
   inline nsPresContext* PresContext() const;
 
-  inline mozilla::GeckoStyleContext* GetParent() const;
-
-  nsStyleContext* GetParentAllowServo() const {
-    return mParent;
-  }
-
   nsIAtom* GetPseudo() const { return mPseudoTag; }
   mozilla::CSSPseudoElementType GetPseudoType() const {
     return static_cast<mozilla::CSSPseudoElementType>(
              mBits >> NS_STYLE_CONTEXT_TYPE_SHIFT);
   }
 
-  bool IsAnonBox() const {
-    return
-      GetPseudoType() == mozilla::CSSPseudoElementType::InheritingAnonBox ||
-      GetPseudoType() == mozilla::CSSPseudoElementType::NonInheritingAnonBox;
+  bool IsInheritingAnonBox() const {
+    return GetPseudoType() == mozilla::CSSPseudoElementType::InheritingAnonBox;
   }
+
+  bool IsNonInheritingAnonBox() const {
+    return GetPseudoType() == mozilla::CSSPseudoElementType::NonInheritingAnonBox;
+  }
+
+  // This function is rather slow; you probably don't want to use it outside
+  // asserts unless you have to.  We _could_ add a new CSSPseudoElementType for
+  // wrapper anon boxes, but that adds a bunch of complexity everywhere we
+  // resolve anonymous box styles...
+  bool IsWrapperAnonBox() const {
+    return nsCSSAnonBoxes::IsWrapperAnonBox(GetPseudo());
+  }
+
+  bool IsAnonBox() const {
+    return IsInheritingAnonBox() || IsNonInheritingAnonBox();
+  }
+
   bool IsPseudoElement() const { return mPseudoTag && !IsAnonBox(); }
 
 
@@ -316,14 +322,8 @@ protected:
   ~nsStyleContext() {}
 
   // Delegated Helper constructor.
-  nsStyleContext(nsStyleContext* aParent,
-                 nsIAtom* aPseudoTag,
+  nsStyleContext(nsIAtom* aPseudoTag,
                  mozilla::CSSPseudoElementType aPseudoType);
-
-  // Helper post-contruct hook.
-  void FinishConstruction();
-
-  void SetStyleBits();
 
   // Helper functions for GetStyle* and PeekStyle*
   #define STYLE_STRUCT_INHERITED(name_, checkdata_cb_)                  \
@@ -336,8 +336,6 @@ protected:
   #include "nsStyleStructList.h"
   #undef STYLE_STRUCT_RESET
   #undef STYLE_STRUCT_INHERITED
-
-  RefPtr<nsStyleContext> mParent;
 
   // If this style context is for a pseudo-element or anonymous box,
   // the relevant atom.

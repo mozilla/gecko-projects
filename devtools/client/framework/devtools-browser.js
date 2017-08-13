@@ -303,7 +303,7 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
         gDevToolsBrowser.toggleToolboxCommand(window.gBrowser);
         break;
       case "toggleToolbar":
-        window.DeveloperToolbar.focusToggle();
+        gDevToolsBrowser.getDeveloperToolbar(window).focusToggle();
         break;
       case "webide":
         gDevToolsBrowser.openWebIDE();
@@ -312,7 +312,7 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
         BrowserToolboxProcess.init();
         break;
       case "browserConsole":
-        let HUDService = require("devtools/client/webconsole/hudservice");
+        let {HUDService} = require("devtools/client/webconsole/hudservice");
         HUDService.openBrowserConsoleOrFocus();
         break;
       case "responsiveDesignMode":

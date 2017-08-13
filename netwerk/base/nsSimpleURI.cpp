@@ -274,6 +274,12 @@ nsSimpleURI::GetDisplayHost(nsACString &aUnicodeHost)
 }
 
 NS_IMETHODIMP
+nsSimpleURI::GetDisplayPrePath(nsACString &aPrePath)
+{
+    return GetPrePath(aPrePath);
+}
+
+NS_IMETHODIMP
 nsSimpleURI::GetHasRef(bool *result)
 {
     *result = mIsRefValid;
@@ -306,7 +312,7 @@ nsSimpleURI::SetSpec(const nsACString &aSpec)
     ToLowerCase(mScheme);
 
     // This sets mPath, mQuery and mRef.
-    return SetPath(Substring(spec, colonPos + 1));
+    return SetPathQueryRef(Substring(spec, colonPos + 1));
 }
 
 NS_IMETHODIMP
@@ -437,7 +443,7 @@ nsSimpleURI::SetPort(int32_t port)
 }
 
 NS_IMETHODIMP
-nsSimpleURI::GetPath(nsACString &result)
+nsSimpleURI::GetPathQueryRef(nsACString &result)
 {
     result = mPath;
     if (mIsQueryValid) {
@@ -451,7 +457,7 @@ nsSimpleURI::GetPath(nsACString &result)
 }
 
 NS_IMETHODIMP
-nsSimpleURI::SetPath(const nsACString &aPath)
+nsSimpleURI::SetPathQueryRef(const nsACString &aPath)
 {
     NS_ENSURE_STATE(mMutable);
 
@@ -711,13 +717,6 @@ nsSimpleURI::GetAsciiHost(nsACString &result)
     return NS_OK;
 }
 
-NS_IMETHODIMP
-nsSimpleURI::GetOriginCharset(nsACString &result)
-{
-    result.Truncate();
-    return NS_OK;
-}
-
 //----------------------------------------------------------------------------
 // nsSimpleURI::nsIClassInfo
 //----------------------------------------------------------------------------
@@ -868,6 +867,13 @@ nsSimpleURI::SetQuery(const nsACString& aQuery)
     }
 
     return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSimpleURI::SetQueryWithEncoding(const nsACString& aQuery,
+                                  const Encoding* aEncoding)
+{
+    return SetQuery(aQuery);
 }
 
 } // namespace net

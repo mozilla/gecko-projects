@@ -80,11 +80,6 @@ using mozilla::DefaultXDisplay;
 #include <winuser.h>
 #endif
 
-#ifdef MOZ_WIDGET_ANDROID
-#include "AndroidBridge.h"
-#include "GLContext.h"
-#endif
-
 #include "mozilla/dom/TabChild.h"
 
 #ifdef CreateEvent // Thank you MS.
@@ -379,8 +374,7 @@ nsPluginFrame::GetMinISize(gfxContext *aRenderingContext)
   nscoord result = 0;
 
   if (!IsHidden(false)) {
-    if (mContent->IsAnyOfHTMLElements(nsGkAtoms::applet,
-                                      nsGkAtoms::embed)) {
+    if (mContent->IsHTMLElement(nsGkAtoms::embed)) {
       bool vertical = GetWritingMode().IsVertical();
       result = nsPresContext::CSSPixelsToAppUnits(
         vertical ? EMBED_DEF_HEIGHT : EMBED_DEF_WIDTH);
@@ -441,9 +435,8 @@ nsPluginFrame::GetDesiredSize(nsPresContext* aPresContext,
   aMetrics.Width() = aReflowInput.ComputedWidth();
   aMetrics.Height() = aReflowInput.ComputedHeight();
 
-  // for EMBED and APPLET, default to 240x200 for compatibility
-  if (mContent->IsAnyOfHTMLElements(nsGkAtoms::applet,
-                                    nsGkAtoms::embed)) {
+  // for EMBED, default to 240x200 for compatibility
+  if (mContent->IsHTMLElement(nsGkAtoms::embed)) {
     if (aMetrics.Width() == NS_UNCONSTRAINEDSIZE) {
       aMetrics.Width() = clamped(nsPresContext::CSSPixelsToAppUnits(EMBED_DEF_WIDTH),
                                aReflowInput.ComputedMinWidth(),
@@ -948,61 +941,6 @@ nsDisplayPluginReadback::GetBounds(nsDisplayListBuilder* aBuilder,
   return GetDisplayItemBounds(aBuilder, this, mFrame);
 }
 
-#ifdef MOZ_WIDGET_ANDROID
-
-class nsDisplayPluginVideo : public nsDisplayItem {
-public:
-  nsDisplayPluginVideo(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame, nsNPAPIPluginInstance::VideoInfo* aVideoInfo)
-    : nsDisplayItem(aBuilder, aFrame), mVideoInfo(aVideoInfo)
-  {
-    MOZ_COUNT_CTOR(nsDisplayPluginVideo);
-  }
-#ifdef NS_BUILD_REFCNT_LOGGING
-  virtual ~nsDisplayPluginVideo() {
-    MOZ_COUNT_DTOR(nsDisplayPluginVideo);
-  }
-#endif
-
-  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
-                           bool* aSnap) const override;
-
-  NS_DISPLAY_DECL_NAME("PluginVideo", TYPE_PLUGIN_VIDEO)
-
-  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
-                                             LayerManager* aManager,
-                                             const ContainerLayerParameters& aContainerParameters) override
-  {
-    return static_cast<nsPluginFrame*>(mFrame)->BuildLayer(aBuilder, aManager, this, aContainerParameters);
-  }
-
-  virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
-                                   LayerManager* aManager,
-                                   const ContainerLayerParameters& aParameters) override
-  {
-    return LAYER_ACTIVE;
-  }
-
-  virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override
-  {
-    return new nsDisplayPluginGeometry(this, aBuilder);
-  }
-
-  nsNPAPIPluginInstance::VideoInfo* VideoInfo() { return mVideoInfo; }
-
-private:
-  nsNPAPIPluginInstance::VideoInfo* mVideoInfo;
-};
-
-nsRect
-nsDisplayPluginVideo::GetBounds(nsDisplayListBuilder* aBuilder,
-                                bool* aSnap) const
-{
-  *aSnap = false;
-  return GetDisplayItemBounds(aBuilder, this, mFrame);
-}
-
-#endif
-
 nsRect
 nsDisplayPlugin::GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) const
 {
@@ -1152,9 +1090,6 @@ nsPluginFrame::IsOpaque() const
 {
 #if defined(XP_MACOSX)
   return false;
-#elif defined(MOZ_WIDGET_ANDROID)
-  // We don't know, so just assume transparent
-  return false;
 #else
 
   if (mInstanceOwner && mInstanceOwner->UseAsyncRendering()) {
@@ -1246,36 +1181,19 @@ nsPluginFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   if (type == nsPresContext::eContext_Print) {
     aLists.Content()->AppendNewToTop(new (aBuilder)
       nsDisplayGeneric(aBuilder, this, PaintPrintPlugin, "PrintPlugin",
-                       TYPE_PRINT_PLUGIN));
+                       DisplayItemType::TYPE_PRINT_PLUGIN));
   } else {
     LayerState state = GetLayerState(aBuilder, nullptr);
     if (state == LAYER_INACTIVE &&
         nsDisplayItem::ForceActiveLayers()) {
       state = LAYER_ACTIVE;
     }
-    // We don't need this on Android, and it just confuses things
-#if !MOZ_WIDGET_ANDROID
     if (aBuilder->IsPaintingToWindow() &&
         state == LAYER_ACTIVE &&
         IsTransparentMode()) {
       aLists.Content()->AppendNewToTop(new (aBuilder)
         nsDisplayPluginReadback(aBuilder, this));
     }
-#endif
-
-#if MOZ_WIDGET_ANDROID
-    if (aBuilder->IsPaintingToWindow() &&
-        state == LAYER_ACTIVE) {
-
-      nsTArray<nsNPAPIPluginInstance::VideoInfo*> videos;
-      mInstanceOwner->GetVideos(videos);
-
-      for (uint32_t i = 0; i < videos.Length(); i++) {
-        aLists.Content()->AppendNewToTop(new (aBuilder)
-          nsDisplayPluginVideo(aBuilder, this, videos[i]));
-      }
-    }
-#endif
 
     aLists.Content()->AppendNewToTop(new (aBuilder)
       nsDisplayPlugin(aBuilder, this));
@@ -1411,10 +1329,6 @@ nsPluginFrame::GetLayerState(nsDisplayListBuilder* aBuilder,
   if (!mInstanceOwner)
     return LAYER_NONE;
 
-#ifdef MOZ_WIDGET_ANDROID
-  // We always want a layer on Honeycomb and later
-  return LAYER_ACTIVE;
-#else
   if (mInstanceOwner->NeedsScrollImageLayer()) {
     return LAYER_ACTIVE;
   }
@@ -1424,7 +1338,6 @@ nsPluginFrame::GetLayerState(nsDisplayListBuilder* aBuilder,
   }
 
   return LAYER_ACTIVE_FORCE;
-#endif
 }
 
 class PluginFrameDidCompositeObserver final : public DidCompositeObserver
@@ -1489,7 +1402,7 @@ nsPluginFrame::BuildLayer(nsDisplayListBuilder* aBuilder,
   RefPtr<Layer> layer =
     (aManager->GetLayerBuilder()->GetLeafLayerFor(aBuilder, aItem));
 
-  if (aItem->GetType() == TYPE_PLUGIN) {
+  if (aItem->GetType() == DisplayItemType::TYPE_PLUGIN) {
     RefPtr<ImageContainer> container;
     // Image for Windowed plugins that support window capturing for scroll
     // operations or async windowless rendering.
@@ -1541,34 +1454,8 @@ nsPluginFrame::BuildLayer(nsDisplayListBuilder* aBuilder,
       }
       lm->AddDidCompositeObserver(mDidCompositeObserver.get());
     }
-#ifdef MOZ_WIDGET_ANDROID
-  } else if (aItem->GetType() == TYPE_PLUGIN_VIDEO) {
-    nsDisplayPluginVideo* videoItem = reinterpret_cast<nsDisplayPluginVideo*>(aItem);
-    nsNPAPIPluginInstance::VideoInfo* videoInfo = videoItem->VideoInfo();
-
-    RefPtr<ImageContainer> container = mInstanceOwner->GetImageContainerForVideo(videoInfo);
-    if (!container)
-      return nullptr;
-
-    if (!layer) {
-      // Initialize ImageLayer
-      layer = aManager->CreateImageLayer();
-      if (!layer)
-        return nullptr;
-    }
-
-    ImageLayer* imglayer = static_cast<ImageLayer*>(layer.get());
-    imglayer->SetContainer(container);
-
-    layer->SetContentFlags(IsOpaque() ? Layer::CONTENT_OPAQUE : 0);
-
-    // Set the offset and size according to the video dimensions
-    r.MoveBy(videoInfo->mDimensions.TopLeft());
-    size.width = videoInfo->mDimensions.width;
-    size.height = videoInfo->mDimensions.height;
-#endif
   } else {
-    NS_ASSERTION(aItem->GetType() == TYPE_PLUGIN_READBACK,
+    NS_ASSERTION(aItem->GetType() == DisplayItemType::TYPE_PLUGIN_READBACK,
                  "Unknown item type");
     MOZ_ASSERT(!IsOpaque(), "Opaque plugins don't use backgrounds");
 
@@ -1615,18 +1502,7 @@ nsPluginFrame::PaintPlugin(nsDisplayListBuilder* aBuilder,
                            gfxContext& aRenderingContext,
                            const nsRect& aDirtyRect, const nsRect& aPluginRect)
 {
-#if defined(MOZ_WIDGET_ANDROID)
-  if (mInstanceOwner) {
-    gfxRect frameGfxRect =
-      PresContext()->AppUnitsToGfxUnits(aPluginRect);
-    gfxRect dirtyGfxRect =
-      PresContext()->AppUnitsToGfxUnits(aDirtyRect);
-
-    mInstanceOwner->Paint(&aRenderingContext, frameGfxRect, dirtyGfxRect);
-    return;
-  }
-#else
-# if defined(DEBUG)
+#if defined(DEBUG)
   // On Desktop, we should have built a layer as we no longer support in-process
   // plugins or synchronous painting. We can only get here for windowed plugins
   // (which draw themselves), or via some error/unload state.
@@ -1635,7 +1511,6 @@ nsPluginFrame::PaintPlugin(nsDisplayListBuilder* aBuilder,
     mInstanceOwner->GetWindow(window);
     MOZ_ASSERT(!window || window->type == NPWindowTypeWindow);
   }
-# endif
 #endif
 }
 

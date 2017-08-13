@@ -11,12 +11,9 @@ import java.util.List;
 
 import android.support.annotation.Nullable;
 import android.support.v4.content.ContextCompat;
-import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.BrowserApp;
-import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.SiteIdentity;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
 import org.mozilla.gecko.Telemetry;
@@ -30,15 +27,13 @@ import org.mozilla.gecko.lwt.LightweightThemeDrawable;
 import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.MenuPopup;
 import org.mozilla.gecko.preferences.GeckoPreferences;
-import org.mozilla.gecko.skin.SkinConfig;
 import org.mozilla.gecko.tabs.TabHistoryController;
 import org.mozilla.gecko.toolbar.ToolbarDisplayLayout.OnStopListener;
 import org.mozilla.gecko.toolbar.ToolbarDisplayLayout.OnTitleChangeListener;
 import org.mozilla.gecko.toolbar.ToolbarDisplayLayout.UpdateFlags;
 import org.mozilla.gecko.util.Clipboard;
-import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.MenuUtils;
-import org.mozilla.gecko.widget.themed.ThemedFrameLayout;
+import org.mozilla.gecko.util.WindowUtil;
 import org.mozilla.gecko.widget.themed.ThemedImageButton;
 import org.mozilla.gecko.widget.themed.ThemedImageView;
 import org.mozilla.gecko.widget.themed.ThemedRelativeLayout;
@@ -86,7 +81,7 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
                                                 GeckoMenu.ActionItemBarPresenter {
     private static final String LOGTAG = "GeckoToolbar";
 
-    private static final int LIGHTWEIGHT_THEME_INVERT_ALPHA = 34; // 255 - alpha = invert_alpha
+    private static final int LIGHTWEIGHT_THEME_ALPHA = 77;
 
     public interface OnActivateListener {
         public void onActivate();
@@ -126,8 +121,6 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
     private ToolbarProgressView progressBar;
     protected final TabCounter tabsCounter;
     protected final View menuButton;
-    // bug 1375351: There is no menuIcon in Photon flavor, menuIcon should be removed
-    protected final ThemedImageView menuIcon;
     private MenuPopup menuPopup;
     protected final List<View> focusOrder;
 
@@ -198,7 +191,6 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
         tabsCounter.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
 
         menuButton = findViewById(R.id.menu);
-        menuIcon = (ThemedImageView) findViewById(R.id.menu_icon);
 
         // The focusOrder List should be filled by sub-classes.
         focusOrder = new ArrayList<View>();
@@ -337,6 +329,10 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
                 activity.openOptionsMenu();
             }
         });
+
+        final Tab tab = Tabs.getInstance().getSelectedTab();
+        final boolean darkTheme = (tab != null && tab.isPrivate());
+        WindowUtil.invalidateStatusBarColor(activity, darkTheme);
     }
 
     @Override
@@ -838,6 +834,8 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
 
     @Override
     public void setPrivateMode(boolean isPrivate) {
+        final boolean modeChanged = isPrivateMode() != isPrivate;
+
         super.setPrivateMode(isPrivate);
 
         tabsButton.setPrivateMode(isPrivate);
@@ -845,14 +843,13 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
         urlEditLayout.setPrivateMode(isPrivate);
         urlDisplayLayout.setPrivateMode(isPrivate);
 
-        // bug 1375351: menuButton is a ThemedImageButton in Photon flavor
-        if (SkinConfig.isPhoton()) {
-            ((ThemedImageButton)menuButton).setPrivateMode(isPrivate);
-        } else {
-            ((ThemedFrameLayout)menuButton).setPrivateMode(isPrivate);
-        }
+        ((ThemedImageButton) menuButton).setPrivateMode(isPrivate);
 
         shadowPaint.setColor(isPrivate ? shadowPrivateColor : shadowColor);
+
+        if (modeChanged) {
+            WindowUtil.invalidateStatusBarColor(activity, isPrivate);
+        }
     }
 
     public void show() {
@@ -940,7 +937,7 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
 
         final LightweightThemeDrawable drawable = theme.getColorDrawable(view, color);
         if (drawable != null) {
-            drawable.setAlpha(LIGHTWEIGHT_THEME_INVERT_ALPHA, LIGHTWEIGHT_THEME_INVERT_ALPHA);
+            drawable.setAlpha(LIGHTWEIGHT_THEME_ALPHA, LIGHTWEIGHT_THEME_ALPHA);
         }
 
         return drawable;

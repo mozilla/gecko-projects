@@ -3,6 +3,7 @@
 == bug1375518-3.html bug1375518-ref.html
 == bug1375518-4.html bug1375518-4-ref.html
 == bug1375518-5.html bug1375518-5-ref.html
+== bug1379306.html bug1379306-ref.html
 == bc_dyn_cell1.html bc_dyn_cell1_ref.html
 == bc_dyn_cell2.html bc_dyn_cell2_ref.html
 == bc_dyn_cell3.html bc_dyn_cell3_ref.html
@@ -110,3 +111,5 @@ fuzzy(255,40) == border-style-outset-becomes-groove.html border-style-outset-bec
 # is 20px).
 fuzzy(255,40) == border-style-inset-becomes-ridge.html border-style-inset-becomes-ridge-ref.html
 fuzzy(2,11000) == 1324524.html 1324524-ref.html
+== 1384602-1a.html 1384602-1-ref.html
+== 1384602-1b.html 1384602-1-ref.html

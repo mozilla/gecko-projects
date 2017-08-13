@@ -12,12 +12,11 @@
 #include "mozilla/gfx/Types.h"
 #include "mozilla/gfx/Tools.h"
 #include "mozilla/layers/LayersTypes.h"
+#include "mozilla/PodOperations.h"
 #include "mozilla/Range.h"
 #include "Units.h"
 #include "RoundedRect.h"
 #include "nsStyleConsts.h"
-
-//#define ENABLE_FRAME_LATENCY_LOG
 
 namespace mozilla {
 namespace wr {
@@ -354,8 +353,16 @@ static inline wr::BorderRadius ToUniformBorderRadius(const mozilla::LayerSize& a
   return br;
 }
 
-static inline wr::BorderRadius ToBorderRadius(const mozilla::LayerSize& topLeft, const mozilla::LayerSize& topRight,
-                                              const mozilla::LayerSize& bottomLeft, const mozilla::LayerSize& bottomRight)
+static inline wr::BorderRadius EmptyBorderRadius()
+{
+  wr::BorderRadius br;
+  PodZero(&br);
+  return br;
+}
+
+template<class T>
+static inline wr::BorderRadius ToBorderRadius(const gfx::SizeTyped<T>& topLeft, const gfx::SizeTyped<T>& topRight,
+                                              const gfx::SizeTyped<T>& bottomLeft, const gfx::SizeTyped<T>& bottomRight)
 {
   wr::BorderRadius br;
   br.top_left = ToLayoutSize(topLeft);
@@ -649,6 +656,10 @@ static inline wr::WrFilterOp ToWrFilterOp(const layers::CSSFilter& filter) {
 // and the compiler will catch accidental conversions between the two.
 struct WrClipId {
   uint64_t id;
+
+  bool operator==(const WrClipId& other) const {
+    return id == other.id;
+  }
 };
 
 } // namespace wr

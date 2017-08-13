@@ -165,7 +165,7 @@ nsMathMLmfencedFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   /////////////
   // display the content
   nsMathMLContainerFrame::BuildDisplayList(aBuilder, aLists);
-  
+
   ////////////
   // display fences and separators
   uint32_t count = 0;

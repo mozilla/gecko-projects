@@ -54,9 +54,9 @@
 #include "mozilla/GeckoStyleContext.h"
 #include "mozilla/Keyframe.h"
 #include "mozilla/Mutex.h"
-#include "mozilla/Preferences.h"
 #include "mozilla/ServoElementSnapshot.h"
 #include "mozilla/ServoRestyleManager.h"
+#include "mozilla/SizeOfState.h"
 #include "mozilla/StyleAnimationValue.h"
 #include "mozilla/SystemGroup.h"
 #include "mozilla/ServoMediaList.h"
@@ -89,8 +89,6 @@ SERVO_ARC_TYPE(StyleContext, ServoStyleContext)
 
 static Mutex* sServoFontMetricsLock = nullptr;
 static RWLock* sServoLangFontPrefsLock = nullptr;
-
-static bool sFramesTimingFunctionEnabled;
 
 static
 const nsFont*
@@ -218,13 +216,9 @@ Gecko_ServoStyleContext_Init(
     mozilla::CSSPseudoElementType aPseudoType,
     nsIAtom* aPseudoTag)
 {
-  // because it is within an Arc it is unsafe for the Rust side to ever
-  // carry around a mutable non opaque reference to the context, so we
-  // cast it here.
-  auto parent = const_cast<ServoStyleContext*>(aParentContext);
-  auto presContext = const_cast<nsPresContext*>(aPresContext);
+  auto* presContext = const_cast<nsPresContext*>(aPresContext);
   new (KnownNotNull, aContext) ServoStyleContext(
-      parent, presContext, aPseudoTag, aPseudoType,
+      presContext, aPseudoTag, aPseudoType,
       ServoComputedDataForgotten(aValues));
 }
 
@@ -377,13 +371,17 @@ Gecko_UnsetNodeFlags(RawGeckoNodeBorrowed aNode, uint32_t aFlags)
 }
 
 void
-Gecko_SetOwnerDocumentNeedsStyleFlush(RawGeckoElementBorrowed aElement)
+Gecko_NoteDirtyElement(RawGeckoElementBorrowed aElement)
 {
   MOZ_ASSERT(NS_IsMainThread());
+  const_cast<Element*>(aElement)->NoteDirtyForServo();
+}
 
-  if (nsIPresShell* shell = aElement->OwnerDoc()->GetShell()) {
-    shell->EnsureStyleFlush();
-  }
+void
+Gecko_NoteAnimationOnlyDirtyElement(RawGeckoElementBorrowed aElement)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  const_cast<Element*>(aElement)->NoteAnimationOnlyDirtyForServo();
 }
 
 nsStyleContext*
@@ -453,6 +451,18 @@ Gecko_GetElementSnapshot(const ServoElementSnapshotTable* aTable,
   MOZ_ASSERT(aElement);
 
   return aTable->Get(const_cast<Element*>(aElement));
+}
+
+bool
+Gecko_HaveSeenPtr(SeenPtrs* aTable, const void* aPtr)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aTable);
+  // Empty Rust allocations are indicated by small values up to the alignment
+  // of the relevant type. We shouldn't see anything like that here.
+  MOZ_ASSERT(uintptr_t(aPtr) > 16);
+
+  return aTable->HaveSeenPtr(aPtr);
 }
 
 RawServoDeclarationBlockStrongBorrowedOrNull
@@ -828,11 +838,6 @@ Gecko_GetPositionInSegment(RawGeckoAnimationPropertySegmentBorrowed aSegment,
   return ComputedTimingFunction::GetPortion(aSegment->mTimingFunction,
                                             positionInSegment,
                                             aBeforeFlag);
-}
-
-bool
-Gecko_IsFramesTimingEnabled() {
-  return sFramesTimingFunctionEnabled;
 }
 
 RawServoAnimationValueBorrowedOrNull
@@ -1448,6 +1453,54 @@ Gecko_CopyCounterStyle(CounterStylePtr* aDst, const CounterStylePtr* aSrc)
   *aDst = *aSrc;
 }
 
+bool
+Gecko_CounterStyle_IsNone(const CounterStylePtr* aPtr) {
+  MOZ_ASSERT(aPtr);
+  return (*aPtr)->IsNone();
+}
+
+bool
+Gecko_CounterStyle_IsName(const CounterStylePtr* aPtr) {
+  return !Gecko_CounterStyle_IsNone(aPtr) && !(*aPtr)->AsAnonymous();
+}
+
+void
+Gecko_CounterStyle_GetName(const CounterStylePtr* aPtr,
+                           nsAString* aResult) {
+  MOZ_ASSERT(Gecko_CounterStyle_IsName(aPtr));
+  (*aPtr)->GetStyleName(*aResult);
+}
+
+const nsTArray<nsString>&
+Gecko_CounterStyle_GetSymbols(const CounterStylePtr* aPtr) {
+  MOZ_ASSERT((*aPtr)->AsAnonymous());
+  AnonymousCounterStyle* anonymous = (*aPtr)->AsAnonymous();
+  return anonymous->GetSymbols();
+}
+
+uint8_t
+Gecko_CounterStyle_GetSystem(const CounterStylePtr* aPtr) {
+  MOZ_ASSERT((*aPtr)->AsAnonymous());
+  AnonymousCounterStyle* anonymous = (*aPtr)->AsAnonymous();
+  return anonymous->GetSystem();
+}
+
+bool
+Gecko_CounterStyle_IsSingleString(const CounterStylePtr* aPtr) {
+  MOZ_ASSERT(aPtr);
+  AnonymousCounterStyle* anonymous = (*aPtr)->AsAnonymous();
+  return anonymous ? anonymous->IsSingleString() : false;
+}
+
+void
+Gecko_CounterStyle_GetSingleString(const CounterStylePtr* aPtr,
+                                   nsAString* aResult) {
+  MOZ_ASSERT(Gecko_CounterStyle_IsSingleString(aPtr));
+  const nsTArray<nsString>& symbols = Gecko_CounterStyle_GetSymbols(aPtr);
+  MOZ_ASSERT(symbols.Length() == 1);
+  aResult->Assign(symbols[0]);
+}
+
 already_AddRefed<css::URLValue>
 ServoBundledURI::IntoCssUrl()
 {
@@ -1678,30 +1731,37 @@ Gecko_ClearPODTArray(void* aArray, size_t aElementSize, size_t aElementAlign)
                                                         aElementSize, aElementAlign);
 }
 
-void Gecko_SetStyleGridTemplateArrayLengths(nsStyleGridTemplate* aValue,
-                                            uint32_t aTrackSizes)
-{
-  aValue->mMinTrackSizingFunctions.SetLength(aTrackSizes);
-  aValue->mMaxTrackSizingFunctions.SetLength(aTrackSizes);
-  aValue->mLineNameLists.SetLength(aTrackSizes + 1);
-}
-
-void Gecko_SetGridTemplateLineNamesLength(nsStyleGridTemplate* aValue,
-                                          uint32_t aNames)
-{
-  aValue->mLineNameLists.SetLength(aNames);
-}
-
 void Gecko_ResizeTArrayForStrings(nsTArray<nsString>* aArray, uint32_t aLength)
 {
   aArray->SetLength(aLength);
 }
 
 void
-Gecko_CopyStyleGridTemplateValues(nsStyleGridTemplate* aGridTemplate,
+Gecko_SetStyleGridTemplate(UniquePtr<nsStyleGridTemplate>* aGridTemplate,
+                           nsStyleGridTemplate* aValue)
+{
+  aGridTemplate->reset(aValue);
+}
+
+nsStyleGridTemplate*
+Gecko_CreateStyleGridTemplate(uint32_t aTrackSizes, uint32_t aNameSize)
+{
+  nsStyleGridTemplate* result = new nsStyleGridTemplate;
+  result->mMinTrackSizingFunctions.SetLength(aTrackSizes);
+  result->mMaxTrackSizingFunctions.SetLength(aTrackSizes);
+  result->mLineNameLists.SetLength(aNameSize);
+  return result;
+}
+
+void
+Gecko_CopyStyleGridTemplateValues(UniquePtr<nsStyleGridTemplate>* aGridTemplate,
                                   const nsStyleGridTemplate* aOther)
 {
-  *aGridTemplate = *aOther;
+  if (aOther) {
+    *aGridTemplate = MakeUnique<nsStyleGridTemplate>(*aOther);
+  } else {
+    *aGridTemplate = nullptr;
+  }
 }
 
 mozilla::css::GridTemplateAreasValue*
@@ -2418,9 +2478,6 @@ InitializeServo()
 
   sServoFontMetricsLock = new Mutex("Gecko_GetFontMetrics");
   sServoLangFontPrefsLock = new RWLock("nsPresContext::GetDefaultFont");
-
-  Preferences::AddBoolVarCache(&sFramesTimingFunctionEnabled,
-                               "layout.css.frames-timing.enabled");
 }
 
 void
@@ -2488,7 +2545,7 @@ ServoStyleSheet*
 Gecko_LoadStyleSheet(css::Loader* aLoader,
                      ServoStyleSheet* aParent,
                      css::LoaderReusableStyleSheets* aReusableSheets,
-                     RawGeckoURLExtraData* aBaseURLData,
+                     RawGeckoURLExtraData* aURLExtraData,
                      const uint8_t* aURLString,
                      uint32_t aURLStringLength,
                      RawServoMediaListStrong aMediaList)
@@ -2497,14 +2554,14 @@ Gecko_LoadStyleSheet(css::Loader* aLoader,
   MOZ_ASSERT(aLoader, "Should've catched this before");
   MOZ_ASSERT(aParent, "Only used for @import, so parent should exist!");
   MOZ_ASSERT(aURLString, "Invalid URLs shouldn't be loaded!");
-  MOZ_ASSERT(aBaseURLData, "Need base URL data");
+  MOZ_ASSERT(aURLExtraData, "Need URL extra data");
 
   RefPtr<dom::MediaList> media = new ServoMediaList(aMediaList.Consume());
   nsDependentCSubstring urlSpec(reinterpret_cast<const char*>(aURLString),
                                 aURLStringLength);
   nsCOMPtr<nsIURI> uri;
   nsresult rv = NS_NewURI(getter_AddRefs(uri), urlSpec, nullptr,
-                          aBaseURLData->BaseURI());
+                          aURLExtraData->BaseURI());
 
   StyleSheet* previousFirstChild = aParent->GetFirstChild();
   if (NS_SUCCEEDED(rv)) {
@@ -2515,11 +2572,21 @@ Gecko_LoadStyleSheet(css::Loader* aLoader,
       !aParent->GetFirstChild() ||
       aParent->GetFirstChild() == previousFirstChild) {
     // Servo and Gecko have different ideas of what a valid URL is, so we might
-    // get in here with a URL string that NS_NewURI can't handle.  If so,
-    // silently do nothing.  Eventually we should be able to assert that the
-    // NS_NewURI succeeds, here.
+    // get in here with a URL string that NS_NewURI can't handle.  We may also
+    // reach here via an import cycle.  For the import cycle case, we need some
+    // sheet object per spec, even if its empty.  DevTools uses the URI to
+    // realize it has hit an import cycle, so we mark it complete to make the
+    // sheet readable from JS.
     RefPtr<ServoStyleSheet> emptySheet =
       aParent->CreateEmptyChildSheet(media.forget());
+    // Make a dummy URI if we don't have one because some methods assume
+    // non-null URIs.
+    if (!uri) {
+      NS_NewURI(getter_AddRefs(uri), NS_LITERAL_CSTRING("about:invalid"));
+    }
+    emptySheet->SetURIs(uri, uri, uri);
+    emptySheet->SetPrincipal(aURLExtraData->GetPrincipal());
+    emptySheet->SetComplete();
     aParent->PrependStyleSheet(emptySheet);
     return emptySheet.forget().take();
   }
@@ -2650,12 +2717,6 @@ Gecko_Destroy_nsStyle##name(nsStyle##name* ptr)                               \
 }
 
 void
-Gecko_Construct_nsStyleVariables(nsStyleVariables* ptr)
-{
-  new (ptr) nsStyleVariables();
-}
-
-void
 Gecko_RegisterProfilerThread(const char* name)
 {
   char stackTop;
@@ -2731,20 +2792,32 @@ Gecko_ReportUnexpectedCSSError(ErrorReporter* reporter,
                                const char* message,
                                const char* param,
                                uint32_t paramLen,
+                               const char* prefix,
+                               const char* prefixParam,
+                               uint32_t prefixParamLen,
+                               const char* suffix,
                                const char* source,
                                uint32_t sourceLen,
                                uint32_t lineNumber,
-                               uint32_t colNumber,
-                               nsIURI* uri,
-                               const char* followup)
+                               uint32_t colNumber)
 {
   MOZ_ASSERT(NS_IsMainThread());
+
+  if (prefix) {
+    if (prefixParam) {
+      nsDependentCSubstring paramValue(prefixParam, prefixParamLen);
+      nsAutoString wideParam = NS_ConvertUTF8toUTF16(paramValue);
+      reporter->ReportUnexpectedUnescaped(prefix, wideParam);
+    } else {
+      reporter->ReportUnexpected(prefix);
+    }
+  }
 
   nsDependentCSubstring paramValue(param, paramLen);
   nsAutoString wideParam = NS_ConvertUTF8toUTF16(paramValue);
   reporter->ReportUnexpectedUnescaped(message, wideParam);
-  if (followup) {
-    reporter->ReportUnexpected(followup);
+  if (suffix) {
+    reporter->ReportUnexpected(suffix);
   }
   nsDependentCSubstring sourceValue(source, sourceLen);
   reporter->OutputError(lineNumber, colNumber, sourceValue);

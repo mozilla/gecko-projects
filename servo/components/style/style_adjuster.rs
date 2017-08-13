@@ -85,6 +85,22 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         }
     }
 
+    /// Compute a few common flags for both text and element's style.
+    pub fn set_bits(&mut self) {
+        use properties::computed_value_flags::IS_IN_DISPLAY_NONE_SUBTREE;
+        use properties::computed_value_flags::IS_IN_PSEUDO_ELEMENT_SUBTREE;
+
+        if self.style.inherited_flags().contains(IS_IN_DISPLAY_NONE_SUBTREE) ||
+            self.style.get_box().clone_display() == display::none {
+            self.style.flags.insert(IS_IN_DISPLAY_NONE_SUBTREE);
+        }
+
+        if self.style.inherited_flags().contains(IS_IN_PSEUDO_ELEMENT_SUBTREE) ||
+            self.style.is_pseudo_element() {
+            self.style.flags.insert(IS_IN_PSEUDO_ELEMENT_SUBTREE);
+        }
+    }
+
     /// Adjust the style for text style.
     ///
     /// The adjustments here are a subset of the adjustments generally, because
@@ -94,6 +110,7 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
     #[cfg(feature = "gecko")]
     pub fn adjust_for_text(&mut self) {
         self.adjust_for_text_combine_upright();
+        self.set_bits();
     }
 
     /// Change writing mode of the text frame for text-combine-upright.
@@ -225,7 +242,7 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
     fn adjust_for_outline(&mut self) {
         if self.style.get_outline().clone_outline_style().none_or_hidden() &&
            self.style.get_outline().outline_has_nonzero_width() {
-            self.style.mutate_outline().set_outline_width(Au(0));
+            self.style.mutate_outline().set_outline_width(Au(0).into());
         }
     }
 
@@ -454,6 +471,36 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         }
     }
 
+    /// Resolves "justify-items: auto" based on the inherited style if needed to
+    /// comply with:
+    ///
+    /// https://drafts.csswg.org/css-align/#valdef-justify-items-legacy
+    ///
+    /// (Note that "auto" is being renamed to "legacy")
+    #[cfg(feature = "gecko")]
+    fn adjust_for_justify_items(&mut self) {
+        use values::specified::align;
+        let justify_items = self.style.get_position().clone_justify_items();
+        if justify_items.specified.0 != align::ALIGN_AUTO {
+            return;
+        }
+
+        let parent_justify_items =
+            self.style.get_parent_position().clone_justify_items();
+
+        if !parent_justify_items.computed.0.contains(align::ALIGN_LEGACY) {
+            return;
+        }
+
+        if parent_justify_items.computed == justify_items.computed {
+            return;
+        }
+
+        self.style
+            .mutate_position()
+            .set_computed_justify_items(parent_justify_items.computed);
+    }
+
     /// Adjusts the style to account for various fixups that don't fit naturally
     /// into the cascade.
     ///
@@ -478,6 +525,7 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
             self.adjust_for_table_text_align();
             self.adjust_for_contain();
             self.adjust_for_mathvariant();
+            self.adjust_for_justify_items();
         }
         #[cfg(feature = "servo")]
         {
@@ -491,5 +539,6 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         {
             self.adjust_for_ruby(layout_parent_style, flags);
         }
+        self.set_bits();
     }
 }

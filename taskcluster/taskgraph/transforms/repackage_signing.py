@@ -10,7 +10,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import validate_schema, Schema
-from taskgraph.util.scriptworker import get_signing_cert_scope
+from taskgraph.util.scriptworker import get_signing_cert_scope_per_platform
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Required, Optional
 
@@ -41,6 +41,7 @@ def validate(config, jobs):
 def make_repackage_signing_description(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']
+        attributes = dep_job.attributes
 
         treeherder = job.get('treeherder', {})
         treeherder.setdefault('symbol', 'tc-rs(N)')
@@ -51,7 +52,16 @@ def make_repackage_signing_description(config, jobs):
         treeherder.setdefault('tier', 1)
         treeherder.setdefault('kind', 'build')
 
-        label = job.get('label', "repackage-signing-{}".format(dep_job.label))
+        label = job['label']
+        description = (
+            "Signing of repackaged artifacts for locale '{locale}' for build '"
+            "{build_platform}/{build_type}'".format(
+                locale=attributes.get('locale', 'en-US'),
+                build_platform=attributes.get('build_platform'),
+                build_type=attributes.get('build_type')
+            )
+        )
+
         dependencies = {"repackage": dep_job.label}
 
         signing_dependencies = dep_job.dependencies
@@ -67,8 +77,12 @@ def make_repackage_signing_description(config, jobs):
             attributes['locale'] = dep_job.attributes.get('locale')
             locale_str = "{}/".format(dep_job.attributes.get('locale'))
 
-        scopes = [get_signing_cert_scope(config),
-                  "project:releng:signing:format:mar"]
+        build_platform = dep_job.attributes.get('build_platform')
+        is_nightly = dep_job.attributes.get('nightly')
+        signing_cert_scope = get_signing_cert_scope_per_platform(
+            build_platform, is_nightly, config
+        )
+        scopes = [signing_cert_scope, 'project:releng:signing:format:mar_sha384']
 
         upstream_artifacts = [{
             "taskId": {"task-reference": "<repackage>"},
@@ -76,9 +90,9 @@ def make_repackage_signing_description(config, jobs):
             "paths": [
                 "public/build/{}target.complete.mar".format(locale_str),
             ],
-            "formats": ["mar"]
+            "formats": ["mar_sha384"]
         }]
-        if 'win' in dep_job.attributes.get('build_platform'):
+        if 'win' in build_platform:
             upstream_artifacts.append({
                 "taskId": {"task-reference": "<repackage>"},
                 "taskType": "repackage",
@@ -90,7 +104,7 @@ def make_repackage_signing_description(config, jobs):
             scopes.append("project:releng:signing:format:sha2signcode")
 
             # Stub installer is only generated on win32
-            if '32' in dep_job.attributes.get('build_platform'):
+            if '32' in build_platform:
                 upstream_artifacts.append({
                     "taskId": {"task-reference": "<repackage>"},
                     "taskType": "repackage",
@@ -103,8 +117,7 @@ def make_repackage_signing_description(config, jobs):
 
         task = {
             'label': label,
-            'description': "Repackage signing {} ".format(
-                dep_job.task["metadata"]["description"]),
+            'description': description,
             'worker-type': "scriptworker-prov-v1/signing-linux-v1",
             'worker': {'implementation': 'scriptworker-signing',
                        'upstream-artifacts': upstream_artifacts,
@@ -121,8 +134,7 @@ def make_repackage_signing_description(config, jobs):
             'win32-nightly',
             'win64-nightly'
         ]
-        if dep_job.attributes.get('build_platform') in funsize_platforms and \
-                dep_job.attributes.get('nightly'):
+        if build_platform in funsize_platforms and is_nightly:
             route_template = "project.releng.funsize.level-{level}.{project}"
             task['routes'] = [
                 route_template.format(project=config.params['project'],

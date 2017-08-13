@@ -18,33 +18,21 @@ this.EXPORTED_SYMBOLS = ["ExtensionParent"];
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
-                                  "resource://gre/modules/AddonManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
-                                  "resource://gre/modules/AppConstants.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "DeferredSave",
-                                  "resource://gre/modules/DeferredSave.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "E10SUtils",
-                                  "resource:///modules/E10SUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
-                                  "resource://gre/modules/FileUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "IndexedDB",
-                                  "resource://gre/modules/IndexedDB.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
-                                  "resource://gre/modules/MessageChannel.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "NativeApp",
-                                  "resource://gre/modules/NativeMessaging.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
-                                  "resource://gre/modules/Schemas.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  AppConstants: "resource://gre/modules/AppConstants.jsm",
+  DeferredSave: "resource://gre/modules/DeferredSave.jsm",
+  E10SUtils: "resource:///modules/E10SUtils.jsm",
+  MessageChannel: "resource://gre/modules/MessageChannel.jsm",
+  OS: "resource://gre/modules/osfile.jsm",
+  NativeApp: "resource://gre/modules/NativeMessaging.jsm",
+  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
+  Schemas: "resource://gre/modules/Schemas.jsm",
+});
 
-XPCOMUtils.defineLazyServiceGetter(this, "gAddonPolicyService",
-                                   "@mozilla.org/addons/policy-service;1",
-                                   "nsIAddonPolicyService");
-XPCOMUtils.defineLazyServiceGetter(this, "aomStartup",
-                                   "@mozilla.org/addons/addon-manager-startup;1",
-                                   "amIAddonManagerStartup");
+XPCOMUtils.defineLazyServiceGetters(this, {
+  gAddonPolicyService: ["@mozilla.org/addons/policy-service;1", "nsIAddonPolicyService"],
+  aomStartup: ["@mozilla.org/addons/addon-manager-startup;1", "amIAddonManagerStartup"],
+});
 
 Cu.import("resource://gre/modules/ExtensionCommon.jsm");
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
@@ -68,6 +56,7 @@ var {
 } = ExtensionUtils;
 
 const BASE_SCHEMA = "chrome://extensions/content/schemas/manifest.json";
+const CATEGORY_EXTENSION_MODULES = "webextension-modules";
 const CATEGORY_EXTENSION_SCHEMAS = "webextension-schemas";
 const CATEGORY_EXTENSION_SCRIPTS = "webextension-scripts";
 
@@ -78,6 +67,7 @@ schemaURLs.add("chrome://extensions/content/schemas/experiments.json");
 let GlobalManager;
 let ParentAPIManager;
 let ProxyMessenger;
+let StartupCache;
 
 // This object loads the ext-*.js scripts that define the extension API.
 let apiManager = new class extends SchemaAPIManager {
@@ -97,18 +87,31 @@ let apiManager = new class extends SchemaAPIManager {
     });
   }
 
+  getModuleJSONURLs() {
+    return Array.from(XPCOMUtils.enumerateCategoryEntries(CATEGORY_EXTENSION_MODULES),
+                      ([name, url]) => url);
+  }
+
   // Loads all the ext-*.js scripts currently registered.
   lazyInit() {
     if (this.initialized) {
       return this.initialized;
     }
 
-    let scripts = [];
+    let modulesPromise = StartupCache.other.get(
+      ["parentModules"],
+      () => this.loadModuleJSON(this.getModuleJSONURLs()));
+
+    let scriptURLs = [];
     for (let [/* name */, value] of XPCOMUtils.enumerateCategoryEntries(CATEGORY_EXTENSION_SCRIPTS)) {
-      scripts.push(value);
+      scriptURLs.push(value);
     }
 
-    let promise = Promise.all(scripts.map(url => ChromeUtils.compileScript(url))).then(scripts => {
+    let promise = (async () => {
+      let scripts = await Promise.all(scriptURLs.map(url => ChromeUtils.compileScript(url)));
+
+      this.initModuleData(await modulesPromise);
+
       for (let script of scripts) {
         script.executeInGlobal(this.global);
       }
@@ -128,7 +131,7 @@ let apiManager = new class extends SchemaAPIManager {
         }
         return Promise.all(promises);
       });
-    });
+    })();
 
     /* eslint-disable mozilla/balanced-listeners */
     Services.mm.addMessageListener("Extension:GetTabAndWindowId", this);
@@ -267,15 +270,22 @@ ProxyMessenger = {
    * @returns {object|null} The message manager matching the recipient if found.
    */
   getMessageManagerForRecipient(recipient) {
-    let {tabId} = recipient;
     // tabs.sendMessage / tabs.connect
-    if (tabId) {
+    if ("tabId" in recipient) {
       // `tabId` being set implies that the tabs API is supported, so we don't
       // need to check whether `tabTracker` exists.
-      let tab = apiManager.global.tabTracker.getTab(tabId, null);
+      let tab = apiManager.global.tabTracker.getTab(recipient.tabId, null);
       if (!tab) {
         return null;
       }
+
+      // There can be no recipients in a tab pending restore,
+      // So we bail early to avoid instantiating the lazy browser.
+      let node = tab.browser || tab;
+      if (node.getAttribute("pending") === "true") {
+        return null;
+      }
+
       let browser = tab.linkedBrowser || tab.browser;
 
       // Options panels in the add-on manager currently require
@@ -1365,18 +1375,21 @@ let IconDetails = {
   },
 };
 
-let StartupCache = {
+StartupCache = {
   DB_NAME: "ExtensionStartupCache",
 
-  STORE_NAMES: Object.freeze(["locales", "manifests", "permissions", "schemas"]),
+  STORE_NAMES: Object.freeze(["general", "locales", "manifests", "other", "permissions", "schemas"]),
 
-  get file() {
-    return FileUtils.getFile("ProfLD", ["startupCache", "webext.sc.lz4"]);
-  },
+  file: OS.Path.join(OS.Constants.Path.localProfileDir, "startupCache", "webext.sc.lz4"),
 
   get saver() {
     if (!this._saver) {
-      this._saver = new DeferredSave(this.file.path,
+      OS.File.makeDir(OS.Path.dirname(this.file), {
+        ignoreExisting: true,
+        from: OS.Constants.Path.localProfileDir,
+      });
+
+      this._saver = new DeferredSave(this.file,
                                      () => this.getBlob(),
                                      {delay: 5000});
     }
@@ -1417,6 +1430,7 @@ let StartupCache = {
 
   clearAddonData(id) {
     return Promise.all([
+      this.general.delete(id),
       this.locales.delete(id),
       this.manifests.delete(id),
       this.permissions.delete(id),
@@ -1431,6 +1445,15 @@ let StartupCache = {
       this._data = new Map();
       this._dataPromise = Promise.resolve(this._data);
     }
+  },
+
+  get(extension, path, createFunc) {
+    return this.general.get([extension.id, extension.version, ...path],
+                            createFunc);
+  },
+
+  delete(extension, path) {
+    return this.general.delete([extension.id, extension.version, ...path]);
   },
 };
 

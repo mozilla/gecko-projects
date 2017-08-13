@@ -41,40 +41,26 @@ const SCALAR_STORAGE_CONSUMED = "storage.sync.api.usage.storage_consumed";
 // Default is 5sec, which seems a bit aggressive on the open internet
 const KINTO_REQUEST_TIMEOUT = 30000;
 
+Cu.import("resource://gre/modules/Log.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 
+XPCOMUtils.defineLazyModuleGetters(this, {
+  AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
+  BulkKeyBundle: "resource://services-sync/keys.js",
+  CollectionKeyManager: "resource://services-sync/record.js",
+  CommonUtils: "resource://services-common/utils.js",
+  CryptoUtils: "resource://services-crypto/utils.js",
+  fxAccounts: "resource://gre/modules/FxAccounts.jsm",
+  KintoHttpClient: "resource://services-common/kinto-http-client.js",
+  Kinto: "resource://services-common/kinto-offline-client.js",
+  FirefoxAdapter: "resource://services-common/kinto-storage-adapter.js",
+  Observers: "resource://services-common/observers.js",
+  Sqlite: "resource://gre/modules/Sqlite.jsm",
+  Utils: "resource://services-sync/util.js",
+});
 
-XPCOMUtils.defineLazyModuleGetter(this, "AsyncShutdown",
-                                  "resource://gre/modules/AsyncShutdown.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "BulkKeyBundle",
-                                  "resource://services-sync/keys.js");
-XPCOMUtils.defineLazyModuleGetter(this, "CollectionKeyManager",
-                                  "resource://services-sync/record.js");
-XPCOMUtils.defineLazyModuleGetter(this, "CommonUtils",
-                                  "resource://services-common/utils.js");
-XPCOMUtils.defineLazyModuleGetter(this, "CryptoUtils",
-                                  "resource://services-crypto/utils.js");
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionStorage",
-                                  "resource://gre/modules/ExtensionStorage.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "fxAccounts",
-                                  "resource://gre/modules/FxAccounts.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "KintoHttpClient",
-                                  "resource://services-common/kinto-http-client.js");
-XPCOMUtils.defineLazyModuleGetter(this, "Kinto",
-                                  "resource://services-common/kinto-offline-client.js");
-XPCOMUtils.defineLazyModuleGetter(this, "FirefoxAdapter",
-                                  "resource://services-common/kinto-storage-adapter.js");
-XPCOMUtils.defineLazyModuleGetter(this, "Log",
-                                  "resource://gre/modules/Log.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Observers",
-                                  "resource://services-common/observers.js");
-XPCOMUtils.defineLazyModuleGetter(this, "Services",
-                                  "resource://gre/modules/Services.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Sqlite",
-                                  "resource://gre/modules/Sqlite.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Utils",
-                                  "resource://services-sync/util.js");
 XPCOMUtils.defineLazyPreferenceGetter(this, "prefPermitsStorageSync",
                                       STORAGE_SYNC_ENABLED_PREF, true);
 XPCOMUtils.defineLazyPreferenceGetter(this, "prefStorageSyncServerURL",

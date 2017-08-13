@@ -32,6 +32,11 @@ const MessageState = Immutable.Record({
   // This map is consumed by the ObjectInspector so we only load properties once,
   // when needed (when an ObjectInspector node is expanded), and then caches them.
   messagesObjectPropertiesById: Immutable.Map(),
+  // Map of the form {messageId : {[actor]: entries}}, where `entries` is
+  // a RDP packet containing the entries of the ${actor} grip.
+  // This map is consumed by the ObjectInspector so we only load entries once,
+  // when needed (when an ObjectInspector node is expanded), and then caches them.
+  messagesObjectEntriesById: Immutable.Map(),
   // Map of the form {groupMessageId : groupArray},
   // where groupArray is the list of of all the parent groups' ids of the groupMessageId.
   groupsById: Immutable.Map(),
@@ -54,6 +59,7 @@ function messages(state = new MessageState(), action, filtersState, prefsState) 
     messagesUiById,
     messagesTableDataById,
     messagesObjectPropertiesById,
+    messagesObjectEntriesById,
     networkMessagesUpdateById,
     groupsById,
     currentGroup,
@@ -207,6 +213,16 @@ function messages(state = new MessageState(), action, filtersState, prefsState) 
           }, messagesObjectPropertiesById.get(action.id))
         )
       );
+    case constants.MESSAGE_OBJECT_ENTRIES_RECEIVE:
+      return state.set(
+        "messagesObjectEntriesById",
+        messagesObjectEntriesById.set(
+          action.id,
+          Object.assign({
+            [action.actor]: action.entries
+          }, messagesObjectEntriesById.get(action.id))
+        )
+      );
 
     case constants.NETWORK_MESSAGE_UPDATE:
       return state.set(
@@ -356,6 +372,10 @@ function limitTopLevelMessageCount(state, record, logLimit) {
     record.set("messagesObjectPropertiesById",
       record.messagesObjectPropertiesById.withMutations(cleanUpCollection));
   }
+  if (mapHasRemovedIdKey(record.messagesObjectEntriesById)) {
+    record.set("messagesObjectEntriesById",
+      record.messagesObjectEntriesById.withMutations(cleanUpCollection));
+  }
   if (objectHasRemovedIdKey(record.repeatById)) {
     record.set("repeatById", cleanUpObject(record.repeatById));
   }
@@ -395,6 +415,11 @@ function getAllActorsInMessage(message, state) {
     actors.push(...Object.keys(loadedProperties));
   }
 
+  const loadedEntries = state.messagesObjectEntriesById.get(message.id);
+  if (loadedEntries) {
+    actors.push(...Object.keys(loadedEntries));
+  }
+
   return actors;
 }
 
@@ -406,22 +431,57 @@ function getToplevelMessageCount(record) {
   return record.messagesById.count(message => !message.groupId);
 }
 
+/**
+ * Returns true if given message should be visible, false otherwise.
+ */
 function shouldMessageBeVisible(message, messagesState, filtersState, checkGroup = true) {
-  return (
-    (
-      checkGroup === false
-      || isInOpenedGroup(message, messagesState.groupsById, messagesState.messagesUiById)
-    )
-    && (
-      isUnfilterable(message)
-      || (
-        matchLevelFilters(message, filtersState)
-        && matchCssFilters(message, filtersState)
-        && matchNetworkFilters(message, filtersState)
-        && matchSearchFilters(message, filtersState)
-      )
-    )
-  );
+  // Do not display the message if it's in closed group.
+  if (
+    checkGroup
+    && !isInOpenedGroup(message, messagesState.groupsById, messagesState.messagesUiById)
+  ) {
+    return false;
+  }
+
+  // Some messages can't be filtered out (e.g. groups).
+  // So, always return true for those.
+  if (isUnfilterable(message)) {
+    return true;
+  }
+
+  // Let's check all filters and hide the message if they say so.
+  if (!matchFilters(message, filtersState)) {
+    return false;
+  }
+
+  // If there is a free text available for filtering use it to decide
+  // whether the message is displayed or not.
+  let text = (filtersState.text || "").trim();
+  if (text) {
+    return matchSearchFilters(message, text);
+  }
+
+  return true;
+}
+
+function matchFilters(message, filtersState) {
+  if (matchLevelFilters(message, filtersState)) {
+    return true;
+  }
+
+  // Return true if the message source is 'css'
+  // and CSS filter is enabled.
+  if (matchCssFilters(message, filtersState)) {
+    return true;
+  }
+
+  // Return true if the message is network event
+  // and Network and/or XHR filter is enabled.
+  if (matchNetworkFilters(message, filtersState)) {
+    return true;
+  }
+
+  return false;
 }
 
 function isUnfilterable(message) {
@@ -449,31 +509,33 @@ function isGroupClosed(groupId, messagesUI) {
   return messagesUI.includes(groupId) === false;
 }
 
-function matchLevelFilters(message, filters) {
-  return filters.get(message.level) === true;
-}
-
 function matchNetworkFilters(message, filters) {
   return (
-    message.source !== MESSAGE_SOURCE.NETWORK
-    || (filters.get("net") === true && message.isXHR === false)
-    || (filters.get("netxhr") === true && message.isXHR === true)
+    message.source === MESSAGE_SOURCE.NETWORK &&
+    (filters.get("net") === true && message.isXHR === false) ||
+    (filters.get("netxhr") === true && message.isXHR === true)
+  );
+}
+
+function matchLevelFilters(message, filters) {
+  return (
+    (message.source === MESSAGE_SOURCE.CONSOLE_API ||
+    message.source === MESSAGE_SOURCE.JAVASCRIPT) &&
+    filters.get(message.level) === true
   );
 }
 
 function matchCssFilters(message, filters) {
   return (
-    message.source != MESSAGE_SOURCE.CSS
-    || filters.get("css") === true
+    message.source === MESSAGE_SOURCE.CSS &&
+    filters.get("css") === true
   );
 }
 
-function matchSearchFilters(message, filters) {
-  let text = (filters.text || "").trim();
+function matchSearchFilters(message, text) {
   return (
-    text === ""
     // Look for a match in parameters.
-    || isTextInParameters(text, message.parameters)
+    isTextInParameters(text, message.parameters)
     // Look for a match in location.
     || isTextInFrame(text, message.frame)
     // Look for a match in net events.

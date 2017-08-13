@@ -93,6 +93,19 @@ ContentProcessController::NotifyAsyncScrollbarDragRejected(const FrameMetrics::V
 }
 
 void
+ContentProcessController::NotifyAutoscrollHandledByAPZ(const FrameMetrics::ViewID& aScrollId)
+{
+  APZCCallbackHelper::NotifyAutoscrollHandledByAPZ(aScrollId);
+}
+
+void
+ContentProcessController::CancelAutoscroll(const ScrollableLayerGuid& aGuid)
+{
+  // This should never get called
+  MOZ_ASSERT_UNREACHABLE("Unexpected message to content process");
+}
+
+void
 ContentProcessController::PostDelayedTask(already_AddRefed<Runnable> aRunnable, int aDelayMs)
 {
   MOZ_ASSERT_UNREACHABLE("ContentProcessController should only be used remotely.");

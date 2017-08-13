@@ -72,7 +72,6 @@ using mozilla::Unused;
 #include "AndroidBridge.h"
 #include "AndroidBridgeUtilities.h"
 #include "AndroidUiThread.h"
-#include "android_npapi.h"
 #include "FennecJNINatives.h"
 #include "GeneratedJNINatives.h"
 #include "GeckoEditableSupport.h"
@@ -366,7 +365,9 @@ public:
         : mWindow(aPtr, aWindow)
         , mNPZC(aNPZC)
         , mPreviousButtons(0)
-    {}
+    {
+        MOZ_ASSERT(mWindow);
+    }
 
     ~NPZCSupport()
     {}
@@ -828,7 +829,9 @@ public:
         : mWindow(aPtr, aWindow)
         , mCompositor(aInstance)
         , mCompositorPaused(true)
-    {}
+    {
+        MOZ_ASSERT(mWindow);
+    }
 
     ~LayerViewSupport()
     {}
@@ -860,6 +863,9 @@ private:
     void OnResumedCompositor()
     {
         MOZ_ASSERT(NS_IsMainThread());
+        if (!mWindow) {
+            return; // Already shut down.
+        }
 
         // When we receive this, the compositor has already been told to
         // resume. (It turns out that waiting till we reach here to tell
@@ -920,7 +926,9 @@ public:
                           jni::Object::Param aSurface)
     {
         MOZ_ASSERT(NS_IsMainThread());
-        MOZ_ASSERT(mWindow);
+        if (!mWindow) {
+            return; // Already shut down.
+        }
 
         mSurface = aSurface;
         mWindow->CreateLayerManager(aWidth, aHeight);
@@ -977,14 +985,11 @@ public:
                 MOZ_ASSERT(NS_IsMainThread());
 
                 JNIEnv* const env = jni::GetGeckoThreadEnv();
-                // Make sure LayerViewSupport hasn't been detached from the
-                // Java object since this event was dispatched.
-                if (LayerViewSupport* const lvs = GetNative(
-                        LayerView::Compositor::LocalRef(env, mCompositor))) {
-                    MOZ_CATCH_JNI_EXCEPTION(env);
+                LayerViewSupport* const lvs = GetNative(
+                        LayerView::Compositor::LocalRef(env, mCompositor));
+                MOZ_CATCH_JNI_EXCEPTION(env);
 
-                    lvs->OnResumedCompositor();
-                }
+                lvs->OnResumedCompositor();
             }
         };
 
@@ -1258,12 +1263,12 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
     nsCOMPtr<nsIWindowWatcher> ww = do_GetService(NS_WINDOWWATCHER_CONTRACTID);
     MOZ_RELEASE_ASSERT(ww);
 
-    nsAdoptingCString url;
+    nsAutoCString url;
     if (aChromeURI) {
         url = aChromeURI->ToCString();
     } else {
-        url = Preferences::GetCString("toolkit.defaultChromeURI");
-        if (!url) {
+        nsresult rv = Preferences::GetCString("toolkit.defaultChromeURI", url);
+        if (NS_FAILED(rv)) {
             url = NS_LITERAL_CSTRING("chrome://geckoview/content/geckoview.xul");
         }
     }
@@ -1280,7 +1285,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
         chromeFlags += ",private";
     }
     nsCOMPtr<mozIDOMWindowProxy> domWindow;
-    ww->OpenWindow(nullptr, url, nullptr, chromeFlags.get(),
+    ww->OpenWindow(nullptr, url.get(), nullptr, chromeFlags.get(),
                    androidView, getter_AddRefs(domWindow));
     MOZ_RELEASE_ASSERT(domWindow);
 

@@ -73,7 +73,7 @@ reftest.Runner = class {
     this.parentWindow =  assert.window(this.driver.getCurrentWindow());
 
     this.screenshotMode = SCREENSHOT_MODE[screenshotMode] ||
-        SCREENSHOT_MODE["unexpected"];
+        SCREENSHOT_MODE.unexpected;
 
     this.urlCount = Object.keys(urlCount || {})
         .reduce((map, key) => map.set(key, urlCount[key]), new Map());
@@ -100,10 +100,11 @@ reftest.Runner = class {
   *openWindow() {
     let reftestWin;
     yield new Promise(resolve => {
-      reftestWin = this.parentWindow.openDialog("chrome://marionette/content/reftest.xul",
-                                                "reftest",
-                                                "chrome,dialog,height=600,width=600,all",
-                                                () => resolve());
+      reftestWin = this.parentWindow.openDialog(
+          "chrome://marionette/content/reftest.xul",
+          "reftest",
+          "chrome,dialog,height=600,width=600,all",
+          () => resolve());
     });
 
     let browser = reftestWin.document.createElementNS(XUL_NS, "xul:browser");
