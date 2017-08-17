@@ -61,7 +61,7 @@ inline DisplayItemType GetDisplayItemTypeFromKey(uint32_t aDisplayItemKey)
 {
   static const uint32_t typeMask = (1 << TYPE_BITS) - 1;
   DisplayItemType type = static_cast<DisplayItemType>(aDisplayItemKey & typeMask);
-  NS_ASSERTION(type > DisplayItemType::TYPE_ZERO && type < DisplayItemType::TYPE_MAX, "Invalid display item type!");
+  NS_ASSERTION(type >= DisplayItemType::TYPE_ZERO && type < DisplayItemType::TYPE_MAX, "Invalid display item type!");
   return type;
 }
 
