@@ -156,5 +156,6 @@ def _generate_treeherder_symbol(is_nightly):
 
 
 def _generate_worker_type(signing_cert_scope):
-    worker_type = 'depsigning' if 'dep-signing' in signing_cert_scope else 'signing-linux-v1'
+#    worker_type = 'depsigning' if 'dep-signing' in signing_cert_scope else 'signing-linux-v1'
+    worker_type = 'signing-linux-dev' if 'dep-signing' in signing_cert_scope else 'signing-linux-v1'
     return 'scriptworker-prov-v1/{}'.format(worker_type)
