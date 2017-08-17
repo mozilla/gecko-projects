@@ -3967,7 +3967,10 @@ AddModifiedFramesFromRootFrame(std::vector<WeakFrame>& aFrames,
     aRootFrame->GetProperty(nsIFrame::ModifiedFrameList());
 
   if (frames) {
-    aFrames.insert(aFrames.end(), frames->begin(), frames->end());
+    for (WeakFrame& frame : *frames) {
+      aFrames.push_back(Move(frame));
+    }
+
     frames->clear();
   }
 }
