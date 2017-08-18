@@ -3786,7 +3786,8 @@ MergeDisplayLists(nsDisplayListBuilder* aBuilder,
   for (nsDisplayItem* i = aNewList->GetBottom(); i != nullptr; i = i->GetAbove()) {
     if (newListLookup.Get({ i->Frame(), i->GetPerFrameKey() }, nullptr)) {
        MOZ_CRASH_UNSAFE_PRINTF("Duplicate display items detected!: %s(0x%p) type=%d key=%d",
-                                i->Name(), i->Frame(), i->GetType(), i->GetPerFrameKey());
+                                i->Name(), i->Frame(),
+                                static_cast<int>(i->GetType()), i->GetPerFrameKey());
     }
     newListLookup.Put({ i->Frame(), i->GetPerFrameKey() }, i);
   }
