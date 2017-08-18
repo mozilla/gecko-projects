@@ -4925,7 +4925,7 @@ public:
 
   virtual void RestoreState() override
   {
-    nsDisplayItem::RestoreState();
+    nsCharClipDisplayItem::RestoreState();
     mOpacity = 1.0f;
   }
 
