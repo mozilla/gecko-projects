@@ -1981,13 +1981,16 @@ public:
    * items by z-index and content order and for some other uses. Never
    * returns null.
    */
-  inline nsIFrame* Frame() const {
+  inline nsIFrame* Frame() const
+  {
     MOZ_ASSERT(mFrame, "Trying to use display item after deletion!");
     return mFrame;
   }
-  bool HasDeletedFrame() const {
-    return !mFrame;
-  }
+  
+  bool HasDeletedFrame() const { return !mFrame; }
+
+  virtual nsIFrame* StyleFrame() const { return mFrame; }
+
   /**
    * Compute the used z-index of our frame; returns zero for elements to which
    * z-index does not apply, and for z-index:auto.
@@ -3698,8 +3701,6 @@ protected:
   void PaintInternal(nsDisplayListBuilder* aBuilder, gfxContext* aCtx,
                      const nsRect& aBounds, nsRect* aClipRect);
 
-  virtual nsIFrame* StyleFrame() { return mFrame; }
-
   // Determine whether we want to be separated into our own layer, independent
   // of whether this item can actually be layerized.
   enum ImageLayerization {
@@ -3772,7 +3773,7 @@ public:
 
   NS_DISPLAY_DECL_NAME("TableBackgroundImage", TYPE_TABLE_BACKGROUND_IMAGE)
 protected:
-  virtual nsIFrame* StyleFrame() override { return mStyleFrame; }
+  virtual nsIFrame* StyleFrame() const override { return mStyleFrame; }
 
   nsIFrame* mStyleFrame;
   TableType mTableType;
