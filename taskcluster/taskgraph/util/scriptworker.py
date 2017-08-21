@@ -40,7 +40,6 @@ This is a list of list-pairs, for ordering.
 SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'all-nightly-branches', set([
         'mozilla-central',
-        'date',
     ])
 ], [
     'all-release-branches', set([
@@ -75,7 +74,6 @@ BEETMOVER_SCOPE_ALIAS_TO_PROJECT = [[
         'mozilla-central',
         'mozilla-beta',
         'mozilla-release',
-        'date',
     ])
 ], [
     'all-release-branches', set([
@@ -105,7 +103,6 @@ BEETMOVER_SCOPE_ALIAS_TO_TARGET_TASK = [[
         'nightly_desktop',
         'mozilla_beta_tasks',
         'mozilla_release_tasks',
-        'date_tasks',
     ])
 ], [
     'all-release-tasks', BEETMOVER_RELEASE_TARGET_TASKS
@@ -138,7 +135,6 @@ This is a list of list-pairs, for ordering.
 BALROG_SCOPE_ALIAS_TO_PROJECT = [[
     'nightly', set([
         'mozilla-central',
-        'date'
     ])
 ], [
     'beta', set([
@@ -211,7 +207,6 @@ BALROG_CHANNEL_SCOPES = {
 PUSH_APK_SCOPE_ALIAS_TO_PROJECT = [[
     'central', set([
         'mozilla-central',
-        'date',
     ])
 ], [
     'beta', set([
@@ -241,7 +236,6 @@ PUSH_APK_GOOGLE_PLAY_TRACT = {
 
 PUSH_APK_BREAKPOINT_WORKER_TYPE = {
     'central': 'aws-provisioner-v1/taskcluster-generic',
-    'date': 'aws-provisioner-v1/taskcluster-generic',
     'beta': 'null-provisioner/human-breakpoint',
     'release': 'null-provisioner/human-breakpoint',
     'default': 'invalid/invalid',

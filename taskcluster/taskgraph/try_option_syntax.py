@@ -123,7 +123,7 @@ UNITTEST_ALIASES = {
 UNITTEST_PLATFORM_PRETTY_NAMES = {
     'Ubuntu': ['linux32', 'linux64', 'linux64-asan', 'linux64-stylo', 'linux64-stylo-sequential'],
     'x64': ['linux64', 'linux64-asan', 'linux64-stylo', 'linux64-stylo-sequential'],
-    'Android 4.3': ['android-4.3-arm7-api-16'],
+    'Android 4.3': ['android-4.3-arm7-api-15'],
     '10.10': ['macosx64'],
     # other commonly-used substrings for platforms not yet supported with
     # in-tree taskgraphs:
@@ -145,8 +145,8 @@ UNITTEST_PLATFORM_PRETTY_NAMES = {
 # as different "platforms".  These do *not* automatically ride along with "-p
 # all"
 RIDEALONG_BUILDS = {
-    'android-api-16': [
-        'android-api-16-l10n',
+    'android-api-15': [
+        'android-api-15-l10n',
     ],
     'linux': [
         'linux-l10n',
