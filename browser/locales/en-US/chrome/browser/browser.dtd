@@ -161,22 +161,7 @@ These should match what Safari and other Apple applications use on OS X Lion. --
 <!ENTITY bookmarkThisPageCmd.label "Bookmark This Page">
 <!ENTITY editThisBookmarkCmd.label "Edit This Bookmark">
 <!ENTITY bookmarkThisPageCmd.commandkey "d">
-<!-- LOCALIZATION NOTE (findShareServices.label):
-  -  Use the unicode ellipsis char, \u2026,
-  -  or use "..." if \u2026 doesn't suit traditions in your locale. -->
-<!ENTITY findShareServices.label "Find more Share services…">
-<!ENTITY sharePageCmd.label "Share This Page">
-<!ENTITY sharePageCmd.commandkey "S">
-<!ENTITY sharePageCmd.accesskey "s">
-<!-- LOCALIZATION NOTE (shareLink.accesskey): must be different than the following share access keys -->
-<!ENTITY shareLink.label "Share This Link">
-<!ENTITY shareLink.accesskey "h">
-<!ENTITY shareImage.label "Share This Image">
-<!ENTITY shareImage.accesskey "r">
-<!ENTITY shareSelect.label "Share Selection">
-<!ENTITY shareSelect.accesskey "r">
-<!ENTITY shareVideo.label "Share This Video">
-<!ENTITY shareVideo.accesskey "r">
+
 <!ENTITY feedsMenu2.label "Subscribe to This Page">
 <!ENTITY subscribeToPageMenupopup.label "Subscribe to This Page">
 <!ENTITY subscribeToPageMenuitem.label "Subscribe to This Page…">
@@ -244,11 +229,16 @@ These should match what Safari and other Apple applications use on OS X Lion. --
 <!ENTITY bookmarksCmd.commandkey "b">
 
 <!ENTITY bookmarksMenuButton.label          "Bookmarks">
-<!ENTITY bookmarksMenuButton.other.label "Other Bookmarks">
-<!ENTITY bookmarksMenuButton.mobile.label "Mobile Bookmarks">
+<!ENTITY bookmarksMenuButton.other.label    "Other Bookmarks">
+<!ENTITY bookmarksMenuButton.mobile.label   "Mobile Bookmarks">
 <!ENTITY viewBookmarksSidebar2.label        "View Bookmarks Sidebar">
+<!ENTITY hideBookmarksSidebar.label         "Hide Bookmarks Sidebar">
 <!ENTITY viewBookmarksToolbar.label         "View Bookmarks Toolbar">
+<!ENTITY hideBookmarksToolbar.label         "Hide Bookmarks Toolbar">
 <!ENTITY searchBookmarks.label              "Search Bookmarks">
+<!ENTITY bookmarkingTools.label             "Bookmarking Tools">
+<!ENTITY addBookmarksMenu.label             "Add Bookmarks Menu to Toolbar">
+<!ENTITY removeBookmarksMenu.label          "Remove Bookmarks Menu from Toolbar">
 
 <!ENTITY containersMenu.label "Containers">
 
@@ -836,15 +826,7 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 <!ENTITY syncReAuthItem.accesskey     "R">
 <!ENTITY syncToolbarButton.label      "Sync">
 
-<!ENTITY social.addons.label "Manage Services…">
-
-<!ENTITY social.directory.label "Activations Directory">
-<!ENTITY social.directory.text "You can activate Share services from the directory.">
-<!ENTITY social.directory.button "Take me there!">
-<!ENTITY social.directory.introText "Click on a service to add it to &brandShortName;.">
-<!ENTITY social.directory.viewmore.text "View More">
-
-<!ENTITY customizeMode.menuAndToolbars.header2 "Additional Tools and Features">
+<!ENTITY customizeMode.menuAndToolbars.header3 "Drag your favorite items into the toolbar or overflow menu.">
 <!ENTITY customizeMode.menuAndToolbars.empty "Want more tools?">
 <!ENTITY customizeMode.menuAndToolbars.emptyLink "Choose from thousands of add-ons">
 <!ENTITY customizeMode.restoreDefaults "Restore Defaults">
@@ -991,5 +973,5 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 <!ENTITY pageAction.addToUrlbar.label "Add to Address Bar">
 <!ENTITY pageAction.removeFromUrlbar.label "Remove from Address Bar">
 
-<!ENTITY sendToDevice.label2 "Send to Device">
+<!ENTITY sendToDevice.label3 "Send Page to Device">
 <!ENTITY sendToDevice.syncNotReady.label "Syncing Devices…">

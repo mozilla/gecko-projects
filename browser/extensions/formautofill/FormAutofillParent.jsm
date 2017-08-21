@@ -82,6 +82,7 @@ FormAutofillParent.prototype = {
     Services.ppmm.addMessageListener("FormAutofill:InitStorage", this);
     Services.ppmm.addMessageListener("FormAutofill:GetRecords", this);
     Services.ppmm.addMessageListener("FormAutofill:SaveAddress", this);
+    Services.ppmm.addMessageListener("FormAutofill:SaveCreditCard", this);
     Services.ppmm.addMessageListener("FormAutofill:RemoveAddresses", this);
     Services.ppmm.addMessageListener("FormAutofill:OpenPreferences", this);
     Services.mm.addMessageListener("FormAutofill:OnFormSubmit", this);
@@ -175,7 +176,7 @@ FormAutofillParent.prototype = {
    * @param   {object} message.data The data of the message.
    * @param   {nsIFrameMessageManager} message.target Caller's message manager.
    */
-  receiveMessage({name, data, target}) {
+  async receiveMessage({name, data, target}) {
     switch (name) {
       case "FormAutofill:InitStorage": {
         this.profileStorage.initialize();
@@ -191,6 +192,11 @@ FormAutofillParent.prototype = {
         } else {
           this.profileStorage.addresses.add(data.address);
         }
+        break;
+      }
+      case "FormAutofill:SaveCreditCard": {
+        await this.profileStorage.creditCards.normalizeCCNumberFields(data.creditcard);
+        this.profileStorage.creditCards.add(data.creditcard);
         break;
       }
       case "FormAutofill:RemoveAddresses": {
@@ -219,6 +225,7 @@ FormAutofillParent.prototype = {
     Services.ppmm.removeMessageListener("FormAutofill:InitStorage", this);
     Services.ppmm.removeMessageListener("FormAutofill:GetRecords", this);
     Services.ppmm.removeMessageListener("FormAutofill:SaveAddress", this);
+    Services.ppmm.removeMessageListener("FormAutofill:SaveCreditCard", this);
     Services.ppmm.removeMessageListener("FormAutofill:RemoveAddresses", this);
     Services.obs.removeObserver(this, "advanced-pane-loaded");
     Services.prefs.removeObserver(ENABLED_PREF, this);
@@ -286,6 +293,14 @@ FormAutofillParent.prototype = {
     let {address} = data;
 
     if (address.guid) {
+      // Avoid updating the fields that users don't modify.
+      let originalAddress = this.profileStorage.addresses.get(address.guid);
+      for (let field in address.record) {
+        if (address.untouchedFields.includes(field) && originalAddress[field]) {
+          address.record[field] = originalAddress[field];
+        }
+      }
+
       if (!this.profileStorage.addresses.mergeIfPossible(address.guid, address.record)) {
         FormAutofillDoorhanger.show(target, "update").then((state) => {
           let changedGUIDs = this.profileStorage.addresses.mergeToStorage(address.record);

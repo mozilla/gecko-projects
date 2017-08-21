@@ -8,7 +8,7 @@ use azure::azure_hl::{BackendType, DrawOptions, DrawTarget, Pattern, StrokeOptio
 use azure::azure_hl::{Color, ColorPattern, DrawSurfaceOptions, Filter, PathBuilder};
 use azure::azure_hl::{ExtendMode, GradientStop, LinearGradientPattern, RadialGradientPattern};
 use azure::azure_hl::SurfacePattern;
-use canvas_traits::*;
+use canvas_traits::canvas::*;
 use cssparser::RGBA;
 use euclid::{Transform2D, Point2D, Vector2D, Rect, Size2D};
 use ipc_channel::ipc::{self, IpcSender};
@@ -193,12 +193,8 @@ impl<'a> CanvasPaintThread<'a> {
                             Canvas2dMsg::SetShadowColor(ref color) => painter.set_shadow_color(color.to_azure_style()),
                         }
                     },
-                    CanvasMsg::Common(message) => {
-                        match message {
-                            CanvasCommonMsg::Close => break,
-                            CanvasCommonMsg::Recreate(size) => painter.recreate(size),
-                        }
-                    },
+                    CanvasMsg::Close => break,
+                    CanvasMsg::Recreate(size) => painter.recreate(size),
                     CanvasMsg::FromScript(message) => {
                         match message {
                             FromScriptMsg::SendPixels(chan) => {
@@ -213,8 +209,6 @@ impl<'a> CanvasPaintThread<'a> {
                             }
                         }
                     }
-                    CanvasMsg::WebGL(_) => panic!("Wrong WebGL message sent to Canvas2D thread"),
-                    CanvasMsg::WebVR(_) => panic!("Wrong WebVR message sent to Canvas2D thread"),
                 }
             }
         }).expect("Thread spawning failed");
@@ -571,7 +565,7 @@ impl<'a> CanvasPaintThread<'a> {
         })
     }
 
-    fn send_data(&mut self, chan: IpcSender<CanvasData>) {
+    fn send_data(&mut self, chan: IpcSender<CanvasImageData>) {
         self.drawtarget.snapshot().get_data_surface().with_data(|element| {
             let size = self.drawtarget.get_size();
 
@@ -585,32 +579,36 @@ impl<'a> CanvasPaintThread<'a> {
             };
             let data = webrender_api::ImageData::Raw(Arc::new(element.into()));
 
+            let mut updates = webrender_api::ResourceUpdates::new();
+
             match self.image_key {
                 Some(image_key) => {
                     debug!("Updating image {:?}.", image_key);
-                    self.webrender_api.update_image(image_key,
-                                                    descriptor,
-                                                    data,
-                                                    None);
+                    updates.update_image(image_key,
+                                         descriptor,
+                                         data,
+                                         None);
                 }
                 None => {
                     self.image_key = Some(self.webrender_api.generate_image_key());
                     debug!("New image {:?}.", self.image_key);
-                    self.webrender_api.add_image(self.image_key.unwrap(),
-                                                 descriptor,
-                                                 data,
-                                                 None);
+                    updates.add_image(self.image_key.unwrap(),
+                                      descriptor,
+                                      data,
+                                      None);
                 }
             }
 
             if let Some(image_key) = mem::replace(&mut self.very_old_image_key, self.old_image_key.take()) {
-                self.webrender_api.delete_image(image_key);
+                updates.delete_image(image_key);
             }
+
+            self.webrender_api.update_resources(updates);
 
             let data = CanvasImageData {
                 image_key: self.image_key.unwrap(),
             };
-            chan.send(CanvasData::Image(data)).unwrap();
+            chan.send(data).unwrap();
         })
     }
 
@@ -764,12 +762,16 @@ impl<'a> CanvasPaintThread<'a> {
 
 impl<'a> Drop for CanvasPaintThread<'a> {
     fn drop(&mut self) {
+        let mut updates = webrender_api::ResourceUpdates::new();
+
         if let Some(image_key) = self.old_image_key.take() {
-            self.webrender_api.delete_image(image_key);
+            updates.delete_image(image_key);
         }
         if let Some(image_key) = self.very_old_image_key.take() {
-            self.webrender_api.delete_image(image_key);
+            updates.delete_image(image_key);
         }
+
+        self.webrender_api.update_resources(updates);
     }
 }
 

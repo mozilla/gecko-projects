@@ -33,13 +33,8 @@ using mozilla::Move;
 // Undo the damage done by mozzconf.h
 #undef compress
 
-// Logging seems to be somewhat broken on b2g.
-#ifdef MOZ_B2G
-#define IPC_LOG(...)
-#else
 static mozilla::LazyLogModule sLogModule("ipc");
 #define IPC_LOG(...) MOZ_LOG(sLogModule, LogLevel::Debug, (__VA_ARGS__))
-#endif
 
 /*
  * IPC design:
@@ -1976,8 +1971,20 @@ MessageChannel::MessageTask::Clear()
 NS_IMETHODIMP
 MessageChannel::MessageTask::GetPriority(uint32_t* aPriority)
 {
-  *aPriority = mMessage.priority() == Message::HIGH_PRIORITY ?
-               PRIORITY_HIGH : PRIORITY_NORMAL;
+  switch (mMessage.priority()) {
+  case Message::NORMAL_PRIORITY:
+    *aPriority = PRIORITY_NORMAL;
+    break;
+  case Message::INPUT_PRIORITY:
+    *aPriority = PRIORITY_INPUT;
+    break;
+  case Message::HIGH_PRIORITY:
+    *aPriority = PRIORITY_HIGH;
+    break;
+  default:
+    MOZ_ASSERT(false);
+    break;
+  }
   return NS_OK;
 }
 

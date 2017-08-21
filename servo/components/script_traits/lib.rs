@@ -24,7 +24,6 @@ extern crate ipc_channel;
 extern crate libc;
 extern crate msg;
 extern crate net_traits;
-extern crate offscreen_gl_context;
 extern crate profile_traits;
 extern crate rustc_serialize;
 #[macro_use] extern crate serde;
@@ -39,12 +38,14 @@ mod script_msg;
 pub mod webdriver_msg;
 
 use bluetooth_traits::BluetoothRequest;
+use canvas_traits::webgl::WebGLPipeline;
 use devtools_traits::{DevtoolScriptControlMsg, ScriptToDevtoolsControlMsg, WorkerId};
 use euclid::{Size2D, Length, Point2D, Vector2D, Rect, ScaleFactor, TypedSize2D};
 use gfx_traits::Epoch;
 use heapsize::HeapSizeOf;
 use hyper::header::Headers;
 use hyper::method::Method;
+use ipc_channel::{Error as IpcError};
 use ipc_channel::ipc::{IpcReceiver, IpcSender};
 use libc::c_void;
 use msg::constellation_msg::{BrowsingContextId, TopLevelBrowsingContextId, FrameType, Key, KeyModifiers, KeyState};
@@ -500,7 +501,7 @@ pub struct InitialScriptState {
     /// A port on which messages sent by the constellation to script can be received.
     pub control_port: IpcReceiver<ConstellationControlMsg>,
     /// A channel on which messages can be sent to the constellation from script.
-    pub constellation_chan: IpcSender<ScriptMsg>,
+    pub script_to_constellation_chan: ScriptToConstellationChan,
     /// A sender for the layout thread to communicate to the constellation.
     pub layout_to_constellation_chan: IpcSender<LayoutMsg>,
     /// A channel to schedule timer events.
@@ -523,8 +524,10 @@ pub struct InitialScriptState {
     pub pipeline_namespace_id: PipelineNamespaceId,
     /// A ping will be sent on this channel once the script thread shuts down.
     pub content_process_shutdown_chan: IpcSender<()>,
+    /// A channel to the webgl thread used in this pipeline.
+    pub webgl_chan: WebGLPipeline,
     /// A channel to the webvr thread, if available.
-    pub webvr_thread: Option<IpcSender<WebVRMsg>>
+    pub webvr_chan: Option<IpcSender<WebVRMsg>>
 }
 
 /// This trait allows creating a `ScriptThread` without depending on the `script`
@@ -740,14 +743,12 @@ pub enum ConstellationMsg {
     /// Request that the constellation send the current focused top-level browsing context id,
     /// over a provided channel.
     GetFocusTopLevelBrowsingContext(IpcSender<Option<TopLevelBrowsingContextId>>),
-    /// Request to load the initial page.
-    InitLoadUrl(ServoUrl),
     /// Query the constellation to see if the current compositor output is stable
     IsReadyToSaveImage(HashMap<PipelineId, Epoch>),
     /// Inform the constellation of a key event.
     KeyEvent(Option<char>, Key, KeyState, KeyModifiers),
     /// Request to load a page.
-    LoadUrl(PipelineId, LoadData),
+    LoadUrl(TopLevelBrowsingContextId, ServoUrl),
     /// Request to traverse the joint session history of the provided browsing context.
     TraverseHistory(TopLevelBrowsingContextId, TraversalDirection),
     /// Inform the constellation of a window being resized.
@@ -760,10 +761,12 @@ pub enum ConstellationMsg {
     Reload(TopLevelBrowsingContextId),
     /// A log entry, with the top-level browsing context id and thread name
     LogEntry(Option<TopLevelBrowsingContextId>, Option<String>, LogEntry),
-    /// Set the WebVR thread channel.
-    SetWebVRThread(IpcSender<WebVRMsg>),
     /// Dispatch WebVR events to the subscribed script threads.
     WebVREvents(Vec<PipelineId>, Vec<WebVREvent>),
+    /// Create a new top level browsing context.
+    NewBrowser(ServoUrl, IpcSender<TopLevelBrowsingContextId>),
+    /// Make browser visible.
+    SelectBrowser(TopLevelBrowsingContextId),
 }
 
 /// Resources required by workerglobalscopes
@@ -780,7 +783,7 @@ pub struct WorkerGlobalScopeInit {
     /// From devtools sender
     pub from_devtools_sender: Option<IpcSender<DevtoolScriptControlMsg>>,
     /// Messages to send to constellation
-    pub constellation_chan: IpcSender<ScriptMsg>,
+    pub script_to_constellation_chan: ScriptToConstellationChan,
     /// Message to send to the scheduler
     pub scheduler_chan: IpcSender<TimerSchedulerMsg>,
     /// The worker id
@@ -842,4 +845,20 @@ pub struct DrawAPaintImageResult {
     pub image_key: Option<ImageKey>,
     /// Drawing the image might have requested loading some image URLs.
     pub missing_image_urls: Vec<ServoUrl>,
+}
+
+/// A Script to Constellation channel.
+#[derive(Deserialize, Serialize, Clone)]
+pub struct ScriptToConstellationChan {
+    /// Sender for communicating with constellation thread.
+    pub sender: IpcSender<(PipelineId, ScriptMsg)>,
+    /// Used to identify the origin of the message.
+    pub pipeline_id: PipelineId,
+}
+
+impl ScriptToConstellationChan {
+    /// Send ScriptMsg and attach the pipeline_id to the message.
+    pub fn send(&self, msg: ScriptMsg) -> Result<(), IpcError> {
+        self.sender.send((self.pipeline_id, msg))
+    }
 }

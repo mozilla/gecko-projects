@@ -27,24 +27,22 @@ awsy-stylo:
     description: "Are we slim yet for Stylo parallel"
     suite: awsy
     treeherder-symbol: tc-SY-stylo(sy)
-    run-on-projects:
-        by-test-platform:
-            macosx64-stylo/.*: ['mozilla-central', 'try']
-            default: built-projects
     max-run-time: 7200
     instance-size: xlarge
     allow-software-gl-layers: false
+    run-on-projects:
+        by-test-platform:
+            .*-stylo.*: ['autoland', 'mozilla-central', 'try']
+            default: built-projects
     mozharness:
         script: awsy_script.py
         config:
             by-test-platform:
-                # Do not run on Windows until
-                # bug 1385027 (stylo tests on win) is fixed.
-                #windows10-64-stylo/opt:
-                #    - awsy/taskcluster_windows_config.py
-                macosx64-stylo/opt:
+                windows.*:
+                    - awsy/taskcluster_windows_config.py
+                macosx.*:
                     - awsy/macosx_config.py
-                linux64-stylo/opt:
+                linux.*:
                     - awsy/linux_config.py
         extra-options:
             - --enable-stylo
@@ -53,19 +51,19 @@ awsy-stylo-sequential:
     description: "Are we slim yet for Stylo sequential"
     suite: awsy
     treeherder-symbol: tc-SY-stylo-seq(sy)
-    run-on-projects:
-        by-test-platform:
-            macosx64-stylo/.*: ['mozilla-central', 'try']
-            default: built-projects
     max-run-time: 7200
     instance-size: xlarge
     allow-software-gl-layers: false
+    run-on-projects:
+        by-test-platform:
+            .*-stylo.*: ['autoland', 'mozilla-central', 'try']
+            default: built-projects
     mozharness:
         script: awsy_script.py
         config:
             # Only run on Linux64.
             by-test-platform:
-                linux64-stylo-sequential/opt:
+                linux.*:
                     - awsy/linux_config.py
         extra-options:
             - --enable-stylo
@@ -80,7 +78,7 @@ cppunit:
         by-test-platform:
             windows10-64-asan/opt: []  # as an exception to windows.*
             linux64-qr/.*: ['mozilla-central', 'try']
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            .*-stylo.*: ['autoland', 'mozilla-central', 'try']
             default: built-projects
     mozharness:
         by-test-platform:
@@ -116,13 +114,17 @@ crashtest:
             default: default
     run-on-projects:
         by-test-platform:
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            macosx64-stylo.*: ['autoland', 'mozilla-central', 'try']
             default: built-projects
     chunks:
         by-test-platform:
             android-4.3-arm7-api-16/debug: 10
             android.*: 4
             default: 1
+    e10s:
+        by-test-platform:
+            windows7-32/debug: both
+            default: true
     mozharness:
         by-test-platform:
             android.*:
@@ -298,6 +300,11 @@ jsreftest:
             linux64-qr/.*: 4
             macosx.*: 2
             default: 3
+    e10s:
+        by-test-platform:
+            linux64-jsdcov/opt: false
+            windows7-32/debug: both
+            default: true
     max-run-time:
         by-test-platform:
             android.*: 7200
@@ -382,37 +389,25 @@ marionette-headless:
     description: "Marionette headless unittest run"
     suite: marionette
     treeherder-symbol: tc(MnH)
-    max-run-time:
-        by-test-platform:
-            default: 5400
-    instance-size:
-        by-test-platform:
-            default: default
-    tier:
-        by-test-platform:
-            default: default
-    chunks:
-        by-test-platform:
-            default: 1
+    max-run-time: 5400
+    instance-size: default
+    tier: default
+    chunks: 1
     mozharness:
-        by-test-platform:
-            default:
-                script: marionette.py
-                no-read-buildbot-config: true
-                config:
-                    by-test-platform:
-                        windows.*:
-                            - marionette/windows_taskcluster_config.py
-                        macosx.*:
-                            - marionette/prod_config.py
-                            - marionette/mac_taskcluster_config.py
-                        default:
-                            - marionette/prod_config.py
-                            - remove_executables.py
-                extra-options:
-                    by-test-platform:
-                        default:
-                            - --headless
+        script: marionette.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                windows.*:
+                    - marionette/windows_taskcluster_config.py
+                macosx.*:
+                    - marionette/prod_config.py
+                    - marionette/mac_taskcluster_config.py
+                default:
+                    - marionette/prod_config.py
+                    - remove_executables.py
+        extra-options:
+            - --headless
 
 mochitest:
     description: "Mochitest plain run"
@@ -438,6 +433,7 @@ mochitest:
     e10s:
         by-test-platform:
             linux64-jsdcov/opt: false
+            windows7-32/debug: both
             default: true
     max-run-time:
         by-test-platform:
@@ -447,15 +443,14 @@ mochitest:
     allow-software-gl-layers: false
     run-on-projects:
         by-test-platform:
-            # Deactivate try on Buildbot, by default. We don't have enough machines
-            windows8-64.*: ['mozilla-release', 'mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland']
-            windows8-64-devedition/opt: built-projects  # No dev edition outside of supported branches
-            windows10.*: []
+            linux64-stylo.*: ['autoland', 'mozilla-central', 'try']
+            macosx64-stylo/.*: ['mozilla-central', 'try']
+            windows7-32-stylo.*: ['autoland', 'mozilla-central', 'try']
             default: built-projects
-    worker-type:
+    tier:
         by-test-platform:
-            windows8-64.*: buildbot-bridge/buildbot-bridge
-            default: null
+            macosx64-stylo/.*: 2
+            default: default
     mozharness:
         by-test-platform:
             android.*:
@@ -496,6 +491,10 @@ mochitest-a11y:
     run-on-projects:
         by-test-platform:
             linux64-qr/.*: ['mozilla-central', 'try']
+            linux64-stylo.*: ['autoland', 'mozilla-central', 'try']
+            linux64-stylo/debug: ['try']
+            macosx64-stylo/.*: ['mozilla-central', 'try']
+            windows7-32-stylo.*: ['autoland', 'mozilla-central', 'try']
             default: built-projects
     mozharness:
         script: desktop_unittest.py
@@ -513,6 +512,11 @@ mochitest-a11y:
                     - remove_executables.py
         extra-options:
             - --mochitest-suite=a11y
+    tier:
+        by-test-platform:
+            .*-stylo.*: 2
+            linux64-stylo/debug: 3
+            default: default
 
 mochitest-browser-chrome:
     description: "Mochitest browser-chrome run"
@@ -532,6 +536,7 @@ mochitest-browser-chrome:
     e10s:
         by-test-platform:
             linux64-jsdcov/opt: false
+            windows7-32/debug: both
             default: true
     max-run-time:
         by-test-platform:
@@ -546,6 +551,10 @@ mochitest-browser-chrome:
             windows8-64.*: ['mozilla-release', 'mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland']
             windows8-64-devedition/opt: built-projects  # No dev edition outside of supported branches
             windows10.*: []
+            linux64-stylo.*: ['autoland', 'mozilla-central', 'try']
+            linux64-stylo/debug: ['try']
+            macosx64-stylo/.*: ['mozilla-central', 'try']
+            windows7-32-stylo.*: ['autoland', 'mozilla-central', 'try']
             default: built-projects
     worker-type:
         by-test-platform:
@@ -577,6 +586,11 @@ mochitest-browser-chrome:
             linux64-jsdcov/opt: xlarge
             default: legacy
     allow-software-gl-layers: false
+    tier:
+        by-test-platform:
+            .*-stylo.*: 2
+            linux64-stylo/debug: 3
+            default: default
 
 mochitest-browser-screenshots:
     description: "Mochitest Browser Screenshots"
@@ -630,6 +644,9 @@ mochitest-chrome:
     run-on-projects:
         by-test-platform:
             windows7-32.*: ['try', 'date']
+            linux64-stylo/debug: ['try']
+            linux64-stylo.*: ['autoland', 'mozilla-central', 'try']
+            macosx64-stylo/.*: ['mozilla-central', 'try']
             default: built-projects
     worker-type:
         by-test-platform:
@@ -670,33 +687,9 @@ mochitest-chrome:
     tier:
         by-test-platform:
             windows7-32.*: 2
+            macosx64-stylo/.*: 2
+            linux64-stylo/debug: 3
             default: default
-
-mochitest-chrome-style:
-    description: "Mochitest chrome run for style system"
-    suite: mochitest/chrome-style
-    treeherder-symbol: tc-M(cs)
-    loopback-video: true
-    run-on-projects:
-        by-test-platform:
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
-            default: built-projects
-    e10s: false
-    mozharness:
-        mochitest-flavor: chrome
-        script: desktop_unittest.py
-        no-read-buildbot-config: true
-        config:
-            by-test-platform:
-                windows.*:
-                    - unittests/win_taskcluster_unittest.py
-                macosx.*:
-                    - unittests/mac_unittest.py
-                default:
-                    - unittests/linux_unittest.py
-                    - remove_executables.py
-        extra-options:
-            - --mochitest-suite=chrome-style
 
 mochitest-clipboard:
     description: "Mochitest clipboard run"
@@ -707,13 +700,19 @@ mochitest-clipboard:
     instance-size: xlarge
     run-on-projects:
         by-test-platform:
-            windows.*: ['try', 'date']
+            linux64-stylo/debug: ['try']
+            linux64-stylo.*: ['autoland', 'mozilla-central', 'try']
+            macosx64-stylo/.*: ['mozilla-central', 'try']
             default: built-projects
     worker-type:
         by-test-platform:
             windows7-32.*: buildbot-bridge/buildbot-bridge
             windows8-64.*: buildbot-bridge/buildbot-bridge
             default: null
+    e10s:
+        by-test-platform:
+            windows7-32/debug: both
+            default: true
     mozharness:
         by-test-platform:
             android.*:
@@ -744,7 +743,8 @@ mochitest-clipboard:
                     - --mochitest-suite=plain-clipboard,chrome-clipboard,browser-chrome-clipboard
     tier:
         by-test-platform:
-            windows7-32.*: 2
+            macosx64-stylo/.*: 2
+            linux64-stylo/debug: 3
             default: default
 
 mochitest-devtools-chrome:
@@ -763,19 +763,14 @@ mochitest-devtools-chrome:
             default: 10
     run-on-projects:
         by-test-platform:
-            # Deactivate try on Buildbot, by default. We don't have enough machines
-            windows8-64.*: ['mozilla-release', 'mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland']
-            windows8-64-devedition/opt: built-projects  # No dev edition outside of supported branches
-            windows10.*: []
-            .*-stylo.*: ['autoland', 'mozilla-central', 'try']
+            linux64-stylo.*: ['autoland', 'mozilla-central', 'try']
+            macosx64-stylo/.*: ['mozilla-central', 'try']
+            windows7-32-stylo.*: ['autoland', 'mozilla-central', 'try']
             default: built-projects
-    worker-type:
-        by-test-platform:
-            windows8-64.*: buildbot-bridge/buildbot-bridge
-            default: null
     e10s:
         by-test-platform:
             linux64-jsdcov/opt: false
+            windows7-32/debug: both
             default: true
     mozharness:
         mochitest-flavor: chrome
@@ -817,11 +812,18 @@ mochitest-gpu:
             windows8-64.*: ['mozilla-release', 'mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland']
             windows8-64-devedition/opt: built-projects  # No dev edition outside of supported branches
             windows10.*: []
+            linux64-stylo.*: ['autoland', 'mozilla-central', 'try']
+            macosx64-stylo/.*: ['mozilla-central', 'try']
+            windows7-32-stylo.*: ['autoland', 'mozilla-central', 'try']
             default: built-projects
     worker-type:
         by-test-platform:
             windows8-64.*: buildbot-bridge/buildbot-bridge
             default: null
+    e10s:
+        by-test-platform:
+            windows7-32/debug: both
+            default: true
     mozharness:
         by-test-platform:
             android.*:
@@ -852,6 +854,7 @@ mochitest-gpu:
     tier:
         by-test-platform:
             linux64-qr/.*: 1
+            macosx64-stylo/.*: 2
             default: default
 
 mochitest-jetpack:
@@ -861,7 +864,6 @@ mochitest-jetpack:
     loopback-video: true
     e10s: false
     max-run-time: 5400
-    docker-image: {"in-tree": "desktop1604-test"}
     mozharness:
         mochitest-flavor: jetpack-package
         script: desktop_unittest.py
@@ -901,6 +903,9 @@ mochitest-media:
             windows8-64.*: ['mozilla-release', 'mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland']
             windows8-64-devedition/opt: built-projects  # No dev edition outside of supported branches
             windows10.*: []
+            linux64-stylo.*: ['autoland', 'mozilla-central', 'try']
+            macosx64-stylo/.*: ['mozilla-central', 'try']
+            windows7-32-stylo.*: ['autoland', 'mozilla-central', 'try']
             default: built-projects
     worker-type:
         by-test-platform:
@@ -939,38 +944,15 @@ mochitest-media:
     tier:
         by-test-platform:
             linux64-qr/.*: 1
+            macosx64-stylo/.*: 2
             default: default
-
-mochitest-style:
-    description: "Mochitest plain run for style system"
-    suite: mochitest/plain-style
-    treeherder-symbol: tc-M(s)
-    loopback-video: true
-    run-on-projects:
-        by-test-platform:
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
-            default: built-projects
-    mozharness:
-        mochitest-flavor: plain
-        script: desktop_unittest.py
-        no-read-buildbot-config: true
-        config:
-            by-test-platform:
-                windows.*:
-                    - unittests/win_taskcluster_unittest.py
-                macosx.*:
-                    - unittests/mac_unittest.py
-                default:
-                    - unittests/linux_unittest.py
-                    - remove_executables.py
-        extra-options:
-            - --mochitest-suite=plain-style
 
 mochitest-valgrind:
     description: "Mochitest plain Valgrind run"
     suite: mochitest/valgrind-plain
     treeherder-symbol: tc-M-V()
     run-on-projects: []
+    tier: 3
     loopback-video: true
     chunks: 40
     max-run-time: 14400
@@ -1006,6 +988,9 @@ mochitest-webgl:
             windows8-64.*: ['mozilla-release', 'mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland']
             windows8-64-devedition/opt: built-projects  # No dev edition outside of supported branches
             windows10.*: []
+            linux64-stylo.*: ['autoland', 'mozilla-central', 'try']
+            macosx64-stylo/.*: ['mozilla-central', 'try']
+            windows7-32-stylo.*: ['autoland', 'mozilla-central', 'try']
             default: built-projects
     worker-type:
         by-test-platform:
@@ -1015,6 +1000,10 @@ mochitest-webgl:
         by-test-platform:
             android.*: 10
             default: 3
+    e10s:
+        by-test-platform:
+            windows7-32/debug: both
+            default: true
     loopback-video: true
     max-run-time:
         by-test-platform:
@@ -1056,6 +1045,7 @@ mochitest-webgl:
     tier:
         by-test-platform:
             linux64-qr/.*: 1
+            macosx64-stylo/.*: 2
             default: default
 
 reftest:
@@ -1068,7 +1058,9 @@ reftest:
             windows8-64.*: ['mozilla-release', 'mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland']
             windows8-64-devedition/opt: built-projects  # No dev edition outside of supported branches
             windows10.*: []
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            linux64-stylo.*: ['autoland', 'mozilla-central', 'try']
+            macosx64-stylo.*: ['autoland', 'mozilla-central', 'try']
+            windows7-32-stylo.*: ['autoland', 'mozilla-central', 'try']
             default: built-projects
     worker-type:
         by-test-platform:
@@ -1088,6 +1080,10 @@ reftest:
             windows8-64.*/opt: 1
             windows8-64.*/debug: 2
             default: 8
+    e10s:
+        by-test-platform:
+            windows7-32/debug: both
+            default: true
     max-run-time:
         by-test-platform:
             android.*: 10800
@@ -1139,32 +1135,24 @@ reftest-gpu:
         by-test-platform:
             windows7-32.*/debug: buildbot-bridge/buildbot-bridge
             default: null
-    instance-size:
-        by-test-platform:
-            default: default
+    instance-size: default
     virtualization: virtual-with-gpu
-    max-run-time:
-        by-test-platform:
-            default: 3600
+    max-run-time: 3600
     mozharness:
-        by-test-platform:
-            default:
-                script: desktop_unittest.py
-                no-read-buildbot-config: true
-                chunked:
-                  by-test-platform:
-                    default: false
-                config:
-                    by-test-platform:
-                        windows.*:
-                            - unittests/win_taskcluster_unittest.py
-                        macosx.*:
-                            - unittests/mac_unittest.py
-                        linux.*:
-                            - unittests/linux_unittest.py
-                            - remove_executables.py
-                extra-options:
-                    - --reftest-suite=reftest-gpu
+        script: desktop_unittest.py
+        no-read-buildbot-config: true
+        chunked: false
+        config:
+            by-test-platform:
+                windows.*:
+                    - unittests/win_taskcluster_unittest.py
+                macosx.*:
+                    - unittests/mac_unittest.py
+                linux.*:
+                    - unittests/linux_unittest.py
+                    - remove_executables.py
+        extra-options:
+            - --reftest-suite=reftest-gpu
     tier: default
 
 reftest-no-accel:
@@ -1175,7 +1163,6 @@ reftest-no-accel:
     run-on-projects:
         by-test-platform:
             windows10.*: []
-            linux64-qr/.*: ['mozilla-central', 'try']
             # Deactivate try on Buildbot, by default. We don't have enough machines
             windows8-64.*: ['mozilla-release', 'mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland']
             windows8-64-devedition/opt: built-projects  # No dev edition outside of supported branches
@@ -1190,6 +1177,11 @@ reftest-no-accel:
             windows8-64.*/debug: 2
             windows8-64.*/opt: 1
             default: 8
+    e10s:
+        by-test-platform:
+            linux64-jsdcov/opt: false
+            windows7-32/debug: both
+            default: true
     mozharness:
         script: desktop_unittest.py
         no-read-buildbot-config: true
@@ -1215,14 +1207,11 @@ reftest-stylo:
     suite: reftest/reftest-stylo
     treeherder-symbol: tc-R(Rs)
     virtualization: virtual-with-gpu
-    docker-image: {"in-tree": "desktop1604-test"}
     chunks: 16
     run-on-projects:
         by-test-platform:
-            .*-stylo/opt: [ 'autoland', 'mozilla-central', 'try' ] # not on mozilla-inbound
-            macosx64-stylo/debug: [ 'autoland', 'mozilla-central', 'try' ] # not on mozilla-inbound
-            linux64-stylo-sequential/opt: [ 'mozilla-central']
-            default: built-projects
+            windows10.*: []
+            default: ['autoland', 'mozilla-central', 'try']
     mozharness:
         script: desktop_unittest.py
         no-read-buildbot-config: true
@@ -1266,9 +1255,8 @@ talos-chrome:
     virtualization: hardware
     run-on-projects:
         by-test-platform:
-            linux64-stylo-sequential/.*: ['mozilla-central','try']
-            linux64-stylo/.*: ['mozilla-central', 'try']
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            linux64-qr/.*: ['mozilla-central', 'try']
+            .*-stylo.*: ['mozilla-central', 'try']
             default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     max-run-time: 3600
     mozharness:
@@ -1287,6 +1275,33 @@ talos-chrome:
             - --add-option
             - --webServer,localhost
 
+talos-chrome-stylo:
+    description: "Talos Stylo chrome"
+    suite: talos
+    try-name: chromez-stylo
+    treeherder-symbol: tc-Ts(c)
+    virtualization: hardware
+    run-on-projects:
+        by-test-platform:
+            windows.*: ['mozilla-central', 'try']
+            default: []
+    max-run-time: 3600
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                macosx.*:
+                    - talos/mac_config.py
+                windows.*:
+                    - talos/windows_config.py
+                default:
+                    - talos/linux_config.py
+        extra-options:
+            - --suite=chromez-stylo
+            - --add-option
+            - --webServer,localhost
+
 talos-dromaeojs:
     description: "Talos dromaeojs"
     suite: talos
@@ -1295,9 +1310,8 @@ talos-dromaeojs:
     virtualization: hardware
     run-on-projects:
         by-test-platform:
-            linux64-stylo-sequential/.*: ['mozilla-central','try']
-            linux64-stylo/.*: ['mozilla-central', 'try']
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            linux64-qr/.*: ['mozilla-central', 'try']
+            .*-stylo.*: ['mozilla-central', 'try']
             default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     max-run-time: 3600
     mozharness:
@@ -1316,6 +1330,33 @@ talos-dromaeojs:
             - --add-option
             - --webServer,localhost
 
+talos-dromaeojs-stylo:
+    description: "Talos Stylo dromaeojs"
+    suite: talos
+    try-name: dromaeojs-stylo
+    treeherder-symbol: tc-Ts(d)
+    virtualization: hardware
+    run-on-projects:
+        by-test-platform:
+            windows.*: ['mozilla-central', 'try']
+            default: []
+    max-run-time: 3600
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                macosx.*:
+                    - talos/mac_config.py
+                windows.*:
+                    - talos/windows_config.py
+                default:
+                    - talos/linux_config.py
+        extra-options:
+            - --suite=dromaeojs-stylo
+            - --add-option
+            - --webServer,localhost
+
 talos-g1:
     description: "Talos g1"
     suite: talos
@@ -1324,9 +1365,8 @@ talos-g1:
     virtualization: hardware
     run-on-projects:
         by-test-platform:
-            linux64-stylo-sequential/.*: ['mozilla-central','try']
-            linux64-stylo/.*: ['mozilla-central', 'try']
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            linux64-qr/.*: ['mozilla-central', 'try']
+            .*-stylo.*: ['mozilla-central', 'try']
             default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     max-run-time: 7200
     mozharness:
@@ -1345,6 +1385,33 @@ talos-g1:
             - --add-option
             - --webServer,localhost
 
+talos-g1-stylo:
+    description: "Talos Stylo g1"
+    suite: talos
+    try-name: g1-stylo
+    treeherder-symbol: tc-Ts(g1)
+    virtualization: hardware
+    run-on-projects:
+        by-test-platform:
+            windows.*: ['mozilla-central', 'try']
+            default: []
+    max-run-time: 7200
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                macosx.*:
+                    - talos/mac_config.py
+                windows.*:
+                    - talos/windows_config.py
+                default:
+                    - talos/linux_config.py
+        extra-options:
+            - --suite=g1-stylo
+            - --add-option
+            - --webServer,localhost
+
 talos-g2:
     description: "Talos g2"
     suite: talos
@@ -1354,9 +1421,8 @@ talos-g2:
     max-run-time: 7200
     run-on-projects:
         by-test-platform:
-            linux64-stylo-sequential/.*: ['mozilla-central','try']
-            linux64-stylo/.*: ['mozilla-central', 'try']
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            linux64-qr/.*: ['mozilla-central', 'try']
+            .*-stylo.*: ['mozilla-central', 'try']
             default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     mozharness:
         script: talos_script.py
@@ -1374,6 +1440,33 @@ talos-g2:
             - --add-option
             - --webServer,localhost
 
+talos-g2-stylo:
+    description: "Talos Stylo g2"
+    suite: talos
+    try-name: g2-stylo
+    treeherder-symbol: tc-Ts(g2)
+    virtualization: hardware
+    max-run-time: 7200
+    run-on-projects:
+        by-test-platform:
+            windows.*: ['mozilla-central', 'try']
+            default: []
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                macosx.*:
+                    - talos/mac_config.py
+                windows.*:
+                    - talos/windows_config.py
+                default:
+                    - talos/linux_config.py
+        extra-options:
+            - --suite=g2-stylo
+            - --add-option
+            - --webServer,localhost
+
 talos-g3:
     description: "Talos g3"
     suite: talos
@@ -1382,9 +1475,8 @@ talos-g3:
     virtualization: hardware
     run-on-projects:
         by-test-platform:
-            linux64-stylo-sequential/.*: ['mozilla-central','try']
-            linux64-stylo/.*: ['mozilla-central', 'try']
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            linux64-qr/.*: ['mozilla-central', 'try']
+            .*-stylo.*: ['mozilla-central', 'try']
             default: ['mozilla-beta','mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     max-run-time: 3600
     mozharness:
@@ -1411,9 +1503,8 @@ talos-g4:
     virtualization: hardware
     run-on-projects:
         by-test-platform:
-            linux64-stylo-sequential/.*: ['mozilla-central','try']
-            linux64-stylo/.*: ['mozilla-central', 'try']
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            linux64-qr/.*: ['mozilla-central', 'try']
+            .*-stylo.*: ['mozilla-central', 'try']
             default: ['mozilla-beta','mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     max-run-time: 3600
     mozharness:
@@ -1432,6 +1523,33 @@ talos-g4:
             - --add-option
             - --webServer,localhost
 
+talos-g4-stylo:
+    description: "Talos Stylo g4"
+    suite: talos
+    try-name: g4-stylo
+    treeherder-symbol: tc-Ts(g4)
+    virtualization: hardware
+    run-on-projects:
+        by-test-platform:
+            windows.*: ['mozilla-central', 'try']
+            default: []
+    max-run-time: 3600
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                macosx.*:
+                    - talos/mac_config.py
+                windows.*:
+                    - talos/windows_config.py
+                default:
+                    - talos/linux_config.py
+        extra-options:
+            - --suite=g4-stylo
+            - --add-option
+            - --webServer,localhost
+
 talos-g5:
     description: "Talos g5"
     suite: talos
@@ -1440,9 +1558,8 @@ talos-g5:
     virtualization: hardware
     run-on-projects:
         by-test-platform:
-            linux64-stylo-sequential/.*: ['mozilla-central','try']
-            linux64-stylo/.*: ['mozilla-central', 'try']
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            linux64-qr/.*: ['mozilla-central', 'try']
+            .*-stylo.*: ['mozilla-central', 'try']
             default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     max-run-time: 3600
     mozharness:
@@ -1462,6 +1579,34 @@ talos-g5:
             - --add-option
             - --webServer,localhost
 
+talos-g5-stylo:
+    description: "Talos Stylo g5"
+    suite: talos
+    try-name: g5-stylo
+    treeherder-symbol: tc-Ts(g5)
+    virtualization: hardware
+    run-on-projects:
+        by-test-platform:
+            windows.*: ['mozilla-central', 'try']
+            default: []
+    max-run-time: 3600
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                macosx.*:
+                    - talos/mac_config.py
+                windows.*:
+                    - talos/windows_config.py
+                default:
+                    - talos/linux_config.py
+                    - remove_executables.py
+        extra-options:
+            - --suite=g5-stylo
+            - --add-option
+            - --webServer,localhost
+
 talos-other:
     description: "Talos other"
     suite: talos
@@ -1470,9 +1615,8 @@ talos-other:
     virtualization: hardware
     run-on-projects:
         by-test-platform:
-            linux64-stylo-sequential/.*: ['mozilla-central','try']
-            linux64-stylo/.*: ['mozilla-central', 'try']
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            linux64-qr/.*: ['mozilla-central', 'try']
+            .*-stylo.*: ['mozilla-central', 'try']
             default: ['mozilla-beta','mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     max-run-time: 3600
     mozharness:
@@ -1491,6 +1635,33 @@ talos-other:
             - --add-option
             - --webServer,localhost
 
+talos-other-stylo:
+    description: "Talos Stylo other"
+    suite: talos
+    try-name: other-stylo
+    treeherder-symbol: tc-Ts(o)
+    virtualization: hardware
+    run-on-projects:
+        by-test-platform:
+            windows.*: ['mozilla-central', 'try']
+            default: []
+    max-run-time: 3600
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                macosx.*:
+                    - talos/mac_config.py
+                windows.*:
+                    - talos/windows_config.py
+                default:
+                    - talos/linux_config.py
+        extra-options:
+            - --suite=other-stylo
+            - --add-option
+            - --webServer,localhost
+
 talos-perf-reftest:
     description: "Talos perf-reftest"
     suite: talos
@@ -1499,9 +1670,8 @@ talos-perf-reftest:
     virtualization: hardware
     run-on-projects:
         by-test-platform:
-            linux64-stylo-sequential/.*: ['mozilla-central', 'try']
-            linux64-stylo/.*: ['mozilla-central', 'try']
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            linux64-qr/.*: ['mozilla-central', 'try']
+            .*-stylo.*: ['mozilla-central', 'try']
             default: ['mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     max-run-time: 3600
     mozharness:
@@ -1522,7 +1692,11 @@ talos-perf-reftest-singletons:
     try-name: perf-reftest-singletons
     treeherder-symbol: tc-T(ps)
     virtualization: hardware
-    run-on-projects: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
+    run-on-projects:
+        by-test-platform:
+            linux64-qr/.*: ['mozilla-central', 'try']
+            .*-stylo.*: ['mozilla-central', 'try']
+            default: ['mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     max-run-time: 3600
     mozharness:
         script: talos_script.py
@@ -1538,6 +1712,54 @@ talos-perf-reftest-singletons:
         extra-options:
             - --suite=perf-reftest-singletons
 
+talos-perf-reftest-singletons-stylo:
+    description: "Talos Stylo perf-reftest singletons"
+    suite: talos
+    try-name: perf-reftest-singletons-stylo
+    treeherder-symbol: tc-Ts(ps)
+    virtualization: hardware
+    run-on-projects:
+        by-test-platform:
+            windows.*: ['mozilla-central', 'try']
+            default: []
+    max-run-time: 3600
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                macosx.*:
+                    - talos/mac_config.py
+                windows.*:
+                    - talos/windows_config.py
+                default:
+                    - talos/linux_config.py
+        extra-options:
+            - --suite=perf-reftest-singletons-stylo
+
+talos-perf-reftest-stylo:
+    description: "Talos Stylo perf-reftest"
+    suite: talos
+    try-name: perf-reftest-stylo
+    treeherder-symbol: tc-Ts(p)
+    virtualization: hardware
+    run-on-projects:
+        by-test-platform:
+            windows.*: ['mozilla-central', 'try']
+            default: []
+    max-run-time: 3600
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                windows.*:
+                    - talos/windows_config.py
+                default:
+                    - talos/linux_config.py
+        extra-options:
+            - --suite=perf-reftest-stylo
+
 talos-svgr:
     description: "Talos svgr"
     suite: talos
@@ -1546,9 +1768,8 @@ talos-svgr:
     virtualization: hardware
     run-on-projects:
         by-test-platform:
-            linux64-stylo-sequential/.*: ['mozilla-central','try']
-            linux64-stylo/.*: ['mozilla-central', 'try']
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            linux64-qr/.*: ['mozilla-central', 'try']
+            .*-stylo.*: ['mozilla-central', 'try']
             default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     max-run-time: 3600
     mozharness:
@@ -1567,6 +1788,33 @@ talos-svgr:
             - --add-option
             - --webServer,localhost
 
+talos-svgr-stylo:
+    description: "Talos Stylo svgr"
+    suite: talos
+    try-name: svgr-stylo
+    treeherder-symbol: tc-Ts(s)
+    virtualization: hardware
+    run-on-projects:
+        by-test-platform:
+            windows.*: ['mozilla-central', 'try']
+            default: []
+    max-run-time: 3600
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                macosx.*:
+                    - talos/mac_config.py
+                windows.*:
+                    - talos/windows_config.py
+                default:
+                    - talos/linux_config.py
+        extra-options:
+            - --suite=svgr-stylo
+            - --add-option
+            - --webServer,localhost
+
 talos-tp5o:
     description: "Talos tp5o"
     suite: talos
@@ -1575,9 +1823,8 @@ talos-tp5o:
     virtualization: hardware
     run-on-projects:
         by-test-platform:
-            linux64-stylo-sequential/.*: ['mozilla-central','try']
-            linux64-stylo/.*: ['mozilla-central', 'try']
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            linux64-qr/.*: ['mozilla-central', 'try']
+            .*-stylo.*: ['mozilla-central', 'try']
             default: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try']
     max-run-time: 3600
     mozharness:
@@ -1596,6 +1843,33 @@ talos-tp5o:
             - --add-option
             - --webServer,localhost
 
+talos-tp5o-stylo:
+    description: "Talos Stylo tp5o"
+    suite: talos
+    try-name: tp5o-stylo
+    treeherder-symbol: tc-Ts(tp)
+    virtualization: hardware
+    run-on-projects:
+        by-test-platform:
+            windows.*: ['mozilla-central', 'try']
+            default: []
+    max-run-time: 3600
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                macosx.*:
+                    - talos/mac_config.py
+                windows.*:
+                    - talos/windows_config.py
+                default:
+                    - talos/linux_config.py
+        extra-options:
+            - --suite=tp5o-stylo
+            - --add-option
+            - --webServer,localhost
+
 talos-tp6:
     description: "Talos Tp6"
     suite: talos
@@ -1604,6 +1878,7 @@ talos-tp6:
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
+            macosx.*: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
             default: []
     max-run-time: 3600
     mozharness:
@@ -1623,10 +1898,10 @@ talos-tp6:
             - --webServer,localhost
 
 talos-tp6-stylo:
-    description: "Talos Tp6 Stylo"
+    description: "Talos Stylo Tp6"
     suite: talos
     try-name: tp6-stylo
-    treeherder-symbol: tc-T(tp6s)
+    treeherder-symbol: tc-Ts(tp6s)
     virtualization: hardware
     run-on-projects:
         by-test-platform:
@@ -1649,10 +1924,10 @@ talos-tp6-stylo:
             - --suite=tp6-stylo
 
 talos-tp6-stylo-threads:
-    description: "Talos Tp6 Stylo Threads"
+    description: "Talos Stylo Threads Tp6"
     suite: talos
     try-name: tp6-stylo-threads
-    treeherder-symbol: tc-T(tp6st)
+    treeherder-symbol: tc-Ts(tp6st)
     virtualization: hardware
     run-on-projects:
         by-test-platform:
@@ -1682,6 +1957,7 @@ talos-xperf:
     run-on-projects:
         by-test-platform:
             windows7-32.*: ['mozilla-beta', 'mozilla-central', 'mozilla-inbound', 'autoland', 'try', 'date']
+            .*-stylo.*: ['mozilla-central', 'try']
             default: []
     max-run-time: 3600
     mozharness:
@@ -1700,6 +1976,32 @@ talos-xperf:
             - --add-option
             - --webServer,localhost
 
+talos-xperf-stylo:
+    description: "Talos Stylo xperf"
+    suite: talos
+    try-name: xperf-stylo
+    treeherder-symbol: tc-Ts(x)
+    run-on-projects:
+        by-test-platform:
+            windows7-32.*: ['mozilla-central', 'try']
+            default: []
+    max-run-time: 3600
+    mozharness:
+        script: talos_script.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                macosx.*:
+                    - talos/mac_config.py
+                windows.*:
+                    - talos/windows_config.py
+                default:
+                    - talos/linux_config.py
+        extra-options:
+            - --suite=xperf-stylo
+            - --add-option
+            - --webServer,localhost
+
 telemetry-tests-client:
     description: "Telemetry tests client run"
     suite: telemetry-tests-client
@@ -1715,6 +2017,36 @@ telemetry-tests-client:
                     - remove_executables.py
                 windows.*: []
 
+test-verify:
+    description: "Extra verification of tests modified on this push"
+    suite: test-verification
+    treeherder-symbol: tc(TV)
+    loopback-video: true
+    max-run-time: 5400
+    allow-software-gl-layers: false
+    run-on-projects: built-projects
+    tier: 3
+    mozharness:
+        script: desktop_unittest.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                windows.*:
+                    - unittests/win_taskcluster_unittest.py
+                macosx.*:
+                    - remove_executables.py
+                    - unittests/mac_unittest.py
+                linux.*:
+                    - unittests/linux_unittest.py
+                    - remove_executables.py
+        extra-options:
+            - --verify
+    when:
+        files-changed:
+            - '**/*.js'
+            - '**/*.html'
+            - '**/*.xhtml'
+            - '**/*.xul'
 
 web-platform-tests:
     description: "Web platform test run"
@@ -1729,8 +2061,12 @@ web-platform-tests:
     instance-size: xlarge
     run-on-projects:
         by-test-platform:
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            .*-stylo.*: ['autoland', 'mozilla-central', 'try']
             default: built-projects
+    e10s:
+        by-test-platform:
+            windows7-32/debug: both
+            default: true
     mozharness:
         script: web_platform_tests.py
         no-read-buildbot-config: true
@@ -1759,10 +2095,9 @@ web-platform-tests-headless:
     e10s:
         by-test-platform:
             macosx.*: true
-            default: both
+            default: true
     max-run-time: 7200
     instance-size: xlarge
-    docker-image: {"in-tree": "desktop1604-test"}
     run-on-projects: [] # disabled pending releng approval
     mozharness:
         script: web_platform_tests.py
@@ -1801,8 +2136,12 @@ web-platform-tests-reftests:
         default: 6
     run-on-projects:
         by-test-platform:
-            macosx64-stylo/.*: ['autoland', 'mozilla-central', 'try']
+            .*-stylo.*: ['autoland', 'mozilla-central', 'try']
             default: built-projects
+    e10s:
+        by-test-platform:
+            windows7-32/debug: both
+            default: true
     mozharness:
         script: web_platform_tests.py
         no-read-buildbot-config: true
@@ -1831,9 +2170,8 @@ web-platform-tests-reftests-headless:
         default: 6
     e10s:
         by-test-platform:
-            macosx.*: true
-            default: both
-    docker-image: {"in-tree": "desktop1604-test"}
+            windows7-32/debug: both
+            default: true
     run-on-projects: [] # disabled pending releng approval
     mozharness:
         script: web_platform_tests.py
@@ -1884,7 +2222,6 @@ web-platform-tests-wdspec-headless:
     treeherder-symbol: tc-W(WdH)
     max-run-time: 5400
     instance-size: xlarge
-    docker-image: {"in-tree": "desktop1604-test"}
     run-on-projects: [] # disabled pending releng approval
     mozharness:
         script: web_platform_tests.py

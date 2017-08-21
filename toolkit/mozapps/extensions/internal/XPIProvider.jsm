@@ -17,78 +17,43 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/AddonManager.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "AddonRepository",
-                                  "resource://gre/modules/addons/AddonRepository.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AddonSettings",
-                                  "resource://gre/modules/addons/AddonSettings.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
-                                  "resource://gre/modules/AppConstants.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ChromeManifestParser",
-                                  "resource://gre/modules/ChromeManifestParser.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Extension",
-                                  "resource://gre/modules/Extension.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
-                                  "resource://gre/modules/LightweightThemeManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
-                                  "resource://gre/modules/FileUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ZipUtils",
-                                  "resource://gre/modules/ZipUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
-                                  "resource://gre/modules/NetUtil.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PermissionsUtils",
-                                  "resource://gre/modules/PermissionsUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "OS",
-                                  "resource://gre/modules/osfile.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ConsoleAPI",
-                                  "resource://gre/modules/Console.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ProductAddonChecker",
-                                  "resource://gre/modules/addons/ProductAddonChecker.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "UpdateUtils",
-                                  "resource://gre/modules/UpdateUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
-                                  "resource://gre/modules/AppConstants.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "isAddonPartOfE10SRollout",
-                                  "resource://gre/modules/addons/E10SAddonsRollout.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "JSONFile",
-                                  "resource://gre/modules/JSONFile.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "LegacyExtensionsUtils",
-                                  "resource://gre/modules/LegacyExtensionsUtils.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  AddonRepository: "resource://gre/modules/addons/AddonRepository.jsm",
+  AddonSettings: "resource://gre/modules/addons/AddonSettings.jsm",
+  AppConstants: "resource://gre/modules/AppConstants.jsm",
+  ChromeManifestParser: "resource://gre/modules/ChromeManifestParser.jsm",
+  Extension: "resource://gre/modules/Extension.jsm",
+  LightweightThemeManager: "resource://gre/modules/LightweightThemeManager.jsm",
+  FileUtils: "resource://gre/modules/FileUtils.jsm",
+  ZipUtils: "resource://gre/modules/ZipUtils.jsm",
+  NetUtil: "resource://gre/modules/NetUtil.jsm",
+  PermissionsUtils: "resource://gre/modules/PermissionsUtils.jsm",
+  OS: "resource://gre/modules/osfile.jsm",
+  ConsoleAPI: "resource://gre/modules/Console.jsm",
+  ProductAddonChecker: "resource://gre/modules/addons/ProductAddonChecker.jsm",
+  UpdateUtils: "resource://gre/modules/UpdateUtils.jsm",
+  isAddonPartOfE10SRollout: "resource://gre/modules/addons/E10SAddonsRollout.jsm",
+  JSONFile: "resource://gre/modules/JSONFile.jsm",
+  LegacyExtensionsUtils: "resource://gre/modules/LegacyExtensionsUtils.jsm",
 
-/* globals DownloadAddonInstall, LocalAddonInstall, StagedAddonInstall, UpdateChecker, loadManifestFromFile, verifyBundleSignedState */
-for (let sym of [
-  "DownloadAddonInstall",
-  "LocalAddonInstall",
-  "StagedAddonInstall",
-  "UpdateChecker",
-  "loadManifestFromFile",
-  "verifyBundleSignedState",
-]) {
-  XPCOMUtils.defineLazyModuleGetter(this, sym, "resource://gre/modules/addons/XPIInstall.jsm");
-}
+  DownloadAddonInstall: "resource://gre/modules/addons/XPIInstall.jsm",
+  LocalAddonInstall: "resource://gre/modules/addons/XPIInstall.jsm",
+  StagedAddonInstall: "resource://gre/modules/addons/XPIInstall.jsm",
+  UpdateChecker: "resource://gre/modules/addons/XPIInstall.jsm",
+  loadManifestFromFile: "resource://gre/modules/addons/XPIInstall.jsm",
+  verifyBundleSignedState: "resource://gre/modules/addons/XPIInstall.jsm",
+});
 
 const {nsIBlocklistService} = Ci;
-XPCOMUtils.defineLazyServiceGetter(this, "Blocklist",
-                                   "@mozilla.org/extensions/blocklist;1",
-                                   "nsIBlocklistService");
-XPCOMUtils.defineLazyServiceGetter(this,
-                                   "ChromeRegistry",
-                                   "@mozilla.org/chrome/chrome-registry;1",
-                                   "nsIChromeRegistry");
-XPCOMUtils.defineLazyServiceGetter(this,
-                                   "ResProtocolHandler",
-                                   "@mozilla.org/network/protocol;1?name=resource",
-                                   "nsIResProtocolHandler");
-XPCOMUtils.defineLazyServiceGetter(this,
-                                   "AddonPolicyService",
-                                   "@mozilla.org/addons/policy-service;1",
-                                   "nsIAddonPolicyService");
-XPCOMUtils.defineLazyServiceGetter(this,
-                                   "AddonPathService",
-                                   "@mozilla.org/addon-path-service;1",
-                                   "amIAddonPathService");
-XPCOMUtils.defineLazyServiceGetter(this, "aomStartup",
-                                   "@mozilla.org/addons/addon-manager-startup;1",
-                                   "amIAddonManagerStartup");
+
+XPCOMUtils.defineLazyServiceGetters(this, {
+  Blocklist: ["@mozilla.org/extensions/blocklist;1", "nsIBlocklistService"],
+  ChromeRegistry: ["@mozilla.org/chrome/chrome-registry;1", "nsIChromeRegistry"],
+  ResProtocolHandler: ["@mozilla.org/network/protocol;1?name=resource", "nsIResProtocolHandler"],
+  AddonPolicyService: ["@mozilla.org/addons/policy-service;1", "nsIAddonPolicyService"],
+  AddonPathService: ["@mozilla.org/addon-path-service;1", "amIAddonPathService"],
+  aomStartup: ["@mozilla.org/addons/addon-manager-startup;1", "amIAddonManagerStartup"],
+});
 
 Cu.importGlobalProperties(["URL"]);
 
@@ -189,7 +154,7 @@ const TOOLKIT_ID                      = "toolkit@mozilla.org";
 
 const XPI_SIGNATURE_CHECK_PERIOD      = 24 * 60 * 60;
 
-XPCOMUtils.defineConstant(this, "DB_SCHEMA", 22);
+XPCOMUtils.defineConstant(this, "DB_SCHEMA", 23);
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "ALLOW_NON_MPC", PREF_ALLOW_NON_MPC);
 
@@ -483,6 +448,21 @@ function findMatchingStaticBlocklistItem(aAddon) {
     }
   }
   return null;
+}
+
+/**
+ * Determine the reason to pass to an extension's bootstrap methods when
+ * switch between versions.
+ *
+ * @param {string} oldVersion The version of the existing extension instance.
+ * @param {string} newVersion The version of the extension being installed.
+ *
+ * @return {BOOSTRAP_REASONS.ADDON_UPGRADE|BOOSTRAP_REASONS.ADDON_DOWNGRADE}
+ */
+function newVersionReason(oldVersion, newVersion) {
+  return Services.vc.compare(oldVersion, newVersion) <= 0 ?
+         BOOTSTRAP_REASONS.ADDON_UPGRADE :
+         BOOTSTRAP_REASONS.ADDON_DOWNGRADE;
 }
 
 /**
@@ -1681,12 +1661,13 @@ this.XPIStates = {
    * Find the highest priority location of an add-on by ID and return the
    * location and the XPIState.
    * @param aId   The add-on ID
+   * @param aLocations If specified, the locations to search
    * @return {XPIState?}
    */
-  findAddon(aId) {
+  findAddon(aId, aLocations = this.db.values()) {
     // Fortunately the Map iterator returns in order of insertion, which is
     // also our highest -> lowest priority order.
-    for (let location of this.db.values()) {
+    for (let location of aLocations) {
       if (location.has(aId)) {
         return location.get(aId);
       }
@@ -2256,13 +2237,20 @@ this.XPIProvider = {
 
             // If the add-on was pending disable then shut it down and remove it
             // from the persisted data.
+            let reason = BOOTSTRAP_REASONS.APP_SHUTDOWN;
             if (addon.disable) {
-              XPIProvider.callBootstrapMethod(addonDetails, addon.file, "shutdown",
-                                              BOOTSTRAP_REASONS.ADDON_DISABLE);
-            } else {
-              XPIProvider.callBootstrapMethod(addonDetails, addon.file, "shutdown",
-                                              BOOTSTRAP_REASONS.APP_SHUTDOWN);
+              reason = BOOTSTRAP_REASONS.ADDON_DISABLE;
+            } else if (addon.location.name == KEY_APP_TEMPORARY) {
+              reason = BOOTSTRAP_REASONS.ADDON_UNINSTALL;
+              let locations = Array.from(XPIStates.db.values())
+                                   .filter(loc => loc.name != TemporaryInstallLocation.name);
+              let existing = XPIStates.findAddon(addon.id, locations);
+              if (existing) {
+                reason = newVersionReason(addon.version, existing.version);
+              }
             }
+            XPIProvider.callBootstrapMethod(addonDetails, addon.file,
+                                            "shutdown", reason);
           }
           Services.obs.removeObserver(this, "quit-application-granted");
         }
@@ -2348,21 +2336,28 @@ this.XPIProvider = {
       for (let [id, addon] of tempLocation.entries()) {
         tempLocation.delete(id);
 
+        let reason = BOOTSTRAP_REASONS.ADDON_UNINSTALL;
+
+        let locations = Array.from(XPIStates.db.values())
+                             .filter(loc => loc != tempLocation);
+        let existing = XPIStates.findAddon(id, locations);
+        if (existing) {
+          reason = newVersionReason(addon.version, existing.version);
+        }
+
         this.callBootstrapMethod(createAddonDetails(id, addon),
-                                 addon.file, "uninstall",
-                                 BOOTSTRAP_REASONS.ADDON_UNINSTALL);
+                                 addon.file, "uninstall", reason);
         this.unloadBootstrapScope(id);
         TemporaryInstallLocation.uninstallAddon(id);
 
-        let state = XPIStates.findAddon(id);
-        if (state) {
-          let newAddon = XPIDatabase.makeAddonLocationVisible(id, state.location.name);
+        if (existing) {
+          let newAddon = XPIDatabase.makeAddonLocationVisible(id, existing.location.name);
 
           let file = new nsIFile(newAddon.path);
 
+          let data = {oldVersion: addon.version};
           this.callBootstrapMethod(createAddonDetails(id, newAddon),
-                                   file, "install",
-                                   BOOTSTRAP_REASONS.ADDON_INSTALL);
+                                   file, "install", reason, data);
         }
       }
     }
@@ -2857,9 +2852,7 @@ this.XPIProvider = {
               // call its uninstall method
               let newVersion = addon.version;
               let oldVersion = existingAddon;
-              let uninstallReason = Services.vc.compare(oldVersion, newVersion) < 0 ?
-                                    BOOTSTRAP_REASONS.ADDON_UPGRADE :
-                                    BOOTSTRAP_REASONS.ADDON_DOWNGRADE;
+              let uninstallReason = newVersionReason(oldVersion, newVersion);
 
               this.callBootstrapMethod(createAddonDetails(existingAddonID, existingAddon),
                                        file, "uninstall", uninstallReason,
@@ -3472,6 +3465,8 @@ this.XPIProvider = {
         logger.warn("Addon with ID " + oldAddon.id + " already installed,"
                     + " older version will be disabled");
 
+        addon.installDate = oldAddon.installDate;
+
         let existingAddonID = oldAddon.id;
         let existingAddon = oldAddon._sourceBundle;
 
@@ -3480,11 +3475,7 @@ this.XPIProvider = {
         let newVersion = addon.version;
         let oldVersion = oldAddon.version;
 
-        if (Services.vc.compare(newVersion, oldVersion) >= 0) {
-          installReason = BOOTSTRAP_REASONS.ADDON_UPGRADE;
-        } else {
-          installReason = BOOTSTRAP_REASONS.ADDON_DOWNGRADE;
-        }
+        installReason = newVersionReason(oldVersion, newVersion);
         let uninstallReason = installReason;
 
         extraParams.newVersion = newVersion;
@@ -4222,7 +4213,6 @@ this.XPIProvider = {
     if (!aFile.exists()) {
       activeAddon.bootstrapScope =
         new Cu.Sandbox(principal, { sandboxName: aFile.path,
-                                    wantGlobalProperties: ["indexedDB"],
                                     addonId: aId,
                                     metadata: { addonID: aId } });
       logger.error("Attempted to load bootstrap scope from missing directory " + aFile.path);
@@ -4240,7 +4230,6 @@ this.XPIProvider = {
 
       activeAddon.bootstrapScope =
         new Cu.Sandbox(principal, { sandboxName: uri,
-                                    wantGlobalProperties: ["indexedDB"],
                                     addonId: aId,
                                     metadata: { addonID: aId, URI: uri } });
 
@@ -4375,13 +4364,17 @@ this.XPIProvider = {
       }
 
       if (aAddon.hasEmbeddedWebExtension) {
+        let reason = Object.keys(BOOTSTRAP_REASONS).find(
+          key => BOOTSTRAP_REASONS[key] == aReason
+        );
+
         if (aMethod == "startup") {
           const webExtension = LegacyExtensionsUtils.getEmbeddedExtensionFor(params);
           params.webExtension = {
-            startup: () => webExtension.startup(),
+            startup: () => webExtension.startup(reason),
           };
         } else if (aMethod == "shutdown") {
-          LegacyExtensionsUtils.getEmbeddedExtensionFor(params).shutdown();
+          LegacyExtensionsUtils.getEmbeddedExtensionFor(params).shutdown(reason);
         }
       }
 

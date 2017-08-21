@@ -3,20 +3,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 %endif
+%filter substitution
+%define horizontalTabPadding 9px
 
 :root {
   --tab-toolbar-navbar-overlap: 1px;
-/* Temporarily using the compact tab strip by default because of bug 1386964:
+  --tab-line-color: highlight;
   --tab-min-height: 33px;
 }
 
 :root[uidensity=compact] {
-*/
   --tab-min-height: 29px;
 }
 
 :root[uidensity=touch] {
   --tab-min-height: 41px;
+}
+
+:root:-moz-lwtheme {
+  --tab-line-color: var(--lwt-accent-color);
 }
 
 #tabbrowser-tabs,
@@ -49,7 +54,7 @@
 }
 
 .tab-content {
-  padding: 0 9px;
+  padding: 0 @horizontalTabPadding@;
 }
 
 .tab-content[pinned] {
@@ -118,23 +123,23 @@
 }
 
 .tab-sharing-icon-overlay[sharing="camera"] {
-  list-style-image: url("chrome://browser/skin/notification-icons.svg#camera-sharing");
+  list-style-image: url("chrome://browser/skin/notification-icons/camera.svg");
 }
 
 .tab-sharing-icon-overlay[sharing="microphone"] {
-  list-style-image: url("chrome://browser/skin/notification-icons.svg#microphone-sharing");
+  list-style-image: url("chrome://browser/skin/notification-icons/microphone.svg");
 }
 
 .tab-sharing-icon-overlay[sharing="screen"] {
-  list-style-image: url("chrome://browser/skin/notification-icons.svg#screen-sharing");
+  list-style-image: url("chrome://browser/skin/notification-icons/screen.svg");
 }
 
 .tab-icon-overlay {
   width: 16px;
   height: 16px;
   margin-top: -8px;
-  margin-inline-start: -15px;
-  margin-inline-end: -1px;
+  margin-inline-start: -6px;
+  margin-inline-end: -10px;
   position: relative;
 }
 
@@ -195,9 +200,13 @@
 }
 
 .tab-close-button {
-  margin-inline-start: 1px;
   margin-inline-end: -2px;
   padding: 0;
+}
+
+:root[uidensity=touch] .tab-close-button {
+  margin-inline-end: -@horizontalTabPadding@;
+  padding: 10px calc(@horizontalTabPadding@ - 2px);
 }
 
 .tab-icon-sound {
@@ -307,13 +316,21 @@
   border-left-style: solid;
   border-right-style: solid;
   border-color: var(--tabs-border);
+  border-image: linear-gradient(var(--tabs-border),
+                                var(--tabs-border) calc(100% - 1px - var(--tab-toolbar-navbar-overlap)),
+                                transparent calc(100% - 1px - var(--tab-toolbar-navbar-overlap)));
+  border-image-slice: 1;
   background-color: var(--toolbar-bgcolor);
   background-image: var(--toolbar-bgimage);
   background-repeat: repeat-x;
 }
 
+:root:not([sizemode=normal]) .tabbrowser-tab[first-visible-tab] > .tab-stack > .tab-background[selected=true] {
+  border-inline-start-style: none;
+}
+
 .tab-line[selected=true] {
-  background-color: Highlight;
+  background-color: var(--tab-line-color);
 }
 
 /*
@@ -406,10 +423,18 @@
   opacity: 0.2;
 }
 
-#TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-tab::before,
-#TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-tab::after {
-  opacity: 0.4;
+%ifdef CAN_DRAW_IN_TITLEBAR
+%ifdef MENUBAR_CAN_AUTOHIDE
+:root[tabsintitlebar] #toolbar-menubar[autohide=true] ~ #TabsToolbar > #tabbrowser-tabs > .tabbrowser-tab::after,
+:root[tabsintitlebar] #toolbar-menubar[autohide=true] ~ #TabsToolbar > #tabbrowser-tabs > .tabbrowser-tab::before
+%else
+:root[tabsintitlebar] .tabbrowser-tab::after,
+:root[tabsintitlebar] .tabbrowser-tab::before
+%endif
+{
+  border-image: none;
 }
+%endif
 
 /* Also show separators beside the selected tab when dragging it. */
 #tabbrowser-tabs[movingtab] > .tabbrowser-tab[beforeselected]:not([last-visible-tab])::after,
@@ -439,9 +464,6 @@
 #TabsToolbar > #new-tab-button ,
 #TabsToolbar > toolbarpaletteitem > #new-tab-button {
   list-style-image: url(chrome://browser/skin/tabbrowser/newtab.svg);
-  -moz-context-properties: fill;
-  fill: currentColor;
-  color: inherit;
 }
 
 .tabs-newtab-button {
@@ -462,8 +484,6 @@
 
 #alltabs-button {
   list-style-image: url(chrome://browser/skin/arrow-dropdown-16.svg);
-  -moz-context-properties: fill;
-  fill: currentColor;
 }
 
 .alltabs-item > .menu-iconic-left > .menu-iconic-icon {

@@ -102,7 +102,8 @@ WebRenderBridgeChild::DPEnd(wr::DisplayListBuilder &aBuilder,
                             const gfx::IntSize& aSize,
                             bool aIsSync,
                             uint64_t aTransactionId,
-                            const WebRenderScrollData& aScrollData)
+                            const WebRenderScrollData& aScrollData,
+                            const mozilla::TimeStamp& aTxnStartTime)
 {
   MOZ_ASSERT(!mDestroyed);
   MOZ_ASSERT(mIsInTransaction);
@@ -119,10 +120,10 @@ WebRenderBridgeChild::DPEnd(wr::DisplayListBuilder &aBuilder,
 
   if (aIsSync) {
     this->SendDPSyncEnd(aSize, mParentCommands, mDestroyedActors, GetFwdTransactionId(), aTransactionId,
-                        contentSize, dlData, dl.dl_desc, aScrollData, mIdNamespace, fwdTime);
+                        contentSize, dlData, dl.dl_desc, aScrollData, mIdNamespace, aTxnStartTime, fwdTime);
   } else {
     this->SendDPEnd(aSize, mParentCommands, mDestroyedActors, GetFwdTransactionId(), aTransactionId,
-                    contentSize, dlData, dl.dl_desc, aScrollData, mIdNamespace, fwdTime);
+                    contentSize, dlData, dl.dl_desc, aScrollData, mIdNamespace, aTxnStartTime, fwdTime);
   }
 
   mParentCommands.Clear();
@@ -211,8 +212,8 @@ WriteFontFileData(const uint8_t* aData, uint32_t aLength, uint32_t aIndex,
 }
 
 void
-WebRenderBridgeChild::PushGlyphs(wr::DisplayListBuilder& aBuilder, const nsTArray<GlyphArray>& aGlyphs,
-                                 gfx::ScaledFont* aFont, const StackingContextHelper& aSc,
+WebRenderBridgeChild::PushGlyphs(wr::DisplayListBuilder& aBuilder, const nsTArray<gfx::Glyph>& aGlyphs,
+                                 gfx::ScaledFont* aFont, const gfx::Color& aColor, const StackingContextHelper& aSc,
                                  const LayerRect& aBounds, const LayerRect& aClip)
 {
   MOZ_ASSERT(aFont);
@@ -221,27 +222,21 @@ WebRenderBridgeChild::PushGlyphs(wr::DisplayListBuilder& aBuilder, const nsTArra
   wr::WrFontKey key = GetFontKeyForScaledFont(aFont);
   MOZ_ASSERT(key.mNamespace.mHandle && key.mHandle);
 
-  for (size_t i = 0; i < aGlyphs.Length(); i++) {
-    GlyphArray glyph_array = aGlyphs[i];
-    nsTArray<gfx::Glyph>& glyphs = glyph_array.glyphs();
+  nsTArray<wr::GlyphInstance> wr_glyph_instances;
+  wr_glyph_instances.SetLength(aGlyphs.Length());
 
-    nsTArray<wr::GlyphInstance> wr_glyph_instances;
-    wr_glyph_instances.SetLength(glyphs.Length());
-
-    for (size_t j = 0; j < glyphs.Length(); j++) {
-      wr_glyph_instances[j].index = glyphs[j].mIndex;
-      wr_glyph_instances[j].point = aSc.ToRelativeLayoutPoint(
-              LayerPoint::FromUnknownPoint(glyphs[j].mPosition));
-    }
-
-    aBuilder.PushText(aSc.ToRelativeLayoutRect(aBounds),
-                      aSc.ToRelativeLayoutRect(aClip),
-                      glyph_array.color().value(),
-                      key,
-                      Range<const wr::GlyphInstance>(wr_glyph_instances.Elements(), wr_glyph_instances.Length()),
-                      aFont->GetSize());
-
+  for (size_t j = 0; j < aGlyphs.Length(); j++) {
+    wr_glyph_instances[j].index = aGlyphs[j].mIndex;
+    wr_glyph_instances[j].point = aSc.ToRelativeLayoutPoint(
+            LayerPoint::FromUnknownPoint(aGlyphs[j].mPosition));
   }
+
+  aBuilder.PushText(aSc.ToRelativeLayoutRect(aBounds),
+                    aSc.ToRelativeLayoutRect(aClip),
+                    aColor,
+                    key,
+                    Range<const wr::GlyphInstance>(wr_glyph_instances.Elements(), wr_glyph_instances.Length()),
+                    aFont->GetSize());
 }
 
 wr::FontKey
@@ -464,10 +459,7 @@ WebRenderBridgeChild::RecvWrUpdated(const wr::IdNamespace& aNewIdNamespace)
   // Update mIdNamespace to identify obsolete keys and messages by WebRenderBridgeParent.
   // Since usage of invalid keys could cause crash in webrender.
   mIdNamespace = aNewIdNamespace;
-  // Remove all FontKeys since they are removed by WebRenderBridgeParent
-  for (auto iter = mFontKeys.Iter(); !iter.Done(); iter.Next()) {
-    SendDeleteFont(iter.Data());
-  }
+  // Just clear FontKeys, they are removed during WebRenderAPI destruction.
   mFontKeys.Clear();
   GetCompositorBridgeChild()->RecvInvalidateLayers(wr::AsUint64(mPipelineId));
   return IPC_OK();

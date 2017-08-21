@@ -16,7 +16,7 @@ use shared_lock::StylesheetGuards;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 #[cfg(feature = "gecko")]
-use stylesheets::{MallocSizeOfWithRepeats, SizeOfState};
+use stylesheets::SizeOfState;
 
 bitflags! {
     flags RestyleFlags: u8 {
@@ -69,14 +69,23 @@ impl RestyleData {
     }
 
     /// Clear all the restyle state associated with this element.
-    fn clear(&mut self) {
-        *self = Self::new();
+    ///
+    /// FIXME(bholley): The only caller of this should probably just assert that
+    /// the hint is empty and call clear_flags_and_damage().
+    fn clear_restyle_state(&mut self) {
+        self.clear_restyle_flags_and_damage();
+        self.hint = RestyleHint::empty();
     }
 
     /// Clear restyle flags and damage.
-    fn clear_flags_and_damage(&mut self) {
+    ///
+    /// Note that we don't touch the TRAVERSED_WITHOUT_STYLING bit, which gets
+    /// set to the correct value on each traversal. There's no reason anyone
+    /// needs to clear it, and clearing it accidentally mid-traversal could
+    /// cause incorrect style sharing behavior.
+    fn clear_restyle_flags_and_damage(&mut self) {
         self.damage = RestyleDamage::empty();
-        self.flags = RestyleFlags::empty();
+        self.flags = self.flags & TRAVERSED_WITHOUT_STYLING;
     }
 
     /// Returns whether this element or any ancestor is going to be
@@ -97,10 +106,14 @@ impl RestyleData {
     }
 
     /// Sets the flag that tells us whether we've reconstructed an ancestor.
-    pub fn set_reconstructed_ancestor(&mut self) {
-        // If it weren't for animation-only traversals, we could assert
-        // `!self.reconstructed_ancestor()` here.
-        self.flags.insert(ANCESTOR_WAS_RECONSTRUCTED);
+    pub fn set_reconstructed_ancestor(&mut self, reconstructed: bool) {
+        if reconstructed {
+            // If it weren't for animation-only traversals, we could assert
+            // `!self.reconstructed_ancestor()` here.
+            self.flags.insert(ANCESTOR_WAS_RECONSTRUCTED);
+        } else {
+            self.flags.remove(ANCESTOR_WAS_RECONSTRUCTED);
+        }
     }
 
     /// Mark this element as restyled, which is useful to know whether we need
@@ -252,6 +265,17 @@ impl ElementStyles {
     pub fn is_display_none(&self) -> bool {
         self.primary().get_box().clone_display() == display::T::none
     }
+
+    #[cfg(feature = "gecko")]
+    fn malloc_size_of_children_excluding_cvs(&self, _state: &mut SizeOfState) -> usize {
+        // As the method name suggests, we don't measures the ComputedValues
+        // here, because they are measured on the C++ side.
+
+        // XXX: measure the EagerPseudoArray itself, but not the ComputedValues
+        // within it.
+
+        0
+    }
 }
 
 // We manually implement Debug for ElementStyles so that we can avoid the
@@ -261,20 +285,6 @@ impl fmt::Debug for ElementStyles {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "ElementStyles {{ primary: {:?}, pseudos: {:?} }}",
                self.primary.as_ref().map(|x| &x.rules), self.pseudos)
-    }
-}
-
-#[cfg(feature = "gecko")]
-impl MallocSizeOfWithRepeats for ElementStyles {
-    fn malloc_size_of_children(&self, state: &mut SizeOfState) -> usize {
-        let mut n = 0;
-        if let Some(ref primary) = self.primary {
-            n += primary.malloc_size_of_children(state)
-        };
-
-        // We may measure more fields in the future if DMD says it's worth it.
-
-        n
     }
 }
 
@@ -420,19 +430,18 @@ impl ElementData {
 
     /// Drops any restyle state from the element.
     pub fn clear_restyle_state(&mut self) {
-        self.restyle.clear();
+        self.restyle.clear_restyle_state();
     }
 
     /// Drops restyle flags and damage from the element.
     pub fn clear_restyle_flags_and_damage(&mut self) {
-        self.restyle.clear_flags_and_damage();
+        self.restyle.clear_restyle_flags_and_damage();
     }
-}
 
-#[cfg(feature = "gecko")]
-impl MallocSizeOfWithRepeats for ElementData {
-    fn malloc_size_of_children(&self, state: &mut SizeOfState) -> usize {
-        let n = self.styles.malloc_size_of_children(state);
+    /// Measures memory usage.
+    #[cfg(feature = "gecko")]
+    pub fn malloc_size_of_children_excluding_cvs(&self, state: &mut SizeOfState) -> usize {
+        let n = self.styles.malloc_size_of_children_excluding_cvs(state);
 
         // We may measure more fields in the future if DMD says it's worth it.
 

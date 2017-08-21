@@ -57,13 +57,15 @@ protected:
   void OnPlaybackEvent(MediaEventType aEvent) override;
   void DurationChanged() override;
   void DownloadProgressed() override;
+  void MetadataLoaded(UniquePtr<MediaInfo> aInfo,
+                      UniquePtr<MetadataTags> aTags,
+                      MediaDecoderEventVisibility aEventVisibility) override;
+
   RefPtr<ResourceCallback> mResourceCallback;
   RefPtr<BaseMediaResource> mResource;
 
 public:
   explicit ChannelMediaDecoder(MediaDecoderInit& aInit);
-
-  MediaDecoderStateMachine* CreateStateMachine() override;
 
   MediaResource* GetResource() const override final;
 
@@ -83,7 +85,9 @@ public:
   void Resume() override;
 
 private:
-  virtual ChannelMediaDecoder* CloneImpl(MediaDecoderInit& aInit) = 0;
+  // Create a new state machine to run this decoder.
+  MediaDecoderStateMachine* CreateStateMachine();
+
   nsresult OpenResource(nsIStreamListener** aStreamListener);
   nsresult Load(BaseMediaResource* aOriginal);
 

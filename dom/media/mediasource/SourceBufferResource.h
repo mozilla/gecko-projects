@@ -7,24 +7,15 @@
 #ifndef MOZILLA_SOURCEBUFFERRESOURCE_H_
 #define MOZILLA_SOURCEBUFFERRESOURCE_H_
 
-#include "MediaCache.h"
-#include "MediaResource.h"
-#include "ResourceQueue.h"
-#include "mozilla/Attributes.h"
-#include "nsCOMPtr.h"
-#include "nsError.h"
-#include "nsIPrincipal.h"
-#include "nsTArray.h"
-#include "nscore.h"
 #include "mozilla/Logging.h"
+#include "MediaResource.h"
+#include "nsIPrincipal.h"
+#include "ResourceQueue.h"
 
 #define UNIMPLEMENTED() { /* Logging this is too spammy to do by default */ }
 
-class nsIStreamListener;
-
 namespace mozilla {
 
-class MediaDecoder;
 class MediaByteBuffer;
 class TaskQueue;
 
@@ -44,10 +35,6 @@ public:
   {
     UNIMPLEMENTED();
     return nullptr;
-  }
-  void SetReadMode(MediaCacheStream::ReadMode aMode) override
-  {
-    UNIMPLEMENTED();
   }
   nsresult ReadAt(int64_t aOffset,
                   char* aBuffer,

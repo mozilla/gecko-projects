@@ -111,6 +111,27 @@
 # define USE_LUL_STACKWALK
 # include "lul/LulMain.h"
 # include "lul/platform-linux-lul.h"
+
+// On linux we use LUL for periodic samples and synchronous samples, but we use
+// FramePointerStackWalk for backtrace samples when MOZ_PROFILING is enabled.
+// (See the comment at the top of the file for a definition of
+// periodic/synchronous/backtrace.).
+//
+// FramePointerStackWalk can produce incomplete stacks when the current entry is
+// in a shared library without framepointers, however LUL can take a long time
+// to initialize, which is undesirable for consumers of
+// profiler_suspend_and_sample_thread like the Background Hang Reporter.
+# if defined(MOZ_PROFILING)
+#  define USE_FRAME_POINTER_STACK_WALK
+# endif
+#endif
+
+// We can only stackwalk without expensive initialization on platforms which
+// support FramePointerStackWalk or MozStackWalk. LUL Stackwalking requires
+// initializing LUL, and EHABIStackWalk requires initializing EHABI, both of
+// which can be expensive.
+#if defined(USE_FRAME_POINTER_STACK_WALK) || defined(USE_MOZ_STACK_WALK)
+# define HAVE_FASTINIT_NATIVE_UNWIND
 #endif
 
 #ifdef MOZ_VALGRIND
@@ -195,12 +216,12 @@ private:
 
   ~CorePS()
   {
-    while (mLiveThreads.size() > 0) {
+    while (!mLiveThreads.empty()) {
       delete mLiveThreads.back();
       mLiveThreads.pop_back();
     }
 
-    while (mDeadThreads.size() > 0) {
+    while (!mDeadThreads.empty()) {
       delete mDeadThreads.back();
       mDeadThreads.pop_back();
     }
@@ -695,80 +716,6 @@ public:
 #endif
 };
 
-static bool
-IsChromeJSScript(JSScript* aScript)
-{
-  // WARNING: this function runs within the profiler's "critical section".
-
-  nsIScriptSecurityManager* const secman =
-    nsScriptSecurityManager::GetScriptSecurityManager();
-  NS_ENSURE_TRUE(secman, false);
-
-  JSPrincipals* const principals = JS_GetScriptPrincipals(aScript);
-  return secman->IsSystemPrincipal(nsJSPrincipals::get(principals));
-}
-
-static void
-AddPseudoEntry(uint32_t aFeatures, NotNull<RacyThreadInfo*> aRacyInfo,
-               const js::ProfileEntry& entry,
-               ProfilerStackCollector& aCollector)
-{
-  // WARNING: this function runs within the profiler's "critical section".
-  // WARNING: this function might be called while the profiler is inactive, and
-  //          cannot rely on ActivePS.
-
-  MOZ_ASSERT(entry.kind() == js::ProfileEntry::Kind::CPP_NORMAL ||
-             entry.kind() == js::ProfileEntry::Kind::JS_NORMAL);
-
-  const char* label = entry.label();
-  const char* dynamicString = entry.dynamicString();
-  bool isChromeJSEntry = false;
-  int lineno = -1;
-
-  if (entry.isJs()) {
-    // There are two kinds of JS frames that get pushed onto the PseudoStack.
-    //
-    // - label = "", dynamic string = <something>
-    // - label = "js::RunScript", dynamic string = nullptr
-    //
-    // The line number is only interesting for the first case.
-    if (label[0] == '\0') {
-      MOZ_ASSERT(dynamicString);
-
-      // We call entry.script() repeatedly -- rather than storing the result in
-      // a local variable in order -- to avoid rooting hazards.
-      if (entry.script()) {
-        isChromeJSEntry = IsChromeJSScript(entry.script());
-        if (entry.pc()) {
-          lineno = JS_PCToLineNumber(entry.script(), entry.pc());
-        } else {
-          // The JIT only allows the top-most entry to have a nullptr pc.
-          MOZ_ASSERT(&entry == &aRacyInfo->entries[aRacyInfo->stackSize() - 1]);
-        }
-      }
-
-    } else {
-      MOZ_ASSERT(strcmp(label, "js::RunScript") == 0 && !dynamicString);
-    }
-
-  } else {
-    MOZ_ASSERT(entry.isCpp());
-    lineno = entry.line();
-  }
-
-  if (dynamicString) {
-    // Adjust the dynamic string as necessary.
-    if (ProfilerFeature::HasPrivacy(aFeatures) && !isChromeJSEntry) {
-      dynamicString = "(private)";
-    } else if (strlen(dynamicString) >= ProfileBuffer::kMaxFrameKeyLength) {
-      dynamicString = "(too long)";
-    }
-  }
-
-  aCollector.CollectCodeLocation(label, dynamicString, lineno,
-                                 Some(entry.category()));
-}
-
 // Setting MAX_NATIVE_FRAMES too high risks the unwinder wasting a lot of time
 // looping on corrupted stacks.
 //
@@ -944,7 +891,10 @@ MergeStacks(uint32_t aFeatures, bool aIsSynchronous,
       // Pseudo-frames with the CPP_MARKER_FOR_JS kind are just annotations and
       // should not be recorded in the profile.
       if (pseudoEntry.kind() != js::ProfileEntry::Kind::CPP_MARKER_FOR_JS) {
-        AddPseudoEntry(aFeatures, racyInfo, pseudoEntry, aCollector);
+        // The JIT only allows the top-most entry to have a nullptr pc.
+        MOZ_ASSERT_IF(pseudoEntry.isJs() && pseudoEntry.script() && !pseudoEntry.pc(),
+                      &pseudoEntry == &racyInfo->entries[racyInfo->stackSize() - 1]);
+        aCollector.CollectPseudoEntry(pseudoEntry);
       }
       pseudoIndex++;
       continue;
@@ -970,7 +920,7 @@ MergeStacks(uint32_t aFeatures, bool aIsSynchronous,
       // with stale JIT code return addresses.
       if (aIsSynchronous ||
           jsFrame.kind == JS::ProfilingFrameIterator::Frame_Wasm) {
-        aCollector.CollectCodeLocation("", jsFrame.label, -1, Nothing());
+        aCollector.CollectWasmFrame(jsFrame.label);
       } else {
         MOZ_ASSERT(jsFrame.kind == JS::ProfilingFrameIterator::Frame_Ion ||
                    jsFrame.kind == JS::ProfilingFrameIterator::Frame_Baseline);
@@ -1020,45 +970,62 @@ StackWalkCallback(uint32_t aFrameNumber, void* aPC, void* aSP, void* aClosure)
   nativeStack->mPCs[nativeStack->mCount] = aPC;
   nativeStack->mCount++;
 }
+#endif
 
+#if defined(USE_FRAME_POINTER_STACK_WALK)
 static void
-DoNativeBacktrace(PSLockRef aLock, const ThreadInfo& aThreadInfo,
-                  const Registers& aRegs, NativeStack& aNativeStack)
+DoFramePointerBacktrace(PSLockRef aLock, const ThreadInfo& aThreadInfo,
+                        const Registers& aRegs, NativeStack& aNativeStack)
 {
   // WARNING: this function runs within the profiler's "critical section".
   // WARNING: this function might be called while the profiler is inactive, and
   //          cannot rely on ActivePS.
 
   // Start with the current function. We use 0 as the frame number here because
-  // the FramePointerStackWalk() and MozStackWalkThread() calls below will use
-  // 1..N. This is a bit weird but it doesn't matter because
-  // StackWalkCallback() doesn't use the frame number argument.
+  // the FramePointerStackWalk() call below will use 1..N. This is a bit weird
+  // but it doesn't matter because StackWalkCallback() doesn't use the frame
+  // number argument.
   StackWalkCallback(/* frameNum */ 0, aRegs.mPC, aRegs.mSP, &aNativeStack);
 
   uint32_t maxFrames = uint32_t(MAX_NATIVE_FRAMES - aNativeStack.mCount);
 
-#if defined(USE_FRAME_POINTER_STACK_WALK)
   void* stackEnd = aThreadInfo.StackTop();
   if (aRegs.mFP >= aRegs.mSP && aRegs.mFP <= stackEnd) {
     FramePointerStackWalk(StackWalkCallback, /* skipFrames */ 0, maxFrames,
                           &aNativeStack, reinterpret_cast<void**>(aRegs.mFP),
                           stackEnd);
   }
-#elif defined(USE_MOZ_STACK_WALK)
+}
+#endif
+
+#if defined(USE_MOZ_STACK_WALK)
+static void
+DoMozStackWalkBacktrace(PSLockRef aLock, const ThreadInfo& aThreadInfo,
+                        const Registers& aRegs, NativeStack& aNativeStack)
+{
+  // WARNING: this function runs within the profiler's "critical section".
+  // WARNING: this function might be called while the profiler is inactive, and
+  //          cannot rely on ActivePS.
+
+  // Start with the current function. We use 0 as the frame number here because
+  // the MozStackWalkThread() call below will use 1..N. This is a bit weird but
+  // it doesn't matter because StackWalkCallback() doesn't use the frame number
+  // argument.
+  StackWalkCallback(/* frameNum */ 0, aRegs.mPC, aRegs.mSP, &aNativeStack);
+
+  uint32_t maxFrames = uint32_t(MAX_NATIVE_FRAMES - aNativeStack.mCount);
+
   HANDLE thread = GetThreadHandle(aThreadInfo.GetPlatformData());
   MOZ_ASSERT(thread);
   MozStackWalkThread(StackWalkCallback, /* skipFrames */ 0, maxFrames,
                      &aNativeStack, thread, /* context */ nullptr);
-#else
-# error "bad configuration"
-#endif
 }
 #endif
 
 #ifdef USE_EHABI_STACKWALK
 static void
-DoNativeBacktrace(PSLockRef aLock, const ThreadInfo& aThreadInfo,
-                  const Registers& aRegs, NativeStack& aNativeStack)
+DoEHABIBacktrace(PSLockRef aLock, const ThreadInfo& aThreadInfo,
+                 const Registers& aRegs, NativeStack& aNativeStack)
 {
   // WARNING: this function runs within the profiler's "critical section".
   // WARNING: this function might be called while the profiler is inactive, and
@@ -1138,8 +1105,8 @@ ASAN_memcpy(void* aDst, const void* aSrc, size_t aLen)
 #endif
 
 static void
-DoNativeBacktrace(PSLockRef aLock, const ThreadInfo& aThreadInfo,
-                  const Registers& aRegs, NativeStack& aNativeStack)
+DoLULBacktrace(PSLockRef aLock, const ThreadInfo& aThreadInfo,
+               const Registers& aRegs, NativeStack& aNativeStack)
 {
   // WARNING: this function runs within the profiler's "critical section".
   // WARNING: this function might be called while the profiler is inactive, and
@@ -1263,6 +1230,30 @@ DoNativeBacktrace(PSLockRef aLock, const ThreadInfo& aThreadInfo,
 
 #endif
 
+#ifdef HAVE_NATIVE_UNWIND
+static void
+DoNativeBacktrace(PSLockRef aLock, const ThreadInfo& aThreadInfo,
+                  const Registers& aRegs, NativeStack& aNativeStack)
+{
+  // This method determines which stackwalker is used for periodic and
+  // synchronous samples. (Backtrace samples are treated differently, see
+  // profiler_suspend_and_sample_thread() for details). The only part of the
+  // ordering that matters is that LUL must precede FRAME_POINTER, because on
+  // Linux they can both be present.
+#if defined(USE_LUL_STACKWALK)
+  DoLULBacktrace(aLock, aThreadInfo, aRegs, aNativeStack);
+#elif defined(USE_EHABI_STACKWALK)
+  DoEHABIBacktrace(aLock, aThreadInfo, aRegs, aNativeStack);
+#elif defined(USE_FRAME_POINTER_STACK_WALK)
+  DoFramePointerBacktrace(aLock, aThreadInfo, aRegs, aNativeStack);
+#elif defined(USE_MOZ_STACK_WALK)
+  DoMozStackWalkBacktrace(aLock, aThreadInfo, aRegs, aNativeStack);
+#else
+  #error "Invalid configuration"
+#endif
+}
+#endif
+
 // Writes some components shared by periodic and synchronous profiles to
 // ActivePS's ProfileBuffer. (This should only be called from DoSyncSample()
 // and DoPeriodicSample().)
@@ -1284,18 +1275,19 @@ DoSharedSample(PSLockRef aLock, bool aIsSynchronous,
   TimeDuration delta = aNow - CorePS::ProcessStartTime();
   aBuffer.AddEntry(ProfileBufferEntry::Time(delta.ToMilliseconds()));
 
+  ProfileBufferCollector collector(aBuffer, ActivePS::Features(aLock));
   NativeStack nativeStack;
 #if defined(HAVE_NATIVE_UNWIND)
   if (ActivePS::FeatureStackWalk(aLock)) {
     DoNativeBacktrace(aLock, aThreadInfo, aRegs, nativeStack);
 
     MergeStacks(ActivePS::Features(aLock), aIsSynchronous, aThreadInfo, aRegs,
-                nativeStack, aBuffer);
+                nativeStack, collector);
   } else
 #endif
   {
     MergeStacks(ActivePS::Features(aLock), aIsSynchronous, aThreadInfo, aRegs,
-                nativeStack, aBuffer);
+                nativeStack, collector);
 
     // We can't walk the whole native stack, but we can record the top frame.
     if (ActivePS::FeatureLeaf(aLock)) {
@@ -2846,7 +2838,7 @@ locked_profiler_stop(PSLockRef aLock)
 
   // This is where we destroy the ThreadInfos for all dead threads.
   CorePS::ThreadVector& deadThreads = CorePS::DeadThreads(aLock);
-  while (deadThreads.size() > 0) {
+  while (!deadThreads.empty()) {
     delete deadThreads.back();
     deadThreads.pop_back();
   }
@@ -3341,48 +3333,6 @@ profiler_current_thread_id()
   return Thread::GetCurrentId();
 }
 
-// NOTE: The callback function passed in will be called while the target thread
-// is paused. Doing stuff in this function like allocating which may try to
-// claim locks is a surefire way to deadlock.
-void
-profiler_suspend_and_sample_thread(
-  int aThreadId,
-  const std::function<ProfilerStackCallback>& aCallback,
-  bool aSampleNative /* = true */)
-{
-  // Allocate the space for the native stack
-  NativeStack nativeStack;
-
-  // Lock the profiler mutex
-  PSAutoLock lock(gPSMutex);
-
-  const CorePS::ThreadVector& liveThreads = CorePS::LiveThreads(lock);
-  for (uint32_t i = 0; i < liveThreads.size(); i++) {
-    ThreadInfo* info = liveThreads.at(i);
-
-    if (info->ThreadId() == aThreadId) {
-      // Suspend, sample, and then resume the target thread.
-      Sampler sampler(lock);
-      sampler.SuspendAndSampleAndResumeThread(lock, *info,
-                                              [&](const Registers& aRegs) {
-        // The target thread is now suspended. Collect a native backtrace, and
-        // call the callback.
-#if defined(HAVE_NATIVE_UNWIND)
-        if (aSampleNative) {
-          DoNativeBacktrace(lock, *info, aRegs, nativeStack);
-        }
-#endif
-        aCallback(nativeStack.mPCs, nativeStack.mCount, info->IsMainThread());
-      });
-
-      // NOTE: Make sure to disable the sampler before it is destroyed, in case
-      // the profiler is running at the same time.
-      sampler.Disable(lock);
-      break;
-    }
-  }
-}
-
 // NOTE: aCollector's methods will be called while the target thread is paused.
 // Doing things in those methods like allocating -- which may try to claim
 // locks -- is a surefire way to deadlock.
@@ -3414,9 +3364,18 @@ profiler_suspend_and_sample_thread(int aThreadId,
         // The target thread is now suspended. Collect a native backtrace, and
         // call the callback.
         bool isSynchronous = false;
-#if defined(HAVE_NATIVE_UNWIND)
+#if defined(HAVE_FASTINIT_NATIVE_UNWIND)
         if (aSampleNative) {
-          DoNativeBacktrace(lock, *info, aRegs, nativeStack);
+          // We can only use FramePointerStackWalk or MozStackWalk from
+          // suspend_and_sample_thread as other stackwalking methods may not be
+          // initialized.
+# if defined(USE_FRAME_POINTER_STACK_WALK)
+          DoFramePointerBacktrace(lock, *info, aRegs, nativeStack);
+# elif defined(USE_MOZ_STACK_WALK)
+          DoMozStackWalkBacktrace(lock, *info, aRegs, nativeStack);
+# else
+#  error "Invalid configuration"
+# endif
 
           MergeStacks(aFeatures, isSynchronous, *info, aRegs, nativeStack,
                       aCollector);

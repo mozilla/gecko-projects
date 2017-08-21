@@ -254,6 +254,9 @@ user_pref("toolkit.telemetry.server", "https://%(server)s/telemetry-dummy/");
 // Don't send 'new-profile' ping on new profiles during tests, otherwise the testing framework
 // might wait on the pingsender to finish and slow down tests.
 user_pref("toolkit.telemetry.newProfilePing.enabled", false);
+// Don't send 'bhr' ping during tests, otherwise the testing framework might
+// wait on the pingsender to finish and slow down tests.
+user_pref("toolkit.telemetry.bhrPing.enabled", false);
 // Don't send the 'shutdown' ping using the pingsender on the first session using
 // the 'pingsender' process. Valgrind marks the process as leaky (e.g. see bug 1364068
 // for the 'new-profile' ping) but does not provide enough information
@@ -394,7 +397,3 @@ user_pref("extensions.screenshots.system-disabled", true);
 // The maintenance can take a relatively long time which may cause unnecessary
 // intermittents and slow down tests.
 user_pref("places.database.lastMaintenance", 7258114800);
-
-// Disable the Pocket page action and enable the CUI widget until bug 1385418 is
-// fixed.
-user_pref("extensions.pocket.disablePageAction", true);

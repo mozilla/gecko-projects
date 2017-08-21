@@ -740,7 +740,7 @@ nsCSPContext::EnsureEventTarget(nsIEventTarget* aEventTarget)
 }
 
 struct ConsoleMsgQueueElem {
-  nsXPIDLString mMsg;
+  nsString      mMsg;
   nsString      mSourceName;
   nsString      mSourceLine;
   uint32_t      mLineNumber;
@@ -867,15 +867,6 @@ nsCSPContext::SendReports(nsISupports* aBlockedContentSource,
                           uint32_t aLineNum)
 {
   NS_ENSURE_ARG_MAX(aViolatedPolicyIndex, mPolicies.Length() - 1);
-
-#ifdef MOZ_B2G
-  // load group information (on process-split necko implementations like b2g).
-  // (fix this in bug 1011086)
-  if (!mCallingChannelLoadGroup) {
-    NS_WARNING("Load group required but not present for report sending; cannot send CSP violation reports");
-    return NS_ERROR_FAILURE;
-  }
-#endif
 
   dom::CSPReport report;
   nsresult rv;
@@ -1236,6 +1227,14 @@ nsCSPContext::AsyncReportViolation(nsISupports* aBlockedContentSource,
                                 aScriptSample,
                                 aLineNum,
                                 this);
+
+  // If the document is currently buffering up CSP violation reports, send the
+  // runnable to it instead of dispatching it immediately.
+  nsCOMPtr<nsIDocument> doc = do_QueryReferent(mLoadingContext);
+  if (doc && doc->ShouldBufferCSPViolations()) {
+    doc->BufferCSPViolation(task);
+    return NS_OK;
+  }
 
   if (XRE_IsContentProcess()) {
     if (mEventTarget) {

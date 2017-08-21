@@ -20,6 +20,10 @@ Archived ping data
 Raw JSON
 ">
 
+<!ENTITY aboutTelemetry.showInFirefoxJsonViewer "
+Open in the JSON viewer
+">
+
 <!ENTITY aboutTelemetry.showSubsessionData "
 Show subsession data
 ">
@@ -80,10 +84,6 @@ Older
   Browser Hangs
 ">
 
-<!ENTITY aboutTelemetry.threadHangStatsSection "
-  Thread Hangs
-">
-
 <!ENTITY aboutTelemetry.capturedStacksSection "
   Captured Stacks
 ">
@@ -118,6 +118,10 @@ Older
 
 <!ENTITY aboutTelemetry.lateWritesSection "
   Late Writes
+">
+
+<!ENTITY aboutTelemetry.rawPayloadSection "
+Raw Payload
 ">
 
 <!ENTITY aboutTelemetry.sessionInfoSection "

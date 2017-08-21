@@ -41,40 +41,22 @@ Cu.importGlobalProperties(["TextEncoder"]);
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-/* globals processCount */
-
-XPCOMUtils.defineLazyPreferenceGetter(this, "processCount", "dom.ipc.processCount.extension");
-
-XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
-                                  "resource://gre/modules/AddonManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AddonManagerPrivate",
-                                  "resource://gre/modules/AddonManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AsyncShutdown",
-                                  "resource://gre/modules/AsyncShutdown.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionAPIs",
-                                  "resource://gre/modules/ExtensionAPI.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionCommon",
-                                  "resource://gre/modules/ExtensionCommon.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionPermissions",
-                                  "resource://gre/modules/ExtensionPermissions.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionStorage",
-                                  "resource://gre/modules/ExtensionStorage.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionTestCommon",
-                                  "resource://testing-common/ExtensionTestCommon.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Log",
-                                  "resource://gre/modules/Log.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
-                                  "resource://gre/modules/MessageChannel.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
-                                  "resource://gre/modules/NetUtil.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "OS",
-                                  "resource://gre/modules/osfile.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
-                                  "resource://gre/modules/Schemas.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "setTimeout",
-                                  "resource://gre/modules/Timer.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
-                                  "resource://gre/modules/TelemetryStopwatch.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  AddonManager: "resource://gre/modules/AddonManager.jsm",
+  AddonManagerPrivate: "resource://gre/modules/AddonManager.jsm",
+  AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
+  ExtensionCommon: "resource://gre/modules/ExtensionCommon.jsm",
+  ExtensionPermissions: "resource://gre/modules/ExtensionPermissions.jsm",
+  ExtensionStorage: "resource://gre/modules/ExtensionStorage.jsm",
+  ExtensionTestCommon: "resource://testing-common/ExtensionTestCommon.jsm",
+  Log: "resource://gre/modules/Log.jsm",
+  MessageChannel: "resource://gre/modules/MessageChannel.jsm",
+  NetUtil: "resource://gre/modules/NetUtil.jsm",
+  OS: "resource://gre/modules/osfile.jsm",
+  Schemas: "resource://gre/modules/Schemas.jsm",
+  setTimeout: "resource://gre/modules/Timer.jsm",
+  TelemetryStopwatch: "resource://gre/modules/TelemetryStopwatch.jsm",
+});
 
 XPCOMUtils.defineLazyGetter(
   this, "processScript",
@@ -84,13 +66,12 @@ XPCOMUtils.defineLazyGetter(
 Cu.import("resource://gre/modules/ExtensionParent.jsm");
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 
-XPCOMUtils.defineLazyServiceGetter(this, "aomStartup",
-                                   "@mozilla.org/addons/addon-manager-startup;1",
-                                   "amIAddonManagerStartup");
-XPCOMUtils.defineLazyServiceGetter(this, "uuidGen",
-                                   "@mozilla.org/uuid-generator;1",
-                                   "nsIUUIDGenerator");
+XPCOMUtils.defineLazyServiceGetters(this, {
+  aomStartup: ["@mozilla.org/addons/addon-manager-startup;1", "amIAddonManagerStartup"],
+  uuidGen: ["@mozilla.org/uuid-generator;1", "nsIUUIDGenerator"],
+});
 
+XPCOMUtils.defineLazyPreferenceGetter(this, "processCount", "dom.ipc.processCount.extension");
 XPCOMUtils.defineLazyPreferenceGetter(this, "useRemoteWebExtensions",
                                       "extensions.webextensions.remote", false);
 
@@ -247,8 +228,6 @@ var UninstallObserver = {
   init() {
     if (!this.initialized) {
       AddonManager.addAddonListener(this);
-      XPCOMUtils.defineLazyPreferenceGetter(this, "leaveStorage", LEAVE_STORAGE_PREF, false);
-      XPCOMUtils.defineLazyPreferenceGetter(this, "leaveUuid", LEAVE_UUID_PREF, false);
       this.initialized = true;
     }
   },
@@ -268,7 +247,7 @@ var UninstallObserver = {
       return;
     }
 
-    if (!this.leaveStorage) {
+    if (!Services.prefs.getBoolPref(LEAVE_STORAGE_PREF, false)) {
       // Clear browser.local.storage
       AsyncShutdown.profileChangeTeardown.addBlocker(
         `Clear Extension Storage ${addon.id}`,
@@ -293,7 +272,7 @@ var UninstallObserver = {
       Services.perms.removeFromPrincipal(principal, "persistent-storage");
     }
 
-    if (!this.leaveUuid) {
+    if (!Services.prefs.getBoolPref(LEAVE_UUID_PREF, false)) {
       // Clear the entry in the UUID map
       UUIDMap.remove(addon.id);
     }
@@ -313,6 +292,7 @@ UninstallObserver.init();
 this.ExtensionData = class {
   constructor(rootURI) {
     this.rootURI = rootURI;
+    this.resourceURL = rootURI.spec;
 
     this.manifest = null;
     this.id = null;
@@ -503,80 +483,76 @@ this.ExtensionData = class {
     };
   }
 
-  parseManifest() {
-    return Promise.all([
+  async parseManifest() {
+    let [manifest] = await Promise.all([
       this.readJSON("manifest.json"),
-      Management.lazyInit(),
-    ]).then(([manifest]) => {
-      this.manifest = manifest;
-      this.rawManifest = manifest;
-
-      if (manifest && manifest.default_locale) {
-        return this.initLocale();
-      }
-    }).then(() => {
-      let context = {
-        url: this.baseURI && this.baseURI.spec,
-
-        principal: this.principal,
-
-        logError: error => {
-          this.manifestWarning(error);
-        },
-
-        preprocessors: {},
-      };
-
-      if (this.manifest.theme) {
-        let invalidProps = validateThemeManifest(Object.getOwnPropertyNames(this.manifest));
-
-        if (invalidProps.length) {
-          let message = `Themes defined in the manifest may only contain static resources. ` +
-            `If you would like to use additional properties, please use the "theme" permission instead. ` +
-            `(the invalid properties found are: ${invalidProps})`;
-          this.manifestError(message);
-        }
-      }
-
-      if (this.localeData) {
-        context.preprocessors.localize = (value, context) => this.localize(value);
-      }
-
-      let normalized = Schemas.normalize(this.manifest, "manifest.WebExtensionManifest", context);
-      if (normalized.error) {
-        this.manifestError(normalized.error);
-      } else {
-        return normalized.value;
-      }
-    });
-  }
-
-  // Reads the extension's |manifest.json| file, and stores its
-  // parsed contents in |this.manifest|.
-  async loadManifest() {
-    [this.manifest] = await Promise.all([
-      this.parseManifest(),
       Management.lazyInit(),
     ]);
 
-    if (!this.manifest) {
-      return;
+    this.manifest = manifest;
+    this.rawManifest = manifest;
+
+    if (manifest && manifest.default_locale) {
+      await this.initLocale();
     }
 
+    let context = {
+      url: this.baseURI && this.baseURI.spec,
+
+      principal: this.principal,
+
+      logError: error => {
+        this.manifestWarning(error);
+      },
+
+      preprocessors: {},
+    };
+
+    if (this.manifest.theme) {
+      let invalidProps = validateThemeManifest(Object.getOwnPropertyNames(this.manifest));
+
+      if (invalidProps.length) {
+        let message = `Themes defined in the manifest may only contain static resources. ` +
+          `If you would like to use additional properties, please use the "theme" permission instead. ` +
+          `(the invalid properties found are: ${invalidProps})`;
+        this.manifestError(message);
+      }
+    }
+
+    if (this.localeData) {
+      context.preprocessors.localize = (value, context) => this.localize(value);
+    }
+
+    let normalized = Schemas.normalize(this.manifest, "manifest.WebExtensionManifest", context);
+    if (normalized.error) {
+      this.manifestError(normalized.error);
+      return null;
+    }
+
+    manifest = normalized.value;
+
+    let id;
     try {
-      // Do not override the add-on id that has been already assigned.
-      if (!this.id && this.manifest.applications.gecko.id) {
-        this.id = this.manifest.applications.gecko.id;
+      if (manifest.applications.gecko.id) {
+        id = manifest.applications.gecko.id;
       }
     } catch (e) {
       // Errors are handled by the type checks above.
     }
 
-    let whitelist = [];
-    for (let perm of this.manifest.permissions) {
+    if (!this.id) {
+      this.id = id;
+    }
+
+    let apiNames = new Set();
+    let dependencies = new Set();
+    let originPermissions = new Set();
+    let permissions = new Set();
+
+    for (let perm of manifest.permissions) {
       if (perm === "geckoProfiler") {
         const acceptedExtensions = Services.prefs.getStringPref("extensions.geckoProfiler.acceptedExtensionIds", "");
-        if (!acceptedExtensions.split(",").includes(this.id)) {
+        if (!acceptedExtensions.split(",").includes(id)) {
           this.manifestError("Only whitelisted extensions are allowed to access the geckoProfiler.");
           continue;
         }
@@ -586,26 +562,66 @@ this.ExtensionData = class {
       if (type.origin) {
         let matcher = new MatchPattern(perm, {ignorePath: true});
 
-        whitelist.push(matcher);
         perm = matcher.pattern;
+        originPermissions.add(perm);
       } else if (type.api) {
-        this.apiNames.add(type.api);
+        apiNames.add(type.api);
       }
 
-      this.permissions.add(perm);
+      permissions.add(perm);
     }
 
-    // An extension always gets permission to its own url.
     if (this.id) {
+      // An extension always gets permission to its own url.
       let matcher = new MatchPattern(this.getURL(), {ignorePath: true});
-      whitelist.push(matcher);
+      originPermissions.add(matcher.pattern);
+
+      // Apply optional permissions
+      let perms = await ExtensionPermissions.get(this);
+      for (let perm of perms.permissions) {
+        permissions.add(perm);
+      }
+      for (let origin of perms.origins) {
+        originPermissions.add(origin);
+      }
     }
 
-    this.whiteListedHosts = new MatchPatternSet(whitelist);
-
-    for (let api of this.apiNames) {
-      this.dependencies.add(`${api}@experiments.addons.mozilla.org`);
+    for (let api of apiNames) {
+      dependencies.add(`${api}@experiments.addons.mozilla.org`);
     }
+
+    // Normalize all patterns to contain a single leading /
+    let webAccessibleResources = (manifest.web_accessible_resources || [])
+        .map(path => path.replace(/^\/*/, "/"));
+
+    return {apiNames, dependencies, originPermissions, id, manifest, permissions,
+            webAccessibleResources};
+  }
+
+  // Reads the extension's |manifest.json| file, and stores its
+  // parsed contents in |this.manifest|.
+  async loadManifest() {
+    let [manifestData] = await Promise.all([
+      this.parseManifest(),
+      Management.lazyInit(),
+    ]);
+
+    if (!manifestData) {
+      return;
+    }
+
+    // Do not override the add-on id that has been already assigned.
+    if (!this.id) {
+      this.id = manifestData.id;
+    }
+
+    this.manifest = manifestData.manifest;
+    this.apiNames = manifestData.apiNames;
+    this.dependencies = manifestData.dependencies;
+    this.permissions = manifestData.permissions;
+
+    this.webAccessibleResources = manifestData.webAccessibleResources.map(res => new MatchGlob(res));
+    this.whiteListedHosts = new MatchPatternSet(manifestData.originPermissions);
 
     return this.manifest;
   }
@@ -818,7 +834,8 @@ this.Extension = class extends ExtensionData {
 
     this.id = addonData.id;
     this.version = addonData.version;
-    this.baseURI = Services.io.newURI(this.getURL("")).QueryInterface(Ci.nsIURL);
+    this.baseURL = this.getURL("");
+    this.baseURI = Services.io.newURI(this.baseURL).QueryInterface(Ci.nsIURL);
     this.principal = this.createPrincipal();
     this.views = new Set();
     this._backgroundPageFrameLoader = null;
@@ -846,12 +863,14 @@ this.Extension = class extends ExtensionData {
       if (permissions.origins.length > 0) {
         let patterns = this.whiteListedHosts.patterns.map(host => host.pattern);
 
-        this.whiteListedHosts = new MatchPatternSet([...patterns, ...permissions.origins],
+        this.whiteListedHosts = new MatchPatternSet(new Set([...patterns, ...permissions.origins]),
                                                     {ignorePath: true});
       }
 
       this.policy.permissions = Array.from(this.permissions);
       this.policy.allowedOrigins = this.whiteListedHosts;
+
+      this.cachePermissions();
     });
 
     this.on("remove-permissions", (ignoreEvent, permissions) => {
@@ -868,6 +887,8 @@ this.Extension = class extends ExtensionData {
 
       this.policy.permissions = Array.from(this.permissions);
       this.policy.allowedOrigins = this.whiteListedHosts;
+
+      this.cachePermissions();
     });
     /* eslint-enable mozilla/balanced-listeners */
   }
@@ -940,7 +961,17 @@ this.Extension = class extends ExtensionData {
     let uri = Services.io.newURI(url);
 
     let common = this.baseURI.getCommonBaseSpec(uri);
-    return common == this.baseURI.spec;
+    return common == this.baseURL;
+  }
+
+  checkLoadURL(url, options = {}) {
+    // As an optimization, f the URL starts with the extension's base URL,
+    // don't do any further checks. It's always allowed to load it.
+    if (url.startsWith(this.baseURL)) {
+      return true;
+    }
+
+    return ExtensionUtils.checkLoadURL(url, this.principal, options);
   }
 
   async promiseLocales(locale) {
@@ -958,28 +989,40 @@ this.Extension = class extends ExtensionData {
       });
   }
 
-  parseManifest() {
-    return StartupCache.manifests.get([this.id, this.version, Services.locale.getAppLocaleAsLangTag()],
-                                      () => super.parseManifest());
+  get manifestCacheKey() {
+    return [this.id, this.version, Services.locale.getAppLocaleAsLangTag()];
   }
 
-  loadManifest() {
-    return super.loadManifest().then(manifest => {
-      if (this.errors.length) {
-        return Promise.reject({errors: this.errors});
-      }
+  parseManifest() {
+    return StartupCache.manifests.get(this.manifestCacheKey, () => super.parseManifest());
+  }
 
+  async cachePermissions() {
+    let manifestData = await this.parseManifest();
+
+    manifestData.originPermissions = this.whiteListedHosts.patterns.map(pat => pat.pattern);
+    manifestData.permissions = this.permissions;
+    return StartupCache.manifests.set(this.manifestCacheKey, manifestData);
+  }
+
+  async loadManifest() {
+    let manifest = await super.loadManifest();
+
+    if (this.errors.length) {
+      return Promise.reject({errors: this.errors});
+    }
+
+    if (this.apiNames.size) {
       // Load Experiments APIs that this extension depends on.
-      return Promise.all(
-        Array.from(this.apiNames, api => ExtensionAPIs.load(api))
-      ).then(apis => {
-        for (let API of apis) {
-          this.apis.push(new API(this));
-        }
+      let apis = await Promise.all(
+        Array.from(this.apiNames, api => ExtensionCommon.ExtensionAPIs.load(api)));
 
-        return manifest;
-      });
-    });
+      for (let API of apis) {
+        this.apis.push(new API(this));
+      }
+    }
+
+    return manifest;
   }
 
   // Representation of the extension to send to content
@@ -989,11 +1032,12 @@ this.Extension = class extends ExtensionData {
     return {
       id: this.id,
       uuid: this.uuid,
+      name: this.name,
       instanceId: this.instanceId,
       manifest: this.manifest,
-      resourceURL: this.addonData.resourceURI.spec,
+      resourceURL: this.resourceURL,
       baseURL: this.baseURI.spec,
-      content_scripts: this.manifest.content_scripts || [],  // eslint-disable-line camelcase
+      contentScripts: this.contentScripts,
       webAccessibleResources: this.webAccessibleResources.map(res => res.glob),
       whiteListedHosts: this.whiteListedHosts.patterns.map(pat => pat.pattern),
       localeData: this.localeData.serialize(),
@@ -1001,6 +1045,10 @@ this.Extension = class extends ExtensionData {
       principal: this.principal,
       optionalPermissions: this.manifest.optional_permissions,
     };
+  }
+
+  get contentScripts() {
+    return this.manifest.content_scripts || [];
   }
 
   broadcast(msg, data) {
@@ -1091,28 +1139,44 @@ this.Extension = class extends ExtensionData {
     return super.initLocale(locale);
   }
 
-  initUnlimitedStoragePermission() {
-    const principal = this.principal;
+  updatePermissions(reason) {
+    const {principal} = this;
 
-    // Check if the site permission has already been set for the extension by the WebExtensions
-    // internals (instead of being manually allowed by the user).
-    const hasSitePermission = Services.perms.testPermissionFromPrincipal(
-      principal, "WebExtensions-unlimitedStorage"
-    );
+    const testPermission = perm =>
+      Services.perms.testPermissionFromPrincipal(principal, perm);
 
-    if (this.hasPermission("unlimitedStorage")) {
-      // Set the indexedDB permission and a custom "WebExtensions-unlimitedStorage" to remember
-      // that the permission hasn't been selected manually by the user.
-      Services.perms.addFromPrincipal(principal, "WebExtensions-unlimitedStorage",
-                                      Services.perms.ALLOW_ACTION);
-      Services.perms.addFromPrincipal(principal, "indexedDB", Services.perms.ALLOW_ACTION);
-      Services.perms.addFromPrincipal(principal, "persistent-storage", Services.perms.ALLOW_ACTION);
-    } else if (hasSitePermission) {
-      // Remove the indexedDB permission if it has been enabled using the
-      // unlimitedStorage WebExtensions permissions.
-      Services.perms.removeFromPrincipal(principal, "WebExtensions-unlimitedStorage");
-      Services.perms.removeFromPrincipal(principal, "indexedDB");
-      Services.perms.removeFromPrincipal(principal, "persistent-storage");
+    // Only update storage permissions when the extension changes in
+    // some way.
+    if (reason !== "APP_STARTUP" && reason !== "APP_SHUTDOWN") {
+      if (this.hasPermission("unlimitedStorage")) {
+        // Set the indexedDB permission and a custom "WebExtensions-unlimitedStorage" to remember
+        // that the permission hasn't been selected manually by the user.
+        Services.perms.addFromPrincipal(principal, "WebExtensions-unlimitedStorage",
+                                        Services.perms.ALLOW_ACTION);
+        Services.perms.addFromPrincipal(principal, "indexedDB", Services.perms.ALLOW_ACTION);
+        Services.perms.addFromPrincipal(principal, "persistent-storage", Services.perms.ALLOW_ACTION);
+      } else {
+        // Remove the indexedDB permission if it has been enabled using the
+        // unlimitedStorage WebExtensions permissions.
+        Services.perms.removeFromPrincipal(principal, "WebExtensions-unlimitedStorage");
+        Services.perms.removeFromPrincipal(principal, "indexedDB");
+        Services.perms.removeFromPrincipal(principal, "persistent-storage");
+      }
+    }
+
+    // Never change geolocation permissions at shutdown, since it uses a
+    // session-only permission.
+    if (reason !== "APP_SHUTDOWN") {
+      if (this.hasPermission("geolocation")) {
+        if (testPermission("geo") === Services.perms.UNKNOWN_ACTION) {
+          Services.perms.addFromPrincipal(principal, "geo",
+                                          Services.perms.ALLOW_ACTION,
+                                          Services.perms.EXPIRE_SESSION);
+        }
+      } else if (reason !== "APP_STARTUP" &&
+                 testPermission("geo") === Services.perms.ALLOW_ACTION) {
+        Services.perms.removeFromPrincipal(principal, "geo");
+      }
     }
   }
 
@@ -1146,10 +1210,7 @@ this.Extension = class extends ExtensionData {
 
     TelemetryStopwatch.start("WEBEXT_EXTENSION_STARTUP_MS", this);
     try {
-      let [perms] = await Promise.all([
-        ExtensionPermissions.get(this),
-        this.loadManifest(),
-      ]);
+      await this.loadManifest();
 
       if (!this.hasShutdown) {
         await this.initLocale();
@@ -1165,28 +1226,10 @@ this.Extension = class extends ExtensionData {
 
       GlobalManager.init(this);
 
-      // Apply optional permissions
-      for (let perm of perms.permissions) {
-        this.permissions.add(perm);
-      }
-      if (perms.origins.length > 0) {
-        let patterns = this.whiteListedHosts.patterns.map(host => host.pattern);
-
-        this.whiteListedHosts = new MatchPatternSet([...patterns, ...perms.origins],
-                                                    {ignorePath: true});
-      }
-
-      // Normalize all patterns to contain a single leading /
-      let resources = (this.manifest.web_accessible_resources || [])
-          .map(path => path.replace(/^\/*/, "/"));
-
-      this.webAccessibleResources = resources.map(res => new MatchGlob(res));
-
-
       this.policy.active = false;
-      this.policy = processScript.initExtension(this.serialize(), this);
+      this.policy = processScript.initExtension(this);
 
-      this.initUnlimitedStoragePermission();
+      this.updatePermissions(this.startupReason);
 
       // The "startup" Management event sent on the extension instance itself
       // is emitted just before the Management "startup" event,
@@ -1296,6 +1339,8 @@ this.Extension = class extends ExtensionData {
     data["Extension:Extensions"] = data["Extension:Extensions"].filter(e => e.id !== this.id);
 
     Services.ppmm.removeMessageListener(this.MESSAGE_EMIT_EVENT, this);
+
+    this.updatePermissions(this.shutdownReason);
 
     if (!this.manifest) {
       this.policy.active = false;

@@ -8,7 +8,7 @@
 
 use ServoArc;
 use app_units::Au;
-use canvas_traits::CanvasMsg;
+use canvas_traits::canvas::CanvasMsg;
 use context::{LayoutContext, with_thread_local_font_context};
 use euclid::{Transform3D, Point2D, Vector2D, Radians, Rect, Size2D};
 use floats::ClearType;
@@ -30,7 +30,7 @@ use msg::constellation_msg::{BrowsingContextId, PipelineId};
 use net_traits::image::base::{Image, ImageMetadata};
 use net_traits::image_cache::{ImageOrMetadataAvailable, UsePlaceholder};
 use range::*;
-use script_layout_interface::HTMLCanvasData;
+use script_layout_interface::{HTMLCanvasData, HTMLCanvasDataSource};
 use script_layout_interface::SVGSVGData;
 use script_layout_interface::wrapper_traits::{PseudoElementType, ThreadSafeLayoutElement, ThreadSafeLayoutNode};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
@@ -53,6 +53,7 @@ use style::values::{self, Either, Auto};
 use style::values::computed::{LengthOrPercentage, LengthOrPercentageOrAuto};
 use text;
 use text::TextRunScanner;
+use webrender_api;
 use wrapper::ThreadSafeLayoutNodeHelpers;
 
 // From gfxFontConstants.h in Firefox.
@@ -322,17 +323,31 @@ impl InlineAbsoluteFragmentInfo {
 }
 
 #[derive(Clone)]
+pub enum CanvasFragmentSource {
+    WebGL(webrender_api::ImageKey),
+    Image(Option<Arc<Mutex<IpcSender<CanvasMsg>>>>)
+}
+
+#[derive(Clone)]
 pub struct CanvasFragmentInfo {
-    pub ipc_renderer: Option<Arc<Mutex<IpcSender<CanvasMsg>>>>,
+    pub source: CanvasFragmentSource,
     pub dom_width: Au,
     pub dom_height: Au,
 }
 
 impl CanvasFragmentInfo {
     pub fn new(data: HTMLCanvasData) -> CanvasFragmentInfo {
+        let source = match data.source {
+            HTMLCanvasDataSource::WebGL(texture_id) => {
+                CanvasFragmentSource::WebGL(texture_id)
+            },
+            HTMLCanvasDataSource::Image(ipc_sender) => {
+                CanvasFragmentSource::Image(ipc_sender.map(|renderer| Arc::new(Mutex::new(renderer))))
+            }
+        };
+
         CanvasFragmentInfo {
-            ipc_renderer: data.ipc_renderer
-                              .map(|renderer| Arc::new(Mutex::new(renderer))),
+            source: source,
             dom_width: Au::from_px(data.width as i32),
             dom_height: Au::from_px(data.height as i32),
         }
@@ -2472,6 +2487,13 @@ impl Fragment {
                               stacking_relative_border_box.size.height - border_padding.vertical()))
     }
 
+    /// Returns true if this fragment has a filter, transform, or perspective property set.
+    pub fn has_filter_transform_or_perspective(&self) -> bool {
+           self.style().get_box().transform.0.is_some() ||
+           !self.style().get_effects().filter.0.is_empty() ||
+           self.style().get_box().perspective != Either::Second(values::None_)
+    }
+
     /// Returns true if this fragment establishes a new stacking context and false otherwise.
     pub fn establishes_stacking_context(&self) -> bool {
         // Text fragments shouldn't create stacking contexts.
@@ -2485,22 +2507,17 @@ impl Fragment {
         if self.style().get_effects().opacity != 1.0 {
             return true
         }
-        if !self.style().get_effects().filter.0.is_empty() {
-            return true
-        }
+
         if self.style().get_effects().mix_blend_mode != mix_blend_mode::T::normal {
             return true
         }
 
-        if self.style().get_box().transform.0.is_some() ||
-           self.style().get_box().transform_style == transform_style::T::preserve_3d ||
-           self.style().overrides_transform_style() {
-            return true
+        if self.has_filter_transform_or_perspective() {
+            return true;
         }
 
-        // TODO(mrobinson): Determine if this is necessary, since blocks with
-        // transformations already create stacking contexts.
-        if let Either::First(ref _length) = self.style().get_box().perspective {
+        if self.style().get_box().transform_style == transform_style::T::preserve_3d ||
+           self.style().overrides_transform_style() {
             return true
         }
 
@@ -2887,8 +2904,17 @@ impl Fragment {
         for operation in operations {
             let matrix = match *operation {
                 transform::ComputedOperation::Rotate(ax, ay, az, theta) => {
-                    let theta = 2.0f32 * f32::consts::PI - theta.radians();
-                    Transform3D::create_rotation(ax, ay, az, Radians::new(theta))
+                    // https://www.w3.org/TR/css-transforms-1/#funcdef-rotate3d
+                    // A direction vector that cannot be normalized, such as [0, 0, 0], will cause
+                    // the rotation to not be applied, so we use identity matrix in this case.
+                    let len = (ax * ax + ay * ay + az * az).sqrt();
+                    if len > 0. {
+                        let theta = 2.0f32 * f32::consts::PI - theta.radians();
+                        Transform3D::create_rotation(ax / len, ay / len, az / len,
+                                                     Radians::new(theta))
+                    } else {
+                        Transform3D::identity()
+                    }
                 }
                 transform::ComputedOperation::Perspective(d) => {
                     create_perspective_matrix(d)

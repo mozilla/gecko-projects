@@ -36,9 +36,8 @@ use floats::{ClearType, FloatKind, Floats, PlacementInfo};
 use flow::{self, BaseFlow, EarlyAbsolutePositionInfo, Flow, FlowClass, ForceNonfloatedFlag};
 use flow::{BLOCK_POSITION_IS_STATIC, CLEARS_LEFT, CLEARS_RIGHT};
 use flow::{CONTAINS_TEXT_OR_REPLACED_FRAGMENTS, INLINE_POSITION_IS_STATIC};
-use flow::{FragmentationContext, MARGINS_CANNOT_COLLAPSE, PreorderFlowTraversal};
-use flow::{ImmutableFlowUtils, LateAbsolutePositionInfo, MutableFlowUtils, OpaqueFlow};
-use flow::IS_ABSOLUTELY_POSITIONED;
+use flow::{IS_ABSOLUTELY_POSITIONED, FragmentationContext, MARGINS_CANNOT_COLLAPSE};
+use flow::{ImmutableFlowUtils, LateAbsolutePositionInfo, OpaqueFlow};
 use flow_list::FlowList;
 use fragment::{CoordinateSystem, Fragment, FragmentBorderBoxIterator, Overflow};
 use fragment::{IS_INLINE_FLEX_ITEM, IS_BLOCK_FLEX_ITEM};
@@ -57,9 +56,10 @@ use style::computed_values::{position, text_align};
 use style::context::SharedStyleContext;
 use style::logical_geometry::{LogicalPoint, LogicalRect, LogicalSize, WritingMode};
 use style::properties::ComputedValues;
-use style::servo::restyle_damage::{BUBBLE_ISIZES, REFLOW, REFLOW_OUT_OF_FLOW, REPOSITION};
+use style::servo::restyle_damage::{BUBBLE_ISIZES, REFLOW, REFLOW_OUT_OF_FLOW};
 use style::values::computed::{LengthOrPercentageOrNone, LengthOrPercentage};
 use style::values::computed::LengthOrPercentageOrAuto;
+use traversal::PreorderFlowTraversal;
 
 /// Information specific to floated blocks.
 #[derive(Clone, Serialize)]
@@ -448,20 +448,16 @@ pub struct AbsoluteAssignBSizesTraversal<'a>(pub &'a SharedStyleContext<'a>);
 impl<'a> PreorderFlowTraversal for AbsoluteAssignBSizesTraversal<'a> {
     #[inline]
     fn process(&self, flow: &mut Flow) {
-        {
-            // The root of the absolute flow tree is definitely not absolutely
-            // positioned. Nothing to process here.
-            let flow: &Flow = flow;
-            if flow.contains_roots_of_absolute_flow_tree() {
-                return;
-            }
-            if !flow.is_block_like() {
-                return
-            }
+        if !flow.is_block_like() {
+            return
         }
 
+        // This flow might not be an absolutely positioned flow if it is the root of the tree.
         let block = flow.as_mut_block();
-        debug_assert!(block.base.flags.contains(IS_ABSOLUTELY_POSITIONED));
+        if !block.base.flags.contains(IS_ABSOLUTELY_POSITIONED) {
+            return;
+        }
+
         if !block.base.restyle_damage.intersects(REFLOW_OUT_OF_FLOW | REFLOW) {
             return
         }
@@ -1065,8 +1061,8 @@ impl BlockFlow {
             // Assign block-sizes for all flows in this absolute flow tree.
             // This is preorder because the block-size of an absolute flow may depend on
             // the block-size of its containing block, which may also be an absolute flow.
-            (&mut *self as &mut Flow).traverse_preorder_absolute_flows(
-                &mut AbsoluteAssignBSizesTraversal(layout_context.shared_context()));
+            let assign_abs_b_sizes = AbsoluteAssignBSizesTraversal(layout_context.shared_context());
+            assign_abs_b_sizes.traverse_absolute_flows(&mut *self);
         }
 
         // Don't remove the dirty bits yet if we're absolutely-positioned, since our final size
@@ -1551,7 +1547,7 @@ impl BlockFlow {
             self.assign_inline_sizes(layout_context);
             // Re-run layout on our children.
             for child in flow::mut_base(self).children.iter_mut() {
-                sequential::traverse_flow_tree_preorder(child, layout_context, RelayoutMode::Force);
+                sequential::reflow(child, layout_context, RelayoutMode::Force);
             }
             // Assign our final-final block size.
             self.assign_block_size(layout_context);
@@ -1944,7 +1940,7 @@ impl Flow for BlockFlow {
         }
     }
 
-    fn compute_absolute_position(&mut self, _layout_context: &LayoutContext) {
+    fn compute_stacking_relative_position(&mut self, _layout_context: &LayoutContext) {
         // FIXME (mbrubeck): Get the real container size, taking the container writing mode into
         // account.  Must handle vertical writing modes.
         let container_size = Size2D::new(self.base.block_container_inline_size, Au(0));
@@ -1989,12 +1985,12 @@ impl Flow for BlockFlow {
 
         // For relatively-positioned descendants, the containing block formed by a block is just
         // the content box. The containing block for absolutely-positioned descendants, on the
-        // other hand, is only established if we are positioned.
+        // other hand, is established in other circumstances (see `is_absolute_containing_block').
         let relative_offset =
             self.fragment.relative_position(&self.base
                                                  .early_absolute_position_info
                                                  .relative_containing_block_size);
-        if self.contains_positioned_fragments() {
+        if self.is_absolute_containing_block() {
             let border_box_origin = (self.fragment.border_box -
                 self.fragment.style.logical_border_width()).start;
             self.base
@@ -2013,14 +2009,15 @@ impl Flow for BlockFlow {
                                                  logical_border_width.inline_start,
                                                  logical_border_width.block_start);
                 let position = position.to_physical(self.base.writing_mode, container_size);
-                if self.contains_positioned_fragments() {
+
+                // Some blocks establish a stacking context, but not a containing block for
+                // absolutely positioned elements. An example of this might be a block that has
+                // `position: static` and `opacity` set. In these cases, absolutely-positioned
+                // children will not be positioned relative to us but will instead be positioned
+                // relative to our containing block.
+                if self.is_absolute_containing_block() {
                     position
                 } else {
-                    // We establish a stacking context but are not positioned. (This will happen
-                    // if, for example, the element has `position: static` but has `opacity` or
-                    // `transform` set.) In this case, absolutely-positioned children will not be
-                    // positioned relative to us but will instead be positioned relative to our
-                    // containing block.
                     position - self.base.stacking_relative_position
                 }
             } else {
@@ -2084,8 +2081,6 @@ impl Flow for BlockFlow {
             flow::mut_base(kid).late_absolute_position_info =
                 late_absolute_position_info_for_children;
         }
-
-        self.base.restyle_damage.remove(REPOSITION)
     }
 
     fn mark_as_root(&mut self) {
@@ -2107,8 +2102,15 @@ impl Flow for BlockFlow {
         (self.fragment.border_box - self.fragment.style().logical_border_width()).size
     }
 
+    /// Returns true if this flow contains fragments that are roots of an absolute flow tree.
+    fn contains_roots_of_absolute_flow_tree(&self) -> bool {
+        self.contains_relatively_positioned_fragments() || self.is_root() ||
+        self.fragment.has_filter_transform_or_perspective()
+    }
+
+    /// Returns true if this is an absolute containing block.
     fn is_absolute_containing_block(&self) -> bool {
-        self.contains_positioned_fragments()
+        self.contains_positioned_fragments() || self.fragment.has_filter_transform_or_perspective()
     }
 
     fn update_late_computed_inline_position_if_necessary(&mut self, inline_position: Au) {

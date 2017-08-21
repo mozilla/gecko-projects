@@ -282,9 +282,8 @@ VRDisplayOpenVR::StopPresentation()
 
   mIsPresenting = false;
   Telemetry::Accumulate(Telemetry::WEBVR_USERS_VIEW_IN, 2);
-  Telemetry::Accumulate(Telemetry::WEBVR_TIME_SPEND_FOR_VIEWING_IN_OPENVR,
-                        static_cast<uint32_t>((TimeStamp::Now() - mPresentationStart)
-                        .ToMilliseconds()));
+  Telemetry::AccumulateTimeDelta(Telemetry::WEBVR_TIME_SPENT_VIEWING_IN_OPENVR,
+                                 mPresentationStart);
 }
 
 bool
@@ -306,8 +305,8 @@ VRDisplayOpenVR::SubmitFrame(void* aTextureHandle,
   ::vr::VRTextureBounds_t bounds;
   bounds.uMin = aLeftEyeRect.x;
   bounds.vMin = 1.0 - aLeftEyeRect.y;
-  bounds.uMax = aLeftEyeRect.x + aLeftEyeRect.width;
-  bounds.vMax = 1.0 - aLeftEyeRect.y - aLeftEyeRect.height;
+  bounds.uMax = aLeftEyeRect.x + aLeftEyeRect.Width();
+  bounds.vMax = 1.0 - aLeftEyeRect.y - aLeftEyeRect.Height();
 
   ::vr::EVRCompositorError err;
   err = mVRCompositor->Submit(::vr::EVREye::Eye_Left, &tex, &bounds);
@@ -317,8 +316,8 @@ VRDisplayOpenVR::SubmitFrame(void* aTextureHandle,
 
   bounds.uMin = aRightEyeRect.x;
   bounds.vMin = 1.0 - aRightEyeRect.y;
-  bounds.uMax = aRightEyeRect.x + aRightEyeRect.width;
-  bounds.vMax = 1.0 - aRightEyeRect.y - aRightEyeRect.height;
+  bounds.uMax = aRightEyeRect.x + aRightEyeRect.Width();
+  bounds.vMax = 1.0 - aRightEyeRect.y - aRightEyeRect.Height();
 
   err = mVRCompositor->Submit(::vr::EVREye::Eye_Right, &tex, &bounds);
   if (err != ::vr::EVRCompositorError::VRCompositorError_None) {
@@ -378,7 +377,7 @@ VRDisplayOpenVR::NotifyVSync()
 
 VRControllerOpenVR::VRControllerOpenVR(dom::GamepadHand aHand, uint32_t aDisplayID,
                                        uint32_t aNumButtons, uint32_t aNumTriggers,
-                                       uint32_t aNumAxes, ::vr::ETrackedDeviceClass aDeviceType)
+                                       uint32_t aNumAxes, const nsCString& aId)
   : VRControllerHost(VRDeviceType::OpenVR, aHand, aDisplayID)
   , mTrigger(aNumTriggers)
   , mAxisMove(aNumAxes)
@@ -387,20 +386,9 @@ VRControllerOpenVR::VRControllerOpenVR(dom::GamepadHand aHand, uint32_t aDisplay
 {
   MOZ_COUNT_CTOR_INHERITED(VRControllerOpenVR, VRControllerHost);
 
-  switch (aDeviceType) {
-    case ::vr::TrackedDeviceClass_Controller:
-      mControllerInfo.mControllerName.AssignLiteral("OpenVR Gamepad");
-      break;
-    case ::vr::TrackedDeviceClass_GenericTracker:
-      mControllerInfo.mControllerName.AssignLiteral("OpenVR Tracker");
-      break;
-    default:
-      MOZ_ASSERT(false);
-      break;
-  }
-
   mAxisMove.SetLengthAndRetainStorage(aNumAxes);
   mTrigger.SetLengthAndRetainStorage(aNumTriggers);
+  mControllerInfo.mControllerName = aId;
   mControllerInfo.mNumButtons = aNumButtons;
   mControllerInfo.mNumAxes = aNumAxes;
   mControllerInfo.mNumHaptics = kNumOpenVRHaptcs;
@@ -947,7 +935,7 @@ VRSystemManagerOpenVR::StopVibrateHaptic(uint32_t aControllerIdx)
 {
   // mVRSystem is available after VRDisplay is created
   // at GetHMDs().
-  if (!mVRSystem) {
+  if (!mVRSystem || (aControllerIdx >= mOpenVRController.Length())) {
     return;
   }
 
@@ -1079,9 +1067,11 @@ VRSystemManagerOpenVR::ScanForControllers()
         ++numButtons;
       }
 
+      nsCString deviceId;
+      GetControllerDeviceId(deviceType, trackedDevice, deviceId);
       RefPtr<VRControllerOpenVR> openVRController =
         new VRControllerOpenVR(hand, mOpenVRHMD->GetDisplayInfo().GetDisplayID(),
-                               numButtons, numTriggers, numAxes, deviceType);
+                               numButtons, numTriggers, numAxes, deviceId);
       openVRController->SetTrackedIndex(trackedDevice);
       mOpenVRController.AppendElement(openVRController);
 
@@ -1103,3 +1093,37 @@ VRSystemManagerOpenVR::RemoveControllers()
   mControllerCount = 0;
 }
 
+void
+VRSystemManagerOpenVR::GetControllerDeviceId(::vr::ETrackedDeviceClass aDeviceType,
+                                             ::vr::TrackedDeviceIndex_t aDeviceIndex, nsCString& aId)
+{
+  switch (aDeviceType) {
+    case ::vr::TrackedDeviceClass_Controller:
+    {
+      ::vr::ETrackedPropertyError err;
+      uint32_t requiredBufferLen;
+      char charBuf[128];
+      requiredBufferLen = mVRSystem->GetStringTrackedDeviceProperty(aDeviceIndex,
+                          ::vr::Prop_RenderModelName_String, charBuf, 128, &err);
+      if (requiredBufferLen > 128) {
+        MOZ_CRASH("Larger than the buffer size.");
+      }
+      MOZ_ASSERT(requiredBufferLen && err == ::vr::TrackedProp_Success);
+      nsCString deviceId(charBuf);
+      if (deviceId.Find("knuckles") != kNotFound) {
+        aId.AssignLiteral("OpenVR Knuckles");
+      } else {
+        aId.AssignLiteral("OpenVR Gamepad");
+      }
+      break;
+    }
+    case ::vr::TrackedDeviceClass_GenericTracker:
+    {
+      aId.AssignLiteral("OpenVR Tracker");
+      break;
+    }
+    default:
+      MOZ_ASSERT(false);
+      break;
+  }
+}

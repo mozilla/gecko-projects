@@ -86,7 +86,7 @@
 #include "mozilla/dom/FileList.h"
 #include "nsIFile.h"
 #include "nsDirectoryServiceDefs.h"
-#include "nsIContentPrefService.h"
+#include "nsIContentPrefService2.h"
 #include "nsIMIMEService.h"
 #include "nsIObserverService.h"
 #include "nsIPopupWindowManager.h"
@@ -1025,13 +1025,6 @@ UploadLastDir::FetchDirectoryAndDisplayPicker(nsIDocument* aDoc,
   nsCOMPtr<nsIContentPrefCallback2> prefCallback =
     new UploadLastDir::ContentPrefCallback(aFilePicker, aFpCallback);
 
-#ifdef MOZ_B2G
-  if (XRE_IsContentProcess()) {
-    prefCallback->HandleCompletion(nsIContentPrefCallback2::COMPLETE_ERROR);
-    return NS_OK;
-  }
-#endif
-
   // Attempt to get the CPS, if it's not present we'll fallback to use the Desktop folder
   nsCOMPtr<nsIContentPrefService2> contentPrefService =
     do_GetService(NS_CONTENT_PREF_SERVICE_CONTRACTID);
@@ -1055,12 +1048,6 @@ UploadLastDir::StoreLastUsedDirectory(nsIDocument* aDoc, nsIFile* aDir)
   if (!aDir) {
     return NS_OK;
   }
-
-#ifdef MOZ_B2G
-  if (XRE_IsContentProcess()) {
-    return NS_OK;
-  }
-#endif
 
   nsCOMPtr<nsIURI> docURI = aDoc->GetDocumentURI();
   NS_PRECONDITION(docURI, "docURI is null");
@@ -1162,6 +1149,7 @@ HTMLInputElement::HTMLInputElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
   , mPickerRunning(false)
   , mSelectionCached(true)
   , mIsPreviewEnabled(false)
+  , mHasPatternAttribute(false)
 {
   // If size is above 512, mozjemalloc allocates 1kB, see
   // memory/mozjemalloc/jemalloc.c
@@ -1470,8 +1458,15 @@ HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       UpdateTooLongValidityState();
     } else if (aName == nsGkAtoms::minlength) {
       UpdateTooShortValidityState();
-    } else if (aName == nsGkAtoms::pattern && mDoneCreating) {
-      UpdatePatternMismatchValidityState();
+    } else if (aName == nsGkAtoms::pattern) {
+      // Although pattern attribute only applies to single line text controls,
+      // we set this flag for all input types to save having to check the type
+      // here.
+      mHasPatternAttribute = !!aValue;
+
+      if (mDoneCreating) {
+        UpdatePatternMismatchValidityState();
+      }
     } else if (aName == nsGkAtoms::multiple) {
       UpdateTypeMismatchValidityState();
     } else if (aName == nsGkAtoms::max) {
@@ -2959,6 +2954,26 @@ HTMLInputElement::GetFiles()
   }
 
   return mFileData->mFileList;
+}
+
+void
+HTMLInputElement::SetFiles(FileList* aFiles)
+{
+  if (mType != NS_FORM_INPUT_FILE || !aFiles) {
+    return;
+  }
+
+  // Clear |mFileData->mFileList| to omit |UpdateFileList|
+  if (mFileData->mFileList) {
+    mFileData->mFileList->Clear();
+    mFileData->mFileList = nullptr;
+  }
+
+  // Update |mFileData->mFilesOrDirectories|
+  SetFiles(aFiles, true);
+
+  // Update |mFileData->mFileList| without copy
+  mFileData->mFileList = aFiles;
 }
 
 /* static */ void
@@ -5921,7 +5936,7 @@ HTMLInputElement::ChooseDirectory(ErrorResult& aRv)
   // "Pick Folder..." button on platforms that don't have a directory picker
   // we have to redirect to the file picker here.
   InitFilePicker(
-#if defined(ANDROID) || defined(MOZ_B2G)
+#if defined(ANDROID)
                  // No native directory picker - redirect to plain file picker
                  FILE_PICKER_FILE
 #else

@@ -118,8 +118,12 @@ var whitelist = [
   // browser/extensions/pdfjs/content/web/viewer.js#7450
   {file: "resource://pdf.js/web/debugger.js"},
 
-  // Needed by Normandy
-  {file: "resource://gre/modules/IndexedDB.jsm"},
+  // These are used in content processes. They are actually referenced.
+  {file: "resource://shield-recipe-client-content/shield-content-frame.js"},
+  {file: "resource://shield-recipe-client-content/shield-content-process.js"},
+
+  // New L10n API that is not yet used in production
+  {file: "resource://gre/modules/Localization.jsm"},
 
   // Starting from here, files in the whitelist are bugs that need fixing.
   // Bug 1339420
@@ -161,8 +165,6 @@ var whitelist = [
   {file: "chrome://pippki/content/resetpassword.xul"},
   // Bug 1351078
   {file: "resource://gre/modules/Battery.jsm"},
-  // Bug 1351070
-  {file: "resource://gre/modules/ContentPrefInstance.jsm"},
   // Bug 1351079
   {file: "resource://gre/modules/ISO8601DateUtils.jsm"},
   // Bug 1337345

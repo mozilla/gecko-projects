@@ -9,56 +9,16 @@ use ordered_float::NotNaN;
 use std::fmt;
 use style_traits::ToCss;
 use style_traits::values::specified::AllowedLengthType;
-use super::{Number, ToComputedValue, Context};
+use super::{Number, ToComputedValue, Context, Percentage};
 use values::{Auto, CSSFloat, Either, ExtremumLength, None_, Normal, specified};
 use values::computed::{NonNegativeAu, NonNegativeNumber};
+use values::distance::{ComputeSquaredDistance, SquaredDistance};
 use values::generics::NonNegative;
 use values::specified::length::{AbsoluteLength, FontBaseSize, FontRelativeLength};
 use values::specified::length::ViewportPercentageLength;
 
 pub use super::image::Image;
 pub use values::specified::{Angle, BorderStyle, Time, UrlOrNone};
-
-/// A computed `<percentage>` value.
-///
-/// FIXME(emilio): why is this in length.rs?
-#[derive(Clone, Copy, Debug, Default, PartialEq, HasViewportPercentage)]
-#[cfg_attr(feature = "servo", derive(Deserialize, HeapSizeOf, Serialize))]
-pub struct Percentage(pub CSSFloat);
-
-impl Percentage {
-    /// 0%
-    #[inline]
-    pub fn zero() -> Self {
-        Percentage(0.)
-    }
-
-    /// 100%
-    #[inline]
-    pub fn hundred() -> Self {
-        Percentage(1.)
-    }
-}
-
-impl ToCss for Percentage {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        write!(dest, "{}%", self.0 * 100.)
-    }
-}
-
-impl ToComputedValue for specified::Percentage {
-    type ComputedValue = Percentage;
-
-    #[inline]
-    fn to_computed_value(&self, _: &Context) -> Percentage {
-        Percentage(self.get())
-    }
-
-    #[inline]
-    fn from_computed_value(computed: &Percentage) -> Self {
-        specified::Percentage::new(computed.0)
-    }
-}
 
 impl ToComputedValue for specified::NoCalcLength {
     type ComputedValue = Au;
@@ -110,6 +70,19 @@ pub struct CalcLengthOrPercentage {
     pub clamping_mode: AllowedLengthType,
     length: Au,
     pub percentage: Option<Percentage>,
+}
+
+impl ComputeSquaredDistance for CalcLengthOrPercentage {
+    #[inline]
+    fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
+        // FIXME(nox): This looks incorrect to me, to add a distance between lengths
+        // with a distance between percentages.
+        Ok(
+            self.unclamped_length().to_f64_px().compute_squared_distance(
+                &other.unclamped_length().to_f64_px())? +
+            self.percentage().compute_squared_distance(&other.percentage())?,
+        )
+    }
 }
 
 impl CalcLengthOrPercentage {
@@ -222,11 +195,21 @@ impl From<LengthOrPercentageOrNone> for Option<CalcLengthOrPercentage> {
 
 impl ToCss for CalcLengthOrPercentage {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-        match (self.length, self.percentage) {
-            (l, Some(p)) if l == Au(0) => p.to_css(dest),
-            (l, Some(p)) => write!(dest, "calc({}px + {}%)", Au::to_px(l), p.0 * 100.),
-            (l, None) => write!(dest, "{}px", Au::to_px(l)),
-        }
+        use num_traits::Zero;
+
+        let (length, percentage) = match (self.length, self.percentage) {
+            (l, None) => return l.to_css(dest),
+            (l, Some(p)) if l == Au(0) => return p.to_css(dest),
+            (l, Some(p)) => (l, p),
+        };
+
+        dest.write_str("calc(")?;
+        percentage.to_css(dest)?;
+
+        dest.write_str(if length < Zero::zero() { " - " } else { " + " })?;
+        length.abs().to_css(dest)?;
+
+        dest.write_str(")")
     }
 }
 
@@ -296,6 +279,23 @@ pub enum LengthOrPercentage {
     Length(Au),
     Percentage(Percentage),
     Calc(CalcLengthOrPercentage),
+}
+
+impl ComputeSquaredDistance for LengthOrPercentage {
+    #[inline]
+    fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
+        match (self, other) {
+            (&LengthOrPercentage::Length(ref this), &LengthOrPercentage::Length(ref other)) => {
+                this.compute_squared_distance(other)
+            },
+            (&LengthOrPercentage::Percentage(ref this), &LengthOrPercentage::Percentage(ref other)) => {
+                this.compute_squared_distance(other)
+            },
+            (this, other) => {
+                CalcLengthOrPercentage::compute_squared_distance(&(*this).into(), &(*other).into())
+            }
+        }
+    }
 }
 
 impl From<Au> for LengthOrPercentage {
@@ -423,6 +423,23 @@ pub enum LengthOrPercentageOrAuto {
     Calc(CalcLengthOrPercentage),
 }
 
+impl ComputeSquaredDistance for LengthOrPercentageOrAuto {
+    #[inline]
+    fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
+        match (self, other) {
+            (&LengthOrPercentageOrAuto::Length(ref this), &LengthOrPercentageOrAuto::Length(ref other)) => {
+                this.compute_squared_distance(other)
+            },
+            (&LengthOrPercentageOrAuto::Percentage(ref this), &LengthOrPercentageOrAuto::Percentage(ref other)) => {
+                this.compute_squared_distance(other)
+            },
+            (this, other) => {
+                <Option<CalcLengthOrPercentage>>::compute_squared_distance(&(*this).into(), &(*other).into())
+            }
+        }
+    }
+}
+
 impl LengthOrPercentageOrAuto {
     /// Returns true if the computed value is absolute 0 or 0%.
     ///
@@ -499,6 +516,23 @@ pub enum LengthOrPercentageOrNone {
     Percentage(Percentage),
     Calc(CalcLengthOrPercentage),
     None,
+}
+
+impl ComputeSquaredDistance for LengthOrPercentageOrNone {
+    #[inline]
+    fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
+        match (self, other) {
+            (&LengthOrPercentageOrNone::Length(ref this), &LengthOrPercentageOrNone::Length(ref other)) => {
+                this.compute_squared_distance(other)
+            },
+            (&LengthOrPercentageOrNone::Percentage(ref this), &LengthOrPercentageOrNone::Percentage(ref other)) => {
+                this.compute_squared_distance(other)
+            },
+            (this, other) => {
+                <Option<CalcLengthOrPercentage>>::compute_squared_distance(&(*this).into(), &(*other).into())
+            }
+        }
+    }
 }
 
 impl LengthOrPercentageOrNone {
@@ -583,6 +617,13 @@ impl From<LengthOrPercentage> for NonNegativeLengthOrPercentage {
     }
 }
 
+impl From<NonNegativeLengthOrPercentage> for LengthOrPercentage {
+    #[inline]
+    fn from(lop: NonNegativeLengthOrPercentage) -> LengthOrPercentage {
+        lop.0
+    }
+}
+
 impl NonNegativeLengthOrPercentage {
     /// Get zero value.
     #[inline]
@@ -648,6 +689,22 @@ pub enum MozLength {
     ExtremumLength(ExtremumLength),
 }
 
+impl ComputeSquaredDistance for MozLength {
+    #[inline]
+    fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
+        match (self, other) {
+            (&MozLength::LengthOrPercentageOrAuto(ref this), &MozLength::LengthOrPercentageOrAuto(ref other)) => {
+                this.compute_squared_distance(other)
+            },
+            _ => {
+                // FIXME(nox): Should this return `Ok(SquaredDistance::Value(1.))`
+                // when `self` and `other` are the same extremum value?
+                Err(())
+            },
+        }
+    }
+}
+
 impl MozLength {
     /// Returns the `auto` value.
     pub fn auto() -> Self {
@@ -690,6 +747,22 @@ impl ToComputedValue for specified::MozLength {
 pub enum MaxLength {
     LengthOrPercentageOrNone(LengthOrPercentageOrNone),
     ExtremumLength(ExtremumLength),
+}
+
+impl ComputeSquaredDistance for MaxLength {
+    #[inline]
+    fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
+        match (self, other) {
+            (&MaxLength::LengthOrPercentageOrNone(ref this), &MaxLength::LengthOrPercentageOrNone(ref other)) => {
+                this.compute_squared_distance(other)
+            },
+            _ => {
+                // FIXME(nox): Should this return `Ok(SquaredDistance::Value(1.))`
+                // when `self` and `other` are the same extremum value?
+                Err(())
+            },
+        }
+    }
 }
 
 impl MaxLength {

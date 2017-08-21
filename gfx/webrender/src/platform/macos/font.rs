@@ -13,17 +13,18 @@ use core_graphics::geometry::{CGPoint, CGSize, CGRect};
 use core_text::font::CTFont;
 use core_text::font_descriptor::kCTFontDefaultOrientation;
 use core_text;
-use std::collections::HashMap;
+use internal_types::FastHashMap;
 use std::collections::hash_map::Entry;
 use api::{ColorU, FontKey, FontRenderMode, GlyphDimensions};
-use api::{GlyphKey, SubpixelPoint};
-use api::{FontInstanceKey, NativeFontHandle};
+use api::{GlyphKey};
+use api::{FontInstance, NativeFontHandle};
 use gamma_lut::{GammaLut, Color as ColorLut};
 use std::ptr;
+use std::sync::Arc;
 
 pub struct FontContext {
-    cg_fonts: HashMap<FontKey, CGFont>,
-    ct_fonts: HashMap<(FontKey, Au), CTFont>,
+    cg_fonts: FastHashMap<FontKey, CGFont>,
+    ct_fonts: FastHashMap<(FontKey, Au), CTFont>,
     gamma_lut: GammaLut,
 }
 
@@ -83,7 +84,8 @@ fn supports_subpixel_aa() -> bool {
 
 fn get_glyph_metrics(ct_font: &CTFont,
                      glyph: CGGlyph,
-                     subpixel_point: &SubpixelPoint) -> GlyphMetrics {
+                     x_offset: f64,
+                     y_offset: f64) -> GlyphMetrics {
     let bounds = ct_font.get_bounding_rects_for_glyphs(kCTFontDefaultOrientation, &[glyph]);
 
     if bounds.origin.x.is_nan() || bounds.origin.y.is_nan() ||
@@ -102,8 +104,6 @@ fn get_glyph_metrics(ct_font: &CTFont,
             advance: 0.0,
         };
     }
-
-    let (x_offset, y_offset) = subpixel_point.to_f64();
 
     // First round out to pixel boundaries
     // CG Origin is bottom left
@@ -154,8 +154,8 @@ impl FontContext {
         let gamma = 0.0;
 
         FontContext {
-            cg_fonts: HashMap::new(),
-            ct_fonts: HashMap::new(),
+            cg_fonts: FastHashMap::default(),
+            ct_fonts: FastHashMap::default(),
             gamma_lut: GammaLut::new(contrast, gamma, gamma),
         }
     }
@@ -164,13 +164,13 @@ impl FontContext {
         self.cg_fonts.contains_key(font_key)
     }
 
-    pub fn add_raw_font(&mut self, font_key: &FontKey, bytes: &[u8], index: u32) {
+    pub fn add_raw_font(&mut self, font_key: &FontKey, bytes: Arc<Vec<u8>>, index: u32) {
         if self.cg_fonts.contains_key(font_key) {
             return
         }
 
         assert_eq!(index, 0);
-        let data_provider = CGDataProvider::from_buffer(bytes);
+        let data_provider = CGDataProvider::from_buffer(&**bytes);
         let cg_font = match CGFont::from_data_provider(data_provider) {
             Err(_) => return,
             Ok(cg_font) => cg_font,
@@ -238,11 +238,12 @@ impl FontContext {
     }
 
     pub fn get_glyph_dimensions(&mut self,
-                                font: &FontInstanceKey,
+                                font: &FontInstance,
                                 key: &GlyphKey) -> Option<GlyphDimensions> {
         self.get_ct_font(font.font_key, font.size).and_then(|ref ct_font| {
             let glyph = key.index as CGGlyph;
-            let metrics = get_glyph_metrics(ct_font, glyph, &key.subpixel_point);
+            let (x_offset, y_offset) = font.get_subpx_offset(key);
+            let metrics = get_glyph_metrics(ct_font, glyph, x_offset, y_offset);
             if metrics.rasterized_width == 0 || metrics.rasterized_height == 0 {
                 None
             } else {
@@ -297,7 +298,7 @@ impl FontContext {
     }
 
     pub fn rasterize_glyph(&mut self,
-                           font: &FontInstanceKey,
+                           font: &FontInstance,
                            key: &GlyphKey)
                            -> Option<RasterizedGlyph> {
 
@@ -307,7 +308,8 @@ impl FontContext {
         };
 
         let glyph = key.index as CGGlyph;
-        let metrics = get_glyph_metrics(&ct_font, glyph, &key.subpixel_point);
+        let (x_offset, y_offset) = font.get_subpx_offset(key);
+        let metrics = get_glyph_metrics(&ct_font, glyph, x_offset, y_offset);
         if metrics.rasterized_width == 0 || metrics.rasterized_height == 0 {
             return Some(RasterizedGlyph::blank())
         }
@@ -364,8 +366,6 @@ impl FontContext {
         cg_context.set_should_smooth_fonts(smooth);
         cg_context.set_allows_antialiasing(antialias);
         cg_context.set_should_antialias(antialias);
-
-        let (x_offset, y_offset) = key.subpixel_point.to_f64();
 
         // CG Origin is bottom left, WR is top left. Need -y offset
         let rasterization_origin = CGPoint {
@@ -440,4 +440,3 @@ impl FontContext {
         })
     }
 }
-

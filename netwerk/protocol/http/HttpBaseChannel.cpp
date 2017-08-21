@@ -183,6 +183,7 @@ HttpBaseChannel::HttpBaseChannel()
   , mResponseCouldBeSynthesized(false)
   , mBlockAuthPrompt(false)
   , mAllowStaleCacheContent(false)
+  , mTlsFlags(0)
   , mSuspendCount(0)
   , mInitialRwin(0)
   , mProxyResolveFlags(0)
@@ -437,7 +438,6 @@ HttpBaseChannel::SetLoadFlags(nsLoadFlags aLoadFlags)
   }
 
   mLoadFlags = aLoadFlags;
-  mForceMainDocumentChannel = (aLoadFlags & LOAD_DOCUMENT_URI);
   return NS_OK;
 }
 
@@ -2170,7 +2170,7 @@ NS_IMETHODIMP
 HttpBaseChannel::GetIsMainDocumentChannel(bool* aValue)
 {
   NS_ENSURE_ARG_POINTER(aValue);
-  *aValue = mForceMainDocumentChannel || (mLoadFlags & LOAD_DOCUMENT_URI);
+  *aValue = IsNavigation();
   return NS_OK;
 }
 
@@ -2614,6 +2614,22 @@ HttpBaseChannel::SetBeConservative(bool aBeConservative)
 }
 
 NS_IMETHODIMP
+HttpBaseChannel::GetTlsFlags(uint32_t *aTlsFlags)
+{
+  NS_ENSURE_ARG_POINTER(aTlsFlags);
+
+  *aTlsFlags = mTlsFlags;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::SetTlsFlags(uint32_t aTlsFlags)
+{
+  mTlsFlags = aTlsFlags;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 HttpBaseChannel::GetApiRedirectToURI(nsIURI ** aResult)
 {
   NS_ENSURE_ARG_POINTER(aResult);
@@ -2946,7 +2962,7 @@ HttpBaseChannel::GetURIPrincipal()
 bool
 HttpBaseChannel::IsNavigation()
 {
-  return mForceMainDocumentChannel;
+  return mForceMainDocumentChannel || (mLoadFlags & LOAD_DOCUMENT_URI);
 }
 
 bool
@@ -3184,7 +3200,7 @@ HttpBaseChannel::AddCookiesToRequest()
 
   bool useCookieService =
     (XRE_IsParentProcess());
-  nsXPIDLCString cookie;
+  nsCString cookie;
   if (useCookieService) {
     nsICookieService *cs = gHttpHandler->GetCookieService();
     if (cs) {
@@ -3419,6 +3435,8 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
     rv = httpInternal->SetAllowAltSvc(mAllowAltSvc);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
     rv = httpInternal->SetBeConservative(mBeConservative);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    rv = httpInternal->SetTlsFlags(mTlsFlags);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
 
     RefPtr<nsHttpChannel> realChannel;

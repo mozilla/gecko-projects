@@ -161,51 +161,33 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
 Cu.import("resource://gre/modules/debug.js", this);
 Cu.import("resource://gre/modules/osfile.jsm", this);
 
-XPCOMUtils.defineLazyServiceGetter(this, "gSessionStartup",
-  "@mozilla.org/browser/sessionstartup;1", "nsISessionStartup");
-XPCOMUtils.defineLazyServiceGetter(this, "gScreenManager",
-  "@mozilla.org/gfx/screenmanager;1", "nsIScreenManager");
-XPCOMUtils.defineLazyServiceGetter(this, "Telemetry",
-  "@mozilla.org/base/telemetry;1", "nsITelemetry");
-XPCOMUtils.defineLazyModuleGetter(this, "console",
-  "resource://gre/modules/Console.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "RecentWindow",
-  "resource:///modules/RecentWindow.jsm");
+XPCOMUtils.defineLazyServiceGetters(this, {
+  gSessionStartup: ["@mozilla.org/browser/sessionstartup;1", "nsISessionStartup"],
+  gScreenManager: ["@mozilla.org/gfx/screenmanager;1", "nsIScreenManager"],
+  Telemetry: ["@mozilla.org/base/telemetry;1", "nsITelemetry"],
+});
 
-XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
-  "resource://gre/modules/AppConstants.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "GlobalState",
-  "resource:///modules/sessionstore/GlobalState.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PrivacyFilter",
-  "resource:///modules/sessionstore/PrivacyFilter.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "RunState",
-  "resource:///modules/sessionstore/RunState.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "DevToolsShim",
-  "chrome://devtools-shim/content/DevToolsShim.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "SessionSaver",
-  "resource:///modules/sessionstore/SessionSaver.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "SessionCookies",
-  "resource:///modules/sessionstore/SessionCookies.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "SessionFile",
-  "resource:///modules/sessionstore/SessionFile.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "setTimeout",
-  "resource://gre/modules/Timer.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TabAttributes",
-  "resource:///modules/sessionstore/TabAttributes.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TabCrashHandler",
-  "resource:///modules/ContentCrashHandlers.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TabState",
-  "resource:///modules/sessionstore/TabState.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TabStateCache",
-  "resource:///modules/sessionstore/TabStateCache.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TabStateFlusher",
-  "resource:///modules/sessionstore/TabStateFlusher.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Utils",
-  "resource://gre/modules/sessionstore/Utils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ViewSourceBrowser",
-  "resource://gre/modules/ViewSourceBrowser.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AsyncShutdown",
-  "resource://gre/modules/AsyncShutdown.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  AppConstants: "resource://gre/modules/AppConstants.jsm",
+  AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
+  DevToolsShim: "chrome://devtools-shim/content/DevToolsShim.jsm",
+  GlobalState: "resource:///modules/sessionstore/GlobalState.jsm",
+  PrivacyFilter: "resource:///modules/sessionstore/PrivacyFilter.jsm",
+  RecentWindow: "resource:///modules/RecentWindow.jsm",
+  RunState: "resource:///modules/sessionstore/RunState.jsm",
+  SessionCookies: "resource:///modules/sessionstore/SessionCookies.jsm",
+  SessionFile: "resource:///modules/sessionstore/SessionFile.jsm",
+  SessionSaver: "resource:///modules/sessionstore/SessionSaver.jsm",
+  TabAttributes: "resource:///modules/sessionstore/TabAttributes.jsm",
+  TabCrashHandler: "resource:///modules/ContentCrashHandlers.jsm",
+  TabState: "resource:///modules/sessionstore/TabState.jsm",
+  TabStateCache: "resource:///modules/sessionstore/TabStateCache.jsm",
+  TabStateFlusher: "resource:///modules/sessionstore/TabStateFlusher.jsm",
+  Utils: "resource://gre/modules/sessionstore/Utils.jsm",
+  ViewSourceBrowser: "resource://gre/modules/ViewSourceBrowser.jsm",
+  console: "resource://gre/modules/Console.jsm",
+  setTimeout: "resource://gre/modules/Timer.jsm",
+});
 
 /**
  * |true| if we are in debug mode, |false| otherwise.
@@ -230,6 +212,10 @@ var gResistFingerprintingEnabled = false;
 this.SessionStore = {
   get promiseInitialized() {
     return SessionStoreInternal.promiseInitialized;
+  },
+
+  get promiseAllWindowsRestored() {
+    return SessionStoreInternal.promiseAllWindowsRestored;
   },
 
   get canRestoreLastSession() {
@@ -549,6 +535,22 @@ var SessionStoreInternal = {
 
   // Whether session has been initialized
   _sessionInitialized: false,
+
+  // A promise resolved once all windows are restored.
+  _deferredAllWindowsRestored: (function() {
+    let deferred = {};
+
+    deferred.promise = new Promise((resolve, reject) => {
+      deferred.resolve = resolve;
+      deferred.reject = reject;
+    });
+
+    return deferred;
+  })(),
+
+  get promiseAllWindowsRestored() {
+    return this._deferredAllWindowsRestored.promise;
+  },
 
   // Promise that is resolved when we're ready to initialize
   // and restore the session.
@@ -1147,6 +1149,7 @@ var SessionStoreInternal = {
 
           // Nothing to restore now, notify observers things are complete.
           Services.obs.notifyObservers(null, NOTIFY_WINDOWS_RESTORED);
+          this._deferredAllWindowsRestored.resolve();
         } else {
           TelemetryTimestamps.add("sessionRestoreRestoring");
           this._restoreCount = aInitialState.windows ? aInitialState.windows.length : 0;
@@ -1165,6 +1168,7 @@ var SessionStoreInternal = {
       } else {
         // Nothing to restore, notify observers things are complete.
         Services.obs.notifyObservers(null, NOTIFY_WINDOWS_RESTORED);
+        this._deferredAllWindowsRestored.resolve();
       }
     // this window was opened by _openWindowWithState
     } else if (!this._isWindowLoaded(aWindow)) {
@@ -2765,9 +2769,7 @@ var SessionStoreInternal = {
       this._closedObjectsChanged = true;
     }
 
-    if (lastSessionState.scratchpads) {
-      DevToolsShim.restoreScratchpadSession(lastSessionState.scratchpads);
-    }
+    DevToolsShim.restoreDevToolsSession(lastSessionState);
 
     // Set data that persists between sessions
     this._recentCrashes = lastSessionState.session &&
@@ -3134,10 +3136,7 @@ var SessionStoreInternal = {
     // Collect and store session cookies.
     state.cookies = SessionCookies.collect();
 
-    let scratchpads = DevToolsShim.getOpenedScratchpads();
-    if (scratchpads && scratchpads.length) {
-      state.scratchpads = scratchpads;
-    }
+    DevToolsShim.saveDevToolsSession(state);
 
     // Persist the last session if we deferred restoring it
     if (LastSession.canRestore) {
@@ -3530,9 +3529,7 @@ var SessionStoreInternal = {
 
     this.restoreWindow(aWindow, root.windows[0], aOptions);
 
-    if (aState.scratchpads) {
-      DevToolsShim.restoreScratchpadSession(aState.scratchpads);
-    }
+    DevToolsShim.restoreDevToolsSession(aState);
   },
 
   /**
@@ -4468,8 +4465,15 @@ var SessionStoreInternal = {
       return;
 
     // This was the last window restored at startup, notify observers.
-    Services.obs.notifyObservers(null,
-      this._browserSetState ? NOTIFY_BROWSER_STATE_RESTORED : NOTIFY_WINDOWS_RESTORED);
+    if (!this._browserSetState) {
+      Services.obs.notifyObservers(null, NOTIFY_WINDOWS_RESTORED);
+      this._deferredAllWindowsRestored.resolve();
+    } else {
+      // _browserSetState is used only by tests, and it uses an alternate
+      // notification in order not to retrigger startup observers that
+      // are listening for NOTIFY_WINDOWS_RESTORED.
+      Services.obs.notifyObservers(null, NOTIFY_BROWSER_STATE_RESTORED);
+    }
 
     this._browserSetState = false;
     this._restoreCount = -1;

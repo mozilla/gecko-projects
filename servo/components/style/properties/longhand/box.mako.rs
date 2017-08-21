@@ -711,7 +711,6 @@ ${helpers.predefined_type("animation-delay",
         "computed::ScrollSnapPoint::none()",
         animation_value_type="discrete",
         products="gecko",
-        disable_when_testing=True,
         spec="Nonstandard (https://www.w3.org/TR/2015/WD-css-snappoints-1-20150326/#scroll-snap-points)",
     )}
 % endfor
@@ -722,7 +721,7 @@ ${helpers.predefined_type("scroll-snap-destination",
                           products="gecko",
                           boxed="True",
                           spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/scroll-snap-destination)",
-                          animation_value_type="ComputedValue")}
+                          animation_value_type="discrete")}
 
 ${helpers.predefined_type(
     "scroll-snap-coordinate",
@@ -731,7 +730,7 @@ ${helpers.predefined_type(
     vector=True,
     products="gecko",
     spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/scroll-snap-destination)",
-    animation_value_type="ComputedValue",
+    animation_value_type="discrete",
     allow_empty="NotInitial"
 )}
 
@@ -1416,8 +1415,7 @@ ${helpers.predefined_type(
                         let ay = ay.to_computed_value(context);
                         let az = az.to_computed_value(context);
                         let theta = theta.to_computed_value(context);
-                        let len = (ax * ax + ay * ay + az * az).sqrt();
-                        result.push(computed_value::ComputedOperation::Rotate(ax / len, ay / len, az / len, theta));
+                        result.push(computed_value::ComputedOperation::Rotate(ax, ay, az, theta));
                     }
                     SpecifiedOperation::Skew(theta_x, None) => {
                         let theta_x = theta_x.to_computed_value(context);
@@ -1825,15 +1823,14 @@ ${helpers.single_keyword("-moz-appearance",
                          gecko_constant_prefix="ThemeWidgetType_NS_THEME",
                          products="gecko",
                          spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/-moz-appearance)",
-                         animation_value_type="none")}
+                         animation_value_type="discrete")}
 
 ${helpers.predefined_type("-moz-binding", "UrlOrNone", "Either::Second(None_)",
                           products="gecko",
                           boxed="True" if product == "gecko" else "False",
                           animation_value_type="none",
                           gecko_ffi_name="mBinding",
-                          spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/-moz-binding)",
-                          disable_when_testing="True")}
+                          spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/-moz-binding)")}
 
 ${helpers.single_keyword("-moz-orient",
                           "inline block horizontal vertical",
@@ -1905,17 +1902,20 @@ ${helpers.single_keyword("-moz-orient",
     }
 </%helpers:longhand>
 
-${helpers.predefined_type("shape-outside", "basic_shape::FloatAreaShape",
-                          "generics::basic_shape::ShapeSource::None",
-                          products="gecko", boxed="True",
-                          animation_value_type="none",
-                          flags="APPLIES_TO_FIRST_LETTER",
-                          spec="https://drafts.csswg.org/css-shapes/#shape-outside-property")}
+${helpers.predefined_type(
+    "shape-outside",
+    "basic_shape::FloatAreaShape",
+    "generics::basic_shape::ShapeSource::None",
+    products="gecko",
+    boxed=True,
+    animation_value_type="discrete",
+    flags="APPLIES_TO_FIRST_LETTER",
+    spec="https://drafts.csswg.org/css-shapes/#shape-outside-property",
+)}
 
 <%helpers:longhand name="touch-action"
                    products="gecko"
                    animation_value_type="discrete"
-                   disable_when_testing="True"
                    spec="https://compat.spec.whatwg.org/#touch-action">
     use gecko_bindings::structs;
     use std::fmt;

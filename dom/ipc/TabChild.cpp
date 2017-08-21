@@ -90,6 +90,7 @@
 #include "nsPIWindowRoot.h"
 #include "nsLayoutUtils.h"
 #include "nsPrintfCString.h"
+#include "nsThreadManager.h"
 #include "nsThreadUtils.h"
 #include "nsViewManager.h"
 #include "nsWeakReference.h"
@@ -297,8 +298,17 @@ ContentListener::HandleEvent(nsIDOMEvent* aEvent)
 
 class TabChild::DelayedDeleteRunnable final
   : public Runnable
+  , public nsIRunnablePriority
 {
     RefPtr<TabChild> mTabChild;
+
+    // In order to ensure that this runnable runs after everything that could
+    // possibly touch this tab, we send it through the event queue twice. The
+    // first time it runs at normal priority and the second time it runs at
+    // input priority. This ensures that it runs after all events that were in
+    // either queue at the time it was first dispatched. mReadyToDelete starts
+    // out false (when it runs at normal priority) and is then set to true.
+    bool mReadyToDelete = false;
 
 public:
     explicit DelayedDeleteRunnable(TabChild* aTabChild)
@@ -309,11 +319,21 @@ public:
         MOZ_ASSERT(aTabChild);
     }
 
+    NS_DECL_ISUPPORTS_INHERITED
+
 private:
     ~DelayedDeleteRunnable()
     {
         MOZ_ASSERT(NS_IsMainThread());
         MOZ_ASSERT(!mTabChild);
+    }
+
+    NS_IMETHOD GetPriority(uint32_t* aPriority) override
+    {
+      *aPriority = mReadyToDelete
+                 ? nsIRunnablePriority::PRIORITY_INPUT
+                 : nsIRunnablePriority::PRIORITY_NORMAL;
+      return NS_OK;
     }
 
     NS_IMETHOD
@@ -322,15 +342,26 @@ private:
         MOZ_ASSERT(NS_IsMainThread());
         MOZ_ASSERT(mTabChild);
 
+        if (!mReadyToDelete) {
+          // This time run this runnable at input priority.
+          mReadyToDelete = true;
+          MOZ_ALWAYS_SUCCEEDS(NS_DispatchToCurrentThread(this));
+          return NS_OK;
+        }
+
         // Check in case ActorDestroy was called after RecvDestroy message.
         if (mTabChild->IPCOpen()) {
-            Unused << PBrowserChild::Send__delete__(mTabChild);
+          Unused << PBrowserChild::Send__delete__(mTabChild);
         }
 
         mTabChild = nullptr;
         return NS_OK;
     }
 };
+
+NS_IMPL_ISUPPORTS_INHERITED(TabChild::DelayedDeleteRunnable,
+                            Runnable,
+                            nsIRunnablePriority)
 
 namespace {
 std::map<TabId, RefPtr<TabChild>>&

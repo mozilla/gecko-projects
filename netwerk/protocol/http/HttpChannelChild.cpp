@@ -224,6 +224,14 @@ HttpChannelChild::ReleaseMainThreadOnlyReferences()
 
   nsTArray<nsCOMPtr<nsISupports>> arrayToRelease;
   arrayToRelease.AppendElement(mCacheKey.forget());
+  arrayToRelease.AppendElement(mRedirectChannelChild.forget());
+
+  // To solve multiple inheritence of nsISupports in InterceptStreamListener
+  already_AddRefed<nsIStreamListener> listener = mInterceptListener.forget();
+  arrayToRelease.AppendElement(listener.take());
+
+  arrayToRelease.AppendElement(mInterceptedRedirectListener.forget());
+  arrayToRelease.AppendElement(mInterceptedRedirectContext.forget());
 
   NS_DispatchToMainThread(new ProxyReleaseRunnable(Move(arrayToRelease)));
 }
@@ -2555,6 +2563,7 @@ HttpChannelChild::ContinueAsyncOpen()
   openArgs.allowSpdy() = mAllowSpdy;
   openArgs.allowAltSvc() = mAllowAltSvc;
   openArgs.beConservative() = mBeConservative;
+  openArgs.tlsFlags() = mTlsFlags;
   openArgs.initialRwin() = mInitialRwin;
 
   uint32_t cacheKey = 0;
@@ -2603,6 +2612,8 @@ HttpChannelChild::ContinueAsyncOpen()
   openArgs.dispatchFetchEventEnd()    = mDispatchFetchEventEnd;
   openArgs.handleFetchEventStart()    = mHandleFetchEventStart;
   openArgs.handleFetchEventEnd()      = mHandleFetchEventEnd;
+
+  openArgs.forceMainDocumentChannel() = mForceMainDocumentChannel;
 
   // This must happen before the constructor message is sent. Otherwise messages
   // from the parent could arrive quickly and be delivered to the wrong event

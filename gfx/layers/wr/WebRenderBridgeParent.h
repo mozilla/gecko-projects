@@ -103,6 +103,7 @@ public:
                                     const wr::BuiltDisplayListDescriptor& dlDesc,
                                     const WebRenderScrollData& aScrollData,
                                     const wr::IdNamespace& aIdNamespace,
+                                    const TimeStamp& aTxnStartTime,
                                     const TimeStamp& aFwdTime) override;
   mozilla::ipc::IPCResult RecvDPSyncEnd(const gfx::IntSize& aSize,
                                         InfallibleTArray<WebRenderParentCommand>&& aCommands,
@@ -114,6 +115,7 @@ public:
                                         const wr::BuiltDisplayListDescriptor& dlDesc,
                                         const WebRenderScrollData& aScrollData,
                                         const wr::IdNamespace& aIdNamespace,
+                                        const TimeStamp& aTxnStartTime,
                                         const TimeStamp& aFwdTime) override;
   mozilla::ipc::IPCResult RecvParentCommands(nsTArray<WebRenderParentCommand>&& commands) override;
   mozilla::ipc::IPCResult RecvDPGetSnapshot(PTextureParent* aTexture) override;
@@ -170,7 +172,7 @@ public:
   void SendPendingAsyncMessages() override;
   void SetAboutToSendAsyncMessages() override;
 
-  void HoldPendingTransactionId(uint32_t aWrEpoch, uint64_t aTransactionId, const TimeStamp& aFwdTime);
+  void HoldPendingTransactionId(uint32_t aWrEpoch, uint64_t aTransactionId, const TimeStamp& aTxnStartTime, const TimeStamp& aFwdTime);
   uint64_t LastPendingTransactionId();
   uint64_t FlushPendingTransactionIds();
   uint64_t FlushTransactionIdsForEpoch(const wr::Epoch& aEpoch, const TimeStamp& aEndTime);
@@ -186,10 +188,6 @@ public:
 
   void UpdateAPZ();
   const WebRenderScrollData& GetScrollData() const;
-
-  static wr::IdNamespace AllocIdNameSpace() {
-    return wr::IdNamespace { ++sIdNameSpace };
-  }
 
   void FlushRendering(bool aIsSync);
 
@@ -227,6 +225,7 @@ private:
                    const wr::BuiltDisplayListDescriptor& dlDesc,
                    const WebRenderScrollData& aScrollData,
                    const wr::IdNamespace& aIdNamespace,
+                   const TimeStamp& aTxnStartTime,
                    const TimeStamp& aFwdTime);
   mozilla::ipc::IPCResult HandleShutdown();
 
@@ -250,13 +249,15 @@ private:
 
 private:
   struct PendingTransactionId {
-    PendingTransactionId(wr::Epoch aEpoch, uint64_t aId, const TimeStamp& aFwdTime)
+    PendingTransactionId(wr::Epoch aEpoch, uint64_t aId, const TimeStamp& aTxnStartTime, const TimeStamp& aFwdTime)
       : mEpoch(aEpoch)
       , mId(aId)
+      , mTxnStartTime(aTxnStartTime)
       , mFwdTime(aFwdTime)
     {}
     wr::Epoch mEpoch;
     uint64_t mId;
+    TimeStamp mTxnStartTime;
     TimeStamp mFwdTime;
   };
 
@@ -296,8 +297,6 @@ private:
 
   // Can only be accessed on the compositor thread.
   WebRenderScrollData mScrollData;
-
-  static uint32_t sIdNameSpace;
 };
 
 } // namespace layers

@@ -64,6 +64,10 @@ pub enum PseudoElement {
     ServoInlineAbsolute,
 }
 
+/// The count of simple (non-functional) pseudo-elements (that is, all
+/// pseudo-elements for now).
+pub const SIMPLE_PSEUDO_COUNT: usize = PseudoElement::ServoInlineAbsolute as usize + 1;
+
 impl ::selectors::parser::PseudoElement for PseudoElement {
     type Impl = SelectorImpl;
 
@@ -106,6 +110,17 @@ impl PseudoElement {
         self.clone() as usize
     }
 
+    /// An index for this pseudo-element to be indexed in an enumerated array.
+    #[inline]
+    pub fn simple_index(&self) -> Option<usize> {
+        Some(self.clone() as usize)
+    }
+
+    /// An array of `None`, one per simple pseudo-element.
+    pub fn simple_pseudo_none_array<T>() -> [Option<T>; SIMPLE_PSEUDO_COUNT] {
+        Default::default()
+    }
+
     /// Creates a pseudo-element from an eager index.
     #[inline]
     pub fn from_eager_index(i: usize) -> Self {
@@ -115,10 +130,22 @@ impl PseudoElement {
         result
     }
 
-    /// Whether the current pseudo element is :before or :after.
+    /// Whether the current pseudo element is ::before or ::after.
     #[inline]
     pub fn is_before_or_after(&self) -> bool {
-        matches!(*self, PseudoElement::After | PseudoElement::Before)
+        self.is_before() || self.is_after()
+    }
+
+    /// Whether this pseudo-element is the ::before pseudo.
+    #[inline]
+    pub fn is_before(&self) -> bool {
+        *self == PseudoElement::Before
+    }
+
+    /// Whether this pseudo-element is the ::after pseudo.
+    #[inline]
+    pub fn is_after(&self) -> bool {
+        *self == PseudoElement::After
     }
 
     /// Whether the current pseudo element is :first-letter
@@ -533,28 +560,6 @@ impl SelectorImpl {
         for i in 0..EAGER_PSEUDO_COUNT {
             fun(PseudoElement::from_eager_index(i));
         }
-    }
-
-    /// Executes `fun` for each pseudo-element.
-    #[inline]
-    pub fn each_simple_pseudo_element<F>(mut fun: F)
-        where F: FnMut(PseudoElement),
-    {
-        fun(PseudoElement::Before);
-        fun(PseudoElement::After);
-        fun(PseudoElement::DetailsContent);
-        fun(PseudoElement::DetailsSummary);
-        fun(PseudoElement::Selection);
-        fun(PseudoElement::ServoText);
-        fun(PseudoElement::ServoInputText);
-        fun(PseudoElement::ServoTableWrapper);
-        fun(PseudoElement::ServoAnonymousTableWrapper);
-        fun(PseudoElement::ServoAnonymousTable);
-        fun(PseudoElement::ServoAnonymousTableRow);
-        fun(PseudoElement::ServoAnonymousTableCell);
-        fun(PseudoElement::ServoAnonymousBlock);
-        fun(PseudoElement::ServoInlineBlockWrapper);
-        fun(PseudoElement::ServoInlineAbsolute);
     }
 
     /// Returns the pseudo-class state flag for selector matching.

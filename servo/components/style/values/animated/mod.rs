@@ -13,6 +13,8 @@ use smallvec::SmallVec;
 use std::cmp::max;
 use values::computed::Angle as ComputedAngle;
 use values::computed::BorderCornerRadius as ComputedBorderCornerRadius;
+#[cfg(feature = "servo")]
+use values::computed::ComputedUrl;
 use values::computed::GreaterThanOrEqualToOneNumber as ComputedGreaterThanOrEqualToOneNumber;
 use values::computed::MaxLength as ComputedMaxLength;
 use values::computed::MozLength as ComputedMozLength;
@@ -22,6 +24,7 @@ use values::computed::NonNegativeNumber as ComputedNonNegativeNumber;
 use values::computed::PositiveInteger as ComputedPositiveInteger;
 use values::specified::url::SpecifiedUrl;
 
+pub mod color;
 pub mod effects;
 
 /// Conversion between computed values and intermediate values for animations.
@@ -95,6 +98,8 @@ pub trait AnimatedValueAsComputed {}
 impl AnimatedValueAsComputed for Au {}
 impl AnimatedValueAsComputed for ComputedAngle {}
 impl AnimatedValueAsComputed for SpecifiedUrl {}
+#[cfg(feature = "servo")]
+impl AnimatedValueAsComputed for ComputedUrl {}
 impl AnimatedValueAsComputed for bool {}
 impl AnimatedValueAsComputed for f32 {}
 
@@ -167,7 +172,7 @@ impl ToAnimatedValue for ComputedPositiveInteger {
 
     #[inline]
     fn from_animated_value(animated: Self::AnimatedValue) -> Self {
-        max(animated.0, 0).into()
+        max(animated.0, 1).into()
     }
 }
 

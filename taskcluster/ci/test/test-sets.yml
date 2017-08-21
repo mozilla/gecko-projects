@@ -38,6 +38,7 @@ common-tests:
     - reftest
     - reftest-no-accel
     - telemetry-tests-client
+    - test-verify
     - xpcshell
 
 web-platform-tests:
@@ -84,15 +85,36 @@ stylo-tests:
     - crashtest
     - reftest
     - reftest-stylo
-    - mochitest-style
-    - mochitest-chrome-style
     - web-platform-tests
     - web-platform-tests-reftests
+    - mochitest
+    - mochitest-a11y
+    - mochitest-browser-chrome
+    - mochitest-browser-screenshots
+    - mochitest-chrome
+    - mochitest-clipboard
+    - mochitest-gpu
+    - mochitest-media
+    - mochitest-webgl
 
 stylo-sequential-tests:
     - crashtest
     - reftest-stylo
-    - mochitest-style
+    - mochitest
+
+qr-talos:
+    - talos-chrome
+    - talos-dromaeojs
+    # - talos-g1 # doesn't work with QR yet
+    # - talos-g2 # doesn't work with QR yet
+    - talos-g3
+    - talos-g4
+    - talos-g5
+    - talos-other
+    - talos-svgr
+    - talos-tp5o
+    - talos-perf-reftest
+    - talos-perf-reftest-singletons
 
 qr-tests:
     - cppunit
@@ -105,7 +127,6 @@ qr-tests:
     - mochitest-media
     - mochitest-webgl
     - reftest
-    - reftest-no-accel
     - xpcshell
 
 jsdcov-code-coverage-tests:
@@ -155,6 +176,20 @@ windows-talos:
     - talos-tp5o
     - talos-xperf
     - talos-tp6
+
+windows-talos-stylo:
+    - talos-chrome-stylo
+    - talos-dromaeojs-stylo
+    - talos-g1-stylo
+    - talos-g2-stylo
+    - talos-g4-stylo
+    - talos-g5-stylo
+    - talos-other-stylo
+    - talos-perf-reftest-stylo
+    - talos-perf-reftest-singletons-stylo
+    - talos-svgr-stylo
+    - talos-tp5o-stylo
+    - talos-xperf-stylo
     - talos-tp6-stylo
     - talos-tp6-stylo-threads
 
@@ -195,6 +230,7 @@ macosx64-tests-talos:
     - talos-tp5o
     - talos-perf-reftest
     - talos-perf-reftest-singletons
+    - talos-tp6
 
 linux32-tests:
     - cppunit
@@ -256,9 +292,7 @@ android-x86-tests:
     - xpcshell
 
 windows8-tests:
-    - mochitest
     - mochitest-browser-chrome
-    - mochitest-devtools-chrome
     - mochitest-media
     - reftest
     - reftest-no-accel

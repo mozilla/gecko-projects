@@ -77,7 +77,7 @@ var SelectHelper = {
     }
 
     p.show((data) => {
-      this._promptCallBack(data,element)
+      this._promptCallBack(data, element)
     });
   },
 
@@ -91,7 +91,7 @@ var SelectHelper = {
   getListForElement: function(element) {
     let index = 0;
     let items = [];
-    this.forVisibleOptions(element, function(node, options,parent) {
+    this.forVisibleOptions(element, function(node, options, parent) {
       let item = {
         label: node.text || node.label,
         header: options.isGroup,
@@ -142,11 +142,9 @@ var SelectHelper = {
 
   fireOnChange: function(element) {
     let win = element.ownerGlobal;
-    let event = element.ownerDocument.createEvent("Events");
-    event.initEvent("change", true, true, element.defaultView, 0,
-        false, false, false, false, null);
     win.setTimeout(function() {
-      element.dispatchEvent(event);
+      element.dispatchEvent(new win.Event("input", { bubbles: true }));
+      element.dispatchEvent(new win.Event("change", { bubbles: true }));
     }, 0);
   },
 
@@ -160,7 +158,7 @@ var SelectHelper = {
     }, 0);
   },
 
-  _isDisabledElement : function(element) {
+  _isDisabledElement: function(element) {
     let currentElement = element;
     while (currentElement) {
       // Must test with === in case a form has a field named "disabled". See bug 1263589.

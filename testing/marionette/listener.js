@@ -19,8 +19,6 @@ Cu.import("resource://gre/modules/FileUtils.jsm");
 Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 Cu.import("chrome://marionette/content/accessibility.js");
 Cu.import("chrome://marionette/content/action.js");
@@ -167,6 +165,7 @@ var loadListener = {
     if (waitForUnloaded) {
       addEventListener("hashchange", this, false);
       addEventListener("pagehide", this, false);
+      addEventListener("popstate", this, false);
 
       // The events can only be received when the event listeners are
       // added to the currently selected frame.
@@ -213,6 +212,7 @@ var loadListener = {
 
     removeEventListener("hashchange", this);
     removeEventListener("pagehide", this);
+    removeEventListener("popstate", this);
     removeEventListener("DOMContentLoaded", this);
     removeEventListener("pageshow", this);
 
@@ -262,6 +262,7 @@ var loadListener = {
 
         removeEventListener("hashchange", this);
         removeEventListener("pagehide", this);
+        removeEventListener("popstate", this);
 
         // Now wait until the target page has been loaded
         addEventListener("DOMContentLoaded", this, false);
@@ -269,6 +270,7 @@ var loadListener = {
         break;
 
       case "hashchange":
+      case "popstate":
         this.stop();
         sendOk(this.command_id);
         break;
@@ -444,10 +446,10 @@ var loadListener = {
       this.start(command_id, timeout, startTime, true);
     }
 
-    return Task.spawn(function* () {
-      yield trigger();
+    return (async () => {
+      await trigger();
 
-    }).then(val => {
+    })().then(val => {
       if (!loadEventExpected) {
         sendOk(command_id);
         return;
@@ -467,7 +469,6 @@ var loadListener = {
       }
 
       sendError(err, command_id);
-
     });
   },
 };
@@ -508,12 +509,12 @@ function dispatch(fn) {
   return function(msg) {
     let id = msg.json.command_id;
 
-    let req = Task.spawn(function* () {
+    let req = (async () => {
       if (typeof msg.json == "undefined" || msg.json instanceof Array) {
-        return yield fn.apply(null, msg.json);
+        return fn.apply(null, msg.json);
       }
-      return yield fn(msg.json);
-    });
+      return fn(msg.json);
+    })();
 
     let okOrValueResponse = rv => {
       if (typeof rv == "undefined") {
@@ -799,26 +800,25 @@ function checkForInterrupted() {
   }
 }
 
-function* execute(script, args, timeout, opts) {
+async function execute(script, args, timeout, opts) {
   opts.timeout = timeout;
 
   let sb = sandbox.createMutable(curContainer.frame);
   let wargs = evaluate.fromJSON(
       args, seenEls, curContainer.frame, curContainer.shadowRoot);
-  let res = yield evaluate.sandbox(sb, script, wargs, opts);
+  let res = await evaluate.sandbox(sb, script, wargs, opts);
 
   return evaluate.toJSON(res, seenEls);
 }
 
-function* executeInSandbox(script, args, timeout, opts) {
+async function executeInSandbox(script, args, timeout, opts) {
   opts.timeout = timeout;
 
   let sb = sandboxes.get(opts.sandboxName, opts.newSandbox);
   let wargs = evaluate.fromJSON(
       args, seenEls, curContainer.frame, curContainer.shadowRoot);
-  let evaluatePromise = evaluate.sandbox(sb, script, wargs, opts);
 
-  let res = yield evaluatePromise;
+  let res = await evaluate.sandbox(sb, script, wargs, opts);
   return evaluate.toJSON(res, seenEls);
 }
 
@@ -880,7 +880,7 @@ function emitTouchEvent(type, touch) {
 /**
  * Function that perform a single tap
  */
-function singleTap(id, corx, cory) {
+async function singleTap(id, corx, cory) {
   let el = seenEls.get(id, curContainer);
   // after this block, the element will be scrolled into view
   let visible = element.isVisible(el, corx, cory);
@@ -890,21 +890,20 @@ function singleTap(id, corx, cory) {
   }
 
   let a11y = accessibility.get(capabilities.get("moz:accessibilityChecks"));
-  return a11y.getAccessible(el, true).then(acc => {
-    a11y.assertVisible(acc, el, visible);
-    a11y.assertActionable(acc, el);
-    if (!curContainer.frame.document.createTouch) {
-      legacyactions.mouseEventsOnly = true;
-    }
-    let c = element.coordinates(el, corx, cory);
-    if (!legacyactions.mouseEventsOnly) {
-      let touchId = legacyactions.nextTouchId++;
-      let touch = createATouch(el, c.x, c.y, touchId);
-      emitTouchEvent("touchstart", touch);
-      emitTouchEvent("touchend", touch);
-    }
-    legacyactions.mouseTap(el.ownerDocument, c.x, c.y);
-  });
+  let acc = await a11y.getAccessible(el, true);
+  a11y.assertVisible(acc, el, visible);
+  a11y.assertActionable(acc, el);
+  if (!curContainer.frame.document.createTouch) {
+    legacyactions.mouseEventsOnly = true;
+  }
+  let c = element.coordinates(el, corx, cory);
+  if (!legacyactions.mouseEventsOnly) {
+    let touchId = legacyactions.nextTouchId++;
+    let touch = createATouch(el, c.x, c.y, touchId);
+    emitTouchEvent("touchstart", touch);
+    emitTouchEvent("touchend", touch);
+  }
+  legacyactions.mouseTap(el.ownerDocument, c.x, c.y);
 }
 
 /**
@@ -936,19 +935,19 @@ function createATouch(el, corx, cory, touchId) {
  *      Object with an |actions| attribute that is an Array of objects
  *      each of which represents an action sequence.
  */
-function* performActions(msg) {
+async function performActions(msg) {
   let chain = action.Chain.fromJson(msg.actions);
-  yield action.dispatch(chain, seenEls, curContainer);
+  await action.dispatch(chain, seenEls, curContainer);
 }
 
 /**
- * The Release Actions command is used to release all the keys and pointer
+ * The release actions command is used to release all the keys and pointer
  * buttons that are currently depressed. This causes events to be fired
  * as if the state was released by an explicit series of actions. It also
  * clears all the internal state of the virtual devices.
  */
-function* releaseActions() {
-  yield action.dispatchTickActions(
+async function releaseActions() {
+  await action.dispatchTickActions(
       action.inputsToCancel.reverse(), 0, seenEls, curContainer);
   action.inputsToCancel.length = 0;
   action.inputStateMap.clear();
@@ -1298,7 +1297,7 @@ function getPageSource() {
  * Find an element in the current browsing context's document using the
  * given search strategy.
  */
-function* findElementContent(strategy, selector, opts = {}) {
+async function findElementContent(strategy, selector, opts = {}) {
   if (!SUPPORTED_STRATEGIES.has(strategy)) {
     throw new InvalidSelectorError("Strategy not supported: " + strategy);
   }
@@ -1308,7 +1307,7 @@ function* findElementContent(strategy, selector, opts = {}) {
     opts.startNode = seenEls.get(opts.startNode, curContainer);
   }
 
-  let el = yield element.find(curContainer, strategy, selector, opts);
+  let el = await element.find(curContainer, strategy, selector, opts);
   let elRef = seenEls.add(el);
   let webEl = element.makeWebElement(elRef);
   return webEl;
@@ -1318,7 +1317,7 @@ function* findElementContent(strategy, selector, opts = {}) {
  * Find elements in the current browsing context's document using the
  * given search strategy.
  */
-function* findElementsContent(strategy, selector, opts = {}) {
+async function findElementsContent(strategy, selector, opts = {}) {
   if (!SUPPORTED_STRATEGIES.has(strategy)) {
     throw new InvalidSelectorError("Strategy not supported: " + strategy);
   }
@@ -1328,7 +1327,7 @@ function* findElementsContent(strategy, selector, opts = {}) {
     opts.startNode = seenEls.get(opts.startNode, curContainer);
   }
 
-  let els = yield element.find(curContainer, strategy, selector, opts);
+  let els = await element.find(curContainer, strategy, selector, opts);
   let elRefs = seenEls.addAll(els);
   let webEls = elRefs.map(element.makeWebElement);
   return webEls;
@@ -1498,22 +1497,20 @@ function isElementSelected(id) {
       el, capabilities.get("moz:accessibilityChecks"));
 }
 
-function* sendKeysToElement(id, val) {
+async function sendKeysToElement(id, val) {
   let el = seenEls.get(id, curContainer);
   if (el.type == "file") {
-    yield interaction.uploadFile(el, val);
+    await interaction.uploadFile(el, val);
   } else if ((el.type == "date" || el.type == "time") &&
       Preferences.get("dom.forms.datetime")) {
-    yield interaction.setFormControlValue(el, val);
+    interaction.setFormControlValue(el, val);
   } else {
-    yield interaction.sendKeysToElement(
+    await interaction.sendKeysToElement(
         el, val, false, capabilities.get("moz:accessibilityChecks"));
   }
 }
 
-/**
- * Clear the text of an element.
- */
+/** Clear the text of an element. */
 function clearElement(id) {
   try {
     let el = seenEls.get(id, curContainer);
@@ -1838,7 +1835,7 @@ function flushRendering() {
   return windowUtils.isMozAfterPaintPending;
 }
 
-function* reftestWait(url, remote) {
+async function reftestWait(url, remote) {
   let win = curContainer.frame;
   let document = curContainer.frame.document;
 
@@ -1850,8 +1847,8 @@ function* reftestWait(url, remote) {
 
   if (document.location.href !== url || document.readyState != "complete") {
     logger.debug(`Waiting for page load of ${url}`);
-    yield new Promise(resolve => {
-      let maybeResolve = (event) => {
+    await new Promise(resolve => {
+      let maybeResolve = event => {
         if (event.target === curContainer.frame.document &&
             event.target.location.href === url) {
           win = curContainer.frame;
@@ -1867,7 +1864,7 @@ function* reftestWait(url, remote) {
     // Ensure that the event loop has spun at least once since load,
     // so that setTimeout(fn, 0) in the load event has run
     reftestWait = document.documentElement.classList.contains("reftest-wait");
-    yield new Promise(resolve => win.setTimeout(resolve, 0));
+    await new Promise(resolve => win.setTimeout(resolve, 0));
   }
 
   let root = document.documentElement;
@@ -1875,7 +1872,7 @@ function* reftestWait(url, remote) {
     // Check again in case reftest-wait was removed since the load event
     if (root.classList.contains("reftest-wait")) {
       logger.debug("Waiting for reftest-wait removal");
-      yield new Promise(resolve => {
+      await new Promise(resolve => {
         let observer = new win.MutationObserver(() => {
           if (!root.classList.contains("reftest-wait")) {
             observer.disconnect();
@@ -1889,7 +1886,7 @@ function* reftestWait(url, remote) {
 
     logger.debug("Waiting for rendering");
 
-    yield new Promise(resolve => {
+    await new Promise(resolve => {
       let maybeResolve = () => {
         if (flushRendering()) {
           win.addEventListener("MozAfterPaint", maybeResolve, {once: true});

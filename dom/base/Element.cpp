@@ -980,7 +980,7 @@ Element::ScrollHeight()
   nsIScrollableFrame* sf = GetScrollFrame();
   nscoord height;
   if (sf) {
-    height = sf->GetScrollRange().height + sf->GetScrollPortRect().height;
+    height = sf->GetScrollRange().Height() + sf->GetScrollPortRect().Height();
   } else {
     height = GetScrollRectSizeForOverflowVisibleFrame(GetStyledFrame()).height;
   }
@@ -997,7 +997,7 @@ Element::ScrollWidth()
   nsIScrollableFrame* sf = GetScrollFrame();
   nscoord width;
   if (sf) {
-    width = sf->GetScrollRange().width + sf->GetScrollPortRect().width;
+    width = sf->GetScrollRange().Width() + sf->GetScrollPortRect().Width();
   } else {
     width = GetScrollRectSizeForOverflowVisibleFrame(GetStyledFrame()).width;
   }
@@ -2406,11 +2406,44 @@ Element::OnlyNotifySameValueSet(int32_t aNamespaceID, nsIAtom* aName,
 }
 
 nsresult
+Element::SetSingleClassFromParser(nsIAtom* aSingleClassName)
+{
+  // Keep this in sync with SetAttr and SetParsedAttr below.
+
+  if (!mAttrsAndChildren.CanFitMoreAttrs()) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsAttrValue value(aSingleClassName);
+
+  nsIDocument* document = GetComposedDoc();
+  mozAutoDocUpdate updateBatch(document, UPDATE_CONTENT_MODEL, false);
+
+  // In principle, BeforeSetAttr should be called here if a node type
+  // existed that wanted to do something special for class, but there
+  // is no such node type, so calling SetMayHaveClass() directly.
+  SetMayHaveClass();
+
+  return SetAttrAndNotify(kNameSpaceID_None,
+                          nsGkAtoms::_class,
+                          nullptr, // prefix
+                          nullptr, // old value
+                          value,
+                          static_cast<uint8_t>(nsIDOMMutationEvent::ADDITION),
+                          false, // hasListeners
+                          false, // notify
+                          kCallAfterSetAttr,
+                          document,
+                          updateBatch);
+}
+
+nsresult
 Element::SetAttr(int32_t aNamespaceID, nsIAtom* aName,
                  nsIAtom* aPrefix, const nsAString& aValue,
                  bool aNotify)
 {
-  // Keep this in sync with SetParsedAttr below
+  // Keep this in sync with SetParsedAttr below and SetSingleClassFromParser
+  // above.
 
   NS_ENSURE_ARG_POINTER(aName);
   NS_ASSERTION(aNamespaceID != kNameSpaceID_Unknown,
@@ -2475,7 +2508,7 @@ Element::SetParsedAttr(int32_t aNamespaceID, nsIAtom* aName,
                        nsIAtom* aPrefix, nsAttrValue& aParsedValue,
                        bool aNotify)
 {
-  // Keep this in sync with SetAttr above
+  // Keep this in sync with SetAttr and SetSingleClassFromParser above
 
   NS_ENSURE_ARG_POINTER(aName);
   NS_ASSERTION(aNamespaceID != kNameSpaceID_Unknown,
@@ -2709,6 +2742,10 @@ Element::BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
         // If it is ever made to be exact, we probably need to handle this
         // similarly to how ids are handled in PreIdMaybeChange and
         // PostIdMaybeChange.
+        // Note that SetSingleClassFromParser inlines BeforeSetAttr and
+        // calls SetMayHaveClass directly. Making a subclass take action
+        // on the class attribute in a BeforeSetAttr override would
+        // require revising SetSingleClassFromParser.
         SetMayHaveClass();
       }
     }
@@ -4123,8 +4160,11 @@ Element::UpdateIntersectionObservation(DOMIntersectionObserver* aObserver, int32
 
 void
 Element::ClearServoData() {
+  MOZ_ASSERT(IsStyledByServo());
 #ifdef MOZ_STYLO
   Servo_Element_ClearData(this);
+  UnsetFlags(ELEMENT_HAS_DIRTY_DESCENDANTS_FOR_SERVO |
+             ELEMENT_HAS_ANIMATION_ONLY_DIRTY_DESCENDANTS_FOR_SERVO);
 #else
   MOZ_CRASH("Accessing servo node data in non-stylo build");
 #endif
@@ -4140,18 +4180,117 @@ Element::SetCustomElementData(CustomElementData* aData)
 
 MOZ_DEFINE_MALLOC_SIZE_OF(ServoElementMallocSizeOf)
 
-size_t
-Element::SizeOfExcludingThis(SizeOfState& aState) const
+void
+Element::AddSizeOfExcludingThis(SizeOfState& aState, nsStyleSizes& aSizes,
+                                size_t* aNodeSize) const
 {
-  size_t n = FragmentOrElement::SizeOfExcludingThis(aState);
+  FragmentOrElement::AddSizeOfExcludingThis(aState, aSizes, aNodeSize);
 
-  // Measure mServoData. We use ServoElementMallocSizeOf rather than
-  // |aState.mMallocSizeOf| to distinguish in DMD's output the memory
-  // measured within Servo code.
-  if (mServoData.Get()) {
-    n += Servo_Element_SizeOfExcludingThis(ServoElementMallocSizeOf,
-                                           &aState.mSeenPtrs, this);
+  if (HasServoData()) {
+    // Measure mServoData, excluding the ComputedValues. This measurement
+    // counts towards the element's size. We use ServoElementMallocSizeOf
+    // rather thang |aState.mMallocSizeOf| to better distinguish in DMD's
+    // output the memory measured within Servo code.
+    *aNodeSize +=
+      Servo_Element_SizeOfExcludingThisAndCVs(ServoElementMallocSizeOf,
+                                              &aState.mSeenPtrs, this);
+
+    // Now measure just the ComputedValues (and style structs) under
+    // mServoData. This counts towards the relevant fields in |aSizes|.
+    RefPtr<ServoStyleContext> sc;
+    if (Servo_Element_HasPrimaryComputedValues(this)) {
+      sc = Servo_Element_GetPrimaryComputedValues(this).Consume();
+      if (!aState.HaveSeenPtr(sc.get())) {
+        sc->AddSizeOfIncludingThis(aState, aSizes, /* isDOM = */ true);
+      }
+
+      for (size_t i = 0; i < nsCSSPseudoElements::kEagerPseudoCount; i++) {
+        if (Servo_Element_HasPseudoComputedValues(this, i)) {
+          sc = Servo_Element_GetPseudoComputedValues(this, i).Consume();
+          if (!aState.HaveSeenPtr(sc.get())) {
+            sc->AddSizeOfIncludingThis(aState, aSizes, /* isDOM = */ true);
+          }
+        }
+      }
+    }
   }
-  return n;
 }
 
+struct DirtyDescendantsBit {
+  static bool HasBit(const Element* aElement)
+  {
+    return aElement->HasDirtyDescendantsForServo();
+  }
+  static void SetBit(Element* aElement)
+  {
+    aElement->SetHasDirtyDescendantsForServo();
+  }
+};
+
+struct AnimationOnlyDirtyDescendantsBit {
+  static bool HasBit(const Element* aElement)
+  {
+    return aElement->HasAnimationOnlyDirtyDescendantsForServo();
+  }
+  static void SetBit(Element* aElement)
+  {
+    aElement->SetHasAnimationOnlyDirtyDescendantsForServo();
+  }
+};
+
+#ifdef DEBUG
+template<typename Traits>
+bool
+BitIsPropagated(const Element* aElement)
+{
+  const Element* curr = aElement;
+  while (curr) {
+    if (!Traits::HasBit(curr)) {
+      return false;
+    }
+    nsINode* parentNode = curr->GetParentNode();
+    curr = curr->GetFlattenedTreeParentElementForStyle();
+    MOZ_ASSERT_IF(!curr,
+                  parentNode == aElement->OwnerDoc() ||
+                  parentNode == parentNode->OwnerDoc()->GetRootElement());
+  }
+  return true;
+}
+#endif
+
+template<typename Traits>
+void
+NoteDirtyElement(Element* aElement)
+{
+  MOZ_ASSERT(aElement->IsInComposedDoc());
+  nsIDocument* doc = aElement->GetComposedDoc();
+  nsIPresShell* shell = doc->GetShell();
+  NS_ENSURE_TRUE_VOID(shell);
+  shell->EnsureStyleFlush();
+
+  Element* parent = aElement->GetFlattenedTreeParentElementForStyle();
+  if (!parent || !parent->HasServoData()) {
+    // The bits only apply to styled elements.
+    return;
+  }
+
+  Element* curr = parent;
+  while (curr && !Traits::HasBit(curr)) {
+    Traits::SetBit(curr);
+    curr = curr->GetFlattenedTreeParentElementForStyle();
+  }
+
+  MOZ_ASSERT(BitIsPropagated<Traits>(parent));
+}
+
+void
+Element::NoteDirtyForServo()
+{
+  NoteDirtyElement<DirtyDescendantsBit>(this);
+}
+
+void
+Element::NoteAnimationOnlyDirtyForServo()
+{
+  NoteDirtyElement<AnimationOnlyDirtyDescendantsBit>(this);
+}

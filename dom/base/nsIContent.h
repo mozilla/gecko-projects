@@ -979,6 +979,7 @@ public:
   virtual void RemovePurple() = 0;
 
   virtual bool OwnedOnlyByTheDOMTree() { return false; }
+
 protected:
   /**
    * Hook for implementing GetID.  This is guaranteed to only be

@@ -197,18 +197,19 @@ nsPageFrame::ProcessSpecialCodes(const nsString& aStr, nsString& aNewStr)
   // values
   NS_NAMED_LITERAL_STRING(kPageAndTotal, "&PT");
   if (aStr.Find(kPageAndTotal) != kNotFound) {
-    char16_t * uStr = nsTextFormatter::smprintf(mPD->mPageNumAndTotalsFormat.get(), mPageNum, mTotNumPages);
-    aNewStr.ReplaceSubstring(kPageAndTotal, nsDependentString(uStr));
-    free(uStr);
+    nsAutoString uStr;
+    nsTextFormatter::ssprintf(uStr, mPD->mPageNumAndTotalsFormat.get(),
+                              mPageNum, mTotNumPages);
+    aNewStr.ReplaceSubstring(kPageAndTotal, uStr);
   }
 
   // Search to see if the page number code is in the string
   // and replace the page number code with the actual value
   NS_NAMED_LITERAL_STRING(kPage, "&P");
   if (aStr.Find(kPage) != kNotFound) {
-    char16_t * uStr = nsTextFormatter::smprintf(mPD->mPageNumFormat.get(), mPageNum);
-    aNewStr.ReplaceSubstring(kPage, nsDependentString(uStr));
-    free(uStr);
+    nsAutoString uStr;
+    nsTextFormatter::ssprintf(uStr, mPD->mPageNumFormat.get(), mPageNum);
+    aNewStr.ReplaceSubstring(kPage, uStr);
   }
 
   NS_NAMED_LITERAL_STRING(kTitle, "&T");
@@ -223,9 +224,9 @@ nsPageFrame::ProcessSpecialCodes(const nsString& aStr, nsString& aNewStr)
 
   NS_NAMED_LITERAL_STRING(kPageTotal, "&L");
   if (aStr.Find(kPageTotal) != kNotFound) {
-    char16_t * uStr = nsTextFormatter::smprintf(mPD->mPageNumFormat.get(), mTotNumPages);
-    aNewStr.ReplaceSubstring(kPageTotal, nsDependentString(uStr));
-    free(uStr);
+    nsAutoString uStr;
+    nsTextFormatter::ssprintf(uStr, mPD->mPageNumFormat.get(), mTotNumPages);
+    aNewStr.ReplaceSubstring(kPageTotal, uStr);
   }
 }
 
@@ -420,7 +421,7 @@ PruneDisplayListForExtraPage(nsDisplayListBuilder* aBuilder,
       if (!nsLayoutUtils::IsProperAncestorFrameCrossDoc(aPage, f)) {
         // We're throwing this away so call its destructor now. The memory
         // is owned by aBuilder which destroys all items at once.
-        i->~nsDisplayItem();
+        i->Destroy(aBuilder);
         continue;
       }
     }
@@ -432,7 +433,7 @@ PruneDisplayListForExtraPage(nsDisplayListBuilder* aBuilder,
 static void
 BuildDisplayListForExtraPage(nsDisplayListBuilder* aBuilder,
                              nsPageFrame* aPage, nsIFrame* aExtraPage,
-                             const nsRect& aDirtyRect, nsDisplayList* aList)
+                             nsDisplayList* aList)
 {
   // The only content in aExtraPage we care about is out-of-flow content whose
   // placeholders have occurred in aPage. If
@@ -442,7 +443,7 @@ BuildDisplayListForExtraPage(nsDisplayListBuilder* aBuilder,
     return;
   }
   nsDisplayList list;
-  aExtraPage->BuildDisplayListForStackingContext(aBuilder, aDirtyRect, &list);
+  aExtraPage->BuildDisplayListForStackingContext(aBuilder, &list);
   PruneDisplayListForExtraPage(aBuilder, aPage, aExtraPage, &list);
   aList->AppendToTop(&list);
 }
@@ -495,7 +496,7 @@ public:
     static_cast<nsPageFrame*>(mFrame)->
       PaintHeaderFooter(*aCtx, ToReferenceFrame(), mDisableSubpixelAA);
   }
-  NS_DISPLAY_DECL_NAME("HeaderFooter", nsDisplayItem::TYPE_HEADER_FOOTER)
+  NS_DISPLAY_DECL_NAME("HeaderFooter", TYPE_HEADER_FOOTER)
 
   virtual nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) override {
     bool snap;
@@ -512,7 +513,6 @@ protected:
 //------------------------------------------------------------------------------
 void
 nsPageFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
                               const nsDisplayListSet& aLists)
 {
   nsDisplayListCollection set;
@@ -553,7 +553,10 @@ nsPageFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     clipState.ClipContainingBlockDescendants(clipRect, nullptr);
 
     nsRect dirtyRect = child->GetVisualOverflowRectRelativeToSelf();
-    child->BuildDisplayListForStackingContext(aBuilder, dirtyRect, &content);
+    nsDisplayListBuilder::AutoBuildingDisplayList
+      buildingForChild(aBuilder, child, dirtyRect,
+                       aBuilder->IsAtRootOfPseudoStackingContext());
+    child->BuildDisplayListForStackingContext(aBuilder, &content);
 
     // We may need to paint out-of-flow frames whose placeholders are
     // on other pages. Add those pages to our display list. Note that
@@ -564,8 +567,12 @@ nsPageFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // following placeholders to their out-of-flows) end up on the list.
     nsIFrame* page = child;
     while ((page = GetNextPage(page)) != nullptr) {
-      BuildDisplayListForExtraPage(aBuilder, this, page,
-          dirtyRect + child->GetOffsetTo(page), &content);
+      nsRect childDirty = dirtyRect + child->GetOffsetTo(page);
+
+      nsDisplayListBuilder::AutoBuildingDisplayList
+        buildingForChild(aBuilder, page, childDirty,
+                         aBuilder->IsAtRootOfPseudoStackingContext());
+      BuildDisplayListForExtraPage(aBuilder, this, page, &content);
     }
 
     // Invoke AutoBuildingDisplayList to ensure that the correct dirtyRect
@@ -579,6 +586,7 @@ nsPageFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // can monkey with the contents if necessary.
     nsRect backgroundRect =
       nsRect(aBuilder->ToReferenceFrame(child), child->GetSize());
+
     PresContext()->GetPresShell()->AddCanvasBackgroundColorItem(
       *aBuilder, content, child, backgroundRect, NS_RGBA(0,0,0,0));
   }

@@ -64,17 +64,8 @@ protected:
   int Chmod(const char* aPath, int aMode) {
     return mClient->Chmod(aPath, aMode);
   }
-  int Link(const char* aPath, const char* bPath) {
-    return mClient->Link(aPath, bPath);
-  }
   int Mkdir(const char* aPath, int aMode) {
     return mClient->Mkdir(aPath, aMode);
-  }
-  int Symlink(const char* aPath, const char* bPath) {
-    return mClient->Symlink(aPath, bPath);
-  }
-  int Rename(const char* aPath, const char* bPath) {
-    return mClient->Rename(aPath, bPath);
   }
   int Rmdir(const char* aPath) {
     return mClient->Rmdir(aPath);
@@ -133,6 +124,8 @@ SandboxBrokerTest::GetPolicy() const
   policy->AddPath(MAY_READ | MAY_WRITE, "/tmp", AddAlways);
   policy->AddPath(MAY_READ | MAY_WRITE | MAY_CREATE, "/tmp/blublu", AddAlways);
   policy->AddPath(MAY_READ | MAY_WRITE | MAY_CREATE, "/tmp/blublublu", AddAlways);
+  // This should be non-writable by the user running the test:
+  policy->AddPath(MAY_READ | MAY_WRITE, "/etc", AddAlways);
 
   return Move(policy);
 }
@@ -206,6 +199,14 @@ TEST_F(SandboxBrokerTest, Access)
   EXPECT_EQ(-EACCES, Access("/proc/self", R_OK));
 
   EXPECT_EQ(-EACCES, Access("/proc/self/stat", F_OK));
+
+  EXPECT_EQ(0, Access("/tmp", X_OK));
+  EXPECT_EQ(0, Access("/tmp", R_OK|X_OK));
+  EXPECT_EQ(0, Access("/tmp", R_OK|W_OK|X_OK));
+  EXPECT_EQ(0, Access("/proc/self", X_OK));
+
+  EXPECT_EQ(0, Access("/etc", R_OK|X_OK));
+  EXPECT_EQ(-EACCES, Access("/etc", W_OK));
 }
 
 TEST_F(SandboxBrokerTest, Stat)
@@ -257,10 +258,7 @@ TEST_F(SandboxBrokerTest, Chmod)
   close(fd);
   // Set read only. SandboxBroker enforces 0600 mode flags.
   ASSERT_EQ(0, Chmod("/tmp/blublu", S_IRUSR));
-  // SandboxBroker doesn't use real access(), it just checks against
-  // the policy. So it can't see the change in permisions here.
-  // This won't work:
-  // EXPECT_EQ(-EACCES, Access("/tmp/blublu", W_OK));
+  EXPECT_EQ(-EACCES, Access("/tmp/blublu", W_OK));
   statstruct realStat;
   EXPECT_EQ(0, statsyscall("/tmp/blublu", &realStat));
   EXPECT_EQ((mode_t)S_IRUSR, realStat.st_mode & 0777);
@@ -268,43 +266,6 @@ TEST_F(SandboxBrokerTest, Chmod)
   ASSERT_EQ(0, Chmod("/tmp/blublu", S_IRUSR | S_IWUSR));
   EXPECT_EQ(0, statsyscall("/tmp/blublu", &realStat));
   EXPECT_EQ((mode_t)(S_IRUSR | S_IWUSR), realStat.st_mode & 0777);
-  EXPECT_EQ(0, unlink("/tmp/blublu"));
-
-  PrePostTestCleanup();
-}
-
-TEST_F(SandboxBrokerTest, Link)
-{
-  PrePostTestCleanup();
-
-  int fd = Open("/tmp/blublu", O_WRONLY | O_CREAT);
-  ASSERT_GE(fd, 0) << "Opening /tmp/blublu for writing failed.";
-  close(fd);
-  ASSERT_EQ(0, Link("/tmp/blublu", "/tmp/blublublu"));
-  EXPECT_EQ(0, Access("/tmp/blublublu", F_OK));
-  // Not whitelisted target path
-  EXPECT_EQ(-EACCES, Link("/tmp/blublu", "/tmp/nope"));
-  EXPECT_EQ(0, unlink("/tmp/blublublu"));
-  EXPECT_EQ(0, unlink("/tmp/blublu"));
-
-  PrePostTestCleanup();
-}
-
-TEST_F(SandboxBrokerTest, Symlink)
-{
-  PrePostTestCleanup();
-
-  int fd = Open("/tmp/blublu", O_WRONLY | O_CREAT);
-  ASSERT_GE(fd, 0) << "Opening /tmp/blublu for writing failed.";
-  close(fd);
-  ASSERT_EQ(0, Symlink("/tmp/blublu", "/tmp/blublublu"));
-  EXPECT_EQ(0, Access("/tmp/blublublu", F_OK));
-  statstruct aStat;
-  ASSERT_EQ(0, lstatsyscall("/tmp/blublublu", &aStat));
-  EXPECT_EQ((mode_t)S_IFLNK, aStat.st_mode & S_IFMT);
-  // Not whitelisted target path
-  EXPECT_EQ(-EACCES, Symlink("/tmp/blublu", "/tmp/nope"));
-  EXPECT_EQ(0, unlink("/tmp/blublublu"));
   EXPECT_EQ(0, unlink("/tmp/blublu"));
 
   PrePostTestCleanup();
@@ -325,24 +286,6 @@ TEST_F(SandboxBrokerTest, Mkdir)
     << "Creating uncreatable dir that already exists didn't fail correctly.";
   EXPECT_EQ(-EEXIST, Mkdir("/dev/zero", 0600))
     << "Creating uncreatable dir over preexisting file didn't fail correctly.";
-
-  PrePostTestCleanup();
-}
-
-TEST_F(SandboxBrokerTest, Rename)
-{
-  PrePostTestCleanup();
-
-  ASSERT_EQ(0, mkdir("/tmp/blublu", 0600))
-    << "Creating dir /tmp/blublu failed.";
-  EXPECT_EQ(0, Access("/tmp/blublu", F_OK));
-  ASSERT_EQ(0, Rename("/tmp/blublu", "/tmp/blublublu"));
-  EXPECT_EQ(0, Access("/tmp/blublublu", F_OK));
-  EXPECT_EQ(-ENOENT , Access("/tmp/blublu", F_OK));
-  // Not whitelisted target path
-  EXPECT_EQ(-EACCES, Rename("/tmp/blublublu", "/tmp/nope"))
-    << "Renaming dir without write access succeed.";
-  EXPECT_EQ(0, rmdir("/tmp/blublublu"));
 
   PrePostTestCleanup();
 }
@@ -389,7 +332,7 @@ TEST_F(SandboxBrokerTest, Readlink)
   int fd = Open("/tmp/blublu", O_WRONLY | O_CREAT);
   ASSERT_GE(fd, 0) << "Opening /tmp/blublu for writing failed.";
   close(fd);
-  ASSERT_EQ(0, Symlink("/tmp/blublu", "/tmp/blublublu"));
+  ASSERT_EQ(0, symlink("/tmp/blublu", "/tmp/blublublu"));
   EXPECT_EQ(0, Access("/tmp/blublublu", F_OK));
   char linkBuff[256];
   EXPECT_EQ(11, Readlink("/tmp/blublublu", linkBuff, sizeof(linkBuff)));

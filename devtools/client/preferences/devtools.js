@@ -18,7 +18,6 @@ pref("devtools.loader.hotreload", false);
 
 // Developer toolbar preferences
 pref("devtools.toolbar.enabled", true);
-pref("devtools.toolbar.visible", false);
 
 // Enable DevTools WebIDE by default
 pref("devtools.webide.enabled", true);
@@ -316,11 +315,11 @@ pref("devtools.webconsole.new-frontend-enabled", false);
 pref("devtools.source-map.client-service.enabled", true);
 
 // The number of lines that are displayed in the web console.
-pref("devtools.hud.loglimit", 1000);
+pref("devtools.hud.loglimit", 10000);
 
-// The number of lines that are displayed in the web console for the Net,
+// The number of lines that are displayed in the old web console for the Net,
 // CSS, JS and Web Developer categories. These defaults should be kept in sync
-// with DEFAULT_LOG_LIMIT in the webconsole frontend.
+// with DEFAULT_LOG_LIMIT in the old webconsole frontend.
 pref("devtools.hud.loglimit.network", 1000);
 pref("devtools.hud.loglimit.cssparser", 1000);
 pref("devtools.hud.loglimit.exception", 1000);

@@ -119,11 +119,6 @@ class GlobalPCList {
     }
   }
 
-  hasActivePeerConnection(winID) {
-    this.removeNullRefs(winID);
-    return !!this._list[winID];
-  }
-
   handleGMPCrash(data) {
     let broadcastPluginCrash = function(list, winID, pluginID, pluginName) {
       if (list.hasOwnProperty(winID)) {
@@ -214,8 +209,7 @@ class GlobalPCList {
 setupPrototype(GlobalPCList, {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
                                          Ci.nsIMessageListener,
-                                         Ci.nsISupportsWeakReference,
-                                         Ci.IPeerConnectionManager]),
+                                         Ci.nsISupportsWeakReference]),
   classID: PC_MANAGER_CID,
   _xpcom_factory: {
     createInstance(outer, iid) {
@@ -828,7 +822,7 @@ class RTCPeerConnection {
 
   async _getPermission() {
     if (!this._havePermission) {
-      let privileged = this._isChrome || AppConstants.MOZ_B2G ||
+      let privileged = this._isChrome ||
           Services.prefs.getBoolPref("media.navigator.permission.disabled");
 
       if (privileged) {

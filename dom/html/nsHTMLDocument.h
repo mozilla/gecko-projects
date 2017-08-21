@@ -22,7 +22,6 @@
 #include "mozilla/dom/HTMLSharedElement.h"
 #include "mozilla/dom/BindingDeclarations.h"
 
-class nsIEditor;
 class nsIURI;
 class nsIDocShell;
 class nsICachingChannel;
@@ -105,7 +104,7 @@ public:
   virtual void AddedForm() override;
   virtual void RemovedForm() override;
   virtual int32_t GetNumFormsSynchronous() override;
-  virtual void TearingDownEditor(nsIEditor *aEditor) override;
+  virtual void TearingDownEditor() override;
   virtual void SetIsXHTML(bool aXHTML) override
   {
     mType = (aXHTML ? eXHTML : eHTML);
@@ -160,7 +159,7 @@ public:
     return nsDocument::GetElementById(aElementId);
   }
 
-  virtual void DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const override;
+  virtual void DocAddSizeOfExcludingThis(nsWindowSizes& aWindowSizes) const override;
   // DocAddSizeOfIncludingThis is inherited from nsIDocument.
 
   virtual bool WillIgnoreCharsetOverride() override;
@@ -251,7 +250,6 @@ public:
   {
     // Deprecated
   }
-  mozilla::dom::Selection* GetSelection(mozilla::ErrorResult& aRv);
   // The XPCOM CaptureEvents works fine for us.
   // The XPCOM ReleaseEvents works fine for us.
   // We're picking up GetLocation from Document

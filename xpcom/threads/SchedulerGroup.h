@@ -81,7 +81,7 @@ public:
     MOZ_ASSERT(IsSafeToRun());
   }
 
-  class Runnable final : public mozilla::Runnable
+  class Runnable final : public mozilla::Runnable, public nsIRunnablePriority
   {
   public:
     Runnable(already_AddRefed<nsIRunnable>&& aRunnable,
@@ -95,10 +95,13 @@ public:
 
     NS_DECL_ISUPPORTS_INHERITED
     NS_DECL_NSIRUNNABLE
+    NS_DECL_NSIRUNNABLEPRIORITY
 
     NS_DECLARE_STATIC_IID_ACCESSOR(NS_SCHEDULERGROUPRUNNABLE_IID);
 
  private:
+    friend class SchedulerGroup;
+
     ~Runnable() = default;
 
     nsCOMPtr<nsIRunnable> mRunnable;
@@ -129,6 +132,9 @@ public:
   static void MarkVsyncRan();
 
 protected:
+  static nsresult InternalUnlabeledDispatch(TaskCategory aCategory,
+                                            already_AddRefed<Runnable>&& aRunnable);
+
   // Implementations are guaranteed that this method is called on the main
   // thread.
   virtual AbstractThread* AbstractMainThreadForImpl(TaskCategory aCategory);

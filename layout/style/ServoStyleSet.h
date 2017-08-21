@@ -58,6 +58,16 @@ enum class StylistState : uint8_t {
   StyleSheetsDirty,
 };
 
+// Bitfield type to represent Servo stylesheet origins.
+enum class OriginFlags : uint8_t {
+  UserAgent = 0x01,
+  User      = 0x02,
+  Author    = 0x04,
+  All       = 0x07,
+};
+
+MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(OriginFlags)
+
 /**
  * The set of style sheets that apply to a document, backed by a Servo
  * Stylist.  A ServoStyleSet contains ServoStyleSheets.
@@ -99,7 +109,7 @@ public:
   void RecordShadowStyleChange(mozilla::dom::ShadowRoot* aShadowRoot) {
     // FIXME(emilio): When we properly support shadow dom we'll need to do
     // better.
-    ForceAllStyleDirty();
+    MarkOriginsDirty(OriginFlags::All);
   }
 
   bool StyleSheetsHaveChanged() const
@@ -289,13 +299,6 @@ public:
   void StyleSubtreeForReconstruct(dom::Element* aRoot);
 
   /**
-   * Records that the contents of style sheets have changed since the last
-   * restyle.  Calling this will ensure that the Stylist rebuilds its
-   * selector maps.
-   */
-  void ForceAllStyleDirty();
-
-  /**
    * Helper for correctly calling UpdateStylist without paying the cost of an
    * extra function call in the common no-rebuild-needed case.
    */
@@ -349,8 +352,7 @@ public:
    *
    * FIXME(emilio): Is there a point in this after bug 1367904?
    */
-  already_AddRefed<ServoStyleContext>
-  ResolveServoStyle(dom::Element* aElement, ServoTraversalFlags aFlags);
+  already_AddRefed<ServoStyleContext> ResolveServoStyle(dom::Element* aElement);
 
   bool GetKeyframesForName(const nsString& aName,
                            const nsTimingFunction& aTimingFunction,
@@ -457,29 +459,8 @@ public:
                        Element* aElement);
 
 private:
-  // On construction, sets sInServoTraversal to the given ServoStyleSet.
-  // On destruction, clears sInServoTraversal and calls RunPostTraversalTasks.
-  class MOZ_STACK_CLASS AutoSetInServoTraversal
-  {
-  public:
-    explicit AutoSetInServoTraversal(ServoStyleSet* aSet)
-      : mSet(aSet)
-    {
-      MOZ_ASSERT(!sInServoTraversal);
-      MOZ_ASSERT(aSet);
-      sInServoTraversal = aSet;
-    }
-
-    ~AutoSetInServoTraversal()
-    {
-      MOZ_ASSERT(sInServoTraversal);
-      sInServoTraversal = nullptr;
-      mSet->RunPostTraversalTasks();
-    }
-
-  private:
-    ServoStyleSet* mSet;
-  };
+  friend class AutoSetInServoTraversal;
+  friend class AutoPrepareTraversal;
 
   /**
    * Gets the pending snapshots to handle from the restyle manager.
@@ -493,15 +474,6 @@ private:
    * Call this before jumping into Servo's style system.
    */
   void ResolveMappedAttrDeclarationBlocks();
-
-  /**
-   * Perform all lazy operations required before traversing
-   * a subtree.
-   *
-   * Returns whether a post-traversal is required.
-   */
-  bool PrepareAndTraverseSubtree(RawGeckoElementBorrowed aRoot,
-                                 ServoTraversalFlags aFlags);
 
   /**
    * Clear our cached mNonInheritingStyleContexts.
@@ -518,11 +490,18 @@ private:
    * When aRoot is null, the entire document is pre-traversed.  Otherwise,
    * only the subtree rooted at aRoot is pre-traversed.
    */
-  void PreTraverse(dom::Element* aRoot = nullptr,
-                   EffectCompositor::AnimationRestyleType =
-                     EffectCompositor::AnimationRestyleType::Throttled);
+  void PreTraverse(ServoTraversalFlags aFlags,
+                   dom::Element* aRoot = nullptr);
+
   // Subset of the pre-traverse steps that involve syncing up data
   void PreTraverseSync();
+
+  /**
+   * Records that the contents of style sheets at the specified origin have
+   * changed since the last.  Calling this will ensure that the Stylist
+   * rebuilds its selector maps.
+   */
+  void MarkOriginsDirty(OriginFlags aChangedOrigins);
 
   /**
    * Note that the stylist needs a style flush due to style sheet changes.

@@ -14,6 +14,7 @@
 <?xml-stylesheet href="chrome://browser/skin/preferences/applications.css"?>
 <?xml-stylesheet href="chrome://browser/skin/preferences/in-content-new/search.css"?>
 <?xml-stylesheet href="chrome://browser/skin/preferences/in-content-new/containers.css"?>
+<?xml-stylesheet href="chrome://browser/skin/preferences/in-content-new/privacy.css"?>
 
 <!DOCTYPE page [
 <!ENTITY % brandDTD SYSTEM "chrome://branding/locale/brand.dtd">
@@ -171,15 +172,12 @@
     </richlistbox>
 
     <keyset>
-      <!-- Disable the findbar because it doesn't work properly.
-           Remove this keyset once bug 1094240 ("disablefastfind" attribute
-           broken in e10s mode) is fixed. -->
-      <key key="&focusSearch1.key;" modifiers="accel" id="focusSearch1" oncommand=";"/>
+      <key key="&focusSearch1.key;" modifiers="accel" id="focusSearch1" oncommand="gSearchResultsPane.searchInput.focus();"/>
     </keyset>
 
     <html:a class="help-button" target="_blank" aria-label="&helpButton2.label;">&helpButton2.label;</html:a>
 
-    <vbox class="main-content" flex="1">
+    <vbox class="main-content" flex="1" align="start">
       <vbox class="pane-container">
         <hbox class="search-container" pack="end">
           <textbox type="search" id="searchInput" hidden="true" clickSelectsAll="true"/>

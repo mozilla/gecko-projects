@@ -7,17 +7,16 @@ use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceUintRect, DeviceUi
 use api::{ExtendMode, FontKey, FontRenderMode, GlyphInstance, GlyphOptions, GradientStop};
 use api::{ImageKey, ImageRendering, ItemRange, LayerPoint, LayerRect, LayerSize};
 use api::{LayerToScrollTransform, LayerVector2D, LayoutVector2D, LineOrientation, LineStyle};
-use api::{LocalClip, PipelineId, RepeatMode, ScrollSensitivity, TextShadow, TileOffset};
-use api::{TransformStyle, WebGLContextId, WorldPixel, YuvColorSpace, YuvData};
+use api::{LocalClip, PipelineId, RepeatMode, ScrollSensitivity, SubpixelDirection, TextShadow};
+use api::{TileOffset, TransformStyle, WorldPixel, YuvColorSpace, YuvData};
 use app_units::Au;
-use fnv::FnvHasher;
 use frame::FrameId;
 use gpu_cache::GpuCache;
-use internal_types::HardwareCompositeOp;
+use internal_types::{FastHashMap, HardwareCompositeOp};
 use mask_cache::{ClipMode, ClipRegion, ClipSource, MaskCacheInfo};
 use plane_split::{BspSplitter, Polygon, Splitter};
 use prim_store::{GradientPrimitiveCpu, ImagePrimitiveCpu, LinePrimitive, PrimitiveKind};
-use prim_store::{ImagePrimitiveKind, PrimitiveContainer, PrimitiveIndex};
+use prim_store::{PrimitiveContainer, PrimitiveIndex};
 use prim_store::{PrimitiveStore, RadialGradientPrimitiveCpu, TextRunMode};
 use prim_store::{RectanglePrimitive, TextRunPrimitiveCpu, TextShadowPrimitiveCpu};
 use prim_store::{BoxShadowPrimitiveCpu, TexelRect, YuvImagePrimitiveCpu};
@@ -28,8 +27,6 @@ use resource_cache::ResourceCache;
 use clip_scroll_node::{ClipInfo, ClipScrollNode, NodeType};
 use clip_scroll_tree::ClipScrollTree;
 use std::{cmp, f32, i32, mem, usize};
-use std::collections::HashMap;
-use std::hash::BuildHasherDefault;
 use euclid::{SideOffsets2D, vec2, vec3};
 use tiling::{ContextIsolation, StackingContextIndex};
 use tiling::{ClipScrollGroup, ClipScrollGroupIndex, CompositeOps, DisplayListMap, Frame};
@@ -106,7 +103,6 @@ pub struct FrameBuilderConfig {
     pub enable_scrollbars: bool,
     pub default_font_render_mode: FontRenderMode,
     pub debug: bool,
-    pub cache_expiry_frames: u32,
 }
 
 pub struct FrameBuilder {
@@ -118,9 +114,8 @@ pub struct FrameBuilder {
 
     stacking_context_store: Vec<StackingContext>,
     clip_scroll_group_store: Vec<ClipScrollGroup>,
-    clip_scroll_group_indices: HashMap<ClipAndScrollInfo,
-                                       ClipScrollGroupIndex,
-                                       BuildHasherDefault<FnvHasher>>,
+    clip_scroll_group_indices: FastHashMap<ClipAndScrollInfo,
+                                           ClipScrollGroupIndex>,
     packed_layers: Vec<PackedLayer>,
 
     // A stack of the current text-shadow primitives.
@@ -151,7 +146,7 @@ impl FrameBuilder {
                 FrameBuilder {
                     stacking_context_store: recycle_vec(prev.stacking_context_store),
                     clip_scroll_group_store: recycle_vec(prev.clip_scroll_group_store),
-                    clip_scroll_group_indices: HashMap::default(),
+                    clip_scroll_group_indices: FastHashMap::default(),
                     cmds: recycle_vec(prev.cmds),
                     packed_layers: recycle_vec(prev.packed_layers),
                     shadow_prim_stack: recycle_vec(prev.shadow_prim_stack),
@@ -169,7 +164,7 @@ impl FrameBuilder {
                 FrameBuilder {
                     stacking_context_store: Vec::new(),
                     clip_scroll_group_store: Vec::new(),
-                    clip_scroll_group_indices: HashMap::default(),
+                    clip_scroll_group_indices: FastHashMap::default(),
                     cmds: Vec::new(),
                     packed_layers: Vec::new(),
                     shadow_prim_stack: Vec::new(),
@@ -327,9 +322,14 @@ impl FrameBuilder {
                                 pipeline_id: PipelineId,
                                 rect: &LayerRect,
                                 transform: &LayerToScrollTransform,
+                                origin_in_parent_reference_frame: LayerVector2D,
                                 clip_scroll_tree: &mut ClipScrollTree)
                                 -> ClipId {
-        let new_id = clip_scroll_tree.add_reference_frame(rect, transform, pipeline_id, parent_id);
+        let new_id = clip_scroll_tree.add_reference_frame(rect,
+                                                          transform,
+                                                          origin_in_parent_reference_frame,
+                                                          pipeline_id,
+                                                          parent_id);
         self.reference_frame_stack.push(new_id);
         new_id
     }
@@ -357,10 +357,10 @@ impl FrameBuilder {
 
         let root_id = clip_scroll_tree.root_reference_frame_id();
         if let Some(root_node) = clip_scroll_tree.nodes.get_mut(&root_id) {
-            if let NodeType::ReferenceFrame(ref mut transform) = root_node.node_type {
-                *transform = LayerToScrollTransform::create_translation(viewport_offset.x,
-                                                                        viewport_offset.y,
-                                                                        0.0);
+            if let NodeType::ReferenceFrame(ref mut info) = root_node.node_type {
+                info.transform = LayerToScrollTransform::create_translation(viewport_offset.x,
+                                                                            viewport_offset.y,
+                                                                            0.0);
             }
             root_node.local_clip_rect = viewport_clip;
         }
@@ -379,7 +379,12 @@ impl FrameBuilder {
                      -> ClipId {
         let viewport_rect = LayerRect::new(LayerPoint::zero(), *viewport_size);
         let identity = &LayerToScrollTransform::identity();
-        self.push_reference_frame(None, pipeline_id, &viewport_rect, identity, clip_scroll_tree);
+        self.push_reference_frame(None,
+                                  pipeline_id,
+                                  &viewport_rect,
+                                  identity,
+                                  LayerVector2D::zero(),
+                                  clip_scroll_tree);
 
         let topmost_scrolling_node_id = ClipId::root_scroll_node(pipeline_id);
         clip_scroll_tree.topmost_scrolling_node_id = topmost_scrolling_node_id;
@@ -908,9 +913,15 @@ impl FrameBuilder {
 
         // Shadows never use subpixel AA, but need to respect the alpha/mono flag
         // for reftests.
-        let shadow_render_mode = match self.config.default_font_render_mode {
-            FontRenderMode::Subpixel | FontRenderMode::Alpha => FontRenderMode::Alpha,
-            FontRenderMode::Mono => FontRenderMode::Mono,
+        let (shadow_render_mode, subpx_dir) = match self.config.default_font_render_mode {
+            FontRenderMode::Subpixel | FontRenderMode::Alpha => {
+                // TODO(gw): Expose subpixel direction in API once WR supports
+                //           vertical text runs.
+                (FontRenderMode::Alpha, SubpixelDirection::Horizontal)
+            }
+            FontRenderMode::Mono => {
+                (FontRenderMode::Mono, SubpixelDirection::None)
+            }
         };
 
         let prim = TextRunPrimitiveCpu {
@@ -918,12 +929,14 @@ impl FrameBuilder {
             logical_font_size: size,
             glyph_range,
             glyph_count,
-            glyph_instances: Vec::new(),
+            glyph_gpu_blocks: Vec::new(),
+            glyph_keys: Vec::new(),
             glyph_options,
             normal_render_mode,
             shadow_render_mode,
             offset: run_offset,
             color: *color,
+            subpx_dir,
         };
 
         // Text shadows that have a blur radius of 0 need to be rendered as normal
@@ -1192,24 +1205,6 @@ impl FrameBuilder {
         }
     }
 
-    pub fn add_webgl_rectangle(&mut self,
-                               clip_and_scroll: ClipAndScrollInfo,
-                               rect: LayerRect,
-                               local_clip: &LocalClip,
-                               context_id: WebGLContextId) {
-        let prim_cpu = ImagePrimitiveCpu {
-            kind: ImagePrimitiveKind::WebGL(context_id),
-            gpu_blocks: [ [rect.size.width, rect.size.height, 0.0, 0.0].into(),
-                          TexelRect::invalid().into() ],
-        };
-
-        self.add_primitive(clip_and_scroll,
-                           &rect,
-                           local_clip,
-                           &[],
-                           PrimitiveContainer::Image(prim_cpu));
-    }
-
     pub fn add_image(&mut self,
                      clip_and_scroll: ClipAndScrollInfo,
                      rect: LayerRect,
@@ -1223,10 +1218,10 @@ impl FrameBuilder {
         let sub_rect_block = sub_rect.unwrap_or(TexelRect::invalid()).into();
 
         let prim_cpu = ImagePrimitiveCpu {
-            kind: ImagePrimitiveKind::Image(image_key,
-                                            image_rendering,
-                                            tile,
-                                            *tile_spacing),
+            image_key,
+            image_rendering,
+            tile_offset: tile,
+            tile_spacing: *tile_spacing,
             gpu_blocks: [ [ stretch_size.width,
                             stretch_size.height,
                             tile_spacing.width,
@@ -1363,7 +1358,7 @@ impl FrameBuilder {
         // The stacking contexts that fall into this category are
         //  - ones with `ContextIsolation::Items`, for their actual items to be backed
         //  - immediate children of `ContextIsolation::Items`
-        let mut preserve_3d_map: HashMap<StackingContextIndex, RenderTask> = HashMap::new();
+        let mut preserve_3d_map: FastHashMap<StackingContextIndex, RenderTask> = FastHashMap::default();
         // The plane splitter stack, using a simple BSP tree.
         let mut splitter_stack = Vec::new();
 
@@ -1769,7 +1764,10 @@ impl<'a> LayerRectCalculationAndCullingPass<'a> {
                 if let Some(mask) = clip_source.image_mask() {
                     // We don't add the image mask for resolution, because
                     // layer masks are resolved later.
-                    self.resource_cache.request_image(mask.image, ImageRendering::Auto, None);
+                    self.resource_cache.request_image(mask.image,
+                                                      ImageRendering::Auto,
+                                                      None,
+                                                      self.gpu_cache);
                 }
             }
         }
@@ -1875,9 +1873,9 @@ impl<'a> LayerRectCalculationAndCullingPass<'a> {
             current_id = node.parent;
 
             let clip = match node.node_type {
-                NodeType::ReferenceFrame(transform) => {
+                NodeType::ReferenceFrame(ref info) => {
                     // if the transform is non-aligned, bake the next LCCR into the clip mask
-                    next_node_needs_region_mask |= !transform.preserves_2d_axis_alignment();
+                    next_node_needs_region_mask |= !info.transform.preserves_2d_axis_alignment();
                     continue
                 },
                 NodeType::Clip(ref clip) if clip.mask_cache_info.is_masking() => clip,

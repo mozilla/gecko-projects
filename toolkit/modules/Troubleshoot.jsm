@@ -438,6 +438,7 @@ var dataProviders = {
       DWriteEnabled: "directWriteEnabled",
       DWriteVersion: "directWriteVersion",
       cleartypeParameters: "clearTypeParameters",
+      OffMainThreadPaintEnabled: "offMainThreadPaintEnabled",
     };
 
     for (let prop in gfxInfoProps) {
@@ -605,6 +606,7 @@ var dataProviders = {
         Services.prefs.getIntPref("accessibility.force_disabled");
     } catch (e) {}
     data.handlerUsed = Services.appinfo.accessibleHandlerUsed;
+    data.instantiator = Services.appinfo.accessibilityInstantiator;
     done(data);
   },
 

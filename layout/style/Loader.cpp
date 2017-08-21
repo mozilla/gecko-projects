@@ -3,16 +3,7 @@
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/.
- *
- * This Original Code has been modified by IBM Corporation.
- * Modifications made by IBM described herein are Copyright (c)
- * International Business Machines Corporation, 2000.  Modifications
- * to Mozilla code or documentation identified per MPL Section 3.3
- *
- * Date             Modified by     Description of modification
- * 04/20/2000       IBM Corp.      OS/2 VisualAge build.
- */
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* loading of CSS style sheets using the network APIs */
 
@@ -1986,6 +1977,7 @@ Loader::LoadInlineStyle(nsIContent* aElement,
                         uint32_t aLineNumber,
                         const nsAString& aTitle,
                         const nsAString& aMedia,
+                        ReferrerPolicy aReferrerPolicy,
                         Element* aScopeElement,
                         nsICSSLoaderObserver* aObserver,
                         bool* aCompleted,
@@ -2008,11 +2000,12 @@ Loader::LoadInlineStyle(nsIContent* aElement,
 
   // Since we're not planning to load a URI, no need to hand a principal to the
   // load data or to CreateSheet().  Also, OK to use CORS_NONE for the CORS
-  // mode and mDocument's ReferrerPolicy.
+  // mode.
+
   StyleSheetState state;
   RefPtr<StyleSheet> sheet;
   nsresult rv = CreateSheet(nullptr, aElement, nullptr, eAuthorSheetFeatures,
-                            CORS_NONE, mDocument->GetReferrerPolicy(),
+                            CORS_NONE, aReferrerPolicy,
                             EmptyString(), // no inline integrity checks
                             false, false, aTitle, state, aIsAlternate,
                             &sheet);

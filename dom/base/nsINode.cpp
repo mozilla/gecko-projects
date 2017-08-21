@@ -62,7 +62,6 @@
 #include "nsIDOMEventListener.h"
 #include "nsIDOMMutationEvent.h"
 #include "nsIDOMNodeList.h"
-#include "nsIEditor.h"
 #include "nsILinkHandler.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/dom/NodeInfoInlines.h"
@@ -225,14 +224,6 @@ nsINode::IsEditableInternal() const
   return doc && doc->HasFlag(NODE_IS_EDITABLE);
 }
 
-static nsIContent* GetEditorRootContent(nsIEditor* aEditor)
-{
-  nsCOMPtr<nsIDOMElement> rootElement;
-  aEditor->GetRootElement(getter_AddRefs(rootElement));
-  nsCOMPtr<nsIContent> rootContent(do_QueryInterface(rootElement));
-  return rootContent;
-}
-
 nsIContent*
 nsINode::GetTextEditorRootContent(TextEditor** aTextEditor)
 {
@@ -366,13 +357,13 @@ nsINode::GetSelectionRootContent(nsIPresShell* aPresShell)
 
   nsPresContext* presContext = aPresShell->GetPresContext();
   if (presContext) {
-    nsIEditor* editor = nsContentUtils::GetHTMLEditor(presContext);
-    if (editor) {
+    HTMLEditor* htmlEditor = nsContentUtils::GetHTMLEditor(presContext);
+    if (htmlEditor) {
       // This node is in HTML editor.
       nsIDocument* doc = GetComposedDoc();
       if (!doc || doc->HasFlag(NODE_IS_EDITABLE) ||
           !HasFlag(NODE_IS_EDITABLE)) {
-        nsIContent* editorRoot = GetEditorRootContent(editor);
+        nsIContent* editorRoot = htmlEditor->GetRoot();
         NS_ENSURE_TRUE(editorRoot, nullptr);
         return nsContentUtils::IsInSameAnonymousTree(this, editorRoot) ?
                  editorRoot :
@@ -1352,16 +1343,6 @@ nsresult
 nsINode::PostHandleEvent(EventChainPostVisitor& /*aVisitor*/)
 {
   return NS_OK;
-}
-
-nsresult
-nsINode::DispatchDOMEvent(WidgetEvent* aEvent,
-                          nsIDOMEvent* aDOMEvent,
-                          nsPresContext* aPresContext,
-                          nsEventStatus* aEventStatus)
-{
-  return EventDispatcher::DispatchDOMEvent(this, aEvent, aDOMEvent,
-                                           aPresContext, aEventStatus);
 }
 
 EventListenerManager*
@@ -2579,13 +2560,13 @@ nsINode::GetAccessibleNode()
   return nullptr;
 }
 
-size_t
-nsINode::SizeOfExcludingThis(SizeOfState& aState) const
+void
+nsINode::AddSizeOfExcludingThis(SizeOfState& aState, nsStyleSizes& aSizes,
+                                size_t* aNodeSize) const
 {
-  size_t n = 0;
   EventListenerManager* elm = GetExistingListenerManager();
   if (elm) {
-    n += elm->SizeOfIncludingThis(aState.mMallocSizeOf);
+    *aNodeSize += elm->SizeOfIncludingThis(aState.mMallocSizeOf);
   }
 
   // Measurement of the following members may be added later if DMD finds it is
@@ -2596,7 +2577,6 @@ nsINode::SizeOfExcludingThis(SizeOfState& aState) const
   // The following members are not measured:
   // - mParent, mNextSibling, mPreviousSibling, mFirstChild: because they're
   //   non-owning
-  return n;
 }
 
 #define EVENT(name_, id_, type_, struct_)                                    \

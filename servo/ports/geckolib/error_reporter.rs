@@ -6,7 +6,7 @@
 
 #![allow(unsafe_code)]
 
-use cssparser::{Parser, SourcePosition, ParseError as CssParseError, Token, BasicParseError};
+use cssparser::{SourceLocation, ParseError as CssParseError, Token, BasicParseError};
 use cssparser::CowRcStr;
 use selectors::parser::SelectorParseError;
 use std::ptr;
@@ -50,11 +50,11 @@ enum ErrorString<'a> {
 }
 
 impl<'a> ErrorString<'a> {
-    fn into_str(self) -> String {
+    fn into_str(self) -> CowRcStr<'a> {
         match self {
-            ErrorString::Snippet(s) => s.as_ref().to_owned(),
-            ErrorString::Ident(i) => escape_css_ident(&i),
-            ErrorString::UnexpectedToken(t) => token_to_str(t),
+            ErrorString::Snippet(s) => s,
+            ErrorString::Ident(i) => escape_css_ident(&i).into(),
+            ErrorString::UnexpectedToken(t) => token_to_str(t).into(),
         }
     }
 }
@@ -158,9 +158,9 @@ fn token_to_str<'a>(t: Token<'a>) -> String {
         Token::Percentage { int_value: Some(i), .. } => i.to_string(),
         Token::Percentage { unit_value, .. } => unit_value.to_string(),
         Token::Dimension { int_value: Some(i), ref unit, .. } =>
-            format!("{}{}", i.to_string(), escape_css_ident(&unit.to_string())),
+            format!("{}{}", i, escape_css_ident(&*unit)),
         Token::Dimension { value, ref unit, .. } =>
-            format!("{}{}", value.to_string(), escape_css_ident(&unit.to_string())),
+            format!("{}{}", value, escape_css_ident(&*unit)),
         Token::WhiteSpace(_) => "whitespace".into(),
         Token::Comment(_) => "comment".into(),
         Token::Colon => ":".into(),
@@ -330,15 +330,10 @@ impl<'a> ErrorHelpers<'a> for ContextualParseError<'a> {
 }
 
 impl ParseErrorReporter for ErrorReporter {
-    fn report_error<'a>(&self,
-                        input: &mut Parser,
-                        position: SourcePosition,
-                        error: ContextualParseError<'a>,
-                        _url: &UrlExtraData,
-                        line_number_offset: u64) {
-        let location = input.source_location(position);
-        let line_number = location.line + line_number_offset as u32;
-
+    fn report_error(&self,
+                    _url: &UrlExtraData,
+                    location: SourceLocation,
+                    error: ContextualParseError) {
         let (pre, name, action) = error.to_gecko_message();
         let suffix = match action {
             Action::Nothing => ptr::null(),
@@ -362,8 +357,8 @@ impl ParseErrorReporter for ErrorReporter {
                                            suffix as *const _,
                                            source.as_ptr() as *const _,
                                            source.len() as u32,
-                                           line_number as u32,
-                                           location.column as u32);
+                                           location.line,
+                                           location.column);
         }
     }
 }

@@ -17,6 +17,7 @@ const kSkipSourceNodePref = "browser.uiCustomization.skipSourceNodeCheck";
 const kToolbarVisibilityBtn = "customization-toolbar-visibility-button";
 const kDrawInTitlebarPref = "browser.tabs.drawInTitlebar";
 const kMaxTransitionDurationMs = 2000;
+const kKeepBroadcastAttributes = "keepbroadcastattributeswhencustomizing";
 
 const kPanelItemContextMenu = "customizationPanelItemContextMenu";
 const kPaletteItemContextMenu = "customizationPaletteItemContextMenu";
@@ -202,6 +203,21 @@ CustomizeMode.prototype = {
   },
 
   enter() {
+    if (!this.window.toolbar.visible) {
+      let w = this.window.getTopWin(true);
+      if (w) {
+        w.gCustomizeMode.enter();
+        return;
+      }
+      let obs = () => {
+        Services.obs.removeObserver(obs, "browser-delayed-startup-finished");
+        w = this.window.getTopWin(true);
+        w.gCustomizeMode.enter();
+      };
+      Services.obs.addObserver(obs, "browser-delayed-startup-finished");
+      this.window.openUILinkIn("about:newtab", "window");
+      return;
+    }
     this._wantToBeInCustomizeMode = true;
 
     if (this._customizing || this._handler.isEnteringCustomizeMode) {
@@ -442,7 +458,7 @@ CustomizeMode.prototype = {
       CustomizableUI.dispatchToolboxEvent("customizationending", {}, window);
 
       window.PanelUI.menuButton.disabled = false;
-      let overflowContainer = document.getElementById("widget-overflow-scroller");
+      let overflowContainer = document.getElementById("widget-overflow-mainView").firstChild;
       overflowContainer.appendChild(window.PanelUI.overflowFixedList);
       document.getElementById("nav-bar-overflow-button").disabled = false;
       let panelContextMenu = document.getElementById(kPanelItemContextMenu);
@@ -774,12 +790,16 @@ CustomizeMode.prototype = {
 
     // Ensure the wrapped item doesn't look like it's in any special state, and
     // can't be interactved with when in the customization palette.
-    if (aNode.hasAttribute("command")) {
+    // Note that some buttons opt out of this with the
+    // keepbroadcastattributeswhencustomizing attribute.
+    if (aNode.hasAttribute("command") &&
+        aNode.getAttribute(kKeepBroadcastAttributes) != "true") {
       wrapper.setAttribute("itemcommand", aNode.getAttribute("command"));
       aNode.removeAttribute("command");
     }
 
-    if (aNode.hasAttribute("observes")) {
+    if (aNode.hasAttribute("observes") &&
+        aNode.getAttribute(kKeepBroadcastAttributes) != "true") {
       wrapper.setAttribute("itemobserves", aNode.getAttribute("observes"));
       aNode.removeAttribute("observes");
     }

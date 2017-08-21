@@ -22,7 +22,6 @@
 #include "jsfriendapi.h"
 #include "js/Value.h"
 #include "Layers.h"
-#include "MediaDecoder.h"
 #include "nsAppRunner.h"
 // nsNPAPIPluginInstance must be included before nsIDocument.h, which is included in mozAutoDocUpdate.h.
 #include "nsNPAPIPluginInstance.h"
@@ -41,12 +40,13 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/CustomElementRegistry.h"
 #include "mozilla/dom/DocumentFragment.h"
+#include "mozilla/dom/DOMException.h"
+#include "mozilla/dom/DOMExceptionBinding.h"
 #include "mozilla/dom/DOMTypes.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/FileSystemSecurity.h"
 #include "mozilla/dom/FileBlobImpl.h"
 #include "mozilla/dom/HTMLInputElement.h"
-#include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/HTMLTemplateElement.h"
 #include "mozilla/dom/HTMLContentElement.h"
 #include "mozilla/dom/HTMLShadowElement.h"
@@ -63,6 +63,7 @@
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
+#include "mozilla/HTMLEditor.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/InternalMutationEvent.h"
 #include "mozilla/Likely.h"
@@ -135,7 +136,6 @@
 #include "nsIDOMNodeList.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsIDragService.h"
-#include "nsIEditor.h"
 #include "nsIFormControl.h"
 #include "nsIForm.h"
 #include "nsIFragmentContentSink.h"
@@ -2405,7 +2405,16 @@ nsContentUtils::ShouldResistFingerprinting(nsIDocShell* aDocShell)
   if (!aDocShell) {
     return false;
   }
-  bool isChrome = nsContentUtils::IsChromeDoc(aDocShell->GetDocument());
+  return ShouldResistFingerprinting(aDocShell->GetDocument());
+}
+
+/* static */
+bool
+nsContentUtils::ShouldResistFingerprinting(nsIDocument* aDoc) {
+  if (!aDoc) {
+    return false;
+  }
+  bool isChrome = nsContentUtils::IsChromeDoc(aDoc);
   return !isChrome && ShouldResistFingerprinting();
 }
 
@@ -4544,10 +4553,10 @@ nsContentUtils::DispatchChromeEvent(nsIDocument *aDoc,
   if (!piTarget)
     return NS_ERROR_INVALID_ARG;
 
-  nsEventStatus status = nsEventStatus_eIgnore;
-  rv = piTarget->DispatchDOMEvent(nullptr, event, nullptr, &status);
+  bool defaultActionEnabled;
+  rv = piTarget->DispatchEvent(event, &defaultActionEnabled);
   if (aDefaultAction) {
-    *aDefaultAction = (status != nsEventStatus_eConsumeNoDefault);
+    *aDefaultAction = defaultActionEnabled;
   }
   return rv;
 }
@@ -5189,7 +5198,8 @@ nsContentUtils::ConvertToPlainText(const nsAString& aSourceBuffer,
                                   principal,
                                   true,
                                   nullptr,
-                                  DocumentFlavorHTML);
+                                  DocumentFlavorHTML,
+                                  StyleBackendType::None);
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIDocument> document = do_QueryInterface(domDocument);
@@ -7541,7 +7551,7 @@ nsContentUtils::GetSelectionInTextControl(Selection* aSelection,
 }
 
 
-nsIEditor*
+HTMLEditor*
 nsContentUtils::GetHTMLEditor(nsPresContext* aPresContext)
 {
   nsCOMPtr<nsIDocShell> docShell(aPresContext->GetDocShell());
@@ -7550,9 +7560,7 @@ nsContentUtils::GetHTMLEditor(nsPresContext* aPresContext)
       NS_FAILED(docShell->GetEditable(&isEditable)) || !isEditable)
     return nullptr;
 
-  nsCOMPtr<nsIEditor> editor;
-  docShell->GetEditor(getter_AddRefs(editor));
-  return editor;
+  return docShell->GetHTMLEditor();
 }
 
 bool
@@ -9029,6 +9037,25 @@ nsContentUtils::PushEnabled(JSContext* aCx, JSObject* aObj)
   }
 
   return workerPrivate->PushEnabled();
+}
+
+// static
+bool
+nsContentUtils::StreamsEnabled(JSContext* aCx, JSObject* aObj)
+{
+  if (NS_IsMainThread()) {
+    return Preferences::GetBool("dom.streams.enabled", false);
+  }
+
+  using namespace workers;
+
+  // Otherwise, check the pref via the WorkerPrivate
+  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
+  if (!workerPrivate) {
+    return false;
+  }
+
+  return workerPrivate->StreamsEnabled();
 }
 
 // static
@@ -10658,6 +10685,29 @@ nsContentUtils::GetSourceMapURL(nsIHttpChannel* aChannel, nsACString& aResult)
   return NS_SUCCEEDED(rv);
 }
 
+/* static */  bool
+nsContentUtils::IsMessageInputEvent(const IPC::Message& aMsg)
+{
+  if ((aMsg.type() & mozilla::dom::PBrowser::PBrowserStart)
+      == mozilla::dom::PBrowser::PBrowserStart) {
+    switch (aMsg.type()) {
+      case mozilla::dom::PBrowser::Msg_RealMouseMoveEvent__ID:
+      case mozilla::dom::PBrowser::Msg_RealMouseButtonEvent__ID:
+      case mozilla::dom::PBrowser::Msg_RealKeyEvent__ID:
+      case mozilla::dom::PBrowser::Msg_MouseWheelEvent__ID:
+      case mozilla::dom::PBrowser::Msg_RealTouchEvent__ID:
+      case mozilla::dom::PBrowser::Msg_RealTouchMoveEvent__ID:
+      case mozilla::dom::PBrowser::Msg_RealDragEvent__ID:
+      case mozilla::dom::PBrowser::Msg_UpdateDimensions__ID:
+      case mozilla::dom::PBrowser::Msg_MouseEvent__ID:
+      case mozilla::dom::PBrowser::Msg_KeyEvent__ID:
+      case mozilla::dom::PBrowser::Msg_SetDocShellIsActive__ID:
+        return true;
+    }
+  }
+  return false;
+}
+
 static const char* kUserInteractionInactive = "user-interaction-inactive";
 static const char* kUserInteractionActive = "user-interaction-active";
 
@@ -10731,3 +10781,73 @@ nsContentUtils::IsOverridingWindowName(const nsAString& aName)
     !aName.LowerCaseEqualsLiteral("_parent") &&
     !aName.LowerCaseEqualsLiteral("_self");
 }
+
+/* static */ void
+nsContentUtils::ExtractErrorValues(JSContext* aCx,
+                                   JS::Handle<JS::Value> aValue,
+                                   nsACString& aSourceSpecOut,
+                                   uint32_t* aLineOut,
+                                   uint32_t* aColumnOut,
+                                   nsString& aMessageOut)
+{
+  MOZ_ASSERT(aLineOut);
+  MOZ_ASSERT(aColumnOut);
+
+  if (aValue.isObject()) {
+    JS::Rooted<JSObject*> obj(aCx, &aValue.toObject());
+    RefPtr<dom::DOMException> domException;
+
+    // Try to process as an Error object.  Use the file/line/column values
+    // from the Error as they will be more specific to the root cause of
+    // the problem.
+    JSErrorReport* err = obj ? JS_ErrorFromException(aCx, obj) : nullptr;
+    if (err) {
+      // Use xpc to extract the error message only.  We don't actually send
+      // this report anywhere.
+      RefPtr<xpc::ErrorReport> report = new xpc::ErrorReport();
+      report->Init(err,
+                   "<unknown>", // toString result
+                   false,       // chrome
+                   0);          // window ID
+
+      if (!report->mFileName.IsEmpty()) {
+        CopyUTF16toUTF8(report->mFileName, aSourceSpecOut);
+        *aLineOut = report->mLineNumber;
+        *aColumnOut = report->mColumn;
+      }
+      aMessageOut.Assign(report->mErrorMsg);
+    }
+
+    // Next, try to unwrap the rejection value as a DOMException.
+    else if(NS_SUCCEEDED(UNWRAP_OBJECT(DOMException, obj, domException))) {
+
+      nsAutoString filename;
+      domException->GetFilename(aCx, filename);
+      if (!filename.IsEmpty()) {
+        CopyUTF16toUTF8(filename, aSourceSpecOut);
+        *aLineOut = domException->LineNumber(aCx);
+        *aColumnOut = domException->ColumnNumber();
+      }
+
+      domException->GetName(aMessageOut);
+      aMessageOut.AppendLiteral(": ");
+
+      nsAutoString message;
+      domException->GetMessageMoz(message);
+      aMessageOut.Append(message);
+    }
+  }
+
+  // If we could not unwrap a specific error type, then perform default safe
+  // string conversions on primitives.  Objects will result in "[Object]"
+  // unfortunately.
+  if (aMessageOut.IsEmpty()) {
+    nsAutoJSString jsString;
+    if (jsString.init(aCx, aValue)) {
+      aMessageOut = jsString;
+    } else {
+      JS_ClearPendingException(aCx);
+    }
+  }
+}
+

@@ -136,7 +136,7 @@ impl TableCellFlow {
         }
 
         for kid in flow::mut_base(self).children.iter_mut() {
-            let mut kid_base = flow::mut_base(kid);
+            let kid_base = flow::mut_base(kid);
             if !kid_base.flags.contains(IS_ABSOLUTELY_POSITIONED) {
                 kid_base.position.start.b += offset
             }
@@ -230,8 +230,8 @@ impl Flow for TableCellFlow {
         self.assign_block_size_table_cell_base(layout_context);
     }
 
-    fn compute_absolute_position(&mut self, layout_context: &LayoutContext) {
-        self.block_flow.compute_absolute_position(layout_context)
+    fn compute_stacking_relative_position(&mut self, layout_context: &LayoutContext) {
+        self.block_flow.compute_stacking_relative_position(layout_context)
     }
 
     fn update_late_computed_inline_position_if_necessary(&mut self, inline_position: Au) {
@@ -269,6 +269,14 @@ impl Flow for TableCellFlow {
 
     fn compute_overflow(&self) -> Overflow {
         self.block_flow.compute_overflow()
+    }
+
+    fn contains_roots_of_absolute_flow_tree(&self) -> bool {
+        self.block_flow.contains_roots_of_absolute_flow_tree()
+    }
+
+    fn is_absolute_containing_block(&self) -> bool {
+        self.block_flow.is_absolute_containing_block()
     }
 
     fn generated_containing_block_size(&self, flow: OpaqueFlow) -> LogicalSize<Au> {

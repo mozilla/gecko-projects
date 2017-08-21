@@ -3542,8 +3542,13 @@ LIRGenerator::visitArrayJoin(MArrayJoin* ins)
     MOZ_ASSERT(ins->array()->type() == MIRType::Object);
     MOZ_ASSERT(ins->sep()->type() == MIRType::String);
 
+    LDefinition tempDef = LDefinition::BogusTemp();
+    if (ins->optimizeForArray())
+        tempDef = temp();
+
     LArrayJoin* lir = new(alloc()) LArrayJoin(useRegisterAtStart(ins->array()),
-                                              useRegisterAtStart(ins->sep()));
+                                              useRegisterAtStart(ins->sep()),
+                                              tempDef);
     defineReturn(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -4354,9 +4359,14 @@ LIRGenerator::visitIsTypedArray(MIsTypedArray* ins)
 void
 LIRGenerator::visitIsCallable(MIsCallable* ins)
 {
-    MOZ_ASSERT(ins->object()->type() == MIRType::Object);
     MOZ_ASSERT(ins->type() == MIRType::Boolean);
-    define(new(alloc()) LIsCallable(useRegister(ins->object())), ins);
+
+    if (ins->object()->type() == MIRType::Object) {
+        define(new(alloc()) LIsCallableO(useRegister(ins->object())), ins);
+    } else {
+        MOZ_ASSERT(ins->object()->type() == MIRType::Value);
+        define(new(alloc()) LIsCallableV(useBox(ins->object()), temp()), ins);
+    }
 }
 
 void

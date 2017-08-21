@@ -1069,7 +1069,7 @@ HTMLCanvasElement::InvalidateCanvasContent(const gfx::Rect* damageRect)
     nsIFrame::WebRenderUserDataTable* userDataTable =
       frame->GetProperty(nsIFrame::WebRenderUserDataProperty());
     RefPtr<WebRenderUserData> data;
-    userDataTable->Get(nsDisplayItem::TYPE_CANVAS, getter_AddRefs(data));
+    userDataTable->Get(static_cast<uint32_t>(DisplayItemType::TYPE_CANVAS), getter_AddRefs(data));
     if (data && data->AsCanvasData()) {
       renderer = data->AsCanvasData()->GetCanvasRenderer();
     }
@@ -1084,10 +1084,10 @@ HTMLCanvasElement::InvalidateCanvasContent(const gfx::Rect* damageRect)
       nsIntSize size = GetWidthHeight();
       if (size.width != 0 && size.height != 0) {
         gfx::IntRect invalRect = gfx::IntRect::Truncate(*damageRect);
-        layer = frame->InvalidateLayer(nsDisplayItem::TYPE_CANVAS, &invalRect);
+        layer = frame->InvalidateLayer(DisplayItemType::TYPE_CANVAS, &invalRect);
       }
     } else {
-      layer = frame->InvalidateLayer(nsDisplayItem::TYPE_CANVAS);
+      layer = frame->InvalidateLayer(DisplayItemType::TYPE_CANVAS);
     }
 
     if (layer) {
@@ -1188,7 +1188,10 @@ HTMLCanvasElement::GetCanvasLayer(nsDisplayListBuilder* aBuilder,
     layer->SetUserData(&sOffscreenCanvasLayerUserDataDummy, userData);
 
     CanvasRenderer* canvasRenderer = layer->CreateOrGetCanvasRenderer();
-    InitializeCanvasRenderer(aBuilder, canvasRenderer);
+
+    if (!InitializeCanvasRenderer(aBuilder, canvasRenderer)) {
+      return nullptr;
+    }
 
     layer->Updated();
     return layer.forget();
@@ -1197,12 +1200,12 @@ HTMLCanvasElement::GetCanvasLayer(nsDisplayListBuilder* aBuilder,
   return nullptr;
 }
 
-void
+bool
 HTMLCanvasElement::InitializeCanvasRenderer(nsDisplayListBuilder* aBuilder,
                                             CanvasRenderer* aRenderer)
 {
   if (mCurrentContext) {
-    mCurrentContext->InitializeCanvasRenderer(aBuilder, aRenderer);
+    return mCurrentContext->InitializeCanvasRenderer(aBuilder, aRenderer);
   }
 
   if (mOffscreenCanvas) {
@@ -1210,7 +1213,10 @@ HTMLCanvasElement::InitializeCanvasRenderer(nsDisplayListBuilder* aBuilder,
     data.mRenderer = GetAsyncCanvasRenderer();
     data.mSize = GetWidthHeight();
     aRenderer->Initialize(data);
+    return true;
   }
+
+  return true;
 }
 
 bool

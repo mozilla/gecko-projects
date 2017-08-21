@@ -11,6 +11,7 @@
 #define nsTString_CharT                     nsString
 #define nsTStringRepr_CharT                 nsStringRepr
 #define nsTFixedString_CharT                nsFixedString
+#define nsTAutoStringN_CharT                nsAutoStringN
 #define nsTAutoString_CharT                 nsAutoString
 #define nsTSubstring_CharT                  nsAString
 #define PrintfAppend_CharT                  PrintfAppend_nsAString
@@ -20,8 +21,8 @@
 #define nsTDependentString_CharT            nsDependentString
 #define nsTDependentSubstring_CharT         nsDependentSubstring
 #define nsTLiteralString_CharT              nsLiteralString
-#define nsTXPIDLString_CharT                nsXPIDLString
 #define nsTGetterCopies_CharT               nsGetterCopies
 #define nsTPromiseFlatString_CharT          nsPromiseFlatString
 #define TPromiseFlatString_CharT            PromiseFlatString
 #define nsTSubstringSplitter_CharT          nsSubstringSplitter
+#define TNullString_CharT                   NullString

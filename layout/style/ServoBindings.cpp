@@ -33,6 +33,7 @@
 #include "nsIPresShellInlines.h"
 #include "nsIPrincipal.h"
 #include "nsIURI.h"
+#include "nsIXULRuntime.h"
 #include "nsFontMetrics.h"
 #include "nsHTMLStyleSheet.h"
 #include "nsMappedAttributes.h"
@@ -88,6 +89,7 @@ SERVO_ARC_TYPE(StyleContext, ServoStyleContext)
 #undef SERVO_ARC_TYPE
 
 static Mutex* sServoFontMetricsLock = nullptr;
+static Mutex* sServoWidgetLock = nullptr;
 static RWLock* sServoLangFontPrefsLock = nullptr;
 
 static
@@ -116,18 +118,6 @@ void
 AssertIsMainThreadOrServoLangFontPrefsCacheLocked()
 {
   MOZ_ASSERT(NS_IsMainThread() || sServoLangFontPrefsLock->LockedForWritingByCurrentThread());
-}
-
-uint32_t
-Gecko_ChildrenCount(RawGeckoNodeBorrowed aNode)
-{
-  return aNode->GetChildCount();
-}
-
-bool
-Gecko_NodeIsElement(RawGeckoNodeBorrowed aNode)
-{
-  return aNode->IsElement();
 }
 
 bool
@@ -235,6 +225,46 @@ ServoComputedData::GetStyleVariables() const
             "called");
 }
 
+MOZ_DEFINE_MALLOC_SIZE_OF(ServoStyleStructsMallocSizeOf)
+
+void
+ServoComputedData::AddSizeOfExcludingThis(SizeOfState& aState,
+                                          nsStyleSizes& aSizes) const
+{
+  // XXX WARNING: GetStyleFoo() returns an nsStyleFoo pointer. This nsStyleFoo
+  // sits within a servo_arc::Arc, i.e. it is preceded by a word-sized
+  // refcount. So this pointer is an interior pointer. To get the start address
+  // of the heap block we move the pointer back by one word. For this to work,
+  // two things must be true.
+  //
+  // - The layout of servo_arc::Arc must stay the same.
+  //
+  // - The alignment of each nsStyleFoo must not be greater than the size of a
+  //   word (otherwise padding might be inserted between the refcount and the
+  //   struct in the servo_arc::Arc).
+  //
+  // In the long run a better solution here is for mozjemalloc to provide a
+  // function that converts an interior pointer to a start pointer (bug
+  // 1389305), but that's not available right now.
+  //
+  // Also, we use ServoStyleStructsMallocSizeOf rather than
+  // |aState.mMallocSizeOf| to better distinguish in DMD's output the memory
+  // measured here.
+#define STYLE_STRUCT(name_, cb_) \
+  static_assert(alignof(nsStyle##name_) <= sizeof(size_t), \
+                "alignment will break AddSizeOfExcludingThis()"); \
+  const char* p##name_ = reinterpret_cast<const char*>(GetStyle##name_()); \
+  p##name_ -= sizeof(size_t); \
+  if (!aState.HaveSeenPtr(p##name_)) { \
+    aSizes.NS_STYLE_SIZES_FIELD(name_) += \
+      ServoStyleStructsMallocSizeOf(p##name_); \
+  }
+  #define STYLE_STRUCT_LIST_IGNORE_VARIABLES
+#include "nsStyleStructList.h"
+#undef STYLE_STRUCT
+#undef STYLE_STRUCT_LIST_IGNORE_VARIABLES
+}
+
 void
 Gecko_ServoStyleContext_Destroy(ServoStyleContext* aContext)
 {
@@ -258,17 +288,6 @@ Gecko_DestroyStyleChildrenIterator(
   MOZ_ASSERT(aIterator);
 
   aIterator->~StyleChildrenIterator();
-}
-
-nsIContent*
-Gecko_ElementBindingAnonymousContent(RawGeckoElementBorrowed aElement)
-{
-  MOZ_ASSERT(aElement->HasFlag(NODE_MAY_BE_IN_BINDING_MNGR));
-  nsBindingManager* manager = aElement->OwnerDoc()->BindingManager();
-  if (nsXBLBinding* binding = manager->GetBindingWithContent(aElement)) {
-    return binding->GetAnonymousContent();
-  }
-  return nullptr;
 }
 
 RawGeckoNodeBorrowed
@@ -307,12 +326,6 @@ Gecko_DocumentState(const nsIDocument* aDocument)
 }
 
 bool
-Gecko_IsTextNode(RawGeckoNodeBorrowed aNode)
-{
-  return aNode->NodeInfo()->NodeType() == nsIDOMNode::TEXT_NODE;
-}
-
-bool
 Gecko_IsRootElement(RawGeckoElementBorrowed aElement)
 {
   return aElement->OwnerDoc()->GetRootElement() == aElement;
@@ -326,38 +339,13 @@ Gecko_MatchesElement(CSSPseudoClassType aType,
 }
 
 nsIAtom*
-Gecko_LocalName(RawGeckoElementBorrowed aElement)
-{
-  return aElement->NodeInfo()->NameAtom();
-}
-
-nsIAtom*
 Gecko_Namespace(RawGeckoElementBorrowed aElement)
 {
   int32_t id = aElement->NodeInfo()->NamespaceID();
   return nsContentUtils::NameSpaceManager()->NameSpaceURIAtomForServo(id);
 }
 
-nsIAtom*
-Gecko_GetElementId(RawGeckoElementBorrowed aElement)
-{
-  const nsAttrValue* attr = aElement->GetParsedAttr(nsGkAtoms::id);
-  if (attr && attr->Type() == nsAttrValue::eAtom) {
-    return attr->GetAtomValue();
-  }
-  // The only case in which we should have a non-atom value here is if it's the
-  // empty string value.
-  MOZ_ASSERT(!attr || attr->IsEmptyString());
-  return nullptr;
-}
-
 // Dirtiness tracking.
-uint32_t
-Gecko_GetNodeFlags(RawGeckoNodeBorrowed aNode)
-{
-  return aNode->GetFlags();
-}
-
 void
 Gecko_SetNodeFlags(RawGeckoNodeBorrowed aNode, uint32_t aFlags)
 {
@@ -371,37 +359,17 @@ Gecko_UnsetNodeFlags(RawGeckoNodeBorrowed aNode, uint32_t aFlags)
 }
 
 void
-Gecko_SetOwnerDocumentNeedsStyleFlush(RawGeckoElementBorrowed aElement)
+Gecko_NoteDirtyElement(RawGeckoElementBorrowed aElement)
 {
   MOZ_ASSERT(NS_IsMainThread());
-
-  if (nsIPresShell* shell = aElement->OwnerDoc()->GetShell()) {
-    shell->EnsureStyleFlush();
-  }
+  const_cast<Element*>(aElement)->NoteDirtyForServo();
 }
 
-nsStyleContext*
-Gecko_GetStyleContext(RawGeckoElementBorrowed aElement,
-                      nsIAtom* aPseudoTagOrNull)
+void
+Gecko_NoteAnimationOnlyDirtyElement(RawGeckoElementBorrowed aElement)
 {
-  nsIFrame* relevantFrame =
-    ServoRestyleManager::FrameForPseudoElement(aElement, aPseudoTagOrNull);
-  if (relevantFrame) {
-    return relevantFrame->StyleContext();
-  }
-
-  if (aPseudoTagOrNull) {
-    return nullptr;
-  }
-
-  // FIXME(emilio): Is there a shorter path?
-  nsIPresShell* shell = aElement->OwnerDoc()->GetShell();
-  NS_ENSURE_TRUE(shell, nullptr);
-  nsCSSFrameConstructor* fc = shell->GetPresContext()->FrameConstructor();
-
-  // NB: This is only called for CalcStyleDifference, and we handle correctly
-  // the display: none case since Servo still has the older style.
-  return fc->GetDisplayContentsStyleFor(aElement);
+  MOZ_ASSERT(NS_IsMainThread());
+  const_cast<Element*>(aElement)->NoteAnimationOnlyDirtyForServo();
 }
 
 CSSPseudoElementType
@@ -410,7 +378,7 @@ Gecko_GetImplementedPseudo(RawGeckoElementBorrowed aElement)
   return aElement->GetPseudoElementType();
 }
 
-nsChangeHint
+uint32_t
 Gecko_CalcStyleDifference(ServoStyleContextBorrowed aOldStyle,
                           ServoStyleContextBorrowed aNewStyle,
                           uint64_t aOldStyleBits,
@@ -431,12 +399,6 @@ Gecko_CalcStyleDifference(ServoStyleContextBorrowed aOldStyle,
       relevantStructs);
   *aAnyStyleChanged = equalStructs != NS_STYLE_INHERIT_MASK;
   return result;
-}
-
-nsChangeHint
-Gecko_HintsHandledForDescendants(nsChangeHint aHint)
-{
-  return aHint & ~NS_HintsNotHandledForDescendantsIn(aHint);
 }
 
 const ServoElementSnapshot*
@@ -877,12 +839,14 @@ Gecko_GetBody(RawGeckoPresContextBorrowed aPresContext)
   return aPresContext->Document()->GetBodyElement();
 }
 
-nscolor Gecko_GetLookAndFeelSystemColor(int32_t aId,
-                                        RawGeckoPresContextBorrowed aPresContext)
+nscolor
+Gecko_GetLookAndFeelSystemColor(int32_t aId,
+                                RawGeckoPresContextBorrowed aPresContext)
 {
   bool useStandinsForNativeColors = aPresContext && !aPresContext->IsChrome();
   nscolor result;
   LookAndFeel::ColorID colorId = static_cast<LookAndFeel::ColorID>(aId);
+  MutexAutoLock guard(*sServoWidgetLock);
   LookAndFeel::GetColor(colorId, useStandinsForNativeColors, &result);
   return result;
 }
@@ -1727,30 +1691,37 @@ Gecko_ClearPODTArray(void* aArray, size_t aElementSize, size_t aElementAlign)
                                                         aElementSize, aElementAlign);
 }
 
-void Gecko_SetStyleGridTemplateArrayLengths(nsStyleGridTemplate* aValue,
-                                            uint32_t aTrackSizes)
-{
-  aValue->mMinTrackSizingFunctions.SetLength(aTrackSizes);
-  aValue->mMaxTrackSizingFunctions.SetLength(aTrackSizes);
-  aValue->mLineNameLists.SetLength(aTrackSizes + 1);
-}
-
-void Gecko_SetGridTemplateLineNamesLength(nsStyleGridTemplate* aValue,
-                                          uint32_t aNames)
-{
-  aValue->mLineNameLists.SetLength(aNames);
-}
-
 void Gecko_ResizeTArrayForStrings(nsTArray<nsString>* aArray, uint32_t aLength)
 {
   aArray->SetLength(aLength);
 }
 
 void
-Gecko_CopyStyleGridTemplateValues(nsStyleGridTemplate* aGridTemplate,
+Gecko_SetStyleGridTemplate(UniquePtr<nsStyleGridTemplate>* aGridTemplate,
+                           nsStyleGridTemplate* aValue)
+{
+  aGridTemplate->reset(aValue);
+}
+
+nsStyleGridTemplate*
+Gecko_CreateStyleGridTemplate(uint32_t aTrackSizes, uint32_t aNameSize)
+{
+  nsStyleGridTemplate* result = new nsStyleGridTemplate;
+  result->mMinTrackSizingFunctions.SetLength(aTrackSizes);
+  result->mMaxTrackSizingFunctions.SetLength(aTrackSizes);
+  result->mLineNameLists.SetLength(aNameSize);
+  return result;
+}
+
+void
+Gecko_CopyStyleGridTemplateValues(UniquePtr<nsStyleGridTemplate>* aGridTemplate,
                                   const nsStyleGridTemplate* aOther)
 {
-  *aGridTemplate = *aOther;
+  if (aOther) {
+    *aGridTemplate = MakeUnique<nsStyleGridTemplate>(*aOther);
+  } else {
+    *aGridTemplate = nullptr;
+  }
 }
 
 mozilla::css::GridTemplateAreasValue*
@@ -2466,13 +2437,19 @@ InitializeServo()
   Servo_Initialize(URLExtraData::Dummy());
 
   sServoFontMetricsLock = new Mutex("Gecko_GetFontMetrics");
+  sServoWidgetLock = new Mutex("Servo::WidgetLock");
   sServoLangFontPrefsLock = new RWLock("nsPresContext::GetDefaultFont");
 }
 
 void
 ShutdownServo()
 {
+  MOZ_ASSERT(sServoFontMetricsLock);
+  MOZ_ASSERT(sServoWidgetLock);
+  MOZ_ASSERT(sServoLangFontPrefsLock);
+
   delete sServoFontMetricsLock;
+  delete sServoWidgetLock;
   delete sServoLangFontPrefsLock;
   Servo_Shutdown();
 }
@@ -2653,6 +2630,12 @@ Gecko_RegisterNamespace(nsIAtom* aNamespace)
     return -1;
   }
   return id;
+}
+
+bool
+Gecko_ShouldCreateStyleThreadPool()
+{
+  return !mozilla::BrowserTabsRemoteAutostart() || XRE_IsContentProcess();
 }
 
 NS_IMPL_FFI_REFCOUNTING(nsCSSFontFaceRule, CSSFontFaceRule);

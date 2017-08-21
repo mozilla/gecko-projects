@@ -7,7 +7,6 @@
 @namespace svg url("http://www.w3.org/2000/svg");
 
 :root {
-  --identity-popup-expander-width: 38px;
   --panelui-subview-transition-duration: 150ms;
   --lwt-additional-images: none;
   --lwt-background-alignment: right top;
@@ -67,28 +66,6 @@ toolbar[customizable="true"] {
 
 #toolbar-menubar[autohide="true"] {
   -moz-binding: url("chrome://browser/content/customizableui/toolbar.xml#toolbar-menubar-autohide");
-}
-
-#addon-bar {
-  -moz-binding: url("chrome://browser/content/customizableui/toolbar.xml#addonbar-delegating");
-  visibility: visible;
-  margin: 0;
-  height: 0 !important;
-  overflow: hidden;
-  padding: 0;
-  border: 0 none;
-}
-
-#addonbar-closebutton {
-  visibility: visible;
-  height: 0 !important;
-}
-
-#status-bar {
-  height: 0 !important;
-  -moz-binding: none;
-  padding: 0;
-  margin: 0;
 }
 
 panelmultiview {
@@ -347,6 +324,10 @@ toolbarpaletteitem:-moz-any([place="palette"], [place="panel"]) > toolbaritem[sd
 
 toolbarpaletteitem > toolbaritem[sdkstylewidget="true"][cui-areatype="toolbar"] > .toolbarbutton-text {
   display: -moz-box;
+}
+
+.webextension-browser-action > .toolbarbutton-badge-stack > .toolbarbutton-icon {
+  width: 16px;
 }
 
 @media not all and (min-resolution: 1.1dppx) {
@@ -685,8 +666,8 @@ html|input.urlbar-input[textoverflow]:not([focused]) {
   -moz-binding: url("chrome://global/content/bindings/datetimepopup.xml#datetime-popup");
 }
 
-#urlbar[pageproxystate="invalid"] > #urlbar-icons > .urlbar-icon,
-#urlbar[pageproxystate="invalid"] > #urlbar-icons > #star-button-box > .urlbar-icon,
+#urlbar[pageproxystate="invalid"] > #page-action-buttons > .urlbar-icon,
+#urlbar[pageproxystate="invalid"] > #page-action-buttons > .urlbar-icon-wrapper > .urlbar-icon,
 .urlbar-go-button[pageproxystate="valid"],
 .urlbar-go-button:not([parentfocused="true"]),
 #urlbar[pageproxystate="invalid"] > #identity-box > #blocked-permissions-container,
@@ -756,7 +737,8 @@ html|input.urlbar-input[textoverflow]:not([focused]) {
 toolbarpaletteitem[place=toolbar][id^=wrapper-customizableui-special-spring],
 toolbarspring {
   -moz-box-flex: 1;
-  min-width: 40px;
+  min-width: 28px;
+  max-width: 112px;
 }
 
 #nav-bar toolbarpaletteitem[id^=wrapper-customizableui-special-spring],
@@ -1066,11 +1048,6 @@ html|*#gcli-output-frame,
 
 .browserStack[responsivemode][notransition] {
   transition: none;
-}
-
-panelview > .social-panel-frame {
-  width: auto;
-  height: auto;
 }
 
 /* Translation */
@@ -1407,6 +1384,21 @@ toolbarpaletteitem[place="palette"][hidden] {
 #pageAction-panel-sendToDevice-subview-body:not([state="notready"]) > #pageAction-panel-sendToDevice-notReady,
 #pageAction-urlbar-sendToDevice-subview-body:not([state="notready"]) > #pageAction-urlbar-sendToDevice-notReady {
   display: none;
+}
+
+/* WebExtension Sidebars */
+#sidebar-box[sidebarcommand$="-sidebar-action"] > #sidebar-header > #sidebar-switcher-target > #sidebar-icon {
+  list-style-image: var(--webextension-menuitem-image, inherit);
+  -moz-context-properties: fill;
+  fill: currentColor;
+  width: 16px;
+  height: 16px;
+}
+
+@media (min-resolution: 1.1dppx) {
+  #sidebar-box[sidebarcommand$="-sidebar-action"] > #sidebar-header > #sidebar-switcher-target > #sidebar-icon {
+    list-style-image: var(--webextension-menuitem-image-2x, inherit);
+  }
 }
 
 %include theme-vars.inc.css

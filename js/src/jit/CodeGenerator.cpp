@@ -2417,7 +2417,7 @@ FindFirstDollarIndex(MacroAssembler& masm, Register str, Register len, Register 
     masm.bind(&done);
 }
 
-typedef bool (*GetFirstDollarIndexRawFn)(JSContext*, HandleString, int32_t*);
+typedef bool (*GetFirstDollarIndexRawFn)(JSContext*, JSString*, int32_t*);
 static const VMFunction GetFirstDollarIndexRawInfo =
     FunctionInfo<GetFirstDollarIndexRawFn>(GetFirstDollarIndexRaw, "GetFirstDollarIndexRaw");
 
@@ -9295,10 +9295,45 @@ static const VMFunction ArrayJoinInfo = FunctionInfo<ArrayJoinFn>(jit::ArrayJoin
 void
 CodeGenerator::visitArrayJoin(LArrayJoin* lir)
 {
-    pushArg(ToRegister(lir->separator()));
-    pushArg(ToRegister(lir->array()));
+    Label skipCall;
 
+    Register output = ToRegister(lir->output());
+    Register sep = ToRegister(lir->separator());
+    Register array = ToRegister(lir->array());
+    if (lir->mir()->optimizeForArray()) {
+        Register temp = ToRegister(lir->temp());
+
+        masm.loadPtr(Address(array, NativeObject::offsetOfElements()), temp);
+        Address length(temp, ObjectElements::offsetOfLength());
+        Address initLength(temp, ObjectElements::offsetOfInitializedLength());
+
+        // Check for length == 0
+        Label notEmpty;
+        masm.branch32(Assembler::NotEqual, length, Imm32(0), &notEmpty);
+        const JSAtomState& names = GetJitContext()->runtime->names();
+        masm.movePtr(ImmGCPtr(names.empty), output);
+        masm.jump(&skipCall);
+
+        masm.bind(&notEmpty);
+        Label notSingleString;
+        // Check for length == 1, initializedLength >= 1, arr[0].isString()
+        masm.branch32(Assembler::NotEqual, length, Imm32(1), &notSingleString);
+        masm.branch32(Assembler::LessThan, initLength, Imm32(1), &notSingleString);
+
+        Address elem0(temp, 0);
+        masm.branchTestString(Assembler::NotEqual, elem0, &notSingleString);
+
+        // At this point, 'output' can be used as a scratch register, since we're
+        // guaranteed to succeed.
+        masm.unboxString(elem0, output);
+        masm.jump(&skipCall);
+        masm.bind(&notSingleString);
+    }
+
+    pushArg(sep);
+    pushArg(array);
     callVM(ArrayJoinInfo, lir);
+    masm.bind(&skipCall);
 }
 
 void
@@ -10176,18 +10211,15 @@ CodeGenerator::visitCallGetElement(LCallGetElement* lir)
     }
 }
 
-typedef bool (*SetObjectElementFn)(JSContext*, HandleObject, HandleValue, HandleValue,
-                                   bool strict);
-static const VMFunction SetObjectElementInfo =
-    FunctionInfo<SetObjectElementFn>(SetObjectElement, "SetObjectElement");
-
 void
 CodeGenerator::visitCallSetElement(LCallSetElement* lir)
 {
+    Register obj = ToRegister(lir->getOperand(0));
     pushArg(Imm32(lir->mir()->strict()));
+    pushArg(TypedOrValueRegister(MIRType::Object, AnyRegister(obj)));
     pushArg(ToValue(lir, LCallSetElement::Value));
     pushArg(ToValue(lir, LCallSetElement::Index));
-    pushArg(ToRegister(lir->getOperand(0)));
+    pushArg(obj);
     callVM(SetObjectElementInfo, lir);
 }
 
@@ -11870,18 +11902,22 @@ CodeGenerator::visitSetDOMProperty(LSetDOMProperty* ins)
 
 class OutOfLineIsCallable : public OutOfLineCodeBase<CodeGenerator>
 {
-    LIsCallable* ins_;
+    Register object_;
+    Register output_;
 
   public:
-    explicit OutOfLineIsCallable(LIsCallable* ins)
-      : ins_(ins)
+    OutOfLineIsCallable(Register object, Register output)
+      : object_(object), output_(output)
     { }
 
     void accept(CodeGenerator* codegen) {
         codegen->visitOutOfLineIsCallable(this);
     }
-    LIsCallable* ins() const {
-        return ins_;
+    Register object() const {
+        return object_;
+    }
+    Register output() const {
+        return output_;
     }
 };
 
@@ -11934,12 +11970,12 @@ CodeGenerator::emitIsCallableOrConstructor(Register object, Register output, Lab
 }
 
 void
-CodeGenerator::visitIsCallable(LIsCallable* ins)
+CodeGenerator::visitIsCallableO(LIsCallableO* ins)
 {
     Register object = ToRegister(ins->object());
     Register output = ToRegister(ins->output());
 
-    OutOfLineIsCallable* ool = new(alloc()) OutOfLineIsCallable(ins);
+    OutOfLineIsCallable* ool = new(alloc()) OutOfLineIsCallable(object, output);
     addOutOfLineCode(ool, ins->mir());
 
     emitIsCallableOrConstructor<Callable>(object, output, ool->entry());
@@ -11948,11 +11984,33 @@ CodeGenerator::visitIsCallable(LIsCallable* ins)
 }
 
 void
+CodeGenerator::visitIsCallableV(LIsCallableV* ins)
+{
+    ValueOperand val = ToValue(ins, LIsCallableV::Value);
+    Register output = ToRegister(ins->output());
+    Register temp = ToRegister(ins->temp());
+
+    Label notObject;
+    masm.branchTestObject(Assembler::NotEqual, val, &notObject);
+    masm.unboxObject(val, temp);
+
+    OutOfLineIsCallable* ool = new(alloc()) OutOfLineIsCallable(temp, output);
+    addOutOfLineCode(ool, ins->mir());
+
+    emitIsCallableOrConstructor<Callable>(temp, output, ool->entry());
+    masm.jump(ool->rejoin());
+
+    masm.bind(&notObject);
+    masm.move32(Imm32(0), output);
+
+    masm.bind(ool->rejoin());
+}
+
+void
 CodeGenerator::visitOutOfLineIsCallable(OutOfLineIsCallable* ool)
 {
-    LIsCallable* ins = ool->ins();
-    Register object = ToRegister(ins->object());
-    Register output = ToRegister(ins->output());
+    Register object = ool->object();
+    Register output = ool->output();
 
     saveVolatile(output);
     masm.setupUnalignedABICall(output);

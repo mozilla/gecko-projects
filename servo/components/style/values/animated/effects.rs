@@ -4,7 +4,7 @@
 
 //! Animated types for CSS values related to effects.
 
-use properties::animated_properties::{Animatable, IntermediateColor};
+use properties::animated_properties::Animatable;
 use properties::longhands::box_shadow::computed_value::T as ComputedBoxShadowList;
 use properties::longhands::filter::computed_value::T as ComputedFilterList;
 use properties::longhands::text_shadow::computed_value::T as ComputedTextShadowList;
@@ -12,8 +12,10 @@ use std::cmp;
 #[cfg(not(feature = "gecko"))]
 use values::Impossible;
 use values::animated::{ToAnimatedValue, ToAnimatedZero};
+use values::animated::color::RGBA;
 use values::computed::{Angle, NonNegativeNumber};
 use values::computed::length::{Length, NonNegativeLength};
+use values::distance::{ComputeSquaredDistance, SquaredDistance};
 use values::generics::effects::BoxShadow as GenericBoxShadow;
 use values::generics::effects::Filter as GenericFilter;
 use values::generics::effects::SimpleShadow as GenericSimpleShadow;
@@ -32,7 +34,7 @@ pub type TextShadowList = ShadowList<SimpleShadow>;
 pub struct ShadowList<Shadow>(Vec<Shadow>);
 
 /// An animated value for a single `box-shadow`.
-pub type BoxShadow = GenericBoxShadow<IntermediateColor, Length, NonNegativeLength, Length>;
+pub type BoxShadow = GenericBoxShadow<Option<RGBA>, Length, NonNegativeLength, Length>;
 
 /// An animated value for the `filter` property.
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
@@ -48,7 +50,7 @@ pub type Filter = GenericFilter<Angle, NonNegativeNumber, NonNegativeLength, Sim
 pub type Filter = GenericFilter<Angle, NonNegativeNumber, NonNegativeLength, Impossible>;
 
 /// An animated value for the `drop-shadow()` filter.
-pub type SimpleShadow = GenericSimpleShadow<IntermediateColor, Length, NonNegativeLength>;
+pub type SimpleShadow = GenericSimpleShadow<Option<RGBA>, Length, NonNegativeLength>;
 
 impl ToAnimatedValue for ComputedBoxShadowList {
     type AnimatedValue = BoxShadowList;
@@ -102,6 +104,27 @@ where
     }
 }
 
+impl<S> ComputeSquaredDistance for ShadowList<S>
+where
+    S: ComputeSquaredDistance + ToAnimatedZero,
+{
+    #[inline]
+    fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
+        use itertools::{EitherOrBoth, Itertools};
+
+        self.0.iter().zip_longest(other.0.iter()).map(|it| {
+            match it {
+                EitherOrBoth::Both(from, to) => {
+                    from.compute_squared_distance(to)
+                },
+                EitherOrBoth::Left(list) | EitherOrBoth::Right(list) => {
+                    list.compute_squared_distance(&list.to_animated_zero()?)
+                },
+            }
+        }).sum()
+    }
+}
+
 impl<S> ToAnimatedZero for ShadowList<S> {
     #[inline]
     fn to_animated_zero(&self) -> Result<Self, ()> {
@@ -140,14 +163,11 @@ impl Animatable for BoxShadow {
             inset: self.inset,
         })
     }
+}
 
+impl ComputeSquaredDistance for BoxShadow {
     #[inline]
-    fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
-        self.compute_squared_distance(other).map(|sd| sd.sqrt())
-    }
-
-    #[inline]
-    fn compute_squared_distance(&self, other: &Self) -> Result<f64, ()> {
+    fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
         if self.inset != other.inset {
             return Err(());
         }
@@ -219,28 +239,13 @@ impl Animatable for SimpleShadow {
             blur: blur,
         })
     }
-
-    #[inline]
-    fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
-        self.compute_squared_distance(other).map(|sd| sd.sqrt())
-    }
-
-    #[inline]
-    fn compute_squared_distance(&self, other: &Self) -> Result<f64, ()> {
-        Ok(
-            self.color.compute_squared_distance(&other.color)? +
-            self.horizontal.compute_squared_distance(&other.horizontal)? +
-            self.vertical.compute_squared_distance(&other.vertical)? +
-            self.blur.compute_squared_distance(&other.blur)?
-        )
-    }
 }
 
 impl ToAnimatedZero for SimpleShadow {
     #[inline]
     fn to_animated_zero(&self) -> Result<Self, ()> {
         Ok(SimpleShadow {
-            color: IntermediateColor::transparent(),
+            color: Some(RGBA::transparent()),
             horizontal: self.horizontal.to_animated_zero()?,
             vertical: self.vertical.to_animated_zero()?,
             blur: self.blur.to_animated_zero()?,

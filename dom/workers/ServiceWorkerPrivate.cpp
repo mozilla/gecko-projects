@@ -459,7 +459,8 @@ public:
     aEvent->SetKeepAliveHandler(keepAliveHandler);
 
     ErrorResult result;
-    result = aWorkerScope->DispatchDOMEvent(nullptr, aEvent, nullptr, nullptr);
+    bool dummy;
+    result = aWorkerScope->DispatchEvent(aEvent, &dummy);
     if (NS_WARN_IF(result.Failed())) {
       result.SuppressException();
       return NS_ERROR_FAILURE;
@@ -1805,7 +1806,7 @@ ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
   // If we are loading a script for a ServiceWorker then we must not
   // try to intercept it.  If the interception matches the current
   // ServiceWorker's scope then we could deadlock the load.
-  info.mLoadFlags = mInfo->GetLoadFlags() |
+  info.mLoadFlags = mInfo->GetImportsLoadFlags() |
                     nsIChannel::LOAD_BYPASS_SERVICE_WORKER;
 
   rv = info.mBaseURI->GetHost(info.mDomain);

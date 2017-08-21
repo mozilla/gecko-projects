@@ -12,6 +12,15 @@ add_task(async function() {
  */
 add_task(async function() {
   await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
-  evaluateSearchResults("updates have been installed", "updateApp");
+  await evaluateSearchResults("updates have been installed", "updateApp");
+  await BrowserTestUtils.removeTab(gBrowser.selectedTab);
+});
+
+/**
+ * Test for searching for the "Location Permissions" subdialog.
+ */
+add_task(async function() {
+  await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
+  await evaluateSearchResults("set location permissions", "permissionsGroup");
   await BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });

@@ -37,18 +37,14 @@ const whitelist = [
     file: "chrome://browser/skin/page-action.svg",
     platforms: ["linux", "win", "macosx"],
   },
+  {
+    file: "chrome://pocket-shared/skin/pocket.svg",
+    platforms: ["linux", "win", "macosx"],
+  },
 
   // Shared entries
   {
     file: "chrome://browser/skin/arrow-left.svg",
-    platforms: ["linux", "win", "macosx"],
-  },
-  {
-    file: "chrome://browser/skin/arrow-dropdown-16.svg",
-    platforms: ["linux", "win", "macosx"],
-  },
-  {
-    file: "chrome://browser/skin/fxa/sync-illustration.svg",
     platforms: ["linux", "win", "macosx"],
   },
   {
@@ -62,10 +58,6 @@ const whitelist = [
   },
   {
     file: "chrome://browser/skin/tracking-protection-16.svg#enabled",
-    platforms: ["linux", "win", "macosx"],
-  },
-  {
-    file: "chrome://global/skin/icons/autoscroll.png",
     platforms: ["linux", "win", "macosx"],
   },
 
@@ -87,14 +79,8 @@ const whitelist = [
   },
 
   {
-    file: "chrome://global/skin/icons/chevron.png",
-    hidpi: "chrome://global/skin/icons/chevron@2x.png",
-    platforms: ["macosx"],
-  },
-
-  {
-    file: "chrome://global/skin/toolbar/chevron.gif",
-    platforms: ["win", "linux"],
+    file: "chrome://browser/skin/chevron.svg",
+    platforms: ["win", "linux", "macosx"],
   },
 
   {

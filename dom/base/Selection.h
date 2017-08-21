@@ -24,9 +24,7 @@ struct CachedOffsetForFrame;
 class nsAutoScrollTimer;
 class nsIContentIterator;
 class nsIDocument;
-class nsIEditor;
 class nsIFrame;
-class nsIHTMLEditor;
 class nsFrameSelection;
 class nsPIDOMWindowOuter;
 struct SelectionDetails;
@@ -36,6 +34,7 @@ class nsHTMLCopyEncoder;
 
 namespace mozilla {
 class ErrorResult;
+class HTMLEditor;
 struct AutoPrepareFocusRange;
 } // namespace mozilla
 
@@ -175,7 +174,22 @@ public:
   nsINode*     GetFocusNode();
   uint32_t     FocusOffset();
 
-  bool IsCollapsed() const;
+  /*
+   * IsCollapsed -- is the whole selection just one point, or unset?
+   */
+  bool IsCollapsed() const
+  {
+    uint32_t cnt = mRanges.Length();
+    if (cnt == 0) {
+      return true;
+    }
+
+    if (cnt != 1) {
+      return false;
+    }
+
+    return mRanges[0].mRange->Collapsed();
+  }
 
   // *JS() methods are mapped to Selection.*().
   // They may move focus only when the range represents normal selection.
@@ -281,6 +295,9 @@ private:
 
   // Note: DoAutoScroll might destroy arbitrary frames etc.
   nsresult DoAutoScroll(nsIFrame *aFrame, nsPoint& aPoint);
+
+  // We are not allowed to be in nodes whose root is not our document
+  bool HasSameRoot(nsINode& aNode);
 
   // XXX Please don't add additional uses of this method, it's only for
   // XXX supporting broken code (bug 1245883) in the following classes:
@@ -390,7 +407,7 @@ private:
 
   nsIDocument* GetDocument() const;
   nsPIDOMWindowOuter* GetWindow() const;
-  nsIEditor* GetEditor() const;
+  HTMLEditor* GetHTMLEditor() const;
 
   /**
    * GetCommonEditingHostForAllRanges() returns common editing host of all

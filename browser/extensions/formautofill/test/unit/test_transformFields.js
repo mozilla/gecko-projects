@@ -65,7 +65,7 @@ const ADDRESS_COMPUTE_TESTCASES = [
     expectedResult: {
       "street-address": "line1\n\nline3",
       "address-line1": "line1",
-      "address-line2": "",
+      "address-line2": undefined,
       "address-line3": "line3",
     },
   },
@@ -89,7 +89,7 @@ const ADDRESS_COMPUTE_TESTCASES = [
     expectedResult: {
       "street-address": "line1\n \nline3\n \nline5",
       "address-line1": "line1",
-      "address-line2": "",
+      "address-line2": undefined,
       "address-line3": "line3 line5",
     },
   },
@@ -131,10 +131,10 @@ const ADDRESS_COMPUTE_TESTCASES = [
       "tel": "+886212345678",
       "tel-country-code": "+886",
       "tel-national": "0212345678",
-      "tel-area-code": "",
-      "tel-local": "",
-      "tel-local-prefix": "",
-      "tel-local-suffix": "",
+      "tel-area-code": undefined,
+      "tel-local": undefined,
+      "tel-local-prefix": undefined,
+      "tel-local-suffix": undefined,
     },
   },
   {
@@ -162,10 +162,10 @@ const ADDRESS_COMPUTE_TESTCASES = [
       "tel": "+886212345678",
       "tel-country-code": "+886",
       "tel-national": "0212345678",
-      "tel-area-code": "",
-      "tel-local": "",
-      "tel-local-prefix": "",
-      "tel-local-suffix": "",
+      "tel-area-code": undefined,
+      "tel-local": undefined,
+      "tel-local-prefix": undefined,
+      "tel-local-suffix": undefined,
     },
   },
   {
@@ -175,12 +175,12 @@ const ADDRESS_COMPUTE_TESTCASES = [
     },
     expectedResult: {
       "tel": "12345",
-      "tel-country-code": "",
+      "tel-country-code": undefined,
       "tel-national": "12345",
-      "tel-area-code": "",
-      "tel-local": "",
-      "tel-local-prefix": "",
-      "tel-local-suffix": "",
+      "tel-area-code": undefined,
+      "tel-local": undefined,
+      "tel-local-prefix": undefined,
+      "tel-local-suffix": undefined,
     },
   },
 ];
@@ -310,13 +310,43 @@ const ADDRESS_NORMALIZE_TESTCASES = [
     },
   },
   {
+    description: "Has alternative \"country-name\"",
+    address: {
+      "country-name": "america",
+    },
+    expectedResult: {
+      "country": "US",
+      "country-name": "United States",
+    },
+  },
+  {
+    description: "Has \"country-name\" as a substring",
+    address: {
+      "country-name": "test america test",
+    },
+    expectedResult: {
+      "country": "US",
+      "country-name": "United States",
+    },
+  },
+  {
+    description: "Has \"country-name\" as part of a word",
+    address: {
+      "country-name": "TRUST",
+    },
+    expectedResult: {
+      "country": undefined,
+      "country-name": undefined,
+    },
+  },
+  {
     description: "Has unknown \"country-name\"",
     address: {
       "country-name": "unknown country name",
     },
     expectedResult: {
       "country": undefined,
-      "country-name": "",
+      "country-name": undefined,
     },
   },
   {
@@ -338,7 +368,7 @@ const ADDRESS_NORMALIZE_TESTCASES = [
     },
     expectedResult: {
       "country": undefined,
-      "country-name": "",
+      "country-name": undefined,
     },
   },
   {
@@ -348,7 +378,7 @@ const ADDRESS_NORMALIZE_TESTCASES = [
     },
     expectedResult: {
       "country": undefined,
-      "country-name": "",
+      "country-name": undefined,
     },
   },
 
@@ -458,6 +488,7 @@ const CREDIT_CARD_COMPUTE_TESTCASES = [
   {
     description: "Empty credit card",
     creditCard: {
+      "cc-number": "1234123412341234", // cc-number won't be verified
     },
     expectedResult: {
     },
@@ -468,6 +499,7 @@ const CREDIT_CARD_COMPUTE_TESTCASES = [
     description: "Has \"cc-name\"",
     creditCard: {
       "cc-name": "Timothy John Berners-Lee",
+      "cc-number": "1234123412341234", // cc-number won't be verified
     },
     expectedResult: {
       "cc-name": "Timothy John Berners-Lee",
@@ -481,8 +513,9 @@ const CREDIT_CARD_COMPUTE_TESTCASES = [
 const CREDIT_CARD_NORMALIZE_TESTCASES = [
   // Empty
   {
-    description: "Empty credit card",
+    description: "No normalizable field",
     creditCard: {
+      "cc-number": "1234123412341234", // cc-number won't be verified
     },
     expectedResult: {
     },
@@ -495,6 +528,7 @@ const CREDIT_CARD_NORMALIZE_TESTCASES = [
       "cc-name": "Timothy John Berners-Lee",
       "cc-given-name": "John",
       "cc-family-name": "Doe",
+      "cc-number": "1234123412341234", // cc-number won't be verified
     },
     expectedResult: {
       "cc-name": "Timothy John Berners-Lee",
@@ -505,9 +539,19 @@ const CREDIT_CARD_NORMALIZE_TESTCASES = [
     creditCard: {
       "cc-given-name": "John",
       "cc-family-name": "Doe",
+      "cc-number": "1234123412341234", // cc-number won't be verified
     },
     expectedResult: {
       "cc-name": "John Doe",
+    },
+  },
+  {
+    description: "Number should be encrypted and masked",
+    creditCard: {
+      "cc-number": "1234123412341234",
+    },
+    expectedResult: {
+      "cc-number": "************1234",
     },
   },
 ];
@@ -564,7 +608,11 @@ add_task(async function test_computeCreditCardFields() {
   let profileStorage = new ProfileStorage(path);
   await profileStorage.initialize();
 
-  CREDIT_CARD_COMPUTE_TESTCASES.forEach(testcase => profileStorage.creditCards.add(testcase.creditCard));
+  for (let testcase of CREDIT_CARD_COMPUTE_TESTCASES) {
+    let encryptedCC = Object.assign({}, testcase.creditCard);
+    await profileStorage.creditCards.normalizeCCNumberFields(encryptedCC);
+    profileStorage.creditCards.add(encryptedCC);
+  }
   await profileStorage._saveImmediately();
 
   profileStorage = new ProfileStorage(path);
@@ -584,7 +632,11 @@ add_task(async function test_normalizeCreditCardFields() {
   let profileStorage = new ProfileStorage(path);
   await profileStorage.initialize();
 
-  CREDIT_CARD_NORMALIZE_TESTCASES.forEach(testcase => profileStorage.creditCards.add(testcase.creditCard));
+  for (let testcase of CREDIT_CARD_NORMALIZE_TESTCASES) {
+    let encryptedCC = Object.assign({}, testcase.creditCard);
+    await profileStorage.creditCards.normalizeCCNumberFields(encryptedCC);
+    profileStorage.creditCards.add(encryptedCC);
+  }
   await profileStorage._saveImmediately();
 
   profileStorage = new ProfileStorage(path);

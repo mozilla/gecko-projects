@@ -10,7 +10,7 @@ use context::QuirksMode;
 use cssparser::{DeclarationListParser, parse_important, ParserInput, CowRcStr};
 use cssparser::{Parser, AtRuleParser, DeclarationParser, Delimiter, ParseError as CssParseError};
 use error_reporting::{ParseErrorReporter, ContextualParseError};
-use parser::{ParserContext, log_css_error};
+use parser::ParserContext;
 use properties::animated_properties::AnimationValue;
 use selectors::parser::SelectorParseError;
 use shared_lock::Locked;
@@ -518,13 +518,35 @@ impl PropertyDeclarationBlock {
     }
 
     /// Take a declaration block known to contain a single property and serialize it.
-    pub fn single_value_to_css<W>(&self, property: &PropertyId, dest: &mut W) -> fmt::Result
-        where W: fmt::Write,
+    pub fn single_value_to_css<W>(
+        &self,
+        property: &PropertyId,
+        dest: &mut W,
+        computed_values: Option<&ComputedValues>,
+    ) -> fmt::Result
+    where
+        W: fmt::Write,
     {
         match property.as_shorthand() {
             Err(_longhand_or_custom) => {
                 if self.declarations.len() == 1 {
-                    self.declarations[0].0.to_css(dest)
+                    let declaration = &self.declarations[0].0;
+                    // If we have a longhand declaration with variables, those variables will be
+                    // stored as unparsed values. As a temporary measure to produce sensible results
+                    // in Gecko's getKeyframes() implementation for CSS animations, if
+                    // |computed_values| is supplied, we use it to expand such variable
+                    // declarations. This will be fixed properly in Gecko bug 1391537.
+                    match (declaration, computed_values) {
+                        (&PropertyDeclaration::WithVariables(id, ref unparsed),
+                         Some(ref computed_values)) => unparsed
+                            .substitute_variables(
+                                id,
+                                &computed_values.custom_properties(),
+                                QuirksMode::NoQuirks,
+                            )
+                            .to_css(dest),
+                        (ref d, _) => d.to_css(dest),
+                    }
                 } else {
                     Err(fmt::Error)
                 }
@@ -909,15 +931,15 @@ pub fn parse_one_declaration_into(declarations: &mut SourcePropertyDeclaration,
                                      quirks_mode);
     let mut input = ParserInput::new(input);
     let mut parser = Parser::new(&mut input);
-    let start = parser.position();
+    let start_position = parser.position();
+    let start_location = parser.current_source_location();
     parser.parse_entirely(|parser| {
         PropertyDeclaration::parse_into(declarations, id, &context, parser)
             .map_err(|e| e.into())
     }).map_err(|err| {
-        let end = parser.position();
         let error = ContextualParseError::UnsupportedPropertyDeclaration(
-            parser.slice(start..end), err);
-        log_css_error(&mut parser, start, error, &context);
+            parser.slice_from(start_position), err);
+        context.log_css_error(start_location, error);
     })
 }
 
@@ -947,7 +969,8 @@ impl<'a, 'b, 'i> DeclarationParser<'i> for PropertyDeclarationParser<'a, 'b> {
 
     fn parse_value<'t>(&mut self, name: CowRcStr<'i>, input: &mut Parser<'i, 't>)
                        -> Result<Importance, ParseError<'i>> {
-        let id = match PropertyId::parse(&name) {
+        let prop_context = PropertyParserContext::new(self.context);
+        let id = match PropertyId::parse(&name, Some(&prop_context)) {
             Ok(id) => id,
             Err(()) => {
                 return Err(if is_non_mozilla_vendor_identifier(&name) {
@@ -1000,10 +1023,8 @@ pub fn parse_property_declaration_list(context: &ParserContext,
                     continue;
                 }
 
-                let pos = err.span.start;
-                let error = ContextualParseError::UnsupportedPropertyDeclaration(
-                    iter.input.slice(err.span), err.error);
-                log_css_error(iter.input, pos, error, &context);
+                let error = ContextualParseError::UnsupportedPropertyDeclaration(err.slice, err.error);
+                context.log_css_error(err.location, error);
             }
         }
     }

@@ -52,6 +52,7 @@
 #include "nsScriptNameSpaceManager.h"
 #include "nsISlowScriptDebug.h"
 #include "nsWindowMemoryReporter.h"
+#include "nsWindowSizes.h"
 #include "WindowNamedPropertiesHandler.h"
 #include "nsFrameSelection.h"
 #include "nsNetUtil.h"
@@ -124,6 +125,7 @@
 #include "nsIPrompt.h"
 #include "nsIPromptService.h"
 #include "nsIPromptFactory.h"
+#include "nsIAddonPolicyService.h"
 #include "nsIWritablePropertyBag2.h"
 #include "nsIWebNavigation.h"
 #include "nsIWebBrowserChrome.h"
@@ -255,10 +257,6 @@
 
 #ifdef MOZ_WEBSPEECH
 #include "mozilla/dom/SpeechSynthesis.h"
-#endif
-
-#ifdef MOZ_B2G
-#include "nsPISocketTransportService.h"
 #endif
 
 // Apple system headers seem to have a check() macro.  <sigh>
@@ -1022,7 +1020,7 @@ NextWindowID();
 template<class T>
 nsPIDOMWindow<T>::nsPIDOMWindow(nsPIDOMWindowOuter *aOuterWindow)
 : mFrameElement(nullptr), mDocShell(nullptr), mModalStateDepth(0),
-  mMutationBits(0), mIsDocumentLoaded(false),
+  mMutationBits(0), mActivePeerConnections(0), mIsDocumentLoaded(false),
   mIsHandlingResizeEvent(false), mIsInnerWindow(aOuterWindow != nullptr),
   mMayHavePaintEventListener(false), mMayHaveTouchEventListener(false),
   mMayHaveSelectionChangeEventListener(false),
@@ -1623,10 +1621,6 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
 #ifdef DEBUG
     mSetOpenerWindowCalled(false),
 #endif
-#ifdef MOZ_B2G
-    mNetworkUploadObserverEnabled(false),
-    mNetworkDownloadObserverEnabled(false),
-#endif
     mCleanedUp(false),
     mDialogAbuseCount(0),
     mAreDialogsEnabled(true),
@@ -1971,11 +1965,6 @@ nsGlobalWindow::CleanUp()
      sns->Unregister(mObserver);
     }
 
-#ifdef MOZ_B2G
-    DisableNetworkEvent(eNetworkUpload);
-    DisableNetworkEvent(eNetworkDownload);
-#endif // MOZ_B2G
-
     if (mIdleService) {
       mIdleService->RemoveIdleObserver(mObserver, MIN_IDLE_NOTIFICATION_TIME_S);
     }
@@ -2047,9 +2036,6 @@ nsGlobalWindow::CleanUp()
     DisableVRUpdates();
     mHasVREvents = false;
     mHasVRDisplayActivateEvents = false;
-#ifdef MOZ_B2G
-    DisableTimeChangeNotifications();
-#endif
     DisableIdleCallbackRequests();
   } else {
     MOZ_ASSERT(!mHasGamepad);
@@ -2647,7 +2633,7 @@ nsGlobalWindow::SetInitialPrincipalToSubject()
     // Ensure that if someone plays with this document they will get
     // layout happening.
     nsRect r = shell->GetPresContext()->GetVisibleArea();
-    shell->Initialize(r.width, r.height);
+    shell->Initialize(r.Width(), r.Height());
   }
 }
 
@@ -4031,17 +4017,6 @@ nsGlobalWindow::PostHandleEvent(EventChainPostVisitor& aVisitor)
   return NS_OK;
 }
 
-nsresult
-nsGlobalWindow::DispatchDOMEvent(WidgetEvent* aEvent,
-                                 nsIDOMEvent* aDOMEvent,
-                                 nsPresContext* aPresContext,
-                                 nsEventStatus* aEventStatus)
-{
-  return EventDispatcher::DispatchDOMEvent(static_cast<nsPIDOMWindow*>(this),
-                                           aEvent, aDOMEvent, aPresContext,
-                                           aEventStatus);
-}
-
 void
 nsGlobalWindow::PoisonOuterWindowProxy(JSObject *aObject)
 {
@@ -4402,6 +4377,24 @@ void
 nsPIDOMWindowInner::SyncStateFromParentWindow()
 {
   nsGlobalWindow::Cast(this)->SyncStateFromParentWindow();
+}
+
+void
+nsPIDOMWindowInner::AddPeerConnection()
+{
+  nsGlobalWindow::Cast(this)->AddPeerConnection();
+}
+
+void
+nsPIDOMWindowInner::RemovePeerConnection()
+{
+  nsGlobalWindow::Cast(this)->RemovePeerConnection();
+}
+
+bool
+nsPIDOMWindowInner::HasActivePeerConnections()
+{
+  return nsGlobalWindow::Cast(this)->HasActivePeerConnections();
 }
 
 bool
@@ -5772,7 +5765,7 @@ nsGlobalWindow::SetInnerWidthOuter(int32_t aInnerWidth,
     presContext = presShell->GetPresContext();
 
     nsRect shellArea = presContext->GetVisibleArea();
-    height = shellArea.height;
+    height = shellArea.Height();
     SetCSSViewportWidthAndHeight(nsPresContext::CSSPixelsToAppUnits(aInnerWidth),
                                  height);
     return;
@@ -5866,7 +5859,7 @@ nsGlobalWindow::SetInnerHeightOuter(int32_t aInnerHeight,
 
     nsRect shellArea = presContext->GetVisibleArea();
     nscoord height = aInnerHeight;
-    nscoord width = shellArea.width;
+    nscoord width = shellArea.Width();
     CheckSecurityWidthAndHeight(nullptr, &height, aCallerType);
     SetCSSViewportWidthAndHeight(width,
                                  nsPresContext::CSSPixelsToAppUnits(height));
@@ -6486,8 +6479,8 @@ nsGlobalWindow::SetCSSViewportWidthAndHeight(nscoord aInnerWidth, nscoord aInner
   mDocShell->GetPresContext(getter_AddRefs(presContext));
 
   nsRect shellArea = presContext->GetVisibleArea();
-  shellArea.height = aInnerHeight;
-  shellArea.width = aInnerWidth;
+  shellArea.SetHeight(aInnerHeight);
+  shellArea.SetWidth(aInnerWidth);
 
   presContext->SetVisibleArea(shellArea);
 }
@@ -11708,7 +11701,7 @@ nsGlobalWindow::HandleIdleActiveEvent()
 }
 
 nsGlobalWindow::SlowScriptResponse
-nsGlobalWindow::ShowSlowScriptDialog()
+nsGlobalWindow::ShowSlowScriptDialog(const nsString& aAddonId)
 {
   MOZ_ASSERT(IsInnerWindow());
 
@@ -11758,9 +11751,13 @@ nsGlobalWindow::ShowSlowScriptDialog()
     nsIDocShell* docShell = GetDocShell();
     nsCOMPtr<nsITabChild> child = docShell ? docShell->GetTabChild() : nullptr;
     action = monitor->NotifySlowScript(child,
-                                       filename.get());
+                                       filename.get(),
+                                       aAddonId);
     if (action == ProcessHangMonitor::Terminate) {
       return KillSlowScript;
+    }
+    if (action == ProcessHangMonitor::TerminateGlobal) {
+      return KillScriptGlobal;
     }
 
     if (action == ProcessHangMonitor::StartDebugger) {
@@ -11798,61 +11795,58 @@ nsGlobalWindow::ShowSlowScriptDialog()
     }
   }
 
-  bool showDebugButton = !!debugCallback;
+  bool failed = false;
+  auto getString = [&] (const char* name,
+                        nsContentUtils::PropertiesFile propFile = nsContentUtils::eDOM_PROPERTIES) {
+    nsAutoString result;
+    nsresult rv = nsContentUtils::GetLocalizedString(
+      propFile, name, result);
+
+    // GetStringFromName can return NS_OK and still give nullptr string
+    failed = failed || NS_FAILED(rv) || result.IsEmpty();
+    return Move(result);
+  };
+
+  bool isAddonScript = !aAddonId.IsEmpty();
+  bool showDebugButton = debugCallback && !isAddonScript;
 
   // Get localizable strings
-  nsAutoString title, msg, stopButton, waitButton, debugButton, neverShowDlg;
 
-  rv = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                          "KillScriptTitle",
-                                          title);
+  nsAutoString title, checkboxMsg, debugButton, msg;
+  if (isAddonScript) {
+    title = getString("KillAddonScriptTitle");
+    checkboxMsg = getString("KillAddonScriptGlobalMessage");
 
-  nsresult tmp = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                           "StopScriptButton",
-                                           stopButton);
-  if (NS_FAILED(tmp)) {
-    rv = tmp;
-  }
+    auto appName = getString("brandShortName", nsContentUtils::eBRAND_PROPERTIES);
 
-  tmp = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                           "WaitForScriptButton",
-                                           waitButton);
-  if (NS_FAILED(tmp)) {
-    rv = tmp;
-  }
-
-  tmp = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                           "DontAskAgain",
-                                           neverShowDlg);
-  if (NS_FAILED(tmp)) {
-    rv = tmp;
-  }
-
-  if (showDebugButton) {
-    tmp = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                             "DebugScriptButton",
-                                             debugButton);
-    if (NS_FAILED(tmp)) {
-      rv = tmp;
+    nsCOMPtr<nsIAddonPolicyService> aps = do_GetService("@mozilla.org/addons/policy-service;1");
+    nsString addonName;
+    if (!aps || NS_FAILED(aps->GetExtensionName(aAddonId, addonName))) {
+      addonName = aAddonId;
     }
 
-    tmp = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                             "KillScriptWithDebugMessage",
-                                             msg);
-    if (NS_FAILED(tmp)) {
-      rv = tmp;
-    }
-  }
-  else {
-    tmp = nsContentUtils::GetLocalizedString(nsContentUtils::eDOM_PROPERTIES,
-                                             "KillScriptMessage",
-                                             msg);
-    if (NS_FAILED(tmp)) {
-      rv = tmp;
+    const char16_t* params[] = {addonName.get(), appName.get()};
+    rv = nsContentUtils::FormatLocalizedString(
+        nsContentUtils::eDOM_PROPERTIES, "KillAddonScriptMessage",
+        params, msg);
+
+    failed = failed || NS_FAILED(rv);
+  } else {
+    title = getString("KillScriptTitle");
+    checkboxMsg = getString("DontAskAgain");
+
+    if (showDebugButton) {
+      debugButton = getString("DebugScriptButton");
+      msg = getString("KillScriptWithDebugMessage");
+    } else {
+      msg = getString("KillScriptMessage");
     }
   }
 
-  if (NS_FAILED(rv)) {
+  auto stopButton = getString("StopScriptButton");
+  auto waitButton = getString("WaitForScriptButton");
+
+  if (failed) {
     NS_ERROR("Failed to get localized strings.");
     return ContinueSlowScript;
   }
@@ -11900,8 +11894,6 @@ nsGlobalWindow::ShowSlowScriptDialog()
     }
   }
 
-  int32_t buttonPressed = 0; // In case the user exits dialog by clicking X.
-  bool neverShowDlgChk = false;
   uint32_t buttonFlags = nsIPrompt::BUTTON_POS_1_DEFAULT +
                          (nsIPrompt::BUTTON_TITLE_IS_STRING *
                           (nsIPrompt::BUTTON_POS_0 + nsIPrompt::BUTTON_POS_1));
@@ -11910,26 +11902,36 @@ nsGlobalWindow::ShowSlowScriptDialog()
   if (showDebugButton)
     buttonFlags += nsIPrompt::BUTTON_TITLE_IS_STRING * nsIPrompt::BUTTON_POS_2;
 
+  bool checkboxValue = false;
+  int32_t buttonPressed = 0; // In case the user exits dialog by clicking X.
   {
     // Null out the operation callback while we're re-entering JS here.
     AutoDisableJSInterruptCallback disabler(cx);
+
     // Open the dialog.
     rv = prompt->ConfirmEx(title.get(), msg.get(), buttonFlags,
                            waitButton.get(), stopButton.get(),
-                           debugButton.get(), neverShowDlg.get(),
-                           &neverShowDlgChk, &buttonPressed);
+                           debugButton.get(), checkboxMsg.get(),
+                           &checkboxValue, &buttonPressed);
   }
 
-  if (NS_SUCCEEDED(rv) && (buttonPressed == 0)) {
-    return neverShowDlgChk ? AlwaysContinueSlowScript : ContinueSlowScript;
+  if (buttonPressed == 0) {
+    if (checkboxValue && !isAddonScript && NS_SUCCEEDED(rv))
+      return AlwaysContinueSlowScript;
+    return ContinueSlowScript;
   }
+
   if (buttonPressed == 2) {
-    if (debugCallback) {
-      rv = debugCallback->HandleSlowScriptDebug(this);
-      return NS_SUCCEEDED(rv) ? ContinueSlowScript : KillSlowScript;
-    }
+    MOZ_RELEASE_ASSERT(debugCallback);
+
+    rv = debugCallback->HandleSlowScriptDebug(this);
+    return NS_SUCCEEDED(rv) ? ContinueSlowScript : KillSlowScript;
   }
+
   JS_ClearPendingException(cx);
+
+  if (checkboxValue && isAddonScript)
+    return KillScriptGlobal;
   return KillSlowScript;
 }
 
@@ -12167,27 +12169,6 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
 
     return NS_OK;
   }
-
-#ifdef MOZ_B2G
-  if (!nsCRT::strcmp(aTopic, NS_NETWORK_ACTIVITY_BLIP_UPLOAD_TOPIC) ||
-      !nsCRT::strcmp(aTopic, NS_NETWORK_ACTIVITY_BLIP_DOWNLOAD_TOPIC)) {
-    MOZ_ASSERT(IsInnerWindow());
-    if (!AsInner()->IsCurrentInnerWindow()) {
-      return NS_OK;
-    }
-
-    RefPtr<Event> event = NS_NewDOMEvent(this, nullptr, nullptr);
-    event->InitEvent(
-      !nsCRT::strcmp(aTopic, NS_NETWORK_ACTIVITY_BLIP_UPLOAD_TOPIC)
-        ? NETWORK_UPLOAD_EVENT_NAME
-        : NETWORK_DOWNLOAD_EVENT_NAME,
-      false, false);
-    event->SetTrusted(true);
-
-    bool dummy;
-    return DispatchEvent(event, &dummy);
-  }
-#endif // MOZ_B2G
 
   if (!nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
     MOZ_ASSERT(!NS_strcmp(aData, u"intl.accept_languages"));
@@ -12608,6 +12589,31 @@ nsGlobalWindow::SyncStateFromParentWindow()
   for (uint32_t i = 0; i < (parentSuspendDepth - parentFreezeDepth); ++i) {
     Suspend();
   }
+}
+
+void
+nsGlobalWindow::AddPeerConnection()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(IsInnerWindow());
+  mActivePeerConnections++;
+}
+
+void
+nsGlobalWindow::RemovePeerConnection()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(IsInnerWindow());
+  MOZ_ASSERT(mActivePeerConnections);
+  mActivePeerConnections--;
+}
+
+bool
+nsGlobalWindow::HasActivePeerConnections()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(IsInnerWindow());
+  return mActivePeerConnections;
 }
 
 template<typename Method>
@@ -13616,17 +13622,16 @@ nsGlobalWindow::DisableTimeChangeNotifications()
 }
 
 void
-nsGlobalWindow::AddSizeOfIncludingThis(nsWindowSizes* aWindowSizes) const
+nsGlobalWindow::AddSizeOfIncludingThis(nsWindowSizes& aWindowSizes) const
 {
-  aWindowSizes->mDOMOtherSize += aWindowSizes->mState.mMallocSizeOf(this);
+  aWindowSizes.mDOMOtherSize += aWindowSizes.mState.mMallocSizeOf(this);
 
   if (IsInnerWindow()) {
     EventListenerManager* elm = GetExistingListenerManager();
     if (elm) {
-      aWindowSizes->mDOMOtherSize +=
-        elm->SizeOfIncludingThis(aWindowSizes->mState.mMallocSizeOf);
-      aWindowSizes->mDOMEventListenersCount +=
-        elm->ListenerCount();
+      aWindowSizes.mDOMOtherSize +=
+        elm->SizeOfIncludingThis(aWindowSizes.mState.mMallocSizeOf);
+      aWindowSizes.mDOMEventListenersCount += elm->ListenerCount();
     }
     if (mDoc) {
       // Multiple global windows can share a document. So only measure the
@@ -13640,32 +13645,32 @@ nsGlobalWindow::AddSizeOfIncludingThis(nsWindowSizes* aWindowSizes) const
   }
 
   if (mNavigator) {
-    aWindowSizes->mDOMOtherSize +=
-      mNavigator->SizeOfIncludingThis(aWindowSizes->mState.mMallocSizeOf);
+    aWindowSizes.mDOMOtherSize +=
+      mNavigator->SizeOfIncludingThis(aWindowSizes.mState.mMallocSizeOf);
   }
 
-  aWindowSizes->mDOMEventTargetsSize +=
+  aWindowSizes.mDOMEventTargetsSize +=
     mEventTargetObjects.ShallowSizeOfExcludingThis(
-      aWindowSizes->mState.mMallocSizeOf);
+      aWindowSizes.mState.mMallocSizeOf);
 
   for (auto iter = mEventTargetObjects.ConstIter(); !iter.Done(); iter.Next()) {
     DOMEventTargetHelper* et = iter.Get()->GetKey();
     if (nsCOMPtr<nsISizeOfEventTarget> iSizeOf = do_QueryObject(et)) {
-      aWindowSizes->mDOMEventTargetsSize +=
+      aWindowSizes.mDOMEventTargetsSize +=
         iSizeOf->SizeOfEventTargetIncludingThis(
-          aWindowSizes->mState.mMallocSizeOf);
+          aWindowSizes.mState.mMallocSizeOf);
     }
     if (EventListenerManager* elm = et->GetExistingListenerManager()) {
-      aWindowSizes->mDOMEventListenersCount += elm->ListenerCount();
+      aWindowSizes.mDOMEventListenersCount += elm->ListenerCount();
     }
-    ++aWindowSizes->mDOMEventTargetsCount;
+    ++aWindowSizes.mDOMEventTargetsCount;
   }
 
   if (IsInnerWindow() && mPerformance) {
-    aWindowSizes->mDOMPerformanceUserEntries =
-      mPerformance->SizeOfUserEntries(aWindowSizes->mState.mMallocSizeOf);
-    aWindowSizes->mDOMPerformanceResourceEntries =
-      mPerformance->SizeOfResourceEntries(aWindowSizes->mState.mMallocSizeOf);
+    aWindowSizes.mDOMPerformanceUserEntries =
+      mPerformance->SizeOfUserEntries(aWindowSizes.mState.mMallocSizeOf);
+    aWindowSizes.mDOMPerformanceResourceEntries =
+      mPerformance->SizeOfResourceEntries(aWindowSizes.mState.mMallocSizeOf);
   }
 }
 
@@ -14666,80 +14671,6 @@ nsGlobalWindow::ReportLargeAllocStatus()
                                   nsContentUtils::eDOM_PROPERTIES,
                                   message);
 }
-
-#ifdef MOZ_B2G
-void
-nsGlobalWindow::EnableNetworkEvent(EventMessage aEventMessage)
-{
-  MOZ_ASSERT(IsInnerWindow());
-
-  nsCOMPtr<nsIPermissionManager> permMgr =
-    services::GetPermissionManager();
-  if (!permMgr) {
-    NS_ERROR("No PermissionManager available!");
-    return;
-  }
-
-  uint32_t permission = nsIPermissionManager::DENY_ACTION;
-  permMgr->TestExactPermissionFromPrincipal(GetPrincipal(), "network-events",
-                                            &permission);
-
-  if (permission != nsIPermissionManager::ALLOW_ACTION) {
-    return;
-  }
-
-  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-  if (!os) {
-    NS_ERROR("ObserverService should be available!");
-    return;
-  }
-
-  switch (aEventMessage) {
-    case eNetworkUpload:
-      if (!mNetworkUploadObserverEnabled) {
-        mNetworkUploadObserverEnabled = true;
-        os->AddObserver(mObserver, NS_NETWORK_ACTIVITY_BLIP_UPLOAD_TOPIC, false);
-      }
-      break;
-    case eNetworkDownload:
-      if (!mNetworkDownloadObserverEnabled) {
-        mNetworkDownloadObserverEnabled = true;
-        os->AddObserver(mObserver, NS_NETWORK_ACTIVITY_BLIP_DOWNLOAD_TOPIC, false);
-      }
-      break;
-    default:
-      break;
-  }
-}
-
-void
-nsGlobalWindow::DisableNetworkEvent(EventMessage aEventMessage)
-{
-  MOZ_ASSERT(IsInnerWindow());
-
-  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-  if (!os) {
-    return;
-  }
-
-  switch (aEventMessage) {
-    case eNetworkUpload:
-      if (mNetworkUploadObserverEnabled) {
-        mNetworkUploadObserverEnabled = false;
-        os->RemoveObserver(mObserver, NS_NETWORK_ACTIVITY_BLIP_UPLOAD_TOPIC);
-      }
-      break;
-    case eNetworkDownload:
-      if (mNetworkDownloadObserverEnabled) {
-        mNetworkDownloadObserverEnabled = false;
-        os->RemoveObserver(mObserver, NS_NETWORK_ACTIVITY_BLIP_DOWNLOAD_TOPIC);
-      }
-      break;
-    default:
-      break;
-  }
-}
-#endif // MOZ_B2G
 
 void
 nsGlobalWindow::RedefineProperty(JSContext* aCx, const char* aPropName,

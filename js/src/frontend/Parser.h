@@ -180,16 +180,6 @@ class ParserBase : public StrictModeGetter
                pc->isLegacyGenerator();
     }
 
-    bool asyncIterationSupported() {
-#ifdef RELEASE_OR_BETA
-        return false;
-#else
-        // Expose Async Iteration only to web content until the spec proposal
-        // gets stable.
-        return !options().isProbablySystemOrAddonCode;
-#endif
-    }
-
     virtual bool strictMode() { return pc->sc()->strict(); }
     bool setLocalStrictMode(bool strict) {
         MOZ_ASSERT(tokenStream.debugHasNoLookahead());
@@ -660,7 +650,7 @@ class Parser final : public ParserBase, private JS::AutoGCRooter
     // While on a |let| TOK_NAME token, examine |next|.  Indicate whether
     // |next|, the next token already gotten with modifier TokenStream::None,
     // continues a LexicalDeclaration.
-    bool nextTokenContinuesLetDeclaration(TokenKind next, YieldHandling yieldHandling);
+    bool nextTokenContinuesLetDeclaration(TokenKind next);
 
     Node lexicalDeclaration(YieldHandling yieldHandling, DeclarationKind kind);
 
@@ -934,8 +924,13 @@ class Parser final : public ParserBase, private JS::AutoGCRooter
     Node objectBindingPattern(DeclarationKind kind, YieldHandling yieldHandling);
     Node arrayBindingPattern(DeclarationKind kind, YieldHandling yieldHandling);
 
+    enum class TargetBehavior {
+        PermitAssignmentPattern,
+        ForbidAssignmentPattern
+    };
     void checkDestructuringAssignmentTarget(Node expr, TokenPos exprPos,
-                                            PossibleError* possibleError);
+                                            PossibleError* possibleError,
+                                            TargetBehavior behavior = TargetBehavior::PermitAssignmentPattern);
     void checkDestructuringAssignmentElement(Node expr, TokenPos exprPos,
                                              PossibleError* possibleError);
 

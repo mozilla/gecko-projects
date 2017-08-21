@@ -154,7 +154,7 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
             trace!(" > visitedness change, force subtree restyle");
             // We can't just return here because there may also be attribute
             // changes as well that imply additional hints.
-            let mut data = self.data.as_mut().unwrap();
+            let data = self.data.as_mut().unwrap();
             data.restyle.hint.insert(RestyleHint::restyle_subtree());
         }
 
@@ -213,9 +213,9 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
                 invalidates_self: false,
             };
 
-            collector.collect_dependencies_in_invalidation_map(
-                shared_context.stylist.invalidation_map(),
-            );
+            shared_context.stylist.each_invalidation_map(|invalidation_map| {
+                collector.collect_dependencies_in_invalidation_map(invalidation_map);
+            });
 
             // TODO(emilio): Consider storing dependencies from the UA sheet in
             // a different map. If we do that, we can skip the stuff on the
@@ -223,9 +223,9 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
             // just at that map.
             let _cut_off_inheritance =
                 self.element.each_xbl_stylist(|stylist| {
-                    collector.collect_dependencies_in_invalidation_map(
-                        stylist.invalidation_map(),
-                    );
+                    stylist.each_invalidation_map(|invalidation_map| {
+                        collector.collect_dependencies_in_invalidation_map(invalidation_map);
+                    });
                 });
 
             collector.invalidates_self
@@ -595,14 +595,27 @@ impl<'a, 'b: 'a, E> TreeStyleInvalidator<'a, 'b, E>
                 matched = true;
 
                 if matches!(next_combinator, Combinator::PseudoElement) {
+                    // This will usually be the very next component, except for
+                    // the fact that we store compound selectors the other way
+                    // around, so there could also be state pseudo-classes.
                     let pseudo_selector =
                         invalidation.selector
                             .iter_raw_parse_order_from(next_combinator_offset - 1)
+                            .skip_while(|c| matches!(**c, Component::NonTSPseudoClass(..)))
                             .next()
                             .unwrap();
+
                     let pseudo = match *pseudo_selector {
                         Component::PseudoElement(ref pseudo) => pseudo,
-                        _ => unreachable!("Someone seriously messed up selector parsing"),
+                        _ => {
+                            unreachable!(
+                                "Someone seriously messed up selector parsing: \
+                                {:?} at offset {:?}: {:?}",
+                                invalidation.selector,
+                                next_combinator_offset,
+                                pseudo_selector,
+                            )
+                        }
                     };
 
                     // FIXME(emilio): This is not ideal, and could not be

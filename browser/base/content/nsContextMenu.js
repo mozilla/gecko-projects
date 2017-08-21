@@ -9,19 +9,14 @@ Components.utils.import("resource://gre/modules/BrowserUtils.jsm");
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 
-
-XPCOMUtils.defineLazyModuleGetter(this, "SpellCheckHelper",
-  "resource://gre/modules/InlineSpellChecker.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "LoginHelper",
-  "resource://gre/modules/LoginHelper.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "LoginManagerContextMenu",
-  "resource://gre/modules/LoginManagerContextMenu.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "WebNavigationFrames",
-  "resource://gre/modules/WebNavigationFrames.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
-  "resource://gre/modules/ContextualIdentityService.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "DevToolsShim",
-  "chrome://devtools-shim/content/DevToolsShim.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  SpellCheckHelper: "resource://gre/modules/InlineSpellChecker.jsm",
+  LoginHelper: "resource://gre/modules/LoginHelper.jsm",
+  LoginManagerContextMenu: "resource://gre/modules/LoginManagerContextMenu.jsm",
+  WebNavigationFrames: "resource://gre/modules/WebNavigationFrames.jsm",
+  ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
+  DevToolsShim: "chrome://devtools-shim/content/DevToolsShim.jsm",
+});
 
 var gContextMenuContentData = null;
 
@@ -312,9 +307,8 @@ nsContextMenu.prototype = {
                        this.onVideo || this.onAudio ||
                        this.onLink || this.onTextInput);
 
-    var showInspect = DevToolsShim.isInstalled() &&
-                      this.inTabBrowser &&
-                      gPrefService.getBoolPref("devtools.inspector.enabled", false);
+    var showInspect = this.inTabBrowser &&
+                      gPrefService.getBoolPref("devtools.inspector.enabled", true);
 
     this.showItem("context-viewsource", shouldShow);
     this.showItem("context-viewinfo", shouldShow);
@@ -380,13 +374,12 @@ nsContextMenu.prototype = {
     let bookmarkPage = document.getElementById("context-bookmarkpage");
     this.showItem(bookmarkPage,
                   !(this.isContentSelected || this.onTextInput || this.onLink ||
-                    this.onImage || this.onVideo || this.onAudio || this.onSocial ||
+                    this.onImage || this.onVideo || this.onAudio ||
                     this.onCanvas || this.inWebExtBrowser));
     bookmarkPage.setAttribute("tooltiptext", bookmarkPage.getAttribute("buttontooltiptext"));
 
     this.showItem("context-bookmarklink", (this.onLink && !this.onMailtoLink &&
-                                           !this.onSocial && !this.onMozExtLink) ||
-                                          this.onPlainTextLink);
+                                           !this.onMozExtLink) || this.onPlainTextLink);
     this.showItem("context-keywordfield",
                   this.onTextInput && this.onKeywordField);
     this.showItem("frame", this.inFrame);
@@ -424,20 +417,6 @@ nsContextMenu.prototype = {
                   this.onTextInput && !this.onNumeric && top.gBidiUI);
     this.showItem("context-bidi-page-direction-toggle",
                   !this.onTextInput && top.gBidiUI);
-
-    // SocialShare
-    let shareButton = SocialShare.shareButton;
-    let shareEnabled = shareButton && !shareButton.disabled && !this.onSocial;
-    let pageShare = shareEnabled && !(this.isContentSelected ||
-                            this.onTextInput || this.onLink || this.onImage ||
-                            this.onVideo || this.onAudio || this.onCanvas ||
-                            this.inWebExtBrowser);
-    this.showItem("context-sharepage", pageShare);
-    this.showItem("context-shareselect", shareEnabled && this.isContentSelected);
-    this.showItem("context-sharelink", shareEnabled && (this.onLink || this.onPlainTextLink) && !this.onMailtoLink && !this.onMozExtLink);
-    this.showItem("context-shareimage", shareEnabled && this.onImage);
-    this.showItem("context-sharevideo", shareEnabled && this.onVideo);
-    this.setItemAttr("context-sharevideo", "disabled", !this.mediaURL || this.mediaURL.startsWith("blob:") || this.mediaURL.startsWith("moz-extension:"));
   },
 
   initSpellingItems() {
@@ -752,7 +731,6 @@ nsContextMenu.prototype = {
       this.principal = ownerDoc.nodePrincipal;
       this.frameOuterWindowID = WebNavigationFrames.getFrameId(ownerDoc.defaultView);
     }
-    this.onSocial = !!this.browser.getAttribute("origin");
     this.webExtBrowserType = this.browser.getAttribute("webextension-view-type");
     this.inWebExtBrowser = !!this.webExtBrowserType;
     this.inTabBrowser = this.browser.ownerGlobal.gBrowser ?
@@ -1331,6 +1309,7 @@ nsContextMenu.prototype = {
 
       let image = document.createElementNS("http://www.w3.org/1999/xhtml", "img");
       image.src = message.data.dataUrl;
+      let imageName = message.data.imageName;
 
       // Confirm since it's annoying if you hit this accidentally.
       const kDesktopBackgroundURL =
@@ -1343,18 +1322,18 @@ nsContextMenu.prototype = {
                    getService(Ci.nsIWindowMediator);
         let dbWin = wm.getMostRecentWindow("Shell:SetDesktopBackground");
         if (dbWin) {
-          dbWin.gSetBackground.init(image);
+          dbWin.gSetBackground.init(image, imageName);
           dbWin.focus();
         } else {
           openDialog(kDesktopBackgroundURL, "",
                      "centerscreen,chrome,dialog=no,dependent,resizable=no",
-                     image);
+                     image, imageName);
         }
       } else {
         // On non-Mac platforms, the Set Wallpaper dialog is modal.
         openDialog(kDesktopBackgroundURL, "",
                    "centerscreen,chrome,dialog,modal,dependent",
-                   image);
+                   image, imageName);
       }
     };
 
@@ -1839,22 +1818,6 @@ nsContextMenu.prototype = {
     mm.sendAsyncMessage("ContextMenu:BookmarkFrame", null, { target: this.target });
   },
 
-  shareLink: function CM_shareLink() {
-    SocialShare.sharePage(null, { url: this.linkURI.spec }, this.target);
-  },
-
-  shareImage: function CM_shareImage() {
-    SocialShare.sharePage(null, { url: this.imageURL, previews: [ this.mediaURL ] }, this.target);
-  },
-
-  shareVideo: function CM_shareVideo() {
-    SocialShare.sharePage(null, { url: this.mediaURL, source: this.mediaURL }, this.target);
-  },
-
-  shareSelect: function CM_shareSelect() {
-    SocialShare.sharePage(null, { url: this.browser.currentURI.spec, text: this.textSelected }, this.target);
-  },
-
   savePageAs: function CM_savePageAs() {
     saveBrowser(this.browser);
   },
@@ -1969,7 +1932,7 @@ nsContextMenu.prototype = {
   _getTelemetryPageContextInfo() {
     let rv = [];
     for (let k of ["isContentSelected", "onLink", "onImage", "onCanvas", "onVideo", "onAudio",
-                   "onTextInput", "onSocial", "inWebExtBrowser", "inTabBrowser"]) {
+                   "onTextInput", "inWebExtBrowser", "inTabBrowser"]) {
       if (this[k]) {
         rv.push(k.replace(/^(?:is|on)(.)/, (match, firstLetter) => firstLetter.toLowerCase()));
       }

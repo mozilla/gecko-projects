@@ -13,6 +13,7 @@ const {DefaultPrefs} = Cu.import("resource://activity-stream/lib/ActivityStreamP
 const {LocalizationFeed} = Cu.import("resource://activity-stream/lib/LocalizationFeed.jsm", {});
 const {ManualMigration} = Cu.import("resource://activity-stream/lib/ManualMigration.jsm", {});
 const {NewTabInit} = Cu.import("resource://activity-stream/lib/NewTabInit.jsm", {});
+const {SectionsFeed} = Cu.import("resource://activity-stream/lib/SectionsManager.jsm", {});
 const {PlacesFeed} = Cu.import("resource://activity-stream/lib/PlacesFeed.jsm", {});
 const {PrefsFeed} = Cu.import("resource://activity-stream/lib/PrefsFeed.jsm", {});
 const {Store} = Cu.import("resource://activity-stream/lib/Store.jsm", {});
@@ -81,6 +82,18 @@ const PREFS_CONFIG = new Map([
     title: "Show the Top Sites section on the New Tab page",
     value: true
   }],
+  ["impressionStats.clicked", {
+    title: "GUIDs of clicked Top stories items",
+    value: "[]"
+  }],
+  ["impressionStats.blocked", {
+    title: "GUIDs of blocked Top stories items",
+    value: "[]"
+  }],
+  ["impressionStats.pocketed", {
+    title: "GUIDs of pocketed Top stories items",
+    value: "[]"
+  }],
   ["telemetry", {
     title: "Enable system error and usage data collection",
     value: true,
@@ -127,6 +140,12 @@ const FEEDS_DATA = [
     name: "prefs",
     factory: () => new PrefsFeed(PREFS_CONFIG),
     title: "Preferences",
+    value: true
+  },
+  {
+    name: "sections",
+    factory: () => new SectionsFeed(),
+    title: "Manages sections",
     value: true
   },
   {

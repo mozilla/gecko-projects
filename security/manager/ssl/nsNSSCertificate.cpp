@@ -896,6 +896,11 @@ nsNSSCertificate::ExportAsCMS(uint32_t chainMode,
   if (isAlreadyShutDown())
     return NS_ERROR_NOT_AVAILABLE;
 
+  nsresult rv = BlockUntilLoadableRootsLoaded();
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
   if (!mCert)
     return NS_ERROR_FAILURE;
 
@@ -1507,7 +1512,7 @@ nsNSSCertificate::Read(nsIObjectInputStream* aStream)
     return rv;
   }
 
-  nsXPIDLCString str;
+  nsCString str;
   rv = aStream->ReadBytes(len, getter_Copies(str));
   if (NS_FAILED(rv)) {
     return rv;

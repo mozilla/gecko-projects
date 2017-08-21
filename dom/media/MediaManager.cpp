@@ -69,10 +69,6 @@
 #include "browser_logging/WebRtcLog.h"
 #endif
 
-#ifdef MOZ_B2G
-#include "MediaPermissionGonk.h"
-#endif
-
 #if defined (XP_WIN)
 #include "mozilla/WindowsVersion.h"
 #include <winsock2.h>
@@ -1066,8 +1062,7 @@ public:
       mAudioDevice ? MediaStreamGraph::AUDIO_THREAD_DRIVER
                    : MediaStreamGraph::SYSTEM_THREAD_DRIVER;
     MediaStreamGraph* msg =
-      MediaStreamGraph::GetInstance(graphDriverType,
-                                    dom::AudioChannel::Normal, window);
+      MediaStreamGraph::GetInstance(graphDriverType, window);
 
     RefPtr<DOMMediaStream> domStream;
     RefPtr<SourceMediaStream> stream;
@@ -1937,10 +1932,6 @@ MediaManager::Get() {
                                             __LINE__,
                                             NS_LITERAL_STRING("Media shutdown"));
     MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
-#ifdef MOZ_B2G
-    // Init MediaPermissionManager before sending out any permission requests.
-    (void) MediaPermissionManager::GetInstance();
-#endif //MOZ_B2G
   }
   return sSingleton;
 }
@@ -3727,8 +3718,7 @@ SourceListener::StopSharing()
     MOZ_RELEASE_ASSERT(window);
     window->SetAudioCapture(false);
     MediaStreamGraph* graph =
-      MediaStreamGraph::GetInstance(MediaStreamGraph::AUDIO_THREAD_DRIVER,
-                                    dom::AudioChannel::Normal, window);
+      MediaStreamGraph::GetInstance(MediaStreamGraph::AUDIO_THREAD_DRIVER, window);
     graph->UnregisterCaptureStreamForWindow(windowID);
     mStream->Destroy();
   }

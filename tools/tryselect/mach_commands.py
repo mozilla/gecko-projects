@@ -43,6 +43,11 @@ def syntax_parser():
     return parser
 
 
+def fuzzy_parser():
+    from tryselect.selectors.fuzzy import FuzzyParser
+    return FuzzyParser()
+
+
 @CommandProvider
 class TrySelect(MachCommandBase):
 
@@ -69,10 +74,9 @@ class TrySelect(MachCommandBase):
 
     @SubCommand('try',
                 'fuzzy',
-                description='Select tasks on try using a fuzzy finder')
-    @CommandArgument('-u', '--update', action='store_true', default=False,
-                     help="Update fzf before running")
-    def try_fuzzy(self, update):
+                description='Select tasks on try using a fuzzy finder',
+                parser=fuzzy_parser)
+    def try_fuzzy(self, *args, **kwargs):
         """Select which tasks to use with fzf.
 
         This selector runs all task labels through a fuzzy finding interface.
@@ -116,7 +120,7 @@ class TrySelect(MachCommandBase):
           ^start 'exact | !ignore fuzzy end$
         """
         from tryselect.selectors.fuzzy import run_fuzzy_try
-        return run_fuzzy_try(update)
+        return run_fuzzy_try(*args, **kwargs)
 
     @SubCommand('try',
                 'syntax',

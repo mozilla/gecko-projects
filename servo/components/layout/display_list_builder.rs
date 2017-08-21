@@ -12,13 +12,13 @@
 
 use app_units::{AU_PER_PX, Au};
 use block::{BlockFlow, BlockStackingContextType};
-use canvas_traits::{CanvasData, CanvasMsg, FromLayoutMsg};
+use canvas_traits::canvas::{CanvasMsg, FromLayoutMsg};
 use context::LayoutContext;
 use euclid::{Transform3D, Point2D, Vector2D, Rect, SideOffsets2D, Size2D, TypedSize2D};
 use flex::FlexFlow;
 use flow::{BaseFlow, Flow, IS_ABSOLUTELY_POSITIONED};
 use flow_ref::FlowRef;
-use fragment::{CoordinateSystem, Fragment, ImageFragmentInfo, ScannedTextFragmentInfo};
+use fragment::{CanvasFragmentSource, CoordinateSystem, Fragment, ImageFragmentInfo, ScannedTextFragmentInfo};
 use fragment::{SpecificFragmentInfo, TruncatedFragmentInfo};
 use gfx::display_list;
 use gfx::display_list::{BLUR_INFLATION_FACTOR, BaseDisplayItem, BorderDetails, BorderDisplayItem};
@@ -28,7 +28,7 @@ use gfx::display_list::{GradientDisplayItem, IframeDisplayItem, ImageBorder, Ima
 use gfx::display_list::{LineDisplayItem, NormalBorder, OpaqueNode, PushTextShadowDisplayItem};
 use gfx::display_list::{PopTextShadowDisplayItem, RadialGradientDisplayItem, ScrollRoot};
 use gfx::display_list::{ScrollRootType, SolidColorDisplayItem, StackingContext, StackingContextType};
-use gfx::display_list::{TextDisplayItem, TextOrientation, WebGLDisplayItem, WebRenderImageInfo};
+use gfx::display_list::{TextDisplayItem, TextOrientation, WebRenderImageInfo};
 use gfx_traits::{combine_id_with_fragment_type, FragmentType, StackingContextId};
 use inline::{FIRST_FRAGMENT_OF_ELEMENT, InlineFlow, LAST_FRAGMENT_OF_ELEMENT};
 use ipc_channel::ipc;
@@ -72,7 +72,7 @@ use style_traits::ToCss;
 use style_traits::cursor::Cursor;
 use table_cell::CollapsedBordersForCell;
 use webrender_api::{ClipAndScrollInfo, ClipId, ColorF, ComplexClipRegion, GradientStop, LineStyle};
-use webrender_api::{LocalClip, RepeatMode, ScrollPolicy, ScrollSensitivity, TransformStyle};
+use webrender_api::{LocalClip, RepeatMode, ScrollPolicy, ScrollSensitivity};
 use webrender_helpers::{ToBorderRadius, ToMixBlendMode, ToRectF, ToTransformStyle};
 
 trait ResolvePercentage {
@@ -189,9 +189,6 @@ pub struct DisplayListBuildState<'a> {
     /// A stack of clips used to cull display list entries that are outside the
     /// rendered region, but only collected at containing block boundaries.
     pub containing_block_clip_stack: Vec<Rect<Au>>,
-
-    /// The current transform style of the stacking context.
-    current_transform_style: TransformStyle,
 }
 
 impl<'a> DisplayListBuildState<'a> {
@@ -210,7 +207,6 @@ impl<'a> DisplayListBuildState<'a> {
             iframe_sizes: Vec::new(),
             clip_stack: Vec::new(),
             containing_block_clip_stack: Vec::new(),
-            current_transform_style: TransformStyle::Flat,
         }
     }
 
@@ -222,7 +218,6 @@ impl<'a> DisplayListBuildState<'a> {
     fn add_stacking_context(&mut self,
                             parent_id: StackingContextId,
                             stacking_context: StackingContext) {
-        self.current_transform_style = stacking_context.transform_style;
         let info = self.stacking_context_info
                        .entry(parent_id)
                        .or_insert(StackingContextInfo::new());
@@ -1416,7 +1411,7 @@ impl FragmentDisplayListBuilding for Fragment {
             state.add_display_item(DisplayItem::BoxShadow(box BoxShadowDisplayItem {
                 base: base,
                 box_bounds: *absolute_bounds,
-                color: style.resolve_color(box_shadow.base.color).to_gfx_color(),
+                color: box_shadow.base.color.unwrap_or(style.get_color().color).to_gfx_color(),
                 offset: Vector2D::new(box_shadow.base.horizontal, box_shadow.base.vertical),
                 blur_radius: box_shadow.base.blur.0,
                 spread_radius: box_shadow.spread,
@@ -1983,15 +1978,22 @@ impl FragmentDisplayListBuilding for Fragment {
                 let computed_width = canvas_fragment_info.dom_width.to_px();
                 let computed_height = canvas_fragment_info.dom_height.to_px();
 
-                let canvas_data = match canvas_fragment_info.ipc_renderer {
-                    Some(ref ipc_renderer) => {
-                        let ipc_renderer = ipc_renderer.lock().unwrap();
-                        let (sender, receiver) = ipc::channel().unwrap();
-                        ipc_renderer.send(CanvasMsg::FromLayout(
-                            FromLayoutMsg::SendData(sender))).unwrap();
-                        receiver.recv().unwrap()
+                let (image_key, format) = match canvas_fragment_info.source {
+                    CanvasFragmentSource::WebGL(image_key) => {
+                        (image_key, PixelFormat::BGRA8)
                     },
-                    None => return,
+                    CanvasFragmentSource::Image(ref ipc_renderer) => {
+                        match *ipc_renderer {
+                            Some(ref ipc_renderer) => {
+                                let ipc_renderer = ipc_renderer.lock().unwrap();
+                                let (sender, receiver) = ipc::channel().unwrap();
+                                ipc_renderer.send(CanvasMsg::FromLayout(
+                                    FromLayoutMsg::SendData(sender))).unwrap();
+                                (receiver.recv().unwrap().image_key, PixelFormat::BGRA8)
+                            },
+                            None => return,
+                        }
+                    }
                 };
 
                 let base = state.create_base_display_item(
@@ -2000,29 +2002,19 @@ impl FragmentDisplayListBuilding for Fragment {
                     self.node,
                     self.style.get_cursor(Cursor::Default),
                     DisplayListSection::Content);
-                let display_item = match canvas_data {
-                    CanvasData::Image(canvas_data) => {
-                        DisplayItem::Image(box ImageDisplayItem {
-                            base: base,
-                            webrender_image: WebRenderImageInfo {
-                                width: computed_width as u32,
-                                height: computed_height as u32,
-                                format: PixelFormat::BGRA8,
-                                key: Some(canvas_data.image_key),
-                            },
-                            image_data: None,
-                            stretch_size: stacking_relative_content_box.size,
-                            tile_spacing: Size2D::zero(),
-                            image_rendering: image_rendering::T::auto,
-                        })
-                    }
-                    CanvasData::WebGL(context_id) => {
-                        DisplayItem::WebGL(box WebGLDisplayItem {
-                            base: base,
-                            context_id: context_id,
-                        })
-                    }
-                };
+                let display_item = DisplayItem::Image(box ImageDisplayItem {
+                    base: base,
+                    webrender_image: WebRenderImageInfo {
+                        width: computed_width as u32,
+                        height: computed_height as u32,
+                        format: format,
+                        key: Some(image_key),
+                    },
+                    image_data: None,
+                    stretch_size: stacking_relative_content_box.size,
+                    tile_spacing: Size2D::zero(),
+                    image_rendering: image_rendering::T::auto,
+                });
 
                 state.add_display_item(display_item);
             }
@@ -2141,7 +2133,7 @@ impl FragmentDisplayListBuilding for Fragment {
                 base: base.clone(),
                 blur_radius: shadow.blur.0,
                 offset: Vector2D::new(shadow.horizontal, shadow.vertical),
-                color: self.style().resolve_color(shadow.color).to_gfx_color(),
+                color: shadow.color.unwrap_or(self.style().get_color().color).to_gfx_color(),
             }));
         }
 
@@ -2302,7 +2294,6 @@ pub struct PreservedDisplayListState {
     containing_block_clip_and_scroll_info: ClipAndScrollInfo,
     clips_pushed: usize,
     containing_block_clips_pushed: usize,
-    transform_style: TransformStyle,
 }
 
 impl PreservedDisplayListState {
@@ -2313,7 +2304,6 @@ impl PreservedDisplayListState {
             containing_block_clip_and_scroll_info: state.containing_block_clip_and_scroll_info,
             clips_pushed: 0,
             containing_block_clips_pushed: 0,
-            transform_style: state.current_transform_style,
         }
     }
 
@@ -2334,8 +2324,6 @@ impl PreservedDisplayListState {
         let truncate_length = state.containing_block_clip_stack.len() -
                               self.containing_block_clips_pushed;
         state.containing_block_clip_stack.truncate(truncate_length);
-
-        state.current_transform_style = self.transform_style;
     }
 
     fn push_clip(&mut self,
@@ -2740,7 +2728,7 @@ impl InlineFlowDisplayListBuilding for InlineFlow {
         self.base.clip_and_scroll_info = Some(state.current_clip_and_scroll_info);
         self.base.clip = state.clip_stack.last().cloned().unwrap_or_else(max_rect);
 
-        for mut fragment in self.fragments.fragments.iter_mut() {
+        for fragment in self.fragments.fragments.iter_mut() {
             let previous_cb_clip_scroll_info = state.containing_block_clip_and_scroll_info;
             if establishes_containing_block_for_absolute(fragment.style.get_box().position) {
                 state.containing_block_clip_and_scroll_info = state.current_clip_and_scroll_info;

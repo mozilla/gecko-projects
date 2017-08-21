@@ -414,7 +414,7 @@ SetJitExceptionHandler()
  * This size is bigger than xul.dll plus some extra for MinidumpWriteDump
  * allocations.
  */
-static const SIZE_T kReserveSize = 0x4000000; // 64 MB
+static const SIZE_T kReserveSize = 0x5000000; // 80 MB
 static void* gBreakpadReservedVM;
 #endif
 
@@ -1285,7 +1285,7 @@ BuildTempPath(char* aBuf, size_t aBufLen)
 static size_t
 BuildTempPath(char* aBuf, size_t aBufLen)
 {
-  // GeckoAppShell or Gonk's init.rc sets this in the environment
+  // GeckoAppShell sets this in the environment
   const char *tempenv = PR_GetEnv("TMPDIR");
   if (!tempenv) {
     return false;

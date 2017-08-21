@@ -109,7 +109,7 @@ impl SelectorMapEntry for Dependency {
 
 /// The same, but for state selectors, which can track more exactly what state
 /// do they track.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct StateDependency {
     /// The other dependency fields.
@@ -132,6 +132,7 @@ impl SelectorMapEntry for StateDependency {
 /// In particular, we want to lookup as few things as possible to get the fewer
 /// selectors the better, so this looks up by id, class, or looks at the list of
 /// state/other attribute affecting selectors.
+#[derive(Debug)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 pub struct InvalidationMap {
     /// A map from a given class name to all the selectors with that class
@@ -194,8 +195,8 @@ impl InvalidationMap {
     pub fn clear(&mut self) {
         self.class_to_selector.clear();
         self.id_to_selector.clear();
-        self.state_affecting_selectors = SelectorMap::new();
-        self.other_attribute_affecting_selectors = SelectorMap::new();
+        self.state_affecting_selectors.clear();
+        self.other_attribute_affecting_selectors.clear();
         self.has_id_attribute_selectors = false;
         self.has_class_attribute_selectors = false;
     }

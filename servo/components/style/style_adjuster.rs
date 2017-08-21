@@ -110,6 +110,7 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
     #[cfg(feature = "gecko")]
     pub fn adjust_for_text(&mut self) {
         self.adjust_for_text_combine_upright();
+        self.adjust_for_text_in_ruby();
         self.set_bits();
     }
 
@@ -135,6 +136,19 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
            text_combine_upright == text_combine_upright::all {
             self.style.flags.insert(IS_TEXT_COMBINED);
             self.style.mutate_inheritedbox().set_writing_mode(writing_mode::horizontal_tb);
+        }
+    }
+
+    /// Applies the line break suppression flag to text if it is in any ruby
+    /// box. This is necessary because its parent may not itself have the flag
+    /// set (e.g. ruby or ruby containers), thus we may not inherit the flag
+    /// from them.
+    #[cfg(feature = "gecko")]
+    fn adjust_for_text_in_ruby(&mut self) {
+        use properties::computed_value_flags::SHOULD_SUPPRESS_LINEBREAK;
+        let parent_display = self.style.get_parent_box().clone_display();
+        if parent_display.is_ruby_type() {
+            self.style.flags.insert(SHOULD_SUPPRESS_LINEBREAK);
         }
     }
 
@@ -184,7 +198,7 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         // When 'contain: paint', update overflow from 'visible' to 'clip'.
         if self.style.get_box().clone_contain().contains(contain::PAINT) {
             if self.style.get_box().clone_overflow_x() == overflow::visible {
-                let mut box_style = self.style.mutate_box();
+                let box_style = self.style.mutate_box();
                 box_style.set_overflow_x(overflow::_moz_hidden_unscrollable);
                 box_style.set_overflow_y(overflow::_moz_hidden_unscrollable);
             }
@@ -199,7 +213,7 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         use properties::longhands::font_style::computed_value::T as font_style;
         use properties::longhands::font_weight::computed_value::T as font_weight;
         if self.style.get_font().clone__moz_math_variant() != moz_math_variant::none {
-            let mut font_style = self.style.mutate_font();
+            let font_style = self.style.mutate_font();
             // Sadly we don't have a nice name for the computed value
             // of "font-weight: normal".
             font_style.set_font_weight(font_weight::normal());
@@ -286,7 +300,7 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
 
         if overflow_x != original_overflow_x ||
            overflow_y != original_overflow_y {
-            let mut box_style = self.style.mutate_box();
+            let box_style = self.style.mutate_box();
             box_style.set_overflow_x(overflow_x);
             box_style.set_overflow_y(overflow_y);
         }

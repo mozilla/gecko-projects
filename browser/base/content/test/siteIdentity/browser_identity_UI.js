@@ -20,11 +20,13 @@ var tests = [
     location: "http://test1.example.org/",
     effectiveHost: "test1.example.org"
   },
+  /* This part is perma-crashing, see: Bug 1315092
   {
     name: "view-source",
     location: "view-source:http://example.com/",
     effectiveHost: null
   },
+  */
   {
     name: "normal HTTPS",
     location: "https://example.com/",
@@ -33,7 +35,7 @@ var tests = [
   },
   {
     name: "IDN subdomain",
-    location: "http://sub1." + idnDomain + "/",
+    location: "http://sub1.xn--hxajbheg2az3al.xn--jxalpdlp/",
     effectiveHost: "sub1." + idnDomain
   },
   {

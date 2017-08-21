@@ -7,7 +7,7 @@
 "use strict";
 
 const {Task} = require("devtools/shared/task");
-const EventEmitter = require("devtools/shared/event-emitter");
+const EventEmitter = require("devtools/shared/old-event-emitter");
 const {
   createNode,
   findOptimalTimeInterval,
@@ -170,7 +170,7 @@ AnimationsTimeline.prototype = {
       parent: animationTimelineEl,
       nodeType: "ul",
       attributes: {
-        "class": "animations"
+        "class": "animations devtools-monospace"
       }
     });
   },

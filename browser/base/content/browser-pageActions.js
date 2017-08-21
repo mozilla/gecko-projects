@@ -48,7 +48,9 @@ var BrowserPageActions = {
    */
   init() {
     for (let action of PageActions.actions) {
-      this.placeAction(action, PageActions.insertBeforeActionIDInUrlbar(action));
+      this.placeAction(action,
+                       PageActions.insertBeforeActionIDInPanel(action),
+                       PageActions.insertBeforeActionIDInUrlbar(action));
     }
   },
 
@@ -65,10 +67,7 @@ var BrowserPageActions = {
    *         in the urlbar before which the given action should be inserted.
    */
   placeAction(action, panelInsertBeforeID, urlbarInsertBeforeID) {
-    if (action.__isSeparator) {
-      this._appendPanelSeparator(action);
-      return;
-    }
+    action.onBeforePlacedInWindow(window);
     this.placeActionInPanel(action, panelInsertBeforeID);
     this.placeActionInUrlbar(action, urlbarInsertBeforeID);
   },
@@ -80,7 +79,7 @@ var BrowserPageActions = {
    *         The action to place.
    * @param  insertBeforeID (string, required)
    *         The ID of the action in the panel before which the given action
-   *         action should be inserted.
+   *         action should be inserted.  Pass null to append.
    */
   placeActionInPanel(action, insertBeforeID) {
     let id = this._panelButtonNodeIDForActionID(action.id);
@@ -105,6 +104,11 @@ var BrowserPageActions = {
   },
 
   _makePanelButtonNodeForAction(action) {
+    if (action.__isSeparator) {
+      let node = document.createElement("toolbarseparator");
+      return [node, null];
+    }
+
     let buttonNode = document.createElement("toolbarbutton");
     buttonNode.classList.add(
       "subviewbutton",
@@ -134,7 +138,7 @@ var BrowserPageActions = {
         return;
       }
       if (action.wantsIframe) {
-        this._toggleTempPanelForAction(action);
+        this._toggleActivatedActionPanelForAction(action);
         return;
       }
       this.panelNode.hidePopup();
@@ -171,22 +175,51 @@ var BrowserPageActions = {
     return panelViewNode;
   },
 
-  _toggleTempPanelForAction(action) {
-    let panelNodeID = this._tempPanelID;
-    let panelNode = document.getElementById(panelNodeID);
+  _toggleActivatedActionPanelForAction(action) {
+    let panelNode = this.activatedActionPanelNode;
     if (panelNode) {
       panelNode.hidePopup();
-      return;
+      return null;
+    }
+
+    // Before creating the panel, find the best anchor node for it because we'll
+    // bail if there isn't one.  Try each of the following nodes in order, using
+    // the first that's visible.
+    let anchorNode = null;
+    let potentialAnchorNodeIDs = [
+      action.anchorIDOverride || null,
+      this._urlbarButtonNodeIDForActionID(action.id),
+      this.mainButtonNode.id,
+      "identity-icon",
+    ];
+    let dwu = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                    .getInterface(Ci.nsIDOMWindowUtils);
+    for (let id of potentialAnchorNodeIDs) {
+      if (id) {
+        let node = document.getElementById(id);
+        if (node && !node.hidden) {
+          let bounds = dwu.getBoundsWithoutFlushing(node);
+          if (bounds.height > 0 && bounds.width > 0) {
+            anchorNode = node;
+            break;
+          }
+        }
+      }
+    }
+    if (!anchorNode) {
+      throw new Error(`PageActions: No anchor node for '${action.id}'`);
     }
 
     panelNode = document.createElement("panel");
-    panelNode.id = panelNodeID;
+    panelNode.id = this._activatedActionPanelID;
     panelNode.classList.add("cui-widget-panel");
+    panelNode.setAttribute("actionID", action.id);
     panelNode.setAttribute("role", "group");
     panelNode.setAttribute("type", "arrow");
     panelNode.setAttribute("flip", "slide");
     panelNode.setAttribute("noautofocus", "true");
     panelNode.setAttribute("tabspecific", "true");
+    panelNode.setAttribute("photon", "true");
 
     let panelViewNode = null;
     let iframeNode = null;
@@ -205,7 +238,16 @@ var BrowserPageActions = {
     let popupSet = document.getElementById("mainPopupSet");
     popupSet.appendChild(panelNode);
     panelNode.addEventListener("popuphidden", () => {
+      if (iframeNode) {
+        action.onIframeHidden(iframeNode, panelNode);
+      }
       panelNode.remove();
+    }, { once: true });
+
+    panelNode.addEventListener("popuphiding", () => {
+      if (iframeNode) {
+        action.onIframeHiding(iframeNode, panelNode);
+      }
     }, { once: true });
 
     if (panelViewNode) {
@@ -213,20 +255,24 @@ var BrowserPageActions = {
       action.subview.onShowing(panelViewNode);
     }
 
+    // Hide the main page action panel before showing the activated-action
+    // panel.
     this.panelNode.hidePopup();
-
-    let urlbarNodeID = this._urlbarButtonNodeIDForActionID(action.id);
-    let anchorNode =
-      document.getElementById(urlbarNodeID) || this.mainButtonNode;
     panelNode.openPopup(anchorNode, "bottomcenter topright");
 
     if (iframeNode) {
       action.onIframeShown(iframeNode, panelNode);
     }
+
+    return panelNode;
   },
 
-  get _tempPanelID() {
-    return "pageActionTempPanel";
+  get activatedActionPanelNode() {
+    return document.getElementById(this._activatedActionPanelID);
+  },
+
+  get _activatedActionPanelID() {
+    return "pageActionActivatedActionPanel";
   },
 
   /**
@@ -313,18 +359,12 @@ var BrowserPageActions = {
         return;
       }
       if (action.subview || action.wantsIframe) {
-        this._toggleTempPanelForAction(action);
+        this._toggleActivatedActionPanelForAction(action);
         return;
       }
       action.onCommand(event, buttonNode);
     });
     return buttonNode;
-  },
-
-  _appendPanelSeparator(action) {
-    let node = document.createElement("toolbarseparator");
-    node.id = this._panelButtonNodeIDForActionID(action.id);
-    this.mainViewBodyNode.appendChild(node);
   },
 
   /**
@@ -411,6 +451,14 @@ var BrowserPageActions = {
     }
   },
 
+  doCommandForAction(action) {
+    if (action.subview || action.wantsIframe) {
+      this._toggleActivatedActionPanelForAction(action);
+      return;
+    }
+    action.onCommand();
+  },
+
   /**
    * Returns the action for a node.
    *
@@ -430,8 +478,8 @@ var BrowserPageActions = {
       // like how #star-button is contained in #star-button-box, the latter
       // being the bookmark action's node.  Look up the ancestor chain.
       for (let n = node.parentNode; n && !action; n = n.parentNode) {
-        if (n.id == "urlbar-icons" || n.localName == "panelview") {
-          // We reached the urlbar icons container or the panelview container.
+        if (n.id == "page-action-buttons" || n.localName == "panelview") {
+          // We reached the page-action-buttons or panelview container.
           // Stop looking; no acton was found.
           break;
         }
@@ -501,10 +549,11 @@ var BrowserPageActions = {
       return;
     }
 
-    // If the temp panel is open and anchored to the main button, close it.
-    let tempPanel = document.getElementById(this._tempPanelID);
-    if (tempPanel && tempPanel.anchorNode.id == this.mainButtonNode.id) {
-      tempPanel.hidePopup();
+    // If the activated-action panel is open and anchored to the main button,
+    // close it.
+    let panelNode = this.activatedActionPanelNode;
+    if (panelNode && panelNode.anchorNode.id == this.mainButtonNode.id) {
+      panelNode.hidePopup();
       return;
     }
 
@@ -654,7 +703,7 @@ BrowserPageActions.copyURL = {
     BrowserPageActions.panelNode.hidePopup();
     Cc["@mozilla.org/widget/clipboardhelper;1"]
       .getService(Ci.nsIClipboardHelper)
-      .copyString(gBrowser.selectedBrowser.currentURI.spec);
+      .copyString(gURLBar.makeURIReadable(gBrowser.selectedBrowser.currentURI).displaySpec);
   },
 };
 

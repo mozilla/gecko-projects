@@ -21,9 +21,6 @@ import org.mozilla.gecko.activitystream.Utils;
 import org.mozilla.gecko.activitystream.homepanel.menu.ActivityStreamContextMenu;
 import org.mozilla.gecko.activitystream.homepanel.model.Highlight;
 import org.mozilla.gecko.home.HomePager;
-import org.mozilla.gecko.icons.IconCallback;
-import org.mozilla.gecko.icons.IconResponse;
-import org.mozilla.gecko.icons.Icons;
 import org.mozilla.gecko.util.DrawableUtil;
 import org.mozilla.gecko.util.TouchTargetUtil;
 import org.mozilla.gecko.util.URIUtils;
@@ -31,25 +28,25 @@ import org.mozilla.gecko.util.ViewUtil;
 import org.mozilla.gecko.widget.FaviconView;
 
 import java.lang.ref.WeakReference;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.UUID;
-import java.util.concurrent.Future;
 
-public class HighlightItem extends StreamItem implements IconCallback {
+public class HighlightItem extends StreamItem {
     private static final String LOGTAG = "GeckoHighlightItem";
 
     public static final int LAYOUT_ID = R.layout.activity_stream_card_history_item;
+    private static final double SIZE_RATIO = 0.75;
 
     private Highlight highlight;
     private int position;
 
-    private final FaviconView pageIconView;
+    private final StreamPageIconLayout pageIconLayout;
     private final TextView pageTitleView;
-    private final TextView vTimeSince;
     private final TextView pageSourceView;
     private final TextView pageDomainView;
     private final ImageView pageSourceIconView;
 
-    private Future<IconResponse> ongoingIconLoad;
     private int tilesMargin;
 
     public HighlightItem(final View itemView,
@@ -60,8 +57,7 @@ public class HighlightItem extends StreamItem implements IconCallback {
         tilesMargin = itemView.getResources().getDimensionPixelSize(R.dimen.activity_stream_base_margin);
 
         pageTitleView = (TextView) itemView.findViewById(R.id.card_history_label);
-        vTimeSince = (TextView) itemView.findViewById(R.id.card_history_time_since);
-        pageIconView = (FaviconView) itemView.findViewById(R.id.icon);
+        pageIconLayout = (StreamPageIconLayout) itemView.findViewById(R.id.icon);
         pageSourceView = (TextView) itemView.findViewById(R.id.card_history_source);
         pageDomainView = (TextView) itemView.findViewById(R.id.page);
         pageSourceIconView = (ImageView) itemView.findViewById(R.id.source_icon);
@@ -87,7 +83,7 @@ public class HighlightItem extends StreamItem implements IconCallback {
                         ActivityStreamContextMenu.MenuMode.HIGHLIGHT,
                         highlight,
                         onUrlOpenListener, onUrlOpenInBackgroundListener,
-                        pageIconView.getWidth(), pageIconView.getHeight());
+                        pageIconLayout.getWidth(), pageIconLayout.getHeight());
 
                 Telemetry.sendUIEvent(
                         TelemetryContract.Event.SHOW,
@@ -100,32 +96,22 @@ public class HighlightItem extends StreamItem implements IconCallback {
         ViewUtil.enableTouchRipple(menuButton);
     }
 
-    public void bind(Highlight highlight, int position, int tilesWidth, int tilesHeight) {
+    public void bind(Highlight highlight, int position, int tilesWidth) {
         this.highlight = highlight;
         this.position = position;
 
         final String backendHightlightTitle = highlight.getTitle();
         final String uiHighlightTitle = !TextUtils.isEmpty(backendHightlightTitle) ? backendHightlightTitle : highlight.getUrl();
         pageTitleView.setText(uiHighlightTitle);
-        vTimeSince.setText(highlight.getRelativeTimeSpan());
 
-        ViewGroup.LayoutParams layoutParams = pageIconView.getLayoutParams();
-        layoutParams.width = tilesWidth - tilesMargin;
-        layoutParams.height = tilesHeight;
-        pageIconView.setLayoutParams(layoutParams);
+        ViewGroup.LayoutParams layoutParams = pageIconLayout.getLayoutParams();
+        layoutParams.width = tilesWidth;
+        layoutParams.height = (int) Math.floor(tilesWidth * SIZE_RATIO);
+        pageIconLayout.setLayoutParams(layoutParams);
 
         updateUiForSource(highlight.getSource());
         updatePageDomain();
-
-        if (ongoingIconLoad != null) {
-            ongoingIconLoad.cancel(true);
-        }
-
-        ongoingIconLoad = Icons.with(itemView.getContext())
-                .pageUrl(highlight.getUrl())
-                .skipNetwork()
-                .build()
-                .execute(this);
+        pageIconLayout.updateIcon(highlight.getUrl(), highlight.getMetadataSlow().getImageUrl());
     }
 
     private void updateUiForSource(Utils.HighlightSource source) {
@@ -148,25 +134,29 @@ public class HighlightItem extends StreamItem implements IconCallback {
     }
 
     private void updatePageDomain() {
-        final UpdatePageDomainAsyncTask hostSLDTask = new UpdatePageDomainAsyncTask(itemView.getContext(),
-                highlight.getUrl(), pageDomainView);
-        hostSLDTask.execute();
-    }
+        final URI highlightURI;
+        try {
+            highlightURI = new URI(highlight.getUrl());
+        } catch (final URISyntaxException e) {
+            // If the URL is invalid, there's not much extra processing we can do on it.
+            pageDomainView.setText(highlight.getUrl());
+            return;
+        }
 
-    @Override
-    public void onIconResponse(IconResponse response) {
-        pageIconView.updateImage(response);
+        final UpdatePageDomainAsyncTask updatePageDomainTask = new UpdatePageDomainAsyncTask(itemView.getContext(),
+                highlightURI, pageDomainView);
+        updatePageDomainTask.execute();
     }
 
     /** Updates the text of the given view to the host second level domain. */
-    private static class UpdatePageDomainAsyncTask extends URIUtils.GetHostSecondLevelDomainAsyncTask {
+    private static class UpdatePageDomainAsyncTask extends URIUtils.GetFormattedDomainAsyncTask {
         private static final int VIEW_TAG_ID = R.id.page; // same as the view.
 
         private final WeakReference<TextView> pageDomainViewWeakReference;
         private final UUID viewTagAtStart;
 
-        UpdatePageDomainAsyncTask(final Context contextReference, final String uriString, final TextView pageDomainView) {
-            super(contextReference, uriString);
+        UpdatePageDomainAsyncTask(final Context contextReference, final URI uri, final TextView pageDomainView) {
+            super(contextReference, uri, false, 0); // hostSLD.
             this.pageDomainViewWeakReference = new WeakReference<>(pageDomainView);
 
             // See isTagSameAsStartTag for details.

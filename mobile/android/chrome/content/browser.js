@@ -153,16 +153,6 @@ var lazilyLoadedObserverScripts = [
   ["ConsoleAPI", ["console-api-log-event"], "chrome://browser/content/ConsoleAPI.js"],
 ];
 
-if (AppConstants.MOZ_WEBRTC) {
-  lazilyLoadedObserverScripts.push(
-    ["WebrtcUI", ["getUserMedia:ask-device-permission",
-                  "getUserMedia:request",
-                  "PeerConnection:request",
-                  "recording-device-events",
-                  "VideoCapture:Paused",
-                  "VideoCapture:Resumed"], "chrome://browser/content/WebrtcUI.js"])
-}
-
 lazilyLoadedObserverScripts.forEach(function (aScript) {
   let [name, notifications, script] = aScript;
   XPCOMUtils.defineLazyGetter(window, name, function() {
@@ -283,11 +273,6 @@ XPCOMUtils.defineLazyServiceGetter(this, "DOMUtils",
 XPCOMUtils.defineLazyServiceGetter(window, "URIFixup",
   "@mozilla.org/docshell/urifixup;1", "nsIURIFixup");
 
-if (AppConstants.MOZ_WEBRTC) {
-  XPCOMUtils.defineLazyServiceGetter(this, "MediaManagerService",
-    "@mozilla.org/mediaManagerService;1", "nsIMediaManagerService");
-}
-
 XPCOMUtils.defineLazyModuleGetter(this, "Log",
   "resource://gre/modules/AndroidLog.jsm", "AndroidLog");
 
@@ -397,7 +382,6 @@ var BrowserApp = {
     GlobalEventDispatcher.registerListener(this, [
       "Browser:LoadManifest",
       "Browser:Quit",
-      "Browser:ZombifyTabs",
       "Fonts:Reload",
       "FormHistory:Init",
       "FullScreen:Exit",
@@ -1678,13 +1662,6 @@ var BrowserApp = {
 
       case "Browser:Quit":
         this.quit(data);
-        break;
-
-      case "Browser:ZombifyTabs":
-        let tabs = this._tabs;
-        for (let i = 0; i < tabs.length; i++) {
-          tabs[i].zombify();
-        }
         break;
 
       case "Fonts:Reload":
@@ -3424,9 +3401,22 @@ nsBrowserAccess.prototype = {
     return browser;
   },
 
-  openURI: function browser_openURI(aURI, aOpener, aWhere, aFlags, aTriggeringPrincipal) {
-    let browser = this._getBrowser(aURI, aOpener, aWhere, aFlags, aTriggeringPrincipal);
-    return browser ? browser.contentWindow : null;
+  openURI: function browser_openURI(aURI, aOpener, aWhere, aFlags,
+                                    aTriggeringPrincipal) {
+    if (!aURI) {
+      throw "Can't open an empty uri";
+    }
+    let browser = this._getBrowser(aURI, aOpener, aWhere, aFlags,
+                                   aTriggeringPrincipal);
+    return browser && browser.contentWindow;
+  },
+
+  createContentWindow: function browser_createContentWindow(
+                                aURI, aOpener, aWhere, aFlags,
+                                aTriggeringPrincipal) {
+    let browser = this._getBrowser(null, aOpener, aWhere, aFlags,
+                                   aTriggeringPrincipal);
+    return browser && browser.contentWindow;
   },
 
   openURIInFrame: function browser_openURIInFrame(aURI, aParams, aWhere, aFlags,

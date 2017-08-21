@@ -11,6 +11,7 @@
 #include "mozilla/Mutex.h"
 #include "nsAutoPtr.h"
 #include "nsRect.h"
+#include "d3d11.h"
 
 namespace mozilla {
 

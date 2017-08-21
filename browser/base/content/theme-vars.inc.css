@@ -106,10 +106,6 @@
   list-style-image: var(--sidebars-icon) !important;
 }
 
-:root[lwthemeicons~="--share_page-icon"] #social-share-button:-moz-lwtheme {
-  list-style-image: var(--share_page-icon) !important;
-}
-
 :root[lwthemeicons~="--subscribe-icon"] #feed-button:-moz-lwtheme {
   list-style-image: var(--subscribe-icon) !important;
 }
@@ -124,10 +120,6 @@
 
 :root[lwthemeicons~="--forget-icon"] #panic-button:-moz-lwtheme {
   list-style-image: var(--forget-icon) !important;
-}
-
-:root[lwthemeicons~="--pocket-icon"] #pocket-button:-moz-lwtheme {
-  list-style-image: var(--pocket-icon) !important;
 }
 
 :root[lwthemeicons~="--bookmark_star-icon"] #star-button:-moz-lwtheme,
@@ -157,11 +149,9 @@
 :root[lwthemeicons~="--synced_tabs-icon"] #sync-button:-moz-lwtheme,
 :root[lwthemeicons~="--open_file-icon"] #open-file-button:-moz-lwtheme,
 :root[lwthemeicons~="--sidebars-icon"] #sidebar-button:-moz-lwtheme,
-:root[lwthemeicons~="--share_page-icon"] #social-share-button:-moz-lwtheme,
 :root[lwthemeicons~="--subscribe-icon"] #feed-button:-moz-lwtheme,
 :root[lwthemeicons~="--text_encoding-icon"] #characterencoding-button:-moz-lwtheme,
 :root[lwthemeicons~="--email_link-icon"] #email-link-button:-moz-lwtheme,
-:root[lwthemeicons~="--forget-icon"] #panic-button:-moz-lwtheme,
-:root[lwthemeicons~="--pocket-icon"] #pocket-button:-moz-lwtheme {
+:root[lwthemeicons~="--forget-icon"] #panic-button:-moz-lwtheme {
   -moz-image-region: rect(0, 16px, 16px, 0) !important;
 }

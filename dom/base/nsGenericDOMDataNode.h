@@ -55,10 +55,14 @@ enum {
   // This bit is set if there is a FlowLengthProperty attached to the node
   // (used by nsTextFrame).
   NS_HAS_FLOWLENGTH_PROPERTY =            DATA_NODE_FLAG_BIT(5),
+
+  // This bit is set if the node may be modified frequently.  This is typically
+  // specified if the instance is in <input> or <textarea>.
+  NS_MAYBE_MODIFIED_FREQUENTLY =          DATA_NODE_FLAG_BIT(6),
 };
 
 // Make sure we have enough space for those bits
-ASSERT_NODE_FLAGS_SPACE(NODE_TYPE_SPECIFIC_BITS_OFFSET + 6);
+ASSERT_NODE_FLAGS_SPACE(NODE_TYPE_SPECIFIC_BITS_OFFSET + 7);
 
 #undef DATA_NODE_FLAG_BIT
 
@@ -67,10 +71,15 @@ class nsGenericDOMDataNode : public nsIContent
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
 
-  NS_DECL_SIZEOF_EXCLUDING_THIS
+  NS_DECL_ADDSIZEOFEXCLUDINGTHIS
 
   explicit nsGenericDOMDataNode(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
   explicit nsGenericDOMDataNode(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
+
+  void MarkAsMaybeModifiedFrequently()
+  {
+    SetFlags(NS_MAYBE_MODIFIED_FREQUENTLY);
+  }
 
   virtual void GetNodeValueInternal(nsAString& aNodeValue) override;
   virtual void SetNodeValueInternal(const nsAString& aNodeValue,

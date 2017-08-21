@@ -672,7 +672,11 @@ pref("layers.geometry.d3d11.enabled", true);
 pref("apz.allow_checkerboarding", true);
 pref("apz.allow_immediate_handoff", true);
 pref("apz.allow_zooming", false);
+#ifdef NIGHTLY_BUILD
+pref("apz.autoscroll.enabled", true);
+#else
 pref("apz.autoscroll.enabled", false);
+#endif
 
 // Whether to lock touch scrolling to one axis at a time
 // 0 = FREE (No locking at all)
@@ -711,10 +715,11 @@ pref("apz.frame_delay.enabled", false);
 #endif
 #if defined(NIGHTLY_BUILD) && !defined(MOZ_WIDGET_ANDROID)
 pref("apz.keyboard.enabled", true);
+pref("apz.keyboard.passive-listeners", true);
 #else
 pref("apz.keyboard.enabled", false);
-#endif
 pref("apz.keyboard.passive-listeners", false);
+#endif
 pref("apz.max_velocity_inches_per_ms", "-1.0");
 pref("apz.max_velocity_queue_size", 5);
 pref("apz.min_skate_speed", "1.0");
@@ -741,9 +746,10 @@ pref("apz.record_checkerboarding", true);
 #else
 pref("apz.record_checkerboarding", false);
 #endif
+pref("apz.second_tap_tolerance", "0.5");
 pref("apz.test.logging_enabled", false);
 pref("apz.touch_start_tolerance", "0.1");
-pref("apz.touch_move_tolerance", "0.03");
+pref("apz.touch_move_tolerance", "0.1");
 pref("apz.velocity_bias", "0.0");
 pref("apz.velocity_relevance_time_ms", 150);
 pref("apz.x_skate_highmem_adjust", "0.0");
@@ -893,6 +899,7 @@ pref("gfx.webrender.force-angle", true);
 pref("gfx.webrender.highlight-painted-layers", false);
 pref("gfx.webrender.layers-free", false);
 pref("gfx.webrender.profiler.enabled", false);
+pref("gfx.webrender.blob-images", false);
 
 // Whether webrender should be used as much as possible.
 pref("gfx.webrendest.enabled", false);
@@ -1423,10 +1430,11 @@ pref("javascript.options.baselinejit",      true);
 pref("javascript.options.ion",              true);
 pref("javascript.options.asmjs",            true);
 pref("javascript.options.wasm",             true);
+pref("javascript.options.wasm_ionjit",      true);
 pref("javascript.options.wasm_baselinejit", false);
 pref("javascript.options.native_regexp",    true);
 pref("javascript.options.parallel_parsing", true);
-#if !defined(RELEASE_OR_BETA) && !defined(ANDROID) && !defined(MOZ_B2G) && !defined(XP_IOS)
+#if !defined(RELEASE_OR_BETA) && !defined(ANDROID) && !defined(XP_IOS)
 pref("javascript.options.asyncstack",       true);
 #else
 pref("javascript.options.asyncstack",       false);
@@ -1441,17 +1449,42 @@ pref("javascript.options.jit.full_debug_checks", true);
 // memory, but makes things like Function.prototype.toSource()
 // fail.
 pref("javascript.options.discardSystemSource", false);
-// This preference limits the memory usage of javascript.
+
+// Many of the the following preferences tune the SpiderMonkey GC, if you
+// change the defaults here please also consider changing them in
+// js/src/jsgc.cpp.  They're documented in js/src/jsapi.h.
+
+// JSGC_MAX_MALLOC_BYTES
+// This preference limits the malloc memory that javascript objects may use.
 // If you want to change these values for your device,
 // please find Bug 417052 comment 17 and Bug 456721
 // Comment 32 and Bug 613551.
+// Override the shell's default of 0xffffffff
 pref("javascript.options.mem.high_water_mark", 128);
+
+// JSGC_MAX_BYTES
+// SpiderMonkey defaults to 2^32-1 bytes, but this is measured in MB so that
+// cannot be represented directly in order to show it in about:config.
 pref("javascript.options.mem.max", -1);
-pref("javascript.options.mem.nursery.max_kb", -1);
+
+// JSGC_MAX_NURSERY_BYTES
+#if defined(ANDROID) || defined(XP_IOS) || defined(MOZ_B2G)
+pref("javascript.options.mem.nursery.max_kb", 4096);
+#else
+pref("javascript.options.mem.nursery.max_kb", 16384);
+#endif
+
+// JSGC_MODE
 pref("javascript.options.mem.gc_per_zone", true);
 pref("javascript.options.mem.gc_incremental", true);
+
+// JSGC_SLICE_TIME_BUDGET
+// Override the shell's default of unlimited slice time.
 pref("javascript.options.mem.gc_incremental_slice_ms", 5);
+
+// JSGC_COMPACTING_ENABLED
 pref("javascript.options.mem.gc_compacting", true);
+
 pref("javascript.options.mem.log", false);
 pref("javascript.options.mem.notify", false);
 pref("javascript.options.gc_on_memory_pressure", true);
@@ -1462,17 +1495,48 @@ pref("javascript.options.compact_on_user_inactive_delay", 15000); // ms
 pref("javascript.options.compact_on_user_inactive_delay", 300000); // ms
 #endif
 
+// JSGC_HIGH_FREQUENCY_TIME_LIMIT
 pref("javascript.options.mem.gc_high_frequency_time_limit_ms", 1000);
+
+// JSGC_HIGH_FREQUENCY_LOW_LIMIT
 pref("javascript.options.mem.gc_high_frequency_low_limit_mb", 100);
+
+// JSGC_HIGH_FREQUENCY_HIGH_LIMIT
 pref("javascript.options.mem.gc_high_frequency_high_limit_mb", 500);
+
+// JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MAX
 pref("javascript.options.mem.gc_high_frequency_heap_growth_max", 300);
+
+// JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MIN
 pref("javascript.options.mem.gc_high_frequency_heap_growth_min", 150);
+
+// JSGC_LOW_FREQUENCY_HEAP_GROWTH
 pref("javascript.options.mem.gc_low_frequency_heap_growth", 150);
+
+// JSGC_DYNAMIC_HEAP_GROWTH
+// Override SpiderMonkey default (false).
 pref("javascript.options.mem.gc_dynamic_heap_growth", true);
+
+// JSGC_DYNAMIC_MARK_SLICE
+// Override SpiderMonkey default (false).
 pref("javascript.options.mem.gc_dynamic_mark_slice", true);
+
+// JSGC_REFRESH_FRAME_SLICES_ENABLED
 pref("javascript.options.mem.gc_refresh_frame_slices_enabled", true);
+
+// JSGC_ALLOCATION_THRESHOLD
 pref("javascript.options.mem.gc_allocation_threshold_mb", 30);
+
+// JSGC_ALLOCATION_THRESHOLD_FACTOR
+pref("javascript.options.mem.gc_allocation_threshold_factor", 90);
+
+// JSGC_ALLOCATION_THRESHOLD_FACTOR_AVOID_INTERRUPT
+pref("javascript.options.mem.gc_allocation_threshold_factor_avoid_interrupt", 90);
+
+// JSGC_MIN_EMPTY_CHUNK_COUNT
 pref("javascript.options.mem.gc_min_empty_chunk_count", 1);
+
+// JSGC_MAX_EMPTY_CHUNK_COUNT
 pref("javascript.options.mem.gc_max_empty_chunk_count", 30);
 
 pref("javascript.options.showInConsole", false);
@@ -1759,12 +1823,6 @@ pref("network.http.tcp_keepalive.long_lived_idle_time", 600);
 pref("network.http.enforce-framing.http1", false); // should be named "strict"
 pref("network.http.enforce-framing.soft", true);
 
-// If it is set to false, headers with empty value will not appear in the header
-// array - behavior as it used to be. If it is true: empty headers coming from
-// the network will exist in header array as empty string. Call SetHeader with
-// an empty value will still delete the header.(Bug 6699259)
-pref("network.http.keep_empty_response_headers_as_empty_string", true);
-
 // Max size, in bytes, for received HTTP response header.
 pref("network.http.max_response_header_size", 393216);
 
@@ -2040,7 +2098,7 @@ pref("network.standard-url.enable-rust", false);
 
 // Whether nsIURI.host/.hostname/.spec should return a punycode string
 // If set to false we will revert to previous behaviour and return a unicode string.
-pref("network.standard-url.punycode-host", false);
+pref("network.standard-url.punycode-host", true);
 
 // Idle timeout for ftp control connections - 5 minute default
 pref("network.ftp.idleConnectionTimeout", 300);
@@ -2060,7 +2118,7 @@ pref("network.preload", true);
 // enables the predictive service
 pref("network.predictor.enabled", true);
 pref("network.predictor.enable-hover-on-ssl", false);
-pref("network.predictor.enable-prefetch", true);
+pref("network.predictor.enable-prefetch", false);
 pref("network.predictor.page-degradation.day", 0);
 pref("network.predictor.page-degradation.week", 5);
 pref("network.predictor.page-degradation.month", 10);
@@ -2494,14 +2552,6 @@ pref("font.name-list.monospace.x-math", "monospace");
 // Some CJK fonts have bad underline offset, their CJK character glyphs are overlapped (or adjoined)  to its underline.
 // These fonts are ignored the underline offset, instead of it, the underline is lowered to bottom of its em descent.
 pref("font.blacklist.underline_offset", "FangSong,Gulim,GulimChe,MingLiU,MingLiU-ExtB,MingLiU_HKSCS,MingLiU-HKSCS-ExtB,MS Gothic,MS Mincho,MS PGothic,MS PMincho,MS UI Gothic,PMingLiU,PMingLiU-ExtB,SimHei,SimSun,SimSun-ExtB,Hei,Kai,Apple LiGothic,Apple LiSung,Osaka");
-
-#ifdef MOZ_B2G
-// Whitelist of fonts that ship with B2G that do not include space lookups in
-// default features. This allows us to skip analyzing the GSUB/GPOS tables
-// unless features are explicitly enabled.
-// Use NSPR_LOG_MODULES=fontinit:5 to dump out details of space lookups
-pref("font.whitelist.skip_default_features_space_check", "Fira Sans,Fira Mono");
-#endif
 
 pref("images.dither", "auto");
 pref("security.directory",              "");
@@ -3123,6 +3173,7 @@ pref("editor.positioning.offset",            0);
 pref("dom.use_watchdog", true);
 pref("dom.max_chrome_script_run_time", 20);
 pref("dom.max_script_run_time", 10);
+pref("dom.max_ext_content_script_run_time", 5);
 
 // Stop all scripts in a compartment when the "stop script" dialog is used.
 pref("dom.global_stop_script", true);
@@ -3132,6 +3183,26 @@ pref("dom.idle_period.throttled_length", 10000);
 
 // The amount of idle time (milliseconds) reserved for a long idle period
 pref("idle_queue.long_period", 50);
+
+// Control the event prioritization on content main thread
+#ifdef NIGHTLY_BUILD
+pref("prioritized_input_events.enabled", false);
+#else
+pref("prioritized_input_events.enabled", false);
+#endif
+
+// The maximum and minimum time (milliseconds) we reserve for handling input
+// events in each frame.
+pref("prioritized_input_events.duration.max", 8);
+pref("prioritized_input_events.duration.min", 1);
+
+// The default amount of time (milliseconds) required for handling a input
+// event.
+pref("prioritized_input_events.default_duration_per_event", 1);
+
+// The number of processed input events we use to predict the amount of time
+// required to process the following input events.
+pref("prioritized_input_events.count_for_prediction", 9);
 
 // The minimum amount of time (milliseconds) required for an idle
 // period to be scheduled on the main thread. N.B. that
@@ -3251,6 +3322,9 @@ pref("dom.ipc.processCount.file", 1);
 
 // WebExtensions only support a single extension process.
 pref("dom.ipc.processCount.extension", 1);
+
+// Don't use a native event loop in the content process.
+pref("dom.ipc.useNativeEventProcessing.content", false);
 
 // Disable support for SVG
 pref("svg.disabled", false);
@@ -4415,7 +4489,7 @@ pref("gfx.font_rendering.fontconfig.max_generic_substitutions", 3);
 #endif
 #endif
 
-#if defined(ANDROID) || defined(MOZ_B2G)
+#if defined(ANDROID)
 
 pref("font.size.fixed.ar", 12);
 
@@ -4433,65 +4507,10 @@ pref("font.size.fixed.x-unicode", 12);
 pref("font.default.x-western", "sans-serif");
 pref("font.size.fixed.x-western", 12);
 
-# ANDROID || MOZ_B2G
+# ANDROID
 #endif
 
-#if defined(MOZ_B2G)
-// Gonk, FxOS Simulator, B2G Desktop and Mulet.
-
-// TODO: some entries could probably be cleaned up.
-
-// ar
-
-pref("font.name-list.serif.el", "Droid Serif"); // not Charis SIL Compact, only has a few Greek chars
-pref("font.name-list.sans-serif.el", "Fira Sans");
-pref("font.name-list.monospace.el", "Fira Mono");
-
-pref("font.name-list.serif.he", "Charis SIL Compact");
-pref("font.name-list.sans-serif.he", "Fira Sans, Droid Sans Hebrew");
-pref("font.name-list.monospace.he", "Fira Mono");
-
-pref("font.name-list.serif.ja", "Charis SIL Compact");
-pref("font.name-list.sans-serif.ja", "Fira Sans, MotoyaLMaru, MotoyaLCedar, Droid Sans Japanese");
-pref("font.name-list.monospace.ja", "MotoyaLMaru, MotoyaLCedar, Fira Mono");
-
-pref("font.name-list.serif.ko", "Charis SIL Compact");
-pref("font.name-list.sans-serif.ko", "Fira Sans");
-pref("font.name-list.monospace.ko", "Fira Mono");
-
-pref("font.name-list.serif.th", "Charis SIL Compact");
-pref("font.name-list.sans-serif.th", "Fira Sans, Noto Sans Thai, Droid Sans Thai");
-pref("font.name-list.monospace.th", "Fira Mono");
-
-pref("font.name-list.serif.x-cyrillic", "Charis SIL Compact");
-pref("font.name-list.sans-serif.x-cyrillic", "Fira Sans");
-pref("font.name-list.monospace.x-cyrillic", "Fira Mono");
-
-pref("font.name-list.serif.x-unicode", "Charis SIL Compact");
-pref("font.name-list.sans-serif.x-unicode", "Fira Sans");
-pref("font.name-list.monospace.x-unicode", "Fira Mono");
-
-pref("font.name-list.serif.x-western", "Charis SIL Compact");
-pref("font.name-list.sans-serif.x-western", "Fira Sans");
-pref("font.name-list.monospace.x-western", "Fira Mono");
-
-pref("font.name-list.serif.zh-CN", "Charis SIL Compact");
-pref("font.name-list.sans-serif.zh-CN", "Fira Sans, Droid Sans Fallback");
-pref("font.name-list.monospace.zh-CN", "Fira Mono");
-
-pref("font.name-list.serif.zh-HK", "Charis SIL Compact");
-pref("font.name-list.sans-serif.zh-HK", "Fira Sans, Droid Sans Fallback");
-pref("font.name-list.monospace.zh-HK", "Fira Mono");
-
-pref("font.name-list.serif.zh-TW", "Charis SIL Compact");
-pref("font.name-list.sans-serif.zh-TW", "Fira Sans, Droid Sans Fallback");
-pref("font.name-list.monospace.zh-TW", "Fira Mono");
-
-pref("font.name-list.serif.x-math", "Latin Modern Math, STIX Two Math, XITS Math, Cambria Math, Libertinus Math, DejaVu Math TeX Gyre, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, STIXGeneral, DejaVu Serif, DejaVu Sans, Charis SIL Compact");
-pref("font.name-list.sans-serif.x-math", "Fira Sans");
-pref("font.name-list.monospace.x-math", "Fira Mono");
-
-#elif defined(ANDROID)
+#if defined(ANDROID)
 // We use the bundled fonts for Firefox for Android
 
 pref("font.name-list.serif.ar", "Noto Naskh Arabic, Noto Serif, Droid Serif");
@@ -4695,6 +4714,11 @@ pref("gl.multithreaded", true);
 pref("gl.ignore-dx-interop2-blacklist", false);
 pref("gl.use-tls-is-current", 0);
 
+#ifdef XP_MACOSX
+pref("webgl.1.allow-core-profiles", true);
+#else
+pref("webgl.1.allow-core-profiles", false);
+#endif
 pref("webgl.force-enabled", false);
 pref("webgl.disabled", false);
 pref("webgl.disable-angle", false);
@@ -4764,7 +4788,7 @@ pref("network.tcp.keepalive.retry_interval", 1); // seconds
 pref("network.tcp.keepalive.probe_count", 4);
 #endif
 
-pref("network.tcp.tcp_fastopen_enable", false);
+pref("network.tcp.tcp_fastopen_enable", true);
 pref("network.tcp.tcp_fastopen_consecutive_failure_limit", 5);
 
 // Whether to disable acceleration for all widgets.
@@ -5029,6 +5053,9 @@ pref("dom.vibrator.max_vibrate_list_len", 128);
 
 // Battery API
 pref("dom.battery.enabled", true);
+
+// Streams API
+pref("dom.streams.enabled", false);
 
 // Push
 
@@ -5379,7 +5406,7 @@ pref("browser.safebrowsing.provider.google.reportURL", "https://safebrowsing.goo
 pref("browser.safebrowsing.provider.google.reportPhishMistakeURL", "https://%LOCALE%.phish-error.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.provider.google.reportMalwareMistakeURL", "https://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.provider.google.advisoryURL", "https://developers.google.com/safe-browsing/v4/advisory");
-pref("browser.safebrowsing.provider.google.advisoryName", "Google Safe Browsing.");
+pref("browser.safebrowsing.provider.google.advisoryName", "Google Safe Browsing");
 
 // Prefs for v4.
 pref("browser.safebrowsing.provider.google4.pver", "4");
@@ -5390,7 +5417,7 @@ pref("browser.safebrowsing.provider.google4.reportURL", "https://safebrowsing.go
 pref("browser.safebrowsing.provider.google4.reportPhishMistakeURL", "https://%LOCALE%.phish-error.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.provider.google4.reportMalwareMistakeURL", "https://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.provider.google4.advisoryURL", "https://developers.google.com/safe-browsing/v4/advisory");
-pref("browser.safebrowsing.provider.google4.advisoryName", "Google Safe Browsing.");
+pref("browser.safebrowsing.provider.google4.advisoryName", "Google Safe Browsing");
 
 pref("browser.safebrowsing.reportPhishURL", "https://%LOCALE%.phish-report.mozilla.com/?hl=%LOCALE%&url=");
 
@@ -5796,6 +5823,7 @@ pref("dom.timeout.max_consecutive_callbacks_ms", 4);
 
 // Use this preference to house "Payment Request API" during development
 pref("dom.payments.request.enabled", false);
+pref("dom.payments.loglevel", "Warn");
 
 #ifdef FUZZING
 pref("fuzzing.enabled", false);

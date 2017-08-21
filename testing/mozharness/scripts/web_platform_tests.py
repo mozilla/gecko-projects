@@ -278,12 +278,13 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin, CodeCovera
                                         error_list=BaseErrorList + HarnessErrorList)
 
         env = {'MINIDUMP_SAVE_PATH': dirs['abs_blob_upload_dir']}
-        env['RUST_BACKTRACE'] = '1'
+        env['RUST_BACKTRACE'] = 'full'
 
         if self.config['allow_software_gl_layers']:
             env['MOZ_LAYERS_ALLOW_SOFTWARE_GL'] = '1'
         if self.config['enable_webrender']:
             env['MOZ_WEBRENDER'] = '1'
+            env['MOZ_ACCELERATED'] = '1'
         if self.config['headless']:
             env['MOZ_HEADLESS'] = '1'
             env['MOZ_HEADLESS_WIDTH'] = self.config['headless_width']

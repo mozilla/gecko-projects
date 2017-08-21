@@ -236,13 +236,6 @@ public:
    */
   EditorBase();
 
-  // Please include TextEditor.h.
-  inline TextEditor* AsTextEditor();
-  inline const TextEditor* AsTextEditor() const;
-  // Please include HTMLEditor.h.
-  inline HTMLEditor* AsHTMLEditor();
-  inline const HTMLEditor* AsHTMLEditor() const;
-
 protected:
   /**
    * The default destructor. This should suffice. Should this be pure virtual
@@ -258,7 +251,27 @@ public:
   already_AddRefed<nsIDOMDocument> GetDOMDocument();
   already_AddRefed<nsIDocument> GetDocument();
   already_AddRefed<nsIPresShell> GetPresShell();
+  nsPresContext* GetPresContext()
+  {
+    RefPtr<nsIPresShell> presShell = GetPresShell();
+    return presShell ? presShell->GetPresContext() : nullptr;
+  }
   already_AddRefed<nsIWidget> GetWidget();
+  nsISelectionController* GetSelectionController() const
+  {
+    if (mSelectionController) {
+      return mSelectionController;
+    }
+    if (!mDocument) {
+      return nullptr;
+    }
+    nsIPresShell* presShell = mDocument->GetShell();
+    if (!presShell) {
+      return nullptr;
+    }
+    nsISelectionController* sc = static_cast<PresShell*>(presShell);
+    return sc;
+  }
   enum NotificationForEditorObservers
   {
     eNotifyEditorObserversOfEnd,
@@ -336,12 +349,27 @@ public:
   already_AddRefed<Element> CreateHTMLContent(nsIAtom* aTag);
 
   /**
+   * Creates text node which is marked as "maybe modified frequently".
+   */
+  static already_AddRefed<nsTextNode> CreateTextNode(nsIDocument& aDocument,
+                                                     const nsAString& aData);
+
+  /**
    * IME event handlers.
    */
   virtual nsresult BeginIMEComposition(WidgetCompositionEvent* aEvent);
   virtual nsresult UpdateIMEComposition(
                      WidgetCompositionEvent* aCompositionChangeEvet) = 0;
   void EndIMEComposition();
+
+  /**
+   * Commit composition if there is.
+   * Note that when there is a composition, this requests to commit composition
+   * to native IME.  Therefore, when there is composition, this can do anything.
+   * For example, the editor instance, the widget or the process itself may
+   * be destroyed.
+   */
+  nsresult CommitComposition();
 
   void SwitchTextDirectionTo(uint32_t aDirection);
 
@@ -569,23 +597,20 @@ protected:
    */
   bool EnsureComposition(WidgetCompositionEvent* aCompositionEvent);
 
-  nsISelectionController* GetSelectionController() const
-  {
-    if (mSelectionController) {
-      return mSelectionController;
-    }
-    if (!mDocument) {
-      return nullptr;
-    }
-    nsIPresShell* presShell = mDocument->GetShell();
-    if (!presShell) {
-      return nullptr;
-    }
-    nsISelectionController* sc = static_cast<PresShell*>(presShell);
-    return sc;
-  }
   nsresult GetSelection(SelectionType aSelectionType,
                         nsISelection** aSelection);
+
+  /**
+   * (Begin|End)PlaceholderTransaction() are called by AutoPlaceholderBatch.
+   * This set of methods are similar to the (Begin|End)Transaction(), but do
+   * not use the transaction managers batching feature.  Instead we use a
+   * placeholder transaction to wrap up any further transaction while the
+   * batch is open.  The advantage of this is that placeholder transactions
+   * can later merge, if needed.  Merging is unavailable between transaction
+   * manager batches.
+   */
+  void BeginPlaceholderTransaction(nsIAtom* aTransactionName);
+  void EndPlaceholderTransaction();
 
 public:
   /**
@@ -639,9 +664,14 @@ public:
   /**
    * Return the offset of aChild in aParent.  Asserts fatally if parent or
    * child is null, or parent is not child's parent.
+   * FYI: aChild must not be being removed from aParent.  In such case, these
+   *      methods may return wrong index if aChild doesn't have previous
+   *      sibling or next sibling.
    */
   static int32_t GetChildOffset(nsIDOMNode* aChild,
                                 nsIDOMNode* aParent);
+  static int32_t GetChildOffset(nsINode* aChild,
+                                nsINode* aParent);
 
   /**
    * Set outOffset to the offset of aChild in the parent.
@@ -788,6 +818,14 @@ public:
   }
 
   /**
+   * Returns true if selection is in an editable element and both the range
+   * start and the range end are editable.  E.g., even if the selection range
+   * includes non-editable elements, returns true when one of common ancestors
+   * of the range start and the range end is editable.  Otherwise, false.
+   */
+  bool IsSelectionEditable();
+
+  /**
    * Returns true if aNode is a MozEditorBogus node.
    */
   bool IsMozEditorBogusNode(nsINode* aNode)
@@ -873,6 +911,11 @@ public:
   }
 
   /**
+   * CollapseSelectionToEnd() collapses the selection to the end of the editor.
+   */
+  nsresult CollapseSelectionToEnd(Selection* aSelection);
+
+  /**
    * Helpers to add a node to the selection.
    * Used by table cell selection methods.
    */
@@ -945,6 +988,36 @@ public:
    * Accessor methods to flags.
    */
   uint32_t Flags() const { return mFlags; }
+
+  nsresult AddFlags(uint32_t aFlags)
+  {
+    const uint32_t kOldFlags = Flags();
+    const uint32_t kNewFlags = (kOldFlags | aFlags);
+    if (kNewFlags == kOldFlags) {
+      return NS_OK;
+    }
+    return SetFlags(kNewFlags); // virtual call and may be expensive.
+  }
+  nsresult RemoveFlags(uint32_t aFlags)
+  {
+    const uint32_t kOldFlags = Flags();
+    const uint32_t kNewFlags = (kOldFlags & ~aFlags);
+    if (kNewFlags == kOldFlags) {
+      return NS_OK;
+    }
+    return SetFlags(kNewFlags); // virtual call and may be expensive.
+  }
+  nsresult AddAndRemoveFlags(uint32_t aAddingFlags, uint32_t aRemovingFlags)
+  {
+    MOZ_ASSERT(!(aAddingFlags & aRemovingFlags),
+               "Same flags are specified both adding and removing");
+    const uint32_t kOldFlags = Flags();
+    const uint32_t kNewFlags = ((kOldFlags | aAddingFlags) & ~aRemovingFlags);
+    if (kNewFlags == kOldFlags) {
+      return NS_OK;
+    }
+    return SetFlags(kNewFlags); // virtual call and may be expensive.
+  }
 
   bool IsPlaintextEditor() const
   {
@@ -1249,12 +1322,26 @@ protected:
   bool mIsHTMLEditorClass;
 
   friend bool NSCanUnload(nsISupports* serviceMgr);
+  friend class AutoPlaceholderBatch;
   friend class AutoRules;
   friend class AutoSelectionRestorer;
   friend class AutoTransactionsConserveSelection;
   friend class RangeUpdater;
+  friend class nsIEditor;
 };
 
 } // namespace mozilla
+
+mozilla::EditorBase*
+nsIEditor::AsEditorBase()
+{
+  return static_cast<mozilla::EditorBase*>(this);
+}
+
+const mozilla::EditorBase*
+nsIEditor::AsEditorBase() const
+{
+  return static_cast<const mozilla::EditorBase*>(this);
+}
 
 #endif // #ifndef mozilla_EditorBase_h

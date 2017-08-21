@@ -71,7 +71,7 @@ const char* const kCSSRawProperties[eCSSProperty_COUNT_with_aliases] = {
 #define CSS_PROP_SHORTHAND(name_, id_, method_, flags_, pref_) #name_,
 #include "nsCSSPropList.h"
 #undef CSS_PROP_SHORTHAND
-#define CSS_PROP_ALIAS(aliasname_, id_, method_, pref_) #aliasname_,
+#define CSS_PROP_ALIAS(aliasname_, aliasid_, id_, method_, pref_) #aliasname_,
 #include "nsCSSPropAliasList.h"
 #undef CSS_PROP_ALIAS
 };
@@ -154,7 +154,7 @@ enum {
 
 // The names are in kCSSRawProperties.
 static nsCSSPropertyID gAliases[eCSSAliasCount != 0 ? eCSSAliasCount : 1] = {
-#define CSS_PROP_ALIAS(aliasname_, propid_, aliasmethod_, pref_)  \
+#define CSS_PROP_ALIAS(aliasname_, aliasid_, propid_, aliasmethod_, pref_)  \
   eCSSProperty_##propid_ ,
 #include "nsCSSPropAliasList.h"
 #undef CSS_PROP_ALIAS
@@ -228,7 +228,7 @@ nsCSSProps::AddRefTable(void)
       #include "nsCSSPropList.h"
       #undef CSS_PROP_SHORTHAND
 
-      #define CSS_PROP_ALIAS(aliasname_, propid_, aliasmethod_, pref_)    \
+      #define CSS_PROP_ALIAS(aliasname_, aliasid_, propid_, aliasmethod_, pref_)    \
         OBSERVE_PROP(pref_, eCSSPropertyAlias_##aliasmethod_)
       #include "nsCSSPropAliasList.h"
       #undef CSS_PROP_ALIAS
@@ -1147,11 +1147,11 @@ const KTableEntry nsCSSProps::kColorKTable[] = {
 };
 
 const KTableEntry nsCSSProps::kContentKTable[] = {
-  { eCSSKeyword_open_quote, NS_STYLE_CONTENT_OPEN_QUOTE },
-  { eCSSKeyword_close_quote, NS_STYLE_CONTENT_CLOSE_QUOTE },
-  { eCSSKeyword_no_open_quote, NS_STYLE_CONTENT_NO_OPEN_QUOTE },
-  { eCSSKeyword_no_close_quote, NS_STYLE_CONTENT_NO_CLOSE_QUOTE },
-  { eCSSKeyword__moz_alt_content, NS_STYLE_CONTENT_ALT_CONTENT },
+  { eCSSKeyword_open_quote, uint8_t(StyleContent::OpenQuote) },
+  { eCSSKeyword_close_quote, uint8_t(StyleContent::CloseQuote) },
+  { eCSSKeyword_no_open_quote, uint8_t(StyleContent::NoOpenQuote) },
+  { eCSSKeyword_no_close_quote, uint8_t(StyleContent::NoCloseQuote) },
+  { eCSSKeyword__moz_alt_content, uint8_t(StyleContent::AltContent) },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -3353,7 +3353,7 @@ nsCSSProps::gPropertyEnabled[eCSSProperty_COUNT_with_aliases] = {
   #include "nsCSSPropList.h"
   #undef CSS_PROP_SHORTHAND
 
-  #define CSS_PROP_ALIAS(aliasname_, propid_, aliasmethod_, pref_) \
+  #define CSS_PROP_ALIAS(aliasname_, aliasid_, propid_, aliasmethod_, pref_) \
     true,
   #include "nsCSSPropAliasList.h"
   #undef CSS_PROP_ALIAS

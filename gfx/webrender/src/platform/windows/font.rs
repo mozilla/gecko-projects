@@ -2,12 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use std::collections::HashMap;
 use api::{FontKey, FontRenderMode, GlyphDimensions};
-use api::{FontInstanceKey, GlyphKey, GlyphOptions};
+use api::{FontInstance, GlyphKey, GlyphOptions, SubpixelDirection};
 use gamma_lut::{GammaLut, Color as ColorLut};
+use internal_types::FastHashMap;
 
 use dwrote;
+use std::sync::Arc;
 
 lazy_static! {
     static ref DEFAULT_FONT_DESCRIPTOR: dwrote::FontDescriptor = dwrote::FontDescriptor {
@@ -19,7 +20,7 @@ lazy_static! {
 }
 
 pub struct FontContext {
-    fonts: HashMap<FontKey, dwrote::FontFace>,
+    fonts: FastHashMap<FontKey, dwrote::FontFace>,
     gamma_lut: GammaLut,
     gdi_gamma_lut: GammaLut,
 }
@@ -95,7 +96,7 @@ impl FontContext {
         let gamma = 1.8;
         let gdi_gamma = 2.3;
         FontContext {
-            fonts: HashMap::new(),
+            fonts: FastHashMap::default(),
             gamma_lut: GammaLut::new(contrast, gamma, gamma),
             gdi_gamma_lut: GammaLut::new(contrast, gdi_gamma, gdi_gamma),
         }
@@ -105,12 +106,12 @@ impl FontContext {
         self.fonts.contains_key(font_key)
     }
 
-    pub fn add_raw_font(&mut self, font_key: &FontKey, data: &[u8], index: u32) {
+    pub fn add_raw_font(&mut self, font_key: &FontKey, data: Arc<Vec<u8>>, index: u32) {
         if self.fonts.contains_key(font_key) {
             return
         }
 
-        if let Some(font_file) = dwrote::FontFile::new_from_data(data) {
+        if let Some(font_file) = dwrote::FontFile::new_from_data(&**data) {
             let face = font_file.create_face(index, dwrote::DWRITE_FONT_SIMULATIONS_NONE);
             self.fonts.insert((*font_key).clone(), face);
         } else {
@@ -154,7 +155,7 @@ impl FontContext {
     }
 
     fn create_glyph_analysis(&self,
-                             font: &FontInstanceKey,
+                             font: &FontInstance,
                              key: &GlyphKey) ->
                             dwrote::GlyphRunAnalysis {
         let face = self.fonts.get(&font.font_key).unwrap();
@@ -181,7 +182,7 @@ impl FontContext {
                                                     dwrite_measure_mode,
                                                     font.glyph_options);
 
-        let (x_offset, y_offset) = key.subpixel_point.to_f64();
+        let (x_offset, y_offset) = font.get_subpx_offset(key);
         let transform = Some(
                         dwrote::DWRITE_MATRIX { m11: 1.0, m12: 0.0, m21: 0.0, m22: 1.0,
                                                 dx: x_offset as f32, dy: y_offset as f32 }
@@ -201,7 +202,7 @@ impl FontContext {
 
     // TODO: Pipe GlyphOptions into glyph_dimensions too
     pub fn get_glyph_dimensions(&self,
-                                font: &FontInstanceKey,
+                                font: &FontInstance,
                                 key: &GlyphKey)
                                 -> Option<GlyphDimensions> {
         // Probably have to default to something else here.
@@ -282,7 +283,7 @@ impl FontContext {
     }
 
     pub fn rasterize_glyph(&mut self,
-                           font: &FontInstanceKey,
+                           font: &FontInstance,
                            key: &GlyphKey)
                            -> Option<RasterizedGlyph> {
         let analysis = self.create_glyph_analysis(font, key);

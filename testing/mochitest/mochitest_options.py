@@ -229,11 +229,12 @@ class MochitestArguments(ArgumentContainer):
                   "chunkByDir directories.",
           "default": 0,
           }],
-        [["--run-by-dir"],
+        [["--run-by-manifest"],
          {"action": "store_true",
-          "dest": "runByDir",
-          "help": "Run each directory in a single browser instance with a fresh profile.",
+          "dest": "runByManifest",
+          "help": "Run each manifest in a single browser instance with a fresh profile.",
           "default": False,
+          "suppress": True,
           }],
         [["--shuffle"],
          {"action": "store_true",
@@ -603,7 +604,13 @@ class MochitestArguments(ArgumentContainer):
         [["--work-path"],
          {"default": None,
           "dest": "workPath",
-          "help": "Path to the base dir of all test files.",
+          "help": "Path to the base dir of all source files.",
+          "suppress": True,
+          }],
+        [["--obj-path"],
+         {"default": None,
+          "dest": "objPath",
+          "help": "Path to the base dir of all object files.",
           "suppress": True,
           }],
         [["--verify"],
@@ -1031,7 +1038,7 @@ class AndroidArguments(ArgumentContainer):
                 if build_obj.substs.get('MOZ_BUILD_MOBILE_ANDROID_WITH_GRADLE'):
                     options.robocopApk = os.path.join(build_obj.topobjdir, 'gradle', 'build',
                                                       'mobile', 'android', 'app', 'outputs', 'apk',
-                                                      'app-official-australis-debug-androidTest-'
+                                                      'app-official-photon-debug-androidTest-'
                                                       'unaligned.apk')
                 else:
                     options.robocopApk = os.path.join(build_obj.topobjdir, 'mobile', 'android',

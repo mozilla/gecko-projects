@@ -10,6 +10,12 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 const ADDRESS_REFERENCES = "chrome://formautofill/content/addressReferences.js";
 
+// TODO: We only support US in MVP. We are going to support more countries in
+//       bug 1370193.
+const ALTERNATIVE_COUNTRY_NAMES = {
+  "US": ["US", "United States of America", "United States", "America", "U.S.", "USA", "U.S.A.", "U.S.A"],
+};
+
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
@@ -46,6 +52,8 @@ this.FormAutofillUtils = {
     "cc-exp-year": "creditCard",
   },
   _addressDataLoaded: false,
+  _collators: {},
+  _reAlternativeCountryNames: {},
 
   isAddressField(fieldName) {
     return !!this._fieldNameInfo[fieldName] && !this.isCreditCardField(fieldName);
@@ -120,82 +128,6 @@ this.FormAutofillUtils = {
     return true;
   },
 
-  // The tag name list is from Chromium except for "STYLE":
-  // eslint-disable-next-line max-len
-  // https://cs.chromium.org/chromium/src/components/autofill/content/renderer/form_autofill_util.cc?l=216&rcl=d33a171b7c308a64dc3372fac3da2179c63b419e
-  EXCLUDED_TAGS: ["SCRIPT", "NOSCRIPT", "OPTION", "STYLE"],
-  /**
-   * Extract all strings of an element's children to an array.
-   * "element.textContent" is a string which is merged of all children nodes,
-   * and this function provides an array of the strings contains in an element.
-   *
-   * @param  {Object} element
-   *         A DOM element to be extracted.
-   * @returns {Array}
-   *          All strings in an element.
-   */
-  extractLabelStrings(element) {
-    let strings = [];
-    let _extractLabelStrings = (el) => {
-      if (this.EXCLUDED_TAGS.includes(el.tagName)) {
-        return;
-      }
-
-      if (el.nodeType == Ci.nsIDOMNode.TEXT_NODE ||
-          el.childNodes.length == 0) {
-        let trimmedText = el.textContent.trim();
-        if (trimmedText) {
-          strings.push(trimmedText);
-        }
-        return;
-      }
-
-      for (let node of el.childNodes) {
-        if (node.nodeType != Ci.nsIDOMNode.ELEMENT_NODE &&
-            node.nodeType != Ci.nsIDOMNode.TEXT_NODE) {
-          continue;
-        }
-        _extractLabelStrings(node);
-      }
-    };
-    _extractLabelStrings(element);
-    return strings;
-  },
-
-  findLabelElements(element) {
-    let document = element.ownerDocument;
-    let labels = [];
-    // TODO: querySelectorAll is inefficient here. However, bug 1339726 is for
-    // a more efficient implementation from DOM API perspective. This function
-    // should be refined after input.labels API landed.
-    for (let label of document.querySelectorAll("label[for]")) {
-      if (element.id == label.htmlFor) {
-        labels.push(label);
-      }
-    }
-
-    if (labels.length > 0) {
-      log.debug("Label found by ID", element.id);
-      return labels;
-    }
-
-    let parent = element.parentNode;
-    if (!parent) {
-      return [];
-    }
-    do {
-      if (parent.tagName == "LABEL" &&
-          parent.control == element &&
-          !parent.hasAttribute("for")) {
-        log.debug("Label found in input's parent or ancestor.");
-        return [parent];
-      }
-      parent = parent.parentNode;
-    } while (parent);
-
-    return [];
-  },
-
   loadDataFromScript(url, sandbox = {}) {
     let scriptLoader = Cc["@mozilla.org/moz/jssubscript-loader;1"]
                          .getService(Ci.mozIJSSubScriptLoader);
@@ -218,6 +150,100 @@ this.FormAutofillUtils = {
   },
 
   /**
+   * Get the collators based on the specified country.
+   * @param   {string} country The specified country.
+   * @returns {array} An array containing several collator objects.
+   */
+  getCollators(country) {
+    // TODO: Only one language should be used at a time per country. The locale
+    //       of the page should be taken into account to do this properly.
+    //       We are going to support more countries in bug 1370193 and this
+    //       should be addressed when we start to implement that bug.
+
+    if (!this._collators[country]) {
+      let dataset = this.getCountryAddressData(country);
+      let languages = dataset.languages ? dataset.languages.split("~") : [dataset.lang];
+      this._collators[country] = languages.map(lang => new Intl.Collator(lang, {sensitivity: "base", ignorePunctuation: true}));
+    }
+    return this._collators[country];
+  },
+
+  /**
+   * Use alternative country name list to identify a country code from a
+   * specified country name.
+   * @param   {string} countryName A country name to be identified
+   * @param   {string} [countrySpecified] A country code indicating that we only
+   *                                      search its alternative names if specified.
+   * @returns {string} The matching country code.
+   */
+  identifyCountryCode(countryName, countrySpecified) {
+    let countries = countrySpecified ? [countrySpecified] : Object.keys(ALTERNATIVE_COUNTRY_NAMES);
+
+    for (let country of countries) {
+      let collators = this.getCollators(country);
+
+      let alternativeCountryNames = ALTERNATIVE_COUNTRY_NAMES[country];
+      let reAlternativeCountryNames = this._reAlternativeCountryNames[country];
+      if (!reAlternativeCountryNames) {
+        reAlternativeCountryNames = this._reAlternativeCountryNames[country] = [];
+      }
+
+      for (let i = 0; i < alternativeCountryNames.length; i++) {
+        let name = alternativeCountryNames[i];
+        let reName = reAlternativeCountryNames[i];
+        if (!reName) {
+          reName = reAlternativeCountryNames[i] = new RegExp("\\b" + this.escapeRegExp(name) + "\\b", "i");
+        }
+
+        if (this.strCompare(name, countryName, collators) || reName.test(countryName)) {
+          return country;
+        }
+      }
+    }
+
+    return null;
+  },
+
+  /**
+   * Try to find the abbreviation of the given state name
+   * @param   {string[]} stateValues A list of inferable state values.
+   * @param   {string} country A country name to be identified.
+   * @returns {string} The matching state abbreviation.
+   */
+  getAbbreviatedStateName(stateValues, country = this.DEFAULT_COUNTRY_CODE) {
+    let values = Array.isArray(stateValues) ? stateValues : [stateValues];
+
+    let collators = this.getCollators(country);
+    let {sub_keys: subKeys, sub_names: subNames} = this.getCountryAddressData(country);
+
+    if (!Array.isArray(subKeys)) {
+      subKeys = subKeys.split("~");
+    }
+    if (!Array.isArray(subNames)) {
+      subNames = subNames.split("~");
+    }
+
+    let speculatedSubIndexes = [];
+    for (const val of values) {
+      let identifiedValue = this.identifyValue(subKeys, subNames, val, collators);
+      if (identifiedValue) {
+        return identifiedValue;
+      }
+
+      // Predict the possible state by partial-matching if no exact match.
+      [subKeys, subNames].forEach(sub => {
+        speculatedSubIndexes.push(sub.findIndex(token => {
+          let pattern = new RegExp("\\b" + this.escapeRegExp(token) + "\\b");
+
+          return pattern.test(val);
+        }));
+      });
+    }
+
+    return subKeys[speculatedSubIndexes.find(i => !!~i)] || null;
+  },
+
+  /**
    * Find the option element from select element.
    * 1. Try to find the locale using the country from address.
    * 2. First pass try to find exact match.
@@ -234,46 +260,56 @@ this.FormAutofillUtils = {
       return null;
     }
 
-    let dataset = this.getCountryAddressData(address.country);
-    let collator = new Intl.Collator(dataset.lang, {sensitivity: "base", ignorePunctuation: true});
+    let country = address.country || this.DEFAULT_COUNTRY_CODE;
+    let dataset = this.getCountryAddressData(country);
+    let collators = this.getCollators(country);
 
     for (let option of selectEl.options) {
-      if (this.strCompare(value, option.value, collator) ||
-          this.strCompare(value, option.text, collator)) {
+      if (this.strCompare(value, option.value, collators) ||
+          this.strCompare(value, option.text, collators)) {
         return option;
       }
     }
 
-    if (fieldName === "address-level1") {
-      if (!Array.isArray(dataset.sub_keys)) {
-        dataset.sub_keys = dataset.sub_keys.split("~");
-      }
-      if (!Array.isArray(dataset.sub_names)) {
-        dataset.sub_names = dataset.sub_names.split("~");
-      }
-      let keys = dataset.sub_keys;
-      let names = dataset.sub_names;
-      let identifiedValue = this.identifyValue(keys, names, value, collator);
-
-      // No point going any further if we cannot identify value from address
-      if (identifiedValue === undefined) {
-        return null;
-      }
-
-      // Go through options one by one to find a match.
-      // Also check if any option contain the address-level1 key.
-      let pattern = new RegExp(`\\b${identifiedValue}\\b`, "i");
-      for (let option of selectEl.options) {
-        let optionValue = this.identifyValue(keys, names, option.value, collator);
-        let optionText = this.identifyValue(keys, names, option.text, collator);
-        if (identifiedValue === optionValue || identifiedValue === optionText || pattern.test(option.value)) {
-          return option;
+    switch (fieldName) {
+      case "address-level1": {
+        if (!Array.isArray(dataset.sub_keys)) {
+          dataset.sub_keys = dataset.sub_keys.split("~");
         }
-      }
-    }
+        if (!Array.isArray(dataset.sub_names)) {
+          dataset.sub_names = dataset.sub_names.split("~");
+        }
+        let keys = dataset.sub_keys;
+        let names = dataset.sub_names;
+        let identifiedValue = this.identifyValue(keys, names, value, collators);
 
-    if (fieldName === "country") {
-      // TODO: Support matching countries (Bug 1375382)
+        // No point going any further if we cannot identify value from address
+        if (!identifiedValue) {
+          return null;
+        }
+
+        // Go through options one by one to find a match.
+        // Also check if any option contain the address-level1 key.
+        let pattern = new RegExp("\\b" + this.escapeRegExp(identifiedValue) + "\\b", "i");
+        for (let option of selectEl.options) {
+          let optionValue = this.identifyValue(keys, names, option.value, collators);
+          let optionText = this.identifyValue(keys, names, option.text, collators);
+          if (identifiedValue === optionValue || identifiedValue === optionText || pattern.test(option.value)) {
+            return option;
+          }
+        }
+        break;
+      }
+      case "country": {
+        if (ALTERNATIVE_COUNTRY_NAMES[value]) {
+          for (let option of selectEl.options) {
+            if (this.identifyCountryCode(option.text, value) || this.identifyCountryCode(option.value, value)) {
+              return option;
+            }
+          }
+        }
+        break;
+      }
     }
 
     return null;
@@ -284,16 +320,16 @@ this.FormAutofillUtils = {
    * @param   {array<string>} keys
    * @param   {array<string>} names
    * @param   {string} value
-   * @param   {object} collator
+   * @param   {array} collators
    * @returns {string}
    */
-  identifyValue(keys, names, value, collator) {
-    let resultKey = keys.find(key => this.strCompare(value, key, collator));
+  identifyValue(keys, names, value, collators) {
+    let resultKey = keys.find(key => this.strCompare(value, key, collators));
     if (resultKey) {
       return resultKey;
     }
 
-    let index = names.findIndex(name => this.strCompare(value, name, collator));
+    let index = names.findIndex(name => this.strCompare(value, name, collators));
     if (index !== -1) {
       return keys[index];
     }
@@ -305,11 +341,21 @@ this.FormAutofillUtils = {
    * Compare if two strings are the same.
    * @param   {string} a
    * @param   {string} b
-   * @param   {object} collator
+   * @param   {array} collators
    * @returns {boolean}
    */
-  strCompare(a = "", b = "", collator) {
-    return !collator.compare(a, b);
+  strCompare(a = "", b = "", collators) {
+    return collators.some(collator => !collator.compare(a, b));
+  },
+
+  /**
+   * Escaping user input to be treated as a literal string within a regular
+   * expression.
+   * @param   {string} string
+   * @returns {string}
+   */
+  escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   },
 
   /**
@@ -344,5 +390,13 @@ this.FormAutofillUtils = {
   },
 };
 
+XPCOMUtils.defineLazyGetter(this.FormAutofillUtils, "DEFAULT_COUNTRY_CODE", () => {
+  return Services.prefs.getCharPref("browser.search.countryCode", "US");
+});
+
 this.log = null;
 this.FormAutofillUtils.defineLazyLogGetter(this, this.EXPORTED_SYMBOLS[0]);
+
+XPCOMUtils.defineLazyGetter(FormAutofillUtils, "stringBundle", function() {
+  return Services.strings.createBundle("chrome://formautofill/locale/formautofill.properties");
+});

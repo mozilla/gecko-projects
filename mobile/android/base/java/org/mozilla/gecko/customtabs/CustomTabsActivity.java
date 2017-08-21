@@ -31,6 +31,7 @@ import android.view.View;
 import android.widget.ProgressBar;
 
 import org.mozilla.gecko.ActivityHandlerHelper;
+import org.mozilla.gecko.DoorHangerPopup;
 import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoView;
 import org.mozilla.gecko.GeckoViewSettings;
@@ -41,7 +42,9 @@ import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuInflater;
 import org.mozilla.gecko.mozglue.SafeIntent;
+import org.mozilla.gecko.permissions.Permissions;
 import org.mozilla.gecko.prompts.PromptService;
+import org.mozilla.gecko.util.ActivityUtils;
 import org.mozilla.gecko.util.Clipboard;
 import org.mozilla.gecko.util.ColorUtil;
 import org.mozilla.gecko.util.GeckoBundle;
@@ -70,13 +73,14 @@ public class CustomTabsActivity extends AppCompatActivity
 
     private GeckoView mGeckoView;
     private PromptService mPromptService;
+    private DoorHangerPopup mDoorHangerPopup;
 
     private boolean mCanGoBack = false;
     private boolean mCanGoForward = false;
     private boolean mCanStop = false;
     private String mCurrentUrl;
     private String mCurrentTitle;
-    private boolean mIsSecure = false;
+    private SecurityInformation mSecurityInformation = null;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -107,6 +111,7 @@ public class CustomTabsActivity extends AppCompatActivity
         mGeckoView.setContentListener(this);
 
         mPromptService = new PromptService(this, mGeckoView.getEventDispatcher());
+        mDoorHangerPopup = new DoorHangerPopup(this, mGeckoView.getEventDispatcher());
 
         final GeckoViewSettings settings = mGeckoView.getSettings();
         settings.setBoolean(GeckoViewSettings.USE_MULTIPROCESS, false);
@@ -121,6 +126,7 @@ public class CustomTabsActivity extends AppCompatActivity
 
     @Override
     public void onDestroy() {
+        mDoorHangerPopup.destroy();
         mPromptService.destroy();
 
         super.onDestroy();
@@ -131,6 +137,12 @@ public class CustomTabsActivity extends AppCompatActivity
         if (!ActivityHandlerHelper.handleActivityResult(requestCode, resultCode, data)) {
             super.onActivityResult(requestCode, resultCode, data);
         }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(final int requestCode, final String[] permissions,
+                                           final int[] grantResults) {
+        Permissions.onRequestPermissionsResult(this, permissions, grantResults);
     }
 
     private void sendTelemetry() {
@@ -423,7 +435,7 @@ public class CustomTabsActivity extends AppCompatActivity
      * Update the state of the action bar
      */
     private void updateActionBar() {
-        actionBarPresenter.update(mCurrentTitle, mCurrentUrl, mIsSecure);
+        actionBarPresenter.update(mCurrentTitle, mCurrentUrl, mSecurityInformation);
     }
 
     /**
@@ -529,6 +541,20 @@ public class CustomTabsActivity extends AppCompatActivity
         updateMenuItemForward();
     }
 
+    @Override
+    public void onLoadUri(final GeckoView view, final String uriStr,
+                          final TargetWindow where) {
+        final Uri uri = Uri.parse(uriStr);
+        if (!TextUtils.isEmpty(mCurrentUrl) &&
+            Uri.parse(mCurrentUrl).getHost().equals(uri.getHost())) {
+            view.loadUri(uri);
+        } else {
+            final Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setData(uri);
+            startActivity(intent);
+        }
+    }
+
     /* GeckoView.ProgressListener */
     @Override
     public void onPageStart(GeckoView view, String url) {
@@ -548,7 +574,7 @@ public class CustomTabsActivity extends AppCompatActivity
 
     @Override
     public void onSecurityChange(GeckoView view, SecurityInformation securityInfo) {
-        mIsSecure = securityInfo.isSecure;
+        mSecurityInformation = securityInfo;
         updateActionBar();
     }
 
@@ -560,7 +586,14 @@ public class CustomTabsActivity extends AppCompatActivity
     }
 
     @Override
-    public void onFullScreen(GeckoView view, boolean fullScreen) {}
+    public void onFullScreen(GeckoView view, boolean fullScreen) {
+        ActivityUtils.setFullScreen(this, fullScreen);
+        if (fullScreen) {
+            getSupportActionBar().hide();
+        } else {
+            getSupportActionBar().show();
+        }
+    }
 
     @Override
     public void onContextMenu(GeckoView view, int screenX, int screenY,

@@ -141,7 +141,10 @@ public:
           static_cast<WebRenderCanvasRendererAsync*>(canvasData->GetCanvasRenderer());
 
         if (isRecycled) {
-          static_cast<nsHTMLCanvasFrame*>(mFrame)->InitializeCanvasRenderer(aDisplayListBuilder, data);
+          nsHTMLCanvasFrame* canvasFrame = static_cast<nsHTMLCanvasFrame*>(mFrame);
+          if (!canvasFrame->InitializeCanvasRenderer(aDisplayListBuilder, data)) {
+            return true;
+          }
         }
 
         data->UpdateCompositableClient();
@@ -177,11 +180,14 @@ public:
           scTransform = scTransform.PreTranslate(0, data->GetSize().height, 0).PreScale(1, -1, 1);
         }
 
+        gfxRect destGFXRect = mFrame->PresContext()->AppUnitsToGfxUnits(dest);
+        scTransform.PreScale(destGFXRect.Width() / canvasSizeInPx.width,
+                             destGFXRect.Height() / canvasSizeInPx.height, 1.0f);
+
         MaybeIntSize scaleToSize;
         LayerRect scBounds(0, 0, bounds.width, bounds.height);
         wr::ImageRendering filter = wr::ToImageRendering(nsLayoutUtils::GetSamplingFilterForFrame(mFrame));
         wr::MixBlendMode mixBlendMode = wr::MixBlendMode::Normal;
-
         aManager->WrBridge()->AddWebRenderParentCommand(OpUpdateAsyncImagePipeline(data->GetPipelineId().value(),
                                                                                    scBounds,
                                                                                    scTransform,
@@ -452,17 +458,16 @@ nsHTMLCanvasFrame::BuildLayer(nsDisplayListBuilder* aBuilder,
   return layer.forget();
 }
 
-void
+bool
 nsHTMLCanvasFrame::InitializeCanvasRenderer(nsDisplayListBuilder* aBuilder,
                                             CanvasRenderer* aRenderer)
 {
   HTMLCanvasElement* element = static_cast<HTMLCanvasElement*>(GetContent());
-  element->InitializeCanvasRenderer(aBuilder, aRenderer);
+  return element->InitializeCanvasRenderer(aBuilder, aRenderer);
 }
 
 void
 nsHTMLCanvasFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                                    const nsRect&           aDirtyRect,
                                     const nsDisplayListSet& aLists)
 {
   if (!IsVisibleForPainting(aBuilder))

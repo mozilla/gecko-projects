@@ -16,7 +16,6 @@ module.metadata = {
 
 const { Cc, Ci } = require("chrome");
 const { DataURL } = require("./url");
-const apiUtils = require("./deprecated/api-utils");
 /*
 While these data flavors resemble Internet media types, they do
 no directly map to them.
@@ -90,15 +89,6 @@ exports.set = function(aData, aDataType) {
     }
   }
 
-  options = apiUtils.validateOptions(options, {
-    data: {
-      is: ["string"]
-    },
-    datatype: {
-      is: ["string"]
-    }
-  });
-
   let flavor = fromJetpackFlavor(options.datatype);
 
   if (!flavor)
@@ -150,7 +140,7 @@ exports.set = function(aData, aDataType) {
     case "image/png":
       let image = options.data;
 
-      let container = {};
+      let container;
 
       try {
         let input = Cc["@mozilla.org/io/string-input-stream;1"].
@@ -158,7 +148,7 @@ exports.set = function(aData, aDataType) {
 
         input.setData(image, image.length);
 
-        imageTools.decodeImageData(input, flavor, container);
+        container = imageTools.decodeImage(input, flavor);
       }
       catch (e) {
         throw new Error("Unable to decode data given in a valid image.");
@@ -171,7 +161,7 @@ exports.set = function(aData, aDataType) {
       var imgPtr = Cc["@mozilla.org/supports-interface-pointer;1"].
                      createInstance(Ci.nsISupportsInterfacePointer);
 
-      imgPtr.data = container.value;
+      imgPtr.data = container;
 
       xferable.addDataFlavor(flavor);
       xferable.setTransferData(flavor, imgPtr, -1);
@@ -207,12 +197,6 @@ exports.get = function(aDataType) {
     else
       options.datatype = "text";
   }
-
-  options = apiUtils.validateOptions(options, {
-    datatype: {
-      is: ["string"]
-    }
-  });
 
   var xferable = Cc["@mozilla.org/widget/transferable;1"].
                  createInstance(Ci.nsITransferable);

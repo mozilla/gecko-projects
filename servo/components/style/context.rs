@@ -5,7 +5,7 @@
 //! The context within which style is calculated.
 
 #[cfg(feature = "servo")] use animation::Animation;
-use animation::PropertyAnimation;
+#[cfg(feature = "servo")] use animation::PropertyAnimation;
 use app_units::Au;
 use bloom::StyleBloom;
 use cache::LRUCache;
@@ -293,6 +293,7 @@ pub struct CurrentElementInfo {
     is_initial_style: bool,
     /// A Vec of possibly expired animations. Used only by Servo.
     #[allow(dead_code)]
+    #[cfg(feature = "servo")]
     pub possibly_expired_animations: Vec<PropertyAnimation>,
 }
 
@@ -387,16 +388,16 @@ impl TraversalStatistics {
               D: DomTraversal<E>,
     {
         let threshold = traversal.shared_context().options.style_statistics_threshold;
+        let stylist = traversal.shared_context().stylist;
 
         self.is_parallel = Some(traversal.is_parallel());
         self.is_large = Some(self.elements_traversed as usize >= threshold);
         self.traversal_time_ms = (time::precise_time_s() - start) * 1000.0;
-        self.selectors = traversal.shared_context().stylist.num_selectors() as u32;
-        self.revalidation_selectors = traversal.shared_context().stylist.num_revalidation_selectors() as u32;
-        self.dependency_selectors =
-            traversal.shared_context().stylist.invalidation_map().len() as u32;
-        self.declarations = traversal.shared_context().stylist.num_declarations() as u32;
-        self.stylist_rebuilds = traversal.shared_context().stylist.num_rebuilds() as u32;
+        self.selectors = stylist.num_selectors() as u32;
+        self.revalidation_selectors = stylist.num_revalidation_selectors() as u32;
+        self.dependency_selectors = stylist.num_invalidations() as u32;
+        self.declarations = stylist.num_declarations() as u32;
+        self.stylist_rebuilds = stylist.num_rebuilds() as u32;
     }
 
     /// Returns whether this traversal is 'large' in order to avoid console spam
@@ -668,6 +669,17 @@ impl<E: TElement> ThreadLocalStyleContext<E> {
         }
     }
 
+    #[cfg(feature = "gecko")]
+    /// Notes when the style system starts traversing an element.
+    pub fn begin_element(&mut self, element: E, data: &ElementData) {
+        debug_assert!(self.current_element_info.is_none());
+        self.current_element_info = Some(CurrentElementInfo {
+            element: element.as_node().opaque(),
+            is_initial_style: !data.has_styles(),
+        });
+    }
+
+    #[cfg(feature = "servo")]
     /// Notes when the style system starts traversing an element.
     pub fn begin_element(&mut self, element: E, data: &ElementData) {
         debug_assert!(self.current_element_info.is_none());

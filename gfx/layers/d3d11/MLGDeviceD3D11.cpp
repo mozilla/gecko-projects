@@ -625,7 +625,11 @@ MLGBufferD3D11::Create(ID3D11Device* aDevice,
   data.SysMemSlicePitch = 0;
 
   RefPtr<ID3D11Buffer> buffer;
-  aDevice->CreateBuffer(&desc, aInitialData ? &data : nullptr, getter_AddRefs(buffer));
+  HRESULT hr = aDevice->CreateBuffer(&desc, aInitialData ? &data : nullptr, getter_AddRefs(buffer));
+  if (FAILED(hr) || !buffer) {
+    gfxCriticalError() << "Failed to create ID3D11Buffer.";
+    return nullptr;
+  }
 
   return new MLGBufferD3D11(buffer, aType, aSize);
 }
@@ -1337,6 +1341,7 @@ bool
 MLGDeviceD3D11::Map(MLGResource* aResource, MLGMapType aType, MLGMappedResource* aMap)
 {
   ID3D11Resource* resource = aResource->AsResourceD3D11()->GetResource();
+  MOZ_ASSERT(resource);
 
   D3D11_MAPPED_SUBRESOURCE map;
   HRESULT hr = mCtx->Map(resource, 0, ToD3D11Map(aType), 0, &map);
@@ -1402,8 +1407,8 @@ MLGDeviceD3D11::SetViewport(const gfx::IntRect& aViewport)
   vp.MinDepth = 0.0f;
   vp.TopLeftX = aViewport.x;
   vp.TopLeftY = aViewport.y;
-  vp.Width = aViewport.width;
-  vp.Height = aViewport.height;
+  vp.Width = aViewport.Width();
+  vp.Height = aViewport.Height();
   mCtx->RSSetViewports(1, &vp);
 }
 

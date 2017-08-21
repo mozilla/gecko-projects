@@ -28,6 +28,7 @@
     "url": "chrome://extensions/content/ext-contextualIdentities.js",
     "schema": "chrome://extensions/content/schemas/contextual_identities.json",
     "scopes": ["addon_parent"],
+    "events": ["startup"],
     "paths": [
       ["contextualIdentities"]
     ]
@@ -51,14 +52,10 @@
   "extension": {
     "url": "chrome://extensions/content/ext-extension.js",
     "schema": "chrome://extensions/content/schemas/extension.json",
-    "scopes": ["addon_parent"],
+    "scopes": ["addon_parent", "content_child"],
     "paths": [
       ["extension"]
     ]
-  },
-  "geolocation": {
-    "url": "chrome://extensions/content/ext-geolocation.js",
-    "events": ["startup"]
   },
   "i18n": {
     "url": "chrome://extensions/content/ext-i18n.js",
@@ -140,7 +137,7 @@
   },
   "test": {
     "schema": "chrome://extensions/content/schemas/test.json",
-    "scopes": []
+    "scopes": ["content_child"]
   },
   "theme": {
     "url": "chrome://extensions/content/ext-theme.js",

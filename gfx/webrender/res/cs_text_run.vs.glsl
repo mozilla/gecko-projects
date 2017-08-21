@@ -24,7 +24,10 @@ void main(void) {
     PrimitiveGeometry shadow_geom = fetch_primitive_geometry(text_shadow_address);
     TextShadow shadow = fetch_text_shadow(text_shadow_address + VECS_PER_PRIM_HEADER);
 
-    Glyph glyph = fetch_glyph(prim.specific_prim_address, glyph_index);
+    Glyph glyph = fetch_glyph(prim.specific_prim_address,
+                              glyph_index,
+                              text.subpx_dir);
+
     GlyphResource res = fetch_glyph_resource(resource_address);
 
     // Glyphs size is already in device-pixels.
@@ -44,7 +47,7 @@ void main(void) {
                    local_rect.xy + local_rect.zw,
                    aPosition.xy);
 
-    vUv = mix(st0, st1, aPosition.xy);
+    vUv = vec3(mix(st0, st1, aPosition.xy), res.layer);
     vColor = shadow.color;
 
     gl_Position = uTransform * vec4(pos, 0.0, 1.0);

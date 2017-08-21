@@ -18,12 +18,12 @@ add_task(async function() {
 add_task(async function() {
   await openPreferencesViaOpenPreferencesAPI("paneGeneral", {leaveOpen: true});
 
-  // Ensure the "Create Account" button in the hidden child of the <xul:deck>
+  // Ensure the "Sign Up" button in the hidden child of the <xul:deck>
   // is selected and displayed on the screen.
   let weavePrefsDeck = gBrowser.contentDocument.getElementById("weavePrefsDeck");
   is(weavePrefsDeck.selectedIndex, 0, "Should select the #noFxaAccount child node");
   let noFxaSignUp = weavePrefsDeck.childNodes[0].querySelector("#noFxaSignUp");
-  is(noFxaSignUp.label, "Create Account", "The Create Account button should exist");
+  is(noFxaSignUp.textContent, "Don\u2019t have an account? Get started", "The Sign Up button should exist");
 
   // Performs search.
   let searchInput = gBrowser.contentDocument.getElementById("searchInput");
@@ -31,8 +31,11 @@ add_task(async function() {
   is(searchInput, gBrowser.contentDocument.activeElement.closest("#searchInput"),
     "Search input should be focused when visiting preferences");
 
-  searchInput.value = "Create Account";
-  searchInput.doCommand();
+  let query = "Don\u2019t have an account? Get started";
+  let searchCompletedPromise = BrowserTestUtils.waitForEvent(
+      gBrowser.contentWindow, "PreferencesSearchCompleted", evt => evt.detail == query);
+  EventUtils.sendString(query);
+  await searchCompletedPromise;
 
   let mainPrefTag = gBrowser.contentDocument.getElementById("mainPrefPane");
   for (let i = 0; i < mainPrefTag.childElementCount; i++) {
@@ -51,8 +54,11 @@ add_task(async function() {
 
   // Performs search.
   searchInput.focus();
-  searchInput.value = "Forget this Email";
-  searchInput.doCommand();
+  query = "Forget this Email";
+  searchCompletedPromise = BrowserTestUtils.waitForEvent(
+      gBrowser.contentWindow, "PreferencesSearchCompleted", evt => evt.detail == query);
+  EventUtils.sendString(query);
+  await searchCompletedPromise;
 
   let noResultsEl = gBrowser.contentDocument.querySelector(".no-results-message");
   is_element_visible(noResultsEl, "Should be reporting no results");

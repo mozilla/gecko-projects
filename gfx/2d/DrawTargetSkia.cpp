@@ -193,8 +193,8 @@ VerifyRGBXCorners(uint8_t* aData, const IntSize &aSize, const int32_t aStride, S
     return true;
   }
 
-  const int height = bounds.height;
-  const int width = bounds.width;
+  const int height = bounds.Height();
+  const int width = bounds.Width();
   const int pixelSize = 4;
   MOZ_ASSERT(aSize.width * pixelSize <= aStride);
 
@@ -848,16 +848,16 @@ ShrinkClippedStrokedRect(const Rect &aStrokedRect, const IntRect &aDeviceClip,
   Rect userSpaceStrokeClip =
     UserSpaceStrokeClip(aDeviceClip, aTransform, aStrokeOptions);
   RectDouble strokedRectDouble(
-    aStrokedRect.x, aStrokedRect.y, aStrokedRect.width, aStrokedRect.height);
+    aStrokedRect.x, aStrokedRect.y, aStrokedRect.Width(), aStrokedRect.Height());
   RectDouble intersection =
     strokedRectDouble.Intersect(RectDouble(userSpaceStrokeClip.x,
                                            userSpaceStrokeClip.y,
-                                           userSpaceStrokeClip.width,
-                                           userSpaceStrokeClip.height));
+                                           userSpaceStrokeClip.Width(),
+                                           userSpaceStrokeClip.Height()));
   Double dashPeriodLength = DashPeriodLength(aStrokeOptions);
   if (intersection.IsEmpty() || dashPeriodLength == 0.0f) {
     return Rect(
-      intersection.x, intersection.y, intersection.width, intersection.height);
+      intersection.x, intersection.y, intersection.Width(), intersection.Height());
   }
 
   // Reduce the rectangle side lengths in multiples of the dash period length
@@ -871,8 +871,8 @@ ShrinkClippedStrokedRect(const Rect &aStrokedRect, const IntRect &aDeviceClip,
   strokedRectDouble.Deflate(insetBy);
   return Rect(strokedRectDouble.x,
               strokedRectDouble.y,
-              strokedRectDouble.width,
-              strokedRectDouble.height);
+              strokedRectDouble.Width(),
+              strokedRectDouble.Height());
 }
 
 void
@@ -1261,7 +1261,13 @@ DrawTargetSkia::FillGlyphsWithCG(ScaledFont *aFont,
     return false;
   }
 
-  SetFontSmoothingBackgroundColor(cgContext, mColorSpace, aRenderingOptions);
+  if (mPushedLayers.empty()) {
+    // Respect the font smoothing background color, but only if no layer is
+    // currently pushed, because this color usually describes what's under this
+    // DrawTarget, and not what's within this DrawTarget under the currently
+    // pushed layer.
+    SetFontSmoothingBackgroundColor(cgContext, mColorSpace, aRenderingOptions);
+  }
   SetFontColor(cgContext, mColorSpace, aPattern);
 
   ScaledFontMac* macFont = static_cast<ScaledFontMac*>(aFont);
@@ -1563,7 +1569,7 @@ DrawTarget::Draw3DTransformedSurface(SourceSurface* aSurface, const Matrix4x4& a
   }
   std::unique_ptr<SkCanvas> dstCanvas(
     SkCanvas::MakeRasterDirect(
-      SkImageInfo::Make(xformBounds.width, xformBounds.height,
+                        SkImageInfo::Make(xformBounds.Width(), xformBounds.Height(),
                         GfxFormatToSkiaColorType(dstSurf->GetFormat()),
                         kPremul_SkAlphaType),
       dstSurf->GetData(), dstSurf->Stride()));
@@ -1813,7 +1819,7 @@ DrawTargetSkia::CopySurface(SourceSurface *aSurface,
 
   mCanvas->save();
   mCanvas->setMatrix(SkMatrix::MakeTrans(SkIntToScalar(aDestination.x), SkIntToScalar(aDestination.y)));
-  mCanvas->clipRect(SkRect::MakeIWH(aSourceRect.width, aSourceRect.height), SkClipOp::kReplace_deprecated);
+  mCanvas->clipRect(SkRect::MakeIWH(aSourceRect.Width(), aSourceRect.Height()), SkClipOp::kReplace_deprecated);
 
   SkPaint paint;
   if (!image->isOpaque()) {

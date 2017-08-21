@@ -327,6 +327,9 @@ DXGITextureData::PrepareDrawTargetInLock(OpenMode aMode)
     }
   }
 
+  // Reset transform
+  mDrawTarget->SetTransform(Matrix());
+
   if (mNeedsClear) {
     mDrawTarget->ClearRect(Rect(0, 0, mSize.width, mSize.height));
     mNeedsClear = false;
@@ -1379,7 +1382,7 @@ DataTextureSourceD3D11::Update(DataSourceSurface* aSurface,
 
         void* data = map.mData + map.mStride * rect.y + BytesPerPixel(aSurface->GetFormat()) * rect.x;
 
-        context->UpdateSubresource(mTexture, 0, &box, data, map.mStride, map.mStride * rect.height);
+        context->UpdateSubresource(mTexture, 0, &box, data, map.mStride, map.mStride * rect.Height());
       }
     } else {
       context->UpdateSubresource(mTexture, 0, nullptr, aSurface->GetData(),
@@ -1399,8 +1402,8 @@ DataTextureSourceD3D11::Update(DataSourceSurface* aSurface,
     for (uint32_t i = 0; i < tileCount; i++) {
       IntRect tileRect = GetTileRect(i);
 
-      desc.Width = tileRect.width;
-      desc.Height = tileRect.height;
+      desc.Width = tileRect.Width();
+      desc.Height = tileRect.Height();
       desc.Usage = D3D11_USAGE_IMMUTABLE;
 
       D3D11_SUBRESOURCE_DATA initData;
@@ -1477,7 +1480,7 @@ IntRect
 DataTextureSourceD3D11::GetTileRect()
 {
   IntRect rect = GetTileRect(mCurrentTile);
-  return IntRect(rect.x, rect.y, rect.width, rect.height);
+  return IntRect(rect.x, rect.y, rect.Width(), rect.Height());
 }
 
 CompositingRenderTargetD3D11::CompositingRenderTargetD3D11(ID3D11Texture2D* aTexture,
@@ -1620,6 +1623,7 @@ SyncObjectD3D11Host::Synchronize()
 
 SyncObjectD3D11Client::SyncObjectD3D11Client(SyncHandle aSyncHandle, ID3D11Device* aDevice)
  : mSyncHandle(aSyncHandle)
+ , mSyncLock("SyncObjectD3D11")
 {
   if (!aDevice) {
     mDevice = DeviceManagerDx::Get()->GetContentDevice();
@@ -1675,9 +1679,19 @@ SyncObjectD3D11Client::IsSyncObjectValid()
   return true;
 }
 
+// We have only 1 sync object. As a thing that somehow works,
+// we copy each of the textures that need to be synced with the compositor
+// into our sync object and only use a lock for this sync object.
+// This way, we don't have to sync every texture we send to the compositor.
+// We only have to do this once per transaction.
 void
 SyncObjectD3D11Client::Synchronize()
 {
+  // Since this can be called from either the Paint or Main thread.
+  // We don't want this to race since we initialize the sync texture here
+  // too.
+  MutexAutoLock syncLock(mSyncLock);
+
   if (!mSyncedTextures.size()) {
     return;
   }

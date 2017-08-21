@@ -26,6 +26,7 @@
 #include "nsPluginTags.h"
 #include "nsFrameMessageManager.h"
 #include "nsHashKeys.h"
+#include "nsIInterfaceRequestor.h"
 #include "nsIObserver.h"
 #include "nsIThreadInternal.h"
 #include "nsIDOMGeoPositionCallback.h"
@@ -97,7 +98,6 @@ namespace dom {
 
 class Element;
 class TabParent;
-class PStorageParent;
 class ClonedMessageData;
 class MemoryReport;
 class TabContext;
@@ -110,6 +110,7 @@ class ContentParent final : public PContentParent
                           , public nsIObserver
                           , public nsIDOMGeoPositionCallback
                           , public nsIDOMGeoPositionErrorCallback
+                          , public nsIInterfaceRequestor
                           , public gfx::gfxVarReceiver
                           , public mozilla::LinkedListElement<ContentParent>
                           , public gfx::GPUProcessListener
@@ -171,7 +172,8 @@ public:
   GetNewOrUsedBrowserProcess(const nsAString& aRemoteType = NS_LITERAL_STRING(NO_REMOTE_TYPE),
                              hal::ProcessPriority aPriority =
                              hal::ProcessPriority::PROCESS_PRIORITY_FOREGROUND,
-                             ContentParent* aOpener = nullptr);
+                             ContentParent* aOpener = nullptr,
+                             bool aPreferUsed = false);
 
   /**
    * Get or create a content process for a JS plugin. aPluginID is the id of the JS plugin
@@ -198,6 +200,12 @@ public:
   static void GetAllEvenIfDead(nsTArray<ContentParent*>& aArray);
 
   const nsAString& GetRemoteType() const;
+
+  virtual nsresult DoGetRemoteType(nsAString& aRemoteType) const override
+  {
+    aRemoteType = GetRemoteType();
+    return NS_OK;
+  }
 
   enum CPIteratorPolicy {
     eLive,
@@ -311,6 +319,7 @@ public:
   NS_DECL_NSIOBSERVER
   NS_DECL_NSIDOMGEOPOSITIONCALLBACK
   NS_DECL_NSIDOMGEOPOSITIONERRORCALLBACK
+  NS_DECL_NSIINTERFACEREQUESTOR
 
   /**
    * MessageManagerCallback methods that we override.
@@ -449,13 +458,6 @@ public:
   virtual PHeapSnapshotTempFileHelperParent*
   AllocPHeapSnapshotTempFileHelperParent() override;
 
-  virtual PStorageParent* AllocPStorageParent() override;
-
-  virtual mozilla::ipc::IPCResult RecvPStorageConstructor(PStorageParent* aActor) override
-  {
-    return PContentParent::RecvPStorageConstructor(aActor);
-  }
-
   virtual PJavaScriptParent*
   AllocPJavaScriptParent() override;
 
@@ -565,14 +567,6 @@ public:
 
   virtual mozilla::ipc::IPCResult
   RecvUnstoreAndBroadcastBlobURLUnregistration(const nsCString& aURI) override;
-
-  virtual mozilla::ipc::IPCResult
-  RecvBroadcastLocalStorageChange(const nsString& aDocumentURI,
-                                  const nsString& aKey,
-                                  const nsString& aOldValue,
-                                  const nsString& aNewValue,
-                                  const IPC::Principal& aPrincipal,
-                                  const bool& aIsPrivate) override;
 
   virtual mozilla::ipc::IPCResult
   RecvGetA11yContentId(uint32_t* aContentId) override;
@@ -839,6 +833,15 @@ private:
 
   virtual bool DeallocPBrowserParent(PBrowserParent* frame) override;
 
+  virtual mozilla::ipc::IPCResult
+  RecvPBrowserConstructor(PBrowserParent* actor,
+                          const TabId& tabId,
+                          const TabId& sameTabGroupAs,
+                          const IPCTabContext& context,
+                          const uint32_t& chromeFlags,
+                          const ContentParentId& cpId,
+                          const bool& isForBrowser) override;
+
   virtual PIPCBlobInputStreamParent*
   SendPIPCBlobInputStreamConstructor(PIPCBlobInputStreamParent* aActor,
                                      const nsID& aID,
@@ -930,8 +933,6 @@ private:
   virtual PMediaParent* AllocPMediaParent() override;
 
   virtual bool DeallocPMediaParent(PMediaParent* aActor) override;
-
-  virtual bool DeallocPStorageParent(PStorageParent* aActor) override;
 
   virtual PPresentationParent* AllocPPresentationParent() override;
 
@@ -1167,6 +1168,9 @@ private:
     nsTArray<ChildEventData>&& events) override;
   virtual mozilla::ipc::IPCResult RecvRecordDiscardedData(
     const DiscardedData& aDiscardedData) override;
+
+  virtual mozilla::ipc::IPCResult RecvBHRThreadHang(
+    const HangDetails& aHangDetails) override;
 public:
   void SendGetFilesResponseAndForget(const nsID& aID,
                                      const GetFilesResponseResult& aResult);

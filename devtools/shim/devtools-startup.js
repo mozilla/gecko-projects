@@ -26,6 +26,11 @@ const kDebuggerPrefs = [
   "devtools.debugger.remote-enabled",
   "devtools.chrome.enabled"
 ];
+
+// If devtools.toolbar.visible is set to true, the developer toolbar should appear on
+// startup.
+const TOOLBAR_VISIBLE_PREF = "devtools.toolbar.visible";
+
 const { XPCOMUtils } = Cu.import("resource://gre/modules/XPCOMUtils.jsm", {});
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
@@ -161,6 +166,19 @@ function DevToolsStartup() {}
 
 DevToolsStartup.prototype = {
   /**
+   * Boolean flag to check if DevTools have been already initialized or not.
+   * By initialized, we mean that its main modules are loaded.
+   */
+  initialized: false,
+
+  /**
+   * Boolean flag to check if the devtools initialization was already sent to telemetry.
+   * We only want to record one devtools entry point per Firefox run, but we are not
+   * interested in all the entry points (e.g. devtools.toolbar.visible).
+   */
+  recorded: false,
+
+  /**
    * Flag that indicates if the developer toggle was already added to customizableUI.
    */
   developerToggleCreated: false,
@@ -193,6 +211,12 @@ DevToolsStartup.prototype = {
     let onWindowReady = window => {
       this.hookWindow(window);
 
+      if (Services.prefs.getBoolPref(TOOLBAR_VISIBLE_PREF, false)) {
+        // Loading devtools-browser will open the developer toolbar by also checking this
+        // pref.
+        this.initDevTools();
+      }
+
       if (devtoolsFlag) {
         this.handleDevToolsFlag(window);
         // This listener is called for all Firefox windows, but we want to execute
@@ -214,6 +238,9 @@ DevToolsStartup.prototype = {
     // Key Shortcuts need to be added on all the created windows.
     this.hookKeyShortcuts(window);
 
+    // In some situations (e.g. starting Firefox with --jsconsole) DevTools will be
+    // initialized before the first browser-delayed-startup-finished event is received.
+    // We use a dedicated flag because we still need to hook the developer toggle.
     if (!this.developerToggleCreated) {
       this.hookDeveloperToggle();
       this.developerToggleCreated = true;
@@ -359,14 +386,8 @@ DevToolsStartup.prototype = {
     return k;
   },
 
-  /**
-   * Boolean flag to check if DevTools have been already initialized or not.
-   * By initialized, we mean that its main modules are loaded.
-   */
-  initialized: false,
-
   initDevTools: function (reason) {
-    if (!this.initialized) {
+    if (reason && !this.recorded) {
       // Only save the first call for each firefox run as next call
       // won't necessarely start the tool. For example key shortcuts may
       // only change the currently selected tool.
@@ -376,6 +397,7 @@ DevToolsStartup.prototype = {
       } catch (e) {
         dump("DevTools telemetry entry point failed: " + e + "\n");
       }
+      this.recorded = true;
     }
     this.initialized = true;
     let { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
@@ -391,9 +413,9 @@ DevToolsStartup.prototype = {
       this.initDevTools("CommandLine");
 
       let { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-      let hudservice = require("devtools/client/webconsole/hudservice");
+      let { HUDService } = require("devtools/client/webconsole/hudservice");
       let { console } = Cu.import("resource://gre/modules/Console.jsm", {});
-      hudservice.toggleBrowserConsole().catch(console.error);
+      HUDService.toggleBrowserConsole().catch(console.error);
     } else {
       // the Browser Console was already open
       window.focus();

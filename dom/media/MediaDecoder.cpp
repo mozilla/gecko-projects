@@ -6,7 +6,6 @@
 
 #include "MediaDecoder.h"
 
-#include "AudioChannelService.h"
 #include "ImageContainer.h"
 #include "Layers.h"
 #include "MediaDecoderStateMachine.h"
@@ -368,7 +367,6 @@ MediaDecoder::MediaDecoder(MediaDecoderInit& aInit)
   , mFrameStats(new FrameStatistics())
   , mVideoFrameContainer(aInit.mOwner->GetVideoFrameContainer())
   , mPinnedForSeek(false)
-  , mAudioChannel(aInit.mAudioChannel)
   , mMinimizePreroll(aInit.mMinimizePreroll)
   , mFiredMetadataLoaded(false)
   , mIsDocumentVisible(false)
@@ -814,9 +812,6 @@ MediaDecoder::FirstFrameLoaded(nsAutoPtr<MediaInfo> aInfo,
 
   Invalidate();
 
-  // This can run cache callbacks.
-  GetResource()->EnsureCacheUpToDate();
-
   // The element can run javascript via events
   // before reaching here, so only change the
   // state if we're still set to the original
@@ -824,10 +819,6 @@ MediaDecoder::FirstFrameLoaded(nsAutoPtr<MediaInfo> aInfo,
   if (mPlayState == PLAY_STATE_LOADING) {
     ChangeState(mNextState);
   }
-
-  // Run NotifySuspendedStatusChanged now to give us a chance to notice
-  // that autoplay should run.
-  NotifySuspendedStatusChanged();
 
   // GetOwner()->FirstFrameLoaded() might call us back. Put it at the bottom of
   // this function to avoid unexpected shutdown from reentrant calls.
@@ -1628,6 +1619,14 @@ MediaDecoder::RequestDebugInfo()
     [str] () {
       return DebugInfoPromise::CreateAndResolve(str, __func__);
     });
+}
+
+void
+MediaDecoder::GetMozDebugReaderData(nsACString& aString)
+{
+  if (mReader) {
+    mReader->GetMozDebugReaderData(aString);
+  }
 }
 
 void

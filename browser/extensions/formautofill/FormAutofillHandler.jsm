@@ -115,13 +115,16 @@ FormAutofillHandler.prototype = {
 
   /**
    * Set fieldDetails from the form about fields that can be autofilled.
-
+   *
+   * @param {boolean} allowDuplicates
+   *        true to remain any duplicated field details otherwise to remove the
+   *        duplicated ones.
    * @returns {Array} The valid address and credit card details.
    */
-  collectFormFields() {
+  collectFormFields(allowDuplicates = false) {
     this._cacheValue.allFieldNames = null;
     this._formFieldCount = this.form.elements.length;
-    let fieldDetails = FormAutofillHeuristics.getFormInfo(this.form);
+    let fieldDetails = FormAutofillHeuristics.getFormInfo(this.form, allowDuplicates);
     this.fieldDetails = fieldDetails ? fieldDetails : [];
     log.debug("Collected details on", this.fieldDetails.length, "fields");
 
@@ -451,10 +454,16 @@ FormAutofillHandler.prototype = {
    * Return the records that is converted from address/creditCard fieldDetails and
    * only valid form records are included.
    *
-   * @returns {Object} The new profile that convert from details with trimmed result.
+   * @returns {Object}
+   *          Consists of two record objects: address, creditCard. Each one can
+   *          be omitted if there's no valid fields. A record object consists of
+   *          three properties:
+   *            - guid: The id of the previously-filled profile or null if omitted.
+   *            - record: A valid record converted from details with trimmed result.
+   *            - untouchedFields: Fields that aren't touched after autofilling.
    */
   createRecords() {
-    let records = {};
+    let data = {};
 
     ["address", "creditCard"].forEach(type => {
       let details = this[type].fieldDetails;
@@ -462,33 +471,57 @@ FormAutofillHandler.prototype = {
         return;
       }
 
-      let recordName = `${type}Record`;
-      records[recordName] = {};
+      data[type] = {
+        guid: this[type].filledRecordGUID,
+        record: {},
+        untouchedFields: [],
+      };
+
       details.forEach(detail => {
         let element = detail.elementWeakRef.get();
         // Remove the unnecessary spaces
         let value = element && element.value.trim();
+
+        // Try to abbreviate the value of select element.
+        if (type == "address" &&
+            detail.fieldName == "address-level1" &&
+            element instanceof Ci.nsIDOMHTMLSelectElement) {
+          // Don't save the record when the option value is empty *OR* there
+          // are multiple options being selected. The empty option is usually
+          // assumed to be default along with a meaningless text to users.
+          if (!value || element.selectedOptions.length != 1) {
+            return;
+          }
+
+          let text = element.selectedOptions[0].text.trim();
+          value = FormAutofillUtils.getAbbreviatedStateName([value, text]) || text;
+        }
+
         if (!value) {
           return;
         }
 
-        records[recordName][detail.fieldName] = value;
+        data[type].record[detail.fieldName] = value;
+
+        if (detail.state == "AUTO_FILLED") {
+          data[type].untouchedFields.push(detail.fieldName);
+        }
       });
     });
 
-    if (records.addressRecord &&
-        Object.keys(records.addressRecord).length < FormAutofillUtils.AUTOFILL_FIELDS_THRESHOLD) {
+    if (data.address &&
+        Object.keys(data.address.record).length < FormAutofillUtils.AUTOFILL_FIELDS_THRESHOLD) {
       log.debug("No address record saving since there are only",
-                     Object.keys(records.addressRecord).length,
+                     Object.keys(data.address.record).length,
                      "usable fields");
-      delete records.addressRecord;
+      delete data.address;
     }
 
-    if (records.creditCardRecord && !records.creditCardRecord["cc-number"]) {
+    if (data.creditCard && !data.creditCard.record["cc-number"]) {
       log.debug("No credit card record saving since card number is empty");
-      delete records.creditCardRecord;
+      delete data.creditCard;
     }
 
-    return records;
+    return data;
   },
 };

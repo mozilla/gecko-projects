@@ -174,10 +174,10 @@ ChannelMediaDecoder::CanClone()
 already_AddRefed<ChannelMediaDecoder>
 ChannelMediaDecoder::Clone(MediaDecoderInit& aInit)
 {
-  if (!mResource) {
+  if (!mResource || !DecoderTraits::IsSupportedType(aInit.mContainerType)) {
     return nullptr;
   }
-  RefPtr<ChannelMediaDecoder> decoder = CloneImpl(aInit);
+  RefPtr<ChannelMediaDecoder> decoder = new ChannelMediaDecoder(aInit);
   if (!decoder) {
     return nullptr;
   }
@@ -253,6 +253,9 @@ ChannelMediaDecoder::Load(nsIChannel* aChannel,
 
   rv = OpenResource(aStreamListener);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  // Set mode to METADATA since we are about to read metadata.
+  mResource->SetReadMode(MediaCacheStream::MODE_METADATA);
 
   SetStateMachine(CreateStateMachine());
   NS_ENSURE_TRUE(GetStateMachine(), NS_ERROR_FAILURE);
@@ -499,6 +502,17 @@ ChannelMediaDecoder::Resume()
   if (mResource) {
     mResource->Resume();
   }
+}
+
+void
+ChannelMediaDecoder::MetadataLoaded(
+  UniquePtr<MediaInfo> aInfo,
+  UniquePtr<MetadataTags> aTags,
+  MediaDecoderEventVisibility aEventVisibility)
+{
+  MediaDecoder::MetadataLoaded(Move(aInfo), Move(aTags), aEventVisibility);
+  // Set mode to PLAYBACK after reading metadata.
+  mResource->SetReadMode(MediaCacheStream::MODE_PLAYBACK);
 }
 
 } // namespace mozilla

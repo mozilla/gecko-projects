@@ -3,25 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#if defined(GL_ES)
-    #if GL_ES == 1
-        #ifdef GL_FRAGMENT_PRECISION_HIGH
-        precision highp sampler2DArray;
-        #else
-        precision mediump sampler2DArray;
-        #endif
-
-        // Sampler default precision is lowp on mobile GPUs.
-        // This causes RGBA32F texture data to be clamped to 16 bit floats on some GPUs (e.g. Mali-T880).
-        // Define highp precision macro to allow lossless FLOAT texture sampling.
-        #define HIGHP_SAMPLER_FLOAT highp
-    #else
-        #define HIGHP_SAMPLER_FLOAT
-    #endif
-#else
-    #define HIGHP_SAMPLER_FLOAT
-#endif
-
 #define PST_TOP_LEFT     0
 #define PST_TOP          1
 #define PST_TOP_RIGHT    2
@@ -58,6 +39,10 @@
 #define LINE_STYLE_DOTTED       1
 #define LINE_STYLE_DASHED       2
 #define LINE_STYLE_WAVY         3
+
+#define SUBPX_DIR_NONE        0
+#define SUBPX_DIR_HORIZONTAL  1
+#define SUBPX_DIR_VERTICAL    2
 
 uniform sampler2DArray sCacheA8;
 uniform sampler2DArray sCacheRGBA8;
@@ -125,6 +110,13 @@ ivec2 get_resource_cache_uv(int address) {
 
 uniform HIGHP_SAMPLER_FLOAT sampler2D sResourceCache;
 
+vec4[2] fetch_from_resource_cache_2_direct(ivec2 address) {
+    return vec4[2](
+        texelFetchOffset(sResourceCache, address, 0, ivec2(0, 0)),
+        texelFetchOffset(sResourceCache, address, 0, ivec2(1, 0))
+    );
+}
+
 vec4[2] fetch_from_resource_cache_2(int address) {
     ivec2 uv = get_resource_cache_uv(address);
     return vec4[2](
@@ -187,6 +179,10 @@ vec4[4] fetch_from_resource_cache_4(int address) {
         texelFetchOffset(sResourceCache, uv, 0, ivec2(2, 0)),
         texelFetchOffset(sResourceCache, uv, 0, ivec2(3, 0))
     );
+}
+
+vec4 fetch_from_resource_cache_1_direct(ivec2 address) {
+    return texelFetch(sResourceCache, address, 0);
 }
 
 vec4 fetch_from_resource_cache_1(int address) {
@@ -419,7 +415,9 @@ struct Glyph {
     vec2 offset;
 };
 
-Glyph fetch_glyph(int specific_prim_address, int glyph_index) {
+Glyph fetch_glyph(int specific_prim_address,
+                  int glyph_index,
+                  int subpx_dir) {
     // Two glyphs are packed in each texel in the GPU cache.
     int glyph_address = specific_prim_address +
                         VECS_PER_TEXT_RUN +
@@ -427,6 +425,20 @@ Glyph fetch_glyph(int specific_prim_address, int glyph_index) {
     vec4 data = fetch_from_resource_cache_1(glyph_address);
     // Select XY or ZW based on glyph index.
     vec2 glyph = mix(data.xy, data.zw, bvec2(glyph_index % 2 == 1));
+
+    // In subpixel mode, the subpixel offset has already been
+    // accounted for while rasterizing the glyph.
+    switch (subpx_dir) {
+        case SUBPX_DIR_NONE:
+            break;
+        case SUBPX_DIR_HORIZONTAL:
+            glyph.x = trunc(glyph.x);
+            break;
+        case SUBPX_DIR_VERTICAL:
+            glyph.y = trunc(glyph.y);
+            break;
+    }
+
     return Glyph(glyph);
 }
 
@@ -751,21 +763,28 @@ TransformVertexInfo write_transform_vertex(RectWithSize instance_rect,
 
 struct GlyphResource {
     vec4 uv_rect;
+    float layer;
     vec2 offset;
 };
 
 GlyphResource fetch_glyph_resource(int address) {
     vec4 data[2] = fetch_from_resource_cache_2(address);
-    return GlyphResource(data[0], data[1].xy);
+    return GlyphResource(data[0], data[1].x, data[1].yz);
 }
 
 struct ImageResource {
     vec4 uv_rect;
+    float layer;
 };
 
 ImageResource fetch_image_resource(int address) {
-    vec4 data = fetch_from_resource_cache_1(address);
-    return ImageResource(data);
+    vec4 data[2] = fetch_from_resource_cache_2(address);
+    return ImageResource(data[0], data[1].x);
+}
+
+ImageResource fetch_image_resource_direct(ivec2 address) {
+    vec4 data[2] = fetch_from_resource_cache_2_direct(address);
+    return ImageResource(data[0], data[1].x);
 }
 
 struct Rectangle {
@@ -802,11 +821,12 @@ Line fetch_line(int address) {
 struct TextRun {
     vec4 color;
     vec2 offset;
+    int subpx_dir;
 };
 
 TextRun fetch_text_run(int address) {
     vec4 data[2] = fetch_from_resource_cache_2(address);
-    return TextRun(data[0], data[1].xy);
+    return TextRun(data[0], data[1].xy, int(data[1].z));
 }
 
 struct Image {

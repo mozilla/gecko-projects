@@ -2283,11 +2283,6 @@ BytecodeEmitter::emitCheck(ptrdiff_t delta, ptrdiff_t* offset)
 {
     *offset = code().length();
 
-    // Start it off moderately large to avoid repeated resizings early on.
-    // ~98% of cases fit within 1024 bytes.
-    if (code().capacity() == 0 && !code().reserve(1024))
-        return false;
-
     if (!code().growBy(delta)) {
         ReportOutOfMemory(cx);
         return false;
@@ -3661,7 +3656,10 @@ BytecodeEmitter::reportExtraWarning(ParseNode* pn, unsigned errorNumber, ...)
     va_list args;
     va_start(args, errorNumber);
 
-    bool result = parser.reportExtraWarningErrorNumberVA(nullptr, pos.begin, errorNumber, args);
+    // FIXME: parser.tokenStream() should be a TokenStreamAnyChars for bug 1351107,
+    // but caused problems, cf. bug 1363116.
+    bool result = parser.tokenStream()
+                        .reportExtraWarningErrorNumberVA(nullptr, pos.begin, errorNumber, args);
 
     va_end(args);
     return result;
@@ -3674,7 +3672,10 @@ BytecodeEmitter::reportStrictModeError(ParseNode* pn, unsigned errorNumber, ...)
 
     va_list args;
     va_start(args, errorNumber);
-    bool result = parser.reportStrictModeErrorNumberVA(nullptr, pos.begin, sc->strict(),
+    // FIXME: parser.tokenStream() should be a TokenStreamAnyChars for bug 1351107,
+    // but caused problems, cf. bug 1363116.
+    bool result = parser.tokenStream()
+                        .reportStrictModeErrorNumberVA(nullptr, pos.begin, sc->strict(),
                                                        errorNumber, args);
     va_end(args);
     return result;
@@ -11295,11 +11296,6 @@ BytecodeEmitter::emitTreeInBranch(ParseNode* pn,
 static bool
 AllocSrcNote(JSContext* cx, SrcNotesVector& notes, unsigned* index)
 {
-    // Start it off moderately large to avoid repeated resizings early on.
-    // ~99% of cases fit within 256 bytes.
-    if (notes.capacity() == 0 && !notes.reserve(256))
-        return false;
-
     if (!notes.growBy(1)) {
         ReportOutOfMemory(cx);
         return false;

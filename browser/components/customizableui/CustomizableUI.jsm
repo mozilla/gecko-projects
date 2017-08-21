@@ -11,26 +11,24 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/AppConstants.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PanelWideWidgetTracker",
-  "resource:///modules/PanelWideWidgetTracker.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "SearchWidgetTracker",
-  "resource:///modules/SearchWidgetTracker.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "CustomizableWidgets",
-  "resource:///modules/CustomizableWidgets.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "DeferredTask",
-  "resource://gre/modules/DeferredTask.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-  "resource://gre/modules/PrivateBrowsingUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetters(this, {
+  PanelWideWidgetTracker: "resource:///modules/PanelWideWidgetTracker.jsm",
+  SearchWidgetTracker: "resource:///modules/SearchWidgetTracker.jsm",
+  CustomizableWidgets: "resource:///modules/CustomizableWidgets.jsm",
+  DeferredTask: "resource://gre/modules/DeferredTask.jsm",
+  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
+  ShortcutUtils: "resource://gre/modules/ShortcutUtils.jsm",
+  LightweightThemeManager: "resource://gre/modules/LightweightThemeManager.jsm",
+});
+
 XPCOMUtils.defineLazyGetter(this, "gWidgetsBundle", function() {
   const kUrl = "chrome://browser/locale/customizableui/customizableWidgets.properties";
   return Services.strings.createBundle(kUrl);
 });
-XPCOMUtils.defineLazyModuleGetter(this, "ShortcutUtils",
-  "resource://gre/modules/ShortcutUtils.jsm");
+
 XPCOMUtils.defineLazyServiceGetter(this, "gELS",
   "@mozilla.org/eventlistenerservice;1", "nsIEventListenerService");
-XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
-                                  "resource://gre/modules/LightweightThemeManager.jsm");
 
 const kNSXUL = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
@@ -59,7 +57,7 @@ const kSubviewEvents = [
  * The current version. We can use this to auto-add new default widgets as necessary.
  * (would be const but isn't because of testing purposes)
  */
-var kVersion = 8;
+var kVersion = 10;
 
 /**
  * Buttons removed from built-ins by version they were removed. kVersion must be
@@ -67,7 +65,6 @@ var kVersion = 8;
  * version the button is removed in as the value.  e.g. "pocket-button": 5
  */
 var ObsoleteBuiltinButtons = {
-  "pocket-button": 6
 };
 
 /**
@@ -194,22 +191,17 @@ var CustomizableUIInternal = {
       "forward-button",
       "stop-reload-button",
       "home-button",
+      "spring",
       "urlbar-container",
       "search-container",
-      "bookmarks-menu-button",
+      "spring",
       "downloads-button",
+      "library-button",
       "sidebar-button",
     ];
 
     if (AppConstants.MOZ_DEV_EDITION) {
       navbarPlacements.splice(2, 0, "developer-button");
-    }
-
-    // Place this last, when createWidget is called for pocket, it will
-    // append to the toolbar.
-    if (Services.prefs.getPrefType("extensions.pocket.enabled") != Services.prefs.PREF_INVALID &&
-        Services.prefs.getBoolPref("extensions.pocket.enabled")) {
-        navbarPlacements.push("pocket-button");
     }
 
     this.registerArea(CustomizableUI.AREA_NAVBAR, {
@@ -250,13 +242,6 @@ var CustomizableUIInternal = {
       defaultCollapsed: true,
     }, true);
 
-    this.registerArea(CustomizableUI.AREA_ADDONBAR, {
-      type: CustomizableUI.TYPE_TOOLBAR,
-      legacy: true,
-      defaultPlacements: ["addonbar-closebutton", "status-bar"],
-      defaultCollapsed: false,
-    }, true);
-
     SearchWidgetTracker.init();
   },
 
@@ -265,7 +250,6 @@ var CustomizableUIInternal = {
       CustomizableUI.AREA_NAVBAR,
       CustomizableUI.AREA_BOOKMARKS,
       CustomizableUI.AREA_TABSTRIP,
-      CustomizableUI.AREA_ADDONBAR,
     ]);
     if (AppConstants.platform != "macosx") {
       toolbars.add(CustomizableUI.AREA_MENUBAR);
@@ -383,14 +367,53 @@ var CustomizableUIInternal = {
         defaultPlacements.push("characterencoding-button");
       }
 
-      if (AppConstants.MOZ_DEV_EDITION || AppConstants.NIGHTLY_BUILD) {
-        if (Services.prefs.getBoolPref("extensions.webcompat-reporter.enabled")) {
-          defaultPlacements.push("webcompat-reporter-button");
+      savedPanelPlacements = savedPanelPlacements.filter(id => !defaultPlacements.includes(id));
+
+      if (savedPanelPlacements.length) {
+        gSavedState.placements[CustomizableUI.AREA_FIXED_OVERFLOW_PANEL] = savedPanelPlacements;
+      }
+    }
+
+    if (currentVersion < 9 && gSavedState.placements && gSavedState.placements["nav-bar"]) {
+      let placements = gSavedState.placements["nav-bar"];
+      if (placements.includes("urlbar-container")) {
+        let urlbarIndex = placements.indexOf("urlbar-container");
+        let secondSpringIndex = urlbarIndex + 1;
+        // Insert if there isn't already a spring before the urlbar
+        if (urlbarIndex == 0 || !placements[urlbarIndex - 1].startsWith(kSpecialWidgetPfx + "spring")) {
+          placements.splice(urlbarIndex, 0, "spring");
+          // The url bar is now 1 index later, so increment the insertion point for
+          // the second spring.
+          secondSpringIndex++;
+        }
+        // If the search container is present, insert after the search container
+        // instead of after the url bar
+        let searchContainerIndex = placements.indexOf("search-container");
+        if (searchContainerIndex != -1) {
+          secondSpringIndex = searchContainerIndex + 1;
+        }
+        if (secondSpringIndex == placements.length ||
+            !placements[secondSpringIndex].startsWith(kSpecialWidgetPfx + "spring")) {
+          placements.splice(secondSpringIndex, 0, "spring");
         }
       }
-      savedPanelPlacements = savedPanelPlacements.filter(id => defaultPlacements.includes(id));
-      if (savedPanelPlacements.length) {
-        gSavedState.placements[this.AREA_FIXED_OVERFLOW_PANEL] = savedPanelPlacements;
+
+      // Finally, replace the bookmarks menu button with the library one if present
+      if (placements.includes("bookmarks-menu-button")) {
+        let bmbIndex = placements.indexOf("bookmarks-menu-button");
+        placements.splice(bmbIndex, 1);
+        let downloadButtonIndex = placements.indexOf("downloads-button");
+        let libraryIndex = downloadButtonIndex == -1 ? bmbIndex : (downloadButtonIndex + 1);
+        placements.splice(libraryIndex, 0, "library-button");
+      }
+    }
+
+    if (currentVersion < 10 && gSavedState && gSavedState.placements) {
+      for (let placements of Object.values(gSavedState.placements)) {
+        if (placements.includes("webcompat-reporter-button")) {
+          placements.splice(placements.indexOf("webcompat-reporter-button"), 1);
+          break;
+        }
       }
     }
   },
@@ -717,7 +740,8 @@ var CustomizableUIInternal = {
           currentNode = currentNode.nextSibling;
         }
 
-        if (currentNode && currentNode.id == id) {
+        if (currentNode &&
+            (currentNode.id == id || this.matchingSpecials(id, currentNode.id))) {
           currentNode = currentNode.nextSibling;
           continue;
         }
@@ -1234,6 +1258,12 @@ var CustomizableUIInternal = {
             aId.startsWith("separator") ||
             aId.startsWith("spring") ||
             aId.startsWith("spacer"));
+  },
+
+  matchingSpecials(aId1, aId2) {
+    return this.isSpecialWidget(aId1) &&
+           this.isSpecialWidget(aId2) &&
+           aId1.match(/spring|spacer|separator/)[0] == aId2.match(/spring|spacer|separator/)[0];
   },
 
   ensureSpecialWidgetId(aId) {
@@ -1951,10 +1981,7 @@ var CustomizableUIInternal = {
   // Note that this does not populate gPlacements, which is done lazily so that
   // the legacy state can be migrated, which is only available once a browser
   // window is openned.
-  // The panel area is an exception here, since it has no legacy state and is
-  // built lazily - and therefore wouldn't otherwise result in restoring its
-  // state immediately when a browser window opens, which is important for
-  // other consumers of this API.
+  // The panel area is an exception here, since it has no legacy state.
   loadSavedState() {
     let state = Services.prefs.getCharPref(kPrefCustomizationState, "");
     if (!state) {
@@ -2808,7 +2835,8 @@ var CustomizableUIInternal = {
       }
 
       for (let i = 0; i < currentPlacements.length; ++i) {
-        if (currentPlacements[i] != defaultPlacements[i]) {
+        if (currentPlacements[i] != defaultPlacements[i] &&
+            !this.matchingSpecials(currentPlacements[i], defaultPlacements[i])) {
           log.debug("Found " + currentPlacements[i] + " in " + areaId + " where " +
                     defaultPlacements[i] + " was expected!");
           return false;
@@ -2875,12 +2903,6 @@ this.CustomizableUI = {
    * Constant reference to the ID of the bookmarks toolbar.
    */
   AREA_BOOKMARKS: "PersonalToolbar",
-  /**
-   * Constant reference to the ID of the addon-bar toolbar shim.
-   * Do not use, this will be removed as soon as reasonably possible.
-   * @deprecated
-   */
-  AREA_ADDONBAR: "addon-bar",
   /**
    * Constant reference to the ID of the non-dymanic (fixed) list in the overflow panel.
    */

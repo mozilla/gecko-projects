@@ -116,6 +116,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "JSONFile",
                                   "resource://gre/modules/JSONFile.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FormAutofillNameUtils",
                                   "resource://formautofill/FormAutofillNameUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "MasterPassword",
+                                  "resource://formautofill/MasterPassword.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PhoneNumber",
                                   "resource://formautofill/phonenumberutils/PhoneNumber.jsm");
 
@@ -1074,7 +1076,9 @@ class AutofillRecords {
   _clone(record) {
     let result = {};
     for (let key in record) {
-      if (!key.startsWith("_")) {
+      // Do not expose hidden fields and fields with empty value (mainly used
+      // as placeholders of the computed fields).
+      if (!key.startsWith("_") && record[key] !== "") {
         result[key] = record[key];
       }
     }
@@ -1163,8 +1167,8 @@ class Addresses extends AutofillRecords {
     // TODO: We only support US in MVP so hide the field if it's not. We
     //       are going to support more countries in bug 1370193.
     if (address.country && address.country != "US") {
-      address["country-name"] = "";
       delete address.country;
+      delete address["country-name"];
     }
   }
 
@@ -1216,9 +1220,7 @@ class Addresses extends AutofillRecords {
     // Compute tel
     if (!("tel-national" in address)) {
       if (address.tel) {
-        // Set "US" as the default region as we only support "en-US" for now.
-        let browserCountryCode = Services.prefs.getCharPref("browser.search.countryCode", "US");
-        let tel = PhoneNumber.Parse(address.tel, address.country || browserCountryCode);
+        let tel = PhoneNumber.Parse(address.tel, address.country || FormAutofillUtils.DEFAULT_COUNTRY_CODE);
         if (tel) {
           if (tel.countryCode) {
             address["tel-country-code"] = tel.countryCode;
@@ -1301,22 +1303,21 @@ class Addresses extends AutofillRecords {
   }
 
   _normalizeCountry(address) {
+    let country;
+
     if (address.country) {
-      let country = address.country.toUpperCase();
-      // Only values included in the region list will be saved.
-      if (REGION_NAMES[country]) {
-        address.country = country;
-      } else {
-        delete address.country;
-      }
+      country = address.country.toUpperCase();
     } else if (address["country-name"]) {
-      for (let region in REGION_NAMES) {
-        if (REGION_NAMES[region].toLowerCase() == address["country-name"].toLowerCase()) {
-          address.country = region;
-          break;
-        }
-      }
+      country = FormAutofillUtils.identifyCountryCode(address["country-name"]);
     }
+
+    // Only values included in the region list will be saved.
+    if (country && REGION_NAMES[country]) {
+      address.country = country;
+    } else {
+      delete address.country;
+    }
+
     delete address["country-name"];
   }
 
@@ -1325,9 +1326,7 @@ class Addresses extends AutofillRecords {
       return;
     }
 
-    // Set "US" as the default region as we only support "en-US" for now.
-    let browserCountryCode = Services.prefs.getCharPref("browser.search.countryCode", "US");
-    let region = address["tel-country-code"] || address.country || browserCountryCode;
+    let region = address["tel-country-code"] || address.country || FormAutofillUtils.DEFAULT_COUNTRY_CODE;
     let number;
 
     if (address.tel) {
@@ -1375,10 +1374,25 @@ class Addresses extends AutofillRecords {
     let hasMatchingField = false;
 
     for (let field of this.VALID_FIELDS) {
-      if (addressToMerge[field] !== undefined && addressFound[field] !== undefined) {
-        if (addressToMerge[field] != addressFound[field]) {
-          this.log.debug("Conflicts: field", field, "has different value.");
-          return false;
+      let existingField = addressFound[field];
+      let incomingField = addressToMerge[field];
+      if (incomingField !== undefined && existingField !== undefined) {
+        if (incomingField != existingField) {
+          // Treat "street-address" as mergeable if their single-line versions
+          // match each other.
+          if (field == "street-address" &&
+              FormAutofillUtils.toOneLineAddress(existingField) == FormAutofillUtils.toOneLineAddress(incomingField)) {
+            // Keep the value in storage if its amount of lines is greater than
+            // or equal to the incoming one.
+            if (existingField.split("\n").length >= incomingField.split("\n").length) {
+              // Replace the incoming field with the one in storage so it will
+              // be further merged back to storage.
+              addressToMerge[field] = existingField;
+            }
+          } else {
+            this.log.debug("Conflicts: field", field, "has different value.");
+            return false;
+          }
         }
         hasMatchingField = true;
       }
@@ -1461,26 +1475,9 @@ class CreditCards extends AutofillRecords {
   }
 
   _normalizeFields(creditCard) {
-    // Fields that should not be set by content.
-    delete creditCard["cc-number-encrypted"];
-
-    // Validate and encrypt credit card numbers, and calculate the masked numbers
-    if (creditCard["cc-number"]) {
-      let ccNumber = creditCard["cc-number"].replace(/\s/g, "");
-      delete creditCard["cc-number"];
-
-      if (!/^\d+$/.test(ccNumber)) {
-        throw new Error("Credit card number contains invalid characters.");
-      }
-
-      // TODO: Encrypt cc-number here (bug 1337314).
-      // e.g. creditCard["cc-number-encrypted"] = Encrypt(creditCard["cc-number"]);
-
-      if (ccNumber.length > 4) {
-        creditCard["cc-number"] = "*".repeat(ccNumber.length - 4) + ccNumber.substr(-4);
-      } else {
-        creditCard["cc-number"] = ccNumber;
-      }
+    // Check if cc-number is normalized(normalizeCCNumberFields should be called first).
+    if (!creditCard["cc-number-encrypted"] || !creditCard["cc-number"].includes("*")) {
+      throw new Error("Credit card number needs to be normalized first.");
     }
 
     // Normalize name
@@ -1517,6 +1514,38 @@ class CreditCards extends AutofillRecords {
       } else {
         creditCard["cc-exp-year"] = expYear;
       }
+    }
+  }
+
+  /**
+   * Normalize credit card number related field for saving. It should always be
+   * called before adding/updating credit card records.
+   *
+   * @param  {Object} creditCard
+   *         The creditCard record with plaintext number only.
+   */
+  async normalizeCCNumberFields(creditCard) {
+    // Fields that should not be set by content.
+    delete creditCard["cc-number-encrypted"];
+
+    // Validate and encrypt credit card numbers, and calculate the masked numbers
+    if (creditCard["cc-number"]) {
+      let ccNumber = creditCard["cc-number"].replace(/\s/g, "");
+      delete creditCard["cc-number"];
+
+      if (!/^\d+$/.test(ccNumber)) {
+        throw new Error("Credit card number contains invalid characters.");
+      }
+
+      // Based on the information on wiki[1], the shortest valid length should be
+      // 12 digits(Maestro).
+      // [1] https://en.wikipedia.org/wiki/Payment_card_number
+      if (ccNumber.length < 12) {
+        throw new Error("Invalid credit card number because length is under 12 digits.");
+      }
+
+      creditCard["cc-number-encrypted"] = await MasterPassword.encrypt(creditCard["cc-number"]);
+      creditCard["cc-number"] = "*".repeat(ccNumber.length - 4) + ccNumber.substr(-4);
     }
   }
 }

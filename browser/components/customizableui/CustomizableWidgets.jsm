@@ -11,24 +11,18 @@ Cu.import("resource:///modules/CustomizableUI.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/AppConstants.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "BrowserUITelemetry",
-  "resource:///modules/BrowserUITelemetry.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
-  "resource://gre/modules/PlacesUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesUIUtils",
-  "resource:///modules/PlacesUIUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "RecentlyClosedTabsAndWindowsMenuUtils",
-  "resource:///modules/sessionstore/RecentlyClosedTabsAndWindowsMenuUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ShortcutUtils",
-  "resource://gre/modules/ShortcutUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "CharsetMenu",
-  "resource://gre/modules/CharsetMenu.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-  "resource://gre/modules/PrivateBrowsingUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "SyncedTabs",
-  "resource://services-sync/SyncedTabs.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
-  "resource://gre/modules/ContextualIdentityService.jsm");
+
+XPCOMUtils.defineLazyModuleGetters(this, {
+  BrowserUITelemetry: "resource:///modules/BrowserUITelemetry.jsm",
+  PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
+  PlacesUIUtils: "resource:///modules/PlacesUIUtils.jsm",
+  RecentlyClosedTabsAndWindowsMenuUtils: "resource:///modules/sessionstore/RecentlyClosedTabsAndWindowsMenuUtils.jsm",
+  ShortcutUtils: "resource://gre/modules/ShortcutUtils.jsm",
+  CharsetMenu: "resource://gre/modules/CharsetMenu.jsm",
+  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
+  SyncedTabs: "resource://services-sync/SyncedTabs.jsm",
+  ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
+});
 
 XPCOMUtils.defineLazyGetter(this, "CharsetBundle", function() {
   const kCharsetBundle = "chrome://global/locale/charsetMenu.properties";
@@ -569,47 +563,6 @@ const CustomizableWidgets = [
 
       aNode.appendChild(obChecked);
       aNode.appendChild(obPosition);
-    }
-  }, {
-    id: "social-share-button",
-    // custom build our button so we can attach to the share command
-    type: "custom",
-    onBuild(aDocument) {
-      let node = aDocument.createElementNS(kNSXUL, "toolbarbutton");
-      node.setAttribute("id", this.id);
-      node.classList.add("toolbarbutton-1");
-      node.classList.add("chromeclass-toolbar-additional");
-      node.setAttribute("label", CustomizableUI.getLocalizedProperty(this, "label"));
-      node.setAttribute("tooltiptext", CustomizableUI.getLocalizedProperty(this, "tooltiptext"));
-      node.setAttribute("removable", "true");
-      node.setAttribute("observes", "Social:PageShareable");
-      node.setAttribute("command", "Social:SharePage");
-
-      let listener = {
-        onWidgetAdded: (aWidgetId) => {
-          if (aWidgetId != this.id)
-            return;
-
-          Services.obs.notifyObservers(null, "social:" + this.id + "-added");
-        },
-
-        onWidgetRemoved: aWidgetId => {
-          if (aWidgetId != this.id)
-            return;
-
-          Services.obs.notifyObservers(null, "social:" + this.id + "-removed");
-        },
-
-        onWidgetInstanceRemoved: (aWidgetId, aDoc) => {
-          if (aWidgetId != this.id || aDoc != aDocument)
-            return;
-
-          CustomizableUI.removeListener(listener);
-        }
-      };
-      CustomizableUI.addListener(listener);
-
-      return node;
     }
   }, {
     id: "add-ons-button",

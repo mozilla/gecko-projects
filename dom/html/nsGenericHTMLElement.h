@@ -23,7 +23,6 @@
 
 class nsDOMTokenList;
 class nsIDOMHTMLMenuElement;
-class nsIEditor;
 class nsIFormControlFrame;
 class nsIFrame;
 class nsILayoutHistoryState;
@@ -230,14 +229,14 @@ public:
     mozilla::CSSIntRect rcFrame;
     GetOffsetRect(rcFrame);
 
-    return rcFrame.width;
+    return rcFrame.Width();
   }
   int32_t OffsetHeight()
   {
     mozilla::CSSIntRect rcFrame;
     GetOffsetRect(rcFrame);
 
-    return rcFrame.height;
+    return rcFrame.Height();
   }
 
   // These methods are already implemented in nsIContent but we want something
@@ -708,8 +707,7 @@ public:
   static inline bool
   ShouldExposeIdAsHTMLDocumentProperty(Element* aElement)
   {
-    if (aElement->IsAnyOfHTMLElements(nsGkAtoms::embed,
-                                      nsGkAtoms::object)) {
+    if (aElement->IsHTMLElement(nsGkAtoms::object)) {
       return true;
     }
 
@@ -917,14 +915,14 @@ protected:
   }
 
   /**
-   * Locates the nsIEditor associated with this node.  In general this is
+   * Locates the TextEditor associated with this node.  In general this is
    * equivalent to GetEditorInternal(), but for designmode or contenteditable,
    * this may need to get an editor that's not actually on this element's
    * associated TextControlFrame.  This is used by the spellchecking routines
    * to get the editor affected by changing the spellcheck attribute on this
    * node.
    */
-  virtual already_AddRefed<nsIEditor> GetAssociatedEditor();
+  virtual already_AddRefed<mozilla::TextEditor> GetAssociatedEditor();
 
   /**
    * Get the frame's offset information for offsetTop/Left/Width/Height.
@@ -1472,6 +1470,15 @@ protected:
   NS_INTERFACE_MAP_ENTRY_CONDITIONAL(_interface,                              \
                                      mNodeInfo->Equals(nsGkAtoms::_tag))
 
+namespace mozilla {
+namespace dom {
+
+typedef nsGenericHTMLElement* (*HTMLContentCreatorFunction)(
+  already_AddRefed<mozilla::dom::NodeInfo>&&,
+  mozilla::dom::FromParser aFromParser);
+
+} // namespace dom
+} // namespace mozilla
 
 /**
  * A macro to declare the NS_NewHTMLXXXElement() functions.
@@ -1519,6 +1526,13 @@ NS_NewHTML##_elementName##Element(already_AddRefed<mozilla::dom::NodeInfo>&& aNo
 nsGenericHTMLElement*
 NS_NewHTMLElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
                   mozilla::dom::FromParser aFromParser = mozilla::dom::NOT_FROM_PARSER);
+
+// Distinct from the above in order to have function pointer that compared unequal
+// to a function pointer to the above.
+nsGenericHTMLElement*
+NS_NewCustomElement(
+  already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
+  mozilla::dom::FromParser aFromParser = mozilla::dom::NOT_FROM_PARSER);
 
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Shared)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(SharedList)

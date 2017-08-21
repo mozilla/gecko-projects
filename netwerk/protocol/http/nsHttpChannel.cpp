@@ -76,7 +76,6 @@
 #include "nsICancelable.h"
 #include "nsIHttpChannelAuthProvider.h"
 #include "nsIHttpChannelInternal.h"
-#include "nsIHttpEventSink.h"
 #include "nsIPrompt.h"
 #include "nsInputStreamPump.h"
 #include "nsURLHelper.h"
@@ -433,11 +432,9 @@ nsHttpChannel::LogBlockedCORSRequest(const nsAString& aMessage)
 //-----------------------------------------------------------------------------
 
 nsresult
-nsHttpChannel::Connect()
+nsHttpChannel::OnBeforeConnect()
 {
     nsresult rv;
-
-    LOG(("nsHttpChannel::Connect [this=%p]\n", this));
 
     // Note that we are only setting the "Upgrade-Insecure-Requests" request
     // header for *all* navigational requests instead of all requests as
@@ -498,6 +495,51 @@ nsHttpChannel::Connect()
     mConnectionInfo->SetPrivate(mPrivateBrowsing);
     mConnectionInfo->SetNoSpdy(mCaps & NS_HTTP_DISALLOW_SPDY);
     mConnectionInfo->SetBeConservative((mCaps & NS_HTTP_BE_CONSERVATIVE) || mBeConservative);
+    mConnectionInfo->SetTlsFlags(mTlsFlags);
+
+    // notify "http-on-before-connect" observers
+    gHttpHandler->OnBeforeConnect(this);
+
+    // Check if request was cancelled during http-on-before-connect.
+    if (mCanceled) {
+        return mStatus;
+    }
+
+    if (mSuspendCount) {
+        // We abandon the connection here if there was one.
+        LOG(("Waiting until resume OnBeforeConnect [this=%p]\n", this));
+        MOZ_ASSERT(!mCallOnResume);
+        mCallOnResume = &nsHttpChannel::OnBeforeConnectContinue;
+        return NS_OK;
+    }
+
+    return Connect();
+}
+
+void
+nsHttpChannel::OnBeforeConnectContinue()
+{
+    NS_PRECONDITION(!mCallOnResume, "How did that happen?");
+    nsresult rv;
+
+    if (mSuspendCount) {
+        LOG(("Waiting until resume OnBeforeConnect [this=%p]\n", this));
+        mCallOnResume = &nsHttpChannel::OnBeforeConnectContinue;
+        return;
+    }
+
+    LOG(("nsHttpChannel::OnBeforeConnectContinue [this=%p]\n", this));
+    rv = Connect();
+    if (NS_FAILED(rv)) {
+        CloseCacheEntry(false);
+        Unused << AsyncAbort(rv);
+    }
+}
+
+nsresult
+nsHttpChannel::Connect()
+{
+    LOG(("nsHttpChannel::Connect [this=%p]\n", this));
 
     // Consider opening a TCP connection right away.
     SpeculativeConnect();
@@ -509,6 +551,10 @@ nsHttpChannel::Connect()
     }
 
     // open a cache entry for this channel...
+    nsresult rv;
+    bool isHttps = false;
+    rv = mURI->SchemeIs("https", &isHttps);
+    NS_ENSURE_SUCCESS(rv,rv);
     rv = OpenCacheEntry(isHttps);
 
     // do not continue if asyncOpenCacheEntry is in progress
@@ -2316,10 +2362,11 @@ nsHttpChannel::ProcessResponse()
                                                     lci);
     }
 
-    if (mTransaction->ProxyConnectFailed()) {
+    if (mTransaction && mTransaction->ProxyConnectFailed()) {
         // Only allow 407 (authentication required) to continue
-        if (httpStatus != 407)
+        if (httpStatus != 407) {
             return ProcessFailedProxyConnect(httpStatus);
+        }
         // If proxy CONNECT response needs to complete, wait to process connection
         // for Strict-Transport-Security.
     } else {
@@ -2377,7 +2424,7 @@ nsHttpChannel::ContinueProcessResponse1()
     // Cookies and Alt-Service should not be handled on proxy failure either.
     // This would be consolidated with ProcessSecurityHeaders but it should
     // happen after OnExamineResponse.
-    if (!mTransaction->ProxyConnectFailed() && (httpStatus != 407)) {
+    if (!(mTransaction && mTransaction->ProxyConnectFailed()) && (httpStatus != 407)) {
         nsAutoCString cookie;
         if (NS_SUCCEEDED(mResponseHead->GetHeader(nsHttp::Set_Cookie, cookie))) {
             SetCookie(cookie.get());
@@ -2560,13 +2607,15 @@ nsHttpChannel::ContinueProcessResponse2(nsresult rv)
         } else {
             rv = mAuthProvider->ProcessAuthentication(
                 httpStatus,
-                mConnectionInfo->EndToEndSSL() && mTransaction->ProxyConnectFailed());
+                mConnectionInfo->EndToEndSSL() &&
+                mTransaction && mTransaction->ProxyConnectFailed());
         }
         if (rv == NS_ERROR_IN_PROGRESS)  {
             // authentication prompt has been invoked and result
             // is expected asynchronously
             mAuthRetryPending = true;
-            if (httpStatus == 407 || mTransaction->ProxyConnectFailed())
+            if (httpStatus == 407 ||
+                (mTransaction && mTransaction->ProxyConnectFailed()))
                 mProxyAuthPending = true;
 
             // suspend the transaction pump to stop receiving the
@@ -2579,8 +2628,9 @@ nsHttpChannel::ContinueProcessResponse2(nsresult rv)
         } else if (NS_FAILED(rv)) {
             LOG(("ProcessAuthentication failed [rv=%" PRIx32 "]\n",
                  static_cast<uint32_t>(rv)));
-            if (mTransaction->ProxyConnectFailed())
+            if (mTransaction && mTransaction->ProxyConnectFailed()) {
                 return ProcessFailedProxyConnect(httpStatus);
+            }
             if (!mAuthRetryPending) {
                 rv = mAuthProvider->CheckForSuperfluousAuth();
                 if (NS_FAILED(rv)) {
@@ -3010,18 +3060,6 @@ nsHttpChannel::OpenRedirectChannel(nsresult rv)
     // i.e. after all sinks had been notified
     mRedirectChannel->SetOriginalURI(mOriginalURI);
 
-    // And now, notify observers the deprecated way
-    nsCOMPtr<nsIHttpEventSink> httpEventSink;
-    GetCallback(httpEventSink);
-    if (httpEventSink) {
-        // NOTE: nsIHttpEventSink is only used for compatibility with pre-1.8
-        // versions.
-        rv = httpEventSink->OnRedirect(this, mRedirectChannel);
-        if (NS_FAILED(rv)) {
-            return rv;
-        }
-    }
-
     // open new channel
     if (mLoadInfo && mLoadInfo->GetEnforceSecurity()) {
         MOZ_ASSERT(!mListenerContext, "mListenerContext should be null!");
@@ -3174,7 +3212,7 @@ nsHttpChannel::ResponseWouldVary(nsICacheEntry* entry)
 
             // check the last value of the given request header to see if it has
             // since changed.  if so, then indeed the cached response is invalid.
-            nsXPIDLCString lastVal;
+            nsCString lastVal;
             entry->GetMetaDataElement(metaKey.get(), getter_Copies(lastVal));
             LOG(("nsHttpChannel::ResponseWouldVary [channel=%p] "
                      "stored value = \"%s\"\n",
@@ -4052,7 +4090,7 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry, nsIApplicationCache* appC
     *aResult = ENTRY_WANTED;
     mCachedContentIsValid = false;
 
-    nsXPIDLCString buf;
+    nsCString buf;
 
     // Get the method that was used to generate the cached response
     rv = entry->GetMetaDataElement("request-method", getter_Copies(buf));
@@ -5789,16 +5827,6 @@ nsHttpChannel::ContinueProcessRedirection(nsresult rv)
     // i.e. after all sinks had been notified
     mRedirectChannel->SetOriginalURI(mOriginalURI);
 
-    // And now, the deprecated way
-    nsCOMPtr<nsIHttpEventSink> httpEventSink;
-    GetCallback(httpEventSink);
-    if (httpEventSink) {
-        // NOTE: nsIHttpEventSink is only used for compatibility with pre-1.8
-        // versions.
-        rv = httpEventSink->OnRedirect(this, mRedirectChannel);
-        if (NS_FAILED(rv))
-            return rv;
-    }
     // XXX we used to talk directly with the script security manager, but that
     // should really be handled by the event sink implementation.
 
@@ -6712,7 +6740,7 @@ nsHttpChannel::ContinueBeginConnectWithResult()
         // case, we should not send the request to the server
         rv = mStatus;
     } else {
-        rv = Connect();
+        rv = OnBeforeConnect();
     }
 
     LOG(("nsHttpChannel::ContinueBeginConnectWithResult result [this=%p rv=%" PRIx32
@@ -7413,7 +7441,9 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
     // HTTP 0.9 is more likely to be an error than really 0.9, so count it that way
     if (mCanceled) {
         chanDisposition  = kHttpCanceled;
-    } else if (!mUsedNetwork) {
+    } else if (!mUsedNetwork ||
+               (mRaceCacheWithNetwork &&
+                mFirstResponseSource == RESPONSE_FROM_CACHE)) {
         chanDisposition = kHttpDisk;
     } else if (NS_SUCCEEDED(status) &&
                mResponseHead &&
@@ -7875,7 +7905,7 @@ nsHttpChannel::GetCacheTokenCachedCharset(nsACString &_retval)
     if (!mCacheEntry)
         return NS_ERROR_NOT_AVAILABLE;
 
-    nsXPIDLCString cachedCharset;
+    nsCString cachedCharset;
     rv = mCacheEntry->GetMetaDataElement("charset",
                                          getter_Copies(cachedCharset));
     if (NS_SUCCEEDED(rv))

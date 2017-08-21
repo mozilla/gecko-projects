@@ -12,6 +12,8 @@
   --toolbar-non-lwt-bgcolor: var(--toolbar-bgcolor);
   --toolbar-non-lwt-textcolor: var(--chrome-color);
   --toolbar-non-lwt-bgimage: none;
+
+  --tab-line-color: highlight;
 }
 
 :root:-moz-lwtheme-brighttext {
@@ -28,16 +30,8 @@
   --chrome-selection-background-color: #5675B9;
 
   /* Url and search bars */
-  --url-and-searchbar-background-color: hsla(0, 0%, 100%, .1);
+  --url-and-searchbar-background-color: rgb(71, 71, 73);
   --urlbar-separator-color: #5F6670;
-  --urlbar-dropmarker-url: url("chrome://browser/skin/compacttheme/urlbar-history-dropmarker.svg");
-  --urlbar-dropmarker-region: rect(0px, 11px, 14px, 0px);
-  --urlbar-dropmarker-hover-region: rect(0, 22px, 14px, 11px);
-  --urlbar-dropmarker-active-region: rect(0px, 33px, 14px, 22px);
-  --urlbar-dropmarker-2x-url: url("chrome://browser/skin/compacttheme/urlbar-history-dropmarker.svg");
-  --urlbar-dropmarker-2x-region: rect(0px, 11px, 14px, 0px);
-  --urlbar-dropmarker-hover-2x-region: rect(0, 22px, 14px, 11px);
-  --urlbar-dropmarker-active-2x-region: rect(0px, 33px, 14px, 22px);
 }
 
 :root:-moz-lwtheme-darktext {
@@ -109,8 +103,11 @@ toolbar[brighttext] .toolbarbutton-1 {
   background-color: var(--url-and-searchbar-background-color) !important;
   background-image: none !important;
   color: inherit !important;
-  border: 1px solid var(--chrome-nav-bar-controls-border-color) !important;
-  box-shadow: none !important;
+}
+
+#urlbar:not([focused="true"]),
+.searchbar-textbox:not([focused="true"]) {
+  border-color: var(--chrome-nav-bar-controls-border-color);
 }
 
 #urlbar[pageproxystate="valid"] > #identity-box.verifiedIdentity > #identity-icon-labels:-moz-lwtheme-brighttext {
@@ -132,21 +129,6 @@ toolbar[brighttext] .toolbarbutton-1 {
 
 #urlbar-zoom-button:-moz-lwtheme-brighttext:hover:active {
   background-color: rgba(255,255,255,.3);
-}
-
-/* Use smaller back button icon */
-#back-button {
-  list-style-image: url("chrome://browser/skin/back.svg");
-}
-
-.tabbrowser-tab:-moz-any([image], [pinned]) > .tab-stack > .tab-content[attention]:not([selected="true"]),
-.tabbrowser-tab > .tab-stack > .tab-content[pinned][titlechanged]:not([selected="true"]) {
-  background-position: center bottom -4px;
-}
-
-.tabbrowser-tab[image] > .tab-stack > .tab-content[attention]:not([pinned]):not([selected="true"]) {
-  background-position: left bottom var(--tab-toolbar-navbar-overlap);
-  background-size: 34px 100%;
 }
 
 .tab-throbber[selected][progress] {

@@ -14,6 +14,7 @@ mod loader;
 mod media_rule;
 mod memory;
 mod namespace_rule;
+pub mod origin;
 mod page_rule;
 mod rule_list;
 mod rule_parser;
@@ -43,6 +44,7 @@ pub use self::memory::{MallocSizeOf, MallocSizeOfFn, MallocSizeOfWithGuard};
 #[cfg(feature = "gecko")]
 pub use self::memory::{MallocSizeOfWithRepeats, SizeOfState};
 pub use self::namespace_rule::NamespaceRule;
+pub use self::origin::{Origin, OriginSet, PerOrigin};
 pub use self::page_rule::PageRule;
 pub use self::rule_parser::{State, TopLevelRuleParser};
 pub use self::rule_list::{CssRules, CssRulesHelpers};
@@ -81,22 +83,6 @@ impl UrlExtraData {
 // It is currently marked so because properties::UnparsedValue wants Eq.
 #[cfg(feature = "gecko")]
 impl Eq for UrlExtraData {}
-
-/// Each style rule has an origin, which determines where it enters the cascade.
-///
-/// http://dev.w3.org/csswg/css-cascade/#cascading-origins
-#[derive(Clone, PartialEq, Eq, Copy, Debug)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-pub enum Origin {
-    /// http://dev.w3.org/csswg/css-cascade/#cascade-origin-ua
-    UserAgent,
-
-    /// http://dev.w3.org/csswg/css-cascade/#cascade-origin-author
-    Author,
-
-    /// http://dev.w3.org/csswg/css-cascade/#cascade-origin-user
-    User,
-}
 
 /// A CSS rule.
 ///
@@ -148,7 +134,7 @@ impl MallocSizeOfWithGuard for CssRule {
 }
 
 #[allow(missing_docs)]
-#[derive(PartialEq, Eq, Copy, Clone)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum CssRuleType {
     // https://drafts.csswg.org/cssom/#the-cssrule-interface
     Style               = 1,
@@ -263,7 +249,7 @@ impl CssRule {
             loader: loader,
             state: state,
             had_hierarchy_error: false,
-            namespaces: Some(&mut *guard),
+            namespaces: &mut *guard,
         };
 
         parse_one_rule(&mut input, &mut rule_parser)

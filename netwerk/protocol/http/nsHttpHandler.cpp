@@ -249,7 +249,6 @@ nsHttpHandler::nsHttpHandler()
     , mTCPKeepaliveLongLivedEnabled(false)
     , mTCPKeepaliveLongLivedIdleTimeS(600)
     , mEnforceH1Framing(FRAMECHECK_BARELY)
-    , mKeepEmptyResponseHeadersAsEmtpyString(false)
     , mDefaultHpackBuffer(4096)
     , mMaxHttpResponseHeaderSize(393216)
     , mFocusedWindowTransactionRatio(0.9f)
@@ -456,9 +455,10 @@ nsHttpHandler::Init()
         mAppVersion.AssignLiteral(MOZ_APP_UA_VERSION);
     }
 
-    // Generating the spoofed userAgent for fingerprinting resistance. We will
-    // round the version to the nearest 10. By doing so, the anonymity group will
-    // cover more versions instead of one version.
+    // Generating the spoofed userAgent for fingerprinting resistance.
+    // The browser version will be rounded down to a multiple of 10.
+    // By doing so, the anonymity group will cover more versions instead of one
+    // version.
     uint32_t spoofedVersion = mAppVersion.ToInteger(&rv);
     if (NS_SUCCEEDED(rv)) {
         spoofedVersion = spoofedVersion - (spoofedVersion % 10);
@@ -1848,14 +1848,6 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         }
     }
 
-    if (PREF_CHANGED(HTTP_PREF("keep_empty_response_headers_as_empty_string"))) {
-        rv = prefs->GetBoolPref(HTTP_PREF("keep_empty_response_headers_as_empty_string"),
-                                &cVar);
-        if (NS_SUCCEEDED(rv)) {
-            mKeepEmptyResponseHeadersAsEmtpyString = cVar;
-        }
-    }
-
     if (PREF_CHANGED(HTTP_PREF("spdy.hpack-default-buffer"))) {
         rv = prefs->GetIntPref(HTTP_PREF("spdy.default-hpack-buffer"), &val);
         if (NS_SUCCEEDED(rv)) {
@@ -2306,6 +2298,16 @@ nsHttpHandler::Observe(nsISupports *subject,
             Telemetry::Accumulate(Telemetry::DNT_USAGE, 2);
         } else {
             Telemetry::Accumulate(Telemetry::DNT_USAGE, 1);
+        }
+
+        if (UseFastOpen()) {
+            Telemetry::Accumulate(Telemetry::TCP_FAST_OPEN_STATUS, 0);
+        } else if (!mFastOpenSupported) {
+            Telemetry::Accumulate(Telemetry::TCP_FAST_OPEN_STATUS, 1);
+        } else if (!mUseFastOpen) {
+            Telemetry::Accumulate(Telemetry::TCP_FAST_OPEN_STATUS, 2);
+        } else {
+            Telemetry::Accumulate(Telemetry::TCP_FAST_OPEN_STATUS, 3);
         }
     } else if (!strcmp(topic, "profile-change-net-restore")) {
         // initialize connection manager

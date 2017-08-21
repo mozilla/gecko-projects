@@ -119,6 +119,63 @@ FakePrefs.prototype = {
   }
 };
 
+/**
+ * Slimmed down version of toolkit/modules/EventEmitter.jsm
+ */
+function EventEmitter() {}
+EventEmitter.decorate = function(objectToDecorate) {
+  let emitter = new EventEmitter();
+  objectToDecorate.on = emitter.on.bind(emitter);
+  objectToDecorate.off = emitter.off.bind(emitter);
+  objectToDecorate.emit = emitter.emit.bind(emitter);
+};
+EventEmitter.prototype = {
+  on(event, listener) {
+    if (!this._eventEmitterListeners) {
+      this._eventEmitterListeners = new Map();
+    }
+    if (!this._eventEmitterListeners.has(event)) {
+      this._eventEmitterListeners.set(event, []);
+    }
+    this._eventEmitterListeners.get(event).push(listener);
+  },
+  off(event, listener) {
+    if (!this._eventEmitterListeners) {
+      return;
+    }
+    let listeners = this._eventEmitterListeners.get(event);
+    if (listeners) {
+      this._eventEmitterListeners.set(event, listeners.filter(
+        l => l !== listener && l._originalListener !== listener
+      ));
+    }
+  },
+  // All arguments to this method will be sent to listeners
+  emit(event, ...args) {
+    if (!this._eventEmitterListeners || !this._eventEmitterListeners.has(event)) {
+      return;
+    }
+    let originalListeners = this._eventEmitterListeners.get(event);
+    for (let listener of this._eventEmitterListeners.get(event)) {
+      // If the object was destroyed during event emission, stop
+      // emitting.
+      if (!this._eventEmitterListeners) {
+        break;
+      }
+      // If listeners were removed during emission, make sure the
+      // event handler we're going to fire wasn't removed.
+      if (originalListeners === this._eventEmitterListeners.get(event) ||
+        this._eventEmitterListeners.get(event).some(l => l === listener)) {
+        try {
+          listener(event, ...args);
+        } catch (ex) {
+          // error with a listener
+        }
+      }
+    }
+  }
+};
+
 function FakePerformance() {}
 FakePerformance.prototype = {
   marks: new Map(),
@@ -173,20 +230,21 @@ function nodeWithIntlProp(node) {
   return React.cloneElement(node, {intl});
 }
 
-function shallowWithIntl(node) {
-  return shallow(nodeWithIntlProp(node), {context: {intl}});
+function shallowWithIntl(node, options = {}) {
+  return shallow(nodeWithIntlProp(node), Object.assign({}, options, {context: {intl}}));
 }
 
-function mountWithIntl(node) {
-  return mount(nodeWithIntlProp(node), {
+function mountWithIntl(node, options = {}) {
+  return mount(nodeWithIntlProp(node), Object.assign({}, options, {
     context: {intl},
     childContextTypes: {intl: intlShape}
-  });
+  }));
 }
 
 module.exports = {
   FakePerformance,
   FakePrefs,
+  EventEmitter,
   GlobalOverrider,
   addNumberReducer,
   mountWithIntl,

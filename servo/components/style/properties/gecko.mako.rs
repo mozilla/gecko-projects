@@ -60,11 +60,9 @@ use selector_parser::PseudoElement;
 use servo_arc::{Arc, RawOffsetArc};
 use std::mem::{forget, uninitialized, transmute, zeroed};
 use std::{cmp, ops, ptr};
-use stylesheets::{MallocSizeOfWithRepeats, SizeOfState};
 use values::{self, Auto, CustomIdent, Either, KeyframesName};
-use values::computed::{NonNegativeAu, ToComputedValue};
+use values::computed::{NonNegativeAu, ToComputedValue, Percentage};
 use values::computed::effects::{BoxShadow, Filter, SimpleShadow};
-use values::computed::length::Percentage;
 use computed_values::border_style;
 
 pub mod style_structs {
@@ -370,18 +368,6 @@ impl ComputedValuesInner {
     }
 }
 
-impl MallocSizeOfWithRepeats for ComputedValues {
-    fn malloc_size_of_children(&self, state: &mut SizeOfState) -> usize {
-        let mut n = 0;
-        if let Some(ref raw_offset_arc) = *self.get_raw_visited_style() {
-            n += raw_offset_arc.with_arc(|a: &Arc<ComputedValues>| {
-                a.malloc_size_of_children(state)
-            })
-        }
-        n
-    }
-}
-
 <%def name="declare_style_struct(style_struct)">
 pub use ::gecko_bindings::structs::mozilla::Gecko${style_struct.gecko_name} as ${style_struct.gecko_struct_name};
 impl ${style_struct.gecko_struct_name} {
@@ -470,7 +456,10 @@ def set_gecko_property(ffi_name, expr):
 </%def>
 
 <%def name="impl_keyword_clone(ident, gecko_ffi_name, keyword, cast_type='u8')">
-    #[allow(non_snake_case)]
+    // FIXME: We introduced non_upper_case_globals for -moz-appearance only
+    //        since the prefix of Gecko value starts with ThemeWidgetType_NS_THEME.
+    //        We should remove this after fix bug 1371809.
+    #[allow(non_snake_case, non_upper_case_globals)]
     pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
         use properties::longhands::${ident}::computed_value::T as Keyword;
         // FIXME(bholley): Align binary representations and ditch |match| for cast + static_asserts
@@ -599,7 +588,7 @@ def set_gecko_property(ffi_name, expr):
     // set on mContextFlags, and the length field is set to the initial value.
 
     pub fn set_${ident}(&mut self, v: longhands::${ident}::computed_value::T) {
-        use values::generics::svg::SVGLength;
+        use values::generics::svg::{SVGLength, SvgLengthOrPercentageOrNumber};
         use gecko_bindings::structs::nsStyleSVG_${ident.upper()}_CONTEXT as CONTEXT_VALUE;
         let length = match v {
             SVGLength::Length(length) => {
@@ -615,9 +604,10 @@ def set_gecko_property(ffi_name, expr):
             }
         };
         match length {
-            Either::First(number) =>
-                self.gecko.${gecko_ffi_name}.set_value(CoordDataValue::Factor(From::from(number))),
-            Either::Second(lop) => self.gecko.${gecko_ffi_name}.set(lop),
+            SvgLengthOrPercentageOrNumber::LengthOrPercentage(lop) =>
+                self.gecko.${gecko_ffi_name}.set(lop),
+            SvgLengthOrPercentageOrNumber::Number(num) =>
+                self.gecko.${gecko_ffi_name}.set_value(CoordDataValue::Factor(num.into())),
         }
     }
 
@@ -634,21 +624,28 @@ def set_gecko_property(ffi_name, expr):
     }
 
     pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
-        use values::generics::svg::SVGLength;
+        use values::generics::svg::{SVGLength, SvgLengthOrPercentageOrNumber};
         use values::computed::LengthOrPercentage;
         use gecko_bindings::structs::nsStyleSVG_${ident.upper()}_CONTEXT as CONTEXT_VALUE;
         if (self.gecko.mContextFlags & CONTEXT_VALUE) != 0 {
             return SVGLength::ContextValue;
         }
         let length = match self.gecko.${gecko_ffi_name}.as_value() {
-            CoordDataValue::Factor(number) => Either::First(From::from(number)),
-            CoordDataValue::Coord(coord) => Either::Second(From::from(LengthOrPercentage::Length(Au(coord)))),
-            CoordDataValue::Percent(p) => Either::Second(From::from(LengthOrPercentage::Percentage(Percentage(p)))),
-            CoordDataValue::Calc(calc) => Either::Second(From::from(LengthOrPercentage::Calc(calc.into()))),
+            CoordDataValue::Factor(number) =>
+                SvgLengthOrPercentageOrNumber::Number(number),
+            CoordDataValue::Coord(coord) =>
+                SvgLengthOrPercentageOrNumber::LengthOrPercentage(
+                    LengthOrPercentage::Length(Au(coord))),
+            CoordDataValue::Percent(p) =>
+                SvgLengthOrPercentageOrNumber::LengthOrPercentage(
+                    LengthOrPercentage::Percentage(Percentage(p))),
+            CoordDataValue::Calc(calc) =>
+                SvgLengthOrPercentageOrNumber::LengthOrPercentage(
+                    LengthOrPercentage::Calc(calc.into())),
             _ => unreachable!("Unexpected coordinate {:?} in ${ident}",
                               self.gecko.${gecko_ffi_name}.as_value()),
         };
-        SVGLength::Length(length)
+        SVGLength::Length(length.into())
     }
 </%def>
 
@@ -1713,15 +1710,22 @@ fn static_assert() {
             }
         }
 
-        // Set defaults
-        ${self_grid}.mRepeatAutoIndex = -1;
-        ${self_grid}.set_mIsAutoFill(false);
-        ${self_grid}.set_mIsSubgrid(false);
-
         let max_lines = nsStyleGridLine_kMaxLine as usize - 1;      // for accounting the final <line-names>
 
-        match v {
+        let result = match v {
+            GridTemplateComponent::None => ptr::null_mut(),
             GridTemplateComponent::TrackList(track) => {
+                let mut num_values = track.values.len();
+                if let Auto(_) = track.list_type {
+                    num_values += 1;
+                }
+
+                num_values = cmp::min(num_values, max_lines);
+                let value = unsafe {
+                    bindings::Gecko_CreateStyleGridTemplate(num_values as u32,
+                                                            (num_values + 1) as u32).as_mut().unwrap()
+                };
+
                 let mut auto_idx = usize::MAX;
                 let mut auto_track_size = None;
                 if let Auto(idx) = track.list_type {
@@ -1729,100 +1733,83 @@ fn static_assert() {
                     let auto_repeat = track.auto_repeat.as_ref().expect("expected <auto-track-repeat> value");
 
                     if auto_repeat.count == RepeatCount::AutoFill {
-                        ${self_grid}.set_mIsAutoFill(true);
+                        value.set_mIsAutoFill(true);
                     }
 
-                    ${self_grid}.mRepeatAutoIndex = idx as i16;
+                    value.mRepeatAutoIndex = idx as i16;
                     // NOTE: Gecko supports only one set of values in <auto-repeat>
                     // i.e., it can only take repeat(auto-fill, [a] 10px [b]), and no more.
-                    set_line_names(&auto_repeat.line_names[0], &mut ${self_grid}.mRepeatAutoLineNameListBefore);
-                    set_line_names(&auto_repeat.line_names[1], &mut ${self_grid}.mRepeatAutoLineNameListAfter);
+                    set_line_names(&auto_repeat.line_names[0], &mut value.mRepeatAutoLineNameListBefore);
+                    set_line_names(&auto_repeat.line_names[1], &mut value.mRepeatAutoLineNameListAfter);
                     auto_track_size = Some(auto_repeat.track_sizes.get(0).unwrap().clone());
                 } else {
                     unsafe {
                         bindings::Gecko_ResizeTArrayForStrings(
-                            &mut ${self_grid}.mRepeatAutoLineNameListBefore, 0);
+                            &mut value.mRepeatAutoLineNameListBefore, 0);
                         bindings::Gecko_ResizeTArrayForStrings(
-                            &mut ${self_grid}.mRepeatAutoLineNameListAfter, 0);
+                            &mut value.mRepeatAutoLineNameListAfter, 0);
                     }
-                }
-
-                let mut num_values = track.values.len();
-                if auto_track_size.is_some() {
-                    num_values += 1;
-                }
-
-                num_values = cmp::min(num_values, max_lines);
-                unsafe {
-                    bindings::Gecko_SetStyleGridTemplateArrayLengths(&mut ${self_grid}, num_values as u32);
                 }
 
                 let mut line_names = track.line_names.into_iter();
                 let mut values_iter = track.values.into_iter();
-                let min_max_iter = ${self_grid}.mMinTrackSizingFunctions.iter_mut()
-                                               .zip(${self_grid}.mMaxTrackSizingFunctions.iter_mut());
+                {
+                    let min_max_iter = value.mMinTrackSizingFunctions.iter_mut()
+                                            .zip(value.mMaxTrackSizingFunctions.iter_mut());
+                    for (i, (gecko_min, gecko_max)) in min_max_iter.enumerate().take(max_lines) {
+                        let name_list = line_names.next().expect("expected line-names");
+                        set_line_names(&name_list, &mut value.mLineNameLists[i]);
+                        if i == auto_idx {
+                            let track_size = auto_track_size.take()
+                                .expect("expected <track-size> for <auto-track-repeat>");
+                            track_size.to_gecko_style_coords(gecko_min, gecko_max);
+                            continue
+                        }
 
-                for (i, (gecko_min, gecko_max)) in min_max_iter.enumerate().take(max_lines) {
-                    let name_list = line_names.next().expect("expected line-names");
-                    set_line_names(&name_list, &mut ${self_grid}.mLineNameLists[i]);
-                    if i == auto_idx {
-                        let track_size = auto_track_size.take().expect("expected <track-size> for <auto-track-repeat>");
+                        let track_size = values_iter.next().expect("expected <track-size> value");
                         track_size.to_gecko_style_coords(gecko_min, gecko_max);
-                        continue
                     }
-
-                    let track_size = values_iter.next().expect("expected <track-size> value");
-                    track_size.to_gecko_style_coords(gecko_min, gecko_max);
                 }
 
                 let final_names = line_names.next().unwrap();
-                set_line_names(&final_names, ${self_grid}.mLineNameLists.last_mut().unwrap());
-            },
-            GridTemplateComponent::None => {
-                unsafe {
-                    bindings::Gecko_SetStyleGridTemplateArrayLengths(&mut ${self_grid}, 0);
-                    bindings::Gecko_ResizeTArrayForStrings(
-                        &mut ${self_grid}.mRepeatAutoLineNameListBefore, 0);
-                    bindings::Gecko_ResizeTArrayForStrings(
-                        &mut ${self_grid}.mRepeatAutoLineNameListAfter, 0);
-                }
+                set_line_names(&final_names, value.mLineNameLists.last_mut().unwrap());
+
+                value
             },
             GridTemplateComponent::Subgrid(list) => {
-                ${self_grid}.set_mIsSubgrid(true);
                 let names_length = match list.fill_idx {
                     Some(_) => list.names.len() - 1,
                     None => list.names.len(),
                 };
                 let num_values = cmp::min(names_length, max_lines + 1);
-
-                unsafe {
-                    bindings::Gecko_SetStyleGridTemplateArrayLengths(&mut ${self_grid}, 0);
-                    bindings::Gecko_SetGridTemplateLineNamesLength(&mut ${self_grid}, num_values as u32);
-                    bindings::Gecko_ResizeTArrayForStrings(
-                        &mut ${self_grid}.mRepeatAutoLineNameListBefore, 0);
-                    bindings::Gecko_ResizeTArrayForStrings(
-                        &mut ${self_grid}.mRepeatAutoLineNameListAfter, 0);
-                }
+                let value = unsafe {
+                    bindings::Gecko_CreateStyleGridTemplate(0, num_values as u32).as_mut().unwrap()
+                };
+                value.set_mIsSubgrid(true);
 
                 let mut names = list.names.into_vec();
                 if let Some(idx) = list.fill_idx {
-                    ${self_grid}.set_mIsAutoFill(true);
-                    ${self_grid}.mRepeatAutoIndex = idx as i16;
+                    value.set_mIsAutoFill(true);
+                    value.mRepeatAutoIndex = idx as i16;
                     set_line_names(&names.swap_remove(idx as usize),
-                                   &mut ${self_grid}.mRepeatAutoLineNameListBefore);
+                                   &mut value.mRepeatAutoLineNameListBefore);
                 }
 
-                for (servo_names, gecko_names) in names.iter().zip(${self_grid}.mLineNameLists.iter_mut()) {
+                for (servo_names, gecko_names) in names.iter().zip(value.mLineNameLists.iter_mut()) {
                     set_line_names(servo_names, gecko_names);
                 }
+
+                value
             },
-        }
+        };
+
+        unsafe { bindings::Gecko_SetStyleGridTemplate(&mut ${self_grid}, result); }
     }
 
     pub fn copy_grid_template_${kind}_from(&mut self, other: &Self) {
         unsafe {
             bindings::Gecko_CopyStyleGridTemplateValues(&mut ${self_grid},
-                                                        &other.gecko.mGridTemplate${kind.title()});
+                                                        other.gecko.mGridTemplate${kind.title()}.mPtr);
         }
     }
 
@@ -1839,16 +1826,10 @@ fn static_assert() {
         use values::generics::grid::{GridTemplateComponent, LineNameList, RepeatCount};
         use values::generics::grid::{TrackList, TrackListType, TrackRepeat, TrackSize};
 
-        if ${self_grid}.mRepeatAutoLineNameListBefore.len() == 0 &&
-           ${self_grid}.mRepeatAutoLineNameListAfter.len() == 0 &&
-           ${self_grid}.mMinTrackSizingFunctions.len() == 0 &&
-           ${self_grid}.mMaxTrackSizingFunctions.len() == 0 &&
-           ${self_grid}.mLineNameLists.len() == 0 &&
-           ${self_grid}.mRepeatAutoIndex == -1 &&
-           !${self_grid}.mIsAutoFill() &&
-           !${self_grid}.mIsSubgrid() {
-           return GridTemplateComponent::None;
-        }
+        let value = match unsafe { ${self_grid}.mPtr.as_ref() } {
+            None => return GridTemplateComponent::None,
+            Some(value) => value,
+        };
 
         #[inline]
         fn to_boxed_customident_slice(gecko_names: &nsTArray<nsStringRepr>) -> Box<[CustomIdent]> {
@@ -1866,13 +1847,13 @@ fn static_assert() {
             }).collect()
         }
 
-        let repeat_auto_index = ${self_grid}.mRepeatAutoIndex as usize;
-        if ${self_grid}.mIsSubgrid() {
-            let mut names_vec = to_line_names_vec(&${self_grid}.mLineNameLists);
-            let fill_idx = if ${self_grid}.mIsAutoFill() {
+        let repeat_auto_index = value.mRepeatAutoIndex as usize;
+        if value.mIsSubgrid() {
+            let mut names_vec = to_line_names_vec(&value.mLineNameLists);
+            let fill_idx = if value.mIsAutoFill() {
                 names_vec.insert(
                     repeat_auto_index,
-                    to_boxed_customident_slice(&${self_grid}.mRepeatAutoLineNameListBefore));
+                    to_boxed_customident_slice(&value.mRepeatAutoLineNameListBefore));
                 Some(repeat_auto_index as u32)
             } else {
                 None
@@ -1883,18 +1864,18 @@ fn static_assert() {
         } else {
             let mut auto_repeat = None;
             let mut list_type = TrackListType::Normal;
-            let line_names = to_line_names_vec(&${self_grid}.mLineNameLists).into_boxed_slice();
-            let mut values = Vec::with_capacity(${self_grid}.mMinTrackSizingFunctions.len());
+            let line_names = to_line_names_vec(&value.mLineNameLists).into_boxed_slice();
+            let mut values = Vec::with_capacity(value.mMinTrackSizingFunctions.len());
 
-            let min_max_iter = ${self_grid}.mMinTrackSizingFunctions.iter()
-                .zip(${self_grid}.mMaxTrackSizingFunctions.iter());
+            let min_max_iter = value.mMinTrackSizingFunctions.iter()
+                .zip(value.mMaxTrackSizingFunctions.iter());
             for (i, (gecko_min, gecko_max)) in min_max_iter.enumerate() {
                 let track_size = TrackSize::from_gecko_style_coords(gecko_min, gecko_max);
 
                 if i == repeat_auto_index {
                     list_type = TrackListType::Auto(repeat_auto_index as u16);
 
-                    let count = if ${self_grid}.mIsAutoFill() {
+                    let count = if value.mIsAutoFill() {
                         RepeatCount::AutoFill
                     } else {
                         RepeatCount::AutoFit
@@ -1903,9 +1884,9 @@ fn static_assert() {
                     let line_names = {
                         let mut vec: Vec<Box<[CustomIdent]>> = Vec::with_capacity(2);
                         vec.push(to_boxed_customident_slice(
-                            &${self_grid}.mRepeatAutoLineNameListBefore));
+                            &value.mRepeatAutoLineNameListBefore));
                         vec.push(to_boxed_customident_slice(
-                            &${self_grid}.mRepeatAutoLineNameListAfter));
+                            &value.mRepeatAutoLineNameListAfter));
                         vec.into_boxed_slice()
                     };
 
@@ -2182,9 +2163,15 @@ fn static_assert() {
     }
 
     pub fn fixup_none_generic(&mut self, device: &Device) {
+        self.gecko.mFont.systemFont = false;
         unsafe {
             bindings::Gecko_nsStyleFont_FixupNoneGeneric(&mut self.gecko, device.pres_context())
         }
+    }
+
+    pub fn fixup_system(&mut self) {
+        self.gecko.mFont.systemFont = true;
+        self.gecko.mGenericID = structs::kGenericFont_NONE;
     }
 
     pub fn set_font_family(&mut self, v: longhands::font_family::computed_value::T) {
@@ -2223,6 +2210,7 @@ fn static_assert() {
     pub fn copy_font_family_from(&mut self, other: &Self) {
         unsafe { Gecko_CopyFontFamilyFrom(&mut self.gecko.mFont, &other.gecko.mFont); }
         self.gecko.mGenericID = other.gecko.mGenericID;
+        self.gecko.mFont.systemFont = other.gecko.mFont.systemFont;
     }
 
     pub fn reset_font_family(&mut self, other: &Self) {
@@ -2644,12 +2632,13 @@ fn static_assert() {
 
     #[allow(non_snake_case)]
     pub fn set__moz_min_font_size_ratio(&mut self, v: longhands::_moz_min_font_size_ratio::computed_value::T) {
-        let percentage = if v.0 > 255. {
+        let scaled = v.0 * 100.;
+        let percentage = if scaled > 255. {
             255.
-        } else if v.0 < 0. {
+        } else if scaled < 0. {
             0.
         } else {
-            v.0
+            scaled
         };
 
         self.gecko.mMinFontSizeRatio = percentage as u8;
@@ -3524,7 +3513,7 @@ fn static_assert() {
                         Gecko_AppendWillChange(&mut self.gecko, feature.0.as_ptr());
                     }
 
-                    if let Ok(prop_id) = PropertyId::parse(&feature.0.to_string()) {
+                    if let Ok(prop_id) = PropertyId::parse(&feature.0.to_string(), None) {
                         match prop_id.as_shorthand() {
                             Ok(shorthand) => {
                                 for longhand in shorthand.longhands() {
@@ -4241,21 +4230,11 @@ fn static_assert() {
            return Either::Second(Auto);
         }
 
-        let get_clip_rect_component = |value: structs::nscoord| -> Option<Au> {
-            if value == 0 {
-                None
-            } else {
-                Some(Au(value))
-            }
-        };
-
         Either::First(ClipRect {
-            top: get_clip_rect_component(self.gecko.mImageRegion.y),
-            right: get_clip_rect_component(self.gecko.mImageRegion.width).map(
-                |v| v + Au(self.gecko.mImageRegion.x)),
-            bottom: get_clip_rect_component(self.gecko.mImageRegion.height).map(
-                |v| v + Au(self.gecko.mImageRegion.y)),
-            left: get_clip_rect_component(self.gecko.mImageRegion.x),
+            top: Some(Au(self.gecko.mImageRegion.y)),
+            right: Some(Au(self.gecko.mImageRegion.width) + Au(self.gecko.mImageRegion.x)),
+            bottom: Some(Au(self.gecko.mImageRegion.height) + Au(self.gecko.mImageRegion.y)),
+            left: Some(Au(self.gecko.mImageRegion.x)),
         })
     }
 
@@ -4461,14 +4440,14 @@ fn static_assert() {
                     fn init_shadow(filter: &mut nsStyleFilter) -> &mut nsCSSShadowArray {
                         unsafe {
                             let ref mut union = filter.__bindgen_anon_1;
-                            let mut shadow_array: &mut *mut nsCSSShadowArray = union.mDropShadow.as_mut();
+                            let shadow_array: &mut *mut nsCSSShadowArray = union.mDropShadow.as_mut();
                             *shadow_array = Gecko_NewCSSShadowArray(1);
 
                             &mut **shadow_array
                         }
                     }
 
-                    let mut gecko_shadow = init_shadow(gecko_filter);
+                    let gecko_shadow = init_shadow(gecko_filter);
                     gecko_shadow.mArray[0].set_from_simple_shadow(shadow);
                 },
                 Url(ref url) => {
@@ -5017,14 +4996,14 @@ fn static_assert() {
                     unsafe {
                         // We have to be very careful to avoid a copy here!
                         let ref mut union = ${ident}.__bindgen_anon_1;
-                        let mut shape: &mut *mut StyleBasicShape = union.mBasicShape.as_mut();
+                        let shape: &mut *mut StyleBasicShape = union.mBasicShape.as_mut();
                         *shape = Gecko_NewBasicShape(ty);
                         &mut **shape
                     }
                 }
                 match servo_shape {
                     BasicShape::Inset(inset) => {
-                        let mut shape = init_shape(${ident}, StyleBasicShapeType::Inset);
+                        let shape = init_shape(${ident}, StyleBasicShapeType::Inset);
                         unsafe { shape.mCoordinates.set_len(4) };
 
                         // set_len() can't call constructors, so the coordinates
@@ -5046,7 +5025,7 @@ fn static_assert() {
                         set_corners_from_radius(inset.round, &mut shape.mRadius);
                     }
                     BasicShape::Circle(circ) => {
-                        let mut shape = init_shape(${ident}, StyleBasicShapeType::Circle);
+                        let shape = init_shape(${ident}, StyleBasicShapeType::Circle);
                         unsafe { shape.mCoordinates.set_len(1) };
                         shape.mCoordinates[0].leaky_set_null();
                         circ.radius.to_gecko_style_coord(&mut shape.mCoordinates[0]);
@@ -5054,7 +5033,7 @@ fn static_assert() {
                         shape.mPosition = circ.position.into();
                     }
                     BasicShape::Ellipse(el) => {
-                        let mut shape = init_shape(${ident}, StyleBasicShapeType::Ellipse);
+                        let shape = init_shape(${ident}, StyleBasicShapeType::Ellipse);
                         unsafe { shape.mCoordinates.set_len(2) };
                         shape.mCoordinates[0].leaky_set_null();
                         el.semiaxis_x.to_gecko_style_coord(&mut shape.mCoordinates[0]);
@@ -5064,7 +5043,7 @@ fn static_assert() {
                         shape.mPosition = el.position.into();
                     }
                     BasicShape::Polygon(poly) => {
-                        let mut shape = init_shape(${ident}, StyleBasicShapeType::Polygon);
+                        let shape = init_shape(${ident}, StyleBasicShapeType::Polygon);
                         unsafe {
                             shape.mCoordinates.set_len(poly.coordinates.len() as u32 * 2);
                         }
@@ -5084,6 +5063,10 @@ fn static_assert() {
             }
         }
 
+    }
+
+    pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
+        (&self.gecko.${gecko_ffi_name}).into()
     }
 
     pub fn copy_${ident}_from(&mut self, other: &Self) {
@@ -5166,7 +5149,7 @@ clip-path
 
     pub fn set_stroke_dasharray(&mut self, v: longhands::stroke_dasharray::computed_value::T) {
         use gecko_bindings::structs::nsStyleSVG_STROKE_DASHARRAY_CONTEXT as CONTEXT_VALUE;
-        use values::generics::svg::SVGStrokeDashArray;
+        use values::generics::svg::{SVGStrokeDashArray, SvgLengthOrPercentageOrNumber};
 
         match v {
             SVGStrokeDashArray::Values(v) => {
@@ -5175,10 +5158,12 @@ clip-path
                 unsafe {
                     bindings::Gecko_nsStyleSVG_SetDashArrayLength(&mut self.gecko, v.len() as u32);
                 }
-                for (mut gecko, servo) in self.gecko.mStrokeDasharray.iter_mut().zip(v) {
+                for (gecko, servo) in self.gecko.mStrokeDasharray.iter_mut().zip(v) {
                     match servo {
-                        Either::First(number) => gecko.set_value(CoordDataValue::Factor(number.into())),
-                        Either::Second(lop) => gecko.set(lop),
+                        SvgLengthOrPercentageOrNumber::LengthOrPercentage(lop) =>
+                            gecko.set(lop),
+                        SvgLengthOrPercentageOrNumber::Number(num) =>
+                            gecko.set_value(CoordDataValue::Factor(num.into())),
                     }
                 }
             }
@@ -5208,7 +5193,7 @@ clip-path
     pub fn clone_stroke_dasharray(&self) -> longhands::stroke_dasharray::computed_value::T {
         use gecko_bindings::structs::nsStyleSVG_STROKE_DASHARRAY_CONTEXT as CONTEXT_VALUE;
         use values::computed::LengthOrPercentage;
-        use values::generics::svg::SVGStrokeDashArray;
+        use values::generics::svg::{SVGStrokeDashArray, SvgLengthOrPercentageOrNumber};
 
         if self.gecko.mContextFlags & CONTEXT_VALUE != 0 {
             debug_assert_eq!(self.gecko.mStrokeDasharray.len(), 0);
@@ -5217,13 +5202,17 @@ clip-path
         let mut vec = vec![];
         for gecko in self.gecko.mStrokeDasharray.iter() {
             match gecko.as_value() {
-                CoordDataValue::Factor(number) => vec.push(Either::First(number.into())),
+                CoordDataValue::Factor(number) =>
+                    vec.push(SvgLengthOrPercentageOrNumber::Number(number.into())),
                 CoordDataValue::Coord(coord) =>
-                    vec.push(Either::Second(LengthOrPercentage::Length(Au(coord)).into())),
+                    vec.push(SvgLengthOrPercentageOrNumber::LengthOrPercentage(
+                        LengthOrPercentage::Length(Au(coord)).into())),
                 CoordDataValue::Percent(p) =>
-                    vec.push(Either::Second(LengthOrPercentage::Percentage(Percentage(p)).into())),
+                    vec.push(SvgLengthOrPercentageOrNumber::LengthOrPercentage(
+                        LengthOrPercentage::Percentage(Percentage(p)).into())),
                 CoordDataValue::Calc(calc) =>
-                    vec.push(Either::Second(LengthOrPercentage::Calc(calc.into()).into())),
+                    vec.push(SvgLengthOrPercentageOrNumber::LengthOrPercentage(
+                        LengthOrPercentage::Calc(calc.into()).into())),
                 _ => unreachable!(),
             }
         }
@@ -5241,7 +5230,7 @@ clip-path
         }
 
         self.gecko.mContextPropsBits = 0;
-        for (mut gecko, servo) in self.gecko.mContextProps.iter_mut().zip(v) {
+        for (gecko, servo) in self.gecko.mContextProps.iter_mut().zip(v) {
             if servo.0 == atom!("fill") {
                 self.gecko.mContextPropsBits |= structs::NS_STYLE_CONTEXT_PROPERTY_FILL as u8;
             } else if servo.0 == atom!("stroke") {
@@ -5459,10 +5448,10 @@ clip-path
     ${impl_simple_copy('column_count', 'mColumnCount')}
 
     pub fn clone_column_count(&self) -> longhands::column_count::computed_value::T {
-        use gecko_bindings::structs::NS_STYLE_COLUMN_COUNT_AUTO;
+        use gecko_bindings::structs::{NS_STYLE_COLUMN_COUNT_AUTO, nsStyleColumn_kMaxColumnCount};
         if self.gecko.mColumnCount != NS_STYLE_COLUMN_COUNT_AUTO {
-            debug_assert!((self.gecko.mColumnCount as i32) >= 0 &&
-                          (self.gecko.mColumnCount as i32) < i32::max_value());
+            debug_assert!(self.gecko.mColumnCount >= 1 &&
+                          self.gecko.mColumnCount <= nsStyleColumn_kMaxColumnCount);
             Either::First((self.gecko.mColumnCount as i32).into())
         } else {
             Either::Second(Auto)
@@ -5602,6 +5591,80 @@ clip-path
 
     pub fn reset_content(&mut self, other: &Self) {
         self.copy_content_from(other)
+    }
+
+    pub fn clone_content(&self) -> longhands::content::computed_value::T {
+        use gecko::conversions::string_from_chars_pointer;
+        use gecko_bindings::structs::nsStyleContentType::*;
+        use properties::longhands::content::computed_value::{T, ContentItem};
+        use values::generics::CounterStyleOrNone;
+        use values::specified::url::SpecifiedUrl;
+        use values::specified::Attr;
+
+        if self.gecko.mContents.is_empty() {
+            return T::Normal;
+        }
+
+        if self.gecko.mContents.len() == 1 &&
+           self.gecko.mContents[0].mType == eStyleContentType_AltContent {
+            return T::MozAltContent;
+        }
+
+        T::Items(
+            self.gecko.mContents.iter().map(|gecko_content| {
+                match gecko_content.mType {
+                    eStyleContentType_OpenQuote => ContentItem::OpenQuote,
+                    eStyleContentType_CloseQuote => ContentItem::CloseQuote,
+                    eStyleContentType_NoOpenQuote => ContentItem::NoOpenQuote,
+                    eStyleContentType_NoCloseQuote => ContentItem::NoCloseQuote,
+                    eStyleContentType_String => {
+                        let gecko_chars = unsafe { gecko_content.mContent.mString.as_ref() };
+                        let string = unsafe { string_from_chars_pointer(*gecko_chars) };
+                        ContentItem::String(string)
+                    },
+                    eStyleContentType_Attr => {
+                        let gecko_chars = unsafe { gecko_content.mContent.mString.as_ref() };
+                        let string = unsafe { string_from_chars_pointer(*gecko_chars) };
+                        let (namespace, attribute) =
+                            match string.find('|') {
+                                None => (None, string),
+                                Some(index) => {
+                                    let (_, val) = string.split_at(index);
+                                    // FIXME: We should give NamespaceId as well to make Attr
+                                    // struct. However, there is no field for it in Gecko.
+                                    debug_assert!(false, "Attr with namespace does not support yet");
+                                    (None, val.to_string())
+                                }
+                            };
+                        ContentItem::Attr(Attr { namespace, attribute })
+                    },
+                    eStyleContentType_Counter | eStyleContentType_Counters => {
+                        let gecko_function =
+                            unsafe { &**gecko_content.mContent.mCounters.as_ref() };
+                        let ident = gecko_function.mIdent.to_string();
+                        let style =
+                            CounterStyleOrNone::from_gecko_value(&gecko_function.mCounterStyle);
+                        if gecko_content.mType == eStyleContentType_Counter {
+                            ContentItem::Counter(ident, style)
+                        } else {
+                            let separator = gecko_function.mSeparator.to_string();
+                            ContentItem::Counters(ident, separator, style)
+                        }
+                    },
+                    eStyleContentType_Image => {
+                        unsafe {
+                            let gecko_image_request =
+                                unsafe { &**gecko_content.mContent.mImage.as_ref() };
+                            ContentItem::Url(
+                                SpecifiedUrl::from_image_request(gecko_image_request)
+                                    .expect("mContent could not convert to SpecifiedUrl")
+                            )
+                        }
+                    },
+                    x => panic!("Found unexpected value in style struct for content property: {:?}", x),
+                }
+            }).collect()
+        )
     }
 
     % for counter_property in ["Increment", "Reset"]:

@@ -39,6 +39,9 @@ browser.jar:
   skin/classic/browser/feeds/feedIcon16.png           (feeds/feedIcon16.png)
   skin/classic/browser/feeds/subscribe.css            (feeds/subscribe.css)
 * skin/classic/browser/newtab/newTab.css              (newtab/newTab.css)
+* skin/classic/browser/notification-icons/geo-blocked.svg  (notification-icons/geo-blocked.svg)
+  skin/classic/browser/notification-icons/geo-detailed.svg (notification-icons/geo-detailed.svg)
+* skin/classic/browser/notification-icons/geo.svg          (notification-icons/geo.svg)
   skin/classic/browser/places/allBookmarks.png        (places/allBookmarks.png)
   skin/classic/browser/places/bookmarksMenu.png       (places/bookmarksMenu.png)
   skin/classic/browser/places/bookmarksToolbar.png    (places/bookmarksToolbar.png)
@@ -64,16 +67,10 @@ browser.jar:
 * skin/classic/browser/preferences/in-content/dialog.css      (preferences/in-content/dialog.css)
 * skin/classic/browser/preferences/in-content-new/dialog.css          (preferences/in-content-new/dialog.css)
   skin/classic/browser/preferences/applications.css   (preferences/applications.css)
-  skin/classic/browser/social/services-16.png         (social/services-16.png)
-  skin/classic/browser/social/services-64.png         (social/services-64.png)
   skin/classic/browser/tabbrowser/tabDragIndicator.png      (tabbrowser/tabDragIndicator.png)
 
   skin/classic/browser/sync-desktopIcon.svg  (../shared/sync-desktopIcon.svg)
-  skin/classic/browser/sync-horizontalbar.png
-  skin/classic/browser/sync-horizontalbar@2x.png
   skin/classic/browser/sync-mobileIcon.svg  (../shared/sync-mobileIcon.svg)
-  skin/classic/browser/syncProgress-horizontalbar.png
-  skin/classic/browser/syncProgress-horizontalbar@2x.png
 #ifdef E10S_TESTING_ONLY
   skin/classic/browser/e10s-64@2x.png (../shared/e10s-64@2x.png)
 #endif

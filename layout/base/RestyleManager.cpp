@@ -1267,6 +1267,23 @@ StyleChangeReflow(nsIFrame* aFrame, nsChangeHint aHint)
   } while (aFrame);
 }
 
+// Get the next sibling which might have a frame.  This only considers siblings
+// that stylo post-traversal looks at, so only elements and text.  In
+// particular, it ignores comments.
+static nsIContent*
+NextSiblingWhichMayHaveFrame(nsIContent* aContent)
+{
+  for (nsIContent* next = aContent->GetNextSibling();
+       next;
+       next = next->GetNextSibling()) {
+    if (next->IsElement() || next->IsNodeOfType(nsINode::eTEXT)) {
+      return next;
+    }
+  }
+
+  return nullptr;
+}
+
 void
 RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
 {
@@ -1397,7 +1414,8 @@ RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
            aChangeList[i].mContent &&
            aChangeList[i].mContent->HasFlag(NODE_NEEDS_FRAME) &&
            (i == lazyRangeStart ||
-            aChangeList[i - 1].mContent->GetNextSibling() == aChangeList[i].mContent))
+            NextSiblingWhichMayHaveFrame(aChangeList[i - 1].mContent) ==
+              aChangeList[i].mContent))
     {
       MOZ_ASSERT(aChangeList[i].mHint & nsChangeHint_ReconstructFrame);
       MOZ_ASSERT(!aChangeList[i].mFrame);
@@ -1405,7 +1423,7 @@ RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
     }
     if (i != lazyRangeStart) {
       nsIContent* start = aChangeList[lazyRangeStart].mContent;
-      nsIContent* end = aChangeList[i-1].mContent->GetNextSibling();
+      nsIContent* end = NextSiblingWhichMayHaveFrame(aChangeList[i-1].mContent);
       nsIContent* container = start->GetParent();
       MOZ_ASSERT(container);
       if (!end) {
@@ -1774,7 +1792,7 @@ RestyleManager::AddLayerChangesForAnimation(nsIFrame* aFrame,
       // so we can skip adding any change hint here. (If we *were* to add
       // nsChangeHint_UpdateTransformLayer, ApplyRenderingChangeToTree would
       // complain that we're updating a transform layer without a transform).
-      if (layerInfo.mLayerType == nsDisplayItem::TYPE_TRANSFORM &&
+      if (layerInfo.mLayerType == DisplayItemType::TYPE_TRANSFORM &&
           !aFrame->StyleDisplay()->HasTransformStyle()) {
         continue;
       }

@@ -7,7 +7,6 @@ import os
 import subprocess
 import sys
 from abc import ABCMeta, abstractmethod, abstractproperty
-from distutils.spawn import find_executable
 
 GIT_CINNABAR_NOT_FOUND = """
 Could not detect `git-cinnabar`.
@@ -53,11 +52,12 @@ class VCSHelper(object):
         )
 
         for cmd in commands:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            output = proc.communicate()[0].strip()
+            try:
+                output = subprocess.check_output(cmd, stderr=open(os.devnull, 'w')).strip()
+            except (subprocess.CalledProcessError, OSError):
+                continue
 
-            if proc.returncode == 0:
-                return cmd[0], output
+            return cmd[0], output
         return None, ''
 
     @classmethod
@@ -76,10 +76,14 @@ class VCSHelper(object):
             print(e.output)
             raise
 
-    def write_task_config(self, labels):
+    def write_task_config(self, labels, templates=None):
         config = os.path.join(self.root, 'try_task_config.json')
         with open(config, 'w') as fh:
-            json.dump(sorted(labels), fh, indent=2)
+            try_task_config = {'tasks': sorted(labels)}
+            if templates:
+                try_task_config['templates'] = templates
+
+            json.dump(try_task_config, fh, indent=2)
         return config
 
     def check_working_directory(self):
@@ -102,11 +106,11 @@ class VCSHelper(object):
 
 class HgHelper(VCSHelper):
 
-    def push_to_try(self, msg, labels=None):
+    def push_to_try(self, msg, labels=None, templates=None):
         self.check_working_directory()
 
         if labels:
-            config = self.write_task_config(labels)
+            config = self.write_task_config(labels, templates)
             self.run(['hg', 'add', config])
 
         try:
@@ -136,15 +140,17 @@ class HgHelper(VCSHelper):
 
 class GitHelper(VCSHelper):
 
-    def push_to_try(self, msg, labels=None):
+    def push_to_try(self, msg, labels=None, templates=None):
         self.check_working_directory()
 
-        if not find_executable('git-cinnabar'):
+        try:
+            subprocess.check_output(['git', 'cinnabar', '--version'], stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError:
             print(GIT_CINNABAR_NOT_FOUND)
             return 1
 
         if labels:
-            config = self.write_task_config(labels)
+            config = self.write_task_config(labels, templates)
             self.run(['git', 'add', config])
 
         subprocess.check_call(['git', 'commit', '--allow-empty', '-m', msg])

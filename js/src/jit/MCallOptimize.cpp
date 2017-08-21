@@ -758,9 +758,25 @@ IonBuilder::inlineArrayJoin(CallInfo& callInfo)
     if (callInfo.getArg(0)->type() != MIRType::String)
         return InliningStatus_NotInlined;
 
+    // If we can confirm that the class is an array, the codegen
+    // for MArrayJoin can be notified to check for common empty and one-item arrays.
+    bool optimizeForArray = ([&](){
+        TemporaryTypeSet* thisTypes = callInfo.thisArg()->resultTypeSet();
+        if (!thisTypes)
+            return false;
+
+        const Class* clasp = thisTypes->getKnownClass(constraints());
+        // TODO: Handle unboxed arrays?
+        if (clasp != &ArrayObject::class_)
+            return false;
+
+        return true;
+    })();
+
     callInfo.setImplicitlyUsedUnchecked();
 
-    MArrayJoin* ins = MArrayJoin::New(alloc(), callInfo.thisArg(), callInfo.getArg(0));
+    MArrayJoin* ins = MArrayJoin::New(alloc(), callInfo.thisArg(), callInfo.getArg(0),
+                                      optimizeForArray);
 
     current->add(ins);
     current->push(ins);
@@ -1601,8 +1617,7 @@ IonBuilder::inlineConstantStringSplitString(CallInfo& callInfo)
     MDefinition* array = current->peek(-1);
 
     if (!initLength) {
-        if (!array->isResumePoint())
-            MOZ_TRY(resumeAfter(array->toNewArray()));
+        MOZ_TRY(resumeAfter(array->toNewArray()));
         return InliningStatus_Inlined;
     }
 
@@ -2966,25 +2981,24 @@ IonBuilder::inlineIsCallable(CallInfo& callInfo)
         return InliningStatus_NotInlined;
 
     MDefinition* arg = callInfo.getArg(0);
-    // Do not inline if the type of arg is neither primitive nor object.
-    if (arg->type() > MIRType::Object)
-        return InliningStatus_NotInlined;
 
     // Try inlining with constant true/false: only objects may be callable at
     // all, and if we know the class check if it is callable.
     bool isCallableKnown = false;
     bool isCallableConstant;
-    if (arg->type() != MIRType::Object) {
-        // Primitive (including undefined and null).
-        isCallableKnown = true;
-        isCallableConstant = false;
-    } else {
+    if (arg->type() == MIRType::Object) {
         TemporaryTypeSet* types = arg->resultTypeSet();
         const Class* clasp = types ? types->getKnownClass(constraints()) : nullptr;
         if (clasp && !clasp->isProxy()) {
             isCallableKnown = true;
             isCallableConstant = clasp->nonProxyCallable();
         }
+    } else if (!arg->mightBeType(MIRType::Object)) {
+        // Primitive (including undefined and null).
+        isCallableKnown = true;
+        isCallableConstant = false;
+    } else if (arg->type() != MIRType::Value) {
+        return InliningStatus_NotInlined;
     }
 
     callInfo.setImplicitlyUsedUnchecked();

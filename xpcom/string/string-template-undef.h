@@ -12,6 +12,7 @@
 #undef nsTString_CharT
 #undef nsTStringRepr_CharT
 #undef nsTFixedString_CharT
+#undef nsTAutoStringN_CharT
 #undef nsTAutoString_CharT
 #undef nsTSubstring_CharT
 #undef PrintfAppend_CharT
@@ -26,3 +27,4 @@
 #undef nsTPromiseFlatString_CharT
 #undef TPromiseFlatString_CharT
 #undef nsTSubstringSplitter_CharT
+#undef TNullString_CharT

@@ -733,6 +733,14 @@ gfxPlatform::Init()
       gpu->LaunchGPUProcess();
     }
 
+    if (XRE_IsParentProcess()) {
+      if (gfxPlatform::ForceSoftwareVsync()) {
+        gPlatform->mVsyncSource = (gPlatform)->gfxPlatform::CreateHardwareVsyncSource();
+      } else {
+        gPlatform->mVsyncSource = gPlatform->CreateHardwareVsyncSource();
+      }
+    }
+
 #ifdef USE_SKIA
     SkGraphics::Init();
 #  ifdef MOZ_ENABLE_FREETYPE
@@ -812,14 +820,6 @@ gfxPlatform::Init()
 
     RegisterStrongMemoryReporter(new GfxMemoryImageReporter());
     mlg::InitializeMemoryReporters();
-
-    if (XRE_IsParentProcess()) {
-      if (gfxPlatform::ForceSoftwareVsync()) {
-        gPlatform->mVsyncSource = (gPlatform)->gfxPlatform::CreateHardwareVsyncSource();
-      } else {
-        gPlatform->mVsyncSource = gPlatform->CreateHardwareVsyncSource();
-      }
-    }
 
 #ifdef USE_SKIA
     uint32_t skiaCacheSize = GetSkiaGlyphCacheSize();
@@ -2445,6 +2445,14 @@ gfxPlatform::InitWebRenderConfig()
     if (env && *env == '1') {
       featureWebRender.UserEnable("Enabled by envvar");
     }
+  }
+
+  // HW_COMPOSITING being disabled implies interfacing with the GPU might break
+  if (!gfxConfig::IsEnabled(Feature::HW_COMPOSITING)) {
+    featureWebRender.ForceDisable(
+      FeatureStatus::Unavailable,
+      "Hardware compositing is disabled",
+      NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBRENDER_NEED_HWCOMP"));
   }
 
   // WebRender relies on the GPU process when on Windows

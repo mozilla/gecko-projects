@@ -34,7 +34,6 @@ const PREF_WHITELIST = [
   "onboarding-tour-library",
   "onboarding-tour-performance",
   "onboarding-tour-private-browsing",
-  "onboarding-tour-search",
   "onboarding-tour-singlesearch",
   "onboarding-tour-sync",
 ].forEach(tourId => PREF_WHITELIST.push([`browser.onboarding.tour.${tourId}.completed`, PREF_BOOL]));
@@ -196,7 +195,7 @@ function uninstall(aData, aReason) {}
 
 function startup(aData, aReason) {
   // Only start Onboarding when the browser UI is ready
-  if (aReason === APP_STARTUP || aReason === ADDON_INSTALL) {
+  if (Services.startup.startingUp) {
     Services.obs.addObserver(observe, BROWSER_READY_NOTIFICATION);
     Services.obs.addObserver(observe, BROWSER_SESSION_STORE_NOTIFICATION);
   } else {

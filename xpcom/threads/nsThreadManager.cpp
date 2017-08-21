@@ -11,14 +11,19 @@
 #include "nsTArray.h"
 #include "nsAutoPtr.h"
 #include "mozilla/AbstractThread.h"
+#include "mozilla/EventQueue.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/SystemGroup.h"
+#include "mozilla/ThreadEventQueue.h"
 #include "mozilla/ThreadLocal.h"
+#include "PrioritizedEventQueue.h"
 #ifdef MOZ_CANARY
 #include <fcntl.h>
 #include <unistd.h>
 #endif
 
 #include "MainThreadIdlePeriod.h"
+#include "InputEventStatistics.h"
 
 using namespace mozilla;
 
@@ -94,18 +99,30 @@ nsThreadManager::Init()
                    0;
 #endif
 
+  using MainThreadQueueT = PrioritizedEventQueue<EventQueue>;
+
+  nsCOMPtr<nsIIdlePeriod> idlePeriod = new MainThreadIdlePeriod();
+  auto prioritized = MakeUnique<MainThreadQueueT>(MakeUnique<EventQueue>(),
+                                                  MakeUnique<EventQueue>(),
+                                                  MakeUnique<EventQueue>(),
+                                                  MakeUnique<EventQueue>(),
+                                                  idlePeriod.forget());
+
+  // Save a reference temporarily so we can set some state on it.
+  MainThreadQueueT* prioritizedRef = prioritized.get();
+  RefPtr<ThreadEventQueue<MainThreadQueueT>> queue =
+    new ThreadEventQueue<MainThreadQueueT>(Move(prioritized));
+
   // Setup "main" thread
-  mMainThread = new nsThread(nsThread::MAIN_THREAD, 0);
+  mMainThread = new nsThread(WrapNotNull(queue), nsThread::MAIN_THREAD, 0);
+
+  prioritizedRef->SetMutexRef(queue->MutexRef());
+  prioritizedRef->SetNextIdleDeadlineRef(mMainThread->NextIdleDeadlineRef());
 
   nsresult rv = mMainThread->InitCurrentThread();
   if (NS_FAILED(rv)) {
     mMainThread = nullptr;
     return rv;
-  }
-
-  {
-    nsCOMPtr<nsIIdlePeriod> idlePeriod = new MainThreadIdlePeriod();
-    mMainThread->RegisterIdlePeriod(idlePeriod.forget());
   }
 
   // We need to keep a pointer to the current thread, so we can satisfy
@@ -242,7 +259,9 @@ nsThreadManager::GetCurrentThread()
   }
 
   // OK, that's fine.  We'll dynamically create one :-)
-  RefPtr<nsThread> thread = new nsThread(nsThread::NOT_MAIN_THREAD, 0);
+  RefPtr<ThreadEventQueue<EventQueue>> queue =
+    new ThreadEventQueue<EventQueue>(MakeUnique<EventQueue>());
+  RefPtr<nsThread> thread = new nsThread(WrapNotNull(queue), nsThread::NOT_MAIN_THREAD, 0);
   if (!thread || NS_FAILED(thread->InitCurrentThread())) {
     return nullptr;
   }
@@ -270,7 +289,9 @@ nsThreadManager::NewNamedThread(const nsACString& aName,
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  RefPtr<nsThread> thr = new nsThread(nsThread::NOT_MAIN_THREAD, aStackSize);
+  RefPtr<ThreadEventQueue<EventQueue>> queue =
+    new ThreadEventQueue<EventQueue>(MakeUnique<EventQueue>());
+  RefPtr<nsThread> thr = new nsThread(WrapNotNull(queue), nsThread::NOT_MAIN_THREAD, aStackSize);
   nsresult rv = thr->Init(aName);  // Note: blocks until the new thread has been set up
   if (NS_FAILED(rv)) {
     return rv;
@@ -393,7 +414,7 @@ nsThreadManager::GetHighestNumberOfThreads()
 }
 
 NS_IMETHODIMP
-nsThreadManager::DispatchToMainThread(nsIRunnable *aEvent)
+nsThreadManager::DispatchToMainThread(nsIRunnable *aEvent, uint32_t aPriority)
 {
   // Note: C++ callers should instead use NS_DispatchToMainThread.
   MOZ_ASSERT(NS_IsMainThread());
@@ -402,8 +423,31 @@ nsThreadManager::DispatchToMainThread(nsIRunnable *aEvent)
   if (NS_WARN_IF(!mMainThread)) {
     return NS_ERROR_NOT_INITIALIZED;
   }
-
+  if (aPriority != nsIRunnablePriority::PRIORITY_NORMAL) {
+    nsCOMPtr<nsIRunnable> event(aEvent);
+    return mMainThread->DispatchFromScript(
+             new PrioritizableRunnable(event.forget(), aPriority), 0);
+  }
   return mMainThread->DispatchFromScript(aEvent, 0);
+}
+
+void
+nsThreadManager::EnableMainThreadEventPrioritization()
+{
+  static bool sIsInitialized = false;
+  if (sIsInitialized) {
+    return;
+  }
+  sIsInitialized = true;
+  MOZ_ASSERT(Preferences::IsServiceAvailable());
+  bool enable =
+    Preferences::GetBool("prioritized_input_events.enabled", false);
+
+  if (!enable) {
+    return;
+  }
+  InputEventStatistics::Get().SetEnable(true);
+  mMainThread->EnableInputEventPrioritization();
 }
 
 NS_IMETHODIMP

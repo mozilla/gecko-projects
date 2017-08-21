@@ -103,7 +103,7 @@ const globalImportContext = typeof Window === "undefined" ? BACKGROUND_PROCESS :
 //   UNINIT: "UNINIT"
 // }
 const actionTypes = {};
-for (const type of ["BLOCK_URL", "BOOKMARK_URL", "DELETE_BOOKMARK_BY_ID", "DELETE_HISTORY_URL", "DELETE_HISTORY_URL_CONFIRM", "DIALOG_CANCEL", "DIALOG_OPEN", "FEED_INIT", "INIT", "LOCALE_UPDATED", "MIGRATION_CANCEL", "MIGRATION_START", "NEW_TAB_INIT", "NEW_TAB_INITIAL_STATE", "NEW_TAB_LOAD", "NEW_TAB_UNLOAD", "OPEN_LINK", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "PINNED_SITES_UPDATED", "PLACES_BOOKMARK_ADDED", "PLACES_BOOKMARK_CHANGED", "PLACES_BOOKMARK_REMOVED", "PLACES_HISTORY_CLEARED", "PLACES_LINK_BLOCKED", "PLACES_LINK_DELETED", "PREFS_INITIAL_VALUES", "PREF_CHANGED", "SAVE_SESSION_PERF_DATA", "SAVE_TO_POCKET", "SCREENSHOT_UPDATED", "SECTION_DEREGISTER", "SECTION_REGISTER", "SECTION_ROWS_UPDATE", "SET_PREF", "SNIPPETS_DATA", "SNIPPETS_RESET", "SYSTEM_TICK", "TELEMETRY_PERFORMANCE_EVENT", "TELEMETRY_UNDESIRED_EVENT", "TELEMETRY_USER_EVENT", "TOP_SITES_PIN", "TOP_SITES_UNPIN", "TOP_SITES_UPDATED", "UNINIT"]) {
+for (const type of ["BLOCK_URL", "BOOKMARK_URL", "DELETE_BOOKMARK_BY_ID", "DELETE_HISTORY_URL", "DELETE_HISTORY_URL_CONFIRM", "DIALOG_CANCEL", "DIALOG_OPEN", "FEED_INIT", "INIT", "LOCALE_UPDATED", "MIGRATION_CANCEL", "MIGRATION_START", "NEW_TAB_INIT", "NEW_TAB_INITIAL_STATE", "NEW_TAB_LOAD", "NEW_TAB_UNLOAD", "OPEN_LINK", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "PINNED_SITES_UPDATED", "PLACES_BOOKMARK_ADDED", "PLACES_BOOKMARK_CHANGED", "PLACES_BOOKMARK_REMOVED", "PLACES_HISTORY_CLEARED", "PLACES_LINK_BLOCKED", "PLACES_LINK_DELETED", "PREFS_INITIAL_VALUES", "PREF_CHANGED", "SAVE_SESSION_PERF_DATA", "SAVE_TO_POCKET", "SCREENSHOT_UPDATED", "SECTION_DEREGISTER", "SECTION_REGISTER", "SECTION_ROWS_UPDATE", "SET_PREF", "SNIPPETS_DATA", "SNIPPETS_RESET", "SYSTEM_TICK", "TELEMETRY_IMPRESSION_STATS", "TELEMETRY_PERFORMANCE_EVENT", "TELEMETRY_UNDESIRED_EVENT", "TELEMETRY_USER_EVENT", "TOP_SITES_EDIT_CLOSE", "TOP_SITES_EDIT_OPEN", "TOP_SITES_PIN", "TOP_SITES_UNPIN", "TOP_SITES_UPDATED", "UNINIT"]) {
   actionTypes[type] = type;
 }
 
@@ -191,7 +191,7 @@ function UserEvent(data) {
  * UndesiredEvent - A telemetry ping indicating an undesired state.
  *
  * @param  {object} data Fields to include in the ping (value, etc.)
- * @param {int} importContext (For testing) Override the import context for testing.
+ * @param  {int} importContext (For testing) Override the import context for testing.
  * @return {object} An action. For UI code, a SendToMain action.
  */
 function UndesiredEvent(data) {
@@ -208,7 +208,7 @@ function UndesiredEvent(data) {
  * PerfEvent - A telemetry ping indicating a performance-related event.
  *
  * @param  {object} data Fields to include in the ping (value, etc.)
- * @param {int} importContext (For testing) Override the import context for testing.
+ * @param  {int} importContext (For testing) Override the import context for testing.
  * @return {object} An action. For UI code, a SendToMain action.
  */
 function PerfEvent(data) {
@@ -216,6 +216,23 @@ function PerfEvent(data) {
 
   const action = {
     type: actionTypes.TELEMETRY_PERFORMANCE_EVENT,
+    data
+  };
+  return importContext === UI_CODE ? SendToMain(action) : action;
+}
+
+/**
+ * ImpressionStats - A telemetry ping indicating an impression stats.
+ *
+ * @param  {object} data Fields to include in the ping
+ * @param  {int} importContext (For testing) Override the import context for testing.
+ * #return {object} An action. For UI code, a SendToMain action.
+ */
+function ImpressionStats(data) {
+  let importContext = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : globalImportContext;
+
+  const action = {
+    type: actionTypes.TELEMETRY_IMPRESSION_STATS,
     data
   };
   return importContext === UI_CODE ? SendToMain(action) : action;
@@ -233,6 +250,7 @@ var actionCreators = {
   UserEvent,
   UndesiredEvent,
   PerfEvent,
+  ImpressionStats,
   SendToContent,
   SendToMain,
   SetPref
@@ -306,14 +324,14 @@ var _require = __webpack_require__(2);
 
 const injectIntl = _require.injectIntl;
 
-const ContextMenu = __webpack_require__(15);
+const ContextMenu = __webpack_require__(16);
 
 var _require2 = __webpack_require__(1);
 
 const ac = _require2.actionCreators;
 
-const linkMenuOptions = __webpack_require__(22);
-const DEFAULT_SITE_MENU_OPTIONS = ["CheckPinTopSite", "Separator", "OpenInNewWindow", "OpenInPrivateWindow"];
+const linkMenuOptions = __webpack_require__(23);
+const DEFAULT_SITE_MENU_OPTIONS = ["CheckPinTopSite", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl"];
 
 class LinkMenu extends React.Component {
   getOptions() {
@@ -326,8 +344,9 @@ class LinkMenu extends React.Component {
 
     const propOptions = !site.isDefault ? props.options : DEFAULT_SITE_MENU_OPTIONS;
 
-    const options = propOptions.map(o => linkMenuOptions[o](site, index)).map(option => {
+    const options = propOptions.map(o => linkMenuOptions[o](site, index, source)).map(option => {
       const action = option.action,
+            impression = option.impression,
             id = option.id,
             type = option.type,
             userEvent = option.userEvent;
@@ -342,6 +361,9 @@ class LinkMenu extends React.Component {
               source,
               action_position: index
             }));
+          }
+          if (impression) {
+            props.dispatch(impression);
           }
         };
       }
@@ -491,6 +513,33 @@ module.exports = {
 
 /***/ }),
 /* 6 */
+/***/ (function(module, exports) {
+
+var g;
+
+// This works in non-strict mode
+g = (function() {
+	return this;
+})();
+
+try {
+	// This works if eval is allowed (see CSP)
+	g = g || Function("return this")() || (1,eval)("this");
+} catch(e) {
+	// This works if the window reference is available
+	if(typeof window === "object")
+		g = window;
+}
+
+// g can still be undefined, but nothing to do about it...
+// We return undefined, instead of nothing here, so it's
+// easier to handle this case. if(!global) { ...}
+
+module.exports = g;
+
+
+/***/ }),
+/* 7 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -507,12 +556,12 @@ var _require2 = __webpack_require__(2);
 const addLocaleData = _require2.addLocaleData,
       IntlProvider = _require2.IntlProvider;
 
-const TopSites = __webpack_require__(20);
-const Search = __webpack_require__(18);
-const ConfirmDialog = __webpack_require__(14);
-const ManualMigration = __webpack_require__(16);
-const PreferencesPane = __webpack_require__(17);
-const Sections = __webpack_require__(19);
+const TopSites = __webpack_require__(21);
+const Search = __webpack_require__(19);
+const ConfirmDialog = __webpack_require__(15);
+const ManualMigration = __webpack_require__(17);
+const PreferencesPane = __webpack_require__(18);
+const Sections = __webpack_require__(20);
 
 // Locales that should be displayed RTL
 const RTL_LIST = ["ar", "he", "fa", "ur"];
@@ -530,8 +579,11 @@ function addLocaleDataForReactIntl(_ref) {
 
 class Base extends React.Component {
   componentDidMount() {
-    // Also wait for the preloaded page to show, so the tab's title updates
-    addEventListener("visibilitychange", () => this.updateTitle(this.props.App), { once: true });
+    // Also wait for the preloaded page to show, so the tab's title and favicon updates
+    addEventListener("visibilitychange", () => {
+      this.updateTitle(this.props.App);
+      document.getElementById("favicon").href += "#";
+    }, { once: true });
   }
   componentWillUpdate(_ref2) {
     let App = _ref2.App;
@@ -546,7 +598,9 @@ class Base extends React.Component {
   updateTitle(_ref3) {
     let strings = _ref3.strings;
 
-    document.title = strings.newtab_page_title;
+    if (strings) {
+      document.title = strings.newtab_page_title;
+    }
   }
 
   render() {
@@ -557,7 +611,7 @@ class Base extends React.Component {
           initialized = _props$App.initialized;
 
     const prefs = props.Prefs.values;
-    if (!initialized) {
+    if (!initialized || !strings) {
       return null;
     }
 
@@ -585,7 +639,7 @@ class Base extends React.Component {
 module.exports = connect(state => ({ App: state.App, Prefs: state.Prefs }))(Base);
 
 /***/ }),
-/* 7 */
+/* 8 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -665,7 +719,7 @@ module.exports = class DetectUserSessionStart {
 };
 
 /***/ }),
-/* 8 */
+/* 9 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -750,7 +804,7 @@ module.exports.OUTGOING_MESSAGE_NAME = OUTGOING_MESSAGE_NAME;
 module.exports.INCOMING_MESSAGE_NAME = INCOMING_MESSAGE_NAME;
 
 /***/ }),
-/* 9 */
+/* 10 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -1061,10 +1115,10 @@ module.exports = {
   SnippetsProvider,
   SNIPPETS_UPDATE_INTERVAL_MS
 };
-/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(23)))
+/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(6)))
 
 /***/ }),
-/* 10 */
+/* 11 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -1078,6 +1132,8 @@ var _require = __webpack_require__(1);
 const at = _require.actionTypes;
 
 
+const TOP_SITES_SHOWMORE_LENGTH = 12;
+
 const INITIAL_STATE = {
   App: {
     // Have we received real data from the app yet?
@@ -1085,7 +1141,7 @@ const INITIAL_STATE = {
     // The locale of the browser
     locale: "",
     // Localized strings with defaults
-    strings: {},
+    strings: null,
     // The version of the system-addon
     version: null
   },
@@ -1147,7 +1203,6 @@ function insertPinned(links, pinned) {
   newLinks = newLinks.map(link => {
     if (link && link.isPinned) {
       delete link.isPinned;
-      delete link.pinTitle;
       delete link.pinIndex;
     }
     return link;
@@ -1158,7 +1213,7 @@ function insertPinned(links, pinned) {
     if (!val) {
       return;
     }
-    let link = Object.assign({}, val, { isPinned: true, pinIndex: index, pinTitle: val.title });
+    let link = Object.assign({}, val, { isPinned: true, pinIndex: index });
     if (index > newLinks.length) {
       newLinks[index] = link;
     } else {
@@ -1228,7 +1283,7 @@ function TopSites() {
       return Object.assign({}, prevState, { rows: newRows });
     case at.PINNED_SITES_UPDATED:
       pinned = action.data;
-      newRows = insertPinned(prevState.rows, pinned);
+      newRows = insertPinned(prevState.rows, pinned).slice(0, TOP_SITES_SHOWMORE_LENGTH);
       return Object.assign({}, prevState, { rows: newRows });
     default:
       return prevState;
@@ -1361,17 +1416,18 @@ var reducers = { TopSites, App, Snippets, Prefs, Dialog, Sections };
 module.exports = {
   reducers,
   INITIAL_STATE,
-  insertPinned
+  insertPinned,
+  TOP_SITES_SHOWMORE_LENGTH
 };
 
 /***/ }),
-/* 11 */
+/* 12 */
 /***/ (function(module, exports) {
 
 module.exports = ReactDOM;
 
 /***/ }),
-/* 12 */
+/* 13 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -1384,7 +1440,7 @@ var _require = __webpack_require__(2);
 
 const FormattedMessage = _require.FormattedMessage;
 
-const cardContextTypes = __webpack_require__(13);
+const cardContextTypes = __webpack_require__(14);
 
 var _require2 = __webpack_require__(1);
 
@@ -1433,6 +1489,12 @@ class Card extends React.Component {
       source: this.props.eventSource,
       action_position: this.props.index
     }));
+    this.props.dispatch(ac.ImpressionStats({
+      source: this.props.eventSource,
+      click: 0,
+      incognito: true,
+      tiles: [{ id: this.props.link.guid, pos: this.props.index }]
+    }));
   }
   onMenuUpdate(showContextMenu) {
     this.setState({ showContextMenu });
@@ -1446,9 +1508,11 @@ class Card extends React.Component {
           eventSource = _props.eventSource;
 
     const isContextMenuOpen = this.state.showContextMenu && this.state.activeCard === index;
-    var _cardContextTypes$lin = cardContextTypes[link.type];
-    const icon = _cardContextTypes$lin.icon,
-          intlID = _cardContextTypes$lin.intlID;
+
+    var _ref = link.type ? cardContextTypes[link.type] : {};
+
+    const icon = _ref.icon,
+          intlID = _ref.intlID;
 
 
     return React.createElement(
@@ -1463,33 +1527,27 @@ class Card extends React.Component {
           link.image && React.createElement("div", { className: "card-preview-image", style: { backgroundImage: `url(${link.image})` } }),
           React.createElement(
             "div",
-            { className: "card-details" },
-            React.createElement(
+            { className: `card-details${link.image ? "" : " no-image"}` },
+            link.hostname && React.createElement(
               "div",
               { className: "card-host-name" },
-              " ",
-              link.hostname,
-              " "
+              link.hostname
             ),
             React.createElement(
               "div",
-              { className: `card-text${link.image ? "" : " full-height"}` },
+              { className: `card-text${link.image ? "" : " no-image"}${link.hostname ? "" : " no-host-name"}${icon ? "" : " no-context"}` },
               React.createElement(
                 "h4",
                 { className: "card-title", dir: "auto" },
-                " ",
-                link.title,
-                " "
+                link.title
               ),
               React.createElement(
                 "p",
                 { className: "card-description", dir: "auto" },
-                " ",
-                link.description,
-                " "
+                link.description
               )
             ),
-            React.createElement(
+            icon && React.createElement(
               "div",
               { className: "card-context" },
               React.createElement("span", { className: `card-context-icon icon icon-${icon}` }),
@@ -1526,7 +1584,7 @@ class Card extends React.Component {
 module.exports = Card;
 
 /***/ }),
-/* 13 */
+/* 14 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -1552,7 +1610,7 @@ module.exports = {
 };
 
 /***/ }),
-/* 14 */
+/* 15 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -1671,7 +1729,7 @@ module.exports._unconnected = ConfirmDialog;
 module.exports.Dialog = ConfirmDialog;
 
 /***/ }),
-/* 15 */
+/* 16 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -1765,7 +1823,7 @@ module.exports.ContextMenu = ContextMenu;
 module.exports.ContextMenuItem = ContextMenuItem;
 
 /***/ }),
-/* 16 */
+/* 17 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -1843,7 +1901,7 @@ module.exports = connect()(ManualMigration);
 module.exports._unconnected = ManualMigration;
 
 /***/ }),
-/* 17 */
+/* 18 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -1983,7 +2041,7 @@ module.exports.PreferencesPane = PreferencesPane;
 module.exports.PreferencesInput = PreferencesInput;
 
 /***/ }),
-/* 18 */
+/* 19 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -2082,11 +2140,11 @@ module.exports = connect()(injectIntl(Search));
 module.exports._unconnected = Search;
 
 /***/ }),
-/* 19 */
+/* 20 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
-
+/* WEBPACK VAR INJECTION */(function(global) {
 
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
@@ -2101,8 +2159,16 @@ var _require2 = __webpack_require__(2);
 const injectIntl = _require2.injectIntl,
       FormattedMessage = _require2.FormattedMessage;
 
-const Card = __webpack_require__(12);
-const Topics = __webpack_require__(21);
+const Card = __webpack_require__(13);
+const Topics = __webpack_require__(22);
+
+var _require3 = __webpack_require__(1);
+
+const ac = _require3.actionCreators;
+
+
+const VISIBLE = "visible";
+const VISIBILITY_CHANGE_EVENT = "visibilitychange";
 
 class Section extends React.Component {
   constructor(props) {
@@ -2112,16 +2178,93 @@ class Section extends React.Component {
     this.state = { infoActive: false };
   }
 
+  /**
+   * Take a truthy value to conditionally change the infoActive state.
+   */
+  _setInfoState(nextActive) {
+    const infoActive = !!nextActive;
+    if (infoActive !== this.state.infoActive) {
+      this.setState({ infoActive });
+    }
+  }
+
   onInfoEnter() {
-    this.setState({ infoActive: true });
+    // We're getting focus or hover, so info state should be true if not yet.
+    this._setInfoState(true);
   }
 
   onInfoLeave(event) {
-    // If we have a related target, check to see if it is within the current
-    // target (section-info-option) to keep infoActive true. False otherwise.
-    this.setState({
-      infoActive: event && event.relatedTarget && event.relatedTarget.compareDocumentPosition(event.currentTarget) & Node.DOCUMENT_POSITION_CONTAINS
-    });
+    // We currently have an active (true) info state, so keep it true only if we
+    // have a related event target that is contained "within" the current target
+    // (section-info-option) as itself or a descendant. Set to false otherwise.
+    this._setInfoState(event && event.relatedTarget && (event.relatedTarget === event.currentTarget || event.relatedTarget.compareDocumentPosition(event.currentTarget) & Node.DOCUMENT_POSITION_CONTAINS));
+  }
+
+  getFormattedMessage(message) {
+    return typeof message === "string" ? React.createElement(
+      "span",
+      null,
+      message
+    ) : React.createElement(FormattedMessage, message);
+  }
+
+  _dispatchImpressionStats() {
+    const props = this.props;
+
+    const maxCards = 3 * props.maxRows;
+    props.dispatch(ac.ImpressionStats({
+      source: props.eventSource,
+      tiles: props.rows.slice(0, maxCards).map(link => ({ id: link.guid }))
+    }));
+  }
+
+  // This sends an event when a user sees a set of new content. If content
+  // changes while the page is hidden (i.e. preloaded or on a hidden tab),
+  // only send the event if the page becomes visible again.
+  sendImpressionStatsOrAddListener() {
+    const props = this.props;
+
+
+    if (!props.dispatch) {
+      return;
+    }
+
+    if (props.document.visibilityState === VISIBLE) {
+      this._dispatchImpressionStats();
+    } else {
+      // We should only ever send the latest impression stats ping, so remove any
+      // older listeners.
+      if (this._onVisibilityChange) {
+        props.document.removeEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
+      }
+
+      // When the page becoems visible, send the impression stats ping.
+      this._onVisibilityChange = () => {
+        if (props.document.visibilityState === VISIBLE) {
+          this._dispatchImpressionStats();
+          props.document.removeEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
+        }
+      };
+      props.document.addEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
+    }
+  }
+
+  componentDidMount() {
+    if (this.props.rows.length) {
+      this.sendImpressionStatsOrAddListener();
+    }
+  }
+
+  componentDidUpdate(prevProps) {
+    const props = this.props;
+
+    if (
+    // Don't send impression stats for the empty state
+    props.rows.length &&
+    // We only want to send impression stats if the content of the cards has changed
+    props.rows !== prevProps.rows) {
+      this.sendImpressionStatsOrAddListener();
+    }
   }
 
   render() {
@@ -2134,10 +2277,11 @@ class Section extends React.Component {
           infoOption = _props.infoOption,
           emptyState = _props.emptyState,
           dispatch = _props.dispatch,
-          maxCards = _props.maxCards,
+          maxRows = _props.maxRows,
           contextMenuOptions = _props.contextMenuOptions,
           intl = _props.intl;
 
+    const maxCards = 3 * maxRows;
     const initialized = rows && rows.length > 0;
     const shouldShowTopics = id === "TopStories" && this.props.topics && this.props.read_more_endpoint;
 
@@ -2162,8 +2306,8 @@ class Section extends React.Component {
         React.createElement(
           "h3",
           { className: "section-title" },
-          React.createElement("span", { className: `icon icon-small-spacer icon-${icon}` }),
-          React.createElement(FormattedMessage, title)
+          icon && icon.startsWith("moz-extension://") ? React.createElement("span", { className: "icon icon-small-spacer", style: { "background-image": `url('${icon}')` } }) : React.createElement("span", { className: `icon icon-small-spacer icon-${icon || "webextension"}` }),
+          this.getFormattedMessage(title)
         ),
         infoOption && React.createElement(
           "span",
@@ -2180,17 +2324,17 @@ class Section extends React.Component {
             infoOption.header && React.createElement(
               "div",
               { className: "info-option-header", role: "heading" },
-              React.createElement(FormattedMessage, infoOption.header)
+              this.getFormattedMessage(infoOption.header)
             ),
             infoOption.body && React.createElement(
               "p",
               { className: "info-option-body" },
-              React.createElement(FormattedMessage, infoOption.body)
+              this.getFormattedMessage(infoOption.body)
             ),
             infoOption.link && React.createElement(
               "a",
               { href: infoOption.link.href, target: "_blank", rel: "noopener noreferrer", className: "info-option-link" },
-              React.createElement(FormattedMessage, infoOption.link)
+              this.getFormattedMessage(infoOption.link.title || infoOption.link)
             )
           )
         )
@@ -2210,7 +2354,7 @@ class Section extends React.Component {
           React.createElement(
             "p",
             { className: "empty-state-message" },
-            React.createElement(FormattedMessage, emptyState.message)
+            this.getFormattedMessage(emptyState.message)
           )
         )
       ),
@@ -2218,6 +2362,8 @@ class Section extends React.Component {
     );
   }
 }
+
+Section.defaultProps = { document: global.document };
 
 const SectionIntl = injectIntl(Section);
 
@@ -2236,9 +2382,10 @@ module.exports = connect(state => ({ Sections: state.Sections }))(Sections);
 module.exports._unconnected = Sections;
 module.exports.SectionIntl = SectionIntl;
 module.exports._unconnectedSection = Section;
+/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(6)))
 
 /***/ }),
-/* 20 */
+/* 21 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -2252,7 +2399,8 @@ const connect = _require.connect;
 
 var _require2 = __webpack_require__(2);
 
-const FormattedMessage = _require2.FormattedMessage;
+const FormattedMessage = _require2.FormattedMessage,
+      injectIntl = _require2.injectIntl;
 
 const LinkMenu = __webpack_require__(4);
 
@@ -2275,6 +2423,8 @@ class TopSite extends React.Component {
     this.onLinkClick = this.onLinkClick.bind(this);
     this.onMenuButtonClick = this.onMenuButtonClick.bind(this);
     this.onMenuUpdate = this.onMenuUpdate.bind(this);
+    this.onDismissButtonClick = this.onDismissButtonClick.bind(this);
+    this.onPinButtonClick = this.onPinButtonClick.bind(this);
   }
   toggleContextMenu(event, index) {
     this.setState({
@@ -2282,12 +2432,20 @@ class TopSite extends React.Component {
       showContextMenu: true
     });
   }
-  onLinkClick() {
+  userEvent(event) {
     this.props.dispatch(ac.UserEvent({
-      event: "CLICK",
+      event,
       source: TOP_SITES_SOURCE,
       action_position: this.props.index
     }));
+  }
+  onLinkClick(ev) {
+    if (this.props.editMode) {
+      // Ignore clicks if we are in the edit modal.
+      ev.preventDefault();
+      return;
+    }
+    this.userEvent("CLICK");
   }
   onMenuButtonClick(event) {
     event.preventDefault();
@@ -2296,14 +2454,49 @@ class TopSite extends React.Component {
   onMenuUpdate(showContextMenu) {
     this.setState({ showContextMenu });
   }
-  render() {
+  onDismissButtonClick() {
+    const link = this.props.link;
+
+    if (link.isPinned) {
+      this.props.dispatch(ac.SendToMain({
+        type: at.TOP_SITES_UNPIN,
+        data: { site: { url: link.url } }
+      }));
+    }
+    this.props.dispatch(ac.SendToMain({
+      type: at.BLOCK_URL,
+      data: link.url
+    }));
+    this.userEvent("BLOCK");
+  }
+  onPinButtonClick() {
     var _props = this.props;
     const link = _props.link,
-          index = _props.index,
-          dispatch = _props.dispatch;
+          index = _props.index;
+
+    if (link.isPinned) {
+      this.props.dispatch(ac.SendToMain({
+        type: at.TOP_SITES_UNPIN,
+        data: { site: { url: link.url } }
+      }));
+      this.userEvent("UNPIN");
+    } else {
+      this.props.dispatch(ac.SendToMain({
+        type: at.TOP_SITES_PIN,
+        data: { site: { url: link.url }, index }
+      }));
+      this.userEvent("PIN");
+    }
+  }
+  render() {
+    var _props2 = this.props;
+    const link = _props2.link,
+          index = _props2.index,
+          dispatch = _props2.dispatch,
+          editMode = _props2.editMode;
 
     const isContextMenuOpen = this.state.showContextMenu && this.state.activeTile === index;
-    const title = link.pinTitle || link.hostname;
+    const title = link.hostname;
     const topSiteOuterClassName = `top-site-outer${isContextMenuOpen ? " active" : ""}`;
     const tippyTopIcon = link.tippyTopIcon;
 
@@ -2346,26 +2539,44 @@ class TopSite extends React.Component {
           )
         )
       ),
-      React.createElement(
-        "button",
-        { className: "context-menu-button", onClick: this.onMenuButtonClick },
+      !editMode && React.createElement(
+        "div",
+        null,
         React.createElement(
-          "span",
-          { className: "sr-only" },
-          `Open context menu for ${title}`
-        )
+          "button",
+          { className: "context-menu-button", onClick: this.onMenuButtonClick },
+          React.createElement(
+            "span",
+            { className: "sr-only" },
+            `Open context menu for ${title}`
+          )
+        ),
+        React.createElement(LinkMenu, {
+          dispatch: dispatch,
+          index: index,
+          onUpdate: this.onMenuUpdate,
+          options: TOP_SITES_CONTEXT_MENU_OPTIONS,
+          site: link,
+          source: TOP_SITES_SOURCE,
+          visible: isContextMenuOpen })
       ),
-      React.createElement(LinkMenu, {
-        dispatch: dispatch,
-        index: index,
-        onUpdate: this.onMenuUpdate,
-        options: TOP_SITES_CONTEXT_MENU_OPTIONS,
-        site: link,
-        source: TOP_SITES_SOURCE,
-        visible: isContextMenuOpen })
+      editMode && React.createElement(
+        "div",
+        { className: "edit-menu" },
+        React.createElement("button", {
+          className: `icon icon-${link.isPinned ? "unpin" : "pin"}`,
+          title: this.props.intl.formatMessage({ id: `edit_topsites_${link.isPinned ? "unpin" : "pin"}_button` }),
+          onClick: this.onPinButtonClick }),
+        React.createElement("button", {
+          className: "icon icon-dismiss",
+          title: this.props.intl.formatMessage({ id: "edit_topsites_dismiss_button" }),
+          onClick: this.onDismissButtonClick })
+      )
     );
   }
 }
+
+TopSite.defaultProps = { editMode: false };
 
 /**
  * A proxy class that uses double requestAnimationFrame from
@@ -2392,7 +2603,7 @@ class TopSitesPerfTimer extends React.Component {
     this.perfSvc = this.props.perfSvc || perfSvc;
 
     this._sendPaintedEvent = this._sendPaintedEvent.bind(this);
-    this._timestampSent = false;
+    this._timestampHandled = false;
   }
 
   componentDidMount() {
@@ -2404,25 +2615,30 @@ class TopSitesPerfTimer extends React.Component {
   }
 
   /**
-   * Call the given callback when the subsequent animation frame
-   * (not the upcoming one) paints.
+   * Call the given callback after the upcoming frame paints.
+   *
+   * @note Both setTimeout and requestAnimationFrame are throttled when the page
+   * is hidden, so this callback may get called up to a second or so after the
+   * requestAnimationFrame "paint" for hidden tabs.
+   *
+   * Newtabs hidden while loading will presumably be fairly rare (other than
+   * preloaded tabs, which we will be filtering out on the server side), so such
+   * cases should get lost in the noise.
+   *
+   * If we decide that it's important to find out when something that's hidden
+   * has "painted", however, another option is to post a message to this window.
+   * That should happen even faster than setTimeout, and, at least as of this
+   * writing, it's not throttled in hidden windows in Firefox.
    *
    * @param {Function} callback
    *
    * @returns void
    */
-  _onNextFrame(callback) {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(callback);
-    });
+  _afterFramePaint(callback) {
+    requestAnimationFrame(() => setTimeout(callback, 0));
   }
 
   _maybeSendPaintedEvent() {
-    // If we've already saved a timestamp for this session, don't do so again.
-    if (this._timestampSent) {
-      return;
-    }
-
     // We don't want this to ever happen, but sometimes it does.  And when it
     // does (typically on the first newtab at startup time calling
     // componentDidMount), the paint(s) we care about will be later (eg
@@ -2432,7 +2648,19 @@ class TopSitesPerfTimer extends React.Component {
       return;
     }
 
-    this._onNextFrame(this._sendPaintedEvent);
+    // If we've already handled a timestamp, don't do it again
+    if (this._timestampHandled) {
+      return;
+    }
+
+    // And if we haven't, we're doing so now, so remember that. Even if
+    // something goes wrong in the callback, we can't try again, as we'd be
+    // sending back the wrong data, and we have to do it here, so that other
+    // calls to this method while waiting for the next frame won't also try to
+    // handle handle it.
+    this._timestampHandled = true;
+
+    this._afterFramePaint(this._sendPaintedEvent);
   }
 
   _sendPaintedEvent() {
@@ -2448,11 +2676,10 @@ class TopSitesPerfTimer extends React.Component {
     } catch (ex) {
       // If this failed, it's likely because the `privacy.resistFingerprinting`
       // pref is true.  We should at least not blow up, and should continue
-      // to set this._timestampSent to avoid going through this again.
+      // to set this._timestampHandled to avoid going through this again.
     }
-
-    this._timestampSent = true;
   }
+
   render() {
     return React.createElement(TopSites, this.props);
   }
@@ -2460,7 +2687,7 @@ class TopSitesPerfTimer extends React.Component {
 
 const TopSites = props => React.createElement(
   "section",
-  null,
+  { className: "top-sites" },
   React.createElement(
     "h3",
     { className: "section-title" },
@@ -2474,17 +2701,95 @@ const TopSites = props => React.createElement(
       key: link.guid || link.url,
       dispatch: props.dispatch,
       link: link,
-      index: index }))
-  )
+      index: index,
+      intl: props.intl }))
+  ),
+  React.createElement(TopSitesEditIntl, props)
 );
+
+class TopSitesEdit extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { showEditModal: false };
+    this.onEditButtonClick = this.onEditButtonClick.bind(this);
+  }
+  onEditButtonClick() {
+    this.setState({ showEditModal: !this.state.showEditModal });
+    const event = this.state.showEditModal ? "TOP_SITES_EDIT_OPEN" : "TOP_SITES_EDIT_CLOSE";
+    this.props.dispatch(ac.UserEvent({
+      source: TOP_SITES_SOURCE,
+      event
+    }));
+  }
+  render() {
+    return React.createElement(
+      "div",
+      { className: "edit-topsites-wrapper" },
+      React.createElement(
+        "div",
+        { className: "edit-topsites-button" },
+        React.createElement(
+          "button",
+          {
+            className: "edit",
+            title: this.props.intl.formatMessage({ id: "edit_topsites_button_label" }),
+            onClick: this.onEditButtonClick },
+          React.createElement(FormattedMessage, { id: "edit_topsites_button_text" })
+        )
+      ),
+      this.state.showEditModal && React.createElement(
+        "div",
+        { className: "edit-topsites" },
+        React.createElement("div", { className: "modal-overlay" }),
+        React.createElement(
+          "div",
+          { className: "modal" },
+          React.createElement(
+            "section",
+            { className: "edit-topsites-inner-wrapper" },
+            React.createElement(
+              "h3",
+              { className: "section-title" },
+              React.createElement("span", { className: `icon icon-small-spacer icon-topsites` }),
+              React.createElement(FormattedMessage, { id: "header_top_sites" })
+            ),
+            React.createElement(
+              "ul",
+              { className: "top-sites-list" },
+              this.props.TopSites.rows.map((link, index) => link && React.createElement(TopSite, {
+                key: link.guid || link.url,
+                dispatch: this.props.dispatch,
+                link: link,
+                index: index,
+                intl: this.props.intl,
+                editMode: true }))
+            )
+          ),
+          React.createElement(
+            "section",
+            { className: "actions" },
+            React.createElement(
+              "button",
+              { className: "done", onClick: this.onEditButtonClick },
+              React.createElement(FormattedMessage, { id: "edit_topsites_done_button" })
+            )
+          )
+        )
+      )
+    );
+  }
+}
+
+const TopSitesEditIntl = injectIntl(TopSitesEdit);
 
 module.exports = connect(state => ({ TopSites: state.TopSites }))(TopSitesPerfTimer);
 module.exports._unconnected = TopSitesPerfTimer;
 module.exports.TopSite = TopSite;
 module.exports.TopSites = TopSites;
+module.exports.TopSitesEdit = TopSitesEdit;
 
 /***/ }),
-/* 21 */
+/* 22 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -2549,7 +2854,7 @@ module.exports._unconnected = Topics;
 module.exports.Topic = Topic;
 
 /***/ }),
-/* 22 */
+/* 23 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -2582,7 +2887,7 @@ module.exports = {
     icon: "bookmark",
     action: ac.SendToMain({
       type: at.BOOKMARK_URL,
-      data: site.url
+      data: { url: site.url, title: site.title }
     }),
     userEvent: "BOOKMARK_ADD"
   }),
@@ -2604,12 +2909,18 @@ module.exports = {
     }),
     userEvent: "OPEN_PRIVATE_WINDOW"
   }),
-  BlockUrl: site => ({
+  BlockUrl: (site, index, eventSource) => ({
     id: "menu_action_dismiss",
     icon: "dismiss",
     action: ac.SendToMain({
       type: at.BLOCK_URL,
       data: site.url
+    }),
+    impression: ac.ImpressionStats({
+      source: eventSource,
+      block: 0,
+      incognito: true,
+      tiles: [{ id: site.guid, pos: index }]
     }),
     userEvent: "BLOCK"
   }),
@@ -2631,7 +2942,7 @@ module.exports = {
     icon: "pin",
     action: ac.SendToMain({
       type: at.TOP_SITES_PIN,
-      data: { site: { url: site.url, title: site.hostname }, index }
+      data: { site: { url: site.url }, index }
     }),
     userEvent: "PIN"
   }),
@@ -2644,12 +2955,18 @@ module.exports = {
     }),
     userEvent: "UNPIN"
   }),
-  SaveToPocket: site => ({
+  SaveToPocket: (site, index, eventSource) => ({
     id: "menu_action_save_to_pocket",
     icon: "pocket",
     action: ac.SendToMain({
       type: at.SAVE_TO_POCKET,
       data: { site: { url: site.url, title: site.title } }
+    }),
+    impression: ac.ImpressionStats({
+      source: eventSource,
+      pocket: 0,
+      incognito: true,
+      tiles: [{ id: site.guid, pos: index }]
     }),
     userEvent: "SAVE_TO_POCKET"
   })
@@ -2657,33 +2974,6 @@ module.exports = {
 
 module.exports.CheckBookmark = site => site.bookmarkGuid ? module.exports.RemoveBookmark(site) : module.exports.AddBookmark(site);
 module.exports.CheckPinTopSite = (site, index) => site.isPinned ? module.exports.UnpinTopSite(site) : module.exports.PinTopSite(site, index);
-
-/***/ }),
-/* 23 */
-/***/ (function(module, exports) {
-
-var g;
-
-// This works in non-strict mode
-g = (function() {
-	return this;
-})();
-
-try {
-	// This works if eval is allowed (see CSP)
-	g = g || Function("return this")() || (1,eval)("this");
-} catch(e) {
-	// This works if the window reference is available
-	if(typeof window === "object")
-		g = window;
-}
-
-// g can still be undefined, but nothing to do about it...
-// We return undefined, instead of nothing here, so it's
-// easier to handle this case. if(!global) { ...}
-
-module.exports = g;
-
 
 /***/ }),
 /* 24 */
@@ -2699,22 +2989,22 @@ module.exports = Redux;
 
 
 const React = __webpack_require__(0);
-const ReactDOM = __webpack_require__(11);
-const Base = __webpack_require__(6);
+const ReactDOM = __webpack_require__(12);
+const Base = __webpack_require__(7);
 
 var _require = __webpack_require__(3);
 
 const Provider = _require.Provider;
 
-const initStore = __webpack_require__(8);
+const initStore = __webpack_require__(9);
 
-var _require2 = __webpack_require__(10);
+var _require2 = __webpack_require__(11);
 
 const reducers = _require2.reducers;
 
-const DetectUserSessionStart = __webpack_require__(7);
+const DetectUserSessionStart = __webpack_require__(8);
 
-var _require3 = __webpack_require__(9);
+var _require3 = __webpack_require__(10);
 
 const addSnippetsSubscriber = _require3.addSnippetsSubscriber;
 

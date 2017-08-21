@@ -20,18 +20,19 @@ Cu.importGlobalProperties(["fetch"]);
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
-                                  "resource://gre/modules/MessageChannel.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
-                                  "resource://gre/modules/Preferences.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
-                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
-                                  "resource://gre/modules/Schemas.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  ConsoleAPI: "resource://gre/modules/Console.jsm",
+  MessageChannel: "resource://gre/modules/MessageChannel.jsm",
+  Preferences: "resource://gre/modules/Preferences.jsm",
+  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
+  Schemas: "resource://gre/modules/Schemas.jsm",
+});
 
 XPCOMUtils.defineLazyServiceGetter(this, "styleSheetService",
                                    "@mozilla.org/content/style-sheet-service;1",
                                    "nsIStyleSheetService");
+
+const global = this;
 
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 
@@ -41,11 +42,10 @@ var {
   EventEmitter,
   ExtensionError,
   defineLazyGetter,
+  filterStack,
   getConsole,
   getInnerWindowID,
   getUniqueId,
-  runSafeSync,
-  runSafeSyncWithoutClone,
   instanceOf,
 } = ExtensionUtils;
 
@@ -83,6 +83,98 @@ class NoCloneSpreadArgs {
     return this.unwrappedValues[Symbol.iterator]();
   }
 }
+
+class ExtensionAPI extends ExtensionUtils.EventEmitter {
+  constructor(extension) {
+    super();
+
+    this.extension = extension;
+
+    extension.once("shutdown", () => {
+      if (this.onShutdown) {
+        this.onShutdown(extension.shutdownReason);
+      }
+      this.extension = null;
+    });
+  }
+
+  destroy() {
+  }
+
+  onManifestEntry(entry) {
+  }
+
+  getAPI(context) {
+    throw new Error("Not Implemented");
+  }
+}
+
+var ExtensionAPIs = {
+  apis: new Map(),
+
+  load(apiName) {
+    let api = this.apis.get(apiName);
+
+    if (api.loadPromise) {
+      return api.loadPromise;
+    }
+
+    let {script, schema} = api;
+
+    let addonId = `${apiName}@experiments.addons.mozilla.org`;
+    api.sandbox = Cu.Sandbox(global, {
+      wantXrays: false,
+      sandboxName: script,
+      addonId,
+      metadata: {addonID: addonId},
+    });
+
+    api.sandbox.ExtensionAPI = ExtensionAPI;
+
+    // Create a console getter which lazily provide a ConsoleAPI instance.
+    XPCOMUtils.defineLazyGetter(api.sandbox, "console", () => {
+      return new ConsoleAPI({prefix: addonId});
+    });
+
+    Services.scriptloader.loadSubScript(script, api.sandbox, "UTF-8");
+
+    api.loadPromise = Schemas.load(schema).then(() => {
+      let API = Cu.evalInSandbox("API", api.sandbox);
+      API.prototype.namespace = apiName;
+      return API;
+    });
+
+    return api.loadPromise;
+  },
+
+  unload(apiName) {
+    let api = this.apis.get(apiName);
+
+    let {schema} = api;
+
+    Schemas.unload(schema);
+    Cu.nukeSandbox(api.sandbox);
+
+    api.sandbox = null;
+    api.loadPromise = null;
+  },
+
+  register(namespace, schema, script) {
+    if (this.apis.has(namespace)) {
+      throw new Error(`API namespace already exists: ${namespace}`);
+    }
+
+    this.apis.set(namespace, {schema, script});
+  },
+
+  unregister(namespace) {
+    if (!this.apis.has(namespace)) {
+      throw new Error(`API namespace does not exist: ${namespace}`);
+    }
+
+    this.apis.delete(namespace);
+  },
+};
 
 class BaseContext {
   constructor(envType, extension) {
@@ -157,46 +249,55 @@ class BaseContext {
     throw new Error("Not implemented");
   }
 
-  runSafe(...args) {
+  runSafe(callback, ...args) {
+    return this.applySafe(callback, args);
+  }
+
+  runSafeWithoutClone(callback, ...args) {
+    return this.applySafeWithoutClone(callback, args);
+  }
+
+  applySafe(callback, args) {
     if (this.unloaded) {
       Cu.reportError("context.runSafe called after context unloaded");
     } else if (!this.active) {
       Cu.reportError("context.runSafe called while context is inactive");
     } else {
-      return runSafeSync(this, ...args);
+      try {
+        let {cloneScope} = this;
+        args = args.map(arg => Cu.cloneInto(arg, cloneScope));
+      } catch (e) {
+        Cu.reportError(e);
+        dump(`runSafe failure: cloning into ${this.cloneScope}: ${e}\n\n${filterStack(Error())}`);
+      }
+
+      return this.applySafeWithoutClone(callback, args);
     }
   }
 
-  runSafeWithoutClone(...args) {
+  applySafeWithoutClone(callback, args) {
     if (this.unloaded) {
       Cu.reportError("context.runSafeWithoutClone called after context unloaded");
     } else if (!this.active) {
       Cu.reportError("context.runSafeWithoutClone called while context is inactive");
     } else {
-      return runSafeSyncWithoutClone(...args);
+      try {
+        return Reflect.apply(callback, null, args);
+      } catch (e) {
+        dump(`Extension error: ${e} ${e.fileName} ${e.lineNumber}\n[[Exception stack\n${filterStack(e)}Current stack\n${filterStack(Error())}]]\n`);
+        Cu.reportError(e);
+      }
     }
   }
 
   checkLoadURL(url, options = {}) {
-    let ssm = Services.scriptSecurityManager;
-
-    let flags = ssm.STANDARD;
-    if (!options.allowScript) {
-      flags |= ssm.DISALLOW_SCRIPT;
-    }
-    if (!options.allowInheritsPrincipal) {
-      flags |= ssm.DISALLOW_INHERIT_PRINCIPAL;
-    }
-    if (options.dontReportErrors) {
-      flags |= ssm.DONT_REPORT_ERRORS;
+    // As an optimization, f the URL starts with the extension's base URL,
+    // don't do any further checks. It's always allowed to load it.
+    if (url.startsWith(this.extension.baseURL)) {
+      return true;
     }
 
-    try {
-      ssm.checkLoadURIStrWithPrincipal(this.principal, url, flags);
-    } catch (e) {
-      return false;
-    }
-    return true;
+    return ExtensionUtils.checkLoadURL(url, this.principal, options);
   }
 
   /**
@@ -335,9 +436,9 @@ class BaseContext {
    *     belonging to the target scope. Otherwise, undefined.
    */
   wrapPromise(promise, callback = null) {
-    let runSafe = this.runSafe.bind(this);
-    if (promise instanceof this.cloneScope.Promise) {
-      runSafe = this.runSafeWithoutClone.bind(this);
+    let applySafe = this.applySafe.bind(this);
+    if (Cu.getGlobalForObject(promise) === this.cloneScope) {
+      applySafe = this.applySafeWithoutClone.bind(this);
     }
 
     if (callback) {
@@ -348,11 +449,11 @@ class BaseContext {
           } else if (!this.active) {
             dump(`Promise resolved while context is inactive\n`);
           } else if (args instanceof NoCloneSpreadArgs) {
-            this.runSafeWithoutClone(callback, ...args.unwrappedValues);
+            this.applySafeWithoutClone(callback, args.unwrappedValues);
           } else if (args instanceof SpreadArgs) {
-            runSafe(callback, ...args);
+            applySafe(callback, args);
           } else {
-            runSafe(callback, args);
+            applySafe(callback, [args]);
           }
         },
         error => {
@@ -362,7 +463,7 @@ class BaseContext {
             } else if (!this.active) {
               dump(`Promise rejected while context is inactive\n`);
             } else {
-              this.runSafeWithoutClone(callback);
+              this.applySafeWithoutClone(callback, []);
             }
           });
         });
@@ -376,11 +477,11 @@ class BaseContext {
               dump(`Promise resolved while context is inactive\n`);
             } else if (value instanceof NoCloneSpreadArgs) {
               let values = value.unwrappedValues;
-              this.runSafeWithoutClone(resolve, values.length == 1 ? values[0] : values);
+              this.applySafeWithoutClone(resolve, values.length == 1 ? [values[0]] : [values]);
             } else if (value instanceof SpreadArgs) {
-              runSafe(resolve, value.length == 1 ? value[0] : value);
+              applySafe(resolve, value.length == 1 ? value : [value]);
             } else {
-              runSafe(resolve, value);
+              applySafe(resolve, [value]);
             }
           },
           value => {
@@ -389,7 +490,7 @@ class BaseContext {
             } else if (!this.active) {
               dump(`Promise rejected while context is inactive: ${value && value.message}\n`);
             } else {
-              this.runSafeWithoutClone(reject, this.normalizeError(value));
+              this.applySafeWithoutClone(reject, [this.normalizeError(value)]);
             }
           });
       });
@@ -848,7 +949,7 @@ class SchemaAPIManager extends EventEmitter {
 
     this._modulesJSONLoaded = false;
 
-    this.schemaURLs = new Set();
+    this.schemaURLs = new Map();
 
     this.apis = new DefaultWeakMap(() => new Map());
 
@@ -909,7 +1010,10 @@ class SchemaAPIManager extends EventEmitter {
       this.modules.set(name, details);
 
       if (details.schema) {
-        this.schemaURLs.add(details.schema);
+        let content = (details.scopes &&
+                       (details.scopes.includes("content_parent") ||
+                        details.scopes.includes("content_child")));
+        this.schemaURLs.set(details.schema, {content});
       }
 
       for (let event of details.events || []) {
@@ -1152,22 +1256,19 @@ class SchemaAPIManager extends EventEmitter {
   _createExtGlobal() {
     let global = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), {
       wantXrays: false,
-      sandboxName: `Namespace of ext-*.js scripts for ${this.processType}`,
+      sandboxName: `Namespace of ext-*.js scripts for ${this.processType} (from: resource://gre/modules/ExtensionCommon.jsm)`,
     });
 
-    Object.assign(global, {global, Cc, Ci, Cu, Cr, XPCOMUtils, ChromeWorker, ExtensionCommon, MatchPattern, MatchPatternSet, StructuredCloneHolder, extensions: this});
+    Object.assign(global, {global, Cc, Ci, Cu, Cr, XPCOMUtils, ChromeWorker, ExtensionAPI, ExtensionCommon, MatchPattern, MatchPatternSet, StructuredCloneHolder, extensions: this});
 
     Cu.import("resource://gre/modules/AppConstants.jsm", global);
-    Cu.import("resource://gre/modules/ExtensionAPI.jsm", global);
 
     XPCOMUtils.defineLazyGetter(global, "console", getConsole);
 
-    XPCOMUtils.defineLazyModuleGetter(global, "ExtensionUtils",
-                                      "resource://gre/modules/ExtensionUtils.jsm");
-    XPCOMUtils.defineLazyModuleGetter(global, "XPCOMUtils",
-                                      "resource://gre/modules/XPCOMUtils.jsm");
-    XPCOMUtils.defineLazyModuleGetter(global, "require",
-                                      "resource://devtools/shared/Loader.jsm");
+    XPCOMUtils.defineLazyModuleGetters(global, {
+      ExtensionUtils: "resource://gre/modules/ExtensionUtils.jsm",
+      XPCOMUtils: "resource://gre/modules/XPCOMUtils.jsm",
+    });
 
     return global;
   }
@@ -1564,6 +1665,8 @@ ExtensionCommon = {
   BaseContext,
   CanOfAPIs,
   EventManager,
+  ExtensionAPI,
+  ExtensionAPIs,
   LocalAPIImplementation,
   LocaleData,
   NoCloneSpreadArgs,

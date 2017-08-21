@@ -30,10 +30,10 @@ var InputWidgetHelper = {
   },
 
   show: function(aElement) {
-    let type = aElement.getAttribute('type');
+    let type = aElement.getAttribute("type");
     let p = new Prompt({
       window: aElement.ownerGlobal,
-      title: this.strings().GetStringFromName("inputWidgetHelper." + aElement.getAttribute('type')),
+      title: this.strings().GetStringFromName("inputWidgetHelper." + aElement.getAttribute("type")),
       buttons: [
         this.strings().GetStringFromName("inputWidgetHelper.set"),
         this.strings().GetStringFromName("inputWidgetHelper.clear"),
@@ -75,7 +75,7 @@ var InputWidgetHelper = {
     if (!(aElement instanceof win.HTMLInputElement))
       return false;
 
-    let type = aElement.getAttribute('type');
+    let type = aElement.getAttribute("type");
     if (type == "date" || type == "datetime" || type == "datetime-local" ||
         type == "week" || type == "month" || type == "time") {
       return true;
@@ -86,16 +86,13 @@ var InputWidgetHelper = {
 
   fireOnChange: function(aElement) {
     let win = aElement.ownerGlobal;
-    let evt = aElement.ownerDocument.createEvent("Events");
-    evt.initEvent("change", true, true, aElement.defaultView, 0,
-                  false, false,
-                  false, false, null);
     win.setTimeout(function() {
-      aElement.dispatchEvent(evt);
+      aElement.dispatchEvent(new win.Event("input", { bubbles: true }));
+      aElement.dispatchEvent(new win.Event("change", { bubbles: true }));
     }, 0);
   },
 
-  _isDisabledElement : function(aElement) {
+  _isDisabledElement: function(aElement) {
     let currentElement = aElement;
     while (currentElement) {
       if (currentElement.disabled)

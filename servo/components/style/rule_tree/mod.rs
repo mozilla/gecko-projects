@@ -210,7 +210,10 @@ impl RuleTree {
                     _ => {},
                 };
             }
-            if any_normal {
+            // We really want to ensure empty rule nodes appear in the rule tree for
+            // devtools, this condition ensures that if we find an empty rule node, we
+            // insert it at the normal level.
+            if any_normal || !any_important {
                 if matches!(level, Transitions) && found_important {
                     // There can be at most one transition, and it will come at
                     // the end of the iterator. Stash it and apply it after
@@ -953,11 +956,10 @@ impl StrongRuleNode {
         // That's... suspicious, but it's fine if it happens for the rule tree
         // case, so just don't crash in the case we're doing the final GC in
         // script.
-        if !cfg!(feature = "testing") {
-            debug_assert!(!thread_state::get().is_worker() &&
-                          (thread_state::get().is_layout() ||
-                           thread_state::get().is_script()));
-        }
+
+        debug_assert!(!thread_state::get().is_worker() &&
+                      (thread_state::get().is_layout() ||
+                       thread_state::get().is_script()));
 
         let current = me.next_free.load(Ordering::Relaxed);
         if current == FREE_LIST_SENTINEL {
@@ -1081,6 +1083,19 @@ impl StrongRuleNode {
             LonghandId::BorderTopRightRadius,
             LonghandId::BorderBottomRightRadius,
             LonghandId::BorderBottomLeftRadius,
+
+            LonghandId::BorderInlineStartColor,
+            LonghandId::BorderInlineStartStyle,
+            LonghandId::BorderInlineStartWidth,
+            LonghandId::BorderInlineEndColor,
+            LonghandId::BorderInlineEndStyle,
+            LonghandId::BorderInlineEndWidth,
+            LonghandId::BorderBlockStartColor,
+            LonghandId::BorderBlockStartStyle,
+            LonghandId::BorderBlockStartWidth,
+            LonghandId::BorderBlockEndColor,
+            LonghandId::BorderBlockEndStyle,
+            LonghandId::BorderBlockEndWidth,
         ];
 
         const PADDING_PROPS: &'static [LonghandId] = &[
@@ -1088,6 +1103,11 @@ impl StrongRuleNode {
             LonghandId::PaddingRight,
             LonghandId::PaddingBottom,
             LonghandId::PaddingLeft,
+
+            LonghandId::PaddingInlineStart,
+            LonghandId::PaddingInlineEnd,
+            LonghandId::PaddingBlockStart,
+            LonghandId::PaddingBlockEnd,
         ];
 
         // Inherited properties:
@@ -1132,6 +1152,10 @@ impl StrongRuleNode {
             LonghandId::BorderRightColor,
             LonghandId::BorderBottomColor,
             LonghandId::BorderLeftColor,
+            LonghandId::BorderInlineStartColor,
+            LonghandId::BorderInlineEndColor,
+            LonghandId::BorderBlockStartColor,
+            LonghandId::BorderBlockEndColor,
             LonghandId::TextShadow,
         ];
 

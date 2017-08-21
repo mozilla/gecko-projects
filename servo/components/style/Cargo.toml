@@ -26,11 +26,10 @@ servo = ["serde", "heapsize", "heapsize_derive",
          #"arrayvec/use_union"
 
          "servo_url"]
-testing = []
 gecko_debug = ["nsstring_vendor/gecko_debug"]
 
 [dependencies]
-app_units = "0.5.2"
+app_units = "0.5.3"
 arrayvec = "0.3.20"
 arraydeque = "0.2.3"
 atomic_refcell = "0.1"
@@ -38,7 +37,7 @@ bitflags = "0.7"
 bit-vec = "0.4.3"
 byteorder = "1.0"
 cfg-if = "0.1.0"
-cssparser = "0.18"
+cssparser = "0.19"
 encoding = {version = "0.2", optional = true}
 euclid = "0.15"
 fnv = "1.0"
@@ -46,7 +45,7 @@ heapsize = {version = "0.4", optional = true}
 heapsize_derive = {version = "0.1", optional = true}
 itertools = "0.5"
 itoa = "0.3"
-html5ever = {version = "0.18", optional = true}
+html5ever = {version = "0.19", optional = true}
 lazy_static = "0.2"
 log = "0.3"
 matches = "0.1"

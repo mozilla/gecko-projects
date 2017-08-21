@@ -2545,14 +2545,23 @@
     "description": "Stats about success rate of HTTP OMT request in content process, keyed by content policy.",
     "labels": ["success", "successMainThread", "failListener", "failListenerChain", "notRequested"]
   },
-  "TCP_FAST_OPEN": {
+  "TCP_FAST_OPEN_2": {
+    "record_in_processes": ["main", "content"],
+    "expires_in_version": "61",
+    "kind": "enumerated",
+    "n_values": 16,
+    "description": "When a http connection is closed, track whether or not TCP Fast Open was used: 0=TFO_NOT_TRIED(There was no http connection and it was not TLS), 1=TFO_TRIED_NEGOTIATING, 2=TFO_DATA_SENT, 3=TFO_FAILED_CONNECTION_REFUSED, 4=TFO_FAILED_NET_TIMEOUT, 5=TFO_FAILED_UNKNOW_ERROR, 6=TFO_FAILED_BACKUP_CONNECTION, 7=TFO_FAILED_CONNECTION_REFUSED_NO_TFO_FAILED_TOO, 8=TFO_FAILED_NET_TIMEOUT__NO_TFO_FAILED_TOO, 9=TFO_FAILED_UNKNOW_ERROR_NO_TFO_FAILED_TOO, 10=TFO_FAILED_BACKUP_CONNECTION_NO_TFO_FAILED_TOO.",
+    "alert_emails": ["necko@mozilla.com", "ddamjanovic@mozilla.com"],
+    "bug_numbers": [1390881]
+  },
+  "TCP_FAST_OPEN_STATUS": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "61",
     "kind": "enumerated",
     "n_values": 8,
-    "description": "When a http connection is closed, track whether or not TCP Fast Open was used: 0=TFO_NOT_TRIED, 1=TFO_TRIED_NEGOTIATING, 2=TFO_DATA_SENT, 3=TFO_FAILED.",
-    "alert_emails": ["necko@mozilla.com"],
-    "bug_numbers": [1352271]
+    "description": "TCP Fast Open was: 0=enabled during the session, 1=not available or disabled in the os, 2=disabled by the pref, 3=disabled based on the too many connection failures.",
+    "alert_emails": ["necko@mozilla.com", "ddamjanovic@mozilla.com"],
+    "bug_numbers": [1390881]
   },
   "TLS_EARLY_DATA_NEGOTIATED": {
     "record_in_processes": ["main", "content"],
@@ -4022,6 +4031,17 @@
     "high": 1000000,
     "n_buckets": 50,
     "description": "How many speculative connections are made needlessly"
+  },
+  "TAB_COUNT": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": [],
+    "bug_numbers": [1361855],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 1000,
+    "n_buckets": 100,
+    "releaseChannelCollection": "opt-out",
+    "description": "Number of tabs opened across all windows, collected at most every 5 minutes whenever the user interacts with the browser in the following ways: open tab/window, page load."
   },
   "TAP_TO_LOAD_IMAGE_SIZE": {
     "record_in_processes": ["main", "content"],
@@ -6838,114 +6858,6 @@
     "kind": "flag",
     "description": "Whether the character encoding menu was used to override an encoding in this session."
   },
-  "DECODER_INSTANTIATED_ISO2022JP": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for ISO-2022-JP has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_IBM866": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for IBM866 has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_MACGREEK": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for MACGREEK has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_MACICELANDIC": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for MACICELANDIC has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_MACCE": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for MACCE has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_MACHEBREW": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for MACHEBREW has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_MACARABIC": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for MACARABIC has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_MACFARSI": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for MACFARSI has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_MACCROATIAN": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for MACCROATIAN has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_MACCYRILLIC": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for MACCYRILLIC has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_MACROMANIAN": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for MACROMANIAN has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_MACTURKISH": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for MACTURKISH has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_MACDEVANAGARI": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for MACDEVANAGARI has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_MACGUJARATI": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for MACGUJARATI has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_MACGURMUKHI": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for MACGURMUKHI has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_KOI8R": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for KOI8R has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_KOI8U": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for KOI8U has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_ISO_8859_5": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether the decoder for ISO-8859-5 has been instantiated in this session."
-  },
   "LONG_REFLOW_INTERRUPTIBLE": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -8138,12 +8050,6 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "If we are on Windows and neither the Windows countryCode nor the geoip countryCode indicates we are in the US, set to false if they both agree on the value or true otherwise"
-  },
-  "SOCIAL_ENABLED_ON_SESSION": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Social has been enabled at least once on the current session"
   },
   "ENABLE_PRIVILEGE_EVER_CALLED": {
     "record_in_processes": ["main", "content"],
@@ -11022,34 +10928,6 @@
     "alert_emails": ["dolske@mozilla.com"],
     "description": "Scaling percentage for the display where the first window is opened"
   },
-  "SOCIAL_SIDEBAR_STATE": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "boolean",
-    "description": "Social Sidebar state 0: closed, 1: opened.  Toggling between providers will result in a higher opened rate."
-  },
-  "SOCIAL_TOOLBAR_BUTTONS": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "enumerated",
-    "n_values": 3,
-    "description": "Social toolbar button has been used (0:share, 1:status, 2:bookmark)"
-  },
-  "SOCIAL_PANEL_CLICKS": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "enumerated",
-    "n_values": 4,
-    "description": "Social content has been interacted with (0:share, 1:status, 2:bookmark, 3: sidebar)"
-  },
-  "SOCIAL_SIDEBAR_OPEN_DURATION": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000000,
-    "n_buckets": 10,
-    "description": "Sidebar showing: seconds that the sidebar has been opened"
-  },
   "SHUTDOWN_PHASE_DURATION_TICKS_QUIT_APPLICATION": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -13648,40 +13526,40 @@
     "kind": "enumerated",
     "n_values": 3,
     "releaseChannelCollection": "opt-out",
-    "description": "The amount of users who view VR content in: 2D=0, Oculus=1, OpenVR=2."
+    "description": "The amount of sessions who view VR content in: 2D=0, Oculus=1, OpenVR=2."
   },
-  "WEBVR_TIME_SPEND_FOR_VIEWING_IN_2D": {
+  "WEBVR_TIME_SPENT_VIEWING_IN_2D": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["dmu@mozilla.com"],
     "bug_numbers": [1306156],
     "expires_in_version": "never",
     "kind": "exponential",
-    "high": 50000,
+    "high": 1200000,
     "n_buckets": 100,
     "releaseChannelCollection": "opt-out",
-    "description": "The amount of time spend(ms) for users who view VR content in 2D."
+    "description": "The amount of time spent(ms) of a session for viewing VR content in 2D."
   },
-  "WEBVR_TIME_SPEND_FOR_VIEWING_IN_OCULUS": {
+  "WEBVR_TIME_SPENT_VIEWING_IN_OCULUS": {
     "record_in_processes": ["main", "gpu"],
     "alert_emails": ["dmu@mozilla.com"],
     "bug_numbers": [1306156],
     "expires_in_version": "never",
     "kind": "exponential",
-    "high": 50000,
+    "high": 1200000,
     "n_buckets": 100,
     "releaseChannelCollection": "opt-out",
-    "description": "The amount of time spend(ms) for users who view VR content in Oculus."
+    "description": "The amount of time spent(ms) of a session for viewing content in Oculus."
   },
-  "WEBVR_TIME_SPEND_FOR_VIEWING_IN_OPENVR": {
+  "WEBVR_TIME_SPENT_VIEWING_IN_OPENVR": {
     "record_in_processes": ["main", "gpu"],
     "alert_emails": ["dmu@mozilla.com"],
     "bug_numbers": [1306156],
     "expires_in_version": "never",
     "kind": "exponential",
-    "high": 50000,
+    "high": 1200000,
     "n_buckets": 100,
     "releaseChannelCollection": "opt-out",
-    "description": "The amount of time spend(ms) for users who view VR content in OpenVR."
+    "description": "The amount of time spent(ms) of a session for viewing content in OpenVR."
   },
   "URLCLASSIFIER_UI_EVENTS": {
     "record_in_processes": ["main", "content"],
@@ -13691,5 +13569,27 @@
     "kind": "enumerated",
     "n_values": 64,
     "description": "URL CLassifier-related (aka Safe Browsing) UI events. See nsIUrlClassifierUITelemetry.idl for the specific values."
+  },
+ "WEBAUTHN_CREATE_CREDENTIAL_MS": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["seceng-telemetry@mozilla.com", "jjones@mozilla.com"],
+    "expires_in_version": "70",
+    "releaseChannelCollection": "opt-out",
+    "kind": "exponential",
+    "high": 120000,
+    "n_buckets": 100,
+    "bug_numbers": [1265472],
+    "description": "Time in milliseconds to complete a WebAuthn create credential."
+  },
+  "WEBAUTHN_GET_ASSERTION_MS": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["seceng-telemetry@mozilla.com", "jjones@mozilla.com"],
+    "expires_in_version": "70",
+    "releaseChannelCollection": "opt-out",
+    "kind": "exponential",
+    "high": 120000,
+    "n_buckets": 100,
+    "bug_numbers": [1265472],
+    "description": "Time in milliseconds to complete a WebAuthn get assertion."
   }
 }

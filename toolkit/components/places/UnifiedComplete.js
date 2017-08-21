@@ -299,24 +299,17 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 Cu.importGlobalProperties(["fetch"]);
 
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
-                                  "resource://gre/modules/PlacesUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
-                                  "resource://gre/modules/TelemetryStopwatch.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Sqlite",
-                                  "resource://gre/modules/Sqlite.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "OS",
-                                  "resource://gre/modules/osfile.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionSearchHandler",
-                                  "resource://gre/modules/ExtensionSearchHandler.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesSearchAutocompleteProvider",
-                                  "resource://gre/modules/PlacesSearchAutocompleteProvider.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesRemoteTabsAutocompleteProvider",
-                                  "resource://gre/modules/PlacesRemoteTabsAutocompleteProvider.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "BrowserUtils",
-                                  "resource://gre/modules/BrowserUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ProfileAge",
-                                  "resource://gre/modules/ProfileAge.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
+  TelemetryStopwatch: "resource://gre/modules/TelemetryStopwatch.jsm",
+  Sqlite: "resource://gre/modules/Sqlite.jsm",
+  OS: "resource://gre/modules/osfile.jsm",
+  ExtensionSearchHandler: "resource://gre/modules/ExtensionSearchHandler.jsm",
+  PlacesSearchAutocompleteProvider: "resource://gre/modules/PlacesSearchAutocompleteProvider.jsm",
+  PlacesRemoteTabsAutocompleteProvider: "resource://gre/modules/PlacesRemoteTabsAutocompleteProvider.jsm",
+  BrowserUtils: "resource://gre/modules/BrowserUtils.jsm",
+  ProfileAge: "resource://gre/modules/ProfileAge.jsm",
+});
 
 XPCOMUtils.defineLazyServiceGetter(this, "textURIService",
                                    "@mozilla.org/intl/texttosuburi;1",
@@ -1676,8 +1669,8 @@ Search.prototype = {
     // pass the pretty, unescaped URL as the match comment, since it's likely
     // to be displayed to the user, and in any case the front-end should not
     // rely on it being canonical.
-    let escapedURL = uri.spec;
-    let displayURL = textURIService.unEscapeURIForUI("UTF-8", uri.spec);
+    let escapedURL = uri.displaySpec;
+    let displayURL = textURIService.unEscapeURIForUI("UTF-8", uri.displaySpec);
 
     let value = PlacesUtils.mozActionURI("visiturl", {
       url: escapedURL,

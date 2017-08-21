@@ -12,10 +12,12 @@ use media_queries::Device;
 #[cfg(feature = "gecko")]
 use properties;
 use properties::{ComputedValues, StyleBuilder};
+#[cfg(feature = "servo")]
+use servo_url::ServoUrl;
 use std::f32;
-use std::f64;
-use std::f64::consts::PI;
 use std::fmt;
+#[cfg(feature = "servo")]
+use std::sync::Arc;
 use style_traits::ToCss;
 use super::{CSSFloat, CSSInteger};
 use super::generics::{GreaterThanOrEqualToOne, NonNegative};
@@ -28,6 +30,7 @@ pub use app_units::Au;
 pub use properties::animated_properties::TransitionProperty;
 #[cfg(feature = "gecko")]
 pub use self::align::{AlignItems, AlignJustifyContent, AlignJustifySelf, JustifyItems};
+pub use self::angle::Angle;
 pub use self::background::BackgroundSize;
 pub use self::border::{BorderImageSlice, BorderImageWidth, BorderImageSideWidth};
 pub use self::border::{BorderRadius, BorderCornerRadius};
@@ -39,19 +42,21 @@ pub use self::image::{Gradient, GradientItem, Image, ImageLayer, LineDirection, 
 pub use self::gecko::ScrollSnapPoint;
 pub use self::rect::LengthOrNumberRect;
 pub use super::{Auto, Either, None_};
-pub use super::specified::{BorderStyle, UrlOrNone};
+pub use super::specified::BorderStyle;
 pub use super::generics::grid::GridLine;
-pub use super::specified::url::SpecifiedUrl;
 pub use self::length::{CalcLengthOrPercentage, Length, LengthOrNone, LengthOrNumber, LengthOrPercentage};
-pub use self::length::{LengthOrPercentageOrAuto, LengthOrPercentageOrNone, MaxLength, MozLength, Percentage};
+pub use self::length::{LengthOrPercentageOrAuto, LengthOrPercentageOrNone, MaxLength, MozLength};
 pub use self::length::NonNegativeLengthOrPercentage;
+pub use self::percentage::Percentage;
 pub use self::position::Position;
 pub use self::svg::{SVGLength, SVGOpacity, SVGPaint, SVGPaintKind, SVGStrokeDashArray, SVGWidth};
 pub use self::text::{InitialLetter, LetterSpacing, LineHeight, WordSpacing};
+pub use self::time::Time;
 pub use self::transform::{TimingFunction, TransformOrigin};
 
 #[cfg(feature = "gecko")]
 pub mod align;
+pub mod angle;
 pub mod background;
 pub mod basic_shape;
 pub mod border;
@@ -62,10 +67,12 @@ pub mod image;
 #[cfg(feature = "gecko")]
 pub mod gecko;
 pub mod length;
+pub mod percentage;
 pub mod position;
 pub mod rect;
 pub mod svg;
 pub mod text;
+pub mod time;
 pub mod transform;
 
 /// A `Context` is all the data a specified value could ever need to compute
@@ -135,8 +142,7 @@ impl<'a> Context<'a> {
         &self.builder
     }
 
-
-    /// Apply text-zoom if enabled
+    /// Apply text-zoom if enabled.
     #[cfg(feature = "gecko")]
     pub fn maybe_zoom_text(&self, size: NonNegativeAu) -> NonNegativeAu {
         // We disable zoom for <svg:text> by unsetting the
@@ -322,106 +328,6 @@ impl<T> ToComputedValue for T
 impl ComputedValueAsSpecified for Atom {}
 impl ComputedValueAsSpecified for bool {}
 
-/// A computed `<angle>` value.
-#[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf, Deserialize, Serialize))]
-pub enum Angle {
-    /// An angle with degree unit
-    Degree(CSSFloat),
-    /// An angle with gradian unit
-    Gradian(CSSFloat),
-    /// An angle with radian unit
-    Radian(CSSFloat),
-    /// An angle with turn unit
-    Turn(CSSFloat),
-}
-
-impl Angle {
-    /// Construct a computed `Angle` value from a radian amount.
-    pub fn from_radians(radians: CSSFloat) -> Self {
-        Angle::Radian(radians)
-    }
-
-    /// Return the amount of radians this angle represents.
-    #[inline]
-    pub fn radians(&self) -> CSSFloat {
-        self.radians64().min(f32::MAX as f64).max(f32::MIN as f64) as f32
-    }
-
-    /// Return the amount of radians this angle represents as a 64-bit float.
-    /// Gecko stores angles as singles, but does this computation using doubles.
-    /// See nsCSSValue::GetAngleValueInRadians.
-    /// This is significant enough to mess up rounding to the nearest
-    /// quarter-turn for 225 degrees, for example.
-    #[inline]
-    pub fn radians64(&self) -> f64 {
-        const RAD_PER_DEG: f64 = PI / 180.0;
-        const RAD_PER_GRAD: f64 = PI / 200.0;
-        const RAD_PER_TURN: f64 = PI * 2.0;
-
-        let radians = match *self {
-            Angle::Degree(val) => val as f64 * RAD_PER_DEG,
-            Angle::Gradian(val) => val as f64 * RAD_PER_GRAD,
-            Angle::Turn(val) => val as f64 * RAD_PER_TURN,
-            Angle::Radian(val) => val as f64,
-        };
-        radians.min(f64::MAX).max(f64::MIN)
-    }
-
-    /// Returns an angle that represents a rotation of zero radians.
-    pub fn zero() -> Self {
-        Angle::Radian(0.0)
-    }
-}
-
-impl ToCss for Angle {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result
-        where W: fmt::Write,
-    {
-        match *self {
-            Angle::Degree(val) => write!(dest, "{}deg", val),
-            Angle::Gradian(val) => write!(dest, "{}grad", val),
-            Angle::Radian(val) => write!(dest, "{}rad", val),
-            Angle::Turn(val) => write!(dest, "{}turn", val),
-        }
-    }
-}
-
-/// A computed `<time>` value.
-#[derive(Clone, PartialEq, PartialOrd, Copy, Debug)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf, Deserialize, Serialize))]
-pub struct Time {
-    seconds: CSSFloat,
-}
-
-impl Time {
-    /// Construct a computed `Time` value from a seconds amount.
-    pub fn from_seconds(seconds: CSSFloat) -> Self {
-        Time {
-            seconds: seconds,
-        }
-    }
-
-    /// Construct a computed `Time` value that represents zero seconds.
-    pub fn zero() -> Self {
-        Self::from_seconds(0.0)
-    }
-
-    /// Return the amount of seconds this time represents.
-    #[inline]
-    pub fn seconds(&self) -> CSSFloat {
-        self.seconds
-    }
-}
-
-impl ToCss for Time {
-    fn to_css<W>(&self, dest: &mut W) -> fmt::Result
-        where W: fmt::Write,
-    {
-        write!(dest, "{}s", self.seconds())
-    }
-}
-
 impl ComputedValueAsSpecified for specified::BorderStyle {}
 
 /// A `<number>` value.
@@ -531,9 +437,9 @@ pub type LengthOrPercentageOrNumber = Either<Number, LengthOrPercentage>;
 /// NonNegativeLengthOrPercentage | NonNegativeNumber
 pub type NonNegativeLengthOrPercentageOrNumber = Either<NonNegativeNumber, NonNegativeLengthOrPercentage>;
 
-#[derive(Clone, PartialEq, Eq, Copy, Debug)]
-#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 #[allow(missing_docs)]
+#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Clone, ComputeSquaredDistance, Copy, Debug, Eq, PartialEq)]
 /// A computed cliprect for clip and image-region
 pub struct ClipRect {
     pub top: Option<Au>,
@@ -645,3 +551,45 @@ impl From<Au> for NonNegativeAu {
         NonNegative::<Au>(au)
     }
 }
+
+/// The computed value of a CSS `url()`, resolved relative to the stylesheet URL.
+#[cfg(feature = "servo")]
+#[derive(Clone, Debug, HeapSizeOf, Serialize, Deserialize, PartialEq)]
+pub enum ComputedUrl {
+    /// The `url()` was invalid or it wasn't specified by the user.
+    Invalid(Arc<String>),
+    /// The resolved `url()` relative to the stylesheet URL.
+    Valid(ServoUrl),
+}
+
+/// TODO: Properly build ComputedUrl for gecko
+#[cfg(feature = "gecko")]
+pub type ComputedUrl = specified::url::SpecifiedUrl;
+
+#[cfg(feature = "servo")]
+impl ComputedUrl {
+    /// Returns the resolved url if it was valid.
+    pub fn url(&self) -> Option<&ServoUrl> {
+        match *self {
+            ComputedUrl::Valid(ref url) => Some(url),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "servo")]
+impl ToCss for ComputedUrl {
+    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+        let string = match *self {
+            ComputedUrl::Valid(ref url) => url.as_str(),
+            ComputedUrl::Invalid(ref invalid_string) => invalid_string,
+        };
+
+        dest.write_str("url(")?;
+        string.to_css(dest)?;
+        dest.write_str(")")
+    }
+}
+
+/// <url> | <none>
+pub type UrlOrNone = Either<ComputedUrl, None_>;

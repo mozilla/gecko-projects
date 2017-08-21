@@ -485,7 +485,7 @@ ${helpers.single_keyword_system("font-variant-caps",
         ///
         /// However, system fonts may provide other values. Pango
         /// may provide 350, 380, and 1000 (on top of the existing values), for example.
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, ToCss)]
+        #[derive(Clone, ComputeSquaredDistance, Copy, Debug, PartialEq, Eq, Hash, ToCss)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf, Deserialize, Serialize))]
         pub struct T(pub u16);
 
@@ -844,8 +844,11 @@ ${helpers.single_keyword_system("font-variant-caps",
         }
 
         /// Compute it against a given base font size
-        pub fn to_computed_value_against(&self, context: &Context, base_size: FontBaseSize)
-                                         -> NonNegativeAu {
+        pub fn to_computed_value_against(
+            &self,
+            context: &Context,
+            base_size: FontBaseSize,
+        ) -> NonNegativeAu {
             use values::specified::length::FontRelativeLength;
             match *self {
                 SpecifiedValue::Length(LengthOrPercentage::Length(
@@ -856,8 +859,12 @@ ${helpers.single_keyword_system("font-variant-caps",
                         NoCalcLength::ServoCharacterWidth(value))) => {
                     value.to_computed_value(base_size.resolve(context)).into()
                 }
-                SpecifiedValue::Length(LengthOrPercentage::Length(ref l)) => {
+                SpecifiedValue::Length(LengthOrPercentage::Length(
+                        NoCalcLength::Absolute(ref l))) => {
                     context.maybe_zoom_text(l.to_computed_value(context).into())
+                }
+                SpecifiedValue::Length(LengthOrPercentage::Length(ref l)) => {
+                    l.to_computed_value(context).into()
                 }
                 SpecifiedValue::Length(LengthOrPercentage::Percentage(pc)) => {
                     base_size.resolve(context).scale_by(pc.0).into()
@@ -1111,6 +1118,7 @@ ${helpers.single_keyword_system("font-variant-caps",
         use properties::animated_properties::Animatable;
         use values::CSSFloat;
         use values::animated::{ToAnimatedValue, ToAnimatedZero};
+        use values::distance::{ComputeSquaredDistance, SquaredDistance};
 
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
         #[derive(Copy, Clone, Debug, PartialEq, ToCss)]
@@ -1138,12 +1146,13 @@ ${helpers.single_keyword_system("font-variant-caps",
                     _ => Err(()),
                 }
             }
+        }
 
+        impl ComputeSquaredDistance for T {
             #[inline]
-            fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
-                match (*self, *other) {
-                    (T::Number(ref number), T::Number(ref other)) =>
-                        number.compute_distance(other),
+            fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
+                match (self, other) {
+                    (&T::Number(ref this), &T::Number(ref other)) => this.compute_squared_distance(other),
                     _ => Err(()),
                 }
             }
@@ -1507,7 +1516,7 @@ ${helpers.single_keyword_system("font-kerning",
     }
 </%helpers:longhand>
 
-#[cfg(any(feature = "gecko", feature = "testing"))]
+#[cfg(feature = "gecko")]
 macro_rules! exclusive_value {
     (($value:ident, $set:expr) => $ident:ident) => {
         if $value.intersects($set) {
@@ -2256,7 +2265,7 @@ https://drafts.csswg.org/css-fonts-4/#low-level-font-variation-settings-control-
 <%helpers:longhand name="-moz-script-size-multiplier" products="gecko" animation_value_type="none"
                    predefined_type="Number" gecko_ffi_name="mScriptSizeMultiplier"
                    spec="Internal (not web-exposed)"
-                   internal="True" disable_when_testing="True">
+                   internal="True">
     use values::computed::ComputedValueAsSpecified;
     pub use self::computed_value::T as SpecifiedValue;
 
@@ -2281,7 +2290,7 @@ https://drafts.csswg.org/css-fonts-4/#low-level-font-variation-settings-control-
 <%helpers:longhand name="-moz-script-level" products="gecko" animation_value_type="none"
                    predefined_type="Integer" gecko_ffi_name="mScriptLevel"
                    spec="Internal (not web-exposed)"
-                   internal="True" disable_when_testing="True" need_clone="True">
+                   internal="True" need_clone="True">
     use std::fmt;
     use style_traits::ToCss;
 
@@ -2380,7 +2389,7 @@ ${helpers.single_keyword("-moz-math-variant",
 <%helpers:longhand name="-moz-script-min-size" products="gecko" animation_value_type="none"
                    predefined_type="Length" gecko_ffi_name="mScriptMinSize"
                    spec="Internal (not web-exposed)"
-                   internal="True" disable_when_testing="True">
+                   internal="True">
     use app_units::Au;
     use gecko_bindings::structs::NS_MATHML_DEFAULT_SCRIPT_MIN_SIZE_PT;
     use values::specified::length::{AU_PER_PT, FontBaseSize, NoCalcLength};

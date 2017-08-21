@@ -97,6 +97,7 @@
 #include "DecoderTraits.h"
 #include "MediaContainerType.h"
 #include "MP4Decoder.h"
+#include "FrameStatistics.h"
 
 #ifdef MOZ_ANDROID_HLS_SUPPORT
 #include "HLSDecoder.h"
@@ -652,10 +653,8 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_CLASS(AudioChannelAgentCallback)
 
-  AudioChannelAgentCallback(HTMLMediaElement* aOwner,
-                            AudioChannel aChannel)
+  explicit AudioChannelAgentCallback(HTMLMediaElement* aOwner)
     : mOwner(aOwner)
-    , mAudioChannel(aChannel)
     , mAudioChannelVolume(1.0)
     , mPlayingThroughTheAudioChannel(false)
     , mAudioCapturedByWindow(false)
@@ -869,9 +868,7 @@ private:
     }
 
     mAudioChannelAgent = new AudioChannelAgent();
-    nsresult rv = mAudioChannelAgent->Init(mOwner->OwnerDoc()->GetInnerWindow(),
-                                           static_cast<int32_t>(mAudioChannel),
-                                           this);
+    nsresult rv = mAudioChannelAgent->Init(mOwner->OwnerDoc()->GetInnerWindow(), this);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       mAudioChannelAgent = nullptr;
       MOZ_LOG(AudioChannelService::GetAudioChannelLog(), LogLevel::Debug,
@@ -1107,7 +1104,6 @@ private:
   RefPtr<AudioChannelAgent> mAudioChannelAgent;
   HTMLMediaElement* mOwner;
 
-  AudioChannel mAudioChannel;
   // The audio channel volume
   float mAudioChannelVolume;
   // Is this media element playing?
@@ -2524,7 +2520,6 @@ nsresult HTMLMediaElement::LoadResource()
   if (mMediaSource) {
     MediaDecoderInit decoderInit(
       this,
-      mAudioChannel,
       mMuted ? 0.0 : mVolume,
       mPreservesPitch,
       mPlaybackRate,
@@ -3586,7 +3581,7 @@ HTMLMediaElement::MozCaptureStream(ErrorResult& aRv)
   }
 
   MediaStreamGraph* graph =
-    MediaStreamGraph::GetInstance(graphDriverType, mAudioChannel, window);
+    MediaStreamGraph::GetInstance(graphDriverType, window);
 
   RefPtr<DOMMediaStream> stream =
     CaptureStreamInternal(StreamCaptureBehavior::CONTINUE_WHEN_ENDED,
@@ -3619,7 +3614,7 @@ HTMLMediaElement::MozCaptureStreamUntilEnded(ErrorResult& aRv)
   }
 
   MediaStreamGraph* graph =
-    MediaStreamGraph::GetInstance(graphDriverType, mAudioChannel, window);
+    MediaStreamGraph::GetInstance(graphDriverType, window);
 
   RefPtr<DOMMediaStream> stream =
     CaptureStreamInternal(StreamCaptureBehavior::FINISH_WHEN_ENDED,
@@ -3864,7 +3859,6 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
     mIsEncrypted(false),
     mWaitingForKey(NOT_WAITING_FOR_KEY),
     mDownloadSuspendedByCache(false, "HTMLMediaElement::mDownloadSuspendedByCache"),
-    mAudioChannel(AudioChannelService::GetDefaultAudioChannel()),
     mDisableVideo(false),
     mHasUserInteraction(false),
     mFirstFrameLoaded(false),
@@ -3874,7 +3868,7 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
     mMediaTracksConstructed(false),
     mVisibilityState(Visibility::UNTRACKED),
     mErrorSink(new ErrorSink(this)),
-    mAudioChannelWrapper(new AudioChannelAgentCallback(this, mAudioChannel))
+    mAudioChannelWrapper(new AudioChannelAgentCallback(this))
 {
   MOZ_ASSERT(mMainThreadEventTarget);
   MOZ_ASSERT(mAbstractMainThread);
@@ -4729,7 +4723,6 @@ HTMLMediaElement::InitializeDecoderAsClone(ChannelMediaDecoder* aOriginal)
   NS_ASSERTION(mDecoder == nullptr, "Shouldn't have a decoder");
 
   MediaDecoderInit decoderInit(this,
-                               mAudioChannel,
                                mMuted ? 0.0 : mVolume,
                                mPreservesPitch,
                                mPlaybackRate,
@@ -4816,7 +4809,6 @@ nsresult HTMLMediaElement::InitializeDecoderForChannel(nsIChannel* aChannel,
   }
 
   MediaDecoderInit decoderInit(this,
-                               mAudioChannel,
                                mMuted ? 0.0 : mVolume,
                                mPreservesPitch,
                                mPlaybackRate,
@@ -5159,11 +5151,6 @@ void HTMLMediaElement::SetupSrcMediaStreamPlayback(DOMMediaStream* aStream)
   nsPIDOMWindowInner* window = OwnerDoc()->GetInnerWindow();
   if (!window) {
     return;
-  }
-
-  RefPtr<MediaStream> stream = GetSrcMediaStream();
-  if (stream) {
-    stream->SetAudioChannelType(mAudioChannel);
   }
 
   UpdateSrcMediaStreamPlaying();
@@ -5859,6 +5846,12 @@ HTMLMediaElement::UpdateReadyStateInternal()
     return;
   }
 
+  if (!mPaused || mAutoplaying) {
+    // We only want to reset mWaitingForKey if we have played all decoded data
+    // or if we haven't played anything yet.
+    mWaitingForKey = NOT_WAITING_FOR_KEY;
+  }
+
   // Now see if we should set HAVE_ENOUGH_DATA.
   // If it's something we don't know the size of, then we can't
   // make a real estimate, so we go straight to HAVE_ENOUGH_DATA once
@@ -5867,7 +5860,7 @@ HTMLMediaElement::UpdateReadyStateInternal()
   // autoplay elements for live streams will never play. Otherwise we
   // move to HAVE_ENOUGH_DATA if we can play through the entire media
   // without stopping to buffer.
-  if (mWaitingForKey == NOT_WAITING_FOR_KEY && mDecoder->CanPlayThrough()) {
+  if (mDecoder->CanPlayThrough()) {
     LOG(LogLevel::Debug, ("MediaElement %p UpdateReadyStateInternal() "
                           "Decoder can play through", this));
     ChangeReadyState(nsIDOMHTMLMediaElement::HAVE_ENOUGH_DATA);
@@ -5932,7 +5925,6 @@ void HTMLMediaElement::ChangeReadyState(nsMediaReadyState aState)
       mReadyState >= nsIDOMHTMLMediaElement::HAVE_FUTURE_DATA) {
     DispatchAsyncEvent(NS_LITERAL_STRING("canplay"));
     if (!mPaused) {
-      mWaitingForKey = NOT_WAITING_FOR_KEY;
       NotifyAboutPlaying();
     }
   }
@@ -7166,6 +7158,17 @@ HTMLMediaElement::NextFrameStatus()
   return NEXT_FRAME_UNINITIALIZED;
 }
 
+
+void
+HTMLMediaElement::SetDecoder(MediaDecoder* aDecoder)
+{
+  MOZ_ASSERT(aDecoder); // Use ShutdownDecoder() to clear.
+  if (mDecoder) {
+    ShutdownDecoder();
+  }
+  mDecoder = aDecoder;
+}
+
 float
 HTMLMediaElement::ComputedVolume() const
 {
@@ -7255,8 +7258,7 @@ HTMLMediaElement::AudioCaptureStreamChange(bool aCapture)
 
     uint64_t id = window->WindowID();
     MediaStreamGraph* msg =
-      MediaStreamGraph::GetInstance(MediaStreamGraph::AUDIO_THREAD_DRIVER,
-                                    mAudioChannel, window);
+      MediaStreamGraph::GetInstance(MediaStreamGraph::AUDIO_THREAD_DRIVER, window);
 
     if (GetSrcMediaStream()) {
       mCaptureStreamPort = msg->ConnectToCaptureStream(id, GetSrcMediaStream());

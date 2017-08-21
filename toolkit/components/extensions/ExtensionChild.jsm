@@ -24,14 +24,12 @@ const Cr = Components.results;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionContent",
-                                  "resource://gre/modules/ExtensionContent.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
-                                  "resource://gre/modules/MessageChannel.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "NativeApp",
-                                  "resource://gre/modules/NativeMessaging.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
-                                  "resource://gre/modules/PromiseUtils.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  ExtensionContent: "resource://gre/modules/ExtensionContent.jsm",
+  MessageChannel: "resource://gre/modules/MessageChannel.jsm",
+  NativeApp: "resource://gre/modules/NativeMessaging.jsm",
+  PromiseUtils: "resource://gre/modules/PromiseUtils.jsm",
+});
 
 Cu.import("resource://gre/modules/ExtensionCommon.jsm");
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
@@ -340,6 +338,7 @@ class Messenger {
           return Promise.reject({message: error.message});
         }
       });
+    holder = null;
 
     return this.context.wrapPromise(promise, responseCallback);
   }
@@ -376,12 +375,16 @@ class Messenger {
           });
 
           let message = holder.deserialize(this.context.cloneScope);
+          holder = null;
+
           sender = Cu.cloneInto(sender, this.context.cloneScope);
           sendResponse = Cu.exportFunction(sendResponse, this.context.cloneScope);
 
           // Note: We intentionally do not use runSafe here so that any
           // errors are propagated to the message sender.
           let result = fire.raw(message, sender, sendResponse);
+          message = null;
+
           if (result instanceof this.context.cloneScope.Promise) {
             return result;
           } else if (result === true) {
@@ -501,7 +504,7 @@ class BrowserExtensionContent extends EventEmitter {
     Services.cpmm.addMessageListener(this.MESSAGE_EMIT_EVENT, this);
 
     defineLazyGetter(this, "scripts", () => {
-      return data.content_scripts.map(scriptData => new ExtensionContent.Script(this, scriptData));
+      return data.contentScripts.map(scriptData => new ExtensionContent.Script(this, scriptData));
     });
 
     this.webAccessibleResources = data.webAccessibleResources.map(res => new MatchGlob(res));
@@ -513,6 +516,7 @@ class BrowserExtensionContent extends EventEmitter {
     this.localeData = new LocaleData(data.localeData);
 
     this.manifest = data.manifest;
+    this.baseURL = data.baseURL;
     this.baseURI = Services.io.newURI(data.baseURL);
 
     // Only used in addon processes.
@@ -815,9 +819,6 @@ class ChildAPIManager {
    * @param {function(*)} [callback] The callback to be called when the function
    *     completes.
    * @param {object} [options] Extra options.
-   * @param {boolean} [options.noClone = false] If true, do not clone
-   *     the arguments into an extension sandbox before calling the API
-   *     method.
    * @returns {Promise|undefined} Must be void if `callback` is set, and a
    *     promise otherwise. The promise is resolved when the function completes.
    */
@@ -831,7 +832,6 @@ class ChildAPIManager {
       callId,
       path,
       args,
-      noClone: options.noClone || false,
     });
 
     return this.context.wrapPromise(deferred.promise, callback);

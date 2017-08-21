@@ -153,7 +153,6 @@
 @BINPATH@/components/editor.xpt
 @BINPATH@/components/extensions.xpt
 @BINPATH@/components/exthandler.xpt
-@BINPATH@/components/exthelper.xpt
 @BINPATH@/components/fastfind.xpt
 @BINPATH@/components/feeds.xpt
 @BINPATH@/components/gfx.xpt
@@ -173,9 +172,6 @@
 @BINPATH@/components/layout_xul_tree.xpt
 @BINPATH@/components/layout_xul.xpt
 @BINPATH@/components/locale.xpt
-#ifdef MOZ_GECKO_PROFILER
-@BINPATH@/components/memory_profiler.xpt
-#endif
 @BINPATH@/components/mimetype.xpt
 @BINPATH@/components/mozfind.xpt
 #ifdef ENABLE_INTL_API
@@ -337,8 +333,8 @@
 @BINPATH@/components/nsURLFormatter.js
 @BINPATH@/components/txEXSLTRegExFunctions.manifest
 @BINPATH@/components/txEXSLTRegExFunctions.js
-@BINPATH@/components/nsContentPrefService.manifest
-@BINPATH@/components/nsContentPrefService.js
+@BINPATH@/components/ContentPrefService2.manifest
+@BINPATH@/components/ContentPrefService2.js
 @BINPATH@/components/nsHandlerService-json.manifest
 @BINPATH@/components/nsHandlerService-json.js
 @BINPATH@/components/nsHandlerService.manifest
@@ -566,4 +562,14 @@
 
 #ifdef PKG_LOCALE_MANIFEST
 #include @PKG_LOCALE_MANIFEST@
+#endif
+
+; Background Hang Monitor
+@BINPATH@/components/backgroundhangmonitor.xpt
+
+; NOTE: This must match the config checks in
+; /toolkit/components/backgroundhangmonitor/moz.build.
+#if defined(NIGHTLY_BUILD) && !defined(MOZ_DEBUG) && !defined(MOZ_TSAN)
+@BINPATH@/components/BHRTelemetryService.js
+@BINPATH@/components/BHRTelemetryService.manifest
 #endif

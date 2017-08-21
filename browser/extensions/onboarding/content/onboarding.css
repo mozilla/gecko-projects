@@ -62,8 +62,10 @@
   display: inline-block;
   offset-inline-start: 39px;
   border-radius: 22px;
-  padding: 5px 8px;
-  width: 110px;
+  padding: 5px 12px;
+  min-width: 100px;
+  max-width: 140px;
+  white-space: pre-line;
   margin-inline-start: 3px;
   margin-top: -5px;
 }
@@ -153,14 +155,20 @@
 #onboarding-tour-list {
   margin: 40px 0 0 0;
   padding: 0;
+  margin-inline-start: 16px;
 }
 
-#onboarding-tour-list > li {
+#onboarding-tour-list .onboarding-tour-item-container {
   list-style: none;
+  outline: none;
+}
+
+#onboarding-tour-list .onboarding-tour-item {
+  pointer-events: none;
+  display: list-item;
   padding-inline-start: 49px;
   padding-top: 14px;
   padding-bottom: 14px;
-  margin-inline-start: 16px;
   margin-bottom: 9px;
   background-repeat: no-repeat;
   background-position: left 17px top 14px;
@@ -169,11 +177,11 @@
   cursor: pointer;
 }
 
-#onboarding-tour-list > li:dir(rtl) {
+#onboarding-tour-list .onboarding-tour-item:dir(rtl) {
   background-position-x: right 17px;
 }
 
-#onboarding-tour-list > li.onboarding-complete::before {
+#onboarding-tour-list .onboarding-tour-item.onboarding-complete::before {
   content: url("img/icons_tour-complete.svg");
   position: relative;
   offset-inline-start: 3px;
@@ -181,12 +189,12 @@
   float: inline-start;
 }
 
-#onboarding-tour-list > li.onboarding-complete {
+#onboarding-tour-list .onboarding-tour-item.onboarding-complete {
   padding-inline-start: 29px;
 }
 
-#onboarding-tour-list > li.onboarding-active,
-#onboarding-tour-list > li:hover {
+#onboarding-tour-list .onboarding-tour-item.onboarding-active,
+#onboarding-tour-list .onboarding-tour-item-container:hover .onboarding-tour-item {
   color: #0A84FF;
   /* With 1px transparent outline, could see a border in the high-constrast mode */
   outline: 1px solid transparent;
@@ -251,6 +259,8 @@
   line-height: 22px;
   padding-inline-start: 40px;
   padding-inline-end: 28px;
+  max-height: 360px;
+  overflow: auto;
 }
 
 .onboarding-tour-description > h1 {
@@ -322,7 +332,9 @@
 }
 
 /* Keyboard focus specific outline */
-.onboarding-tour-action-button:-moz-focusring {
+.onboarding-tour-action-button:-moz-focusring,
+#onboarding-notification-action-btn:-moz-focusring,
+#onboarding-tour-list .onboarding-tour-item:focus {
   outline: 2px solid rgba(0,149,221,0.5);
   outline-offset: 1px;
   -moz-outline-radius: 2px;
@@ -344,21 +356,17 @@
 }
 
 /* Tour Icons */
-#onboarding-tour-search,
 #onboarding-tour-singlesearch {
-  background-image: url("img/icons_search.svg");
+  background-image: url("img/icons_singlesearch.svg");
 }
 
-#onboarding-tour-search.onboarding-active,
-#onboarding-tour-search:hover,
 #onboarding-tour-singlesearch.onboarding-active,
 #onboarding-tour-singlesearch:hover {
-  background-image: url("img/icons_search-colored.svg");
+  background-image: url("img/icons_singlesearch-colored.svg");
 }
 
-#onboarding-notification-bar[data-target-tour-id=onboarding-tour-search] #onboarding-notification-tour-icon,
 #onboarding-notification-bar[data-target-tour-id=onboarding-tour-singlesearch] #onboarding-notification-tour-icon {
-  background-image: url("img/icons_search-notification.svg");
+  background-image: url("img/icons_singlesearch-notification.svg");
 }
 
 #onboarding-tour-private-browsing {
@@ -428,13 +436,16 @@
 }
 
 #onboarding-tour-library {
-  background-image: url("img/icons_search.svg");
+  background-image: url("img/icons_library.svg");
 }
 
 #onboarding-tour-library.onboarding-active,
-#onboarding-tour-library:hover,
+#onboarding-tour-library:hover {
+  background-image: url("img/icons_library-colored.svg");
+}
+
 #onboarding-notification-bar[data-target-tour-id=onboarding-tour-library] #onboarding-notification-tour-icon {
-  background-image: url("img/icons_search-colored.svg");
+  background-image: url("img/icons_library-notification.svg");
 }
 
 #onboarding-tour-performance {
@@ -447,9 +458,7 @@
 }
 
 #onboarding-notification-bar[data-target-tour-id=onboarding-tour-performance] #onboarding-notification-tour-icon {
-  /* TODO: Placeholder icon. It should be replaced upon assets are available.
-           This is tracking in Bug 1382520. */
-  background-image: url("img/icons_sync-notification.svg");
+  background-image: url("img/icons_performance-notification.svg");
 }
 
 /* Tour Notifications */
@@ -492,7 +501,7 @@
   --height: 22px;
   --vpadding: 3px;
   position: absolute;
-  content: attr(data-tooltip);
+  content: attr(aria-label);
   top: 0;
   offset-inline-start: 73px;
   line-height: calc(var(--height) - var(--vpadding) * 2);
@@ -534,6 +543,7 @@
 
 #onboarding-notification-tour-title {
   margin: 0;
+  font-weight: bold;
 }
 
 #onboarding-notification-tour-icon {

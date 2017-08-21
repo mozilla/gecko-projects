@@ -12,8 +12,7 @@ use display_list_builder::{DisplayListBuildState, InlineFlowDisplayListBuilding}
 use euclid::{Point2D, Size2D};
 use floats::{FloatKind, Floats, PlacementInfo};
 use flow::{self, BaseFlow, Flow, FlowClass, ForceNonfloatedFlag};
-use flow::{CONTAINS_TEXT_OR_REPLACED_FRAGMENTS, EarlyAbsolutePositionInfo, MutableFlowUtils};
-use flow::OpaqueFlow;
+use flow::{CONTAINS_TEXT_OR_REPLACED_FRAGMENTS, EarlyAbsolutePositionInfo, OpaqueFlow};
 use flow_ref::FlowRef;
 use fragment::{CoordinateSystem, Fragment, FragmentBorderBoxIterator, Overflow};
 use fragment::IS_ELLIPSIS;
@@ -34,8 +33,9 @@ use style::computed_values::{display, overflow_x, position, text_align, text_jus
 use style::computed_values::{vertical_align, white_space};
 use style::logical_geometry::{LogicalRect, LogicalSize, WritingMode};
 use style::properties::{longhands, ComputedValues};
-use style::servo::restyle_damage::{BUBBLE_ISIZES, REFLOW, REFLOW_OUT_OF_FLOW, REPOSITION, RESOLVE_GENERATED_CONTENT};
+use style::servo::restyle_damage::{BUBBLE_ISIZES, REFLOW, REFLOW_OUT_OF_FLOW, RESOLVE_GENERATED_CONTENT};
 use text;
+use traversal::PreorderFlowTraversal;
 use unicode_bidi as bidi;
 
 /// `Line`s are represented as offsets into the child list, rather than
@@ -435,7 +435,7 @@ impl LineBreaker {
             return
         }
         let last_fragment_index = self.pending_line.range.end() - FragmentIndex(1);
-        let mut fragment = &mut self.new_fragments[last_fragment_index.get() as usize];
+        let fragment = &mut self.new_fragments[last_fragment_index.get() as usize];
 
         let old_fragment_inline_size = fragment.border_box.size.inline;
 
@@ -1047,7 +1047,7 @@ impl InlineFlow {
         let space_per_expansion_opportunity = slack_inline_size / expansion_opportunities as i32;
         for fragment_index in line.range.each_index() {
             let fragment = fragments.get_mut(fragment_index.to_usize());
-            let mut scanned_text_fragment_info = match fragment.specific {
+            let scanned_text_fragment_info = match fragment.specific {
                 SpecificFragmentInfo::ScannedText(ref mut info) if !info.range.is_empty() => info,
                 _ => continue
             };
@@ -1486,12 +1486,12 @@ impl Flow for InlineFlow {
             indentation = Au(0)
         }
 
-        if self.contains_positioned_fragments() {
+        if self.is_absolute_containing_block() {
             // Assign block-sizes for all flows in this absolute flow tree.
             // This is preorder because the block-size of an absolute flow may depend on
             // the block-size of its containing block, which may also be an absolute flow.
-            (&mut *self as &mut Flow).traverse_preorder_absolute_flows(
-                &mut AbsoluteAssignBSizesTraversal(layout_context.shared_context()));
+            let assign_abs_b_sizes = AbsoluteAssignBSizesTraversal(layout_context.shared_context());
+            assign_abs_b_sizes.traverse_absolute_flows(&mut *self);
         }
 
         self.base.position.size.block = match self.last_line_containing_real_fragments() {
@@ -1534,7 +1534,7 @@ impl Flow for InlineFlow {
         }
     }
 
-    fn compute_absolute_position(&mut self, _: &LayoutContext) {
+    fn compute_stacking_relative_position(&mut self, _: &LayoutContext) {
         // First, gather up the positions of all the containing blocks (if any).
         //
         // FIXME(pcwalton): This will get the absolute containing blocks inside `...` wrong in the
@@ -1649,8 +1649,6 @@ impl Flow for InlineFlow {
                 _ => {}
             }
         }
-
-        self.base.restyle_damage.remove(REPOSITION)
     }
 
     fn update_late_computed_inline_position_if_necessary(&mut self, _: Au) {}

@@ -11,7 +11,7 @@ use computed_values::font_family::FamilyName;
 use cssparser::{AtRuleParser, AtRuleType, BasicParseError, DeclarationListParser, DeclarationParser, Parser};
 use cssparser::{CowRcStr, RuleListParser, SourceLocation, QualifiedRuleParser, Token, serialize_identifier};
 use error_reporting::ContextualParseError;
-use parser::{ParserContext, log_css_error, Parse};
+use parser::{ParserContext, Parse};
 use selectors::parser::SelectorParseError;
 use shared_lock::{SharedRwLockReadGuard, ToCssWithGuard};
 use std::fmt;
@@ -222,10 +222,8 @@ macro_rules! font_feature_values_blocks {
                     });
                     while let Some(result) = iter.next() {
                         if let Err(err) = result {
-                            let pos = err.span.start;
-                            let error = ContextualParseError::UnsupportedRule(
-                                iter.input.slice(err.span), err.error);
-                            log_css_error(iter.input, pos, error, context);
+                            let error = ContextualParseError::UnsupportedRule(err.slice, err.error);
+                            context.log_css_error(err.location, error);
                         }
                     }
                 }
@@ -324,24 +322,26 @@ macro_rules! font_feature_values_blocks {
                 }
             }
 
-            fn parse_block<'t>(&mut self, prelude: Self::Prelude, input: &mut Parser<'i, 't>)
-                               -> Result<Self::AtRule, ParseError<'i>> {
-                let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFeatureValues));
+            fn parse_block<'t>(
+                &mut self,
+                prelude: Self::Prelude,
+                input: &mut Parser<'i, 't>
+            ) -> Result<Self::AtRule, ParseError<'i>> {
+                debug_assert_eq!(self.context.rule_type(), CssRuleType::FontFeatureValues);
                 match prelude {
                     $(
                         BlockType::$ident_camel => {
                             let parser = FFVDeclarationsParser {
-                                context: &context,
+                                context: &self.context,
                                 declarations: &mut self.rule.$ident,
                             };
 
                             let mut iter = DeclarationListParser::new(input, parser);
                             while let Some(declaration) = iter.next() {
                                 if let Err(err) = declaration {
-                                    let pos = err.span.start;
                                     let error = ContextualParseError::UnsupportedKeyframePropertyDeclaration(
-                                        iter.input.slice(err.span), err.error);
-                                    log_css_error(iter.input, pos, error, &context);
+                                        err.slice, err.error);
+                                    self.context.log_css_error(err.location, error);
                                 }
                             }
                         },

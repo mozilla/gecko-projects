@@ -17,33 +17,59 @@ XPCOMUtils.defineLazyServiceGetter(this, "WindowsUIUtils", "@mozilla.org/windows
 XPCOMUtils.defineLazyGetter(this, "WeaveService", () =>
   Cc["@mozilla.org/weave/service;1"].getService().wrappedJSObject
 );
-XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
-                                  "resource://gre/modules/ContextualIdentityService.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
-                                  "resource://gre/modules/SafeBrowsing.jsm");
 
 // lazy module getters
 
-/* global AboutHome:false, AddonManager:false, AppMenuNotifications:false,
-          AsyncPrefs: false, AsyncShutdown:false, AutoCompletePopup:false, BookmarkHTMLUtils:false,
-          BookmarkJSONUtils:false, BrowserUITelemetry:false, BrowserUsageTelemetry:false,
-          ContentClick:false, ContentPrefServiceParent:false, ContentSearch:false,
-          DateTimePickerHelper:false, DirectoryLinksProvider:false,
-          ExtensionsUI:false, Feeds:false,
-          FileUtils:false, FormValidationHandler:false, Integration:false,
-          LightweightThemeManager:false, LoginHelper:false, LoginManagerParent:false,
-          NetUtil:false, NewTabUtils:false, OS:false,
-          PageActions:false,
-          PageThumbs:false, PdfJs:false, PermissionUI:false, PlacesBackups:false,
-          PlacesUtils:false, PluralForm:false, PrivateBrowsingUtils:false,
-          ProcessHangMonitor:false, ReaderParent:false, RecentWindow:false,
-          RemotePrompt:false, SessionStore:false,
-          ShellService:false, SimpleServiceDiscovery:false, TabCrashHandler:false,
-          UITour:false, UIState:false, UpdateListener:false, WebChannel:false,
-          WindowsRegistry:false, webrtcUI:false */
+XPCOMUtils.defineLazyModuleGetters(this, {
+  AddonManager: "resource://gre/modules/AddonManager.jsm",
+  AppMenuNotifications: "resource://gre/modules/AppMenuNotifications.jsm",
+  AsyncPrefs: "resource://gre/modules/AsyncPrefs.jsm",
+  AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
+  AutoCompletePopup: "resource://gre/modules/AutoCompletePopup.jsm",
+  BookmarkHTMLUtils: "resource://gre/modules/BookmarkHTMLUtils.jsm",
+  BookmarkJSONUtils: "resource://gre/modules/BookmarkJSONUtils.jsm",
+  BrowserUITelemetry: "resource:///modules/BrowserUITelemetry.jsm",
+  BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
+  ContentClick: "resource:///modules/ContentClick.jsm",
+  ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
+  DateTimePickerHelper: "resource://gre/modules/DateTimePickerHelper.jsm",
+  DirectoryLinksProvider: "resource:///modules/DirectoryLinksProvider.jsm",
+  ExtensionsUI: "resource:///modules/ExtensionsUI.jsm",
+  Feeds: "resource:///modules/Feeds.jsm",
+  FileUtils: "resource://gre/modules/FileUtils.jsm",
+  FormValidationHandler: "resource:///modules/FormValidationHandler.jsm",
+  Integration: "resource://gre/modules/Integration.jsm",
+  LightweightThemeManager: "resource://gre/modules/LightweightThemeManager.jsm",
+  LoginHelper: "resource://gre/modules/LoginHelper.jsm",
+  LoginManagerParent: "resource://gre/modules/LoginManagerParent.jsm",
+  NetUtil: "resource://gre/modules/NetUtil.jsm",
+  NewTabUtils: "resource://gre/modules/NewTabUtils.jsm",
+  OS: "resource://gre/modules/osfile.jsm",
+  PageActions: "resource:///modules/PageActions.jsm",
+  PageThumbs: "resource://gre/modules/PageThumbs.jsm",
+  PdfJs: "resource://pdf.js/PdfJs.jsm",
+  PermissionUI: "resource:///modules/PermissionUI.jsm",
+  PlacesBackups: "resource://gre/modules/PlacesBackups.jsm",
+  PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
+  PluralForm: "resource://gre/modules/PluralForm.jsm",
+  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
+  ProcessHangMonitor: "resource:///modules/ProcessHangMonitor.jsm",
+  ReaderParent: "resource:///modules/ReaderParent.jsm",
+  RecentWindow: "resource:///modules/RecentWindow.jsm",
+  RemotePrompt: "resource:///modules/RemotePrompt.jsm",
+  SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
+  SessionStore: "resource:///modules/sessionstore/SessionStore.jsm",
+  ShellService: "resource:///modules/ShellService.jsm",
+  SimpleServiceDiscovery: "resource://gre/modules/SimpleServiceDiscovery.jsm",
+  TabCrashHandler: "resource:///modules/ContentCrashHandlers.jsm",
+  UIState: "resource://services-sync/UIState.jsm",
+  UITour: "resource:///modules/UITour.jsm",
+  WebChannel: "resource://gre/modules/WebChannel.jsm",
+  WindowsRegistry: "resource://gre/modules/WindowsRegistry.jsm",
+});
 
-
+/* global AboutHome:false, ContentPrefServiceParent:false, ContentSearch:false,
+          UpdateListener:false, webrtcUI:false */
 
 /**
  * IF YOU ADD OR REMOVE FROM THIS LIST, PLEASE UPDATE THE LIST ABOVE AS WELL.
@@ -54,72 +80,24 @@ let initializedModules = {};
 
 [
   ["AboutHome", "resource:///modules/AboutHome.jsm", "init"],
-  ["AddonManager", "resource://gre/modules/AddonManager.jsm"],
-  ["AppMenuNotifications", "resource://gre/modules/AppMenuNotifications.jsm"],
-  ["AsyncPrefs", "resource://gre/modules/AsyncPrefs.jsm"],
-  ["AsyncShutdown", "resource://gre/modules/AsyncShutdown.jsm"],
-  ["AutoCompletePopup", "resource://gre/modules/AutoCompletePopup.jsm"],
-  ["BookmarkHTMLUtils", "resource://gre/modules/BookmarkHTMLUtils.jsm"],
-  ["BookmarkJSONUtils", "resource://gre/modules/BookmarkJSONUtils.jsm"],
-  ["BrowserUITelemetry", "resource:///modules/BrowserUITelemetry.jsm"],
-  ["BrowserUsageTelemetry", "resource:///modules/BrowserUsageTelemetry.jsm"],
-  ["ContentClick", "resource:///modules/ContentClick.jsm"],
   ["ContentPrefServiceParent", "resource://gre/modules/ContentPrefServiceParent.jsm", "alwaysInit"],
   ["ContentSearch", "resource:///modules/ContentSearch.jsm", "init"],
-  ["DateTimePickerHelper", "resource://gre/modules/DateTimePickerHelper.jsm"],
-  ["DirectoryLinksProvider", "resource:///modules/DirectoryLinksProvider.jsm"],
-  ["ExtensionsUI", "resource:///modules/ExtensionsUI.jsm"],
-  ["Feeds", "resource:///modules/Feeds.jsm"],
-  ["FileUtils", "resource://gre/modules/FileUtils.jsm"],
-  ["FormValidationHandler", "resource:///modules/FormValidationHandler.jsm"],
-  ["Integration", "resource://gre/modules/Integration.jsm"],
-  ["LightweightThemeManager", "resource://gre/modules/LightweightThemeManager.jsm"],
-  ["LoginHelper", "resource://gre/modules/LoginHelper.jsm"],
-  ["LoginManagerParent", "resource://gre/modules/LoginManagerParent.jsm"],
-  ["NetUtil", "resource://gre/modules/NetUtil.jsm"],
-  ["NewTabUtils", "resource://gre/modules/NewTabUtils.jsm"],
-  ["OS", "resource://gre/modules/osfile.jsm"],
-  ["PageActions", "resource:///modules/PageActions.jsm"],
-  ["PageThumbs", "resource://gre/modules/PageThumbs.jsm"],
-  ["PdfJs", "resource://pdf.js/PdfJs.jsm"],
-  ["PermissionUI", "resource:///modules/PermissionUI.jsm"],
-  ["PlacesBackups", "resource://gre/modules/PlacesBackups.jsm"],
-  ["PlacesUtils", "resource://gre/modules/PlacesUtils.jsm"],
-  ["PluralForm", "resource://gre/modules/PluralForm.jsm"],
-  ["PrivateBrowsingUtils", "resource://gre/modules/PrivateBrowsingUtils.jsm"],
-  ["ProcessHangMonitor", "resource:///modules/ProcessHangMonitor.jsm"],
-  ["ReaderParent", "resource:///modules/ReaderParent.jsm"],
-  ["RecentWindow", "resource:///modules/RecentWindow.jsm"],
-  ["RemotePrompt", "resource:///modules/RemotePrompt.jsm"],
-  ["SessionStore", "resource:///modules/sessionstore/SessionStore.jsm"],
-  ["ShellService", "resource:///modules/ShellService.jsm"],
-  ["SimpleServiceDiscovery", "resource://gre/modules/SimpleServiceDiscovery.jsm"],
-  ["TabCrashHandler", "resource:///modules/ContentCrashHandlers.jsm"],
-  ["UIState", "resource://services-sync/UIState.jsm"],
-  ["UITour", "resource:///modules/UITour.jsm"],
   ["UpdateListener", "resource://gre/modules/UpdateListener.jsm", "init"],
-  ["WebChannel", "resource://gre/modules/WebChannel.jsm"],
-  ["WindowsRegistry", "resource://gre/modules/WindowsRegistry.jsm"],
   ["webrtcUI", "resource:///modules/webrtcUI.jsm", "init"],
 ].forEach(([name, resource, init]) => {
-  if (init) {
-    XPCOMUtils.defineLazyGetter(this, name, () => {
-      Cu.import(resource, initializedModules);
-      initializedModules[name][init]();
-      return initializedModules[name];
-    });
-  } else {
-    XPCOMUtils.defineLazyModuleGetter(this, name, resource);
-  }
+  XPCOMUtils.defineLazyGetter(this, name, () => {
+    Cu.import(resource, initializedModules);
+    initializedModules[name][init]();
+    return initializedModules[name];
+  });
 });
 
 if (AppConstants.MOZ_CRASHREPORTER) {
-  XPCOMUtils.defineLazyModuleGetter(this, "PluginCrashReporter",
-                                    "resource:///modules/ContentCrashHandlers.jsm");
-  XPCOMUtils.defineLazyModuleGetter(this, "UnsubmittedCrashHandler",
-                                    "resource:///modules/ContentCrashHandlers.jsm");
-  XPCOMUtils.defineLazyModuleGetter(this, "CrashSubmit",
-                                    "resource://gre/modules/CrashSubmit.jsm");
+  XPCOMUtils.defineLazyModuleGetters(this, {
+    PluginCrashReporter: "resource:///modules/ContentCrashHandlers.jsm",
+    UnsubmittedCrashHandler: "resource:///modules/ContentCrashHandlers.jsm",
+    CrashSubmit: "resource://gre/modules/CrashSubmit.jsm",
+  });
 }
 
 XPCOMUtils.defineLazyGetter(this, "gBrandBundle", function() {
@@ -234,8 +212,10 @@ const BOOKMARKS_BACKUP_MIN_INTERVAL_DAYS = 1;
 // Maximum interval between backups.  If the last backup is older than these
 // days we will try to create a new one more aggressively.
 const BOOKMARKS_BACKUP_MAX_INTERVAL_DAYS = 3;
-// Seconds of idle time before reporting media telemetry.
-const MEDIA_TELEMETRY_IDLE_TIME_SEC = 20;
+// Seconds of idle time before the late idle tasks will be scheduled.
+const LATE_TASKS_IDLE_TIME_SEC = 20;
+// Time after we stop tracking startup crashes.
+const STARTUP_CRASHES_END_DELAY_MS = 30 * 1000;
 
 // Factory object
 const BrowserGlueServiceFactory = {
@@ -576,9 +556,13 @@ BrowserGlue.prototype = {
       this._idleService.removeIdleObserver(this, this._bookmarksBackupIdleTime);
       delete this._bookmarksBackupIdleTime;
     }
-    if (this._mediaTelemetryIdleObserver) {
-      this._idleService.removeIdleObserver(this._mediaTelemetryIdleObserver, MEDIA_TELEMETRY_IDLE_TIME_SEC);
-      delete this._mediaTelemetryIdleObserver;
+    if (this._lateTasksIdleObserver) {
+      this._idleService.removeIdleObserver(this._lateTasksIdleObserver, LATE_TASKS_IDLE_TIME_SEC);
+      delete this._lateTasksIdleObserver;
+    }
+    if (this._gmpInstallManager) {
+      this._gmpInstallManager.uninit();
+      delete this._gmpInstallManager;
     }
     try {
       os.removeObserver(this, "places-init-complete");
@@ -890,17 +874,6 @@ BrowserGlue.prototype = {
       Services.ppmm.loadProcessScript("resource://pdf.js/pdfjschildbootstrap-enabled.js", true);
     }
 
-    if (AppConstants.platform == "win") {
-      // For Windows 7, initialize the jump list module.
-      const WINTASKBAR_CONTRACTID = "@mozilla.org/windows-taskbar;1";
-      if (WINTASKBAR_CONTRACTID in Cc &&
-          Cc[WINTASKBAR_CONTRACTID].getService(Ci.nsIWinTaskbar).available) {
-        let temp = {};
-        Cu.import("resource:///modules/WindowsJumpLists.jsm", temp);
-        temp.WinTaskbarJumpList.startup();
-      }
-    }
-
     TabCrashHandler.init();
     if (AppConstants.MOZ_CRASHREPORTER) {
       PluginCrashReporter.init();
@@ -973,27 +946,12 @@ BrowserGlue.prototype = {
 
     this._firstWindowTelemetry(aWindow);
     this._firstWindowLoaded();
-
-    this._mediaTelemetryIdleObserver = {
-      browserGlue: this,
-      observe(aSubject, aTopic, aData) {
-        if (aTopic != "idle") {
-          return;
-        }
-        this.browserGlue._sendMediaTelemetry();
-      }
-    };
-    this._idleService.addIdleObserver(this._mediaTelemetryIdleObserver,
-                                      MEDIA_TELEMETRY_IDLE_TIME_SEC);
   },
 
   _sendMediaTelemetry() {
     let win = RecentWindow.getMostRecentBrowserWindow();
     let v = win.document.createElementNS("http://www.w3.org/1999/xhtml", "video");
     v.reportCanPlayTelemetry();
-    this._idleService.removeIdleObserver(this._mediaTelemetryIdleObserver,
-                                         MEDIA_TELEMETRY_IDLE_TIME_SEC);
-    delete this._mediaTelemetryIdleObserver;
   },
 
   /**
@@ -1060,10 +1018,6 @@ BrowserGlue.prototype = {
     BrowserUsageTelemetry.init();
     BrowserUITelemetry.init();
 
-    if (AppConstants.MOZ_DEV_EDITION) {
-      this._createExtraDefaultProfile();
-    }
-
     this._initServiceDiscovery();
 
     // Show update notification, if needed.
@@ -1098,99 +1052,143 @@ BrowserGlue.prototype = {
       this._notifyDisabledNonMpc();
     }
 
-    // Perform default browser checking.
-    if (ShellService) {
-      let shouldCheck = AppConstants.DEBUG ? false :
-                                             ShellService.shouldCheckDefaultBrowser;
-
-      const skipDefaultBrowserCheck =
-        Services.prefs.getBoolPref("browser.shell.skipDefaultBrowserCheckOnFirstRun") &&
-        !Services.prefs.getBoolPref("browser.shell.didSkipDefaultBrowserCheckOnFirstRun");
-
-      const usePromptLimit = !AppConstants.RELEASE_OR_BETA;
-      let promptCount =
-        usePromptLimit ? Services.prefs.getIntPref("browser.shell.defaultBrowserCheckCount") : 0;
-
-      let willRecoverSession = false;
-      try {
-        let ss = Cc["@mozilla.org/browser/sessionstartup;1"].
-                 getService(Ci.nsISessionStartup);
-        willRecoverSession =
-          (ss.sessionType == Ci.nsISessionStartup.RECOVER_SESSION);
-      } catch (ex) { /* never mind; suppose SessionStore is broken */ }
-
-      // startup check, check all assoc
-      let isDefault = false;
-      let isDefaultError = false;
-      try {
-        isDefault = ShellService.isDefaultBrowser(true, false);
-      } catch (ex) {
-        isDefaultError = true;
-      }
-
-      if (isDefault) {
-        let now = (Math.floor(Date.now() / 1000)).toString();
-        Services.prefs.setCharPref("browser.shell.mostRecentDateSetAsDefault", now);
-      }
-
-      let willPrompt = shouldCheck && !isDefault && !willRecoverSession;
-
-      // Skip the "Set Default Browser" check during first-run or after the
-      // browser has been run a few times.
-      if (willPrompt) {
-        if (skipDefaultBrowserCheck) {
-          Services.prefs.setBoolPref("browser.shell.didSkipDefaultBrowserCheckOnFirstRun", true);
-          willPrompt = false;
-        } else {
-          promptCount++;
-        }
-        if (usePromptLimit && promptCount > 3) {
-          willPrompt = false;
-        }
-      }
-
-      if (usePromptLimit && willPrompt) {
-        Services.prefs.setIntPref("browser.shell.defaultBrowserCheckCount", promptCount);
-      }
-
-      try {
-        // Report default browser status on startup to telemetry
-        // so we can track whether we are the default.
-        Services.telemetry.getHistogramById("BROWSER_IS_USER_DEFAULT")
-                          .add(isDefault);
-        Services.telemetry.getHistogramById("BROWSER_IS_USER_DEFAULT_ERROR")
-                          .add(isDefaultError);
-        Services.telemetry.getHistogramById("BROWSER_SET_DEFAULT_ALWAYS_CHECK")
-                          .add(shouldCheck);
-        Services.telemetry.getHistogramById("BROWSER_SET_DEFAULT_DIALOG_PROMPT_RAWCOUNT")
-                          .add(promptCount);
-      } catch (ex) { /* Don't break the default prompt if telemetry is broken. */ }
-
-      if (willPrompt) {
-        Services.tm.dispatchToMainThread(function() {
-          DefaultBrowserCheck.prompt(RecentWindow.getMostRecentBrowserWindow());
-        });
-      }
-    }
-
     if (AppConstants.MOZ_CRASHREPORTER) {
       UnsubmittedCrashHandler.init();
-      Services.tm.idleDispatchToMainThread(function() {
-        UnsubmittedCrashHandler.checkForUnsubmittedCrashReports();
-      });
     }
 
-    // Let's load the contextual identities.
+    this._sanitizer.onStartup();
+    E10SAccessibilityCheck.onWindowsRestored();
+
+    this._scheduleStartupIdleTasks();
+
+    this._lateTasksIdleObserver = (idleService, topic, data) => {
+      if (topic == "idle") {
+        idleService.removeIdleObserver(this._lateTasksIdleObserver,
+                                       LATE_TASKS_IDLE_TIME_SEC);
+        delete this._lateTasksIdleObserver;
+        this._scheduleArbitrarilyLateIdleTasks();
+      }
+    };
+    this._idleService.addIdleObserver(
+      this._lateTasksIdleObserver, LATE_TASKS_IDLE_TIME_SEC);
+  },
+
+  /**
+   * Use this function as an entry point to schedule tasks that
+   * need to run only once after startup, and can be scheduled
+   * by using an idle callback.
+   *
+   * The functions scheduled here will fire from idle callbacks
+   * once every window has finished being restored by session
+   * restore, and it's guaranteed that they will run before
+   * the equivalent per-window idle tasks
+   * (from _schedulePerWindowIdleTasks in browser.js).
+   *
+   * If you have something that can wait even further than the
+   * per-window initialization, please schedule them using
+   * _scheduleArbitrarilyLateIdleTasks.
+   * Don't be fooled by thinking that the use of the timeout parameter
+   * will delay your function: it will just ensure that it potentially
+   * happens _earlier_ than expected (when the timeout limit has been reached),
+   * but it will not make it happen later (and out of order) compared
+   * to the other ones scheduled together.
+   */
+  _scheduleStartupIdleTasks() {
     Services.tm.idleDispatchToMainThread(() => {
       ContextualIdentityService.load();
     });
 
+    // Load the Login Manager data from disk off the main thread, some time
+    // after startup.  If the data is required before this runs, for example
+    // because a restored page contains a password field, it will be loaded on
+    // the main thread, and this initialization request will be ignored.
+    Services.tm.idleDispatchToMainThread(() => {
+      try {
+        Services.logins;
+      } catch (ex) {
+        Cu.reportError(ex);
+      }
+    }, 3000);
+
+    // It's important that SafeBrowsing is initialized reasonably
+    // early, so we use a maximum timeout for it.
     Services.tm.idleDispatchToMainThread(() => {
       SafeBrowsing.init();
     }, 5000);
 
-    this._sanitizer.onStartup();
-    E10SAccessibilityCheck.onWindowsRestored();
+    if (AppConstants.MOZ_CRASHREPORTER) {
+      Services.tm.idleDispatchToMainThread(() => {
+        UnsubmittedCrashHandler.checkForUnsubmittedCrashReports();
+      });
+    }
+
+    if (AppConstants.platform == "win") {
+      Services.tm.idleDispatchToMainThread(() => {
+        // For Windows 7, initialize the jump list module.
+        const WINTASKBAR_CONTRACTID = "@mozilla.org/windows-taskbar;1";
+        if (WINTASKBAR_CONTRACTID in Cc &&
+            Cc[WINTASKBAR_CONTRACTID].getService(Ci.nsIWinTaskbar).available) {
+          let temp = {};
+          Cu.import("resource:///modules/WindowsJumpLists.jsm", temp);
+          temp.WinTaskbarJumpList.startup();
+        }
+      });
+    }
+
+    if (AppConstants.MOZ_DEV_EDITION) {
+      Services.tm.idleDispatchToMainThread(() => {
+        this._createExtraDefaultProfile();
+      });
+    }
+
+    Services.tm.idleDispatchToMainThread(() => {
+      this._checkForDefaultBrowser();
+    });
+
+    Services.tm.idleDispatchToMainThread(() => {
+      let {setTimeout} = Cu.import("resource://gre/modules/Timer.jsm", {});
+      setTimeout(function() {
+        Services.tm.idleDispatchToMainThread(Services.startup.trackStartupCrashEnd);
+      }, STARTUP_CRASHES_END_DELAY_MS);
+    });
+  },
+
+  /**
+   * Use this function as an entry point to schedule tasks that need
+   * to run once per session, at any arbitrary point in time.
+   * This function will be called from an idle observer. Check the value of
+   * LATE_TASKS_IDLE_TIME_SEC to see the current value for this idle
+   * observer.
+   *
+   * Note: this function may never be called if the user is never idle for the
+   * full length of the period of time specified. But given a reasonably low
+   * value, this is unlikely.
+   */
+  _scheduleArbitrarilyLateIdleTasks() {
+    Services.tm.idleDispatchToMainThread(() => {
+      this._sendMediaTelemetry();
+    });
+
+    Services.tm.idleDispatchToMainThread(() => {
+      // Telemetry for master-password - we do this after a delay as it
+      // can cause IO if NSS/PSM has not already initialized.
+      let tokenDB = Cc["@mozilla.org/security/pk11tokendb;1"]
+                .getService(Ci.nsIPK11TokenDB);
+      let token = tokenDB.getInternalKeyToken();
+      let mpEnabled = token.hasPassword;
+      if (mpEnabled) {
+        Services.telemetry.getHistogramById("MASTER_PASSWORD_ENABLED").add(mpEnabled);
+      }
+    });
+
+    Services.tm.idleDispatchToMainThread(() => {
+      let obj = {};
+      Cu.import("resource://gre/modules/GMPInstallManager.jsm", obj);
+      this._gmpInstallManager = new obj.GMPInstallManager();
+      // We don't really care about the results, if someone is interested they
+      // can check the log.
+      this._gmpInstallManager.simpleCheckAndInstall().catch(() => {});
+    });
   },
 
   _createExtraDefaultProfile() {
@@ -1791,7 +1789,7 @@ BrowserGlue.prototype = {
     if (currentUIVersion < 18) {
       // Remove iconsize and mode from all the toolbars
       let toolbars = ["navigator-toolbox", "nav-bar", "PersonalToolbar",
-                      "addon-bar", "TabsToolbar", "toolbar-menubar"];
+                      "TabsToolbar", "toolbar-menubar"];
       for (let resourceName of ["mode", "iconsize"]) {
         for (let toolbarId of toolbars) {
           xulStore.removeValue(BROWSER_DOCURL, toolbarId, resourceName);
@@ -1972,7 +1970,7 @@ BrowserGlue.prototype = {
     if (currentUIVersion < 39) {
       // Remove the 'defaultset' value for all the toolbars
       let toolbars = ["nav-bar", "PersonalToolbar",
-                      "addon-bar", "TabsToolbar", "toolbar-menubar"];
+                      "TabsToolbar", "toolbar-menubar"];
       for (let toolbarId of toolbars) {
         xulStore.removeValue(BROWSER_DOCURL, toolbarId, "defaultset");
       }
@@ -2104,6 +2102,83 @@ BrowserGlue.prototype = {
 
     // Update the migration version.
     Services.prefs.setIntPref("browser.migration.version", UI_VERSION);
+  },
+
+  _checkForDefaultBrowser() {
+    // Perform default browser checking.
+    if (!ShellService) {
+      return;
+    }
+
+    let shouldCheck = AppConstants.DEBUG ? false :
+                                           ShellService.shouldCheckDefaultBrowser;
+
+    const skipDefaultBrowserCheck =
+      Services.prefs.getBoolPref("browser.shell.skipDefaultBrowserCheckOnFirstRun") &&
+      !Services.prefs.getBoolPref("browser.shell.didSkipDefaultBrowserCheckOnFirstRun");
+
+    const usePromptLimit = !AppConstants.RELEASE_OR_BETA;
+    let promptCount =
+      usePromptLimit ? Services.prefs.getIntPref("browser.shell.defaultBrowserCheckCount") : 0;
+
+    let willRecoverSession = false;
+    try {
+      let ss = Cc["@mozilla.org/browser/sessionstartup;1"].
+               getService(Ci.nsISessionStartup);
+      willRecoverSession =
+        (ss.sessionType == Ci.nsISessionStartup.RECOVER_SESSION);
+    } catch (ex) { /* never mind; suppose SessionStore is broken */ }
+
+    // startup check, check all assoc
+    let isDefault = false;
+    let isDefaultError = false;
+    try {
+      isDefault = ShellService.isDefaultBrowser(true, false);
+    } catch (ex) {
+      isDefaultError = true;
+    }
+
+    if (isDefault) {
+      let now = (Math.floor(Date.now() / 1000)).toString();
+      Services.prefs.setCharPref("browser.shell.mostRecentDateSetAsDefault", now);
+    }
+
+    let willPrompt = shouldCheck && !isDefault && !willRecoverSession;
+
+    // Skip the "Set Default Browser" check during first-run or after the
+    // browser has been run a few times.
+    if (willPrompt) {
+      if (skipDefaultBrowserCheck) {
+        Services.prefs.setBoolPref("browser.shell.didSkipDefaultBrowserCheckOnFirstRun", true);
+        willPrompt = false;
+      } else {
+        promptCount++;
+      }
+      if (usePromptLimit && promptCount > 3) {
+        willPrompt = false;
+      }
+    }
+
+    if (usePromptLimit && willPrompt) {
+      Services.prefs.setIntPref("browser.shell.defaultBrowserCheckCount", promptCount);
+    }
+
+    try {
+      // Report default browser status on startup to telemetry
+      // so we can track whether we are the default.
+      Services.telemetry.getHistogramById("BROWSER_IS_USER_DEFAULT")
+                        .add(isDefault);
+      Services.telemetry.getHistogramById("BROWSER_IS_USER_DEFAULT_ERROR")
+                        .add(isDefaultError);
+      Services.telemetry.getHistogramById("BROWSER_SET_DEFAULT_ALWAYS_CHECK")
+                        .add(shouldCheck);
+      Services.telemetry.getHistogramById("BROWSER_SET_DEFAULT_DIALOG_PROMPT_RAWCOUNT")
+                        .add(promptCount);
+    } catch (ex) { /* Don't break the default prompt if telemetry is broken. */ }
+
+    if (willPrompt) {
+      DefaultBrowserCheck.prompt(RecentWindow.getMostRecentBrowserWindow());
+    }
   },
 
   // ------------------------------

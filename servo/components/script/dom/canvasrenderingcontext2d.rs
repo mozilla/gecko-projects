@@ -2,10 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use canvas_traits::{Canvas2dMsg, CanvasCommonMsg, CanvasMsg};
-use canvas_traits::{CompositionOrBlending, FillOrStrokeStyle, FillRule};
-use canvas_traits::{LineCapStyle, LineJoinStyle, LinearGradientStyle};
-use canvas_traits::{RadialGradientStyle, RepetitionStyle, byte_swap_and_premultiply};
+use canvas_traits::canvas::{Canvas2dMsg, CanvasMsg};
+use canvas_traits::canvas::{CompositionOrBlending, FillOrStrokeStyle, FillRule};
+use canvas_traits::canvas::{LineCapStyle, LineJoinStyle, LinearGradientStyle};
+use canvas_traits::canvas::{RadialGradientStyle, RepetitionStyle, byte_swap_and_premultiply};
 use cssparser::{Parser, ParserInput, RGBA};
 use cssparser::Color as CSSColor;
 use dom::bindings::cell::DOMRefCell;
@@ -42,7 +42,7 @@ use net_traits::image_cache::ImageResponse;
 use net_traits::image_cache::ImageState;
 use net_traits::image_cache::UsePlaceholder;
 use num_traits::ToPrimitive;
-use script_traits::ScriptMsg as ConstellationMsg;
+use script_traits::ScriptMsg;
 use servo_url::ServoUrl;
 use std::{cmp, fmt, mem};
 use std::cell::Cell;
@@ -130,9 +130,9 @@ impl CanvasRenderingContext2D {
                          -> CanvasRenderingContext2D {
         debug!("Creating new canvas rendering context.");
         let (sender, receiver) = ipc::channel().unwrap();
-        let constellation_chan = global.constellation_chan();
+        let script_to_constellation_chan = global.script_to_constellation_chan();
         debug!("Asking constellation to create new canvas thread.");
-        constellation_chan.send(ConstellationMsg::CreateCanvasPaintThread(size, sender)).unwrap();
+        script_to_constellation_chan.send(ScriptMsg::CreateCanvasPaintThread(size, sender)).unwrap();
         let ipc_renderer = receiver.recv().unwrap();
         debug!("Done.");
         CanvasRenderingContext2D {
@@ -163,7 +163,7 @@ impl CanvasRenderingContext2D {
     pub fn set_bitmap_dimensions(&self, size: Size2D<i32>) {
         self.reset_to_initial_state();
         self.ipc_renderer
-            .send(CanvasMsg::Common(CanvasCommonMsg::Recreate(size)))
+            .send(CanvasMsg::Recreate(size))
             .unwrap();
     }
 
@@ -171,10 +171,6 @@ impl CanvasRenderingContext2D {
     fn reset_to_initial_state(&self) {
         self.saved_states.borrow_mut().clear();
         *self.state.borrow_mut() = CanvasContextState::new();
-    }
-
-    pub fn ipc_renderer(&self) -> IpcSender<CanvasMsg> {
-        self.ipc_renderer.clone()
     }
 
     fn mark_as_dirty(&self) {
@@ -1392,7 +1388,7 @@ impl CanvasRenderingContext2DMethods for CanvasRenderingContext2D {
 
 impl Drop for CanvasRenderingContext2D {
     fn drop(&mut self) {
-        if let Err(err) = self.ipc_renderer.send(CanvasMsg::Common(CanvasCommonMsg::Close)) {
+        if let Err(err) = self.ipc_renderer.send(CanvasMsg::Close) {
             warn!("Could not close canvas: {}", err)
         }
     }

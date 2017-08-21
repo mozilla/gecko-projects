@@ -36,6 +36,18 @@ class DisplayListBuilder;
 class RendererOGL;
 class RendererEvent;
 
+// This isn't part of WR's API, but we define it here to simplify layout's
+// logic and data plumbing.
+struct Line {
+  float baseline;
+  float start;
+  float end;
+  float width;
+  wr::ColorF color;
+  wr::LineOrientation orientation;
+  wr::LineStyle style;
+};
+
 class WebRenderAPI
 {
   NS_INLINE_DECL_REFCOUNTING(WebRenderAPI);
@@ -46,6 +58,8 @@ public:
                                                layers::CompositorBridgeParentBase* aBridge,
                                                RefPtr<widget::CompositorWidget>&& aWidget,
                                                LayoutDeviceIntSize aSize);
+
+  already_AddRefed<WebRenderAPI> Clone();
 
   wr::WindowId GetId() const { return mId; }
 
@@ -121,13 +135,13 @@ public:
   bool Resume();
 
   wr::WrIdNamespace GetNamespace();
-  GLint GetMaxTextureSize() const { return mMaxTextureSize; }
+  uint32_t GetMaxTextureSize() const { return mMaxTextureSize; }
   bool GetUseANGLE() const { return mUseANGLE; }
   layers::SyncHandle GetSyncHandle() const { return mSyncHandle; }
 
 protected:
-  WebRenderAPI(wr::RenderApi* aRawApi, wr::WindowId aId, GLint aMaxTextureSize, bool aUseANGLE, layers::SyncHandle aSyncHandle)
-    : mRenderApi(aRawApi)
+  WebRenderAPI(wr::DocumentHandle* aHandle, wr::WindowId aId, uint32_t aMaxTextureSize, bool aUseANGLE, layers::SyncHandle aSyncHandle)
+    : mDocHandle(aHandle)
     , mId(aId)
     , mMaxTextureSize(aMaxTextureSize)
     , mUseANGLE(aUseANGLE)
@@ -138,11 +152,12 @@ protected:
   // Should be used only for shutdown handling
   void WaitFlushed();
 
-  wr::RenderApi* mRenderApi;
+  wr::DocumentHandle* mDocHandle;
   wr::WindowId mId;
-  GLint mMaxTextureSize;
+  uint32_t mMaxTextureSize;
   bool mUseANGLE;
   layers::SyncHandle mSyncHandle;
+  RefPtr<wr::WebRenderAPI> mRootApi;
 
   friend class DisplayListBuilder;
   friend class layers::WebRenderBridgeParent;
@@ -170,13 +185,16 @@ public:
                            const float* aOpacity,
                            const gfx::Matrix4x4* aTransform,
                            wr::TransformStyle aTransformStyle,
+                           const gfx::Matrix4x4* aPerspective,
                            const wr::MixBlendMode& aMixBlendMode,
                            const nsTArray<wr::WrFilterOp>& aFilters);
   void PopStackingContext();
 
-  void PushClip(const wr::LayoutRect& aClipRect,
-                const wr::WrImageMask* aMask);
-  void PopClip();
+  wr::WrClipId DefineClip(const wr::LayoutRect& aClipRect,
+                          const nsTArray<wr::WrComplexClipRegion>* aComplex = nullptr,
+                          const wr::WrImageMask* aMask = nullptr);
+  void PushClip(const wr::WrClipId& aClipId, bool aRecordInStack = true);
+  void PopClip(bool aRecordInStack = true);
 
   void PushBuiltDisplayList(wr::BuiltDisplayList &dl);
 
@@ -289,6 +307,17 @@ public:
                 Range<const wr::GlyphInstance> aGlyphBuffer,
                 float aGlyphSize);
 
+  void PushLine(const wr::LayoutRect& aClip,
+                const wr::Line& aLine);
+
+  void PushTextShadow(const wr::LayoutRect& aBounds,
+                      const wr::LayoutRect& aClip,
+                      const wr::TextShadow& aShadow);
+
+  void PopTextShadow();
+
+
+
   void PushBoxShadow(const wr::LayoutRect& aRect,
                      const wr::LayoutRect& aClip,
                      const wr::LayoutRect& aBoxBounds,
@@ -303,6 +332,8 @@ public:
   // has not yet been popped with PopClip. Return Nothing() if the clip stack
   // is empty.
   Maybe<wr::WrClipId> TopmostClipId();
+  // Same as TopmostClipId() but for scroll layers.
+  Maybe<layers::FrameMetrics::ViewID> TopmostScrollId();
   // Returns the scroll id that was pushed just before the given scroll id. This
   // function returns Nothing() if the given scrollid has not been encountered,
   // or if it is the rootmost scroll id (and therefore has no ancestor).

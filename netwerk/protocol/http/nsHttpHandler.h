@@ -318,6 +318,12 @@ public:
       NotifyObservers(chan, NS_HTTP_ON_USERAGENT_REQUEST_TOPIC);
     }
 
+    // Called by the channel before setting up the transaction
+    void OnBeforeConnect(nsIHttpChannel *chan)
+    {
+        NotifyObservers(chan, NS_HTTP_ON_BEFORE_CONNECT_TOPIC);
+    }
+
     // Called by the channel once headers are available
     void OnExamineResponse(nsIHttpChannel *chan)
     {
@@ -364,11 +370,6 @@ public:
     }
 
     void ShutdownConnectionManager();
-
-    bool KeepEmptyResponseHeadersAsEmtpyString() const
-    {
-        return mKeepEmptyResponseHeadersAsEmtpyString;
-    }
 
     uint32_t DefaultHpackBuffer() const
     {
@@ -593,13 +594,6 @@ private:
     FrameCheckLevel mEnforceH1Framing;
 
     nsCOMPtr<nsIRequestContextService> mRequestContextService;
-
-    // If it is set to false, headers with empty value will not appear in the
-    // header array - behavior as it used to be. If it is true: empty headers
-    // coming from the network will exits in header array as empty string.
-    // Call SetHeader with an empty value will still delete the header.
-    // (Bug 6699259)
-    bool mKeepEmptyResponseHeadersAsEmtpyString;
 
     // The default size (in bytes) of the HPACK decompressor table.
     uint32_t mDefaultHpackBuffer;

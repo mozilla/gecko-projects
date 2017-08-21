@@ -363,6 +363,15 @@ this.tabs = class extends ExtensionAPI {
 
             tabListener.initTabReady();
             let currentTab = window.gBrowser.selectedTab;
+
+            if (createProperties.openerTabId !== null) {
+              options.ownerTab = tabTracker.getTab(createProperties.openerTabId);
+              options.openerBrowser = options.ownerTab.linkedBrowser;
+              if (options.ownerTab.ownerGlobal !== window) {
+                return Promise.reject({message: "Opener tab must be in the same window as the tab being created"});
+              }
+            }
+
             let nativeTab = window.gBrowser.addTab(url || window.BROWSER_NEW_TAB_URL, options);
 
             let active = true;
@@ -446,7 +455,13 @@ this.tabs = class extends ExtensionAPI {
               tabbrowser.unpinTab(nativeTab);
             }
           }
-          // FIXME: highlighted/selected, openerTabId
+          if (updateProperties.openerTabId !== null) {
+            let opener = tabTracker.getTab(updateProperties.openerTabId);
+            if (opener.ownerDocument !== nativeTab.ownerDocument) {
+              return Promise.reject({message: "Opener tab must be in the same window as the tab being updated"});
+            }
+            tabTracker.setOpener(nativeTab, opener);
+          }
 
           return tabManager.convert(nativeTab);
         },
@@ -767,7 +782,7 @@ this.tabs = class extends ExtensionAPI {
             PrintPreviewListener,
           } = activeTab.ownerGlobal;
 
-          return new Promise(resolve => {
+          return new Promise((resolve, reject) => {
             let ppBrowser = PrintUtils._shouldSimplify ?
               PrintPreviewListener.getSimplifiedPrintPreviewBrowser() :
               PrintPreviewListener.getPrintPreviewBrowser();
@@ -777,7 +792,7 @@ this.tabs = class extends ExtensionAPI {
             let onEntered = (message) => {
               mm.removeMessageListener("Printing:Preview:Entered", onEntered);
               if (message.data.failed) {
-                throw new ExtensionError("Print preview failed");
+                reject({message: "Print preview failed"});
               }
               resolve();
             };
@@ -793,6 +808,10 @@ this.tabs = class extends ExtensionAPI {
           let picker = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
           let title = strBundle.GetStringFromName("saveaspdf.saveasdialog.title");
 
+          if (AppConstants.platform === "macosx") {
+            return Promise.reject({message: "Not supported on Mac OS X"});
+          }
+
           picker.init(activeTab.ownerGlobal, title, Ci.nsIFilePicker.modeSave);
           picker.appendFilter("PDF", "*.pdf");
           picker.defaultExtension = "pdf";
@@ -807,7 +826,7 @@ this.tabs = class extends ExtensionAPI {
                   fstream.init(picker.file, 0x2A, 0x1B6, 0);  // write|create|truncate, file permissions rw-rw-rw- = 0666 = 0x1B6
                   fstream.close();  // unlock file
                 } catch (e) {
-                  resolve(retval == 0 ? "Not saved" : "Not replaced");
+                  resolve(retval == 0 ? "not_saved" : "not_replaced");
                   return;
                 }
 
@@ -880,10 +899,10 @@ this.tabs = class extends ExtensionAPI {
 
                 activeTab.linkedBrowser.print(activeTab.linkedBrowser.outerWindowID, printSettings, null);
 
-                resolve(retval == 0 ? "Saved" : "Replaced");
+                resolve(retval == 0 ? "saved" : "replaced");
               } else {
                 // Cancel clicked (retval == 1)
-                resolve("Cancelled");
+                resolve("canceled");
               }
             });
           });

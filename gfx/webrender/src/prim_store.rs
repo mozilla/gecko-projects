@@ -5,8 +5,8 @@
 use api::{BuiltDisplayList, ColorF, ComplexClipRegion, DeviceIntRect, DeviceIntSize, DevicePoint};
 use api::{ExtendMode, FontKey, FontRenderMode, GlyphInstance, GlyphOptions, GradientStop};
 use api::{ImageKey, ImageRendering, ItemRange, LayerPoint, LayerRect, LayerSize, TextShadow};
-use api::{LayerToWorldTransform, TileOffset, WebGLContextId, YuvColorSpace, YuvFormat};
-use api::{device_length, FontInstanceKey, LayerVector2D, LineOrientation, LineStyle};
+use api::{GlyphKey, LayerToWorldTransform, TileOffset, YuvColorSpace, YuvFormat};
+use api::{device_length, FontInstance, LayerVector2D, LineOrientation, LineStyle, SubpixelDirection};
 use app_units::Au;
 use border::BorderCornerInstance;
 use euclid::{Size2D};
@@ -200,14 +200,11 @@ impl ToGpuBlocks for LinePrimitive {
 }
 
 #[derive(Debug)]
-pub enum ImagePrimitiveKind {
-    Image(ImageKey, ImageRendering, Option<TileOffset>, LayerSize),
-    WebGL(WebGLContextId),
-}
-
-#[derive(Debug)]
 pub struct ImagePrimitiveCpu {
-    pub kind: ImagePrimitiveKind,
+    pub image_key: ImageKey,
+    pub image_rendering: ImageRendering,
+    pub tile_offset: Option<TileOffset>,
+    pub tile_spacing: LayerSize,
     // TODO(gw): Build on demand
     pub gpu_blocks: [GpuBlockData; 2],
 }
@@ -518,12 +515,13 @@ pub struct TextRunPrimitiveCpu {
     pub logical_font_size: Au,
     pub glyph_range: ItemRange<GlyphInstance>,
     pub glyph_count: usize,
-    // TODO(gw): Maybe make this an Arc for sharing with resource cache
-    pub glyph_instances: Vec<GlyphInstance>,
+    pub glyph_keys: Vec<GlyphKey>,
+    pub glyph_gpu_blocks: Vec<GpuBlockData>,
     pub glyph_options: Option<GlyphOptions>,
     pub normal_render_mode: FontRenderMode,
     pub shadow_render_mode: FontRenderMode,
     pub color: ColorF,
+    pub subpx_dir: SubpixelDirection,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -537,53 +535,70 @@ impl TextRunPrimitiveCpu {
                           resource_cache: &mut ResourceCache,
                           device_pixel_ratio: f32,
                           display_list: &BuiltDisplayList,
-                          run_mode: TextRunMode) {
-        // Cache the glyph positions, if not in the cache already.
-        // TODO(gw): In the future, remove `glyph_instances`
-        //           completely, and just reference the glyphs
-        //           directly from the displaty list.
-        if self.glyph_instances.is_empty() {
-            let src_glyphs = display_list.get(self.glyph_range);
-            for src in src_glyphs {
-                self.glyph_instances.push(GlyphInstance {
-                    index: src.index,
-                    point: src.point,
-                });
-            }
-        }
-
+                          run_mode: TextRunMode,
+                          gpu_cache: &mut GpuCache) {
         let font_size_dp = self.logical_font_size.scale_by(device_pixel_ratio);
         let render_mode = match run_mode {
             TextRunMode::Normal => self.normal_render_mode,
             TextRunMode::Shadow => self.shadow_render_mode,
         };
 
-        let font = FontInstanceKey::new(self.font_key,
-                                        font_size_dp,
-                                        self.color,
-                                        render_mode,
-                                        self.glyph_options);
+        let font = FontInstance::new(self.font_key,
+                                     font_size_dp,
+                                     self.color,
+                                     render_mode,
+                                     self.glyph_options,
+                                     self.subpx_dir);
 
-        resource_cache.request_glyphs(font, &self.glyph_instances);
+        // Cache the glyph positions, if not in the cache already.
+        // TODO(gw): In the future, remove `glyph_instances`
+        //           completely, and just reference the glyphs
+        //           directly from the display list.
+        if self.glyph_keys.is_empty() {
+            let src_glyphs = display_list.get(self.glyph_range);
+
+            // TODO(gw): If we support chunks() on AuxIter
+            //           in the future, this code below could
+            //           be much simpler...
+            let mut gpu_block = GpuBlockData::empty();
+
+            for (i, src) in src_glyphs.enumerate() {
+                let key = GlyphKey::new(src.index,
+                                        src.point,
+                                        font.render_mode,
+                                        font.subpx_dir);
+                self.glyph_keys.push(key);
+
+                // Two glyphs are packed per GPU block.
+
+                if (i & 1) == 0 {
+                    gpu_block.data[0] = src.point.x;
+                    gpu_block.data[1] = src.point.y;
+                } else {
+                    gpu_block.data[2] = src.point.x;
+                    gpu_block.data[3] = src.point.y;
+                    self.glyph_gpu_blocks.push(gpu_block);
+                }
+            }
+
+            // Ensure the last block is added in the case
+            // of an odd number of glyphs.
+            if (self.glyph_keys.len() & 1) != 0 {
+                self.glyph_gpu_blocks.push(gpu_block);
+            }
+        }
+
+        resource_cache.request_glyphs(font, &self.glyph_keys, gpu_cache);
     }
 
     fn write_gpu_blocks(&self,
                         request: &mut GpuDataRequest) {
         request.push(self.color);
-        request.push([self.offset.x, self.offset.y, 0.0, 0.0]);
-
-        // Two glyphs are packed per GPU block.
-        for glyph_chunk in self.glyph_instances.chunks(2) {
-            // In the case of an odd number of glyphs, the
-            // last glyph will get duplicated in the final
-            // GPU block.
-            let first_glyph = glyph_chunk.first().unwrap();
-            let second_glyph = glyph_chunk.last().unwrap();
-            request.push([first_glyph.point.x,
-                          first_glyph.point.y,
-                          second_glyph.point.x,
-                          second_glyph.point.y]);
-        }
+        request.push([self.offset.x,
+                      self.offset.y,
+                      self.subpx_dir as u32 as f32,
+                      0.0]);
+        request.extend_from_slice(&self.glyph_gpu_blocks);
     }
 }
 
@@ -1113,7 +1128,10 @@ impl PrimitiveStore {
 
             for clip in &metadata.clips {
                 if let ClipSource::Region(ClipRegion{ image_mask: Some(ref mask), .. }, ..) = *clip {
-                    resource_cache.request_image(mask.image, ImageRendering::Auto, None);
+                    resource_cache.request_image(mask.image,
+                                                 ImageRendering::Auto,
+                                                 None,
+                                                 gpu_cache);
                 }
             }
         }
@@ -1160,25 +1178,25 @@ impl PrimitiveStore {
                 text.prepare_for_render(resource_cache,
                                         device_pixel_ratio,
                                         display_list,
-                                        text_run_mode);
+                                        text_run_mode,
+                                        gpu_cache);
             }
             PrimitiveKind::Image => {
                 let image_cpu = &mut self.cpu_images[cpu_prim_index.0];
 
-                match image_cpu.kind {
-                    ImagePrimitiveKind::Image(image_key, image_rendering, tile_offset, tile_spacing) => {
-                        resource_cache.request_image(image_key, image_rendering, tile_offset);
+                resource_cache.request_image(image_cpu.image_key,
+                                             image_cpu.image_rendering,
+                                             image_cpu.tile_offset,
+                                             gpu_cache);
 
-                        // TODO(gw): This doesn't actually need to be calculated each frame.
-                        // It's cheap enough that it's not worth introducing a cache for images
-                        // right now, but if we introduce a cache for images for some other
-                        // reason then we might as well cache this with it.
-                        let image_properties = resource_cache.get_image_properties(image_key);
-                        metadata.opacity.is_opaque = image_properties.descriptor.is_opaque &&
-                                                     tile_spacing.width == 0.0 &&
-                                                     tile_spacing.height == 0.0;
-                    }
-                    ImagePrimitiveKind::WebGL(..) => {}
+                // TODO(gw): This doesn't actually need to be calculated each frame.
+                // It's cheap enough that it's not worth introducing a cache for images
+                // right now, but if we introduce a cache for images for some other
+                // reason then we might as well cache this with it.
+                if let Some(image_properties) = resource_cache.get_image_properties(image_cpu.image_key) {
+                    metadata.opacity.is_opaque = image_properties.descriptor.is_opaque &&
+                                                 image_cpu.tile_spacing.width == 0.0 &&
+                                                 image_cpu.tile_spacing.height == 0.0;
                 }
             }
             PrimitiveKind::YuvImage => {
@@ -1187,7 +1205,10 @@ impl PrimitiveStore {
                 let channel_num = image_cpu.format.get_plane_num();
                 debug_assert!(channel_num <= 3);
                 for channel in 0..channel_num {
-                    resource_cache.request_image(image_cpu.yuv_key[channel], image_cpu.image_rendering, None);
+                    resource_cache.request_image(image_cpu.yuv_key[channel],
+                                                 image_cpu.image_rendering,
+                                                 None,
+                                                 gpu_cache);
                 }
             }
             PrimitiveKind::AlignedGradient |

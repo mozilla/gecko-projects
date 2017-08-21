@@ -40,6 +40,23 @@ class ChildProfilerController;
 
 using mozilla::loader::PScriptCacheChild;
 
+#if !defined(XP_WIN)
+// Returns whether or not the currently running build is an unpackaged
+// developer build. This check is implemented by looking for omni.ja in the
+// the obj/dist dir. We use this routine to detect when the build dir will
+// use symlinks to the repo and object dir. On Windows, dev builds don't
+// use symlinks.
+bool IsDevelopmentBuild();
+#endif /* !XP_WIN */
+
+#if defined(XP_MACOSX)
+// Return the repo directory and the repo object directory respectively. These
+// should only be used on Mac developer builds to determine the path to the
+// repo or object directory.
+nsresult GetRepoDir(nsIFile **aRepoDir);
+nsresult GetObjDir(nsIFile **aObjDir);
+#endif /* XP_MACOSX */
+
 namespace ipc {
 class OptionalURIParams;
 class URIParams;
@@ -49,7 +66,6 @@ namespace dom {
 
 class AlertObserver;
 class ConsoleListener;
-class PStorageChild;
 class ClonedMessageData;
 class TabChild;
 class GetFilesHelperChild;
@@ -300,10 +316,6 @@ public:
 
   virtual bool DeallocPMediaChild(PMediaChild* aActor) override;
 
-  virtual PStorageChild* AllocPStorageChild() override;
-
-  virtual bool DeallocPStorageChild(PStorageChild* aActor) override;
-
   virtual PPresentationChild* AllocPPresentationChild() override;
 
   virtual bool DeallocPPresentationChild(PPresentationChild* aActor) override;
@@ -413,14 +425,6 @@ public:
 
   virtual mozilla::ipc::IPCResult
   RecvInitBlobURLs(nsTArray<BlobURLRegistrationData>&& aRegistations) override;
-
-  virtual mozilla::ipc::IPCResult
-  RecvDispatchLocalStorageChange(const nsString& aDocumentURI,
-                                 const nsString& aKey,
-                                 const nsString& aOldValue,
-                                 const nsString& aNewValue,
-                                 const IPC::Principal& aPrincipal,
-                                 const bool& aIsPrivate) override;
 
   virtual mozilla::ipc::IPCResult RecvLastPrivateDocShellDestroyed() override;
 
@@ -677,6 +681,17 @@ public:
                     nsTArray<PluginTag>&& aPluginTags,
                     nsTArray<FakePluginTag>&& aFakePluginTags) override;
 
+#ifdef NIGHTLY_BUILD
+  // Fetch the current number of pending input events.
+  //
+  // NOTE: This method performs an atomic read, and is safe to call from all threads.
+  uint32_t
+  GetPendingInputEvents()
+  {
+    return mPendingInputEvents;
+  }
+#endif
+
 private:
   static void ForceKillTimerCallback(nsITimer* aTimer, void* aClosure);
   void StartForceKillTimer();
@@ -690,6 +705,17 @@ private:
 
   virtual already_AddRefed<nsIEventTarget>
   GetSpecificMessageEventTarget(const Message& aMsg) override;
+
+#ifdef NIGHTLY_BUILD
+  virtual void
+  OnChannelReceivedMessage(const Message& aMsg) override;
+
+  virtual PContentChild::Result
+  OnMessageReceived(const Message& aMsg) override;
+
+  virtual PContentChild::Result
+  OnMessageReceived(const Message& aMsg, Message*& aReply) override;
+#endif
 
   InfallibleTArray<nsAutoPtr<AlertObserver> > mAlertObservers;
   RefPtr<ConsoleListener> mConsoleListener;
@@ -760,6 +786,11 @@ private:
   nsClassHashtable<nsUint64HashKey, AnonymousTemporaryFileCallback> mPendingAnonymousTemporaryFiles;
 
   mozilla::Atomic<bool> mShuttingDown;
+
+#ifdef NIGHTLY_BUILD
+  // NOTE: This member is atomic because it can be accessed from off-main-thread.
+  mozilla::Atomic<uint32_t> mPendingInputEvents;
+#endif
 
   DISALLOW_EVIL_CONSTRUCTORS(ContentChild);
 };

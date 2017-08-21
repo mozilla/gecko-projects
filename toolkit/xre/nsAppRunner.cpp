@@ -979,6 +979,19 @@ nsXULAppInfo::GetAccessibleHandlerUsed(bool* aResult)
 }
 
 NS_IMETHODIMP
+nsXULAppInfo::GetAccessibilityInstantiator(nsAString &aInstantiator)
+{
+#if defined(ACCESSIBILITY) && defined(XP_WIN)
+  if (!a11y::GetInstantiator(aInstantiator)) {
+    aInstantiator = NS_LITERAL_STRING("");
+  }
+#else
+  aInstantiator = NS_LITERAL_STRING("");
+#endif
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsXULAppInfo::GetIs64Bit(bool* aResult)
 {
 #ifdef HAVE_64BIT_BUILD
@@ -1784,7 +1797,7 @@ StartRemoteClient(const char* aDesktopStartupID,
   if (NS_FAILED(rv))
     return REMOTE_NOT_FOUND;
 
-  nsXPIDLCString response;
+  nsCString response;
   bool success = false;
   rv = client.SendCommandLine(program.get(), username, profile,
                               gArgc, gArgv, aDesktopStartupID,
@@ -3711,6 +3724,27 @@ AnnotateLSBRelease(void*)
 
 #endif
 
+#ifdef XP_WIN
+static void ReadAheadDll(const wchar_t* dllName) {
+  wchar_t dllPath[MAX_PATH];
+  if (ConstructSystem32Path(dllName, dllPath, MAX_PATH)) {
+    ReadAheadLib(dllPath);
+  }
+}
+
+static void PR_CALLBACK ReadAheadDlls_ThreadStart(void *) {
+  // Load DataExchange.dll and twinapi.appcore.dll for nsWindow::EnableDragDrop
+  ReadAheadDll(L"DataExchange.dll");
+  ReadAheadDll(L"twinapi.appcore.dll");
+
+  // Load twinapi.dll for WindowsUIUtils::UpdateTabletModeState
+  ReadAheadDll(L"twinapi.dll");
+
+  // Load explorerframe.dll for WinTaskbar::Initialize
+  ReadAheadDll(L"ExplorerFrame.dll");
+}
+#endif
+
 namespace mozilla {
   ShutdownChecksMode gShutdownChecks = SCM_NOTHING;
 } // namespace mozilla
@@ -4290,7 +4324,7 @@ XREMain::XRE_mainRun()
     rv = prefs->GetDefaultBranch(nullptr, getter_AddRefs(defaultPrefBranch));
 
     if (NS_SUCCEEDED(rv)) {
-      nsXPIDLCString sval;
+      nsCString sval;
       rv = defaultPrefBranch->GetCharPref("app.update.channel", getter_Copies(sval));
       if (NS_SUCCEEDED(rv)) {
         CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("ReleaseChannel"),
@@ -4338,6 +4372,16 @@ XREMain::XRE_mainRun()
   nsCOMPtr<nsIAppStartup> appStartup
     (do_GetService(NS_APPSTARTUP_CONTRACTID));
   NS_ENSURE_TRUE(appStartup, NS_ERROR_FAILURE);
+
+
+#ifdef XP_WIN
+  if (!PR_GetEnv("XRE_NO_DLL_READAHEAD"))
+  {
+    PR_CreateThread(PR_USER_THREAD, ReadAheadDlls_ThreadStart, 0,
+                    PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD,
+                    PR_UNJOINABLE_THREAD, 0);
+  }
+#endif
 
   if (gDoMigration) {
     nsCOMPtr<nsIFile> file;
@@ -4980,6 +5024,24 @@ bool
 XRE_IsContentProcess()
 {
   return XRE_GetProcessType() == GeckoProcessType_Content;
+}
+
+bool
+XRE_UseNativeEventProcessing()
+{
+  if (XRE_IsContentProcess()) {
+    static bool sInited = false;
+    static bool sUseNativeEventProcessing = false;
+    if (!sInited) {
+      Preferences::AddBoolVarCache(&sUseNativeEventProcessing,
+                                   "dom.ipc.useNativeEventProcessing.content");
+      sInited = true;
+    }
+
+    return sUseNativeEventProcessing;
+  }
+
+  return true;
 }
 
 // If you add anything to this enum, please update about:support to reflect it

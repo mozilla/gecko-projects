@@ -31,7 +31,6 @@ include protocol PParentToChildStream;
 include protocol POfflineCacheUpdate;
 include protocol PRenderFrame;
 include protocol PSpeechSynthesis;
-include protocol PStorage;
 include protocol PTestShell;
 include protocol PJavaScript;
 include protocol PRemoteSpellcheckEngine;
@@ -97,6 +96,7 @@ using mozilla::Telemetry::KeyedScalarAction from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::ChildEventData from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::DiscardedData from "mozilla/TelemetryComms.h";
 using mozilla::CrossProcessMutexHandle from "mozilla/ipc/CrossProcessMutex.h";
+using mozilla::HangDetails from "mozilla/HangDetails.h";
 
 union ChromeRegistryItem
 {
@@ -291,7 +291,6 @@ nested(upto inside_cpow) sync protocol PContent
     manages PChildToParentStream;
     manages PParentToChildStream;
     manages PSpeechSynthesis;
-    manages PStorage;
     manages PTestShell;
     manages PJavaScript;
     manages PRemoteSpellcheckEngine;
@@ -566,13 +565,6 @@ child:
 
     async BlobURLUnregistration(nsCString aURI);
 
-    async DispatchLocalStorageChange(nsString documentURI,
-                                     nsString key,
-                                     nsString oldValue,
-                                     nsString newValue,
-                                     Principal principal,
-                                     bool isPrivate);
-
     async GMPsChanged(GMPCapabilityData[] capabilities);
 
 
@@ -712,8 +704,6 @@ parent:
     async PChildToParentStream();
 
     async PSpeechSynthesis();
-
-    nested(inside_cpow) async PStorage();
 
     async PMedia();
 
@@ -1048,13 +1038,6 @@ parent:
 
      async UnstoreAndBroadcastBlobURLUnregistration(nsCString url);
 
-     async BroadcastLocalStorageChange(nsString documentURI,
-                                       nsString key,
-                                       nsString oldValue,
-                                       nsString newValue,
-                                       Principal principal,
-                                       bool isPrivate);
-
     /**
      * Messages for communicating child Telemetry to the parent process
      */
@@ -1073,6 +1056,8 @@ parent:
     async FinishMemoryReport(uint32_t aGeneration);
 
     async MaybeReloadPlugins();
+
+    async BHRThreadHang(HangDetails aHangDetails);
 both:
      async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,
                         Principal aPrincipal, ClonedMessageData aData);

@@ -1038,8 +1038,8 @@ Parser<ParseHandler, CharT>::parse()
 }
 
 /*
- * Strict mode forbids introducing new definitions for 'eval', 'arguments', or
- * for any strict mode reserved word.
+ * Strict mode forbids introducing new definitions for 'eval', 'arguments',
+ * 'let', 'static', 'yield', or for any strict mode reserved word.
  */
 bool
 ParserBase::isValidStrictBinding(PropertyName* name)
@@ -2285,7 +2285,7 @@ Parser<FullParseHandler, char16_t>::moduleBody(ModuleSharedContext* modulesc)
         return null();
 
     AutoAwaitIsKeyword<Parser> awaitIsKeyword(this, AwaitIsModuleKeyword);
-    ParseNode* pn = statementList(YieldIsKeyword);
+    ParseNode* pn = statementList(YieldIsName);
     if (!pn)
         return null();
 
@@ -3911,12 +3911,6 @@ Parser<ParseHandler, CharT>::functionStmt(uint32_t toStringStart, YieldHandling 
 
     GeneratorKind generatorKind = NotGenerator;
     if (tt == TOK_MUL) {
-        if (!asyncIterationSupported()) {
-            if (asyncKind != SyncFunction) {
-                error(JSMSG_ASYNC_GENERATOR);
-                return null();
-            }
-        }
         generatorKind = StarGenerator;
         if (!tokenStream.getToken(&tt))
             return null();
@@ -3986,12 +3980,6 @@ Parser<ParseHandler, CharT>::functionExpr(uint32_t toStringStart, InvokedPredict
         return null();
 
     if (tt == TOK_MUL) {
-        if (!asyncIterationSupported()) {
-            if (asyncKind != SyncFunction) {
-                error(JSMSG_ASYNC_GENERATOR);
-                return null();
-            }
-        }
         generatorKind = StarGenerator;
         if (!tokenStream.getToken(&tt))
             return null();
@@ -4521,7 +4509,12 @@ Parser<ParseHandler, CharT>::objectBindingPattern(DeclarationKind kind,
             if (!tokenStream.getToken(&tt))
                 return null();
 
-            Node inner = bindingIdentifierOrPattern(kind, yieldHandling, tt);
+            if (!TokenKindIsPossibleIdentifierName(tt)) {
+                error(JSMSG_NO_VARIABLE_NAME);
+                return null();
+            }
+
+            Node inner = bindingIdentifier(kind, yieldHandling);
             if (!inner)
                 return null();
 
@@ -5668,7 +5661,7 @@ Parser<ParseHandler, CharT>::exportFunctionDeclaration(uint32_t begin, uint32_t 
 
     MOZ_ASSERT(tokenStream.isCurrentTokenType(TOK_FUNCTION));
 
-    Node kid = functionStmt(toStringStart, YieldIsKeyword, NameRequired, asyncKind);
+    Node kid = functionStmt(toStringStart, YieldIsName, NameRequired, asyncKind);
     if (!kid)
         return null();
 
@@ -5694,7 +5687,7 @@ Parser<ParseHandler, CharT>::exportClassDeclaration(uint32_t begin)
 
     MOZ_ASSERT(tokenStream.isCurrentTokenType(TOK_CLASS));
 
-    Node kid = classDefinition(YieldIsKeyword, ClassStatement, NameRequired);
+    Node kid = classDefinition(YieldIsName, ClassStatement, NameRequired);
     if (!kid)
         return null();
 
@@ -5749,7 +5742,7 @@ Parser<ParseHandler, CharT>::exportDefaultFunctionDeclaration(uint32_t begin,
 
     MOZ_ASSERT(tokenStream.isCurrentTokenType(TOK_FUNCTION));
 
-    Node kid = functionStmt(toStringStart, YieldIsKeyword, AllowDefaultName, asyncKind);
+    Node kid = functionStmt(toStringStart, YieldIsName, AllowDefaultName, asyncKind);
     if (!kid)
         return null();
 
@@ -5772,7 +5765,7 @@ Parser<ParseHandler, CharT>::exportDefaultClassDeclaration(uint32_t begin)
 
     MOZ_ASSERT(tokenStream.isCurrentTokenType(TOK_CLASS));
 
-    Node kid = classDefinition(YieldIsKeyword, ClassStatement, AllowDefaultName);
+    Node kid = classDefinition(YieldIsName, ClassStatement, AllowDefaultName);
     if (!kid)
         return null();
 
@@ -5800,7 +5793,7 @@ Parser<ParseHandler, CharT>::exportDefaultAssignExpr(uint32_t begin)
     if (!noteDeclaredName(name, DeclarationKind::Const, pos()))
         return null();
 
-    Node kid = assignExpr(InAllowed, YieldIsKeyword, TripledotProhibited);
+    Node kid = assignExpr(InAllowed, YieldIsName, TripledotProhibited);
     if (!kid)
         return null();
     if (!matchOrInsertSemicolonAfterExpression())
@@ -6167,7 +6160,7 @@ Parser<ParseHandler, CharT>::forHeadStart(YieldHandling yieldHandling,
         if (!tokenStream.peekToken(&next))
             return false;
 
-        parsingLexicalDeclaration = nextTokenContinuesLetDeclaration(next, yieldHandling);
+        parsingLexicalDeclaration = nextTokenContinuesLetDeclaration(next);
         if (!parsingLexicalDeclaration) {
             tokenStream.ungetToken();
             letIsIdentifier = true;
@@ -6294,16 +6287,14 @@ Parser<ParseHandler, CharT>::forStatement(YieldHandling yieldHandling)
         }
     }
 
-    if (asyncIterationSupported()) {
-        if (pc->isAsync()) {
-            bool matched;
-            if (!tokenStream.matchToken(&matched, TOK_AWAIT))
-                return null();
+    if (pc->isAsync()) {
+        bool matched;
+        if (!tokenStream.matchToken(&matched, TOK_AWAIT))
+            return null();
 
-            if (matched) {
-                iflags |= JSITER_FORAWAITOF;
-                iterKind = IteratorKind::Async;
-            }
+        if (matched) {
+            iflags |= JSITER_FORAWAITOF;
+            iterKind = IteratorKind::Async;
         }
     }
 
@@ -7467,8 +7458,7 @@ Parser<ParseHandler, CharT>::classDefinition(YieldHandling yieldHandling,
 
 template <class ParseHandler, typename CharT>
 bool
-Parser<ParseHandler, CharT>::nextTokenContinuesLetDeclaration(TokenKind next,
-                                                              YieldHandling yieldHandling)
+Parser<ParseHandler, CharT>::nextTokenContinuesLetDeclaration(TokenKind next)
 {
     MOZ_ASSERT(tokenStream.isCurrentTokenType(TOK_LET));
 
@@ -7478,42 +7468,23 @@ Parser<ParseHandler, CharT>::nextTokenContinuesLetDeclaration(TokenKind next,
     MOZ_ASSERT(next == verify);
 #endif
 
-    // Destructuring is (for once) the easy case.
+    // Destructuring continues a let declaration.
     if (next == TOK_LB || next == TOK_LC)
         return true;
 
-    // If we have the name "yield", the grammar parameter exactly states
-    // whether this is okay.  (This wasn't true for SpiderMonkey's ancient
-    // legacy generator syntax, but that's dead now.)  If YieldIsName,
-    // declaration-parsing code will (if necessary) enforce a strict mode
-    // restriction on defining "yield".  If YieldIsKeyword, consider this the
-    // end of the declaration, in case ASI induces a semicolon that makes the
-    // "yield" valid.
-    if (next == TOK_YIELD)
-        return yieldHandling == YieldIsName;
-
-    // Somewhat similar logic applies for "await", except that it's not tracked
-    // with an AwaitHandling argument.
-    if (next == TOK_AWAIT)
-        return !awaitIsKeyword();
+    // A "let" edge case deserves special comment.  Consider this:
+    //
+    //   let     // not an ASI opportunity
+    //   let;
+    //
+    // Static semantics in §13.3.1.1 turn a LexicalDeclaration that binds
+    // "let" into an early error.  Does this retroactively permit ASI so
+    // that we should parse this as two ExpressionStatements?   No.  ASI
+    // resolves during parsing.  Static semantics only apply to the full
+    // parse tree with ASI applied.  No backsies!
 
     // Otherwise a let declaration must have a name.
-    if (TokenKindIsPossibleIdentifier(next)) {
-        // A "let" edge case deserves special comment.  Consider this:
-        //
-        //   let     // not an ASI opportunity
-        //   let;
-        //
-        // Static semantics in §13.3.1.1 turn a LexicalDeclaration that binds
-        // "let" into an early error.  Does this retroactively permit ASI so
-        // that we should parse this as two ExpressionStatements?   No.  ASI
-        // resolves during parsing.  Static semantics only apply to the full
-        // parse tree with ASI applied.  No backsies!
-        return true;
-    }
-
-    // Otherwise not a let declaration.
-    return false;
+    return TokenKindIsPossibleIdentifier(next);
 }
 
 template <class ParseHandler, typename CharT>
@@ -7816,7 +7787,7 @@ Parser<ParseHandler, CharT>::statementListItem(YieldHandling yieldHandling,
         if (!tokenStream.peekToken(&next))
             return null();
 
-        if (tt == TOK_LET && nextTokenContinuesLetDeclaration(next, yieldHandling))
+        if (tt == TOK_LET && nextTokenContinuesLetDeclaration(next))
             return lexicalDeclaration(yieldHandling, DeclarationKind::Let);
 
         if (tt == TOK_ASYNC) {
@@ -8690,12 +8661,13 @@ Parser<ParseHandler, CharT>::generatorComprehensionLambda(unsigned begin)
 
     // Create box for fun->object early to root it.
     Directives directives(/* strict = */ outerpc->sc()->strict());
-    FunctionBox* genFunbox = newFunctionBox(genfn, fun, /* toStringStart = */ 0, directives,
+    FunctionBox* genFunbox = newFunctionBox(genfn, fun, /* toStringStart = */ begin, directives,
                                             StarGenerator, SyncFunction);
     if (!genFunbox)
         return null();
     genFunbox->isGenexpLambda = true;
     genFunbox->initWithEnclosingParseContext(outerpc, Expression);
+    genFunbox->setStart(tokenStream, begin);
 
     SourceParseContext genpc(this, genFunbox, /* newDirectives = */ nullptr);
     if (!genpc.init())
@@ -9501,7 +9473,8 @@ Parser<SyntaxParseHandler, char16_t>::newRegExp()
 template <class ParseHandler, typename CharT>
 void
 Parser<ParseHandler, CharT>::checkDestructuringAssignmentTarget(Node expr, TokenPos exprPos,
-                                                                PossibleError* possibleError)
+                                                                PossibleError* possibleError,
+                                                                TargetBehavior behavior)
 {
     // Return early if a pending destructuring error is already present.
     if (possibleError->hasPendingDestructuringError())
@@ -9527,6 +9500,15 @@ Parser<ParseHandler, CharT>::checkDestructuringAssignmentTarget(Node expr, Token
                 possibleError->setPendingDestructuringWarningAt(exprPos,
                                                                 JSMSG_BAD_STRICT_ASSIGN_EVAL);
             }
+            return;
+        }
+    }
+
+    if (behavior == TargetBehavior::ForbidAssignmentPattern) {
+        if (handler.isUnparenthesizedDestructuringPattern(expr) ||
+            handler.isParenthesizedDestructuringPattern(expr))
+        {
+            possibleError->setPendingDestructuringErrorAt(exprPos, JSMSG_BAD_DESTRUCT_TARGET);
             return;
         }
     }
@@ -9721,12 +9703,6 @@ Parser<ParseHandler, CharT>::propertyName(YieldHandling yieldHandling,
     }
 
     if (ltok == TOK_MUL) {
-        if (!asyncIterationSupported()) {
-            if (isAsync) {
-                error(JSMSG_ASYNC_GENERATOR);
-                return null();
-            }
-        }
         isGenerator = true;
         if (!tokenStream.getToken(&ltok))
             return null();
@@ -9932,8 +9908,10 @@ Parser<ParseHandler, CharT>::objectLiteral(YieldHandling yieldHandling,
                                     possibleError);
             if (!inner)
                 return null();
-            if (possibleError)
-                checkDestructuringAssignmentTarget(inner, innerPos, possibleError);
+            if (possibleError) {
+                checkDestructuringAssignmentTarget(inner, innerPos, possibleError,
+                                                   TargetBehavior::ForbidAssignmentPattern);
+            }
             if (!handler.addSpreadProperty(literal, begin, inner))
                 return null();
         } else {

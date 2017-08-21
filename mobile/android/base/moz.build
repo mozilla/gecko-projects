@@ -16,6 +16,9 @@ with Files('*Manifest*'):
 with Files('adjust-sdk-sandbox.token'):
     BUG_COMPONENT = ('Firefox for Android', 'Build Config & IDE Support')
 
+with Files('pocket-api-sandbox.token'):
+    BUG_COMPONENT = ('Firefox for Android', 'Build Config & IDE Support')
+
 with Files('android-services.mozbuild'):
     BUG_COMPONENT = ('Android Background Services', 'Android Sync')
 
@@ -283,6 +286,7 @@ gujar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x for x in 
     'util/IntentUtils.java',
     'util/IOUtils.java',
     'util/JSONUtils.java',
+    'util/MapUtils.java',
     'util/MenuUtils.java',
     'util/NetworkUtils.java',
     'util/NonEvictingLruCache.java',
@@ -515,6 +519,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'activitystream/homepanel/stream/HighlightItem.java',
     'activitystream/homepanel/stream/HighlightsTitle.java',
     'activitystream/homepanel/stream/StreamItem.java',
+    'activitystream/homepanel/stream/StreamPageIconLayout.java',
     'activitystream/homepanel/stream/TopPanel.java',
     'activitystream/homepanel/stream/WelcomePanel.java',
     'activitystream/homepanel/StreamItemAnimator.java',
@@ -551,6 +556,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'CustomEditText.java',
     'customtabs/ActionBarPresenter.java',
     'customtabs/CustomTabsActivity.java',
+    'customtabs/CustomTabsSecurityPopup.java',
     'customtabs/GeckoCustomTabsService.java',
     'customtabs/IntentUtil.java',
     'DataReportingNotification.java',
@@ -642,6 +648,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'firstrun/FirstrunPager.java',
     'firstrun/FirstrunPagerConfig.java',
     'firstrun/FirstrunPanel.java',
+    'firstrun/LastPanel.java',
     'firstrun/RestrictedWelcomePanel.java',
     'firstrun/SyncPanel.java',
     'firstrun/TabQueuePanel.java',
@@ -1006,12 +1013,10 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'widget/themed/ThemedTextView.java',
     'widget/themed/ThemedView.java',
 ]]
-# The following sources are Photon specific, Eventually they should be merged into base/
-# when we are ready to drop Australis sources.
+# The following sources are Photon specific, Eventually they should be merged into base.
 gbjar.sources += ['../app/src/photon/java/org/mozilla/gecko/' + x for x in [
     'home/SearchEngineRow.java',
     'home/SuggestionItem.java',
-    'skin/SkinConfig.java',
     'toolbar/BrowserToolbarTablet.java',
     'toolbar/BrowserToolbarTabletBase.java',
     'toolbar/ForwardButton.java',

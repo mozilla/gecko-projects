@@ -20,7 +20,7 @@ use properties::{AnimationRules, ComputedValues, PropertyDeclarationBlock};
 #[cfg(feature = "gecko")] use properties::animated_properties::AnimationValue;
 #[cfg(feature = "gecko")] use properties::animated_properties::TransitionProperty;
 use rule_tree::CascadeLevel;
-use selector_parser::{AttrValue, ElementExt, PreExistingComputedValues};
+use selector_parser::{AttrValue, ElementExt};
 use selector_parser::{PseudoClassStringArg, PseudoElement};
 use selectors::matching::{ElementSelectorFlags, VisitedHandlingMode};
 use selectors::sink::Push;
@@ -33,8 +33,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Deref;
 use stylist::Stylist;
-use thread_state;
-use traversal_flags::TraversalFlags;
+use traversal_flags::{TraversalFlags, self};
 
 pub use style_traits::UnsafeNode;
 
@@ -240,44 +239,6 @@ fn fmt_subtree<F, N: TNode>(f: &mut fmt::Formatter, stringify: &F, n: N, indent:
     Ok(())
 }
 
-/// Flag that this element has a descendant for style processing, propagating
-/// the bit up to the root as needed.
-///
-/// This is _not_ safe to call during the parallel traversal.
-///
-/// This is intended as a helper so Servo and Gecko can override it with custom
-/// stuff if needed.
-///
-/// Returns whether no parent had already noted it, that is, whether we reached
-/// the root during the walk up.
-pub unsafe fn raw_note_descendants<E, B>(element: E) -> bool
-    where E: TElement,
-          B: DescendantsBit<E>,
-{
-    debug_assert!(!thread_state::get().is_worker());
-    // TODO(emilio, bholley): Documenting the flags setup a bit better wouldn't
-    // really hurt I guess.
-    debug_assert!(element.get_data().is_some(),
-                  "You should ensure you only flag styled elements");
-
-    let mut curr = Some(element);
-    while let Some(el) = curr {
-        if B::has(el) {
-            break;
-        }
-        B::set(el);
-        curr = el.traversal_parent();
-    }
-
-    // Note: We disable this assertion on servo because of bugs. See the
-    // comment around note_dirty_descendant in layout/wrapper.rs.
-    if cfg!(feature = "gecko") {
-        debug_assert!(element.descendants_bit_is_propagated::<B>());
-    }
-
-    curr.is_none()
-}
-
 /// A trait used to synthesize presentational hints for HTML element attributes.
 pub trait PresentationalHintsSynthesizer {
     /// Generate the proper applicable declarations due to presentational hints,
@@ -417,18 +378,6 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
     /// Internal iterator for the classes of this element.
     fn each_class<F>(&self, callback: F) where F: FnMut(&Atom);
 
-    /// Get the pre-existing style to calculate restyle damage (change hints).
-    ///
-    /// This needs to be generic since it varies between Servo and Gecko.
-    ///
-    /// XXX(emilio): It's a bit unfortunate we need to pass the current computed
-    /// values as an argument here, but otherwise Servo would crash due to
-    /// double borrows to return it.
-    fn existing_style_for_restyle_damage<'a>(&'a self,
-                                             current_computed_values: &'a ComputedValues,
-                                             pseudo: Option<&PseudoElement>)
-                                             -> Option<&'a PreExistingComputedValues>;
-
     /// Whether a given element may generate a pseudo-element.
     ///
     /// This is useful to avoid computing, for example, pseudo styles for
@@ -489,6 +438,11 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
                    !data.restyle.hint.has_animation_hint_or_recascade();
         }
 
+        if traversal_flags.contains(traversal_flags::UnstyledOnly) {
+            // We don't process invalidations in UnstyledOnly mode.
+            return data.has_styles();
+        }
+
         if self.has_snapshot() && !self.handled_snapshot() {
             return false;
         }
@@ -496,29 +450,32 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
         data.has_styles() && !data.restyle.hint.has_non_animation_invalidations()
     }
 
-    /// Flags an element and its ancestors with a given `DescendantsBit`.
-    ///
-    /// TODO(emilio): We call this conservatively from restyle_element_internal
-    /// because we never flag unstyled stuff. A different setup for this may be
-    /// a bit cleaner, but it's probably not worth to invest on it right now
-    /// unless necessary.
-    unsafe fn note_descendants<B: DescendantsBit<Self>>(&self);
+    /// Returns whether the element's styles are up-to-date after traversal
+    /// (i.e. in post traversal).
+    fn has_current_styles(&self, data: &ElementData) -> bool {
+        if self.has_snapshot() && !self.handled_snapshot() {
+            return false;
+        }
+
+        data.has_styles() &&
+        // TODO(hiro): When an animating element moved into subtree of
+        // contenteditable element, there remains animation restyle hints in
+        // post traversal. It's generally harmless since the hints will be
+        // processed in a next styling but ideally it should be processed soon.
+        //
+        // Without this, we get failures in:
+        //   layout/style/crashtests/1383319.html
+        //   layout/style/crashtests/1383001.html
+        //
+        // https://bugzilla.mozilla.org/show_bug.cgi?id=1389675 tracks fixing
+        // this.
+        !data.restyle.hint.has_non_animation_invalidations()
+    }
 
     /// Flag that this element has a descendant for style processing.
     ///
     /// Only safe to call with exclusive access to the element.
     unsafe fn set_dirty_descendants(&self);
-
-    /// Debug helper to be sure the bit is propagated.
-    fn descendants_bit_is_propagated<B: DescendantsBit<Self>>(&self) -> bool {
-        let mut current = Some(*self);
-        while let Some(el) = current {
-            if !B::has(el) { return false; }
-            current = el.traversal_parent();
-        }
-
-        true
-    }
 
     /// Flag that this element has no descendant for style processing.
     ///
@@ -543,6 +500,13 @@ pub trait TElement : Eq + PartialEq + Debug + Hash + Sized + Copy + Clone +
     /// Only safe to call with exclusive access to the element.
     unsafe fn unset_animation_only_dirty_descendants(&self) {
     }
+
+    /// Clear all bits related to dirty descendant.
+    ///
+    /// In Gecko, this corresponds to the regular dirty descendants bit, the
+    /// animation-only dirty descendants bit, and the lazy frame construction
+    /// descendants bit.
+    unsafe fn clear_descendants_bits(&self) { self.unset_dirty_descendants(); }
 
     /// Returns true if this element is a visited link.
     ///

@@ -1268,6 +1268,7 @@
             // events can be handled by browser-content.js.
             popup.setAttribute("mousethrough", "always");
             popup.setAttribute("rolluponmousewheel", "true");
+            popup.setAttribute("hidden", "true");
             return popup;
           ]]>
         </body>
@@ -1298,6 +1299,7 @@
               this._autoScrollPopup.setAttribute("translucent", /Win|Mac/.test(navigator.platform));
             }
 
+            this._autoScrollPopup.removeAttribute("hidden");
             this._autoScrollPopup.setAttribute("noautofocus", "true");
             this._autoScrollPopup.setAttribute("scrolldir", scrolldir);
             this._autoScrollPopup.addEventListener("popuphidden", this, true);
@@ -1696,17 +1698,7 @@
         }
 
         if (links.length) {
-          // Bug 1368481: mozSourceNode is null if the drag event originated
-          // in an external application - needs better fallback!
-          let triggeringPrincipal;
-          let sourceNode = event.dataTransfer.mozSourceNode;
-          if (sourceNode) {
-            triggeringPrincipal = sourceNode.nodePrincipal;
-          } else {
-            var secMan = Components.classes["@mozilla.org/scriptsecuritymanager;1"].
-              getService(Components.interfaces.nsIScriptSecurityManager);
-            triggeringPrincipal = secMan.getSystemPrincipal();
-          }
+          let triggeringPrincipal = linkHandler.getTriggeringPrincipal(event);
           this.droppedLinkHandler(event, links, triggeringPrincipal);
         }
       ]]>

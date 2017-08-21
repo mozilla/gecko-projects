@@ -54,6 +54,8 @@ public:
   {
   }
 
+  void EnableMainThreadEventPrioritization();
+
 private:
   nsThreadManager()
     : mCurThreadIndex(0)

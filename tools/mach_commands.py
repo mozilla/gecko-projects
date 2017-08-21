@@ -9,6 +9,7 @@ import os
 import stat
 import platform
 import errno
+import re
 
 from mach.decorators import (
     CommandArgument,
@@ -17,6 +18,7 @@ from mach.decorators import (
 )
 
 from mozbuild.base import MachCommandBase, MozbuildObject
+import mozversioncontrol
 
 
 @CommandProvider
@@ -261,25 +263,13 @@ class FormatProvider(MachCommandBase):
         # Note that this will potentially miss a lot things
         from subprocess import Popen, PIPE
 
-        if os.path.exists(".hg"):
+        if isinstance(self.repository, mozversioncontrol.HgRepository):
             diff_process = Popen(["hg", "diff", "-U0", "-r", ".^",
                                   "--include", "glob:**.c", "--include", "glob:**.cpp",
                                   "--include", "glob:**.h",
                                   "--exclude", "listfile:.clang-format-ignore"], stdout=PIPE)
         else:
-            git_process = Popen(["git", "diff", "--no-color", "-U0", "HEAD^"], stdout=PIPE)
-            try:
-                diff_process = Popen(["filterdiff", "--include=*.h",
-                                      "--include=*.cpp", "--include=*.c",
-                                      "--exclude-from-file=.clang-format-ignore"],
-                                     stdin=git_process.stdout, stdout=PIPE)
-            except OSError as e:
-                if e.errno == errno.ENOENT:
-                    print("Can't find filterdiff. Please install patchutils.")
-                else:
-                    print("OSError {0}: {1}".format(e.code, e.reason))
-                return 1
-
+	    diff_process = Popen(["git", "diff", "--no-color", "-U0", "HEAD","--","*.c","*.cpp","*.h"], stdout=PIPE)
         args = [sys.executable, clang_format_diff, "-p1"]
         if not show:
             args.append("-i")
@@ -288,18 +278,22 @@ class FormatProvider(MachCommandBase):
 
     def generate_path_list(self, paths):
         pathToThirdparty = os.path.join(self.topsrcdir,
-                                        "tools",
-                                        "rewriting",
-                                        "ThirdPartyPaths.txt")
-        with open(pathToThirdparty) as f:
-            # Normalize the path (no trailing /)
-            ignored_dir = tuple(d.rstrip('/') for d in f.read().splitlines())
+                                        ".clang-format-ignore")
+        ignored_dir = []
+        for line in open(pathToThirdparty):
+            # Remove comments and empty lines
+            if line.startswith('#') or len(line.strip()) == 0:
+                continue
+            ignored_dir.append(line.rstrip())
 
+        # Generates the list of regexp
+        ignored_dir_re = '(%s)' % '|'.join(ignored_dir)
         extensions = ('.cpp', '.c', '.h')
 
         path_list = []
         for f in paths:
-            if f.startswith(ignored_dir):
+            if re.match(ignored_dir_re, f):
+                # Early exit if we have provided an ignored directory
                 print("clang-format: Ignored third party code '{0}'".format(f))
                 continue
 
@@ -309,8 +303,8 @@ class FormatProvider(MachCommandBase):
                     subs.sort()
                     for filename in sorted(files):
                         f_in_dir = os.path.join(folder, filename)
-                        if f_in_dir.endswith(extensions):
-                            # Supported extension
+                        if f_in_dir.endswith(extensions) and not re.match(ignored_dir_re, f_in_dir):
+                            # Supported extension and accepted path
                             path_list.append(f_in_dir)
             else:
                 if f.endswith(extensions):
@@ -335,7 +329,7 @@ class FormatProvider(MachCommandBase):
         cf_process = Popen(args)
         if show:
             # show the diff
-            if os.path.exists(".hg"):
+            if isinstance(self.repository, mozversioncontrol.HgRepository):
                 cf_process = Popen(["hg", "diff"] + path_list)
             else:
                 cf_process = Popen(["git", "diff"] + path_list)

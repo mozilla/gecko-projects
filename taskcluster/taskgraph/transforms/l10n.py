@@ -220,6 +220,9 @@ def setup_nightly_dependency(config, jobs):
             # Weave these in and just assume they will be there in the resulting graph
             job['dependencies'].update({
                 'signed-build': 'build-signing-{}'.format(job['name']),
+            })
+        if job['attributes']['build_platform'].startswith('win'):
+            job['dependencies'].update({
                 'repackage-signed': 'repackage-signing-{}'.format(job['name'])
             })
         yield job

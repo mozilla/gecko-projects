@@ -33,6 +33,7 @@
 #include <algorithm>
 #include "nsProxyRelease.h"
 #include "nsIContentPolicy.h"
+#include "mozilla/ErrorNames.h"
 
 using mozilla::media::TimeUnit;
 
@@ -973,12 +974,6 @@ bool
 ChannelMediaResource::IsDataCachedToEndOfResource(int64_t aOffset)
 {
   return mCacheStream.IsDataCachedToEndOfStream(aOffset);
-}
-
-void
-ChannelMediaResource::EnsureCacheUpToDate()
-{
-  mCacheStream.EnsureCacheUpdate();
 }
 
 bool

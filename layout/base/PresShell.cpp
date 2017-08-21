@@ -2,19 +2,7 @@
  * vim: set ts=2 sw=2 et tw=78:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/.
- *
- * This Original Code has been modified by IBM Corporation.
- * Modifications made by IBM described herein are
- * Copyright (c) International Business Machines
- * Corporation, 2000
- *
- * Modifications to Mozilla code or documentation
- * identified per MPL Section 3.3
- *
- * Date         Modified by     Description of modification
- * 05/03/2000   IBM Corp.       Observer events for reflow states
- */
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* a presentation of a document, part 2 */
 
@@ -75,6 +63,7 @@
 #include "nsIDOMNodeList.h"
 #include "nsIDOMElement.h"
 #include "nsRange.h"
+#include "nsWindowSizes.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsReadableUtils.h"
@@ -123,7 +112,6 @@
 #include "SVGContentUtils.h"
 #include "nsSVGEffects.h"
 #include "SVGFragmentIdentifier.h"
-#include "nsArenaMemoryStats.h"
 #include "nsFrameSelection.h"
 
 #include "mozilla/dom/Performance.h"
@@ -255,7 +243,7 @@ struct RangePaintInfo {
 
   ~RangePaintInfo()
   {
-    mList.DeleteAll();
+    mList.DeleteAll(&mBuilder);
     MOZ_COUNT_DTOR(RangePaintInfo);
   }
 };
@@ -4864,7 +4852,7 @@ PresShell::ClipListToRange(nsDisplayListBuilder *aBuilder,
     }
     else {
       // otherwise, just delete the item and don't readd it to the list
-      i->~nsDisplayItem();
+      i->Destroy(aBuilder);
     }
   }
 
@@ -4942,8 +4930,8 @@ PresShell::CreateRangePaintInfo(nsIDOMRange* aRange,
     nsIFrame* frame = aNode->AsContent()->GetPrimaryFrame();
     // XXX deal with frame being null due to display:contents
     for (; frame; frame = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(frame)) {
-      frame->BuildDisplayListForStackingContext(&info->mBuilder,
-               frame->GetVisualOverflowRect(), &info->mList);
+      info->mBuilder.SetDirtyRect(frame->GetVisualOverflowRect());
+      frame->BuildDisplayListForStackingContext(&info->mBuilder, &info->mList);
     }
   };
   if (startContainer->NodeType() == nsIDOMNode::TEXT_NODE) {
@@ -5240,14 +5228,14 @@ AddCanvasBackgroundColor(const nsDisplayList& aList, nsIFrame* aCanvasFrame,
 {
   for (nsDisplayItem* i = aList.GetBottom(); i; i = i->GetAbove()) {
     if (i->Frame() == aCanvasFrame &&
-        i->GetType() == nsDisplayItem::TYPE_CANVAS_BACKGROUND_COLOR) {
+        i->GetType() == DisplayItemType::TYPE_CANVAS_BACKGROUND_COLOR) {
       nsDisplayCanvasBackgroundColor* bg = static_cast<nsDisplayCanvasBackgroundColor*>(i);
       bg->SetExtraBackgroundColor(aColor);
       return true;
     }
     nsDisplayList* sublist = i->GetSameCoordinateSystemChildren();
     if (sublist &&
-        !(i->GetType() == nsDisplayItem::TYPE_BLEND_CONTAINER && !aCSSBackgroundColor) &&
+        !(i->GetType() == DisplayItemType::TYPE_BLEND_CONTAINER && !aCSSBackgroundColor) &&
         AddCanvasBackgroundColor(*sublist, aCanvasFrame, aColor, aCSSBackgroundColor))
       return true;
   }
@@ -5988,12 +5976,13 @@ PresShell::MarkFramesInSubtreeApproximatelyVisible(nsIFrame* aFrame,
       }
     }
 
-    scrollFrame->NotifyApproximateFrameVisibilityUpdate(ignoreDisplayPort);
-
     nsRect displayPort;
     bool usingDisplayport = !ignoreDisplayPort &&
       nsLayoutUtils::GetDisplayPortForVisibilityTesting(
         aFrame->GetContent(), &displayPort, RelativeTo::ScrollFrame);
+
+    scrollFrame->NotifyApproximateFrameVisibilityUpdate(!usingDisplayport);
+
     if (usingDisplayport) {
       rect = displayPort;
     } else {
@@ -6131,7 +6120,7 @@ PresShell::DoUpdateApproximateFrameVisibility(bool aRemoveOnly)
 
   ClearApproximateFrameVisibilityVisited(rootFrame->GetView(), true);
 
-  list.DeleteAll();
+  list.DeleteAll(&builder);
 #endif
 }
 
@@ -7107,8 +7096,8 @@ DispatchPointerFromMouseOrTouch(PresShell* aShell,
       event.pointerId = touch->Identifier();
       event.mRefPoint = touch->mRefPoint;
       event.mModifiers = touchEvent->mModifiers;
-      event.mWidth = touch->RadiusX();
-      event.mHeight = touch->RadiusY();
+      event.mWidth = touch->RadiusX(CallerType::System);
+      event.mHeight = touch->RadiusY(CallerType::System);
       event.tiltX = touch->tiltX;
       event.tiltY = touch->tiltY;
       event.mTime = touchEvent->mTime;
@@ -9729,6 +9718,7 @@ PresShell::Observe(nsISupports* aSubject,
 
   if (!nsCRT::strcmp(aTopic, NS_WIDGET_WAKE_OBSERVER_TOPIC)) {
     mLastOSWake = TimeStamp::Now();
+    return NS_OK;
   }
 
   NS_WARNING("unrecognized topic in PresShell::Observe");
@@ -11018,39 +11008,34 @@ PresShell::GetRootPresShell()
 }
 
 void
-PresShell::AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
-                                  nsArenaMemoryStats* aArenaObjectsSize,
-                                  size_t* aPresShellSize,
-                                  size_t* aStyleSetsSize,
-                                  size_t* aTextRunsSize,
-                                  size_t* aPresContextSize,
-                                  size_t* aFramePropertiesSize)
+PresShell::AddSizeOfIncludingThis(nsWindowSizes& aSizes) const
 {
-  mFrameArena.AddSizeOfExcludingThis(aMallocSizeOf, aArenaObjectsSize);
-  *aPresShellSize += aMallocSizeOf(this);
+  MallocSizeOf mallocSizeOf = aSizes.mState.mMallocSizeOf;
+  mFrameArena.AddSizeOfExcludingThis(aSizes);
+  aSizes.mLayoutPresShellSize += mallocSizeOf(this);
   if (mCaret) {
-    *aPresShellSize += mCaret->SizeOfIncludingThis(aMallocSizeOf);
+    aSizes.mLayoutPresShellSize += mCaret->SizeOfIncludingThis(mallocSizeOf);
   }
-  *aPresShellSize += mApproximatelyVisibleFrames.ShallowSizeOfExcludingThis(aMallocSizeOf);
-  *aPresShellSize += mFramesToDirty.ShallowSizeOfExcludingThis(aMallocSizeOf);
-  *aPresShellSize += aArenaObjectsSize->mOther;
+  aSizes.mLayoutPresShellSize +=
+    mApproximatelyVisibleFrames.ShallowSizeOfExcludingThis(mallocSizeOf) +
+    mFramesToDirty.ShallowSizeOfExcludingThis(mallocSizeOf);
 
   if (nsStyleSet* styleSet = StyleSet()->GetAsGecko()) {
-    *aStyleSetsSize += styleSet->SizeOfIncludingThis(aMallocSizeOf);
+    aSizes.mLayoutStyleSetsSize += styleSet->SizeOfIncludingThis(mallocSizeOf);
   } else if (ServoStyleSet* styleSet = StyleSet()->GetAsServo()) {
-    *aStyleSetsSize += styleSet->SizeOfIncludingThis(aMallocSizeOf);
+    aSizes.mLayoutStyleSetsSize += styleSet->SizeOfIncludingThis(mallocSizeOf);
   } else {
     MOZ_CRASH();
   }
 
-  *aTextRunsSize += SizeOfTextRuns(aMallocSizeOf);
+  aSizes.mLayoutTextRunsSize += SizeOfTextRuns(mallocSizeOf);
 
-  *aPresContextSize += mPresContext->SizeOfIncludingThis(aMallocSizeOf);
+  aSizes.mLayoutPresContextSize +=
+    mPresContext->SizeOfIncludingThis(mallocSizeOf);
 
   nsIFrame* rootFrame = mFrameConstructor->GetRootFrame();
   if (rootFrame) {
-    *aFramePropertiesSize +=
-      rootFrame->SizeOfFramePropertiesForTree(aMallocSizeOf);
+    rootFrame->AddSizeOfExcludingThisForTree(aSizes);
   }
 }
 

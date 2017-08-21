@@ -40,8 +40,13 @@ import concurrent.futures
 import multiprocessing
 
 from optparse import OptionParser
-from xml.dom.minidom import parse
 
+from mozbuild.util import memoize
+from mozbuild.generated_sources import (
+    get_filename_with_digest,
+    get_generated_sources,
+    get_s3_region_and_bucket,
+)
 from mozpack.copier import FileRegistry
 from mozpack.manifests import (
     InstallManifest,
@@ -332,6 +337,15 @@ def make_file_mapping(install_manifests):
                 file_mapping[abs_dest] = src.path
     return file_mapping
 
+@memoize
+def get_generated_file_s3_path(filename, rel_path, bucket):
+    """Given a filename, return a path formatted similarly to
+    GetVCSFilename but representing a file available in an s3 bucket."""
+    with open(filename, 'rb') as f:
+        path = get_filename_with_digest(rel_path, f.read())
+        return 's3:{bucket}:{path}:'.format(bucket=bucket, path=path)
+
+
 def GetPlatformSpecificDumper(**kwargs):
     """This function simply returns a instance of a subclass of Dumper
     that is appropriate for the current platform."""
@@ -377,7 +391,8 @@ class Dumper:
                  copy_debug=False,
                  vcsinfo=False,
                  srcsrv=False,
-                 repo_manifest=None,
+                 generated_files=None,
+                 s3_bucket=None,
                  file_mapping=None):
         # popen likes absolute paths, at least on windows
         self.dump_syms = os.path.abspath(dump_syms)
@@ -391,8 +406,8 @@ class Dumper:
         self.copy_debug = copy_debug
         self.vcsinfo = vcsinfo
         self.srcsrv = srcsrv
-        if repo_manifest:
-            self.parse_repo_manifest(repo_manifest)
+        self.generated_files = generated_files or {}
+        self.s3_bucket = s3_bucket
         self.file_mapping = file_mapping or {}
         # Add a static mapping for Rust sources.
         target_os = buildconfig.substs['OS_ARCH']
@@ -408,56 +423,6 @@ class Dumper:
             Dumper.srcdirRepoInfo[rust_srcdir] = GitRepoInfo(rust_srcdir,
                                                              buildconfig.substs['RUSTC_COMMIT'],
                                                              'https://github.com/rust-lang/rust/')
-
-    def parse_repo_manifest(self, repo_manifest):
-        """
-        Parse an XML manifest of repository info as produced
-        by the `repo manifest -r` command.
-        """
-        doc = parse(repo_manifest)
-        if doc.firstChild.tagName != "manifest":
-            return
-        # First, get remotes.
-        def ensure_slash(u):
-            if not u.endswith("/"):
-                return u + "/"
-            return u
-        remotes = dict([(r.getAttribute("name"), ensure_slash(r.getAttribute("fetch"))) for r in doc.getElementsByTagName("remote")])
-        # And default remote.
-        default_remote = None
-        if doc.getElementsByTagName("default"):
-            default_remote = doc.getElementsByTagName("default")[0].getAttribute("remote")
-        # Now get projects. Assume they're relative to repo_manifest.
-        base_dir = os.path.abspath(os.path.dirname(repo_manifest))
-        for proj in doc.getElementsByTagName("project"):
-            # name is the repository URL relative to the remote path.
-            name = proj.getAttribute("name")
-            # path is the path on-disk, relative to the manifest file.
-            path = proj.getAttribute("path")
-            # revision is the changeset ID.
-            rev = proj.getAttribute("revision")
-            # remote is the base URL to use.
-            remote = proj.getAttribute("remote")
-            # remote defaults to the <default remote>.
-            if not remote:
-                remote = default_remote
-            # path defaults to name.
-            if not path:
-                path = name
-            if not (name and path and rev and remote):
-                print("Skipping project %s" % proj.toxml())
-                continue
-            remote = remotes[remote]
-            # Turn git URLs into http URLs so that urljoin works.
-            if remote.startswith("git:"):
-                remote = "http" + remote[3:]
-            # Add this project to srcdirs.
-            srcdir = os.path.join(base_dir, path)
-            self.srcdirs.append(srcdir)
-            # And cache its VCS file info. Currently all repos mentioned
-            # in a repo manifest are assumed to be git.
-            root = urlparse.urljoin(remote, name)
-            Dumper.srcdirRepoInfo[srcdir] = GitRepoInfo(srcdir, rev, root)
 
     # subclasses override this
     def ShouldProcess(self, file):
@@ -550,7 +515,12 @@ class Dumper:
                         if filename in self.file_mapping:
                             filename = self.file_mapping[filename]
                         if self.vcsinfo:
-                            (filename, rootname) = GetVCSFilename(filename, self.srcdirs)
+                            gen_path = self.generated_files.get(filename)
+                            if gen_path and self.s3_bucket:
+                                filename = get_generated_file_s3_path(filename, gen_path, self.s3_bucket)
+                                rootname = ''
+                            else:
+                                (filename, rootname) = GetVCSFilename(filename, self.srcdirs)
                             # sets vcs_root in case the loop through files were to end on an empty rootname
                             if vcs_root is None:
                               if rootname:
@@ -721,6 +691,7 @@ class Dumper_Win32(Dumper):
             os.remove(stream_output_path)
         return result
 
+
 class Dumper_Linux(Dumper):
     objcopy = os.environ['OBJCOPY'] if 'OBJCOPY' in os.environ else 'objcopy'
     def ShouldProcess(self, file):
@@ -868,11 +839,6 @@ def main():
     parser.add_option("-i", "--source-index",
                       action="store_true", dest="srcsrv", default=False,
                       help="Add source index information to debug files, making them suitable for use in a source server.")
-    parser.add_option("--repo-manifest",
-                      action="store", dest="repo_manifest",
-                      help="""Get source information from this XML manifest
-produced by the `repo manifest -r` command.
-""")
     parser.add_option("--install-manifest",
                       action="append", dest="install_manifests",
                       default=[],
@@ -899,6 +865,9 @@ to canonical locations in the source repository. Specify
         parser.error(str(e))
         exit(1)
     file_mapping = make_file_mapping(manifests)
+    generated_files = {os.path.join(buildconfig.topobjdir, f): f
+                          for (f, _) in get_generated_sources()}
+    _, bucket = get_s3_region_and_bucket()
     dumper = GetPlatformSpecificDumper(dump_syms=args[0],
                                        symbol_path=args[1],
                                        copy_debug=options.copy_debug,
@@ -906,7 +875,8 @@ to canonical locations in the source repository. Specify
                                        srcdirs=options.srcdir,
                                        vcsinfo=options.vcsinfo,
                                        srcsrv=options.srcsrv,
-                                       repo_manifest=options.repo_manifest,
+                                       generated_files=generated_files,
+                                       s3_bucket=bucket,
                                        file_mapping=file_mapping)
 
     dumper.Process(args[2])

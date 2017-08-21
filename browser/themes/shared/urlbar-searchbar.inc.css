@@ -1,6 +1,8 @@
+%if 0
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+%endif
 
 #urlbar,
 .searchbar-textbox {
@@ -107,20 +109,41 @@
   list-style-image: url("chrome://browser/skin/sync.svg");
 }
 
-/* Page action urlbar buttons */
-#urlbar-icons {
+/* URL bar and page action buttons */
+
+.urlbar-history-dropmarker {
+  -moz-appearance: none;
+  list-style-image: url(chrome://browser/skin/arrow-dropdown-16.svg);
+  transition: opacity 0.15s ease;
+}
+
+#urlbar[switchingtabs] > .urlbar-textbox-container > .urlbar-history-dropmarker {
+  transition: none;
+}
+
+#navigator-toolbox:not(:hover) > #nav-bar:not([customizing="true"]) > #nav-bar-customization-target > #urlbar-container > #urlbar:not([focused]) > .urlbar-textbox-container > .urlbar-history-dropmarker {
+  opacity: 0;
+}
+
+#page-action-buttons {
+  -moz-box-align: center;
   /* Add more space between the last icon and the urlbar's edge. */
   margin-inline-end: 3px;
 }
 
 .urlbar-icon {
-  width: 22px;
+  padding: 0 6px;
+  /* 16x16 icon with border-box sizing */
+  width: 28px;
   height: 16px;
-  margin-inline-start: 6px;
   -moz-context-properties: fill, fill-opacity;
   fill: currentColor;
   fill-opacity: 0.6;
   color: inherit;
+}
+
+.urlbar-icon:hover {
+  fill-opacity: 0.8;
 }
 
 #pageActionButton {
@@ -166,10 +189,9 @@
   position: absolute;
   overflow: hidden;
   top: calc(50% - 16.5px); /* 16.5px is half the height of the sprite */
-  /* .urlbar-icon has width 22px. Each frame is 33px wide. Set margin-inline-start
-     to be half the difference, -5.5px, plus the 6px margin-inline-start of
-     .urlbar-icon, 6px. */
-  margin-inline-start: 0.5px;
+  /* .urlbar-icon has width 28px. Each frame is 33px wide. Set margin-inline-start
+     to be half the difference, -2.5px. */
+  margin-inline-start: -2.5px;
   /* Set the height to equal the height of each frame of the SVG. Must use
      min- and max- width and height due to bug 1379332. */
   min-width: 33px;
@@ -190,6 +212,8 @@
   animation-timing-function: steps(19);
   animation-duration: 317ms;
   width: 660px;
+  -moz-context-properties: fill, stroke;
+  stroke: var(--toolbarbutton-icon-fill-attention);
 }
 
 #star-button-box[animationsenabled] > #star-button[starred][animate]:-moz-locale-dir(rtl) + #star-button-animatable-box > #star-button-animatable-image {

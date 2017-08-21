@@ -147,14 +147,18 @@ GeckoChildProcessHost::GetPathToBinary(FilePath& exePath, GeckoProcessType proce
     if (!::GetModuleFileNameW(nullptr, exePathBuf, MAXPATHLEN)) {
       MOZ_CRASH("GetModuleFileNameW failed (FIXME)");
     }
-    std::wstring exePathStr = exePathBuf;
 #if defined(MOZ_SANDBOX)
     // We need to start the child process using the real path, so that the
     // sandbox policy rules will match for DLLs loaded from the bin dir after
     // we have lowered the sandbox.
-    widget::WinUtils::ResolveJunctionPointsAndSymLinks(exePathStr);
+    std::wstring exePathStr = exePathBuf;
+    if (widget::WinUtils::ResolveJunctionPointsAndSymLinks(exePathStr)) {
+      exePath = FilePath::FromWStringHack(exePathStr);
+    } else
 #endif
-    exePath = FilePath::FromWStringHack(exePathStr);
+    {
+      exePath = FilePath::FromWStringHack(exePathBuf);
+    }
 #elif defined(OS_POSIX)
     exePath = FilePath(CommandLine::ForCurrentProcess()->argv()[0]);
 #else
@@ -319,6 +323,32 @@ GeckoChildProcessHost::PrepareLaunch()
     mSandboxLevel = GetEffectiveContentSandboxLevel();
     mEnableSandboxLogging =
       Preferences::GetBool("security.sandbox.logging.enabled");
+
+    // We currently have to whitelist certain paths for tests to work in some
+    // development configurations.
+    nsAutoString readPaths;
+    nsresult rv =
+      Preferences::GetString("security.sandbox.content.read_path_whitelist",
+                             readPaths);
+    if (NS_SUCCEEDED(rv)) {
+      for (const nsAString& readPath : readPaths.Split(',')) {
+        nsString trimmedPath(readPath);
+        trimmedPath.Trim(" ", true, true);
+        std::wstring resolvedPath(trimmedPath.Data());
+        // Before resolving check if path ends with '\' as this indicates we
+        // want to give read access to a directory and so it needs a wildcard.
+        bool addWildcard = (resolvedPath.back() == L'\\');
+        if (!widget::WinUtils::ResolveJunctionPointsAndSymLinks(resolvedPath)) {
+          NS_ERROR("Failed to resolve test read policy rule.");
+          continue;
+        }
+
+        if (addWildcard) {
+          resolvedPath.append(L"\\*");
+        }
+        mAllowedFilesRead.push_back(resolvedPath);
+      }
+    }
   }
 #endif
 

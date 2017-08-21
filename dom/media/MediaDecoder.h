@@ -22,7 +22,6 @@
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/StateMirroring.h"
 #include "mozilla/StateWatching.h"
-#include "mozilla/dom/AudioChannelBinding.h"
 #include "necko-config.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
@@ -52,7 +51,6 @@ enum class Visibility : uint8_t;
 struct MOZ_STACK_CLASS MediaDecoderInit
 {
   MediaDecoderOwner* const mOwner;
-  const dom::AudioChannel mAudioChannel;
   const double mVolume;
   const bool mPreservesPitch;
   const double mPlaybackRate;
@@ -62,7 +60,6 @@ struct MOZ_STACK_CLASS MediaDecoderInit
   const MediaContainerType mContainerType;
 
   MediaDecoderInit(MediaDecoderOwner* aOwner,
-                   dom::AudioChannel aAudioChannel,
                    double aVolume,
                    bool aPreservesPitch,
                    double aPlaybackRate,
@@ -71,7 +68,6 @@ struct MOZ_STACK_CLASS MediaDecoderInit
                    bool aLooping,
                    const MediaContainerType& aContainerType)
     : mOwner(aOwner)
-    , mAudioChannel(aAudioChannel)
     , mVolume(aVolume)
     , mPreservesPitch(aPreservesPitch)
     , mPlaybackRate(aPlaybackRate)
@@ -111,10 +107,6 @@ public:
   // Returns the container content type of the resource.
   // Safe to call from any thread.
   const MediaContainerType& ContainerType() const { return mContainerType; }
-
-  // Create a new state machine to run this decoder.
-  // Subclasses must implement this.
-  virtual MediaDecoderStateMachine* CreateStateMachine() = 0;
 
   // Cleanup internal data structures. Must be called on the main
   // thread by the owning object before that object disposes of this object.
@@ -211,7 +203,6 @@ public:
   // Must be called before Shutdown().
   bool OwnerHasError() const;
 
-public:
   // Returns true if this media supports random seeking. False for example with
   // chained ogg files.
   bool IsMediaSeekable();
@@ -309,8 +300,6 @@ private:
   // Returns true if we can play the entire media through without stopping
   // to buffer, given the current download and playback rates.
   bool CanPlayThrough();
-
-  dom::AudioChannel GetAudioChannel() { return mAudioChannel; }
 
   // Called from HTMLMediaElement when owner document activity changes
   virtual void SetElementVisibility(bool aIsDocumentVisible,
@@ -417,7 +406,7 @@ private:
 
   // Returns a string describing the state of the media player internal
   // data. Used for debugging purposes.
-  virtual void GetMozDebugReaderData(nsACString& aString) { }
+  virtual void GetMozDebugReaderData(nsACString& aString);
 
   virtual void DumpDebugInfo();
 
@@ -455,6 +444,12 @@ protected:
   }
 
   virtual void OnPlaybackEvent(MediaEventType aEvent);
+
+  // Called when the metadata from the media file has been loaded by the
+  // state machine. Call on the main thread only.
+  virtual void MetadataLoaded(UniquePtr<MediaInfo> aInfo,
+                              UniquePtr<MetadataTags> aTags,
+                              MediaDecoderEventVisibility aEventVisibility);
 
   /******
    * The following members should be accessed with the decoder lock held.
@@ -495,12 +490,6 @@ protected:
 
 private:
   nsCString GetDebugInfo();
-
-  // Called when the metadata from the media file has been loaded by the
-  // state machine. Call on the main thread only.
-  void MetadataLoaded(UniquePtr<MediaInfo> aInfo,
-                      UniquePtr<MetadataTags> aTags,
-                      MediaDecoderEventVisibility aEventVisibility);
 
   // Called when the owner's activity changed.
   void NotifyCompositor();
@@ -580,10 +569,6 @@ protected:
   // True when our media stream has been pinned. We pin the stream
   // while seeking.
   bool mPinnedForSeek;
-
-  // Be assigned from media element during the initialization and pass to
-  // AudioStream Class.
-  const dom::AudioChannel mAudioChannel;
 
   // True if the decoder has been directed to minimize its preroll before
   // playback starts. After the first time playback starts, we don't attempt

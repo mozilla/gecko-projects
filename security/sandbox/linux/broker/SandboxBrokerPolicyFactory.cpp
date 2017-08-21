@@ -79,19 +79,27 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory()
 #endif
 
 #ifdef MOZ_WIDGET_GTK
-  // Bug 1321134: DConf's single bit of shared memory
   if (const auto userDir = g_get_user_runtime_dir()) {
+    // Bug 1321134: DConf's single bit of shared memory
     // The leaf filename is "user" by default, but is configurable.
     nsPrintfCString shmPath("%s/dconf/", userDir);
     policy->AddPrefix(rdwrcr, shmPath.get());
+#ifdef MOZ_PULSEAUDIO
+    // PulseAudio, if it can't get server info from X11, will break
+    // unless it can open this directory (or create it, but in our use
+    // case we know it already exists).  See bug 1335329.
+    nsPrintfCString pulsePath("%s/pulse", userDir);
+    policy->AddPath(rdonly, pulsePath.get());
+#endif // MOZ_PULSEAUDIO
   }
-#endif
+#endif // MOZ_WIDGET_GTK
 
   // Read permissions
   policy->AddPath(rdonly, "/dev/urandom");
   policy->AddPath(rdonly, "/proc/cpuinfo");
   policy->AddPath(rdonly, "/proc/meminfo");
   policy->AddDir(rdonly, "/lib");
+  policy->AddDir(rdonly, "/lib64");
   policy->AddDir(rdonly, "/etc");
   policy->AddDir(rdonly, "/usr/share");
   policy->AddDir(rdonly, "/usr/local/share");
@@ -110,6 +118,13 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory()
 
   // Bug 1385715: NVIDIA PRIME support
   policy->AddPath(rdonly, "/proc/modules");
+
+#ifdef MOZ_PULSEAUDIO
+  // See bug 1384986 comment #1.
+  if (const auto xauth = PR_GetEnv("XAUTHORITY")) {
+    policy->AddPath(rdonly, xauth);
+  }
+#endif
 
   // Configuration dirs in the homedir that we want to allow read
   // access to.
@@ -215,7 +230,9 @@ UniquePtr<SandboxBroker::Policy>
 SandboxBrokerPolicyFactory::GetContentPolicy(int aPid, bool aFileProcess)
 {
   // Policy entries that vary per-process (currently the only reason
-  // that can happen is because they contain the pid) are added here.
+  // that can happen is because they contain the pid) are added here,
+  // as well as entries that depend on preferences or paths not available
+  // in early startup.
 
   MOZ_ASSERT(NS_IsMainThread());
   // File broker usage is controlled through a pref.
@@ -254,6 +271,11 @@ SandboxBrokerPolicyFactory::GetContentPolicy(int aPid, bool aFileProcess)
   // Bug 1198552: memory reporting.
   policy->AddPath(rdonly, nsPrintfCString("/proc/%d/statm", aPid).get());
   policy->AddPath(rdonly, nsPrintfCString("/proc/%d/smaps", aPid).get());
+
+  // Bug 1384804, notably comment 15
+  // Used by libnuma, included by x265/ffmpeg, who falls back
+  // to get_mempolicy if this fails
+  policy->AddPath(rdonly, nsPrintfCString("/proc/%d/status", aPid).get());
 
   // userContent.css and the extensions dir sit in the profile, which is
   // normally blocked and we can't get the profile dir earlier in startup,

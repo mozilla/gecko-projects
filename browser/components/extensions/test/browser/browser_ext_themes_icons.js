@@ -133,12 +133,10 @@ async function runTestWithIcons(icons) {
     ["synced_tabs", "#sync-button", "sync-button"],
     ["open_file", "#open-file-button", "open-file-button"],
     ["sidebars", "#sidebar-button", "sidebar-button"],
-    ["share_page", "#social-share-button", "social-share-button"],
     ["subscribe", "#feed-button", "feed-button"],
     ["text_encoding", "#characterencoding-button", "characterencoding-button"],
     ["email_link", "#email-link-button", "email-link-button"],
     ["forget", "#panic-button", "panic-button"],
-    ["pocket", "#pocket-button", "pocket-button"],
   ];
   // We add these at the beginning because adding them at the end can end up
   // putting them in the overflow panel, where they aren't displayed the same way.
@@ -207,12 +205,10 @@ add_task(async function test_all_icons() {
     ["synced_tabs", "fox.svg"],
     ["open_file", "fox.svg"],
     ["sidebars", "fox.svg"],
-    ["share_page", "fox.svg"],
     ["subscribe", "fox.svg"],
     ["text_encoding", "fox.svg"],
     ["email_link", "fox.svg"],
     ["forget", "fox.svg"],
-    ["pocket", "fox.svg"],
   ];
   await runTestWithIcons(icons);
 });
@@ -249,12 +245,10 @@ add_task(async function test_some_icons() {
     ["synced_tabs", ""],
     ["open_file", ""],
     ["sidebars", ""],
-    ["share_page", ""],
     ["subscribe", ""],
     ["text_encoding", ""],
     ["email_link", ""],
     ["forget", ""],
-    ["pocket", "fox.svg"],
   ];
   await runTestWithIcons(icons);
 });

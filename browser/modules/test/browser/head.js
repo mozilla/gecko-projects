@@ -76,14 +76,30 @@ let typeInSearchField = async function(browser, text, fieldName) {
   });
 };
 
+
 /**
- * Clear and get the SEARCH_COUNTS histogram.
+ * Clear and get the named histogram
+ * @param {String} name
+ *        The name of the histogram
  */
-function getSearchCountsHistogram() {
-  let search_hist = Services.telemetry.getKeyedHistogramById("SEARCH_COUNTS");
-  search_hist.clear();
-  return search_hist;
+function getAndClearHistogram(name) {
+  let histogram = Services.telemetry.getHistogramById(name);
+  histogram.clear();
+  return histogram;
 }
+
+
+/**
+ * Clear and get the named keyed histogram
+ * @param {String} name
+ *        The name of the keyed histogram
+ */
+function getAndClearKeyedHistogram(name) {
+  let histogram = Services.telemetry.getKeyedHistogramById(name);
+  histogram.clear();
+  return histogram;
+}
+
 
 /**
  * Check that the keyed histogram contains the right value.
@@ -228,3 +244,14 @@ function getPopupNotificationNode() {
   return popupNotifications[0];
 }
 
+
+/**
+ * Disable non-release page actions (that are tested elsewhere).
+ *
+ * @return void
+ */
+async function disableNonReleaseActions() {
+  if (AppConstants.MOZ_DEV_EDITION || AppConstants.NIGHTLY_BUILD) {
+    await SpecialPowers.pushPrefEnv({set: [["extensions.webcompat-reporter.enabled", false]]});
+  }
+}

@@ -339,6 +339,11 @@ public:
     return mSelectionProperties;
   }
 
+  bool HasPatternAttribute() const
+  {
+    return mHasPatternAttribute;
+  }
+
   // nsIConstraintValidation
   bool     IsTooLong();
   bool     IsTooShort();
@@ -513,6 +518,7 @@ public:
   // XPCOM GetForm() is OK
 
   FileList* GetFiles();
+  void SetFiles(FileList* aFiles);
 
   // XPCOM GetFormAction() is OK
   void SetFormAction(const nsAString& aValue, ErrorResult& aRv)
@@ -1666,6 +1672,7 @@ protected:
   bool                     mPickerRunning : 1;
   bool                     mSelectionCached : 1;
   bool                     mIsPreviewEnabled : 1;
+  bool                     mHasPatternAttribute : 1;
 
 private:
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,

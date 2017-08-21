@@ -45,9 +45,9 @@ use webdriver::command::{
     GetNamedCookieParameters, AddCookieParameters, TimeoutsParameters,
     ActionsParameters, TakeScreenshotParameters};
 use webdriver::response::{CloseWindowResponse, Cookie, CookieResponse, CookiesResponse,
-                          NewSessionResponse, RectResponse, TimeoutsResponse, ValueResponse,
-                          WebDriverResponse};
-use webdriver::common::{Date, ELEMENT_KEY, FrameId, Nullable, WebElement};
+                          ElementRectResponse, NewSessionResponse, TimeoutsResponse,
+                          ValueResponse, WebDriverResponse, WindowRectResponse};
+use webdriver::common::{Date, ELEMENT_KEY, FrameId, Nullable, WebElement, WindowState};
 use webdriver::error::{ErrorStatus, WebDriverError, WebDriverResult};
 use webdriver::server::{WebDriverHandler, Session};
 use webdriver::httpapi::{WebDriverExtensionRoute};
@@ -488,13 +488,10 @@ impl MarionetteHandler {
 
         prefs.insert_slice(&extra_prefs[..]);
 
-        // fallbacks can be removed when Firefox 54 becomes stable
         if let Some(ref level) = self.current_log_level {
             prefs.insert("marionette.log.level", Pref::new(level.to_string()));
-            prefs.insert("marionette.logging", Pref::new(level.to_string()));  // fallback
         };
         prefs.insert("marionette.port", Pref::new(port as i64));
-        prefs.insert("marionette.defaultPrefs.port", Pref::new(port as i64));  // fallback
 
         prefs.write().map_err(|_| WebDriverError::new(ErrorStatus::UnknownError,
                                                       "Unable to write Firefox profile"))
@@ -551,7 +548,16 @@ impl WebDriverHandler<GeckoExtensionRoute> for MarionetteHandler {
         match self.connection.lock() {
             Ok(ref mut connection) => {
                 match connection.as_mut() {
-                    Some(conn) => conn.send_command(resolved_capabilities, &msg),
+                    Some(conn) => {
+                        conn.send_command(resolved_capabilities, &msg)
+                            .map_err(|mut err| {
+                                // Shutdown the browser if no session can
+                                // be established due to errors.
+                                if let NewSession(_) = msg.command {
+                                    err.delete_session=true;
+                                }
+                                err})
+                    },
                     None => panic!("Connection missing")
                 }
             },
@@ -760,7 +766,8 @@ impl MarionetteSession {
                     ErrorStatus::UnknownError,
                     "Failed to interpret width as float");
 
-                WebDriverResponse::ElementRect(RectResponse::new(x, y, width, height))
+                let rect = ElementRectResponse { x, y, width, height };
+                WebDriverResponse::ElementRect(rect)
             },
             FullscreenWindow | MinimizeWindow | MaximizeWindow | GetWindowRect |
             SetWindowRect(_) => {
@@ -792,7 +799,13 @@ impl MarionetteSession {
                     ErrorStatus::UnknownError,
                     "Failed to interpret y as float");
 
-                WebDriverResponse::WindowRect(RectResponse::new(x, y, width, height))
+                let state = match resp.result.find("state") {
+                    Some(json) => WindowState::from_json(json)?,
+                    None => WindowState::Normal,
+                };
+
+                let rect = WindowRectResponse { x, y, width, height, state };
+                WebDriverResponse::WindowRect(rect)
             },
             GetCookies => {
                 let cookies = try!(self.process_cookies(&resp.result));
