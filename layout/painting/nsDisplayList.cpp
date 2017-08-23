@@ -4764,10 +4764,13 @@ nsDisplayLayerEventRegions::AddFrame(nsDisplayListBuilder* aBuilder,
 static void
 RemoveFrameFromFrameRects(nsDisplayLayerEventRegions::FrameRects& aFrameRects, nsIFrame* aFrame)
 {
-  for (uint32_t i = 0; i < aFrameRects.mFrames.Length(); i++) {
+  uint32_t i = 0;
+  while (i < aFrameRects.mFrames.Length()) {
     if (aFrameRects.mFrames[i] == aFrame) {
       aFrameRects.mFrames.RemoveElementAt(i);
       aFrameRects.mBoxes.RemoveElementAt(i);
+    } else {
+      i++;
     }
   }
 }

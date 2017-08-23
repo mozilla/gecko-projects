@@ -3657,7 +3657,8 @@ void MergeFrameRects(nsDisplayLayerEventRegions* aOldItem,
   // belonging to invalidated frames (deleted frames should
   // already be gone at this point)
   nsDisplayLayerEventRegions::FrameRects& oldRects = aOldItem->*aRectList;
-  for (uint32_t i = 0; i < oldRects.mFrames.Length(); i++) {
+  uint32_t i = 0;
+  while (i < oldRects.mFrames.Length()) {
     // TODO: As mentioned in nsDisplayLayerEventRegions, this
     // operation might perform really poorly on a vector.
     nsIFrame* f = oldRects.mFrames[i];
@@ -3666,6 +3667,8 @@ void MergeFrameRects(nsDisplayLayerEventRegions* aOldItem,
       f->RealDisplayItemData().RemoveElement(aOldItem);
       oldRects.mFrames.RemoveElementAt(i);
       oldRects.mBoxes.RemoveElementAt(i);
+    } else {
+      i++;
     }
   }
   if (!aNewItem) {

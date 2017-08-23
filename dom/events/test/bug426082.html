@@ -95,6 +95,8 @@ function* tests() {
   sendMouseEvent("mouseup", outside);
   yield undefined;
 
+  window.opener.ok(false, "unfocused the button");
+
   // Press the label.
   sendMouseEvent("mousemove", label);
   sendMouseEvent("mousedown", label);
