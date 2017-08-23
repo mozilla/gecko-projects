@@ -4332,10 +4332,6 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
       MarkFramesWithItemsAndImagesModified(&list);
     }
 
-    std::vector<WeakFrame> modifiedFrames = GetModifiedFrames(aFrame);
-    const bool paintedPreviously =
-      aFrame->HasProperty(nsIFrame::ModifiedFrameList());
-
     builder.EnterPresShell(aFrame);
     {
       // If a scrollable container layer is created in nsDisplayList::PaintForFrame,
@@ -4371,7 +4367,11 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
       uint32_t totalDisplayItems = 0;
       uint32_t reusedDisplayItems = 0;
 
+      const bool paintedPreviously =
+        aFrame->HasProperty(nsIFrame::ModifiedFrameList());
+
       if (retainedBuilder && paintedPreviously) {
+        std::vector<WeakFrame> modifiedFrames = GetModifiedFrames(aFrame);
         // printf("Attempting merge build with %lu modified frames\n", modifiedFrames.size());
 
         if (retainedBuilder->mPreviousCaret != builder.GetCaretFrame()) {
