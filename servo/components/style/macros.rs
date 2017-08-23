@@ -84,16 +84,9 @@ macro_rules! define_keyword_type {
     ($name: ident, $css: expr) => {
         #[allow(missing_docs)]
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-        #[derive(Clone, ComputeSquaredDistance, Copy, PartialEq, ToCss)]
+        #[derive(Animate, Clone, ComputeSquaredDistance, Copy, PartialEq)]
+        #[derive(ToAnimatedZero, ToCss)]
         pub struct $name;
-
-        impl $crate::properties::animated_properties::Animatable for $name {
-            #[inline]
-            fn add_weighted(&self, _other: &Self, _self_progress: f64, _other_progress: f64)
-                -> Result<Self, ()> {
-                Ok($name)
-            }
-        }
 
         impl fmt::Debug for $name {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -112,10 +105,5 @@ macro_rules! define_keyword_type {
         impl $crate::values::computed::ComputedValueAsSpecified for $name {}
         impl $crate::values::animated::AnimatedValueAsComputed for $name {}
         no_viewport_percentage!($name);
-
-        impl $crate::values::animated::ToAnimatedZero for $name {
-            #[inline]
-            fn to_animated_zero(&self) -> Result<Self, ()> { Ok($name) }
-        }
     };
 }

@@ -31,34 +31,15 @@
   --arrowpanel-dimmed-even-further: hsla(210,4%,10%,.17);
 
   --urlbar-separator-color: hsla(0,0%,16%,.2);
+
+  --toolbox-border-bottom-color: #e1e1e2;
 }
 
 :root:-moz-lwtheme {
   --toolbar-bgcolor: rgba(255,255,255,.4);
   --toolbar-bgimage: none;
-}
 
-#navigator-toolbox::after {
-  -moz-box-ordinal-group: 101; /* tabs toolbar is 100 */
-  content: "";
-  display: -moz-box;
-  border-top: 1px solid hsla(0,0%,100%,.15);
-  border-bottom: 1px solid hsla(0,0%,0%,.15);
-  margin-top: -2px;
-  position: relative;
-  z-index: 2; /* navbar is at 1 */
-}
-
-@media (-moz-mac-yosemite-theme) {
-  #navigator-toolbox:-moz-window-inactive::after {
-    border-top-style: none;
-    border-bottom-color: hsla(0,0%,0%,.1);
-    margin-top: -1px;
-  }
-}
-
-:root[customizing] #navigator-toolbox::after {
-  display: none;
+  --toolbox-border-bottom-color: rgba(0,0,0,.3);
 }
 
 #navigator-toolbox toolbarbutton:-moz-lwtheme {
@@ -132,11 +113,6 @@
 #navigator-toolbox > toolbar:not(#TabsToolbar) {
   -moz-appearance: none;
   background: var(--toolbar-bgcolor);
-}
-
-#navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):not(#nav-bar) {
-  /* add extra padding to compensate the bottom border */
-  padding-bottom: 2px;
 }
 
 /* Draw the bottom border of the tabs toolbar when it's not using
@@ -276,30 +252,6 @@
 .bookmark-item[cutting] > .toolbarbutton-text,
 .bookmark-item[cutting] > .menu-iconic-left > .menu-iconic-text {
   opacity: 0.7;
-}
-
-#bookmarks-toolbar-placeholder {
-  list-style-image: url("chrome://browser/skin/places/bookmarksToolbar.png") !important;
-}
-
-toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-placeholder,
-#personal-bookmarks[cui-areatype="menu-panel"] > #bookmarks-toolbar-placeholder {
-  list-style-image: url("chrome://browser/skin/places/bookmarksToolbar-menuPanel.png") !important;
-}
-
-@media (min-resolution: 2dppx) {
-  #bookmarks-toolbar-placeholder {
-    list-style-image: url("chrome://browser/skin/places/bookmarksToolbar@2x.png") !important;
-  }
-
-  toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-placeholder,
-  #personal-bookmarks[cui-areatype="menu-panel"] > #bookmarks-toolbar-placeholder {
-    list-style-image: url("chrome://browser/skin/places/bookmarksToolbar-menuPanel@2x.png") !important;
-  }
-
-  #bookmarks-toolbar-placeholder > .toolbarbutton-icon {
-    width: 16px;
-  }
 }
 
 /* ----- BOOKMARK MENUS ----- */
@@ -586,44 +538,6 @@ html|span.ac-emphasize-text-url {
 #BMB_bookmarksPopup[side="right"] {
   margin-top: -26px;
   margin-bottom: -26px;
-}
-
-/* POPUP BLOCKER BUTTON */
-#page-report-button {
-  list-style-image: url("chrome://browser/skin/urlbar-popup-blocked.png");
-  -moz-image-region: rect(0, 16px, 16px, 0);
-}
-
-#page-report-button:hover:active,
-#page-report-button[open="true"] {
-  -moz-image-region: rect(0, 32px, 16px, 16px);
-}
-
-@media (min-resolution: 2dppx) {
-  #page-report-button {
-    list-style-image: url("chrome://browser/skin/urlbar-popup-blocked@2x.png");
-    -moz-image-region: rect(0, 32px, 32px, 0);
-  }
-
-  #page-report-button:hover:active,
-  #page-report-button[open="true"] {
-    -moz-image-region: rect(0, 64px, 32px, 32px);
-  }
-}
-
-/* Reader mode button */
-
-#reader-mode-button {
-  list-style-image: url("chrome://browser/skin/readerMode.svg");
-  -moz-image-region: rect(0, 16px, 16px, 0);
-}
-
-#reader-mode-button:hover:active {
-  -moz-image-region: rect(0, 32px, 16px, 16px);
-}
-
-#reader-mode-button[readeractive] {
-  -moz-image-region: rect(0, 48px, 16px, 32px);
 }
 
 /* BOOKMARKING PANEL */
@@ -1298,8 +1212,6 @@ html|*.addon-webext-perm-list {
 %include ../shared/fullscreen/warning.inc.css
 %include ../shared/ctrlTab.inc.css
 %include ../shared/plugin-doorhanger.inc.css
-
-%include downloads/indicator.css
 
 /* On mac, the popup notification contents are indented by default and so
   the default closebutton margins from notification.css require adjustment */

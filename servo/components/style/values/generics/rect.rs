@@ -6,14 +6,14 @@
 
 use cssparser::Parser;
 use parser::{Parse, ParserContext};
-use properties::animated_properties::Animatable;
 use std::fmt;
 use style_traits::{ToCss, ParseError};
 
 /// A CSS value made of four components, where its `ToCss` impl will try to
 /// serialize as few components as possible, like for example in `border-width`.
-#[derive(Clone, ComputeSquaredDistance, Copy, Debug, HasViewportPercentage, PartialEq, ToComputedValue)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+#[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug)]
+#[derive(HasViewportPercentage, PartialEq, ToComputedValue)]
 pub struct Rect<T>(pub T, pub T, pub T, pub T);
 
 impl<T> Rect<T> {
@@ -49,24 +49,6 @@ impl<T> Rect<T>
         };
         // <first> <second> <third> <fourth>
         Ok(Self::new(first, second, third, fourth))
-    }
-}
-
-impl<L> Animatable for Rect<L>
-where
-    L: Animatable,
-{
-    fn add_weighted(
-        &self,
-        other: &Self,
-        self_portion: f64,
-        other_portion: f64,
-    ) -> Result<Self, ()> {
-        let first = self.0.add_weighted(&other.0, self_portion, other_portion)?;
-        let second = self.1.add_weighted(&other.1, self_portion, other_portion)?;
-        let third = self.2.add_weighted(&other.2, self_portion, other_portion)?;
-        let fourth = self.3.add_weighted(&other.3, self_portion, other_portion)?;
-        Ok(Rect(first, second, third, fourth))
     }
 }
 

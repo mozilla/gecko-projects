@@ -26,29 +26,14 @@ ${helpers.single_keyword("caption-side", "top bottom",
     use values::specified::length::NonNegativeLength;
 
     pub mod computed_value {
-        use properties::animated_properties::Animatable;
         use values::animated::{ToAnimatedValue, ToAnimatedZero};
         use values::computed::NonNegativeAu;
 
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-        #[derive(Clone, ComputeSquaredDistance, Copy, Debug, PartialEq, ToCss)]
+        #[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug, PartialEq, ToCss)]
         pub struct T {
             pub horizontal: NonNegativeAu,
             pub vertical: NonNegativeAu,
-        }
-
-        /// https://drafts.csswg.org/css-transitions/#animtype-simple-list
-        impl Animatable for T {
-            #[inline]
-            fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64)
-                -> Result<Self, ()> {
-                Ok(T {
-                    horizontal: self.horizontal.add_weighted(&other.horizontal,
-                                                             self_portion, other_portion)?,
-                    vertical: self.vertical.add_weighted(&other.vertical,
-                                                         self_portion, other_portion)?,
-                })
-            }
         }
 
         impl ToAnimatedZero for T {

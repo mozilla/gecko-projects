@@ -657,26 +657,6 @@
      };
 
      /**
-      * Gets the number of bytes available on disk to the current user.
-      *
-      * @param {string} sourcePath Platform-specific path to a directory on
-      * the disk to query for free available bytes.
-      *
-      * @return {number} The number of bytes available for the current user.
-      * @throws {OS.File.Error} In case of any error.
-      */
-     File.getAvailableFreeSpace = function Win_getAvailableFreeSpace(sourcePath) {
-       let freeBytesAvailableToUser = new Type.uint64_t.implementation(0);
-       let freeBytesAvailableToUserPtr = freeBytesAvailableToUser.address();
-
-       throw_on_zero("getAvailableFreeSpace",
-         WinFile.GetDiskFreeSpaceEx(sourcePath, freeBytesAvailableToUserPtr, null, null)
-       );
-
-       return freeBytesAvailableToUser.value;
-     };
-
-     /**
       * A global value used to receive data during time conversions.
       */
      let gSystemTime = new Type.SystemTime.implementation();
@@ -831,9 +811,9 @@
       *
       * Skip special directories "." and "..".
       *
-      * @return {File.Entry} The next entry in the directory.
-      * @throws {StopIteration} Once all files in the directory have been
-      * encountered.
+      * @return By definition of the iterator protocol, either
+      * `{value: {File.Entry}, done: false}` if there is an unvisited entry
+      * in the directory, or `{value: undefined, done: true}`, otherwise.
       */
      File.DirectoryIterator.prototype.next = function next() {
          // FIXME: If we start supporting "\\?\"-prefixed paths, do not forget
@@ -844,9 +824,12 @@
            if (name == "." || name == "..") {
              continue;
            }
-           return new File.DirectoryIterator.Entry(entry, this._path);
+           return {
+             value: new File.DirectoryIterator.Entry(entry, this._path),
+             done: false
+           };
          }
-         throw StopIteration;
+         return {value: undefined, done: true};
      };
 
      File.DirectoryIterator.prototype.close = function close() {

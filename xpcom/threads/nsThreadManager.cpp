@@ -117,7 +117,10 @@ nsThreadManager::Init()
   mMainThread = new nsThread(WrapNotNull(queue), nsThread::MAIN_THREAD, 0);
 
   prioritizedRef->SetMutexRef(queue->MutexRef());
+
+#ifndef RELEASE_OR_BETA
   prioritizedRef->SetNextIdleDeadlineRef(mMainThread->NextIdleDeadlineRef());
+#endif
 
   nsresult rv = mMainThread->InitCurrentThread();
   if (NS_FAILED(rv)) {
@@ -434,20 +437,30 @@ nsThreadManager::DispatchToMainThread(nsIRunnable *aEvent, uint32_t aPriority)
 void
 nsThreadManager::EnableMainThreadEventPrioritization()
 {
-  static bool sIsInitialized = false;
-  if (sIsInitialized) {
-    return;
-  }
-  sIsInitialized = true;
-  MOZ_ASSERT(Preferences::IsServiceAvailable());
-  bool enable =
-    Preferences::GetBool("prioritized_input_events.enabled", false);
-
-  if (!enable) {
-    return;
-  }
+  MOZ_ASSERT(NS_IsMainThread());
   InputEventStatistics::Get().SetEnable(true);
   mMainThread->EnableInputEventPrioritization();
+}
+
+void
+nsThreadManager::FlushInputEventPrioritization()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  mMainThread->FlushInputEventPrioritization();
+}
+
+void
+nsThreadManager::SuspendInputEventPrioritization()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  mMainThread->SuspendInputEventPrioritization();
+}
+
+void
+nsThreadManager::ResumeInputEventPrioritization()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  mMainThread->ResumeInputEventPrioritization();
 }
 
 NS_IMETHODIMP

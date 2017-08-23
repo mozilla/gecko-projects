@@ -10,7 +10,6 @@
 #include "nsIChannel.h"
 #include "nsIURI.h"
 #include "nsISeekableStream.h"
-#include "nsIStreamingProtocolController.h"
 #include "nsIStreamListener.h"
 #include "nsIChannelEventSink.h"
 #include "nsIInterfaceRequestor.h"
@@ -176,17 +175,6 @@ public:
   // each read.
   virtual bool ShouldCacheReads() = 0;
 
-  already_AddRefed<MediaByteBuffer> CachedReadAt(int64_t aOffset, uint32_t aCount)
-  {
-    RefPtr<MediaByteBuffer> bytes = new MediaByteBuffer();
-    bool ok = bytes->SetLength(aCount, fallible);
-    NS_ENSURE_TRUE(ok, nullptr);
-    char* curr = reinterpret_cast<char*>(bytes->Elements());
-    nsresult rv = ReadFromCache(curr, aOffset, aCount);
-    NS_ENSURE_SUCCESS(rv, nullptr);
-    return bytes.forget();
-  }
-
   // Report the current offset in bytes from the start of the stream.
   // This is used to approximate where we currently are in the playback of a
   // media.
@@ -214,15 +202,6 @@ public:
   // Returns true if all the data from aOffset to the end of the stream
   // is in cache. If the end of the stream is not known, we return false.
   virtual bool IsDataCachedToEndOfResource(int64_t aOffset) = 0;
-  // Returns true if we are expecting any more data to arrive
-  // sometime in the not-too-distant future, either from the network or from
-  // an appendBuffer call on a MediaSource element.
-  virtual bool IsExpectingMoreData()
-  {
-    // MediaDecoder::mDecoderPosition is roughly the same as Tell() which
-    // returns a position updated by latest Read() or ReadAt().
-    return !IsDataCachedToEndOfResource(Tell()) && !IsSuspended();
-  }
   // Returns true if this stream is suspended by the cache because the
   // cache is full. If true then the decoder should try to start consuming
   // data, otherwise we may not be able to make progress.
@@ -252,12 +231,6 @@ public:
    * aRanges is being used.
    */
   virtual nsresult GetCachedRanges(MediaByteRangeSet& aRanges) = 0;
-
-  // Returns true if the resource is a live stream.
-  virtual bool IsLiveStream()
-  {
-    return GetLength() == -1;
-  }
 
   virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const {
     return 0;
@@ -344,6 +317,9 @@ public:
   {
     return nullptr;
   }
+
+  // Returns true if the resource is a live stream.
+  bool IsLiveStream() { return GetLength() == -1; }
 
   size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override
   {
@@ -790,6 +766,19 @@ public:
     bytes->SetLength(curr - start);
     return bytes.forget();
   }
+
+  already_AddRefed<MediaByteBuffer> CachedMediaReadAt(int64_t aOffset,
+                                                      uint32_t aCount) const
+  {
+    RefPtr<MediaByteBuffer> bytes = new MediaByteBuffer();
+    bool ok = bytes->SetLength(aCount, fallible);
+    NS_ENSURE_TRUE(ok, nullptr);
+    char* curr = reinterpret_cast<char*>(bytes->Elements());
+    nsresult rv = mResource->ReadFromCache(curr, aOffset, aCount);
+    NS_ENSURE_SUCCESS(rv, nullptr);
+    return bytes.forget();
+  }
+
   // Get the length of the stream in bytes. Returns -1 if not known.
   // This can change over time; after a seek operation, a misbehaving
   // server may give us a resource of a different length to what it had

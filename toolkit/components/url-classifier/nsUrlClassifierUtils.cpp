@@ -249,12 +249,15 @@ static const struct {
   { "goog-phish-proto",    SOCIAL_ENGINEERING},              // 5
 
   // For application reputation
-  { "goog-badbinurl-proto", MALICIOUS_BINARY},         // 7
+  { "goog-badbinurl-proto", MALICIOUS_BINARY},            // 7
   { "goog-downloadwhite-proto", CSD_DOWNLOAD_WHITELIST},  // 9
+
+  // For login reputation
+  { "goog-passwordwhite-proto", CSD_WHITELIST}, // 8
 
   // For testing purpose.
   { "test-phish-proto",    SOCIAL_ENGINEERING_PUBLIC}, // 2
-  { "test-unwanted-proto", UNWANTED_SOFTWARE}, // 3
+  { "test-unwanted-proto", UNWANTED_SOFTWARE},         // 3
 };
 
 NS_IMETHODIMP
@@ -331,10 +334,10 @@ nsUrlClassifierUtils::GetProtocolVersion(const nsACString& aProvider,
   if (prefBranch) {
       nsPrintfCString prefName("browser.safebrowsing.provider.%s.pver",
                                nsCString(aProvider).get());
-      nsXPIDLCString version;
+      nsCString version;
       nsresult rv = prefBranch->GetCharPref(prefName.get(), getter_Copies(version));
 
-      aVersion = NS_SUCCEEDED(rv) ? version : DEFAULT_PROTOCOL_VERSION;
+      aVersion = NS_SUCCEEDED(rv) ? version.get() : DEFAULT_PROTOCOL_VERSION;
   } else {
       aVersion = DEFAULT_PROTOCOL_VERSION;
   }

@@ -257,17 +257,8 @@ protected:
   using Master = MediaDecoderStateMachine;
   explicit StateObject(Master* aPtr) : mMaster(aPtr) { }
   TaskQueue* OwnerThread() const { return mMaster->mTaskQueue; }
-  MediaResource* Resource() const { return mMaster->mResource; }
   ReaderProxy* Reader() const { return mMaster->mReader; }
   const MediaInfo& Info() const { return mMaster->Info(); }
-  bool IsExpectingMoreData() const
-  {
-    // We are expecting more data if either the resource states so, or if we
-    // have a waiting promise pending (such as with non-MSE EME).
-    return Resource()->IsExpectingMoreData()
-           || mMaster->IsWaitingAudioData()
-           || mMaster->IsWaitingVideoData();
-  }
   MediaQueue<AudioData>& AudioQueue() const { return mMaster->mAudioQueue; }
   MediaQueue<VideoData>& VideoQueue() const { return mMaster->mVideoQueue; }
 
@@ -2006,9 +1997,6 @@ public:
       }
       mMaster->UpdatePlaybackPosition(clockTime);
 
-      // Ensure readyState is updated before firing the 'ended' event.
-      mMaster->UpdateNextFrameStatus(MediaDecoderOwner::NEXT_FRAME_UNAVAILABLE);
-
       mMaster->mOnPlaybackEvent.Notify(MediaEventType::PlaybackEnded);
 
       mSentPlaybackEndedEvent = true;
@@ -2481,8 +2469,7 @@ SeekingState::SeekCompleted()
 {
   const auto newCurrentTime = CalculateNewCurrentTime();
 
-  bool isLiveStream = Resource()->IsLiveStream();
-  if (newCurrentTime == mMaster->Duration() && !isLiveStream) {
+  if (newCurrentTime == mMaster->Duration() && !mMaster->mIsLiveStream) {
     // Seeked to end of media. Explicitly finish the queues so DECODING
     // will transition to COMPLETED immediately. Note we don't do
     // this when playing a live stream, since the end of media will advance
@@ -2698,7 +2685,6 @@ MediaDecoderStateMachine::MediaDecoderStateMachine(MediaDecoder* aDecoder,
   mVideoDecodeSuspended(false),
   mVideoDecodeSuspendTimer(mTaskQueue),
   mOutputStreamManager(new OutputStreamManager()),
-  mResource(aDecoder->GetResource()),
   mVideoDecodeMode(VideoDecodeMode::Normal),
   mIsMSE(aDecoder->IsMSE()),
   INIT_MIRROR(mBuffered, TimeIntervals()),
@@ -3466,10 +3452,8 @@ MediaDecoderStateMachine::FinishDecodeFirstFrame()
 
   mMediaSink->Redraw(Info().mVideo);
 
-  LOG("Media duration %" PRId64 ", "
-      "transportSeekable=%d, mediaSeekable=%d",
-      Duration().ToMicroseconds(), mResource->IsTransportSeekable(),
-      mMediaSeekable);
+  LOG("Media duration %" PRId64 ", mediaSeekable=%d",
+      Duration().ToMicroseconds(), mMediaSeekable);
 
   // Get potentially updated metadata
   mReader->ReadUpdatedMetadata(mInfo.ptr());

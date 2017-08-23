@@ -28,6 +28,7 @@
 #include "nsITooltipListener.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/TabContext.h"
+#include "mozilla/dom/CoalescedMouseData.h"
 #include "mozilla/dom/CoalescedWheelData.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/EventDispatcher.h"
@@ -70,6 +71,7 @@ namespace dom {
 class TabChild;
 class TabGroup;
 class ClonedMessageData;
+class CoalescedMouseData;
 class CoalescedWheelData;
 
 class TabChildGlobal : public DOMEventTargetHelper,
@@ -269,6 +271,7 @@ class TabChild final : public TabChildBase,
                        public mozilla::ipc::IShmemAllocator
 {
   typedef mozilla::dom::ClonedMessageData ClonedMessageData;
+  typedef mozilla::dom::CoalescedMouseData CoalescedMouseData;
   typedef mozilla::dom::CoalescedWheelData CoalescedWheelData;
   typedef mozilla::layout::RenderFrameChild RenderFrameChild;
   typedef mozilla::layers::APZEventState APZEventState;
@@ -384,13 +387,26 @@ public:
                                                          const ScrollableLayerGuid& aGuid,
                                                          const uint64_t& aInputBlockId) override;
 
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPriorityRealMouseMoveEvent(const mozilla::WidgetMouseEvent& aEvent,
+                                       const ScrollableLayerGuid& aGuid,
+                                       const uint64_t& aInputBlockId) override;
+
   virtual mozilla::ipc::IPCResult RecvSynthMouseMoveEvent(const mozilla::WidgetMouseEvent& aEvent,
                                                           const ScrollableLayerGuid& aGuid,
                                                           const uint64_t& aInputBlockId) override;
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPrioritySynthMouseMoveEvent(const mozilla::WidgetMouseEvent& aEvent,
+                                        const ScrollableLayerGuid& aGuid,
+                                        const uint64_t& aInputBlockId) override;
 
   virtual mozilla::ipc::IPCResult RecvRealMouseButtonEvent(const mozilla::WidgetMouseEvent& aEvent,
                                                            const ScrollableLayerGuid& aGuid,
                                                            const uint64_t& aInputBlockId) override;
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPriorityRealMouseButtonEvent(const mozilla::WidgetMouseEvent& aEvent,
+                                         const ScrollableLayerGuid& aGuid,
+                                         const uint64_t& aInputBlockId) override;
 
   virtual mozilla::ipc::IPCResult RecvRealDragEvent(const WidgetDragEvent& aEvent,
                                                     const uint32_t& aDragAction,
@@ -399,9 +415,17 @@ public:
   virtual mozilla::ipc::IPCResult
   RecvRealKeyEvent(const mozilla::WidgetKeyboardEvent& aEvent) override;
 
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPriorityRealKeyEvent(const mozilla::WidgetKeyboardEvent& aEvent) override;
+
   virtual mozilla::ipc::IPCResult RecvMouseWheelEvent(const mozilla::WidgetWheelEvent& aEvent,
                                                       const ScrollableLayerGuid& aGuid,
                                                       const uint64_t& aInputBlockId) override;
+
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPriorityMouseWheelEvent(const mozilla::WidgetWheelEvent& aEvent,
+                                    const ScrollableLayerGuid& aGuid,
+                                    const uint64_t& aInputBlockId) override;
 
   virtual mozilla::ipc::IPCResult RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
                                                      const ScrollableLayerGuid& aGuid,
@@ -409,10 +433,22 @@ public:
                                                      const nsEventStatus& aApzResponse) override;
 
   virtual mozilla::ipc::IPCResult
+  RecvNormalPriorityRealTouchEvent(const WidgetTouchEvent& aEvent,
+                                   const ScrollableLayerGuid& aGuid,
+                                   const uint64_t& aInputBlockId,
+                                   const nsEventStatus& aApzResponse) override;
+
+  virtual mozilla::ipc::IPCResult
   RecvRealTouchMoveEvent(const WidgetTouchEvent& aEvent,
                          const ScrollableLayerGuid& aGuid,
                          const uint64_t& aInputBlockId,
                          const nsEventStatus& aApzResponse) override;
+
+  virtual mozilla::ipc::IPCResult
+  RecvNormalPriorityRealTouchMoveEvent(const WidgetTouchEvent& aEvent,
+                                       const ScrollableLayerGuid& aGuid,
+                                       const uint64_t& aInputBlockId,
+                                       const nsEventStatus& aApzResponse) override;
 
   virtual mozilla::ipc::IPCResult RecvKeyEvent(const nsString& aType,
                                                const int32_t& aKeyCode,
@@ -658,6 +694,14 @@ public:
                                         const Modifiers& aModifiers,
                                         const ScrollableLayerGuid& aGuid,
                                         const uint64_t& aInputBlockId) override;
+
+  mozilla::ipc::IPCResult
+  RecvNormalPriorityHandleTap(const layers::GeckoContentController::TapType& aType,
+                              const LayoutDevicePoint& aPoint,
+                              const Modifiers& aModifiers,
+                              const ScrollableLayerGuid& aGuid,
+                              const uint64_t& aInputBlockId) override;
+
   void SetAllowedTouchBehavior(uint64_t aInputBlockId,
                                const nsTArray<TouchBehaviorFlags>& aFlags) const;
 
@@ -707,6 +751,8 @@ public:
   {
     return mWidgetNativeData;
   }
+
+  void MaybeDispatchCoalescedMouseMoveEvents();
 
 protected:
   virtual ~TabChild();
@@ -875,7 +921,9 @@ private:
   // takes time, some repeated events can be skipped to not flood child process.
   mozilla::TimeStamp mLastWheelProcessedTimeFromParent;
   mozilla::TimeDuration mLastWheelProcessingDuration;
+  CoalescedMouseData mCoalescedMouseData;
   CoalescedWheelData mCoalescedWheelData;
+  RefPtr<CoalescedMouseMoveFlusher> mCoalescedMouseEventFlusher;
 
   RefPtr<layers::IAPZCTreeManager> mApzcTreeManager;
 
@@ -890,6 +938,7 @@ private:
 #if defined(ACCESSIBILITY)
   PDocAccessibleChild* mTopLevelDocAccessibleChild;
 #endif
+  bool mCoalesceMouseMoveEvents;
 
   bool mPendingDocShellIsActive;
   bool mPendingDocShellPreserveLayers;

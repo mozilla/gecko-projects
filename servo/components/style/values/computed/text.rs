@@ -4,7 +4,6 @@
 
 //! Computed types for text properties.
 
-use properties::animated_properties::Animatable;
 use values::{CSSInteger, CSSFloat};
 use values::animated::ToAnimatedZero;
 use values::computed::{NonNegativeAu, NonNegativeNumber};
@@ -24,28 +23,6 @@ pub type WordSpacing = Spacing<LengthOrPercentage>;
 
 /// A computed value for the `line-height` property.
 pub type LineHeight = GenericLineHeight<NonNegativeNumber, NonNegativeAu>;
-
-impl Animatable for LineHeight {
-    #[inline]
-    fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
-        match (*self, *other) {
-            (GenericLineHeight::Length(ref this), GenericLineHeight::Length(ref other)) => {
-                this.add_weighted(other, self_portion, other_portion).map(GenericLineHeight::Length)
-            },
-            (GenericLineHeight::Number(ref this), GenericLineHeight::Number(ref other)) => {
-                this.add_weighted(other, self_portion, other_portion).map(GenericLineHeight::Number)
-            },
-            (GenericLineHeight::Normal, GenericLineHeight::Normal) => {
-                Ok(GenericLineHeight::Normal)
-            },
-            #[cfg(feature = "gecko")]
-            (GenericLineHeight::MozBlockHeight, GenericLineHeight::MozBlockHeight) => {
-                Ok(GenericLineHeight::MozBlockHeight)
-            },
-            _ => Err(()),
-        }
-    }
-}
 
 impl ToAnimatedZero for LineHeight {
     #[inline]

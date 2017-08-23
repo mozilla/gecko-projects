@@ -105,7 +105,24 @@ public:
     EventQueue()->EnableInputEventPrioritization();
   }
 
+  void FlushInputEventPrioritization()
+  {
+    EventQueue()->FlushInputEventPrioritization();
+  }
+
+  void SuspendInputEventPrioritization()
+  {
+    EventQueue()->SuspendInputEventPrioritization();
+  }
+
+  void ResumeInputEventPrioritization()
+  {
+    EventQueue()->ResumeInputEventPrioritization();
+  }
+
+#ifndef RELEASE_OR_BETA
   mozilla::TimeStamp& NextIdleDeadlineRef() { return mNextIdleDeadline; }
+#endif
 
   mozilla::SynchronizedEventQueue* EventQueue() { return mEvents.get(); }
 

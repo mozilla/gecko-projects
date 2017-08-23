@@ -4,6 +4,12 @@
 
 /* Sidebars */
 
+#history-panel,
+#bookmarksPanel {
+  -moz-appearance: none;
+  background-color: transparent;
+}
+
 #sidebar-search-container {
   padding: 4px;
 }

@@ -107,7 +107,7 @@ element.Store = class {
   /**
    * Make an element seen.
    *
-   * @param {nsIDOMElement} el
+   * @param {Element} el
    *    Element to add to set of seen elements.
    *
    * @return {string}
@@ -155,10 +155,10 @@ element.Store = class {
    *
    * @param {string} uuid
    *     Web element reference, or UUID.
-   * @param {(nsIDOMWindow|ShadowRoot)} container
-   * Window and an optional shadow root that contains the element.
+   * @param {Object.<string, (WindowProxy|Element)} container
+   *     Window and an optional shadow root that contains the element.
    *
-   * @returns {nsIDOMElement}
+   * @returns {Element}
    *     Element associated with reference.
    *
    * @throws {NoSuchElementError}
@@ -181,24 +181,11 @@ element.Store = class {
       delete this.els[uuid];
     }
 
-    // use XPCNativeWrapper to compare elements (see bug 834266)
-    let wrappedFrame = new XPCNativeWrapper(container.frame);
-    let wrappedShadowRoot;
-    if (container.shadowRoot) {
-      wrappedShadowRoot = new XPCNativeWrapper(container.shadowRoot);
-    }
-    let wrappedEl = new XPCNativeWrapper(el);
-    let wrappedContainer = {
-      frame: wrappedFrame,
-      shadowRoot: wrappedShadowRoot,
-    };
-    if (!el ||
-        !(wrappedEl.ownerDocument == wrappedFrame.document) ||
-        element.isDisconnected(wrappedEl, wrappedContainer)) {
+    if (element.isStale(el, container.frame, container.shadowRoot)) {
       throw new StaleElementReferenceError(
-          error.pprint`The element reference of ${el} stale: ` +
+          error.pprint`The element reference of ${el} stale; ` +
               "either the element is no longer attached to the DOM " +
-              "or the page has been refreshed");
+              "or the document has been refreshed");
     }
 
     return el;
@@ -216,38 +203,41 @@ element.Store = class {
  * See the |element.Strategy| enum for a full list of supported
  * search strategies that can be passed to |strategy|.
  *
- * Available flags for |opts|:
+ * Available flags for <var>opts</var>:
  *
- *     |all|
- *       If true, a multi-element search selector is used and a sequence
- *       of elements will be returned.  Otherwise a single element.
+ * <dl>
+ *   <dt><code>all</code>
+ *   <dd>
+ *     If true, a multi-element search selector is used and a sequence
+ *     of elements will be returned.  Otherwise a single element.
  *
- *     |timeout|
- *       Duration to wait before timing out the search.  If |all| is
- *       false, a NoSuchElementError is thrown if unable to find
- *       the element within the timeout duration.
+ *   <dt><code>timeout</code>
+ *   <dd>
+ *     Duration to wait before timing out the search.  If <code>all</code>
+ *     is false, a {@link NoSuchElementError} is thrown if unable to
+ *     find the element within the timeout duration.
  *
- *     |startNode|
- *       Element to use as the root of the search.
+ *   <dt><code>startNode</code>
+ *   <dd>Element to use as the root of the search.
  *
- * @param {Object.<string, Window>} container
+ * @param {Object.<string, WindowProxy>} container
  *     Window object and an optional shadow root that contains the
  *     root shadow DOM element.
  * @param {string} strategy
  *     Search strategy whereby to locate the element(s).
  * @param {string} selector
  *     Selector search pattern.  The selector must be compatible with
- *     the chosen search |strategy|.
+ *     the chosen search <var>strategy</var>.
  * @param {Object.<string, ?>} opts
  *     Options.
  *
- * @return {Promise.<(nsIDOMElement|Array.<nsIDOMElement>)>}
+ * @return {Promise.<(Element|Array.<Element>)>}
  *     Single element or a sequence of elements.
  *
  * @throws InvalidSelectorError
- *     If |strategy| is unknown.
+ *     If <var>strategy</var> is unknown.
  * @throws InvalidSelectorError
- *     If |selector| is malformed.
+ *     If <var>selector</var> is malformed.
  * @throws NoSuchElementError
  *     If a single element is requested, this error will throw if the
  *     element is not found.
@@ -634,10 +624,51 @@ element.generateUUID = function() {
 };
 
 /**
+ * Determines if <var>el</var> is stale.
+ *
+ * A stale element is an element no longer attached to the DOM, which
+ * is provided through <var>window</var>.
+ *
+ * @param {Element} el
+ *     DOM element to check for staleness.
+ * @param {WindowProxy} window
+ *     Window global to check if <var>el</var> is still part of.
+ * @param {Element=} shadowRoot
+ *     Current shadow root element.
+ *
+ * @return {boolean}
+ *     True if <var>el</var> is stale, false otherwise.
+ */
+element.isStale = function(el, window, shadowRoot = undefined) {
+  if (typeof window == "undefined") {
+    throw new TypeError("Window global must be provided for staleness check");
+  }
+
+  // use XPCNativeWrapper to compare elements (see bug 834266)
+  let wrappedElement, wrappedWindow, wrappedShadowRoot;
+
+  wrappedElement = new XPCNativeWrapper(el);
+  wrappedWindow = new XPCNativeWrapper(window);
+  if (shadowRoot) {
+    wrappedShadowRoot = new XPCNativeWrapper(shadowRoot);
+  }
+
+  const container = {
+    frame: wrappedWindow,
+    shadowRoot: wrappedShadowRoot,
+  };
+
+  let sameDoc = wrappedElement.ownerDocument === wrappedWindow.document;
+  let disconn = element.isDisconnected(wrappedElement, container);
+
+  return !el || !sameDoc || disconn;
+};
+
+/**
  * Check if the element is detached from the current frame as well as
  * the optional shadow root (when inside a Shadow DOM context).
  *
- * @param {nsIDOMElement} el
+ * @param {Element} el
  *     Element to be checked.
  * @param {Container} container
  *     Container with |frame|, which is the window object that contains
@@ -881,24 +912,25 @@ element.isObscured = function(el) {
  * rectangle that is inside the viewport.
  *
  * @param {DOMRect} rect
- *     Element off a DOMRect sequence produced by calling |getClientRects|
- *     on a |DOMElement|.
- * @param {nsIDOMWindow} win
- *     Current browsing context.
+ *     Element off a DOMRect sequence produced by calling
+ *     <code>getClientRects</code> on an {@link Element}.
+ * @param {WindowProxy} window
+ *     Current window global.
  *
  * @return {Map.<string, number>}
- *     X and Y coordinates that denotes the in-view centre point of |rect|.
+ *     X and Y coordinates that denotes the in-view centre point of
+ *     <var>rect</var>.
  */
-element.getInViewCentrePoint = function(rect, win) {
+element.getInViewCentrePoint = function(rect, window) {
   const {max, min} = Math;
 
   let x = {
     left: max(0, min(rect.x, rect.x + rect.width)),
-    right: min(win.innerWidth, max(rect.x, rect.x + rect.width)),
+    right: min(window.innerWidth, max(rect.x, rect.x + rect.width)),
   };
   let y = {
     top: max(0, min(rect.y, rect.y + rect.height)),
-    bottom: min(win.innerHeight, max(rect.y, rect.y + rect.height)),
+    bottom: min(window.innerHeight, max(rect.y, rect.y + rect.height)),
   };
 
   return {

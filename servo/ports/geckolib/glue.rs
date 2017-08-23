@@ -25,6 +25,7 @@ use style::gecko::restyle_damage::GeckoRestyleDamage;
 use style::gecko::selector_parser::PseudoElement;
 use style::gecko::traversal::RecalcStyleOnly;
 use style::gecko::wrapper::GeckoElement;
+use style::gecko_bindings::bindings;
 use style::gecko_bindings::bindings::{RawGeckoElementBorrowed, RawGeckoElementBorrowedOrNull};
 use style::gecko_bindings::bindings::{RawGeckoKeyframeListBorrowed, RawGeckoKeyframeListBorrowedMut};
 use style::gecko_bindings::bindings::{RawServoDeclarationBlockBorrowed, RawServoDeclarationBlockStrong};
@@ -105,7 +106,7 @@ use style::properties::{IS_FIELDSET_CONTENT, IS_LINK, IS_VISITED_LINK, LonghandI
 use style::properties::{PropertyDeclaration, PropertyDeclarationBlock, PropertyId, ShorthandId};
 use style::properties::{SKIP_ROOT_AND_ITEM_BASED_DISPLAY_FIXUP, SourcePropertyDeclaration, StyleBuilder};
 use style::properties::PROHIBIT_DISPLAY_CONTENTS;
-use style::properties::animated_properties::{Animatable, AnimatableLonghand, AnimationValue};
+use style::properties::animated_properties::{AnimatableLonghand, AnimationValue};
 use style::properties::animated_properties::compare_property_priority;
 use style::properties::parse_one_declaration_into;
 use style::rule_tree::StyleSource;
@@ -128,7 +129,7 @@ use style::traversal::{DomTraversal, TraversalDriver};
 use style::traversal::resolve_style;
 use style::traversal_flags::{TraversalFlags, self};
 use style::values::{CustomIdent, KeyframesName};
-use style::values::animated::ToAnimatedZero;
+use style::values::animated::{Animate, Procedure, ToAnimatedZero};
 use style::values::computed::Context;
 use style::values::distance::ComputeSquaredDistance;
 use style_traits::{PARSING_MODE_DEFAULT, ToCss};
@@ -215,7 +216,7 @@ fn traverse_subtree(element: GeckoElement,
     }
 
     let per_doc_data = PerDocumentStyleData::from_ffi(raw_data).borrow();
-    debug_assert!(!per_doc_data.stylesheets.has_changed());
+    debug_assert!(!per_doc_data.stylist.stylesheets_have_changed());
 
     let global_style_data = &*GLOBAL_STYLE_DATA;
     let guard = global_style_data.shared_lock.read();
@@ -291,14 +292,14 @@ pub extern "C" fn Servo_TraverseSubtree(root: RawGeckoElementBorrowed,
                      traversal_flags,
                      unsafe { &*snapshots });
 
-    debug!("Servo_TraverseSubtree complete (dd={}, aodd={}, restyle={:?})",
+    debug!("Servo_TraverseSubtree complete (dd={}, aodd={}, lfcd={}, lfc={}, restyle={:?})",
            element.has_dirty_descendants(),
            element.has_animation_only_dirty_descendants(),
+           element.descendants_need_frames(),
+           element.needs_frame(),
            element.borrow_data().unwrap().restyle);
 
-    element.has_dirty_descendants() ||
-    element.has_animation_only_dirty_descendants() ||
-    element.borrow_data().unwrap().restyle.contains_restyle_data()
+    element.needs_post_traversal()
 }
 
 /// Checks whether the rule tree has crossed its threshold for unused nodes, and
@@ -319,7 +320,7 @@ pub extern "C" fn Servo_AnimationValues_Interpolate(from: RawServoAnimationValue
 {
     let from_value = AnimationValue::as_arc(&from);
     let to_value = AnimationValue::as_arc(&to);
-    if let Ok(value) = from_value.interpolate(to_value, progress) {
+    if let Ok(value) = from_value.animate(to_value, Procedure::Interpolate { progress }) {
         Arc::new(value).into_strong()
     } else {
         RawServoAnimationValueStrong::null()
@@ -332,7 +333,7 @@ pub extern "C" fn Servo_AnimationValues_IsInterpolable(from: RawServoAnimationVa
                                                        -> bool {
     let from_value = AnimationValue::as_arc(&from);
     let to_value = AnimationValue::as_arc(&to);
-    from_value.interpolate(to_value, 0.5).is_ok()
+    from_value.animate(to_value, Procedure::Interpolate { progress: 0.5 }).is_ok()
 }
 
 #[no_mangle]
@@ -342,7 +343,7 @@ pub extern "C" fn Servo_AnimationValues_Add(a: RawServoAnimationValueBorrowed,
 {
     let a_value = AnimationValue::as_arc(&a);
     let b_value = AnimationValue::as_arc(&b);
-    if let Ok(value) = a_value.add(b_value) {
+    if let Ok(value) = a_value.animate(b_value, Procedure::Add) {
         Arc::new(value).into_strong()
     } else {
         RawServoAnimationValueStrong::null()
@@ -357,7 +358,7 @@ pub extern "C" fn Servo_AnimationValues_Accumulate(a: RawServoAnimationValueBorr
 {
     let a_value = AnimationValue::as_arc(&a);
     let b_value = AnimationValue::as_arc(&b);
-    if let Ok(value) = a_value.accumulate(b_value, count) {
+    if let Ok(value) = a_value.animate(b_value, Procedure::Accumulate { count }) {
         Arc::new(value).into_strong()
     } else {
         RawServoAnimationValueStrong::null()
@@ -463,12 +464,16 @@ pub extern "C" fn Servo_AnimationCompose(raw_value_map: RawServoAnimationValueMa
                     CompositeOperation::Add => {
                         debug_assert!(need_underlying_value,
                                       "Should have detected we need an underlying value");
-                        underlying_value.as_ref().unwrap().add(keyframe_value).ok()
+                        underlying_value.as_ref().unwrap().animate(keyframe_value, Procedure::Add).ok()
                     },
                     CompositeOperation::Accumulate => {
                         debug_assert!(need_underlying_value,
                                       "Should have detected we need an underlying value");
-                        underlying_value.as_ref().unwrap().accumulate(keyframe_value, 1).ok()
+                        underlying_value
+                            .as_ref()
+                            .unwrap()
+                            .animate(keyframe_value, Procedure::Accumulate { count: 1 })
+                            .ok()
                     },
                     _ => None,
                 }
@@ -507,11 +512,17 @@ pub extern "C" fn Servo_AnimationCompose(raw_value_map: RawServoAnimationValueMa
                                         -> Option<AnimationValue> {
             let count = computed_timing.mCurrentIteration;
             match composited_value {
-                Some(endpoint) => last_value.accumulate(&endpoint, count)
-                                            .ok()
-                                            .or(Some(endpoint)),
-                None => last_value.accumulate(keyframe_value.unwrap(), count)
-                                  .ok(),
+                Some(endpoint) => {
+                    last_value
+                        .animate(&endpoint, Procedure::Accumulate { count })
+                        .ok()
+                        .or(Some(endpoint))
+                },
+                None => {
+                    last_value
+                        .animate(keyframe_value.unwrap(), Procedure::Accumulate { count })
+                        .ok()
+                },
             }
         };
 
@@ -535,12 +546,12 @@ pub extern "C" fn Servo_AnimationCompose(raw_value_map: RawServoAnimationValueMa
         return;
     }
 
-    let position = unsafe {
+    let pos = unsafe {
         Gecko_GetPositionInSegment(segment, progress, computed_timing.mBeforeFlag)
     };
-    if let Ok(value) = from_value.interpolate(to_value, position) {
+    if let Ok(value) = from_value.animate(to_value, Procedure::Interpolate { progress: pos }) {
         value_map.insert(property, value);
-    } else if position < 0.5 {
+    } else if pos < 0.5 {
         value_map.insert(property, from_value.clone());
     } else {
         value_map.insert(property, to_value.clone());
@@ -817,6 +828,14 @@ pub extern "C" fn Servo_Element_GetPseudoComputedValues(element: RawGeckoElement
 }
 
 #[no_mangle]
+pub extern "C" fn Servo_Element_IsDisplayNone(element: RawGeckoElementBorrowed) -> bool
+{
+    let element = GeckoElement(element);
+    let data = element.borrow_data().expect("Invoking Servo_Element_IsDisplayNone on unstyled element");
+    data.styles.is_display_none()
+}
+
+#[no_mangle]
 pub extern "C" fn Servo_StyleSheet_Empty(mode: SheetParsingMode) -> RawServoStyleSheetContentsStrong {
     let global_style_data = &*GLOBAL_STYLE_DATA;
     let origin = match mode {
@@ -892,7 +911,7 @@ pub extern "C" fn Servo_StyleSet_AppendStyleSheet(
     let data = &mut *data;
     let guard = global_style_data.shared_lock.read();
     let sheet = unsafe { GeckoStyleSheet::new(sheet) };
-    data.stylesheets.append_stylesheet(Some(data.stylist.device()), sheet, &guard);
+    data.stylist.append_stylesheet(sheet, &guard);
 }
 
 #[no_mangle]
@@ -920,10 +939,7 @@ pub extern "C" fn Servo_StyleSet_MediumFeaturesChanged(
     }
     data.stylist.device_mut().reset_computed_values();
     let origins_in_which_rules_changed =
-        data.stylist.media_features_change_changed_style(
-            data.stylesheets.iter(),
-            &guard,
-        );
+        data.stylist.media_features_change_changed_style(&guard);
 
     // We'd like to return `OriginFlags` here, but bindgen bitfield enums don't
     // work as return values with the Linux 32-bit ABI at the moment because
@@ -941,7 +957,7 @@ pub extern "C" fn Servo_StyleSet_PrependStyleSheet(
     let data = &mut *data;
     let guard = global_style_data.shared_lock.read();
     let sheet = unsafe { GeckoStyleSheet::new(sheet) };
-    data.stylesheets.prepend_stylesheet(Some(data.stylist.device()), sheet, &guard);
+    data.stylist.prepend_stylesheet(sheet, &guard);
 }
 
 #[no_mangle]
@@ -955,8 +971,7 @@ pub extern "C" fn Servo_StyleSet_InsertStyleSheetBefore(
     let data = &mut *data;
     let guard = global_style_data.shared_lock.read();
     let sheet = unsafe { GeckoStyleSheet::new(sheet) };
-    data.stylesheets.insert_stylesheet_before(
-        Some(data.stylist.device()),
+    data.stylist.insert_stylesheet_before(
         sheet,
         unsafe { GeckoStyleSheet::new(before_sheet) },
         &guard,
@@ -973,7 +988,7 @@ pub extern "C" fn Servo_StyleSet_RemoveStyleSheet(
     let data = &mut *data;
     let guard = global_style_data.shared_lock.read();
     let sheet = unsafe { GeckoStyleSheet::new(sheet) };
-    data.stylesheets.remove_stylesheet(Some(data.stylist.device()), sheet, &guard);
+    data.stylist.remove_stylesheet(sheet, &guard);
 }
 
 #[no_mangle]
@@ -985,7 +1000,12 @@ pub extern "C" fn Servo_StyleSet_FlushStyleSheets(
     let guard = global_style_data.shared_lock.read();
     let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
     let doc_element = doc_element.map(GeckoElement);
-    data.flush_stylesheets(&guard, doc_element);
+    let have_invalidations = data.flush_stylesheets(&guard, doc_element);
+    if have_invalidations && doc_element.is_some() {
+        // The invalidation machinery propagates the bits up, but we still
+        // need to tell the gecko restyle root machinery about it.
+        unsafe { bindings::Gecko_NoteDirtyElement(doc_element.unwrap().0); }
+    }
 }
 
 #[no_mangle]
@@ -995,8 +1015,8 @@ pub extern "C" fn Servo_StyleSet_NoteStyleSheetsChanged(
     changed_origins: OriginFlags,
 ) {
     let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
-    data.stylesheets.force_dirty(OriginSet::from(changed_origins));
-    data.stylesheets.set_author_style_disabled(author_style_disabled);
+    data.stylist.force_stylesheet_origins_dirty(OriginSet::from(changed_origins));
+    data.stylist.set_author_style_disabled(author_style_disabled);
 }
 
 #[no_mangle]
@@ -1049,12 +1069,16 @@ pub extern "C" fn Servo_StyleSheet_SizeOfIncludingThis(
 #[no_mangle]
 pub extern "C" fn Servo_StyleSheet_GetOrigin(
     sheet: RawServoStyleSheetContentsBorrowed
-) -> OriginFlags {
-    match StylesheetContents::as_arc(&sheet).origin {
+) -> u8 {
+    let origin = match StylesheetContents::as_arc(&sheet).origin {
         Origin::UserAgent => OriginFlags_UserAgent,
         Origin::User => OriginFlags_User,
         Origin::Author => OriginFlags_Author,
-    }
+    };
+    // We'd like to return `OriginFlags` here, but bindgen bitfield enums don't
+    // work as return values with the Linux 32-bit ABI at the moment because
+    // they wrap the value in a struct, so for now just unwrap it.
+    origin.0
 }
 
 #[no_mangle]
@@ -2080,8 +2104,8 @@ pub extern "C" fn Servo_MatrixTransform_Operate(matrix_operator: MatrixTransform
     let from = ComputedMatrix::from(unsafe { from.as_ref() }.expect("not a valid 'from' matrix"));
     let to = ComputedMatrix::from(unsafe { to.as_ref() }.expect("not a valid 'to' matrix"));
     let result = match matrix_operator {
-        Interpolate => from.interpolate(&to, progress),
-        Accumulate => from.accumulate(&to, progress as u64),
+        Interpolate => from.animate(&to, Procedure::Interpolate { progress }),
+        Accumulate => from.animate(&to, Procedure::Accumulate { count: progress as u64 }),
     };
 
     let output = unsafe { output.as_mut() }.expect("not a valid 'output' matrix");

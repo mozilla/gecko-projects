@@ -107,8 +107,7 @@ where
 
     /// Appends a new stylesheet to the current set.
     ///
-    /// FIXME(emilio): `device` shouldn't be optional, but a bunch of work needs
-    /// to happen to make the invalidations work properly in servo.
+    /// No device implies not computing invalidations.
     pub fn append_stylesheet(
         &mut self,
         device: Option<&Device>,
@@ -122,9 +121,6 @@ where
     }
 
     /// Prepend a new stylesheet to the current set.
-    ///
-    /// FIXME(emilio): `device` shouldn't be optional, but a bunch of work needs
-    /// to happen to make the invalidations work properly in servo.
     pub fn prepend_stylesheet(
         &mut self,
         device: Option<&Device>,
@@ -138,15 +134,12 @@ where
     }
 
     /// Insert a given stylesheet before another stylesheet in the document.
-    ///
-    /// FIXME(emilio): `device` shouldn't be optional, but a bunch of work needs
-    /// to happen to make the invalidations work properly in servo.
     pub fn insert_stylesheet_before(
         &mut self,
         device: Option<&Device>,
         sheet: S,
         before_sheet: S,
-        guard: &SharedRwLockReadGuard
+        guard: &SharedRwLockReadGuard,
     ) {
         debug!("StylesheetSet::insert_stylesheet_before");
         self.remove_stylesheet_if_present(&sheet);
@@ -158,9 +151,6 @@ where
     }
 
     /// Remove a given stylesheet from the set.
-    ///
-    /// FIXME(emilio): `device` shouldn't be optional, but a bunch of work needs
-    /// to happen to make the invalidations work properly in servo.
     pub fn remove_stylesheet(
         &mut self,
         device: Option<&Device>,
@@ -192,25 +182,28 @@ where
 
     /// Flush the current set, unmarking it as dirty, and returns an iterator
     /// over the new stylesheet list.
+    ///
+    /// Returns true if any elements were invalidated.
     pub fn flush<E>(
         &mut self,
         document_element: Option<E>,
-    ) -> (StylesheetIterator<S>, OriginSet)
+    ) -> (StylesheetIterator<S>, OriginSet, bool)
     where
         E: TElement,
     {
         debug!("StylesheetSet::flush");
 
         let mut origins = OriginSet::empty();
+        let mut have_invalidations = false;
         for (data, origin) in self.invalidation_data.iter_mut_origins() {
             if data.dirty {
-                data.invalidations.flush(document_element);
+                have_invalidations |= data.invalidations.flush(document_element);
                 data.dirty = false;
                 origins |= origin;
             }
         }
 
-        (self.iter(), origins)
+        (self.iter(), origins, have_invalidations)
     }
 
     /// Flush stylesheets, but without running any of the invalidation passes.

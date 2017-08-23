@@ -1115,9 +1115,8 @@ ${helpers.single_keyword_system("font-variant-caps",
     }
 
     pub mod computed_value {
-        use properties::animated_properties::Animatable;
         use values::CSSFloat;
-        use values::animated::{ToAnimatedValue, ToAnimatedZero};
+        use values::animated::{Animate, Procedure, ToAnimatedValue, ToAnimatedZero};
         use values::distance::{ComputeSquaredDistance, SquaredDistance};
 
         #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
@@ -1137,12 +1136,12 @@ ${helpers.single_keyword_system("font-variant-caps",
             }
         }
 
-        impl Animatable for T {
-            fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64)
-                -> Result<Self, ()> {
-                match (*self, *other) {
-                    (T::Number(ref number), T::Number(ref other)) =>
-                        Ok(T::Number(number.add_weighted(other, self_portion, other_portion)?)),
+        impl Animate for T {
+            fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
+                match (self, other) {
+                    (&T::Number(ref number), &T::Number(ref other)) => {
+                        Ok(T::Number(number.animate(other, procedure)?))
+                    },
                     _ => Err(()),
                 }
             }
@@ -2316,7 +2315,7 @@ https://drafts.csswg.org/css-fonts-4/#low-level-font-variation-settings-control-
         fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
             match *self {
                 SpecifiedValue::Auto => dest.write_str("auto"),
-                SpecifiedValue::Relative(rel) => write!(dest, "{}", rel),
+                SpecifiedValue::Relative(rel) => rel.to_css(dest),
                 // can only be specified by pres attrs; should not
                 // serialize to anything else
                 SpecifiedValue::Absolute(_) => Ok(()),

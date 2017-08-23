@@ -482,6 +482,13 @@ const gStoragePressureObserver = {
       return;
     }
 
+    const NOTIFICATION_VALUE = "storage-pressure-notification";
+    let notificationBox = document.getElementById("high-priority-global-notificationbox");
+    if (notificationBox.getNotificationWithValue(NOTIFICATION_VALUE)) {
+      // Do not display the 2nd notification when there is already one
+      return;
+    }
+
     // Don't display notification twice within the given interval.
     // This is because
     //   - not to annoy user
@@ -503,7 +510,6 @@ const gStoragePressureObserver = {
     let usage = subject.QueryInterface(Ci.nsISupportsPRUint64).data
     let prefStrBundle = document.getElementById("bundle_preferences");
     let brandShortName = document.getElementById("bundle_brand").getString("brandShortName");
-    let notificationBox = document.getElementById("high-priority-global-notificationbox");
     buttons.push({
       label: prefStrBundle.getString("spaceAlert.learnMoreButton.label"),
       accessKey: prefStrBundle.getString("spaceAlert.learnMoreButton.accesskey"),
@@ -552,7 +558,7 @@ const gStoragePressureObserver = {
     }
 
     notificationBox.appendNotification(
-      msg, "storage-pressure-notification", null, notificationBox.PRIORITY_WARNING_HIGH, buttons, null);
+      msg, NOTIFICATION_VALUE, null, notificationBox.PRIORITY_WARNING_HIGH, buttons, null);
   }
 };
 
@@ -667,7 +673,7 @@ var gPopupBlockerObserver = {
 
           const priority = notificationBox.PRIORITY_WARNING_MEDIUM;
           notificationBox.appendNotification(message, "popup-blocked",
-                                             "chrome://browser/skin/Info.png",
+                                             "chrome://browser/skin/notification-icons/popup.svg",
                                              priority, buttons);
         }
       }
@@ -1680,6 +1686,7 @@ var gBrowserInit = {
 
     SessionStore.promiseAllWindowsRestored.then(() => {
       this._schedulePerWindowIdleTasks();
+      document.documentElement.setAttribute("sessionrestored", "true");
     });
 
     Services.obs.notifyObservers(window, "browser-delayed-startup-finished");
@@ -2901,10 +2908,6 @@ const TLS_ERROR_REPORT_TELEMETRY_AUTO_SEND      = 5;
 
 const PREF_SSL_IMPACT_ROOTS = ["security.tls.version.", "security.ssl3."];
 
-const PREF_SSL_IMPACT = PREF_SSL_IMPACT_ROOTS.reduce((prefs, root) => {
-  return prefs.concat(Services.prefs.getChildList(root));
-}, []);
-
 /**
  * Handle command events bubbling up from error page content
  * or from about:newtab or from remote error pages that invoke
@@ -2981,7 +2984,10 @@ var BrowserOnClick = {
                               msg.data.securityInfo);
       break;
       case "Browser:ResetSSLPreferences":
-        for (let prefName of PREF_SSL_IMPACT) {
+        let prefSSLImpact = PREF_SSL_IMPACT_ROOTS.reduce((prefs, root) => {
+                return prefs.concat(Services.prefs.getChildList(root));
+        }, []);
+        for (let prefName of prefSSLImpact) {
           Services.prefs.clearUserPref(prefName);
         }
         msg.target.reload();

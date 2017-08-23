@@ -388,27 +388,6 @@
      };
 
      /**
-      * Gets the number of bytes available on disk to the current user.
-      *
-      * @param {string} sourcePath Platform-specific path to a directory on
-      * the disk to query for free available bytes.
-      *
-      * @return {number} The number of bytes available for the current user.
-      * @throws {OS.File.Error} In case of any error.
-      */
-     File.getAvailableFreeSpace = function Unix_getAvailableFreeSpace(sourcePath) {
-       let fileSystemInfo = new Type.statvfs.implementation();
-       let fileSystemInfoPtr = fileSystemInfo.address();
-
-       throw_on_negative("statvfs", (UnixFile.statvfs || UnixFile.statfs)(sourcePath, fileSystemInfoPtr));
-
-       let bytes = new Type.uint64_t.implementation(
-                        fileSystemInfo.f_frsize * fileSystemInfo.f_bavail);
-
-       return bytes.value;
-     };
-
-     /**
       * Default mode for opening directories.
       */
      const DEFAULT_UNIX_MODE_DIR = Const.S_IRWXU;
@@ -753,16 +732,16 @@
       *
       * Skip special directories "." and "..".
       *
-      * @return {File.Entry} The next entry in the directory.
-      * @throws {StopIteration} Once all files in the directory have been
-      * encountered.
+      * @return By definition of the iterator protocol, either
+      * `{value: {File.Entry}, done: false}` if there is an unvisited entry
+      * in the directory, or `{value: undefined, done: true}`, otherwise.
       */
      File.DirectoryIterator.prototype.next = function next() {
        if (!this._exists) {
          throw File.Error.noSuchFile("DirectoryIterator.prototype.next", this._path);
        }
        if (this._closed) {
-         throw StopIteration;
+         return {value: undefined, done: true};
        }
        for (let entry = UnixFile.readdir(this._dir);
             entry != null && !entry.isNull();
@@ -785,10 +764,13 @@
            isSymLink = contents.d_type == Const.DT_LNK;
          }
 
-         return new File.DirectoryIterator.Entry(isDir, isSymLink, name, this._path);
+         return {
+           value: new File.DirectoryIterator.Entry(isDir, isSymLink, name, this._path),
+           done: false
+         };
        }
        this.close();
-       throw StopIteration;
+       return {value: undefined, done: true};
      };
 
      /**

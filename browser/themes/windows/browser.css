@@ -30,6 +30,8 @@
   --arrowpanel-dimmed-even-further: hsla(0,0%,80%,.8);
 
   --urlbar-separator-color: ThreeDLightShadow;
+
+  --toolbox-border-bottom-color: ThreeDShadow;
 }
 
 @media (-moz-windows-default-theme) {
@@ -41,6 +43,8 @@
     --toolbar-non-lwt-bgimage: none;
 
     --panel-separator-color: hsla(210,4%,10%,.14);
+
+    --toolbox-border-bottom-color: #e1e1e2;
   }
 }
 
@@ -49,6 +53,8 @@
 
   --toolbar-bgcolor: rgba(255,255,255,.4);
   --toolbar-bgimage: none;
+
+  --toolbox-border-bottom-color: rgba(0,0,0,.3);
 }
 
 #menubar-items {
@@ -68,30 +74,6 @@
 #navigator-toolbox,
 #navigator-toolbox > toolbar {
   -moz-appearance: none;
-}
-
-#navigator-toolbox::after {
-  content: "";
-  display: -moz-box;
-  -moz-box-ordinal-group: 101; /* tabs toolbar is 100 */
-  border-bottom: 1px solid ThreeDShadow;
-}
-
-@media (-moz-windows-default-theme) {
-  @media (-moz-os-version: windows-win8),
-         (-moz-os-version: windows-win10) {
-    #navigator-toolbox::after {
-      border-bottom-color: #c2c2c2;
-    }
-  }
-}
-
-#navigator-toolbox:-moz-lwtheme::after {
-  border-bottom-color: rgba(0,0,0,.3);
-}
-
-:root[customizing] #navigator-toolbox::after {
-  display: none;
 }
 
 #navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar) {
@@ -279,17 +261,6 @@
   #titlebar-min {
     margin-inline-end: 2px;
   }
-}
-
-/* ::::: bookmark buttons ::::: */
-
-#bookmarks-toolbar-placeholder {
-  list-style-image: url("chrome://browser/skin/places/bookmarksToolbar.png") !important;
-}
-
-toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-placeholder,
-#personal-bookmarks[cui-areatype="menu-panel"] > #bookmarks-toolbar-placeholder {
-  list-style-image: url("chrome://browser/skin/places/bookmarksToolbar-menuPanel.png") !important;
 }
 
 /* ::::: bookmark menus ::::: */
@@ -768,39 +739,6 @@ treechildren.searchbar-treebody::-moz-tree-row(selected) {
   border-top: 1px solid GrayText;
 }
 
-/* popup blocker button */
-
-#page-report-button {
-  list-style-image: url("chrome://browser/skin/urlbar-popup-blocked.png");
-  -moz-image-region: rect(0, 16px, 16px, 0);
-}
-
-#page-report-button:hover {
-  -moz-image-region: rect(0, 32px, 16px, 16px);
-}
-
-#page-report-button:hover:active,
-#page-report-button[open="true"] {
-  -moz-image-region: rect(0, 48px, 16px, 32px);
-}
-
-/* Reader mode button */
-
-#reader-mode-button {
-  list-style-image: url("chrome://browser/skin/readerMode.svg");
-  -moz-image-region: rect(0, 16px, 16px, 0);
-}
-
-#reader-mode-button:hover,
-#reader-mode-button[readeractive]:hover {
-  -moz-image-region: rect(0, 32px, 16px, 16px);
-}
-
-#reader-mode-button:hover:active,
-#reader-mode-button[readeractive] {
-  -moz-image-region: rect(0, 48px, 16px, 32px);
-}
-
 /* bookmarking panel */
 
 #editBookmarkPanelStarIcon {
@@ -831,8 +769,9 @@ treechildren.searchbar-treebody::-moz-tree-row(selected) {
 
 %include ../shared/sidebar.inc.css
 
-#sidebar {
-  background-color: Window;
+#sidebar-box {
+  background-color: -moz-Field;
+  color: -moz-FieldText;
 }
 
 #sidebar-header {
@@ -1123,8 +1062,6 @@ notification[value="translation"] {
 %include ../shared/fullscreen/warning.inc.css
 %include ../shared/ctrlTab.inc.css
 %include ../shared/plugin-doorhanger.inc.css
-
-%include downloads/indicator.css
 
 /* Error counter */
 

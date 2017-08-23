@@ -122,7 +122,7 @@
             #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
             #[derive(Clone, Debug, PartialEq)]
             % if need_animatable or animation_value_type == "ComputedValue":
-            #[derive(ComputeSquaredDistance)]
+            #[derive(Animate, ComputeSquaredDistance)]
             % endif
             pub struct T(
                 % if allow_empty and allow_empty != "NotInitial":
@@ -133,19 +133,7 @@
             );
 
             % if need_animatable or animation_value_type == "ComputedValue":
-                use properties::animated_properties::Animatable;
-                use values::animated::ToAnimatedZero;
-
-                impl Animatable for T {
-                    fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64)
-                        -> Result<Self, ()> {
-                        self.0.add_weighted(&other.0, self_portion, other_portion).map(T)
-                    }
-
-                    fn add(&self, other: &Self) -> Result<Self, ()> {
-                        self.0.add(&other.0).map(T)
-                    }
-                }
+                use values::animated::{ToAnimatedZero};
 
                 impl ToAnimatedZero for T {
                     #[inline]

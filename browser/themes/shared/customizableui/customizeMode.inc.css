@@ -113,7 +113,7 @@
 .customizationmode-button > .box-inherit > .button-menu-dropmarker {
   margin-inline-end: 0;
   padding-inline-end: 0;
-  list-style-image: url(chrome://browser/skin/arrow-dropdown-16.svg);
+  list-style-image: url(chrome://global/skin/icons/arrow-dropdown-16.svg);
 }
 
 .customizationmode-button:-moz-any(:focus,:active,:hover):not([disabled]),
@@ -277,10 +277,6 @@ toolbarpaletteitem[place=toolbar] > toolbarspring {
 #wrapper-zoom-controls[place="palette"] > #zoom-controls > #zoom-reset-button,
 #wrapper-zoom-controls[place="palette"] > #zoom-controls > #zoom-reset-button + separator {
   display: none;
-}
-
-#personal-bookmarks[cui-areatype="toolbar"]:not([overflowedItem=true]) > #bookmarks-toolbar-placeholder > .toolbarbutton-icon {
-  margin-inline-end: 5px;
 }
 
 #customization-palette > toolbarpaletteitem > label {

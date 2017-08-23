@@ -243,6 +243,10 @@ WebRenderLayerManager::CreateWebRenderCommandsFromDisplayList(nsDisplayList* aDi
       continue;
     }
 
+    if (item->BackfaceIsHidden() && aSc.IsBackfaceVisible()) {
+      continue;
+    }
+
     savedItems.AppendToTop(item);
 
     bool forceNewLayerData = false;
@@ -554,7 +558,7 @@ WebRenderLayerManager::GenerateFallbackData(nsDisplayItem* aItem,
 
       wr::ByteBuffer bytes(recorder->mOutputStream.mLength, (uint8_t*)recorder->mOutputStream.mData);
       wr::ImageKey key = WrBridge()->GetNextImageKey();
-      WrBridge()->SendAddBlobImage(key, imageSize.ToUnknownSize(), imageSize.width * 4, dt->GetFormat(), bytes);
+      WrBridge()->SendAddBlobImage(key, imageSize.ToUnknownSize(), 0, dt->GetFormat(), bytes);
       fallbackData->SetKey(key);
     } else {
       fallbackData->CreateImageClientIfNeeded();

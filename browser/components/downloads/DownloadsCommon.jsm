@@ -42,7 +42,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PluralForm: "resource://gre/modules/PluralForm.jsm",
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   AppMenuNotifications: "resource://gre/modules/AppMenuNotifications.jsm",
-  CustomizableUI: "resource:///modules/CustomizableUI.jsm",
   DownloadHistory: "resource://gre/modules/DownloadHistory.jsm",
   Downloads: "resource://gre/modules/Downloads.jsm",
   DownloadUIHelper: "resource://gre/modules/DownloadUIHelper.jsm",
@@ -1161,17 +1160,6 @@ DownloadsIndicatorDataCtor.prototype = {
 
     this._refreshProperties();
 
-    let widgetGroup = CustomizableUI.getWidget("downloads-button");
-    let inMenu = widgetGroup.areaType == CustomizableUI.TYPE_MENU_PANEL;
-    if (inMenu) {
-      if (this._attention == DownloadsCommon.ATTENTION_NONE) {
-        AppMenuNotifications.removeNotification(/^download-/);
-      } else {
-        let badgeClass = "download-" + this._attention;
-        AppMenuNotifications.showBadgeOnlyNotification(badgeClass);
-      }
-    }
-
     this._views.forEach(this._updateView, this);
   },
 
@@ -1221,7 +1209,14 @@ DownloadsIndicatorDataCtor.prototype = {
     // Determine if the indicator should be shown or get attention.
     this._hasDownloads = (this._itemCount > 0);
 
-    this._percentComplete = summary.percentComplete;
+    // Always show a progress bar if there are downloads in progress.
+    if (summary.percentComplete >= 0) {
+      this._percentComplete = summary.percentComplete;
+    } else if (summary.numDownloading > 0) {
+      this._percentComplete = 0;
+    } else {
+      this._percentComplete = -1;
+    }
   }
 };
 
