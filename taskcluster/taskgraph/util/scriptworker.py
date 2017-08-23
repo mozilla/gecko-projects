@@ -101,11 +101,11 @@ BEETMOVER_SCOPE_ALIAS_TO_TARGET_TASK = [[
         'nightly_fennec',
         'nightly_linux',
         'nightly_macosx',
-        'nightly_win',
+        'nightly_win64',
+        'nightly_win32',
         'nightly_desktop',
         'mozilla_beta_tasks',
         'mozilla_release_tasks',
-        'date_tasks',
     ])
 ], [
     'all-release-tasks', BEETMOVER_RELEASE_TARGET_TASKS
