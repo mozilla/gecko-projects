@@ -5,6 +5,10 @@
 import json
 import os
 
+import logging
+logger = logging.getLogger(__name__)
+
+
 PLATFORM_RENAMES = {
     'windows2012-32': 'win32',
     'windows2012-64': 'win64',
@@ -55,7 +59,7 @@ def _open_release_history(release_history):
 def _sanitize_platform(platform):
     platform = get_friendly_platform_name(platform)
     if platform not in BALROG_PLATFORM_MAP:
-        return dict()
+        return platform
     return BALROG_PLATFORM_MAP[platform][0]
 
 
