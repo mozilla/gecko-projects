@@ -1732,8 +1732,12 @@ private:
   nsRect                         mDirtyRect;
   nsRegion                       mWindowExcludeGlassRegion;
   nsRegion                       mWindowOpaqueRegion;
-  LayoutDeviceIntRegion          mWindowDraggingRegion;
-  LayoutDeviceIntRegion          mWindowNoDraggingRegion;
+
+
+  std::vector<WeakFrame>         mWindowDraggingFrames;
+  nsTArray<pixman_box32_t>       mWindowDraggingRects;
+  std::vector<WeakFrame>         mWindowNoDraggingFrames;
+  nsTArray<pixman_box32_t>       mWindowNoDraggingRects;
   // The display item for the Windows window glass background, if any
   nsDisplayItem*                 mGlassDisplayItem;
   // A temporary list that we append scroll info items to while building
