@@ -106,11 +106,13 @@ def make_task_description(config, jobs):
             'artifacts': _generate_task_output_files(builds.keys(), build_locale),
         }
 
+        level = config.params['level']
+
         task = {
             'label': label,
             'description': "{} Partials".format(
                 dep_job.task["metadata"]["description"]),  # TODO reformat
-            'worker-type': 'aws-provisioner-v1/funsize-mar-generator',
+            'worker-type': 'aws-provisioner-v1/gecko-%s-b-linux' % level,
             'dependencies': dependencies,
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
