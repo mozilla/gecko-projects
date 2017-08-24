@@ -1804,6 +1804,41 @@ nsDisplayListBuilder::GetWindowDraggingRegion() const
   return result;
 }
 
+void
+nsDisplayListBuilder::RemoveModifiedWindowDraggingRegion()
+{
+  uint32_t i = 0;
+  while (i < mWindowDraggingFrames.size()) {
+    if (!mWindowDraggingFrames[i].IsAlive() ||
+        mWindowDraggingFrames[i]->IsFrameModified()) {
+      mWindowDraggingFrames.erase(mWindowDraggingFrames.begin() + i);
+      mWindowDraggingRects.RemoveElementAt(i);
+    } else {
+      i++;
+    }
+  }
+  
+  i = 0;
+  while (i < mWindowNoDraggingFrames.size()) {
+    if (!mWindowNoDraggingFrames[i].IsAlive() ||
+        mWindowNoDraggingFrames[i]->IsFrameModified()) {
+      mWindowNoDraggingFrames.erase(mWindowDraggingFrames.begin() + i);
+      mWindowNoDraggingRects.RemoveElementAt(i);
+    } else {
+      i++;
+    }
+  }
+}
+
+void
+nsDisplayListBuilder::ClearWindowDraggingRegion()
+{
+  mWindowDraggingFrames.clear();
+  mWindowDraggingRects.Clear();
+  mWindowNoDraggingFrames.clear();
+  mWindowNoDraggingRects.Clear();
+}
+
 const uint32_t gWillChangeAreaMultiplier = 3;
 static uint32_t GetLayerizationCost(const nsSize& aSize) {
   // There's significant overhead for each layer created from Gecko

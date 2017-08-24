@@ -4371,6 +4371,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
         aFrame->HasProperty(nsIFrame::ModifiedFrameList());
 
       if (retainedBuilder && paintedPreviously) {
+        builder.RemoveModifiedWindowDraggingRegion();
         std::vector<WeakFrame> modifiedFrames = GetModifiedFrames(aFrame);
         // printf("Attempting merge build with %lu modified frames\n", modifiedFrames.size());
 
@@ -4460,6 +4461,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
       if (!merged) {
         list.DeleteAll(&builder);
         builder.SetDirtyRect(dirtyRect);
+        builder.ClearWindowDraggingRegion();
         aFrame->BuildDisplayListForStackingContext(&builder, &list);
       }
 

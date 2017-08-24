@@ -902,6 +902,9 @@ public:
 
   LayoutDeviceIntRegion GetWindowDraggingRegion() const;
 
+  void RemoveModifiedWindowDraggingRegion();
+  void ClearWindowDraggingRegion();
+
   /**
    * Allocate memory in our arena. It will only be freed when this display list
    * builder is destroyed. This memory holds nsDisplayItems. nsDisplayItem
