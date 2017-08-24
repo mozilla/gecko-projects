@@ -87,14 +87,20 @@ def make_task_description(config, jobs):
         if not builds:
             continue
 
+        signing_task = None
+        for dependency in dependencies.keys():
+            if 'signing' in dependency:
+                signing_task = dependency
+        signing_task_ref = '<{}>'.format(signing_task)
+
         extra = {'funsize': { 'partials': list()}}
         update_number = 1
-        artifact_path = "{}/{}".format(_generate_taskcluster_prefix('<repackage-signing>', locale=locale), 'target.complete.mar')
+        artifact_path = "{}/{}".format(_generate_taskcluster_prefix(signing_task_ref, locale=locale), 'target.complete.mar')
         for build in builds:
             extra['funsize']['partials'].append({
                 'locale': build_locale,
                 'from_mar': builds[build]['mar_url'],
-                'to_mar': artifact_path,
+                'to_mar': {'task-reference': artifact_path},
                 'platform': get_friendly_platform_name(dep_th_platform),
                 'branch': config.params['project'],
                 'update_number': update_number,
