@@ -112,6 +112,13 @@ def make_task_description(config, jobs):
             'artifacts': _generate_task_output_files(builds.keys(), build_locale),
         }
 
+        run = {
+            'using': 'mozharness',
+            'script': 'mozharness/scripts/funsize.py',
+            'config': ['funsize.py'],
+            'job-script': 'taskcluster/scripts/builder/funsize.sh',
+            'actions': [],
+        }
         level = config.params['level']
 
         task = {
@@ -125,6 +132,7 @@ def make_task_description(config, jobs):
             'treeherder': treeherder,
             'extra': extra,
             'worker': worker,
+            'run': run,
         }
 
         yield task
@@ -143,7 +151,6 @@ def make_task_worker(config, jobs):
         task_ref = '<' + str(repackage_signing_task) + '>'
 
         worker = {
-            'implementation': 'docker-worker',
             'docker-image': {'in-tree': 'funsize-update-generator'},
             'os': 'linux',
             'max-run-time': 3600,
