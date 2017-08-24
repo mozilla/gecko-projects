@@ -6,8 +6,6 @@ Query balrog for partials information before task generation.
 """
 from __future__ import absolute_import, print_function, unicode_literals
 
-from functools32 import lru_cache
-
 
 import requests
 import redo
@@ -102,7 +100,6 @@ def _retry_on_http_errors(url, verify, params, errors):
         raise
 
 
-@lru_cache(maxsize=1)
 def get_releases(product, branch):
     """Returns a list of release names from Balrog.
     :param product: product name, AKA appName
@@ -129,7 +126,6 @@ def get_releases(product, branch):
     return releases
 
 
-@lru_cache(maxsize=32)
 def get_release_builds(release):
     url = "{}/releases/{}".format(BALROG_API_ROOT, release)
     logger.info("Connecting to %s", url)
@@ -196,4 +192,3 @@ def populate_release_history(product, branch, maxbuilds=4, maxsearch=10):
                     'mar_url': url,
                 }
     return builds
-
