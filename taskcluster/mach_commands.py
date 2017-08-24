@@ -504,3 +504,22 @@ class TaskClusterImagesProvider(object):
         except Exception:
             traceback.print_exc()
             sys.exit(1)
+
+@CommandProvider
+class TaskClusterPartialsData(object):
+    @Command('partials', category="ci",
+             description="Qeury balrog for build history to enable partials")
+    @CommandArgument('-b', '--branch',
+                     help="The project branch used in balrog branch, such as "
+                          "mozilla-central, release, date")
+    @CommandArgument('--product', default='Firefox',
+                     help="The product identifier, such as 'Firefox'")
+    def generate_partials_builds(self, product, branch):
+        from taskgraph.partials_balrog import populate_release_history
+        try:
+            build_history = populate_release_history(product, branch)
+            print(json.dumps(build_history, sort_keys=True, indent=2, separators=(',', ': ')))
+        except Exception:
+            traceback.print_exc()
+            sys.exit(1)
+

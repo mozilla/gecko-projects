@@ -107,6 +107,11 @@ syntax or reading a project-specific configuration file).
 ``include_nightly``
     If true, then nightly tasks are eligible for optimization.
 
+``release_history``
+   A path to a filename containing the releases history for this project
+   from balrog. Used by the partial update generation. If missing, no
+   partials will be generated.
+
 Morphed Set
 -----------
 

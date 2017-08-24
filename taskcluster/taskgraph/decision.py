@@ -18,6 +18,7 @@ from .create import create_tasks
 from .parameters import Parameters
 from .taskgraph import TaskGraph
 from .actions import render_actions_json
+from .partials_balrog import populate_release_history
 from . import GECKO
 
 from taskgraph.util.templates import Templates
@@ -107,6 +108,11 @@ def taskgraph_decision(options):
     """
 
     parameters = get_decision_parameters(options)
+
+    release_history = populate_release_history('Firefox', parameters['project'])
+
+    write_artifact(parameters['release_history'], release_history)
+
     # create a TaskGraphGenerator instance
     tgg = TaskGraphGenerator(
         root_dir=options['root'],
@@ -168,6 +174,10 @@ def get_decision_parameters(options):
     ]
     parameters['target_task_labels'] = []
     parameters['morph_templates'] = {}
+
+    # Define default build history file, to store balrog data required by
+    # partials generation
+    parameters['release_history'] = 'release_history.json'
 
     # owner must be an email, but sometimes (e.g., for ffxbld) it is not, in which
     # case, fake it

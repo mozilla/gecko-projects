@@ -488,6 +488,9 @@ GROUP_NAMES = {
     'TW64': 'Toolchain builds for Windows 64-bits',
     'SM-tc': 'Spidermonkey builds',
     'pub': 'APK publishing',
+    'p': 'Partial generation',
+    'ps': 'Partials signing',
+    'pBM': 'Beetmover for partials',
 }
 UNKNOWN_GROUP_NAME = "Treeherder group {} has no name; add it to " + __file__
 
