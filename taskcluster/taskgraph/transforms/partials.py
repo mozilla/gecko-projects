@@ -155,6 +155,10 @@ def make_task_worker(config, jobs):
             'docker-image': {'in-tree': 'funsize-update-generator'},
             'os': 'linux',
             'max-run-time': 3600,
+            'env': {
+                'SHA1_SIGNING_CERT': 'nightly_sha1',
+                'SHA384_SIGNING_CERT': 'nightly_sha384'
+            }
         }
 
         job["worker"].update(worker)
