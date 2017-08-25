@@ -25,6 +25,10 @@ RUN pip install -r /tmp/requirements.txt
 # scripts
 RUN mkdir /home/worker/bin
 COPY scripts/* /home/worker/bin/
+
+# %include taskcluster/docker/recipes/run-task
+ADD topsrcdir/taskcluster/docker/recipes/run-task /home/worker/bin/run-task
+
 COPY runme.sh /runme.sh
 RUN chmod 755 /home/worker/bin/* /runme.sh
 RUN mkdir /home/worker/keys
