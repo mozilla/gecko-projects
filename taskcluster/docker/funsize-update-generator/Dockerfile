@@ -63,3 +63,5 @@ ENV           HOME          /home/worker
 ENV           SHELL         /bin/bash
 ENV           USER          worker
 ENV           LOGNAME       worker
+
+CMD ["/runme.sh"]

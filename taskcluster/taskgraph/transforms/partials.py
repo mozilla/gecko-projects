@@ -132,7 +132,7 @@ def make_task_description(config, jobs):
             'treeherder': treeherder,
             'extra': extra,
             'worker': worker,
-            'run': run,
+            # 'run': run,
         }
 
         yield task
@@ -151,6 +151,7 @@ def make_task_worker(config, jobs):
         task_ref = '<' + str(repackage_signing_task) + '>'
 
         worker = {
+            'implementation': 'docker-worker',
             'docker-image': {'in-tree': 'funsize-update-generator'},
             'os': 'linux',
             'max-run-time': 3600,
