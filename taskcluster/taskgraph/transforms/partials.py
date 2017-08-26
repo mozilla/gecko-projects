@@ -95,7 +95,7 @@ def make_task_description(config, jobs):
 
         extra = {'funsize': { 'partials': list()}}
         update_number = 1
-        artifact_path = "{}/{}".format(_generate_taskcluster_prefix(signing_task_ref, locale=locale), 'target.complete.mar')
+        artifact_path = "{}{}".format(_generate_taskcluster_prefix(signing_task_ref, locale=locale), 'target.complete.mar')
         for build in builds:
             extra['funsize']['partials'].append({
                 'locale': build_locale,
