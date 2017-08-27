@@ -1781,11 +1781,11 @@ nsDisplayListBuilder::AdjustWindowDraggingRegion(nsIFrame* aFrame)
     LayoutDeviceIntRect transformedDevPixelBorderBoxInt;
     if (transformedDevPixelBorderBox.ToIntRect(&transformedDevPixelBorderBoxInt)) {
       if (styleUI->mWindowDragging == StyleWindowDragging::Drag) {
-        mWindowDraggingFrames.push_back(aFrame);
+        mWindowDraggingFrames.emplace_back(aFrame);
         mWindowDraggingRects.AppendElement(
           nsRegion::RectToBox(transformedDevPixelBorderBoxInt.ToUnknownRect()));
       } else {
-        mWindowNoDraggingFrames.push_back(aFrame);
+        mWindowNoDraggingFrames.emplace_back(aFrame);
         mWindowNoDraggingRects.AppendElement(
           nsRegion::RectToBox(transformedDevPixelBorderBoxInt.ToUnknownRect()));
       }
