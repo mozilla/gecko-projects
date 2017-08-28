@@ -3837,7 +3837,7 @@ MergeDisplayLists(nsDisplayListBuilder* aBuilder,
             MergeDisplayLists(aBuilder, i->GetChildren(),
                               old->GetChildren(), i->GetChildren(),
                               aTotalDisplayItems, aReusedDisplayItems);
-            old->UpdateBounds(aBuilder);
+            i->UpdateBounds(aBuilder);
           }
           if (old->GetType() == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
             MergeLayerEventRegions(old, i, false);
