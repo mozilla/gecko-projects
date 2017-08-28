@@ -3248,10 +3248,10 @@ nsDisplayBackgroundImage::~nsDisplayBackgroundImage()
 #endif
 }
 
-static nsStyleContext* GetBackgroundStyleContext(nsIFrame* aFrame)
+static nsIFrame* GetBackgroundStyleContextFrame(nsIFrame* aFrame)
 {
-  nsStyleContext *sc;
-  if (!nsCSSRendering::FindBackground(aFrame, &sc)) {
+  nsIFrame* f;
+  if (!nsCSSRendering::FindBackgroundFrame(aFrame, &f)) {
     // We don't want to bail out if moz-appearance is set on a root
     // node. If it has a parent content node, bail because it's not
     // a root, other wise keep going in order to let the theme stuff
@@ -3266,9 +3266,9 @@ static nsStyleContext* GetBackgroundStyleContext(nsIFrame* aFrame)
       return nullptr;
     }
 
-    sc = aFrame->StyleContext();
+    f = aFrame;
   }
-  return sc;
+  return f;
 }
 
 /* static */ void
@@ -3346,9 +3346,16 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
   }
   nsPresContext* presContext = aFrame->PresContext();
   bool isThemed = aFrame->IsThemed();
+  nsIFrame* dependentFrame = nullptr;
   if (!isThemed) {
     if (!bgSC) {
-      bgSC = GetBackgroundStyleContext(aFrame);
+      dependentFrame = GetBackgroundStyleContextFrame(aFrame);
+      if (dependentFrame) {
+        bgSC = dependentFrame->StyleContext();
+        if (dependentFrame == aFrame) {
+          dependentFrame = nullptr;
+        }
+      }
     }
     if (bgSC) {
       bg = bgSC->StyleBackground();
@@ -3403,16 +3410,19 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
                               bg->BottomLayer(), bgRect,
                               useWillPaintBorderOptimization);
     }
+    nsDisplayItem *bgItem;
     if (aSecondaryReferenceFrame) {
-      bgItemList.AppendNewToTop(
+      bgItem =
           new (aBuilder) nsDisplayTableBackgroundColor(aBuilder, aSecondaryReferenceFrame, bgRect, bg,
                                                        drawBackgroundColor ? color : NS_RGBA(0, 0, 0, 0),
-                                                       aFrame));
+                                                       aFrame);
     } else {
-      bgItemList.AppendNewToTop(
+      bgItem =
           new (aBuilder) nsDisplayBackgroundColor(aBuilder, aFrame, bgRect, bg,
-                                                  drawBackgroundColor ? color : NS_RGBA(0, 0, 0, 0)));
+                                                  drawBackgroundColor ? color : NS_RGBA(0, 0, 0, 0));
     }
+    bgItem->SetDependentFrame(dependentFrame);
+    bgItemList.AppendNewToTop(bgItem);
   }
 
   if (isThemed) {
@@ -3501,6 +3511,7 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
           bgItem = new (aBuilder) nsDisplayBackgroundImage(bgData);
         }
       }
+      bgItem->SetDependentFrame(dependentFrame);
       if (aSecondaryReferenceFrame) {
         thisItemList.AppendNewToTop(
           nsDisplayTableFixedPosition::CreateForFixedBackground(aBuilder,
@@ -3514,16 +3525,18 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
       }
 
     } else {
+      nsDisplayItem* bgItem;
       if (aSecondaryReferenceFrame) {
         nsDisplayBackgroundImage::InitData tableData = bgData;
         nsIFrame* styleFrame = tableData.frame;
         tableData.frame = aSecondaryReferenceFrame;
 
-        thisItemList.AppendNewToTop(
-          new (aBuilder) nsDisplayTableBackgroundImage(tableData, styleFrame));
+        bgItem = new (aBuilder) nsDisplayTableBackgroundImage(tableData, styleFrame);
       } else {
-        thisItemList.AppendNewToTop(new (aBuilder) nsDisplayBackgroundImage(bgData));
+        bgItem = new (aBuilder) nsDisplayBackgroundImage(bgData);
       }
+      bgItem->SetDependentFrame(dependentFrame);
+      thisItemList.AppendNewToTop(bgItem);
     }
 
     if (bg->mImage.mLayers[i].mBlendMode != NS_STYLE_BLEND_NORMAL) {

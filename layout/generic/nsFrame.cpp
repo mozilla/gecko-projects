@@ -940,6 +940,14 @@ nsIFrame::MarkNeedsDisplayItemRebuild()
 
   MOZ_ASSERT(PresContext()->LayoutPhaseCount(eLayoutPhase_DisplayListBuilding) == 0);
   SetFrameIsModified(true);
+
+  // Hopefully this is cheap, but we could use a frame state bit to note
+  // the presence of dependencies to speed it up.
+  for (nsDisplayItem* i : RealDisplayItemData()) {
+    if (i->GetDependentFrame()) {
+      i->GetDependentFrame()->MarkNeedsDisplayItemRebuild();
+    }
+  }
 }
 
 // Subclass hook for style post processing

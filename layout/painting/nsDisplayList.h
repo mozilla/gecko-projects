@@ -2590,6 +2590,16 @@ public:
     return backfaceHidden;
   }
 
+  void SetDependentFrame(nsIFrame* aFrame)
+  {
+    mDependentFrame = aFrame;
+  }
+
+  nsIFrame* GetDependentFrame()
+  {
+    return mDependentFrame;
+  }
+
 protected:
   nsDisplayItem() = delete;
 
@@ -2604,6 +2614,7 @@ protected:
   // Result of FindReferenceFrameFor(mFrame), if mFrame is non-null
   const nsIFrame* mReferenceFrame;
   RefPtr<struct AnimatedGeometryRoot> mAnimatedGeometryRoot;
+  WeakFrame mDependentFrame;
   // Result of ToReferenceFrame(mFrame), if mFrame is non-null
   nsPoint   mToReferenceFrame;
   // This is the rectangle that needs to be painted.
