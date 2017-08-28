@@ -2590,14 +2590,9 @@ public:
     return backfaceHidden;
   }
 
-  void SetDependentFrame(nsIFrame* aFrame)
+  virtual nsIFrame* GetDependentFrame()
   {
-    mDependentFrame = aFrame;
-  }
-
-  nsIFrame* GetDependentFrame()
-  {
-    return mDependentFrame;
+    return nullptr;
   }
 
 protected:
@@ -2614,7 +2609,6 @@ protected:
   // Result of FindReferenceFrameFor(mFrame), if mFrame is non-null
   const nsIFrame* mReferenceFrame;
   RefPtr<struct AnimatedGeometryRoot> mAnimatedGeometryRoot;
-  WeakFrame mDependentFrame;
   // Result of ToReferenceFrame(mFrame), if mFrame is non-null
   nsPoint   mToReferenceFrame;
   // This is the rectangle that needs to be painted.
@@ -3707,6 +3701,16 @@ public:
     return mShouldFixToViewport;
   }
 
+  virtual nsIFrame* GetDependentFrame() override
+  {
+    return mDependentFrame;
+  }
+
+  void SetDependentFrame(nsIFrame* aFrame)
+  {
+    mDependentFrame = aFrame;
+  }
+
 protected:
   typedef class mozilla::layers::ImageContainer ImageContainer;
   typedef class mozilla::layers::ImageLayer ImageLayer;
@@ -3733,6 +3737,7 @@ protected:
   // mIsThemed is true or if FindBackground returned false.
   const nsStyleBackground* mBackgroundStyle;
   nsCOMPtr<imgIContainer> mImage;
+  WeakFrame mDependentFrame;
   nsRect mBackgroundRect; // relative to the reference frame
   nsRect mFillRect;
   nsRect mDestRect;
@@ -3934,12 +3939,23 @@ public:
     ComputeInvalidationRegionDifference(aBuilder, geometry, aInvalidRegion);
   }
 
+  virtual nsIFrame* GetDependentFrame() override
+  {
+    return mDependentFrame;
+  }
+
+  void SetDependentFrame(nsIFrame* aFrame)
+  {
+    mDependentFrame = aFrame;
+  }
+
   NS_DISPLAY_DECL_NAME("BackgroundColor", TYPE_BACKGROUND_COLOR)
   virtual void WriteDebugInfo(std::stringstream& aStream) override;
 
 protected:
   const nsRect mBackgroundRect;
   const nsStyleBackground* mBackgroundStyle;
+  WeakFrame mDependentFrame;
   mozilla::gfx::Color mColor;
 
   struct {

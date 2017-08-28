@@ -3410,7 +3410,7 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
                               bg->BottomLayer(), bgRect,
                               useWillPaintBorderOptimization);
     }
-    nsDisplayItem *bgItem;
+    nsDisplayBackgroundColor *bgItem;
     if (aSecondaryReferenceFrame) {
       bgItem =
           new (aBuilder) nsDisplayTableBackgroundColor(aBuilder, aSecondaryReferenceFrame, bgRect, bg,
@@ -3525,7 +3525,7 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
       }
 
     } else {
-      nsDisplayItem* bgItem;
+      nsDisplayBackgroundImage* bgItem;
       if (aSecondaryReferenceFrame) {
         nsDisplayBackgroundImage::InitData tableData = bgData;
         nsIFrame* styleFrame = tableData.frame;

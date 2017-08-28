@@ -574,7 +574,7 @@ nsCanvasFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
           nsDisplayFixedPosition::CreateForFixedBackground(aBuilder, this, bgItem, i));
 
       } else {
-        nsDisplayItem* bgItem = new (aBuilder) nsDisplayCanvasBackgroundImage(bgData);
+        nsDisplayCanvasBackgroundImage* bgItem = new (aBuilder) nsDisplayCanvasBackgroundImage(bgData);
         bgItem->SetDependentFrame(dependentFrame);
         thisItemList.AppendNewToTop(bgItem);
       }
