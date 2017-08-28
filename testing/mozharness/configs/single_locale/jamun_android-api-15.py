@@ -1,30 +1,23 @@
 import os
-BRANCH = "mozilla-beta"
-MOZ_UPDATE_CHANNEL = "beta"
+
+BRANCH = "jamun"
 MOZILLA_DIR = BRANCH
-OBJDIR = "obj-firefox"
-EN_US_BINARY_URL = None
-HG_SHARE_BASE_DIR = "/builds/hg-shared"
+EN_US_BINARY_URL = None     # No build has been uploaded to archive.m.o
 
 config = {
     "branch": BRANCH,
-    "stage_product": "mobile",
     "log_name": "single_locale",
-    "objdir": OBJDIR,
+    "objdir": "obj-firefox",
     "is_automation": True,
     "buildbot_json_path": "buildprops.json",
     "force_clobber": True,
     "clobberer_url": "https://api.pub.build.mozilla.org/clobberer/lastclobber",
     "locales_file": "%s/mobile/locales/l10n-changesets.json" % MOZILLA_DIR,
     "locales_dir": "mobile/android/locales",
-    "locales_platform": "android-api-16",
     "ignore_locales": ["en-US"],
-    "balrog_credentials_file": "oauth.txt",
+    "nightly_build": True,
+    'balrog_credentials_file': 'oauth.txt',
     "tools_repo": "https://hg.mozilla.org/build/tools",
-    "platform": "android",
-    "is_release_or_beta": True,
-    "build_type": "api-16-opt",
-    "build_target": "Android_arm-eabi-gcc3",
     "tooltool_config": {
         "manifest": "mobile/android/config/tooltool-manifests/android/releng.manifest",
         "output_dir": "%(abs_work_dir)s/" + MOZILLA_DIR,
@@ -33,33 +26,42 @@ config = {
         'tooltool.py': '/builds/tooltool.py',
     },
     "repos": [{
-        "repo": "https://hg.mozilla.org/releases/mozilla-beta",
-        "branch": "default",
-        "dest": MOZILLA_DIR,
-    }, {
+        "vcs": "hg",
         "repo": "https://hg.mozilla.org/build/tools",
         "branch": "default",
-        "dest": "tools"
+        "dest": "tools",
+    }, {
+        "vcs": "hg",
+        "repo": "https://hg.mozilla.org/projects/jamun",
+        "revision": "%(revision)s",
+        "dest": MOZILLA_DIR,
     }],
-    "hg_l10n_base": "https://hg.mozilla.org/releases/l10n/%s" % BRANCH,
+    "hg_l10n_base": "https://hg.mozilla.org/releases/l10n/mozilla-aurora",
     "hg_l10n_tag": "default",
-    'vcs_share_base': HG_SHARE_BASE_DIR,
-    "l10n_dir": MOZILLA_DIR,
+    'vcs_share_base': "/builds/hg-shared",
 
+    "l10n_dir": "mozilla-aurora",
     "repack_env": {
         # so ugly, bug 951238
         "LD_LIBRARY_PATH": "/lib:/tools/gcc-4.7.2-0moz1/lib:/tools/gcc-4.7.2-0moz1/lib64",
+        "MOZ_OBJDIR": "obj-firefox",
         "EN_US_BINARY_URL": os.environ.get("EN_US_BINARY_URL", EN_US_BINARY_URL),
-        "MOZ_OBJDIR": OBJDIR,
         "LOCALE_MERGEDIR": "%(abs_merge_dir)s/",
-        "MOZ_UPDATE_CHANNEL": MOZ_UPDATE_CHANNEL,
+        "MOZ_UPDATE_CHANNEL": "nightly-jamun",
     },
-    "upload_branch": "%s-android-api-16" % BRANCH,
+    "upload_branch": "%s-android-api-15" % BRANCH,
     "ssh_key_dir": "~/.ssh",
     "merge_locales": True,
     "mozilla_dir": MOZILLA_DIR,
+    "mozconfig": "%s/mobile/android/config/mozconfigs/android-api-15/l10n-nightly" % MOZILLA_DIR,
     "signature_verification_script": "tools/release/signing/verify-android-signature.sh",
-    "key_alias": "release",
+    "stage_product": "mobile",
+    "platform": "android",
+    "build_type": "api-15-opt",
+
+    # Balrog
+    "build_target": "Android_arm-eabi-gcc3",
+
     # Mock
     "mock_target": "mozilla-centos6-x86_64-android",
     "mock_packages": ['autoconf213', 'python', 'zip', 'mozilla-python27-mercurial', 'git', 'ccache',
@@ -88,7 +90,5 @@ config = {
         ('/builds/relengapi.tok', '/builds/relengapi.tok'),
         ('/tools/tooltool.py', '/builds/tooltool.py'),
         ('/usr/local/lib/hgext', '/usr/local/lib/hgext'),
-        ('/builds/mozilla-fennec-geoloc-api.key', '/builds/mozilla-fennec-geoloc-api.key'),
-        ('/builds/adjust-sdk-beta.token', '/builds/adjust-sdk-beta.token'),
     ],
 }

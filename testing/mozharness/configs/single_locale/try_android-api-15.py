@@ -1,16 +1,14 @@
 import os
 
-BRANCH = "mozilla-central"
-MOZ_UPDATE_CHANNEL = "nightly"
+BRANCH = "try"
 MOZILLA_DIR = BRANCH
-OBJDIR = "obj-firefox"
-EN_US_BINARY_URL = "http://archive.mozilla.org/pub/mobile/nightly/latest-%s-android-api-16/en-US" % BRANCH
-HG_SHARE_BASE_DIR = "/builds/hg-shared"
+EN_US_BINARY_URL = "http://archive.mozilla.org/pub/" \
+                   "mobile/nightly/latest-mozilla-central-android-api-15/en-US"
 
 config = {
-    "branch": BRANCH,
+    "branch": "try",
     "log_name": "single_locale",
-    "objdir": OBJDIR,
+    "objdir": "obj-firefox",
     "is_automation": True,
     "buildbot_json_path": "buildprops.json",
     "force_clobber": True,
@@ -18,7 +16,7 @@ config = {
     "locales_file": "%s/mobile/locales/l10n-changesets.json" % MOZILLA_DIR,
     "locales_dir": "mobile/android/locales",
     "ignore_locales": ["en-US"],
-    "nightly_build": True,
+    "nightly_build": False,
     'balrog_credentials_file': 'oauth.txt',
     "tools_repo": "https://hg.mozilla.org/build/tools",
     "tooltool_config": {
@@ -28,6 +26,8 @@ config = {
     "exes": {
         'tooltool.py': '/builds/tooltool.py',
     },
+    "update_gecko_source_to_enUS": False,
+    "nightly_build": True,
     "repos": [{
         "vcs": "hg",
         "repo": "https://hg.mozilla.org/build/tools",
@@ -35,36 +35,35 @@ config = {
         "dest": "tools",
     }, {
         "vcs": "hg",
-        "repo": "https://hg.mozilla.org/mozilla-central",
+        "repo": "https://hg.mozilla.org/try",
         "revision": "%(revision)s",
-        "dest": MOZILLA_DIR,
-    }, {
-        "repo": "https://hg.mozilla.org/build/buildbot-configs",
-        "branch": "default",
-        "dest": "buildbot-configs"
+        "dest": "try",
+        "clone_upstream_url": "https://hg.mozilla.org/mozilla-unified",
+        "clone_by_revision": True,
+        "clone_with_purge": True,
     }],
     "hg_l10n_base": "https://hg.mozilla.org/l10n-central",
     "hg_l10n_tag": "default",
-    'vcs_share_base': HG_SHARE_BASE_DIR,
+    'vcs_share_base': "/builds/hg-shared",
 
     "l10n_dir": "l10n-central",
     "repack_env": {
         # so ugly, bug 951238
         "LD_LIBRARY_PATH": "/lib:/tools/gcc-4.7.2-0moz1/lib:/tools/gcc-4.7.2-0moz1/lib64",
-        "MOZ_OBJDIR": OBJDIR,
+        "MOZ_OBJDIR": "obj-firefox",
         "EN_US_BINARY_URL": os.environ.get("EN_US_BINARY_URL", EN_US_BINARY_URL),
         "LOCALE_MERGEDIR": "%(abs_merge_dir)s/",
-        "MOZ_UPDATE_CHANNEL": MOZ_UPDATE_CHANNEL,
+        "MOZ_UPDATE_CHANNEL": "try", # XXX Invalid
     },
-    "upload_branch": "%s-android-api-16" % BRANCH,
+    "upload_branch": "%s-android-api-15" % BRANCH,
     "ssh_key_dir": "~/.ssh",
     "merge_locales": True,
     "mozilla_dir": MOZILLA_DIR,
-    "mozconfig": "%s/mobile/android/config/mozconfigs/android-api-16/l10n-nightly" % MOZILLA_DIR,
+    "mozconfig": "%s/mobile/android/config/mozconfigs/android-api-15/l10n-nightly" % MOZILLA_DIR,
     "signature_verification_script": "tools/release/signing/verify-android-signature.sh",
     "stage_product": "mobile",
-    "platform": "android",
-    "build_type": "api-16-opt",
+    "platform": "android", # XXX Validate
+    "build_type": "api-15-opt", # XXX Validate
 
     # Balrog
     "build_target": "Android_arm-eabi-gcc3",

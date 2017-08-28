@@ -1,12 +1,12 @@
 import os
 
-BRANCH = "try"
+BRANCH = "date"
 MOZILLA_DIR = BRANCH
 EN_US_BINARY_URL = "http://archive.mozilla.org/pub/" \
-                   "mobile/nightly/latest-mozilla-central-android-api-16/en-US"
+                   "mobile/nightly/latest-date-android-api-15/en-US"
 
 config = {
-    "branch": "try",
+    "branch": BRANCH,
     "log_name": "single_locale",
     "objdir": "obj-firefox",
     "is_automation": True,
@@ -16,7 +16,7 @@ config = {
     "locales_file": "%s/mobile/locales/l10n-changesets.json" % MOZILLA_DIR,
     "locales_dir": "mobile/android/locales",
     "ignore_locales": ["en-US"],
-    "nightly_build": False,
+    "nightly_build": True,
     'balrog_credentials_file': 'oauth.txt',
     "tools_repo": "https://hg.mozilla.org/build/tools",
     "tooltool_config": {
@@ -26,8 +26,6 @@ config = {
     "exes": {
         'tooltool.py': '/builds/tooltool.py',
     },
-    "update_gecko_source_to_enUS": False,
-    "nightly_build": True,
     "repos": [{
         "vcs": "hg",
         "repo": "https://hg.mozilla.org/build/tools",
@@ -35,12 +33,9 @@ config = {
         "dest": "tools",
     }, {
         "vcs": "hg",
-        "repo": "https://hg.mozilla.org/try",
+        "repo": "https://hg.mozilla.org/projects/date",
         "revision": "%(revision)s",
-        "dest": "try",
-        "clone_upstream_url": "https://hg.mozilla.org/mozilla-unified",
-        "clone_by_revision": True,
-        "clone_with_purge": True,
+        "dest": MOZILLA_DIR,
     }],
     "hg_l10n_base": "https://hg.mozilla.org/l10n-central",
     "hg_l10n_tag": "default",
@@ -53,17 +48,17 @@ config = {
         "MOZ_OBJDIR": "obj-firefox",
         "EN_US_BINARY_URL": os.environ.get("EN_US_BINARY_URL", EN_US_BINARY_URL),
         "LOCALE_MERGEDIR": "%(abs_merge_dir)s/",
-        "MOZ_UPDATE_CHANNEL": "try", # XXX Invalid
+        "MOZ_UPDATE_CHANNEL": "nightly-date",
     },
-    "upload_branch": "%s-android-api-16" % BRANCH,
+    "upload_branch": "%s-android-api-15" % BRANCH,
     "ssh_key_dir": "~/.ssh",
     "merge_locales": True,
     "mozilla_dir": MOZILLA_DIR,
-    "mozconfig": "%s/mobile/android/config/mozconfigs/android-api-16/l10n-nightly" % MOZILLA_DIR,
+    "mozconfig": "%s/mobile/android/config/mozconfigs/android-api-15/l10n-nightly" % MOZILLA_DIR,
     "signature_verification_script": "tools/release/signing/verify-android-signature.sh",
     "stage_product": "mobile",
-    "platform": "android", # XXX Validate
-    "build_type": "api-16-opt", # XXX Validate
+    "platform": "android",
+    "build_type": "api-15-opt",
 
     # Balrog
     "build_target": "Android_arm-eabi-gcc3",

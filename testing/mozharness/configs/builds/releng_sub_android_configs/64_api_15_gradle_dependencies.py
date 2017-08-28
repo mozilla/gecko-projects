@@ -1,8 +1,8 @@
 config = {
-    'base_name': 'Android armv7 api-16+ Gradle dependencies %(branch)s',
-    'stage_platform': 'android-api-16-gradle-dependencies',
-    'build_type': 'api-16-opt',
-    'src_mozconfig': 'mobile/android/config/mozconfigs/android-api-16-gradle-dependencies/nightly',
+    'base_name': 'Android armv7 API 15+ Gradle dependencies %(branch)s',
+    'stage_platform': 'android-api-15-gradle-dependencies',
+    'build_type': 'api-15-opt',
+    'src_mozconfig': 'mobile/android/config/mozconfigs/android-api-15-gradle-dependencies/nightly',
     'multi_locale_config_platform': 'android',
      # gradle-dependencies doesn't produce a package. So don't collect package metrics.
     'disable_package_metrics': True,

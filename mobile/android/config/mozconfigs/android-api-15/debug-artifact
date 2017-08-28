@@ -5,7 +5,11 @@ NO_NDK=1
 
 . "$topsrcdir/mobile/android/config/mozconfigs/common"
 
-. "$topsrcdir/mobile/android/config/mozconfigs/android-api-16/nightly"
+# Global options
+ac_add_options --enable-debug
+ac_add_options --enable-marionette
+
+. "$topsrcdir/mobile/android/config/mozconfigs/android-api-15/nightly"
 
 . "$topsrcdir/build/mozconfig.artifact"
 
