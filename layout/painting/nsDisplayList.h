@@ -1900,9 +1900,11 @@ public:
     mDisableSubpixelAA = false;
   }
 
-  void SetFrameDeleted()
+  virtual void RemoveFrame(nsIFrame* aFrame)
   {
-    mFrame = nullptr;
+    if (aFrame == mFrame) {
+      mFrame = nullptr;
+    }
   }
 
   /**
@@ -3709,6 +3711,17 @@ public:
   void SetDependentFrame(nsIFrame* aFrame)
   {
     mDependentFrame = aFrame;
+    if (aFrame) {
+      mDependentFrame->RealDisplayItemData().AppendElement(this);
+    }
+  }
+
+  virtual void RemoveFrame(nsIFrame* aFrame) override
+  {
+    if (aFrame == mDependentFrame) {
+      mDependentFrame = nullptr;
+    }
+    nsDisplayItem::RemoveFrame(aFrame);
   }
 
 protected:
@@ -3737,7 +3750,7 @@ protected:
   // mIsThemed is true or if FindBackground returned false.
   const nsStyleBackground* mBackgroundStyle;
   nsCOMPtr<imgIContainer> mImage;
-  WeakFrame mDependentFrame;
+  nsIFrame* mDependentFrame;
   nsRect mBackgroundRect; // relative to the reference frame
   nsRect mFillRect;
   nsRect mDestRect;
@@ -3884,6 +3897,12 @@ public:
   {
     mState.mColor = mColor;
   }
+  ~nsDisplayBackgroundColor()
+  {
+    if (mDependentFrame) {
+      mDependentFrame->RealDisplayItemData().RemoveElement(this);
+    }
+  }
 
   virtual void RestoreState() override
   {
@@ -3947,6 +3966,17 @@ public:
   void SetDependentFrame(nsIFrame* aFrame)
   {
     mDependentFrame = aFrame;
+    if (aFrame) {
+      mDependentFrame->RealDisplayItemData().AppendElement(this);
+    }
+  }
+
+  virtual void RemoveFrame(nsIFrame* aFrame) override
+  {
+    if (aFrame == mDependentFrame) {
+      mDependentFrame = nullptr;
+    }
+    nsDisplayItem::RemoveFrame(aFrame);
   }
 
   NS_DISPLAY_DECL_NAME("BackgroundColor", TYPE_BACKGROUND_COLOR)
@@ -3955,7 +3985,7 @@ public:
 protected:
   const nsRect mBackgroundRect;
   const nsStyleBackground* mBackgroundStyle;
-  WeakFrame mDependentFrame;
+  nsIFrame* mDependentFrame;
   mozilla::gfx::Color mColor;
 
   struct {
@@ -4399,7 +4429,7 @@ public:
     nsTArray<nsIFrame*> mFrames;
   };
 
-  void RemoveFrame(nsIFrame* aFrame);
+  virtual void RemoveFrame(nsIFrame* aFrame) override;
 
 private:
   friend void MergeLayerEventRegions(nsDisplayItem*, nsDisplayItem*, bool);

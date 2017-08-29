@@ -944,8 +944,9 @@ nsIFrame::MarkNeedsDisplayItemRebuild()
   // Hopefully this is cheap, but we could use a frame state bit to note
   // the presence of dependencies to speed it up.
   for (nsDisplayItem* i : RealDisplayItemData()) {
-    if (i->GetDependentFrame()) {
-      i->GetDependentFrame()->MarkNeedsDisplayItemRebuild();
+    if (i->GetDependentFrame() == this &&
+        !i->HasDeletedFrame()) {
+      i->Frame()->MarkNeedsDisplayItemRebuild();
     }
   }
 }

@@ -3246,6 +3246,9 @@ nsDisplayBackgroundImage::~nsDisplayBackgroundImage()
 #ifdef NS_BUILD_REFCNT_LOGGING
   MOZ_COUNT_DTOR(nsDisplayBackgroundImage);
 #endif
+  if (mDependentFrame) {
+    mDependentFrame->RealDisplayItemData().RemoveElement(this);
+  }
 }
 
 static nsIFrame* GetBackgroundStyleContextFrame(nsIFrame* aFrame)
@@ -4839,6 +4842,8 @@ nsDisplayLayerEventRegions::RemoveFrame(nsIFrame* aFrame)
   RemoveFrameFromFrameRects(mNoActionRegion, aFrame);
   RemoveFrameFromFrameRects(mHorizontalPanRegion, aFrame);
   RemoveFrameFromFrameRects(mVerticalPanRegion, aFrame);
+
+  nsDisplayItem::RemoveFrame(aFrame);
 }
 
 void

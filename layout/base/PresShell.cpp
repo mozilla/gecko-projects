@@ -2093,17 +2093,7 @@ PresShell::NotifyDestroyingFrame(nsIFrame* aFrame)
   aFrame->DisplayItemData().Clear();
 
   for (nsDisplayItem* item : aFrame->RealDisplayItemData()) {
-    if (item->GetType() == DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
-      // If this is a regions item that was added because we contributed
-      // rather than actually created it, just remove ourselves from
-      // the item rather than marking it destroyed.
-      nsDisplayLayerEventRegions* regions =
-        static_cast<nsDisplayLayerEventRegions*>(item);
-      regions->RemoveFrame(aFrame);
-    }
-    if (!item->HasDeletedFrame() && item->Frame() == aFrame) {
-      item->SetFrameDeleted();
-    }
+    item->RemoveFrame(aFrame);
   }
   aFrame->RealDisplayItemData().Clear();
 
